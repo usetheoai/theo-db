@@ -136,4 +136,5 @@ Todas as citações foram verificadas (link estável: arXiv / DOI / venue oficia
 
 ## Licença
 
-A definir (proposta em avaliação: Apache 2.0). Ver [`PRD.md` §11](./PRD.md#11-modelo-open-source-e-licenciamento).
+[Apache License 2.0](./LICENSE) — a mesma do Supabase. Open-source permissiva, sem open-core.
+Dependências AGPL são proibidas na distribuição. Ver [`PRD.md` §11 e §15](./PRD.md#11-modelo-open-source-e-licenciamento).

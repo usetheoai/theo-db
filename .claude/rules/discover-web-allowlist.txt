@@ -1,0 +1,50 @@
+# Authoritative domains for WebFetch during /discover-execute.
+#
+# Format: one domain per line, no protocol, no trailing slash. Lines starting
+# with '#' are comments. Wildcards via *.example.com are supported by the skill
+# that reads this list.
+#
+# Default policy: empty allowlist = no WebFetch during discovery. This list is
+# deliberately curated to AUTHORITATIVE sources only (peer-reviewed venues,
+# primary project docs/repos, the SOTA anchor's official pages) so a TheoDB
+# discovery cites the field — not random blogs. See rules/discover-phd-rigor.md
+# for the PhD-rigor bar these domains exist to satisfy (SOTA-anchoring +
+# reproducible-benchmark evidence + >= 2 primary sources per technique).
+#
+# Adding/removing a domain is a per-project change tracked in CHANGELOG.md.
+# Keep it narrow: a domain earns a place only if it hosts primary, citable
+# evidence (a paper, an official spec, a maintained repo/doc), never opinion.
+
+# --- Peer-reviewed literature, venues and stable resolvers (primary sources) ---
+arxiv.org
+www.arxiv.org
+doi.org
+dl.acm.org
+aclanthology.org
+openreview.net
+proceedings.neurips.cc
+proceedings.mlr.press
+www.usenix.org
+www.vldb.org
+dblp.org
+ieeexplore.ieee.org
+www.cidrdb.org
+research.google
+
+# --- SOTA anchor: AlloyDB / ScaNN (the competitor TheoDB mirrors) ---
+cloud.google.com
+services.google.com
+
+# --- Core engine + permissive dependencies (official docs + maintained repos) ---
+www.postgresql.org
+github.com
+raw.githubusercontent.com
+*.github.io
+duckdb.org
+www.timescale.com
+docs.timescale.com
+
+# --- Peer OSS Postgres distributions (study material, not endorsement) ---
+supabase.com
+tembo.io
+www.paradedb.com

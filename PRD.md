@@ -105,9 +105,9 @@ Equipes que querem PostgreSQL com IA e analytics hoje escolhem entre opções ru
         roda em: laptop · on-prem · edge · qualquer nuvem · K8s · bare metal
 ```
 
-- **Base:** PostgreSQL upstream, **sem fork** (recebe patches do upstream; divergência mínima e isolada em extensões).
-- **`pgvector*` customizado:** ponto de diferenciação técnica. Fork mantido do pgvector com índice ANN de alta performance (alvo: qualidade tipo ScaNN, derivável de OSS) + integração com o planner para filtered vector search.
-- **Camada columnar:** extensão de armazenamento colunar em memória para acelerar analytics (avaliar Hydra/`pg_mooncake`/colunar próprio — ver due-diligence de licença em [§11](#11-modelo-open-source-e-licenciamento)).
+- **Base:** PostgreSQL upstream, **sem fork** (recebe patches do upstream; divergência mínima e isolada em extensões). A regra "sem fork" vale para o **engine** — não para extensões.
+- **`pgvector*` customizado:** ponto de diferenciação técnica. Fork de `pgvector`/`pgvectorscale` é **autorizado quando trouxer avanço mensurável** (mesma estratégia do AlloyDB, cujo vector é um pgvector customizado), sob a **Política de Fork** (ver D3). Integração com o planner para filtered vector search.
+- **Camada columnar:** extensão de armazenamento colunar (DuckDB-powered: `pg_mooncake`/`pg_analytics`) para acelerar analytics — ver due-diligence de licença em [§11](#11-modelo-open-source-e-licenciamento) e D2.
 - **HA/replicação:** composição de ferramentas OSS consagradas (ex.: Patroni, pgBackRest) sob um operador único.
 - **Composition root única:** o empacotamento e o tuning conjunto são o produto; o usuário não monta peças.
 
@@ -123,7 +123,7 @@ Cada pilar é uma área de produto independente. O MVP recortará um subconjunto
 Distribuição única, 100% wire-compatible, com extensões pré-instaladas e tunadas. Versões alinhadas a majors suportados do Postgres. Drivers/ferramentas padrão funcionam sem mudança.
 
 ### P2 — Vetorial / IA in-database (pilar killer)
-- pgvector customizado: armazenamento de embeddings + índice ANN de alta performance + HNSW padrão.
+- pgvector customizado (`pgvector` + `pgvectorscale`): armazenamento de embeddings + índice ANN de alta performance (StreamingDiskANN) + HNSW/IVFFlat padrão. Ver D3.
 - Geração de embeddings via SQL (modelos locais e remotos).
 - Filtered vector search com integração ao planner.
 - Hybrid search (texto + semântico) e reranking.
@@ -131,7 +131,7 @@ Distribuição única, 100% wire-compatible, com extensões pré-instaladas e tu
 - Avaliação de recall e tuning de índice.
 
 ### P3 — Columnar / HTAP analytics
-Engine colunar em memória para acelerar consultas analíticas sobre dados transacionais, sem ETL para outro sistema. Planner escolhe plano row vs colunar.
+Armazenamento colunar acelerado por DuckDB (`pg_mooncake` MIT, primário; `pg_analytics` alternativa) para consultas analíticas rápidas sobre dados Postgres, sem ETL para outro sistema. Entrega o resultado HTAP do AlloyDB com peça permissiva (ver D2 — é columnar lakehouse, não in-memory).
 
 ### P4 — Alta disponibilidade, DR e backup
 Failover automático (primary + standby), replicação assíncrona cross-site, backup contínuo + PITR, backups on-demand e agendados.
@@ -175,7 +175,7 @@ CLI de gestão, **MCP server** para acesso seguro de agentes de IA, integraçõe
 - [COULD] Embeddings multimodais; auto-embedding de tabelas.
 
 **P3 Columnar/HTAP**
-- [SHOULD] Armazenamento colunar em memória para colunas/tabelas selecionadas.
+- [SHOULD] Armazenamento colunar (DuckDB-powered) para colunas/tabelas selecionadas.
 - [SHOULD] Escolha automática row vs colunar pelo planner.
 - [COULD] Recomendação automática de quais colunas materializar.
 
@@ -243,16 +243,24 @@ CLI de gestão, **MCP server** para acesso seguro de agentes de IA, integraçõe
 
 **Premissa:** open-source de verdade (Princípio 3). Sem open-core que esconda os pilares centrais.
 
-**Licença proposta (questão aberta — decisão de owner + ADR):** Apache 2.0 para o código próprio (permissiva, amigável a adoção corporativa). Alternativa: PostgreSQL License (alinhada ao upstream).
+**Licença (DECIDIDA — ver D1):** **Apache License 2.0**, a mesma do Supabase. Arquivo `LICENSE` na raiz do repositório.
+**Regra dura derivada:** Apache 2.0 é permissiva → **dependências AGPL são proibidas** na distribuição. Só Apache 2.0 / MIT / BSD / PostgreSQL License entram no pacote.
 
-**Due-diligence de licença das dependências (BLOQUEANTE antes de empacotar):**
-- PostgreSQL — PostgreSQL License (permissiva) ✅
-- pgvector — PostgreSQL License (permissiva) ✅
-- Índice ANN tipo ScaNN — base de referência do Google é Apache 2.0; validar a peça exata adotada.
-- **Camada columnar — ⚠️ risco de licença:** algumas opções (ex.: Citus columnar) são **AGPL**, o que é incompatível com produto permissivo. Avaliar alternativas Apache/MIT (ex.: `pg_mooncake`, Hydra) com auditoria formal.
-- Ferramentas de HA/backup (Patroni, pgBackRest) — validar licença de cada uma.
+**Due-diligence de licença das dependências (verificada em 2026-06-26 — BLOQUEANTE antes de empacotar):**
 
-> Há um plugin de auditoria de licença disponível (`loop-check-licence`) que **deve** rodar sobre o conjunto de dependências antes de qualquer release. Conflito copyleft/permissivo é um gate de release.
+| Dependência candidata | Licença | Veredito |
+|---|---|---|
+| PostgreSQL (base) | PostgreSQL License | ✅ permitida |
+| `pgvector` (vetorial — HNSW/IVFFlat) | PostgreSQL License | ✅ permitida |
+| `pgvectorscale` (ANN — StreamingDiskANN) | PostgreSQL License | ✅ permitida |
+| `pg_mooncake` (columnar — primário) | MIT | ✅ permitida |
+| `pg_analytics` / ParadeDB (columnar — alternativa) | PostgreSQL License | ✅ permitida |
+| Citus columnar | **AGPL-3.0** | ❌ **barrada** |
+| Hydra columnar engine | **AGPL-3.0** | ❌ **barrada** |
+| ParadeDB `pg_search` (full-text BM25) | **AGPL-3.0** | ❌ **barrada** (buscar alternativa permissiva p/ full-text) |
+| Patroni / pgBackRest (HA/backup) | a confirmar no discovery | ⏳ validar |
+
+> O plugin `loop-check-licence` **deve** rodar sobre o conjunto de dependências antes de qualquer release. Qualquer dependência AGPL (ou sem licença) é um **gate de release** — bloqueia o pacote até substituição por peça permissiva.
 
 ---
 
@@ -273,7 +281,7 @@ CLI de gestão, **MCP server** para acesso seguro de agentes de IA, integraçõe
 |---|---|---|
 | **Columnar é tecnicamente o mais difícil** de igualar | Alta | Tratar como pilar posterior; começar pelo vetorial/IA; usar OSS existente, não reinventar. |
 | **Conflito de licença** (AGPL em columnar) | Alta | Due-diligence bloqueante ([§11](#11-modelo-open-source-e-licenciamento)); escolher só deps permissivas. |
-| **Manutenção do fork do pgvector** diverge do upstream | Média | Minimizar diff; contribuir upstream; CI contra novas versões do pgvector. |
+| **Manutenção do fork de pgvector/pgvectorscale** diverge do upstream | Média | Política de Fork (D3): upstream-first, gatilho por benchmark, diff mínimo, CI de rebase contínuo, desfazer o fork quando o upstream alcançar. |
 | **Paridade de performance** com engine proprietário do Google | Média | Não prometer paridade; competir em abertura/custo; metas próprias com benchmark honesto. |
 | **Escopo gigante** (10 pilares) | Alta | MVP estreito ([§14](#14-recorte-de-mvp-candidato)); Regra 2 (não abrir pilar novo antes de fechar o anterior). |
 | **Posicionamento "AlloyDB killer"** pode soar vendor-hostile | Baixa | Seguir `public-copy`: posicionamento por outcome, não por ataque a concorrente. |
@@ -295,15 +303,46 @@ CLI de gestão, **MCP server** para acesso seguro de agentes de IA, integraçõe
 
 ---
 
-## 15. Questões em aberto
+## 15. Decisões (fechadas em 2026-06-26)
 
-1. **Licença final** do código próprio (Apache 2.0 vs PostgreSQL License)? — decisão de owner + ADR.
-2. **Peça columnar** definitiva (Hydra / `pg_mooncake` / outra) e sua licença?
-3. **Origem do índice ANN avançado** (qual implementação OSS, e como mantê-la)?
-4. **Telemetria opt-in** para métricas de adoção — sim/não e que dados?
-5. **Quais majors do PostgreSQL** suportar no v1?
-6. **Modelo de governança** do projeto OSS (mantenedores, CLA/DCO)?
-7. Haverá, no futuro, um **control plane managed** (fora do escopo v1, mas afeta arquitetura)?
+As 7 questões em aberto foram resolvidas. Critério de decisão: **espelhar o SOTA do AlloyDB** (nosso alvo) usando **apenas peças OSS permissivas** — porque a licença escolhida (Apache 2.0) bane copyleft de rede (AGPL). Cada decisão tem consequência rastreável.
+
+### D1 — Licença: **Apache 2.0** (a mesma do Supabase)
+O código próprio do TheoDB é licenciado sob **Apache License 2.0**, igual ao Supabase. Inclui grant de patente, é amigável a adoção corporativa e compatível com as dependências permissivas escolhidas.
+**Consequência (regra dura):** toda dependência empacotada DEVE ser permissiva (Apache 2.0 / MIT / BSD / PostgreSQL License). **AGPL é proibida** na distribuição. Sem open-core: os pilares centrais ficam todos sob Apache 2.0 (Princípio 3).
+
+### D2 — Camada columnar: **DuckDB-powered permissivo** (`pg_mooncake` MIT, primário; `pg_analytics` PostgreSQL License, alternativa)
+O columnar in-memory do AlloyDB é proprietário e não tem equivalente OSS permissivo idêntico. As opções columnar mais óbvias do ecossistema (**Citus columnar, Hydra columnar engine, ParadeDB pg_search**) são **AGPL-3.0 → barradas por D1**. Adotamos **`pg_mooncake` (MIT)** como candidato primário e **`pg_analytics` (PostgreSQL License)** como alternativa — ambos columnar/lakehouse acelerados por DuckDB.
+**Honestidade:** é columnar on-disk/lakehouse (DuckDB+Iceberg), *não* o columnar in-memory do AlloyDB. Entregamos o **resultado** (HTAP/analytics rápido sobre dados Postgres) com técnica diferente. A escolha final entre as duas peças é validada no `cycle-discover` do pilar P3.
+
+### D3 — Índice ANN: **pgvector + pgvectorscale**, com fork autorizado (Política de Fork)
+O AlloyDB usa ScaNN (a integração `alloydb_scann` é proprietária). Nosso "pgvector customizado" = **`pgvector`** (PostgreSQL License — HNSW/IVFFlat) + **`pgvectorscale`** (PostgreSQL License — índice **StreamingDiskANN** + Statistical Binary Quantization). Espelha o "vector + índice ANN avançado" do AlloyDB com peças compatíveis com D1, e dá o caminho de escala disco/bilhões de vetores (DiskANN) sem depender de código fechado.
+
+**Política de Fork (decisão do owner, 2026-06-26 — "não vamos medir esforços onde houver avanço"):** forkar `pgvector`/`pgvectorscale` é **autorizado** quando trouxer vantagem competitiva real. A licença permite (PostgreSQL License → redistribuível sob Apache 2.0 com atribuição) e o próprio AlloyDB faz isso. Para o fork ser um ativo, não um fardo, ele segue um contrato:
+
+1. **Upstream-first.** A mudança é proposta ao upstream antes de virar fork. Fork é o que sobra quando o upstream não absorve (ou não cabe no nosso roadmap de tempo).
+2. **Gatilho por evidência.** O fork dispara no `cycle-discover`/`cycle-plan` do pilar vetorial, justificado por **benchmark reproduzível** (latência/recall/escala) — nunca às cegas. Sem ganho mensurável, ficamos no upstream (KISS/YAGNI).
+3. **Diff mínimo e isolado.** Patches pequenos e bem delimitados; nada de reescrever a extensão.
+4. **CI de rebase contínuo.** Pipeline que faz merge das novas versões do upstream e roda a suíte; divergência é dívida visível, não silenciosa.
+5. **Escopo:** vale para **extensões** (pgvector/pgvectorscale e afins). **Não** se estende ao engine PostgreSQL, que permanece sem fork (§6).
+6. **Saída:** se o upstream alcançar o nosso patch, **desfazemos o fork** e voltamos ao upstream.
+
+Enquanto não houver evidência de ganho, o default permanece: **upstream as-is**.
+
+### D4 — Telemetria: **opt-in, anônima, mínima, desligada por padrão**
+Diferente do AlloyDB managed (que coleta por ser serviço), o TheoDB é OSS instalável. Telemetria é **opt-in explícito**, anônima, mínima (versão, OS/arch, contagem de recursos), documentada e desativável a qualquer momento. Confiança > métrica.
+
+### D5 — Majors do PostgreSQL: **17 (MVP) → 18**
+AlloyDB cobre PG 14–17 e o Omni já tem builds 18.x. Para começar enxuto (KISS/YAGNI), o MVP mira **PostgreSQL 17** (maduro e amplamente adotado) e adiciona **PostgreSQL 18** em seguida.
+**Dependência:** condicionado a `pgvector`/`pgvectorscale`/columnar suportarem o major — a confirmar no discovery antes de travar 18.
+
+### D6 — Governança: **DCO (sign-off), sem CLA**
+Modelo open governance com **Developer Certificate of Origin** (sign-off por commit), **sem CLA** (menos atrito, sem transferência de copyright — coerente com Apache 2.0 e com "OSS de verdade"). Mantenedores core da usetheo inicialmente; `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` e `SECURITY.md` a criar. Sem open-core nos pilares centrais.
+
+### D7 — Control plane managed: **fora do v1; porta aberta via operador K8s**
+v1 = engine downloadable OSS (decisão já firmada). Um managed **não** será construído agora (YAGNI), mas a arquitetura mantém a porta aberta: o **operador Kubernetes (P8)** é o substrato natural de um eventual managed. Reavaliar pós-tração.
+
+> Estas decisões devem ser promovidas a ADRs formais (`docs/adr/0001..0007`) quando a estrutura de engenharia for criada. Mudá-las exige novo ADR + entrada no CHANGELOG.
 
 ---
 

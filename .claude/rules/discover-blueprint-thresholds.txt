@@ -1,0 +1,25 @@
+# Discover-Blueprint Score Thresholds
+#
+# Per-project Source of Truth for /discover-confidence thresholds.
+#
+# Format: <band-name>|<min-score>|<sunset-date>|<adr-ref>
+#
+# Bands (descending) — FRONTIER PROFILE (TheoDB), tightened for PhD rigor:
+#   92+   -> SHIPPABLE              (verde, blueprint pronto para uso)
+#   75-91 -> SHIPPABLE_WITH_CAVEATS (ressalvas explicitas)
+#   50-74 -> NON_SHIPPABLE          (re-execute discovery)
+#   0-49  -> INVALID                (hard cap fired OR very low score)
+#
+# Comparison is >= (inclusive). Score == 75 -> SHIPPABLE_WITH_CAVEATS.
+#
+# Rationale: TheoDB is a frontier DB anchored on AlloyDB SOTA; a blueprint must
+# clear a higher bar before it is "ready for use". See rules/discover-phd-rigor.md
+# and knowledge-base/adrs/0001-discover-phd-rigor.md. Recalibrate against a holdout
+# set once real blueprints exist (currently pre-code).
+#
+# Sunset = quarterly review. Update sunset + ADR ref when you recalibrate.
+#
+SHIPPABLE|92|2027-01-31|0001-discover-phd-rigor
+SHIPPABLE_WITH_CAVEATS|75|2027-01-31|0001-discover-phd-rigor
+NON_SHIPPABLE|50|2027-01-31|0001-discover-phd-rigor
+INVALID|0|2027-01-31|0001-discover-phd-rigor

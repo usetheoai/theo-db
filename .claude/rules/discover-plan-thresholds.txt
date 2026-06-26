@@ -1,0 +1,33 @@
+# Discover-Plan Score Thresholds — per-project tuning.
+#
+# Authoritative source: rules/discover-plan-golden-rule.md
+#
+# Format (one entry per line):
+#   KEY = VALUE
+#
+# Lines starting with `#` and blank lines are skipped.
+# Defaults shipped with the skill at:
+#   skills/discover-plan-confidence/templates/ (when present)
+#
+# Per-project overrides go here and are CHANGELOG-tracked.
+#
+# FRONTIER PROFILE (TheoDB): bands tightened below for a PhD-rigor discover.
+# See rules/discover-phd-rigor.md. The frontier question budget (6-14 total,
+# <=5 per corner, techniques >=2) is enforced STRUCTURALLY in
+# skills/discover-plan-confidence/scripts/check_plan_completeness.py — the
+# soft_cap.* keys here are DOCUMENTARY (the scorer reads only band.* keys).
+
+# Soft caps (documentary — enforced budget lives in check_plan_completeness.py)
+soft_cap.question_count_low = 5
+soft_cap.coverage_corner_thin = 2   # techniques corner should carry >= 2 (R4)
+
+# Hard caps (documentary mirror of discover-plan-golden-rule.md; budget stays <= 15)
+hard_cap.question_count_max = 15
+hard_cap.fabricated_citation = 49
+hard_cap.empty_corner = 49
+
+# Verdict bands (READ by run_discover_plan_score.py — tightened for frontier rigor)
+band.shippable = 92
+band.shippable_with_caveats = 75
+band.needs_revision = 50
+band.invalid = 0
