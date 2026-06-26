@@ -56,10 +56,12 @@ WARN_ONLY="${STOP_VALIDATION_WARN_ONLY:-0}"
 #   <name>.spec.<ext>          (TS/JS Jasmine/RSpec)
 #   test_<name>.<ext>          (Python pytest)
 # Falls back to "ANY test file in the same directory" (idiomatic in some langs).
-# Skips generated/doc files and obvious vendored/third-party trees.
+# Skips generated/doc files, obvious vendored/third-party trees, and the
+# .claude/ pipeline tooling (it is dev scaffolding with its own tests, not the
+# project's consumer-facing production source — so it never gates the CHANGELOG).
 SRC_CHANGED=$(echo "$ALL_FILES" \
   | grep -E '\.(go|py|ts|tsx|js|jsx|rs|java|kt|rb|cs)$' \
-  | grep -vE '(^|/)(node_modules|vendor|dist|build|target|\.venv|__pycache__|\.next|\.nuxt)/' \
+  | grep -vE '(^|/)(node_modules|vendor|dist|build|target|\.venv|__pycache__|\.next|\.nuxt|\.claude)/' \
   | grep -vE '(_test|\.test|\.spec)\.[a-z]+$' \
   | grep -vE '(^|/)test_[^/]+\.[a-z]+$' \
   | grep -vE '(^|/)zz_generated[^/]*\.go$' \
@@ -112,7 +114,7 @@ if [ -f "CHANGELOG.md" ]; then
   CODE_CHANGED=$(echo "$ALL_FILES" \
     | grep -E '\.(go|py|ts|tsx|js|jsx|rs|java|kt|rb|cs)$' \
     | grep -vE '(_test|\.test|\.spec)\.[a-z]+$' \
-    | grep -vE '(^|/)(node_modules|vendor|dist|build|target|\.venv|__pycache__)/' \
+    | grep -vE '(^|/)(node_modules|vendor|dist|build|target|\.venv|__pycache__|\.claude)/' \
     || true)
   if [ -n "$CODE_CHANGED" ] && ! echo "$ALL_FILES" | grep -qE '^CHANGELOG\.md$'; then
     msg="CHANGELOG.md not updated despite production source changes (Inquebrável Rule 6; cycle-review BLOCKER). Add an entry to [Unreleased] before stopping. Override with STOP_VALIDATION_WARN_ONLY=1 only when the change is a bulk reorg with the rationale documented separately."
