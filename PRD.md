@@ -105,9 +105,9 @@ Equipes que querem PostgreSQL com IA e analytics hoje escolhem entre opções ru
         roda em: laptop · on-prem · edge · qualquer nuvem · K8s · bare metal
 ```
 
-- **Base:** PostgreSQL upstream, **sem fork** (recebe patches do upstream; divergência mínima e isolada em extensões).
-- **`pgvector*` customizado:** ponto de diferenciação técnica. Fork mantido do pgvector com índice ANN de alta performance (alvo: qualidade tipo ScaNN, derivável de OSS) + integração com o planner para filtered vector search.
-- **Camada columnar:** extensão de armazenamento colunar em memória para acelerar analytics (avaliar Hydra/`pg_mooncake`/colunar próprio — ver due-diligence de licença em [§11](#11-modelo-open-source-e-licenciamento)).
+- **Base:** PostgreSQL upstream, **sem fork** (recebe patches do upstream; divergência mínima e isolada em extensões). A regra "sem fork" vale para o **engine** — não para extensões.
+- **`pgvector*` customizado:** ponto de diferenciação técnica. Fork de `pgvector`/`pgvectorscale` é **autorizado quando trouxer avanço mensurável** (mesma estratégia do AlloyDB, cujo vector é um pgvector customizado), sob a **Política de Fork** (ver D3). Integração com o planner para filtered vector search.
+- **Camada columnar:** extensão de armazenamento colunar (DuckDB-powered: `pg_mooncake`/`pg_analytics`) para acelerar analytics — ver due-diligence de licença em [§11](#11-modelo-open-source-e-licenciamento) e D2.
 - **HA/replicação:** composição de ferramentas OSS consagradas (ex.: Patroni, pgBackRest) sob um operador único.
 - **Composition root única:** o empacotamento e o tuning conjunto são o produto; o usuário não monta peças.
 
@@ -281,7 +281,7 @@ CLI de gestão, **MCP server** para acesso seguro de agentes de IA, integraçõe
 |---|---|---|
 | **Columnar é tecnicamente o mais difícil** de igualar | Alta | Tratar como pilar posterior; começar pelo vetorial/IA; usar OSS existente, não reinventar. |
 | **Conflito de licença** (AGPL em columnar) | Alta | Due-diligence bloqueante ([§11](#11-modelo-open-source-e-licenciamento)); escolher só deps permissivas. |
-| **Manutenção do fork do pgvector** diverge do upstream | Média | Minimizar diff; contribuir upstream; CI contra novas versões do pgvector. |
+| **Manutenção do fork de pgvector/pgvectorscale** diverge do upstream | Média | Política de Fork (D3): upstream-first, gatilho por benchmark, diff mínimo, CI de rebase contínuo, desfazer o fork quando o upstream alcançar. |
 | **Paridade de performance** com engine proprietário do Google | Média | Não prometer paridade; competir em abertura/custo; metas próprias com benchmark honesto. |
 | **Escopo gigante** (10 pilares) | Alta | MVP estreito ([§14](#14-recorte-de-mvp-candidato)); Regra 2 (não abrir pilar novo antes de fechar o anterior). |
 | **Posicionamento "AlloyDB killer"** pode soar vendor-hostile | Baixa | Seguir `public-copy`: posicionamento por outcome, não por ataque a concorrente. |
@@ -315,8 +315,19 @@ O código próprio do TheoDB é licenciado sob **Apache License 2.0**, igual ao 
 O columnar in-memory do AlloyDB é proprietário e não tem equivalente OSS permissivo idêntico. As opções columnar mais óbvias do ecossistema (**Citus columnar, Hydra columnar engine, ParadeDB pg_search**) são **AGPL-3.0 → barradas por D1**. Adotamos **`pg_mooncake` (MIT)** como candidato primário e **`pg_analytics` (PostgreSQL License)** como alternativa — ambos columnar/lakehouse acelerados por DuckDB.
 **Honestidade:** é columnar on-disk/lakehouse (DuckDB+Iceberg), *não* o columnar in-memory do AlloyDB. Entregamos o **resultado** (HTAP/analytics rápido sobre dados Postgres) com técnica diferente. A escolha final entre as duas peças é validada no `cycle-discover` do pilar P3.
 
-### D3 — Índice ANN: **pgvector + pgvectorscale** (ambos permissivos)
+### D3 — Índice ANN: **pgvector + pgvectorscale**, com fork autorizado (Política de Fork)
 O AlloyDB usa ScaNN (a integração `alloydb_scann` é proprietária). Nosso "pgvector customizado" = **`pgvector`** (PostgreSQL License — HNSW/IVFFlat) + **`pgvectorscale`** (PostgreSQL License — índice **StreamingDiskANN** + Statistical Binary Quantization). Espelha o "vector + índice ANN avançado" do AlloyDB com peças compatíveis com D1, e dá o caminho de escala disco/bilhões de vetores (DiskANN) sem depender de código fechado.
+
+**Política de Fork (decisão do owner, 2026-06-26 — "não vamos medir esforços onde houver avanço"):** forkar `pgvector`/`pgvectorscale` é **autorizado** quando trouxer vantagem competitiva real. A licença permite (PostgreSQL License → redistribuível sob Apache 2.0 com atribuição) e o próprio AlloyDB faz isso. Para o fork ser um ativo, não um fardo, ele segue um contrato:
+
+1. **Upstream-first.** A mudança é proposta ao upstream antes de virar fork. Fork é o que sobra quando o upstream não absorve (ou não cabe no nosso roadmap de tempo).
+2. **Gatilho por evidência.** O fork dispara no `cycle-discover`/`cycle-plan` do pilar vetorial, justificado por **benchmark reproduzível** (latência/recall/escala) — nunca às cegas. Sem ganho mensurável, ficamos no upstream (KISS/YAGNI).
+3. **Diff mínimo e isolado.** Patches pequenos e bem delimitados; nada de reescrever a extensão.
+4. **CI de rebase contínuo.** Pipeline que faz merge das novas versões do upstream e roda a suíte; divergência é dívida visível, não silenciosa.
+5. **Escopo:** vale para **extensões** (pgvector/pgvectorscale e afins). **Não** se estende ao engine PostgreSQL, que permanece sem fork (§6).
+6. **Saída:** se o upstream alcançar o nosso patch, **desfazemos o fork** e voltamos ao upstream.
+
+Enquanto não houver evidência de ganho, o default permanece: **upstream as-is**.
 
 ### D4 — Telemetria: **opt-in, anônima, mínima, desligada por padrão**
 Diferente do AlloyDB managed (que coleta por ser serviço), o TheoDB é OSS instalável. Telemetria é **opt-in explícito**, anônima, mínima (versão, OS/arch, contagem de recursos), documentada e desativável a qualquer momento. Confiança > métrica.

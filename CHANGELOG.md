@@ -24,4 +24,5 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 - PRD §11 (licenciamento): licença travada em Apache 2.0; due-diligence de dependências atualizada com licenças verificadas (pgvector/pgvectorscale/pg_analytics = PostgreSQL License; pg_mooncake = MIT; Citus/Hydra columnar/ParadeDB pg_search = AGPL → barradas).
 - PRD §7/§8 (pilares P2/P3): P2 passa a citar `pgvector` + `pgvectorscale`; P3 passa de "columnar in-memory" para columnar DuckDB-powered permissivo (alinhado às decisões D2/D3).
+- PRD D3 (§6/§13): adicionada **Política de Fork** — fork de `pgvector`/`pgvectorscale` autorizado quando houver avanço mensurável, sob contrato (upstream-first, gatilho por benchmark, diff mínimo, CI de rebase contínuo, desfazer quando o upstream alcançar). A regra "sem fork" segue valendo só para o engine PostgreSQL.
 - README (Licença): de "a definir" para Apache 2.0 com link para `LICENSE`.
