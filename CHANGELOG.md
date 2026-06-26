@@ -28,6 +28,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - README inicial (`README.md`): posicionamento orientado a outcome, público-alvo, seção "como funciona" e roadmap macro de milestones (M0–M9).
 - Seção de Referências no README: whitepaper ScaNN for AlloyDB (pesquisa aplicada do concorrente) e 24 papers seminais verificados, agrupados por pilar — vetorial/ANN (ScaNN, HNSW, DiskANN, Product Quantization, Faiss), embeddings/busca híbrida/reranking (Sentence-BERT, DPR, ColBERT, RRF, BEIR), text-to-SQL e segurança (Spider, BIRD, Indirect Prompt Injection), columnar/HTAP (C-Store, MonetDB/X100, HyPer, Citus), replicação/HA/DR (Raft, ARIES, Aurora, Spanner) e auto-tuning (Learned Indexes, OtterTune, AutoAdmin, Database Cracking).
 
+### Security
+
+- M0 Walking Skeleton: `Dockerfile` — base image fixada ao digest imutável `postgres:17-bookworm@sha256:17b6c778...` (H-1); garante que re-builds futuros não consumam silenciosamente uma imagem diferente caso o tag seja remapeado no Docker Hub.
+- M0 Walking Skeleton: `Dockerfile` — pgvector referenciado pelo commit SHA imutável `#586e7515...` em vez da tag mutável `#v0.8.3` (H-2); elimina risco de `git tag -f` no upstream substituir a fonte na próxima build.
+
 ### Changed
 
 - `cycle-discover` endurecido para rigor PhD (ADR `0001-discover-phd-rigor`): budget de perguntas ampliado para fronteira (6–14 total, ≤5/corner, técnicas ≥2) via `skills/discover-plan-confidence/scripts/check_plan_completeness.py` (mantém-se dentro do hard cap locked ≤15); bands de verdict mais agressivos (SHIPPABLE 92, CAVEATS 75) em `discover-plan-thresholds.txt` e `discover-blueprint-thresholds.txt`; seção `§ 3.1 — Project rigor profile` adicionada aos dois golden rules locked de discover; `discover-plan/SKILL.md`, `discover-execute/SKILL.md` e o template de plano passam a exigir SOTA-anchoring + ≥2 fontes primárias + benchmark/`UNBENCHMARKED` na corner de técnicas; `cycle-discover.md` cross-referencia o perfil de rigor.

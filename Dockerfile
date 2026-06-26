@@ -1,11 +1,9 @@
 # syntax=docker/dockerfile:1
 
+FROM postgres:17-bookworm@sha256:17b6c778de50f4bb9a878c36e736110fbcd9b7020377d6fdfdf20f7c0347e40a
 ARG PG_MAJOR=17
-ARG DEBIAN_CODENAME=bookworm
-FROM postgres:$PG_MAJOR-$DEBIAN_CODENAME
-ARG PG_MAJOR
 
-ADD https://github.com/pgvector/pgvector.git#v0.8.3 /tmp/pgvector
+ADD https://github.com/pgvector/pgvector.git#586e7515bafe6912c425164d186d56550657c349 /tmp/pgvector
 
 RUN apt-get update && \
     apt-mark hold locales && \
