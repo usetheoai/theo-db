@@ -14,6 +14,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `CLAUDE.md` — regras do projeto para o Claude Code. Princípio guia "Esforço ≠ Complexidade" (complexidade medida pela necessidade do projeto, não pelo esforço; esforço alto é bem-vindo quando há necessidade real, complexidade desnecessária é proibida sempre; anti-sunk-cost) + regras específicas do TheoDB (SOTA-anchored, Apache 2.0/AGPL-proibida, Política de Fork, sem fork do engine, performance só com benchmark, honestidade).
 - `LICENSE` — Apache License 2.0 (texto oficial), a mesma licença do Supabase (decisão D1).
 - Decisões D1–D7 fechadas no PRD §15 (antes "Questões em aberto"), ancoradas no SOTA AlloyDB: D1 licença Apache 2.0; D2 columnar DuckDB-powered permissivo (`pg_mooncake` MIT / `pg_analytics`); D3 índice ANN `pgvector` + `pgvectorscale`; D4 telemetria opt-in/anônima/desligada por padrão; D5 PostgreSQL 17 (MVP) → 18; D6 governança via DCO sem CLA; D7 control plane managed fora do v1.
 - PRD inicial do TheoDB (`PRD.md`): define o produto inteiro — visão, problema/oportunidade, posicionamento vs AlloyDB Omni, personas, princípios, arquitetura ("PostgreSQL + extensões + pgvector customizado, sem fork"), os 10 pilares de capacidade (P1–P10), requisitos funcionais/não-funcionais, modelo open-source e licenciamento, riscos e recorte de MVP candidato.
