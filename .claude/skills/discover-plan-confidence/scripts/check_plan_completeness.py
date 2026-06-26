@@ -3,7 +3,11 @@
 Bundles 4 sub-checks for orchestrator simplicity:
 
   1. mandatory_sections — all 10 required headers present (caps verdict at 70 if any missing)
-  2. question_budget   — 5 <= N <= 10, per-corner <= 3, per-corner >= 1 OR DEFER-CORNER marker per D5
+  2. question_budget   — 6 <= N <= 14, per-corner <= 5, per-corner >= 1 OR DEFER-CORNER marker per D5
+                         (FRONTIER PROFILE — TheoDB; see rules/discover-phd-rigor.md § 2.
+                          Window widened from the generic 5..10/<=3 default so the techniques
+                          corner can go deep on the SOTA axis. Stays within the locked
+                          discover-plan-golden-rule.md hard cap of <= 15.)
   3. method_per_question — Fase A non-empty OR 'SKIP' AND Fase B non-empty (header-text-based per EC-2)
   4. adr_count         — at least 2 ADRs in ## ADRs section (D1 time-budget + D2 investigation-depth minimum)
 
@@ -24,9 +28,12 @@ from check_research_coverage import _has_defer_corner_marker
 
 
 CORNERS = ("tests", "deps", "tools", "techniques")
-MIN_QUESTIONS = 5
-MAX_QUESTIONS = 10
-MAX_PER_CORNER = 3
+# FRONTIER PROFILE (TheoDB) — see rules/discover-phd-rigor.md § 2. Widened from the
+# generic 5..10 / <=3 default so the techniques corner can interrogate the SOTA axis
+# deeply. Still inside the locked discover-plan-golden-rule.md hard cap of <= 15.
+MIN_QUESTIONS = 6
+MAX_QUESTIONS = 14
+MAX_PER_CORNER = 5
 MIN_ADRS = 2
 
 MANDATORY_SECTIONS = [

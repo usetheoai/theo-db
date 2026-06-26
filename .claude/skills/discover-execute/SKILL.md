@@ -84,6 +84,7 @@ Each iteration of the halt-loop MUST:
 3. **Synthesize the answer** in the format declared by the plan's "expected answer shape".
 4. **Append/update the blueprint** under the section mapped to that question. Replace the `<!-- TBD: Qx -->` placeholder.
 5. **Cite the source** — every paragraph or table cell that references behavior MUST link to a `.claude/knowledge-base/references/{project}/{path}:{line}` reference. No claim without citation.
+   - **PhD-rigor mandate (TheoDB — `rules/discover-phd-rigor.md`).** For a `techniques` answer on a performance- or algorithm-bearing pillar: (R1) anchor it on the AlloyDB/ScaNN SOTA and state the gap; (R2) cite ≥ 2 independent primary sources (a peer-reviewed paper via the allowlist + an official doc/repo); (R3) attach benchmark methodology + numbers + source for any performance statement, or mark it literally `UNBENCHMARKED`. Bare "X is faster" prose is rejected. External fetches are restricted to `rules/discover-web-allowlist.txt`.
 6. **Mark the question DONE** in a session-local progress file under `.claude/knowledge-base/discoveries/.progress-{slug}.json` (gitignored).
 7. **Re-evaluate halt condition.** If all four conditions hold (every question answered + every citation verifiable + four corners populated + acceptance criteria met), emit `<promise>BLUEPRINT_COMPLETE</promise>`.
 
@@ -173,6 +174,8 @@ Your next action:
 - Upstream skill: `/discover-edge-cases` (validates the plan before execute)
 - Downstream skill: `/discover-confidence` (scores the blueprint this skill produces)
 - Downstream skill: `/discover-improve` (refines the blueprint if confidence is low)
+- Rigor contract (TheoDB): `rules/discover-phd-rigor.md`
+- Allowlist for external sources: `rules/discover-web-allowlist.txt`
 - Template: `templates/blueprint-template.md`
 - Prompt: `prompts/execute-mode-prompt.md`
 - Loop engine: `ralph-loop` plugin (must be enabled in `~/.claude/settings.json`)

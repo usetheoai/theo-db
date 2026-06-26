@@ -14,6 +14,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Perfil de rigor PhD do `cycle-discover` para o TheoDB (projeto de fronteira): novo `rules/discover-phd-rigor.md` (contrato de rigor — SOTA-anchoring, ≥2 fontes primárias por técnica, evidência de benchmark ou marcador honesto `UNBENCHMARKED`, budget de fronteira) + ADR `knowledge-base/adrs/0001-discover-phd-rigor.md` que documenta as mudanças nas regras locked. `rules/discover-web-allowlist.txt` populado com domínios SOTA autoritativos (arXiv/DOI/venues, AlloyDB/ScaNN, pgvector/pgvectorscale/DuckDB/Postgres) — antes vazio, o discover era cego à literatura.
 - `CLAUDE.md` — regras do projeto para o Claude Code. Princípio guia "Esforço ≠ Complexidade" (complexidade medida pela necessidade do projeto, não pelo esforço; esforço alto é bem-vindo quando há necessidade real, complexidade desnecessária é proibida sempre; anti-sunk-cost) + regras específicas do TheoDB (SOTA-anchored, Apache 2.0/AGPL-proibida, Política de Fork, sem fork do engine, performance só com benchmark, honestidade).
 - `LICENSE` — Apache License 2.0 (texto oficial), a mesma licença do Supabase (decisão D1).
 - Decisões D1–D7 fechadas no PRD §15 (antes "Questões em aberto"), ancoradas no SOTA AlloyDB: D1 licença Apache 2.0; D2 columnar DuckDB-powered permissivo (`pg_mooncake` MIT / `pg_analytics`); D3 índice ANN `pgvector` + `pgvectorscale`; D4 telemetria opt-in/anônima/desligada por padrão; D5 PostgreSQL 17 (MVP) → 18; D6 governança via DCO sem CLA; D7 control plane managed fora do v1.
@@ -23,6 +24,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- `cycle-discover` endurecido para rigor PhD (ADR `0001-discover-phd-rigor`): budget de perguntas ampliado para fronteira (6–14 total, ≤5/corner, técnicas ≥2) via `skills/discover-plan-confidence/scripts/check_plan_completeness.py` (mantém-se dentro do hard cap locked ≤15); bands de verdict mais agressivos (SHIPPABLE 92, CAVEATS 75) em `discover-plan-thresholds.txt` e `discover-blueprint-thresholds.txt`; seção `§ 3.1 — Project rigor profile` adicionada aos dois golden rules locked de discover; `discover-plan/SKILL.md`, `discover-execute/SKILL.md` e o template de plano passam a exigir SOTA-anchoring + ≥2 fontes primárias + benchmark/`UNBENCHMARKED` na corner de técnicas; `cycle-discover.md` cross-referencia o perfil de rigor.
 - PRD §11 (licenciamento): licença travada em Apache 2.0; due-diligence de dependências atualizada com licenças verificadas (pgvector/pgvectorscale/pg_analytics = PostgreSQL License; pg_mooncake = MIT; Citus/Hydra columnar/ParadeDB pg_search = AGPL → barradas).
 - PRD §7/§8 (pilares P2/P3): P2 passa a citar `pgvector` + `pgvectorscale`; P3 passa de "columnar in-memory" para columnar DuckDB-powered permissivo (alinhado às decisões D2/D3).
 - PRD D3 (§6/§13): adicionada **Política de Fork** — fork de `pgvector`/`pgvectorscale` autorizado quando houver avanço mensurável, sob contrato (upstream-first, gatilho por benchmark, diff mínimo, CI de rebase contínuo, desfazer quando o upstream alcançar). A regra "sem fork" segue valendo só para o engine PostgreSQL.

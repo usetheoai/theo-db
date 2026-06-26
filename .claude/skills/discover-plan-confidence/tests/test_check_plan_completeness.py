@@ -53,15 +53,15 @@ def test_missing_section_detected(tmp_path: Path, good_discover_plan: Path) -> N
 
 
 def test_question_count_below_min_detected(under_budget_plan: Path) -> None:
-    """4 Qs is below the 5-10 budget."""
+    """4 Qs is below the 6-14 frontier budget (floor 6 — rules/discover-phd-rigor.md § 2)."""
     report = check_plan_completeness(under_budget_plan)
     assert any("too_few" in v for v in report["budget_violations"])
 
 
 def test_question_count_above_max_detected(tmp_path: Path) -> None:
-    """11 Qs is above the 5-10 budget. Build a synthetic plan inline."""
+    """15 Qs is above the 6-14 frontier budget. Build a synthetic plan inline."""
     rows = "\n".join(
-        f"| Q{i} | q | tests | `.claude/knowledge-base/references/project-a/` | SKIP | Read | text |" for i in range(1, 12)
+        f"| Q{i} | q | tests | `.claude/knowledge-base/references/project-a/` | SKIP | Read | text |" for i in range(1, 16)
     )
     body = (
         "# Discovery Plan: Over Budget\n\n## Context\n\nx\n\n## Objective\n\nx\n\n"
@@ -84,9 +84,9 @@ def test_question_count_above_max_detected(tmp_path: Path) -> None:
 
 
 def test_per_corner_max_exceeded_detected(tmp_path: Path) -> None:
-    """4 Qs in one corner (tests) violates per-corner max (3)."""
+    """6 Qs in one corner (tests) violates the frontier per-corner max (5)."""
     rows = "\n".join(
-        f"| Q{i} | q | tests | `.claude/knowledge-base/references/project-a/` | SKIP | Read | text |" for i in range(1, 5)
+        f"| Q{i} | q | tests | `.claude/knowledge-base/references/project-a/` | SKIP | Read | text |" for i in range(1, 7)
     )
     body = (
         "# Discovery Plan: Corner Overflow\n\n## Context\n\nx\n\n## Objective\n\nx\n\n"
@@ -96,10 +96,10 @@ def test_per_corner_max_exceeded_detected(tmp_path: Path) -> None:
         "| # | Question | Corner | Reference project(s) | Fase A (broad — ast-grep map) | Fase B (deep — Read at each hotspot) | Expected answer shape |\n"
         "|---|---|---|---|---|---|---|\n"
         f"{rows}\n"
-        "| Q5 | q | deps | `.claude/knowledge-base/references/project-a/` | SKIP | Read | text |\n\n"
+        "| Q7 | q | deps | `.claude/knowledge-base/references/project-a/` | SKIP | Read | text |\n\n"
         "## Coverage Matrix\n\n| Corner | Q | Status |\n|---|---|---|\n"
-        "| Integration tests | Q1, Q2, Q3, Q4 | x |\n"
-        "| Dependencies | Q5 | x |\n"
+        "| Integration tests | Q1, Q2, Q3, Q4, Q5, Q6 | x |\n"
+        "| Dependencies | Q7 | x |\n"
         "| Tools | (none) | <!-- DEFER-CORNER: tools | x --> |\n"
         "| Techniques | (none) | <!-- DEFER-CORNER: techniques | x --> |\n\n"
         "## Halt-loop Checkpoints\n\n| C | A | F |\n|---|---|---|\n| x | y | z |\n\n"

@@ -46,6 +46,8 @@ ls rules/
 
 Read each `.md` file. The discovery plan SHALL cite at least one project rule (e.g., `architecture.md` for boundaries that any borrowed pattern must respect, `testing.md` for test pyramid expectations that any borrowed test technique must align with).
 
+**MANDATORY for TheoDB:** read `rules/discover-phd-rigor.md` and apply its bar. TheoDB is a frontier DB anchored on the AlloyDB SOTA — discovery is applied-PhD-grade: SOTA-anchored, ≥ 2 primary sources per technique, benchmark evidence or an honest `UNBENCHMARKED` flag for every performance claim.
+
 ### Step 1 — Inventory what is already known
 
 Read in order:
@@ -80,12 +82,23 @@ Every discovery plan MUST cover the four corners or explicitly justify deferral 
 | **Tools** | Build/test/lint tooling. CI shape. Local dev story. | "Does <project A> ship docker-compose for dev? What's the test command?" |
 | **Techniques** | The algorithm / pattern / data structure being borrowed. | "How does <project B> implement <specific behavior>?" |
 
-#### Question budget (mandatory)
+#### Question budget (mandatory — FRONTIER PROFILE)
 
-- **Total: 5-10 questions across all corners.** Below 5 → blueprint will be thin; above 10 → halt-loop will likely exhaust budget. Sweet spot 6-8.
-- **Max 3 questions per corner.** If you find yourself wanting a 4th in one corner, fold two into one OR move to a follow-up discovery plan (next slug).
-- **Min 1 question per corner.** If a corner has zero, you MUST add an ADR justifying the deferral.
+Per `rules/discover-phd-rigor.md § 2`. Discovery on a frontier DB earns deeper interrogation than the generic default.
+
+- **Total: 6-14 questions across all corners.** Below 6 → too thin for a frontier bet; above 14 → halt-loop will likely exhaust budget. Sweet spot 8-10. (Ceiling enforced at 14 by `check_plan_completeness.py`; locked hard cap stays ≤ 15.)
+- **Max 5 questions per corner** — to let the `techniques` corner go deep on the algorithm/SOTA axis.
+- **Techniques corner: ≥ 2 questions (R4).** The SOTA axis is where TheoDB's bets live (e.g., the pgvector/pgvectorscale fork trigger — PRD D3). One technique question is not frontier discovery.
+- **Min 1 question per other corner.** If a corner has zero, you MUST add an ADR justifying the deferral.
 - **Each question maps to exactly one corner.** Questions that legitimately span corners should be split.
+
+#### SOTA-rigor on the techniques corner (mandatory — R1/R2/R3)
+
+For every `techniques` question on a performance- or algorithm-bearing pillar (P2 vector/AI, P3 columnar, P4 HA, P7 auto-tuning):
+
+- **R1 — anchor on SOTA.** Name how AlloyDB/ScaNN (or the field) solves the same problem; state the gap TheoDB must close with a permissive piece.
+- **R2 — ≥ 2 primary sources.** Plan to cite ≥ 2 independent primary sources per technique (a peer-reviewed paper via the allowlist + an official doc/repo under `knowledge-base/references/`). One source is insufficient.
+- **R3 — benchmark or `UNBENCHMARKED`.** Any performance claim the blueprint will make must plan to carry methodology + numbers + source, or be flagged `UNBENCHMARKED` (an honest gap that seeds the next discovery). No bare "X is faster" prose (`public-copy.md`, PRD D3).
 
 #### Pre-validate cited paths (mandatory)
 
@@ -125,7 +138,7 @@ These rules are NON-NEGOTIABLE for every discovery plan:
 1. **Every research question maps to a method.** No "we'll figure it out". Method = `Read path/to/file`, `Grep 'pattern' in dir/`, `find -name`, `git log --grep`, etc.
 2. **Every citation in the plan points to a real path in `knowledge-base/references/`.** Fabricated paths are a `discover-confidence` hard cap (INVALID).
 3. **Out-of-scope is explicit.** Vague "rest" is rejected.
-4. **Question budget respected.** Total 5-10 questions, max 3 per corner, min 1 per corner (or ADR-deferred). See Step 3.
+4. **Question budget respected (FRONTIER PROFILE).** Total 6-14 questions, max 5 per corner, techniques ≥ 2, min 1 per other corner (or ADR-deferred). See Step 3 + `rules/discover-phd-rigor.md`.
 5. **Time-budget per project.** Each reference project gets a budget (e.g., "<project A>: 4h, <project B>: 2h"). Halt-loop respects it. Per-question stop condition mandatory.
 6. **Coverage Matrix is complete.** Every research question maps to at least one method. Deferred questions need an ADR.
 7. **ADRs justify investigation depth.** Why dig into one subdirectory but skip another? Document the rationale.
@@ -150,4 +163,6 @@ These rules are NON-NEGOTIABLE for every discovery plan:
 - Sibling skill: `/discover-edge-cases` (next step after this skill)
 - Sibling skill: `/discover-execute` (consumes the plan)
 - Sibling skill: `/discover-confidence` (scores the blueprint produced by execute)
+- Rigor contract (TheoDB): `rules/discover-phd-rigor.md`
+- Allowlist for external sources: `rules/discover-web-allowlist.txt`
 - Template: `templates/discovery-plan-template.md`
