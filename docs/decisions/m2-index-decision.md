@@ -1,7 +1,7 @@
 # M2 — Index decision (evidence-driven)
 
-**Date:** 2026-06-27 · **Status:** Evidence captured; **final index choice DEFERRED to a realistic-dataset benchmark** (honest, measurement-first per ADR 0002).
-**Evidence:** `docs/benchmarks/2026-06-27-pgvector-cosine.json` (reproducible, seed=42, sha-stamped).
+**Date:** 2026-06-27 · **Status:** **DECIDED on real-dataset evidence — HNSW is the default index** (measurement-first per ADR 0002). pgvectorscale StreamingDiskANN stays *available* for the high-dim / large-scale regime it is engineered for (honestly `UNBENCHMARKED` for us — see § Final decision).
+**Evidence:** `docs/benchmarks/2026-06-27-glove-25-angular.json` (real ANN-Benchmarks dataset, seed=42, sha-stamped) + `docs/benchmarks/2026-06-27-pgvector-cosine.json` (synthetic baseline).
 
 ## What this records
 
@@ -49,13 +49,57 @@ off-harness numbers** in this table.
 - **DiskANN wins decisively on index size** (2.43 MB vs 4.17 MB — 42% smaller, via Statistical Binary Quantization) and reaches the highest measured recall (0.971).
 - **This is a dataset artifact, not a property of DiskANN — on two axes.** (1) *Distribution:* uniform-random high-dimensional vectors are near-equidistant (curse of dimensionality); SBQ quantization loses the fine distinctions such data relies on, so DiskANN needs a larger candidate list. (2) *Scale:* DiskANN is a disk-resident, billion-scale algorithm; at n=5000 the whole dataset is in memory and the streaming/graph-on-disk advantage is irrelevant, so SBQ is pure downside here. SBQ is engineered for **real embedding distributions at scale** (clustered/structured), where pgvectorscale's published benchmarks show it *beating* HNSW-class indexes (e.g. "28× lower p95 latency vs Pinecone @99% recall, 50M Cohere-768" — blueprint `alloydb-vector-ai-implementation`, flagged `UNBENCHMARKED` for us).
 
-## Decision
+> **Synthetic baseline alone could not decide.** Choosing an index from synthetic gaussian would violate
+> ADR 0002 + `public-copy.md` (no claim without a representative benchmark). The synthetic run proved the
+> harness works and flagged its own dataset as unrepresentative for SBQ — so we mirrored a **real**
+> ANN-Benchmarks dataset (next section), which **resolves the decision** (§ Final decision).
 
-**The final M2 index choice is DEFERRED until a realistic embedding dataset (e.g. sift-128 / glove-100 / a Cohere subset) is mirrored locally and benchmarked.** Choosing HNSW *or* DiskANN from synthetic gaussian alone would violate ADR 0002 (measurement-first) and `public-copy.md` (no claim without representative benchmark). What we know:
+## Measured evidence — REAL dataset (glove-25-angular, ANN-Benchmarks; n=50k subsample, q=500, dim=25, cosine, k=10)
 
-- DiskANN is **available and functional** in the image (DoD-2 "index beyond HNSW available" ✅).
-- DiskANN is **measurably competitive** (reaches 0.971 recall, the highest measured, reproducible from the harness) and **more compact** (−42% index size), though at ~3–4× lower QPS than HNSW at equal recall on this dataset.
-- The **decisive comparison requires real data** — the synthetic harness proved the infrastructure works and revealed its own dataset is unrepresentative for SBQ.
+This is the dataset the synthetic baseline was waiting for. `glove-25-angular` is a real word-embedding
+distribution (clustered, not near-equidistant). Seeded 50k-corpus / 500-query subsample of the official
+`ann-benchmarks.com/glove-25-angular.hdf5` (SHA256 `51004cb0…`); loaded via `--hdf5`. Every row from the
+harness, stamped at the producing commit.
+
+| index | params | recall@10 | QPS | p95 | build | index size |
+|---|---|---|---|---|---|---|
+| HNSW | ef_search=40 | 0.984 | 2778 | 0.57 ms | **11 s** | **20.55 MB** |
+| HNSW | ef_search=100 | **0.996** | 1495 | 1.11 ms | 11 s | 20.55 MB |
+| DiskANN (SBQ) | sls=100, rescore=100 | 0.610 | 446 | 3.33 ms | 123 s | 22.77 MB |
+| DiskANN (SBQ) | sls=500, rescore=500 | 0.863 | 129 | 11.30 ms | 123 s | 22.77 MB |
+| DiskANN (SBQ) | sls=1000, rescore=1000 | 0.933 | 75 | 20.69 ms | 123 s | 22.77 MB |
+| DiskANN (SBQ) | sls=2000, rescore=1000 | 0.933 | 52 | 32.04 ms | 123 s | 22.77 MB |
+
+**On real glove-25, HNSW dominates DiskANN on every single axis** (recall is deterministic ±0.001 across
+runs; QPS/build are load-dependent but the *gaps* are large and direction-stable):
+
+- **Recall:** HNSW 0.996 vs DiskANN's best 0.933 — DiskANN never reaches HNSW.
+- **QPS:** HNSW 1495 @0.996 recall vs DiskANN 75 @0.933 — ~20× faster at higher recall.
+- **Build:** HNSW 11 s vs DiskANN 123 s — ~11× faster.
+- **Index size:** HNSW 20.55 MB vs DiskANN **22.77 MB** — DiskANN is *larger*. **The −42% SBQ size
+  advantage seen on synthetic dim=128 VANISHES at dim=25** — it was a high-dimensionality artifact: SBQ
+  compresses the stored vectors, but at low dim the graph + full-precision rescore vectors dominate, so
+  quantization saves almost nothing.
+
+This is the inverse of the naive reading of the synthetic run, and it is the honest, decision-grade signal:
+**SBQ/DiskANN's value proposition (compression + disk-scale) needs BOTH high dimensionality (768–1536) AND
+large scale (millions+).** glove-25 has neither; synthetic gaussian had only the dimension. Neither of our
+two benchmarks sits in DiskANN's design envelope.
+
+## Final decision (DoD-2 — chosen by evidence)
+
+**HNSW is TheoDB's default ANN index.** The evidence is unambiguous at every dimensionality/scale we have
+measured (synthetic dim=128 @5k, real glove dim=25 @50k): HNSW wins on recall, QPS, build time, and — at
+low dim — index size.
+
+**pgvectorscale StreamingDiskANN remains available** (DoD-2 "index beyond HNSW available" ✅ — `CREATE INDEX
+… USING diskann` works and the planner uses it) and is the documented option for the regime it is
+engineered for: **high-dimensional embeddings (768–1536) at large scale (millions of vectors)**, where SBQ
+compression and disk-resident graph pay off and where AlloyDB's ScaNN-class quantization wins. **We make no
+superiority claim for that regime — it is `UNBENCHMARKED` for TheoDB** (would require a Cohere/OpenAI-768
+dataset at millions of vectors, beyond this slice; tracked as follow-up). Honest framing per ADR 0002 +
+`public-copy.md`: we ship the index that the measured evidence selects (HNSW) and keep the alternative
+available + clearly-scoped, rather than claiming an unproven win.
 
 ## D3 (Fork Policy) — honored
 
@@ -67,11 +111,16 @@ pgvectorscale's top-level license is **The PostgreSQL License** (verified: `.cla
 
 ## Build reproducibility — pinned
 
-The multi-stage build is pinned on every axis for reproducible artifacts: base image by digest (shared `ARG BASE_IMAGE` across builder + runtime), pgvector by SHA (`586e7515`), pgvectorscale by commit (`57c88b7`), `cargo-pgrx` by version (`0.16.1`, `--locked`), Rust toolchain by version (`1.91.0`), and `cargo pgrx install --locked` so the compiled crate set matches the pinned `Cargo.lock`.
+The multi-stage build is pinned on every axis for reproducible artifacts: base image by digest (shared `ARG BASE_IMAGE` across builder + runtime), pgvector by SHA (`586e7515`), pgvectorscale by commit (`57c88b7`), `cargo-pgrx` by version (`0.16.1`, installed with `--locked`), and Rust toolchain by version (`1.91.0`). (`cargo pgrx install` does not accept `--locked`; the compiled crate set is pinned by the committed `Cargo.lock` at `57c88b7`, which pgrx does not re-resolve by default.)
 
-## Next slice (follow-up)
+## Done in this milestone
 
-1. Mirror a real ANN-Benchmarks dataset (sift-128-euclidean / glove-100-angular) under the repo (supply-chain: self-host the HDF5, do not depend on a live third-party host).
-2. Extend the harness with an HDF5 dataset loader (the recall math + measurement already exist).
-3. Re-run HNSW vs DiskANN on real data → make the final index decision with representative evidence.
-4. M2 DoD-3 (embeddings SQL function) is a separate slice.
+1. ✅ HDF5 loader for ANN-Benchmarks reference datasets (`--hdf5`, seeded subsample) — `dataset.py::load_hdf5_subsample`.
+2. ✅ Real-data run on `glove-25-angular` → **final index decision made** (HNSW default; § Final decision).
+
+## Follow-up (remaining M2 / future)
+
+1. **High-dim validation of the DiskANN regime** — mirror a Cohere/OpenAI-768 (or sift-128) dataset at large scale and re-run, to test (not assume) DiskANN/SBQ superiority where it is engineered to win. Until then that claim stays `UNBENCHMARKED`.
+2. **M2 DoD-1 CI** — wire the harness into CI over a small reference subset (a full DiskANN build on 50k takes ~2 min, so CI uses HNSW + a capped diskann subset).
+3. **M2 DoD-3** — embeddings SQL function from a configurable model (separate slice).
+4. **D1 pre-release** — `cargo-deny`/`loop-check-licence` sweep over the Rust crate tree before any distribution.
