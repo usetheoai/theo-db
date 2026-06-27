@@ -52,5 +52,14 @@ RUN apt-get update && \
 COPY --from=scale-builder /usr/lib/postgresql/$PG_MAJOR/lib/vectorscale* /usr/lib/postgresql/$PG_MAJOR/lib/
 COPY --from=scale-builder /usr/share/postgresql/$PG_MAJOR/extension/vectorscale* /usr/share/postgresql/$PG_MAJOR/extension/
 
+# plpython3u for theodb.embed (M2 DoD-3) — the DB calls a configurable model endpoint (AlloyDB pattern);
+# NO model/torch ships in the image (lean). Kept (not removed) — it is a runtime dependency.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends postgresql-plpython3-$PG_MAJOR && \
+    rm -rf /var/lib/apt/lists/*
+
+# theodb.embed() — created on fresh DB init (idempotent script).
+COPY sql/30-theodb-embed.sql /docker-entrypoint-initdb.d/30-theodb-embed.sql
+
 HEALTHCHECK --interval=5s --timeout=5s --start-period=10s --retries=5 \
   CMD pg_isready -h localhost -p 5432 -U postgres -q

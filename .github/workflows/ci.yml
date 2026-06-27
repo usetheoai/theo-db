@@ -52,7 +52,9 @@ jobs:
 
       - name: Start TheoDB
         run: |
-          docker run -d --name theo-db-ci -e POSTGRES_PASSWORD=postgres -p 5432:5432 theo-db:ci
+          # host-gateway lets the in-container theodb.embed() reach the host embedding server (DoD-3 test)
+          docker run -d --name theo-db-ci --add-host=host.docker.internal:host-gateway \
+            -e POSTGRES_PASSWORD=postgres -p 5432:5432 theo-db:ci
           for i in $(seq 1 30); do
             [ "$(docker inspect -f '{{.State.Health.Status}}' theo-db-ci)" = healthy ] && break
             sleep 2
