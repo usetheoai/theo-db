@@ -14,3 +14,7 @@
 
 # Compaction snapshots written by precompact-preserve.sh (runtime artifacts)
 .claude/.compaction-snapshots/
+
+# Python bytecode (global)
+__pycache__/
+*.pyc

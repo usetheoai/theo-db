@@ -107,6 +107,17 @@ wire e executa vector search.
 - [ ] `CREATE EXTENSION vector;` funciona e uma query de similaridade (`<=>`) retorna resultado correto end-to-end num smoke test automatizado.
 - [ ] ADR "sem fork do engine PostgreSQL" registrado em `docs/adr/` (promove a decisão de §6 do PRD); decisões D1–D7 referenciadas como ADRs `0001..0007` a formalizar.
 
+**Entregáveis (artefatos concretos):**
+
+- `Dockerfile` — imagem `postgres:17-bookworm` + `pgvector` (base por digest + pgvector por SHA, `HEALTHCHECK pg_isready`). ✅ entregue.
+- `smoke.sh` — smoke test wire (`pg_isready`) + `CREATE EXTENSION vector` + query `<=>`. ✅ entregue.
+- `docs/adr/0001-no-engine-fork.md` — ADR da decisão "sem fork do engine". ✅ entregue.
+- Entrada correspondente em `CHANGELOG.md` `[Unreleased]`. ✅ entregue.
+
+**Documentação:**
+
+- ADR: `docs/adr/0001-no-engine-fork.md` (satisfaz DoD-3).
+
 **Dependencies:** none (this is the foundation).
 
 **Top risks:**
@@ -126,6 +137,18 @@ pré-instaladas e a suíte de compatibilidade do upstream passando.
 - [ ] 100% dos testes de regressão do PostgreSQL 17 upstream passam na distribuição.
 - [ ] Extensões do MVP pré-instaladas e habilitáveis via `CREATE EXTENSION`, com tuning conjunto documentado.
 - [ ] Due-diligence de licença das deps do core executada (`loop-check-licence`); zero AGPL no pacote.
+
+**Entregáveis (artefatos concretos):**
+
+- Imagem container PG17 com a suíte de extensões do MVP pré-instaladas e habilitáveis via `CREATE EXTENSION`.
+- Relatório versionado da suíte de regressão do PostgreSQL 17 upstream (100% pass).
+- Relatório `loop-check-licence` (zero AGPL no pacote) — **gate de release**.
+- Documento de tuning conjunto das extensões.
+
+**Documentação:**
+
+- Doc de empacotamento + extensões habilitáveis + tuning conjunto (a produzir em `docs/packaging/`).
+- Referência SOTA: `supabase-postgres` (ver `.claude/knowledge-base/references-catalog.md`).
 
 **Dependencies:** M0.
 
@@ -147,6 +170,21 @@ pré-instaladas e a suíte de compatibilidade do upstream passando.
 - [ ] Função SQL para gerar embeddings a partir de modelo configurável (local e/ou remoto).
 - [ ] Política de Fork (D3) honrada: qualquer patch em pgvector/pgvectorscale tem benchmark de gatilho + diff mínimo + CI de rebase — ou permanece upstream as-is.
 
+**Entregáveis (artefatos concretos):**
+
+- `pgvector` + `pgvectorscale` na imagem; índice ANN avançado (StreamingDiskANN) criável via SQL.
+- Função SQL de geração de embeddings a partir de modelo configurável (local e/ou remoto).
+- Benchmark reproduzível de recall/latência publicado em `docs/benchmarks/` (ou marcador honesto `UNBENCHMARKED` até haver evidência).
+- Política de Fork (D3) honrada para qualquer patch em `pgvector`/`pgvectorscale`.
+
+**Documentação de especificação (API-alvo do TheoDB):**
+
+- `docs/features/01-busca-similaridade-vetorial.md`
+- `docs/features/02-indice-hnsw.md`
+- `docs/features/03-indice-ivfflat.md`
+- `docs/features/04-indice-ivf.md`
+- `docs/features/05-indice-scann.md`
+
 **Dependencies:** M1.
 
 **Top risks:**
@@ -166,6 +204,16 @@ pré-instaladas e a suíte de compatibilidade do upstream passando.
 - [ ] Migração de um banco vanilla com tabela vetorial preserva dados e índices num smoke test.
 - [ ] Guia de migração mínima publicado.
 
+**Entregáveis (artefatos concretos):**
+
+- Procedimento `pg_dump`/`pg_restore` documentado e testado contra um Postgres vanilla.
+- Smoke de migração de banco vanilla com tabela vetorial (dados + índices preservados).
+- Guia de migração mínima publicado.
+
+**Documentação:**
+
+- Guia de migração mínima (a produzir em `docs/migration/`).
+
 **Dependencies:** M2.
 
 **Top risks:**
@@ -184,6 +232,18 @@ pré-instaladas e a suíte de compatibilidade do upstream passando.
 - [ ] Primary com standby e failover automático sob tempo-alvo medido (Patroni-based).
 - [ ] Backup contínuo + PITR e backups agendados funcionando (pgBackRest-based), com restore validado.
 - [ ] Due-diligence de licença de Patroni/pgBackRest confirmada permissiva (PRD §11 — "a confirmar").
+
+**Entregáveis (artefatos concretos):**
+
+- Setup HA Patroni: primary + standby + failover automático sob tempo-alvo medido.
+- Backup contínuo + PITR (pgBackRest) com restore validado e backups agendados.
+- Confirmação de licença permissiva de Patroni/pgBackRest.
+- Runbook de operação HA + backup/restore.
+
+**Documentação:**
+
+- Runbook HA + backup/restore (a produzir em `docs/operations/`).
+- Referências SOTA: `cloudnative-pg`, `patroni`, `pgbackrest`.
 
 **Dependencies:** M1 (core estável). M2 não é bloqueante.
 
@@ -205,6 +265,18 @@ bare metal regulado.
 - [ ] Orquestrador RPM/bare metal sobe a mesma distribuição sem rebuild.
 - [ ] Smoke de portabilidade: a mesma imagem roda em laptop e em alvo bare metal.
 
+**Entregáveis (artefatos concretos):**
+
+- Operador Kubernetes (CRD + reconciler) que provisiona um cluster TheoDB (primary + standby) declarativamente.
+- Orquestrador RPM/bare metal que sobe a mesma distribuição sem rebuild.
+- Smoke de portabilidade (mesma imagem: laptop ↔ bare metal).
+- Guia de deploy (K8s + bare metal).
+
+**Documentação:**
+
+- Guia de deploy K8s + bare metal (a produzir em `docs/deploy/`).
+- Referência SOTA: `cloudnative-pg`.
+
 **Dependencies:** M4 (HA é o que o operador orquestra).
 
 **Top risks:**
@@ -225,6 +297,17 @@ rápido sobre dados transacionais vivos, com escolha de plano row vs colunar.
 - [ ] Escolha de plano row vs colunar pelo planner documentada.
 - [ ] Honestidade documentada: é columnar lakehouse (DuckDB+Iceberg), **não** in-memory como o AlloyDB (D2).
 
+**Entregáveis (artefatos concretos):**
+
+- `pg_mooncake` habilitado para tabelas/colunas selecionadas; query analítica medida vs row-store.
+- Documentação da escolha de plano row vs colunar pelo planner.
+- Nota de honestidade: lakehouse colunar (DuckDB+Iceberg), **não** in-memory (D2).
+
+**Documentação:**
+
+- Doc columnar/HTAP + escolha de plano row vs colunar (a produzir em `docs/analytics/`).
+- Referências SOTA: `duckdb`, `pg_mooncake`.
+
 **Dependencies:** M1.
 
 **Top risks:**
@@ -236,14 +319,34 @@ rápido sobre dados transacionais vivos, com escolha de plano row vs colunar.
 
 ### M7 — [ ] IA avançada
 
-**Objective:** Filtered vector search, hybrid search + reranking, e NL → SQL com views parametrizadas
-seguras.
+**Objective:** Filtered vector search, hybrid search + reranking, NL → SQL seguro (views parametrizadas)
+e **funções de IA generativa em SQL** (geração de texto, classificação condicional, análise de sentimento,
+sumarização) sobre modelo configurável local/remoto.
 
 **Definition of done:**
 
 - [ ] Filtered vector search integrado ao planner, com benchmark.
 - [ ] Hybrid search (texto + semântico) + reranking (RRF) com recall medido (ex.: BEIR).
 - [ ] NL → SQL com guarda contra prompt-injection (views parametrizadas seguras); **alternativa permissiva** identificada para full-text BM25 (paradedb `pg_search` é AGPL → barrado).
+- [ ] Funções de IA generativa em SQL — `ai.generate`, `ai.if`, `ai.analyze_sentiment`, `ai.summarize`/`ai.agg_summarize` — sobre modelo configurável (local/remoto), com versões otimizadas (`ai.*` aceleradas) e guarda de custo/segurança; cada função com teste de contrato.
+
+**Entregáveis (artefatos concretos):**
+
+- Filtered vector search integrado ao planner, com benchmark.
+- Hybrid search (texto + semântico) + reranking RRF, com recall medido (ex.: BEIR).
+- NL → SQL com guarda anti-prompt-injection (views parametrizadas seguras).
+- Alternativa permissiva a BM25 full-text identificada (paradedb `pg_search` é AGPL → barrado).
+- Funções de IA generativa em SQL (`ai.generate`/`ai.if`/`ai.analyze_sentiment`/`ai.summarize`/`ai.agg_summarize`) sobre modelo configurável, com versões otimizadas e teste de contrato por função.
+
+**Documentação de especificação (API-alvo do TheoDB):**
+
+- `docs/features/06-busca-hibrida.md` — hybrid search + RRF (cobre o DoD).
+- `docs/features/07-funcoes-ia-sql.md` — funções `ai.if`/`ai.rank`/`ai.generate` (cobre o DoD).
+- `docs/features/08-acelerar-consultas.md` — execução otimizada das funções de IA (cobre o DoD).
+- `docs/features/09-ranquear-resultados.md` — reranking via `ai.rank` (cobre o DoD).
+- `docs/features/10-analise-sentimento.md` — `ai.analyze_sentiment` (cobre o DoD).
+- `docs/features/11-sumarizacao-conteudo.md` — `ai.summarize`/`ai.agg_summarize` (cobre o DoD).
+- `docs/features/12-linguagem-natural.md` — NL → SQL via `theodb_ai_nl` (cobre o DoD).
 
 **Dependencies:** M2.
 
@@ -265,6 +368,17 @@ partir de AlloyDB. *(Merge de README M8 — Escala & observabilidade — com REA
 - [ ] Read replicas / read pools com load-balancing; métricas exportáveis via Prometheus/OpenTelemetry.
 - [ ] Index advisor + autovacuum adaptativo + query insights disponíveis.
 - [ ] MCP server para acesso seguro de agentes + ao menos uma integração de framework + caminho de **migração a partir de AlloyDB** (anti-lock-in — alimenta a métrica north-star).
+
+**Entregáveis (artefatos concretos):**
+
+- Read replicas / read pools com load-balancing.
+- Métricas exportáveis via Prometheus/OpenTelemetry.
+- Index advisor + autovacuum adaptativo + query insights.
+- MCP server (acesso seguro de agentes) + ≥ 1 integração de framework (LangChain/LlamaIndex) + caminho de migração a partir de AlloyDB.
+
+**Documentação:**
+
+- Docs de observabilidade, MCP server e integrações (a produzir em `docs/`).
 
 **Dependencies:** M5 (deploy/operação); M2 (IA); M6 (analytics) para o conjunto completo.
 
