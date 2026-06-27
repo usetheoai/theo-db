@@ -66,6 +66,9 @@ jobs:
           PGPORT: "5432"
         run: bash smoke.sh
 
+      - name: CA bundle present (theodb.embed HTTPS cloud providers — regression guard)
+        run: docker exec theo-db-ci test -f /etc/ssl/certs/ca-certificates.crt
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

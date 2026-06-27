@@ -53,9 +53,11 @@ COPY --from=scale-builder /usr/lib/postgresql/$PG_MAJOR/lib/vectorscale* /usr/li
 COPY --from=scale-builder /usr/share/postgresql/$PG_MAJOR/extension/vectorscale* /usr/share/postgresql/$PG_MAJOR/extension/
 
 # plpython3u for theodb.embed (M2 DoD-3) — the DB calls a configurable model endpoint (AlloyDB pattern);
-# NO model/torch ships in the image (lean). Kept (not removed) — it is a runtime dependency.
+# NO model/torch ships in the image (lean). Kept (not removed) — runtime dependencies.
+# ca-certificates is required for plpython3u's urllib to verify TLS when the endpoint is an HTTPS cloud
+# provider (e.g. OpenAI); without it CREATE-CERT verification fails (SSL: CERTIFICATE_VERIFY_FAILED).
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends postgresql-plpython3-$PG_MAJOR && \
+    apt-get install -y --no-install-recommends postgresql-plpython3-$PG_MAJOR ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 # theodb.embed() — created on fresh DB init (idempotent script).

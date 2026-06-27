@@ -24,6 +24,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **`theodb.embed` agora alcança provedores HTTPS de nuvem** (ex.: OpenAI). A imagem não trazia `ca-certificates`, então o `urllib` do `plpython3u` falhava o handshake TLS com `SSL: CERTIFICATE_VERIFY_FAILED` — o caminho remoto (M2 DoD-3) só funcionava com endpoints `http://` locais. Adicionado `ca-certificates` ao runtime (+1 MB → 470 MB). **Validado contra a API real da OpenAI**: `theodb.embed('…', 'text-embedding-3-small')` retorna `vector(1536)` com semântica genuína (paráfrase 0.35 << não-relacionado 0.92 em distância cosseno). Guard de regressão no CI (CA bundle presente). Sem regressão no caminho local (10 testes verde).
+
 ### Security
 
 ## [0.2.0] - 2026-06-27
