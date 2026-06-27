@@ -18,3 +18,7 @@
 # Python bytecode (global)
 __pycache__/
 *.pyc
+
+# Coverage + pytest artifacts
+.coverage
+.pytest_cache/
