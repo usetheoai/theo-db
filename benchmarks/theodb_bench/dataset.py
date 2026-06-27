@@ -6,7 +6,43 @@ this module closes that gap.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
+
+
+def load_hdf5_subsample(
+    path: str, n: int, n_queries: int, seed: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Load an ANN-Benchmarks HDF5 (``train`` + ``test``) and return a seeded subsample.
+
+    ANN-Benchmarks reference datasets (e.g. ``glove-25-angular``) ship real embedding
+    distributions — unlike :func:`make_dataset`'s synthetic gaussian. We subsample a seeded
+    ``n`` corpus rows from ``train`` and ``n_queries`` rows from ``test`` so a full-scale run
+    stays tractable while preserving the real (clustered) distribution. Output matches
+    :func:`make_dataset`: ``(corpus (n,dim), queries (n_queries,dim))`` — so the existing
+    ground-truth + recall + harness pipeline runs unchanged on real data.
+
+    Raises FileNotFoundError if the dataset is absent, ValueError if ``n``/``n_queries`` exceed
+    the file's train/test sizes.
+    """
+    if not Path(path).is_file():
+        raise FileNotFoundError(f"HDF5 dataset not found: {path}")
+    import h5py  # local import: only the real-dataset path needs h5py
+
+    with h5py.File(path, "r") as f:
+        train, test = f["train"], f["test"]
+        if n > train.shape[0]:
+            raise ValueError(f"n={n} exceeds train size {train.shape[0]} in {path}")
+        if n_queries > test.shape[0]:
+            raise ValueError(f"n_queries={n_queries} exceeds test size {test.shape[0]} in {path}")
+        rng = np.random.default_rng(seed)
+        corpus_idx = np.sort(rng.choice(train.shape[0], size=n, replace=False))
+        query_idx = np.sort(rng.choice(test.shape[0], size=n_queries, replace=False))
+        # h5py fancy-indexing requires sorted, unique indices (satisfied above).
+        corpus = train[corpus_idx].astype(np.float64)
+        queries = test[query_idx].astype(np.float64)
+    return corpus, queries
 
 
 def make_dataset(

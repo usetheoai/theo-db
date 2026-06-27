@@ -137,3 +137,34 @@ def test_build_config_diskann_only():
 def test_build_config_both_indexes():
     cfg = build_config(build_parser().parse_args(["--index", "both"]))
     assert [s["name"] for s in cfg["index_specs"]] == ["hnsw", "diskann"]
+
+
+def _tiny_hdf5(tmp_path):
+    import h5py
+    import numpy as np
+
+    path = tmp_path / "tiny-angular.hdf5"
+    rng = np.random.default_rng(0)
+    with h5py.File(path, "w") as f:
+        f.create_dataset("train", data=rng.standard_normal((60, 6)).astype(np.float32))
+        f.create_dataset("test", data=rng.standard_normal((10, 6)).astype(np.float32))
+    return str(path)
+
+
+def test_run_benchmark_uses_hdf5_and_infers_dim(tmp_path):
+    cfg = dict(_CONFIG)
+    cfg["hdf5_path"] = _tiny_hdf5(tmp_path)
+    cfg["dataset_label"] = "tiny-angular"
+    cfg["n"] = 40
+    cfg["n_queries"] = 5
+    report = run_benchmark(cfg, FakeVectorDB(), tmp_path)
+    assert report["dim"] == 6  # inferred from the HDF5 file, not from config["dim"]
+    assert report["dataset"] == "tiny-angular"
+    # artifact filename carries the dataset label so real-data runs do not clobber synthetic ones
+    assert list(tmp_path.glob("*tiny-angular*.json"))
+
+
+def test_build_config_hdf5_flag_sets_path_and_label():
+    cfg = build_config(build_parser().parse_args(["--hdf5", "/x/glove-25-angular.hdf5"]))
+    assert cfg["hdf5_path"] == "/x/glove-25-angular.hdf5"
+    assert cfg["dataset_label"] == "glove-25-angular"

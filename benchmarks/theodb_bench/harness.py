@@ -12,7 +12,7 @@ import platform
 import subprocess
 from pathlib import Path
 
-from .dataset import make_dataset
+from .dataset import load_hdf5_subsample, make_dataset
 from .metrics import latency_percentiles, qps_best_of_n
 from .recall import brute_force_ground_truth, recall_at_k
 
@@ -28,11 +28,16 @@ def _git_sha() -> str:
 
 def run_benchmark(config: dict, db, out_dir) -> dict:
     """Run the benchmark for every index spec / param sweep and write the report. Returns the report dict."""
-    corpus, queries = make_dataset(config["n"], config["dim"], config["n_queries"], config["seed"])
+    hdf5 = config.get("hdf5_path")
+    if hdf5:
+        corpus, queries = load_hdf5_subsample(hdf5, config["n"], config["n_queries"], config["seed"])
+    else:
+        corpus, queries = make_dataset(config["n"], config["dim"], config["n_queries"], config["seed"])
+    dim = corpus.shape[1]  # real datasets define their own dim; trust the data, not config
     _, gt_dist = brute_force_ground_truth(corpus, queries, config["k"], config["metric"])
 
     db.ensure_extension()
-    db.create_table(config["table"], config["dim"])
+    db.create_table(config["table"], dim)
     db.load_vectors(config["table"], corpus)
 
     results = []
@@ -79,11 +84,12 @@ def run_benchmark(config: dict, db, out_dir) -> dict:
         "date": datetime.date.today().isoformat(),
         "seed": config["seed"],
         "n": config["n"],
-        "dim": config["dim"],
+        "dim": dim,
         "n_queries": config["n_queries"],
         "k": config["k"],
         "metric": config["metric"],
         "runs": config["runs"],
+        "dataset": config.get("dataset_label", f"synthetic-gaussian-{config['metric']}"),
         "host": platform.node(),
         "methodology": (
             "index-forced (SET enable_seqscan=off, assert_index_used); recall is "
@@ -96,10 +102,17 @@ def run_benchmark(config: dict, db, out_dir) -> dict:
     return report
 
 
+def artifact_stem(report: dict) -> str:
+    """Filename stem for a report: real datasets carry their label; synthetic keeps the legacy name."""
+    label = report.get("dataset", "")
+    if label and not label.startswith("synthetic-gaussian"):
+        return f"{report['date']}-{label}"
+    return f"{report['date']}-pgvector-{report['metric']}"
+
+
 def _write_report(report: dict, out_dir: Path) -> tuple[Path, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
-    metric = report["metric"]
-    stem = f"{report['date']}-pgvector-{metric}"
+    stem = artifact_stem(report)
     json_path = out_dir / f"{stem}.json"
     md_path = out_dir / f"{stem}.md"
     json_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
@@ -112,8 +125,8 @@ def _render_markdown(report: dict) -> str:
         f"# TheoDB vector benchmark — {report['date']}",
         "",
         f"- **commit:** `{report['sha']}` · **seed:** {report['seed']} · **dataset:** "
-        f"n={report['n']} dim={report['dim']} metric={report['metric']} · "
-        f"**k:** {report['k']} · **runs (best-of-N):** {report['runs']}",
+        f"{report.get('dataset', 'synthetic')} (n={report['n']} dim={report['dim']} "
+        f"metric={report['metric']}) · **k:** {report['k']} · **runs (best-of-N):** {report['runs']}",
         "- recall@k is distance-thresholded (ANN-Benchmarks semantics); ground-truth is exact brute-force.",
         "",
         "| index | params | recall@k | QPS | p50 ms | p95 ms | p99 ms | build ms | index bytes |",

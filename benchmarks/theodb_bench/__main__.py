@@ -26,6 +26,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="hnsw",
         help="which index(es) to benchmark (diskann requires the vectorscale extension)",
     )
+    p.add_argument(
+        "--hdf5",
+        default=None,
+        help="path to an ANN-Benchmarks HDF5 (train/test) — real dataset instead of synthetic gaussian; "
+        "dim is inferred from the file",
+    )
     p.add_argument("--dsn", default=None, help="libpq DSN (else built from PG* env vars)")
     p.add_argument("--out", default="docs/benchmarks")
     return p
@@ -95,7 +101,7 @@ def build_config(args: argparse.Namespace) -> dict:
         specs.append(_hnsw_spec(table, opclass))
     if args.index in ("diskann", "both"):
         specs.append(_diskann_spec(table, opclass))
-    return {
+    config = {
         "seed": args.seed,
         "n": args.n,
         "dim": args.dim,
@@ -106,6 +112,11 @@ def build_config(args: argparse.Namespace) -> dict:
         "table": table,
         "index_specs": specs,
     }
+    if args.hdf5:
+        config["hdf5_path"] = args.hdf5
+        # label = filename stem (e.g. glove-25-angular.hdf5 -> glove-25-angular)
+        config["dataset_label"] = os.path.splitext(os.path.basename(args.hdf5))[0]
+    return config
 
 
 def main(argv=None) -> int:
@@ -122,7 +133,9 @@ def main(argv=None) -> int:
             f"{r['index']:6} {r['params']:14} recall@{report['k']}={r['recall_at_k']:.4f} "
             f"qps={r['qps']:.1f} p95={r['p95']:.3f}ms build={r['build_ms']:.0f}ms size={r['index_bytes']}B"
         )
-    print(f"report -> {args.out}/{report['date']}-pgvector-{report['metric']}.json")
+    from .harness import artifact_stem
+
+    print(f"report -> {args.out}/{artifact_stem(report)}.json")
     return 0
 
 
