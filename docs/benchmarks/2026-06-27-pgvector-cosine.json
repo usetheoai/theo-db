@@ -1,0 +1,80 @@
+{
+  "sha": "0297a97",
+  "date": "2026-06-27",
+  "seed": 42,
+  "n": 5000,
+  "dim": 128,
+  "n_queries": 100,
+  "k": 10,
+  "metric": "cosine",
+  "runs": 3,
+  "host": "paulohenriquevn",
+  "methodology": "index-forced (SET enable_seqscan=off, assert_index_used); recall is distance-thresholded (ANN-Benchmarks) vs exact float32 brute-force ground-truth; QPS = 1/best-of-N mean per-query latency (warm)",
+  "results": [
+    {
+      "index": "hnsw",
+      "params": "ef_search=40",
+      "recall_at_k": 0.7099999999999999,
+      "qps": 1290.682739693766,
+      "build_ms": 2239.5994670005166,
+      "index_bytes": 4169728,
+      "p50": 0.8489925021422096,
+      "p95": 1.4760132999072093,
+      "p99": 1.9447470713930668,
+      "mean": 0.8970367802248802,
+      "std": 0.2912812301696932
+    },
+    {
+      "index": "hnsw",
+      "params": "ef_search=100",
+      "recall_at_k": 0.9440000000000002,
+      "qps": 587.2283252950889,
+      "build_ms": 2239.5994670005166,
+      "index_bytes": 4169728,
+      "p50": 1.6658230015309528,
+      "p95": 2.7071646989497826,
+      "p99": 3.5052842245204356,
+      "mean": 1.7495742466417141,
+      "std": 0.5369411891521738
+    },
+    {
+      "index": "diskann",
+      "params": "sls=100",
+      "recall_at_k": 0.629,
+      "qps": 430.93878834955893,
+      "build_ms": 5323.539741002605,
+      "index_bytes": 2433024,
+      "p50": 2.2653104970231652,
+      "p95": 3.866931354787085,
+      "p99": 5.435668614736639,
+      "mean": 2.48051264982981,
+      "std": 0.7673994086987816
+    },
+    {
+      "index": "diskann",
+      "params": "sls=500",
+      "recall_at_k": 0.916,
+      "qps": 178.39111052182005,
+      "build_ms": 5323.539741002605,
+      "index_bytes": 2433024,
+      "p50": 5.107616998429876,
+      "p95": 11.342913499902352,
+      "p99": 14.973828498987114,
+      "mean": 5.989007950071634,
+      "std": 2.606466901483218
+    },
+    {
+      "index": "diskann",
+      "params": "sls=1000",
+      "recall_at_k": 0.916,
+      "qps": 140.96162761263625,
+      "build_ms": 5323.539741002605,
+      "index_bytes": 2433024,
+      "p50": 7.708567998633953,
+      "p95": 15.336203251354169,
+      "p99": 17.25879386285669,
+      "mean": 8.4671835568588,
+      "std": 3.369540677146008
+    }
+  ]
+}

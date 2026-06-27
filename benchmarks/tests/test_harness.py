@@ -119,3 +119,21 @@ def test_cli_parses_args():
     assert args.k == 3
     cfg = build_config(args)
     assert cfg["seed"] == 7 and cfg["k"] == 3 and cfg["metric"] == "cosine"
+
+
+def test_build_config_hnsw_only_by_default():
+    cfg = build_config(build_parser().parse_args([]))
+    assert [s["name"] for s in cfg["index_specs"]] == ["hnsw"]
+
+
+def test_build_config_diskann_only():
+    cfg = build_config(build_parser().parse_args(["--index", "diskann"]))
+    specs = cfg["index_specs"]
+    assert [s["name"] for s in specs] == ["diskann"]
+    assert "USING diskann" in specs[0]["ddl"]
+    assert any("diskann.query_search_list_size" in s for sw in specs[0]["sweep"] for s in sw["session"])
+
+
+def test_build_config_both_indexes():
+    cfg = build_config(build_parser().parse_args(["--index", "both"]))
+    assert [s["name"] for s in cfg["index_specs"]] == ["hnsw", "diskann"]

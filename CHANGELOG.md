@@ -14,6 +14,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **M2 DoD-2 — índice ANN avançado StreamingDiskANN** (`pgvectorscale` 0.9.0) na imagem oficial via **build multi-stage** (Rust/cargo-pgrx só no estágio builder; runtime cresce ~2 MB → 445 MB, **sem toolchain Rust**). `CREATE EXTENSION vectorscale CASCADE` + `CREATE INDEX … USING diskann` funcionam (planner usa o índice). Harness estendido (`--index hnsw|diskann|both`) mede a **curva recall×QPS** dos dois. **Decisão de índice por evidência** em `docs/decisions/m2-index-decision.md`: em dataset sintético gaussiano, HNSW domina a fronteira recall×QPS e DiskANN/SBQ comprime o índice (−42%, 2.43 MB vs 4.17 MB), mas isso é **artefato de dados** (SBQ é p/ embeddings reais; em gaussiano random precisa de `search_list_size` muito maior — alcança 0.97 a sls=2000) → **decisão final deferida a um benchmark de dataset real** (honesto, measurement-first ADR 0002). **D3 honrado** (pgvectorscale as-is, commit `57c88b7` pinado — base do CI-de-rebase; sem fork). M0 preservado (`smoke.sh` → SMOKE PASSED). 47 testes verde (unit + integração contra container), coverage 98%, `ruff` limpo.
+
 ### Changed
 
 ### Deprecated

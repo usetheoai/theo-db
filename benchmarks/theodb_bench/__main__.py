@@ -20,6 +20,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--k", type=int, default=10)
     p.add_argument("--metric", choices=["l2", "cosine"], default="l2")
     p.add_argument("--runs", type=int, default=3)
+    p.add_argument(
+        "--index",
+        choices=["hnsw", "diskann", "both"],
+        default="hnsw",
+        help="which index(es) to benchmark (diskann requires the vectorscale extension)",
+    )
     p.add_argument("--dsn", default=None, help="libpq DSN (else built from PG* env vars)")
     p.add_argument("--out", default="docs/benchmarks")
     return p
@@ -35,22 +41,51 @@ def _dsn_from_env() -> str:
     )
 
 
+def _hnsw_spec(table: str, opclass: str) -> dict:
+    # Force the index on so we measure the index, not the planner's seqscan choice on small/medium N
+    # — this is the pgvector recall-test methodology (blueprint §Integration).
+    return {
+        "name": "hnsw",
+        "index_name": "bench_hnsw",
+        "ddl": f"CREATE INDEX bench_hnsw ON {table} USING hnsw (embedding {opclass})",
+        "sweep": [
+            {"label": "ef_search=40", "session": ["SET enable_seqscan = off", "SET hnsw.ef_search = 40"]},
+            {"label": "ef_search=100", "session": ["SET enable_seqscan = off", "SET hnsw.ef_search = 100"]},
+        ],
+    }
+
+
+def _diskann_spec(table: str, opclass: str) -> dict:
+    # pgvectorscale StreamingDiskANN; query_search_list_size (+ query_rescore) trade recall for speed.
+    # The sweep spans a wide range because SBQ quantization needs a larger candidate list than HNSW's
+    # ef_search to reach equivalent recall on non-clustered data (measured: synthetic gaussian needs
+    # sls up to ~1000-2000; real embedding distributions reach high recall at far lower sls).
+    def _sw(sls: int) -> dict:
+        return {
+            "label": f"sls={sls}",
+            "session": [
+                "SET enable_seqscan = off",
+                f"SET diskann.query_search_list_size = {sls}",
+                f"SET diskann.query_rescore = {min(sls, 500)}",
+            ],
+        }
+
+    return {
+        "name": "diskann",
+        "index_name": "bench_diskann",
+        "ddl": f"CREATE INDEX bench_diskann ON {table} USING diskann (embedding {opclass})",
+        "sweep": [_sw(100), _sw(500), _sw(1000)],
+    }
+
+
 def build_config(args: argparse.Namespace) -> dict:
     opclass = _OPCLASS[args.metric]
     table = "bench_vectors"
-    specs = [
-        {
-            "name": "hnsw",
-            "index_name": "bench_hnsw",
-            "ddl": f"CREATE INDEX bench_hnsw ON {table} USING hnsw (embedding {opclass})",
-            # Force the index on so we measure the index, not the planner's seqscan choice on
-            # small/medium N — this is the pgvector recall-test methodology (blueprint §Integration).
-            "sweep": [
-                {"label": "ef_search=40", "session": ["SET enable_seqscan = off", "SET hnsw.ef_search = 40"]},
-                {"label": "ef_search=100", "session": ["SET enable_seqscan = off", "SET hnsw.ef_search = 100"]},
-            ],
-        }
-    ]
+    specs = []
+    if args.index in ("hnsw", "both"):
+        specs.append(_hnsw_spec(table, opclass))
+    if args.index in ("diskann", "both"):
+        specs.append(_diskann_spec(table, opclass))
     return {
         "seed": args.seed,
         "n": args.n,
