@@ -8,8 +8,8 @@
     "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/scripts/statusline.sh\""
   },
   "permissions": {
-    "_comment_yolo_": "YOLO mode (2026-06-26, owner-directed): zero permission prompts for normal work. deny holds ONLY critical git commands (Unbreakable Rule 4). bypassPermissions is intentionally NOT used because it would ignore this deny list. Note: hooks/validate-command.sh + hooks/boundary-check.sh still independently enforce git-critical, rm-rf-on-system-paths, the references/tools read-only boundary, and the no-Co-Authored-By policy regardless of these permissions.",
-    "defaultMode": "acceptEdits",
+    "_comment_yolo_": "FULL YOLO (2026-06-26, owner-directed): defaultMode bypassPermissions = zero prompts for EVERY tool (bash, file ops, web, MCP, all). IMPORTANT: under bypassPermissions the allow/deny lists below are NOT consulted by the permission engine — they are kept only as documentation of intent. Git-critical commands, commit-to-main, rm-rf on system paths, the knowledge-base/references|tools read-only boundary, and the no-Co-Authored-By policy remain ENFORCED by hooks/validate-command.sh + hooks/boundary-check.sh, which run regardless of permission mode. Net effect: everything runs with no confirmation EXCEPT what those hooks block. The CLI may prompt once to accept dangerous mode.",
+    "defaultMode": "bypassPermissions",
     "allow": [
       "Bash(*)",
       "Read",

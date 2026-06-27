@@ -1,0 +1,10 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "integration: requires a running theo-db:dev container (pgvector)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

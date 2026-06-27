@@ -1,0 +1,6 @@
+# TheoDB vector recall@k benchmark harness — dependencies (dev/CI tooling, NOT shipped in theo-db image).
+# CVE-check: pip-audit -r requirements.txt  (clean as of 2026-06-27). Licenses: numpy BSD-3, pytest MIT,
+# psycopg2 LGPL-with-linking-exception (dev-only — D1 distribution constraint does not apply; see plan § Dependencies).
+numpy>=1.26
+psycopg2-binary>=2.9
+pytest>=7

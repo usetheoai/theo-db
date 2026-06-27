@@ -4,6 +4,11 @@ Source of truth for cycle contracts, golden rules, thresholds, and allowlists.
 Every cycle reads its contract from here; every quality gate references a golden
 rule file.
 
+> **Product north-star (estratégia):** TheoDB busca ser **igual ou superior ao AlloyDB** para usuários
+> OSS/on-prem (Opção α — measurement-first). Fonte de verdade LOCKED:
+> [`docs/adr/0002-north-star-equal-or-superior-to-alloydb.md`](../../docs/adr/0002-north-star-equal-or-superior-to-alloydb.md).
+> Estes arquivos de regra definem *como* trabalhamos (contratos de ciclo); o *o quê* estratégico vive no ADR.
+
 ## Cycle Contracts
 
 Each `cycle-{name}.md` defines:

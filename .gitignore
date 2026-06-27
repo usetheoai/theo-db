@@ -7,3 +7,18 @@
 
 # Cycle runtime artifacts (regenerated per run; not source)
 .claude/knowledge-base/implementations/.progress-*.json
+
+# SOTA reference peers cloned by /roadmap-init — local study material (640M+),
+# reproducible via the clone commands in references-catalog.md. Not project source.
+.claude/knowledge-base/references/*/
+
+# Compaction snapshots written by precompact-preserve.sh (runtime artifacts)
+.claude/.compaction-snapshots/
+
+# Python bytecode (global)
+__pycache__/
+*.pyc
+
+# Coverage + pytest artifacts
+.coverage
+.pytest_cache/

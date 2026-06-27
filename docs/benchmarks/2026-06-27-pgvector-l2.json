@@ -1,0 +1,41 @@
+{
+  "sha": "651bf65",
+  "date": "2026-06-27",
+  "seed": 42,
+  "n": 5000,
+  "dim": 128,
+  "n_queries": 100,
+  "k": 10,
+  "metric": "l2",
+  "runs": 3,
+  "host": "paulohenriquevn",
+  "methodology": "index-forced (SET enable_seqscan=off, assert_index_used); recall is distance-thresholded (ANN-Benchmarks) vs exact float32 brute-force ground-truth; QPS = 1/best-of-N mean per-query latency (warm)",
+  "results": [
+    {
+      "index": "hnsw",
+      "params": "ef_search=40",
+      "recall_at_k": 0.8420000000000003,
+      "qps": 1963.9297569190053,
+      "build_ms": 1209.9336090032011,
+      "index_bytes": 4169728,
+      "p50": 0.5366139994293917,
+      "p95": 0.9229332496033749,
+      "p99": 1.1360626949317516,
+      "mean": 0.5881684569370312,
+      "std": 0.15363423174190421
+    },
+    {
+      "index": "hnsw",
+      "params": "ef_search=100",
+      "recall_at_k": 0.9560000000000002,
+      "qps": 1727.5529163829133,
+      "build_ms": 1209.9336090032011,
+      "index_bytes": 4169728,
+      "p50": 0.6775765032216441,
+      "p95": 0.9927092483849267,
+      "p99": 1.2208294627635041,
+      "mean": 0.6870786433622319,
+      "std": 0.18663704328372774
+    }
+  ]
+}
