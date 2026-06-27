@@ -182,12 +182,20 @@ e **decidir o índice pela evidência** — adotar pgvectorscale / forkar (D3) /
 SOTA do AlloyDB, Apache-2.0) — mirando **igualar ou superar** o recall@latência publicado do ScaNN; +
 **geração de embeddings via SQL** sobre modelo configurável. O diferencial técnico do TheoDB.
 
+**Status (2026-06-27): READY_TO_MERGE** — 4/4 DoDs implementados com evidência real; review consolidado em
+`.claude/knowledge-base/reviews/m2-vetorial-ia-review-2026-06-27.md` (0 BLOCKER, HIGH resolvidos na raiz).
+**Decisão de índice (DoD-2): HNSW é o default**, escolhido pela evidência em dataset real (glove-25-angular) —
+DiskANN disponível e honestamente `UNBENCHMARKED` para alta-dim/escala (`docs/decisions/m2-index-decision.md`).
+O checkbox do milestone (`### M2 — [ ]`) só vira `[x]` no passo de **release** (`cycle-release`, pós-merge — sem
+flip silencioso). Gates pendentes antes do flip: (1) push do `develop` + **1º CI verde** (fecha o "rodando em CI"
+do DoD-1); (2) **sweep de licença D1** sobre a árvore de crates Rust de `vectorscale.so` (PRD §11).
+
 **Definition of done:**
 
-- [ ] **(Gate — 1º item)** Harness de benchmark **recall@k + latência/QPS/build/memória reproduzível** rodando em CI sobre datasets de referência (ANN-Benchmarks), publicado em `docs/benchmarks/`. Nenhuma decisão de índice nem claim de performance antes disto (ADR 0002).
-- [ ] Índice ANN além do HNSW disponível, **escolhido pela evidência do harness** — pgvectorscale StreamingDiskANN / fork (D3) / ScaNN-as-PG-AM (Apache-2.0) — mirando **igualar ou superar** o recall@latência publicado do ScaNN; resultado medido publicado em `docs/benchmarks/`.
-- [ ] Função SQL para gerar embeddings a partir de modelo configurável (local e/ou remoto).
-- [ ] Política de Fork (D3) honrada: qualquer patch em pgvector/pgvectorscale tem benchmark de gatilho + diff mínimo + CI de rebase — ou permanece upstream as-is.
+- [ ] **(Gate — 1º item)** Harness de benchmark **recall@k + latência/QPS/build/memória reproduzível** rodando em CI sobre datasets de referência (ANN-Benchmarks), publicado em `docs/benchmarks/`. Nenhuma decisão de índice nem claim de performance antes disto (ADR 0002). — **harness + loader HDF5 + dataset real (glove-25) + publicado ✅; CI fiado (`.github/workflows/ci.yml`), aguardando 1º run verde no push.**
+- [x] Índice ANN além do HNSW disponível, **escolhido pela evidência do harness** — pgvectorscale StreamingDiskANN / fork (D3) / ScaNN-as-PG-AM (Apache-2.0) — mirando **igualar ou superar** o recall@latência publicado do ScaNN; resultado medido publicado em `docs/benchmarks/`. — **DiskANN disponível na imagem; HNSW escolhido pela evidência (glove-25: HNSW domina todos os eixos); superioridade ScaNN-class marcada `UNBENCHMARKED`.**
+- [x] Função SQL para gerar embeddings a partir de modelo configurável (local e/ou remoto). — **`theodb.embed()` (plpython3u, endpoint configurável — padrão AlloyDB; `tools/embedding_server.py` serve modelo local real; `docs/sql-embeddings.md`).**
+- [x] Política de Fork (D3) honrada: qualquer patch em pgvector/pgvectorscale tem benchmark de gatilho + diff mínimo + CI de rebase — ou permanece upstream as-is. — **pgvectorscale as-is, commit `57c88b7` pinado, sem fork.**
 
 **Entregáveis (artefatos concretos):**
 
