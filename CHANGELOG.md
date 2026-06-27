@@ -14,7 +14,21 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- **Harness de benchmark vetorial** `benchmarks/theodb_bench` — o **gate measurement-first do M2** (ADR 0002). Mede **recall@k** (semântica distance-thresholded do ANN-Benchmarks, não id-overlap), **latência p50/p95/p99**, **QPS** (best-of-N), **build-time** e **tamanho de índice** de um índice `pgvector` contra o container `theo-db:dev`, com **ground-truth brute-force exato** e **dataset seedado** (reprodutível); emite relatório JSON+markdown em `docs/benchmarks/`. Pirâmide de teste: 36 testes (unit puro + integração contra container real), coverage 98% (recall/metrics 100%), `ruff` limpo. Adapter `db.py` isola o driver (DIP); `psycopg2` é dev-only (não vai na imagem distribuída — D1 N/A). **Primeira evidência medida** (`docs/benchmarks/2026-06-27-pgvector-l2.json`, seed=42 n=5000 dim=128, números exatos por-run no JSON sha-stamped): HNSW recall@10 **~0.84** (ef_search=40) e **~0.96** (ef_search=100) — recall estável a menos da pequena variância de build paralelo do HNSW; QPS na faixa de ~1.7k–3.7k single-thread best-of-N (curva recall×QPS completa no JSON, varia com a carga da máquina). Converte o `UNBENCHMARKED` do pgvector em número reproduzível e destrava a decisão de índice + o gatilho de fork D3.
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.1.0] - 2026-06-27
+
+### Added
+
+- **Harness de benchmark vetorial** `benchmarks/theodb_bench` — o **gate measurement-first do M2** (ADR 0002). Mede **recall@k** (semântica distance-thresholded do ANN-Benchmarks, não id-overlap), **latência p50/p95/p99**, **QPS** (best-of-N), **build-time** e **tamanho de índice** de um índice `pgvector` contra o container `theo-db:dev`, com **ground-truth brute-force exato** e **dataset seedado** (reprodutível); emite relatório JSON+markdown em `docs/benchmarks/`. Pirâmide de teste: 42 testes (unit puro + integração contra container real), coverage 98% (recall/metrics/dataset 100%), `ruff` limpo. Adapter `db.py` isola o driver (DIP); `psycopg2` é dev-only (não vai na imagem distribuída — D1 N/A). **Primeira evidência medida** (`docs/benchmarks/2026-06-27-pgvector-l2.json`, seed=42 n=5000 dim=128, números exatos por-run no JSON sha-stamped): HNSW recall@10 **~0.84** (ef_search=40) e **~0.96** (ef_search=100) — recall estável a menos da pequena variância de build paralelo do HNSW; QPS na faixa de ~1.7k–3.7k single-thread best-of-N (curva recall×QPS completa no JSON, varia com a carga da máquina). Converte o `UNBENCHMARKED` do pgvector em número reproduzível e destrava a decisão de índice + o gatilho de fork D3.
 
 - M0 Walking Skeleton: `Dockerfile` — imagem `postgres:17-bookworm` com `pgvector v0.8.3` (Apache 2.0) compilado via `make OPTFLAGS=""` (binário portátil, sem `-march=native`); `HEALTHCHECK pg_isready` para sinalização automática de saúde do container.
 - M0 Walking Skeleton: `smoke.sh` — smoke test automatizado que executa `pg_isready` (loop 10×1s), `CREATE EXTENSION IF NOT EXISTS vector` e `SELECT '[1,2,3]'::vector <=> '[4,5,6]'::vector` via `psql -v ON_ERROR_STOP=1`; imprime `SMOKE PASSED` e encerra com exit 0.
@@ -34,15 +48,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - README inicial (`README.md`): posicionamento orientado a outcome, público-alvo, seção "como funciona" e roadmap macro de milestones (M0–M9).
 - Seção de Referências no README: whitepaper ScaNN for AlloyDB (pesquisa aplicada do concorrente) e 24 papers seminais verificados, agrupados por pilar — vetorial/ANN (ScaNN, HNSW, DiskANN, Product Quantization, Faiss), embeddings/busca híbrida/reranking (Sentence-BERT, DPR, ColBERT, RRF, BEIR), text-to-SQL e segurança (Spider, BIRD, Indirect Prompt Injection), columnar/HTAP (C-Store, MonetDB/X100, HyPer, Citus), replicação/HA/DR (Raft, ARIES, Aurora, Spanner) e auto-tuning (Learned Indexes, OtterTune, AutoAdmin, Database Cracking).
 
-### Security
-
-- M0 Walking Skeleton: `Dockerfile` — base image fixada ao digest imutável `postgres:17-bookworm@sha256:17b6c778...` (H-1); garante que re-builds futuros não consumam silenciosamente uma imagem diferente caso o tag seja remapeado no Docker Hub.
-- M0 Walking Skeleton: `Dockerfile` — pgvector referenciado pelo commit SHA imutável `#586e7515...` em vez da tag mutável `#v0.8.3` (H-2); elimina risco de `git tag -f` no upstream substituir a fonte na próxima build.
-
-### Fixed
-
-- `.claude/rules/discover-plan-thresholds.txt` — migrado do formato `band.x = N` (equals) para o formato canônico pipe-delimitado que `run_discover_plan_score.py` realmente lê (split `|`). O formato errado deixava as bandas vazias e colapsava o verdict de `/discover-plan-confidence` para INVALID independente do score; agora SHIPPABLE/CAVEATS/NEEDS_REVISION/INVALID resolvem corretamente.
-- `.claude/skills/plan-confidence/scripts/check_evidence_citations.py` — `_scan_blueprint_refs` passa a procurar blueprints também sob `.claude/knowledge-base/discoveries/blueprints/` (antes só `knowledge-base/...`), espelhando o `_resolve_rule_file`. Sem isso, qualquer citação `Blueprint §X` num plano resolvia como fabricada (hard cap INVALID) neste layout `.claude/`.
 
 ### Changed
 
@@ -54,3 +59,15 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - PRD §7/§8 (pilares P2/P3): P2 passa a citar `pgvector` + `pgvectorscale`; P3 passa de "columnar in-memory" para columnar DuckDB-powered permissivo (alinhado às decisões D2/D3).
 - PRD D3 (§6/§13): adicionada **Política de Fork** — fork de `pgvector`/`pgvectorscale` autorizado quando houver avanço mensurável, sob contrato (upstream-first, gatilho por benchmark, diff mínimo, CI de rebase contínuo, desfazer quando o upstream alcançar). A regra "sem fork" segue valendo só para o engine PostgreSQL.
 - README (Licença): de "a definir" para Apache 2.0 com link para `LICENSE`.
+
+### Fixed
+
+- `.claude/rules/discover-plan-thresholds.txt` — migrado do formato `band.x = N` (equals) para o formato canônico pipe-delimitado que `run_discover_plan_score.py` realmente lê (split `|`). O formato errado deixava as bandas vazias e colapsava o verdict de `/discover-plan-confidence` para INVALID independente do score; agora SHIPPABLE/CAVEATS/NEEDS_REVISION/INVALID resolvem corretamente.
+- `.claude/skills/plan-confidence/scripts/check_evidence_citations.py` — `_scan_blueprint_refs` passa a procurar blueprints também sob `.claude/knowledge-base/discoveries/blueprints/` (antes só `knowledge-base/...`), espelhando o `_resolve_rule_file`. Sem isso, qualquer citação `Blueprint §X` num plano resolvia como fabricada (hard cap INVALID) neste layout `.claude/`.
+
+
+### Security
+
+- M0 Walking Skeleton: `Dockerfile` — base image fixada ao digest imutável `postgres:17-bookworm@sha256:17b6c778...` (H-1); garante que re-builds futuros não consumam silenciosamente uma imagem diferente caso o tag seja remapeado no Docker Hub.
+- M0 Walking Skeleton: `Dockerfile` — pgvector referenciado pelo commit SHA imutável `#586e7515...` em vez da tag mutável `#v0.8.3` (H-2); elimina risco de `git tag -f` no upstream substituir a fonte na próxima build.
+
