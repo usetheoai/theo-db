@@ -125,3 +125,47 @@ jobs:
       - name: Teardown
         if: always()
         run: docker rm -f theo-db-ci || true
+
+  migration-smoke:
+    # M3 DoD-1/DoD-2: standard pg_dump/pg_restore migration from a vanilla pgvector source into TheoDB,
+    # asserting data + indexes are preserved. Every step here has been run locally first.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build TheoDB image (cache from image-and-bench)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          tags: theo-db:dev
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Start source (vanilla pgvector) + target (TheoDB)
+        run: |
+          docker run -d --name m3-src -e POSTGRES_PASSWORD=postgres pgvector/pgvector:pg17
+          docker run -d --name m3-dst -e POSTGRES_PASSWORD=postgres theo-db:dev
+          for c in m3-src m3-dst; do
+            for i in $(seq 1 30); do
+              docker exec "$c" pg_isready -U postgres -q && break
+              sleep 2
+            done
+            docker exec "$c" pg_isready -U postgres -q
+          done
+
+      - name: Guide ↔ smoke consistency (doc-check)
+        run: bash migrate-doc-check.sh
+
+      - name: Migration smoke (data + indexes preserved)
+        run: bash migrate-smoke.sh
+
+      - name: Self-test (checksum assert is not theatre)
+        run: bash migrate-smoke-selftest.sh
+
+      - name: Teardown
+        if: always()
+        run: docker rm -f m3-src m3-dst || true
