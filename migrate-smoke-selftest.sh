@@ -6,11 +6,15 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+SRC_CONTAINER="${SRC_CONTAINER:-m3-src}"
 DST_CONTAINER="${DST_CONTAINER:-m3-dst}"
 PW="${PW:-postgres}"
 DST_DB="${DST_DB:-migrate_smoke}"
 dst_psql() { docker exec -i -e PGPASSWORD="$PW" "$DST_CONTAINER" psql -U postgres -d "$1" -v ON_ERROR_STOP=1 "${@:2}"; }
-cleanup() { dst_psql postgres -c "DROP DATABASE IF EXISTS $DST_DB;" >/dev/null 2>&1 || true; }
+cleanup() {
+  dst_psql postgres -c "DROP DATABASE IF EXISTS $DST_DB WITH (FORCE);" >/dev/null 2>&1 || true
+  docker exec -i -e PGPASSWORD="$PW" "$SRC_CONTAINER" psql -U postgres -d postgres -c "DROP TABLE IF EXISTS items;" >/dev/null 2>&1 || true
+}
 trap cleanup EXIT
 
 echo "[selftest] 1/3 — run a real migration, keep source table + target db"

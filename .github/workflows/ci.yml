@@ -145,22 +145,17 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Start source (vanilla pgvector) + target (TheoDB)
+      - name: Start source (vanilla pgvector, pinned by digest) + target (TheoDB)
         run: |
-          docker run -d --name m3-src -e POSTGRES_PASSWORD=postgres pgvector/pgvector:pg17
+          # pinned by digest for reproducibility, consistent with the repo's supply-chain policy
+          docker run -d --name m3-src -e POSTGRES_PASSWORD=postgres \
+            pgvector/pgvector@sha256:be400b50812ab2cc908ed78593fda2e51e3b45fe774fa637f1c7b16e68531d95
           docker run -d --name m3-dst -e POSTGRES_PASSWORD=postgres theo-db:dev
-          for c in m3-src m3-dst; do
-            for i in $(seq 1 30); do
-              docker exec "$c" pg_isready -U postgres -q && break
-              sleep 2
-            done
-            docker exec "$c" pg_isready -U postgres -q
-          done
 
       - name: Guide ↔ smoke consistency (doc-check)
         run: bash migrate-doc-check.sh
 
-      - name: Migration smoke (data + indexes preserved)
+      - name: Migration smoke (data + indexes preserved; waits for readiness internally)
         run: bash migrate-smoke.sh
 
       - name: Self-test (checksum assert is not theatre)

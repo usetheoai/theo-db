@@ -7,7 +7,13 @@ GUIDE="$HERE/docs/migration/minimal-migration.md"
 SMOKE="$HERE/migrate-smoke.sh"
 
 # literal (grep -F) shared commands — the load-bearing migration + verification primitives
-SHARED=("pg_dump -Fc" "pg_restore --no-owner" "md5(string_agg(embedding::text, ',' ORDER BY id))" "USING hnsw" "USING ivfflat")
+SHARED=(
+  "pg_dump -Fc"
+  "pg_restore --no-owner --exit-on-error"
+  "md5(string_agg(id::text || '|' || title || '|' || embedding::text, ',' ORDER BY id))"
+  "USING hnsw"
+  "USING ivfflat"
+)
 
 fail=0
 for cmd in "${SHARED[@]}"; do
