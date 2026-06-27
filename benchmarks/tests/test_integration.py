@@ -89,8 +89,9 @@ def test_harness_measures_diskann(db, tmp_path):
     diskann = [r for r in report["results"] if r["index"] == "diskann"]
     assert diskann, "harness produced no diskann results"
     assert all(0.0 <= r["recall_at_k"] <= 1.0 and r["qps"] > 0 for r in diskann)
-    # at high sls on low dim, diskann/SBQ reaches high recall (the curve climbs with sls)
-    assert max(r["recall_at_k"] for r in diskann) >= 0.80
+    # at high sls on low dim, diskann/SBQ reaches high recall (rescore scales with sls up to the
+    # engine ceiling, so the curve climbs to the plan's >= 0.90 acceptance bound)
+    assert max(r["recall_at_k"] for r in diskann) >= 0.90
 
 
 def test_hnsw_recall_is_high_vs_exact(db, tmp_path):

@@ -56,17 +56,26 @@ def _hnsw_spec(table: str, opclass: str) -> dict:
 
 
 def _diskann_spec(table: str, opclass: str) -> dict:
-    # pgvectorscale StreamingDiskANN; query_search_list_size (+ query_rescore) trade recall for speed.
-    # The sweep spans a wide range because SBQ quantization needs a larger candidate list than HNSW's
-    # ef_search to reach equivalent recall on non-clustered data (measured: synthetic gaussian needs
-    # sls up to ~1000-2000; real embedding distributions reach high recall at far lower sls).
+    # pgvectorscale StreamingDiskANN. Two knobs trade recall for speed:
+    #   - query_search_list_size (sls): SBQ-approximate candidate list size
+    #   - query_rescore: how many candidates get re-ranked with exact full-precision vectors
+    # We scale rescore WITH sls (rescore == min(sls, engine-max 1000)) so the recall×QPS Pareto curve
+    # is honest: freezing rescore at an arbitrary 500 below sls (an earlier bug) capped recall while QPS
+    # still fell, manufacturing a fake plateau. pgvectorscale's hard ceiling for query_rescore is 1000;
+    # tying rescore to sls up to that ceiling is the symmetric sweep — every point measures a real
+    # (recall, QPS) pair, including the high-recall top of the curve (sls=2000 reaches rescore=1000).
+    # SBQ needs a larger candidate list than HNSW's ef_search on non-clustered data (synthetic gaussian:
+    # sls up to ~2000; real embedding distributions reach high recall at far lower sls).
+    _RESCORE_MAX = 1000  # pgvectorscale diskann.query_rescore valid range is 0..1000
+
     def _sw(sls: int) -> dict:
+        rescore = min(sls, _RESCORE_MAX)
         return {
-            "label": f"sls={sls}",
+            "label": f"sls={sls},rescore={rescore}",
             "session": [
                 "SET enable_seqscan = off",
                 f"SET diskann.query_search_list_size = {sls}",
-                f"SET diskann.query_rescore = {min(sls, 500)}",
+                f"SET diskann.query_rescore = {rescore}",
             ],
         }
 
@@ -74,7 +83,7 @@ def _diskann_spec(table: str, opclass: str) -> dict:
         "name": "diskann",
         "index_name": "bench_diskann",
         "ddl": f"CREATE INDEX bench_diskann ON {table} USING diskann (embedding {opclass})",
-        "sweep": [_sw(100), _sw(500), _sw(1000)],
+        "sweep": [_sw(100), _sw(500), _sw(1000), _sw(2000)],
     }
 
 
