@@ -16,6 +16,8 @@
 
 **Tese central:** o AlloyDB Omni provou que existe demanda por "PostgreSQL + IA + analytics empacotados, rodando em qualquer lugar" — mas ele é **proprietário e pago ($40/vCPU/mês)**. O TheoDB ocupa exatamente essa lacuna sendo **100% open-source**, sem licença por vCPU, sem lock-in, com a mesma técnica de base (Postgres + extensões + pgvector customizado).
 
+**North Star (mandato do CTO, 2026-06-27):** TheoDB deve ser **igual ou superior ao AlloyDB** para usuários OSS/on-prem (Opção α — paridade de capacidades/resultados + superioridade estrutural OSS; superioridade de performance no pilar vetorial **comprovada por benchmark reproduzível**). Honra D1–D7: columnar (lakehouse, D2) e HA (Patroni) são apostas **diferentes e competitivas**, não cópias internas do AlloyDB (paridade interna *literal* exigiria reabrir D1/D2/D7). Fonte de verdade LOCKED: [`docs/adr/0002-north-star-equal-or-superior-to-alloydb.md`](./docs/adr/0002-north-star-equal-or-superior-to-alloydb.md).
+
 ---
 
 ## 2. Problema e oportunidade

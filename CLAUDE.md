@@ -54,6 +54,27 @@ quanto tempo investimos. São dois eixos independentes:
 
 ---
 
+## North Star — igualar ou superar o AlloyDB (Opção α)
+
+> **Mandato do CTO (2026-06-27):** entregar um banco **igual ou superior ao AlloyDB**. Fonte de verdade
+> LOCKED: [`docs/adr/0002-north-star-equal-or-superior-to-alloydb.md`](./docs/adr/0002-north-star-equal-or-superior-to-alloydb.md).
+
+**Como (Opção α):** igualar/superar o AlloyDB em **capacidades e resultados** para usuários
+OSS/on-prem/model-agnostic; **vencer já hoje** em abertura, custo, portabilidade e independência de modelo;
+buscar **superioridade de performance no pilar vetorial comprovada por benchmark** (`docs/benchmarks/`).
+
+- **Measurement-first:** o harness de recall@k reproduzível é o **1º item de M2** e pré-requisito de qualquer
+  claim de performance. Hoje não existe (tudo `UNBENCHMARKED`).
+- **Fork é condicional** ao benchmark de gatilho (D3); não forkar antes de medir (anti-sunk-cost).
+- **Columnar (lakehouse, D2) e HA (Patroni)** são apostas **diferentes e competitivas**, não cópias do
+  AlloyDB — forçado pela licença permissiva (D1 barra AGPL). Paridade interna *literal* (Opção β) exigiria
+  reabrir D1/D2/D7 — fora de escopo até novo ADR.
+- **Esforço ≠ Complexidade:** esforço alto é bem-vindo (ScaNN-as-PG-AM, fork com CI de rebase, suíte de
+  benchmark); o COMO é medir-depois-construir-o-essencial. Performance só vira claim com benchmark
+  (`../.claude/rules/public-copy.md`).
+
+---
+
 ## Regras específicas do TheoDB
 
 1. **Ancore no SOTA AlloyDB.** Decisões de produto/arquitetura espelham o alvo (AlloyDB) e

@@ -13,6 +13,16 @@ exigem montagem manual — sem licença por vCPU e sem lock-in.
 
 ---
 
+## Missão
+
+A missão do TheoDB é **igualar ou superar o AlloyDB** para quem roda OSS, on-premises e na borda —
+entregando as mesmas capacidades (busca vetorial/IA, analytics, operação) com **superioridade estrutural**
+em abertura, custo, portabilidade e **independência de modelo** (qualquer modelo local ou remoto, sem
+lock-in). Metas de performance são **metas comprovadas por benchmark reproduzível** em `docs/benchmarks/` —
+nunca afirmações sem evidência. Estratégia completa: [`docs/adr/0002-north-star-equal-or-superior-to-alloydb.md`](./docs/adr/0002-north-star-equal-or-superior-to-alloydb.md).
+
+---
+
 ## Por que TheoDB
 
 - **Open-source de verdade.** Sem licença por vCPU, sem open-core escondendo os recursos centrais. Auditável, customizável, contribuível.

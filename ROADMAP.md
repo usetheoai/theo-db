@@ -87,6 +87,21 @@ pulls/downloads da imagem, contribuidores externos, % de testes de compat Postgr
 
 ---
 
+## North Star — igualar ou superar o AlloyDB
+
+**Mandato (CTO, 2026-06-27):** TheoDB deve ser **igual ou superior ao AlloyDB** para usuários OSS/on-prem.
+Estratégia (Opção α) + doutrina measurement-first — fonte de verdade LOCKED em
+[`docs/adr/0002-north-star-equal-or-superior-to-alloydb.md`](docs/adr/0002-north-star-equal-or-superior-to-alloydb.md).
+
+- **Vetorial (pilar killer):** superioridade **comprovada por benchmark reproduzível** (`docs/benchmarks/`).
+  O **harness de recall é o 1º item de M2**; fork condicional ao gatilho (D3); o algoritmo ScaNN é Apache-2.0
+  (rota ScaNN-as-PG-AM aberta).
+- **Vencemos já em:** abertura, custo, portabilidade, independência de modelo.
+- **Apostas diferentes (não cópias):** columnar lakehouse (D2), HA Patroni (M4) — competitivas, forçadas pela
+  licença permissiva (D1 barra AGPL). Paridade interna *literal* = Opção β, exige reabrir D1/D2/D7 (novo ADR).
+
+---
+
 ## Milestones
 
 > Each milestone has a checkbox in its header. Flip `[ ]` → `[x]` as you complete it. Status lives in this document; no external tracker required.
@@ -161,20 +176,25 @@ pré-instaladas e a suíte de compatibilidade do upstream passando.
 
 ### M2 — [ ] Vetorial / IA (pilar killer) — MVP
 
-**Objective:** pgvector customizado (`pgvector` + `pgvectorscale`) com índice ANN avançado
-(StreamingDiskANN) + geração de embeddings via SQL — o diferencial técnico do TheoDB.
+**Objective:** Provar **superioridade vetorial com evidência** (ADR 0002, measurement-first): construir o
+**harness de benchmark recall@k/latência reproduzível** (gate), medir o baseline `pgvector`/`pgvectorscale`,
+e **decidir o índice pela evidência** — adotar pgvectorscale / forkar (D3) / **ScaNN-as-PG-AM** (mesmo núcleo
+SOTA do AlloyDB, Apache-2.0) — mirando **igualar ou superar** o recall@latência publicado do ScaNN; +
+**geração de embeddings via SQL** sobre modelo configurável. O diferencial técnico do TheoDB.
 
 **Definition of done:**
 
-- [ ] Índice ANN além do HNSW disponível (pgvectorscale StreamingDiskANN), com recall medido em dataset de referência e **benchmark reproduzível publicado** em `docs/benchmarks/`.
+- [ ] **(Gate — 1º item)** Harness de benchmark **recall@k + latência/QPS/build/memória reproduzível** rodando em CI sobre datasets de referência (ANN-Benchmarks), publicado em `docs/benchmarks/`. Nenhuma decisão de índice nem claim de performance antes disto (ADR 0002).
+- [ ] Índice ANN além do HNSW disponível, **escolhido pela evidência do harness** — pgvectorscale StreamingDiskANN / fork (D3) / ScaNN-as-PG-AM (Apache-2.0) — mirando **igualar ou superar** o recall@latência publicado do ScaNN; resultado medido publicado em `docs/benchmarks/`.
 - [ ] Função SQL para gerar embeddings a partir de modelo configurável (local e/ou remoto).
 - [ ] Política de Fork (D3) honrada: qualquer patch em pgvector/pgvectorscale tem benchmark de gatilho + diff mínimo + CI de rebase — ou permanece upstream as-is.
 
 **Entregáveis (artefatos concretos):**
 
-- `pgvector` + `pgvectorscale` na imagem; índice ANN avançado (StreamingDiskANN) criável via SQL.
+- **Harness de benchmark recall@k/latência reproduzível em CI (gate — 1º item)** publicado em `docs/benchmarks/`; nenhum claim/decisão de índice antes dele.
+- `pgvector` + `pgvectorscale` na imagem; índice ANN avançado **escolhido pela evidência do harness** (pgvectorscale StreamingDiskANN / fork D3 / ScaNN-as-PG-AM) criável via SQL.
 - Função SQL de geração de embeddings a partir de modelo configurável (local e/ou remoto).
-- Benchmark reproduzível de recall/latência publicado em `docs/benchmarks/` (ou marcador honesto `UNBENCHMARKED` até haver evidência).
+- Resultado de recall/latência publicado em `docs/benchmarks/` (ou marcador honesto `UNBENCHMARKED` até haver evidência).
 - Política de Fork (D3) honrada para qualquer patch em `pgvector`/`pgvectorscale`.
 
 **Documentação de especificação (API-alvo do TheoDB):**
@@ -226,6 +246,10 @@ pré-instaladas e a suíte de compatibilidade do upstream passando.
 ### M4 — [ ] Operação básica (HA + backup)
 
 **Objective:** Alta disponibilidade com failover automático (primary + standby) e backup contínuo + PITR.
+
+> **Aposta deliberada (ADR 0002):** HA clássica Patroni/pgBackRest — **não** o storage desagregado do AlloyDB.
+> Competitiva e adequada para OSS/on-prem (battle-tested, roda em qualquer lugar), **não** uma cópia interna.
+> Paridade de *arquitetura* de storage seria Opção β (exige reabrir D1/D2/D7 — fora de escopo).
 
 **Definition of done:**
 
@@ -322,6 +346,11 @@ rápido sobre dados transacionais vivos, com escolha de plano row vs colunar.
 **Objective:** Filtered vector search, hybrid search + reranking, NL → SQL seguro (views parametrizadas)
 e **funções de IA generativa em SQL** (geração de texto, classificação condicional, análise de sentimento,
 sumarização) sobre modelo configurável local/remoto.
+
+> **Sequência (ADR 0002):** **hybrid search (FTS+vector+RRF) primeiro** — puro OSS, win imediato.
+> **BM25 permissivo** é gap real (`pg_search` é AGPL → barrado por D1) → ganha **discovery própria** antes de
+> implementar. **Model-agnostic** (qualquer modelo local/remoto) é a alavanca de **superioridade** sobre o
+> lock-in Gemini do AlloyDB.
 
 **Definition of done:**
 
