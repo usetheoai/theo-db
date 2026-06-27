@@ -26,8 +26,9 @@ ANN-Benchmarks distance-thresholded recall semantics. The measurement-first gate
 - **Lint:** `ruff check benchmarks/` → All checks passed. **Dead code:** vulture clean.
 - **File size:** every module ≤ 500 (max 123).
 - **Runtime-metric proof (the gate):** real run produced `docs/benchmarks/2026-06-27-pgvector-l2.json`
-  with measured numbers — **HNSW recall@10 = 0.841 (ef_search=40) and 0.960 (ef_search=100)**, QPS ~1.8k–3.7k
-  single-thread, seed=42 n=5000 dim=128. Reproducible (seed + commit sha + host + methodology stamped in the report).
+  with measured numbers — **HNSW recall@10 ≈ 0.84 (ef_search=40) and ≈ 0.96 (ef_search=100)** (exact per-run in the
+  sha-stamped JSON; recall is stable modulo minor HNSW parallel-build variance), QPS ~1.7k–3.7k single-thread,
+  seed=42 n=5000 dim=128. Reproducible (seed + commit sha + host + methodology stamped in the report).
 
 ### Review fixes applied (cycle-review, 4 specialists — 0 BLOCKER, 2 HIGH closed)
 
