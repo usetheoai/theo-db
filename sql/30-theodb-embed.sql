@@ -35,6 +35,10 @@ if not endpoint:
         sqlstate="22023",
     )
 
+# SSRF hardening: only http(s); refuse file://, ftp://, gopher://, etc. (the GUC is session-settable).
+if not (endpoint.startswith("http://") or endpoint.startswith("https://")):
+    plpy.error("theodb.embed: endpoint must be http(s)://", sqlstate="22023")
+
 mdl = model or _cfg("theodb.embedding_model") or "default"
 api_key = _cfg("theodb.embedding_api_key")
 
@@ -44,23 +48,42 @@ req.add_header("Content-Type", "application/json")
 if api_key:
     req.add_header("Authorization", "Bearer " + api_key)
 
+# Do NOT follow redirects — a 30x to 169.254.169.254 (cloud metadata) or an internal host would be SSRF.
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+opener = urllib.request.build_opener(_NoRedirect)
 try:
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with opener.open(req, timeout=30) as resp:
         body = json.loads(resp.read())
-except urllib.error.URLError as e:
-    plpy.error("theodb.embed: embedding endpoint call failed: %s" % e)
+# URLError = DNS/refused/5xx; OSError = timeout (TimeoutError); ValueError = JSONDecodeError on a 200
+# with a non-JSON body. All fail loud + typed — never a silent NULL (Rule 8).
+except (urllib.error.URLError, OSError, ValueError) as e:
+    plpy.error("theodb.embed: embedding endpoint call failed: %s" % e, sqlstate="38000")
 
 try:
     vec = body["data"][0]["embedding"]
 except (KeyError, IndexError, TypeError) as e:
-    plpy.error("theodb.embed: unexpected embedding response shape (%s): %s" % (e, str(body)[:200]))
+    plpy.error(
+        "theodb.embed: unexpected embedding response shape (%s): %s" % (e, str(body)[:200]),
+        sqlstate="38000",
+    )
 
 if not vec:
-    plpy.error("theodb.embed: endpoint returned an empty embedding")
+    plpy.error("theodb.embed: endpoint returned an empty embedding", sqlstate="38000")
 
 return "[" + ",".join(str(float(x)) for x in vec) + "]"
 $$;
 
+-- Locked to privileged roles: the function makes server-side outbound HTTP (the configured endpoint),
+-- so it is NOT granted to PUBLIC. GRANT EXECUTE to a specific role to expose it.
+REVOKE ALL ON FUNCTION theodb.embed(text, text) FROM PUBLIC;
+
 COMMENT ON FUNCTION theodb.embed(text, text) IS
   'Generate an embedding for content via the configurable model endpoint (theodb.embedding_endpoint). '
-  'Returns a pgvector value. Model selectable per-call or via theodb.embedding_model GUC.';
+  'Returns a pgvector value. Model selectable per-call or via theodb.embedding_model GUC. '
+  'SECURITY: makes server-side outbound HTTP to the configured endpoint (http(s) only, no redirects); '
+  'not granted to PUBLIC. theodb.embedding_api_key is a session GUC (visible to SHOW / captured by '
+  'log_statement) — set it per-session out of band, not in logged DDL. CALL IS SYNCHRONOUS: one blocking '
+  'HTTP round-trip per row; do not embed large tables in a single statement (async/batch is future work).';

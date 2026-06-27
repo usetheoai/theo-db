@@ -26,6 +26,10 @@ def load_hdf5_subsample(
     Raises FileNotFoundError if the dataset is absent, ValueError if ``n``/``n_queries`` exceed
     the file's train/test sizes.
     """
+    if n < 1:
+        raise ValueError(f"n must be >= 1, got {n}")
+    if n_queries < 1:
+        raise ValueError(f"n_queries must be >= 1, got {n_queries}")
     if not Path(path).is_file():
         raise FileNotFoundError(f"HDF5 dataset not found: {path}")
     import h5py  # local import: only the real-dataset path needs h5py

@@ -9,6 +9,7 @@ import os
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 
@@ -107,3 +108,81 @@ def test_embed_without_endpoint_raises_typed_error(conn):
         with pytest.raises(psycopg2.errors.InvalidParameterValue) as exc:
             cur.execute("SELECT theodb.embed('x')")
     assert "embedding_endpoint is not set" in str(exc.value)
+
+
+def test_embed_null_content_raises_typed_error(conn, embed_server):
+    # negative: NULL content fails fast (22023), never a silent NULL embedding
+    with conn.cursor() as cur:
+        cur.execute("SET theodb.embedding_endpoint = %s", (embed_server,))
+        with pytest.raises(psycopg2.errors.InvalidParameterValue) as exc:
+            cur.execute("SELECT theodb.embed(NULL)")
+    assert "must not be NULL" in str(exc.value)
+
+
+def test_embed_non_http_scheme_rejected(conn):
+    # negative: SSRF hardening — a file:// (or any non-http) endpoint is refused, typed
+    with conn.cursor() as cur:
+        cur.execute("SET theodb.embedding_endpoint = 'file:///etc/passwd'")
+        with pytest.raises(psycopg2.errors.InvalidParameterValue) as exc:
+            cur.execute("SELECT theodb.embed('x')")
+    assert "http(s)" in str(exc.value)
+
+
+def test_embed_unreachable_endpoint_raises(conn):
+    # negative: connection refused → typed "call failed", not an uncaught traceback / silent NULL
+    with conn.cursor() as cur:
+        cur.execute("SET theodb.embedding_endpoint = 'http://host.docker.internal:1/v1/embeddings'")
+        with pytest.raises(psycopg2.errors.ExternalRoutineException) as exc:
+            cur.execute("SELECT theodb.embed('x')")
+    assert "call failed" in str(exc.value)
+
+
+@pytest.fixture(scope="module")
+def broken_server():
+    """Serves deliberately broken responses so the failure branches are exercised (negative cases)."""
+    import json as _json
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class H(BaseHTTPRequestHandler):
+        def log_message(self, *_a):
+            pass
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", 0))
+            self.rfile.read(length)
+            route = self.path.rstrip("/")
+            if route == "/empty":
+                payload = _json.dumps({"data": [{"embedding": []}]}).encode()
+            elif route == "/malformed":
+                payload = _json.dumps({"unexpected": "shape"}).encode()
+            else:  # /notjson
+                payload = b"this is not json"
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+    port = _free_port()
+    srv = ThreadingHTTPServer(("0.0.0.0", port), H)
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    try:
+        yield f"http://host.docker.internal:{port}"
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+@pytest.mark.parametrize("route,needle", [
+    ("/empty", "empty embedding"),
+    ("/malformed", "unexpected embedding response shape"),
+    ("/notjson", "call failed"),
+])
+def test_embed_bad_response_raises_typed_error(conn, broken_server, route, needle):
+    # negative: empty vector / wrong shape / non-JSON 200 all fail loud + typed 38000 (Rule 8)
+    with conn.cursor() as cur:
+        cur.execute("SET theodb.embedding_endpoint = %s", (broken_server + route,))
+        with pytest.raises(psycopg2.errors.ExternalRoutineException) as exc:
+            cur.execute("SELECT theodb.embed('x')")
+    assert needle in str(exc.value)

@@ -56,3 +56,10 @@ def test_load_hdf5_rejects_oversized_queries(tiny_hdf5):
 def test_load_hdf5_missing_file_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
         load_hdf5_subsample(str(tmp_path / "nope.hdf5"), n=10, n_queries=2, seed=42)
+
+
+@pytest.mark.parametrize("n,nq", [(0, 5), (-1, 5), (20, 0), (20, -3)])
+def test_load_hdf5_rejects_nonpositive(tiny_hdf5, n, nq):
+    # negative: non-positive sizes are a typed domain error (consistent with make_dataset)
+    with pytest.raises(ValueError, match=r"must be >= 1"):
+        load_hdf5_subsample(tiny_hdf5, n=n, n_queries=nq, seed=42)
