@@ -1,0 +1,125 @@
+name: CI
+
+# M2 DoD-1: the recall@k benchmark harness is the measurement-first gate. It runs in CI over a
+# real ANN-Benchmarks reference dataset (glove-25-angular), alongside the M0 smoke (pgvector) and
+# the M2 vectorscale/diskann integration. Every step here is one that has been run locally first.
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+
+jobs:
+  harness-unit:
+    # Fast, container-free: the recall math, ground-truth, metrics and HDF5 loader (DoD-1 gate logic).
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: benchmarks
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install harness deps
+        run: pip install -r requirements.txt ruff vulture
+      - name: Lint (ruff)
+        run: ruff check theodb_bench tests
+      - name: Dead-code (vulture)
+        run: vulture theodb_bench --min-confidence 80
+      - name: Unit tests (no container)
+        run: pytest -m "not integration" -q
+
+  image-and-bench:
+    # Builds the TheoDB image, proves M0 (smoke) + M2 vectorscale, then runs the benchmark harness
+    # in CI over the real glove-25-angular reference dataset (DoD-1) + the integration suite.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build TheoDB image (pgvector + pgvectorscale)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          tags: theo-db:ci
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Start TheoDB
+        run: |
+          docker run -d --name theo-db-ci -e POSTGRES_PASSWORD=postgres -p 5432:5432 theo-db:ci
+          for i in $(seq 1 30); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' theo-db-ci)" = healthy ] && break
+            sleep 2
+          done
+          docker inspect -f '{{.State.Health.Status}}' theo-db-ci | grep -q healthy
+
+      - name: Smoke (M0 — pgvector)
+        env:
+          PGPORT: "5432"
+        run: bash smoke.sh
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install harness deps
+        working-directory: benchmarks
+        run: pip install -r requirements.txt
+
+      - name: Cache ANN-Benchmarks dataset
+        id: cache-glove
+        uses: actions/cache@v4
+        with:
+          path: benchmarks/.datasets/glove-25-angular.hdf5
+          key: glove-25-angular-hdf5
+
+      - name: Fetch glove-25-angular (if not cached)
+        if: steps.cache-glove.outputs.cache-hit != 'true'
+        working-directory: benchmarks
+        run: |
+          mkdir -p .datasets
+          curl -sSL -o .datasets/glove-25-angular.hdf5 http://ann-benchmarks.com/glove-25-angular.hdf5
+          echo "51004cb0ae962159f0db507a51fec2b395de14b166f55976c89f16bd2f8b6391  .datasets/glove-25-angular.hdf5" | sha256sum -c -
+
+      - name: Benchmark gate — harness on real reference dataset (HNSW; capped for CI time)
+        working-directory: benchmarks
+        env:
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: postgres
+        # HNSW only + small subset keeps CI fast (a full diskann build on 50k takes ~2 min); the
+        # decision-grade diskann sweep is run out-of-CI and committed under docs/benchmarks/.
+        run: |
+          python -m theodb_bench --hdf5 .datasets/glove-25-angular.hdf5 --index hnsw \
+            --metric cosine --seed 42 --n 10000 --n-queries 200 --k 10 --runs 2 --out /tmp/bench
+          python - <<'PY'
+          import glob, json, sys
+          f = sorted(glob.glob("/tmp/bench/*glove-25-angular*.json"))[-1]
+          d = json.load(open(f))
+          r = max(x["recall_at_k"] for x in d["results"])
+          print(f"CI benchmark recall@10 (HNSW, glove-25, n=10k): {r:.4f}")
+          # HNSW on a real clustered dataset must recall high — guards against a silently broken gate.
+          sys.exit(0 if r >= 0.90 else 1)
+          PY
+
+      - name: Integration tests (vectorscale / diskann against the container)
+        working-directory: benchmarks
+        env:
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: postgres
+        run: pytest -m integration -q
+
+      - name: Teardown
+        if: always()
+        run: docker rm -f theo-db-ci || true
