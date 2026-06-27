@@ -110,7 +110,7 @@ Estratégia (Opção α) + doutrina measurement-first — fonte de verdade LOCKE
 > e adotar a doutrina walking-skeleton, M0 virou a fatia fina end-to-end e o antigo README-M8
 > (Escala & observabilidade) foi fundido com o README-M9 (Ecossistema & DX) no M8 abaixo.
 
-### M0 — [ ] Walking skeleton
+### M0 — [x] Walking skeleton
 
 **Objective:** Empacotar a fatia mais fina end-to-end que prova a arquitetura "PostgreSQL + extensões,
 sem fork": uma imagem container TheoDB com PostgreSQL 17 + pgvector pré-instalado que aceita conexão
