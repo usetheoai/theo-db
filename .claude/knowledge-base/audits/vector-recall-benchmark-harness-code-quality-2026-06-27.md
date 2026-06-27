@@ -5,7 +5,7 @@
 
 ## Scope
 
-`benchmarks/theodb_bench/` (Python package, 7 modules, 471 LoC) + `benchmarks/tests/` (6 test files, 36 tests).
+`benchmarks/theodb_bench/` (Python package, 7 modules) + `benchmarks/tests/` (6 test files, 42 tests). Re-audited after cycle-review fixes.
 
 ## Detectors run (real, this audit)
 

@@ -3,20 +3,23 @@
 Encapsulates psycopg2 so the pure logic (recall/metrics/dataset) never imports a driver.
 Swapping psycopg2 for pg8000 (BSD) would be a change confined to this file.
 
-Errors are typed (DBUnavailableError / IndexNotUsedError), never magic return values (Rule 8).
+Errors are typed: connect/ping/operational failures raise DBUnavailableError; a query that
+does not use the index raises IndexNotUsedError; bad metric raises ValueError. No magic return
+values (Rule 8) — every failure is loud and typed.
 """
 from __future__ import annotations
 
 import time
+from contextlib import contextmanager
 
 import psycopg2
 from psycopg2.extras import execute_values
 
-_OPS = {"l2": "<->", "cosine": "<=>", "ip": "<#>"}
+_OPS = {"l2": "<->", "cosine": "<=>"}
 
 
 class DBUnavailableError(RuntimeError):
-    """Raised when the database cannot be reached (fail-fast at the boundary)."""
+    """Raised when the database cannot be reached or an operation fails at the boundary."""
 
 
 class IndexNotUsedError(RuntimeError):
@@ -44,6 +47,17 @@ class VectorDB:
             f"FROM {table} ORDER BY {embed_col} {op} %s::vector LIMIT {int(k)}"
         )
 
+    @contextmanager
+    def _cursor(self):
+        """Yield a cursor, translating any psycopg2 operational error into DBUnavailableError."""
+        if self._conn is None:
+            raise DBUnavailableError("not connected (call connect() first)")
+        try:
+            with self._conn.cursor() as cur:
+                yield cur
+        except psycopg2.Error as e:
+            raise DBUnavailableError(f"db operation failed: {e}") from e
+
     # --- connection -------------------------------------------------------
     def connect(self) -> "VectorDB":
         try:
@@ -54,12 +68,9 @@ class VectorDB:
         return self
 
     def ping(self) -> None:
-        try:
-            with self._conn.cursor() as cur:
-                cur.execute("SELECT 1")
-                cur.fetchone()
-        except (psycopg2.Error, AttributeError) as e:
-            raise DBUnavailableError(f"ping failed: {e}") from e
+        with self._cursor() as cur:
+            cur.execute("SELECT 1")
+            cur.fetchone()
 
     def close(self) -> None:
         if self._conn is not None:
@@ -68,11 +79,11 @@ class VectorDB:
 
     # --- schema + load ----------------------------------------------------
     def ensure_extension(self) -> None:
-        with self._conn.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
 
     def create_table(self, table: str, dim: int, embed_col: str = "embedding") -> None:
-        with self._conn.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(f"DROP TABLE IF EXISTS {table}")
             cur.execute(
                 f"CREATE TABLE {table} (id INTEGER PRIMARY KEY, {embed_col} vector({int(dim)}))"
@@ -80,7 +91,7 @@ class VectorDB:
 
     def load_vectors(self, table, vectors, embed_col: str = "embedding") -> None:
         rows = [(i, "[" + ",".join(repr(float(x)) for x in v) + "]") for i, v in enumerate(vectors)]
-        with self._conn.cursor() as cur:
+        with self._cursor() as cur:
             execute_values(
                 cur, f"INSERT INTO {table} (id, {embed_col}) VALUES %s", rows, page_size=1000
             )
@@ -88,18 +99,18 @@ class VectorDB:
     # --- index + query ----------------------------------------------------
     def build_index(self, ddl: str) -> float:
         start = time.perf_counter()
-        with self._conn.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(ddl)
         return time.perf_counter() - start
 
     def set_session(self, statement: str) -> None:
-        with self._conn.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(statement)
 
     def query_topk(self, table, qvec, k, metric="l2", embed_col="embedding"):
         sql = self._topk_sql(table, embed_col, k, metric)
         vec = "[" + ",".join(repr(float(x)) for x in qvec) + "]"
-        with self._conn.cursor() as cur:
+        with self._cursor() as cur:
             start = time.perf_counter()
             cur.execute(sql, (vec, vec))
             rows = cur.fetchall()
@@ -111,13 +122,13 @@ class VectorDB:
     def assert_index_used(self, table, qvec, k, metric="l2", embed_col="embedding") -> None:
         sql = "EXPLAIN (FORMAT TEXT) " + self._topk_sql(table, embed_col, k, metric)
         vec = "[" + ",".join(repr(float(x)) for x in qvec) + "]"
-        with self._conn.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(sql, (vec, vec))
             plan = "\n".join(r[0] for r in cur.fetchall())
         if "Index Scan" not in plan and "Index Only Scan" not in plan:
             raise IndexNotUsedError(f"planner did not use the index:\n{plan}")
 
     def index_size_bytes(self, index_name: str) -> int:
-        with self._conn.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute("SELECT pg_relation_size(%s::regclass)", (index_name,))
             return int(cur.fetchone()[0])

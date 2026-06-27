@@ -32,3 +32,8 @@ def test_dataset_zero_n_raises():
 def test_dataset_zero_dim_raises():
     with pytest.raises(ValueError):
         make_dataset(10, 0, 3, seed=0)
+
+
+def test_dataset_zero_queries_raises():
+    with pytest.raises(ValueError):
+        make_dataset(10, 4, 0, seed=0)

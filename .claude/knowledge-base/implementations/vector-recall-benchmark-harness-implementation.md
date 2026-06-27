@@ -21,13 +21,23 @@ ANN-Benchmarks distance-thresholded recall semantics. The measurement-first gate
 
 ## DoD / acceptance evidence (all validated)
 
-- **Tests:** 36/36 pass (`pytest -q`), unit + integration against real container.
-- **Coverage:** 98% total; `recall.py` + `metrics.py` (critical paths) **100%**.
+- **Tests:** 42/42 pass (`pytest -q`), unit + integration against real container.
+- **Coverage:** 98% total; `recall.py` + `metrics.py` + `dataset.py` (critical paths) **100%**.
 - **Lint:** `ruff check benchmarks/` → All checks passed. **Dead code:** vulture clean.
 - **File size:** every module ≤ 500 (max 123).
 - **Runtime-metric proof (the gate):** real run produced `docs/benchmarks/2026-06-27-pgvector-l2.json`
-  with measured numbers — **HNSW recall@10 = 0.832 (ef_search=40, ~2232 QPS) and 0.958 (ef_search=100,
-  ~1454 QPS)**, seed=42 n=5000 dim=128. Reproducible (seed-stamped + commit sha `84aead5`).
+  with measured numbers — **HNSW recall@10 = 0.841 (ef_search=40) and 0.960 (ef_search=100)**, QPS ~1.8k–3.7k
+  single-thread, seed=42 n=5000 dim=128. Reproducible (seed + commit sha + host + methodology stamped in the report).
+
+### Review fixes applied (cycle-review, 4 specialists — 0 BLOCKER, 2 HIGH closed)
+
+- **HIGH (changelog≠json):** CHANGELOG numbers synced to the committed JSON (recall exact, QPS as range).
+- **HIGH (recall semantics prose-only):** added real distance-vs-identity + eps-boundary tests (`test_recall.py`).
+- **MEDIUM (float32 oracle):** ground-truth now rounds to float32 to match pgvector `vector(float4)` storage (`recall.py`).
+- **MEDIUM (error-typing):** `db.py` `_cursor` translates operational `psycopg2.Error` → `DBUnavailableError`; docstring honest.
+- **MEDIUM (cold/warm mix):** untimed warmup run added; report self-describes methodology + host + n_queries (`harness.py`).
+- **MEDIUM (`ip` half-wired):** removed `ip` from `_OPS` until recall supports the negative-inner-product sign convention.
+- **MEDIUM (harness wiring tautological):** added `MissVectorDB` test asserting recall 0.0 + report-content round-trip test.
 - **Failure scenarios exercised:** DB unavailable → `DBUnavailableError` (unit); planner seqscan →
   `IndexNotUsedError` (integration `test_index_not_used_raises`); empty/k>N dataset → `ValueError` (unit).
 

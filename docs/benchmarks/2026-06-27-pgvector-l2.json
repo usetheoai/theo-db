@@ -1,38 +1,41 @@
 {
-  "sha": "84aead5",
+  "sha": "ee49a6b",
   "date": "2026-06-27",
   "seed": 42,
   "n": 5000,
   "dim": 128,
+  "n_queries": 100,
   "k": 10,
   "metric": "l2",
   "runs": 3,
+  "host": "paulohenriquevn",
+  "methodology": "index-forced (SET enable_seqscan=off, assert_index_used); recall is distance-thresholded (ANN-Benchmarks) vs exact float32 brute-force ground-truth; QPS = 1/best-of-N mean per-query latency (warm)",
   "results": [
     {
       "index": "hnsw",
       "params": "ef_search=40",
-      "recall_at_k": 0.8320000000000002,
-      "qps": 2232.1719051407244,
-      "build_ms": 1055.3202150040306,
-      "index_bytes": 4177920,
-      "p50": 0.5475760008266661,
-      "p95": 0.7475670998246642,
-      "p99": 0.8401302305719581,
-      "mean": 0.5390762899575444,
-      "std": 0.13460644772563077
+      "recall_at_k": 0.8410000000000001,
+      "qps": 3658.441596884789,
+      "build_ms": 749.616484004946,
+      "index_bytes": 4169728,
+      "p50": 0.27714649695553817,
+      "p95": 0.3984485494584078,
+      "p99": 0.5104348810709775,
+      "mean": 0.3000341333002628,
+      "std": 0.0781847479370199
     },
     {
       "index": "hnsw",
       "params": "ef_search=100",
-      "recall_at_k": 0.958,
-      "qps": 1454.240921218967,
-      "build_ms": 1055.3202150040306,
-      "index_bytes": 4177920,
-      "p50": 0.6555824984388892,
-      "p95": 1.1164595063746674,
-      "p99": 1.4498338758130553,
-      "mean": 0.7074805697629927,
-      "std": 0.21263961864353087
+      "recall_at_k": 0.96,
+      "qps": 1830.9534174119583,
+      "build_ms": 749.616484004946,
+      "index_bytes": 4169728,
+      "p50": 0.599188500927994,
+      "p95": 0.930429999061744,
+      "p99": 1.1430723326338919,
+      "mean": 0.6452207864883045,
+      "std": 0.15453951866231086
     }
   ]
 }

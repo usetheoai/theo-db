@@ -4,11 +4,17 @@ import pytest
 from theodb_bench.db import DBUnavailableError, VectorDB
 
 
-def test_ping_raises_dbunavailable_on_bad_dsn():
-    # port 1 is unbound -> connect fails fast -> typed error, not magic return
+def test_connect_raises_dbunavailable_on_bad_dsn():
+    # port 1 is unbound -> connect fails fast -> typed error with the DSN context in the message
     db = VectorDB("host=127.0.0.1 port=1 dbname=x user=x connect_timeout=1")
-    with pytest.raises(DBUnavailableError):
+    with pytest.raises(DBUnavailableError, match="cannot connect"):
         db.connect()
+
+
+def test_operation_without_connect_raises_dbunavailable():
+    db = VectorDB("host=127.0.0.1 port=1 dbname=x")
+    with pytest.raises(DBUnavailableError, match="not connected"):
+        db.ping()
 
 
 def test_topk_sql_shape_l2():

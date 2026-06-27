@@ -46,6 +46,30 @@ _CONFIG = {
 }
 
 
+class MissVectorDB(FakeVectorDB):
+    """query_topk returns far distances -> every result misses -> recall@k == 0.0."""
+
+    def query_topk(self, table, q, k, metric, embed_col="embedding"):
+        return list(range(k)), [1e9] * k, 0.001
+
+
+def test_runner_recall_reflects_misses(tmp_path):
+    # proves the harness wiring is NOT hardcoded to 1.0 — it propagates real misses.
+    report = run_benchmark(_CONFIG, MissVectorDB(), tmp_path)
+    assert report["results"][0]["recall_at_k"] == 0.0
+
+
+def test_report_persists_config_values(tmp_path):
+    import json
+
+    report = run_benchmark(_CONFIG, FakeVectorDB(), tmp_path)
+    written = json.loads(list(tmp_path.glob("*.json"))[0].read_text())
+    assert written["seed"] == _CONFIG["seed"]
+    assert written["n"] == _CONFIG["n"]
+    assert written["n_queries"] == _CONFIG["n_queries"]
+    assert written["results"][0]["recall_at_k"] == report["results"][0]["recall_at_k"]
+
+
 def test_runner_with_fake_db_emits_report(tmp_path):
     report = run_benchmark(_CONFIG, FakeVectorDB(), tmp_path)
     r = report["results"][0]

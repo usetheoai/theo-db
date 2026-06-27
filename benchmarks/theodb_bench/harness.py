@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import platform
 import subprocess
 from pathlib import Path
 
@@ -43,6 +44,11 @@ def run_benchmark(config: dict, db, out_dir) -> dict:
             # guard once: confirm the planner actually uses the index
             db.assert_index_used(config["table"], queries[0], config["k"], config["metric"])
 
+            # untimed warmup pass so the timed runs (and percentiles) describe a warm cache,
+            # consistent with the best-of-N QPS (domain review M2).
+            for q in queries:
+                db.query_topk(config["table"], q, config["k"], config["metric"])
+
             run_means, all_latency_ms, last_run_dists = [], [], None
             for _ in range(config["runs"]):
                 lat, run_dists = [], []
@@ -74,9 +80,16 @@ def run_benchmark(config: dict, db, out_dir) -> dict:
         "seed": config["seed"],
         "n": config["n"],
         "dim": config["dim"],
+        "n_queries": config["n_queries"],
         "k": config["k"],
         "metric": config["metric"],
         "runs": config["runs"],
+        "host": platform.node(),
+        "methodology": (
+            "index-forced (SET enable_seqscan=off, assert_index_used); recall is "
+            "distance-thresholded (ANN-Benchmarks) vs exact float32 brute-force ground-truth; "
+            "QPS = 1/best-of-N mean per-query latency (warm)"
+        ),
         "results": results,
     }
     _write_report(report, Path(out_dir))

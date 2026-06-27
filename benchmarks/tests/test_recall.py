@@ -15,11 +15,26 @@ def test_recall_half_when_one_of_two_missed():
     assert recall_at_k(true_d, [np.array([0.1, 0.9])], k=2) == 0.5
 
 
-def test_recall_tie_at_kth_counts_equivalent():
-    # An equally-distant alternative (0.2 == k-th true distance) must count — the
-    # distance-threshold definition is what makes this correct (id-overlap would miss it).
+def test_recall_counts_by_distance_not_identity():
+    # The index returns two points whose distances are [0.15, 0.18] — NEITHER equals a true
+    # distance, but both are <= the k-th true distance (0.2), so both count. id-overlap would
+    # score this 0.0 (different ids); distance-threshold scores 1.0. This is exactly ADR D2.
     true_d = np.array([[0.1, 0.2]])
-    assert recall_at_k(true_d, [np.array([0.1, 0.2])], k=2) == 1.0
+    assert recall_at_k(true_d, [np.array([0.15, 0.18])], k=2) == 1.0
+
+
+def test_recall_within_eps_counts_as_hit():
+    # a returned distance just ABOVE the k-th true distance but within eps (1e-3) must count
+    true_d = np.array([[0.1, 0.2]])
+    # threshold = 0.2 + 1e-3 = 0.201; 0.2005 <= 0.201 -> hit
+    assert recall_at_k(true_d, [np.array([0.1, 0.2005])], k=2, eps=1e-3) == 1.0
+
+
+def test_recall_outside_eps_is_miss():
+    # a returned distance beyond k-th + eps must NOT count
+    true_d = np.array([[0.1, 0.2]])
+    # threshold = 0.201; 0.25 > 0.201 -> miss -> only 1 of 2 hits
+    assert recall_at_k(true_d, [np.array([0.1, 0.25])], k=2, eps=1e-3) == 0.5
 
 
 def test_recall_in_unit_interval():
@@ -49,7 +64,7 @@ def test_ground_truth_cosine_matches_known():
 
 def test_k_greater_than_n_raises_valueerror():
     corpus = np.array([[0, 0], [1, 1]], dtype=float)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="exceeds corpus size"):
         brute_force_ground_truth(corpus, corpus, k=5, metric="l2")
 
 

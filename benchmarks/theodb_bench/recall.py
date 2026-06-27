@@ -16,8 +16,11 @@ _METRICS = ("l2", "cosine")
 
 
 def _pairwise_distances(corpus: np.ndarray, queries: np.ndarray, metric: str) -> np.ndarray:
-    corpus = np.asarray(corpus, dtype=np.float64)
-    queries = np.asarray(queries, dtype=np.float64)
+    # pgvector stores `vector` as float4 (single precision); the exact oracle must rank the SAME
+    # float32-precision values the index sees, else near-ties diverge between oracle and SUT.
+    # Round to float32, then compute the distance itself in float64 for numerical stability. (review M1)
+    corpus = np.asarray(corpus, dtype=np.float32).astype(np.float64)
+    queries = np.asarray(queries, dtype=np.float32).astype(np.float64)
     if corpus.shape[0] == 0:
         raise ValueError("corpus is empty")
     if queries.shape[0] == 0:
