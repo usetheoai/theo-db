@@ -61,6 +61,39 @@ def test_index_not_used_raises(db):
         db.assert_index_used("it_seq", queries[0], 5, "l2")
 
 
+def test_vectorscale_extension_and_diskann_index(db):
+    db.ensure_extension()
+    db.set_session("CREATE EXTENSION IF NOT EXISTS vectorscale CASCADE")
+    db.create_table("it_scale", 32)
+    corpus, queries = make_dataset(500, 32, 3, seed=9)
+    db.load_vectors("it_scale", corpus)
+    db.build_index("CREATE INDEX it_scale_dann ON it_scale USING diskann (embedding vector_cosine_ops)")
+    db.set_session("SET enable_seqscan = off")
+    db.set_session("SET diskann.query_search_list_size = 100")
+    db.assert_index_used("it_scale", queries[0], 5, "cosine")  # diskann index actually used
+    ids, dists, latency = db.query_topk("it_scale", queries[0], 5, "cosine")
+    assert len(ids) == 5
+    assert latency > 0
+    assert db.index_size_bytes("it_scale_dann") > 0
+
+
+def test_harness_measures_diskann(db, tmp_path):
+    from theodb_bench.__main__ import build_config, build_parser
+    from theodb_bench.harness import run_benchmark
+
+    args = build_parser().parse_args(
+        ["--index", "diskann", "--metric", "cosine", "--seed", "7",
+         "--n", "2000", "--dim", "32", "--n-queries", "30", "--k", "10", "--runs", "2"]
+    )
+    report = run_benchmark(build_config(args), db, tmp_path)
+    diskann = [r for r in report["results"] if r["index"] == "diskann"]
+    assert diskann, "harness produced no diskann results"
+    assert all(0.0 <= r["recall_at_k"] <= 1.0 and r["qps"] > 0 for r in diskann)
+    # at high sls on low dim, diskann/SBQ reaches high recall (rescore scales with sls up to the
+    # engine ceiling, so the curve climbs to the plan's >= 0.90 acceptance bound)
+    assert max(r["recall_at_k"] for r in diskann) >= 0.90
+
+
 def test_hnsw_recall_is_high_vs_exact(db, tmp_path):
     config = {
         "seed": 7, "n": 2000, "dim": 32, "n_queries": 50, "k": 10, "metric": "l2", "runs": 3,

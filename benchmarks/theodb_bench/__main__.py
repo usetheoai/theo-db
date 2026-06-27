@@ -20,6 +20,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--k", type=int, default=10)
     p.add_argument("--metric", choices=["l2", "cosine"], default="l2")
     p.add_argument("--runs", type=int, default=3)
+    p.add_argument(
+        "--index",
+        choices=["hnsw", "diskann", "both"],
+        default="hnsw",
+        help="which index(es) to benchmark (diskann requires the vectorscale extension)",
+    )
+    p.add_argument(
+        "--hdf5",
+        default=None,
+        help="path to an ANN-Benchmarks HDF5 (train/test) — real dataset instead of synthetic gaussian; "
+        "dim is inferred from the file",
+    )
     p.add_argument("--dsn", default=None, help="libpq DSN (else built from PG* env vars)")
     p.add_argument("--out", default="docs/benchmarks")
     return p
@@ -35,23 +47,61 @@ def _dsn_from_env() -> str:
     )
 
 
+def _hnsw_spec(table: str, opclass: str) -> dict:
+    # Force the index on so we measure the index, not the planner's seqscan choice on small/medium N
+    # — this is the pgvector recall-test methodology (blueprint §Integration).
+    return {
+        "name": "hnsw",
+        "index_name": "bench_hnsw",
+        "ddl": f"CREATE INDEX bench_hnsw ON {table} USING hnsw (embedding {opclass})",
+        "sweep": [
+            {"label": "ef_search=40", "session": ["SET enable_seqscan = off", "SET hnsw.ef_search = 40"]},
+            {"label": "ef_search=100", "session": ["SET enable_seqscan = off", "SET hnsw.ef_search = 100"]},
+        ],
+    }
+
+
+def _diskann_spec(table: str, opclass: str) -> dict:
+    # pgvectorscale StreamingDiskANN. Two knobs trade recall for speed:
+    #   - query_search_list_size (sls): SBQ-approximate candidate list size
+    #   - query_rescore: how many candidates get re-ranked with exact full-precision vectors
+    # We scale rescore WITH sls (rescore == min(sls, engine-max 1000)) so the recall×QPS Pareto curve
+    # is honest: freezing rescore at an arbitrary 500 below sls (an earlier bug) capped recall while QPS
+    # still fell, manufacturing a fake plateau. pgvectorscale's hard ceiling for query_rescore is 1000;
+    # tying rescore to sls up to that ceiling is the symmetric sweep — every point measures a real
+    # (recall, QPS) pair, including the high-recall top of the curve (sls=2000 reaches rescore=1000).
+    # SBQ needs a larger candidate list than HNSW's ef_search on non-clustered data (synthetic gaussian:
+    # sls up to ~2000; real embedding distributions reach high recall at far lower sls).
+    _RESCORE_MAX = 1000  # pgvectorscale diskann.query_rescore valid range is 0..1000
+
+    def _sw(sls: int) -> dict:
+        rescore = min(sls, _RESCORE_MAX)
+        return {
+            "label": f"sls={sls},rescore={rescore}",
+            "session": [
+                "SET enable_seqscan = off",
+                f"SET diskann.query_search_list_size = {sls}",
+                f"SET diskann.query_rescore = {rescore}",
+            ],
+        }
+
+    return {
+        "name": "diskann",
+        "index_name": "bench_diskann",
+        "ddl": f"CREATE INDEX bench_diskann ON {table} USING diskann (embedding {opclass})",
+        "sweep": [_sw(100), _sw(500), _sw(1000), _sw(2000)],
+    }
+
+
 def build_config(args: argparse.Namespace) -> dict:
     opclass = _OPCLASS[args.metric]
     table = "bench_vectors"
-    specs = [
-        {
-            "name": "hnsw",
-            "index_name": "bench_hnsw",
-            "ddl": f"CREATE INDEX bench_hnsw ON {table} USING hnsw (embedding {opclass})",
-            # Force the index on so we measure the index, not the planner's seqscan choice on
-            # small/medium N — this is the pgvector recall-test methodology (blueprint §Integration).
-            "sweep": [
-                {"label": "ef_search=40", "session": ["SET enable_seqscan = off", "SET hnsw.ef_search = 40"]},
-                {"label": "ef_search=100", "session": ["SET enable_seqscan = off", "SET hnsw.ef_search = 100"]},
-            ],
-        }
-    ]
-    return {
+    specs = []
+    if args.index in ("hnsw", "both"):
+        specs.append(_hnsw_spec(table, opclass))
+    if args.index in ("diskann", "both"):
+        specs.append(_diskann_spec(table, opclass))
+    config = {
         "seed": args.seed,
         "n": args.n,
         "dim": args.dim,
@@ -62,6 +112,11 @@ def build_config(args: argparse.Namespace) -> dict:
         "table": table,
         "index_specs": specs,
     }
+    if args.hdf5:
+        config["hdf5_path"] = args.hdf5
+        # label = filename stem (e.g. glove-25-angular.hdf5 -> glove-25-angular)
+        config["dataset_label"] = os.path.splitext(os.path.basename(args.hdf5))[0]
+    return config
 
 
 def main(argv=None) -> int:
@@ -78,7 +133,9 @@ def main(argv=None) -> int:
             f"{r['index']:6} {r['params']:14} recall@{report['k']}={r['recall_at_k']:.4f} "
             f"qps={r['qps']:.1f} p95={r['p95']:.3f}ms build={r['build_ms']:.0f}ms size={r['index_bytes']}B"
         )
-    print(f"report -> {args.out}/{report['date']}-pgvector-{report['metric']}.json")
+    from .harness import artifact_stem
+
+    print(f"report -> {args.out}/{artifact_stem(report)}.json")
     return 0
 
 
