@@ -1,33 +1,17 @@
-# Discover-Plan Score Thresholds — per-project tuning.
+# Discover-plan-confidence verdict bands.
 #
-# Authoritative source: rules/discover-plan-golden-rule.md
+# Formato CANÔNICO: pipe-delimitado `NAME|threshold|sunset|adr` — lido por
+# `skills/discover-plan-confidence/scripts/run_discover_plan_score.py` (_parse_thresholds usa split("|")
+# e _verdict_for retorna o próprio NAME como token de verdict). Espelha `discover-blueprint-thresholds.txt`.
+# Bands apertados (frontier) por ADR 0001-discover-phd-rigor § 3.1.
 #
-# Format (one entry per line):
-#   KEY = VALUE
+# Os HARD CAPS (citação fabricada, corner vazio, budget de perguntas) NÃO são lidos daqui — são enforced
+# pelos checker scripts (check_reference_citations / check_research_coverage / check_plan_completeness).
 #
-# Lines starting with `#` and blank lines are skipped.
-# Defaults shipped with the skill at:
-#   skills/discover-plan-confidence/templates/ (when present)
-#
-# Per-project overrides go here and are CHANGELOG-tracked.
-#
-# FRONTIER PROFILE (TheoDB): bands tightened below for a PhD-rigor discover.
-# See rules/discover-phd-rigor.md. The frontier question budget (6-14 total,
-# <=5 per corner, techniques >=2) is enforced STRUCTURALLY in
-# skills/discover-plan-confidence/scripts/check_plan_completeness.py — the
-# soft_cap.* keys here are DOCUMENTARY (the scorer reads only band.* keys).
-
-# Soft caps (documentary — enforced budget lives in check_plan_completeness.py)
-soft_cap.question_count_low = 5
-soft_cap.coverage_corner_thin = 2   # techniques corner should carry >= 2 (R4)
-
-# Hard caps (documentary mirror of discover-plan-golden-rule.md; budget stays <= 15)
-hard_cap.question_count_max = 15
-hard_cap.fabricated_citation = 49
-hard_cap.empty_corner = 49
-
-# Verdict bands (READ by run_discover_plan_score.py — tightened for frontier rigor)
-band.shippable = 92
-band.shippable_with_caveats = 75
-band.needs_revision = 50
-band.invalid = 0
+# Correção (2026-06-27): o arquivo estava no formato `band.x = N` (equals), incompatível com o parser
+# pipe-delimitado → bands vazio → verdict colapsava para INVALID independente do score. Migrado ao formato
+# canônico (mesmas bandas 92/75/50/0; mesmos tokens do golden rule + exit codes do runner).
+SHIPPABLE|92|2027-01-31|0001-discover-phd-rigor
+SHIPPABLE_WITH_CAVEATS|75|2027-01-31|0001-discover-phd-rigor
+NON_SHIPPABLE|50|2027-01-31|0001-discover-phd-rigor
+INVALID|0|2027-01-31|0001-discover-phd-rigor

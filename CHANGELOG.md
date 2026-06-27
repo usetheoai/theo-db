@@ -37,6 +37,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - M0 Walking Skeleton: `Dockerfile` — base image fixada ao digest imutável `postgres:17-bookworm@sha256:17b6c778...` (H-1); garante que re-builds futuros não consumam silenciosamente uma imagem diferente caso o tag seja remapeado no Docker Hub.
 - M0 Walking Skeleton: `Dockerfile` — pgvector referenciado pelo commit SHA imutável `#586e7515...` em vez da tag mutável `#v0.8.3` (H-2); elimina risco de `git tag -f` no upstream substituir a fonte na próxima build.
 
+### Fixed
+
+- `.claude/rules/discover-plan-thresholds.txt` — migrado do formato `band.x = N` (equals) para o formato canônico pipe-delimitado que `run_discover_plan_score.py` realmente lê (split `|`). O formato errado deixava as bandas vazias e colapsava o verdict de `/discover-plan-confidence` para INVALID independente do score; agora SHIPPABLE/CAVEATS/NEEDS_REVISION/INVALID resolvem corretamente.
+- `.claude/skills/plan-confidence/scripts/check_evidence_citations.py` — `_scan_blueprint_refs` passa a procurar blueprints também sob `.claude/knowledge-base/discoveries/blueprints/` (antes só `knowledge-base/...`), espelhando o `_resolve_rule_file`. Sem isso, qualquer citação `Blueprint §X` num plano resolvia como fabricada (hard cap INVALID) neste layout `.claude/`.
+
 ### Changed
 
 - `ROADMAP.md` alinhado ao North Star (ADR 0002, mandato CTO): **M2** reescrito de "adotar pgvectorscale" (paridade) para **superioridade com evidência** — harness de benchmark recall@k é o **gate / 1º item**, e a escolha do índice (pgvectorscale / fork D3 / **ScaNN-as-PG-AM**, algoritmo Apache-2.0) passa a ser **decidida pelo benchmark**, mirando igualar ou superar o ScaNN; **M4** ganhou nota de divergência honesta (Patroni ≠ storage desagregado do AlloyDB — aposta competitiva, não cópia); **M7** ganhou nota de sequência (hybrid primeiro; BM25 → discovery própria pelo gap AGPL; model-agnostic como alavanca de superioridade).
