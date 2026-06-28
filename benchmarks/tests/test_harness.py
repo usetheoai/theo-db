@@ -139,6 +139,34 @@ def test_build_config_both_indexes():
     assert [s["name"] for s in cfg["index_specs"]] == ["hnsw", "diskann"]
 
 
+def test_build_config_ivfflat_only():
+    # M9: --index ivfflat -> single ivfflat spec; lists = n/1000; probes clamped-then-deduped.
+    cfg = build_config(build_parser().parse_args(["--index", "ivfflat", "--n", "5000"]))
+    specs = cfg["index_specs"]
+    assert [s["name"] for s in specs] == ["ivfflat"]
+    assert "USING ivfflat" in specs[0]["ddl"] and "WITH (lists = 5)" in specs[0]["ddl"]
+    # n=5000 -> lists=5; raw probes {1,10,5} clamped to {1,5,5} -> deduped {1,5}. Labels == executed.
+    labels = [sw["label"] for sw in specs[0]["sweep"]]
+    assert labels == ["probes=1", "probes=5"], labels
+    for sw in specs[0]["sweep"]:
+        p = sw["label"].split("=")[1]
+        assert f"SET ivfflat.probes = {p}" in sw["session"]  # label matches executed value (honesty)
+
+
+def test_build_config_ivfflat_lists_floored_to_one_for_small_n():
+    # n < 1000 -> n//1000 == 0; max(1, ...) guards against the invalid `WITH (lists = 0)` DDL.
+    cfg = build_config(build_parser().parse_args(["--index", "ivfflat", "--n", "200"]))
+    spec = cfg["index_specs"][0]
+    assert "WITH (lists = 1)" in spec["ddl"]
+    assert [sw["label"] for sw in spec["sweep"]] == ["probes=1"]  # all probes clamp to lists=1, dedup -> one
+
+
+def test_build_config_all_includes_hnsw_and_ivfflat():
+    # --index all = hnsw + ivfflat (dependency-light; diskann stays on `both`/`diskann`).
+    cfg = build_config(build_parser().parse_args(["--index", "all"]))
+    assert [s["name"] for s in cfg["index_specs"]] == ["hnsw", "ivfflat"]
+
+
 def _tiny_hdf5(tmp_path):
     import h5py
     import numpy as np

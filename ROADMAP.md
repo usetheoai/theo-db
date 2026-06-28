@@ -334,7 +334,7 @@ bare metal regulado.
 
 ---
 
-### M6 — [ ] Analytics colunar / HTAP
+### M6 — [x] Analytics colunar / HTAP
 
 **Objective:** Camada de armazenamento colunar (DuckDB-powered, `pg_mooncake` MIT) para analytics
 rápido sobre dados transacionais vivos, com escolha de plano row vs colunar.
@@ -439,6 +439,183 @@ partir de AlloyDB. *(Merge de README M8 — Escala & observabilidade — com REA
 
 1. Escopo amplo (merge de dois marcos) — priorizar sub-fatias e não inflar.
 2. MCP/integrações dependerem de specs externas em movimento.
+
+---
+
+### M9 — [ ] Índice IVFFlat / IVF validado + benchmarkado (specs 03, 04)
+
+> Added 2026-06-28 by `/roadmap-feature` (gap audit de `docs/features/`). Fecha as specs 03 + 04.
+
+**Objective:** Validar e benchmarkar o índice IVFFlat do pgvector (já disponível na imagem, `USING ivfflat`, mas **nunca exercitado** pelo nosso harness recall@k que só mede HNSW/DiskANN), medido pelo teste de integração reportando recall@10 ∈ [0,1] com o índice efetivamente usado — fechando a spec 03 (IVFFlat) e a spec 04 (IVF ≡ IVFFlat do pgvector; não há AM "IVF" distinto a implementar).
+
+**Definition of done:**
+
+- [ ] `_ivfflat_spec` no harness (`USING ivfflat … WITH (lists=…)` + sweep `ivfflat.probes`) + `--index ivfflat`/`all`; sem regressão a hnsw/diskann.
+- [ ] Teste de integração mede recall@10 ∈ [0,1] com índice usado (`enable_seqscan=off`) contra container real.
+- [ ] Relatório medido `docs/benchmarks/m9-ivfflat.md` (IVFFlat vs HNSW recall×QPS) — sem claim de perf não-benchmarkado (Rule 5).
+- [ ] Specs `03`/`04` anotadas como validadas, apontando para o relatório.
+
+**Entregáveis (artefatos concretos):**
+
+- `_ivfflat_spec` + opção CLI no `benchmarks/theodb_bench`; teste em `benchmarks/tests/`.
+- Relatório `docs/benchmarks/m9-ivfflat.md`.
+
+**Documentação:**
+
+- Notas "implementado/validado" em `docs/features/03-indice-ivfflat.md` e `04-indice-ivf.md`.
+
+**Dependencies:** M2 (núcleo vetorial / harness recall@k).
+
+**Top risks (new):**
+
+1. Tuning `lists`/`probes` — reportar a curva (não um ponto) para comparação honesta com HNSW.
+2. IVFFlat exige build **após** carga dos dados — manter a ordem load→build do harness.
+
+---
+
+### M10 — [ ] `ai.agg_summarize` — sumarização agregada (spec 11)
+
+> Added 2026-06-28 by `/roadmap-feature` (gap audit). Completa a spec 11 (escalar `ai.summarize` já ship em M7).
+
+**Objective:** Entregar `ai.agg_summarize` — função **agregada** SQL (muitas linhas → um resumo) sobre `ai._chat`, complementando o `ai.summarize` escalar já existente, medida por teste com o chat-stub determinístico + uma evidência real (OpenAI).
+
+**Definition of done:**
+
+- [ ] `ai.agg_summarize` (aggregate) criada; `VOLATILE`; `REVOKE … FROM PUBLIC` (paridade com as demais `ai.*`).
+- [ ] Teste com chat-stub determinístico (1 resumo a partir de N linhas) verde + 1 evidência real registrada.
+- [ ] Doc em `docs/sql-ai-functions.md` com exemplo.
+
+**Entregáveis (artefatos concretos):**
+
+- SQL em `sql/50-theodb-ai.sql` (ou arquivo dedicado); teste de integração.
+
+**Documentação:**
+
+- `docs/sql-ai-functions.md` — seção `ai.agg_summarize`.
+
+**Dependencies:** M7 (IA avançada — `ai._chat`/`ai.summarize`).
+
+**Top risks (new):**
+
+1. Limite de contexto do prompt ao agregar N linhas — definir estratégia (truncar/map-reduce) e documentar.
+2. Custo/latência por chamada agregada — sem claim de perf sem benchmark.
+
+---
+
+### M11 — [ ] `ai.*` modos acelerados (array/batch) (spec 08)
+
+> Added 2026-06-28 by `/roadmap-feature` (gap audit). As `ai.*` hoje são escalares (1 chamada/linha).
+
+**Objective:** Entregar uma variante **batch** (entrada `ARRAY` / set-returning) das funções `ai.*` para reduzir round-trips por linha, conforme a spec 08 ("acelerar consultas"), medida por teste — caminhar a parsimony-ladder antes (YAGNI: só se houver necessidade real medida).
+
+**Definition of done:**
+
+- [ ] Variante batch de ≥ 1 função `ai.*` (ex.: `ai.generate`/`ai.rank` sobre `ARRAY`/conjunto); `REVOKE … FROM PUBLIC`.
+- [ ] Teste verde (batch produz o mesmo resultado que N chamadas escalares).
+- [ ] Doc; nenhum claim de speedup sem benchmark reproduzível (Rule 5) — se medido, relatório em `docs/benchmarks/`.
+
+**Entregáveis (artefatos concretos):**
+
+- SQL batch em `sql/50-theodb-ai.sql`; teste.
+
+**Documentação:**
+
+- `docs/sql-ai-functions.md` — seção modos acelerados.
+
+**Dependencies:** M7 (IA avançada).
+
+**Top risks (new):**
+
+1. Complexidade de parsing/iteração de batch — manter mínimo (KISS); pode ser YAGNI se sem demanda.
+2. Erro parcial no batch (uma linha falha) — definir semântica fail-fast vs por-linha (error-handling).
+
+---
+
+### M12 — [ ] `theodb_ai_nl` — superfície completa NL→SQL (config/templates/value-index) (spec 12)
+
+> Added 2026-06-28 by `/roadmap-feature` (gap audit). MVP seguro `ai.nl_to_sql`/`ai.nl_query` já ship em M7-S4.
+
+**Objective:** Estender o MVP seguro de NL→SQL (geração + execução read-only sandboxed já entregue) com a superfície declarada na spec 12 — config, templates de prompt, value-index/concept-types — preservando 100% a defesa anti-injection (read-only sandbox + allowlist parser-grade).
+
+**Definition of done:**
+
+- [ ] Config (tabela/GUC) + registry de templates de prompt; value-index para colunas categóricas.
+- [ ] Defesa anti-injection do MVP **mantida** (teste de regressão: injeções bloqueadas, DB intacto).
+- [ ] Testes (geração + execução) verdes + evidência real (OpenAI).
+- [ ] Doc em `docs/` da superfície.
+
+**Entregáveis (artefatos concretos):**
+
+- SQL em `sql/60-theodb-nl.sql`; tabelas de config/templates; testes.
+
+**Documentação:**
+
+- `docs/` — guia da superfície `theodb_ai_nl`.
+
+**Dependencies:** M7 (IA avançada — NL→SQL MVP).
+
+**Top risks (new):**
+
+1. Superfície grande (a spec tem ~58 etapas) — fatiar; entregar incrementos seguros, não tudo de uma vez.
+2. Qualquer nova entrada deve passar pelo sandbox read-only + allowlist (não reintroduzir vetor de exfiltração).
+
+---
+
+### M13 — [ ] Superfície de IA empacotada nativa — `ai.hybrid_search()` JSON + registry `theodb_ml` (specs 06, 07 — conclusão)
+
+> Added 2026-06-28 by `/roadmap-feature` (gap audit). Capacidades já entregues; falta a superfície literal das specs.
+
+**Objective:** Entregar a superfície de API literal que as specs 06/07 descrevem — `ai.hybrid_search()` (entrada JSON nativa, hoje entregue como `ai.hybrid_search_rrf` em SQL manual) e o registry `theodb_ml.create_model` (hoje funções escalares em schema `ai` sobre GUCs `theodb.llm_*`) — sobre as capacidades já existentes, OU um ADR honesto de desvio se a superfície literal for açúcar sintático sem valor (YAGNI).
+
+**Definition of done:**
+
+- [ ] `ai.hybrid_search()` (wrapper JSON sobre o RRF existente) com teste, OU ADR de desvio justificado.
+- [ ] `theodb_ml` model registry (`create_model`) com teste, OU ADR de desvio justificado (mantendo GUCs como caminho atual).
+- [ ] `REVOKE … FROM PUBLIC`; doc atualizada; honestidade sobre o que é açúcar vs. nova capacidade.
+
+**Entregáveis (artefatos concretos):**
+
+- SQL wrapper + (opcional) extensão/registry; testes; ADR se desvio.
+
+**Documentação:**
+
+- `docs/sql-ai-functions.md` + `docs/` (registry).
+
+**Dependencies:** M2 (vetorial), M7 (IA avançada).
+
+**Top risks (new):**
+
+1. Pode ser apenas açúcar sintático sobre o que já existe (YAGNI) — validar o valor antes de construir; ADR se não justificar.
+2. Manter as garantias de segurança (`REVOKE FROM PUBLIC`) na nova superfície.
+
+---
+
+### M14 — [ ] Índice ScaNN-quality / avaliação do gatilho de fork (spec 05) — measurement-gated (D3)
+
+> Added 2026-06-28 by `/roadmap-feature` (gap audit). Honesto: hoje entregamos o equivalente permissivo DiskANN (M2), não ScaNN literal.
+
+**Objective:** Avaliar o "ScaNN-as-PG-AM" (o killer aspiracional do PRD) como **gatilho de fork condicional (D3)** — measurement-first: medir DiskANN (pgvectorscale, já benchmarkado em M2) vs o alvo ScaNN-quality no harness recall@k e **só** perseguir um AM nativo se um benchmark reproduzível justificar o ganho; honestidade absoluta (DiskANN é o substituto permissivo entregue, ScaNN literal não está shipado).
+
+**Definition of done:**
+
+- [ ] Benchmark reproduzível DiskANN vs alvo ScaNN-quality no harness recall@k (`docs/benchmarks/`).
+- [ ] ADR de decisão fork/no-fork ancorado na evidência (PRD D3 / anti-sunk-cost).
+- [ ] Honestidade: nenhum claim de "ScaNN done" sem AM nativo medido; substituto DiskANN documentado na spec 05.
+
+**Entregáveis (artefatos concretos):**
+
+- Relatório de benchmark; ADR de decisão; (condicional) protótipo de AM somente se o gatilho disparar.
+
+**Documentação:**
+
+- Nota honesta em `docs/features/05-indice-scann.md` (DiskANN como equivalente permissivo entregue + status do gatilho).
+
+**Dependencies:** M2 (vetorial / DiskANN), M9 (família de índices validada no harness).
+
+**Top risks (new):**
+
+1. Research-grade + risco de build (precedente do bloqueio rustc/MSRV no M6) — measurement-first evita esforço sem evidência.
+2. Anti-sunk-cost (CLAUDE.md): não forkar/manter AM nativo se o upstream/DiskANN já entrega o resultado.
 
 ---
 

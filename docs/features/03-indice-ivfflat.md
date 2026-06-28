@@ -1,5 +1,11 @@
 # Criar um índice IVFFlat
 
+> **✅ Validado (M9, 2026-06-28):** o índice IVFFlat do `pgvector` está disponível na imagem e foi
+> **validado + benchmarkado** no harness recall@k (`--index ivfflat`). Evidência medida (recall × QPS
+> vs HNSW, build-time, tamanho) em [`docs/benchmarks/m9-ivfflat.md`](../benchmarks/m9-ivfflat.md).
+> A capacidade IVFFlat está disponível via `CREATE INDEX … USING ivfflat (…) WITH (lists = N)` +
+> `SET ivfflat.probes`. A superfície literal abaixo permanece como API-alvo do TheoDB.
+
 > **Status:** 📋 Especificação (planejado) — recurso-alvo do milestone **M2 — Vetorial / IA** ([ROADMAP](../../ROADMAP.md)).
 > Esta página documenta a **API-alvo do TheoDB**. As funcionalidades aqui descritas **ainda não estão
 > implementadas** na release atual (M0 entrega PostgreSQL 17 + `pgvector`). Nenhum número de desempenho

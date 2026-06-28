@@ -22,9 +22,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--runs", type=int, default=3)
     p.add_argument(
         "--index",
-        choices=["hnsw", "diskann", "both"],
+        choices=["hnsw", "ivfflat", "diskann", "both", "all"],
         default="hnsw",
-        help="which index(es) to benchmark (diskann requires the vectorscale extension)",
+        help="which index(es) to benchmark: hnsw | ivfflat | diskann | both (hnsw+diskann) | "
+        "all (hnsw+ivfflat — excludes diskann; use 'both'/'diskann' for that). "
+        "diskann requires the vectorscale extension",
     )
     p.add_argument(
         "--hdf5",
@@ -57,6 +59,34 @@ def _hnsw_spec(table: str, opclass: str) -> dict:
         "sweep": [
             {"label": "ef_search=40", "session": ["SET enable_seqscan = off", "SET hnsw.ef_search = 40"]},
             {"label": "ef_search=100", "session": ["SET enable_seqscan = off", "SET hnsw.ef_search = 100"]},
+        ],
+    }
+
+
+def _ivfflat_spec(table: str, opclass: str, n: int) -> dict:
+    # pgvector IVFFlat: vectors are partitioned into `lists` clusters; a query scans the `probes`
+    # nearest clusters. `lists` is a BUILD param; `probes` is the query-time recall/speed knob.
+    # pgvector guidance: lists ~= rows/1000 for <= 1M rows. probes is swept (recall x QPS curve).
+    # At probes==lists every cluster is scanned, so IVFFlat (flat/full-precision storage) becomes
+    # exact-among-indexed. Force the index on (pgvector recall-test methodology) so we measure the
+    # index, not a seqscan.
+    #
+    # Measurement honesty: we CLAMP each probe to `lists` BEFORE de-duplicating, so every sweep
+    # point's LABEL equals the value actually executed (probes > lists is a no-op in pgvector — an
+    # unclamped label like "probes=10" on a lists=5 index would silently run probes=5 and report a
+    # duplicate operating point under a wrong label).
+    lists = max(1, n // 1000)
+    probes = sorted({min(p, lists) for p in (1, 10, lists)})
+    return {
+        "name": "ivfflat",
+        "index_name": "bench_ivfflat",
+        "ddl": f"CREATE INDEX bench_ivfflat ON {table} USING ivfflat (embedding {opclass}) WITH (lists = {lists})",
+        "sweep": [
+            {
+                "label": f"probes={p}",
+                "session": ["SET enable_seqscan = off", f"SET ivfflat.probes = {p}"],
+            }
+            for p in probes
         ],
     }
 
@@ -97,8 +127,10 @@ def build_config(args: argparse.Namespace) -> dict:
     opclass = _OPCLASS[args.metric]
     table = "bench_vectors"
     specs = []
-    if args.index in ("hnsw", "both"):
+    if args.index in ("hnsw", "both", "all"):
         specs.append(_hnsw_spec(table, opclass))
+    if args.index in ("ivfflat", "all"):
+        specs.append(_ivfflat_spec(table, opclass, args.n))
     if args.index in ("diskann", "both"):
         specs.append(_diskann_spec(table, opclass))
     config = {
