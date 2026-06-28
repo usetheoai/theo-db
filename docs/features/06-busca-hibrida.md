@@ -1,5 +1,10 @@
 # Busca híbrida por similaridade vetorial
 
+> **✅ Entregue (M7-S1 + M13):** capacidade RRF via `ai.hybrid_search_rrf(...)` (M7-S1) + a superfície JSON
+> literal **`ai.hybrid_search(config jsonb)`** (M13, wrapper fino — paridade testada com o rrf). Ver
+> [`docs/sql-ai-functions.md`](../sql-ai-functions.md) § "Packaged surface". A superfície literal abaixo
+> permanece como API-alvo; `theodb_scann` (índice) não é entregue (usamos DiskANN/HNSW — specs 02/05).
+
 > **Status:** 📋 Especificação (planejado) — recurso-alvo do milestone **M7 — IA avançada** ([ROADMAP](../../ROADMAP.md)).
 > Esta página documenta a **API-alvo do TheoDB**. As funcionalidades aqui descritas **ainda não estão
 > implementadas** na release atual (M0 entrega PostgreSQL 17 + `pgvector`). Nenhum número de desempenho

@@ -66,9 +66,14 @@ def conn():
     c.close()
 
 
-def _set_endpoint(cur, endpoint: str) -> None:
-    cur.execute("SET theodb.llm_endpoint = %s", (endpoint,))
-    cur.execute("SET theodb.llm_model = 'stub-chat'")
+@pytest.fixture(autouse=True)
+def _clean_registry(conn):
+    # guarantee test independence (testing.md §6): no shared mutable registry rows across tests.
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM theodb_ml.models")
+    yield
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM theodb_ml.models")
 
 
 # --- M13: theodb_ml model registry (create_model / apply_model bridges to the unchanged ai._chat) ---------
@@ -103,10 +108,38 @@ def test_theodb_ml_create_model_rejects_non_http_endpoint(conn):
             cur.execute("SELECT theodb_ml.create_model('bad', 'file:///etc/passwd', 'm')")
 
 
+def test_theodb_ml_create_model_empty_id_raises(conn):
+    with conn.cursor() as cur:
+        with pytest.raises(psycopg2.errors.InvalidParameterValue):  # 22023 — empty model_id
+            cur.execute("SELECT theodb_ml.create_model('', 'https://x.example/v1', 'm')")
+
+
+def test_theodb_ml_create_model_upsert_updates(conn):
+    # create_model is an upsert: re-registering an id updates endpoint + model_name.
+    with conn.cursor() as cur:
+        cur.execute("SELECT theodb_ml.create_model('up', 'https://a.example/v1', 'm1')")
+        cur.execute("SELECT theodb_ml.create_model('up', 'https://b.example/v1', 'm2')")
+        cur.execute("SELECT endpoint, model_name FROM theodb_ml.list_models() WHERE model_id='up'")
+        assert cur.fetchone() == ("https://b.example/v1", "m2")
+
+
 def test_theodb_ml_apply_unknown_model_raises(conn):
     with conn.cursor() as cur:
         with pytest.raises(psycopg2.errors.InvalidParameterValue):  # 22023
             cur.execute("SELECT theodb_ml.apply_model('does_not_exist')")
+
+
+def test_theodb_ml_apply_model_resets_stale_model_guc(conn, chat_server):
+    # M1 fix: apply_model(B) with NULL model_name must NOT leave a stale model from a prior apply_model(A).
+    with conn.cursor() as cur:
+        cur.execute("SELECT theodb_ml.create_model('mA', %s, 'model-a')", (chat_server,))
+        cur.execute("SELECT theodb_ml.create_model('mB', %s, NULL)", (chat_server,))
+        cur.execute("SELECT theodb_ml.apply_model('mA')")
+        cur.execute("SELECT current_setting('theodb.llm_model', true)")
+        assert cur.fetchone()[0] == "model-a"
+        cur.execute("SELECT theodb_ml.apply_model('mB')")
+        cur.execute("SELECT current_setting('theodb.llm_model', true)")
+        assert cur.fetchone()[0] == "", "apply_model(B, NULL) must reset the model GUC (no stale model from A)"
 
 
 def test_theodb_ml_drop_and_list(conn, chat_server):

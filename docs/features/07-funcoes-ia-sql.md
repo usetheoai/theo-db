@@ -1,5 +1,12 @@
 # Consultas SQL inteligentes com funções de IA
 
+> **✅ Entregue (M7-S3 + M10/M11 + M13):** funções `ai.*` (generate/if/analyze_sentiment/summarize/rank,
+> agg_summarize, generate_batch) + o **registry `theodb_ml`** (M13: `create_model`/`apply_model` sobre
+> `(endpoint, model_name)`). Ver [`docs/sql-ai-functions.md`](../sql-ai-functions.md).
+> **Divergência honesta (ADR D2):** o `theodb_ml` **não** persiste credenciais (sem coluna `api_key`) — as
+> chaves permanecem GUC de sessão (`theodb.llm_api_key`); `apply_model` faz a ponte via GUCs em vez do
+> `model_id =>` por-chamada / `CALL …(model_auth_type=>…)` literais do AlloyDB (deferidos).
+
 > **Status:** 📋 Especificação (planejado) — recurso-alvo do milestone **M7 — IA avançada** ([ROADMAP](../../ROADMAP.md)).
 > Esta página documenta a **API-alvo do TheoDB**. As funções escalares `ai.generate`/`ai.if`/`ai.rank`/
 > `ai.analyze_sentiment`/`ai.summarize` **estão implementadas** desde M7-S3 (ver nota abaixo); os modos

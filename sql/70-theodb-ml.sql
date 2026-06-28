@@ -77,9 +77,9 @@ BEGIN
         RAISE EXCEPTION 'theodb_ml.apply_model: model % not found', p_id USING ERRCODE = '22023';
     END IF;
     PERFORM set_config('theodb.llm_endpoint', m.endpoint, false);  -- session-level
-    IF m.model_name IS NOT NULL THEN
-        PERFORM set_config('theodb.llm_model', m.model_name, false);
-    END IF;
+    -- ALWAYS set the model GUC (empty string when the model has none) so a prior apply_model's model does NOT
+    -- leak into this one — ai._chat treats '' as falsy and falls back to 'default' (review M1).
+    PERFORM set_config('theodb.llm_model', COALESCE(m.model_name, ''), false);
 END $$;
 
 -- Least-privilege: these functions manage model configs + SET session GUCs that gate outbound HTTP via
