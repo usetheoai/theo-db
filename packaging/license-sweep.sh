@@ -44,6 +44,7 @@ echo "== (c) BM25 candidates (M7-S2) — license verdict from each canonical rep
 # VectorChord-bm25 must be AGPL/Elastic (barred). A license that cannot be fetched is UNVERIFIED (never
 # assumed permissive). These candidates are NOT in the distribution image, so they do not affect the
 # distribution AGPL gate above — this block records the M7-S2 identification as re-runnable evidence.
+# NOTE: §(c) exit is advisory (informational identification); D1 for the SHIPPED image is gated by (a)+(b).
 bm25_license() {
   # $1 = label, $2 = raw LICENSE url, $3 = expected: 'permissive' | 'barred'
   local label="$1" url="$2" expect="$3" body
@@ -67,7 +68,7 @@ bm25_license() {
   fi
 }
 bm25_license "pg_textsearch" "https://raw.githubusercontent.com/timescale/pg_textsearch/v1.3.1/LICENSE" "permissive"
-bm25_license "VectorChord-bm25" "https://raw.githubusercontent.com/tensorchord/VectorChord-bm25/main/LICENSE" "barred"
+bm25_license "VectorChord-bm25" "https://raw.githubusercontent.com/tensorchord/VectorChord-bm25/0.3.0/LICENSE" "barred"
 
 echo "======================================================"
 if [ "$fail" -eq 0 ]; then echo "LICENSE SWEEP PASSED — zero AGPL in the TheoDB package"; else echo "LICENSE SWEEP FAILED — AGPL found"; fi

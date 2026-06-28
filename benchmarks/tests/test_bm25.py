@@ -79,3 +79,19 @@ def test_bm25_ranks_relevant_first(db):
     db.create_bm25_index("it_bm25_rank")
     ranked = db.bm25_query("it_bm25_rank", "database system", 5)
     assert ranked and ranked[0] == "d1", f"BM25 must rank the matching doc first: {ranked}"
+
+
+def test_bm25_empty_content_index_and_nonmatch(db):
+    """Failure scenario #3: a BM25 index build over an empty-content row does not crash, and a query whose
+    terms match nothing in the corpus executes without error. (Note: bm25_query is a top-k ranker with NO
+    `WHERE @@` match filter — by design — so a non-matching query still returns docs ranked; the failure
+    mode being guarded is a *crash/error*, not non-emptiness.)"""
+    _require_bm25(db)
+    db.ensure_bm25_extension()
+    with db._cursor() as cur:
+        cur.execute("DROP TABLE IF EXISTS it_bm25_empty")
+        cur.execute("CREATE TABLE it_bm25_empty (doc_id text PRIMARY KEY, content text)")
+        cur.execute("INSERT INTO it_bm25_empty VALUES ('d1',''),('d2','postgresql database')")
+    db.create_bm25_index("it_bm25_empty")  # must not crash on the empty-content row
+    ranked = db.bm25_query("it_bm25_empty", "zzznomatchterm", 5)  # must not error
+    assert isinstance(ranked, list)  # top-k ranker returns a (possibly full) list, never raises

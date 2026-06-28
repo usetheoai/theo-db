@@ -191,10 +191,19 @@ class VectorDB:
 
     # --- M7-S2: pg_textsearch BM25 leg (throwaway image only; requires shared_preload_libraries) ----
     def pg_textsearch_available(self) -> bool:
-        """True iff the pg_textsearch extension can be created (i.e. the lib is preloaded)."""
+        """True iff the pg_textsearch control file is installed AND the lib is in shared_preload_libraries.
+
+        Both are required: the extension cannot be created without the control file (make install) NOR
+        without the preload (it RAISEs 'library not loaded'). We check both so the skip gate is honest —
+        checking only pg_available_extensions would pass on an image that installed the files but was
+        started without `-c shared_preload_libraries=pg_textsearch`.
+        """
         with self._cursor() as cur:
             cur.execute("SELECT count(*) FROM pg_available_extensions WHERE name = 'pg_textsearch'")
-            return int(cur.fetchone()[0]) > 0
+            installed = int(cur.fetchone()[0]) > 0
+            cur.execute("SELECT current_setting('shared_preload_libraries', true)")
+            preload = cur.fetchone()[0] or ""
+        return installed and ("pg_textsearch" in preload)
 
     def ensure_bm25_extension(self) -> None:
         with self._cursor() as cur:
@@ -212,7 +221,8 @@ class VectorDB:
         # so ASC ordering yields best-first. LIMIT enables its top-k (Block-Max WAND) optimization.
         with self._cursor() as cur:
             cur.execute(
-                f"SELECT doc_id FROM {table} ORDER BY {text_col} <@> %s LIMIT {int(n)}",
+                f"SELECT doc_id FROM {table} WHERE {text_col} IS NOT NULL "
+                f"ORDER BY {text_col} <@> %s LIMIT {int(n)}",
                 (query_text,),
             )
             return [r[0] for r in cur.fetchall()]

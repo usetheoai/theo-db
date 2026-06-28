@@ -14,7 +14,7 @@ loads a labelled corpus into a `documents` table and scores four retrievers with
 
 - **vector** — `pgvector` `<=>` (cosine) top-100
 - **fts** — PostgreSQL native `ts_rank_cd` + GIN (the lexical leg shipped in M7-S1) top-100
-- **bm25** — **pg_textsearch** Okapi BM25 (`content <@> 'query'`, k1=1.2/b=0.75) top-100
+- **bm25** — **pg_textsearch** Okapi BM25 (`content <@> 'query'`; library defaults, confirmed at index build via the NOTICE `Using index options: k1=1.20, b=0.75`) top-100
 - **hybrid** — `ai.hybrid_search_rrf` (RRF of vector + ts_rank_cd, k=60)
 
 ## Dataset (CI fixture — deterministic, offline)
@@ -34,10 +34,16 @@ queries, graded qrels (databases vs cooking). Embeddings via the deterministic f
 
 ## Honest reading
 
-- **BM25 measurably beats the shipped `ts_rank_cd` lexical leg on this fixture** — nDCG@10 **0.9546 vs 0.5143**
-  and Recall@100 **1.0000 vs 0.3125**. The direction is unambiguous: as a *lexical* ranker, pg_textsearch's
-  true Okapi BM25 is far stronger than PostgreSQL's cover-density `ts_rank_cd` here. This is the expected
-  result — `ts_rank_cd` is not BM25 — and it is now **measured**, not assumed.
+- **The load-bearing signal is nDCG@10: BM25 0.9546 vs ts_rank_cd 0.5143** on this fixture — as a *lexical
+  ranker*, pg_textsearch's true Okapi BM25 ranks the relevant docs higher than PostgreSQL's cover-density
+  `ts_rank_cd` (which is not BM25). This is now **measured**, not assumed.
+- **Recall@100 (1.0000 vs 0.3125) is NOT a ranker-quality signal here — read it with care.** The two legs are
+  different *retrievers*, not just different rankers: `bm25_query` is `ORDER BY <@> LIMIT 100` (no match
+  filter), so on a 12-doc corpus (< 100) it returns every doc → Recall@100 is trivially 1.0; `fts_query`
+  applies `WHERE text_tsv @@ plainto_tsquery` (boolean match filter), so non-matching relevant docs are
+  dropped → 0.3125. The Recall@100 gap is dominated by the **match-filter asymmetry + corpus < top-k**, not
+  by BM25 ranking superiority. Only the **nDCG@10** number above is a fair ranking comparison; do not cite the
+  Recall@100 delta as evidence of BM25 superiority.
 - **Caveat (fixture, not the field):** this is a small synthetic lexical corpus. The magnitude of the gain on a
   real heterogeneous corpus (BEIR `scifact`/`nfcorpus`, real embeddings) is the **decisive follow-up** before
   adoption. The synthetic embedder also makes `vector`/`hybrid` saturate Recall@100 at 1.0 (little headroom),
