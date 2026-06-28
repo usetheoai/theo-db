@@ -1,5 +1,14 @@
 # Criar um índice ScaNN
 
+> **⚖️ Decisão (M14, 2026-06-28) — NO-FORK:** TheoDB **não** constrói o access method `theodb_scann` literal.
+> O índice ScaNN-quality **entregue** é o **StreamingDiskANN** (`pgvectorscale`, M2) — substituto permissivo
+> que atinge a barra ScaNN-quality (recall@10 medido **0.978** ≥ 0.90 em gaussiano sintético dim=32, runs=3;
+> decisão **provisional** até run em dataset real `--hdf5`; `docs/benchmarks/m14-scann-fork-decision.md`).
+> A decisão é gateada por evidência (measurement-first / anti-sunk-cost) — ver
+> [`docs/adr/0004-scann-fork-decision.md`](../adr/0004-scann-fork-decision.md), que define o gatilho que
+> reabriria o fork. A superfície `theodb_scann` literal abaixo permanece como API-alvo (gated, não entregue);
+> use `USING diskann` (pgvectorscale) hoje.
+
 > **Status:** 📋 Especificação (planejado) — recurso-alvo do milestone **M2 — Vetorial / IA** ([ROADMAP](../../ROADMAP.md)).
 > Esta página documenta a **API-alvo do TheoDB**. As funcionalidades aqui descritas **ainda não estão
 > implementadas** na release atual (M0 entrega PostgreSQL 17 + `pgvector`). Nenhum número de desempenho
