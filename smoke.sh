@@ -62,4 +62,21 @@ if [ "$AI_CHECK" != "5:0" ]; then
 fi
 echo "ai: 5 generative ai.* functions present, 0 executable by PUBLIC OK"
 
+# M7-S4: safe NL→SQL functions present + locked down (NO network — presence + privilege only).
+NL_CHECK=$(psql -h "$HOST" -p "$PORT" -U "$USER" -t -A -q -v ON_ERROR_STOP=1 <<'SQL'
+SELECT
+  (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+     WHERE n.nspname='ai' AND p.proname IN ('nl_to_sql','nl_query'))::text
+  || ':' ||
+  (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+     WHERE n.nspname='ai' AND p.proname IN ('nl_to_sql','nl_query')
+       AND has_function_privilege('public', p.oid, 'execute'))::text;
+SQL
+)
+if [ "$NL_CHECK" != "2:0" ]; then
+  echo "NL SMOKE FAILED: expected '2:0' (2 NL→SQL functions present, 0 PUBLIC-executable), got '$NL_CHECK'" >&2
+  exit 1
+fi
+echo "ai: 2 safe NL→SQL functions (nl_to_sql/nl_query) present, 0 executable by PUBLIC OK"
+
 echo "SMOKE PASSED"

@@ -402,3 +402,62 @@ jobs:
       - name: Teardown
         if: always()
         run: docker rm -f theo-db-bm25c || true
+
+  nl-sql:
+    timeout-minutes: 20
+    # M7-S4: safe NL→SQL (anti-prompt-injection) — offline deterministic injection suite (stub; NO external API).
+    # The stub "complies" with each injection so the test proves the GUARDS (L2 validation / L3 read-only
+    # sandbox 25006) catch it. Run locally first.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build TheoDB image (cache from image-and-bench)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          tags: theo-db:dev
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Start TheoDB (host-gateway so the in-DB function reaches the host stub)
+        run: |
+          docker run -d --name theo-db-nl --add-host=host.docker.internal:host-gateway \
+            -e POSTGRES_PASSWORD=postgres -p 5432:5432 theo-db:dev
+          for i in $(seq 1 30); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' theo-db-nl)" = healthy ] && break
+            sleep 2
+          done
+          docker inspect -f '{{.State.Health.Status}}' theo-db-nl | grep -q healthy
+      - name: NL→SQL presence smoke (functions present + non-PUBLIC, no network)
+        env:
+          PGPORT: "5432"
+        run: bash smoke.sh
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install harness deps
+        working-directory: benchmarks
+        run: pip install -r requirements.txt
+      - name: NL→SQL anti-prompt-injection suite (offline stub — proves the guards catch injections)
+        working-directory: benchmarks
+        env:
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: postgres
+        run: pytest -m integration tests/test_nl_sql.py -q
+      - name: S3 ai.* no-regression (the stub changed)
+        working-directory: benchmarks
+        env:
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: postgres
+        run: pytest -m integration tests/test_ai_sql.py -k 'not real' -q
+      - name: Teardown
+        if: always()
+        run: docker rm -f theo-db-nl || true

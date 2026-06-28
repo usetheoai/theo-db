@@ -38,6 +38,21 @@ def _decide(system: str, user: str) -> str:
         return "neutral"  # sentiment neutral-label path
     if "__no__" in usr_l:
         return "no"  # ai.if false branch, decoupled from English-'not' heuristic
+    # M7-S4 NL→SQL injection seams: the stub "complies" with the injection on demand, so the tests prove the
+    # GUARDS (L2 static validation / L3 read-only sandbox) catch it — not that the LLM refused.
+    if "__nlinject_drop__" in usr_l:
+        return "DROP TABLE secret"
+    if "__nlinject_write__" in usr_l:
+        return "UPDATE documents SET content = 'pwned'"
+    if "__nlinject_multi__" in usr_l:
+        return "SELECT 1; DROP TABLE secret"
+    if "__nlinject_exfil__" in usr_l:
+        return "SELECT pg_read_file('/etc/passwd')"
+    if "__nlinject_relation__" in usr_l:
+        return "SELECT * FROM pg_authid"  # a non-allowlisted relation
+    if "read-only postgresql select" in sys_l:  # ai.nl_to_sql / ai.nl_query (L1 prompt)
+        # benign: a count question -> a safe SELECT over the (allowlisted) documents table
+        return "SELECT count(*) AS n FROM documents"
     if "positive, negative, neutral" in sys_l:  # ai.analyze_sentiment
         if any(w in usr_l for w in ("bad", "terrible", "boring", "hate", "awful")):
             return "negative"
