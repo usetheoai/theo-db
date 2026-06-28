@@ -81,6 +81,8 @@ def test_harness_measures_diskann(db, tmp_path):
     from theodb_bench.__main__ import build_config, build_parser
     from theodb_bench.harness import run_benchmark
 
+    db.ensure_extension()
+    db.set_session("CREATE EXTENSION IF NOT EXISTS vectorscale CASCADE")  # self-sufficient (no test-ordering dep)
     args = build_parser().parse_args(
         ["--index", "diskann", "--metric", "cosine", "--seed", "7",
          "--n", "2000", "--dim", "32", "--n-queries", "30", "--k", "10", "--runs", "2"]

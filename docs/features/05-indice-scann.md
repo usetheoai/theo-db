@@ -2,7 +2,8 @@
 
 > **⚖️ Decisão (M14, 2026-06-28) — NO-FORK:** TheoDB **não** constrói o access method `theodb_scann` literal.
 > O índice ScaNN-quality **entregue** é o **StreamingDiskANN** (`pgvectorscale`, M2) — substituto permissivo
-> que atinge a barra ScaNN-quality (recall@10 medido **0.986** ≥ 0.90; `docs/benchmarks/m14-scann-fork-decision.md`).
+> que atinge a barra ScaNN-quality (recall@10 medido **0.978** ≥ 0.90 em gaussiano sintético dim=32, runs=3;
+> decisão **provisional** até run em dataset real `--hdf5`; `docs/benchmarks/m14-scann-fork-decision.md`).
 > A decisão é gateada por evidência (measurement-first / anti-sunk-cost) — ver
 > [`docs/adr/0004-scann-fork-decision.md`](../adr/0004-scann-fork-decision.md), que define o gatilho que
 > reabriria o fork. A superfície `theodb_scann` literal abaixo permanece como API-alvo (gated, não entregue);
