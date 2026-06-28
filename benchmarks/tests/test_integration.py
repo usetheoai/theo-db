@@ -94,6 +94,27 @@ def test_harness_measures_diskann(db, tmp_path):
     assert max(r["recall_at_k"] for r in diskann) >= 0.90
 
 
+def test_harness_measures_ivfflat(db, tmp_path):
+    # M9: IVFFlat (pgvector) validated in the recall harness — features 03/04.
+    from theodb_bench.__main__ import build_config, build_parser
+    from theodb_bench.harness import run_benchmark
+
+    args = build_parser().parse_args(
+        ["--index", "ivfflat", "--metric", "l2", "--seed", "11",
+         "--n", "2000", "--dim", "32", "--n-queries", "30", "--k", "10", "--runs", "2"]
+    )
+    report = run_benchmark(build_config(args), db, tmp_path)
+    ivf = [r for r in report["results"] if r["index"] == "ivfflat"]
+    assert ivf, "harness produced no ivfflat results"
+    assert all(0.0 <= r["recall_at_k"] <= 1.0 and r["qps"] > 0 for r in ivf)
+    assert all(r["build_ms"] > 0 and r["index_bytes"] > 0 for r in ivf)
+    # The probes sweep is ascending; recall must be non-decreasing across it, and at probes=lists
+    # (all lists scanned) IVFFlat is exact-among-indexed (flat storage) -> high recall.
+    recalls = [r["recall_at_k"] for r in ivf]
+    assert recalls == sorted(recalls), f"recall not monotonic across probes sweep: {recalls}"
+    assert max(recalls) >= 0.90  # probes=lists scans all clusters -> ~exact recall
+
+
 def test_hnsw_recall_is_high_vs_exact(db, tmp_path):
     config = {
         "seed": 7, "n": 2000, "dim": 32, "n_queries": 50, "k": 10, "metric": "l2", "runs": 3,

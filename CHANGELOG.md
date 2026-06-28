@@ -14,6 +14,9 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **M9 — Índice IVFFlat / IVF validado + benchmarkado (features 03/04).** O índice IVFFlat do `pgvector` agora é cidadão de primeira classe no harness recall@k (`--index ivfflat` / `--index all`), com teste de integração medindo recall@10 com o índice efetivamente usado e curva recall × QPS vs HNSW. Evidência medida (n=5000, dim=16, l2): IVFFlat constrói ~6.9× mais rápido (157ms vs 1078ms) e índice ~4× menor (467KB vs 1.85MB); a `probes=lists` atinge recall 1.0. Relatório em `docs/benchmarks/m9-ivfflat.md`; specs 03/04 anotadas como validadas. Sem nova dependência (capacidade já no `pgvector`); nenhum claim de "mais rápido" (trade-off reportado como medido).
+- Roadmap ampliado via `/roadmap-feature` (auditoria de `docs/features/`): adicionados M9 (IVFFlat/IVF — specs 03/04), M10 (`ai.agg_summarize` — spec 11), M11 (`ai.*` modos acelerados — spec 08), M12 (`theodb_ai_nl` superfície completa — spec 12), M13 (superfície de IA empacotada nativa — specs 06/07), M14 (ScaNN-quality / gatilho de fork — spec 05, measurement-gated D3). Cada gap de feature agora é um milestone auditável dirigível por `/auto-plan M<N>`.
+
 ### Changed
 
 ### Deprecated

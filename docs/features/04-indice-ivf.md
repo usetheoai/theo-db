@@ -1,5 +1,10 @@
 # Criar um índice IVF
 
+> **✅ Validado (M9, 2026-06-28):** no `pgvector`, o índice da família IVF **é o IVFFlat** (não há um
+> access method "IVF" distinto). Foi **validado + benchmarkado** no harness recall@k — evidência medida
+> em [`docs/benchmarks/m9-ivfflat.md`](../benchmarks/m9-ivfflat.md). Ver também
+> [`03-indice-ivfflat.md`](./03-indice-ivfflat.md). A superfície literal abaixo permanece como API-alvo.
+
 > **Status:** 📋 Especificação (planejado) — recurso-alvo do milestone **M2 — Vetorial / IA** ([ROADMAP](../../ROADMAP.md)).
 > Esta página documenta a **API-alvo do TheoDB**. As funcionalidades aqui descritas **ainda não estão
 > implementadas** na release atual (M0 entrega PostgreSQL 17 + `pgvector`). Nenhum número de desempenho
