@@ -113,3 +113,119 @@ def test_hnsw_recall_is_high_vs_exact(db, tmp_path):
     assert r["qps"] > 0
     assert r["build_ms"] > 0
     assert r["index_bytes"] > 0
+
+
+# --- M7-S1: ai.hybrid_search_rrf contract (FTS + vector + RRF) -----------------------------------
+# Deterministic: explicit query_vector (no embedding endpoint call). vector(3) toy space.
+import psycopg2  # noqa: E402
+
+
+def _raw_conn():
+    c = psycopg2.connect(_dsn())
+    c.autocommit = True
+    return c
+
+
+def _seed_documents(cur, table: str, rows: list[tuple]) -> None:
+    """rows = [(doc_id, content, embedding_or_None)]. tsv is GENERATED from content (english)."""
+    cur.execute(f"DROP TABLE IF EXISTS {table}")
+    cur.execute(
+        f"CREATE TABLE {table} ("
+        f"  doc_id text PRIMARY KEY,"
+        f"  content text,"
+        f"  text_tsv tsvector GENERATED ALWAYS AS (to_tsvector('english', coalesce(content,''))) STORED,"
+        f"  embedding vector(3))"
+    )
+    cur.execute(f"CREATE INDEX {table}_gin ON {table} USING gin (text_tsv)")
+    for doc_id, content, emb in rows:
+        cur.execute(
+            f"INSERT INTO {table}(doc_id, content, embedding) VALUES (%s, %s, %s)",
+            (doc_id, content, emb),
+        )
+
+
+def _hybrid(cur, table, *, query_text=None, query_vector=None, k=60, per_leg_limit=20, result_limit=5):
+    cur.execute(
+        "SELECT id, score FROM ai.hybrid_search_rrf("
+        "  tbl => %s::regclass, id_col => 'doc_id', content_tsv_col => 'text_tsv', vector_col => 'embedding',"
+        "  query_text => %s, query_vector => %s, k => %s, per_leg_limit => %s, result_limit => %s)",
+        (table, query_text, query_vector, k, per_leg_limit, result_limit),
+    )
+    return cur.fetchall()
+
+
+def test_hybrid_fuses_both_legs():
+    conn = _raw_conn()
+    try:
+        with conn.cursor() as cur:
+            _seed_documents(cur, "hyb_both", [
+                ("d1", "database systems", "[1,0,0]"),   # matches FTS 'database' AND near query vector
+                ("d2", "database tuning",  "[0,1,0]"),   # matches FTS 'database', far vector
+                ("d3", "cooking recipes",  "[1,0,0]"),   # near query vector, no FTS 'database' match
+            ])
+            rows = _hybrid(cur, "hyb_both", query_text="database", query_vector="[1,0,0]", result_limit=5)
+            ids = [r[0] for r in rows]
+            assert ids[0] == "d1", f"both-legs doc must rank first, got {rows}"
+            assert set(ids) == {"d1", "d2", "d3"}, f"all docs surface via fusion, got {ids}"
+    finally:
+        conn.close()
+
+
+def test_hybrid_empty_fts_leg():
+    conn = _raw_conn()
+    try:
+        with conn.cursor() as cur:
+            _seed_documents(cur, "hyb_nofts", [
+                ("d1", "cooking recipes", "[1,0,0]"),
+                ("d2", "garden tools",    "[0,1,0]"),
+            ])
+            # query_text matches NO row via @@ → FTS leg empty; vector-only docs still returned.
+            rows = _hybrid(cur, "hyb_nofts", query_text="zzznomatch", query_vector="[1,0,0]")
+            ids = [r[0] for r in rows]
+            assert "d1" in ids, f"vector-only doc must surface when FTS leg empty, got {rows}"
+            assert all(r[1] > 0 for r in rows), "scores positive (vector leg contributes)"
+    finally:
+        conn.close()
+
+
+def test_hybrid_empty_vector_leg():
+    conn = _raw_conn()
+    try:
+        with conn.cursor() as cur:
+            # embeddings are NULL → vector leg empty (WHERE embedding IS NOT NULL); FTS-only docs surface.
+            _seed_documents(cur, "hyb_novec", [
+                ("d1", "database systems", None),
+                ("d2", "database tuning",  None),
+            ])
+            rows = _hybrid(cur, "hyb_novec", query_text="database", query_vector="[1,0,0]")
+            ids = [r[0] for r in rows]
+            assert set(ids) == {"d1", "d2"}, f"FTS-only docs must surface when vector leg empty, got {rows}"
+    finally:
+        conn.close()
+
+
+def test_hybrid_invalid_k_raises():
+    conn = _raw_conn()
+    try:
+        with conn.cursor() as cur:
+            _seed_documents(cur, "hyb_k0", [("d1", "database", "[1,0,0]")])
+            with pytest.raises(psycopg2.errors.InvalidParameterValue):  # SQLSTATE 22023
+                _hybrid(cur, "hyb_k0", query_text="database", query_vector="[1,0,0]", k=0)
+    finally:
+        conn.close()
+
+
+def test_hybrid_k_param_changes_score():
+    conn = _raw_conn()
+    try:
+        with conn.cursor() as cur:
+            _seed_documents(cur, "hyb_kp", [
+                ("d1", "database systems", "[1,0,0]"),
+                ("d2", "database tuning",  "[0,1,0]"),
+            ])
+            top_k1 = _hybrid(cur, "hyb_kp", query_text="database", query_vector="[1,0,0]", k=1)[0]
+            top_k60 = _hybrid(cur, "hyb_kp", query_text="database", query_vector="[1,0,0]", k=60)[0]
+            assert top_k1[0] == top_k60[0] == "d1"
+            assert abs(top_k1[1] - top_k60[1]) > 1e-4, "k must change the fused score (param wired, not hardcoded)"
+    finally:
+        conn.close()
