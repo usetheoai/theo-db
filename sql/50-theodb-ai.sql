@@ -155,6 +155,45 @@ if not m:
 return float(m.group(0))
 $$;
 
+-- ai.agg_summarize — AGGREGATE: collapse many rows into a single summary (feature 11, aggregate path).
+-- Composed from ai._chat (Rule 9 — no reinvention). sfunc is pure-SQL newline-join (NULL-skipping);
+-- finalfunc makes ONE ai._chat call on the accumulation, bounded to 12000 chars for cost/token safety
+-- (map-reduce for larger groups is deferred — YAGNI). Empty / all-NULL group -> NULL (no LLM call).
+-- VOLATILE via ai._chat; SECURITY INVOKER (the caller needs EXECUTE on ai._chat too — see the grant note).
+CREATE OR REPLACE FUNCTION ai._agg_summ_accum(state text, item text)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+AS $$
+    SELECT CASE
+        WHEN item IS NULL THEN state
+        WHEN state IS NULL THEN item
+        ELSE state || E'\n' || item
+    END;
+$$;
+
+CREATE OR REPLACE FUNCTION ai._agg_summ_final(state text)
+RETURNS text
+LANGUAGE sql
+VOLATILE
+AS $$
+    SELECT CASE
+        WHEN state IS NULL THEN NULL
+        ELSE ai._chat(
+            left(state, 12000),
+            'Summarize the following collected texts into a single concise summary (1-3 sentences).',
+            NULL)
+    END;
+$$;
+
+-- No CREATE OR REPLACE AGGREGATE exists; DROP-then-CREATE keeps re-applying this file idempotent.
+DROP AGGREGATE IF EXISTS ai.agg_summarize(text);
+CREATE AGGREGATE ai.agg_summarize(text) (
+    sfunc = ai._agg_summ_accum,
+    stype = text,
+    finalfunc = ai._agg_summ_final
+);
+
 -- Least-privilege: these functions make server-side outbound HTTP (the configured endpoint), so they are
 -- NOT granted to PUBLIC (same posture as theodb.embed).
 -- IMPORTANT (SECURITY INVOKER): the public wrappers run as the CALLER, and each one calls ai._chat as the
@@ -168,6 +207,9 @@ REVOKE ALL ON FUNCTION ai.if(text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION ai.analyze_sentiment(text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION ai.summarize(text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION ai.rank(text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION ai._agg_summ_accum(text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION ai._agg_summ_final(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION ai.agg_summarize(text) FROM PUBLIC;
 
 COMMENT ON FUNCTION ai._chat(text, text, text) IS
   'PRIVATE: one configurable chat-completions round-trip (theodb.llm_endpoint, http(s)-only, no redirects) '

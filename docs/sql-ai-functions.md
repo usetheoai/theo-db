@@ -89,6 +89,42 @@ LIMIT 20;
 - Target API spec: `docs/features/07-funcoes-ia-sql.md`, `docs/features/10-analise-sentimento.md`, `docs/features/11-sumarizacao-conteudo.md`
 - Implementation: `sql/50-theodb-ai.sql`
 
+## Aggregate summarization (`ai.agg_summarize`) — M10
+
+`ai.agg_summarize(text)` is a **SQL aggregate** that collapses many rows into a single summary. It
+complements the scalar `ai.summarize(content)` (which summarizes one value) and is built on the same
+private `ai._chat` helper — no new dependency.
+
+```sql
+-- one summary of all matching rows:
+SELECT ai.agg_summarize(content) FROM incidents WHERE created_at > now() - interval '1 day';
+
+-- one summary per group:
+SELECT service, ai.agg_summarize(content) AS digest
+FROM incidents
+GROUP BY service;
+```
+
+**Behavior:**
+
+- Rows are newline-joined (NULL rows skipped); the aggregate makes **one** `ai._chat` call per group.
+- **Empty group or all-NULL rows → `NULL`** (no LLM call).
+- The accumulated prompt is **bounded to 12000 characters** for cost/token safety — very large groups are
+  truncated (documented limitation; map-reduce over chunks is deferred future work).
+- `VOLATILE` (an LLM call) — cost/latency scale with the number of groups; no performance claim is made
+  without a reproducible benchmark.
+
+**Security:** `ai.agg_summarize` and its support functions are `REVOKE`d from `PUBLIC` (same posture as the
+scalar `ai.*`). Because they run `SECURITY INVOKER` and call `ai._chat`, a role needs `EXECUTE` on
+`ai._chat` **in addition to** `ai.agg_summarize`:
+
+```sql
+GRANT EXECUTE ON FUNCTION ai._chat(text,text,text), ai.agg_summarize(text) TO <role>;
+```
+
+**Limitations (honest):** no per-call model override for the aggregate (uses the configured
+`theodb.llm_model`; YAGNI — deferred); prompt truncated past the cap above.
+
 ## Natural-language → SQL (`ai.nl_to_sql` / `ai.nl_query`) — M7-S4
 
 Ask questions in natural language; get **safe, read-only** SQL or results. Safety does **not** trust the LLM —

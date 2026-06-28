@@ -119,6 +119,29 @@ def test_summarize_returns_text(conn, chat_server):
     assert out.startswith("A concise summary"), f"summarize wrapper did not route the summarize system prompt: {out!r}"
 
 
+def test_agg_summarize_over_rows(conn, chat_server):
+    # M10: the aggregate collapses many rows into one summary via ai._chat (summarize system prompt).
+    with conn.cursor() as cur:
+        _set_endpoint(cur, chat_server)
+        cur.execute("DROP TABLE IF EXISTS it_agg")
+        cur.execute("CREATE TABLE it_agg (id int, content text)")
+        cur.execute("INSERT INTO it_agg VALUES (1,'first note'),(2,'second note'),(3,'third note')")
+        cur.execute("SELECT ai.agg_summarize(content) FROM it_agg")
+        out = cur.fetchone()[0]
+    assert isinstance(out, str) and len(out) > 0
+    assert out.startswith("A concise summary"), f"agg_summarize did not route the summarize system prompt: {out!r}"
+
+
+def test_agg_summarize_empty_and_null_input_is_null(conn, chat_server):
+    # empty group -> finalfunc gets NULL state -> NULL (no LLM call); all-NULL rows -> still NULL.
+    with conn.cursor() as cur:
+        _set_endpoint(cur, chat_server)
+        cur.execute("SELECT ai.agg_summarize(c) FROM (SELECT NULL::text c WHERE false) z")
+        assert cur.fetchone()[0] is None
+        cur.execute("SELECT ai.agg_summarize(c) FROM (VALUES (NULL::text),(NULL::text)) v(c)")
+        assert cur.fetchone()[0] is None
+
+
 def test_rank_parses_float(conn, chat_server):
     with conn.cursor() as cur:
         _set_endpoint(cur, chat_server)
@@ -203,6 +226,29 @@ def test_real_openai_sentiment_polarity(conn):
     assert pos in ("positive", "negative", "neutral")
     assert neg in ("positive", "negative", "neutral")
     assert pos == "positive" and neg == "negative"
+
+
+@pytest.mark.skipif(
+    not (os.environ.get("THEODB_LLM_ENDPOINT") and os.environ.get("OPENAI_API_KEY")),
+    reason="real-OpenAI test: set THEODB_LLM_ENDPOINT + OPENAI_API_KEY to enable",
+)
+def test_real_openai_agg_summarize_shape(conn):
+    # M10 real evidence: aggregate N rows -> one non-empty summary (shape only; LLM non-determinism).
+    with conn.cursor() as cur:
+        cur.execute("SET theodb.llm_endpoint = %s", (os.environ["THEODB_LLM_ENDPOINT"],))
+        cur.execute("SET theodb.llm_model = %s", (os.environ.get("THEODB_LLM_MODEL", "gpt-4o-mini"),))
+        cur.execute("SET theodb.llm_api_key = %s", (os.environ["OPENAI_API_KEY"],))
+        cur.execute("DROP TABLE IF EXISTS it_agg_real")
+        cur.execute("CREATE TABLE it_agg_real (id int, content text)")
+        cur.execute(
+            "INSERT INTO it_agg_real VALUES "
+            "(1,'The deployment failed because the database ran out of disk space.'),"
+            "(2,'A second outage was caused by an expired TLS certificate.'),"
+            "(3,'The team added monitoring alerts for disk usage and certificate expiry.')"
+        )
+        cur.execute("SELECT ai.agg_summarize(content) FROM it_agg_real")
+        out = cur.fetchone()[0]
+    assert isinstance(out, str) and len(out) > 0  # a real, non-empty summary of the 3 incident notes
 
 
 # --- added in review: untested fail-fast branches + neutral label + message assertions ------------

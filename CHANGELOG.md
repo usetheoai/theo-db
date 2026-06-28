@@ -14,6 +14,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **M10 — `ai.agg_summarize` (sumarização agregada, feature 11).** Novo **aggregate** PostgreSQL `ai.agg_summarize(text)` que colapsa muitas linhas em um único resumo, complementando o `ai.summarize` escalar (M7-S3). Composto sobre o helper privado `ai._chat` (Regra 9 — sem nova dependência): `sfunc` puro-SQL (newline-join, pula NULL) + `finalfunc` puro-SQL (`NULL→NULL` sem chamada LLM; senão uma chamada `ai._chat` no acumulado **limitado a 12000 chars** por segurança de custo/token — map-reduce deferido, YAGNI). Idempotente (`DROP AGGREGATE IF EXISTS`); `REVOKE … FROM PUBLIC` no aggregate + 2 funções de apoio (paridade com `ai.*`). Funciona em `GROUP BY`. **Evidência real (gpt-4o-mini):** agrega 3 notas de incidente em um resumo coerente (registrado em `knowledge-base/implementations/m10-agg-summarize-implementation.md`); 2 testes offline (stub determinístico) + 1 real opt-in + smoke de presença/privilégio. Baked via initdb.d (`sql/50-theodb-ai.sql`); doc em `docs/sql-ai-functions.md`. Sem claim de performance (custo/latência escalam por grupo — documentado).
+
 ### Changed
 
 ### Deprecated
