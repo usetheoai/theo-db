@@ -50,8 +50,9 @@ def result():
 def test_columnar_skips_without_extension(db):
     if db.pg_mooncake_available():
         pytest.skip("pg_mooncake IS available here — absent-path covered on the shipped image")
-    with pytest.raises(DBUnavailableError):
+    with pytest.raises(DBUnavailableError) as exc:
         db.ensure_mooncake_extension()  # fails loud, not a silent NULL
+    assert "pg_mooncake" in str(exc.value)
 
 
 def test_columnar_mirror_matches_row(result):
@@ -70,3 +71,10 @@ def test_columnar_uses_duckdb_plan(result):
 
 def test_columnar_reports_timings(result):
     assert result["row"]["ms"] > 0 and result["columnar"]["ms"] > 0
+
+
+def test_columnar_create_mirror_nonexistent_base_raises(db):
+    _require_mooncake(db)
+    db.ensure_mooncake_extension()
+    with pytest.raises(DBUnavailableError):  # typed error, not silent
+        db.create_columnstore_mirror("cs_nope", "does_not_exist_base")

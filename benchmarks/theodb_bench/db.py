@@ -229,10 +229,17 @@ class VectorDB:
 
     # --- M6: pg_mooncake columnar/HTAP (throwaway measurement substrate; requires preload + wal_level) ----
     def pg_mooncake_available(self) -> bool:
-        """True iff pg_mooncake is installable (the lib is preloaded + the extension is present)."""
+        """True iff the pg_mooncake control file is installed AND it is in shared_preload_libraries.
+
+        Both are required: pg_mooncake needs the preload (it relies on pg_duckdb being preloaded) — checking
+        only pg_available_extensions would pass on an image that installed the files but was started without
+        `-c shared_preload_libraries=pg_duckdb,pg_mooncake` (honesty parity with pg_textsearch_available)."""
         with self._cursor() as cur:
             cur.execute("SELECT count(*) FROM pg_available_extensions WHERE name = 'pg_mooncake'")
-            return int(cur.fetchone()[0]) > 0
+            installed = int(cur.fetchone()[0]) > 0
+            cur.execute("SELECT current_setting('shared_preload_libraries', true)")
+            preload = cur.fetchone()[0] or ""
+        return installed and ("pg_mooncake" in preload)
 
     def ensure_mooncake_extension(self) -> None:
         with self._cursor() as cur:

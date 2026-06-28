@@ -87,7 +87,7 @@ the new helpers ride the existing `VectorDB` adapter (DIP). No product-layer cod
 
 ## Objective
 
-- [ ] A throwaway `packaging/Dockerfile.columnar` provides pg_mooncake on PostgreSQL 17 (built from source; pg_duckdb base) — NOT the shipped image.
+- [ ] A throwaway `packaging/Dockerfile.columnar` provides pg_mooncake as the measurement substrate (the canonical MIT distribution; the from-source PG17 build is attempted in `Dockerfile.columnar-pg17probe`, gated on a rustc/MSRV fix) — NOT the shipped image.
 - [ ] `VectorDB` columnar helpers: detect pg_mooncake, create a columnstore mirror, capture EXPLAIN, time a query.
 - [ ] The columnar harness runs an analytical query (scan-heavy aggregate/group-by over a non-trivial row count) on the mirror vs the row-store and reports correctness (results match) + timing for both.
 - [ ] The row-vs-columnar plan choice is captured: `DuckDBScan` on the mirror vs `Seq Scan` on the row table (DoD-2).
@@ -421,7 +421,7 @@ VERIFY:  python3 -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yml'
 | 2 | Row vs columnar plan choice documented (DoD-2) | T2.1, T3.1 | EXPLAIN artifact: DuckDBScan (mirror) vs Seq Scan (row) + analytics doc |
 | 3 | Honesty: lakehouse DuckDB+Iceberg, not in-memory (DoD-3 / D2) | D2, T3.1 | analytics doc + report state the honest delta |
 | 4 | Permissive (MIT) — no AGPL | T1.1 | license-sweep pg_mooncake+pg_duckdb MIT verdicts + audit doc |
-| 5 | PG17 support (risk #1) | T1.1 | Dockerfile.columnar builds pg_mooncake-pg17 (Makefile-supported) |
+| 5 | PG17 support (risk #1) | T1.1 | pg17 supported (Makefile pg14–18); from-source pg17 build attempted (`Dockerfile.columnar-pg17probe`), blocked on a rustc/MSRV pin at upstream HEAD — gated. `Dockerfile.columnar` = canonical PG18 distribution (measurement substrate) |
 | 6 | Correctness (mirror == row) | T2.1 | `test_columnar_mirror_matches_row` |
 | 7 | Distribution unchanged until measurement justifies (YAGNI) | T1.1 | pg_mooncake only in the throwaway `Dockerfile.columnar` (D1); shipped image untouched |
 | 8 | Reproducible in CI | T3.1 | `columnar-measure` job |

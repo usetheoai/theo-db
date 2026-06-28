@@ -83,8 +83,13 @@ image (measurement-first gate — M6); this records the M6 columnar identificati
 
 | Candidate | License (verbatim source) | Verdict |
 |---|---|---|
-| `Mooncake-Labs/pg_mooncake` | **MIT** (`raw.githubusercontent.com/Mooncake-Labs/pg_mooncake/main/LICENSE`) | **PERMISSIVE** |
-| `duckdb/pg_duckdb` | **MIT** (MIT body; `raw.githubusercontent.com/duckdb/pg_duckdb/main/LICENSE`) | **PERMISSIVE** |
+| `Mooncake-Labs/pg_mooncake` v0.1.2 | **MIT** (`raw.githubusercontent.com/Mooncake-Labs/pg_mooncake/v0.1.2/LICENSE`) | **PERMISSIVE** |
+| `duckdb/pg_duckdb` v1.0.0 | **MIT** (MIT body; `raw.githubusercontent.com/duckdb/pg_duckdb/v1.0.0/LICENSE`) | **PERMISSIVE** |
+| `duckdb/duckdb` v1.1.3 | **MIT** (`raw.githubusercontent.com/duckdb/duckdb/v1.1.3/LICENSE`) | **PERMISSIVE** |
 
-Net: the columnar/HTAP stack (pg_mooncake + pg_duckdb + DuckDB) is permissive (MIT), D1-clean. Adoption into
-the shipped image is gated on the PG17 build + a large-scale measurement (see `docs/benchmarks/m6-columnar-vs-row.md`).
+Net: the three top-level columnar licenses (pg_mooncake, pg_duckdb, DuckDB) are MIT — verified verbatim from
+their canonical repos (pinned tags). **Caveat (honest):** this checks the top-level LICENSE files only; before
+pg_mooncake is adopted INTO the shipped image, a §(b)-equivalent transitive scan (the full Rust/pgrx + bundled-
+DuckDB tree) MUST run to make the D1 claim hold for the shipped artifact. Until then these are pre-adoption,
+informational verdicts (the pieces are not in the distribution — measurement-first gate). Adoption is gated on
+the PG17 build + a large-scale measurement (see `docs/benchmarks/m6-columnar-vs-row.md`).

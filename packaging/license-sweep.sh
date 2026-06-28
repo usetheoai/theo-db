@@ -74,8 +74,9 @@ bm25_license "VectorChord-bm25" "https://raw.githubusercontent.com/tensorchord/V
 echo "== (e) Columnar candidates (M6) — license verdict from each canonical repo (informational: not in the shipped image) =="
 # pg_mooncake + pg_duckdb (the columnar/HTAP pieces) must be permissive (MIT). Same reproducible, fail-closed
 # discipline as § (c). These are NOT in the distribution image (measurement-first gate) — informational record.
-bm25_license "pg_mooncake" "https://raw.githubusercontent.com/Mooncake-Labs/pg_mooncake/main/LICENSE" "permissive"
-bm25_license "pg_duckdb" "https://raw.githubusercontent.com/duckdb/pg_duckdb/main/LICENSE" "permissive"
+bm25_license "pg_mooncake" "https://raw.githubusercontent.com/Mooncake-Labs/pg_mooncake/v0.1.2/LICENSE" "permissive"
+bm25_license "pg_duckdb" "https://raw.githubusercontent.com/duckdb/pg_duckdb/v1.0.0/LICENSE" "permissive"
+bm25_license "duckdb" "https://raw.githubusercontent.com/duckdb/duckdb/v1.1.3/LICENSE" "permissive"
 
 echo "======================================================"
 if [ "$fail" -eq 0 ]; then echo "LICENSE SWEEP PASSED — zero AGPL in the TheoDB package"; else echo "LICENSE SWEEP FAILED — AGPL found"; fi
