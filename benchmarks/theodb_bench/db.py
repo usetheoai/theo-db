@@ -188,3 +188,31 @@ class VectorDB:
                 (table, query_text, vec, int(k), int(n), int(n)),
             )
             return [r[0] for r in cur.fetchall()]
+
+    # --- M7-S2: pg_textsearch BM25 leg (throwaway image only; requires shared_preload_libraries) ----
+    def pg_textsearch_available(self) -> bool:
+        """True iff the pg_textsearch extension can be created (i.e. the lib is preloaded)."""
+        with self._cursor() as cur:
+            cur.execute("SELECT count(*) FROM pg_available_extensions WHERE name = 'pg_textsearch'")
+            return int(cur.fetchone()[0]) > 0
+
+    def ensure_bm25_extension(self) -> None:
+        with self._cursor() as cur:
+            cur.execute("CREATE EXTENSION IF NOT EXISTS pg_textsearch")
+
+    def create_bm25_index(self, table: str, text_col: str = "content", text_config: str = "english") -> None:
+        with self._cursor() as cur:
+            cur.execute(
+                f"CREATE INDEX {table}_bm25 ON {table} "
+                f"USING bm25 ({text_col}) WITH (text_config='{text_config}')"
+            )
+
+    def bm25_query(self, table: str, query_text: str, n: int, text_col: str = "content") -> list:
+        # pg_textsearch: `col <@> 'query'` returns the negative BM25 score (lower = better match),
+        # so ASC ordering yields best-first. LIMIT enables its top-k (Block-Max WAND) optimization.
+        with self._cursor() as cur:
+            cur.execute(
+                f"SELECT doc_id FROM {table} ORDER BY {text_col} <@> %s LIMIT {int(n)}",
+                (query_text,),
+            )
+            return [r[0] for r in cur.fetchall()]

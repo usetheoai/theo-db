@@ -1,0 +1,19 @@
+# TheoDB M7-S2 — THROWAWAY image: theo-db:dev + pg_textsearch (permissive BM25), for MEASUREMENT only.
+# This image is NOT the shipped distribution. Per measurement-first (ADR 0002 / ADR 0003), pg_textsearch is
+# built here solely to (a) functionally prove BM25 works on the TheoDB engine and (b) measure its recall vs
+# the already-shipped ts_rank_cd. Adopting pg_textsearch into the shipped Dockerfile is a future decision
+# gated on docs/benchmarks/m7-bm25-vs-tsrank.md. Mirrors the throwaway pattern of packaging/Dockerfile.regress.
+#
+# pg_textsearch is PostgreSQL License (permissive, D1-clean — see packaging/license-sweep.sh § (c) + ADR 0003).
+# Run with: docker run ... theo-db-bm25 -c shared_preload_libraries=pg_textsearch
+FROM theo-db:dev
+
+ARG PGTS_TAG=v1.3.1
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential git ca-certificates postgresql-server-dev-17 \
+ && rm -rf /var/lib/apt/lists/*
+RUN git clone --depth 1 --branch "$PGTS_TAG" https://github.com/timescale/pg_textsearch /tmp/pgts \
+ && cd /tmp/pgts && make && make install \
+ && rm -rf /tmp/pgts
+USER postgres

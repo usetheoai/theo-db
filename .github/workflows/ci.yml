@@ -343,3 +343,62 @@ jobs:
       - name: Teardown
         if: always()
         run: docker rm -f theo-db-ai || true
+
+  bm25-measure:
+    timeout-minutes: 25
+    # M7-S2: permissive BM25 (pg_textsearch) — build the throwaway image + MEASURE recall vs ts_rank_cd.
+    # measurement-first (ADR 0002/0003): pg_textsearch is NOT in the shipped image; this job builds it only to
+    # functionally prove + measure BM25. Deterministic synthetic fixture; no external API. Run locally first.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build TheoDB base image (cache from image-and-bench)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          tags: theo-db:dev
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: License sweep — BM25 candidates permissive/barred verdict (reproducible, ADR 0003)
+        run: bash packaging/license-sweep.sh
+
+      - name: Build throwaway BM25 image (pg_textsearch v1.3.1, PostgreSQL License)
+        run: docker build -f packaging/Dockerfile.bm25 -t theo-db-bm25 .
+
+      - name: Start BM25 image (shared_preload_libraries=pg_textsearch)
+        run: |
+          docker run -d --name theo-db-bm25c -e POSTGRES_PASSWORD=postgres -p 5432:5432 \
+            theo-db-bm25 -c shared_preload_libraries=pg_textsearch
+          for i in $(seq 1 30); do
+            [ "$(docker inspect -f '{{.State.Health.Status}}' theo-db-bm25c)" = healthy ] && break
+            sleep 2
+          done
+          docker inspect -f '{{.State.Health.Status}}' theo-db-bm25c | grep -q healthy
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install harness deps
+        working-directory: benchmarks
+        run: pip install -r requirements.txt
+
+      - name: BM25 recall measurement (pg_textsearch vs ts_rank_cd, against the real build)
+        working-directory: benchmarks
+        env:
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: postgres
+        run: pytest -m integration tests/test_bm25.py -q
+
+      - name: Teardown
+        if: always()
+        run: docker rm -f theo-db-bm25c || true

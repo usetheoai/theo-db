@@ -26,9 +26,10 @@ def rrf_fuse(leg_rankings: list, k: int = 60) -> list:
 
 
 def run_three_retrievers(db, dataset, embed_fn, dim: int, table: str = "hybrid_eval",
-                         k_rrf: int = 60, top: int = 100) -> dict:
+                         k_rrf: int = 60, top: int = 100, include_bm25: bool = False) -> dict:
     """Load the labelled corpus into a documents table, then score pure-vector / pure-FTS / RRF-hybrid
     retrievers with nDCG@10 + Recall@100 (BEIR methodology). Returns {name: {ndcg10, recall100}}.
+    When include_bm25=True, also scores a `bm25` leg via pg_textsearch (requires the throwaway bm25 image).
 
     embed_fn(text) -> vector (deterministic lexical embedder for CI, or theodb.embed for the real eval).
     """
@@ -42,6 +43,12 @@ def run_three_retrievers(db, dataset, embed_fn, dim: int, table: str = "hybrid_e
         "fts": lambda qtext, qvec: db.fts_query(table, qtext, top),
         "hybrid": lambda qtext, qvec: db.hybrid_rrf_docs(table, qtext, qvec, k_rrf, top),
     }
+
+    # M7-S2 (measurement-first): optionally add the pg_textsearch BM25 leg (throwaway image only).
+    if include_bm25:
+        db.ensure_bm25_extension()
+        db.create_bm25_index(table)
+        retrievers["bm25"] = lambda qtext, qvec: db.bm25_query(table, qtext, top)
 
     out: dict = {}
     for name, retrieve in retrievers.items():
