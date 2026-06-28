@@ -1,83 +1,60 @@
-# Discover Edge Case Review — pg-extension-packaging
+# Edge Case Review — M15 pg-extension-packaging (implementation plan)
+
+> Note: distinct from the discovery-plan edge-case review of the same date (that one reviewed the *discovery*
+> plan; this reviews the *implementation* plan `knowledge-base/plans/pg-extension-packaging-plan.md`).
 
 Date: 2026-06-28
-Discovery plan analyzed: .claude/knowledge-base/discoveries/plans/pg-extension-packaging-plan.md
-Research questions analyzed: 8
-Edge cases found: 5 (MUST FIX: 2, SHOULD TEST: 2, DOCUMENT: 1)
-
-All cited reference paths were verified to exist (Q1 `pgvector/test` + `pgvectorscale/tests`; Q2
-`supabase-postgres/migrations/tests/extensions/` with `01-postgis.sql`…`10-timescaledb.sql`; Q4 both
-Makefiles; Q5 all distribution entrypoints; Q6/Q7/Q8 control + upgrade + pgrx scripts). No fabricated
-citation. The edge cases below are about **method correctness**, not missing paths.
+Tasks analyzed: 7 (T1.1, T1.2, T1.3, T2.1, T3.1, T3.2, T4.1, T4.2, T4.3)
+Cases found: 5 (EDGE: 2, NEGATIVE: 3 | MUST FIX: 2, SHOULD TEST: 2, DOCUMENT: 1)
 
 ## MUST FIX
 
-### EC-1: Q4 points at the wrong Makefile for the "SQL-only" shape
-- **Affected question:** Q4 (tools)
-- **Family:** Method
-- **Scenario:** Q4 asks for "the minimal PGXS Makefile shape for a SQL-only extension" and lists BOTH
-  `pgvector/Makefile` and `pgvectorscale/Makefile`. Verification shows `pgvectorscale/Makefile` is a
-  **pgrx-hybrid** build (`PGRX_VERSION`, `cargo build --features pg…`), NOT SQL-only — it compiles a
-  `.so`. Reading it as the SQL-only model would teach the wrong idiom.
-- **Impact:** The blueprint could recommend a pgrx/cargo build for what is a pure-SQL (plpython3u)
-  extension — over-engineering + a wrong toolchain (violates Rule 9 / KISS).
-- **Suggested fix:** Q4 method → make `pgvector/Makefile` the **primary** SQL-only model
-  (`EXTENSION = vector` / `DATA = $(wildcard sql/*--*--*.sql)` / `DATA_built` / `PGXS`), and use
-  `pgvectorscale/Makefile` ONLY as the pgrx **contrast** (which is already Q8's job).
+### EC-1: `requires` omits `plpython3u` → `CREATE EXTENSION theodb` fails creating plpython3u functions
+- **Affected task:** T1.1
+- **Kind:** NEGATIVE (the install fails if plpython3u is absent)
+- **Family:** Boundary / Dependency
+- **Scenario:** the bodies define `LANGUAGE plpython3u` functions (`sql/50-theodb-ai.sql` ×7, `sql/60-theodb-nl.sql` ×2, `sql/30-theodb-embed.sql` ×2 — verified). The plan's control declares `requires = 'vector, vectorscale'` — **plpython3u is missing**. On a DB without plpython3u, `CREATE EXTENSION theodb` (even with CASCADE) reaches the first `LANGUAGE plpython3u` function and errors mid-install (`language "plpython3u" does not exist`), leaving a partially-created extension.
+- **Impact:** the extension does not install on any PG where plpython3u was not pre-installed — defeats M15 on non-TheoDB PGs and makes CASCADE not self-sufficient.
+- **Suggested fix:** `requires = 'vector, vectorscale, plpython3u'` in `theodb.control` (CASCADE then installs plpython3u too, or fails fast with a clear `required extension "plpython3u" is not installed`). The blueprint Corner 2 already listed plpython3u as a dependency — align the control table to it.
 
-### EC-2: Q7's central technique (adopt init-script objects) is greenfield in every reference
-- **Affected question:** Q7 (techniques)
-- **Family:** Interpretation / Citation
-- **Scenario:** Q7 wants the "init-script → extension adoption" strategy (`ALTER EXTENSION theodb ADD
-  FUNCTION …`). The pgvectorscale upgrade scripts (`vectorscale--X--Y.sql`) all assume a **clean**
-  `CREATE EXTENSION` lineage — none adopt pre-existing orphan objects. So Fase B against the clones
-  will find the idempotent-upgrade idiom (`CREATE OR REPLACE`, `DO $$` guards, `@extschema@`) but
-  **NOT** the orphan-adoption move. That move is a TheoDB-specific scenario (our `ai.*` already exist
-  via init-script on running DBs).
-- **Impact:** If Q7 demands orphan-adoption evidence from the clones, Fase A is exhausted → Q7 BLOCKED →
-  the hardest M15 decision is left unanswered.
-- **Suggested fix:** Split Q7 honestly: (a) idempotent-upgrade idiom → evidence from
-  `pgvectorscale/.../sql/vectorscale--*.sql` (rich); (b) orphan-object adoption → evidence from the
-  **official PG doc** "Packaging Related Objects into an Extension" (`postgresql.org`, allowlisted) +
-  state explicitly that the clones are greenfield here. Add a halt-loop checkpoint so Q7 is DONE when
-  BOTH (a) the idiom and (b) a doc-cited adoption strategy are captured.
+### EC-2: `make install` cannot run in the runtime stage (dev package removed) → image build fails
+- **Affected task:** T2.1 (and T1.2's install assumption)
+- **Kind:** NEGATIVE (build-time failure)
+- **Family:** Resource / Tooling
+- **Scenario:** `Dockerfile:46` runs `apt-get remove -y build-essential postgresql-server-dev-$PG_MAJOR` after compiling pgvector. PGXS (`$(pg_config --pgxs)` → the global `Makefile` shipped by `postgresql-server-dev-NN`) is therefore **absent** in the runtime stage. `make install` (which does `include $(PGXS)`) fails. For a SQL-only extension there is no `.so` to build — install is just placing `theodb.control` + `theodb--*.sql` into `$(pg_config --sharedir)/extension/`.
+- **Impact:** the image build breaks at the install step.
+- **Suggested fix:** in the Dockerfile, install the SQL-only extension by **copying** `theodb.control` + the built `theodb--1.0.sql` + `theodb--1.0--1.1.sql` directly into `"$(pg_config --sharedir)/extension/"` (one `RUN cp`), NOT via `make install`. Keep the PGXS `Makefile` as the **local-dev** install path (where the dev package exists). `pg_config` itself stays in the base image; only `--pgxs` is gone.
 
 ## SHOULD TEST
 
-### EC-3: Q3 assumes plpython3u can be a `requires` target without noting the superuser consequence
-- **Affected question:** Q3 (deps)
-- **Suggested halt-loop checkpoint:** Before answering Q3 DONE, assert the blueprint states whether
-  `requires = '…, plpython3u'` forces `superuser = true` in the control file (plpython3u is an
-  **untrusted** PL — superuser-only). Evidence pointer already in hand: `vectorscale.control` sets
-  `superuser = true`. If the umbrella requires plpython3u, the control likely must too — capture that.
+### EC-3: `CREATE EXTENSION theodb` without CASCADE on a bare PG (deps absent)
+- **Affected task:** T1.3
+- **Kind:** NEGATIVE
+- **Suggested test:** `test_create_without_cascade_errors_clearly()` — on a DB without `vector`, run `CREATE EXTENSION theodb` (no CASCADE) and assert it raises the typed error mentioning the missing required extension (not a generic failure). Asserts the documented remedy (CASCADE) is the real behavior. (Already in `## Failure scenarios`; promote to an explicit test.)
 
-### EC-4: Q2 can lean on the local timescaledb test instead of the network
-- **Affected question:** Q2 (tests)
-- **Suggested halt-loop checkpoint:** `supabase-postgres/migrations/tests/extensions/10-timescaledb.sql`
-  exists locally — prefer it (and `01..09`) as the per-extension install-test pattern; only WebFetch
-  `docs.timescale.com` if an **upgrade-specific** idiom is needed that the local test does not show.
-  Reduces network dependency (fewer allowlist round-trips, less BLOCKED risk).
+### EC-4: re-running the init / `CREATE EXTENSION theodb` twice (idempotency at the boundary)
+- **Affected task:** T2.1
+- **Kind:** EDGE
+- **Suggested test:** `test_create_extension_is_idempotent()` — `CREATE EXTENSION IF NOT EXISTS theodb CASCADE` twice; assert the second is a no-op (one row in `pg_extension`, no error). The init uses `IF NOT EXISTS` (00-create-theodb.sql); this proves a container restart / re-attach does not double-create.
 
 ## DOCUMENT
 
-### EC-5: Q5 (distribution corner) is intentionally shallow
-- **Accepted risk:** `ansible/`, `nix/`, `*.pkr.hcl` are large; D2 already declares entrypoint-level
-  (not full-infra) coverage. Risk of scope creep / budget exhaustion is consciously accepted — the
-  blueprint will cite the extension-install entrypoints only and flag the shallow coverage honestly.
-  No plan change beyond what D2 + the per-project budget already enforce.
+### EC-5: `theodb_ai_nl` config-table rows do not survive `pg_dump` without `pg_extension_config_dump`
+- **Kind:** EDGE
+- **Accepted risk:** packaging the config tables (`nl_config`/`nl_templates`/`nl_value_index`) as extension members means their **user rows** are not dumped by default (extension data is recreated by the script, not dumped). This is already tracked as Unresolved Q3; not blocking install. A follow-up may call `pg_extension_config_dump('ai.nl_config','')` to opt the user rows into dumps. Documented, deferred.
 
 ## Summary
 
-| Question | Edges found | MUST FIX | SHOULD TEST | DOCUMENT |
-|----------|-------------|----------|-------------|----------|
-| Q1 | 0 | 0 | 0 | 0 |
-| Q2 | 1 | 0 | 1 | 0 |
-| Q3 | 1 | 0 | 1 | 0 |
-| Q4 | 1 | 1 | 0 | 0 |
-| Q5 | 1 | 0 | 0 | 1 |
-| Q6 | 0 | 0 | 0 | 0 |
-| Q7 | 1 | 1 | 0 | 0 |
-| Q8 | 0 | 0 | 0 | 0 |
+| Task | EDGE | NEGATIVE | MUST FIX | SHOULD TEST | DOCUMENT |
+|------|------|----------|----------|-------------|----------|
+| T1.1 | 0 | 1 | 1 | 0 | 0 |
+| T1.2 | 0 | 0 | 0 | 0 | 0 |
+| T1.3 | 0 | 1 | 0 | 1 | 1 |
+| T2.1 | 1 | 1 | 1 | 1 | 0 |
+| T3.x/T4.x | 0 | 0 | 0 | 0 | 0 |
 
-**Verdict:** DISCOVERY PLAN NEEDS ADJUSTMENT — 2 MUST FIX absorbed into plan v1.1 (Q4 ref correction;
-Q7 split + doc-cited adoption). SHOULD TEST items added as halt-loop checkpoints.
+**Coverage check:** the two install boundaries (dependency resolution; image install mechanism) now have both an
+EDGE (idempotency) and a NEGATIVE (missing dep / missing PGXS) case considered.
+
+**Verdict:** PLAN NEEDS ADJUSTMENT — 2 MUST FIX absorbed into plan v1.1 (requires += plpython3u; Dockerfile
+copies the SQL-only extension instead of `make install`). 2 SHOULD TEST added to TDD.
