@@ -44,4 +44,22 @@ if [ "$TOP" != "d1" ]; then
 fi
 echo "hybrid: ai.hybrid_search_rrf top result = $TOP (both-legs doc) OK"
 
+# M7-S3: generative ai.* functions present + locked down (NO network — presence + privilege only).
+AI_CHECK=$(psql -h "$HOST" -p "$PORT" -U "$USER" -t -A -q -v ON_ERROR_STOP=1 <<'SQL'
+SELECT
+  (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+     WHERE n.nspname='ai' AND p.proname IN ('generate','if','analyze_sentiment','summarize','rank'))::text
+  || ':' ||
+  -- none of the outbound-HTTP functions may be executable by PUBLIC (least-privilege)
+  (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+     WHERE n.nspname='ai' AND p.proname IN ('generate','if','analyze_sentiment','summarize','rank','_chat')
+       AND has_function_privilege('public', p.oid, 'execute'))::text;
+SQL
+)
+if [ "$AI_CHECK" != "5:0" ]; then
+  echo "AI SMOKE FAILED: expected '5:0' (5 functions present, 0 PUBLIC-executable), got '$AI_CHECK'" >&2
+  exit 1
+fi
+echo "ai: 5 generative ai.* functions present, 0 executable by PUBLIC OK"
+
 echo "SMOKE PASSED"

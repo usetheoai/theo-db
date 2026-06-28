@@ -14,6 +14,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **M7-S3 (IA avançada) — funções de IA generativa em SQL.** Cinco funções escalares no schema `ai` (`ai.generate`→text, `ai.if`→boolean, `ai.analyze_sentiment`→positive/negative/neutral, `ai.summarize`→text, `ai.rank`→real) sobre um **endpoint chat-completions OpenAI-compatible configurável** (GUCs `theodb.llm_endpoint`/`llm_model`/`llm_api_key`), **model-agnostic** (local ou nuvem) — espelha o `ai.generate`/`google_ml_integration` do AlloyDB sem o lock-in de modelo. Um helper privado único `ai._chat` é a fonte de verdade do HTTP (DRY); estende o padrão `theodb.embed` do M2 (SSRF guard http(s)-only, sem redirects, erros tipados fail-fast, `REVOKE FROM PUBLIC`). Parsing determinístico com fail-fast (`22023`) em saída não-conforme (D4); a chave de API nunca aparece em mensagens de erro. Baked no image via initdb.d (`sql/50-theodb-ai.sql`). **Evidência real, sem mock:** 12 testes de contrato offline (stub determinístico) + 1 teste end-to-end **contra a OpenAI real** (polaridade de sentimento verificada). Smoke de presença + privilégio (sem rede) + job CI `ai-sql` (stub offline, zero chamadas externas). Doc `docs/sql-ai-functions.md`. Modos array/cursor ("aceleradas") são follow-up (YAGNI). Zero dependência nova; sem AGPL.
+
 ### Changed
 
 ### Deprecated

@@ -66,5 +66,8 @@ COPY sql/30-theodb-embed.sql /docker-entrypoint-initdb.d/30-theodb-embed.sql
 # ai.hybrid_search_rrf() — M7-S1 hybrid search (FTS + vector + RRF), created on fresh DB init (idempotent).
 COPY sql/40-theodb-hybrid.sql /docker-entrypoint-initdb.d/40-theodb-hybrid.sql
 
+# ai.generate/if/analyze_sentiment/summarize/rank — M7-S3 generative-AI functions (idempotent).
+COPY sql/50-theodb-ai.sql /docker-entrypoint-initdb.d/50-theodb-ai.sql
+
 HEALTHCHECK --interval=5s --timeout=5s --start-period=10s --retries=5 \
   CMD pg_isready -h localhost -p 5432 -U postgres -q
