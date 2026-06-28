@@ -365,7 +365,7 @@ rápido sobre dados transacionais vivos, com escolha de plano row vs colunar.
 
 ---
 
-### M7 — [ ] IA avançada
+### M7 — [x] IA avançada
 
 **Objective:** Filtered vector search, hybrid search + reranking, NL → SQL seguro (views parametrizadas)
 e **funções de IA generativa em SQL** (geração de texto, classificação condicional, análise de sentimento,
