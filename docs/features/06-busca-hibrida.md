@@ -8,6 +8,13 @@
 
 Esta página cobre a busca híbrida no TheoDB — combinação de busca vetorial (semântica) com Full Text Search — tanto pela função nativa `ai.hybrid_search()` quanto pela implementação manual via SQL com Reciprocal Rank Fusion (RRF).
 
+> **Superfície implementada (M7-S1):** a primeira fatia entregue é a função SQL **`ai.hybrid_search_rrf(...)`**
+> (`sql/40-theodb-hybrid.sql`) — o MVP manual-SQL da RRF (`score = Σ 1/(k+rank)`, k=60 default exposto como
+> parâmetro; perna FTS `ts_rank_cd`/GIN + perna vetorial `pgvector` `<=>`; empty-leg via `FULL OUTER JOIN`+`COALESCE`).
+> A API nativa `ai.hybrid_search()` com `search_inputs` JSON (abaixo) é um wrapper fino futuro sobre essa mesma
+> função (uma única fonte de verdade da fusão). Recall medido (BEIR-style) em `docs/benchmarks/m7-hybrid-recall.md`.
+> BM25 permissivo (`pg_search` é AGPL → barrado por D1) é a slice M7-S2.
+
 ---
 
 # 1. Habilitar funções Preview

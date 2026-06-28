@@ -63,5 +63,8 @@ RUN apt-get update && \
 # theodb.embed() — created on fresh DB init (idempotent script).
 COPY sql/30-theodb-embed.sql /docker-entrypoint-initdb.d/30-theodb-embed.sql
 
+# ai.hybrid_search_rrf() — M7-S1 hybrid search (FTS + vector + RRF), created on fresh DB init (idempotent).
+COPY sql/40-theodb-hybrid.sql /docker-entrypoint-initdb.d/40-theodb-hybrid.sql
+
 HEALTHCHECK --interval=5s --timeout=5s --start-period=10s --retries=5 \
   CMD pg_isready -h localhost -p 5432 -U postgres -q

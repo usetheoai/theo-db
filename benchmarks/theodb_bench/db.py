@@ -132,3 +132,59 @@ class VectorDB:
         with self._cursor() as cur:
             cur.execute("SELECT pg_relation_size(%s::regclass)", (index_name,))
             return int(cur.fetchone()[0])
+
+    # --- M7-S1: documents table (text + tsvector + vector) for the hybrid eval -------------------
+    def create_documents_table(self, table: str, dim: int) -> None:
+        with self._cursor() as cur:
+            cur.execute(f"DROP TABLE IF EXISTS {table}")
+            cur.execute(
+                f"CREATE TABLE {table} ("
+                f"  doc_id text PRIMARY KEY,"
+                f"  content text,"
+                f"  text_tsv tsvector GENERATED ALWAYS AS (to_tsvector('english', coalesce(content,''))) STORED,"
+                f"  embedding vector({int(dim)}))"
+            )
+            cur.execute(f"CREATE INDEX {table}_gin ON {table} USING gin (text_tsv)")
+
+    def load_documents(self, table: str, docs: dict) -> None:
+        """docs: {doc_id: (content, vector_list)}."""
+        rows = [
+            (doc_id, content, "[" + ",".join(repr(float(x)) for x in vec) + "]")
+            for doc_id, (content, vec) in docs.items()
+        ]
+        with self._cursor() as cur:
+            execute_values(
+                cur, f"INSERT INTO {table} (doc_id, content, embedding) VALUES %s", rows, page_size=1000
+            )
+
+    def vector_query_docs(self, table: str, qvec, n: int) -> list:
+        vec = "[" + ",".join(repr(float(x)) for x in qvec) + "]"
+        with self._cursor() as cur:
+            cur.execute(
+                f"SELECT doc_id FROM {table} WHERE embedding IS NOT NULL "
+                f"ORDER BY embedding <=> %s::vector LIMIT {int(n)}",
+                (vec,),
+            )
+            return [r[0] for r in cur.fetchall()]
+
+    def fts_query(self, table: str, query_text: str, n: int) -> list:
+        with self._cursor() as cur:
+            cur.execute(
+                f"SELECT doc_id FROM {table} WHERE text_tsv @@ plainto_tsquery('english', %s) "
+                f"ORDER BY ts_rank_cd(text_tsv, plainto_tsquery('english', %s)) DESC LIMIT {int(n)}",
+                (query_text, query_text),
+            )
+            return [r[0] for r in cur.fetchall()]
+
+    def hybrid_rrf_docs(self, table: str, query_text: str, qvec, k: int, n: int) -> list:
+        """Call the in-DB ai.hybrid_search_rrf with a precomputed query vector; return ranked doc ids."""
+        vec = "[" + ",".join(repr(float(x)) for x in qvec) + "]"
+        with self._cursor() as cur:
+            cur.execute(
+                "SELECT id FROM ai.hybrid_search_rrf("
+                "  tbl => %s::regclass, id_col => 'doc_id', content_tsv_col => 'text_tsv',"
+                "  vector_col => 'embedding', query_text => %s, query_vector => %s::vector,"
+                "  k => %s, per_leg_limit => %s, result_limit => %s)",
+                (table, query_text, vec, int(k), int(n), int(n)),
+            )
+            return [r[0] for r in cur.fetchall()]

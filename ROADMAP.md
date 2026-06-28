@@ -142,7 +142,7 @@ wire e executa vector search.
 
 ---
 
-### M1 — [ ] Core + empacotamento
+### M1 — [x] Core + empacotamento
 
 **Objective:** Distribuição PostgreSQL-compatível completa em imagem container, com extensões
 pré-instaladas e a suíte de compatibilidade do upstream passando.

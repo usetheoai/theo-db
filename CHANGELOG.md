@@ -24,6 +24,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.6.0] - 2026-06-28
+
+### Added
+
+- **M7-S1 (IA avançada) — busca híbrida FTS+vetor por RRF.** Função SQL `ai.hybrid_search_rrf` (plpgsql, dynamic SQL `%I`-quoted, injection-safe) funde a perna FTS nativa do PostgreSQL (`ts_rank_cd`/GIN sobre `tsvector`) com a perna vetorial `pgvector` (`<=>`) via Reciprocal Rank Fusion (`score = Σ 1/(k+rank)`, k=60 default exposto como parâmetro — Cormack et al. 2009). Empty-leg tratado por `FULL OUTER JOIN`+`COALESCE` (doc casado por só uma perna ainda aparece). Zero dependência nova (FTS é built-in; RRF é SQL puro; sem BM25 AGPL — `pg_search` barrado por D1, adiado para M7-S2). Baked no image via initdb.d (`sql/40-theodb-hybrid.sql`). **5 testes de contrato verdes** contra container real (fusão das 2 pernas, empty-FTS, empty-vector, k inválido→`22023`, k-param muda score). Harness de recall estendido a um eval BEIR-style (`ndcg_at_k`/`recall_at_n` + `rrf_fuse` + driver de 3 retrievers vector/fts/hybrid) com **números medidos** (não fabricados) em `docs/benchmarks/m7-hybrid-recall.md` (honesto: no fixture lexical sintético hybrid empata vector — o ganho real exige modelo de embedding real, slice real-BEIR fora de CI). Smoke `ai.hybrid_search_rrf` (golden top-k) + job CI `hybrid-search`. Review endureceu: FTS leg com `ORDER BY ts_rank_cd DESC` antes do LIMIT (top-k correto além do per_leg_limit), `plainto_tsquery('english', …)` pinado, tie-break `id ASC` (paridade com o twin Python), `REVOKE ALL FROM PUBLIC`, casos negativos tipados + erro de endpoint desconfigurado. Testes: 14 unit + 10 hybrid integration verdes.
+
 ## [0.5.0] - 2026-06-28
 
 ### Added
