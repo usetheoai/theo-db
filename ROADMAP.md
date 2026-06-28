@@ -442,7 +442,7 @@ partir de AlloyDB. *(Merge de README M8 — Escala & observabilidade — com REA
 
 ---
 
-### M9 — [ ] Índice IVFFlat / IVF validado + benchmarkado (specs 03, 04)
+### M9 — [x] Índice IVFFlat / IVF validado + benchmarkado (specs 03, 04)
 
 > Added 2026-06-28 by `/roadmap-feature` (gap audit de `docs/features/`). Fecha as specs 03 + 04.
 
