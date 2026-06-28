@@ -29,8 +29,15 @@ _CANNED = "TheoDB is a PostgreSQL-compatible database with generative-AI SQL fun
 def _decide(system: str, user: str) -> str:
     sys_l = (system or "").lower()
     usr_l = (user or "").lower()
+    # Test seams (magic tokens) to exercise the production error/parse branches deterministically:
+    if "__empty__" in usr_l:
+        return ""  # -> ai._chat empty-completion guard (38000)
     if "__malformed__" in usr_l:
         return "Well, it depends on how you look at it, there is no single answer here."
+    if "__neutral__" in usr_l:
+        return "neutral"  # sentiment neutral-label path
+    if "__no__" in usr_l:
+        return "no"  # ai.if false branch, decoupled from English-'not' heuristic
     if "positive, negative, neutral" in sys_l:  # ai.analyze_sentiment
         if any(w in usr_l for w in ("bad", "terrible", "boring", "hate", "awful")):
             return "negative"
@@ -76,6 +83,10 @@ def build_handler(model_name: str):
             messages = req.get("messages") or []
             system = next((m.get("content", "") for m in messages if m.get("role") == "system"), "")
             user = next((m.get("content", "") for m in messages if m.get("role") == "user"), "")
+            if "__badshape__" in (user or "").lower():
+                # 200 with a body missing choices[0].message -> ai._chat response-shape guard (38000)
+                self._json(200, {"object": "chat.completion", "choices": []})
+                return
             content = _decide(system, user)
             self._json(
                 200,

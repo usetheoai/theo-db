@@ -84,7 +84,9 @@ def test_generate_returns_text(conn, chat_server):
         _set_endpoint(cur, chat_server)
         cur.execute("SELECT ai.generate('describe theodb')")
         out = cur.fetchone()[0]
+    # generate sends NO system prompt -> stub returns the raw canned sentence (asserts wrapper routing)
     assert isinstance(out, str) and len(out) > 0
+    assert not out.startswith("A concise summary"), "generate must not route through the summarize system prompt"
 
 
 def test_if_parses_boolean_true_and_false(conn, chat_server):
@@ -113,7 +115,8 @@ def test_summarize_returns_text(conn, chat_server):
         _set_endpoint(cur, chat_server)
         cur.execute("SELECT ai.summarize('a long piece of text to condense into a summary')")
         out = cur.fetchone()[0]
-    assert isinstance(out, str) and len(out) > 0
+    # summarize sends the summarize system prompt -> stub prefixes "A concise summary" (asserts routing)
+    assert out.startswith("A concise summary"), f"summarize wrapper did not route the summarize system prompt: {out!r}"
 
 
 def test_rank_parses_float(conn, chat_server):
@@ -200,3 +203,56 @@ def test_real_openai_sentiment_polarity(conn):
     assert pos in ("positive", "negative", "neutral")
     assert neg in ("positive", "negative", "neutral")
     assert pos == "positive" and neg == "negative"
+
+
+# --- added in review: untested fail-fast branches + neutral label + message assertions ------------
+
+def test_null_prompt_raises_typed(conn):
+    # ai._chat NULL-prompt guard (22023) — runs before the endpoint check, no stub needed.
+    with conn.cursor() as cur:
+        with pytest.raises(psycopg2.errors.InvalidParameterValue) as exc:
+            cur.execute("SELECT ai.generate(NULL)")
+    assert "must not be NULL" in str(exc.value)
+
+
+def test_empty_completion_raises_typed(conn, chat_server):
+    # ai._chat empty-completion guard (38000) — stub returns "" on __EMPTY__.
+    with conn.cursor() as cur:
+        _set_endpoint(cur, chat_server)
+        with pytest.raises(psycopg2.errors.ExternalRoutineException) as exc:
+            cur.execute("SELECT ai.generate('__EMPTY__ please')")
+    assert "empty completion" in str(exc.value)
+
+
+def test_bad_response_shape_raises_typed(conn, chat_server):
+    # ai._chat response-shape guard (38000) — stub returns {choices: []} on __BADSHAPE__.
+    with conn.cursor() as cur:
+        _set_endpoint(cur, chat_server)
+        with pytest.raises(psycopg2.errors.ExternalRoutineException) as exc:
+            cur.execute("SELECT ai.generate('__BADSHAPE__ please')")
+    assert "unexpected chat response shape" in str(exc.value)
+
+
+def test_sentiment_neutral_label(conn, chat_server):
+    # the neutral-label path (stub returns 'neutral' on __NEUTRAL__) — previously untested.
+    with conn.cursor() as cur:
+        _set_endpoint(cur, chat_server)
+        cur.execute("SELECT ai.analyze_sentiment('__NEUTRAL__ the story is okay')")
+        assert cur.fetchone()[0] == "neutral"
+
+
+def test_if_false_via_explicit_no(conn, chat_server):
+    # ai.if false branch decoupled from the English-'not' heuristic (stub __NO__ -> 'no').
+    with conn.cursor() as cur:
+        _set_endpoint(cur, chat_server)
+        cur.execute("SELECT ai.if('__NO__ is this true')")
+        assert cur.fetchone()[0] is False
+
+
+def test_connection_refused_message(conn):
+    # 38000 connection-refused carries a distinct message (vs empty/bad-shape which also are 38000).
+    with conn.cursor() as cur:
+        cur.execute("SET theodb.llm_endpoint = 'http://127.0.0.1:1/v1/chat/completions'")
+        with pytest.raises(psycopg2.errors.ExternalRoutineException) as exc:
+            cur.execute("SELECT ai.generate('x')")
+    assert "call failed" in str(exc.value)

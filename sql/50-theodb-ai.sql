@@ -83,10 +83,12 @@ return content
 $$;
 
 -- ai.generate — raw text completion.
+-- VOLATILE (default): an LLM call is non-deterministic + has side effects (network/cost) — STABLE would
+-- let the planner fold/hoist calls (e.g. one call broadcast over N rows), contradicting "per row".
 CREATE OR REPLACE FUNCTION ai.generate(prompt text, model text DEFAULT NULL)
 RETURNS text
 LANGUAGE sql
-STABLE
+VOLATILE
 AS $$
     SELECT ai._chat(prompt, NULL, model);
 $$;
@@ -100,12 +102,15 @@ out = plpy.execute(
     plpy.prepare("SELECT ai._chat($1, $2, $3) AS v", ["text", "text", "text"]),
     [prompt, "Answer with exactly one word: yes or no.", model],
 )[0]["v"]
-norm = (out or "").strip().lower()
-if norm.startswith(("yes", "true", "1")):
+import re
+# Match on the FIRST token, not startswith — else "not sure"/"nope" would wrongly hit the "no" prefix
+# and silently return False (D4 says: unparseable → fail-fast, never guess).
+first = re.split(r"[^a-z0-9]+", (out or "").strip().lower(), maxsplit=1)[0]
+if first in ("yes", "true", "1", "y", "t"):
     return True
-if norm.startswith(("no", "false", "0")):
+if first in ("no", "false", "0", "n", "f"):
     return False
-plpy.error("ai.if: unparseable boolean from model: %s" % norm[:50], sqlstate="22023")
+plpy.error("ai.if: unparseable boolean from model: %s" % (out or "")[:50], sqlstate="22023")
 $$;
 
 -- ai.analyze_sentiment — content -> one of {positive, negative, neutral}. Fail-fast on out-of-set (D4).
@@ -117,18 +122,19 @@ out = plpy.execute(
     plpy.prepare("SELECT ai._chat($1, $2, $3) AS v", ["text", "text", "text"]),
     [content, "Classify the sentiment of the text. Reply with exactly one of: positive, negative, neutral.", model],
 )[0]["v"]
-norm = (out or "").strip().lower()
-for label in ("positive", "negative", "neutral"):
-    if norm.startswith(label):
-        return label
-plpy.error("ai.analyze_sentiment: model did not return a known label: %s" % norm[:50], sqlstate="22023")
+import re
+# First-token match (not startswith) so "positively awful" can't be misread as "positive".
+first = re.split(r"[^a-z]+", (out or "").strip().lower(), maxsplit=1)[0]
+if first in ("positive", "negative", "neutral"):
+    return first
+plpy.error("ai.analyze_sentiment: model did not return a known label: %s" % (out or "")[:50], sqlstate="22023")
 $$;
 
--- ai.summarize — content -> concise summary text.
+-- ai.summarize — content -> concise summary text. VOLATILE (LLM call — see ai.generate note).
 CREATE OR REPLACE FUNCTION ai.summarize(content text, model text DEFAULT NULL)
 RETURNS text
 LANGUAGE sql
-STABLE
+VOLATILE
 AS $$
     SELECT ai._chat(content, 'Summarize the following text concisely in 1-2 sentences.', model);
 $$;
@@ -150,7 +156,12 @@ return float(m.group(0))
 $$;
 
 -- Least-privilege: these functions make server-side outbound HTTP (the configured endpoint), so they are
--- NOT granted to PUBLIC (same posture as theodb.embed). GRANT EXECUTE to specific roles to expose them.
+-- NOT granted to PUBLIC (same posture as theodb.embed).
+-- IMPORTANT (SECURITY INVOKER): the public wrappers run as the CALLER, and each one calls ai._chat as the
+-- caller too — so a role needs EXECUTE on ai._chat *in addition to* the wrapper it uses. Grant BOTH:
+--   GRANT EXECUTE ON FUNCTION ai._chat(text,text,text), ai.generate(text,text), ai.if(text,text),
+--     ai.analyze_sentiment(text,text), ai.summarize(text,text), ai.rank(text,text) TO <role>;
+-- Do NOT grant ai._chat to PUBLIC to "fix" a permission error — that re-opens outbound HTTP to every role.
 REVOKE ALL ON FUNCTION ai._chat(text, text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION ai.generate(text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION ai.if(text, text) FROM PUBLIC;
