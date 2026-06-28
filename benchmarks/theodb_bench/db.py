@@ -226,3 +226,39 @@ class VectorDB:
                 (query_text,),
             )
             return [r[0] for r in cur.fetchall()]
+
+    # --- M6: pg_mooncake columnar/HTAP (throwaway measurement substrate; requires preload + wal_level) ----
+    def pg_mooncake_available(self) -> bool:
+        """True iff the pg_mooncake control file is installed AND it is in shared_preload_libraries.
+
+        Both are required: pg_mooncake needs the preload (it relies on pg_duckdb being preloaded) — checking
+        only pg_available_extensions would pass on an image that installed the files but was started without
+        `-c shared_preload_libraries=pg_duckdb,pg_mooncake` (honesty parity with pg_textsearch_available)."""
+        with self._cursor() as cur:
+            cur.execute("SELECT count(*) FROM pg_available_extensions WHERE name = 'pg_mooncake'")
+            installed = int(cur.fetchone()[0]) > 0
+            cur.execute("SELECT current_setting('shared_preload_libraries', true)")
+            preload = cur.fetchone()[0] or ""
+        return installed and ("pg_mooncake" in preload)
+
+    def ensure_mooncake_extension(self) -> None:
+        with self._cursor() as cur:
+            cur.execute("CREATE EXTENSION IF NOT EXISTS pg_mooncake CASCADE")
+
+    def create_columnstore_mirror(self, mirror: str, base: str) -> None:
+        with self._cursor() as cur:
+            cur.execute("CALL mooncake.create_table(%s, %s)", (mirror, base))
+
+    def explain_plan(self, sql: str) -> str:
+        with self._cursor() as cur:
+            cur.execute("EXPLAIN " + sql)
+            return "\n".join(r[0] for r in cur.fetchall())
+
+    def timed_query(self, sql: str):
+        """Return (rows, elapsed_ms) for a read query."""
+        with self._cursor() as cur:
+            start = time.perf_counter()
+            cur.execute(sql)
+            rows = cur.fetchall()
+            ms = (time.perf_counter() - start) * 1000.0
+        return rows, ms

@@ -75,3 +75,21 @@ identification (ADR 0003) as re-runnable evidence.
 
 **Net:** `pg_textsearch` is the identified permissive BM25 alternative (ADR 0003); adoption into the shipped
 image is gated on the recall benchmark `docs/benchmarks/m7-bm25-vs-tsrank.md` (measurement-first, ADR 0002).
+
+## (e) Columnar candidates (M6) — permissive verification
+
+Reproducible via `bash packaging/license-sweep.sh` § (e). These pieces are **not** in the shipped distribution
+image (measurement-first gate — M6); this records the M6 columnar identification as re-runnable evidence.
+
+| Candidate | License (verbatim source) | Verdict |
+|---|---|---|
+| `Mooncake-Labs/pg_mooncake` v0.1.2 | **MIT** (`raw.githubusercontent.com/Mooncake-Labs/pg_mooncake/v0.1.2/LICENSE`) | **PERMISSIVE** |
+| `duckdb/pg_duckdb` v1.0.0 | **MIT** (MIT body; `raw.githubusercontent.com/duckdb/pg_duckdb/v1.0.0/LICENSE`) | **PERMISSIVE** |
+| `duckdb/duckdb` v1.1.3 | **MIT** (`raw.githubusercontent.com/duckdb/duckdb/v1.1.3/LICENSE`) | **PERMISSIVE** |
+
+Net: the three top-level columnar licenses (pg_mooncake, pg_duckdb, DuckDB) are MIT — verified verbatim from
+their canonical repos (pinned tags). **Caveat (honest):** this checks the top-level LICENSE files only; before
+pg_mooncake is adopted INTO the shipped image, a §(b)-equivalent transitive scan (the full Rust/pgrx + bundled-
+DuckDB tree) MUST run to make the D1 claim hold for the shipped artifact. Until then these are pre-adoption,
+informational verdicts (the pieces are not in the distribution — measurement-first gate). Adoption is gated on
+the PG17 build + a large-scale measurement (see `docs/benchmarks/m6-columnar-vs-row.md`).

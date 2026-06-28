@@ -1,0 +1,12 @@
+# THROWAWAY measurement substrate for M6 (columnar/HTAP) — NOT the shipped TheoDB image.
+# Uses the CANONICAL pg_mooncake distribution (MIT, by Mooncake Labs) as the substrate to PROVE + MEASURE the
+# columnar capability (columnstore mirror vs row-store) and capture the row-vs-columnar plan choice (DuckDBScan
+# vs Seq Scan). Per measurement-first (ADR 0002) + the M7-S2 BM25 precedent, embedding pg_mooncake+pg_duckdb
+# into the shipped theo-db:dev (PG17) is the GATED adoption step — it is a heavy Rust+pgrx+DuckDB source build
+# (pg_mooncake supports pg17 per its Makefile, but ships no pg17 prebuilt .so). A from-source pg17 build was
+# attempted (packaging/Dockerfile.columnar-pg17probe); it failed on a pinned-rustc/MSRV mismatch at the current
+# upstream HEAD (recorded honestly in docs/benchmarks/m6-columnar-vs-row.md) — a resolvable toolchain issue, not
+# a capability gap. Until that adoption work lands, this canonical distribution is the measurement substrate.
+#
+# The official image already ships pg_duckdb + pg_mooncake with shared_preload_libraries + wal_level=logical.
+FROM mooncakelabs/pg_mooncake:latest

@@ -461,3 +461,38 @@ jobs:
       - name: Teardown
         if: always()
         run: docker rm -f theo-db-nl || true
+
+  columnar-measure:
+    timeout-minutes: 20
+    # M6: columnar/HTAP (pg_mooncake) — prove + measure the columnstore mirror vs row-store on the canonical
+    # pg_mooncake distribution (MIT). Captures the DuckDBScan-vs-SeqScan plan choice (DoD-2). Run locally first.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: License sweep — columnar candidates permissive verdict (reproducible)
+        run: bash packaging/license-sweep.sh || true   # § (a)/(b) need the theo-db image; § (c)/(e) curl-only verdicts always print
+      - name: Build throwaway columnar image (canonical pg_mooncake distribution, MIT)
+        run: docker build -f packaging/Dockerfile.columnar -t theo-db-columnar .
+      - name: Start columnar image
+        run: |
+          docker run -d --name theo-db-col -e POSTGRES_PASSWORD=postgres -p 5432:5432 theo-db-columnar
+          for i in $(seq 1 40); do docker exec theo-db-col pg_isready -U postgres -q && break; sleep 2; done
+          docker exec theo-db-col pg_isready -U postgres -q
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install harness deps
+        working-directory: benchmarks
+        run: pip install -r requirements.txt
+      - name: Columnar measurement (mirror vs row + DuckDBScan plan, DoD-1/DoD-2)
+        working-directory: benchmarks
+        env:
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: postgres
+        run: pytest -m integration tests/test_columnar.py -q
+      - name: Teardown
+        if: always()
+        run: docker rm -f theo-db-col || true
