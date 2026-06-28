@@ -14,8 +14,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- **M4 — Operação básica: HA (Patroni) + backup/PITR (pgBackRest)** (3/3 DoDs). Topologia `ha/docker-compose.ha.yml`: **3 etcd** (quorum ímpar, anti-split-brain) + **2 nós TheoDB-Patroni** (`ha/Dockerfile.ha` = theo-db:dev + Patroni 4.1.3 + pgBackRest 2.58, ambos **MIT** — D1-clean). Aposta ADR 0002: HA clássica battle-tested (OSS/on-prem), não o storage desagregado do AlloyDB. **DoD-1 (failover):** `ha/failover-smoke.sh` (fase A) mata o primary e mede o **RTO ≈ 19-23s** (≤ 30s; tunado `ttl=20,loop_wait=5,retry_timeout=5`), com catch-up de replicação determinístico (**RPO=0**) e dados vetoriais preservados bit-exato; (fase B) **teste real de partição de rede** prova anti-split-brain — o primary isolado vira **read-only** enquanto a maioria elege um novo primary que aceita escritas (nunca dois primaries graváveis). **DoD-2 (backup/PITR):** `ha/pitr-smoke.sh` faz `stanza-create`+`check`+backup full (WAL archiving contínuo via `archive_command` nos params gerenciados pelo Patroni — sobrevive ao failover), captura um alvo, faz mudança pós-alvo, e **restaura via `--type=time` numa instância isolada**, validando estado == alvo (keep presente, pós-alvo ausente) — mais um **caso negativo** (alvo anterior a qualquer backup é recusado, sem restore silencioso errado). **DoD-3 (licenças):** Patroni MIT + pgBackRest MIT confirmados (runbook § Licenças). Runbook `docs/operations/ha-backup-runbook.md` (failover/switchover, backup+cron agendado, PITR, troubleshooting). **CI**: job `ha-smoke` roda os dois smokes contra um cluster real. `shellcheck` limpo. Blueprint+plano (plan-confidence SHIPPABLE 100) em `.claude/knowledge-base/`.
-
 ### Changed
 
 ### Deprecated
@@ -25,6 +23,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 ### Security
+
+## [0.4.0] - 2026-06-28
+
+### Added
+
+- **M4 — Operação básica: HA (Patroni) + backup/PITR (pgBackRest)** (3/3 DoDs). Topologia `ha/docker-compose.ha.yml`: **3 etcd** (quorum ímpar, anti-split-brain) + **2 nós TheoDB-Patroni** (`ha/Dockerfile.ha` = theo-db:dev + Patroni 4.1.3 + pgBackRest 2.58, ambos **MIT** — D1-clean). Aposta ADR 0002: HA clássica battle-tested (OSS/on-prem), não o storage desagregado do AlloyDB. **DoD-1 (failover):** `ha/failover-smoke.sh` (fase A) mata o primary e mede o **RTO ≈ 19-23s** (≤ 30s; tunado `ttl=20,loop_wait=5,retry_timeout=5`), com catch-up de replicação determinístico (**RPO=0**) e dados vetoriais preservados bit-exato; (fase B) **teste real de partição de rede** prova anti-split-brain — o primary isolado vira **read-only** enquanto a maioria elege um novo primary que aceita escritas (nunca dois primaries graváveis). **DoD-2 (backup/PITR):** `ha/pitr-smoke.sh` faz `stanza-create`+`check`+backup full (WAL archiving contínuo via `archive_command` nos params gerenciados pelo Patroni — sobrevive ao failover), captura um alvo, faz mudança pós-alvo, e **restaura via `--type=time` numa instância isolada**, validando estado == alvo (keep presente, pós-alvo ausente) — mais um **caso negativo** (alvo anterior a qualquer backup é recusado, sem restore silencioso errado). **DoD-3 (licenças):** Patroni MIT + pgBackRest MIT confirmados (runbook § Licenças). Runbook `docs/operations/ha-backup-runbook.md` (failover/switchover, backup+cron agendado, PITR, troubleshooting). **CI**: job `ha-smoke` roda os dois smokes contra um cluster real. `shellcheck` limpo. Blueprint+plano (plan-confidence SHIPPABLE 100) em `.claude/knowledge-base/`.
 
 ## [0.3.0] - 2026-06-28
 
