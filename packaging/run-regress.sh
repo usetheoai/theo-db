@@ -7,6 +7,11 @@ BIN=/usr/lib/postgresql/17/bin
 REG=/src/src/test/regress
 OUT=/tmp/regress_out
 
+# Prove the engine-under-test IS the distribution (PGDG 17.10), matching the source tag REL_17_10.
+VER="$("$BIN/postgres" --version)"
+echo "engine under test: $VER"
+echo "$VER" | grep -q "17\.10" || { echo "ERROR: engine is not 17.10 (got: $VER) — source tag mismatch"; exit 2; }
+
 rm -rf "$PGDATA"; mkdir -p "$PGDATA" "$OUT"
 "$BIN/initdb" -D "$PGDATA" -U postgres -E UTF8 >/tmp/initdb.log 2>&1 || { tail -20 /tmp/initdb.log; exit 2; }
 "$BIN/pg_ctl" -D "$PGDATA" -w -t 60 \

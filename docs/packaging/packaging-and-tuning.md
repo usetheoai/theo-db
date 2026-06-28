@@ -33,7 +33,7 @@ The extensions coexist without conflict (separate namespaces / access methods). 
 
 ## Upstream regression suite (DoD-1)
 
-The distribution passes the **PostgreSQL 17.10 upstream regression suite, 100%**:
+The distribution passes the **PostgreSQL 17.10 upstream CORE regression suite (`src/test/regress`, `parallel_schedule`), 100%**:
 
 ```
 # All 225 tests passed.
@@ -50,7 +50,7 @@ docker run --rm theo-db-regress                                     # initdb a T
 (PGDG 17.10 + our extensions). The source is the matching tag `REL_17_10`, configured with the same Debian
 feature surface (tcl/perl/python/pam/openssl/libxml/libxslt/uuid/gssapi/ldap/icu/nls) so expected outputs
 line up. Because the engine is not forked, a green suite confirms the **repackaging** did not regress core
-SQL — it is not re-litigating the engine. Re-run on each PG minor bump via the `PG_TAG` build arg.
+SQL — it is not re-litigating the engine. Re-run on each PG minor bump via the `PG_TAG` build arg. (Scope: the core `src/test/regress` schedule; `make check-world` — contrib/isolation/TAP — is future hardening.)
 
 ## License due-diligence — zero AGPL (DoD-3)
 
@@ -73,9 +73,9 @@ Net: the core package is **100% permissive, zero AGPL** — clear under PRD §11
 ```bash
 # DoD-2 — extensions
 docker run -d --name t -e POSTGRES_PASSWORD=postgres theo-db:dev && sleep 8
-docker exec t psql -U postgres -c "CREATE EXTENSION vector; CREATE EXTENSION vectorscale CASCADE; CREATE EXTENSION plpython3u; \dx"
+docker exec t psql -U postgres -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS vectorscale CASCADE; CREATE EXTENSION IF NOT EXISTS plpython3u; \dx"
 docker rm -f t
 # DoD-1 — regression suite
 docker build -f packaging/Dockerfile.regress -t theo-db-regress . && docker run --rm theo-db-regress
-# DoD-3 — AGPL sweep (apt + Rust crates) — see commands above
+# DoD-3 — AGPL sweep (reproducible): bash packaging/license-sweep.sh  (report: docs/packaging/license-audit.md)
 ```

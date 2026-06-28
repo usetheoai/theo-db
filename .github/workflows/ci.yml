@@ -169,6 +169,7 @@ jobs:
         run: docker rm -f m3-src m3-dst || true
 
   ha-smoke:
+    timeout-minutes: 25
     # M4 DoD-1/DoD-2: Patroni HA failover (measured RTO) + pgBackRest PITR (validated restore).
     # Every step here has been run locally first.
     runs-on: ubuntu-latest
@@ -201,6 +202,7 @@ jobs:
         run: docker compose -f ha/docker-compose.ha.yml down -v || true
 
   pg-regression:
+    timeout-minutes: 25
     # M1 DoD-1: the upstream PostgreSQL 17 regression suite passes 100% on the TheoDB distribution.
     # Throwaway runner (FROM theo-db:dev) builds pg_regress from REL_17_10 and runs `make installcheck`.
     runs-on: ubuntu-latest
