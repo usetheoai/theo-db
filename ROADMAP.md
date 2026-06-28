@@ -590,7 +590,7 @@ partir de AlloyDB. *(Merge de README M8 — Escala & observabilidade — com REA
 
 ---
 
-### M14 — [ ] Índice ScaNN-quality / avaliação do gatilho de fork (spec 05) — measurement-gated (D3)
+### M14 — [x] Índice ScaNN-quality / avaliação do gatilho de fork (spec 05) — measurement-gated (D3)
 
 > Added 2026-06-28 by `/roadmap-feature` (gap audit). Honesto: hoje entregamos o equivalente permissivo DiskANN (M2), não ScaNN literal.
 
