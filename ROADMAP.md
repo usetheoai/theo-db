@@ -224,15 +224,22 @@ de `vectorscale.so` (PRD §11) antes de distribuir o binário da imagem.
 
 ---
 
-### M3 — [ ] Migração mínima
+### M3 — [x] Migração mínima
 
 **Objective:** Caminho de entrada a partir do PostgreSQL vanilla via import/export padrão.
 
+**Status (2026-06-28): RELEASED `v0.3.0`** — 3/3 DoDs entregues com evidência real; review
+`.claude/knowledge-base/reviews/m3-minimal-migration-review-2026-06-27.md` (READY_TO_MERGE) → PR #4 merjado
+(`fe9a735`) → tag `v0.3.0` + GitHub release. **CI verde** (run `28319401284`: `harness-unit` +
+`image-and-bench` + **`migration-smoke`**, que roda doc-check + smoke + selftest contra source+target reais),
+fechando o "testado em CI" do DoD-1. Checkbox flipado de forma auditável
+(`.claude/knowledge-base/roadmap-runs/M3-2026-06-28.md`).
+
 **Definition of done:**
 
-- [ ] Import/export padrão (`pg_dump`/`pg_restore`) documentado e testado contra um Postgres vanilla.
-- [ ] Migração de um banco vanilla com tabela vetorial preserva dados e índices num smoke test.
-- [ ] Guia de migração mínima publicado.
+- [x] Import/export padrão (`pg_dump`/`pg_restore`) documentado e testado contra um Postgres vanilla. — `docs/migration/minimal-migration.md` + `migrate-smoke.sh` + job CI `migration-smoke` (verde).
+- [x] Migração de um banco vanilla com tabela vetorial preserva dados e índices num smoke test. — checksum de linha-inteira idêntico + definições dos 4 índices preservadas + HNSW/IVFFlat usáveis (selftest prova que o assert é real).
+- [x] Guia de migração mínima publicado. — `docs/migration/minimal-migration.md` (consistência guia↔smoke garantida por `migrate-doc-check.sh`).
 
 **Entregáveis (artefatos concretos):**
 
