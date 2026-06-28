@@ -72,5 +72,9 @@ COPY sql/50-theodb-ai.sql /docker-entrypoint-initdb.d/50-theodb-ai.sql
 # ai.nl_to_sql/ai.nl_query — M7-S4 safe NL→SQL (anti-prompt-injection), created on fresh DB init (idempotent).
 COPY sql/60-theodb-nl.sql /docker-entrypoint-initdb.d/60-theodb-nl.sql
 
+# theodb_ai_nl config surface — M12 (config/templates/value-index + ai.nl_query_cfg) over the unchanged gate.
+# MUST load AFTER 60 (ai.nl_query_cfg delegates to ai.nl_query).
+COPY sql/61-theodb-nl-config.sql /docker-entrypoint-initdb.d/61-theodb-nl-config.sql
+
 HEALTHCHECK --interval=5s --timeout=5s --start-period=10s --retries=5 \
   CMD pg_isready -h localhost -p 5432 -U postgres -q

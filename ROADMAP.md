@@ -473,7 +473,7 @@ partir de AlloyDB. *(Merge de README M8 — Escala & observabilidade — com REA
 
 ---
 
-### M10 — [ ] `ai.agg_summarize` — sumarização agregada (spec 11)
+### M10 — [x] `ai.agg_summarize` — sumarização agregada (spec 11)
 
 > Added 2026-06-28 by `/roadmap-feature` (gap audit). Completa a spec 11 (escalar `ai.summarize` já ship em M7).
 
@@ -502,7 +502,7 @@ partir de AlloyDB. *(Merge de README M8 — Escala & observabilidade — com REA
 
 ---
 
-### M11 — [ ] `ai.*` modos acelerados (array/batch) (spec 08)
+### M11 — [x] `ai.*` modos acelerados (array/batch) (spec 08)
 
 > Added 2026-06-28 by `/roadmap-feature` (gap audit). As `ai.*` hoje são escalares (1 chamada/linha).
 
@@ -546,7 +546,7 @@ partir de AlloyDB. *(Merge de README M8 — Escala & observabilidade — com REA
 
 **Entregáveis (artefatos concretos):**
 
-- SQL em `sql/60-theodb-nl.sql`; tabelas de config/templates; testes.
+- SQL em `sql/61-theodb-nl-config.sql` (config surface — o gate `sql/60` é reutilizado **sem alteração**); tabelas de config/templates/value-index; testes.
 
 **Documentação:**
 
