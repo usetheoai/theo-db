@@ -9,7 +9,7 @@
 -- One private helper (ai._chat) is the single HTTP source of truth; the five public functions are thin
 -- task-specific wrappers (D1). Idempotent: safe to re-run / load from docker-entrypoint-initdb.d.
 
-CREATE EXTENSION IF NOT EXISTS plpython3u;
+-- dep (plpython3u) declared in theodb.control `requires` (M15) — not created here
 CREATE SCHEMA IF NOT EXISTS ai;
 
 -- ai._chat — PRIVATE: one configurable chat-completions round-trip + parse. Not granted to PUBLIC.

@@ -1,0 +1,5 @@
+comment = 'TheoDB AI + vector surface (embed, hybrid search, generative ai.*, NL->SQL, model registry)'
+default_version = '1.0'
+requires = 'vector, vectorscale, plpython3u'
+superuser = true
+relocatable = false

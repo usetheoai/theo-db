@@ -8,7 +8,7 @@
 -- Empty-leg handling: a doc matched by only one retriever still surfaces (FULL OUTER JOIN + COALESCE).
 -- Idempotent: safe to re-run / load from docker-entrypoint-initdb.d.
 
-CREATE EXTENSION IF NOT EXISTS vector;
+-- dep (vector) declared in theodb.control `requires` (M15) — not created here
 CREATE SCHEMA IF NOT EXISTS ai;
 
 -- ai.hybrid_search_rrf — fuse an FTS leg and a vector leg over a documents-shaped table via RRF.
