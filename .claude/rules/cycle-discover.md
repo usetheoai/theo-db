@@ -17,8 +17,6 @@ Do NOT trigger DISCOVER for:
 - Locating a symbol in your own code (use Grep/Glob).
 - Questions answered by reading your own `README.md` / `ARCHITECTURE.md`.
 
-**Project rigor profile (TheoDB — frontier).** Discovery on TheoDB runs at applied-PhD grade: SOTA-anchored on AlloyDB/ScaNN, ≥ 2 primary sources per technique, benchmark-or-`UNBENCHMARKED` for every performance claim, frontier question budget (6-14, techniques ≥ 2). The contract is `rules/discover-phd-rigor.md` (ADR `0001-discover-phd-rigor`); the two discover golden rules carry it under their `§ 3.1 — Project rigor profile`.
-
 ## Chain (unbreakable)
 
 ```
@@ -88,7 +86,5 @@ A blueprint that turns out wrong is simply not consumed downstream — delete or
 - Skills: `skills/discover-plan/SKILL.md`, `skills/discover-edge-cases/SKILL.md`, `skills/discover-plan-confidence/SKILL.md`, `skills/discover-execute/SKILL.md`, `skills/discover-confidence/SKILL.md`, `skills/discover-improve/SKILL.md`
 - Optional skill distillation (out of cycle): `skills/skill-creator/SKILL.md`
 - Allowlist: `rules/discover-web-allowlist.txt`
-- Project rigor profile (TheoDB frontier): `rules/discover-phd-rigor.md`
-- ADR: `knowledge-base/adrs/0001-discover-phd-rigor.md`
 - Macro super-loop: `rules/cycle-roadmap.md` — seeds `knowledge-base/references/` at project inception via `/roadmap-init`
 - Downstream: `rules/cycle-plan.md` (consumes blueprints as input to `/to-plan`)
