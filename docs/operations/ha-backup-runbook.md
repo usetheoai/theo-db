@@ -25,7 +25,7 @@ docker exec theodb-patroni1 patronictl -c /tmp/patroni.yml list
   `GET :8008/leader`, `GET :8008/health`.
 - **Switchover planejado (sem perda):** `patronictl switchover theodb --leader <atual> --candidate <novo> --force`.
 - **Failover automático:** ao perder o primary, o Patroni promove um standby quando o leader-lock do etcd expira
-  (`ttl=20s`). RTO medido pelo smoke ≈ **22s** (`ha/failover-smoke.sh`). Tuning em `ha/patroni-entrypoint.sh`
+  (`ttl=20s`). RTO medido pelo smoke ≈ **19-23s** (`ha/failover-smoke.sh`). Tuning em `ha/patroni-entrypoint.sh`
   (`ttl`/`loop_wait`/`retry_timeout` — invariante `loop_wait + 2*retry_timeout <= ttl`).
 - **Manutenção:** `patronictl pause theodb` (desliga failover automático) / `patronictl resume theodb`.
 - **Anti-split-brain:** um nó só é primary enquanto detém + renova o lock no etcd; ao falhar a renovação,
@@ -82,7 +82,7 @@ pgbackrest --stanza=theodb --type=time "--target=2026-06-28 11:01:04.065+00" \
 Confirmado permissivo (D1 — sem AGPL na distribuição):
 
 - **Patroni 4.1.3 — The MIT License (MIT)** (`.claude/knowledge-base/references/patroni/LICENSE`).
-- **pgBackRest 2.58/2.59 — The MIT License (MIT)** (`.claude/knowledge-base/references/pgbackrest/LICENSE`).
+- **pgBackRest 2.58.0 — The MIT License (MIT)** (`.claude/knowledge-base/references/pgbackrest/LICENSE`).
 - **etcd — Apache-2.0** (DCS; imagem `quay.io/coreos/etcd`).
 
 Todas Apache-2.0-compatíveis / permissivas → liberadas sob a política de licença do TheoDB (PRD §11).

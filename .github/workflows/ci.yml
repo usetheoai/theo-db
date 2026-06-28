@@ -191,7 +191,7 @@ jobs:
         run: docker build -f ha/Dockerfile.ha -t theo-db-ha .
 
       - name: Failover smoke (automatic failover, measured RTO, no split-brain)
-        run: KEEP=1 bash ha/failover-smoke.sh
+        run: KEEP=1 RTO_TARGET=45 bash ha/failover-smoke.sh
 
       - name: PITR smoke (pgBackRest backup + validated point-in-time restore)
         run: KEEP=1 bash ha/pitr-smoke.sh
