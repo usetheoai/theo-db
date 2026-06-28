@@ -334,7 +334,7 @@ bare metal regulado.
 
 ---
 
-### M6 — [ ] Analytics colunar / HTAP
+### M6 — [x] Analytics colunar / HTAP
 
 **Objective:** Camada de armazenamento colunar (DuckDB-powered, `pg_mooncake` MIT) para analytics
 rápido sobre dados transacionais vivos, com escolha de plano row vs colunar.
