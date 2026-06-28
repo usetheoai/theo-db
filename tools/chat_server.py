@@ -50,6 +50,18 @@ def _decide(system: str, user: str) -> str:
         return "SELECT pg_read_file('/etc/passwd')"
     if "__nlinject_relation__" in usr_l:
         return "SELECT * FROM pg_authid"  # a non-allowlisted relation
+    if "__nlinject_commajoin__" in usr_l:
+        return "SELECT documents.content, secret.k FROM documents, secret"  # comma-join exfil (L4 bypass attempt)
+    if "__nlinject_quoted__" in usr_l:
+        return 'SELECT k FROM "secret"'  # quoted-identifier exfil (regex-L4 bypass attempt)
+    if "__nlinject_statfile__" in usr_l:
+        return "SELECT pg_stat_file('/etc/passwd')"  # no-FROM exfil function (denylist must catch)
+    if "__nlinject_funcwrite__" in usr_l:
+        return "SELECT nextval('s')"  # passes L2 keyword denylist; a real write -> L3 must block (25006)
+    if "__nlcte__" in usr_l:
+        return "WITH c AS (SELECT content FROM documents) SELECT count(*) AS n FROM c"  # benign CTE
+    if "__nllimit__" in usr_l:
+        return "SELECT doc_id FROM documents LIMIT 5"  # already has LIMIT (outer-LIMIT wrap must not error)
     if "read-only postgresql select" in sys_l:  # ai.nl_to_sql / ai.nl_query (L1 prompt)
         # benign: a count question -> a safe SELECT over the (allowlisted) documents table
         return "SELECT count(*) AS n FROM documents"

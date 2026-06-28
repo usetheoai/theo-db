@@ -23,3 +23,11 @@ S3 ai.* (18 offline) green after the stub change; 69 unit; ruff + vulture clean.
 
 ## Deferred (honest)
 Full AlloyDB `theodb_ai_nl` config/template/value-index surface (ADR D4 — YAGNI). Recommended deployment hardening: run `ai.nl_query` under a least-privilege read-only role (read-only txn does not block role-gated read funcs; covered by L2 denylist).
+
+## Review hardening (cycle-review NEEDS_FIXES → resolved)
+- **BLOCKER (read-exfil bypass):** L4 regex allowlist was bypassable by comma-join (`FROM documents, secret`) and quoted identifiers (`FROM "secret"`). **Fixed:** replaced the regex with a **parser-grade allowlist via `EXPLAIN (FORMAT JSON)`** — the planner enumerates every relation (comma-join/quoted/subquery/CTE base rels); each is checked against `allowed_relations`. Confirmed: comma-join + quoted exfil now rejected (22023).
+- **HIGH (denylist gaps):** added `pg_stat_file`, `pg_ls_waldir/logdir/tmpdir/archive_statusdir`, `pg_ls_*` prefix, `lo_get/put`, `pg_read_server_files` to the L2 denylist (no-FROM exfil funcs EXPLAIN can't see as relations).
+- **HIGH (L3 untested end-to-end):** added `test_nl_query_func_write_blocked_by_readonly_sandbox` — `SELECT nextval('s')` passes the L2 keyword denylist and is stopped ONLY by L3 (25006), sequence unadvanced. Proves L3 is load-bearing on the real `ai.nl_query` path.
+- **MEDIUM (SET LOCAL leak):** PostgreSQL forbids restoring transaction_read_only to read-write after a query (25001), so the GUC cannot be restored mid-txn. Resolved honestly: documented the fail-safe contract (call in its own transaction; in an explicit txn it stays read-only — restrictive, never permissive) + a test asserting that fail-safe behavior.
+- **LOW (double-LIMIT):** wrap as `FROM (%s) t LIMIT n` (outer) so a generated SELECT ending in LIMIT doesn't 42601.
+- Real OpenAI re-verified through the EXPLAIN-allowlist path: `ai.nl_query('how many rows are in documents', ARRAY['documents'])` → `[{"count": 3}]`. Full suite: 22 NL + 18 S3 (no regression) + 69 unit green.

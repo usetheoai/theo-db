@@ -194,3 +194,107 @@ def test_readonly_sandbox_blocks_write_directly(conn):
         """)
         cur.execute("SELECT x FROM l3_probe")
         assert cur.fetchone()[0] == 1, "L3 read-only sandbox must block the write (x unchanged)"
+
+
+# --- review-added: read-exfil bypass coverage (L4 must catch these) + L3 end-to-end + arch fixes ----
+
+def test_nl_to_sql_inject_comma_join_relation_rejected(conn, chat_server):
+    """Comma-join exfil (SELECT ... FROM documents, secret) — the EXPLAIN-based allowlist must catch the
+    second relation that a from/join regex missed (review BLOCKER)."""
+    with conn.cursor() as cur:
+        _setup(cur, chat_server)
+        with pytest.raises(psycopg2.errors.InvalidParameterValue):  # 22023 — L4: 'secret' not allowlisted
+            cur.execute("SELECT ai.nl_to_sql('__NLINJECT_COMMAJOIN__', ARRAY['documents'])")
+
+
+def test_nl_to_sql_inject_quoted_identifier_rejected(conn, chat_server):
+    """Quoted-identifier exfil (FROM \"secret\") — EXPLAIN resolves it as a relation; allowlist rejects."""
+    with conn.cursor() as cur:
+        _setup(cur, chat_server)
+        with pytest.raises(psycopg2.errors.InvalidParameterValue):  # 22023 — L4
+            cur.execute("SELECT ai.nl_to_sql('__NLINJECT_QUOTED__', ARRAY['documents'])")
+
+
+def test_nl_to_sql_inject_stat_file_rejected(conn, chat_server):
+    """No-FROM exfil function pg_stat_file — the extended denylist must catch it (EXPLAIN shows no relation)."""
+    with conn.cursor() as cur:
+        _setup(cur, chat_server)
+        with pytest.raises(psycopg2.errors.InvalidParameterValue):  # 22023 — L2 banned
+            cur.execute("SELECT ai.nl_to_sql('__NLINJECT_STATFILE__', ARRAY['documents'])")
+
+
+def test_nl_query_comma_join_exfil_blocked_no_leak(conn, chat_server):
+    """End-to-end: a comma-join read of `secret` via ai.nl_query is rejected (22023) — `secret` is never read."""
+    with conn.cursor() as cur:
+        _setup(cur, chat_server)
+        with pytest.raises(psycopg2.errors.InvalidParameterValue):
+            cur.execute("SELECT ai.nl_query('__NLINJECT_COMMAJOIN__', ARRAY['documents'])")
+
+
+def test_nl_query_func_write_blocked_by_readonly_sandbox(conn, chat_server):
+    """L3 PROVEN END-TO-END through ai.nl_query: a write-performing function (nextval) passes the L2 keyword
+    denylist (starts with SELECT, no banned token) and is stopped ONLY by the read-only sandbox (25006),
+    leaving the sequence unadvanced (review HIGH — L3 must be exercised on the real path)."""
+    with conn.cursor() as cur:
+        _setup(cur, chat_server)
+        cur.execute("DROP SEQUENCE IF EXISTS s")
+        cur.execute("CREATE SEQUENCE s")
+        with pytest.raises(psycopg2.errors.ReadOnlySqlTransaction):  # 25006
+            cur.execute("SELECT ai.nl_query('__NLINJECT_FUNCWRITE__', ARRAY['s'])")
+    with conn.cursor() as cur:
+        cur.execute("SELECT last_value, is_called FROM s")
+        last_value, is_called = cur.fetchone()
+        assert is_called is False, f"nextval must not have advanced the sequence (read-only blocked it): {last_value},{is_called}"
+
+
+def test_nl_query_benign_cte_returns_rows(conn, chat_server):
+    """A benign WITH/CTE query (allowed per L2 ^select|with) executes through the sandbox + jsonb wrap."""
+    with conn.cursor() as cur:
+        _setup(cur, chat_server)
+        cur.execute("SELECT ai.nl_query('__NLCTE__ how many', ARRAY['documents'])")
+        rows = cur.fetchone()[0]
+    assert isinstance(rows, list) and rows and rows[0].get("n") == 2
+
+
+def test_nl_query_generated_limit_no_syntax_error(conn, chat_server):
+    """A generated SELECT that already ends in LIMIT must not produce a double-LIMIT syntax error (review LOW)."""
+    with conn.cursor() as cur:
+        _setup(cur, chat_server)
+        cur.execute("SELECT ai.nl_query('__NLLIMIT__ list docs', ARRAY['documents'], NULL, 100)")
+        rows = cur.fetchone()[0]
+    assert isinstance(rows, list)  # executes cleanly; <=5 rows from the inner LIMIT
+
+
+def test_nl_query_readonly_is_failsafe_in_explicit_txn(conn, chat_server):
+    """Documented fail-safe contract: inside an EXPLICIT transaction, ai.nl_query marks it read-only and a
+    subsequent write is BLOCKED (25006) — restrictive, never permissive (PostgreSQL forbids restoring to
+    read-write after a query; SQLSTATE 25001). Normal single-statement usage has no leak (its txn ends at once)."""
+    with conn.cursor() as cur:
+        _setup(cur, chat_server)
+    c = psycopg2.connect(
+        host=os.environ.get("PGHOST", "localhost"), port=os.environ.get("PGPORT", "5432"),
+        dbname=os.environ.get("PGDATABASE", "postgres"), user=os.environ.get("PGUSER", "postgres"),
+        password=os.environ.get("PGPASSWORD", "postgres"),
+    )
+    try:
+        c.autocommit = False  # explicit multi-statement transaction
+        with c.cursor() as cur:
+            cur.execute("SET theodb.llm_endpoint = %s", (chat_server,))
+            cur.execute("SET theodb.llm_model = 'stub-chat'")
+            cur.execute("SELECT ai.nl_query('how many documents', ARRAY['documents'])")
+            assert cur.fetchone()[0][0]["n"] == 2
+            with pytest.raises(psycopg2.errors.ReadOnlySqlTransaction):  # 25006 — fail-safe, not a vuln
+                cur.execute("INSERT INTO documents VALUES ('d3','should be blocked')")
+        c.rollback()
+    finally:
+        c.close()
+    with conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM documents")
+        assert cur.fetchone()[0] == 2, "no row written (blocked INSERT + rollback left the table at 2)"
+
+
+def test_nl_to_sql_empty_question_rejected(conn, chat_server):
+    with conn.cursor() as cur:
+        _setup(cur, chat_server)
+        with pytest.raises(psycopg2.errors.InvalidParameterValue):  # 22023
+            cur.execute("SELECT ai.nl_to_sql('   ', ARRAY['documents'])")
