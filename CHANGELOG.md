@@ -24,6 +24,17 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.3.0] - 2026-06-28
+
+### Added
+
+- **M3 — Migração mínima vanilla PostgreSQL → TheoDB** (3/3 DoDs). Caminho de entrada via `pg_dump`/`pg_restore` **padrão** (Regra 9 — sem ferramenta própria; TheoDB é wire-compatible). `migrate-smoke.sh` migra um source pgvector vanilla (`pgvector/pgvector:pg17`) para o TheoDB e **asseria preservação**: checksum de dados `md5(string_agg(embedding…))` idêntico source↔target (bit-exato), os **4 índices preservados** (hnsw/ivfflat/btree×2), e o **índice HNSW usável** numa query ANN pós-restore. `migrate-smoke-selftest.sh` prova que o assert não é teatro (corrompe 1 linha → verificação falha com `data checksum mismatch`). `migrate-doc-check.sh` garante que o guia não diverge do smoke. Guia publicado em `docs/migration/minimal-migration.md` (ambos formatos custom/plain, pré-check de `extversion`, verificação de integridade, passo opcional `USING diskann` pós-migração, troubleshooting dos 3 riscos). **CI**: job `migration-smoke` roda doc-check + smoke + selftest contra source+target reais. Evidência: ambos os formatos preservam dados bit-exato (medido); blueprint em `.claude/knowledge-base/discoveries/blueprints/m3-minimal-migration-blueprint.md`.
+
+
+### Fixed
+
+- **`theodb.embed` agora alcança provedores HTTPS de nuvem** (ex.: OpenAI). A imagem não trazia `ca-certificates`, então o `urllib` do `plpython3u` falhava o handshake TLS com `SSL: CERTIFICATE_VERIFY_FAILED` — o caminho remoto (M2 DoD-3) só funcionava com endpoints `http://` locais. Adicionado `ca-certificates` ao runtime (+1 MB → 470 MB). **Validado contra a API real da OpenAI**: `theodb.embed('…', 'text-embedding-3-small')` retorna `vector(1536)` com semântica genuína (paráfrase 0.35 << não-relacionado 0.92 em distância cosseno). Guard de regressão no CI (CA bundle presente). Sem regressão no caminho local (10 testes verde).
+
 ## [0.2.0] - 2026-06-27
 
 ### Added

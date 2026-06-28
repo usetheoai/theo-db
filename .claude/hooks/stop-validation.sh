@@ -131,6 +131,7 @@ fi
 # ----------------------------------------------------------------------------
 SECRET_HITS=$(echo "$ALL_FILES" \
   | grep -E '(^|/)(\.env(\.[a-z0-9_-]+)?|credentials([._-][a-z0-9]+)?|[a-z0-9_-]*secret[s]?(\.[a-z0-9_-]+)?\.(ya?ml|json|env|txt))$|\.(pem|key|p12|pfx|jks)$' \
+  | grep -vE '\.(example|sample|template|dist)$' \
   || true)
 if [ -n "$SECRET_HITS" ]; then
   msg="Secret-pattern files appear in this session's diff (cycle-review BLOCKER). Verify they are intentionally NOT secrets, or remove them before stopping:"

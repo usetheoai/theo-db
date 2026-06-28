@@ -45,6 +45,14 @@ SET theodb.embedding_api_key  = '…';
 SELECT theodb.embed('hello', 'text-embedding-3-small');  -- vector(1536)
 ```
 
+## Validated against real providers
+
+- **Local model** (`tools/embedding_server.py`, fastembed bge-small-en-v1.5) — 384-dim, used by the
+  integration tests (real, no mock).
+- **Cloud — OpenAI** — `theodb.embed('…', 'text-embedding-3-small')` against `https://api.openai.com/v1/embeddings`
+  returns `vector(1536)` with genuine semantics (paraphrase ≪ unrelated in cosine distance). The image ships
+  `ca-certificates` so `plpython3u`'s TLS verification succeeds for HTTPS providers.
+
 ## Notes (honest)
 
 - `tools/embedding_server.py` ships **bge-small-en-v1.5** (384-dim, ONNX via fastembed — no GPU, no
