@@ -156,17 +156,24 @@ return float(m.group(0))
 $$;
 
 -- ai.agg_summarize — AGGREGATE: collapse many rows into a single summary (feature 11, aggregate path).
--- Composed from ai._chat (Rule 9 — no reinvention). sfunc is pure-SQL newline-join (NULL-skipping);
+-- Composed from ai._chat (Rule 9 — no reinvention). sfunc is a pure-SQL newline-join (NULL/empty-skipping);
 -- finalfunc makes ONE ai._chat call on the accumulation, bounded to 12000 chars for cost/token safety
--- (map-reduce for larger groups is deferred — YAGNI). Empty / all-NULL group -> NULL (no LLM call).
--- VOLATILE via ai._chat; SECURITY INVOKER (the caller needs EXECUTE on ai._chat too — see the grant note).
+-- (map-reduce for larger groups is deferred — YAGNI). Empty / all-NULL / all-empty group -> NULL (no LLM call).
+-- ORDER DEPENDENCE: a plain aggregate has indeterminate input order, so the concatenation (and thus the
+-- summary) is not reproducible across runs unless the caller pins it: `ai.agg_summarize(x ORDER BY <key>)`.
+-- SECURITY INVOKER (the caller needs EXECUTE on ai._chat too — see the grant note).
+-- VOLATILITY: like EVERY PostgreSQL aggregate (string_agg/array_agg/sum are all IMMUTABLE; none can be
+-- VOLATILE — there is no syntax for it and PG does not derive it from member fns), ai.agg_summarize's own
+-- pg_proc row is provolatile='i'. That is NOT a footgun: the paid, non-deterministic LLM call lives in the
+-- VOLATILE finalfunc (ai._agg_summ_final), which the executor re-runs per query — aggregates are never
+-- constant-folded (they require input rows). The transition fn below is honestly IMMUTABLE (pure concat).
 CREATE OR REPLACE FUNCTION ai._agg_summ_accum(state text, item text)
 RETURNS text
 LANGUAGE sql
 IMMUTABLE
 AS $$
     SELECT CASE
-        WHEN item IS NULL THEN state
+        WHEN item IS NULL OR item = '' THEN state
         WHEN state IS NULL THEN item
         ELSE state || E'\n' || item
     END;
@@ -193,6 +200,14 @@ CREATE AGGREGATE ai.agg_summarize(text) (
     stype = text,
     finalfunc = ai._agg_summ_final
 );
+
+COMMENT ON AGGREGATE ai.agg_summarize(text) IS
+  'Collapse many rows into one summary via ai._chat. ONE synchronous LLM call per group; cost scales with '
+  'the number of groups (not row-capped) — caller controls grouping. Per-group input capped at 12000 chars '
+  '(map-reduce deferred). Empty/all-NULL/all-empty group -> NULL (no call). Input order is indeterminate '
+  'unless pinned: ai.agg_summarize(x ORDER BY <key>). Like all PG aggregates its pg_proc is provolatile=i; '
+  'the non-deterministic LLM call lives in the VOLATILE finalfunc (re-run per query). REVOKE FROM PUBLIC '
+  '(needs ai._chat EXECUTE).';
 
 -- Least-privilege: these functions make server-side outbound HTTP (the configured endpoint), so they are
 -- NOT granted to PUBLIC (same posture as theodb.embed).

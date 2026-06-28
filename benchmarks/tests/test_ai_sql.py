@@ -202,9 +202,45 @@ def test_ai_functions_not_executable_by_public(conn):
     # least-privilege: outbound-HTTP functions must NOT be granted to PUBLIC
     with conn.cursor() as cur:
         for fn in ("ai.generate(text,text)", "ai.if(text,text)", "ai.analyze_sentiment(text,text)",
-                   "ai.summarize(text,text)", "ai.rank(text,text)", "ai._chat(text,text,text)"):
+                   "ai.summarize(text,text)", "ai.rank(text,text)", "ai._chat(text,text,text)",
+                   # M10 aggregate + its support functions (same outbound-HTTP least-privilege posture)
+                   "ai.agg_summarize(text)", "ai._agg_summ_accum(text,text)", "ai._agg_summ_final(text)"):
             cur.execute("SELECT has_function_privilege('public', %s, 'execute')", (fn,))
             assert cur.fetchone()[0] is False, f"{fn} must not be PUBLIC-executable"
+
+
+def test_agg_summarize_finalfunc_is_volatile(conn):
+    # M10 review: PostgreSQL gives EVERY aggregate provolatile='i' (string_agg/array_agg/sum are all 'i';
+    # no aggregate can be VOLATILE). The real guarantee that the paid LLM call is never optimized away is
+    # that the FINALFUNC is VOLATILE (the executor re-runs it per query). Guard that, not the aggregate.
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT proname, provolatile FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
+            "WHERE n.nspname='ai' AND p.proname IN ('agg_summarize','_agg_summ_final') ORDER BY proname"
+        )
+        vol = dict(cur.fetchall())
+    assert vol["_agg_summ_final"] == "v", "ai._agg_summ_final must be VOLATILE (it performs the LLM call)"
+    assert vol["agg_summarize"] == "i", "PG aggregates are provolatile='i' by design (like string_agg)"
+
+
+def test_agg_summarize_skips_null_and_empty_rows(conn, chat_server):
+    # M10 review: mixed NULL/empty + non-NULL group -> one summary (accum NULL/empty-skip branch);
+    # and an all-empty-string group short-circuits to NULL with NO LLM call (symmetry with all-NULL).
+    with conn.cursor() as cur:
+        _set_endpoint(cur, chat_server)
+        cur.execute("SELECT ai.agg_summarize(c) FROM (VALUES ('a'),(NULL::text),(''),('b')) v(c)")
+        out = cur.fetchone()[0]
+        assert isinstance(out, str) and out.startswith("A concise summary")
+        cur.execute("SELECT ai.agg_summarize(c) FROM (VALUES (''::text),('')) v(c)")
+        assert cur.fetchone()[0] is None  # all-empty -> NULL, no LLM call
+
+
+def test_agg_summarize_propagates_empty_completion_typed(conn, chat_server):
+    # M10 review: a failure in the per-group LLM call propagates ai._chat's typed error through the aggregate.
+    with conn.cursor() as cur:
+        _set_endpoint(cur, chat_server)
+        with pytest.raises(psycopg2.errors.ExternalRoutineException):  # 38000 — empty completion via finalfunc
+            cur.execute("SELECT ai.agg_summarize(c) FROM (VALUES ('__EMPTY__ please summarize')) v(c)")
 
 
 # --- opt-in real-OpenAI test (skips unless configured) -------------------------------------------

@@ -481,7 +481,7 @@ partir de AlloyDB. *(Merge de README M8 — Escala & observabilidade — com REA
 
 **Definition of done:**
 
-- [ ] `ai.agg_summarize` (aggregate) criada; `VOLATILE`; `REVOKE … FROM PUBLIC` (paridade com as demais `ai.*`).
+- [ ] `ai.agg_summarize` (aggregate) criada; a chamada LLM no finalfunc `VOLATILE` (aggregates do PG são sempre `provolatile=i`, como `string_agg` — a garantia anti-cache é o finalfunc volátil, re-executado por query); `REVOKE … FROM PUBLIC` (paridade com as demais `ai.*`).
 - [ ] Teste com chat-stub determinístico (1 resumo a partir de N linhas) verde + 1 evidência real registrada.
 - [ ] Doc em `docs/sql-ai-functions.md` com exemplo.
 

@@ -65,19 +65,24 @@ echo "ai: 5 generative ai.* functions present, 0 executable by PUBLIC OK"
 # M10: ai.agg_summarize aggregate present + locked down (NO network — presence + privilege only).
 AGG_CHECK=$(psql -h "$HOST" -p "$PORT" -U "$USER" -t -A -q -v ON_ERROR_STOP=1 <<'SQL'
 SELECT
+  -- aggregate present (prokind='a') AND its finalfunc is VOLATILE (the real "LLM call re-runs" guarantee;
+  -- the aggregate itself is provolatile='i' like every PG aggregate, so we assert the finalfunc instead)
   (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
      WHERE n.nspname='ai' AND p.proname='agg_summarize' AND p.prokind='a')::text
+  || ':' ||
+  (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+     WHERE n.nspname='ai' AND p.proname='_agg_summ_final' AND p.provolatile='v')::text
   || ':' ||
   (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
      WHERE n.nspname='ai' AND p.proname IN ('agg_summarize','_agg_summ_accum','_agg_summ_final')
        AND has_function_privilege('public', p.oid, 'execute'))::text;
 SQL
 )
-if [ "$AGG_CHECK" != "1:0" ]; then
-  echo "AGG SMOKE FAILED: expected '1:0' (agg_summarize aggregate present, 0 PUBLIC-executable), got '$AGG_CHECK'" >&2
+if [ "$AGG_CHECK" != "1:1:0" ]; then
+  echo "AGG SMOKE FAILED: expected '1:1:0' (aggregate present, finalfunc VOLATILE, 0 PUBLIC-executable), got '$AGG_CHECK'" >&2
   exit 1
 fi
-echo "ai: ai.agg_summarize aggregate present, 0 executable by PUBLIC OK"
+echo "ai: ai.agg_summarize aggregate present (finalfunc VOLATILE), 0 executable by PUBLIC OK"
 
 # M7-S4: safe NL→SQL functions present + locked down (NO network — presence + privilege only).
 NL_CHECK=$(psql -h "$HOST" -p "$PORT" -U "$USER" -t -A -q -v ON_ERROR_STOP=1 <<'SQL'

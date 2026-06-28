@@ -107,12 +107,16 @@ GROUP BY service;
 
 **Behavior:**
 
-- Rows are newline-joined (NULL rows skipped); the aggregate makes **one** `ai._chat` call per group.
-- **Empty group or all-NULL rows → `NULL`** (no LLM call).
+- Rows are newline-joined (**NULL and empty-string rows skipped**); the aggregate makes **one** `ai._chat` call per group.
+- **Empty group / all-NULL / all-empty rows → `NULL`** (no LLM call).
+- **Input order is indeterminate** (a plain aggregate has no defined row order), so the summary is not
+  reproducible across runs unless you pin it: `ai.agg_summarize(content ORDER BY id)`.
 - The accumulated prompt is **bounded to 12000 characters** for cost/token safety — very large groups are
   truncated (documented limitation; map-reduce over chunks is deferred future work).
-- `VOLATILE` (an LLM call) — cost/latency scale with the number of groups; no performance claim is made
-  without a reproducible benchmark.
+- Cost/latency scale with the number of groups (one LLM call per group); no performance claim is made
+  without a reproducible benchmark. Like every PostgreSQL aggregate, `ai.agg_summarize` is `provolatile=i`
+  (no aggregate can be `VOLATILE`); the non-deterministic LLM call lives in its `VOLATILE` finalfunc, which
+  the executor re-runs per query (aggregates are never constant-folded), so results are never cached.
 
 **Security:** `ai.agg_summarize` and its support functions are `REVOKE`d from `PUBLIC` (same posture as the
 scalar `ai.*`). Because they run `SECURITY INVOKER` and call `ai._chat`, a role needs `EXECUTE` on

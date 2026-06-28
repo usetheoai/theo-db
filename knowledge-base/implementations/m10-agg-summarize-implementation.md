@@ -50,6 +50,26 @@ Files: `sql/50-theodb-ai.sql` (DDL), `benchmarks/tests/test_ai_sql.py` (3 tests)
 - No new dependency (Rule 9); the 5 scalar `ai.*` + `ai._chat` unchanged (backward compatible).
 - No unbenchmarked perf claim (Rule 5); cost/latency documented, no speed claim.
 
+## Review fixes (cycle-review)
+
+4 specialist agents (test-auditor · cross-validation · security+arch · PG-domain). Applied:
+
+- **Volatility (cross-val HIGH, re-scoped after empirical probe):** every PostgreSQL aggregate is
+  `provolatile='i'` (probed live: 155 `i` / 8 `s` / **0 `v`**; `string_agg`/`array_agg`/`sum` are all `i`;
+  no syntax makes an aggregate VOLATILE). So "the aggregate must be VOLATILE" is unsatisfiable; the real
+  anti-cache guarantee is the **VOLATILE finalfunc** (`ai._agg_summ_final`), re-run per query (aggregates
+  are never constant-folded). Reverted the transition fn to its honest `IMMUTABLE` (pure concat); the
+  test/smoke/doc/ROADMAP-DoD now assert/state the finalfunc-VOLATILE guarantee, not an impossible
+  aggregate-VOLATILE.
+- **Security regression guard (test MEDIUM):** extended `test_ai_functions_not_executable_by_public` to
+  cover `agg_summarize` + the 2 support fns.
+- **NULL/empty branch (test MEDIUM + domain LOW):** accum now skips `NULL OR ''`; added
+  `test_agg_summarize_skips_null_and_empty_rows` (mixed + all-empty→NULL) and an aggregate-path typed-error
+  test (`__EMPTY__`→38000).
+- **Order-dependence (domain MEDIUM):** documented (comment + `COMMENT ON AGGREGATE` + doc) that input order
+  is indeterminate unless pinned via `ai.agg_summarize(x ORDER BY <key>)`.
+- **Per-group cost (security LOW):** `COMMENT ON AGGREGATE` states one synchronous LLM call per group.
+
 ## Known limits (honest)
 
 - Prompt bounded to 12000 chars (very large groups are truncated — documented; map-reduce deferred, ADR D2).
