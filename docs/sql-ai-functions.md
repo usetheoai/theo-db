@@ -160,6 +160,47 @@ N scalar → +N) — no latency claim is made without a reproducible benchmark.
 **Security:** `REVOKE`d from `PUBLIC`; SECURITY INVOKER, so the caller needs `EXECUTE` on `ai._chat` too:
 `GRANT EXECUTE ON FUNCTION ai._chat(text,text,text), ai.generate_batch(text[],text) TO <role>;`.
 
+## Packaged surface: `ai.hybrid_search()` JSON + `theodb_ml` registry — M13
+
+The literal spec-06/07 packaged API over existing capabilities (the underlying `ai.hybrid_search_rrf` and
+`ai._chat` are reused **unchanged**).
+
+### `ai.hybrid_search(config jsonb)` — JSON hybrid search
+
+A thin wrapper over `ai.hybrid_search_rrf` (one fusion source of truth). Honest sugar: it adds the JSON
+calling convention, not a new fusion.
+
+```sql
+SELECT id, score FROM ai.hybrid_search('{
+  "table": "documents", "id_col": "doc_id", "content_tsv_col": "text_tsv", "vector_col": "embedding",
+  "query_text": "database", "query_vector": "[1,0,0]", "result_limit": 5
+}'::jsonb);
+```
+
+Returns the SAME rows as the explicit-arg `ai.hybrid_search_rrf` (verified by a parity test). Missing a
+required key (`table`/`id_col`/`content_tsv_col`/`vector_col`) → fail-fast `22023`.
+
+### `theodb_ml` model registry
+
+Register named `(endpoint, model_name)` configs and select one per session — bridging to the unchanged
+`ai._chat` via session GUCs.
+
+```sql
+SELECT theodb_ml.create_model('openai', 'https://api.openai.com/v1/chat/completions', 'gpt-4o-mini');
+SELECT theodb_ml.apply_model('openai');         -- SETs theodb.llm_endpoint / theodb.llm_model for the session
+SET theodb.llm_api_key = '...';                 -- the key is set separately (see security note)
+SELECT ai.generate('summarize this');           -- uses the applied model
+SELECT * FROM theodb_ml.list_models();
+```
+
+**Security (ADR D2) — keys are NEVER persisted.** The registry stores **endpoint + model_name only — there
+is no `api_key` column**. Persisting credentials in a table would be a security regression (pg_dump, logical
+replication, base backups, SELECT-by-grantee). API keys remain **session GUCs** (`theodb.llm_api_key`), set
+out of band per session — `apply_model` does **not** set or store the key. This deliberately diverges from
+the literal AlloyDB `create_model` (which stores credentials). `create_model` validates the endpoint is
+`http(s)://`; `ai._chat` re-validates at call time (SSRF). All `theodb_ml` functions + `ai.hybrid_search` are
+`REVOKE`d from `PUBLIC`.
+
 ## Natural-language → SQL (`ai.nl_to_sql` / `ai.nl_query`) — M7-S4
 
 Ask questions in natural language; get **safe, read-only** SQL or results. Safety does **not** trust the LLM —

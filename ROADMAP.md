@@ -531,7 +531,7 @@ partir de AlloyDB. *(Merge de README M8 — Escala & observabilidade — com REA
 
 ---
 
-### M12 — [ ] `theodb_ai_nl` — superfície completa NL→SQL (config/templates/value-index) (spec 12)
+### M12 — [x] `theodb_ai_nl` — superfície completa NL→SQL (config/templates/value-index) (spec 12)
 
 > Added 2026-06-28 by `/roadmap-feature` (gap audit). MVP seguro `ai.nl_to_sql`/`ai.nl_query` já ship em M7-S4.
 
