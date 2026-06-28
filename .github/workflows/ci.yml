@@ -167,3 +167,35 @@ jobs:
       - name: Teardown
         if: always()
         run: docker rm -f m3-src m3-dst || true
+
+  ha-smoke:
+    # M4 DoD-1/DoD-2: Patroni HA failover (measured RTO) + pgBackRest PITR (validated restore).
+    # Every step here has been run locally first.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build TheoDB base image (cache from image-and-bench)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          tags: theo-db:dev
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build TheoDB-HA image (Patroni + pgBackRest)
+        run: docker build -f ha/Dockerfile.ha -t theo-db-ha .
+
+      - name: Failover smoke (automatic failover, measured RTO, no split-brain)
+        run: KEEP=1 RTO_TARGET=45 bash ha/failover-smoke.sh
+
+      - name: PITR smoke (pgBackRest backup + validated point-in-time restore)
+        run: KEEP=1 bash ha/pitr-smoke.sh
+
+      - name: Teardown
+        if: always()
+        run: docker compose -f ha/docker-compose.ha.yml down -v || true
