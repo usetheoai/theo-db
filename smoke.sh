@@ -84,6 +84,23 @@ if [ "$AGG_CHECK" != "1:1:0" ]; then
 fi
 echo "ai: ai.agg_summarize aggregate present (finalfunc VOLATILE), 0 executable by PUBLIC OK"
 
+# M11: ai.generate_batch present + locked down (NO network — presence + privilege only).
+BATCH_CHECK=$(psql -h "$HOST" -p "$PORT" -U "$USER" -t -A -q -v ON_ERROR_STOP=1 <<'SQL'
+SELECT
+  (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+     WHERE n.nspname='ai' AND p.proname='generate_batch')::text
+  || ':' ||
+  (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+     WHERE n.nspname='ai' AND p.proname='generate_batch'
+       AND has_function_privilege('public', p.oid, 'execute'))::text;
+SQL
+)
+if [ "$BATCH_CHECK" != "1:0" ]; then
+  echo "BATCH SMOKE FAILED: expected '1:0' (ai.generate_batch present, 0 PUBLIC-executable), got '$BATCH_CHECK'" >&2
+  exit 1
+fi
+echo "ai: ai.generate_batch present, 0 executable by PUBLIC OK"
+
 # M7-S4: safe NL→SQL functions present + locked down (NO network — presence + privilege only).
 NL_CHECK=$(psql -h "$HOST" -p "$PORT" -U "$USER" -t -A -q -v ON_ERROR_STOP=1 <<'SQL'
 SELECT

@@ -142,6 +142,88 @@ def test_agg_summarize_empty_and_null_input_is_null(conn, chat_server):
         assert cur.fetchone()[0] is None
 
 
+# --- M11: ai.generate_batch (accelerated — N prompts in ONE round-trip) ---------------------------
+
+def _stub_count(chat_server: str) -> int:
+    # the fixture yields the in-container URL (host.docker.internal); read /count from the host side.
+    import json as _json
+    url = chat_server.replace("host.docker.internal", "127.0.0.1").replace("/v1/chat/completions", "/count")
+    with urllib.request.urlopen(url, timeout=5) as r:
+        return _json.loads(r.read())["count"]
+
+
+def test_generate_batch_one_roundtrip(conn, chat_server):
+    # M11 core: a batch of N prompts is ONE HTTP round-trip and returns N answers IN ORDER.
+    before = _stub_count(chat_server)
+    with conn.cursor() as cur:
+        _set_endpoint(cur, chat_server)
+        cur.execute("SELECT ai.generate_batch(ARRAY['first','second','third'])")
+        res = cur.fetchone()[0]
+    after = _stub_count(chat_server)
+    assert after - before == 1, f"batch must be ONE round-trip, got {after - before}"
+    assert isinstance(res, list) and len(res) == 3
+    assert res == ["answer to item 1", "answer to item 2", "answer to item 3"]  # order preserved
+
+
+def test_scalar_generate_is_n_roundtrips(conn, chat_server):
+    # contrast: N scalar ai.generate calls are N round-trips (this is what batch accelerates).
+    before = _stub_count(chat_server)
+    with conn.cursor() as cur:
+        _set_endpoint(cur, chat_server)
+        for p in ("a", "b", "c"):
+            cur.execute("SELECT ai.generate(%s)", (p,))
+    after = _stub_count(chat_server)
+    assert after - before == 3, f"3 scalar calls must be 3 round-trips, got {after - before}"
+
+
+def test_generate_batch_empty_makes_no_call(conn, chat_server):
+    before = _stub_count(chat_server)
+    with conn.cursor() as cur:
+        _set_endpoint(cur, chat_server)
+        cur.execute("SELECT ai.generate_batch(ARRAY[]::text[])")
+        res = cur.fetchone()[0]
+    after = _stub_count(chat_server)
+    assert res == []  # empty in -> empty out
+    assert after - before == 0  # NO LLM call
+
+
+def test_generate_batch_null_element_raises_typed(conn, chat_server):
+    with conn.cursor() as cur:
+        _set_endpoint(cur, chat_server)
+        with pytest.raises(psycopg2.errors.InvalidParameterValue):  # 22023 — alignment contract
+            cur.execute("SELECT ai.generate_batch(ARRAY['a', NULL])")
+
+
+def test_generate_batch_wrong_length_raises_typed(conn, chat_server):
+    # stub seam __wronglen__ returns N-1 items -> the len!=N guard fails fast (no silent misalignment).
+    with conn.cursor() as cur:
+        _set_endpoint(cur, chat_server)
+        with pytest.raises(psycopg2.errors.InvalidParameterValue):  # 22023
+            cur.execute("SELECT ai.generate_batch(ARRAY['__wronglen__ a','b','c'])")
+
+
+def test_stub_counter_is_threadsafe(chat_server):
+    # concurrent test: K parallel chat requests must bump the counter EXACTLY K times — proves the Lock
+    # prevents lost updates, so the round-trip measurement above is reliable. (No DB needed.)
+    import concurrent.futures
+    import json as _json
+    chat_url = chat_server.replace("host.docker.internal", "127.0.0.1")
+    before = _stub_count(chat_server)
+    K = 50
+
+    def _hit(_):
+        data = _json.dumps({"model": "stub", "messages": [{"role": "user", "content": "ping"}]}).encode()
+        req = urllib.request.Request(chat_url, data=data, headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as ex:
+        statuses = list(ex.map(_hit, range(K)))
+    after = _stub_count(chat_server)
+    assert all(s == 200 for s in statuses)
+    assert after - before == K, f"counter lost updates under concurrency: {after - before} != {K}"
+
+
 def test_rank_parses_float(conn, chat_server):
     with conn.cursor() as cur:
         _set_endpoint(cur, chat_server)
@@ -285,6 +367,25 @@ def test_real_openai_agg_summarize_shape(conn):
         cur.execute("SELECT ai.agg_summarize(content) FROM it_agg_real")
         out = cur.fetchone()[0]
     assert isinstance(out, str) and len(out) > 0  # a real, non-empty summary of the 3 incident notes
+
+
+@pytest.mark.skipif(
+    not (os.environ.get("THEODB_LLM_ENDPOINT") and os.environ.get("OPENAI_API_KEY")),
+    reason="real-OpenAI test: set THEODB_LLM_ENDPOINT + OPENAI_API_KEY to enable",
+)
+def test_real_openai_generate_batch_shape(conn):
+    # M11 real evidence: N prompts -> N answers in ONE round-trip (shape only; LLM non-determinism).
+    with conn.cursor() as cur:
+        cur.execute("SET theodb.llm_endpoint = %s", (os.environ["THEODB_LLM_ENDPOINT"],))
+        cur.execute("SET theodb.llm_model = %s", (os.environ.get("THEODB_LLM_MODEL", "gpt-4o-mini"),))
+        cur.execute("SET theodb.llm_api_key = %s", (os.environ["OPENAI_API_KEY"],))
+        cur.execute(
+            "SELECT ai.generate_batch(ARRAY["
+            "'Capital of France? one word','2+2? a number only','Opposite of hot? one word'])"
+        )
+        res = cur.fetchone()[0]
+    assert isinstance(res, list) and len(res) == 3  # exactly N answers, real model, one request
+    assert all(isinstance(x, str) and len(x) > 0 for x in res)
 
 
 # --- added in review: untested fail-fast branches + neutral label + message assertions ------------

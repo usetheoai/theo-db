@@ -209,6 +209,50 @@ COMMENT ON AGGREGATE ai.agg_summarize(text) IS
   'the non-deterministic LLM call lives in the VOLATILE finalfunc (re-run per query). REVOKE FROM PUBLIC '
   '(needs ai._chat EXECUTE).';
 
+-- ai.generate_batch — ACCELERATED: answer N prompts in ONE ai._chat round-trip (feature 08).
+-- Packs the N prompts (numbered) into a single request asking for a JSON array of exactly N answers, then
+-- parses + validates len==N. Cuts N round-trips to 1 (the real "acceleration" — measured by request count,
+-- not an unbenchmarked latency claim). Reuses ai._chat (Rule 9). VOLATILE (LLM call). Empty array -> empty
+-- array, NO call. NULL array / any NULL element -> 22023 (preserves the N-in / N-out alignment contract).
+-- Best-effort by nature: a model that returns invalid JSON or the wrong length fails fast (22023); for a
+-- guaranteed per-item result, use the scalar ai.generate. Batching the other ai.* is deferred (YAGNI).
+CREATE OR REPLACE FUNCTION ai.generate_batch(prompts text[], model text DEFAULT NULL)
+RETURNS text[]
+LANGUAGE plpython3u
+VOLATILE
+AS $$
+import json
+if prompts is None:
+    plpy.error("ai.generate_batch: prompts must not be NULL", sqlstate="22023")
+n = len(prompts)
+if n == 0:
+    return []
+if any(p is None for p in prompts):
+    plpy.error("ai.generate_batch: prompts must not contain NULL elements (breaks the N-in/N-out alignment)",
+               sqlstate="22023")
+user = "\n".join("%d. %s" % (i + 1, p) for i, p in enumerate(prompts))
+system = ("You are given %d numbered items. Respond with ONLY a JSON array of exactly %d strings — the "
+          "answer to each item, in order. No prose, no markdown." % (n, n))
+out = plpy.execute(
+    plpy.prepare("SELECT ai._chat($1, $2, $3) AS v", ["text", "text", "text"]),
+    [user, system, model],
+)[0]["v"]
+s = (out or "").strip()
+if s.startswith("```"):  # strip an optional ```json ... ``` fence some models add
+    s = s.split("\n", 1)[1] if "\n" in s else s
+    if s.endswith("```"):
+        s = s[: s.rfind("```")]
+    s = s.strip()
+try:
+    arr = json.loads(s)
+except (ValueError, TypeError):
+    plpy.error("ai.generate_batch: model did not return valid JSON: %s" % (out or "")[:80], sqlstate="22023")
+if not isinstance(arr, list) or len(arr) != n:
+    plpy.error("ai.generate_batch: expected a JSON array of %d items, got %s" % (n, str(arr)[:80]),
+               sqlstate="22023")
+return [None if x is None else str(x) for x in arr]
+$$;
+
 -- Least-privilege: these functions make server-side outbound HTTP (the configured endpoint), so they are
 -- NOT granted to PUBLIC (same posture as theodb.embed).
 -- IMPORTANT (SECURITY INVOKER): the public wrappers run as the CALLER, and each one calls ai._chat as the
@@ -222,6 +266,7 @@ REVOKE ALL ON FUNCTION ai.if(text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION ai.analyze_sentiment(text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION ai.summarize(text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION ai.rank(text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION ai.generate_batch(text[], text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION ai._agg_summ_accum(text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION ai._agg_summ_final(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION ai.agg_summarize(text) FROM PUBLIC;

@@ -21,9 +21,21 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 _CANNED = "TheoDB is a PostgreSQL-compatible database with generative-AI SQL functions."
+
+# Request counter (M11): the round-trip-reduction test measures how many chat-completions requests a
+# batch issues (1) vs N scalar calls (N). ThreadingHTTPServer dispatches each request on its own thread,
+# so the counter is guarded by a Lock — the atomic-counter invariant is "every accepted request bumps it
+# exactly once" (validated by a concurrent test).
+_count_lock = threading.Lock()
+_count = {"n": 0}
+
+# numbered-item line, e.g. "1. do X" — used by the JSON-array (batch) reply branch to size the array.
+_NUMBERED_LINE_RE = re.compile(r"^\s*\d+\.\s", re.MULTILINE)
 
 
 def _decide(system: str, user: str) -> str:
@@ -75,6 +87,11 @@ def _decide(system: str, user: str) -> str:
         return "0.8"
     if "summarize" in sys_l:  # ai.summarize
         return "A concise summary: " + _CANNED
+    if "json array" in sys_l:  # ai.generate_batch — return a JSON array sized to the numbered items
+        count = len(_NUMBERED_LINE_RE.findall(user or ""))
+        if "__wronglen__" in usr_l:  # seam: return a too-short array to exercise the len!=N fail-fast
+            count = max(0, count - 1)
+        return json.dumps(["answer to item %d" % (i + 1) for i in range(count)])
     return _CANNED  # ai.generate (raw)
 
 
@@ -91,9 +108,12 @@ def build_handler(model_name: str):
             self.end_headers()
             self.wfile.write(body)
 
-        def do_GET(self):  # health
+        def do_GET(self):  # health + request counter (M11 round-trip measurement)
             if self.path == "/health":
                 self._json(200, {"status": "ok", "model": model_name})
+            elif self.path == "/count":
+                with _count_lock:
+                    self._json(200, {"count": _count["n"]})
             else:
                 self._json(404, {"error": {"message": f"no route {self.path}"}})
 
@@ -101,6 +121,9 @@ def build_handler(model_name: str):
             if self.path.rstrip("/") not in ("/v1/chat/completions", "/chat/completions"):
                 self._json(404, {"error": {"message": f"no route {self.path}"}})
                 return
+            # count every accepted chat-completions request (one HTTP round-trip) — thread-safe.
+            with _count_lock:
+                _count["n"] += 1
             try:
                 length = int(self.headers.get("Content-Length", 0))
                 req = json.loads(self.rfile.read(length) or b"{}")

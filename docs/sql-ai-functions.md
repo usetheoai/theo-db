@@ -129,6 +129,37 @@ GRANT EXECUTE ON FUNCTION ai._chat(text,text,text), ai.agg_summarize(text) TO <r
 **Limitations (honest):** no per-call model override for the aggregate (uses the configured
 `theodb.llm_model`; YAGNI — deferred); prompt truncated past the cap above.
 
+## Accelerated batch (`ai.generate_batch`) — M11
+
+`ai.generate_batch(prompts text[], model text DEFAULT NULL) -> text[]` answers **N prompts in ONE**
+chat round-trip — instead of one HTTP call per row with the scalar `ai.generate`. It packs the prompts
+into a single request asking the model for a JSON array of exactly N answers, then validates the length.
+
+```sql
+SELECT ai.generate_batch(ARRAY[
+  'Capital of France? one word',
+  '2+2? a number only',
+  'Opposite of hot? one word'
+]);
+-- -> {Paris,4,cold}   (one request to the endpoint, three answers in order)
+```
+
+**Acceleration (measured, not claimed):** a batch of N is **one** round-trip; N scalar `ai.generate`
+calls are **N** round-trips. This is verified in CI by counting requests against the stub (batch → +1;
+N scalar → +N) — no latency claim is made without a reproducible benchmark.
+
+**Contract / behavior:**
+
+- Returns exactly N answers, in input order. **Empty array → empty array, no LLM call.**
+- **Fail-fast (typed `22023`)** if the model returns invalid JSON or the wrong number of items, if the
+  array is NULL, or if any element is NULL (the N-in/N-out alignment is a hard contract). For a guaranteed
+  per-item result regardless of model behavior, use the scalar `ai.generate`.
+- Best-effort by nature (one large request can hit the token limit — chunk on the caller side). Only
+  `ai.generate` is batched today (batching the other `ai.*` is deferred until needed).
+
+**Security:** `REVOKE`d from `PUBLIC`; SECURITY INVOKER, so the caller needs `EXECUTE` on `ai._chat` too:
+`GRANT EXECUTE ON FUNCTION ai._chat(text,text,text), ai.generate_batch(text[],text) TO <role>;`.
+
 ## Natural-language → SQL (`ai.nl_to_sql` / `ai.nl_query`) — M7-S4
 
 Ask questions in natural language; get **safe, read-only** SQL or results. Safety does **not** trust the LLM —
