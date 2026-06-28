@@ -260,7 +260,7 @@ fechando o "testado em CI" do DoD-1. Checkbox flipado de forma auditável
 
 ---
 
-### M4 — [ ] Operação básica (HA + backup)
+### M4 — [x] Operação básica (HA + backup)
 
 **Objective:** Alta disponibilidade com failover automático (primary + standby) e backup contínuo + PITR.
 
@@ -268,11 +268,18 @@ fechando o "testado em CI" do DoD-1. Checkbox flipado de forma auditável
 > Competitiva e adequada para OSS/on-prem (battle-tested, roda em qualquer lugar), **não** uma cópia interna.
 > Paridade de *arquitetura* de storage seria Opção β (exige reabrir D1/D2/D7 — fora de escopo).
 
+**Status (2026-06-28): RELEASED `v0.4.0`** — 3/3 DoDs entregues com evidência real medida; review
+`.claude/knowledge-base/reviews/m4-ha-backup-review-2026-06-28.md` (READY_TO_MERGE) → PR #5 merjado
+(`223ee3c`) → tag `v0.4.0` + GitHub release. **CI verde** (run com 4 jobs incl. **`ha-smoke`** que sobe o
+cluster Patroni e roda failover + PITR). Checkbox flipado de forma auditável
+(`.claude/knowledge-base/roadmap-runs/M4-2026-06-28.md`). Hardening (synchronous_mode zero-RPO, 3+3,
+pg_hba/creds de produção) explicitamente diferido p/ M5.
+
 **Definition of done:**
 
-- [ ] Primary com standby e failover automático sob tempo-alvo medido (Patroni-based).
-- [ ] Backup contínuo + PITR e backups agendados funcionando (pgBackRest-based), com restore validado.
-- [ ] Due-diligence de licença de Patroni/pgBackRest confirmada permissiva (PRD §11 — "a confirmar").
+- [x] Primary com standby e failover automático sob tempo-alvo medido (Patroni-based). — `ha/failover-smoke.sh`: **RTO≈19-23s** (≤30), **RPO=0** determinístico, + teste real de partição (anti-split-brain).
+- [x] Backup contínuo + PITR e backups agendados funcionando (pgBackRest-based), com restore validado. — `ha/pitr-smoke.sh`: backup full + WAL archiving + **restore `--type=time` validado** + caso negativo; cron agendado no runbook.
+- [x] Due-diligence de licença de Patroni/pgBackRest confirmada permissiva (PRD §11). — Patroni MIT + pgBackRest MIT confirmados dos LICENSE (runbook § Licenças).
 
 **Entregáveis (artefatos concretos):**
 
