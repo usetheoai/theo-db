@@ -14,8 +14,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- **M12 — superfície de configuração `theodb_ai_nl` (config/templates/value-index, feature 12).** Camada de configuração sobre o gate seguro do M7-S4 (`ai.nl_to_sql`/`ai.nl_query`, **reutilizado SEM alteração** — `sql/60` intocado, Regra 9). Novo `sql/61-theodb-nl-config.sql`: 3 tabelas (`ai.nl_config`, `ai.nl_templates`, `ai.nl_value_index`) + funções de gestão (`ai.nl_add_config`/`ai.nl_add_template`/`ai.nl_set_template_enabled`/`ai.nl_set_value_index`/`ai.nl_refresh_value_index`) + **`ai.nl_query_cfg(question, config_id, max_rows)`** que enriquece o prompt (schema_context + template habilitado + hints de value-index) e delega ao `ai.nl_query` inalterado com os `allowed_relations` da config. **Defesa anti-injection PRESERVADA por construção** (a config só enriquece o prompt; o gate L1-L4 roda em toda query — teste de regressão prova injeção bloqueada `22023` + DB intacto). `ai.nl_refresh_value_index` é guardado (D3): relação deve estar no allowlist da config, coluna validada como identificador, leitura de shape fixo via `quote_ident`+`::regclass` (sem SQL do usuário). Todas as funções `REVOKE … FROM PUBLIC`. **Evidência real (gpt-4o-mini):** config `rcfg` dirige `ai.nl_query_cfg('how many documents are there?')` → `[{"count": 3}]` (log em `knowledge-base/implementations/m12-nl-surface-implementation.md`); 29 testes offline + 1 real; smoke de presença/privilégio; doc em `docs/sql-ai-functions.md`. Divergência honesta (ADR D1): superfície das 58 funções literais do AlloyDB deferida (YAGNI) — entregues os 3 capabilities core no schema `ai`. Sem nova dependência.
-
 ### Changed
 
 ### Deprecated
@@ -25,6 +23,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 ### Security
+
+## [0.11.0] - 2026-06-28
+
+### Added
+
+- **M12 — superfície de configuração `theodb_ai_nl` (config/templates/value-index, feature 12).** Camada de configuração sobre o gate seguro do M7-S4 (`ai.nl_to_sql`/`ai.nl_query`, **reutilizado SEM alteração** — `sql/60` intocado, Regra 9). Novo `sql/61-theodb-nl-config.sql`: 3 tabelas (`ai.nl_config`, `ai.nl_templates`, `ai.nl_value_index`) + funções de gestão (`ai.nl_add_config`/`ai.nl_add_template`/`ai.nl_set_template_enabled`/`ai.nl_set_value_index`/`ai.nl_refresh_value_index`) + **`ai.nl_query_cfg(question, config_id, max_rows)`** que enriquece o prompt (schema_context + template habilitado + hints de value-index) e delega ao `ai.nl_query` inalterado com os `allowed_relations` da config. **Defesa anti-injection PRESERVADA por construção** (a config só enriquece o prompt; o gate L1-L4 roda em toda query — teste de regressão prova injeção bloqueada `22023` + DB intacto). `ai.nl_refresh_value_index` é guardado (D3): relação deve estar no allowlist da config, coluna validada como identificador, leitura de shape fixo via `quote_ident`+`::regclass` (sem SQL do usuário). Todas as funções `REVOKE … FROM PUBLIC`. **Evidência real (gpt-4o-mini):** config `rcfg` dirige `ai.nl_query_cfg('how many documents are there?')` → `[{"count": 3}]` (log em `knowledge-base/implementations/m12-nl-surface-implementation.md`); 29 testes offline + 1 real; smoke de presença/privilégio; doc em `docs/sql-ai-functions.md`. Divergência honesta (ADR D1): superfície das 58 funções literais do AlloyDB deferida (YAGNI) — entregues os 3 capabilities core no schema `ai`. Sem nova dependência.
 
 ## [0.10.0] - 2026-06-28
 
