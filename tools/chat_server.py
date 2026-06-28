@@ -87,11 +87,19 @@ def _decide(system: str, user: str) -> str:
         return "0.8"
     if "summarize" in sys_l:  # ai.summarize
         return "A concise summary: " + _CANNED
-    if "json array" in sys_l:  # ai.generate_batch — return a JSON array sized to the numbered items
-        count = len(_NUMBERED_LINE_RE.findall(user or ""))
-        if "__wronglen__" in usr_l:  # seam: return a too-short array to exercise the len!=N fail-fast
+    if "json array" in sys_l:  # ai.generate_batch — return a JSON array of exactly N answers
+        # Size from the N the system prompt declares ("...exactly N strings..."), NOT by counting numbered
+        # lines in the user text — a prompt that itself embeds a "2. ..." line would otherwise over-count.
+        m = re.search(r"exactly (\d+) strings", sys_l)
+        count = int(m.group(1)) if m else len(_NUMBERED_LINE_RE.findall(user or ""))
+        if "__wronglen__" in usr_l:  # seam: too-short array -> exercise the len!=N fail-fast
             count = max(0, count - 1)
-        return json.dumps(["answer to item %d" % (i + 1) for i in range(count)])
+        if "__nonstr__" in usr_l:  # seam: array of NUMBERS -> exercise the non-string element fail-fast
+            return json.dumps(list(range(count)))
+        payload = json.dumps(["answer to item %d" % (i + 1) for i in range(count)])
+        if "__fenced__" in usr_l:  # seam: wrap in a ```json fence -> exercise the function's fence strip
+            return "```json\n" + payload + "\n```"
+        return payload
     return _CANNED  # ai.generate (raw)
 
 

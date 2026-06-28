@@ -222,6 +222,7 @@ LANGUAGE plpython3u
 VOLATILE
 AS $$
 import json
+import re
 if prompts is None:
     plpy.error("ai.generate_batch: prompts must not be NULL", sqlstate="22023")
 n = len(prompts)
@@ -237,12 +238,10 @@ out = plpy.execute(
     plpy.prepare("SELECT ai._chat($1, $2, $3) AS v", ["text", "text", "text"]),
     [user, system, model],
 )[0]["v"]
+# strip an optional ```json ... ``` markdown fence (single- OR multi-line) some models add
 s = (out or "").strip()
-if s.startswith("```"):  # strip an optional ```json ... ``` fence some models add
-    s = s.split("\n", 1)[1] if "\n" in s else s
-    if s.endswith("```"):
-        s = s[: s.rfind("```")]
-    s = s.strip()
+s = re.sub(r"^```[A-Za-z0-9_-]*\s*", "", s)
+s = re.sub(r"\s*```$", "", s).strip()
 try:
     arr = json.loads(s)
 except (ValueError, TypeError):
@@ -250,15 +249,34 @@ except (ValueError, TypeError):
 if not isinstance(arr, list) or len(arr) != n:
     plpy.error("ai.generate_batch: expected a JSON array of %d items, got %s" % (n, str(arr)[:80]),
                sqlstate="22023")
-return [None if x is None else str(x) for x in arr]
+# Strict elements: fail-fast on a non-string (the model ignoring "array of strings") rather than
+# silently coercing a number/object via str() into a plausible-but-wrong cell (Rule 8 — no silent garbage).
+result = []
+for x in arr:
+    if x is None:
+        result.append(None)
+    elif isinstance(x, str):
+        result.append(x)
+    else:
+        plpy.error("ai.generate_batch: model returned a non-string array element: %s" % str(x)[:80],
+                   sqlstate="22023")
+return result
 $$;
+
+COMMENT ON FUNCTION ai.generate_batch(text[], text) IS
+  'ACCELERATED: answer N prompts in ONE ai._chat round-trip (vs N for N scalar ai.generate calls). Packs N '
+  'numbered prompts -> asks for a JSON array of exactly N strings -> validates len==N + string elements '
+  '(fail-fast 22023 on invalid JSON / wrong length / NULL or non-string element). Empty array -> empty, no '
+  'call. Best-effort (multi-line prompts weaken N-alignment; use scalar ai.generate for a guaranteed '
+  'per-item result). VOLATILE; REVOKE FROM PUBLIC (needs ai._chat EXECUTE).';
 
 -- Least-privilege: these functions make server-side outbound HTTP (the configured endpoint), so they are
 -- NOT granted to PUBLIC (same posture as theodb.embed).
 -- IMPORTANT (SECURITY INVOKER): the public wrappers run as the CALLER, and each one calls ai._chat as the
 -- caller too — so a role needs EXECUTE on ai._chat *in addition to* the wrapper it uses. Grant BOTH:
 --   GRANT EXECUTE ON FUNCTION ai._chat(text,text,text), ai.generate(text,text), ai.if(text,text),
---     ai.analyze_sentiment(text,text), ai.summarize(text,text), ai.rank(text,text) TO <role>;
+--     ai.analyze_sentiment(text,text), ai.summarize(text,text), ai.rank(text,text),
+--     ai.generate_batch(text[],text), ai.agg_summarize(text) TO <role>;
 -- Do NOT grant ai._chat to PUBLIC to "fix" a permission error — that re-opens outbound HTTP to every role.
 REVOKE ALL ON FUNCTION ai._chat(text, text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION ai.generate(text, text) FROM PUBLIC;

@@ -202,14 +202,52 @@ def test_generate_batch_wrong_length_raises_typed(conn, chat_server):
             cur.execute("SELECT ai.generate_batch(ARRAY['__wronglen__ a','b','c'])")
 
 
+def test_generate_batch_invalid_json_raises_typed(conn, chat_server):
+    # stub seam __malformed__ returns prose (not JSON) -> the JSON-parse guard fails fast (22023).
+    with conn.cursor() as cur:
+        _set_endpoint(cur, chat_server)
+        with pytest.raises(psycopg2.errors.InvalidParameterValue) as exc:
+            cur.execute("SELECT ai.generate_batch(ARRAY['__malformed__ a','b'])")
+    assert "valid JSON" in str(exc.value)
+
+
+def test_generate_batch_non_string_element_raises_typed(conn, chat_server):
+    # stub seam __nonstr__ returns a JSON array of NUMBERS -> the function must fail fast (22023),
+    # never silently coerce 4 -> "4" / {"a":1} -> "{'a': 1}" into a plausible-but-wrong cell.
+    with conn.cursor() as cur:
+        _set_endpoint(cur, chat_server)
+        with pytest.raises(psycopg2.errors.InvalidParameterValue) as exc:
+            cur.execute("SELECT ai.generate_batch(ARRAY['__nonstr__ a','b'])")
+    assert "non-string" in str(exc.value)
+
+
+def test_generate_batch_strips_json_fence(conn, chat_server):
+    # stub seam __fenced__ wraps the array in a ```json fence -> the function must strip it and parse N items.
+    with conn.cursor() as cur:
+        _set_endpoint(cur, chat_server)
+        cur.execute("SELECT ai.generate_batch(ARRAY['__fenced__ a','b'])")
+        res = cur.fetchone()[0]
+    assert isinstance(res, list) and len(res) == 2
+
+
+def test_generate_batch_embedded_numbered_line_still_one_batch(conn, chat_server):
+    # a prompt that itself contains a "2. ..." line must NOT inflate N (stub sizes from the declared N).
+    with conn.cursor() as cur:
+        _set_endpoint(cur, chat_server)
+        cur.execute("SELECT ai.generate_batch(ARRAY[E'list:\n1. foo\n2. bar', 'second'])")
+        res = cur.fetchone()[0]
+    assert isinstance(res, list) and len(res) == 2  # 2 prompts -> 2 answers, embedded numbering ignored
+
+
 def test_stub_counter_is_threadsafe(chat_server):
-    # concurrent test: K parallel chat requests must bump the counter EXACTLY K times — proves the Lock
-    # prevents lost updates, so the round-trip measurement above is reliable. (No DB needed.)
+    # concurrent reliability test: K parallel chat requests must bump the lock-guarded counter EXACTLY K
+    # times (no lost updates), so the round-trip measurement above is trustworthy. The Lock guards the
+    # read-modify-write of `_count["n"]` (a += is several bytecodes; the GIL does not make it atomic).
     import concurrent.futures
     import json as _json
     chat_url = chat_server.replace("host.docker.internal", "127.0.0.1")
     before = _stub_count(chat_server)
-    K = 50
+    K = 300
 
     def _hit(_):
         data = _json.dumps({"model": "stub", "messages": [{"role": "user", "content": "ping"}]}).encode()

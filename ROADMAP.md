@@ -511,7 +511,7 @@ partir de AlloyDB. *(Merge de README M8 — Escala & observabilidade — com REA
 **Definition of done:**
 
 - [ ] Variante batch de ≥ 1 função `ai.*` (ex.: `ai.generate`/`ai.rank` sobre `ARRAY`/conjunto); `REVOKE … FROM PUBLIC`.
-- [ ] Teste verde (batch produz o mesmo resultado que N chamadas escalares).
+- [ ] Teste verde: a redução de round-trips é **medida** (batch de N = 1 requisição vs N escalares = N requisições, via contador do stub) e o batch retorna N respostas em ordem.
 - [ ] Doc; nenhum claim de speedup sem benchmark reproduzível (Rule 5) — se medido, relatório em `docs/benchmarks/`.
 
 **Entregáveis (artefatos concretos):**
