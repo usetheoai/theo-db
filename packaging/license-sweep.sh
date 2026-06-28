@@ -39,6 +39,36 @@ for lic,n in c.most_common(): print(f'    {n:3} {lic}')
 sys.exit(1 if agpl else 0)
 " || fail=1
 
+echo "== (c) BM25 candidates (M7-S2) — license verdict from each canonical repo (informational: not in the shipped image) =="
+# Reproducible identification (ADR 0003): pg_textsearch must be permissive (PostgreSQL License);
+# VectorChord-bm25 must be AGPL/Elastic (barred). A license that cannot be fetched is UNVERIFIED (never
+# assumed permissive). These candidates are NOT in the distribution image, so they do not affect the
+# distribution AGPL gate above — this block records the M7-S2 identification as re-runnable evidence.
+bm25_license() {
+  # $1 = label, $2 = raw LICENSE url, $3 = expected: 'permissive' | 'barred'
+  local label="$1" url="$2" expect="$3" body
+  body="$(curl -fsSL --max-time 20 "$url" 2>/dev/null || true)"
+  if [ -z "$body" ]; then
+    echo "  UNVERIFIED $label (could not fetch $url) — not assumed permissive"
+    return 0
+  fi
+  if printf '%s' "$body" | grep -qiE 'affero|agpl|elastic license'; then
+    if [ "$expect" = "barred" ]; then
+      echo "  $label: AGPL/Elastic (barred by D1) — confirmed"
+    else
+      echo "  AGPL FINDING (unexpected): $label is AGPL/Elastic"; fail=1
+    fi
+  elif printf '%s' "$body" | grep -qiE 'postgresql license|permission to use, copy, modify'; then
+    echo "  $label: PostgreSQL License (permissive) — confirmed"
+  elif printf '%s' "$body" | grep -qiE 'apache license|MIT License|BSD'; then
+    echo "  $label: permissive (Apache/MIT/BSD) — confirmed"
+  else
+    echo "  UNVERIFIED $label (license text not recognized) — not assumed permissive"
+  fi
+}
+bm25_license "pg_textsearch" "https://raw.githubusercontent.com/timescale/pg_textsearch/v1.3.1/LICENSE" "permissive"
+bm25_license "VectorChord-bm25" "https://raw.githubusercontent.com/tensorchord/VectorChord-bm25/main/LICENSE" "barred"
+
 echo "======================================================"
 if [ "$fail" -eq 0 ]; then echo "LICENSE SWEEP PASSED — zero AGPL in the TheoDB package"; else echo "LICENSE SWEEP FAILED — AGPL found"; fi
 exit "$fail"

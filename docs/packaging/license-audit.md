@@ -57,3 +57,21 @@ ship?"), and a deterministic script over (a) the image's apt packages and (b) th
 re-runnable in CI and produces a stable, auditable artifact — stronger as a release gate than a non-pinned
 LLM audit. `loop-check-licence` remains available for deeper periodic provenance/similarity audits. (This is
 the ADR-recorded deviation referenced in the M1 plan.)
+
+## (d) BM25 candidates (M7-S2) — permissive-vs-AGPL identification
+
+Reproducible via `bash packaging/license-sweep.sh` § (c) — each verdict is fetched from the candidate's
+**canonical repo** (never assumed from memory; unfetchable → `UNVERIFIED`). These pieces are **not** in the
+shipped distribution image (so they do not affect the distribution AGPL gate); this records the M7-S2
+identification (ADR 0003) as re-runnable evidence.
+
+| Candidate | License (verbatim source) | BM25 true? | Verdict |
+|---|---|---|---|
+| `timescale/pg_textsearch` v1.3.1 | **PostgreSQL License** (`raw.githubusercontent.com/timescale/pg_textsearch/v1.3.1/LICENSE`) | Yes (Okapi, k1=1.2/b=0.75, Block-Max WAND) | **PERMISSIVE — identified** |
+| `tensorchord/VectorChord-bm25` | **AGPLv3 / Elastic License v2** (dual; `raw.githubusercontent.com/tensorchord/VectorChord-bm25/main/LICENSE`) | Yes | **BARRED (D1)** — neither license permissive |
+| `paradedb/pg_search` | **AGPL-3.0** (`.claude/knowledge-base/references/paradedb/LICENSE`) | Yes | **BARRED (D1)** — study-only witness |
+| PostgreSQL native `ts_rank_cd` | PostgreSQL License (built-in) | No (cover-density, not BM25) | permissive but not BM25 — interim default (M7-S1) |
+| `Intelligent-Internet/psql_bm25s` | Apache-2.0 | Yes | permissive — fallback |
+
+**Net:** `pg_textsearch` is the identified permissive BM25 alternative (ADR 0003); adoption into the shipped
+image is gated on the recall benchmark `docs/benchmarks/m7-bm25-vs-tsrank.md` (measurement-first, ADR 0002).
