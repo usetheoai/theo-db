@@ -60,6 +60,32 @@ Detalhes de arquitetura, pilares de capacidade e o recorte de MVP estão no [`PR
 
 ---
 
+## Instalação
+
+TheoDB roda como uma imagem container com **uma extensão instalável** que provisiona toda a superfície
+de IA + vetorial:
+
+```bash
+docker pull ghcr.io/usetheodev/theo-db:latest
+docker run -d --name theodb -e POSTGRES_PASSWORD=postgres -p 5432:5432 ghcr.io/usetheodev/theo-db:latest
+```
+
+A imagem cria a extensão automaticamente no primeiro init. Em **qualquer PostgreSQL 17**, instale-a com:
+
+```sql
+CREATE EXTENSION theodb CASCADE;   -- CASCADE instala as dependências (vector, vectorscale, plpython3u)
+```
+
+Passo a passo das 12 capacidades em [`docs/quickstart.md`](./docs/quickstart.md).
+
+> **Limitação honesta (PostgreSQL gerenciado):** a superfície de IA (`ai.*`, NL→SQL, registry de modelos —
+> features 06–12) usa a linguagem **`plpython3u`**, que é *untrusted* e exige **superusuário** para instalar.
+> Em PostgreSQL gerenciado que não habilita `plpython3u` (ex.: alguns provedores de nuvem), apenas as
+> features **vetoriais 01–05** (similaridade, HNSW, IVFFlat, IVF, DiskANN) ficam disponíveis. A imagem
+> TheoDB downloadable habilita tudo.
+
+---
+
 ## Roadmap macro (inicial)
 
 > Visão macro de alto nível. Os marcos serão refinados em planos detalhados antes de cada
