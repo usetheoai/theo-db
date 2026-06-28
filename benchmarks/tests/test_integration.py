@@ -94,6 +94,29 @@ def test_harness_measures_diskann(db, tmp_path):
     assert max(r["recall_at_k"] for r in diskann) >= 0.90
 
 
+def test_diskann_reaches_scann_quality_recall(db, tmp_path):
+    # M14 fork-decision evidence: DiskANN (StreamingDiskANN, the shipped permissive ANN) must reach the
+    # ScaNN-quality bar (recall@10 >= 0.90 at usable QPS). This is the measurable gate the no-fork decision
+    # (docs/adr/0004) rests on — if it ever fails, the fork-trigger re-opens (PRD fork-gate policy).
+    from theodb_bench.__main__ import build_config, build_parser
+    from theodb_bench.harness import run_benchmark
+
+    SCANN_QUALITY_BAR = 0.90
+    db.ensure_extension()
+    db.set_session("CREATE EXTENSION IF NOT EXISTS vectorscale CASCADE")  # diskann AM precondition (self-sufficient)
+    args = build_parser().parse_args(
+        ["--index", "diskann", "--metric", "cosine", "--seed", "14",
+         "--n", "3000", "--dim", "32", "--n-queries", "50", "--k", "10", "--runs", "2"]
+    )
+    report = run_benchmark(build_config(args), db, tmp_path)
+    diskann = [r for r in report["results"] if r["index"] == "diskann"]
+    assert diskann, "no diskann results"
+    assert all(0.0 <= r["recall_at_k"] <= 1.0 and r["qps"] > 0 for r in diskann)
+    assert max(r["recall_at_k"] for r in diskann) >= SCANN_QUALITY_BAR, (
+        f"DiskANN below the ScaNN-quality bar {SCANN_QUALITY_BAR} — fork-trigger would re-open: {diskann}"
+    )
+
+
 def test_harness_measures_ivfflat(db, tmp_path):
     # M9: IVFFlat (pgvector) validated in the recall harness — features 03/04.
     from theodb_bench.__main__ import build_config, build_parser
