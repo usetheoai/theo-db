@@ -510,7 +510,7 @@ VERIFY:  cd benchmarks && pytest tests/test_hybrid.py -q && pytest -m integratio
 - [ ] `test_beir_loader_roundtrip` passes (unit): `cd benchmarks && pytest -m "not integration" tests/test_hybrid.py -k loader -q`.
 - [ ] `test_three_retrievers_report_metrics` passes (integration) against the container: `cd benchmarks && pytest -m integration tests/test_integration.py -k retrievers -q`.
 - [ ] The driver reports a finite nDCG@10 + Recall@100 for all three retrievers — `pytest -m integration -k retrievers` prints values in `[0,1]` and exits `0` (numbers observed, not fabricated).
-- [ ] Skip path: with `THEODB_EMBEDDING_*` unset the real-endpoint path skips with a clear message (no silent pass).
+- [ ] Endpoint-unconfigured path: `ai.hybrid_search_rrf(query_text=>…)` with no query_vector and `theodb.embedding_endpoint` unset raises a typed error (SQLSTATE `22023`, no silent green) — `pytest -m integration -k endpoint` exits `0`.
 - [ ] Pass: lint — `cd benchmarks && ruff check theodb_bench tests`; dead-code `vulture theodb_bench --min-confidence 80` clean.
 - [ ] Pass: size — `wc -l` on every changed/new file returns `< 500`.
 
@@ -633,7 +633,7 @@ VERIFY:  docker build -t theo-db:dev . && PGPORT=5432 bash smoke.sh   (hybrid li
 |---|---|---|---|
 | PostgreSQL (`psycopg`, the container) | container not ready / connection refused | run integration test before `pg_isready` passes | harness `VectorDB.connect/ping` raises a clear error; smoke `pg_isready` loop waits then fails loud (no silent pass) |
 | PostgreSQL (planner) | FTS index not used / no `@@` match | query with a term absent from the corpus | empty FTS leg → `FULL OUTER JOIN`+`COALESCE` returns vector-only rows, no crash (`test_hybrid_empty_fts_leg`) |
-| Embedding endpoint (`THEODB_EMBEDDING_*`, OpenAI-compatible, HTTP) | endpoint unset OR call fails (timeout/5xx) | unset the GUC/env in the integration eval | real-endpoint path **skips with a clear reason** (no silent green); typed error on a failed call (fail-fast, mirrors `theodb.embed` `22023` pattern) |
+| Embedding endpoint (`THEODB_EMBEDDING_*`, OpenAI-compatible, HTTP) | endpoint unset OR call fails (timeout/5xx) | unset the GUC/env in the integration eval | the SQL `ai.hybrid_search_rrf` vector leg calls `theodb.embed`, which **raises a typed error** (SQLSTATE `22023`/`38000`, no silent green); the Python real-endpoint full eval is deferred out-of-CI (report `docs/benchmarks/m7-hybrid-recall.md`), the CI eval uses the deterministic offline embedder |
 
 ## Final Phase: Integration Validation (MANDATORY)
 
@@ -656,4 +656,4 @@ ruff check theodb_bench tests && vulture theodb_bench --min-confidence 80
 - [ ] Coverage ≥ 90% on changed files (critical paths: the RRF fusion + nDCG/recall math at 100%)
 - [ ] Zero lint warnings — `ruff check theodb_bench tests` exits `0`; dead-code clean — `vulture theodb_bench --min-confidence 80` exits `0`
 - [ ] Runtime-metric proof — `pytest -m integration -k retrievers` shows the 3-retriever eval reporting finite nDCG@10/Recall@100 (asserted non-NaN in `[0,1]`)
-- [ ] Failure scenarios green — `pytest -m integration -k 'empty or skip'` exits `0` (empty-leg + endpoint-skip behaviors observed)
+- [ ] Failure scenarios green — `pytest -m integration -k 'empty or endpoint'` exits `0` (empty-leg + endpoint-unconfigured typed-error behaviors observed)

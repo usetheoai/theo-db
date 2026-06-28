@@ -74,10 +74,15 @@ BEGIN
             LIMIT $3
         ),
         fts AS (
+            -- Pin 'english' (matches the GENERATED to_tsvector('english',…) column; never rely on the
+            -- cluster default_text_search_config — ADR D1). The explicit ORDER BY before LIMIT keeps the
+            -- TOP per_leg_limit by relevance: with a GIN/@@ scan rows come back in heap order, so without
+            -- it LIMIT would keep an arbitrary subset and silently drop the most-relevant FTS docs.
             SELECT %1$I AS _id,
-                   RANK() OVER (ORDER BY ts_rank_cd(%4$I, plainto_tsquery($2)) DESC) AS rank
+                   RANK() OVER (ORDER BY ts_rank_cd(%4$I, plainto_tsquery('english', $2)) DESC) AS rank
             FROM %3$s
-            WHERE $2 IS NOT NULL AND %4$I @@ plainto_tsquery($2)
+            WHERE $2 IS NOT NULL AND %4$I @@ plainto_tsquery('english', $2)
+            ORDER BY ts_rank_cd(%4$I, plainto_tsquery('english', $2)) DESC
             LIMIT $3
         )
         SELECT COALESCE(vec._id, fts._id)::text AS id,
@@ -85,12 +90,20 @@ BEGIN
               + COALESCE(1.0 / ($4 + fts.rank), 0.0))::real AS score
         FROM vec
         FULL OUTER JOIN fts ON vec._id = fts._id
-        ORDER BY score DESC
+        -- Deterministic tie-break (id ASC) so equal fused scores order identically to the offline
+        -- Python twin rrf_fuse (ADR D2 — one fusion definition, stable ordering).
+        ORDER BY score DESC, id ASC
         LIMIT $5
     $q$, id_col, vector_col, tbl::text, content_tsv_col)
     USING qvec, query_text, per_leg_limit, k, result_limit;
 END;
 $$;
+
+-- Least-privilege, consistent with theodb.embed: when query_vector is NULL this function calls
+-- theodb.embed (server-side outbound HTTP). It is SECURITY INVOKER (default), so theodb.embed's own
+-- REVOKE-from-PUBLIC is honored per-caller — but we REVOKE here too so the privilege model is explicit
+-- and does not silently become an SSRF surface if someone ever switches this to SECURITY DEFINER.
+REVOKE ALL ON FUNCTION ai.hybrid_search_rrf(regclass, text, text, text, text, vector, int, int, int) FROM PUBLIC;
 
 COMMENT ON FUNCTION ai.hybrid_search_rrf(regclass, text, text, text, text, vector, int, int, int) IS
   'Hybrid search: fuse a PostgreSQL FTS leg (ts_rank_cd over a tsvector column) and a pgvector leg (<=>) '

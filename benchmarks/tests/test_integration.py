@@ -242,5 +242,75 @@ def test_three_retrievers_report_metrics(db):
     for name, m in results.items():
         assert 0.0 <= m["ndcg10"] <= 1.0, f"{name} nDCG@10 out of range: {m}"
         assert 0.0 <= m["recall100"] <= 1.0, f"{name} Recall@100 out of range: {m}"
-    # the eval must produce real signal (not all-zero) on this labelled corpus
-    assert any(m["ndcg10"] > 0 for m in results.values()), f"no retriever scored: {results}"
+    # the HYBRID leg specifically (the thing M7-S1 ships) must produce real signal — not vacuously
+    # green because vector or fts happened to score.
+    assert results["hybrid"]["ndcg10"] > 0, f"hybrid leg scored zero nDCG@10: {results}"
+    assert results["hybrid"]["recall100"] > 0, f"hybrid leg scored zero Recall@100: {results}"
+
+
+def test_hybrid_invalid_per_leg_limit_raises():
+    conn = _raw_conn()
+    try:
+        with conn.cursor() as cur:
+            _seed_documents(cur, "hyb_pll", [("d1", "database", "[1,0,0]")])
+            with pytest.raises(psycopg2.errors.InvalidParameterValue):  # 22023
+                _hybrid(cur, "hyb_pll", query_text="database", query_vector="[1,0,0]", per_leg_limit=0)
+    finally:
+        conn.close()
+
+
+def test_hybrid_invalid_result_limit_raises():
+    conn = _raw_conn()
+    try:
+        with conn.cursor() as cur:
+            _seed_documents(cur, "hyb_rl", [("d1", "database", "[1,0,0]")])
+            with pytest.raises(psycopg2.errors.InvalidParameterValue):  # 22023
+                _hybrid(cur, "hyb_rl", query_text="database", query_vector="[1,0,0]", result_limit=0)
+    finally:
+        conn.close()
+
+
+def test_hybrid_both_query_args_null_raises():
+    conn = _raw_conn()
+    try:
+        with conn.cursor() as cur:
+            _seed_documents(cur, "hyb_null", [("d1", "database", "[1,0,0]")])
+            with pytest.raises(psycopg2.errors.InvalidParameterValue):  # 22023 — need text and/or vector
+                _hybrid(cur, "hyb_null", query_text=None, query_vector=None)
+    finally:
+        conn.close()
+
+
+def test_hybrid_both_legs_empty_returns_no_rows():
+    conn = _raw_conn()
+    try:
+        with conn.cursor() as cur:
+            # FTS term matches nothing AND all embeddings NULL -> both legs empty -> zero rows, no error.
+            _seed_documents(cur, "hyb_empty", [
+                ("d1", "cooking recipes", None),
+                ("d2", "garden tools",    None),
+            ])
+            rows = _hybrid(cur, "hyb_empty", query_text="zzznomatch", query_vector="[1,0,0]")
+            assert rows == [], f"both-legs-empty must return zero rows (not error), got {rows}"
+    finally:
+        conn.close()
+
+
+def test_hybrid_unconfigured_endpoint_raises_typed_error():
+    """Failure scenario: query_text only (no query_vector) with theodb.embedding_endpoint unset →
+    the vector leg embeds via theodb.embed, which fails fast with a typed error (no silent green)."""
+    conn = _raw_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("RESET theodb.embedding_endpoint")  # ensure unset for this session
+            _seed_documents(cur, "hyb_noep", [("d1", "database", "[1,0,0]")])
+            # query_vector omitted -> function calls theodb.embed(query_text) -> 22023 (endpoint not set).
+            with pytest.raises(psycopg2.errors.InvalidParameterValue):
+                cur.execute(
+                    "SELECT id, score FROM ai.hybrid_search_rrf("
+                    "  tbl => 'hyb_noep'::regclass, id_col => 'doc_id', content_tsv_col => 'text_tsv',"
+                    "  vector_col => 'embedding', query_text => 'database')"
+                )
+                cur.fetchall()
+    finally:
+        conn.close()
