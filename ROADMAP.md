@@ -619,6 +619,40 @@ partir de AlloyDB. *(Merge de README M8 — Escala & observabilidade — com REA
 
 ---
 
+### M15 — [ ] Produtização — extensão instalável `CREATE EXTENSION theodb` + quickstart e2e das 12 features
+
+> Added 2026-06-28. Ancorado no blueprint `.claude/knowledge-base/discoveries/blueprints/pg-extension-packaging-blueprint.md` (SHIPPABLE_WITH_CAVEATS). Honesto: as 12 features de `docs/features/` já funcionam na imagem, mas vêm via `docker-entrypoint-initdb.d` (só em DB fresh) — não há `CREATE EXTENSION theodb`, nem versionamento, nem imagem publicada. M15 fecha o salto "amontoado de scripts → produto".
+
+**Objective:** Transformar os seis init-scripts (`sql/30-70`) numa **extensão PostgreSQL SQL-only umbrella** (`CREATE EXTENSION theodb`, modelo pgvector/PGXS — NÃO pgrx, pois `ai.*` são plpython3u sem `.so`) com `requires='vector, vectorscale'`, `superuser=true`, versionada e com upgrade paths, instalada na imagem via `CREATE EXTENSION theodb` (substituindo os scripts soltos), com quickstart e2e exercitando as 12 features e a imagem publicada — sem nenhuma afirmação de performance nova (packaging não muda perf).
+
+**Definition of done:**
+
+- [ ] `theodb.control` (`default_version='1.0'`, `requires='vector, vectorscale'`, `superuser=true`, `relocatable=false`, `trusted` unset, sem `module_pathname`) — ADR D1/D2 do blueprint.
+- [ ] `theodb--1.0.sql` (install script montado dos `sql/30-70`, criando schemas `ai`/`theodb_ml` in-script) + Makefile PGXS (`DATA`/`DATA_built`, sem `MODULES`).
+- [ ] Convenção de upgrade `theodb--X--Y.sql` estabelecida (CREATE OR REPLACE + `DO $$` guards + `@extschema:vector@`) — pelo menos o esqueleto v1.0.
+- [ ] `Dockerfile` instala a extensão e roda `CREATE EXTENSION theodb` no init (substitui os 6 `initdb.d` copies) — ADR D3 (greenfield).
+- [ ] Teste de install + upgrade (modelo pg_regress ou pytest) + teste transacional de install (modelo supabase) + `smoke.sh` estendido para `CREATE EXTENSION theodb`.
+- [ ] `quickstart.md` + demo e2e das 12 features via `CREATE EXTENSION theodb`; imagem publicada em `ghcr.io/usetheodev/theo-db`; `make dist` zip.
+- [ ] README documenta honestamente a limitação plpython3u (managed PG sem plpython3u → só features 01-05).
+
+**Entregáveis (artefatos concretos):**
+
+- `theodb.control`, `sql/theodb--1.0.sql`, Makefile PGXS, `Dockerfile` ajustado, testes de install/upgrade, `docs/quickstart.md`, imagem publicada.
+
+**Documentação:**
+
+- `docs/quickstart.md` (e2e das 12 features) + README (install + limitação plpython3u) + `docs/sql-ai-functions.md` (instalação via extensão).
+
+**Dependencies:** M1 (empacotamento/imagem), M2 (vetorial), M7/M10/M11/M12/M13 (superfície `ai.*`/`nl`/`ml`).
+
+**Top risks (new):**
+
+1. `requires` não auto-instala sem `CASCADE` (doc PG) — mitigar: imagem pré-compila vector+vectorscale; documentar `CREATE EXTENSION theodb CASCADE` para outros PGs.
+2. plpython3u é untrusted → extensão `superuser`-only; managed PGs sem plpython3u perdem 06-12 — limitação documentada honestamente (`public-copy.md`), não escondida.
+3. Migração de DBs legados (init-script) — mitigado por anti-sunk-cost: pre-1.0 sem base instalada → greenfield; sem `ALTER EXTENSION ADD` elaborado.
+
+---
+
 ## State-of-the-art references
 
 Peers cloned under `.claude/knowledge-base/references/`. See
