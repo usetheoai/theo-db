@@ -1,14 +1,33 @@
-# Code-Quality Audit — m6-columnar-htap
+# Code Quality Audit: m6-columnar-htap
 
-**Date:** 2026-06-28 · **Verdict:** PASS (0 hard caps, 0 soft caps)
+**Date:** 2026-06-28
+**Mode:** plan-bound
+**Verdict:** PASS
+**Score cap:** 100
+**Hard caps triggered:** _none_
 
-`run_code_quality.py m6-columnar-htap` → PASS. Independently verified: vulture + ruff clean on
-`theodb_bench`/`columnar.py`/`tests/test_columnar.py`; imports resolve (3 columnar + 69 unit pass);
-`bash -n license-sweep.sh` clean; columnar capability validated functionally (mirror==row, DuckDBScan plan).
+## Summary
 
-## Wiring triad
-- `VectorDB.{pg_mooncake_available,ensure_mooncake_extension,create_columnstore_mirror,explain_plan,timed_query}` + `columnar.run_columnar_vs_row` — callers: `test_columnar.py`; observable: measured timings + DuckDBScan plan + correctness match.
-- `license-sweep.sh § (e)` — caller: manual + `columnar-measure` CI; observable: pg_mooncake/pg_duckdb MIT verdict lines.
-- `packaging/Dockerfile.columnar` — caller: `columnar-measure` CI job; observable: build + measurement.
+- Languages audited: _none_
+- Languages skipped: _none_
+- Total findings: 0 (0 HARD, 0 SOFT_CAP, 0 SOFT_FLOOR, 0 INFO)
 
-PASS → proceed to /review.
+## Findings by detector
+
+### D1 — Dead code
+_No findings._
+
+### D2 — Symbol fabrication
+_No findings._
+
+### D3 — Cross-package orphan exports
+_No findings._
+
+### D4 — Mutation testing
+_No findings._
+
+## Related
+
+- Golden rule: [`.claude/rules/code-quality-golden-rule.md`](../../rules/code-quality-golden-rule.md)
+- Allowlist: [`.claude/rules/code-quality-allowlist.txt`](../../rules/code-quality-allowlist.txt)
+- Thresholds: [`.claude/rules/code-quality-thresholds.txt`](../../rules/code-quality-thresholds.txt)
