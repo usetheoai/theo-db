@@ -25,3 +25,8 @@ __pycache__/
 
 # ANN-Benchmarks dataset cache (large HDF5, fetched on demand)
 benchmarks/.datasets/
+
+# Secrets — local env (API keys). NEVER commit. .env.example (no secrets) IS tracked.
+.env
+.env.*
+!.env.example
