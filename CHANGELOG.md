@@ -24,6 +24,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.5.0] - 2026-06-28
+
+### Added
+
+- **M1 — Core + empacotamento** (3/3 DoDs), formalizando a distribuição PostgreSQL-compatível com evidência. **DoD-1:** a **suíte de regressão do PostgreSQL 17.10 upstream passa 100% (`All 225 tests passed`)** na distribuição TheoDB — runner throwaway `packaging/Dockerfile.regress` (`FROM theo-db:dev`, builda `pg_regress`+`regress.so` da tag `REL_17_10` com as flags Debian casadas) + `packaging/run-regress.sh` (`make installcheck`/pg_regress contra um cluster TheoDB efêmero). Como o engine não é forkado (ADR 0001), a suíte verde prova que o **empacotamento** não regrediu o SQL core. **DoD-2:** extensões do MVP pré-instaladas e habilitáveis via `CREATE EXTENSION` (`vector` 0.8.3, `vectorscale` 0.9.0, `plpython3u`, `plpgsql`) + tuning conjunto documentado. **DoD-3:** due-diligence de licença — **zero AGPL** no pacote (scan apt: só falso-positivo `ca-certificates`; **293 crates Rust** do pgvectorscale via `cargo metadata`: 0 AGPL/Affero, tudo MIT/Apache-2.0/permissivo), implementada como gate **reprodutível e commitado** (`packaging/license-sweep.sh` — exit ≠ 0 em qualquer AGPL real; evidência em `docs/packaging/license-audit.md`, com nota de desvio da ferramenta `loop-check-licence`). Doc `docs/packaging/packaging-and-tuning.md`; **CI** jobs `pg-regression` + `ha-smoke` com `timeout-minutes`. Blueprint+plano (plan-confidence SHIPPABLE 100) em `.claude/knowledge-base/`.
+
 ## [0.4.0] - 2026-06-28
 
 ### Added
