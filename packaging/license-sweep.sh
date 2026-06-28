@@ -61,7 +61,8 @@ bm25_license() {
     fi
   elif printf '%s' "$body" | grep -qiE 'postgresql license|permission to use, copy, modify'; then
     echo "  $label: PostgreSQL License (permissive) — confirmed"
-  elif printf '%s' "$body" | grep -qiE 'apache license|MIT License|BSD'; then
+  elif printf '%s' "$body" | grep -qiE 'apache license|MIT License|BSD|permission is hereby granted'; then
+    # 'permission is hereby granted' = the MIT/ISC body (some repos ship the MIT text without the "MIT License" title)
     echo "  $label: permissive (Apache/MIT/BSD) — confirmed"
   else
     echo "  UNVERIFIED $label (license text not recognized) — not assumed permissive"
@@ -69,6 +70,12 @@ bm25_license() {
 }
 bm25_license "pg_textsearch" "https://raw.githubusercontent.com/timescale/pg_textsearch/v1.3.1/LICENSE" "permissive"
 bm25_license "VectorChord-bm25" "https://raw.githubusercontent.com/tensorchord/VectorChord-bm25/0.3.0/LICENSE" "barred"
+
+echo "== (e) Columnar candidates (M6) — license verdict from each canonical repo (informational: not in the shipped image) =="
+# pg_mooncake + pg_duckdb (the columnar/HTAP pieces) must be permissive (MIT). Same reproducible, fail-closed
+# discipline as § (c). These are NOT in the distribution image (measurement-first gate) — informational record.
+bm25_license "pg_mooncake" "https://raw.githubusercontent.com/Mooncake-Labs/pg_mooncake/main/LICENSE" "permissive"
+bm25_license "pg_duckdb" "https://raw.githubusercontent.com/duckdb/pg_duckdb/main/LICENSE" "permissive"
 
 echo "======================================================"
 if [ "$fail" -eq 0 ]; then echo "LICENSE SWEEP PASSED — zero AGPL in the TheoDB package"; else echo "LICENSE SWEEP FAILED — AGPL found"; fi

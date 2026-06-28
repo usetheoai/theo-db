@@ -14,6 +14,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **M6 — Analytics colunar / HTAP (pg_mooncake, MIT).** Capacidade columnstore-mirror provada + medida: `CALL mooncake.create_table('mirror','base')` cria um espelho colunar (DuckDB+Iceberg) sincronizado; query analítica medida **mirror vs row-store** com correção verificada (`match=True`, agregado idêntico grupo-a-grupo em 100k linhas). **DoD-2 (escolha de plano row vs colunar) provado por EXPLAIN:** mirror = `Custom Scan (DuckDBScan)` (engine vetorizado DuckDB) vs row = `Seq Scan` — `docs/analytics/columnar-htap.md`. **Honestidade (DoD-3/D2):** é lakehouse DuckDB+Iceberg em disco, **NÃO** in-memory como o AlloyDB (peers in-memory Citus/Hydra são AGPL → barrados por D1) — aposta competitiva-diferente, não cópia. Números medidos honestos em `docs/benchmarks/m6-columnar-vs-row.md` (a 100k o row-store é mais rápido: 10.9ms vs 44.3ms — o ganho colunar materializa em escala maior, **UNBENCHMARKED** a essa escala; sem claim de performance). Licença MIT reprodutível (pg_mooncake+pg_duckdb) em `license-sweep.sh § (e)`. **measurement-first** (ADR 0002): a distribuição NÃO embarca pg_mooncake ainda — o build PG17 from-source (Rust+pgrx+DuckDB) é gated (tentado em `packaging/Dockerfile.columnar-pg17probe`, bloqueado num pin de rustc/MSRV no HEAD upstream; pg17 é suportado pela Makefile). Substrato de medição = distribuição canônica MIT (`packaging/Dockerfile.columnar`). Job CI `columnar-measure`. Risk #1 (suporte PG17) resolvido; risk #2 (sync overhead) UNBENCHMARKED documentado.
+
 ### Changed
 
 ### Deprecated

@@ -75,3 +75,16 @@ identification (ADR 0003) as re-runnable evidence.
 
 **Net:** `pg_textsearch` is the identified permissive BM25 alternative (ADR 0003); adoption into the shipped
 image is gated on the recall benchmark `docs/benchmarks/m7-bm25-vs-tsrank.md` (measurement-first, ADR 0002).
+
+## (e) Columnar candidates (M6) — permissive verification
+
+Reproducible via `bash packaging/license-sweep.sh` § (e). These pieces are **not** in the shipped distribution
+image (measurement-first gate — M6); this records the M6 columnar identification as re-runnable evidence.
+
+| Candidate | License (verbatim source) | Verdict |
+|---|---|---|
+| `Mooncake-Labs/pg_mooncake` | **MIT** (`raw.githubusercontent.com/Mooncake-Labs/pg_mooncake/main/LICENSE`) | **PERMISSIVE** |
+| `duckdb/pg_duckdb` | **MIT** (MIT body; `raw.githubusercontent.com/duckdb/pg_duckdb/main/LICENSE`) | **PERMISSIVE** |
+
+Net: the columnar/HTAP stack (pg_mooncake + pg_duckdb + DuckDB) is permissive (MIT), D1-clean. Adoption into
+the shipped image is gated on the PG17 build + a large-scale measurement (see `docs/benchmarks/m6-columnar-vs-row.md`).
