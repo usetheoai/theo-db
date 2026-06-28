@@ -188,3 +188,41 @@ class VectorDB:
                 (table, query_text, vec, int(k), int(n), int(n)),
             )
             return [r[0] for r in cur.fetchall()]
+
+    # --- M7-S2: pg_textsearch BM25 leg (throwaway image only; requires shared_preload_libraries) ----
+    def pg_textsearch_available(self) -> bool:
+        """True iff the pg_textsearch control file is installed AND the lib is in shared_preload_libraries.
+
+        Both are required: the extension cannot be created without the control file (make install) NOR
+        without the preload (it RAISEs 'library not loaded'). We check both so the skip gate is honest —
+        checking only pg_available_extensions would pass on an image that installed the files but was
+        started without `-c shared_preload_libraries=pg_textsearch`.
+        """
+        with self._cursor() as cur:
+            cur.execute("SELECT count(*) FROM pg_available_extensions WHERE name = 'pg_textsearch'")
+            installed = int(cur.fetchone()[0]) > 0
+            cur.execute("SELECT current_setting('shared_preload_libraries', true)")
+            preload = cur.fetchone()[0] or ""
+        return installed and ("pg_textsearch" in preload)
+
+    def ensure_bm25_extension(self) -> None:
+        with self._cursor() as cur:
+            cur.execute("CREATE EXTENSION IF NOT EXISTS pg_textsearch")
+
+    def create_bm25_index(self, table: str, text_col: str = "content", text_config: str = "english") -> None:
+        with self._cursor() as cur:
+            cur.execute(
+                f"CREATE INDEX {table}_bm25 ON {table} "
+                f"USING bm25 ({text_col}) WITH (text_config='{text_config}')"
+            )
+
+    def bm25_query(self, table: str, query_text: str, n: int, text_col: str = "content") -> list:
+        # pg_textsearch: `col <@> 'query'` returns the negative BM25 score (lower = better match),
+        # so ASC ordering yields best-first. LIMIT enables its top-k (Block-Max WAND) optimization.
+        with self._cursor() as cur:
+            cur.execute(
+                f"SELECT doc_id FROM {table} WHERE {text_col} IS NOT NULL "
+                f"ORDER BY {text_col} <@> %s LIMIT {int(n)}",
+                (query_text,),
+            )
+            return [r[0] for r in cur.fetchall()]

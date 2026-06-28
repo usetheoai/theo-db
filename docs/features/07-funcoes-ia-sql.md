@@ -1,12 +1,20 @@
 # Consultas SQL inteligentes com funções de IA
 
 > **Status:** 📋 Especificação (planejado) — recurso-alvo do milestone **M7 — IA avançada** ([ROADMAP](../../ROADMAP.md)).
-> Esta página documenta a **API-alvo do TheoDB**. As funcionalidades aqui descritas **ainda não estão
-> implementadas** na release atual (M0 entrega PostgreSQL 17 + `pgvector`). Nenhum número de desempenho
+> Esta página documenta a **API-alvo do TheoDB**. As funções escalares `ai.generate`/`ai.if`/`ai.rank`/
+> `ai.analyze_sentiment`/`ai.summarize` **estão implementadas** desde M7-S3 (ver nota abaixo); os modos
+> array/cursor e a extensão empacotada `theodb_ml` permanecem alvo. Nenhum número de desempenho
 > nesta página é um benchmark — benchmarks reproduzíveis vivem em `docs/benchmarks/` quando publicados
 > (CLAUDE.md, regra TheoDB 5).
 
 Esta página cobre as funções SQL de IA do TheoDB (`ai.if`, `ai.generate`, `ai.rank`): suas assinaturas, parâmetros, modos de processamento (escalar, em lote e via cursor) e casos de uso para filtragem, geração e ranking inteligentes em SQL.
+
+> **Superfície implementada (M7-S3):** as funções **escalares** `ai.generate`/`ai.if`/`ai.rank`/`ai.analyze_sentiment`/`ai.summarize`
+> estão entregues (`sql/50-theodb-ai.sql`) sobre um **endpoint chat-completions OpenAI-compatible configurável**
+> (GUCs `theodb.llm_endpoint`/`theodb.llm_model`/`theodb.llm_api_key`), model-agnostic, fail-fast tipado e
+> `REVOKE`das de PUBLIC. Doc operacional: `docs/sql-ai-functions.md`. Os modos **em lote (array) e via cursor**
+> ("aceleradas") desta página são um **follow-up documentado** (não nesta fatia — KISS/YAGNI). A extensão
+> empacotada `theodb_ml` e os comandos `CALL theodb_ml.*` são a forma-alvo; hoje as funções vivem no schema `ai`.
 
 ---
 

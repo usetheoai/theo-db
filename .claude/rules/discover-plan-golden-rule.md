@@ -32,18 +32,6 @@ A discovery plan is `INVALID` and cannot produce a `SHIPPABLE` verdict when any 
 | `--skip-checks` flag does not exist and SHALL NOT be added | Constructor invariant |
 | `hard_caps_triggered` MUST be non-empty when verdict==INVALID | JSON schema invariant |
 
-## § 3.1 — Project rigor profile (TheoDB — frontier; ADR `0001-discover-phd-rigor`)
-
-TheoDB is a frontier DB anchored on the AlloyDB SOTA. The per-project profile `discover-phd-rigor.md` sharpens this cycle **without loosening any LOCKED hard cap above**:
-
-| Profile requirement | Status | Enforcement |
-|---|---|---|
-| Question budget window **6-14** total, **≤ 5 per corner**, **techniques ≥ 2** | Active | Structural — `skills/discover-plan-confidence/scripts/check_plan_completeness.py` (`MIN_QUESTIONS`/`MAX_QUESTIONS`/`MAX_PER_CORNER`). Stays inside the LOCKED `Question count ≤ 15`. |
-| SOTA-anchoring (R1), ≥ 2 primary sources (R2), benchmark-or-`UNBENCHMARKED` (R3) on the techniques corner | Active | **Review-enforced** (read by `/discover-plan-confidence` + `/discover-edge-cases`); not yet a deterministic checker — honest debt tracked in `discover-phd-rigor.md § 3`. |
-| Tightened verdict bands (SHIPPABLE 92, CAVEATS 75) | Active | `discover-plan-thresholds.txt` (read by `run_discover_plan_score.py`). |
-
-This subsection is per-project and ADR-gated. Promoting any review-enforced item (R1–R3) to a deterministic hard/soft cap requires a new ADR per § 6 + a fixture-backed script.
-
 ## § 4 — Why the rule exists
 
 A discovery plan that does not declare research questions is investigation theatre. A plan that cites references that do not exist will produce a blueprint built on fiction. A plan with > 15 questions has not been scoped — it is a research project, not a discovery cycle.
@@ -61,7 +49,7 @@ Aligned with `cycle-rule-schema.md`:
 
 ## § 6 — When this rule may change
 
-Only via explicit ADR. Requires CHANGELOG entry and passing `check_xrefs.py` + `test_e2e_smoke.py`. The § 3.1 frontier profile was added by ADR `0001-discover-phd-rigor`.
+Per `cycle-rule-schema.md § Golden Rule Change Protocol`. No rule-specific deviations.
 
 ## Cross-references
 
@@ -69,5 +57,3 @@ Only via explicit ADR. Requires CHANGELOG entry and passing `check_xrefs.py` + `
 - Cycle: `cycle-discover.md`
 - Skill: `skills/discover-plan-confidence/SKILL.md`
 - Thresholds: `discover-plan-thresholds.txt`
-- Project rigor profile: `discover-phd-rigor.md`
-- ADR: `knowledge-base/adrs/0001-discover-phd-rigor.md`

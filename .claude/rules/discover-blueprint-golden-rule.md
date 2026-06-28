@@ -35,19 +35,6 @@ This is NOT a guideline. It is a constraint enforced by the skill. The skill SHA
 | Score-capped reports MUST mark the cap explicitly | Rendering invariant |
 | `hard_caps_triggered` list MUST be non-empty when verdict==INVALID | JSON schema invariant |
 
-## § 3.1 — Project rigor profile (TheoDB — frontier; ADR `0001-discover-phd-rigor`)
-
-TheoDB is a frontier DB anchored on the AlloyDB SOTA. The per-project profile `discover-phd-rigor.md` sharpens what a *shippable blueprint* must contain **without loosening any LOCKED hard cap above**:
-
-| Profile requirement | Status | Enforcement |
-|---|---|---|
-| **R1 — SOTA-anchoring.** Every technique names the AlloyDB/ScaNN (or field) approach + the gap TheoDB closes. | Active | **Review-enforced** (read by `/discover-confidence`); honest debt in `discover-phd-rigor.md § 3`. |
-| **R2 — ≥ 2 primary sources per technique.** Partly backed by the LOCKED ≥ 2-references rule above; the *per-technique* split is review-enforced. | Active | Partial script + review. |
-| **R3 — benchmark-or-`UNBENCHMARKED`.** Every performance statement carries methodology + numbers + source, or the literal marker. Bare "X is faster" rejected (`public-copy.md`, PRD D3). | Active | **Review-enforced.** |
-| Tightened verdict bands (SHIPPABLE 92, CAVEATS 75) | Active | `discover-blueprint-thresholds.txt` (read by `run_blueprint_score.py`). |
-
-This subsection is per-project and ADR-gated. Promoting any review-enforced item to a deterministic hard/soft cap requires a new ADR per § 6 + a fixture-backed script.
-
 ## § 4 — Why the rule exists
 
 A blueprint missing a coverage corner is a blueprint that did NOT do the deep research it claimed. A blueprint with fabricated citations is unsafe to use as a design source — recipients trust cited paths and build on top of references that do not exist.
@@ -69,12 +56,11 @@ This rule forces minimum structural state PRESENT before the aggregate matters.
 
 ## § 6 — When this rule may change
 
-Only via explicit ADR signed by the project owner. Any change that softens enforcement MUST:
+Per `cycle-rule-schema.md § Golden Rule Change Protocol` (ADR signed by the project
+owner). Rule-specific deviations:
 
-1. Cite the ADR in `knowledge-base/adrs/`.
-2. Document the change in `## § 3 — Rules that cannot be bent`.
-3. Bump `rules/discover-blueprint-thresholds.txt` reference to the new ADR (when that file exists).
-4. Add CHANGELOG entry under `[Unreleased] § Changed`.
+- Document the change in `## § 3 — Rules that cannot be bent`.
+- Bump the `rules/discover-blueprint-thresholds.txt` reference to the new ADR.
 
 ## § 7 — Failure modes the rule guards against
 
@@ -93,5 +79,3 @@ Only via explicit ADR signed by the project owner. Any change that softens enfor
 - Thresholds template: `skills/discover-confidence/templates/discover-blueprint-thresholds.example.txt`
 - Rubric: `skills/discover-confidence/templates/rubric-blueprint.md`
 - Defaults (fallback): `skills/discover-confidence/defaults/`
-- Project rigor profile: `discover-phd-rigor.md`
-- ADR: `knowledge-base/adrs/0001-discover-phd-rigor.md`

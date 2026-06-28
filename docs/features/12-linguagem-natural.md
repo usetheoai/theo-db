@@ -6,6 +6,12 @@
 > nesta página é um benchmark — benchmarks reproduzíveis vivem em `docs/benchmarks/` quando publicados
 > (CLAUDE.md, regra TheoDB 5).
 
+> **Superfície implementada (M7-S4):** o MVP seguro está entregue como `ai.nl_to_sql` (gera+valida) e
+> `ai.nl_query` (executa em sandbox read-only) — `sql/60-theodb-nl.sql`. A guarda anti-prompt-injection é o
+> gate: defesa em 4 camadas (prompt + validação estática + **sandbox read-only nativo `25006`** + allowlist de
+> relações = "views parametrizadas seguras"). A superfície completa de configuração/templates/value-index do
+> `theodb_ai_nl` abaixo é o alvo AlloyDB, **deferida** (YAGNI). Doc operacional: `docs/sql-ai-functions.md`.
+
 Esta página cobre as consultas SQL e as APIs da extensão `theodb_ai_nl`, que traduz perguntas em
 linguagem natural para SQL — configuração, contexto de schema, templates, fragmentos, concept types,
 value index e geração/execução de consultas.

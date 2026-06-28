@@ -84,7 +84,6 @@ Numbered list. Each question maps to a Coverage Corner (tests / deps / tools / t
 | Q3 | What's Project A's local-dev story? Docker? Just Postgres? | tools | `.claude/knowledge-base/references/project-a/` | SKIP Fase A — text-shape question. Glob for `docker-compose*.yml`, `Makefile`, `README*.md` | Read each file fully | Step-by-step instructions + dependency list |
 | Q4 | Does Project C implement procedural memory as prompt-rewriting or as a structured memory class? | techniques | `.claude/knowledge-base/references/project-c/` | `ast-grep run --pattern 'class $NAME($$$): $$$' --lang python .claude/knowledge-base/references/project-c/src/project-c/prompts/` to list candidate classes | Read each candidate class to determine architecture pattern | Architecture description + class diagram + key citations |
 | Q5 | Compare how Project A (TS) and Project B (Python) define the `add()` operation | techniques | `.claude/knowledge-base/references/project-a/`, `.claude/knowledge-base/references/project-b/` | `ast-grep run -p 'async add($$$) { $$$ }' --lang typescript ref/project-a/` AND `ast-grep run -p 'def add($$$): $$$' --lang python ref/project-b/` — TWO Fase A queries, one per language | Read both candidate methods side-by-side to compare signatures + bodies | Side-by-side table with TS and Python signatures + citations |
-| Q6 | What recall/latency does the SOTA index (anchor) report vs the permissive piece, and under what benchmark? | techniques | `.claude/knowledge-base/references/<permissive-piece>/`, allowlisted paper/doc | `ast-grep`/Grep for the index entrypoint + benchmark harness in the ref; WebFetch the anchor's published numbers (allowlist only) | Read the benchmark methodology + numbers from BOTH sources | Table: source → dataset → recall@k → p95 latency → methodology; bare claims marked `UNBENCHMARKED` (R3) |
 
 ## Coverage Matrix
 
@@ -92,14 +91,12 @@ Every Coverage Corner MUST have at least one Research Question mapped to it. If 
 
 | Corner | Questions mapped | Status |
 |---|---|---|
-| Integration tests | Q1 | Covered |
+| Integration tests | Q1, Q5 | Covered |
 | Dependencies | Q2 | Covered |
 | Tools | Q3 | Covered |
-| Techniques | Q4, Q5, Q6 | Covered (≥ 2 — frontier R4) |
+| Techniques | Q4, Q5 | Covered |
 
 **Coverage: X/Y corners covered (Z%)**
-
-> **TheoDB frontier rigor** (`rules/discover-phd-rigor.md`): the `techniques` corner carries **≥ 2** questions, each (R1) anchored on the AlloyDB/ScaNN SOTA with the gap stated, (R2) backed by **≥ 2 primary sources** (paper via allowlist + official doc/repo), and (R3) any performance claim it will make carries benchmark methodology + numbers + source OR the literal marker `UNBENCHMARKED`. Budget: **6-14 total, ≤ 5 per corner**.
 
 If `Z < 100%`, the discovery plan caps at `discover-confidence` INVALID (≤49). Either map a question to the missing corner OR add an ADR explicitly deferring it.
 
@@ -123,7 +120,6 @@ Observable conditions for "this discovery is done":
 - [ ] All research questions answered OR explicitly marked BLOCKED with reason
 - [ ] All four coverage corners have populated sections in the blueprint
 - [ ] Every citation in the blueprint points to a real `.claude/knowledge-base/references/{...}` path
-- [ ] **Frontier rigor (R1/R2/R3):** every technique anchored on SOTA + ≥ 2 primary sources; every performance claim benchmarked OR flagged `UNBENCHMARKED`
 - [ ] At least one ADR section in the blueprint synthesizes decisions taken
 - [ ] Time budget respected per project
 - [ ] `/discover-confidence` verdict ≥ SHIPPABLE_WITH_CAVEATS
