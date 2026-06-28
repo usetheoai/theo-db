@@ -561,7 +561,7 @@ partir de AlloyDB. *(Merge de README M8 — Escala & observabilidade — com REA
 
 ---
 
-### M13 — [ ] Superfície de IA empacotada nativa — `ai.hybrid_search()` JSON + registry `theodb_ml` (specs 06, 07 — conclusão)
+### M13 — [x] Superfície de IA empacotada nativa — `ai.hybrid_search()` JSON + registry `theodb_ml` (specs 06, 07 — conclusão)
 
 > Added 2026-06-28 by `/roadmap-feature` (gap audit). Capacidades já entregues; falta a superfície literal das specs.
 
