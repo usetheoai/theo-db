@@ -229,3 +229,18 @@ def test_hybrid_k_param_changes_score():
             assert abs(top_k1[1] - top_k60[1]) > 1e-4, "k must change the fused score (param wired, not hardcoded)"
     finally:
         conn.close()
+
+
+def test_three_retrievers_report_metrics(db):
+    """M7-S1 T2.2: the 3-retriever BEIR-style eval reports finite nDCG@10 + Recall@100 (measured)."""
+    from theodb_bench.beir import EMBED_DIM, lexical_embed, synthetic_dataset
+    from theodb_bench.hybrid import run_three_retrievers
+
+    db.ensure_extension()
+    results = run_three_retrievers(db, synthetic_dataset(), lexical_embed, EMBED_DIM, table="it_hybrid_eval")
+    assert set(results) == {"vector", "fts", "hybrid"}
+    for name, m in results.items():
+        assert 0.0 <= m["ndcg10"] <= 1.0, f"{name} nDCG@10 out of range: {m}"
+        assert 0.0 <= m["recall100"] <= 1.0, f"{name} Recall@100 out of range: {m}"
+    # the eval must produce real signal (not all-zero) on this labelled corpus
+    assert any(m["ndcg10"] > 0 for m in results.values()), f"no retriever scored: {results}"
