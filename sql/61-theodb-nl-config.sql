@@ -94,6 +94,9 @@ BEGIN
     IF p_values IS NULL THEN
         RAISE EXCEPTION 'ai.nl_set_value_index: values must not be NULL' USING ERRCODE = '22023';
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM ai.nl_config WHERE config_id = p_config) THEN
+        RAISE EXCEPTION 'ai.nl_set_value_index: config % not found', p_config USING ERRCODE = '22023';
+    END IF;
     INSERT INTO ai.nl_value_index (config_id, relation, column_name, values, refreshed_at)
         VALUES (p_config, p_relation, p_column, p_values, now())
         ON CONFLICT (config_id, relation, column_name) DO UPDATE

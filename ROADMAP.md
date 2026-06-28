@@ -546,7 +546,7 @@ partir de AlloyDB. *(Merge de README M8 — Escala & observabilidade — com REA
 
 **Entregáveis (artefatos concretos):**
 
-- SQL em `sql/60-theodb-nl.sql`; tabelas de config/templates; testes.
+- SQL em `sql/61-theodb-nl-config.sql` (config surface — o gate `sql/60` é reutilizado **sem alteração**); tabelas de config/templates/value-index; testes.
 
 **Documentação:**
 

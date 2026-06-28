@@ -338,6 +338,58 @@ def test_nl_query_cfg_config_not_found_raises(conn, chat_server):
             cur.execute("SELECT ai.nl_query_cfg('anything', 'no_such_config')")
 
 
+def test_nl_query_cfg_relation_exfil_blocked_by_l4(conn, chat_server):
+    # PROVES the config's UNIQUE security job: cfg1.allowed_relations=['documents'] is forwarded to the gate's
+    # L4 relation allowlist. A comma-join exfil of 'secret' (NOT in the config) must be rejected by L4 (not just
+    # the L2 keyword denylist) — and 'secret' must be untouched.
+    with conn.cursor() as cur:
+        _setup_cfg(cur, chat_server)
+        with pytest.raises(psycopg2.errors.InvalidParameterValue):  # 22023 — L4: secret not in cfg allowlist
+            cur.execute("SELECT ai.nl_query_cfg('__NLINJECT_COMMAJOIN__ read secret', 'cfg1')")
+    with conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM secret")
+        assert cur.fetchone()[0] == 1  # secret intact — config allowlist reached L4
+
+
+def test_nl_query_cfg_empty_question_raises(conn, chat_server):
+    with conn.cursor() as cur:
+        _setup_cfg(cur, chat_server)
+        with pytest.raises(psycopg2.errors.InvalidParameterValue):  # 22023
+            cur.execute("SELECT ai.nl_query_cfg('   ', 'cfg1')")
+
+
+def test_nl_set_template_enabled_disables_and_not_found(conn, chat_server):
+    with conn.cursor() as cur:
+        _setup_cfg(cur, chat_server)
+        # disable the template -> nl_query_cfg still works (disabled template excluded from enrichment), benign
+        cur.execute("SELECT ai.nl_set_template_enabled('tmpl1', false)")
+        cur.execute("SELECT ai.nl_query_cfg('how many documents', 'cfg1')")
+        assert cur.fetchone()[0][0]["n"] == 2
+        cur.execute("SELECT enabled FROM ai.nl_templates WHERE template_id='tmpl1'")
+        assert cur.fetchone()[0] is False
+        with pytest.raises(psycopg2.errors.InvalidParameterValue):  # 22023 — unknown template
+            cur.execute("SELECT ai.nl_set_template_enabled('no_such_template', true)")
+
+
+def test_nl_set_value_index_explicit_and_guards(conn, chat_server):
+    with conn.cursor() as cur:
+        _setup_cfg(cur, chat_server)
+        cur.execute("SELECT ai.nl_set_value_index('cfg1', 'documents', 'content', ARRAY['x','y'])")
+        cur.execute("SELECT values FROM ai.nl_value_index WHERE config_id='cfg1' AND column_name='content'")
+        assert cur.fetchone()[0] == ["x", "y"]
+        with pytest.raises(psycopg2.errors.InvalidParameterValue):  # 22023 — NULL values
+            cur.execute("SELECT ai.nl_set_value_index('cfg1', 'documents', 'content', NULL)")
+        with pytest.raises(psycopg2.errors.InvalidParameterValue):  # 22023 — unknown config
+            cur.execute("SELECT ai.nl_set_value_index('nope', 'documents', 'content', ARRAY['x'])")
+
+
+def test_nl_refresh_value_index_rejects_nonpositive_max(conn, chat_server):
+    with conn.cursor() as cur:
+        _setup_cfg(cur, chat_server)
+        with pytest.raises(psycopg2.errors.InvalidParameterValue):  # 22023
+            cur.execute("SELECT ai.nl_refresh_value_index('cfg1', 'documents', 'content', 0)")
+
+
 def test_nl_refresh_value_index_populates_from_data(conn, chat_server):
     # auto-populate the value-index for documents.content (allowed in cfg1); stored distinct values.
     with conn.cursor() as cur:

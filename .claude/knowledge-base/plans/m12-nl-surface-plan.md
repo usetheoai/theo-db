@@ -66,7 +66,7 @@ Every file in any `#### Files to edit` below appears in this table.
 
 Per `rules/architecture.md`: all new objects live in schema `ai` (interface-layer capability) over the
 unchanged M7-S4 gate (the security adapter). No new dependency. The value-index auto-refresh is the only new
-dynamic-SQL surface and is guarded (relation ∈ config allowlist + identifier-validated column + read-only).
+dynamic-SQL surface and is guarded (relation ∈ config allowlist + identifier-validated column + fixed-shape read via quote_ident/regclass — no user SQL).
 
 ## Prior Art & Related Work
 
@@ -82,7 +82,7 @@ dynamic-SQL surface and is guarded (relation ∈ config allowlist + identifier-v
 - [ ] `ai.nl_query_cfg(question, config_id, max_rows)` — loads config, enriches the prompt (schema_context + enabled template + value-index hints), delegates to the UNCHANGED `ai.nl_query` with the config's allowed_relations.
 - [ ] **Anti-injection gate preserved**: an adversarial question through `ai.nl_query_cfg` is still blocked (22023), DB intact — proven by a regression test.
 - [ ] `REVOKE ALL ... FROM PUBLIC` on every new function (parity with the gate).
-- [ ] `ai.nl_refresh_value_index` is injection-safe: relation must be ∈ the config's allowed_relations; column validated as a plain identifier; runs read-only; `quote_ident`.
+- [ ] `ai.nl_refresh_value_index` is injection-safe: relation must be ∈ the config's allowed_relations; column validated as a plain identifier; fixed-shape read via `quote_ident` + `::regclass` (no user SQL executed).
 - [ ] Real-OpenAI evidence: a registered config drives a real NL→SQL query returning rows.
 
 ## ADRs
@@ -124,13 +124,15 @@ re-validates every generated relation against the passed allowlist regardless.
 **Consequences:** the template/schema_context cannot relax the gate (a feature, not a limit); the regression
 test proves an injection through the config path is still blocked.
 
-### D3 — `nl_refresh_value_index` dynamic SQL is hard-guarded (relation allowlist + identifier validation + read-only)
+### D3 — `nl_refresh_value_index` dynamic SQL is hard-guarded (relation allowlist + identifier validation + fixed-shape read)
 
 **Decision:** `ai.nl_refresh_value_index(config_id, relation, column_name, max_values)` auto-populates the
 value-index by running `SELECT DISTINCT <col> FROM <relation> LIMIT n`, but ONLY after: (a) the relation is
 exactly ∈ the config's `allowed_relations`; (b) `column_name` matches `^[A-Za-z_][A-Za-z0-9_]*$`; (c) the
-relation resolves via `to_regclass`; the query runs with `transaction_read_only=on` and `quote_ident` on the
-column. An explicit `ai.nl_set_value_index(...)` (operator supplies values, zero dynamic SQL) is also provided.
+relation resolves via `to_regclass`; the dynamic query is a FIXED-SHAPE read (`SELECT DISTINCT %I FROM %s` —
+`%I` quotes the column, the relation is rendered via `::regclass`; NO user SQL is interpolated), so it cannot
+express a write and needs no `transaction_read_only` GUC (which would anyway block the function's own index
+upsert). An explicit `ai.nl_set_value_index(...)` (operator supplies values, zero dynamic SQL) is also provided.
 
 **Rationale:** auto-refresh-from-data is the real value-index feature, but dynamic SQL is an injection vector
 — so it is guarded by the same allowlist discipline as the gate (relation must be operator-vetted in the
@@ -210,7 +212,7 @@ Dockerfile — COPY sql/61-theodb-nl-config.sql to initdb.d (after sql/60)
 
 #### Deep Dives
 - **Tables:** `ai.nl_config(config_id PK, allowed_relations text[] NOT NULL, schema_context text, template_id text, model text, created_at timestamptz default now())`; `ai.nl_templates(template_id PK, system_prompt text NOT NULL, enabled boolean NOT NULL default true)`; `ai.nl_value_index(config_id, relation, column_name, values text[] NOT NULL, refreshed_at timestamptz default now(), PRIMARY KEY(config_id, relation, column_name))`.
-- **`nl_refresh_value_index` guard (D3):** load config; assert `relation = ANY(config.allowed_relations)` (else 22023); assert `column_name ~ '^[A-Za-z_][A-Za-z0-9_]*$'` (else 22023); `to_regclass(relation)` not null (else 22023); `set_config('transaction_read_only','on',true)`; `EXECUTE format('SELECT array_agg(v) FROM (SELECT DISTINCT %I::text AS v FROM %s WHERE %I IS NOT NULL ORDER BY 1 LIMIT %s) z', column_name, relation, column_name, max_values)`; upsert into `ai.nl_value_index`.
+- **`nl_refresh_value_index` guard (D3):** load config; assert `relation = ANY(config.allowed_relations)` (else 22023); assert `column_name ~ '^[A-Za-z_][A-Za-z0-9_]*$'` (else 22023); `to_regclass(relation)` not null (else 22023); `EXECUTE format('SELECT array_agg(v ORDER BY v) FROM (SELECT DISTINCT %I::text AS v FROM %s WHERE %I IS NOT NULL LIMIT %s) z', column_name, relation::regclass, column_name, max_values)` (fixed-shape read; no user SQL); upsert into `ai.nl_value_index`.
 - **Edge cases:** config not found → 22023; max_values ≤ 0 → 22023; relation not allowlisted → 22023; bad column identifier → 22023.
 
 #### Pseudo-code / Signatures
@@ -358,7 +360,7 @@ VERIFY:  PG*=... pytest -m integration tests/test_nl_sql.py -k 'nl_query_cfg' -q
 | 3 | feature 12 value-index (categorical) | T1.1 | `ai.nl_value_index` + `ai.nl_set_value_index` + guarded `ai.nl_refresh_value_index` |
 | 4 | config-driven NL query | T2.1 | `ai.nl_query_cfg` over the unchanged gate |
 | 5 | **anti-injection defense preserved** | T2.1 | gate reused unchanged (D2); regression test (injection blocked + DB intact) |
-| 6 | refresh dynamic-SQL injection-safe | T1.1 | D3 guard (relation allowlist + identifier validation + read-only); guard test |
+| 6 | refresh dynamic-SQL injection-safe | T1.1 | D3 guard (relation allowlist + identifier validation + fixed-shape read via quote_ident/regclass); guard test |
 | 7 | REVOKE FROM PUBLIC (security parity) | T1.1, T2.1 | REVOKE on every new fn |
 | 8 | real functional evidence (not stub-only) | T2.1 | real-OpenAI config-driven query + logged output |
 | 9 | no regression to M7-S4 gate; no new dep | T2.1 | existing nl tests green; sql/60 unchanged; Rule 9 |

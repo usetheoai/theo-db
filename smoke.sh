@@ -126,14 +126,18 @@ SELECT
   || ':' ||
   (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
      WHERE n.nspname='ai' AND p.proname IN ('nl_query_cfg','nl_add_config','nl_add_template',
+       'nl_set_template_enabled','nl_set_value_index','nl_refresh_value_index'))::text
+  || ':' ||
+  (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+     WHERE n.nspname='ai' AND p.proname IN ('nl_query_cfg','nl_add_config','nl_add_template',
        'nl_set_template_enabled','nl_set_value_index','nl_refresh_value_index')
        AND has_function_privilege('public', p.oid, 'execute'))::text;
 SQL
 )
-if [ "$NLCFG_CHECK" != "3:0" ]; then
-  echo "NL-CFG SMOKE FAILED: expected '3:0' (3 config tables, 0 PUBLIC-executable fns), got '$NLCFG_CHECK'" >&2
+if [ "$NLCFG_CHECK" != "3:6:0" ]; then
+  echo "NL-CFG SMOKE FAILED: expected '3:6:0' (3 config tables, 6 fns present, 0 PUBLIC-executable), got '$NLCFG_CHECK'" >&2
   exit 1
 fi
-echo "ai: theodb_ai_nl config surface (3 tables + nl_query_cfg) present, 0 executable by PUBLIC OK"
+echo "ai: theodb_ai_nl config surface (3 tables + 6 fns incl nl_query_cfg) present, 0 executable by PUBLIC OK"
 
 echo "SMOKE PASSED"
