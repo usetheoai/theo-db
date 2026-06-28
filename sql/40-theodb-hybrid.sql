@@ -112,3 +112,40 @@ COMMENT ON FUNCTION ai.hybrid_search_rrf(regclass, text, text, text, text, vecto
   'feeds the FTS leg and, when query_vector is NULL, is embedded via theodb.embed for the vector leg. '
   'Identifier args are %I-quoted (injection-safe). The native ai.hybrid_search() JSON-array surface is a '
   'future thin wrapper over this one function (one fusion source of truth).';
+
+-- ai.hybrid_search — M13: the literal spec-06 JSON-config surface. A THIN wrapper that parses a jsonb config
+-- and delegates to ai.hybrid_search_rrf (one fusion source of truth — no forked RRF math). Honest sugar: it
+-- adds the JSON calling convention, not a new fusion capability. Same RETURNS TABLE(id, score) as the core.
+CREATE OR REPLACE FUNCTION ai.hybrid_search(config jsonb)
+RETURNS TABLE(id text, score real)
+LANGUAGE plpgsql
+STABLE
+AS $$
+BEGIN
+    IF config IS NULL
+       OR config->>'table' IS NULL OR config->>'id_col' IS NULL
+       OR config->>'content_tsv_col' IS NULL OR config->>'vector_col' IS NULL THEN
+        RAISE EXCEPTION 'ai.hybrid_search: config must include table, id_col, content_tsv_col, vector_col'
+            USING ERRCODE = '22023';
+    END IF;
+    RETURN QUERY SELECT * FROM ai.hybrid_search_rrf(
+        (config->>'table')::regclass,
+        config->>'id_col',
+        config->>'content_tsv_col',
+        config->>'vector_col',
+        config->>'query_text',
+        CASE WHEN config ? 'query_vector' THEN (config->>'query_vector')::vector ELSE NULL END,
+        coalesce((config->>'k')::int, 60),
+        coalesce((config->>'per_leg_limit')::int, 20),
+        coalesce((config->>'result_limit')::int, 5)
+    );
+END;
+$$;
+
+REVOKE ALL ON FUNCTION ai.hybrid_search(jsonb) FROM PUBLIC;
+
+COMMENT ON FUNCTION ai.hybrid_search(jsonb) IS
+  'Literal spec-06 JSON surface: ai.hybrid_search(''{"table":...,"id_col":...,"content_tsv_col":...,'
+  '"vector_col":...,"query_text":...,"query_vector":...,"k":...,"per_leg_limit":...,"result_limit":...}''). '
+  'THIN wrapper over ai.hybrid_search_rrf (one fusion definition) — adds the JSON convention, not new fusion. '
+  'Fail-fast 22023 on missing required keys. Not granted to PUBLIC.';

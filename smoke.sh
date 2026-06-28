@@ -140,4 +140,26 @@ if [ "$NLCFG_CHECK" != "3:6:0" ]; then
 fi
 echo "ai: theodb_ai_nl config surface (3 tables + 6 fns incl nl_query_cfg) present, 0 executable by PUBLIC OK"
 
+# M13: packaged surface — ai.hybrid_search(jsonb) + theodb_ml registry (presence/privilege + NO api_key column).
+PKG_CHECK=$(psql -h "$HOST" -p "$PORT" -U "$USER" -t -A -q -v ON_ERROR_STOP=1 <<'SQL'
+SELECT
+  (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+     WHERE (n.nspname='ai' AND p.proname='hybrid_search')
+        OR (n.nspname='theodb_ml' AND p.proname IN ('create_model','drop_model','list_models','apply_model')))::text
+  || ':' ||
+  (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+     WHERE ((n.nspname='ai' AND p.proname='hybrid_search')
+         OR (n.nspname='theodb_ml' AND p.proname IN ('create_model','drop_model','list_models','apply_model')))
+       AND has_function_privilege('public', p.oid, 'execute'))::text
+  || ':' ||
+  (SELECT count(*) FROM information_schema.columns
+     WHERE table_schema='theodb_ml' AND table_name='models' AND column_name ILIKE '%key%')::text;
+SQL
+)
+if [ "$PKG_CHECK" != "5:0:0" ]; then
+  echo "PKG SMOKE FAILED: expected '5:0:0' (5 fns present, 0 PUBLIC-executable, 0 api_key columns), got '$PKG_CHECK'" >&2
+  exit 1
+fi
+echo "ai: packaged surface (ai.hybrid_search + theodb_ml registry) present, 0 PUBLIC, 0 persisted keys OK"
+
 echo "SMOKE PASSED"

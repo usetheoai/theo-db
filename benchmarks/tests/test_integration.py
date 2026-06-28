@@ -192,6 +192,38 @@ def test_hybrid_fuses_both_legs():
         conn.close()
 
 
+def test_hybrid_search_json_matches_rrf():
+    # M13: the literal ai.hybrid_search(jsonb) wrapper returns the SAME rows as ai.hybrid_search_rrf.
+    import json as _json
+    conn = _raw_conn()
+    try:
+        with conn.cursor() as cur:
+            _seed_documents(cur, "hyb_json", [
+                ("d1", "database systems", "[1,0,0]"),
+                ("d2", "database tuning",  "[0,1,0]"),
+                ("d3", "cooking recipes",  "[1,0,0]"),
+            ])
+            explicit = _hybrid(cur, "hyb_json", query_text="database", query_vector="[1,0,0]", result_limit=5)
+            cfg = {"table": "hyb_json", "id_col": "doc_id", "content_tsv_col": "text_tsv",
+                   "vector_col": "embedding", "query_text": "database", "query_vector": "[1,0,0]",
+                   "result_limit": 5}
+            cur.execute("SELECT id, score FROM ai.hybrid_search(%s::jsonb)", (_json.dumps(cfg),))
+            via_json = cur.fetchall()
+            assert via_json == explicit, f"JSON wrapper must match rrf: {via_json} != {explicit}"
+    finally:
+        conn.close()
+
+
+def test_hybrid_search_json_missing_keys_raises():
+    conn = _raw_conn()
+    try:
+        with conn.cursor() as cur:
+            with pytest.raises(psycopg2.errors.InvalidParameterValue):  # 22023 — missing required keys
+                cur.execute("SELECT * FROM ai.hybrid_search('{}'::jsonb)")
+    finally:
+        conn.close()
+
+
 def test_hybrid_empty_fts_leg():
     conn = _raw_conn()
     try:

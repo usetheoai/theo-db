@@ -14,6 +14,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **M13 — superfície de IA empacotada nativa (`ai.hybrid_search()` JSON + registry `theodb_ml`, specs 06/07).** Duas superfícies literais sobre capacidades já existentes (Regra 9 — `ai.hybrid_search_rrf` e `ai._chat` **inalterados**): **`ai.hybrid_search(config jsonb)`** (`sql/40`, aditivo) — wrapper fino que delega ao `ai.hybrid_search_rrf` (uma fonte de verdade de fusão); açúcar honesto (convenção JSON, não nova fusão); paridade provada por teste (mesmas linhas que o rrf); 22023 se faltar chave obrigatória. **Registry `theodb_ml`** (`sql/70`, novo): `theodb_ml.models(model_id, endpoint, model_name)` + `create_model`/`drop_model`/`list_models`/`apply_model`; `apply_model` seta os GUCs de sessão (`theodb.llm_endpoint`/`llm_model`) que o `ai._chat` já lê — liga o registry ao chat **sem tocar** o `ai._chat`. **Segurança (ADR D2): chaves NUNCA persistidas** — a tabela do registry **não tem coluna `api_key`** (persistir credenciais = regressão: pg_dump/replicação/backups); as chaves permanecem GUC de sessão (`theodb.llm_api_key`), divergência documentada do `create_model` literal do AlloyDB. `create_model` valida endpoint `http(s)://` (SSRF); todas as fns `REVOKE … FROM PUBLIC`. **Evidência real (gpt-4o-mini):** `theodb_ml.create_model('openai', …)` → `apply_model` → `ai.generate('Reply with the single word: ok')` → `ok` (log em `knowledge-base/implementations/m13-packaged-ai-surface-implementation.md`); parity + registry + key-not-persisted + negativos = 8 testes + 1 real; 103 testes offline sem regressão; smoke `5:0:0`; doc em `docs/sql-ai-functions.md`. Sem nova dependência.
+
 ### Changed
 
 ### Deprecated

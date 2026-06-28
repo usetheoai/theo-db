@@ -76,5 +76,9 @@ COPY sql/60-theodb-nl.sql /docker-entrypoint-initdb.d/60-theodb-nl.sql
 # MUST load AFTER 60 (ai.nl_query_cfg delegates to ai.nl_query).
 COPY sql/61-theodb-nl-config.sql /docker-entrypoint-initdb.d/61-theodb-nl-config.sql
 
+# theodb_ml model registry — M13 (create_model/apply_model + ai.hybrid_search JSON lives in sql/40).
+# apply_model only SETs the GUCs ai._chat (sql/50) reads; load after 50.
+COPY sql/70-theodb-ml.sql /docker-entrypoint-initdb.d/70-theodb-ml.sql
+
 HEALTHCHECK --interval=5s --timeout=5s --start-period=10s --retries=5 \
   CMD pg_isready -h localhost -p 5432 -U postgres -q
