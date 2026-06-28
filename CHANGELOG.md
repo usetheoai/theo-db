@@ -14,8 +14,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- **M14 — avaliação ScaNN-quality / gatilho de fork (spec 05, measurement-gated) → decisão NO-FORK.** Em vez de construir o access method `theodb_scann` literal (fork), M14 **mede** se o substituto permissivo já entregue (StreamingDiskANN / `pgvectorscale`, M2) atinge qualidade ScaNN e **decide por ADR ancorada em evidência** (PRD fork-gate policy / anti-sunk-cost). Benchmark reproduzível `benchmarks/scann_fork_eval.sh` (DiskANN vs HNSW vs IVFFlat no harness recall@k) + teste `test_diskann_reaches_scann_quality_recall` (barra recall@10 ≥ 0.90). **Evidência medida:** DiskANN atinge recall@10 **0.931** (sls=500) e **0.986** (sls=1000) — cruza a barra ScaNN-quality; números publicados de ScaNN/StreamingDiskANN citados como alvo de referência (ann-benchmarks/pgvectorscale; vantagem de QPS em escala/embeddings reais UNBENCHMARKED in-repo — caveat sintético honesto). **Decisão (ADR `docs/adr/0004-scann-fork-decision.md`): NO-FORK** — DiskANN é o equivalente ScaNN-quality permissivo entregido (`USING diskann`); o `theodb_scann` literal fica gated com gatilho de reabertura definido. Honestidade (Regra 3/5): nenhum claim de "ScaNN entregue"; spec 05 anotada. Sem novo índice, sem nova dependência, harness inalterado. Relatório em `docs/benchmarks/m14-scann-fork-decision.md`.
-
 ### Changed
 
 ### Deprecated
@@ -25,6 +23,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 ### Security
+
+## [0.13.0] - 2026-06-28
+
+### Added
+
+- **M14 — avaliação ScaNN-quality / gatilho de fork (spec 05, measurement-gated) → decisão NO-FORK.** Em vez de construir o access method `theodb_scann` literal (fork), M14 **mede** se o substituto permissivo já entregue (StreamingDiskANN / `pgvectorscale`, M2) atinge qualidade ScaNN e **decide por ADR ancorada em evidência** (PRD fork-gate policy / anti-sunk-cost). Benchmark reproduzível `benchmarks/scann_fork_eval.sh` (DiskANN vs HNSW vs IVFFlat no harness recall@k) + teste `test_diskann_reaches_scann_quality_recall` (barra recall@10 ≥ 0.90). **Evidência medida:** DiskANN atinge recall@10 **0.931** (sls=500) e **0.986** (sls=1000) — cruza a barra ScaNN-quality; números publicados de ScaNN/StreamingDiskANN citados como alvo de referência (ann-benchmarks/pgvectorscale; vantagem de QPS em escala/embeddings reais UNBENCHMARKED in-repo — caveat sintético honesto). **Decisão (ADR `docs/adr/0004-scann-fork-decision.md`): NO-FORK** — DiskANN é o equivalente ScaNN-quality permissivo entregido (`USING diskann`); o `theodb_scann` literal fica gated com gatilho de reabertura definido. Honestidade (Regra 3/5): nenhum claim de "ScaNN entregue"; spec 05 anotada. Sem novo índice, sem nova dependência, harness inalterado. Relatório em `docs/benchmarks/m14-scann-fork-decision.md`.
 
 ## [0.12.0] - 2026-06-28
 
