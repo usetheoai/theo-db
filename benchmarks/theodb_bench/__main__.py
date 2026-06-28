@@ -25,7 +25,8 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["hnsw", "ivfflat", "diskann", "both", "all"],
         default="hnsw",
         help="which index(es) to benchmark: hnsw | ivfflat | diskann | both (hnsw+diskann) | "
-        "all (hnsw+ivfflat). diskann requires the vectorscale extension",
+        "all (hnsw+ivfflat — excludes diskann; use 'both'/'diskann' for that). "
+        "diskann requires the vectorscale extension",
     )
     p.add_argument(
         "--hdf5",
@@ -65,12 +66,17 @@ def _hnsw_spec(table: str, opclass: str) -> dict:
 def _ivfflat_spec(table: str, opclass: str, n: int) -> dict:
     # pgvector IVFFlat: vectors are partitioned into `lists` clusters; a query scans the `probes`
     # nearest clusters. `lists` is a BUILD param; `probes` is the query-time recall/speed knob.
-    # pgvector guidance: lists ~= rows/1000 for <= 1M rows. probes is swept (recall x QPS curve);
-    # probes is clamped to lists (scanning more lists than exist is a no-op). At probes==lists every
-    # cluster is scanned, so IVFFlat (flat/full-precision storage) becomes exact-among-indexed.
-    # Force the index on (pgvector recall-test methodology) so we measure the index, not a seqscan.
+    # pgvector guidance: lists ~= rows/1000 for <= 1M rows. probes is swept (recall x QPS curve).
+    # At probes==lists every cluster is scanned, so IVFFlat (flat/full-precision storage) becomes
+    # exact-among-indexed. Force the index on (pgvector recall-test methodology) so we measure the
+    # index, not a seqscan.
+    #
+    # Measurement honesty: we CLAMP each probe to `lists` BEFORE de-duplicating, so every sweep
+    # point's LABEL equals the value actually executed (probes > lists is a no-op in pgvector — an
+    # unclamped label like "probes=10" on a lists=5 index would silently run probes=5 and report a
+    # duplicate operating point under a wrong label).
     lists = max(1, n // 1000)
-    probes = sorted({1, 10, lists})
+    probes = sorted({min(p, lists) for p in (1, 10, lists)})
     return {
         "name": "ivfflat",
         "index_name": "bench_ivfflat",
@@ -78,7 +84,7 @@ def _ivfflat_spec(table: str, opclass: str, n: int) -> dict:
         "sweep": [
             {
                 "label": f"probes={p}",
-                "session": ["SET enable_seqscan = off", f"SET ivfflat.probes = {min(p, lists)}"],
+                "session": ["SET enable_seqscan = off", f"SET ivfflat.probes = {p}"],
             }
             for p in probes
         ],
