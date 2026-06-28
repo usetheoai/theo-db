@@ -209,5 +209,38 @@ defense lives **outside** the LLM:
 ### Limitations (honest)
 
 - The full AlloyDB `theodb_ai_nl` configuration/template/value-index/concept-type surface (persisted schema
-  context, learned templates, semantic value index) is the **target**, NOT this slice — schema context is passed
-  per-call via `allowed_relations` (deferred follow-up; the security gate is what M7-S4 ships).
+  context, learned templates, semantic value index) — M7-S4 ships the security gate; the **config surface**
+  is delivered in M12 below.
+
+## theodb_ai_nl config surface (`ai.nl_query_cfg`) — M12
+
+M12 adds a **configuration layer** over the M7-S4 gate: register schema context, prompt templates, and a
+categorical value-index once, then query by config id. **The gate (`ai.nl_query`, L1-L4) is reused
+UNCHANGED** — the config only enriches the prompt and supplies the allowed-relation list; it never relaxes
+the anti-injection defense.
+
+```sql
+-- register a config (once):
+SELECT ai.nl_add_config('app1', ARRAY['documents'], 'documents(doc_id, content) holds docs.', NULL, 'gpt-4o-mini');
+SELECT ai.nl_refresh_value_index('app1', 'documents', 'content', 50);  -- categorical hint, from data (guarded)
+
+-- query by config:
+SELECT ai.nl_query_cfg('how many documents are there?', 'app1');
+-- -> [{"count": 3}]   (gate-validated, read-only)
+```
+
+**Surface:**
+
+- `ai.nl_config` / `ai.nl_templates` / `ai.nl_value_index` tables + `ai.nl_add_config` / `ai.nl_add_template`
+  / `ai.nl_set_template_enabled` / `ai.nl_set_value_index` / `ai.nl_refresh_value_index` management functions.
+- `ai.nl_query_cfg(question, config_id, max_rows)` — enriches the prompt (schema_context + enabled template +
+  value-index hints) and delegates to `ai.nl_query` with the config's `allowed_relations`.
+
+**Security:** an adversarial question through `ai.nl_query_cfg` is still rejected (`22023`) with the DB
+intact — proven by a regression test. `ai.nl_refresh_value_index` runs a fixed-shape read only over a
+relation already in the config's `allowed_relations` (column `quote_ident`-ed, relation via `::regclass`);
+arbitrary-table reads are impossible. All functions are `REVOKE`d from `PUBLIC`.
+
+**Divergence (honest):** the literal 58-function AlloyDB `theodb_ai_nl` extension (auto-template-from-history,
+concept-types, fragments) is the target; M12 ships the three core capabilities (config / templates /
+value-index) in schema `ai`.

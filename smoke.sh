@@ -118,4 +118,22 @@ if [ "$NL_CHECK" != "2:0" ]; then
 fi
 echo "ai: 2 safe NL→SQL functions (nl_to_sql/nl_query) present, 0 executable by PUBLIC OK"
 
+# M12: theodb_ai_nl config surface present + locked down (NO network — presence + privilege only).
+NLCFG_CHECK=$(psql -h "$HOST" -p "$PORT" -U "$USER" -t -A -q -v ON_ERROR_STOP=1 <<'SQL'
+SELECT
+  (SELECT count(*) FROM pg_tables WHERE schemaname='ai'
+     AND tablename IN ('nl_config','nl_templates','nl_value_index'))::text
+  || ':' ||
+  (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+     WHERE n.nspname='ai' AND p.proname IN ('nl_query_cfg','nl_add_config','nl_add_template',
+       'nl_set_template_enabled','nl_set_value_index','nl_refresh_value_index')
+       AND has_function_privilege('public', p.oid, 'execute'))::text;
+SQL
+)
+if [ "$NLCFG_CHECK" != "3:0" ]; then
+  echo "NL-CFG SMOKE FAILED: expected '3:0' (3 config tables, 0 PUBLIC-executable fns), got '$NLCFG_CHECK'" >&2
+  exit 1
+fi
+echo "ai: theodb_ai_nl config surface (3 tables + nl_query_cfg) present, 0 executable by PUBLIC OK"
+
 echo "SMOKE PASSED"

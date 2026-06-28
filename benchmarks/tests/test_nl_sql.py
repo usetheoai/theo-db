@@ -298,3 +298,99 @@ def test_nl_to_sql_empty_question_rejected(conn, chat_server):
         _setup(cur, chat_server)
         with pytest.raises(psycopg2.errors.InvalidParameterValue):  # 22023
             cur.execute("SELECT ai.nl_to_sql('   ', ARRAY['documents'])")
+
+
+# --- M12: theodb_ai_nl config surface (ai.nl_config / nl_templates / nl_value_index / ai.nl_query_cfg) ----
+
+def _setup_cfg(cur, endpoint):
+    _setup(cur, endpoint)
+    cur.execute("DELETE FROM ai.nl_value_index WHERE config_id = 'cfg1'")
+    cur.execute("SELECT ai.nl_add_template('tmpl1', 'When asked about counts, return a COUNT query.')")
+    cur.execute(
+        "SELECT ai.nl_add_config('cfg1', ARRAY['documents'], 'documents(doc_id, content) holds docs.', 'tmpl1', 'stub-chat')"
+    )
+
+
+def test_nl_query_cfg_benign_returns_rows(conn, chat_server):
+    # the config drives the query (allowed_relations from cfg1); the gate still runs -> benign count.
+    with conn.cursor() as cur:
+        _setup_cfg(cur, chat_server)
+        cur.execute("SELECT ai.nl_query_cfg('how many documents are there', 'cfg1')")
+        rows = cur.fetchone()[0]
+    assert rows[0]["n"] == 2
+
+
+def test_nl_query_cfg_injection_blocked_and_db_intact(conn, chat_server):
+    # anti-injection PRESERVED through the config path: an injection -> 22023, target table untouched.
+    with conn.cursor() as cur:
+        _setup_cfg(cur, chat_server)
+        with pytest.raises(psycopg2.errors.InvalidParameterValue):  # 22023 — gate rejects the DROP
+            cur.execute("SELECT ai.nl_query_cfg('__NLINJECT_DROP__ delete everything', 'cfg1')")
+    with conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM documents")
+        assert cur.fetchone()[0] == 2  # DB intact — the config layer did not weaken the gate
+
+
+def test_nl_query_cfg_config_not_found_raises(conn, chat_server):
+    with conn.cursor() as cur:
+        _setup_cfg(cur, chat_server)
+        with pytest.raises(psycopg2.errors.InvalidParameterValue):  # 22023
+            cur.execute("SELECT ai.nl_query_cfg('anything', 'no_such_config')")
+
+
+def test_nl_refresh_value_index_populates_from_data(conn, chat_server):
+    # auto-populate the value-index for documents.content (allowed in cfg1); stored distinct values.
+    with conn.cursor() as cur:
+        _setup_cfg(cur, chat_server)
+        cur.execute("SELECT ai.nl_refresh_value_index('cfg1', 'documents', 'content', 50)")
+        n = cur.fetchone()[0]
+        assert n == 2
+        cur.execute("SELECT values FROM ai.nl_value_index WHERE config_id='cfg1' AND relation='documents' AND column_name='content'")
+        vals = cur.fetchone()[0]
+    assert sorted(vals) == ["cooking recipes", "postgresql database"]
+
+
+def test_nl_refresh_value_index_rejects_non_allowlisted_relation(conn, chat_server):
+    # D3 guard: 'secret' is NOT in cfg1.allowed_relations -> refresh must reject (no arbitrary-table read).
+    with conn.cursor() as cur:
+        _setup_cfg(cur, chat_server)
+        with pytest.raises(psycopg2.errors.InvalidParameterValue):  # 22023
+            cur.execute("SELECT ai.nl_refresh_value_index('cfg1', 'secret', 'k', 50)")
+
+
+def test_nl_refresh_value_index_rejects_bad_column_identifier(conn, chat_server):
+    with conn.cursor() as cur:
+        _setup_cfg(cur, chat_server)
+        with pytest.raises(psycopg2.errors.InvalidParameterValue):  # 22023 — non-identifier column
+            cur.execute("SELECT ai.nl_refresh_value_index('cfg1', 'documents', 'content; DROP', 50)")
+
+
+def test_nl_config_functions_revoked_from_public(conn):
+    with conn.cursor() as cur:
+        for fn in ("ai.nl_query_cfg(text,text,int)", "ai.nl_add_config(text,text[],text,text,text)",
+                   "ai.nl_add_template(text,text)", "ai.nl_set_template_enabled(text,boolean)",
+                   "ai.nl_set_value_index(text,text,text,text[])", "ai.nl_refresh_value_index(text,text,text,int)"):
+            cur.execute("SELECT has_function_privilege('public', %s, 'execute')", (fn,))
+            assert cur.fetchone()[0] is False, f"{fn} must not be PUBLIC-executable"
+
+
+@pytest.mark.skipif(
+    not (os.environ.get("THEODB_LLM_ENDPOINT") and os.environ.get("OPENAI_API_KEY")),
+    reason="real-OpenAI test: set THEODB_LLM_ENDPOINT + OPENAI_API_KEY to enable",
+)
+def test_real_openai_nl_query_cfg(conn):
+    # M12 real evidence: a registered config drives a real NL->SQL query returning rows.
+    with conn.cursor() as cur:
+        cur.execute("SET theodb.llm_endpoint = %s", (os.environ["THEODB_LLM_ENDPOINT"],))
+        cur.execute("SET theodb.llm_model = %s", (os.environ.get("THEODB_LLM_MODEL", "gpt-4o-mini"),))
+        cur.execute("SET theodb.llm_api_key = %s", (os.environ["OPENAI_API_KEY"],))
+        cur.execute("DROP TABLE IF EXISTS documents")
+        cur.execute("CREATE TABLE documents (doc_id text PRIMARY KEY, content text)")
+        cur.execute("INSERT INTO documents VALUES ('d1','a'),('d2','b'),('d3','c')")
+        cur.execute(
+            "SELECT ai.nl_add_config('rcfg', ARRAY['documents'], 'documents(doc_id, content) is a table of documents.', NULL, %s)",
+            (os.environ.get("THEODB_LLM_MODEL", "gpt-4o-mini"),),
+        )
+        cur.execute("SELECT ai.nl_query_cfg('how many documents are there?', 'rcfg')")
+        rows = cur.fetchone()[0]
+    assert isinstance(rows, list) and len(rows) >= 1  # a real read-only result over the configured relation
