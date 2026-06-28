@@ -1,0 +1,30 @@
+# M1 DoD-1 — runs the upstream PostgreSQL 17.10 regression suite against the TheoDB distribution.
+# FROM theo-db:dev so the server-under-test IS the TheoDB engine (unmodified PGDG postgres 17.10 + our
+# extensions; ADR 0001 — no engine fork). Builds pg_regress + regress.so from the matching source tag and
+# runs `make installcheck`. Throwaway image — never shipped.
+FROM theo-db:dev
+
+USER root
+# Build deps matching the Debian feature surface (so expected outputs line up): tcl/perl/python/pam/
+# openssl/libxml/libxslt/uuid/gssapi/ldap/icu/nls. No --with-llvm (JIT doesn't change SQL output).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential flex bison git ca-certificates gettext pkg-config \
+      libreadline-dev zlib1g-dev libicu-dev libssl-dev liblz4-dev libzstd-dev \
+      libxml2-dev libxslt1-dev uuid-dev libkrb5-dev libldap2-dev libpam0g-dev \
+      tcl-dev perl libperl-dev python3-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+ARG PG_TAG=REL_17_10
+RUN git clone --depth 1 --branch $PG_TAG https://github.com/postgres/postgres /src
+WORKDIR /src
+RUN ./configure --with-tcl --with-perl --with-python --with-pam --with-openssl \
+      --with-libxml --with-libxslt --with-uuid=e2fs --with-gssapi --with-ldap --with-icu \
+      --enable-nls --without-llvm >/tmp/configure.log 2>&1 || { tail -40 /tmp/configure.log; exit 1; }
+# Build the regression harness: libpq (pg_regress links -lpq) + pg_regress + regress.so + contrib helpers
+RUN make -C src/interfaces/libpq >/tmp/makelibpq.log 2>&1 || { tail -40 /tmp/makelibpq.log; exit 1; } && \
+    make -C src/test/regress >/tmp/makeregress.log 2>&1 || { tail -60 /tmp/makeregress.log; exit 1; }
+
+COPY packaging/run-regress.sh /usr/local/bin/run-regress.sh
+RUN chmod +x /usr/local/bin/run-regress.sh
+USER postgres
+ENTRYPOINT ["/usr/local/bin/run-regress.sh"]
