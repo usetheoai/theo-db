@@ -89,6 +89,77 @@ LIMIT 20;
 - Target API spec: `docs/features/07-funcoes-ia-sql.md`, `docs/features/10-analise-sentimento.md`, `docs/features/11-sumarizacao-conteudo.md`
 - Implementation: `sql/50-theodb-ai.sql`
 
+## Aggregate summarization (`ai.agg_summarize`) — M10
+
+`ai.agg_summarize(text)` is a **SQL aggregate** that collapses many rows into a single summary. It
+complements the scalar `ai.summarize(content)` (which summarizes one value) and is built on the same
+private `ai._chat` helper — no new dependency.
+
+```sql
+-- one summary of all matching rows:
+SELECT ai.agg_summarize(content) FROM incidents WHERE created_at > now() - interval '1 day';
+
+-- one summary per group:
+SELECT service, ai.agg_summarize(content) AS digest
+FROM incidents
+GROUP BY service;
+```
+
+**Behavior:**
+
+- Rows are newline-joined (**NULL and empty-string rows skipped**); the aggregate makes **one** `ai._chat` call per group.
+- **Empty group / all-NULL / all-empty rows → `NULL`** (no LLM call).
+- **Input order is indeterminate** (a plain aggregate has no defined row order), so the summary is not
+  reproducible across runs unless you pin it: `ai.agg_summarize(content ORDER BY id)`.
+- The accumulated prompt is **bounded to 12000 characters** for cost/token safety — very large groups are
+  truncated (documented limitation; map-reduce over chunks is deferred future work).
+- Cost/latency scale with the number of groups (one LLM call per group); no performance claim is made
+  without a reproducible benchmark. Like every PostgreSQL aggregate, `ai.agg_summarize` is `provolatile=i`
+  (no aggregate can be `VOLATILE`); the non-deterministic LLM call lives in its `VOLATILE` finalfunc, which
+  the executor re-runs per query (aggregates are never constant-folded), so results are never cached.
+
+**Security:** `ai.agg_summarize` and its support functions are `REVOKE`d from `PUBLIC` (same posture as the
+scalar `ai.*`). Because they run `SECURITY INVOKER` and call `ai._chat`, a role needs `EXECUTE` on
+`ai._chat` **in addition to** `ai.agg_summarize`:
+
+```sql
+GRANT EXECUTE ON FUNCTION ai._chat(text,text,text), ai.agg_summarize(text) TO <role>;
+```
+
+**Limitations (honest):** no per-call model override for the aggregate (uses the configured
+`theodb.llm_model`; YAGNI — deferred); prompt truncated past the cap above.
+
+## Accelerated batch (`ai.generate_batch`) — M11
+
+`ai.generate_batch(prompts text[], model text DEFAULT NULL) -> text[]` answers **N prompts in ONE**
+chat round-trip — instead of one HTTP call per row with the scalar `ai.generate`. It packs the prompts
+into a single request asking the model for a JSON array of exactly N answers, then validates the length.
+
+```sql
+SELECT ai.generate_batch(ARRAY[
+  'Capital of France? one word',
+  '2+2? a number only',
+  'Opposite of hot? one word'
+]);
+-- -> {Paris,4,cold}   (one request to the endpoint, three answers in order)
+```
+
+**Acceleration (measured, not claimed):** a batch of N is **one** round-trip; N scalar `ai.generate`
+calls are **N** round-trips. This is verified in CI by counting requests against the stub (batch → +1;
+N scalar → +N) — no latency claim is made without a reproducible benchmark.
+
+**Contract / behavior:**
+
+- Returns exactly N answers, in input order. **Empty array → empty array, no LLM call.**
+- **Fail-fast (typed `22023`)** if the model returns invalid JSON or the wrong number of items, if the
+  array is NULL, or if any element is NULL (the N-in/N-out alignment is a hard contract). For a guaranteed
+  per-item result regardless of model behavior, use the scalar `ai.generate`.
+- Best-effort by nature (one large request can hit the token limit — chunk on the caller side). Only
+  `ai.generate` is batched today (batching the other `ai.*` is deferred until needed).
+
+**Security:** `REVOKE`d from `PUBLIC`; SECURITY INVOKER, so the caller needs `EXECUTE` on `ai._chat` too:
+`GRANT EXECUTE ON FUNCTION ai._chat(text,text,text), ai.generate_batch(text[],text) TO <role>;`.
+
 ## Natural-language → SQL (`ai.nl_to_sql` / `ai.nl_query`) — M7-S4
 
 Ask questions in natural language; get **safe, read-only** SQL or results. Safety does **not** trust the LLM —

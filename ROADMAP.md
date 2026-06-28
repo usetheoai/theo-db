@@ -442,7 +442,7 @@ partir de AlloyDB. *(Merge de README M8 — Escala & observabilidade — com REA
 
 ---
 
-### M9 — [ ] Índice IVFFlat / IVF validado + benchmarkado (specs 03, 04)
+### M9 — [x] Índice IVFFlat / IVF validado + benchmarkado (specs 03, 04)
 
 > Added 2026-06-28 by `/roadmap-feature` (gap audit de `docs/features/`). Fecha as specs 03 + 04.
 
@@ -481,7 +481,7 @@ partir de AlloyDB. *(Merge de README M8 — Escala & observabilidade — com REA
 
 **Definition of done:**
 
-- [ ] `ai.agg_summarize` (aggregate) criada; `VOLATILE`; `REVOKE … FROM PUBLIC` (paridade com as demais `ai.*`).
+- [ ] `ai.agg_summarize` (aggregate) criada; a chamada LLM no finalfunc `VOLATILE` (aggregates do PG são sempre `provolatile=i`, como `string_agg` — a garantia anti-cache é o finalfunc volátil, re-executado por query); `REVOKE … FROM PUBLIC` (paridade com as demais `ai.*`).
 - [ ] Teste com chat-stub determinístico (1 resumo a partir de N linhas) verde + 1 evidência real registrada.
 - [ ] Doc em `docs/sql-ai-functions.md` com exemplo.
 
@@ -511,7 +511,7 @@ partir de AlloyDB. *(Merge de README M8 — Escala & observabilidade — com REA
 **Definition of done:**
 
 - [ ] Variante batch de ≥ 1 função `ai.*` (ex.: `ai.generate`/`ai.rank` sobre `ARRAY`/conjunto); `REVOKE … FROM PUBLIC`.
-- [ ] Teste verde (batch produz o mesmo resultado que N chamadas escalares).
+- [ ] Teste verde: a redução de round-trips é **medida** (batch de N = 1 requisição vs N escalares = N requisições, via contador do stub) e o batch retorna N respostas em ordem.
 - [ ] Doc; nenhum claim de speedup sem benchmark reproduzível (Rule 5) — se medido, relatório em `docs/benchmarks/`.
 
 **Entregáveis (artefatos concretos):**

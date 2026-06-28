@@ -155,12 +155,128 @@ if not m:
 return float(m.group(0))
 $$;
 
+-- ai.agg_summarize — AGGREGATE: collapse many rows into a single summary (feature 11, aggregate path).
+-- Composed from ai._chat (Rule 9 — no reinvention). sfunc is a pure-SQL newline-join (NULL/empty-skipping);
+-- finalfunc makes ONE ai._chat call on the accumulation, bounded to 12000 chars for cost/token safety
+-- (map-reduce for larger groups is deferred — YAGNI). Empty / all-NULL / all-empty group -> NULL (no LLM call).
+-- ORDER DEPENDENCE: a plain aggregate has indeterminate input order, so the concatenation (and thus the
+-- summary) is not reproducible across runs unless the caller pins it: `ai.agg_summarize(x ORDER BY <key>)`.
+-- SECURITY INVOKER (the caller needs EXECUTE on ai._chat too — see the grant note).
+-- VOLATILITY: like EVERY PostgreSQL aggregate (string_agg/array_agg/sum are all IMMUTABLE; none can be
+-- VOLATILE — there is no syntax for it and PG does not derive it from member fns), ai.agg_summarize's own
+-- pg_proc row is provolatile='i'. That is NOT a footgun: the paid, non-deterministic LLM call lives in the
+-- VOLATILE finalfunc (ai._agg_summ_final), which the executor re-runs per query — aggregates are never
+-- constant-folded (they require input rows). The transition fn below is honestly IMMUTABLE (pure concat).
+CREATE OR REPLACE FUNCTION ai._agg_summ_accum(state text, item text)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+AS $$
+    SELECT CASE
+        WHEN item IS NULL OR item = '' THEN state
+        WHEN state IS NULL THEN item
+        ELSE state || E'\n' || item
+    END;
+$$;
+
+CREATE OR REPLACE FUNCTION ai._agg_summ_final(state text)
+RETURNS text
+LANGUAGE sql
+VOLATILE
+AS $$
+    SELECT CASE
+        WHEN state IS NULL THEN NULL
+        ELSE ai._chat(
+            left(state, 12000),
+            'Summarize the following collected texts into a single concise summary (1-3 sentences).',
+            NULL)
+    END;
+$$;
+
+-- No CREATE OR REPLACE AGGREGATE exists; DROP-then-CREATE keeps re-applying this file idempotent.
+DROP AGGREGATE IF EXISTS ai.agg_summarize(text);
+CREATE AGGREGATE ai.agg_summarize(text) (
+    sfunc = ai._agg_summ_accum,
+    stype = text,
+    finalfunc = ai._agg_summ_final
+);
+
+COMMENT ON AGGREGATE ai.agg_summarize(text) IS
+  'Collapse many rows into one summary via ai._chat. ONE synchronous LLM call per group; cost scales with '
+  'the number of groups (not row-capped) — caller controls grouping. Per-group input capped at 12000 chars '
+  '(map-reduce deferred). Empty/all-NULL/all-empty group -> NULL (no call). Input order is indeterminate '
+  'unless pinned: ai.agg_summarize(x ORDER BY <key>). Like all PG aggregates its pg_proc is provolatile=i; '
+  'the non-deterministic LLM call lives in the VOLATILE finalfunc (re-run per query). REVOKE FROM PUBLIC '
+  '(needs ai._chat EXECUTE).';
+
+-- ai.generate_batch — ACCELERATED: answer N prompts in ONE ai._chat round-trip (feature 08).
+-- Packs the N prompts (numbered) into a single request asking for a JSON array of exactly N answers, then
+-- parses + validates len==N. Cuts N round-trips to 1 (the real "acceleration" — measured by request count,
+-- not an unbenchmarked latency claim). Reuses ai._chat (Rule 9). VOLATILE (LLM call). Empty array -> empty
+-- array, NO call. NULL array / any NULL element -> 22023 (preserves the N-in / N-out alignment contract).
+-- Best-effort by nature: a model that returns invalid JSON or the wrong length fails fast (22023); for a
+-- guaranteed per-item result, use the scalar ai.generate. Batching the other ai.* is deferred (YAGNI).
+CREATE OR REPLACE FUNCTION ai.generate_batch(prompts text[], model text DEFAULT NULL)
+RETURNS text[]
+LANGUAGE plpython3u
+VOLATILE
+AS $$
+import json
+import re
+if prompts is None:
+    plpy.error("ai.generate_batch: prompts must not be NULL", sqlstate="22023")
+n = len(prompts)
+if n == 0:
+    return []
+if any(p is None for p in prompts):
+    plpy.error("ai.generate_batch: prompts must not contain NULL elements (breaks the N-in/N-out alignment)",
+               sqlstate="22023")
+user = "\n".join("%d. %s" % (i + 1, p) for i, p in enumerate(prompts))
+system = ("You are given %d numbered items. Respond with ONLY a JSON array of exactly %d strings — the "
+          "answer to each item, in order. No prose, no markdown." % (n, n))
+out = plpy.execute(
+    plpy.prepare("SELECT ai._chat($1, $2, $3) AS v", ["text", "text", "text"]),
+    [user, system, model],
+)[0]["v"]
+# strip an optional ```json ... ``` markdown fence (single- OR multi-line) some models add
+s = (out or "").strip()
+s = re.sub(r"^```[A-Za-z0-9_-]*\s*", "", s)
+s = re.sub(r"\s*```$", "", s).strip()
+try:
+    arr = json.loads(s)
+except (ValueError, TypeError):
+    plpy.error("ai.generate_batch: model did not return valid JSON: %s" % (out or "")[:80], sqlstate="22023")
+if not isinstance(arr, list) or len(arr) != n:
+    plpy.error("ai.generate_batch: expected a JSON array of %d items, got %s" % (n, str(arr)[:80]),
+               sqlstate="22023")
+# Strict elements: fail-fast on a non-string (the model ignoring "array of strings") rather than
+# silently coercing a number/object via str() into a plausible-but-wrong cell (Rule 8 — no silent garbage).
+result = []
+for x in arr:
+    if x is None:
+        result.append(None)
+    elif isinstance(x, str):
+        result.append(x)
+    else:
+        plpy.error("ai.generate_batch: model returned a non-string array element: %s" % str(x)[:80],
+                   sqlstate="22023")
+return result
+$$;
+
+COMMENT ON FUNCTION ai.generate_batch(text[], text) IS
+  'ACCELERATED: answer N prompts in ONE ai._chat round-trip (vs N for N scalar ai.generate calls). Packs N '
+  'numbered prompts -> asks for a JSON array of exactly N strings -> validates len==N + string elements '
+  '(fail-fast 22023 on invalid JSON / wrong length / NULL or non-string element). Empty array -> empty, no '
+  'call. Best-effort (multi-line prompts weaken N-alignment; use scalar ai.generate for a guaranteed '
+  'per-item result). VOLATILE; REVOKE FROM PUBLIC (needs ai._chat EXECUTE).';
+
 -- Least-privilege: these functions make server-side outbound HTTP (the configured endpoint), so they are
 -- NOT granted to PUBLIC (same posture as theodb.embed).
 -- IMPORTANT (SECURITY INVOKER): the public wrappers run as the CALLER, and each one calls ai._chat as the
 -- caller too — so a role needs EXECUTE on ai._chat *in addition to* the wrapper it uses. Grant BOTH:
 --   GRANT EXECUTE ON FUNCTION ai._chat(text,text,text), ai.generate(text,text), ai.if(text,text),
---     ai.analyze_sentiment(text,text), ai.summarize(text,text), ai.rank(text,text) TO <role>;
+--     ai.analyze_sentiment(text,text), ai.summarize(text,text), ai.rank(text,text),
+--     ai.generate_batch(text[],text), ai.agg_summarize(text) TO <role>;
 -- Do NOT grant ai._chat to PUBLIC to "fix" a permission error — that re-opens outbound HTTP to every role.
 REVOKE ALL ON FUNCTION ai._chat(text, text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION ai.generate(text, text) FROM PUBLIC;
@@ -168,6 +284,10 @@ REVOKE ALL ON FUNCTION ai.if(text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION ai.analyze_sentiment(text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION ai.summarize(text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION ai.rank(text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION ai.generate_batch(text[], text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION ai._agg_summ_accum(text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION ai._agg_summ_final(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION ai.agg_summarize(text) FROM PUBLIC;
 
 COMMENT ON FUNCTION ai._chat(text, text, text) IS
   'PRIVATE: one configurable chat-completions round-trip (theodb.llm_endpoint, http(s)-only, no redirects) '

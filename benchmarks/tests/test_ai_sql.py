@@ -119,6 +119,149 @@ def test_summarize_returns_text(conn, chat_server):
     assert out.startswith("A concise summary"), f"summarize wrapper did not route the summarize system prompt: {out!r}"
 
 
+def test_agg_summarize_over_rows(conn, chat_server):
+    # M10: the aggregate collapses many rows into one summary via ai._chat (summarize system prompt).
+    with conn.cursor() as cur:
+        _set_endpoint(cur, chat_server)
+        cur.execute("DROP TABLE IF EXISTS it_agg")
+        cur.execute("CREATE TABLE it_agg (id int, content text)")
+        cur.execute("INSERT INTO it_agg VALUES (1,'first note'),(2,'second note'),(3,'third note')")
+        cur.execute("SELECT ai.agg_summarize(content) FROM it_agg")
+        out = cur.fetchone()[0]
+    assert isinstance(out, str) and len(out) > 0
+    assert out.startswith("A concise summary"), f"agg_summarize did not route the summarize system prompt: {out!r}"
+
+
+def test_agg_summarize_empty_and_null_input_is_null(conn, chat_server):
+    # empty group -> finalfunc gets NULL state -> NULL (no LLM call); all-NULL rows -> still NULL.
+    with conn.cursor() as cur:
+        _set_endpoint(cur, chat_server)
+        cur.execute("SELECT ai.agg_summarize(c) FROM (SELECT NULL::text c WHERE false) z")
+        assert cur.fetchone()[0] is None
+        cur.execute("SELECT ai.agg_summarize(c) FROM (VALUES (NULL::text),(NULL::text)) v(c)")
+        assert cur.fetchone()[0] is None
+
+
+# --- M11: ai.generate_batch (accelerated — N prompts in ONE round-trip) ---------------------------
+
+def _stub_count(chat_server: str) -> int:
+    # the fixture yields the in-container URL (host.docker.internal); read /count from the host side.
+    import json as _json
+    url = chat_server.replace("host.docker.internal", "127.0.0.1").replace("/v1/chat/completions", "/count")
+    with urllib.request.urlopen(url, timeout=5) as r:
+        return _json.loads(r.read())["count"]
+
+
+def test_generate_batch_one_roundtrip(conn, chat_server):
+    # M11 core: a batch of N prompts is ONE HTTP round-trip and returns N answers IN ORDER.
+    before = _stub_count(chat_server)
+    with conn.cursor() as cur:
+        _set_endpoint(cur, chat_server)
+        cur.execute("SELECT ai.generate_batch(ARRAY['first','second','third'])")
+        res = cur.fetchone()[0]
+    after = _stub_count(chat_server)
+    assert after - before == 1, f"batch must be ONE round-trip, got {after - before}"
+    assert isinstance(res, list) and len(res) == 3
+    assert res == ["answer to item 1", "answer to item 2", "answer to item 3"]  # order preserved
+
+
+def test_scalar_generate_is_n_roundtrips(conn, chat_server):
+    # contrast: N scalar ai.generate calls are N round-trips (this is what batch accelerates).
+    before = _stub_count(chat_server)
+    with conn.cursor() as cur:
+        _set_endpoint(cur, chat_server)
+        for p in ("a", "b", "c"):
+            cur.execute("SELECT ai.generate(%s)", (p,))
+    after = _stub_count(chat_server)
+    assert after - before == 3, f"3 scalar calls must be 3 round-trips, got {after - before}"
+
+
+def test_generate_batch_empty_makes_no_call(conn, chat_server):
+    before = _stub_count(chat_server)
+    with conn.cursor() as cur:
+        _set_endpoint(cur, chat_server)
+        cur.execute("SELECT ai.generate_batch(ARRAY[]::text[])")
+        res = cur.fetchone()[0]
+    after = _stub_count(chat_server)
+    assert res == []  # empty in -> empty out
+    assert after - before == 0  # NO LLM call
+
+
+def test_generate_batch_null_element_raises_typed(conn, chat_server):
+    with conn.cursor() as cur:
+        _set_endpoint(cur, chat_server)
+        with pytest.raises(psycopg2.errors.InvalidParameterValue):  # 22023 — alignment contract
+            cur.execute("SELECT ai.generate_batch(ARRAY['a', NULL])")
+
+
+def test_generate_batch_wrong_length_raises_typed(conn, chat_server):
+    # stub seam __wronglen__ returns N-1 items -> the len!=N guard fails fast (no silent misalignment).
+    with conn.cursor() as cur:
+        _set_endpoint(cur, chat_server)
+        with pytest.raises(psycopg2.errors.InvalidParameterValue):  # 22023
+            cur.execute("SELECT ai.generate_batch(ARRAY['__wronglen__ a','b','c'])")
+
+
+def test_generate_batch_invalid_json_raises_typed(conn, chat_server):
+    # stub seam __malformed__ returns prose (not JSON) -> the JSON-parse guard fails fast (22023).
+    with conn.cursor() as cur:
+        _set_endpoint(cur, chat_server)
+        with pytest.raises(psycopg2.errors.InvalidParameterValue) as exc:
+            cur.execute("SELECT ai.generate_batch(ARRAY['__malformed__ a','b'])")
+    assert "valid JSON" in str(exc.value)
+
+
+def test_generate_batch_non_string_element_raises_typed(conn, chat_server):
+    # stub seam __nonstr__ returns a JSON array of NUMBERS -> the function must fail fast (22023),
+    # never silently coerce 4 -> "4" / {"a":1} -> "{'a': 1}" into a plausible-but-wrong cell.
+    with conn.cursor() as cur:
+        _set_endpoint(cur, chat_server)
+        with pytest.raises(psycopg2.errors.InvalidParameterValue) as exc:
+            cur.execute("SELECT ai.generate_batch(ARRAY['__nonstr__ a','b'])")
+    assert "non-string" in str(exc.value)
+
+
+def test_generate_batch_strips_json_fence(conn, chat_server):
+    # stub seam __fenced__ wraps the array in a ```json fence -> the function must strip it and parse N items.
+    with conn.cursor() as cur:
+        _set_endpoint(cur, chat_server)
+        cur.execute("SELECT ai.generate_batch(ARRAY['__fenced__ a','b'])")
+        res = cur.fetchone()[0]
+    assert isinstance(res, list) and len(res) == 2
+
+
+def test_generate_batch_embedded_numbered_line_still_one_batch(conn, chat_server):
+    # a prompt that itself contains a "2. ..." line must NOT inflate N (stub sizes from the declared N).
+    with conn.cursor() as cur:
+        _set_endpoint(cur, chat_server)
+        cur.execute("SELECT ai.generate_batch(ARRAY[E'list:\n1. foo\n2. bar', 'second'])")
+        res = cur.fetchone()[0]
+    assert isinstance(res, list) and len(res) == 2  # 2 prompts -> 2 answers, embedded numbering ignored
+
+
+def test_stub_counter_is_threadsafe(chat_server):
+    # concurrent reliability test: K parallel chat requests must bump the lock-guarded counter EXACTLY K
+    # times (no lost updates), so the round-trip measurement above is trustworthy. The Lock guards the
+    # read-modify-write of `_count["n"]` (a += is several bytecodes; the GIL does not make it atomic).
+    import concurrent.futures
+    import json as _json
+    chat_url = chat_server.replace("host.docker.internal", "127.0.0.1")
+    before = _stub_count(chat_server)
+    K = 300
+
+    def _hit(_):
+        data = _json.dumps({"model": "stub", "messages": [{"role": "user", "content": "ping"}]}).encode()
+        req = urllib.request.Request(chat_url, data=data, headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as ex:
+        statuses = list(ex.map(_hit, range(K)))
+    after = _stub_count(chat_server)
+    assert all(s == 200 for s in statuses)
+    assert after - before == K, f"counter lost updates under concurrency: {after - before} != {K}"
+
+
 def test_rank_parses_float(conn, chat_server):
     with conn.cursor() as cur:
         _set_endpoint(cur, chat_server)
@@ -179,9 +322,45 @@ def test_ai_functions_not_executable_by_public(conn):
     # least-privilege: outbound-HTTP functions must NOT be granted to PUBLIC
     with conn.cursor() as cur:
         for fn in ("ai.generate(text,text)", "ai.if(text,text)", "ai.analyze_sentiment(text,text)",
-                   "ai.summarize(text,text)", "ai.rank(text,text)", "ai._chat(text,text,text)"):
+                   "ai.summarize(text,text)", "ai.rank(text,text)", "ai._chat(text,text,text)",
+                   # M10 aggregate + its support functions (same outbound-HTTP least-privilege posture)
+                   "ai.agg_summarize(text)", "ai._agg_summ_accum(text,text)", "ai._agg_summ_final(text)"):
             cur.execute("SELECT has_function_privilege('public', %s, 'execute')", (fn,))
             assert cur.fetchone()[0] is False, f"{fn} must not be PUBLIC-executable"
+
+
+def test_agg_summarize_finalfunc_is_volatile(conn):
+    # M10 review: PostgreSQL gives EVERY aggregate provolatile='i' (string_agg/array_agg/sum are all 'i';
+    # no aggregate can be VOLATILE). The real guarantee that the paid LLM call is never optimized away is
+    # that the FINALFUNC is VOLATILE (the executor re-runs it per query). Guard that, not the aggregate.
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT proname, provolatile FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
+            "WHERE n.nspname='ai' AND p.proname IN ('agg_summarize','_agg_summ_final') ORDER BY proname"
+        )
+        vol = dict(cur.fetchall())
+    assert vol["_agg_summ_final"] == "v", "ai._agg_summ_final must be VOLATILE (it performs the LLM call)"
+    assert vol["agg_summarize"] == "i", "PG aggregates are provolatile='i' by design (like string_agg)"
+
+
+def test_agg_summarize_skips_null_and_empty_rows(conn, chat_server):
+    # M10 review: mixed NULL/empty + non-NULL group -> one summary (accum NULL/empty-skip branch);
+    # and an all-empty-string group short-circuits to NULL with NO LLM call (symmetry with all-NULL).
+    with conn.cursor() as cur:
+        _set_endpoint(cur, chat_server)
+        cur.execute("SELECT ai.agg_summarize(c) FROM (VALUES ('a'),(NULL::text),(''),('b')) v(c)")
+        out = cur.fetchone()[0]
+        assert isinstance(out, str) and out.startswith("A concise summary")
+        cur.execute("SELECT ai.agg_summarize(c) FROM (VALUES (''::text),('')) v(c)")
+        assert cur.fetchone()[0] is None  # all-empty -> NULL, no LLM call
+
+
+def test_agg_summarize_propagates_empty_completion_typed(conn, chat_server):
+    # M10 review: a failure in the per-group LLM call propagates ai._chat's typed error through the aggregate.
+    with conn.cursor() as cur:
+        _set_endpoint(cur, chat_server)
+        with pytest.raises(psycopg2.errors.ExternalRoutineException):  # 38000 — empty completion via finalfunc
+            cur.execute("SELECT ai.agg_summarize(c) FROM (VALUES ('__EMPTY__ please summarize')) v(c)")
 
 
 # --- opt-in real-OpenAI test (skips unless configured) -------------------------------------------
@@ -203,6 +382,48 @@ def test_real_openai_sentiment_polarity(conn):
     assert pos in ("positive", "negative", "neutral")
     assert neg in ("positive", "negative", "neutral")
     assert pos == "positive" and neg == "negative"
+
+
+@pytest.mark.skipif(
+    not (os.environ.get("THEODB_LLM_ENDPOINT") and os.environ.get("OPENAI_API_KEY")),
+    reason="real-OpenAI test: set THEODB_LLM_ENDPOINT + OPENAI_API_KEY to enable",
+)
+def test_real_openai_agg_summarize_shape(conn):
+    # M10 real evidence: aggregate N rows -> one non-empty summary (shape only; LLM non-determinism).
+    with conn.cursor() as cur:
+        cur.execute("SET theodb.llm_endpoint = %s", (os.environ["THEODB_LLM_ENDPOINT"],))
+        cur.execute("SET theodb.llm_model = %s", (os.environ.get("THEODB_LLM_MODEL", "gpt-4o-mini"),))
+        cur.execute("SET theodb.llm_api_key = %s", (os.environ["OPENAI_API_KEY"],))
+        cur.execute("DROP TABLE IF EXISTS it_agg_real")
+        cur.execute("CREATE TABLE it_agg_real (id int, content text)")
+        cur.execute(
+            "INSERT INTO it_agg_real VALUES "
+            "(1,'The deployment failed because the database ran out of disk space.'),"
+            "(2,'A second outage was caused by an expired TLS certificate.'),"
+            "(3,'The team added monitoring alerts for disk usage and certificate expiry.')"
+        )
+        cur.execute("SELECT ai.agg_summarize(content) FROM it_agg_real")
+        out = cur.fetchone()[0]
+    assert isinstance(out, str) and len(out) > 0  # a real, non-empty summary of the 3 incident notes
+
+
+@pytest.mark.skipif(
+    not (os.environ.get("THEODB_LLM_ENDPOINT") and os.environ.get("OPENAI_API_KEY")),
+    reason="real-OpenAI test: set THEODB_LLM_ENDPOINT + OPENAI_API_KEY to enable",
+)
+def test_real_openai_generate_batch_shape(conn):
+    # M11 real evidence: N prompts -> N answers in ONE round-trip (shape only; LLM non-determinism).
+    with conn.cursor() as cur:
+        cur.execute("SET theodb.llm_endpoint = %s", (os.environ["THEODB_LLM_ENDPOINT"],))
+        cur.execute("SET theodb.llm_model = %s", (os.environ.get("THEODB_LLM_MODEL", "gpt-4o-mini"),))
+        cur.execute("SET theodb.llm_api_key = %s", (os.environ["OPENAI_API_KEY"],))
+        cur.execute(
+            "SELECT ai.generate_batch(ARRAY["
+            "'Capital of France? one word','2+2? a number only','Opposite of hot? one word'])"
+        )
+        res = cur.fetchone()[0]
+    assert isinstance(res, list) and len(res) == 3  # exactly N answers, real model, one request
+    assert all(isinstance(x, str) and len(x) > 0 for x in res)
 
 
 # --- added in review: untested fail-fast branches + neutral label + message assertions ------------
