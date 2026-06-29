@@ -15,6 +15,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 ### Changed
+- Estratégia de produto: o diferencial do TheoDB passa a ser a **unificação tudo-em-um** (vetor + relacional + IA + colunar numa instância, SQL único, sem ETL/2º sistema); performance vetorial é **competitiva, não líder**. Posicionamento: alternativa OSS a AlloyDB/Pinecone. ADR `0005-unification-as-differentiator` (sign-off CTO) refina o item 3 do ADR `0002` (LOCKED).
 
 ### Deprecated
 
