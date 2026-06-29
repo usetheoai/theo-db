@@ -10,43 +10,82 @@ The control-parse + extension-safety tests are pure-file and run anywhere (no DB
 
 import os
 import pathlib
+import re
 
 import psycopg2
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 CONTROL = ROOT / "theodb.control"
-INSTALL_SQL = ROOT / "sql" / "theodb--1.0.sql"  # generated (gitignored); built by `make theodb-build`
+INSTALL_SQL = ROOT / "sql" / "theodb--1.0.sql"          # generated (gitignored); built by `make theodb-build`
+UPGRADE_SQL = ROOT / "sql" / "theodb--1.0--1.1.sql"     # committed (upgrade-path skeleton)
+# Source bodies concatenated (in load order) to build the install script — mirrors the Makefile PARTS.
+PARTS = [
+    "30-theodb-embed.sql", "40-theodb-hybrid.sql", "50-theodb-ai.sql",
+    "60-theodb-nl.sql", "61-theodb-nl-config.sql", "70-theodb-ml.sql",
+]
+# Top-level transaction control is forbidden inside an extension script (PG docs). Regex (not a literal
+# set) so `BEGIN WORK;`, `BEGIN ;` (space), and `COMMIT; -- note` are all caught — plpgsql `BEGIN`/`END`
+# inside `$$ ... $$` bodies have no trailing `;` on the keyword and are NOT matched.
+_TX_CONTROL = re.compile(r"^\s*(BEGIN|COMMIT|START\s+TRANSACTION|ROLLBACK)\b[^;]*;", re.IGNORECASE)
+# The documented surface that MUST be present (presence-by-name, not a loose count).
+_REQUIRED_FUNCS = [
+    ("theodb", "embed"), ("ai", "generate"), ("ai", "analyze_sentiment"), ("ai", "summarize"),
+    ("ai", "rank"), ("ai", "generate_batch"), ("ai", "agg_summarize"), ("ai", "hybrid_search"),
+    ("ai", "nl_to_sql"), ("ai", "nl_query"), ("theodb_ml", "create_model"), ("theodb_ml", "apply_model"),
+]
+
+
+def _build_install_script_text():
+    """Return the assembled install-script text (built from the source bodies if the generated file
+    is absent) — so the safety scan NEVER silently skips (the file is gitignored)."""
+    if INSTALL_SQL.exists():
+        return INSTALL_SQL.read_text()
+    return "\n".join((ROOT / "sql" / p).read_text() for p in PARTS)
+
+
+def _assert_extension_safe(text, label):
+    for ln in text.splitlines():
+        assert not ln.strip().upper().startswith("CREATE EXTENSION"), f"{label}: forbidden CREATE EXTENSION: {ln}"
+        assert not _TX_CONTROL.match(ln), f"{label}: forbidden top-level transaction control: {ln}"
 
 
 # ---- pure-file tests (no DB) ------------------------------------------------
 
 def test_control_declares_requires():
-    """theodb.control declares vector, vectorscale AND plpython3u, superuser, no module_pathname."""
+    """theodb.control declares vector, vectorscale AND plpython3u, superuser, not-trusted, no module_pathname."""
     text = CONTROL.read_text()
     assert "requires = 'vector, vectorscale, plpython3u'" in text
     assert "superuser = true" in text
     assert "relocatable = false" in text
-    assert "module_pathname" not in text  # SQL-only: no .so (M15 ADR D1)
-    assert "trusted" not in text          # untrusted plpython3u -> not trusted (M15 ADR D2)
+    assert "module_pathname" not in text   # SQL-only: no .so (M15 ADR D1)
+    assert "trusted = true" not in text     # untrusted plpython3u -> never trusted (M15 ADR D2)
 
 
 def test_built_script_is_extension_safe():
-    """The built install script has no top-level transaction control and no CREATE EXTENSION."""
-    if not INSTALL_SQL.exists():
-        pytest.skip("run `make theodb-build` first to generate sql/theodb--1.0.sql")
-    lines = INSTALL_SQL.read_text().splitlines()
-    for ln in lines:
-        s = ln.strip().upper()
-        assert not s.startswith("CREATE EXTENSION"), f"forbidden in ext script: {ln}"
-        assert s not in ("BEGIN;", "COMMIT;", "ROLLBACK;", "START TRANSACTION;"), f"tx control: {ln}"
+    """The assembled install script has no top-level transaction control and no CREATE EXTENSION.
+
+    Builds the script in-memory if the generated file is absent, so this gate never no-ops (M-review fix)."""
+    _assert_extension_safe(_build_install_script_text(), "install script")
+
+
+def test_upgrade_script_is_extension_safe():
+    """The committed upgrade script (theodb--1.0--1.1.sql) is also extension-safe (T3.1 AC; review M2 fix)."""
+    _assert_extension_safe(UPGRADE_SQL.read_text(), "upgrade script")
+
+
+def test_make_builds_install_script(tmp_path):
+    """Concatenating the source bodies (the Makefile build path) yields a non-empty script (review M4 fix)."""
+    text = _build_install_script_text()
+    assert len(text) > 1000  # ~1031 lines of real SQL
+    assert "theodb.embed" in text and "ai.hybrid_search" in text
 
 
 # ---- DB integration tests ---------------------------------------------------
 
 @pytest.fixture(scope="module")
 def admin_conn():
-    """Autocommit connection to the maintenance DB, for CREATE/DROP DATABASE."""
+    """Autocommit connection to the maintenance DB, for CREATE/DROP DATABASE. Drops test DBs on teardown."""
     c = psycopg2.connect(
         host=os.environ.get("PGHOST", "localhost"),
         port=os.environ.get("PGPORT", "5432"),
@@ -56,6 +95,10 @@ def admin_conn():
     )
     c.autocommit = True
     yield c
+    # teardown: drop the DBs this module created (review L3 fix — no server residue)
+    with c.cursor() as cur:
+        for name in ("m15_surface", "m15_upgrade", "m15_idem", "m15_bare", "m15_residue"):
+            cur.execute(f"DROP DATABASE IF EXISTS {name}")
     c.close()
 
 
@@ -76,24 +119,25 @@ def _connect(name):
 
 
 def test_extension_installs_full_surface(admin_conn):
-    """CREATE EXTENSION theodb CASCADE on a fresh DB installs >=24 functions across ai/theodb/theodb_ml."""
+    """CREATE EXTENSION theodb CASCADE installs every documented function (presence-by-name, not a count)."""
     _fresh_db(admin_conn, "m15_surface")
     conn = _connect("m15_surface")
     try:
         with conn.cursor() as cur:
             cur.execute("CREATE EXTENSION theodb CASCADE")
-            cur.execute(
-                "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
-                "WHERE n.nspname IN ('ai','theodb','theodb_ml')"
-            )
-            assert cur.fetchone()[0] >= 24
+            for schema, fn in _REQUIRED_FUNCS:
+                cur.execute(
+                    "SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
+                    "WHERE n.nspname=%s AND p.proname=%s",
+                    (schema, fn),
+                )
+                assert cur.fetchone() is not None, f"missing documented function {schema}.{fn}"
             cur.execute("SELECT extversion FROM pg_extension WHERE extname='theodb'")
             assert cur.fetchone()[0] == "1.0"
-            # requires resolved via CASCADE
             cur.execute(
                 "SELECT count(*) FROM pg_extension WHERE extname IN ('vector','vectorscale','plpython3u')"
             )
-            assert cur.fetchone()[0] == 3
+            assert cur.fetchone()[0] == 3  # requires resolved via CASCADE
     finally:
         conn.close()
 
@@ -124,6 +168,23 @@ def test_create_extension_is_idempotent(admin_conn):
             conn.commit()
             cur.execute("SELECT count(*) FROM pg_extension WHERE extname='theodb'")
             assert cur.fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+def test_transactional_install_leaves_no_residue(admin_conn):
+    """Install inside a transaction then ROLLBACK leaves no theodb objects (supabase model; ADR D5)."""
+    _fresh_db(admin_conn, "m15_residue")
+    conn = _connect("m15_residue")
+    try:
+        with conn.cursor() as cur:
+            cur.execute("BEGIN")
+            cur.execute("CREATE EXTENSION theodb CASCADE")
+            cur.execute("ROLLBACK")
+            cur.execute("SELECT count(*) FROM pg_extension WHERE extname='theodb'")
+            assert cur.fetchone()[0] == 0  # rolled back -> gone
+            cur.execute("SELECT count(*) FROM pg_namespace WHERE nspname='theodb_ml'")
+            assert cur.fetchone()[0] == 0  # no orphan schema left behind
     finally:
         conn.close()
 

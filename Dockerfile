@@ -67,7 +67,6 @@ RUN apt-get update && \
 # are created in-script by the extension. Deps (vector/vectorscale/plpython3u) come from theodb.control requires.
 COPY theodb.control /tmp/theodb/theodb.control
 COPY sql/ /tmp/theodb/sql/
-COPY sql/theodb--1.0--1.1.sql /tmp/theodb/sql/theodb--1.0--1.1.sql
 RUN set -eux; \
     cd /tmp/theodb; \
     cat sql/30-theodb-embed.sql sql/40-theodb-hybrid.sql sql/50-theodb-ai.sql \
