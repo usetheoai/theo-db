@@ -55,7 +55,7 @@ unchanged + a non-regression benchmark (CTO requirement: measured data).
 ### Current callers / dependents
 
 - **Root scripts** — invoked by `.github/workflows/ci.yml` (the only mechanizable caller; lines 67/159/162/165/262/323/436) + documented in `docs/migration/minimal-migration.md:100-102`. Historical mentions in `knowledge-base/**`, `CHANGELOG.md`, `ROADMAP.md` are audit-trail prose — NOT updated (immutable history; Rule 6 forbids editing released CHANGELOG entries).
-- **`theodb_rs` Rust symbols** — `_embed_text` is called by the `theodb.embed` SQL wrapper (extension_sql, same file); `err_input`/`err_external`/`guc`/`truncate` are private to the crate (no external caller). `grep -rn '_embed_text' theodb_rs/` → only `lib.rs`. The split is internal; the SQL surface (`theodb._embed_text`, `theodb.embed`) is the only external contract and MUST be byte-identical.
+- **`theodb_rs` Rust symbols** — `_embed_text` is called by the `theodb.embed` SQL wrapper (extension_sql, same file); `err_input`/`err_external`/`guc`/`truncate` are private to the crate (no external caller). `grep -rn '_embed_text' theodb_rs/` → only `lib.rs`. The split is internal; the SQL surface (`theodb._embed_text`, `theodb.embed`) is the only external contract and MUST be preserved (signatures byte-identical; the generated-SQL OBJECT SET identical order-insensitively — EC-1, pgrx item order is unstable).
 
 ### Domain glossary
 

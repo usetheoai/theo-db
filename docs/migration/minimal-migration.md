@@ -2,7 +2,7 @@
 
 Move an existing PostgreSQL + `pgvector` database into TheoDB using **standard `pg_dump` / `pg_restore`**.
 TheoDB is wire-compatible with PostgreSQL, so there is **no special tool** — your vector data and your
-HNSW / IVFFlat indexes come across intact. This is proven end-to-end by `migrate-smoke.sh` (and in CI).
+HNSW / IVFFlat indexes come across intact. This is proven end-to-end by `scripts/migrate-smoke.sh` (and in CI).
 
 > Use a `pg_dump`/`pg_restore` client whose version is **>= your source server version** (a PG16 client
 > cannot dump a PG17 server). The repo smoke runs the tools *inside* the PG17 containers to sidestep this.

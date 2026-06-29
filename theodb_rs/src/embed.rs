@@ -1,7 +1,7 @@
 //! Domain layer (blueprint ADR-1): the embedding call — portable business logic. Talks to the
 //! configurable model endpoint over HTTP (minreq, native-tls) and returns a pgvector text literal.
-//! All Postgres specifics (typed errors, GUC reads) are delegated to `crate::pg` — this module has no
-//! direct pgrx ABI dependency beyond those helpers, which keeps the logic testable + portable.
+//! All Postgres specifics (typed errors, GUC reads) are delegated to `crate::pg` — this module touches
+//! the pgrx ABI only through those helpers, which concentrates the PG coupling at one boundary (ADR-1).
 //!
 //! Error parity with the plpython3u baseline (oracle: `benchmarks/tests/test_embed_sql.py`):
 //!   * input errors (NULL content, unset endpoint, non-http(s) scheme)        -> SQLSTATE 22023
