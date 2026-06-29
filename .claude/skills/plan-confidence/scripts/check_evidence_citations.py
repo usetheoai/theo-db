@@ -190,20 +190,23 @@ def _resolve_rule_file(filename: str, project_root: Path) -> Path | None:
         project_root / "rules" / filename,
         project_root / ".claude" / "rules" / filename,
         project_root / "knowledge-base" / filename,
+        project_root / ".claude" / "knowledge-base" / filename,
         project_root / filename,  # e.g. CHANGELOG.md, CLAUDE.md
     ]
     for c in candidates:
         if c.exists() and c.is_file():
             return c
     # Last-resort: shallow search inside knowledge-base/ (handles ADRs etc.).
-    kb = project_root / "knowledge-base"
-    if kb.exists():
-        try:
-            for p in kb.rglob(filename):
-                if p.is_file():
-                    return p
-        except OSError:
-            pass
+    # Both the bare and the `.claude/`-prefixed layouts are supported (this
+    # project stores its knowledge-base under `.claude/knowledge-base/`).
+    for kb in (project_root / "knowledge-base", project_root / ".claude" / "knowledge-base"):
+        if kb.exists():
+            try:
+                for p in kb.rglob(filename):
+                    if p.is_file():
+                        return p
+            except OSError:
+                pass
     return None
 
 
@@ -241,13 +244,20 @@ def _scan_blueprint_refs(
     prose: str, line_index: list[int], project_root: Path
 ) -> list[tuple[Citation, bool]]:
     out: list[tuple[Citation, bool]] = []
-    blueprints_dir = project_root / "knowledge-base" / "discoveries" / "blueprints"
+    # Support both the bare and the `.claude/`-prefixed layouts (this project
+    # stores blueprints under `.claude/knowledge-base/discoveries/blueprints/`).
     available = []
-    if blueprints_dir.exists():
-        try:
-            available = [p for p in blueprints_dir.iterdir() if p.is_file() and p.suffix == ".md"]
-        except OSError:
-            available = []
+    for blueprints_dir in (
+        project_root / "knowledge-base" / "discoveries" / "blueprints",
+        project_root / ".claude" / "knowledge-base" / "discoveries" / "blueprints",
+    ):
+        if blueprints_dir.exists():
+            try:
+                available.extend(
+                    p for p in blueprints_dir.iterdir() if p.is_file() and p.suffix == ".md"
+                )
+            except OSError:
+                pass
     for m in _BLUEPRINT_REF_RE.finditer(prose):
         section = m.group(1) or m.group(2)
         raw = m.group(0)

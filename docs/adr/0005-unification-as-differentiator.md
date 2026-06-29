@@ -1,6 +1,6 @@
 # ADR 0005 — Diferencial do produto: Unificação tudo-em-um (performance competitiva, não líder)
 
-**Status:** Accepted (LOCKED — refina o ADR 0002; sign-off CTO 2026-06-29) · **Data:** 2026-06-29 · **Owner:** CTO (paulohenriquevn)
+**Status:** Accepted (LOCKED — refina o ADR 0002) · **⚠️ Superseded in part by [ADR 0006](0006-own-code-postgres-based-rust-go.md) (2026-06-29)** — o moat agora INCLUI código próprio defensável em Rust/Go (a unificação segue um pilar; performance volta a ser perseguível, benchmark-gated) · **Data:** 2026-06-29 · **Owner:** CTO (paulohenriquevn)
 **Atualiza (refina, não supersede):** ADR `0002-north-star-equal-or-superior-to-alloydb` (item 3 da Decisão) ·
 **Relacionado:** ADR `0001-no-engine-fork`, ADR `0004-scann-fork-decision` (NO-FORK), PRD §15 (D1–D7), `ROADMAP.md`
 

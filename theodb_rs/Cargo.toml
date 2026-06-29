@@ -1,0 +1,42 @@
+[package]
+name = "theodb_rs"
+version = "1.0.0"
+edition = "2021"
+description = "TheoDB's own PostgreSQL extension in Rust (pgrx) — theodb.embed (M17, ROADMAP-v2 / ADR 0006)"
+license = "Apache-2.0"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[[bin]]
+name = "pgrx_embed_theodb_rs"
+path = "./src/bin/pgrx_embed.rs"
+
+[features]
+default = ["pg17"]
+pg13 = ["pgrx/pg13", "pgrx-tests/pg13"]
+pg14 = ["pgrx/pg14", "pgrx-tests/pg14"]
+pg15 = ["pgrx/pg15", "pgrx-tests/pg15"]
+pg16 = ["pgrx/pg16", "pgrx-tests/pg16"]
+pg17 = ["pgrx/pg17", "pgrx-tests/pg17"]
+pg_test = []
+
+[dependencies]
+pgrx = "=0.16.1"
+# Minimal audited HTTP client (ISC). `https-native` = OpenSSL/native-tls (NOT rustls) — deps-audit
+# measured the rustls path pulls vulnerable rustls-webpki (RUSTSEC-2026-0098/0099/0104); OpenSSL is
+# already in the builder stage. See plan ADR D2.
+minreq = { version = "2", features = ["https-native", "json-using-serde"] }
+serde_json = "1"
+
+[dev-dependencies]
+pgrx-tests = "=0.16.1"
+
+[profile.dev]
+panic = "unwind"
+
+[profile.release]
+panic = "unwind"
+opt-level = 3
+lto = "thin"
+codegen-units = 1
