@@ -20,7 +20,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Changed
 - **Retry da classe recuperável (embed client Rust + `ai._chat`):** backoff exponencial limitado (≤2 retries) com jitter para `connect`/`timeout`/502/503/429, em UM lugar por cliente (DRY — todos os `ai.*` herdam via `ai._chat`); erros de input (22023) e demais 4xx falham-rápido SEM retry (`error-handling.md §2`). Usa apenas stdlib (sem nova crate). Mitiga o "single transient 5xx aborta o statement" da auditoria.
-- **Guard fail-fast no seam `theodb.embed`** em `ai.hybrid_search_rrf`: `to_regprocedure('theodb.embed(text)') IS NULL` → erro tipado `0A000` claro ("install the theodb_rs extension") em vez de quebra silenciosa quando `theodb_rs` foi removido.
+- **Guard fail-fast no seam `theodb.embed`** em `ai.hybrid_search_rrf`: `to_regprocedure('theodb.embed(text, text)') IS NULL` → erro tipado `0A000` claro ("install the theodb_rs extension") em vez de quebra silenciosa quando `theodb_rs` foi removido. (A assinatura registrada é `(text, text)` — `model` tem DEFAULT; a forma de 1-arg nunca resolveria.)
 
 ### Deprecated
 - **Função embedding plpython3u legada (`theodb.embed`) aposentada no upgrade `theodb` 1.0→1.1:** DROP condicional (só quando ainda é `LANGUAGE plpython3u` e não pertence à extensão `theodb_rs`), permitindo que instalações v0.x façam UPDATE e adicionem `theodb_rs` sem conflito de definição. `default_version` da extensão `theodb` passa a `1.1`.

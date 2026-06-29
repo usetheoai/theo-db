@@ -20,7 +20,7 @@ Off-roadmap (no `milestone_id` → `cycle-release` skips the checkbox flip with 
 - **New tests: 18/18 PASS** — `test_embed_batch.py` (7), `test_hybrid_guard.py` (2), `test_retry.py` (3),
   `test_retirement_migration.py` (3), `test_import_chunked.py` (3).
 - **Regression oracle: 13/13 PASS UNCHANGED** — `test_embed_sql.py` (10) + `test_embed_failure_scenarios.py` (3).
-- **Total: 31/31 embed/AI integration tests green.**
+- **Total: 41/41 tests green** (13 oracle + 18 new + 9 extension-install + 1 added real-upgrade-path retirement test) — re-verified after the /review fixes.
 - **Benchmark (CTO data, `docs/benchmarks/audit-remediation-embed-batch.md`, mean±std, 5 runs):** the N→1
   collapse is real and grows with N — N=8 → **2.93×**, N=32 → **7.49×**, N=128 → **7.99×** (per-row issues
   N HTTP round-trips; `embed_batch` issues 1).

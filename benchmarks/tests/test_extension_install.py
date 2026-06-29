@@ -29,8 +29,14 @@ PARTS = [
 # inside `$$ ... $$` bodies have no trailing `;` on the keyword and are NOT matched.
 _TX_CONTROL = re.compile(r"^\s*(BEGIN|COMMIT|START\s+TRANSACTION|ROLLBACK)\b[^;]*;", re.IGNORECASE)
 # The documented surface that MUST be present (presence-by-name, not a loose count).
+# Post-M17 (v0.16.0) theodb.embed + theodb.embed_batch are served by the Rust `theodb_rs` extension, NOT
+# the SQL `theodb` extension — so the full documented surface requires installing BOTH (the product ships
+# both; the Dockerfile init creates theodb + theodb_rs). embed_batch + import_pinecone_chunked are the
+# audit-remediation additions.
 _REQUIRED_FUNCS = [
-    ("theodb", "embed"), ("ai", "generate"), ("ai", "analyze_sentiment"), ("ai", "summarize"),
+    ("theodb", "embed"), ("theodb", "embed_batch"),
+    ("theodb", "import_pinecone"), ("theodb", "import_pinecone_chunked"),
+    ("ai", "generate"), ("ai", "analyze_sentiment"), ("ai", "summarize"),
     ("ai", "rank"), ("ai", "generate_batch"), ("ai", "agg_summarize"), ("ai", "hybrid_search"),
     ("ai", "nl_to_sql"), ("ai", "nl_query"), ("theodb_ml", "create_model"), ("theodb_ml", "apply_model"),
 ]
@@ -125,6 +131,9 @@ def test_extension_installs_full_surface(admin_conn):
     try:
         with conn.cursor() as cur:
             cur.execute("CREATE EXTENSION theodb CASCADE")
+            # M17: theodb.embed (+ embed_batch) ship in the Rust theodb_rs extension; the full documented
+            # surface requires it too (theodb_rs requires theodb, so this is the shipped pair).
+            cur.execute("CREATE EXTENSION theodb_rs CASCADE")
             for schema, fn in _REQUIRED_FUNCS:
                 cur.execute(
                     "SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
@@ -133,7 +142,7 @@ def test_extension_installs_full_surface(admin_conn):
                 )
                 assert cur.fetchone() is not None, f"missing documented function {schema}.{fn}"
             cur.execute("SELECT extversion FROM pg_extension WHERE extname='theodb'")
-            assert cur.fetchone()[0] == "1.0"
+            assert cur.fetchone()[0] == "1.1"  # default_version bumped to 1.1 (audit-remediation retirement migration)
             cur.execute(
                 "SELECT count(*) FROM pg_extension WHERE extname IN ('vector','vectorscale','plpython3u')"
             )

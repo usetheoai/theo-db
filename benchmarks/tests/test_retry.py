@@ -163,8 +163,7 @@ def test_retry_respects_bounds_and_no_key_leak(conn, scripted):
         with pytest.raises(psycopg2.errors.ExternalRoutineException) as exc:
             cur.execute("SELECT theodb.embed('x')")
     hits = _count(host, "/embed/down")
-    # Bounded: 3 attempts total (1 + MAX_RETRIES=2) — a down endpoint can't hang unbounded.
+    # Bounded: exactly 3 attempts total (1 + MAX_RETRIES=2) — a down endpoint can't hang unbounded.
     assert hits == 3
-    assert hits <= 3
     # EC-2: the api_key must NEVER appear in the exhausted-retry error message.
     assert "SENTINEL_KEY_12345" not in str(exc.value)

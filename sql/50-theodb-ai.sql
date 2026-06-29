@@ -79,6 +79,10 @@ while True:
     except urllib.error.HTTPError as e:
         # HTTPError ⊂ URLError, carries .code — retry only the recoverable status class.
         if e.code in _RECOVERABLE_STATUS and attempt < _MAX_RETRIES:
+            # Observability (wiring-triad pillar c): surface the transient retry so a flapping endpoint
+            # is visible instead of silent until the final hard failure. api_key is never in the message.
+            plpy.warning("ai._chat: chat endpoint returned HTTP %d; retrying (%d/%d)"
+                         % (e.code, attempt + 1, _MAX_RETRIES))
             time.sleep(0.1 * (4 ** attempt) + random.uniform(0, 0.05))
             attempt += 1
             continue
@@ -86,6 +90,8 @@ while True:
     except (urllib.error.URLError, OSError) as e:
         # DNS/refused/timeout — transient; retry until the cap, then fail-fast.
         if attempt < _MAX_RETRIES:
+            plpy.warning("ai._chat: chat endpoint connection error; retrying (%d/%d): %s"
+                         % (attempt + 1, _MAX_RETRIES, e))
             time.sleep(0.1 * (4 ** attempt) + random.uniform(0, 0.05))
             attempt += 1
             continue

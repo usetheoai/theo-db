@@ -15,7 +15,7 @@
 //!   * HTTP / response failures (connect/timeout/non-2xx/bad body/shape/empty) -> SQLSTATE 38000
 use serde_json::Value;
 
-use crate::pg::{err_external, err_input, guc};
+use crate::pg::{err_external, err_input, guc, warn};
 
 /// Generate the embedding for `content` via the `theodb.embedding_endpoint` GUC and return it as a
 /// pgvector text literal `"[x,y,z]"` (exactly as the plpython3u baseline did); the SQL wrapper
@@ -153,7 +153,8 @@ fn resolve_cfg(fn_name: &str, model: Option<&str>) -> (String, String, Option<St
 const MAX_RETRIES: u32 = 2;
 
 /// The recoverable HTTP status class (transient): too-many-requests + bad/unavailable gateway. Other 4xx
-/// (400/401/403/404/422) and 5xx are irrecoverable -> fail-fast, NO retry (retrying would mask bugs, Rule 8).
+/// (400/401/403/404/422) and other 5xx (500/504) are irrecoverable -> fail-fast, NO retry (retrying would
+/// mask bugs, Rule 8).
 fn is_recoverable_status(status: i32) -> bool {
     matches!(status, 429 | 502 | 503)
 }
@@ -192,6 +193,12 @@ fn post_json(fn_name: &str, endpoint: &str, payload: String, api_key: Option<&st
         match req.send() {
             Ok(r) if (200..300).contains(&r.status_code) => break r,
             Ok(r) if is_recoverable_status(r.status_code) && attempt < MAX_RETRIES => {
+                warn(&format!(
+                    "{fn_name}: embedding endpoint returned HTTP {}; retrying ({}/{})",
+                    r.status_code,
+                    attempt + 1,
+                    MAX_RETRIES
+                ));
                 backoff(attempt);
                 attempt += 1;
                 continue;
@@ -203,7 +210,11 @@ fn post_json(fn_name: &str, endpoint: &str, payload: String, api_key: Option<&st
             )),
             // Connect/timeout/redirect errors are recoverable until the cap, then fail-fast (38000).
             Err(e) if attempt < MAX_RETRIES => {
-                let _ = e;
+                warn(&format!(
+                    "{fn_name}: embedding endpoint connection error; retrying ({}/{}): {e}",
+                    attempt + 1,
+                    MAX_RETRIES
+                ));
                 backoff(attempt);
                 attempt += 1;
                 continue;

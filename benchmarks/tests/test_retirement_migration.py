@@ -23,14 +23,21 @@ _REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 _MIGRATION = os.path.join(_REPO, "sql", "theodb--1.0--1.1.sql")
 
 
-def _connect():
+def _connect(dbname=None):
     return psycopg2.connect(
         host=os.environ.get("PGHOST", "localhost"),
         port=os.environ.get("PGPORT", "5432"),
-        dbname=os.environ.get("PGDATABASE", "postgres"),
+        dbname=dbname or os.environ.get("PGDATABASE", "postgres"),
         user=os.environ.get("PGUSER", "postgres"),
         password=os.environ.get("PGPASSWORD", "postgres"),
     )
+
+
+def _fresh_db(admin, name):
+    admin.autocommit = True
+    with admin.cursor() as cur:
+        cur.execute(f"DROP DATABASE IF EXISTS {name} WITH (FORCE)")
+        cur.execute(f"CREATE DATABASE {name}")
 
 
 def _migration_sql() -> str:
@@ -79,6 +86,45 @@ def test_owned_embed_preserved():
     finally:
         conn.rollback()
         conn.close()
+
+
+def test_real_upgrade_path_drops_member_embed_then_theodb_rs_installs_clean():
+    """End-to-end proof of the audit #9 claim, on the REAL upgrade path (not a bare delta run):
+
+    a v0.x-shaped install where the plpython3u theodb.embed is a `theodb` MEMBER -> ALTER EXTENSION theodb
+    UPDATE TO '1.1' (runs the actual delta in extension-update context) drops it -> CREATE EXTENSION
+    theodb_rs then installs WITHOUT a duplicate-definition clash and the Rust theodb.embed is present.
+    Uses a throwaway database so the real version chain (1.0 -> UPDATE 1.1) can be exercised.
+    """
+    admin = _connect()
+    _fresh_db(admin, "retire_upgrade")
+    admin.close()
+    conn = _connect("retire_upgrade")
+    conn.autocommit = True
+    try:
+        with conn.cursor() as cur:
+            cur.execute("CREATE EXTENSION theodb VERSION '1.0' CASCADE")
+            # Seed the legacy plpython3u embed AS A theodb MEMBER (mirrors a real v0.x install).
+            cur.execute(
+                "CREATE FUNCTION theodb.embed(content text, model text DEFAULT NULL) "
+                "RETURNS text LANGUAGE plpython3u AS $py$ return '[0,0]' $py$"
+            )
+            cur.execute("ALTER EXTENSION theodb ADD FUNCTION theodb.embed(text, text)")
+            # The real upgrade path runs the delta in extension-update context (can drop its own member).
+            cur.execute("ALTER EXTENSION theodb UPDATE TO '1.1'")
+            cur.execute("SELECT to_regprocedure('theodb.embed(text,text)')")
+            assert cur.fetchone()[0] is None  # legacy plpython3u embed retired on UPDATE
+            # And now theodb_rs installs with NO duplicate-definition clash — the load-bearing claim.
+            cur.execute("CREATE EXTENSION theodb_rs CASCADE")
+            cur.execute("SELECT to_regprocedure('theodb.embed(text,text)') IS NOT NULL")
+            assert cur.fetchone()[0] is True  # the Rust theodb.embed now owns the slot
+    finally:
+        conn.close()
+        admin = _connect()
+        admin.autocommit = True
+        with admin.cursor() as cur:
+            cur.execute("DROP DATABASE IF EXISTS retire_upgrade WITH (FORCE)")
+        admin.close()
 
 
 def test_default_version_is_1_1():
