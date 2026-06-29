@@ -60,25 +60,26 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends postgresql-plpython3-$PG_MAJOR ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-# theodb.embed() — created on fresh DB init (idempotent script).
-COPY sql/30-theodb-embed.sql /docker-entrypoint-initdb.d/30-theodb-embed.sql
+# M15 — TheoDB ships as an INSTALLABLE EXTENSION (CREATE EXTENSION theodb), not init-scripts.
+# Build the install script (concat of the modular bodies in load order) and install the SQL-only extension
+# by copying theodb.control + sql/theodb--*.sql into the PG extension dir. SQL-only install is a plain copy —
+# no PGXS/make at runtime (the dev package was removed above; M15 ADR D2 / EC-2). Schemas ai/theodb/theodb_ml
+# are created in-script by the extension. Deps (vector/vectorscale/plpython3u) come from theodb.control requires.
+COPY theodb.control /tmp/theodb/theodb.control
+COPY sql/ /tmp/theodb/sql/
+RUN set -eux; \
+    cd /tmp/theodb; \
+    cat sql/30-theodb-embed.sql sql/40-theodb-hybrid.sql sql/50-theodb-ai.sql \
+        sql/60-theodb-nl.sql sql/61-theodb-nl-config.sql sql/70-theodb-ml.sql > sql/theodb--1.0.sql; \
+    install -m 0644 theodb.control sql/theodb--1.0.sql sql/theodb--1.0--1.1.sql \
+        "/usr/share/postgresql/$PG_MAJOR/extension/"; \
+    rm -rf /tmp/theodb
 
-# ai.hybrid_search_rrf() — M7-S1 hybrid search (FTS + vector + RRF), created on fresh DB init (idempotent).
-COPY sql/40-theodb-hybrid.sql /docker-entrypoint-initdb.d/40-theodb-hybrid.sql
-
-# ai.generate/if/analyze_sentiment/summarize/rank — M7-S3 generative-AI functions (idempotent).
-COPY sql/50-theodb-ai.sql /docker-entrypoint-initdb.d/50-theodb-ai.sql
-
-# ai.nl_to_sql/ai.nl_query — M7-S4 safe NL→SQL (anti-prompt-injection), created on fresh DB init (idempotent).
-COPY sql/60-theodb-nl.sql /docker-entrypoint-initdb.d/60-theodb-nl.sql
-
-# theodb_ai_nl config surface — M12 (config/templates/value-index + ai.nl_query_cfg) over the unchanged gate.
-# MUST load AFTER 60 (ai.nl_query_cfg delegates to ai.nl_query).
-COPY sql/61-theodb-nl-config.sql /docker-entrypoint-initdb.d/61-theodb-nl-config.sql
-
-# theodb_ml model registry — M13 (create_model/apply_model + ai.hybrid_search JSON lives in sql/40).
-# apply_model only SETs the GUCs ai._chat (sql/50) reads; load after 50.
-COPY sql/70-theodb-ml.sql /docker-entrypoint-initdb.d/70-theodb-ml.sql
+# Create the extension on fresh DB init (greenfield — M15 ADR D3). CASCADE pulls vector+vectorscale+plpython3u.
+COPY <<'EOF' /docker-entrypoint-initdb.d/00-create-theodb.sql
+-- M15: TheoDB surface is provisioned by the theodb extension (not raw init-scripts).
+CREATE EXTENSION IF NOT EXISTS theodb CASCADE;
+EOF
 
 HEALTHCHECK --interval=5s --timeout=5s --start-period=10s --retries=5 \
   CMD pg_isready -h localhost -p 5432 -U postgres -q

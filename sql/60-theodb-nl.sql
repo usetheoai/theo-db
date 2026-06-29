@@ -15,7 +15,7 @@
 -- EXPLAIN allowlist cover those, and a restricted role is the belt-and-suspenders backstop).
 -- Idempotent: safe to re-run / load from docker-entrypoint-initdb.d.
 
-CREATE EXTENSION IF NOT EXISTS plpython3u;
+-- dep (plpython3u) declared in theodb.control `requires` (M15) — not created here
 CREATE SCHEMA IF NOT EXISTS ai;
 
 -- ai.nl_to_sql — generate (via ai._chat) + statically validate to ONE read-only SELECT over the allowlist.

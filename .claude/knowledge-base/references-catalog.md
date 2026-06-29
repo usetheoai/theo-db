@@ -2,8 +2,9 @@
 generated_by: roadmap-init
 generated_on: 2026-06-26
 slug: theodb
-peer_count_cloned: 11
+peer_count_cloned: 13
 peer_count_skipped: 0
+landscape_catalogued: 6
 ---
 
 # References catalog
@@ -323,6 +324,81 @@ ambíguo (Apache no topo, engine AGPL) — tratado conservadoramente como study-
 ### Supports ROADMAP milestone(s)
 
 - M6 — *because:* design de columnar engine (comparar com `pg_mooncake`).
+
+---
+
+## pinecone-python-client
+
+- **Folder:** `.claude/knowledge-base/references/pinecone-python-client/`
+- **Lifecycle:** cloned (2026-06-28, `--depth 1`)
+- **Repo:** https://github.com/pinecone-io/pinecone-python-client
+- **License:** `Apache-2.0` (client SDK; the Pinecone **engine** is proprietary/SaaS — not here)
+- **License-gate decision:** auto-approved-permissive (SDK only — engine is closed, nothing to import)
+- **Last release / last commit:** active
+
+### Why this peer is here
+
+Pinecone é o **alvo competitivo de mercado** (vector DB gerenciado, fechado). O engine não é OSS — só
+os SDKs cliente (Apache). Referência de **ergonomia de API / DX** para a superfície de produto/BaaS do
+TheoDB (a north-star de migração saindo de pago).
+
+### What to study in it
+
+- Forma da API de gestão (create index/collection, upsert, query, namespaces).
+- Modelagem de erros + tipos do cliente (DX).
+- Convenções de paginação/batch que esperamos espelhar.
+
+### Supports ROADMAP milestone(s)
+
+- M8 — *because:* referência de DX/API para o caminho gerenciado (e a discovery `baas-control-plane`).
+
+---
+
+## vectorchord *(study-only)*
+
+- **Folder:** `.claude/knowledge-base/references/vectorchord/`
+- **Lifecycle:** cloned (2026-06-28, `--depth 1`)
+- **Repo:** https://github.com/tensorchord/VectorChord
+- **License:** `AGPL-3.0 OR Elastic License v2` (dual)
+- **License-gate decision:** clone-anyway-study-only — ⚠️ **AGPL/ELv2: barrado no pacote por D1** (mesmo veredito do `VectorChord-bm25` no M7). Copiar/derivar código é PROIBIDO. Só estudo clean-room.
+- **Last release / last commit:** v1.1.1 (2026-02-28)
+
+### Why this peer is here
+
+Sucessor do pgvecto.rs — índice `vchordrq` com **RaBitQ** (quantização 1/4/8-bit + reranking). É a rota
+de quantização concorrente ao SBQ/StreamingDiskANN (pgvectorscale, que shipamos). Estudo do **algoritmo**
+para o landscape de quantização (M14/M2) — NÃO importável (D1).
+
+### What to study in it
+
+- Design do RaBitQ (compressão binária + reranking) — só o **design**, clean-room.
+- Como compõem com tipos do pgvector (compat declarada).
+- Comparação de memória-a-recall vs SBQ (DiskANN) — gatilho #2 do ADR 0004.
+
+### Supports ROADMAP milestone(s)
+
+- M2 / M14 — *because:* rota de quantização alternativa no landscape do pilar vetorial (não-adotável).
+
+---
+
+## Landscape catalogados (não-clonados — estudo via web/docs)
+
+Standalone vector DBs e managed-Postgres relevantes ao landscape competitivo. **Não clonados** (disco +
+baixo retorno: são bancos standalone, não extensões Postgres — adotá-los romperia o gate "100%
+wire-compatible Postgres", logo são referência **competitiva/de técnica**, não código a importar).
+Licenças confirmadas por busca 2026 (fontes no histórico da sessão).
+
+| Peer | Licença | Tipo | Veredito p/ TheoDB |
+|---|---|---|---|
+| Qdrant | Apache-2.0 | Standalone DB (Rust) | Permissivo, mas standalone → não-importável (quebra wire-compat). Estudo de **filtered ANN** / payload filtering. |
+| Milvus | Apache-2.0 | Standalone DB (Go/C++) | Permissivo; billion-scale + GPU. Não-importável. Estudo de **escala/sharding** (informa M8). |
+| Weaviate | BSD-3 / Apache-2.0 | Standalone DB (Go) | Permissivo; vectorization embutida. Não-importável. Estudo de **RAG/hybrid UX**. |
+| Chroma | Apache-2.0 | Embedded/standalone (Py/JS) | Permissivo; foco em DX. Não-importável. Estudo de **DX de embedding/dev-loop**. |
+| Neon | Apache-2.0 | Serverless Postgres (storage desagregado) | Permissivo, mas storage desagregado é complexo de self-host (Databricks comprou 2025). Estudo de **arquitetura control-plane / branching / scale-to-zero**. |
+| Supabase (stack) | Apache-2.0 | BaaS Postgres OSS completo | Permissivo, self-host Docker. Já temos `supabase-postgres` (só a imagem). O stack (`supabase/supabase`: studio/gotrue/postgrest/storage/realtime) é a **referência primária de BaaS OSS** — clonar quando a discovery `baas-control-plane` exigir + houver disco. |
+
+> Estes alimentam a discovery `baas-control-plane` (Neon/Supabase) e o landscape do pilar vetorial
+> (Qdrant/Milvus/Weaviate/Chroma). Promover qualquer um a `cloned` exige espaço em disco (hoje 99%).
 
 ---
 

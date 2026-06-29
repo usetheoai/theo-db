@@ -13,6 +13,18 @@ for i in $(seq 1 10); do
 done
 pg_isready -h "$HOST" -p "$PORT" -U "$USER" -q
 
+# M15: TheoDB ships as an installable extension — assert it is present (every surface below comes from it).
+THEODB_VER=$(psql -h "$HOST" -p "$PORT" -U "$USER" -t -A -q -v ON_ERROR_STOP=1 <<'SQL'
+CREATE EXTENSION IF NOT EXISTS theodb CASCADE;
+SELECT extversion FROM pg_extension WHERE extname='theodb';
+SQL
+)
+if [ -z "$THEODB_VER" ]; then
+  echo "THEODB SMOKE FAILED: extension 'theodb' not installed (expected CREATE EXTENSION theodb to work)" >&2
+  exit 1
+fi
+echo "theodb: extension installed (v$THEODB_VER) OK"
+
 psql -h "$HOST" -p "$PORT" -U "$USER" -v ON_ERROR_STOP=1 <<'SQL'
 CREATE EXTENSION IF NOT EXISTS vector;
 SELECT '[1,2,3]'::vector <=> '[4,5,6]'::vector;

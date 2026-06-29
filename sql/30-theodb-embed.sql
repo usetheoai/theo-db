@@ -8,8 +8,7 @@
 --   SET theodb.embedding_api_key  = '...';                              -- optional bearer token
 -- Idempotent: safe to re-run / load from docker-entrypoint-initdb.d.
 
-CREATE EXTENSION IF NOT EXISTS vector;
-CREATE EXTENSION IF NOT EXISTS plpython3u;
+-- deps (vector, plpython3u) declared in theodb.control `requires` (M15) — not created here
 CREATE SCHEMA IF NOT EXISTS theodb;
 
 CREATE OR REPLACE FUNCTION theodb.embed(content text, model text DEFAULT NULL)
