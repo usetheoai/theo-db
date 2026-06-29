@@ -34,3 +34,4 @@ benchmarks/.datasets/
 # M15: generated extension install script (built from sql/NN-*.sql)
 sql/theodb--1.0.sql
 dist/
+theodb_rs/target/

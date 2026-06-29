@@ -27,7 +27,27 @@ RUN cd /tmp/pgvectorscale/pgvectorscale && \
     cargo pgrx init --pg$PG_MAJOR "$(which pg_config)" && \
     cargo pgrx install --release --features pg$PG_MAJOR
 
-# ---- Stage 2: runtime (postgres:17 + pgvector + pgvectorscale) ----
+# ---- Stage 1b: build theodb_rs (TheoDB's own Rust/pgrx extension — M17, ROADMAP-v2 / ADR 0006) ----
+# Mirrors the scale-builder pattern (plan ADR D3). Compiles our crate against the SAME pinned PG.
+FROM ${BASE_IMAGE} AS theodb-rs-builder
+ARG PG_MAJOR=17
+ARG PGRX_VERSION=0.16.1
+ARG RUST_VERSION=1.91.0
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential postgresql-server-dev-$PG_MAJOR libssl-dev pkg-config clang curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain $RUST_VERSION
+ENV PATH="/root/.cargo/bin:${PATH}"
+RUN cargo install --locked cargo-pgrx --version $PGRX_VERSION
+# Initialize the pgrx dev environment (compiles/links against the runtime's pg_config) BEFORE copying
+# our source — this expensive layer is independent of the crate code, so editing lib.rs does not force
+# a PostgreSQL recompile (only the COPY + install layers below rerun).
+RUN cargo pgrx init --pg$PG_MAJOR "$(which pg_config)"
+# Copy the crate (with its committed Cargo.lock for reproducibility — pgrx install does not re-resolve).
+COPY theodb_rs/ /tmp/theodb_rs/
+RUN cd /tmp/theodb_rs && cargo pgrx install --release --features pg$PG_MAJOR
+
+# ---- Stage 2: runtime (postgres:17 + pgvector + pgvectorscale + theodb_rs) ----
 FROM ${BASE_IMAGE}
 ARG PG_MAJOR=17
 
@@ -51,6 +71,12 @@ RUN apt-get update && \
 # pgvectorscale artifacts (the .so + .control + .sql) — no Rust toolchain in the runtime image
 COPY --from=scale-builder /usr/lib/postgresql/$PG_MAJOR/lib/vectorscale* /usr/lib/postgresql/$PG_MAJOR/lib/
 COPY --from=scale-builder /usr/share/postgresql/$PG_MAJOR/extension/vectorscale* /usr/share/postgresql/$PG_MAJOR/extension/
+
+# theodb_rs artifacts (M17) — TheoDB's own Rust extension (.so + .control + .sql). Same artifact-only
+# COPY pattern as pgvectorscale (no Rust toolchain in runtime). minreq uses native-tls → the runtime
+# needs libssl3 (present in postgres:17-bookworm base) + ca-certificates (installed below for HTTPS).
+COPY --from=theodb-rs-builder /usr/lib/postgresql/$PG_MAJOR/lib/theodb_rs* /usr/lib/postgresql/$PG_MAJOR/lib/
+COPY --from=theodb-rs-builder /usr/share/postgresql/$PG_MAJOR/extension/theodb_rs* /usr/share/postgresql/$PG_MAJOR/extension/
 
 # plpython3u for theodb.embed (M2 DoD-3) — the DB calls a configurable model endpoint (AlloyDB pattern);
 # NO model/torch ships in the image (lean). Kept (not removed) — runtime dependencies.
@@ -78,8 +104,14 @@ RUN set -eux; \
 
 # Create the extension on fresh DB init (greenfield — M15 ADR D3). CASCADE pulls vector+vectorscale+plpython3u.
 COPY <<'EOF' /docker-entrypoint-initdb.d/00-create-theodb.sql
--- M15: TheoDB surface is provisioned by the theodb extension (not raw init-scripts).
+-- M15: the TheoDB surface (hybrid/ai/nl/ml/migrate) ships in the SQL `theodb` extension, which OWNS the
+-- `theodb` schema. Create it FIRST. CASCADE pulls vector + vectorscale + plpython3u. Its plpgsql function
+-- bodies reference theodb.embed lazily (late-bound at call time), so theodb.embed need not exist yet.
 CREATE EXTENSION IF NOT EXISTS theodb CASCADE;
+-- M17: theodb.embed is served by TheoDB's own Rust extension theodb_rs (plan ADR D1). It requires
+-- `theodb` (the schema owner) and installs the public theodb.embed INTO the existing theodb schema
+-- (its own objects live in schema theodb_rs). CASCADE pulls `vector`.
+CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE;
 EOF
 
 HEALTHCHECK --interval=5s --timeout=5s --start-period=10s --retries=5 \

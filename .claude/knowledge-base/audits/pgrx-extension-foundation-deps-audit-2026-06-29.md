@@ -42,7 +42,8 @@ All four candidates were lockfile-generated + `cargo audit`-scanned. Result (rus
 
 ## Outstanding caveat (PASS_WITH_CAVEATS)
 
-### RUSTSEC-2021-0127 — `serde_cbor 0.11.2` unmaintained (WARNING, not a CVE)
+### RUSTSEC-2021-0127 (`serde_cbor`) + `paste` unmaintained (WARNINGS, not CVEs)
+- **Verified on the committed `theodb_rs/Cargo.lock`:** `cargo audit` → 0 vulnerabilities; 2 *allowed warnings* (`serde_cbor` unmaintained, `paste` no-longer-maintained) — both transitive via `pgrx` (the framework), in its proc-macro/test machinery, not TheoDB's request path. Same acceptance + rationale as below.
 - **Path:** `serde_cbor 0.11.2 → pgrx 0.16.1 → theodb_rs`.
 - **Class:** unmaintained crate advisory (informational) — NOT an exploitable CVE; cargo audit reports it as an *allowed warning*, not a vulnerability (audit exits 0 for vulns).
 - **Why accepted:** `serde_cbor` is a transitive dependency of `pgrx =0.16.1` (our extension framework, pinned to match the image's `PGRX_VERSION=0.16.1` — ADR D3). It is in pgrx's schema/test machinery, not in TheoDB's runtime request path. Removing it requires upgrading/forking pgrx, which would drift from the image toolchain (rejected — ADR D3). Re-assess when pgrx upgrades its dependency tree.

@@ -1,0 +1,14 @@
+# TheoDB's own Rust extension (pgrx) — M17, ROADMAP-v2 / ADR 0006.
+# Owns the Rust `theodb.embed` during the incremental plpython3u→Rust rewrite (plan ADR D1).
+# The SQL-only `theodb` umbrella no longer defines theodb.embed (removed from sql/30 in M17).
+comment = 'TheoDB own Rust extension (pgrx): theodb.embed in Rust (M17)'
+default_version = '1.0.0'
+module_pathname = '$libdir/theodb_rs'
+relocatable = false
+# theodb.embed makes server-side outbound HTTP to the configured endpoint — privileged, like the
+# plpython3u original (sql/30). Not granted to PUBLIC (REVOKE in the install SQL).
+superuser = true
+# Requires `vector` (the return type + text::vector cast) AND `theodb` (the umbrella owns the `theodb`
+# schema into which theodb.embed is installed — theodb_rs creates the function there but NOT the schema,
+# avoiding a cross-extension CREATE SCHEMA ownership conflict). theodb_rs's own objects live in schema theodb_rs.
+requires = 'vector, theodb'
