@@ -653,7 +653,7 @@ partir de AlloyDB. *(Merge de README M8 — Escala & observabilidade — com REA
 
 ---
 
-### M16 — [ ] Unificação tudo-em-um — a query unificada + filtered vector search + migração do Pinecone
+### M16 — [x] Unificação tudo-em-um — a query unificada + filtered vector search + migração do Pinecone
 
 > Added 2026-06-29. Ancorado no **ADR `0005-unification-as-differentiator`** (LOCKED, sign-off CTO): o diferencial do TheoDB é a **unificação** (vetor + relacional + IA numa instância, SQL único transacional, sem ETL/2º sistema), performance **competitiva** (não líder). Posicionamento: alternativa OSS a AlloyDB/Pinecone. M16 torna a unificação **real e demonstrável** — deixa de ser "instalável" e vira "produto de fato".
 
