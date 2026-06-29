@@ -147,37 +147,72 @@ fn resolve_cfg(fn_name: &str, model: Option<&str>) -> (String, String, Option<St
     (endpoint, mdl, api_key)
 }
 
+/// Max retries for the recoverable class (3 attempts total). Bounded so a down endpoint can never hang
+/// beyond `(MAX_RETRIES + 1) × timeout` (`error-handling.md` — retry with backoff, never unbounded).
+const MAX_RETRIES: u32 = 2;
+
+/// The recoverable HTTP status class (transient): too-many-requests + bad/unavailable gateway. Other 4xx
+/// (400/401/403/404/422) and 5xx are irrecoverable -> fail-fast, NO retry (retrying would mask bugs, Rule 8).
+fn is_recoverable_status(status: i32) -> bool {
+    matches!(status, 429 | 502 | 503)
+}
+
+/// Bounded exponential backoff with jitter (stdlib only — no `rand`/`backoff` crate, parsimony rung 5):
+/// attempt 0 -> ~100ms, attempt 1 -> ~400ms, plus 0–49ms jitter from the clock to de-synchronize retries.
+fn backoff(attempt: u32) {
+    let base_ms = 100u64.saturating_mul(4u64.saturating_pow(attempt));
+    let jitter_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| u64::from(d.subsec_nanos()) % 50)
+        .unwrap_or(0);
+    std::thread::sleep(std::time::Duration::from_millis(base_ms + jitter_ms));
+}
+
 /// The single HTTP source of truth shared by `run` + `run_batch` (DRY) — POST a JSON payload to the
 /// embeddings endpoint and return the parsed response body. SSRF posture (http(s)-only resolved by the
 /// caller; no redirects) and typed-error parity (connect/timeout/non-2xx/non-JSON -> 38000 "call failed")
-/// are preserved here. Phase 3 (recoverable-class retry) wraps the send/status here so BOTH entry points
-/// inherit it in one place.
+/// are preserved. A bounded recoverable-class retry (connect/timeout + 429/502/503) wraps the send/status
+/// here so BOTH entry points inherit it in one place (DRY); the api key only ever lives in the request
+/// header, never in an error message (no-leak even after retries are exhausted).
 fn post_json(fn_name: &str, endpoint: &str, payload: String, api_key: Option<&str>) -> Value {
-    let mut req = minreq::post(endpoint)
-        .with_header("Content-Type", "application/json")
-        .with_body(payload)
-        .with_timeout(30)
-        // SSRF: never follow a 30x to an internal host / cloud metadata (parity with the
-        // plpython3u _NoRedirect handler). minreq follows up to 100 redirects by default.
-        .with_max_redirects(0);
-    if let Some(key) = api_key {
-        req = req.with_header("Authorization", format!("Bearer {key}"));
-    }
+    let mut attempt: u32 = 0;
+    let resp = loop {
+        let mut req = minreq::post(endpoint)
+            .with_header("Content-Type", "application/json")
+            .with_body(payload.clone()) // body is consumed per send -> clone for retryability
+            .with_timeout(30)
+            // SSRF: never follow a 30x to an internal host / cloud metadata (parity with the
+            // plpython3u _NoRedirect handler). minreq follows up to 100 redirects by default.
+            .with_max_redirects(0);
+        if let Some(key) = api_key {
+            req = req.with_header("Authorization", format!("Bearer {key}"));
+        }
 
-    // URL/connect/timeout/redirect errors -> "call failed" (38000), like the baseline.
-    let resp = match req.send() {
-        Ok(r) => r,
-        Err(e) => err_external(&format!("{fn_name}: embedding endpoint call failed: {e}")),
+        match req.send() {
+            Ok(r) if (200..300).contains(&r.status_code) => break r,
+            Ok(r) if is_recoverable_status(r.status_code) && attempt < MAX_RETRIES => {
+                backoff(attempt);
+                attempt += 1;
+                continue;
+            }
+            // Non-2xx, non-recoverable, OR retries exhausted -> fail-fast with the status (38000).
+            Ok(r) => err_external(&format!(
+                "{fn_name}: embedding endpoint call failed: HTTP status {}",
+                r.status_code
+            )),
+            // Connect/timeout/redirect errors are recoverable until the cap, then fail-fast (38000).
+            Err(e) if attempt < MAX_RETRIES => {
+                let _ = e;
+                backoff(attempt);
+                attempt += 1;
+                continue;
+            }
+            Err(e) => err_external(&format!("{fn_name}: embedding endpoint call failed: {e}")),
+        }
     };
-    if !(200..300).contains(&resp.status_code) {
-        err_external(&format!(
-            "{fn_name}: embedding endpoint call failed: HTTP status {}",
-            resp.status_code
-        ));
-    }
 
-    // A 200 with a non-JSON body is a "call failed" (parity: plpython3u catches JSONDecodeError
-    // in the same branch as URLError).
+    // Parse is NOT retried — a 200 with a non-JSON body is a "call failed" (parity: plpython3u catches
+    // JSONDecodeError in the same branch as URLError).
     let body_str = match resp.as_str() {
         Ok(s) => s,
         Err(e) => err_external(&format!("{fn_name}: embedding endpoint call failed: {e}")),

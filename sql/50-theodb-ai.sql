@@ -18,8 +18,15 @@ RETURNS text
 LANGUAGE plpython3u
 AS $$
 import json
+import random
+import time
 import urllib.request
 import urllib.error
+
+# Recoverable HTTP class (transient): retry with bounded backoff. Other 4xx/5xx + JSON-shape errors are
+# irrecoverable -> fail-fast, NO retry (error-handling.md §2; retrying would mask bugs, Rule 8).
+_RECOVERABLE_STATUS = {429, 502, 503}
+_MAX_RETRIES = 2  # 3 attempts total — bounded so a down endpoint can't hang beyond (retries+1)*timeout
 
 def _cfg(name):
     # name is a trusted literal (no user input) — current_setting(..., true) returns NULL if unset.
@@ -60,13 +67,32 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 opener = urllib.request.build_opener(_NoRedirect)
-try:
-    with opener.open(req, timeout=30) as resp:
-        body = json.loads(resp.read())
-# URLError = DNS/refused/5xx; OSError = timeout; ValueError = JSONDecodeError on a non-JSON 200.
-# All fail loud + typed — never a silent NULL (Rule 8). api_key is NEVER included in the error text.
-except (urllib.error.URLError, OSError, ValueError) as e:
-    plpy.error("ai._chat: chat endpoint call failed: %s" % e, sqlstate="38000")
+# Bounded recoverable-class retry (connect/timeout + 429/502/503) with exponential backoff + jitter.
+# api_key is NEVER included in any error text (it only lives in the request header), even after the cap.
+body = None
+attempt = 0
+while True:
+    try:
+        with opener.open(req, timeout=30) as resp:
+            body = json.loads(resp.read())
+        break
+    except urllib.error.HTTPError as e:
+        # HTTPError ⊂ URLError, carries .code — retry only the recoverable status class.
+        if e.code in _RECOVERABLE_STATUS and attempt < _MAX_RETRIES:
+            time.sleep(0.1 * (4 ** attempt) + random.uniform(0, 0.05))
+            attempt += 1
+            continue
+        plpy.error("ai._chat: chat endpoint call failed: %s" % e, sqlstate="38000")
+    except (urllib.error.URLError, OSError) as e:
+        # DNS/refused/timeout — transient; retry until the cap, then fail-fast.
+        if attempt < _MAX_RETRIES:
+            time.sleep(0.1 * (4 ** attempt) + random.uniform(0, 0.05))
+            attempt += 1
+            continue
+        plpy.error("ai._chat: chat endpoint call failed: %s" % e, sqlstate="38000")
+    except ValueError as e:
+        # JSONDecodeError on a non-JSON 200 — NOT retried (fail-fast).
+        plpy.error("ai._chat: chat endpoint call failed: %s" % e, sqlstate="38000")
 
 try:
     content = body["choices"][0]["message"]["content"]
