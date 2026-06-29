@@ -64,7 +64,7 @@ jobs:
       - name: Smoke (M0 — pgvector)
         env:
           PGPORT: "5432"
-        run: bash smoke.sh
+        run: bash scripts/smoke.sh
 
       - name: CA bundle present (theodb.embed HTTPS cloud providers — regression guard)
         run: docker exec theo-db-ci test -f /etc/ssl/certs/ca-certificates.crt
@@ -156,13 +156,13 @@ jobs:
           docker run -d --name m3-dst -e POSTGRES_PASSWORD=postgres theo-db:dev
 
       - name: Guide ↔ smoke consistency (doc-check)
-        run: bash migrate-doc-check.sh
+        run: bash scripts/migrate-doc-check.sh
 
       - name: Migration smoke (data + indexes preserved; waits for readiness internally)
-        run: bash migrate-smoke.sh
+        run: bash scripts/migrate-smoke.sh
 
       - name: Self-test (checksum assert is not theatre)
-        run: bash migrate-smoke-selftest.sh
+        run: bash scripts/migrate-smoke-selftest.sh
 
       - name: Teardown
         if: always()
@@ -259,7 +259,7 @@ jobs:
       - name: Hybrid smoke (ai.hybrid_search_rrf golden top-k assertion)
         env:
           PGPORT: "5432"
-        run: bash smoke.sh
+        run: bash scripts/smoke.sh
 
       - uses: actions/setup-python@v5
         with:
@@ -320,7 +320,7 @@ jobs:
       - name: AI presence smoke (functions present + non-PUBLIC, no network)
         env:
           PGPORT: "5432"
-        run: bash smoke.sh
+        run: bash scripts/smoke.sh
 
       - uses: actions/setup-python@v5
         with:
@@ -433,7 +433,7 @@ jobs:
       - name: NL→SQL presence smoke (functions present + non-PUBLIC, no network)
         env:
           PGPORT: "5432"
-        run: bash smoke.sh
+        run: bash scripts/smoke.sh
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

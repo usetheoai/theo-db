@@ -97,9 +97,9 @@ Bring up a vanilla source + a TheoDB target, then run the smoke:
 ```bash
 docker run -d --name m3-src -e POSTGRES_PASSWORD=postgres pgvector/pgvector:pg17
 docker run -d --name m3-dst -e POSTGRES_PASSWORD=postgres theo-db:dev
-bash migrate-smoke.sh            # seed → pg_dump -Fc → pg_restore → assert rows + checksum + index defs + HNSW/IVFFlat usable
-bash migrate-smoke-selftest.sh   # proves the assert is real: corrupt 1 row → verification fails
-bash migrate-doc-check.sh        # proves this guide's commands match the smoke
+bash scripts/migrate-smoke.sh            # seed → pg_dump -Fc → pg_restore → assert rows + checksum + index defs + HNSW/IVFFlat usable
+bash scripts/migrate-smoke-selftest.sh   # proves the assert is real: corrupt 1 row → verification fails
+bash scripts/migrate-doc-check.sh        # proves this guide's commands match the smoke
 docker rm -f m3-src m3-dst
 ```
 

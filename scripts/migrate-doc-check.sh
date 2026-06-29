@@ -3,7 +3,7 @@
 # must also appear (literally) in migrate-smoke.sh — so the published guide never drifts from what is tested.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-GUIDE="$HERE/docs/migration/minimal-migration.md"
+GUIDE="$HERE/../docs/migration/minimal-migration.md"
 SMOKE="$HERE/migrate-smoke.sh"
 
 # literal (grep -F) shared commands — the load-bearing migration + verification primitives
