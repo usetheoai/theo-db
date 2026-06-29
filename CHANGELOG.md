@@ -13,8 +13,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-
-### Added
 - `ROADMAP-v2.md` — o norte ativo da nova estratégia (ADR 0006): jornada incremental para um banco real Postgres-based com código próprio em Rust (pgrx) + Go, dependências externas mínimas, substituindo `pgvector`/`pgvectorscale`/`plpython3u` por código próprio **com paridade medida** (measurement-first). Milestones M17–M24.
 
 ### Changed
@@ -25,6 +23,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Removed
 
 ### Fixed
+- `/plan-confidence` gate (`check_evidence_citations.py`): resolve citações sob `.claude/knowledge-base/` (audits, blueprints) — antes só procurava em `knowledge-base/` na raiz, gerando falsos `fabricated_citation` em projetos `.claude/`-based (alinha com o checker irmão do `/discover-confidence`).
 
 ### Security
 
