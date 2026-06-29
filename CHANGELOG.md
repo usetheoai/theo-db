@@ -15,6 +15,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 ### Changed
+- **Reestruturação FAANG — Fatia 1 (refactor puro, paridade provada):** primeira fatia da reorganização decidida pelo blueprint de system-design/repo-structure (SHIPPABLE 97.8). (a) Scripts soltos da raiz movidos para `scripts/` (`git mv`, histórico preservado; `smoke.sh` + `migrate-*.sh`), referências vivas repointadas (`.github/workflows/ci.yml`, guia de migração). (b) `theodb_rs/src/lib.rs` dividido no layering de 3 boundaries do blueprint — `pg.rs` (glue Postgres/pgrx: erros tipados + GUC), `embed.rs` (domínio: a chamada HTTP + parse), `lib.rs` (api-surface: `#[pg_extern]` + wrapper SQL). (c) Toolchain Rust fixado (`theodb_rs/rust-toolchain.toml` = 1.91.0). **SEM mudança de comportamento:** mesma superfície SQL (`theodb.embed`/`theodb_rs._embed_text`), suíte de 18 testes verde sem alteração, `cargo clippy` 0 warnings, e benchmark de paridade pré-vs-pós-split (interleaved, mesmo stub) com delta dentro de 1σ (`docs/benchmarks/faang-restructure-slice-1-parity.md`). Workspace Cargo + CI nova diferidos (blueprint ADR-2 — YAGNI).
 
 ### Deprecated
 
