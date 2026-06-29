@@ -13,10 +13,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- **Unificação demonstrável (M16):** a *query unificada* canônica — busca vetorial + `JOIN` com dados relacionais + filtro + `ai.*` numa única transação SQL — documentada (`docs/quickstart.md` § Unified query) e testada e2e; **filtered vector search** com recall preservado (`SET hnsw.iterative_scan = strict_order` contra o over-filtering de índices aproximados), provado por teste; e **migração do Pinecone** via `theodb.import_pinecone(target, export jsonb)` (mapeia `{id,values,metadata}` → `(id, embedding vector, metadata jsonb)`, jsonb nativo, sem dependência nova) com `docs/migrate-from-pinecone.md`. Demo honesta 1-vs-2 sistemas (`docs/unification-1-vs-2-systems.md`) — mede simplicidade/consistência, não velocidade.
 
 ### Changed
-- Estratégia de produto: o diferencial do TheoDB passa a ser a **unificação tudo-em-um** (vetor + relacional + IA + colunar numa instância, SQL único, sem ETL/2º sistema); performance vetorial é **competitiva, não líder**. Posicionamento: alternativa OSS a AlloyDB/Pinecone. ADR `0005-unification-as-differentiator` (sign-off CTO) refina o item 3 do ADR `0002` (LOCKED).
 
 ### Deprecated
 
@@ -25,6 +23,15 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 ### Security
+
+## [0.15.0] - 2026-06-29
+
+### Added
+- **Unificação demonstrável (M16):** a *query unificada* canônica — busca vetorial + `JOIN` com dados relacionais + filtro + `ai.*` numa única transação SQL — documentada (`docs/quickstart.md` § Unified query) e testada e2e; **filtered vector search** com recall preservado (`SET hnsw.iterative_scan = strict_order` contra o over-filtering de índices aproximados), provado por teste; e **migração do Pinecone** via `theodb.import_pinecone(target, export jsonb)` (mapeia `{id,values,metadata}` → `(id, embedding vector, metadata jsonb)`, jsonb nativo, sem dependência nova) com `docs/migrate-from-pinecone.md`. Demo honesta 1-vs-2 sistemas (`docs/unification-1-vs-2-systems.md`) — mede simplicidade/consistência, não velocidade.
+
+
+### Changed
+- Estratégia de produto: o diferencial do TheoDB passa a ser a **unificação tudo-em-um** (vetor + relacional + IA + colunar numa instância, SQL único, sem ETL/2º sistema); performance vetorial é **competitiva, não líder**. Posicionamento: alternativa OSS a AlloyDB/Pinecone. ADR `0005-unification-as-differentiator` (sign-off CTO) refina o item 3 do ADR `0002` (LOCKED).
 
 ## [0.14.0] - 2026-06-28
 
