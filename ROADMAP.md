@@ -619,7 +619,7 @@ partir de AlloyDB. *(Merge de README M8 — Escala & observabilidade — com REA
 
 ---
 
-### M15 — [ ] Produtização — extensão instalável `CREATE EXTENSION theodb` + quickstart e2e das 12 features
+### M15 — [x] Produtização — extensão instalável `CREATE EXTENSION theodb` + quickstart e2e das 12 features
 
 > Added 2026-06-28. Ancorado no blueprint `.claude/knowledge-base/discoveries/blueprints/pg-extension-packaging-blueprint.md` (SHIPPABLE_WITH_CAVEATS). Honesto: as 12 features de `docs/features/` já funcionam na imagem, mas vêm via `docker-entrypoint-initdb.d` (só em DB fresh) — não há `CREATE EXTENSION theodb`, nem versionamento, nem imagem publicada. M15 fecha o salto "amontoado de scripts → produto".
 
