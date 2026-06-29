@@ -2,7 +2,7 @@
 
 Move an existing PostgreSQL + `pgvector` database into TheoDB using **standard `pg_dump` / `pg_restore`**.
 TheoDB is wire-compatible with PostgreSQL, so there is **no special tool** — your vector data and your
-HNSW / IVFFlat indexes come across intact. This is proven end-to-end by `migrate-smoke.sh` (and in CI).
+HNSW / IVFFlat indexes come across intact. This is proven end-to-end by `scripts/migrate-smoke.sh` (and in CI).
 
 > Use a `pg_dump`/`pg_restore` client whose version is **>= your source server version** (a PG16 client
 > cannot dump a PG17 server). The repo smoke runs the tools *inside* the PG17 containers to sidestep this.
@@ -97,9 +97,9 @@ Bring up a vanilla source + a TheoDB target, then run the smoke:
 ```bash
 docker run -d --name m3-src -e POSTGRES_PASSWORD=postgres pgvector/pgvector:pg17
 docker run -d --name m3-dst -e POSTGRES_PASSWORD=postgres theo-db:dev
-bash migrate-smoke.sh            # seed → pg_dump -Fc → pg_restore → assert rows + checksum + index defs + HNSW/IVFFlat usable
-bash migrate-smoke-selftest.sh   # proves the assert is real: corrupt 1 row → verification fails
-bash migrate-doc-check.sh        # proves this guide's commands match the smoke
+bash scripts/migrate-smoke.sh            # seed → pg_dump -Fc → pg_restore → assert rows + checksum + index defs + HNSW/IVFFlat usable
+bash scripts/migrate-smoke-selftest.sh   # proves the assert is real: corrupt 1 row → verification fails
+bash scripts/migrate-doc-check.sh        # proves this guide's commands match the smoke
 docker rm -f m3-src m3-dst
 ```
 

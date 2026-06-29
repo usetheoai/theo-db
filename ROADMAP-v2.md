@@ -58,7 +58,7 @@ capacidades-killer são **nossas**, não uma colagem de extensões de terceiros.
 > Cada milestone roda o ciclo completo (discover→plan→implement→code-quality→review→release) com paridade
 > provada. Flip `[ ]` → `[x]` ao concluir.
 
-### M17 — [ ] Fundação: extensão própria `theodb` em Rust (pgrx) + 1ª feature com paridade
+### M17 — [x] Fundação: extensão própria `theodb` em Rust (pgrx) + 1ª feature com paridade
 
 **Objective:** Criar a extensão PostgreSQL **própria em Rust** (`cargo-pgrx`), buildada na imagem (o toolchain
 Rust já existe — a imagem hoje compila pgvectorscale), com CI, e **reescrever a primeira superfície**
