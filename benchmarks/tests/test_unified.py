@@ -10,9 +10,49 @@ import math
 import os
 import pathlib
 import random
+import re
+import socket
+import subprocess
+import sys
+import time
+import urllib.request
 
 import psycopg2
 import pytest
+
+_REPO = pathlib.Path(__file__).resolve().parents[2]
+
+
+def _free_port():
+    s = socket.socket()
+    s.bind(("", 0))
+    p = s.getsockname()[1]
+    s.close()
+    return p
+
+
+@pytest.fixture(scope="module")
+def chat_server():
+    """Deterministic OpenAI-compatible stub (tools/chat_server.py) reached from the container via
+    host.docker.internal — the container must be run with --add-host=host.docker.internal:host-gateway."""
+    port = _free_port()
+    proc = subprocess.Popen(
+        [sys.executable, str(_REPO / "tools" / "chat_server.py"), "--host", "0.0.0.0", "--port", str(port)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        for _ in range(60):
+            try:
+                with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=2) as r:
+                    if r.status == 200:
+                        break
+            except OSError:
+                time.sleep(0.5)
+        else:
+            raise RuntimeError("chat stub did not become healthy")
+        yield f"http://host.docker.internal:{port}/v1/chat/completions"
+    finally:
+        proc.terminate()
+        proc.wait(timeout=10)
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 QUICKSTART = ROOT / "docs" / "quickstart.md"
@@ -93,6 +133,36 @@ def test_unified_query_returns_correct_joined_rows(admin_conn):
             """, (_vec(q),))
             top = cur.fetchone()[0]
             assert top == "p_target", f"unified query returned {top}, expected p_target"
+    finally:
+        conn.close()
+
+
+def test_unified_query_with_ai_leg(admin_conn, chat_server):
+    """The FULL unification: vector ORDER BY + relational JOIN + WHERE + ai.* in one transactional SQL.
+    Proves the '+AI' third of the moat — ai.summarize routes through the stub (prefix 'A concise summary')."""
+    conn = _fresh_db_with_ext(admin_conn, "m16_unified")
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SET theodb.llm_endpoint = %s", (chat_server,))
+            cur.execute("SET theodb.llm_model = 'stub-chat'")
+            cur.execute("""
+                CREATE TABLE products (id text PRIMARY KEY, description text, category_id int, embedding vector(8));
+                CREATE TABLE inventory (product_id text PRIMARY KEY, in_stock bool);
+            """)
+            cur.execute("INSERT INTO products VALUES ('p1','red running shoes',3,%s),('p2','blue boots',3,%s)",
+                        (_vec([0.99] + [0] * 7), _vec([0] + [1] + [0] * 6)))
+            cur.execute("INSERT INTO inventory VALUES ('p1',true),('p2',true)")
+            # vector + JOIN + WHERE + AI, one statement
+            cur.execute("""
+                SELECT p.id, ai.summarize(p.description) AS gist
+                FROM products p JOIN inventory i ON i.product_id = p.id
+                WHERE i.in_stock AND p.category_id = 3
+                ORDER BY p.embedding <=> %s::vector
+                LIMIT 1
+            """, (_vec([1] + [0] * 7),))
+            row = cur.fetchone()
+            assert row[0] == "p1"                                  # vector+relational legs
+            assert row[1].startswith("A concise summary")          # AI leg actually ran (stub routing)
     finally:
         conn.close()
 
@@ -237,11 +307,24 @@ def test_import_pinecone_dim_mismatch(admin_conn):
 
 # ---- T2.2 / T3.1 — docs (pure-file + runnable SQL) -------------------------------------------------
 
-def test_migrate_doc_exists_and_mentions_function():
+def test_migrate_doc_runnable_sql_executes(admin_conn):
+    """The migration guide's SQL actually runs against the container (T2.2) — catches a broken example
+    (e.g. a dim-mismatch) that a string grep would miss. Runs the runnable ```sql blocks in order."""
     assert MIGRATE_DOC.exists(), "docs/migrate-from-pinecone.md missing"
     text = MIGRATE_DOC.read_text()
-    assert "theodb.import_pinecone" in text
-    assert "embedding" in text and "metadata" in text
+    assert "theodb.import_pinecone" in text  # the guide must teach the function
+    blocks = re.findall(r"```sql\n(.*?)```", text, re.DOTALL)
+    assert blocks, "migration guide has no runnable SQL block"
+    conn = _fresh_db_with_ext(admin_conn, "m16_import")
+    try:
+        with conn.cursor() as cur:
+            for b in blocks:
+                if "..." in b or "<" in b:   # skip illustrative blocks with placeholders
+                    continue
+                cur.execute(b)               # must execute without error (real dims, real signature)
+            conn.commit()
+    finally:
+        conn.close()
 
 
 def test_demo_doc_has_no_perf_claim():

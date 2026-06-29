@@ -31,10 +31,13 @@ CREATE EXTENSION IF NOT EXISTS theodb CASCADE;
 
 CREATE TABLE items (
   id        text PRIMARY KEY,     -- Pinecone id
-  embedding vector(1536),         -- Pinecone values (match your model's dimension)
+  embedding vector(3),            -- Pinecone values — toy dim 3 here; use YOUR model's dim (e.g. vector(1536))
   metadata  jsonb                 -- Pinecone metadata (queryable; promote hot keys to columns)
 );
 ```
+
+> The example below uses `vector(3)` so it runs as-is. In production set the dimension to your embedding
+> model's (e.g. `vector(1536)` for OpenAI `text-embedding-3-small`); the `values` array length must match.
 
 | Pinecone field | TheoDB column |
 |---|---|
