@@ -25,6 +25,13 @@ pub(crate) fn err_external(msg: &str) -> ! {
     unreachable!()
 }
 
+/// Emit a WARNING-level server log for a transient, retried failure. Observability for the retry path
+/// (wiring-triad pillar c): without it, a flapping endpoint is invisible until the final hard failure.
+/// Does not diverge — the caller continues to the next retry.
+pub(crate) fn warn(msg: &str) {
+    pgrx::warning!("{}", msg);
+}
+
 /// Read a session GUC by its (trusted, literal) name. Mirrors the plpython3u
 /// `current_setting(name, true)` call — returns None when unset/empty.
 pub(crate) fn guc(name: &str) -> Option<String> {
