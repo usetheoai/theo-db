@@ -396,7 +396,13 @@ Licenças confirmadas por busca 2026 (fontes no histórico da sessão).
 | Chroma | Apache-2.0 | Embedded/standalone (Py/JS) | Permissivo; foco em DX. Não-importável. Estudo de **DX de embedding/dev-loop**. |
 | Neon | Apache-2.0 | Serverless Postgres (storage desagregado) | Permissivo, mas storage desagregado é complexo de self-host (Databricks comprou 2025). Estudo de **arquitetura control-plane / branching / scale-to-zero**. |
 | Supabase (stack) | Apache-2.0 | BaaS Postgres OSS completo | Permissivo, self-host Docker. Já temos `supabase-postgres` (só a imagem). O stack (`supabase/supabase`: studio/gotrue/postgrest/storage/realtime) é a **referência primária de BaaS OSS** — clonar quando a discovery `baas-control-plane` exigir + houver disco. |
+| pgvecto.rs (tensorchord) | Apache-2.0 | Extensão PG (Rust, vector search) | **DESCONTINUADO** — o README diz "migrate to VectorChord"; última release v0.4.0 (nov/2024). Permissivo (código legalmente reutilizável), MAS projeto morto → **não adotar** (Regra 9: abandonado = alerta vermelho). `pgvectorscale` (vivo, mantido, PostgreSQL License, Rust) já cobre DiskANN+SBQ. |
 
+> **Padrão de licença TensorChord (alerta):** pgvecto.rs (Apache, descontinuado) → **VectorChord** (AGPL/Elastic,
+> sucessor "mais rápido"). Apache → copyleft no sucessor = **rug-pull de licença**. Razão para NÃO depender de
+> nada da TensorChord; reforça `pgvector` + `pgvectorscale` (permissivos **e vivos e mantidos**) como a escolha
+> certa do pilar vetorial. Confirma o ADR 0005 (unificação; performance competitiva — não reescrever em Rust).
+>
 > Estes alimentam a discovery `baas-control-plane` (Neon/Supabase) e o landscape do pilar vetorial
 > (Qdrant/Milvus/Weaviate/Chroma). Promover qualquer um a `cloned` exige espaço em disco (hoje 99%).
 
