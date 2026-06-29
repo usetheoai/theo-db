@@ -58,9 +58,28 @@ SELECT theodb.import_pinecone(
 
 Signature: `theodb.import_pinecone(target regclass, export jsonb, id_col text DEFAULT 'id', embedding_col text
 DEFAULT 'embedding', metadata_col text DEFAULT 'metadata') RETURNS integer`. It fails fast (`SQLSTATE 22023`)
-on a non-array export or a record missing `id`/`values` — no partial corrupt insert.
+on a non-array export or a record missing `id`/`values` — no partial corrupt insert. The FUNCTION is
+**all-or-nothing**: the whole import runs in one transaction (best for small/atomic imports).
 
-For large exports, import in batches (call once per chunk of the array).
+### Large exports — `theodb.import_pinecone_chunked` (PROCEDURE, per-batch COMMIT)
+
+The FUNCTION holds the whole export in ONE transaction — for a large export that is unbounded memory/WAL.
+For large migrations use the PROCEDURE, which ingests in `chunk_size` batches with a COMMIT per batch:
+
+```sql
+-- CALL (not SELECT) — and in autocommit (no surrounding BEGIN), because the procedure COMMITs per chunk.
+CALL theodb.import_pinecone_chunked(
+  'items'::regclass,
+  '[{"id":"doc-1","values":[0.12,0.04,0.0],"metadata":{"category":"shoes"}}, ...]'::jsonb,
+  1000               -- chunk_size (default 1000)
+);
+```
+
+Signature: `theodb.import_pinecone_chunked(target regclass, export jsonb, chunk_size int DEFAULT 1000,
+id_col text DEFAULT 'id', embedding_col text DEFAULT 'embedding', metadata_col text DEFAULT 'metadata')`.
+Same fail-fast validation + injection-safe dynamic SQL as the FUNCTION. **It is NOT all-or-nothing**: a
+mid-run failure leaves already-COMMITted batches persisted (bounded footprint + partial progress survives an
+abort). Choose the FUNCTION for small/atomic imports, the PROCEDURE for large ones.
 
 ## 4. Now it's unified
 
