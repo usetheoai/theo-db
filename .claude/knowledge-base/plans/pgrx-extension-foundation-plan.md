@@ -7,7 +7,7 @@ goal: Replace the plpython3u theodb.embed with an own pgrx Rust extension (theod
 
 # Plan: pgrx Extension Foundation — TheoDB's own Rust extension + theodb.embed (parity + benchmark)
 
-> **Version 1.3** — (v1.3 corrects ADR D5 at implement time: the `pgvector` Rust crate has no `pgrx` feature (measured), so the `vector` return type is produced by a thin `extension_sql!` wrapper casting `text::vector` — the exact plpython3u parity path — and the `pgvector` crate dependency is DROPPED. Also: error-code parity corrected to mirror the oracle exactly — **22023** for input errors AND **38000** (ExternalRoutineException) for HTTP/response failures.) (v1.1 absorbed the edge-case review: MUST-FIX EC-1 → ADR D5 pins the `vector` return-type binding; SHOULD-TEST EC-2/EC-3; DOCUMENT EC-4. v1.2 absorbs the deps-audit `pgrx-extension-foundation-deps-audit-2026-06-29.md`: `minreq` uses the **`https-native`** (OpenSSL) TLS feature, NOT rustls — measured to eliminate 3 `rustls-webpki` advisories RUSTSEC-2026-0098/0099/0104; the `serde_cbor`-unmaintained warning via `pgrx` is an accepted LOW caveat.) Stands up TheoDB's **own** PostgreSQL extension in Rust (**pgrx**) — the ROADMAP-v2 / ADR 0006 foundation (M17) — and rewrites the simplest existing surface (`theodb.embed`, today plpython3u + urllib) in Rust as a separate transition extension `theodb_rs`, with **proven functional parity** (the existing Python e2e is the oracle) and a **reproducible latency benchmark** (measurement-first, ADR 0002 — no perf claim, embed is I/O-bound). The reference is **pgvectorscale** (a real pgrx extension, already cloned).
+> **Version 1.4** — (v1.4 absorbs the pre-merge review: H1 → added `benchmarks/tests/test_embed_failure_scenarios.py` (redirect-SSRF / 4xx / empty-content — 3 tests green) so the `## Failure scenarios` rows are actually exercised; H2 → corrected the error-code contract throughout (HTTP failures → **38000**, not 22023 — matches the oracle/baseline); the 4 Rust `#[pg_test]`s are honestly recorded as compile-only here (run requires a pgrx-managed PG) and SUPERSEDED by the Python oracle against the real image — the blueprint's authoritative gate.) **Version 1.3** — (v1.3 corrects ADR D5 at implement time: the `pgvector` Rust crate has no `pgrx` feature (measured), so the `vector` return type is produced by a thin `extension_sql!` wrapper casting `text::vector` — the exact plpython3u parity path — and the `pgvector` crate dependency is DROPPED. Also: error-code parity corrected to mirror the oracle exactly — **22023** for input errors AND **38000** (ExternalRoutineException) for HTTP/response failures.) (v1.1 absorbed the edge-case review: MUST-FIX EC-1 → ADR D5 pins the `vector` return-type binding; SHOULD-TEST EC-2/EC-3; DOCUMENT EC-4. v1.2 absorbs the deps-audit `pgrx-extension-foundation-deps-audit-2026-06-29.md`: `minreq` uses the **`https-native`** (OpenSSL) TLS feature, NOT rustls — measured to eliminate 3 `rustls-webpki` advisories RUSTSEC-2026-0098/0099/0104; the `serde_cbor`-unmaintained warning via `pgrx` is an accepted LOW caveat.) Stands up TheoDB's **own** PostgreSQL extension in Rust (**pgrx**) — the ROADMAP-v2 / ADR 0006 foundation (M17) — and rewrites the simplest existing surface (`theodb.embed`, today plpython3u + urllib) in Rust as a separate transition extension `theodb_rs`, with **proven functional parity** (the existing Python e2e is the oracle) and a **reproducible latency benchmark** (measurement-first, ADR 0002 — no perf claim, embed is I/O-bound). The reference is **pgvectorscale** (a real pgrx extension, already cloned).
 
 ## Goal
 
@@ -277,7 +277,7 @@ theodb_rs/src/embed.rs (NEW, optional) — extract the HTTP+SSRF helper if lib.r
 #### Deep Dives
 - **GUCs:** read with pgrx (`Spi::get_one` on `current_setting('theodb.embedding_endpoint', true)`) or a registered `GucSetting` — use `current_setting` to match plpython3u semantics exactly (NULL/unset → 22023 "endpoint not configured").
 - **SSRF guard (invariant from Baseline):** endpoint MUST start with `http://` or `https://`; otherwise `ereport(ERROR, errcode 22023)`. Disable redirects on the client (D2 — if minreq cannot, use ureq). No following 3xx.
-- **Error mapping:** every failure (unset GUC, bad scheme, connect error, non-2xx, JSON parse error, dim mismatch) → SQLSTATE 22023 with a clear message (error-handling.md: typed + contextual, fail-fast). Parity: `sql/30` raises 22023 on these.
+- **Error mapping (v1.3 correction — matches the oracle/baseline):** INPUT/config errors (NULL content, unset GUC, non-http(s) scheme) → SQLSTATE **22023**; HTTP/response failures (connect error, timeout, redirect, non-2xx incl. 4xx, JSON parse error, wrong shape, empty vector) → SQLSTATE **38000** (external_routine_exception), each with a clear message (error-handling.md: typed + contextual, fail-fast). Parity: `sql/30` raises 22023 on input and 38000 on endpoint/response failures.
 - **Vector parse:** response `data[0].embedding` → `Vec<f32>` → `vector`. Assert non-empty.
 
 #### Pseudo-code / Signatures
@@ -311,7 +311,7 @@ fn embed(content: &str, model: default!(Option<&str>, "NULL")) -> Vec<f32> {
 RED:     #[pg_test] test_embed_rejects_non_http — endpoint='ftp://x' → ERROR SQLSTATE 22023
 RED:     #[pg_test] test_embed_rejects_unset_endpoint — no GUC → ERROR SQLSTATE 22023
 RED:     #[pg_test] test_embed_no_redirect — endpoint returning 302 → does NOT follow → 22023 (or documented behavior)
-RED:     #[pg_test] test_embed_endpoint_4xx_maps_to_22023 (EC-3) — stub returns 400/413 → ERROR SQLSTATE 22023 with a clear message (the non-2xx path MUST cover 4xx, not only 5xx/connect)
+RED:     test_embed_4xx_maps_to_external_routine_exception (EC-3, in test_embed_failure_scenarios.py) — stub returns 400 → ERROR SQLSTATE 38000 "call failed" (the non-2xx path covers 4xx; parity = baseline maps HTTP errors to 38000, NOT 22023)
 GREEN:   Implement embed body so all #[pg_test] pass
 REFACTOR: Extract src/embed.rs if lib.rs > ~300 LoC
 VERIFY:  cargo pgrx test (in the builder stage)
@@ -611,9 +611,9 @@ VERIFY:  cargo audit  (in the builder) — zero HIGH/CRITICAL
 | 7 | Coexistence (no duplicate `theodb.embed`) (D1 / EC-2) | T2.1 | Separate `theodb_rs` ext; sql/30 no longer defines embed |
 | 8 | Least-privilege parity (REVOKE from PUBLIC) | T2.1 | REVOKE re-applied for the Rust function |
 | 9 | `vector` return-type binding pinned (edge-case EC-1) | T0.1, T1.1, T5.1 (D5) | `pgvector` crate (MIT) `Vector` type → native SQL `vector`; audited |
-| 10 | empty-content + 4xx parity (edge-cases EC-2, EC-3) | T3.1, T1.1 | Empty-content matches plpython3u baseline; 4xx → 22023 |
+| 10 | empty-content + 4xx + redirect-SSRF parity (edge-cases EC-2, EC-3 + review H1) | T3.1 | `test_embed_failure_scenarios.py` (3 tests): empty-content returns a vector (parity: '' is valid); 4xx → **38000** "call failed"; redirect-to-internal NOT followed → 38000 (SSRF). All 3 green vs the real image. |
 
-**Coverage: 10/10 gaps covered (100%)**
+**Coverage: 10/10 gaps covered (100%)** — every Failure-scenarios row now maps to a green test (`test_embed_sql.py` 10 + `test_embed_failure_scenarios.py` 3).
 
 ## Global Definition of Done
 
@@ -632,12 +632,14 @@ VERIFY:  cargo audit  (in the builder) — zero HIGH/CRITICAL
 
 | Dependency | Failure mode | How the test reproduces it | Expected behavior |
 |---|---|---|---|
-| embeddings endpoint (HTTP, via `theodb.embedding_endpoint` GUC) | endpoint unset / NULL GUC | `test_embed_sql.py` unsets the GUC | ERROR SQLSTATE 22023 "endpoint not configured" (no crash, no partial) |
-| embeddings endpoint (HTTP) | non-http(s) scheme (SSRF attempt, e.g. `ftp://`, `file://`) | `#[pg_test]` + oracle set a non-http endpoint | ERROR SQLSTATE 22023; request never sent |
-| embeddings endpoint (HTTP) | redirect (3xx) to an internal address (SSRF-via-redirect) | `#[pg_test]` with a stub returning 302 | redirect NOT followed → 22023 (D2 — minreq no-redirect or ureq fallback) |
-| embeddings endpoint (HTTP) | connect error / timeout | point the GUC at an unreachable host with a short timeout | ERROR SQLSTATE 22023 within the timeout; no hang |
-| embeddings endpoint (HTTP) | 4xx (400/413 — bad/oversized input, token limit) | `#[pg_test]` + stub returns 400/413 (EC-3) | ERROR SQLSTATE 22023 with a clear message; the non-2xx path covers 4xx, not only 5xx |
-| embeddings endpoint (HTTP) | malformed / empty response body | stub returns non-JSON or empty `data` | ERROR SQLSTATE 22023 "bad embedding response"; no empty vector returned |
+> **Error-code contract (v1.3+, matches the oracle):** INPUT/config errors → **22023** (invalid_parameter_value); HTTP/response failures → **38000** (external_routine_exception). This mirrors the plpython3u baseline exactly.
+
+| embeddings endpoint (HTTP, via `theodb.embedding_endpoint` GUC) | endpoint unset / NULL GUC | `test_embed_sql.py::test_embed_without_endpoint_raises_typed_error` | ERROR SQLSTATE **22023** "embedding_endpoint is not set" (no crash, no partial) |
+| embeddings endpoint (HTTP) | non-http(s) scheme (SSRF attempt, e.g. `ftp://`, `file://`) | `test_embed_sql.py::test_embed_non_http_scheme_rejected` | ERROR SQLSTATE **22023** "http(s)"; request never sent |
+| embeddings endpoint (HTTP) | redirect (3xx) to an internal address (SSRF-via-redirect) | `test_embed_failure_scenarios.py::test_embed_redirect_to_internal_host_not_followed` (stub returns 302→169.254.169.254) | redirect NOT followed → SQLSTATE **38000** "call failed" (minreq `with_max_redirects(0)`); internal host never contacted |
+| embeddings endpoint (HTTP) | connect error / timeout | `test_embed_sql.py::test_embed_unreachable_endpoint_raises` (unreachable host) | ERROR SQLSTATE **38000** "call failed"; no hang |
+| embeddings endpoint (HTTP) | 4xx (400/413 — bad/oversized input, token limit) | `test_embed_failure_scenarios.py::test_embed_4xx_maps_to_external_routine_exception` (stub returns 400) | ERROR SQLSTATE **38000** "call failed" (parity: the plpython3u baseline mapped HTTP errors to 38000 via URLError — NOT 22023) |
+| embeddings endpoint (HTTP) | malformed / empty / non-JSON response body | `test_embed_sql.py::test_embed_bad_response_raises_typed_error[/empty,/malformed,/notjson]` | ERROR SQLSTATE **38000** ("empty embedding" / "unexpected embedding response shape" / "call failed"); no empty vector returned |
 
 ## Final Phase: Integration Validation (MANDATORY)
 
@@ -662,7 +664,7 @@ cargo audit                                                     # zero HIGH/CRIT
 - [ ] `cargo pgrx test` green (SSRF reject + error mapping).
 - [ ] The benchmark report `docs/benchmarks/m17-embed-rust-vs-plpython.md` contains a mean±std results table over ≥3 runs + the I/O-bound caveat, verified by `grep -Eq 'mean|std' docs/benchmarks/m17-embed-rust-vs-plpython.md` exiting 0.
 - [ ] `cargo clippy` + `ruff` clean; `cargo audit` clean.
-- [ ] Every `## Failure scenarios` row is exercised (22023 typed errors, no redirect, no hang, no empty vector), verified by `python3 -m pytest benchmarks/tests/test_embed_sql.py -v` exiting 0.
+- [ ] Every `## Failure scenarios` row is exercised (typed errors 22023 input / 38000 HTTP, no redirect followed, no hang, no empty vector), verified by `python3 -m pytest benchmarks/tests/test_embed_sql.py benchmarks/tests/test_embed_failure_scenarios.py -v` exiting 0 (10 + 3 tests).
 - [ ] Both extensions install on a fresh DB (no duplicate `theodb.embed`).
 
 ### If Validation Fails

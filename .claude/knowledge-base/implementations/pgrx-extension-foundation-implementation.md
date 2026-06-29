@@ -56,3 +56,24 @@ The plan initially said "all failures → 22023". Reading the frozen oracle reve
 - `cargo audit` reports 2 *unmaintained* warnings (`serde_cbor`, `paste`) — both transitive via `pgrx` (the
   framework, pinned to the image's 0.16.1), not exploitable CVEs; accepted (deps-audit report § caveat).
 - GHCR image publish (`theo-db:develop`) remains a separate manual step (token scope) — unchanged by M17.
+
+## Transition-state debt (recorded for M19 consolidation)
+
+- **`DROP EXTENSION theodb_rs` silently degrades `ai.hybrid_search_rrf` (MEDIUM, arch review).** The runtime
+  call direction is `theodb` (sql/40 `hybrid_search` plpgsql) → `theodb.embed` (provided by `theodb_rs`), but
+  that call is late-bound (plpgsql), so there is no `pg_depend` edge. `requires = 'vector, theodb'` protects
+  the reverse drop (`DROP EXTENSION theodb` errors without CASCADE), but dropping `theodb_rs` alone succeeds
+  and removes `theodb.embed` with no warning — hybrid search's embedding leg then fails at call time. This is
+  inherent to the D1 transition split (two extensions during the plpython3u→Rust rewrite) and resolves when
+  M19 consolidates the surfaces into one extension. Operators should not drop `theodb_rs` independently in the
+  transition window. Recorded as known debt (not an M17 regression — embed did not exist standalone before).
+
+## Review fixes absorbed (v1.4)
+
+- **H1 (tests):** added `benchmarks/tests/test_embed_failure_scenarios.py` (3 tests, green vs the real image):
+  redirect-to-internal NOT followed (SSRF), 4xx → 38000, empty-content `embed('')` returns a vector. The
+  `## Failure scenarios` rows are now all backed by a green test.
+- **H2 (plan↔code):** corrected the plan's error-code contract throughout — HTTP failures (incl. 4xx) →
+  SQLSTATE **38000** (was wrongly 22023 in v1.1 body), matching the oracle + baseline.
+- **LOW:** restored the api-key out-of-band security guidance in the `theodb.embed` COMMENT; fixed stale
+  Dockerfile comments (theodb.embed no longer plpython3u; ca-certificates also serves minreq TLS).

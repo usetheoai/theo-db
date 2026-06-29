@@ -181,7 +181,9 @@ COMMENT ON FUNCTION theodb.embed(text, text) IS
   'Generate an embedding for content via the configurable model endpoint (theodb.embedding_endpoint). '
   'Returns a pgvector value. Implemented in Rust (theodb_rs extension, M17). '
   'SECURITY: server-side outbound HTTP to the configured endpoint (http(s) only, no redirects); '
-  'not granted to PUBLIC. CALL IS SYNCHRONOUS: one blocking HTTP round-trip per row.';
+  'not granted to PUBLIC. theodb.embedding_api_key is a session GUC (visible to SHOW / captured by '
+  'log_statement) — set it per-session out of band, not in logged DDL. '
+  'CALL IS SYNCHRONOUS: one blocking HTTP round-trip per row.';
 
 REVOKE ALL ON FUNCTION theodb.embed(text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION theodb_rs._embed_text(text, text) FROM PUBLIC;

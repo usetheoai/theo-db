@@ -78,10 +78,11 @@ COPY --from=scale-builder /usr/share/postgresql/$PG_MAJOR/extension/vectorscale*
 COPY --from=theodb-rs-builder /usr/lib/postgresql/$PG_MAJOR/lib/theodb_rs* /usr/lib/postgresql/$PG_MAJOR/lib/
 COPY --from=theodb-rs-builder /usr/share/postgresql/$PG_MAJOR/extension/theodb_rs* /usr/share/postgresql/$PG_MAJOR/extension/
 
-# plpython3u for theodb.embed (M2 DoD-3) — the DB calls a configurable model endpoint (AlloyDB pattern);
+# plpython3u — still used by ai/nl/ml/migrate SQL surfaces (sql/50/60/70/80). NOTE (M17): theodb.embed is
+# no longer plpython3u (it moved to the Rust theodb_rs extension); plpython3u is kept for the OTHER surfaces.
 # NO model/torch ships in the image (lean). Kept (not removed) — runtime dependencies.
-# ca-certificates is required for plpython3u's urllib to verify TLS when the endpoint is an HTTPS cloud
-# provider (e.g. OpenAI); without it CREATE-CERT verification fails (SSL: CERTIFICATE_VERIFY_FAILED).
+# ca-certificates is required for TLS verification on HTTPS cloud endpoints — by BOTH plpython3u's urllib
+# (ai/nl/ml) AND the Rust theodb.embed (minreq/native-tls/OpenSSL); without it cert verification fails.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends postgresql-plpython3-$PG_MAJOR ca-certificates && \
     rm -rf /var/lib/apt/lists/*
