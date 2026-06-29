@@ -4,6 +4,10 @@
 > This is a **macro** roadmap. Decomposition into tasks is the job of `/to-plan` per milestone.
 > Synthesized from `PRD.md` (§1–§15, decisões D1–D7) and `README.md` (roadmap macro M0–M9),
 > confirmed by the owner on 2026-06-26.
+>
+> **⚠️ 2026-06-29 — O norte ativo migrou para [`ROADMAP-v2.md`](ROADMAP-v2.md)** (ADR `0006`: banco real
+> Postgres-based com código PRÓPRIO em Rust/Go, dependências externas mínimas). Este v1 (M0–M16, entregues
+> como distribuição-composição) permanece como **histórico** + **base de paridade** para a reescrita do v2.
 
 ## Vision
 
