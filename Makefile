@@ -12,7 +12,8 @@ DATA_built = sql/$(EXTENSION)--$(EXTVERSION).sql
 
 # Source bodies, concatenated in load order (50 before 70; 60 before 61) — see Dockerfile history.
 PARTS = sql/30-theodb-embed.sql sql/40-theodb-hybrid.sql sql/50-theodb-ai.sql \
-        sql/60-theodb-nl.sql sql/61-theodb-nl-config.sql sql/70-theodb-ml.sql
+        sql/60-theodb-nl.sql sql/61-theodb-nl-config.sql sql/70-theodb-ml.sql \
+        sql/80-theodb-migrate.sql
 
 # PGXS is only needed for `make install` / regress (it requires postgresql-server-dev). The concat
 # target below works WITHOUT it, so the install script can be built in a runtime image that dropped the

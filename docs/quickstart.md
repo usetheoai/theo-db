@@ -118,6 +118,39 @@ SELECT ai.agg_summarize(description) FROM products;   -- aggregate over many row
 SELECT ai.nl_query('how many products are in category 1?', ARRAY['products']);
 ```
 
+## Unified query (the differentiator)
+
+The point of TheoDB: vector search, your **relational** data, and **AI** in **one transactional SQL** — no
+ETL, no second system. The embedding and the business row are the same row (consistent by construction).
+
+```sql
+-- vector ORDER BY + relational JOIN + filter + AI, one statement, one transaction
+SET hnsw.iterative_scan = strict_order;   -- preserves recall under a selective filter (see below)
+SELECT p.id, p.description,
+       ai.summarize(p.description) AS gist          -- AI leg (same instance)
+FROM products p
+JOIN inventory i ON i.product_id = p.id             -- relational JOIN (operational data)
+WHERE i.in_stock AND p.category_id = 3              -- relational filter
+ORDER BY p.embedding <=> '[0.1,0.2,...]'::vector    -- vector leg (pgvector)
+LIMIT 5;
+```
+
+A pure vector DB (e.g. Pinecone) cannot do the `JOIN`/`WHERE` against your relational data in the same query —
+you would run two systems and merge in the app, risking staleness. Here it is one consistent SQL.
+
+### Filtered vector search — preserve recall
+
+With approximate indexes, a selective `WHERE` can return **fewer than `LIMIT`** rows (the filter is applied
+after the index scan — "over-filtering"). Enable iterative scans so the index is scanned until `k` results are
+found, in exact order:
+
+```sql
+SET hnsw.iterative_scan = strict_order;   -- or relaxed_order; bounded by hnsw.max_scan_tuples
+```
+
+For categorical low-cardinality filters, `pgvectorscale` label-filtering (a `smallint[]` label column) is an
+in-index alternative. Prove the index is used with `EXPLAIN (ANALYZE, BUFFERS) SELECT … ORDER BY embedding <=> …`.
+
 ## Upgrades
 
 ```sql

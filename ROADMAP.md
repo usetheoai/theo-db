@@ -619,7 +619,7 @@ partir de AlloyDB. *(Merge de README M8 — Escala & observabilidade — com REA
 
 ---
 
-### M15 — [ ] Produtização — extensão instalável `CREATE EXTENSION theodb` + quickstart e2e das 12 features
+### M15 — [x] Produtização — extensão instalável `CREATE EXTENSION theodb` + quickstart e2e das 12 features
 
 > Added 2026-06-28. Ancorado no blueprint `.claude/knowledge-base/discoveries/blueprints/pg-extension-packaging-blueprint.md` (SHIPPABLE_WITH_CAVEATS). Honesto: as 12 features de `docs/features/` já funcionam na imagem, mas vêm via `docker-entrypoint-initdb.d` (só em DB fresh) — não há `CREATE EXTENSION theodb`, nem versionamento, nem imagem publicada. M15 fecha o salto "amontoado de scripts → produto".
 
@@ -650,6 +650,38 @@ partir de AlloyDB. *(Merge de README M8 — Escala & observabilidade — com REA
 1. `requires` não auto-instala sem `CASCADE` (doc PG) — mitigar: imagem pré-compila vector+vectorscale; documentar `CREATE EXTENSION theodb CASCADE` para outros PGs.
 2. plpython3u é untrusted → extensão `superuser`-only; managed PGs sem plpython3u perdem 06-12 — limitação documentada honestamente (`public-copy.md`), não escondida.
 3. Migração de DBs legados (init-script) — mitigado por anti-sunk-cost: pre-1.0 sem base instalada → greenfield; sem `ALTER EXTENSION ADD` elaborado.
+
+---
+
+### M16 — [ ] Unificação tudo-em-um — a query unificada + filtered vector search + migração do Pinecone
+
+> Added 2026-06-29. Ancorado no **ADR `0005-unification-as-differentiator`** (LOCKED, sign-off CTO): o diferencial do TheoDB é a **unificação** (vetor + relacional + IA numa instância, SQL único transacional, sem ETL/2º sistema), performance **competitiva** (não líder). Posicionamento: alternativa OSS a AlloyDB/Pinecone. M16 torna a unificação **real e demonstrável** — deixa de ser "instalável" e vira "produto de fato".
+
+**Objective:** Provar e empacotar a unificação como diferencial — uma **query unificada canônica** (busca vetorial `JOIN` dados relacionais + filtro + IA, em SQL único transacional), **filtered vector search** eficiente (filtro relacional + ordenação vetorial usando índice), **caminho de migração do Pinecone** (import) e uma **demo honesta 1-sistema (TheoDB) vs 2-sistemas (Pinecone+Postgres)** que mede simplicidade/consistência (não velocidade), tudo com evidência reproduzível.
+
+**Definition of done:**
+
+- [ ] **Query unificada canônica**: exemplo de 1ª classe + teste e2e — busca vetorial `JOIN` tabela relacional + `WHERE` filtro + `ai.*` (ex.: rerank/summarize) numa única transação, com resultado correto verificado contra container real.
+- [ ] **Filtered vector search eficiente**: `WHERE` relacional + `ORDER BY embedding <=> $1` usando índice (pgvector iterative scan / pgvectorscale label-filtering) — teste prova que o filtro+ANN retorna o conjunto correto (sem perder candidatos válidos) e usa índice (`EXPLAIN`).
+- [ ] **Migração do Pinecone**: função/script de import (vetores + metadata do formato de export do Pinecone → tabela TheoDB com `vector` + colunas relacionais) + teste com fixture; doc `docs/migrate-from-pinecone.md`.
+- [ ] **Demo comparativa honesta 1-vs-2**: documento + script reproduzível mostrando a mesma carga RAG em TheoDB (1 SQL, transacional, sem staleness) vs Pinecone+Postgres (2 sistemas, ETL/sync). Mede **simplicidade/consistência**, NÃO performance (sem claim de velocidade — `public-copy.md`).
+- [ ] Sem nova dependência onde possível (Regra 9); honestidade (Regra 3/5): nenhum claim de performance; a demo é de unificação/consistência.
+
+**Entregáveis (artefatos concretos):**
+
+- Exemplo SQL + teste e2e da query unificada; teste de filtered search (+ `EXPLAIN`); import-from-pinecone (SQL/script) + teste; `docs/migrate-from-pinecone.md`; demo 1-vs-2 (`docs/` + script).
+
+**Documentação:**
+
+- `docs/quickstart.md` (seção query unificada) + `docs/migrate-from-pinecone.md` + demo comparativa.
+
+**Dependencies:** M2 (vetorial), M7/M13 (IA/`ai.*`), M15 (extensão instalável). Ancora: ADR 0005.
+
+**Top risks (new):**
+
+1. Filtered vector search pode degradar recall (pre-filter vs post-filter) — mitigar: medir recall com filtro vs sem; usar iterative scan / label-filtering; documentar trade-off honesto.
+2. Formato de export do Pinecone pode variar — mitigar: suportar o formato documentado + fixture de teste; falhar-claro em formato desconhecido (typed error).
+3. Demo "1-vs-2" não pode virar claim de performance — mitigar: mede simplicidade/consistência (linhas de código, staleness, nº de sistemas), nunca velocidade (`public-copy.md`).
 
 ---
 
