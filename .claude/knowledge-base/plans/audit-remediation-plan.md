@@ -103,7 +103,7 @@ Per `.claude/rules/architecture.md`: embed_batch keeps the 3-boundary layering (
 **Consequences:** existing v0.x installs upgrade cleanly then add theodb_rs without a clash; fresh installs at 1.1 never had the plpython3u embed (no-op DROP). The generated `sql/theodb--1.0.sql` (gitignored, rebuilt by make) is confirmed not to redefine embed.
 
 ### D5 — Fail-fast guard at the embed seam (to_regprocedure), not a hard `requires` edge
-**Decision:** in `ai.hybrid_search_rrf`, before calling `theodb.embed(query_text)`, check `to_regprocedure('theodb.embed(text)') IS NULL` → `RAISE` a typed error (SQLSTATE 0A000 feature_not_supported, message "theodb.embed unavailable — install the theodb_rs extension"); add a regression test.
+**Decision:** in `ai.hybrid_search_rrf`, before calling `theodb.embed(query_text)`, check `to_regprocedure('theodb.embed(text, text)') IS NULL` → `RAISE` a typed error (SQLSTATE 0A000 feature_not_supported, message "theodb.embed unavailable — install the theodb_rs extension"); add a regression test.
 **Rationale:** the runtime call is late-bound plpgsql with no `pg_depend` edge (audit #3/#8); a hard `requires theodb_rs` edge on the `theodb` umbrella would invert the dependency (theodb_rs already requires theodb — a cycle) and force theodb_rs at install even for users who don't use hybrid search. A fail-fast guard turns a silent runtime break into a clear, actionable error — the pragmatic Staff fix the audit recommended.
 **Alternatives considered:** (a) hard `requires` edge — rejected: dependency cycle (theodb_rs requires theodb) + forces the extension on non-hybrid users; (b) status quo silent break — rejected: the audit finding; (c) auto-install — rejected: extensions don't self-install dependents.
 **Consequences:** dropping theodb_rs makes hybrid_search fail with a clear message instead of a cryptic "function does not exist"; one cheap `to_regprocedure` check per call (negligible).
@@ -284,7 +284,7 @@ External HTTP — covered in `## Failure scenarios` (batch endpoint 5xx/timeout,
 Turn the silent DROP-theodb_rs break into a clear typed error.
 
 #### Why this step (action + reasoning)
-1. **What:** before `qvec := theodb.embed(query_text)` (sql/40:62), add `IF to_regprocedure('theodb.embed(text)') IS NULL THEN RAISE EXCEPTION ... USING ERRCODE='0A000'`.
+1. **What:** before `qvec := theodb.embed(query_text)` (sql/40:62), add `IF to_regprocedure('theodb.embed(text, text)') IS NULL THEN RAISE EXCEPTION ... USING ERRCODE='0A000'`.
 2. **Why now:** audit #3/#8 — late-bound seam, no pg_depend, silent break. D5 (guard, not hard requires). Cites sql/40:62.
 
 #### Evidence
@@ -301,7 +301,7 @@ benchmarks/tests/test_hybrid_guard.py (NEW) — with theodb.embed absent (or sim
 
 #### Deep Dives
 - **Invariant:** when theodb.embed exists, hybrid_search behaves EXACTLY as before. The guard only fires when absent.
-- **Edge case:** `to_regprocedure('theodb.embed(text)')` — the function is `theodb.embed(text, text)` with a default; the single-arg call resolves via default. Confirm the regproc signature string matches (`theodb.embed(text)` resolves the 1-arg call form). Test both.
+- **Resolved (signature):** `theodb.embed` is registered as `theodb.embed(text, text)` (model has a DEFAULT — a DEFAULT does NOT create a separate 1-arg proc), so the guard MUST check `to_regprocedure('theodb.embed(text, text)')`; the 1-arg form `'theodb.embed(text)'` never resolves and would false-positive (always fire). The test simulates absence via `DROP EXTENSION theodb_rs` inside a transaction that is ROLLED BACK (non-destructive).
 
 #### Tasks
 1. Add the guard before the embed call.
@@ -440,9 +440,9 @@ VERIFY: python3 -m pytest benchmarks/tests/test_retirement_migration.py -v ; fre
 (none — single-threaded) — DDL migration.
 
 #### Acceptance Criteria
-- [ ] Existing-install simulation: the stale plpython3u embed is dropped on UPDATE so theodb_rs installs with no clash — asserted by `pytest benchmarks/tests/test_import_chunked.py::test_upgrade_drops_plpython_embed` (exit 0).
-- [ ] theodb_rs-owned embed is NEVER dropped by the conditional guard — asserted by `pytest benchmarks/tests/test_import_chunked.py::test_owned_embed_preserved`.
-- [ ] Fresh image init (CREATE EXTENSION theodb + theodb_rs) stays clean — verified by `make -C benchmarks rebuild-and-smoke` exit 0.
+- [ ] Existing-install simulation: the stale plpython3u embed is dropped on UPDATE so theodb_rs installs with no clash — asserted by `pytest benchmarks/tests/test_retirement_migration.py::test_upgrade_drops_plpython_embed` (exit 0).
+- [ ] theodb_rs-owned embed is NEVER dropped by the conditional guard — asserted by `pytest benchmarks/tests/test_retirement_migration.py::test_owned_embed_preserved`.
+- [ ] Fresh image init (CREATE EXTENSION theodb + theodb_rs) stays clean — asserted by `pytest benchmarks/tests/test_extension_install.py` (exit 0) against the rebuilt image.
 - [ ] theodb.control default_version equals 1.1 and the upgrade chain ships in the image — verified by `grep -q "default_version = '1.1'" theodb.control`.
 
 #### DoD
@@ -570,7 +570,7 @@ python3 benchmarks/bench_embed_batch.py ...   # N×embed vs embed_batch(N) -> do
 - [ ] `cargo pgrx test` + clippy + ruff clean.
 - [ ] Benchmark report shows the N→1 collapse with measured numbers (mean ± std over ≥ 3 runs) — produced by `python3 benchmarks/bench_embed_batch.py` into `docs/benchmarks/audit-remediation-embed-batch.md`.
 - [ ] All declared failure scenarios are exercised (retry recover; fail-fast on irrecoverable; batch size-mismatch; silent-break guard) — asserted by `pytest benchmarks/tests/test_retry.py benchmarks/tests/test_embed_batch.py benchmarks/tests/test_hybrid_guard.py` (exit 0).
-- [ ] Fresh image init creates both extensions cleanly (retirement-migration regression) — verified by `make -C benchmarks rebuild-and-smoke` exit 0.
+- [ ] Fresh image init creates both extensions cleanly (retirement-migration regression) — asserted by `pytest benchmarks/tests/test_extension_install.py` (exit 0) against the rebuilt image.
 
 ### If Validation Fails
 1. Separate plan-caused failures from pre-existing.

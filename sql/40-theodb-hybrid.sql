@@ -59,6 +59,15 @@ BEGIN
     -- Resolve the vector leg's query vector: explicit query_vector wins; else embed query_text (D4).
     qvec := query_vector;
     IF qvec IS NULL AND query_text IS NOT NULL THEN
+        -- Fail-fast seam guard (audit #3/#8): theodb.embed is a late-bound cross-extension call with no
+        -- pg_depend edge, so dropping theodb_rs would otherwise surface here as a cryptic "function
+        -- theodb.embed(text) does not exist" (42883) mid-query. Turn it into a clear, actionable error.
+        -- The function is registered as theodb.embed(text, text) (model has a DEFAULT) — check that exact
+        -- signature, not the 1-arg call form (which never resolves).
+        IF to_regprocedure('theodb.embed(text, text)') IS NULL THEN
+            RAISE EXCEPTION 'ai.hybrid_search_rrf: theodb.embed is unavailable — install the theodb_rs extension (CREATE EXTENSION theodb_rs), or pass query_vector explicitly'
+                USING ERRCODE = '0A000';  -- feature_not_supported
+        END IF;
         qvec := theodb.embed(query_text);
     END IF;
 
