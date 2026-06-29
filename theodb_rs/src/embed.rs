@@ -4,10 +4,11 @@
 //! the pgrx ABI only through those helpers, which concentrates the PG coupling at one boundary (ADR-1).
 //!
 //! Two entry points share one HTTP/parse path (`post_json` + `resolve_cfg` + `format_embedding`, DRY):
-//!   * `run`       — one input → one vector (per-row `theodb.embed`).
-//!   * `run_batch` — N inputs → N vectors in ONE round-trip (`theodb.embed_batch`); collapses the
-//!                   embed N+1 the system-design audit flagged CRITICAL. The endpoint natively accepts
-//!                   `input: string[]` (OpenAI shape); embeddings are mapped back by `data[].index`.
+//!
+//! * `run` — one input → one vector (per-row `theodb.embed`).
+//! * `run_batch` — N inputs → N vectors in ONE round-trip (`theodb.embed_batch`); collapses the embed
+//!   N+1 the system-design audit flagged CRITICAL. The endpoint natively accepts `input: string[]`
+//!   (OpenAI shape); embeddings are mapped back by `data[].index`.
 //!
 //! Error parity with the plpython3u baseline (oracle: `benchmarks/tests/test_embed_sql.py`):
 //!   * input errors (NULL content, unset endpoint, non-http(s) scheme)        -> SQLSTATE 22023
