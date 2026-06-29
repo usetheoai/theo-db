@@ -14,6 +14,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 - TheoDB agora instala como uma extensão PostgreSQL real: `CREATE EXTENSION theodb CASCADE` provisiona toda a superfície de IA + vetorial (embed, busca híbrida, `ai.*` generativas, NL→SQL, registry de modelos) em qualquer PostgreSQL 17, com versionamento e caminho de upgrade (`ALTER EXTENSION theodb UPDATE`) — substituindo os scripts de init (M15).
+- Guia de início rápido [`docs/quickstart.md`](docs/quickstart.md) cobrindo as 12 capacidades de ponta a ponta via `CREATE EXTENSION theodb`, seção de instalação no README (com a limitação honesta de `plpython3u`/superusuário em PostgreSQL gerenciado) e artefato de distribuição `make dist` (`dist/theodb-1.0.zip`) (M15).
 
 ### Changed
 - Os seis scripts SQL da superfície de IA deixam de declarar `CREATE EXTENSION` internamente; as dependências (`vector`, `vectorscale`, `plpython3u`) passam a ser declaradas em `theodb.control` (`requires`) e resolvidas via `CASCADE` (M15).
