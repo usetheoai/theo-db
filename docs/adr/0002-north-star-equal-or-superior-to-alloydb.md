@@ -1,6 +1,6 @@
 # ADR 0002 — North Star: TheoDB igual ou superior ao AlloyDB (Opção α)
 
-**Status:** Accepted (LOCKED — north-star do produto) · **Data:** 2026-06-27 · **Owner:** CTO (paulohenriquevn)
+**Status:** Accepted (LOCKED) · **⚠️ Superseded in part by [ADR 0006](0006-own-code-postgres-based-rust-go.md) (2026-06-29)** — "compor > construir" deu lugar a "construir código próprio em Rust/Go" (measurement-first preservado) · **Data:** 2026-06-27 · **Owner:** CTO (paulohenriquevn)
 **Supersede:** — · **Relacionado:** ADR `0001-no-engine-fork`, PRD §15 (D1–D7), `ROADMAP.md`, blueprint `alloydb-vector-ai-implementation`
 
 > Esta é a **fonte de verdade da estratégia de produto**. Mudá-la exige sign-off explícito do CTO +

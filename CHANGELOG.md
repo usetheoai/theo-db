@@ -15,6 +15,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 ### Changed
+- **Virada estratégica (mandato CTO 2026-06-29, pressão de investidores):** TheoDB passa de "distribuição que compõe peças OSS" para **um banco de dados competitivo baseado na engine PostgreSQL (modelo AlloyDB/Neon) com código PRÓPRIO em Rust (pgrx, in-engine) + Go (control plane)**, preservando todas as features mapeadas. Engine PostgreSQL **mantido** (C, wire-compat — ADR 0001 núcleo); reescrita **incremental com paridade** (testes validam). ADR `0006-own-code-postgres-based-rust-go` (sign-off CTO) supersede em parte os ADRs `0002`/`0004`/`0005`; measurement-first e licença permissiva (D1) preservados.
 
 ### Deprecated
 

@@ -1,6 +1,6 @@
 # ADR 0004 — ScaNN access-method fork decision: NO-FORK (DiskANN is the permissive ScaNN-quality substitute)
 
-**Status:** Accepted (provisional — pending a real-dataset `--hdf5` confirmation; see Re-open gate) · **Date:** 2026-06-28 · **Milestone:** M14 · **Deciders:** TheoDB maintainers
+**Status:** Accepted (provisional) · **⚠️ Reopened by [ADR 0006](0006-own-code-postgres-based-rust-go.md) (2026-06-29)** — own index/quantization in Rust is now on the table, still benchmark-gated (measurement-first) · **Date:** 2026-06-28 · **Milestone:** M14 · **Deciders:** TheoDB maintainers
 **Related:** ADR 0001 (no engine fork), ADR 0002 (north-star, measurement-first), PRD §15 fork-gate policy
 (a fork/native-AM is conditional on a reproducible benchmark), CLAUDE.md (anti-sunk-cost; Esforço ≠ Complexidade)
 
