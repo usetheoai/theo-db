@@ -13,7 +13,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- **(M22) Quantização escalar própria (SBQ) em Rust — recall@k + memória gated por benchmark (coexistência, measurement-first):** `theodb.sbq_knn(src_table regclass, embed_col text, queries vector[], bits=>1, over_fetch=>4, …)` e `theodb.sbq_bytes_per_vector(dim, bits)` implementados em Rust (`theodb_rs/src/sbq.rs`). Quantizador SBQ próprio (limiar por dimensão pela média, `bits_per_dim` empacotados em `u64`) — código permissivo aprendido do SBQ do pgvectorscale (PostgreSQL License); **RaBitQ do vectorchord NÃO foi copiado (AGPL — proibido na distribuição, D1)**. Busca = candidatos via o carrier IVFFlat do M21 → ranking por **Hamming** (`popcount` XOR) nos códigos → **rerank** full-precision dos top `k·over_fetch` com o kernel f32 do M20 (`crate::vec`). **Sem nova dependência** (`std` puro: bit ops + `u64::count_ones`). **Decisão = coexistência** (ADR D3): lê `embed_col::real[]`, não toca pgvectorscale/pgvector nem `embed`/`hybrid`/`import`/M21. **Paridade de recall@k + memória** vs pgvectorscale SBQ (`diskann` memory_optimized) provada por `benchmarks/tests/test_sbq_index.py::test_recall_memory_parity_gate` + benchmark reprodutível (`docs/benchmarks/m22-sbq-parity.md`). Memória honesta (EC-1): bytes/vector `ceil(dim·bits/64)·8` = **paridade com pgvectorscale** (mesma fórmula) + **~32× vs f32** (não "menos que pgvectorscale"). Validação fail-fast 22023 (bits/over_fetch/lists/probes fora de faixa, metric, dim, id_col, identifier); REVOKE de PUBLIC. Forma SQL-callable measurement-first (planner AM = M22b).
 
 ### Changed
 
@@ -24,6 +23,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 ### Security
+
+## [0.22.0] - 2026-06-30
+
+### Added
+- **(M22) Quantização escalar própria (SBQ) em Rust — recall@k + memória gated por benchmark (coexistência, measurement-first):** `theodb.sbq_knn(src_table regclass, embed_col text, queries vector[], bits=>1, over_fetch=>4, …)` e `theodb.sbq_bytes_per_vector(dim, bits)` implementados em Rust (`theodb_rs/src/sbq.rs`). Quantizador SBQ próprio (limiar por dimensão pela média, `bits_per_dim` empacotados em `u64`) — código permissivo aprendido do SBQ do pgvectorscale (PostgreSQL License); **RaBitQ do vectorchord NÃO foi copiado (AGPL — proibido na distribuição, D1)**. Busca = candidatos via o carrier IVFFlat do M21 → ranking por **Hamming** (`popcount` XOR) nos códigos → **rerank** full-precision dos top `k·over_fetch` com o kernel f32 do M20 (`crate::vec`). **Sem nova dependência** (`std` puro: bit ops + `u64::count_ones`). **Decisão = coexistência** (ADR D3): lê `embed_col::real[]`, não toca pgvectorscale/pgvector nem `embed`/`hybrid`/`import`/M21. **Paridade de recall@k + memória** vs pgvectorscale SBQ (`diskann` memory_optimized) provada por `benchmarks/tests/test_sbq_index.py::test_recall_memory_parity_gate` + benchmark reprodutível (`docs/benchmarks/m22-sbq-parity.md`). Memória honesta (EC-1): bytes/vector `ceil(dim·bits/64)·8` = **paridade com pgvectorscale** (mesma fórmula) + **~32× vs f32** (não "menos que pgvectorscale"). Validação fail-fast 22023 (bits/over_fetch/lists/probes fora de faixa, metric, dim, id_col, identifier); REVOKE de PUBLIC. Forma SQL-callable measurement-first (planner AM = M22b).
 
 ## [0.21.0] - 2026-06-30
 
