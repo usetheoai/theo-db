@@ -35,7 +35,10 @@ type TheoDBClusterSpec struct {
 
 	// StorageSize is the per-instance persistent volume size (e.g. "10Gi"). Validated as a
 	// Kubernetes quantity at the API boundary so a malformed value never reaches the reconciler.
+	// Immutable: a StatefulSet's VolumeClaimTemplates cannot be changed in place, so the API server
+	// rejects an edit rather than letting the operator silently drop it (recreate the cluster to resize).
 	// +kubebuilder:validation:Pattern=`^[0-9]+(\.[0-9]+)?(Ei|Pi|Ti|Gi|Mi|Ki|E|P|T|G|M|k)?$`
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="storageSize is immutable; recreate the cluster to resize"
 	// +kubebuilder:default:="1Gi"
 	// +optional
 	StorageSize string `json:"storageSize,omitempty"`

@@ -14,7 +14,7 @@ against a **real kube-apiserver + etcd** (envtest, in-process, no kubelet), not 
 | The reconciler provisions a StatefulSet + gateway Service + **governing headless Service** (ClusterIP=None for stable pod DNS), all owner-referenced | `TestReconcile_CreatesStatefulSetAndService` (real envtest) | PASS |
 | Reconcile is idempotent — a converged re-run causes no resourceVersion churn (EC-2) | `TestReconcile_Idempotent` (asserts identical `resourceVersion`) | PASS |
 | Scaling patches ONLY the mutable field (replicas), never the immutable spec (EC-1) | `TestReconcile_ScaleUpUpdatesReplicas` | PASS |
-| Changing `storageSize` does NOT trigger a rejected immutable-VCT update — reconcile converges, VCT unchanged (EC-1) | `TestReconcile_StorageSizeChange_NoImmutableUpdate` | PASS |
+| `storageSize` is immutable (StatefulSet VCT can't change in place) — the API server rejects an edit at the boundary, so intent never silently diverges (EC-1) | `TestCRD_RejectsStorageSizeChange` (CEL `x-kubernetes-validations`) | PASS |
 | A reconcile request for a deleted CR is a no-op, never an error (failure scenario) | `TestReconcile_CRDeleted_NoOp` | PASS |
 | Invalid spec is rejected **at the API boundary** (empty image, malformed storageSize, port out of range, instances < 1) | `TestCRD_RejectsInvalidSpec` (4 sub-cases, real apiserver) | PASS |
 | Status reflects readiness honestly under envtest (no kubelet → Phase=Initializing) + records `observedGeneration` (EC-4) | `TestReconcile_StatusInitializingWithoutKubelet` | PASS |
@@ -38,7 +38,7 @@ make test          # controller-gen + go vet + setup-envtest + go test ./... -co
 === RUN   TestReconcile_CreatesStatefulSetAndService     --- PASS (~2s)    # real kube-apiserver+etcd
 === RUN   TestReconcile_Idempotent                       --- PASS
 === RUN   TestReconcile_ScaleUpUpdatesReplicas           --- PASS
-=== RUN   TestReconcile_StorageSizeChange_NoImmutableUpdate --- PASS       # EC-1 immutable VCT
+=== RUN   TestCRD_RejectsStorageSizeChange                --- PASS         # EC-1 immutable (CEL)
 === RUN   TestReconcile_CRDeleted_NoOp                    --- PASS         # IgnoreNotFound
 === RUN   TestCRD_RejectsInvalidSpec                      --- PASS (4 sub) # boundary validation
 === RUN   TestReconcile_StatusInitializingWithoutKubelet --- PASS

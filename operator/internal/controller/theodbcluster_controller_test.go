@@ -146,9 +146,10 @@ func TestReconcile_ScaleUpUpdatesReplicas(t *testing.T) {
 	}
 }
 
-// T2.2 RED — EC-1 (immutable fields): changing spec.StorageSize must NOT trigger a StatefulSet update of the
-// immutable VolumeClaimTemplates. The reconcile converges without error and the persisted VCT is unchanged.
-func TestReconcile_StorageSizeChange_NoImmutableUpdate(t *testing.T) {
+// T2.2 RED — EC-1 (immutable fields): a StatefulSet's VolumeClaimTemplates cannot change in place, so the CRD
+// marks storageSize immutable. The API server rejects an edit at the boundary (rather than the operator
+// silently dropping it), and the persisted StatefulSet VCT therefore never diverges from intent.
+func TestCRD_RejectsStorageSizeChange(t *testing.T) {
 	name := "tc-storage"
 	c := createCluster(t, name, theodbv1.TheoDBClusterSpec{Instances: 1, Image: "theo-db:test", StorageSize: "1Gi", Port: 5432})
 	reconcileOnce(t, name)
@@ -157,15 +158,15 @@ func TestReconcile_StorageSizeChange_NoImmutableUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.Spec.StorageSize = "5Gi"
-	if err := k8sClient.Update(context.Background(), c); err != nil {
-		t.Fatalf("update storageSize: %v", err)
+	err := k8sClient.Update(context.Background(), c)
+	if err == nil {
+		t.Fatal("expected the apiserver to reject the immutable storageSize change, got nil")
+	}
+	if !apierrors.IsInvalid(err) {
+		t.Errorf("want Invalid error for storageSize change, got %v", err)
 	}
 
-	// Reconcile MUST NOT error (a full-spec StatefulSet update would be rejected by the apiserver on the VCT).
-	if _, err := newReconciler().Reconcile(context.Background(), ctrlReq(name, "default")); err != nil {
-		t.Fatalf("reconcile after storageSize change must not error (immutable VCT not re-applied): %v", err)
-	}
-
+	// The persisted StatefulSet VCT stays at the original 1Gi (no drift).
 	var ss appsv1.StatefulSet
 	if err := k8sClient.Get(context.Background(), nn(name), &ss); err != nil {
 		t.Fatal(err)
@@ -173,7 +174,7 @@ func TestReconcile_StorageSizeChange_NoImmutableUpdate(t *testing.T) {
 	got := ss.Spec.VolumeClaimTemplates[0].Spec.Resources.Requests["storage"]
 	want := resource.MustParse("1Gi")
 	if got.Cmp(want) != 0 {
-		t.Errorf("VCT storage: got %v, want 1Gi unchanged (immutable field must not be patched)", got)
+		t.Errorf("VCT storage: got %v, want 1Gi unchanged", got)
 	}
 }
 
