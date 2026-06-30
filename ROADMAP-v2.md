@@ -113,7 +113,7 @@ Rust já existe — a imagem hoje compila pgvectorscale), com CI, e **reescrever
 
 **Dependencies:** M17. **Nota:** measurement-first — só substitui pgvector quando a paridade for provada.
 
-### M21 — [ ] Índice ANN próprio em Rust: HNSW + IVFFlat (gated por benchmark)
+### M21 — [x] Índice ANN próprio em Rust: HNSW + IVFFlat (gated por benchmark)
 
 **Objective:** Implementar índice (access method) HNSW + IVFFlat **próprio em Rust**, substituindo o pgvector
 index — **somente** quando atingir **paridade de recall@k** no harness.

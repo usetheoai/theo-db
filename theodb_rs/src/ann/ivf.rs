@@ -136,4 +136,29 @@ impl IvfflatIndex {
         results.truncate(k);
         results.into_iter().map(|c| (self.ids[c.i], c.d)).collect()
     }
+
+    /// Candidate generation for a quantized re-ranker (M22): return the corpus POSITIONS (0-based, aligned with
+    /// the build corpus order) of every member of the `probes` nearest lists, UNranked. The caller re-ranks by
+    /// its own (e.g. Hamming) distance + a full-precision rerank. Additive to M21 — `search` is unchanged.
+    pub(crate) fn candidate_positions(&self, q: &[f32], probes: usize) -> Vec<usize> {
+        if self.vectors.is_empty() {
+            return Vec::new();
+        }
+        let p = probes.clamp(1, self.centroids.len().max(1));
+        let mut cdist: Vec<Cand> = self
+            .centroids
+            .iter()
+            .enumerate()
+            .map(|(i, c)| Cand {
+                d: self.metric.dist(q, c),
+                i,
+            })
+            .collect();
+        cdist.sort();
+        let mut out: Vec<usize> = Vec::new();
+        for c in cdist.iter().take(p) {
+            out.extend_from_slice(&self.lists[c.i]);
+        }
+        out
+    }
 }
