@@ -183,7 +183,7 @@ mod theodb_rs {
     // reads `embed_col::real[]` only; never touches pgvector's index/storage (ADR D1). REVOKEd from PUBLIC.
     /// `theodb_rs._hnsw_knn` — own HNSW top-k over `src_table.embed_col`.
     #[allow(clippy::too_many_arguments)]
-    #[pg_extern]
+    #[pg_extern(volatile)] // reads a table via Spi — explicitly VOLATILE (never IMMUTABLE)
     fn _hnsw_knn(
         src_table: &str,
         embed_col: &str,
@@ -212,7 +212,7 @@ mod theodb_rs {
 
     /// `theodb_rs._ivfflat_knn` — own IVFFlat top-k over `src_table.embed_col`.
     #[allow(clippy::too_many_arguments)]
-    #[pg_extern]
+    #[pg_extern(volatile)] // reads a table via Spi — explicitly VOLATILE (never IMMUTABLE)
     fn _ivfflat_knn(
         src_table: &str,
         embed_col: &str,

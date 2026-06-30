@@ -176,6 +176,75 @@ def test_knn_param_over_cap_raises_22023(conn, data):
         assert exc.value.pgcode == "22023", f"over-cap param must be 22023, got {exc.value.pgcode}"
 
 
+@pytest.mark.parametrize("fn,extra", [
+    ("hnsw_knn", "k => 0, ef_search => 40, metric => 'l2'"),            # k < 1
+    ("hnsw_knn", "k => 5, m => 1, ef_search => 40, metric => 'l2'"),    # m < 2
+    ("hnsw_knn", "k => 5, m => 101, ef_search => 40, metric => 'l2'"),  # m > 100
+    ("hnsw_knn", "k => 50, ef_construction => 10, ef_search => 60, metric => 'l2'"),  # ef_construction < k
+    ("hnsw_knn", "k => 50, ef_search => 10, metric => 'l2'"),           # ef_search < k
+    ("ivfflat_knn", "k => 5, lists => 0, probes => 1, metric => 'l2'"),   # lists < 1
+    ("ivfflat_knn", "k => 5, lists => 8, probes => 0, metric => 'l2'"),   # probes < 1
+])
+def test_knn_param_lower_bounds_raise_22023(conn, data, fn, extra):
+    """EC-2 lower-bound caps: every out-of-range knob fails fast with the specific 22023."""
+    _, queries = data
+    with conn.cursor() as cur:
+        with pytest.raises(psycopg2.Error) as exc:
+            _own_knn(cur, fn, queries[:1], K, extra)
+        assert exc.value.pgcode == "22023", f"{fn} {extra} must be 22023, got {exc.value.pgcode}"
+
+
+def test_knn_inconsistent_vector_dims_raises_22023(conn, data):
+    """A corpus with mixed vector dimensions fails fast with 22023 (not a panic / wrong answer)."""
+    _, queries = data
+    with conn.cursor() as cur:
+        cur.execute("DROP TABLE IF EXISTS m21_mixdim")
+        # No typmod → column accepts any-dim vectors, so we can store inconsistent dims.
+        cur.execute("CREATE TABLE m21_mixdim (id integer PRIMARY KEY, embedding vector)")
+        cur.execute("INSERT INTO m21_mixdim VALUES (1, %s::vector), (2, %s::vector)",
+                    (_vec_lit(np.ones(DIM)), _vec_lit(np.ones(DIM + 4))))
+        with pytest.raises(psycopg2.Error) as exc:
+            qlits = [_vec_lit(np.ones(DIM))]
+            cur.execute(
+                "SELECT query_idx FROM theodb.hnsw_knn('m21_mixdim'::regclass, 'embedding', %s::vector[], "
+                "k => 5, ef_search => 40, metric => 'l2')", (qlits,))
+            cur.fetchall()
+        assert exc.value.pgcode == "22023", f"inconsistent dims must be 22023, got {exc.value.pgcode}"
+        cur.execute("DROP TABLE IF EXISTS m21_mixdim")
+
+
+def test_knn_empty_table_returns_zero_rows(conn, data):
+    """An empty source table returns 0 rows (no panic) — the build-over-nothing edge."""
+    _, queries = data
+    with conn.cursor() as cur:
+        cur.execute("DROP TABLE IF EXISTS m21_empty")
+        cur.execute(f"CREATE TABLE m21_empty (id integer PRIMARY KEY, embedding vector({DIM}))")
+        qlits = [_vec_lit(queries[0])]
+        cur.execute(
+            "SELECT count(*) FROM theodb.hnsw_knn('m21_empty'::regclass, 'embedding', %s::vector[], "
+            "k => 5, ef_search => 40, metric => 'l2')", (qlits,))
+        assert cur.fetchone()[0] == 0
+        cur.execute("DROP TABLE IF EXISTS m21_empty")
+
+
+@pytest.mark.parametrize("bad_col", ["embedding; DROP TABLE m21_corpus; --", "e'); DROP TABLE m21_corpus; --", "embedding OR 1=1"])
+def test_knn_injection_in_column_name_rejected(conn, data, bad_col):
+    """A hostile embed_col identifier is rejected by the allowlist (22023) — and the corpus survives."""
+    _, queries = data
+    with conn.cursor() as cur:
+        with pytest.raises(psycopg2.Error) as exc:
+            qlits = [_vec_lit(queries[0])]
+            cur.execute(
+                "SELECT query_idx FROM theodb.hnsw_knn('m21_corpus'::regclass, %s, %s::vector[], "
+                "k => 5, ef_search => 40, metric => 'l2')", (bad_col, qlits))
+            cur.fetchall()
+        assert exc.value.pgcode == "22023", f"injection ident must be 22023, got {exc.value.pgcode}"
+    # the corpus table must still exist (the malicious DDL never executed)
+    with conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM m21_corpus")
+        assert cur.fetchone()[0] == N
+
+
 def test_knn_empty_queries_returns_zero_rows(conn):
     with conn.cursor() as cur:
         cur.execute(
@@ -204,6 +273,8 @@ def test_knn_skips_null_vector_rows(conn, data):
 @pytest.mark.parametrize("sig", [
     "theodb.hnsw_knn(regclass, text, vector[], int, int, int, int, text, text, bigint)",
     "theodb.ivfflat_knn(regclass, text, vector[], int, int, int, text, text, bigint)",
+    "theodb_rs._hnsw_knn(text, text, text, text, real[], int, int, int, int, int, bigint)",
+    "theodb_rs._ivfflat_knn(text, text, text, text, real[], int, int, int, int, bigint)",
 ])
 def test_knn_revoked_from_public(conn, sig):
     with conn.cursor() as cur:
