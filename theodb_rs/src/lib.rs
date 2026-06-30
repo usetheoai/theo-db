@@ -18,6 +18,8 @@ use pgrx::prelude::*;
 mod chat;
 mod embed;
 mod http;
+mod hybrid;
+mod migrate;
 mod nl;
 mod pg;
 
@@ -227,6 +229,90 @@ REVOKE ALL ON FUNCTION theodb_rs._nl_to_sql(text, text[], text) FROM PUBLIC;
 "#,
     name = "theodb_nl_wrappers",
     requires = [_nl_to_sql],
+);
+
+// SQL wrappers: the public hybrid-search surface (M19 — was plpgsql in sql/40, now Rust). Created INTO the
+// existing `ai` schema. The public ai.hybrid_search_rrf keeps its exact named parameters + DEFAULTs (callers
+// use tbl => …, query_vector => … named notation) and the `regclass`/`vector` types pgrx cannot express
+// natively — the thin SQL wrapper bridges them to the text-typed Rust entrypoint (tbl::text, query_vector::text).
+// RETURNS TABLE(id text, score real) preserved. Both REVOKEd from PUBLIC (the embed leg makes outbound HTTP).
+// NOTE (M19 scope decision): hybrid now co-resides with theodb.embed in theodb_rs, so the former cross-extension
+// seam guard scenario (drop theodb_rs, hybrid survives → 0A000) no longer applies — dropping theodb_rs removes
+// both (the function itself → 42883). The defensive 0A000 guard remains for an individually-dropped embed.
+extension_sql!(
+    r#"
+CREATE FUNCTION ai.hybrid_search_rrf(
+    tbl              regclass,
+    id_col           text,
+    content_tsv_col  text,
+    vector_col       text,
+    query_text       text    DEFAULT NULL,
+    query_vector     vector  DEFAULT NULL,
+    k                int     DEFAULT 60,
+    per_leg_limit    int     DEFAULT 20,
+    result_limit     int     DEFAULT 5
+)
+RETURNS TABLE(id text, score real)
+LANGUAGE sql STABLE
+AS $$
+  SELECT id, score FROM theodb_rs._hybrid_search_rrf(
+    tbl::text, id_col, content_tsv_col, vector_col, query_text, query_vector::text,
+    k, per_leg_limit, result_limit)
+$$;
+
+CREATE FUNCTION ai.hybrid_search(config jsonb)
+RETURNS TABLE(id text, score real)
+LANGUAGE sql STABLE
+AS $$ SELECT id, score FROM theodb_rs._hybrid_search_json(config) $$;
+
+COMMENT ON FUNCTION ai.hybrid_search_rrf(regclass, text, text, text, text, vector, int, int, int) IS
+  'Hybrid search: fuse a PostgreSQL FTS leg (ts_rank_cd over a tsvector column) and a pgvector leg (<=>) via '
+  'Reciprocal Rank Fusion (score = sum 1/(k+rank), k default 60 — Cormack et al. 2009). Empty legs handled by '
+  'FULL OUTER JOIN + COALESCE. query_text feeds FTS and, when query_vector is NULL, is embedded via '
+  'theodb.embed. Implemented in Rust (theodb_rs, M19) — orchestrates ONE fusion SQL via SPI (one fusion '
+  'source of truth). Identifier args are %I-quoted (injection-safe). Not granted to PUBLIC.';
+
+COMMENT ON FUNCTION ai.hybrid_search(jsonb) IS
+  'Literal spec-06 JSON surface over ai.hybrid_search_rrf (one fusion definition). Implemented in Rust '
+  '(theodb_rs, M19). Fail-fast 22023 on missing required keys (table, id_col, content_tsv_col, vector_col). '
+  'Not granted to PUBLIC.';
+
+REVOKE ALL ON FUNCTION ai.hybrid_search_rrf(regclass, text, text, text, text, vector, int, int, int) FROM PUBLIC;
+REVOKE ALL ON FUNCTION ai.hybrid_search(jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb_rs._hybrid_search_rrf(text, text, text, text, text, text, int, int, int) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb_rs._hybrid_search_json(jsonb) FROM PUBLIC;
+"#,
+    name = "theodb_hybrid_wrappers",
+    requires = [_hybrid_search_rrf, _hybrid_search_json],
+);
+
+// SQL wrapper: the public migration helper `theodb.import_pinecone` (M19 — was plpgsql in sql/80, now Rust).
+// The chunked PROCEDURE theodb.import_pinecone_chunked STAYS plpgsql (ADR-D — only a plpgsql PROCEDURE can
+// COMMIT per batch). Created INTO the existing `theodb` schema; exact signature + DEFAULTs preserved; REVOKEd
+// from PUBLIC (writes to caller-owned tables). The thin wrapper bridges `regclass` to the text-typed Rust fn.
+extension_sql!(
+    r#"
+CREATE FUNCTION theodb.import_pinecone(
+    target        regclass,
+    export        jsonb,
+    id_col        text DEFAULT 'id',
+    embedding_col text DEFAULT 'embedding',
+    metadata_col  text DEFAULT 'metadata'
+) RETURNS integer
+LANGUAGE sql
+AS $$ SELECT theodb_rs._import_pinecone(target::text, export, id_col, embedding_col, metadata_col) $$;
+
+COMMENT ON FUNCTION theodb.import_pinecone(regclass, jsonb, text, text, text) IS
+  'Import a Pinecone export (JSON array of {id,values,metadata}) into a TheoDB table (id, embedding vector, '
+  'metadata jsonb). Native jsonb (serde); safe dynamic SQL (%I-quoted, regclass-validated, parameter-bound). '
+  'Implemented in Rust (theodb_rs, M19). Fail-fast 22023 on a non-array export or a record missing id/values. '
+  'For large/atomic-vs-chunked imports see theodb.import_pinecone_chunked (PROCEDURE). Not granted to PUBLIC.';
+
+REVOKE ALL ON FUNCTION theodb.import_pinecone(regclass, jsonb, text, text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb_rs._import_pinecone(text, jsonb, text, text, text) FROM PUBLIC;
+"#,
+    name = "theodb_import_wrapper",
+    requires = [_import_pinecone],
 );
 
 // Rust-side unit tests for the input-validation guards (no network needed). The cross-language

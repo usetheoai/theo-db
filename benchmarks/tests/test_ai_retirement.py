@@ -9,7 +9,7 @@ Runs the ACTUAL `sql/theodb--1.1--1.2.sql` delta:
     Rust ai._chat is present. Uses a throwaway database so the real version chain runs.
   * test_owned_ai_preserved — running the delta against the shipped state (theodb_rs-owned ai.*, LANGUAGE sql
     wrappers) is a no-op for the DROP guard: the Rust ai.* survive. Rolled-back tx on the main DB.
-  * test_default_version_is_1_2 — theodb.control ships default_version = '1.2'.
+  * test_default_version_is_current — theodb.control ships default_version = '1.3' (M19).
 """
 import os
 
@@ -55,6 +55,9 @@ def test_upgrade_drops_plpython_ai_then_theodb_rs_installs_clean():
     try:
         with conn.cursor() as cur:
             cur.execute("CREATE EXTENSION theodb VERSION '1.1' CASCADE")
+            # M19: theodb's requires no longer pulls plpython3u via CASCADE — install it explicitly to
+            # reconstruct the v0.17 state (throwaway DB, dropped in teardown).
+            cur.execute("CREATE EXTENSION IF NOT EXISTS plpython3u")
             # Simulate a v0.17-shaped install: a plpython3u ai._chat + the 4 wrappers as theodb members,
             # and an SQL ai.generate that DEPENDS on ai._chat (the dependency the migration must break).
             cur.execute(
@@ -131,6 +134,7 @@ def test_owned_ai_preserved():
         conn.close()
 
 
-def test_default_version_is_1_2():
+def test_default_version_is_current():
+    # M19 bumped default_version to 1.3 (nl/hybrid/import retirement); this file tests the 1.1->1.2 link.
     with open(os.path.join(_REPO, "theodb.control")) as f:
-        assert "default_version = '1.2'" in f.read()
+        assert "default_version = '1.3'" in f.read()

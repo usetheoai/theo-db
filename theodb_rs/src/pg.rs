@@ -25,6 +25,18 @@ pub(crate) fn err_external(msg: &str) -> ! {
     unreachable!()
 }
 
+/// Raise SQLSTATE 0A000 (feature_not_supported) for an unavailable cross-extension seam — e.g. the
+/// hybrid-search fail-fast guard when `theodb.embed` is missing (theodb_rs dropped). Diverges.
+pub(crate) fn err_unsupported(msg: &str) -> ! {
+    pgrx::pg_sys::panic::ErrorReport::new(
+        PgSqlErrorCode::ERRCODE_FEATURE_NOT_SUPPORTED,
+        msg.to_string(),
+        "theodb",
+    )
+    .report(PgLogLevel::ERROR);
+    unreachable!()
+}
+
 /// Emit a WARNING-level server log for a transient, retried failure. Observability for the retry path
 /// (wiring-triad pillar c): without it, a flapping endpoint is invisible until the final hard failure.
 /// Does not diverge — the caller continues to the next retry.

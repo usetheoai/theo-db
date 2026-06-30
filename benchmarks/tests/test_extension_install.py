@@ -59,13 +59,15 @@ def _assert_extension_safe(text, label):
 # ---- pure-file tests (no DB) ------------------------------------------------
 
 def test_control_declares_requires():
-    """theodb.control declares vector, vectorscale AND plpython3u, superuser, not-trusted, no module_pathname."""
+    """theodb.control declares vector, vectorscale (NO plpython3u since M19 — last plpython3u retired),
+    superuser, not-trusted, no module_pathname."""
     text = CONTROL.read_text()
-    assert "requires = 'vector, vectorscale, plpython3u'" in text
+    assert "requires = 'vector, vectorscale'" in text  # M19: plpython3u dropped from requires (100% Rust surface)
+    assert "plpython3u" not in text                    # no plpython3u dependency remains
     assert "superuser = true" in text
     assert "relocatable = false" in text
     assert "module_pathname" not in text   # SQL-only: no .so (M15 ADR D1)
-    assert "trusted = true" not in text     # untrusted plpython3u -> never trusted (M15 ADR D2)
+    assert "trusted = true" not in text     # SQL umbrella stays untrusted/superuser (M15 ADR D2)
 
 
 def test_built_script_is_extension_safe():
@@ -84,7 +86,11 @@ def test_make_builds_install_script(tmp_path):
     """Concatenating the source bodies (the Makefile build path) yields a non-empty script (review M4 fix)."""
     text = _build_install_script_text()
     assert len(text) > 1000  # ~1031 lines of real SQL
-    assert "theodb.embed" in text and "ai.hybrid_search" in text
+    # M17/M19: theodb.embed + ai.hybrid_search + theodb.import_pinecone(FUNCTION) + ai.nl_to_sql moved to the
+    # Rust theodb_rs extension, so they no longer appear in the concatenated SQL install script. Assert markers
+    # for surface that STAYS in the SQL umbrella PARTS (30-70): ai.nl_query (plpgsql L3 keeper) + ai.summarize
+    # (generative). (PARTS excludes sql/80 by design — its chunked PROCEDURE has a COMMIT the safety scan flags.)
+    assert "ai.nl_query" in text and "ai.summarize" in text
 
 
 # ---- DB integration tests ---------------------------------------------------
@@ -142,11 +148,11 @@ def test_extension_installs_full_surface(admin_conn):
                 )
                 assert cur.fetchone() is not None, f"missing documented function {schema}.{fn}"
             cur.execute("SELECT extversion FROM pg_extension WHERE extname='theodb'")
-            assert cur.fetchone()[0] == "1.2"  # default_version bumped to 1.2 (M18 ai.* retirement migration)
+            assert cur.fetchone()[0] == "1.3"  # default_version bumped to 1.3 (M19 nl/hybrid/import retirement)
             cur.execute(
-                "SELECT count(*) FROM pg_extension WHERE extname IN ('vector','vectorscale','plpython3u')"
+                "SELECT count(*) FROM pg_extension WHERE extname IN ('vector','vectorscale')"
             )
-            assert cur.fetchone()[0] == 3  # requires resolved via CASCADE
+            assert cur.fetchone()[0] == 2  # requires (vector, vectorscale) resolved via CASCADE; plpython3u dropped (M19)
     finally:
         conn.close()
 
