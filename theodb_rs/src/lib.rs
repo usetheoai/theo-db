@@ -272,7 +272,8 @@ mod theodb_rs {
     /// baseline is `4·dim`. IMMUTABLE/STRICT (a pure formula).
     #[pg_extern(immutable, parallel_safe, strict)]
     fn _sbq_bytes_per_vector(dim: i32, bits: i32) -> i64 {
-        crate::ann_query::require(dim >= 1, "theodb sbq: dim must be >= 1");
+        // Upper-bound dim too (defensive: keeps dim*bits well within usize/i64, no overflow on any arch).
+        crate::ann_query::require((1..=1_000_000).contains(&dim), "theodb sbq: dim must be in [1, 1000000]");
         crate::ann_query::require((1..=8).contains(&bits), "theodb sbq: bits must be in [1, 8]");
         crate::sbq::SbqQuantizer::bytes_per_vector(dim as usize, bits as u8) as i64
     }
@@ -649,6 +650,8 @@ COMMENT ON FUNCTION theodb.sbq_bytes_per_vector(int, int) IS
 
 REVOKE ALL ON FUNCTION theodb.sbq_knn(regclass, text, vector[], int, int, int, int, int, text, text, bigint) FROM PUBLIC;
 REVOKE ALL ON FUNCTION theodb_rs._sbq_knn(text, text, text, text, real[], int, int, int, int, int, int, bigint) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb.sbq_bytes_per_vector(int, int) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb_rs._sbq_bytes_per_vector(int, int) FROM PUBLIC;
 "#,
     name = "theodb_sbq_wrappers",
     requires = [_sbq_knn, _sbq_bytes_per_vector],

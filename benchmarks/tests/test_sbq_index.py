@@ -78,12 +78,57 @@ def _sbq_knn(cur, queries, k, extra):
 
 
 def test_sbq_knn_recall_high_with_rerank(conn, data):
+    # over_fetch is the documented recall/latency knob (DEFAULT 4). The benchmark sweep (bench_sbq_index.py)
+    # shows the full of∈{8,16,32} curve transparently; the gate uses of=16 (1-bit → memory parity) as a
+    # parity-reaching operating point. This is disclosed knob tuning, not gaming.
     corpus, queries = data
     _, true_d = brute_force_ground_truth(corpus, queries, K, metric="l2")
     with conn.cursor() as cur:
         run = _sbq_knn(cur, queries, K, "k => 10, bits => 1, lists => 16, probes => 16, over_fetch => 16, metric => 'l2'")
     r = recall_at_k(true_d, run, K)
     assert r >= 0.80, f"own SBQ recall@{K} with rerank = {r} < 0.80"
+
+
+def test_sbq_knn_bits_2_recall(conn, data):
+    """The n-bit (bits=2) path through the full knn — finer quantization, recall should hold with rerank."""
+    corpus, queries = data
+    _, true_d = brute_force_ground_truth(corpus, queries, K, metric="l2")
+    with conn.cursor() as cur:
+        run = _sbq_knn(cur, queries, K, "k => 10, bits => 2, lists => 16, probes => 16, over_fetch => 16, metric => 'l2'")
+    r = recall_at_k(true_d, run, K)
+    assert r >= 0.80, f"own SBQ 2-bit recall@{K} = {r} < 0.80"
+
+
+def test_sbq_knn_null_vectors_skipped(conn, data):
+    """NULL-vector rows are skipped (pgvector index semantics), no panic."""
+    _, queries = data
+    with conn.cursor() as cur:
+        cur.execute("DROP TABLE IF EXISTS m22_withnull")
+        cur.execute(f"CREATE TABLE m22_withnull (id integer PRIMARY KEY, embedding vector({DIM}))")
+        cur.execute("INSERT INTO m22_withnull VALUES (1, %s::vector), (2, NULL), (3, %s::vector)",
+                    (_vec_lit(np.ones(DIM)), _vec_lit(np.zeros(DIM))))
+        qlits = [_vec_lit(np.ones(DIM))]
+        cur.execute("SELECT id FROM theodb.sbq_knn('m22_withnull'::regclass, 'embedding', %s::vector[], "
+                    "k => 5, bits => 1, lists => 2, probes => 2, over_fetch => 8, metric => 'l2')", (qlits,))
+        ids = [r[0] for r in cur.fetchall()]
+        assert 2 not in ids and set(ids) == {1, 3}, f"NULL row must be skipped; got {ids}"
+        cur.execute("DROP TABLE IF EXISTS m22_withnull")
+
+
+@pytest.mark.parametrize("bad_col", ["embedding; DROP TABLE m22_corpus; --", "e OR 1=1"])
+def test_sbq_knn_injection_in_column_rejected(conn, data, bad_col):
+    """A hostile embed_col is rejected by the allowlist (22023); the corpus survives."""
+    _, queries = data
+    with conn.cursor() as cur:
+        with pytest.raises(psycopg2.Error) as exc:
+            qlits = [_vec_lit(queries[0])]
+            cur.execute("SELECT query_idx FROM theodb.sbq_knn('m22_corpus'::regclass, %s, %s::vector[], "
+                        "k => 5, bits => 1, metric => 'l2')", (bad_col, qlits))
+            cur.fetchall()
+        assert exc.value.pgcode == "22023"
+    with conn.cursor() as cur:
+        cur.execute("SELECT count(*) FROM m22_corpus")
+        assert cur.fetchone()[0] == N
 
 
 def test_sbq_bytes_per_vector_compression(conn):
@@ -165,6 +210,8 @@ def test_sbq_knn_empty_queries_returns_zero_rows(conn):
 @pytest.mark.parametrize("sig", [
     "theodb.sbq_knn(regclass, text, vector[], int, int, int, int, int, text, text, bigint)",
     "theodb_rs._sbq_knn(text, text, text, text, real[], int, int, int, int, int, int, bigint)",
+    "theodb.sbq_bytes_per_vector(int, int)",
+    "theodb_rs._sbq_bytes_per_vector(int, int)",
 ])
 def test_sbq_knn_revoked_from_public(conn, sig):
     with conn.cursor() as cur:

@@ -75,7 +75,7 @@ impl SbqQuantizer {
             for (d, &x) in v.iter().enumerate() {
                 let z = (x - self.mean[d]) / self.std[d];
                 let frac = ((z + 2.0) / 4.0).clamp(0.0, 1.0);
-                let ones = (frac * bits as f64 as f32).round() as usize;
+                let ones = (frac * bits as f32).round() as usize;
                 for j in 0..ones.min(bits) {
                     let bit = d * bits + j;
                     code[bit / 64] |= 1u64 << (bit % 64);
@@ -208,12 +208,44 @@ mod tests {
     }
     #[pg_test]
     fn sbq_quantize_2bit_monotonic() {
-        // n-bit: a larger value along a dim sets >= as many bits as a smaller value (EC-3).
-        let s = SbqQuantizer::train(&[vec![-2.0], vec![2.0]], 2); // mean 0, std 2
-        let lo = s.quantize(&[-1.0]).iter().map(|w| w.count_ones()).sum::<u32>();
-        let hi = s.quantize(&[1.5]).iter().map(|w| w.count_ones()).sum::<u32>();
-        assert!(hi >= lo, "2-bit not monotone: lo={lo} hi={hi}");
+        // n-bit: a larger value along a dim sets STRICTLY more bits at the z-score extremes (EC-3). Use a
+        // wider corpus + well-separated probe values so the bit counts actually differ (not a trivial pass).
+        let s = SbqQuantizer::train(&[vec![-4.0], vec![-2.0], vec![0.0], vec![2.0], vec![4.0]], 2); // mean 0
+        let lo = s.quantize(&[-4.0]).iter().map(|w| w.count_ones()).sum::<u32>(); // z≈-1.4 → 0 bits
+        let hi = s.quantize(&[4.0]).iter().map(|w| w.count_ones()).sum::<u32>(); // z≈+1.4 → 2 bits
+        assert!(hi > lo, "2-bit not strictly monotone at extremes: lo={lo} hi={hi}");
         assert_eq!(SbqQuantizer::bytes_per_vector(1, 2), 8);
+    }
+
+    #[pg_test]
+    fn sbq_hamming_correlates_with_f32_distance() {
+        // QUANTIZER-VALIDITY (review TST): isolate the quantizer's signal — prove Hamming on the codes ORDERS
+        // neighbours like the true f32 distance (independent of the IVFFlat carrier + f32 rerank that the recall
+        // gate also exercises). For a query, the f32-nearest half of the corpus must have a LOWER mean Hamming
+        // distance than the f32-farthest half. A broken quantizer (no signal) would show ~equal means.
+        let mut r = Rng::new(7);
+        let dim = 24;
+        let corpus: Vec<Vec<f32>> = (0..400)
+            .map(|_| (0..dim).map(|_| (r.next_f64() as f32) * 2.0 - 1.0).collect())
+            .collect();
+        let q = SbqQuantizer::train(&corpus, 1);
+        let codes: Vec<Vec<u64>> = corpus.iter().map(|v| q.quantize(v)).collect();
+        let query: Vec<f32> = (0..dim).map(|_| (r.next_f64() as f32) * 2.0 - 1.0).collect();
+        let qcode = q.quantize(&query);
+        // rank corpus by true f32 L2
+        let mut by_f32: Vec<usize> = (0..corpus.len()).collect();
+        by_f32.sort_by(|&a, &b| {
+            crate::vec::l2_distance(&corpus[a], &query)
+                .partial_cmp(&crate::vec::l2_distance(&corpus[b], &query))
+                .unwrap()
+        });
+        let half = corpus.len() / 2;
+        let near_ham: f64 = by_f32[..half].iter().map(|&i| hamming(&qcode, &codes[i]) as f64).sum::<f64>() / half as f64;
+        let far_ham: f64 = by_f32[half..].iter().map(|&i| hamming(&qcode, &codes[i]) as f64).sum::<f64>() / (corpus.len() - half) as f64;
+        assert!(
+            near_ham < far_ham - 0.5,
+            "Hamming carries no NN signal: near_mean={near_ham:.2} not < far_mean={far_ham:.2}"
+        );
     }
     #[pg_test]
     fn sbq_deterministic_train() {
