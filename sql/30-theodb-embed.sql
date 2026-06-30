@@ -12,5 +12,5 @@
 --   SET theodb.embedding_api_key  = '...';                              -- optional bearer token
 -- Idempotent: safe to re-run / load from docker-entrypoint-initdb.d.
 
--- deps (vector, vectorscale, plpython3u) declared in theodb.control `requires` (M15) — not created here
+-- deps (vector, vectorscale) declared in theodb.control `requires` (M15; plpython3u dropped in M19) — not created here
 CREATE SCHEMA IF NOT EXISTS theodb;

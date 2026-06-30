@@ -74,7 +74,7 @@ Rust já existe — a imagem hoje compila pgvectorscale), com CI, e **reescrever
 
 **Dependencies:** ADR 0006. **Risco:** curva pgrx + HTTP em Rust; mitigado por escopo mínimo (1 função).
 
-### M18 — [ ] Superfície de IA própria em Rust (`ai.*` generativas)
+### M18 — [x] Superfície de IA própria em Rust (`ai.*` generativas)
 
 **Objective:** Reescrever `ai._chat` + `generate`/`if`/`analyze_sentiment`/`summarize`/`rank`/`generate_batch`/
 `agg_summarize` de plpython3u → **Rust/pgrx**, com paridade pelos testes M7/M10/M11.

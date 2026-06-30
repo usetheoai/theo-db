@@ -1,0 +1,167 @@
+agent: review-m19-nl-hybrid-import-rust-cross-validation
+review_target: origin/main..develop for plan m19-nl-hybrid-import-rust
+plan: .claude/knowledge-base/plans/m19-nl-hybrid-import-rust-plan.md
+note_on_baseline: >-
+  Local `main` does not exist; reviewed against origin/main..develop. M19 commits in range:
+  44ce44d (wip nl), b4fbdb9 (nl_to_sql), aa60756 (test fixture), e00a9a6 (hybrid+import),
+  0af2018 (bench), e53f8f0 (clippy/code-quality), 87142e1 (impl summary).
+
+plan_tasks_summary:
+  total_tasks: 6           # T1.1, T1.2, T2.1, T3.1, T4.1, T5.1
+  fully_implemented: 5     # T1.1, T2.1, T3.1, T4.1, T5.1
+  partial: 0
+  missing: 0
+  diverged: 1              # T1.2 (nl_query shipped plpgsql, planned Rust)
+
+acceptance_criteria_summary:
+  total: 18
+  satisfied: 17
+  unverified: 0
+  false_claims: 0
+  diverged: 1              # T1.2 AC ("ai.nl_query is Rust") — met functionally via plpgsql, not Rust
+
+adr_compliance:
+  total_adrs: 5            # plan D1..D5
+  respected: 5             # D1 EXPLAIN-via-SPI, D2 stdlib L2, D3 RRF/import via SPI, D4 chunked plpgsql, D5 retirement
+  diverged_without_new_adr: 0
+  notes: >-
+    All five plan ADRs (D1..D5) are respected in code. TWO divergences from the plan BODY exist, each
+    carried by an ADR that lives ONLY in the implementation summary / code comments, NOT in the frozen plan:
+    (1) ADR-F — ai.nl_query stays plpgsql (plan T1.2 said Rust); (2) the hybrid co-residency scope pivot
+    (user AskUserQuestion) which changed the embed-seam guard scenario from 0A000 to 42883. Documented, not
+    silent — but the plan was never amended, so they surface here as plan-vs-impl divergences (MEDIUM).
+
+plan_drift:
+  plan_edited_after_implement: false
+  details: >-
+    Plan committed once at 2026-06-30 05:33 (72ac7cb); first code commit b4fbdb9 at 06:41. `git log` on the
+    plan file shows no later edit. Plan was frozen since implement start — review is reliable.
+
+dod_verdicts:
+  dod_1_nl_anti_injection_L1_L4_rust:
+    verdict: MET_WITH_DIVERGENCE
+    detail: >-
+      L1 (prompt), L2 (single-stmt + SELECT/WITH + 29-keyword denylist + DO$$/CALL, stdlib scan) and L4
+      (EXPLAIN FORMAT JSON via SPI + serde_json relation walk) are 100% Rust in theodb_rs/src/nl.rs. Every
+      injection case rejected with 22023; write→25006. Parity oracle test_nl_sql.py (35 incl 12 injection
+      cases) is UNCHANGED and reported green (167 passed / 7 skipped). DIVERGENCE: L3 (read-only sandbox in
+      ai.nl_query) is NOT in Rust — it stays a plpgsql keeper (impl ADR-F), contrary to plan T1.2 /
+      Objective bullet 2 / Coverage Matrix row 2 which said "ai.nl_query is Rust". The anti-injection CORE
+      (L1/L2/L4) is Rust; the regression is fully blocked; only L3's execution shell stays plpgsql.
+  dod_2_hybrid_rrf_and_import_rust_parity:
+    verdict: MET_WITH_SCOPE_PIVOT
+    detail: >-
+      ai.hybrid_search_rrf + ai.hybrid_search(jsonb) (hybrid.rs) and theodb.import_pinecone (migrate.rs) are
+      Rust #[pg_extern]s orchestrating the identical RRF / INSERT SQL via SPI with native %I quoting,
+      'english' FTS pin, score DESC/id ASC tie-break, k/limit 22023 validation, regclass-safe identifiers
+      (plan ADR D3). Parity proven by UNCHANGED test_hybrid.py (offline RRF twin) + test_integration.py +
+      test_unified import cases. import_pinecone_chunked PROCEDURE stays plpgsql (plan ADR D4 — in-plan, OK).
+      SCOPE PIVOT (mid-implementation, NOT an in-plan ADR): a user AskUserQuestion moved hybrid fully into
+      theodb_rs co-resident with theodb.embed; the embed cross-extension seam no longer exists, so
+      test_hybrid_guard was re-pointed from asserting 0A000 to 42883. The defensive 0A000 guard remains in
+      hybrid.rs for an individually-dropped embed. Functional parity intact; plan body not amended.
+  dod_3_plpython3u_removed_readme_extension_100pct_rust:
+    verdict: MET (with an honest-wording caveat)
+    detail: >-
+      theodb.control: requires = 'vector, vectorscale' (plpython3u dropped), default_version = '1.3'.
+      sql/theodb--1.2--1.3.sql guard-DROPs legacy theodb-owned nl_to_sql + hybrid_search(_rrf) + import_pinecone.
+      grep 'LANGUAGE plpython3u' over sql/ == 0. README plpython3u managed-PG limitation note removed/replaced
+      and CREATE EXTENSION comment de-references plpython3u. test_extension_install / retirement tests assert
+      extversion 1.3, requires sans plpython3u, pg_extension count 2 (not 3). CAVEAT: "extension 100% Rust" is
+      not literally true — ai.nl_query + import_pinecone_chunked are plpgsql, the public wrappers are LANGUAGE
+      sql. The precise, honest claim "100% plpython3u-free" IS satisfied; the impl documents the plpgsql
+      keepers openly (Rule 3 honesty upheld).
+
+findings:
+  - id: F-xval-1
+    severity: MEDIUM
+    file: theodb_rs/src/nl.rs:121
+    plan_ref: T1.2 (nl_query Rust port) / Objective bullet 2 / Coverage Matrix row 2
+    summary: >-
+      ai.nl_query (L3 read-only sandbox) was planned as a Rust function but shipped as a plpgsql keeper
+      (sql/60). Documented in the implementation as "ADR-F", but that ADR is not in the frozen plan.
+    evidence: |
+      Plan T1.2: "ai.nl_query is Rust orchestrating the L3 read-only sandbox (write → 25006)";
+      Files-to-edit lists "theodb_rs/src/nl.rs — nl_query (SPI sandbox + execute)".
+      Reality: nl.rs has NO nl_query fn — comment nl.rs:121 + sql/60:18-56 keep it plpgsql.
+      Rationale (sound): nested Rust nl_query → Rust nl_to_sql breaks the L4 EXPLAIN-over-SPI;
+      keeping nl_query plpgsql lets it call ai.nl_to_sql at SQL level in a clean context.
+      Functionally at parity: test_nl_sql.py nl_query/L3 cases UNCHANGED and green.
+    recommended_action: >-
+      Accept the divergence (technically justified, anti-injection core is Rust, oracle green) but
+      promote ADR-F into the plan record (or an implementation ADR file) so the plan-vs-impl contract is
+      reconciled; correct the lib.rs:99 comment ("L3 sandbox, now Rust") which overstates L3 as Rust.
+
+  - id: F-xval-2
+    severity: MEDIUM
+    file: theodb_rs/src/lib.rs:239 (and benchmarks/tests/test_hybrid_guard.py)
+    plan_ref: T2.1 + plan ADR D3 ("preserve the embed-seam guard → 0A000")
+    summary: >-
+      The hybrid scope decision (hybrid co-resides with theodb.embed in theodb_rs) was a mid-implementation
+      pivot via user AskUserQuestion, not an in-plan ADR. It changed the seam-guard test scenario from
+      asserting 0A000 to asserting 42883 — i.e. a named parity/guard test was modified.
+    evidence: |
+      Impl summary Phase 2: "Scope decision (user, AskUserQuestion): hybrid moves fully into theodb_rs".
+      test_hybrid_guard.py: test_absent_raises_0A000 → test_absent_raises_undefined (42883).
+      Plan ADR D3 lists "preserve the embed-seam guard (...→0A000)" as a consequence to keep.
+      Mitigant: the 0A000 err_unsupported guard REMAINS in hybrid.rs:94-98 for an individually-dropped
+      embed; RRF parity is proven by the UNCHANGED test_hybrid.py + test_integration.py.
+    recommended_action: >-
+      Record the AskUserQuestion scope decision as a formal implementation ADR so the D3-consequence change
+      is auditable; no code change required (guard retained, parity intact).
+
+  - id: F-xval-3
+    severity: LOW
+    file: benchmarks/tests/test_unified.py:97
+    plan_ref: Global DoD ("test_unified.py (11) green vs the rebuilt image — UNCHANGED test files")
+    summary: >-
+      test_unified.py was modified (CREATE EXTENSION theodb CASCADE → theodb_rs CASCADE) despite the plan
+      listing it among the parity oracles that "stay green UNCHANGED".
+    evidence: |
+      Diff changes _fresh_db_with_ext fixture; impl summary acknowledges it as test-maintenance
+      ("latent gap since M18 — ai._chat moved"). Change is to the install fixture, not to assertion/oracle
+      logic. test_nl_sql.py and test_hybrid.py (the other two named oracles) are genuinely UNCHANGED.
+    recommended_action: >-
+      Accept (necessary, correct maintenance) but note the DoD wording "UNCHANGED" was not literally held
+      for test_unified.py; it is a fixture fix, not an oracle weakening.
+
+  - id: F-xval-4
+    severity: LOW
+    file: sql/30-theodb-embed.sql:15, sql/50-theodb-ai.sql:15
+    plan_ref: T4.1 (plpython3u-free surface) / Rule 6 doc accuracy
+    summary: >-
+      Two source comments still state plpython3u is declared in theodb.control requires, now stale after
+      M19 removed it.
+    evidence: |
+      sql/30:15 "deps (vector, vectorscale, plpython3u) declared in theodb.control requires";
+      sql/50:15 "dep (plpython3u) still declared in theodb.control requires until M19".
+      Actual control: requires = 'vector, vectorscale' (plpython3u removed).
+    recommended_action: Update the two comments to drop plpython3u (doc-drift; no behavioral impact).
+
+  - id: F-xval-5
+    severity: INFO
+    file: docs/benchmarks/m19-nl-rust-vs-plpython.md vs commit 0af2018
+    plan_ref: T5.1 (benchmark report)
+    summary: >-
+      Benchmark ratio is internally consistent at 0.883 in the committed report AND the implementation
+      summary, but commit 0af2018's message says "0.922x" (stale, pre-final re-run).
+    evidence: |
+      Report: "Ratio Rust/plpython3u: 0.883", 5 runs × 20 calls, mean±std + p95 (meets ≥3-runs DoD).
+      Commit 0af2018 subject: "no-regression (0.922x)". No impact on the no-regression verdict.
+    recommended_action: None required; note the commit-message number is superseded by the committed report.
+
+positive_findings:
+  - No plan drift (plan frozen since before implement start).
+  - No new crate (Cargo.toml diff empty) — ADR D1/D2 "no sqlparser/regex" honored.
+  - CHANGELOG [Unreleased] § Changed updated (Rule 6).
+  - L4 EXPLAIN-via-SPI + serde_json walk faithfully ports the plpython3u allowlist (D1).
+  - %I/regclass injection-safety preserved via Postgres format() over SPI in both hybrid.rs and migrate.rs (D3).
+  - Coverage Matrix rows 1,3,4,5,6,7,8,9,10 fully satisfied; row 2 (nl_query) met functionally via plpgsql keeper.
+
+overall_verdict: >-
+  No BLOCKER, no HIGH. All three DoDs are functionally met and the injection regression is fully blocked
+  by the UNCHANGED test_nl_sql/test_hybrid oracles (167 passed / 7 skipped reported). Two MEDIUM
+  plan-vs-implementation divergences exist (nl_query plpgsql keeper; hybrid co-residency scope pivot) —
+  both technically justified and documented in the implementation, but carried by ADRs that were never
+  folded back into the frozen plan. Recommended action is reconciliation (promote ADR-F + the
+  AskUserQuestion scope decision into the plan/ADR record), not code reversion.

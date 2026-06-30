@@ -8,7 +8,7 @@ states, each inside a transaction that is ROLLED BACK (non-destructive):
     clash).
   * test_owned_embed_preserved        — the real shipped state: theodb.embed is the Rust (LANGUAGE sql)
     wrapper owned by theodb_rs. The delta must NOT drop it (the guard spares the Rust one).
-  * test_default_version_is_1_1       — theodb.control ships default_version = '1.1' (static check).
+  * test_default_version_is_current   — theodb.control ships default_version = '1.3' (M19; static check).
 
 Run against a rebuilt container started with `--add-host=host.docker.internal:host-gateway`, PG* env set.
 """
@@ -52,6 +52,9 @@ def test_upgrade_drops_plpython_embed():
     try:
         with conn.cursor() as cur:
             cur.execute("DROP EXTENSION theodb_rs")  # remove the Rust theodb.embed (+ embed_batch)
+            # M19: theodb no longer requires plpython3u, so the language is not auto-installed — create it
+            # explicitly to simulate a v0.x install that had it (rolled back at teardown; non-destructive).
+            cur.execute("CREATE EXTENSION IF NOT EXISTS plpython3u")
             cur.execute(
                 "CREATE FUNCTION theodb.embed(content text, model text DEFAULT NULL) "
                 "RETURNS text LANGUAGE plpython3u AS $py$ return '[0,0]' $py$"
@@ -104,6 +107,9 @@ def test_real_upgrade_path_drops_member_embed_then_theodb_rs_installs_clean():
     try:
         with conn.cursor() as cur:
             cur.execute("CREATE EXTENSION theodb VERSION '1.0' CASCADE")
+            # M19: theodb's requires no longer pulls plpython3u via CASCADE — install it explicitly to
+            # reconstruct the v0.x state where the legacy plpython3u embed existed (throwaway DB, teardown drops).
+            cur.execute("CREATE EXTENSION IF NOT EXISTS plpython3u")
             # Seed the legacy plpython3u embed AS A theodb MEMBER (mirrors a real v0.x install).
             cur.execute(
                 "CREATE FUNCTION theodb.embed(content text, model text DEFAULT NULL) "
@@ -127,8 +133,9 @@ def test_real_upgrade_path_drops_member_embed_then_theodb_rs_installs_clean():
         admin.close()
 
 
-def test_default_version_is_1_1():
-    # theodb.control must ship default_version = '1.1' so fresh installs + UPDATE land on the retired state.
+def test_default_version_is_current():
+    # theodb.control ships default_version = '1.3' (M19) so fresh installs + UPDATE land on the fully-retired
+    # state (the M17 1.0->1.1 embed delta tested here is one link in the 1.0->1.1->1.2->1.3 chain).
     with open(os.path.join(_REPO, "theodb.control")) as f:
         control = f.read()
-    assert "default_version = '1.1'" in control
+    assert "default_version = '1.3'" in control

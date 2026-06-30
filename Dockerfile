@@ -99,7 +99,7 @@ RUN set -eux; \
     cat sql/30-theodb-embed.sql sql/40-theodb-hybrid.sql sql/50-theodb-ai.sql \
         sql/60-theodb-nl.sql sql/61-theodb-nl-config.sql sql/70-theodb-ml.sql \
         sql/80-theodb-migrate.sql > sql/theodb--1.0.sql; \
-    install -m 0644 theodb.control sql/theodb--1.0.sql sql/theodb--1.0--1.1.sql sql/theodb--1.1--1.2.sql \
+    install -m 0644 theodb.control sql/theodb--1.0.sql sql/theodb--1.0--1.1.sql sql/theodb--1.1--1.2.sql sql/theodb--1.2--1.3.sql \
         "/usr/share/postgresql/$PG_MAJOR/extension/"; \
     rm -rf /tmp/theodb
 
