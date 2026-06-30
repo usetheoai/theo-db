@@ -87,7 +87,7 @@ Rust já existe — a imagem hoje compila pgvectorscale), com CI, e **reescrever
 
 **Dependencies:** M17.
 
-### M19 — [ ] NL→SQL + híbrida + import próprios em Rust (fim do plpython3u)
+### M19 — [x] NL→SQL + híbrida + import próprios em Rust (fim do plpython3u)
 
 **Objective:** Reescrever `ai.nl_to_sql`/`nl_query` (allowlist parser-grade), `ai.hybrid_search(_rrf)` e
 `theodb.import_pinecone` → Rust, com paridade pelos testes M12/M13/M16. Após este milestone, a extensão
