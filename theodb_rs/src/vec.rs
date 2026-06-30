@@ -60,13 +60,10 @@ pub(crate) fn cosine_distance(a: &[f32], b: &[f32]) -> f64 {
         norma += x * x;
         normb += y * y;
     }
-    // Use sqrt(a * b) over sqrt(a) * sqrt(b) — byte-for-byte with pgvector (vector.c:659).
-    let mut similarity = sim as f64 / ((norma as f64) * (normb as f64)).sqrt();
-    if similarity > 1.0 {
-        similarity = 1.0;
-    } else if similarity < -1.0 {
-        similarity = -1.0;
-    }
+    // Use sqrt(a * b) over sqrt(a) * sqrt(b) — byte-for-byte with pgvector (vector.c:659). Clamp to [-1,1]
+    // (pgvector's `if sim > 1 ... else if sim < -1 ...`, vector.c:683-688); `.clamp` is equivalent for finite,
+    // inf (→ bound), and NaN (→ NaN) inputs, so parity holds.
+    let similarity = (sim as f64 / ((norma as f64) * (normb as f64)).sqrt()).clamp(-1.0, 1.0);
     1.0 - similarity
 }
 
@@ -76,7 +73,7 @@ pub(crate) fn cosine_distance(a: &[f32], b: &[f32]) -> f64 {
 // pgvector's live functions; these document + lock the f32-parity contract. Oracle values from pgvector's
 // regression suite (test/sql/vector_type.sql).
 #[cfg(any(test, feature = "pg_test"))]
-#[pg_schema]
+#[pgrx::pg_schema]
 mod tests {
     use super::*;
     use pgrx::prelude::*;
