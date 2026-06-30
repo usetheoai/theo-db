@@ -1,4 +1,4 @@
-//! Domain layer (blueprint M19, ADR-C): hybrid search (FTS + vector) fused by Reciprocal Rank Fusion,
+//! SPI-orchestration adapter (blueprint M19, ADR-C): hybrid search (FTS + vector) fused by Reciprocal Rank Fusion,
 //! ported from the plpgsql `ai.hybrid_search_rrf`/`ai.hybrid_search` (sql/40). The Rust function is the
 //! ENTRYPOINT and owns orchestration; the RRF fusion itself stays ONE SQL string (RANK per leg → FULL
 //! OUTER JOIN → summed COALESCE(1/(k+rank))), run via SPI. We do NOT reimplement RRF/RANK/FULL-OUTER-JOIN
@@ -12,6 +12,7 @@
 //! result_limit must be > 0 and at least one of query_text/query_vector must be present (22023); the
 //! `theodb.embed` seam is guarded with 0A000 when theodb_rs (and thus embed) was dropped.
 use pgrx::prelude::*;
+use serde_json::Value;
 
 use crate::pg::{err_input, err_unsupported};
 
@@ -48,7 +49,7 @@ LIMIT $5"#;
 /// correctly quoted by Postgres). `query_vector_text` is the pgvector value rendered as text (or None).
 /// Diverges (typed error) on any guard violation; otherwise returns `(id, score)` ordered by fused score.
 #[allow(clippy::too_many_arguments)]
-fn run_rrf(
+pub(crate) fn run_rrf(
     tbl_text: &str,
     id_col: &str,
     content_tsv_col: &str,
@@ -143,68 +144,33 @@ fn run_rrf(
         out
     })
 }
+/// Parse the `ai.hybrid_search(jsonb)` config and delegate to `run_rrf` (one fusion source of truth).
+/// Required keys missing → 22023. Returns the fused rows. Called by the `#[pg_extern]` in `lib.rs`.
+pub(crate) fn run_rrf_json(cfg: Value) -> Vec<(String, f32)> {
+    let get_str = |k: &str| cfg.get(k).and_then(|v| v.as_str());
+    let (table, id_col, content_tsv_col, vector_col) =
+        match (get_str("table"), get_str("id_col"), get_str("content_tsv_col"), get_str("vector_col")) {
+            (Some(t), Some(i), Some(c), Some(v)) => (t, i, c, v),
+            _ => err_input(
+                "ai.hybrid_search: config must include table, id_col, content_tsv_col, vector_col",
+            ),
+        };
+    let query_text = get_str("query_text");
+    let query_vector = get_str("query_vector");
+    let as_i32 = |k: &str, d: i32| cfg.get(k).and_then(|v| v.as_i64()).map(|n| n as i32).unwrap_or(d);
+    let k = as_i32("k", 60);
+    let per_leg_limit = as_i32("per_leg_limit", 20);
+    let result_limit = as_i32("result_limit", 5);
 
-#[pg_schema]
-mod theodb_rs {
-    use super::run_rrf;
-    use crate::pg::err_input;
-    use pgrx::prelude::*;
+    // Resolve the bare table name to a regclass::text (same as the plpgsql `(config->>'table')::regclass`
+    // then `tbl::text`) — Postgres quotes it safely; a non-existent relation raises naturally.
+    let tbl_text = Spi::get_one_with_args::<String>("SELECT ($1)::regclass::text", &[table.into()])
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| err_input("ai.hybrid_search: table does not resolve to a relation"));
 
-    /// api-surface: the RRF hybrid-search entrypoint (the SQL `ai.hybrid_search_rrf`). The public wrapper
-    /// passes `tbl::text` (regclass→quoted name) and `query_vector::text`; this returns the fused table.
-    #[pg_extern]
-    #[allow(clippy::too_many_arguments)]
-    fn _hybrid_search_rrf(
-        tbl_text: &str,
-        id_col: &str,
-        content_tsv_col: &str,
-        vector_col: &str,
-        query_text: Option<&str>,
-        query_vector_text: Option<&str>,
-        k: i32,
-        per_leg_limit: i32,
-        result_limit: i32,
-    ) -> TableIterator<'static, (name!(id, String), name!(score, f32))> {
-        let rows = run_rrf(
-            tbl_text, id_col, content_tsv_col, vector_col, query_text, query_vector_text, k,
-            per_leg_limit, result_limit,
-        );
-        TableIterator::new(rows)
-    }
-
-    /// api-surface: the literal spec-06 JSON surface (the SQL `ai.hybrid_search(jsonb)`). Parses the config
-    /// and delegates to the SAME `run_rrf` (one fusion source of truth). Required keys missing → 22023.
-    #[pg_extern]
-    fn _hybrid_search_json(
-        config: pgrx::JsonB,
-    ) -> TableIterator<'static, (name!(id, String), name!(score, f32))> {
-        let cfg = config.0;
-        let get_str = |k: &str| cfg.get(k).and_then(|v| v.as_str());
-        let (table, id_col, content_tsv_col, vector_col) =
-            match (get_str("table"), get_str("id_col"), get_str("content_tsv_col"), get_str("vector_col")) {
-                (Some(t), Some(i), Some(c), Some(v)) => (t, i, c, v),
-                _ => err_input(
-                    "ai.hybrid_search: config must include table, id_col, content_tsv_col, vector_col",
-                ),
-            };
-        let query_text = get_str("query_text");
-        let query_vector = get_str("query_vector");
-        let as_i32 = |k: &str, d: i32| cfg.get(k).and_then(|v| v.as_i64()).map(|n| n as i32).unwrap_or(d);
-        let k = as_i32("k", 60);
-        let per_leg_limit = as_i32("per_leg_limit", 20);
-        let result_limit = as_i32("result_limit", 5);
-
-        // Resolve the bare table name to a regclass::text (same as the plpgsql `(config->>'table')::regclass`
-        // then `tbl::text`) — Postgres quotes it safely; a non-existent relation raises naturally.
-        let tbl_text = Spi::get_one_with_args::<String>("SELECT ($1)::regclass::text", &[table.into()])
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| err_input("ai.hybrid_search: table does not resolve to a relation"));
-
-        let rows = run_rrf(
-            &tbl_text, id_col, content_tsv_col, vector_col, query_text, query_vector, k,
-            per_leg_limit, result_limit,
-        );
-        TableIterator::new(rows)
-    }
+    run_rrf(
+        &tbl_text, id_col, content_tsv_col, vector_col, query_text, query_vector, k, per_leg_limit,
+        result_limit,
+    )
 }

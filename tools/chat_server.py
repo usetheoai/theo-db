@@ -62,6 +62,8 @@ def _decide(system: str, user: str) -> str:
         return "SELECT pg_read_file('/etc/passwd')"
     if "__nlinject_relation__" in usr_l:
         return "SELECT * FROM pg_authid"  # a non-allowlisted relation
+    if "__nlinject_noplan__" in usr_l:
+        return "SELECT * FROM no_such_relation_xyz"  # references a NON-EXISTENT relation -> EXPLAIN cannot plan
     if "__nlinject_commajoin__" in usr_l:
         return "SELECT documents.content, secret.k FROM documents, secret"  # comma-join exfil (L4 bypass attempt)
     if "__nlinject_quoted__" in usr_l:

@@ -116,6 +116,17 @@ def test_nl_to_sql_inject_non_allowlisted_relation_rejected(conn, chat_server):
             cur.execute("SELECT ai.nl_to_sql('__NLINJECT_RELATION__', ARRAY['documents'])")
 
 
+def test_nl_to_sql_unplannable_query_rejected_22023(conn, chat_server):
+    # L4: a generated SELECT over a NON-EXISTENT relation cannot be planned. The Rust port traps the planner
+    # error (PgTryBuilder) and re-raises it as the contracted SQLSTATE 22023 "did not plan (rejected)" — parity
+    # with the plpython3u try/except → plpy.error(22023). Fail-closed: the query is never executed.
+    with conn.cursor() as cur:
+        _setup(cur, chat_server)
+        with pytest.raises(psycopg2.errors.InvalidParameterValue) as exc:  # 22023, not the planner's 42P01
+            cur.execute("SELECT ai.nl_to_sql('__NLINJECT_NOPLAN__', ARRAY['no_such_relation_xyz'])")
+        assert "did not plan" in str(exc.value)
+
+
 def test_nl_to_sql_empty_allowlist_rejected(conn, chat_server):
     with conn.cursor() as cur:
         _setup(cur, chat_server)

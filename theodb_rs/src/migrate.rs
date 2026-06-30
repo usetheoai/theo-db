@@ -1,4 +1,4 @@
-//! Domain layer (blueprint M19, ADR-C): the Pinecone import migration helper, ported from the plpgsql
+//! SPI-orchestration adapter (blueprint M19, ADR-C): the Pinecone import migration helper, ported from the plpgsql
 //! `theodb.import_pinecone` FUNCTION (sql/80). Maps a Pinecone export {id, values, metadata} → a relational
 //! table (id, embedding vector, metadata jsonb). The Rust function owns the loop + native jsonb parsing
 //! (serde — no pinecone client, no stdlib json dependency); the INSERT is built with Postgres-native `%I`
@@ -21,7 +21,7 @@ const INSERT_TEMPLATE: &str = "INSERT INTO %1$s (%2$I, %3$I, %4$I) VALUES ($1, $
 
 /// Import a Pinecone export into `target` and return the number of records inserted. `target_text` is a
 /// `regclass::text` (already correctly quoted by Postgres). Diverges (22023) on a malformed export.
-fn import(
+pub(crate) fn import(
     target_text: &str,
     export: Value,
     id_col: &str,
@@ -78,23 +78,4 @@ fn import(
         }
         n
     })
-}
-
-#[pg_schema]
-mod theodb_rs {
-    use super::import;
-    use pgrx::prelude::*;
-
-    /// api-surface: the Pinecone import entrypoint (the SQL `theodb.import_pinecone`). The public wrapper
-    /// passes `target::text` (regclass→quoted name). Returns the count of inserted records.
-    #[pg_extern]
-    fn _import_pinecone(
-        target_text: &str,
-        export: pgrx::JsonB,
-        id_col: &str,
-        embedding_col: &str,
-        metadata_col: &str,
-    ) -> i32 {
-        import(target_text, export.0, id_col, embedding_col, metadata_col)
-    }
 }

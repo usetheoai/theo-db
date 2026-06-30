@@ -104,6 +104,51 @@ mod theodb_rs {
         let refs: Vec<Option<&str>> = allowed_relations.iter().map(|o| o.as_deref()).collect();
         crate::nl::nl_to_sql(question, &refs, model)
     }
+
+    // ── M19: hybrid search (RRF) — Rust entrypoints orchestrating the fusion SQL via SPI (crate::hybrid) ──
+    /// `theodb_rs._hybrid_search_rrf` — the RRF hybrid-search entrypoint (the SQL `ai.hybrid_search_rrf`).
+    /// The public wrapper passes `tbl::text` (regclass→quoted name) and `query_vector::text`.
+    #[pg_extern]
+    #[allow(clippy::too_many_arguments)]
+    fn _hybrid_search_rrf(
+        tbl_text: &str,
+        id_col: &str,
+        content_tsv_col: &str,
+        vector_col: &str,
+        query_text: Option<&str>,
+        query_vector_text: Option<&str>,
+        k: i32,
+        per_leg_limit: i32,
+        result_limit: i32,
+    ) -> TableIterator<'static, (name!(id, String), name!(score, f32))> {
+        TableIterator::new(crate::hybrid::run_rrf(
+            tbl_text, id_col, content_tsv_col, vector_col, query_text, query_vector_text, k,
+            per_leg_limit, result_limit,
+        ))
+    }
+
+    /// `theodb_rs._hybrid_search_json` — the literal spec-06 JSON surface (the SQL `ai.hybrid_search(jsonb)`).
+    /// Delegates to the SAME fusion as `_hybrid_search_rrf` (one fusion source of truth). Missing keys → 22023.
+    #[pg_extern]
+    fn _hybrid_search_json(
+        config: pgrx::JsonB,
+    ) -> TableIterator<'static, (name!(id, String), name!(score, f32))> {
+        TableIterator::new(crate::hybrid::run_rrf_json(config.0))
+    }
+
+    // ── M19: Pinecone import — Rust loop + %I-quoted INSERT via SPI (crate::migrate) ─────────────────────
+    /// `theodb_rs._import_pinecone` — the Pinecone import entrypoint (the SQL `theodb.import_pinecone`).
+    /// The public wrapper passes `target::text` (regclass→quoted name). Returns the count of inserted records.
+    #[pg_extern]
+    fn _import_pinecone(
+        target_text: &str,
+        export: pgrx::JsonB,
+        id_col: &str,
+        embedding_col: &str,
+        metadata_col: &str,
+    ) -> i32 {
+        crate::migrate::import(target_text, export.0, id_col, embedding_col, metadata_col)
+    }
 }
 
 // SQL wrapper: the public `theodb.embed(content, model DEFAULT NULL) RETURNS vector`. Casts the Rust

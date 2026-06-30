@@ -1,6 +1,7 @@
-//! pg-glue layer (blueprint ADR-1): the boundary between TheoDB's portable domain logic and
-//! PostgreSQL/pgrx internals — typed-error `ereport` + session-GUC reads. Nothing here is
-//! embedding-specific; it is the only module that talks to the Postgres ABI.
+//! pg-glue layer (blueprint ADR-1): typed-error `ereport` helpers + session-GUC reads shared across modules.
+//! The portable modules (`embed`, `chat`) route ALL their ABI access through here; the SPI-orchestration
+//! adapters (`nl`, `hybrid`, `migrate`) additionally call `Spi`/pgrx directly (the accepted ADR-C boundary).
+//! Nothing here is embedding-specific.
 use pgrx::prelude::*;
 
 /// Raise SQLSTATE 22023 (invalid_parameter_value) for input/config errors. Diverges.

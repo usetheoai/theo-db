@@ -1,5 +1,7 @@
-//! Domain layer (blueprint M19): safe natural-language → SQL with layered anti-prompt-injection guards,
-//! ported from the plpython3u `ai.nl_to_sql`/`ai.nl_query` (sql/60) — the LAST plpython3u in the surface.
+//! SPI-orchestration adapter (blueprint M19): safe natural-language → SQL with layered anti-prompt-injection
+//! guards, ported from the plpython3u `ai.nl_to_sql`/`ai.nl_query` (sql/60) — the LAST plpython3u in the
+//! surface. Unlike the portable `embed`/`chat` modules (all ABI access via `crate::pg`), this module talks to
+//! Postgres directly through `Spi`/pgrx (the L4 EXPLAIN call) — that SPI use IS the accepted ADR-C boundary.
 //!
 //! Defense (does NOT trust the LLM):
 //! - L1 — prompt constraint (hardening; the system prompt is byte-identical so the stub routes on it).
@@ -89,18 +91,21 @@ pub(crate) fn nl_to_sql(question: Option<&str>, allowed: &[Option<&str>], model:
     // SELECT/WITH with no ';' (L2(a)), so interpolating it into one EXPLAIN command cannot break out.
     let explain = format!("EXPLAIN (FORMAT JSON, VERBOSE false) {sql}");
     // Run EXPLAIN via SPI (it PLANS, does not execute). `Spi::get_one` manages its own SPI_connect, so it
-    // works at any nesting depth (top-level OR nested under ai.nl_query) — exactly like the guc reads. A
-    // genuinely un-plannable query (unknown relation / syntax) raises a Postgres ERROR that propagates as a
-    // clean rejection (fail-closed). NOTE: we deliberately do NOT wrap this in PgTryBuilder — its PG_TRY
-    // subtransaction breaks the nested-SPI EXPLAIN (the planner call then fails even for a valid query).
-    // EXPLAIN (FORMAT JSON) returns a `json`-typed column (oid 114) — read it as pgrx::Json (NOT String,
-    // which is TEXTOID and type-mismatches). `Spi::get_one` manages its own SPI_connect, so this works at any
-    // nesting depth (standalone OR under ai.nl_query). An un-plannable query raises a PG ERROR that propagates
-    // as a clean rejection (fail-closed).
-    let plan: Value = match Spi::get_one::<pgrx::Json>(&explain) {
-        Ok(Some(j)) => j.0,
-        Ok(None) => err_input("ai.nl_to_sql: query did not plan (rejected): empty plan"),
-        Err(e) => err_input(&format!("ai.nl_to_sql: query did not plan (rejected): {e:?}")),
+    // works at any nesting depth (top-level OR nested under ai.nl_query). EXPLAIN (FORMAT JSON) returns a
+    // `json`-typed column (oid 114) → read it as pgrx::Json (NOT String, which is TEXTOID and type-mismatches).
+    // A genuinely un-plannable query (unknown relation / syntax) raises a Postgres ERROR that, in SPI, longjmps
+    // out — so to RE-RAISE it as the plan's contracted SQLSTATE 22023 "did not plan (rejected)" (parity with
+    // the plpython3u `try/except → plpy.error(22023)`, ADR consequence), we trap it with PgTryBuilder and
+    // convert to None. This is the pgrx-idiomatic catch-and-continue (cf. pgrx's own tupdesc.rs); the trap is
+    // around the planner call only, fail-closed either way (an un-plannable query is never executed).
+    let plan_opt: Option<Value> = PgTryBuilder::new(|| {
+        Spi::get_one::<pgrx::Json>(&explain).ok().flatten().map(|j| j.0)
+    })
+    .catch_others(|_| None)
+    .execute();
+    let plan: Value = match plan_opt {
+        Some(j) => j,
+        None => err_input("ai.nl_to_sql: query did not plan (rejected)"),
     };
     let mut rels: Vec<(String, String)> = Vec::new();
     collect_relations(&plan, &mut rels);
@@ -277,5 +282,75 @@ fn collect_relations(node: &Value, acc: &mut Vec<(String, String)>) {
             }
         }
         _ => {}
+    }
+}
+
+// Rust unit tests for the pure L2/L4 helpers (plan T1.1: "a Rust unit test per L2 rule"). These assert the
+// byte-faithful parity with the plpython3u `\b…\b` regex semantics WITHOUT a DB — a refactor that weakens the
+// anti-injection scan fails here at `cargo pgrx test`, not only in the slow Python image oracle. The
+// end-to-end cross-language parity stays proven by benchmarks/tests/test_nl_sql.py (35).
+#[cfg(any(test, feature = "pg_test"))]
+#[pg_schema]
+mod nl_tests {
+    use super::*;
+
+    #[pg_test]
+    fn first_banned_token_matches_whole_tokens_only() {
+        // whole-token banned keywords are caught (leftmost wins)…
+        assert_eq!(first_banned_token("select drop from t").as_deref(), Some("drop"));
+        assert_eq!(first_banned_token("insert into x").as_deref(), Some("insert"));
+        // …the pg_ls_ bare-prefix sibling is caught…
+        assert_eq!(first_banned_token("select pg_ls_dir('.')").as_deref(), Some("pg_ls_dir"));
+        // …a banned word embedded in a larger identifier is NOT a separate token (\b semantics)…
+        assert_eq!(first_banned_token("select dropped_at from t"), None);
+        assert_eq!(first_banned_token("select created from t"), None); // 'created' != 'create'
+        // …and a benign read query has no banned token.
+        assert_eq!(first_banned_token("select count(*) from documents"), None);
+    }
+
+    #[pg_test]
+    fn has_do_block_and_has_word_detect_procedural() {
+        assert!(has_do_block("do $$ begin end $$")); // do then $$
+        assert!(has_do_block("select 1; do$$")); // no space variant
+        assert!(!has_do_block("select doc from t")); // 'doc' is not a 'do' token
+        assert!(!has_do_block("select 1")); // no do-block
+        assert!(has_word("call foo()", "call"));
+        assert!(!has_word("select recall from t", "call")); // 'recall' is not 'call'
+    }
+
+    #[pg_test]
+    fn starts_with_keyword_is_word_bounded() {
+        assert!(starts_with_keyword("  select 1", "select"));
+        assert!(starts_with_keyword("with x as (select 1) select * from x", "with"));
+        assert!(!starts_with_keyword("selection from t", "select")); // 'selection' is not 'select'
+        assert!(!starts_with_keyword("update t set x=1", "select"));
+    }
+
+    #[pg_test]
+    fn strip_sql_comments_removes_line_and_block() {
+        // a banned token hidden behind a line comment is removed from the L2 copy (so it cannot smuggle)…
+        assert!(!strip_sql_comments("select 1 -- drop table t\n from t").contains("drop"));
+        // …and a DOTALL block comment too.
+        assert!(!strip_sql_comments("select /* drop */ 1").contains("drop"));
+        assert!(strip_sql_comments("select 1 from t").contains("from t")); // non-comment text preserved
+    }
+
+    #[pg_test]
+    fn nl_fence_strip_unwraps_markdown_fence() {
+        assert_eq!(nl_fence_strip("```sql\nSELECT 1```"), "SELECT 1");
+        assert_eq!(nl_fence_strip("```\nSELECT 1\n```"), "SELECT 1");
+        assert_eq!(nl_fence_strip("SELECT 1"), "SELECT 1"); // no fence → unchanged (trimmed)
+    }
+
+    #[pg_test]
+    fn collect_relations_walks_the_plan_tree() {
+        let plan: Value = serde_json::json!([
+            {"Plan": {"Node Type": "Seq Scan", "Schema": "public", "Relation Name": "documents",
+                      "Plans": [{"Node Type": "Seq Scan", "Schema": "secret", "Relation Name": "pg_authid"}]}}
+        ]);
+        let mut rels: Vec<(String, String)> = Vec::new();
+        collect_relations(&plan, &mut rels);
+        assert!(rels.contains(&("public".to_string(), "documents".to_string())));
+        assert!(rels.contains(&("secret".to_string(), "pg_authid".to_string()))); // nested relation found
     }
 }

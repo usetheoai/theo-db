@@ -12,7 +12,7 @@
 -- by name (late-bound via plpgsql, since `ai._chat` is created by theodb_rs, installed after theodb).
 -- Idempotent: safe to re-run / load from docker-entrypoint-initdb.d.
 
--- dep (plpython3u) still declared in theodb.control `requires` until M19 (nl layer); not created here
+-- M18: ai._chat + the generative wrappers are Rust (theodb_rs); plpython3u dropped from requires in M19. Not created here.
 CREATE SCHEMA IF NOT EXISTS ai;
 
 -- ai.generate — raw text completion. plpgsql (late-bound) so its body is not validated against ai._chat at

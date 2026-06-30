@@ -112,6 +112,25 @@ Per `.claude/rules/architecture.md`: new domain modules `nl.rs`/`hybrid.rs`/`mig
 **Alternatives:** (a) leave plpython3u in requires — rejected (defeats M19); (b) drop superuser too — rejected (unverified; out of scope).
 **Consequences:** existing installs UPDATE then add/refresh theodb_rs; fresh installs at 1.3 plpython3u-free.
 
+### D6 — `ai.nl_query` (L3 sandbox) stays plpgsql (ADR-F) — post-implementation reconciliation
+> Recorded during M19 `/review` (cross-validation finding). The plan's Phase 1 originally implied porting `nl_query` to Rust (T1.2).
+
+**Decision:** `ai.nl_query` (L3 read-only sandbox) STAYS a thin plpgsql keeper in sql/60 (NOT Rust); it calls the Rust `ai.nl_to_sql` at the SQL level.
+**Rationale:** L3 is transaction-control (`SET LOCAL transaction_read_only`/`statement_timeout`) + dynamic `EXECUTE` — inherently SQL/plpgsql operations (same class as the chunked-import PROCEDURE, D4). Critically, `nl_query` MUST call `ai.nl_to_sql` at the SQL level so nl_to_sql's L4 `EXPLAIN`-over-SPI runs in a clean execution context — a nested Rust→Rust frame breaks the planner SPI call. plpgsql is first-party (not a plpython3u dependency), so DoD-3 (100% plpython3u-free) is unaffected.
+**Alternatives:** (a) port nl_query to Rust — rejected (nested EXPLAIN-SPI breakage + transaction-control is a plpgsql concern); (b) inline L3 into nl_to_sql — rejected (conflates generate-vs-execute split).
+**Consequences:** the anti-injection core (L1/L2/L4) is 100% Rust; L3 stays plpgsql. Identical to D4's reasoning.
+
+### D7 — Hybrid `ai.hybrid_search` co-resides with `theodb.embed` in `theodb_rs` — post-implementation reconciliation
+> Recorded during M19 `/review`. Decision taken via AskUserQuestion (2026-06-30): "Literal: hybrid 100% em theodb_rs".
+
+**Decision:** `ai.hybrid_search_rrf` + `ai.hybrid_search(jsonb)` move FULLY into `theodb_rs` (Rust entrypoints), co-resident with `theodb.embed`. The pre-M19 cross-extension seam guard scenario (hybrid in `theodb`, embed in `theodb_rs` → drop theodb_rs → hybrid survives with 0A000) no longer exists: dropping `theodb_rs` removes BOTH, so `test_hybrid_guard` now asserts a clean 42883 on the function itself; the defensive 0A000 `err_unsupported` guard remains in `hybrid.rs` for an individually-dropped `theodb.embed`.
+**Rationale:** the user chose literal "tudo em Rust" after the seam-guard trade-off was surfaced. Co-residence is coherent (one extension owns the AI surface) and removes a now-moot cross-extension seam.
+**Alternatives:** (a) thin theodb-owned wrapper preserving the seam guard — declined by user; (b) keep hybrid plpgsql — declined (not literal Rust).
+**Consequences:** `test_hybrid_guard::test_absent_raises_undefined` asserts 42883 (was 0A000); the 0A000 guard is retained-but-defensive (LOW: no longer covered by a test — disclosed honestly in the implementation summary).
+
+> **Note (29→33):** the L2 denylist is **33** keywords (the verbatim list in Phase 1 below enumerates 33); earlier "29-keyword" labels in this plan are a miscount — the implemented `BANNED` const and CHANGELOG say 33.
+> **Note (bench):** the committed `docs/benchmarks/m19-nl-rust-vs-plpython.md` reports the latest run (Rust ~0.66 ms vs plpython3u ~0.75 ms, ratio ~0.88); an earlier commit message cited 0.922 from a prior run. Both are NO-REGRESSION; the doc is authoritative.
+
 ## Drawbacks & Risks
 
 | Drawback / Risk | Severity | Mitigation | Owner |
