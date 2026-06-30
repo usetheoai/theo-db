@@ -73,16 +73,15 @@ docker run -d --name theodb -e POSTGRES_PASSWORD=postgres -p 5432:5432 ghcr.io/u
 A imagem cria a extensão automaticamente no primeiro init. Em **qualquer PostgreSQL 17**, instale-a com:
 
 ```sql
-CREATE EXTENSION theodb CASCADE;   -- CASCADE instala as dependências (vector, vectorscale, plpython3u)
+CREATE EXTENSION theodb CASCADE;   -- CASCADE instala as dependências (vector, vectorscale)
 ```
 
 Passo a passo das 12 capacidades em [`docs/quickstart.md`](./docs/quickstart.md).
 
-> **Limitação honesta (PostgreSQL gerenciado):** a superfície de IA (`ai.*`, NL→SQL, registry de modelos —
-> features 06–12) usa a linguagem **`plpython3u`**, que é *untrusted* e exige **superusuário** para instalar.
-> Em PostgreSQL gerenciado que não habilita `plpython3u` (ex.: alguns provedores de nuvem), apenas as
-> features **vetoriais 01–05** (similaridade, HNSW, IVFFlat, IVF, DiskANN) ficam disponíveis. A imagem
-> TheoDB downloadable habilita tudo.
+> **Sem `plpython3u` (desde M19):** toda a superfície de IA (`ai.*`, NL→SQL, generativas, embed) é servida
+> pela extensão Rust **`theodb_rs`** — o `theodb` não requer mais a linguagem *untrusted* `plpython3u`. A
+> antiga limitação em PostgreSQL gerenciado (que não habilita `plpython3u`) **deixou de existir**: as 12
+> capacidades ficam disponíveis sem depender de uma linguagem untrusted.
 
 ---
 

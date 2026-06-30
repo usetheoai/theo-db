@@ -15,6 +15,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 ### Changed
+- **(EM PROGRESSO — M19) NL→SQL portado de plpython3u → Rust/pgrx:** `ai.nl_to_sql` (a ÚLTIMA função `plpython3u`) reescrita em Rust (`theodb_rs/src/nl.rs`) com a defesa anti-injection em camadas preservada — L1 prompt byte-idêntico, L2 validação estática (single-statement, SELECT/WITH-only, denylist de 29 keywords, sem `DO $$`/`CALL`) via scanning stdlib, L4 allowlist parser-grade via `EXPLAIN (FORMAT JSON)` do Postgres (sem crate de parser — preserva a defesa contra comma-join/identificador-citado). **Validado:** 26/26 testes `nl_to_sql` incl. TODOS os casos de injeção verdes; a extensão `theodb` é **100% `plpython3u`-free** (zero funções plpython3u no banco; `requires` sem plpython3u; `default_version` 1.3; migration condicional 1.2→1.3). README: limitação plpython3u em PG gerenciado removida.
 
 ### Deprecated
 
