@@ -33,22 +33,24 @@ pub(crate) fn chat(prompt: Option<&str>, system: Option<&str>, model: Option<&st
 
     let body = post_json("ai._chat", &endpoint, payload, api_key.as_deref());
 
-    let content = body
+    // Parity with the plpython3u original: a missing choices/choices[0]/message/content key (or empty
+    // choices) is "unexpected chat response shape"; a present-but-null OR empty-string content is the
+    // distinct "empty completion" (the plpython3u `content is None or content == ""` branch, 38000).
+    match body
         .get("choices")
         .and_then(|c| c.get(0))
         .and_then(|m| m.get("message"))
         .and_then(|m| m.get("content"))
-        .and_then(|c| c.as_str())
-        .unwrap_or_else(|| {
-            err_external(&format!(
-                "ai._chat: unexpected chat response shape: {}",
-                truncate(&body.to_string(), 200)
-            ))
-        });
-    if content.is_empty() {
-        err_external("ai._chat: endpoint returned an empty completion");
+    {
+        Some(Value::String(s)) if !s.is_empty() => s.clone(),
+        Some(Value::String(_)) | Some(Value::Null) => {
+            err_external("ai._chat: endpoint returned an empty completion")
+        }
+        _ => err_external(&format!(
+            "ai._chat: unexpected chat response shape: {}",
+            truncate(&body.to_string(), 200)
+        )),
     }
-    content.to_string()
 }
 
 /// `ai.if` — natural-language condition -> boolean. First-token match (not startswith); unparseable -> 22023.
@@ -141,7 +143,10 @@ fn resolve_chat_cfg(model: Option<&str>) -> (String, String, Option<String>) {
     if !(endpoint.starts_with("http://") || endpoint.starts_with("https://")) {
         err_input("ai._chat: endpoint must be http(s)://");
     }
+    // `model or _cfg("theodb.llm_model") or "default"` — empty string is falsy in Python, so an explicit
+    // `''` model argument falls back to the GUC/default (parity; not kept as the literal empty model).
     let mdl: String = model
+        .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
         .or_else(|| guc("theodb.llm_model"))
         .unwrap_or_else(|| "default".to_string());

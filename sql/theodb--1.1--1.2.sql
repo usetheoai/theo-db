@@ -6,8 +6,14 @@
 --      longer hold a LANGUAGE sql pg_depend on `ai._chat` — that dependency would otherwise block the DROP.
 --   2. Conditionally retires the legacy plpython3u `ai.*` so adding the Rust theodb_rs `ai.*` does not clash
 --      on `CREATE FUNCTION` — ONLY when the function is genuinely plpython3u AND not a theodb_rs member.
--- On a fresh 1.2 install the keepers are already plpgsql (sql/50 base) and there is no plpython3u ai.* to drop,
--- so step 2 is a no-op. Mirrors the M17 1.0->1.1 embed retirement idiom.
+-- On a fresh 1.2 install the keepers are already plpgsql (the regenerated sql/50 base has zero plpython3u
+-- ai.*), so step 2's DROP loop finds nothing — a no-op. Mirrors the M17 1.0->1.1 embed retirement idiom.
+--
+-- IN-PLACE UPGRADE ORDER (non-greenfield): on a running v0.x DB, run `ALTER EXTENSION theodb UPDATE TO '1.2'`
+-- (this delta — drops the plpython3u ai.*) BEFORE installing/updating the M18 `theodb_rs` (which creates the
+-- Rust ai.*); otherwise the Rust `CREATE FUNCTION ai._chat` clashes on the duplicate signature. Between the
+-- two steps the keepers (ai.generate/summarize/agg_summarize) transiently call a missing ai._chat. The
+-- greenfield container path (docker-entrypoint) is safe: it creates theodb then theodb_rs in order.
 
 -- 1. Late-bind the SQL keepers (idempotent; matches the 1.2 base) — removes the sql-dependency on ai._chat.
 CREATE OR REPLACE FUNCTION ai.generate(prompt text, model text DEFAULT NULL)

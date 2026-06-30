@@ -17,7 +17,7 @@ Ports the 5 plpython3u generative functions (`ai._chat`, `ai.if`, `ai.analyze_se
 - **Fresh install lands clean at theodb 1.2**: `theodb|1.2`, `theodb_rs|1.0.0`. The `ai.*` surface is
   Rust-backed (`ai._chat`/`if`/`analyze_sentiment`/`rank`/`generate_batch` are LANGUAGE sql wrappers over
   `theodb_rs._ai_*`); the keepers `ai.generate`/`summarize`/`_agg_summ_final` are plpgsql (late-bound).
-- **`test_ai_sql.py` 33/33 offline PASS** (3 real-OpenAI tests skipped — opt-in) — full parity: generate / if
+- **Full suite 69 passed / 3 skipped** (test_ai_sql 33 + test_ai_edge 4 + test_ai_retirement 3 + embed 20 + extension_install 9). **`test_ai_sql.py` 33/33 offline PASS** (3 real-OpenAI tests skipped — opt-in) — full parity: generate / if
   / analyze_sentiment / rank / summarize / agg_summarize / generate_batch + every malformed / SSRF / empty /
   bad-shape / REVOKE / round-trip-count case.
 - **Embed regression: 20/20 PASS** (`test_embed_sql` 10 + `test_embed_failure_scenarios` 3 + `test_embed_batch`
