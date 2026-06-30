@@ -1,0 +1,103 @@
+reviewer: architecture
+slug: m20-own-vector-type
+date: 2026-06-30
+scope: |
+  theodb_rs/src/vec.rs (NEW, domain: f32-parity distance math) + theodb_rs/src/lib.rs
+  wiring (3 #[pg_extern] _vec_l2/_vec_ip/_vec_cosine + extension_sql theodb.l2_distance/
+  inner_product/cosine_distance). Lens: SOLID/SRP/layering, COEXISTENCE (ADR D1),
+  parsimony refinement (#[repr(C)] FFI -> ::real[]/Vec<f32>), cohesion, premature abstraction.
+
+summary_counts:
+  BLOCKER: 0
+  HIGH: 0
+  MEDIUM: 0
+  LOW: 1
+  INFO: 3
+
+findings:
+  - id: ARCH-M20-01
+    severity: LOW
+    file: theodb_rs/src/vec.rs:21-29,33-34,41-42,53-54
+    summary: >
+      Domain math couples to the pg-glue ereport path via check_dims -> err_input,
+      contradicting the plan's explicit DIP rationale that vec.rs is "pure (&[f32] -> f64),
+      testable without Postgres".
+    evidence: >
+      vec.rs line 17 imports crate::pg::err_input; check_dims (l.21-29) calls it directly,
+      and l2_distance/inner_product/cosine_distance each invoke check_dims. err_input
+      (pg.rs:8-16) issues a pgrx ereport (Postgres ABI) and diverges (-> !). Consequence:
+      the functions are NOT runnable under plain #[test] — the unit tests are #[pg_test]
+      (vec.rs:75-131, requiring cargo pgrx test), directly falsifying the plan's stated
+      "testable without Postgres" DIP claim (plan.md:50, l.181 "Pure fns -> unit-testable").
+      A stricter DIP would have the pure math return Result<f64, DimMismatch> and translate
+      to err_input at the #[pg_extern] boundary (lib.rs), keeping vec.rs Postgres-free.
+    recommended_action: >
+      Acceptable to ship — this matches the established M17-M19 convention (embed.rs/nl.rs
+      route typed errors through pg.rs, an accepted ADR-C boundary documented in pg.rs:1-4).
+      Note for a future cleanup (or M21): if true domain purity is wanted, return a typed
+      error from the pure fns and raise at the extern layer. Update the plan's DIP wording
+      to reflect that dim-validation deliberately lives in the domain via the shared err
+      helper (honesty), rather than claiming Postgres-free purity that the code does not have.
+
+  - id: ARCH-M20-02
+    severity: INFO
+    file: theodb_rs/src/lib.rs:387-429
+    summary: >
+      COEXISTENCE (ADR D1) is implemented correctly and is the right call — distance
+      FUNCTIONS in the theodb schema, NOT redefined operators on the shared vector type.
+    evidence: >
+      The extension_sql block contains only CREATE FUNCTION theodb.l2_distance/inner_product/
+      cosine_distance(vector, vector) — no CREATE OPERATOR, no CREATE TYPE, no CREATE OPCLASS.
+      pgvector's <->/<#>/<=> operators, the vector type, and HNSW/IVFFlat/DiskANN opclasses are
+      untouched. Redefining those operators on the shared vector type would either collide
+      (duplicate operator for the same type pair) or shadow pgvector's bindings and break the
+      index opclasses + theodb.embed/hybrid/import. Functions in a distinct schema coexist with
+      zero conflict. The own-operator/own-opclass path is correctly DEFERRED to M21 (index AM)
+      per ADR D1 alt (c). requires chain (theodb_rs requires theodb requires vector + extension_sql
+      requires=[_vec_l2,_vec_ip,_vec_cosine]) makes the vector type and its ::real[] cast present
+      at CREATE time. Architecturally sound.
+    recommended_action: None — exemplary coexistence design; no change needed.
+
+  - id: ARCH-M20-03
+    severity: INFO
+    file: theodb_rs/src/vec.rs:1-11; theodb_rs/src/lib.rs:153-176,387-396
+    summary: >
+      Parsimony refinement (plan's #[repr(C)] unsafe FFI reader -> pgrx-native Vec<f32> from
+      pgvector's lossless vector::real[] cast) is sound, an architectural improvement (zero
+      unsafe), and adequately documented — but it superseded the plan's entire Phase-1 T1.1
+      and its EC-1 (detoast) MUST-FIX.
+    evidence: >
+      Plan T1.1 (plan.md:129-154) prescribed `#[repr(C)] struct PgVectorBytes { vl_len_, dim,
+      unused, x }` + unsafe as_slice + explicit pg_detoast_datum, with EC-1 (TOAST) a MUST-FIX
+      and the Coverage-Matrix row "Own #[repr(C)] pgvector-compatible reader". The implementation
+      instead casts a::real[] in SQL (pgvector's lossless cast, sql/vector.sql:157) and receives
+      a pgrx Vec<f32> (lib.rs:159-175 externs; l.390-396 SQL wrappers). This is binary-equivalent
+      (identical f32 bits -> f32 parity preserved), removes ALL unsafe, and delegates detoast to
+      pgrx — closing EC-1 without unsafe. Documented as a refinement in vec.rs:5-11 and the
+      implementation summary (l.24-29). The choice is squarely within the GREEN-phase parsimony
+      ladder remit (rungs 3/4: prefer the native platform cast / already-installed capability over
+      a hand-rolled unsafe reader), so it is a legitimate refinement, not a silent pivot.
+    recommended_action: >
+      From the architecture lens: keep it — less code, no unsafe, EC-1 dissolved. Defer to the
+      cross-validation reviewer to confirm the plan-vs-implementation mechanism delta and the now-
+      moot EC-1 MUST-FIX are explicitly reconciled (the implementation summary documents it; the
+      plan file T1.1 still reads as #[repr(C)], so the record is split across two docs).
+
+  - id: ARCH-M20-04
+    severity: INFO
+    file: theodb_rs/src/lib.rs:390-396
+    summary: >
+      The ::real[] refinement trades the FFI reader's zero-copy read for a per-call SQL cast +
+      Vec<f32> allocation/copy. Acceptable for M20 (parity scope), worth tracking for M21.
+    evidence: >
+      Each theodb.* call casts a::real[] and pgrx marshals a fresh Vec<f32> (heap alloc + copy of
+      the dim*f32 payload) before the pure math runs. A #[repr(C)] datum reader would have been
+      zero-copy. M20 is explicitly parity-not-perf (ADR D2/D3; SIMD + index AM are M21+), and the
+      benchmark honestly frames ~3x scalar-vs-SIMD, so the allocation is not a regression against
+      any M20 goal. Cohesion is clean: vec.rs has a single responsibility (distance math); the <#>
+      negation lives at the call site (KISS, not a 4th function); check_dims is a shared helper
+      (DRY, used by all three). No premature abstraction (no traits/generics/config knobs).
+    recommended_action: >
+      No action for M20. When M21 adds the index access method (which operates on raw datums and
+      will likely need the #[repr(C)] reader anyway), revisit whether the distance fns should share
+      a zero-copy slice path to avoid the per-call Vec allocation on the hot index-scan path.

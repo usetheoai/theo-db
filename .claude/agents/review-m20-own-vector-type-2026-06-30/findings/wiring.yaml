@@ -1,0 +1,73 @@
+agent: wiring
+slug: m20-own-vector-type
+date: 2026-06-30
+verdict: READY_TO_MERGE
+summary: >
+  Wiring triad complete for all 3 new pg_extern symbols. Every new export is reachable,
+  called, REVOKEd, and integration-tested. No dead code. extension_sql requires + control-file
+  dependency chain correct. Only one LOW advisory on the 3rd-pillar (runtime metric) shape.
+
+triad_per_symbol:
+  - symbol: theodb_rs._vec_l2 (lib.rs:158)
+    caller: "theodb.l2_distance(vector,vector) SQL wrapper (lib.rs:397) casts a::real[] -> _vec_l2"
+    impl: "crate::vec::l2_distance (vec.rs:33)"
+    integration_test: "test_vector_ops.py OPS[l2] (oracle + highdim 1536/16000 + dim-mismatch + NULL + REVOKE)"
+    observability: "typed 22023 on dim-mismatch (vec.rs check_dims -> pg.rs err_input ERRCODE_INVALID_PARAMETER_VALUE); STRICT NULL"
+    status: PASS
+  - symbol: theodb_rs._vec_ip (lib.rs:166)
+    caller: "theodb.inner_product(vector,vector) SQL wrapper (lib.rs:401)"
+    impl: "crate::vec::inner_product (vec.rs:41)"
+    integration_test: "test_vector_ops.py OPS[ip] + test_negative_inner_product_is_pgvector_neg_ip (<#> == -theodb.inner_product)"
+    observability: "typed 22023 + STRICT NULL"
+    status: PASS
+  - symbol: theodb_rs._vec_cosine (lib.rs:172)
+    caller: "theodb.cosine_distance(vector,vector) SQL wrapper (lib.rs:405)"
+    impl: "crate::vec::cosine_distance (vec.rs:53)"
+    integration_test: "test_vector_ops.py OPS[cosine] (identical->0, orthogonal->1, opposite->2 clamp)"
+    observability: "typed 22023 + STRICT NULL"
+    status: PASS
+
+checks:
+  - id: pg_extern_callers
+    desc: "Each of 3 #[pg_extern] has a real production SQL-wrapper caller (theodb.* fns)"
+    result: PASS
+  - id: no_dead_export
+    desc: "crate::vec::{l2_distance,inner_product,cosine_distance} all called by _vec_*; check_dims called by all 3"
+    result: PASS
+    evidence: "git grep: check_dims called at vec.rs:34,42,54; _vec_* referenced at lib.rs:159/167/173 (impl) + 399/403/407 (caller)"
+  - id: negative_inner_product_removed
+    desc: "No dead `negative_inner_product` Rust fn — <#> is applied at call site as -inner_product (KISS); only comments reference pgvector's vector_negative_inner_product"
+    result: PASS
+    evidence: "git grep negative_inner_product -> only comment lines (lib.rs:165,393; vec.rs:47); no fn def"
+  - id: extension_sql_requires
+    desc: "extension_sql requires=[_vec_l2,_vec_ip,_vec_cosine] matches the 3 symbols the SQL body references"
+    result: PASS
+    evidence: "lib.rs:427 requires = [_vec_l2, _vec_ip, _vec_cosine]"
+  - id: schema_and_cast_available_at_create
+    desc: "theodb schema + vector type + vector::real[] cast exist at CREATE time"
+    result: PASS
+    evidence: "theodb_rs.control:14 requires = 'vector, theodb'; precedent theodb.embed/import_pinecone create into theodb schema the same way"
+  - id: revoke_from_public_all_6
+    desc: "REVOKE FROM PUBLIC on 3 theodb.* + 3 theodb_rs._vec_*"
+    result: PASS
+    evidence: "lib.rs:419-424 — 6 REVOKE ALL statements; signatures match (vector,vector) and (real[],real[])"
+  - id: integration_test_coverage
+    desc: "test_vector_ops.py covers each op: oracle parity, highdim, <#>=neg-ip, dim-mismatch raises, NULL->NULL, REVOKE"
+    result: PASS
+  - id: real_array_to_vec_f32
+    desc: "::real[] -> Vec<f32> wiring: SQL casts a::real[]; pg_extern signature Vec<f32>; REVOKE sig (real[],real[]) consistent"
+    result: PASS
+
+observations:
+  - severity: LOW
+    title: "3rd wiring pillar (runtime metric) satisfied by typed error + STRICT, not a counter/log line"
+    detail: >
+      The wiring triad's 3rd pillar nominally asks for a counter/histogram/log line. For these pure,
+      deterministic, hot-path distance functions a runtime counter would be observability noise
+      (over-engineering — parsimony). The observable signal is the typed 22023 dim-mismatch error
+      (surfaces in PG logs) plus STRICT NULL semantics, both integration-tested. Acceptable; flagged
+      honestly rather than claimed as a metric.
+    action: "No change required. Accept as-is for pure math functions."
+
+blockers: []
+high: []
