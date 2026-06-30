@@ -84,6 +84,8 @@ def _decide(system: str, user: str) -> str:
     if "yes or no" in sys_l:  # ai.if
         return "no" if any(w in usr_l for w in (" not ", "no ", "isn't", "cannot")) else "yes"
     if "single number" in sys_l:  # ai.rank
+        if "__bignum__" in usr_l:  # seam: out-of-[0,1] value -> exercise the no-clamp parity
+            return "7"
         return "0.8"
     if "summarize" in sys_l:  # ai.summarize
         return "A concise summary: " + _CANNED
@@ -96,6 +98,8 @@ def _decide(system: str, user: str) -> str:
             count = max(0, count - 1)
         if "__nonstr__" in usr_l:  # seam: array of NUMBERS -> exercise the non-string element fail-fast
             return json.dumps(list(range(count)))
+        if "__jsonnull__" in usr_l:  # seam: a JSON null element -> exercise the JSON-null -> SQL NULL parity
+            return json.dumps(["answer to item %d" % (i + 1) for i in range(max(0, count - 1))] + [None])
         payload = json.dumps(["answer to item %d" % (i + 1) for i in range(count)])
         if "__fenced__" in usr_l:  # seam: wrap in a ```json fence -> exercise the function's fence strip
             return "```json\n" + payload + "\n```"
@@ -145,6 +149,11 @@ def build_handler(model_name: str):
                 # 200 with a body missing choices[0].message -> ai._chat response-shape guard (38000)
                 self._json(200, {"object": "chat.completion", "choices": []})
                 return
+            if "__nullcontent__" in (user or "").lower():
+                # 200 with content: null -> ai._chat empty-completion guard (38000), distinct from a missing key
+                self._json(200, {"object": "chat.completion",
+                                 "choices": [{"index": 0, "message": {"role": "assistant", "content": None}}]})
+                return
             content = _decide(system, user)
             self._json(
                 200,
@@ -169,7 +178,15 @@ def main(argv=None) -> int:
     p.add_argument("--model", default="stub-chat")
     args = p.parse_args(argv)
 
-    server = ThreadingHTTPServer((args.host, args.port), build_handler(args.model))
+    # A larger listen backlog (default is 5) + daemon threads so a burst of concurrent clients (the
+    # thread-safety test fires K=300 via 16 workers) does not overflow the accept queue and reset
+    # connections. Robustness of the test stub only — does not affect any response/parity behavior.
+    class _Server(ThreadingHTTPServer):
+        request_queue_size = 256
+        daemon_threads = True
+        allow_reuse_address = True
+
+    server = _Server((args.host, args.port), build_handler(args.model))
     print(f"chat_server (stub): http://{args.host}:{args.port}/v1/chat/completions", flush=True)
     try:
         server.serve_forever()

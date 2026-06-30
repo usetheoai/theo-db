@@ -24,6 +24,15 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.18.0] - 2026-06-30
+
+### Changed
+- **Superfície de IA generativa reescrita de plpython3u → Rust/pgrx (M18, ROADMAP-v2):** `ai._chat` (a fonte única de HTTP), `ai.if`, `ai.analyze_sentiment`, `ai.rank` e `ai.generate_batch` agora são servidas pela extensão Rust `theodb_rs` (`theodb_rs/src/chat.rs`), com **paridade provada** pela suíte de 36 testes (`benchmarks/tests/test_ai_sql.py`, stub determinístico) — mesmas assinaturas/RETURNS/VOLATILE, mesmos system prompts byte-idênticos, mesma lógica de parse (boolean/label/float/JSON-array) e mesmos SQLSTATEs tipados (22023 input/parse, 38000 endpoint). O cliente HTTP compartilhado (send + retry da classe recuperável {429,502,503}+connect/timeout + SSRF/no-redirect + api_key-no-leak) foi extraído para `theodb_rs/src/http.rs` e é reusado por embed + chat (DRY). As funções SQL `ai.generate`/`ai.summarize` e o finalfunc do aggregate `ai.agg_summarize` passaram a `plpgsql` (late-bound a `ai._chat`, que agora vive em `theodb_rs`); o aggregate permanece (não-plpython3u). **Camada de IA não usa mais plpython3u** (zero `LANGUAGE plpython3u` em `sql/50`). Benchmark Rust-vs-plpython3u (no-regression, I/O-bound) em `docs/benchmarks/m18-ai-rust-vs-plpython.md`. Refinamentos de paridade do `/review`: `model=''` cai no fallback (truthiness Python), conteúdo de resposta JSON-null → erro tipado "empty completion" (38000), e cobertura de edges dos parsers (`ai.rank` sem clamp, elemento JSON-null → SQL NULL, array NULL → 22023) em `benchmarks/tests/test_ai_edge.py`.
+
+
+### Deprecated
+- **Funções `ai.*` generativas em plpython3u aposentadas no upgrade `theodb` 1.1→1.2:** DROP condicional de `ai._chat`/`ai.if`/`ai.analyze_sentiment`/`ai.rank`/`ai.generate_batch` (só quando ainda são `LANGUAGE plpython3u` e não pertencem a `theodb_rs`), permitindo que instalações v0.x façam UPDATE e adicionem/atualizem `theodb_rs` sem conflito de definição. `default_version` da extensão `theodb` passa a `1.2`.
+
 ## [0.17.0] - 2026-06-29
 
 ### Added

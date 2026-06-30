@@ -8,7 +8,7 @@ pub(crate) fn err_input(msg: &str) -> ! {
     pgrx::pg_sys::panic::ErrorReport::new(
         PgSqlErrorCode::ERRCODE_INVALID_PARAMETER_VALUE,
         msg.to_string(),
-        "theodb.embed",
+        "theodb",
     )
     .report(PgLogLevel::ERROR);
     unreachable!()
@@ -19,7 +19,7 @@ pub(crate) fn err_external(msg: &str) -> ! {
     pgrx::pg_sys::panic::ErrorReport::new(
         PgSqlErrorCode::ERRCODE_EXTERNAL_ROUTINE_EXCEPTION,
         msg.to_string(),
-        "theodb.embed",
+        "theodb",
     )
     .report(PgLogLevel::ERROR);
     unreachable!()
