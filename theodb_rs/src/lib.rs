@@ -155,7 +155,7 @@ mod theodb_rs {
     // The public `theodb.*` wrappers cast `vector::real[]` (pgvector's lossless cast) so these receive the
     // exact f32 payload as a pgrx-native Vec<f32> (no unsafe FFI; pgrx handles detoast). Coexistence (ADR D1).
     /// `theodb_rs._vec_l2` — L2 distance `<->` (the SQL `theodb.l2_distance`).
-    #[pg_extern]
+    #[pg_extern(immutable, parallel_safe, strict)]
     fn _vec_l2(a: Vec<f32>, b: Vec<f32>) -> f64 {
         crate::vec::l2_distance(&a, &b)
     }
@@ -163,13 +163,13 @@ mod theodb_rs {
     /// `theodb_rs._vec_ip` — inner product (the SQL `theodb.inner_product`, byte-for-byte with pgvector's
     /// `inner_product`). The `<#>` operator distance is `-theodb.inner_product` (pgvector's
     /// `vector_negative_inner_product`); exposed positive for a clean 1:1 parity comparison.
-    #[pg_extern]
+    #[pg_extern(immutable, parallel_safe, strict)]
     fn _vec_ip(a: Vec<f32>, b: Vec<f32>) -> f64 {
         crate::vec::inner_product(&a, &b)
     }
 
     /// `theodb_rs._vec_cosine` — cosine distance `<=>` (the SQL `theodb.cosine_distance`).
-    #[pg_extern]
+    #[pg_extern(immutable, parallel_safe, strict)]
     fn _vec_cosine(a: Vec<f32>, b: Vec<f32>) -> f64 {
         crate::vec::cosine_distance(&a, &b)
     }

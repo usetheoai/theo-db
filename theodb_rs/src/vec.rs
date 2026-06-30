@@ -16,8 +16,10 @@
 //! best-effort (ADR D3) — parity is asserted to pgvector's rounded TEXT output.
 use crate::pg::err_input;
 
-/// Reject mismatched dimensions with a typed 22023 (parity with pgvector's `CheckDims`, which errors on
-/// `a->dim != b->dim`). Fail-fast at the boundary (Unbreakable Rule 8).
+/// Reject mismatched dimensions, fail-fast at the boundary (Unbreakable Rule 8). Both TheoDB and pgvector's
+/// `CheckDims` reject `a->dim != b->dim`; pgvector raises SQLSTATE 22000 (data_exception) while TheoDB uses
+/// its house typed error 22023 (invalid_parameter_value, via `err_input`) — same fail-fast semantics, a
+/// deliberate code divergence consistent with the rest of theodb_rs (documented; the parity tests assert 22023).
 fn check_dims(a: &[f32], b: &[f32]) {
     if a.len() != b.len() {
         err_input(&format!(

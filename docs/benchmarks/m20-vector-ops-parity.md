@@ -10,9 +10,9 @@ the same input (residual = f32 SIMD low-bit noise). Measured max RELATIVE differ
 
 | Op | max rel \|Δ\| (theodb vs pgvector) | theodb mean (ms) | pgvector mean (ms) | ratio |
 |---|---|---|---|---|
-| l2 | 1.142e-06 | 42.70 ± 4.11 | 10.90 ± 2.38 | 3.92× |
-| inner_product | 1.733e-06 | 39.04 ± 1.16 | 10.39 ± 1.20 | 3.76× |
-| cosine | 1.680e-06 | 40.27 ± 1.46 | 10.30 ± 0.80 | 3.91× |
+| l2 | 1.142e-06 | 55.27 ± 2.01 | 14.14 ± 2.36 | 3.91× |
+| inner_product | 1.733e-06 | 54.64 ± 3.99 | 10.53 ± 0.21 | 5.19× |
+| cosine | 1.680e-06 | 61.85 ± 8.19 | 14.64 ± 3.13 | 4.23× |
 
 Max rel \|Δ\| ~1e-6 across all ops ⇒ **numeric parity** — the residual is f32 SIMD-summation-order
 low-bit noise (pgvector's `VECTOR_TARGET_CLONES` reorders the sum; TheoDB uses scalar f32). NOT an algorithm
