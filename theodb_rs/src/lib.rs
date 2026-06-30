@@ -18,6 +18,7 @@ use pgrx::prelude::*;
 mod ann;
 mod ann_query;
 mod chat;
+mod sbq;
 mod embed;
 mod http;
 mod hybrid;
@@ -236,6 +237,44 @@ mod theodb_rs {
             crate::ann_query::Params { k, m: 16, ef_construction: 64, ef_search: 64, lists, probes, seed },
         );
         TableIterator::new(rows)
+    }
+
+    // ── M22: own SBQ scalar quantization + quantized ANN search (crate::sbq) ──────────────────────────────
+    // The public `theodb.sbq_knn` wrapper (regclass arg) casts the table `::text` and flattens `queries
+    // vector[]` to `real[]` + `qdim`. Build-once-answer-batch: quantize the corpus (own SBQ), candidate-gen via
+    // the M21 IVFFlat carrier, Hamming rank, full-precision f32 rerank. VOLATILE (reads a table). Coexistence:
+    // reads `embed_col::real[]`; never touches pgvector/pgvectorscale. REVOKEd from PUBLIC.
+    /// `theodb_rs._sbq_knn` — own SBQ quantized top-k over `src_table.embed_col`.
+    #[allow(clippy::too_many_arguments)]
+    #[pg_extern(volatile)] // reads a table via Spi — explicitly VOLATILE (never IMMUTABLE)
+    fn _sbq_knn(
+        src_table: &str,
+        embed_col: &str,
+        id_col: &str,
+        metric: &str,
+        queries: Vec<f32>,
+        qdim: i32,
+        k: i32,
+        bits: i32,
+        lists: i32,
+        probes: i32,
+        over_fetch: i32,
+        seed: i64,
+    ) -> TableIterator<'static, (name!(query_idx, i32), name!(id, i64), name!(distance, f64))> {
+        let rows = crate::sbq::knn(
+            src_table, embed_col, id_col, metric, &queries, qdim, k, bits, lists, probes, over_fetch, seed,
+        );
+        TableIterator::new(rows)
+    }
+
+    /// `theodb_rs._sbq_bytes_per_vector` — the own SBQ storage footprint (bytes/vector) at `dim` × `bits`
+    /// (`ceil(dim·bits/64)·8`). The public `theodb.sbq_bytes_per_vector` exposes it for the memory gate; f32
+    /// baseline is `4·dim`. IMMUTABLE/STRICT (a pure formula).
+    #[pg_extern(immutable, parallel_safe, strict)]
+    fn _sbq_bytes_per_vector(dim: i32, bits: i32) -> i64 {
+        crate::ann_query::require(dim >= 1, "theodb sbq: dim must be >= 1");
+        crate::ann_query::require((1..=8).contains(&bits), "theodb sbq: bits must be in [1, 8]");
+        crate::sbq::SbqQuantizer::bytes_per_vector(dim as usize, bits as u8) as i64
     }
 }
 
@@ -561,6 +600,58 @@ REVOKE ALL ON FUNCTION theodb_rs._ivfflat_knn(text, text, text, text, real[], in
 "#,
     name = "theodb_ann_wrappers",
     requires = [_hnsw_knn, _ivfflat_knn],
+);
+
+// SQL wrappers: TheoDB's own SBQ quantized search (M22 — own scalar quantization, recall + memory gated).
+// Created INTO the existing `theodb` schema. `theodb.sbq_knn` takes `queries vector[]`, flattens it query-major
+// into `real[]` + derives `qdim` from the first query (same bridge as M21). `theodb.sbq_bytes_per_vector` is the
+// memory metric (bytes/vector, parity with pgvectorscale's formula + ~Nx vs f32). RETURNS TABLE(query_idx int,
+// id bigint, distance float8). VOLATILE (sbq_knn reads a table). COEXISTENCE (ADR D3): reads `embed_col::real[]`
+// only — pgvectorscale/pgvector untouched. REVOKEd from PUBLIC.
+extension_sql!(
+    r#"
+CREATE FUNCTION theodb.sbq_knn(
+    src_table  regclass,
+    embed_col  text,
+    queries    vector[],
+    k          int    DEFAULT 10,
+    bits       int    DEFAULT 1,
+    lists      int    DEFAULT 100,
+    probes     int    DEFAULT 1,
+    over_fetch int    DEFAULT 4,
+    metric     text   DEFAULT 'l2',
+    id_col     text   DEFAULT 'id',
+    seed       bigint DEFAULT 42
+) RETURNS TABLE(query_idx int, id bigint, distance float8)
+LANGUAGE sql VOLATILE
+AS $$
+  SELECT query_idx, id, distance FROM theodb_rs._sbq_knn(
+    src_table::text, embed_col, id_col, metric,
+    (SELECT COALESCE(array_agg(x ORDER BY qi, ci), ARRAY[]::real[])
+       FROM unnest(queries) WITH ORDINALITY AS u(qv, qi),
+            unnest(qv::real[]) WITH ORDINALITY AS e(x, ci)),
+    COALESCE(array_length((queries[1])::real[], 1), 1),
+    k, bits, lists, probes, over_fetch, seed)
+$$;
+
+CREATE FUNCTION theodb.sbq_bytes_per_vector(dim int, bits int DEFAULT 1)
+RETURNS bigint LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
+AS $$ SELECT theodb_rs._sbq_bytes_per_vector(dim, bits) $$;
+
+COMMENT ON FUNCTION theodb.sbq_knn(regclass, text, vector[], int, int, int, int, int, text, text, bigint) IS
+  'TheoDB own SBQ quantized ANN search (M22): per-dimension mean-threshold scalar bit quantization (own Rust, '
+  'permissive — NOT the AGPL RaBitQ), candidate-gen via the M21 IVFFlat carrier, Hamming rank + full-precision '
+  'f32 rerank. recall@k gated vs pgvectorscale; memory = bytes/vector (theodb.sbq_bytes_per_vector). Coexists '
+  'with pgvectorscale/pgvector. Measurement-first SQL-callable (planner AM = M22b); not granted to PUBLIC.';
+COMMENT ON FUNCTION theodb.sbq_bytes_per_vector(int, int) IS
+  'Own SBQ storage footprint bytes/vector = ceil(dim*bits/64)*8 (parity with pgvectorscale at matched bits; '
+  '~Nx reduction vs f32 4*dim). The memory metric for the M22 gate. Implemented in Rust (theodb_rs, M22).';
+
+REVOKE ALL ON FUNCTION theodb.sbq_knn(regclass, text, vector[], int, int, int, int, int, text, text, bigint) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb_rs._sbq_knn(text, text, text, text, real[], int, int, int, int, int, int, bigint) FROM PUBLIC;
+"#,
+    name = "theodb_sbq_wrappers",
+    requires = [_sbq_knn, _sbq_bytes_per_vector],
 );
 
 // Rust-side unit tests for the input-validation guards (no network needed). The cross-language

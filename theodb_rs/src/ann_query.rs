@@ -31,7 +31,7 @@ const M_MAX: i32 = 100;
 const EF_MAX: i32 = 1000;
 const LIST_MAX: i32 = 32768;
 
-fn require(cond: bool, msg: &str) {
+pub(crate) fn require(cond: bool, msg: &str) {
     if !cond {
         err_input(msg);
     }
@@ -41,7 +41,7 @@ fn require(cond: bool, msg: &str) {
 /// table itself arrives pre-resolved as `regclass::text`, but column names are caller text). Deliberately a
 /// strict ASCII allowlist (not `%I`-quoting like M19): it is injection-proof and column names that are SQL
 /// keywords / contain special chars are out of scope for an ANN embedding column — fail-fast 22023 instead.
-fn valid_ident(name: &str) -> bool {
+pub(crate) fn valid_ident(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 63
         && name.bytes().next().is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
@@ -54,7 +54,7 @@ fn valid_ident(name: &str) -> bool {
 /// MEMORY: reads the whole corpus into a `Vec<(i64, Vec<f32>)>` (row count × vector dim × 4 bytes). This is
 /// the measurement-first SQL-callable scope (ADR D1) — for very large tables the caller should pre-filter the
 /// `src_table` (e.g. a view); a persisted, streaming on-disk access method is the deferred M21b follow-up.
-fn read_corpus(src_table: &str, embed_col: &str, id_col: &str, qdim: usize) -> Vec<(i64, Vec<f32>)> {
+pub(crate) fn read_corpus(src_table: &str, embed_col: &str, id_col: &str, qdim: usize) -> Vec<(i64, Vec<f32>)> {
     // id_col must be an integer-typed column (EC-6) — clean 22023 instead of a raw cast error deep in the read.
     let type_sql = format!(
         "SELECT format_type(a.atttypid, NULL) FROM pg_attribute a \
