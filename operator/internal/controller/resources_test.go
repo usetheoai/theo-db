@@ -36,7 +36,8 @@ func sampleCluster() *theodbv1.TheoDBCluster {
 
 // T2.1 RED: TestBuildStatefulSet_ReplicasImagePVC.
 func TestBuildStatefulSet_ReplicasImagePVC(t *testing.T) {
-	ss := buildStatefulSet(sampleCluster())
+	wantQty := resource.MustParse("5Gi")
+	ss := buildStatefulSet(sampleCluster(), wantQty)
 	if ss.Spec.Replicas == nil || *ss.Spec.Replicas != 3 {
 		t.Fatalf("replicas: got %v, want 3", ss.Spec.Replicas)
 	}
@@ -46,12 +47,31 @@ func TestBuildStatefulSet_ReplicasImagePVC(t *testing.T) {
 	if len(ss.Spec.VolumeClaimTemplates) != 1 {
 		t.Fatalf("want 1 volumeClaimTemplate, got %d", len(ss.Spec.VolumeClaimTemplates))
 	}
-	wantQty := resource.MustParse("5Gi")
 	if got := ss.Spec.VolumeClaimTemplates[0].Spec.Resources.Requests["storage"]; got.Cmp(wantQty) != 0 {
 		t.Errorf("storage: got %v, want 5Gi", got)
 	}
 	if ss.Spec.Template.Spec.Containers[0].Ports[0].ContainerPort != 5432 {
 		t.Errorf("port: got %d, want 5432", ss.Spec.Template.Spec.Containers[0].Ports[0].ContainerPort)
+	}
+	if ss.Spec.ServiceName != "c1-hl" {
+		t.Errorf("governing serviceName: got %q, want c1-hl", ss.Spec.ServiceName)
+	}
+}
+
+// T2.1 RED: the governing headless Service is ClusterIP=None and named <cluster>-hl (pod DNS identity).
+func TestBuildHeadlessService_NoneClusterIP(t *testing.T) {
+	svc := buildHeadlessService(sampleCluster())
+	if svc.Name != "c1-hl" {
+		t.Errorf("name: got %q, want c1-hl", svc.Name)
+	}
+	if svc.Spec.ClusterIP != "None" {
+		t.Errorf("clusterIP: got %q, want None (headless)", svc.Spec.ClusterIP)
+	}
+	if !svc.Spec.PublishNotReadyAddresses {
+		t.Error("publishNotReadyAddresses must be true so peers discover each other before Ready")
+	}
+	if svc.Spec.Ports[0].Port != 5432 {
+		t.Errorf("port: got %d, want 5432", svc.Spec.Ports[0].Port)
 	}
 }
 
@@ -73,7 +93,7 @@ func TestBuildStatefulSet_OwnerRef(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := sampleCluster()
-	ss := buildStatefulSet(c)
+	ss := buildStatefulSet(c, resource.MustParse("5Gi"))
 	if err := controllerutil.SetControllerReference(c, ss, scheme); err != nil {
 		t.Fatal(err)
 	}

@@ -52,8 +52,10 @@ spec:
               Minimal — adapted from cloudnative-pg's ClusterSpec (instances/image/storage).
             properties:
               image:
-                description: Image is the container image for the TheoDB instances
-                  (the shipped theo-db image).
+                description: |-
+                  Image is the container image for the TheoDB instances (the shipped theo-db image).
+                  Required — a cluster cannot run without an image; the API server rejects an empty value.
+                minLength: 1
                 type: string
               instances:
                 default: 1
@@ -66,13 +68,18 @@ spec:
                 default: 5432
                 description: Port is the database port exposed by the Service.
                 format: int32
+                maximum: 65535
+                minimum: 1
                 type: integer
               storageSize:
                 default: 1Gi
-                description: StorageSize is the per-instance persistent volume size
-                  (e.g. "10Gi").
+                description: |-
+                  StorageSize is the per-instance persistent volume size (e.g. "10Gi"). Validated as a
+                  Kubernetes quantity at the API boundary so a malformed value never reaches the reconciler.
+                pattern: ^[0-9]+(\.[0-9]+)?(Ei|Pi|Ti|Gi|Mi|Ki|E|P|T|G|M|k)?$
                 type: string
             required:
+            - image
             - instances
             type: object
           status:
@@ -139,6 +146,12 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              observedGeneration:
+                description: |-
+                  ObservedGeneration is the .metadata.generation the status was last reconciled against,
+                  so clients can tell whether the status reflects the current spec.
+                format: int64
+                type: integer
               phase:
                 description: 'Phase is a human-readable cluster phase: "Initializing",
                   "Healthy", "Error".'

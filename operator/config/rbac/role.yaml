@@ -33,12 +33,8 @@ rules:
   resources:
   - theodbclusters
   verbs:
-  - create
-  - delete
   - get
   - list
-  - patch
-  - update
   - watch
 - apiGroups:
   - core.theodb.io

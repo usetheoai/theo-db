@@ -44,9 +44,10 @@ func labelsFor(c *theodbv1.TheoDBCluster) map[string]string {
 func headlessServiceName(c *theodbv1.TheoDBCluster) string { return c.Name + "-hl" }
 
 // buildStatefulSet is a PURE builder (envtest-free unit-testable): N replicas of the theo-db image with a
-// per-replica PVC of StorageSize, exposing Port. Adapts the cloudnative-pg pattern to a standard StatefulSet
-// (ADR D1 — KISS; cnpg uses pods-per-instance, M23 uses a StatefulSet).
-func buildStatefulSet(c *theodbv1.TheoDBCluster) *appsv1.StatefulSet {
+// per-replica PVC of `storage`, exposing Port. Adapts the cloudnative-pg pattern to a standard StatefulSet
+// (ADR D1 — KISS; cnpg uses pods-per-instance, M23 uses a StatefulSet). `storage` is parsed by the caller
+// (Reconcile validates spec.StorageSize at the boundary), so this builder is panic-free on any CR input.
+func buildStatefulSet(c *theodbv1.TheoDBCluster, storage resource.Quantity) *appsv1.StatefulSet {
 	labels := labelsFor(c)
 	replicas := c.Spec.Instances
 	return &appsv1.StatefulSet{
@@ -75,7 +76,7 @@ func buildStatefulSet(c *theodbv1.TheoDBCluster) *appsv1.StatefulSet {
 					AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
 					Resources: corev1.VolumeResourceRequirements{
 						Requests: corev1.ResourceList{
-							corev1.ResourceStorage: resource.MustParse(c.Spec.StorageSize),
+							corev1.ResourceStorage: storage,
 						},
 					},
 				},
@@ -84,8 +85,8 @@ func buildStatefulSet(c *theodbv1.TheoDBCluster) *appsv1.StatefulSet {
 	}
 }
 
-// buildService is a PURE builder: the cluster's connection gateway (ADR D3 — gateway = the Service), selecting
-// the StatefulSet pods on Port.
+// buildService is a PURE builder: the cluster's connection gateway (ADR D3 — gateway = the Service), a
+// ClusterIP load-balancing the StatefulSet pods on Port.
 func buildService(c *theodbv1.TheoDBCluster) *corev1.Service {
 	labels := labelsFor(c)
 	return &corev1.Service{
@@ -93,11 +94,34 @@ func buildService(c *theodbv1.TheoDBCluster) *corev1.Service {
 		Spec: corev1.ServiceSpec{
 			Type:     corev1.ServiceTypeClusterIP,
 			Selector: labels,
-			Ports: []corev1.ServicePort{{
-				Name:       "postgres",
-				Port:       c.Spec.Port,
-				TargetPort: intstr.FromInt32(c.Spec.Port),
-			}},
+			Ports:    []corev1.ServicePort{servicePort(c)},
 		},
+	}
+}
+
+// buildHeadlessService is a PURE builder: the StatefulSet's GOVERNING (headless) Service. A StatefulSet
+// requires a headless Service (ClusterIP: None) named `ServiceName` to give each pod stable DNS
+// (`<pod>.<name>-hl.<ns>.svc`). Without it, per-pod network identity — the reason a StatefulSet exists —
+// never resolves for Instances > 1. Distinct from the gateway Service above (which has a VIP).
+func buildHeadlessService(c *theodbv1.TheoDBCluster) *corev1.Service {
+	labels := labelsFor(c)
+	return &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: headlessServiceName(c), Namespace: c.Namespace, Labels: labels},
+		Spec: corev1.ServiceSpec{
+			Type:                     corev1.ServiceTypeClusterIP,
+			ClusterIP:                corev1.ClusterIPNone,
+			Selector:                 labels,
+			PublishNotReadyAddresses: true, // peers must discover each other before Ready (replication bootstrap)
+			Ports:                    []corev1.ServicePort{servicePort(c)},
+		},
+	}
+}
+
+// servicePort is the shared postgres port definition for both Services.
+func servicePort(c *theodbv1.TheoDBCluster) corev1.ServicePort {
+	return corev1.ServicePort{
+		Name:       "postgres",
+		Port:       c.Spec.Port,
+		TargetPort: intstr.FromInt32(c.Spec.Port),
 	}
 }

@@ -29,15 +29,20 @@ type TheoDBClusterSpec struct {
 	Instances int32 `json:"instances"`
 
 	// Image is the container image for the TheoDB instances (the shipped theo-db image).
-	// +optional
-	Image string `json:"image,omitempty"`
+	// Required — a cluster cannot run without an image; the API server rejects an empty value.
+	// +kubebuilder:validation:MinLength=1
+	Image string `json:"image"`
 
-	// StorageSize is the per-instance persistent volume size (e.g. "10Gi").
+	// StorageSize is the per-instance persistent volume size (e.g. "10Gi"). Validated as a
+	// Kubernetes quantity at the API boundary so a malformed value never reaches the reconciler.
+	// +kubebuilder:validation:Pattern=`^[0-9]+(\.[0-9]+)?(Ei|Pi|Ti|Gi|Mi|Ki|E|P|T|G|M|k)?$`
 	// +kubebuilder:default:="1Gi"
 	// +optional
 	StorageSize string `json:"storageSize,omitempty"`
 
 	// Port is the database port exposed by the Service.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
 	// +kubebuilder:default:=5432
 	// +optional
 	Port int32 `json:"port,omitempty"`
@@ -52,6 +57,11 @@ type TheoDBClusterStatus struct {
 	// ReadyInstances is the number of ready instances (from the StatefulSet's ReadyReplicas).
 	// +optional
 	ReadyInstances int32 `json:"readyInstances,omitempty"`
+
+	// ObservedGeneration is the .metadata.generation the status was last reconciled against,
+	// so clients can tell whether the status reflects the current spec.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
 	// Conditions represent the current state of the TheoDBCluster (e.g. "Ready").
 	// +listType=map

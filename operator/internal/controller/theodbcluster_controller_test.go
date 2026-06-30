@@ -23,6 +23,8 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -30,6 +32,10 @@ import (
 
 	theodbv1 "github.com/usetheodev/theo-db/operator/api/v1"
 )
+
+func nn(name string) types.NamespacedName {
+	return types.NamespacedName{Name: name, Namespace: "default"}
+}
 
 func ctrlReq(name, namespace string) ctrl.Request {
 	return ctrl.Request{NamespacedName: types.NamespacedName{Name: name, Namespace: namespace}}
@@ -70,11 +76,26 @@ func TestReconcile_CreatesStatefulSetAndService(t *testing.T) {
 	}
 
 	var svc corev1.Service
-	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: name, Namespace: "default"}, &svc); err != nil {
-		t.Fatalf("service not created: %v", err)
+	if err := k8sClient.Get(context.Background(), nn(name), &svc); err != nil {
+		t.Fatalf("gateway service not created: %v", err)
 	}
 	if len(svc.OwnerReferences) != 1 {
-		t.Errorf("service owner ref missing: %+v", svc.OwnerReferences)
+		t.Errorf("gateway service owner ref missing: %+v", svc.OwnerReferences)
+	}
+
+	// H1 regression: the governing headless Service (ClusterIP=None) must exist for stable pod DNS.
+	var hl corev1.Service
+	if err := k8sClient.Get(context.Background(), nn(name+"-hl"), &hl); err != nil {
+		t.Fatalf("headless service %s-hl not created: %v", name, err)
+	}
+	if hl.Spec.ClusterIP != "None" {
+		t.Errorf("headless clusterIP: got %q, want None", hl.Spec.ClusterIP)
+	}
+	if len(hl.OwnerReferences) != 1 {
+		t.Errorf("headless service owner ref missing: %+v", hl.OwnerReferences)
+	}
+	if ss.Spec.ServiceName != name+"-hl" {
+		t.Errorf("statefulset governing serviceName: got %q, want %s-hl", ss.Spec.ServiceName, name)
 	}
 }
 
@@ -125,29 +146,72 @@ func TestReconcile_ScaleUpUpdatesReplicas(t *testing.T) {
 	}
 }
 
-// T2.2 RED — fail-fast (Rule 8): a cluster with no image yields a typed error + Error phase, no StatefulSet.
-func TestReconcile_MissingImageFailsFast(t *testing.T) {
-	name := "tc-noimage"
-	createCluster(t, name, theodbv1.TheoDBClusterSpec{Instances: 1, StorageSize: "1Gi", Port: 5432})
+// T2.2 RED — EC-1 (immutable fields): changing spec.StorageSize must NOT trigger a StatefulSet update of the
+// immutable VolumeClaimTemplates. The reconcile converges without error and the persisted VCT is unchanged.
+func TestReconcile_StorageSizeChange_NoImmutableUpdate(t *testing.T) {
+	name := "tc-storage"
+	c := createCluster(t, name, theodbv1.TheoDBClusterSpec{Instances: 1, Image: "theo-db:test", StorageSize: "1Gi", Port: 5432})
+	reconcileOnce(t, name)
 
-	r := newReconciler()
-	_, err := r.Reconcile(context.Background(), ctrlReq(name, "default"))
-	if err == nil {
-		t.Fatal("expected a typed error for missing image, got nil")
+	if err := k8sClient.Get(context.Background(), client.ObjectKeyFromObject(c), c); err != nil {
+		t.Fatal(err)
+	}
+	c.Spec.StorageSize = "5Gi"
+	if err := k8sClient.Update(context.Background(), c); err != nil {
+		t.Fatalf("update storageSize: %v", err)
+	}
+
+	// Reconcile MUST NOT error (a full-spec StatefulSet update would be rejected by the apiserver on the VCT).
+	if _, err := newReconciler().Reconcile(context.Background(), ctrlReq(name, "default")); err != nil {
+		t.Fatalf("reconcile after storageSize change must not error (immutable VCT not re-applied): %v", err)
 	}
 
 	var ss appsv1.StatefulSet
-	getErr := k8sClient.Get(context.Background(), types.NamespacedName{Name: name, Namespace: "default"}, &ss)
-	if !apierrors.IsNotFound(getErr) {
-		t.Errorf("statefulset should NOT exist for an image-less cluster, got err=%v", getErr)
-	}
-
-	var c theodbv1.TheoDBCluster
-	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: name, Namespace: "default"}, &c); err != nil {
+	if err := k8sClient.Get(context.Background(), nn(name), &ss); err != nil {
 		t.Fatal(err)
 	}
-	if c.Status.Phase != "Error" {
-		t.Errorf("phase: got %q, want Error", c.Status.Phase)
+	got := ss.Spec.VolumeClaimTemplates[0].Spec.Resources.Requests["storage"]
+	want := resource.MustParse("1Gi")
+	if got.Cmp(want) != 0 {
+		t.Errorf("VCT storage: got %v, want 1Gi unchanged (immutable field must not be patched)", got)
+	}
+}
+
+// T2.2 RED — failure scenario: a reconcile request for a deleted CR is a no-op (IgnoreNotFound), never an error.
+func TestReconcile_CRDeleted_NoOp(t *testing.T) {
+	res, err := newReconciler().Reconcile(context.Background(), ctrlReq("does-not-exist", "default"))
+	if err != nil {
+		t.Errorf("reconcile of a missing CR must return nil, got %v", err)
+	}
+	if res.Requeue || res.RequeueAfter != 0 {
+		t.Errorf("missing CR must not requeue, got %+v", res)
+	}
+}
+
+// T2.2 RED — boundary validation (fail-fast at the API, error-handling.md): the CRD rejects an empty image,
+// a malformed storageSize, and an out-of-range port BEFORE the object is ever stored.
+func TestCRD_RejectsInvalidSpec(t *testing.T) {
+	cases := []struct {
+		name string
+		spec theodbv1.TheoDBClusterSpec
+	}{
+		{"empty-image", theodbv1.TheoDBClusterSpec{Instances: 1, Image: "", StorageSize: "1Gi", Port: 5432}},
+		{"bad-storage", theodbv1.TheoDBClusterSpec{Instances: 1, Image: "theo-db:test", StorageSize: "garbage", Port: 5432}},
+		{"port-too-high", theodbv1.TheoDBClusterSpec{Instances: 1, Image: "theo-db:test", StorageSize: "1Gi", Port: 99999}},
+		{"instances-zero", theodbv1.TheoDBClusterSpec{Instances: 0, Image: "theo-db:test", StorageSize: "1Gi", Port: 5432}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			obj := &theodbv1.TheoDBCluster{ObjectMeta: metav1.ObjectMeta{Name: "rej-" + tc.name, Namespace: "default"}, Spec: tc.spec}
+			err := k8sClient.Create(context.Background(), obj)
+			if err == nil {
+				_ = k8sClient.Delete(context.Background(), obj)
+				t.Fatalf("apiserver accepted invalid spec %s — CRD validation missing", tc.name)
+			}
+			if !apierrors.IsInvalid(err) {
+				t.Errorf("want Invalid error for %s, got %v", tc.name, err)
+			}
+		})
 	}
 }
 
@@ -167,18 +231,11 @@ func TestReconcile_StatusInitializingWithoutKubelet(t *testing.T) {
 	if c.Status.ReadyInstances != 0 {
 		t.Errorf("readyInstances: got %d, want 0", c.Status.ReadyInstances)
 	}
-	ready := findCondition(c.Status.Conditions, "Ready")
+	ready := apimeta.FindStatusCondition(c.Status.Conditions, "Ready")
 	if ready == nil || ready.Status != metav1.ConditionFalse {
 		t.Errorf("Ready condition: got %+v, want status False", ready)
 	}
-}
-
-// findCondition is a tiny local helper (avoids pulling apimachinery/api/meta just for tests).
-func findCondition(conds []metav1.Condition, condType string) *metav1.Condition {
-	for i := range conds {
-		if conds[i].Type == condType {
-			return &conds[i]
-		}
+	if c.Status.ObservedGeneration != c.Generation {
+		t.Errorf("observedGeneration: got %d, want %d", c.Status.ObservedGeneration, c.Generation)
 	}
-	return nil
 }

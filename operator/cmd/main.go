@@ -35,7 +35,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	corev1 "github.com/usetheodev/theo-db/operator/api/v1"
+	theodbv1 "github.com/usetheodev/theo-db/operator/api/v1"
 	"github.com/usetheodev/theo-db/operator/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
@@ -48,7 +48,7 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
-	utilruntime.Must(corev1.AddToScheme(scheme))
+	utilruntime.Must(theodbv1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
