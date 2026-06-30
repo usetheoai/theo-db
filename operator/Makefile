@@ -89,6 +89,10 @@ build: manifests generate fmt vet ## Build manager binary.
 build-cli: ## Build the theodbctl CLI binary.
 	go build -o bin/theodbctl ./cmd/theodbctl
 
+.PHONY: build-mcp
+build-mcp: ## Build the theodb-mcp MCP server binary.
+	go build -o bin/theodb-mcp ./cmd/theodb-mcp
+
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./cmd/main.go

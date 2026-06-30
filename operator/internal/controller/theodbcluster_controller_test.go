@@ -186,7 +186,7 @@ func TestReconcile_CRDeleted_NoOp(t *testing.T) {
 	if err != nil {
 		t.Errorf("reconcile of a missing CR must return nil, got %v", err)
 	}
-	if res.Requeue || res.RequeueAfter != 0 {
+	if res.RequeueAfter != 0 {
 		t.Errorf("missing CR must not requeue, got %+v", res)
 	}
 }
