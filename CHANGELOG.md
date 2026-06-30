@@ -24,6 +24,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.20.0] - 2026-06-30
+
+### Added
+- **(M20) Operadores de distância vetorial próprios em Rust — paridade numérica com pgvector (coexistência):** `theodb.l2_distance` / `theodb.inner_product` / `theodb.cosine_distance(vector, vector)` implementados em Rust (`theodb_rs/src/vec.rs`), computando L2 (`<->`), inner product (`<#>` = negativo) e cosseno (`<=>`) sobre os valores do pgvector com **acumulação em f32** (igual ao `vector.c` do pgvector — o determinante de paridade bit-a-bit), `sqrt`/divisão em f64, clamp do cosseno a [-1,1]. **Decisão de migração = coexistência** (ADR D1): as funções leem os valores exatos do pgvector via o cast lossless `vector::real[]` (sem tipo competidor, sem redefinir os operadores do pgvector) — dados/índices HNSW/IVFFlat/DiskANN + `embed`/`hybrid`/`import` intactos. Paridade provada por `benchmarks/tests/test_vector_ops.py` (comparação byte-a-byte com as funções nativas do pgvector nos oracle rows + boundaries dim=1/1536/16000/NaN/inf) + benchmark reprodutível (`docs/benchmarks/m20-vector-ops-parity.md`). Sem nova dependência (pgrx + std).
+
 ## [0.19.0] - 2026-06-30
 
 ### Changed

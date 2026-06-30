@@ -22,6 +22,7 @@ mod hybrid;
 mod migrate;
 mod nl;
 mod pg;
+mod vec;
 
 // theodb_rs owns its OWN schema `theodb_rs` (so it never tries to CREATE the `theodb` schema, which
 // is owned by the umbrella `theodb` extension — PG forbids a second extension from CREATE-IF-NOT-EXISTS
@@ -148,6 +149,29 @@ mod theodb_rs {
         metadata_col: &str,
     ) -> i32 {
         crate::migrate::import(target_text, export.0, id_col, embedding_col, metadata_col)
+    }
+
+    // ── M20: own f32-parity distance ops over pgvector's values (crate::vec) ─────────────────────────────
+    // The public `theodb.*` wrappers cast `vector::real[]` (pgvector's lossless cast) so these receive the
+    // exact f32 payload as a pgrx-native Vec<f32> (no unsafe FFI; pgrx handles detoast). Coexistence (ADR D1).
+    /// `theodb_rs._vec_l2` — L2 distance `<->` (the SQL `theodb.l2_distance`).
+    #[pg_extern(immutable, parallel_safe, strict)]
+    fn _vec_l2(a: Vec<f32>, b: Vec<f32>) -> f64 {
+        crate::vec::l2_distance(&a, &b)
+    }
+
+    /// `theodb_rs._vec_ip` — inner product (the SQL `theodb.inner_product`, byte-for-byte with pgvector's
+    /// `inner_product`). The `<#>` operator distance is `-theodb.inner_product` (pgvector's
+    /// `vector_negative_inner_product`); exposed positive for a clean 1:1 parity comparison.
+    #[pg_extern(immutable, parallel_safe, strict)]
+    fn _vec_ip(a: Vec<f32>, b: Vec<f32>) -> f64 {
+        crate::vec::inner_product(&a, &b)
+    }
+
+    /// `theodb_rs._vec_cosine` — cosine distance `<=>` (the SQL `theodb.cosine_distance`).
+    #[pg_extern(immutable, parallel_safe, strict)]
+    fn _vec_cosine(a: Vec<f32>, b: Vec<f32>) -> f64 {
+        crate::vec::cosine_distance(&a, &b)
     }
 }
 
@@ -358,6 +382,49 @@ REVOKE ALL ON FUNCTION theodb_rs._import_pinecone(text, jsonb, text, text, text)
 "#,
     name = "theodb_import_wrapper",
     requires = [_import_pinecone],
+);
+
+// SQL wrappers: TheoDB's own distance functions (M20 — own f32-parity ops over pgvector's values). Created
+// INTO the existing `theodb` schema; cast `vector::real[]` (pgvector's lossless IMPLICIT cast) so the Rust
+// fns receive the exact f32 payload. COEXISTENCE (ADR D1): these are NEW functions — they do NOT redefine
+// pgvector's `<->`/`<#>`/`<=>` operators on the shared `vector` type (no conflict), and pgvector's
+// type/indexes are untouched. STRICT (NULL in → NULL out, parity with pgvector) + IMMUTABLE (pure). REVOKE
+// parity. `theodb.inner_product` mirrors pgvector's positive `inner_product`; the `<#>` distance is its
+// negation (pgvector `vector_negative_inner_product`). `theodb_rs requires theodb requires vector`, so the
+// `vector` type + its `::real[]` cast exist at CREATE time.
+extension_sql!(
+    r#"
+CREATE FUNCTION theodb.l2_distance(a vector, b vector) RETURNS float8
+LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
+AS $$ SELECT theodb_rs._vec_l2(a::real[], b::real[]) $$;
+
+CREATE FUNCTION theodb.inner_product(a vector, b vector) RETURNS float8
+LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
+AS $$ SELECT theodb_rs._vec_ip(a::real[], b::real[]) $$;
+
+CREATE FUNCTION theodb.cosine_distance(a vector, b vector) RETURNS float8
+LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
+AS $$ SELECT theodb_rs._vec_cosine(a::real[], b::real[]) $$;
+
+COMMENT ON FUNCTION theodb.l2_distance(vector, vector) IS
+  'TheoDB own L2 distance (<->) over pgvector values, at f32 numeric parity with pgvector.l2_distance. '
+  'Implemented in Rust (theodb_rs, M20). Coexists with pgvector (reads vector::real[]; no competing type).';
+COMMENT ON FUNCTION theodb.inner_product(vector, vector) IS
+  'TheoDB own inner product over pgvector values, at f32 parity with pgvector.inner_product. The <#> distance '
+  'is -theodb.inner_product. Implemented in Rust (theodb_rs, M20).';
+COMMENT ON FUNCTION theodb.cosine_distance(vector, vector) IS
+  'TheoDB own cosine distance (<=>) over pgvector values, at f32 parity with pgvector.cosine_distance. '
+  'Implemented in Rust (theodb_rs, M20).';
+
+REVOKE ALL ON FUNCTION theodb.l2_distance(vector, vector) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb.inner_product(vector, vector) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb.cosine_distance(vector, vector) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb_rs._vec_l2(real[], real[]) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb_rs._vec_ip(real[], real[]) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb_rs._vec_cosine(real[], real[]) FROM PUBLIC;
+"#,
+    name = "theodb_vector_ops_wrapper",
+    requires = [_vec_l2, _vec_ip, _vec_cosine],
 );
 
 // Rust-side unit tests for the input-validation guards (no network needed). The cross-language

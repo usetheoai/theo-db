@@ -1,0 +1,152 @@
+reviewer: numeric-parity
+slice: m20-own-vector-type
+date: 2026-06-30
+scope: >
+  Byte-faithfulness of theodb_rs/src/vec.rs distance math (l2 / inner_product / cosine,
+  plus <#> = -inner_product and dim-mismatch handling) to pgvector v0.8.3 vector.c
+  (VectorL2SquaredDistance/l2_distance, VectorInnerProduct/inner_product/
+  vector_negative_inner_product, VectorCosineSimilarity/cosine_distance, CheckDims),
+  and honesty of the parity test (benchmarks/tests/test_vector_ops.py, REL_TOL=1e-5).
+verdict: READY_TO_MERGE
+summary: >
+  Numeric parity is byte-faithful to pgvector's canonical SCALAR algorithm in all three
+  operators. No input was found where vec.rs diverges from pgvector beyond the documented
+  SIMD low-bit noise (ADR D3). All hard parity determinants match: f32 accumulation, f64
+  sqrt/divide, single-pass cosine, clamp+1.0-sim, typed 22023 on dim mismatch, lossless
+  value pathway. No BLOCKER/HIGH. Two LOW observations and one INFO (test honesty).
+
+severity_counts:
+  BLOCKER: 0
+  HIGH: 0
+  MEDIUM: 0
+  LOW: 2
+  INFO: 2
+
+parity_matrix:
+  - op: "L2 (<->)"
+    pgvector_ref: "vector.c:554-568 (VectorL2SquaredDistance) + :573-583 (l2_distance)"
+    pgvector_algo: "float distance=0; diff=ax[i]-bx[i] (f32); distance += diff*diff (f32); sqrt((double)squared)"
+    vecrs: "vec.rs:35-36 — let squared: f32 = a.iter().zip(b).map(|(x,y)| (x-y)*(x-y)).sum(); (squared as f64).sqrt()"
+    match: EXACT
+    notes: >
+      .sum::<f32>() folds left-to-right from 0.0 in f32, identical to pgvector's sequential
+      scalar += . diff and diff*diff are f32. f64 cast only on final sqrt. Bit-identical to the
+      scalar reference.
+  - op: "inner product"
+    pgvector_ref: "vector.c:601-611 (VectorInnerProduct) + :616-626 (inner_product)"
+    pgvector_algo: "float distance=0; distance += ax[i]*bx[i] (f32); (double)distance"
+    vecrs: "vec.rs:43-44 — let ip: f32 = a.iter().zip(b).map(|(x,y)| x*y).sum(); ip as f64"
+    match: EXACT
+    notes: "f32 accumulation, f64 cast on result only. theodb.inner_product mirrors pgvector's POSITIVE inner_product (correct — test compares positive-to-positive)."
+  - op: "negative inner product (<#>)"
+    pgvector_ref: "vector.c:631-641 (vector_negative_inner_product) — (double) -VectorInnerProduct(...)"
+    pgvecrs_callsite: "vec.rs:47-49 comment + lib.rs SQL: <#> distance = -theodb.inner_product (applied at call site / asserted in test_negative_inner_product_is_pgvector_neg_ip)"
+    match: EXACT
+    notes: >
+      pgvector negates the f32 then casts to f64: (double)(-(f32)ip). theodb casts then negates:
+      -((f64)ip). Negation is an exact sign-flip in both f32 and f64 and the f32->f64 cast is exact,
+      so both equal -(ip_f32 as f64). No divergence. Applying the sign flip at the call site (KISS)
+      instead of a separate fn is sound.
+  - op: "cosine (<=>)"
+    pgvector_ref: "vector.c:643-660 (VectorCosineSimilarity) + :665-689 (cosine_distance)"
+    pgvector_algo: >
+      f32 sims similarity/norma/normb in ONE loop; return (double)sim / sqrt((double)norma*(double)normb);
+      clamp if sim>1 ->1 else if sim<-1 ->-1; return 1.0 - sim
+    vecrs: "vec.rs:55-67 — single for-loop, three f32 accumulators; (sim as f64 / ((norma as f64)*(normb as f64)).sqrt()).clamp(-1.0,1.0); 1.0 - similarity"
+    match: EXACT
+    notes: >
+      f64 expression structurally identical: sim_f64 / sqrt(norma_f64 * normb_f64) using sqrt(a*b)
+      (matches pgvector's chosen form over sqrt(a)*sqrt(b)). Single-pass f32 accumulation matches.
+      Clamp order (before 1.0-sim) matches.
+  - op: "dim mismatch"
+    pgvector_ref: "CheckDims -> ERRCODE_DATA_EXCEPTION (22023)"
+    vecrs: "vec.rs:21-29 check_dims -> err_input(...) typed 22023; verified in test_dim_mismatch_raises + pg_test dim_mismatch_rejected_22023"
+    match: EXACT
+    notes: "Fail-fast at boundary (Unbreakable Rule 8); typed error parity with pgvector."
+
+clamp_nan_inf_parity:
+  status: VERIFIED_EQUIVALENT
+  build: "theo-db image is Linux/GCC, so pgvector's #ifdef _MSC_VER NaN early-return (vector.c:677-681) is dead code; the if/else (vector.c:683-688) governs."
+  cases:
+    - input: "+inf similarity (e.g. positive sim with zero/positive norm overflow)"
+      pgvector: "inf > 1 -> sim=1.0 -> 1.0-1.0 = 0.0"
+      rust_clamp: "(+inf).clamp(-1,1) = 1.0 -> 1.0-1.0 = 0.0"
+      match: true
+    - input: "-inf similarity"
+      pgvector: "-inf < -1 -> sim=-1.0 -> 1.0-(-1.0) = 2.0"
+      rust_clamp: "(-inf).clamp(-1,1) = -1.0 -> 2.0"
+      match: true
+    - input: "NaN similarity (0-norm: 0.0/0.0, e.g. [3e38]x[3e38] cosine -> inf/inf=NaN)"
+      pgvector: "NaN>1 false, NaN<-1 false -> stays NaN -> 1.0-NaN = NaN"
+      rust_clamp: "f64::clamp(NaN,-1,1) = NaN (no panic; assert is only min<=max) -> 1.0-NaN = NaN"
+      match: true
+  conclusion: ".clamp(-1.0,1.0) is provably equivalent to pgvector's if/else across finite, +-inf, and NaN on the actual (and MSVC) build. vec.rs:63-65 comment is accurate. No divergence."
+
+value_pathway:
+  status: LOSSLESS_VERIFIED
+  detail: >
+    SQL wrappers cast vector::real[] (pgvector CREATE CAST vector AS real[],
+    vector.sql:157) into pgrx Vec<f32>. vector_to_float4 (vector.c:511-530) copies each
+    payload float via Float4GetDatum(vec->x[i]) into a float4 array — a direct, lossless
+    f32->f32 copy. The Rust fns therefore receive pgvector's EXACT f32 bits (no precision
+    change, no unsafe FFI; pgrx handles detoast). Confirms blueprint EC-1 closure claim.
+
+findings:
+  - id: NP-1
+    severity: LOW
+    title: "f32-accumulation unit test proves f32 accum for L2 only, not IP/cosine"
+    file: theodb_rs/src/vec.rs:112-124
+    detail: >
+      f32_accumulation_not_f64 demonstrates f32 (not f64) accumulation by replaying the L2
+      path (squared sum drops sub-ULP +64 vs an f64 accumulator). It does NOT independently
+      assert f32 accumulation for inner_product or cosine. Risk is LOW because IP and cosine
+      use the identical .sum::<f32>() / single-pass-f32-loop structure, and the container
+      parity suite exercises all three at high dim — but the Rust-level proof is asymmetric.
+    recommendation: >
+      Optional: add an analogous big-base sub-ULP assertion for inner_product and the cosine
+      norm sums to lock f32 accumulation per-op at the unit level. Not merge-blocking.
+  - id: NP-2
+    severity: LOW
+    title: "Parity test compares scalar-theodb vs LIVE SIMD-pgvector, not vs canonical scalar"
+    file: benchmarks/tests/test_vector_ops.py:22-41,89-112
+    detail: >
+      The gate asserts within REL_TOL=1e-5 of the INSTALLED pgvector, which is SIMD
+      (VECTOR_TARGET_CLONES) — so the high-dim comparison validates 'within 1e-5 of a
+      reordered f32 sum', not bit-equality to the canonical scalar algorithm. This is the
+      correct and only physically feasible approach (ADR D3) and is honestly documented; the
+      residual exposure is that a hypothetical real bug staying inside 1e-5 on high-dim rows
+      could pass. Mitigated: integer/small rows hit the exact text-equality fast path
+      (theo_val == pg_val), so structural bugs are caught exactly there.
+    recommendation: >
+      Honest debt, acceptable. Optionally pin/force pgvector's scalar build in one CI lane to
+      add a bit-exact scalar-vs-scalar assertion. Not merge-blocking.
+  - id: NP-3
+    severity: INFO
+    title: "REL_TOL=1e-5 tolerance is HONEST and well-scoped"
+    file: benchmarks/tests/test_vector_ops.py:22-41
+    detail: >
+      The tolerance only absorbs SIMD low-bit reordering noise (~1e-6 rel observed at dim
+      1536); _parity_ok first attempts exact text equality and handles inf/nan sign-matched
+      equality, then falls back to abs(t-p) <= 1e-5*max(1,|p|). A genuine cosine/L2/IP
+      algorithm bug produces far more than 1e-5 divergence and would fail. Consistent with
+      ADR D3 and public-copy.md honesty (no false 'bit-exact' claim).
+  - id: NP-4
+    severity: INFO
+    title: "Coexistence wiring does not shadow pgvector operators (no parity-breaking conflict)"
+    file: theodb_rs/src/lib.rs (theodb_vector_ops_wrapper)
+    detail: >
+      New functions are theodb.l2_distance / inner_product / cosine_distance (named functions
+      in the theodb schema), NOT redefinitions of pgvector's <->/<#>/<=> operators on the
+      shared vector type. pgvector's type/operators/indexes are untouched (ADR D1 coexistence),
+      so there is no operator-resolution conflict that could silently change which
+      implementation a query uses. STRICT (NULL->NULL parity) + IMMUTABLE + REVOKE-from-PUBLIC
+      verified in tests.
+
+real_divergence_found: false
+divergence_search_notes: >
+  Examined: integer rows, fractional f32-rounding rows, dim=1 boundary, dim=1536 and
+  near-max dim=16000, f32 overflow ([3e38]: L2->0, IP->+inf, cosine->NaN), zero-norm cosine
+  (0/0->NaN, +-inf/0 -> +-inf -> clamp), NULL args (STRICT), dim mismatch (22023), and the
+  <#> sign-flip. Every case matches pgvector's canonical scalar semantics exactly; the only
+  deviations vs the INSTALLED build are SIMD-reordering low bits, bounded by REL_TOL and
+  documented under ADR D3. No real (algorithmic) bug.

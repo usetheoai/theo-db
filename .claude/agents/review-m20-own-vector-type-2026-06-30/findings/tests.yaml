@@ -1,0 +1,206 @@
+reviewer: tests
+slug: m20-own-vector-type
+date: 2026-06-30
+scope: >
+  Test quality review of M20 (own Rust f32-parity distance ops over pgvector). Files:
+  theodb_rs/src/vec.rs (#[pg_test] mod), benchmarks/tests/test_vector_ops.py (parity gate),
+  benchmarks/bench_vector_ops.py (parity+perf bench), against rules/testing.md and the plan/edge-case review.
+  Reviewed how each layer is (or is not) gated in CI (.github/workflows/ci.yml).
+
+summary:
+  blocker: 0
+  high: 1
+  medium: 4
+  low: 2
+  info: 4
+
+findings:
+  - id: TST-H1
+    severity: HIGH
+    title: "ADR-D2 (f32 accumulation — the bit-parity determinant) has NO CI-executed discriminator"
+    files:
+      - theodb_rs/src/vec.rs:112-124
+      - benchmarks/tests/test_vector_ops.py:28
+      - .github/workflows/ci.yml:126
+    evidence: >
+      The entire milestone hinges on accumulating distance sums in f32 (ADR-D2, "the bit determinant",
+      plan lines 88-94). The ONLY test that actually discriminates f32 vs f64 accumulation is the Rust
+      `f32_accumulation_not_f64` #[pg_test] (vec.rs:112). But CI runs NO cargo / `cargo pgrx test` / clippy
+      step (grep of ci.yml for cargo|pgrx|clippy is empty) — so every Rust #[pg_test] is documentation-grade,
+      never executed automatically. The only CI gate for M20 is `pytest -m integration` (ci.yml:126), which
+      runs test_vector_ops.py with REL_TOL=1e-5. A regression from f32→f64 accumulation on dim-1536 random
+      data diverges from pgvector by only ~sqrt(1536)*eps_f32 ≈ 2e-6 relative — BELOW the 1e-5 tolerance —
+      so the Python gate would very likely STILL PASS an accumulation-width regression. Net: the central
+      correctness property of M20 is not guarded by any always-on test. The tolerance cannot be tightened
+      below the genuine SIMD low-bit noise (~1e-6) without flaking, so the Python gate is structurally unable
+      to be that discriminator; the discriminator must run in CI as a Rust test.
+    impact: >
+      A future change to f64 accumulation (the explicitly REJECTED alternative D2-a) silently passes CI while
+      breaking the parity guarantee the milestone exists to prove.
+    recommendation: >
+      Add a CI step that runs `cargo pgrx test` (or a plain `cargo test` for the pure-math subset) so
+      f32_accumulation_not_f64 actually executes on every push; OR add a Python parity row crafted so that an
+      f64 accumulator diverges > REL_TOL from pgvector (a large-magnitude + many-tiny-terms vector pair, the
+      same construction as the Rust test) so the integration gate itself discriminates the determinant.
+
+  - id: TST-M1
+    severity: MEDIUM
+    title: "Container dim-mismatch test asserts a generic exception, not the typed 22023 (testing.md §4.1)"
+    files:
+      - benchmarks/tests/test_vector_ops.py:127-132
+    evidence: >
+      `test_dim_mismatch_raises` only does `pytest.raises(psycopg2.Error)` — the broadest psycopg2 base class.
+      testing.md §4.1 requires a negative-case test to assert the SPECIFIC typed error + message, not merely
+      "it throws". The plan named this test `test_dim_mismatch_22023` and the Failure-scenarios section
+      (plan:318) explicitly promises "22023 parity". The test was renamed and downgraded: a dim-mismatch that
+      surfaced as 42883, an internal XX000 panic, or any other SQLSTATE would pass undetected. The Rust side
+      DOES assert the message (`#[pg_test(error = "different vector dimensions")]`, vec.rs:126) but that test
+      does not run in CI (see TST-H1), so the CI gate never verifies the SQLSTATE.
+    recommendation: >
+      Capture the exception and assert `exc.value.pgcode == '22023'` (psycopg2 sets .pgcode) and optionally
+      that the message contains "different vector dimensions".
+
+  - id: TST-M2
+    severity: MEDIUM
+    title: "EC-4 half-covered: inf input present, NaN input literal missing"
+    files:
+      - benchmarks/tests/test_vector_ops.py:52-63
+    evidence: >
+      The edge-case review EC-4 (MUST cover NaN/inf) named both `'[NaN]'` and `'[3e38]'` (edge-cases md:43).
+      PAIRS includes ("[3e38]","[3e38]") (overflow→inf) but NO NaN input literal (e.g. '[NaN]' vs '[1]').
+      `_parity_ok`'s NaN branch (test_vector_ops.py:39-40) is only incidentally exercised by the cosine of the
+      [3e38] pair (inf/inf→NaN); a NaN *component in the input* is never fed in. A bug that masks/propagates
+      NaN differently from pgvector on a NaN input would not be caught.
+    recommendation: >
+      Add a NaN-input pair (e.g. ("[NaN,1]","[1,2]")) to PAIRS so all three ops are checked for NaN-input
+      parity-to-live-pgvector, matching the EC-4 contract.
+
+  - id: TST-M3
+    severity: MEDIUM
+    title: "EC-1 (TOAST — the sole MUST-FIX) is not exercised by the always-on CI gate"
+    files:
+      - benchmarks/tests/test_vector_ops.py:52-112
+      - benchmarks/bench_vector_ops.py:42-56
+      - .github/workflows/ci.yml:126
+    evidence: >
+      EC-1 (a `vector` value may be TOASTed/out-of-line for large dims; reading the raw datum without detoast
+      → garbage/segfault) was the single MUST-FIX. The implementation closes it structurally by switching to
+      the `vector::real[]` cast (vec.rs:1-16, lib.rs wrapper) so PG's cast machinery + pgrx detoast — a sound
+      fix. BUT no test proves correct parity on a column-stored, TOAST-sized vector: the CI gate
+      (test_vector_ops.py) passes only INLINE literals (`%s::vector`), which are not stored/TOASTed the same
+      way as a table column. The path that would actually toast (a vector(1536) column ≈ 6KB > 2KB threshold)
+      exists only in bench_vector_ops.py's temp table — and the bench is NOT invoked in CI (no bench step in
+      ci.yml). So the MUST-FIX behaves correctly by construction but is unverified by any automated test.
+      The plan also promised a `#[pg_test]` round-tripping a real datum incl. "a large/TOASTable dim"
+      (plan:143); that test is absent (the approach changed away from the FFI reader).
+    recommendation: >
+      Add a parity test that INSERTs a high-dim (≥1536) vector into a real/temp table column and asserts
+      theodb.* == pgvector.* reading it back (forces the detoast path), OR run bench_vector_ops.py as a CI
+      gate step. Either makes the TOAST MUST-FIX an executed assertion.
+
+  - id: TST-M4
+    severity: MEDIUM
+    title: "Pure distance math gated only by #[pg_test]; no CI-executed unit layer (pyramid base missing from automation)"
+    files:
+      - theodb_rs/src/vec.rs:75-131
+      - .github/workflows/ci.yml
+    evidence: >
+      vec.rs's distance fns are pure (`fn(&[f32]) -> f64`) — the plan's own Baseline calls them "testable
+      without Postgres" (plan:50). Yet all six unit tests are written as `#[pg_test]` inside a
+      `#[pgrx::pg_schema]` mod, coupling the math tests to the pgrx PG harness, AND that harness is never run
+      in CI. The result is a pyramid with no automated base: the only CI execution is the integration-tier
+      Python parity gate. The oracle-value and f32-accumulation assertions (the fast, deterministic unit
+      checks) contribute zero CI signal today.
+    recommendation: >
+      Either wire `cargo pgrx test` into CI, or split the happy-path math assertions (no err_input) into plain
+      `#[cfg(test)] #[test]` so they run under a CI `cargo test` step and form a real, fast unit base. (Noted:
+      the dim-mismatch test needs the PG runtime for err_input/ereport, so it legitimately stays a #[pg_test].)
+
+  - id: TST-L1
+    severity: LOW
+    title: "Bench parity gate (exit 1) has no test proving it fails on a violation"
+    files:
+      - benchmarks/bench_vector_ops.py:123-139
+    evidence: >
+      Plan T5.1 RED criterion was "bench exits non-zero on parity violation" (plan:276). The gate logic exists
+      (`if not parity_ok: return 1`) but there is no test that injects a parity break and asserts exit 1 — the
+      negative behavior of the gate is asserted only by construction. REL_TOL/tolerance default 1e-5 with a
+      `--runs < 3 → exit 2` guard is sound, but a broken gate (e.g. a future refactor that swallows the
+      maxdiff) would not be caught.
+    recommendation: >
+      A tiny unit test invoking _parity_maxdiff/main with a stubbed cursor returning an out-of-tolerance diff,
+      asserting return code 1 — keeps the safety property of the gate self-verifying.
+
+  - id: TST-L2
+    severity: LOW
+    title: "Oracle parity test loops all PAIRS inside one test body (multiple cases, one test)"
+    files:
+      - benchmarks/tests/test_vector_ops.py:89-99
+    evidence: >
+      `test_distance_matches_pgvector_on_oracle` is parametrized over OPS but iterates all 10 PAIRS in a
+      for-loop. testing.md §3 prefers one behavior per test; a failure short-circuits at the first bad pair
+      and the remaining pairs are not evaluated in that run. The assert message does pinpoint the failing
+      pair, so triage is fine — hence LOW.
+    recommendation: >
+      Parametrize over PAIRS as well (pytest.mark.parametrize on the pairs) so each (op, pair) is an
+      independent case and one failure does not mask others.
+
+  - id: TST-I1
+    severity: INFO
+    title: "POSITIVE: #[pg_test]-not-run-in-CI caveat is honestly disclosed (Unbreakable Rule 3)"
+    files:
+      - theodb_rs/src/vec.rs:70-74
+      - benchmarks/tests/test_vector_ops.py:1-13
+    evidence: >
+      vec.rs:70-74 states plainly that #[pg_test] runs under `cargo pgrx test` and "The OBSERVABLE parity gate
+      that runs in CI is the Python suite". The Python docstring documents REL_TOL, the SIMD reordering
+      rationale, and compares against LIVE pgvector (no hardcoded constants). The honesty is exemplary — the
+      finding TST-H1/M4 is that the disclosed consequence (no CI execution of the determinant) is left
+      unmitigated, not that it is hidden.
+
+  - id: TST-I2
+    severity: INFO
+    title: "POSITIVE: REL_TOL=1e-5 is meaningful, not a bug-hiding fudge"
+    files:
+      - benchmarks/tests/test_vector_ops.py:28-41
+    evidence: >
+      Tolerance is ~10x the observed SIMD low-bit noise (~1e-6) and `_parity_ok` short-circuits on exact text
+      equality first, so integer/small cases must match EXACTLY; only SIMD-order noise is absorbed. A real
+      algorithmic error (wrong formula, transposed operands) produces divergence >> 1e-5 and is caught. The
+      `max(1.0, |p|)` floor turns it into an absolute 1e-5 for small distances (e.g. cosine near 0), which is
+      appropriate. Caveat: it is NOT tight enough to catch the f32-vs-f64 determinant (see TST-H1).
+
+  - id: TST-I3
+    severity: INFO
+    title: "POSITIVE: edge boundaries dim=1 / 1536 / 16000 and <#> negative-IP, NULL, zero-norm cosine covered"
+    files:
+      - benchmarks/tests/test_vector_ops.py:60,102-124,135-140
+    evidence: >
+      EC-2 dim=1 (("[3]","[0]") + #[pg_test] dim1_boundary_holds), EC-3 high-dim parametrized [1536, 16000],
+      the <#> operator == -theodb.inner_product (test_negative_inner_product_is_pgvector_neg_ip), STRICT
+      NULL→NULL (test_null_arg_returns_null), and zero-norm cosine (("[0,0]","[3,4]") → NaN parity via
+      _parity_ok) are all present and assert parity-to-live-pgvector. Good edge coverage.
+
+  - id: TST-I4
+    severity: INFO
+    title: "NOTE: f32 discriminator relies on exact float equality, unverified in CI"
+    files:
+      - theodb_rs/src/vec.rs:113-124
+    evidence: >
+      `f32_accumulation_not_f64` asserts `assert_eq!(got, big as f64)` i.e. sqrt(f32_round(1e14)) == 1e7
+      exactly. f32_round(1e14) is not exactly 1e14 (24-bit mantissa), so exact equality of the sqrt to 1e7 is
+      a fragile assumption. Because the #[pg_test] is never executed in CI (TST-H1), this assertion's
+      correctness is unverified. Intent is right (it IS a genuine f32-vs-f64 discriminator); recommend
+      asserting `got != f64_acc` plus a tolerance band on the f32 result rather than exact equality, and run
+      it in CI.
+
+advice_to_lead: >
+  No BLOCKER, but one HIGH that bears on the milestone's core claim: M20 exists to PROVE f32 parity, yet the
+  f32-accumulation determinant (ADR-D2) is guarded only by a #[pg_test] that CI never runs, and the Python
+  gate's necessary tolerance (~1e-5) cannot reliably distinguish f32 from f64. The edge coverage (dim=1/1536/
+  16000, <#>, NULL, zero-norm) is solid and honesty about the #[pg_test]/CI split is exemplary, but two of the
+  edge-case review's named cases regressed in execution: dim-mismatch no longer asserts SQLSTATE 22023, and
+  the NaN input literal from EC-4 is absent. The TOAST MUST-FIX (EC-1) is structurally sound but unverified by
+  the always-on gate. Recommend at minimum: (1) execute the Rust unit tests in CI (cargo pgrx test step) or
+  add a Python parity row that diverges > tolerance under f64; (2) assert pgcode 22023; (3) add a NaN input
+  pair; (4) add a column-stored high-dim parity row (or run the bench in CI) to exercise detoast.
