@@ -15,7 +15,9 @@ use pgrx::prelude::*;
 
 ::pgrx::pg_module_magic!();
 
+mod chat;
 mod embed;
+mod http;
 mod pg;
 
 // theodb_rs owns its OWN schema `theodb_rs` (so it never tries to CREATE the `theodb` schema, which
@@ -45,6 +47,50 @@ mod theodb_rs {
         // layer (which detects NULL elements -> 22023). `content` lives through the call.
         let refs: Vec<Option<&str>> = content.iter().map(|o| o.as_deref()).collect();
         crate::embed::run_batch(&refs, model)
+    }
+
+    // ── M18: the generative ai.* surface (was plpython3u in sql/50) ──────────────────────────────────
+    // Thin delegates to `crate::chat`; the public `ai.*` SQL wrappers (below) carry the documented names,
+    // return types, VOLATILE, and REVOKE. `ai._chat` stays SQL-callable so ai.generate/summarize/the
+    // aggregate finalfunc / M19 nl_to_sql keep working.
+
+    /// `theodb_rs._ai_chat` — one chat-completions round-trip (the SQL `ai._chat`).
+    #[pg_extern]
+    fn _ai_chat(prompt: Option<&str>, system: Option<&str>, model: Option<&str>) -> String {
+        crate::chat::chat(prompt, system, model)
+    }
+
+    /// `theodb_rs._ai_if` — natural-language condition -> boolean (the SQL `ai.if`).
+    #[pg_extern]
+    fn _ai_if(prompt: Option<&str>, model: Option<&str>) -> bool {
+        crate::chat::ai_if(prompt, model)
+    }
+
+    /// `theodb_rs._ai_sentiment` — content -> {positive,negative,neutral} (the SQL `ai.analyze_sentiment`).
+    #[pg_extern]
+    fn _ai_sentiment(content: Option<&str>, model: Option<&str>) -> String {
+        crate::chat::ai_sentiment(content, model)
+    }
+
+    /// `theodb_rs._ai_rank` — natural-language scoring -> real (the SQL `ai.rank`).
+    #[pg_extern]
+    fn _ai_rank(prompt: Option<&str>, model: Option<&str>) -> f32 {
+        crate::chat::ai_rank(prompt, model)
+    }
+
+    /// `theodb_rs._ai_generate_batch` — N prompts -> N answers in ONE round-trip (the SQL `ai.generate_batch`).
+    /// NULL array -> 22023; NULL element -> 22023; empty -> empty (no call); JSON null -> SQL NULL element.
+    #[pg_extern]
+    fn _ai_generate_batch(
+        prompts: Option<Vec<Option<String>>>,
+        model: Option<&str>,
+    ) -> Vec<Option<String>> {
+        let prompts = match prompts {
+            Some(p) => p,
+            None => crate::pg::err_input("ai.generate_batch: prompts must not be NULL"),
+        };
+        let refs: Vec<Option<&str>> = prompts.iter().map(|o| o.as_deref()).collect();
+        crate::chat::ai_generate_batch(&refs, model)
     }
 }
 
@@ -101,6 +147,53 @@ REVOKE ALL ON FUNCTION theodb_rs._embed_batch_text(text[], text) FROM PUBLIC;
 "#,
     name = "theodb_embed_batch_wrapper",
     requires = [_embed_batch_text],
+);
+
+// SQL wrappers: the public generative `ai.*` surface (M18 — was plpython3u in sql/50, now Rust). Created
+// INTO the existing `ai` schema (owned by the `theodb` umbrella; theodb_rs `requires = theodb` so it exists
+// first). Exact public signatures / RETURNS / VOLATILE preserved; every function REVOKEd from PUBLIC (it
+// makes server-side outbound HTTP). `ai._chat` stays SQL-callable (ai.generate/summarize/the aggregate
+// finalfunc + M19 nl_to_sql depend on it by name).
+extension_sql!(
+    r#"
+CREATE FUNCTION ai._chat(prompt text, system text DEFAULT NULL, model text DEFAULT NULL)
+RETURNS text LANGUAGE sql VOLATILE
+AS $$ SELECT theodb_rs._ai_chat(prompt, system, model) $$;
+
+CREATE FUNCTION ai."if"(prompt text, model text DEFAULT NULL)
+RETURNS boolean LANGUAGE sql VOLATILE
+AS $$ SELECT theodb_rs._ai_if(prompt, model) $$;
+
+CREATE FUNCTION ai.analyze_sentiment(content text, model text DEFAULT NULL)
+RETURNS text LANGUAGE sql VOLATILE
+AS $$ SELECT theodb_rs._ai_sentiment(content, model) $$;
+
+CREATE FUNCTION ai.rank(prompt text, model text DEFAULT NULL)
+RETURNS real LANGUAGE sql VOLATILE
+AS $$ SELECT theodb_rs._ai_rank(prompt, model) $$;
+
+CREATE FUNCTION ai.generate_batch(prompts text[], model text DEFAULT NULL)
+RETURNS text[] LANGUAGE sql VOLATILE
+AS $$ SELECT theodb_rs._ai_generate_batch(prompts, model) $$;
+
+COMMENT ON FUNCTION ai._chat(text, text, text) IS
+  'PRIVATE: one configurable chat-completions round-trip (theodb.llm_endpoint, http(s)-only, no redirects) '
+  '+ parse of choices[0].message.content. Single HTTP source of truth for the public ai.* functions. '
+  'Implemented in Rust (theodb_rs, M18). Not granted to PUBLIC. theodb.llm_api_key is a session GUC.';
+
+REVOKE ALL ON FUNCTION ai._chat(text, text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION ai."if"(text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION ai.analyze_sentiment(text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION ai.rank(text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION ai.generate_batch(text[], text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb_rs._ai_chat(text, text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb_rs._ai_if(text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb_rs._ai_sentiment(text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb_rs._ai_rank(text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb_rs._ai_generate_batch(text[], text) FROM PUBLIC;
+"#,
+    name = "theodb_ai_wrappers",
+    requires = [_ai_chat, _ai_if, _ai_sentiment, _ai_rank, _ai_generate_batch],
 );
 
 // Rust-side unit tests for the input-validation guards (no network needed). The cross-language
