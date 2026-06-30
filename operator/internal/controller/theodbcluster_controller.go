@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	dbmetrics "github.com/usetheodev/theo-db/operator/internal/metrics"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -50,7 +51,17 @@ type TheoDBClusterReconciler struct {
 // Reconcile drives the TheoDBCluster towards its desired state: ensure a headless Service (pod identity) + a
 // gateway Service + a StatefulSet, then update status. Idempotent (EC-2: a converged second pass makes no
 // change). Spec is validated at the API boundary (CRD); storageSize is re-parsed here as defense-in-depth.
-func (r *TheoDBClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *TheoDBClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.Result, err error) {
+	start := time.Now()
+	defer func() {
+		dbmetrics.ReconcileDuration.Observe(time.Since(start).Seconds())
+		result := dbmetrics.ResultSuccess
+		if err != nil {
+			result = dbmetrics.ResultError
+		}
+		dbmetrics.ReconcileTotal.WithLabelValues(result).Inc()
+	}()
+
 	var cluster theodbv1.TheoDBCluster
 	if err := r.Get(ctx, req.NamespacedName, &cluster); err != nil {
 		// NotFound: the CR was deleted; owned resources are GC'd by owner refs. No requeue.
@@ -194,6 +205,12 @@ func (r *TheoDBClusterReconciler) updateStatus(ctx context.Context, c *theodbv1.
 		phase = "Healthy"
 		condStatus = metav1.ConditionTrue
 	}
+
+	// Domain metrics (T1.1): per-cluster gauges always reflect the latest observation, even on a no-churn pass.
+	dbmetrics.ClusterReadyInstances.WithLabelValues(c.Namespace, c.Name).Set(float64(ready))
+	dbmetrics.ClusterDesiredInstances.WithLabelValues(c.Namespace, c.Name).Set(float64(c.Spec.Instances))
+	dbmetrics.RecordPhase(c.Namespace, c.Name, phase)
+
 	if c.Status.Phase == phase && c.Status.ReadyInstances == ready && c.Status.ObservedGeneration == c.Generation {
 		return nil // no churn (EC-2)
 	}

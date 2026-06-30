@@ -20,6 +20,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
+	dbmetrics "github.com/usetheodev/theo-db/operator/internal/metrics"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -238,5 +240,26 @@ func TestReconcile_StatusInitializingWithoutKubelet(t *testing.T) {
 	}
 	if c.Status.ObservedGeneration != c.Generation {
 		t.Errorf("observedGeneration: got %d, want %d", c.Status.ObservedGeneration, c.Generation)
+	}
+}
+
+// T1.1 RED: a reconcile emits the domain gauges (ready=0 without kubelet, desired=spec) + a success counter.
+func TestReconcile_EmitsDomainMetrics(t *testing.T) {
+	dbmetrics.ReconcileTotal.Reset()
+	dbmetrics.ClusterReadyInstances.Reset()
+	dbmetrics.ClusterDesiredInstances.Reset()
+	name := "tc-metrics"
+	createCluster(t, name, theodbv1.TheoDBClusterSpec{Instances: 2, Image: "theo-db:test", StorageSize: "1Gi", Port: 5432})
+
+	reconcileOnce(t, name)
+
+	if got := testutil.ToFloat64(dbmetrics.ClusterDesiredInstances.WithLabelValues("default", name)); got != 2 {
+		t.Errorf("desired_instances gauge: got %v, want 2", got)
+	}
+	if got := testutil.ToFloat64(dbmetrics.ClusterReadyInstances.WithLabelValues("default", name)); got != 0 {
+		t.Errorf("ready_instances gauge: got %v, want 0 (no kubelet)", got)
+	}
+	if got := testutil.ToFloat64(dbmetrics.ReconcileTotal.WithLabelValues(dbmetrics.ResultSuccess)); got < 1 {
+		t.Errorf("reconcile_total{success}: got %v, want >= 1", got)
 	}
 }
