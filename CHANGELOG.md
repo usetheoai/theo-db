@@ -21,6 +21,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Removed
 
 ### Fixed
+- `/code-quality` audit no longer walks `knowledge-base/references/` (cloned third-party reference repos): the skip-list used `referencia` (PT) instead of the real directory name `references` (EN), so the symbol-fabrication detector parsed foreign files — wasting time/RAM and producing a spurious `FAIL_HARD` that blocked `/review`. Now the references zone is correctly skipped, with a behavioral regression test. (#37)
 
 ### Security
 

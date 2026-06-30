@@ -7,7 +7,11 @@ from pathlib import Path
 import pytest
 
 from scripts._shared import Finding, compute_verdict
-from scripts.run_code_quality import _resolve_plan_path, main
+from scripts.run_code_quality import (
+    _enumerate_source_files,
+    _resolve_plan_path,
+    main,
+)
 
 
 def _write_rules(tmp_path: Path, *, with_allowlist: str = "") -> Path:
@@ -169,3 +173,26 @@ def test_cli_no_audit_write_skips_markdown(tmp_path: Path, capsys) -> None:
     assert exit_code == 0
     audit_dir = tmp_path / ".claude" / "knowledge-base" / "audits"
     assert not audit_dir.exists() or not list(audit_dir.glob("*.md"))
+
+
+
+def test_enumerate_source_files_skips_references_zone(tmp_path: Path) -> None:
+    """Regression (issue #37): the audit must NOT walk knowledge-base/references/.
+
+    Reference repos cloned there are third-party study material (read-only per
+    cycle-discover.md). Walking them parses tens of thousands of foreign files,
+    blowing up time/memory and polluting findings with spurious FAIL_HARD.
+    """
+    module_file = tmp_path / "src" / "real.py"
+    module_file.parent.mkdir(parents=True)
+    module_file.write_text("def foo():\n    return 1\n")
+
+    foreign = tmp_path / "knowledge-base" / "references" / "langfuse" / "lib.py"
+    foreign.parent.mkdir(parents=True)
+    foreign.write_text("def bar():\n    return 2\n")
+
+    found = _enumerate_source_files(tmp_path, "python")
+
+    assert module_file in found
+    assert foreign not in found
+    assert not any("references" in p.parts for p in found)
