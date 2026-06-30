@@ -169,7 +169,15 @@ def main(argv=None) -> int:
     p.add_argument("--model", default="stub-chat")
     args = p.parse_args(argv)
 
-    server = ThreadingHTTPServer((args.host, args.port), build_handler(args.model))
+    # A larger listen backlog (default is 5) + daemon threads so a burst of concurrent clients (the
+    # thread-safety test fires K=300 via 16 workers) does not overflow the accept queue and reset
+    # connections. Robustness of the test stub only — does not affect any response/parity behavior.
+    class _Server(ThreadingHTTPServer):
+        request_queue_size = 256
+        daemon_threads = True
+        allow_reuse_address = True
+
+    server = _Server((args.host, args.port), build_handler(args.model))
     print(f"chat_server (stub): http://{args.host}:{args.port}/v1/chat/completions", flush=True)
     try:
         server.serve_forever()

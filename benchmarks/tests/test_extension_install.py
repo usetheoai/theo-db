@@ -142,7 +142,7 @@ def test_extension_installs_full_surface(admin_conn):
                 )
                 assert cur.fetchone() is not None, f"missing documented function {schema}.{fn}"
             cur.execute("SELECT extversion FROM pg_extension WHERE extname='theodb'")
-            assert cur.fetchone()[0] == "1.1"  # default_version bumped to 1.1 (audit-remediation retirement migration)
+            assert cur.fetchone()[0] == "1.2"  # default_version bumped to 1.2 (M18 ai.* retirement migration)
             cur.execute(
                 "SELECT count(*) FROM pg_extension WHERE extname IN ('vector','vectorscale','plpython3u')"
             )
