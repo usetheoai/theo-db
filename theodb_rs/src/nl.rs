@@ -2,14 +2,11 @@
 //! ported from the plpython3u `ai.nl_to_sql`/`ai.nl_query` (sql/60) — the LAST plpython3u in the surface.
 //!
 //! Defense (does NOT trust the LLM):
-//!   * L1 — prompt constraint (hardening; the system prompt is byte-identical so the stub routes on it).
-//!   * L2 — static validation on a comment-stripped/lowercased copy: single statement, SELECT/WITH-only,
-//!          a fixed banned-keyword denylist, no `DO $$`/`CALL`. Stdlib scanning (no regex crate, ADR-B);
-//!          tokenizing on `[a-z0-9_]+` runs is byte-equivalent to the plpython3u `\b…\b` denylist.
-//!   * L4 — PARSER-GRADE relation allowlist via `EXPLAIN (FORMAT JSON)` (Postgres's planner enumerates every
-//!          relation — comma-joins/quoted-idents/CTEs included). A Rust SQL parser would diverge from the
-//!          planner and reopen that vulnerability class (ADR-A), so L4 delegates to Postgres via SPI.
-//!   * L3 — read-only sandbox execution in `nl_query` (transaction_read_only + statement_timeout → 25006).
+//! - L1 — prompt constraint (hardening; the system prompt is byte-identical so the stub routes on it).
+//! - L2 — static validation on a comment-stripped/lowercased copy: single statement, SELECT/WITH-only, a fixed banned-keyword denylist, no `DO $$`/`CALL`. Stdlib scanning (no regex crate, ADR-B); tokenizing on `[a-z0-9_]+` runs is byte-equivalent to the plpython3u `\b…\b` denylist.
+//! - L4 — PARSER-GRADE relation allowlist via `EXPLAIN (FORMAT JSON)` (Postgres's planner enumerates every relation — comma-joins/quoted-idents/CTEs included). A Rust SQL parser would diverge from the planner and reopen that vulnerability class (ADR-A), so L4 delegates to Postgres via SPI.
+//! - L3 — read-only sandbox execution in `nl_query` (transaction_read_only + statement_timeout → 25006).
+//!
 //! Generate-vs-execute split: `nl_to_sql` returns the validated SQL (does NOT execute); `nl_query` runs it.
 //! Every rejection is SQLSTATE 22023 (verbatim messages); a write reaching execution is 25006.
 use pgrx::prelude::*;
@@ -37,12 +34,10 @@ pub(crate) fn nl_to_sql(question: Option<&str>, allowed: &[Option<&str>], model:
 
     // Allowlist normalization: bare ('documents') or schema-qualified ('public.documents'), strip+lower.
     let mut allow: Vec<String> = Vec::new();
-    for r in allowed {
-        if let Some(s) = r {
-            let t = s.trim().to_lowercase();
-            if !t.is_empty() && !allow.contains(&t) {
-                allow.push(t);
-            }
+    for s in allowed.iter().flatten() {
+        let t = s.trim().to_lowercase();
+        if !t.is_empty() && !allow.contains(&t) {
+            allow.push(t);
         }
     }
     if allow.is_empty() {

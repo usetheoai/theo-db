@@ -169,7 +169,7 @@ mod theodb_rs {
             tbl_text, id_col, content_tsv_col, vector_col, query_text, query_vector_text, k,
             per_leg_limit, result_limit,
         );
-        TableIterator::new(rows.into_iter())
+        TableIterator::new(rows)
     }
 
     /// api-surface: the literal spec-06 JSON surface (the SQL `ai.hybrid_search(jsonb)`). Parses the config
@@ -205,6 +205,6 @@ mod theodb_rs {
             &tbl_text, id_col, content_tsv_col, vector_col, query_text, query_vector, k,
             per_leg_limit, result_limit,
         );
-        TableIterator::new(rows.into_iter())
+        TableIterator::new(rows)
     }
 }

@@ -1,6 +1,6 @@
 # M19 benchmark — `ai.nl_to_sql` Rust vs plpython3u
 
-**Verdict: NO-REGRESSION** (rust/plpy = 0.922, bar 1.20).
+**Verdict: NO-REGRESSION** (rust/plpy = 0.883, bar 1.20).
 
 ## What this measures
 
@@ -17,11 +17,11 @@ honest expectation is parity, and the gate is **no-regression**, not a speedup c
 
 | Implementation | mean (ms) | ± std (run means) | p95 (ms) |
 |---|---|---|---|
-| Rust `ai.nl_to_sql` | 0.993 | 0.125 | 1.278 |
-| plpython3u `ai.nl_to_sql_plpy` | 1.078 | 0.171 | 1.509 |
+| Rust `ai.nl_to_sql` | 0.663 | 0.072 | 0.889 |
+| plpython3u `ai.nl_to_sql_plpy` | 0.752 | 0.090 | 1.013 |
 
 - Samples: 5 runs × 20 calls = 100 per implementation (warmup excluded).
-- Ratio Rust/plpython3u (mean of run means): **0.922**.
+- Ratio Rust/plpython3u (mean of run means): **0.883**.
 - Host: Linux-6.8.0-124-generic-x86_64-with-glibc2.35; Python 3.10.12.
 
 ## Methodology
