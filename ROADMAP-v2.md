@@ -101,7 +101,7 @@ Rust já existe — a imagem hoje compila pgvectorscale), com CI, e **reescrever
 
 **Dependencies:** M18.
 
-### M20 — [ ] Tipo vetorial próprio em Rust (reduzir dependência do pgvector)
+### M20 — [x] Tipo vetorial próprio em Rust (reduzir dependência do pgvector)
 
 **Objective:** Implementar o tipo `vector` próprio + operadores de distância (`<=>`/`<->`/`<#>`) em Rust, com
 **paridade numérica** vs pgvector, para deixar de depender do pgvector no tipo/ops.
