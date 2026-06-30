@@ -15,6 +15,8 @@ use pgrx::prelude::*;
 
 ::pgrx::pg_module_magic!();
 
+mod ann;
+mod ann_query;
 mod chat;
 mod embed;
 mod http;
@@ -172,6 +174,68 @@ mod theodb_rs {
     #[pg_extern(immutable, parallel_safe, strict)]
     fn _vec_cosine(a: Vec<f32>, b: Vec<f32>) -> f64 {
         crate::vec::cosine_distance(&a, &b)
+    }
+
+    // ── M21: own ANN index (HNSW + IVFFlat) search over a table column ───────────────────────────────────
+    // The public `theodb.hnsw_knn` / `theodb.ivfflat_knn` wrappers (regclass arg) cast the table `::text` and
+    // call these. Build-once-answer-batch: `queries` is the flattened concatenation of query vectors in
+    // `qdim`-sized chunks (one build per call, ADR D1). VOLATILE (reads a table) — NOT immutable. Coexistence:
+    // reads `embed_col::real[]` only; never touches pgvector's index/storage (ADR D1). REVOKEd from PUBLIC.
+    /// `theodb_rs._hnsw_knn` — own HNSW top-k over `src_table.embed_col`.
+    #[allow(clippy::too_many_arguments)]
+    #[pg_extern]
+    fn _hnsw_knn(
+        src_table: &str,
+        embed_col: &str,
+        id_col: &str,
+        metric: &str,
+        queries: Vec<f32>,
+        qdim: i32,
+        k: i32,
+        m: i32,
+        ef_construction: i32,
+        ef_search: i32,
+        seed: i64,
+    ) -> TableIterator<'static, (name!(query_idx, i32), name!(id, i64), name!(distance, f64))> {
+        let rows = crate::ann_query::knn(
+            crate::ann_query::Algo::Hnsw,
+            src_table,
+            embed_col,
+            id_col,
+            metric,
+            &queries,
+            qdim,
+            crate::ann_query::Params { k, m, ef_construction, ef_search, lists: 1, probes: 1, seed },
+        );
+        TableIterator::new(rows)
+    }
+
+    /// `theodb_rs._ivfflat_knn` — own IVFFlat top-k over `src_table.embed_col`.
+    #[allow(clippy::too_many_arguments)]
+    #[pg_extern]
+    fn _ivfflat_knn(
+        src_table: &str,
+        embed_col: &str,
+        id_col: &str,
+        metric: &str,
+        queries: Vec<f32>,
+        qdim: i32,
+        k: i32,
+        lists: i32,
+        probes: i32,
+        seed: i64,
+    ) -> TableIterator<'static, (name!(query_idx, i32), name!(id, i64), name!(distance, f64))> {
+        let rows = crate::ann_query::knn(
+            crate::ann_query::Algo::Ivfflat,
+            src_table,
+            embed_col,
+            id_col,
+            metric,
+            &queries,
+            qdim,
+            crate::ann_query::Params { k, m: 16, ef_construction: 64, ef_search: 64, lists, probes, seed },
+        );
+        TableIterator::new(rows)
     }
 }
 
@@ -425,6 +489,78 @@ REVOKE ALL ON FUNCTION theodb_rs._vec_cosine(real[], real[]) FROM PUBLIC;
 "#,
     name = "theodb_vector_ops_wrapper",
     requires = [_vec_l2, _vec_ip, _vec_cosine],
+);
+
+// SQL wrappers: TheoDB's own ANN index search (M21 — own HNSW + IVFFlat in Rust, recall-gated). Created INTO
+// the existing `theodb` schema. The public surface takes `queries vector[]`; the wrapper flattens it (query-
+// major) into a `real[]` + derives `qdim` from the first query, bridging to the text/real[]-typed Rust extern
+// (pgrx cannot express `regclass`/`vector[]` natively). RETURNS TABLE(query_idx int, id bigint, distance
+// float8). VOLATILE (reads a table). COEXISTENCE (ADR D1): reads `embed_col::real[]` only — pgvector's type,
+// operators, and HNSW/IVFFlat indexes are untouched; this is an ADDITIONAL own-algorithm path, not a
+// replacement. Empty `queries` → empty real[] → 0 rows (EC-5). REVOKEd from PUBLIC (reads caller-owned tables).
+extension_sql!(
+    r#"
+CREATE FUNCTION theodb.hnsw_knn(
+    src_table       regclass,
+    embed_col       text,
+    queries         vector[],
+    k               int    DEFAULT 10,
+    m               int    DEFAULT 16,
+    ef_construction int    DEFAULT 64,
+    ef_search       int    DEFAULT 40,
+    metric          text   DEFAULT 'l2',
+    id_col          text   DEFAULT 'id',
+    seed            bigint DEFAULT 42
+) RETURNS TABLE(query_idx int, id bigint, distance float8)
+LANGUAGE sql VOLATILE
+AS $$
+  SELECT query_idx, id, distance FROM theodb_rs._hnsw_knn(
+    src_table::text, embed_col, id_col, metric,
+    (SELECT COALESCE(array_agg(x ORDER BY qi, ci), ARRAY[]::real[])
+       FROM unnest(queries) WITH ORDINALITY AS u(qv, qi),
+            unnest(qv::real[]) WITH ORDINALITY AS e(x, ci)),
+    COALESCE(array_length((queries[1])::real[], 1), 1),
+    k, m, ef_construction, ef_search, seed)
+$$;
+
+CREATE FUNCTION theodb.ivfflat_knn(
+    src_table       regclass,
+    embed_col       text,
+    queries         vector[],
+    k               int    DEFAULT 10,
+    lists           int    DEFAULT 100,
+    probes          int    DEFAULT 1,
+    metric          text   DEFAULT 'l2',
+    id_col          text   DEFAULT 'id',
+    seed            bigint DEFAULT 42
+) RETURNS TABLE(query_idx int, id bigint, distance float8)
+LANGUAGE sql VOLATILE
+AS $$
+  SELECT query_idx, id, distance FROM theodb_rs._ivfflat_knn(
+    src_table::text, embed_col, id_col, metric,
+    (SELECT COALESCE(array_agg(x ORDER BY qi, ci), ARRAY[]::real[])
+       FROM unnest(queries) WITH ORDINALITY AS u(qv, qi),
+            unnest(qv::real[]) WITH ORDINALITY AS e(x, ci)),
+    COALESCE(array_length((queries[1])::real[], 1), 1),
+    k, lists, probes, seed)
+$$;
+
+COMMENT ON FUNCTION theodb.hnsw_knn(regclass, text, vector[], int, int, int, int, text, text, bigint) IS
+  'TheoDB own HNSW ANN search (M21): build a Hierarchical Navigable Small World graph over src_table.embed_col '
+  'in Rust and answer a batch of top-k queries (<->/<#>/<=>). Recall@k is gated vs pgvector by '
+  'benchmarks/bench_ann_index.py. Coexists with pgvector (reads vector::real[]; no competing index). '
+  'Measurement-first SQL-callable form (ADR D1); not granted to PUBLIC.';
+COMMENT ON FUNCTION theodb.ivfflat_knn(regclass, text, vector[], int, int, int, text, text, bigint) IS
+  'TheoDB own IVFFlat ANN search (M21): k-means++ inverted lists over src_table.embed_col in Rust, scan the '
+  'probes nearest lists. Recall@k gated vs pgvector. Coexists with pgvector. Not granted to PUBLIC.';
+
+REVOKE ALL ON FUNCTION theodb.hnsw_knn(regclass, text, vector[], int, int, int, int, text, text, bigint) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb.ivfflat_knn(regclass, text, vector[], int, int, int, text, text, bigint) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb_rs._hnsw_knn(text, text, text, text, real[], int, int, int, int, int, bigint) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb_rs._ivfflat_knn(text, text, text, text, real[], int, int, int, int, bigint) FROM PUBLIC;
+"#,
+    name = "theodb_ann_wrappers",
+    requires = [_hnsw_knn, _ivfflat_knn],
 );
 
 // Rust-side unit tests for the input-validation guards (no network needed). The cross-language
