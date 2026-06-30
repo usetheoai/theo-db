@@ -109,7 +109,7 @@ func applyCmd() *cobra.Command {
 				if err := cl.Create(ctx, desired); err != nil {
 					return err
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "theodbcluster/%s created\n", desired.Name)
+				cmd.Printf("theodbcluster/%s created\n", desired.Name)
 				return nil
 			}
 			if getErr != nil {
@@ -119,7 +119,7 @@ func applyCmd() *cobra.Command {
 			if err := cl.Update(ctx, existing); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "theodbcluster/%s configured\n", desired.Name)
+			cmd.Printf("theodbcluster/%s configured\n", desired.Name)
 			return nil
 		},
 	}
@@ -146,14 +146,21 @@ func getCmd() *cobra.Command {
 				return err
 			}
 			if len(list.Items) == 0 {
-				fmt.Fprintln(cmd.OutOrStdout(), "no clusters found")
+				cmd.Println("no clusters found")
 				return nil
 			}
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 3, ' ', 0)
-			fmt.Fprintln(w, "NAMESPACE\tNAME\tINSTANCES\tREADY\tPHASE")
+			// tabwriter buffers until Flush, so intermediate writes don't perform I/O; Flush returns the real error.
+			rows := []string{"NAMESPACE\tNAME\tINSTANCES\tREADY\tPHASE"}
 			for i := range list.Items {
 				c := &list.Items[i]
-				fmt.Fprintf(w, "%s\t%s\t%d\t%d\t%s\n", c.Namespace, c.Name, c.Spec.Instances, c.Status.ReadyInstances, c.Status.Phase)
+				rows = append(rows, fmt.Sprintf("%s\t%s\t%d\t%d\t%s",
+					c.Namespace, c.Name, c.Spec.Instances, c.Status.ReadyInstances, c.Status.Phase))
+			}
+			for _, row := range rows {
+				if _, err := fmt.Fprintln(w, row); err != nil {
+					return err
+				}
 			}
 			return w.Flush()
 		},
@@ -180,7 +187,7 @@ func deleteCmd() *cobra.Command {
 				}
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "theodbcluster/%s deleted\n", args[0])
+			cmd.Printf("theodbcluster/%s deleted\n", args[0])
 			return nil
 		},
 	}

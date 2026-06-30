@@ -85,12 +85,12 @@ func newReconciler() *TheoDBClusterReconciler {
 	return &TheoDBClusterReconciler{Client: k8sClient, Scheme: scheme.Scheme}
 }
 
-func reconcileOnce(t *testing.T, name, namespace string) {
+// reconcileOnce reconciles a named cluster in the default namespace (the only namespace this suite uses).
+func reconcileOnce(t *testing.T, name string) {
 	t.Helper()
 	r := newReconciler()
-	req := ctrlReq(name, namespace)
-	if _, err := r.Reconcile(context.Background(), req); err != nil {
-		t.Fatalf("reconcile %s/%s: %v", namespace, name, err)
+	if _, err := r.Reconcile(context.Background(), ctrlReq(name, "default")); err != nil {
+		t.Fatalf("reconcile default/%s: %v", name, err)
 	}
 }
 

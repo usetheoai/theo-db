@@ -56,7 +56,7 @@ func TestReconcile_CreatesStatefulSetAndService(t *testing.T) {
 	name := "tc-create"
 	createCluster(t, name, theodbv1.TheoDBClusterSpec{Instances: 2, Image: "theo-db:test", StorageSize: "1Gi", Port: 5432})
 
-	reconcileOnce(t, name, "default")
+	reconcileOnce(t, name)
 
 	var ss appsv1.StatefulSet
 	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: name, Namespace: "default"}, &ss); err != nil {
@@ -83,13 +83,13 @@ func TestReconcile_Idempotent(t *testing.T) {
 	name := "tc-idem"
 	createCluster(t, name, theodbv1.TheoDBClusterSpec{Instances: 1, Image: "theo-db:test", StorageSize: "1Gi", Port: 5432})
 
-	reconcileOnce(t, name, "default")
+	reconcileOnce(t, name)
 	var first appsv1.StatefulSet
 	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: name, Namespace: "default"}, &first); err != nil {
 		t.Fatal(err)
 	}
 
-	reconcileOnce(t, name, "default")
+	reconcileOnce(t, name)
 	var second appsv1.StatefulSet
 	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: name, Namespace: "default"}, &second); err != nil {
 		t.Fatal(err)
@@ -104,7 +104,7 @@ func TestReconcile_Idempotent(t *testing.T) {
 func TestReconcile_ScaleUpUpdatesReplicas(t *testing.T) {
 	name := "tc-scale"
 	c := createCluster(t, name, theodbv1.TheoDBClusterSpec{Instances: 1, Image: "theo-db:test", StorageSize: "1Gi", Port: 5432})
-	reconcileOnce(t, name, "default")
+	reconcileOnce(t, name)
 
 	// Scale to 3 instances.
 	if err := k8sClient.Get(context.Background(), client.ObjectKeyFromObject(c), c); err != nil {
@@ -114,7 +114,7 @@ func TestReconcile_ScaleUpUpdatesReplicas(t *testing.T) {
 	if err := k8sClient.Update(context.Background(), c); err != nil {
 		t.Fatalf("update spec: %v", err)
 	}
-	reconcileOnce(t, name, "default")
+	reconcileOnce(t, name)
 
 	var ss appsv1.StatefulSet
 	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: name, Namespace: "default"}, &ss); err != nil {
@@ -155,7 +155,7 @@ func TestReconcile_MissingImageFailsFast(t *testing.T) {
 func TestReconcile_StatusInitializingWithoutKubelet(t *testing.T) {
 	name := "tc-status"
 	createCluster(t, name, theodbv1.TheoDBClusterSpec{Instances: 2, Image: "theo-db:test", StorageSize: "1Gi", Port: 5432})
-	reconcileOnce(t, name, "default")
+	reconcileOnce(t, name)
 
 	var c theodbv1.TheoDBCluster
 	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: name, Namespace: "default"}, &c); err != nil {
@@ -167,14 +167,14 @@ func TestReconcile_StatusInitializingWithoutKubelet(t *testing.T) {
 	if c.Status.ReadyInstances != 0 {
 		t.Errorf("readyInstances: got %d, want 0", c.Status.ReadyInstances)
 	}
-	ready := meta_FindCondition(c.Status.Conditions, "Ready")
+	ready := findCondition(c.Status.Conditions, "Ready")
 	if ready == nil || ready.Status != metav1.ConditionFalse {
 		t.Errorf("Ready condition: got %+v, want status False", ready)
 	}
 }
 
-// meta_FindCondition is a tiny local helper (avoids pulling apimachinery/api/meta just for tests).
-func meta_FindCondition(conds []metav1.Condition, condType string) *metav1.Condition {
+// findCondition is a tiny local helper (avoids pulling apimachinery/api/meta just for tests).
+func findCondition(conds []metav1.Condition, condType string) *metav1.Condition {
 	for i := range conds {
 		if conds[i].Type == condType {
 			return &conds[i]
