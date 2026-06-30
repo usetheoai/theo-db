@@ -263,3 +263,21 @@ func TestReconcile_EmitsDomainMetrics(t *testing.T) {
 		t.Errorf("reconcile_total{success}: got %v, want >= 1", got)
 	}
 }
+
+// T2.1 RED: a reconcile provisions the read Service <name>-ro, owner-referenced.
+func TestReconcile_CreatesReadService(t *testing.T) {
+	name := "tc-read"
+	createCluster(t, name, theodbv1.TheoDBClusterSpec{Instances: 2, Image: "theo-db:test", StorageSize: "1Gi", Port: 5432})
+	reconcileOnce(t, name)
+
+	var ro corev1.Service
+	if err := k8sClient.Get(context.Background(), nn(name+"-ro"), &ro); err != nil {
+		t.Fatalf("read service %s-ro not created: %v", name, err)
+	}
+	if len(ro.OwnerReferences) != 1 {
+		t.Errorf("read service owner ref missing: %+v", ro.OwnerReferences)
+	}
+	if ro.Spec.Ports[0].Port != 5432 {
+		t.Errorf("read service port: got %d, want 5432", ro.Spec.Ports[0].Port)
+	}
+}

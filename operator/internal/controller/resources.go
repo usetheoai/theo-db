@@ -117,6 +117,25 @@ func buildHeadlessService(c *theodbv1.TheoDBCluster) *corev1.Service {
 	}
 }
 
+// buildReadService is a PURE builder: the cluster's READ endpoint (plan M24 T2.1, ADR-2), a ClusterIP
+// `<name>-ro` load-balancing the ready pods. Today (no streaming replication — M25) every pod is independent,
+// so this is a read-scale-out endpoint the application can target; when replication lands the same Service
+// narrows to replica pods. The "pool" is the Service's L4 load-balancing across ready endpoints (no PgBouncer).
+func buildReadService(c *theodbv1.TheoDBCluster) *corev1.Service {
+	labels := labelsFor(c)
+	return &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: readServiceName(c), Namespace: c.Namespace, Labels: labels},
+		Spec: corev1.ServiceSpec{
+			Type:     corev1.ServiceTypeClusterIP,
+			Selector: labels,
+			Ports:    []corev1.ServicePort{servicePort(c)},
+		},
+	}
+}
+
+// readServiceName is the read endpoint's Service name.
+func readServiceName(c *theodbv1.TheoDBCluster) string { return c.Name + "-ro" }
+
 // servicePort is the shared postgres port definition for both Services.
 func servicePort(c *theodbv1.TheoDBCluster) corev1.ServicePort {
 	return corev1.ServicePort{

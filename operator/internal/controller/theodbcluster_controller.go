@@ -83,6 +83,9 @@ func (r *TheoDBClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if err := r.ensureService(ctx, &cluster); err != nil {
 		return ctrl.Result{}, err
 	}
+	if err := r.ensureReadService(ctx, &cluster); err != nil {
+		return ctrl.Result{}, err
+	}
 	if err := r.ensureStatefulSet(ctx, &cluster, storage); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -146,6 +149,11 @@ func (r *TheoDBClusterReconciler) ensureHeadlessService(ctx context.Context, c *
 // ensureService ensures the gateway (ClusterIP) Service.
 func (r *TheoDBClusterReconciler) ensureService(ctx context.Context, c *theodbv1.TheoDBCluster) error {
 	return r.ensureServiceObject(ctx, c, buildService(c))
+}
+
+// ensureReadService ensures the read endpoint Service `<name>-ro` (M24 T2.1).
+func (r *TheoDBClusterReconciler) ensureReadService(ctx context.Context, c *theodbv1.TheoDBCluster) error {
+	return r.ensureServiceObject(ctx, c, buildReadService(c))
 }
 
 // ensureServiceObject creates the desired Service, or reconciles the mutable port/selector on the existing one
