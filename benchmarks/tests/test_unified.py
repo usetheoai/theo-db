@@ -94,7 +94,12 @@ def _fresh_db_with_ext(admin_conn, name):
         dbname=name,
     )
     with c.cursor() as cur:
-        cur.execute("CREATE EXTENSION IF NOT EXISTS theodb CASCADE")
+        # Install theodb_rs (the Rust extension) CASCADE: it `requires = theodb`, so this pulls the umbrella
+        # theodb (and vector/vectorscale) first, then layers the Rust surface — ai._chat / ai.summarize /
+        # theodb.embed live in theodb_rs since M18/M19. Mirrors the container's docker-entrypoint-initdb.d
+        # (`CREATE EXTENSION theodb_rs CASCADE`). `CREATE EXTENSION theodb` alone would lack the ai.* generative
+        # surface (it no longer carries the plpython3u ai._chat), so the +AI leg of the unified moat would 42883.
+        cur.execute("CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE")
     c.commit()
     return c
 
