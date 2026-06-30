@@ -20,7 +20,8 @@ at **recall@k parity with pgvectorscale SBQ AND a memory profile** (bytes/vector
 - **Rust compiles** — `cargo pgrx install --release --features pg17` ✓
 - **Lint** — `cargo clippy --release --features pg17 -- -D warnings` CLEAN (fixed 5 `manual_range_contains`) ✓
 - **Algorithm unit proof** — standalone prototype 6/6 (`rustc --test`): SBQ recall@10 = 0.86 at 1-bit+over_fetch=8 (dim 16); `#[pg_test]` mod locks the contract ✓
-- **Container integration** — `pytest benchmarks/tests/test_sbq_index.py` → **10 passed** (recall with rerank, parity gate, bytes/vector compression, 22023 negatives, empty queries, REVOKE incl. private extern) ✓
+- **Container integration** — `pytest benchmarks/tests/test_sbq_index.py` → **16 passed** (recall with rerank + bits=2, parity gate, bytes/vector compression, 22023 negatives, NULL skip, injection-rejected, empty queries, REVOKE incl. private externs + bytes_per_vector) ✓ — grew from 10 after the `/review` fix batch
+- **Post-review** — REVOKE added for `sbq_bytes_per_vector`; new `#[pg_test] sbq_hamming_correlates_with_f32_distance` isolates the quantizer's signal (recall gate alone didn't); +5 tests; `bits as f32` cast; dim overflow guard. See `.claude/knowledge-base/reviews/m22-own-quantization-review-2026-06-30.md` (READY_TO_MERGE) ✓
 - **Benchmark** — `bench_sbq_index.py` → **PARITY_REACHED**: memory own=pgvectorscale (8 bytes/vec at dim 32, 16× vs f32); recall pgvectorscale diskann SBQ=0.6278, own 0.625→0.855 across the over_fetch/probes sweep (mean±std, 3 runs) ✓
 - **CHANGELOG** `[Unreleased] § Added` updated ✓ · **No new dependency** (deps-audit PASS_WITH_CAVEATS; RaBitQ AGPL **avoided**) ✓
 
