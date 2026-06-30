@@ -21,7 +21,8 @@ SQL set-returning functions, at **recall@k parity with pgvector** (proven by a r
 - **Rust compiles** — `cargo pgrx install --release --features pg17` (Docker `theodb-rs-builder` stage) ✓
 - **Lint** — `cargo clippy --release --features pg17 -- -D warnings` CLEAN ✓
 - **Algorithm unit proof** — standalone prototype 10/10 (`rustc --test`); `#[pg_test]` mod locks the contract ✓
-- **Container integration** — `pytest benchmarks/tests/test_ann_index.py` → **12 passed** (recall, parity gate, 22023 negatives, NULL-skip, empty-queries, REVOKE) ✓
+- **Container integration** — `pytest benchmarks/tests/test_ann_index.py` → **26 passed** (recall, parity gate, 22023 negatives incl. lower-bounds/injection/inconsistent-dims, NULL-skip, empty-table/queries, REVOKE incl. private externs) ✓ — count grew from 12 after the `/review` fix batch
+- **Post-review** — `ann.rs` (580 LoC) split into `ann/{mod,hnsw,ivf}.rs` (246/212/139, each <500) per plan DoD; explicit `#[pg_extern(volatile)]`; +14 tests. See `.claude/knowledge-base/reviews/m21-own-ann-index-review-2026-06-30.md` (READY_TO_MERGE) ✓
 - **Benchmark** — `bench_ann_index.py` → **PARITY_REACHED** at every swept point (HNSW ef_search∈{10,40,100,200}, IVF probes∈{1,8,16,32}), mean±std over 3 runs ✓
 - **CHANGELOG** `[Unreleased] § Added` updated ✓ · **No new dependency** (deps-audit PASS_WITH_CAVEATS) ✓
 
