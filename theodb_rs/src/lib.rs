@@ -102,19 +102,6 @@ mod theodb_rs {
         let refs: Vec<Option<&str>> = allowed_relations.iter().map(|o| o.as_deref()).collect();
         crate::nl::nl_to_sql(question, &refs, model)
     }
-
-    /// `theodb_rs._nl_query` — validate (via nl_to_sql) then execute in the read-only sandbox (L3); returns
-    /// jsonb rows. A write reaching execution raises 25006 (the SQL `ai.nl_query`).
-    #[pg_extern]
-    fn _nl_query(
-        question: Option<&str>,
-        allowed_relations: Vec<Option<String>>,
-        model: Option<&str>,
-        max_rows: default!(i32, 100),
-    ) -> pgrx::JsonB {
-        let refs: Vec<Option<&str>> = allowed_relations.iter().map(|o| o.as_deref()).collect();
-        crate::nl::nl_query(question, &refs, model, max_rows)
-    }
 }
 
 // SQL wrapper: the public `theodb.embed(content, model DEFAULT NULL) RETURNS vector`. Casts the Rust
@@ -229,27 +216,17 @@ CREATE FUNCTION ai.nl_to_sql(question text, allowed_relations text[], model text
 RETURNS text LANGUAGE sql VOLATILE
 AS $$ SELECT theodb_rs._nl_to_sql(question, allowed_relations, model) $$;
 
-CREATE FUNCTION ai.nl_query(question text, allowed_relations text[], model text DEFAULT NULL, max_rows int DEFAULT 100)
-RETURNS jsonb LANGUAGE sql VOLATILE
-AS $$ SELECT theodb_rs._nl_query(question, allowed_relations, model, max_rows) $$;
-
 COMMENT ON FUNCTION ai.nl_to_sql(text, text[], text) IS
   'Translate a natural-language question into ONE validated read-only SELECT over allowed_relations (via the '
   'configurable model). Defense: L2 static validation (single statement, SELECT/WITH-only, banned-function '
   'denylist) + L4 parser-grade relation allowlist (EXPLAIN enumerates every planned relation). Fail-fast '
   '22023. Does NOT execute. Implemented in Rust (theodb_rs, M19). Not granted to PUBLIC.';
-COMMENT ON FUNCTION ai.nl_query(text, text[], text, int) IS
-  'Generate+validate (ai.nl_to_sql) then execute the SELECT in a PostgreSQL-native read-only sandbox '
-  '(transaction_read_only + statement_timeout -> 25006 on any write). Returns jsonb rows. Rust (theodb_rs, M19). '
-  'Not granted to PUBLIC.';
 
 REVOKE ALL ON FUNCTION ai.nl_to_sql(text, text[], text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION ai.nl_query(text, text[], text, int) FROM PUBLIC;
 REVOKE ALL ON FUNCTION theodb_rs._nl_to_sql(text, text[], text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION theodb_rs._nl_query(text, text[], text, int) FROM PUBLIC;
 "#,
     name = "theodb_nl_wrappers",
-    requires = [_nl_to_sql, _nl_query],
+    requires = [_nl_to_sql],
 );
 
 // Rust-side unit tests for the input-validation guards (no network needed). The cross-language

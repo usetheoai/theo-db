@@ -15,7 +15,7 @@
 use pgrx::prelude::*;
 use serde_json::Value;
 
-use crate::pg::{err_input, guc};
+use crate::pg::err_input;
 
 /// The banned-token denylist (verbatim from sql/60:74-78). A generated SQL token equal to any of these is
 /// rejected (file/exfil/DDL/DML family). `pg_ls_` is the bare-prefix sibling the first cut missed.
@@ -93,19 +93,19 @@ pub(crate) fn nl_to_sql(question: Option<&str>, allowed: &[Option<&str>], model:
     // L4 — parser-grade relation allowlist via EXPLAIN (FORMAT JSON). The validated `sql` is a single
     // SELECT/WITH with no ';' (L2(a)), so interpolating it into one EXPLAIN command cannot break out.
     let explain = format!("EXPLAIN (FORMAT JSON, VERBOSE false) {sql}");
-    // A planner error (unknown relation / syntax) raises a Postgres ERROR (longjmp), not a Rust panic —
-    // catch it with PgTryBuilder and fail closed (22023). We do not continue the aborted work; we raise our
-    // own typed error immediately, so the outcome is a clean rejection regardless of txn state.
-    let plan_text: Option<String> = pgrx::PgTryBuilder::new(|| Spi::get_one::<String>(&explain).ok().flatten())
-        .catch_others(|_| None)
-        .execute();
-    let plan_text = match plan_text {
-        Some(s) => s,
-        None => err_input("ai.nl_to_sql: query did not plan (rejected)"),
-    };
-    let plan: Value = match serde_json::from_str(&plan_text) {
-        Ok(v) => v,
-        Err(_) => err_input("ai.nl_to_sql: query did not plan (rejected): bad plan JSON"),
+    // Run EXPLAIN via SPI (it PLANS, does not execute). `Spi::get_one` manages its own SPI_connect, so it
+    // works at any nesting depth (top-level OR nested under ai.nl_query) — exactly like the guc reads. A
+    // genuinely un-plannable query (unknown relation / syntax) raises a Postgres ERROR that propagates as a
+    // clean rejection (fail-closed). NOTE: we deliberately do NOT wrap this in PgTryBuilder — its PG_TRY
+    // subtransaction breaks the nested-SPI EXPLAIN (the planner call then fails even for a valid query).
+    // EXPLAIN (FORMAT JSON) returns a `json`-typed column (oid 114) — read it as pgrx::Json (NOT String,
+    // which is TEXTOID and type-mismatches). `Spi::get_one` manages its own SPI_connect, so this works at any
+    // nesting depth (standalone OR under ai.nl_query). An un-plannable query raises a PG ERROR that propagates
+    // as a clean rejection (fail-closed).
+    let plan: Value = match Spi::get_one::<pgrx::Json>(&explain) {
+        Ok(Some(j)) => j.0,
+        Ok(None) => err_input("ai.nl_to_sql: query did not plan (rejected): empty plan"),
+        Err(e) => err_input(&format!("ai.nl_to_sql: query did not plan (rejected): {e:?}")),
     };
     let mut rels: Vec<(String, String)> = Vec::new();
     collect_relations(&plan, &mut rels);
@@ -123,35 +123,12 @@ pub(crate) fn nl_to_sql(question: Option<&str>, allowed: &[Option<&str>], model:
     sql
 }
 
-/// Validate (via `nl_to_sql`) then EXECUTE in the read-only sandbox (L3). Returns jsonb rows. A write that
-/// reaches execution raises SQLSTATE 25006; a runaway query is aborted by statement_timeout (57014).
-pub(crate) fn nl_query(
-    question: Option<&str>,
-    allowed: &[Option<&str>],
-    model: Option<&str>,
-    max_rows: i32,
-) -> pgrx::JsonB {
-    if max_rows <= 0 {
-        err_input(&format!("ai.nl_query: max_rows must be > 0 (got {max_rows})"));
-    }
-    // L1 + L2 + L4 (generate-time) — runs read-write (EXPLAIN plans only) BEFORE the read-only sandbox.
-    let validated = nl_to_sql(question, allowed, model);
-
-    // L3 — PostgreSQL-native read-only sandbox (SET LOCAL, transaction-scoped). A write → 25006. Matches the
-    // plpython3u set_config(..., is_local=true) semantics; not restored (PG forbids RW-after-query, 25001) —
-    // the normal single-statement `SELECT ai.nl_query(...)` ends the txn immediately, so no leak.
-    Spi::run("SET LOCAL transaction_read_only = on").expect("set transaction_read_only");
-    Spi::run("SET LOCAL statement_timeout = 5000").expect("set statement_timeout");
-
-    // Outer LIMIT on the wrapper (not injected into the subquery) so a generated `… LIMIT n` does not produce
-    // `LIMIT n LIMIT m`. `validated` is L4-validated; `max_rows` is a positive int (safe to interpolate).
-    let wrapped = format!(
-        "SELECT coalesce(jsonb_agg(row_to_json(t)), '[]'::jsonb) FROM ({validated}) t LIMIT {max_rows}"
-    );
-    Spi::get_one::<pgrx::JsonB>(&wrapped)
-        .expect("nl_query execution")
-        .unwrap_or_else(|| pgrx::JsonB(serde_json::json!([])))
-}
+// NOTE (M19 ADR-F): `ai.nl_query` (L3 read-only sandbox execution) stays a thin plpgsql keeper in sql/60,
+// NOT a Rust function. L3 is transaction-control (`SET LOCAL transaction_read_only`) + dynamic `EXECUTE` —
+// inherently SQL/plpgsql operations (the M18 precedent: the chunked import PROCEDURE stayed plpgsql, ADR-D).
+// Critically, it MUST call `ai.nl_to_sql` at the SQL level (`validated := ai.nl_to_sql(...)`) so nl_to_sql's
+// L4 `EXPLAIN`-over-SPI runs in a clean execution context; calling the Rust `nl_to_sql` nested from a Rust
+// `nl_query` frame makes the nested EXPLAIN-SPI fail. The anti-injection core (L1/L2/L4) is 100% Rust here.
 
 /// Strip an optional leading ```` ```lang ```` fence + trailing ```` ``` ```` — the nl variant
 /// (`^```[a-zA-Z]*\n?` / `\n?```$`, sql/60:57-58), DISTINCT from `chat::strip_fence`.
