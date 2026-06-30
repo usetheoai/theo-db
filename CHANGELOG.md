@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **M23 — Control plane in Go (Kubernetes operator + CLI).** New `operator/` Go module (kubebuilder/controller-runtime) that reconciles a `TheoDBCluster` CRD into a **StatefulSet** of N theo-db instances + a **ClusterIP Service** gateway, owner-referenced, with status (`Phase`/`ReadyInstances`/`Ready` condition). Reconcile is idempotent (no resourceVersion churn on a converged re-run), scales by patching only the mutable `replicas`+`image` (never the immutable StatefulSet spec), and fails fast with a typed error + `Phase=Error` when `spec.image` is empty. Ships a `theodbctl` cobra CLI (`apply`/`get`/`delete`) and a reproducible `config/` kustomize deploy. Milestone evidence is a **real-`envtest` reconcile gate** (in-process kube-apiserver+etcd, no kubelet) plus a real-kind deploy + CLI smoke — `docs/benchmarks/m23-operator-reconcile.md`. Std `testing` only (no ginkgo); deps are controller-runtime + k8s.io/* + cobra (all Apache-2.0/BSD — D1 license gate satisfied). HA-failover orchestration and an HTTP/pooler gateway are explicit M24+ follow-ups. (#M23)
 
 ### Changed
 
