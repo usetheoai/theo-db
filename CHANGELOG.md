@@ -24,6 +24,15 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.23.0] - 2026-06-30
+
+### Added
+- **M23 — Control plane in Go (Kubernetes operator + CLI).** New `operator/` Go module (kubebuilder/controller-runtime) that reconciles a `TheoDBCluster` CRD into a **StatefulSet** of N theo-db instances, a **governing headless Service** (ClusterIP=None, for stable per-pod DNS) + a **gateway ClusterIP Service**, all owner-referenced, with status (`Phase`/`ReadyInstances`/`ObservedGeneration`/`Ready` condition). Reconcile is idempotent (no resourceVersion churn on a converged re-run), scales by patching only the mutable `replicas`+`image` (never the immutable StatefulSet spec — changing `storageSize` does not attempt a rejected VCT update), and validates the spec **at the API boundary** (image required, `storageSize` quantity pattern, `port` 1..65535, `instances` ≥ 1) so a malformed CR is rejected before it is stored. Ships a `theodbctl` cobra CLI (`apply`/`get`/`delete`) and a reproducible `config/` kustomize deploy with least-privilege RBAC + a non-root distroless manager image. Milestone evidence is a **real-`envtest` reconcile gate** (in-process kube-apiserver+etcd, no kubelet) plus a real-kind deploy + CLI smoke — `docs/benchmarks/m23-operator-reconcile.md`. Std `testing` only (no ginkgo); deps are controller-runtime + k8s.io/* + cobra (all Apache-2.0/BSD — D1 license gate satisfied). HA-failover orchestration and an HTTP/pooler gateway are explicit M24+ follow-ups. (#M23)
+
+
+### Fixed
+- `/code-quality` audit no longer walks `knowledge-base/references/` (cloned third-party reference repos): the skip-list used `referencia` (PT) instead of the real directory name `references` (EN), so the symbol-fabrication detector parsed foreign files — wasting time/RAM and producing a spurious `FAIL_HARD` that blocked `/review`. Now the references zone is correctly skipped, with a behavioral regression test. (#37)
+
 ## [0.22.0] - 2026-06-30
 
 ### Added

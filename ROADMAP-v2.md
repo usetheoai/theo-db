@@ -125,7 +125,7 @@ index — **somente** quando atingir **paridade de recall@k** no harness.
 
 **Dependencies:** M20. **Risco:** ALTO (índice ANN é PhD-level); measurement-first é o guard-rail.
 
-### M22 — [ ] Escala/quantização própria em Rust (substituir pgvectorscale — gated)
+### M22 — [x] Escala/quantização própria em Rust (substituir pgvectorscale — gated)
 
 **Objective:** Índice de escala + quantização **próprio em Rust** (alvo: DiskANN/SBQ-quality), substituindo
 pgvectorscale — **somente** com paridade de recall **e** memória medida.
