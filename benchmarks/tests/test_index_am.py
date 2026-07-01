@@ -180,3 +180,25 @@ def test_null_query_vector_does_not_crash():
         assert cur.fetchone()[0] == 1
         cur.execute("RESET enable_seqscan")
         cur.execute("DROP TABLE m26_null CASCADE")
+
+
+def test_insert_into_empty_built_index_is_found():
+    """M31 regression: CREATE INDEX on an empty table then INSERT — the scan must fold the pending region and
+    find the rows (a structured index built with zero centroids must NOT silently drop pending)."""
+    conn = _conn()
+    conn.autocommit = True
+    try:
+        cur = conn.cursor()
+        cur.execute("CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE")
+        cur.execute("DROP TABLE IF EXISTS m31_empty CASCADE")
+        cur.execute("CREATE TABLE m31_empty (id bigint, embedding vector(4))")
+        # Build the index over an EMPTY table (zero centroids), THEN insert.
+        cur.execute("CREATE INDEX m31_empty_idx ON m31_empty USING theodb_ivfflat (embedding theodb_ivfflat_l2_ops)")
+        cur.execute("INSERT INTO m31_empty VALUES (7, '[1,0,0,0]'), (8, '[0,1,0,0]')")
+        cur.execute("SET enable_seqscan = off")
+        cur.execute("SELECT id FROM m31_empty ORDER BY embedding <-> '[1,0,0,0]' LIMIT 1")
+        assert cur.fetchone()[0] == 7, "row inserted into an empty-built index not found (pending dropped)"
+        cur.execute("RESET enable_seqscan")
+        cur.execute("DROP TABLE m31_empty CASCADE")
+    finally:
+        conn.close()

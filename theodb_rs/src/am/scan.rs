@@ -84,14 +84,13 @@ unsafe fn scan_ivf_structured(rel: pg_sys::Relation, query: &[f32]) -> Vec<(i64,
         Some(m) => m,
         None => pg_sys::error!("theodb am scan: unknown metric tag"),
     };
-    if meta.centroids.is_empty() {
-        return Vec::new();
-    }
-    // Pick the probed centroids by distance (∝ nlists — small).
+    // NOTE: do NOT early-return on empty centroids — an index built (or vacuumed) empty still has a pending
+    // region with INSERTed rows that must be folded in (else those rows are silently dropped). The probe loop
+    // below is simply empty when there are no centroids, and the pending fold still runs.
     let mut cd: Vec<(f64, usize)> =
         meta.centroids.iter().enumerate().map(|(i, c)| (metric.dist(query, c), i)).collect();
     cd.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    let probes = SCAN_PROBES.clamp(1, meta.centroids.len());
+    let probes = SCAN_PROBES.clamp(1, meta.centroids.len().max(1));
     let dim = meta.dim as usize;
     let entry = 8 + dim * 4;
 

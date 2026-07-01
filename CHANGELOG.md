@@ -28,8 +28,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   the O(N) algorithmic gap is closed; the constant-factor (SIMD) residual is M31b (ADR 0011). Evidence:
   `docs/benchmarks/m31-am-latency.{md,json}`. (M31)
 
-### Changed
-
 ### Deprecated
 
 ### Removed

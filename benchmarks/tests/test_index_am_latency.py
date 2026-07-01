@@ -18,13 +18,13 @@ import pytest
 
 pytestmark = pytest.mark.integration
 
-N = 50_000
+N = 100_000
 DIM = 128
 PROBES = 10
 QUERIES = 15
 # Re-scoped ceilings (CTO 2026-07-01): the O(N) M26 path would be ~1 s+ at this N; a structured partial read is
 # an order of magnitude under that. We assert well under the O(N) regime, and within ~4x of pgvector (honest band).
-O_N_CEILING_MS = 400.0
+O_N_CEILING_MS = 600.0
 PGVECTOR_BAND = 4.0
 
 

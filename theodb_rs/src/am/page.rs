@@ -342,7 +342,7 @@ unsafe fn main_index_pages(rel: pg_sys::Relation) -> Result<u32, String> {
             if m.len() < o + 4 {
                 return Err("theodb am: truncated directory".into());
             }
-            total += u32::from_le_bytes(m[o..o + 4].try_into().unwrap());
+            total = total.saturating_add(u32::from_le_bytes(m[o..o + 4].try_into().unwrap()));
         }
         Ok(total)
     } else {
