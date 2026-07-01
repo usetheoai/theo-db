@@ -19,6 +19,7 @@ package mcpserver
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -189,10 +190,24 @@ func TestMCP_ListClusters_ClientError(t *testing.T) {
 	if !res.IsError {
 		t.Error("list_clusters on a client error must return IsError=true")
 	}
+	// Security regression guard: the message must NOT leak the raw K8s error (SA identity / RBAC posture).
+	if text := errorText(res); strings.Contains(text, "boom") {
+		t.Errorf("error message leaked the raw client error: %q", text)
+	}
 	// Server stays up: a second call still succeeds.
 	if _, err := session.ListTools(ctx, nil); err != nil {
 		t.Errorf("server did not stay up after a tool error: %v", err)
 	}
+}
+
+// errorText extracts the text of the first TextContent in an MCP tool result (test helper).
+func errorText(res *mcp.CallToolResult) string {
+	for _, c := range res.Content {
+		if tc, ok := c.(*mcp.TextContent); ok {
+			return tc.Text
+		}
+	}
+	return ""
 }
 
 // T3.1 — failure scenario (plan, EC-5): closing the transport makes server.Run return cleanly (no leak/hang).
