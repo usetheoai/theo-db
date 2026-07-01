@@ -62,7 +62,10 @@ pub extern "C-unwind" fn ambuild(
     unsafe {
         let (corpus, ntuples) = collect_corpus(heaprel, indexrel, index_info);
         let idx = IvfflatIndex::build(&corpus, DEFAULT_LISTS, Metric::L2, BUILD_SEED);
-        page::write_blob(indexrel, pg_sys::ForkNumber::MAIN_FORKNUM, &idx.to_bytes());
+        // M31: persist in the STRUCTURED layout (meta + centroids + per-list pages) so scans read only probed
+        // lists (O(probes)), not the whole blob (O(N)).
+        let dim = corpus.first().map(|(_, v)| v.len()).unwrap_or(0) as u32;
+        page::write_ivf_structured(indexrel, dim, Metric::L2.tag(), idx.centroids(), &idx.list_entries());
         build_result(ntuples, corpus.len())
     }
 }
@@ -142,6 +145,17 @@ pub(crate) unsafe fn vacuum_rebuild(
 ) -> usize {
     // Exclusive the fold lock — wait for all concurrent scans/inserts (share) to finish, then rewrite alone.
     crate::am::lock::index_exclusive(indexrel);
+    let magic = match page::peek_magic(indexrel) {
+        Ok(m) => m,
+        Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
+    };
+    if magic == 0 {
+        return 0; // unbuilt
+    }
+    if magic == page::IVF_STRUCT_MAGIC {
+        return vacuum_rebuild_structured(indexrel, dead);
+    }
+    // Blob (M26 / HNSW) path.
     let blob = match page::read_blob(indexrel) {
         Ok(b) => b,
         Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
@@ -163,9 +177,38 @@ pub(crate) unsafe fn vacuum_rebuild(
             live.push((id, v));
         }
     }
-    // Rebuild the SAME index variant over the live TIDs (folds pending in, drops dead), then rewrite the blob.
     let rebuilt = idx.rebuilt_with(&live, BUILD_SEED);
     page::rewrite_blob(indexrel, &rebuilt.to_bytes());
+    live.len()
+}
+
+/// VACUUM fold for the structured IVFFlat layout (M31): enumerate all list entries + pending, drop dead, rebuild,
+/// and rewrite the structured layout in place.
+unsafe fn vacuum_rebuild_structured(indexrel: pg_sys::Relation, dead: &mut dyn FnMut(i64) -> bool) -> usize {
+    let meta = match page::read_ivf_meta(indexrel) {
+        Ok(m) => m,
+        Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
+    };
+    let metric = match Metric::from_tag(meta.metric_tag) {
+        Some(m) => m,
+        None => pg_sys::error!("theodb am vacuum: unknown metric tag"),
+    };
+    let mut all: Vec<(i64, Vec<f32>)> = Vec::new();
+    for ci in 0..meta.centroids.len() {
+        let (fb, np, cnt) = meta.dir[ci];
+        match page::read_ivf_list(indexrel, fb, np, cnt, meta.dim) {
+            Ok(e) => all.extend(e),
+            Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
+        }
+    }
+    match page::read_pending(indexrel) {
+        Ok(p) => all.extend(p),
+        Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
+    }
+    let live: Vec<(i64, Vec<f32>)> = all.into_iter().filter(|(id, _)| !dead(*id)).collect();
+    let dim = live.first().map(|(_, v)| v.len()).unwrap_or(meta.dim as usize) as u32;
+    let idx = IvfflatIndex::build(&live, DEFAULT_LISTS, metric, BUILD_SEED);
+    page::rewrite_ivf_structured(indexrel, dim, metric.tag(), idx.centroids(), &idx.list_entries());
     live.len()
 }
 

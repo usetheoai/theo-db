@@ -145,6 +145,19 @@ impl IvfflatIndex {
         IvfflatIndex::build(live, self.centroids.len().max(1), self.metric, seed)
     }
 
+    /// The centroids (M31 — the AM persists them in the structured meta page so a scan can pick probed lists).
+    pub(crate) fn centroids(&self) -> &[Vec<f32>] {
+        &self.centroids
+    }
+
+    /// Each centroid's inverted-list entries as `(id, vector)` (M31 — the AM persists these as list pages).
+    pub(crate) fn list_entries(&self) -> Vec<Vec<(i64, Vec<f32>)>> {
+        self.lists
+            .iter()
+            .map(|list| list.iter().map(|&pos| (self.ids[pos], self.vectors[pos].clone())).collect())
+            .collect()
+    }
+
     /// Every `(id, vector)` stored in the index (M26 — the AM enumerates these during VACUUM to rebuild the
     /// index over only the live heap TIDs).
     pub(crate) fn entries(&self) -> Vec<(i64, Vec<f32>)> {
