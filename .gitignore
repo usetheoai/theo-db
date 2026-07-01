@@ -22,6 +22,7 @@ __pycache__/
 # Coverage + pytest artifacts
 .coverage
 .pytest_cache/
+.ruff_cache/
 
 # ANN-Benchmarks dataset cache (large HDF5, fetched on demand)
 benchmarks/.datasets/
