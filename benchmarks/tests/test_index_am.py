@@ -136,3 +136,29 @@ def test_incremental_insert_delete_vacuum():
         cur.execute("DROP TABLE m26_maint CASCADE")
     finally:
         conn.close()
+
+
+def test_hnsw_am_persists_pushes_down_and_recalls():
+    """Phase 6: the theodb_hnsw AM shares the layer — persists, EXPLAIN Index Scan, recall parity."""
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE")
+        cur.execute("SELECT count(*) FROM pg_am WHERE amname = 'theodb_hnsw' AND amtype = 'i'")
+        assert cur.fetchone()[0] == 1, "theodb_hnsw AM not registered"
+        _seed_table(cur, "m26_hnsw", n=200, dim=8)
+        cur.execute("CREATE INDEX m26_hnsw_idx ON m26_hnsw USING theodb_hnsw (embedding theodb_hnsw_l2_ops)")
+        cur.execute("SELECT pg_relation_size('m26_hnsw_idx')")
+        assert cur.fetchone()[0] > 0, "hnsw index not persisted"
+
+        query = "[1,0,0,0,0,0,0,0]"
+        cur.execute("SET enable_indexscan = off; SET enable_seqscan = on")
+        cur.execute(f"SELECT id FROM m26_hnsw ORDER BY embedding <-> '{query}' LIMIT 5")
+        truth = [r[0] for r in cur.fetchall()]
+        cur.execute("SET enable_seqscan = off; SET enable_indexscan = on")
+        cur.execute(f"EXPLAIN SELECT id FROM m26_hnsw ORDER BY embedding <-> '{query}' LIMIT 5")
+        plan = "\n".join(r[0] for r in cur.fetchall())
+        assert "theodb_hnsw" in plan or "Index Scan" in plan, f"planner did not use the hnsw index:\n{plan}"
+        cur.execute(f"SELECT id FROM m26_hnsw ORDER BY embedding <-> '{query}' LIMIT 5")
+        got = [r[0] for r in cur.fetchall()]
+        assert len(set(got) & set(truth)) >= 4, f"hnsw recall@5 too low: {got} vs {truth}"
+        cur.execute("RESET enable_seqscan; RESET enable_indexscan")
+        cur.execute("DROP TABLE m26_hnsw CASCADE")

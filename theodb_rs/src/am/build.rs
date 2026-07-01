@@ -3,14 +3,18 @@
 //! Reuses the proven `crate::ann::IvfflatIndex` (no algorithm fork). The heap scan collects `(encoded_tid, vec)`
 //! into a corpus, builds the index once, serializes it (`to_bytes`), and writes it via `crate::am::page`
 //! (WAL-logged). The heap TID is encoded into the `i64` id slot so `amgettuple` can return it later.
+use crate::am::index::Persisted;
 use crate::am::page;
 use crate::am::tid;
-use crate::ann::{IvfflatIndex, Metric};
+use crate::ann::{HnswIndex, IvfflatIndex, Metric};
 use pgrx::prelude::*;
 
 /// Number of IVFFlat lists (centroids) for the persisted build. A fixed sensible default for the MVP (the
 /// SQL-callable path exposes `lists`; a reloption follows in a later phase). Clamped to corpus size internally.
 const DEFAULT_LISTS: usize = 100;
+/// HNSW build params for the persisted AM (mirror the SQL-callable defaults).
+const HNSW_M: usize = 16;
+const HNSW_EF_CONSTRUCTION: usize = 64;
 const BUILD_SEED: u64 = 42;
 
 /// Collected during the heap scan (one entry per live, non-NULL-vector heap tuple).
@@ -19,38 +23,63 @@ struct BuildState {
     dim: Option<usize>,
 }
 
+/// Scan the heap once, collecting `(encoded heap TID, vector)` for every live non-NULL-vector tuple. Shared by
+/// both AMs' `ambuild`. Returns `(corpus, heap_tuple_count)`.
+unsafe fn collect_corpus(
+    heaprel: pg_sys::Relation,
+    indexrel: pg_sys::Relation,
+    index_info: *mut pg_sys::IndexInfo,
+) -> (Vec<(i64, Vec<f32>)>, f64) {
+    let mut state = BuildState { corpus: Vec::new(), dim: None };
+    let ntuples = pg_sys::table_index_build_scan(
+        heaprel,
+        indexrel,
+        index_info,
+        true, // allow_sync
+        true, // progress
+        Some(build_callback),
+        (&mut state as *mut BuildState).cast::<std::os::raw::c_void>(),
+        std::ptr::null_mut(),
+    );
+    (state.corpus, ntuples as f64)
+}
+
+unsafe fn build_result(ntuples: f64, nindexed: usize) -> *mut pg_sys::IndexBuildResult {
+    let mut result = PgBox::<pg_sys::IndexBuildResult>::alloc0();
+    result.heap_tuples = ntuples;
+    result.index_tuples = nindexed as f64;
+    result.into_pg()
+}
+
+/// `theodb_ivfflat` build. The DEFAULT l2 opclass sets the metric; cosine/ip opclasses are a follow-up (pgrx 0.16
+/// does not expose `get_opfamily_name` for opclass→metric resolution). The metric is persisted in the blob.
 #[pg_guard]
 pub extern "C-unwind" fn ambuild(
     heaprel: pg_sys::Relation,
     indexrel: pg_sys::Relation,
     index_info: *mut pg_sys::IndexInfo,
 ) -> *mut pg_sys::IndexBuildResult {
-    // Phase 2 supports the DEFAULT l2 opclass; cosine/ip opclasses are a follow-up once opclass→metric resolution
-    // is wired (pgrx 0.16 does not expose `get_opfamily_name`). The metric is persisted in the blob for the scan.
-    let metric = Metric::L2;
-    let mut state = BuildState { corpus: Vec::new(), dim: None };
+    unsafe {
+        let (corpus, ntuples) = collect_corpus(heaprel, indexrel, index_info);
+        let idx = IvfflatIndex::build(&corpus, DEFAULT_LISTS, Metric::L2, BUILD_SEED);
+        page::write_blob(indexrel, &idx.to_bytes());
+        build_result(ntuples, corpus.len())
+    }
+}
 
-    let ntuples = unsafe {
-        pg_sys::table_index_build_scan(
-            heaprel,
-            indexrel,
-            index_info,
-            true,  // allow_sync
-            true,  // anyvisible=false in PG; use progress=true
-            Some(build_callback),
-            (&mut state as *mut BuildState).cast::<std::os::raw::c_void>(),
-            std::ptr::null_mut(),
-        )
-    };
-
-    // Build the index (reuse the proven algorithm) and persist it (WAL-logged pages).
-    let idx = IvfflatIndex::build(&state.corpus, DEFAULT_LISTS, metric, BUILD_SEED);
-    unsafe { page::write_blob(indexrel, &idx.to_bytes()) };
-
-    let mut result = unsafe { PgBox::<pg_sys::IndexBuildResult>::alloc0() };
-    result.heap_tuples = ntuples as f64;
-    result.index_tuples = state.corpus.len() as f64;
-    result.into_pg()
+/// `theodb_hnsw` build — same persistence layer, an HNSW graph instead of IVFFlat lists (M26 Phase 6).
+#[pg_guard]
+pub extern "C-unwind" fn ambuild_hnsw(
+    heaprel: pg_sys::Relation,
+    indexrel: pg_sys::Relation,
+    index_info: *mut pg_sys::IndexInfo,
+) -> *mut pg_sys::IndexBuildResult {
+    unsafe {
+        let (corpus, ntuples) = collect_corpus(heaprel, indexrel, index_info);
+        let idx = HnswIndex::build(&corpus, HNSW_M, HNSW_EF_CONSTRUCTION, Metric::L2, BUILD_SEED);
+        page::write_blob(indexrel, &idx.to_bytes());
+        build_result(ntuples, corpus.len())
+    }
 }
 
 /// Called once per heap tuple during the build scan. Skips NULL vectors (pgvector index semantics).
@@ -116,7 +145,7 @@ pub(crate) unsafe fn vacuum_rebuild(
     if blob.is_empty() {
         return 0;
     }
-    let idx = match IvfflatIndex::from_bytes(&blob) {
+    let idx = match Persisted::from_bytes(&blob) {
         Ok(i) => i,
         Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
     };
@@ -124,14 +153,14 @@ pub(crate) unsafe fn vacuum_rebuild(
         Ok(p) => p,
         Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
     };
-    let metric = idx.metric();
     let mut live: Vec<(i64, Vec<f32>)> = Vec::new();
     for (id, v) in idx.entries().into_iter().chain(pending) {
         if !dead(id) {
             live.push((id, v));
         }
     }
-    let rebuilt = IvfflatIndex::build(&live, DEFAULT_LISTS, metric, BUILD_SEED);
+    // Rebuild the SAME index variant over the live TIDs (folds pending in, drops dead), then rewrite the blob.
+    let rebuilt = idx.rebuilt_with(&live, BUILD_SEED);
     page::rewrite_blob(indexrel, &rebuilt.to_bytes());
     live.len()
 }
@@ -140,6 +169,12 @@ pub(crate) unsafe fn vacuum_rebuild(
 #[pg_guard]
 pub extern "C-unwind" fn ambuildempty(indexrel: pg_sys::Relation) {
     let idx = IvfflatIndex::build(&[], DEFAULT_LISTS, Metric::L2, BUILD_SEED);
+    unsafe { page::write_blob(indexrel, &idx.to_bytes()) };
+}
+
+#[pg_guard]
+pub extern "C-unwind" fn ambuildempty_hnsw(indexrel: pg_sys::Relation) {
+    let idx = HnswIndex::build(&[], HNSW_M, HNSW_EF_CONSTRUCTION, Metric::L2, BUILD_SEED);
     unsafe { page::write_blob(indexrel, &idx.to_bytes()) };
 }
 

@@ -4,8 +4,8 @@
 //! the scan key, and runs the reused search — producing `(encoded_tid, distance)` in ascending-distance order.
 //! `amgettuple` hands the executor one heap TID at a time (in that order) until exhausted.
 use crate::am::build::datum_to_vec_f32;
+use crate::am::index::Persisted;
 use crate::am::{page, tid};
-use crate::ann::IvfflatIndex;
 use pgrx::prelude::*;
 
 /// Default lists probed per scan (mirrors ivfflat's `probes`; a GUC/reloption follows later). Larger = higher
@@ -56,7 +56,7 @@ pub extern "C-unwind" fn amrescan(
         if blob.is_empty() {
             return; // empty index
         }
-        let idx = match IvfflatIndex::from_bytes(&blob) {
+        let idx = match Persisted::from_bytes(&blob) {
             Ok(i) => i,
             Err(e) => pg_sys::error!("theodb am scan: {e}"),
         };

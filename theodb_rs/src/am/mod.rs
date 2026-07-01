@@ -13,9 +13,18 @@
 use pgrx::*;
 
 mod build; // ambuild / ambuildempty (Phase 2) + shared datum/metric helpers
+mod index; // polymorphic persisted index (ivf|hnsw) dispatch (Phase 6)
 mod page; // page persistence (Phase 1)
 mod scan; // ambeginscan / amrescan / amgettuple / amendscan (Phase 3)
 mod tid; // heap TID ⇄ i64 codec
+
+/// Type of the two per-algorithm build callbacks (the only hooks that differ between the AMs).
+type AmBuildFn = unsafe extern "C-unwind" fn(
+    pg_sys::Relation,
+    pg_sys::Relation,
+    *mut pg_sys::IndexInfo,
+) -> *mut pg_sys::IndexBuildResult;
+type AmBuildEmptyFn = unsafe extern "C-unwind" fn(pg_sys::Relation);
 
 /// The IndexAmRoutine handler. Idempotent install of the AM (skips if `pg_am` already has it — safe re-`CREATE
 /// EXTENSION`). Mirrors pgvectorscale's amhandler SQL shape (`access_method/mod.rs:27`).
@@ -31,6 +40,28 @@ mod tid; // heap TID ⇄ i64 codec
     $$;
 ")]
 fn theodb_ivfflat_amhandler(_fcinfo: pg_sys::FunctionCallInfo) -> PgBox<pg_sys::IndexAmRoutine> {
+    make_amroutine(build::ambuild, build::ambuildempty)
+}
+
+/// The `theodb_hnsw` handler — the SAME plumbing (scan/insert/vacuum/cost dispatch on the persisted blob's
+/// magic), only the build callbacks differ (an HNSW graph instead of IVFFlat lists). M26 Phase 6.
+#[pg_extern(sql = "
+    CREATE OR REPLACE FUNCTION theodb_hnsw_amhandler(internal) RETURNS index_am_handler
+        PARALLEL SAFE IMMUTABLE STRICT COST 0.0001 LANGUAGE c AS '@MODULE_PATHNAME@', '@FUNCTION_NAME@';
+    DO $$
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_am WHERE amname = 'theodb_hnsw') THEN
+            CREATE ACCESS METHOD theodb_hnsw TYPE INDEX HANDLER theodb_hnsw_amhandler;
+        END IF;
+    END;
+    $$;
+")]
+fn theodb_hnsw_amhandler(_fcinfo: pg_sys::FunctionCallInfo) -> PgBox<pg_sys::IndexAmRoutine> {
+    make_amroutine(build::ambuild_hnsw, build::ambuildempty_hnsw)
+}
+
+/// Fill an `IndexAmRoutine` with the shared hooks + the given per-algorithm build callbacks.
+fn make_amroutine(ambuild: AmBuildFn, ambuildempty: AmBuildEmptyFn) -> PgBox<pg_sys::IndexAmRoutine> {
     let mut amroutine =
         unsafe { PgBox::<pg_sys::IndexAmRoutine>::alloc_node(pg_sys::NodeTag::T_IndexAmRoutine) };
 
@@ -53,8 +84,8 @@ fn theodb_ivfflat_amhandler(_fcinfo: pg_sys::FunctionCallInfo) -> PgBox<pg_sys::
     amroutine.amkeytype = pg_sys::InvalidOid;
 
     amroutine.amvalidate = Some(amvalidate);
-    amroutine.ambuild = Some(build::ambuild);
-    amroutine.ambuildempty = Some(build::ambuildempty);
+    amroutine.ambuild = Some(ambuild);
+    amroutine.ambuildempty = Some(ambuildempty);
     amroutine.aminsert = Some(build::aminsert);
     amroutine.ambulkdelete = Some(ambulkdelete);
     amroutine.amvacuumcleanup = Some(amvacuumcleanup);
@@ -165,4 +196,14 @@ extension_sql!(
     "#,
     name = "theodb_ivfflat_opclasses",
     requires = [theodb_ivfflat_amhandler],
+);
+
+// The DEFAULT l2 operator class for the HNSW AM (same shape; metric L2 baked into the persisted graph).
+extension_sql!(
+    r#"
+    CREATE OPERATOR CLASS theodb_hnsw_l2_ops DEFAULT FOR TYPE vector USING theodb_hnsw AS
+        OPERATOR 1 <-> (vector, vector) FOR ORDER BY float_ops;
+    "#,
+    name = "theodb_hnsw_opclasses",
+    requires = [theodb_hnsw_amhandler],
 );

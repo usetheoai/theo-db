@@ -17,9 +17,10 @@ use std::cmp::Ordering;
 
 mod hnsw;
 mod ivf;
+mod wire;
 
-pub(crate) use hnsw::HnswIndex;
-pub(crate) use ivf::IvfflatIndex;
+pub(crate) use hnsw::{HnswIndex, HNSW_MAGIC};
+pub(crate) use ivf::{IvfflatIndex, IVF_MAGIC};
 
 /// Distance family. `dist` returns the ORDER-BY key (smaller = nearer); for inner product pgvector orders by the
 /// NEGATIVE inner product (`<#>`), so the key is `-inner_product` (parity with pgvector's `<#>`).
