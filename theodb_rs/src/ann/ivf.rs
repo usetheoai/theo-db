@@ -2,6 +2,9 @@
 //! Shared primitives ([`Metric`], [`Rng`], [`Cand`]) live in the parent `ann` module.
 use super::{Cand, Metric, Rng};
 
+/// Bounded Lloyd (k-means) refinement iterations — enough to converge centroids without unbounded work.
+const LLOYD_ITERS: usize = 10;
+
 /// Own IVFFlat index: k-means++ centroids partition the corpus into inverted lists; search scans the `probes`
 /// nearest lists.
 pub(crate) struct IvfflatIndex {
@@ -74,7 +77,7 @@ impl IvfflatIndex {
             centers.push(self.vectors[chosen].clone());
         }
         // Bounded Lloyd refinement.
-        for _ in 0..10 {
+        for _ in 0..LLOYD_ITERS {
             let mut sums = vec![vec![0f64; dim]; centers.len()];
             let mut counts = vec![0usize; centers.len()];
             for v in &self.vectors {

@@ -96,50 +96,46 @@ pub(crate) fn hamming(a: &[u64], b: &[u64]) -> u32 {
     a.iter().zip(b).map(|(x, y)| (x ^ y).count_ones()).sum()
 }
 
-/// Full-precision rerank distance via the M20 f32 kernel (ADR D2). `<#>` orders by negative inner product.
-fn rerank_dist(metric: Metric, a: &[f32], b: &[f32]) -> f64 {
-    match metric {
-        Metric::L2 => crate::vec::l2_distance(a, b),
-        Metric::Cosine => crate::vec::cosine_distance(a, b),
-        Metric::Ip => -crate::vec::inner_product(a, b),
-    }
+/// Per-call SBQ knn knobs (numeric; already the SQL defaults when the caller omits them). Extracted (M25) so
+/// `knn` is not a 12-parameter function — mirrors `ann_query::Params` (clippy `too_many_arguments`).
+pub(crate) struct SbqParams {
+    pub qdim: i32,
+    pub k: i32,
+    pub bits: i32,
+    pub lists: i32,
+    pub probes: i32,
+    pub over_fetch: i32,
+    pub seed: i64,
 }
 
 /// Validate args, read the corpus once, quantize it, build the M21 IVFFlat carrier, and for each query in the
 /// flattened `queries` (`qdim`-sized chunks): generate candidates (IVFFlat probes) → Hamming rank → keep top
 /// `k·over_fetch` → full-precision f32 rerank → top-k. Returns `(query_idx, id, distance)` rows (f32 distance).
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn knn(
     src_table: &str,
     embed_col: &str,
     id_col: &str,
     metric_s: &str,
     queries: &[f32],
-    qdim: i32,
-    k: i32,
-    bits: i32,
-    lists: i32,
-    probes: i32,
-    over_fetch: i32,
-    seed: i64,
+    p: SbqParams,
 ) -> Vec<(i32, i64, f64)> {
     // --- boundary validation (Rule 8; typed 22023) ---
     let metric = Metric::parse(metric_s)
         .unwrap_or_else(|| err_input(&format!("theodb sbq: unknown metric '{metric_s}' (use l2|cosine|ip)")));
     require(valid_ident(embed_col), "theodb sbq: embed_col is not a valid identifier");
     require(valid_ident(id_col), "theodb sbq: id_col is not a valid identifier");
-    require(qdim >= 1, "theodb sbq: qdim must be >= 1");
-    require(k >= 1, "theodb sbq: k must be >= 1");
-    require((1..=BITS_MAX).contains(&bits), "theodb sbq: bits must be in [1, 8]");
-    require((1..=OVER_FETCH_MAX).contains(&over_fetch), "theodb sbq: over_fetch must be in [1, 64]");
-    require((1..=LIST_MAX).contains(&lists), "theodb sbq: lists must be in [1, 32768]");
-    require((1..=LIST_MAX).contains(&probes), "theodb sbq: probes must be in [1, 32768]");
+    require(p.qdim >= 1, "theodb sbq: qdim must be >= 1");
+    require(p.k >= 1, "theodb sbq: k must be >= 1");
+    require((1..=BITS_MAX).contains(&p.bits), "theodb sbq: bits must be in [1, 8]");
+    require((1..=OVER_FETCH_MAX).contains(&p.over_fetch), "theodb sbq: over_fetch must be in [1, 64]");
+    require((1..=LIST_MAX).contains(&p.lists), "theodb sbq: lists must be in [1, 32768]");
+    require((1..=LIST_MAX).contains(&p.probes), "theodb sbq: probes must be in [1, 32768]");
 
     // Empty queries → 0 rows, no Spi read / build (EC-5).
     if queries.is_empty() {
         return Vec::new();
     }
-    let qd = qdim as usize;
+    let qd = p.qdim as usize;
     if !queries.len().is_multiple_of(qd) {
         err_input(&format!(
             "theodb sbq: queries length {} is not a multiple of qdim {qd}",
@@ -149,28 +145,29 @@ pub(crate) fn knn(
 
     let corpus = read_corpus(src_table, embed_col, id_col, qd);
     let vecs: Vec<Vec<f32>> = corpus.iter().map(|(_, v)| v.clone()).collect();
-    let quant = SbqQuantizer::train(&vecs, bits as u8);
+    let quant = SbqQuantizer::train(&vecs, p.bits as u8);
     let codes: Vec<Vec<u64>> = vecs.iter().map(|v| quant.quantize(v)).collect();
-    let carrier = IvfflatIndex::build(&corpus, lists as usize, metric, seed as u64);
+    let carrier = IvfflatIndex::build(&corpus, p.lists as usize, metric, p.seed as u64);
 
-    let k = k as usize;
-    let of = over_fetch as usize;
+    let k = p.k as usize;
+    let of = p.over_fetch as usize;
     let mut out: Vec<(i32, i64, f64)> = Vec::new();
     for (qi, chunk) in queries.chunks(qd).enumerate() {
         let qcode = quant.quantize(chunk);
         // Candidate generation (f32 carrier) → Hamming rank → keep top k*over_fetch.
-        let mut cand = carrier.candidate_positions(chunk, probes as usize);
+        let mut cand = carrier.candidate_positions(chunk, p.probes as usize);
         cand.sort_by_key(|&i| hamming(&qcode, &codes[i]));
         cand.truncate(k * of);
-        // Full-precision rerank → top-k.
+        // Full-precision rerank → top-k. `metric.dist` is the single-source metric→kernel mapping (M25 DRY).
         cand.sort_by(|&a, &b| {
-            rerank_dist(metric, &vecs[a], chunk)
-                .partial_cmp(&rerank_dist(metric, &vecs[b], chunk))
+            metric
+                .dist(&vecs[a], chunk)
+                .partial_cmp(&metric.dist(&vecs[b], chunk))
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
         cand.truncate(k);
         for &i in &cand {
-            out.push((qi as i32, corpus[i].0, rerank_dist(metric, &vecs[i], chunk)));
+            out.push((qi as i32, corpus[i].0, metric.dist(&vecs[i], chunk)));
         }
     }
     out
@@ -183,6 +180,7 @@ pub(crate) fn knn(
 #[pgrx::pg_schema]
 mod tests {
     use super::*;
+    use crate::ann::Rng; // M25: pre-existing missing import (test only compiled under pg_test before)
     use pgrx::prelude::*;
 
     #[pg_test]
@@ -259,7 +257,10 @@ mod tests {
     fn sbq_knn_smoke() {
         Spi::run("CREATE TEMP TABLE sbq_t (id int PRIMARY KEY, e vector(2))").unwrap();
         Spi::run("INSERT INTO sbq_t VALUES (0,'[0,0]'),(1,'[1,0]'),(2,'[5,5]')").unwrap();
-        let r = knn("sbq_t", "e", "id", "l2", &[0.0, 0.0], 2, 2, 1, 4, 4, 8, 42);
+        let r = knn(
+            "sbq_t", "e", "id", "l2", &[0.0, 0.0],
+            SbqParams { qdim: 2, k: 2, bits: 1, lists: 4, probes: 4, over_fetch: 8, seed: 42 },
+        );
         assert_eq!(r.len(), 2);
         assert_eq!(r[0].1, 0); // nearest is id 0
     }
@@ -268,15 +269,24 @@ mod tests {
         Spi::run("CREATE TEMP TABLE sbq_of (id int PRIMARY KEY, e vector(1))").unwrap();
         Spi::run("INSERT INTO sbq_of VALUES (0,'[0]'),(1,'[1]'),(2,'[2]')").unwrap();
         // over_fetch huge + tiny corpus → returns min(k, available), no panic (EC-2).
-        let r = knn("sbq_of", "e", "id", "l2", &[0.0], 1, 10, 1, 2, 2, 64, 42);
+        let r = knn(
+            "sbq_of", "e", "id", "l2", &[0.0],
+            SbqParams { qdim: 1, k: 10, bits: 1, lists: 2, probes: 2, over_fetch: 64, seed: 42 },
+        );
         assert_eq!(r.len(), 3);
     }
     #[pg_test(error = "bits must be in")]
     fn sbq_knn_bad_bits_rejected() {
-        let _ = knn("t", "e", "id", "l2", &[0.0], 1, 5, 9, 4, 4, 8, 42);
+        let _ = knn(
+            "t", "e", "id", "l2", &[0.0],
+            SbqParams { qdim: 1, k: 5, bits: 9, lists: 4, probes: 4, over_fetch: 8, seed: 42 },
+        );
     }
     #[pg_test(error = "unknown metric")]
     fn sbq_knn_bad_metric_rejected() {
-        let _ = knn("t", "e", "id", "nope", &[0.0], 1, 5, 1, 4, 4, 8, 42);
+        let _ = knn(
+            "t", "e", "id", "nope", &[0.0],
+            SbqParams { qdim: 1, k: 5, bits: 1, lists: 4, probes: 4, over_fetch: 8, seed: 42 },
+        );
     }
 }

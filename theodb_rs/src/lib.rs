@@ -262,7 +262,12 @@ mod theodb_rs {
         seed: i64,
     ) -> TableIterator<'static, (name!(query_idx, i32), name!(id, i64), name!(distance, f64))> {
         let rows = crate::sbq::knn(
-            src_table, embed_col, id_col, metric, &queries, qdim, k, bits, lists, probes, over_fetch, seed,
+            src_table,
+            embed_col,
+            id_col,
+            metric,
+            &queries,
+            crate::sbq::SbqParams { qdim, k, bits, lists, probes, over_fetch, seed },
         );
         TableIterator::new(rows)
     }

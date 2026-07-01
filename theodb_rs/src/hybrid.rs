@@ -78,34 +78,8 @@ pub(crate) fn run_rrf(
         err_input("ai.hybrid_search_rrf: provide query_text and/or query_vector");
     }
 
-    // Resolve the vector leg's query vector (as text): explicit query_vector wins; else embed query_text.
-    let qvec: Option<String> = match query_vector_text {
-        Some(v) => Some(v.to_string()),
-        None => match query_text {
-            Some(qt) => {
-                // Fail-fast seam guard (audit #3/#8): theodb.embed is a late-bound cross-extension call with
-                // no pg_depend edge — dropping theodb_rs would surface as a cryptic 42883 mid-query. Check the
-                // exact 2-arg signature (model has a DEFAULT) and turn absence into a clear 0A000.
-                let missing = Spi::get_one::<bool>(
-                    "SELECT to_regprocedure('theodb.embed(text, text)') IS NULL",
-                )
-                .ok()
-                .flatten()
-                .unwrap_or(true);
-                if missing {
-                    err_unsupported(
-                        "ai.hybrid_search_rrf: theodb.embed is unavailable — install the theodb_rs extension (CREATE EXTENSION theodb_rs), or pass query_vector explicitly",
-                    );
-                }
-                Spi::get_one_with_args::<String>(
-                    "SELECT theodb.embed($1)::text",
-                    &[qt.into()],
-                )
-                .unwrap_or_else(|e| err_input(&format!("ai.hybrid_search_rrf: embed failed: {e:?}")))
-            }
-            None => None, // unreachable: rejected above
-        },
-    };
+    // Resolve the vector leg's query vector (explicit wins; else embed query_text). Extracted (M25).
+    let qvec: Option<String> = resolve_query_vector(query_text, query_vector_text);
 
     // Build the fusion SQL with Postgres-native %I quoting (injection-safe) — one format() call over SPI.
     // The template is dollar-quoted ($fq$…$fq$); its literal $1..$5 survive and bind at execution.
@@ -143,6 +117,36 @@ pub(crate) fn run_rrf(
         }
         out
     })
+}
+
+/// Resolve the vector leg's query vector (as text): an explicit `query_vector` wins; otherwise embed
+/// `query_text` via `theodb.embed`. Extracted from `run_rrf` (M25). Includes the embed-seam fail-fast guard
+/// (audit #3/#8: `theodb.embed` is a late-bound cross-extension call with no `pg_depend` edge — dropping
+/// theodb_rs would surface as a cryptic 42883 mid-query; check the exact 2-arg signature and turn absence into
+/// a clear 0A000). Diverges (typed) on embed failure. Returns `None` only if both inputs are absent
+/// (unreachable — `run_rrf` rejects that upstream).
+fn resolve_query_vector(query_text: Option<&str>, query_vector_text: Option<&str>) -> Option<String> {
+    match query_vector_text {
+        Some(v) => Some(v.to_string()),
+        None => match query_text {
+            Some(qt) => {
+                let missing = Spi::get_one::<bool>(
+                    "SELECT to_regprocedure('theodb.embed(text, text)') IS NULL",
+                )
+                .ok()
+                .flatten()
+                .unwrap_or(true);
+                if missing {
+                    err_unsupported(
+                        "ai.hybrid_search_rrf: theodb.embed is unavailable — install the theodb_rs extension (CREATE EXTENSION theodb_rs), or pass query_vector explicitly",
+                    );
+                }
+                Spi::get_one_with_args::<String>("SELECT theodb.embed($1)::text", &[qt.into()])
+                    .unwrap_or_else(|e| err_input(&format!("ai.hybrid_search_rrf: embed failed: {e:?}")))
+            }
+            None => None,
+        },
+    }
 }
 /// Parse the `ai.hybrid_search(jsonb)` config and delegate to `run_rrf` (one fusion source of truth).
 /// Required keys missing → 22023. Returns the fused rows. Called by the `#[pg_extern]` in `lib.rs`.

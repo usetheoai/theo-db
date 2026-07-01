@@ -14,6 +14,8 @@ use crate::pg::{err_external, warn};
 /// Max retries for the recoverable class (3 attempts total). Bounded so a down endpoint can never hang
 /// beyond `(MAX_RETRIES + 1) × timeout` (`error-handling.md` — retry with backoff, never unbounded).
 pub(crate) const MAX_RETRIES: u32 = 2;
+/// Per-request timeout (seconds). Total wall-clock is bounded by `(MAX_RETRIES + 1) × HTTP_TIMEOUT_SECS`.
+const HTTP_TIMEOUT_SECS: u64 = 30;
 
 /// The recoverable HTTP status class (transient): too-many-requests + bad/unavailable gateway. Other 4xx
 /// (400/401/403/404/422) and other 5xx (500/504) are irrecoverable -> fail-fast, NO retry (retrying would
@@ -42,7 +44,7 @@ pub(crate) fn post_json(fn_name: &str, endpoint: &str, payload: String, api_key:
         let mut req = minreq::post(endpoint)
             .with_header("Content-Type", "application/json")
             .with_body(payload.clone()) // body is consumed per send -> clone for retryability
-            .with_timeout(30)
+            .with_timeout(HTTP_TIMEOUT_SECS)
             // SSRF: never follow a 30x to an internal host / cloud metadata (parity with the
             // plpython3u _NoRedirect handler). minreq follows up to 100 redirects by default.
             .with_max_redirects(0);

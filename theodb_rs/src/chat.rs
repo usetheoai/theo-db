@@ -240,3 +240,32 @@ fn parse_batch(out: &str, n: usize) -> Vec<Option<String>> {
     }
     result
 }
+
+// M25 — unit tests for the pure parsers (parity with the vec/nl/sbq test discipline; previously untested).
+#[cfg(any(test, feature = "pg_test"))]
+#[pgrx::pg_schema]
+mod tests {
+    use super::*;
+    use pgrx::prelude::*;
+
+    #[pg_test]
+    fn first_number_extracts_leading_number() {
+        assert_eq!(first_number("score: 4.5 out of 5"), Some(4.5));
+        assert_eq!(first_number("-3 degrees"), Some(-3.0));
+        assert_eq!(first_number("v2.0 release"), Some(2.0));
+        assert_eq!(first_number("no digits here"), None);
+    }
+
+    #[pg_test]
+    fn strip_fence_removes_markdown_fence() {
+        assert_eq!(strip_fence("```json\n[1,2]\n```"), "[1,2]");
+        assert_eq!(strip_fence("```\nhello\n```"), "hello");
+        assert_eq!(strip_fence("plain text"), "plain text");
+    }
+
+    #[pg_test]
+    fn parse_batch_splits_json_array_with_nulls() {
+        let r = parse_batch("[\"a\", null, \"c\"]", 3);
+        assert_eq!(r, vec![Some("a".to_string()), None, Some("c".to_string())]);
+    }
+}

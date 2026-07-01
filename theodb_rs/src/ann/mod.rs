@@ -43,7 +43,10 @@ impl Metric {
 
     /// Order-by distance via the M20 f32-parity kernel (ADR D2). All vectors here are equal-dim (validated at
     /// the SQL boundary), so `crate::vec`'s dim check never fires.
-    pub(super) fn dist(self, a: &[f32], b: &[f32]) -> f64 {
+    ///
+    /// `pub(crate)` (M25): the f32 rerank in `crate::sbq` reuses this exact metric→kernel mapping — widening
+    /// visibility lets it call `metric.dist()` instead of re-implementing the match (single source of truth).
+    pub(crate) fn dist(self, a: &[f32], b: &[f32]) -> f64 {
         match self {
             Metric::L2 => crate::vec::l2_distance(a, b),
             Metric::Cosine => crate::vec::cosine_distance(a, b),
