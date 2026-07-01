@@ -180,7 +180,7 @@ cloudnative-pg), CLI, gateway — o que torna TheoDB deployável/gerenciável (c
 
 ---
 
-### M26 — [ ] Vector Index Access Method próprio (o gap SOTA — função → index engine)
+### M26 — [x] Vector Index Access Method próprio (o gap SOTA — função → index engine)
 
 **Objective:** Promover o ANN in-memory (rebuild-por-query) a um **Postgres Index Access Method real**
 (`IndexAmRoutine`), fechando o único HIGH arquitetural da auditoria — paridade estrutural com
