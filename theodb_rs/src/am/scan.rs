@@ -8,12 +8,6 @@ use crate::am::index::Persisted;
 use crate::am::{page, tid};
 use pgrx::prelude::*;
 
-/// Default lists probed per scan (mirrors ivfflat's `probes`; a GUC/reloption follows later). Larger = higher
-/// recall, slower. We return EVERY probed candidate in distance order (no artificial cap — the executor applies
-/// the real LIMIT); an artificial cap would silently drop rows for an unbounded / large-LIMIT query.
-const SCAN_PROBES: usize = 10;
-const SCAN_K: usize = usize::MAX;
-
 struct ScanState {
     results: Vec<(i64, f64)>,
     pos: usize,
@@ -75,7 +69,8 @@ pub extern "C-unwind" fn amrescan(
             Err(e) => pg_sys::error!("theodb am scan: {e}"),
         };
         // The metric is baked into the persisted index (from_bytes restores it) — search uses it directly.
-        state.results = idx.search_merged(&query, SCAN_K, SCAN_PROBES, &pending);
+        // Variant-appropriate bounds (probes for IVFFlat, ef_search for HNSW) are applied inside search_merged.
+        state.results = idx.search_merged(&query, &pending);
     }
 }
 

@@ -232,6 +232,16 @@ impl IvfflatIndex {
         let lists = c.vecs_usize()?;
         let vectors = c.vecs_f32()?;
         let ids = c.i64_vec()?;
+        // Referential-integrity validation (M26): a structurally-complete but semantically-corrupt blob must NOT
+        // reach `search` (which indexes `self.lists[..]`, `self.vectors[node]`, `self.ids[c.i]`) — an OOB index
+        // there would panic across the C FFI boundary. Fail-fast with a typed Err instead.
+        let n = vectors.len();
+        if ids.len() != n || lists.len() != centroids.len() {
+            return Err("theodb ivfflat: inconsistent counts in index page".into());
+        }
+        if lists.iter().flatten().any(|&node| node >= n) {
+            return Err("theodb ivfflat: list references an out-of-bounds vector".into());
+        }
         Ok(IvfflatIndex { metric, centroids, lists, vectors, ids })
     }
 }
