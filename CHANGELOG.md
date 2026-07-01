@@ -13,13 +13,16 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- M26 (in progress) — vector Index Access Method `theodb_ivfflat`: a persisted Postgres index AM. `CREATE INDEX …
-  USING theodb_ivfflat (embedding theodb_ivfflat_l2_ops)` builds the IVFFlat index once from the heap and persists
-  it to WAL-logged pages (not rebuild-per-query); `ORDER BY embedding <-> $1 LIMIT k` is answered by a planner
-  Index Scan (amcanorderbyop + amcostestimate) at recall parity with a brute-force scan. Built on pgrx 0.16 FFI
-  (IndexAmRoutine + GenericXLog page persistence). Proven by `benchmarks/tests/test_index_am.py` (AM registered,
-  index persists to pages, EXPLAIN uses the index, recall@5 ≥ 4/5). Incremental INSERT/DELETE maintenance + VACUUM,
-  cosine/ip operator classes, and the theodb_hnsw AM are the remaining phases. (M26)
+- M26 — vector Index Access Methods `theodb_ivfflat` + `theodb_hnsw`: persisted Postgres index AMs that promote
+  the in-memory rebuild-per-query ANN into real index engines. `CREATE INDEX … USING theodb_{ivfflat,hnsw}
+  (embedding …_l2_ops)` builds the index once from the heap and persists it to WAL-logged pages (GenericXLog);
+  `ORDER BY embedding <-> $1 LIMIT k` is answered by a planner Index Scan (amcanorderbyop + amcostestimate) at
+  recall parity with a brute-force scan; INSERT appends to a pending buffer (no rebuild), DELETE is filtered by
+  MVCC recheck, and VACUUM folds pending + drops dead TIDs. Built on pgrx 0.16 FFI (IndexAmRoutine + page/buffer
+  persistence). **~16× faster than the rebuild-per-query SQL function** (86 ms vs 1372 ms on 5 000×128); evidence
+  in `docs/benchmarks/m26-index-am.md`. Proven by `benchmarks/tests/test_index_am.py` (6/6) with M20–M22
+  coexistence intact (61 passed). l2 operator class ships now; cosine/ip + partial-page-read scan optimization are
+  documented follow-ups (ADR `docs/adr/0010-m26-index-am-scope.md`). (M26)
 
 ### Changed
 
