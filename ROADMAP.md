@@ -162,6 +162,109 @@ cloudnative-pg), CLI, gateway — o que torna TheoDB deployável/gerenciável (c
 
 ---
 
+### M25 — [ ] Craft hardening do engine Rust (theodb_rs) — dívidas da auditoria de arquitetura
+
+**Objective:** Fechar todos os achados MEDIUM/LOW de craft da auditoria FAANG
+(`.claude/knowledge-base/audits/theodb_rs-architecture-verdict-2026-07-01.md`), **behavior-preserving**.
+
+**Definition of done:**
+
+- [ ] DRY: `sbq::rerank_dist` eliminado — `Metric::dist` widened p/ `pub(crate)` e reusado (single source).
+- [ ] `nl_to_sql` (CCN 19) decomposto (`l2_validate` + `l4_validate_relations`, cada CCN < 10) + **testes Rust rápidos** da composição L2 (multi-statement, relação não-permitida) sem oráculo Python.
+- [ ] `run_rrf` (84 NLOC): extrair `resolve_query_vector`; `sbq::knn` adota `Params` struct (remove `#[allow(too_many_arguments)]`).
+- [ ] Magic numbers → consts (`http` timeout 30, ivf Lloyd 10); testes Rust p/ parsers puros de `chat`/`embed`.
+- [ ] `lib.rs` (721 LoC) dividido: shims `#[pg_extern]` + `extension_sql!` movidos p/ junto do módulo; `lib.rs` vira module-map fino (padrão pgvectorscale=47/paradedb=192).
+- [ ] Gate: `cargo clippy` limpo (sem novos `#[allow]`), 0 ciclos mantido, suíte verde no Docker.
+
+**Dependencies:** M24. **Risco:** refactor em superfície de segurança (`nl_to_sql`) — mitigado por TDD (teste antes do extract) + suíte de paridade v1. **Nota:** puramente behavior-preserving.
+
+---
+
+### M26 — [ ] Vector Index Access Method próprio (o gap SOTA — função → index engine)
+
+**Objective:** Promover o ANN in-memory (rebuild-por-query) a um **Postgres Index Access Method real**
+(`IndexAmRoutine`), fechando o único HIGH arquitetural da auditoria — paridade estrutural com
+pgvector/pgvectorscale/vectorchord (todos AMs).
+
+**Definition of done:**
+
+- [ ] `IndexAmRoutine` registrado (`ambuild`/`aminsert`/`ambeginscan`/`amgettuple`/`amendscan`/`ambulkdelete`/`amvacuumcleanup`/`amcostestimate`) via pgrx (C-unwind guards, memory contexts, page/buffer).
+- [ ] `CREATE INDEX ... USING theodb_hnsw (embedding …_ops)` persistido em páginas (não rebuild por query).
+- [ ] Planner pushdown: `ORDER BY embedding <-> $1 LIMIT k` usa o índice (`amcanorderbyop` + `amcostestimate`), provado por `EXPLAIN`.
+- [ ] Manutenção incremental: `INSERT`/`DELETE` mantêm o índice (sem rebuild total); `VACUUM` limpa.
+- [ ] **Benchmark reproduzível** (measurement-first): recall@k ≥ paridade com a função atual + latência índice-persistido vs full-scan+rebuild; `docs/benchmarks/`.
+- [ ] Coexistência com a função SQL-callable atual mantida (não quebra M20–M22).
+
+**Dependencies:** M25. **Risco (ALTO):** superfície pgrx de baixo nível (FFI/longjmp/WAL) ainda não exercitada — competência que os peers Rust têm; mitigar com spikes de de-risk + estudo dos peers clonados. **Nota:** absorve o antigo deferral M21b.
+
+---
+
+### M27 — [ ] Replicação streaming + read-pool real
+
+**Objective:** Dar significado real ao read-Service `<name>-ro` do M24: replicação streaming Postgres
+(primary + réplicas) + roteamento de leitura para réplicas (o read-scale que hoje é só endpoint-level).
+
+**Definition of done:**
+
+- [ ] Operador provisiona réplicas com replicação streaming (primary + N réplicas, slots/`pg_basebackup`).
+- [ ] Read-Service `<name>-ro` seleciona só pods réplica — read-scale real, não pods independentes.
+- [ ] Promoção de réplica (failover) integrada ao `ha/` (Patroni já existe) OU decisão honesta de deferir.
+- [ ] Read-pool: ADR PgBouncer (cnpg Pooler) vs Service L4.
+- [ ] Evidência real-cluster (kind): réplica recebe writes do primary; read no `-ro` retorna dado replicado.
+
+**Dependencies:** M23, M26. **Risco:** replicação é fonte clássica de bugs de consistência — testes de lag/split-brain. **Nota:** absorve o deferral M24 ADR-2 (read-pool real).
+
+---
+
+### M28 — [ ] MCP write tools + auth (superfície de agente mutável, atrás do edge)
+
+**Objective:** Estender o MCP server (M24, read-only) com write tools protegidos por auth — a superfície
+mutável que o M24 ADR-3 deferiu por precisar da história de auth primeiro.
+
+**Definition of done:**
+
+- [ ] Tools `apply_cluster` / `delete_cluster` (write) com validação de input + typed errors.
+- [ ] Auth: `-http` deixa de ser unauthenticated — integra o edge autenticador (Traefik ForwardAuth / Model B, padrão theo-memory) OU exige token; stdio segue p/ spawn local confiável.
+- [ ] RBAC least-privilege: verbos de write na SA do MCP só com auth presente.
+- [ ] Testes: write tool cria/deleta CR real (envtest); tool sem auth no `-http` → 401; toda mutação logada.
+
+**Dependencies:** M24. **Risco (segurança):** IA que muta estado de cluster — edge autenticador obrigatório antes de expor (CWE-441/Model-B do theo-data). **Nota:** absorve o deferral M24 ADR-3.
+
+---
+
+### M29 — [ ] Veredito de arquitetura + hardening do control plane (operator, Go)
+
+**Objective:** Rodar a mesma auditoria FAANG de 7 dimensões no `operator/` (Go) que rodou no `theodb_rs`,
+e fechar achados de craft — fechando o veredito dos dois codebases.
+
+**Definition of done:**
+
+- [ ] Auditoria de arquitetura do `operator/` (estrutura/naming/SOLID/coupling+ciclos/patterns) com métricas medidas (gocyclo/gocognit) + comparação SOTA (cloudnative-pg).
+- [ ] 0 ciclos; findings HIGH/MEDIUM fechados ou com ADR de aceite; relatório em `.claude/knowledge-base/audits/`.
+- [ ] Gate mantido: `golangci-lint` 0, `deadcode` none, `make test` verde.
+
+**Dependencies:** M24. **Risco:** baixo — operator já passou por 12 agentes nos ciclos M23/M24; provável PASS com poucos ajustes. **Nota:** fecha o veredito FAANG dos dois engines (Rust + Go).
+
+---
+
+### M30 — [ ] Decisão de escopo v1-legacy: columnar (M6) + BM25 (M7) — ADR deprecar-ou-manter
+
+**Objective:** Resolver via ADR se os pilares columnar (M6, `pg_mooncake`/`pg_duckdb`) e BM25 (M7,
+`pg_textsearch`) — construídos sob a tese v1 de _composição_ — permanecem no norte v2 (código próprio, deps
+mínimas) ou são deprecados. O `## Fora de escopo do v2` já exige "Reabrir exige ADR" para columnar — **este é
+esse ADR**.
+
+**Definition of done:**
+
+- [ ] ADR `0007-v1-legacy-columnar-bm25-scope` (MADR 3.0): manter / deprecar-e-remover / reescrever-próprio, com trade-offs + evidência.
+- [ ] Se **deprecar**: plano de remoção com trilha (CI jobs `columnar-measure`/`ai-sql`-bm25, Dockerfiles throwaway, superfície SQL, docs) — como ciclo próprio, não delete solto.
+- [ ] Se **manter**: nota explícita no ROADMAP de que columnar/bm25 são exceção permissiva ao mandato own-code (justificativa Regra 9).
+- [ ] CHANGELOG + `## Relação com o v1` atualizados com a decisão.
+
+**Dependencies:** — (decisão independente; pode rodar em paralelo). **Risco:** decisão de produto/CTO; sem risco técnico. **Nota:** alinha com `## Fora de escopo do v2` ("Columnar próprio… Reabrir exige ADR").
+
+---
+
 ## Sequência e paralelismo
 
 ```

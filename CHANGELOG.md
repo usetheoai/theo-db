@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Roadmap amended (v2): added M25–M30 covering all open professionalization points from the `theodb_rs` architecture audit + M24 deferrals + the operator front. M25 craft hardening (theodb_rs); M26 vector Index Access Method (the SOTA gap — function→index engine); M27 streaming replication + real read-pool; M28 MCP write tools + auth; M29 operator (Go) architecture verdict + hardening; M30 v1-legacy columnar/BM25 scope ADR. (`/roadmap-feature`)
 
 ### Changed
 
