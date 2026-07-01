@@ -13,15 +13,15 @@ blocked on roadmap metadata.
 
 Side effects (when --commit is passed AND a flip happened):
     - `git add ROADMAP.md && git commit -m "chore(roadmap): mark M<N> done (v<version>)"` on the current branch
-    - Append/create `knowledge-base/roadmap-runs/M<N>-<date>.md` with completion metadata
+    - Append/create `.claude/knowledge-base/roadmap-runs/M<N>-<date>.md` with completion metadata
 
 Usage:
     python3 flip_milestone_checkbox.py \
         --roadmap ROADMAP.md \
         --milestone-id M3 \
         --version 0.4.0 \
-        --plan knowledge-base/plans/foo-plan.md \
-        --release-log knowledge-base/releases/v0.4.0-release.md \
+        --plan .claude/knowledge-base/plans/foo-plan.md \
+        --release-log .claude/knowledge-base/releases/v0.4.0-release.md \
         --commit
 
 Exit codes:
@@ -141,8 +141,8 @@ def main() -> int:
     parser.add_argument(
         "--roadmap-runs-dir",
         type=Path,
-        default=Path("knowledge-base/roadmap-runs"),
-        help="Directory for the roadmap-runs audit file.",
+        default=Path(".claude/knowledge-base/roadmap-runs"),
+        help="Directory for the roadmap-runs audit file (canonical location the cycle kit writes to).",
     )
     parser.add_argument("--commit", action="store_true", help="Stage & commit ROADMAP.md on the current branch.")
     args = parser.parse_args()
