@@ -13,6 +13,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Roadmap amended: added the **P0 vector-superiority track** (CTO GOTO 2026-07-01) — M31 (index-AM latency
+  optimization via partial-page reads), M32 (1M+ scale benchmark + QPS head-to-head vs pgvector), M33 (measured
+  head-to-head vs AlloyDB/ScaNN). Runs BEFORE the operational M27–M30; closes the North Star pillar (vector
+  performance superiority proven by benchmark) that is measured-parity-only today.
 
 ### Changed
 
