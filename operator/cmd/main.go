@@ -31,12 +31,14 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	theodbv1 "github.com/usetheodev/theo-db/operator/api/v1"
 	"github.com/usetheodev/theo-db/operator/internal/controller"
+	dbmetrics "github.com/usetheodev/theo-db/operator/internal/metrics"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -177,6 +179,9 @@ func main() {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
 	}
+
+	// Register TheoDB's own domain metrics on controller-runtime's shared registry (M24 T1.1, ADR-1).
+	dbmetrics.Register(ctrlmetrics.Registry)
 
 	if err := (&controller.TheoDBClusterReconciler{
 		Client: mgr.GetClient(),

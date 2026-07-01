@@ -102,3 +102,20 @@ func TestBuildStatefulSet_OwnerRef(t *testing.T) {
 		t.Errorf("owner ref: got %+v, want controller=true owner c1", refs)
 	}
 }
+
+// T2.1 RED: the read Service is named <cluster>-ro, ClusterIP, selects the cluster pods, port matches spec.
+func TestBuildReadService_NameAndSelector(t *testing.T) {
+	svc := buildReadService(sampleCluster())
+	if svc.Name != "c1-ro" {
+		t.Errorf("name: got %q, want c1-ro", svc.Name)
+	}
+	if svc.Spec.Type != "ClusterIP" {
+		t.Errorf("type: got %q, want ClusterIP", svc.Spec.Type)
+	}
+	if svc.Spec.Selector["app.kubernetes.io/instance"] != "c1" {
+		t.Errorf("selector instance: got %q, want c1", svc.Spec.Selector["app.kubernetes.io/instance"])
+	}
+	if svc.Spec.Ports[0].Port != 5432 {
+		t.Errorf("port: got %d, want 5432", svc.Spec.Ports[0].Port)
+	}
+}

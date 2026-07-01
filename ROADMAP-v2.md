@@ -136,7 +136,7 @@ pgvectorscale — **somente** com paridade de recall **e** memória medida.
 
 **Dependencies:** M21. **Risco:** MÁXIMO; o mais caro do v2. Measurement-first rigoroso.
 
-### M23 — [ ] Control plane em Go: operador K8s + CLI + gateway
+### M23 — [x] Control plane em Go: operador K8s + CLI + gateway
 
 **Objective:** Construir a camada de produto/operação em **Go** (código próprio): operador Kubernetes (modelo
 cloudnative-pg), CLI, gateway — o que torna TheoDB deployável/gerenciável (caminho para managed).

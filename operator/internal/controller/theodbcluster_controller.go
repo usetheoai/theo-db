@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	dbmetrics "github.com/usetheodev/theo-db/operator/internal/metrics"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -50,11 +51,26 @@ type TheoDBClusterReconciler struct {
 // Reconcile drives the TheoDBCluster towards its desired state: ensure a headless Service (pod identity) + a
 // gateway Service + a StatefulSet, then update status. Idempotent (EC-2: a converged second pass makes no
 // change). Spec is validated at the API boundary (CRD); storageSize is re-parsed here as defense-in-depth.
-func (r *TheoDBClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *TheoDBClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.Result, err error) {
+	start := time.Now()
+	defer func() {
+		dbmetrics.ReconcileDuration.Observe(time.Since(start).Seconds())
+		result := dbmetrics.ResultSuccess
+		if err != nil {
+			result = dbmetrics.ResultError
+		}
+		dbmetrics.ReconcileTotal.WithLabelValues(result).Inc()
+	}()
+
 	var cluster theodbv1.TheoDBCluster
 	if err := r.Get(ctx, req.NamespacedName, &cluster); err != nil {
-		// NotFound: the CR was deleted; owned resources are GC'd by owner refs. No requeue.
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		if apierrors.IsNotFound(err) {
+			// The CR was deleted; owned resources are GC'd by owner refs. Drop its per-cluster metric
+			// series so a gone cluster stops exporting stale values (review HIGH — series leak).
+			dbmetrics.DeleteCluster(req.Namespace, req.Name)
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, err
 	}
 
 	// storageSize is guarded by a CRD pattern at the boundary; re-parse here so a value that bypassed
@@ -70,6 +86,9 @@ func (r *TheoDBClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, err
 	}
 	if err := r.ensureService(ctx, &cluster); err != nil {
+		return ctrl.Result{}, err
+	}
+	if err := r.ensureReadService(ctx, &cluster); err != nil {
 		return ctrl.Result{}, err
 	}
 	if err := r.ensureStatefulSet(ctx, &cluster, storage); err != nil {
@@ -137,6 +156,11 @@ func (r *TheoDBClusterReconciler) ensureService(ctx context.Context, c *theodbv1
 	return r.ensureServiceObject(ctx, c, buildService(c))
 }
 
+// ensureReadService ensures the read endpoint Service `<name>-ro` (M24 T2.1).
+func (r *TheoDBClusterReconciler) ensureReadService(ctx context.Context, c *theodbv1.TheoDBCluster) error {
+	return r.ensureServiceObject(ctx, c, buildReadService(c))
+}
+
 // ensureServiceObject creates the desired Service, or reconciles the mutable port/selector on the existing one
 // (so a spec.Port change converges) and adopts a missing owner ref. Idempotent — no write when converged.
 func (r *TheoDBClusterReconciler) ensureServiceObject(ctx context.Context, c *theodbv1.TheoDBCluster, desired *corev1.Service) error {
@@ -194,6 +218,12 @@ func (r *TheoDBClusterReconciler) updateStatus(ctx context.Context, c *theodbv1.
 		phase = "Healthy"
 		condStatus = metav1.ConditionTrue
 	}
+
+	// Domain metrics (T1.1): per-cluster gauges always reflect the latest observation, even on a no-churn pass.
+	dbmetrics.ClusterReadyInstances.WithLabelValues(c.Namespace, c.Name).Set(float64(ready))
+	dbmetrics.ClusterDesiredInstances.WithLabelValues(c.Namespace, c.Name).Set(float64(c.Spec.Instances))
+	dbmetrics.RecordPhase(c.Namespace, c.Name, phase)
+
 	if c.Status.Phase == phase && c.Status.ReadyInstances == ready && c.Status.ObservedGeneration == c.Generation {
 		return nil // no churn (EC-2)
 	}
@@ -203,8 +233,11 @@ func (r *TheoDBClusterReconciler) updateStatus(ctx context.Context, c *theodbv1.
 }
 
 // setPhase writes the status subresource (Phase + the Ready condition, via apimachinery's canonical helper).
+// It is the single chokepoint for phase writes, so it also records the phase gauge — this is what surfaces
+// the Error phase set by the invalid-spec path (which never reaches updateStatus) on `theodb_cluster_phase`.
 func (r *TheoDBClusterReconciler) setPhase(ctx context.Context, c *theodbv1.TheoDBCluster, phase string, condStatus metav1.ConditionStatus, reason, msg string) error {
 	c.Status.Phase = phase
+	dbmetrics.RecordPhase(c.Namespace, c.Name, phase)
 	apimeta.SetStatusCondition(&c.Status.Conditions, metav1.Condition{
 		Type:               "Ready",
 		Status:             condStatus,
