@@ -1,6 +1,6 @@
 # M24 — Observability + read-scale + MCP evidence (Go)
 
-**Date:** 2026-06-30 · **Milestone:** M24 (`ROADMAP-v2.md:151`) · **Module:** `operator/`
+**Date:** 2026-06-30 · **Milestone:** M24 (`ROADMAP.md:151`) · **Module:** `operator/`
 
 M24 layers three own-Go capabilities onto the M23 operator. Evidence is **measurement-first**: domain
 metric samples are *asserted* (not eyeballed), the MCP tool-call latency is a *reproducible number*, and the
