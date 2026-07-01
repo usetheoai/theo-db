@@ -13,6 +13,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- M31b — SIMD (AVX2+FMA) fused decode+distance for the `theodb_ivfflat` Index Scan hot loop: the L2 distance is
+  computed DIRECTLY from each candidate's page bytes via `_mm256_loadu_ps` (unaligned load), fusing the byte-decode
+  and the distance into one 8-wide SIMD pass with a cached runtime CPU dispatch (`is_x86_feature_detected!`) and a
+  scalar fallback (portability). Numeric: SIMD lane-summation is recall-preserving, not bit-identical to the M20
+  scalar (same property as pgvector's FMA path). The M20 SQL-callable distance ops stay scalar (byte-parity intact).
 
 ### Changed
 
