@@ -76,6 +76,66 @@ unsafe extern "C-unwind" fn build_callback(
     st.corpus.push((tid::encode(htid), v));
 }
 
+/// Incremental insert (M26 Phase 5, ADR-2): append the new `(heap TID, vector)` to the pending region — O(1)
+/// amortized, NO index rebuild. Scans fold the pending region into the ranking; VACUUM later folds it into the
+/// main index. NULL vectors are not indexed (returns false).
+#[allow(clippy::too_many_arguments)]
+#[pg_guard]
+pub unsafe extern "C-unwind" fn aminsert(
+    indexrel: pg_sys::Relation,
+    values: *mut pg_sys::Datum,
+    isnull: *mut bool,
+    heap_tid: pg_sys::ItemPointer,
+    _heaprel: pg_sys::Relation,
+    _check_unique: pg_sys::IndexUniqueCheck::Type,
+    _index_unchanged: bool,
+    _index_info: *mut pg_sys::IndexInfo,
+) -> bool {
+    if *isnull {
+        return false;
+    }
+    let v = datum_to_vec_f32(*values);
+    let encoded = tid::encode(heap_tid);
+    match page::append_pending(indexrel, encoded, &v) {
+        Ok(()) => true,
+        Err(e) => pg_sys::error!("theodb am insert: {e}"),
+    }
+}
+
+/// Rebuild the main index over only the live heap TIDs (M26 Phase 5 — called by VACUUM's `ambulkdelete`). Reads
+/// the current main index + pending, keeps entries the `dead` predicate rejects, rebuilds, and rewrites the blob
+/// (folding pending in + dropping dead TIDs). Returns the number of live entries.
+pub(crate) unsafe fn vacuum_rebuild(
+    indexrel: pg_sys::Relation,
+    dead: &mut dyn FnMut(i64) -> bool,
+) -> usize {
+    let blob = match page::read_blob(indexrel) {
+        Ok(b) => b,
+        Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
+    };
+    if blob.is_empty() {
+        return 0;
+    }
+    let idx = match IvfflatIndex::from_bytes(&blob) {
+        Ok(i) => i,
+        Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
+    };
+    let pending = match page::read_pending(indexrel) {
+        Ok(p) => p,
+        Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
+    };
+    let metric = idx.metric();
+    let mut live: Vec<(i64, Vec<f32>)> = Vec::new();
+    for (id, v) in idx.entries().into_iter().chain(pending) {
+        if !dead(id) {
+            live.push((id, v));
+        }
+    }
+    let rebuilt = IvfflatIndex::build(&live, DEFAULT_LISTS, metric, BUILD_SEED);
+    page::rewrite_blob(indexrel, &rebuilt.to_bytes());
+    live.len()
+}
+
 /// Empty index (unlogged/empty table): persist an empty index blob so scans read cleanly.
 #[pg_guard]
 pub extern "C-unwind" fn ambuildempty(indexrel: pg_sys::Relation) {

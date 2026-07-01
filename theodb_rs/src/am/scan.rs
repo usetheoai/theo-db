@@ -60,8 +60,13 @@ pub extern "C-unwind" fn amrescan(
             Ok(i) => i,
             Err(e) => pg_sys::error!("theodb am scan: {e}"),
         };
+        // Fold in tuples inserted after the build (pending region) so new rows surface without a rebuild.
+        let pending = match page::read_pending(scan_ref.indexRelation) {
+            Ok(p) => p,
+            Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        };
         // The metric is baked into the persisted index (from_bytes restores it) — search uses it directly.
-        state.results = idx.search(&query, SCAN_K, SCAN_PROBES);
+        state.results = idx.search_merged(&query, SCAN_K, SCAN_PROBES, &pending);
     }
 }
 

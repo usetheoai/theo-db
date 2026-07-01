@@ -104,3 +104,35 @@ def test_index_scan_returns_correct_neighbors():
         assert overlap >= 4, f"recall@5 too low via index: got {got} vs truth {truth}"
         cur.execute("RESET enable_seqscan; RESET enable_indexscan")
         cur.execute("DROP TABLE m26_scan CASCADE")
+
+
+def test_incremental_insert_delete_vacuum():
+    """Phase 5: INSERT (pending, no rebuild) surfaces via the index; DELETE is filtered; VACUUM folds+cleans."""
+    conn = _conn()
+    conn.autocommit = True  # VACUUM cannot run inside a transaction block
+    try:
+        cur = conn.cursor()
+        cur.execute("CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE")
+        _seed_table(cur, "m26_maint", n=200, dim=8)
+        cur.execute("CREATE INDEX m26_maint_idx ON m26_maint USING theodb_ivfflat (embedding theodb_ivfflat_l2_ops)")
+        cur.execute("SET enable_seqscan = off")
+
+        # INSERT a distinctive new row: an exact match for a query no existing row is closest to.
+        q = "[5,5,0,0,0,0,0,0]"
+        cur.execute(f"INSERT INTO m26_maint VALUES (9991, '{q}')")
+        cur.execute(f"SELECT id FROM m26_maint ORDER BY embedding <-> '{q}' LIMIT 1")
+        assert cur.fetchone()[0] == 9991, "inserted row not found via index (pending region)"
+
+        # DELETE it → the executor's MVCC recheck must filter the (still-indexed) TID out.
+        cur.execute("DELETE FROM m26_maint WHERE id = 9991")
+        cur.execute(f"SELECT id FROM m26_maint ORDER BY embedding <-> '{q}' LIMIT 1")
+        assert cur.fetchone()[0] != 9991, "deleted row still returned (MVCC recheck failed)"
+
+        # VACUUM folds pending into the main index + drops dead TIDs; index still answers correctly afterwards.
+        cur.execute("VACUUM m26_maint")
+        cur.execute("SELECT id FROM m26_maint ORDER BY embedding <-> '[1,0,0,0,0,0,0,0]' LIMIT 1")
+        assert cur.fetchone()[0] == 0, "index broken after VACUUM fold"
+        cur.execute("RESET enable_seqscan")
+        cur.execute("DROP TABLE m26_maint CASCADE")
+    finally:
+        conn.close()

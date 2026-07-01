@@ -55,7 +55,7 @@ fn theodb_ivfflat_amhandler(_fcinfo: pg_sys::FunctionCallInfo) -> PgBox<pg_sys::
     amroutine.amvalidate = Some(amvalidate);
     amroutine.ambuild = Some(build::ambuild);
     amroutine.ambuildempty = Some(build::ambuildempty);
-    amroutine.aminsert = Some(aminsert);
+    amroutine.aminsert = Some(build::aminsert);
     amroutine.ambulkdelete = Some(ambulkdelete);
     amroutine.amvacuumcleanup = Some(amvacuumcleanup);
     amroutine.amcostestimate = Some(amcostestimate);
@@ -74,24 +74,7 @@ pub extern "C-unwind" fn amvalidate(_opclassoid: pg_sys::Oid) -> bool {
     true
 }
 
-/// Phase-0 no-op insert (returns false = "not inserted"). Real pending-buffer insert lands in Phase 5.
-// The 8-arg signature is dictated by Postgres's `aminsert_function` FFI contract — irreducible.
-#[allow(clippy::too_many_arguments)]
-#[pg_guard]
-pub unsafe extern "C-unwind" fn aminsert(
-    _indexrel: pg_sys::Relation,
-    _values: *mut pg_sys::Datum,
-    _isnull: *mut bool,
-    _heap_tid: pg_sys::ItemPointer,
-    _heaprel: pg_sys::Relation,
-    _check_unique: pg_sys::IndexUniqueCheck::Type,
-    _index_unchanged: bool,
-    _index_info: *mut pg_sys::IndexInfo,
-) -> bool {
-    false
-}
-
-/// Phase-0 cost: mark the index as usable only when order-bys are present; keep costs modest so the planner MAY
+/// Cost: mark the index usable only when order-bys are present; keep costs modest so the planner MAY
 /// choose it (tuned in Phase 4). When there is no order-by key, refuse (infinite cost).
 // The 8-arg signature is dictated by Postgres's `amcostestimate_function` FFI contract — irreducible.
 #[allow(clippy::too_many_arguments)]
@@ -121,26 +104,54 @@ pub unsafe extern "C-unwind" fn amcostestimate(
     *index_pages = 1.0;
 }
 
+/// VACUUM bulk-delete (M26 Phase 5): rebuild the main index over only the TIDs the `callback` reports as LIVE,
+/// folding in the pending region and dropping dead tuples. A rebuild-on-vacuum (periodic, not per-query) — the
+/// per-INSERT path stays O(1) (pending append), so this does not violate "no total rebuild on insert".
 #[pg_guard]
 pub extern "C-unwind" fn ambulkdelete(
-    _info: *mut pg_sys::IndexVacuumInfo,
+    info: *mut pg_sys::IndexVacuumInfo,
     stats: *mut pg_sys::IndexBulkDeleteResult,
-    _callback: pg_sys::IndexBulkDeleteCallback,
-    _callback_state: *mut ::std::os::raw::c_void,
+    callback: pg_sys::IndexBulkDeleteCallback,
+    callback_state: *mut ::std::os::raw::c_void,
 ) -> *mut pg_sys::IndexBulkDeleteResult {
-    if stats.is_null() {
-        unsafe { PgBox::<pg_sys::IndexBulkDeleteResult>::alloc0().into_pg() }
-    } else {
-        stats
+    unsafe {
+        let results = if stats.is_null() {
+            PgBox::<pg_sys::IndexBulkDeleteResult>::alloc0().into_pg()
+        } else {
+            stats
+        };
+        let indexrel = (*info).index;
+        // `dead(id)` decodes the packed TID and asks Postgres's callback whether that heap tuple is dead.
+        let mut dead = |id: i64| -> bool {
+            let mut itid = pg_sys::ItemPointerData::default();
+            tid::set_on(id, &mut itid);
+            match callback {
+                Some(cb) => cb(&mut itid, callback_state),
+                None => false,
+            }
+        };
+        let live = build::vacuum_rebuild(indexrel, &mut dead);
+        (*results).num_index_tuples = live as f64;
+        results
     }
 }
 
+/// VACUUM cleanup (M26 Phase 5): report the final page count. The heavy lifting happened in `ambulkdelete`.
 #[pg_guard]
 pub extern "C-unwind" fn amvacuumcleanup(
-    _vinfo: *mut pg_sys::IndexVacuumInfo,
+    vinfo: *mut pg_sys::IndexVacuumInfo,
     stats: *mut pg_sys::IndexBulkDeleteResult,
 ) -> *mut pg_sys::IndexBulkDeleteResult {
-    stats
+    unsafe {
+        if stats.is_null() || (*vinfo).analyze_only {
+            return stats;
+        }
+        (*stats).num_pages = pg_sys::RelationGetNumberOfBlocksInFork(
+            (*vinfo).index,
+            pg_sys::ForkNumber::MAIN_FORKNUM,
+        );
+        stats
+    }
 }
 
 // The DEFAULT l2 operator class — the ORDER-BY operator binding `<->` to this AM (no support procs; the metric

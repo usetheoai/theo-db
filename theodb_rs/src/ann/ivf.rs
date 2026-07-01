@@ -140,6 +140,38 @@ impl IvfflatIndex {
         results.into_iter().map(|c| (self.ids[c.i], c.d)).collect()
     }
 
+    /// The index's metric (M26 — the AM reads it back after `from_bytes` to score pending tuples consistently).
+    pub(crate) fn metric(&self) -> Metric {
+        self.metric
+    }
+
+    /// Every `(id, vector)` stored in the index (M26 — the AM enumerates these during VACUUM to rebuild the
+    /// index over only the live heap TIDs).
+    pub(crate) fn entries(&self) -> Vec<(i64, Vec<f32>)> {
+        self.ids.iter().copied().zip(self.vectors.iter().cloned()).collect()
+    }
+
+    /// Like [`search`] but also folds in `pending` `(id, vector)` tuples inserted after the build (M26 Phase 5).
+    /// Pending tuples are scored with the SAME metric and merged into the ranking, so newly-inserted rows surface
+    /// without a rebuild. Returns the top-`k` `(id, distance)` overall.
+    pub(crate) fn search_merged(
+        &self,
+        q: &[f32],
+        k: usize,
+        probes: usize,
+        pending: &[(i64, Vec<f32>)],
+    ) -> Vec<(i64, f64)> {
+        let mut out = self.search(q, k, probes);
+        if !pending.is_empty() {
+            for (id, v) in pending {
+                out.push((*id, self.metric.dist(q, v)));
+            }
+            out.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(&b.0)));
+            out.truncate(k);
+        }
+        out
+    }
+
     /// Candidate generation for a quantized re-ranker (M22): return the corpus POSITIONS (0-based, aligned with
     /// the build corpus order) of every member of the `probes` nearest lists, UNranked. The caller re-ranks by
     /// its own (e.g. Hamming) distance + a full-precision rerank. Additive to M21 — `search` is unchanged.
