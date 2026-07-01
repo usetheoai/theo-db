@@ -16,6 +16,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - Roadmap amended (v2): added M25–M30 covering all open professionalization points from the `theodb_rs` architecture audit + M24 deferrals + the operator front. M25 craft hardening (theodb_rs); M26 vector Index Access Method (the SOTA gap — function→index engine); M27 streaming replication + real read-pool; M28 MCP write tools + auth; M29 operator (Go) architecture verdict + hardening; M30 v1-legacy columnar/BM25 scope ADR. (`/roadmap-feature`)
 
 ### Changed
+- M25 craft hardening of the `theodb_rs` engine extension (behavior-preserving, no new dependency): split the 721-LoC `lib.rs` god-file into a thin 92-LoC module root + a dedicated `api.rs` SQL-surface module; decomposed the NL-to-SQL validator (`nl_to_sql` cyclomatic complexity 19→8) and the hybrid-search orchestrator (`run_rrf` 12→9) into small pure functions; removed a duplicated distance kernel (single-source `Metric::dist`); named magic numbers and added fast unit tests for the SQL-injection guards. Every extracted function is CCN < 10; proven at parity by 72 green integration tests + before/after complexity evidence in `docs/benchmarks/m25-craft-hardening.md`. (M25)
 
 ### Deprecated
 
