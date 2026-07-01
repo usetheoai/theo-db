@@ -37,3 +37,4 @@ sql/theodb--1.0.sql
 dist/
 theodb_rs/target/
 system-design-output/
+architecture-output/
