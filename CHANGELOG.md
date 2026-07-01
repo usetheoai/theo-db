@@ -17,6 +17,16 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   optimization via partial-page reads), M32 (1M+ scale benchmark + QPS head-to-head vs pgvector), M33 (measured
   head-to-head vs AlloyDB/ScaNN). Runs BEFORE the operational M27–M30; closes the North Star pillar (vector
   performance superiority proven by benchmark) that is measured-parity-only today.
+- M31b milestone added (ADR 0011): SIMD vector distance (AVX2 + runtime dispatch) to close the residual
+  constant-factor latency gap vs pgvector. Sequenced M31 → M31b → M32.
+
+### Changed
+- M31 — `theodb_ivfflat` structured partial-page reads: restructured the index into a meta page (centroids +
+  per-list directory) + list pages so the Index Scan reads only the probed lists' pages (O(probes)), not the
+  whole blob (O(N)). Measured ~**45× faster** than the M26 O(N)-per-scan path (~38 ms vs ~1700 ms at 100k×128),
+  recall preserved, INSERT/DELETE/VACUUM maintenance intact. Honest: still ~2.7× behind pgvector's AVX-SIMD C —
+  the O(N) algorithmic gap is closed; the constant-factor (SIMD) residual is M31b (ADR 0011). Evidence:
+  `docs/benchmarks/m31-am-latency.{md,json}`. (M31)
 
 ### Changed
 

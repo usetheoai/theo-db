@@ -279,14 +279,28 @@ esse ADR**.
 0010 §D2/D5) para que o índice persistido **bata a latência de query-time** — não só o rebuild-per-query
 (já 16×), mas se aproxime/supere o seqscan maduro do pgvector no mesmo N.
 
+**Definition of done (re-escopado por ADR 0011, CTO 2026-07-01 — o "≤ pgvector" migrou para M31b):**
+
+- [ ] Scan lê **só as páginas necessárias** (meta/centroide + listas probed) — NÃO o blob inteiro por query (structured layout).
+- [ ] **Benchmark reproduzível** (measurement-first): Index Scan do `theodb_ivfflat` **bem abaixo do regime O(N)** e **dentro de um band documentado do pgvector** (medido: ~45× vs M26 O(N); ~2.7× atrás do pgvector), recall@k mantido; `docs/benchmarks/m31-am-latency.{md,json}`.
+- [ ] Sem regressão: `test_index_am.py` + coexistência M20–M22 verdes; manutenção incremental intacta.
+- [ ] ADR 0010 §D2/D5 atualizado (O(N) fechado para IVFFlat, com número; SIMD-parity → M31b).
+
+**Dependencies:** M26. **Risco (ALTO):** buffer/page FFI de leitura parcial. **Nota:** o `≤ pgvector` (paridade de latência) foi honestamente re-escopado para **M31b** — o gap residual é fator-constante (SIMD), não algorítmico.
+
+### M31b — [ ] Distância vetorial SIMD (AVX2 + runtime dispatch) — fechar o gap de latência vs pgvector
+
+**Objective:** Fechar o resíduo de fator-constante do M31 (theodb ~2.7× atrás do pgvector por usar distância
+escalar/SSE2 4-wide vs a SIMD AVX 8-wide + dispatch de CPU em runtime do pgvector C) — buscar **p50 ≤ pgvector**.
+
 **Definition of done:**
 
-- [ ] Scan lê **só as páginas necessárias** (meta/centroide + listas probed) e/ou cache do índice deserializado por relação — NÃO o blob inteiro por query.
-- [ ] **Benchmark reproduzível** (measurement-first): latência p50/p95 do Index Scan do `theodb_ivfflat`/`theodb_hnsw` **≤ pgvector** no MESMO dataset (n≥100k, dim≥128), recall@k mantido em paridade; `docs/benchmarks/`.
-- [ ] Sem regressão: `test_index_am.py` + coexistência M20–M22 verdes; manutenção incremental intacta.
-- [ ] ADR 0010 §D2/D5 atualizado (limitação O(N) fechada ou re-caracterizada com número).
+- [ ] Distância l2/cosine/ip com SIMD (AVX2/AVX-512 quando disponível) + **dispatch de CPU em runtime** (crate portável tipo `wide`/`multiversion` OU intrinsics com feature-detect) — sem quebrar portabilidade (fallback escalar).
+- [ ] `/deps-audit` da nova crate (CVE + licença D1 permissiva).
+- [ ] **Benchmark reproduzível:** `theodb_ivfflat` Index Scan p50 **≤ pgvector** (n≥100k, dim≥128), recall mantido; `docs/benchmarks/`.
+- [ ] Sem regressão: paridade de recall dos M20–M22 (a distância é reusada) preservada.
 
-**Dependencies:** M26. **Risco (ALTO):** buffer/page FFI de leitura parcial + invalidação de cache sob INSERT/VACUUM; medir antes de afirmar superioridade.
+**Dependencies:** M31. **Risco (MÉDIO):** portabilidade do dispatch de CPU; paridade numérica f32 da distância SIMD vs a escalar (M20).
 
 ### M32 — [ ] Harness de benchmark de escala (1M+ vetores, QPS head-to-head vs pgvector)
 
@@ -299,7 +313,7 @@ próprios vs pgvector em dataset real grande (SIFT1M / GloVe / deep1M), reproduz
 - [ ] Tabela QPS + p50/p95/p99 + recall@10 + build time + index bytes: `theodb_ivfflat`/`theodb_hnsw` **vs** pgvector `ivfflat`/`hnsw`, mean±std ≥3 runs, hardware citado; `docs/benchmarks/` + `.json`.
 - [ ] Veredito honesto por knob (paridade / superior / inferior) — sem cherry-pick; ANN-Benchmarks semantics.
 
-**Dependencies:** M31 (benchmarkar o AM já otimizado, senão a comparação é injusta). **Risco (MÉDIO):** custo de infra/tempo do dataset grande; determinismo do QPS.
+**Dependencies:** M31b (benchmarkar o AM com a distância SIMD já otimizada, senão a comparação de escala é injusta). **Risco (MÉDIO):** custo de infra/tempo do dataset grande; determinismo do QPS.
 
 ### M33 — [ ] Head-to-head medido vs AlloyDB/ScaNN (o claim de superioridade)
 
@@ -330,7 +344,7 @@ M19 ─────────────────────────�
 - M18→M19 elimina `plpython3u` (independência da camada IA).
 - M20→M22 reduz/elimina `pgvector`/`pgvectorscale` — **cada passo gated por paridade medida** (sem regressão).
 - M23→M24 (Go) podem começar após M19 (o banco próprio já coeso).
-- **M26 ──▶ M31 (latência AM) ──▶ M32 (escala/QPS) ──▶ M33 (head-to-head AlloyDB)** — o **track P0** de
+- **M26 ──▶ M31 (leitura parcial, O(N) fechado) ──▶ M31b (distância SIMD) ──▶ M32 (escala/QPS) ──▶ M33 (head-to-head AlloyDB)** — o **track P0** de
   superioridade vetorial roda **antes** de M27–M30 (operacionais). É o pilar do North Star ainda não fechado.
 
 ## Gate de dependências (transversal — o pedido "depender o menos possível")
