@@ -13,7 +13,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- **M24 — Observability + read-scale + MCP (Go).** Three own-Go capabilities on the M23 operator: (1) **domain Prometheus metrics** (`theodb_reconcile_total{result}`, `theodb_reconcile_duration_seconds`, `theodb_cluster_phase{phase}`, `theodb_cluster_ready_instances`, `theodb_cluster_desired_instances`) registered on controller-runtime's shared registry and scraped via the existing `/metrics` — **zero new dependency**, bounded cardinality, idempotent `Register()`; (2) a **read-routing Service** `<name>-ro` the operator provisions (ClusterIP load-balancing ready pods — read-scale endpoint; streaming-replication routing is M25); (3) a read-only **MCP server** (`cmd/theodb-mcp`, official Go SDK v1.6.1) exposing `list_clusters` + `get_cluster` to AI agents over stdio (default) / streamable HTTP. Evidence: real-`envtest` metric + read-Service gates, in-memory MCP handshake/tool-call tests, and an MCP tool-call benchmark (**~208 µs/op**) — `docs/benchmarks/m24-observability-readpool-mcp.md`. Security: `govulncheck ./...` reports **0 reachable vulnerabilities** (toolchain bumped to go1.25.11; `x/net`→v0.55.0; `otel/sdk`→v1.40.0). Coverage: metrics 90.9%, mcpserver 82.1%, controller 71.9%. Std `testing` only; MCP SDK permissive (MIT→Apache-2.0 — D1). Write tools + HA-failover are M25+ follow-ups. (#M24)
 
 ### Changed
 
@@ -24,6 +23,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 ### Security
+
+## [0.24.0] - 2026-07-01
+
+### Added
+- **M24 — Observability + read-scale + MCP (Go).** Three own-Go capabilities on the M23 operator: (1) **domain Prometheus metrics** (`theodb_reconcile_total{result}`, `theodb_reconcile_duration_seconds`, `theodb_cluster_phase{phase}`, `theodb_cluster_ready_instances`, `theodb_cluster_desired_instances`) registered on controller-runtime's shared registry and scraped via the existing `/metrics` — **zero new dependency**, bounded cardinality, idempotent `Register()`; (2) a **read-routing Service** `<name>-ro` the operator provisions (ClusterIP load-balancing ready pods — read-scale endpoint; streaming-replication routing is M25); (3) a read-only **MCP server** (`cmd/theodb-mcp`, official Go SDK v1.6.1) exposing `list_clusters` + `get_cluster` to AI agents over stdio (default) / streamable HTTP. Evidence: real-`envtest` metric + read-Service gates, in-memory MCP handshake/tool-call tests, and an MCP tool-call benchmark (**~208 µs/op**) — `docs/benchmarks/m24-observability-readpool-mcp.md`. Security: `govulncheck ./...` reports **0 reachable vulnerabilities** (toolchain bumped to go1.25.11; `x/net`→v0.55.0; `otel/sdk`→v1.40.0). Coverage: metrics 90.9%, mcpserver 82.1%, controller 71.9%. Std `testing` only; MCP SDK permissive (MIT→Apache-2.0 — D1). Write tools + HA-failover are M25+ follow-ups. (#M24)
 
 ## [0.23.0] - 2026-06-30
 
