@@ -58,6 +58,11 @@ backend sair. É **bounded** (nos pontos de erro do `amrescan` o `results` está
 abort-durante-iteração após popular vaza o buffer de resultados) e **não é UB nem resultado errado**. Correção
 apropriada: scan-state via `PgMemoryContexts`/arena palloc (liberado no reset de contexto), como o pgvectorscale.
 
+> **Atualização (M31, 2026-07-01):** o gargalo O(N)-por-scan (§D2/D5) está **FECHADO para `theodb_ivfflat`** —
+> leitura parcial de páginas estruturadas (meta + centroids + list pages; scan lê só as listas probed). Medido:
+> ~45× vs este blob O(N); ~2.7× atrás do pgvector (o resíduo é fator-constante SIMD → milestone **M31b**, ADR
+> 0011). `theodb_hnsw` permanece no blob O(N) (partial-page HNSW é follow-up).
+
 ### D5 — Otimização de leitura parcial de páginas (o gargalo O(N) do § D2) é follow-up
 
 Ver D2: o scan deseraliza o blob inteiro por query (O(N)). O caminho de otimização (ler só páginas de
