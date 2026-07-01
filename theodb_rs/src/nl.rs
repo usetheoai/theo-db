@@ -62,42 +62,69 @@ pub(crate) fn nl_to_sql(question: Option<&str>, allowed: &[Option<&str>], model:
 
     let sql = nl_fence_strip(raw.trim());
 
-    // L2 — static validation on a comment-stripped, lowercased copy.
-    let low = strip_sql_comments(&sql).to_lowercase();
+    // L2 — static validation (single-statement, SELECT/WITH-only, banned tokens, no procedural blocks).
+    if let Err(e) = l2_validate(&sql) {
+        err_input(&e);
+    }
+    // L4 — parser-grade relation allowlist via EXPLAIN (SPI planner boundary).
+    l4_validate_relations(&sql, &allow);
+
+    sql
+}
+
+/// L2 static validation on a comment-stripped, lowercased copy of the generated SQL. PURE (no SPI, no
+/// divergence) so the security-boundary composition is unit-testable without the LLM/oracle (M25). Returns
+/// `Err(message)` on the first violation; the caller maps it to the typed 22023 error. Byte-identical checks
+/// + messages to the previous inline logic.
+fn l2_validate(sql: &str) -> Result<(), String> {
+    let low = strip_sql_comments(sql).to_lowercase();
     let low = low.trim().to_string();
 
     // L2(a) — single statement (no ';' except an optional trailing one).
     let trimmed = low.trim_end().trim_end_matches(';');
     if trimmed.contains(';') {
-        err_input("ai.nl_to_sql: multiple statements are not allowed");
+        return Err("ai.nl_to_sql: multiple statements are not allowed".to_string());
     }
     // L2(b) — SELECT/WITH only.
     if !starts_with_keyword(&low, "select") && !starts_with_keyword(&low, "with") {
         let head: String = sql.chars().take(60).collect();
-        err_input(&format!(
+        return Err(format!(
             "ai.nl_to_sql: only SELECT/WITH queries are allowed (got: {head})"
         ));
     }
     // L2(c) — banned tokens (leftmost word-token equal to a banned keyword).
     if let Some(tok) = first_banned_token(&low) {
-        err_input(&format!("ai.nl_to_sql: banned token '{tok}' in generated SQL"));
+        return Err(format!("ai.nl_to_sql: banned token '{tok}' in generated SQL"));
     }
     // procedural blocks: `do $$` (optional whitespace) or `call`.
     if has_do_block(&low) || has_word(&low, "call") {
-        err_input("ai.nl_to_sql: procedural blocks are not allowed");
+        return Err("ai.nl_to_sql: procedural blocks are not allowed".to_string());
     }
+    Ok(())
+}
 
-    // L4 — parser-grade relation allowlist via EXPLAIN (FORMAT JSON). The validated `sql` is a single
-    // SELECT/WITH with no ';' (L2(a)), so interpolating it into one EXPLAIN command cannot break out.
+/// PURE relation-allowlist check: every planned relation must be in `allow` (schema-qualified, or bare under
+/// `public`). Unit-testable without SPI (M25). Returns `Err(message)` on the first disallowed relation.
+fn relation_allowed(rels: &[(String, String)], allow: &[String]) -> Result<(), String> {
+    for (schema, name) in rels {
+        let qualified = format!("{schema}.{name}");
+        let ok = allow.iter().any(|a| a == &qualified)
+            || (schema == "public" && allow.iter().any(|a| a == name));
+        if !ok {
+            return Err(format!(
+                "ai.nl_to_sql: relation '{qualified}' is not in the allowlist"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// L4 — parser-grade relation allowlist via EXPLAIN (FORMAT JSON). The `sql` passed L2 (a single SELECT/WITH
+/// with no ';'), so interpolating it into one EXPLAIN command cannot break out. Runs EXPLAIN via SPI (it PLANS,
+/// does not execute); an un-plannable query longjmps out under SPI, trapped by PgTryBuilder and re-raised as the
+/// contracted 22023 "did not plan (rejected)" (parity with the plpython3u `try/except`). Fail-closed either way.
+fn l4_validate_relations(sql: &str, allow: &[String]) {
     let explain = format!("EXPLAIN (FORMAT JSON, VERBOSE false) {sql}");
-    // Run EXPLAIN via SPI (it PLANS, does not execute). `Spi::get_one` manages its own SPI_connect, so it
-    // works at any nesting depth (top-level OR nested under ai.nl_query). EXPLAIN (FORMAT JSON) returns a
-    // `json`-typed column (oid 114) → read it as pgrx::Json (NOT String, which is TEXTOID and type-mismatches).
-    // A genuinely un-plannable query (unknown relation / syntax) raises a Postgres ERROR that, in SPI, longjmps
-    // out — so to RE-RAISE it as the plan's contracted SQLSTATE 22023 "did not plan (rejected)" (parity with
-    // the plpython3u `try/except → plpy.error(22023)`, ADR consequence), we trap it with PgTryBuilder and
-    // convert to None. This is the pgrx-idiomatic catch-and-continue (cf. pgrx's own tupdesc.rs); the trap is
-    // around the planner call only, fail-closed either way (an un-plannable query is never executed).
     let plan_opt: Option<Value> = PgTryBuilder::new(|| {
         Spi::get_one::<pgrx::Json>(&explain).ok().flatten().map(|j| j.0)
     })
@@ -109,18 +136,9 @@ pub(crate) fn nl_to_sql(question: Option<&str>, allowed: &[Option<&str>], model:
     };
     let mut rels: Vec<(String, String)> = Vec::new();
     collect_relations(&plan, &mut rels);
-    for (schema, name) in &rels {
-        let qualified = format!("{schema}.{name}");
-        let ok = allow.iter().any(|a| a == &qualified)
-            || (schema == "public" && allow.iter().any(|a| a == name));
-        if !ok {
-            err_input(&format!(
-                "ai.nl_to_sql: relation '{qualified}' is not in the allowlist"
-            ));
-        }
+    if let Err(e) = relation_allowed(&rels, allow) {
+        err_input(&e);
     }
-
-    sql
 }
 
 // NOTE (M19 ADR-F): `ai.nl_query` (L3 read-only sandbox execution) stays a thin plpgsql keeper in sql/60,
@@ -352,5 +370,71 @@ mod nl_tests {
         collect_relations(&plan, &mut rels);
         assert!(rels.contains(&("public".to_string(), "documents".to_string())));
         assert!(rels.contains(&("secret".to_string(), "pg_authid".to_string()))); // nested relation found
+    }
+
+    // M25 — the L2 security-boundary COMPOSITION, unit-tested without the LLM/oracle (previously untested).
+    // Negative cases assert the SPECIFIC typed message (testing.md § 4.1) — asserting only .is_err() would
+    // false-pass if the check under test were deleted but a *different* guard still tripped (e.g. the banned
+    // 'drop' token catching a dropped multistatement check).
+    #[pg_test]
+    fn l2_validate_rejects_multistatement() {
+        // No banned token here, so ONLY the multistatement guard can reject — isolates the check under test.
+        let e = l2_validate("SELECT 1; SELECT 2").unwrap_err();
+        assert!(e.contains("multiple statements are not allowed"), "got: {e}");
+    }
+
+    #[pg_test]
+    fn l2_validate_rejects_non_select() {
+        // DELETE is not a banned token nor a multistatement — ONLY the SELECT/WITH-only guard can reject.
+        let e = l2_validate("DELETE FROM documents").unwrap_err();
+        assert!(e.contains("only SELECT/WITH queries are allowed"), "got: {e}");
+        // UPDATE/INSERT likewise fail on the SELECT/WITH-only guard (they are not in BANNED).
+        assert!(l2_validate("UPDATE t SET x = 1").unwrap_err().contains("only SELECT/WITH"));
+        assert!(l2_validate("INSERT INTO t VALUES (1)").unwrap_err().contains("only SELECT/WITH"));
+    }
+
+    #[pg_test]
+    fn l2_validate_rejects_banned_token_and_procedural_block() {
+        // The banned-token wiring: a SELECT that reaches a file-read builtin trips the banned scan (not the
+        // SELECT/WITH guard) — proves l2_validate still calls first_banned_token.
+        let e = l2_validate("SELECT pg_read_file('/etc/passwd')").unwrap_err();
+        assert!(e.contains("banned token"), "got: {e}");
+        // The procedural-block wiring: a DO $$ block trips has_do_block — proves that call survived extraction.
+        let e2 = l2_validate("do $$ begin perform 1; end $$").unwrap_err();
+        assert!(e2.contains("procedural blocks are not allowed"), "got: {e2}");
+    }
+
+    #[pg_test]
+    fn l2_validate_accepts_select_and_with() {
+        assert!(l2_validate("SELECT id FROM documents WHERE x > 1").is_ok());
+        assert!(l2_validate("WITH t AS (SELECT 1) SELECT * FROM t").is_ok());
+    }
+
+    #[pg_test]
+    fn l2_validate_accepts_single_trailing_semicolon() {
+        // Boundary: exactly one trailing ';' is valid (an interior ';' is not — covered by the reject test).
+        assert!(l2_validate("SELECT 1;").is_ok());
+    }
+
+    // M25 — the relation-allowlist logic, unit-tested without SPI/EXPLAIN.
+    #[pg_test]
+    fn relation_allowed_enforces_allowlist() {
+        let allow = vec!["public.documents".to_string()];
+        assert!(relation_allowed(&[("public".into(), "documents".into())], &allow).is_ok());
+        // bare name under public matches an allowlisted bare entry
+        assert!(relation_allowed(&[("public".into(), "documents".into())], &["documents".to_string()]).is_ok());
+        // a relation outside the allowlist is rejected (e.g. a system catalog the model tried to reach)
+        assert!(relation_allowed(&[("secret".into(), "pg_authid".into())], &allow).is_err());
+    }
+
+    #[pg_test]
+    fn relation_allowed_bare_entry_does_not_authorize_other_schema() {
+        // Security branch (the `schema == "public"` guard): a BARE allowlist entry `documents` must NOT
+        // authorize a same-named table planted in another schema (e.g. `secret.documents`). An attacker who
+        // creates `secret.documents` must still be rejected — the bare match is scoped to `public` only.
+        let bare = vec!["documents".to_string()];
+        assert!(relation_allowed(&[("secret".into(), "documents".into())], &bare).is_err());
+        // …and the qualified form `secret.documents` is not implied by the bare `public` entry either.
+        assert!(relation_allowed(&[("secret".into(), "documents".into())], &["public.documents".to_string()]).is_err());
     }
 }

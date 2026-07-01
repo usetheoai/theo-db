@@ -22,6 +22,7 @@ __pycache__/
 # Coverage + pytest artifacts
 .coverage
 .pytest_cache/
+.ruff_cache/
 
 # ANN-Benchmarks dataset cache (large HDF5, fetched on demand)
 benchmarks/.datasets/
@@ -36,3 +37,4 @@ sql/theodb--1.0.sql
 dist/
 theodb_rs/target/
 system-design-output/
+architecture-output/

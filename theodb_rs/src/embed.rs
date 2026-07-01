@@ -172,3 +172,18 @@ fn format_embedding(emb: &[Value], fn_name: &str) -> String {
     out.push(']');
     out
 }
+
+// M25 — unit test for the pure embedding formatter (parity with the vec/nl/sbq test discipline).
+#[cfg(any(test, feature = "pg_test"))]
+#[pgrx::pg_schema]
+mod tests {
+    use super::*;
+    use pgrx::prelude::*;
+    use serde_json::json;
+
+    #[pg_test]
+    fn format_embedding_renders_numeric_array() {
+        let emb = vec![json!(1.0), json!(-2.5), json!(0.0)];
+        assert_eq!(format_embedding(&emb, "test"), "[1,-2.5,0]");
+    }
+}

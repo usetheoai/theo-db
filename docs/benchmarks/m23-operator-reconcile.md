@@ -1,6 +1,6 @@
 # M23 — Control-plane reconcile evidence (Go K8s operator)
 
-**Date:** 2026-06-30 · **Milestone:** M23 (`ROADMAP-v2.md:139`) · **Module:** `operator/`
+**Date:** 2026-06-30 · **Milestone:** M23 (`ROADMAP.md:139`) · **Module:** `operator/`
 
 Unlike the vector-pillar milestones (M17–M22), M23 ships a **control plane**, so the milestone
 evidence is **not** a recall/latency benchmark — it is a **reproducible real-`envtest` reconcile

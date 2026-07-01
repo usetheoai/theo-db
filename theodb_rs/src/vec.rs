@@ -117,8 +117,8 @@ mod tests {
         // fall below the f32 ULP and are lost — an f64 accumulator would keep them. Σa² in f32 = big² exactly
         // (the +64 of unit terms is below ULP(1e14)≈8e6); l2 = sqrt of that.
         let big = 1.0e7_f32;
-        let a: Vec<f32> = std::iter::once(big).chain(std::iter::repeat(1.0).take(64)).collect();
-        let b: Vec<f32> = std::iter::repeat(0.0).take(65).collect();
+        let a: Vec<f32> = std::iter::once(big).chain(std::iter::repeat_n(1.0, 64)).collect();
+        let b: Vec<f32> = std::iter::repeat_n(0.0, 65).collect();
         let got = l2_distance(&a, &b);
         assert_eq!(got, (big as f64) * 1.0, "f32 sum drops sub-ULP terms → exactly big"); // sqrt(big²)=big
         let f64_acc: f64 = a.iter().map(|x| (*x as f64) * (*x as f64)).sum::<f64>().sqrt();
