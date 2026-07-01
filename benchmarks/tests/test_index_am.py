@@ -54,3 +54,53 @@ def test_create_index_using_theodb_ivfflat_loads():
         )
         assert cur.fetchone()[0] == "theodb_ivfflat"
         cur.execute("DROP TABLE m26_spike CASCADE")
+
+
+def _seed_table(cur, name, n=200, dim=8):
+    """Deterministic corpus: row i gets a one-hot-ish vector so nearest neighbors are predictable."""
+    cur.execute(f"DROP TABLE IF EXISTS {name} CASCADE")
+    cur.execute(f"CREATE TABLE {name} (id bigint, embedding vector({dim}))")
+    rows = []
+    for i in range(n):
+        vec = [0.0] * dim
+        vec[i % dim] = 1.0 + (i / 1000.0)  # cluster by i%dim, slight tie-break
+        rows.append(f"({i}, '[{','.join(str(x) for x in vec)}]')")
+    cur.execute(f"INSERT INTO {name} VALUES {','.join(rows)}")
+
+
+def test_index_persists_to_pages_not_rebuild():
+    """Phase 2: CREATE INDEX persists the built index to pages (pg_relation_size > 0)."""
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE")
+        _seed_table(cur, "m26_persist")
+        cur.execute("CREATE INDEX m26_persist_idx ON m26_persist USING theodb_ivfflat (embedding theodb_ivfflat_l2_ops)")
+        cur.execute("SELECT pg_relation_size('m26_persist_idx')")
+        assert cur.fetchone()[0] > 0, "index has no persisted pages"
+        cur.execute("DROP TABLE m26_persist CASCADE")
+
+
+def test_index_scan_returns_correct_neighbors():
+    """Phase 3+4: the persisted index answers ORDER BY <-> LIMIT k via an Index Scan, matching brute force."""
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE")
+        _seed_table(cur, "m26_scan", n=200, dim=8)
+        cur.execute("CREATE INDEX m26_scan_idx ON m26_scan USING theodb_ivfflat (embedding theodb_ivfflat_l2_ops)")
+
+        query = "[1,0,0,0,0,0,0,0]"  # closest to rows where i%8==0, smallest i first (id 0, 8, 16, ...)
+        # Brute-force ground truth (seq scan).
+        cur.execute("SET enable_indexscan = off; SET enable_seqscan = on")
+        cur.execute(f"SELECT id FROM m26_scan ORDER BY embedding <-> '{query}' LIMIT 5")
+        truth = [r[0] for r in cur.fetchall()]
+
+        # Force the index and compare (recall@5 parity).
+        cur.execute("SET enable_seqscan = off; SET enable_indexscan = on")
+        cur.execute(f"EXPLAIN (FORMAT text) SELECT id FROM m26_scan ORDER BY embedding <-> '{query}' LIMIT 5")
+        plan = "\n".join(r[0] for r in cur.fetchall())
+        assert "theodb_ivfflat" in plan or "Index Scan" in plan, f"planner did not use the index:\n{plan}"
+
+        cur.execute(f"SELECT id FROM m26_scan ORDER BY embedding <-> '{query}' LIMIT 5")
+        got = [r[0] for r in cur.fetchall()]
+        overlap = len(set(got) & set(truth))
+        assert overlap >= 4, f"recall@5 too low via index: got {got} vs truth {truth}"
+        cur.execute("RESET enable_seqscan; RESET enable_indexscan")
+        cur.execute("DROP TABLE m26_scan CASCADE")

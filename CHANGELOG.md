@@ -13,11 +13,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- M26 (in progress) — vector Index Access Method: registered the `theodb_ivfflat` Postgres index AM via pgrx
-  (`IndexAmRoutine` handler + `CREATE ACCESS METHOD` + l2/cosine/ip operator classes). Phase 0 de-risk spike —
-  `CREATE INDEX … USING theodb_ivfflat` loads end-to-end (build/scan are no-op pending the page-persistence,
-  pushdown, and maintenance phases). Proven by `benchmarks/tests/test_index_am.py` (AM registered + index created).
-  (M26)
+- M26 (in progress) — vector Index Access Method `theodb_ivfflat`: a persisted Postgres index AM. `CREATE INDEX …
+  USING theodb_ivfflat (embedding theodb_ivfflat_l2_ops)` builds the IVFFlat index once from the heap and persists
+  it to WAL-logged pages (not rebuild-per-query); `ORDER BY embedding <-> $1 LIMIT k` is answered by a planner
+  Index Scan (amcanorderbyop + amcostestimate) at recall parity with a brute-force scan. Built on pgrx 0.16 FFI
+  (IndexAmRoutine + GenericXLog page persistence). Proven by `benchmarks/tests/test_index_am.py` (AM registered,
+  index persists to pages, EXPLAIN uses the index, recall@5 ≥ 4/5). Incremental INSERT/DELETE maintenance + VACUUM,
+  cosine/ip operator classes, and the theodb_hnsw AM are the remaining phases. (M26)
 
 ### Changed
 

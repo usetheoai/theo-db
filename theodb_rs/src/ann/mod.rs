@@ -41,6 +41,25 @@ impl Metric {
         }
     }
 
+    /// Stable on-disk tag (M26 index-AM page persistence). The mapping is FROZEN — changing it breaks every
+    /// persisted index. `from_tag` is the inverse (returns `None` for an unknown byte → the reader raises).
+    pub(crate) fn tag(self) -> u8 {
+        match self {
+            Metric::L2 => 0,
+            Metric::Ip => 1,
+            Metric::Cosine => 2,
+        }
+    }
+
+    pub(crate) fn from_tag(t: u8) -> Option<Metric> {
+        match t {
+            0 => Some(Metric::L2),
+            1 => Some(Metric::Ip),
+            2 => Some(Metric::Cosine),
+            _ => None,
+        }
+    }
+
     /// Order-by distance via the M20 f32-parity kernel (ADR D2). All vectors here are equal-dim (validated at
     /// the SQL boundary), so `crate::vec`'s dim check never fires.
     ///
