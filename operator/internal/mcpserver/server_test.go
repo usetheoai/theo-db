@@ -18,13 +18,16 @@ package mcpserver
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	theodbv1 "github.com/usetheodev/theo-db/operator/api/v1"
 )
@@ -165,5 +168,52 @@ func BenchmarkMCP_ListClusters(b *testing.B) {
 		if _, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "list_clusters"}); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+// T3.1 — failure scenario (plan): a List error from the client → IsError tool result, server stays up.
+func TestMCP_ListClusters_ClientError(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = theodbv1.AddToScheme(scheme)
+	errClient := fake.NewClientBuilder().WithScheme(scheme).WithInterceptorFuncs(interceptor.Funcs{
+		List: func(context.Context, client.WithWatch, client.ObjectList, ...client.ListOption) error {
+			return errors.New("boom")
+		},
+	}).Build()
+
+	session, ctx := connect(t, errClient)
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "list_clusters"})
+	if err != nil {
+		t.Fatalf("call list_clusters: %v", err)
+	}
+	if !res.IsError {
+		t.Error("list_clusters on a client error must return IsError=true")
+	}
+	// Server stays up: a second call still succeeds.
+	if _, err := session.ListTools(ctx, nil); err != nil {
+		t.Errorf("server did not stay up after a tool error: %v", err)
+	}
+}
+
+// T3.1 — failure scenario (plan, EC-5): closing the transport makes server.Run return cleanly (no leak/hang).
+func TestMCP_TransportClose_CleanShutdown(t *testing.T) {
+	ctx := context.Background()
+	serverT, clientT := mcp.NewInMemoryTransports()
+	srv := New(newFakeClient())
+	done := make(chan error, 1)
+	go func() { done <- srv.Run(ctx, serverT) }()
+
+	cl := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "v0"}, nil)
+	session, err := cl.Connect(ctx, clientT, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := session.Close(); err != nil {
+		t.Fatalf("session close: %v", err)
+	}
+	select {
+	case <-done: // server.Run returned cleanly
+	case <-time.After(5 * time.Second):
+		t.Fatal("server.Run did not return within 5s of transport close (goroutine leak / hang)")
 	}
 }

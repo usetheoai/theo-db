@@ -281,3 +281,23 @@ func TestReconcile_CreatesReadService(t *testing.T) {
 		t.Errorf("read service port: got %d, want 5432", ro.Spec.Ports[0].Port)
 	}
 }
+
+// Review HIGH — deleting a CR drops its per-cluster metric series (no stale export, no cardinality leak).
+func TestReconcile_DeleteClearsMetrics(t *testing.T) {
+	dbmetrics.ClusterDesiredInstances.Reset()
+	name := "tc-delmetrics"
+	c := createCluster(t, name, theodbv1.TheoDBClusterSpec{Instances: 2, Image: "theo-db:test", StorageSize: "1Gi", Port: 5432})
+	reconcileOnce(t, name)
+	if got := testutil.ToFloat64(dbmetrics.ClusterDesiredInstances.WithLabelValues("default", name)); got != 2 {
+		t.Fatalf("desired gauge before delete: got %v, want 2", got)
+	}
+
+	if err := k8sClient.Delete(context.Background(), c); err != nil {
+		t.Fatal(err)
+	}
+	reconcileOnce(t, name) // NotFound branch → DeleteCluster
+
+	if got := testutil.CollectAndCount(dbmetrics.ClusterDesiredInstances); got != 0 {
+		t.Errorf("desired series after delete+reconcile: got %d, want 0 (series leak)", got)
+	}
+}

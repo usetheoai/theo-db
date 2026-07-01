@@ -82,13 +82,26 @@ func Register(reg prometheus.Registerer) {
 	}
 }
 
+// phases is the closed set of cluster phases (single source of truth for the phase gauge label values).
+var phases = []string{"Initializing", "Healthy", "Error"}
+
 // RecordPhase sets the phase gauge (1 for the active phase, 0 for the others) for one cluster.
 func RecordPhase(namespace, cluster, phase string) {
-	for _, p := range []string{"Initializing", "Healthy", "Error"} {
+	for _, p := range phases {
 		v := 0.0
 		if p == phase {
 			v = 1.0
 		}
 		ClusterPhase.WithLabelValues(namespace, cluster, p).Set(v)
+	}
+}
+
+// DeleteCluster removes every per-cluster gauge series for a deleted cluster, so a gone cluster stops
+// exporting stale values and per-cluster cardinality does not grow without bound (review HIGH — series leak).
+func DeleteCluster(namespace, cluster string) {
+	ClusterReadyInstances.DeleteLabelValues(namespace, cluster)
+	ClusterDesiredInstances.DeleteLabelValues(namespace, cluster)
+	for _, p := range phases {
+		ClusterPhase.DeleteLabelValues(namespace, cluster, p)
 	}
 }

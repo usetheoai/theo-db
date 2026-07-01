@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -35,7 +36,10 @@ import (
 )
 
 func main() {
-	httpAddr := flag.String("http", "", "if set, serve streamable HTTP at this address instead of stdio")
+	httpAddr := flag.String("http", "",
+		"if set, serve streamable HTTP at this address instead of stdio. WARNING: this transport performs NO "+
+			"authentication or TLS — run it ONLY behind an authenticating platform edge, never bound to an "+
+			"untrusted network.")
 	flag.Parse()
 
 	if err := run(*httpAddr); err != nil {
@@ -54,8 +58,10 @@ func run(httpAddr string) error {
 
 	if httpAddr != "" {
 		handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return srv }, nil)
-		fmt.Fprintf(os.Stderr, "theodb-mcp: serving streamable HTTP on %s\n", httpAddr)
-		return http.ListenAndServe(httpAddr, handler)
+		fmt.Fprintf(os.Stderr, "theodb-mcp: serving streamable HTTP on %s (UNAUTHENTICATED — edge-front it)\n", httpAddr)
+		// ReadHeaderTimeout guards against Slowloris on the unauthenticated path (gosec G114).
+		httpSrv := &http.Server{Addr: httpAddr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
+		return httpSrv.ListenAndServe()
 	}
 	return srv.Run(ctx, &mcp.StdioTransport{})
 }

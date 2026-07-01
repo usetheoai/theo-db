@@ -12,6 +12,9 @@ read Service is *proven created against a real apiserver*.
 |---|---|---|
 | Domain Prometheus metrics are registered + exported with correct values | `internal/metrics` `testutil.CollectAndCompare` + envtest `TestReconcile_EmitsDomainMetrics` | PASS |
 | `Register()` is idempotent (no double-register panic, EC-1) | `TestMetrics_Register_Idempotent` | PASS |
+| Deleting a cluster drops its per-cluster gauge series (no stale export, no cardinality leak) | `TestMetrics_DeleteCluster_RemovesSeries` + envtest `TestReconcile_DeleteClearsMetrics` | PASS |
+| MCP `list_clusters` on a client error → IsError result, server stays up (failure scenario) | `TestMCP_ListClusters_ClientError` | PASS |
+| MCP server shuts down cleanly on transport close (no goroutine leak, EC-5) | `TestMCP_TransportClose_CleanShutdown` | PASS |
 | Read Service `<name>-ro` is provisioned, owner-referenced | envtest `TestReconcile_CreatesReadService` | PASS |
 | MCP server handshake + advertises exactly 2 read tools | `TestMCP_Handshake_AdvertisesTwoTools` (in-memory transport) | PASS |
 | MCP `list_clusters` / `get_cluster` return correct data; not-found + empty-name → IsError (EC-2) | `TestMCP_ListClusters_*`, `TestMCP_GetCluster_*` | PASS |
@@ -68,7 +71,11 @@ existing `/metrics`; **no new dependency, no second HTTP server**.
   pods (real infra; the read-scale *value* lands with replication). PgBouncer is reconsidered in M25.
 - **ADR-3 (MCP)** — the server is **read-only** (`list_clusters`, `get_cluster`) over stdio by default
   (`-http` opt-in). Write tools (apply/delete) are deferred: an AI-mutable control surface needs the auth
-  story extended first.
+  story extended first. **The `-http` streamable transport performs NO authentication or TLS** — it is
+  intended ONLY behind an authenticating platform edge (Traefik ForwardAuth / Model B), never bound to an
+  untrusted network. The flag help states this; the handler sets a `ReadHeaderTimeout` (Slowloris guard).
+  Tool error messages are generic ("see operator logs") so raw K8s errors do not leak the operator's
+  ServiceAccount identity / RBAC posture to the agent.
 
 ## Dependencies (license gate D1)
 

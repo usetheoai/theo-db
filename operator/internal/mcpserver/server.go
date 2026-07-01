@@ -70,7 +70,8 @@ func New(c client.Client) *mcp.Server {
 			opts = append(opts, client.InNamespace(in.Namespace))
 		}
 		if err := c.List(ctx, &list, opts...); err != nil {
-			return errorResult(fmt.Sprintf("list failed: %v", err)), listOutput{}, nil
+			// Generic message — the raw K8s error can leak the operator's ServiceAccount identity / RBAC posture.
+			return errorResult("list clusters failed (see operator logs)"), listOutput{}, nil
 		}
 		out := listOutput{Clusters: make([]ClusterSummary, 0, len(list.Items))}
 		for i := range list.Items {
@@ -96,7 +97,7 @@ func New(c client.Client) *mcp.Server {
 			return errorResult(fmt.Sprintf("theodbcluster %q not found in namespace %q", in.Name, ns)), ClusterSummary{}, nil
 		}
 		if err != nil {
-			return errorResult(fmt.Sprintf("get failed: %v", err)), ClusterSummary{}, nil
+			return errorResult("get cluster failed (see operator logs)"), ClusterSummary{}, nil
 		}
 		return nil, summarize(&cluster), nil
 	})

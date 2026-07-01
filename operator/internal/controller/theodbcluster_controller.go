@@ -64,8 +64,13 @@ func (r *TheoDBClusterReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	var cluster theodbv1.TheoDBCluster
 	if err := r.Get(ctx, req.NamespacedName, &cluster); err != nil {
-		// NotFound: the CR was deleted; owned resources are GC'd by owner refs. No requeue.
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		if apierrors.IsNotFound(err) {
+			// The CR was deleted; owned resources are GC'd by owner refs. Drop its per-cluster metric
+			// series so a gone cluster stops exporting stale values (review HIGH — series leak).
+			dbmetrics.DeleteCluster(req.Namespace, req.Name)
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, err
 	}
 
 	// storageSize is guarded by a CRD pattern at the boundary; re-parse here so a value that bypassed
@@ -228,8 +233,11 @@ func (r *TheoDBClusterReconciler) updateStatus(ctx context.Context, c *theodbv1.
 }
 
 // setPhase writes the status subresource (Phase + the Ready condition, via apimachinery's canonical helper).
+// It is the single chokepoint for phase writes, so it also records the phase gauge — this is what surfaces
+// the Error phase set by the invalid-spec path (which never reaches updateStatus) on `theodb_cluster_phase`.
 func (r *TheoDBClusterReconciler) setPhase(ctx context.Context, c *theodbv1.TheoDBCluster, phase string, condStatus metav1.ConditionStatus, reason, msg string) error {
 	c.Status.Phase = phase
+	dbmetrics.RecordPhase(c.Namespace, c.Name, phase)
 	apimeta.SetStatusCondition(&c.Status.Conditions, metav1.Condition{
 		Type:               "Ready",
 		Status:             condStatus,

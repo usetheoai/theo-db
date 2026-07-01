@@ -71,3 +71,25 @@ func TestMetrics_DurationBuckets(t *testing.T) {
 		t.Error("reconcile_duration histogram exported no series")
 	}
 }
+
+// Review HIGH — DeleteCluster removes all per-cluster series so a deleted cluster stops exporting.
+func TestMetrics_DeleteCluster_RemovesSeries(t *testing.T) {
+	ClusterReadyInstances.Reset()
+	ClusterDesiredInstances.Reset()
+	ClusterPhase.Reset()
+	ClusterReadyInstances.WithLabelValues("ns1", "c1").Set(2)
+	ClusterDesiredInstances.WithLabelValues("ns1", "c1").Set(3)
+	RecordPhase("ns1", "c1", "Healthy")
+	if got := testutil.CollectAndCount(ClusterPhase); got != 3 {
+		t.Fatalf("phase series before delete: got %d, want 3", got)
+	}
+
+	DeleteCluster("ns1", "c1")
+
+	if got := testutil.CollectAndCount(ClusterReadyInstances); got != 0 {
+		t.Errorf("ready series after delete: got %d, want 0", got)
+	}
+	if got := testutil.CollectAndCount(ClusterPhase); got != 0 {
+		t.Errorf("phase series after delete: got %d, want 0", got)
+	}
+}
