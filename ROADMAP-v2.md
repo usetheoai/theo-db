@@ -148,7 +148,7 @@ cloudnative-pg), CLI, gateway — o que torna TheoDB deployável/gerenciável (c
 
 **Dependencies:** M19 (banco próprio coeso). **Nota:** absorve o antigo v1-M5.
 
-### M24 — [ ] Observabilidade + escala em Go (read pools, OTel/Prometheus, MCP)
+### M24 — [x] Observabilidade + escala em Go (read pools, OTel/Prometheus, MCP)
 
 **Objective:** Observabilidade e escala de leitura em **Go**: métricas OTel/Prometheus, read pools, MCP server.
 
