@@ -209,4 +209,138 @@ impl HnswIndex {
         found.truncate(k);
         found.into_iter().map(|c| (self.ids[c.i], c.d)).collect()
     }
+
+    /// Rebuild over `live` reusing this graph's parameters (M26 VACUUM fold).
+    pub(crate) fn rebuilt_with(&self, live: &[(i64, Vec<f32>)], seed: u64) -> HnswIndex {
+        HnswIndex::build(live, self.m, self.ef_construction, self.metric, seed)
+    }
+
+    /// Every `(id, vector)` stored (M26 — enumerated during VACUUM to rebuild over only the live heap TIDs).
+    pub(crate) fn entries(&self) -> Vec<(i64, Vec<f32>)> {
+        self.ids.iter().copied().zip(self.vectors.iter().cloned()).collect()
+    }
+
+    /// Like [`search`] but folds in `pending` `(id, vector)` tuples inserted after the build (M26 Phase 5/6).
+    pub(crate) fn search_merged(
+        &self,
+        q: &[f32],
+        k: usize,
+        ef_search: usize,
+        pending: &[(i64, Vec<f32>)],
+    ) -> Vec<(i64, f64)> {
+        let mut out = self.search(q, k, ef_search);
+        if !pending.is_empty() {
+            for (id, v) in pending {
+                out.push((*id, self.metric.dist(q, v)));
+            }
+            out.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(&b.0)));
+            out.truncate(k);
+        }
+        out
+    }
+
+    /// Serialize the graph for page persistence (M26 Phase 6). Bit-faithful; layout mirrors the struct fields.
+    pub(crate) fn to_bytes(&self) -> Vec<u8> {
+        use crate::ann::wire::*;
+        let mut b = Vec::new();
+        put_u32(&mut b, HNSW_MAGIC);
+        put_u32(&mut b, HNSW_VERSION);
+        b.push(self.metric.tag());
+        put_u32(&mut b, self.m as u32);
+        put_u32(&mut b, self.m0 as u32);
+        put_u32(&mut b, self.ef_construction as u32);
+        put_vecs_f32(&mut b, &self.vectors);
+        put_u32(&mut b, self.ids.len() as u32);
+        for id in &self.ids {
+            put_i64(&mut b, *id);
+        }
+        put_vec_usize(&mut b, &self.levels);
+        put_vecs_vecs_usize(&mut b, &self.neighbors);
+        match self.entry {
+            Some(e) => {
+                b.push(1);
+                put_u64(&mut b, e as u64);
+            }
+            None => b.push(0),
+        }
+        put_u32(&mut b, self.max_level as u32);
+        b
+    }
+
+    /// Inverse of [`to_bytes`]. Fail-fast typed `Err` on any truncation / bad magic / unknown metric.
+    pub(crate) fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
+        let mut c = crate::ann::wire::Cur::new(bytes);
+        if c.u32()? != HNSW_MAGIC {
+            return Err("theodb hnsw: bad index page magic".into());
+        }
+        if c.u32()? != HNSW_VERSION {
+            return Err("theodb hnsw: unsupported index page version".into());
+        }
+        let metric = Metric::from_tag(c.u8()?).ok_or("theodb hnsw: unknown metric tag")?;
+        let m = c.u32()? as usize;
+        let m0 = c.u32()? as usize;
+        let ef_construction = c.u32()? as usize;
+        let vectors = c.vecs_f32()?;
+        let ids = c.i64_vec()?;
+        let levels = c.vec_usize()?;
+        let neighbors = c.vecs_vecs_usize()?;
+        let entry = if c.u8()? == 1 { Some(c.usize()?) } else { None };
+        let max_level = c.u32()? as usize;
+        // Referential-integrity validation (M26): a structurally-complete but semantically-corrupt blob must NOT
+        // reach `search` (which does `self.entry.unwrap()` then `self.vectors[ep]`) — that would panic across the
+        // C FFI boundary. Fail-fast with a typed Err instead.
+        let n = vectors.len();
+        if ids.len() != n || levels.len() != n || neighbors.len() != n {
+            return Err("theodb hnsw: inconsistent node counts in index page".into());
+        }
+        match entry {
+            Some(e) if e >= n => return Err("theodb hnsw: entry index out of bounds".into()),
+            None if n > 0 => return Err("theodb hnsw: non-empty index without an entry point".into()),
+            _ => {}
+        }
+        Ok(HnswIndex { metric, m, m0, ef_construction, vectors, ids, levels, neighbors, entry, max_level })
+    }
+}
+
+pub(crate) const HNSW_MAGIC: u32 = 0x5448_4E53; // "THNS"
+const HNSW_VERSION: u32 = 1;
+
+#[cfg(any(test, feature = "pg_test"))]
+#[pgrx::pg_schema]
+mod hnsw_persist_tests {
+    use super::*;
+
+    fn corpus() -> Vec<(i64, Vec<f32>)> {
+        vec![
+            (10, vec![1.0, 0.0, 0.0]),
+            (20, vec![0.0, 1.0, 0.0]),
+            (30, vec![0.0, 0.0, 1.0]),
+            (40, vec![0.9, 0.1, 0.0]),
+            (50, vec![0.1, 0.9, 0.0]),
+        ]
+    }
+
+    #[pgrx::pg_test]
+    fn hnsw_roundtrip_bytes_reproduces_search() {
+        let idx = HnswIndex::build(&corpus(), 16, 64, Metric::L2, 42);
+        let back = HnswIndex::from_bytes(&idx.to_bytes()).expect("round-trip");
+        let q = vec![1.0, 0.0, 0.0];
+        assert_eq!(idx.search(&q, 3, 40), back.search(&q, 3, 40));
+    }
+
+    #[pgrx::pg_test]
+    fn hnsw_empty_roundtrips() {
+        let idx = HnswIndex::build(&[], 16, 64, Metric::Cosine, 1);
+        let back = HnswIndex::from_bytes(&idx.to_bytes()).expect("empty round-trip");
+        assert!(back.search(&[1.0, 0.0], 3, 40).is_empty());
+    }
+
+    #[pgrx::pg_test]
+    fn hnsw_from_bytes_rejects_truncated_and_bad_magic() {
+        let good = HnswIndex::build(&corpus(), 16, 64, Metric::L2, 7).to_bytes();
+        assert!(HnswIndex::from_bytes(&good[..good.len() - 4]).is_err(), "truncated must Err");
+        let mut bad = good.clone();
+        bad[0] ^= 0xFF;
+        assert!(HnswIndex::from_bytes(&bad).is_err(), "bad magic must Err");
+    }
 }

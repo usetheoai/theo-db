@@ -16,6 +16,7 @@
 
 ::pgrx::pg_module_magic!();
 
+mod am;
 mod ann;
 mod ann_query;
 mod chat;
