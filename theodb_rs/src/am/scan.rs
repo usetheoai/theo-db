@@ -9,9 +9,10 @@ use crate::am::{page, tid};
 use pgrx::prelude::*;
 
 /// Default lists probed per scan (mirrors ivfflat's `probes`; a GUC/reloption follows later). Larger = higher
-/// recall, slower. `SCAN_K` caps how many candidates we materialize (the executor applies the real LIMIT).
+/// recall, slower. We return EVERY probed candidate in distance order (no artificial cap — the executor applies
+/// the real LIMIT); an artificial cap would silently drop rows for an unbounded / large-LIMIT query.
 const SCAN_PROBES: usize = 10;
-const SCAN_K: usize = 10_000;
+const SCAN_K: usize = usize::MAX;
 
 struct ScanState {
     results: Vec<(i64, f64)>,
@@ -47,6 +48,14 @@ pub extern "C-unwind" fn amrescan(
         if norderbys < 1 || orderbys.is_null() {
             return; // no ORDER BY <-> key → no index-ordered scan
         }
+        // A NULL query vector (`ORDER BY col <-> NULL`) has SK_ISNULL set and a 0 sk_argument — dereferencing it
+        // would segfault in pg_detoast_datum. Treat it as an empty scan (matches pgvector's ivfscan/hnswscan).
+        if (*orderbys).sk_flags as u32 & pg_sys::SK_ISNULL != 0 {
+            return;
+        }
+        // Serialize against a concurrent VACUUM fold (share mode — compatible with other scans/inserts, blocks the
+        // exclusive rewrite). Prevents a torn read of the blob/pending region mid-rewrite.
+        crate::am::lock::index_shared(scan_ref.indexRelation);
         let query = datum_to_vec_f32((*orderbys).sk_argument);
 
         let blob = match page::read_blob(scan_ref.indexRelation) {

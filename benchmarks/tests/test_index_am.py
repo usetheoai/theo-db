@@ -162,3 +162,21 @@ def test_hnsw_am_persists_pushes_down_and_recalls():
         assert len(set(got) & set(truth)) >= 4, f"hnsw recall@5 too low: {got} vs {truth}"
         cur.execute("RESET enable_seqscan; RESET enable_indexscan")
         cur.execute("DROP TABLE m26_hnsw CASCADE")
+
+
+def test_null_query_vector_does_not_crash():
+    """Negative case: ORDER BY <-> NULL must not deref a NULL datum (SK_ISNULL guard) — returns 0 rows, no crash."""
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute("CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE")
+        _seed_table(cur, "m26_null", n=50, dim=8)
+        cur.execute("CREATE INDEX m26_null_idx ON m26_null USING theodb_ivfflat (embedding theodb_ivfflat_l2_ops)")
+        cur.execute("SET enable_seqscan = off")
+        # A NULL order-by argument: the backend must stay alive (guard against pg_detoast_datum(NULL)).
+        cur.execute("SELECT id FROM m26_null ORDER BY embedding <-> NULL::vector LIMIT 5")
+        rows = cur.fetchall()
+        assert rows == [] or all(r is not None for r in rows), "NULL query must not crash"
+        # The connection is still usable → no backend crash.
+        cur.execute("SELECT 1")
+        assert cur.fetchone()[0] == 1
+        cur.execute("RESET enable_seqscan")
+        cur.execute("DROP TABLE m26_null CASCADE")

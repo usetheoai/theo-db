@@ -62,7 +62,7 @@ pub extern "C-unwind" fn ambuild(
     unsafe {
         let (corpus, ntuples) = collect_corpus(heaprel, indexrel, index_info);
         let idx = IvfflatIndex::build(&corpus, DEFAULT_LISTS, Metric::L2, BUILD_SEED);
-        page::write_blob(indexrel, &idx.to_bytes());
+        page::write_blob(indexrel, pg_sys::ForkNumber::MAIN_FORKNUM, &idx.to_bytes());
         build_result(ntuples, corpus.len())
     }
 }
@@ -77,7 +77,7 @@ pub extern "C-unwind" fn ambuild_hnsw(
     unsafe {
         let (corpus, ntuples) = collect_corpus(heaprel, indexrel, index_info);
         let idx = HnswIndex::build(&corpus, HNSW_M, HNSW_EF_CONSTRUCTION, Metric::L2, BUILD_SEED);
-        page::write_blob(indexrel, &idx.to_bytes());
+        page::write_blob(indexrel, pg_sys::ForkNumber::MAIN_FORKNUM, &idx.to_bytes());
         build_result(ntuples, corpus.len())
     }
 }
@@ -123,6 +123,8 @@ pub unsafe extern "C-unwind" fn aminsert(
     if *isnull {
         return false;
     }
+    // Share the fold lock — a concurrent VACUUM rewrite (exclusive) must not run while we append to pending.
+    crate::am::lock::index_shared(indexrel);
     let v = datum_to_vec_f32(*values);
     let encoded = tid::encode(heap_tid);
     match page::append_pending(indexrel, encoded, &v) {
@@ -138,6 +140,8 @@ pub(crate) unsafe fn vacuum_rebuild(
     indexrel: pg_sys::Relation,
     dead: &mut dyn FnMut(i64) -> bool,
 ) -> usize {
+    // Exclusive the fold lock — wait for all concurrent scans/inserts (share) to finish, then rewrite alone.
+    crate::am::lock::index_exclusive(indexrel);
     let blob = match page::read_blob(indexrel) {
         Ok(b) => b,
         Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
@@ -165,17 +169,19 @@ pub(crate) unsafe fn vacuum_rebuild(
     live.len()
 }
 
-/// Empty index (unlogged/empty table): persist an empty index blob so scans read cleanly.
+/// Empty index for an UNLOGGED table: Postgres calls `ambuildempty` to populate the INIT fork (the template
+/// copied to the main fork on crash-recovery reset) — NOT the main fork. Writing MAIN here would append spurious
+/// pages to the already-built main fork (pgvector writes INIT_FORKNUM too, `ivfbuild.c:1084`).
 #[pg_guard]
 pub extern "C-unwind" fn ambuildempty(indexrel: pg_sys::Relation) {
     let idx = IvfflatIndex::build(&[], DEFAULT_LISTS, Metric::L2, BUILD_SEED);
-    unsafe { page::write_blob(indexrel, &idx.to_bytes()) };
+    unsafe { page::write_blob(indexrel, pg_sys::ForkNumber::INIT_FORKNUM, &idx.to_bytes()) };
 }
 
 #[pg_guard]
 pub extern "C-unwind" fn ambuildempty_hnsw(indexrel: pg_sys::Relation) {
     let idx = HnswIndex::build(&[], HNSW_M, HNSW_EF_CONSTRUCTION, Metric::L2, BUILD_SEED);
-    unsafe { page::write_blob(indexrel, &idx.to_bytes()) };
+    unsafe { page::write_blob(indexrel, pg_sys::ForkNumber::INIT_FORKNUM, &idx.to_bytes()) };
 }
 
 /// Convert a pgvector `vector` Datum into a `Vec<f32>`. pgvector's on-disk layout (studied in M20): a varlena

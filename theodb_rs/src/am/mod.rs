@@ -14,6 +14,7 @@ use pgrx::*;
 
 mod build; // ambuild / ambuildempty (Phase 2) + shared datum/metric helpers
 mod index; // polymorphic persisted index (ivf|hnsw) dispatch (Phase 6)
+mod lock; // advisory index-fold lock (serialize VACUUM rewrite vs scan/insert)
 mod page; // page persistence (Phase 1)
 mod scan; // ambeginscan / amrescan / amgettuple / amendscan (Phase 3)
 mod tid; // heap TID ⇄ i64 codec

@@ -63,6 +63,13 @@ impl<'a> Cur<'a> {
         self.p = end;
         Ok(s)
     }
+    /// Reserve capacity for `count` elements of `elem_bytes` each WITHOUT trusting `count`: a corrupt length field
+    /// must not trigger a multi-GB allocation before the per-element `take()` bounds check fires. Caps at the
+    /// bytes actually remaining (the real read still `Err`s if the blob is short).
+    fn capacity_for(&self, count: usize, elem_bytes: usize) -> usize {
+        let remaining = self.b.len().saturating_sub(self.p);
+        count.min(remaining / elem_bytes.max(1))
+    }
     pub(crate) fn u8(&mut self) -> Result<u8, String> {
         Ok(self.take(1)?[0])
     }
@@ -83,7 +90,7 @@ impl<'a> Cur<'a> {
     }
     pub(crate) fn vec_f32(&mut self) -> Result<Vec<f32>, String> {
         let n = self.u32()? as usize;
-        let mut v = Vec::with_capacity(n);
+        let mut v = Vec::with_capacity(self.capacity_for(n, 4));
         for _ in 0..n {
             v.push(self.f32()?);
         }
@@ -91,7 +98,7 @@ impl<'a> Cur<'a> {
     }
     pub(crate) fn vecs_f32(&mut self) -> Result<Vec<Vec<f32>>, String> {
         let n = self.u32()? as usize;
-        let mut out = Vec::with_capacity(n);
+        let mut out = Vec::with_capacity(self.capacity_for(n, 4));
         for _ in 0..n {
             out.push(self.vec_f32()?);
         }
@@ -99,7 +106,7 @@ impl<'a> Cur<'a> {
     }
     pub(crate) fn vec_usize(&mut self) -> Result<Vec<usize>, String> {
         let n = self.u32()? as usize;
-        let mut v = Vec::with_capacity(n);
+        let mut v = Vec::with_capacity(self.capacity_for(n, 4));
         for _ in 0..n {
             v.push(self.usize()?);
         }
@@ -107,7 +114,7 @@ impl<'a> Cur<'a> {
     }
     pub(crate) fn vecs_usize(&mut self) -> Result<Vec<Vec<usize>>, String> {
         let n = self.u32()? as usize;
-        let mut out = Vec::with_capacity(n);
+        let mut out = Vec::with_capacity(self.capacity_for(n, 4));
         for _ in 0..n {
             out.push(self.vec_usize()?);
         }
@@ -115,7 +122,7 @@ impl<'a> Cur<'a> {
     }
     pub(crate) fn vecs_vecs_usize(&mut self) -> Result<Vec<Vec<Vec<usize>>>, String> {
         let n = self.u32()? as usize;
-        let mut out = Vec::with_capacity(n);
+        let mut out = Vec::with_capacity(self.capacity_for(n, 4));
         for _ in 0..n {
             out.push(self.vecs_usize()?);
         }
@@ -123,7 +130,7 @@ impl<'a> Cur<'a> {
     }
     pub(crate) fn i64_vec(&mut self) -> Result<Vec<i64>, String> {
         let n = self.u32()? as usize;
-        let mut v = Vec::with_capacity(n);
+        let mut v = Vec::with_capacity(self.capacity_for(n, 4));
         for _ in 0..n {
             v.push(self.i64()?);
         }

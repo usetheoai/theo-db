@@ -15,9 +15,10 @@ const META_VERSION: u32 = 1;
 /// Max blob bytes per data page. BLCKSZ 8192 − page header − item-id − item alignment slack. 8000 is safe.
 const CHUNK: usize = 8000;
 
-/// Write `blob` across freshly-extended, WAL-logged pages of the (empty) index relation `rel`. Called by
-/// `ambuild` after `IvfflatIndex::to_bytes`. The relation is assumed to have 0 blocks (a fresh index).
-pub(crate) unsafe fn write_blob(rel: pg_sys::Relation, blob: &[u8]) {
+/// Write `blob` across freshly-extended, WAL-logged pages of the (empty) index relation `rel`, in fork `fork`
+/// (`MAIN_FORKNUM` for `ambuild`; `INIT_FORKNUM` for `ambuildempty` on unlogged indexes). The fork is assumed to
+/// have 0 blocks (a fresh index).
+pub(crate) unsafe fn write_blob(rel: pg_sys::Relation, fork: pg_sys::ForkNumber::Type, blob: &[u8]) {
     let nchunks = blob.len().div_ceil(CHUNK).max(1);
     // Meta item first (block 0).
     let mut meta = Vec::with_capacity(20);
@@ -25,13 +26,13 @@ pub(crate) unsafe fn write_blob(rel: pg_sys::Relation, blob: &[u8]) {
     meta.extend_from_slice(&META_VERSION.to_le_bytes());
     meta.extend_from_slice(&(blob.len() as u64).to_le_bytes());
     meta.extend_from_slice(&(nchunks as u32).to_le_bytes());
-    extend_page_with_item(rel, &meta);
+    extend_page_with_item(rel, fork, &meta);
     // Data chunks (blocks 1..=nchunks). An empty blob still writes one empty data page for a uniform read path.
     if blob.is_empty() {
-        extend_page_with_item(rel, &[]);
+        extend_page_with_item(rel, fork, &[]);
     } else {
         for chunk in blob.chunks(CHUNK) {
-            extend_page_with_item(rel, chunk);
+            extend_page_with_item(rel, fork, chunk);
         }
     }
 }
@@ -52,7 +53,9 @@ pub(crate) unsafe fn read_blob(rel: pg_sys::Relation) -> Result<Vec<u8>, String>
     }
     let blob_len = u64::from_le_bytes(meta[8..16].try_into().unwrap()) as usize;
     let nchunks = u32::from_le_bytes(meta[16..20].try_into().unwrap()) as usize;
-    let mut blob = Vec::with_capacity(blob_len);
+    // Do NOT trust blob_len for the allocation — cap at what the declared chunks could physically hold, so a
+    // corrupt meta page cannot trigger a multi-GB reserve before the per-page reads validate the real length.
+    let mut blob = Vec::with_capacity(blob_len.min(nchunks.saturating_mul(CHUNK)));
     for i in 1..=nchunks {
         if (i as u32) >= nblocks {
             return Err("theodb am: missing data page".into());
@@ -65,14 +68,14 @@ pub(crate) unsafe fn read_blob(rel: pg_sys::Relation) -> Result<Vec<u8>, String>
     Ok(blob)
 }
 
-/// Extend the relation by one page and write `data` as its single item, WAL-logged.
-unsafe fn extend_page_with_item(rel: pg_sys::Relation, data: &[u8]) {
+/// Extend the given fork by one page and write `data` as its single item, WAL-logged.
+unsafe fn extend_page_with_item(rel: pg_sys::Relation, fork: pg_sys::ForkNumber::Type, data: &[u8]) {
     debug_assert!(data.len() < CHUNK + 1);
     // Extend: serialize extension with the relation-extension lock (pgvectorscale util/buffer.rs:62).
     pg_sys::LockRelationForExtension(rel, pg_sys::ExclusiveLock as pg_sys::LOCKMODE);
     let buf = pg_sys::ReadBufferExtended(
         rel,
-        pg_sys::ForkNumber::MAIN_FORKNUM,
+        fork,
         pg_sys::InvalidBlockNumber, // == P_NEW: extend by one page
         pg_sys::ReadBufferMode::RBM_NORMAL,
         std::ptr::null_mut(),
@@ -138,7 +141,7 @@ pub(crate) unsafe fn append_pending(rel: pg_sys::Relation, tid: i64, vec: &[f32]
         }
     }
     // Otherwise extend a fresh pending page.
-    extend_page_with_item(rel, &item);
+    extend_page_with_item(rel, pg_sys::ForkNumber::MAIN_FORKNUM, &item);
     Ok(())
 }
 
@@ -187,13 +190,15 @@ pub(crate) unsafe fn read_pending(rel: pg_sys::Relation) -> Result<Vec<(i64, Vec
     let mut out = Vec::new();
     for block in pstart..nblocks {
         for item in read_all_page_items(rel, block)? {
+            // A well-formed pending item is `[tid i64, dim u32, f32×dim]`. A short item means page corruption —
+            // fail loud with a typed Err rather than silently dropping a row (error-handling discipline).
             if item.len() < 12 {
-                continue;
+                return Err("theodb am: corrupt pending item (too short for header)".into());
             }
             let tid = i64::from_le_bytes(item[0..8].try_into().unwrap());
             let dim = u32::from_le_bytes(item[8..12].try_into().unwrap()) as usize;
             if item.len() < 12 + dim * 4 {
-                continue;
+                return Err("theodb am: corrupt pending item (truncated vector)".into());
             }
             let mut v = Vec::with_capacity(dim);
             for i in 0..dim {
@@ -261,7 +266,7 @@ pub(crate) unsafe fn rewrite_blob(rel: pg_sys::Relation, blob: &[u8]) {
         if b < nblocks {
             reinit_page_with_item(rel, b, data);
         } else {
-            extend_page_with_item(rel, data);
+            extend_page_with_item(rel, pg_sys::ForkNumber::MAIN_FORKNUM, data);
         }
     }
     // Empty any leftover trailing pages (old pending / larger old blob).

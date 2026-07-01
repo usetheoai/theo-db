@@ -286,9 +286,61 @@ impl HnswIndex {
         let neighbors = c.vecs_vecs_usize()?;
         let entry = if c.u8()? == 1 { Some(c.usize()?) } else { None };
         let max_level = c.u32()? as usize;
+        // Referential-integrity validation (M26): a structurally-complete but semantically-corrupt blob must NOT
+        // reach `search` (which does `self.entry.unwrap()` then `self.vectors[ep]`) — that would panic across the
+        // C FFI boundary. Fail-fast with a typed Err instead.
+        let n = vectors.len();
+        if ids.len() != n || levels.len() != n || neighbors.len() != n {
+            return Err("theodb hnsw: inconsistent node counts in index page".into());
+        }
+        match entry {
+            Some(e) if e >= n => return Err("theodb hnsw: entry index out of bounds".into()),
+            None if n > 0 => return Err("theodb hnsw: non-empty index without an entry point".into()),
+            _ => {}
+        }
         Ok(HnswIndex { metric, m, m0, ef_construction, vectors, ids, levels, neighbors, entry, max_level })
     }
 }
 
 pub(crate) const HNSW_MAGIC: u32 = 0x5448_4E53; // "THNS"
 const HNSW_VERSION: u32 = 1;
+
+#[cfg(any(test, feature = "pg_test"))]
+#[pgrx::pg_schema]
+mod hnsw_persist_tests {
+    use super::*;
+
+    fn corpus() -> Vec<(i64, Vec<f32>)> {
+        vec![
+            (10, vec![1.0, 0.0, 0.0]),
+            (20, vec![0.0, 1.0, 0.0]),
+            (30, vec![0.0, 0.0, 1.0]),
+            (40, vec![0.9, 0.1, 0.0]),
+            (50, vec![0.1, 0.9, 0.0]),
+        ]
+    }
+
+    #[pgrx::pg_test]
+    fn hnsw_roundtrip_bytes_reproduces_search() {
+        let idx = HnswIndex::build(&corpus(), 16, 64, Metric::L2, 42);
+        let back = HnswIndex::from_bytes(&idx.to_bytes()).expect("round-trip");
+        let q = vec![1.0, 0.0, 0.0];
+        assert_eq!(idx.search(&q, 3, 40), back.search(&q, 3, 40));
+    }
+
+    #[pgrx::pg_test]
+    fn hnsw_empty_roundtrips() {
+        let idx = HnswIndex::build(&[], 16, 64, Metric::Cosine, 1);
+        let back = HnswIndex::from_bytes(&idx.to_bytes()).expect("empty round-trip");
+        assert!(back.search(&[1.0, 0.0], 3, 40).is_empty());
+    }
+
+    #[pgrx::pg_test]
+    fn hnsw_from_bytes_rejects_truncated_and_bad_magic() {
+        let good = HnswIndex::build(&corpus(), 16, 64, Metric::L2, 7).to_bytes();
+        assert!(HnswIndex::from_bytes(&good[..good.len() - 4]).is_err(), "truncated must Err");
+        let mut bad = good.clone();
+        bad[0] ^= 0xFF;
+        assert!(HnswIndex::from_bytes(&bad).is_err(), "bad magic must Err");
+    }
+}
