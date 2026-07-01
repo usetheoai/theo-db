@@ -273,7 +273,7 @@ esse ADR**.
 > Até fechar este track a honestidade é "paridade OSS + AI-native diferenciado", não "vetorialmente
 > superior" (`.claude/rules/public-copy.md`). Estes três milestones rodam antes dos operacionais.
 
-### M31 — [ ] Otimização de latência do index AM (leitura parcial de páginas)
+### M31 — [x] Otimização de latência do index AM (leitura parcial de páginas)
 
 **Objective:** Fechar o gargalo O(N)-por-scan do AM do M26 (hoje deseraliza o blob inteiro por query, ADR
 0010 §D2/D5) para que o índice persistido **bata a latência de query-time** — não só o rebuild-per-query
