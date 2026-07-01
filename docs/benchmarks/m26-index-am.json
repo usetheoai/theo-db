@@ -1,0 +1,39 @@
+{
+  "milestone": "M26",
+  "date": "2026-07-01",
+  "image": "theo-db:m26",
+  "postgres": "17",
+  "pgrx": "0.16.1",
+  "hardware_note": "developer workstation, warm cache; EXPLAIN (ANALYZE, TIMING ON)",
+  "corpus": { "rows": 5000, "dim": 128, "distribution": "uniform random" },
+  "query": "nearest-10 to an existing row (ORDER BY embedding <-> $1 LIMIT 10)",
+  "runs_per_config": 3,
+  "latency_ms": {
+    "rebuild_per_query_function": {
+      "what": "theodb.ivfflat_knn(...) — reads the whole corpus + k-means rebuild every call (pre-M26 baseline)",
+      "samples": [1342.488, 1369.471, 1404.613],
+      "mean": 1372.19,
+      "std": 25.4
+    },
+    "persisted_ivfflat_index_scan": {
+      "what": "theodb_ivfflat AM — build once at CREATE INDEX, scan reads the persisted index",
+      "samples": [80.162, 91.166, 88.027],
+      "mean": 86.45,
+      "std": 4.67
+    },
+    "plain_seq_scan_no_rebuild": {
+      "what": "seq scan (pgvector-style, no rebuild) — reference; NOT the DoD baseline",
+      "samples": [1.507],
+      "mean": 1.507,
+      "note": "faster than the persisted index at this N because the scan deserializes the whole blob per query (O(N)); optimization deferred, see ADR 0010 D2/D5"
+    }
+  },
+  "speedup_persisted_vs_rebuild": 15.87,
+  "recall": {
+    "metric": "recall@5 vs brute-force sequential scan",
+    "ivfflat": ">= 4/5 (test_index_scan_returns_correct_neighbors)",
+    "hnsw": ">= 4/5 (test_hnsw_am_persists_pushes_down_and_recalls)"
+  },
+  "coexistence": "M20-M22 suites (test_vector_ops/test_ann_index/test_sbq_index): 61 passed",
+  "reproduce": "docs/benchmarks/m26-index-am.md § 4"
+}

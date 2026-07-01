@@ -44,6 +44,26 @@ vence o seq scan. Documentado, não mascarado (Regra 3).
 SQL-callable. Reloptions (`WITH (lists=…)`) são um follow-up (`amoptions=None` hoje). Não bloqueia nenhum DoD (o
 scan usa `probes`/`ef_search` fixos sensatos); é tuning.
 
+### D4 — Concorrência: lock advisório serializa o VACUUM fold; leak de scan-state em abort é follow-up
+
+O `/review` (4 agentes) apontou que o `rewrite_blob` do VACUUM re-mapeia o layout de páginas de forma
+**não-atômica** e o `ShareUpdateExclusiveLock` do VACUUM não bloqueia SELECT/INSERT → risco de torn-read /
+lost-insert sob concorrência. **Corrigido** com um lock advisório xact-scoped keyed no OID do índice
+(`am/lock.rs`): scans/inserts pegam SHARE, o `vacuum_rebuild` pega EXCLUSIVE — serializa a reescrita contra
+leitores/escritores. (Trade-off de liveness: um cursor longo pode atrasar o VACUUM; aceitável no MVP.)
+
+**Follow-up documentado (não corrigido):** o `ScanState` é um `Box` Rust em `scan.opaque`, liberado só pelo
+`amendscan`. Num `ereport(ERROR)` no meio do scan o (sub)xact aborta sem chamar `amendscan` → o `Box` vaza até o
+backend sair. É **bounded** (nos pontos de erro do `amrescan` o `results` está vazio — sem alocação de heap; só
+abort-durante-iteração após popular vaza o buffer de resultados) e **não é UB nem resultado errado**. Correção
+apropriada: scan-state via `PgMemoryContexts`/arena palloc (liberado no reset de contexto), como o pgvectorscale.
+
+### D5 — Otimização de leitura parcial de páginas (o gargalo O(N) do § D2) é follow-up
+
+Ver D2: o scan deseraliza o blob inteiro por query (O(N)). O caminho de otimização (ler só páginas de
+centroide + listas probed, e/ou cache do índice por relação) é um slice próprio com benchmark, deixando o AM
+mais rápido que o seq scan em N pequeno também.
+
 ## Consequências
 
 - **Positivas:** DoD do M26 cumprido e validado — AMs persistidos (ivf+hnsw), pushdown, manutenção incremental,
