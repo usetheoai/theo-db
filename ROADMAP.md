@@ -162,7 +162,7 @@ cloudnative-pg), CLI, gateway — o que torna TheoDB deployável/gerenciável (c
 
 ---
 
-### M25 — [ ] Craft hardening do engine Rust (theodb_rs) — dívidas da auditoria de arquitetura
+### M25 — [x] Craft hardening do engine Rust (theodb_rs) — dívidas da auditoria de arquitetura
 
 **Objective:** Fechar todos os achados MEDIUM/LOW de craft da auditoria FAANG
 (`.claude/knowledge-base/audits/theodb_rs-architecture-verdict-2026-07-01.md`), **behavior-preserving**.
