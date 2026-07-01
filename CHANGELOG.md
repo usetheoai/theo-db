@@ -13,6 +13,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- M26 (in progress) — vector Index Access Method: registered the `theodb_ivfflat` Postgres index AM via pgrx
+  (`IndexAmRoutine` handler + `CREATE ACCESS METHOD` + l2/cosine/ip operator classes). Phase 0 de-risk spike —
+  `CREATE INDEX … USING theodb_ivfflat` loads end-to-end (build/scan are no-op pending the page-persistence,
+  pushdown, and maintenance phases). Proven by `benchmarks/tests/test_index_am.py` (AM registered + index created).
+  (M26)
 
 ### Changed
 
