@@ -373,24 +373,47 @@ mod nl_tests {
     }
 
     // M25 — the L2 security-boundary COMPOSITION, unit-tested without the LLM/oracle (previously untested).
+    // Negative cases assert the SPECIFIC typed message (testing.md § 4.1) — asserting only .is_err() would
+    // false-pass if the check under test were deleted but a *different* guard still tripped (e.g. the banned
+    // 'drop' token catching a dropped multistatement check).
     #[pg_test]
     fn l2_validate_rejects_multistatement() {
-        assert!(l2_validate("SELECT 1; SELECT 2").is_err());
-        assert!(l2_validate("SELECT 1; DROP TABLE t").is_err());
+        // No banned token here, so ONLY the multistatement guard can reject — isolates the check under test.
+        let e = l2_validate("SELECT 1; SELECT 2").unwrap_err();
+        assert!(e.contains("multiple statements are not allowed"), "got: {e}");
     }
 
     #[pg_test]
     fn l2_validate_rejects_non_select() {
-        assert!(l2_validate("DELETE FROM documents").is_err());
-        assert!(l2_validate("UPDATE t SET x = 1").is_err());
-        assert!(l2_validate("INSERT INTO t VALUES (1)").is_err());
+        // DELETE is not a banned token nor a multistatement — ONLY the SELECT/WITH-only guard can reject.
+        let e = l2_validate("DELETE FROM documents").unwrap_err();
+        assert!(e.contains("only SELECT/WITH queries are allowed"), "got: {e}");
+        // UPDATE/INSERT likewise fail on the SELECT/WITH-only guard (they are not in BANNED).
+        assert!(l2_validate("UPDATE t SET x = 1").unwrap_err().contains("only SELECT/WITH"));
+        assert!(l2_validate("INSERT INTO t VALUES (1)").unwrap_err().contains("only SELECT/WITH"));
+    }
+
+    #[pg_test]
+    fn l2_validate_rejects_banned_token_and_procedural_block() {
+        // The banned-token wiring: a SELECT that reaches a file-read builtin trips the banned scan (not the
+        // SELECT/WITH guard) — proves l2_validate still calls first_banned_token.
+        let e = l2_validate("SELECT pg_read_file('/etc/passwd')").unwrap_err();
+        assert!(e.contains("banned token"), "got: {e}");
+        // The procedural-block wiring: a DO $$ block trips has_do_block — proves that call survived extraction.
+        let e2 = l2_validate("do $$ begin perform 1; end $$").unwrap_err();
+        assert!(e2.contains("procedural blocks are not allowed"), "got: {e2}");
     }
 
     #[pg_test]
     fn l2_validate_accepts_select_and_with() {
         assert!(l2_validate("SELECT id FROM documents WHERE x > 1").is_ok());
         assert!(l2_validate("WITH t AS (SELECT 1) SELECT * FROM t").is_ok());
-        assert!(l2_validate("SELECT 1;").is_ok()); // a single trailing semicolon is allowed
+    }
+
+    #[pg_test]
+    fn l2_validate_accepts_single_trailing_semicolon() {
+        // Boundary: exactly one trailing ';' is valid (an interior ';' is not — covered by the reject test).
+        assert!(l2_validate("SELECT 1;").is_ok());
     }
 
     // M25 — the relation-allowlist logic, unit-tested without SPI/EXPLAIN.
@@ -402,5 +425,16 @@ mod nl_tests {
         assert!(relation_allowed(&[("public".into(), "documents".into())], &["documents".to_string()]).is_ok());
         // a relation outside the allowlist is rejected (e.g. a system catalog the model tried to reach)
         assert!(relation_allowed(&[("secret".into(), "pg_authid".into())], &allow).is_err());
+    }
+
+    #[pg_test]
+    fn relation_allowed_bare_entry_does_not_authorize_other_schema() {
+        // Security branch (the `schema == "public"` guard): a BARE allowlist entry `documents` must NOT
+        // authorize a same-named table planted in another schema (e.g. `secret.documents`). An attacker who
+        // creates `secret.documents` must still be rejected — the bare match is scoped to `public` only.
+        let bare = vec!["documents".to_string()];
+        assert!(relation_allowed(&[("secret".into(), "documents".into())], &bare).is_err());
+        // …and the qualified form `secret.documents` is not implied by the bare `public` entry either.
+        assert!(relation_allowed(&[("secret".into(), "documents".into())], &["public.documents".to_string()]).is_err());
     }
 }

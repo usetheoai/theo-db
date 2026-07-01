@@ -49,9 +49,11 @@ They are recorded here as known debt for a future scoped milestone, not silently
 | Function | File | CCN (before = after) |
 |---|---|---:|
 | `ann_query::knn` | `ann_query.rs` | 15 |
+| `chat::first_number` | `chat.rs` | 14 |
 | `nl::strip_sql_comments` | `nl.rs` | 13 |
 | `ann/hnsw::search_layer` | `ann/hnsw.rs` | 12 |
 | `ann/ivf::kmeanspp` | `ann/ivf.rs` | 11 |
+| `embed::run_batch` | `embed.rs` | 11 |
 
 Per the project principle *Esforço ≠ Complexidade* and YAGNI, M25 does not scope-creep into
 functions the audit did not flag. Decomposing HNSW/IVF kernels needs its own benchmark-backed
@@ -101,11 +103,13 @@ and HNSW/IVFFlat recall against their parity thresholds (incl. the anti-sunk-cos
 
 ### 3.2 Unit-test coverage of the extracted pure functions
 
-The new `#[pg_test]` unit tests (`l2_validate` multistatement/non-SELECT/accept, `relation_allowed`
-allowlist; `chat` `first_number`/`strip_fence`/`parse_batch`; `embed` `format_embedding`) **compile**
-under `cargo check --tests` (exit 0). Their runtime behavior is additionally exercised end-to-end
-through the integration suite via SQL — the L2 security-boundary and relation-allowlist paths by
-`test_ai_sql.py`'s multistatement/non-SELECT/allowlist cases, the embed formatting by
+The new `#[pg_test]` unit tests (`l2_validate` multistatement/non-SELECT/banned-token/procedural/accept
+with **specific-message** assertions, `relation_allowed` allowlist + the bare-entry-does-not-authorize-
+another-schema security branch; `chat` `first_number`/`strip_fence`/`parse_batch`; `embed`
+`format_embedding`) **compile** under `cargo check --tests` (exit 0). Their runtime behavior is
+additionally exercised end-to-end through the integration suite via SQL — the L2 security-boundary and
+relation-allowlist paths by **`test_nl_sql.py`** (drop / multistatement / exfil / non-allowlisted-relation
+cases, all asserting SQLSTATE 22023), the AI/chat parsers by `test_ai_sql.py`, the embed formatting by
 `test_embed_sql.py` — which run against a real Postgres and passed in the 72-green run.
 
 > Note on `cargo pgrx test`: pgrx's in-process test harness refuses to run as root (its `initdb`

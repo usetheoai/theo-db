@@ -9,8 +9,10 @@
 //!   SET theodb.embedding_api_key  = '...';                              -- optional bearer token
 //!
 //! Layering (blueprint ADR-1 — 3 boundaries): `pg` (Postgres/pgrx glue: typed errors + GUCs) ·
-//! `embed` (portable domain logic: the HTTP call + parse) · this file (api-surface: the `#[pg_extern]`
-//! entrypoint + the `theodb.embed` SQL wrapper). `lib.rs` is the composition/api root + module map.
+//! `embed` (portable domain logic: the HTTP call + parse) · `api` (api-surface: the `#[pg_extern]`
+//! entrypoints in schema `theodb_rs` + the `extension_sql!` DDL wrappers, e.g. `theodb.embed`). `lib.rs`
+//! is now the thin composition/module root only — the crate doc, `pg_module_magic!()`, the module map,
+//! and the `pg_test` harness (M25 split the api-surface out into `api.rs`; ADR 0009).
 
 ::pgrx::pg_module_magic!();
 
