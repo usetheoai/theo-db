@@ -331,27 +331,43 @@ refuta honestamente) o claim "igual ou superior ao AlloyDB no vetorial".
 
 ---
 
-### M34 — [ ] theodb ANN QPS a escala — lists/probes configurável + scan estruturado do theodb_hnsw
+### M34 — [ ] theodb_ivfflat QPS a escala — lists/probes configuráveis (reloption + GUC)
 
-**Objective:** Fechar o gap de QPS a escala que o M32 mediu (theodb ~8× atrás do pgvector a 1M) implementando as
-duas alavancas nomeadas: (1) uma reloption `lists`/`probes` configurável no `theodb_ivfflat` — hoje fixo em
-`DEFAULT_LISTS=100`/`SCAN_PROBES=10`, que sub-particiona a 1M (escaneia ~100k candidatos vs ~10k do pgvector bem
-tunado); e (2) um scan **estruturado** (partial-read, à la M31) para o `theodb_hnsw`, que hoje desserializa o blob
-inteiro por query (O(N), ~0.6 s a 1M). Torna o claim do M33 (vs AlloyDB) defensável — só se compara ao SOTA depois
-de alcançar paridade de QPS com o pgvector.
+**Objective:** Fechar a alavanca de QPS de MAIOR leverage que o M32 mediu (theodb_ivfflat ~8× atrás do pgvector a
+1M): tornar `lists` (build) e `probes` (scan) **configuráveis** no `theodb_ivfflat`, hoje fixos em
+`DEFAULT_LISTS=100`/`SCAN_PROBES=10`, que sub-particionam a 1M (escaneia ~100k candidatos vs ~10k do pgvector bem
+tunado). Padrão comprovado do pgvectorscale (amoptions callback) + pgvector (GUC `ivfflat.probes`). Re-escopo
+(2026-07-02): a 2ª alavanca original (scan estruturado do `theodb_hnsw`) foi movida para **M35** — a discovery mediu
+que é ~3-4× o esforço/risco do M31 (reescrita de grafo page-native), grande demais para o mesmo ciclo sem re-trabalho.
 
 **Definition of done:**
 
-- [ ] `theodb_ivfflat` aceita `lists` (build) + `probes` (scan) configuráveis via reloption/GUC (pgrx amoptions); o default preserva o comportamento atual (sem regressão nos gates M26/M31).
+- [ ] `theodb_ivfflat` aceita `lists` (build) configurável via reloption `WITH (lists=N)` (pgrx `amoptions`) + `probes` (scan) via GUC `theodb_ivfflat.probes` (`GucRegistry`); o default preserva o comportamento atual (sem regressão nos gates M26/M31).
 - [ ] Com tuning (lists≈√N, probes ajustável), `theodb_ivfflat` p50 **≤ pgvector** a 1M×128 (recall ≥ paridade), validado por re-run do harness M32 (`benchmarks/run_m32_sift1m.py` → `docs/benchmarks/`).
-- [ ] `theodb_hnsw` scan lê **O(probes/ef) não O(N)** (persistência estruturada do grafo, à la M31 para ivfflat); QPS ≥ ~50 a 1M (recall preservado).
-- [ ] Coexistência M20–M22 verde; sem regressão de recall; benchmark reproduzível + veredito honesto (`public-copy.md`).
+- [ ] Validação de bordas das opções (lists/probes fora do range → erro tipado, não crash); coexistência M20–M22 verde; benchmark reproduzível + veredito honesto (`public-copy.md`).
 
-**Dependencies:** M32. **Sequência:** estrategicamente PRECEDE M33 — rodar `/auto-plan M34` antes de M33 (mesmo M33
-tendo ID menor; a regra numérica do `cycle-roadmap` é default, e o operador já decidiu M34 primeiro). **Risco
-(MÉDIO-ALTO):** (1) design da reloption pgrx (amoptions API + validação de bordas); (2) a persistência estruturada
-do grafo HNSW é mais difícil que as listas planas do ivfflat — o grafo não é uma partição plana, então o
-partial-read exige um layout de páginas por-nó/por-camada novo.
+**Dependencies:** M32. **Sequência:** estrategicamente PRECEDE M33 (rodar antes do head-to-head vs AlloyDB). **Risco
+(MÉDIO):** design da reloption pgrx (amoptions API + validação de bordas) + o build de índice ivfflat a 1M com
+`lists` grande é single-thread (custo de tempo, não de correção).
+
+---
+
+### M35 — [ ] theodb_hnsw scan estruturado (partial-read page-native, à la M31 para o grafo)
+
+**Objective:** Eliminar o scan O(N) do `theodb_hnsw` (hoje desserializa o blob inteiro por query — ~6.5 GB / ~0.6 s
+a 1M, `hnsw.rs:243`) com uma persistência **estruturada page-native**: tuplas por-nó (element) + por-camada
+(neighbor) + entry-point na meta, travessia carregando só os nós visitados (o padrão do pgvector `hnsw.h`
+HnswElementTupleData/HnswNeighborTupleData). Espelha o que M31 fez para o ivfflat, mas para o grafo.
+
+**Definition of done:**
+
+- [ ] `theodb_hnsw` persiste o grafo em páginas estruturadas (meta + element tuples + neighbor tuples), não um blob único; VACUUM/INSERT/DELETE intactos.
+- [ ] O scan lê **O(ef·M) páginas não O(N)** (travessia on-demand); QPS ≥ ~50 a 1M (recall preservado), validado por re-run do harness M32.
+- [ ] Integridade de grafo: entry-point fallback, refs stale tratadas, sem regressão de recall; coexistência M20–M22 verde; benchmark reproduzível.
+
+**Dependencies:** M34 (reusa a infra de GUC/reloption + `ef_search` configurável). **Risco (ALTO):** ~3-4× o M31
+(discovery 2026-07-02) — o grafo não é partição plana; codec element/neighbor + travessia validada a 1M são a fonte
+de risco. Único milestone dedicado por design (evita re-trabalho de cramar no M34).
 
 ---
 

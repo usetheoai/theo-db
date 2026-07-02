@@ -13,9 +13,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- Roadmap amended: added M34 — theodb ANN QPS a escala (lists/probes configurável + scan estruturado do
-  theodb_hnsw) (`/roadmap-feature theodb-ann-qps-scale`). As duas alavancas de QPS que o M32 mediu para fechar o
-  gap de ~8× vs pgvector a 1M; estrategicamente precede M33.
+- Roadmap amended: added M34 — theodb_ivfflat QPS a escala (lists/probes configuráveis via reloption + GUC) and
+  M35 — theodb_hnsw scan estruturado page-native (`/roadmap-feature theodb-ann-qps-scale`). The two QPS levers M32
+  measured (~8× gap vs pgvector at 1M); split into two milestones after discovery sized the HNSW structured scan at
+  ~3-4× the M31 effort (too large + risky to bundle without rework). M34 precedes M33 strategically.
 
 ### Changed
 
