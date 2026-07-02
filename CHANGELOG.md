@@ -34,6 +34,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   capítulo-farol 19 passa o validador (PASS).
 
 ### Changed
+- Correção de honestidade em `docs/features/`: 5 páginas estavam marcadas "📋 planejado / ainda não implementadas"
+  quando na verdade **já foram entregues** (drift de documentação — os docs ficaram atrás do código). Atualizadas
+  para "✅ Entregue" com função SQL real + `file:line` + teste que prova cada uma: 01 busca vetorial (M20,
+  `theodb.l2_distance/…`, `test_vector_ops.py`), 02 índice HNSW (M21+M35, AM `theodb_hnsw`,
+  `test_hnsw_structured.py`), 09 ranquear (M7-S3, `ai.rank`, `test_ai_sql.py`), 10 sentimento (M7-S3,
+  `ai.analyze_sentiment`, `test_ai_sql.py`), 12 linguagem natural (M19, `ai.nl_to_sql`, `test_nl_sql.py`). Cada
+  bloco de status validado por `deep-research/validate_citations.py` (PASS — toda citação resolve no disco).
+  Afirmações de qualidade de IA marcadas com a nota de honestidade (dependem do LLM; sem benchmark de acurácia).
 
 ### Deprecated
 

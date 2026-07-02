@@ -1,10 +1,14 @@
 # Consultas em linguagem natural (`theodb_ai_nl`)
 
-> **Status:** 📋 Especificação (planejado) — recurso-alvo do milestone **M7 — IA avançada** ([ROADMAP](../../ROADMAP.md)).
-> Esta página documenta a **API-alvo do TheoDB**. As funcionalidades aqui descritas **ainda não estão
-> implementadas** na release atual (M0 entrega PostgreSQL 17 + `pgvector`). Nenhum número de desempenho
-> nesta página é um benchmark — benchmarks reproduzíveis vivem em `docs/benchmarks/` quando publicados
-> (CLAUDE.md, regra TheoDB 5).
+> **Status:** ✅ **Entregue (M19, superfície M7-S4).** A função `ai.nl_to_sql(question text, allowed_relations
+> text[], model text DEFAULT NULL) RETURNS text` (`theodb_rs/src/api.rs:372`, implementada em
+> `theodb_rs/src/nl.rs:31` `nl_to_sql`) gera SQL a partir de linguagem natural restrito a um allow-list de
+> relações, via LLM, com validação de segurança. Provado por `benchmarks/tests/test_nl_sql.py`. A guarda de
+> segurança (NL→SQL só-leitura, allow-list, anti-prompt-injection) é revisada pelo agente `council-security` —
+> ver blueprint `.claude/knowledge-base/discoveries/blueprints/m7-nl-to-sql-safe-blueprint.md`. **Nota de
+> honestidade:** a qualidade da geração depende do modelo LLM (modelo síncrono por-linha, ADR
+> `docs/adr/0007-synchronous-per-row-model-http.md`); não há benchmark de acurácia NL→SQL (ex.: Spider/BIRD)
+> publicado.
 
 > **Superfície implementada (M7-S4):** o MVP seguro está entregue como `ai.nl_to_sql` (gera+valida) e
 > `ai.nl_query` (executa em sandbox read-only) — `sql/60-theodb-nl.sql`. A guarda anti-prompt-injection é o

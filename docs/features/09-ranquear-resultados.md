@@ -1,10 +1,12 @@
 # Ranquear resultados de busca
 
-> **Status:** 📋 Especificação (planejado) — recurso-alvo do milestone **M7 — IA avançada** ([ROADMAP](../../ROADMAP.md)).
-> Esta página documenta a **API-alvo do TheoDB**. As funcionalidades aqui descritas **ainda não estão
-> implementadas** na release atual (M0 entrega PostgreSQL 17 + `pgvector`). Nenhum número de desempenho
-> nesta página é um benchmark — benchmarks reproduzíveis vivem em `docs/benchmarks/` quando publicados
-> (CLAUDE.md, regra TheoDB 5).
+> **Status:** ✅ **Entregue (M7-S3).** A função `ai.rank(prompt text, model text DEFAULT NULL) RETURNS float4`
+> (`theodb_rs/src/api.rs:338`, implementada em `theodb_rs/src/chat.rs:90` `ai_rank`) atribui um score de relevância
+> via LLM, parseando a saída para float com erro tipado em saída malformada. Provado por
+> `benchmarks/tests/test_ai_sql.py` (`test_rank_parses_float:265`, `test_rank_malformed_output_raises_typed:283`).
+> Para fusão keyword+vetor determinística sem LLM, ver também `ai.hybrid_search_rrf` (feature 06 — RRF).
+> **Nota de honestidade:** a qualidade do ranking depende do modelo LLM configurado (modelo síncrono por-linha,
+> ADR `docs/adr/0007-synchronous-per-row-model-http.md`); não há benchmark de qualidade de ranking publicado.
 
 Esta página cobre o uso de `ai.rank()` para ranking e reranking de resultados de busca no TheoDB, incluindo o pipeline híbrido que combina busca vetorial (`pgvector`) com reranking semântico para aplicações RAG.
 
