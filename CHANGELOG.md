@@ -13,6 +13,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Roadmap emendado com 2 milestones novos ao fim (convenção `/roadmap-feature` — nunca renumerar, nunca roadmap
+  concorrente): **M36 — Quantização-no-índice** (distância assimétrica sobre códigos quantizados no scan + rerank
+  f32; fecha o gap de ~24.6× em QPS vs ScaNN que o M33 mediu — o P0 do North Star; SBQ-primeiro, escalar p/ PQ/ADC
+  se recall < 0.99; benchmark `m36-quantization-in-index.json` obrigatório) e **M37 — Sumarização de conteúdo**
+  (`ai.summarize`, a última feature documentada genuinamente ausente; espelha `ai.rank`/`ai.analyze_sentiment`).
+  M27–M30 (abertos) intactos. Achados desta sessão (auditoria de `docs/features/` + análise do `council-vector-ann`).
 - Handbook "Formação de Engenharia — TheoDB" (`docs/handbook/`): currículo técnico interno que ensina engenharia
   de banco de dados através do código real do TheoDB. Modo curado (Regra 9) para fundamentos já cobertos por
   Strang/CLRS/PG-docs; modo original ancorado em `file:line` + ADR + benchmark para o coração (índices, vetorial,

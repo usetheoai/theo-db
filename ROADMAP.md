@@ -371,6 +371,48 @@ de risco. Único milestone dedicado por design (evita re-trabalho de cramar no M
 
 ---
 
+### M36 — [ ] Quantização-no-índice (fechar o gap de QPS vs ScaNN — o P0 do North Star)
+
+**Objective:** Reduzir o custo POR CANDIDATO no scan do índice, de distância full-precision f32 (128 dims,
+`vec.rs:167` `l2_dist_from_bytes`, chamado no laço quente `am/scan.rs`) para **distância assimétrica sobre códigos
+quantizados** + rerank f32 do top over_fetch — atacando o gap de **~24.6× em QPS** que o M33 mediu vs o ScaNN (o
+algoritmo do índice do AlloyDB) no recall≥0.99 (`docs/benchmarks/m33-scann-headtohead.json`), mantendo o recall em
+paridade (medido, anti-sunk-cost). É a única peça restante do North Star de superioridade vetorial (ADR
+`docs/adr/0002-north-star-equal-or-superior-to-alloydb.md`); o Conselho (`council-vector-ann`) identificou como o
+maior impacto.
+
+**Definition of done:**
+
+- [ ] **Pré-requisito medido:** `THEODB_SCAN_PROFILE=1` confirma que o custo de distância (`score_us`) domina o de I/O (`reads_us`) a probes=50/1M — provando que a distância é o gargalo antes de otimizá-la (measurement-first).
+- [ ] Distância assimétrica sobre códigos quantizados no scan do índice: SBQ-assimétrico primeiro (reusa `theodb_rs/src/sbq.rs`, M22), com códigos persistidos nas páginas de lista/element (`am/page.rs` + build) e novo kernel em `vec.rs` ao lado de `l2_dist_from_bytes`; rerank f32 do top over_fetch.
+- [ ] **Recall em paridade preservado (≥ 0.99 no ponto casado)** — se SBQ-1bit estagnar < 0.99 mesmo com over_fetch, escalar para PQ/ADC com LUT SIMD (o algoritmo ScaNN real); a bifurcação é decidida por benchmark + ADR, não por opinião.
+- [ ] Benchmark reproduzível `docs/benchmarks/m36-quantization-in-index.json` (mesmo shape do M33, ponto casado ≥0.99), reusando `benchmarks/theodb_bench/`, comparado vs theodb_ivfflat (77.9 QPS) e ScaNN (1920.3 QPS). Delta de QPS medido, não suposto.
+
+**Dependencies:** M22 (`sbq.rs` existe), M34 (infra reloption/GUC), M35 (scan estruturado onde o codec entra), M33
+(o gap-baseline). **Risco (ALTO):** o perigo é **regressão de recall** — quantização barata (SBQ-1bit) pode tetar
+abaixo de 0.99, forçando a escalada a PQ/ADC (esforço maior). Todos os deltas de QPS são **UNBENCHMARKED** até o
+`m36-*.json` existir.
+
+---
+
+### M37 — [ ] Sumarização de conteúdo (`ai.summarize`) — fechar a última feature documentada ausente
+
+**Objective:** Entregar a sumarização de conteúdo via SQL — a única feature em `docs/features/` genuinamente NÃO
+implementada (`docs/features/11-sumarizacao-conteudo.md`; nenhuma função `summarize` no código hoje). Espelha
+exatamente o padrão já entregue de `ai.analyze_sentiment` / `ai.rank` (`theodb_rs/src/chat.rs`, modelo síncrono
+por-linha via LLM, ADR `docs/adr/0007-synchronous-per-row-model-http.md`).
+
+**Definition of done:**
+
+- [ ] Função `ai.summarize(content text, model text DEFAULT NULL) RETURNS text` (superfície SQL em `theodb_rs/src/api.rs`, lógica em `theodb_rs/src/chat.rs`, espelhando `ai_sentiment`/`ai_rank`), com erro tipado em saída malformada.
+- [ ] Teste de contrato em `benchmarks/tests/test_ai_sql.py` (happy path + negative case de saída malformada → erro tipado), no padrão dos testes de sentiment/rank.
+- [ ] `docs/features/11-sumarizacao-conteudo.md` atualizado de "📋 planejado" → "✅ Entregue" com `file:line` + teste (validado por `deep-research/validate_citations.py`). **Nota de honestidade:** qualidade depende do LLM configurado; sem benchmark de qualidade de sumarização.
+
+**Dependencies:** M18 (superfície `ai.*` + `chat.rs` existem). **Risco (BAIXO):** é uma cópia estrutural de
+`ai.rank`/`ai.analyze_sentiment` já entregues — sem novo mecanismo, só um novo prompt + parse.
+
+---
+
 ## Sequência e paralelismo
 
 ```
