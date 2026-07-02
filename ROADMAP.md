@@ -331,6 +331,30 @@ refuta honestamente) o claim "igual ou superior ao AlloyDB no vetorial".
 
 ---
 
+### M34 — [ ] theodb ANN QPS a escala — lists/probes configurável + scan estruturado do theodb_hnsw
+
+**Objective:** Fechar o gap de QPS a escala que o M32 mediu (theodb ~8× atrás do pgvector a 1M) implementando as
+duas alavancas nomeadas: (1) uma reloption `lists`/`probes` configurável no `theodb_ivfflat` — hoje fixo em
+`DEFAULT_LISTS=100`/`SCAN_PROBES=10`, que sub-particiona a 1M (escaneia ~100k candidatos vs ~10k do pgvector bem
+tunado); e (2) um scan **estruturado** (partial-read, à la M31) para o `theodb_hnsw`, que hoje desserializa o blob
+inteiro por query (O(N), ~0.6 s a 1M). Torna o claim do M33 (vs AlloyDB) defensável — só se compara ao SOTA depois
+de alcançar paridade de QPS com o pgvector.
+
+**Definition of done:**
+
+- [ ] `theodb_ivfflat` aceita `lists` (build) + `probes` (scan) configuráveis via reloption/GUC (pgrx amoptions); o default preserva o comportamento atual (sem regressão nos gates M26/M31).
+- [ ] Com tuning (lists≈√N, probes ajustável), `theodb_ivfflat` p50 **≤ pgvector** a 1M×128 (recall ≥ paridade), validado por re-run do harness M32 (`benchmarks/run_m32_sift1m.py` → `docs/benchmarks/`).
+- [ ] `theodb_hnsw` scan lê **O(probes/ef) não O(N)** (persistência estruturada do grafo, à la M31 para ivfflat); QPS ≥ ~50 a 1M (recall preservado).
+- [ ] Coexistência M20–M22 verde; sem regressão de recall; benchmark reproduzível + veredito honesto (`public-copy.md`).
+
+**Dependencies:** M32. **Sequência:** estrategicamente PRECEDE M33 — rodar `/auto-plan M34` antes de M33 (mesmo M33
+tendo ID menor; a regra numérica do `cycle-roadmap` é default, e o operador já decidiu M34 primeiro). **Risco
+(MÉDIO-ALTO):** (1) design da reloption pgrx (amoptions API + validação de bordas); (2) a persistência estruturada
+do grafo HNSW é mais difícil que as listas planas do ivfflat — o grafo não é uma partição plana, então o
+partial-read exige um layout de páginas por-nó/por-camada novo.
+
+---
+
 ## Sequência e paralelismo
 
 ```
