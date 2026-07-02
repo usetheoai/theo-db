@@ -13,6 +13,20 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.32.0] - 2026-07-02
+
+### Added
 - M35 — `theodb_hnsw` now persists the graph in a **page-native structured layout** (meta + per-node element
   tuples + per-node neighbor tuples, à la pgvector) and the scan **traverses it on demand**, reading only the
   visited nodes' pages (O(ef·M)) instead of deserializing the whole graph per query (the M26 O(N) blob — ~6.5 GB
@@ -23,19 +37,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   (O(ef·M)). Trade-off: the structured build is ~17.5 min at 1M (single-thread graph construction). Evidence:
   `docs/benchmarks/m35-hnsw-structured-scan.{md,json}`.
 
+
 ### Changed
 - **BREAKING (pre-1.0 engine): `theodb_hnsw` on-disk format changed** from the M26 single-blob to the M35
   page-native structured layout. Newly-built indexes use the structured format automatically; an index built by a
   pre-M35 binary still reads via the legacy O(N) blob path — **REINDEX `theodb_hnsw` indexes to get the
   structured on-demand speedup**. No data loss either way. `theodb_ivfflat` is unaffected.
-
-### Deprecated
-
-### Removed
-
-### Fixed
-
-### Security
 
 ## [0.31.0] - 2026-07-02
 
