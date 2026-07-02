@@ -331,7 +331,7 @@ refuta honestamente) o claim "igual ou superior ao AlloyDB no vetorial".
 
 ---
 
-### M34 — [ ] theodb_ivfflat QPS a escala — lists/probes configuráveis (reloption + GUC)
+### M34 — [x] theodb_ivfflat QPS a escala — lists/probes configuráveis (reloption + GUC)
 
 **Objective:** Fechar a alavanca de QPS de MAIOR leverage que o M32 mediu (theodb_ivfflat ~8× atrás do pgvector a
 1M): tornar `lists` (build) e `probes` (scan) **configuráveis** no `theodb_ivfflat`, hoje fixos em
