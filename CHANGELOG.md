@@ -13,6 +13,20 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.28.0] - 2026-07-02
+
+### Added
 - M31b — SIMD (AVX2+FMA) fused decode+distance for the `theodb_ivfflat` Index Scan hot loop: the L2 distance is
   computed DIRECTLY from each candidate's page bytes via `_mm256_loadu_ps` (unaligned load), fusing the byte-decode
   and the distance into one 8-wide SIMD pass with a cached runtime CPU dispatch (`is_x86_feature_detected!`) and a
@@ -24,11 +38,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - M31b — opt-in scan profiler (`THEODB_SCAN_PROFILE=1`): logs per-scan phase timing (reads/score/sort) + list
   balance (`nonempty_lists`), the runtime observability that exposed the benchmark-data bug below.
 
-### Changed
-
-### Deprecated
-
-### Removed
 
 ### Fixed
 - Benchmark data-generation degeneracy: the index-latency harness seeded vectors with a non-correlated
@@ -37,8 +46,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   single list and made every pre-M31b latency number a brute-force-on-identical-ties measurement (retro-invalidating
   M31's `~2.7× behind pgvector`). Fixed by seeding DISTINCT vectors from Python via `COPY` (uniform + clustered
   regimes). No engine bug — theodb's k-means was always correct. See `docs/adr/0012-benchmark-data-degeneracy.md`.
-
-### Security
 
 ## [0.27.0] - 2026-07-01
 
