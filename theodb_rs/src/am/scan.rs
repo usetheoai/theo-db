@@ -67,10 +67,41 @@ pub extern "C-unwind" fn amrescan(
         }
         state.results = if magic == page::IVF_STRUCT_MAGIC {
             scan_ivf_structured(rel, &query)
+        } else if magic == crate::am::hnsw_page::HNSW_STRUCT_MAGIC {
+            scan_hnsw_structured(rel, &query)
         } else {
             scan_blob(rel, &query)
         };
     }
+}
+
+/// M35 partial-read HNSW scan: read the meta (1 page), traverse the graph ON DEMAND reading only visited nodes'
+/// element/neighbor tuples (∝ ef·M, flat in N — never the whole graph), then fold the pending region. Ascending
+/// distance. Replaces the O(N) `scan_blob` path for structured `theodb_hnsw` indexes.
+unsafe fn scan_hnsw_structured(rel: pg_sys::Relation, query: &[f32]) -> Vec<(i64, f64)> {
+    let meta = match crate::am::hnsw_page::read_meta(rel) {
+        Ok(m) => m,
+        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+    };
+    let metric = match Metric::from_tag(meta.metric_tag) {
+        Some(m) => m,
+        None => pg_sys::error!("theodb am scan: unknown metric tag"),
+    };
+    let ef = crate::am::guc::ef_search();
+    let mut results = match crate::am::hnsw_page::traverse(rel, &meta, query, ef) {
+        Ok(r) => r,
+        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+    };
+    // Fold in pending (INSERTed after build) — no rebuild (mirror the IVF path).
+    let pending = match page::read_pending(rel) {
+        Ok(p) => p,
+        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+    };
+    for (tidv, v) in pending {
+        results.push((tidv, metric.dist(query, &v)));
+    }
+    results.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(&b.0)));
+    results
 }
 
 /// M31 partial-page scan: read the meta + centroids (∝ nlists), pick the `SCAN_PROBES` nearest centroids, and read

@@ -208,7 +208,7 @@ pub(crate) unsafe fn read_pending(rel: pg_sys::Relation) -> Result<Vec<(i64, Vec
 }
 
 /// Read ALL items on a page (share-locked). Used for the multi-item pending pages.
-unsafe fn read_all_page_items(rel: pg_sys::Relation, block: pg_sys::BlockNumber) -> Result<Vec<Vec<u8>>, String> {
+pub(crate) unsafe fn read_all_page_items(rel: pg_sys::Relation, block: pg_sys::BlockNumber) -> Result<Vec<Vec<u8>>, String> {
     let buf = pg_sys::ReadBufferExtended(
         rel,
         pg_sys::ForkNumber::MAIN_FORKNUM,
@@ -272,6 +272,40 @@ pub(crate) unsafe fn rewrite_blob(rel: pg_sys::Relation, blob: &[u8]) {
 }
 
 /// Reinit an existing block to hold exactly one `data` item, WAL-logged.
+/// M35 — reinit `block` in place with ALL `items` (offsets 1..=items.len()), WAL-logged. Empties the page when
+/// `items` is empty. The multi-item counterpart of [`reinit_page_with_item`], used by the structured HNSW VACUUM
+/// rewrite to replace the graph in place without growing the relation.
+pub(crate) unsafe fn reinit_page_with_items(
+    rel: pg_sys::Relation,
+    block: pg_sys::BlockNumber,
+    items: &[Vec<u8>],
+) {
+    let buf = pg_sys::ReadBufferExtended(
+        rel,
+        pg_sys::ForkNumber::MAIN_FORKNUM,
+        block,
+        pg_sys::ReadBufferMode::RBM_NORMAL,
+        std::ptr::null_mut(),
+    );
+    pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_EXCLUSIVE as i32);
+    let state = pg_sys::GenericXLogStart(rel);
+    let page = pg_sys::GenericXLogRegisterBuffer(state, buf, 0);
+    pg_sys::PageInit(page, pg_sys::BLCKSZ as usize, 0);
+    for it in items {
+        let off = pg_sys::PageAddItemExtended(
+            page,
+            it.as_ptr() as pg_sys::Item,
+            it.len(),
+            pg_sys::InvalidOffsetNumber,
+            0,
+        );
+        assert!(off != pg_sys::InvalidOffsetNumber, "theodb am: reinit PageAddItem failed");
+    }
+    pg_sys::MarkBufferDirty(buf);
+    pg_sys::GenericXLogFinish(state);
+    pg_sys::UnlockReleaseBuffer(buf);
+}
+
 unsafe fn reinit_page_with_item(rel: pg_sys::Relation, block: pg_sys::BlockNumber, data: &[u8]) {
     let buf = pg_sys::ReadBufferExtended(
         rel,
@@ -357,8 +391,11 @@ unsafe fn main_index_pages(rel: pg_sys::Relation) -> Result<u32, String> {
             total = total.saturating_add(u32::from_le_bytes(dbytes[o..o + 4].try_into().unwrap()));
         }
         Ok(total)
+    } else if magic == crate::am::hnsw_page::HNSW_STRUCT_MAGIC {
+        // M35 structured HNSW: pending starts right after the neighbor page range (nbr_first + nbr_npages).
+        Ok(crate::am::hnsw_page::decode_meta(&m)?.pending_start())
     } else {
-        // blob (M26 / HNSW): 1 meta + nchunks data pages.
+        // blob (M26 legacy / old HNSW): 1 meta + nchunks data pages.
         if m.len() < 20 {
             return Err("theodb am: truncated blob meta".into());
         }
@@ -622,6 +659,77 @@ unsafe fn read_page_item(rel: pg_sys::Relation, block: pg_sys::BlockNumber) -> R
     let out = std::slice::from_raw_parts(ptr, len).to_vec();
     pg_sys::UnlockReleaseBuffer(buf);
     Ok(out)
+}
+
+/// M35 — read the item at (`block`, `offno`) — generalizes [`read_page_item`] (which reads offset 1) to the
+/// arbitrary-offset addressing the on-demand HNSW traversal needs. Share-locked; copies the bytes out.
+/// `offno` is 1-based (Postgres `OffsetNumber`). Fail-fast typed `Err` on an out-of-range offset.
+pub(crate) unsafe fn read_page_item_at(
+    rel: pg_sys::Relation,
+    block: pg_sys::BlockNumber,
+    offno: pg_sys::OffsetNumber,
+) -> Result<Vec<u8>, String> {
+    let nblocks = pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM);
+    if block >= nblocks {
+        return Err(format!("theodb am: page {block} out of range (nblocks={nblocks})"));
+    }
+    let buf = pg_sys::ReadBufferExtended(
+        rel,
+        pg_sys::ForkNumber::MAIN_FORKNUM,
+        block,
+        pg_sys::ReadBufferMode::RBM_NORMAL,
+        std::ptr::null_mut(),
+    );
+    pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_SHARE as i32);
+    let page = pg_sys::BufferGetPage(buf);
+    let max_off = page_get_max_offset(page);
+    if (offno as usize) < 1 || (offno as usize) > max_off {
+        pg_sys::UnlockReleaseBuffer(buf);
+        return Err(format!("theodb am: offset {offno} out of range (max={max_off}) on page {block}"));
+    }
+    let item_id = page_get_item_id(page, offno);
+    let len = (*item_id).lp_len() as usize;
+    let ptr = page_get_item(page, item_id) as *const u8;
+    let out = std::slice::from_raw_parts(ptr, len).to_vec();
+    pg_sys::UnlockReleaseBuffer(buf);
+    Ok(out)
+}
+
+/// M35 — extend `fork` by one page and write ALL `items` onto it (offsets 1..=items.len()), WAL-logged. The
+/// caller (the HNSW packer) has pre-assigned every item's `(blkno, offno)`, so this writer is dumb: it appends in
+/// order. Mirrors the [`extend_page_with_item`] WAL scaffold for the multi-item case.
+pub(crate) unsafe fn extend_page_with_items(
+    rel: pg_sys::Relation,
+    fork: pg_sys::ForkNumber::Type,
+    items: &[Vec<u8>],
+) {
+    pg_sys::LockRelationForExtension(rel, pg_sys::ExclusiveLock as pg_sys::LOCKMODE);
+    let buf = pg_sys::ReadBufferExtended(
+        rel,
+        fork,
+        pg_sys::InvalidBlockNumber, // P_NEW
+        pg_sys::ReadBufferMode::RBM_NORMAL,
+        std::ptr::null_mut(),
+    );
+    pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_EXCLUSIVE as i32);
+    pg_sys::UnlockRelationForExtension(rel, pg_sys::ExclusiveLock as pg_sys::LOCKMODE);
+
+    let state = pg_sys::GenericXLogStart(rel);
+    let page = pg_sys::GenericXLogRegisterBuffer(state, buf, 0);
+    pg_sys::PageInit(page, pg_sys::BLCKSZ as usize, 0);
+    for it in items {
+        let off = pg_sys::PageAddItemExtended(
+            page,
+            it.as_ptr() as pg_sys::Item,
+            it.len(),
+            pg_sys::InvalidOffsetNumber,
+            0,
+        );
+        assert!(off != pg_sys::InvalidOffsetNumber, "theodb am: PageAddItem failed (item too large / page full?)");
+    }
+    pg_sys::MarkBufferDirty(buf);
+    pg_sys::GenericXLogFinish(state);
+    pg_sys::UnlockReleaseBuffer(buf);
 }
 
 // --- Page macros pgrx does not expose (reimplemented from pgvectorscale util/ports.rs:47-92) ---

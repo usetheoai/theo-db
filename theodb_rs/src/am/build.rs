@@ -81,7 +81,12 @@ pub extern "C-unwind" fn ambuild_hnsw(
     unsafe {
         let (corpus, ntuples) = collect_corpus(heaprel, indexrel, index_info);
         let idx = HnswIndex::build(&corpus, HNSW_M, HNSW_EF_CONSTRUCTION, Metric::L2, BUILD_SEED);
-        page::write_blob(indexrel, pg_sys::ForkNumber::MAIN_FORKNUM, &idx.to_bytes());
+        // M35: persist the STRUCTURED page-native layout (meta + element + neighbor tuples) so scans traverse the
+        // graph ON DEMAND (O(ef·M) pages), not deserialize the whole blob (O(N)).
+        match crate::am::hnsw_page::pack(&idx) {
+            Ok(packed) => crate::am::hnsw_page::write_structured(indexrel, pg_sys::ForkNumber::MAIN_FORKNUM, &packed),
+            Err(e) => pg_sys::error!("theodb hnsw build: {e}"),
+        }
         build_result(ntuples, corpus.len())
     }
 }
@@ -156,7 +161,10 @@ pub(crate) unsafe fn vacuum_rebuild(
     if magic == page::IVF_STRUCT_MAGIC {
         return vacuum_rebuild_structured(indexrel, dead);
     }
-    // Blob (M26 / HNSW) path.
+    if magic == crate::am::hnsw_page::HNSW_STRUCT_MAGIC {
+        return vacuum_rebuild_hnsw_structured(indexrel, dead);
+    }
+    // Blob (M26 legacy) path.
     let blob = match page::read_blob(indexrel) {
         Ok(b) => b,
         Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
@@ -180,6 +188,35 @@ pub(crate) unsafe fn vacuum_rebuild(
     }
     let rebuilt = idx.rebuilt_with(&live, BUILD_SEED);
     page::rewrite_blob(indexrel, &rebuilt.to_bytes());
+    live.len()
+}
+
+/// M35 VACUUM fold for the structured HNSW layout: enumerate every element tuple + pending, drop dead, rebuild the
+/// graph, and rewrite the structured layout in place (folding pending in, dropping dead TIDs). Returns live count.
+unsafe fn vacuum_rebuild_hnsw_structured(indexrel: pg_sys::Relation, dead: &mut dyn FnMut(i64) -> bool) -> usize {
+    let meta = match crate::am::hnsw_page::read_meta(indexrel) {
+        Ok(m) => m,
+        Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
+    };
+    let metric = match Metric::from_tag(meta.metric_tag) {
+        Some(m) => m,
+        None => pg_sys::error!("theodb am vacuum: unknown metric tag"),
+    };
+    let mut all = match crate::am::hnsw_page::enumerate_entries(indexrel, &meta) {
+        Ok(e) => e,
+        Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
+    };
+    match page::read_pending(indexrel) {
+        Ok(p) => all.extend(p),
+        Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
+    }
+    let live: Vec<(i64, Vec<f32>)> = all.into_iter().filter(|(id, _)| !dead(*id)).collect();
+    // HNSW build params are fixed consts (no reloption), so rebuild with them; preserve the metric from meta.
+    let idx = HnswIndex::build(&live, HNSW_M, HNSW_EF_CONSTRUCTION, metric, BUILD_SEED);
+    match crate::am::hnsw_page::pack(&idx) {
+        Ok(packed) => crate::am::hnsw_page::rewrite_structured(indexrel, &packed),
+        Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
+    }
     live.len()
 }
 
@@ -227,7 +264,15 @@ pub extern "C-unwind" fn ambuildempty(indexrel: pg_sys::Relation) {
 #[pg_guard]
 pub extern "C-unwind" fn ambuildempty_hnsw(indexrel: pg_sys::Relation) {
     let idx = HnswIndex::build(&[], HNSW_M, HNSW_EF_CONSTRUCTION, Metric::L2, BUILD_SEED);
-    unsafe { page::write_blob(indexrel, pg_sys::ForkNumber::INIT_FORKNUM, &idx.to_bytes()) };
+    unsafe {
+        // M35: an empty structured graph is meta-only (entry_level = -1).
+        match crate::am::hnsw_page::pack(&idx) {
+            Ok(packed) => {
+                crate::am::hnsw_page::write_structured(indexrel, pg_sys::ForkNumber::INIT_FORKNUM, &packed)
+            }
+            Err(e) => pg_sys::error!("theodb hnsw buildempty: {e}"),
+        }
+    }
 }
 
 /// Convert a pgvector `vector` Datum into a `Vec<f32>`. pgvector's on-disk layout (studied in M20): a varlena
