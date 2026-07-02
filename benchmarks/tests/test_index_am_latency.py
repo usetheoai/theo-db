@@ -116,6 +116,14 @@ def _p50_ms(cur, table, qv):
     return statistics.median(times)
 
 
+def _p50_floor(cur, table, qvs):
+    """Uncontended p50 floor: min over 3 rounds of (median-over-queries of per-query p50). `min` estimates the
+    least-contended latency — the standard de-flaking technique for a latency gate on a shared host (concurrent
+    processes cause upward spikes only, never make a query faster than its true floor). Makes the theodb-vs-pgvector
+    comparison robust to bursts that would otherwise flake a single-run median."""
+    return min(statistics.median(_p50_ms(cur, table, q) for q in qvs) for _ in range(3))
+
+
 def _query_vectors(cur, table, k):
     cur.execute(f"SELECT embedding::text FROM {table} WHERE id <= {k} ORDER BY id")
     return [r[0] for r in cur.fetchall()]
@@ -143,12 +151,12 @@ def test_uniform_theodb_faster_than_pgvector_at_recall_parity():
         _create_index(cur, "latu", "theodb")
         _assert_index_scan(cur, "latu", "latu_theodb")
         th_recall = statistics.mean(len(_truth(cur, "latu", q) & _got(cur, "latu", q)) for q in qvs)
-        th_p50 = statistics.median(_p50_ms(cur, "latu", q) for q in qvs[:LAT_QUERIES])
+        th_p50 = _p50_floor(cur, "latu", qvs[:LAT_QUERIES])
 
         _create_index(cur, "latu", "pgvector")
         _assert_index_scan(cur, "latu", "latu_pgv")
         pv_recall = statistics.mean(len(_truth(cur, "latu", q) & _got(cur, "latu", q)) for q in qvs)
-        pv_p50 = statistics.median(_p50_ms(cur, "latu", q) for q in qvs[:LAT_QUERIES])
+        pv_p50 = _p50_floor(cur, "latu", qvs[:LAT_QUERIES])
 
         # Recall parity — uniform random is the IVFFlat worst case; both are low, theodb not materially worse.
         assert th_recall >= pv_recall - 1.0, f"theodb recall {th_recall:.1f} << pgvector {pv_recall:.1f}"
@@ -175,12 +183,12 @@ def test_clustered_high_recall_and_theodb_within_pgvector():
         _create_index(cur, "latc", "theodb")
         _assert_index_scan(cur, "latc", "latc_theodb")
         th_recall = statistics.mean(len(_truth(cur, "latc", q) & _got(cur, "latc", q)) for q in qvs)
-        th_p50 = statistics.median(_p50_ms(cur, "latc", q) for q in qvs[:LAT_QUERIES])
+        th_p50 = _p50_floor(cur, "latc", qvs[:LAT_QUERIES])
 
         _create_index(cur, "latc", "pgvector")
         _assert_index_scan(cur, "latc", "latc_pgv")
         pv_recall = statistics.mean(len(_truth(cur, "latc", q) & _got(cur, "latc", q)) for q in qvs)
-        pv_p50 = statistics.median(_p50_ms(cur, "latc", q) for q in qvs[:LAT_QUERIES])
+        pv_p50 = _p50_floor(cur, "latc", qvs[:LAT_QUERIES])
 
         # High recall at the realistic operating point, at parity with pgvector.
         assert th_recall >= 8.0, f"theodb recall {th_recall:.1f}/10 too low on clustered data"
