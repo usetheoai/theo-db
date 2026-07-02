@@ -21,6 +21,16 @@ em abertura, custo, portabilidade e **independência de modelo** (qualquer model
 lock-in). Metas de performance são **metas comprovadas por benchmark reproduzível** em `docs/benchmarks/` —
 nunca afirmações sem evidência. Estratégia completa: [`docs/adr/0002-north-star-equal-or-superior-to-alloydb.md`](./docs/adr/0002-north-star-equal-or-superior-to-alloydb.md).
 
+> **Estado medido do pilar vetorial (honesto, M33).** Head-to-head reproduzível vs **ScaNN OSS** — o
+> algoritmo do índice vetorial do AlloyDB — no SIFT1M (1M×128):
+> [`docs/benchmarks/m33-scann-headtohead.md`](./docs/benchmarks/m33-scann-headtohead.md). Resultado: **paridade
+> de recall@10** (ambos alcançam ≥0,99), mas **GAP de throughput** — no ponto recall≥0,99 o ScaNN é ~25× mais
+> rápido em QPS e ~26× menor em p50 (quantização anisotrópica + AH SIMD) que o `theodb_ivfflat` (IVFFlat
+> full-precision). A
+> superioridade vetorial em **velocidade ANN pura ainda NÃO está cumprida**; o diferencial atual do TheoDB é
+> busca vetorial **dentro de um banco transacional** (não uma biblioteca in-memory). Fechar o gap de latência
+> (quantização no índice) é trabalho de milestone futuro. Ver também o GOTO P0 do CTO.
+
 ---
 
 ## Por que TheoDB
