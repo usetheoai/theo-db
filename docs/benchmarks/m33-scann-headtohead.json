@@ -1,0 +1,256 @@
+{
+  "milestone": "M33",
+  "dataset": "sift-128-euclidean (SIFT1M)",
+  "n": 1000000,
+  "dim": 128,
+  "k": 10,
+  "n_queries": 1000,
+  "runs": 3,
+  "seed": 42,
+  "host": "paulohenriquevn",
+  "baseline_note": "AlloyDB is GCP-managed (no local run); ScaNN OSS is the DoD-sanctioned proxy \u2014 the algorithm behind AlloyDB's vector index (arXiv:1908.10396).",
+  "caveat_library_vs_database": "ScaNN is a pure IN-MEMORY ANN library (no persistence/transactions/SQL); theodb_ivfflat is a persistent transactional PostgreSQL index. Raw-search numbers compare the ALGORITHM axis; they do NOT make ScaNN a database. ScaNN peak-RSS includes the full in-memory corpus; theodb index bytes are on-disk index structure \u2014 different measures.",
+  "scann_version": "1.4.2",
+  "scann_build_ms": 20337.0,
+  "scann_peak_rss_mb": 1194.1,
+  "theodb_index_bytes": 537075712,
+  "config": {
+    "num_leaves": 1000,
+    "leaves_to_search_sweep": [
+      1,
+      10,
+      50,
+      100,
+      200,
+      400
+    ],
+    "training_sample_size": 250000,
+    "pre_reorder": 256,
+    "note": "num_leaves matches theodb/pgvector lists=1000; leaves_to_search matches probes sweep"
+  },
+  "results": {
+    "scann": [
+      {
+        "index": "scann",
+        "params": "leaves_to_search=1",
+        "recall_at_k": 0.3758,
+        "qps": 19738.1,
+        "p50": 0.05,
+        "p95": 0.08,
+        "p99": 0.11,
+        "mean_ms": 0.06,
+        "std_ms": 0.01
+      },
+      {
+        "index": "scann",
+        "params": "leaves_to_search=10",
+        "recall_at_k": 0.8733,
+        "qps": 8044.4,
+        "p50": 0.12,
+        "p95": 0.19,
+        "p99": 0.22,
+        "mean_ms": 0.12,
+        "std_ms": 0.03
+      },
+      {
+        "index": "scann",
+        "params": "leaves_to_search=50",
+        "recall_at_k": 0.9909,
+        "qps": 2866.7,
+        "p50": 0.33,
+        "p95": 0.52,
+        "p99": 0.75,
+        "mean_ms": 0.35,
+        "std_ms": 0.09
+      },
+      {
+        "index": "scann",
+        "params": "leaves_to_search=100",
+        "recall_at_k": 0.997,
+        "qps": 1615.8,
+        "p50": 0.57,
+        "p95": 0.93,
+        "p99": 1.1,
+        "mean_ms": 0.62,
+        "std_ms": 0.15
+      },
+      {
+        "index": "scann",
+        "params": "leaves_to_search=200",
+        "recall_at_k": 0.9985,
+        "qps": 816.5,
+        "p50": 1.84,
+        "p95": 2.44,
+        "p99": 2.82,
+        "mean_ms": 1.88,
+        "std_ms": 0.29
+      },
+      {
+        "index": "scann",
+        "params": "leaves_to_search=400",
+        "recall_at_k": 0.9985,
+        "qps": 312.3,
+        "p50": 4.41,
+        "p95": 9.79,
+        "p99": 13.42,
+        "mean_ms": 5.11,
+        "std_ms": 2.15
+      }
+    ],
+    "theodb_ivfflat": [
+      {
+        "index": "theodb_ivfflat",
+        "params": "probes=1",
+        "recall_at_k": 0.37339999999999995,
+        "qps": 1627.3851954097368,
+        "build_ms": 575062.912125999,
+        "index_bytes": 537075712,
+        "p50": 0.601558498601662,
+        "p95": 1.0190780492848714,
+        "p99": 1.3588220770907318,
+        "mean": 0.6508031103609634,
+        "std": 0.18368961555971144
+      },
+      {
+        "index": "theodb_ivfflat",
+        "params": "probes=10",
+        "recall_at_k": 0.8737,
+        "qps": 331.11743299397006,
+        "build_ms": 575062.912125999,
+        "index_bytes": 537075712,
+        "p50": 2.9871529986849055,
+        "p95": 4.705635452774003,
+        "p99": 5.798276020577758,
+        "mean": 3.200706470379373,
+        "std": 2.880697489211691
+      },
+      {
+        "index": "theodb_ivfflat",
+        "params": "probes=50",
+        "recall_at_k": 0.9924000000000001,
+        "qps": 77.91121151983064,
+        "build_ms": 575062.912125999,
+        "index_bytes": 537075712,
+        "p50": 12.765203999151709,
+        "p95": 17.581593999784673,
+        "p99": 20.85089138468901,
+        "mean": 13.122015316638377,
+        "std": 2.5242617964600185
+      },
+      {
+        "index": "theodb_ivfflat",
+        "params": "probes=100",
+        "recall_at_k": 0.9991,
+        "qps": 38.80432918784311,
+        "build_ms": 575062.912125999,
+        "index_bytes": 537075712,
+        "p50": 25.376581001182785,
+        "p95": 33.68442374485311,
+        "p99": 37.76926271115371,
+        "mean": 25.860655946717696,
+        "std": 4.342761772937815
+      }
+    ],
+    "pgvector_ivfflat": [
+      {
+        "index": "ivfflat",
+        "params": "probes=1",
+        "recall_at_k": 0.37439999999999996,
+        "qps": 2485.7735957777245,
+        "build_ms": 32739.490047999425,
+        "index_bytes": 550551552,
+        "p50": 0.3661979972093832,
+        "p95": 0.6973169965931446,
+        "p99": 1.0346412543003676,
+        "mean": 0.40641235356451944,
+        "std": 0.15441106137123412
+      },
+      {
+        "index": "ivfflat",
+        "params": "probes=10",
+        "recall_at_k": 0.8660999999999999,
+        "qps": 348.6981853662906,
+        "build_ms": 32739.490047999425,
+        "index_bytes": 550551552,
+        "p50": 2.7176429975952487,
+        "p95": 4.607763750391312,
+        "p99": 5.276304920116665,
+        "mean": 2.9089605880702343,
+        "std": 0.8803668758865405
+      },
+      {
+        "index": "ivfflat",
+        "params": "probes=50",
+        "recall_at_k": 0.9923000000000001,
+        "qps": 71.7756129412639,
+        "build_ms": 32739.490047999425,
+        "index_bytes": 550551552,
+        "p50": 13.481656496878713,
+        "p95": 20.317285899727718,
+        "p99": 23.58218436107563,
+        "mean": 14.028668355980093,
+        "std": 9.092981833289752
+      },
+      {
+        "index": "ivfflat",
+        "params": "probes=100",
+        "recall_at_k": 0.9993000000000001,
+        "qps": 35.979711950620725,
+        "build_ms": 32739.490047999425,
+        "index_bytes": 550551552,
+        "p50": 28.319950997683918,
+        "p95": 35.9793695010012,
+        "p99": 41.11573080655942,
+        "mean": 28.41890519498217,
+        "std": 5.689339834002216
+      }
+    ]
+  },
+  "matched_high_recall_point": {
+    "recall_floor": 0.99,
+    "scann": {
+      "index": "scann",
+      "params": "leaves_to_search=50",
+      "recall_at_k": 0.9909,
+      "qps": 2866.7,
+      "p50": 0.33,
+      "p95": 0.52,
+      "p99": 0.75,
+      "mean_ms": 0.35,
+      "std_ms": 0.09
+    },
+    "theodb_ivfflat": {
+      "index": "theodb_ivfflat",
+      "params": "probes=50",
+      "recall_at_k": 0.9924000000000001,
+      "qps": 77.91121151983064,
+      "build_ms": 575062.912125999,
+      "index_bytes": 537075712,
+      "p50": 12.765203999151709,
+      "p95": 17.581593999784673,
+      "p99": 20.85089138468901,
+      "mean": 13.122015316638377,
+      "std": 2.5242617964600185
+    },
+    "pgvector_ivfflat": {
+      "index": "ivfflat",
+      "params": "probes=50",
+      "recall_at_k": 0.9923000000000001,
+      "qps": 71.7756129412639,
+      "build_ms": 32739.490047999425,
+      "index_bytes": 550551552,
+      "p50": 13.481656496878713,
+      "p95": 20.317285899727718,
+      "p99": 23.58218436107563,
+      "mean": 14.028668355980093,
+      "std": 9.092981833289752
+    }
+  },
+  "verdict_per_dimension": {
+    "recall_at_10": "PARITY",
+    "qps_at_recall_0.99": "GAP",
+    "latency_p50_at_recall_0.99": "GAP",
+    "memory": "INDETERMINATE (different measures \u2014 see caveat: ScaNN peak-RSS vs theodb index bytes)"
+  },
+  "overall_note": "North Star (vector superiority vs AlloyDB): theodb_ivfflat vs the ScaNN algorithm on raw ANN search \u2014 see verdict_per_dimension. theodb's value is vector search INSIDE a transactional database; ScaNN's is a specialized in-memory library. A GAP on raw QPS is honest and expected (ScaNN uses learned anisotropic quantization + SIMD AH; theodb_ivfflat is full-precision IVFFlat)."
+}

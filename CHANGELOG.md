@@ -13,8 +13,19 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- M33 — head-to-head vetorial reproduzível vs **ScaNN OSS** (o algoritmo do índice do AlloyDB; Apache-2.0) no
+  SIFT1M (1M×128), com veredito honesto por dimensão. AlloyDB é GCP-managed (sem execução local), então o
+  fallback sancionado pelo DoD é o ScaNN OSS. Resultado medido no ponto recall≥0,99: **paridade de recall@10**
+  (ambos ≥0,99), mas **GAP de throughput/latência** — ScaNN ~37× QPS e ~39× menor p50 que `theodb_ivfflat`
+  (quantização anisotrópica + AH SIMD vs IVFFlat full-precision). A superioridade vetorial em velocidade ANN pura
+  ainda **não está cumprida** (refutada honestamente pela evidência — o diferencial atual é vetorial dentro de um
+  banco transacional, não uma biblioteca in-memory). Novo driver `benchmarks/run_m33_scann.py` + teste CI de
+  fairness da semântica de recall; números theodb/pgvector reusados do artefato M34 (mesmo SIFT1M/hardware/GT).
+  Evidência: `docs/benchmarks/m33-scann-headtohead.{md,json}`.
 
 ### Changed
+- README "Missão": nota de estado medido do pilar vetorial (M33) linkando o benchmark — a claim de superioridade
+  vetorial fica qualificada pelo resultado honesto (paridade de recall, GAP de QPS) por `public-copy.md`.
 
 ### Deprecated
 
