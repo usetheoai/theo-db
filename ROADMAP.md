@@ -352,7 +352,7 @@ que é ~3-4× o esforço/risco do M31 (reescrita de grafo page-native), grande d
 
 ---
 
-### M35 — [ ] theodb_hnsw scan estruturado (partial-read page-native, à la M31 para o grafo)
+### M35 — [x] theodb_hnsw scan estruturado (partial-read page-native, à la M31 para o grafo)
 
 **Objective:** Eliminar o scan O(N) do `theodb_hnsw` (hoje desserializa o blob inteiro por query — ~6.5 GB / ~0.6 s
 a 1M, `hnsw.rs:243`) com uma persistência **estruturada page-native**: tuplas por-nó (element) + por-camada
