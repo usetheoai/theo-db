@@ -315,7 +315,7 @@ próprios vs pgvector em dataset real grande (SIFT1M / GloVe / deep1M), reproduz
 
 **Dependencies:** M31b (benchmarkar o AM com a distância SIMD já otimizada, senão a comparação de escala é injusta). **Risco (MÉDIO):** custo de infra/tempo do dataset grande; determinismo do QPS.
 
-### M33 — [ ] Head-to-head medido vs AlloyDB/ScaNN (o claim de superioridade)
+### M33 — [x] Head-to-head medido vs AlloyDB/ScaNN (o claim de superioridade)
 
 **Objective:** Fechar o pilar do North Star — comparação medida vs o alvo SOTA (AlloyDB ScaNN, ou ScaNN
 standalone se o acesso ao AlloyDB for bloqueado), produzindo o artefato reproduzível que sustenta (ou
