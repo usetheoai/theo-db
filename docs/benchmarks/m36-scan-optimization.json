@@ -1,0 +1,32 @@
+{
+  "milestone": "M36",
+  "phase": "1 — lazy min-heap top-K (replaces the O(C·log C) full sort)",
+  "dataset": "synthetic 200000×128 (distinct, seed 42)",
+  "hardware": {
+    "cpu": "13th Gen Intel(R) Core(TM) i7-1355U",
+    "cores": 12,
+    "ram_gb": 15.3,
+    "avx2": true,
+    "note": "mobile CPU, thermal-throttled, single-thread; absolute numbers understate a server; measured under reduced container load"
+  },
+  "method": "end-to-end query latency for ORDER BY embedding <-> q LIMIT 10, best-of-5 runs × 2 passes (min mean), 200 queries seed 7; baseline = theo-db:m35 (full sort), optimized = theo-db:m36 (lazy heap); IDENTICAL data/index/probes on both",
+  "recall": "IDENTICAL by construction — the heap emits the same (dist,tid) ascending order as the old sort (byte-identical top-K); proven by 61 coexistence tests returning the same kNN ids (test_index_am/test_hnsw_structured/test_reloption/test_ann_index/test_sbq_index)",
+  "measurement_first_finding": "the M36 profiler (THEODB_SCAN_PROFILE) falsified the original 'quantize the distance' premise: distance is ~15% of scan cost; the bottlenecks are reads (~44-51%) and sort (~35-41%). Phase 1 attacks sort.",
+  "profiler_sort_phase": {
+    "note": "amrescan-side phase, probes=50, cand=50332, THEODB_SCAN_PROFILE=1",
+    "m35_sort_us": "~10000-15000",
+    "m36_heapify_us": "~760-1130",
+    "reduction": "~10-13× on the sort/heapify phase (O(C·log C) full sort → O(C) heapify; per-pop O(log C)×k moved to amgettuple, bounded by the executor LIMIT)"
+  },
+  "results": [
+    {"probes": 10, "k": 10, "sort_qps": 459.3, "heap_qps": 635.0, "speedup": 1.38},
+    {"probes": 50, "k": 10, "sort_qps": 100.8, "heap_qps": 208.3, "speedup": 2.07},
+    {"probes": 100, "k": 10, "sort_qps": 58.8, "heap_qps": 103.8, "speedup": 1.77}
+  ],
+  "verdict": {
+    "sort_phase_closed": true,
+    "end_to_end_speedup": "1.38–2.07× (grows with candidate count / probes), recall identical",
+    "closes_scann_gap": "partially — this attacks the ~35-41% sort phase. The remaining ~44-51% reads phase is M36 Phase 2 (smaller quantized codes to cut I/O + f32 rerank). The full ScaNN gap (~25×, M33) also needs harder candidate pruning. HONEST: this is a real ~1.4-2.1× scan speedup at preserved recall, NOT '25× from the sort alone'."
+  },
+  "reproduction": "PGPORT=<port> python3 benchmarks/run_m36_scan.py --n 200000 --probes 50 --k 10 --runs 5 --label <sort|heap>  (baseline on theo-db:m35, optimized on theo-db:m36)"
+}

@@ -371,27 +371,28 @@ de risco. Único milestone dedicado por design (evita re-trabalho de cramar no M
 
 ---
 
-### M36 — [ ] Quantização-no-índice (fechar o gap de QPS vs ScaNN — o P0 do North Star)
+### M36 — [ ] Otimização do scan do índice: sort top-K + I/O quantizada (RE-ESCOPADO por medição)
 
-**Objective:** Reduzir o custo POR CANDIDATO no scan do índice, de distância full-precision f32 (128 dims,
-`vec.rs:167` `l2_dist_from_bytes`, chamado no laço quente `am/scan.rs`) para **distância assimétrica sobre códigos
-quantizados** + rerank f32 do top over_fetch — atacando o gap de **~24.6× em QPS** que o M33 mediu vs o ScaNN (o
-algoritmo do índice do AlloyDB) no recall≥0.99 (`docs/benchmarks/m33-scann-headtohead.json`), mantendo o recall em
-paridade (medido, anti-sunk-cost). É a única peça restante do North Star de superioridade vetorial (ADR
-`docs/adr/0002-north-star-equal-or-superior-to-alloydb.md`); o Conselho (`council-vector-ann`) identificou como o
-maior impacto.
+**Objective:** Reduzir o custo de scan do índice atacando os gargalos **MEDIDOS** (não os supostos). O gate
+measurement-first do M36 (`THEODB_SCAN_PROFILE=1`, blueprint
+`.claude/knowledge-base/discoveries/blueprints/m36-quantization-in-index-blueprint.md`) FALSIFICOU a premissa
+original: a distância full-precision é **~15%** do custo de scan, não o gargalo. Os gargalos reais, estáveis em 3
+pontos de probes, são **`reads` (I/O de página) ~44–51%** e **`sort` (ordenar TODOS os candidatos, `am/scan.rs:109`)
+~35–41%**. M36 ataca esses dois. Contribui para o gap de ~25× vs ScaNN medido no M33
+(`docs/benchmarks/m33-scann-headtohead.json`) — honestamente uma fração via sort+reads, NÃO "25× da distância"
+(ADR-1 do blueprint). North Star: `docs/adr/0002-north-star-equal-or-superior-to-alloydb.md`.
 
 **Definition of done:**
 
-- [ ] **Pré-requisito medido:** `THEODB_SCAN_PROFILE=1` confirma que o custo de distância (`score_us`) domina o de I/O (`reads_us`) a probes=50/1M — provando que a distância é o gargalo antes de otimizá-la (measurement-first).
-- [ ] Distância assimétrica sobre códigos quantizados no scan do índice: SBQ-assimétrico primeiro (reusa `theodb_rs/src/sbq.rs`, M22), com códigos persistidos nas páginas de lista/element (`am/page.rs` + build) e novo kernel em `vec.rs` ao lado de `l2_dist_from_bytes`; rerank f32 do top over_fetch.
-- [ ] **Recall em paridade preservado (≥ 0.99 no ponto casado)** — se SBQ-1bit estagnar < 0.99 mesmo com over_fetch, escalar para PQ/ADC com LUT SIMD (o algoritmo ScaNN real); a bifurcação é decidida por benchmark + ADR, não por opinião.
-- [ ] Benchmark reproduzível `docs/benchmarks/m36-quantization-in-index.json` (mesmo shape do M33, ponto casado ≥0.99), reusando `benchmarks/theodb_bench/`, comparado vs theodb_ivfflat (77.9 QPS) e ScaNN (1920.3 QPS). Delta de QPS medido, não suposto.
+- [x] **Pré-requisito medido (concluído):** `THEODB_SCAN_PROFILE=1` mediu a divisão de fases — distância ~15%, reads ~44–51%, sort ~35–41% (200k×128, 3 pontos de probes). A premissa "distância domina" está falsificada; o milestone foi re-escopado para os gargalos reais.
+- [ ] **Sort → heap top-K limitado** (ADR-2, primeiro slice, zero risco de recall): substituir `results.sort_by` sobre TODOS os candidatos (`am/scan.rs:109` ivf + `:188` hnsw-pending) por um heap/partial-sort de tamanho K → O(C·log K) em vez de O(C·log C). Resultado top-K **idêntico** (o heap não muda o ranking, só o custo). Ganho medido via `THEODB_SCAN_PROFILE` + benchmark.
+- [ ] **Reads → códigos quantizados menores no scan + rerank f32** (reusa `theodb_rs/src/sbq.rs`, M22): persistir códigos SBQ nas páginas de lista (`am/page.rs` + build) para cortar bytes/candidato lidos (16 B vs 512 B em dim=128), pontuar por Hamming/assimétrico, rerank f32 do top over_fetch. **Recall preservado (≥ baseline no ponto casado)** como gate; se SBQ-1bit regredir, escalar via ADR.
+- [ ] Benchmark reproduzível `docs/benchmarks/m36-scan-optimization.{md,json}` (reusa `benchmarks/theodb_bench/`), mostrando o ganho de QPS medido a recall preservado vs o baseline pré-M36, e quanto do gap do M33 fecha — honesto (sort+reads, não distância). Delta medido, não suposto.
 
-**Dependencies:** M22 (`sbq.rs` existe), M34 (infra reloption/GUC), M35 (scan estruturado onde o codec entra), M33
-(o gap-baseline). **Risco (ALTO):** o perigo é **regressão de recall** — quantização barata (SBQ-1bit) pode tetar
-abaixo de 0.99, forçando a escalada a PQ/ADC (esforço maior). Todos os deltas de QPS são **UNBENCHMARKED** até o
-`m36-*.json` existir.
+**Dependencies:** M22 (`sbq.rs`), M34 (infra reloption/GUC), M35 (scan estruturado). **Risco (MÉDIO):** o heap
+top-K é correção pura de complexidade (zero risco de recall); a quantização de I/O tem risco de recall (SBQ-1bit
+teta ~0.86 no protótipo) — mitigado por rerank f32 + gate de recall, entregue como segundo slice após o heap ser
+medido. Deltas de QPS **UNBENCHMARKED** até o `m36-*.json` existir.
 
 ---
 

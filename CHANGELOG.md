@@ -13,6 +13,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- M36 Phase 1 — **otimização do scan do índice: heap top-K lazy** (`am/scan.rs`). O gate measurement-first do M36
+  (`THEODB_SCAN_PROFILE`) FALSIFICOU a premissa original ("quantizar a distância"): a distância é ~15% do custo de
+  scan; os gargalos são `reads` (~44–51%) e `sort` (~35–41%). Phase 1 substitui o `results.sort_by` O(C·log C) de
+  TODOS os candidatos por um heap min lazy (heapify O(C) no `amrescan` + pop O(log C) no `amgettuple` = O(C+k·log C)).
+  Top-K byte-idêntico → **recall inalterado** (61 testes de coexistência retornam os mesmos kNN ids). Speedup
+  end-to-end medido **~1.4–2.1×** (cresce com os probes), recall idêntico. Evidência:
+  `docs/benchmarks/m36-scan-optimization.{md,json}`. Phase 2 (códigos SBQ menores p/ cortar o I/O `reads`) é o
+  próximo slice do M36.
 - Roadmap emendado com 2 milestones novos ao fim (convenção `/roadmap-feature` — nunca renumerar, nunca roadmap
   concorrente): **M36 — Quantização-no-índice** (distância assimétrica sobre códigos quantizados no scan + rerank
   f32; fecha o gap de ~24.6× em QPS vs ScaNN que o M33 mediu — o P0 do North Star; SBQ-primeiro, escalar p/ PQ/ADC
