@@ -302,7 +302,7 @@ escalar/SSE2 4-wide vs a SIMD AVX 8-wide + dispatch de CPU em runtime do pgvecto
 
 **Dependencies:** M31. **Risco (MÉDIO):** portabilidade do dispatch de CPU; paridade numérica f32 da distância SIMD vs a escalar (M20).
 
-### M32 — [ ] Harness de benchmark de escala (1M+ vetores, QPS head-to-head vs pgvector)
+### M32 — [x] Harness de benchmark de escala (1M+ vetores, QPS head-to-head vs pgvector)
 
 **Objective:** Produzir a evidência de escala que hoje é `UNBENCHMARKED` — QPS/recall/latência dos AMs
 próprios vs pgvector em dataset real grande (SIFT1M / GloVe / deep1M), reproduzível.
