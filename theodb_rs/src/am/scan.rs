@@ -150,9 +150,14 @@ unsafe fn scan_ivf_structured(rel: pg_sys::Relation, query: &[f32]) -> Vec<(i64,
     let t_sort = std::time::Instant::now();
     results.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(&b.0)));
     if profile {
+        // Phase attribution for the scan (opt-in observability — the wiring-triad runtime metric). `nonempty`
+        // surfaces list-balance health: a near-1 value on distinct data signals a degenerate build/corpus.
         let sort_us = t_sort.elapsed().as_micros();
+        let nonempty = meta.dir.iter().filter(|(_, _, c)| *c > 0).count();
         pg_sys::warning!(
-            "theodb scan profile: cand={cand} reads={read_us}us score={score_us}us sort={sort_us}us"
+            "theodb scan profile: cand={cand} nonempty_lists={nonempty}/{} probes={probes} \
+             reads={read_us}us score={score_us}us sort={sort_us}us",
+            meta.centroids.len()
         );
     }
     results
