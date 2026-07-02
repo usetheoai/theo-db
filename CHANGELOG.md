@@ -13,6 +13,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- M34 — `theodb_ivfflat` now accepts a configurable `lists` build reloption (`CREATE INDEX … WITH (lists=N)`) and a
+  `theodb_ivfflat.probes` scan GUC (`SET theodb_ivfflat.probes = N`), mirroring pgvector's ivfflat knobs (pgrx
+  `amoptions` + `GucRegistry`). Defaults preserve prior behavior (lists=100, probes=10); out-of-range values are
+  rejected at DDL/SET. Closes the ~8× QPS gap M32 measured at 1M (well-tuned `lists=√N` scans ~10k candidates, not
+  ~100k). A VACUUM fold preserves the built list count. Evidence: `docs/benchmarks/m34-ivfflat-reloption.{md,json}`.
 - Roadmap amended: added M34 — theodb_ivfflat QPS a escala (lists/probes configuráveis via reloption + GUC) and
   M35 — theodb_hnsw scan estruturado page-native (`/roadmap-feature theodb-ann-qps-scale`). The two QPS levers M32
   measured (~8× gap vs pgvector at 1M); split into two milestones after discovery sized the HNSW structured scan at

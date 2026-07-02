@@ -9,9 +9,9 @@ use crate::am::tid;
 use crate::ann::{HnswIndex, IvfflatIndex, Metric};
 use pgrx::prelude::*;
 
-/// Number of IVFFlat lists (centroids) for the persisted build. A fixed sensible default for the MVP (the
-/// SQL-callable path exposes `lists`; a reloption follows in a later phase). Clamped to corpus size internally.
-const DEFAULT_LISTS: usize = 100;
+/// Default IVFFlat list count — the reloption default lives in `options::DEFAULT_LISTS` (M34). Re-exported here for
+/// the empty/HNSW build paths that don't read the reloption.
+use crate::am::options::{lists_from_relation, DEFAULT_LISTS};
 /// HNSW build params for the persisted AM (mirror the SQL-callable defaults).
 const HNSW_M: usize = 16;
 const HNSW_EF_CONSTRUCTION: usize = 64;
@@ -61,7 +61,8 @@ pub extern "C-unwind" fn ambuild(
 ) -> *mut pg_sys::IndexBuildResult {
     unsafe {
         let (corpus, ntuples) = collect_corpus(heaprel, indexrel, index_info);
-        let idx = IvfflatIndex::build(&corpus, DEFAULT_LISTS, Metric::L2, BUILD_SEED);
+        let lists = lists_from_relation(indexrel); // M34 — WITH (lists=N), default 100
+        let idx = IvfflatIndex::build(&corpus, lists, Metric::L2, BUILD_SEED);
         // M31: persist in the STRUCTURED layout (meta + centroids + per-list pages) so scans read only probed
         // lists (O(probes)), not the whole blob (O(N)).
         let dim = corpus.first().map(|(_, v)| v.len()).unwrap_or(0) as u32;
@@ -207,7 +208,9 @@ unsafe fn vacuum_rebuild_structured(indexrel: pg_sys::Relation, dead: &mut dyn F
     }
     let live: Vec<(i64, Vec<f32>)> = all.into_iter().filter(|(id, _)| !dead(*id)).collect();
     let dim = live.first().map(|(_, v)| v.len()).unwrap_or(meta.dim as usize) as u32;
-    let idx = IvfflatIndex::build(&live, DEFAULT_LISTS, metric, BUILD_SEED);
+    // M34 — a VACUUM fold preserves the built list count (WITH (lists=N)); reverting to the default would silently
+    // re-partition a tuned index.
+    let idx = IvfflatIndex::build(&live, lists_from_relation(indexrel), metric, BUILD_SEED);
     page::rewrite_ivf_structured(indexrel, dim, metric.tag(), idx.centroids(), &idx.list_entries());
     live.len()
 }
