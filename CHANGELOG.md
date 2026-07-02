@@ -13,6 +13,20 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.30.0] - 2026-07-02
+
+### Added
 - M34 — `theodb_ivfflat` now accepts a configurable `lists` build reloption (`CREATE INDEX … WITH (lists=N)`) and a
   `theodb_ivfflat.probes` scan GUC (`SET theodb_ivfflat.probes = N`), mirroring pgvector's ivfflat knobs (pgrx
   `amoptions` + `GucRegistry`). Defaults preserve prior behavior (lists=100, probes=10); out-of-range values are
@@ -26,19 +40,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   measured (~8× gap vs pgvector at 1M); split into two milestones after discovery sized the HNSW structured scan at
   ~3-4× the M31 effort (too large + risky to bundle without rework). M34 precedes M33 strategically.
 
+
 ### Changed
 - **BREAKING (index format) — M34 bumps the `theodb_ivfflat` structured on-disk format to v2** (the per-list
   directory is now page-chunked so `lists` is no longer capped at ~665). `theodb_ivfflat` indexes built on
   v0.27.0–v0.29.0 (format v1) are rejected on read with a typed `REINDEX to upgrade` error — **REINDEX any
   `theodb_ivfflat` index after upgrading.** `theodb_hnsw` and the SQL-callable distance ops are unaffected.
-
-### Deprecated
-
-### Removed
-
-### Fixed
-
-### Security
 
 ## [0.29.0] - 2026-07-02
 
