@@ -9,8 +9,8 @@ use crate::am::{page, tid};
 use crate::ann::Metric;
 use pgrx::prelude::*;
 
-/// Lists probed per structured IVFFlat scan (bounds the pages read — the partial-read win, M31).
-const SCAN_PROBES: usize = 10;
+// Lists probed per structured IVFFlat scan (bounds the pages read — the partial-read win, M31). M34: read from the
+// `theodb_ivfflat.probes` GUC (default 10) instead of a fixed constant; still clamped to the actual list count.
 
 struct ScanState {
     results: Vec<(i64, f64)>,
@@ -90,7 +90,7 @@ unsafe fn scan_ivf_structured(rel: pg_sys::Relation, query: &[f32]) -> Vec<(i64,
     let mut cd: Vec<(f64, usize)> =
         meta.centroids.iter().enumerate().map(|(i, c)| (metric.dist(query, c), i)).collect();
     cd.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    let probes = SCAN_PROBES.clamp(1, meta.centroids.len().max(1));
+    let probes = crate::am::guc::probes().clamp(1, meta.centroids.len().max(1));
     let dim = meta.dim as usize;
     let entry = 8 + dim * 4;
 

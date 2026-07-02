@@ -16,6 +16,15 @@
 
 ::pgrx::pg_module_magic!();
 
+/// Extension load hook (M34) — registers the `theodb_ivfflat` reloption kind (`WITH (lists=N)`) and the
+/// `theodb_ivfflat.probes` scan GUC. Runs once in the postmaster before any DDL (pgrx honors a user `_PG_init`).
+#[allow(non_snake_case)]
+#[::pgrx::pg_guard]
+pub unsafe extern "C-unwind" fn _PG_init() {
+    am::options::init();
+    am::guc::init();
+}
+
 mod am;
 mod ann;
 mod ann_query;

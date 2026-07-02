@@ -331,18 +331,30 @@ unsafe fn main_index_pages(rel: pg_sys::Relation) -> Result<u32, String> {
     }
     let magic = u32::from_le_bytes(m[0..4].try_into().unwrap());
     if magic == IVF_STRUCT_MAGIC {
-        if m.len() < 21 {
+        if m.len() < 25 {
             return Err("theodb am: truncated structured meta".into());
         }
+        // Version-gate BEFORE parsing v2 offsets — a v1 index (M31/M31b, magic identical) has a different header
+        // layout, so reading `dir_npages`/`centroid_npages` at the v2 offsets would misparse and yield a bogus
+        // pending offset (silently dropping INSERTed rows). Reject v1 with the same REINDEX error read_ivf_meta uses.
+        let ver = u32::from_le_bytes(m[4..8].try_into().unwrap());
+        if ver != 2 {
+            return Err(format!(
+                "theodb am: unsupported structured format v{ver} — REINDEX to upgrade to the M34 page-chunked directory (v2)"
+            ));
+        }
         let nlists = u32::from_le_bytes(m[13..17].try_into().unwrap()) as usize;
-        let centroid_npages = u32::from_le_bytes(m[17..21].try_into().unwrap());
-        let mut total = 1 + centroid_npages;
+        let dir_npages = u32::from_le_bytes(m[17..21].try_into().unwrap());
+        let centroid_npages = u32::from_le_bytes(m[21..25].try_into().unwrap());
+        // M34 v2: the directory is on its own pages — read it to sum the per-list npages.
+        let dbytes = read_chunked(rel, 1, dir_npages)?;
+        if dbytes.len() < nlists * 12 {
+            return Err("theodb am: truncated directory".into());
+        }
+        let mut total = 1u32.saturating_add(dir_npages).saturating_add(centroid_npages);
         for i in 0..nlists {
-            let o = 21 + i * 12 + 4; // dir entry npages field
-            if m.len() < o + 4 {
-                return Err("theodb am: truncated directory".into());
-            }
-            total = total.saturating_add(u32::from_le_bytes(m[o..o + 4].try_into().unwrap()));
+            let o = i * 12 + 4; // np field within the 12-byte dir entry
+            total = total.saturating_add(u32::from_le_bytes(dbytes[o..o + 4].try_into().unwrap()));
         }
         Ok(total)
     } else {
@@ -400,29 +412,35 @@ fn structured_page_items(
     let centroid_npages = npages_for(cbytes.len());
     let encoded: Vec<Vec<u8>> = lists.iter().map(|l| encode_list(l)).collect();
 
-    let mut cursor = 1 + centroid_npages;
+    // The per-list directory lives on its OWN chunked page range (M34, format v2) — NOT inline on the meta page —
+    // so `lists` is no longer bounded by a single page (CHUNK=8000 → ~665 lists at 12 B/entry). Layout:
+    // meta header · dir pages · centroid pages · per-list pages.
+    let dir_npages = npages_for(nlists as usize * 12);
+    let mut cursor = 1 + dir_npages + centroid_npages;
     let mut dir: Vec<(u32, u32, u32)> = Vec::with_capacity(lists.len());
     for (i, enc) in encoded.iter().enumerate() {
         let np = npages_for(enc.len());
         dir.push((cursor, np, lists[i].len() as u32));
         cursor += np;
     }
+    let mut dirbytes = Vec::with_capacity(dir.len() * 12);
+    for (fb, np, cnt) in &dir {
+        dirbytes.extend_from_slice(&fb.to_le_bytes());
+        dirbytes.extend_from_slice(&np.to_le_bytes());
+        dirbytes.extend_from_slice(&cnt.to_le_bytes());
+    }
 
-    let mut meta = Vec::with_capacity(24 + dir.len() * 12);
+    // Meta header (block 0), fixed 25 bytes: magic · ver=2 · metric · dim · nlists · dir_npages · centroid_npages.
+    let mut meta = Vec::with_capacity(25);
     meta.extend_from_slice(&IVF_STRUCT_MAGIC.to_le_bytes());
-    meta.extend_from_slice(&1u32.to_le_bytes());
+    meta.extend_from_slice(&2u32.to_le_bytes()); // format v2 — page-chunked directory (M34)
     meta.push(metric_tag);
     meta.extend_from_slice(&dim.to_le_bytes());
     meta.extend_from_slice(&nlists.to_le_bytes());
+    meta.extend_from_slice(&dir_npages.to_le_bytes());
     meta.extend_from_slice(&centroid_npages.to_le_bytes());
-    for (fb, np, cnt) in &dir {
-        meta.extend_from_slice(&fb.to_le_bytes());
-        meta.extend_from_slice(&np.to_le_bytes());
-        meta.extend_from_slice(&cnt.to_le_bytes());
-    }
-    assert!(meta.len() < CHUNK, "theodb ivf: too many lists for a one-page directory");
 
-    // Flatten into one page-item per page: meta, then centroid chunks, then each list's chunks.
+    // One page-item per page: meta · dir chunks · centroid chunks · each list's chunks.
     let mut items: Vec<Vec<u8>> = vec![meta];
     let push_chunks = |items: &mut Vec<Vec<u8>>, data: &[u8]| {
         if data.is_empty() {
@@ -433,6 +451,7 @@ fn structured_page_items(
             }
         }
     };
+    push_chunks(&mut items, &dirbytes);
     push_chunks(&mut items, &cbytes);
     for enc in &encoded {
         push_chunks(&mut items, enc);
@@ -488,31 +507,39 @@ pub(crate) struct IvfMeta {
 /// Read the meta page + centroid region (small — ∝ nlists, NOT ∝ N). Typed `Err` on corruption.
 pub(crate) unsafe fn read_ivf_meta(rel: pg_sys::Relation) -> Result<IvfMeta, String> {
     let m = read_page_item(rel, 0)?;
-    if m.len() < 21 {
+    if m.len() < 25 {
         return Err("theodb ivf: truncated structured meta".into());
     }
     if u32::from_le_bytes(m[0..4].try_into().unwrap()) != IVF_STRUCT_MAGIC {
         return Err("theodb ivf: bad structured meta magic".into());
     }
+    let ver = u32::from_le_bytes(m[4..8].try_into().unwrap());
+    if ver != 2 {
+        return Err(format!(
+            "theodb ivf: unsupported structured format v{ver} — REINDEX to upgrade to the M34 page-chunked directory (v2)"
+        ));
+    }
     let metric_tag = m[8];
     let dim = u32::from_le_bytes(m[9..13].try_into().unwrap());
     let nlists = u32::from_le_bytes(m[13..17].try_into().unwrap()) as usize;
-    let centroid_npages = u32::from_le_bytes(m[17..21].try_into().unwrap());
-    let dir_off = 21;
-    if m.len() < dir_off + nlists * 12 {
+    let dir_npages = u32::from_le_bytes(m[17..21].try_into().unwrap());
+    let centroid_npages = u32::from_le_bytes(m[21..25].try_into().unwrap());
+    // Directory region (M34, v2): blocks 1..=dir_npages, chunked (no longer inline on the meta page).
+    let dbytes = read_chunked(rel, 1, dir_npages)?;
+    if dbytes.len() < nlists * 12 {
         return Err("theodb ivf: truncated list directory".into());
     }
     let mut dir = Vec::with_capacity(nlists);
     for i in 0..nlists {
-        let o = dir_off + i * 12;
+        let o = i * 12;
         dir.push((
-            u32::from_le_bytes(m[o..o + 4].try_into().unwrap()),
-            u32::from_le_bytes(m[o + 4..o + 8].try_into().unwrap()),
-            u32::from_le_bytes(m[o + 8..o + 12].try_into().unwrap()),
+            u32::from_le_bytes(dbytes[o..o + 4].try_into().unwrap()),
+            u32::from_le_bytes(dbytes[o + 4..o + 8].try_into().unwrap()),
+            u32::from_le_bytes(dbytes[o + 8..o + 12].try_into().unwrap()),
         ));
     }
-    // Centroid region: blocks 1..=centroid_npages.
-    let cbytes = read_chunked(rel, 1, centroid_npages)?;
+    // Centroid region: blocks 1+dir_npages ..= +centroid_npages.
+    let cbytes = read_chunked(rel, 1 + dir_npages, centroid_npages)?;
     let d = dim as usize;
     if d == 0 || cbytes.len() < nlists * d * 4 {
         if nlists == 0 {
