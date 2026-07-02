@@ -99,7 +99,7 @@ impl HnswMeta {
     }
 }
 
-const META_LEN: usize = 4 + 4 + 1 + 4 + 2 + 2 + 4 + 2 + 2 + 4 + 4 + 4 + 4 + 4; // = 47
+const META_LEN: usize = 4 + 4 + 1 + 4 + 2 + 2 + 4 + 2 + 2 + 4 + 4 + 4 + 4 + 4; // = 45 bytes
 
 fn encode_meta(m: &HnswMeta) -> Vec<u8> {
     let mut b = Vec::with_capacity(META_LEN);

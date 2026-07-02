@@ -4,9 +4,10 @@
 Proves the O(N)→O(ef·M) win: replaces the M26 whole-blob deserialize (~6.5 GB/query, 1.6 QPS at 1M in the M32
 artifact) with an on-demand structured traversal reading only visited nodes. Two measurements:
 
-  Part A — recall/QPS/p50 ef_search sweep at 1M (the DoD gate: QPS ≥ 50, recall preserved).
-  Part B — flat-in-N: p50 at 250k vs 1M at the SAME ef_search=100. An O(N) scan would grow p50 ~4× from 250k→1M;
-           an O(ef·M) scan keeps p50 ~flat — the signature of the partial-read traversal.
+  Part A — recall/QPS/p50 ef_search sweep at 1M (the DoD gate: QPS ≥ 50 at recall ≥ the M32 blob's recall).
+  Part B — flat-in-N on PAGES READ (EXPLAIN BUFFERS), the true O(ef·M) metric: at a fixed ef_search the scan
+           touches ~the same page count at 50k and 200k (32-dim synthetic — cheap builds). Wall-clock p50 grows
+           sub-linearly with N (cache misses over a larger index), but the PAGE COUNT is flat — that is O(ef·M).
 
 Repro:
   # container built from this source (has the M35 structured theodb_hnsw):
@@ -134,8 +135,12 @@ def main() -> int:
 
     blob = _m32_blob_hnsw_qps()
 
-    best = max(rep_1m["results"], key=lambda r: r["qps"])  # highest QPS point at 1M
-    best_hi_recall = max((r for r in rep_1m["results"] if r["recall_at_k"] >= 0.90), key=lambda r: r["qps"], default=None)
+    best = max(rep_1m["results"], key=lambda r: r["qps"])  # highest QPS point at 1M (any recall)
+    # "recall preserved" is measured HONESTLY against the M32 blob's recall (not a weaker fixed 0.90 bar): the
+    # matched-recall operating point is the highest-QPS point that still reaches ≥ the blob's recall.
+    blob_recall = (blob or {}).get("recall_at_k", 0.0)
+    preserved = [r for r in rep_1m["results"] if r["recall_at_k"] >= blob_recall]
+    best_preserved = max(preserved, key=lambda r: r["qps"]) if preserved else None
 
     result = {
         "milestone": "M35",
@@ -158,11 +163,19 @@ def main() -> int:
                      "misses over a larger index), but the PAGE COUNT — what O(N) vs O(ef·M) is about — is flat."),
         },
         "verdict": {
-            "qps_ge_50_at_1m": bool(best and best["qps"] >= 50),
-            "best_qps_1m": (best or {}).get("qps"),
-            "best_qps_at_recall_0.90": (best_hi_recall or {}).get("qps"),
-            "recall_preserved": bool(best_hi_recall),
-            "speedup_vs_m32_blob": (round(best["qps"] / blob["qps"], 1) if (best and blob and blob.get("qps")) else None),
+            "blob_recall_bar": blob_recall,
+            "recall_preserved_vs_blob": best_preserved is not None,
+            "matched_recall_point": (
+                {"params": best_preserved["params"], "recall": best_preserved["recall_at_k"], "qps": best_preserved["qps"]}
+                if best_preserved else None),
+            "qps_ge_50_at_preserved_recall": bool(best_preserved and best_preserved["qps"] >= 50),
+            "speedup_vs_blob_at_preserved_recall": (
+                round(best_preserved["qps"] / blob["qps"], 1) if (best_preserved and blob and blob.get("qps")) else None),
+            "max_qps_any_recall": {"params": best["params"], "recall": best["recall_at_k"], "qps": best["qps"]},
+            "max_speedup_any_recall": (
+                round(best["qps"] / blob["qps"], 1) if (blob and blob.get("qps")) else None),
+            "build_ms_1m": rep_1m["results"][0]["build_ms"],
+            "blob_baseline_query_count_note": "M32 blob measured over 50 queries (O(N) scan ~4s/query); M35 over 1000.",
         },
     }
     out = Path(args.out)
@@ -178,8 +191,11 @@ def main() -> int:
     pr = " ".join(f"{m['n']}={m['pages_read']}p" for m in fn["measurements"])
     print(f"flat-in-N pages_read (ef=100): {pr}  ratio={fn['pages_read_ratio']}x (N grew {fn['n_ratio']:.0f}x) => {fn['verdict']}")
     v = result["verdict"]
-    print(f"verdict: QPS>=50@1M={v['qps_ge_50_at_1m']} best_qps={v['best_qps_1m']:.1f} "
-          f"speedup_vs_M32_blob={v['speedup_vs_m32_blob']}x")
+    mp = v["matched_recall_point"]
+    print(f"verdict: recall_preserved_vs_blob(≥{v['blob_recall_bar']:.3f})={v['recall_preserved_vs_blob']} "
+          f"matched-recall point {mp['params']} recall={mp['recall']:.4f} qps={mp['qps']:.1f} "
+          f"(~{v['speedup_vs_blob_at_preserved_recall']}× vs blob); max {v['max_qps_any_recall']['qps']:.1f} qps "
+          f"@ recall {v['max_qps_any_recall']['recall']:.3f} (~{v['max_speedup_any_recall']}×)")
     print(f"artifact -> {out}/m35-hnsw-structured-scan.json")
     return 0
 
@@ -218,24 +234,39 @@ def _render_md(r) -> str:
     L.append("| params | recall@10 | QPS | p50 (ms) | p95 (ms) | build (ms) | index bytes |")
     L.append("|---|---|---|---|---|---|---|")
     for row in r["results_1m"]:
+        p95 = row.get("p95")
+        p95s = f"{p95:.2f}" if isinstance(p95, (int, float)) else "-"
         L.append(f"| {row['params']} | {row['recall_at_k']:.4f} | {row['qps']:.1f} | {row['p50']:.2f} | "
-                 f"{row.get('p95','-')} | {row['build_ms']:.0f} | {row['index_bytes']} |")
+                 f"{p95s} | {row['build_ms']:.0f} | {row['index_bytes']} |")
     b = r["baseline_m32_blob_hnsw"]
     v = r["verdict"]
     if b:
-        L.append(f"\n**vs the M32 O(N) blob scan:** theodb_hnsw blob was **{b['qps']:.1f} QPS** "
-                 f"(recall {b['recall_at_k']:.4f}) at 1M — the M35 structured scan reaches **{v['best_qps_1m']:.1f} QPS** "
-                 f"(**~{v['speedup_vs_m32_blob']}× faster**), the O(N)→O(ef·M) win.\n")
+        mp = v["matched_recall_point"]
+        L.append(f"\n**vs the M32 O(N) blob scan (honest, matched recall):** the blob was **{b['qps']:.1f} QPS** at "
+                 f"recall **{b['recall_at_k']:.4f}** at 1M (over 50 queries — its O(N) scan is ~4 s/query). At the "
+                 f"**matched-recall** operating point `{mp['params']}` (recall {mp['recall']:.4f} ≥ the blob's "
+                 f"{b['recall_at_k']:.3f}), the M35 structured scan reaches **{mp['qps']:.1f} QPS** — "
+                 f"**~{v['speedup_vs_blob_at_preserved_recall']}× faster at preserved recall**. If a recall drop to "
+                 f"{v['max_qps_any_recall']['recall']:.3f} is acceptable (`{v['max_qps_any_recall']['params']}`), QPS "
+                 f"rises to {v['max_qps_any_recall']['qps']:.1f} (~{v['max_speedup_any_recall']}×). The O(N)→O(ef·M) win.\n")
+        L.append(f"**Trade-off (honest):** the structured build is ~{v['build_ms_1m'] / 60000:.1f} min at 1M "
+                 f"(single-thread graph construction) — build-once / scan-many. `theodb_hnsw` build got slower vs the "
+                 f"blob; the scan is the ~{v['speedup_vs_blob_at_preserved_recall']}× win.\n")
     fn = r["flat_in_n_pages_read"]
     L.append("## Flat-in-N — pages read (the O(ef·M) signature)\n")
     pr = " · ".join(f"**{m['pages_read']} pages @ {m['n']:,}**" for m in fn["measurements"])
-    L.append(f"At a fixed `ef_search={fn['ef_search']}` the index scan touches: {pr} — a "
-             f"**{fn['pages_read_ratio']}× page-count ratio while N grew {fn['n_ratio']:.0f}×** ⇒ **{fn['verdict']}**. "
-             f"{fn['note']}\n")
+    L.append(f"Measured on **{_FLAT_DIM}-dim seeded-synthetic** vectors at **{_FLAT_SCALES[0]:,}→{_FLAT_SCALES[-1]:,}** "
+             f"(a scale where builds are cheap — NOT the SIFT1M 128-dim workload of the QPS table above; this "
+             f"demonstrates the page-count invariance, it is not re-validated at 1M). At a fixed "
+             f"`ef_search={fn['ef_search']}` the index scan touches: {pr} — a **{fn['pages_read_ratio']}× page-count "
+             f"ratio while N grew {fn['n_ratio']:.0f}×** ⇒ **{fn['verdict']}**. {fn['note']}\n")
     L.append("## Verdict\n")
-    L.append(f"- QPS ≥ 50 at 1M: **{v['qps_ge_50_at_1m']}** (best {v['best_qps_1m']:.1f} QPS)\n"
-             f"- recall preserved (a ≥0.90 recall point exists): **{v['recall_preserved']}** "
-             f"(best QPS at recall≥0.90: {v['best_qps_at_recall_0.90']})\n")
+    mp = v["matched_recall_point"]
+    L.append(f"- **recall preserved vs the M32 blob** (≥ {v['blob_recall_bar']:.3f}): **{v['recall_preserved_vs_blob']}** — "
+             f"matched-recall point `{mp['params']}` at recall {mp['recall']:.4f}, **{mp['qps']:.1f} QPS**\n"
+             f"- QPS ≥ 50 at the preserved-recall point: **{v['qps_ge_50_at_preserved_recall']}**\n"
+             f"- honest speedup at preserved recall: **~{v['speedup_vs_blob_at_preserved_recall']}×**; "
+             f"up to ~{v['max_speedup_any_recall']}× if recall {v['max_qps_any_recall']['recall']:.3f} is acceptable\n")
     L.append("## Reproduction\n")
     L.append("```\nPGPORT=<port> python3 benchmarks/run_m35_hnsw.py --n-queries 1000 --runs 3\n```\n")
     return "\n".join(L)

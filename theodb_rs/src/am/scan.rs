@@ -87,6 +87,12 @@ unsafe fn scan_hnsw_structured(rel: pg_sys::Relation, query: &[f32]) -> Vec<(i64
         Some(m) => m,
         None => pg_sys::error!("theodb am scan: unknown metric tag"),
     };
+    // Fail-fast with a typed error (mirrors pgvector's "different vector dimensions") instead of letting a
+    // cross-dim query reach the SIMD scorer's length assertion as a bare panic across the C boundary. Only when
+    // the index has nodes: an empty index carries dim=0 and traverse short-circuits to [] regardless of the query.
+    if meta.node_count > 0 && query.len() != meta.dim as usize {
+        pg_sys::error!("theodb hnsw: query dim {} != index dim {}", query.len(), meta.dim);
+    }
     let ef = crate::am::guc::ef_search();
     let mut results = match crate::am::hnsw_page::traverse(rel, &meta, query, ef) {
         Ok(r) => r,

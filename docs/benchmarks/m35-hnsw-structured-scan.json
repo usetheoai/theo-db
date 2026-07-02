@@ -70,11 +70,23 @@
     "std": 15.441104383040587
   },
   "verdict": {
-    "qps_ge_50_at_1m": true,
-    "best_qps_1m": 318.88464620213966,
-    "best_qps_at_recall_0.90": 318.88464620213966,
-    "recall_preserved": true,
-    "speedup_vs_m32_blob": 193.7
+    "blob_recall_bar": 0.9640000000000001,
+    "recall_preserved_vs_blob": true,
+    "matched_recall_point": {
+      "params": "ef_search=100",
+      "recall": 0.9789,
+      "qps": 100.4414931457105
+    },
+    "qps_ge_50_at_preserved_recall": true,
+    "speedup_vs_blob_at_preserved_recall": 61.0,
+    "max_qps_any_recall": {
+      "params": "ef_search=40",
+      "recall": 0.9272,
+      "qps": 318.88464620213966
+    },
+    "max_speedup_any_recall": 193.7,
+    "build_ms_1m": 1050545.6801239997,
+    "blob_baseline_query_count_note": "M32 blob measured over 50 queries (O(N) scan ~4s/query); M35 over 1000."
   },
   "flat_in_n_pages_read": {
     "ef_search": 100,
