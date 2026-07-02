@@ -134,6 +134,18 @@ def test_ef_search_guc_is_honored():
     conn.close()
 
 
+def test_single_node_graph():
+    """A one-row graph: the entry node is the only node (no neighbor tuple to deref) — must return it, no crash."""
+    conn = _conn()
+    cur = conn.cursor()
+    _seed(cur, n=1)
+    cur.execute("CREATE INDEX h_idx ON hrel USING theodb_hnsw (embedding)")
+    cur.execute("SET enable_seqscan=off; SET enable_indexscan=on")
+    cur.execute(f"SELECT id FROM hrel ORDER BY embedding <-> '{_qvec()}' LIMIT 5")
+    assert [r[0] for r in cur.fetchall()] == [1], "single-node graph must return its only row"
+    conn.close()
+
+
 def test_empty_index_and_null_query_are_safe():
     """An index on an empty table + a NULL ORDER BY key return no rows without crashing."""
     conn = _conn()
