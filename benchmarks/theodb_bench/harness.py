@@ -52,21 +52,27 @@ def run_benchmark(config: dict, db, out_dir) -> dict:
     results = []
     for spec in config["index_specs"]:
         build_ms = db.build_index(spec["ddl"]) * 1000.0
+        # A spec MAY cap its query count (`query_cap`): an O(N)-per-query index (e.g. theodb_hnsw's whole-blob
+        # scan, ~4 s/query at 1M) would make the full query set take hours. Capping keeps the run tractable while
+        # still yielding a valid recall/percentile sample; the cap is recorded in the params label for honesty.
+        cap = spec.get("query_cap")
+        q_set = queries if cap is None else queries[:cap]
+        gt_set = gt_dist if cap is None else gt_dist[:cap]
         for params in spec.get("sweep", [{}]):
             for stmt in params.get("session", []):
                 db.set_session(stmt)
             # guard once: confirm the planner actually uses the index
-            db.assert_index_used(config["table"], queries[0], config["k"], config["metric"])
+            db.assert_index_used(config["table"], q_set[0], config["k"], config["metric"])
 
             # untimed warmup pass so the timed runs (and percentiles) describe a warm cache,
             # consistent with the best-of-N QPS (domain review M2).
-            for q in queries:
+            for q in q_set:
                 db.query_topk(config["table"], q, config["k"], config["metric"])
 
             run_means, all_latency_ms, last_run_dists = [], [], None
             for _ in range(config["runs"]):
                 lat, run_dists = [], []
-                for q in queries:
+                for q in q_set:
                     _ids, dists, t = db.query_topk(config["table"], q, config["k"], config["metric"])
                     lat.append(t)
                     run_dists.append(dists)
@@ -74,12 +80,15 @@ def run_benchmark(config: dict, db, out_dir) -> dict:
                 all_latency_ms.extend(x * 1000.0 for x in lat)
                 last_run_dists = run_dists
 
-            recall = recall_at_k(gt_dist, last_run_dists, config["k"])
+            recall = recall_at_k(gt_set, last_run_dists, config["k"])
             pct = latency_percentiles(all_latency_ms)
+            label = params.get("label", "")
+            if cap is not None:
+                label = f"{label} [q={len(q_set)}]".strip()
             results.append(
                 {
                     "index": spec["name"],
-                    "params": params.get("label", ""),
+                    "params": label,
                     "recall_at_k": recall,
                     "qps": qps_best_of_n(run_means),
                     "build_ms": build_ms,

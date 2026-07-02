@@ -42,6 +42,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="load the FULL HDF5 train (no subsample) + derive exact GT from the file's `neighbors` dataset "
         "(M32 >=1M scale path); requires --hdf5 with a `neighbors` dataset",
     )
+    p.add_argument(
+        "--theodb-hnsw-query-cap",
+        type=int,
+        default=None,
+        help="cap the query sample for theodb_hnsw only (its scan is O(N)-per-query — whole-blob deserialize, "
+        "~4 s/query at 1M); keeps a scale run tractable. Recorded in the result label.",
+    )
     p.add_argument("--dsn", default=None, help="libpq DSN (else built from PG* env vars)")
     p.add_argument("--out", default="docs/benchmarks")
     return p
@@ -57,16 +64,21 @@ def _dsn_from_env() -> str:
     )
 
 
-def _theodb_spec(am: str, table: str) -> dict:
+def _theodb_spec(am: str, table: str, query_cap: int | None = None) -> dict:
     # theodb's M26/M31 persisted AMs (theodb_ivfflat / theodb_hnsw) have NO query-time knob — SCAN_PROBES /
     # SCAN_EF are fixed Rust constants (M32 ADR-3). So a single fixed operating point (no ef/probes sweep):
     # just force the index on. l2-only (theodb exposes {am}_l2_ops; cosine deferred — ADR 0010 / M32 ADR-2).
-    return {
+    # query_cap: theodb_hnsw's scan is O(N)-per-query (whole-blob deserialize; M31's structured partial-read is
+    # ivfflat-only) — ~4 s/query at 1M. Cap its query sample so a scale run stays tractable (recorded in label).
+    spec = {
         "name": am,
         "index_name": f"bench_{am}",
         "ddl": f"CREATE INDEX bench_{am} ON {table} USING {am} (embedding {am}_l2_ops)",
         "sweep": [{"label": "fixed", "session": ["SET enable_seqscan = off"]}],
     }
+    if query_cap is not None:
+        spec["query_cap"] = query_cap
+    return spec
 
 
 def _hnsw_spec(table: str, opclass: str) -> dict:
@@ -167,7 +179,7 @@ def build_config(args: argparse.Namespace) -> dict:
         if want_theodb_ivf:
             specs.append(_theodb_spec("theodb_ivfflat", table))
         if want_theodb_hnsw:
-            specs.append(_theodb_spec("theodb_hnsw", table))
+            specs.append(_theodb_spec("theodb_hnsw", table, query_cap=getattr(args, "theodb_hnsw_query_cap", None)))
     config = {
         "seed": args.seed,
         "n": args.n,

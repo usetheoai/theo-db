@@ -16,7 +16,9 @@ from theodb_bench.__main__ import build_config, build_parser
 from theodb_bench.dataset import load_hdf5_full
 from theodb_bench.recall import brute_force_ground_truth, neighbors_ground_truth
 
-SIFT = "benchmarks/.datasets/sift-128-euclidean.hdf5"
+# Resolve cwd-independently (pytest rootdir may be benchmarks/ or the repo root): the dataset lives at
+# benchmarks/.datasets/ relative to this test file's parent-parent.
+SIFT = str(Path(__file__).resolve().parents[1] / ".datasets" / "sift-128-euclidean.hdf5")
 
 
 def _tiny_hdf5(tmp_path, n=200, dim=8, q=15, k=20, seed=1):
@@ -83,6 +85,67 @@ def test_theodb_specs_l2_only_skips_on_cosine():
     assert "theodb_ivfflat" not in names and "theodb_hnsw" not in names
     for s in cfg["index_specs"]:
         assert "theodb_" not in s["ddl"]
+
+
+def test_theodb_hnsw_query_cap_wired():
+    """--theodb-hnsw-query-cap caps ONLY theodb_hnsw's query sample (its scan is O(N)-per-query)."""
+    cfg = build_config(build_parser().parse_args(
+        ["--index", "4way", "--metric", "l2", "--n", "20000", "--theodb-hnsw-query-cap", "50"]
+    ))
+    by = {s["name"]: s for s in cfg["index_specs"]}
+    assert by["theodb_hnsw"].get("query_cap") == 50
+    # the other three are NOT capped (full query set)
+    for name in ("hnsw", "ivfflat", "theodb_ivfflat"):
+        assert by[name].get("query_cap") is None
+
+
+def test_query_cap_limits_queries_in_harness(tmp_path):
+    """A spec with query_cap=N must run exactly N queries (recall/percentiles over the capped sample)."""
+    from theodb_bench.harness import run_benchmark
+
+    class _CountingDB:
+        def __init__(self):
+            self.topk_calls = 0
+            self.corpus = None
+
+        def ensure_extension(self):
+            pass
+
+        def create_table(self, *a, **k):
+            pass
+
+        def load_vectors(self, table, corpus, embed_col="embedding"):
+            self.corpus = np.asarray(corpus, dtype=np.float64)
+
+        def build_index(self, ddl):
+            return 0.001
+
+        def set_session(self, stmt):
+            pass
+
+        def assert_index_used(self, *a, **k):
+            pass
+
+        def index_size_bytes(self, name):
+            return 123
+
+        def query_topk(self, table, qvec, k, metric="l2", embed_col="embedding"):
+            self.topk_calls += 1
+            # exact top-k from the loaded corpus so recall is well-defined
+            idx, dist = brute_force_ground_truth(self.corpus, np.asarray([qvec]), k, metric)
+            return list(idx[0]), list(dist[0]), 0.001
+
+    db = _CountingDB()
+    cfg = {
+        "seed": 1, "n": 100, "dim": 8, "n_queries": 40, "k": 5, "metric": "l2", "runs": 2,
+        "table": "t",
+        "index_specs": [{"name": "capped", "index_name": "ix", "ddl": "CREATE INDEX ix ...",
+                         "sweep": [{"label": "fixed", "session": []}], "query_cap": 10}],
+    }
+    report = run_benchmark(cfg, db, tmp_path)
+    # warmup(10) + runs(2)*10 = 30 topk calls for the capped spec (NOT 40*3=120)
+    assert db.topk_calls == 30, db.topk_calls
+    assert "[q=10]" in report["results"][0]["params"]
 
 
 @pytest.mark.integration
