@@ -144,3 +144,9 @@ Legenda: 🟢 **ORIGINAL** (ancorado no nosso código) · 🔵 **CURADO** (trilh
 O livro cresce **capítulo a capítulo** (não num único despejo — isso seria raso e alucinado, o oposto de
 FAANG-level). O capítulo 19 é o **template de qualidade**: todo capítulo original deve alcançar aquele nível de
 aterrissagem no código e nos números.
+
+**A máquina que produz capítulos:** a skill [`/deep-research`](../../.claude/skills/deep-research/SKILL.md) executa
+este contrato — pesquisa profunda (nosso sistema + papers + benchmarks + cálculos + técnicas), destila nas 5
+camadas, e o validador `scripts/validate_citations.py` mecaniza o contrato de honestidade (toda citação resolve no
+disco; todo número tem benchmark ou `UNBENCHMARKED`; toda URL no allowlist). Um capítulo só é dado por pronto com
+o validador em **PASS** — como o capítulo 19.

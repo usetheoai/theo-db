@@ -25,6 +25,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   fictícios (inspirados-em, não impersonação); cada agente aponta para o código/ADR/benchmark reais que governa e
   é obrigado a lê-los antes de aconselhar (mesmo contrato de honestidade do handbook). Domínios roadmap
   (distribuído, cloud-native, Go, PG-kernel) adiados honestamente até terem código.
+- Skill `/deep-research` (`.claude/skills/deep-research/`): a máquina que produz capítulos do handbook — pesquisa
+  profunda (nosso sistema via `file:line` + papers/benchmarks/técnicas do SOTA no allowlist + cálculos de
+  complexidade) destilada nas 5 camadas (teoria → matemática → nossa implementação → nosso benchmark → SOTA & gap
+  honesto), curar-não-reproduzir. Inclui `templates/chapter-template.md` e `scripts/validate_citations.py` que
+  mecaniza o contrato de honestidade (fail-closed: citação `file:line` que não resolve → INVALID; URL fora do
+  allowlist → INVALID; número de performance sem benchmark nem `UNBENCHMARKED` → NEEDS_REVISION). Dogfood: o
+  capítulo-farol 19 passa o validador (PASS).
 
 ### Changed
 

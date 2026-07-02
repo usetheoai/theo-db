@@ -267,9 +267,10 @@ parâmetros), o `theodb_ivfflat` está em **paridade** com o pgvector ivfflat (�
 ponto de recall alto). Para o HNSW especificamente ainda não temos um side-by-side isolado justo vs o pgvector
 hnsw — é uma medição pendente (honestidade: não afirmo paridade de HNSW sem o número).
 
-**vs ScaNN — o algoritmo do índice vetorial do AlloyDB (milestone M33):** aqui está o **gap real e quantificado**.
-No ponto de recall ≥ 0.99, o ScaNN OSS faz **~1920 QPS / p50 0.5 ms** contra os 78 QPS / 12.8 ms do nosso melhor
-índice — **~25× mais rápido**. Recall: **paridade** (ambos ≥ 0.99). O verdadeiro diferencial do ScaNN não é o
+**vs ScaNN — o algoritmo do índice vetorial do AlloyDB (milestone M33,
+`docs/benchmarks/m33-scann-headtohead.json`):** aqui está o **gap real e quantificado**. No ponto de recall ≥ 0.99,
+o ScaNN OSS faz **~1920 QPS / p50 0.5 ms** contra os 78 QPS / 12.8 ms do nosso melhor índice — **~25× mais
+rápido**. Recall: **paridade** (ambos ≥ 0.99). O verdadeiro diferencial do ScaNN não é o
 grafo — é a **quantização anisotrópica** (comprime os vetores preservando a ordenação por produto interno) +
 *asymmetric hashing* com SIMD, que corta o custo por distância em uma ordem de grandeza. HNSW full-precision (o
 nosso) paga a distância em f32 completo por candidato.
