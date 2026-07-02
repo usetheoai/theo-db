@@ -13,6 +13,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Handbook "Formação de Engenharia — TheoDB" (`docs/handbook/`): currículo técnico interno que ensina engenharia
+  de banco de dados através do código real do TheoDB. Modo curado (Regra 9) para fundamentos já cobertos por
+  Strang/CLRS/PG-docs; modo original ancorado em `file:line` + ADR + benchmark para o coração (índices, vetorial,
+  SIMD, IA-no-banco). Primeiro capítulo-farol escrito: cap. 19 — HNSW (`parte-06-vetorial/19-hnsw.md`), template
+  de qualidade com as 5 camadas (teoria → matemática → nossa implementação → nosso benchmark M35 → gap honesto vs
+  ScaNN). Contrato de honestidade: toda citação resolve no disco.
 
 ### Changed
 
