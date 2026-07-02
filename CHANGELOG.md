@@ -24,6 +24,29 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.28.0] - 2026-07-02
+
+### Added
+- M31b — SIMD (AVX2+FMA) fused decode+distance for the `theodb_ivfflat` Index Scan hot loop: the L2 distance is
+  computed DIRECTLY from each candidate's page bytes via `_mm256_loadu_ps` (unaligned load), fusing the byte-decode
+  and the distance into one 8-wide SIMD pass with a cached runtime CPU dispatch (`is_x86_feature_detected!`) and a
+  scalar fallback (portability). Numeric: SIMD lane-summation is recall-preserving, not bit-identical to the M20
+  scalar (same property as pgvector's FMA path). The M20 SQL-callable distance ops stay scalar (byte-parity intact).
+  Measured on DISTINCT data: theodb_ivfflat Index Scan p50 **≤ pgvector** — 2.6× faster on uniform-random (recall
+  parity) and 0.95× at full recall (10/10) on clustered/embedding-like data (n=100k, dim=128, probes=10). M31b DoD
+  met. Evidence: `docs/benchmarks/m31b-simd-distance.md`.
+- M31b — opt-in scan profiler (`THEODB_SCAN_PROFILE=1`): logs per-scan phase timing (reads/score/sort) + list
+  balance (`nonempty_lists`), the runtime observability that exposed the benchmark-data bug below.
+
+
+### Fixed
+- Benchmark data-generation degeneracy: the index-latency harness seeded vectors with a non-correlated
+  `(SELECT string_agg((random())…) FROM generate_series(…))` sub-select, which PostgreSQL evaluates once as an
+  InitPlan — so all 100k rows got the SAME vector (`COUNT(DISTINCT)=1`). This collapsed any correct k-means into a
+  single list and made every pre-M31b latency number a brute-force-on-identical-ties measurement (retro-invalidating
+  M31's `~2.7× behind pgvector`). Fixed by seeding DISTINCT vectors from Python via `COPY` (uniform + clustered
+  regimes). No engine bug — theodb's k-means was always correct. See `docs/adr/0012-benchmark-data-degeneracy.md`.
+
 ## [0.27.0] - 2026-07-01
 
 ### Added

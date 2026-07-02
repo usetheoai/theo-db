@@ -1,0 +1,41 @@
+{
+  "milestone": "M31b",
+  "date": "2026-07-01",
+  "image": "theo-db:m31b",
+  "pg_major": 17,
+  "pgrx": "0.16.1",
+  "workload": { "n": 100000, "dim": 128, "probes": 10, "lists": 100, "seed": 42, "warm": true },
+  "methodology": "EXPLAIN (ANALYZE, TIMING ON) Execution Time, median over 15 iters/query, medians over queries; DISTINCT vectors seeded via Python COPY (never the non-correlated string_agg InitPlan idiom — see ADR 0012).",
+  "regimes": {
+    "uniform_random": {
+      "note": "IVFFlat worst case (no cluster structure) — recall low for BOTH; theodb decisively faster.",
+      "theodb_ivfflat": { "recall_at_10_mean": 3.9, "p50_ms": 1.71 },
+      "pgvector_ivfflat": { "recall_at_10_mean": 3.8, "p50_ms": 4.53 },
+      "latency_ratio_theodb_over_pgvector": 0.38
+    },
+    "clustered_gaussian_200_centers": {
+      "note": "Realistic embedding-like operating point — both reach full recall; theodb <= pgvector.",
+      "theodb_ivfflat": { "recall_at_10_mean": 10.0, "p50_ms": 5.29 },
+      "pgvector_ivfflat": { "recall_at_10_mean": 10.0, "p50_ms": 5.58 },
+      "latency_ratio_theodb_over_pgvector": 0.95
+    }
+  },
+  "simd_contribution_isolated": {
+    "note": "Before/after on the degenerate identical-data workload (the only apples-to-apples the shipped M31 offered); warm, 40 iters.",
+    "m31_scalar_p50_ms": 24.69,
+    "m31b_simd_p50_ms": 17.03,
+    "speedup": 1.45
+  },
+  "phase0_profile": {
+    "note": "Scan hot-loop compute (N=65000, dim=128), portable SSE2 build, mean over 60 iters.",
+    "decode_ms": 1.96, "decode_share": 0.45,
+    "distance_ms": 2.34, "distance_share": 0.55,
+    "total_compute_ms": 4.30
+  },
+  "hotloop_microbench": {
+    "note": "benchmarks/micro/simd_hotloop_bench.rs, N=65000 dim=128, scalar decode+distance vs fused AVX2+FMA.",
+    "scalar_ms": 5.599, "fused_simd_ms": 3.455, "speedup": 1.62
+  },
+  "dod": { "target": "theodb_ivfflat p50 <= pgvector, recall preserved", "met": true },
+  "evidence": ["docs/benchmarks/m31b-simd-distance.md", "docs/adr/0012-benchmark-data-degeneracy.md", "benchmarks/tests/test_index_am_latency.py", "benchmarks/micro/simd_hotloop_bench.rs"]
+}

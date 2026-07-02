@@ -95,25 +95,48 @@ unsafe fn scan_ivf_structured(rel: pg_sys::Relation, query: &[f32]) -> Vec<(i64,
     let entry = 8 + dim * 4;
 
     let mut results: Vec<(i64, f64)> = Vec::new();
-    // Reused scratch — the vector of the entry currently being scored (avoids a Vec<f32> alloc per entry).
+    // For L2 (the only AM opclass today) score each candidate DIRECTLY off its page bytes via the fused AVX2+FMA
+    // path (M31b — no per-entry decode/scratch). Other metrics (future ip/cosine opclasses) use the scratch decode.
+    let is_l2 = matches!(metric, Metric::L2);
     let mut scratch = vec![0f32; dim];
+    // Opt-in phase profiler (THEODB_SCAN_PROFILE=1): attribute the scan latency across {reads, score, sort} so the
+    // optimization targets the REAL bottleneck, not an assumed one (measurement-first — ADR D3/D4). Off by default:
+    // std::time::Instant is only sampled at list granularity (≤ probes pairs), never per-candidate.
+    let profile = std::env::var("THEODB_SCAN_PROFILE").is_ok_and(|v| v == "1");
+    let mut read_us = 0u128;
+    let mut score_us = 0u128;
+    let mut cand = 0usize;
     for &(_, ci) in cd.iter().take(probes) {
         let (fb, np, cnt) = meta.dir[ci];
+        let t_read = std::time::Instant::now();
         let bytes = match page::read_ivf_list_bytes(rel, fb, np) {
             Ok(b) => b,
             Err(e) => pg_sys::error!("theodb am scan: {e}"),
         };
+        if profile {
+            read_us += t_read.elapsed().as_micros();
+        }
+        let t_score = std::time::Instant::now();
         for i in 0..cnt as usize {
             let o = i * entry;
             if bytes.len() < o + entry {
                 break; // page shorter than the directory count claims — stop this list
             }
             let tidv = i64::from_le_bytes(bytes[o..o + 8].try_into().unwrap());
-            for (j, s) in scratch.iter_mut().enumerate() {
-                let p = o + 8 + j * 4;
-                *s = f32::from_le_bytes(bytes[p..p + 4].try_into().unwrap());
-            }
-            results.push((tidv, metric.dist(query, &scratch)));
+            let d = if is_l2 {
+                crate::vec::l2_dist_from_bytes(query, &bytes[o + 8..o + entry])
+            } else {
+                for (j, s) in scratch.iter_mut().enumerate() {
+                    let p = o + 8 + j * 4;
+                    *s = f32::from_le_bytes(bytes[p..p + 4].try_into().unwrap());
+                }
+                metric.dist(query, &scratch)
+            };
+            results.push((tidv, d));
+            cand += 1;
+        }
+        if profile {
+            score_us += t_score.elapsed().as_micros();
         }
     }
     // Fold in pending (INSERTed after build) — no rebuild.
@@ -124,7 +147,21 @@ unsafe fn scan_ivf_structured(rel: pg_sys::Relation, query: &[f32]) -> Vec<(i64,
     for (tidv, v) in pending {
         results.push((tidv, metric.dist(query, &v)));
     }
+    let t_sort = std::time::Instant::now();
     results.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(&b.0)));
+    if profile {
+        // Phase attribution for the scan (opt-in observability — the wiring-triad runtime metric). `nonempty`
+        // surfaces list-balance health: a near-1 value on distinct data signals a degenerate build/corpus.
+        let sort_us = t_sort.elapsed().as_micros();
+        let nonempty = meta.dir.iter().filter(|(_, _, c)| *c > 0).count();
+        // LOG (server log, not client) — a diagnostic is not a WARNING; keeps client output + warn-as-error tooling
+        // clean while `THEODB_SCAN_PROFILE=1`. Read via the server log (`docker logs`).
+        pgrx::log!(
+            "theodb scan profile: cand={cand} nonempty_lists={nonempty}/{} probes={probes} \
+             reads={read_us}us score={score_us}us sort={sort_us}us",
+            meta.centroids.len()
+        );
+    }
     results
 }
 
