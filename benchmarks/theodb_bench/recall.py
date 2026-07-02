@@ -84,6 +84,13 @@ def neighbors_ground_truth(
     # Keep train in float32 (bounds RSS at 1M×128 ≈ 512 MB); cast only the small per-chunk gather to float64
     # for a numerically stable distance — the SAME float32-value contract as _pairwise_distances.
     train = np.asarray(train, dtype=np.float32)
+    # Fail-fast on out-of-range / negative ids: numpy would silently wrap a bad id to a valid row (wrong GT).
+    if train.shape[0] == 0:
+        raise ValueError("train is empty")
+    if neighbor_ids.min() < 0 or neighbor_ids.max() >= train.shape[0]:
+        raise ValueError(
+            f"neighbor_ids out of range [0, {train.shape[0]}): min={neighbor_ids.min()} max={neighbor_ids.max()}"
+        )
     q_all = np.asarray(queries, dtype=np.float32).astype(np.float64)
     n_queries = q_all.shape[0]
     out = np.empty((n_queries, k), dtype=np.float64)

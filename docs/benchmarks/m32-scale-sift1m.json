@@ -10,7 +10,7 @@
   "runs": 3,
   "dataset": "m32-scale-sift1m",
   "host": "paulohenriquevn",
-  "methodology": "index-forced (SET enable_seqscan=off, assert_index_used); recall is distance-thresholded (ANN-Benchmarks) vs exact float32 brute-force ground-truth; QPS = 1/best-of-N mean per-query latency (warm)",
+  "methodology": "index-forced (SET enable_seqscan=off, assert_index_used); recall is distance-thresholded (ANN-Benchmarks) vs exact GT recomputed from the ANN-Benchmarks neighbors ids in the float32 contract (neighbors-GT); QPS = 1/best-of-N mean per-query latency (warm)",
   "results": [
     {
       "index": "hnsw",
@@ -103,5 +103,6 @@
       "mean": 609.6125442933771,
       "std": 15.441104383040587
     }
-  ]
+  ],
+  "gt_source": "exact GT recomputed from the ANN-Benchmarks neighbors ids in the float32 contract (neighbors-GT)"
 }

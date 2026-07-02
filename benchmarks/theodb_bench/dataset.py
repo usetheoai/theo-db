@@ -81,7 +81,7 @@ def load_hdf5_full(
             raise ValueError(f"n_queries={n_queries} exceeds test size {test_ds.shape[0]} in {path}")
         if neigh_ds.shape[1] < k:
             raise ValueError(f"k={k} exceeds precomputed neighbor count {neigh_ds.shape[1]} in {path}")
-        corpus = train_ds[:].astype(np.float32)  # FULL train (float32 bounds RSS ~ N*dim*4)
+        corpus = train_ds[:].astype(np.float32, copy=False)  # FULL train (float32 bounds RSS ~ N*dim*4)
         rng = np.random.default_rng(seed)
         query_idx = np.sort(rng.choice(test_ds.shape[0], size=n_queries, replace=False))
         queries = test_ds[query_idx].astype(np.float32)

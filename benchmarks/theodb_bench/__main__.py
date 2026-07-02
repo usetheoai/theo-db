@@ -155,14 +155,29 @@ def _diskann_spec(table: str, opclass: str) -> dict:
     }
 
 
+def _train_size(args: argparse.Namespace) -> int:
+    """The corpus size that pgvector's ivfflat `lists` must be derived from. Under --full-train the true N is the
+    HDF5 train size, NOT the --n default — deriving `lists` from the default (5000 -> lists=5) would build a
+    crippled, unfair pgvector ivfflat on a 1M corpus (measurement-integrity defect). Read the real size."""
+    if getattr(args, "full_train", False) and args.hdf5:
+        import h5py
+
+        with h5py.File(args.hdf5, "r") as f:
+            return int(f["train"].shape[0])
+    return args.n
+
+
 def build_config(args: argparse.Namespace) -> dict:
+    if getattr(args, "theodb_hnsw_query_cap", None) is not None and args.theodb_hnsw_query_cap < 1:
+        raise ValueError(f"--theodb-hnsw-query-cap must be >= 1, got {args.theodb_hnsw_query_cap}")
     opclass = _OPCLASS[args.metric]
     table = "bench_vectors"
+    ivfflat_n = _train_size(args)
     specs = []
     if args.index in ("hnsw", "both", "all", "4way"):
         specs.append(_hnsw_spec(table, opclass))
     if args.index in ("ivfflat", "all", "4way"):
-        specs.append(_ivfflat_spec(table, opclass, args.n))
+        specs.append(_ivfflat_spec(table, opclass, ivfflat_n))
     if args.index in ("diskann", "both"):
         specs.append(_diskann_spec(table, opclass))
     # theodb's persisted AMs are l2-only (M32 ADR-2 / ADR 0010). On cosine we DO NOT emit a fabricated cosine
@@ -180,6 +195,11 @@ def build_config(args: argparse.Namespace) -> dict:
             specs.append(_theodb_spec("theodb_ivfflat", table))
         if want_theodb_hnsw:
             specs.append(_theodb_spec("theodb_hnsw", table, query_cap=getattr(args, "theodb_hnsw_query_cap", None)))
+    if not specs:
+        raise ValueError(
+            f"no index specs for --index {args.index} --metric {args.metric} "
+            "(theodb AMs are l2-only; use --metric l2 or a pgvector index)"
+        )
     config = {
         "seed": args.seed,
         "n": args.n,

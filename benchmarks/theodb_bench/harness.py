@@ -36,12 +36,15 @@ def run_benchmark(config: dict, db, out_dir) -> dict:
         corpus, queries, gt_dist = load_hdf5_full(
             hdf5, config["n_queries"], config["seed"], config["k"], config["metric"]
         )
+        gt_source = "exact GT recomputed from the ANN-Benchmarks `neighbors` ids in the float32 contract (neighbors-GT)"
     elif hdf5:
         corpus, queries = load_hdf5_subsample(hdf5, config["n"], config["n_queries"], config["seed"])
         _, gt_dist = brute_force_ground_truth(corpus, queries, config["k"], config["metric"])
+        gt_source = "exact float32 brute-force ground-truth"
     else:
         corpus, queries = make_dataset(config["n"], config["dim"], config["n_queries"], config["seed"])
         _, gt_dist = brute_force_ground_truth(corpus, queries, config["k"], config["metric"])
+        gt_source = "exact float32 brute-force ground-truth"
     dim = corpus.shape[1]  # real datasets define their own dim; trust the data, not config
     n_actual = corpus.shape[0]  # trust the data for N too (full_train ignores config["n"])
 
@@ -56,6 +59,8 @@ def run_benchmark(config: dict, db, out_dir) -> dict:
         # scan, ~4 s/query at 1M) would make the full query set take hours. Capping keeps the run tractable while
         # still yielding a valid recall/percentile sample; the cap is recorded in the params label for honesty.
         cap = spec.get("query_cap")
+        if cap is not None and cap < 1:
+            raise ValueError(f"query_cap must be >= 1, got {cap} (spec {spec['name']})")
         q_set = queries if cap is None else queries[:cap]
         gt_set = gt_dist if cap is None else gt_dist[:cap]
         for params in spec.get("sweep", [{}]):
@@ -109,9 +114,10 @@ def run_benchmark(config: dict, db, out_dir) -> dict:
         "runs": config["runs"],
         "dataset": config.get("dataset_label", f"synthetic-gaussian-{config['metric']}"),
         "host": platform.node(),
+        "gt_source": gt_source,
         "methodology": (
             "index-forced (SET enable_seqscan=off, assert_index_used); recall is "
-            "distance-thresholded (ANN-Benchmarks) vs exact float32 brute-force ground-truth; "
+            f"distance-thresholded (ANN-Benchmarks) vs {gt_source}; "
             "QPS = 1/best-of-N mean per-query latency (warm)"
         ),
         "results": results,
@@ -145,14 +151,18 @@ def _render_markdown(report: dict) -> str:
         f"- **commit:** `{report['sha']}` · **seed:** {report['seed']} · **dataset:** "
         f"{report.get('dataset', 'synthetic')} (n={report['n']} dim={report['dim']} "
         f"metric={report['metric']}) · **k:** {report['k']} · **runs (best-of-N):** {report['runs']}",
-        "- recall@k is distance-thresholded (ANN-Benchmarks semantics); ground-truth is exact brute-force.",
+        f"- recall@k is distance-thresholded (ANN-Benchmarks semantics); ground-truth is "
+        f"{report.get('gt_source', 'exact float32 brute-force ground-truth')}.",
+        "- `mean`/`std` are per-query latency dispersion within the timed sample (ms), not run-to-run variance; "
+        "QPS is best-of-N over the runs.",
         "",
-        "| index | params | recall@k | QPS | p50 ms | p95 ms | p99 ms | build ms | index bytes |",
-        "|---|---|---|---|---|---|---|---|---|",
+        "| index | params | recall@k | QPS | p50 ms | p95 ms | p99 ms | mean ms | std ms | build ms | index bytes |",
+        "|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in report["results"]:
         lines.append(
             f"| {r['index']} | {r['params']} | {r['recall_at_k']:.4f} | {r['qps']:.1f} | "
-            f"{r['p50']:.3f} | {r['p95']:.3f} | {r['p99']:.3f} | {r['build_ms']:.1f} | {r['index_bytes']} |"
+            f"{r['p50']:.3f} | {r['p95']:.3f} | {r['p99']:.3f} | {r.get('mean', 0.0):.3f} | "
+            f"{r.get('std', 0.0):.3f} | {r['build_ms']:.1f} | {r['index_bytes']} |"
         )
     return "\n".join(lines) + "\n"

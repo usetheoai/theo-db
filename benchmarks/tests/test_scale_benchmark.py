@@ -48,6 +48,23 @@ def test_neighbors_ground_truth_matches_brute_force(tmp_path):
     assert np.allclose(gt, bf_dist, atol=1e-4), f"neighbors-GT diverges from brute force: max {np.abs(gt - bf_dist).max()}"
 
 
+def test_neighbors_ground_truth_cosine_matches_brute_force(tmp_path):
+    """The cosine branch of neighbors-GT must also equal exact brute-force cosine GT within eps."""
+    _, train, test = _tiny_hdf5(tmp_path)
+    k = 8
+    nbr_idx, bf_dist = brute_force_ground_truth(train, test, k, "cosine")
+    gt = neighbors_ground_truth(train, test, nbr_idx, k, "cosine")
+    assert np.allclose(gt, bf_dist, atol=1e-4), f"cosine neighbors-GT diverges: max {np.abs(gt - bf_dist).max()}"
+
+
+def test_neighbors_ground_truth_rejects_out_of_range_ids(tmp_path):
+    """Out-of-range neighbor ids fail fast (numpy would silently wrap → wrong GT)."""
+    _, train, test = _tiny_hdf5(tmp_path)
+    bad = np.full((test.shape[0], 10), train.shape[0] + 5, dtype=np.int64)  # all out of range
+    with pytest.raises(ValueError):
+        neighbors_ground_truth(train, test, bad, 10, "l2")
+
+
 def test_load_hdf5_full_returns_full_train_and_gt(tmp_path):
     """load_hdf5_full returns the FULL train (no subsample) + GT distances matching brute force."""
     path, train, _ = _tiny_hdf5(tmp_path, n=200, q=15)
@@ -62,6 +79,26 @@ def test_load_hdf5_full_returns_full_train_and_gt(tmp_path):
 def test_load_hdf5_full_missing_file_raises():
     with pytest.raises(FileNotFoundError):
         load_hdf5_full("/nonexistent/sift.hdf5", n_queries=10, seed=42, k=10, metric="l2")
+
+
+def test_load_hdf5_full_missing_neighbors_raises(tmp_path):
+    """An HDF5 without a `neighbors` dataset cannot use neighbors-GT — fail fast, not a silent wrong GT."""
+    import h5py
+
+    rng = np.random.default_rng(3)
+    path = tmp_path / "no_nbr.hdf5"
+    with h5py.File(path, "w") as f:
+        f.create_dataset("train", data=rng.standard_normal((50, 8)).astype(np.float32))
+        f.create_dataset("test", data=rng.standard_normal((10, 8)).astype(np.float32))
+    with pytest.raises(ValueError, match="neighbors"):
+        load_hdf5_full(str(path), n_queries=5, seed=42, k=5, metric="l2")
+
+
+def test_load_hdf5_full_k_exceeds_neighbors_raises(tmp_path):
+    """k larger than the file's precomputed neighbor count must fail fast."""
+    path, _, _ = _tiny_hdf5(tmp_path, k=8)  # neighbors has only 8 columns
+    with pytest.raises(ValueError):
+        load_hdf5_full(path, n_queries=5, seed=42, k=20, metric="l2")
 
 
 def test_build_config_4way_has_four_specs():
@@ -85,6 +122,17 @@ def test_theodb_specs_l2_only_skips_on_cosine():
     assert "theodb_ivfflat" not in names and "theodb_hnsw" not in names
     for s in cfg["index_specs"]:
         assert "theodb_" not in s["ddl"]
+
+
+def test_theodb_only_cosine_raises_empty_specs():
+    """theodb-only + cosine leaves zero specs — fail fast, not a silent empty benchmark after the expensive load."""
+    with pytest.raises(ValueError, match="no index specs"):
+        build_config(build_parser().parse_args(["--index", "theodb_hnsw", "--metric", "cosine", "--n", "20000"]))
+
+
+def test_query_cap_must_be_positive():
+    with pytest.raises(ValueError, match="query-cap must be >= 1"):
+        build_config(build_parser().parse_args(["--index", "4way", "--n", "20000", "--theodb-hnsw-query-cap", "0"]))
 
 
 def test_theodb_hnsw_query_cap_wired():
