@@ -16,7 +16,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - M33 — head-to-head vetorial reproduzível vs **ScaNN OSS** (o algoritmo do índice do AlloyDB; Apache-2.0) no
   SIFT1M (1M×128), com veredito honesto por dimensão. AlloyDB é GCP-managed (sem execução local), então o
   fallback sancionado pelo DoD é o ScaNN OSS. Resultado medido no ponto recall≥0,99: **paridade de recall@10**
-  (ambos ≥0,99), mas **GAP de throughput/latência** — ScaNN ~37× QPS e ~39× menor p50 que `theodb_ivfflat`
+  (ambos ≥0,99), mas **GAP de throughput/latência** — ScaNN ~25× QPS e ~26× menor p50 que `theodb_ivfflat`
   (quantização anisotrópica + AH SIMD vs IVFFlat full-precision). A superioridade vetorial em velocidade ANN pura
   ainda **não está cumprida** (refutada honestamente pela evidência — o diferencial atual é vetorial dentro de um
   banco transacional, não uma biblioteca in-memory). Novo driver `benchmarks/run_m33_scann.py` + teste CI de

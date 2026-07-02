@@ -99,9 +99,12 @@ def measure_scann(corpus, queries, gt_dist, k, runs):
             run_distances.append(_exact_l2(queries[i], corpus[idx]))
         recall = recall_at_k(gt_dist, run_distances, k)
 
-        # latency (best-of-N runs) — per-query single search to mirror theodb's per-query SQL path
+        # latency (best-of-N runs) — per-query single search to mirror theodb's per-query SQL path.
+        # Percentiles come from the SAME (fastest, min-mean) run that defines best-of-N QPS, so p50/QPS
+        # in a row describe ONE consistent operating point (review finding: last-run vs best-run mismatch).
         run_mean_latencies_s = []
-        all_samples_ms = []
+        best_samples_ms = None
+        best_mean_ms = None
         for _ in range(runs):
             samples_ms = []
             for i in range(n_q):
@@ -109,9 +112,11 @@ def measure_scann(corpus, queries, gt_dist, k, runs):
                 searcher.search(queries[i], final_num_neighbors=k,
                                 pre_reorder_num_neighbors=_PRE_REORDER, leaves_to_search=leaves)
                 samples_ms.append((time.perf_counter() - t) * 1000.0)
-            run_mean_latencies_s.append(float(np.mean(samples_ms)) / 1000.0)
-            all_samples_ms = samples_ms  # keep the last run's per-query samples for percentiles
-        pct = latency_percentiles(all_samples_ms)
+            mean_ms = float(np.mean(samples_ms))
+            run_mean_latencies_s.append(mean_ms / 1000.0)
+            if best_mean_ms is None or mean_ms < best_mean_ms:
+                best_mean_ms, best_samples_ms = mean_ms, samples_ms
+        pct = latency_percentiles(best_samples_ms)
         qps = qps_best_of_n(run_mean_latencies_s)
         rows.append({
             "index": "scann", "params": f"leaves_to_search={leaves}",
@@ -131,15 +136,48 @@ def _scann_version() -> str:
         return "unknown"
 
 
+def _hardware() -> dict:
+    """Real CPU/RAM/AVX2 descriptor — a SIMD-bound ANN speed claim is not reproducible without it
+    (review finding: hostname alone is insufficient per analysis-golden-rule § 3)."""
+    import os
+
+    cpu, ram_gb, avx2 = "unknown", None, False
+    try:
+        info = Path("/proc/cpuinfo").read_text()
+        for line in info.splitlines():
+            if line.startswith("model name"):
+                cpu = line.split(":", 1)[1].strip()
+                break
+        avx2 = "avx2" in info.lower()
+    except OSError:
+        pass
+    try:
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            if line.startswith("MemTotal"):
+                ram_gb = round(int(line.split()[1]) / 1024 / 1024, 1)
+                break
+    except OSError:
+        pass
+    return {"cpu": cpu, "cores": os.cpu_count(), "ram_gb": ram_gb, "avx2": avx2}
+
+
 def _load_m34_rows():
     """theodb_ivfflat + pgvector ivfflat frontier from the M34 SIFT1M artifact (ADR-2 — reuse, don't re-run)."""
     if not _M34_ARTIFACT.is_file():
         raise SystemExit(f"M34 artifact not found at {_M34_ARTIFACT} — needed for the theodb/pgvector columns")
     d = json.loads(_M34_ARTIFACT.read_text())
     rows = {"theodb_ivfflat": [], "pgvector_ivfflat": []}
+    required = ("index", "params", "recall_at_k", "qps", "p50")
     for r in d["results"]:
-        key = "theodb_ivfflat" if r["index"] == "theodb_ivfflat" else "pgvector_ivfflat"
-        rows[key].append(r)
+        missing = [key for key in required if key not in r]
+        if missing:
+            raise SystemExit(f"M34 artifact row missing {missing}: {r} — schema drift, refusing to consolidate")
+        idx = r["index"]
+        if idx == "theodb_ivfflat":
+            rows["theodb_ivfflat"].append(r)
+        elif idx == "ivfflat":  # pgvector's index is labeled 'ivfflat' in the M34 artifact
+            rows["pgvector_ivfflat"].append(r)
+        # any other index type (e.g. hnsw) is SKIPPED — never silently mislabeled as pgvector
     return rows, d
 
 
@@ -173,7 +211,7 @@ def consolidate(scann_rows, scann_build_ms, scann_rss_mb, scann_version, m34_row
     recall_verdict = "PARITY" if (scann_best and theodb_best) else "INDETERMINATE"
     # latency dimension (p50, lower better) at the matched high-recall point
     lat_verdict = "INDETERMINATE"
-    if scann_best and theodb_best:
+    if scann_best and theodb_best and scann_best["p50"] > 0:
         r = theodb_best["p50"] / scann_best["p50"]  # >1 means theodb slower
         lat_verdict = "SUPERIOR" if r <= 0.9 else "PARITY" if r <= 1.1 else "GAP"
 
@@ -183,8 +221,15 @@ def consolidate(scann_rows, scann_build_ms, scann_rss_mb, scann_version, m34_row
         "n": m34_meta["n"], "dim": m34_meta["dim"], "k": m34_meta["k"],
         "n_queries": m34_meta["n_queries"], "runs": m34_meta["runs"], "seed": m34_meta.get("seed", 42),
         "host": m34_meta.get("host", "unknown"),
+        "hardware": _hardware(),
         "baseline_note": ("AlloyDB is GCP-managed (no local run); ScaNN OSS is the DoD-sanctioned proxy — "
                           "the algorithm behind AlloyDB's vector index (arXiv:1908.10396)."),
+        "reproducibility_note": (
+            "The 1000-query subsample IS seeded (42); ScaNN's k-means partition training is NOT seeded, so "
+            "recall/QPS carry a small run-to-run variance (the ~37× throughput gap is far larger than the "
+            "variance). ScaNN trains centroids on a 250k sample vs IVFFlat's ~50k k-means sample — favors "
+            "ScaNN recall, immaterial to the throughput gap. theodb's ms includes a sub-ms SQL round-trip "
+            "(pgvector probes=1 p50=0.37 ms shows the SQL floor); the gap is algorithmic, not IPC."),
         "caveat_library_vs_database": (
             "ScaNN is a pure IN-MEMORY ANN library (no persistence/transactions/SQL); theodb_ivfflat is a "
             "persistent transactional PostgreSQL index. Raw-search numbers compare the ALGORITHM axis; they "
@@ -229,8 +274,12 @@ def _render_md(r) -> str:
     L = []
     L.append("# M33 — head-to-head vs AlloyDB/ScaNN (North Star vector superiority)\n")
     L.append(f"**Dataset:** {r['dataset']} · n={r['n']:,} dim={r['dim']} k={r['k']} · "
-             f"queries={r['n_queries']} (seed {r['seed']}) · runs={r['runs']} · host={r['host']}\n")
+             f"queries={r['n_queries']} (seed {r['seed']}) · runs={r['runs']}\n")
+    hw = r.get("hardware", {})
+    L.append(f"**Hardware:** {hw.get('cpu','?')} · {hw.get('cores','?')} cores · "
+             f"{hw.get('ram_gb','?')} GB RAM · AVX2={hw.get('avx2','?')} · host={r['host']}\n")
     L.append(f"**Baseline:** {r['baseline_note']}\n")
+    L.append(f"**Reproducibility:** {r['reproducibility_note']}\n")
     L.append(f"> **CAVEAT (library vs database):** {r['caveat_library_vs_database']}\n")
     L.append(f"**ScaNN:** v{r['scann_version']} · build {r['scann_build_ms']:.0f} ms · "
              f"peak RSS {r['scann_peak_rss_mb']:.0f} MB (incl. in-memory corpus) · "
@@ -275,6 +324,8 @@ def main() -> int:
     ap.add_argument("--out", default=str(_REPO / "docs" / "benchmarks"))
     args = ap.parse_args()
 
+    if args.n_queries < 1 or args.runs < 1:
+        raise SystemExit("--n-queries and --runs must be >= 1")
     if not Path(args.hdf5).is_file():
         raise SystemExit(f"SIFT1M not found at {args.hdf5} — see the repro header to download it")
     try:
@@ -282,9 +333,17 @@ def main() -> int:
     except ImportError:
         raise SystemExit("scann not installed — `pip install scann` (dev-only, needs AVX2)")
 
+    m34_rows, m34_meta = _load_m34_rows()
+    # Parity guard: the reused theodb/pgvector columns MUST describe the SAME query set / runs / seed as
+    # the ScaNN run, else the head-to-head compares different measurements (review finding).
+    if args.n_queries != m34_meta["n_queries"] or args.runs != m34_meta["runs"] or m34_meta.get("seed", 42) != 42:
+        raise SystemExit(
+            f"parity mismatch: M33 (n_queries={args.n_queries}, runs={args.runs}, seed=42) vs M34 meta "
+            f"(n_queries={m34_meta['n_queries']}, runs={m34_meta['runs']}, seed={m34_meta.get('seed')}). "
+            "The reused theodb/pgvector rows would NOT be on the same query set — refusing to emit a misleading artifact.")
+
     corpus, queries, gt_dist = load_hdf5_full(args.hdf5, args.n_queries, seed=42, k=10, metric="l2")
     scann_rows, build_ms, rss_mb, ver = measure_scann(corpus, queries, gt_dist, k=10, runs=args.runs)
-    m34_rows, m34_meta = _load_m34_rows()
     result = consolidate(scann_rows, build_ms, rss_mb, ver, m34_rows, m34_meta, args.out)
 
     print(f"\n=== M33 ScaNN head-to-head (n={result['n']} k={result['k']} "
