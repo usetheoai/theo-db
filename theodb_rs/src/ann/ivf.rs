@@ -45,36 +45,47 @@ impl IvfflatIndex {
         let n = self.vectors.len();
         let dim = self.vectors[0].len();
         let mut centers: Vec<Vec<f32>> = Vec::with_capacity(k);
-        centers.push(self.vectors[(rng.next_u64() as usize) % n].clone());
+        let first = self.vectors[(rng.next_u64() as usize) % n].clone();
+        // `d2[i]` = squared distance from point i to the NEAREST chosen center, maintained INCREMENTALLY (fold each
+        // new center into the running min). This is the standard k-means++ at O(k·n·d), not the O(k²·n·d) of
+        // recomputing the min over ALL centers every step — at `lists=1000` on 1M that quadratic was ~10¹³ ops
+        // (hours). The result is IDENTICAL (min over chosen centers is associative) + the RNG is consumed in the
+        // exact same order (only on `sum > 0`), so the produced centroids — and every recall/persist test — are
+        // byte-for-byte unchanged.
+        let mut d2: Vec<f64> = self
+            .vectors
+            .iter()
+            .map(|v| {
+                let d = crate::vec::l2_distance(v, &first);
+                d * d
+            })
+            .collect();
+        centers.push(first);
         while centers.len() < k {
-            let d2: Vec<f64> = self
-                .vectors
-                .iter()
-                .map(|v| {
-                    centers
-                        .iter()
-                        .map(|c| {
-                            let d = crate::vec::l2_distance(v, c);
-                            d * d
-                        })
-                        .fold(f64::INFINITY, f64::min)
-                })
-                .collect();
             let sum: f64 = d2.iter().sum();
-            if sum <= 0.0 {
-                centers.push(self.vectors[centers.len() % n].clone());
-                continue;
-            }
-            let mut target = rng.next_f64() * sum;
-            let mut chosen = 0usize;
-            for (i, w) in d2.iter().enumerate() {
-                target -= *w;
-                if target <= 0.0 {
-                    chosen = i;
-                    break;
+            let chosen = if sum <= 0.0 {
+                centers.len() % n // degenerate (all points on a center) — no rng draw, matching the original
+            } else {
+                let mut target = rng.next_f64() * sum;
+                let mut c = 0usize;
+                for (i, w) in d2.iter().enumerate() {
+                    target -= *w;
+                    if target <= 0.0 {
+                        c = i;
+                        break;
+                    }
+                }
+                c
+            };
+            let center = self.vectors[chosen].clone();
+            for (i, v) in self.vectors.iter().enumerate() {
+                let d = crate::vec::l2_distance(v, &center);
+                let dd = d * d;
+                if dd < d2[i] {
+                    d2[i] = dd;
                 }
             }
-            centers.push(self.vectors[chosen].clone());
+            centers.push(center);
         }
         // Bounded Lloyd refinement.
         for _ in 0..LLOYD_ITERS {
