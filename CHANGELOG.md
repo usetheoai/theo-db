@@ -24,6 +24,18 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.29.0] - 2026-07-02
+
+### Added
+- M32 — scale benchmark harness (≥1M vectors, head-to-head vs pgvector). Extends `theodb_bench` with a
+  neighbors-GT loader (`load_hdf5_full` — exact GT from the HDF5 `neighbors` ids, 10⁶ ops instead of the 10¹⁰
+  brute force), theodb_ivfflat/theodb_hnsw index specs (`--index 4way`, fixed op-point — l2-only), a per-spec
+  `query_cap` (for theodb_hnsw's O(N) scan), and an operator driver (`benchmarks/run_m32_sift1m.py`). First ≥1M
+  evidence: `docs/benchmarks/m32-scale-sift1m.{md,json}` (SIFT1M, 1M×128). Honest per-knob verdict: theodb_ivfflat
+  leads on **recall@10 (0.988)** and **index size (533 MB)** but trails pgvector on **QPS (~8×)** at 1M (fixed
+  100-list under-partitioning — no `lists` knob yet); theodb_hnsw is impractical at scale (O(N)-per-query blob
+  scan — the M31 structured partial-read is ivfflat-only). Quantifies the vector-superiority gap; no cherry-pick.
+
 ## [0.28.0] - 2026-07-02
 
 ### Added

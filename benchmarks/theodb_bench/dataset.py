@@ -49,6 +49,47 @@ def load_hdf5_subsample(
     return corpus, queries
 
 
+def load_hdf5_full(
+    path: str, n_queries: int, seed: int, k: int, metric: str = "l2"
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Load the FULL ``train`` (no subsample) + a seeded ``n_queries`` subsample of ``test`` from an
+    ANN-Benchmarks HDF5, and return exact GT distances derived from the file's precomputed ``neighbors``
+    (M32 ADR-2 — the ≥1M scale path). Returns ``(corpus (N,dim) float32, queries (Q,dim) float32,
+    gt_dist (Q,k) float64 ascending)``.
+
+    Unlike :func:`load_hdf5_subsample` (which subsamples the corpus and recomputes brute-force GT — fine at
+    small N), this keeps the full 1M train so the ``neighbors`` ids stay valid, and computes GT in 10⁶ ops
+    via :func:`~theodb_bench.recall.neighbors_ground_truth` instead of the 10¹⁰ brute force.
+
+    Raises FileNotFoundError if absent, ValueError if the file lacks ``neighbors`` or sizes are too small.
+    """
+    if n_queries < 1:
+        raise ValueError(f"n_queries must be >= 1, got {n_queries}")
+    if k < 1:
+        raise ValueError(f"k must be >= 1, got {k}")
+    if not Path(path).is_file():
+        raise FileNotFoundError(f"HDF5 dataset not found: {path}")
+    import h5py  # local import: only the real-dataset path needs h5py
+
+    from .recall import neighbors_ground_truth
+
+    with h5py.File(path, "r") as f:
+        if "neighbors" not in f:
+            raise ValueError(f"{path} has no 'neighbors' dataset — needed for neighbors-GT (use --hdf5 subsample)")
+        train_ds, test_ds, neigh_ds = f["train"], f["test"], f["neighbors"]
+        if n_queries > test_ds.shape[0]:
+            raise ValueError(f"n_queries={n_queries} exceeds test size {test_ds.shape[0]} in {path}")
+        if neigh_ds.shape[1] < k:
+            raise ValueError(f"k={k} exceeds precomputed neighbor count {neigh_ds.shape[1]} in {path}")
+        corpus = train_ds[:].astype(np.float32, copy=False)  # FULL train (float32 bounds RSS ~ N*dim*4)
+        rng = np.random.default_rng(seed)
+        query_idx = np.sort(rng.choice(test_ds.shape[0], size=n_queries, replace=False))
+        queries = test_ds[query_idx].astype(np.float32)
+        neighbor_ids = neigh_ds[query_idx].astype(np.int64)  # (Q, k') ids into train
+    gt_dist = neighbors_ground_truth(corpus, queries, neighbor_ids, k, metric)
+    return corpus, queries, gt_dist
+
+
 def make_dataset(
     n: int, dim: int, n_queries: int, seed: int
 ) -> tuple[np.ndarray, np.ndarray]:
