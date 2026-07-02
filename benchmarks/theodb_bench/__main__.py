@@ -22,10 +22,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--runs", type=int, default=3)
     p.add_argument(
         "--index",
-        choices=["hnsw", "ivfflat", "diskann", "both", "all"],
+        choices=["hnsw", "ivfflat", "diskann", "both", "all", "theodb_ivfflat", "theodb_hnsw", "4way"],
         default="hnsw",
         help="which index(es) to benchmark: hnsw | ivfflat | diskann | both (hnsw+diskann) | "
-        "all (hnsw+ivfflat — excludes diskann; use 'both'/'diskann' for that). "
+        "all (hnsw+ivfflat — excludes diskann; use 'both'/'diskann' for that) | "
+        "theodb_ivfflat | theodb_hnsw (M26 persisted AMs, l2-only) | "
+        "4way (pgvector hnsw+ivfflat vs theodb hnsw+ivfflat — the M32 head-to-head; l2 only). "
         "diskann requires the vectorscale extension",
     )
     p.add_argument(
@@ -33,6 +35,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="path to an ANN-Benchmarks HDF5 (train/test) — real dataset instead of synthetic gaussian; "
         "dim is inferred from the file",
+    )
+    p.add_argument(
+        "--full-train",
+        action="store_true",
+        help="load the FULL HDF5 train (no subsample) + derive exact GT from the file's `neighbors` dataset "
+        "(M32 >=1M scale path); requires --hdf5 with a `neighbors` dataset",
     )
     p.add_argument("--dsn", default=None, help="libpq DSN (else built from PG* env vars)")
     p.add_argument("--out", default="docs/benchmarks")
@@ -47,6 +55,18 @@ def _dsn_from_env() -> str:
         f"user={os.environ.get('PGUSER', 'postgres')} "
         f"password={os.environ.get('PGPASSWORD', 'postgres')}"
     )
+
+
+def _theodb_spec(am: str, table: str) -> dict:
+    # theodb's M26/M31 persisted AMs (theodb_ivfflat / theodb_hnsw) have NO query-time knob — SCAN_PROBES /
+    # SCAN_EF are fixed Rust constants (M32 ADR-3). So a single fixed operating point (no ef/probes sweep):
+    # just force the index on. l2-only (theodb exposes {am}_l2_ops; cosine deferred — ADR 0010 / M32 ADR-2).
+    return {
+        "name": am,
+        "index_name": f"bench_{am}",
+        "ddl": f"CREATE INDEX bench_{am} ON {table} USING {am} (embedding {am}_l2_ops)",
+        "sweep": [{"label": "fixed", "session": ["SET enable_seqscan = off"]}],
+    }
 
 
 def _hnsw_spec(table: str, opclass: str) -> dict:
@@ -127,12 +147,27 @@ def build_config(args: argparse.Namespace) -> dict:
     opclass = _OPCLASS[args.metric]
     table = "bench_vectors"
     specs = []
-    if args.index in ("hnsw", "both", "all"):
+    if args.index in ("hnsw", "both", "all", "4way"):
         specs.append(_hnsw_spec(table, opclass))
-    if args.index in ("ivfflat", "all"):
+    if args.index in ("ivfflat", "all", "4way"):
         specs.append(_ivfflat_spec(table, opclass, args.n))
     if args.index in ("diskann", "both"):
         specs.append(_diskann_spec(table, opclass))
+    # theodb's persisted AMs are l2-only (M32 ADR-2 / ADR 0010). On cosine we DO NOT emit a fabricated cosine
+    # opclass — skip them with a clear notice rather than a wrong DDL.
+    want_theodb_ivf = args.index in ("theodb_ivfflat", "4way")
+    want_theodb_hnsw = args.index in ("theodb_hnsw", "4way")
+    if (want_theodb_ivf or want_theodb_hnsw) and args.metric != "l2":
+        print(
+            f"NOTE: theodb AMs are l2-only; skipping theodb specs for --metric {args.metric} "
+            "(cosine opclass deferred — ADR 0010).",
+            file=sys.stderr,
+        )
+    else:
+        if want_theodb_ivf:
+            specs.append(_theodb_spec("theodb_ivfflat", table))
+        if want_theodb_hnsw:
+            specs.append(_theodb_spec("theodb_hnsw", table))
     config = {
         "seed": args.seed,
         "n": args.n,
@@ -148,6 +183,8 @@ def build_config(args: argparse.Namespace) -> dict:
         config["hdf5_path"] = args.hdf5
         # label = filename stem (e.g. glove-25-angular.hdf5 -> glove-25-angular)
         config["dataset_label"] = os.path.splitext(os.path.basename(args.hdf5))[0]
+    if getattr(args, "full_train", False):
+        config["full_train"] = True
     return config
 
 

@@ -12,7 +12,7 @@ import platform
 import subprocess
 from pathlib import Path
 
-from .dataset import load_hdf5_subsample, make_dataset
+from .dataset import load_hdf5_full, load_hdf5_subsample, make_dataset
 from .metrics import latency_percentiles, qps_best_of_n
 from .recall import brute_force_ground_truth, recall_at_k
 
@@ -29,12 +29,21 @@ def _git_sha() -> str:
 def run_benchmark(config: dict, db, out_dir) -> dict:
     """Run the benchmark for every index spec / param sweep and write the report. Returns the report dict."""
     hdf5 = config.get("hdf5_path")
-    if hdf5:
+    if config.get("full_train"):
+        # M32 >=1M scale path: full train + exact GT from the HDF5 `neighbors` (no 10^10 brute force).
+        if not hdf5:
+            raise ValueError("full_train requires hdf5_path")
+        corpus, queries, gt_dist = load_hdf5_full(
+            hdf5, config["n_queries"], config["seed"], config["k"], config["metric"]
+        )
+    elif hdf5:
         corpus, queries = load_hdf5_subsample(hdf5, config["n"], config["n_queries"], config["seed"])
+        _, gt_dist = brute_force_ground_truth(corpus, queries, config["k"], config["metric"])
     else:
         corpus, queries = make_dataset(config["n"], config["dim"], config["n_queries"], config["seed"])
+        _, gt_dist = brute_force_ground_truth(corpus, queries, config["k"], config["metric"])
     dim = corpus.shape[1]  # real datasets define their own dim; trust the data, not config
-    _, gt_dist = brute_force_ground_truth(corpus, queries, config["k"], config["metric"])
+    n_actual = corpus.shape[0]  # trust the data for N too (full_train ignores config["n"])
 
     db.ensure_extension()
     db.create_table(config["table"], dim)
@@ -83,7 +92,7 @@ def run_benchmark(config: dict, db, out_dir) -> dict:
         "sha": _git_sha(),
         "date": datetime.date.today().isoformat(),
         "seed": config["seed"],
-        "n": config["n"],
+        "n": n_actual,
         "dim": dim,
         "n_queries": config["n_queries"],
         "k": config["k"],
