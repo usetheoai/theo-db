@@ -19,6 +19,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   SIMD, IA-no-banco). Primeiro capítulo-farol escrito: cap. 19 — HNSW (`parte-06-vetorial/19-hnsw.md`), template
   de qualidade com as 5 camadas (teoria → matemática → nossa implementação → nosso benchmark M35 → gap honesto vs
   ScaNN). Contrato de honestidade: toda citação resolve no disco.
+- Conselho Técnico do TheoDB (`docs/conselho-tecnico-theodb.md` + `.claude/agents/council-*.md`): 8 sub-agents
+  especialistas invocáveis (via Task tool) para entender, medir e evoluir o sistema — Vetorial/ANN, Index-AM &
+  Storage, SIMD/Performance, Benchmark, Rust/pgrx, IA-no-banco, Research/ADRs, Segurança. Personas são arquétipos
+  fictícios (inspirados-em, não impersonação); cada agente aponta para o código/ADR/benchmark reais que governa e
+  é obrigado a lê-los antes de aconselhar (mesmo contrato de honestidade do handbook). Domínios roadmap
+  (distribuído, cloud-native, Go, PG-kernel) adiados honestamente até terem código.
 
 ### Changed
 
