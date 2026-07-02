@@ -42,7 +42,11 @@ impl HnswIndex {
             max_level: 0,
         };
         for (id, v) in corpus {
-            let level = (-(rng.next_f64().ln()) * ml) as usize;
+            // Cap the layer so a node's neighbor tuple always fits ONE page in the M35 structured layout
+            // (`nbr_size(level)` ≤ BLCKSZ). Real levels are ~ln(n)/ln(m) (≤ ~5 at 1M, m=16); the cap only
+            // clamps the astronomically-rare tail, so it is byte-invisible on real corpora (pgvector caps the
+            // same way — `HnswGetMaxLevel`). NOT an algorithm change to the reachable graph.
+            let level = ((-(rng.next_f64().ln()) * ml) as usize).min(HNSW_MAX_LEVEL);
             idx.insert(*id, v.clone(), level);
         }
         idx
@@ -210,6 +214,35 @@ impl HnswIndex {
         found.into_iter().map(|c| (self.ids[c.i], c.d)).collect()
     }
 
+    // --- Accessors for the M35 structured page codec (`am/hnsw_page.rs`). Read-only views of the built graph;
+    // no algorithm change. The codec maps node index → (blkno,offno) and serializes these into element/neighbor
+    // tuples. `dim` is 0 for an empty graph. ---
+    pub(crate) fn params(&self) -> (Metric, usize, usize, usize) {
+        (self.metric, self.m, self.m0, self.ef_construction)
+    }
+    pub(crate) fn node_count(&self) -> usize {
+        self.vectors.len()
+    }
+    pub(crate) fn dim(&self) -> usize {
+        self.vectors.first().map(|v| v.len()).unwrap_or(0)
+    }
+    pub(crate) fn entry(&self) -> Option<usize> {
+        self.entry
+    }
+    pub(crate) fn node_id(&self, node: usize) -> i64 {
+        self.ids[node]
+    }
+    pub(crate) fn node_level(&self, node: usize) -> usize {
+        self.levels[node]
+    }
+    pub(crate) fn node_vector(&self, node: usize) -> &[f32] {
+        &self.vectors[node]
+    }
+    /// Neighbors of `node` at `layer` (node indices). Empty if `layer > node.level`.
+    pub(crate) fn node_neighbors(&self, node: usize, layer: usize) -> &[usize] {
+        self.neighbors[node].get(layer).map(|v| v.as_slice()).unwrap_or(&[])
+    }
+
     /// Rebuild over `live` reusing this graph's parameters (M26 VACUUM fold).
     pub(crate) fn rebuilt_with(&self, live: &[(i64, Vec<f32>)], seed: u64) -> HnswIndex {
         HnswIndex::build(live, self.m, self.ef_construction, self.metric, seed)
@@ -304,6 +337,10 @@ impl HnswIndex {
 
 pub(crate) const HNSW_MAGIC: u32 = 0x5448_4E53; // "THNS"
 const HNSW_VERSION: u32 = 1;
+/// Max HNSW layer — bounds a node's neighbor tuple to one page in the M35 structured layout (`am/hnsw_page.rs`).
+/// 32 ≫ the real max (~ln(N)/ln(m) ≈ 5 at 1M, m=16), so it is invisible on real corpora; a conservative cap that
+/// keeps `nbr_size(32) = 4 + (32·m + m0)·6` well under BLCKSZ for the fixed HNSW_M=16.
+const HNSW_MAX_LEVEL: usize = 32;
 
 #[cfg(any(test, feature = "pg_test"))]
 #[pgrx::pg_schema]
