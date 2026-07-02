@@ -55,6 +55,14 @@ def run_benchmark(config: dict, db, out_dir) -> dict:
     results = []
     for spec in config["index_specs"]:
         build_ms = db.build_index(spec["ddl"]) * 1000.0
+        # Isolate this spec's measurement: drop every OTHER spec's index so the planner cannot cross-use a
+        # different index for this spec's queries. Critical when two specs are the same AM family on the same
+        # column (e.g. theodb_ivfflat vs pgvector ivfflat) — otherwise the planner picks one arbitrarily and the
+        # other spec's sweep flattens onto it (a wrong, un-isolated measurement). Specs are measured once in order,
+        # so dropping already-measured / not-yet-built indexes here is safe.
+        for other in config["index_specs"]:
+            if other["index_name"] != spec["index_name"]:
+                db.set_session(f'DROP INDEX IF EXISTS {other["index_name"]}')
         # A spec MAY cap its query count (`query_cap`): an O(N)-per-query index (e.g. theodb_hnsw's whole-blob
         # scan, ~4 s/query at 1M) would make the full query set take hours. Capping keeps the run tractable while
         # still yielding a valid recall/percentile sample; the cap is recorded in the params label for honesty.
