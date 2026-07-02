@@ -13,6 +13,20 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.31.0] - 2026-07-02
+
+### Added
 - M33 — head-to-head vetorial reproduzível vs **ScaNN OSS** (o algoritmo do índice do AlloyDB; Apache-2.0) no
   SIFT1M (1M×128), com veredito honesto por dimensão. AlloyDB é GCP-managed (sem execução local), então o
   fallback sancionado pelo DoD é o ScaNN OSS. Resultado medido no ponto recall≥0,99: **paridade de recall@10**
@@ -23,17 +37,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   fairness da semântica de recall; números theodb/pgvector reusados do artefato M34 (mesmo SIFT1M/hardware/GT).
   Evidência: `docs/benchmarks/m33-scann-headtohead.{md,json}`.
 
+
 ### Changed
 - README "Missão": nota de estado medido do pilar vetorial (M33) linkando o benchmark — a claim de superioridade
   vetorial fica qualificada pelo resultado honesto (paridade de recall, GAP de QPS) por `public-copy.md`.
-
-### Deprecated
-
-### Removed
-
-### Fixed
-
-### Security
 
 ## [0.30.0] - 2026-07-02
 
