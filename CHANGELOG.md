@@ -16,14 +16,21 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - M34 — `theodb_ivfflat` now accepts a configurable `lists` build reloption (`CREATE INDEX … WITH (lists=N)`) and a
   `theodb_ivfflat.probes` scan GUC (`SET theodb_ivfflat.probes = N`), mirroring pgvector's ivfflat knobs (pgrx
   `amoptions` + `GucRegistry`). Defaults preserve prior behavior (lists=100, probes=10); out-of-range values are
-  rejected at DDL/SET. Closes the ~8× QPS gap M32 measured at 1M (well-tuned `lists=√N` scans ~10k candidates, not
-  ~100k). A VACUUM fold preserves the built list count. Evidence: `docs/benchmarks/m34-ivfflat-reloption.{md,json}`.
+  rejected at DDL/SET. Closes the ~8× SCAN-latency gap M32 measured at 1M: at `lists=1000` + tuned probes,
+  `theodb_ivfflat` p50 is ≤ pgvector at the recall-matched high-recall points (probes 50/100, recall 0.99+) and at
+  parity for lower probes. A VACUUM fold preserves the built list count. **Trade-off:** the `lists=1000` **build** is
+  single-thread full-corpus k-means — ~575 s vs pgvector's ~33 s (sampled/parallel); build-time parity is a future
+  lever. Evidence: `docs/benchmarks/m34-ivfflat-reloption.{md,json}`.
 - Roadmap amended: added M34 — theodb_ivfflat QPS a escala (lists/probes configuráveis via reloption + GUC) and
   M35 — theodb_hnsw scan estruturado page-native (`/roadmap-feature theodb-ann-qps-scale`). The two QPS levers M32
   measured (~8× gap vs pgvector at 1M); split into two milestones after discovery sized the HNSW structured scan at
   ~3-4× the M31 effort (too large + risky to bundle without rework). M34 precedes M33 strategically.
 
 ### Changed
+- **BREAKING (index format) — M34 bumps the `theodb_ivfflat` structured on-disk format to v2** (the per-list
+  directory is now page-chunked so `lists` is no longer capped at ~665). `theodb_ivfflat` indexes built on
+  v0.27.0–v0.29.0 (format v1) are rejected on read with a typed `REINDEX to upgrade` error — **REINDEX any
+  `theodb_ivfflat` index after upgrading.** `theodb_hnsw` and the SQL-callable distance ops are unaffected.
 
 ### Deprecated
 

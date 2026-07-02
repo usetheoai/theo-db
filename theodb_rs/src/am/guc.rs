@@ -6,7 +6,6 @@
 //!
 //! Default preserves M26/M31 behavior: unset → `DEFAULT_PROBES` (10). The structured scan clamps the value to the
 //! actual list count, so an over-large `probes` is a safe no-op.
-use pgrx::pg_sys::AsPgCStr;
 use pgrx::{GucContext, GucFlags, GucRegistry, GucSetting};
 
 /// Default probes when the GUC is unset — identical to the pre-M34 fixed `SCAN_PROBES`, so an untuned scan behaves
@@ -20,13 +19,9 @@ pub(crate) static PROBES: GucSetting<i32> = GucSetting::<i32>::new(DEFAULT_PROBE
 /// Register `theodb_ivfflat.probes`. Called once from `_PG_init`.
 pub(crate) fn init() {
     GucRegistry::define_int_guc(
-        unsafe { std::ffi::CStr::from_ptr("theodb_ivfflat.probes".as_pg_cstr()) },
-        unsafe { std::ffi::CStr::from_ptr("Number of nearest lists a theodb_ivfflat scan reads".as_pg_cstr()) },
-        unsafe {
-            std::ffi::CStr::from_ptr(
-                "Higher value increases recall at the cost of speed; clamped to the index's list count.".as_pg_cstr(),
-            )
-        },
+        c"theodb_ivfflat.probes",
+        c"Number of nearest lists a theodb_ivfflat scan reads",
+        c"Higher value increases recall at the cost of speed; clamped to the index's list count.",
         &PROBES,
         MIN_PROBES,
         MAX_PROBES,

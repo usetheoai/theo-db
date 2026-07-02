@@ -334,6 +334,15 @@ unsafe fn main_index_pages(rel: pg_sys::Relation) -> Result<u32, String> {
         if m.len() < 25 {
             return Err("theodb am: truncated structured meta".into());
         }
+        // Version-gate BEFORE parsing v2 offsets — a v1 index (M31/M31b, magic identical) has a different header
+        // layout, so reading `dir_npages`/`centroid_npages` at the v2 offsets would misparse and yield a bogus
+        // pending offset (silently dropping INSERTed rows). Reject v1 with the same REINDEX error read_ivf_meta uses.
+        let ver = u32::from_le_bytes(m[4..8].try_into().unwrap());
+        if ver != 2 {
+            return Err(format!(
+                "theodb am: unsupported structured format v{ver} — REINDEX to upgrade to the M34 page-chunked directory (v2)"
+            ));
+        }
         let nlists = u32::from_le_bytes(m[13..17].try_into().unwrap()) as usize;
         let dir_npages = u32::from_le_bytes(m[17..21].try_into().unwrap());
         let centroid_npages = u32::from_le_bytes(m[21..25].try_into().unwrap());
@@ -342,7 +351,7 @@ unsafe fn main_index_pages(rel: pg_sys::Relation) -> Result<u32, String> {
         if dbytes.len() < nlists * 12 {
             return Err("theodb am: truncated directory".into());
         }
-        let mut total = 1 + dir_npages + centroid_npages;
+        let mut total = 1u32.saturating_add(dir_npages).saturating_add(centroid_npages);
         for i in 0..nlists {
             let o = i * 12 + 4; // np field within the 12-byte dir entry
             total = total.saturating_add(u32::from_le_bytes(dbytes[o..o + 4].try_into().unwrap()));

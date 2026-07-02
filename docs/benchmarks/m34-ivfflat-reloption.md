@@ -24,8 +24,9 @@
   `SET ivfflat.probes`. **Each spec is measured in ISOLATION** (the harness drops the other index during a spec's
   queries) — without this, two ivfflat-family indexes on one column let the planner cross-use them and flatten the
   sweep (the measurement bug caught + fixed this run).
-- **Hardware:** 13th Gen Intel i7-1355U (10C/12T, mobile), 15 GB RAM; `theo-db:m34` (PG17, pgrx 0.16.1);
-  single-thread builds for both (`max_parallel_maintenance_workers=0`, fair build-time axis).
+- **Hardware:** 13th Gen Intel i7-1355U (10C/12T — a mobile, thermally-constrained CPU; the 5% margin at probes=50
+  is within its throttling/scheduler noise, so it is reported as ≈parity, not a win), 15 GB RAM; `theo-db:m34`
+  (PG17, pgrx 0.16.1); single-thread builds for both (`max_parallel_maintenance_workers=0`, fair build-time axis).
 
 ## Honest per-knob verdict — the M32 ~8× QPS gap is CLOSED
 
@@ -34,13 +35,15 @@ high-recall operating points**:
 
 | probes | recall (theodb/pgv) | theodb p50 | pgvector p50 | theodb verdict |
 |---|---|---:|---:|---|
-| 1 | 0.373 / 0.374 | 0.60 ms | 0.37 ms | slightly slower (trivial 1-list point) |
-| 10 | 0.874 / 0.866 | 2.99 ms | 2.72 ms | **PARITY** (~10%, recall ≥ pgvector) |
-| 50 | 0.992 / 0.992 | **12.77 ms** | 13.48 ms | **theodb FASTER** at parity recall |
-| 100 | 0.999 / 0.999 | **25.38 ms** | 28.32 ms | **theodb FASTER** at parity recall |
+| 1 | 0.373 / 0.374 | 0.60 ms | 0.37 ms | ~1.6× slower (trivial 1-list point, sub-ms) |
+| 10 | 0.874 / 0.866 | 2.99 ms | 2.72 ms | ~10% slower (recall +0.8 pts) |
+| 50 | 0.992 / 0.992 | 12.77 ms | 13.48 ms | ≈ parity (5% lower — thin margin, mobile-CPU noise) |
+| 100 | 0.999 / 0.999 | **25.38 ms** | 28.32 ms | **≤ pgvector (−10%)** at parity recall |
 
-**M34 DoD MET:** with the configurable `lists`/`probes`, `theodb_ivfflat` p50 is **≤ pgvector** at 1M on the
-recall-matched operating points that matter (probes 50/100, recall 0.99+). This closes the M32 finding
+**M34 DoD MET:** with the configurable `lists`/`probes`, `theodb_ivfflat` p50 is **≤ pgvector** at 1M at the
+recall-matched high-recall point (probes=100, recall 0.999, a robust −10% margin) and at parity at probes 10–50.
+theodb is faster only at high recall; pgvector keeps a small edge at the low-recall (probes 1–10) corner — the full
+frontier is reported (no cherry-pick). This closes the M32 finding
 (theodb_ivfflat was 30.7 QPS / 32.5 ms at the fixed `lists=100`, ~8× behind); at `lists=1000` + tuned probes it now
 reaches **QPS parity, and is faster at high recall**. Index size is also smaller (537 MB vs 550 MB).
 

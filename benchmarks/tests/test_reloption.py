@@ -124,6 +124,28 @@ def test_default_preserves_behavior():
         conn.close()
 
 
+def test_lists_beyond_single_page_directory():
+    """lists=800 needs a MULTI-PAGE directory (800×12 > CHUNK) — the v2 format headline. Proves build + scan +
+    INSERT (main_index_pages/pending) round-trip past the old ~665 single-page cap that used to panic."""
+    conn = _conn()
+    try:
+        cur = conn.cursor()
+        _seed(cur)  # 2000 rows -> lists=800 gives ~2.5/list; dir = 800*12 = 9600 B = 2 pages (> the ~665 cap)
+        cur.execute("SELECT embedding::text FROM rel WHERE id=1")
+        qv = cur.fetchone()[0]
+        cur.execute("DROP INDEX IF EXISTS rel_ix")
+        cur.execute("CREATE INDEX rel_ix ON rel USING theodb_ivfflat (embedding theodb_ivfflat_l2_ops) WITH (lists=800)")
+        cur.execute("SET theodb_ivfflat.probes = 800")  # all lists -> exact
+        assert _recall(cur, qv) == 10, "lists=800 (multi-page dir) exact scan must return the true top-10"
+        # INSERT exercises main_index_pages/pending on the v2 multi-page-directory layout.
+        cur.execute("INSERT INTO rel VALUES (999999, '" + qv + "')")
+        cur.execute(f"SELECT id FROM rel WHERE id=999999 ORDER BY embedding <-> '{qv}' LIMIT 1")
+        assert cur.fetchone()[0] == 999999, "INSERTed row must be reachable via the v2 index (pending fold)"
+    finally:
+        conn.cursor().execute("DROP TABLE IF EXISTS rel CASCADE")
+        conn.close()
+
+
 def test_lists_out_of_range_rejected():
     """WITH (lists=0) is rejected at DDL by the reloption bounds (typed error, not a crash)."""
     conn = _conn()
