@@ -73,9 +73,10 @@ pub(crate) fn cosine_distance(a: &[f32], b: &[f32]) -> f64 {
 // M31b — fused decode+distance for the index-AM SCAN hot loop. Reads the candidate vector's f32 DIRECTLY from the
 // page bytes (little-endian, native on x86) and computes L2 in ONE pass — eliminating the separate byte-decode
 // (Phase 0 profile: decode 45% + scalar distance 55% of the ~38 ms scan). AVX2+FMA (8-wide) with a runtime
-// dispatch + scalar fallback (portability). Used ONLY by the scan (`Metric::dist_fast`); the M20 SQL-callable ops
-// above are untouched (byte-parity contract). Numeric: SIMD sums in a different f32 order → ~1 ULP·√dim off the
-// scalar sum — recall-preserving (ranking unchanged), NOT bit-identical. pgvector has the same property (FMA).
+// dispatch + scalar fallback (portability). Used ONLY by `scan_ivf_structured`'s L2 branch (am/scan.rs); the M20
+// SQL-callable ops above are untouched (byte-parity contract). Numeric: SIMD sums in a different f32 order → ~1
+// ULP·√dim off the scalar sum — recall-preserving (ranking unchanged), NOT bit-identical. pgvector has the same
+// property (FMA).
 // ---------------------------------------------------------------------------------------------------------------
 
 /// Scalar squared-L2 between `query` (`&[f32]`) and a candidate vector stored as little-endian f32 bytes `raw`
@@ -98,6 +99,19 @@ mod simd_x86 {
 
     static AVX2_FMA: AtomicU8 = AtomicU8::new(2); // 2 = unknown, 1 = yes, 0 = no
 
+    /// Test-only: pin the dispatch to scalar (`false`) or AVX (`true`) so both branches of `l2_dist_from_bytes`
+    /// are coverable on the same host; `reset_for_test` restores runtime detection. Callers MUST reset in the same
+    /// test (no cross-test state — pgrx pg_tests run sequentially in one backend).
+    #[cfg(any(test, feature = "pg_test"))]
+    pub(super) fn force_for_test(available: bool) {
+        AVX2_FMA.store(u8::from(available), Ordering::Relaxed);
+    }
+
+    #[cfg(any(test, feature = "pg_test"))]
+    pub(super) fn reset_for_test() {
+        AVX2_FMA.store(2, Ordering::Relaxed);
+    }
+
     /// Detect AVX2+FMA once, cache in an atomic (idempotent — any thread writes the same value).
     pub(super) fn available() -> bool {
         match AVX2_FMA.load(Ordering::Relaxed) {
@@ -111,8 +125,11 @@ mod simd_x86 {
         }
     }
 
-    /// Squared-L2 with AVX2+FMA, reading `raw` as unaligned little-endian f32. SAFETY: caller MUST ensure AVX2+FMA
-    /// is available (via `available()`) and `raw.len() >= query.len()*4`.
+    /// Squared-L2 with AVX2+FMA, reading `raw` as unaligned little-endian f32. SAFETY (both halves required —
+    /// the loop is driven by `dim = query.len()` and indexes BOTH `query[0..dim]` and `raw[0..dim*4]`): the caller
+    /// MUST ensure (1) AVX2+FMA is available (via `available()`), AND (2) `raw.len() == query.len()*4` — i.e. the
+    /// candidate vector byte-slice has exactly `dim` f32. `_mm256_loadu_ps` handles unaligned addresses, so reading
+    /// `&[u8]` page bytes as `*const f32` is sound; only the LENGTH invariant is the caller's obligation.
     #[target_feature(enable = "avx2,fma")]
     pub(super) unsafe fn l2_sq(query: &[f32], raw: &[u8]) -> f32 {
         let dim = query.len();
@@ -144,13 +161,14 @@ mod simd_x86 {
 }
 
 /// L2 distance between `query` and a candidate stored as little-endian f32 bytes `raw` — the SCAN hot-path entry
-/// (M31b). Dispatches to AVX2+FMA when available (cached), else the scalar fallback. `raw.len() == query.len()*4`.
+/// (M31b). Dispatches to AVX2+FMA when available (cached), else the scalar fallback. The length invariant
+/// `raw.len() == query.len()*4` is enforced ALWAYS (not just in debug) so the `unsafe` AVX2 path can never OOB in
+/// release regardless of caller — one compare per candidate, negligible vs the SIMD work.
 pub(crate) fn l2_dist_from_bytes(query: &[f32], raw: &[u8]) -> f64 {
-    debug_assert_eq!(raw.len(), query.len() * 4);
+    assert_eq!(raw.len(), query.len() * 4, "l2_dist_from_bytes: raw must be exactly dim*4 bytes");
     #[cfg(target_arch = "x86_64")]
     let sq = if simd_x86::available() {
-        // SAFETY: `available()` confirmed AVX2+FMA; `raw.len() == query.len()*4` (debug-asserted; the caller
-        // slices exactly dim*4 bytes per entry).
+        // SAFETY: `available()` confirmed AVX2+FMA and the `assert_eq!` above guarantees `raw.len()==query.len()*4`.
         unsafe { simd_x86::l2_sq(query, raw) }
     } else {
         l2_sq_from_bytes_scalar(query, raw)
@@ -228,14 +246,39 @@ mod tests {
         v.iter().flat_map(|x| x.to_le_bytes()).collect()
     }
 
+    /// Independent f32 Σ(q−c)² oracle (no sqrt roundtrip) — the honest reference for the from-bytes scalar sum.
+    fn l2_sq_f32_oracle(q: &[f32], c: &[f32]) -> f32 {
+        q.iter().zip(c).map(|(x, y)| (x - y) * (x - y)).sum()
+    }
+
     #[pg_test]
-    fn l2_from_bytes_scalar_matches_m20_l2() {
-        // The scalar fallback reads f32 from LE bytes and MUST equal the M20 scalar l2 exactly (same summation
-        // order — same f32 accumulator). Bit-identical, no eps.
-        let q = [3.0f32, 4.0, 0.0, 12.0];
-        let c = [0.0f32, 0.0, 0.0, 0.0];
+    fn l2_from_bytes_scalar_is_bit_identical_to_f32_sum() {
+        // The scalar fallback reads f32 from LE bytes and MUST equal a direct f32 Σd² (same summation order — same
+        // f32 accumulator), bit-for-bit. Uses NON-perfect-square magnitudes so the equality is not an artifact of
+        // a Pythagorean fixture surviving a sqrt/square roundtrip.
+        let q = [0.3f32, 4.7, 1.1, 12.9, 2.2, 7.3, 0.05, 9.8];
+        let c = [1.4f32, 0.2, 3.3, 5.6, 8.1, 0.9, 6.7, 2.0];
         let raw = to_le_bytes(&c);
-        assert_eq!(l2_sq_from_bytes_scalar(&q, &raw), l2_distance(&q, &c).powi(2) as f32);
+        assert_eq!(l2_sq_from_bytes_scalar(&q, &raw), l2_sq_f32_oracle(&q, &c));
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[pg_test]
+    fn l2_dist_from_bytes_scalar_dispatch_branch_covered() {
+        // Force the dispatch to the scalar branch (on this x86 host it would otherwise take AVX) so BOTH arms of
+        // l2_dist_from_bytes are exercised. Reset detection afterwards (no cross-test state).
+        let q: Vec<f32> = (0..40).map(|i| (i as f32) * 0.13 - 2.0).collect();
+        let c: Vec<f32> = (0..40).map(|i| 1.5 - (i as f32) * 0.07).collect();
+        let raw = to_le_bytes(&c);
+        simd_x86::force_for_test(false);
+        let scalar = l2_dist_from_bytes(&q, &raw);
+        simd_x86::force_for_test(true);
+        let avx = l2_dist_from_bytes(&q, &raw);
+        simd_x86::reset_for_test();
+        let oracle = (l2_sq_f32_oracle(&q, &c) as f64).sqrt();
+        assert_eq!(scalar, oracle, "scalar dispatch branch must equal the f32 oracle exactly");
+        let eps = 1e-4 * (q.len() as f64).sqrt() * oracle.max(1.0);
+        assert!((avx - oracle).abs() <= eps, "avx dispatch branch off by {}", (avx - oracle).abs());
     }
 
     #[pg_test]

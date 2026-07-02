@@ -36,10 +36,26 @@ SEED = 42
 
 
 def _conn():
-    return psycopg2.connect(
+    conn = psycopg2.connect(
         host=os.environ.get("PGHOST", "localhost"), port=os.environ.get("PGPORT", "5432"),
         user=os.environ.get("PGUSER", "postgres"), password=os.environ.get("PGPASSWORD", "postgres"),
         dbname=os.environ.get("PGDATABASE", "postgres"),
+        connect_timeout=30,  # fail loud on a stuck connect, never block CI indefinitely
+    )
+    conn.autocommit = True
+    # A stuck build/lock/runaway scan fails loud instead of hanging the ~2min integration gate.
+    conn.cursor().execute("SET statement_timeout = '120s'")
+    return conn
+
+
+def _assert_index_scan(cur, table, expected_index):
+    """Fail loud if the planner did NOT use the intended index for the ORDER BY <-> scan — otherwise a fallback
+    plan could silently produce timings that are not what the gate claims to measure."""
+    cur.execute("SET enable_seqscan=off; SET enable_indexscan=on")
+    cur.execute(f"EXPLAIN SELECT id FROM {table} ORDER BY embedding <-> '[{','.join(['0']*DIM)}]' LIMIT 10")
+    plan = "\n".join(row[0] for row in cur.fetchall())
+    assert "Index Scan" in plan and expected_index in plan, (
+        f"expected Index Scan using {expected_index}, got plan:\n{plan}"
     )
 
 
@@ -105,10 +121,18 @@ def _query_vectors(cur, table, k):
     return [r[0] for r in cur.fetchall()]
 
 
+# Fair-comparison preconditions (both indexes at the SAME operating point): theodb_ivfflat's build uses
+# DEFAULT_LISTS=100 (theodb_rs/src/am/build.rs) matching pgvector's `WITH (lists=100)`, and its scan uses
+# SCAN_PROBES=10 (theodb_rs/src/am/scan.rs) matching `SET ivfflat.probes=10`. These are fixed Rust constants today
+# (no reloption yet — a configurable lists/probes is M32); `_assert_index_scan` pins that each side actually used
+# its own IVFFlat index (not a fallback), so a future default change surfaces as a failure, not a silent unfair run.
+
+
 def test_uniform_theodb_faster_than_pgvector_at_recall_parity():
-    """UNIFORM worst case: theodb Index Scan p50 is decisively ≤ pgvector (SIMD + tight loop), recall at parity."""
+    """UNIFORM worst case: theodb Index Scan p50 is decisively ≤ pgvector (SIMD + tight loop), recall at parity.
+
+    This is the STRICT proof of the M31b DoD (p50 ≤ pgvector) — a robust, noise-proof margin (theodb ~0.4×)."""
     conn = _conn()
-    conn.autocommit = True
     try:
         cur = conn.cursor()
         cur.execute("CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE")
@@ -117,10 +141,12 @@ def test_uniform_theodb_faster_than_pgvector_at_recall_parity():
         qvs = _query_vectors(cur, "latu", QUERIES)
 
         _create_index(cur, "latu", "theodb")
+        _assert_index_scan(cur, "latu", "latu_theodb")
         th_recall = statistics.mean(len(_truth(cur, "latu", q) & _got(cur, "latu", q)) for q in qvs)
         th_p50 = statistics.median(_p50_ms(cur, "latu", q) for q in qvs[:LAT_QUERIES])
 
         _create_index(cur, "latu", "pgvector")
+        _assert_index_scan(cur, "latu", "latu_pgv")
         pv_recall = statistics.mean(len(_truth(cur, "latu", q) & _got(cur, "latu", q)) for q in qvs)
         pv_p50 = statistics.median(_p50_ms(cur, "latu", q) for q in qvs[:LAT_QUERIES])
 
@@ -128,15 +154,17 @@ def test_uniform_theodb_faster_than_pgvector_at_recall_parity():
         assert th_recall >= pv_recall - 1.0, f"theodb recall {th_recall:.1f} << pgvector {pv_recall:.1f}"
         # Decisive latency win (robust margin — the SIMD-fused scan beats pgvector's AVX C here).
         assert th_p50 <= pv_p50, f"theodb p50 {th_p50:.2f}ms not <= pgvector {pv_p50:.2f}ms (uniform)"
-        cur.execute("DROP TABLE latu CASCADE")
     finally:
+        conn.cursor().execute("DROP TABLE IF EXISTS latu CASCADE")
         conn.close()
 
 
 def test_clustered_high_recall_and_theodb_within_pgvector():
-    """CLUSTERED realistic point: both reach high recall; theodb p50 ≤ pgvector within a small noise band."""
+    """CLUSTERED realistic point: both reach high recall; theodb p50 ≤ pgvector within a tight noise band.
+
+    The STRICT p50 ≤ pgvector DoD proof is the uniform test above; here the latency check is a tight 10% band
+    (measured ~0.95×) guarding against regression, while recall (10/10 parity) is the primary assertion."""
     conn = _conn()
-    conn.autocommit = True
     try:
         cur = conn.cursor()
         cur.execute("CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE")
@@ -145,18 +173,20 @@ def test_clustered_high_recall_and_theodb_within_pgvector():
         qvs = _query_vectors(cur, "latc", QUERIES)
 
         _create_index(cur, "latc", "theodb")
+        _assert_index_scan(cur, "latc", "latc_theodb")
         th_recall = statistics.mean(len(_truth(cur, "latc", q) & _got(cur, "latc", q)) for q in qvs)
         th_p50 = statistics.median(_p50_ms(cur, "latc", q) for q in qvs[:LAT_QUERIES])
 
         _create_index(cur, "latc", "pgvector")
+        _assert_index_scan(cur, "latc", "latc_pgv")
         pv_recall = statistics.mean(len(_truth(cur, "latc", q) & _got(cur, "latc", q)) for q in qvs)
         pv_p50 = statistics.median(_p50_ms(cur, "latc", q) for q in qvs[:LAT_QUERIES])
 
         # High recall at the realistic operating point, at parity with pgvector.
         assert th_recall >= 8.0, f"theodb recall {th_recall:.1f}/10 too low on clustered data"
         assert th_recall >= pv_recall - 1.0, f"theodb recall {th_recall:.1f} << pgvector {pv_recall:.1f}"
-        # theodb p50 at or below pgvector within a 15% measurement-noise band (the SIMD residual is closed).
-        assert th_p50 <= pv_p50 * 1.15, f"theodb p50 {th_p50:.2f}ms not <= pgvector {pv_p50:.2f}ms x1.15 (clustered)"
-        cur.execute("DROP TABLE latc CASCADE")
+        # theodb p50 at or below pgvector within a 10% measurement-noise band (the SIMD residual is closed).
+        assert th_p50 <= pv_p50 * 1.10, f"theodb p50 {th_p50:.2f}ms not <= pgvector {pv_p50:.2f}ms x1.10 (clustered)"
     finally:
+        conn.cursor().execute("DROP TABLE IF EXISTS latc CASCADE")
         conn.close()

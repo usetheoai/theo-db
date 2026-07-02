@@ -154,7 +154,9 @@ unsafe fn scan_ivf_structured(rel: pg_sys::Relation, query: &[f32]) -> Vec<(i64,
         // surfaces list-balance health: a near-1 value on distinct data signals a degenerate build/corpus.
         let sort_us = t_sort.elapsed().as_micros();
         let nonempty = meta.dir.iter().filter(|(_, _, c)| *c > 0).count();
-        pg_sys::warning!(
+        // LOG (server log, not client) — a diagnostic is not a WARNING; keeps client output + warn-as-error tooling
+        // clean while `THEODB_SCAN_PROFILE=1`. Read via the server log (`docker logs`).
+        pgrx::log!(
             "theodb scan profile: cand={cand} nonempty_lists={nonempty}/{} probes={probes} \
              reads={read_us}us score={score_us}us sort={sort_us}us",
             meta.centroids.len()

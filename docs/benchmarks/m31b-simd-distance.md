@@ -19,14 +19,15 @@ to the optimization) prevented mis-targeting the SIMD effort.
 
 **Design (informed by the profile):** the AVX2 distance reads f32 DIRECTLY from the entry's page bytes via
 `_mm256_loadu_ps` (unaligned load), **fusing decode + distance** into one SIMD pass — eliminating BOTH the 45%
-decode and the 55% scalar distance (no scratch buffer). Repro: `/tmp/hotloop_profile.rs` (rustc -O --edition 2021).
+decode and the 55% scalar distance (no scratch buffer). Repro: `benchmarks/micro/simd_hotloop_bench.rs`
+(`rustc -O --edition 2021 simd_hotloop_bench.rs && ./simd_hotloop_bench`) — committed, portable (no PGRX_HOME).
 
 ## Phase 1 — the fused SIMD (implementation validated)
 
-Standalone micro-bench (`/tmp/simd_check.rs`, portable SSE2 build): parity vs scalar oracle across dims 1..129
-(within eps — recall-preserving, not bit-identical, as designed); the fused AVX2+FMA hot-loop is **1.62× faster**
-than scalar decode+distance at N=65k. AVX2+FMA present on the build host. The extension `#[pg_test]` parity tests
-(`vec.rs`) lock the contract; the observable gate is the Python benchmark below.
+Standalone micro-bench (`benchmarks/micro/simd_hotloop_bench.rs`, portable SSE2 build): parity vs scalar oracle
+across dims 1..129 (within eps — recall-preserving, not bit-identical, as designed); the fused AVX2+FMA hot-loop is
+**1.62× faster** than scalar decode+distance at N=65k. AVX2+FMA present on the build host. The extension `#[pg_test]`
+parity tests (`vec.rs`) lock the contract; the observable gate is the Python benchmark below.
 
 ## ⚠ Data-integrity finding (why every pre-M31b latency number was invalid)
 

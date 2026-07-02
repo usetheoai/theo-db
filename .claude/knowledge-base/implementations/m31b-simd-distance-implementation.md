@@ -57,3 +57,9 @@ pgvector's FMA path. The M20 SQL-callable distance ops are untouched (byte-parit
 - Absolute recall on uniform-random data is low for BOTH indexes (no cluster structure) — this is inherent to
   IVFFlat, not a theodb defect; the realistic (clustered) point reaches 10/10.
 - `lists`/`probes` are fixed defaults (100/10). A configurable reloption + higher-recall operating points → M32.
+- **ip/cosine SIMD deferred (honest deviation from plan T1.1):** T1.1 named `l2_distance_simd` AND `inner_product_simd`.
+  Only L2 (`l2_dist_from_bytes`) shipped — `theodb_ivfflat` registers ONLY `theodb_ivfflat_l2_ops` today, so the
+  scan's L2 branch is the sole SIMD hot path; ip/cosine candidates (no opclass yet) fall back to the scalar
+  `metric.dist`. Adding ip/cosine SIMD before an ip/cosine opclass exists would be dead code (YAGNI) — deferred to
+  M32 alongside those opclasses. The `Metric::dist_fast` name in plan T2.1 was simplified to a direct
+  `l2_dist_from_bytes` call behind the scan's `is_l2` branch (KISS).
