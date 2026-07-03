@@ -5,11 +5,13 @@
 > [`docs/sql-ai-functions.md`](../sql-ai-functions.md) § "Packaged surface". A superfície literal abaixo
 > permanece como API-alvo; `theodb_scann` (índice) não é entregue (usamos DiskANN/HNSW — specs 02/05).
 
-> **Status:** 📋 Especificação (planejado) — recurso-alvo do milestone **M7 — IA avançada** ([ROADMAP](../../ROADMAP.md)).
-> Esta página documenta a **API-alvo do TheoDB**. As funcionalidades aqui descritas **ainda não estão
-> implementadas** na release atual (M0 entrega PostgreSQL 17 + `pgvector`). Nenhum número de desempenho
-> nesta página é um benchmark — benchmarks reproduzíveis vivem em `docs/benchmarks/` quando publicados
-> (CLAUDE.md, regra TheoDB 5).
+> **Status:** ✅ **Entregue (M7-S1 + M13 + M19).** A busca híbrida está disponível: `ai.hybrid_search_rrf(...)`
+> (Rust `theodb_rs/src/hybrid.rs`, wrapper SQL `theodb_rs/src/api.rs:399`) e `ai.hybrid_search(config jsonb)`
+> (`theodb_rs/src/api.rs:418`) — fusão RRF de vetorial + FTS nativo do PostgreSQL (`ts_rank_cd`/GIN), ambas
+> `REVOKE`das de PUBLIC. Provado por `benchmarks/tests/test_hybrid.py` (`test_rrf_fuse_matches_handcalc`,
+> `test_rrf_fuse_tie_break_is_id_asc`, `test_ndcg_at_k_*`) + `benchmarks/tests/test_hybrid_guard.py` +
+> [`docs/benchmarks/m7-hybrid-recall.md`](../benchmarks/m7-hybrid-recall.md). **Honestidade:** a perna de texto usa
+> FTS nativo; um BM25 permissivo (pg_search é AGPL, barrado por D1) é slice futura — não é a superfície entregue.
 
 Esta página cobre a busca híbrida no TheoDB — combinação de busca vetorial (semântica) com Full Text Search — tanto pela função nativa `ai.hybrid_search()` quanto pela implementação manual via SQL com Reciprocal Rank Fusion (RRF).
 

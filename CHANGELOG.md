@@ -15,6 +15,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 ### Changed
+- Correção de doc-drift em `docs/features/` (auditoria de honestidade do core): 5 páginas tinham a linha
+  `> Status:` stale dizendo "📋 planejado" enquanto a capacidade **já estava entregue e testada** (o callout no topo
+  de cada uma já contava a verdade; a linha oficial não). Corrigidas com `file:line` + testes (validado por
+  `deep-research/validate_citations.py`, 0 fabricado): **03 IVFFlat** (`theodb_ivfflat` AM, `am/mod.rs`) e **04 IVF**
+  (= IVFFlat) → ✅ entregue; **06 híbrida** (`ai.hybrid_search_rrf`/`ai.hybrid_search(jsonb)`, `hybrid.rs`) → ✅ entregue;
+  **07 funções IA SQL** (`ai.*` + registry `theodb_ml`) → ✅ entregue (modos array/cursor seguem YAGNI-adiados);
+  **05 ScaNN** → ⚖️ NO-FORK (M14): `theodb_scann` literal é decisão-de-não-fazer, ScaNN-quality entregue via `USING diskann`.
+  Placeholder `'https://...'` do exemplo de `theodb_ml.create_model` trocado por `'<your-llm-endpoint>'` (clareza).
 
 ### Deprecated
 

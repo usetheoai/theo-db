@@ -5,11 +5,12 @@
 > em [`docs/benchmarks/m9-ivfflat.md`](../benchmarks/m9-ivfflat.md). Ver também
 > [`03-indice-ivfflat.md`](./03-indice-ivfflat.md). A superfície literal abaixo permanece como API-alvo.
 
-> **Status:** 📋 Especificação (planejado) — recurso-alvo do milestone **M2 — Vetorial / IA** ([ROADMAP](../../ROADMAP.md)).
-> Esta página documenta a **API-alvo do TheoDB**. As funcionalidades aqui descritas **ainda não estão
-> implementadas** na release atual (M0 entrega PostgreSQL 17 + `pgvector`). Nenhum número de desempenho
-> nesta página é um benchmark — benchmarks reproduzíveis vivem em `docs/benchmarks/` quando publicados
-> (CLAUDE.md, regra TheoDB 5).
+> **Status:** ✅ **Entregue como IVFFlat (M9 + M21).** No pgvector a família IVF **é** o IVFFlat — ver
+> [`03-indice-ivfflat.md`](./03-indice-ivfflat.md) e [`docs/benchmarks/m9-ivfflat.md`](../benchmarks/m9-ivfflat.md).
+> A capacidade (listas invertidas + quantização) está entregue via `ivfflat`/`theodb_ivfflat`
+> (`theodb_rs/src/am/mod.rs:35`) e quantização SBQ própria (`benchmarks/tests/test_sbq_index.py`). **Honestidade:**
+> não existe um access method `ivf` literal distinto (nem no pgvector nem no TheoDB) — a sintaxe `USING ivf (…
+> quantizer=…)` desta página permanece como API-alvo; a capacidade equivalente já está disponível.
 
 Esta página cobre a criação de índices vetoriais IVF no TheoDB — consultas SQL, parâmetros e funcionalidades, das funções de distância à configuração de listas e quantizers.
 

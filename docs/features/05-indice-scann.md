@@ -9,11 +9,13 @@
 > reabriria o fork. A superfície `theodb_scann` literal abaixo permanece como API-alvo (gated, não entregue);
 > use `USING diskann` (pgvectorscale) hoje.
 
-> **Status:** 📋 Especificação (planejado) — recurso-alvo do milestone **M2 — Vetorial / IA** ([ROADMAP](../../ROADMAP.md)).
-> Esta página documenta a **API-alvo do TheoDB**. As funcionalidades aqui descritas **ainda não estão
-> implementadas** na release atual (M0 entrega PostgreSQL 17 + `pgvector`). Nenhum número de desempenho
-> nesta página é um benchmark — benchmarks reproduzíveis vivem em `docs/benchmarks/` quando publicados
-> (CLAUDE.md, regra TheoDB 5).
+> **Status:** ⚖️ **NO-FORK (decisão M14) — capacidade ScaNN-quality entregue via `USING diskann`.** O access method
+> literal `theodb_scann` **não é implementado por decisão explícita** (não "ainda não feito"), gated por benchmark —
+> ver [`docs/adr/0004-scann-fork-decision.md`](../adr/0004-scann-fork-decision.md) e
+> [`docs/benchmarks/m14-scann-fork-decision.md`](../benchmarks/m14-scann-fork-decision.md). A qualidade ScaNN está
+> disponível hoje via **StreamingDiskANN** (extensão `vectorscale`, `USING diskann`) — provado por
+> `benchmarks/tests/test_harness.py::test_build_config_diskann_only` + `benchmarks/tests/test_sbq_index.py`.
+> A superfície `USING scann (…)` desta página permanece como API-alvo condicional (reabre se um benchmark justificar).
 
 Esta página cobre a criação de índices `ScaNN` no TheoDB via extensão `theodb_scann`, incluindo os modos automático e manual, os quantizadores suportados, parâmetros de árvore, manutenção do índice e exemplos de consulta vetorial.
 
