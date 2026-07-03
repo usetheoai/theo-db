@@ -15,6 +15,18 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 ### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.33.4] - 2026-07-03
+
+### Changed
 - M43 (otimização de **build-time** do `theodb_hnsw`, **gated por benchmark A/B**): a construção do grafo in-memory
   (`ann/hnsw.rs`) passa a usar o **kernel SIMD AVX2+FMA** (novo `crate::vec::l2_distance_simd`, reusa o kernel M31b
   via reinterpret f32→bytes) em vez da distância L2 **escalar** — o build fazia bilhões de distâncias escalares em
@@ -25,14 +37,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   "little")]` no reinterpret f32→bytes (fallback escalar em big-endian — achado do review de segurança; x86_64/LE
   byte-idêntico). A/B rigoroso: build **2.20×** (200±23s→91±3s @200k, 3 samples) / **24min→8.4min @1M**, recall
   paridade. Blueprint: `.claude/knowledge-base/discoveries/blueprints/m43-hnsw-build-qps-blueprint.md`.
-
-### Deprecated
-
-### Removed
-
-### Fixed
-
-### Security
 
 ## [0.33.3] - 2026-07-03
 
