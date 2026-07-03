@@ -555,6 +555,25 @@ build-time real cortado ~2.2–2.9×, recall-preserving; o carrier próprio agor
 
 ---
 
+### M44 — [x] Build PARALELO do theodb_hnsw (2.82× @50k / 1.95× @1M, recall paridade)
+
+**Outcome (WIN honesto):** o M42/M43 mostrou o build como gargalo; o M43 cortou 2.2× via SIMD, o paralelismo era o
+próximo teto. Discover: o build é CPU-bound + Rust puro (sem chamadas PG no loop) → paralelizável. Implementado com
+`std::thread::scope` + `RwLock` por-nó (`ann/hnsw_parallel.rs`), despacho por threshold (small→sequential
+determinístico; large→parallel). Sem nova dep. Artefato: `docs/benchmarks/m44-parallel-build.md`; blueprint no plano.
+
+**Medição A/B (m43 sequential vs m44 parallel):** @50k **2.82×** (33±6s→12±3s, 3 samples back-to-back, bandas
+separadas), recall paridade (Δ+0.0055). @1M: 8.4min→**4.3min** (1.95×), recall 0.9730. **Honesto:** o speedup
+encolhe com escala (contenção de lock cresce); 2.82× é o número rigoroso controlado. **Lineage: 24min→8.4min→4.3min**.
+
+**Custo honesto (Regra 3):** build NÃO-determinístico (racy insert; nenhum teste de determinismo quebra; recall
+paridade é o gate). Race-freedom por construção (RwLock), deadlock-free (1 lock por vez), panic-safe (scope join).
+
+**Dependencies:** M35 (theodb_hnsw), M43 (build SIMD). **Resultado:** build paralelo real, recall-preserving,
+race-free; o carrier atinge build competitivo (12 cores). Próximo: redução de contenção (lock striping) se preciso.
+
+---
+
 ## Sequência e paralelismo
 
 ```

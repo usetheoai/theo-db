@@ -16,6 +16,7 @@
 use std::cmp::Ordering;
 
 mod hnsw;
+mod hnsw_parallel;
 mod ivf;
 mod wire;
 
