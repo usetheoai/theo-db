@@ -60,7 +60,8 @@ pub(crate) unsafe fn read_blob(rel: pg_sys::Relation) -> Result<Vec<u8>, String>
         if (i as u32) >= nblocks {
             return Err("theodb am: missing data page".into());
         }
-        blob.extend_from_slice(&read_page_item(rel, i as pg_sys::BlockNumber)?);
+        // M38: one copy (append into `blob`) instead of the old two-copy `extend_from_slice(&read_page_item(...))`.
+        read_page_item_into(rel, i as pg_sys::BlockNumber, &mut blob)?;
     }
     if blob.len() != blob_len {
         return Err("theodb am: blob length mismatch (corrupt index)".into());
@@ -425,7 +426,9 @@ fn npages_for(nbytes: usize) -> u32 {
 unsafe fn read_chunked(rel: pg_sys::Relation, first_block: u32, npages: u32) -> Result<Vec<u8>, String> {
     let mut out = Vec::new();
     for b in first_block..first_block + npages {
-        out.extend_from_slice(&read_page_item(rel, b)?);
+        // M38: append each chunk's bytes DIRECTLY into `out` (one copy) — was `extend_from_slice(&read_page_item(...))`
+        // (two copies + intermediate realloc); the copy dominates the `reads` scan phase (M36 profiler).
+        read_page_item_into(rel, b, &mut out)?;
     }
     Ok(out)
 }
@@ -639,6 +642,21 @@ pub(crate) unsafe fn read_ivf_list(
 
 /// Read the single item stored on `block` (share-locked, no WAL). Copies the bytes out into an owned Vec.
 unsafe fn read_page_item(rel: pg_sys::Relation, block: pg_sys::BlockNumber) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    read_page_item_into(rel, block, &mut out)?;
+    Ok(out)
+}
+
+/// M38 — append `block`'s single item DIRECTLY into `out` (one copy), share-locked. This is the single item-read
+/// implementation `read_page_item` (fresh Vec) and `read_chunked` (reassembly) both delegate to — eliminating the
+/// double-copy of the old `read_chunked` (`read_page_item(...).to_vec()` then `extend_from_slice`), which the M36
+/// profiler showed dominates the `reads` scan phase (~44% vs ~15% for the SIMD distance). Recall-zero-risk: the
+/// bytes copied out are identical; only the number of memcpies changes.
+unsafe fn read_page_item_into(
+    rel: pg_sys::Relation,
+    block: pg_sys::BlockNumber,
+    out: &mut Vec<u8>,
+) -> Result<(), String> {
     let buf = pg_sys::ReadBufferExtended(
         rel,
         pg_sys::ForkNumber::MAIN_FORKNUM,
@@ -651,14 +669,14 @@ unsafe fn read_page_item(rel: pg_sys::Relation, block: pg_sys::BlockNumber) -> R
     let max_off = page_get_max_offset(page);
     if max_off < 1 {
         pg_sys::UnlockReleaseBuffer(buf);
-        return Ok(Vec::new()); // empty data page
+        return Ok(()); // empty data page — append nothing
     }
     let item_id = page_get_item_id(page, 1);
     let len = (*item_id).lp_len() as usize;
     let ptr = page_get_item(page, item_id) as *const u8;
-    let out = std::slice::from_raw_parts(ptr, len).to_vec();
+    out.extend_from_slice(std::slice::from_raw_parts(ptr, len));
     pg_sys::UnlockReleaseBuffer(buf);
-    Ok(out)
+    Ok(())
 }
 
 /// M35 — read the item at (`block`, `offno`) — generalizes [`read_page_item`] (which reads offset 1) to the

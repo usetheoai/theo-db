@@ -24,6 +24,28 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.33.1] - 2026-07-03
+
+### Changed
+- Correção de honestidade em `docs/features/` (M37): 2 páginas estavam marcadas "📋 planejado" quando a feature
+  **já está entregue e testada** — a auditoria anterior de features foi incompleta (grepou só o Rust
+  `theodb_rs/src/`, perdeu a implementação em `sql/50-theodb-ai.sql`). Corrigidas para "✅ Entregue" com `file:line`
+  + testes (validado por `deep-research/validate_citations.py`): **11 sumarização** (`ai.summarize` plpgsql +
+  `ai.agg_summarize` agregado, `sql/50-theodb-ai.sql:32,82`, chamando o `ai._chat` Rust; 6 testes em
+  `test_ai_sql.py`) e **08 aceleração** (`ai.generate_batch` N-in/N-out + `ai.if`, M11/M18; 9 testes). **Honestidade
+  (Regra 3):** o M37 foi criado sob a premissa "sumarização não implementada" (grep Rust-only) — estava errado; o
+  grounding measurement-first evitou adicionar um `ai.summarize` DUPLICADO (conflito). M37 é uma correção de
+  doc-drift, não código novo. Evidência funcional ao vivo (33 testes de contrato + 3 real-OpenAI
+  gpt-4o-mini, incl. `agg_summarize`) em `docs/benchmarks/m37-ai-summarize-validation.md`.
+
+- M38 (refactor de code-quality, **sem claim de performance**): `read_chunked`/`read_blob` do index-AM agora fazem
+  UMA cópia por página (`read_page_item_into`, append direto) em vez de duas (`read_page_item.to_vec()` +
+  `extend_from_slice`). Menos alocação/tráfego de memória; **recall byte-idêntico** (61 testes de coexistência).
+  **Honestidade (measurement-first):** o M38 investigou cortar o gargalo `reads` do scan; a medição concluiu que
+  (a) o SBQ regride recall (0.77–0.95 < 1.0 em SIFT real) e (b) a cópia **não é** o gargalo end-to-end (o profiler
+  enganou via overhead de instrumentação) — então NÃO há win de QPS a reivindicar. O lever vetorial real restante
+  é PQ (algorítmico, milestone futuro). Evidência: `docs/benchmarks/m38-copy-free-scan.{md,json}`.
+
 ## [0.33.0] - 2026-07-02
 
 ### Added

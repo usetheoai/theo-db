@@ -371,7 +371,7 @@ de risco. Único milestone dedicado por design (evita re-trabalho de cramar no M
 
 ---
 
-### M36 — [ ] Otimização do scan do índice: heap top-K lazy (RE-ESCOPADO por medição)
+### M36 — [x] Otimização do scan do índice: heap top-K lazy (RE-ESCOPADO por medição)
 
 **Objective:** Reduzir o custo de scan do índice atacando o gargalo `sort` **MEDIDO** (não o suposto). O gate
 measurement-first do M36 (`THEODB_SCAN_PROFILE=1`, blueprint
@@ -394,41 +394,57 @@ complexidade (zero risco de recall — top-K byte-idêntico). O `reads` (quantiz
 
 ---
 
-### M38 — [ ] Quantização de I/O no scan (o gargalo `reads` ~44%, recall-risco)
+### M38 — [x] Investigação do gargalo `reads` (medido: sem lever recall-zero-risco viável — PQ é o real)
 
-**Objective:** Cortar o gargalo `reads` (~44–51% do custo de scan, medido no M36) persistindo **códigos SBQ
-menores** nas páginas de lista (16 B/vetor vs 512 B f32 em dim=128 → ~32× menos bytes/candidato lidos), pontuando
-por Hamming/assimétrico, com **rerank f32 do top over_fetch** para recuperar o recall. Continua o M36 (que fechou o
-`sort`); juntos atacam ~80% do custo de scan medido. Segundo slice do ADR-2 do blueprint M36 (medir o heap antes de
-comprometer o risco de recall da quantização).
+**Outcome (honesto, measurement-first):** o milestone entregou uma **MEDIÇÃO** que fechou 3 hipóteses, não um win
+de QPS. Blueprint: `.claude/knowledge-base/discoveries/blueprints/m38-io-quantization-blueprint.md`; artefato:
+`docs/benchmarks/m38-copy-free-scan.{md,json}`.
 
-**Definition of done:**
+1. **SBQ falsificado (recall).** Em SIFT real o SBQ atinge só recall 0.77–0.95 vs 1.0 do baseline (quantização
+   escalar perde ranking demais). O gate "recall preservado" do SBQ não é atingível — PQ seria o answer, mas é
+   milestone grande (deferido).
+2. **A cópia não é o gargalo end-to-end.** O profiler do M36 sugeria `reads` = 44% (dominado pela cópia dupla do
+   `read_chunked`). Eliminada a cópia dupla (`read_page_item_into`, uma cópia), o profiler INTERNO caiu ~metade —
+   **mas o end-to-end NÃO mostrou win confiável** (ratio 0.94–1.52 entre runs = ruído; efeito < variância de
+   medição). Lição: a atribuição do profiler estava **inflada pelo overhead da própria instrumentação**
+   (`Instant::now()`); a cópia não é o gargalo real.
+3. **Byproduct entregue:** a eliminação da cópia dupla (`read_page_item_into`) é código estritamente melhor (menos
+   alocação/tráfego de memória), **recall byte-idêntico** (61 testes de coexistência), merged como refactor de
+   code-quality — SEM claim de QPS (o benchmark não sustenta).
 
-- [ ] Códigos SBQ persistidos nas páginas de lista (`am/page.rs` + `am/build.rs`), reusando `theodb_rs/src/sbq.rs` (M22); mudança de formato de página é BREAKING (magic bump + REINDEX + CHANGELOG).
-- [ ] Scan lê códigos (menos bytes), rankeia por Hamming/assimétrico, **rerank f32 do top over_fetch**; **recall preservado (≥ baseline no ponto casado)** como gate. Se SBQ-1bit regredir < baseline mesmo com over_fetch, escalar bits ou PQ/ADC via ADR.
-- [ ] Benchmark reproduzível `docs/benchmarks/m38-io-quantization.{md,json}` a 1M (reusa `benchmarks/theodb_bench/`): ganho de QPS medido via `reads` cortado (profiler) a recall preservado; quanto do gap M33 fecha, honesto.
+**Conclusão:** nenhum lever de `reads` recall-zero-risco produz win end-to-end mensurável; fechar o gargalo
+vetorial de verdade exige **quantização de produto (PQ + ADC via LUT — o algoritmo do ScaNN)**, que reduz
+candidatos/bytes preservando recall. É PhD-level (codebooks + LUT SIMD + persistência + gate de recall) — um
+milestone futuro grande, registrado aqui e no blueprint para quando o North Star exigir.
 
-**Dependencies:** M22 (`sbq.rs`), M34 (reloption/GUC), M35 (scan estruturado), M36 (heap — o `sort` já resolvido).
-**Risco (MÉDIO):** quantização de I/O tem risco de recall (SBQ-1bit teta ~0.86 no protótipo) — mitigado por rerank
-f32 + gate de recall. Deltas de QPS **UNBENCHMARKED** até o `m38-*.json` existir.
+**Dependencies:** M31b, M34, M35, M36. **Resultado:** measurement + code-quality byproduct (não um win de QPS).
 
 ---
 
-### M37 — [ ] Sumarização de conteúdo (`ai.summarize`) — fechar a última feature documentada ausente
+### M37 — [x] Sumarização de conteúdo (`ai.summarize`) — já entregue (correção de doc-drift)
 
-**Objective:** Entregar a sumarização de conteúdo via SQL — a única feature em `docs/features/` genuinamente NÃO
-implementada (`docs/features/11-sumarizacao-conteudo.md`; nenhuma função `summarize` no código hoje). Espelha
-exatamente o padrão já entregue de `ai.analyze_sentiment` / `ai.rank` (`theodb_rs/src/chat.rs`, modelo síncrono
-por-linha via LLM, ADR `docs/adr/0007-synchronous-per-row-model-http.md`).
+**Outcome (honesto, measurement-first):** o milestone descobriu que a feature **JÁ ESTAVA IMPLEMENTADA E TESTADA**
+— a auditoria anterior de `docs/features/` (que criou este milestone) foi **incompleta**: grepou só o Rust
+(`theodb_rs/src/`) e perdeu a implementação em `sql/50-theodb-ai.sql`. Blueprint:
+`.claude/knowledge-base/discoveries/blueprints/m37-ai-summarize-blueprint.md`.
 
-**Definition of done:**
+O que já existe (M10 + M18):
+- `ai.summarize(content text, model text DEFAULT NULL) RETURNS text` — plpgsql (`sql/50-theodb-ai.sql:32`) que
+  chama o `ai._chat` **em Rust** (`theodb_rs/src/chat.rs`).
+- `ai.agg_summarize(text)` — agregado que colapsa várias linhas num resumo (`sql/50-theodb-ai.sql:82`).
+- **6 testes de contrato verdes** em `benchmarks/tests/test_ai_sql.py` (summarize escalar + agregado + negative
+  cases + volatilidade).
 
-- [ ] Função `ai.summarize(content text, model text DEFAULT NULL) RETURNS text` (superfície SQL em `theodb_rs/src/api.rs`, lógica em `theodb_rs/src/chat.rs`, espelhando `ai_sentiment`/`ai_rank`), com erro tipado em saída malformada.
-- [ ] Teste de contrato em `benchmarks/tests/test_ai_sql.py` (happy path + negative case de saída malformada → erro tipado), no padrão dos testes de sentiment/rank.
-- [ ] `docs/features/11-sumarizacao-conteudo.md` atualizado de "📋 planejado" → "✅ Entregue" com `file:line` + teste (validado por `deep-research/validate_citations.py`). **Nota de honestidade:** qualidade depende do LLM configurado; sem benchmark de qualidade de sumarização.
+**Trabalho do M37 (o único gap real):** `docs/features/11-sumarizacao-conteudo.md` atualizado de "📋 planejado" →
+"✅ Entregue" com `file:line` + os 6 testes, validado por `deep-research/validate_citations.py` (PASS). NÃO foi
+adicionado código Rust — seria um `ai.summarize` DUPLICADO (conflito). O grounding measurement-first evitou o
+duplicado.
 
-**Dependencies:** M18 (superfície `ai.*` + `chat.rs` existem). **Risco (BAIXO):** é uma cópia estrutural de
-`ai.rank`/`ai.analyze_sentiment` já entregues — sem novo mecanismo, só um novo prompt + parse.
+**Honestidade (Regra 3):** quando criei o M37, afirmei "genuinamente não implementada" com base num grep Rust-only.
+Estava errado — a feature está em `sql/50`. M37 é uma correção de doc-drift, não código novo.
+
+**Dependencies:** M10, M18 (a feature real). **Resultado:** correção de documentação + grounding que evitou um
+duplicado.
 
 ---
 

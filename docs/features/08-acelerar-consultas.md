@@ -1,10 +1,13 @@
 # Acelerar consultas com funções otimizadas
 
-> **Status:** 📋 Especificação (planejado) — recurso-alvo do milestone **M7 — IA avançada** ([ROADMAP](../../ROADMAP.md)).
-> Esta página documenta a **API-alvo do TheoDB**. As funcionalidades aqui descritas **ainda não estão
-> implementadas** na release atual (M0 entrega PostgreSQL 17 + `pgvector`). Nenhum número de desempenho
-> nesta página é um benchmark — benchmarks reproduzíveis vivem em `docs/benchmarks/` quando publicados
-> (CLAUDE.md, regra TheoDB 5).
+> **Status:** ✅ **Entregue (M11 + M18).** A aceleração de funções de IA está disponível: `ai.generate_batch(prompts
+> text[], model text DEFAULT NULL) RETURNS text[]` responde N prompts em UM round-trip HTTP
+> (`theodb_rs/src/api.rs`, lógica em `theodb_rs/src/chat.rs` `ai_generate_batch`) — o padrão N-in/N-out que evita o
+> N+1 de chamadas por-linha; e `ai.if(prompt text, model text DEFAULT NULL) RETURNS boolean` para classificação
+> rápida (`theodb_rs/src/chat.rs` `ai_if`). Provado por `benchmarks/tests/test_ai_sql.py` (9 testes de
+> `generate_batch` + testes de `ai.if`). **Nota de honestidade:** a aceleração é o batching de round-trips (N→1);
+> o "Proxy Model local" descrito abaixo (estilo AlloyDB) não é a superfície entregue — a nossa é `ai.generate_batch`
+> / `ai.if`. Qualidade/latência dependem do LLM configurado (ADR `docs/adr/0007-synchronous-per-row-model-http.md`).
 
 Esta página cobre as **Optimized AI Functions** do TheoDB: consultas SQL, comandos, parâmetros e o uso do Proxy Model local para acelerar a classificação por IA com `ai.if()`.
 

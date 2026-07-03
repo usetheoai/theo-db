@@ -1,10 +1,17 @@
 # Sumarização de conteúdo
 
-> **Status:** 📋 Especificação (planejado) — recurso-alvo do milestone **M7 — IA avançada** ([ROADMAP](../../ROADMAP.md)).
-> Esta página documenta a **API-alvo do TheoDB**. As funcionalidades aqui descritas **ainda não estão
-> implementadas** na release atual (M0 entrega PostgreSQL 17 + `pgvector`). Nenhum número de desempenho
-> nesta página é um benchmark — benchmarks reproduzíveis vivem em `docs/benchmarks/` quando publicados
-> (CLAUDE.md, regra TheoDB 5).
+> **Status:** ✅ **Entregue (M10 + M18).** A sumarização está disponível em duas formas:
+> a função escalar `ai.summarize(content text, model text DEFAULT NULL) RETURNS text`
+> (`sql/50-theodb-ai.sql:32`, plpgsql que chama o `ai._chat` **em Rust**, `theodb_rs/src/chat.rs`) e o agregado
+> `ai.agg_summarize(text)` que colapsa várias linhas num único resumo (`sql/50-theodb-ai.sql:82`, com
+> `_agg_summ_accum`/`_agg_summ_final`). Provado por `benchmarks/tests/test_ai_sql.py`
+> (`test_summarize_returns_text`, `test_agg_summarize_over_rows`, `test_agg_summarize_empty_and_null_input_is_null`,
+> `test_agg_summarize_finalfunc_is_volatile`, `test_agg_summarize_skips_null_and_empty_rows`,
+> `test_agg_summarize_propagates_empty_completion_typed` — 6 verdes). **Nota de honestidade:** a qualidade do
+> resumo depende do modelo LLM configurado (modelo síncrono por-linha, ADR
+> `docs/adr/0007-synchronous-per-row-model-http.md`); não há benchmark de qualidade de sumarização — a validação é
+> o teste de contrato contra o container. As seções abaixo (versionamento `theodb_ml`, flags de preview) descrevem
+> a API-alvo estilo AlloyDB; a superfície entregue do TheoDB é `ai.summarize` / `ai.agg_summarize` no schema `ai`.
 
 Esta página cobre as funções `ai.summarize()` e `ai.agg_summarize()` — consultas SQL, parâmetros e
 modos de execução (escalar, baseado em arrays, baseado em cursor e agregado) para gerar resumos de texto.
