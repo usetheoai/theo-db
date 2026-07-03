@@ -15,7 +15,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 ### Changed
-- M41 (otimização de QPS do scan `theodb_hnsw`, **gated por benchmark A/B**): o `traverse` on-demand
+- M41 (otimização de QPS do scan `theodb_hnsw`, **gated por benchmark A/B — ganho honesto 1.2–1.5×**): o `traverse` on-demand
   (`theodb_rs/src/am/hnsw_page.rs`) passa a decodificar+pontuar cada nó **dentro do pin da página**
   (`page::with_page_item`, sem o `to_vec` alloc+memcpy por-nó) e cacheia `RelationGetNumberOfBlocksInFork` uma
   vez por query (era ×2/nó). Motivado pela medição M40 (theodb_hnsw 3–5× mais lento que theodb_ivfflat a recall

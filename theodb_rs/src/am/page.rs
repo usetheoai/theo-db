@@ -737,19 +737,29 @@ pub(crate) unsafe fn with_page_item<T>(
         std::ptr::null_mut(),
     );
     pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_SHARE as i32);
+    // RAII: release (unlock + unpin) on EVERY exit path — incl. an early `?`, an `Err` from `f`, OR a Rust panic
+    // inside `f`. `f` now runs decode+score under the pin (a wider critical section than the old `to_vec`), so
+    // structural release matters (mirrors pgvectorscale's `LockedBufferShare` Drop guard). M41 hardening.
+    let _pin = SharePin(buf);
     let page = pg_sys::BufferGetPage(buf);
     let max_off = page_get_max_offset(page);
     if (offno as usize) < 1 || (offno as usize) > max_off {
-        pg_sys::UnlockReleaseBuffer(buf);
         return Err(format!("theodb am: offset {offno} out of range (max={max_off}) on page {block}"));
     }
     let item_id = page_get_item_id(page, offno);
     let len = (*item_id).lp_len() as usize;
     let ptr = page_get_item(page, item_id) as *const u8;
     let bytes = std::slice::from_raw_parts(ptr, len);
-    let out = f(bytes); // score / decode INSIDE the pin — the borrow ends before we release
-    pg_sys::UnlockReleaseBuffer(buf);
-    out
+    f(bytes) // score / decode INSIDE the pin — the borrow ends here; `_pin` releases the buffer on drop
+}
+
+/// RAII guard for a pinned + share-locked buffer: `UnlockReleaseBuffer` on drop, so the release is panic-safe by
+/// construction (the unwind runs the destructor). Mirrors pgvectorscale's `LockedBufferShare` pattern.
+struct SharePin(pg_sys::Buffer);
+impl Drop for SharePin {
+    fn drop(&mut self) {
+        unsafe { pg_sys::UnlockReleaseBuffer(self.0) }
+    }
 }
 
 /// M41 — read the MAIN-fork block count once (a hot traversal caches this instead of per-item).

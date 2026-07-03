@@ -492,7 +492,7 @@ harness reproduzível; theodb_ivfflat é o carrier mais forte nesta escala/dado;
 
 ---
 
-### M41 — [x] Otimização de QPS do scan theodb_hnsw (2.4–3.0× a recall idêntico)
+### M41 — [x] Otimização de QPS do scan theodb_hnsw (1.2–1.5× a recall idêntico, honesto)
 
 **Outcome (WIN — 1º positivo após 5 negativos measurement-first):** o M40 apontou que o `theodb_hnsw` era 3–5× mais
 lento que o `theodb_ivfflat` a recall igual. O discover (blueprint `m41-hnsw-qps`) identificou o gargalo no
@@ -501,9 +501,10 @@ enquanto o ivfflat amortiza o pin/lock sobre uma página inteira com SIMD. A cor
 **dentro do pin** (`page::with_page_item`, sem cópia) e cacheia `nblocks` por query. Artefato:
 `docs/benchmarks/m41-hnsw-qps.md`.
 
-**Medição A/B (n=50k, recall byte-idêntico):** QPS **2.4–3.0×** (ef=10: 1217→3538; ef=100: 329→865; ef=200:
-214→510), recall inalterado (0.313/0.617/0.809/0.911 idênticos). Gap vs ivfflat de 3–5× → ~paridade (~0.84× no
-alto-recall). **Gate de correção:** 8/8 `test_index_am.py` verdes (recall byte-idêntico por construção).
+**Medição A/B rigorosa (n=50k, 4 amostras alternadas mean±std, recall byte-idêntico):** QPS **1.2–1.5×**, crescendo
+com ef (ef=10: 1.24×; ef=100: 1.38×; ef=200: **1.46×** com bandas de std separadas → significativo). Recall inalterado
+(0.313/0.617/0.809/0.911 idênticos). **Honestidade (Regra 3):** um run único cross-session sugeriu 2.4–3.0×, mas era
+variância do CPU throttled (lição M38/M40); o número controlado é 1.2–1.5×. **Gate:** 8/8 `test_index_am.py` verdes.
 
 **Próximo:** rodar em SIFT1M para o veredito confiável de carrier (theodb_hnsw agora competitivo).
 
