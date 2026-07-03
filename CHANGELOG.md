@@ -15,6 +15,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 ### Changed
+- M43 (otimização de **build-time** do `theodb_hnsw`, **gated por benchmark A/B**): a construção do grafo in-memory
+  (`ann/hnsw.rs`) passa a usar o **kernel SIMD AVX2+FMA** (novo `crate::vec::l2_distance_simd`, reusa o kernel M31b
+  via reinterpret f32→bytes) em vez da distância L2 **escalar** — o build fazia bilhões de distâncias escalares em
+  128-dim enquanto o scan já era SIMD. Motivado pelo M42 (build 24min@1M é o gargalo do carrier). **Alinha** a
+  métrica do build à do scan (ambos SIMD → consistente). **Gate:** recall PARIDADE (não byte-idêntico — FMA arredonda
+  diferente → grafo muda em poucas near-ties). Blueprint: `.claude/knowledge-base/discoveries/blueprints/m43-hnsw-build-qps-blueprint.md`.
 
 ### Deprecated
 

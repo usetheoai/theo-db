@@ -85,7 +85,7 @@ impl HnswIndex {
                     let cand: Vec<Cand> = self.neighbors[nb][layer]
                         .iter()
                         .map(|&x| Cand {
-                            d: self.metric.dist(&nbvec, &self.vectors[x]),
+                            d: self.metric.dist_simd(&nbvec, &self.vectors[x]),
                             i: x,
                         })
                         .collect();
@@ -104,14 +104,14 @@ impl HnswIndex {
     }
 
     fn greedy_descend(&self, q: &[f32], mut ep: usize, layer: usize) -> usize {
-        let mut best_d = self.metric.dist(q, &self.vectors[ep]);
+        let mut best_d = self.metric.dist_simd(q, &self.vectors[ep]);
         loop {
             let mut improved = false;
             let li = layer.min(self.neighbors[ep].len().saturating_sub(1));
             // Clone the small neighbour slice to avoid borrowing self across the dist calls.
             let nbs = self.neighbors[ep][li].clone();
             for nb in nbs {
-                let d = self.metric.dist(q, &self.vectors[nb]);
+                let d = self.metric.dist_simd(q, &self.vectors[nb]);
                 if d < best_d {
                     best_d = d;
                     ep = nb;
@@ -133,7 +133,7 @@ impl HnswIndex {
             if e >= self.vectors.len() {
                 continue;
             }
-            let d = self.metric.dist(q, &self.vectors[e]);
+            let d = self.metric.dist_simd(q, &self.vectors[e]);
             visited[e] = true;
             cand.push(std::cmp::Reverse(Cand { d, i: e }));
             result.push(Cand { d, i: e });
@@ -152,7 +152,7 @@ impl HnswIndex {
                     continue;
                 }
                 visited[nb] = true;
-                let d = self.metric.dist(q, &self.vectors[nb]);
+                let d = self.metric.dist_simd(q, &self.vectors[nb]);
                 let worst = result.peek().map(|w| w.d).unwrap_or(f64::INFINITY);
                 if d < worst || result.len() < ef {
                     cand.push(std::cmp::Reverse(Cand { d, i: nb }));
@@ -178,7 +178,7 @@ impl HnswIndex {
             let cv = &self.vectors[c.i];
             let closer_to_kept = kept
                 .iter()
-                .any(|&k| self.metric.dist(cv, &self.vectors[k]) < c.d);
+                .any(|&k| self.metric.dist_simd(cv, &self.vectors[k]) < c.d);
             if !closer_to_kept {
                 kept.push(c.i);
             }
@@ -264,7 +264,7 @@ impl HnswIndex {
         let mut out = self.search(q, k, ef_search);
         if !pending.is_empty() {
             for (id, v) in pending {
-                out.push((*id, self.metric.dist(q, v)));
+                out.push((*id, self.metric.dist_simd(q, v)));
             }
             out.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(&b.0)));
             out.truncate(k);
