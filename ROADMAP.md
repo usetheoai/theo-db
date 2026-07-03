@@ -371,7 +371,7 @@ de risco. Único milestone dedicado por design (evita re-trabalho de cramar no M
 
 ---
 
-### M36 — [ ] Otimização do scan do índice: heap top-K lazy (RE-ESCOPADO por medição)
+### M36 — [x] Otimização do scan do índice: heap top-K lazy (RE-ESCOPADO por medição)
 
 **Objective:** Reduzir o custo de scan do índice atacando o gargalo `sort` **MEDIDO** (não o suposto). O gate
 measurement-first do M36 (`THEODB_SCAN_PROFILE=1`, blueprint
