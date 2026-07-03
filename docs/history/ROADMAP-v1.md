@@ -200,7 +200,7 @@ de `vectorscale.so` (PRD §11) antes de distribuir o binário da imagem.
 
 - [x] **(Gate — 1º item)** Harness de benchmark **recall@k + latência/QPS/build/memória reproduzível** rodando em CI sobre datasets de referência (ANN-Benchmarks), publicado em `docs/benchmarks/`. Nenhuma decisão de índice nem claim de performance antes disto (ADR 0002). — **harness + loader HDF5 + dataset real (glove-25) + publicado ✅; CI verde (run `28293702614`, job `image-and-bench` roda o harness-gate sobre o glove real em CI).**
 - [x] Índice ANN além do HNSW disponível, **escolhido pela evidência do harness** — pgvectorscale StreamingDiskANN / fork (D3) / ScaNN-as-PG-AM (Apache-2.0) — mirando **igualar ou superar** o recall@latência publicado do ScaNN; resultado medido publicado em `docs/benchmarks/`. — **DiskANN disponível na imagem; HNSW escolhido pela evidência (glove-25: HNSW domina todos os eixos); superioridade ScaNN-class marcada `UNBENCHMARKED`.**
-- [x] Função SQL para gerar embeddings a partir de modelo configurável (local e/ou remoto). — **`theodb.embed()` (plpython3u, endpoint configurável — padrão AlloyDB; `tools/embedding_server.py` serve modelo local real; `docs/sql-embeddings.md`).**
+- [x] Função SQL para gerar embeddings a partir de modelo configurável (local e/ou remoto). — **`theodb.embed()` (plpython3u, endpoint configurável — padrão AlloyDB; `benchmarks/servers/embedding_server.py` serve modelo local real; `docs/sql-embeddings.md`).**
 - [x] Política de Fork (D3) honrada: qualquer patch em pgvector/pgvectorscale tem benchmark de gatilho + diff mínimo + CI de rebase — ou permanece upstream as-is. — **pgvectorscale as-is, commit `57c88b7` pinado, sem fork.**
 
 **Entregáveis (artefatos concretos):**

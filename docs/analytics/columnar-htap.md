@@ -48,6 +48,6 @@ Use the columnstore mirror for big analytical scans, the row table for OLTP.
 
 The columnar capability + the row-vs-columnar plan choice are proven on the canonical pg_mooncake distribution
 (MIT). Embedding pg_mooncake into the shipped TheoDB PG17 image is the **gated adoption step** — pg_mooncake
-supports pg17, but the from-source PG17 build is heavy (Rust+pgrx+DuckDB) and currently blocked on a pinned-rustc
-MSRV at upstream HEAD (`packaging/Dockerfile.columnar-pg17probe`; recorded in the benchmark report). Adoption is
+supports pg17, but the from-source PG17 build is heavy (Rust+pgrx+DuckDB) and was blocked on a pinned-rustc
+MSRV at upstream HEAD (recorded in the benchmark report). Adoption is
 a future ADR gated on the PG17 build fix + a large-scale measurement.

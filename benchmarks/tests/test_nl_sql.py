@@ -1,6 +1,6 @@
 """M7-S4 safe NL→SQL contract + anti-prompt-injection tests (ai.nl_to_sql / ai.nl_query).
 
-The stub (tools/chat_server.py) "complies" with each injection on demand (magic tokens), so these tests prove
+The stub (benchmarks/servers/chat_server.py) "complies" with each injection on demand (magic tokens), so these tests prove
 the GUARDS catch it — L2 static validation (22023 at generate-time) and/or L3 the PG-native read-only sandbox
 (25006 at execute-time) — NOT that the LLM refused. Every injection test also asserts the target table is
 UNCHANGED (the database is never mutated). Gated on the LLM endpoint (the S3 stub); requires the container
@@ -33,7 +33,7 @@ def _free_port() -> int:
 def chat_server():
     port = _free_port()
     proc = subprocess.Popen(
-        [sys.executable, os.path.join(_REPO, "tools", "chat_server.py"), "--host", "0.0.0.0", "--port", str(port)],
+        [sys.executable, os.path.join(_REPO, "benchmarks", "servers", "chat_server.py"), "--host", "0.0.0.0", "--port", str(port)],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
     try:

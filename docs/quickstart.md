@@ -13,12 +13,12 @@ docker run -d --name theodb -e POSTGRES_PASSWORD=postgres -p 5432:5432 ghcr.io/u
 ```
 
 ```sql
--- Installs the whole AI + vector surface; CASCADE pulls vector, vectorscale and plpython3u.
+-- Installs the whole AI + vector surface; CASCADE pulls vector and vectorscale.
 CREATE EXTENSION IF NOT EXISTS theodb CASCADE;
 ```
 
 The bundled image runs this automatically on first init. On any other PostgreSQL 17, run it yourself
-(requires superuser — the AI functions use the untrusted `plpython3u` language).
+(requires superuser — the `theodb` extension is marked `superuser` in its control file).
 
 ```sql
 -- Seed a small products table used by the examples below.
@@ -159,7 +159,7 @@ ALTER EXTENSION theodb UPDATE;   -- chains theodb--X--Y.sql scripts to the newes
 
 ## Notes
 
-- Features 01–05 (vector + indexes) need only `vector` + `vectorscale` — they work on a managed PostgreSQL
-  that lacks `plpython3u`.
-- Features 06–12 (the `ai.*` surface) require `plpython3u` (untrusted, superuser-only) and a configured
-  LLM endpoint. See the README "Install" section for the managed-PostgreSQL limitation.
+- Features 01–05 (vector + indexes) need only `vector` + `vectorscale`.
+- Features 06–12 (the `ai.*` surface) are served by the Rust `theodb_rs` extension (no `plpython3u` since
+  M19) and need a configured LLM endpoint. Because there is no untrusted-language dependency anymore, the
+  `ai.*` surface also works on managed PostgreSQL that does not enable `plpython3u`.

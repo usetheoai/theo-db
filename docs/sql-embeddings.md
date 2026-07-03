@@ -2,8 +2,8 @@
 
 Generate vector embeddings directly from SQL, from a **configurable model**. TheoDB mirrors AlloyDB's
 `embedding()` / `google_ml_integration` design: **the database calls a model endpoint — it does not ship
-a model.** The image stays lean (`plpython3u` only, no torch/ONNX inside Postgres); the model runs
-out-of-process and is fully swappable.
+a model.** The image stays lean (no torch/ONNX inside Postgres — the embed surface is Rust in `theodb_rs`);
+the model runs out-of-process and is fully swappable.
 
 ## Contract
 
@@ -27,7 +27,7 @@ Unset endpoint → fail-fast typed error (`SQLSTATE 22023`), never a silent NULL
 
 ```bash
 pip install fastembed
-python tools/embedding_server.py --host 0.0.0.0 --port 8088 --model BAAI/bge-small-en-v1.5
+python benchmarks/servers/embedding_server.py --host 0.0.0.0 --port 8088 --model BAAI/bge-small-en-v1.5
 ```
 
 ```sql
@@ -47,15 +47,15 @@ SELECT theodb.embed('hello', 'text-embedding-3-small');  -- vector(1536)
 
 ## Validated against real providers
 
-- **Local model** (`tools/embedding_server.py`, fastembed bge-small-en-v1.5) — 384-dim, used by the
+- **Local model** (`benchmarks/servers/embedding_server.py`, fastembed bge-small-en-v1.5) — 384-dim, used by the
   integration tests (real, no mock).
 - **Cloud — OpenAI** — `theodb.embed('…', 'text-embedding-3-small')` against `https://api.openai.com/v1/embeddings`
   returns `vector(1536)` with genuine semantics (paraphrase ≪ unrelated in cosine distance). The image ships
-  `ca-certificates` so `plpython3u`'s TLS verification succeeds for HTTPS providers.
+  `ca-certificates` so the Rust embed surface's TLS verification succeeds for HTTPS providers.
 
 ## Notes (honest)
 
-- `tools/embedding_server.py` ships **bge-small-en-v1.5** (384-dim, ONNX via fastembed — no GPU, no
+- `benchmarks/servers/embedding_server.py` ships **bge-small-en-v1.5** (384-dim, ONNX via fastembed — no GPU, no
   torch). It is a real model, used as the test oracle and as a zero-dependency local option.
 - The call is synchronous inside the backend (same as AlloyDB's pattern). For bulk embedding of large
   tables, batch outside a single statement; an async/batch helper is future work.

@@ -1,7 +1,7 @@
 -- TheoDB M2 DoD-3 — SQL embedding generation from a CONFIGURABLE model.
 -- Mirrors AlloyDB's embedding()/google_ml_integration pattern: the database calls a configurable
 -- model endpoint (it does NOT ship a model). The endpoint can be a self-hosted local model
--- (tools/embedding_server.py — real fastembed/ONNX) OR any cloud OpenAI-compatible provider.
+-- (benchmarks/servers/embedding_server.py — real fastembed/ONNX) OR any cloud OpenAI-compatible provider.
 --
 -- M17 (ROADMAP-v2 / ADR 0006): theodb.embed was REWRITTEN in Rust and now ships in the OWN pgrx
 -- extension `theodb_rs` (theodb_rs/src/lib.rs), NOT here — so the SQL-only `theodb` extension no

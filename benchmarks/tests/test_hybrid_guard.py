@@ -50,7 +50,7 @@ def _connect():
 def embed_server():
     port = _free_port()
     proc = subprocess.Popen(
-        [sys.executable, os.path.join(_REPO, "tools", "embedding_server.py"),
+        [sys.executable, os.path.join(_REPO, "benchmarks", "servers", "embedding_server.py"),
          "--host", "0.0.0.0", "--port", str(port), "--model", "BAAI/bge-small-en-v1.5"],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
