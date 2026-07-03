@@ -448,6 +448,71 @@ duplicado.
 
 ---
 
+### M39 — [x] Product Quantization (PQ+ADC) — medido: NÃO é o lever de QPS (SBQ_RETAINED)
+
+**Outcome (honesto, measurement-first — 3º negativo da sequência M36/M38/M39):** construímos um `theodb.pq_knn`
+próprio, std-only (k-means Lloyd por subespaço + ADC LUT), funcional e testado, e medimos head-to-head vs
+`theodb.sbq_knn`. O gate D3 (anti-sunk-cost) deu **SBQ_RETAINED**: a paridade recall, PQ é **~5× mais lento** que
+o SBQ. Blueprint: `.claude/knowledge-base/discoveries/blueprints/m39-pq-product-quantization-blueprint.md`;
+artefato: `docs/benchmarks/m39-pq.{md,json}`.
+
+1. **Paridade de recall, não vitória.** PQ 0.770 vs SBQ 0.769 (gap 0.001 = ruído); ambos limitados pelo IVFFlat a
+   ~0.77 — **nenhum vence o f32 (recall 1.0)**. O gap que importa é vs f32 (0.23), não PQ-vs-SBQ.
+2. **PQ ~5× mais lento** (QPS 352 vs 1828). Hamming (XOR/popcount) do SBQ é intrinsecamente rápido; o ADC do PQ
+   precomputa LUT `m·k*` + k-means train por-chamada. Para o P0 (QPS/latência), é regressão.
+3. **Ganho de memória real mas fora do alvo** (8 vs 32 vs 256 bytes/vetor) — o P0 é latência, não footprint.
+
+**Decisão (D3):** NÃO faz merge como claim de superioridade; NÃO corta release. O gate parou PQ **antes** da cara
+integração no index-AM. **Próximo lever (o gap real = recall):** anisotropic loss do ScaNN sobre o mesmo
+esqueleto PQ (ataca recall, não QPS) — semente do M40.
+
+**Dependencies:** M22 (SBQ), M34 (theodb_ivfflat), M38 (que apontou PQ). **Resultado:** measurement + um
+`theodb.pq_knn` funcional; sem win de QPS, sem release.
+
+---
+
+### M40 — [x] Carrier head-to-head (theodb_hnsw vs theodb_ivfflat) — re-escopado da anisotropic loss
+
+**Outcome (honesto, measurement-first — 5º da sequência M36/M38/M39/M40-ceiling/M40):** o milestone foi pedido como
+"ScaNN anisotropic loss", mas a **sonda de teto** (`docs/benchmarks/m40-ceiling-probe.md`) falsificou a premissa
+ANTES de construir: no nosso pipeline com rerank f32, o recall é limitado pelo **carrier (probes)**, não pelo
+quantizer — a loss anisotrópica não moveria a agulha. Re-escopado (com aval do owner) para o head-to-head dos
+carriers próprios. Artefato: `docs/benchmarks/m40-carrier.{md,json}`; harness: `benchmarks/run_m40_carrier.py`.
+
+**Medição (n=50k synthetic):** `theodb_ivfflat` **vence** o trade-off recall×QPS — a QPS igual tem recall
+substancialmente maior; o `theodb_hnsw` é **3–5× mais lento a recall igual** (headroom de otimização real no scan
+page-native M35 vs o SIMD+heap do ivfflat). **Caveat honesto:** random-gaussian é o pior caso para grafo; o
+veredito NÃO generaliza para dados reais estruturados a escala — o head-to-head confiável precisa de SIFT1M.
+
+**Próximo (evidence-based):** (1) otimizar QPS do `theodb_hnsw` (é grafo, deveria ser mais rápido que probing);
+(2) rodar este head-to-head em SIFT1M antes de qualquer claim de superioridade de carrier (`public-copy.md`).
+
+**Dependencies:** M34 (theodb_ivfflat), M35 (theodb_hnsw), M39 (ceiling probe). **Resultado:** measurement +
+harness reproduzível; theodb_ivfflat é o carrier mais forte nesta escala/dado; sem claim (precisa SIFT1M).
+
+---
+
+### M41 — [x] Otimização de QPS do scan theodb_hnsw (1.2–1.5× a recall idêntico, honesto)
+
+**Outcome (WIN — 1º positivo após 5 negativos measurement-first):** o M40 apontou que o `theodb_hnsw` era 3–5× mais
+lento que o `theodb_ivfflat` a recall igual. O discover (blueprint `m41-hnsw-qps`) identificou o gargalo no
+`traverse` (`hnsw_page.rs`): custo fixo por-nó (`to_vec` alloc+memcpy + `RelationGetNumberOfBlocksInFork` ×2/nó),
+enquanto o ivfflat amortiza o pin/lock sobre uma página inteira com SIMD. A correção pontua/decodifica cada nó
+**dentro do pin** (`page::with_page_item`, sem cópia) e cacheia `nblocks` por query. Artefato:
+`docs/benchmarks/m41-hnsw-qps.md`.
+
+**Medição A/B rigorosa (n=50k, 4 amostras alternadas mean±std, recall byte-idêntico):** QPS **1.2–1.5×**, crescendo
+com ef (ef=10: 1.24×; ef=100: 1.38×; ef=200: **1.46×** com bandas de std separadas → significativo). Recall inalterado
+(0.313/0.617/0.809/0.911 idênticos). **Honestidade (Regra 3):** um run único cross-session sugeriu 2.4–3.0×, mas era
+variância do CPU throttled (lição M38/M40); o número controlado é 1.2–1.5×. **Gate:** 8/8 `test_index_am.py` verdes.
+
+**Próximo:** rodar em SIFT1M para o veredito confiável de carrier (theodb_hnsw agora competitivo).
+
+**Dependencies:** M35 (theodb_hnsw), M40 (que mediu o gap). **Resultado:** otimização real, recall-preserving,
+provada por A/B benchmark. Código de produto (Rust) — candidato a release.
+
+---
+
 ## Sequência e paralelismo
 
 ```

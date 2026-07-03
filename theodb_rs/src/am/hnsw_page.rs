@@ -429,6 +429,8 @@ fn score(metric: Metric, q: &[f32], vec_bytes: &[u8], is_l2: bool) -> f64 {
 }
 
 /// Load an element at `(blk,off)`, score it, and return a candidate. Increments the pages-read counter.
+/// M41: decodes + scores the vector INSIDE the pinned page scope (`with_page_item`) — no `to_vec` alloc/memcpy.
+/// `nblocks` is cached by the caller (traverse) so this does not re-read `RelationGetNumberOfBlocksInFork`.
 unsafe fn load(
     rel: pg_sys::Relation,
     blk: u32,
@@ -436,34 +438,39 @@ unsafe fn load(
     q: &[f32],
     metric: Metric,
     is_l2: bool,
+    nblocks: u32,
     reads: &mut usize,
 ) -> Result<Cand, String> {
     *reads += 1;
-    let b = page::read_page_item_at(rel, blk, off)?;
-    let ev = decode_element(&b)?;
-    Ok(Cand {
-        d: score(metric, q, ev.vec_bytes, is_l2),
-        blk,
-        off,
-        nbr_blk: ev.nbr_addr.0,
-        nbr_off: ev.nbr_addr.1,
-        level: ev.level,
-        tid: ev.tid,
+    page::with_page_item(rel, blk, off, nblocks, |b| {
+        let ev = decode_element(b)?;
+        Ok(Cand {
+            d: score(metric, q, ev.vec_bytes, is_l2),
+            blk,
+            off,
+            nbr_blk: ev.nbr_addr.0,
+            nbr_off: ev.nbr_addr.1,
+            level: ev.level,
+            tid: ev.tid,
+        })
     })
 }
 
 /// Read a candidate's neighbor addresses on `layer` (increments pages-read for the neighbor tuple).
+/// M41: decodes the addrs INSIDE the pinned page scope — no `to_vec` of the neighbor tuple. `nblocks` cached.
 unsafe fn neighbors_of(
     rel: pg_sys::Relation,
     c: &Cand,
     layer: usize,
     m: usize,
     m0: usize,
+    nblocks: u32,
     reads: &mut usize,
 ) -> Result<Vec<Addr>, String> {
     *reads += 1;
-    let b = page::read_page_item_at(rel, c.nbr_blk, c.nbr_off)?;
-    decode_neighbors(&b, c.level as usize, layer, m, m0)
+    page::with_page_item(rel, c.nbr_blk, c.nbr_off, nblocks, |b| {
+        decode_neighbors(b, c.level as usize, layer, m, m0)
+    })
 }
 
 /// On-demand top-`ef` traversal (mirrors pgvector `HnswSearchLayer`): greedy-descend the upper layers with ef=1,
@@ -483,16 +490,18 @@ pub(crate) unsafe fn traverse(
     let (m, m0) = (meta.m as usize, meta.m0 as usize);
     let ef = ef_search.max(1);
     let mut reads = 0usize;
+    // M41: cache the block count once (was read per-item inside read_page_item_at — a syscall-ish call ×2/node).
+    let nblocks = page::main_fork_nblocks(rel);
 
     // Entry point (from meta), then greedy-descend the upper layers keeping a single best candidate.
-    let mut ep = load(rel, meta.entry_blkno, meta.entry_offno, q, metric, is_l2, &mut reads)?;
+    let mut ep = load(rel, meta.entry_blkno, meta.entry_offno, q, metric, is_l2, nblocks, &mut reads)?;
     let mut lc = meta.entry_level as usize;
     while lc >= 1 {
         loop {
-            let nbrs = neighbors_of(rel, &ep, lc, m, m0, &mut reads)?;
+            let nbrs = neighbors_of(rel, &ep, lc, m, m0, nblocks, &mut reads)?;
             let mut improved = false;
             for (nb, no) in nbrs {
-                let cand = load(rel, nb, no, q, metric, is_l2, &mut reads)?;
+                let cand = load(rel, nb, no, q, metric, is_l2, nblocks, &mut reads)?;
                 if cand.d < ep.d {
                     ep = cand;
                     improved = true;
@@ -517,11 +526,11 @@ pub(crate) unsafe fn traverse(
         if c.d > worst && result.len() >= ef {
             break;
         }
-        for (nb, no) in neighbors_of(rel, &c, 0, m, m0, &mut reads)? {
+        for (nb, no) in neighbors_of(rel, &c, 0, m, m0, nblocks, &mut reads)? {
             if !visited.insert((nb, no)) {
                 continue;
             }
-            let cand = load(rel, nb, no, q, metric, is_l2, &mut reads)?;
+            let cand = load(rel, nb, no, q, metric, is_l2, nblocks, &mut reads)?;
             let worst = result.peek().map(|w| w.d).unwrap_or(f64::INFINITY);
             if cand.d < worst || result.len() < ef {
                 cands.push(std::cmp::Reverse(cand));

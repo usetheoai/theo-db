@@ -6,11 +6,13 @@
 > A capacidade IVFFlat está disponível via `CREATE INDEX … USING ivfflat (…) WITH (lists = N)` +
 > `SET ivfflat.probes`. A superfície literal abaixo permanece como API-alvo do TheoDB.
 
-> **Status:** 📋 Especificação (planejado) — recurso-alvo do milestone **M2 — Vetorial / IA** ([ROADMAP](../../ROADMAP.md)).
-> Esta página documenta a **API-alvo do TheoDB**. As funcionalidades aqui descritas **ainda não estão
-> implementadas** na release atual (M0 entrega PostgreSQL 17 + `pgvector`). Nenhum número de desempenho
-> nesta página é um benchmark — benchmarks reproduzíveis vivem em `docs/benchmarks/` quando publicados
-> (CLAUDE.md, regra TheoDB 5).
+> **Status:** ✅ **Entregue (M9 + M21 + M34).** Duas superfícies: (a) `USING ivfflat` do pgvector nativo na imagem
+> (benchmark em [`docs/benchmarks/m9-ivfflat.md`](../benchmarks/m9-ivfflat.md)); e (b) o **access method próprio**
+> `theodb_ivfflat` em Rust (`theodb_rs/src/am/mod.rs:35`, opclass `theodb_ivfflat_l2_ops` `theodb_rs/src/am/mod.rs:164`,
+> reloption `WITH (lists=N)` `theodb_rs/src/am/options.rs`, GUC `theodb_ivfflat.probes` `theodb_rs/src/am/guc.rs:30`).
+> Provado por `benchmarks/tests/test_index_am.py` (criação/persistência/scan) + `benchmarks/tests/test_ann_index.py`
+> (`test_ivfflat_knn_recall_high_vs_bruteforce`, `test_recall_parity_gate`) + `benchmarks/tests/test_reloption.py`.
+> A sintaxe literal `WITH (lists)` do pgvector e o AM próprio coexistem.
 
 Esta página cobre a criação de índices `IVFFlat` no TheoDB para busca aproximada de vizinhos mais próximos sobre colunas vetoriais, incluindo as métricas de distância suportadas, o parâmetro `lists` e exemplos de consulta.
 

@@ -1,0 +1,32 @@
+{
+  "params": {
+    "n": 2000,
+    "dim": 64,
+    "m": 8,
+    "bits": 4,
+    "nq": 100,
+    "runs": 3,
+    "seed": 2026,
+    "lists": 44,
+    "probes": 16,
+    "over_fetch": 16,
+    "K": 10
+  },
+  "pq": {
+    "recall_mean": 0.77,
+    "recall_std": 0.0,
+    "qps_mean": 351.6,
+    "qps_std": 49.3,
+    "bytes_per_vector": 8
+  },
+  "sbq": {
+    "recall_mean": 0.769,
+    "recall_std": 0.0,
+    "qps_mean": 1828.1,
+    "qps_std": 29.7,
+    "bytes_per_vector": 32
+  },
+  "f32_bytes_per_vector": 256,
+  "verdict": "SBQ_RETAINED",
+  "memory_latency_tradeoff": true
+}

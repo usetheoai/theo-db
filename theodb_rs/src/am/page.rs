@@ -713,6 +713,60 @@ pub(crate) unsafe fn read_page_item_at(
     Ok(out)
 }
 
+/// M41 — copy-free variant of [`read_page_item_at`]: pin+share-lock the page, call `f` with the item bytes
+/// **borrowed directly from the pinned page** (no `to_vec` alloc/memcpy), then unlock+unpin. `nblocks` is passed
+/// in so a hot traversal reads `RelationGetNumberOfBlocksInFork` ONCE instead of once-per-item. `f` MUST NOT
+/// leak the slice past its return (the buffer is unpinned after `f`); it returns an OWNED value (score/decoded
+/// addrs). This removes the per-node alloc+copy that made the on-demand HNSW scan pay a fixed cost per vector
+/// (vs theodb_ivfflat amortizing over a whole page). Same share-lock + bounds discipline as `read_page_item_at`.
+pub(crate) unsafe fn with_page_item<T>(
+    rel: pg_sys::Relation,
+    block: pg_sys::BlockNumber,
+    offno: pg_sys::OffsetNumber,
+    nblocks: pg_sys::BlockNumber,
+    f: impl FnOnce(&[u8]) -> Result<T, String>,
+) -> Result<T, String> {
+    if block >= nblocks {
+        return Err(format!("theodb am: page {block} out of range (nblocks={nblocks})"));
+    }
+    let buf = pg_sys::ReadBufferExtended(
+        rel,
+        pg_sys::ForkNumber::MAIN_FORKNUM,
+        block,
+        pg_sys::ReadBufferMode::RBM_NORMAL,
+        std::ptr::null_mut(),
+    );
+    pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_SHARE as i32);
+    // RAII: release (unlock + unpin) on EVERY exit path — incl. an early `?`, an `Err` from `f`, OR a Rust panic
+    // inside `f`. `f` now runs decode+score under the pin (a wider critical section than the old `to_vec`), so
+    // structural release matters (mirrors pgvectorscale's `LockedBufferShare` Drop guard). M41 hardening.
+    let _pin = SharePin(buf);
+    let page = pg_sys::BufferGetPage(buf);
+    let max_off = page_get_max_offset(page);
+    if (offno as usize) < 1 || (offno as usize) > max_off {
+        return Err(format!("theodb am: offset {offno} out of range (max={max_off}) on page {block}"));
+    }
+    let item_id = page_get_item_id(page, offno);
+    let len = (*item_id).lp_len() as usize;
+    let ptr = page_get_item(page, item_id) as *const u8;
+    let bytes = std::slice::from_raw_parts(ptr, len);
+    f(bytes) // score / decode INSIDE the pin — the borrow ends here; `_pin` releases the buffer on drop
+}
+
+/// RAII guard for a pinned + share-locked buffer: `UnlockReleaseBuffer` on drop, so the release is panic-safe by
+/// construction (the unwind runs the destructor). Mirrors pgvectorscale's `LockedBufferShare` pattern.
+struct SharePin(pg_sys::Buffer);
+impl Drop for SharePin {
+    fn drop(&mut self) {
+        unsafe { pg_sys::UnlockReleaseBuffer(self.0) }
+    }
+}
+
+/// M41 — read the MAIN-fork block count once (a hot traversal caches this instead of per-item).
+pub(crate) unsafe fn main_fork_nblocks(rel: pg_sys::Relation) -> pg_sys::BlockNumber {
+    pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM)
+}
+
 /// M35 — extend `fork` by one page and write ALL `items` onto it (offsets 1..=items.len()), WAL-logged. The
 /// caller (the HNSW packer) has pre-assigned every item's `(blkno, offno)`, so this writer is dumb: it appends in
 /// order. Mirrors the [`extend_page_with_item`] WAL scaffold for the multi-item case.

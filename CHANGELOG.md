@@ -24,6 +24,40 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.33.2] - 2026-07-03
+
+### Changed
+- M41 (otimização de QPS do scan `theodb_hnsw`, **gated por benchmark A/B — ganho honesto 1.2–1.5×**): o `traverse` on-demand
+  (`theodb_rs/src/am/hnsw_page.rs`) passa a decodificar+pontuar cada nó **dentro do pin da página**
+  (`page::with_page_item`, sem o `to_vec` alloc+memcpy por-nó) e cacheia `RelationGetNumberOfBlocksInFork` uma
+  vez por query (era ×2/nó). Motivado pela medição M40 (theodb_hnsw 3–5× mais lento que theodb_ivfflat a recall
+  igual, porque o ivfflat amortiza o pin/lock sobre uma página inteira com SIMD e o hnsw pagava o custo fixo
+  por-nó). **Recall byte-idêntico** (mesma ordem de traversal + top-k) — provado pelos testes do AM; o único eixo
+  medido é QPS. Blueprint: `.claude/knowledge-base/discoveries/blueprints/m41-hnsw-qps-blueprint.md`.
+- M40 (carrier head-to-head — **re-escopado da anisotropic loss, sem claim**): a sonda de teto
+  (`docs/benchmarks/m40-ceiling-probe.md`) provou que o recall é limitado pelo carrier (probes), não pelo
+  quantizer (rerank f32 equaliza) — a loss anisotrópica não moveria recall. Re-escopado para
+  `benchmarks/run_m40_carrier.py` (theodb_hnsw vs theodb_ivfflat recall×QPS a QPS igual). Medição n=50k:
+  theodb_ivfflat vence (theodb_hnsw 3–5× mais lento a recall igual → headroom de otimização). **Caveat:**
+  synthetic random-gaussian é o pior caso p/ grafo — veredito não generaliza; precisa SIFT1M. 5º negativo
+  measurement-first da sessão. `docs/benchmarks/m40-carrier.{md,json}`.
+- M39 (Product Quantization, **medido: NÃO é o lever de QPS — sem claim de performance**): novo `theodb.pq_knn`
+  próprio, std-only (k-means Lloyd por subespaço + ADC LUT, `theodb_rs/src/pq.rs`), funcional e testado
+  (`REVOKE FROM PUBLIC`, espelha `sbq_knn`). Benchmark reproduzível PQ-vs-SBQ (`benchmarks/run_m39_pq.py`,
+  `docs/benchmarks/m39-pq.{md,json}`): gate D3 (anti-sunk-cost) = **SBQ_RETAINED** — a paridade recall (ambos
+  ~0.77, nenhum vence f32=1.0), PQ é ~5× mais lento que o SBQ (ADC + k-means train por-chamada vs Hamming).
+  Ganho de memória (8 vs 32 bytes/vetor) é real mas fora do alvo (P0 = latência). **Honestidade (Regra 3):** o
+  gate parou PQ antes da cara integração no index-AM; 3º negativo measurement-first da sequência (M36/M38/M39).
+  Próximo lever (o gap real = recall vs f32): anisotropic loss do ScaNN.
+- Correção de doc-drift em `docs/features/` (auditoria de honestidade do core): 5 páginas tinham a linha
+  `> Status:` stale dizendo "📋 planejado" enquanto a capacidade **já estava entregue e testada** (o callout no topo
+  de cada uma já contava a verdade; a linha oficial não). Corrigidas com `file:line` + testes (validado por
+  `deep-research/validate_citations.py`, 0 fabricado): **03 IVFFlat** (`theodb_ivfflat` AM, `am/mod.rs`) e **04 IVF**
+  (= IVFFlat) → ✅ entregue; **06 híbrida** (`ai.hybrid_search_rrf`/`ai.hybrid_search(jsonb)`, `hybrid.rs`) → ✅ entregue;
+  **07 funções IA SQL** (`ai.*` + registry `theodb_ml`) → ✅ entregue (modos array/cursor seguem YAGNI-adiados);
+  **05 ScaNN** → ⚖️ NO-FORK (M14): `theodb_scann` literal é decisão-de-não-fazer, ScaNN-quality entregue via `USING diskann`.
+  Placeholder `'https://...'` do exemplo de `theodb_ml.create_model` trocado por `'<your-llm-endpoint>'` (clareza).
+
 ## [0.33.1] - 2026-07-03
 
 ### Changed

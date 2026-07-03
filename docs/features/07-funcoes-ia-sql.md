@@ -7,12 +7,13 @@
 > chaves permanecem GUC de sessão (`theodb.llm_api_key`); `apply_model` faz a ponte via GUCs em vez do
 > `model_id =>` por-chamada / `CALL …(model_auth_type=>…)` literais do AlloyDB (deferidos).
 
-> **Status:** 📋 Especificação (planejado) — recurso-alvo do milestone **M7 — IA avançada** ([ROADMAP](../../ROADMAP.md)).
-> Esta página documenta a **API-alvo do TheoDB**. As funções escalares `ai.generate`/`ai.if`/`ai.rank`/
-> `ai.analyze_sentiment`/`ai.summarize` **estão implementadas** desde M7-S3 (ver nota abaixo); os modos
-> array/cursor e a extensão empacotada `theodb_ml` permanecem alvo. Nenhum número de desempenho
-> nesta página é um benchmark — benchmarks reproduzíveis vivem em `docs/benchmarks/` quando publicados
-> (CLAUDE.md, regra TheoDB 5).
+> **Status:** ✅ **Entregue — núcleo escalar + registry (M7-S3 + M10/M11 + M13).** Funções `ai.*`: `ai.generate`,
+> `ai.summarize`, `ai.agg_summarize` (`sql/50-theodb-ai.sql:21,32,82`); `ai.if`, `ai.analyze_sentiment`, `ai.rank`,
+> `ai.generate_batch`, `ai._chat` (Rust `theodb_rs/src/api.rs:334-355` + `theodb_rs/src/chat.rs`); registry
+> `theodb_ml` (`create_model`/`apply_model`/`list_models`, `sql/70-theodb-ml.sql:26,68`), tudo `REVOKE`do de PUBLIC.
+> Provado por `benchmarks/tests/test_ai_sql.py` (33 testes + 3 real-OpenAI) + `benchmarks/tests/test_theodb_ml.py`.
+> **Honestidade:** os modos **array-based e cursor-based** desta página **não estão implementados** (follow-up YAGNI);
+> o registry não persiste credencial (chave via GUC de sessão, ADR D2). O núcleo escalar está entregue e testado.
 
 Esta página cobre as funções SQL de IA do TheoDB (`ai.if`, `ai.generate`, `ai.rank`): suas assinaturas, parâmetros, modos de processamento (escalar, em lote e via cursor) e casos de uso para filtragem, geração e ranking inteligentes em SQL.
 
@@ -97,7 +98,7 @@ CALL theodb_ml.create_model(
     model_type => 'llm',
     model_provider => 'theodb',
     model_qualified_name => 'theodb-text-lite',
-    model_request_url => 'https://...',
+    model_request_url => '<your-llm-endpoint>',
     model_auth_type => 'theodb_service_agent'
 );
 ```
@@ -111,7 +112,7 @@ Registra um endpoint remoto para uso pelas funções AI.
 ```sql
 CALL theodb_ml.create_model(
     model_id => 'theodb-text-pro-preview-model',
-    model_request_url => 'https://...',
+    model_request_url => '<your-llm-endpoint>',
     model_qualified_name => 'theodb-text-pro-preview',
     model_provider => 'theodb',
     model_type => 'llm',
