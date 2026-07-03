@@ -59,7 +59,10 @@ Two independent rigorous runs on this machine gave **different verdicts** — ru
 `INFERIOR`; run B (2 warmup passes, tabulated above) → `PARITY`. The margin therefore sits **within
 run-to-run measurement noise** on a CPU-contended dev box (concurrent workspace containers). Two operating
 points remain visibly noisy even in run B (theodb ef=200: 43.5 **± 19.1**, non-monotonic vs ef=400;
-pgvector ef=400: 13.9 **± 8.6**), so the high-recall tail should not be over-read. The stable mid-band
+pgvector ef=400: 13.9 **± 8.6**), so the high-recall tail should not be over-read. (The pgvector ef=400
+point at recall 0.9986 sits ABOVE the shared overlap band [0.936, 0.9968], so it is excluded as a shared
+recall level — but it still bounds the top interpolation, and the effect gate uses the frac-weighted
+interpolated std so that noise is carried into the gate, not dropped.) The stable mid-band
 points (theodb ef=100: 139.9 ± 2.8 vs pgvector ef=100: 108.6 ± 1.6) are the most trustworthy and show
 theodb modestly ahead there — but not by a margin that licenses a public claim. Per-run QPS is recorded in
 the `.json` (`qps_runs`) for full transparency.

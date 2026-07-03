@@ -13,12 +13,14 @@ from __future__ import annotations
 _MARGIN_TOL = 0.05
 
 
-def interpolate_qps_at_recall(points, target_recall):
-    """Linear-interpolate QPS at ``target_recall`` on a recall×QPS frontier.
+def _interp_field(points, target_recall, field):
+    """Linear-interpolate `points[i][field]` at ``target_recall`` on the recall-sorted frontier.
 
-    Returns the interpolated QPS, or ``None`` when ``target_recall`` is outside the frontier's measured
-    recall range (NO extrapolation — an out-of-range target is a handled negative case, never a
-    fabricated claim). A single-point frontier covers only its exact recall.
+    Returns the interpolated value, or ``None`` when ``target_recall`` is outside the frontier's measured
+    recall range (NO extrapolation — an out-of-range target is a handled negative case). A single-point
+    frontier covers only its exact recall. Used for both QPS (the claim) and QPS-std (the variance band):
+    interpolating the std — not the nearest point's std — is what makes the effect>variance gate honest at
+    a blended point sourced from a noisy bracket.
     """
     pts = sorted(points, key=lambda p: p["recall"])
     if not pts:
@@ -29,17 +31,16 @@ def interpolate_qps_at_recall(points, target_recall):
         if a["recall"] <= target_recall <= b["recall"]:
             span = b["recall"] - a["recall"]
             if span == 0:  # flat segment (two points same recall) → no div-by-zero
-                return a["qps_mean"]
+                return a[field]
             frac = (target_recall - a["recall"]) / span
-            return a["qps_mean"] + (b["qps_mean"] - a["qps_mean"]) * frac
+            return a[field] + (b[field] - a[field]) * frac
     # single-point frontier where target == that point's recall (range check already passed)
-    return pts[0]["qps_mean"]
+    return pts[0][field]
 
 
-def _std_at(points, recall):
-    """Variance band proxy at an interpolated recall: the qps_std of the nearest measured point."""
-    nearest = min(points, key=lambda p: abs(p["recall"] - recall))
-    return float(nearest.get("qps_std", 0.0))
+def interpolate_qps_at_recall(points, target_recall):
+    """Linear-interpolate QPS at ``target_recall`` on a recall×QPS frontier (``None`` if out of range)."""
+    return _interp_field(points, target_recall, "qps_mean")
 
 
 def _overlap_band(theodb_pts, pgvector_pts):
@@ -55,7 +56,11 @@ def _margin_at(theodb_pts, pgvector_pts, r):
     qp = interpolate_qps_at_recall(pgvector_pts, r)
     if qt is None or qp is None or qp == 0:
         return None
-    effect = abs(qt - qp) > (_std_at(theodb_pts, r) + _std_at(pgvector_pts, r))
+    # Interpolated std (not nearest-point) so a blend sourced from a noisy bracket carries its variance
+    # into the gate — a false SUPERIOR cannot ride an understated std (council-benchmark MEDIUM-1).
+    st = _interp_field(theodb_pts, r, "qps_std") or 0.0
+    sp = _interp_field(pgvector_pts, r, "qps_std") or 0.0
+    effect = abs(qt - qp) > (st + sp)
     return {"recall": round(r, 4), "margin": round(qt / qp, 3),
             "qps_theodb": round(qt, 1), "qps_pgvector": round(qp, 1), "effect_gt_variance": effect}
 
