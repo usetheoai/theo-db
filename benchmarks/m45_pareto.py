@@ -42,6 +42,38 @@ def _std_at(points, recall):
     return float(nearest.get("qps_std", 0.0))
 
 
+def _overlap_band(theodb_pts, pgvector_pts):
+    """The [lo, hi] recall range covered by BOTH frontiers, or None if they do not overlap."""
+    lo = max(min(p["recall"] for p in theodb_pts), min(p["recall"] for p in pgvector_pts))
+    hi = min(max(p["recall"] for p in theodb_pts), max(p["recall"] for p in pgvector_pts))
+    return (lo, hi) if lo <= hi else None
+
+
+def _margin_at(theodb_pts, pgvector_pts, r):
+    """The matched-recall margin dict at recall `r`, or None when either frontier can't be interpolated."""
+    qt = interpolate_qps_at_recall(theodb_pts, r)
+    qp = interpolate_qps_at_recall(pgvector_pts, r)
+    if qt is None or qp is None or qp == 0:
+        return None
+    effect = abs(qt - qp) > (_std_at(theodb_pts, r) + _std_at(pgvector_pts, r))
+    return {"recall": round(r, 4), "margin": round(qt / qp, 3),
+            "qps_theodb": round(qt, 1), "qps_pgvector": round(qp, 1), "effect_gt_variance": effect}
+
+
+def _classify(margins, tol):
+    """Verdict from the per-level margins: SUPERIOR/INFERIOR only when EVERY level agrees with effect."""
+    if not margins:
+        return "PARITY"
+    superior = sum(1 for m in margins if m["margin"] > 1 + tol and m["effect_gt_variance"])
+    inferior = sum(1 for m in margins if m["margin"] < 1 - tol and m["effect_gt_variance"])
+    total = len(margins)
+    if superior == total:
+        return "SUPERIOR"
+    if inferior == total:
+        return "INFERIOR"
+    return "PARITY"
+
+
 def pareto_margin_verdict(theodb_pts, pgvector_pts, margin_tol=_MARGIN_TOL):
     """Compare two frontiers at shared recall levels; return matched-recall margins + an honest verdict.
 
@@ -52,50 +84,15 @@ def pareto_margin_verdict(theodb_pts, pgvector_pts, margin_tol=_MARGIN_TOL):
     """
     if not theodb_pts or not pgvector_pts:
         return {"shared_levels": [], "margins": [], "verdict": "PARITY", "reason": "empty frontier"}
-
-    t_lo, t_hi = min(p["recall"] for p in theodb_pts), max(p["recall"] for p in theodb_pts)
-    p_lo, p_hi = min(p["recall"] for p in pgvector_pts), max(p["recall"] for p in pgvector_pts)
-    lo, hi = max(t_lo, p_lo), min(t_hi, p_hi)
-    if lo > hi:
+    band = _overlap_band(theodb_pts, pgvector_pts)
+    if band is None:
         return {"shared_levels": [], "margins": [], "verdict": "PARITY", "reason": "no recall overlap"}
 
+    lo, hi = band
     # Data-driven shared grid: every measured recall (from either frontier) inside the overlap band.
-    levels = sorted(
-        {p["recall"] for p in theodb_pts if lo <= p["recall"] <= hi}
-        | {p["recall"] for p in pgvector_pts if lo <= p["recall"] <= hi}
-    )
-
-    margins, n_superior, n_inferior = [], 0, 0
-    for r in levels:
-        qt = interpolate_qps_at_recall(theodb_pts, r)
-        qp = interpolate_qps_at_recall(pgvector_pts, r)
-        if qt is None or qp is None or qp == 0:
-            continue
-        margin = qt / qp
-        gap = abs(qt - qp)
-        effect = gap > (_std_at(theodb_pts, r) + _std_at(pgvector_pts, r))
-        margins.append({
-            "recall": round(r, 4),
-            "margin": round(margin, 3),
-            "qps_theodb": round(qt, 1),
-            "qps_pgvector": round(qp, 1),
-            "effect_gt_variance": effect,
-        })
-        if margin > 1 + margin_tol and effect:
-            n_superior += 1
-        elif margin < 1 - margin_tol and effect:
-            n_inferior += 1
-
-    if not margins:
-        return {"shared_levels": levels, "margins": [], "verdict": "PARITY",
-                "reason": "no interpolable shared level"}
-
-    total = len(margins)
-    if n_superior == total and n_inferior == 0:
-        verdict = "SUPERIOR"
-    elif n_inferior == total and n_superior == 0:
-        verdict = "INFERIOR"
-    else:
-        verdict = "PARITY"
-    return {"shared_levels": levels, "margins": margins, "verdict": verdict,
-            "reason": "effect>variance gate over shared recall levels"}
+    levels = sorted(p["recall"] for p in [*theodb_pts, *pgvector_pts] if lo <= p["recall"] <= hi)
+    levels = sorted(set(levels))
+    margins = [m for m in (_margin_at(theodb_pts, pgvector_pts, r) for r in levels) if m is not None]
+    reason = "effect>variance gate over shared recall levels" if margins else "no interpolable shared level"
+    return {"shared_levels": levels, "margins": margins,
+            "verdict": _classify(margins, margin_tol), "reason": reason}
