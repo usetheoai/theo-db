@@ -1,8 +1,9 @@
 """Minimal OpenAI-compatible embeddings server backed by a REAL local model (fastembed/ONNX).
 
-This is the *configurable model* that `theodb.embed()` points at. The TheoDB image stays lean (the DB
-only ships `plpython3u` and calls an HTTP endpoint — the AlloyDB `embedding()` pattern); the model runs
-out-of-process here. It is a real model (BAAI/bge-small-en-v1.5, 384-dim, deterministic), not a mock —
+This is the *configurable model* that `theodb.embed()` points at. The TheoDB image stays lean (the DB's
+Rust extension `theodb_rs` just calls an HTTP endpoint — the AlloyDB `embedding()` pattern; since M19 the
+AI surface is Rust, no `plpython3u`); the model runs out-of-process here. It is a real model
+(BAAI/bge-small-en-v1.5, 384-dim, deterministic), not a mock —
 the same wire contract serves a self-hosted local model OR any cloud OpenAI-compatible provider.
 
 Run: ``python benchmarks/servers/embedding_server.py --port 8088 [--model BAAI/bge-small-en-v1.5]``

@@ -2,8 +2,8 @@
 
 TheoDB exposes generative-AI over your data directly in SQL, mirroring AlloyDB's `ai.generate` /
 `google_ml_integration` — but **model-agnostic**: the database calls a **configurable OpenAI-compatible
-chat-completions endpoint** (any local or cloud model). The image ships **no model** (only `plpython3u`);
-it makes a server-side HTTP call, exactly like `theodb.embed` does for embeddings.
+chat-completions endpoint** (any local or cloud model). The image ships **no model** (the `ai.*` surface is
+Rust in `theodb_rs`); it makes a server-side HTTP call, exactly like `theodb.embed` does for embeddings.
 
 > No performance number on this page is a benchmark (CLAUDE.md TheoDB rule 5). These are functional contracts.
 

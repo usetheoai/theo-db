@@ -23,8 +23,20 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Deprecated
 
 ### Removed
+- Imagem: **`postgresql-plpython3` deixou de ser instalado** — era peso morto desde M19 (toda a superfície
+  `theodb` — embed/ai.*/nl_to_sql — é servida pela extensão Rust `theodb_rs`; `theodb.control` requer só
+  `vector, vectorscale`). **Provado 100% funcional:** rebuild + `scripts/smoke.sh` → `SMOKE PASSED`,
+  `CREATE EXTENSION theodb` chega à v1.3 e todas as superfícies (hybrid RRF, 5 `ai.*`, agg_summarize,
+  generate_batch, NL→SQL) presentes, com **zero pacotes plpython3 na imagem**. Torna verdadeira, no nível
+  da imagem, a afirmação do README "sem plpython3u desde M19".
+- Removido `packaging/Dockerfile.columnar-pg17probe` (não estava em nenhum caminho de CI/build) — o registro
+  honesto do build PG17-from-source que falhou no pin rustc/MSRV permanece em prosa
+  (`docs/benchmarks/m6-columnar-vs-row.md`).
 
 ### Fixed
+- Docs: corrigidos claims **falsos** de que o `plpython3u` ainda é usado/requerido (`docs/quickstart.md`,
+  `docs/sql-ai-functions.md`, `docs/sql-embeddings.md`) + comentários stale no `Dockerfile` e docstring do
+  `benchmarks/servers/embedding_server.py` — a superfície de IA é Rust (`theodb_rs`) desde M19.
 
 ### Security
 

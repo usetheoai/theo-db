@@ -78,20 +78,20 @@ COPY --from=scale-builder /usr/share/postgresql/$PG_MAJOR/extension/vectorscale*
 COPY --from=theodb-rs-builder /usr/lib/postgresql/$PG_MAJOR/lib/theodb_rs* /usr/lib/postgresql/$PG_MAJOR/lib/
 COPY --from=theodb-rs-builder /usr/share/postgresql/$PG_MAJOR/extension/theodb_rs* /usr/share/postgresql/$PG_MAJOR/extension/
 
-# plpython3u — still used by ai/nl/ml/migrate SQL surfaces (sql/50/60/70/80). NOTE (M17): theodb.embed is
-# no longer plpython3u (it moved to the Rust theodb_rs extension); plpython3u is kept for the OTHER surfaces.
-# NO model/torch ships in the image (lean). Kept (not removed) — runtime dependencies.
-# ca-certificates is required for TLS verification on HTTPS cloud endpoints — by BOTH plpython3u's urllib
-# (ai/nl/ml) AND the Rust theodb.embed (minreq/native-tls/OpenSSL); without it cert verification fails.
+# NO plpython3u — the whole `theodb` surface (embed M17, ai.* M18, nl_to_sql M19) is served by the Rust
+# `theodb_rs` extension; `theodb.control` requires only vector+vectorscale (no plpython3u). The image no
+# longer ships `postgresql-plpython3` (it was dead weight since M19).
+# ca-certificates IS still required for TLS verification on HTTPS cloud endpoints — used by the Rust AI
+# surface (minreq/native-tls/OpenSSL) in theodb_rs; without it cert verification fails.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends postgresql-plpython3-$PG_MAJOR ca-certificates && \
+    apt-get install -y --no-install-recommends ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 # M15 — TheoDB ships as an INSTALLABLE EXTENSION (CREATE EXTENSION theodb), not init-scripts.
 # Build the install script (concat of the modular bodies in load order) and install the SQL-only extension
 # by copying theodb.control + sql/theodb--*.sql into the PG extension dir. SQL-only install is a plain copy —
 # no PGXS/make at runtime (the dev package was removed above; M15 ADR D2 / EC-2). Schemas ai/theodb/theodb_ml
-# are created in-script by the extension. Deps (vector/vectorscale/plpython3u) come from theodb.control requires.
+# are created in-script by the extension. Deps (vector/vectorscale) come from theodb.control requires.
 COPY theodb.control /tmp/theodb/theodb.control
 COPY sql/ /tmp/theodb/sql/
 RUN set -eux; \
@@ -103,10 +103,10 @@ RUN set -eux; \
         "/usr/share/postgresql/$PG_MAJOR/extension/"; \
     rm -rf /tmp/theodb
 
-# Create the extension on fresh DB init (greenfield — M15 ADR D3). CASCADE pulls vector+vectorscale+plpython3u.
+# Create the extension on fresh DB init (greenfield — M15 ADR D3). CASCADE pulls vector+vectorscale.
 COPY <<'EOF' /docker-entrypoint-initdb.d/00-create-theodb.sql
 -- M15: the TheoDB surface (hybrid/ai/nl/ml/migrate) ships in the SQL `theodb` extension, which OWNS the
--- `theodb` schema. Create it FIRST. CASCADE pulls vector + vectorscale + plpython3u. Its plpgsql function
+-- `theodb` schema. Create it FIRST. CASCADE pulls vector + vectorscale. Its plpgsql function
 -- bodies reference theodb.embed lazily (late-bound at call time), so theodb.embed need not exist yet.
 CREATE EXTENSION IF NOT EXISTS theodb CASCADE;
 -- M17: theodb.embed is served by TheoDB's own Rust extension theodb_rs (plan ADR D1). It requires

@@ -20,8 +20,8 @@ The measurement runs on the **canonical pg_mooncake distribution** (`mooncakelab
 as the throwaway `packaging/Dockerfile.columnar`), which ships PostgreSQL **18** + pg_duckdb + pg_mooncake.
 TheoDB ships PostgreSQL **17**; pg_mooncake supports pg17 (its Makefile lists pg14–18), but ships **no pg17
 prebuilt artifact**, so a PG17 build is from-source (Rust + cargo-pgrx + DuckDB). A from-source PG17 build was
-attempted (`packaging/Dockerfile.columnar-pg17probe`) and **failed at the current upstream HEAD on a pinned-rustc
-MSRV mismatch** (`error: rustc 1.88.0 is not supported by the following package`) — a resolvable toolchain issue,
+attempted and **failed at the then-current upstream HEAD on a pinned-rustc MSRV mismatch**
+(`error: rustc 1.88.0 is not supported by the following package`) — a resolvable toolchain issue,
 not a capability gap. Per measurement-first, embedding pg_mooncake into the shipped PG17 image is the **gated
 adoption step**; the capability + plan choice are proven here on the canonical distribution.
 

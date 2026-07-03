@@ -2,8 +2,8 @@
 
 Generate vector embeddings directly from SQL, from a **configurable model**. TheoDB mirrors AlloyDB's
 `embedding()` / `google_ml_integration` design: **the database calls a model endpoint — it does not ship
-a model.** The image stays lean (`plpython3u` only, no torch/ONNX inside Postgres); the model runs
-out-of-process and is fully swappable.
+a model.** The image stays lean (no torch/ONNX inside Postgres — the embed surface is Rust in `theodb_rs`);
+the model runs out-of-process and is fully swappable.
 
 ## Contract
 
@@ -51,7 +51,7 @@ SELECT theodb.embed('hello', 'text-embedding-3-small');  -- vector(1536)
   integration tests (real, no mock).
 - **Cloud — OpenAI** — `theodb.embed('…', 'text-embedding-3-small')` against `https://api.openai.com/v1/embeddings`
   returns `vector(1536)` with genuine semantics (paraphrase ≪ unrelated in cosine distance). The image ships
-  `ca-certificates` so `plpython3u`'s TLS verification succeeds for HTTPS providers.
+  `ca-certificates` so the Rust embed surface's TLS verification succeeds for HTTPS providers.
 
 ## Notes (honest)
 
