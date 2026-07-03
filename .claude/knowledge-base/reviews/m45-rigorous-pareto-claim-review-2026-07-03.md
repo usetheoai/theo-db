@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-03
 **Slug:** m45-rigorous-pareto-claim
-**Verdict:** **READY_TO_MERGE**
+**Verdict:** READY_TO_MERGE
 **Scope:** benchmark-only (Python) — `benchmarks/{m45_pareto.py, m45_report.py, run_m45_pareto.py, tests/test_run_m45_pareto.py}` + artifact `docs/benchmarks/m45-pareto-sift1m.{md,json}` + honesty retractions (`docs/benchmarks/sift1m-carrier-verdict.md`, `ROADMAP.md`) + CHANGELOG. **Zero product-code (`theodb_rs`/`theodb_bench`) change.**
 
 ## The outcome (honest negative)
