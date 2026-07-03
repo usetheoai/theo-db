@@ -90,7 +90,12 @@ fn insert_node(
         let m_layer = if layer == 0 { m0 } else { m };
         let selected = select_from(vectors, metric, candidates, m_layer);
 
-        // This node's own neighbors on this layer.
+        // This node's own neighbors on this layer. Honest note (M44 review, LOW): the assignment OVERWRITES the
+        // list, so an in-flight back-link another thread pushed to `node[layer]` (having reached `node` via a
+        // higher layer) can be clobbered — a LOGICAL lost-update (not a data race: both under this write lock).
+        // It only slightly reduces in-edges → a recall effect, well inside the accepted racy-build envelope (ADR
+        // D2) and empirically covered by the recall-parity gate (Δ +0.0055 @50k). If recall ever regresses under
+        // high contention, the minimal fix is to MERGE (extend+prune) instead of overwrite — YAGNI until measured.
         {
             let mut nn = neighbors[node].write().unwrap();
             if layer < nn.len() {
