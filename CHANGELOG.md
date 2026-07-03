@@ -15,6 +15,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 ### Changed
+- M39 (Product Quantization, **medido: NÃO é o lever de QPS — sem claim de performance**): novo `theodb.pq_knn`
+  próprio, std-only (k-means Lloyd por subespaço + ADC LUT, `theodb_rs/src/pq.rs`), funcional e testado
+  (`REVOKE FROM PUBLIC`, espelha `sbq_knn`). Benchmark reproduzível PQ-vs-SBQ (`benchmarks/run_m39_pq.py`,
+  `docs/benchmarks/m39-pq.{md,json}`): gate D3 (anti-sunk-cost) = **SBQ_RETAINED** — a paridade recall (ambos
+  ~0.77, nenhum vence f32=1.0), PQ é ~5× mais lento que o SBQ (ADC + k-means train por-chamada vs Hamming).
+  Ganho de memória (8 vs 32 bytes/vetor) é real mas fora do alvo (P0 = latência). **Honestidade (Regra 3):** o
+  gate parou PQ antes da cara integração no index-AM; 3º negativo measurement-first da sequência (M36/M38/M39).
+  Próximo lever (o gap real = recall vs f32): anisotropic loss do ScaNN.
 - Correção de doc-drift em `docs/features/` (auditoria de honestidade do core): 5 páginas tinham a linha
   `> Status:` stale dizendo "📋 planejado" enquanto a capacidade **já estava entregue e testada** (o callout no topo
   de cada uma já contava a verdade; a linha oficial não). Corrigidas com `file:line` + testes (validado por

@@ -259,6 +259,39 @@ mod theodb_rs {
         crate::ann_query::require((1..=8).contains(&bits), "theodb sbq: bits must be in [1, 8]");
         crate::sbq::SbqQuantizer::bytes_per_vector(dim as usize, bits as u8) as i64
     }
+
+    // ── M39: own Product Quantization + ADC quantized ANN search (crate::pq) ──────────────────────────────
+    // The public `theodb.pq_knn` wrapper mirrors `theodb.sbq_knn`, swapping SBQ's Hamming rank for PQ's ADC
+    // (Σ LUT[i][code[i]]). Build-once-answer-batch: PQ-encode the corpus, candidate-gen via the M21 IVFFlat
+    // carrier, ADC rank, full-precision f32 rerank. VOLATILE (reads a table). Coexistence: reads
+    // `embed_col::real[]` only; never touches pgvector/pgvectorscale. REVOKEd from PUBLIC. Blueprint D1.
+    /// `theodb_rs._pq_knn` — own PQ quantized top-k over `src_table.embed_col` (M39).
+    #[allow(clippy::too_many_arguments)]
+    #[pg_extern(volatile)] // reads a table via Spi — explicitly VOLATILE (never IMMUTABLE)
+    fn _pq_knn(
+        src_table: &str,
+        embed_col: &str,
+        id_col: &str,
+        metric: &str,
+        queries: Vec<f32>,
+        qdim: i32,
+        k: i32,
+        m: i32,
+        lists: i32,
+        probes: i32,
+        over_fetch: i32,
+        seed: i64,
+    ) -> TableIterator<'static, (name!(query_idx, i32), name!(id, i64), name!(distance, f64))> {
+        let rows = crate::pq::knn(
+            src_table,
+            embed_col,
+            id_col,
+            metric,
+            &queries,
+            crate::pq::PqParams { qdim, k, m, lists, probes, over_fetch, seed },
+        );
+        TableIterator::new(rows)
+    }
 }
 
 // SQL wrapper: the public `theodb.embed(content, model DEFAULT NULL) RETURNS vector`. Casts the Rust
@@ -637,4 +670,47 @@ REVOKE ALL ON FUNCTION theodb_rs._sbq_bytes_per_vector(int, int) FROM PUBLIC;
 "#,
     name = "theodb_sbq_wrappers",
     requires = [_sbq_knn, _sbq_bytes_per_vector],
+);
+
+// M39: `theodb.pq_knn` — own Product Quantization quantized ANN search. Same query-major flatten bridge as
+// `theodb.sbq_knn` (`queries vector[]` → `real[]` + derived `qdim`), swapping `bits` for `m` (PQ subspaces).
+// RETURNS TABLE(query_idx int, id bigint, distance float8). VOLATILE (reads a table). COEXISTENCE: reads
+// `embed_col::real[]` only. REVOKEd from PUBLIC (least-privilege parity with sbq_knn).
+extension_sql!(
+    r#"
+CREATE FUNCTION theodb.pq_knn(
+    src_table  regclass,
+    embed_col  text,
+    queries    vector[],
+    k          int    DEFAULT 10,
+    m          int    DEFAULT 8,
+    lists      int    DEFAULT 100,
+    probes     int    DEFAULT 1,
+    over_fetch int    DEFAULT 4,
+    metric     text   DEFAULT 'l2',
+    id_col     text   DEFAULT 'id',
+    seed       bigint DEFAULT 42
+) RETURNS TABLE(query_idx int, id bigint, distance float8)
+LANGUAGE sql VOLATILE
+AS $$
+  SELECT query_idx, id, distance FROM theodb_rs._pq_knn(
+    src_table::text, embed_col, id_col, metric,
+    (SELECT COALESCE(array_agg(x ORDER BY qi, ci), ARRAY[]::real[])
+       FROM unnest(queries) WITH ORDINALITY AS u(qv, qi),
+            unnest(qv::real[]) WITH ORDINALITY AS e(x, ci)),
+    COALESCE(array_length((queries[1])::real[], 1), 1),
+    k, m, lists, probes, over_fetch, seed)
+$$;
+
+COMMENT ON FUNCTION theodb.pq_knn(regclass, text, vector[], int, int, int, int, int, text, text, bigint) IS
+  'TheoDB own Product Quantization ANN search (M39): per-subspace k-means codebooks (own Rust, permissive — '
+  'NOT the AGPL RaBitQ/k_means), asymmetric distance (ADC) via per-query LUT, candidate-gen via the M21 IVFFlat '
+  'carrier, ADC rank + full-precision f32 rerank. Benchmark-gated vs SBQ (D3); measurement-first SQL-callable; '
+  'not granted to PUBLIC.';
+
+REVOKE ALL ON FUNCTION theodb.pq_knn(regclass, text, vector[], int, int, int, int, int, text, text, bigint) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb_rs._pq_knn(text, text, text, text, real[], int, int, int, int, int, int, bigint) FROM PUBLIC;
+"#,
+    name = "theodb_pq_wrappers",
+    requires = [_pq_knn],
 );

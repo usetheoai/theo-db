@@ -36,6 +36,7 @@ mod hybrid;
 mod migrate;
 mod nl;
 mod pg;
+mod pq;
 mod vec;
 
 mod api;
