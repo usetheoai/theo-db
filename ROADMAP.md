@@ -421,21 +421,30 @@ milestone futuro grande, registrado aqui e no blueprint para quando o North Star
 
 ---
 
-### M37 — [ ] Sumarização de conteúdo (`ai.summarize`) — fechar a última feature documentada ausente
+### M37 — [x] Sumarização de conteúdo (`ai.summarize`) — já entregue (correção de doc-drift)
 
-**Objective:** Entregar a sumarização de conteúdo via SQL — a única feature em `docs/features/` genuinamente NÃO
-implementada (`docs/features/11-sumarizacao-conteudo.md`; nenhuma função `summarize` no código hoje). Espelha
-exatamente o padrão já entregue de `ai.analyze_sentiment` / `ai.rank` (`theodb_rs/src/chat.rs`, modelo síncrono
-por-linha via LLM, ADR `docs/adr/0007-synchronous-per-row-model-http.md`).
+**Outcome (honesto, measurement-first):** o milestone descobriu que a feature **JÁ ESTAVA IMPLEMENTADA E TESTADA**
+— a auditoria anterior de `docs/features/` (que criou este milestone) foi **incompleta**: grepou só o Rust
+(`theodb_rs/src/`) e perdeu a implementação em `sql/50-theodb-ai.sql`. Blueprint:
+`.claude/knowledge-base/discoveries/blueprints/m37-ai-summarize-blueprint.md`.
 
-**Definition of done:**
+O que já existe (M10 + M18):
+- `ai.summarize(content text, model text DEFAULT NULL) RETURNS text` — plpgsql (`sql/50-theodb-ai.sql:32`) que
+  chama o `ai._chat` **em Rust** (`theodb_rs/src/chat.rs`).
+- `ai.agg_summarize(text)` — agregado que colapsa várias linhas num resumo (`sql/50-theodb-ai.sql:82`).
+- **6 testes de contrato verdes** em `benchmarks/tests/test_ai_sql.py` (summarize escalar + agregado + negative
+  cases + volatilidade).
 
-- [ ] Função `ai.summarize(content text, model text DEFAULT NULL) RETURNS text` (superfície SQL em `theodb_rs/src/api.rs`, lógica em `theodb_rs/src/chat.rs`, espelhando `ai_sentiment`/`ai_rank`), com erro tipado em saída malformada.
-- [ ] Teste de contrato em `benchmarks/tests/test_ai_sql.py` (happy path + negative case de saída malformada → erro tipado), no padrão dos testes de sentiment/rank.
-- [ ] `docs/features/11-sumarizacao-conteudo.md` atualizado de "📋 planejado" → "✅ Entregue" com `file:line` + teste (validado por `deep-research/validate_citations.py`). **Nota de honestidade:** qualidade depende do LLM configurado; sem benchmark de qualidade de sumarização.
+**Trabalho do M37 (o único gap real):** `docs/features/11-sumarizacao-conteudo.md` atualizado de "📋 planejado" →
+"✅ Entregue" com `file:line` + os 6 testes, validado por `deep-research/validate_citations.py` (PASS). NÃO foi
+adicionado código Rust — seria um `ai.summarize` DUPLICADO (conflito). O grounding measurement-first evitou o
+duplicado.
 
-**Dependencies:** M18 (superfície `ai.*` + `chat.rs` existem). **Risco (BAIXO):** é uma cópia estrutural de
-`ai.rank`/`ai.analyze_sentiment` já entregues — sem novo mecanismo, só um novo prompt + parse.
+**Honestidade (Regra 3):** quando criei o M37, afirmei "genuinamente não implementada" com base num grep Rust-only.
+Estava errado — a feature está em `sql/50`. M37 é uma correção de doc-drift, não código novo.
+
+**Dependencies:** M10, M18 (a feature real). **Resultado:** correção de documentação + grounding que evitou um
+duplicado.
 
 ---
 
