@@ -24,6 +24,55 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.33.0] - 2026-07-02
+
+### Added
+- M36 Phase 1 — **otimização do scan do índice: heap top-K lazy** (`am/scan.rs`). O gate measurement-first do M36
+  (`THEODB_SCAN_PROFILE`) FALSIFICOU a premissa original ("quantizar a distância"): a distância é ~15% do custo de
+  scan; os gargalos são `reads` (~44–51%) e `sort` (~35–41%). Phase 1 substitui o `results.sort_by` O(C·log C) de
+  TODOS os candidatos por um heap min lazy (heapify O(C) no `amrescan` + pop O(log C) no `amgettuple` = O(C+k·log C)).
+  Top-K byte-idêntico → **recall inalterado** (por construção — mesma ordem total `(total_cmp, tid)`; provado pelo
+  pg_test de ordering + a suíte de 61 testes de coexistência passando inalterada). Fase sort caiu ~10–13×
+  (profiler, estável/algorítmico); speedup end-to-end **~1.5× band** (mean, recall idêntico), Amdahl-limitado pelo
+  `reads` restante — o que motiva o Phase 2. Evidência: `docs/benchmarks/m36-scan-optimization.{md,json}`. Phase 2
+  (códigos SBQ menores p/ cortar o I/O `reads`, ~44%) é o próximo slice do M36.
+- Roadmap emendado com 2 milestones novos ao fim (convenção `/roadmap-feature` — nunca renumerar, nunca roadmap
+  concorrente): **M36 — Quantização-no-índice** (distância assimétrica sobre códigos quantizados no scan + rerank
+  f32; fecha o gap de ~24.6× em QPS vs ScaNN que o M33 mediu — o P0 do North Star; SBQ-primeiro, escalar p/ PQ/ADC
+  se recall < 0.99; benchmark `m36-quantization-in-index.json` obrigatório) e **M37 — Sumarização de conteúdo**
+  (`ai.summarize`, a última feature documentada genuinamente ausente; espelha `ai.rank`/`ai.analyze_sentiment`).
+  M27–M30 (abertos) intactos. Achados desta sessão (auditoria de `docs/features/` + análise do `council-vector-ann`).
+- Handbook "Formação de Engenharia — TheoDB" (`docs/handbook/`): currículo técnico interno que ensina engenharia
+  de banco de dados através do código real do TheoDB. Modo curado (Regra 9) para fundamentos já cobertos por
+  Strang/CLRS/PG-docs; modo original ancorado em `file:line` + ADR + benchmark para o coração (índices, vetorial,
+  SIMD, IA-no-banco). Primeiro capítulo-farol escrito: cap. 19 — HNSW (`parte-06-vetorial/19-hnsw.md`), template
+  de qualidade com as 5 camadas (teoria → matemática → nossa implementação → nosso benchmark M35 → gap honesto vs
+  ScaNN). Contrato de honestidade: toda citação resolve no disco.
+- Conselho Técnico do TheoDB (`docs/conselho-tecnico-theodb.md` + `.claude/agents/council-*.md`): 8 sub-agents
+  especialistas invocáveis (via Task tool) para entender, medir e evoluir o sistema — Vetorial/ANN, Index-AM &
+  Storage, SIMD/Performance, Benchmark, Rust/pgrx, IA-no-banco, Research/ADRs, Segurança. Personas são arquétipos
+  fictícios (inspirados-em, não impersonação); cada agente aponta para o código/ADR/benchmark reais que governa e
+  é obrigado a lê-los antes de aconselhar (mesmo contrato de honestidade do handbook). Domínios roadmap
+  (distribuído, cloud-native, Go, PG-kernel) adiados honestamente até terem código.
+- Skill `/deep-research` (`.claude/skills/deep-research/`): a máquina que produz capítulos do handbook — pesquisa
+  profunda (nosso sistema via `file:line` + papers/benchmarks/técnicas do SOTA no allowlist + cálculos de
+  complexidade) destilada nas 5 camadas (teoria → matemática → nossa implementação → nosso benchmark → SOTA & gap
+  honesto), curar-não-reproduzir. Inclui `templates/chapter-template.md` e `scripts/validate_citations.py` que
+  mecaniza o contrato de honestidade (fail-closed: citação `file:line` que não resolve → INVALID; URL fora do
+  allowlist → INVALID; número de performance sem benchmark nem `UNBENCHMARKED` → NEEDS_REVISION). Dogfood: o
+  capítulo-farol 19 passa o validador (PASS).
+
+
+### Changed
+- Correção de honestidade em `docs/features/`: 5 páginas estavam marcadas "📋 planejado / ainda não implementadas"
+  quando na verdade **já foram entregues** (drift de documentação — os docs ficaram atrás do código). Atualizadas
+  para "✅ Entregue" com função SQL real + `file:line` + teste que prova cada uma: 01 busca vetorial (M20,
+  `theodb.l2_distance/…`, `test_vector_ops.py`), 02 índice HNSW (M21+M35, AM `theodb_hnsw`,
+  `test_hnsw_structured.py`), 09 ranquear (M7-S3, `ai.rank`, `test_ai_sql.py`), 10 sentimento (M7-S3,
+  `ai.analyze_sentiment`, `test_ai_sql.py`), 12 linguagem natural (M19, `ai.nl_to_sql`, `test_nl_sql.py`). Cada
+  bloco de status validado por `deep-research/validate_citations.py` (PASS — toda citação resolve no disco).
+  Afirmações de qualidade de IA marcadas com a nota de honestidade (dependem do LLM; sem benchmark de acurácia).
+
 ## [0.32.0] - 2026-07-02
 
 ### Added

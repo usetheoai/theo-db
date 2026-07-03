@@ -352,7 +352,7 @@ que é ~3-4× o esforço/risco do M31 (reescrita de grafo page-native), grande d
 
 ---
 
-### M35 — [ ] theodb_hnsw scan estruturado (partial-read page-native, à la M31 para o grafo)
+### M35 — [x] theodb_hnsw scan estruturado (partial-read page-native, à la M31 para o grafo)
 
 **Objective:** Eliminar o scan O(N) do `theodb_hnsw` (hoje desserializa o blob inteiro por query — ~6.5 GB / ~0.6 s
 a 1M, `hnsw.rs:243`) com uma persistência **estruturada page-native**: tuplas por-nó (element) + por-camada
@@ -368,6 +368,67 @@ HnswElementTupleData/HnswNeighborTupleData). Espelha o que M31 fez para o ivffla
 **Dependencies:** M34 (reusa a infra de GUC/reloption + `ef_search` configurável). **Risco (ALTO):** ~3-4× o M31
 (discovery 2026-07-02) — o grafo não é partição plana; codec element/neighbor + travessia validada a 1M são a fonte
 de risco. Único milestone dedicado por design (evita re-trabalho de cramar no M34).
+
+---
+
+### M36 — [ ] Otimização do scan do índice: heap top-K lazy (RE-ESCOPADO por medição)
+
+**Objective:** Reduzir o custo de scan do índice atacando o gargalo `sort` **MEDIDO** (não o suposto). O gate
+measurement-first do M36 (`THEODB_SCAN_PROFILE=1`, blueprint
+`.claude/knowledge-base/discoveries/blueprints/m36-quantization-in-index-blueprint.md`) FALSIFICOU a premissa
+original: a distância full-precision é **~15%** do custo de scan, não o gargalo. Os gargalos reais, estáveis em 3
+pontos de probes, são **`reads` (I/O de página) ~44–51%** e **`sort` (ordenar TODOS os candidatos, `am/scan.rs`)
+~35–41%**. M36 ataca o `sort` (win de recall-zero-risco); o `reads` foi separado no **M38** (quantização de I/O,
+recall-risco — ADR-2: medir o heap antes de comprometer o risco maior). Contribui para o gap de ~25× vs ScaNN
+medido no M33 (`docs/benchmarks/m33-scann-headtohead.json`) — honestamente uma fração via `sort`, NÃO "25× da
+distância" (ADR-1 do blueprint). North Star: `docs/adr/0002-north-star-equal-or-superior-to-alloydb.md`.
+
+**Definition of done:**
+
+- [x] **Pré-requisito medido (concluído):** `THEODB_SCAN_PROFILE=1` mediu a divisão de fases — distância ~15%, reads ~44–51%, sort ~35–41% (200k×128, 3 pontos de probes). A premissa "distância domina" está falsificada; o milestone foi re-escopado para os gargalos reais.
+- [x] **Sort → heap min lazy** (ADR-2, recall-zero-risco): `results.sort_by` sobre TODOS os candidatos → heap min lazy (heapify O(C) no `amrescan` + pop O(log C) no `amgettuple` = O(C+k·log C) em vez de O(C·log C)). Top-K **byte-idêntico** (mesma ordem total `(total_cmp, tid)`) → recall inalterado (provado por construção + `#[pg_test]` de ordering + 61 testes de coexistência). Fase sort caiu ~10–13× (profiler).
+- [x] Benchmark reproduzível `docs/benchmarks/m36-scan-optimization.{md,json}` (`benchmarks/run_m36_scan.py`): end-to-end ~1.5× band (mean±std, recall idêntico), reconciliado com o teto de Amdahl (`sort` ~37–41% ⇒ teto ~1.5–1.7×). Honesto: fecha o `sort`, não o gap total do ScaNN.
+
+**Dependencies:** M34 (infra reloption/GUC), M35 (scan estruturado). **Risco (BAIXO):** o heap é correção pura de
+complexidade (zero risco de recall — top-K byte-idêntico). O `reads` (quantização de I/O, recall-risco) é o M38.
+
+---
+
+### M38 — [ ] Quantização de I/O no scan (o gargalo `reads` ~44%, recall-risco)
+
+**Objective:** Cortar o gargalo `reads` (~44–51% do custo de scan, medido no M36) persistindo **códigos SBQ
+menores** nas páginas de lista (16 B/vetor vs 512 B f32 em dim=128 → ~32× menos bytes/candidato lidos), pontuando
+por Hamming/assimétrico, com **rerank f32 do top over_fetch** para recuperar o recall. Continua o M36 (que fechou o
+`sort`); juntos atacam ~80% do custo de scan medido. Segundo slice do ADR-2 do blueprint M36 (medir o heap antes de
+comprometer o risco de recall da quantização).
+
+**Definition of done:**
+
+- [ ] Códigos SBQ persistidos nas páginas de lista (`am/page.rs` + `am/build.rs`), reusando `theodb_rs/src/sbq.rs` (M22); mudança de formato de página é BREAKING (magic bump + REINDEX + CHANGELOG).
+- [ ] Scan lê códigos (menos bytes), rankeia por Hamming/assimétrico, **rerank f32 do top over_fetch**; **recall preservado (≥ baseline no ponto casado)** como gate. Se SBQ-1bit regredir < baseline mesmo com over_fetch, escalar bits ou PQ/ADC via ADR.
+- [ ] Benchmark reproduzível `docs/benchmarks/m38-io-quantization.{md,json}` a 1M (reusa `benchmarks/theodb_bench/`): ganho de QPS medido via `reads` cortado (profiler) a recall preservado; quanto do gap M33 fecha, honesto.
+
+**Dependencies:** M22 (`sbq.rs`), M34 (reloption/GUC), M35 (scan estruturado), M36 (heap — o `sort` já resolvido).
+**Risco (MÉDIO):** quantização de I/O tem risco de recall (SBQ-1bit teta ~0.86 no protótipo) — mitigado por rerank
+f32 + gate de recall. Deltas de QPS **UNBENCHMARKED** até o `m38-*.json` existir.
+
+---
+
+### M37 — [ ] Sumarização de conteúdo (`ai.summarize`) — fechar a última feature documentada ausente
+
+**Objective:** Entregar a sumarização de conteúdo via SQL — a única feature em `docs/features/` genuinamente NÃO
+implementada (`docs/features/11-sumarizacao-conteudo.md`; nenhuma função `summarize` no código hoje). Espelha
+exatamente o padrão já entregue de `ai.analyze_sentiment` / `ai.rank` (`theodb_rs/src/chat.rs`, modelo síncrono
+por-linha via LLM, ADR `docs/adr/0007-synchronous-per-row-model-http.md`).
+
+**Definition of done:**
+
+- [ ] Função `ai.summarize(content text, model text DEFAULT NULL) RETURNS text` (superfície SQL em `theodb_rs/src/api.rs`, lógica em `theodb_rs/src/chat.rs`, espelhando `ai_sentiment`/`ai_rank`), com erro tipado em saída malformada.
+- [ ] Teste de contrato em `benchmarks/tests/test_ai_sql.py` (happy path + negative case de saída malformada → erro tipado), no padrão dos testes de sentiment/rank.
+- [ ] `docs/features/11-sumarizacao-conteudo.md` atualizado de "📋 planejado" → "✅ Entregue" com `file:line` + teste (validado por `deep-research/validate_citations.py`). **Nota de honestidade:** qualidade depende do LLM configurado; sem benchmark de qualidade de sumarização.
+
+**Dependencies:** M18 (superfície `ai.*` + `chat.rs` existem). **Risco (BAIXO):** é uma cópia estrutural de
+`ai.rank`/`ai.analyze_sentiment` já entregues — sem novo mecanismo, só um novo prompt + parse.
 
 ---
 

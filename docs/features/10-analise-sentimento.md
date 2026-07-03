@@ -1,10 +1,12 @@
 # Análise de sentimento de texto
 
-> **Status:** 📋 Especificação (planejado) — recurso-alvo do milestone **M7 — IA avançada** ([ROADMAP](../../ROADMAP.md)).
-> Esta página documenta a **API-alvo do TheoDB**. As funcionalidades aqui descritas **ainda não estão
-> implementadas** na release atual (M0 entrega PostgreSQL 17 + `pgvector`). Nenhum número de desempenho
-> nesta página é um benchmark — benchmarks reproduzíveis vivem em `docs/benchmarks/` quando publicados
-> (CLAUDE.md, regra TheoDB 5).
+> **Status:** ✅ **Entregue (M7-S3).** A função `ai.analyze_sentiment(content text, model text DEFAULT NULL)
+> RETURNS text` (`theodb_rs/src/api.rs:334`, implementada em `theodb_rs/src/chat.rs:73` `ai_sentiment`) classifica
+> o texto num rótulo de sentimento via LLM, com erro tipado em saída malformada. Provado por
+> `benchmarks/tests/test_ai_sql.py` (`test_analyze_sentiment_in_label_set:101`,
+> `test_sentiment_malformed_output_raises_typed:290`). **Nota de honestidade:** a acurácia depende do modelo LLM
+> configurado (modelo síncrono por-linha, ADR `docs/adr/0007-synchronous-per-row-model-http.md`); não há benchmark
+> de acurácia de sentimento publicado.
 
 Esta página cobre a função `ai.analyze_sentiment()` — consultas SQL, parâmetros e modos de execução
 (escalar, baseado em arrays e baseado em cursor) para classificar o sentimento de textos.

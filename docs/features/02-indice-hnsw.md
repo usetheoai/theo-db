@@ -1,10 +1,12 @@
 # Criar índices HNSW
 
-> **Status:** 📋 Especificação (planejado) — recurso-alvo do milestone **M2 — Vetorial / IA** ([ROADMAP](../../ROADMAP.md)).
-> Esta página documenta a **API-alvo do TheoDB**. As funcionalidades aqui descritas **ainda não estão
-> implementadas** na release atual (M0 entrega PostgreSQL 17 + `pgvector`). Nenhum número de desempenho
-> nesta página é um benchmark — benchmarks reproduzíveis vivem em `docs/benchmarks/` quando publicados
-> (CLAUDE.md, regra TheoDB 5).
+> **Status:** ✅ **Entregue (M21 + M35).** O TheoDB tem um access method HNSW **próprio**: `theodb_hnsw`
+> (`CREATE ACCESS METHOD theodb_hnsw` em `theodb_rs/src/am/mod.rs:58`, opclass `theodb_hnsw_l2_ops` em `:208`).
+> Uso: `CREATE INDEX … USING theodb_hnsw (embedding theodb_hnsw_l2_ops)` + `SET theodb_hnsw.ef_search = N`. Desde o
+> M35 a persistência é page-native com travessia on-demand (grafo em `theodb_rs/src/ann/hnsw.rs`, páginas em
+> `theodb_rs/src/am/hnsw_page.rs`). Provado por `benchmarks/tests/test_hnsw_structured.py`. Benchmark medido:
+> `docs/benchmarks/m35-hnsw-structured-scan.{md,json}` (~100 QPS @ recall 0.98 a 1M; O(N)→O(ef·M)). Coexiste com o
+> HNSW do pgvector. Regra TheoDB 5: só há afirmação de desempenho com link para o artefato de benchmark.
 
 Esta página cobre a criação de índices vetoriais HNSW no TheoDB — todas as consultas SQL, parâmetros e funcionalidades da indexação HNSW, das funções de distância aos parâmetros de construção do grafo.
 

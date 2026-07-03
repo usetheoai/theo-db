@@ -1,9 +1,11 @@
 # Busca por similaridade vetorial
 
-> **Status:** 📋 Especificação (planejado) — recurso-alvo do milestone **M2 — Vetorial / IA** ([ROADMAP](../../ROADMAP.md)).
-> Esta página documenta a **API-alvo do TheoDB**. As funcionalidades aqui descritas **ainda não estão
-> implementadas** na release atual (M0 entrega PostgreSQL 17 + `pgvector`). Nenhum número de desempenho
-> nesta página é um benchmark — benchmarks reproduzíveis vivem em `docs/benchmarks/` quando publicados
+> **Status:** ✅ **Entregue (M20).** A busca por similaridade vetorial está disponível: kernels de distância
+> próprios do TheoDB — `theodb.l2_distance` / `theodb.inner_product` / `theodb.cosine_distance`
+> (`theodb_rs/src/api.rs:483,487,491`, implementados em `theodb_rs/src/vec.rs` com paridade f32 vs pgvector) —
+> operando sobre o tipo `vector`. Coexiste com os operadores `<->` / `<#>` / `<=>` do pgvector. Provado por
+> `benchmarks/tests/test_vector_ops.py`. Números de desempenho reproduzíveis (recall/QPS) vivem em
+> `docs/benchmarks/` (M31b/M32/M34/M35); nenhuma afirmação de desempenho nesta página sem link para esse artefato
 > (CLAUDE.md, regra TheoDB 5).
 
 Esta página cobre a execução de buscas por similaridade vetorial (KNN / nearest neighbor) no TheoDB, detalhando a consulta base, os operadores de distância e os parâmetros de cada consulta.
