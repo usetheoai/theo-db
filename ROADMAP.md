@@ -471,6 +471,27 @@ esqueleto PQ (ataca recall, não QPS) — semente do M40.
 
 ---
 
+### M40 — [x] Carrier head-to-head (theodb_hnsw vs theodb_ivfflat) — re-escopado da anisotropic loss
+
+**Outcome (honesto, measurement-first — 5º da sequência M36/M38/M39/M40-ceiling/M40):** o milestone foi pedido como
+"ScaNN anisotropic loss", mas a **sonda de teto** (`docs/benchmarks/m40-ceiling-probe.md`) falsificou a premissa
+ANTES de construir: no nosso pipeline com rerank f32, o recall é limitado pelo **carrier (probes)**, não pelo
+quantizer — a loss anisotrópica não moveria a agulha. Re-escopado (com aval do owner) para o head-to-head dos
+carriers próprios. Artefato: `docs/benchmarks/m40-carrier.{md,json}`; harness: `benchmarks/run_m40_carrier.py`.
+
+**Medição (n=50k synthetic):** `theodb_ivfflat` **vence** o trade-off recall×QPS — a QPS igual tem recall
+substancialmente maior; o `theodb_hnsw` é **3–5× mais lento a recall igual** (headroom de otimização real no scan
+page-native M35 vs o SIMD+heap do ivfflat). **Caveat honesto:** random-gaussian é o pior caso para grafo; o
+veredito NÃO generaliza para dados reais estruturados a escala — o head-to-head confiável precisa de SIFT1M.
+
+**Próximo (evidence-based):** (1) otimizar QPS do `theodb_hnsw` (é grafo, deveria ser mais rápido que probing);
+(2) rodar este head-to-head em SIFT1M antes de qualquer claim de superioridade de carrier (`public-copy.md`).
+
+**Dependencies:** M34 (theodb_ivfflat), M35 (theodb_hnsw), M39 (ceiling probe). **Resultado:** measurement +
+harness reproduzível; theodb_ivfflat é o carrier mais forte nesta escala/dado; sem claim (precisa SIFT1M).
+
+---
+
 ## Sequência e paralelismo
 
 ```

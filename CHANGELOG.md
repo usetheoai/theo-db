@@ -15,6 +15,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 ### Changed
+- M40 (carrier head-to-head — **re-escopado da anisotropic loss, sem claim**): a sonda de teto
+  (`docs/benchmarks/m40-ceiling-probe.md`) provou que o recall é limitado pelo carrier (probes), não pelo
+  quantizer (rerank f32 equaliza) — a loss anisotrópica não moveria recall. Re-escopado para
+  `benchmarks/run_m40_carrier.py` (theodb_hnsw vs theodb_ivfflat recall×QPS a QPS igual). Medição n=50k:
+  theodb_ivfflat vence (theodb_hnsw 3–5× mais lento a recall igual → headroom de otimização). **Caveat:**
+  synthetic random-gaussian é o pior caso p/ grafo — veredito não generaliza; precisa SIFT1M. 5º negativo
+  measurement-first da sessão. `docs/benchmarks/m40-carrier.{md,json}`.
 - M39 (Product Quantization, **medido: NÃO é o lever de QPS — sem claim de performance**): novo `theodb.pq_knn`
   próprio, std-only (k-means Lloyd por subespaço + ADC LUT, `theodb_rs/src/pq.rs`), funcional e testado
   (`REVOKE FROM PUBLIC`, espelha `sbq_knn`). Benchmark reproduzível PQ-vs-SBQ (`benchmarks/run_m39_pq.py`,
