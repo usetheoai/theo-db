@@ -15,6 +15,18 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 ### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.33.2] - 2026-07-03
+
+### Changed
 - M41 (otimização de QPS do scan `theodb_hnsw`, **gated por benchmark A/B — ganho honesto 1.2–1.5×**): o `traverse` on-demand
   (`theodb_rs/src/am/hnsw_page.rs`) passa a decodificar+pontuar cada nó **dentro do pin da página**
   (`page::with_page_item`, sem o `to_vec` alloc+memcpy por-nó) e cacheia `RelationGetNumberOfBlocksInFork` uma
@@ -45,14 +57,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   **07 funções IA SQL** (`ai.*` + registry `theodb_ml`) → ✅ entregue (modos array/cursor seguem YAGNI-adiados);
   **05 ScaNN** → ⚖️ NO-FORK (M14): `theodb_scann` literal é decisão-de-não-fazer, ScaNN-quality entregue via `USING diskann`.
   Placeholder `'https://...'` do exemplo de `theodb_ml.create_model` trocado por `'<your-llm-endpoint>'` (clareza).
-
-### Deprecated
-
-### Removed
-
-### Fixed
-
-### Security
 
 ## [0.33.1] - 2026-07-03
 
