@@ -15,6 +15,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 ### Changed
+- Interno (sem impacto no consumidor): os stubs de teste da superfície de IA (`embedding_server.py`,
+  `chat_server.py`) movidos de `tools/` para `benchmarks/servers/` — coesão, já que só `benchmarks/` os
+  consome. Só um comentário de `sql/30-theodb-embed.sql` (path do endpoint local de exemplo) foi atualizado;
+  nenhuma mudança de comportamento do banco.
 
 ### Deprecated
 
