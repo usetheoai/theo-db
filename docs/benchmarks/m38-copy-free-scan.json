@@ -1,0 +1,41 @@
+{
+  "milestone": "M38",
+  "outcome": "MEASUREMENT (not a QPS win) — the reads-copy lever does not deliver a benchmark-provable end-to-end speedup; the single-copy change is a recall-identical code-quality byproduct",
+  "dataset": "synthetic 200000×128 (distinct, seed 42) + SIFT 120000×128 (real, for the SBQ recall gate)",
+  "hardware": {
+    "cpu": "13th Gen Intel(R) Core(TM) i7-1355U",
+    "cores": 12,
+    "ram_gb": 15.3,
+    "avx2": true,
+    "note": "mobile CPU, thermal-throttled + heavy container load during measurement — HIGH variance; the measured effect is SMALLER than this variance"
+  },
+  "findings": [
+    {
+      "id": "F1-sbq-falsified",
+      "claim": "SBQ (scalar quantization, the original M38 approach) preserves recall to baseline",
+      "verdict": "FALSIFIED",
+      "evidence": "theodb.sbq_knn vs exact seqscan on real SIFT 120k×128, 100 queries, f32 baseline recall@10 = 1.0000: SBQ bits=1/of=40 = 0.774; bits=2/of=40 = 0.854; bits=4/of=40 = 0.947 — all below 1.0. Scalar quantization loses too much ranking information per byte; PQ (product quantization + LUT asymmetric distance, the ScaNN/FAISS approach) is the technical answer but a large milestone."
+    },
+    {
+      "id": "F2-copy-not-bottleneck",
+      "claim": "the reads phase (~44% of the M36 profiler) is copy-dominated, so eliminating the copy speeds up the scan",
+      "verdict": "FALSIFIED (end-to-end)",
+      "evidence": "eliminated read_chunked's double-copy (read_page_item.to_vec() + extend_from_slice → read_page_item_into, one copy). The INTERNAL profiler reads dropped ~8ms→~4ms at probes=50, BUT the end-to-end QPS showed NO reliable win: ratio m38/m36 = {50:[1.03,1.52,0.94,1.03], 100:[1.16,0.94,0.94], 200:0.92} — swings 50% between runs = noise; effect < measurement variance. LESSON: the M36 profiler's phase attribution was INFLATED by its own Instant::now() instrumentation overhead (~400 syscalls/query at probes=50); the copy is not the real end-to-end bottleneck."
+    },
+    {
+      "id": "F3-single-copy-byproduct",
+      "claim": "the double-copy in read_chunked is wasteful",
+      "verdict": "CONFIRMED (kept as code-quality)",
+      "evidence": "read_page_item_into appends directly (one copy) instead of read_chunked's old two copies + intermediate realloc. Recall byte-identical (61 coexistence tests return the same kNN ids). Merged as a code-quality refactor (less allocation/memory traffic), NOT as a QPS win — the benchmark does not support a performance claim (F2)."
+    }
+  ],
+  "recall_preserved": "IDENTICAL — the single-copy change copies the same bytes; kNN ids unchanged (61 coexistence tests: test_index_am/hnsw_structured/reloption/ann_index/sbq_index).",
+  "verdict": {
+    "qps_win": false,
+    "reads_lever_viable": false,
+    "code_quality_byproduct": "read_page_item_into (double→single copy, recall-identical)",
+    "real_remaining_vector_lever": "PQ (product quantization + ADC via LUT — the ScaNN algorithm); reduces candidates/bytes at preserved recall; PhD-level, a large future milestone",
+    "honest_note": "measurement-first (3rd time in the M36/M38 saga) reshaped the milestone: SBQ regresses recall, and copy-elimination gives no end-to-end win because the profiler misled via instrumentation overhead. Shipping M38 as a QPS win would be unsupported by the data."
+  },
+  "reproduction": "SBQ recall: load SIFT subset into a table, theodb.sbq_knn vs seqscan. Copy QPS: PGPORT=<port> python3 benchmarks/run_m36_scan.py --n 200000 --probes 50 --k 10 --runs 10 (theo-db:m36 = double-copy, theo-db:m38 = single-copy)."
+}

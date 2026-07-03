@@ -15,6 +15,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 ### Changed
+- M38 (refactor de code-quality, **sem claim de performance**): `read_chunked`/`read_blob` do index-AM agora fazem
+  UMA cópia por página (`read_page_item_into`, append direto) em vez de duas (`read_page_item.to_vec()` +
+  `extend_from_slice`). Menos alocação/tráfego de memória; **recall byte-idêntico** (61 testes de coexistência).
+  **Honestidade (measurement-first):** o M38 investigou cortar o gargalo `reads` do scan; a medição concluiu que
+  (a) o SBQ regride recall (0.77–0.95 < 1.0 em SIFT real) e (b) a cópia **não é** o gargalo end-to-end (o profiler
+  enganou via overhead de instrumentação) — então NÃO há win de QPS a reivindicar. O lever vetorial real restante
+  é PQ (algorítmico, milestone futuro). Evidência: `docs/benchmarks/m38-copy-free-scan.{md,json}`.
 
 ### Deprecated
 

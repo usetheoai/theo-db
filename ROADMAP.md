@@ -394,23 +394,30 @@ complexidade (zero risco de recall — top-K byte-idêntico). O `reads` (quantiz
 
 ---
 
-### M38 — [ ] Quantização de I/O no scan (o gargalo `reads` ~44%, recall-risco)
+### M38 — [x] Investigação do gargalo `reads` (medido: sem lever recall-zero-risco viável — PQ é o real)
 
-**Objective:** Cortar o gargalo `reads` (~44–51% do custo de scan, medido no M36) persistindo **códigos SBQ
-menores** nas páginas de lista (16 B/vetor vs 512 B f32 em dim=128 → ~32× menos bytes/candidato lidos), pontuando
-por Hamming/assimétrico, com **rerank f32 do top over_fetch** para recuperar o recall. Continua o M36 (que fechou o
-`sort`); juntos atacam ~80% do custo de scan medido. Segundo slice do ADR-2 do blueprint M36 (medir o heap antes de
-comprometer o risco de recall da quantização).
+**Outcome (honesto, measurement-first):** o milestone entregou uma **MEDIÇÃO** que fechou 3 hipóteses, não um win
+de QPS. Blueprint: `.claude/knowledge-base/discoveries/blueprints/m38-io-quantization-blueprint.md`; artefato:
+`docs/benchmarks/m38-copy-free-scan.{md,json}`.
 
-**Definition of done:**
+1. **SBQ falsificado (recall).** Em SIFT real o SBQ atinge só recall 0.77–0.95 vs 1.0 do baseline (quantização
+   escalar perde ranking demais). O gate "recall preservado" do SBQ não é atingível — PQ seria o answer, mas é
+   milestone grande (deferido).
+2. **A cópia não é o gargalo end-to-end.** O profiler do M36 sugeria `reads` = 44% (dominado pela cópia dupla do
+   `read_chunked`). Eliminada a cópia dupla (`read_page_item_into`, uma cópia), o profiler INTERNO caiu ~metade —
+   **mas o end-to-end NÃO mostrou win confiável** (ratio 0.94–1.52 entre runs = ruído; efeito < variância de
+   medição). Lição: a atribuição do profiler estava **inflada pelo overhead da própria instrumentação**
+   (`Instant::now()`); a cópia não é o gargalo real.
+3. **Byproduct entregue:** a eliminação da cópia dupla (`read_page_item_into`) é código estritamente melhor (menos
+   alocação/tráfego de memória), **recall byte-idêntico** (61 testes de coexistência), merged como refactor de
+   code-quality — SEM claim de QPS (o benchmark não sustenta).
 
-- [ ] Códigos SBQ persistidos nas páginas de lista (`am/page.rs` + `am/build.rs`), reusando `theodb_rs/src/sbq.rs` (M22); mudança de formato de página é BREAKING (magic bump + REINDEX + CHANGELOG).
-- [ ] Scan lê códigos (menos bytes), rankeia por Hamming/assimétrico, **rerank f32 do top over_fetch**; **recall preservado (≥ baseline no ponto casado)** como gate. Se SBQ-1bit regredir < baseline mesmo com over_fetch, escalar bits ou PQ/ADC via ADR.
-- [ ] Benchmark reproduzível `docs/benchmarks/m38-io-quantization.{md,json}` a 1M (reusa `benchmarks/theodb_bench/`): ganho de QPS medido via `reads` cortado (profiler) a recall preservado; quanto do gap M33 fecha, honesto.
+**Conclusão:** nenhum lever de `reads` recall-zero-risco produz win end-to-end mensurável; fechar o gargalo
+vetorial de verdade exige **quantização de produto (PQ + ADC via LUT — o algoritmo do ScaNN)**, que reduz
+candidatos/bytes preservando recall. É PhD-level (codebooks + LUT SIMD + persistência + gate de recall) — um
+milestone futuro grande, registrado aqui e no blueprint para quando o North Star exigir.
 
-**Dependencies:** M22 (`sbq.rs`), M34 (reloption/GUC), M35 (scan estruturado), M36 (heap — o `sort` já resolvido).
-**Risco (MÉDIO):** quantização de I/O tem risco de recall (SBQ-1bit teta ~0.86 no protótipo) — mitigado por rerank
-f32 + gate de recall. Deltas de QPS **UNBENCHMARKED** até o `m38-*.json` existir.
+**Dependencies:** M31b, M34, M35, M36. **Resultado:** measurement + code-quality byproduct (não um win de QPS).
 
 ---
 
