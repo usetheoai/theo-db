@@ -23,7 +23,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   `test_ai_sql.py`) e **08 aceleração** (`ai.generate_batch` N-in/N-out + `ai.if`, M11/M18; 9 testes). **Honestidade
   (Regra 3):** o M37 foi criado sob a premissa "sumarização não implementada" (grep Rust-only) — estava errado; o
   grounding measurement-first evitou adicionar um `ai.summarize` DUPLICADO (conflito). M37 é uma correção de
-  doc-drift, não código novo.
+  doc-drift, não código novo. Evidência funcional ao vivo (33 testes de contrato + 3 real-OpenAI
+  gpt-4o-mini, incl. `agg_summarize`) em `docs/benchmarks/m37-ai-summarize-validation.md`.
 
 - M38 (refactor de code-quality, **sem claim de performance**): `read_chunked`/`read_blob` do index-AM agora fazem
   UMA cópia por página (`read_page_item_into`, append direto) em vez de duas (`read_page_item.to_vec()` +
