@@ -19,6 +19,17 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Deprecated
 
 ### Removed
+- **Control-plane / plataforma removidos deste repositório — o foco é o banco de dados (engine + extensão).**
+  Apagados: o módulo Go `operator/` (operador K8s + CLI + gateway + MCP server + read-pool + observabilidade —
+  todo o código Go do control-plane) e `ha/` (Patroni + pgBackRest + smokes de failover/PITR). Deploy,
+  orquestração K8s, HA-via-operador e a superfície de plataforma **não fazem parte do TheoDB-engine** — são
+  responsabilidade de outra camada. Limpeza acompanhante: job `ha-smoke` do CI removido; README sem as promessas
+  de operador/HA/deploy-tooling; ROADMAP com M23/M24/M27/M28/M29 marcados REMOVIDO (fora de escopo); seção
+  "Integrating with the Theo platform" do `CLAUDE.md` removida; docs órfãos `docs/benchmarks/m23-operator-reconcile.md`,
+  `docs/benchmarks/m24-observability-readpool-mcp.md`, `docs/operations/ha-backup-runbook.md` e
+  `docs/conselho-tecnico-theodb.md` apagados. **Nota:** ADR `0006` (estratégia "Rust/Go") é LOCKED — sua porção
+  Go fica pendente de um ADR de superseção formal (sign-off do owner). Entradas de CHANGELOG já released
+  (M23/M4) permanecem intocadas (Regra 6 — histórico).
 
 ### Fixed
 

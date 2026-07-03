@@ -20,8 +20,9 @@ capacidades-killer são **nossas**, não uma colagem de extensões de terceiros.
 1. **Engine PostgreSQL mantido** (C, não-reescrito, wire-compat). Não reescrevemos parser/MVCC/WAL/protocolo —
    isso É o Postgres (ADR 0001 núcleo; engine-do-zero rejeitado em ADR 0001 A3). A engine não é uma
    "dependência a remover" — é a **fundação**.
-2. **Código próprio:** Rust (`pgrx`) para o que roda *dentro* do engine (tipos, funções, índices); Go para o
-   que roda *fora* (operador K8s, CLI, gateway, control plane).
+2. **Código próprio:** Rust (`pgrx`) para o que roda *dentro* do engine (tipos, funções, índices). Deploy,
+   orquestração e control-plane (operador K8s / CLI / gateway) estão **fora de escopo** deste repositório —
+   o foco é o banco de dados (o engine + a extensão).
 3. **Dependências externas mínimas** (o pedido do CTO):
    - Substituir incrementalmente as extensões de terceiros (`pgvector`, `pgvectorscale`, `plpython3u`) por
      **código próprio Rust** — para deixar de depender delas.
@@ -138,27 +139,17 @@ pgvectorscale — **somente** com paridade de recall **e** memória medida.
 
 **Dependencies:** M21. **Risco:** MÁXIMO; o mais caro do v2. Measurement-first rigoroso.
 
-### M23 — [x] Control plane em Go: operador K8s + CLI + gateway
+### ~~M23 — Control plane em Go: operador K8s + CLI + gateway~~ (REMOVIDO 2026-07-03 — fora de escopo)
 
-**Objective:** Construir a camada de produto/operação em **Go** (código próprio): operador Kubernetes (modelo
-cloudnative-pg), CLI, gateway — o que torna TheoDB deployável/gerenciável (caminho para managed).
+> **Removido do escopo (2026-07-03):** control-plane / operador K8s / CLI / gateway **não fazem parte do
+> banco de dados** — este repositório é só o engine + a extensão. O diretório `operator/` (Go) foi apagado.
+> Deploy/orquestração são responsabilidade de outra camada, não do TheoDB-engine.
 
-**Definition of done:**
+### ~~M24 — Observabilidade + escala em Go (read pools, OTel/Prometheus, MCP)~~ (REMOVIDO 2026-07-03 — fora de escopo)
 
-- [ ] Operador K8s provisiona/gerencia um cluster TheoDB (CRD + reconciliation); CLI; deploy reproduzível.
-- [ ] Código próprio Go com testes; sem dep externa além do ecossistema K8s padrão.
-
-**Dependencies:** M19 (banco próprio coeso). **Nota:** absorve o antigo v1-M5.
-
-### M24 — [x] Observabilidade + escala em Go (read pools, OTel/Prometheus, MCP)
-
-**Objective:** Observabilidade e escala de leitura em **Go**: métricas OTel/Prometheus, read pools, MCP server.
-
-**Definition of done:**
-
-- [ ] Métricas runtime expostas (Prometheus/OTel); read pools; MCP server — código próprio Go com testes.
-
-**Dependencies:** M23. **Nota:** absorve o antigo v1-M8.
+> **Removido do escopo (2026-07-03):** observabilidade/read-pools/MCP server eram **código Go do
+> control-plane** (vivia em `operator/`, agora apagado). Não é o banco de dados. Se observabilidade voltar,
+> entra como capacidade do engine (extensão), não como serviço Go externo.
 
 ---
 
@@ -199,51 +190,15 @@ pgvector/pgvectorscale/vectorchord (todos AMs).
 
 ---
 
-### M27 — [ ] Replicação streaming + read-pool real
+### ~~M27 — Replicação streaming + read-pool real~~ (REMOVIDO 2026-07-03 — fora de escopo)
+### ~~M28 — MCP write tools + auth (atrás do edge)~~ (REMOVIDO 2026-07-03 — fora de escopo)
+### ~~M29 — Veredito de arquitetura do control plane (operator, Go)~~ (REMOVIDO 2026-07-03 — fora de escopo)
 
-**Objective:** Dar significado real ao read-Service `<name>-ro` do M24: replicação streaming Postgres
-(primary + réplicas) + roteamento de leitura para réplicas (o read-scale que hoje é só endpoint-level).
-
-**Definition of done:**
-
-- [ ] Operador provisiona réplicas com replicação streaming (primary + N réplicas, slots/`pg_basebackup`).
-- [ ] Read-Service `<name>-ro` seleciona só pods réplica — read-scale real, não pods independentes.
-- [ ] Promoção de réplica (failover) integrada ao `ha/` (Patroni já existe) OU decisão honesta de deferir.
-- [ ] Read-pool: ADR PgBouncer (cnpg Pooler) vs Service L4.
-- [ ] Evidência real-cluster (kind): réplica recebe writes do primary; read no `-ro` retorna dado replicado.
-
-**Dependencies:** M23, M26. **Risco:** replicação é fonte clássica de bugs de consistência — testes de lag/split-brain. **Nota:** absorve o deferral M24 ADR-2 (read-pool real).
-
----
-
-### M28 — [ ] MCP write tools + auth (superfície de agente mutável, atrás do edge)
-
-**Objective:** Estender o MCP server (M24, read-only) com write tools protegidos por auth — a superfície
-mutável que o M24 ADR-3 deferiu por precisar da história de auth primeiro.
-
-**Definition of done:**
-
-- [ ] Tools `apply_cluster` / `delete_cluster` (write) com validação de input + typed errors.
-- [ ] Auth: `-http` deixa de ser unauthenticated — integra o edge autenticador (Traefik ForwardAuth / Model B, padrão theo-memory) OU exige token; stdio segue p/ spawn local confiável.
-- [ ] RBAC least-privilege: verbos de write na SA do MCP só com auth presente.
-- [ ] Testes: write tool cria/deleta CR real (envtest); tool sem auth no `-http` → 401; toda mutação logada.
-
-**Dependencies:** M24. **Risco (segurança):** IA que muta estado de cluster — edge autenticador obrigatório antes de expor (CWE-441/Model-B do theo-data). **Nota:** absorve o deferral M24 ADR-3.
-
----
-
-### M29 — [ ] Veredito de arquitetura + hardening do control plane (operator, Go)
-
-**Objective:** Rodar a mesma auditoria FAANG de 7 dimensões no `operator/` (Go) que rodou no `theodb_rs`,
-e fechar achados de craft — fechando o veredito dos dois codebases.
-
-**Definition of done:**
-
-- [ ] Auditoria de arquitetura do `operator/` (estrutura/naming/SOLID/coupling+ciclos/patterns) com métricas medidas (gocyclo/gocognit) + comparação SOTA (cloudnative-pg).
-- [ ] 0 ciclos; findings HIGH/MEDIUM fechados ou com ADR de aceite; relatório em `.claude/knowledge-base/audits/`.
-- [ ] Gate mantido: `golangci-lint` 0, `deadcode` none, `make test` verde.
-
-**Dependencies:** M24. **Risco:** baixo — operator já passou por 12 agentes nos ciclos M23/M24; provável PASS com poucos ajustes. **Nota:** fecha o veredito FAANG dos dois engines (Rust + Go).
+> **Removidos do escopo (2026-07-03):** replicação/read-pool provisionados por operador, write-tools de MCP
+> atrás de um edge autenticador, e a auditoria do `operator/` (Go) são **control-plane / deploy / plataforma**,
+> não o banco de dados. O `operator/` e o `ha/` foram apagados deste repositório; este repo é só o engine +
+> a extensão. Replicação/HA no nível do Postgres, se voltarem, entram como capacidade do engine (não via
+> operador K8s), num roadmap futuro.
 
 ---
 
