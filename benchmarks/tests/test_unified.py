@@ -33,11 +33,11 @@ def _free_port():
 
 @pytest.fixture(scope="module")
 def chat_server():
-    """Deterministic OpenAI-compatible stub (tools/chat_server.py) reached from the container via
+    """Deterministic OpenAI-compatible stub (benchmarks/servers/chat_server.py) reached from the container via
     host.docker.internal — the container must be run with --add-host=host.docker.internal:host-gateway."""
     port = _free_port()
     proc = subprocess.Popen(
-        [sys.executable, str(_REPO / "tools" / "chat_server.py"), "--host", "0.0.0.0", "--port", str(port)],
+        [sys.executable, str(_REPO / "benchmarks" / "servers" / "chat_server.py"), "--host", "0.0.0.0", "--port", str(port)],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         for _ in range(60):

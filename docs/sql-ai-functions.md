@@ -77,7 +77,7 @@ LIMIT 20;
 
 ## Testing
 
-- **Offline (CI):** a deterministic OpenAI-compatible stub (`tools/chat_server.py`) is the endpoint, so each
+- **Offline (CI):** a deterministic OpenAI-compatible stub (`benchmarks/servers/chat_server.py`) is the endpoint, so each
   function's SQL→HTTP→parse contract is tested with zero external calls (`benchmarks/tests/test_ai_sql.py -k
   'not real'`).
 - **Real (opt-in):** `pytest -k real` runs against OpenAI when `THEODB_LLM_ENDPOINT` + `OPENAI_API_KEY` are

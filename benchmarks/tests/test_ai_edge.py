@@ -36,7 +36,7 @@ def _free_port() -> int:
 def chat_server():
     port = _free_port()
     proc = subprocess.Popen(
-        [sys.executable, os.path.join(_REPO, "tools", "chat_server.py"), "--host", "0.0.0.0", "--port", str(port)],
+        [sys.executable, os.path.join(_REPO, "benchmarks", "servers", "chat_server.py"), "--host", "0.0.0.0", "--port", str(port)],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
     try:

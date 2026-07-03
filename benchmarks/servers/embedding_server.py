@@ -5,7 +5,7 @@ only ships `plpython3u` and calls an HTTP endpoint — the AlloyDB `embedding()`
 out-of-process here. It is a real model (BAAI/bge-small-en-v1.5, 384-dim, deterministic), not a mock —
 the same wire contract serves a self-hosted local model OR any cloud OpenAI-compatible provider.
 
-Run: ``python tools/embedding_server.py --port 8088 [--model BAAI/bge-small-en-v1.5]``
+Run: ``python benchmarks/servers/embedding_server.py --port 8088 [--model BAAI/bge-small-en-v1.5]``
 Endpoint: ``POST /v1/embeddings``  body ``{"input": "text" | ["t1","t2"], "model": "..."}``
 Response (OpenAI shape): ``{"object":"list","data":[{"object":"embedding","index":0,"embedding":[...]}], ...}``
 Stdlib HTTP only (no framework dep); fastembed is the single heavy dep and lives OUTSIDE the DB image.

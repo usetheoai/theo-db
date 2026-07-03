@@ -20,7 +20,7 @@ time, against the SAME stub, interleaved**:
 
 - **PRE-split:** `theo-db:m17` (the shipped M17 image — single-file `lib.rs`, `theodb_rs._embed_text` body inline).
 - **POST-split:** `theo-db:slice1` (this slice — `pg.rs` glue + `embed.rs` domain + `lib.rs` api/map). Same SQL surface (`\df` identical: `theodb_rs._embed_text` C + `theodb.embed` SQL).
-- **Stub:** one shared `tools/embedding_server.py` (real BAAI/bge-small-en-v1.5, 384-dim, deterministic), reached via `host.docker.internal`.
+- **Stub:** one shared `benchmarks/servers/embedding_server.py` (real BAAI/bge-small-en-v1.5, 384-dim, deterministic), reached via `host.docker.internal`.
 - **Workload:** 200 serial `SELECT theodb.embed('benchmark text')` calls per run, **6 runs INTERLEAVED** (run order: pre, post, pre, post, …) so any host-load drift hits both implementations equally. 5 warmup calls per connection discarded. Per-call latency = run wall-clock / 200; reported mean ± std (population) over the 6 runs.
 - **Hardware:** 13th Gen Intel Core i7-1355U. **PostgreSQL:** 17.10. Both containers + the stub ran concurrently (heavy I/O-bound load — note the absolute ms is ~2× the lightly-loaded M17 run; this is exactly why the same-machine/same-time interleaved comparison is the valid one).
 
@@ -29,7 +29,7 @@ time, against the SAME stub, interleaved**:
 # pre-split + post-split side by side
 docker run -d --name m17  --add-host=host.docker.internal:host-gateway -p 55434:5432 ... theo-db:m17
 docker run -d --name s1   --add-host=host.docker.internal:host-gateway -p 55433:5432 ... theo-db:slice1
-python3 tools/embedding_server.py --port <P> &           # one shared stub
+python3 benchmarks/servers/embedding_server.py --port <P> &           # one shared stub
 # interleave bench(port=55434) and bench(port=55433), 6 runs each, N=200 (benchmarks/bench_embed.py)
 ```
 

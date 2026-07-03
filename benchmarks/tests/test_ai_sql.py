@@ -1,7 +1,7 @@
 """Contract tests for the M7-S3 generative-AI SQL functions (ai.generate/if/analyze_sentiment/summarize/rank).
 
 Two layers (plan ADR D3):
- - OFFLINE (default, CI): a deterministic OpenAI-compatible stub (tools/chat_server.py) is the configurable
+ - OFFLINE (default, CI): a deterministic OpenAI-compatible stub (benchmarks/servers/chat_server.py) is the configurable
    endpoint, so each function's SQL->HTTP->parse contract is exercised with zero external calls / cost.
  - REAL (opt-in, `-k real`): runs against OpenAI only when THEODB_LLM_ENDPOINT + OPENAI_API_KEY are set
    (key from the gitignored .env); asserts shape/polarity, never exact text (LLM non-determinism). Skips
@@ -37,7 +37,7 @@ def _free_port() -> int:
 def chat_server():
     port = _free_port()
     proc = subprocess.Popen(
-        [sys.executable, os.path.join(_REPO, "tools", "chat_server.py"),
+        [sys.executable, os.path.join(_REPO, "benchmarks", "servers", "chat_server.py"),
          "--host", "0.0.0.0", "--port", str(port)],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )

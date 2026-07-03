@@ -9,7 +9,7 @@
 ## Method (reproducible)
 
 - **Same container, same PostgreSQL, same endpoint, same stub** for both arms — the ONLY variable is the function language (Rust `ai._chat` vs plpython3u `ai._chat_py`, the latter recreated for the bench).
-- **Endpoint:** the deterministic local stub `tools/chat_server.py`, reached via `host.docker.internal`.
+- **Endpoint:** the deterministic local stub `benchmarks/servers/chat_server.py`, reached via `host.docker.internal`.
 - **Workload:** 100 serial calls/run, **5 runs**, 5 warmup discarded. Per-call latency = run wall-clock / n. Reported as mean ± std dev (population) over the runs.
 - **Harness:** `benchmarks/bench_chat.py`.
 - **Hardware:** 13th Gen Intel(R) Core(TM) i7-1355U. **PostgreSQL:** PostgreSQL 17.10 (Debian, pgdg). **Toolchain:** Rust 1.91, pgrx 0.16.1, minreq 2 (https-native/OpenSSL).

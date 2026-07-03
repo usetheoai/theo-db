@@ -12,7 +12,7 @@
 - Both arms run as a SINGLE SQL statement so client/parse overhead is identical:
   - per-row: `SELECT theodb.embed(v) FROM unnest($1::text[]) AS v` (N round-trips)
   - batch:   `SELECT theodb.embed_batch($1::text[])` (1 round-trip)
-- **Endpoint:** the deterministic local stub `tools/embedding_server.py` (BAAI/bge-small-en-v1.5, 384-dim, ONNX/fastembed), reached via `host.docker.internal`.
+- **Endpoint:** the deterministic local stub `benchmarks/servers/embedding_server.py` (BAAI/bge-small-en-v1.5, 384-dim, ONNX/fastembed), reached via `host.docker.internal`.
 - **Workload:** distinct inputs per N; **5 runs** per arm, 2 warmup discarded. Reported as mean ± std dev (population) of the per-statement wall-clock.
 - **Harness:** `benchmarks/bench_embed_batch.py` (`bench_n1(conn, sizes, runs)`).
 - **Hardware:** 13th Gen Intel(R) Core(TM) i7-1355U. **PostgreSQL:** PostgreSQL 17.10 (Debian, pgdg). **Toolchain:** Rust 1.91, pgrx 0.16.1, minreq 2 (https-native/OpenSSL).
@@ -23,7 +23,7 @@
 docker build -t theo-db:audit-rem .
 docker run -d --name theodb-audit-rem --add-host=host.docker.internal:host-gateway \
   -e POSTGRES_PASSWORD=postgres -e POSTGRES_HOST_AUTH_METHOD=trust -p 55432:5432 theo-db:audit-rem
-python3 tools/embedding_server.py --host 0.0.0.0 --port 8099 --model BAAI/bge-small-en-v1.5 &
+python3 benchmarks/servers/embedding_server.py --host 0.0.0.0 --port 8099 --model BAAI/bge-small-en-v1.5 &
 PGHOST=localhost PGPORT=55432 python3 benchmarks/bench_embed_batch.py \
   --endpoint http://host.docker.internal:8099/v1/embeddings \
   --report docs/benchmarks/audit-remediation-embed-batch.md

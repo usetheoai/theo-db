@@ -7,7 +7,7 @@
 `ai.nl_to_sql` was ported from `plpython3u` to Rust (theodb_rs, M19). This is a head-to-head of the Rust
 implementation against the **exact retired plpython3u body** (git `6c1dddb:sql/60-theodb-nl.sql`, renamed
 `ai.nl_to_sql_plpy`). Both call the **same** Rust `ai._chat` against the **same** deterministic chat stub
-(`tools/chat_server.py`), so the LLM round-trip is held constant and the measured delta isolates the
+(`benchmarks/servers/chat_server.py`), so the LLM round-trip is held constant and the measured delta isolates the
 **validation glue**: Rust stdlib token-scan + `Spi` EXPLAIN vs plpython3u `re` + `plpy` EXPLAIN.
 
 `ai.nl_to_sql` end-to-end latency is dominated by the model call (I/O-bound) — like per-row `embed`, the
@@ -28,7 +28,7 @@ honest expectation is parity, and the gate is **no-regression**, not a speedup c
 
 1. Build the M19 image (`docker build -t theo-db:m19 .`) and start it with `--add-host=host.docker.internal:host-gateway`.
 2. A throwaway DB installs `theodb_rs` (Rust `ai.nl_to_sql` + `ai._chat`) + `plpython3u` + the baseline `ai.nl_to_sql_plpy`.
-3. `theodb.llm_endpoint` points at the local `tools/chat_server.py` stub (deterministic benign SELECT).
+3. `theodb.llm_endpoint` points at the local `benchmarks/servers/chat_server.py` stub (deterministic benign SELECT).
 4. Warmup 5 calls/impl (excluded); then 5 runs × 20 sequential calls/impl, timed client-side
    (`time.perf_counter` around `SELECT ai.<fn>(question, allowed)`), same question + allowlist for both.
 5. Report mean ± population-std of per-run means + p95 over all samples.

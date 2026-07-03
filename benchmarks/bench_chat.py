@@ -3,7 +3,7 @@
 Measurement-first (ADR 0002 / `public-copy.md`): reports the measured numbers ONLY — no performance claim.
 `ai._chat` is I/O-bound (the chat endpoint dominates wall-clock), so the honest expected result is "no
 latency regression" from the plpython3u→Rust rewrite, NOT a speedup. The SAME deterministic chat stub
-(`tools/chat_server.py`) serves both arms, so the comparison is apples-to-apples in ONE container.
+(`benchmarks/servers/chat_server.py`) serves both arms, so the comparison is apples-to-apples in ONE container.
 
 The plpython3u baseline `ai._chat_py` is (re)created here for the comparison only (the shipped `ai._chat` is
 Rust after M18) — minimal, no retry, same request/parse shape as the historical plpython3u `ai._chat`.
@@ -88,7 +88,7 @@ def _render_report(rust: dict, py: dict, meta: dict) -> str:
         "",
         "- **Same container, same PostgreSQL, same endpoint, same stub** for both arms — the ONLY variable is "
         "the function language (Rust `ai._chat` vs plpython3u `ai._chat_py`, the latter recreated for the bench).",
-        "- **Endpoint:** the deterministic local stub `tools/chat_server.py`, reached via `host.docker.internal`.",
+        "- **Endpoint:** the deterministic local stub `benchmarks/servers/chat_server.py`, reached via `host.docker.internal`.",
         f"- **Workload:** {rust['n']} serial calls/run, **{rust['runs']} runs**, {meta['warmup']} warmup discarded. "
         "Per-call latency = run wall-clock / n. Reported as mean ± std dev (population) over the runs.",
         "- **Harness:** `benchmarks/bench_chat.py`.",

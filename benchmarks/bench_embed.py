@@ -3,7 +3,7 @@
 Measurement-first (ADR 0002 / `.claude/rules/public-copy.md`): this harness reports the measured
 numbers ONLY — it makes no performance claim. `theodb.embed` is **I/O-bound** (the embedding endpoint
 dominates wall-clock), so the honest expected result is "no latency regression" from the plpython3u→Rust
-rewrite, NOT a speedup. The same deterministic stub (`tools/embedding_server.py`) is used for both
+rewrite, NOT a speedup. The same deterministic stub (`benchmarks/servers/embedding_server.py`) is used for both
 implementations so the comparison is apples-to-apples.
 
 Usage (against a running TheoDB container with theodb.embedding_endpoint reachable):

@@ -19,7 +19,7 @@ rewriting `theodb.embed` from plpython3u to Rust (pgrx) does **not regress laten
 - Both functions installed in one `theo-db:m17` container:
   - `theodb.embed` — the Rust impl (theodb_rs extension; `theodb.embed` SQL wrapper → `theodb_rs._embed_text`, Rust/pgrx).
   - `theodb.embed_py` — the previous plpython3u impl (created from the pre-M17 `sql/30-theodb-embed.sql` body, renamed).
-- **Endpoint:** the deterministic local stub `tools/embedding_server.py` (real model BAAI/bge-small-en-v1.5,
+- **Endpoint:** the deterministic local stub `benchmarks/servers/embedding_server.py` (real model BAAI/bge-small-en-v1.5,
   384-dim, ONNX/fastembed), reached via `host.docker.internal`.
 - **Workload:** 200 serial `SELECT <func>('benchmark text')` calls per run, **5 runs**, 5 warmup calls
   discarded. Per-call latency = run wall-clock / 200. Reported as mean ± std dev (population) over the 5 runs.
@@ -36,7 +36,7 @@ docker run -d --name theodb-m17-test --add-host=host.docker.internal:host-gatewa
   -e POSTGRES_PASSWORD=postgres -e POSTGRES_HOST_AUTH_METHOD=trust -p 55432:5432 theo-db:m17
 
 # 2. start the deterministic embedding stub on the host
-python3 tools/embedding_server.py --host 0.0.0.0 --port 8099 --model BAAI/bge-small-en-v1.5 &
+python3 benchmarks/servers/embedding_server.py --host 0.0.0.0 --port 8099 --model BAAI/bge-small-en-v1.5 &
 
 # 3. create the plpython3u baseline (theodb.embed_py) in the container from the pre-M17 sql/30 body,
 #    then run benchmarks/bench_embed.py against theodb.embed (Rust) and theodb.embed_py (plpython3u)

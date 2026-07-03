@@ -5,7 +5,7 @@ stub (NOT a model) so each function's SQL->HTTP->parse contract is tested determ
 (no external API, no cost, no flakiness). The same wire contract serves a real cloud provider in
 production; the real end-to-end is exercised by an opt-in test against OpenAI (key from gitignored .env).
 
-Run: ``python tools/chat_server.py --port 8099``
+Run: ``python benchmarks/servers/chat_server.py --port 8099``
 Endpoint: ``POST /v1/chat/completions``  body ``{"model": "...", "messages": [{"role","content"}]}``
 Response (OpenAI shape): ``{"choices":[{"message":{"role":"assistant","content":"..."}}], ...}``
 
