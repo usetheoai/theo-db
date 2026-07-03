@@ -27,8 +27,53 @@ impl HnswIndex {
         metric: Metric,
         seed: u64,
     ) -> Self {
+        let n = corpus.len();
         let mut rng = Rng::new(seed);
         let ml = 1.0 / (m.max(2) as f64).ln();
+        // Pre-assign every node's level DETERMINISTICALLY (sequential RNG, same order as the old build) so BOTH
+        // the sequential and parallel paths use identical levels — only the parallel LINKING order races (M44 D2).
+        // Cap the layer so a node's neighbor tuple always fits ONE page in the M35 structured layout
+        // (`nbr_size(level)` ≤ BLCKSZ). Real levels are ~ln(n)/ln(m) (≤ ~5 at 1M, m=16); the cap only clamps the
+        // astronomically-rare tail (pgvector caps the same way — `HnswGetMaxLevel`). NOT an algorithm change.
+        let levels: Vec<usize> = (0..n)
+            .map(|_| ((-(rng.next_f64().ln()) * ml) as usize).min(HNSW_MAX_LEVEL))
+            .collect();
+
+        // Small corpora: the unchanged sequential build (deterministic, no thread overhead — the tiny AM test
+        // corpora take this path). Large corpora: the M44 parallel build.
+        if n < crate::ann::hnsw_parallel::PARALLEL_BUILD_THRESHOLD {
+            return Self::build_sequential(corpus, m, ef_construction, metric, &levels);
+        }
+
+        let vectors: Vec<Vec<f32>> = corpus.iter().map(|(_, v)| v.clone()).collect();
+        let ids: Vec<i64> = corpus.iter().map(|(id, _)| *id).collect();
+        let m0 = m * 2;
+        let efc = ef_construction.max(m);
+        let (neighbors, entry, max_level) =
+            crate::ann::hnsw_parallel::build_parallel(&vectors, &levels, m, m0, efc, metric);
+        HnswIndex {
+            metric,
+            m,
+            m0,
+            ef_construction: efc,
+            vectors,
+            ids,
+            levels,
+            neighbors,
+            entry: Some(entry),
+            max_level,
+        }
+    }
+
+    /// The sequential graph build (deterministic given `levels`): insert every node in order into a growing graph.
+    /// Used directly for corpora below `PARALLEL_BUILD_THRESHOLD` and as the reference the parallel path matches.
+    fn build_sequential(
+        corpus: &[(i64, Vec<f32>)],
+        m: usize,
+        ef_construction: usize,
+        metric: Metric,
+        levels: &[usize],
+    ) -> Self {
         let mut idx = HnswIndex {
             metric,
             m,
@@ -41,13 +86,8 @@ impl HnswIndex {
             entry: None,
             max_level: 0,
         };
-        for (id, v) in corpus {
-            // Cap the layer so a node's neighbor tuple always fits ONE page in the M35 structured layout
-            // (`nbr_size(level)` ≤ BLCKSZ). Real levels are ~ln(n)/ln(m) (≤ ~5 at 1M, m=16); the cap only
-            // clamps the astronomically-rare tail, so it is byte-invisible on real corpora (pgvector caps the
-            // same way — `HnswGetMaxLevel`). NOT an algorithm change to the reachable graph.
-            let level = ((-(rng.next_f64().ln()) * ml) as usize).min(HNSW_MAX_LEVEL);
-            idx.insert(*id, v.clone(), level);
+        for (i, (id, v)) in corpus.iter().enumerate() {
+            idx.insert(*id, v.clone(), levels[i]);
         }
         idx
     }
@@ -379,5 +419,63 @@ mod hnsw_persist_tests {
         let mut bad = good.clone();
         bad[0] ^= 0xFF;
         assert!(HnswIndex::from_bytes(&bad).is_err(), "bad magic must Err");
+    }
+
+    // M44 — a random `n`-node corpus (dim 16), deterministic given `seed`, to exercise the PARALLEL build path.
+    fn big_corpus(n: usize, dim: usize, seed: u64) -> Vec<(i64, Vec<f32>)> {
+        let mut r = Rng::new(seed);
+        (0..n)
+            .map(|i| {
+                let v: Vec<f32> = (0..dim).map(|_| (r.next_f64() as f32) * 2.0 - 1.0).collect();
+                (i as i64, v)
+            })
+            .collect()
+    }
+
+    #[pgrx::pg_test]
+    fn hnsw_parallel_build_produces_valid_searchable_graph() {
+        // > PARALLEL_BUILD_THRESHOLD (4096) → the M44 parallel path. Every corpus point must find ITSELF as the
+        // exact nearest (distance 0) → the concurrently-built graph is valid + connected + searchable (a lost
+        // link / deadlock / corruption would fail this or hang).
+        let n = 5000;
+        let c = big_corpus(n, 16, 2026);
+        assert!(n >= crate::ann::hnsw_parallel::PARALLEL_BUILD_THRESHOLD, "corpus must trigger the parallel path");
+        let idx = HnswIndex::build(&c, 16, 64, Metric::L2, 2026);
+        assert_eq!(idx.node_count(), n, "all nodes present");
+        // Sample 20 corpus points; each must be its own top-1 (self-recall).
+        let mut self_hits = 0;
+        for i in (0..n).step_by(n / 20) {
+            let q = &c[i].1;
+            let res = idx.search(q, 1, 64);
+            if res.first().map(|(id, _)| *id) == Some(i as i64) {
+                self_hits += 1;
+            }
+        }
+        assert!(self_hits >= 19, "parallel graph self-recall too low: {self_hits}/20");
+    }
+
+    #[pgrx::pg_test]
+    fn hnsw_parallel_build_recall_reasonable() {
+        // Parallel-built graph recall@10 vs brute-force exact, over a query sample — must be high (the racy build
+        // is recall-EQUIVALENT to sequential, ADR D2). Not identity — a statistical parity gate.
+        let n = 5000;
+        let dim = 16;
+        let c = big_corpus(n, dim, 7);
+        let idx = HnswIndex::build(&c, 16, 64, Metric::L2, 7);
+        let mut r = Rng::new(999);
+        let mut total = 0.0f64;
+        let nq = 30;
+        for _ in 0..nq {
+            let q: Vec<f32> = (0..dim).map(|_| (r.next_f64() as f32) * 2.0 - 1.0).collect();
+            // exact top-10 by brute force
+            let mut exact: Vec<(usize, f64)> =
+                c.iter().enumerate().map(|(j, (_, v))| (j, crate::vec::l2_distance(&q, v))).collect();
+            exact.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+            let gt: std::collections::HashSet<i64> = exact[..10].iter().map(|(j, _)| *j as i64).collect();
+            let got: std::collections::HashSet<i64> = idx.search(&q, 10, 100).iter().map(|(id, _)| *id).collect();
+            total += (gt.intersection(&got).count() as f64) / 10.0;
+        }
+        let recall = total / nq as f64;
+        assert!(recall >= 0.85, "parallel build recall@10 too low: {recall:.3}");
     }
 }

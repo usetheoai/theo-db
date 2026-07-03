@@ -15,6 +15,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 ### Changed
+- M44 (build PARALELO do `theodb_hnsw`, **gated por benchmark A/B**): a construção do grafo in-memory
+  (`ann/hnsw_parallel.rs`, novo) roda concorrente com `std::thread::scope` (borrow do corpus sem Arc; panic
+  re-propaga no join → fail-loud) + `RwLock` por-nó nas listas de vizinhos (deadlock-free: 1 lock por vez).
+  `HnswIndex::build` despacha por tamanho: corpus < 4096 → sequencial (determinístico, testes AM intocados);
+  ≥ → paralelo. **Honestidade (Regra 3):** o build paralelo é NÃO-determinístico (ordem de insert racy → grafo
+  diferente a cada run; nenhum teste de determinismo quebra); recall PARIDADE é o gate. Sem nova dep (std). Motivado
+  pelo M42/M43 (build era o gargalo do carrier; M43 cortou 2.2× via SIMD, paralelismo é o próximo teto).
 
 ### Deprecated
 
