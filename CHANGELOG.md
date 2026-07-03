@@ -20,7 +20,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   via reinterpret f32→bytes) em vez da distância L2 **escalar** — o build fazia bilhões de distâncias escalares em
   128-dim enquanto o scan já era SIMD. Motivado pelo M42 (build 24min@1M é o gargalo do carrier). **Alinha** a
   métrica do build à do scan (ambos SIMD → consistente). **Gate:** recall PARIDADE (não byte-idêntico — FMA arredonda
-  diferente → grafo muda em poucas near-ties). Blueprint: `.claude/knowledge-base/discoveries/blueprints/m43-hnsw-build-qps-blueprint.md`.
+  diferente → grafo muda em poucas near-ties; recall medido idêntico @200k, paridade @1M). O `l2_distance` (paridade
+  pgvector — operadores/scan-rerank/knn) fica intocado; só o build aproximado usa SIMD. Guard `#[cfg(target_endian=
+  "little")]` no reinterpret f32→bytes (fallback escalar em big-endian — achado do review de segurança; x86_64/LE
+  byte-idêntico). A/B rigoroso: build **2.20×** (200±23s→91±3s @200k, 3 samples) / **24min→8.4min @1M**, recall
+  paridade. Blueprint: `.claude/knowledge-base/discoveries/blueprints/m43-hnsw-build-qps-blueprint.md`.
 
 ### Deprecated
 
