@@ -19,6 +19,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Deprecated
 
 ### Removed
+
+### Fixed
+
+### Security
+
+## [0.35.0] - 2026-07-03
+
+### Removed
 - **Control-plane / plataforma removidos deste repositório — o foco é o banco de dados (engine + extensão).**
   Apagados: o módulo Go `operator/` (operador K8s + CLI + gateway + MCP server + read-pool + observabilidade —
   todo o código Go do control-plane) e `ha/` (Patroni + pgBackRest + smokes de failover/PITR). Deploy,
@@ -30,10 +38,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   `docs/conselho-tecnico-theodb.md` apagados. **Nota:** ADR `0006` (estratégia "Rust/Go") é LOCKED — sua porção
   Go fica pendente de um ADR de superseção formal (sign-off do owner). Entradas de CHANGELOG já released
   (M23/M4) permanecem intocadas (Regra 6 — histórico).
-
-### Fixed
-
-### Security
 
 ## [0.34.0] - 2026-07-03
 
