@@ -15,6 +15,18 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 ### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.33.1] - 2026-07-03
+
+### Changed
 - Correção de honestidade em `docs/features/` (M37): 2 páginas estavam marcadas "📋 planejado" quando a feature
   **já está entregue e testada** — a auditoria anterior de features foi incompleta (grepou só o Rust
   `theodb_rs/src/`, perdeu a implementação em `sql/50-theodb-ai.sql`). Corrigidas para "✅ Entregue" com `file:line`
@@ -33,14 +45,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   (a) o SBQ regride recall (0.77–0.95 < 1.0 em SIFT real) e (b) a cópia **não é** o gargalo end-to-end (o profiler
   enganou via overhead de instrumentação) — então NÃO há win de QPS a reivindicar. O lever vetorial real restante
   é PQ (algorítmico, milestone futuro). Evidência: `docs/benchmarks/m38-copy-free-scan.{md,json}`.
-
-### Deprecated
-
-### Removed
-
-### Fixed
-
-### Security
 
 ## [0.33.0] - 2026-07-02
 
