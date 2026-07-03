@@ -1,0 +1,232 @@
+{
+  "params": {
+    "n": 1000000,
+    "dim": 128,
+    "nq": 500,
+    "runs": 3,
+    "ef_grid": [
+      40,
+      64,
+      100,
+      200,
+      400
+    ],
+    "seed": 2026,
+    "k": 10,
+    "metric": "l2",
+    "dataset": "sift-128-euclidean.hdf5",
+    "build_params": "m=16, ef_construction=64, max_parallel_maintenance_workers=0 (matched), maintenance_work_mem=2GB (pgvector only; theodb builds in Rust memory)"
+  },
+  "build_s": {
+    "theodb_hnsw": 271.3,
+    "pgvector_hnsw": 466.6
+  },
+  "frontier": {
+    "theodb_hnsw": [
+      {
+        "ef": 40,
+        "recall": 0.9278,
+        "qps_mean": 294.0,
+        "qps_std": 15.5,
+        "qps_runs": [
+          299.4,
+          309.8,
+          272.9
+        ],
+        "nq": 500,
+        "build_s": 271.3
+      },
+      {
+        "ef": 64,
+        "recall": 0.9646,
+        "qps_mean": 178.1,
+        "qps_std": 9.8,
+        "qps_runs": [
+          172.8,
+          169.8,
+          191.9
+        ],
+        "nq": 500,
+        "build_s": 271.3
+      },
+      {
+        "ef": 100,
+        "recall": 0.9832,
+        "qps_mean": 139.9,
+        "qps_std": 2.8,
+        "qps_runs": [
+          141.7,
+          141.9,
+          135.9
+        ],
+        "nq": 500,
+        "build_s": 271.3
+      },
+      {
+        "ef": 200,
+        "recall": 0.9932,
+        "qps_mean": 43.5,
+        "qps_std": 19.1,
+        "qps_runs": [
+          61.6,
+          17.1,
+          51.9
+        ],
+        "nq": 500,
+        "build_s": 271.3
+      },
+      {
+        "ef": 400,
+        "recall": 0.9968,
+        "qps_mean": 44.8,
+        "qps_std": 2.8,
+        "qps_runs": [
+          41.2,
+          45.0,
+          48.1
+        ],
+        "nq": 500,
+        "build_s": 271.3
+      }
+    ],
+    "pgvector_hnsw": [
+      {
+        "ef": 40,
+        "recall": 0.936,
+        "qps_mean": 221.3,
+        "qps_std": 9.3,
+        "qps_runs": [
+          208.1,
+          227.8,
+          228.0
+        ],
+        "nq": 500,
+        "build_s": 466.6
+      },
+      {
+        "ef": 64,
+        "recall": 0.9678,
+        "qps_mean": 160.9,
+        "qps_std": 5.0,
+        "qps_runs": [
+          158.5,
+          167.9,
+          156.3
+        ],
+        "nq": 500,
+        "build_s": 466.6
+      },
+      {
+        "ef": 100,
+        "recall": 0.9866,
+        "qps_mean": 108.6,
+        "qps_std": 1.6,
+        "qps_runs": [
+          109.9,
+          106.4,
+          109.6
+        ],
+        "nq": 500,
+        "build_s": 466.6
+      },
+      {
+        "ef": 200,
+        "recall": 0.9956,
+        "qps_mean": 62.8,
+        "qps_std": 1.1,
+        "qps_runs": [
+          62.0,
+          62.1,
+          64.3
+        ],
+        "nq": 500,
+        "build_s": 466.6
+      },
+      {
+        "ef": 400,
+        "recall": 0.9986,
+        "qps_mean": 13.9,
+        "qps_std": 8.6,
+        "qps_runs": [
+          9.1,
+          6.7,
+          26.0
+        ],
+        "nq": 500,
+        "build_s": 466.6
+      }
+    ]
+  },
+  "verdict": {
+    "shared_levels": [
+      0.936,
+      0.9646,
+      0.9678,
+      0.9832,
+      0.9866,
+      0.9932,
+      0.9956,
+      0.9968
+    ],
+    "margins": [
+      {
+        "recall": 0.936,
+        "margin": 1.212,
+        "qps_theodb": 268.2,
+        "qps_pgvector": 221.3,
+        "effect_gt_variance": true
+      },
+      {
+        "recall": 0.9646,
+        "margin": 1.067,
+        "qps_theodb": 178.1,
+        "qps_pgvector": 167.0,
+        "effect_gt_variance": false
+      },
+      {
+        "recall": 0.9678,
+        "margin": 1.066,
+        "qps_theodb": 171.5,
+        "qps_pgvector": 160.9,
+        "effect_gt_variance": false
+      },
+      {
+        "recall": 0.9832,
+        "margin": 1.185,
+        "qps_theodb": 139.9,
+        "qps_pgvector": 118.1,
+        "effect_gt_variance": true
+      },
+      {
+        "recall": 0.9866,
+        "margin": 0.986,
+        "qps_theodb": 107.1,
+        "qps_pgvector": 108.6,
+        "effect_gt_variance": false
+      },
+      {
+        "recall": 0.9932,
+        "margin": 0.58,
+        "qps_theodb": 43.5,
+        "qps_pgvector": 75.0,
+        "effect_gt_variance": true
+      },
+      {
+        "recall": 0.9956,
+        "margin": 0.706,
+        "qps_theodb": 44.4,
+        "qps_pgvector": 62.8,
+        "effect_gt_variance": true
+      },
+      {
+        "recall": 0.9968,
+        "margin": 1.036,
+        "qps_theodb": 44.8,
+        "qps_pgvector": 43.2,
+        "effect_gt_variance": false
+      }
+    ],
+    "verdict": "PARITY",
+    "reason": "effect>variance gate over shared recall levels"
+  }
+}
