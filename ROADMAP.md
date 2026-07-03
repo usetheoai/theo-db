@@ -513,6 +513,29 @@ provada por A/B benchmark. Código de produto (Rust) — candidato a release.
 
 ---
 
+### M42 — [x] Veredito de carrier em SIFT1M real (theodb_hnsw M41 vence — 1º sinal de superioridade vetorial)
+
+**Outcome (WIN honesto em dados reais — inverte o synthetic do M40):** rodamos o head-to-head 4-way em **SIFT1M
+real (1M×128, GT exato)** na imagem M41-otimizada. O M40 (synthetic random-gaussian) dava vitória ao ivfflat; em
+dados **estruturados reais o grafo vence decisivamente**, exatamente como o caveat honesto do M40 previa. Sem
+código novo (harness `run_m32_sift1m.py` existente). Artefato: `docs/benchmarks/sift1m-carrier-verdict.md` +
+`m32-scale-sift1m.json`.
+
+**Medição (best-of-3, GT exato):** `theodb_hnsw` 0.96 recall @ **278 QPS** vs `theodb_ivfflat` 0.98 @ **28.7 QPS**
+→ **~10×**. E vs o **pgvector hnsw** (mesmo framework): ~1.7–2.8× mais rápido a recall igual (ef=40: 0.941/230 vs
+0.926/133; ef=100: 0.987/143 vs 0.977/74). Curva Pareto completa no doc.
+
+**Caveats honestos:** build do theodb_hnsw é lento (24min@1M — M41 otimizou o scan, não o build; próximo alvo);
+QPS best-of-N single-machine (direção inequívoca, mas margem vs pgvector precisa mean±std + repro independente
+antes de claim público — `public-copy.md`); amostra de 200 queries.
+
+**Próximo:** (1) otimização de build-time do theodb_hnsw; (2) mean±std + repro do margin vs pgvector para claim.
+
+**Dependencies:** M35 (theodb_hnsw), M41 (scan otimizado), M40 (que pediu SIFT1M). **Resultado:** 1º sinal real de
+superioridade do carrier próprio vs a baseline SOTA permissiva (pgvector hnsw); sem código novo.
+
+---
+
 ## Sequência e paralelismo
 
 ```
