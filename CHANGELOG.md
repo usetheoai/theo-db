@@ -15,12 +15,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 ### Changed
-- M42 (veredito de carrier em **SIFT1M real** — 1º sinal de superioridade vetorial, sem código novo): head-to-head
-  4-way em SIFT1M (1M×128, GT exato) na imagem M41. **theodb_hnsw vence o theodb_ivfflat ~10×** (0.96 recall @ 278
-  QPS vs 0.98 @ 28.7) e é **~1.7–2.8× mais rápido que o pgvector hnsw** a recall igual — invertendo o veredito
-  synthetic do M40 (o grafo vence em dados estruturados reais, como o caveat honesto previa). **Caveats:** build do
-  theodb_hnsw lento (24min@1M, próximo alvo); QPS best-of-N single-machine (margem vs pgvector precisa mean±std +
-  repro antes de claim público, `public-copy.md`). `docs/benchmarks/sift1m-carrier-verdict.md` + `m32-scale-sift1m.json`.
 
 ### Deprecated
 
@@ -29,6 +23,16 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 ### Security
+
+## [0.33.3] - 2026-07-03
+
+### Changed
+- M42 (veredito de carrier em **SIFT1M real** — 1º sinal de superioridade vetorial, sem código novo): head-to-head
+  4-way em SIFT1M (1M×128, GT exato) na imagem M41. **theodb_hnsw vence o theodb_ivfflat ~10×** (0.96 recall @ 278
+  QPS vs 0.98 @ 28.7) e é **~1.7–2.8× mais rápido que o pgvector hnsw** a recall igual — invertendo o veredito
+  synthetic do M40 (o grafo vence em dados estruturados reais, como o caveat honesto previa). **Caveats:** build do
+  theodb_hnsw lento (24min@1M, próximo alvo); QPS best-of-N single-machine (margem vs pgvector precisa mean±std +
+  repro antes de claim público, `public-copy.md`). `docs/benchmarks/sift1m-carrier-verdict.md` + `m32-scale-sift1m.json`.
 
 ## [0.33.2] - 2026-07-03
 
