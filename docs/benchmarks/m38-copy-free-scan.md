@@ -34,10 +34,12 @@ end-to-end NÃO mostrou win confiável:**
 | 100 | 1.16 / 0.94 / 0.94 |
 | 200 | 0.92 |
 
-A **mesma comparação varia 50% entre runs** — o efeito é menor que a variância de medição. **Lição:** a atribuição
-do profiler estava **inflada pelo overhead da própria instrumentação** (`Instant::now()` — ~400 syscalls/query a
-probes=50), fazendo `reads` parecer 44% quando o custo real da cópia é pequeno. No end-to-end real, a cópia **não
-é** o gargalo. Fazer a Phase 2 (score-off-page, eliminar a outra metade da cópia) daria o mesmo resultado.
+A **mesma comparação varia 50% entre runs** — o efeito é menor que a variância de medição. **Lição (hipótese, não
+medida):** a atribuição do profiler provavelmente estava inflada pelo overhead da própria instrumentação (as
+chamadas `Instant::now()` por-lista somadas em `reads`), fazendo `reads` parecer 44% quando o custo real da cópia é
+pequeno — o que explica por que eliminar a cópia não moveu o end-to-end. Independente da causa exata, o **fato
+medido** é claro: no end-to-end real, a cópia **não é** o gargalo. Fazer a Phase 2 (score-off-page, eliminar a
+outra metade da cópia) daria o mesmo resultado.
 
 ## F3 — byproduct: a cópia dupla era desperdício (mantido como code-quality) ✅
 
