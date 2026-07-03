@@ -536,6 +536,25 @@ superioridade do carrier próprio vs a baseline SOTA permissiva (pgvector hnsw);
 
 ---
 
+### M43 — [x] Otimização de build-time do theodb_hnsw (~2.2–2.9× via SIMD, recall paridade)
+
+**Outcome (WIN honesto):** o M42 expôs o build do theodb_hnsw como gargalo (24min@1M). O discover achou a causa: o
+build in-memory (`ann/hnsw.rs`) usava distância L2 **escalar** enquanto o scan já era **SIMD** — bilhões de
+distâncias escalares em 128-dim. A correção adiciona `crate::vec::l2_distance_simd` (reusa o kernel AVX2+FMA M31b
+via reinterpret f32→bytes) e roteia o build para ele (`Metric::dist_simd`), alinhando build e scan ao mesmo SIMD.
+Artefato: `docs/benchmarks/m43-hnsw-build.md`; blueprint: `m43-hnsw-build-qps-blueprint.md`.
+
+**Medição A/B rigorosa (3 samples @ 200k, mean±std):** build **2.20×** (m41 200±23s vs m43 91±3s, bandas
+separadas), **recall IDÊNTICO** (0.9825=0.9825). @ **1M**: 24min → **8.4min** (~2.86× vs baseline M42), recall
+paridade 0.9725. **Gate:** 8/8 `test_index_am.py` verdes.
+
+**Nota:** `l2_distance` (paridade pgvector, operadores/scan-rerank/knn) intocado — só o build aproximado usa SIMD.
+
+**Dependencies:** M35 (theodb_hnsw), M41 (kernel SIMD do scan), M42 (que mediu o gargalo de build). **Resultado:**
+build-time real cortado ~2.2–2.9×, recall-preserving; o carrier próprio agora é competitivo em build, scan E recall×QPS.
+
+---
+
 ## Sequência e paralelismo
 
 ```

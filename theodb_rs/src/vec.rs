@@ -160,6 +160,31 @@ mod simd_x86 {
     }
 }
 
+/// L2 distance between two f32 slices, using the SAME AVX2+FMA kernel as the scan (M43). Reuses `l2_dist_from_bytes`
+/// by reinterpreting `b`'s f32 slice as its own little-endian bytes — a zero-copy cast (an f32 slice IS its bytes on
+/// x86_64 LE). Used by the `theodb_hnsw` BUILD (billions of 128-dim distances) to replace the scalar `l2_distance`.
+/// NOT bit-identical to `l2_distance` (SIMD FMA rounds differently) — callers that need exact pgvector parity
+/// (operators, scan rerank, knn) MUST keep using `l2_distance`; this is for the approximate graph build/search where
+/// the recall gate is PARITY, not identity. Aligns the build's metric with the scan's (both SIMD → consistent).
+pub(crate) fn l2_distance_simd(a: &[f32], b: &[f32]) -> f64 {
+    check_dims(a, b);
+    // The reinterpret feeds `b`'s NATIVE-endian bytes to `l2_dist_from_bytes`, which reloads them as f32 either via
+    // AVX `_mm256_loadu_ps` (native f32) or the scalar `f32::from_le_bytes`. Both are only value-preserving when
+    // native == little-endian. Guard it: on big-endian the reinterpret would corrupt values, so fall back to the
+    // exact scalar `l2_distance` (correctness over the SIMD win on a target TheoDB does not ship — M43 review finding).
+    #[cfg(target_endian = "little")]
+    {
+        // SAFETY: `b` is a valid `&[f32]`; its bytes are exactly `b.len()*4` contiguous LE bytes. The reinterpret is
+        // read-only and lives only for the `l2_dist_from_bytes` call, which re-asserts `raw.len() == a.len()*4`.
+        let b_bytes = unsafe { std::slice::from_raw_parts(b.as_ptr() as *const u8, b.len() * 4) };
+        l2_dist_from_bytes(a, b_bytes)
+    }
+    #[cfg(not(target_endian = "little"))]
+    {
+        l2_distance(a, b)
+    }
+}
+
 /// L2 distance between `query` and a candidate stored as little-endian f32 bytes `raw` — the SCAN hot-path entry
 /// (M31b). Dispatches to AVX2+FMA when available (cached), else the scalar fallback. The length invariant
 /// `raw.len() == query.len()*4` is enforced ALWAYS (not just in debug) so the `unsafe` AVX2 path can never OOB in

@@ -73,6 +73,18 @@ impl Metric {
             Metric::Ip => -crate::vec::inner_product(a, b),
         }
     }
+
+    /// M43 — like [`dist`] but routes L2 to the AVX2+FMA kernel (`l2_distance_simd`) for the `theodb_hnsw`
+    /// in-memory build/search hot path (billions of 128-dim distances). NOT bit-identical to `dist` for L2 (SIMD
+    /// FMA rounding) → the graph may differ in a few near-tie selections; the recall gate is PARITY. Cosine/Ip are
+    /// unchanged (no SIMD kernel yet; the persisted AM is L2-only per ADR 0010, so those paths are build-inert).
+    pub(crate) fn dist_simd(self, a: &[f32], b: &[f32]) -> f64 {
+        match self {
+            Metric::L2 => crate::vec::l2_distance_simd(a, b),
+            Metric::Cosine => crate::vec::cosine_distance(a, b),
+            Metric::Ip => -crate::vec::inner_product(a, b),
+        }
+    }
 }
 
 /// Seeded SplitMix64 PRNG — std-only, deterministic (ADR D3). NOT cryptographic; used only for HNSW layer
