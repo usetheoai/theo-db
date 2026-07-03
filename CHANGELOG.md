@@ -15,6 +15,18 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 ### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.33.5] - 2026-07-03
+
+### Changed
 - M44 (build PARALELO do `theodb_hnsw`, **gated por benchmark A/B**): a construção do grafo in-memory
   (`ann/hnsw_parallel.rs`, novo) roda concorrente com `std::thread::scope` (borrow do corpus sem Arc; panic
   re-propaga no join → fail-loud) + `RwLock` por-nó nas listas de vizinhos (deadlock-free: 1 lock por vez).
@@ -26,14 +38,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   (Δ+0.0055). Review de concorrência: SOUND (race-free/deadlock-free/panic-safe por construção, zero unsafe); 1
   achado LOW (back-link lost-update dentro do envelope racy aceito, recall verde) documentado no código, não
   corrigido (YAGNI). Lineage do build: 24min→8.4min→4.3min.
-
-### Deprecated
-
-### Removed
-
-### Fixed
-
-### Security
 
 ## [0.33.4] - 2026-07-03
 
