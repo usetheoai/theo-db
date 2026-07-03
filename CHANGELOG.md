@@ -13,6 +13,20 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.34.0] - 2026-07-03
+
+### Added
 - M45 (medição RIGOROSA de superioridade vetorial — **mean±std recall×QPS Pareto** de `theodb_hnsw` vs
   `pgvector hnsw` em SIFT1M, **measurement-first honesto**): harness `benchmarks/run_m45_pareto.py`
   (+ lógica pura testada `m45_pareto.py`: interpolação de QPS a recall igual + veredito
@@ -28,16 +42,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   `public-copy.md` §4 (artefato reproduzível); metade 2 (reprodução independente) fica ABERTA. Fecha o DoD
   aberto do M32 (tabela mean±std ≥3 runs). Artefato: `docs/benchmarks/m45-pareto-sift1m.{md,json}`.
   Zero dependência nova; reusa `theodb_bench.{dataset,db,recall}`.
-
-### Changed
-
-### Deprecated
-
-### Removed
-
-### Fixed
-
-### Security
 
 ## [0.33.5] - 2026-07-03
 
