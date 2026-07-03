@@ -24,6 +24,25 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.34.0] - 2026-07-03
+
+### Added
+- M45 (medição RIGOROSA de superioridade vetorial — **mean±std recall×QPS Pareto** de `theodb_hnsw` vs
+  `pgvector hnsw` em SIFT1M, **measurement-first honesto**): harness `benchmarks/run_m45_pareto.py`
+  (+ lógica pura testada `m45_pareto.py`: interpolação de QPS a recall igual + veredito
+  `SUPERIOR`/`PARITY`/`INFERIOR` com gate efeito>variância) constrói os DOIS índices-AM com build params
+  casados (m=16, ef_construction=64, single-thread, `maintenance_work_mem` justo ao pgvector), faz sweep do
+  MESMO grid `ef_search` nos dois (GUC de sessão, sem rebuild), roda ≥3 passes cronometrados por ponto →
+  **mean±std** QPS + recall vs GT exato, e computa a margem a recall igual por interpolação de Pareto.
+  **Veredito honesto: `PARITY`** — o *sinal* de superioridade do M42 (~1.7–2.8×, best-of-N/200-queries)
+  **NÃO se reproduz** sob rigor: os dois frontiers se entrelaçam (theodb mais rápido a recall baixo-médio,
+  pgvector a recall alto), dentro do ruído run-a-run (dois runs deram INFERIOR→PARITY). **O claim de
+  superioridade do M42 é retratado**; o North Star P0 (superioridade vetorial vs pgvector) está em PARIDADE,
+  não superioridade — próximo lever é latência+variância do scan theodb. Entrega a metade 1 de
+  `public-copy.md` §4 (artefato reproduzível); metade 2 (reprodução independente) fica ABERTA. Fecha o DoD
+  aberto do M32 (tabela mean±std ≥3 runs). Artefato: `docs/benchmarks/m45-pareto-sift1m.{md,json}`.
+  Zero dependência nova; reusa `theodb_bench.{dataset,db,recall}`.
+
 ## [0.33.5] - 2026-07-03
 
 ### Changed

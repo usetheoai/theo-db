@@ -515,6 +515,11 @@ provada por A/B benchmark. Código de produto (Rust) — candidato a release.
 
 ### M42 — [x] Veredito de carrier em SIFT1M real (theodb_hnsw M41 vence — 1º sinal de superioridade vetorial)
 
+> **⚠️ Retratado por M45 (2026-07-03):** o "~1.7–2.8× mais rápido que pgvector hnsw" abaixo era best-of-N +
+> 200 queries + cache quente e **NÃO se reproduz** sob mean±std rigoroso (500 queries, ≥3 runs, GT exato) —
+> veredito real **PARITY** (`docs/benchmarks/m45-pareto-sift1m.md`). theodb_hnsw é **competitivo, não
+> superior** vs pgvector hnsw a 1M. Não citar os multiplicadores abaixo como claim.
+
 **Outcome (WIN honesto em dados reais — inverte o synthetic do M40):** rodamos o head-to-head 4-way em **SIFT1M
 real (1M×128, GT exato)** na imagem M41-otimizada. O M40 (synthetic random-gaussian) dava vitória ao ivfflat; em
 dados **estruturados reais o grafo vence decisivamente**, exatamente como o caveat honesto do M40 previa. Sem

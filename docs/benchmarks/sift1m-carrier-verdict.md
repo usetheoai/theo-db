@@ -1,5 +1,12 @@
 # SIFT1M carrier verdict — theodb_hnsw (M41-optimized) wins on real structured data
 
+> **⚠️ RETRACTED (2026-07-03, by M45).** The "~1.7–2.8× superiority vs pgvector hnsw" signal below did
+> **NOT** survive rigorous mean±std measurement. Under 500 queries × ≥3 timed runs with exact GT
+> (`docs/benchmarks/m45-pareto-sift1m.md`), the verdict is **PARITY** — the two frontiers interleave within
+> run-to-run noise (two runs gave INFERIOR→PARITY). This page's superiority claim was a best-of-N +
+> 200-query + warm-cache artifact and is superseded by M45. theodb_hnsw is **competitive, not superior**,
+> vs pgvector hnsw at 1M. Kept for provenance; **do not cite the multipliers below as a claim.**
+
 **Date:** 2026-07-03
 **Verdict:** **On real SIFT1M, `theodb_hnsw` (M41-optimized scan) DECISIVELY beats `theodb_ivfflat` (~10× QPS at
 comparable recall) AND is competitive-to-superior vs pgvector's own `hnsw` (~1.7–2.8× QPS at matched recall).**
