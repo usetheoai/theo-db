@@ -4,9 +4,8 @@
 
 TheoDB é um banco de dados open-source e 100% compatível com PostgreSQL, empacotado como uma
 edição única para download que roda no seu laptop, on-premises, na borda, em qualquer nuvem,
-em Kubernetes ou bare metal. Num só pacote você tem busca vetorial para aplicações de IA,
-analytics colunar sobre dados transacionais vivos e as ferramentas de operação que normalmente
-exigem montagem manual — sem licença por vCPU e sem lock-in.
+em Kubernetes ou bare metal. Num só pacote você tem busca vetorial para aplicações de IA
+e analytics colunar sobre dados transacionais vivos — sem licença por vCPU e sem lock-in.
 
 > ⚠️ **Status:** projeto em fase inicial de design (Draft v0.1). Ainda não há release.
 > O documento de produto está em [`PRD.md`](./PRD.md).
@@ -60,7 +59,7 @@ em conjunto:
 
 ```
 TheoDB = PostgreSQL (upstream) + pgvector customizado + camada columnar
-         + HA/replicação + integração de IA/ML + tooling (operador, CLI, MCP, migração)
+         + integração de IA/ML + tooling (MCP, migração)
          empacotado como uma imagem única que roda em qualquer lugar
 ```
 
@@ -104,8 +103,6 @@ Passo a passo das 12 capacidades em [`docs/quickstart.md`](./docs/quickstart.md)
 - [ ] **M1 — Core + empacotamento.** Distribuição PostgreSQL-compatível em imagem container, extensões pré-instaladas, suíte de compatibilidade passando.
 - [ ] **M2 — Vetorial / IA (pilar killer).** pgvector customizado com índice ANN avançado + geração de embeddings via SQL. *(MVP candidato)*
 - [ ] **M3 — Migração mínima.** Import/export e caminho de entrada a partir do PostgreSQL vanilla.
-- [ ] **M4 — Operação básica.** Alta disponibilidade (failover automático), backup contínuo + PITR.
-- [ ] **M5 — Deploy em produção.** Operador Kubernetes; orquestrador para RPM/bare metal.
 - [ ] **M6 — Analytics colunar / HTAP.** Camada de armazenamento colunar com escolha de plano row vs colunar.
 - [ ] **M7 — IA avançada.** Filtered vector search, hybrid search + reranking, NL → SQL com views seguras.
 - [ ] **M8 — Escala & observabilidade.** Read pools com load-balancing, index advisor, autovacuum adaptativo, métricas OTel/Prometheus.
