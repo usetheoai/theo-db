@@ -67,8 +67,15 @@ def measure(port, n, dim, probes, k, runs, nq):
             lat.append(time.perf_counter() - t)
         run_means.append(sum(lat) / len(lat))
     best_mean_s = min(run_means)
+    # Report dispersion too — a throttled mobile CPU has real run-to-run variance; a point estimate alone is not
+    # honest (analysis-golden-rule §3). qps_best is the best-of-N; qps_mean±std characterizes the noise.
+    import statistics
+    qps_per_run = [1.0 / m for m in run_means]
     return {"n": n, "dim": dim, "probes": probes, "k": k, "runs": runs, "n_queries": nq,
-            "qps": round(1.0 / best_mean_s, 1), "p50_ms": round(best_mean_s * 1000.0, 3)}
+            "qps_best": round(1.0 / best_mean_s, 1),
+            "qps_mean": round(statistics.mean(qps_per_run), 1),
+            "qps_std": round(statistics.pstdev(qps_per_run), 1) if runs > 1 else 0.0,
+            "p50_ms": round(best_mean_s * 1000.0, 3)}
 
 
 def main() -> int:
@@ -88,7 +95,8 @@ def main() -> int:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     (out / f".m36-{args.label}.json").write_text(json.dumps(r, indent=2) + "\n")
-    print(f"[{args.label}] n={r['n']} probes={r['probes']} k={r['k']}: QPS={r['qps']} p50={r['p50_ms']}ms")
+    print(f"[{args.label}] n={r['n']} probes={r['probes']} k={r['k']}: "
+          f"QPS best={r['qps_best']} mean={r['qps_mean']}±{r['qps_std']} p50={r['p50_ms']}ms")
     return 0
 
 

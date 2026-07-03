@@ -7,26 +7,30 @@
     "cores": 12,
     "ram_gb": 15.3,
     "avx2": true,
-    "note": "mobile CPU, thermal-throttled, single-thread; absolute numbers understate a server; measured under reduced container load"
+    "note": "mobile CPU, thermal-throttled, single-thread; HIGH run-to-run variance (see qps_std) — absolute numbers understate a server"
   },
-  "method": "end-to-end query latency for ORDER BY embedding <-> q LIMIT 10, best-of-5 runs × 2 passes (min mean), 200 queries seed 7; baseline = theo-db:m35 (full sort), optimized = theo-db:m36 (lazy heap); IDENTICAL data/index/probes on both",
-  "recall": "IDENTICAL by construction — the heap emits the same (dist,tid) ascending order as the old sort (byte-identical top-K); proven by 61 coexistence tests returning the same kNN ids (test_index_am/test_hnsw_structured/test_reloption/test_ann_index/test_sbq_index)",
-  "measurement_first_finding": "the M36 profiler (THEODB_SCAN_PROFILE) falsified the original 'quantize the distance' premise: distance is ~15% of scan cost; the bottlenecks are reads (~44-51%) and sort (~35-41%). Phase 1 attacks sort.",
+  "method": "end-to-end query latency for ORDER BY embedding <-> q LIMIT 10, 8 runs (mean±std over per-run mean latency, best-of-8 for qps_best), 200 queries seed 7; baseline = theo-db:m35 (full sort), optimized = theo-db:m36 (lazy heap); IDENTICAL data/index/probes/k on both. The two images differ by EXACTLY one engine commit (8e2bdab, am/scan.rs only) since v0.32.0 — verified via `git diff 37c9765..8e2bdab -- '*.rs'`.",
+  "recall": "IDENTICAL by construction — `Scored` orders by (f64::total_cmp, tid), the exact total order the old `results.sort_by((partial_cmp, tid))` produced on finite L2 distances, so the emitted top-K is byte-identical. Proven by the `heap_pops_same_order_as_sort_with_ties` pg_test + the full 61-test suite passing unchanged (kNN-id-comparison subset returns the same ids; the suite also includes negative/privilege tests). The latency driver itself does not diff ids.",
+  "measurement_first_finding": "the M36 profiler (THEODB_SCAN_PROFILE) falsified the original 'quantize the distance' premise: distance is ~14-15% of scan cost; the bottlenecks are reads (~44-51%) and sort (~35-41%). Phase 1 attacks sort.",
   "profiler_sort_phase": {
-    "note": "amrescan-side phase, probes=50, cand=50332, THEODB_SCAN_PROFILE=1",
+    "note": "amrescan-side phase, probes=50, cand=50332, THEODB_SCAN_PROFILE=1 — this is the STABLE, algorithmic finding (O(C·log C) full sort → O(C) heapify; the per-pop O(log C)×k moved to amgettuple, bounded by the executor LIMIT and unprofiled)",
     "m35_sort_us": "~10000-15000",
     "m36_heapify_us": "~760-1130",
-    "reduction": "~10-13× on the sort/heapify phase (O(C·log C) full sort → O(C) heapify; per-pop O(log C)×k moved to amgettuple, bounded by the executor LIMIT)"
+    "reduction": "~10-13× on the sort/heapify phase"
   },
   "results": [
-    {"probes": 10, "k": 10, "sort_qps": 459.3, "heap_qps": 635.0, "speedup": 1.38},
-    {"probes": 50, "k": 10, "sort_qps": 100.8, "heap_qps": 208.3, "speedup": 2.07},
-    {"probes": 100, "k": 10, "sort_qps": 58.8, "heap_qps": 103.8, "speedup": 1.77}
+    {"probes": 10, "k": 10, "sort_qps_mean": 526.6, "sort_qps_std": 46.6, "heap_qps_mean": 882.6, "heap_qps_std": 66.2, "speedup_mean": 1.68},
+    {"probes": 50, "k": 10, "sort_qps_mean": 112.5, "sort_qps_std": 3.8, "heap_qps_mean": 162.4, "heap_qps_std": 16.1, "speedup_mean": 1.44},
+    {"probes": 100, "k": 10, "sort_qps_mean": 47.1, "sort_qps_std": 4.4, "heap_qps_mean": 81.2, "heap_qps_std": 6.8, "speedup_mean": 1.72}
   ],
   "verdict": {
     "sort_phase_closed": true,
-    "end_to_end_speedup": "1.38–2.07× (grows with candidate count / probes), recall identical",
-    "closes_scann_gap": "partially — this attacks the ~35-41% sort phase. The remaining ~44-51% reads phase is M36 Phase 2 (smaller quantized codes to cut I/O + f32 rerank). The full ScaNN gap (~25×, M33) also needs harder candidate pruning. HONEST: this is a real ~1.4-2.1× scan speedup at preserved recall, NOT '25× from the sort alone'."
+    "end_to_end_speedup": "~1.4-1.7× (mean over 8 runs) at IDENTICAL recall. HIGH variance on the throttled CPU — the per-probe ratio is not cleanly monotonic; treat it as a ~1.5× band, not a precise per-point number. Consistent with the Amdahl ceiling: sort is ~37-41% of scan, so removing it caps the scan speedup near ~1.5-1.7× — the measured mean sits at that ceiling (a small extra from the comparator + allocation change).",
+    "closes_scann_gap": "partially — this attacks the ~35-41% sort phase only. The remaining ~44-51% reads phase is M36 Phase 2 (smaller quantized codes to cut I/O + f32 rerank). The full ScaNN gap (~25×, M33) also needs harder candidate pruning. HONEST: this is a real ~1.5× scan speedup at preserved recall, NOT '25× from the sort alone'.",
+    "honest_notes": [
+      "The STABLE claim is the profiler's ~10-13× sort-phase reduction (algorithmic). The end-to-end ~1.5× is Amdahl-bounded and variance-heavy.",
+      "Blob (legacy M26) scan path: for exact-distance ties with an empty pending region, the tie-break normalizes from corpus-position to tid — a more-deterministic order, not a recall change; the byte-identical claim is exact on the structured (shipping) paths."
+    ]
   },
-  "reproduction": "PGPORT=<port> python3 benchmarks/run_m36_scan.py --n 200000 --probes 50 --k 10 --runs 5 --label <sort|heap>  (baseline on theo-db:m35, optimized on theo-db:m36)"
+  "reproduction": "for each of theo-db:m35 (sort) and theo-db:m36 (heap), same host: PGPORT=<port> python3 benchmarks/run_m36_scan.py --n 200000 --probes 50 --k 10 --runs 8 --label <sort|heap>"
 }
