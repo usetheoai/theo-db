@@ -13,6 +13,20 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.33.0] - 2026-07-02
+
+### Added
 - M36 Phase 1 — **otimização do scan do índice: heap top-K lazy** (`am/scan.rs`). O gate measurement-first do M36
   (`THEODB_SCAN_PROFILE`) FALSIFICOU a premissa original ("quantizar a distância"): a distância é ~15% do custo de
   scan; os gargalos são `reads` (~44–51%) e `sort` (~35–41%). Phase 1 substitui o `results.sort_by` O(C·log C) de
@@ -48,6 +62,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   allowlist → INVALID; número de performance sem benchmark nem `UNBENCHMARKED` → NEEDS_REVISION). Dogfood: o
   capítulo-farol 19 passa o validador (PASS).
 
+
 ### Changed
 - Correção de honestidade em `docs/features/`: 5 páginas estavam marcadas "📋 planejado / ainda não implementadas"
   quando na verdade **já foram entregues** (drift de documentação — os docs ficaram atrás do código). Atualizadas
@@ -57,14 +72,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   `ai.analyze_sentiment`, `test_ai_sql.py`), 12 linguagem natural (M19, `ai.nl_to_sql`, `test_nl_sql.py`). Cada
   bloco de status validado por `deep-research/validate_citations.py` (PASS — toda citação resolve no disco).
   Afirmações de qualidade de IA marcadas com a nota de honestidade (dependem do LLM; sem benchmark de acurácia).
-
-### Deprecated
-
-### Removed
-
-### Fixed
-
-### Security
 
 ## [0.32.0] - 2026-07-02
 
