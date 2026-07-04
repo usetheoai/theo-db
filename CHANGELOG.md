@@ -13,8 +13,17 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- M46: `benchmarks/run_m46_highrecall.py` — driver de re-medição Pareto endurecido do `theodb_hnsw` no alto
+  recall (median + trimmed-mean sobre ≥5 runs, captura de `pages_read` determinístico via `THEODB_SCAN_PROFILE`,
+  gate recall-neutro baseline-vs-pós). Reusa o harness M45 (Regra 9), pós-processamento puro unit-testável.
 
 ### Changed
+- M46: `theodb_hnsw` scan hot-path hygiene (recall-neutro, alto recall) — `traverse` (`hnsw_page.rs`) agora
+  **pre-dimensiona** as três estruturas per-query (`HashSet`/2×`BinaryHeap` com `with_capacity`, âncoras pgvector
+  `tidhash_create(ef*m*2)` + pgvectorscale `with_capacity(search_list_size*neigbors)`) e **reusa um scratch
+  `Vec<Addr>`** no ground loop em vez de alocar por nó (`decode_neighbors_into`, espelha o `unvisited` reusado do
+  pgvector). Zero nova dependência (hasher default). Recall-neutro **provado** (index-scan == seqscan exato,
+  byte-idêntico) — a mudança elimina complexidade acidental (rehash super-linear em ef + churn de allocator).
 
 ### Deprecated
 
