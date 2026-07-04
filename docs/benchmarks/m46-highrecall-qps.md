@@ -30,8 +30,22 @@ box noise. It drifted **massively** between the two runs (same box, minutes apar
 
 An unchanged binary reading **+122% faster** between two runs means the box (12 cores, load average **18–36**
 during measurement, 11 workspace containers competing) dominates the signal. Any theodb baseline-vs-post QPS
-delta (below) is **dwarfed** by this drift → **effect ≪ variance** → no honest QPS verdict is possible here.
+delta is **dwarfed** by this drift → **effect ≪ variance** → no honest QPS verdict is possible here.
 Chasing the theodb numbers would be exactly the measurement-artifact-chasing ADR-2 forbids.
+
+For full transparency, here are the theodb median-QPS numbers the control invalidates (do **not** read these as
+a result — they are shown so the skeptic sees exactly what the noise swamped, including a −12% at ef=300):
+
+| ef | theodb QPS median base→post | raw Δ | note |
+|---:|:---|---:|:---|
+| 100 | 366.7 → 444.0 | +21% | control drifted +29% at this ef — Δ not attributable |
+| 200 | 263.3 → 278.4 | +6% | control drifted +122% — Δ not attributable |
+| 300 | 259.6 → 228.5 | **−12%** | control drifted +146% — the baseline run was non-uniformly contended (theodb baseline ef=300 even reads *faster* than ef=200, physically incoherent), so this −12% is a noise artifact, not a regression |
+| 400 | 179.6 → 211.9 | +18% | control drifted +122% — Δ not attributable |
+
+Normalizing theodb by the control does **not** rescue the comparison: the baseline run was non-uniformly loaded
+(its own ef-ordering is physically incoherent), so the ratio is untrustworthy in both directions. "No
+attributable delta either way" is the only honest read.
 
 ## Deterministic evidence (box-independent — this is what proves recall-neutrality)
 
@@ -51,6 +65,12 @@ order races"*), so the two containers built *slightly different graphs*. A two-c
 test above (one binary, one graph, index-scan == exact-scan). The benchmark merely confirms **no systematic
 difference** beyond the parallel-build noise band.
 
+> **Harness limitation (do not repeat the confound).** The driver's automated `recall_neutral_verdict` gate is a
+> *byte* gate: fed these points it returns `RECALL_REGRESSION`, because recall moved 0.9960→0.9955. That gate
+> **cannot** distinguish a −0.0005 build-race from a −0.0005 real regression — only the same-graph SQL oracle
+> can, which is why "recall-neutral: PROVEN" rests on the oracle, not on the benchmark gate. The gate is correct
+> for a *same-graph binary swap*; the two-container A/B does not provide one.
+
 ## Why 50k cannot show the M46 benefit (scale caveat)
 
 The change targets the **~44% ef≥200 QPS variance** the M45 SIFT1M Pareto measured — a **1M-scale, memory-bound**
@@ -64,25 +84,39 @@ the full SIFT1M corpus.
 
 - **Shipped:** the recall-neutral hot-path change (correct, proven) + the hardened harness (median/trimmed/
   pages_read + control) — the substrate for a clean verdict.
-- **Deferred (not failed):** the QPS/variance verdict, blocked on a **quiet box at SIFT1M scale**. Under dev-box
-  contention (control drift +122%) and at a scale that doesn't reproduce the target regime, no honest QPS claim
-  is attributable to M46. This is the honest-negative ADR-2 explicitly permits.
+- **Deferred (not failed):** the QPS/variance verdict, blocked on TWO confounds this run exposed — box contention
+  (control drift +122%) **and** the parallel-build graph difference between containers. This is the honest-negative
+  ADR-2 explicitly permits.
 
-## Reproduce
+## The next measurement must be SAME-GRAPH (a quiet box alone is not enough)
+
+A quiet box removes the *load* confound but **not** the *graph-difference* confound: at any `n > 4096` the M44
+parallel build still races, so a two-container A/B keeps comparing two *different* graphs. To attribute an
+allocation-only scan change to QPS you need a **byte-identical graph** on both binaries. Two ways:
+
+1. **Persist/restore one index into both binaries** — build the theodb_hnsw index once, snapshot its page image,
+   restore it into both the baseline and the post container, then sweep. Same graph → the only variable is the
+   scan allocator.
+2. **Rust `criterion` micro-bench over a fixed in-memory graph** — bench `traverse` directly against one
+   `HnswIndex::build(seed=42)` graph, comparing pre-size vs `::new()`. No container, no box-load noise, no build
+   race. This is the cleanest isolation of the L1-A/L1-B effect and the recommended next step.
+
+Either design, at SIFT1M scale (where the ~44% ef≥200 variance regime appears), is the reproducible artifact for
+the win/variance verdict. Tracked in `knowledge-base/implementations/m46-hnsw-highrecall-qps-followups.md`.
+
+## Reproduce (this run — the confounded two-container A/B, for the record)
 
 ```bash
-# Build both images (pre-change baseline via `git stash push theodb_rs/src/am/hnsw_page.rs`, then pop):
-docker build -t theo-db:m46-baseline .   # (pre-change source)
-docker build -t theo-db:m46 .            # (with the change)
-# Run each with the deterministic pages_read profiler on:
+# baseline image = pre-change source (git stash push theodb_rs/src/am/hnsw_page.rs → build → pop):
+docker build -t theo-db:m46-baseline .   # pre-change
+docker build -t theo-db:m46 .            # with the change
 docker run -d --name m46-base -e POSTGRES_PASSWORD=postgres -e THEODB_SCAN_PROFILE=1 -p 5480:5432 theo-db:m46-baseline
 docker run -d --name m46-post -e POSTGRES_PASSWORD=postgres -e THEODB_SCAN_PROFILE=1 -p 5479:5432 theo-db:m46
-# On a QUIET box, at full 1M (drop --no-full-train / --n for the full corpus):
-python3 benchmarks/run_m46_highrecall.py --hdf5 benchmarks/.datasets/sift-128-euclidean.hdf5 \
-    --nq 500 --runs 5 --ef-grid 100,200,300,400 --port 5480 --container m46-base --tag baseline --out base.json
-python3 benchmarks/run_m46_highrecall.py --hdf5 benchmarks/.datasets/sift-128-euclidean.hdf5 \
-    --nq 500 --runs 5 --ef-grid 100,200,300,400 --port 5479 --container m46-post --tag post --out post.json
-python3 benchmarks/run_m46_highrecall.py --compare base.json post.json --write-doc
+# --nq 200 --n 50000 (this run's scale; drop --no-full-train/--n for full 1M on a quiet box):
+python3 benchmarks/run_m46_highrecall.py --hdf5 benchmarks/.datasets/sift-128-euclidean.hdf5 --no-full-train \
+    --n 50000 --nq 200 --runs 5 --ef-grid 100,200,300,400 --port 5480 --container m46-base --tag baseline --out base.json
+python3 benchmarks/run_m46_highrecall.py --hdf5 benchmarks/.datasets/sift-128-euclidean.hdf5 --no-full-train \
+    --n 50000 --nq 200 --runs 5 --ef-grid 100,200,300,400 --port 5479 --container m46-post --tag post --out post.json
 ```
 
 Raw numbers: `docs/benchmarks/m46-highrecall-qps.json`. Recall-neutral SQL proof: `theodb_rs/src/am/hnsw_page.rs`

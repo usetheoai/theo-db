@@ -573,6 +573,9 @@ pub(crate) unsafe fn traverse(
         if c.d > worst && result.len() >= ef {
             break;
         }
+        // On Err, `?` aborts before `scratch` is read; on Ok, `decode_neighbors_into` has cleared+refilled it.
+        // This is what makes the scratch reuse leak-free — do NOT swallow this Err (e.g. `let _ =`) or the loop
+        // below would read a previous node's neighbors.
         neighbors_into(rel, &c, 0, m, m0, nblocks, &mut reads, &mut scratch)?;
         for i in 0..scratch.len() {
             let (nb, no) = scratch[i];
@@ -723,8 +726,10 @@ mod tests {
     fn topk_ids(query_lit: &str, k: i64) -> Vec<i32> {
         let sql = format!("SELECT id FROM rn ORDER BY e <-> '{query_lit}'::vector LIMIT {k}");
         pgrx::Spi::connect(|client| {
+            // pgrx 0.16.1: `select`'s 3rd arg is `args: &[DatumWithOid]` (a slice) — `&[]`, never `None`
+            // (matches hybrid.rs / ann_query.rs). Column ordinals are 1-based → `row.get::<i32>(1)`.
             client
-                .select(&sql, None, None)
+                .select(&sql, None, &[])
                 .unwrap()
                 .filter_map(|row| row.get::<i32>(1).unwrap())
                 .collect::<Vec<i32>>()
