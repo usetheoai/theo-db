@@ -26,10 +26,8 @@ The extensions coexist without conflict (separate namespaces / access methods). 
   `SET hnsw.ef_search` trades recall for latency at query time; `maintenance_work_mem` ↑ speeds index builds.
 - **DiskANN (pgvectorscale):** for high-dim / large-scale; `SET diskann.query_search_list_size` +
   `diskann.query_rescore` trade recall for latency (see the M2 benchmark sweep).
-- **Embeddings (`theodb.embed`, plpython3u):** configure the model endpoint via the `theodb.embedding_*` GUCs
-  (see `docs/sql-embeddings.md`); the call is synchronous — batch large jobs outside a single statement.
-- **HA + backup:** when running under Patroni, `archive_mode`/`archive_command` live in the Patroni-managed
-  `postgresql.parameters` (see `docs/operations/ha-backup-runbook.md`).
+- **Embeddings (`theodb.embed`, Rust `theodb_rs`):** configure the model endpoint via the `theodb.embedding_*`
+  GUCs (see `docs/sql-embeddings.md`); the call is synchronous — batch large jobs outside a single statement.
 
 ## Upstream regression suite (DoD-1)
 
@@ -63,8 +61,8 @@ Confirmed permissive across the whole package (D1 — no AGPL in the distributio
   crate tree — **293 crates, 0 AGPL/Affero**. Distribution: MIT / Apache-2.0 / Unicode-3.0 / ISC / Zlib /
   Unlicense (the 2 "no-license-field" entries are pgvectorscale's own workspace crates — `vectorscale`,
   `pgvectorscale_derive` — under the project's PostgreSQL License, not AGPL).
-- **Extensions:** pgvector / pgvectorscale / plpython3u — PostgreSQL License. (HA deps Patroni/pgBackRest —
-  MIT — are not part of the core image; see the HA runbook.)
+- **Extensions:** pgvector / pgvectorscale — PostgreSQL License. (The AI surface is Rust `theodb_rs`, not
+  `plpython3u`; deploy/HA are out of this repository's scope — the engine + extension only.)
 
 Net: the core package is **100% permissive, zero AGPL** — clear under PRD §11 (D1).
 

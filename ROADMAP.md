@@ -1,9 +1,9 @@
-# TheoDB — Roadmap (banco real, Postgres-based, código próprio Rust/Go)
+# TheoDB — Roadmap (banco real, Postgres-based, código próprio Rust)
 
 > **Este é o roadmap ATIVO** — o path convencional (`ROADMAP.md`) que o cycle-kit lê e o `cycle-release` flipa.
 > Origem: **ADR `0006-own-code-postgres-based-rust-go`** (virada de mandato "v2", sign-off CTO, 2026-06-29).
-> Substituiu o antigo roadmap v1 (tese de composição, M0–M16 entregues como distribuição), agora arquivado em
-> [`docs/history/ROADMAP-v1.md`](docs/history/ROADMAP-v1.md) como histórico do que foi provado + base de paridade.
+> Substituiu o antigo roadmap v1 (tese de composição, M0–M16 entregues como distribuição). O foco é o banco:
+> o engine PostgreSQL + a extensão própria (control-plane/deploy foram removidos do escopo deste repositório).
 > Norte: transformar TheoDB de "distribuição que compõe extensões de terceiros" em um **banco de dados real, com
 > código PRÓPRIO**, dependendo o **mínimo possível** de bibliotecas externas, **mantendo a engine PostgreSQL**
 > (C, wire-compat).

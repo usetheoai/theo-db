@@ -32,6 +32,9 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - Removido `packaging/Dockerfile.columnar-pg17probe` (não estava em nenhum caminho de CI/build) — o registro
   honesto do build PG17-from-source que falhou no pin rustc/MSRV permanece em prosa
   (`docs/benchmarks/m6-columnar-vs-row.md`).
+- Limpeza de `docs/`: removido `docs/history/ROADMAP-v1.md` (roadmap v1 arquivado — planejamento/histórico, não
+  documentação técnica do banco); a referência no `ROADMAP.md` ativo foi ajustada. `docs/` agora contém apenas
+  documentação relacionada ao banco (adr, benchmarks, features, handbook, migração, packaging, analytics, sql-*).
 
 ### Fixed
 - `README.md` + `CLAUDE.md`: corrigida staleness de gênese após 45 milestones/v0.35.0. **Factual:** "Draft
@@ -44,6 +47,9 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - Docs: corrigidos claims **falsos** de que o `plpython3u` ainda é usado/requerido (`docs/quickstart.md`,
   `docs/sql-ai-functions.md`, `docs/sql-embeddings.md`) + comentários stale no `Dockerfile` e docstring do
   `benchmarks/servers/embedding_server.py` — a superfície de IA é Rust (`theodb_rs`) desde M19.
+- `docs/packaging/packaging-and-tuning.md`: removida a seção HA/Patroni + a referência ao runbook
+  (`docs/operations/ha-backup-runbook.md`, deletado) e à dependência plpython3u — HA/deploy estão fora do
+  escopo do repositório e a superfície de IA é Rust.
 
 ### Security
 
