@@ -1,0 +1,35 @@
+{
+  "substrate": "mooncakelabs/pg_mooncake (PG18, MIT)",
+  "note": "measurement substrate \u2014 shipping columnar on the PG17 TheoDB image is the gated adoption step",
+  "query": "SELECT category, count(*), avg(amount) FROM t GROUP BY category (analytics rollup)",
+  "points": [
+    {
+      "n": 100000,
+      "rows_synced": 100000,
+      "row_ms": 9.2,
+      "columnar_ms": 4.0,
+      "speedup": 2.33,
+      "columnar_plan_duckdb": true,
+      "match": true
+    },
+    {
+      "n": 1000000,
+      "rows_synced": 1000000,
+      "row_ms": 62.3,
+      "columnar_ms": 7.2,
+      "speedup": 8.65,
+      "columnar_plan_duckdb": true,
+      "match": true
+    },
+    {
+      "n": 5000000,
+      "rows_synced": 5000000,
+      "row_ms": 397.4,
+      "columnar_ms": 26.6,
+      "speedup": 14.94,
+      "columnar_plan_duckdb": true,
+      "match": true
+    }
+  ],
+  "crossover_n": 100000
+}

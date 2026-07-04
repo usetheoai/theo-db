@@ -13,6 +13,15 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- M30 (decisão de escopo v1-legacy — **ADR 0013**): columnar (M6, `pg_mooncake`/`pg_duckdb`, MIT) e BM25 (M7,
+  `pg_textsearch`) **MANTIDOS** como exceções permissivas (Regra 9), gated para adoção. A decisão de manter
+  columnar é validada por **benchmark de escala** (`benchmarks/run_m30_columnar_scale.py` +
+  `docs/benchmarks/m30-columnar-scale.{md,json}`): o columnstore DuckDB vence o row-store **2.33× (100k) →
+  8.65× (1M) → 14.94× (5M)** numa agregação analítica, resultado byte-correto + plano `DuckDBScan` — fecha o
+  gap que o M6 marcou UNBENCHMARKED. BM25: mantido pelo win medido (nDCG@10 0.95 vs 0.51 do `ts_rank_cd`, m7).
+  O leg lexical **shipado** segue o FTS nativo (`ts_rank_cd`); columnar NÃO é embarcado ainda (adoção gated em
+  build-PG17 ou bump-PG18 — milestone futura). Zero mudança de código de produto; substrato de medição é a
+  imagem canônica `mooncakelabs/pg_mooncake` (PG18).
 
 ### Changed
 - **API pública renomeada:** `theodb.import_pinecone` → **`theodb.import_vectors`** (e
