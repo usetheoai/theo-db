@@ -26,8 +26,10 @@ reescritos-próprios**. A superfície SHIPADA de texto do hybrid search é FTS *
    vários), não um nicho.
 2. **Measurement-first (ADR 0002) + honestidade (Regra 3)** — nenhum pilar fica/some por opinião; a decisão é
    ancorada em benchmark reproduzível.
-3. **Licença (D1)** — só permissivo. `pg_mooncake`/`pg_duckdb` = **MIT**; `pg_textsearch` = permissivo (ADR 0003).
-   Os columnar in-memory (Citus/Hydra) são **AGPL → barrados** por D1 — DuckDB é a única rota permissiva.
+3. **Licença (D1)** — só permissivo. `pg_mooncake` = **MIT** (empacota o `pg_duckdb`, também MIT); `pg_textsearch`
+   = permissivo (ADR 0003). Os columnar **on-disk comprimidos** Citus e Hydra são **AGPL → barrados** por D1
+   (verificado: `citus/LICENSE` = AGPLv3, `hydra/columnar/LICENSE` = AGPL) — a rota DuckDB/mooncake é a única
+   permissiva.
 4. **Regra 9 (não reinventar)** — reescrever columnar/BM25 do zero é inviável (DuckDB é battle-tested).
 
 ## Opções consideradas
@@ -42,20 +44,28 @@ reescritos-próprios**. A superfície SHIPADA de texto do hybrid search é FTS *
 adoção futura. Por pilar:
 
 ### Columnar (M6, `pg_mooncake`) — MANTER
-A decisão-crítica era: columnar ganha em escala? O M6 mediu só 100k (onde o row-store ganhava) e marcou o win
-de escala **UNBENCHMARKED**. **M30 fechou esse gap** (`docs/benchmarks/m30-columnar-scale.md`, substrato
-canônico `mooncakelabs/pg_mooncake` PG18):
+A decisão-crítica era: columnar ganha em escala? O M6 mediu só 100k e marcou o win de escala **UNBENCHMARKED**.
+**M30 fechou esse gap** (`docs/benchmarks/m30-columnar-scale.md`, substrato canônico `mooncakelabs/pg_mooncake`
+PG18, **mean±std sobre 3 runs**, `effect > variance` em todos os pontos):
 
-| linhas (n) | row-store (Seq Scan) | columnstore (DuckDBScan) | speedup | correto? |
+| linhas (n) | row-store (Seq Scan) | columnstore (DuckDBScan) | speedup | effect>variância |
 |---|---|---|---|---|
-| 100.000 | 9.2 ms | 4.0 ms | **2.33×** | sim |
-| 1.000.000 | 62.3 ms | 7.2 ms | **8.65×** | sim |
-| 5.000.000 | 397.4 ms | 26.6 ms | **14.94×** | sim |
+| 100.000 | 12.7 ± 1.4 ms | 4.2 ± 0.8 ms | **2.99×** | sim |
+| 1.000.000 | 62.3 ± 3.5 ms | 7.0 ± 0.5 ms | **8.89×** | sim |
+| 5.000.000 | 285.3 ± 19.3 ms | 20.6 ± 0.3 ms | **13.87×** | sim |
 
-O speedup **cresce com a escala** (2.3× → 15×) numa agregação `GROUP BY` analítica, com resultado **byte-correto**
-(count exato + avg dentro de 1e-3) e plano `DuckDBScan` vetorizado. É a assinatura clássica do columnar. ⇒ Um
-pilar de analytics/HTAP real, permissivo (MIT), medido-vencedor a escala. Deprecá-lo jogaria fora paridade com
-o AlloyDB.
+O speedup **cresce com a escala** (~3× → ~14×) numa agregação `GROUP BY` analítica; o gap entre as médias excede
+o desvio combinado em todos os pontos (não é ruído), resultado **correto** (count exato + avg dentro de 1e-3
+cross-engine — **não** byte-idêntico: soma PG vs DuckDB difere no último decimal) e plano `DuckDBScan`
+vetorizado. É a assinatura clássica do columnar. ⇒ Um pilar de analytics/HTAP real, permissivo (MIT),
+medido-vencedor a escala. Deprecá-lo jogaria fora paridade com o AlloyDB.
+
+**Reconciliação honesta com o M6 (Regra 3).** O M6 (2026-06-28) mediu o row-store *vencendo* a 100k (columnar
+44.3 ms); este run mede columnar vencendo a 100k (4.2 ms) — um swing de ~11× no mesmo harness + mesma família
+de imagem `:latest` (drift de versão do DuckDB/mooncake + cache; ADR 0012 documenta essa classe). Por isso o
+**ponto de 100k é tratado como quase-paridade, NÃO load-bearing**: a decisão de MANTER se ancora no win
+**robusto a versão, muito além da variância, a ≥ 1M** (~9× a 1M, ~14× a 5M). O row-win de 100k do M6 (e sua
+explicação de "overhead de setup domina") fica **superado / incerto**, não é citado como evidência.
 
 ### BM25 (M7, `pg_textsearch`) — MANTER
 `docs/benchmarks/m7-bm25-vs-tsrank.md`: **nDCG@10 BM25 0.9546 vs `ts_rank_cd` nativo 0.5143** — um ganho grande

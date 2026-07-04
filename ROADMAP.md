@@ -52,7 +52,7 @@ capacidades-killer são **nossas**, não uma colagem de extensões de terceiros.
   "código próprio" no v2 inicial. Reabrir exige ADR.
   > **Exceção permissiva (Regra 9), decidida no M30 / ADR 0013 (2026-07-03):** `pg_mooncake`/`pg_duckdb` (MIT)
   > para columnar/HTAP e `pg_textsearch` (permissivo) para BM25 são **mantidos como exceções explícitas** ao
-  > mandato own-code — justificadas por evidência medida (columnar 15× a 5M; BM25 nDCG 0.95 vs 0.51) e por não
+  > mandato own-code — justificadas por evidência medida (columnar ~14× a 5M (mean±std); BM25 nDCG 0.95 vs 0.51) e por não
   > haver peça own-code permissiva que resolva (Citus/Hydra columnar são AGPL — barrados por D1). Gated para
   > adoção; não embarcados ainda.
 - **Reescrever HTTP/serde/crypto/parser genérico** — isso é reinventar a roda (Regra 9). Usamos crates
@@ -220,7 +220,7 @@ ADR [`0013-v1-legacy-columnar-bm25-scope`](docs/adr/0013-v1-legacy-columnar-bm25
 **Definition of done:**
 
 - [x] ADR `0013-v1-legacy-columnar-bm25-scope` (MADR 3.0): decisão = **MANTER** ambos, trade-offs + evidência + alternativa rejeitada (deprecar). *(ADR 0007 já estava ocupado; usado 0013.)*
-- [x] Evidência de benchmark validando o KEEP: columnar-at-scale (`docs/benchmarks/m30-columnar-scale.md`) — columnstore vence o row-store **2.33× (100k) → 8.65× (1M) → 14.94× (5M)**, correto (match) + `DuckDBScan`; fecha o gap UNBENCHMARKED do M6. BM25: nDCG 0.95 vs 0.51 (m7).
+- [x] Evidência de benchmark validando o KEEP: columnar-at-scale (`docs/benchmarks/m30-columnar-scale.md`) — columnstore vence o row-store **2.99× (100k) → 8.89× (1M) → 13.87× (5M) — mean±std, effect>variância**, correto (match) + `DuckDBScan`; fecha o gap UNBENCHMARKED do M6. BM25: nDCG 0.95 vs 0.51 (m7).
 - [x] Nota de exceção permissiva no ROADMAP (§ Fora de escopo do v2 — Regra 9).
 - [x] CHANGELOG + `## Relação com o v1` atualizados com a decisão.
 
@@ -573,5 +573,5 @@ M19 ─────────────────────────�
   (os testes do v1 são a **prova de paridade** da reescrita do v2).
 - ADRs: `0006` é o norte; `0001` núcleo mantido; `0002/0004/0005` supersedidos/reabertos em parte (ver notas).
 - **Columnar (M6) + BM25 (M7)** — os dois pilares v1 de composição foram **mantidos** (M30 / ADR `0013`,
-  2026-07-03) como exceções permissivas (Regra 9), com evidência medida (columnar 15× a 5M; BM25 nDCG 0.95 vs
+  2026-07-03) como exceções permissivas (Regra 9), com evidência medida (columnar ~14× a 5M (mean±std); BM25 nDCG 0.95 vs
   0.51). Gated para adoção; o leg lexical shipado segue o `ts_rank_cd` nativo.

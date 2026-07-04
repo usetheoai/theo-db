@@ -35,17 +35,20 @@ def _mooncake_or_skip(port):
 
 
 @pytest.mark.integration
-def test_run_m30_scale_emits_points_and_verdict():
+def test_run_m30_scale_emits_meanstd_points_and_verdict():
     port = int(os.environ.get("PORT", os.environ.get("PGPORT", "5492")))
     _mooncake_or_skip(port)
-    res = run_m30_columnar_scale.run(port, scales=(1000, 5000))
+    res = run_m30_columnar_scale.run(port, scales=(1000, 5000), runs=2)
     assert res["substrate"].startswith("mooncakelabs")
+    assert res["runs"] == 2
     assert len(res["points"]) == 2
     for p in res["points"]:
-        for key in ("n", "row_ms", "columnar_ms", "speedup", "columnar_plan_duckdb", "match"):
+        for key in ("n", "row_ms_mean", "row_ms_std", "columnar_ms_mean", "columnar_ms_std",
+                    "speedup", "effect_gt_variance", "columnar_plan_duckdb", "match"):
             assert key in p, f"point missing {key}"
-        assert p["match"] is True                       # correctness: columnar == row (within eps)
-        assert p["columnar_plan_duckdb"] is True         # the mirror plans as DuckDBScan
-        assert p["row_ms"] >= 0 and p["columnar_ms"] >= 0
-    # crossover_n is an int (some scale won) or None (none did) — both are honest outcomes
+        assert p["match"] is True                        # correctness: columnar == row (within eps)
+        assert p["columnar_plan_duckdb"] is True          # the mirror plans as DuckDBScan
+        assert p["row_ms_mean"] >= 0 and p["columnar_ms_mean"] >= 0
+        assert isinstance(p["effect_gt_variance"], bool)
+    # crossover_n = smallest scale with an effect>variance columnar win, or None — both are honest outcomes
     assert res["crossover_n"] is None or isinstance(res["crossover_n"], int)

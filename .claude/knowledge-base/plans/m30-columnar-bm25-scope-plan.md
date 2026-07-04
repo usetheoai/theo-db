@@ -20,7 +20,7 @@ goal: Decide (ADR) to KEEP columnar + BM25 as permissive analytics pillars, vali
 > pillars (Rule-9 exceptions, gated for adoption), validated by a reproducible columnar-vs-row **scale**
 > benchmark, measured by `docs/benchmarks/m30-columnar-scale.json` showing the DuckDB columnstore beats the
 > row-store `Seq Scan` at large analytical scale AND `docs/adr/0013-v1-legacy-columnar-bm25-scope.md` +
-> the ROADMAP note present, with `python3 scripts/check_xrefs.py` clean.
+> the ROADMAP note present, with `python3 .claude/scripts/check_xrefs.py` clean.
 
 ## Context
 
@@ -281,7 +281,7 @@ RED: test_adr_0013_present_and_grounded() — asserts docs/adr/0013-*.md exists,
      pillars, links docs/benchmarks/m30-columnar-scale.md + m7-bm25-vs-tsrank.md, and lists a rejected alternative.
 GREEN: write the ADR + ROADMAP note.
 REFACTOR: none.
-VERIFY: python3 -m pytest benchmarks/tests/test_run_m30_columnar_scale.py -k adr -q ; python3 scripts/check_xrefs.py
+VERIFY: python3 -m pytest benchmarks/tests/test_run_m30_columnar_scale.py -k adr -q ; python3 .claude/scripts/check_xrefs.py
 ```
 
 #### Concurrency tests (only when applicable)
@@ -292,7 +292,7 @@ VERIFY: python3 -m pytest benchmarks/tests/test_run_m30_columnar_scale.py -k adr
 #### Acceptance Criteria
 - [ ] `docs/adr/0013-v1-legacy-columnar-bm25-scope.md` exists (MADR 3.0), decision = KEEP both, cites the scale benchmark + m6 + m7, lists the rejected deprecate alternative + the gated-adoption path.
 - [ ] `ROADMAP.md` has the permissive-exception note (Rule 9) for columnar + BM25, citing ADR 0013.
-- [ ] `python3 scripts/check_xrefs.py` clean (no dangling reference).
+- [ ] `python3 .claude/scripts/check_xrefs.py` clean (no dangling reference).
 - [ ] CHANGELOG + "Relação com o v1" updated.
 
 #### DoD
@@ -343,7 +343,7 @@ PORT=<mooncake> python3 -m pytest benchmarks/tests/test_run_m30_columnar_scale.p
 python3 benchmarks/run_m30_columnar_scale.py --port <mooncake> --write-doc
 test -f docs/benchmarks/m30-columnar-scale.json
 # 2. ADR + xrefs:
-test -f docs/adr/0013-v1-legacy-columnar-bm25-scope.md && python3 scripts/check_xrefs.py
+test -f docs/adr/0013-v1-legacy-columnar-bm25-scope.md && python3 .claude/scripts/check_xrefs.py
 # 3. No product regression (nothing removed): the shipped image + smoke unaffected
 PGHOST=localhost PGPORT=<theo-db> bash scripts/smoke.sh   # SMOKE PASSED (product untouched)
 pyflakes benchmarks/run_m30_columnar_scale.py
