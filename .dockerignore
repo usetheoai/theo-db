@@ -1,0 +1,9 @@
+# Build artifacts — never needed in the image build context (the Dockerfile compiles fresh inside
+# the theodb-rs-builder stage via `cargo pgrx install`). Excluding target/ cuts the build context
+# from ~1.7GB to a few MB, so each measurement-loop rebuild transfers in seconds, not minutes.
+theodb_rs/target/
+**/__pycache__/
+**/.pytest_cache/
+**/.ruff_cache/
+.git/
+*.log
