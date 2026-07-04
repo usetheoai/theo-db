@@ -7,7 +7,8 @@ edição única para download que roda no seu laptop, on-premises, na borda, em 
 em Kubernetes ou bare metal. Num só pacote você tem busca vetorial para aplicações de IA
 e analytics colunar sobre dados transacionais vivos — sem licença por vCPU e sem lock-in.
 
-> ⚠️ **Status:** projeto em fase inicial de design (Draft v0.1). Ainda não há release.
+> ⚠️ **Status:** em desenvolvimento ativo, ainda **pré-1.0** (releases 0.x — ver [`CHANGELOG.md`](./CHANGELOG.md)).
+> Sem afirmação de "production-ready" até haver evidência de uso sustentado (`public-copy.md`).
 > O documento de produto está em [`PRD.md`](./PRD.md).
 
 ---
@@ -29,6 +30,11 @@ nunca afirmações sem evidência. Estratégia completa: [`docs/adr/0002-north-s
 > superioridade vetorial em **velocidade ANN pura ainda NÃO está cumprida**; o diferencial atual do TheoDB é
 > busca vetorial **dentro de um banco transacional** (não uma biblioteca in-memory). Fechar o gap de latência
 > (quantização no índice) é trabalho de milestone futuro. Ver também o GOTO P0 do CTO.
+>
+> **Atualização (M45).** Sob medição rigorosa mean±std no SIFT1M, o índice-AM próprio `theodb_hnsw` fica em
+> **paridade** (não superioridade) com o `pgvector hnsw` na fronteira recall×QPS —
+> [`docs/benchmarks/m45-pareto-sift1m.md`](./docs/benchmarks/m45-pareto-sift1m.md). Nenhum claim de "mais
+> rápido que o pgvector" é permitido: é paridade competitiva.
 
 ---
 
@@ -59,12 +65,13 @@ em conjunto:
 
 ```
 TheoDB = PostgreSQL (upstream) + pgvector customizado + camada columnar
-         + integração de IA/ML + tooling (MCP, migração)
+         + integração de IA/ML + tooling de migração
          empacotado como uma imagem única que roda em qualquer lugar
 ```
 
-A diferenciação técnica está no **pgvector customizado** (índice ANN de alta performance
-integrado ao planner) e no **empacotamento integrado** dos pilares de IA, analytics e operação.
+A diferenciação técnica está no **pgvector customizado** (índice ANN próprio integrado ao planner do
+Postgres — desempenho medido em `docs/benchmarks/`, sem claim sem evidência) e no **empacotamento
+integrado** dos pilares de IA, analytics e operação.
 Detalhes de arquitetura, pilares de capacidade e o recorte de MVP estão no [`PRD.md`](./PRD.md).
 
 ---
@@ -105,17 +112,22 @@ Passo a passo das 12 capacidades em [`docs/quickstart.md`](./docs/quickstart.md)
 - [ ] **M3 — Migração mínima.** Import/export e caminho de entrada a partir do PostgreSQL vanilla.
 - [ ] **M6 — Analytics colunar / HTAP.** Camada de armazenamento colunar com escolha de plano row vs colunar.
 - [ ] **M7 — IA avançada.** Filtered vector search, hybrid search + reranking, NL → SQL com views seguras.
-- [ ] **M8 — Escala & observabilidade.** Read pools com load-balancing, index advisor, autovacuum adaptativo, métricas OTel/Prometheus.
-- [ ] **M9 — Ecossistema & DX.** MCP server, integrações LangChain/LlamaIndex, UI de administração, migração a partir de AlloyDB.
+- [ ] **M8 — Escala & auto-tuning (no engine).** Index advisor + autovacuum adaptativo como capacidade da
+  extensão. *(Read pools / observabilidade OTel / control-plane são deploy/plataforma — fora do escopo deste
+  repositório, que é o banco.)*
+- [ ] **M9 — Ecossistema & DX.** Integrações LangChain/LlamaIndex, migração a partir de AlloyDB.
 
 O recorte exato do MVP (provavelmente **M0 → M2**) será fechado no próximo passo de planejamento.
+Nota: control-plane, deploy K8s e a superfície de plataforma **não fazem parte deste repositório** —
+o foco é o banco de dados (o engine + a extensão).
 
 ---
 
 ## Documentação
 
 - [`PRD.md`](./PRD.md) — documento de produto completo (visão, pilares, requisitos, riscos, MVP).
-- `CHANGELOG.md` — registro de mudanças (a ser criado quando o desenvolvimento começar).
+- [`CHANGELOG.md`](./CHANGELOG.md) — registro de mudanças ([Keep a Changelog](https://keepachangelog.com/) + SemVer).
+- [`docs/quickstart.md`](./docs/quickstart.md) — passo a passo das capacidades; [`docs/benchmarks/`](./docs/benchmarks/) — evidência medida.
 
 ---
 

@@ -63,12 +63,14 @@ quanto tempo investimos. São dois eixos independentes:
 OSS/on-prem/model-agnostic; **vencer já hoje** em abertura, custo, portabilidade e independência de modelo;
 buscar **superioridade de performance no pilar vetorial comprovada por benchmark** (`docs/benchmarks/`).
 
-- **Measurement-first:** o harness de recall@k reproduzível é o **1º item de M2** e pré-requisito de qualquer
-  claim de performance. Hoje não existe (tudo `UNBENCHMARKED`).
+- **Measurement-first:** o harness de recall@k reproduzível **existe** (`benchmarks/theodb_bench/`) e é
+  pré-requisito de qualquer claim de performance. Estado medido: SIFT1M vs ScaNN (M33 — gap ~25× QPS) e vs
+  pgvector hnsw (M45 — **paridade** recall×QPS). Nenhuma afirmação de performance sem artefato em `docs/benchmarks/`.
 - **Fork é condicional** ao benchmark de gatilho (D3); não forkar antes de medir (anti-sunk-cost).
-- **Columnar (lakehouse, D2) e HA (Patroni)** são apostas **diferentes e competitivas**, não cópias do
-  AlloyDB — forçado pela licença permissiva (D1 barra AGPL). Paridade interna *literal* (Opção β) exigiria
-  reabrir D1/D2/D7 — fora de escopo até novo ADR.
+- **Columnar (lakehouse, D2)** é uma aposta **diferente e competitiva**, não cópia do AlloyDB — forçado pela
+  licença permissiva (D1 barra AGPL). Paridade interna *literal* (Opção β) exigiria reabrir D1/D2/D7 — fora de
+  escopo até novo ADR. **HA / replicação / control-plane são deploy/plataforma — fora do escopo deste
+  repositório** (o `operator/` Go e o `ha/` Patroni foram removidos; este repo é o banco: engine + extensão).
 - **Esforço ≠ Complexidade:** esforço alto é bem-vindo (ScaNN-as-PG-AM, fork com CI de rebase, suíte de
   benchmark); o COMO é medir-depois-construir-o-essencial. Performance só vira claim com benchmark
   (`../.claude/rules/public-copy.md`).
@@ -104,5 +106,5 @@ buscar **superioridade de performance no pilar vetorial comprovada por benchmark
 - Commits **sem** trailer `Co-Authored-By` (política do projeto — `../.claude/rules/cycle-review.md`).
 - Trabalho não-trivial passa pelos ciclos: `cycle-discover` → `cycle-plan` → `cycle-implement`
   → `cycle-code-quality` → `cycle-review` (ver `../.claude/rules/`).
-- Decisões arquiteturais viram ADRs em `docs/adr/` quando a estrutura de engenharia existir
-  (D1–D7 a promover).
+- Decisões arquiteturais viram ADRs em `docs/adr/` (a estrutura existe — 12 ADRs, incluindo D1–D7
+  formalizados em `docs/adr/0006`); toda nova decisão de arquitetura abre um ADR.

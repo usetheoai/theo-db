@@ -31,11 +31,11 @@ _TX_CONTROL = re.compile(r"^\s*(BEGIN|COMMIT|START\s+TRANSACTION|ROLLBACK)\b[^;]
 # The documented surface that MUST be present (presence-by-name, not a loose count).
 # Post-M17 (v0.16.0) theodb.embed + theodb.embed_batch are served by the Rust `theodb_rs` extension, NOT
 # the SQL `theodb` extension — so the full documented surface requires installing BOTH (the product ships
-# both; the Dockerfile init creates theodb + theodb_rs). embed_batch + import_pinecone_chunked are the
+# both; the Dockerfile init creates theodb + theodb_rs). embed_batch + import_vectors_chunked are the
 # audit-remediation additions.
 _REQUIRED_FUNCS = [
     ("theodb", "embed"), ("theodb", "embed_batch"),
-    ("theodb", "import_pinecone"), ("theodb", "import_pinecone_chunked"),
+    ("theodb", "import_vectors"), ("theodb", "import_vectors_chunked"),
     ("ai", "generate"), ("ai", "analyze_sentiment"), ("ai", "summarize"),
     ("ai", "rank"), ("ai", "generate_batch"), ("ai", "agg_summarize"), ("ai", "hybrid_search"),
     ("ai", "nl_to_sql"), ("ai", "nl_query"), ("theodb_ml", "create_model"), ("theodb_ml", "apply_model"),
@@ -86,7 +86,7 @@ def test_make_builds_install_script(tmp_path):
     """Concatenating the source bodies (the Makefile build path) yields a non-empty script (review M4 fix)."""
     text = _build_install_script_text()
     assert len(text) > 1000  # ~1031 lines of real SQL
-    # M17/M19: theodb.embed + ai.hybrid_search + theodb.import_pinecone(FUNCTION) + ai.nl_to_sql moved to the
+    # M17/M19: theodb.embed + ai.hybrid_search + theodb.import_vectors(FUNCTION) + ai.nl_to_sql moved to the
     # Rust theodb_rs extension, so they no longer appear in the concatenated SQL install script. Assert markers
     # for surface that STAYS in the SQL umbrella PARTS (30-70): ai.nl_query (plpgsql L3 keeper) + ai.summarize
     # (generative). (PARTS excludes sql/80 by design — its chunked PROCEDURE has a COMMIT the safety scan flags.)

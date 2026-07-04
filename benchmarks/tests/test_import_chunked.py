@@ -1,4 +1,4 @@
-"""Audit-remediation tests for theodb.import_pinecone_chunked (T5.1, audit #6/#7).
+"""Audit-remediation tests for theodb.import_vectors_chunked (T5.1, audit #6/#7).
 
 The PROCEDURE ingests a Pinecone export in chunk_size batches with a COMMIT per batch (bounds memory/WAL).
 Verified against the rebuilt image:
@@ -53,7 +53,7 @@ def test_import_chunked_all_inserted(conn):
     with conn.cursor() as cur:
         _make_table(cur, "imp_all")
         cur.execute(
-            "CALL theodb.import_pinecone_chunked('imp_all'::regclass, %s::jsonb, 1000)",
+            "CALL theodb.import_vectors_chunked('imp_all'::regclass, %s::jsonb, 1000)",
             (_export(2500),),
         )
         cur.execute("SELECT count(*) FROM imp_all")
@@ -69,7 +69,7 @@ def test_import_chunked_commits_batches(conn):
         # A bad record at index 1500 fails mid-chunk-2; chunk-1 (records 0..999) was already COMMITted.
         with pytest.raises(psycopg2.errors.InvalidParameterValue):
             cur.execute(
-                "CALL theodb.import_pinecone_chunked('imp_partial'::regclass, %s::jsonb, 1000)",
+                "CALL theodb.import_vectors_chunked('imp_partial'::regclass, %s::jsonb, 1000)",
                 (_export(2500, bad_at=1500),),
             )
         cur.execute("SELECT count(*) FROM imp_partial")
@@ -83,7 +83,7 @@ def test_chunk_size_guard(conn):
         _make_table(cur, "imp_guard")
         with pytest.raises(psycopg2.errors.InvalidParameterValue) as exc:
             cur.execute(
-                "CALL theodb.import_pinecone_chunked('imp_guard'::regclass, %s::jsonb, 0)",
+                "CALL theodb.import_vectors_chunked('imp_guard'::regclass, %s::jsonb, 0)",
                 (_export(10),),
             )
         assert "chunk_size must be > 0" in str(exc.value)

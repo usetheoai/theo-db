@@ -4,16 +4,16 @@
 -- parsimony ladder). Safe dynamic SQL via regclass + %I — identifiers never interpolated raw; values bound.
 -- deps (vector) declared in theodb.control `requires` (M15).
 --
--- M19 (ROADMAP-v2): the `theodb.import_pinecone` FUNCTION is now implemented in Rust by the `theodb_rs`
--- extension (theodb_rs/src/migrate.rs) — NOT here. The chunked PROCEDURE `theodb.import_pinecone_chunked`
+-- M19 (ROADMAP-v2): the `theodb.import_vectors` FUNCTION is now implemented in Rust by the `theodb_rs`
+-- extension (theodb_rs/src/migrate.rs) — NOT here. The chunked PROCEDURE `theodb.import_vectors_chunked`
 -- STAYS plpgsql below (ADR-D): only a plpgsql PROCEDURE can COMMIT per batch — a Rust #[pg_extern] function
 -- runs in the caller's transaction and cannot. Same %I-quoted, regclass-validated, parameter-bound discipline
 -- in both. This file keeps the `theodb` schema bootstrap + the chunked PROCEDURE.
 
 CREATE SCHEMA IF NOT EXISTS theodb;
 
--- theodb.import_pinecone_chunked(...) — M-audit-remediation (audit #6 unbounded_collection / #7 memory_inefficiency).
--- The theodb.import_pinecone FUNCTION (now Rust, theodb_rs/src/migrate.rs) ingests the WHOLE export in ONE
+-- theodb.import_vectors_chunked(...) — M-audit-remediation (audit #6 unbounded_collection / #7 memory_inefficiency).
+-- The theodb.import_vectors FUNCTION (now Rust, theodb_rs/src/migrate.rs) ingests the WHOLE export in ONE
 -- transaction (unbounded memory/WAL for a large export). This PROCEDURE ingests in `chunk_size` batches with a
 -- COMMIT per batch, bounding the in-flight footprint of a large migration. A FUNCTION CANNOT COMMIT (it runs in
 -- the caller's transaction — true for the plpgsql original AND the Rust port) — only a PROCEDURE (CALLed) can;
@@ -28,7 +28,7 @@ CREATE SCHEMA IF NOT EXISTS theodb;
 -- Semantics (documented, NOT all-or-nothing): a mid-run failure leaves already-COMMITted batches persisted
 -- (that is the point of chunking — bounded footprint + partial progress survives an abort). Use the atomic
 -- FUNCTION when you need all-or-nothing.
-CREATE PROCEDURE theodb.import_pinecone_chunked(
+CREATE PROCEDURE theodb.import_vectors_chunked(
     target        regclass,
     export        jsonb,
     chunk_size    int  DEFAULT 1000,
@@ -46,11 +46,11 @@ DECLARE
     ins   text;
 BEGIN
     IF chunk_size IS NULL OR chunk_size <= 0 THEN
-        RAISE EXCEPTION 'theodb.import_pinecone_chunked: chunk_size must be > 0 (got %)', chunk_size
+        RAISE EXCEPTION 'theodb.import_vectors_chunked: chunk_size must be > 0 (got %)', chunk_size
             USING ERRCODE = '22023';
     END IF;
     IF jsonb_typeof(export) <> 'array' THEN
-        RAISE EXCEPTION 'theodb.import_pinecone_chunked: export must be a JSON array of records'
+        RAISE EXCEPTION 'theodb.import_vectors_chunked: export must be a JSON array of records'
             USING ERRCODE = '22023';
     END IF;
 
@@ -65,7 +65,7 @@ BEGIN
         WHILE j < LEAST(i + chunk_size, total) LOOP
             rec := export -> j;   -- index into the materialized jsonb (no portal held across COMMIT)
             IF NOT (rec ? 'id' AND rec ? 'values') THEN
-                RAISE EXCEPTION 'theodb.import_pinecone_chunked: each record must have "id" and "values" (got: %)', rec
+                RAISE EXCEPTION 'theodb.import_vectors_chunked: each record must have "id" and "values" (got: %)', rec
                     USING ERRCODE = '22023';
             END IF;
             EXECUTE ins USING rec->>'id', (rec->'values')::text, COALESCE(rec->'metadata', '{}'::jsonb);
@@ -75,14 +75,14 @@ BEGIN
         i := i + chunk_size;
     END LOOP;
 
-    RAISE NOTICE 'theodb.import_pinecone_chunked: imported % records in chunks of %', total, chunk_size;
+    RAISE NOTICE 'theodb.import_vectors_chunked: imported % records in chunks of %', total, chunk_size;
 END;
 $$;
 
-COMMENT ON PROCEDURE theodb.import_pinecone_chunked(regclass, jsonb, int, text, text, text) IS
+COMMENT ON PROCEDURE theodb.import_vectors_chunked(regclass, jsonb, int, text, text, text) IS
     'Chunked Pinecone import: ingest a JSON array of {id,values,metadata} into a TheoDB table in chunk_size '
     'batches with a COMMIT per batch (bounds memory/WAL for large migrations). CALL in autocommit. NOT '
-    'all-or-nothing (committed batches survive a mid-run abort) — use theodb.import_pinecone (FUNCTION) for '
+    'all-or-nothing (committed batches survive a mid-run abort) — use theodb.import_vectors (FUNCTION) for '
     'small/atomic imports. Same %I-quoted, parameter-bound dynamic SQL (injection-safe). audit-remediation.';
 
-REVOKE ALL ON PROCEDURE theodb.import_pinecone_chunked(regclass, jsonb, int, text, text, text) FROM PUBLIC;
+REVOKE ALL ON PROCEDURE theodb.import_vectors_chunked(regclass, jsonb, int, text, text, text) FROM PUBLIC;

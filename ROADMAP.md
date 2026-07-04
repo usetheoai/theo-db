@@ -1,9 +1,9 @@
-# TheoDB — Roadmap (banco real, Postgres-based, código próprio Rust/Go)
+# TheoDB — Roadmap (banco real, Postgres-based, código próprio Rust)
 
 > **Este é o roadmap ATIVO** — o path convencional (`ROADMAP.md`) que o cycle-kit lê e o `cycle-release` flipa.
 > Origem: **ADR `0006-own-code-postgres-based-rust-go`** (virada de mandato "v2", sign-off CTO, 2026-06-29).
-> Substituiu o antigo roadmap v1 (tese de composição, M0–M16 entregues como distribuição), agora arquivado em
-> [`docs/history/ROADMAP-v1.md`](docs/history/ROADMAP-v1.md) como histórico do que foi provado + base de paridade.
+> Substituiu o antigo roadmap v1 (tese de composição, M0–M16 entregues como distribuição). O foco é o banco:
+> o engine PostgreSQL + a extensão própria (control-plane/deploy foram removidos do escopo deste repositório).
 > Norte: transformar TheoDB de "distribuição que compõe extensões de terceiros" em um **banco de dados real, com
 > código PRÓPRIO**, dependendo o **mínimo possível** de bibliotecas externas, **mantendo a engine PostgreSQL**
 > (C, wire-compat).
@@ -50,6 +50,11 @@ capacidades-killer são **nossas**, não uma colagem de extensões de terceiros.
 - **Columnar próprio (substituir DuckDB/`pg_mooncake`)** — reescrever um motor colunar vetorizado é PhD-level
   e anos (Regra 9). HTAP colunar permanece via a peça permissiva atual **ou** é deferido; não é candidato a
   "código próprio" no v2 inicial. Reabrir exige ADR.
+  > **Exceção permissiva (Regra 9), decidida no M30 / ADR 0013 (2026-07-03):** `pg_mooncake`/`pg_duckdb` (MIT)
+  > para columnar/HTAP e `pg_textsearch` (permissivo) para BM25 são **mantidos como exceções explícitas** ao
+  > mandato own-code — justificadas por evidência medida (columnar ~14× a 5M (mean±std); BM25 nDCG 0.95 vs 0.51) e por não
+  > haver peça own-code permissiva que resolva (Citus/Hydra columnar são AGPL — barrados por D1). Gated para
+  > adoção; não embarcados ainda.
 - **Reescrever HTTP/serde/crypto/parser genérico** — isso é reinventar a roda (Regra 9). Usamos crates
   auditados mínimos.
 
@@ -209,14 +214,18 @@ pgvector/pgvectorscale/vectorchord (todos AMs).
 mínimas) ou são deprecados. O `## Fora de escopo do v2` já exige "Reabrir exige ADR" para columnar — **este é
 esse ADR**.
 
+**Decisão (2026-07-03, CTO): MANTER os dois** como exceções permissivas (Regra 9), gated para adoção futura —
+ADR [`0013-v1-legacy-columnar-bm25-scope`](docs/adr/0013-v1-legacy-columnar-bm25-scope.md).
+
 **Definition of done:**
 
-- [ ] ADR `0007-v1-legacy-columnar-bm25-scope` (MADR 3.0): manter / deprecar-e-remover / reescrever-próprio, com trade-offs + evidência.
-- [ ] Se **deprecar**: plano de remoção com trilha (CI jobs `columnar-measure`/`ai-sql`-bm25, Dockerfiles throwaway, superfície SQL, docs) — como ciclo próprio, não delete solto.
-- [ ] Se **manter**: nota explícita no ROADMAP de que columnar/bm25 são exceção permissiva ao mandato own-code (justificativa Regra 9).
-- [ ] CHANGELOG + `## Relação com o v1` atualizados com a decisão.
+- [x] ADR `0013-v1-legacy-columnar-bm25-scope` (MADR 3.0): decisão = **MANTER** ambos, trade-offs + evidência + alternativa rejeitada (deprecar). *(ADR 0007 já estava ocupado; usado 0013.)*
+- [x] Evidência de benchmark validando o KEEP: columnar-at-scale (`docs/benchmarks/m30-columnar-scale.md`) — columnstore vence o row-store **2.99× (100k) → 8.89× (1M) → 13.87× (5M) — mean±std, effect>variância**, correto (match) + `DuckDBScan`; fecha o gap UNBENCHMARKED do M6. BM25: nDCG 0.95 vs 0.51 (m7).
+- [x] Nota de exceção permissiva no ROADMAP (§ Fora de escopo do v2 — Regra 9).
+- [x] CHANGELOG + `## Relação com o v1` atualizados com a decisão.
 
-**Dependencies:** — (decisão independente; pode rodar em paralelo). **Risco:** decisão de produto/CTO; sem risco técnico. **Nota:** alinha com `## Fora de escopo do v2` ("Columnar próprio… Reabrir exige ADR").
+**Dependencies:** — (decisão independente). **Risco:** decisão de produto/CTO; sem risco técnico. **Nota:** o
+caminho de adoção (embarcar columnar: build PG17 OU bump PG18) é milestone futura — M30 é decisão + evidência.
 
 ---
 
@@ -563,3 +572,6 @@ M19 ─────────────────────────�
 - `ROADMAP.md` (v1): M0–M16 entregues (distribuição-composição). Permanece como histórico + base funcional
   (os testes do v1 são a **prova de paridade** da reescrita do v2).
 - ADRs: `0006` é o norte; `0001` núcleo mantido; `0002/0004/0005` supersedidos/reabertos em parte (ver notas).
+- **Columnar (M6) + BM25 (M7)** — os dois pilares v1 de composição foram **mantidos** (M30 / ADR `0013`,
+  2026-07-03) como exceções permissivas (Regra 9), com evidência medida (columnar ~14× a 5M (mean±std); BM25 nDCG 0.95 vs
+  0.51). Gated para adoção; o leg lexical shipado segue o `ts_rank_cd` nativo.

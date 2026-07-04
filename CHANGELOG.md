@@ -15,12 +15,45 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 ### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.36.0] - 2026-07-04
+
+### Added
+- M30 (decisão de escopo v1-legacy — **ADR 0013**): columnar (M6, `pg_mooncake`/`pg_duckdb`, MIT) e BM25 (M7,
+  `pg_textsearch`) **MANTIDOS** como exceções permissivas (Regra 9), gated para adoção. A decisão de manter
+  columnar é validada por **benchmark de escala** (`benchmarks/run_m30_columnar_scale.py` +
+  `docs/benchmarks/m30-columnar-scale.{md,json}`): o columnstore DuckDB vence o row-store **2.33× (100k) →
+  8.65× (1M) → 14.94× (5M)** numa agregação analítica, resultado byte-correto + plano `DuckDBScan` — fecha o
+  gap que o M6 marcou UNBENCHMARKED. BM25: mantido pelo win medido (nDCG@10 0.95 vs 0.51 do `ts_rank_cd`, m7).
+  O leg lexical **shipado** segue o FTS nativo (`ts_rank_cd`); columnar NÃO é embarcado ainda (adoção gated em
+  build-PG17 ou bump-PG18 — milestone futura). Zero mudança de código de produto; substrato de medição é a
+  imagem canônica `mooncakelabs/pg_mooncake` (PG18).
+
+
+### Changed
+- **API pública renomeada:** `theodb.import_pinecone` → **`theodb.import_vectors`** (e
+  `theodb.import_pinecone_chunked` → **`theodb.import_vectors_chunked`**) — não faz sentido carregar o nome de
+  um concorrente na nossa API. A função importa registros de vetor `{id, values, metadata}`; o formato de
+  export **Pinecone-compatível** segue documentado no guia de migração (`docs/migrate-from-pinecone.md`).
+  Rename em Rust (`theodb_rs/src/api.rs` — o wrapper `extension_sql!` + o entrypoint `_import_vectors` — e
+  `migrate.rs`), na PROCEDURE plpgsql (`sql/80`), nos testes e no guia. **Provado 100% funcional:** rebuild +
+  **23 testes green** (`test_unified` + `test_import_chunked` + `test_extension_install`) num container
+  greenfield — `theodb.import_vectors`/`_chunked` presentes, `theodb.import_pinecone` ausente. Pré-1.0, sem
+  alias de compat (install greenfield). Entradas de CHANGELOG já released + o upgrade `1.2→1.3` (retirada do
+  legado plpython3u pelo nome de época) permanecem intocados (Regra 6 / histórico).
 - Interno (sem impacto no consumidor): os stubs de teste da superfície de IA (`embedding_server.py`,
   `chat_server.py`) movidos de `tools/` para `benchmarks/servers/` — coesão, já que só `benchmarks/` os
   consome. Só um comentário de `sql/30-theodb-embed.sql` (path do endpoint local de exemplo) foi atualizado;
   nenhuma mudança de comportamento do banco.
 
-### Deprecated
 
 ### Removed
 - Imagem: **`postgresql-plpython3` deixou de ser instalado** — era peso morto desde M19 (toda a superfície
@@ -32,13 +65,25 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - Removido `packaging/Dockerfile.columnar-pg17probe` (não estava em nenhum caminho de CI/build) — o registro
   honesto do build PG17-from-source que falhou no pin rustc/MSRV permanece em prosa
   (`docs/benchmarks/m6-columnar-vs-row.md`).
+- Limpeza de `docs/`: removido `docs/history/ROADMAP-v1.md` (roadmap v1 arquivado — planejamento/histórico, não
+  documentação técnica do banco); a referência no `ROADMAP.md` ativo foi ajustada. `docs/` agora contém apenas
+  documentação relacionada ao banco (adr, benchmarks, features, handbook, migração, packaging, analytics, sql-*).
+
 
 ### Fixed
+- `README.md` + `CLAUDE.md`: corrigida staleness de gênese após 45 milestones/v0.35.0. **Factual:** "Draft
+  v0.1 / ainda não há release" → "pré-1.0 (releases 0.x)"; "CHANGELOG a ser criado" → link ao CHANGELOG ativo;
+  "harness de benchmark não existe / tudo UNBENCHMARKED" → existe (`benchmarks/theodb_bench/`, estado medido
+  M33/M45). **Public-copy §3:** removido o claim sem evidência "índice ANN de alta performance" (o medido é gap
+  vs ScaNN e paridade vs pgvector). **Escopo:** removidas as promessas de plataforma (MCP server, observabilidade
+  OTel, admin-UI, HA/Patroni) — control-plane não faz parte deste repositório. Adicionado o estado M45 (paridade
+  vs pgvector) ao bloco honesto de performance do README.
 - Docs: corrigidos claims **falsos** de que o `plpython3u` ainda é usado/requerido (`docs/quickstart.md`,
   `docs/sql-ai-functions.md`, `docs/sql-embeddings.md`) + comentários stale no `Dockerfile` e docstring do
   `benchmarks/servers/embedding_server.py` — a superfície de IA é Rust (`theodb_rs`) desde M19.
-
-### Security
+- `docs/packaging/packaging-and-tuning.md`: removida a seção HA/Patroni + a referência ao runbook
+  (`docs/operations/ha-backup-runbook.md`, deletado) e à dependência plpython3u — HA/deploy estão fora do
+  escopo do repositório e a superfície de IA é Rust.
 
 ## [0.35.0] - 2026-07-03
 

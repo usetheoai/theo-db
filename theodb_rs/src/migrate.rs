@@ -1,5 +1,5 @@
 //! SPI-orchestration adapter (blueprint M19, ADR-C): the Pinecone import migration helper, ported from the plpgsql
-//! `theodb.import_pinecone` FUNCTION (sql/80). Maps a Pinecone export {id, values, metadata} → a relational
+//! `theodb.import_vectors` FUNCTION (sql/80). Maps a Pinecone export {id, values, metadata} → a relational
 //! table (id, embedding vector, metadata jsonb). The Rust function owns the loop + native jsonb parsing
 //! (serde — no pinecone client, no stdlib json dependency); the INSERT is built with Postgres-native `%I`
 //! quoting via `format()` over SPI (NOT hand-rolled), so the injection-safety of the plpgsql version is
@@ -30,7 +30,7 @@ pub(crate) fn import(
 ) -> i32 {
     let records = match export {
         Value::Array(a) => a,
-        _ => err_input("theodb.import_pinecone: export must be a JSON array of records"),
+        _ => err_input("theodb.import_vectors: export must be a JSON array of records"),
     };
 
     // Build the INSERT once with Postgres-native %I quoting (injection-safe) — one format() call over SPI.
@@ -41,7 +41,7 @@ pub(crate) fn import(
     )
     .ok()
     .flatten()
-    .unwrap_or_else(|| err_input("theodb.import_pinecone: could not build INSERT"));
+    .unwrap_or_else(|| err_input("theodb.import_vectors: could not build INSERT"));
 
     // One mutable SPI session for the whole loop (mirrors the plpgsql FUNCTION running in the caller's txn:
     // a mid-loop error aborts the statement — no partial insert survives). A wrong-dim `$2::vector` cast
@@ -51,7 +51,7 @@ pub(crate) fn import(
         for rec in &records {
             if rec.get("id").is_none() || rec.get("values").is_none() {
                 err_input(&format!(
-                    "theodb.import_pinecone: each record must have \"id\" and \"values\" (got: {rec})"
+                    "theodb.import_vectors: each record must have \"id\" and \"values\" (got: {rec})"
                 ));
             }
             // rec->>'id' semantics: string stays unquoted; number/bool → text; null/absent → NULL.
@@ -73,7 +73,7 @@ pub(crate) fn import(
                     None,
                     &[id_text.into(), values_text.into(), pgrx::JsonB(meta).into()],
                 )
-                .unwrap_or_else(|e| err_input(&format!("theodb.import_pinecone: insert failed: {e:?}")));
+                .unwrap_or_else(|e| err_input(&format!("theodb.import_vectors: insert failed: {e:?}")));
             n += 1;
         }
         n

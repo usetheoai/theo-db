@@ -7,6 +7,17 @@ goal: Make the all-in-one unification demonstrable — unified query + recall-pr
 
 # Plan: M16 — Unification made real: the unified query, filtered search, and Pinecone migration
 
+> **✅ COMPLETED + SUPERSEDED (arquivado 2026-07-03).** M16 foi entregue: todos os deliverables existem e a
+> métrica-alvo passa — `benchmarks/tests/test_unified.py` **11/11 green** contra o container (verificado
+> 2026-07-03: query unificada, recall sob filtro via `hnsw.iterative_scan`, index-scan, import Pinecone
+> map/reject/safe-identifiers/dim-mismatch, migrate-doc SQL, no-perf-claim, quickstart section). O
+> `theodb.import_pinecone` (FUNCTION) foi **portado para Rust no M19** (`theodb_rs/src/migrate.rs`, commit
+> `e00a9a6`); o `import_pinecone_chunked` (PROCEDURE plpgsql, COMMIT-por-batch) permanece no `sql/80`.
+> Follow-ups conscientemente deferidos e ainda abertos: `ndjson`/parquet bulk e `sparse_values` (densos-only).
+> **Nota de staleness (histórica, não corrigida):** a Baseline Context abaixo descreve o mundo pré-M19 —
+> menciona `theodb.embed` em `plpython3u` (hoje Rust) e `tools/chat_server.py` (hoje `benchmarks/servers/`).
+> Preservado como registro do que M16 planejou.
+
 > **Version 1.1** (edge-case MUST-FIX absorbed: T1.2 over-filtering test must PROVE the edge is real — assert `n_without < k` first, else xfail; T2.1 adds hostile-identifier + dim-mismatch negative tests) — TheoDB's moat is unification (ADR 0005): vector + relational + AI in one instance, one
 > transactional SQL, no ETL/2nd system. M15 made it installable; M16 makes the unification **demonstrable** —
 > a canonical unified query (vector `JOIN` relational + `WHERE` + `ai.*`), **recall-preserving filtered
