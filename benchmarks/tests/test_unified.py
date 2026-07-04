@@ -3,7 +3,7 @@
 Proves the ADR-0005 moat is demonstrable: vector + relational + AI in one transactional SQL, filtered
 search that preserves recall (no over-filtering), and a dependency-free Pinecone import. Honesty (ADR 0005):
 no speed claim — correctness (recall under filter) + unification. Runs against a container with the theodb
-extension (theo-db:m16, which bundles sql/80 import_pinecone). Connection via PGHOST/PGPORT.
+extension (theo-db:m16, which bundles sql/80 import_vectors). Connection via PGHOST/PGPORT.
 """
 
 import math
@@ -239,17 +239,17 @@ def test_filtered_search_uses_index(admin_conn):
         conn.close()
 
 
-# ---- T2.1 — import_pinecone --------------------------------------------------------------------------
+# ---- T2.1 — import_vectors --------------------------------------------------------------------------
 
-def test_import_pinecone_maps_records(admin_conn):
-    """import_pinecone maps a Pinecone export {id,values,metadata} → (id, embedding vector, metadata jsonb)."""
+def test_import_vectors_maps_records(admin_conn):
+    """import_vectors maps a Pinecone export {id,values,metadata} → (id, embedding vector, metadata jsonb)."""
     conn = _fresh_db_with_ext(admin_conn, "m16_import")
     try:
         with conn.cursor() as cur:
             cur.execute("CREATE TABLE items (id text PRIMARY KEY, embedding vector(3), metadata jsonb)")
             export = '[{"id":"a","values":[1,0,0],"metadata":{"cat":3}},' \
                      ' {"id":"b","values":[0,1,0],"metadata":{"cat":7}}]'
-            cur.execute("SELECT theodb.import_pinecone('items'::regclass, %s::jsonb)", (export,))
+            cur.execute("SELECT theodb.import_vectors('items'::regclass, %s::jsonb)", (export,))
             assert cur.fetchone()[0] == 2
             cur.execute("SELECT metadata->>'cat' FROM items WHERE id='a'")
             assert cur.fetchone()[0] == "3"
@@ -259,7 +259,7 @@ def test_import_pinecone_maps_records(admin_conn):
         conn.close()
 
 
-def test_import_pinecone_rejects_malformed(admin_conn):
+def test_import_vectors_rejects_malformed(admin_conn):
     """Non-array export AND a record missing 'values' each raise SQLSTATE 22023 (typed, fail-fast)."""
     conn = _fresh_db_with_ext(admin_conn, "m16_import")
     try:
@@ -269,7 +269,7 @@ def test_import_pinecone_rejects_malformed(admin_conn):
             for bad in ('{"id":"a","values":[1,0,0]}',           # object, not array
                         '[{"id":"a"}]'):                          # record missing 'values'
                 with pytest.raises(psycopg2.errors.InvalidParameterValue):  # SQLSTATE 22023
-                    cur.execute("SELECT theodb.import_pinecone('t'::regclass, %s::jsonb)", (bad,))
+                    cur.execute("SELECT theodb.import_vectors('t'::regclass, %s::jsonb)", (bad,))
                 conn.rollback()
             cur.execute("SELECT count(*) FROM t")
             assert cur.fetchone()[0] == 0  # no partial/corrupt insert
@@ -277,14 +277,14 @@ def test_import_pinecone_rejects_malformed(admin_conn):
         conn.close()
 
 
-def test_import_pinecone_safe_identifiers(admin_conn):
+def test_import_vectors_safe_identifiers(admin_conn):
     """Hostile table/column identifiers are handled via %I/regclass — no SQL injection (EC-2)."""
     conn = _fresh_db_with_ext(admin_conn, "m16_import")
     try:
         with conn.cursor() as cur:
             cur.execute('CREATE TABLE "weird;name" (id text PRIMARY KEY, "emb;col" vector(3), metadata jsonb)')
             cur.execute(
-                "SELECT theodb.import_pinecone('\"weird;name\"'::regclass, %s::jsonb, 'id', 'emb;col', 'metadata')",
+                "SELECT theodb.import_vectors('\"weird;name\"'::regclass, %s::jsonb, 'id', 'emb;col', 'metadata')",
                 ('[{"id":"x","values":[1,2,3],"metadata":{}}]',))
             assert cur.fetchone()[0] == 1
             cur.execute('SELECT count(*) FROM "weird;name"')
@@ -293,7 +293,7 @@ def test_import_pinecone_safe_identifiers(admin_conn):
         conn.close()
 
 
-def test_import_pinecone_dim_mismatch(admin_conn):
+def test_import_vectors_dim_mismatch(admin_conn):
     """A values array of the wrong length raises a typed error (vector typmod), no corrupt insert (EC-2)."""
     conn = _fresh_db_with_ext(admin_conn, "m16_import")
     try:
@@ -301,7 +301,7 @@ def test_import_pinecone_dim_mismatch(admin_conn):
             cur.execute("CREATE TABLE t3 (id text PRIMARY KEY, embedding vector(3), metadata jsonb)")
             conn.commit()
             with pytest.raises(psycopg2.errors.DataException):  # vector dim mismatch (22xxx)
-                cur.execute("SELECT theodb.import_pinecone('t3'::regclass, %s::jsonb)",
+                cur.execute("SELECT theodb.import_vectors('t3'::regclass, %s::jsonb)",
                             ('[{"id":"a","values":[1,2,3,4,5]}]',))  # 5 != 3
             conn.rollback()
             cur.execute("SELECT count(*) FROM t3")
@@ -317,7 +317,7 @@ def test_migrate_doc_runnable_sql_executes(admin_conn):
     (e.g. a dim-mismatch) that a string grep would miss. Runs the runnable ```sql blocks in order."""
     assert MIGRATE_DOC.exists(), "docs/migrate-from-pinecone.md missing"
     text = MIGRATE_DOC.read_text()
-    assert "theodb.import_pinecone" in text  # the guide must teach the function
+    assert "theodb.import_vectors" in text  # the guide must teach the function
     blocks = re.findall(r"```sql\n(.*?)```", text, re.DOTALL)
     assert blocks, "migration guide has no runnable SQL block"
     conn = _fresh_db_with_ext(admin_conn, "m16_import")

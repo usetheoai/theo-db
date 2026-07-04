@@ -15,6 +15,16 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 ### Changed
+- **API pública renomeada:** `theodb.import_pinecone` → **`theodb.import_vectors`** (e
+  `theodb.import_pinecone_chunked` → **`theodb.import_vectors_chunked`**) — não faz sentido carregar o nome de
+  um concorrente na nossa API. A função importa registros de vetor `{id, values, metadata}`; o formato de
+  export **Pinecone-compatível** segue documentado no guia de migração (`docs/migrate-from-pinecone.md`).
+  Rename em Rust (`theodb_rs/src/api.rs` — o wrapper `extension_sql!` + o entrypoint `_import_vectors` — e
+  `migrate.rs`), na PROCEDURE plpgsql (`sql/80`), nos testes e no guia. **Provado 100% funcional:** rebuild +
+  **23 testes green** (`test_unified` + `test_import_chunked` + `test_extension_install`) num container
+  greenfield — `theodb.import_vectors`/`_chunked` presentes, `theodb.import_pinecone` ausente. Pré-1.0, sem
+  alias de compat (install greenfield). Entradas de CHANGELOG já released + o upgrade `1.2→1.3` (retirada do
+  legado plpython3u pelo nome de época) permanecem intocados (Regra 6 / histórico).
 - Interno (sem impacto no consumidor): os stubs de teste da superfície de IA (`embedding_server.py`,
   `chat_server.py`) movidos de `tools/` para `benchmarks/servers/` — coesão, já que só `benchmarks/` os
   consome. Só um comentário de `sql/30-theodb-embed.sql` (path do endpoint local de exemplo) foi atualizado;

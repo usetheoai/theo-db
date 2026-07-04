@@ -118,10 +118,10 @@ mod theodb_rs {
     }
 
     // ── M19: Pinecone import — Rust loop + %I-quoted INSERT via SPI (crate::migrate) ─────────────────────
-    /// `theodb_rs._import_pinecone` — the Pinecone import entrypoint (the SQL `theodb.import_pinecone`).
+    /// `theodb_rs._import_vectors` — the Pinecone import entrypoint (the SQL `theodb.import_vectors`).
     /// The public wrapper passes `target::text` (regclass→quoted name). Returns the count of inserted records.
     #[pg_extern]
-    fn _import_pinecone(
+    fn _import_vectors(
         target_text: &str,
         export: pgrx::JsonB,
         id_col: &str,
@@ -474,13 +474,13 @@ REVOKE ALL ON FUNCTION theodb_rs._hybrid_search_json(jsonb) FROM PUBLIC;
     requires = [_hybrid_search_rrf, _hybrid_search_json],
 );
 
-// SQL wrapper: the public migration helper `theodb.import_pinecone` (M19 — was plpgsql in sql/80, now Rust).
-// The chunked PROCEDURE theodb.import_pinecone_chunked STAYS plpgsql (ADR-D — only a plpgsql PROCEDURE can
+// SQL wrapper: the public migration helper `theodb.import_vectors` (M19 — was plpgsql in sql/80, now Rust).
+// The chunked PROCEDURE theodb.import_vectors_chunked STAYS plpgsql (ADR-D — only a plpgsql PROCEDURE can
 // COMMIT per batch). Created INTO the existing `theodb` schema; exact signature + DEFAULTs preserved; REVOKEd
 // from PUBLIC (writes to caller-owned tables). The thin wrapper bridges `regclass` to the text-typed Rust fn.
 extension_sql!(
     r#"
-CREATE FUNCTION theodb.import_pinecone(
+CREATE FUNCTION theodb.import_vectors(
     target        regclass,
     export        jsonb,
     id_col        text DEFAULT 'id',
@@ -488,19 +488,19 @@ CREATE FUNCTION theodb.import_pinecone(
     metadata_col  text DEFAULT 'metadata'
 ) RETURNS integer
 LANGUAGE sql
-AS $$ SELECT theodb_rs._import_pinecone(target::text, export, id_col, embedding_col, metadata_col) $$;
+AS $$ SELECT theodb_rs._import_vectors(target::text, export, id_col, embedding_col, metadata_col) $$;
 
-COMMENT ON FUNCTION theodb.import_pinecone(regclass, jsonb, text, text, text) IS
+COMMENT ON FUNCTION theodb.import_vectors(regclass, jsonb, text, text, text) IS
   'Import a Pinecone export (JSON array of {id,values,metadata}) into a TheoDB table (id, embedding vector, '
   'metadata jsonb). Native jsonb (serde); safe dynamic SQL (%I-quoted, regclass-validated, parameter-bound). '
   'Implemented in Rust (theodb_rs, M19). Fail-fast 22023 on a non-array export or a record missing id/values. '
-  'For large/atomic-vs-chunked imports see theodb.import_pinecone_chunked (PROCEDURE). Not granted to PUBLIC.';
+  'For large/atomic-vs-chunked imports see theodb.import_vectors_chunked (PROCEDURE). Not granted to PUBLIC.';
 
-REVOKE ALL ON FUNCTION theodb.import_pinecone(regclass, jsonb, text, text, text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION theodb_rs._import_pinecone(text, jsonb, text, text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb.import_vectors(regclass, jsonb, text, text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb_rs._import_vectors(text, jsonb, text, text, text) FROM PUBLIC;
 "#,
     name = "theodb_import_wrapper",
-    requires = [_import_pinecone],
+    requires = [_import_vectors],
 );
 
 // SQL wrappers: TheoDB's own distance functions (M20 — own f32-parity ops over pgvector's values). Created
