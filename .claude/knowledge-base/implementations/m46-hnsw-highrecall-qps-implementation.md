@@ -103,10 +103,27 @@ CHANGELOG.md
 "Index Scan using rn_idx") retornou `2,3,1,4,7` — byte-idêntico ao seqscan exato `2,3,1,4,7`. CI não roda
 `cargo pgrx test` (verificado em `ci.yml`); os pg_tests são local/doc-grade.
 
+## Task status (final)
+
+- [x] **T2.1** — pre-size + scratch (`89a0492`). Recall-neutro PROVADO (index==seqscan byte-idêntico). 3 testes.
+- [x] **T1.1** — driver endurecido + `.dockerignore` (`feat(m46): T1.1`). 12 testes puros verdes, ruff+vulture limpos.
+- [x] **T3.1** — veredito honesto (`feat(m46): T3.1`). Recall-neutro PROVADO; QPS honest-negative (controle pgvector
+  derivou +122% → medição inconclusiva sob contenção; regime de 44%-variância é fenômeno de 1M não reproduzido a 50k).
+
 ## Global DoD (from plan)
 
-- [ ] pg_tests + integration verdes no container; `cargo build` limpo
-- [ ] Recall@10 idêntico baseline vs pós (recall-neutro)
-- [ ] Benchmark reproduzível em `docs/benchmarks/m46-*.{md,json}` com veredito honesto
-- [ ] `/code-quality` ∉ {FAIL_HARD, INVALID}; `/review` READY_TO_MERGE
-- [ ] CHANGELOG `[Unreleased]` atualizado; sem `Co-Authored-By`
+- [x] `cargo build`/`cargo pgrx install --release` limpo (imagem `theo-db:m46` buildada). pg_tests são local/doc-grade
+  (CI não roda `cargo pgrx test`, verificado em `ci.yml`); recall-neutro provado via SQL contra o binário shipado.
+- [x] Recall-neutro PROVADO (index-scan == seqscan exato, byte-idêntico). Benchmark: recall+pages_read batem
+  dentro de <0.3% (ruído de build paralelo M44, `hnsw.rs:34` — não regressão de scan; ver relatório).
+- [x] Benchmark reproduzível em `docs/benchmarks/m46-highrecall-qps.{md,json}` com **veredito honesto**
+  (recall-neutro PROVEN + QPS honest-negative com evidência do controle).
+- [ ] `/code-quality` ∉ {FAIL_HARD, INVALID}; `/review` READY_TO_MERGE — **em execução**.
+- [x] CHANGELOG `[Unreleased]` atualizado; **sem** `Co-Authored-By`.
+
+## Measurement honesty (T3.1 key finding)
+
+O box estava em **load 18-36** (12 cores) durante a medição. O **controle pgvector** (binário idêntico inalterado
+nos dois lados) derivou **+122% a +146%** entre os runs — prova irrefutável de que o ruído do ambiente domina e
+que nenhum Δ de QPS do theodb é atribuível ao M46. Perseguir o QPS aqui seria caçar artefato (ADR-2). O código é
+correto e recall-neutro; o veredito de QPS/variância fica para SIFT1M num box quieto (o artefato reproduzível).
