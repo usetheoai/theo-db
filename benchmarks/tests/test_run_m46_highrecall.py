@@ -126,6 +126,23 @@ def test_parse_pages_read_ignores_malformed():
     assert parse_pages_read(log) == {}  # never crashes on a format drift
 
 
+# ----------------------------- T3.1 verdict artifact (doc-check, grounded) -----------------------------
+
+def test_m46_verdict_present_and_grounded():
+    """T3.1 RED (plan): the report .md carries the baseline-vs-post deterministic table (recall + pages_read),
+    the control-drift evidence, and an EXPLICIT honest verdict — no bare 'faster' claim (public-copy.md)."""
+    from pathlib import Path
+    md = Path(__file__).resolve().parents[2] / "docs" / "benchmarks" / "m46-highrecall-qps.md"
+    assert md.exists(), "T3.1 report artifact must exist"
+    text = md.read_text()
+    assert "Recall-neutral: PROVEN" in text, "recall-neutral verdict must be explicit"
+    assert "control" in text.lower() and "drift" in text.lower(), "control-drift honesty check must be present"
+    assert "pages_read" in text, "deterministic pages_read evidence must be tabled"
+    assert "INCONCLUSIVE_UNDER_CONTENTION" in text or "NOT ESTABLISHED" in text, "QPS verdict must be explicit"
+    # no unqualified superiority claim (public-copy.md §4): 'faster' must not appear without a caveat marker
+    assert "makes **no** QPS superiority claim" in text or "no QPS" in text.lower()
+
+
 # ----------------------------- integration structure (needs a container) -----------------------------
 
 @pytest.mark.integration
