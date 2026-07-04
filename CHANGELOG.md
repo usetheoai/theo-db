@@ -24,6 +24,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   `Vec<Addr>`** no ground loop em vez de alocar por nó (`decode_neighbors_into`, espelha o `unvisited` reusado do
   pgvector). Zero nova dependência (hasher default). Recall-neutro **provado** (index-scan == seqscan exato,
   byte-idêntico) — a mudança elimina complexidade acidental (rehash super-linear em ef + churn de allocator).
+  Ganho de QPS não estabelecido nesta medição (box saturado, controle pgvector derivou +122%) — veredito honesto
+  diferido para medição same-graph num box quieto (`docs/benchmarks/m46-highrecall-qps.md`).
 
 ### Deprecated
 
