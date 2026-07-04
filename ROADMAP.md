@@ -543,6 +543,33 @@ race-free; o carrier atinge build competitivo (12 cores). Próximo: redução de
 
 ---
 
+### M46 — [ ] theodb_hnsw scan hot-path hygiene — fechar o déficit de QPS no alto recall (recall-neutro, benchmark-gated)
+
+**Objective (V2 — 1º milestone após o ROADMAP V1 completo):** o M45 (Pareto mean±std, SIFT1M) mediu PARIDADE
+theodb_hnsw vs pgvector, com déficit no alto recall (0.58× a recall 0.9932, effect>variância) e variância de QPS
+explodindo a ef≥200 (±44% vs pgvector ±1.7%). A discovery (3 council agents, código real + peers SOTA) achou a
+causa: overhead per-query **acidental** que escala com ef — `visited: HashSet::new()` (SipHash, capacity 0 → ~12
+rehashes a ef=200), heaps sem `with_capacity`, `Vec<Addr>` por nó (`hnsw_page.rs:518-520,200`). Complexidade
+acidental que pgvector/pgvectorscale não pagam. Achado honesto: parte do "gap" é ruído de medição (ef400 mede mais
+rápido que ef200 — impossível p/ custo real → dev box contendida). Fecha via pre-size + fast scratch, recall-neutro,
+com re-medição rigorosa (measurement-first).
+
+**Definition of done:**
+
+- [ ] `traverse` (`hnsw_page.rs:518-520`) pre-size das 3 estruturas per-query (`with_capacity(ef*m0*2)` etc.,
+  âncora pgvector `tidhash_create(ef*m*2)` + pgvectorscale `with_capacity(search_list_size*neigbors)`) +
+  scratch `Vec<Addr>` reusado no ground loop (elimina alloc-por-nó). **Zero nova dep** (hasher default, rung 5).
+- [ ] **Recall-neutro provado:** `traverse` retorna resultado byte-idêntico + `pages_read` idêntico antes/depois
+  por seed fixa (teste-âncora `assert_eq!` + property `decode_neighbors_into`). Se divergir 1 tid, é BUG.
+- [ ] Re-run do Pareto (`benchmarks/run_m46_highrecall.py`, median ≥5 runs + pages_read) → `docs/benchmarks/m46-*.{md,json}`;
+  veredito honesto por effect>variância: theodb QPS ≥ pgvector a recall ≥0.993 OU honest-negative com variância
+  a ef≥200 reduzida de ~44% p/ <15% (sem cherry-pick, `public-copy.md`).
+
+**Dependencies:** M45 (o Pareto baseline). **Risco (MÉDIO):** ruído da dev box (mitigado por median + back-to-back +
+pages_read determinístico). Blueprint: `.claude/knowledge-base/discoveries/blueprints/m46-hnsw-highrecall-qps-blueprint.md`.
+
+---
+
 ## Sequência e paralelismo
 
 ```
