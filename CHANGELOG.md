@@ -34,6 +34,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   (`docs/benchmarks/m6-columnar-vs-row.md`).
 
 ### Fixed
+- `README.md` + `CLAUDE.md`: corrigida staleness de gênese após 45 milestones/v0.35.0. **Factual:** "Draft
+  v0.1 / ainda não há release" → "pré-1.0 (releases 0.x)"; "CHANGELOG a ser criado" → link ao CHANGELOG ativo;
+  "harness de benchmark não existe / tudo UNBENCHMARKED" → existe (`benchmarks/theodb_bench/`, estado medido
+  M33/M45). **Public-copy §3:** removido o claim sem evidência "índice ANN de alta performance" (o medido é gap
+  vs ScaNN e paridade vs pgvector). **Escopo:** removidas as promessas de plataforma (MCP server, observabilidade
+  OTel, admin-UI, HA/Patroni) — control-plane não faz parte deste repositório. Adicionado o estado M45 (paridade
+  vs pgvector) ao bloco honesto de performance do README.
 - Docs: corrigidos claims **falsos** de que o `plpython3u` ainda é usado/requerido (`docs/quickstart.md`,
   `docs/sql-ai-functions.md`, `docs/sql-embeddings.md`) + comentários stale no `Dockerfile` e docstring do
   `benchmarks/servers/embedding_server.py` — a superfície de IA é Rust (`theodb_rs`) desde M19.
