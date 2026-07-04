@@ -13,6 +13,20 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.36.0] - 2026-07-04
+
+### Added
 - M30 (decisão de escopo v1-legacy — **ADR 0013**): columnar (M6, `pg_mooncake`/`pg_duckdb`, MIT) e BM25 (M7,
   `pg_textsearch`) **MANTIDOS** como exceções permissivas (Regra 9), gated para adoção. A decisão de manter
   columnar é validada por **benchmark de escala** (`benchmarks/run_m30_columnar_scale.py` +
@@ -22,6 +36,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   O leg lexical **shipado** segue o FTS nativo (`ts_rank_cd`); columnar NÃO é embarcado ainda (adoção gated em
   build-PG17 ou bump-PG18 — milestone futura). Zero mudança de código de produto; substrato de medição é a
   imagem canônica `mooncakelabs/pg_mooncake` (PG18).
+
 
 ### Changed
 - **API pública renomeada:** `theodb.import_pinecone` → **`theodb.import_vectors`** (e
@@ -39,7 +54,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   consome. Só um comentário de `sql/30-theodb-embed.sql` (path do endpoint local de exemplo) foi atualizado;
   nenhuma mudança de comportamento do banco.
 
-### Deprecated
 
 ### Removed
 - Imagem: **`postgresql-plpython3` deixou de ser instalado** — era peso morto desde M19 (toda a superfície
@@ -55,6 +69,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   documentação técnica do banco); a referência no `ROADMAP.md` ativo foi ajustada. `docs/` agora contém apenas
   documentação relacionada ao banco (adr, benchmarks, features, handbook, migração, packaging, analytics, sql-*).
 
+
 ### Fixed
 - `README.md` + `CLAUDE.md`: corrigida staleness de gênese após 45 milestones/v0.35.0. **Factual:** "Draft
   v0.1 / ainda não há release" → "pré-1.0 (releases 0.x)"; "CHANGELOG a ser criado" → link ao CHANGELOG ativo;
@@ -69,8 +84,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - `docs/packaging/packaging-and-tuning.md`: removida a seção HA/Patroni + a referência ao runbook
   (`docs/operations/ha-backup-runbook.md`, deletado) e à dependência plpython3u — HA/deploy estão fora do
   escopo do repositório e a superfície de IA é Rust.
-
-### Security
 
 ## [0.35.0] - 2026-07-03
 
