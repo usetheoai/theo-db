@@ -19,6 +19,13 @@ pub(super) const PARALLEL_BUILD_THRESHOLD: usize = 4096;
 
 /// Build the HNSW graph concurrently over `vectors` (all equal-dim) with pre-assigned `levels` (deterministic).
 /// Node 0 is the seed entry. Returns `(neighbors, entry, max_level)` in the same shape the sequential build yields.
+/// Every this many nodes, the leader joins all workers and calls `check_interrupt` (M48 T4.1). Batching is what
+/// makes cancellation possible AND safe: a `pg_sys::check_for_interrupts!` in the injected closure can
+/// `ereport(ERROR)` → longjmp, which MUST NOT cross a live worker thread (UB) — so it runs only between batches,
+/// when `thread::scope` has joined every worker. 4096 bounds the cancel latency to one batch without adding
+/// meaningful join overhead over a multi-thousand-node build.
+const CANCEL_CHECK_BATCH: usize = 4096;
+
 pub(super) fn build_parallel(
     vectors: &[Vec<f32>],
     levels: &[usize],
@@ -26,6 +33,7 @@ pub(super) fn build_parallel(
     m0: usize,
     ef_construction: usize,
     metric: Metric,
+    check_interrupt: &(dyn Fn() + Sync),
 ) -> (Vec<Vec<Vec<usize>>>, usize, usize) {
     let n = vectors.len();
     // One lock per node, guarding its per-layer neighbor lists (init empty, sized to the node's level).
@@ -33,25 +41,34 @@ pub(super) fn build_parallel(
         (0..n).map(|i| RwLock::new(vec![Vec::new(); levels[i] + 1])).collect();
     // Shared (entry, max_level). Node 0 is the seed; it is placed before the parallel phase (empty neighbors).
     let state = RwLock::new((0usize, levels[0]));
-    let counter = AtomicUsize::new(1); // node 0 already placed
 
     let nthreads = std::thread::available_parallelism()
         .map(|p| p.get())
         .unwrap_or(1)
         .min(n.max(1));
 
-    // `scope` guarantees all workers finish (and re-raises any worker panic) before returning — no `Arc`/`'static`.
-    std::thread::scope(|s| {
-        for _ in 0..nthreads {
-            s.spawn(|| loop {
-                let node = counter.fetch_add(1, Ordering::Relaxed);
-                if node >= n {
-                    break;
-                }
-                insert_node(node, vectors, levels, &neighbors, &state, m, m0, ef_construction, metric);
-            });
-        }
-    });
+    // Batched worker pool: each batch `[start, end)` gets a fresh counter so a worker's final over-fetch never
+    // leaks into the next batch. `scope` joins all workers (and re-raises any panic) before the batch returns —
+    // the ONLY point where `check_interrupt` (leader-only) is longjmp-safe.
+    let mut start = 1usize; // node 0 already placed
+    while start < n {
+        let end = (start + CANCEL_CHECK_BATCH).min(n);
+        let counter = AtomicUsize::new(start);
+        std::thread::scope(|s| {
+            for _ in 0..nthreads {
+                s.spawn(|| loop {
+                    let node = counter.fetch_add(1, Ordering::Relaxed);
+                    if node >= end {
+                        break;
+                    }
+                    insert_node(node, vectors, levels, &neighbors, &state, m, m0, ef_construction, metric);
+                });
+            }
+        });
+        // All workers joined — safe to run the injected cancellation check (it may ereport(ERROR)→longjmp).
+        check_interrupt();
+        start = end;
+    }
 
     let neighbors_plain: Vec<Vec<Vec<usize>>> =
         neighbors.into_iter().map(|rw| rw.into_inner().unwrap_or_else(|e| e.into_inner())).collect();

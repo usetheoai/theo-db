@@ -13,6 +13,8 @@ share the module-level connection. Crash tests live in test_am_crash.py.
 import os
 import re
 import subprocess
+import threading
+import time
 
 import psycopg2
 import pytest
@@ -109,7 +111,11 @@ def test_fold_preserves_scan_results(conn, am, opclass):
 
     size_pre = _rel_size(cur, table)
     cur.execute(f"DELETE FROM {table} WHERE id % 10 < 3")  # ~30% dead
-    cur.execute(f"VACUUM {table}")
+    # INDEX_CLEANUP ON forces ambulkdelete → the fold path. Plain VACUUM on this tiny table (heap < 32 pages)
+    # hits PG's index-vacuum bypass (vacuumlazy.c BYPASS_THRESHOLD_PAGES) and never calls ambulkdelete, so the
+    # fold would not run. A real (large) table triggers ambulkdelete without the flag; the flag only forces the
+    # path deterministically on the small fixture.
+    cur.execute(f"VACUUM (INDEX_CLEANUP ON) {table}")
     size_post = _rel_size(cur, table)
 
     # Correctness (ANN is approximate — assert recall overlap, not exact order): the fold must keep the
@@ -143,12 +149,14 @@ def test_fold_reclaims_pages(conn, am, opclass):
     table = f"m48_reclaim_{am}"
     _make_index(cur, table, am, opclass, n=500, dim=8)
 
+    # INDEX_CLEANUP ON forces the fold path on this small fixture (see test_fold_preserves for why plain VACUUM
+    # bypasses it). Both folds must actually run for the reclaim invariant to be exercised.
     cur.execute(f"DELETE FROM {table} WHERE id % 10 < 3")
-    cur.execute(f"VACUUM {table}")
+    cur.execute(f"VACUUM (INDEX_CLEANUP ON) {table}")
     size_fold1 = _rel_size(cur, table)
 
     cur.execute(f"DELETE FROM {table} WHERE id % 10 >= 7")
-    cur.execute(f"VACUUM {table}")
+    cur.execute(f"VACUUM (INDEX_CLEANUP ON) {table}")
     size_fold2 = _rel_size(cur, table)
 
     # The second fold reuses the region freed by the first ⇒ size does not grow. (Bounded growth; a fully
@@ -262,7 +270,7 @@ def test_fold_empty_corpus(conn, am, opclass):
     table = f"m48_empty_{am}"
     _make_index(cur, table, am, opclass, n=200, dim=8)
     cur.execute(f"DELETE FROM {table}")
-    cur.execute(f"VACUUM {table}")
+    cur.execute(f"VACUUM (INDEX_CLEANUP ON) {table}")  # force the fold-to-empty path on the small fixture
 
     # empty scan returns nothing, no error
     assert _index_knn(cur, table, [1.0] * 8, 5) == []
@@ -270,3 +278,73 @@ def test_fold_empty_corpus(conn, am, opclass):
     cur.execute(f"INSERT INTO {table} VALUES (999, %s)", (str([2.0] * 8),))
     assert _index_knn(cur, table, [2.0] * 8, 1) == [999]
     cur.execute(f"DROP TABLE {table}")
+
+
+def _connect():
+    return psycopg2.connect(host=PGHOST, port=PGPORT, user=PGUSER, password=PGPASSWORD, dbname="postgres",
+                            connect_timeout=5)
+
+
+def test_cancel_interrupts_create_index():
+    """T4.1/D4: a long parallel CREATE INDEX must respond to pg_cancel_backend within ~one batch, not run to
+    completion. Anti-flake (EC-8): measure a full build baseline first; skip if it is too fast to cancel
+    reliably; otherwise cancel a second build after baseline/4 and assert it errors ('canceling statement')
+    well before a full build would finish, leaves no index, and a re-CREATE works."""
+    su = _connect(); su.autocommit = True
+    cur = su.cursor()
+    cur.execute("DROP TABLE IF EXISTS m48_cancel")
+    cur.execute("CREATE TABLE m48_cancel (id int, v vector(32))")
+    cur.execute(
+        "INSERT INTO m48_cancel SELECT g, array_fill((g / 97.0)::real, ARRAY[32])::vector "
+        "FROM generate_series(1, 500000) g"  # ~6s parallel build on a quiet box — long enough to cancel
+    )
+    su.close()
+
+    # Baseline: time one full CREATE INDEX (the parallel batched build).
+    b = _connect(); b.autocommit = True
+    bc = b.cursor()
+    t0 = time.time()
+    bc.execute("CREATE INDEX m48_cancel_base ON m48_cancel USING theodb_hnsw (v theodb_hnsw_l2_ops)")
+    baseline = time.time() - t0
+    bc.execute("DROP INDEX m48_cancel_base")
+    b.close()
+    if baseline < 3.0:
+        pytest.skip(f"parallel build too fast ({baseline:.1f}s) to cancel reliably on this box (EC-8)")
+
+    # Cancel run: a worker thread builds; the main thread cancels its backend after baseline/4.
+    ca = _connect(); ca.autocommit = True
+    acur = ca.cursor()
+    acur.execute("SELECT pg_backend_pid()")
+    pid = acur.fetchone()[0]
+    result = {}
+
+    def _build():
+        try:
+            acur.execute("CREATE INDEX m48_cancel_x ON m48_cancel USING theodb_hnsw (v theodb_hnsw_l2_ops)")
+            result["ok"] = True
+        except Exception as e:  # noqa: BLE001 — we assert the specific typed message below
+            result["err"] = e
+
+    th = threading.Thread(target=_build)
+    start = time.time()
+    th.start()
+    time.sleep(baseline / 4)
+    killer = _connect(); killer.autocommit = True
+    killer.cursor().execute(f"SELECT pg_cancel_backend({pid})")
+    killer.close()
+    th.join(timeout=baseline)
+    elapsed = time.time() - start
+    ca.close()
+
+    assert "err" in result, f"CREATE INDEX was not cancelled (ran to completion in {elapsed:.1f}s)"
+    assert "cancel" in str(result["err"]).lower(), f"unexpected error (not a cancel): {result['err']}"
+    assert elapsed < baseline * 0.9, f"cancel latency too high ({elapsed:.1f}s vs baseline {baseline:.1f}s)"
+
+    # No orphan index, and a fresh CREATE INDEX still works.
+    chk = _connect(); chk.autocommit = True
+    cc = chk.cursor()
+    cc.execute("SELECT count(*) FROM pg_class WHERE relname = 'm48_cancel_x'")
+    assert cc.fetchone()[0] == 0, "cancelled CREATE INDEX left an orphan index relation"
+    cc.execute("CREATE INDEX m48_cancel_x ON m48_cancel USING theodb_hnsw (v theodb_hnsw_l2_ops)")
+    cc.execute("DROP TABLE m48_cancel")
+    chk.close()

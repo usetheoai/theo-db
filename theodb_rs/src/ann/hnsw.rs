@@ -19,13 +19,30 @@ pub(crate) struct HnswIndex {
 
 impl HnswIndex {
     /// Build the graph from `corpus` (`(id, vector)` pairs, all equal-dim). `m` neighbours per node (layer 0
-    /// gets `2*m`), `ef_construction` build candidate-list size.
+    /// gets `2*m`), `ef_construction` build candidate-list size. Non-cancellable convenience wrapper — the pure
+    /// domain callers (tests, the criterion bench, small sequential builds) use this; the PostgreSQL callers use
+    /// [`build_cancellable`] to inject `check_for_interrupts!` so a long `CREATE INDEX` responds to cancel (T4.1).
     pub(crate) fn build(
         corpus: &[(i64, Vec<f32>)],
         m: usize,
         ef_construction: usize,
         metric: Metric,
         seed: u64,
+    ) -> Self {
+        Self::build_cancellable(corpus, m, ef_construction, metric, seed, &|| {})
+    }
+
+    /// Build with a caller-injected `check_interrupt`, called once per parallel batch (M48 T4.1). This is the DIP
+    /// seam that keeps the `ann/` layer pure (zero `pg_sys`): the domain declares the contract (`&dyn Fn()`), the
+    /// `am/` infrastructure implements it with `pgrx::check_for_interrupts!`. Same pattern as the FU-1
+    /// `NeighborSource` seam. The closure runs only between batches, where all workers are joined (longjmp-safe).
+    pub(crate) fn build_cancellable(
+        corpus: &[(i64, Vec<f32>)],
+        m: usize,
+        ef_construction: usize,
+        metric: Metric,
+        seed: u64,
+        check_interrupt: &(dyn Fn() + Sync),
     ) -> Self {
         let n = corpus.len();
         let mut rng = Rng::new(seed);
@@ -50,7 +67,7 @@ impl HnswIndex {
         let m0 = m * 2;
         let efc = ef_construction.max(m);
         let (neighbors, entry, max_level) =
-            crate::ann::hnsw_parallel::build_parallel(&vectors, &levels, m, m0, efc, metric);
+            crate::ann::hnsw_parallel::build_parallel(&vectors, &levels, m, m0, efc, metric, check_interrupt);
         HnswIndex {
             metric,
             m,

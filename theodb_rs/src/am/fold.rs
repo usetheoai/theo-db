@@ -63,6 +63,10 @@ pub(crate) unsafe fn fold(rel: pg_sys::Relation, meta: &[u8], body: &[Vec<Vec<u8
         } else {
             page::extend_page_with_items(rel, pg_sys::ForkNumber::MAIN_FORKNUM, page_items);
         }
+        // T4.1/D4: the fold runs inside VACUUM — `vacuum_delay_point` applies the cost-based throttle AND checks
+        // for interrupts per page, so a VACUUM of a huge index responds to `pg_cancel_backend` (and to the cost
+        // limit) mid-fold, not only at batch boundaries of the rebuild.
+        pg_sys::vacuum_delay_point();
         // T2.3 crash injection: after this body page's WAL record is committed (reinit/extend already ran
         // GenericXLogFinish), before the pivot. Default GUC 0 ⇒ no-op in production.
         crate::am::guc::maybe_crash_after_body_page(i as u32 + 1);

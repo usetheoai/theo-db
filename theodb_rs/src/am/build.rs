@@ -80,7 +80,12 @@ pub extern "C-unwind" fn ambuild_hnsw(
 ) -> *mut pg_sys::IndexBuildResult {
     unsafe {
         let (corpus, ntuples) = collect_corpus(heaprel, indexrel, index_info);
-        let idx = HnswIndex::build(&corpus, HNSW_M, HNSW_EF_CONSTRUCTION, Metric::L2, BUILD_SEED);
+        // T4.1: inject the cancellation seam so a long `CREATE INDEX` responds to `pg_cancel_backend` within one
+        // parallel batch. `check_for_interrupts!` runs on the leader between batches (all workers joined) — safe
+        // to longjmp. Under `#[pg_guard]` (this callback), the ereport(ERROR) unwinds cleanly across the C boundary.
+        let idx = HnswIndex::build_cancellable(
+            &corpus, HNSW_M, HNSW_EF_CONSTRUCTION, Metric::L2, BUILD_SEED, &|| { pgrx::check_for_interrupts!(); },
+        );
         // M35: persist the STRUCTURED page-native layout (meta + element + neighbor tuples) so scans traverse the
         // graph ON DEMAND (O(ef·M) pages), not deserialize the whole blob (O(N)).
         match crate::am::hnsw_page::pack(&idx) {
@@ -212,7 +217,10 @@ unsafe fn vacuum_rebuild_hnsw_structured(indexrel: pg_sys::Relation, dead: &mut 
     }
     let live: Vec<(i64, Vec<f32>)> = all.into_iter().filter(|(id, _)| !dead(*id)).collect();
     // HNSW build params are fixed consts (no reloption), so rebuild with them; preserve the metric from meta.
-    let idx = HnswIndex::build(&live, HNSW_M, HNSW_EF_CONSTRUCTION, metric, BUILD_SEED);
+    // T4.1: the fold's rebuild is also cancellable (a VACUUM of a huge index responds to cancel per batch).
+    let idx = HnswIndex::build_cancellable(
+        &live, HNSW_M, HNSW_EF_CONSTRUCTION, metric, BUILD_SEED, &|| { pgrx::check_for_interrupts!(); },
+    );
     // M48 (#47): crash-safe fold — pack the new generation at a fresh base, write it to inert pages, then pivot
     // block 0. `pack_at` resolves the graph's pointers relative to `base`, so the packed image is position-
     // independent and readers (which follow meta.elem_first/nbr_first/entry_blkno) need no change. T2.2: pack once

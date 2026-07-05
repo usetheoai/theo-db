@@ -60,3 +60,53 @@
   folded index is not mis-read from a stale log line).
 - **amvacuumcleanup is fail-safe** — pending_page_count swallows an unreadable-meta Err to 0 (skip), so a
   routine VACUUM never aborts (test_vacuum_cleanup_never_errors_across_states).
+
+## T4.1 (cancelabilidade — findings)
+- **Purity AC nuance:** the plan's `grep -c pg_sys ann/hnsw.rs == 0` counts the `#[pgrx::pg_test]` TEST
+  attributes (pre-existing, lines 386-457) — those are test-harness, not production pg_sys. The honest,
+  enforceable gate is `ann/hnsw_parallel.rs` production code == 0 pg_sys (verified; the 1 grep match is a
+  DOC COMMENT). ann/hnsw.rs production code (build/build_cancellable) stays pure — the seam is a callback.
+- **Build restructured to batched scopes** — the M44 build was one thread::scope over all N nodes; T4.1
+  batches it (4096/batch) so check_interrupt runs between batches with all workers JOINED (longjmp-safe).
+  This is the D4 design (the plan's pseudo showed batched), not a plan defect. Recall unaffected (within-
+  batch races preserved, covered by the recall gate).
+- **Cancel test needs a >3s build** — 200k×16 builds in <3s on the quiet dev box (EC-8 skip); bumped to
+  500k×32 (~6s) so the cancel is actually exercised (30s test, passed), not skipped.
+- **closure body must be a block** — `&|| pgrx::check_for_interrupts!()` failed ("attributes on expressions
+  experimental"); `&|| { ...; }` (statement position) compiles.
+- **D4 `vacuum_delay_point()` per fold page (SEPA pre-commit MAJOR — was missing):** the seam made the
+  parallel BUILD cancellable, but the fold's page-write loop had no per-page interrupt/throttle point, so a
+  VACUUM of a huge index only responded to cancel at rebuild-batch boundaries. Added `pg_sys::vacuum_delay_point()`
+  per body page in `fold::fold` (am/fold.rs). Safe because every `fold` caller reaches it via `vacuum_rebuild`,
+  called ONLY from `ambulkdelete`/`amvacuumcleanup` (verified) — always a VACUUM context. This also applies the
+  cost-based delay (VACUUM I/O throttle) for free. Closes EC-4 (cancel-mid-fold) responsiveness.
+- **`cargo bench --no-run` (AC) — honestly NOT run in this env:** no PGRX_HOME on the host and the Docker build
+  does not compile benches. The T4.1 change is to `build_parallel`'s signature; the FU-1 bench (`benches/scan_hot_path.rs`)
+  links `scan_core` (not `build_parallel`), so it is unaffected by this change. Marked as an honest gap — a
+  bench-link check belongs in CI with the pgrx toolchain, not faked green here.
+
+## VALIDATION CORRECTION (stale-container discovery — honesty, Rule 3)
+- **Root cause:** `test_am_maintenance.py` / `test_am_crash.py` resolve the DB via `PGPORT`/`PGPASSWORD` env
+  (defaults 55448/`theodb`), NOT `THEODB_TEST_DSN`. Earlier this session I exported `THEODB_TEST_DSN` (ignored),
+  so every pytest run silently hit a stale `theodb-m48-verify` container (OLD image, port 55448) — the prior
+  "42 passed" evidence did NOT exercise the current code. Fixed by pointing `PGHOST/PGPORT/PGUSER/PGPASSWORD`
+  at a fresh container built from the current image and removing all stale containers.
+- **Re-validated against the CURRENT code (image theodb:m48-t41v, `vacuum_delay_point` included):**
+  test_am_maintenance 12 passed / 0 skipped (with a THEODB_SCAN_PROFILE container → the 4 pending_pages metric
+  tests run, not skip); test_am_crash 10 passed; regression test_index_am 8, test_hnsw_structured 6,
+  test_reloption 5, test_index_am_latency 2, test_ann_index 26 = 47. Total **69 passed, 0 failed, 0 skipped**.
+- **`pending_pages` runtime metric (wiring pillar c) real evidence:** container log shows `pending_pages=`
+  102, 23, 6, 2, 1 (non-zero, pending region present) then 0 (after the fold eliminates it) — observed, not asserted-in-vacuum.
+- **VACUUM fold WAL volume (M55 input, real):** one fold of a 400-row/dim-8 HNSW index = 26 WAL records,
+  13 full-page images, 86569 bytes (VACUUM VERBOSE), and grows the relation 122880→212992 (15→26 pages,
+  shadow-write not in-place — the #47 structural oracle).
+
+## Pre-existing test bug fixed (T2.1/T2.2/T3.1 fold tests never exercised the fold)
+- **`test_fold_preserves` / `test_fold_reclaims_pages` / `test_fold_empty_corpus` used plain `VACUUM {table}`**
+  which hits PG's index-vacuum bypass (`vacuumlazy.c` BYPASS_THRESHOLD_PAGES) on the tiny (<32-page) fixtures →
+  `ambulkdelete` never ran → the fold never ran → the `size_post > size_pre` oracle silently failed on ALL
+  images (t2/t22/t31/t41), i.e. these were committed RED-never-GREEN. Fixed: they now force `VACUUM
+  (INDEX_CLEANUP ON) {table}` (same mechanism T3.1 already used for pending). A real large table triggers
+  `ambulkdelete` without the flag; the flag only forces the path deterministically on the small fixture.
+  The EC-3 safe-path test (`test_vacuum_cleanup_never_errors_across_states`) KEEPS plain `VACUUM` on purpose —
+  it proves a routine VACUUM never aborts (folds via the amvacuumcleanup pending path, which is flag-independent).
