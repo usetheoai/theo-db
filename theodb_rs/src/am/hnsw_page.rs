@@ -190,14 +190,32 @@ pub(crate) fn decode_neighbors(
     m: usize,
     m0: usize,
 ) -> Result<Vec<Addr>, String> {
+    let mut out = Vec::new();
+    decode_neighbors_into(b, level, lc, m, m0, &mut out)?;
+    Ok(out)
+}
+
+/// M46 L1-B: the allocation-free heart of `decode_neighbors`. Decodes the neighbor addrs of a node's layer
+/// into a caller-owned scratch `Vec` (cleared first), so the ground-layer traversal can reuse ONE buffer
+/// across every expanded node instead of allocating a fresh `Vec` per node (`hnsw_page.rs` ground loop).
+/// Mirrors pgvector's reused `unvisited` scratch (`hnswutils.c:834`). Semantically identical to the original.
+pub(crate) fn decode_neighbors_into(
+    b: &[u8],
+    level: usize,
+    lc: usize,
+    m: usize,
+    m0: usize,
+    out: &mut Vec<Addr>,
+) -> Result<(), String> {
+    out.clear();
     if b.len() < NBR_HEADER || b[N_TAG] != NBR_TAG {
         return Err("theodb hnsw: bad neighbor tuple".into());
     }
     if lc > level {
-        return Ok(Vec::new());
+        return Ok(());
     }
     let (start, len) = if lc == 0 { (level * m, m0) } else { ((level - lc) * m, m) };
-    let mut out = Vec::with_capacity(len);
+    out.reserve(len);
     for i in 0..len {
         let o = NBR_HEADER + (start + i) * SLOT;
         if b.len() < o + SLOT {
@@ -209,7 +227,7 @@ pub(crate) fn decode_neighbors(
             out.push((blk, off));
         }
     }
-    Ok(out)
+    Ok(())
 }
 
 fn encode_element(idx: &HnswIndex, node: usize, nbr_addr: Addr, dim: usize) -> Vec<u8> {
@@ -473,6 +491,25 @@ unsafe fn neighbors_of(
     })
 }
 
+/// M46 L1-B: like `neighbors_of` but decodes into a caller-owned scratch `Vec` (cleared first) instead of
+/// allocating a fresh one. The ground-layer loop reuses ONE scratch across every expanded node.
+#[allow(clippy::too_many_arguments)]
+unsafe fn neighbors_into(
+    rel: pg_sys::Relation,
+    c: &Cand,
+    layer: usize,
+    m: usize,
+    m0: usize,
+    nblocks: u32,
+    reads: &mut usize,
+    out: &mut Vec<Addr>,
+) -> Result<(), String> {
+    *reads += 1;
+    page::with_page_item(rel, c.nbr_blk, c.nbr_off, nblocks, |b| {
+        decode_neighbors_into(b, c.level as usize, layer, m, m0, out)
+    })
+}
+
 /// On-demand top-`ef` traversal (mirrors pgvector `HnswSearchLayer`): greedy-descend the upper layers with ef=1,
 /// then the ground layer with `ef_search`, reading a node's element/neighbor tuple ONLY when it is visited.
 /// Returns `(tid, dist)` ascending. Reads ≈ 1(meta) + O(entry_level) + O(ef·M) pages — flat in N.
@@ -515,9 +552,19 @@ pub(crate) unsafe fn traverse(
     }
 
     // Ground layer with ef_search: a min-heap of candidates to expand, a max-heap of the ef best found.
-    let mut visited: std::collections::HashSet<(u32, u16)> = std::collections::HashSet::new();
-    let mut cands: std::collections::BinaryHeap<std::cmp::Reverse<Cand>> = std::collections::BinaryHeap::new();
-    let mut result: std::collections::BinaryHeap<Cand> = std::collections::BinaryHeap::new();
+    // M46 L1-A: pre-size the three per-query structures so they never rehash/realloc mid-search — the
+    // accidental overhead that scaled super-linearly with ef (default SipHash `HashSet` starts at capacity 0
+    // and rehashes ~12× over an ef=200 search). Anchors: pgvector `tidhash_create(ef*m*2)` (`hnswutils.c:675`),
+    // pgvectorscale `with_capacity(search_list_size*neigbors)` (`graph/mod.rs:109-111`). Recall-neutral.
+    let cap = ef.saturating_mul(m0.max(1)).max(1);
+    let mut visited: std::collections::HashSet<(u32, u16)> =
+        std::collections::HashSet::with_capacity(cap.saturating_mul(2));
+    let mut cands: std::collections::BinaryHeap<std::cmp::Reverse<Cand>> =
+        std::collections::BinaryHeap::with_capacity(cap);
+    let mut result: std::collections::BinaryHeap<Cand> =
+        std::collections::BinaryHeap::with_capacity(ef + 1);
+    // M46 L1-B: one neighbor scratch reused across every expanded node (was a fresh `Vec` per node).
+    let mut scratch: Vec<Addr> = Vec::with_capacity(m0.max(1));
     visited.insert((ep.blk, ep.off));
     cands.push(std::cmp::Reverse(ep));
     result.push(ep);
@@ -526,7 +573,12 @@ pub(crate) unsafe fn traverse(
         if c.d > worst && result.len() >= ef {
             break;
         }
-        for (nb, no) in neighbors_of(rel, &c, 0, m, m0, nblocks, &mut reads)? {
+        // On Err, `?` aborts before `scratch` is read; on Ok, `decode_neighbors_into` has cleared+refilled it.
+        // This is what makes the scratch reuse leak-free — do NOT swallow this Err (e.g. `let _ =`) or the loop
+        // below would read a previous node's neighbors.
+        neighbors_into(rel, &c, 0, m, m0, nblocks, &mut reads, &mut scratch)?;
+        for i in 0..scratch.len() {
+            let (nb, no) = scratch[i];
             if !visited.insert((nb, no)) {
                 continue;
             }
@@ -631,6 +683,33 @@ mod tests {
         assert_eq!(meta.node_count, 0);
     }
 
+    /// M46 L1-B: the reused-scratch variant `decode_neighbors_into` must produce EXACTLY the same addrs as the
+    /// allocating `decode_neighbors`, AND must clear any prior contents of the scratch (the scratch-not-cleared
+    /// bug that would leak a previous node's neighbors into the next — EC-1 of the edge-case review).
+    #[pgrx::pg_test]
+    fn decode_neighbors_into_matches_original() {
+        let idx = HnswIndex::build(&corpus(), 16, 64, Metric::L2, 11);
+        let (_metric, m, m0, _ef) = idx.params();
+        let packed = pack(&idx).expect("pack");
+        let dim = idx.dim();
+        let ipp = elems_per_page(dim);
+        for node in 0..idx.node_count() {
+            let level = idx.node_level(node);
+            let ea = ((1 + node / ipp) as u32, (1 + node % ipp) as u16);
+            let ep = packed.pages[ea.0 as usize - 1][ea.1 as usize - 1].as_slice();
+            let ev = decode_element(ep).unwrap();
+            let (nb_blk, nb_off) = ev.nbr_addr;
+            let np = packed.pages[nb_blk as usize - 1][nb_off as usize - 1].as_slice();
+            for lc in 0..=level {
+                let orig = decode_neighbors(np, level, lc, m, m0).unwrap();
+                // pre-dirty the scratch to prove `_into` clears it before writing.
+                let mut scratch: Vec<Addr> = vec![(9999, 9999), (8888, 8888)];
+                decode_neighbors_into(np, level, lc, m, m0, &mut scratch).unwrap();
+                assert_eq!(scratch, orig, "node {node} layer {lc}: _into must equal original AND clear prior");
+            }
+        }
+    }
+
     #[pgrx::pg_test]
     fn decode_meta_rejects_bad_magic_and_truncation() {
         let idx = HnswIndex::build(&corpus(), 16, 64, Metric::L2, 3);
@@ -639,5 +718,64 @@ mod tests {
         let mut bad = good.clone();
         bad[0] ^= 0xFF;
         assert!(decode_meta(&bad).is_err(), "bad magic must Err");
+    }
+
+    /// Collect the id column of `SELECT id FROM rn ORDER BY e <-> q LIMIT k` under the current planner GUCs,
+    /// via a real Spi round-trip — the only way to exercise the on-disk `traverse` (it needs a live Relation).
+    #[cfg(any(test, feature = "pg_test"))]
+    fn topk_ids(query_lit: &str, k: i64) -> Vec<i32> {
+        let sql = format!("SELECT id FROM rn ORDER BY e <-> '{query_lit}'::vector LIMIT {k}");
+        pgrx::Spi::connect(|client| {
+            // pgrx 0.16.1: `select`'s 3rd arg is `args: &[DatumWithOid]` (a slice) — `&[]`, never `None`
+            // (matches hybrid.rs / ann_query.rs). Column ordinals are 1-based → `row.get::<i32>(1)`.
+            client
+                .select(&sql, None, &[])
+                .unwrap()
+                .filter_map(|row| row.get::<i32>(1).unwrap())
+                .collect::<Vec<i32>>()
+        })
+    }
+
+    /// M46 L1-A recall-neutrality, proven END-TO-END through the real `traverse` (index scan) against an
+    /// INDEPENDENT oracle (the exact seqscan) — NOT a golden vector snapshotted from the already-mutated tree
+    /// (which would be circular; EC-2 + SEPA initial-brief). The pre-size (`with_capacity`) is a std-guaranteed
+    /// capacity hint that cannot alter visit order; this test is the load-bearing regression guard proving it.
+    /// On a tiny distinct corpus at ef_search=200, HNSW recall is 100%, so the index top-k set MUST equal the
+    /// exact top-k set, and repeated index runs MUST be byte-identical (determinism).
+    #[pgrx::pg_test]
+    fn traverse_presize_is_recall_neutral_end_to_end() {
+        pgrx::Spi::run("CREATE TEMP TABLE rn (id int PRIMARY KEY, e vector(4))").unwrap();
+        // 30 deterministic, distinct points — no distance ties near the probe → unambiguous exact NN.
+        for i in 0..30i32 {
+            let (a, b, c, d) = (i as f32, (i % 7) as f32, (i % 5) as f32, i as f32 * 0.1);
+            pgrx::Spi::run(&format!("INSERT INTO rn VALUES ({i}, '[{a},{b},{c},{d}]')")).unwrap();
+        }
+        pgrx::Spi::run("CREATE INDEX rn_idx ON rn USING theodb_hnsw (e)").unwrap();
+        pgrx::Spi::run("SET theodb_hnsw.ef_search = 200").unwrap();
+
+        let probe = "[3.3,1.1,2.2,0.4]";
+        // Exact oracle: force a seqscan (bypass the AM entirely).
+        pgrx::Spi::run("SET enable_indexscan = off; SET enable_bitmapscan = off; SET enable_seqscan = on")
+            .unwrap();
+        let exact = topk_ids(probe, 5);
+        // Index path: force the theodb_hnsw index scan → exercises `traverse` with the pre-sized structures.
+        pgrx::Spi::run("SET enable_seqscan = off; SET enable_bitmapscan = off; SET enable_indexscan = on")
+            .unwrap();
+        let via_index_1 = topk_ids(probe, 5);
+        let via_index_2 = topk_ids(probe, 5);
+
+        assert_eq!(via_index_1, via_index_2, "traverse must be deterministic (pre-size adds no nondeterminism)");
+        let (mut si, mut se) = (via_index_1.clone(), exact.clone());
+        si.sort_unstable();
+        se.sort_unstable();
+        assert_eq!(si, se, "recall-neutral: index top-5 set must equal exact top-5 set (100% recall at ef=200)");
+    }
+
+    /// Negative case (testing.md §4.1): `ef_search = 0` is rejected at the GUC boundary (MIN_EF_SEARCH=1) with a
+    /// typed error — it can never reach `traverse`, so the internal `ef_search.max(1)` clamp is defense-in-depth.
+    /// This fail-fast-at-the-boundary is the honest form of the plan's "ef=0 → clamp, no crash" acceptance.
+    #[pgrx::pg_test(error = "outside the valid range")]
+    fn ef_search_zero_rejected_at_guc_boundary() {
+        pgrx::Spi::run("SET theodb_hnsw.ef_search = 0").unwrap();
     }
 }
