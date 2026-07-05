@@ -29,6 +29,9 @@ from typing import Any
 PRODUCTION_DIR_NAMES = ("src", "lib", "packages")
 TEST_DIR_NAMES = ("test", "tests", "__tests__", "spec")
 INTEGRATION_DIR_NAMES = ("integration", "e2e")
+# theo-db: integration tests are pytest-vs-real-container under benchmarks/tests/ (project layout
+# predates this script; aligning the tool to reality, same class as the MAX_PER_CORNER fix).
+EXTRA_INTEGRATION_DIRS = ("benchmarks/tests",)
 
 # Lines that DEFINE a symbol rather than CALL it. A file whose only occurrences of
 # the symbol match these patterns is the definition site, not a caller.
@@ -42,6 +45,11 @@ _DEFINITION_PATTERNS = (
     r"^\s*(?:async\s+)?def\s+{sym}\b",
     r"^\s*class\s+{sym}\b",
     r"^\s*export\s+default\s+(?:function|class)?\s*{sym}\b",
+    # Rust (theodb_rs): fn/struct/enum/trait/type/static/const definitions
+    r"^\s*(?:pub(?:\(crate\))?\s+)?(?:unsafe\s+)?(?:extern\s+\"[^\"]+\"\s+)?fn\s+{sym}\b",
+    r"^\s*(?:pub(?:\(crate\))?\s+)?(?:struct|enum|trait|mod)\s+{sym}\b",
+    r"^\s*(?:pub(?:\(crate\))?\s+)?(?:static|const)\s+{sym}\b",
+    r"^\s*(?:pub(?:\(crate\))?\s+)?type\s+{sym}\s*=",
 )
 
 
@@ -114,8 +122,9 @@ def check_pillar_a_static_caller(project_root: Path, symbol: str) -> dict[str, A
     matches = _grep_symbol(
         project_root,
         symbol,
-        include_globs=["*.ts", "*.tsx", "*.js", "*.mjs", "*.py"],
-        exclude_dirs=["node_modules", ".git", "dist", "build", "tests", "test", "__tests__", "spec"],
+        include_globs=["*.ts", "*.tsx", "*.js", "*.mjs", "*.py", "*.rs"],
+        exclude_dirs=["node_modules", ".git", "dist", "build", "tests", "test", "__tests__", "spec",
+                      "target", "benchmarks", "benches"],
     )
     # Exclude files with "test" / "spec" / "fixture" / "mock" in basename
     production_files = [
@@ -190,6 +199,10 @@ def check_pillar_b_integration_test(project_root: Path, symbol: str, deferral_pa
             candidate = project_root / tdir / idir
             if candidate.exists():
                 integration_dirs.append(candidate)
+    for extra in EXTRA_INTEGRATION_DIRS:
+        candidate = project_root / extra
+        if candidate.exists():
+            integration_dirs.append(candidate)
 
     if not integration_dirs:
         return {
