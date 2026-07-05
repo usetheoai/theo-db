@@ -7,6 +7,14 @@ goal: Fechar os 5 DoDs de correctness & durabilidade do Index AM (issues #46/#47
 
 # Plan: M48 — Correctness & durabilidade do Index AM (crash-safety #46/#47, pending fold, cancelabilidade, custo honesto)
 
+> **Version 1.2** (revisão por plan-defect descoberto no /implement iter-2: o mecanismo FSM per-page do
+> T2.2 conflita com a realidade dos layouts — TODOS os readers assumem ranges CONTÍGUOS
+> (`read_chunked(first,npages)`, dir por cursor `page.rs:459-465`, pending como cauda
+> `pstart..nblocks` `page.rs:105-112`); reuso de página avulsa fragmentaria os ranges. GIN/nbtree usam
+> FSM porque suas páginas são auto-contidas — as nossas não. Mecanismo substituído por **reuso de
+> região contígua (alternação de gerações)** — mesmo outcome do DoD (tamanho estável), zero FSM.
+> Divergência do blueprint §Q4 documentada em D2 (o precedente core é verdadeiro, mas inaplicável ao
+> layout chunked). Halt-loop pausado e retomado conforme cycle-implement § Stop conditions.)
 > **Version 1.1** (edge-cases absorvidos — `reviews/m48-am-crash-safety-plan-edge-cases-2026-07-05.md`:
 > EC-1 auto-migrate v1→v2 no fold; EC-2 guard FSM; EC-3 costestimate nunca-erra; EC-4..8 testes) —
 > Executa o blueprint SHIPPABLE `m48-am-crash-safety` (99.7): fecha os dois furos de
@@ -147,8 +155,8 @@ O fold.rs recebe `Vec<item-bytes>` prontos do serializer — **não conhece o la
 anti-retrabalho M51 do ROADMAP). **Auto-migração v1→v2 (EC-1):** `vacuum_rebuild` já lê o corpus vivo
 de forma formato-agnóstica; o fold SEMPRE escreve a geração nova em meta v2 ⇒ o primeiro VACUUM
 pós-upgrade migra v1→v2 atomicamente (crash-safe pelo próprio pivot) — os rewrites in-place morrem de
-verdade, e o #47 fecha TAMBÉM para índices legados (não só para recém-criados). `extend_page_with_item` passa a reusar páginas do FSM via
-`GetFreeIndexPage` quando disponível (fecha o ciclo do reclaim).
+verdade, e o #47 fecha TAMBÉM para índices legados (não só para recém-criados). `extend_page_with_item` permanece intocado (extend puro); o reuso é por REGIÃO no
+fold.rs, não por página avulsa.
 **Rationale:** composição dos DOIS precedentes core — ordem GIN (dados-antes-pivot-depois,
 `ginfast.c:766-772`) + meta-full-record nbtree (`nbtxlog.c:81-130`); cabe no cap de 4 páginas/registro
 porque o pivot toca 1 página (Blueprint §Q1.1). SRP/budget: page.rs já tem 829 LoC (>500,
@@ -156,7 +164,11 @@ porque o pivot toca 1 página (Blueprint §Q1.1). SRP/budget: page.rs já tem 82
 **Alternatives considered:** (a) manutenção in-place à la pgvector — REJEITADO AGORA: é o M55 (complexidade
 tombstone/repair/4-passes, Blueprint §Q5); (b) "meta+N páginas novas num único registro" — REJEITADO:
 estoura o cap de 4 do GenericXLog (Blueprint §Q1.1); (c) escrever a geração nova NO LUGAR (in-place,
-estado atual) — REJEITADO: é o bug #47 (estado misto após crash mid-fold).
+estado atual) — REJEITADO: é o bug #47 (estado misto após crash mid-fold); (d) reclaim via FSM
+per-page (RecordFreeIndexPage/GetFreeIndexPage — recomendação original do blueprint §Q4) — REJEITADO
+NA v1.2: fragmenta os ranges contíguos que todos os readers assumem (`read_chunked`,
+`page.rs:459-465`, `page.rs:105-112`); precedente core vale para páginas auto-contidas, não para
+layout chunked.
 **Consequences:** pico transitório de disco ~2× durante o fold (velha+nova coexistem até o reclaim);
 WAL do fold vira FPIs da geração nova (volume medido no benchmark — insumo M55); leitores protegidos
 pelo fold lock EXCLUSIVE existente (sem safexid — Blueprint §Q4).
@@ -242,9 +254,9 @@ SUSET + nome autoexplicativo; precedente: developer GUCs do core).
 
 - Q1 — o default do `vacuum_pending_threshold` (16 páginas) é adequado? → o benchmark da Fase 6 mede a
   degradação por página pendente; recalibrar com o dado é follow-up aceitável (não bloqueia).
-- Q2 — `GetFreeIndexPage` devolvendo página reusada exige re-init defensivo (página pode estar em
-  qualquer estado)? → sim; `extend_page_with_item` re-inicializa incondicionalmente a página vinda do
-  FSM (PageInit) — assert coberto no teste de reclaim (T2.2).
+- Q2 (v1.2) — a região reusada pode conter lixo de gerações antigas/crashes? → sim; a escrita na
+  região re-inicializa incondicionalmente cada página (reinit_page_with_item) — coberto pelo property
+  test de free_region + teste de reclaim (T2.2).
 - (demais decisões: resolvidas em plan time via blueprint D1–D6 + edge-case review absorvida em v1.1.)
 
 ## Dependencies
@@ -472,81 +484,87 @@ Happens-before observation via timestamps das duas conexões.
 #### DoD
 - [ ] `pytest -q -k "meta_v2 or fold"` retorna `passed`; `pytest benchmarks/tests/test_index_am.py -q` sem `failed`; `grep -c "meta v2" CHANGELOG.md` ≥ 1 em `[Unreleased] § Changed`
 
-### T2.2 — Reclaim pós-pivot via FSM
+### T2.2 — Reclaim pós-pivot por região contígua (alternação de gerações) [v1.2]
 
 #### Objective
-Após o pivot, marcar as páginas da geração velha como vazias (WAL) e registrá-las no FSM; consumo FSM
-no `extend_page_with_item`.
+Após o pivot, re-inicializar a região da geração velha (WAL) e fazer o fold seguinte reusá-la
+(lowest-fit contíguo) — tamanho do índice estabiliza sem FSM.
 
 #### Why this step (action + reasoning)
-1. **O que faz:** loop `reinit_page_with_item(b, &[])` sobre 1..old_start (registros WAL próprios) +
-   `RecordFreeIndexPage(rel, b)` + `IndexFreeSpaceMapVacuum(rel)`; `extend_page_with_item` tenta
-   `GetFreeIndexPage` antes de extend (re-init defensivo incondicional — Unresolved Q2).
-2. **Por que agora:** sem reclaim o índice cresce ~2× por fold para sempre; FSM advisory é o padrão core
-   (Blueprint §Q4 — "deleção é WAL-logged; FSM não é"). Depois do pivot (T2.1) e antes dos crash tests
-   (T2.3) que validam os 3 estados.
+1. **O que faz:** no fim do `fold()`: loop `reinit_page_with_item(b, &[])` sobre a região velha
+   (registros WAL próprios). No início do `fold()`: escolhe `base` = menor região contígua livre
+   (computada dos pointers da meta atual: tudo que NÃO é bloco 0, nem geração viva, nem pending é
+   livre) que caiba `items.len()` páginas; senão `base = nblocks` (extend).
+2. **Por que assim (v1.2):** os readers assumem ranges contíguos (`read_chunked(first,npages)`,
+   dir-cursor `page.rs:459-465`, pending-cauda `page.rs:105-112`) — reuso FSM por página avulsa
+   (desenho v1.1, blueprint §Q4) fragmentaria os ranges. Alternação de regiões dá o MESMO outcome do
+   DoD (tamanho estável a partir do 2º fold) com zero máquina nova.
 
 #### Evidence
-- Padrão: `ginfast.c:667-668,1014-1020` (RecordFreeIndexPage + IndexFreeSpaceMapVacuum);
-  `nbtpage.c:868-988` (consumo com re-verificação). Bindings: pg17.rs:45766-45769 (Blueprint §Q8).
+- Contiguidade load-bearing: `page.rs:459-465` (cursor absoluto por lista), `page.rs:105-112`
+  (pending = cauda `pstart..nblocks`), `read_chunked` (ranges).
+- Precedente da alternação: o próprio meta-pivot (D2) — a região velha é inerte pós-pivot por
+  construção; reusar exige apenas que ela seja computável (pointers da meta v2) e re-inicializada.
 
 #### Files to edit
 ```
-theodb_rs/src/am/fold.rs — passo reclaim
-theodb_rs/src/am/page.rs — extend_page_with_item: FSM-first com re-init defensivo
+theodb_rs/src/am/fold.rs — free_region(): computa a região livre dos pointers da meta; reclaim no fim do fold
 ```
 
 #### Deep file dependency analysis
-- `fold.rs`: reclaim é o passo 3 do lifecycle (mesmo módulo, mesma chamada `fold()`).
-- `page.rs::extend_page_with_item`: callers (write paths todos) — comportamento idêntico quando FSM
-  vazio; quando FSM devolve página, re-init incondicional (PageInit) antes de usar.
+- `fold.rs`: reclaim e escolha de base são passos do MESMO lifecycle (nenhum arquivo novo);
+  page.rs intocado neste task (extend puro permanece).
 
 #### Deep Dives
-- **FSM é advisory:** página perdida em crash = perdida até próximo fold ("no big problem", nbtree).
-  Página devolvida pode estar em QUALQUER estado ⇒ re-init incondicional.
-- **Tamanho estável:** fold N+1 reusa as páginas reclamadas do fold N ⇒ índice para de crescer
-  (assert do teste: 2 folds consecutivos, nblocks não cresce entre eles).
+- **Free-region (guard EC-2 reframed):** a computação EXCLUI sempre o bloco 0, a região da geração
+  viva e a pending viva — por construção nunca devolve bloco 0/out-of-range (o guard vira uma
+  função pura testável, não uma defesa contra FSM stale). Região devolvida é re-init incondicional
+  página a página na escrita (pode conter lixo de gerações antigas/crashes).
+- **Crash durante o reclaim:** meta nova já pivotada — páginas velhas parcialmente re-inicializadas
+  são inertes; o próximo fold recomputa a região livre dos pointers (nada depende do reclaim ter
+  completado).
+- **Tamanho estável:** fold N+1 cabe na região do fold N-1 quando as gerações têm tamanho
+  similar ⇒ alternação low/high; pico ~2× documentado em D2/Drawbacks.
 
 #### Pseudo-code / Signatures
 ```pseudocode
-// fold() passo 3:
-for b in old_gen_blocks: reinit_page_with_item(rel, b, &[]); RecordFreeIndexPage(rel, b)
-IndexFreeSpaceMapVacuum(rel)
-// page.rs:
-fn extend_page_with_item(rel, fork, item):
-  if fork==MAIN && (b = GetFreeIndexPage(rel)) != InvalidBlockNumber:
-      // Guard EC-2: FSM é advisory não-WAL-logged — pós-crash pode conter lixo (até o bloco 0!).
-      if b == 0 || b >= RelationGetNumberOfBlocksInFork(rel, MAIN): fallthrough_to_extend
-      else: reinit_page_with_item(rel, b, item); return b   // re-init defensivo SEMPRE
-  ... extend atual ...
+fn free_region(meta: &MetaPointers, nblocks: u32, need: u32) -> u32:
+  // regiões candidatas: [1, live_start) e [live_end, pending_start) — a maior folga contígua
+  // que NÃO intersecta {0} ∪ [live_start, live_end) ∪ [pending_start, nblocks)
+  if live_start > 1 && live_start - 1 >= need: return 1        // lowest-fit
+  return nblocks                                                // extend (sem região que caiba)
+// fold(): base = free_region(...); escreve items em base..; pivot; reinit região velha + pending velha
 ```
 
 #### Tasks
-1. RED: `test_fold_reclaims_pages` (pytest) — 2 VACUUMs consecutivos: nblocks estável (não 3× o corpo)
-2. GREEN: reclaim + FSM-first
-3. REFACTOR: none expected
+1. RED: teste Rust puro de `free_region` (casos: cabe-na-baixa, não-cabe→extend, exclui bloco 0/viva/pending)
+2. RED: `test_fold_reclaims_pages` (pytest) — 2 folds consecutivos: tamanho estável
+3. GREEN: free_region + reclaim no fold
+4. REFACTOR: None expected
 
 #### TDD
 ```
-RED:     test_fold_reclaims_pages() — build N; DELETE 30% + VACUUM (fold 1); anota
+RED:     test_free_region_lowest_fit() (Rust #[test] puro) — meta com região baixa livre de N páginas;
+         assert_eq free_region(need<=N) == 1; assert_eq free_region(need>N) == nblocks; assert região
+         devolvida nunca inclui 0/viva/pending (property nos 3 casos)
+RED:     test_fold_reclaims_pages() (pytest) — build N; DELETE 30% + VACUUM (fold 1); anota
          pg_relation_size(index); DELETE mais 30% + VACUUM (fold 2); assert size(fold2) <= size(fold1)
-         (reuso comprovado — sem reclaim seria estritamente maior)
+         (alternação comprovada — sem reclaim seria estritamente maior)
 GREEN:   implementação
 REFACTOR: None expected
-VERIFY:  pytest -q -k reclaim
+VERIFY:  cargo test --lib free_region (builder stage) + pytest -q -k reclaim
 ```
 
 #### Concurrency tests
-Coberto pelo concurrent test de T2.1 (test_fold_blocks_concurrent_scan) — o reclaim roda sob o mesmo
-fold lock EXCLUSIVE; nenhum estado concorrente novo.
+Coberto pelo concurrent test de T2.1 (mesmo fold lock EXCLUSIVE; free_region roda sob o lock).
 
 #### Acceptance Criteria
 - [ ] 2 folds consecutivos: `pg_relation_size(index)` do fold 2 `<=` do fold 1 (assert do teste `test_fold_reclaims_pages`)
-- [ ] Página vinda do FSM re-inicializada incondicionalmente — `pytest -q -k reclaim` retorna `passed`
-- [ ] Guard EC-2: `cargo test fsm_guard` retorna `ok` (bloco 0 / fora-de-range do FSM ignorado; meta intacta)
+- [ ] Guard EC-2 (reframed): `cargo test free_region` retorna `ok` — região livre nunca inclui bloco 0/geração viva/pending (property test puro)
+- [ ] Pass: size — `wc -l theodb_rs/src/am/fold.rs` ≤ 500
 
 #### DoD
-- [ ] `pytest -q -k reclaim` retorna `passed`; suíte inteira sem `failed`; CHANGELOG coberto pela entrada do T2.1
+- [ ] `pytest -q -k reclaim` retorna `passed`; `cargo test --lib` (builder) `ok`; suíte inteira sem `failed`; CHANGELOG coberto pela entrada do T2.1
 
 ### T2.3 — GUC `theodb.test_crash_after_pages` + testes de crash mid-fold (o gate do #47)
 
@@ -968,7 +986,7 @@ VERIFY:  pytest -q -k m48_driver_smoke; depois python3 benchmarks/run_m48_mainte
 | 7 | Restrição meta-pivot layout-agnóstico (anti-retrabalho M51) | T2.1 (D2) | fold.rs recebe items opacos; serializer separado |
 
 | 8 | EC-1 — índices legados v1 no VACUUM (#47 para legados) | T2.1 | fold auto-migra v1→v2 no primeiro VACUUM |
-| 9 | EC-2 — FSM advisory pode devolver bloco inválido | T2.2 | guard b==0/out-of-range antes do re-init |
+| 9 | EC-2 (reframed v1.2) — região de reuso jamais inclui bloco 0/geração viva/pending | T2.2 | `free_region()` pura por construção + property test Rust |
 | 10 | EC-3 — torn meta no costestimate durante fold | T5.1 | contrato nunca-erra + teste negativo |
 
 **Coverage: 10/10 gaps covered (100%)**
