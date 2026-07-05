@@ -187,15 +187,20 @@ pub(crate) unsafe fn read_pending(rel: pg_sys::Relation) -> Result<Vec<(i64, Vec
     let mut out = Vec::new();
     for block in pstart..nblocks {
         for item in read_all_page_items(rel, block)? {
-            // A well-formed pending item is `[tid i64, dim u32, f32×dim]`. A short item means page corruption —
-            // fail loud with a typed Err rather than silently dropping a row (error-handling discipline).
+            // A well-formed pending item is EXACTLY `[tid i64, dim u32, f32×dim]`. Validate the length EXACTLY
+            // (`==`, not `<`): after a crash mid-fold that extended the relation (M48 issue #47, base=tail), the
+            // orphan body pages land inside the OLD generation's pending range `[pending_start, nblocks)` and get
+            // read here as "pending" — an element/neighbor tuple decoded as a pending item yields a bogus dim.
+            // Fail LOUD with a REINDEX-instructing typed error rather than feeding a garbage vector to the scan
+            // (error-handling discipline; never silent corruption). This is the same fail-loud crash window the
+            // fold reclaim has — closed fully (no REINDEX) only by M55's incremental maintenance (ADR 0014).
             if item.len() < 12 {
-                return Err("theodb am: corrupt pending item (too short for header)".into());
+                return Err("theodb am: corrupt pending item (too short for header) — REINDEX".into());
             }
             let tid = i64::from_le_bytes(item[0..8].try_into().unwrap());
             let dim = u32::from_le_bytes(item[8..12].try_into().unwrap()) as usize;
-            if item.len() < 12 + dim * 4 {
-                return Err("theodb am: corrupt pending item (truncated vector)".into());
+            if item.len() != 12 + dim * 4 {
+                return Err("theodb am: corrupt pending item (bad length — likely a post-crash orphan page) — REINDEX".into());
             }
             let mut v = Vec::with_capacity(dim);
             for i in 0..dim {

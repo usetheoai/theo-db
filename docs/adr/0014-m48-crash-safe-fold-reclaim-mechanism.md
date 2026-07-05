@@ -36,10 +36,17 @@ senão estende no tail; após o pivot, re-inicializa as páginas leftover `[gen_
 modo que a pending region leia limpo (0 entradas). Isso **bounda o crescimento** (o índice para de crescer a
 partir do 2º fold, alternando low/high) sem FSM.
 
-**Limite honesto (adjudicado):** o reclaim NÃO é totalmente atômico. Um crash **no meio do passo de reclaim**
-(entre o pivot e o fim do reinit-leftover) pode deixar bytes stale na pending range. `read_pending`
-**falha-alto** (erro tipado → REINDEX) sobre página stale — então a janela é **fail-loud, nunca corrupção
-silenciosa**. Isso é uma restrição consciente do DoD do #47: a garantia "crash em qualquer ponto deixa o índice
+**Limite honesto (adjudicado):** duas janelas de crash **fail-loud** (nunca corrupção silenciosa), ambas
+fechadas totalmente só pelo M55:
+
+1. **Crash no meio do reclaim** (entre o pivot e o fim do reinit-leftover) pode deixar bytes stale na pending
+   range.
+2. **Crash no meio do shadow-write quando o fold estende no tail** (1º fold, ou quando a região baixa não cabe)
+   deixa páginas órfãs da geração nova DENTRO da pending range da geração VELHA `[pending_start, nblocks)` —
+   o bloco 0 ainda aponta para a velha, mas `nblocks` cresceu.
+
+Em ambas, `read_pending` valida o comprimento EXATO do item de pending e **falha-alto** (erro tipado → REINDEX)
+sobre uma página órfã/stale — a garantia é **consistente OU fail-loud-REINDEX, nunca silenciosamente errado**. Isso é uma restrição consciente do DoD do #47: a garantia "crash em qualquer ponto deixa o índice
 **consistente e utilizável**" vale para o **pivot** (A); para o **reclaim** (B) a garantia é "consistente **OU**
 fail-loud com REINDEX". O fechamento total (reclaim atômico sem janela REINDEX) é **manutenção incremental
 crash-safe = M55** (`ROADMAP § M55` — "fold incremental vs in-place", pré-requisito de claim v1.0).
@@ -65,6 +72,22 @@ crash-safe = M55** (`ROADMAP § M55` — "fold incremental vs in-place", pré-re
   implícito = 1) e migra no primeiro fold. HNSW não muda de formato (elem_first/nbr_first já são pointers).
 - **Prova pendente (dependência T2.2 → T2.3):** o teste que exercita o crash **no meio do reclaim** e prova
   o fail-loud é o T2.3 (crash-injection GUC). Até lá, "reclaim crash-safe fail-loud" é DEVIDO, não fechado.
+
+## Notas de implementação descobertas em /implement (T2.3)
+
+- **Recuperação da janela é REINDEX, não re-VACUUM.** Um crash pós-pivot/mid-reclaim deixa páginas
+  órfãs/não-reclamadas na pending range; um re-VACUUM lê a MESMA pending poluída e também falha-alto — só o
+  REINDEX (rebuild do heap, descartando as páginas do índice) cura. O teste `test_vacuum_after_crash_converges`
+  originalmente planejado (re-VACUUM converge) foi **re-asserted para REINDEX** — divergência plano↔realidade
+  registrada aqui (não gaming: o teste prova a recuperação real).
+- **O hook de crash-injection é superuser-gated (segurança).** `std::process::abort()` é **instance-wide**
+  (o postmaster trata como crash e reinicia TODA a instância, não só o backend do chamador). Como o pgrx 0.16.1
+  NÃO enforça o `Suset` do GUC custom, um não-superuser poderia `SET … ; VACUUM` e derrubar a instância (DoS).
+  Fix: os hooks `maybe_crash_*` retornam cedo se `!superuser()` — o footgun sempre-compilado fica inalcançável
+  por role comum (provado por `test_crash_hook_is_superuser_gated`). O default 0 sozinho NÃO era barreira.
+- **Garantia real do #47 (redação honesta):** o núcleo — **corrupção silenciosa (scan pontuando bytes stale
+  como vetores)** — está ELIMINADO em todos os pontos de crash. A garantia é "consistente **OU** fail-loud com
+  REINDEX, nunca silenciosamente errado" — MAIS FRACA que "sempre utilizável sem REINDEX", que é o M55.
 
 ## Rules consumidas
 

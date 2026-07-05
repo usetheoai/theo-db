@@ -32,6 +32,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Corrupção silenciosa do índice vetorial em crash durante VACUUM está eliminada (issue #47, gate fechado): provado por crash-injection determinística (GUC `theodb.test_crash_after_pages`/`test_crash_phase`, superuser-only, default off) em 3 pontos do fold (pré-pivot, pós-pivot, meio-do-reclaim) — em TODOS, após crash-recovery o scan é consistente OU falha-alto com erro tipado instruindo REINDEX, NUNCA um resultado silenciosamente errado. REINDEX (rebuild do heap) cura a janela residual; o fechamento total sem REINDEX é M55 (ADR 0014) (#47)
+
 - Índices `theodb_hnsw`/`theodb_ivfflat` sobre tabelas UNLOGGED agora sobrevivem a crash/failover: o INIT fork passou a ser WAL-logado (`log_newpage_range` incondicional ao fim do `ambuildempty` — GenericXLog é no-op de WAL para relações unlogged); antes, o primeiro INSERT pós-recovery falhava com "truncated meta page" até REINDEX (#46)
 
 ### Security

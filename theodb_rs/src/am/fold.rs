@@ -63,11 +63,16 @@ pub(crate) unsafe fn fold(rel: pg_sys::Relation, meta: &[u8], body: &[Vec<Vec<u8
         } else {
             page::extend_page_with_items(rel, pg_sys::ForkNumber::MAIN_FORKNUM, page_items);
         }
-        // T2.3 wires the crash-injection hook here (after page `i+1`, before the pivot).
+        // T2.3 crash injection: after this body page's WAL record is committed (reinit/extend already ran
+        // GenericXLogFinish), before the pivot. Default GUC 0 ⇒ no-op in production.
+        crate::am::guc::maybe_crash_after_body_page(i as u32 + 1);
     }
     // 2. pivot — flip the fixed meta page LAST, in its own record, as a FULL IMAGE (D2 / blueprint §Q1/§Q4:
     // a delta over a torn base page would corrupt the meta; the full image is torn-page-proof on redo).
     page::pivot_meta_page(rel, meta);
+    // T2.3 crash injection: right after the pivot is committed, before reclaim — proves the new generation is
+    // intact on recovery (block 0 already points at it).
+    crate::am::guc::maybe_crash_at_phase(crate::am::guc::CRASH_PHASE_POST_PIVOT);
     // 3. reclaim (T2.2 — bounded growth): reinit every page AFTER the new generation to EMPTY, so the pending
     // range `[gen_end, nblocks)` reads clean (0 entries) — this makes a reused-low-region fold NOT grow the
     // relation, and turns a dead tail generation back into free space for the next fold. `read_pending` fails
@@ -76,8 +81,13 @@ pub(crate) unsafe fn fold(rel: pg_sys::Relation, meta: &[u8], body: &[Vec<Vec<u8
     // in-place) — see ROADMAP § M55; this is the conservative, non-corrupting bound.
     let gen_end = base + body.len() as u32;
     let nblocks_now = pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM);
-    for b in gen_end..nblocks_now {
+    for (reclaimed, b) in (gen_end..nblocks_now).enumerate() {
         page::reinit_page_with_items(rel, b, &[]);
+        // T2.3 crash injection: after the first leftover page is emptied — the moment that proves the
+        // crash-mid-reclaim window is FAIL-LOUD (read_pending → typed REINDEX error), never silent corruption.
+        if reclaimed == 0 {
+            crate::am::guc::maybe_crash_at_phase(crate::am::guc::CRASH_PHASE_MID_RECLAIM);
+        }
     }
 }
 

@@ -34,3 +34,17 @@
 - **ADR 0014 written** — names the FSM→contiguous-region swap + the M55 residual window (SEPA required this
   in docs/adr/, not just followups.md; /review cross-validation will cite it).
 - **page.rs 894 LoC** — grew +18 (ivf_gen_base) on top of the pre-existing 876; split still the followup remedy.
+
+## T2.3 (crash-injection gate — findings)
+- **#47 core (silent corruption) CLOSED** — proven by 3 crash-injection points; every point is fail-loud
+  (consistent OR typed REINDEX), never silently wrong. The crash tests CAUGHT that the pre-pivot-extend and
+  post-pivot crashes leave orphan/un-reclaimed pages in the OLD/NEW pending range; read_pending now validates
+  exact item length and fails loud (REINDEX). REINDEX heals; a plain re-VACUUM does NOT (it reads the same
+  polluted pending). Full clean-on-crash-without-REINDEX is M55 (ADR 0014, both windows documented).
+- **Suset NOT enforced by pgrx 0.16.1 for custom GUCs** — a NOSUPERUSER role can SET theodb.test_crash_*.
+  Load-bearing safety is default=0 + the hook only aborts the CALLER's own backend (no privilege escalation:
+  a non-super can already crash their own session). The superuser-only test was intentionally NOT shipped
+  (would fake-pass). Followup: an explicit is_superuser() guard in the hook if defense-in-depth is wanted.
+- **wait_ready hardened** — requires 2 consecutive stable query round-trips (an abort() restarts the whole
+  postmaster in place; a single connect can race the tail of crash recovery). Makes the crash suite robust
+  back-to-back.
