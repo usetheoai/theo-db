@@ -14,7 +14,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Roadmap amendado: adicionados M47–M55 (remediação do deep-view 2026-07-05 — FU-1 régua same-graph, correctness do AM #46/#47, opclasses cosine/IP, calibração SOTA com pgvectorscale diskann + dataset realista, SBQ inline no AM gated, filtered ANN, híbrida com WHERE+BM25+BEIR, vectorizer auto-embedding, decisão VACUUM-wall) (`/roadmap-feature deepview-remediation`; issues #46, #47)
+
 ### Changed
+
+- Roadmap M47–M55: emendas do review de engenharia de BD absorvidas nos DoDs — M50 dataset dimensionado pela memória da box (build materializa corpus em RAM) + primeiro artefato de QPS multi-cliente; M51 write-path SBQ resolvido (codebook em meta pages, pending permanece f32, drift documentado) + co-localização de códigos rebaixada a decisão medida (custo ~2–3× de index size); M48 meta-pivot declarado layout-agnóstico (anti-retrabalho M51) + nota de testes EXPLAIN em N realista; M53 frame de segurança do filter_sql corrigido (privilégio do chamador + confinamento sintático); M55 criado (decisão fold incremental vs in-place — pré-requisito de claim v1.0)
+- Ground-loop do scan do índice vetorial `theodb_hnsw` extraído para uma camada pura (`ann/scan_core`) atrás de um seam `NeighborSource`, mantendo o comportamento de busca idêntico (recall-neutro) — refatoração interna que habilita medição isolada e reproduzível do custo de alocação por consulta (FU-1/M47).
 
 ### Deprecated
 
