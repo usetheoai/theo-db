@@ -110,3 +110,29 @@
   `ambulkdelete` without the flag; the flag only forces the path deterministically on the small fixture.
   The EC-3 safe-path test (`test_vacuum_cleanup_never_errors_across_states`) KEEPS plain `VACUUM` on purpose —
   it proves a routine VACUUM never aborts (folds via the amvacuumcleanup pending path, which is flag-independent).
+
+## T5.1 (amcostestimate honesto — findings)
+- **New module `am/cost.rs` (SRP):** pure `ivf_visit_ratio`/`hnsw_visit_ratio` + pure fallback dispatch
+  `ratio_for` + the fail-safe I/O wrapper `scan_visit_ratio`. `amcostestimate` (mod.rs) now calls
+  `genericcostestimate` then `startup = total * ratio`. Verified honest via EXPLAIN: N=100 → Seq Scan+Sort
+  (cost 3.91, no index); N=50k → Index Scan (Limit 127.00..127.94, ratio≈0.013). The old stub returned cost 0.
+- **NOT "pgvector verbatim" (SEPA honesty note):** only the load-bearing `startup = total * ratio` core is
+  ported from pgvector's `hnsw.c`/`ivfflat.c`. pgvector's secondary corrections — IVF `sequentialRatio` page
+  adjust and the HNSW/IVF TOAST `startupPages` refinement — are OMITTED. Both favor the index; omitting them
+  biases conservatively toward seqscan, which does NOT break the AC (N=100 wants seqscan; N=50k is far above
+  the boundary so the index still wins). The 0.55 HNSW scaling constant IS ported. Constant tuning is out of
+  scope (D5). The CHANGELOG/comments say "modelo de custo do pgvector", not "verbatim".
+- **HNSW `m` from the fixed build const, not the meta (SEPA [MAJOR] fail-safe):** since HNSW `m` has no
+  reloption (fixed `HNSW_M=16`), the cost path uses the const directly — avoiding a second meta read that
+  could `Err` under a concurrent fold. EVERY meta read in `scan_visit_ratio` is fail-safe: `peek_magic().ok()`
+  → `None` → 1.0; a torn IVF meta → `read_ivf_meta().map(dir.len).unwrap_or(0)` → `lists==0` → 1.0. EC-3
+  contract (NEVER error — a costestimate error aborts ALL query planning) held.
+- **EC-3 proof = 6 Rust `#[cfg(test)]` unit tests (ran in the builder: `cargo test --lib am::cost` → 6 passed):**
+  the fallback matrix (`ratio_for(None|garbage|lists=0|tuples=0)` → 1.0, no panic), the AM dispatch, the
+  pgvector shrink-with-N property, and the clamps. Plus the pytest `test_costestimate_never_errors_on_empty_index`
+  (tuples==0 end-to-end). The Docker release build does NOT compile `#[cfg(test)]`, so these were compiled+run
+  separately in the `theodb-rs-builder` stage — real evidence, not assumed.
+- **No test migration needed:** the plan flagged migrating small-N EXPLAIN asserts in `test_index_am.py`, but
+  those tests (8 passed) do not assert planner index-choice on toy tables, so the honest cost did not break them.
+- **GREEN evidence (image theodb:m48-t51):** planner pytest 6 passed (both AMs × 3 regimes), Rust unit 6 passed,
+  full maintenance 14 passed/4 skipped, regression index_am 8 + hnsw_structured 6 + reloption 5 + ann_index 26.

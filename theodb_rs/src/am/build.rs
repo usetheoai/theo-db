@@ -13,7 +13,7 @@ use pgrx::prelude::*;
 /// the empty/HNSW build paths that don't read the reloption.
 use crate::am::options::{lists_from_relation, DEFAULT_LISTS};
 /// HNSW build params for the persisted AM (mirror the SQL-callable defaults).
-const HNSW_M: usize = 16;
+pub(crate) const HNSW_M: usize = 16;
 const HNSW_EF_CONSTRUCTION: usize = 64;
 const BUILD_SEED: u64 = 42;
 

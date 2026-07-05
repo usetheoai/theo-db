@@ -348,3 +348,75 @@ def test_cancel_interrupts_create_index():
     cc.execute("CREATE INDEX m48_cancel_x ON m48_cancel USING theodb_hnsw (v theodb_hnsw_l2_ops)")
     cc.execute("DROP TABLE m48_cancel")
     chk.close()
+
+
+# ---------------------------------------------------------------------------
+# T5.1 — honest amcostestimate (planner picks seqscan at small N, index at realistic N)
+# ---------------------------------------------------------------------------
+
+def _bulk_make_index(cur, table, am, opclass, n, dim=8):
+    """Server-side bulk build of the same deterministic vectors as _make_index (id i → [i, i+1000, ...]) so a
+    50k-row table builds in one INSERT ... SELECT, not n round-trips. ANALYZE after so the planner's cost model
+    reads real reltuples (amcostestimate keys off (*indexinfo).tuples)."""
+    cur.execute(f"DROP TABLE IF EXISTS {table}")
+    cur.execute(f"CREATE TABLE {table} (id int, v vector({dim}))")
+    cur.execute(
+        f"INSERT INTO {table} SELECT g, (SELECT array_agg((g + j * 1000)::real ORDER BY j) "
+        f"FROM generate_series(0, {dim - 1}) j)::vector FROM generate_series(0, {n - 1}) g"
+    )
+    cur.execute(f"CREATE INDEX {table}_idx ON {table} USING {am} ({'v ' + opclass})")
+    cur.execute(f"ANALYZE {table}")
+
+
+def _explain(cur, table, query, k):
+    cur.execute(f"EXPLAIN SELECT id FROM {table} ORDER BY v <-> %s LIMIT {k}", (str(query),))
+    return "\n".join(r[0] for r in cur.fetchall())
+
+
+@pytest.mark.parametrize("am,opclass", [
+    ("theodb_hnsw", "theodb_hnsw_l2_ops"),
+    ("theodb_ivfflat", "theodb_ivfflat_l2_ops"),
+])
+def test_planner_prefers_seqscan_small_n(conn, am, opclass):
+    """T5.1/D5: with an honest cost, a 100-row table's ORDER BY <-> LIMIT is cheaper as a seqscan+sort than an
+    index scan (the index's startup ≈ its total when ratio≈1). The pre-fix stub returned cost 0 ⇒ index always
+    won even here (lying to the planner). Asserts the CORRECT new behaviour: no Index Scan at small N."""
+    cur = conn.cursor()
+    table = f"m48_cost_small_{am}"
+    _bulk_make_index(cur, table, am, opclass, n=100, dim=8)
+    plan = _explain(cur, table, [50.0 + j * 1000 for j in range(8)], 5)
+    assert "Index Scan" not in plan, f"{am}: small N should NOT use the index (seqscan+sort wins) — plan:\n{plan}"
+    cur.execute(f"DROP TABLE {table}")
+
+
+@pytest.mark.parametrize("am,opclass", [
+    ("theodb_hnsw", "theodb_hnsw_l2_ops"),
+    ("theodb_ivfflat", "theodb_ivfflat_l2_ops"),
+])
+def test_planner_prefers_index_realistic_n(conn, am, opclass):
+    """T5.1/D5: at realistic scale (50k rows) the ANN index's ordered scan (ratio≪1 ⇒ tiny startup) beats a
+    full seqscan+sort for ORDER BY <-> LIMIT — the pushdown must survive the honest cost. Asserts Index Scan."""
+    cur = conn.cursor()
+    table = f"m48_cost_big_{am}"
+    _bulk_make_index(cur, table, am, opclass, n=50000, dim=8)
+    plan = _explain(cur, table, [25000.0 + j * 1000 for j in range(8)], 5)
+    assert "Index Scan" in plan, f"{am}: realistic N should use the index — plan:\n{plan}"
+    cur.execute(f"DROP TABLE {table}")
+
+
+@pytest.mark.parametrize("am,opclass", [
+    ("theodb_hnsw", "theodb_hnsw_l2_ops"),
+    ("theodb_ivfflat", "theodb_ivfflat_l2_ops"),
+])
+def test_costestimate_never_errors_on_empty_index(conn, am, opclass):
+    """T5.1/EC-3: amcostestimate must NEVER error — a costestimate that error!'d would abort ALL query planning
+    (e.g. during a concurrent VACUUM that momentarily makes the meta unreadable). Exercise the tuples==0 /
+    freshly-emptied fallback (ratio=1.0) and assert EXPLAIN still emits a plan with no error."""
+    cur = conn.cursor()
+    table = f"m48_cost_empty_{am}"
+    _make_index(cur, table, am, opclass, n=10, dim=8)
+    cur.execute(f"DELETE FROM {table}")
+    cur.execute(f"ANALYZE {table}")  # reltuples → 0, drives the tuples<=0 fallback branch
+    plan = _explain(cur, table, [1.0] * 8, 5)  # must not raise
+    assert "->" in plan or "Scan" in plan, f"{am}: EXPLAIN emitted no plan:\n{plan}"
+    cur.execute(f"DROP TABLE {table}")

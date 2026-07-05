@@ -13,6 +13,7 @@
 use pgrx::*;
 
 mod build; // ambuild / ambuildempty (Phase 2) + shared datum/metric helpers
+mod cost; // M48 T5.1 — honest amcostestimate visit-ratio (pgvector cost model)
 mod fold; // M48 — crash-safe VACUUM fold (meta-pivot, issue #47)
 pub(crate) mod guc; // M34 — theodb_ivfflat.probes scan GUC
 mod hnsw_page; // M35 — page-native structured persistence for theodb_hnsw
@@ -110,15 +111,18 @@ pub extern "C-unwind" fn amvalidate(_opclassoid: pg_sys::Oid) -> bool {
     true
 }
 
-/// Cost: mark the index usable only when order-bys are present; keep costs modest so the planner MAY
-/// choose it (tuned in Phase 4). When there is no order-by key, refuse (infinite cost).
+/// Cost (M48 T5.1 / D5 — honest): refuse when there is no order-by (this AM only serves `ORDER BY <-> LIMIT`).
+/// Otherwise base the cost on `genericcostestimate` and scale the STARTUP by the fraction of index tuples an
+/// ordered ANN scan actually visits (`cost::scan_visit_ratio`, the pgvector model): a large index visits a
+/// tiny fraction → small startup → it wins the LIMIT; a tiny index visits nearly all → startup ≈ total →
+/// seqscan+sort wins. The old body returned cost 0, so the index always won (it lied to the planner, G6).
 // The 8-arg signature is dictated by Postgres's `amcostestimate_function` FFI contract — irreducible.
 #[allow(clippy::too_many_arguments)]
 #[pg_guard]
 pub unsafe extern "C-unwind" fn amcostestimate(
-    _root: *mut pg_sys::PlannerInfo,
+    root: *mut pg_sys::PlannerInfo,
     path: *mut pg_sys::IndexPath,
-    _loop_count: f64,
+    loop_count: f64,
     index_startup_cost: *mut pg_sys::Cost,
     index_total_cost: *mut pg_sys::Cost,
     index_selectivity: *mut pg_sys::Selectivity,
@@ -133,11 +137,22 @@ pub unsafe extern "C-unwind" fn amcostestimate(
         *index_pages = 0.0;
         return;
     }
-    *index_startup_cost = 0.0;
-    *index_total_cost = 0.0;
-    *index_selectivity = 1.0;
-    *index_correlation = 1.0;
-    *index_pages = 1.0;
+    let mut costs: pg_sys::GenericCosts = std::mem::zeroed();
+    pg_sys::genericcostestimate(root, path, loop_count, &mut costs);
+
+    let indexinfo = (*path).indexinfo;
+    let tuples = (*indexinfo).tuples;
+    // Open NoLock: the planner already holds a lock on this index for the query being planned (pgvector
+    // `hnsw.c` / `ivfflat.c` pattern). `scan_visit_ratio` is fail-safe — any unreadable meta degrades to 1.0.
+    let rel = pg_sys::index_open((*indexinfo).indexoid, pg_sys::NoLock as pg_sys::LOCKMODE);
+    let ratio = cost::scan_visit_ratio(rel, tuples);
+    pg_sys::index_close(rel, pg_sys::NoLock as pg_sys::LOCKMODE);
+
+    *index_startup_cost = costs.indexTotalCost * ratio;
+    *index_total_cost = costs.indexTotalCost;
+    *index_selectivity = costs.indexSelectivity;
+    *index_correlation = costs.indexCorrelation;
+    *index_pages = costs.numIndexPages;
 }
 
 /// VACUUM bulk-delete (M26 Phase 5): rebuild the main index over only the TIDs the `callback` reports as LIVE,
