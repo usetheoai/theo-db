@@ -848,6 +848,10 @@ apressado.
 insumo). **Risco (BAIXO — é decisão+medição, não implementação):** a implementação decorrente será ALTO e
 ganha milestone próprio via `/roadmap-feature` após o ADR.
 
+> **Insumo do M48 já disponível (2026-07-05):** o volume de WAL do fold shadow-write está medido em
+> `docs/benchmarks/m48-am-maintenance.{md,json}` — ~12,3 MB para reescrever um índice de 50k (mean±std de 3
+> runs); é exatamente esse custo que o fold incremental desta milestone busca reduzir.
+
 ---
 
 ## Sequência e paralelismo
