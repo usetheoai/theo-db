@@ -1,0 +1,367 @@
+{
+  "runs": 3,
+  "n": 50000,
+  "dim": 8,
+  "seed": 42,
+  "load": {
+    "load1": 0.41,
+    "nproc": 12
+  },
+  "threshold_pages": 16,
+  "pending_series": {
+    "0": [
+      {
+        "target_pages": 0,
+        "observed_pending": 0,
+        "before": {
+          "p50_ms": 0.1357,
+          "p95_ms": 0.2831,
+          "pages_read": 356,
+          "pending_pages": 0
+        },
+        "after": {
+          "p50_ms": 0.2466,
+          "p95_ms": 0.3391,
+          "pages_read": 356,
+          "pending_pages": 0
+        }
+      },
+      {
+        "target_pages": 0,
+        "observed_pending": 0,
+        "before": {
+          "p50_ms": 0.2196,
+          "p95_ms": 0.2963,
+          "pages_read": 354,
+          "pending_pages": 0
+        },
+        "after": {
+          "p50_ms": 0.1171,
+          "p95_ms": 0.1396,
+          "pages_read": 354,
+          "pending_pages": 0
+        }
+      },
+      {
+        "target_pages": 0,
+        "observed_pending": 0,
+        "before": {
+          "p50_ms": 0.1386,
+          "p95_ms": 0.2611,
+          "pages_read": 351,
+          "pending_pages": 0
+        },
+        "after": {
+          "p50_ms": 0.2423,
+          "p95_ms": 0.3167,
+          "pages_read": 351,
+          "pending_pages": 0
+        }
+      }
+    ],
+    "8": [
+      {
+        "target_pages": 8,
+        "observed_pending": 10,
+        "before": {
+          "p50_ms": 0.4485,
+          "p95_ms": 0.5483,
+          "pages_read": 386,
+          "pending_pages": 10
+        },
+        "after": {
+          "p50_ms": 0.4421,
+          "p95_ms": 0.4942,
+          "pages_read": 386,
+          "pending_pages": 10
+        }
+      },
+      {
+        "target_pages": 8,
+        "observed_pending": 10,
+        "before": {
+          "p50_ms": 0.269,
+          "p95_ms": 0.2944,
+          "pages_read": 380,
+          "pending_pages": 10
+        },
+        "after": {
+          "p50_ms": 0.2727,
+          "p95_ms": 0.3088,
+          "pages_read": 380,
+          "pending_pages": 10
+        }
+      },
+      {
+        "target_pages": 8,
+        "observed_pending": 10,
+        "before": {
+          "p50_ms": 0.3834,
+          "p95_ms": 0.5599,
+          "pages_read": 351,
+          "pending_pages": 10
+        },
+        "after": {
+          "p50_ms": 0.3144,
+          "p95_ms": 0.5316,
+          "pages_read": 351,
+          "pending_pages": 10
+        }
+      }
+    ],
+    "16": [
+      {
+        "target_pages": 16,
+        "observed_pending": 16,
+        "before": {
+          "p50_ms": 0.5692,
+          "p95_ms": 0.6742,
+          "pages_read": 363,
+          "pending_pages": 16
+        },
+        "after": {
+          "p50_ms": 0.5586,
+          "p95_ms": 0.7887,
+          "pages_read": 363,
+          "pending_pages": 16
+        }
+      },
+      {
+        "target_pages": 16,
+        "observed_pending": 16,
+        "before": {
+          "p50_ms": 0.381,
+          "p95_ms": 0.7522,
+          "pages_read": 363,
+          "pending_pages": 16
+        },
+        "after": {
+          "p50_ms": 0.5907,
+          "p95_ms": 0.7653,
+          "pages_read": 363,
+          "pending_pages": 16
+        }
+      },
+      {
+        "target_pages": 16,
+        "observed_pending": 16,
+        "before": {
+          "p50_ms": 0.44,
+          "p95_ms": 0.5832,
+          "pages_read": 347,
+          "pending_pages": 16
+        },
+        "after": {
+          "p50_ms": 0.4196,
+          "p95_ms": 0.7218,
+          "pages_read": 347,
+          "pending_pages": 16
+        }
+      }
+    ],
+    "64": [
+      {
+        "target_pages": 64,
+        "observed_pending": 64,
+        "before": {
+          "p50_ms": 1.1174,
+          "p95_ms": 1.7453,
+          "pages_read": 347,
+          "pending_pages": 64
+        },
+        "after": {
+          "p50_ms": 0.1433,
+          "p95_ms": 0.2775,
+          "pages_read": 378,
+          "pending_pages": 0
+        }
+      },
+      {
+        "target_pages": 64,
+        "observed_pending": 64,
+        "before": {
+          "p50_ms": 1.1718,
+          "p95_ms": 1.7946,
+          "pages_read": 350,
+          "pending_pages": 64
+        },
+        "after": {
+          "p50_ms": 0.1134,
+          "p95_ms": 0.3394,
+          "pages_read": 363,
+          "pending_pages": 0
+        }
+      },
+      {
+        "target_pages": 64,
+        "observed_pending": 64,
+        "before": {
+          "p50_ms": 1.2971,
+          "p95_ms": 1.883,
+          "pages_read": 347,
+          "pending_pages": 64
+        },
+        "after": {
+          "p50_ms": 0.2247,
+          "p95_ms": 0.3259,
+          "pages_read": 364,
+          "pending_pages": 0
+        }
+      }
+    ]
+  },
+  "p50_ms_agg": {
+    "0:before": {
+      "mean": 0.1646,
+      "std": 0.0389,
+      "n": 3
+    },
+    "0:after": {
+      "mean": 0.202,
+      "std": 0.0601,
+      "n": 3
+    },
+    "8:before": {
+      "mean": 0.367,
+      "std": 0.0742,
+      "n": 3
+    },
+    "8:after": {
+      "mean": 0.3431,
+      "std": 0.0721,
+      "n": 3
+    },
+    "16:before": {
+      "mean": 0.4634,
+      "std": 0.0786,
+      "n": 3
+    },
+    "16:after": {
+      "mean": 0.523,
+      "std": 0.0743,
+      "n": 3
+    },
+    "64:before": {
+      "mean": 1.1954,
+      "std": 0.0752,
+      "n": 3
+    },
+    "64:after": {
+      "mean": 0.1605,
+      "std": 0.047,
+      "n": 3
+    }
+  },
+  "pages_read_agg": {
+    "0:before": {
+      "mean": 353.6667,
+      "std": 2.0548,
+      "n": 3
+    },
+    "0:after": {
+      "mean": 353.6667,
+      "std": 2.0548,
+      "n": 3
+    },
+    "8:before": {
+      "mean": 372.3333,
+      "std": 15.2825,
+      "n": 3
+    },
+    "8:after": {
+      "mean": 372.3333,
+      "std": 15.2825,
+      "n": 3
+    },
+    "16:before": {
+      "mean": 357.6667,
+      "std": 7.5425,
+      "n": 3
+    },
+    "16:after": {
+      "mean": 357.6667,
+      "std": 7.5425,
+      "n": 3
+    },
+    "64:before": {
+      "mean": 348,
+      "std": 1.4142,
+      "n": 3
+    },
+    "64:after": {
+      "mean": 368.3333,
+      "std": 6.8475,
+      "n": 3
+    }
+  },
+  "pending_pages_agg": {
+    "0:before": {
+      "mean": 0,
+      "std": 0.0,
+      "n": 3
+    },
+    "0:after": {
+      "mean": 0,
+      "std": 0.0,
+      "n": 3
+    },
+    "8:before": {
+      "mean": 10,
+      "std": 0.0,
+      "n": 3
+    },
+    "8:after": {
+      "mean": 10,
+      "std": 0.0,
+      "n": 3
+    },
+    "16:before": {
+      "mean": 16,
+      "std": 0.0,
+      "n": 3
+    },
+    "16:after": {
+      "mean": 16,
+      "std": 0.0,
+      "n": 3
+    },
+    "64:before": {
+      "mean": 64,
+      "std": 0.0,
+      "n": 3
+    },
+    "64:after": {
+      "mean": 0,
+      "std": 0.0,
+      "n": 3
+    }
+  },
+  "wal_bytes": {
+    "0": {
+      "mean_bytes": 0,
+      "std_bytes": 0.0,
+      "n": 3
+    },
+    "8": {
+      "mean_bytes": 0,
+      "std_bytes": 0.0,
+      "n": 3
+    },
+    "16": {
+      "mean_bytes": 0,
+      "std_bytes": 0.0,
+      "n": 3
+    },
+    "64": {
+      "mean_bytes": 12284696,
+      "std_bytes": 1601.1,
+      "n": 3
+    }
+  },
+  "planner": {
+    "small_n_uses_index": false,
+    "small_n_plan": "Limit  (cost=3.91..3.92 rows=5 width=12)\n  ->  Sort  (cost=3.91..4.16 rows=100 width=12)\n        Sort Key: ((v <-> '[50,1050,2050,3050,4050,5050,6050,7050]'::vector))\n        ->  Seq Scan on m48bench_small  (cost=0.00..2.25 rows=100 width=12)",
+    "big_n_uses_index": true,
+    "big_n_plan": "Limit  (cost=127.00..127.94 rows=5 width=12)\n  ->  Index Scan using m48bench_big_idx on m48bench_big  (cost=127.00..9552.00 rows=50000 width=12)\n        Order By: (v <-> '[25000,26000,27000,28000,29000,30000,31000,32000]'::vector)"
+  }
+}

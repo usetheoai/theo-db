@@ -10,6 +10,7 @@ honest cost estimate (T5.1) here.
 Uses a plain psycopg2 connection (env PGHOST/PGPORT/...) — these do NOT kill the container, so they
 share the module-level connection. Crash tests live in test_am_crash.py.
 """
+import json
 import os
 import re
 import subprocess
@@ -420,3 +421,26 @@ def test_costestimate_never_errors_on_empty_index(conn, am, opclass):
     plan = _explain(cur, table, [1.0] * 8, 5)  # must not raise
     assert "->" in plan or "Scan" in plan, f"{am}: EXPLAIN emitted no plan:\n{plan}"
     cur.execute(f"DROP TABLE {table}")
+
+
+def test_m48_driver_smoke(tmp_path):
+    """T6.1: the maintenance benchmark driver runs end-to-end (small N=5k / 1 run) and emits a JSON artifact
+    with the mandatory schema keys. Guards the artifact contract before the full 3-run characterization."""
+    import subprocess as _sp
+    import sys as _sys
+
+    out_json = tmp_path / "m48-smoke.json"
+    out_md = tmp_path / "m48-smoke.md"
+    env = {**os.environ, "PGHOST": PGHOST, "PGPORT": str(PGPORT), "PGUSER": PGUSER, "PGPASSWORD": PGPASSWORD}
+    r = _sp.run(
+        [_sys.executable, "run_m48_maintenance.py", "--n", "5000", "--runs", "1",
+         "--out-json", str(out_json), "--out-md", str(out_md)],
+        cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))), env=env,
+        capture_output=True, text=True, timeout=300,
+    )
+    assert r.returncode == 0, f"driver failed: {r.stderr}\n{r.stdout}"
+    data = json.loads(out_json.read_text())
+    for key in ("runs", "pending_series", "wal_bytes", "load"):
+        assert key in data, f"artifact missing required key {key!r}: {list(data)}"
+    assert data["runs"] == 1
+    assert out_md.exists() and "caracterização" in out_md.read_text()

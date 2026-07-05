@@ -136,3 +136,26 @@
   those tests (8 passed) do not assert planner index-choice on toy tables, so the honest cost did not break them.
 - **GREEN evidence (image theodb:m48-t51):** planner pytest 6 passed (both AMs × 3 regimes), Rust unit 6 passed,
   full maintenance 14 passed/4 skipped, regression index_am 8 + hnsw_structured 6 + reloption 5 + ann_index 26.
+
+## T6.1 (benchmark artifact — findings)
+- **Driver `benchmarks/run_m48_maintenance.py` (reuses `theodb_bench.metrics.latency_percentiles`, Rule 9):**
+  measures pending degradation + fold recovery, WAL bytes of the fold, and the planner cost regimes. Load-guard
+  aborts if load1 > nproc/2 (M46 lesson); runs on a THEODB_SCAN_PROFILE container to read the runtime metrics.
+- **Real data (3 runs, N=50k, dev box load 0.41):** the fold fires ONLY above `vacuum_pending_threshold` (16):
+  pending 8(obs 10)/16 do NOT fold (pending unchanged, ~0 index WAL); pending 64 → 0 after fold, scan **p50 drops
+  ~7× (1.20→0.16 ms, effect ≫ std 0.08)** and the fold emits **12.28 MB ± 1.6 KB of WAL** (the shadow-rewrite
+  cost — explicit M55 input). Planner: N=100 → Seq Scan (index NOT used), N=50k → Index Scan.
+- **Two honesty bugs caught by inspecting the first artifact (fixed before commit):**
+  (1) the planner section falsely reported "N=100 uses index = True" because the measurement phase left
+  `SET enable_seqscan = off` on the session, forcing the index in the later EXPLAIN — fixed with a `RESET`
+  before the planner EXPLAINs (the pytest planner tests were correct; only the driver's shared session leaked).
+  (2) the first table showed `pages_read` (graph-traversal, ~constant ~355) which HID the fold effect — the
+  pending cost is a separate linear scan visible in p50 / `pending_pages`, so the table now shows
+  `pending_pages` before→after + p50 + a "foldou?" column, with the threshold behavior explained.
+- **`pages_read` is graph-only, not pending:** `pages_read` (hnsw_page.rs) counts graph pages; `pending_pages`
+  (page.rs) counts the linear pending scan. The fold's benefit is in p50 + pending_pages, not pages_read — the
+  artifact states this so a reader does not misread the constant pages_read as "the fold did nothing".
+- **Smoke test `test_m48_driver_smoke` (N=5k/1 run):** asserts the driver runs end-to-end and emits the json
+  schema (runs/pending_series/wal_bytes/load) + the md caveat — guards the artifact contract.
+- **No comparative claim (public-copy.md):** dev-box characterization; the md carries the box-load caveat and
+  "caracterização, não competição".
