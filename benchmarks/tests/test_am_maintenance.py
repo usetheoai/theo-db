@@ -11,6 +11,8 @@ Uses a plain psycopg2 connection (env PGHOST/PGPORT/...) — these do NOT kill t
 share the module-level connection. Crash tests live in test_am_crash.py.
 """
 import os
+import re
+import subprocess
 
 import psycopg2
 import pytest
@@ -19,6 +21,28 @@ PGHOST = os.environ.get("PGHOST", "localhost")
 PGPORT = os.environ.get("PGPORT", "55448")
 PGUSER = os.environ.get("PGUSER", "postgres")
 PGPASSWORD = os.environ.get("PGPASSWORD", "theodb")
+# When set, the container has THEODB_SCAN_PROFILE=1 and the fold tests read the pages_read runtime metric from
+# its server log (the wiring-triad pillar (c) observable). Without it, the pages_read assertions are skipped and
+# only correctness is checked.
+MAINT_CONTAINER = os.environ.get("THEODB_MAINT_CONTAINER", "")
+
+
+def _scan_pending_pages(table, query):
+    """Run a profiled index scan and return the pending_pages the theodb scan logged — the O(pending) linear scan
+    cost that the pending fold eliminates (THEODB_SCAN_PROFILE=1 must be set in the container env). Returns None
+    when profiling is unavailable."""
+    if not MAINT_CONTAINER:
+        return None
+    c = psycopg2.connect(host=PGHOST, port=PGPORT, user=PGUSER, password=PGPASSWORD, dbname="postgres")
+    c.autocommit = True
+    cur = c.cursor()
+    cur.execute("SET enable_seqscan = off")
+    cur.execute(f"SELECT id FROM {table} ORDER BY v <-> %s LIMIT 5", (str(query),))
+    cur.fetchall()
+    c.close()
+    logs = subprocess.run(["docker", "logs", "--tail", "40", MAINT_CONTAINER], capture_output=True, text=True)
+    hits = re.findall(r"pending_pages=(\d+)", logs.stdout + logs.stderr)
+    return int(hits[-1]) if hits else None
 
 
 @pytest.fixture()
@@ -135,6 +159,96 @@ def test_fold_reclaims_pages(conn, am, opclass):
     query = [40.0 + j * 1000 for j in range(8)]
     idx_top = _index_knn(cur, table, query, 5)
     assert all(i % 10 >= 3 and i % 10 < 7 for i in idx_top), f"{am}: stale/deleted id after two folds: {idx_top}"
+    cur.execute(f"DROP TABLE {table}")
+
+
+def _insert_pending(cur, table, start, count, dim=8):
+    """Insert `count` rows AFTER the index exists ⇒ they land in the pending region (aminsert append)."""
+    for i in range(start, start + count):
+        cur.execute(f"INSERT INTO {table} VALUES (%s, %s)", (i, str([float(i + j * 1000) for j in range(dim)])))
+
+
+@pytest.mark.parametrize("am,opclass", [
+    ("theodb_hnsw", "theodb_hnsw_l2_ops"),
+    ("theodb_ivfflat", "theodb_ivfflat_l2_ops"),
+])
+def test_insert_only_vacuum_folds_pending_above_threshold(conn, am, opclass):
+    """T3.1/D3: an insert-only workload (no deletes) accumulates a pending region; a VACUUM must fold it into the
+    main structure once it exceeds theodb.vacuum_pending_threshold, so the scan returns to O(structure). Proven
+    on two lenses: pages_read (THEODB_SCAN_PROFILE runtime metric) drops, AND the top-k stays correct."""
+    cur = conn.cursor()
+    table = f"m48_pend_{am}"
+    _make_index(cur, table, am, opclass, n=120, dim=8)
+    _insert_pending(cur, table, 120, 800)  # enough rows for several pending pages
+    query = [60.0 + j * 1000 for j in range(8)]
+
+    pend_before = _scan_pending_pages(table, query)
+    if pend_before is None:
+        pytest.skip("THEODB_SCAN_PROFILE not enabled — pending_pages metric unavailable")
+    assert pend_before >= 2, f"{am}: test needs ≥2 pending pages, got {pend_before}"
+    cur.execute("SET theodb.vacuum_pending_threshold = 1")  # well below pending ⇒ folds
+    cur.execute(f"VACUUM (INDEX_CLEANUP ON) {table}")  # force index cleanup (PG14+ skips it insert-only) ⇒ pending fold
+    pend_after = _scan_pending_pages(table, query)
+
+    # The pending region is now folded into the structure ⇒ the O(pending) scan cost is gone.
+    assert pend_after == 0, f"{am}: pending not folded ({pend_before} -> {pend_after} pages)"
+    # Correctness: the folded index still returns the true nearest neighbours of the full corpus.
+    idx_top = _index_knn(cur, table, query, 10)
+    truth = set(_seqscan_knn(cur, table, query, 10))
+    assert len(set(idx_top) & truth) >= 8, f"{am}: fold degraded recall: {idx_top} vs {truth}"
+    cur.execute(f"DROP TABLE {table}")
+
+
+@pytest.mark.parametrize("am,opclass", [
+    ("theodb_hnsw", "theodb_hnsw_l2_ops"),
+    ("theodb_ivfflat", "theodb_ivfflat_l2_ops"),
+])
+def test_pending_threshold_boundary(conn, am, opclass):
+    """EC-6: strict `>` — pending == threshold does NOT fold; threshold+1 folds. A high threshold leaves the
+    pending in place (scan still correct via the pending scan); a low one folds it."""
+    cur = conn.cursor()
+    table = f"m48_bound_{am}"
+    _make_index(cur, table, am, opclass, n=80, dim=8)
+    _insert_pending(cur, table, 80, 800)
+    query = [50.0 + j * 1000 for j in range(8)]
+
+    p = _scan_pending_pages(table, query)
+    if p is None:
+        pytest.skip("THEODB_SCAN_PROFILE not enabled — pending_pages metric unavailable")
+    assert p >= 2, f"{am}: boundary test needs ≥2 pending pages, got {p}"
+
+    # threshold == pending: strict `>` ⇒ does NOT fold (EC-6). Pending stays exactly p.
+    cur.execute(f"SET theodb.vacuum_pending_threshold = {p}")
+    cur.execute(f"VACUUM (INDEX_CLEANUP ON) {table}")
+    assert _scan_pending_pages(table, query) == p, f"{am}: folded at threshold==pending (should be strict >)"
+
+    # threshold == pending-1: now `p > p-1` ⇒ folds. Pending goes to 0.
+    cur.execute(f"SET theodb.vacuum_pending_threshold = {p - 1}")
+    cur.execute(f"VACUUM (INDEX_CLEANUP ON) {table}")
+    assert _scan_pending_pages(table, query) == 0, f"{am}: did not fold at threshold==pending-1"
+    assert len(set(_index_knn(cur, table, query, 10)) & set(_seqscan_knn(cur, table, query, 10))) >= 8
+    cur.execute(f"DROP TABLE {table}")
+
+
+def test_vacuum_cleanup_never_errors_across_states(conn):
+    """SEPA MAJOR (EC-3 on the maintenance path): a routine VACUUM must NEVER abort on the pending-fold check.
+    Exercise the states a cleanup can hit — freshly built (no pending), below threshold, above threshold, and
+    empty — all must complete without error. (A legacy-v1/torn-meta fixture needs a cross-binary build like
+    EC-1; pending_page_count swallows that Err to 0 by construction — followup for the fixture.)"""
+    cur = conn.cursor()
+    table = "m48_vcleanup"
+    _make_index(cur, table, "theodb_hnsw", "theodb_hnsw_l2_ops", n=60, dim=8)
+    cur.execute(f"VACUUM {table}")  # no pending
+    _insert_pending(cur, table, 60, 3)
+    cur.execute("SET theodb.vacuum_pending_threshold = 65536")
+    cur.execute(f"VACUUM {table}")  # pending below threshold
+    _insert_pending(cur, table, 63, 200)
+    cur.execute("SET theodb.vacuum_pending_threshold = 2")
+    cur.execute(f"VACUUM {table}")  # pending above threshold → folds
+    cur.execute(f"DELETE FROM {table}")
+    cur.execute(f"VACUUM {table}")  # empty
+    cur.execute(f"SELECT 1")  # connection still healthy, no error was raised
+    assert cur.fetchone()[0] == 1
     cur.execute(f"DROP TABLE {table}")
 
 

@@ -48,3 +48,15 @@
 - **wait_ready hardened** — requires 2 consecutive stable query round-trips (an abort() restarts the whole
   postmaster in place; a single connect can race the tail of crash recovery). Makes the crash suite robust
   back-to-back.
+
+## T3.1 (pending fold — findings)
+- **PG14+ skips index cleanup on an insert-only VACUUM** — so amvacuumcleanup (and thus the pending fold)
+  does NOT run on a plain `VACUUM tbl` with zero dead tuples. The fold triggers on `VACUUM (INDEX_CLEANUP ON)`
+  OR when dead tuples are present (normal autovacuum). This is correct PG behaviour, documented in the
+  CHANGELOG as a usage note (not a bug). Followup: verify insert-threshold autovacuum
+  (autovacuum_vacuum_insert_threshold) triggers index cleanup in practice (it may also skip it).
+- **pending fold requires INDEX_CLEANUP** — the tests use `VACUUM (INDEX_CLEANUP ON)`; the runtime-metric
+  proof (pending_pages N→0) is the wiring pillar (c) observable, logged on every scan (including 0, so a
+  folded index is not mis-read from a stale log line).
+- **amvacuumcleanup is fail-safe** — pending_page_count swallows an unreadable-meta Err to 0 (skip), so a
+  routine VACUUM never aborts (test_vacuum_cleanup_never_errors_across_states).

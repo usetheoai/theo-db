@@ -24,6 +24,18 @@ const MAX_EF_SEARCH: i32 = 1000; // pgvector's hnsw.ef_search ceiling
 
 pub(crate) static EF_SEARCH: GucSetting<i32> = GucSetting::<i32>::new(DEFAULT_EF_SEARCH);
 
+/// M48 (T3.1) — `SET theodb.vacuum_pending_threshold = N`: a VACUUM folds the pending region into the main
+/// structure when it exceeds N pages, even with zero dead tuples, so an insert-only workload's scan returns to
+/// O(structure) instead of paying O(pending) forever. Operational knob (Userset), NOT a build reloption. Default
+/// 16 is an educated guess; the M48 benchmark (T6.1) measures the scan degradation per pending page.
+pub(crate) const DEFAULT_VACUUM_PENDING_THRESHOLD: i32 = 16;
+pub(crate) static VACUUM_PENDING_THRESHOLD: GucSetting<i32> = GucSetting::<i32>::new(DEFAULT_VACUUM_PENDING_THRESHOLD);
+
+/// The effective pending-fold threshold in pages (never below 1).
+pub(crate) fn vacuum_pending_threshold() -> u32 {
+    VACUUM_PENDING_THRESHOLD.get().max(1) as u32
+}
+
 // M48 (T2.3) — deterministic crash-injection for the VACUUM fold's crash tests. `injection_points` is NOT
 // compiled into the packaged Debian PG17 (blueprint §Q9, verified), so we ship a tiny always-compiled test hook
 // instead. Both default to 0 (off) ⇒ ZERO effect in production; both are `Suset` (only a superuser can set them,
@@ -86,6 +98,16 @@ pub(crate) fn init() {
         0,
         2,
         GucContext::Suset,
+        GucFlags::default(),
+    );
+    GucRegistry::define_int_guc(
+        c"theodb.vacuum_pending_threshold",
+        c"VACUUM folds the theodb index pending region into the main structure above this many pages (even with 0 dead tuples)",
+        c"Keeps an insert-only workload's scan at O(structure). Higher = fewer folds but slower scans between them.",
+        &VACUUM_PENDING_THRESHOLD,
+        1,
+        65536,
+        GucContext::Userset,
         GucFlags::default(),
     );
     GucRegistry::define_int_guc(

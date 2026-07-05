@@ -14,6 +14,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `SET theodb.vacuum_pending_threshold = N` (default 16): um VACUUM funde a região pending do índice vetorial na estrutura principal quando ela passa de N páginas — mesmo sem tuplas mortas — para que um workload insert-only tenha o scan em O(estrutura), não O(pending) para sempre. Observável pela métrica de runtime `pending_pages` (`THEODB_SCAN_PROFILE=1`), que cai a 0 após o fold. Nota: um VACUUM insert-only puro pula o index cleanup no PG14+; use `VACUUM (INDEX_CLEANUP ON)` (ou deixe o autovacuum rodar quando houver tuplas mortas) para disparar o fold (#47)
+
 - Roadmap amendado: adicionados M47–M55 (remediação do deep-view 2026-07-05 — FU-1 régua same-graph, correctness do AM #46/#47, opclasses cosine/IP, calibração SOTA com pgvectorscale diskann + dataset realista, SBQ inline no AM gated, filtered ANN, híbrida com WHERE+BM25+BEIR, vectorizer auto-embedding, decisão VACUUM-wall) (`/roadmap-feature deepview-remediation`; issues #46, #47)
 
 ### Changed

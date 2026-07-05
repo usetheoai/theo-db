@@ -172,20 +172,39 @@ pub extern "C-unwind" fn ambulkdelete(
     }
 }
 
-/// VACUUM cleanup (M26 Phase 5): report the final page count. The heavy lifting happened in `ambulkdelete`.
+/// VACUUM cleanup (M26 Phase 5 + M48 T3.1): report the final page count, AND — when `ambulkdelete` did not run
+/// (`stats == NULL` ⇒ zero dead tuples, i.e. an insert-only workload) — fold the pending region into the main
+/// structure once it exceeds `theodb.vacuum_pending_threshold` pages, so the scan returns to O(structure)
+/// instead of paying O(pending) forever (D3). The per-INSERT path stays O(1); the fold is the same crash-safe
+/// `vacuum_rebuild` used by `ambulkdelete`, with nothing dead. NEVER aborts on an unreadable/legacy meta —
+/// `pending_page_count` swallows the error to 0 (skip), so a routine VACUUM is fail-safe.
 #[pg_guard]
 pub extern "C-unwind" fn amvacuumcleanup(
     vinfo: *mut pg_sys::IndexVacuumInfo,
     stats: *mut pg_sys::IndexBulkDeleteResult,
 ) -> *mut pg_sys::IndexBulkDeleteResult {
     unsafe {
-        if stats.is_null() || (*vinfo).analyze_only {
+        if (*vinfo).analyze_only {
             return stats;
         }
-        (*stats).num_pages = pg_sys::RelationGetNumberOfBlocksInFork(
-            (*vinfo).index,
-            pg_sys::ForkNumber::MAIN_FORKNUM,
-        );
+        let indexrel = (*vinfo).index;
+        if stats.is_null() {
+            // No bulkdelete this pass — fold the pending region if it grew past the threshold (insert-only path).
+            let pending = page::pending_page_count(indexrel);
+            if pending > guc::vacuum_pending_threshold() {
+                let mut none_dead = |_id: i64| -> bool { false };
+                let live = build::vacuum_rebuild(indexrel, &mut none_dead);
+                let out = PgBox::<pg_sys::IndexBulkDeleteResult>::alloc0().into_pg();
+                (*out).num_index_tuples = live as f64;
+                (*out).pages_deleted = pending; // the pending pages folded away
+                (*out).num_pages =
+                    pg_sys::RelationGetNumberOfBlocksInFork(indexrel, pg_sys::ForkNumber::MAIN_FORKNUM);
+                return out;
+            }
+            return stats; // NULL — below threshold, nothing to do
+        }
+        (*stats).num_pages =
+            pg_sys::RelationGetNumberOfBlocksInFork(indexrel, pg_sys::ForkNumber::MAIN_FORKNUM);
         stats
     }
 }

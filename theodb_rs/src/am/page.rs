@@ -111,6 +111,21 @@ unsafe fn pending_layout(rel: pg_sys::Relation) -> Result<(u32, u32), String> {
     Ok((main_index_pages(rel)?, nblocks))
 }
 
+/// Number of pending pages `[pending_start, nblocks)`. Returns 0 (⇒ do-not-fold) for any index whose meta
+/// cannot be read — a legacy M26 blob, an unbuilt index, or a torn meta. A routine VACUUM must NEVER abort on
+/// this, so the `Err` is swallowed to 0 with a server WARN (the EC-3 fail-safe applied to the maintenance path,
+/// per D3 "v1 blob → skip with WARN"), not propagated.
+pub(crate) unsafe fn pending_page_count(rel: pg_sys::Relation) -> u32 {
+    match pending_layout(rel) {
+        Ok((pstart, nblocks)) if pstart > 0 && nblocks > pstart => nblocks - pstart,
+        Ok(_) => 0,
+        Err(e) => {
+            pgrx::log!("theodb am: pending-fold skipped (meta unreadable, REINDEX to upgrade): {e}");
+            0
+        }
+    }
+}
+
 /// Encode one pending entry: `[tid i64, dim u32, f32×dim]`.
 fn encode_pending(tid: i64, vec: &[f32]) -> Vec<u8> {
     let mut e = Vec::with_capacity(12 + vec.len() * 4);
@@ -181,7 +196,15 @@ unsafe fn try_add_to_page(rel: pg_sys::Relation, block: pg_sys::BlockNumber, ite
 /// Read every pending `(tid, vector)` appended since the build (M26 Phase 5). Empty when there is no pending.
 pub(crate) unsafe fn read_pending(rel: pg_sys::Relation) -> Result<Vec<(i64, Vec<f32>)>, String> {
     let (pstart, nblocks) = pending_layout(rel)?;
-    if pstart == 0 || nblocks <= pstart {
+    let pending_pages = if pstart > 0 && nblocks > pstart { nblocks - pstart } else { 0 };
+    // Runtime metric (wiring pillar c, opt-in THEODB_SCAN_PROFILE=1): every scan reads the WHOLE pending region
+    // linearly (O(pending)), a cost the graph-traverse `pages_read` metric does not capture. Logged on EVERY scan
+    // (including 0) so the pending-fold win (T3.1) is observable: it drops from N to 0 once VACUUM folds the
+    // pending into the structure — logging only the non-zero case would let a stale reading masquerade as "0".
+    if std::env::var("THEODB_SCAN_PROFILE").is_ok_and(|v| v == "1") {
+        pgrx::log!("theodb am pending scan: pending_pages={pending_pages}");
+    }
+    if pending_pages == 0 {
         return Ok(Vec::new());
     }
     let mut out = Vec::new();
