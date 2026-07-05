@@ -31,6 +31,16 @@ serde_json = "1"
 
 [dev-dependencies]
 pgrx-tests = "=0.16.1"
+# FU-1: criterion drives the same-graph scan-allocation micro-bench (`benches/scan_hot_path.rs`). Dev-only →
+# never links into the released cdylib (parsimony rung 4). Pinned to pgvectorscale's version (same pgrx stack).
+criterion = "0.5.1"
+
+# FU-1 same-graph micro-bench: measures the M46 pre-size vs `::new()` allocation cost over a fixed synthetic
+# graph. `harness = false` → criterion owns `main()`. The bench `#[path]`-includes the PURE `ann/scan_core.rs`
+# (zero `crate::`/`pg_sys` refs) so it links standalone WITHOUT a PostgreSQL runtime (blueprint Q5).
+[[bench]]
+name = "scan_hot_path"
+harness = false
 
 [profile.dev]
 panic = "unwind"

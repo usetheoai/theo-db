@@ -551,56 +551,75 @@ pub(crate) unsafe fn traverse(
         lc -= 1;
     }
 
-    // Ground layer with ef_search: a min-heap of candidates to expand, a max-heap of the ef best found.
-    // M46 L1-A: pre-size the three per-query structures so they never rehash/realloc mid-search — the
-    // accidental overhead that scaled super-linearly with ef (default SipHash `HashSet` starts at capacity 0
-    // and rehashes ~12× over an ef=200 search). Anchors: pgvector `tidhash_create(ef*m*2)` (`hnswutils.c:675`),
-    // pgvectorscale `with_capacity(search_list_size*neigbors)` (`graph/mod.rs:109-111`). Recall-neutral.
-    let cap = ef.saturating_mul(m0.max(1)).max(1);
-    let mut visited: std::collections::HashSet<(u32, u16)> =
-        std::collections::HashSet::with_capacity(cap.saturating_mul(2));
-    let mut cands: std::collections::BinaryHeap<std::cmp::Reverse<Cand>> =
-        std::collections::BinaryHeap::with_capacity(cap);
-    let mut result: std::collections::BinaryHeap<Cand> =
-        std::collections::BinaryHeap::with_capacity(ef + 1);
-    // M46 L1-B: one neighbor scratch reused across every expanded node (was a fresh `Vec` per node).
-    let mut scratch: Vec<Addr> = Vec::with_capacity(m0.max(1));
-    visited.insert((ep.blk, ep.off));
-    cands.push(std::cmp::Reverse(ep));
-    result.push(ep);
-    while let Some(std::cmp::Reverse(c)) = cands.pop() {
-        let worst = result.peek().map(|w| w.d).unwrap_or(f64::INFINITY);
-        if c.d > worst && result.len() >= ef {
-            break;
-        }
-        // On Err, `?` aborts before `scratch` is read; on Ok, `decode_neighbors_into` has cleared+refilled it.
-        // This is what makes the scratch reuse leak-free — do NOT swallow this Err (e.g. `let _ =`) or the loop
-        // below would read a previous node's neighbors.
-        neighbors_into(rel, &c, 0, m, m0, nblocks, &mut reads, &mut scratch)?;
-        for i in 0..scratch.len() {
-            let (nb, no) = scratch[i];
-            if !visited.insert((nb, no)) {
-                continue;
-            }
-            let cand = load(rel, nb, no, q, metric, is_l2, nblocks, &mut reads)?;
-            let worst = result.peek().map(|w| w.d).unwrap_or(f64::INFINITY);
-            if cand.d < worst || result.len() < ef {
-                cands.push(std::cmp::Reverse(cand));
-                result.push(cand);
-                if result.len() > ef {
-                    result.pop();
-                }
-            }
-        }
-    }
+    // Ground layer with ef_search — extracted to `ann/scan_core::ground_search` behind a `NeighborSource` seam
+    // (FU-1). The M46 pre-size + reused scratch live there now (`presize = true` keeps the M46 behavior);
+    // production drives it via `PageNeighborSource`, the criterion bench via `MemNeighborSource`. Recall-neutral:
+    // the ground loop reads the same pages in the same order (dedup-before-load preserved). `reads` is threaded
+    // through the source's `Cell` so `pages_read` stays exact.
+    let pg_src = PageNeighborSource {
+        rel,
+        nblocks,
+        q,
+        metric,
+        is_l2,
+        m,
+        m0,
+        reads: std::cell::Cell::new(reads),
+    };
+    let out = crate::ann::scan_core::ground_search(&pg_src, ep, ef, m0, true)?;
+    reads = pg_src.reads.get();
 
     if std::env::var("THEODB_SCAN_PROFILE").is_ok_and(|v| v == "1") {
         // The wiring-triad runtime metric: pages read must be O(ef·M), flat in N (server LOG, not client WARNING).
-        pgrx::log!("theodb hnsw scan profile: pages_read={reads} ef={ef} m={m} m0={m0} results={}", result.len());
+        pgrx::log!("theodb hnsw scan profile: pages_read={reads} ef={ef} m={m} m0={m0} results={}", out.len());
     }
-    let mut out: Vec<(i64, f64)> = result.into_iter().map(|c| (c.tid, c.d)).collect();
-    out.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(&b.0)));
     Ok(out)
+}
+
+/// The production [`scan_core::NeighborSource`]: drives the ground search over PostgreSQL pages by reusing the
+/// existing `load` + `neighbors_into` page readers (FU-1). `Node` is the on-disk `Cand` (distance + tid + the
+/// neighbor-tuple address for expansion); `Ref` is a neighbor element address `(blk,off)`. The page-read counter
+/// is threaded through a `Cell` (the trait methods take `&self`); it mirrors the pre-FU-1 `&mut reads` exactly.
+struct PageNeighborSource<'a> {
+    rel: pg_sys::Relation,
+    nblocks: u32,
+    q: &'a [f32],
+    metric: Metric,
+    is_l2: bool,
+    m: usize,
+    m0: usize,
+    reads: std::cell::Cell<usize>,
+}
+
+impl<'a> crate::ann::scan_core::NeighborSource for PageNeighborSource<'a> {
+    type Node = Cand;
+    type Ref = Addr;
+
+    fn dist(&self, node: &Cand) -> f64 {
+        node.d
+    }
+    fn tid(&self, node: &Cand) -> i64 {
+        node.tid
+    }
+    fn node_key(&self, node: &Cand) -> u64 {
+        ((node.blk as u64) << 16) | node.off as u64
+    }
+    fn ref_key(&self, r: &Addr) -> u64 {
+        ((r.0 as u64) << 16) | r.1 as u64
+    }
+    fn neighbors_into(&self, node: &Cand, out: &mut Vec<Addr>) -> Result<(), String> {
+        let mut reads = 0usize;
+        // bare `neighbors_into(..)` = the free page reader below; `self`-less → no recursion into this method.
+        let r = unsafe { neighbors_into(self.rel, node, 0, self.m, self.m0, self.nblocks, &mut reads, out) };
+        self.reads.set(self.reads.get() + reads);
+        r
+    }
+    fn load(&self, r: &Addr) -> Result<Cand, String> {
+        let mut reads = 0usize;
+        let cand = unsafe { load(self.rel, r.0, r.1, self.q, self.metric, self.is_l2, self.nblocks, &mut reads) };
+        self.reads.set(self.reads.get() + reads);
+        cand
+    }
 }
 
 #[cfg(any(test, feature = "pg_test"))]
