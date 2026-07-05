@@ -27,3 +27,10 @@
   file-ownership heuristic. Committed with T2.1; test_am_maintenance.py grows with T3.1/T5.1 later.
 - **AC not ticked (honest):** page.rs ≤ 850 (876, over — followup split) and Coverage #8 EC-1 auto-migrate
   round-trip (cross-binary followup) are LEFT OPEN, not ticked GREEN.
+
+## T2.2 (SEPA-flagged, honest)
+- **"reclaim crash-safe" NOT ticked** — T2.2's RED (size-stability fold2<=fold1) proves REUSE, not the
+  fail-loud-on-crash. The crash-mid-reclaim proof is T2.3 (crash-injection). Explicit dependency T2.2→T2.3.
+- **ADR 0014 written** — names the FSM→contiguous-region swap + the M55 residual window (SEPA required this
+  in docs/adr/, not just followups.md; /review cross-validation will cite it).
+- **page.rs 894 LoC** — grew +18 (ivf_gen_base) on top of the pre-existing 876; split still the followup remedy.

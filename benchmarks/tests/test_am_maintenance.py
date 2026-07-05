@@ -111,6 +111,37 @@ def test_fold_preserves_scan_results(conn, am, opclass):
     ("theodb_hnsw", "theodb_hnsw_l2_ops"),
     ("theodb_ivfflat", "theodb_ivfflat_l2_ops"),
 ])
+def test_fold_reclaims_pages(conn, am, opclass):
+    """T2.2: consecutive folds must NOT grow the relation unboundedly — the second fold reuses the dead
+    low region left by the first (generation alternation), so its size does not exceed the first fold's.
+    A pure tail-append fold (no reclaim) would grow strictly on every fold."""
+    cur = conn.cursor()
+    table = f"m48_reclaim_{am}"
+    _make_index(cur, table, am, opclass, n=500, dim=8)
+
+    cur.execute(f"DELETE FROM {table} WHERE id % 10 < 3")
+    cur.execute(f"VACUUM {table}")
+    size_fold1 = _rel_size(cur, table)
+
+    cur.execute(f"DELETE FROM {table} WHERE id % 10 >= 7")
+    cur.execute(f"VACUUM {table}")
+    size_fold2 = _rel_size(cur, table)
+
+    # The second fold reuses the region freed by the first ⇒ size does not grow. (Bounded growth; a fully
+    # minimal / shrinking reclaim is M55.) Correctness still holds after two folds.
+    assert size_fold2 <= size_fold1, (
+        f"{am}: relation grew across folds ({size_fold1} -> {size_fold2}) — reclaim did not reuse freed space"
+    )
+    query = [40.0 + j * 1000 for j in range(8)]
+    idx_top = _index_knn(cur, table, query, 5)
+    assert all(i % 10 >= 3 and i % 10 < 7 for i in idx_top), f"{am}: stale/deleted id after two folds: {idx_top}"
+    cur.execute(f"DROP TABLE {table}")
+
+
+@pytest.mark.parametrize("am,opclass", [
+    ("theodb_hnsw", "theodb_hnsw_l2_ops"),
+    ("theodb_ivfflat", "theodb_ivfflat_l2_ops"),
+])
 def test_fold_empty_corpus(conn, am, opclass):
     """EC-5: folding an emptied index (DELETE ALL + VACUUM) yields a valid empty index, still writable."""
     cur = conn.cursor()

@@ -18,6 +18,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- VACUUM do índice vetorial bounda o crescimento do índice: o fold reusa a região contígua liberada por um fold anterior (alternância de gerações), em vez de estender sempre. Limite honesto (ADR 0014): o passo de reclaim NÃO é totalmente atômico — um crash no meio do reclaim é **fail-loud** (erro tipado → REINDEX), nunca corrupção silenciosa; o reclaim atômico sem janela de REINDEX é escopo do M55 (manutenção incremental crash-safe). A correção de corrupção do #47 em si (meta-pivot) é completa e crash-safe (#47)
+
 - VACUUM do índice vetorial (`theodb_hnsw`/`theodb_ivfflat`) agora é **crash-safe**: o fold escreve a nova geração em páginas frescas e troca a página-meta (bloco 0) por último, num único registro WAL full-image — antes reescrevia no lugar, meta primeiro, e um crash no meio do VACUUM podia corromper o índice (pior caso: resultado silenciosamente errado). Formato structured do IVF migrado para v3 (campo `gen_base`, geração relocável); índices v2 continuam legíveis e são migrados no primeiro VACUUM. Índices pré-M48 podem exigir REINDEX se o erro tipado instruir (#47)
 
 - Cycle-kit: `check_plan_completeness.py` (discover-plan-confidence) alinhado ao perfil frontier já sancionado por ADR `0001-discover-phd-rigor` (MIN_QUESTIONS=6, MAX_QUESTIONS=14, MAX_PER_CORNER=5 — o script ainda aplicava 5/10/3; dentro do cap LOCKED ≤15 do golden rule)

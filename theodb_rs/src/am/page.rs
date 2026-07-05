@@ -646,6 +646,24 @@ pub(crate) unsafe fn read_ivf_meta(rel: pg_sys::Relation) -> Result<IvfMeta, Str
     Ok(IvfMeta { dim, metric_tag, centroids, dir })
 }
 
+/// The first block of the current IVF structured generation (v3 `gen_base`; v2 legacy = 1). The single-source
+/// pointer the crash-safe fold's `free_region` reclaims BEFORE — same value the scan resolves the directory from.
+pub(crate) unsafe fn ivf_gen_base(rel: pg_sys::Relation) -> Result<u32, String> {
+    let m = read_page_item(rel, 0)?;
+    if m.len() < 8 || u32::from_le_bytes(m[0..4].try_into().unwrap()) != IVF_STRUCT_MAGIC {
+        return Err("theodb ivf: bad structured meta magic".into());
+    }
+    let ver = u32::from_le_bytes(m[4..8].try_into().unwrap());
+    if ver == 3 {
+        if m.len() < 29 {
+            return Err("theodb ivf: truncated v3 meta (missing gen_base)".into());
+        }
+        Ok(u32::from_le_bytes(m[25..29].try_into().unwrap()))
+    } else {
+        Ok(1) // v2 (M34): directory implicitly at block 1
+    }
+}
+
 /// Read ONE list's raw page bytes (`npages` chunks from `first_block`) — the hot scan path scores entries directly
 /// off these bytes with a reused scratch buffer (M31), avoiding a `Vec<f32>` allocation per entry.
 pub(crate) unsafe fn read_ivf_list_bytes(
