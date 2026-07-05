@@ -213,8 +213,12 @@ unsafe fn vacuum_rebuild_hnsw_structured(indexrel: pg_sys::Relation, dead: &mut 
     let live: Vec<(i64, Vec<f32>)> = all.into_iter().filter(|(id, _)| !dead(*id)).collect();
     // HNSW build params are fixed consts (no reloption), so rebuild with them; preserve the metric from meta.
     let idx = HnswIndex::build(&live, HNSW_M, HNSW_EF_CONSTRUCTION, metric, BUILD_SEED);
-    match crate::am::hnsw_page::pack(&idx) {
-        Ok(packed) => crate::am::hnsw_page::rewrite_structured(indexrel, &packed),
+    // M48 (#47): crash-safe fold — pack the new generation at a fresh base, write it to inert pages, then pivot
+    // block 0. `pack_at` resolves the graph's pointers relative to `base`, so the packed image is position-
+    // independent and readers (which follow meta.elem_first/nbr_first/entry_blkno) need no change.
+    let base = crate::am::fold::tail_base(indexrel);
+    match crate::am::hnsw_page::pack_at(&idx, base as usize) {
+        Ok(packed) => crate::am::fold::fold(indexrel, &packed.meta, &packed.pages, base),
         Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
     }
     live.len()
@@ -248,7 +252,13 @@ unsafe fn vacuum_rebuild_structured(indexrel: pg_sys::Relation, dead: &mut dyn F
     // M34 — a VACUUM fold preserves the built list count (WITH (lists=N)); reverting to the default would silently
     // re-partition a tuned index.
     let idx = IvfflatIndex::build(&live, lists_from_relation(indexrel), metric, BUILD_SEED);
-    page::rewrite_ivf_structured(indexrel, dim, metric.tag(), idx.centroids(), &idx.list_entries());
+    // M48 (#47): crash-safe fold — the v3 items carry gen_base = the fresh base, so the relocated directory /
+    // centroids / lists resolve correctly after block 0 is pivoted. One item per page ⇒ wrap each as a 1-item page.
+    let base = crate::am::fold::tail_base(indexrel);
+    let items = page::ivf_structured_items(base, dim, metric.tag(), idx.centroids(), &idx.list_entries());
+    let (meta, body_items) = items.split_first().expect("ivf structured items always include the meta");
+    let body: Vec<Vec<Vec<u8>>> = body_items.iter().map(|it| vec![it.clone()]).collect();
+    crate::am::fold::fold(indexrel, meta, &body, base);
     live.len()
 }
 

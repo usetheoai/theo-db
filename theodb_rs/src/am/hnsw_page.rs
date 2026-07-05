@@ -269,26 +269,37 @@ fn encode_neighbors(idx: &HnswIndex, node: usize, elem_addr: &[Addr], m: usize, 
 /// Resolve the whole in-memory graph into meta + page images (ADR-2 — no I/O, unit-testable). Returns `Err` if a
 /// neighbor tuple would exceed one page (impossible under the build's level cap, asserted here defensively).
 pub(crate) fn pack(idx: &HnswIndex) -> Result<Packed, String> {
+    // The initial build / buildempty writes a contiguous generation starting right after the meta (block 1).
+    pack_at(idx, 1)
+}
+
+/// Like [`pack`], but places the generation body starting at block `base` (M48 / issue #47). The meta's element
+/// and neighbor pointers (`elem_first`/`nbr_first`/`entry_blkno`) plus every neighbor-tuple address are resolved
+/// relative to `base`, so the packed image is position-independent — the crash-safe fold writes it at the tail
+/// (or a reclaimed contiguous region) and pivots block 0 to it. Readers already follow the meta pointers, so no
+/// read path changes: the graph is relocatable for free (unlike IVF, whose directory needed an explicit gen_base).
+pub(crate) fn pack_at(idx: &HnswIndex, base: usize) -> Result<Packed, String> {
     let (metric, m, m0, _ef) = idx.params();
     let n = idx.node_count();
     let dim = idx.dim();
 
-    // Empty graph: meta only, entry_level = -1.
+    // Empty graph: meta only, entry_level = -1. `base` is irrelevant (no body pages) — record it anyway so
+    // pending_start (= nbr_first + nbr_npages = base) is consistent with a non-empty generation at `base`.
     if n == 0 {
         let meta = encode_meta(&HnswMeta {
             metric_tag: metric.tag(), dim: dim as u32, m: m as u16, m0: m0 as u16,
             entry_blkno: 0, entry_offno: 0, entry_level: -1, node_count: 0,
-            elem_first: 1, elem_npages: 0, nbr_first: 1, nbr_npages: 0,
+            elem_first: base as u32, elem_npages: 0, nbr_first: base as u32, nbr_npages: 0,
         });
         return Ok(Packed { meta, pages: Vec::new() });
     }
 
-    // 1. Analytic element addresses (fixed size ⇒ node i is at block 1+i/ipp, offset 1+i%ipp).
+    // 1. Analytic element addresses (fixed size ⇒ node i is at block base+i/ipp, offset 1+i%ipp).
     let ipp = elems_per_page(dim);
     let elem_npages = n.div_ceil(ipp);
     let elem_addr: Vec<Addr> =
-        (0..n).map(|i| ((1 + i / ipp) as u32, (1 + i % ipp) as u16)).collect();
-    let nbr_first = 1 + elem_npages;
+        (0..n).map(|i| ((base + i / ipp) as u32, (1 + i % ipp) as u16)).collect();
+    let nbr_first = base + elem_npages;
 
     // 2. Pack neighbor tuples by free space, starting at nbr_first. Content uses the analytic elem addrs.
     let mut nbr_pages: Vec<Vec<Vec<u8>>> = vec![Vec::new()];
@@ -327,7 +338,7 @@ pub(crate) fn pack(idx: &HnswIndex) -> Result<Packed, String> {
     let meta = encode_meta(&HnswMeta {
         metric_tag: metric.tag(), dim: dim as u32, m: m as u16, m0: m0 as u16,
         entry_blkno: eb, entry_offno: eo, entry_level: idx.node_level(entry_node) as i16,
-        node_count: n as u32, elem_first: 1, elem_npages: elem_npages as u32,
+        node_count: n as u32, elem_first: base as u32, elem_npages: elem_npages as u32,
         nbr_first: nbr_first as u32, nbr_npages: nbr_npages as u32,
     });
 
@@ -381,29 +392,8 @@ pub(crate) unsafe fn enumerate_entries(
     Ok(out)
 }
 
-/// Rewrite the structured graph in place (VACUUM fold): reinit block 0 (meta) + the page images, then empty every
-/// leftover page (the old pending region) so no stale pending survives — mirrors `page::rewrite_blob`'s in-place
-/// reinit strategy, avoiding unbounded relation growth across vacuums.
-pub(crate) unsafe fn rewrite_structured(rel: pg_sys::Relation, packed: &Packed) {
-    let nblocks = pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM);
-    // block 0 = meta, then the page images; reinit existing blocks in place, extend for any new ones.
-    // NB: closures do not inherit the enclosing `unsafe fn` context, so the FFI calls are wrapped explicitly.
-    let write_block = |block: u32, items: &[Vec<u8>]| unsafe {
-        if block < nblocks {
-            page::reinit_page_with_items(rel, block, items);
-        } else {
-            page::extend_page_with_items(rel, pg_sys::ForkNumber::MAIN_FORKNUM, items);
-        }
-    };
-    write_block(0, std::slice::from_ref(&packed.meta));
-    for (i, pg) in packed.pages.iter().enumerate() {
-        write_block(1 + i as u32, pg);
-    }
-    let total = 1 + packed.pages.len() as u32;
-    for b in total..nblocks {
-        page::reinit_page_with_items(rel, b, &[]); // empty the old pending pages
-    }
-}
+// (M48) The old in-place `rewrite_structured` was replaced by the crash-safe `fold::fold` (meta-pivot) — it
+// rewrote block 0 first, so a crash mid-vacuum left the meta pointing at pages that still held old bytes (#47).
 
 /// A traversal candidate: its element address, neighbor-tuple address, level, heap tid, and distance to the query.
 #[derive(Clone, Copy)]

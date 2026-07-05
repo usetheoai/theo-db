@@ -13,6 +13,7 @@
 use pgrx::*;
 
 mod build; // ambuild / ambuildempty (Phase 2) + shared datum/metric helpers
+mod fold; // M48 — crash-safe VACUUM fold (meta-pivot, issue #47)
 pub(crate) mod guc; // M34 — theodb_ivfflat.probes scan GUC
 mod hnsw_page; // M35 — page-native structured persistence for theodb_hnsw
 mod index; // polymorphic persisted index (ivf|hnsw) dispatch (Phase 6)

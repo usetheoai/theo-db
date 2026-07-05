@@ -307,6 +307,35 @@ pub(crate) unsafe fn reinit_page_with_items(
     pg_sys::UnlockReleaseBuffer(buf);
 }
 
+/// Pivot the fixed meta page (block 0) to a new generation — the LAST write of a crash-safe fold (M48 #47).
+/// Registers block 0 with `GENERIC_XLOG_FULL_IMAGE` so the record carries the whole rewritten meta rather than
+/// a delta: the meta is replaced in full, and a full image is torn-page-proof on redo (the nbtree/GIN
+/// meta-full-record discipline, blueprint §Q1/§Q4 — a delta applied over a torn base page would corrupt it).
+pub(crate) unsafe fn pivot_meta_page(rel: pg_sys::Relation, meta: &[u8]) {
+    let buf = pg_sys::ReadBufferExtended(
+        rel,
+        pg_sys::ForkNumber::MAIN_FORKNUM,
+        0,
+        pg_sys::ReadBufferMode::RBM_NORMAL,
+        std::ptr::null_mut(),
+    );
+    pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_EXCLUSIVE as i32);
+    let state = pg_sys::GenericXLogStart(rel);
+    let page = pg_sys::GenericXLogRegisterBuffer(state, buf, pg_sys::GENERIC_XLOG_FULL_IMAGE as i32);
+    pg_sys::PageInit(page, pg_sys::BLCKSZ as usize, 0);
+    let off = pg_sys::PageAddItemExtended(
+        page,
+        meta.as_ptr() as pg_sys::Item,
+        meta.len(),
+        pg_sys::InvalidOffsetNumber,
+        0,
+    );
+    assert!(off != pg_sys::InvalidOffsetNumber, "theodb am: pivot PageAddItem failed");
+    pg_sys::MarkBufferDirty(buf);
+    pg_sys::GenericXLogFinish(state);
+    pg_sys::UnlockReleaseBuffer(buf);
+}
+
 unsafe fn reinit_page_with_item(rel: pg_sys::Relation, block: pg_sys::BlockNumber, data: &[u8]) {
     let buf = pg_sys::ReadBufferExtended(
         rel,
@@ -369,24 +398,34 @@ unsafe fn main_index_pages(rel: pg_sys::Relation) -> Result<u32, String> {
         if m.len() < 25 {
             return Err("theodb am: truncated structured meta".into());
         }
-        // Version-gate BEFORE parsing v2 offsets — a v1 index (M31/M31b, magic identical) has a different header
-        // layout, so reading `dir_npages`/`centroid_npages` at the v2 offsets would misparse and yield a bogus
-        // pending offset (silently dropping INSERTed rows). Reject v1 with the same REINDEX error read_ivf_meta uses.
+        // Version-gate BEFORE parsing offsets — a v1 index (M31/M31b, magic identical) has a different header
+        // layout, so reading `dir_npages`/`centroid_npages` at the v2/v3 offsets would misparse and yield a bogus
+        // pending offset (silently dropping INSERTed rows). v2 (M34) has an implicit gen_base of 1; v3 (M48)
+        // carries it explicitly. Reject anything else with the REINDEX error.
         let ver = u32::from_le_bytes(m[4..8].try_into().unwrap());
-        if ver != 2 {
+        if ver != 2 && ver != 3 {
             return Err(format!(
-                "theodb am: unsupported structured format v{ver} — REINDEX to upgrade to the M34 page-chunked directory (v2)"
+                "theodb am: unsupported structured format v{ver} — REINDEX to upgrade to the M48 relocatable generation (v3)"
             ));
         }
         let nlists = u32::from_le_bytes(m[13..17].try_into().unwrap()) as usize;
         let dir_npages = u32::from_le_bytes(m[17..21].try_into().unwrap());
         let centroid_npages = u32::from_le_bytes(m[21..25].try_into().unwrap());
-        // M34 v2: the directory is on its own pages — read it to sum the per-list npages.
-        let dbytes = read_chunked(rel, 1, dir_npages)?;
+        let gen_base = if ver == 3 {
+            if m.len() < 29 {
+                return Err("theodb am: truncated v3 meta (missing gen_base)".into());
+            }
+            u32::from_le_bytes(m[25..29].try_into().unwrap())
+        } else {
+            1
+        };
+        // The directory is on its own pages — read it to sum the per-list npages. Pending starts right after the
+        // generation body (gen_base + dir + centroids + Σ list pages), which is the true tail for an append fold.
+        let dbytes = read_chunked(rel, gen_base, dir_npages)?;
         if dbytes.len() < nlists * 12 {
             return Err("theodb am: truncated directory".into());
         }
-        let mut total = 1u32.saturating_add(dir_npages).saturating_add(centroid_npages);
+        let mut total = gen_base.saturating_add(dir_npages).saturating_add(centroid_npages);
         for i in 0..nlists {
             let o = i * 12 + 4; // np field within the 12-byte dir entry
             total = total.saturating_add(u32::from_le_bytes(dbytes[o..o + 4].try_into().unwrap()));
@@ -437,6 +476,7 @@ unsafe fn read_chunked(rel: pg_sys::Relation, first_block: u32, npages: u32) -> 
 /// Each item is one page. The meta's directory references the sequential block numbers (identical whether the
 /// items are then extended into a fresh relation or reinit-ed in place).
 fn structured_page_items(
+    base: u32,
     dim: u32,
     metric_tag: u8,
     centroids: &[Vec<f32>],
@@ -452,11 +492,13 @@ fn structured_page_items(
     let centroid_npages = npages_for(cbytes.len());
     let encoded: Vec<Vec<u8>> = lists.iter().map(|l| encode_list(l)).collect();
 
-    // The per-list directory lives on its OWN chunked page range (M34, format v2) — NOT inline on the meta page —
-    // so `lists` is no longer bounded by a single page (CHUNK=8000 → ~665 lists at 12 B/entry). Layout:
-    // meta header · dir pages · centroid pages · per-list pages.
+    // The per-list directory lives on its OWN chunked page range (M34) — NOT inline on the meta page — so `lists`
+    // is no longer bounded by a single page (CHUNK=8000 → ~665 lists at 12 B/entry). M48 (v3): the generation body
+    // starts at `base` (block 0 is the fixed meta/pivot page; `base==1` for the initial contiguous build, `base`
+    // == tail/reclaimed-region for a crash-safe fold). Layout: [block 0 meta] · gen_base: dir pages · centroid
+    // pages · per-list pages. The dir's per-list first_block cursors are ABSOLUTE, resolved from `base` here.
     let dir_npages = npages_for(nlists as usize * 12);
-    let mut cursor = 1 + dir_npages + centroid_npages;
+    let mut cursor = base + dir_npages + centroid_npages;
     let mut dir: Vec<(u32, u32, u32)> = Vec::with_capacity(lists.len());
     for (i, enc) in encoded.iter().enumerate() {
         let np = npages_for(enc.len());
@@ -470,15 +512,18 @@ fn structured_page_items(
         dirbytes.extend_from_slice(&cnt.to_le_bytes());
     }
 
-    // Meta header (block 0), fixed 25 bytes: magic · ver=2 · metric · dim · nlists · dir_npages · centroid_npages.
-    let mut meta = Vec::with_capacity(25);
+    // Meta header (block 0), fixed 29 bytes: magic · ver=3 · metric · dim · nlists · dir_npages · centroid_npages
+    // · gen_base (M48). v3 adds gen_base so the generation body is relocatable for the crash-safe fold; v2 (M34)
+    // is still readable with an implicit gen_base of 1 (auto-migrated to v3 on the first VACUUM fold).
+    let mut meta = Vec::with_capacity(29);
     meta.extend_from_slice(&IVF_STRUCT_MAGIC.to_le_bytes());
-    meta.extend_from_slice(&2u32.to_le_bytes()); // format v2 — page-chunked directory (M34)
+    meta.extend_from_slice(&3u32.to_le_bytes()); // format v3 — relocatable generation (M48 issue #47)
     meta.push(metric_tag);
     meta.extend_from_slice(&dim.to_le_bytes());
     meta.extend_from_slice(&nlists.to_le_bytes());
     meta.extend_from_slice(&dir_npages.to_le_bytes());
     meta.extend_from_slice(&centroid_npages.to_le_bytes());
+    meta.extend_from_slice(&base.to_le_bytes());
 
     // One page-item per page: meta · dir chunks · centroid chunks · each list's chunks.
     let mut items: Vec<Vec<u8>> = vec![meta];
@@ -507,34 +552,26 @@ pub(crate) unsafe fn write_ivf_structured(
     centroids: &[Vec<f32>],
     lists: &[Vec<(i64, Vec<f32>)>],
 ) {
-    for item in structured_page_items(dim, metric_tag, centroids, lists) {
+    // Initial build: contiguous generation right after the meta page (base = block 1).
+    for item in structured_page_items(1, dim, metric_tag, centroids, lists) {
         extend_page_with_item(rel, pg_sys::ForkNumber::MAIN_FORKNUM, &item);
     }
 }
 
-/// Rewrite the structured layout in place (M31 VACUUM fold) — reinit existing blocks, extend new, empty leftovers
-/// (same discipline as `rewrite_blob`). Drops any old pending pages beyond the new item count.
-pub(crate) unsafe fn rewrite_ivf_structured(
-    rel: pg_sys::Relation,
+/// Build the IVFFlat structured page items for a generation based at `base` (M48 crash-safe fold). The caller
+/// (`fold::fold`) writes item 0 (meta, carrying gen_base) to block 0 LAST and items 1.. to `base..`.
+pub(crate) fn ivf_structured_items(
+    base: u32,
     dim: u32,
     metric_tag: u8,
     centroids: &[Vec<f32>],
     lists: &[Vec<(i64, Vec<f32>)>],
-) {
-    let items = structured_page_items(dim, metric_tag, centroids, lists);
-    let nblocks = pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM);
-    for (i, item) in items.iter().enumerate() {
-        let b = i as u32;
-        if b < nblocks {
-            reinit_page_with_item(rel, b, item);
-        } else {
-            extend_page_with_item(rel, pg_sys::ForkNumber::MAIN_FORKNUM, item);
-        }
-    }
-    for b in (items.len() as u32)..nblocks {
-        reinit_page_with_item(rel, b, &[]);
-    }
+) -> Vec<Vec<u8>> {
+    structured_page_items(base, dim, metric_tag, centroids, lists)
 }
+
+// (M48) The old in-place `rewrite_ivf_structured` was replaced by the crash-safe `fold::fold` (meta-pivot) via
+// `ivf_structured_items` — the in-place rewrite wrote block 0 first, corrupting the index on a mid-vacuum crash (#47).
 
 /// The parsed structured meta: dim, metric tag, centroids, and the per-list directory `(first_block, npages, count)`.
 pub(crate) struct IvfMeta {
@@ -553,10 +590,12 @@ pub(crate) unsafe fn read_ivf_meta(rel: pg_sys::Relation) -> Result<IvfMeta, Str
     if u32::from_le_bytes(m[0..4].try_into().unwrap()) != IVF_STRUCT_MAGIC {
         return Err("theodb ivf: bad structured meta magic".into());
     }
+    // v2 (M34) is read with an implicit gen_base of 1 (contiguous from block 1); v3 (M48) carries an explicit
+    // gen_base so the generation can live at a relocated offset after a crash-safe fold. Anything else → REINDEX.
     let ver = u32::from_le_bytes(m[4..8].try_into().unwrap());
-    if ver != 2 {
+    if ver != 2 && ver != 3 {
         return Err(format!(
-            "theodb ivf: unsupported structured format v{ver} — REINDEX to upgrade to the M34 page-chunked directory (v2)"
+            "theodb ivf: unsupported structured format v{ver} — REINDEX to upgrade to the M48 relocatable generation (v3)"
         ));
     }
     let metric_tag = m[8];
@@ -564,8 +603,16 @@ pub(crate) unsafe fn read_ivf_meta(rel: pg_sys::Relation) -> Result<IvfMeta, Str
     let nlists = u32::from_le_bytes(m[13..17].try_into().unwrap()) as usize;
     let dir_npages = u32::from_le_bytes(m[17..21].try_into().unwrap());
     let centroid_npages = u32::from_le_bytes(m[21..25].try_into().unwrap());
-    // Directory region (M34, v2): blocks 1..=dir_npages, chunked (no longer inline on the meta page).
-    let dbytes = read_chunked(rel, 1, dir_npages)?;
+    let gen_base = if ver == 3 {
+        if m.len() < 29 {
+            return Err("theodb ivf: truncated v3 meta (missing gen_base)".into());
+        }
+        u32::from_le_bytes(m[25..29].try_into().unwrap())
+    } else {
+        1 // v2: directory implicitly at block 1
+    };
+    // Directory region: blocks gen_base..=+dir_npages, chunked (no longer inline on the meta page).
+    let dbytes = read_chunked(rel, gen_base, dir_npages)?;
     if dbytes.len() < nlists * 12 {
         return Err("theodb ivf: truncated list directory".into());
     }
@@ -578,8 +625,8 @@ pub(crate) unsafe fn read_ivf_meta(rel: pg_sys::Relation) -> Result<IvfMeta, Str
             u32::from_le_bytes(dbytes[o + 8..o + 12].try_into().unwrap()),
         ));
     }
-    // Centroid region: blocks 1+dir_npages ..= +centroid_npages.
-    let cbytes = read_chunked(rel, 1 + dir_npages, centroid_npages)?;
+    // Centroid region: blocks gen_base+dir_npages ..= +centroid_npages.
+    let cbytes = read_chunked(rel, gen_base + dir_npages, centroid_npages)?;
     let d = dim as usize;
     if d == 0 || cbytes.len() < nlists * d * 4 {
         if nlists == 0 {
