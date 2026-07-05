@@ -258,7 +258,10 @@ unsafe fn vacuum_rebuild_structured(indexrel: pg_sys::Relation, dead: &mut dyn F
 #[pg_guard]
 pub extern "C-unwind" fn ambuildempty(indexrel: pg_sys::Relation) {
     let idx = IvfflatIndex::build(&[], DEFAULT_LISTS, Metric::L2, BUILD_SEED);
-    unsafe { page::write_blob(indexrel, pg_sys::ForkNumber::INIT_FORKNUM, &idx.to_bytes()) };
+    unsafe {
+        page::write_blob(indexrel, pg_sys::ForkNumber::INIT_FORKNUM, &idx.to_bytes());
+        wal_log_init_fork(indexrel);
+    }
 }
 
 #[pg_guard]
@@ -268,10 +271,25 @@ pub extern "C-unwind" fn ambuildempty_hnsw(indexrel: pg_sys::Relation) {
         // M35: an empty structured graph is meta-only (entry_level = -1).
         match crate::am::hnsw_page::pack(&idx) {
             Ok(packed) => {
-                crate::am::hnsw_page::write_structured(indexrel, pg_sys::ForkNumber::INIT_FORKNUM, &packed)
+                crate::am::hnsw_page::write_structured(indexrel, pg_sys::ForkNumber::INIT_FORKNUM, &packed);
+                wal_log_init_fork(indexrel);
             }
             Err(e) => pg_sys::error!("theodb hnsw buildempty: {e}"),
         }
+    }
+}
+
+/// Issue #46: WAL-log every INIT-fork page unconditionally. `GenericXLog` is a WAL no-op when
+/// `RelationNeedsWAL()` is false (always the case for the UNLOGGED relations that get an INIT fork), so
+/// without this the crash-recovery reset copies a fork that never reached the WAL — the reset main fork
+/// comes up empty/zeroed and `aminsert` fails with "truncated meta page" until REINDEX. Pattern is the
+/// upstream fix verbatim: pgvector `hnswbuild.c:1137-1138` / gist `gist.c:133-150` (`log_newpage_range`
+/// with FPIs for the whole fork). Called as the LAST step of buildempty so the range covers every page.
+unsafe fn wal_log_init_fork(indexrel: pg_sys::Relation) {
+    let fork = pg_sys::ForkNumber::INIT_FORKNUM;
+    let nblocks = pg_sys::RelationGetNumberOfBlocksInFork(indexrel, fork);
+    if nblocks > 0 {
+        pg_sys::log_newpage_range(indexrel, fork, 0, nblocks, true);
     }
 }
 

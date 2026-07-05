@@ -28,6 +28,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Índices `theodb_hnsw`/`theodb_ivfflat` sobre tabelas UNLOGGED agora sobrevivem a crash/failover: o INIT fork passou a ser WAL-logado (`log_newpage_range` incondicional ao fim do `ambuildempty` — GenericXLog é no-op de WAL para relações unlogged); antes, o primeiro INSERT pós-recovery falhava com "truncated meta page" até REINDEX (#46)
+
 ### Security
 
 ## [0.37.0] - 2026-07-05
