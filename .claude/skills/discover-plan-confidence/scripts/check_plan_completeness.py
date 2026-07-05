@@ -24,9 +24,12 @@ from check_research_coverage import _has_defer_corner_marker
 
 
 CORNERS = ("tests", "deps", "tools", "techniques")
-MIN_QUESTIONS = 5
-MAX_QUESTIONS = 10
-MAX_PER_CORNER = 3
+# Frontier profile per rules/discover-phd-rigor.md § 2 + ADR 0001-discover-phd-rigor
+# (was 5/10/3 — the ADR-sanctioned widening had not been shipped to this script).
+# Stays inside the LOCKED golden-rule cap (question count <= 15).
+MIN_QUESTIONS = 6
+MAX_QUESTIONS = 14
+MAX_PER_CORNER = 5
 MIN_ADRS = 2
 
 MANDATORY_SECTIONS = [
