@@ -8,12 +8,19 @@
     400
   ],
   "graph": {
+    "kind": "synthetic_random_regular",
     "n": 50000,
     "dim": 128,
+    "m0": 32,
     "seed": 42,
-    "metric": "L2"
+    "note": "NOT a real HNSW graph — build_graph() in benches/scan_hot_path.rs: n nodes, m0 random neighbors each, random vectors, seeded. Representative for the ALLOCATION workload (cost scales with ef, node degree, visit count), NOT for recall."
   },
-  "methodology": "criterion 0.5.1, harness=false; same seeded graph built once; two bench_functions (presized=M46 pre-allocated scratch, unsized=::new()) over the SAME graph via MemNeighborSource; 3 runs, each cpuset-pinned to cores 8-11 to isolate from 11 concurrent user containers.",
+  "methodology": "criterion 0.5.1, harness=false. A synthetic random-regular graph (build_graph(50_000,128,m0=32,seed=42)) is built ONCE and shared by two bench_functions that call the SAME pure ground_search — the only variable is the scratch-allocation strategy (presized=M46 pre-allocated, unsized=::new()). 3 runs, each cpuset-pinned to cores 8-11 to isolate from 11 concurrent user containers (no quiet box available). Recall correctness of the refactor is NOT measured here — it is proven separately on a REAL HnswIndex by the pg_test oracle ground_search_matches_brute_exact_knn (ann/scan_core.rs).",
+  "link_gate": {
+    "command": "cargo bench --no-run --bench scan_hot_path",
+    "result": "PASS — Finished `bench` profile [optimized]; Executable benches/scan_hot_path.rs (links standalone, zero pg_sys — the #[path]-included region of scan_core.rs is pg-free; MemNeighborSource/HnswIndex are #[cfg(pg_test)]-gated and excluded).",
+    "coverage": "#7"
+  },
   "per_cell": {
     "100": {
       "presized": {
@@ -27,6 +34,10 @@
         "run1_ci_us": [
           856.43,
           920.64
+        ],
+        "swing_pct": [
+          -37,
+          39
         ]
       },
       "unsized": {
@@ -40,6 +51,10 @@
         "run1_ci_us": [
           1014.22,
           1075.02
+        ],
+        "swing_pct": [
+          -20,
+          12
         ]
       },
       "delta_pct": -2.6,
@@ -58,6 +73,10 @@
         "run1_ci_us": [
           1557.74,
           1657.57
+        ],
+        "swing_pct": [
+          -16,
+          26
         ]
       },
       "unsized": {
@@ -71,6 +90,10 @@
         "run1_ci_us": [
           1605.97,
           1699.22
+        ],
+        "swing_pct": [
+          -14,
+          24
         ]
       },
       "delta_pct": -6.7,
@@ -89,6 +112,10 @@
         "run1_ci_us": [
           4293.1,
           4420.17
+        ],
+        "swing_pct": [
+          -11,
+          16
         ]
       },
       "unsized": {
@@ -102,6 +129,10 @@
         "run1_ci_us": [
           4523.54,
           4627.65
+        ],
+        "swing_pct": [
+          -19,
+          23
         ]
       },
       "delta_pct": -4.1,
@@ -110,11 +141,11 @@
     }
   },
   "verdict": "HONEST_NEGATIVE_WITHIN_NOISE",
-  "verdict_detail": "presized (M46 pre-size) is directionally faster on the mean at every ef, but the run-to-run box noise (absolute times swing ±13-25%) EXCEEDS the effect (~2-7% on the mean); the presized-vs-unsized direction FLIPS run-to-run at ef=100 (run 2) and ef=400 (run 3). Only ef=200 is presized-faster in all 3 runs. On this shared dev box (11 concurrent user containers, no quiet box available) the same-graph allocation delta is NOT robustly significant. Valid per plan EC-2.",
-  "ec2_caveat": "This same-graph micro-bench is an UPPER BOUND on the production gain: it isolates the allocation cost with NO page I/O, so allocation is a larger fraction of wall-time than in production, where page reads amortize it. No product/QPS-superiority claim is made from this number — the production claim remains the SQL quiet-box benchmark.",
+  "verdict_detail": "presized (M46 pre-size) is directionally faster on the mean at every ef (-2.6/-6.7/-4.1%), but the run-to-run box noise (absolute times swing up to -37%/+39% around the mean) EXCEEDS the effect; the presized-vs-unsized direction FLIPS run-to-run at ef=100 (run 2) and ef=400 (run 3). Only ef=200 is presized-faster in all 3 runs. On this shared dev box the same-graph allocation delta is NOT robustly significant. Valid per plan EC-2. NOTE: the tight run-1 criterion CIs (non-overlapping at ef=100/400) are WITHIN-RUN sampling precision, not run-to-run reproducibility — the run-to-run flips are the honest signal.",
+  "ec2_caveat": "This synthetic-graph, no-page-I/O micro-bench is an UPPER BOUND on the production gain: it isolates the allocation cost, so allocation is a larger fraction of wall-time than in production, where page reads amortize it. No product/QPS-superiority claim is made from this number — the production claim remains the SQL quiet-box benchmark.",
   "env": {
     "cpu": "13th Gen Intel(R) Core(TM) i7-1355U",
-    "git_sha": "5475990",
+    "git_sha": "6839b54",
     "pinned_cpus": "8-11",
     "concurrent_containers": 11
   }
