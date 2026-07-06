@@ -90,6 +90,10 @@ pub(crate) struct HnswMeta {
     pub(crate) elem_npages: u32,
     pub(crate) nbr_first: u32,
     pub(crate) nbr_npages: u32,
+    /// M51 layout v2: SBQ bits-per-dim (0 = f32-only / legacy v1). > 0 ⇒ `codebook` carries the persisted
+    /// quantizer (`SbqQuantizer::to_meta_bytes`) so the scan reproduces the build-time quantization.
+    pub(crate) sbq_bits: u8,
+    pub(crate) codebook: Vec<u8>,
 }
 
 impl HnswMeta {
@@ -99,12 +103,17 @@ impl HnswMeta {
     }
 }
 
-const META_LEN: usize = 4 + 4 + 1 + 4 + 2 + 2 + 4 + 2 + 2 + 4 + 4 + 4 + 4 + 4; // = 45 bytes
+const META_LEN: usize = 4 + 4 + 1 + 4 + 2 + 2 + 4 + 2 + 2 + 4 + 4 + 4 + 4 + 4; // = 45 bytes (v1 core)
+const HNSW_STRUCT_VERSION_SBQ: u32 = 2; // M51 layout v2: same core header + trailing [sbq_bits:u8][cb_len:u32][codebook]
 
+/// Encode the meta item. `sbq_bits == 0` ⇒ emit the byte-identical **v1** layout (legacy indexes + f32-only
+/// builds are unchanged; existing tests stay green). `sbq_bits > 0` ⇒ emit **v2** = the same 45-byte core with
+/// `HNSW_STRUCT_VERSION_SBQ` in the version slot, then `[sbq_bits:u8][codebook_len:u32 LE][codebook bytes]`.
 fn encode_meta(m: &HnswMeta) -> Vec<u8> {
-    let mut b = Vec::with_capacity(META_LEN);
+    let version = if m.sbq_bits == 0 { HNSW_STRUCT_VERSION } else { HNSW_STRUCT_VERSION_SBQ };
+    let mut b = Vec::with_capacity(META_LEN + if m.sbq_bits == 0 { 0 } else { 5 + m.codebook.len() });
     b.extend_from_slice(&HNSW_STRUCT_MAGIC.to_le_bytes());
-    b.extend_from_slice(&HNSW_STRUCT_VERSION.to_le_bytes());
+    b.extend_from_slice(&version.to_le_bytes());
     b.push(m.metric_tag);
     b.extend_from_slice(&m.dim.to_le_bytes());
     b.extend_from_slice(&m.m.to_le_bytes());
@@ -117,10 +126,16 @@ fn encode_meta(m: &HnswMeta) -> Vec<u8> {
     b.extend_from_slice(&m.elem_npages.to_le_bytes());
     b.extend_from_slice(&m.nbr_first.to_le_bytes());
     b.extend_from_slice(&m.nbr_npages.to_le_bytes());
+    if m.sbq_bits != 0 {
+        b.push(m.sbq_bits);
+        b.extend_from_slice(&(m.codebook.len() as u32).to_le_bytes());
+        b.extend_from_slice(&m.codebook);
+    }
     b
 }
 
 /// Parse the meta item. Fail-fast typed `Err` on truncation / bad magic / unknown version — never panic.
+/// Handles both v1 (legacy, no SBQ) and v2 (M51, trailing codebook); v1 indexes stay readable.
 pub(crate) fn decode_meta(b: &[u8]) -> Result<HnswMeta, String> {
     if b.len() < META_LEN {
         return Err("theodb hnsw: truncated meta page".into());
@@ -130,11 +145,31 @@ pub(crate) fn decode_meta(b: &[u8]) -> Result<HnswMeta, String> {
         return Err("theodb hnsw: bad structured meta magic (REINDEX to upgrade the M26 blob to the M35 \
                     page-native format)".into());
     }
-    if u32::from_le_bytes(b[4..8].try_into().unwrap()) != HNSW_STRUCT_VERSION {
-        return Err("theodb hnsw: unsupported structured meta version".into());
+    let version = u32::from_le_bytes(b[4..8].try_into().unwrap());
+    if version != HNSW_STRUCT_VERSION && version != HNSW_STRUCT_VERSION_SBQ {
+        return Err(format!(
+            "theodb hnsw: unsupported structured meta version v{version} (REINDEX to upgrade to the M51 SBQ layout v2)"
+        ));
     }
     let u16a = |o: usize| u16::from_le_bytes(b[o..o + 2].try_into().unwrap());
     let u32a = |o: usize| u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+    // v2 trailer: [sbq_bits:u8][codebook_len:u32][codebook]. Validate exact length (Rule 8) before slicing.
+    let (sbq_bits, codebook) = if version == HNSW_STRUCT_VERSION_SBQ {
+        if b.len() < META_LEN + 5 {
+            return Err("theodb hnsw: truncated v2 SBQ trailer".into());
+        }
+        let bits = b[META_LEN];
+        let cb_len = u32::from_le_bytes(b[META_LEN + 1..META_LEN + 5].try_into().unwrap()) as usize;
+        if b.len() != META_LEN + 5 + cb_len {
+            return Err(format!(
+                "theodb hnsw: v2 codebook length mismatch (declared {cb_len}, have {})",
+                b.len() - META_LEN - 5
+            ));
+        }
+        (bits, b[META_LEN + 5..].to_vec())
+    } else {
+        (0u8, Vec::new())
+    };
     Ok(HnswMeta {
         metric_tag: b[8],
         dim: u32a(9),
@@ -148,6 +183,8 @@ pub(crate) fn decode_meta(b: &[u8]) -> Result<HnswMeta, String> {
         elem_npages: u32a(33),
         nbr_first: u32a(37),
         nbr_npages: u32a(41),
+        sbq_bits,
+        codebook,
     })
 }
 
@@ -290,6 +327,7 @@ pub(crate) fn pack_at(idx: &HnswIndex, base: usize) -> Result<Packed, String> {
             metric_tag: metric.tag(), dim: dim as u32, m: m as u16, m0: m0 as u16,
             entry_blkno: 0, entry_offno: 0, entry_level: -1, node_count: 0,
             elem_first: base as u32, elem_npages: 0, nbr_first: base as u32, nbr_npages: 0,
+            sbq_bits: 0, codebook: Vec::new(),
         });
         return Ok(Packed { meta, pages: Vec::new() });
     }
@@ -340,6 +378,7 @@ pub(crate) fn pack_at(idx: &HnswIndex, base: usize) -> Result<Packed, String> {
         entry_blkno: eb, entry_offno: eo, entry_level: idx.node_level(entry_node) as i16,
         node_count: n as u32, elem_first: base as u32, elem_npages: elem_npages as u32,
         nbr_first: nbr_first as u32, nbr_npages: nbr_npages as u32,
+        sbq_bits: 0, codebook: Vec::new(),
     });
 
     let mut pages = elem_pages;
@@ -725,6 +764,44 @@ mod tests {
         let mut bad = good.clone();
         bad[0] ^= 0xFF;
         assert!(decode_meta(&bad).is_err(), "bad magic must Err");
+    }
+
+    // --- M51 T1.1: layout v2 meta carries the SBQ codebook; v1 (f32-only) stays byte-identical. ---
+    fn meta_fixture(sbq_bits: u8, codebook: Vec<u8>) -> HnswMeta {
+        HnswMeta {
+            metric_tag: Metric::L2.tag(), dim: 3, m: 16, m0: 32,
+            entry_blkno: 1, entry_offno: 1, entry_level: 2, node_count: 5,
+            elem_first: 1, elem_npages: 1, nbr_first: 2, nbr_npages: 1, sbq_bits, codebook,
+        }
+    }
+
+    #[pgrx::pg_test]
+    fn hnsw_meta_v2_roundtrips_codebook() {
+        let cb = vec![4u8, 3, 0, 0, 0, 1, 2, 3, 4]; // arbitrary codebook bytes (e.g. to_meta_bytes output)
+        let bytes = encode_meta(&meta_fixture(4, cb.clone()));
+        assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), HNSW_STRUCT_VERSION_SBQ, "must be v2");
+        let d = decode_meta(&bytes).expect("v2 decodes");
+        assert_eq!(d.sbq_bits, 4);
+        assert_eq!(d.codebook, cb, "codebook roundtrips byte-exact");
+        assert_eq!(d.dim, 3);
+        assert_eq!(d.node_count, 5);
+    }
+
+    #[pgrx::pg_test]
+    fn hnsw_meta_v1_byte_identical_when_no_sbq() {
+        let bytes = encode_meta(&meta_fixture(0, Vec::new()));
+        assert_eq!(bytes.len(), META_LEN, "f32-only meta must be exactly the 45-byte v1 layout");
+        assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), HNSW_STRUCT_VERSION, "must stay v1");
+        let d = decode_meta(&bytes).unwrap();
+        assert_eq!(d.sbq_bits, 0);
+        assert!(d.codebook.is_empty());
+    }
+
+    #[pgrx::pg_test]
+    fn hnsw_meta_v2_rejects_truncated_codebook() {
+        let mut bytes = encode_meta(&meta_fixture(1, vec![1, 2, 3, 4]));
+        bytes.truncate(bytes.len() - 1); // drop one codebook byte → declared cb_len mismatch
+        assert!(decode_meta(&bytes).is_err(), "truncated v2 codebook must Err (Rule 8)");
     }
 
     /// Collect the id column of `SELECT id FROM rn ORDER BY e <-> q LIMIT k` under the current planner GUCs,
