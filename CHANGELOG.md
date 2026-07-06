@@ -14,6 +14,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Micro-benchmark same-graph do custo de alocação do scan HNSW (M47/FU-1) em `docs/benchmarks/fu1-samegraph-scan-microbench.{md,json}`: mede via criterion, sobre o MESMO grafo seeded (50k×128), o scratch pré-alocado (M46) vs `::new()`, no sweep de ef {100,200,400}, em 3 runs pinados em cores dedicados. Veredito honesto **HONEST_NEGATIVE_WITHIN_NOISE**: o presized é direcionalmente mais rápido na média (~2-7%), mas o ruído do box compartilhado (±13-25% run-to-run) excede o efeito e a direção flipa em ef=100/400 — só ef=200 é consistente (3/3). Caveat EC-2 explícito: é um limite superior (sem I/O de página, que amortiza a alocação em produção); nenhuma afirmação de superioridade de QPS de produção deste número isolado. Fecha também o gate honesto do M48 (`cargo bench --no-run` agora validado)
+
 ### Changed
 
 ### Deprecated

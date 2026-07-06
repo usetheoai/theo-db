@@ -1,0 +1,121 @@
+{
+  "milestone": "M47",
+  "slug": "fu1-samegraph-scan-microbench",
+  "runs": 3,
+  "ef_sweep": [
+    100,
+    200,
+    400
+  ],
+  "graph": {
+    "n": 50000,
+    "dim": 128,
+    "seed": 42,
+    "metric": "L2"
+  },
+  "methodology": "criterion 0.5.1, harness=false; same seeded graph built once; two bench_functions (presized=M46 pre-allocated scratch, unsized=::new()) over the SAME graph via MemNeighborSource; 3 runs, each cpuset-pinned to cores 8-11 to isolate from 11 concurrent user containers.",
+  "per_cell": {
+    "100": {
+      "presized": {
+        "mean_us": 908.3,
+        "std_us": 283.6,
+        "runs_us": [
+          886.86,
+          1265.8,
+          572.1
+        ],
+        "run1_ci_us": [
+          856.43,
+          920.64
+        ]
+      },
+      "unsized": {
+        "mean_us": 932.5,
+        "std_us": 135.7,
+        "runs_us": [
+          1044.1,
+          1011.9,
+          741.5
+        ],
+        "run1_ci_us": [
+          1014.22,
+          1075.02
+        ]
+      },
+      "delta_pct": -2.6,
+      "presized_faster_runs": 2,
+      "direction_consistent": false
+    },
+    "200": {
+      "presized": {
+        "mean_us": 1792.8,
+        "std_us": 336.6,
+        "runs_us": [
+          1605.82,
+          2265.4,
+          1507.2
+        ],
+        "run1_ci_us": [
+          1557.74,
+          1657.57
+        ]
+      },
+      "unsized": {
+        "mean_us": 1922.2,
+        "std_us": 323.8,
+        "runs_us": [
+          1651.49,
+          2377.4,
+          1737.6
+        ],
+        "run1_ci_us": [
+          1605.97,
+          1699.22
+        ]
+      },
+      "delta_pct": -6.7,
+      "presized_faster_runs": 3,
+      "direction_consistent": true
+    },
+    "400": {
+      "presized": {
+        "mean_us": 4582.4,
+        "std_us": 538.2,
+        "runs_us": [
+          4356.84,
+          5324.8,
+          4065.6
+        ],
+        "run1_ci_us": [
+          4293.1,
+          4420.17
+        ]
+      },
+      "unsized": {
+        "mean_us": 4780.6,
+        "std_us": 826.1,
+        "runs_us": [
+          4574.86,
+          5879.5,
+          3887.5
+        ],
+        "run1_ci_us": [
+          4523.54,
+          4627.65
+        ]
+      },
+      "delta_pct": -4.1,
+      "presized_faster_runs": 2,
+      "direction_consistent": false
+    }
+  },
+  "verdict": "HONEST_NEGATIVE_WITHIN_NOISE",
+  "verdict_detail": "presized (M46 pre-size) is directionally faster on the mean at every ef, but the run-to-run box noise (absolute times swing ±13-25%) EXCEEDS the effect (~2-7% on the mean); the presized-vs-unsized direction FLIPS run-to-run at ef=100 (run 2) and ef=400 (run 3). Only ef=200 is presized-faster in all 3 runs. On this shared dev box (11 concurrent user containers, no quiet box available) the same-graph allocation delta is NOT robustly significant. Valid per plan EC-2.",
+  "ec2_caveat": "This same-graph micro-bench is an UPPER BOUND on the production gain: it isolates the allocation cost with NO page I/O, so allocation is a larger fraction of wall-time than in production, where page reads amortize it. No product/QPS-superiority claim is made from this number — the production claim remains the SQL quiet-box benchmark.",
+  "env": {
+    "cpu": "13th Gen Intel(R) Core(TM) i7-1355U",
+    "git_sha": "5475990",
+    "pinned_cpus": "8-11",
+    "concurrent_containers": 11
+  }
+}
