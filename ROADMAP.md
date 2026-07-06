@@ -239,6 +239,8 @@ caminho de adoção (embarcar columnar: build PG17 OU bump PG18) é milestone fu
 
 ### M31 — [x] Otimização de latência do index AM (leitura parcial de páginas)
 
+> **Nota (superseded — [ADR 0012](docs/adr/0012-benchmark-data-degeneracy.md), anotado 2026-07-06 no M50/G8):** as *claims de latência* do M31 (via ADR 0011) foram medidas em dados sintéticos degenerados (InitPlan-hoist → todos os vetores idênticos); ficam **superseded pela ADR 0012**. O trabalho de código do M31 (leitura parcial de páginas) permanece válido; a régua de latência confiável é a do M32 (SIFT1M real) e M45/M50.
+
 **Objective:** Fechar o gargalo O(N)-por-scan do AM do M26 (hoje deseraliza o blob inteiro por query, ADR
 0010 §D2/D5) para que o índice persistido **bata a latência de query-time** — não só o rebuild-per-query
 (já 16×), mas se aproxime/supere o seqscan maduro do pgvector no mesmo N.
@@ -645,7 +647,7 @@ meta-pivot muda o ciclo de vida de páginas — REINDEX path e formato versionad
 (`build.rs:196-221` + `lock.rs`) tem casa própria: **M55** (discover fold incremental vs manutenção
 in-place à la pgvector) — não entra aqui para não inflar o DoD.
 
-### M49 — [ ] Opclasses cosine + inner-product no AM (o gap funcional que bloqueia RAG real)
+### M49 — [x] Opclasses cosine + inner-product no AM (o gap funcional que bloqueia RAG real)
 
 **Objective:** Os dois AMs só registram L2 (`vector_l2_ops`, `am/mod.rs:192-213`; dispatch `scan.rs:169`).
 Embeddings de produção (OpenAI/Cohere/BGE) usam **cosine/IP** — sem essas opclasses o índice não serve ao

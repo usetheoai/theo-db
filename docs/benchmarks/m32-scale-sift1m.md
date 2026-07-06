@@ -1,5 +1,12 @@
 # TheoDB vector benchmark — 2026-07-03
 
+> **Data-distinctness banner (cross-ref [ADR 0012](../adr/0012-benchmark-data-degeneracy.md), added 2026-07-06 for M50/G8).**
+> This is a **real-SIFT1M** run: the 1M vectors come from the ANN-Benchmarks `sift-128-euclidean` corpus with
+> exact neighbors-GT — genuinely distinct data. It is **NOT** affected by the InitPlan-hoist degeneracy that
+> ADR 0012 documents (where an uncorrelated `generate_series` sub-select made every synthetic row identical,
+> collapsing k-means to a single list). Latency/recall numbers here stand; the ADR-0012 retraction applies only
+> to the earlier synthetic-data latency claims (ADR 0011 / M31), not to this artifact.
+
 - **commit:** `c4999ac` · **seed:** 42 · **dataset:** m32-scale-sift1m (n=1000000 dim=128 metric=l2) · **k:** 10 · **runs (best-of-N):** 3
 - recall@k is distance-thresholded (ANN-Benchmarks semantics); ground-truth is exact GT recomputed from the ANN-Benchmarks `neighbors` ids in the float32 contract (neighbors-GT).
 - `mean`/`std` are per-query latency dispersion within the timed sample (ms), not run-to-run variance; QPS is best-of-N over the runs.
