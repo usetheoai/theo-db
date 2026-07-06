@@ -318,7 +318,14 @@ fn encode_neighbors(idx: &HnswIndex, node: usize, elem_addr: &[Addr], m: usize, 
 /// neighbor tuple would exceed one page (impossible under the build's level cap, asserted here defensively).
 pub(crate) fn pack(idx: &HnswIndex) -> Result<Packed, String> {
     // The initial build / buildempty writes a contiguous generation starting right after the meta (block 1).
-    pack_at(idx, 1)
+    pack_at(idx, 1, 0)
+}
+
+/// Like [`pack`] but emits **layout v2**: trains an SBQ quantizer from the graph's vectors, persists the codebook
+/// in the meta, and writes each node's compact SBQ code inline after its f32 vector (M51 T1.1/T2.1). `sbq_bits==0`
+/// is identical to [`pack`].
+pub(crate) fn pack_sbq(idx: &HnswIndex, sbq_bits: u8) -> Result<Packed, String> {
+    pack_at(idx, 1, sbq_bits)
 }
 
 /// Like [`pack`], but places the generation body starting at block `base` (M48 / issue #47). The meta's element
@@ -326,13 +333,15 @@ pub(crate) fn pack(idx: &HnswIndex) -> Result<Packed, String> {
 /// relative to `base`, so the packed image is position-independent — the crash-safe fold writes it at the tail
 /// (or a reclaimed contiguous region) and pivots block 0 to it. Readers already follow the meta pointers, so no
 /// read path changes: the graph is relocatable for free (unlike IVF, whose directory needed an explicit gen_base).
-pub(crate) fn pack_at(idx: &HnswIndex, base: usize) -> Result<Packed, String> {
+pub(crate) fn pack_at(idx: &HnswIndex, base: usize, sbq_bits: u8) -> Result<Packed, String> {
     let (metric, m, m0, _ef) = idx.params();
     let n = idx.node_count();
     let dim = idx.dim();
 
     // Empty graph: meta only, entry_level = -1. `base` is irrelevant (no body pages) — record it anyway so
     // pending_start (= nbr_first + nbr_npages = base) is consistent with a non-empty generation at `base`.
+    // An empty index has no vectors to train the quantizer on, so it stays v1 (SBQ arrives on the first fold
+    // after data lands — REINDEX/VACUUM).
     if n == 0 {
         let meta = encode_meta(&HnswMeta {
             metric_tag: metric.tag(), dim: dim as u32, m: m as u16, m0: m0 as u16,
@@ -343,8 +352,22 @@ pub(crate) fn pack_at(idx: &HnswIndex, base: usize) -> Result<Packed, String> {
         return Ok(Packed { meta, pages: Vec::new() });
     }
 
+    // M51 T1.1/T2.1: when SBQ is enabled, train the quantizer from the graph's vectors, emit one compact code per
+    // node (packed u64 words → LE bytes) and the codebook for the meta. `code_len == 0` ⇒ the v1 f32-only path.
+    let (code_len, codes, codebook) = if sbq_bits > 0 {
+        let vecs: Vec<Vec<f32>> = (0..n).map(|i| idx.node_vector(i).to_vec()).collect();
+        let q = crate::sbq::SbqQuantizer::train(&vecs, sbq_bits);
+        let codes: Vec<Vec<u8>> = vecs
+            .iter()
+            .map(|v| q.quantize(v).iter().flat_map(|w| w.to_le_bytes()).collect())
+            .collect();
+        (crate::sbq::SbqQuantizer::bytes_per_vector(dim, sbq_bits), codes, q.to_meta_bytes())
+    } else {
+        (0usize, Vec::new(), Vec::new())
+    };
+
     // 1. Analytic element addresses (fixed size ⇒ node i is at block base+i/ipp, offset 1+i%ipp).
-    let ipp = elems_per_page(dim, 0);
+    let ipp = elems_per_page(dim, code_len);
     let elem_npages = n.div_ceil(ipp);
     let elem_addr: Vec<Addr> =
         (0..n).map(|i| ((base + i / ipp) as u32, (1 + i % ipp) as u16)).collect();
@@ -378,7 +401,15 @@ pub(crate) fn pack_at(idx: &HnswIndex, base: usize) -> Result<Packed, String> {
     // 3. Element pages: fixed ipp items per page (matches the analytic addrs), neighbortid = the packed nbr addr.
     let mut elem_pages: Vec<Vec<Vec<u8>>> = Vec::with_capacity(elem_npages);
     for chunk in (0..n).collect::<Vec<_>>().chunks(ipp) {
-        elem_pages.push(chunk.iter().map(|&node| encode_element(idx, node, nbr_addr[node], dim, &[])).collect());
+        elem_pages.push(
+            chunk
+                .iter()
+                .map(|&node| {
+                    let code: &[u8] = if code_len > 0 { &codes[node] } else { &[] };
+                    encode_element(idx, node, nbr_addr[node], dim, code)
+                })
+                .collect(),
+        );
     }
 
     // 4. Meta with the entry point resolved to its element addr.
@@ -389,7 +420,7 @@ pub(crate) fn pack_at(idx: &HnswIndex, base: usize) -> Result<Packed, String> {
         entry_blkno: eb, entry_offno: eo, entry_level: idx.node_level(entry_node) as i16,
         node_count: n as u32, elem_first: base as u32, elem_npages: elem_npages as u32,
         nbr_first: nbr_first as u32, nbr_npages: nbr_npages as u32,
-        sbq_bits: 0, codebook: Vec::new(),
+        sbq_bits: if code_len > 0 { sbq_bits } else { 0 }, codebook,
     });
 
     let mut pages = elem_pages;
@@ -813,6 +844,29 @@ mod tests {
         let mut bytes = encode_meta(&meta_fixture(1, vec![1, 2, 3, 4]));
         bytes.truncate(bytes.len() - 1); // drop one codebook byte → declared cb_len mismatch
         assert!(decode_meta(&bytes).is_err(), "truncated v2 codebook must Err (Rule 8)");
+    }
+
+    #[pgrx::pg_test]
+    fn pack_sbq_writes_codebook_and_matching_codes() {
+        // T1.1-build + T2.1-write (M51): pack_sbq trains the quantizer, persists the codebook in the v2 meta, and
+        // writes each node's inline code == the quantizer's code for that node's vector.
+        let idx = HnswIndex::build(&corpus(), 16, 64, Metric::L2, 9);
+        let bits = 2u8;
+        let packed = pack_sbq(&idx, bits).expect("pack_sbq");
+        let meta = decode_meta(&packed.meta).unwrap();
+        assert_eq!(meta.sbq_bits, bits, "meta records SBQ bits");
+        assert!(!meta.codebook.is_empty(), "codebook persisted in meta");
+        // reconstruct the quantizer from the persisted codebook and verify each element's code matches.
+        let q = crate::sbq::SbqQuantizer::from_meta_bytes(&meta.codebook).expect("codebook decodes");
+        let dim = idx.dim();
+        let ipp = elems_per_page(dim, crate::sbq::SbqQuantizer::bytes_per_vector(dim, bits));
+        for node in 0..idx.node_count() {
+            let ep = packed.pages[node / ipp][node % ipp].as_slice();
+            let ev = decode_element(ep).unwrap();
+            let expect: Vec<u8> =
+                q.quantize(idx.node_vector(node)).iter().flat_map(|w| w.to_le_bytes()).collect();
+            assert_eq!(ev.code_bytes, expect.as_slice(), "node {node}: inline code == quantize(vec)");
+        }
     }
 
     #[pgrx::pg_test]

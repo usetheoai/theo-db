@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `pack_sbq` (`hnsw_page.rs`) treina o quantizer SBQ dos vetores do grafo, persiste o codebook no meta v2 e escreve cada código SBQ inline no element tuple (== quantize(vec)); o fold do VACUUM preserva SBQ re-quantizando os live vectors (`build.rs`, passa `meta.sbq_bits`). M51 T1.1-build + T2.1-write. (M51)
 - Element tuple do `theodb_hnsw` carrega código SBQ opcional inline após o vetor f32 (`hnsw_page.rs` `encode_element`/`decode_element`/`ElementView.code_bytes`); v1 (sem código) byte-idêntico. M51 T2.1. (M51)
 - Meta page do `theodb_hnsw` ganha layout v2 SBQ-capable (`HnswMeta.sbq_bits`/`codebook`, `hnsw_page.rs`): v2 persiste o codebook; v1 (f32-only) permanece byte-idêntico e legível (version-gated, REINDEX faz upgrade). Base do M51 T1.1. (M51)
 - SBQ codebook serializa/desserializa para meta bytes (`SbqQuantizer::to_meta_bytes`/`from_meta_bytes`, `sbq.rs`) — base do layout v3 do M51 (T1.1); validação de tamanho fail-fast (Rule 8). (M51)
