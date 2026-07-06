@@ -51,11 +51,12 @@ const SLOT: usize = 6; // (u32 blkno, u16 offno)
 const fn maxalign(n: usize) -> usize {
     (n + 7) & !7
 }
-fn elem_size(dim: usize) -> usize {
-    ELEM_HEADER + dim * 4
+/// Element tuple size: header + f32 vector + optional trailing SBQ code (`code_len` bytes; 0 ⇒ v1 f32-only).
+fn elem_size(dim: usize, code_len: usize) -> usize {
+    ELEM_HEADER + dim * 4 + code_len
 }
-fn elems_per_page(dim: usize) -> usize {
-    (USABLE / (ITEMID + maxalign(elem_size(dim)))).max(1)
+fn elems_per_page(dim: usize, code_len: usize) -> usize {
+    (USABLE / (ITEMID + maxalign(elem_size(dim, code_len)))).max(1)
 }
 /// Total neighbor slots for a node at `level`: `m` per upper layer (`level` of them) + `m0` on the ground.
 fn nbr_slots(level: usize, m: usize, m0: usize) -> usize {
@@ -195,6 +196,8 @@ pub(crate) struct ElementView<'a> {
     pub(crate) tid: i64,
     pub(crate) nbr_addr: Addr,
     pub(crate) vec_bytes: &'a [u8],
+    /// M51 layout v2: the trailing SBQ code bytes (empty for v1 f32-only tuples). Scored by `sbq::hamming`.
+    pub(crate) code_bytes: &'a [u8],
 }
 
 pub(crate) fn decode_element(b: &[u8]) -> Result<ElementView<'_>, String> {
@@ -214,6 +217,9 @@ pub(crate) fn decode_element(b: &[u8]) -> Result<ElementView<'_>, String> {
             u16::from_le_bytes(b[E_NBR_OFF..E_NBR_OFF + 2].try_into().unwrap()),
         ),
         vec_bytes: &b[E_VEC..end],
+        // v1: nothing after the vec (empty). v2: the SBQ code occupies `[end..]` (its length = the item's
+        // trailing bytes; the caller knows `bytes_per_vector(dim, meta.sbq_bits)` to validate if needed).
+        code_bytes: &b[end..],
     })
 }
 
@@ -267,8 +273,10 @@ pub(crate) fn decode_neighbors_into(
     Ok(())
 }
 
-fn encode_element(idx: &HnswIndex, node: usize, nbr_addr: Addr, dim: usize) -> Vec<u8> {
-    let mut b = vec![0u8; elem_size(dim)];
+/// Encode an element tuple. `code` is the node's SBQ code (empty ⇒ v1 f32-only, byte-identical to before);
+/// when non-empty it is written immediately after the f32 vector (layout v2).
+fn encode_element(idx: &HnswIndex, node: usize, nbr_addr: Addr, dim: usize, code: &[u8]) -> Vec<u8> {
+    let mut b = vec![0u8; elem_size(dim, code.len())];
     b[E_TAG] = ELEM_TAG;
     b[E_LEVEL] = idx.node_level(node) as u8;
     b[E_TID..E_TID + 8].copy_from_slice(&idx.node_id(node).to_le_bytes());
@@ -277,6 +285,9 @@ fn encode_element(idx: &HnswIndex, node: usize, nbr_addr: Addr, dim: usize) -> V
     b[E_DIM..E_DIM + 2].copy_from_slice(&(dim as u16).to_le_bytes());
     for (j, &f) in idx.node_vector(node).iter().enumerate() {
         b[E_VEC + j * 4..E_VEC + j * 4 + 4].copy_from_slice(&f.to_le_bytes());
+    }
+    if !code.is_empty() {
+        b[E_VEC + dim * 4..].copy_from_slice(code);
     }
     b
 }
@@ -333,7 +344,7 @@ pub(crate) fn pack_at(idx: &HnswIndex, base: usize) -> Result<Packed, String> {
     }
 
     // 1. Analytic element addresses (fixed size ⇒ node i is at block base+i/ipp, offset 1+i%ipp).
-    let ipp = elems_per_page(dim);
+    let ipp = elems_per_page(dim, 0);
     let elem_npages = n.div_ceil(ipp);
     let elem_addr: Vec<Addr> =
         (0..n).map(|i| ((base + i / ipp) as u32, (1 + i % ipp) as u16)).collect();
@@ -367,7 +378,7 @@ pub(crate) fn pack_at(idx: &HnswIndex, base: usize) -> Result<Packed, String> {
     // 3. Element pages: fixed ipp items per page (matches the analytic addrs), neighbortid = the packed nbr addr.
     let mut elem_pages: Vec<Vec<Vec<u8>>> = Vec::with_capacity(elem_npages);
     for chunk in (0..n).collect::<Vec<_>>().chunks(ipp) {
-        elem_pages.push(chunk.iter().map(|&node| encode_element(idx, node, nbr_addr[node], dim)).collect());
+        elem_pages.push(chunk.iter().map(|&node| encode_element(idx, node, nbr_addr[node], dim, &[])).collect());
     }
 
     // 4. Meta with the entry point resolved to its element addr.
@@ -671,7 +682,7 @@ mod tests {
         let idx = HnswIndex::build(&corpus(), 16, 64, Metric::L2, 42);
         let packed = pack(&idx).expect("pack");
         let dim = idx.dim();
-        let ipp = elems_per_page(dim);
+        let ipp = elems_per_page(dim, 0);
         // Element pages are the first `elem_npages`; each element decodes and its addr maps back to its node.
         let meta = decode_meta(&packed.meta).unwrap();
         for p in 0..meta.elem_npages as usize {
@@ -692,7 +703,7 @@ mod tests {
         let packed = pack(&idx).expect("pack");
         let meta = decode_meta(&packed.meta).unwrap();
         let dim = idx.dim();
-        let ipp = elems_per_page(dim);
+        let ipp = elems_per_page(dim, 0);
         let n = idx.node_count();
         // For every node, decode each layer's neighbor addrs, map back to node indices, and assert the SET equals
         // the in-memory `neighbors[node][lc]` — the load-bearing correctness check (blueprint R2).
@@ -738,7 +749,7 @@ mod tests {
         let (_metric, m, m0, _ef) = idx.params();
         let packed = pack(&idx).expect("pack");
         let dim = idx.dim();
-        let ipp = elems_per_page(dim);
+        let ipp = elems_per_page(dim, 0);
         for node in 0..idx.node_count() {
             let level = idx.node_level(node);
             let ea = ((1 + node / ipp) as u32, (1 + node % ipp) as u16);
@@ -802,6 +813,25 @@ mod tests {
         let mut bytes = encode_meta(&meta_fixture(1, vec![1, 2, 3, 4]));
         bytes.truncate(bytes.len() - 1); // drop one codebook byte → declared cb_len mismatch
         assert!(decode_meta(&bytes).is_err(), "truncated v2 codebook must Err (Rule 8)");
+    }
+
+    #[pgrx::pg_test]
+    fn element_tuple_carries_optional_sbq_code() {
+        // T2.1 (M51): an element tuple optionally carries the SBQ code after the f32 vec; v1 (no code) stays
+        // byte-identical and the f32 vec bytes are untouched when a code is appended.
+        let idx = HnswIndex::build(&corpus(), 16, 64, Metric::L2, 7);
+        let dim = idx.dim();
+        let e1 = encode_element(&idx, 0, (1, 1), dim, &[]);
+        assert_eq!(e1.len(), elem_size(dim, 0), "v1 tuple size unchanged");
+        let v1 = decode_element(&e1).unwrap();
+        assert!(v1.code_bytes.is_empty(), "v1 tuple has no SBQ code");
+
+        let code = vec![0xABu8, 0xCD, 0x01, 0x02];
+        let e2 = encode_element(&idx, 0, (1, 1), dim, &code);
+        assert_eq!(e2.len(), elem_size(dim, code.len()), "v2 tuple grows by the code length");
+        let v2 = decode_element(&e2).unwrap();
+        assert_eq!(v2.code_bytes, code.as_slice(), "SBQ code roundtrips inline after the vec");
+        assert_eq!(v2.vec_bytes, v1.vec_bytes, "appending a code must not change the f32 vec bytes");
     }
 
     /// Collect the id column of `SELECT id FROM rn ORDER BY e <-> q LIMIT k` under the current planner GUCs,
