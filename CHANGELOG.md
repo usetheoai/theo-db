@@ -13,8 +13,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Régua SOTA vetorial M50: benchmark 3-way `theodb_hnsw` vs pgvector hnsw vs pgvectorscale `diskann` (cosine, recall@10 vs GT exato) + **primeiro QPS multi-cliente de banco** (8/16 conexões) em `benchmarks/run_m50_sota.py` → artefato `docs/benchmarks/m50-sota-ruler.{md,json}` (M50).
+- JSON bruto reconstruído para os artefatos M41/M43 (`docs/benchmarks/m41-hnsw-qps.json`, `m43-hnsw-build.json`) — higiene de artefatos G8 (M50).
 
 ### Changed
+- Reconciliação M30 (CHANGELOG↔artefato, G8/M50): os speedups columnar autoritativos são os do artefato reproduzível `docs/benchmarks/m30-columnar-scale.{md,json}` — **2.99× (100k) → 8.89× (1M) → 13.87× (5M)**. A prosa da entrada `[0.36.0]` (2.33×/8.65×/14.94×) veio de um run anterior em box contendida e fica superseded pelo artefato (a entrada released não é editada, Rule 6) (M50).
+- Banner de cross-referência à ADR 0012 (data-degeneracy) adicionado a `docs/benchmarks/m32-scale-sift1m.md` — distinção de dados verificada (SIFT real, não a degeneração InitPlan-hoist) (M50).
 
 ### Deprecated
 
