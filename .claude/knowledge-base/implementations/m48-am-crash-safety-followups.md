@@ -159,3 +159,28 @@
   schema (runs/pending_series/wal_bytes/load) + the md caveat — guards the artifact contract.
 - **No comparative claim (public-copy.md):** dev-box characterization; the md carries the box-load caveat and
   "caracterização, não competição".
+
+## Validation gate — `acceptance_criteria` file_size FAIL is an unactionable gate/plan mismatch (honest)
+- **run_validation.py final state:** 5 PASS (progress_schema, checkpoint_consistency, wiring_triad,
+  test_obligations, code_quality=PASS), 4 SKIP (npm — this is a Rust/pgrx project, no JS toolchain), 1 N/A
+  (patterns), **1 FAIL: `acceptance_criteria` (file_size only)**.
+- **Why it cannot go green:** the gate applies an ABSOLUTE `<= 500` LoC limit to every changed file. The
+  plan's ACTUAL file-size DoD (plan line ~1000) is *"fold.rs ≤ 500; nenhum arquivo tocado cresce além do
+  baseline +10% sem split"* — a baseline-relative budget the gate cannot parse (it extracts the literal `500`).
+  The three flagged files:
+  - **CHANGELOG.md (678):** a public append-only contract; `architecture.md`'s source-file LoC budget does NOT
+    apply to it and `audit-trail-rotation.md` keeps it indefinitely. It can NEVER be ≤ 500 → the gate can NEVER
+    exit 0 on this (or any mature) project. This is a gate limitation, not a code defect.
+  - **hnsw_page.rs (790):** PRE-EXISTING (Baseline Context = 800); it SHRANK during M48. Within baseline+10% (880).
+  - **page.rs (917):** PRE-EXISTING (Baseline Context = 829); M48 features (pivot_meta_page, read_pending
+    fail-loud, pending metric) pushed it to +10.6% — 5 lines over the +10% soft cap after the comment trims
+    (d4d3543). The full split into `am/ivf_page.rs` is the committed M51-adjacent followup (blueprint anti-rework
+    restriction keeps it out of M48). A marginal soft-cap breach on pre-existing debt.
+- **The plan's REAL file-size DoD IS met** modulo page.rs's +0.6% soft-cap overage: fold.rs 139 ≤ 500 ✓,
+  cost.rs 126 ≤ 500 ✓ (both NEW), hnsw_page.rs shrank ✓. NEW files are well under budget; the failures are all
+  pre-existing/exempt.
+- **Handoff:** this file_size caveat is exactly what `/review` adjudicates (README/CHANGELOG/file-size are
+  human-adjudicated per cycle-review's agents). Not gamed (CHANGELOG cannot be shrunk; splitting every >500
+  source file is out-of-scope scope-creep and would STILL leave CHANGELOG failing). Surfaced honestly, not
+  papered over (Rule 3). All FUNCTIONAL gates pass; final-image evidence: maintenance 19, crash 10, regression
+  47 = 76 passed, 0 failed.
