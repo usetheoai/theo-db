@@ -78,8 +78,10 @@ impl Metric {
 
     /// M43 — like [`dist`] but routes L2 to the AVX2+FMA kernel (`l2_distance_simd`) for the `theodb_hnsw`
     /// in-memory build/search hot path (billions of 128-dim distances). NOT bit-identical to `dist` for L2 (SIMD
-    /// FMA rounding) → the graph may differ in a few near-tie selections; the recall gate is PARITY. Cosine/Ip are
-    /// unchanged (no SIMD kernel yet; the persisted AM is L2-only per ADR 0010, so those paths are build-inert).
+    /// FMA rounding) → the graph may differ in a few near-tie selections; the recall gate is PARITY. (M49: the
+    /// persisted AM now builds/scans cosine/ip too — the scan hot path uses the fused zero-alloc kernels in
+    /// `vec.rs`; this `dist_simd` is the shared in-memory build path for all metrics, superseding ADR 0010's
+    /// L2-only scope.)
     pub(crate) fn dist_simd(self, a: &[f32], b: &[f32]) -> f64 {
         match self {
             Metric::L2 => crate::vec::l2_distance_simd(a, b),

@@ -16,7 +16,8 @@ use std::collections::BinaryHeap;
 
 /// One scored candidate: its distance-to-query key + heap TID. Ordered ascending by (distance, tid) — the exact
 /// order the old `results.sort_by` produced, so the emitted top-K is byte-identical (recall unchanged, M36 ADR-1).
-/// `f64::total_cmp` is a TOTAL order (no NaN hazard — distances are finite), and the `tid` tiebreak reproduces the
+/// `f64::total_cmp` is a TOTAL order — under M49 cosine a zero-norm vector yields NaN, which `total_cmp` orders
+/// LAST (EC-3), so a degenerate vector sinks to the end instead of panicking; the `tid` tiebreak reproduces the
 /// stable order of the previous sort.
 #[derive(PartialEq)]
 struct Scored {

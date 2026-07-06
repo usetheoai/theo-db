@@ -15,19 +15,20 @@
     "theodb_ivfflat/cosine": 0.89,
     "theodb_ivfflat/ip": 0.83
   },
+  "recall_oracle": "exact same-metric seqscan (ground truth). NOT a pgvector head-to-head — the exact oracle is a STRONGER correctness gate than approx-vs-approx; a pgvector comparison is a follow-up.",
   "crash_safety": {
-    "tested": "theodb_hnsw cosine, 500 rows, SIGKILL + restart",
-    "result": "top-5 identical pre-crash and post-recovery (metric preserved, not corrupted to L2)"
+    "test": "benchmarks/tests/test_am_crash.py::test_cosine_crash_safe (committed, reproducible)",
+    "result": "theodb_hnsw cosine, 500 rows, SIGKILL+restart → top-5 under <=> identical pre/post (metric preserved, not corrupted to L2)"
   },
-  "verdict": "PARITY — recall@10 >= 0.80 for cosine AND ip on both AMs vs the same-metric seqscan oracle",
+  "verdict": "recall@10 >= 0.80 for cosine AND ip on both AMs vs the exact same-metric seqscan oracle; cosine crash-safe (committed test)",
   "caveats": {
-    "mips": "Inner product is NOT a metric (no triangle inequality). HNSW-over-IP works empirically (pgvector ships vector_ip_ops for hnsw); build and scan use the same negative-IP comparator, so the graph is self-consistent. No triangle-inequality assumption exists in the traverse.",
-    "ivf_approx": "IVF recall (<1.0) is inherent to list-probing (only `probes` lists scanned), not a metric defect — HNSW achieves 1.0. Tune `probes`/`lists` for higher IVF recall.",
-    "kernel": "IP/cosine use scalar-from-bytes fused kernels (zero-alloc, the M49 DoD). L2 keeps AVX2+FMA; adding AVX2 to IP/cosine is a future optimization if a latency benchmark shows a lag — not measured here.",
-    "scope": "Recall parity vs the SAME-metric seqscan oracle (exact ground truth). Not a QPS/latency claim."
+    "mips": "Inner product is NOT a metric (no triangle inequality). HNSW-over-IP works empirically (pgvector ships vector_ip_ops for hnsw); build+scan use the same negative-IP comparator → the graph is self-consistent.",
+    "ivf_recall": "IVF cosine/ip recall (0.83-0.89 vs HNSW's 1.0) has TWO components, honestly: (1) inherent list-probing approximation (only `probes` lists scanned), AND (2) a build-quality gap — our IVF k-means seeds with L2 (ivf.rs:59) and uses arithmetic-mean centroids (ivf.rs:101), NOT the spherical k-means pgvector uses for cosine (ivfkmeans.c:33). Part of the gap is (2), not purely (1). Tracked follow-up: spherical k-means for IVF cosine/ip (or Design-A normalize escalation).",
+    "kernel": "IP/cosine use scalar-from-bytes fused kernels (zero-alloc, the M49 DoD). L2 keeps AVX2+FMA; AVX2 for IP/cosine is a future optimization if a latency benchmark shows a lag — not measured here.",
+    "scope": "Correctness (recall vs exact oracle) + crash-safety. NOT a QPS/latency claim."
   },
   "env": {
     "cpu": "13th Gen Intel(R) Core(TM) i7-1355U",
-    "git_sha": "2d8a465"
+    "git_sha": "1af9da1"
   }
 }
