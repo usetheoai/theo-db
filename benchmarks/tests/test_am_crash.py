@@ -401,3 +401,36 @@ def test_crash_hook_is_superuser_gated():
 # hooks are still compiled into the production artifact (ADR D6 — injection_points absent in packaged PG17);
 # moving them behind a `crash_injection` cargo feature (fail-closed by construction) is a recommended follow-up
 # hardening, not a live hole. Full detail in m48-am-crash-safety-followups.md § Security review.
+
+
+def test_cosine_crash_safe():
+    """M49 review BLOCKER-1: a theodb_hnsw COSINE index must survive power-loss (SIGKILL) with its metric
+    preserved — the top-K under `<=>` is identical pre-crash and post-recovery. Cosine/ip use the raw-f32 page
+    format IDENTICAL to L2 (ADR-2), so M48's meta-pivot + INIT-fork WAL cover them; this proves it end-to-end
+    for the cosine metric specifically (a corruption to L2 would change the `<=>` order)."""
+    wait_ready()
+    su = connect(); su.autocommit = True
+    cur = su.cursor()
+    cur.execute("DROP TABLE IF EXISTS m49_cosine_crash")
+    cur.execute("CREATE TABLE m49_cosine_crash (id int, v vector(8))")
+    for i in range(1, 501):
+        cur.execute("INSERT INTO m49_cosine_crash VALUES (%s,%s)",
+                    (i, str([float(i), i * 0.5, i * 2.0, float(i), i * 0.1, float(i), i * 3.0, float(i)])))
+    cur.execute("CREATE INDEX m49_cosine_crash_idx ON m49_cosine_crash USING theodb_hnsw (v theodb_hnsw_cosine_ops)")
+    q = str([10.0, 5.0, 20.0, 10.0, 1.0, 10.0, 30.0, 10.0])
+    cur.execute("SET enable_seqscan = off")
+    cur.execute("SELECT id FROM m49_cosine_crash ORDER BY v <=> %s LIMIT 5", (q,))
+    pre = [r[0] for r in cur.fetchall()]
+    su.close()
+    assert len(pre) == 5, "cosine index returned no rows pre-crash"
+
+    crash_and_restart()  # SIGKILL + restart (power-loss analog)
+
+    chk = connect(); chk.autocommit = True
+    c2 = chk.cursor()
+    c2.execute("SET enable_seqscan = off")
+    c2.execute("SELECT id FROM m49_cosine_crash ORDER BY v <=> %s LIMIT 5", (q,))
+    post = [r[0] for r in c2.fetchall()]
+    assert post == pre, f"cosine top-5 changed across crash (metric corrupted?): pre={pre} post={post}"
+    c2.execute("DROP TABLE m49_cosine_crash")
+    chk.close()

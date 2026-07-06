@@ -423,16 +423,14 @@ impl Ord for Cand {
     }
 }
 
-fn score(metric: Metric, q: &[f32], vec_bytes: &[u8], is_l2: bool) -> f64 {
-    if is_l2 {
-        crate::vec::l2_dist_from_bytes(q, vec_bytes)
-    } else {
-        let dim = vec_bytes.len() / 4;
-        let mut v = vec![0f32; dim];
-        for (i, s) in v.iter_mut().enumerate() {
-            *s = f32::from_le_bytes(vec_bytes[i * 4..i * 4 + 4].try_into().unwrap());
-        }
-        metric.dist(q, &v)
+// M49: 3-way fused dispatch — L2/IP/cosine all score from raw page bytes with ZERO per-node `Vec<f32>` alloc
+// (was: only L2 fused; cosine/ip decoded a Vec per visited node — the ROADMAP-flagged mine). `_is_l2` is kept
+// for call-site signature stability (the metric already carries the same information).
+fn score(metric: Metric, q: &[f32], vec_bytes: &[u8], _is_l2: bool) -> f64 {
+    match metric {
+        Metric::L2 => crate::vec::l2_dist_from_bytes(q, vec_bytes),
+        Metric::Ip => crate::vec::ip_dist_from_bytes(q, vec_bytes),
+        Metric::Cosine => crate::vec::cosine_dist_from_bytes(q, vec_bytes),
     }
 }
 

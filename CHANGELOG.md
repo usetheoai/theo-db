@@ -24,6 +24,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.40.0] - 2026-07-06
+
+### Added
+
+- Opclasses `cosine` (`<=>`) e `inner-product` (`<#>`) para `theodb_hnsw` e `theodb_ivfflat` (M49): `CREATE INDEX … USING theodb_hnsw (embedding theodb_hnsw_cosine_ops)` (e `_ip_ops`, e as variantes ivfflat) registram e fazem pushdown do operador (provado por `EXPLAIN Index Scan`). A métrica é resolvida do opclass no build via `index_getprocinfo` (support FUNCTION 1 retorna a tag — ADR-1) e persistida na meta — um índice `cosine`/`ip` constrói e ordena pela métrica certa (não mais o L2 fixo); L2 permanece o opclass DEFAULT. O scan pontua cosine/IP com kernel fused **zero-alocação por nó** (`ip_dist_from_bytes`/`cosine_dist_from_bytes` lendo os bytes da página inline — mesmo contrato do L2; fecha a "mina" de `Vec<f32>` por nó visitado). Paridade provada em `docs/benchmarks/m49-cosine-ip-opclasses.{md,json}`: recall@10 vs o oracle seqscan EXATO da mesma métrica = **1.0 (HNSW cosine/ip)**, 0.89/0.83 (IVF cosine/ip — parte da diferença vs HNSW é aproximação de list-probing, parte é o k-means IVF não-spherical, follow-up rastreado); crash-safe provado por teste committado (`test_cosine_crash_safe`: índice cosine idêntico pré/pós SIGKILL — formato de página raw idêntico ao L2). Caveat: IP não é métrica (HNSW-over-IP funciona empiricamente, precedente pgvector) (#M49)
+
 ## [0.39.0] - 2026-07-06
 
 ### Added

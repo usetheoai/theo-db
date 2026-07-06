@@ -583,7 +583,7 @@ pages_read determinístico). Blueprint: `.claude/knowledge-base/discoveries/blue
 > Sequencial gated: **M50 é GATE do M51** (anti-sunk-cost — se o Pareto calibrado mudar o diagnóstico, a
 > aposta muda por ADR).
 
-### M47 — [ ] FU-1: micro-benchmark same-graph do ground-loop do HNSW scan (formaliza o plano em voo)
+### M47 — [x] FU-1: micro-benchmark same-graph do ground-loop do HNSW scan (formaliza o plano em voo)
 
 **Objective:** Medir de forma limpa (same-graph, box-noise-immune) o custo de alocação que o M46 remove —
 o A/B de 2 containers foi invalidado por contenção de box (controle pgvector +122%) e por grafos diferentes

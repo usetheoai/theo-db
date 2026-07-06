@@ -16,7 +16,8 @@ use std::collections::BinaryHeap;
 
 /// One scored candidate: its distance-to-query key + heap TID. Ordered ascending by (distance, tid) — the exact
 /// order the old `results.sort_by` produced, so the emitted top-K is byte-identical (recall unchanged, M36 ADR-1).
-/// `f64::total_cmp` is a TOTAL order (no NaN hazard — distances are finite), and the `tid` tiebreak reproduces the
+/// `f64::total_cmp` is a TOTAL order — under M49 cosine a zero-norm vector yields NaN, which `total_cmp` orders
+/// LAST (EC-3), so a degenerate vector sinks to the end instead of panicking; the `tid` tiebreak reproduces the
 /// stable order of the previous sort.
 #[derive(PartialEq)]
 struct Scored {
@@ -166,10 +167,8 @@ unsafe fn scan_ivf_structured(rel: pg_sys::Relation, query: &[f32]) -> BinaryHea
     let entry = 8 + dim * 4;
 
     let mut results: Vec<(i64, f64)> = Vec::new();
-    // For L2 (the only AM opclass today) score each candidate DIRECTLY off its page bytes via the fused AVX2+FMA
-    // path (M31b — no per-entry decode/scratch). Other metrics (future ip/cosine opclasses) use the scratch decode.
-    let is_l2 = matches!(metric, Metric::L2);
-    let mut scratch = vec![0f32; dim];
+    // M49: every metric (L2/IP/cosine) scores DIRECTLY off the page bytes via a fused zero-alloc kernel — no
+    // per-entry `scratch` decode. (L2 keeps its AVX2+FMA path; IP/cosine are scalar-from-bytes, still zero-alloc.)
     // Opt-in phase profiler (THEODB_SCAN_PROFILE=1): attribute the scan latency across {reads, score, sort} so the
     // optimization targets the REAL bottleneck, not an assumed one (measurement-first — ADR D3/D4). Off by default:
     // std::time::Instant is only sampled at list granularity (≤ probes pairs), never per-candidate.
@@ -194,14 +193,12 @@ unsafe fn scan_ivf_structured(rel: pg_sys::Relation, query: &[f32]) -> BinaryHea
                 break; // page shorter than the directory count claims — stop this list
             }
             let tidv = i64::from_le_bytes(bytes[o..o + 8].try_into().unwrap());
-            let d = if is_l2 {
-                crate::vec::l2_dist_from_bytes(query, &bytes[o + 8..o + entry])
-            } else {
-                for (j, s) in scratch.iter_mut().enumerate() {
-                    let p = o + 8 + j * 4;
-                    *s = f32::from_le_bytes(bytes[p..p + 4].try_into().unwrap());
-                }
-                metric.dist(query, &scratch)
+            // M49: 3-way fused, zero-alloc for all metrics (was: L2 fused; cosine/ip decoded `scratch` per entry).
+            let raw = &bytes[o + 8..o + entry];
+            let d = match metric {
+                Metric::L2 => crate::vec::l2_dist_from_bytes(query, raw),
+                Metric::Ip => crate::vec::ip_dist_from_bytes(query, raw),
+                Metric::Cosine => crate::vec::cosine_dist_from_bytes(query, raw),
             };
             results.push((tidv, d));
             cand += 1;
