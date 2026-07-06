@@ -28,3 +28,11 @@ foram validados historicamente via o harness Docker de regress (SQL), nunca via 
 quebrado em develop até o fix MemNode 351022f). Ação: auditar a suíte pg_test contra cargo-pgrx-test e corrigir os
 padrões incompatíveis (error-matching + schema-gen) num slice de higiene dedicado. Os testes NOVOS do M51
 (codebook, meta v2, element tuple) registram e passam corretamente sob cargo pgrx test.
+
+## [M51 follow-up rastreado] Benchmark SBQ-inline ≥2× QPS em escala com pressão de memória
+O M51 provou recall≥0.99 (0.9993) do read path SBQ-inline, mas a 25k/128d (sem pressão de memória) o SBQ NÃO é
+mais rápido que f32 (parity-to-slower) — consistente com o veredito do M50. O claim `≥2× QPS a recall≥0.99 vs
+pgvector` só é mensurável em **escala com pressão de memória** (≥250k @1536d ou 1M @768d) numa **box quieta**
+(o QPS a esta box contendida é poluído). Requer: box dedicada/quieta OU o streaming build do M55 (`collect_corpus`
+materializa o corpus em RAM sem teto). Ver `docs/adr/0015-sbq-inline-keep-kill.md` (critério de reabertura da
+decisão de composição) + `docs/benchmarks/m51-sbq-inline.md § 4`. Prioridade: ALTA (é o gate de valor do M51).

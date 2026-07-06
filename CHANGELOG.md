@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Benchmark M51 SBQ-inline (`benchmarks/run_m51_sbq_inline.py` → `docs/benchmarks/m51-sbq-inline.{md,json}`): recall@10 do read path SBQ = **0.9993** (gate ≥0.99 ATINGIDO, único spec acima de 0.99); a 25k sem pressão de memória o SBQ é parity-to-slower vs f32 em QPS (o ganho ≥2× é follow-up em escala, consistente com o M50). ADR `docs/adr/0015-sbq-inline-keep-kill.md` (RETÉM, opt-in, default off). (M51)
 - `theodb_hnsw` scan usa o read path SBQ (M51 T3.1): num índice v2, o walk do HNSW pontua candidatos por **Hamming popcount** sobre os códigos inline (barato) e reranqueia os sobreviventes por **f32 exato** (recall recuperado, M40); knob `SET theodb_hnsw.over_fetch = N` alarga o pool antes do rerank. Índice v1 (f32) inalterado. (M51)
 - `theodb_hnsw` aceita `WITH (sbq_bits = N)` (reloption, `options.rs`) → `ambuild_hnsw` chama `pack_sbq` (`build.rs`); default 0 = f32-only v1. `CREATE INDEX ... WITH (sbq_bits=4)` produz índice v2 com códigos inline, scannable. M51 reloption connect. (M51)
 - `pack_sbq` (`hnsw_page.rs`) treina o quantizer SBQ dos vetores do grafo, persiste o codebook no meta v2 e escreve cada código SBQ inline no element tuple (== quantize(vec)); o fold do VACUUM preserva SBQ re-quantizando os live vectors (`build.rs`, passa `meta.sbq_bits`). M51 T1.1-build + T2.1-write. (M51)
