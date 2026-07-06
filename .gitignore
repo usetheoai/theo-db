@@ -7,6 +7,14 @@
 
 # Cycle runtime artifacts (regenerated per run; not source)
 .claude/knowledge-base/implementations/.progress-*.json
+# Per-run halt-loop scaffolding — ephemeral, never tracked (implement SKILL.md: "gitignored").
+# The durable summaries ({slug}-implementation.md, {slug}-followups.md) ARE tracked; only the
+# per-iteration log dirs + SEPA scaffolding + validate reports are excluded.
+halt-loop-prompts/
+agents/
+.claude/knowledge-base/implementations/*/
+.claude/skills/*-sepa-knowledge/
+.claude/knowledge-base/reviews/*-implement-validate-*.md
 
 # SOTA reference peers cloned by /roadmap-init — local study material (640M+),
 # reproducible via the clone commands in references-catalog.md. Not project source.

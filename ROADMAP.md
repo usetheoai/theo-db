@@ -543,7 +543,7 @@ race-free; o carrier atinge build competitivo (12 cores). Próximo: redução de
 
 ---
 
-### M46 — [ ] theodb_hnsw scan hot-path hygiene — fechar o déficit de QPS no alto recall (recall-neutro, benchmark-gated)
+### M46 — [x] theodb_hnsw scan hot-path hygiene — fechar o déficit de QPS no alto recall (recall-neutro, benchmark-gated)
 
 **Objective (V2 — 1º milestone após o ROADMAP V1 completo):** o M45 (Pareto mean±std, SIFT1M) mediu PARIDADE
 theodb_hnsw vs pgvector, com déficit no alto recall (0.58× a recall 0.9932, effect>variância) e variância de QPS
@@ -570,6 +570,290 @@ pages_read determinístico). Blueprint: `.claude/knowledge-base/discoveries/blue
 
 ---
 
+## Remediação deep-view (2026-07-05) — M47–M55
+
+> Origem: deep-view de trajetória (5 council agents sobre código real — vector-ann, ai-in-db,
+> index-storage, benchmark, research-adr; grill: `knowledge-base/grills/deepview-remediation-feature-grill.md`).
+> Veredito: **COURSE_CORRECTION_NEEDED** — fundações certas, esforço no asymptote errado. O gap de ~25× vs
+> ScaNN (M33) é ~8–12× **quantização de scoring** (512 B/candidato f32 DRAM-bound vs 64 B AH em cache) +
+> ~2–3× layout/page-reads + ~1.2–1.4× piso SQL; o piso estrutural inevitável de um AM Postgres é ~2–4×,
+> não 25× — **o gap é quase todo endereçável**. Paridade com pgvector (M45) é o TETO da classe
+> "f32-em-páginas" (pgvector maduro senta no mesmo ponto: 71.8 vs 77.9 QPS, M33). Ordem: correctness →
+> calibrar a régua → mudar de asymptote (quantização) → filtered ANN → híbrida real → lifecycle AI.
+> Sequencial gated: **M50 é GATE do M51** (anti-sunk-cost — se o Pareto calibrado mudar o diagnóstico, a
+> aposta muda por ADR).
+
+### M47 — [ ] FU-1: micro-benchmark same-graph do ground-loop do HNSW scan (formaliza o plano em voo)
+
+**Objective:** Medir de forma limpa (same-graph, box-noise-immune) o custo de alocação que o M46 remove —
+o A/B de 2 containers foi invalidado por contenção de box (controle pgvector +122%) e por grafos diferentes
+do build paralelo M44. Extrai o ground-loop para a camada pura `ann/scan_core.rs` (trait `NeighborSource` +
+`ground_search<S>(…, presize)`; produção via `PageNeighborSource` em `am/hnsw_page.rs`, bench via
+`MemNeighborSource`) e bencha `presized` vs `::new()` via criterion sobre grafo seeded fixo.
+Plano: `.claude/knowledge-base/plans/fu1-samegraph-scan-microbench-plan.md` (`milestone_id: M47`).
+
+**Definition of done:**
+
+- [ ] `ann/scan_core.rs` PURO (zero `pg_sys`/`crate::` — invariante de link, blueprint Q5); `cargo bench`
+  linka standalone sem runtime PostgreSQL.
+- [ ] Guard de equivalência: o path benchado == oráculo `brute()` exato no grafo seeded (D3 do blueprint);
+  oracle recall-neutro do M46 (`traverse_presize_is_recall_neutral_end_to_end`) verde no path de produção.
+- [ ] Duas medições criterion (`presized`/`unsized`) sobre o MESMO grafo (`HnswIndex::build(seed=42)`,
+  N≥50k) com CIs reportados; delta persistido em `docs/benchmarks/fu1-samegraph-scan-microbench.{md,json}`.
+- [ ] Caveat EC-2 explícito no artefato: micro-bench sem I/O de página magnifica a fração de alocação —
+  o delta é **UPPER BOUND** do ganho de produção, não o número de produção (`public-copy.md`).
+
+**Dependencies:** M46. **Risco (BAIXO):** o delta pode ser pequeno (honest-negative aceito — fecha o
+veredito M46 de qualquer forma). `criterion` é dev-only (nunca linka no cdylib).
+
+### M48 — [ ] Correctness & durabilidade do AM — fechar os furos de crash-safety (issues #46/#47)
+
+**Objective:** O deep-view do AM achou dois furos que violam o invariante de crash-safety do projeto:
+(a) **#46** — índice sobre tabela UNLOGGED quebra após crash/failover porque `GenericXLogStart` é no-op
+quando `RelationNeedsWAL()==false` → INIT fork nunca vai ao WAL (`am/build.rs:259-276` → `page.rs:87-99`);
+(b) **#47** — o rebuild-on-vacuum reescreve o índice in-place, meta (bloco 0) PRIMEIRO, um registro
+GenericXLog por página (`page.rs:517-537` IVF; `hnsw_page.rs:387-406` HNSW) — crash mid-fold ⇒ estado misto;
+pior caso, scan pontua bytes stale como vetores (**resultado silenciosamente errado**). Mais dois gaps
+operacionais: pending nunca foldada em workload insert-only (`amvacuumcleanup` retorna cedo, `mod.rs:181-183`
+→ scan paga O(pending) para sempre) e build paralelo não-cancelável (sem `CHECK_FOR_INTERRUPTS` no
+`thread::scope`, `hnsw_parallel.rs:44-54`).
+
+**Definition of done:**
+
+- [ ] **#46 fechado:** `log_newpage_range()` forçado quando `forkNum == INIT_FORKNUM` independente de
+  `RelationNeedsWAL` (padrão pgvector `hnswbuild.c:1137-1138` / `ivfbuild.c:1047-1048`); teste de regressão:
+  UNLOGGED + `docker kill` (sem checkpoint) + restart → `INSERT` OK (não "truncated meta page").
+- [ ] **#47 fechado via meta-pivot atômico:** geração nova escrita em páginas frescas (shadow), meta pivotada
+  por ÚLTIMO em UM registro GenericXLog; páginas antigas reclamadas depois (FSM). Teste fault-injection:
+  crash injetado entre escritas do fold → restart → scan consistente (geração antiga OU nova, nunca mista).
+  **Restrição de design (anti-retrabalho M51):** o mecanismo meta-pivot é **layout-agnóstico** — camada de
+  ciclo de vida de páginas, separada do serializer de tuples — para que o layout v3 do M51 troque só o
+  serializer. Registrar no artefato o volume de WAL do shadow-rewrite (full-page images do índice inteiro
+  por VACUUM — insumo do M55).
+- [ ] Pending fold em `amvacuumcleanup` quando threshold excedido (workload insert-only deixa de degradar
+  sem limite); teste: N inserts sem DELETE + VACUUM → pending foldada, scan O(ef·M).
+- [ ] Build paralelo cancelável: `CHECK_FOR_INTERRUPTS` entre batches do leader (`pg_cancel_backend`
+  interrompe `CREATE INDEX` em ≤ 1 batch).
+- [ ] `amcostestimate` honesto (estilo `genericcostestimate` + `spc_random_page_cost`, âncora pgvector
+  `ivfflat.c:86-116`/`hnsw.c:135-164`) — o planner compara índice vs seqscan de verdade (hoje: stub 0/0,
+  `am/mod.rs:117-140`). **Nota de teste:** custo honesto → seqscan vence em N pequeno e isso é o resultado
+  CORRETO; os testes de pushdown migram para assertar `EXPLAIN` em N realista, não em tabelas de brinquedo.
+
+**Dependencies:** M47. **Risco (MÉDIO):** harness de fault-injection é novo (gdb breakpoint ou fault hook);
+meta-pivot muda o ciclo de vida de páginas — REINDEX path e formato versionado já existem como precedente
+(v1→v2). **Nota (fora deste milestone):** o muro estrutural VACUUM O(N)-em-RAM sob lock EXCLUSIVE
+(`build.rs:196-221` + `lock.rs`) tem casa própria: **M55** (discover fold incremental vs manutenção
+in-place à la pgvector) — não entra aqui para não inflar o DoD.
+
+### M49 — [ ] Opclasses cosine + inner-product no AM (o gap funcional que bloqueia RAG real)
+
+**Objective:** Os dois AMs só registram L2 (`vector_l2_ops`, `am/mod.rs:192-213`; dispatch `scan.rs:169`).
+Embeddings de produção (OpenAI/Cohere/BGE) usam **cosine/IP** — sem essas opclasses o índice não serve ao
+workload que o README promete, e nenhum dataset realista (M50) pode ser medido. Atenção à mina já mapeada:
+o `score()` do traverse só tem kernel fused para L2 — o caminho cosine/IP hoje alocaria `Vec<f32>` por nó
+visitado (`am/hnsw_page.rs:436-447`).
+
+**Definition of done:**
+
+- [ ] `vector_cosine_ops` + `vector_ip_ops` registradas para `theodb_hnsw` e `theodb_ivfflat`
+  (`amcanorderbyop`, strategy 1), com `CREATE INDEX … (embedding vector_cosine_ops)` + `EXPLAIN` provando
+  pushdown do `<=>`/`<#>`.
+- [ ] Kernel fused SIMD para cosine/IP no traverse — **zero alocação por nó** (mesmo contrato do L2;
+  extensão de `vec.rs`, runtime dispatch AVX2 preservado).
+- [ ] Paridade numérica + recall@10 vs pgvector nas mesmas métricas (harness existente, seed fixa);
+  artefato `docs/benchmarks/m49-cosine-ip-opclasses.{md,json}`.
+- [ ] Coexistência: suíte L2 (M45/M46) verde sem regressão; erros tipados para opclass×métrica inválida.
+
+**Dependencies:** M48. **Risco (BAIXO-MÉDIO):** kernel IP/cosine SIMD é extensão direta do L2; decisão
+normalizar-vs-computar documentada (âncora pgvector `vector_negative_inner_product`). **Caveat MIPS:**
+inner product não é métrica (sem desigualdade triangular) — HNSW-sobre-IP funciona empiricamente
+(precedente pgvector), mas o plano registra o caveat e o oráculo de paridade cobre IP explicitamente.
+
+### M50 — [ ] Calibração da régua SOTA — pgvectorscale diskann + dataset realista + higiene de artefatos
+
+**Objective:** Toda a evidência vetorial é UM dataset (SIFT1M/128d/L2), UM eixo (read-only, warm, 1 cliente),
+numa box que já invalidou 3 medições (M41/M42/M46). E a comparação SOTA justa **nunca foi feita**: o
+pgvectorscale `diskann` (StreamingDiskANN + SBQ — o SOTA permissivo apples-to-apples: mesmo processo, mesmo
+buffer manager, mesmo piso SQL) **já está instalado na imagem** (`CREATE EXTENSION theodb CASCADE`). Sem
+esta calibração, qualquer novo ciclo de otimização mira um asymptote desconhecido. GATE do M51.
+
+**Definition of done:**
+
+- [ ] Pareto M45 re-executado com **+1 spec: pgvectorscale `diskann`** (mesmo harness `run_m45_pareto.py`,
+  mesmas queries seed 42, isolamento de índice) → posição honesta do SOTA-em-Postgres registrada.
+- [ ] **+1 dataset realista de RAG, dimensionado pela MEMÓRIA da box** (HIGH-1 do review): o build do
+  theodb materializa o corpus em RAM (`collect_corpus`, `am/build.rs:28-45`, sem teto) — 1M×1536d ≈ 6.1 GB
+  só de corpus, ×3 builds (theodb/pgvector/diskann) numa box de ~15 GB. Escolha default: **cohere 768d×1M
+  (~3 GB)** OU subset 250–500k @1536d com caveat explícito no artefato; 1M×1536d fica gated pelo streaming
+  build (M55+). Métrica cosine (requer M49), GT exato; fronteira recall×QPS theodb_hnsw vs pgvector vs
+  diskann → `docs/benchmarks/m50-sota-ruler.{md,json}`.
+- [ ] **Primeiro artefato de QPS-de-banco** (G5/G6 do deep-view): sweep multi-cliente (8/16 conexões,
+  p50/p95/p99, mesmo ponto de recall) + degradação de latência de scan com pending acumulada (N inserts
+  pós-build, antes do fold) — theodb vs pgvector. QPS a 1 cliente é 1/latência, não throughput de banco.
+- [ ] Protocolo de box quieta documentado e aplicado (load-guard **pré-flight contra carga EXTERNA**: medição
+  aborta se load>N ou controle deriva >10% — lição M46); mean±std ≥3 runs, effect>variância obrigatório
+  para qualquer veredito.
+- [ ] Higiene de artefatos (G8 do deep-view): JSON bruto para m41/m43; banner de retração cross-ref em
+  `m32-scale-sift1m.md`; nota `(superseded — ADR 0012)` no bullet do M31; números M30 CHANGELOG↔artefato
+  reconciliados.
+- [ ] Veredito escrito: onde o teto da classe atual está e se o lever do M51 (SBQ inline) continua sendo a
+  aposta certa — **este parágrafo é o gate formal do M51**.
+
+**Dependencies:** M47, M49. **Risco (MÉDIO):** box de dev contendida (mitigação: load-guard + janelas
+quietas; se inviável, box dedicada vira pré-requisito registrado); download/GT de dataset 1536d é pesado.
+
+### M51 — [ ] SBQ inline no AM — quantização no caminho quente (a aposta que muda de asymptote; GATED por M50)
+
+**Objective:** O lever dominante do gap (~8–12×): hoje o scan pontua TODOS os ~50k candidatos em f32
+full-precision (512 B/candidato a 128d → 25.6 MB/query, DRAM-bound; `am/hnsw_page.rs` traverse). O padrão
+comprovado (pgvectorscale SBQ, licença PostgreSQL — D1 OK) é: códigos compactos DENTRO do índice, scoring
+barato no hot path, rerank exato f32 só no top. Peças prontas: quantizador SBQ testado (M22 parity, 16×
+compressão; `sbq.rs`), recall recuperável via rerank provado (0.947 @bits=4 em SIFT real, M38 + over_fetch
+→ 1.000, M40). Os honest-negatives M39/M40 NÃO cobrem esta aposta: M39 mediu ADC *escalar* (não Hamming/LUT16
+SIMD); M40 provou que quantização não move *recall* — ela existe para baratear o *scoring* (~10×), permitindo
+mais ef ao mesmo custo. Impacto estimado 3–8× QPS a recall ≥0.99 (ESTIMATIVA — é exatamente o que este
+milestone mede).
+
+**Definition of done:**
+
+- [ ] Códigos SBQ (4-bit, ~64 B a dim=128) inline nos element tuples do `theodb_hnsw` (layout v3, formato
+  versionado + REINDEX path, precedente v1→v2).
+- [ ] **Write path resolvido** (HIGH-2 do review): codebook/means SBQ persistidos em **meta pages**
+  (precedente pgvectorscale); `aminsert` NÃO quantiza — a **pending permanece f32** (`append_pending`,
+  `build.rs:122-143`; o scan da pending segue exato) e os códigos são gerados **no fold**; política de
+  drift documentada (means fixados no build; advisory de REINDEX quando a distribuição muda).
+- [ ] **Co-localização dos códigos dos vizinhos: decisão MEDIDA, não compromisso** (HIGH-3 do review):
+  a 128d/4-bit, códigos no bloco de vizinhança custam ~2 KB/nó (m0≈32×64 B) → índice ~2–3× maior por
+  ~1 read/nó a menos (`hnsw_page.rs:452-511`). Adotar SÓ se o benchmark index-size×reads×QPS mostrar
+  effect>variância; senão, códigos apenas nos element tuples.
+- [ ] Traverse pontua candidatos por **Hamming popcount SIMD** sobre os códigos; **rerank exato f32
+  on-page** apenas no top `k·over_fetch` (over_fetch reloption/GUC, default medido).
+- [ ] **Recall-gate D3-style:** recall@10 ≥ 0.99 preservado no Pareto M50 (SIFT1M E dataset realista);
+  retenção SÓ se effect>variância — senão honest-negative + ADR mantendo f32 (anti-sunk-cost).
+- [ ] Fronteira recall×QPS re-medida vs pgvector E diskann → `docs/benchmarks/m51-sbq-inline.{md,json}`;
+  meta: mover a fronteira ≥2× a recall ≥0.99 vs pgvector (o M50 fixa o número exato do gate).
+- [ ] **ADR keep/kill do AM próprio** (risco 4c do deep-view): critério registrado de quando o AM próprio
+  deixa de valer a pena (ex.: se após este lever seguir ≤ pgvector+diskann no Pareto realista, reabrir a
+  decisão de composição). O D3 tem cláusula de saída para forks; o AM próprio hoje não tem — este ADR fecha
+  o gap de decision-record.
+- [ ] Condicional (G4): se sobrar gap residual atribuível ao scoring, criterion bench LUT16 ADC vs Hamming
+  (1M candidatos, mesmo codebook) — só DEPOIS do veredito principal.
+
+**Dependencies:** M50 (GATE — o veredito escrito do M50 autoriza ou re-escopa esta aposta). **Risco (ALTO):**
+mudança de formato on-disk + calibração de over_fetch (recall); mitigado pelo gate D3 e pelo REINDEX path.
+
+### M52 — [ ] Filtered ANN planner-integrado — `WHERE … ORDER BY embedding <=> $1` com recall preservado
+
+**Objective:** O gap CRÍTICO vs o campo: filtered vector search é o flagship do AlloyDB (adaptive filtering),
+está no pgvector 0.8 (iterative index scans) e no pgvectorscale (label filtering) — e no TheoDB tem **zero
+milestone, zero blueprint** (PRD P2 lista como [SHOULD] e nunca executou). É o único wedge *técnico* coerente
+com a tese de unificação (vetor+relacional no mesmo engine): HNSW ingênuo colapsa de recall sob filtro
+seletivo — resolver isso planner-integrado é diferencial genuíno e citável. Cobertura de benchmark hoje: zero.
+
+**Definition of done:**
+
+- [ ] Discover primeiro (blueprint): AlloyDB adaptive filtering, pgvector 0.8 iterative scans, ACORN
+  (predicate-agnostic HNSW), pgvectorscale labels — estratégia escolhida por ADR com alternativas.
+- [ ] Estratégia implementada no `theodb_hnsw` (ex.: iterative scan — continuar a busca até k tuplas
+  passarem o recheck do executor; ou pushdown de bitmap de visibilidade) — `EXPLAIN` provando índice usado
+  sob `WHERE`.
+- [ ] **Benchmark de seletividade** (1% / 10% / 50%): recall@10 + QPS vs pgvector iterative scan, mesmo
+  dataset do M50 → `docs/benchmarks/m52-filtered-ann.{md,json}`. Recall sob filtro seletivo ≥ paridade
+  pgvector 0.8.
+- [ ] Zero regressão no path unfiltered (suíte M45/M50 verde; effect>variância).
+
+**Dependencies:** M51. **Risco (ALTO):** interação com executor/planner (recheck, rescan) é o território
+mais sutil da Index AM API; mitigação: discover + âncora nos 2 designs OSS existentes (pgvector iterative,
+pgvectorscale labels).
+
+### M53 — [ ] Híbrida de verdade — WHERE relacional + leg BM25 + benchmark BEIR real
+
+**Objective:** Três dívidas da superfície híbrida: (a) o `FUSION_TEMPLATE` (`hybrid.rs:24-46`) **não aceita
+filtro WHERE** — a própria tese de unificação não está exposta na API (`api.rs:432-449` sem parâmetro de
+predicado); (b) o leg lexical é `ts_rank_cd`, que perdeu de 0.5143 para **0.9546** (nDCG@10) do BM25
+(`m7-bm25-vs-tsrank.md`) — medido superior e não shipado (o gate de adoção do `pg_textsearch` da exceção
+ADR 0013 nunca rodou); (c) o claim de recall da híbrida **não tem artefato** — a fixture do m7 tem 12 docs
+e o próprio doc diz "not decision-grade"; o follow-up BEIR real está aberto desde 2026-06-28.
+
+**Definition of done:**
+
+- [ ] Parâmetro de filtro relacional na fusão (`ai.hybrid_search_rrf(…, filter_sql)`). **Frame de segurança
+  honesto (review):** o predicado executa **com o privilégio do chamador** (SECURITY INVOKER — nenhuma
+  fronteira de privilégio é cruzada); a garantia do template é **confinamento sintático** (o filtro não
+  escapa do WHERE da CTE — mesma disciplina `%I`/parametrização atual). Composição com M52 quando o leg
+  vetorial usa índice.
+- [ ] Gate de adoção do BM25 executado: leg lexical `pg_textsearch` (BM25) opt-in com fallback `ts_rank_cd`
+  preservado; decisão registrada (executa a exceção ADR 0013 — não reabre out-of-scope).
+- [ ] **Benchmark BEIR real** (scifact/nfcorpus, embedder real via `.env` de teste, nDCG@10 + recall@100):
+  híbrida vs vector-only vs BM25-only → `docs/benchmarks/m53-hybrid-beir.{md,json}` — a híbrida só vira
+  claim com este artefato (`public-copy.md`).
+- [ ] Idioma do `to_tsvector`/`plainto_tsquery` parametrizável (hoje 'english' hard-coded, `hybrid.rs:34-37`).
+
+**Dependencies:** M19 (híbrida existente), M50 (protocolo de medição). **Risco (MÉDIO):** `pg_textsearch`
+na imagem (packaging); embedder real no CI (custo/flakiness — mitigação: subset fixo + cache de embeddings
+no fixture).
+
+### M54 — [ ] Vectorizer próprio — auto-embedding declarativo (o lifecycle que define "AI-native" em 2026)
+
+**Objective:** O campo definiu a categoria pelo lifecycle, não pelas funções per-row: pgai vectorizer
+(Timescale), Supabase automatic embeddings, AlloyDB — embedding gerado/atualizado em INSERT/UPDATE,
+declarativamente. No TheoDB **não existe nada disso** (zero triggers em `sql/`; ADR 0007 fixou per-row
+síncrono para a *função* `embed`, não para manutenção de coluna): todo embedding é mantido pela aplicação —
+é a lacuna que um dev de RAG sente no minuto 5. Requer revisitar o ADR 0007 por ADR novo (async permitido
+para o vectorizer; a função `embed` continua síncrona).
+
+**Definition of done:**
+
+- [ ] Discover (blueprint): padrão pgai vectorizer + Supabase (trigger → fila → worker) mapeado; decisão de
+  worker (background worker pgrx vs cron/externo) por ADR com alternativas — o ADR revisita o 0007
+  explicitamente.
+- [ ] `theodb.create_vectorizer(table, source_col, embedding_col, model)` declarativo: trigger AFTER
+  INSERT/UPDATE enfileira (tabela de jobs com estados tipados: pending/processing/done/failed + tentativas);
+  worker consome em batch via `embed_batch` existente (`embed.rs:55-124`) — retry bounded reusa `http.rs`.
+- [ ] Chunking helper SQL (recursive character split, tamanho/overlap configuráveis) — suficiente para v1;
+  chunking avançado fica para depois (YAGNI).
+- [ ] Crash-safety da fila: job em `processing` com owner morto volta a `pending` (visibility timeout);
+  teste e2e contra stub determinístico: INSERT → embedding aparece; UPDATE → re-embed; falha de endpoint →
+  retry bounded + estado `failed` tipado (nunca swallow).
+- [ ] Métrica de runtime (wiring triad): contador de jobs processados/falhados consultável (não só LOG).
+
+**Dependencies:** M19. **Risco (ALTO):** background worker em pgrx é território FFI novo (ciclo de vida,
+sinais, shutdown limpo); fila crash-safe tem sutilezas de visibilidade — mitigação: discover primeiro,
+estados tipados, e o worker nunca segura transação do usuário (async por design).
+
+### M55 — [ ] Decisão: manutenção do índice a escala — fold incremental vs in-place (o muro do VACUUM)
+
+**Objective (milestone-decisão, precedente M30):** o desenho deliberado do ADR-1/M35 (grafo imutável +
+rebuild total no VACUUM) tem um muro estrutural: o fold materializa o corpus O(N) em RAM
+(`build.rs:196-221`) **sob advisory lock EXCLUSIVE** (`lock.rs`) — a escala North-Star (1M+×768d), isso
+significa GBs de RAM e **parada total de queries vetoriais durante o VACUUM** (e uma transação longa com
+lock SHARE bloqueia o VACUUM indefinidamente). pgvector faz manutenção in-place por página, sem cliff. O
+mesmo mecanismo limita o **build** (`collect_corpus` sem teto — o gate de dataset do M50). É dívida
+classe-bloqueador para qualquer claim de produção; a decisão precisa de discover próprio, não de um fix
+apressado.
+
+**Definition of done:**
+
+- [ ] Discover (blueprint): fold incremental (gerações parciais sobre o meta-pivot do M48) vs manutenção
+  in-place à la pgvector (`hnswvacuum.c`) vs híbrido (in-place para DELETE, fold para compaction) —
+  trade-offs com evidência dos peers (pgvector, pgvectorscale).
+- [ ] Medição do estado atual como baseline: RAM de pico + duração do lock EXCLUSIVE no fold a 100k/500k/1M
+  (SIFT + 768d) + volume de WAL (insumo já coletado no M48) → `docs/benchmarks/m55-vacuum-wall.{md,json}`.
+- [ ] **ADR (MADR 3.0)** com a decisão, alternativas rejeitadas e o plano de milestone(s) de implementação;
+  inclui o teto de memória do BUILD (`collect_corpus` streaming ou batched) no escopo da decisão.
+- [ ] Trigger registrado: a implementação da decisão é **pré-requisito de qualquer claim v1.0/produção**
+  (`public-copy.md` § 3) — o ADR fixa isso explicitamente.
+
+**Dependencies:** M48 (o meta-pivot é a fundação de qualquer fold incremental; o volume de WAL medido lá é
+insumo). **Risco (BAIXO — é decisão+medição, não implementação):** a implementação decorrente será ALTO e
+ganha milestone próprio via `/roadmap-feature` após o ADR.
+
+> **Insumo do M48 já disponível (2026-07-05):** o volume de WAL do fold shadow-write está medido em
+> `docs/benchmarks/m48-am-maintenance.{md,json}` — ~12,3 MB para reescrever um índice de 50k (mean±std de 3
+> runs); é exatamente esse custo que o fold incremental desta milestone busca reduzir.
+
+---
+
 ## Sequência e paralelismo
 
 ```
@@ -585,6 +869,10 @@ M19 ─────────────────────────�
 - M23→M24 (Go) podem começar após M19 (o banco próprio já coeso).
 - **M26 ──▶ M31 (leitura parcial, O(N) fechado) ──▶ M31b (distância SIMD) ──▶ M32 (escala/QPS) ──▶ M33 (head-to-head AlloyDB)** — o **track P0** de
   superioridade vetorial roda **antes** de M27–M30 (operacionais). É o pilar do North Star ainda não fechado.
+- **Remediação deep-view (2026-07-05): M47 (FU-1 régua) ──▶ M48 (correctness #46/#47) ──▶ M49 (cosine/IP) ──▶ M50 (calibração SOTA) ══GATE══▶ M51 (SBQ inline — muda de asymptote) ──▶ M52 (filtered ANN) ──▶ M53 (híbrida real) · M54 (vectorizer, deps M19) · M55 (decisão VACUUM-wall, deps M48)** —
+  correctness antes de performance; nenhuma aposta grande sem a régua calibrada (anti-sunk-cost). Emendas
+  do review de engenharia de BD (2026-07-05) absorvidas nos DoDs: dataset-por-memória e QPS-multi-cliente
+  (M50), write-path SBQ e co-localização-medida (M51), meta-pivot layout-agnóstico (M48), M55 criado.
 
 ## Gate de dependências (transversal — o pedido "depender o menos possível")
 

@@ -13,7 +13,7 @@ use pgrx::prelude::*;
 /// the empty/HNSW build paths that don't read the reloption.
 use crate::am::options::{lists_from_relation, DEFAULT_LISTS};
 /// HNSW build params for the persisted AM (mirror the SQL-callable defaults).
-const HNSW_M: usize = 16;
+pub(crate) const HNSW_M: usize = 16;
 const HNSW_EF_CONSTRUCTION: usize = 64;
 const BUILD_SEED: u64 = 42;
 
@@ -80,7 +80,12 @@ pub extern "C-unwind" fn ambuild_hnsw(
 ) -> *mut pg_sys::IndexBuildResult {
     unsafe {
         let (corpus, ntuples) = collect_corpus(heaprel, indexrel, index_info);
-        let idx = HnswIndex::build(&corpus, HNSW_M, HNSW_EF_CONSTRUCTION, Metric::L2, BUILD_SEED);
+        // T4.1: inject the cancellation seam so a long `CREATE INDEX` responds to `pg_cancel_backend` within one
+        // parallel batch. `check_for_interrupts!` runs on the leader between batches (all workers joined) — safe
+        // to longjmp. Under `#[pg_guard]` (this callback), the ereport(ERROR) unwinds cleanly across the C boundary.
+        let idx = HnswIndex::build_cancellable(
+            &corpus, HNSW_M, HNSW_EF_CONSTRUCTION, Metric::L2, BUILD_SEED, &|| { pgrx::check_for_interrupts!(); },
+        );
         // M35: persist the STRUCTURED page-native layout (meta + element + neighbor tuples) so scans traverse the
         // graph ON DEMAND (O(ef·M) pages), not deserialize the whole blob (O(N)).
         match crate::am::hnsw_page::pack(&idx) {
@@ -212,11 +217,31 @@ unsafe fn vacuum_rebuild_hnsw_structured(indexrel: pg_sys::Relation, dead: &mut 
     }
     let live: Vec<(i64, Vec<f32>)> = all.into_iter().filter(|(id, _)| !dead(*id)).collect();
     // HNSW build params are fixed consts (no reloption), so rebuild with them; preserve the metric from meta.
-    let idx = HnswIndex::build(&live, HNSW_M, HNSW_EF_CONSTRUCTION, metric, BUILD_SEED);
-    match crate::am::hnsw_page::pack(&idx) {
-        Ok(packed) => crate::am::hnsw_page::rewrite_structured(indexrel, &packed),
+    // T4.1: the fold's rebuild is also cancellable (a VACUUM of a huge index responds to cancel per batch).
+    let idx = HnswIndex::build_cancellable(
+        &live, HNSW_M, HNSW_EF_CONSTRUCTION, metric, BUILD_SEED, &|| { pgrx::check_for_interrupts!(); },
+    );
+    // M48 (#47): crash-safe fold — pack the new generation at a fresh base, write it to inert pages, then pivot
+    // block 0. `pack_at` resolves the graph's pointers relative to `base`, so the packed image is position-
+    // independent and readers (which follow meta.elem_first/nbr_first/entry_blkno) need no change. T2.2: pack once
+    // at base 1 to count pages (the count is base-independent), pick a base that reuses the dead low region when
+    // it fits (bounded growth), and repack only if the base changed.
+    let probe = match crate::am::hnsw_page::pack_at(&idx, 1) {
+        Ok(p) => p,
         Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
-    }
+    };
+    let need = probe.pages.len() as u32;
+    let nblocks = pg_sys::RelationGetNumberOfBlocksInFork(indexrel, pg_sys::ForkNumber::MAIN_FORKNUM);
+    let base = crate::am::fold::free_region(crate::am::fold::cur_gen_start(indexrel), nblocks, need);
+    let packed = if base == 1 {
+        probe
+    } else {
+        match crate::am::hnsw_page::pack_at(&idx, base as usize) {
+            Ok(p) => p,
+            Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
+        }
+    };
+    crate::am::fold::fold(indexrel, &packed.meta, &packed.pages, base);
     live.len()
 }
 
@@ -248,7 +273,22 @@ unsafe fn vacuum_rebuild_structured(indexrel: pg_sys::Relation, dead: &mut dyn F
     // M34 — a VACUUM fold preserves the built list count (WITH (lists=N)); reverting to the default would silently
     // re-partition a tuned index.
     let idx = IvfflatIndex::build(&live, lists_from_relation(indexrel), metric, BUILD_SEED);
-    page::rewrite_ivf_structured(indexrel, dim, metric.tag(), idx.centroids(), &idx.list_entries());
+    // M48 (#47): crash-safe fold — the v3 items carry gen_base = the fresh base, so the relocated directory /
+    // centroids / lists resolve correctly after block 0 is pivoted. One item per page ⇒ wrap each as a 1-item
+    // page. T2.2: the per-page count is base-independent, so build items at base 1 to count, choose a base that
+    // reuses the dead low region when it fits, and rebuild the items only if the base changed.
+    let probe = page::ivf_structured_items(1, dim, metric.tag(), idx.centroids(), &idx.list_entries());
+    let need = probe.len() as u32 - 1; // minus the meta (item 0, written to block 0)
+    let nblocks = pg_sys::RelationGetNumberOfBlocksInFork(indexrel, pg_sys::ForkNumber::MAIN_FORKNUM);
+    let base = crate::am::fold::free_region(crate::am::fold::cur_gen_start(indexrel), nblocks, need);
+    let items = if base == 1 {
+        probe
+    } else {
+        page::ivf_structured_items(base, dim, metric.tag(), idx.centroids(), &idx.list_entries())
+    };
+    let (meta, body_items) = items.split_first().expect("ivf structured items always include the meta");
+    let body: Vec<Vec<Vec<u8>>> = body_items.iter().map(|it| vec![it.clone()]).collect();
+    crate::am::fold::fold(indexrel, meta, &body, base);
     live.len()
 }
 
@@ -258,7 +298,10 @@ unsafe fn vacuum_rebuild_structured(indexrel: pg_sys::Relation, dead: &mut dyn F
 #[pg_guard]
 pub extern "C-unwind" fn ambuildempty(indexrel: pg_sys::Relation) {
     let idx = IvfflatIndex::build(&[], DEFAULT_LISTS, Metric::L2, BUILD_SEED);
-    unsafe { page::write_blob(indexrel, pg_sys::ForkNumber::INIT_FORKNUM, &idx.to_bytes()) };
+    unsafe {
+        page::write_blob(indexrel, pg_sys::ForkNumber::INIT_FORKNUM, &idx.to_bytes());
+        wal_log_init_fork(indexrel);
+    }
 }
 
 #[pg_guard]
@@ -268,10 +311,25 @@ pub extern "C-unwind" fn ambuildempty_hnsw(indexrel: pg_sys::Relation) {
         // M35: an empty structured graph is meta-only (entry_level = -1).
         match crate::am::hnsw_page::pack(&idx) {
             Ok(packed) => {
-                crate::am::hnsw_page::write_structured(indexrel, pg_sys::ForkNumber::INIT_FORKNUM, &packed)
+                crate::am::hnsw_page::write_structured(indexrel, pg_sys::ForkNumber::INIT_FORKNUM, &packed);
+                wal_log_init_fork(indexrel);
             }
             Err(e) => pg_sys::error!("theodb hnsw buildempty: {e}"),
         }
+    }
+}
+
+/// Issue #46: WAL-log every INIT-fork page unconditionally. `GenericXLog` is a WAL no-op when
+/// `RelationNeedsWAL()` is false (always the case for the UNLOGGED relations that get an INIT fork), so
+/// without this the crash-recovery reset copies a fork that never reached the WAL — the reset main fork
+/// comes up empty/zeroed and `aminsert` fails with "truncated meta page" until REINDEX. Pattern is the
+/// upstream fix verbatim: pgvector `hnswbuild.c:1137-1138` / gist `gist.c:133-150` (`log_newpage_range`
+/// with FPIs for the whole fork). Called as the LAST step of buildempty so the range covers every page.
+unsafe fn wal_log_init_fork(indexrel: pg_sys::Relation) {
+    let fork = pg_sys::ForkNumber::INIT_FORKNUM;
+    let nblocks = pg_sys::RelationGetNumberOfBlocksInFork(indexrel, fork);
+    if nblocks > 0 {
+        pg_sys::log_newpage_range(indexrel, fork, 0, nblocks, true);
     }
 }
 

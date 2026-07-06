@@ -18,6 +18,7 @@ use std::cmp::Ordering;
 mod hnsw;
 mod hnsw_parallel;
 mod ivf;
+pub(crate) mod scan_core;
 mod wire;
 
 pub(crate) use hnsw::{HnswIndex, HNSW_MAGIC};

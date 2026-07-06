@@ -269,26 +269,37 @@ fn encode_neighbors(idx: &HnswIndex, node: usize, elem_addr: &[Addr], m: usize, 
 /// Resolve the whole in-memory graph into meta + page images (ADR-2 — no I/O, unit-testable). Returns `Err` if a
 /// neighbor tuple would exceed one page (impossible under the build's level cap, asserted here defensively).
 pub(crate) fn pack(idx: &HnswIndex) -> Result<Packed, String> {
+    // The initial build / buildempty writes a contiguous generation starting right after the meta (block 1).
+    pack_at(idx, 1)
+}
+
+/// Like [`pack`], but places the generation body starting at block `base` (M48 / issue #47). The meta's element
+/// and neighbor pointers (`elem_first`/`nbr_first`/`entry_blkno`) plus every neighbor-tuple address are resolved
+/// relative to `base`, so the packed image is position-independent — the crash-safe fold writes it at the tail
+/// (or a reclaimed contiguous region) and pivots block 0 to it. Readers already follow the meta pointers, so no
+/// read path changes: the graph is relocatable for free (unlike IVF, whose directory needed an explicit gen_base).
+pub(crate) fn pack_at(idx: &HnswIndex, base: usize) -> Result<Packed, String> {
     let (metric, m, m0, _ef) = idx.params();
     let n = idx.node_count();
     let dim = idx.dim();
 
-    // Empty graph: meta only, entry_level = -1.
+    // Empty graph: meta only, entry_level = -1. `base` is irrelevant (no body pages) — record it anyway so
+    // pending_start (= nbr_first + nbr_npages = base) is consistent with a non-empty generation at `base`.
     if n == 0 {
         let meta = encode_meta(&HnswMeta {
             metric_tag: metric.tag(), dim: dim as u32, m: m as u16, m0: m0 as u16,
             entry_blkno: 0, entry_offno: 0, entry_level: -1, node_count: 0,
-            elem_first: 1, elem_npages: 0, nbr_first: 1, nbr_npages: 0,
+            elem_first: base as u32, elem_npages: 0, nbr_first: base as u32, nbr_npages: 0,
         });
         return Ok(Packed { meta, pages: Vec::new() });
     }
 
-    // 1. Analytic element addresses (fixed size ⇒ node i is at block 1+i/ipp, offset 1+i%ipp).
+    // 1. Analytic element addresses (fixed size ⇒ node i is at block base+i/ipp, offset 1+i%ipp).
     let ipp = elems_per_page(dim);
     let elem_npages = n.div_ceil(ipp);
     let elem_addr: Vec<Addr> =
-        (0..n).map(|i| ((1 + i / ipp) as u32, (1 + i % ipp) as u16)).collect();
-    let nbr_first = 1 + elem_npages;
+        (0..n).map(|i| ((base + i / ipp) as u32, (1 + i % ipp) as u16)).collect();
+    let nbr_first = base + elem_npages;
 
     // 2. Pack neighbor tuples by free space, starting at nbr_first. Content uses the analytic elem addrs.
     let mut nbr_pages: Vec<Vec<Vec<u8>>> = vec![Vec::new()];
@@ -327,7 +338,7 @@ pub(crate) fn pack(idx: &HnswIndex) -> Result<Packed, String> {
     let meta = encode_meta(&HnswMeta {
         metric_tag: metric.tag(), dim: dim as u32, m: m as u16, m0: m0 as u16,
         entry_blkno: eb, entry_offno: eo, entry_level: idx.node_level(entry_node) as i16,
-        node_count: n as u32, elem_first: 1, elem_npages: elem_npages as u32,
+        node_count: n as u32, elem_first: base as u32, elem_npages: elem_npages as u32,
         nbr_first: nbr_first as u32, nbr_npages: nbr_npages as u32,
     });
 
@@ -381,29 +392,8 @@ pub(crate) unsafe fn enumerate_entries(
     Ok(out)
 }
 
-/// Rewrite the structured graph in place (VACUUM fold): reinit block 0 (meta) + the page images, then empty every
-/// leftover page (the old pending region) so no stale pending survives — mirrors `page::rewrite_blob`'s in-place
-/// reinit strategy, avoiding unbounded relation growth across vacuums.
-pub(crate) unsafe fn rewrite_structured(rel: pg_sys::Relation, packed: &Packed) {
-    let nblocks = pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM);
-    // block 0 = meta, then the page images; reinit existing blocks in place, extend for any new ones.
-    // NB: closures do not inherit the enclosing `unsafe fn` context, so the FFI calls are wrapped explicitly.
-    let write_block = |block: u32, items: &[Vec<u8>]| unsafe {
-        if block < nblocks {
-            page::reinit_page_with_items(rel, block, items);
-        } else {
-            page::extend_page_with_items(rel, pg_sys::ForkNumber::MAIN_FORKNUM, items);
-        }
-    };
-    write_block(0, std::slice::from_ref(&packed.meta));
-    for (i, pg) in packed.pages.iter().enumerate() {
-        write_block(1 + i as u32, pg);
-    }
-    let total = 1 + packed.pages.len() as u32;
-    for b in total..nblocks {
-        page::reinit_page_with_items(rel, b, &[]); // empty the old pending pages
-    }
-}
+// (M48) The old in-place `rewrite_structured` was replaced by the crash-safe `fold::fold` (meta-pivot) — it
+// rewrote block 0 first, so a crash mid-vacuum left the meta pointing at pages that still held old bytes (#47).
 
 /// A traversal candidate: its element address, neighbor-tuple address, level, heap tid, and distance to the query.
 #[derive(Clone, Copy)]
@@ -551,56 +541,75 @@ pub(crate) unsafe fn traverse(
         lc -= 1;
     }
 
-    // Ground layer with ef_search: a min-heap of candidates to expand, a max-heap of the ef best found.
-    // M46 L1-A: pre-size the three per-query structures so they never rehash/realloc mid-search — the
-    // accidental overhead that scaled super-linearly with ef (default SipHash `HashSet` starts at capacity 0
-    // and rehashes ~12× over an ef=200 search). Anchors: pgvector `tidhash_create(ef*m*2)` (`hnswutils.c:675`),
-    // pgvectorscale `with_capacity(search_list_size*neigbors)` (`graph/mod.rs:109-111`). Recall-neutral.
-    let cap = ef.saturating_mul(m0.max(1)).max(1);
-    let mut visited: std::collections::HashSet<(u32, u16)> =
-        std::collections::HashSet::with_capacity(cap.saturating_mul(2));
-    let mut cands: std::collections::BinaryHeap<std::cmp::Reverse<Cand>> =
-        std::collections::BinaryHeap::with_capacity(cap);
-    let mut result: std::collections::BinaryHeap<Cand> =
-        std::collections::BinaryHeap::with_capacity(ef + 1);
-    // M46 L1-B: one neighbor scratch reused across every expanded node (was a fresh `Vec` per node).
-    let mut scratch: Vec<Addr> = Vec::with_capacity(m0.max(1));
-    visited.insert((ep.blk, ep.off));
-    cands.push(std::cmp::Reverse(ep));
-    result.push(ep);
-    while let Some(std::cmp::Reverse(c)) = cands.pop() {
-        let worst = result.peek().map(|w| w.d).unwrap_or(f64::INFINITY);
-        if c.d > worst && result.len() >= ef {
-            break;
-        }
-        // On Err, `?` aborts before `scratch` is read; on Ok, `decode_neighbors_into` has cleared+refilled it.
-        // This is what makes the scratch reuse leak-free — do NOT swallow this Err (e.g. `let _ =`) or the loop
-        // below would read a previous node's neighbors.
-        neighbors_into(rel, &c, 0, m, m0, nblocks, &mut reads, &mut scratch)?;
-        for i in 0..scratch.len() {
-            let (nb, no) = scratch[i];
-            if !visited.insert((nb, no)) {
-                continue;
-            }
-            let cand = load(rel, nb, no, q, metric, is_l2, nblocks, &mut reads)?;
-            let worst = result.peek().map(|w| w.d).unwrap_or(f64::INFINITY);
-            if cand.d < worst || result.len() < ef {
-                cands.push(std::cmp::Reverse(cand));
-                result.push(cand);
-                if result.len() > ef {
-                    result.pop();
-                }
-            }
-        }
-    }
+    // Ground layer with ef_search — extracted to `ann/scan_core::ground_search` behind a `NeighborSource` seam
+    // (FU-1). The M46 pre-size + reused scratch live there now (`presize = true` keeps the M46 behavior);
+    // production drives it via `PageNeighborSource`, the criterion bench via `MemNeighborSource`. Recall-neutral:
+    // the ground loop reads the same pages in the same order (dedup-before-load preserved). `reads` is threaded
+    // through the source's `Cell` so `pages_read` stays exact.
+    let pg_src = PageNeighborSource {
+        rel,
+        nblocks,
+        q,
+        metric,
+        is_l2,
+        m,
+        m0,
+        reads: std::cell::Cell::new(reads),
+    };
+    let out = crate::ann::scan_core::ground_search(&pg_src, ep, ef, m0, true)?;
+    reads = pg_src.reads.get();
 
     if std::env::var("THEODB_SCAN_PROFILE").is_ok_and(|v| v == "1") {
         // The wiring-triad runtime metric: pages read must be O(ef·M), flat in N (server LOG, not client WARNING).
-        pgrx::log!("theodb hnsw scan profile: pages_read={reads} ef={ef} m={m} m0={m0} results={}", result.len());
+        pgrx::log!("theodb hnsw scan profile: pages_read={reads} ef={ef} m={m} m0={m0} results={}", out.len());
     }
-    let mut out: Vec<(i64, f64)> = result.into_iter().map(|c| (c.tid, c.d)).collect();
-    out.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(&b.0)));
     Ok(out)
+}
+
+/// The production [`scan_core::NeighborSource`]: drives the ground search over PostgreSQL pages by reusing the
+/// existing `load` + `neighbors_into` page readers (FU-1). `Node` is the on-disk `Cand` (distance + tid + the
+/// neighbor-tuple address for expansion); `Ref` is a neighbor element address `(blk,off)`. The page-read counter
+/// is threaded through a `Cell` (the trait methods take `&self`); it mirrors the pre-FU-1 `&mut reads` exactly.
+struct PageNeighborSource<'a> {
+    rel: pg_sys::Relation,
+    nblocks: u32,
+    q: &'a [f32],
+    metric: Metric,
+    is_l2: bool,
+    m: usize,
+    m0: usize,
+    reads: std::cell::Cell<usize>,
+}
+
+impl<'a> crate::ann::scan_core::NeighborSource for PageNeighborSource<'a> {
+    type Node = Cand;
+    type Ref = Addr;
+
+    fn dist(&self, node: &Cand) -> f64 {
+        node.d
+    }
+    fn tid(&self, node: &Cand) -> i64 {
+        node.tid
+    }
+    fn node_key(&self, node: &Cand) -> u64 {
+        ((node.blk as u64) << 16) | node.off as u64
+    }
+    fn ref_key(&self, r: &Addr) -> u64 {
+        ((r.0 as u64) << 16) | r.1 as u64
+    }
+    fn neighbors_into(&self, node: &Cand, out: &mut Vec<Addr>) -> Result<(), String> {
+        let mut reads = 0usize;
+        // bare `neighbors_into(..)` = the free page reader below; `self`-less → no recursion into this method.
+        let r = unsafe { neighbors_into(self.rel, node, 0, self.m, self.m0, self.nblocks, &mut reads, out) };
+        self.reads.set(self.reads.get() + reads);
+        r
+    }
+    fn load(&self, r: &Addr) -> Result<Cand, String> {
+        let mut reads = 0usize;
+        let cand = unsafe { load(self.rel, r.0, r.1, self.q, self.metric, self.is_l2, self.nblocks, &mut reads) };
+        self.reads.set(self.reads.get() + reads);
+        cand
+    }
 }
 
 #[cfg(any(test, feature = "pg_test"))]

@@ -13,6 +13,8 @@
 use pgrx::*;
 
 mod build; // ambuild / ambuildempty (Phase 2) + shared datum/metric helpers
+mod cost; // M48 T5.1 — honest amcostestimate visit-ratio (pgvector cost model)
+mod fold; // M48 — crash-safe VACUUM fold (meta-pivot, issue #47)
 pub(crate) mod guc; // M34 — theodb_ivfflat.probes scan GUC
 mod hnsw_page; // M35 — page-native structured persistence for theodb_hnsw
 mod index; // polymorphic persisted index (ivf|hnsw) dispatch (Phase 6)
@@ -109,15 +111,18 @@ pub extern "C-unwind" fn amvalidate(_opclassoid: pg_sys::Oid) -> bool {
     true
 }
 
-/// Cost: mark the index usable only when order-bys are present; keep costs modest so the planner MAY
-/// choose it (tuned in Phase 4). When there is no order-by key, refuse (infinite cost).
+/// Cost (M48 T5.1 / D5 — honest): refuse when there is no order-by (this AM only serves `ORDER BY <-> LIMIT`).
+/// Otherwise base the cost on `genericcostestimate` and scale the STARTUP by the fraction of index tuples an
+/// ordered ANN scan actually visits (`cost::scan_visit_ratio`, the pgvector model): a large index visits a
+/// tiny fraction → small startup → it wins the LIMIT; a tiny index visits nearly all → startup ≈ total →
+/// seqscan+sort wins. The old body returned cost 0, so the index always won (it lied to the planner, G6).
 // The 8-arg signature is dictated by Postgres's `amcostestimate_function` FFI contract — irreducible.
 #[allow(clippy::too_many_arguments)]
 #[pg_guard]
 pub unsafe extern "C-unwind" fn amcostestimate(
-    _root: *mut pg_sys::PlannerInfo,
+    root: *mut pg_sys::PlannerInfo,
     path: *mut pg_sys::IndexPath,
-    _loop_count: f64,
+    loop_count: f64,
     index_startup_cost: *mut pg_sys::Cost,
     index_total_cost: *mut pg_sys::Cost,
     index_selectivity: *mut pg_sys::Selectivity,
@@ -132,11 +137,22 @@ pub unsafe extern "C-unwind" fn amcostestimate(
         *index_pages = 0.0;
         return;
     }
-    *index_startup_cost = 0.0;
-    *index_total_cost = 0.0;
-    *index_selectivity = 1.0;
-    *index_correlation = 1.0;
-    *index_pages = 1.0;
+    let mut costs: pg_sys::GenericCosts = std::mem::zeroed();
+    pg_sys::genericcostestimate(root, path, loop_count, &mut costs);
+
+    let indexinfo = (*path).indexinfo;
+    let tuples = (*indexinfo).tuples;
+    // Open NoLock: the planner already holds a lock on this index for the query being planned (pgvector
+    // `hnsw.c` / `ivfflat.c` pattern). `scan_visit_ratio` is fail-safe — any unreadable meta degrades to 1.0.
+    let rel = pg_sys::index_open((*indexinfo).indexoid, pg_sys::NoLock as pg_sys::LOCKMODE);
+    let ratio = cost::scan_visit_ratio(rel, tuples);
+    pg_sys::index_close(rel, pg_sys::NoLock as pg_sys::LOCKMODE);
+
+    *index_startup_cost = costs.indexTotalCost * ratio;
+    *index_total_cost = costs.indexTotalCost;
+    *index_selectivity = costs.indexSelectivity;
+    *index_correlation = costs.indexCorrelation;
+    *index_pages = costs.numIndexPages;
 }
 
 /// VACUUM bulk-delete (M26 Phase 5): rebuild the main index over only the TIDs the `callback` reports as LIVE,
@@ -171,20 +187,39 @@ pub extern "C-unwind" fn ambulkdelete(
     }
 }
 
-/// VACUUM cleanup (M26 Phase 5): report the final page count. The heavy lifting happened in `ambulkdelete`.
+/// VACUUM cleanup (M26 Phase 5 + M48 T3.1): report the final page count, AND — when `ambulkdelete` did not run
+/// (`stats == NULL` ⇒ zero dead tuples, i.e. an insert-only workload) — fold the pending region into the main
+/// structure once it exceeds `theodb.vacuum_pending_threshold` pages, so the scan returns to O(structure)
+/// instead of paying O(pending) forever (D3). The per-INSERT path stays O(1); the fold is the same crash-safe
+/// `vacuum_rebuild` used by `ambulkdelete`, with nothing dead. NEVER aborts on an unreadable/legacy meta —
+/// `pending_page_count` swallows the error to 0 (skip), so a routine VACUUM is fail-safe.
 #[pg_guard]
 pub extern "C-unwind" fn amvacuumcleanup(
     vinfo: *mut pg_sys::IndexVacuumInfo,
     stats: *mut pg_sys::IndexBulkDeleteResult,
 ) -> *mut pg_sys::IndexBulkDeleteResult {
     unsafe {
-        if stats.is_null() || (*vinfo).analyze_only {
+        if (*vinfo).analyze_only {
             return stats;
         }
-        (*stats).num_pages = pg_sys::RelationGetNumberOfBlocksInFork(
-            (*vinfo).index,
-            pg_sys::ForkNumber::MAIN_FORKNUM,
-        );
+        let indexrel = (*vinfo).index;
+        if stats.is_null() {
+            // No bulkdelete this pass — fold the pending region if it grew past the threshold (insert-only path).
+            let pending = page::pending_page_count(indexrel);
+            if pending > guc::vacuum_pending_threshold() {
+                let mut none_dead = |_id: i64| -> bool { false };
+                let live = build::vacuum_rebuild(indexrel, &mut none_dead);
+                let out = PgBox::<pg_sys::IndexBulkDeleteResult>::alloc0().into_pg();
+                (*out).num_index_tuples = live as f64;
+                (*out).pages_deleted = pending; // the pending pages folded away
+                (*out).num_pages =
+                    pg_sys::RelationGetNumberOfBlocksInFork(indexrel, pg_sys::ForkNumber::MAIN_FORKNUM);
+                return out;
+            }
+            return stats; // NULL — below threshold, nothing to do
+        }
+        (*stats).num_pages =
+            pg_sys::RelationGetNumberOfBlocksInFork(indexrel, pg_sys::ForkNumber::MAIN_FORKNUM);
         stats
     }
 }

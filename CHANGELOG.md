@@ -24,6 +24,38 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.38.0] - 2026-07-06
+
+### Added
+
+- Benchmark de manutenção do índice vetorial em `docs/benchmarks/m48-am-maintenance.{md,json}` (driver `benchmarks/run_m48_maintenance.py`): caracteriza (a) a degradação de scan por região pending acumulada e a recuperação pelo fold (p50 cai ~7× quando o fold dispara acima do threshold de 16 páginas — pending 64→0), (b) o volume de WAL do fold shadow-write (~12 MB para reescrever um índice de 50k — insumo do M55), e (c) o custo honesto do planner (seqscan em N=100, índice em N=50k). Caracterização em dev box com mean±std de 3 runs + load-guard (lição M46), sem claim comparativo (#47)
+
+- `CREATE INDEX ... USING theodb_hnsw` (build paralelo M44) agora responde a `pg_cancel_backend`: o build checa cancelamento uma vez por batch (4096 nós), então um build longo interrompe em ~1 batch em vez de rodar até o fim, sem deixar índice órfão. A cancelabilidade entra por um seam de injeção de dependência (a camada `ann/` permanece pura, sem `pg_sys`). O VACUUM/fold também é cancelável: o rebuild checa cancel por batch e o fold chama `vacuum_delay_point()` por página escrita (throttle de custo do VACUUM + ponto de interrupção), então um VACUUM de índice grande responde a cancel no meio do fold. **Caveat honesto:** cancelar (ou crashar) um fold no meio da escrita da nova geração pode deixar o índice exigindo `REINDEX` — é a MESMA janela fail-loud do crash (erro tipado instruindo REINDEX, NUNCA corrupção silenciosa; um re-VACUUM não cura, REINDEX sim). O fechamento total dessa janela (cancelar/crashar sem REINDEX) é escopo do M55 (fold incremental, ADR 0014) (#47)
+
+- `SET theodb.vacuum_pending_threshold = N` (default 16): um VACUUM funde a região pending do índice vetorial na estrutura principal quando ela passa de N páginas — mesmo sem tuplas mortas — para que um workload insert-only tenha o scan em O(estrutura), não O(pending) para sempre. Observável pela métrica de runtime `pending_pages` (`THEODB_SCAN_PROFILE=1`), que cai a 0 após o fold. Nota: um VACUUM insert-only puro pula o index cleanup no PG14+; use `VACUUM (INDEX_CLEANUP ON)` (ou deixe o autovacuum rodar quando houver tuplas mortas) para disparar o fold (#47)
+
+- Roadmap amendado: adicionados M47–M55 (remediação do deep-view 2026-07-05 — FU-1 régua same-graph, correctness do AM #46/#47, opclasses cosine/IP, calibração SOTA com pgvectorscale diskann + dataset realista, SBQ inline no AM gated, filtered ANN, híbrida com WHERE+BM25+BEIR, vectorizer auto-embedding, decisão VACUUM-wall) (`/roadmap-feature deepview-remediation`; issues #46, #47)
+
+
+### Changed
+
+- Planner recebe custo honesto do índice vetorial: `amcostestimate` passou a usar `genericcostestimate` e escalar o custo de startup pela fração de tuplas que um scan ordenado realmente visita (modelo de custo do pgvector — IVF `probes/lists`; HNSW fórmula por `m`/`ef_search`). Antes retornava custo 0, então o planner escolhia o índice até em tabelas minúsculas onde `seqscan + sort` é mais barato. Agora `ORDER BY <-> LIMIT` usa `seqscan` em N pequeno (~100 linhas) e o índice em N realista (~50k), ambos provados por `EXPLAIN`. Leitura da meta é fail-safe: qualquer meta ilegível (durante um VACUUM concorrente) cai para custo genérico, nunca aborta o planejamento (#47)
+
+- VACUUM do índice vetorial bounda o crescimento do índice: o fold reusa a região contígua liberada por um fold anterior (alternância de gerações), em vez de estender sempre. Limite honesto (ADR 0014): o passo de reclaim NÃO é totalmente atômico — um crash no meio do reclaim é **fail-loud** (erro tipado → REINDEX), nunca corrupção silenciosa; o reclaim atômico sem janela de REINDEX é escopo do M55 (manutenção incremental crash-safe). A correção de corrupção do #47 em si (meta-pivot) é completa e crash-safe (#47)
+
+- VACUUM do índice vetorial (`theodb_hnsw`/`theodb_ivfflat`) agora é **crash-safe**: o fold escreve a nova geração em páginas frescas e troca a página-meta (bloco 0) por último, num único registro WAL full-image — antes reescrevia no lugar, meta primeiro, e um crash no meio do VACUUM podia corromper o índice (pior caso: resultado silenciosamente errado). Formato structured do IVF migrado para v3 (campo `gen_base`, geração relocável); índices v2 continuam legíveis e são migrados no primeiro VACUUM. Índices pré-M48 podem exigir REINDEX se o erro tipado instruir (#47)
+
+- Cycle-kit: `check_plan_completeness.py` (discover-plan-confidence) alinhado ao perfil frontier já sancionado por ADR `0001-discover-phd-rigor` (MIN_QUESTIONS=6, MAX_QUESTIONS=14, MAX_PER_CORNER=5 — o script ainda aplicava 5/10/3; dentro do cap LOCKED ≤15 do golden rule)
+- Roadmap M47–M55: emendas do review de engenharia de BD absorvidas nos DoDs — M50 dataset dimensionado pela memória da box (build materializa corpus em RAM) + primeiro artefato de QPS multi-cliente; M51 write-path SBQ resolvido (codebook em meta pages, pending permanece f32, drift documentado) + co-localização de códigos rebaixada a decisão medida (custo ~2–3× de index size); M48 meta-pivot declarado layout-agnóstico (anti-retrabalho M51) + nota de testes EXPLAIN em N realista; M53 frame de segurança do filter_sql corrigido (privilégio do chamador + confinamento sintático); M55 criado (decisão fold incremental vs in-place — pré-requisito de claim v1.0)
+- Ground-loop do scan do índice vetorial `theodb_hnsw` extraído para uma camada pura (`ann/scan_core`) atrás de um seam `NeighborSource`, mantendo o comportamento de busca idêntico (recall-neutro) — refatoração interna que habilita medição isolada e reproduzível do custo de alocação por consulta (FU-1/M47).
+
+
+### Fixed
+
+- Corrupção silenciosa do índice vetorial em crash durante VACUUM está eliminada (issue #47, gate fechado): provado por crash-injection determinística (GUC `theodb.test_crash_after_pages`/`test_crash_phase`, superuser-only, default off) em 3 pontos do fold (pré-pivot, pós-pivot, meio-do-reclaim) — em TODOS, após crash-recovery o scan é consistente OU falha-alto com erro tipado instruindo REINDEX, NUNCA um resultado silenciosamente errado. REINDEX (rebuild do heap) cura a janela residual; o fechamento total sem REINDEX é M55 (ADR 0014) (#47)
+
+- Índices `theodb_hnsw`/`theodb_ivfflat` sobre tabelas UNLOGGED agora sobrevivem a crash/failover: o INIT fork passou a ser WAL-logado (`log_newpage_range` incondicional ao fim do `ambuildempty` — GenericXLog é no-op de WAL para relações unlogged); antes, o primeiro INSERT pós-recovery falhava com "truncated meta page" até REINDEX (#46)
+
 ## [0.37.0] - 2026-07-05
 
 ### Added

@@ -114,6 +114,7 @@ if [ -f "CHANGELOG.md" ]; then
   CODE_CHANGED=$(echo "$ALL_FILES" \
     | grep -E '\.(go|py|ts|tsx|js|jsx|rs|java|kt|rb|cs)$' \
     | grep -vE '(_test|\.test|\.spec)\.[a-z]+$' \
+    | grep -vE '(^|/)test_[^/]+\.[a-z]+$' \
     | grep -vE '(^|/)(node_modules|vendor|dist|build|target|\.venv|__pycache__|\.claude)/' \
     || true)
   if [ -n "$CODE_CHANGED" ] && ! echo "$ALL_FILES" | grep -qE '^CHANGELOG\.md$'; then
