@@ -645,7 +645,7 @@ meta-pivot muda o ciclo de vida de páginas — REINDEX path e formato versionad
 (`build.rs:196-221` + `lock.rs`) tem casa própria: **M55** (discover fold incremental vs manutenção
 in-place à la pgvector) — não entra aqui para não inflar o DoD.
 
-### M49 — [ ] Opclasses cosine + inner-product no AM (o gap funcional que bloqueia RAG real)
+### M49 — [x] Opclasses cosine + inner-product no AM (o gap funcional que bloqueia RAG real)
 
 **Objective:** Os dois AMs só registram L2 (`vector_l2_ops`, `am/mod.rs:192-213`; dispatch `scan.rs:169`).
 Embeddings de produção (OpenAI/Cohere/BGE) usam **cosine/IP** — sem essas opclasses o índice não serve ao
