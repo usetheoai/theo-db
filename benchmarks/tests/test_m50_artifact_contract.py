@@ -8,6 +8,7 @@ determinístico) — valida o JSON committado + a forma pura do driver.
 import importlib.util
 import json
 import pathlib
+import re
 
 BENCH = pathlib.Path(__file__).resolve().parents[1]
 ART_JSON = BENCH.parent / "docs" / "benchmarks" / "m50-sota-ruler.json"
@@ -45,6 +46,31 @@ def test_artifact_md_contains_written_verdict_gate():
     assert "recall-parity" in md or "paridade de recall" in md
     # honesty caveats about reduced scale must be present, not hidden
     assert "escala reduzida" in md.lower()
+
+
+def test_md_table_numbers_match_json_no_handedit():
+    """§1 table cells (recall/p50/qps) MUST equal the committed JSON per_spec (review F1 regression guard).
+
+    Catches hand-edited numbers that diverge from the reproducible artifact — the exact traceability
+    breach the benchmark council flagged. Rows are matched by (index-name-in-a-prior-line, knob)."""
+    d = json.loads(ART_JSON.read_text())
+    lut = {}  # (spec, knob) -> curve point
+    label = {"theodb_hnsw": "theodb_hnsw", "pgvector_hnsw": "pgvector_hnsw", "diskann": "diskann"}
+    for spec in label:
+        for c in d["per_spec"][spec]["curve"]:
+            lut[(spec, c["knob"])] = c
+    # parse markdown rows: | **theodb_hnsw** | ef=400 | 0.941 ± 0.007 | 12.19 | 100 | 15.9 |
+    row = re.compile(r"\|\s*\**(theodb_hnsw|pgvector_hnsw|diskann)\**\s*\|\s*\**(?:ef|sls)=(\d+)\**\s*\|"
+                     r"\s*\**([\d.]+)\s*±\s*[\d.]+\**\s*\|\s*\**([\d.]+)\**\s*\|\s*\**([\d.]+)\**\s*\|")
+    matched = 0
+    for m in row.finditer(ART_MD.read_text()):
+        spec, knob, recall, p50, qps = m.group(1), int(m.group(2)), float(m.group(3)), float(m.group(4)), float(m.group(5))
+        c = lut[(spec, knob)]
+        assert abs(recall - c["recall_mean"]) <= 0.001, f"{spec} knob={knob}: recall md {recall} != json {c['recall_mean']}"
+        assert abs(p50 - c["p50_ms_mean"]) <= 0.05, f"{spec} knob={knob}: p50 md {p50} != json {c['p50_ms_mean']}"
+        assert abs(qps - c["qps_1client_mean"]) <= 1.0, f"{spec} knob={knob}: qps md {qps} != json {c['qps_1client_mean']}"
+        matched += 1
+    assert matched >= 12, f"expected >=12 table rows cross-checked, got {matched}"
 
 
 def test_driver_multiclient_helper_exists_and_shaped():

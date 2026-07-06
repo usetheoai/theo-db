@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-06 · **Milestone:** M50 (GATE do M51) · **Metric:** cosine (`<=>`, requer M49) · **GT:** seqscan exato
 **Harness:** `benchmarks/run_m50_sota.py` (reusa `theodb_bench.metrics`, Rule 9) · **Image:** `theodb:m49-p3` (vector + vectorscale + theodb no mesmo processo)
-**Verdict:** **theodb_hnsw em recall-parity com pgvector, ~40% atrás em throughput no ponto de alto-recall; `diskann` dominado nesta escala in-memory.** Detalhe + gate do M51 abaixo.
+**Verdict:** **theodb_hnsw em recall-parity com pgvector, ~1.6–1.7× atrás em latência (fator-constante) / 29% menos QPS a 8-clientes no alto-recall; `diskann` dominado nesta escala in-memory.** Detalhe + gate do M51 abaixo.
 
 ---
 
@@ -12,7 +12,7 @@ Esta é uma **calibração de escala reduzida**, medida numa box de dev contendi
 
 1. **Escala reduzida por decisão do usuário (2026-07-06).** O DoD do M50 pede um dataset RAG realista dimensionado pela memória da box (default cohere 768d×1M, ~3 GB, ×3 builds). A box tinha **12 containers ativos** e `collect_corpus` materializa o corpus inteiro em RAM sem teto (`am/build.rs`), tornando o run 1M×3-builds inviável aqui. O usuário escolheu **"rodar agora com dataset menor + caveats"**. Escala efetiva: **n=25 000, dim=128, dados gaussianos sintéticos** (distintos — NÃO a degeneração InitPlan da ADR 0012; cada vetor é `rnd.gauss` independente). O run 1M realista fica **gated no streaming build (M55+) ou numa box dedicada/quieta**.
 2. **Box NÃO estava quieta.** `load_pre=7.87`; durante os 3 runs o load subiu para **11.03 / 9.32 / 12.64** (`load_post=12.66`) numa box de 12 cores — bem acima do "quieto". Consequência: **os números ABSOLUTOS de latência/QPS carregam ruído de contenção externa.** O que É robusto ao ruído é a **ordenação RELATIVA** entre os três índices — ela é consistente em **1-cliente E multi-cliente E nos 3 runs** (ver abaixo), então o veredito relativo se sustenta apesar da box suja.
-3. **Recall é confiável; latência absoluta não.** O `recall_std` sobre 3 runs é minúsculo (~0.006–0.011) → as curvas de recall são estáveis. A latência absoluta oscila com o load; por isso o veredito se apoia em **deltas relativos entre índices medidos no MESMO run/box**, não em ms absolutos.
+3. **Recall é confiável; latência absoluta não.** O `recall_std` sobre 3 runs é **≤ 0.024** (e **≤ 0.007 no ponto de alto-recall ef=400** que ancora o veredito) → as curvas de recall são estáveis onde importa. A latência absoluta oscila com o load; por isso o veredito se apoia em **deltas relativos entre índices medidos no MESMO run/box** (ratios same-run), não em ms absolutos.
 4. **Sub-item não medido:** a degradação de latência de scan com pending acumulada (theodb-específico, item 3 do DoD) **não foi medida** neste ciclo — fica registrada como follow-up honesto, não como checkbox fake.
 
 ---
@@ -21,23 +21,25 @@ Esta é uma **calibração de escala reduzida**, medida numa box de dev contendi
 
 Melhor-recall em **negrito**. `recall` = média±desvio sobre 3 runs; `p50`/`qps` são 1-cliente (= 1/latência, **não** throughput de banco — ver §2).
 
+Números **gerados diretamente do JSON committado** (`m50-sota-ruler.json § per_spec`) — nenhuma edição à mão (correção de review F1). `p50`/`qps` são médias sobre os 3 runs (ruído de latência absoluta — ver caveats).
+
 | index | knob | recall@10 | p50 (ms) | qps (1c) | build (s) |
 |---|---|---|---|---|---|
-| **theodb_hnsw** | ef=40 | 0.367 ± 0.009 | 2.93 | 343 | 15.9 |
-| **theodb_hnsw** | ef=100 | 0.598 ± 0.010 | 4.98 | 201 | 15.9 |
-| **theodb_hnsw** | ef=200 | 0.808 ± 0.006 | 8.02 | 125 | 15.9 |
-| **theodb_hnsw** | **ef=400** | **0.941 ± 0.006** | **12.19** | **72** | 15.9 |
-| pgvector_hnsw | ef=40 | 0.369 ± 0.009 | 2.88 | 373 | 8.5 |
-| pgvector_hnsw | ef=100 | 0.605 ± 0.007 | 4.51 | 225 | 8.5 |
-| pgvector_hnsw | ef=200 | 0.796 ± 0.002 | 6.91 | 149 | 8.5 |
-| pgvector_hnsw | **ef=400** | **0.935 ± 0.011** | **7.25** | **107** | 8.5 |
-| diskann | sls=100 | 0.383 ± 0.001 | 7.70 | 130 | 69.2 |
-| diskann | sls=500 | 0.755 ± 0.009 | 19.96 | 50 | 69.2 |
-| diskann | sls=1000 | 0.874 ± 0.002 | 28.14 | 36 | 69.2 |
-| diskann | **sls=2000** | **0.877 ± 0.002** | **42.80** | 21 | 69.2 |
+| **theodb_hnsw** | ef=40 | 0.363 ± 0.024 | 2.70 | 400 | 15.9 |
+| **theodb_hnsw** | ef=100 | 0.623 ± 0.011 | 4.77 | 230 | 15.9 |
+| **theodb_hnsw** | ef=200 | 0.813 ± 0.011 | 7.56 | 148 | 15.9 |
+| **theodb_hnsw** | **ef=400** | **0.941 ± 0.007** | **12.19** | **100** | 15.9 |
+| pgvector_hnsw | ef=40 | 0.367 ± 0.010 | 1.59 | 678 | 8.5 |
+| pgvector_hnsw | ef=100 | 0.590 ± 0.003 | 2.84 | 385 | 8.5 |
+| pgvector_hnsw | ef=200 | 0.796 ± 0.004 | 4.33 | 257 | 8.5 |
+| pgvector_hnsw | **ef=400** | **0.935 ± 0.004** | **7.25** | **151** | 8.5 |
+| diskann | sls=100 | 0.379 ± 0.005 | 4.86 | 240 | 69.2 |
+| diskann | sls=500 | 0.753 ± 0.003 | 15.02 | 69 | 69.2 |
+| diskann | sls=1000 | 0.875 ± 0.003 | 26.88 | 39 | 69.2 |
+| diskann | **sls=2000** | **0.877 ± 0.003** | **42.80** | 25 | 69.2 |
 
 **Leitura:**
-- **theodb_hnsw ↔ pgvector: paridade de recall, gap de latência.** Nas duas curvas o recall casa knob-a-knob (0.37/0.60/0.81/0.94 vs 0.37/0.61/0.80/0.94). No ponto de alto-recall (~0.94), theodb faz **p50 12.2 ms vs 7.25 ms** do pgvector → **theodb ~1.7× mais lento** ali. Nos knobs baixos (ef≤200) a diferença é pequena. Ou seja: o gap que sobra é **latência/fator-constante no scan de alto-ef**, não recall — exatamente o que o GOTO P0 do CTO aponta como o teto ainda não vencido.
+- **theodb_hnsw ↔ pgvector: paridade de recall, gap de latência de fator-constante.** Nas duas curvas o recall casa knob-a-knob (0.363/0.623/0.813/0.941 vs 0.367/0.590/0.796/0.935 — paridade dentro do ruído). Na latência, pgvector é mais rápido **em TODA a curva** por um multiplicador **aproximadamente constante ~1.6–1.7×**: ef=40 → 2.70 vs 1.59 ms (1.70×); ef=400 → 12.19 vs 7.25 ms (1.68× média; **1.64× ± 0.35 medido same-run** nos 3 runs, imune ao ruído da box). Um gap que é um multiplicador ~constante ao longo de todos os ef é a **assinatura de um custo por-candidato fixo** (scoring f32 full-precision por candidato), não algorítmico e não recall — exatamente o eixo que o GOTO P0 do CTO aponta como o teto ainda não vencido, e exatamente o eixo que o lever do M51 (SBQ-inline) ataca.
 - **diskann dominado nesta escala.** Menor recall-teto (0.877), maior latência (28–43 ms) e **build 8× mais lento** (69 s vs 8.5 s). Isso é **esperado e honesto**: o `diskann` (StreamingDiskANN + SBQ) é desenhado para **billion-scale disk-resident**, onde a compressão SBQ ~16–32× faz o grafo caber em RAM. A 25k tudo cabe em memória, então o SBQ só **custa recall** e o overhead de traversal disk-oriented só **custa latência** — sem o regime de pressão de memória, o design dele não tem onde ganhar.
 
 ## 2. Primeiro QPS multi-cliente de banco (item 3 do DoD) — theodb vs pgvector, ponto de alto-recall (ef=400, recall ~0.94)
@@ -51,7 +53,7 @@ Melhor-recall em **negrito**. `recall` = média±desvio sobre 3 runs; `p50`/`qps
 | pgvector_hnsw | 8 | **962** | 11.9 |
 | pgvector_hnsw | 16 | 921 | 33.1 |
 
-**Leitura:** a 8 clientes, pgvector faz **962 vs 680 qps** (theodb ~40% atrás, no MESMO recall ~0.94) — consistente com o gap de latência 1-cliente. A 16 clientes ambos saturam (~800–920 qps) na box de 12 cores sob load externo 11–12, e o gap se estreita. **O sinal relativo (pgvector à frente no throughput de alto-recall) é o mesmo em 1-cliente e multi-cliente** → robusto ao ruído da box.
+**Leitura:** a 8 clientes, pgvector faz **962 vs 680 qps** (theodb **29% atrás**, no MESMO recall ~0.94) — consistente com o gap de latência 1-cliente. A 16 clientes ambos saturam (~790–920 qps) na box de 12 cores sob load externo 11–12, e o gap **estreita para ~14%** (791 vs 921). **O sinal relativo (pgvector à frente no throughput de alto-recall) é o mesmo em 1-cliente e multi-cliente e nos 3 runs** → a *direção* é robusta ao ruído da box (a *magnitude* varia 14–29% com a saturação).
 
 ## 3. Metodologia / reprodução
 
@@ -67,19 +69,23 @@ Imagem `theodb:m49-p3` (as 3 extensões no mesmo processo/buffer manager). GT = 
 
 ## 4. VEREDITO ESCRITO — **o gate formal do M51** (item 6 do DoD)
 
-**Onde está o teto da classe atual.** O `theodb_hnsw` **igualou o recall** do pgvector (a baseline SOTA permissiva) em toda a curva cosine — o pilar de recall do North Star está em paridade. O que **sobra** é o eixo de **latência/throughput no ponto de alto-recall**: ~1.7× mais lento (1-cliente) e ~40% menos QPS (8-cliente) que o pgvector a recall ~0.94. O gargalo é **custo por-candidato no scan de alto-ef** (fator-constante), não algorítmico e não recall — o mesmo diagnóstico do GOTO P0.
+**Onde está o teto da classe atual.** O `theodb_hnsw` **igualou o recall** do pgvector (a baseline SOTA permissiva) em toda a curva cosine — o pilar de recall do North Star está em paridade. O que **sobra** é o eixo de **latência/throughput**: pgvector é ~1.6–1.7× mais rápido (1-cliente, fator-constante ao longo de toda a curva; **1.64× ± 0.35 same-run**) e faz 29% mais QPS a 8-clientes (estreitando para ~14% a 16c) no MESMO recall ~0.94. O gargalo é **custo por-candidato no scan** (multiplicador ~constante → scoring f32 full-precision por candidato), não algorítmico e não recall — o mesmo diagnóstico do GOTO P0.
 
 **O lever do M51 (SBQ inline) continua sendo a aposta certa?** — **SIM, direcionalmente, MAS com o gate re-escopado.**
 
-- **Direção correta:** o gap remanescente é latência de scan, e o mecanismo do SBQ-inline — códigos compactos DENTRO do índice + scoring barato (Hamming/popcount) no hot path + rerank f32 só no top — ataca **exatamente** esse eixo. É o lever que muda o asymptote (menos bytes lidos por candidato, mais grafo em cache), não mais um ajuste de fator-constante.
-- **Ressalva dura, medida aqui:** o `diskann` — que **É** SBQ-inline (a implementação SOTA permissiva do pgvectorscale) — ficou **dominado nesta escala de 25k**. A razão é estrutural: o ganho de QPS do SBQ **só materializa quando o corpus f32 estoura o cache/RAM** (regime de pressão de memória). A 25k, f32 cabe, então SBQ só custa recall. **Corolário para o M51:** a meta de sucesso do M51 (`fronteira ≥2× a recall ≥0.99 vs pgvector`) **NÃO é mensurável nesta escala reduzida** — medida a 25k, o M51 vai *parecer* uma regressão do mesmo jeito que o `diskann` parece aqui. O número do gate do M51 **tem que vir de um run em escala com pressão de memória** (cohere 768d×1M ou subset 1536d), não de 25k.
-- **Risco de recall já mapeado (M39):** a quantização escalar SBQ topa em recall 0.77–0.95 em SIFT real (ADR/M39 linha 367) — o alvo `recall ≥0.99` do M51 **depende do passo de rerank exato f32 no top** (que o DoD do M51 já inclui). Sem o rerank, o gate de recall do M51 falha.
+- **Direção correta:** o gap remanescente é o custo por-candidato do scan, e o mecanismo do SBQ-inline — códigos compactos DENTRO do índice + scoring barato (Hamming/popcount) no hot path + rerank f32 só no top — ataca **exatamente** esse eixo. É o lever que muda o asymptote (menos bytes lidos por candidato, mais grafo em cache), não mais um ajuste de fator-constante.
+- **Ressalva dura, medida aqui — separando os DOIS eixos (correção de review):** o `diskann` — que **É** SBQ-inline (a implementação SOTA permissiva do pgvectorscale) — ficou **dominado nesta escala de 25k** por **duas razões distintas** que não devem ser fundidas:
+  - **Eixo QPS/throughput:** o ganho de QPS da compressão SBQ **só materializa sob pressão de memória** (quando o corpus f32 estoura o cache/RAM e a compressão ~16–32× faz o grafo caber). A 25k, f32 cabe trivialmente (~12,8 MB) → a compressão não tem onde ganhar e o overhead de traversal disk-oriented + search-lists profundas só custa latência.
+  - **Eixo recall (separado):** o teto de recall do `diskann` (0.877) **não é artefato de pressão de memória** — é uma propriedade de **carrier**: o StreamingDiskANN poda na distância SBQ sem um rerank f32 completo no topo. Por `m40-ceiling-probe.md`, num pipeline com rerank f32 o recall é **carrier-limited, não quantizer-limited** (com budget de carrier adequado, SBQ+rerank chega a ~1.0).
+  - **Corolário para o M51:** a meta de QPS do M51 (`fronteira ≥2× a recall ≥0.99 vs pgvector`) **NÃO é mensurável nesta escala reduzida** — medida a 25k, o M51 vai *parecer* uma regressão **no eixo de throughput** do mesmo jeito que o `diskann` parece aqui. **Mas a analogia vale SÓ no eixo de throughput:** no eixo de recall o M51 é desenhado com rerank f32 on-page (DoD M51), então **um recall < 0.99 a 25k seria uma falha REAL do M51, não um artefato esperado**. O número do gate de QPS do M51 **tem que vir de um run em escala com pressão de memória** (cohere 768d×1M ou subset 1536d), não de 25k.
+- **Dependência de recall corretamente identificada (correção de review — base M40, não M39):** o alvo `recall ≥0.99` do M51 **depende do passo de rerank exato f32 no top** — **não** porque "SBQ escalar topa o recall" (o `m40-ceiling-probe.md` **falsificou** isso: o teto 0.77 do M39 era um artefato de carrier/probes baixos, não do quantizador; a posição fechada do time — objetivo do M51, ROADMAP — é que **quantização não move recall neste pipeline, ela existe para baratear o scoring**), mas porque o **rank Hamming sobre os códigos comprimidos precisa ser corrigido pelo rerank f32** para que o recall fique **carrier-limited (recuperável via ef/over_fetch)** em vez de quantizer-limited. Ref: `m40-ceiling-probe.md` + `theodb_rs/src/sbq.rs:6-7` (o pipeline carrier→Hamming→rerank-f32 já existe).
 
-**Decisão de gate:** **M51 AUTORIZADO** (a aposta SBQ-inline é a próxima certa), com **duas condições de medição herdadas deste veredito**, para não repetir o erro de medir num asymptote errado:
-1. O gate de sucesso do M51 (`≥2× QPS a recall ≥0.99`) **deve ser medido em escala com pressão de memória** (≥250k @1536d ou 1M @768d) — a régua de 25k aqui **não pode** validar nem refutar esse número.
-2. O gate de recall do M51 (`≥0.99`) **exige o rerank f32 no top** provado por teste, dado o teto conhecido do SBQ escalar (M39).
+**Decisão de gate:** **M51 AUTORIZADO** (a aposta SBQ-inline é a próxima certa), com **três condições de medição herdadas deste veredito**, para não repetir o erro de medir num asymptote errado:
+1. O gate de QPS do M51 (`≥2× a recall ≥0.99`) **deve ser medido em escala com pressão de memória** (≥250k @1536d ou 1M @768d) — a régua de 25k aqui **não pode** validar nem refutar esse número.
+2. O gate de recall do M51 (`≥0.99`) **exige o rerank f32 no top** provado por teste — porque o rank Hamming sozinho é carrier-degradado (M40), não porque o SBQ tenha um teto de recall.
+3. O número de QPS do gate **deve ser medido em box quieta (load-guard pré-flight)** — o QPS absoluto DESTE run está poluído por contenção externa (caveat §2) e não pode servir de baseline para o `≥2×`.
 
-Nenhuma evidência aqui **falsifica** o M51; a evidência **re-escopa a régua** onde ele deve ser medido. Isso é o gate cumprindo seu papel: impedir que o próximo ciclo mire um asymptote desconhecido.
+Nenhuma evidência aqui **falsifica** o M51; a evidência **re-escopa a régua** onde ele deve ser medido. Isso é o gate cumprindo seu papel: impedir que o próximo ciclo mire um asymptote desconhecido — no eixo de QPS **e** no eixo de recall.
 
 ## 5. DoD do M50 — status honesto
 
