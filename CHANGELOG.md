@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- SBQ codebook serializa/desserializa para meta bytes (`SbqQuantizer::to_meta_bytes`/`from_meta_bytes`, `sbq.rs`) — base do layout v3 do M51 (T1.1); validação de tamanho fail-fast (Rule 8). (M51)
 
 ### Changed
 
