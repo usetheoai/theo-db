@@ -65,7 +65,11 @@ pub(crate) unsafe fn fold(rel: pg_sys::Relation, meta: &[u8], body: &[Vec<Vec<u8
         }
         // T4.1/D4: the fold runs inside VACUUM — `vacuum_delay_point` applies the cost-based throttle AND checks
         // for interrupts per page, so a VACUUM of a huge index responds to `pg_cancel_backend` (and to the cost
-        // limit) mid-fold, not only at batch boundaries of the rebuild.
+        // limit) mid-fold, not only at batch boundaries of the rebuild. HONEST caveat: a cancel (or crash) HERE
+        // leaves the already-committed shadow body pages as orphans in the OLD pending range — the old generation
+        // stays intact (block 0 unchanged) so there is NO silent corruption, but the next scan's `read_pending`
+        // fails LOUD (typed REINDEX error) and a re-VACUUM does not heal it (only REINDEX does). Closing this
+        // window (cancel/crash without REINDEX) is M55's incremental fold (ADR 0014).
         pg_sys::vacuum_delay_point();
         // T2.3 crash injection: after this body page's WAL record is committed (reinit/extend already ran
         // GenericXLogFinish), before the pivot. Default GUC 0 ⇒ no-op in production.

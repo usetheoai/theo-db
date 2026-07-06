@@ -54,6 +54,34 @@ def _load_guard():
     return {"load1": round(load1, 2), "nproc": nproc}
 
 
+def _env_info(cur):
+    """Reproducibility disclosure (analysis-golden-rule §3): host CPU, PG version, git SHA of the code under
+    test. Best-effort — any probe that fails is recorded as 'unknown' rather than aborting the run."""
+    def _run(cmd):
+        try:
+            return subprocess.run(cmd, capture_output=True, text=True, timeout=5).stdout.strip()
+        except Exception:  # noqa: BLE001 — disclosure is best-effort, never fatal
+            return ""
+    cpu = ""
+    try:
+        for line in open("/proc/cpuinfo"):
+            if line.startswith("model name"):
+                cpu = line.split(":", 1)[1].strip()
+                break
+    except OSError:
+        pass
+    try:
+        cur.execute("SHOW server_version")
+        pg = cur.fetchone()[0]
+    except Exception:  # noqa: BLE001
+        pg = "unknown"
+    sha = _run(["git", "rev-parse", "--short", "HEAD"]) or "unknown"
+    # Only TRACKED modifications count as "the code under test is dirty" — untracked audit-trail dirs
+    # (halt-loop logs, gitignored artifacts) are not the code being measured.
+    dirty = "-dirty" if _run(["git", "status", "--porcelain", "--untracked-files=no"]) else ""
+    return {"cpu": cpu or "unknown", "pg_version": pg, "git_sha": sha + dirty}
+
+
 def _last_metric(pattern):
     """Read the last `pattern=<int>` the scan logged (pages_read / pending_pages) from the container log."""
     out = subprocess.run(["docker", "logs", "--tail", "60", CONTAINER], capture_output=True, text=True)
@@ -147,6 +175,7 @@ def run(n, runs):
     load = _load_guard()
     conn = _connect()
     cur = conn.cursor()
+    env = _env_info(cur)
 
     pending_series = {str(t): [] for t in PENDING_TARGETS}
     wal_series = {str(t): [] for t in PENDING_TARGETS}
@@ -198,7 +227,7 @@ def run(n, runs):
                            "std_bytes": round(statistics.pstdev(v), 1) if len(v) > 1 else 0.0, "n": len(v)}
 
     return {
-        "runs": runs, "n": n, "dim": DIM, "seed": SEED, "load": load,
+        "runs": runs, "n": n, "dim": DIM, "seed": SEED, "load": load, "env": env,
         "threshold_pages": DEFAULT_THRESHOLD,
         "pending_series": pending_series,
         "p50_ms_agg": _agg("p50_ms"),
@@ -265,6 +294,9 @@ def _write_md(data, path):
               f"threshold de fold={data['threshold_pages']} páginas (default `theodb.vacuum_pending_threshold`). "
               "Cada célula p50 = mediana de 200 scans `ORDER BY <-> LIMIT 5`; WAL = delta de `pg_current_wal_lsn()` "
               "em torno de um `VACUUM (INDEX_CLEANUP ON)`. Load-guard aborta se `load1 > nproc/2`.", "",
+              f"**Ambiente:** CPU `{data.get('env', {}).get('cpu', 'unknown')}`; "
+              f"PostgreSQL {data.get('env', {}).get('pg_version', 'unknown')}; "
+              f"código sob teste `git {data.get('env', {}).get('git_sha', 'unknown')}`.", "",
               "## Caveats honestos", "",
               "- **Escopo — caracterização, não competição:** números de uma dev box; sem claim comparativo vs outro produto.",
               f"- **dim={data['dim']} é escolha de custo-de-teste, NÃO representativa de embeddings reais** "
@@ -273,7 +305,9 @@ def _write_md(data, path):
               "scan (p50) para um workload real de embeddings.",
               "- Variância reportada (std); o efeito do fold (pending→0, p50 menor) deve exceder a variância "
               "entre runs para ser um sinal, não ruído. No alvo 64: p50 cai ~7× (1.2→0.16 ms), muito acima do std (~0.08) — sinal, não ruído.",
-              "- `pages_read`/`pending_pages` vêm do log com `THEODB_SCAN_PROFILE=1` (pilar-c do wiring).", ""]
+              "- `pages_read`/`pending_pages` vêm do log com `THEODB_SCAN_PROFILE=1` (pilar-c do wiring).",
+              "- O WAL medido (`pg_current_wal_lsn()` delta) é do CLUSTER inteiro na janela, não só do índice; "
+              "numa box quieta (1 conexão, load baixo) ele é dominado pelo fold, mas não é escopado ao índice.", ""]
     with open(path, "w") as f:
         f.write("\n".join(lines))
 

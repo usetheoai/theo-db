@@ -41,10 +41,11 @@
   post-pivot crashes leave orphan/un-reclaimed pages in the OLD/NEW pending range; read_pending now validates
   exact item length and fails loud (REINDEX). REINDEX heals; a plain re-VACUUM does NOT (it reads the same
   polluted pending). Full clean-on-crash-without-REINDEX is M55 (ADR 0014, both windows documented).
-- **Suset NOT enforced by pgrx 0.16.1 for custom GUCs** — a NOSUPERUSER role can SET theodb.test_crash_*.
-  Load-bearing safety is default=0 + the hook only aborts the CALLER's own backend (no privilege escalation:
-  a non-super can already crash their own session). The superuser-only test was intentionally NOT shipped
-  (would fake-pass). Followup: an explicit is_superuser() guard in the hook if defense-in-depth is wanted.
+- **Suset NOT enforced by pgrx 0.16.1 for custom GUCs** — a NOSUPERUSER role can SET theodb.test_crash_* in
+  its own session. **CORRECTION (2026-07-06, per /review):** an explicit `if !superuser() { return }` guard
+  WAS added to both hooks (guc.rs) and the superuser-gated test IS shipped (`test_crash_hook_is_superuser_gated`,
+  now with a positive control). The persistence-escalation vector (ALTER DATABASE/ROLE SET) is blocked by PG's
+  Suset enforcement (repro). See § /review outcome below — this earlier "followup" line is superseded.
 - **wait_ready hardened** — requires 2 consecutive stable query round-trips (an abort() restarts the whole
   postmaster in place; a single connect can race the tail of crash recovery). Makes the crash suite robust
   back-to-back.
@@ -184,3 +185,33 @@
   source file is out-of-scope scope-creep and would STILL leave CHANGELOG failing). Surfaced honestly, not
   papered over (Rule 3). All FUNCTIONAL gates pass; final-image evidence: maintenance 19, crash 10, regression
   47 = 76 passed, 0 failed.
+
+## /review outcome (4 domain reviewers) + fixes
+- **Verdicts:** council-index-storage READY_TO_MERGE (1 MEDIUM doc, 1 LOW), council-rust-pgrx READY_TO_MERGE
+  (longjmp-safety verified sound), council-benchmark READY_TO_MERGE (data honest, effect >> variance),
+  council-security NEEDS_FIXES (1 HIGH needs-repro, 1 MEDIUM honesty, 1 LOW-MED test rigor).
+- **[HIGH autovacuum DoS] — REFUTED by repro (2026-07-06).** Concern: a non-super persists the crash GUC where
+  an autovacuum superuser session reads it -> instance-wide abort(). Tested on the real instance: `ALTER
+  DATABASE ... SET theodb.test_crash_after_pages=1` and `ALTER ROLE ... SET` by a NOSUPERUSER BOTH fail with
+  `ERROR: permission denied to set parameter` — PostgreSQL enforces the Suset context for PERSISTED settings.
+  The in-session SET a non-super CAN do only affects the attacker's OWN backend, where `guc.rs:61`
+  `if !superuser() { return }` neutralizes it. No non-super -> instance-DoS path. Documented in
+  `test_am_crash.py § SECURITY POSTURE`.
+- **[MEDIUM honesty] — FIXED.** The trailing NOTE in `test_am_crash.py` was stale/false (claimed the superuser
+  check was "a followup / NOT shipped", contradicting the shipped `guc.rs:61` guard AND the shipped gate test).
+  Rewrote it to match reality + the repro (Rule 3).
+- **[LOW-MED test rigor] — FIXED.** `test_crash_hook_is_superuser_gated` now has a SUPERUSER positive control
+  (same n=200/GUC=1 setup -> asserts the abort DOES fire + instance crash-recovers) so the non-super gate proof
+  is not vacuous. Crash suite re-run: 10 passed.
+- **[Defence-in-depth follow-up]** The fault-injection hooks are still compiled into the production artifact
+  (ADR D6 — injection_points absent in packaged PG17). Moving them behind a `crash_injection` cargo feature
+  (fail-closed by construction) is recommended hardening — NOT a live hole (exploit refuted). Follow-up, not a blocker.
+- **[MEDIUM index-storage] — FIXED (honest caveat).** A cancelled (not only crashed) VACUUM fold can leave the
+  index needing REINDEX — same fail-loud window (typed REINDEX error, never silent corruption; re-VACUUM does
+  not heal). Added to the CHANGELOG cancellability entry + the `fold.rs` `vacuum_delay_point` docstring. Full
+  closure is M55 (ADR 0014).
+- **[MEDIUM-LOW benchmark] — FIXED.** Added an `## Ambiente` disclosure (host CPU + PG version + git SHA) and a
+  WAL-is-cluster-wide caveat to the benchmark md (analysis-golden-rule §3 reproducibility).
+- **LOW/INFO (noted, not blocking):** empty-prior-generation crash-test gap (index-storage LOW — duplicate-tid
+  edge, not corruption); `Sync` over-constraining on check_interrupt (rust-pgrx INFO); manual buffer RAII in
+  write paths (rust-pgrx LOW, idiomatic). Tracked for a future pass.

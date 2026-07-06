@@ -324,31 +324,59 @@ def test_crash_mid_reclaim_is_fail_loud(am, opclass):
     c2.close()
 
 
+def _suguard_setup(cur, table):
+    cur.execute(f"DROP TABLE IF EXISTS {table}")
+    cur.execute(f"CREATE TABLE {table} (id int, v vector(8))")
+    for i in range(200):
+        cur.execute(f"INSERT INTO {table} VALUES (%s, %s)", (i, str([float(i)] * 8)))
+    cur.execute(f"CREATE INDEX {table}_idx ON {table} USING theodb_hnsw (v theodb_hnsw_l2_ops)")
+    cur.execute(f"DELETE FROM {table} WHERE id % 3 = 0")
+
+
 def test_crash_hook_is_superuser_gated():
-    """SECURITY (SEPA CRITICAL): abort() is instance-wide (the postmaster treats a SIGABRT'd backend as a
-    crash and restarts everything). pgrx does not enforce the GUC's Suset, so the hook itself is superuser-
-    gated. A NON-superuser that SETs the GUC and runs VACUUM must NOT crash the instance — the hook returns
-    early for them. We prove it by having a non-super run the exact DoS attempt and asserting the instance
-    stays up (a subsequent query on a fresh connection still works)."""
+    """SECURITY (SEPA CRITICAL + review HIGH refutation): abort() is instance-wide (the postmaster treats a
+    SIGABRT'd backend as a crash and recovers everything), so the crash-injection hook is superuser-gated
+    (`guc.rs`: `if !superuser() { return }`) — a NON-superuser SET + VACUUM must NOT abort.
+
+    Two halves so the gate proof is not vacuous (review LOW-MED):
+      (1) POSITIVE CONTROL — a SUPERUSER with the SAME n=200/GUC=1 setup DOES abort (proves the hook is
+          reachable: the backend connection drops, then the instance crash-recovers).
+      (2) THE GATE — a NON-superuser with the identical setup does NOT abort (fresh query works, no recovery).
+    Without (1), a fold that wrote 0 body pages would make (2) pass vacuously."""
     wait_ready()
+
+    # (1) Positive control: as superuser, the hook fires and aborts the backend.
     su = connect(); su.autocommit = True
     cur = su.cursor()
-    cur.execute("DROP TABLE IF EXISTS m48_suguard")
-    cur.execute("CREATE TABLE m48_suguard (id int, v vector(8))")
-    for i in range(200):
-        cur.execute("INSERT INTO m48_suguard VALUES (%s, %s)", (i, str([float(i)] * 8)))
-    cur.execute("CREATE INDEX m48_suguard_idx ON m48_suguard USING theodb_hnsw (v theodb_hnsw_l2_ops)")
-    cur.execute("DELETE FROM m48_suguard WHERE id % 3 = 0")
-    cur.execute("DROP ROLE IF EXISTS m48_attacker")
-    cur.execute("CREATE ROLE m48_attacker LOGIN PASSWORD 'x' NOSUPERUSER")
-    cur.execute("GRANT ALL ON m48_suguard TO m48_attacker")
-    su.close()
+    _suguard_setup(cur, "m48_suguard_pos")
+    cur.execute("SET theodb.test_crash_after_pages = 1")
+    aborted = False
+    try:
+        cur.execute("VACUUM m48_suguard_pos")  # superuser → hook NOT gated → abort() → connection dies
+    except (psycopg2.OperationalError, psycopg2.errors.AdminShutdown, psycopg2.InterfaceError):
+        aborted = True
+    try:
+        su.close()
+    except Exception:  # noqa: BLE001 — the socket may already be dead from the abort
+        pass
+    assert aborted, "positive control: superuser VACUUM with GUC=1 did NOT abort — the hook is unreachable, so " \
+                    "the gate assertion below would be vacuous. Fix the setup so the fold writes >= 1 body page."
+    wait_ready()  # the instance crash-recovers after the abort
+
+    # (2) The gate: a NON-superuser doing the exact DoS attempt must NOT crash the instance.
+    su2 = connect(); su2.autocommit = True
+    c2 = su2.cursor()
+    _suguard_setup(c2, "m48_suguard")
+    c2.execute("DROP ROLE IF EXISTS m48_attacker")
+    c2.execute("CREATE ROLE m48_attacker LOGIN PASSWORD 'x' NOSUPERUSER")
+    c2.execute("GRANT ALL ON m48_suguard TO m48_attacker")
+    su2.close()
 
     atk = psycopg2.connect(host=PGHOST, port=PGPORT, user="m48_attacker", password="x", dbname="postgres")
     atk.autocommit = True
     acur = atk.cursor()
-    acur.execute("SET theodb.test_crash_after_pages = 1")  # pgrx lets a non-super SET it...
-    acur.execute("VACUUM m48_suguard")  # ...but the superuser-gated hook must NOT abort for them
+    acur.execute("SET theodb.test_crash_after_pages = 1")  # pgrx lets a non-super SET it in-session...
+    acur.execute("VACUUM m48_suguard")  # ...but the superuser-gated hook returns early → no abort
     atk.close()
 
     # The instance is still up (no crash recovery happened): a fresh connection works immediately, no wait.
@@ -357,14 +385,19 @@ def test_crash_hook_is_superuser_gated():
     ccur.execute("SELECT 1")
     assert ccur.fetchone()[0] == 1
     ccur.execute("DROP TABLE m48_suguard")
+    ccur.execute("DROP TABLE IF EXISTS m48_suguard_pos")
     ccur.execute("DROP ROLE m48_attacker")
     check.close()
 
 
-# NOTE (honest finding, logged in followups.md): the crash GUCs are declared GucContext::Suset, but pgrx
-# 0.16.1 does NOT reject a non-superuser SET on a custom GUC the way core PGC_SUSET params do — a NOSUPERUSER
-# role can SET them in-session. The load-bearing production safety is NOT the Suset flag: it is (a) default 0
-# (off), and (b) the hook only aborts the caller's OWN backend during a VACUUM that same session runs — a
-# non-superuser can already crash their own session, so this is no privilege escalation. A superuser-only
-# assertion test was intentionally NOT shipped because pgrx does not provide that guarantee (would be a
-# faked-passing test). Enforcing it (e.g. an explicit is_superuser check in the hook) is a followup.
+# SECURITY POSTURE (matches the SHIPPED code; verified by repro 2026-07-06):
+# The crash GUCs are declared GucContext::Suset. pgrx 0.16.1 does NOT reject a non-superuser *in-session* SET
+# on a custom GUC, BUT that only affects the attacker's OWN backend, where the hook's explicit
+# `if !superuser() { return }` guard (guc.rs) makes it a no-op — closed and PROVEN by the gate test above
+# (with a superuser positive control so the proof is not vacuous). The autovacuum-persistence escalation (a
+# non-super persisting the GUC where an autovacuum superuser session would read it) is BLOCKED BY POSTGRES:
+# `ALTER DATABASE ... SET` and `ALTER ROLE ... SET` of this Suset GUC by a non-superuser BOTH fail with
+# "permission denied to set parameter" (repro 2026-07-06 — the review HIGH is refuted). Defence in depth: the
+# hooks are still compiled into the production artifact (ADR D6 — injection_points absent in packaged PG17);
+# moving them behind a `crash_injection` cargo feature (fail-closed by construction) is a recommended follow-up
+# hardening, not a live hole. Full detail in m48-am-crash-safety-followups.md § Security review.
