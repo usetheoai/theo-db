@@ -149,7 +149,7 @@ pub(crate) struct MemNeighborSource<'a> {
 
 /// A loaded in-memory node: its index + its cached distance to the query.
 #[cfg(feature = "pg_test")]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct MemNode {
     idx: u32,
     d: f64,

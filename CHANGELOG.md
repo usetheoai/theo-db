@@ -21,6 +21,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Removed
 
 ### Fixed
+- `cargo pgrx test` (feature `pg_test`) voltou a compilar: `MemNode` (`ann/scan_core.rs`) passou a derivar `Debug`, exigido pelo `.unwrap_err()` do teste `scan_core.rs:299` (o build de teste estava quebrado em develop; o harness Docker de regress não exercitava o `pg_test`) — desbloqueia o TDD local do M51.
 
 ### Security
 
