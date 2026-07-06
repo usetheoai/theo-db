@@ -149,7 +149,7 @@ pub(crate) fn decode_meta(b: &[u8]) -> Result<HnswMeta, String> {
     let version = u32::from_le_bytes(b[4..8].try_into().unwrap());
     if version != HNSW_STRUCT_VERSION && version != HNSW_STRUCT_VERSION_SBQ {
         return Err(format!(
-            "theodb hnsw: unsupported structured meta version v{version} (REINDEX to upgrade to the M51 SBQ layout v2)"
+            "theodb hnsw: unsupported structured meta version v{version} — REINDEX with a compatible theodb build"
         ));
     }
     let u16a = |o: usize| u16::from_le_bytes(b[o..o + 2].try_into().unwrap());
@@ -534,9 +534,20 @@ unsafe fn load(
         let ev = decode_element(b)?;
         // M51: when a quantized query code is present (SBQ index), guide the walk by the cheap Hamming distance
         // on the inline codes; the f32 vector is NOT touched here (that is the SBQ scan-cost saving). The exact
-        // f32 rerank of the survivors happens once, in `traverse`, after the walk.
+        // f32 rerank of the survivors happens once, in `traverse`, after the walk. Rule 8: the element code MUST
+        // be exactly the query code's length (both = bytes_per_vector(dim, sbq_bits)); a truncated on-disk code
+        // (corruption / orphan page) is a typed Err, never a silently-wrong Hamming distance.
         let d = match qcode {
-            Some(qc) => crate::sbq::hamming_bytes(qc, ev.code_bytes) as f64,
+            Some(qc) => {
+                if ev.code_bytes.len() != qc.len() {
+                    return Err(format!(
+                        "theodb hnsw: element SBQ code is {} bytes, expected {} — REINDEX (v2 corruption)",
+                        ev.code_bytes.len(),
+                        qc.len()
+                    ));
+                }
+                crate::sbq::hamming_bytes(qc, ev.code_bytes) as f64
+            }
             None => score(metric, q, ev.vec_bytes, is_l2),
         };
         Ok(Cand {
@@ -612,6 +623,15 @@ pub(crate) unsafe fn traverse(
     // once after the ground search. `None` (v1) ⇒ the walk scores by exact f32 — byte-identical to before.
     let qcode_owned: Option<Vec<u8>> = if meta.sbq_bits > 0 {
         let quant = crate::sbq::SbqQuantizer::from_meta_bytes(&meta.codebook)?;
+        // Defense-in-depth (F1): the persisted codebook must cover the index dim, else `quantize(q)` (q.len() ==
+        // meta.dim, enforced by the scan dim-guard) would index the codebook OOB. A typed Err, never a panic.
+        if quant.dim() != meta.dim as usize {
+            return Err(format!(
+                "theodb hnsw: SBQ codebook dim {} != index dim {} — REINDEX (v2 corruption)",
+                quant.dim(),
+                meta.dim
+            ));
+        }
         Some(quant.quantize(q).iter().flat_map(|w| w.to_le_bytes()).collect())
     } else {
         None
@@ -916,6 +936,22 @@ mod tests {
                 q.quantize(idx.node_vector(node)).iter().flat_map(|w| w.to_le_bytes()).collect();
             assert_eq!(ev.code_bytes, expect.as_slice(), "node {node}: inline code == quantize(vec)");
         }
+    }
+
+    #[pgrx::pg_test]
+    fn element_code_length_is_exact_so_load_guard_detects_truncation() {
+        // H2 (M51 review, Rule 8): a truncated on-disk SBQ code must be caught, not silently Hamming'd. The guard
+        // in `load` compares `ev.code_bytes.len()` to the query code length (both = bytes_per_vector). This proves
+        // `decode_element` exposes the EXACT trailing length, so any truncation is observable by that guard.
+        let idx = HnswIndex::build(&corpus(), 16, 64, Metric::L2, 5);
+        let dim = idx.dim();
+        let full = crate::sbq::SbqQuantizer::bytes_per_vector(dim, 2);
+        let code = vec![0xAAu8; full];
+        let e = encode_element(&idx, 0, (1, 1), dim, &code);
+        assert_eq!(decode_element(&e).unwrap().code_bytes.len(), full, "full code exposes its exact length");
+        // a shorter (truncated) code decodes to a SHORTER code_bytes → the load guard (len != qcode.len()) fires.
+        let e_short = encode_element(&idx, 0, (1, 1), dim, &code[..full - 1]);
+        assert_eq!(decode_element(&e_short).unwrap().code_bytes.len(), full - 1, "truncation is observable");
     }
 
     #[pgrx::pg_test]

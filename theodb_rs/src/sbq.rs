@@ -90,6 +90,12 @@ impl SbqQuantizer {
         (dim * bits as usize).div_ceil(64) * 8
     }
 
+    /// The dimensionality this codebook was trained on (per-dim means). Used by the scan to fail-fast if a
+    /// persisted codebook's dim disagrees with the index meta (defense-in-depth against a corrupt v2 meta).
+    pub(crate) fn dim(&self) -> usize {
+        self.mean.len()
+    }
+
     /// Serialize the codebook (bits + per-dim means + per-dim std) to LE bytes for the layout-v3 meta page
     /// (T1.1, M51). Format: `[bits:u8][dim:u32 LE][mean: dim×f32 LE][std: dim×f32 LE, n-bit only]`.
     pub(crate) fn to_meta_bytes(&self) -> Vec<u8> {
