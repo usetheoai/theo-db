@@ -606,7 +606,7 @@ Plano: `.claude/knowledge-base/plans/fu1-samegraph-scan-microbench-plan.md` (`mi
 **Dependencies:** M46. **Risco (BAIXO):** o delta pode ser pequeno (honest-negative aceito — fecha o
 veredito M46 de qualquer forma). `criterion` é dev-only (nunca linka no cdylib).
 
-### M48 — [ ] Correctness & durabilidade do AM — fechar os furos de crash-safety (issues #46/#47)
+### M48 — [x] Correctness & durabilidade do AM — fechar os furos de crash-safety (issues #46/#47)
 
 **Objective:** O deep-view do AM achou dois furos que violam o invariante de crash-safety do projeto:
 (a) **#46** — índice sobre tabela UNLOGGED quebra após crash/failover porque `GenericXLogStart` é no-op
