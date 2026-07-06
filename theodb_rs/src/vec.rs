@@ -203,6 +203,41 @@ pub(crate) fn l2_dist_from_bytes(query: &[f32], raw: &[u8]) -> f64 {
     (sq as f64).sqrt()
 }
 
+/// M49: fused dot product `Σ query·raw` over little-endian f32 bytes — ZERO per-node `Vec<f32>` alloc (the mine
+/// the ROADMAP flagged for cosine/ip). Reads each f32 inline from `raw`. The length invariant is enforced ALWAYS
+/// so no OOB. (AVX2 for the dot term is a Phase-4 parity optimization if the benchmark shows cosine/ip lag L2's
+/// AVX2 kernel; the zero-alloc contract — the M49 DoD — is already met by this scalar path.)
+fn dot_from_bytes(query: &[f32], raw: &[u8]) -> f32 {
+    assert_eq!(raw.len(), query.len() * 4, "dot_from_bytes: raw must be exactly dim*4 bytes");
+    let mut dot = 0f32;
+    for (i, &qi) in query.iter().enumerate() {
+        let r = f32::from_le_bytes([raw[i * 4], raw[i * 4 + 1], raw[i * 4 + 2], raw[i * 4 + 3]]);
+        dot += qi * r;
+    }
+    dot
+}
+
+/// M49: negative inner product `-Σ q·r` from raw bytes (the `<#>` ORDER BY key — smaller = closer, pgvector
+/// `vector_negative_inner_product` convention). Zero-alloc.
+pub(crate) fn ip_dist_from_bytes(query: &[f32], raw: &[u8]) -> f64 {
+    -(dot_from_bytes(query, raw) as f64)
+}
+
+/// M49: cosine distance `1 - dot/sqrt(‖q‖²·‖r‖²)` from raw bytes, one pass, clamp to [-1,1]. Zero-alloc. A
+/// zero-norm `raw` yields NaN (0/0) — ordered LAST by the scan's `Cand` "NaN LAST" comparator (`ann/mod.rs`).
+pub(crate) fn cosine_dist_from_bytes(query: &[f32], raw: &[u8]) -> f64 {
+    assert_eq!(raw.len(), query.len() * 4, "cosine_dist_from_bytes: raw must be exactly dim*4 bytes");
+    let (mut dot, mut nq, mut nr) = (0f32, 0f32, 0f32);
+    for (i, &qi) in query.iter().enumerate() {
+        let r = f32::from_le_bytes([raw[i * 4], raw[i * 4 + 1], raw[i * 4 + 2], raw[i * 4 + 3]]);
+        dot += qi * r;
+        nq += qi * qi;
+        nr += r * r;
+    }
+    let sim = (dot as f64) / ((nq as f64) * (nr as f64)).sqrt();
+    1.0 - sim.clamp(-1.0, 1.0)
+}
+
 // Rust unit tests for the pure distance math (plan T2.1). `#[pg_test]` (not plain `#[test]`) because the
 // pgrx cdylib links pg symbols — runs under `cargo pgrx test`, compiles under `cargo check --tests`. The
 // OBSERVABLE parity gate that runs in CI is the Python suite (benchmarks/tests/test_vector_ops.py) replaying

@@ -14,7 +14,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- Opclasses `cosine` (`<=>`) e `inner-product` (`<#>`) para `theodb_hnsw` e `theodb_ivfflat` (M49): `CREATE INDEX … USING theodb_hnsw (embedding theodb_hnsw_cosine_ops)` (e `_ip_ops`, e as variantes ivfflat) registram e fazem pushdown do operador (provado por `EXPLAIN Index Scan`). A métrica é resolvida do opclass no build via `index_getprocinfo` (support FUNCTION 1 retorna a tag — ADR-1) e persistida na meta — um índice `cosine`/`ip` constrói e ordena pela métrica certa (não mais o L2 fixo); L2 permanece o opclass DEFAULT. [em progresso: kernel fused zero-alloc cosine/IP + paridade recall@10 vs pgvector nas fases seguintes do M49]
+- Opclasses `cosine` (`<=>`) e `inner-product` (`<#>`) para `theodb_hnsw` e `theodb_ivfflat` (M49): `CREATE INDEX … USING theodb_hnsw (embedding theodb_hnsw_cosine_ops)` (e `_ip_ops`, e as variantes ivfflat) registram e fazem pushdown do operador (provado por `EXPLAIN Index Scan`). A métrica é resolvida do opclass no build via `index_getprocinfo` (support FUNCTION 1 retorna a tag — ADR-1) e persistida na meta — um índice `cosine`/`ip` constrói e ordena pela métrica certa (não mais o L2 fixo); L2 permanece o opclass DEFAULT. O scan pontua cosine/IP com kernel fused **zero-alocação por nó** (`ip_dist_from_bytes`/`cosine_dist_from_bytes` lendo os bytes da página inline — mesmo contrato do L2; fecha a "mina" de `Vec<f32>` por nó visitado). [em progresso: paridade recall@10 vs pgvector + crash-safety no benchmark do M49]
 
 ### Changed
 
