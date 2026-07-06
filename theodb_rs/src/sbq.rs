@@ -145,6 +145,12 @@ pub(crate) fn hamming(a: &[u64], b: &[u64]) -> u32 {
     a.iter().zip(b).map(|(x, y)| (x ^ y).count_ones()).sum()
 }
 
+/// Hamming distance over the raw LE code bytes (as stored inline in the element tuple, M51). Byte-wise XOR
+/// popcount equals the word-wise result. Compares up to the shorter length (defensive; equal-length in practice).
+pub(crate) fn hamming_bytes(a: &[u8], b: &[u8]) -> u32 {
+    a.iter().zip(b).map(|(x, y)| (x ^ y).count_ones()).sum()
+}
+
 /// Per-call SBQ knn knobs (numeric; already the SQL defaults when the caller omits them). Extracted (M25) so
 /// `knn` is not a 12-parameter function — mirrors `ann_query::Params` (clippy `too_many_arguments`).
 pub(crate) struct SbqParams {

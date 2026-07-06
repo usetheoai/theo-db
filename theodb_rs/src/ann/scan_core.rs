@@ -81,6 +81,24 @@ pub(crate) fn ground_search<S: NeighborSource>(
     m0: usize,
     presize: bool,
 ) -> Result<Vec<(i64, f64)>, String> {
+    // Thin wrapper: map the raw nodes to (tid, walk-distance). The SBQ rerank path (M51) uses
+    // `ground_search_nodes` directly so it can re-score the surviving nodes by exact f32.
+    Ok(ground_search_nodes(src, entry, ef, m0, presize)?
+        .into_iter()
+        .map(|(node, d)| (src.tid(&node), d))
+        .collect())
+}
+
+/// Like [`ground_search`] but returns the raw loaded nodes (ascending by walk-distance) instead of `(tid, dist)`,
+/// so a caller can re-score the survivors (M51: rerank the SBQ-Hamming top-`ef` by exact f32). Nodes carry their
+/// storage handle (production `Cand` has `(blk,off)`), which the collapsed `(tid, dist)` form discards.
+pub(crate) fn ground_search_nodes<S: NeighborSource>(
+    src: &S,
+    entry: S::Node,
+    ef: usize,
+    m0: usize,
+    presize: bool,
+) -> Result<Vec<(S::Node, f64)>, String> {
     let ef = ef.max(1); // ef=0 clamp (edge-case) — never an empty search
     let (mut visited, mut cands, mut result, mut scratch): (
         HashSet<u64>,
@@ -128,9 +146,11 @@ pub(crate) fn ground_search<S: NeighborSource>(
         }
     }
 
-    let mut out: Vec<(i64, f64)> =
-        result.into_iter().map(|r| (src.tid(&r.node), r.d)).collect();
-    out.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal).then(a.0.cmp(&b.0)));
+    let mut out: Vec<(S::Node, f64)> = result.into_iter().map(|r| (r.node, r.d)).collect();
+    // Ascending by distance, tie-broken by tid for determinism (same order the collapsed form produced).
+    out.sort_by(|a, b| {
+        a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal).then(src.tid(&a.0).cmp(&src.tid(&b.0)))
+    });
     Ok(out)
 }
 

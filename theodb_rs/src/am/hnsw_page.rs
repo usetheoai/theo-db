@@ -525,14 +525,22 @@ unsafe fn load(
     q: &[f32],
     metric: Metric,
     is_l2: bool,
+    qcode: Option<&[u8]>,
     nblocks: u32,
     reads: &mut usize,
 ) -> Result<Cand, String> {
     *reads += 1;
     page::with_page_item(rel, blk, off, nblocks, |b| {
         let ev = decode_element(b)?;
+        // M51: when a quantized query code is present (SBQ index), guide the walk by the cheap Hamming distance
+        // on the inline codes; the f32 vector is NOT touched here (that is the SBQ scan-cost saving). The exact
+        // f32 rerank of the survivors happens once, in `traverse`, after the walk.
+        let d = match qcode {
+            Some(qc) => crate::sbq::hamming_bytes(qc, ev.code_bytes) as f64,
+            None => score(metric, q, ev.vec_bytes, is_l2),
+        };
         Ok(Cand {
-            d: score(metric, q, ev.vec_bytes, is_l2),
+            d,
             blk,
             off,
             nbr_blk: ev.nbr_addr.0,
@@ -599,15 +607,26 @@ pub(crate) unsafe fn traverse(
     // M41: cache the block count once (was read per-item inside read_page_item_at — a syscall-ish call ×2/node).
     let nblocks = page::main_fork_nblocks(rel);
 
+    // M51: for an SBQ index (v2), reconstruct the quantizer from the persisted codebook and quantize the query
+    // once. The walk then scores by cheap Hamming on the inline codes; the exact f32 rerank of the survivors runs
+    // once after the ground search. `None` (v1) ⇒ the walk scores by exact f32 — byte-identical to before.
+    let qcode_owned: Option<Vec<u8>> = if meta.sbq_bits > 0 {
+        let quant = crate::sbq::SbqQuantizer::from_meta_bytes(&meta.codebook)?;
+        Some(quant.quantize(q).iter().flat_map(|w| w.to_le_bytes()).collect())
+    } else {
+        None
+    };
+    let qcode: Option<&[u8]> = qcode_owned.as_deref();
+
     // Entry point (from meta), then greedy-descend the upper layers keeping a single best candidate.
-    let mut ep = load(rel, meta.entry_blkno, meta.entry_offno, q, metric, is_l2, nblocks, &mut reads)?;
+    let mut ep = load(rel, meta.entry_blkno, meta.entry_offno, q, metric, is_l2, qcode, nblocks, &mut reads)?;
     let mut lc = meta.entry_level as usize;
     while lc >= 1 {
         loop {
             let nbrs = neighbors_of(rel, &ep, lc, m, m0, nblocks, &mut reads)?;
             let mut improved = false;
             for (nb, no) in nbrs {
-                let cand = load(rel, nb, no, q, metric, is_l2, nblocks, &mut reads)?;
+                let cand = load(rel, nb, no, q, metric, is_l2, qcode, nblocks, &mut reads)?;
                 if cand.d < ep.d {
                     ep = cand;
                     improved = true;
@@ -631,12 +650,38 @@ pub(crate) unsafe fn traverse(
         q,
         metric,
         is_l2,
+        qcode,
         m,
         m0,
         reads: std::cell::Cell::new(reads),
     };
-    let out = crate::ann::scan_core::ground_search(&pg_src, ep, ef, m0, true)?;
-    reads = pg_src.reads.get();
+    let out = if qcode.is_some() {
+        // SBQ (M51): the ground walk ranked candidates by Hamming. Widen the candidate pool by `over_fetch`
+        // (scan GUC) so the true NN survives the approximate ranking, then rerank the survivors by EXACT f32 —
+        // this is where recall is recovered (carrier-limited, M40). Only the surviving `walk_ef` pages are
+        // re-read for their f32 vectors; the walk itself paid only the cheap Hamming cost.
+        let over_fetch = crate::am::guc::over_fetch().max(1);
+        let walk_ef = ef.saturating_mul(over_fetch);
+        let nodes = crate::ann::scan_core::ground_search_nodes(&pg_src, ep, walk_ef, m0, true)?;
+        reads = pg_src.reads.get();
+        let mut reranked: Vec<(i64, f64)> = Vec::with_capacity(nodes.len());
+        for (cand, _ham) in &nodes {
+            let d = page::with_page_item(rel, cand.blk, cand.off, nblocks, |b| {
+                Ok(score(metric, q, decode_element(b)?.vec_bytes, is_l2))
+            })?;
+            reads += 1;
+            reranked.push((cand.tid, d));
+        }
+        reranked.sort_by(|a, b| {
+            a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(&b.0))
+        });
+        reranked.truncate(ef); // return the ef best by exact f32; the scan takes top-k
+        reranked
+    } else {
+        let o = crate::ann::scan_core::ground_search(&pg_src, ep, ef, m0, true)?;
+        reads = pg_src.reads.get();
+        o
+    };
 
     if std::env::var("THEODB_SCAN_PROFILE").is_ok_and(|v| v == "1") {
         // The wiring-triad runtime metric: pages read must be O(ef·M), flat in N (server LOG, not client WARNING).
@@ -655,6 +700,8 @@ struct PageNeighborSource<'a> {
     q: &'a [f32],
     metric: Metric,
     is_l2: bool,
+    /// M51: the quantized query code (SBQ index) — `Some` ⇒ the walk scores by Hamming; `None` ⇒ f32.
+    qcode: Option<&'a [u8]>,
     m: usize,
     m0: usize,
     reads: std::cell::Cell<usize>,
@@ -685,7 +732,9 @@ impl<'a> crate::ann::scan_core::NeighborSource for PageNeighborSource<'a> {
     }
     fn load(&self, r: &Addr) -> Result<Cand, String> {
         let mut reads = 0usize;
-        let cand = unsafe { load(self.rel, r.0, r.1, self.q, self.metric, self.is_l2, self.nblocks, &mut reads) };
+        let cand = unsafe {
+            load(self.rel, r.0, r.1, self.q, self.metric, self.is_l2, self.qcode, self.nblocks, &mut reads)
+        };
         self.reads.set(self.reads.get() + reads);
         cand
     }
@@ -974,5 +1023,35 @@ mod tests {
         se.sort_unstable();
         via_index.sort_unstable();
         assert_eq!(si, se, "SBQ v2 index top-5 must equal exact top-5 (codes present don't corrupt f32 scoring)");
+    }
+
+    /// M51 T3.1 recall gate: on a corpus where the Hamming walk does NOT cover everything (walk_ef < node_count),
+    /// the cheap-Hamming navigation + exact-f32 rerank still recovers high recall@10 vs the exact oracle. This is
+    /// the property M40 predicts (carrier-limited: over_fetch widens the pool so the true NN survives the rerank).
+    #[pgrx::pg_test]
+    fn sbq_traverse_hamming_then_rerank_recall_high() {
+        pgrx::Spi::run("CREATE TEMP TABLE rq (id int PRIMARY KEY, e vector(16))").unwrap();
+        for i in 0..400i32 {
+            // deterministic, well-spread distinct points (id-dominated with a per-dim ripple → clear NN structure)
+            let v: Vec<String> = (0..16)
+                .map(|j| format!("{:.3}", i as f32 * 0.5 + ((i * 7 + j * 13) % 29) as f32 * 0.3))
+                .collect();
+            pgrx::Spi::run(&format!("INSERT INTO rq VALUES ({i}, '[{}]')", v.join(","))).unwrap();
+        }
+        pgrx::Spi::run("CREATE INDEX rq_idx ON rq USING theodb_hnsw (e) WITH (sbq_bits = 2)").unwrap();
+        // walk_ef = ef_search * over_fetch = 50 * 6 = 300 < 400 → navigation + rerank genuinely tested.
+        pgrx::Spi::run("SET theodb_hnsw.ef_search = 50; SET theodb_hnsw.over_fetch = 6").unwrap();
+        let probe = "[40,41,42,40,41,42,40,41,42,40,41,42,40,41,42,40]";
+        pgrx::Spi::run("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on").unwrap();
+        let exact = topk_ids_tbl("rq", probe, 10);
+        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        let via_index = topk_ids_tbl("rq", probe, 10);
+        let hits = via_index.iter().filter(|id| exact.contains(id)).count();
+        let recall = hits as f64 / exact.len().max(1) as f64;
+        assert!(
+            recall >= 0.9,
+            "SBQ Hamming+rerank recall@10 = {recall:.2} (hits {hits}/{}) — expected >= 0.9 (over_fetch=6 recovers it)",
+            exact.len()
+        );
     }
 }
