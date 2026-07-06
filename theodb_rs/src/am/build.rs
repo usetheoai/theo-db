@@ -53,6 +53,20 @@ unsafe fn build_result(ntuples: f64, nindexed: usize) -> *mut pg_sys::IndexBuild
 
 /// `theodb_ivfflat` build. The DEFAULT l2 opclass sets the metric; cosine/ip opclasses are a follow-up (pgrx 0.16
 /// does not expose `get_opfamily_name` for opclass→metric resolution). The metric is persisted in the blob.
+/// M49 / ADR-1: resolve the index's metric from its operator class at build time via the `FUNCTION 1` support
+/// proc (pgvector's `HnswInitSupport` mechanism — `hnswutils.c:154`). The cosine/ip opclasses bind
+/// `theodb_metric_{cosine,ip}()` (returns the metric tag); the DEFAULT L2 opclass has NO support proc, so
+/// `index_getprocid` returns `InvalidOid` → fall back to L2. Closes the "always L2" build hardcode; the scan and
+/// both VACUUM rebuilds already honor the persisted `metric_tag`.
+unsafe fn resolve_metric(indexrel: pg_sys::Relation) -> Metric {
+    let procid = pg_sys::index_getprocid(indexrel, 1, 1);
+    if procid == pg_sys::InvalidOid {
+        return Metric::L2;
+    }
+    let datum = pg_sys::OidFunctionCall0Coll(procid, pg_sys::InvalidOid);
+    Metric::from_tag(datum.value() as u8).unwrap_or(Metric::L2)
+}
+
 #[pg_guard]
 pub extern "C-unwind" fn ambuild(
     heaprel: pg_sys::Relation,
@@ -62,11 +76,12 @@ pub extern "C-unwind" fn ambuild(
     unsafe {
         let (corpus, ntuples) = collect_corpus(heaprel, indexrel, index_info);
         let lists = lists_from_relation(indexrel); // M34 — WITH (lists=N), default 100
-        let idx = IvfflatIndex::build(&corpus, lists, Metric::L2, BUILD_SEED);
+        let metric = resolve_metric(indexrel); // M49: cosine/ip/L2 from the opclass, not hardcoded
+        let idx = IvfflatIndex::build(&corpus, lists, metric, BUILD_SEED);
         // M31: persist in the STRUCTURED layout (meta + centroids + per-list pages) so scans read only probed
         // lists (O(probes)), not the whole blob (O(N)).
         let dim = corpus.first().map(|(_, v)| v.len()).unwrap_or(0) as u32;
-        page::write_ivf_structured(indexrel, dim, Metric::L2.tag(), idx.centroids(), &idx.list_entries());
+        page::write_ivf_structured(indexrel, dim, metric.tag(), idx.centroids(), &idx.list_entries());
         build_result(ntuples, corpus.len())
     }
 }
@@ -83,8 +98,9 @@ pub extern "C-unwind" fn ambuild_hnsw(
         // T4.1: inject the cancellation seam so a long `CREATE INDEX` responds to `pg_cancel_backend` within one
         // parallel batch. `check_for_interrupts!` runs on the leader between batches (all workers joined) — safe
         // to longjmp. Under `#[pg_guard]` (this callback), the ereport(ERROR) unwinds cleanly across the C boundary.
+        let metric = resolve_metric(indexrel); // M49: cosine/ip/L2 from the opclass (ADR-1)
         let idx = HnswIndex::build_cancellable(
-            &corpus, HNSW_M, HNSW_EF_CONSTRUCTION, Metric::L2, BUILD_SEED, &|| { pgrx::check_for_interrupts!(); },
+            &corpus, HNSW_M, HNSW_EF_CONSTRUCTION, metric, BUILD_SEED, &|| { pgrx::check_for_interrupts!(); },
         );
         // M35: persist the STRUCTURED page-native layout (meta + element + neighbor tuples) so scans traverse the
         // graph ON DEMAND (O(ef·M) pages), not deserialize the whole blob (O(N)).
@@ -297,8 +313,9 @@ unsafe fn vacuum_rebuild_structured(indexrel: pg_sys::Relation, dead: &mut dyn F
 /// pages to the already-built main fork (pgvector writes INIT_FORKNUM too, `ivfbuild.c:1084`).
 #[pg_guard]
 pub extern "C-unwind" fn ambuildempty(indexrel: pg_sys::Relation) {
-    let idx = IvfflatIndex::build(&[], DEFAULT_LISTS, Metric::L2, BUILD_SEED);
     unsafe {
+        let metric = resolve_metric(indexrel); // M49: an empty cosine/ip index must persist the right tag (edge #4)
+        let idx = IvfflatIndex::build(&[], DEFAULT_LISTS, metric, BUILD_SEED);
         page::write_blob(indexrel, pg_sys::ForkNumber::INIT_FORKNUM, &idx.to_bytes());
         wal_log_init_fork(indexrel);
     }
@@ -306,7 +323,8 @@ pub extern "C-unwind" fn ambuildempty(indexrel: pg_sys::Relation) {
 
 #[pg_guard]
 pub extern "C-unwind" fn ambuildempty_hnsw(indexrel: pg_sys::Relation) {
-    let idx = HnswIndex::build(&[], HNSW_M, HNSW_EF_CONSTRUCTION, Metric::L2, BUILD_SEED);
+    let metric = unsafe { resolve_metric(indexrel) }; // M49: empty cosine/ip index persists the right tag (edge #4)
+    let idx = HnswIndex::build(&[], HNSW_M, HNSW_EF_CONSTRUCTION, metric, BUILD_SEED);
     unsafe {
         // M35: an empty structured graph is meta-only (entry_level = -1).
         match crate::am::hnsw_page::pack(&idx) {
