@@ -72,7 +72,7 @@ fn make_amroutine(ambuild: AmBuildFn, ambuildempty: AmBuildEmptyFn) -> PgBox<pg_
         unsafe { PgBox::<pg_sys::IndexAmRoutine>::alloc_node(pg_sys::NodeTag::T_IndexAmRoutine) };
 
     amroutine.amstrategies = 0;
-    amroutine.amsupport = 0; // metric is implied by the opclass name; no opclass support procs (parsimony)
+    amroutine.amsupport = 1; // M49: opclass support FUNCTION 1 returns the metric tag (ADR-1 — resolved at ambuild via index_getprocinfo). L2 (DEFAULT) carries no support proc → resolve_metric falls back to L2.
     amroutine.amcanorder = false;
     amroutine.amcanorderbyop = true; // enables the `ORDER BY embedding <-> $1 LIMIT k` pushdown (Phase 4)
     amroutine.amcanbackward = false;
@@ -224,10 +224,25 @@ pub extern "C-unwind" fn amvacuumcleanup(
     }
 }
 
-// The DEFAULT l2 operator class — the ORDER-BY operator binding `<->` to this AM (no support procs; the metric
-// is L2, baked into the persisted index). cosine/ip opclasses are a follow-up (need opclass→metric resolution,
-// which pgrx 0.16 does not expose via get_opfamily_name). Requires pgvector's `vector` type + `<->` operator
-// (present in the TheoDB image). `requires` the amhandler so the AM exists first.
+/// M49 opclass support FUNCTION 1: return the metric tag (matching `Metric::tag()`). Bound as `FUNCTION 1` of
+/// the cosine/ip opclasses; `resolve_metric` (build.rs) reads it via `index_getprocinfo(rel,1,1)` (ADR-1,
+/// pgvector's `HnswInitSupport` mechanism — `hnswutils.c:154`). L2 is DEFAULT and carries NO support proc, so a
+/// bare `USING theodb_hnsw (col)` resolves to L2 by fallback (InvalidOid). 0-arg because our distance kernels
+/// live in Rust — the proc only names the metric.
+#[pg_extern(immutable, parallel_safe)]
+fn theodb_metric_ip() -> i32 {
+    crate::ann::Metric::Ip.tag() as i32
+}
+
+#[pg_extern(immutable, parallel_safe)]
+fn theodb_metric_cosine() -> i32 {
+    crate::ann::Metric::Cosine.tag() as i32
+}
+
+// The DEFAULT l2 operator class — the ORDER-BY operator binding `<->` to this AM (no support procs; L2 is the
+// fallback metric). M49 adds the non-default cosine (`<=>`) / ip (`<#>`) opclasses below, each with a
+// `FUNCTION 1` metric-tag support proc that `resolve_metric` reads at ambuild (ADR-1). Requires pgvector's
+// `vector` type + the operators (present in the TheoDB image). `requires` the amhandler so the AM exists first.
 extension_sql!(
     r#"
     CREATE OPERATOR CLASS theodb_ivfflat_l2_ops DEFAULT FOR TYPE vector USING theodb_ivfflat AS
@@ -245,4 +260,33 @@ extension_sql!(
     "#,
     name = "theodb_hnsw_opclasses",
     requires = [theodb_hnsw_amhandler],
+);
+
+// M49: non-default cosine (`<=>`) + inner-product (`<#>`) opclasses for both AMs. Strategy is always 1
+// (`FOR ORDER BY float_ops`); the metric is encoded in the operator + the `FUNCTION 1` metric-tag support proc
+// (ADR-1). `<#>` is pgvector's negative inner product (smaller = closer). `<=>` is cosine distance.
+extension_sql!(
+    r#"
+    CREATE OPERATOR CLASS theodb_ivfflat_cosine_ops FOR TYPE vector USING theodb_ivfflat AS
+        OPERATOR 1 <=> (vector, vector) FOR ORDER BY float_ops,
+        FUNCTION 1 theodb_metric_cosine();
+    CREATE OPERATOR CLASS theodb_ivfflat_ip_ops FOR TYPE vector USING theodb_ivfflat AS
+        OPERATOR 1 <#> (vector, vector) FOR ORDER BY float_ops,
+        FUNCTION 1 theodb_metric_ip();
+    CREATE OPERATOR CLASS theodb_hnsw_cosine_ops FOR TYPE vector USING theodb_hnsw AS
+        OPERATOR 1 <=> (vector, vector) FOR ORDER BY float_ops,
+        FUNCTION 1 theodb_metric_cosine();
+    CREATE OPERATOR CLASS theodb_hnsw_ip_ops FOR TYPE vector USING theodb_hnsw AS
+        OPERATOR 1 <#> (vector, vector) FOR ORDER BY float_ops,
+        FUNCTION 1 theodb_metric_ip();
+    "#,
+    name = "theodb_cosine_ip_opclasses",
+    requires = [
+        theodb_ivfflat_amhandler,
+        theodb_hnsw_amhandler,
+        "theodb_ivfflat_opclasses",
+        "theodb_hnsw_opclasses",
+        theodb_metric_cosine,
+        theodb_metric_ip,
+    ],
 );
