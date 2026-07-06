@@ -103,8 +103,10 @@ pub extern "C-unwind" fn ambuild_hnsw(
             &corpus, HNSW_M, HNSW_EF_CONSTRUCTION, metric, BUILD_SEED, &|| { pgrx::check_for_interrupts!(); },
         );
         // M35: persist the STRUCTURED page-native layout (meta + element + neighbor tuples) so scans traverse the
-        // graph ON DEMAND (O(ef·M) pages), not deserialize the whole blob (O(N)).
-        match crate::am::hnsw_page::pack(&idx) {
+        // graph ON DEMAND (O(ef·M) pages), not deserialize the whole blob (O(N)). M51: `WITH (sbq_bits=N)` enables
+        // the inline SBQ codes (0 = f32-only v1, the default).
+        let sbq_bits = crate::am::options::sbq_bits_from_relation(indexrel);
+        match crate::am::hnsw_page::pack_sbq(&idx, sbq_bits) {
             Ok(packed) => crate::am::hnsw_page::write_structured(indexrel, pg_sys::ForkNumber::MAIN_FORKNUM, &packed),
             Err(e) => pg_sys::error!("theodb hnsw build: {e}"),
         }

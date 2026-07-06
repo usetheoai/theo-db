@@ -892,7 +892,11 @@ mod tests {
     /// via a real Spi round-trip — the only way to exercise the on-disk `traverse` (it needs a live Relation).
     #[cfg(any(test, feature = "pg_test"))]
     fn topk_ids(query_lit: &str, k: i64) -> Vec<i32> {
-        let sql = format!("SELECT id FROM rn ORDER BY e <-> '{query_lit}'::vector LIMIT {k}");
+        topk_ids_tbl("rn", query_lit, k)
+    }
+    #[cfg(any(test, feature = "pg_test"))]
+    fn topk_ids_tbl(tbl: &str, query_lit: &str, k: i64) -> Vec<i32> {
+        let sql = format!("SELECT id FROM {tbl} ORDER BY e <-> '{query_lit}'::vector LIMIT {k}");
         pgrx::Spi::connect(|client| {
             // pgrx 0.16.1: `select`'s 3rd arg is `args: &[DatumWithOid]` (a slice) — `&[]`, never `None`
             // (matches hybrid.rs / ann_query.rs). Column ordinals are 1-based → `row.get::<i32>(1)`.
@@ -945,5 +949,30 @@ mod tests {
     #[pgrx::pg_test(error = "outside the valid range")]
     fn ef_search_zero_rejected_at_guc_boundary() {
         pgrx::Spi::run("SET theodb_hnsw.ef_search = 0").unwrap();
+    }
+
+    /// M51 reloption connect: `CREATE INDEX ... WITH (sbq_bits=4)` builds a v2 index (SBQ codes inline). Until the
+    /// traverse uses the Hamming path (T3.1), the f32 rerank scan MUST still return the exact top-k — proving the
+    /// inline codes do not corrupt the vector scoring and the reloption is wired end-to-end.
+    #[pgrx::pg_test]
+    fn create_index_with_sbq_bits_scans_correctly() {
+        pgrx::Spi::run("CREATE TEMP TABLE rs (id int PRIMARY KEY, e vector(4))").unwrap();
+        for i in 0..30i32 {
+            let (a, b, c, d) = (i as f32, (i % 7) as f32, (i % 5) as f32, i as f32 * 0.1);
+            pgrx::Spi::run(&format!("INSERT INTO rs VALUES ({i}, '[{a},{b},{c},{d}]')")).unwrap();
+        }
+        pgrx::Spi::run("CREATE INDEX rs_idx ON rs USING theodb_hnsw (e) WITH (sbq_bits = 4)").unwrap();
+        pgrx::Spi::run("SET theodb_hnsw.ef_search = 200").unwrap();
+        let probe = "[3.3,1.1,2.2,0.4]";
+        pgrx::Spi::run("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on").unwrap();
+        let exact = topk_ids_tbl("rs", probe, 5);
+        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        let mut via_index = topk_ids_tbl("rs", probe, 5);
+        assert!(!via_index.is_empty(), "the SBQ-built index must be scannable (reloption wired)");
+        let (mut si, mut se) = (via_index.clone(), exact.clone());
+        si.sort_unstable();
+        se.sort_unstable();
+        via_index.sort_unstable();
+        assert_eq!(si, se, "SBQ v2 index top-5 must equal exact top-5 (codes present don't corrupt f32 scoring)");
     }
 }
