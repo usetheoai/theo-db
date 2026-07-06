@@ -197,10 +197,8 @@ unsafe fn try_add_to_page(rel: pg_sys::Relation, block: pg_sys::BlockNumber, ite
 pub(crate) unsafe fn read_pending(rel: pg_sys::Relation) -> Result<Vec<(i64, Vec<f32>)>, String> {
     let (pstart, nblocks) = pending_layout(rel)?;
     let pending_pages = if pstart > 0 && nblocks > pstart { nblocks - pstart } else { 0 };
-    // Runtime metric (wiring pillar c, opt-in THEODB_SCAN_PROFILE=1): every scan reads the WHOLE pending region
-    // linearly (O(pending)), a cost the graph-traverse `pages_read` metric does not capture. Logged on EVERY scan
-    // (including 0) so the pending-fold win (T3.1) is observable: it drops from N to 0 once VACUUM folds the
-    // pending into the structure — logging only the non-zero case would let a stale reading masquerade as "0".
+    // Runtime metric (wiring pillar c, opt-in THEODB_SCAN_PROFILE=1): the O(pending) linear scan cost that
+    // `pages_read` (graph-only) misses. Logged on EVERY scan (incl. 0) so the T3.1 fold win (N→0) is observable.
     if std::env::var("THEODB_SCAN_PROFILE").is_ok_and(|v| v == "1") {
         pgrx::log!("theodb am pending scan: pending_pages={pending_pages}");
     }
@@ -210,13 +208,11 @@ pub(crate) unsafe fn read_pending(rel: pg_sys::Relation) -> Result<Vec<(i64, Vec
     let mut out = Vec::new();
     for block in pstart..nblocks {
         for item in read_all_page_items(rel, block)? {
-            // A well-formed pending item is EXACTLY `[tid i64, dim u32, f32×dim]`. Validate the length EXACTLY
-            // (`==`, not `<`): after a crash mid-fold that extended the relation (M48 issue #47, base=tail), the
-            // orphan body pages land inside the OLD generation's pending range `[pending_start, nblocks)` and get
-            // read here as "pending" — an element/neighbor tuple decoded as a pending item yields a bogus dim.
-            // Fail LOUD with a REINDEX-instructing typed error rather than feeding a garbage vector to the scan
-            // (error-handling discipline; never silent corruption). This is the same fail-loud crash window the
-            // fold reclaim has — closed fully (no REINDEX) only by M55's incremental maintenance (ADR 0014).
+            // A well-formed pending item is EXACTLY `[tid i64, dim u32, f32×dim]`. Validate the length with `==`
+            // (not `<`): a crash mid-fold that extended the relation (#47, base=tail) leaves orphan body pages in
+            // the old pending range `[pending_start, nblocks)`; decoded as pending they yield a bogus dim. Fail
+            // LOUD (typed REINDEX error) rather than feed a garbage vector to the scan — the fail-loud crash
+            // window closed fully (no REINDEX) only by M55 (ADR 0014); never silent corruption.
             if item.len() < 12 {
                 return Err("theodb am: corrupt pending item (too short for header) — REINDEX".into());
             }
@@ -336,9 +332,8 @@ pub(crate) unsafe fn reinit_page_with_items(
 }
 
 /// Pivot the fixed meta page (block 0) to a new generation — the LAST write of a crash-safe fold (M48 #47).
-/// Registers block 0 with `GENERIC_XLOG_FULL_IMAGE` so the record carries the whole rewritten meta rather than
-/// a delta: the meta is replaced in full, and a full image is torn-page-proof on redo (the nbtree/GIN
-/// meta-full-record discipline, blueprint §Q1/§Q4 — a delta applied over a torn base page would corrupt it).
+/// Registers block 0 with `GENERIC_XLOG_FULL_IMAGE` (nbtree/GIN meta-full-record discipline, blueprint §Q1/§Q4):
+/// the whole meta is carried, torn-page-proof on redo — a delta over a torn base page would corrupt it.
 pub(crate) unsafe fn pivot_meta_page(rel: pg_sys::Relation, meta: &[u8]) {
     let buf = pg_sys::ReadBufferExtended(
         rel,
