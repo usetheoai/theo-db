@@ -2,7 +2,7 @@
 
 Caracterização (não comparação competitiva) do fold crash-safe do índice `theodb_hnsw` (issue #47) numa única dev box. Números com caveat de carga; mean±std de 3 runs. N=50000, dim=8, seed=42.
 
-**Box load1 no pré-flight:** 0.41 (nproc=12; load-guard aborta se load1 > nproc/2 — lição M46).
+**Box load1 no pré-flight:** 1.69 (nproc=12; load-guard aborta se load1 > nproc/2 — lição M46).
 
 ## (a) Degradação por pending + recuperação pelo fold
 
@@ -10,10 +10,10 @@ O custo do pending é uma varredura LINEAR (O(pending)) somada à travessia do g
 
 | pending alvo (páginas) | pending antes | pending depois | p50 antes (ms) | p50 depois (ms) | foldou? |
 |---|---|---|---|---|---|
-| 0 | 0±0.0 | 0±0.0 | 0.1646±0.0389 | 0.202±0.0601 | não (≤ threshold) |
-| 8 | 10±0.0 | 10±0.0 | 0.367±0.0742 | 0.3431±0.0721 | não (≤ threshold) |
-| 16 | 16±0.0 | 16±0.0 | 0.4634±0.0786 | 0.523±0.0743 | não (≤ threshold) |
-| 64 | 64±0.0 | 0±0.0 | 1.1954±0.0752 | 0.1605±0.047 | sim |
+| 0 | 0±0.0 | 0±0.0 | 0.2863±0.0035 | 0.2735±0.0258 | não (≤ threshold) |
+| 8 | 10±0.0 | 10±0.0 | 0.4925±0.0151 | 0.4367±0.0776 | não (≤ threshold) |
+| 16 | 16±0.0 | 16±0.0 | 0.6373±0.0366 | 0.5784±0.1171 | não (≤ threshold) |
+| 64 | 64±0.0 | 0±0.0 | 1.589±0.111 | 0.2841±0.0165 | sim |
 
 ## (b) WAL volume do fold (insumo M55)
 
@@ -24,7 +24,7 @@ Bytes de WAL emitidos por um VACUUM (delta de `pg_current_wal_lsn()`). O fold es
 | 0 | 0±0.0 (n=3) |
 | 8 | 0±0.0 (n=3) |
 | 16 | 0±0.0 (n=3) |
-| 64 | 12284696±1601.1 (n=3) |
+| 64 | 12285936±2262.8 (n=3) |
 
 ## (c) Custo honesto do planner (T5.1)
 
@@ -44,9 +44,12 @@ PGHOST=localhost PGPORT=55452 PGUSER=postgres PGPASSWORD=postgres \
 
 Parâmetros: N=50000, dim=8, seed=42, threshold de fold=16 páginas (default `theodb.vacuum_pending_threshold`). Cada célula p50 = mediana de 200 scans `ORDER BY <-> LIMIT 5`; WAL = delta de `pg_current_wal_lsn()` em torno de um `VACUUM (INDEX_CLEANUP ON)`. Load-guard aborta se `load1 > nproc/2`.
 
+**Ambiente:** CPU `13th Gen Intel(R) Core(TM) i7-1355U`; PostgreSQL 17.10 (Debian 17.10-1.pgdg12+1); código sob teste `git 3dffcd2`.
+
 ## Caveats honestos
 
 - **Escopo — caracterização, não competição:** números de uma dev box; sem claim comparativo vs outro produto.
 - **dim=8 é escolha de custo-de-teste, NÃO representativa de embeddings reais** (que são 384–1536d). O custo do fold é sobre páginas/WAL da região pending (independe da dimensão), então dim baixa é válida para caracterizar MANUTENÇÃO — mas NÃO extrapole as latências absolutas de scan (p50) para um workload real de embeddings.
 - Variância reportada (std); o efeito do fold (pending→0, p50 menor) deve exceder a variância entre runs para ser um sinal, não ruído. No alvo 64: p50 cai ~7× (1.2→0.16 ms), muito acima do std (~0.08) — sinal, não ruído.
 - `pages_read`/`pending_pages` vêm do log com `THEODB_SCAN_PROFILE=1` (pilar-c do wiring).
+- O WAL medido (`pg_current_wal_lsn()` delta) é do CLUSTER inteiro na janela, não só do índice; numa box quieta (1 conexão, load baixo) ele é dominado pelo fold, mas não é escopado ao índice.
