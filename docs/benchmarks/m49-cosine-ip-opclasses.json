@@ -1,0 +1,33 @@
+{
+  "milestone": "M49",
+  "slug": "cosine-ip-opclasses",
+  "dataset": {
+    "n": 2000,
+    "dim": 16,
+    "kind": "uniform_random[-1,1]",
+    "seed": 42,
+    "queries": 20,
+    "k": 10
+  },
+  "recall_at_10": {
+    "theodb_hnsw/cosine": 1.0,
+    "theodb_hnsw/ip": 1.0,
+    "theodb_ivfflat/cosine": 0.89,
+    "theodb_ivfflat/ip": 0.83
+  },
+  "crash_safety": {
+    "tested": "theodb_hnsw cosine, 500 rows, SIGKILL + restart",
+    "result": "top-5 identical pre-crash and post-recovery (metric preserved, not corrupted to L2)"
+  },
+  "verdict": "PARITY — recall@10 >= 0.80 for cosine AND ip on both AMs vs the same-metric seqscan oracle",
+  "caveats": {
+    "mips": "Inner product is NOT a metric (no triangle inequality). HNSW-over-IP works empirically (pgvector ships vector_ip_ops for hnsw); build and scan use the same negative-IP comparator, so the graph is self-consistent. No triangle-inequality assumption exists in the traverse.",
+    "ivf_approx": "IVF recall (<1.0) is inherent to list-probing (only `probes` lists scanned), not a metric defect — HNSW achieves 1.0. Tune `probes`/`lists` for higher IVF recall.",
+    "kernel": "IP/cosine use scalar-from-bytes fused kernels (zero-alloc, the M49 DoD). L2 keeps AVX2+FMA; adding AVX2 to IP/cosine is a future optimization if a latency benchmark shows a lag — not measured here.",
+    "scope": "Recall parity vs the SAME-metric seqscan oracle (exact ground truth). Not a QPS/latency claim."
+  },
+  "env": {
+    "cpu": "13th Gen Intel(R) Core(TM) i7-1355U",
+    "git_sha": "2d8a465"
+  }
+}

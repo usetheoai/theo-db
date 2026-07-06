@@ -97,3 +97,43 @@ def test_build_resolves_cosine_metric(conn, am):
     overlap = len(set(idx_cos) & set(truth_cos))
     assert overlap >= 8, f"{am}: cosine index did not scan with cosine (overlap {overlap}/10; idx={idx_cos} cos-truth={truth_cos})"
     cur.execute(f"DROP TABLE {table}")
+
+
+def _recall_at_k(cur, table, am, opclass, op, n=2000, dim=16, k=10, nq=20, seed=42):
+    """Build an index with (op) metric over n realistic random vectors; measure recall@k vs the SAME-metric
+    seqscan oracle over nq seeded queries. Returns mean recall. lists tuned for IVF (n/50)."""
+    import random
+    rnd = random.Random(seed)
+    cur.execute(f"DROP TABLE IF EXISTS {table}")
+    cur.execute(f"CREATE TABLE {table} (id int, v vector({dim}))")
+    for i in range(n):
+        vec = [round(rnd.uniform(-1, 1), 4) for _ in range(dim)]
+        cur.execute(f"INSERT INTO {table} VALUES (%s,%s)", (i, str(vec)))
+    wc = " WITH (lists=40)" if am == "theodb_ivfflat" else ""
+    cur.execute(f"CREATE INDEX {table}_idx ON {table} USING {am} (v {opclass}){wc}")
+    total = 0.0
+    for _ in range(nq):
+        q = str([round(rnd.uniform(-1, 1), 4) for _ in range(dim)])
+        cur.execute("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on")
+        cur.execute(f"SELECT id FROM {table} ORDER BY v {op} %s LIMIT {k}", (q,))
+        truth = set(r[0] for r in cur.fetchall())
+        cur.execute("RESET enable_indexscan; RESET enable_bitmapscan; SET enable_seqscan=off")
+        cur.execute(f"SELECT id FROM {table} ORDER BY v {op} %s LIMIT {k}", (q,))
+        got = set(r[0] for r in cur.fetchall())
+        cur.execute("RESET enable_seqscan")
+        total += len(truth & got) / k
+    cur.execute(f"DROP TABLE {table}")
+    return total / nq
+
+
+@pytest.mark.parametrize("am,opclass,op", [
+    ("theodb_hnsw", "theodb_hnsw_cosine_ops", "<=>"),
+    ("theodb_hnsw", "theodb_hnsw_ip_ops", "<#>"),
+    ("theodb_ivfflat", "theodb_ivfflat_cosine_ops", "<=>"),
+    ("theodb_ivfflat", "theodb_ivfflat_ip_ops", "<#>"),
+])
+def test_cosine_ip_recall_parity(conn, am, opclass, op):
+    """Phase 4 — the M49 gate: recall@10 of a cosine/ip index vs the same-metric seqscan oracle on realistic
+    random data must be >= 0.8 (the fused kernel scores the right metric AND the ANN structure preserves it)."""
+    recall = _recall_at_k(conn.cursor(), f"m49_recall_{opclass}", am, opclass, op)
+    assert recall >= 0.8, f"{opclass}: recall@10 {recall:.3f} < 0.80"
