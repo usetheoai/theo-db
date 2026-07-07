@@ -38,6 +38,7 @@ mod nl;
 mod pg;
 mod pq;
 mod vec;
+mod vectorizer;
 
 mod api;
 

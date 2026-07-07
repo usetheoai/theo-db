@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Fundação do vectorizer declarativo (M54, ADR 0016): fila de jobs crash-safe (`theodb.vectorizer_queue`) com estados tipados (pending/processing/failed), fencing por owner token e visibility-timeout — worker morto libera o job (lease expirado → re-claimável), owner obsoleto não sobrescreve o novo (evita duplo-processamento), poison-pill vira dead-letter no teto de tentativas (nunca loop). 6 pg_test cobrem o state machine sem worker/preload/OpenAI.
 
 ### Changed
 
