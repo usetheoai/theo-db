@@ -35,8 +35,13 @@ pub(crate) static OVER_FETCH: GucSetting<i32> = GucSetting::<i32>::new(DEFAULT_O
 /// M52 — `SET theodb_hnsw.max_scan_tuples = N`: the iterative-scan ceiling. Under a selective `WHERE`, the
 /// executor keeps pulling tuples the filter rejects; the `theodb_hnsw` scan then re-searches with a growing `ef`
 /// (RELAXED order, pgvector-0.8 style) until `max_scan_tuples` distinct candidates have been emitted, preserving
-/// recall under the filter. Default 20000 mirrors pgvector's `hnsw.max_scan_tuples`. 0 = iterative scan OFF (the
-/// pre-M52 behavior: at most `ef_search` tuples).
+/// recall under the filter. `0` = iterative scan OFF (the pre-M52 behavior: at most `ef_search` tuples).
+///
+/// DELIBERATE DIVERGENCE from pgvector: pgvector gates iterative scan behind a SEPARATE `hnsw.iterative_scan` GUC
+/// that defaults to `off`; here a non-zero `max_scan_tuples` (default 20000) enables it directly, so theodb's
+/// iterative scan is ON by default. Rationale: filtered ANN with preserved recall is the North-Star behavior;
+/// unfiltered `LIMIT k` (k ≤ ef_search) never triggers the grow, so there is no unfiltered regression. Set 0 to
+/// reproduce pgvector's default-OFF semantics.
 pub(crate) const DEFAULT_MAX_SCAN_TUPLES: i32 = 20000;
 pub(crate) static MAX_SCAN_TUPLES: GucSetting<i32> = GucSetting::<i32>::new(DEFAULT_MAX_SCAN_TUPLES);
 

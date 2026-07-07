@@ -155,8 +155,9 @@ def run(n, dim, nq, k, runs):
     for sel in FILTERS:
         th = agg.get("theodb_hnsw", {}).get(sel, {}).get("recall_mean")
         pv = agg.get("pgvector_hnsw", {}).get(sel, {}).get("recall_mean")
-        gate[sel] = {"theodb": th, "pgvector": pv,
-                     "theodb_ge_pgvector": (th is not None and pv is not None and th >= pv - 0.01)}
+        # Explicit 0.01 tolerance (documented, not hidden): "parity" = theodb within 1pt of pgvector recall.
+        gate[sel] = {"theodb": th, "pgvector": pv, "tolerance": 0.01,
+                     "theodb_ge_pgvector_within_1pct": (th is not None and pv is not None and th >= pv - 0.01)}
     return {"n": n, "dim": dim, "queries": nq, "k": k, "runs": runs, "metric": "cosine", "ncat": NCAT,
             "load_pre": load_pre, "load_per_run": loads, "nproc": os.cpu_count(),
             "filters": FILTERS, "parity_gate": gate, "per_spec": agg, "raw": results}
@@ -175,7 +176,7 @@ def main():
     json.dump(data, open(args.out, "w"), indent=2)
     print(f"wrote {args.out} (n={args.n} dim={args.dim} runs={args.runs}); load_pre={data['load_pre']}")
     for sel, g in data["parity_gate"].items():
-        print(f"  {sel}: theodb recall {g['theodb']} vs pgvector {g['pgvector']} → parity {g['theodb_ge_pgvector']}")
+        print(f"  {sel}: theodb recall {g['theodb']} vs pgvector {g['pgvector']} → parity(±0.01) {g['theodb_ge_pgvector_within_1pct']}")
 
 
 if __name__ == "__main__":

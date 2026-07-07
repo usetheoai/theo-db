@@ -51,3 +51,10 @@ resume do `discarded` set (não re-percorre) → ~3× mais rápido no caso selet
 @1%). theodb IGUALA o RECALL (0.973 ≥ 0.967) mas paga QPS. Otimização: expor um `discarded` set resumível do
 `traverse` (estado de scan entre chamadas de amgettuple) em vez de re-buscar. Ver `docs/benchmarks/m52-filtered-ann.md § 2`.
 Prioridade: MÉDIA (recall já em paridade; é custo, não correção).
+
+## [M52 review LOW] Testes diretos de terminação/rescan do iterative scan
+council-index-storage (não-bloqueante): o amgettuple não tem teste unit direto (o módulo scan_heap_tests não
+registra no cargo pgrx test — classe pré-existente). Adicionar: (i) teste com `max_scan_tuples=5` provando
+terminação por cap, (ii) self-join/nested-loop provando que emitted.clear() evita skip/dup entre rescans,
+(iii) exit por ef-ceiling. A prova de terminação é airtight por construção (3 bounds), mas testes diretos
+reforçariam. Prioridade: BAIXA.
