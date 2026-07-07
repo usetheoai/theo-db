@@ -1064,6 +1064,9 @@ mod tests {
     /// M51 T3.1 recall gate: on a corpus where the Hamming walk does NOT cover everything (walk_ef < node_count),
     /// the cheap-Hamming navigation + exact-f32 rerank still recovers high recall@10 vs the exact oracle. This is
     /// the property M40 predicts (carrier-limited: over_fetch widens the pool so the true NN survives the rerank).
+    /// NOTE: `sbq_bits=2` recovers here because the corpus is low-dim (16-d, structured). At high dim (128-d) 2-bit
+    /// navigation is too lossy (`docs/benchmarks/m51-sbq-inline.md § 3` measured recall 0.52); the benchmark uses
+    /// 8-bit for the ≥0.99 gate. This unit test proves the read-path MECHANISM, not that 2-bit is safe in general.
     #[pgrx::pg_test]
     fn sbq_traverse_hamming_then_rerank_recall_high() {
         pgrx::Spi::run("CREATE TEMP TABLE rq (id int PRIMARY KEY, e vector(16))").unwrap();

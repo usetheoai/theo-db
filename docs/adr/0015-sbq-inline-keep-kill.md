@@ -25,9 +25,11 @@ variância; senão honest-negative + ADR mantendo f32. Este ADR registra a decis
 
 **RETER a implementação SBQ-inline**, com o claim de QPS honestamente delimitado:
 
-1. **Reter** porque: o read path é **correto e preserva recall ≥0.99** (o gate central do M51); é **opt-in**
-   (`WITH (sbq_bits=N)`, default 0 = f32) → **zero regressão** em índices existentes; e dá acesso a um teto de recall
-   (0.999) acima do f32/pgvector-HNSW (0.93–0.95) via o rerank exato.
+1. **Reter** porque: o read path é **correto e recupera recall ≥0.99** (o gate central do M51 — 0.9993, a prova de
+   que a navegação aproximada por Hamming + rerank exato não perde o NN com pool adequado; **NÃO** é um teto de recall
+   superior ao f32 — o 0.999 vem de varrer o SBQ até walk_ef=6400 vs ef=400 dos baselines, comparação não-casada,
+   ver `m51-sbq-inline.md § 1`); é **opt-in** (`WITH (sbq_bits=N)`, default 0 = f32) → **zero regressão** em índices
+   existentes.
 2. **NÃO é kill** porque o benefício de QPS do SBQ é uma propriedade de **escala com pressão de memória**, não medível
    a 25k. Matar aqui seria over-reading uma calibração de escala limitada (o mesmo erro que o M50 evitou).
 
