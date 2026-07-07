@@ -101,10 +101,12 @@ mod theodb_rs {
         k: i32,
         per_leg_limit: i32,
         result_limit: i32,
+        language: &str,
+        filter_sql: Option<&str>,
     ) -> TableIterator<'static, (name!(id, String), name!(score, f32))> {
         TableIterator::new(crate::hybrid::run_rrf(
             tbl_text, id_col, content_tsv_col, vector_col, query_text, query_vector_text, k,
-            per_leg_limit, result_limit,
+            per_leg_limit, result_limit, language, filter_sql,
         ))
     }
 
@@ -438,14 +440,16 @@ CREATE FUNCTION ai.hybrid_search_rrf(
     query_vector     vector  DEFAULT NULL,
     k                int     DEFAULT 60,
     per_leg_limit    int     DEFAULT 20,
-    result_limit     int     DEFAULT 5
+    result_limit     int     DEFAULT 5,
+    language         text    DEFAULT 'english',
+    filter_sql       text    DEFAULT NULL
 )
 RETURNS TABLE(id text, score real)
 LANGUAGE sql STABLE
 AS $$
   SELECT id, score FROM theodb_rs._hybrid_search_rrf(
     tbl::text, id_col, content_tsv_col, vector_col, query_text, query_vector::text,
-    k, per_leg_limit, result_limit)
+    k, per_leg_limit, result_limit, language, filter_sql)
 $$;
 
 CREATE FUNCTION ai.hybrid_search(config jsonb)
@@ -453,7 +457,7 @@ RETURNS TABLE(id text, score real)
 LANGUAGE sql STABLE
 AS $$ SELECT id, score FROM theodb_rs._hybrid_search_json(config) $$;
 
-COMMENT ON FUNCTION ai.hybrid_search_rrf(regclass, text, text, text, text, vector, int, int, int) IS
+COMMENT ON FUNCTION ai.hybrid_search_rrf(regclass, text, text, text, text, vector, int, int, int, text, text) IS
   'Hybrid search: fuse a PostgreSQL FTS leg (ts_rank_cd over a tsvector column) and a pgvector leg (<=>) via '
   'Reciprocal Rank Fusion (score = sum 1/(k+rank), k default 60 — Cormack et al. 2009). Empty legs handled by '
   'FULL OUTER JOIN + COALESCE. query_text feeds FTS and, when query_vector is NULL, is embedded via '
@@ -465,9 +469,9 @@ COMMENT ON FUNCTION ai.hybrid_search(jsonb) IS
   '(theodb_rs, M19). Fail-fast 22023 on missing required keys (table, id_col, content_tsv_col, vector_col). '
   'Not granted to PUBLIC.';
 
-REVOKE ALL ON FUNCTION ai.hybrid_search_rrf(regclass, text, text, text, text, vector, int, int, int) FROM PUBLIC;
+REVOKE ALL ON FUNCTION ai.hybrid_search_rrf(regclass, text, text, text, text, vector, int, int, int, text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION ai.hybrid_search(jsonb) FROM PUBLIC;
-REVOKE ALL ON FUNCTION theodb_rs._hybrid_search_rrf(text, text, text, text, text, text, int, int, int) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb_rs._hybrid_search_rrf(text, text, text, text, text, text, int, int, int, text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION theodb_rs._hybrid_search_json(jsonb) FROM PUBLIC;
 "#,
     name = "theodb_hybrid_wrappers",

@@ -25,16 +25,16 @@ const FUSION_TEMPLATE: &str = r#"WITH vec AS (
     SELECT %1$I AS _id,
            RANK() OVER (ORDER BY %2$I <=> $1::vector) AS rank
     FROM %3$s
-    WHERE %2$I IS NOT NULL AND $1 IS NOT NULL
+    WHERE %2$I IS NOT NULL AND $1 IS NOT NULL AND (%5$s)
     ORDER BY %2$I <=> $1::vector
     LIMIT $3
 ),
 fts AS (
     SELECT %1$I AS _id,
-           RANK() OVER (ORDER BY ts_rank_cd(%4$I, plainto_tsquery('english', $2)) DESC) AS rank
+           RANK() OVER (ORDER BY ts_rank_cd(%4$I, plainto_tsquery($6::regconfig, $2)) DESC) AS rank
     FROM %3$s
-    WHERE $2 IS NOT NULL AND %4$I @@ plainto_tsquery('english', $2)
-    ORDER BY ts_rank_cd(%4$I, plainto_tsquery('english', $2)) DESC
+    WHERE $2 IS NOT NULL AND %4$I @@ plainto_tsquery($6::regconfig, $2) AND (%5$s)
+    ORDER BY ts_rank_cd(%4$I, plainto_tsquery($6::regconfig, $2)) DESC
     LIMIT $3
 )
 SELECT COALESCE(vec._id, fts._id)::text AS id,
@@ -59,6 +59,8 @@ pub(crate) fn run_rrf(
     k: i32,
     per_leg_limit: i32,
     result_limit: i32,
+    language: &str,
+    filter_sql: Option<&str>,
 ) -> Vec<(String, f32)> {
     // Fail-fast, typed (Rule 8) — mirror sql/40:45-57.
     if k <= 0 {
@@ -77,16 +79,26 @@ pub(crate) fn run_rrf(
     if query_text.is_none() && query_vector_text.is_none() {
         err_input("ai.hybrid_search_rrf: provide query_text and/or query_vector");
     }
+    // M53: the relational filter is inlined into BOTH legs' WHERE, syntactically confined in parens
+    // (`AND (<filter>)`). The whole function is SECURITY INVOKER (runs with the CALLER's privilege — no
+    // privilege boundary is crossed), so the filter can do nothing the caller could not do in a plain query.
+    // The one hard confinement guard: reject a statement terminator, so the filter cannot chain a second
+    // statement out of the CTE's WHERE. Absent filter ⇒ `true` (no-op, byte-identical to the pre-M53 legs).
+    let filter = filter_sql.unwrap_or("true");
+    if filter.contains(';') {
+        err_input("ai.hybrid_search_rrf: filter_sql must be a single boolean predicate (no ';')");
+    }
 
     // Resolve the vector leg's query vector (explicit wins; else embed query_text). Extracted (M25).
     let qvec: Option<String> = resolve_query_vector(query_text, query_vector_text);
 
     // Build the fusion SQL with Postgres-native %I quoting (injection-safe) — one format() call over SPI.
-    // The template is dollar-quoted ($fq$…$fq$); its literal $1..$5 survive and bind at execution.
-    let build_q = format!("SELECT format($fq${FUSION_TEMPLATE}$fq$, $1, $2, $3, $4)");
+    // `%1$I..%4$I` = identifiers (quoted), `%3$s` = regclass text, `%5$s` = the confined filter predicate.
+    // The template is dollar-quoted ($fq$…$fq$); its literal $1..$6 survive and bind at execution.
+    let build_q = format!("SELECT format($fq${FUSION_TEMPLATE}$fq$, $1, $2, $3, $4, $5)");
     let built = Spi::get_one_with_args::<String>(
         &build_q,
-        &[id_col.into(), vector_col.into(), tbl_text.into(), content_tsv_col.into()],
+        &[id_col.into(), vector_col.into(), tbl_text.into(), content_tsv_col.into(), filter.into()],
     )
     .ok()
     .flatten()
@@ -104,6 +116,7 @@ pub(crate) fn run_rrf(
                     per_leg_limit.into(),
                     k.into(),
                     result_limit.into(),
+                    language.into(),
                 ],
             )
             .unwrap_or_else(|e| err_input(&format!("ai.hybrid_search_rrf: fusion query failed: {e:?}")));
@@ -165,6 +178,9 @@ pub(crate) fn run_rrf_json(cfg: Value) -> Vec<(String, f32)> {
     let k = as_i32("k", 60);
     let per_leg_limit = as_i32("per_leg_limit", 20);
     let result_limit = as_i32("result_limit", 5);
+    // M53: optional `language` (FTS regconfig, default english) + `filter_sql` (relational WHERE predicate).
+    let language = get_str("language").unwrap_or("english");
+    let filter_sql = get_str("filter_sql");
 
     // Resolve the bare table name to a regclass::text (same as the plpgsql `(config->>'table')::regclass`
     // then `tbl::text`) — Postgres quotes it safely; a non-existent relation raises naturally.
@@ -175,6 +191,6 @@ pub(crate) fn run_rrf_json(cfg: Value) -> Vec<(String, f32)> {
 
     run_rrf(
         &tbl_text, id_col, content_tsv_col, vector_col, query_text, query_vector, k, per_leg_limit,
-        result_limit,
+        result_limit, language, filter_sql,
     )
 }

@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Hybrid search agora aceita um filtro relacional e um idioma de FTS: `ai.hybrid_search_rrf(…, language, filter_sql)` — o `filter_sql` é confinado ao WHERE de ambos os legs (vetorial + lexical) e executa com o privilégio do chamador (SECURITY INVOKER), rejeitando terminador de statement (`;`); `language` parametriza `plainto_tsquery` (antes 'english' fixo) (M53).
 
 ### Changed
 

@@ -1155,4 +1155,59 @@ mod tests {
         let got = filtered_topk("fo", "cat = 3", "[5,1,2,0.5]", 3);
         assert!(got.len() <= 3, "OFF path returns at most k, no infinite loop (got {})", got.len());
     }
+
+    /// M53 item 1 (filter_sql) + item 4 (language): `ai.hybrid_search_rrf` accepts a relational filter (confined
+    /// to the CTE WHERE) and a parametrizable FTS language. This SQL-level test proves the filter is APPLIED
+    /// (every returned id satisfies `cat = 1`) and the language param is honored (no error with 'simple').
+    #[pgrx::pg_test]
+    fn hybrid_search_accepts_filter_and_language() {
+        pgrx::Spi::run(
+            "CREATE TEMP TABLE hy (id int, cat int, tsv tsvector, emb vector(3))",
+        )
+        .unwrap();
+        for i in 0..20i32 {
+            let cat = i % 2; // half cat=0, half cat=1
+            pgrx::Spi::run(&format!(
+                "INSERT INTO hy VALUES ({i}, {cat}, to_tsvector('english', 'alpha beta doc{i}'), '[{},{},{}]')",
+                i as f32 * 0.1, (i % 3) as f32, (i % 5) as f32
+            ))
+            .unwrap();
+        }
+        // filter_sql => 'cat = 1' : every fused id must be a cat=1 row.
+        let ids: Vec<i32> = pgrx::Spi::connect(|c| {
+            c.select(
+                "SELECT id::int FROM ai.hybrid_search_rrf(tbl => 'hy', id_col => 'id', \
+                 content_tsv_col => 'tsv', vector_col => 'emb', query_text => 'alpha', \
+                 query_vector => '[0.5,1,2]'::vector, result_limit => 20, filter_sql => 'cat = 1')",
+                None,
+                &[],
+            )
+            .unwrap()
+            .filter_map(|r| r.get::<i32>(1).unwrap())
+            .collect()
+        });
+        assert!(!ids.is_empty(), "filtered hybrid search must return the cat=1 rows");
+        assert!(ids.iter().all(|id| id % 2 == 1), "every fused id must satisfy filter_sql cat=1, got {ids:?}");
+        // language => 'simple' : must not error (item 4 — parametrizable regconfig).
+        let n: Option<i64> = pgrx::Spi::get_one(
+            "SELECT count(*) FROM ai.hybrid_search_rrf(tbl => 'hy', id_col => 'id', \
+             content_tsv_col => 'tsv', vector_col => 'emb', query_text => 'alpha', \
+             query_vector => '[0.5,1,2]'::vector, language => 'simple')",
+        )
+        .unwrap();
+        assert!(n.is_some(), "language => 'simple' must run without error");
+    }
+
+    /// M53 item 1 negative case (Rule 8): a filter_sql containing a statement terminator is rejected — the
+    /// confinement guard prevents chaining a second statement out of the CTE WHERE.
+    #[pgrx::pg_test(error = "ai.hybrid_search_rrf: filter_sql must be a single boolean predicate (no ';')")]
+    fn hybrid_filter_rejects_statement_terminator() {
+        pgrx::Spi::run("CREATE TEMP TABLE hz (id int, tsv tsvector, emb vector(2))").unwrap();
+        pgrx::Spi::run("INSERT INTO hz VALUES (1, to_tsvector('a'), '[1,2]')").unwrap();
+        pgrx::Spi::run(
+            "SELECT * FROM ai.hybrid_search_rrf(tbl => 'hz', id_col => 'id', content_tsv_col => 'tsv', \
+             vector_col => 'emb', query_vector => '[1,2]'::vector, filter_sql => 'true; DROP TABLE hz')",
+        )
+        .unwrap();
+    }
 }
