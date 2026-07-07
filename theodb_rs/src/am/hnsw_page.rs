@@ -626,6 +626,64 @@ pub(crate) unsafe fn set_ground_neighbors_inplace(
     })
 }
 
+/// M56 fase 2 (T2.1): the insert-time neighbor search — greedy-descend the upper layers to a ground entry (exactly
+/// as the scan's [`traverse`] does), then ground-search with `ef_construction` and return the `m0` nearest LIVE
+/// nodes' ELEMENT addresses (the candidates the reused node Z will link to). v1 (exact f32) path — the reused-slot
+/// insert is v1-only, so the walk scores by f32 and the candidates are already f32-ranked. Read-only.
+pub(crate) unsafe fn insert_search_ground(
+    rel: pg_sys::Relation,
+    meta: &HnswMeta,
+    q: &[f32],
+    ef_construction: usize,
+) -> Result<Vec<Addr>, String> {
+    if meta.entry_level < 0 || meta.node_count == 0 {
+        return Ok(Vec::new());
+    }
+    let metric = Metric::from_tag(meta.metric_tag).ok_or("theodb hnsw: unknown metric tag")?;
+    let is_l2 = matches!(metric, Metric::L2);
+    let (m, m0) = (meta.m as usize, meta.m0 as usize);
+    let ef = ef_construction.max(m0);
+    let mut reads = 0usize;
+    let nblocks = page::main_fork_nblocks(rel);
+    let qcode: Option<&[u8]> = None; // v1 only (the reused-slot insert gates to v1)
+
+    let mut ep = load(rel, meta.entry_blkno, meta.entry_offno, q, metric, is_l2, qcode, nblocks, &mut reads)?;
+    let mut lc = meta.entry_level as usize;
+    while lc >= 1 {
+        loop {
+            let nbrs = neighbors_of(rel, &ep, lc, m, m0, nblocks, &mut reads)?;
+            let mut improved = false;
+            for (nb, no) in nbrs {
+                let cand = load(rel, nb, no, q, metric, is_l2, qcode, nblocks, &mut reads)?;
+                if cand.d < ep.d {
+                    ep = cand;
+                    improved = true;
+                }
+            }
+            if !improved {
+                break;
+            }
+        }
+        lc -= 1;
+    }
+
+    let pg_src = PageNeighborSource {
+        rel,
+        nblocks,
+        q,
+        metric,
+        is_l2,
+        qcode,
+        m,
+        m0,
+        reads: std::cell::Cell::new(reads),
+    };
+    let nodes = crate::ann::scan_core::ground_search_nodes(&pg_src, ep, ef, m0, true)?;
+    let mut cands: Vec<(f64, Addr)> = nodes.iter().map(|(c, _)| (c.d, (c.blk, c.off))).collect();
+    cands.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(cands.into_iter().take(m0).map(|(_, a)| a).collect())
+}
+
 // (M48) The old in-place `rewrite_structured` was replaced by the crash-safe `fold::fold` (meta-pivot) — it
 // rewrote block 0 first, so a crash mid-vacuum left the meta pointing at pages that still held old bytes (#47).
 
@@ -1703,6 +1761,44 @@ mod tests {
             let got = decode_neighbors(&nbytes, lvl, 0, m, m0).unwrap();
             assert_eq!(got, wanted, "ground slots round-trip through decode_neighbors (empties padded, dropped)");
             pg_sys::index_close(rel, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+        }
+    }
+
+    /// M56 fase 2 T2.1: `insert_search_ground` (descent + ground search) returns LIVE element addrs; querying with
+    /// a node's OWN vector puts that node (distance ~0) as the nearest candidate — proves the on-disk insert search.
+    #[pgrx::pg_test]
+    fn insert_search_ground_finds_live_neighbors() {
+        pgrx::Spi::run("CREATE TABLE ins (id int PRIMARY KEY, e vector(4))").unwrap();
+        for i in 0..30i32 {
+            let (a, b, c, d) = (i as f32, (i % 7) as f32, (i % 5) as f32, i as f32 * 0.1);
+            pgrx::Spi::run(&format!("INSERT INTO ins VALUES ({i}, '[{a},{b},{c},{d}]')")).unwrap();
+        }
+        pgrx::Spi::run("CREATE INDEX ins_idx ON ins USING theodb_hnsw (e)").unwrap();
+        let qtext: String = pgrx::Spi::get_one("SELECT e::text FROM ins WHERE id = 12").unwrap().expect("vec");
+        let qv: Vec<f32> = qtext.trim_matches(|c| c == '[' || c == ']')
+            .split(',').map(|s| s.trim().parse().unwrap()).collect();
+        unsafe {
+            let oid: pg_sys::Oid = pgrx::Spi::get_one("SELECT 'ins_idx'::regclass::oid").unwrap().expect("oid");
+            let rel = pg_sys::index_open(oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            let meta = read_meta(rel).expect("read_meta");
+            let cands = insert_search_ground(rel, &meta, &qv, 100).expect("insert search");
+            assert!(!cands.is_empty(), "search returns candidates");
+            assert!(cands.len() <= meta.m0 as usize, "at most m0 ground neighbors");
+            for (blk, off) in &cands {
+                let b = page::read_page_item_at(rel, *blk, *off).unwrap();
+                assert!(!decode_element(&b).unwrap().deleted, "each candidate is a LIVE element");
+            }
+            let (nblk, noff) = cands[0];
+            let nb = page::read_page_item_at(rel, nblk, noff).unwrap();
+            let nev = decode_element(&nb).unwrap();
+            let d: f32 = (0..4)
+                .map(|i| {
+                    let x = f32::from_le_bytes(nev.vec_bytes[i * 4..i * 4 + 4].try_into().unwrap());
+                    (qv[i] - x) * (qv[i] - x)
+                })
+                .sum();
+            assert!(d < 0.01, "nearest candidate is node 12 itself (d={d})");
+            pg_sys::index_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
         }
     }
 }
