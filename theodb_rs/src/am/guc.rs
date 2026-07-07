@@ -70,6 +70,17 @@ pub(crate) fn hnsw_tombstone_compact_pct() -> i32 {
     HNSW_TOMBSTONE_COMPACT_PCT.get().clamp(0, 100)
 }
 
+/// M56 fase 2 — `SET theodb.hnsw_slot_reuse = on|off`: when ON (default), `aminsert` REUSES a tombstoned element
+/// slot via a proper in-place insert (search + link) before growing the pending region, bounding relation growth
+/// under DELETE+INSERT churn. OFF forces the legacy pending-append path (the kill-switch, and the A/B toggle the
+/// churn benchmark uses to isolate the slot-reuse effect).
+pub(crate) static HNSW_SLOT_REUSE: GucSetting<bool> = GucSetting::<bool>::new(true);
+
+/// Whether `aminsert` should reuse tombstoned slots in place (M56 fase 2).
+pub(crate) fn hnsw_slot_reuse() -> bool {
+    HNSW_SLOT_REUSE.get()
+}
+
 // M48 (T2.3) — deterministic crash-injection for the VACUUM fold's crash tests. `injection_points` is NOT
 // compiled into the packaged Debian PG17 (blueprint §Q9, verified), so we ship a tiny always-compiled test hook
 // instead. Both default to 0 (off) ⇒ ZERO effect in production; both are `Suset` (only a superuser can set them,
@@ -151,6 +162,14 @@ pub(crate) fn init() {
         &HNSW_TOMBSTONE_COMPACT_PCT,
         0,
         100,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+    GucRegistry::define_bool_guc(
+        c"theodb.hnsw_slot_reuse",
+        c"When on, theodb_hnsw aminsert reuses a tombstoned slot in place (search + link) before growing pending",
+        c"Bounds relation growth under DELETE+INSERT churn (M56 fase 2). Off = legacy pending-append (kill-switch / A/B).",
+        &HNSW_SLOT_REUSE,
         GucContext::Userset,
         GucFlags::default(),
     );
