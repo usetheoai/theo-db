@@ -3,12 +3,17 @@
 //! `#[pg_test]` WITHOUT a running worker, `shared_preload_libraries`, or an OpenAI endpoint (blueprint § Fatia
 //! de testabilidade; MEMORY m46: CI does not run `cargo pgrx test`, pgrx test sets no preload).
 //!
-//! The worker main (a ~20-line loop, elsewhere) composes: `claim_batch` (txn1, commits) → `embed_batch` (no
-//! txn, over HTTP) → `mark_done`/`mark_failed` (txn2, owner-guarded). The COMMITTED lease — not a held lock —
-//! protects a job between phases (H2). Every transition is guarded by a fencing `owner` token so a slow-but-
-//! alive worker whose lease expired and was reclaimed cannot clobber the new owner (H1 — the single most
-//! important crash-safety correction from discovery). Attempts are burned ON CLAIM (not on failure) so a job
-//! that kills the worker before reporting still counts down to the `failed` dead-letter (H3, poison-pill).
+//! The worker main (elsewhere) composes: `claim_batch` (txn, commits the lease) → process incl. `embed_batch`
+//! (its own txn, subtransaction-isolated so a caught endpoint ERROR rolls back clean — council H-1) →
+//! `mark_done`/`mark_failed` (txn, owner-guarded). The COMMITTED lease — not a held lock — protects a job
+//! between phases; the worker renews the lease before each fallback job so a live worker never loses one it is
+//! processing. Every transition is fenced by a globally-unique `owner` uuid so a slow-but-alive worker whose
+//! lease expired and was reclaimed cannot clobber the new owner (H1). Attempts are burned ON CLAIM so a job
+//! that kills the worker before reporting counts down to the `failed` dead-letter (H3); a reaper dead-letters
+//! orphans stuck at the cap. HONEST tradeoff (council HIGH-1): the embed HTTP runs INSIDE a transaction
+//! (synchronous, like dblink / pgsql-http — `embed` reads GUCs via SPI, which needs a txn); the per-request
+//! timeout bounds the snapshot hold. A fully async embed (read cfg → commit → HTTP → write) is a tracked
+//! follow-up so the xmin horizon is never pinned by a hung endpoint.
 use pgrx::prelude::*;
 
 // The declarative config + the crash-safe job queue (ADR 0016). `owner` is an opaque text fencing token
@@ -42,8 +47,11 @@ CREATE TABLE IF NOT EXISTS theodb.vectorizer_queue (
     enqueued_at    timestamptz NOT NULL DEFAULT now()
 );
 
+-- Partial: excludes `failed` dead-letter tombstones so the claim scan stays enxuto as they accumulate
+-- (council-index-storage M-3). Covers both the `pending` and the `processing`-reclaim branches.
 CREATE INDEX IF NOT EXISTS vectorizer_queue_claim_idx
-    ON theodb.vectorizer_queue (state, enqueued_at);
+    ON theodb.vectorizer_queue (state, enqueued_at)
+    WHERE state IN ('pending', 'processing');
 "#,
     name = "theodb_vectorizer_schema",
 );
@@ -79,7 +87,7 @@ CREATE FUNCTION theodb.create_vectorizer(
     source_table  regclass,
     source_pk_col text,
     content_col   text,
-    target_table  text,
+    target_table  regclass,
     target_col    text,
     model         text DEFAULT NULL,
     dims          int  DEFAULT NULL
@@ -101,7 +109,7 @@ BEGIN
 END;
 $fn$;
 
-COMMENT ON FUNCTION theodb.create_vectorizer(regclass, text, text, text, text, text, int) IS
+COMMENT ON FUNCTION theodb.create_vectorizer(regclass, text, text, regclass, text, text, int) IS
   'Declaratively maintain an embedding column: attach an AFTER INSERT/UPDATE/DELETE trigger to source_table '
   'that enqueues jobs into theodb.vectorizer_queue; the background worker drains them (M54, ADR 0016). The '
   'trigger only enqueues (cheap, no HTTP) — model latency stays off the writer transaction.';
@@ -135,7 +143,7 @@ BEGIN
 END;
 $fn$;
 
-REVOKE ALL ON FUNCTION theodb.create_vectorizer(regclass, text, text, text, text, text, int) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb.create_vectorizer(regclass, text, text, regclass, text, text, int) FROM PUBLIC;
 
 -- Runtime metric (wiring triad pillar c): a single-row counter of jobs the worker processed / failed. The
 -- worker bumps it via theodb_rs._vectorizer_bump_stats. Queryable (not just a LOG line) via theodb.vectorizer_stats().
@@ -318,8 +326,10 @@ fn lookup_config(vectorizer_id: i32) -> (String, String, String, String, String,
     })
 }
 
-/// Build one dynamic SQL string with Postgres-native `format()` (injection-safe %I/%s over SPI). The
-/// config identifiers (from `create_vectorizer`, owner-controlled) are still `%I`-quoted as defense.
+/// Build one dynamic SQL string with Postgres-native `format()` over SPI. COLUMN identifiers use `%I`
+/// (quoted). TABLE names use `%s` — but they come from `create_vectorizer`'s `regclass` params stored as
+/// `regclass::text`, which Postgres already renders as a safely-quoted, schema-qualified identifier (not raw
+/// user text), so `%s` on them is injection-safe. Config is owner-controlled server-side, not request input.
 fn build_sql(template: &str, a: &str, b: &str, c: &str) -> String {
     Spi::get_one_with_args::<String>(
         &format!("SELECT format($fmt${template}$fmt$, $1, $2, $3)"),
@@ -428,6 +438,28 @@ fn _vectorizer_bump_stats(processed: i64, failed: i64) {
     )
     .unwrap_or_else(|e| crate::pg::err_input(&format!("vectorizer stats bump failed: {e:?}")));
 }
+
+/// Dead-letter orphans stuck in `processing` at the attempt cap. A worker that crashed AFTER burning the
+/// last attempt (on claim) but BEFORE reporting leaves a job `processing` that the claim can never reclaim
+/// (`attempts < max` is false) — without this reaper it would leak in `processing` forever, inflating the
+/// metric and never reaching the `failed` dead-letter (council-index-storage HIGH-2). Returns the count reaped.
+#[pg_extern]
+fn _vectorizer_reap_orphans(max_attempts: i32) -> i64 {
+    Spi::connect_mut(|client| {
+        client
+            .update(
+                "WITH r AS (UPDATE theodb.vectorizer_queue \
+                 SET state='failed', last_error='lease expired at attempt cap (worker crashed before reporting)' \
+                 WHERE state='processing' AND attempts >= $1 AND lease_deadline < now() RETURNING 1) \
+                 SELECT count(*) FROM r",
+                None,
+                &[max_attempts.into()],
+            )
+            .ok()
+            .and_then(|t| t.first().get::<i64>(1).ok().flatten())
+            .unwrap_or(0)
+    })
+}
 } // mod theodb_rs
 
 // ── The background worker (ADR 0016) — the ONLY non-CI-testable piece (needs shared_preload_libraries). It
@@ -457,15 +489,53 @@ pub(crate) fn register_worker() {
     }
 }
 
+/// Run `f` inside an internal subtransaction so a caught Postgres ERROR leaves clean SPI/snapshot state
+/// before the outer `BackgroundWorker::transaction` commits (council-rust-pgrx H-1: `PgTryBuilder::catch`
+/// only `FlushErrorState`s — it does NOT abort the (sub)transaction; committing a dirty one warns/PANICs
+/// under `--enable-cassert`). Returns `Some(f())` when `f` succeeded (subtxn released into the parent),
+/// `None` when `f` raised (subtxn rolled back).
+fn in_subtxn<T>(f: impl FnOnce() -> T) -> Option<T> {
+    unsafe {
+        pgrx::pg_sys::BeginInternalSubTransaction(std::ptr::null());
+    }
+    let res: Option<T> = PgTryBuilder::new(std::panic::AssertUnwindSafe(|| Some(f())))
+        .catch_others(|_| None)
+        .execute();
+    unsafe {
+        if res.is_some() {
+            pgrx::pg_sys::ReleaseCurrentSubTransaction();
+        } else {
+            pgrx::pg_sys::RollbackAndReleaseCurrentSubTransaction();
+        }
+    }
+    res
+}
+
 #[pg_guard]
 #[no_mangle]
 pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
     use pgrx::bgworkers::*;
     BackgroundWorker::attach_signal_handlers(SignalWakeFlags::SIGHUP | SignalWakeFlags::SIGTERM);
     BackgroundWorker::connect_worker_to_spi(Some(WORKER_DBNAME), None);
-    let owner = format!("bgw-{}", unsafe { pgrx::pg_sys::MyProcPid });
+    // A globally-unique fencing token (uuid, NOT the reusable pid) so a restarted worker never inherits a
+    // previous incarnation's identity — the fencing (owner=$owner) depends on this uniqueness (council M-1).
+    let owner = BackgroundWorker::transaction(|| {
+        Spi::get_one::<String>("SELECT 'bgw-' || gen_random_uuid()::text")
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| format!("bgw-{}", unsafe { pgrx::pg_sys::MyProcPid }))
+    });
 
     while BackgroundWorker::wait_latch(Some(std::time::Duration::from_secs(WORKER_POLL_SECS))) {
+        // Reaper — dead-letter orphans stuck at the attempt cap whose lease expired (a worker crashed AFTER
+        // burning the last attempt; claim can never reclaim them since attempts<max is false) — council HIGH-2.
+        BackgroundWorker::transaction(|| {
+            let _ = Spi::run_with_args(
+                "SELECT theodb_rs._vectorizer_reap_orphans($1)",
+                &[WORKER_MAX_ATTEMPTS.into()],
+            );
+        });
+
         // Phase 1 — claim a batch (its own txn; the committed lease protects the jobs across phases).
         let jobs: Vec<(i64, i32, String, String)> = BackgroundWorker::transaction(|| {
             Spi::connect_mut(|c| {
@@ -495,21 +565,33 @@ pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
 
         let (mut processed, mut failed) = (0i64, 0i64);
 
-        // Per-job process + owner-guarded mark, each in its own txn (the fallback + the delete path). The
-        // PgTryBuilder converts an embed/write longjmp into `false` so the worker never dies (B1).
+        // Renew a job's lease to the full interval right before its (≤ ~90s) embed, so a live worker never
+        // loses a job it is actively processing — matters in the per-job fallback where up to WORKER_BATCH
+        // jobs run sequentially under one claim (council H-3 / M-2).
+        let renew = |job_id: i64| {
+            BackgroundWorker::transaction(|| {
+                let _ = Spi::run_with_args(
+                    "SELECT theodb_rs._vectorizer_renew_lease($1, $2, $3)",
+                    &[vec![job_id].into(), owner.clone().into(), WORKER_LEASE_SECS.into()],
+                );
+            });
+        };
+
+        // Per-job process (subtxn-isolated per H-1) + owner-guarded mark, each in its own txn (the fallback +
+        // the delete path). A caught embed/write ERROR rolls the subtxn back to a clean state and marks failed.
         let process_one = |job_id: i64, vid: i32, pk: &str, is_delete: bool| -> bool {
             let pk = pk.to_string();
-            let ok: bool = BackgroundWorker::transaction(|| {
-                PgTryBuilder::new(|| {
+            let ok = BackgroundWorker::transaction(|| {
+                in_subtxn(|| {
                     let call = if is_delete {
                         "SELECT theodb_rs._vectorizer_process_delete($1, $2)"
                     } else {
                         "SELECT theodb_rs._vectorizer_process_upsert($1, $2)"
                     };
-                    Spi::run_with_args(call, &[vid.into(), pk.clone().into()]).is_ok()
+                    Spi::run_with_args(call, &[vid.into(), pk.clone().into()])
+                        .expect("vectorizer process job failed");
                 })
-                .catch_others(|_| false)
-                .execute()
+                .is_some()
             });
             BackgroundWorker::transaction(|| {
                 let sql = if ok {
@@ -525,6 +607,9 @@ pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
         // Deletes: per-job (no embed). Upserts: grouped by vectorizer for ONE embed_batch HTTP round-trip.
         let mut groups: std::collections::HashMap<i32, Vec<(i64, String)>> = std::collections::HashMap::new();
         for (job_id, vid, pk, op) in jobs {
+            if BackgroundWorker::sigterm_received() {
+                break;
+            }
             if op == "delete" {
                 if process_one(job_id, vid, &pk, true) { processed += 1 } else { failed += 1 }
             } else {
@@ -532,30 +617,39 @@ pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
             }
         }
         for (vid, group) in groups {
+            if BackgroundWorker::sigterm_received() {
+                break;
+            }
             let job_ids: Vec<i64> = group.iter().map(|(j, _)| *j).collect();
             let pks: Vec<String> = group.iter().map(|(_, p)| p.clone()).collect();
-            // Phase 2 (batch) — ONE embed_batch for the whole group; the function marks each done inside its
-            // txn. A batch endpoint failure diverges → caught here → per-job fallback isolates the poison row.
+            // Phase 2 (batch) — ONE embed_batch for the whole group, subtxn-isolated (H-1) so a batch failure
+            // rolls back cleanly; then the per-job fallback isolates the poison row.
             let batch_done: Option<i64> = BackgroundWorker::transaction(|| {
-                PgTryBuilder::new(|| {
+                in_subtxn(|| {
                     Spi::connect_mut(|c| {
                         c.update(
                             "SELECT theodb_rs._vectorizer_process_upsert_batch($1, $2, $3, $4)",
                             None,
                             &[vid.into(), job_ids.clone().into(), pks.clone().into(), owner.clone().into()],
                         )
+                        .expect("vectorizer batch failed")
+                        .first()
+                        .get::<i64>(1)
                         .ok()
-                        .and_then(|t| t.first().get::<i64>(1).ok().flatten())
+                        .flatten()
+                        .unwrap_or(0)
                     })
                 })
-                .catch_others(|_| None)
-                .execute()
             });
             match batch_done {
                 Some(n) => processed += n,
                 None => {
-                    for (job_id, pk) in group {
-                        if process_one(job_id, vid, &pk, false) { processed += 1 } else { failed += 1 }
+                    for (job_id, pk) in &group {
+                        if BackgroundWorker::sigterm_received() {
+                            break;
+                        }
+                        renew(*job_id);
+                        if process_one(*job_id, vid, pk, false) { processed += 1 } else { failed += 1 }
                     }
                 }
             }
@@ -791,5 +885,22 @@ mod tests {
             (r.get::<i64>(1).unwrap().unwrap(), r.get::<i64>(2).unwrap().unwrap())
         });
         assert_eq!((processed, failed), (5, 1), "vectorizer_stats() sums the worker's processed/failed bumps");
+    }
+
+    #[pg_test]
+    fn reaper_dead_letters_orphan_stuck_at_cap() {
+        seed(1);
+        // Claim with max=1 → attempts becomes 1 (== cap). Simulate the worker crashing before it could report:
+        // back-date the lease. The claim can NEVER reclaim it (attempts<max is false), so without the reaper it
+        // would leak in `processing` forever. The reaper must dead-letter it.
+        Spi::get_one::<i64>("SELECT count(*) FROM theodb_rs._vectorizer_claim_batch('w1', 10, 60, 1)").unwrap();
+        Spi::run("UPDATE theodb.vectorizer_queue SET lease_deadline = now() - interval '1 second'").unwrap();
+        let stuck: i64 =
+            Spi::get_one("SELECT count(*) FROM theodb_rs._vectorizer_claim_batch('w2', 10, 60, 1)").unwrap().unwrap();
+        assert_eq!(stuck, 0, "an orphan at the attempt cap is NOT reclaimable (attempts<max false)");
+        let reaped: i64 = Spi::get_one("SELECT theodb_rs._vectorizer_reap_orphans(1)").unwrap().unwrap();
+        assert_eq!(reaped, 1, "the reaper dead-letters the stuck orphan");
+        let state: String = Spi::get_one("SELECT state FROM theodb.vectorizer_queue").unwrap().unwrap();
+        assert_eq!(state, "failed", "reaped orphan is failed, not stuck in processing forever");
     }
 }
