@@ -704,7 +704,7 @@ esta calibração, qualquer novo ciclo de otimização mira um asymptote desconh
 **Dependencies:** M47, M49. **Risco (MÉDIO):** box de dev contendida (mitigação: load-guard + janelas
 quietas; se inviável, box dedicada vira pré-requisito registrado); download/GT de dataset 1536d é pesado.
 
-### M51 — [ ] SBQ inline no AM — quantização no caminho quente (a aposta que muda de asymptote; GATED por M50)
+### M51 — [x] SBQ inline no AM — quantização no caminho quente (a aposta que muda de asymptote; GATED por M50)
 
 **Objective:** O lever dominante do gap (~8–12×): hoje o scan pontua TODOS os ~50k candidatos em f32
 full-precision (512 B/candidato a 128d → 25.6 MB/query, DRAM-bound; `am/hnsw_page.rs` traverse). O padrão
