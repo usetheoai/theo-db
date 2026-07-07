@@ -795,7 +795,7 @@ e o próprio doc diz "not decision-grade"; o follow-up BEIR real está aberto de
 na imagem (packaging); embedder real no CI (custo/flakiness — mitigação: subset fixo + cache de embeddings
 no fixture).
 
-### M54 — [ ] Vectorizer próprio — auto-embedding declarativo (o lifecycle que define "AI-native" em 2026)
+### M54 — [x] Vectorizer próprio — auto-embedding declarativo (o lifecycle que define "AI-native" em 2026)
 
 **Objective:** O campo definiu a categoria pelo lifecycle, não pelas funções per-row: pgai vectorizer
 (Timescale), Supabase automatic embeddings, AlloyDB — embedding gerado/atualizado em INSERT/UPDATE,

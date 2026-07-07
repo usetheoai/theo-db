@@ -24,6 +24,21 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.46.0] - 2026-07-07
+
+### Added
+- Decisão M55 (ADR 0017, MADR 3.0) sobre manutenção do índice HNSW a escala: **híbrido tombstone-in-place (à la pgvectorscale) para DELETE + fold O(N) do M48 para compaction**, rejeitando fold-incremental-puro e in-place-completo-big-bang. Baseline medido do muro atual em `docs/benchmarks/m55-vacuum-wall.{md,json}` (harness `benchmarks/run_m55_vacuum_wall.py`): a 100k×768d o fold whole-index segura o advisory EXCLUSIVE por ~86 s (parada total de queries vetoriais) com ~1,44 GB de RSS e ~340 MB de WAL; projeção O(N) ponto-único (confiança baixa) para 1M×768d ~14 GB / ~14 min / ~3,4 GB. O ADR fixa a implementação da fase 1 como **pré-requisito de qualquer claim v1.0/produção** (M55).
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
 ## [0.45.0] - 2026-07-07
 
 ### Added
