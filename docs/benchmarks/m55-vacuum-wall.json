@@ -1,0 +1,158 @@
+{
+  "milestone": "M55",
+  "dim": 768,
+  "seed": 42,
+  "runs": 3,
+  "scales_requested": [
+    100000,
+    250000
+  ],
+  "post_index_rows": 500,
+  "guc_vacuum_threshold": "theodb.vacuum_pending_threshold",
+  "load": {
+    "load1": 1.56,
+    "nproc": 12
+  },
+  "env": {
+    "cpu": "13th Gen Intel(R) Core(TM) i7-1355U",
+    "pg_version": "17.10 (Debian 17.10-1.pgdg12+1)",
+    "git_sha": "ec347bd",
+    "container": "theodb-m55bench"
+  },
+  "scales": {
+    "100000": {
+      "measured": true,
+      "ram_gate": {
+        "need_gb": 2.3,
+        "avail_gb": 7.35
+      },
+      "runs_raw": [
+        {
+          "peak_private_rss_mb": null,
+          "vmhwm_mb": 1442.75,
+          "exclusive_lock_ms": 76551.665,
+          "wall_ms": 77543.871,
+          "wal_bytes": 339768800,
+          "ram_samples": 0,
+          "ram_sample_errors": 643,
+          "lock_polls": 36425,
+          "clear_refs_ok": true,
+          "guc": {
+            "name": "theodb.vacuum_pending_threshold",
+            "confirmed": true,
+            "default": "16"
+          }
+        },
+        {
+          "peak_private_rss_mb": null,
+          "vmhwm_mb": 1442.66,
+          "exclusive_lock_ms": 83944.329,
+          "wall_ms": 86192.063,
+          "wal_bytes": 340657104,
+          "ram_samples": 0,
+          "ram_sample_errors": 596,
+          "lock_polls": 34903,
+          "clear_refs_ok": true,
+          "guc": {
+            "name": "theodb.vacuum_pending_threshold",
+            "confirmed": true,
+            "default": "16"
+          }
+        },
+        {
+          "peak_private_rss_mb": null,
+          "vmhwm_mb": 1442.76,
+          "exclusive_lock_ms": 96792.678,
+          "wall_ms": 111054.91,
+          "wal_bytes": 341199616,
+          "ram_samples": 0,
+          "ram_sample_errors": 867,
+          "lock_polls": 51659,
+          "clear_refs_ok": true,
+          "guc": {
+            "name": "theodb.vacuum_pending_threshold",
+            "confirmed": true,
+            "default": "16"
+          }
+        }
+      ],
+      "agg": {
+        "vmhwm_mb": {
+          "mean": 1442.723,
+          "std": 0.045,
+          "n": 3
+        },
+        "exclusive_lock_ms": {
+          "mean": 85762.891,
+          "std": 8362.816,
+          "n": 3
+        },
+        "wall_ms": {
+          "mean": 91596.948,
+          "std": 14204.624,
+          "n": 3
+        },
+        "wal_bytes": {
+          "mean": 340541840,
+          "std": 589786.938,
+          "n": 3
+        }
+      },
+      "errors": []
+    },
+    "250000": {
+      "skipped": true,
+      "reason": "RAM gate: need ~4.25 GB, MemAvailable 3.67 GB \u2014 skipping to avoid OOM"
+    }
+  },
+  "projection_1M": {
+    "projected": true,
+    "model": "linear O(N) from measured scales",
+    "n_points": 1,
+    "target_n": 1000000,
+    "metrics": {
+      "vmhwm_mb": {
+        "value_at_1M": 14427.23,
+        "slope_per_row": 0.01442723,
+        "intercept": 0.0,
+        "n_points": 1,
+        "note": "single-point through-origin O(N) extrapolation"
+      },
+      "exclusive_lock_ms": {
+        "value_at_1M": 857628.91,
+        "slope_per_row": 0.8576289100000001,
+        "intercept": 0.0,
+        "n_points": 1,
+        "note": "single-point through-origin O(N) extrapolation"
+      },
+      "wall_ms": {
+        "value_at_1M": 915969.48,
+        "slope_per_row": 0.91596948,
+        "intercept": 0.0,
+        "n_points": 1,
+        "note": "single-point through-origin O(N) extrapolation"
+      },
+      "wal_bytes": {
+        "value_at_1M": 3405418400.0,
+        "slope_per_row": 3405.4184,
+        "intercept": 0.0,
+        "n_points": 1,
+        "note": "single-point through-origin O(N) extrapolation"
+      }
+    }
+  },
+  "warnings": [
+    "SET theodb.vacuum_pending_threshold=0 failed: 0 is outside the valid range for parameter \"theodb.vacuum_pending_threshold\" (1 .. 65536)\n",
+    "SET theodb.vacuum_pending_threshold=0 failed: 0 is outside the valid range for parameter \"theodb.vacuum_pending_threshold\" (1 .. 65536)\n",
+    "SET theodb.vacuum_pending_threshold=0 failed: 0 is outside the valid range for parameter \"theodb.vacuum_pending_threshold\" (1 .. 65536)\n"
+  ],
+  "caveats": [
+    "1M is a PROJECTION (linear O(N) from the measured scales), NEVER measured \u2014 do not report it as fact.",
+    "maintenance_work_mem does NOT bound peak_private_rss: the Rust fold mallocs OUTSIDE Postgres memory contexts, so the working set is not capped by the PG knob \u2014 that is exactly why M55 measures it.",
+    "peak_private_rss_mb EXCLUDES shared_buffers (Private_Dirty+Private_Clean); VmHWM is the CEILING (includes shared pages) \u2014 treat VmHWM as an upper bound, not the private working set.",
+    "exclusive_lock_ms is a LOWER bound (a ~1ms poller misses lock edges shorter than the interval); wall_ms (the VACUUM statement wall-clock) is the UPPER bound. The truth is between them.",
+    "WAL bytes are CLUSTER-WIDE in the window (pg_current_wal_lsn delta), not scoped to the index \u2014 mitigated by autovacuum OFF on the table + a single connection on a quiet box, but not isolated.",
+    "The advisory (classid=index_oid, objsubid=1) ExclusiveLock mapping MUST be confirmed empirically against the fold's real lock; if it does not match, lock_ms is null and only wall_ms bounds it.",
+    "Characterization on ONE dev box (not a competitive claim); mean\u00b1std over the run count; RAM sampled at ~25ms via `docker exec cat smaps_rollup` (the exec overhead is the effective sampling floor)."
+  ]
+}
