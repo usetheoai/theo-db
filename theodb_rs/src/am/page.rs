@@ -258,6 +258,51 @@ pub(crate) unsafe fn read_all_page_items(rel: pg_sys::Relation, block: pg_sys::B
     Ok(out)
 }
 
+/// M56: edit the items of ONE page IN PLACE under a single `GenericXLog` (crash-safe, per-page — no advisory
+/// index lock, no O(N) rebuild). For each item, `f` receives the item's mutable bytes and returns `true` iff it
+/// modified them (the item size MUST NOT change — this is a fixed-offset byte edit, e.g. the tombstone flag).
+/// If nothing changed the WAL record is aborted (no dirtying). Returns the count of items `f` modified. Takes
+/// `BUFFER_LOCK_EXCLUSIVE` for the page only — concurrent scans (SHARE on other pages) never stall.
+pub(crate) unsafe fn modify_items_under_wal(
+    rel: pg_sys::Relation,
+    block: pg_sys::BlockNumber,
+    mut f: impl FnMut(&mut [u8]) -> bool,
+) -> u32 {
+    let buf = pg_sys::ReadBufferExtended(
+        rel,
+        pg_sys::ForkNumber::MAIN_FORKNUM,
+        block,
+        pg_sys::ReadBufferMode::RBM_NORMAL,
+        std::ptr::null_mut(),
+    );
+    pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_EXCLUSIVE as i32);
+    let state = pg_sys::GenericXLogStart(rel);
+    // The registered page is GenericXLog's working copy; mutating it is the intended in-place edit path.
+    let page = pg_sys::GenericXLogRegisterBuffer(state, buf, 0);
+    let max_off = page_get_max_offset(page);
+    let mut changed = 0u32;
+    for off in 1..=max_off {
+        let item_id = page_get_item_id(page, off as pg_sys::OffsetNumber);
+        let len = (*item_id).lp_len() as usize;
+        if len == 0 {
+            continue;
+        }
+        let ptr = page_get_item(page, item_id) as *mut u8;
+        let item = std::slice::from_raw_parts_mut(ptr, len);
+        if f(item) {
+            changed += 1;
+        }
+    }
+    if changed > 0 {
+        pg_sys::MarkBufferDirty(buf);
+        pg_sys::GenericXLogFinish(state);
+    } else {
+        pg_sys::GenericXLogAbort(state);
+    }
+    pg_sys::UnlockReleaseBuffer(buf);
+    changed
+}
+
 /// Overwrite the whole relation with a fresh blob (VACUUM fold/rebuild, M26 Phase 5). Reinitializes existing
 /// pages in place under WAL, then extends/uses pages for the new blob; surplus old pages are emptied. Simpler
 /// than physical truncation and correct (empty trailing pages are ignored by `read_blob`/`read_pending`).

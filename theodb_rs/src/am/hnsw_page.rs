@@ -208,6 +208,7 @@ pub(crate) struct ElementView<'a> {
     /// `ambulkdelete`; dropped by the next compaction (`fold`). `version` bumps on delete (forward-compat hook
     /// for a phase-2 slot-reuse insert; NOT load-bearing in phase 1 — the M52 iterative scan dedups by tid).
     pub(crate) deleted: bool,
+    #[allow(dead_code)] // phase-2 slot-reuse hook: written on delete, not yet consumed in phase 1
     pub(crate) version: u8,
 }
 
@@ -488,6 +489,12 @@ pub(crate) unsafe fn enumerate_entries(
     for blk in meta.elem_first..(meta.elem_first + meta.elem_npages) {
         for item in page::read_all_page_items(rel, blk)? {
             let ev = decode_element(&item)?;
+            // M56: compaction reuses this enumerate → the rebuild drops tombstoned nodes here (they are gone
+            // from the fresh graph, reclaiming their space). This is the ONLY reclaim path in phase 1 (slot
+            // reuse on INSERT is phase 2 — it would mutate the immutable M35 graph).
+            if ev.deleted {
+                continue;
+            }
             let dim = ev.vec_bytes.len() / 4;
             let mut v = vec![0f32; dim];
             for (i, s) in v.iter_mut().enumerate() {
@@ -497,6 +504,44 @@ pub(crate) unsafe fn enumerate_entries(
         }
     }
     Ok(out)
+}
+
+/// M56: mark every DEAD element tuple as a tombstone IN PLACE, per page under WAL (no O(N) rebuild, no advisory
+/// EXCLUSIVE). `is_dead(tid)` is the executor's visibility callback. Returns the count newly tombstoned. A
+/// tombstone is navigated-through-but-not-emitted by the scan; its space is reclaimed by the next compaction.
+pub(crate) unsafe fn tombstone_sweep(
+    rel: pg_sys::Relation,
+    meta: &HnswMeta,
+    is_dead: &mut impl FnMut(i64) -> bool,
+) -> u32 {
+    let mut total = 0u32;
+    for blk in meta.elem_first..(meta.elem_first + meta.elem_npages) {
+        total += page::modify_items_under_wal(rel, blk, |item| {
+            if item.len() < ELEM_HEADER || item[E_TAG] != ELEM_TAG || item[E_DELETED] != 0 {
+                return false; // not an element tuple, or already a tombstone
+            }
+            let tid = i64::from_le_bytes(item[E_TID..E_TID + 8].try_into().unwrap());
+            if is_dead(tid) {
+                mark_tombstone_in_place(item)
+            } else {
+                false
+            }
+        });
+    }
+    total
+}
+
+/// M56: count the tombstoned element tuples (SHARE-locked read) — the numerator of the compaction ratio.
+pub(crate) unsafe fn count_tombstones(rel: pg_sys::Relation, meta: &HnswMeta) -> u32 {
+    let mut n = 0u32;
+    for blk in meta.elem_first..(meta.elem_first + meta.elem_npages) {
+        for item in page::read_all_page_items(rel, blk).unwrap_or_default() {
+            if item.len() >= ELEM_HEADER && item[E_TAG] == ELEM_TAG && item[E_DELETED] != 0 {
+                n += 1;
+            }
+        }
+    }
+    n
 }
 
 // (M48) The old in-place `rewrite_structured` was replaced by the crash-safe `fold::fold` (meta-pivot) — it
@@ -512,6 +557,9 @@ struct Cand {
     nbr_off: u16,
     level: u8,
     tid: i64,
+    /// M56: a tombstoned node is navigated THROUGH (its arcs preserve connectivity — it enters the candidate
+    /// heap and is expanded) but is NEVER pushed to the result set. Set from `ElementView.deleted`.
+    deleted: bool,
 }
 impl PartialEq for Cand {
     fn eq(&self, o: &Self) -> bool {
@@ -584,6 +632,7 @@ unsafe fn load(
             nbr_off: ev.nbr_addr.1,
             level: ev.level,
             tid: ev.tid,
+            deleted: ev.deleted,
         })
     })
 }
@@ -762,6 +811,10 @@ impl<'a> crate::ann::scan_core::NeighborSource for PageNeighborSource<'a> {
     }
     fn tid(&self, node: &Cand) -> i64 {
         node.tid
+    }
+    /// M56: a tombstoned node is navigated through (its neighbors still expand) but never emitted.
+    fn emittable(&self, node: &Cand) -> bool {
+        !node.deleted
     }
     fn node_key(&self, node: &Cand) -> u64 {
         ((node.blk as u64) << 16) | node.off as u64
@@ -1288,6 +1341,142 @@ mod tests {
              lexical_engine => 'bm25', content_text_col => 'body')",
         )
         .unwrap();
+    }
+
+    /// M56: decode the heap `ctid` of a row into the i64 the index packs (`(block << 16) | offset`, per
+    /// `crate::am::tid::encode`), so a test can name specific on-disk nodes for the tombstone sweep.
+    fn heap_tid_i64(tbl: &str, id: i32) -> i64 {
+        let txt: String = pgrx::Spi::get_one(&format!("SELECT ctid::text FROM {tbl} WHERE id = {id}"))
+            .unwrap()
+            .expect("row exists");
+        // ctid text form is "(block,offset)".
+        let inner = txt.trim_start_matches('(').trim_end_matches(')');
+        let (b, o) = inner.split_once(',').expect("ctid has block,offset");
+        let block: i64 = b.trim().parse().expect("block int");
+        let offset: i64 = o.trim().parse().expect("offset int");
+        (block << 16) | offset
+    }
+
+    /// M56 DoD — the DELETE path tombstones dead nodes IN PLACE and the scan NAVIGATES THROUGH tombstones but
+    /// NEVER emits them, proven END-TO-END against a REAL on-disk graph. VACUUM the *command* cannot run inside a
+    /// pg_test transaction (M55/M48 precedent drives the command from an external harness), so this test invokes
+    /// the FFI sweep DIRECTLY — the same `tombstone_sweep` `ambulkdelete` calls — against the built index.
+    ///
+    /// The load-bearing subtlety: the heap rows are NOT deleted. The executor's heap-recheck therefore CANNOT
+    /// hide the swept nodes; the ONLY thing that can drop them from the result is the tombstone `emittable`
+    /// filter. This isolates the filter under test from the heap-recheck backstop (which would mask a broken
+    /// filter). A regular (WAL-logged) table exercises the real GenericXLog per-page path, not the temp/local-
+    /// buffer path.
+    #[pgrx::pg_test]
+    fn tombstone_sweep_filters_dead_and_preserves_recall() {
+        pgrx::Spi::run("CREATE TABLE tz (id int PRIMARY KEY, e vector(4))").unwrap();
+        // 30 deterministic, distinct points — no distance ties near the probe → unambiguous exact NN (100%
+        // recall at ef=200, so index order == exact order; same corpus as the recall-neutrality test above).
+        for i in 0..30i32 {
+            let (a, b, c, d) = (i as f32, (i % 7) as f32, (i % 5) as f32, i as f32 * 0.1);
+            pgrx::Spi::run(&format!("INSERT INTO tz VALUES ({i}, '[{a},{b},{c},{d}]')")).unwrap();
+        }
+        pgrx::Spi::run("CREATE INDEX tz_idx ON tz USING theodb_hnsw (e)").unwrap();
+        pgrx::Spi::run("SET theodb_hnsw.ef_search = 200").unwrap();
+
+        let probe = "[3.3,1.1,2.2,0.4]";
+        // Exact oracle over the full live set (seqscan): top-7 tells us the 2 victims AND the post-sweep truth.
+        pgrx::Spi::run("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on").unwrap();
+        let exact_full = topk_ids_tbl("tz", probe, 7);
+        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        let before = topk_ids_tbl("tz", probe, 5);
+        assert_eq!(before.len(), 5, "index returns 5 results before any tombstone");
+
+        // Tombstone the 2 nearest nodes IN the index (their heap rows stay ALIVE — see the doc comment).
+        let victims = [before[0], before[1]];
+        let victim_tids: Vec<i64> = victims.iter().map(|&id| heap_tid_i64("tz", id)).collect();
+        unsafe {
+            let oid: pg_sys::Oid =
+                pgrx::Spi::get_one("SELECT 'tz_idx'::regclass::oid").unwrap().expect("index oid");
+            let rel = pg_sys::index_open(oid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+            let meta = read_meta(rel).expect("read_meta");
+            let mut is_dead = |tid: i64| victim_tids.contains(&tid);
+            let swept = tombstone_sweep(rel, &meta, &mut is_dead);
+            let counted = count_tombstones(rel, &meta);
+            pg_sys::index_close(rel, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+            assert_eq!(swept, 2, "sweep tombstones exactly the 2 dead nodes in place (per-page WAL, no rebuild)");
+            assert_eq!(counted, 2, "count_tombstones sees exactly the 2 on-page marks");
+        }
+
+        // After the sweep the scan must NOT emit the tombstoned nodes, yet still return 5 LIVE results — it
+        // navigated THROUGH the 2 tombstones (their arcs preserved connectivity, so the graph is not severed).
+        let after = topk_ids_tbl("tz", probe, 5);
+        for v in &victims {
+            assert!(!after.contains(v), "tombstoned node {v} is filtered (heap row still live → only the emittable filter can drop it)");
+        }
+        assert_eq!(after.len(), 5, "scan navigates through tombstones and still returns 5 live results (graph not disconnected)");
+
+        // Recall preserved: post-sweep index top-5 == exact top-5 of (live set minus the 2 victims).
+        let mut oracle: Vec<i32> = exact_full.into_iter().filter(|id| !victims.contains(id)).take(5).collect();
+        let mut got = after.clone();
+        oracle.sort_unstable();
+        got.sort_unstable();
+        assert_eq!(got, oracle, "navigate-through-don't-emit preserves recall: top-5 == exact top-5 of the survivors");
+    }
+
+    /// M56: the compaction ratio path — when tombstones exceed `theodb.hnsw_tombstone_compact_pct` of the graph,
+    /// `vacuum_delete_inplace` folds (rebuild) to reclaim their space, dropping them from the physical layout.
+    /// With the GUC set low and enough nodes swept, the fold runs and `count_tombstones` returns 0 afterwards
+    /// (they are gone, not merely flagged), while the surviving live nodes still scan correctly.
+    #[pgrx::pg_test]
+    fn compaction_reclaims_tombstones_past_ratio_threshold() {
+        pgrx::Spi::run("CREATE TABLE tc (id int PRIMARY KEY, e vector(4))").unwrap();
+        for i in 0..30i32 {
+            let (a, b, c, d) = (i as f32, (i % 7) as f32, (i % 5) as f32, i as f32 * 0.1);
+            pgrx::Spi::run(&format!("INSERT INTO tc VALUES ({i}, '[{a},{b},{c},{d}]')")).unwrap();
+        }
+        pgrx::Spi::run("CREATE INDEX tc_idx ON tc USING theodb_hnsw (e)").unwrap();
+        pgrx::Spi::run("SET theodb_hnsw.ef_search = 200").unwrap();
+        // Compact as soon as >10% of the graph is tombstoned; we will tombstone ~1/3 → well past the ratio.
+        pgrx::Spi::run("SET theodb.hnsw_tombstone_compact_pct = 10").unwrap();
+
+        // Delete 10 of 30 rows FROM THE HEAP so the executor callback agrees they are dead, then drive the
+        // in-place delete path (which compacts because 10/30 > 10%).
+        pgrx::Spi::run("DELETE FROM tc WHERE id < 10").unwrap();
+
+        unsafe {
+            let oid: pg_sys::Oid =
+                pgrx::Spi::get_one("SELECT 'tc_idx'::regclass::oid").unwrap().expect("index oid");
+            // Predicate: a node is dead iff its heap row no longer exists (id < 10 were deleted).
+            // Map each index tid back to its heap id via the surviving set: query which ids remain.
+            let surviving: std::collections::HashSet<i64> = {
+                let mut s = std::collections::HashSet::new();
+                for id in 10..30i32 {
+                    s.insert(heap_tid_i64("tc", id));
+                }
+                s
+            };
+            let rel = pg_sys::index_open(oid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+            let mut dead = |tid: i64| !surviving.contains(&tid);
+            let live = crate::am::build::vacuum_delete_inplace(rel, &mut dead);
+            pg_sys::index_close(rel, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+            assert_eq!(live, 20, "vacuum_delete_inplace reports 20 live nodes after compacting away 10");
+            // After compaction the tombstones are physically GONE (reclaimed), not merely flagged.
+            let rel2 = pg_sys::index_open(oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            let meta2 = read_meta(rel2).expect("read_meta after compaction");
+            let remaining = count_tombstones(rel2, &meta2);
+            assert_eq!(meta2.node_count, 20, "compacted graph has exactly the 20 surviving nodes");
+            assert_eq!(remaining, 0, "compaction reclaimed the tombstones (0 left in the physical layout)");
+            pg_sys::index_close(rel2, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+        }
+
+        // The compacted index still scans correctly against the surviving live set.
+        let probe = "[13.3,1.1,2.2,1.4]"; // near ids in the surviving 10..30 range
+        pgrx::Spi::run("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on").unwrap();
+        let exact = topk_ids_tbl("tc", probe, 5);
+        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        let mut via_index = topk_ids_tbl("tc", probe, 5);
+        assert!(via_index.iter().all(|id| *id >= 10), "no compacted-away node leaks into results");
+        let (mut si, mut se) = (via_index.clone(), exact.clone());
+        si.sort_unstable();
+        se.sort_unstable();
+        via_index.sort_unstable();
+        assert_eq!(si, se, "compacted index top-5 == exact top-5 of the surviving set");
     }
 }
 

@@ -57,6 +57,19 @@ pub(crate) fn vacuum_pending_threshold() -> u32 {
     VACUUM_PENDING_THRESHOLD.get().max(1) as u32
 }
 
+/// M56 — `SET theodb.hnsw_tombstone_compact_pct = N`: a VACUUM tombstones dead nodes in place (cheap, no O(N),
+/// no stall); once tombstones reach N% of the graph, the same VACUUM ALSO runs the (rare, O(N)) compaction fold
+/// to reclaim their space and re-densify. Default 20%. `0` disables ratio-compaction (only pending-threshold
+/// folds). This is the knob that trades delete-latency (low) against index bloat between compactions.
+pub(crate) const DEFAULT_HNSW_TOMBSTONE_COMPACT_PCT: i32 = 20;
+pub(crate) static HNSW_TOMBSTONE_COMPACT_PCT: GucSetting<i32> =
+    GucSetting::<i32>::new(DEFAULT_HNSW_TOMBSTONE_COMPACT_PCT);
+
+/// The effective tombstone-compaction percentage (0..=100; 0 = disabled).
+pub(crate) fn hnsw_tombstone_compact_pct() -> i32 {
+    HNSW_TOMBSTONE_COMPACT_PCT.get().clamp(0, 100)
+}
+
 // M48 (T2.3) — deterministic crash-injection for the VACUUM fold's crash tests. `injection_points` is NOT
 // compiled into the packaged Debian PG17 (blueprint §Q9, verified), so we ship a tiny always-compiled test hook
 // instead. Both default to 0 (off) ⇒ ZERO effect in production; both are `Suset` (only a superuser can set them,
@@ -128,6 +141,16 @@ pub(crate) fn init() {
         &VACUUM_PENDING_THRESHOLD,
         1,
         65536,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+    GucRegistry::define_int_guc(
+        c"theodb.hnsw_tombstone_compact_pct",
+        c"After tombstones reach this % of the theodb_hnsw graph, a VACUUM also runs the O(N) compaction fold (0 = disabled)",
+        c"Deletes tombstone in place (cheap, no stall); compaction reclaims their space. Higher = less compaction but more bloat.",
+        &HNSW_TOMBSTONE_COMPACT_PCT,
+        0,
+        100,
         GucContext::Userset,
         GucFlags::default(),
     );

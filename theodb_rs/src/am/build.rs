@@ -168,6 +168,41 @@ pub unsafe extern "C-unwind" fn aminsert(
 /// Rebuild the main index over only the live heap TIDs (M26 Phase 5 — called by VACUUM's `ambulkdelete`). Reads
 /// the current main index + pending, keeps entries the `dead` predicate rejects, rebuilds, and rewrites the blob
 /// (folding pending in + dropping dead TIDs). Returns the number of live entries.
+/// M56: VACUUM bulk-delete via IN-PLACE tombstones for the HNSW structured layout — mark each dead node as a
+/// tombstone per page (buffer-EXCLUSIVE + GenericXLog, NO advisory index lock, NO O(N) rebuild → NO total stall),
+/// then run the (rare) O(N) compaction fold ONLY when tombstones exceed the ratio GUC. IVF/blob layouts have no
+/// in-place path yet → they keep the existing O(N) rebuild (out of M56 scope). Returns the live graph count.
+pub(crate) unsafe fn vacuum_delete_inplace(
+    indexrel: pg_sys::Relation,
+    dead: &mut dyn FnMut(i64) -> bool,
+) -> usize {
+    let magic = match page::peek_magic(indexrel) {
+        Ok(m) => m,
+        Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
+    };
+    if magic != crate::am::hnsw_page::HNSW_STRUCT_MAGIC {
+        return vacuum_rebuild(indexrel, dead); // IVF / blob / unbuilt — no in-place tombstone path
+    }
+    let meta = match crate::am::hnsw_page::read_meta(indexrel) {
+        Ok(m) => m,
+        Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
+    };
+    // Phase 1 — tombstone the dead in place (crash-safe per page, no advisory EXCLUSIVE, no stall).
+    {
+        let mut is_dead = |id: i64| dead(id);
+        crate::am::hnsw_page::tombstone_sweep(indexrel, &meta, &mut is_dead);
+    } // `is_dead` (which borrowed `dead`) is dropped here — `dead` is free again for the compaction path.
+    // Ratio-triggered compaction: reclaim tombstone space + re-densify only when it grows past the GUC %.
+    let total_tomb = crate::am::hnsw_page::count_tombstones(indexrel, &meta) as u64;
+    let node_count = meta.node_count as u64;
+    let pct = crate::am::guc::hnsw_tombstone_compact_pct() as u64;
+    if pct > 0 && node_count > 0 && total_tomb * 100 > node_count * pct {
+        // Compaction = the full crash-safe fold (takes advisory EXCLUSIVE); `enumerate_entries` drops tombstones.
+        return vacuum_rebuild(indexrel, dead);
+    }
+    (node_count.saturating_sub(total_tomb)) as usize
+}
+
 pub(crate) unsafe fn vacuum_rebuild(
     indexrel: pg_sys::Relation,
     dead: &mut dyn FnMut(i64) -> bool,

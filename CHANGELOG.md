@@ -14,8 +14,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 - Roadmap amendado (deep-view 2026-07-07): milestones M56–M59 da trilha de **superioridade vetorial** (o eixo do North Star ainda aberto) — M56 (P3: manutenção in-place/tombstone, remove o muro do VACUUM), M57 (P0: SBQ inline ≥2× QPS a 1M provado — o "fork na estrada"), M58 (P2: SIMD cosine/IP), M59 (P1: quantização anisotrópica + AH para fechar o gap ~25× vs ScaNN). Análise em `.claude/knowledge-base/audits/deep-view-sota-ai-native-2026-07-07.md`.
+- **M56 — DELETE do HNSW por tombstone in-place** (remove o muro do VACUUM da fase de DELETE, ADR 0017 fase 1). `ambulkdelete` agora marca cada nó morto como tombstone **na própria página** sob GenericXLog (crash-safe), **sem** advisory EXCLUSIVE e **sem** rebuild O(N) — eliminando a parada de queries de ~86 s medida no M55. O scan **navega através** dos tombstones (os arcos deles preservam a conectividade do grafo) mas **nunca os emite** (filtro `emittable` no `NeighborSource`). A compactação O(N) (o fold do M48, que recupara o espaço e re-densifica) roda **apenas** quando os tombstones passam de `theodb.hnsw_tombstone_compact_pct` (default 20%) do grafo. Provado por pg_test contra grafo on-disk real: sweep FFI filtra os nós mortos com recall preservado (heap vivo → só o filtro pode dropá-los) e a compactação recupera fisicamente os tombstones.
 
 ### Changed
+- **Layout do element tuple do `theodb_hnsw`**: os 2 bytes de pad (offsets 2–3, sempre zero até M55) passam a carregar `deleted` (flag de tombstone) e `version` (hook forward-compat p/ slot-reuse da fase 2). Índices v1/v2 pré-M56 permanecem compatíveis (pad=0 decodifica como vivo/versão 0); nenhum REINDEX é exigido. Nova GUC `theodb.hnsw_tombstone_compact_pct` (0–100, default 20) controla o gatilho de compactação (M56).
 
 ### Deprecated
 
