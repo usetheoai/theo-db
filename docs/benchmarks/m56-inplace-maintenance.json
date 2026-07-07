@@ -1,0 +1,235 @@
+{
+  "milestone": "M56",
+  "dim": 768,
+  "seed": 42,
+  "runs": 3,
+  "scales_requested": [
+    100000
+  ],
+  "delete_frac": 0.1,
+  "compact_guc": "theodb.hnsw_tombstone_compact_pct",
+  "pct_no_compact": 90,
+  "pct_force_compact": 5,
+  "load": {
+    "load1": 2.85,
+    "nproc": 12
+  },
+  "env": {
+    "cpu": "13th Gen Intel(R) Core(TM) i7-1355U",
+    "pg_version": "17.10 (Debian 17.10-1.pgdg12+1)",
+    "git_sha": "cabb437",
+    "container": "theodb-m56bench"
+  },
+  "scales": {
+    "100000": {
+      "measured": true,
+      "ram_gate": {
+        "need_gb": 2.3,
+        "avail_gb": 6.24
+      },
+      "delete_frac": 0.1,
+      "n_deleted_mean": 10000,
+      "tombstone": {
+        "runs_raw": [
+          {
+            "mode": "tombstone",
+            "n_deleted": 10000,
+            "peak_private_rss_mb": 1.61,
+            "vmhwm_mb": 152.11,
+            "exclusive_lock_ms": null,
+            "wall_ms": 1060.912,
+            "wal_bytes": 35903872,
+            "ram_samples": 12,
+            "ram_sample_errors": 0,
+            "lock_polls": 742,
+            "clear_refs_ok": true,
+            "guc": {
+              "name": "theodb.hnsw_tombstone_compact_pct",
+              "mode": "tombstone",
+              "pct": 90,
+              "confirmed": true,
+              "default": "20"
+            }
+          },
+          {
+            "mode": "tombstone",
+            "n_deleted": 10000,
+            "peak_private_rss_mb": 1.59,
+            "vmhwm_mb": 152.28,
+            "exclusive_lock_ms": null,
+            "wall_ms": 2589.433,
+            "wal_bytes": 35896816,
+            "ram_samples": 32,
+            "ram_sample_errors": 0,
+            "lock_polls": 1985,
+            "clear_refs_ok": true,
+            "guc": {
+              "name": "theodb.hnsw_tombstone_compact_pct",
+              "mode": "tombstone",
+              "pct": 90,
+              "confirmed": true,
+              "default": "20"
+            }
+          },
+          {
+            "mode": "tombstone",
+            "n_deleted": 10000,
+            "peak_private_rss_mb": 1.59,
+            "vmhwm_mb": 151.53,
+            "exclusive_lock_ms": null,
+            "wall_ms": 4407.606,
+            "wal_bytes": 4692440,
+            "ram_samples": 47,
+            "ram_sample_errors": 0,
+            "lock_polls": 3142,
+            "clear_refs_ok": true,
+            "guc": {
+              "name": "theodb.hnsw_tombstone_compact_pct",
+              "mode": "tombstone",
+              "pct": 90,
+              "confirmed": true,
+              "default": "20"
+            }
+          }
+        ],
+        "agg": {
+          "peak_private_rss_mb": {
+            "mean": 1.597,
+            "std": 0.009,
+            "n": 3
+          },
+          "vmhwm_mb": {
+            "mean": 151.973,
+            "std": 0.321,
+            "n": 3
+          },
+          "wall_ms": {
+            "mean": 2685.984,
+            "std": 1367.987,
+            "n": 3
+          },
+          "wal_bytes": {
+            "mean": 25497709.333,
+            "std": 14711547.312,
+            "n": 3
+          }
+        },
+        "errors": []
+      },
+      "compaction": {
+        "runs_raw": [
+          {
+            "mode": "compaction",
+            "n_deleted": 10000,
+            "peak_private_rss_mb": 1159.1,
+            "vmhwm_mb": 1308.76,
+            "exclusive_lock_ms": 80790.346,
+            "wall_ms": 84541.247,
+            "wal_bytes": 326229136,
+            "ram_samples": 536,
+            "ram_sample_errors": 0,
+            "lock_polls": 35488,
+            "clear_refs_ok": true,
+            "guc": {
+              "name": "theodb.hnsw_tombstone_compact_pct",
+              "mode": "compaction",
+              "pct": 5,
+              "confirmed": true,
+              "default": "20"
+            }
+          },
+          {
+            "mode": "compaction",
+            "n_deleted": 10000,
+            "peak_private_rss_mb": 1158.7,
+            "vmhwm_mb": 1307.39,
+            "exclusive_lock_ms": 114485.601,
+            "wall_ms": 133490.005,
+            "wal_bytes": 307501072,
+            "ram_samples": 677,
+            "ram_sample_errors": 0,
+            "lock_polls": 49169,
+            "clear_refs_ok": true,
+            "guc": {
+              "name": "theodb.hnsw_tombstone_compact_pct",
+              "mode": "compaction",
+              "pct": 5,
+              "confirmed": true,
+              "default": "20"
+            }
+          },
+          {
+            "mode": "compaction",
+            "n_deleted": 10000,
+            "peak_private_rss_mb": 1159.89,
+            "vmhwm_mb": 1298.95,
+            "exclusive_lock_ms": 125326.445,
+            "wall_ms": 133914.786,
+            "wal_bytes": 307502976,
+            "ram_samples": 542,
+            "ram_sample_errors": 0,
+            "lock_polls": 35623,
+            "clear_refs_ok": true,
+            "guc": {
+              "name": "theodb.hnsw_tombstone_compact_pct",
+              "mode": "compaction",
+              "pct": 5,
+              "confirmed": true,
+              "default": "20"
+            }
+          }
+        ],
+        "agg": {
+          "peak_private_rss_mb": {
+            "mean": 1159.23,
+            "std": 0.494,
+            "n": 3
+          },
+          "vmhwm_mb": {
+            "mean": 1305.033,
+            "std": 4.338,
+            "n": 3
+          },
+          "exclusive_lock_ms": {
+            "mean": 106867.464,
+            "std": 18963.0,
+            "n": 3
+          },
+          "wall_ms": {
+            "mean": 117315.346,
+            "std": 23175.436,
+            "n": 3
+          },
+          "wal_bytes": {
+            "mean": 313744394.667,
+            "std": 8828045.292,
+            "n": 3
+          }
+        },
+        "errors": []
+      },
+      "verdict": {
+        "m55_baseline_wall_ms_100k": 86000.0,
+        "tombstone_wall_ms": 2685.984,
+        "tombstone_peak_rss_mb": 1.597,
+        "tombstone_exclusive_lock_ms": null,
+        "speedup_vs_m55_fold": 32.0,
+        "delete_path_much_less_than_86s": true,
+        "no_advisory_exclusive_in_tombstone_path": true,
+        "compaction_wall_ms": 117315.346,
+        "compaction_peak_rss_mb": 1159.23,
+        "compaction_exclusive_lock_ms": 106867.464,
+        "note": "The tombstone path replaces the per-DELETE fold; the compaction path (rare, ratio-triggered) keeps the M55-like cost by design \u2014 M56 makes the fold RARE, not cheap."
+      }
+    }
+  },
+  "warnings": [],
+  "caveats": [
+    "The tombstone path's exclusive_lock_ms is None BY DESIGN \u2014 `vacuum_delete_inplace` takes NO advisory ExclusiveLock on the tombstone-only path (only the rare compaction fold does). None here is the POSITIVE result (queries never stall), NOT a measurement gap.",
+    "peak_private_rss_mb EXCLUDES shared_buffers (Private_Dirty+Private_Clean); the tombstone sweep mallocs nothing O(N) \u2014 it modifies one page at a time \u2014 so its private working set is O(#deleted), tiny vs the fold's O(N) ~1.44 GB at 100k (M55).",
+    "The M55 baseline (86 s / 1.44 GB @ 100k\u00d7768d) is quoted from docs/benchmarks/m55-vacuum-wall.md, measured on the SAME dev-box class; treat the speedup as same-box characterization, not a portable claim.",
+    "The compaction mode reproduces the fold cost (unchanged from M55) to show the RARE path; 1M for that path is an O(N) PROJECTION (see M55), never measured here.",
+    "WAL bytes are CLUSTER-WIDE in the window (pg_current_wal_lsn delta), mitigated by autovacuum OFF + one connection on a quiet box, not fully isolated (same caveat as M55).",
+    "Characterization on ONE dev box (not a competitive claim); mean\u00b1std over the run count; RAM sampled at ~25ms via `docker exec cat smaps_rollup`."
+  ]
+}
