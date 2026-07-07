@@ -61,15 +61,42 @@ def _load():
 
 
 def _make_dataset(cur, table, n, dim, seed):
-    # M57: stream the gaussian corpus via COPY (O(1) client RAM, fast at 1M) instead of per-row INSERT — reuses
-    # the M55 streaming loader (Rule 9). The `executemany` path is O(n) round-trips and unusable at 1M scale.
-    import os
-    import sys
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from run_m55_vacuum_wall import _copy_vectors
+    # M57: stream the gaussian corpus via COPY with NUMPY generation (O(1) client RAM, and numpy removes the
+    # per-float `random.gauss` bottleneck that makes 1M×768d unusably slow in pure Python). A `read()`-only
+    # file-like feeds `copy_expert` chunk-by-chunk so client RAM stays bounded regardless of n.
+    import numpy as np
+    rng = np.random.default_rng(seed)
     cur.execute(f"DROP TABLE IF EXISTS {table}")
     cur.execute(f"CREATE TABLE {table} (id int, v vector({dim}))")
-    _copy_vectors(cur, table, 0, n, dim, seed)
+
+    class _NpReader:
+        def __init__(self):
+            self.i = 0
+            self.buf = ""
+
+        def _fill(self):
+            m = min(20000, n - self.i)
+            if m <= 0:
+                return False
+            arr = rng.standard_normal((m, dim)).astype(np.float32)
+            fmt = np.char.mod("%.4f", arr)  # (m, dim) string array — the %.4f formatting runs at C speed
+            base = self.i
+            self.buf += "".join(f"{base + r}\t[" + ",".join(fmt[r]) + "]\n" for r in range(m))
+            self.i += m
+            return True
+
+        def read(self, size=-1):
+            if size is None or size < 0:
+                while self._fill():
+                    pass
+                out, self.buf = self.buf, ""
+                return out
+            while len(self.buf) < size and self._fill():
+                pass
+            out, self.buf = self.buf[:size], self.buf[size:]
+            return out
+
+    cur.copy_expert(f"COPY {table} (id, v) FROM STDIN", _NpReader())
     cur.execute(f"ANALYZE {table}")
 
 
