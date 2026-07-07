@@ -566,6 +566,34 @@ pub(crate) unsafe fn find_reusable_slot(rel: pg_sys::Relation, meta: &HnswMeta, 
     None
 }
 
+/// M56 fase 2 (T1.2): revive a tombstoned element slot as a NEW node — overwrite its `tid` + f32 vector in place,
+/// clear `deleted`, bump `version`; KEEP its `level`, neighbor-tuple address and `dim` (Z reuses X's graph slot so
+/// its inbound arcs Y→slot now serve Z, correctly scored by Z's stored vector). v1 (f32-only) slots ONLY: a v2
+/// (inline-SBQ) slot also carries a code region that would still hold X's code — reusing it would misroute the
+/// Hamming walk, so we refuse (the item is longer than `E_VEC + dim*4`) and the caller falls back to `append_pending`
+/// (recomputing Z's SBQ code in place is a tracked follow-up). Crash-safe via `page::modify_item_at` (GenericXLog).
+/// Returns `true` iff the slot was revived.
+pub(crate) unsafe fn write_reused_element(rel: pg_sys::Relation, elem_addr: Addr, tid: i64, vec: &[f32]) -> bool {
+    let (blk, off) = elem_addr;
+    page::modify_item_at(rel, blk, off, |item| {
+        if item.len() < ELEM_HEADER || item[E_TAG] != ELEM_TAG {
+            return false;
+        }
+        let dim = u16::from_le_bytes([item[E_DIM], item[E_DIM + 1]]) as usize;
+        // v1 only (exact size = header + vec, no trailing SBQ code) AND matching dim.
+        if item.len() != E_VEC + dim * 4 || vec.len() != dim {
+            return false;
+        }
+        item[E_DELETED] = 0;
+        item[E_VERSION] = item[E_VERSION].wrapping_add(1);
+        item[E_TID..E_TID + 8].copy_from_slice(&tid.to_le_bytes());
+        for (i, &x) in vec.iter().enumerate() {
+            item[E_VEC + i * 4..E_VEC + i * 4 + 4].copy_from_slice(&x.to_le_bytes());
+        }
+        true
+    })
+}
+
 // (M48) The old in-place `rewrite_structured` was replaced by the crash-safe `fold::fold` (meta-pivot) — it
 // rewrote block 0 first, so a crash mid-vacuum left the meta pointing at pages that still held old bytes (#47).
 
@@ -1578,6 +1606,42 @@ mod tests {
             let item = page::read_page_item_at(rel, blk, off).expect("read slot");
             assert!(decode_element(&item).unwrap().deleted, "the found slot is the tombstone");
             assert!(find_reusable_slot(rel, &meta, 99).is_none(), "no slot has level ≥ 99 (nbr tuple wouldn't fit)");
+            pg_sys::index_close(rel, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+        }
+    }
+
+    /// M56 fase 2 T1.2: `write_reused_element` revives a tombstoned slot with a new tid + vector, clears
+    /// `deleted`, bumps `version`, and KEEPS the slot's level + neighbor-tuple address (Z takes X's graph position).
+    #[pgrx::pg_test]
+    fn write_reused_element_revives_slot_keeping_graph_position() {
+        pgrx::Spi::run("CREATE TABLE wr (id int PRIMARY KEY, e vector(4))").unwrap();
+        for i in 0..30i32 {
+            let (a, b, c, d) = (i as f32, (i % 7) as f32, (i % 5) as f32, i as f32 * 0.1);
+            pgrx::Spi::run(&format!("INSERT INTO wr VALUES ({i}, '[{a},{b},{c},{d}]')")).unwrap();
+        }
+        pgrx::Spi::run("CREATE INDEX wr_idx ON wr USING theodb_hnsw (e)").unwrap();
+        let dead_tid = heap_tid_i64("wr", 7);
+        unsafe {
+            let oid: pg_sys::Oid = pgrx::Spi::get_one("SELECT 'wr_idx'::regclass::oid").unwrap().expect("oid");
+            let rel = pg_sys::index_open(oid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+            let meta = read_meta(rel).expect("read_meta");
+            let mut is_dead = |t: i64| t == dead_tid;
+            assert_eq!(tombstone_sweep(rel, &meta, &mut is_dead), 1, "tombstone node id=7");
+            let slot = find_reusable_slot(rel, &meta, 0).expect("reusable slot");
+            let bytes_before = page::read_page_item_at(rel, slot.0, slot.1).unwrap();
+            let before = decode_element(&bytes_before).unwrap();
+            let (lvl, nbr, ver) = (before.level, before.nbr_addr, before.version);
+            assert!(before.deleted, "slot is a tombstone before revive");
+
+            let newvec = [9.0f32, 8.0, 7.0, 6.0];
+            assert!(write_reused_element(rel, slot, 424242, &newvec), "revive the v1 slot");
+            let bytes_after = page::read_page_item_at(rel, slot.0, slot.1).unwrap();
+            let after = decode_element(&bytes_after).unwrap();
+            assert!(!after.deleted, "revived slot is live");
+            assert_eq!(after.tid, 424242, "new tid written");
+            assert_eq!(after.version, ver.wrapping_add(1), "version bumped");
+            assert_eq!((after.level, after.nbr_addr), (lvl, nbr), "graph position (level + nbr slot) preserved");
+            assert_eq!(f32::from_le_bytes(after.vec_bytes[0..4].try_into().unwrap()), 9.0, "new vector written");
             pg_sys::index_close(rel, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
         }
     }

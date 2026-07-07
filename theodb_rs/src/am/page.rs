@@ -333,6 +333,43 @@ pub(crate) unsafe fn modify_items_under_wal(
     changed
 }
 
+/// M56 fase 2: edit exactly ONE item at `(block, off)` in place under a single `GenericXLog` (crash-safe). `f`
+/// receives the item's mutable bytes and returns `true` iff it modified them (item size MUST NOT change). Returns
+/// whether the edit applied. The single-slot counterpart of [`modify_items_under_wal`], for the in-place insert
+/// that rewrites ONE reused element / neighbor slot (not a whole-page sweep). `BUFFER_LOCK_EXCLUSIVE` on the page.
+pub(crate) unsafe fn modify_item_at(
+    rel: pg_sys::Relation,
+    block: pg_sys::BlockNumber,
+    off: u16,
+    f: impl FnOnce(&mut [u8]) -> bool,
+) -> bool {
+    let buf = pg_sys::ReadBufferExtended(
+        rel,
+        pg_sys::ForkNumber::MAIN_FORKNUM,
+        block,
+        pg_sys::ReadBufferMode::RBM_NORMAL,
+        std::ptr::null_mut(),
+    );
+    pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_EXCLUSIVE as i32);
+    let state = pg_sys::GenericXLogStart(rel);
+    let page = pg_sys::GenericXLogRegisterBuffer(state, buf, 0);
+    let mut changed = false;
+    let item_id = page_get_item_id(page, off as pg_sys::OffsetNumber);
+    let len = (*item_id).lp_len() as usize;
+    if len > 0 {
+        let ptr = page_get_item(page, item_id) as *mut u8;
+        changed = f(std::slice::from_raw_parts_mut(ptr, len));
+    }
+    if changed {
+        pg_sys::MarkBufferDirty(buf);
+        pg_sys::GenericXLogFinish(state);
+    } else {
+        pg_sys::GenericXLogAbort(state);
+    }
+    pg_sys::UnlockReleaseBuffer(buf);
+    changed
+}
+
 /// Overwrite the whole relation with a fresh blob (VACUUM fold/rebuild, M26 Phase 5). Reinitializes existing
 /// pages in place under WAL, then extends/uses pages for the new blob; surplus old pages are emptied. Simpler
 /// than physical truncation and correct (empty trailing pages are ignored by `read_blob`/`read_pending`).
