@@ -58,3 +58,11 @@ registra no cargo pgrx test — classe pré-existente). Adicionar: (i) teste com
 terminação por cap, (ii) self-join/nested-loop provando que emitted.clear() evita skip/dup entre rescans,
 (iii) exit por ef-ceiling. A prova de terminação é airtight por construção (3 bounds), mas testes diretos
 reforçariam. Prioridade: BAIXA.
+
+## [M52 review HIGH-2] Controle multi-seed + ON/OFF formal no harness M52
+council-benchmark: o delta theodb-vs-pgvector a 10%/50% é pequeno e oscila de sinal entre runs (variância). Para
+CONFIRMAR (não supor) que é ruído e que o iterative dispara: estender `run_m52_filtered_ann.py` com (a) um loop
+multi-seed (ex.: [42,99,7]) reportando mean±std do delta por seletividade, e (b) uma varredura `max_scan_tuples ∈
+{0, 20000}` do theodb por seletividade (prova o trigger). Committar o json regenerado. Numa versão anterior do
+artefato esses controles foram citados como "medidos" em prosa sem código/raw — retirados; este é o débito de
+torná-los reproduzíveis. Prioridade: MÉDIA (o gate 1% já é medido e passa; isto fecha o "por que 10%/50%").

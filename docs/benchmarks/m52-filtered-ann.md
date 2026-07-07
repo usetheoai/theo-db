@@ -2,34 +2,33 @@
 
 **Date:** 2026-07-07 · **Milestone:** M52 · **Metric:** cosine · **GT:** seqscan exato + filtro · **Image:** `theodb:m52` (vs pgvector 0.8.3)
 **Harness:** `benchmarks/run_m52_filtered_ann.py` (reusa `theodb_bench.metrics`, espelha M50/M51) · **n=25 000, dim=128, k=10, 3 runs**
-**Verdict:** **No filtro SELETIVO (1%) — onde o iterative scan é o ponto — theodb ATINGE PARIDADE com o pgvector 0.8 (recall 0.973 ≥ 0.967).** O gate do DoD (recall sob filtro seletivo ≥ paridade pgvector) é cumprido.
+**Verdict:** **No filtro SELETIVO (1%) — onde o iterative scan é o ponto — theodb ATINGE PARIDADE com o pgvector 0.8 (recall 0.971 ≥ 0.964).** O gate do DoD (recall sob filtro seletivo ≥ paridade pgvector) é cumprido.
 
 ---
 
 ## ⚠️ Caveats (Rule 3)
 
-Escala tratável (25k×128 gaussiano) numa box **muito contendida** (`load_pre=15.63`, por-run `[14.5, 20.5, 20.8]`). Os números de **QPS carregam ruído pesado** de contenção; o **recall é determinístico** (seed fixo, GT exato) e independente de carga — é o eixo confiável e o gate do M52. O ganho ≥2× de QPS não é um objetivo do M52 (é do M51).
+Escala tratável (25k×128 gaussiano) numa box **contendida** (`load_pre=9.47`, por-run `[9.3, 11.9, 13.9]`). Os números de **QPS carregam ruído** de contenção; o **recall é determinístico** (seed fixo, GT exato) e independente de carga — é o eixo confiável e o gate do M52. O ganho ≥2× de QPS não é um objetivo do M52 (é do M51).
 
 ## 1. Recall@10 por seletividade (theodb iterative vs pgvector 0.8 relaxed_order, mean±std, 3 runs)
 
-| seletividade | filtro | theodb recall | pgvector recall | paridade | theodb p50 | pgvector p50 |
+| seletividade | filtro | theodb recall | pgvector recall | paridade (±0.01) | theodb p50 | pgvector p50 |
 |---|---|---|---|---|---|---|
-| **~1%** | `cat = 7` | **0.9733 ± 0.002** | 0.9673 ± 0.005 | ✅ **SIM** (≥) | 58.4 ms | 17.0 ms |
-| ~10% | `cat < 10` | 0.6040 ± 0.008 | 0.6173 ± 0.008 | ✗ (−0.013) | 5.2 ms | 3.2 ms |
-| ~50% | `cat < 50` | 0.5840 ± 0.016 | 0.6080 ± 0.013 | ✗ (−0.024) | 4.6 ms | 2.8 ms |
+| **~1%** | `cat = 7` | **0.9713 ± 0.002** | 0.9640 ± 0.003 | ✅ **SIM** | 42.8 ms | 14.6 ms |
+| ~10% | `cat < 10` | 0.5973 ± 0.009 | 0.5873 ± 0.006 | ✅ SIM | 3.9 ms | 3.0 ms |
+| ~50% | `cat < 50` | 0.5873 ± **0.032** | 0.5773 ± 0.008 | ✅ SIM | 3.5 ms | 2.3 ms |
 
-## 2. Leitura (com controles MEDIDOS — correção de review)
+## 2. Leitura
 
-- **O gate É o caso SELETIVO (1%), e ele PASSA.** Sob `cat = 7` (~250 de 25 000 linhas), o HNSW ingênuo (≤ ef_search=100 tuplas) quase nunca acha 10 linhas que passam o filtro nos 100 candidatos mais próximos → recall colapsaria. O **iterative scan** (re-busca com ef crescente até `max_scan_tuples`) recupera: **theodb 0.973 ≥ pgvector 0.967** (±0.002, baixa variância). Este é o gap CRÍTICO que o DoD ataca, e theodb iguala o SOTA permissivo (pgvector 0.8 `relaxed_order`).
-- **O iterative scan REALMENTE dispara e recupera a 10% (medido, não suposto).** Controle na mesma tabela (`SET max_scan_tuples=0` vs `20000`): a **10% (cat<10) theodb ON=0.58 vs OFF=0.49** (+0.09 — o iterative dispara e recupera); a **50% ON==OFF** (o filtro não é seletivo o suficiente, o ef=100 já sobra candidatos, o iterative mal dispara). Isso corrige a alegação anterior (errada) de que "o iterative mal dispara a 10%".
-- **As pequenas diferenças theodb-vs-pgvector a 10%/50% são RUÍDO de amostra, não déficit sistemático.** O run principal (seed 42, 50 queries) teve theodb −0.01/−0.02; um controle independente (seed 99, 30 queries) inverte o sinal (theodb 0.58 > pgvector 0.49 a 10%). Com nq pequeno, o recall theodb−pgvector oscila ±0.05–0.10 por query set. **Base HNSW a ef=100 (M50, 50q×3runs, o número CONFIÁVEL):** theodb **0.6227** vs pgvector **0.590** — theodb marginalmente à FRENTE unfiltered (não atrás, como uma versão anterior deste artefato afirmou por erro). Portanto o M52 **não introduziu um déficit de filtragem sistemático**; as diferenças moderadas são variância de query set sobre uma base ~equivalente. (Honestidade Rule 3: a redação anterior citou os números do M50 invertidos e supôs um "gap base"; ambos foram corrigidos por medição.)
-- **QPS: theodb ~3× mais lento que pgvector no caso seletivo** (58 vs 17 ms) porque, por ADR-1 (KISS), o iterative scan do theodb **re-busca o grafo inteiro com ef dobrado** a cada esgotamento, enquanto o pgvector 0.8 **resume do `discarded` set** (não re-percorre). É o trade-off documentado: paridade de RECALL agora; a otimização resume-from-discarded fica como follow-up rastreado (backlog) SE o custo importar.
+- **O gate É o caso SELETIVO (1%), e ele PASSA.** Sob `cat = 7` (~250 de 25 000 linhas), o HNSW ingênuo (≤ ef_search=100 tuplas) quase nunca acha 10 linhas que passam o filtro nos 100 candidatos mais próximos → recall colapsaria. O **iterative scan** (re-busca com ef crescente até `max_scan_tuples`) recupera: **theodb 0.971 ≥ pgvector 0.964** (±0.002 sobre 3 runs, baixa variância). Este é o gap CRÍTICO que o DoD ataca, e theodb iguala o SOTA permissivo (pgvector 0.8 `relaxed_order`). Que o iterative scan é o que recupera aqui está provado pelo pg_test `iterative_scan_off_when_max_scan_tuples_zero` (com o knob em 0 o path degrada) + `filtered_scan_preserves_recall_via_iterative` (com o knob on, index top-k == exato).
+- **A 10%/50% também passam paridade nesta run (theodb marginalmente À FRENTE: 0.597 vs 0.587; 0.587 vs 0.577) — mas NÃO são o gate e o delta NÃO é conclusivo.** Estes NÃO são filtros altamente seletivos: a ef=100 já sobram candidatos que passam, então o recall medido é próximo do **recall base do HNSW a ef=100** (~0.59 para ambos, não-seletivo). O delta de ±0.01 aqui está dentro da **variância de run committada** — o `recall_std` do theodb a 50% é **0.032** (grande; ver a tabela), então o sinal do delta theodb-vs-pgvector oscila com a run/query set e NÃO é um déficit sistemático. A **base confiável (M50, 50q×3runs)** é theodb **0.6227** vs pgvector **0.590** — theodb marginalmente à FRENTE unfiltered, consistente. Honestidade (Rule 3): uma versão anterior deste artefato (a) citou os números do M50 invertidos e (b) afirmou controles ON/OFF/multi-seed como "medidos" sem código/raw committado — ambos retirados; o que fica é o que o harness committado produz. Um controle multi-seed formal (ON/OFF + seeds) é follow-up rastreado no backlog.
+- **QPS: theodb ~3× mais lento que pgvector no caso seletivo** (58 vs 17 ms) porque, por ADR-1 (KISS), o iterative scan do theodb **re-busca o grafo inteiro com ef dobrado** a cada esgotamento, enquanto o pgvector 0.8 **resume do `discarded` set** (não re-percorre). Trade-off documentado: paridade de RECALL agora; a otimização resume-from-discarded fica como follow-up rastreado (backlog).
 
 ## 3. VEREDITO (DoD)
 
-**Cumprido:** recall sob filtro seletivo (1%) **≥ paridade pgvector 0.8** (0.973 ≥ 0.967) — o iterative scan do theodb funciona, dispara sob seletividade (medido ON>OFF a 10%), e iguala o SOTA permissivo no caso que importa. `EXPLAIN` prova `Index Scan` sob `WHERE` (pg_test `filtered_scan_preserves_recall_via_iterative`). Zero regressão no path unfiltered (a suíte M45/M50 usa `LIMIT k` com ef≫k → o grow nunca dispara; pg_test `traverse_presize` + `iterative_scan_off` verdes).
+**Cumprido:** recall sob filtro seletivo (1%) **≥ paridade pgvector 0.8** (0.971 ≥ 0.964, baixa variância) — o iterative scan do theodb funciona e iguala o SOTA permissivo no caso que importa. Nesta run as 3 seletividades passam paridade (±0.01). `EXPLAIN` prova `Index Scan` sob `WHERE` (pg_test `filtered_scan_preserves_recall_via_iterative`). Zero regressão no path unfiltered (a suíte M45/M50 usa `LIMIT k` com ef≫k → o grow nunca dispara; pg_test `traverse_presize` + `iterative_scan_off` verdes).
 
-**Honesto sobre o que NÃO é vitória:** (a) a 10%/50% as diferenças theodb-vs-pgvector estão dentro da variância de query set (base ~equivalente, theodb marginalmente à frente no M50) — nem vitória nem déficit sistemático; (b) o QPS do theodb no caso seletivo é ~3× o do pgvector (re-busca vs resume) — trade-off ADR-1, follow-up de otimização; (c) o `parity_gate` do harness usa uma tolerância de 0.01 embutida (`theodb >= pgvector − 0.01`), explicitada aqui.
+**Honesto sobre o que NÃO é conclusivo:** (a) a 10%/50% o delta theodb-vs-pgvector (~+0.01 nesta run) é pequeno, não-seletivo e dentro da variância de run committada (`recall_std` até 0.032) — nem vitória nem déficit sistemático; um controle multi-seed formal é follow-up; (b) o QPS do theodb no caso seletivo é ~3× o do pgvector (re-busca vs resume) → follow-up ADR-1; (c) o `parity_gate` do harness usa tolerância de 0.01 (`theodb >= pgvector − 0.01`), explicitada aqui.
 
 ## 4. Metodologia / reprodução
 

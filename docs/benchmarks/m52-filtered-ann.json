@@ -6,11 +6,11 @@
   "runs": 3,
   "metric": "cosine",
   "ncat": 100,
-  "load_pre": 15.63,
+  "load_pre": 9.47,
   "load_per_run": [
-    14.53,
-    20.5,
-    20.78
+    9.3,
+    11.93,
+    13.9
   ],
   "nproc": 12,
   "filters": {
@@ -20,60 +20,63 @@
   },
   "parity_gate": {
     "1pct": {
-      "theodb": 0.9733,
-      "pgvector": 0.9673,
-      "theodb_ge_pgvector": true
+      "theodb": 0.9713,
+      "pgvector": 0.964,
+      "tolerance": 0.01,
+      "theodb_ge_pgvector_within_1pct": true
     },
     "10pct": {
-      "theodb": 0.604,
-      "pgvector": 0.6173,
-      "theodb_ge_pgvector": false
+      "theodb": 0.5973,
+      "pgvector": 0.5873,
+      "tolerance": 0.01,
+      "theodb_ge_pgvector_within_1pct": true
     },
     "50pct": {
-      "theodb": 0.584,
-      "pgvector": 0.608,
-      "theodb_ge_pgvector": false
+      "theodb": 0.5873,
+      "pgvector": 0.5773,
+      "tolerance": 0.01,
+      "theodb_ge_pgvector_within_1pct": true
     }
   },
   "per_spec": {
     "theodb_hnsw": {
       "1pct": {
-        "recall_mean": 0.9733,
+        "recall_mean": 0.9713,
         "recall_std": 0.0019,
-        "p50_ms_mean": 58.389,
-        "qps_1client_mean": 17.1
+        "p50_ms_mean": 42.821,
+        "qps_1client_mean": 23.4
       },
       "10pct": {
-        "recall_mean": 0.604,
-        "recall_std": 0.0075,
-        "p50_ms_mean": 5.201,
-        "qps_1client_mean": 192.3
+        "recall_mean": 0.5973,
+        "recall_std": 0.009,
+        "p50_ms_mean": 3.945,
+        "qps_1client_mean": 253.5
       },
       "50pct": {
-        "recall_mean": 0.584,
-        "recall_std": 0.0157,
-        "p50_ms_mean": 4.591,
-        "qps_1client_mean": 217.8
+        "recall_mean": 0.5873,
+        "recall_std": 0.0324,
+        "p50_ms_mean": 3.513,
+        "qps_1client_mean": 284.7
       }
     },
     "pgvector_hnsw": {
       "1pct": {
-        "recall_mean": 0.9673,
-        "recall_std": 0.0047,
-        "p50_ms_mean": 16.952,
-        "qps_1client_mean": 59.0
+        "recall_mean": 0.964,
+        "recall_std": 0.0028,
+        "p50_ms_mean": 14.621,
+        "qps_1client_mean": 68.4
       },
       "10pct": {
-        "recall_mean": 0.6173,
-        "recall_std": 0.0082,
-        "p50_ms_mean": 3.228,
-        "qps_1client_mean": 309.8
+        "recall_mean": 0.5873,
+        "recall_std": 0.0057,
+        "p50_ms_mean": 2.952,
+        "qps_1client_mean": 338.8
       },
       "50pct": {
-        "recall_mean": 0.608,
-        "recall_std": 0.0128,
-        "p50_ms_mean": 2.804,
-        "qps_1client_mean": 356.6
+        "recall_mean": 0.5773,
+        "recall_std": 0.0082,
+        "p50_ms_mean": 2.314,
+        "qps_1client_mean": 432.1
       }
     }
   },
@@ -81,70 +84,70 @@
     "theodb_hnsw": {
       "1pct": [
         {
-          "build_s": 24.48,
-          "recall": 0.976,
-          "p50_ms": 51.061,
-          "qps_1client": 19.6,
+          "build_s": 18.81,
+          "recall": 0.974,
+          "p50_ms": 43.111,
+          "qps_1client": 23.2,
           "queries_used": 50
         },
         {
-          "build_s": 23.42,
-          "recall": 0.972,
-          "p50_ms": 56.45,
-          "qps_1client": 17.7,
+          "build_s": 19.1,
+          "recall": 0.97,
+          "p50_ms": 41.524,
+          "qps_1client": 24.1,
           "queries_used": 50
         },
         {
-          "build_s": 21.99,
-          "recall": 0.972,
-          "p50_ms": 67.656,
-          "qps_1client": 14.8,
+          "build_s": 19.19,
+          "recall": 0.97,
+          "p50_ms": 43.828,
+          "qps_1client": 22.8,
           "queries_used": 50
         }
       ],
       "10pct": [
         {
-          "build_s": 24.48,
-          "recall": 0.594,
-          "p50_ms": 4.904,
-          "qps_1client": 203.9,
+          "build_s": 18.81,
+          "recall": 0.598,
+          "p50_ms": 3.997,
+          "qps_1client": 250.2,
           "queries_used": 50
         },
         {
-          "build_s": 23.42,
-          "recall": 0.606,
-          "p50_ms": 5.31,
-          "qps_1client": 188.3,
+          "build_s": 19.1,
+          "recall": 0.608,
+          "p50_ms": 3.923,
+          "qps_1client": 254.9,
           "queries_used": 50
         },
         {
-          "build_s": 21.99,
-          "recall": 0.612,
-          "p50_ms": 5.39,
-          "qps_1client": 185.5,
+          "build_s": 19.19,
+          "recall": 0.586,
+          "p50_ms": 3.914,
+          "qps_1client": 255.5,
           "queries_used": 50
         }
       ],
       "50pct": [
         {
-          "build_s": 24.48,
-          "recall": 0.598,
-          "p50_ms": 4.122,
-          "qps_1client": 242.6,
+          "build_s": 18.81,
+          "recall": 0.596,
+          "p50_ms": 3.669,
+          "qps_1client": 272.6,
           "queries_used": 50
         },
         {
-          "build_s": 23.42,
-          "recall": 0.592,
-          "p50_ms": 4.819,
-          "qps_1client": 207.5,
+          "build_s": 19.1,
+          "recall": 0.622,
+          "p50_ms": 3.412,
+          "qps_1client": 293.1,
           "queries_used": 50
         },
         {
-          "build_s": 21.99,
-          "recall": 0.562,
-          "p50_ms": 4.832,
-          "qps_1client": 206.9,
+          "build_s": 19.19,
+          "recall": 0.544,
+          "p50_ms": 3.457,
+          "qps_1client": 289.3,
           "queries_used": 50
         }
       ]
@@ -152,70 +155,70 @@
     "pgvector_hnsw": {
       "1pct": [
         {
-          "build_s": 6.47,
-          "recall": 0.964,
-          "p50_ms": 19.185,
-          "qps_1client": 52.1,
+          "build_s": 5.17,
+          "recall": 0.96,
+          "p50_ms": 13.208,
+          "qps_1client": 75.7,
           "queries_used": 50
         },
         {
-          "build_s": 6.61,
-          "recall": 0.974,
-          "p50_ms": 14.99,
-          "qps_1client": 66.7,
+          "build_s": 5.48,
+          "recall": 0.966,
+          "p50_ms": 15.694,
+          "qps_1client": 63.7,
           "queries_used": 50
         },
         {
-          "build_s": 7.33,
-          "recall": 0.964,
-          "p50_ms": 16.682,
-          "qps_1client": 59.9,
+          "build_s": 5.4,
+          "recall": 0.966,
+          "p50_ms": 14.961,
+          "qps_1client": 66.8,
           "queries_used": 50
         }
       ],
       "10pct": [
         {
-          "build_s": 6.47,
-          "recall": 0.628,
-          "p50_ms": 3.376,
-          "qps_1client": 296.2,
+          "build_s": 5.17,
+          "recall": 0.588,
+          "p50_ms": 2.592,
+          "qps_1client": 385.8,
           "queries_used": 50
         },
         {
-          "build_s": 6.61,
-          "recall": 0.616,
-          "p50_ms": 3.34,
-          "qps_1client": 299.4,
+          "build_s": 5.48,
+          "recall": 0.58,
+          "p50_ms": 2.919,
+          "qps_1client": 342.5,
           "queries_used": 50
         },
         {
-          "build_s": 7.33,
-          "recall": 0.608,
-          "p50_ms": 2.968,
-          "qps_1client": 336.9,
+          "build_s": 5.4,
+          "recall": 0.594,
+          "p50_ms": 3.345,
+          "qps_1client": 299.0,
           "queries_used": 50
         }
       ],
       "50pct": [
         {
-          "build_s": 6.47,
-          "recall": 0.59,
-          "p50_ms": 2.85,
-          "qps_1client": 350.8,
+          "build_s": 5.17,
+          "recall": 0.568,
+          "p50_ms": 2.177,
+          "qps_1client": 459.3,
           "queries_used": 50
         },
         {
-          "build_s": 6.61,
-          "recall": 0.618,
-          "p50_ms": 2.607,
-          "qps_1client": 383.6,
+          "build_s": 5.48,
+          "recall": 0.588,
+          "p50_ms": 2.323,
+          "qps_1client": 430.4,
           "queries_used": 50
         },
         {
-          "build_s": 7.33,
-          "recall": 0.616,
-          "p50_ms": 2.956,
-          "qps_1client": 338.2,
+          "build_s": 5.4,
+          "recall": 0.576,
+          "p50_ms": 2.443,
+          "qps_1client": 409.3,
           "queries_used": 50
         }
       ]
