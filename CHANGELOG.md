@@ -14,6 +14,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 - Hybrid search agora aceita um filtro relacional e um idioma de FTS: `ai.hybrid_search_rrf(…, language, filter_sql)` — o `filter_sql` é confinado ao WHERE de ambos os legs (vetorial + lexical) e executa com o privilégio do chamador (SECURITY INVOKER), rejeitando terminador de statement (`;`); `language` parametriza `plainto_tsquery` (antes 'english' fixo) (M53).
+- Leg lexical BM25 opt-in no hybrid search: `ai.hybrid_search_rrf(…, lexical_engine, content_text_col)` — `lexical_engine='bm25'` roteia o leg lexical para `pg_textsearch` (operador `<@>`, ordenação por menor distância) sobre uma coluna TEXT indexada `USING bm25`, com `ts_rank_cd` preservado como default (regressão zero). Falha-rápido tipada (22023) em engine inválido ou `content_text_col` ausente; `0A000` claro quando a extensão `pg_textsearch` não está presente (imagem shipada). Executa a exceção permissiva do ADR 0013 sem reabrir out-of-scope (M53).
 
 ### Changed
 

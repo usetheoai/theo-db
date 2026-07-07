@@ -103,10 +103,12 @@ mod theodb_rs {
         result_limit: i32,
         language: &str,
         filter_sql: Option<&str>,
+        lexical_engine: &str,
+        content_text_col: Option<&str>,
     ) -> TableIterator<'static, (name!(id, String), name!(score, f32))> {
         TableIterator::new(crate::hybrid::run_rrf(
             tbl_text, id_col, content_tsv_col, vector_col, query_text, query_vector_text, k,
-            per_leg_limit, result_limit, language, filter_sql,
+            per_leg_limit, result_limit, language, filter_sql, lexical_engine, content_text_col,
         ))
     }
 
@@ -442,14 +444,16 @@ CREATE FUNCTION ai.hybrid_search_rrf(
     per_leg_limit    int     DEFAULT 20,
     result_limit     int     DEFAULT 5,
     language         text    DEFAULT 'english',
-    filter_sql       text    DEFAULT NULL
+    filter_sql       text    DEFAULT NULL,
+    lexical_engine   text    DEFAULT 'ts_rank_cd',
+    content_text_col text    DEFAULT NULL
 )
 RETURNS TABLE(id text, score real)
 LANGUAGE sql STABLE
 AS $$
   SELECT id, score FROM theodb_rs._hybrid_search_rrf(
     tbl::text, id_col, content_tsv_col, vector_col, query_text, query_vector::text,
-    k, per_leg_limit, result_limit, language, filter_sql)
+    k, per_leg_limit, result_limit, language, filter_sql, lexical_engine, content_text_col)
 $$;
 
 CREATE FUNCTION ai.hybrid_search(config jsonb)
@@ -457,21 +461,26 @@ RETURNS TABLE(id text, score real)
 LANGUAGE sql STABLE
 AS $$ SELECT id, score FROM theodb_rs._hybrid_search_json(config) $$;
 
-COMMENT ON FUNCTION ai.hybrid_search_rrf(regclass, text, text, text, text, vector, int, int, int, text, text) IS
+COMMENT ON FUNCTION ai.hybrid_search_rrf(regclass, text, text, text, text, vector, int, int, int, text, text, text, text) IS
   'Hybrid search: fuse a PostgreSQL FTS leg (ts_rank_cd over a tsvector column) and a pgvector leg (<=>) via '
   'Reciprocal Rank Fusion (score = sum 1/(k+rank), k default 60 — Cormack et al. 2009). Empty legs handled by '
   'FULL OUTER JOIN + COALESCE. query_text feeds FTS and, when query_vector is NULL, is embedded via '
   'theodb.embed. Implemented in Rust (theodb_rs, M19) — orchestrates ONE fusion SQL via SPI (one fusion '
-  'source of truth). Identifier args are %I-quoted (injection-safe). Not granted to PUBLIC.';
+  'source of truth). Identifier args are %I-quoted (injection-safe). language parametrizes plainto_tsquery '
+  '(default english). filter_sql is a caller-privilege (SECURITY INVOKER) relational WHERE predicate confined '
+  'to both legs (rejects '';''). M53: lexical_engine (''ts_rank_cd'' default | ''bm25'') opts the lexical leg '
+  'into pg_textsearch BM25 — bm25 requires content_text_col (the TEXT column indexed USING bm25) and the '
+  'pg_textsearch extension (else 0A000); language is inert under bm25 (analyzer fixed at index build). '
+  'Not granted to PUBLIC.';
 
 COMMENT ON FUNCTION ai.hybrid_search(jsonb) IS
   'Literal spec-06 JSON surface over ai.hybrid_search_rrf (one fusion definition). Implemented in Rust '
   '(theodb_rs, M19). Fail-fast 22023 on missing required keys (table, id_col, content_tsv_col, vector_col). '
   'Not granted to PUBLIC.';
 
-REVOKE ALL ON FUNCTION ai.hybrid_search_rrf(regclass, text, text, text, text, vector, int, int, int, text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION ai.hybrid_search_rrf(regclass, text, text, text, text, vector, int, int, int, text, text, text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION ai.hybrid_search(jsonb) FROM PUBLIC;
-REVOKE ALL ON FUNCTION theodb_rs._hybrid_search_rrf(text, text, text, text, text, text, int, int, int, text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb_rs._hybrid_search_rrf(text, text, text, text, text, text, int, int, int, text, text, text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION theodb_rs._hybrid_search_json(jsonb) FROM PUBLIC;
 "#,
     name = "theodb_hybrid_wrappers",

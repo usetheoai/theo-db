@@ -16,12 +16,12 @@ use serde_json::Value;
 
 use crate::pg::{err_input, err_unsupported};
 
-/// The RRF fusion template. `%1$I`=id_col, `%2$I`=vector_col, `%3$s`=tbl (regclass::text, already quoted),
-/// `%4$I`=content_tsv_col — substituted by Postgres `format()` (injection-safe). The `$1..$5` placeholders
-/// are LITERAL here (format only touches `%` specifiers) and bind at execution: $1=qvec(text→::vector),
-/// $2=query_text, $3=per_leg_limit, $4=k, $5=result_limit. Byte-faithful to sql/40:76-106 (the only change
-/// vs the plpgsql original is `$1::vector`, since qvec crosses the Rust boundary as text).
-const FUSION_TEMPLATE: &str = r#"WITH vec AS (
+/// The RRF fusion template (default `ts_rank_cd` lexical leg). `%1$I`=id_col, `%2$I`=vector_col,
+/// `%3$s`=tbl (regclass::text, already quoted), `%4$I`=lexical column (tsvector), `%5$s`=filter_sql —
+/// substituted by Postgres `format()` (injection-safe). The `$1..$6` placeholders are LITERAL here (format
+/// only touches `%` specifiers) and bind at execution: $1=qvec(text→::vector), $2=query_text,
+/// $3=per_leg_limit, $4=k, $5=result_limit, $6=language(regconfig). Byte-faithful to sql/40:76-106.
+const FUSION_TEMPLATE_TSRANK: &str = r#"WITH vec AS (
     SELECT %1$I AS _id,
            RANK() OVER (ORDER BY %2$I <=> $1::vector) AS rank
     FROM %3$s
@@ -35,6 +35,38 @@ fts AS (
     FROM %3$s
     WHERE $2 IS NOT NULL AND %4$I @@ plainto_tsquery($6::regconfig, $2) AND (%5$s)
     ORDER BY ts_rank_cd(%4$I, plainto_tsquery($6::regconfig, $2)) DESC
+    LIMIT $3
+)
+SELECT COALESCE(vec._id, fts._id)::text AS id,
+       (COALESCE(1.0 / ($4 + vec.rank), 0.0)
+      + COALESCE(1.0 / ($4 + fts.rank), 0.0))::real AS score
+FROM vec
+FULL OUTER JOIN fts ON vec._id = fts._id
+ORDER BY score DESC, id ASC
+LIMIT $5"#;
+
+/// M53 item 2: the BM25 lexical-leg variant. The `vec` CTE and the RRF tail are byte-identical to
+/// `FUSION_TEMPLATE_TSRANK`; only the `fts` CTE changes. `%4$I` is the TEXT column indexed `USING bm25`.
+/// The pg_textsearch `<@>` operator returns the NEGATED BM25 score (distance: smaller = better match), so
+/// the leg orders ASC (best-first) — symmetric to the vector `<=>` leg — NOT `DESC`. There is no `@@`
+/// match-filter (BM25 is a top-k ranker; `LIMIT $3` via Block-Max WAND selects the top matches), which is
+/// byte-faithful to the offline twin `db.bm25_query`. `$6` (language) is NOT referenced here — the analyzer
+/// is fixed at index build time (`text_config`), so `language` is inert for BM25; run_rrf binds only $1..$5
+/// for this template. `%5$s` composes the M53 filter_sql identically to the ts_rank_cd leg.
+const FUSION_TEMPLATE_BM25: &str = r#"WITH vec AS (
+    SELECT %1$I AS _id,
+           RANK() OVER (ORDER BY %2$I <=> $1::vector) AS rank
+    FROM %3$s
+    WHERE %2$I IS NOT NULL AND $1 IS NOT NULL AND (%5$s)
+    ORDER BY %2$I <=> $1::vector
+    LIMIT $3
+),
+fts AS (
+    SELECT %1$I AS _id,
+           RANK() OVER (ORDER BY %4$I <@> $2) AS rank
+    FROM %3$s
+    WHERE $2 IS NOT NULL AND %4$I IS NOT NULL AND (%5$s)
+    ORDER BY %4$I <@> $2
     LIMIT $3
 )
 SELECT COALESCE(vec._id, fts._id)::text AS id,
@@ -61,6 +93,8 @@ pub(crate) fn run_rrf(
     result_limit: i32,
     language: &str,
     filter_sql: Option<&str>,
+    lexical_engine: &str,
+    content_text_col: Option<&str>,
 ) -> Vec<(String, f32)> {
     // Fail-fast, typed (Rule 8) — mirror sql/40:45-57.
     if k <= 0 {
@@ -89,36 +123,70 @@ pub(crate) fn run_rrf(
         err_input("ai.hybrid_search_rrf: filter_sql must be a single boolean predicate (no ';')");
     }
 
+    // M53 item 2: select the lexical leg (ts_rank_cd default | bm25 opt-in). The `%4$I` format slot means
+    // "the lexical column, as the engine interprets it": a tsvector for ts_rank_cd, the raw TEXT column
+    // (indexed `USING bm25`) for bm25. Fail-fast typed (Rule 8) on an invalid engine or a bm25 leg missing
+    // its text column — NEVER silently fall back (a silent fallback would let a caller measure ts_rank_cd
+    // while believing it is BM25). The `bm25` path additionally requires the pg_textsearch extension —
+    // absent on the shipped image, so it surfaces a clear 0A000 (mirrors the embed-seam guard) rather than a
+    // cryptic 42883 mid-query. `language` ($6) is inert for bm25 (analyzer fixed at index build).
+    let (template, lexical_col, binds_language) = match lexical_engine {
+        "ts_rank_cd" => (FUSION_TEMPLATE_TSRANK, content_tsv_col, true),
+        "bm25" => {
+            let text_col = content_text_col.unwrap_or_else(|| {
+                err_input(
+                    "ai.hybrid_search_rrf: lexical_engine='bm25' requires content_text_col (the TEXT column indexed USING bm25)",
+                )
+            });
+            let missing = Spi::get_one::<bool>(
+                "SELECT NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_textsearch')",
+            )
+            .ok()
+            .flatten()
+            .unwrap_or(true);
+            if missing {
+                err_unsupported(
+                    "ai.hybrid_search_rrf: lexical_engine='bm25' requires the pg_textsearch extension (CREATE EXTENSION pg_textsearch, shared_preload_libraries=pg_textsearch) — not present on the shipped image; use lexical_engine='ts_rank_cd' (default)",
+                );
+            }
+            (FUSION_TEMPLATE_BM25, text_col, false)
+        }
+        other => err_input(&format!(
+            "ai.hybrid_search_rrf: lexical_engine must be 'ts_rank_cd' or 'bm25' (got '{other}')"
+        )),
+    };
+
     // Resolve the vector leg's query vector (explicit wins; else embed query_text). Extracted (M25).
     let qvec: Option<String> = resolve_query_vector(query_text, query_vector_text);
 
     // Build the fusion SQL with Postgres-native %I quoting (injection-safe) — one format() call over SPI.
     // `%1$I..%4$I` = identifiers (quoted), `%3$s` = regclass text, `%5$s` = the confined filter predicate.
     // The template is dollar-quoted ($fq$…$fq$); its literal $1..$6 survive and bind at execution.
-    let build_q = format!("SELECT format($fq${FUSION_TEMPLATE}$fq$, $1, $2, $3, $4, $5)");
+    let build_q = format!("SELECT format($fq${template}$fq$, $1, $2, $3, $4, $5)");
     let built = Spi::get_one_with_args::<String>(
         &build_q,
-        &[id_col.into(), vector_col.into(), tbl_text.into(), content_tsv_col.into(), filter.into()],
+        &[id_col.into(), vector_col.into(), tbl_text.into(), lexical_col.into(), filter.into()],
     )
     .ok()
     .flatten()
     .unwrap_or_else(|| err_input("ai.hybrid_search_rrf: could not build fusion query"));
 
-    // Execute the fused query and collect (id, score). SELECT-only → read-only Spi::connect.
+    // Execute the fused query and collect (id, score). SELECT-only → read-only Spi::connect. The bm25
+    // template does NOT reference $6, so bind only $1..$5 for it (binding an unreferenced param would be
+    // rejected by SPI); the ts_rank_cd template references $6 (language::regconfig).
     Spi::connect(|client| {
+        let mut exec_args: Vec<pgrx::datum::DatumWithOid> = vec![
+            qvec.clone().into(),
+            query_text.into(),
+            per_leg_limit.into(),
+            k.into(),
+            result_limit.into(),
+        ];
+        if binds_language {
+            exec_args.push(language.into());
+        }
         let table = client
-            .select(
-                built.as_str(),
-                None,
-                &[
-                    qvec.clone().into(),
-                    query_text.into(),
-                    per_leg_limit.into(),
-                    k.into(),
-                    result_limit.into(),
-                    language.into(),
-                ],
-            )
+            .select(built.as_str(), None, &exec_args)
             .unwrap_or_else(|e| err_input(&format!("ai.hybrid_search_rrf: fusion query failed: {e:?}")));
         let mut out: Vec<(String, f32)> = Vec::with_capacity(table.len());
         for row in table {
@@ -178,9 +246,12 @@ pub(crate) fn run_rrf_json(cfg: Value) -> Vec<(String, f32)> {
     let k = as_i32("k", 60);
     let per_leg_limit = as_i32("per_leg_limit", 20);
     let result_limit = as_i32("result_limit", 5);
-    // M53: optional `language` (FTS regconfig, default english) + `filter_sql` (relational WHERE predicate).
+    // M53: optional `language` (FTS regconfig, default english) + `filter_sql` (relational WHERE predicate)
+    // + `lexical_engine` (ts_rank_cd default | bm25) + `content_text_col` (bm25 TEXT column).
     let language = get_str("language").unwrap_or("english");
     let filter_sql = get_str("filter_sql");
+    let lexical_engine = get_str("lexical_engine").unwrap_or("ts_rank_cd");
+    let content_text_col = get_str("content_text_col");
 
     // Resolve the bare table name to a regclass::text (same as the plpgsql `(config->>'table')::regclass`
     // then `tbl::text`) — Postgres quotes it safely; a non-existent relation raises naturally.
@@ -191,6 +262,6 @@ pub(crate) fn run_rrf_json(cfg: Value) -> Vec<(String, f32)> {
 
     run_rrf(
         &tbl_text, id_col, content_tsv_col, vector_col, query_text, query_vector, k, per_leg_limit,
-        result_limit, language, filter_sql,
+        result_limit, language, filter_sql, lexical_engine, content_text_col,
     )
 }

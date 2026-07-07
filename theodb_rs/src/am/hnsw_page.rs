@@ -1210,4 +1210,42 @@ mod tests {
         )
         .unwrap();
     }
+
+    /// M53 item 2 negative case (Rule 8): lexical_engine='bm25' without content_text_col fails fast (typed
+    /// 22023) — the BM25 leg operates on a raw TEXT column, not the tsvector, so the column is required.
+    #[pgrx::pg_test(error = "ai.hybrid_search_rrf: lexical_engine='bm25' requires content_text_col (the TEXT column indexed USING bm25)")]
+    fn hybrid_bm25_without_text_col_errors() {
+        pgrx::Spi::run("CREATE TEMP TABLE hz (id int, tsv tsvector, emb vector(2))").unwrap();
+        pgrx::Spi::run(
+            "SELECT * FROM ai.hybrid_search_rrf(tbl => 'hz', id_col => 'id', content_tsv_col => 'tsv', \
+             vector_col => 'emb', query_vector => '[1,2]'::vector, lexical_engine => 'bm25')",
+        )
+        .unwrap();
+    }
+
+    /// M53 item 2 negative case (Rule 8): an invalid lexical_engine value fails fast (typed 22023) naming the
+    /// valid values — NO silent fallback to ts_rank_cd (that would let a caller measure the wrong engine).
+    #[pgrx::pg_test(error = "ai.hybrid_search_rrf: lexical_engine must be 'ts_rank_cd' or 'bm25' (got 'okapi')")]
+    fn hybrid_invalid_lexical_engine_errors() {
+        pgrx::Spi::run("CREATE TEMP TABLE hz (id int, tsv tsvector, emb vector(2))").unwrap();
+        pgrx::Spi::run(
+            "SELECT * FROM ai.hybrid_search_rrf(tbl => 'hz', id_col => 'id', content_tsv_col => 'tsv', \
+             vector_col => 'emb', query_vector => '[1,2]'::vector, lexical_engine => 'okapi')",
+        )
+        .unwrap();
+    }
+
+    /// M53 item 2 packaging gate: on the shipped image (no pg_textsearch), lexical_engine='bm25' surfaces a
+    /// clear 0A000 (feature_not_supported) rather than a cryptic 42883 mid-query. The pgrx test instance has
+    /// no pg_textsearch, so this exercises the gate directly (mirrors the embed-seam guard).
+    #[pgrx::pg_test(error = "ai.hybrid_search_rrf: lexical_engine='bm25' requires the pg_textsearch extension (CREATE EXTENSION pg_textsearch, shared_preload_libraries=pg_textsearch) — not present on the shipped image; use lexical_engine='ts_rank_cd' (default)")]
+    fn hybrid_bm25_without_extension_raises_unsupported() {
+        pgrx::Spi::run("CREATE TEMP TABLE hz (id int, body text, emb vector(2))").unwrap();
+        pgrx::Spi::run(
+            "SELECT * FROM ai.hybrid_search_rrf(tbl => 'hz', id_col => 'id', content_tsv_col => 'body', \
+             vector_col => 'emb', query_text => 'x', query_vector => '[1,2]'::vector, \
+             lexical_engine => 'bm25', content_text_col => 'body')",
+        )
+        .unwrap();
+    }
 }
