@@ -2,9 +2,15 @@
 //! ported from the plpgsql `ai.hybrid_search_rrf`/`ai.hybrid_search` (sql/40). The Rust function is the
 //! ENTRYPOINT and owns orchestration; the RRF fusion itself stays ONE SQL string (RANK per leg → FULL
 //! OUTER JOIN → summed COALESCE(1/(k+rank))), run via SPI. We do NOT reimplement RRF/RANK/FULL-OUTER-JOIN
-//! in Rust — that would fork the fusion math (ADR-C / D2: one fusion source of truth). Identifier args are
-//! quoted with Postgres-native `format('%I', …)` over SPI (NOT hand-rolled), so the injection-safety of the
-//! plpgsql version is preserved byte-for-byte (sql/40 used the same `%I`/`%s`/`$n` discipline).
+//! in Rust — that would fork the fusion math (ADR-C / D2: one fusion source of truth). IDENTIFIER args
+//! (id/vector/tsvector/text columns) are quoted with Postgres-native `format('%I', …)` over SPI (NOT
+//! hand-rolled), and VALUE args (qvec/query_text/language) are execution binds (`$1..$6`) — both are
+//! injection-safe. The ONE exception is `filter_sql` (M53): it is RAW caller-privilege SQL interpolated
+//! as `%5$s` (a bare boolean predicate), NOT `%I`-quoted and NOT parametrized. Its safety is *syntactic
+//! confinement* under SECURITY INVOKER (read-only SPI, no privilege boundary crossed — the predicate can
+//! do nothing the caller could not do in a plain query), NOT injection-proofing. NEVER build `filter_sql`
+//! from untrusted input, NEVER wrap this function in SECURITY DEFINER, NEVER GRANT it to a role you intend
+//! to isolate (a subquery in the predicate reads with the caller's privileges by design).
 //!
 //! Legs: vector (`<=>` cosine, pgvector) and FTS (`ts_rank_cd` over a tsvector column, 'english' pinned).
 //! A doc matched by only one retriever still surfaces (FULL OUTER JOIN + COALESCE). Deterministic tie-break
@@ -113,14 +119,21 @@ pub(crate) fn run_rrf(
     if query_text.is_none() && query_vector_text.is_none() {
         err_input("ai.hybrid_search_rrf: provide query_text and/or query_vector");
     }
-    // M53: the relational filter is inlined into BOTH legs' WHERE, syntactically confined in parens
-    // (`AND (<filter>)`). The whole function is SECURITY INVOKER (runs with the CALLER's privilege — no
-    // privilege boundary is crossed), so the filter can do nothing the caller could not do in a plain query.
-    // The one hard confinement guard: reject a statement terminator, so the filter cannot chain a second
-    // statement out of the CTE's WHERE. Absent filter ⇒ `true` (no-op, byte-identical to the pre-M53 legs).
+    // M53: the relational filter is inlined into BOTH legs' WHERE, wrapped in parens (`AND (<filter>)`).
+    // SECURITY INVOKER + read-only SPI + REVOKE-from-PUBLIC mean NO privilege boundary is crossed — a
+    // subquery in the predicate reads only what the caller could already read (this is by design, and is
+    // why filter_sql must never be built from untrusted input; see the module docstring). The guard here is
+    // defense-in-depth *syntactic confinement*, NOT injection-proofing: reject a statement terminator and
+    // SQL comment sequences so the predicate cannot neutralize the closing paren / trailing `ORDER BY`/
+    // `LIMIT` / the second CTE and break out of `( ... )`. It is honestly a blacklist, not a parser — a
+    // read-only subquery still composes (caller-privilege). Absent filter ⇒ `true` (no-op, byte-identical
+    // to the pre-M53 legs). A structured filter API (column/op/value, %I + bind) is the fail-closed
+    // follow-up (backlog).
     let filter = filter_sql.unwrap_or("true");
-    if filter.contains(';') {
-        err_input("ai.hybrid_search_rrf: filter_sql must be a single boolean predicate (no ';')");
+    if filter.contains(';') || filter.contains("--") || filter.contains("/*") || filter.contains("*/") {
+        err_input(
+            "ai.hybrid_search_rrf: filter_sql must be a single boolean predicate (no ';', comment, or chaining) — it is raw caller-privilege SQL, never build it from untrusted input",
+        );
     }
 
     // M53 item 2: select the lexical leg (ts_rank_cd default | bm25 opt-in). The `%4$I` format slot means

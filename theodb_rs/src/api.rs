@@ -466,12 +466,14 @@ COMMENT ON FUNCTION ai.hybrid_search_rrf(regclass, text, text, text, text, vecto
   'Reciprocal Rank Fusion (score = sum 1/(k+rank), k default 60 — Cormack et al. 2009). Empty legs handled by '
   'FULL OUTER JOIN + COALESCE. query_text feeds FTS and, when query_vector is NULL, is embedded via '
   'theodb.embed. Implemented in Rust (theodb_rs, M19) — orchestrates ONE fusion SQL via SPI (one fusion '
-  'source of truth). Identifier args are %I-quoted (injection-safe). language parametrizes plainto_tsquery '
-  '(default english). filter_sql is a caller-privilege (SECURITY INVOKER) relational WHERE predicate confined '
-  'to both legs (rejects '';''). M53: lexical_engine (''ts_rank_cd'' default | ''bm25'') opts the lexical leg '
-  'into pg_textsearch BM25 — bm25 requires content_text_col (the TEXT column indexed USING bm25) and the '
-  'pg_textsearch extension (else 0A000); language is inert under bm25 (analyzer fixed at index build). '
-  'Not granted to PUBLIC.';
+  'source of truth). IDENTIFIER args are %I-quoted and VALUE args are execution binds — both injection-safe. '
+  'language parametrizes plainto_tsquery (default english). WARNING: filter_sql is RAW caller-privilege SQL '
+  '(SECURITY INVOKER, read-only) inlined as a bare boolean predicate — NOT %I-quoted, NOT parametrized; its '
+  'safety is syntactic confinement (rejects '';'' and SQL comments), NOT injection-proofing. NEVER build it '
+  'from untrusted input, NEVER wrap this function in SECURITY DEFINER, NEVER GRANT to a role you intend to '
+  'isolate. M53: lexical_engine (''ts_rank_cd'' default | ''bm25'') opts the lexical leg into pg_textsearch '
+  'BM25 — bm25 requires content_text_col (the TEXT column indexed USING bm25) and the pg_textsearch extension '
+  '(else 0A000); language is inert under bm25 (analyzer fixed at index build). Not granted to PUBLIC.';
 
 COMMENT ON FUNCTION ai.hybrid_search(jsonb) IS
   'Literal spec-06 JSON surface over ai.hybrid_search_rrf (one fusion definition). Implemented in Rust '

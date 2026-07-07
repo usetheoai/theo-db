@@ -1198,15 +1198,30 @@ mod tests {
         assert!(n.is_some(), "language => 'simple' must run without error");
     }
 
-    /// M53 item 1 negative case (Rule 8): a filter_sql containing a statement terminator is rejected — the
-    /// confinement guard prevents chaining a second statement out of the CTE WHERE.
-    #[pgrx::pg_test(error = "ai.hybrid_search_rrf: filter_sql must be a single boolean predicate (no ';')")]
+    /// M53 item 1 negative case (Rule 8): a filter_sql containing a statement terminator is rejected. The
+    /// guard is syntactic confinement (blacklist), NOT injection-proofing — a read-only subquery still
+    /// composes with the caller's own privileges by design (see the hybrid.rs module docstring).
+    #[pgrx::pg_test(error = "ai.hybrid_search_rrf: filter_sql must be a single boolean predicate (no ';', comment, or chaining) — it is raw caller-privilege SQL, never build it from untrusted input")]
     fn hybrid_filter_rejects_statement_terminator() {
         pgrx::Spi::run("CREATE TEMP TABLE hz (id int, tsv tsvector, emb vector(2))").unwrap();
         pgrx::Spi::run("INSERT INTO hz VALUES (1, to_tsvector('a'), '[1,2]')").unwrap();
         pgrx::Spi::run(
             "SELECT * FROM ai.hybrid_search_rrf(tbl => 'hz', id_col => 'id', content_tsv_col => 'tsv', \
              vector_col => 'emb', query_vector => '[1,2]'::vector, filter_sql => 'true; DROP TABLE hz')",
+        )
+        .unwrap();
+    }
+
+    /// M53 security hardening (council-security F1): the confinement guard also rejects SQL comment
+    /// sequences (`--`), so the predicate cannot comment out the closing paren / trailing clauses to break
+    /// out of `( ... )`. Defense-in-depth on the SECURITY INVOKER path (does not claim full parse safety).
+    #[pgrx::pg_test(error = "ai.hybrid_search_rrf: filter_sql must be a single boolean predicate (no ';', comment, or chaining) — it is raw caller-privilege SQL, never build it from untrusted input")]
+    fn hybrid_filter_rejects_sql_comment() {
+        pgrx::Spi::run("CREATE TEMP TABLE hz (id int, tsv tsvector, emb vector(2))").unwrap();
+        pgrx::Spi::run("INSERT INTO hz VALUES (1, to_tsvector('a'), '[1,2]')").unwrap();
+        pgrx::Spi::run(
+            "SELECT * FROM ai.hybrid_search_rrf(tbl => 'hz', id_col => 'id', content_tsv_col => 'tsv', \
+             vector_col => 'emb', query_vector => '[1,2]'::vector, filter_sql => 'true) -- ')",
         )
         .unwrap();
     }
