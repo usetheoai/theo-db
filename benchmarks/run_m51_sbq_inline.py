@@ -61,19 +61,15 @@ def _load():
 
 
 def _make_dataset(cur, table, n, dim, seed):
-    import random
-    rnd = random.Random(seed)
+    # M57: stream the gaussian corpus via COPY (O(1) client RAM, fast at 1M) instead of per-row INSERT — reuses
+    # the M55 streaming loader (Rule 9). The `executemany` path is O(n) round-trips and unusable at 1M scale.
+    import os
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from run_m55_vacuum_wall import _copy_vectors
     cur.execute(f"DROP TABLE IF EXISTS {table}")
     cur.execute(f"CREATE TABLE {table} (id int, v vector({dim}))")
-    rows = []
-    for i in range(n):
-        vec = "[" + ",".join(f"{rnd.gauss(0, 1):.4f}" for _ in range(dim)) + "]"
-        rows.append((i, vec))
-        if len(rows) >= 1000:
-            cur.executemany(f"INSERT INTO {table} VALUES (%s,%s)", rows)
-            rows = []
-    if rows:
-        cur.executemany(f"INSERT INTO {table} VALUES (%s,%s)", rows)
+    _copy_vectors(cur, table, 0, n, dim, seed)
     cur.execute(f"ANALYZE {table}")
 
 
