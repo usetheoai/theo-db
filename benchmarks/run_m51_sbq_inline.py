@@ -70,31 +70,21 @@ def _make_dataset(cur, table, n, dim, seed):
     cur.execute(f"CREATE TABLE {table} (id int, v vector({dim}))")
 
     class _NpReader:
+        # Return ONE full chunk per read() (ignoring `size`) — psycopg2 streams whatever we return. This avoids
+        # the O(n²) trap of buffering a big chunk then slicing it `size` bytes at a time (which quadratic-blows at
+        # 1M). Each chunk is generated fresh with numpy, so client RAM stays O(chunk), not O(n).
         def __init__(self):
             self.i = 0
-            self.buf = ""
 
-        def _fill(self):
+        def read(self, size=-1):
             m = min(20000, n - self.i)
             if m <= 0:
-                return False
+                return ""
             arr = rng.standard_normal((m, dim)).astype(np.float32)
             fmt = np.char.mod("%.4f", arr)  # (m, dim) string array — the %.4f formatting runs at C speed
             base = self.i
-            self.buf += "".join(f"{base + r}\t[" + ",".join(fmt[r]) + "]\n" for r in range(m))
             self.i += m
-            return True
-
-        def read(self, size=-1):
-            if size is None or size < 0:
-                while self._fill():
-                    pass
-                out, self.buf = self.buf, ""
-                return out
-            while len(self.buf) < size and self._fill():
-                pass
-            out, self.buf = self.buf[:size], self.buf[size:]
-            return out
+            return "".join(f"{base + r}\t[" + ",".join(fmt[r]) + "]\n" for r in range(m))
 
     cur.copy_expert(f"COPY {table} (id, v) FROM STDIN", _NpReader())
     cur.execute(f"ANALYZE {table}")
