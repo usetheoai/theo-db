@@ -41,7 +41,7 @@ CONTAINER = os.environ.get("THEODB_BENCH_CONTAINER", "theodb-bench")
 
 DIM = 768
 SEED = 42
-SCALES = [100000, 500000]
+SCALES = [100000, 250000]  # 500k+ nao cabe na dev box (RAM); 1M projetado O(N)
 POST_INDEX_ROWS = 500  # rows inserted AFTER the index build → land in pending → trip the fold
 # GUC that gates the fold: pending_pages > threshold. Set to 0 so the POST_INDEX_ROWS pending trips it.
 # The exact name is confirmed at runtime (SHOW); a SHOW failure is logged as a WARN, not fatal.
