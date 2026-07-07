@@ -14,7 +14,7 @@ use pgrx::prelude::*;
 use crate::am::options::{lists_from_relation, DEFAULT_LISTS};
 /// HNSW build params for the persisted AM (mirror the SQL-callable defaults).
 pub(crate) const HNSW_M: usize = 16;
-const HNSW_EF_CONSTRUCTION: usize = 64;
+pub(crate) const HNSW_EF_CONSTRUCTION: usize = 64;
 const BUILD_SEED: u64 = 42;
 
 /// Collected during the heap scan (one entry per live, non-NULL-vector heap tuple).
@@ -162,6 +162,22 @@ pub unsafe extern "C-unwind" fn aminsert(
     crate::am::lock::index_shared(indexrel);
     let v = datum_to_vec_f32(*values);
     let encoded = tid::encode(heap_tid);
+    // M56 fase 2 (DoD-1): for an HNSW structured index, try to REUSE a tombstoned slot via a proper in-place insert
+    // (search + link, pgvector `hnswinsert.c` pattern) BEFORE growing the pending region — this bounds relation
+    // growth under DELETE+INSERT churn (slot-reuse). `Ok(false)` ⇒ no reusable v1 slot ⇒ fall through to pending
+    // (the O(1) path, unchanged). The share lock excludes the compaction fold (exclusive); the atomic per-slot
+    // claim in `write_reused_element` makes concurrent inserts safe.
+    if let Ok(magic) = page::peek_magic(indexrel) {
+        if magic == crate::am::hnsw_page::HNSW_STRUCT_MAGIC {
+            if let Ok(meta) = crate::am::hnsw_page::read_meta(indexrel) {
+                match crate::am::hnsw_page::insert_inplace(indexrel, &meta, encoded, &v) {
+                    Ok(true) => return true, // reused a tombstoned slot — done, relation did not grow
+                    Ok(false) => {}          // no reusable slot — fall through to the pending append
+                    Err(e) => pg_sys::error!("theodb am insert (in-place): {e}"),
+                }
+            }
+        }
+    }
     match page::append_pending(indexrel, encoded, &v) {
         Ok(()) => true,
         Err(e) => pg_sys::error!("theodb am insert: {e}"),

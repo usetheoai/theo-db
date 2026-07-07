@@ -576,7 +576,10 @@ pub(crate) unsafe fn find_reusable_slot(rel: pg_sys::Relation, meta: &HnswMeta, 
 pub(crate) unsafe fn write_reused_element(rel: pg_sys::Relation, elem_addr: Addr, tid: i64, vec: &[f32]) -> bool {
     let (blk, off) = elem_addr;
     page::modify_item_at(rel, blk, off, |item| {
-        if item.len() < ELEM_HEADER || item[E_TAG] != ELEM_TAG {
+        // Atomic claim: revive ONLY a still-tombstoned slot. `modify_item_at` holds the buffer EXCLUSIVE, so two
+        // concurrent inserts racing for the same slot serialize here — the first flips `deleted=0` and wins; the
+        // second sees `deleted==0` and returns false (the caller then falls back to `append_pending`). No lost write.
+        if item.len() < ELEM_HEADER || item[E_TAG] != ELEM_TAG || item[E_DELETED] == 0 {
             return false;
         }
         let dim = u16::from_le_bytes([item[E_DIM], item[E_DIM + 1]]) as usize;
@@ -682,6 +685,66 @@ pub(crate) unsafe fn insert_search_ground(
     let mut cands: Vec<(f64, Addr)> = nodes.iter().map(|(c, _)| (c.d, (c.blk, c.off))).collect();
     cands.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
     Ok(cands.into_iter().take(m0).map(|(_, a)| a).collect())
+}
+
+/// M56 fase 2 (T3.1): the in-place insert with SLOT-REUSE — revive a tombstoned slot as the new node Z, properly
+/// linked into the graph (`pgvector/hnswinsert.c` pattern adapted to the M35 layout). Returns `Ok(true)` iff a slot
+/// was reused (the caller is done), `Ok(false)` iff there is no reusable v1 slot (the caller falls back to
+/// `append_pending`). Steps, all crash-safe per page (GenericXLog), ordered so a crash never corrupts the graph:
+///   1. find a reusable tombstoned v1 slot (`None` ⇒ fallback);
+///   2. search the CURRENT graph for Z's `m0` nearest LIVE neighbors (the tombstone is navigated-through, not Z);
+///   3. revive the slot as Z (tid + vec, `deleted=0`) — v1-gated, `false` ⇒ fallback;
+///   4. set Z's ground neighbors (forward links);
+///   5. add Z to each neighbor's ground list IF it has room (backward links; skip-if-full is a valid asymmetric
+///      HNSW edge — the fold re-balances). Z's inbound arcs Y→slot (inherited from the reused tombstone) already
+///      make Z reachable, correctly scored by its own vector, so recall is preserved (measured in T4).
+pub(crate) unsafe fn insert_inplace(
+    rel: pg_sys::Relation,
+    meta: &HnswMeta,
+    tid: i64,
+    vec: &[f32],
+) -> Result<bool, String> {
+    if meta.sbq_bits > 0 {
+        return Ok(false); // v2/SBQ slot revive needs Z's recomputed inline code — tracked follow-up
+    }
+    let (m, m0) = (meta.m as usize, meta.m0 as usize);
+    let slot = match find_reusable_slot(rel, meta, 0) {
+        Some(s) => s,
+        None => return Ok(false),
+    };
+    // (2) find Z's neighbors in the CURRENT graph, before the slot becomes Z.
+    let neighbors = insert_search_ground(rel, meta, vec, crate::am::build::HNSW_EF_CONSTRUCTION)?;
+    // (3) revive the slot as Z (v1 only).
+    if !write_reused_element(rel, slot, tid, vec) {
+        return Ok(false);
+    }
+    // (4) set Z's ground neighbors. Read Z's kept level + neighbor-tuple address.
+    let (zlvl, znbr) = {
+        let zb = page::read_page_item_at(rel, slot.0, slot.1)?;
+        let z = decode_element(&zb)?;
+        (z.level as usize, z.nbr_addr)
+    };
+    set_ground_neighbors_inplace(rel, znbr, zlvl, m, m0, &neighbors);
+    // (5) backward links: add Z (element addr == `slot`) to each neighbor's ground list if it has a free slot.
+    for &n in &neighbors {
+        if n == slot {
+            continue;
+        }
+        let (nlvl, nnbr) = {
+            let nb = page::read_page_item_at(rel, n.0, n.1)?;
+            let ne = decode_element(&nb)?;
+            (ne.level as usize, ne.nbr_addr)
+        };
+        let mut ground = {
+            let nnb = page::read_page_item_at(rel, nnbr.0, nnbr.1)?;
+            decode_neighbors(&nnb, nlvl, 0, m, m0)?
+        };
+        if ground.len() < m0 && !ground.contains(&slot) {
+            ground.push(slot);
+            set_ground_neighbors_inplace(rel, nnbr, nlvl, m, m0, &ground);
+        }
+    }
+    Ok(true)
 }
 
 // (M48) The old in-place `rewrite_structured` was replaced by the crash-safe `fold::fold` (meta-pivot) — it
@@ -1799,6 +1862,55 @@ mod tests {
                 .sum();
             assert!(d < 0.01, "nearest candidate is node 12 itself (d={d})");
             pg_sys::index_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+        }
+    }
+
+    /// M56 fase 2 T4.1 (ACCEPTANCE — DoD-1 slot-reuse): after tombstones exist, `aminsert` REUSES them via a proper
+    /// in-place insert instead of growing the pending region — the tombstones are reclaimed (count → 0) AND each new
+    /// row is properly linked (found by an index scan on its own vector). This is the end-to-end slot-reuse.
+    #[pgrx::pg_test]
+    fn aminsert_reuses_tombstoned_slots_and_links_new_rows() {
+        pgrx::Spi::run("CREATE TABLE re (id int PRIMARY KEY, e vector(4))").unwrap();
+        for i in 0..30i32 {
+            let (a, b, c, d) = (i as f32, (i % 7) as f32, (i % 5) as f32, i as f32 * 0.1);
+            pgrx::Spi::run(&format!("INSERT INTO re VALUES ({i}, '[{a},{b},{c},{d}]')")).unwrap();
+        }
+        pgrx::Spi::run("CREATE INDEX re_idx ON re USING theodb_hnsw (e)").unwrap();
+        pgrx::Spi::run("SET theodb_hnsw.ef_search = 200").unwrap();
+
+        // Tombstone 5 index slots (ids 0..5) via the FFI sweep — the post-DELETE/VACUUM state.
+        let dead: Vec<i64> = (0..5i32).map(|id| heap_tid_i64("re", id)).collect();
+        unsafe {
+            let oid: pg_sys::Oid = pgrx::Spi::get_one("SELECT 're_idx'::regclass::oid").unwrap().expect("oid");
+            let rel = pg_sys::index_open(oid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+            let meta = read_meta(rel).expect("read_meta");
+            let mut is_dead = |t: i64| dead.contains(&t);
+            assert_eq!(tombstone_sweep(rel, &meta, &mut is_dead), 5, "5 tombstones created");
+            assert_eq!(count_tombstones(rel, &meta), 5, "5 tombstones present");
+            pg_sys::index_close(rel, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+        }
+
+        // Insert 5 NEW rows (near live nodes 10..15 → real neighbors) → aminsert must REUSE the 5 tombstoned slots.
+        for i in 0..5i32 {
+            let (id, base) = (100 + i, 10 + i);
+            let (a, b, c, d) = (base as f32, (base % 7) as f32, (base % 5) as f32, base as f32 * 0.1 + 0.01);
+            pgrx::Spi::run(&format!("INSERT INTO re VALUES ({id}, '[{a},{b},{c},{d}]')")).unwrap();
+        }
+        unsafe {
+            let oid: pg_sys::Oid = pgrx::Spi::get_one("SELECT 're_idx'::regclass::oid").unwrap().expect("oid");
+            let rel = pg_sys::index_open(oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            let meta = read_meta(rel).expect("read_meta");
+            assert_eq!(count_tombstones(rel, &meta), 0, "all 5 tombstones were REUSED by the 5 inserts (no pending growth)");
+            pg_sys::index_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+        }
+
+        // Each new row is found by an index scan on its own vector (proves the in-place insert LINKED it).
+        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        for i in 0..5i32 {
+            let id = 100 + i;
+            let q: String = pgrx::Spi::get_one(&format!("SELECT e::text FROM re WHERE id = {id}")).unwrap().unwrap();
+            let got = topk_ids_tbl("re", &q, 1);
+            assert!(got.contains(&id), "new row {id} is found by the index scan on its own vector (got {got:?})");
         }
     }
 }
