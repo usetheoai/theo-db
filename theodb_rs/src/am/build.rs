@@ -213,11 +213,16 @@ pub(crate) unsafe fn vacuum_delete_inplace(
         let mut is_dead = |id: i64| dead(id);
         crate::am::hnsw_page::tombstone_sweep(indexrel, &meta, &mut is_dead);
     } // `is_dead` (which borrowed `dead`) is dropped here — `dead` is free again for the compaction path.
-    // Ratio-triggered compaction: reclaim tombstone space + re-densify only when it grows past the GUC %.
+    // Ratio-triggered compaction: reclaim + re-densify (and REPAIR the graph) once churn passes the GUC %. The
+    // trigger counts CHURN (`version>0` = tombstones + slots revived by reuse), not just current tombstones — else
+    // slot-reuse (which consumes tombstones before they accumulate) would suppress the fold and let the incremental
+    // -insert degradation compound (the M56 fase-2 churn benchmark measured recall collapsing). The live count
+    // returned below is still node_count − tombstones (revived slots are live).
     let total_tomb = crate::am::hnsw_page::count_tombstones(indexrel, &meta) as u64;
+    let churned = crate::am::hnsw_page::count_churned(indexrel, &meta) as u64;
     let node_count = meta.node_count as u64;
     let pct = crate::am::guc::hnsw_tombstone_compact_pct() as u64;
-    if pct > 0 && node_count > 0 && total_tomb * 100 > node_count * pct {
+    if pct > 0 && node_count > 0 && churned * 100 > node_count * pct {
         // Compaction = the full crash-safe fold (takes advisory EXCLUSIVE); `enumerate_entries` drops tombstones.
         return vacuum_rebuild(indexrel, dead);
     }

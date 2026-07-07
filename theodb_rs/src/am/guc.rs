@@ -72,11 +72,14 @@ pub(crate) fn hnsw_tombstone_compact_pct() -> i32 {
 
 /// M56 fase 2 — `SET theodb.hnsw_slot_reuse = on|off`: when ON, `aminsert` REUSES a tombstoned element slot via a
 /// proper in-place insert (search + link) before growing the pending region, bounding relation growth under
-/// DELETE+INSERT churn. **Default OFF** — the churn benchmark (`docs/benchmarks/m56-slot-reuse-churn.md`) measured
-/// that slot-reuse SUPPRESSES the ratio-triggered compaction (it keeps tombstones below the threshold, so the fold
-/// that REPAIRS the graph never fires) and recall@10 collapses (~0.57 vs ~0.95 with the default navigate-through +
-/// fold path). Slot-reuse bounds index SIZE but trades away RECALL — a bad trade, so it is OFF by default and
-/// opt-in for operators who accept it (or once the insert-linking quality / a reuse-driven repair trigger lands).
+/// DELETE+INSERT churn. **Default OFF.** The churn benchmark (`docs/benchmarks/m56-slot-reuse-churn.md`) drove the
+/// design: the original slot-reuse SUPPRESSED the ratio-compaction (tombstones consumed before the threshold, so
+/// the graph-REPAIRING fold never fired) and recall@10 collapsed to ~0.57. The fix — reuse only clean level-0
+/// non-entry slots + trigger the fold on CHURN (`count_churned`, not just tombstones) — makes it recall-SAFE
+/// (~0.955). BUT the benchmark then showed the net benefit is MARGINAL: the size win is ~1.04–1.18× and slot-reuse
+/// never beats the plain navigate-through + fold path on recall. So it stays OFF by default (the simpler
+/// navigate-through + fold is the recommended path), opt-in for niche churn-heavy workloads that want the marginal
+/// between-fold size win.
 pub(crate) static HNSW_SLOT_REUSE: GucSetting<bool> = GucSetting::<bool>::new(false);
 
 /// Whether `aminsert` should reuse tombstoned slots in place (M56 fase 2).

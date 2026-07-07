@@ -544,6 +544,24 @@ pub(crate) unsafe fn count_tombstones(rel: pg_sys::Relation, meta: &HnswMeta) ->
     n
 }
 
+/// M56 fase 2: count CHURNED element slots — those whose `version > 0`, i.e. tombstoned OR revived-by-reuse since
+/// the last fold (which resets `version` to 0 on rebuild). This is the trigger for the compaction that REPAIRS the
+/// graph: with slot-reuse ON, tombstones are consumed by inserts before they reach the tombstone-ratio threshold,
+/// so a tombstone-only trigger never fires and the incremental-insert degradation is never repaired (the churn
+/// benchmark measured recall collapsing). Triggering on `version > 0` counts BOTH tombstones and reused slots, so
+/// the fold fires under reuse churn too, keeping recall bounded. SHARE-locked read.
+pub(crate) unsafe fn count_churned(rel: pg_sys::Relation, meta: &HnswMeta) -> u32 {
+    let mut n = 0u32;
+    for blk in meta.elem_first..(meta.elem_first + meta.elem_npages) {
+        for item in page::read_all_page_items(rel, blk).unwrap_or_default() {
+            if item.len() >= ELEM_HEADER && item[E_TAG] == ELEM_TAG && item[E_VERSION] != 0 {
+                n += 1;
+            }
+        }
+    }
+    n
+}
+
 /// M56 fase 2 (T1.1 — RepairGraph/in-place insert slot-reuse): find a tombstoned element slot reusable for a
 /// NEW node of level `need_level` — a slot whose element is `deleted` AND whose stored level ≥ `need_level`, so
 /// the new node's fixed-per-level neighbor tuple (`level*m + m0` slots) fits where the old node's did (ADR-R1).
@@ -556,8 +574,15 @@ pub(crate) unsafe fn find_reusable_slot(rel: pg_sys::Relation, meta: &HnswMeta, 
             Err(_) => continue,
         };
         for (off, bytes) in items {
+            // Never reuse the entry node's slot — it must keep its high level + entry role, else the descent from
+            // meta.entry would read garbage upper-layer links. Match the level EXACTLY so the revived node Z is a
+            // CLEAN node of that level (no stale upper-layer links inherited from a higher-level tombstone), which
+            // the churn benchmark showed is required to keep recall from collapsing.
+            if blk == meta.entry_blkno && off == meta.entry_offno {
+                continue;
+            }
             if let Ok(ev) = decode_element(&bytes) {
-                if ev.deleted && ev.level as usize >= need_level {
+                if ev.deleted && ev.level as usize == need_level {
                     return Some((blk, off));
                 }
             }
@@ -1745,20 +1770,24 @@ mod tests {
             pgrx::Spi::run(&format!("INSERT INTO fr VALUES ({i}, '[{a},{b},{c},{d}]')")).unwrap();
         }
         pgrx::Spi::run("CREATE INDEX fr_idx ON fr USING theodb_hnsw (e)").unwrap();
-        let dead_tid = heap_tid_i64("fr", 5);
+        // Tombstone a batch (ids 0..12) so at least one is a level-0 non-entry node (find_reusable_slot matches
+        // level EXACTLY and skips the entry).
+        let dead: Vec<i64> = (0..12i32).map(|id| heap_tid_i64("fr", id)).collect();
         unsafe {
             let oid: pg_sys::Oid = pgrx::Spi::get_one("SELECT 'fr_idx'::regclass::oid").unwrap().expect("oid");
             let rel = pg_sys::index_open(oid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
             let meta = read_meta(rel).expect("read_meta");
             assert!(find_reusable_slot(rel, &meta, 0).is_none(), "no tombstones ⇒ no reusable slot");
-            let mut is_dead = |tid: i64| tid == dead_tid;
-            assert_eq!(tombstone_sweep(rel, &meta, &mut is_dead), 1, "tombstone node id=5");
+            let mut is_dead = |tid: i64| dead.contains(&tid);
+            assert_eq!(tombstone_sweep(rel, &meta, &mut is_dead), 12, "tombstone 12 nodes");
             let slot = find_reusable_slot(rel, &meta, 0);
-            assert!(slot.is_some(), "after tombstoning, a level-0 reusable slot exists");
+            assert!(slot.is_some(), "a level-0 non-entry reusable slot exists among the 12 tombstones");
             let (blk, off) = slot.unwrap();
+            assert!((blk, off) != (meta.entry_blkno, meta.entry_offno), "never returns the entry slot");
             let item = page::read_page_item_at(rel, blk, off).expect("read slot");
-            assert!(decode_element(&item).unwrap().deleted, "the found slot is the tombstone");
-            assert!(find_reusable_slot(rel, &meta, 99).is_none(), "no slot has level ≥ 99 (nbr tuple wouldn't fit)");
+            let ev = decode_element(&item).unwrap();
+            assert!(ev.deleted && ev.level == 0, "the found slot is a level-0 tombstone");
+            assert!(find_reusable_slot(rel, &meta, 99).is_none(), "no slot has level == 99");
             pg_sys::index_close(rel, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
         }
     }
@@ -1879,35 +1908,41 @@ mod tests {
         pgrx::Spi::run("SET theodb_hnsw.ef_search = 200").unwrap();
         pgrx::Spi::run("SET theodb.hnsw_slot_reuse = on").unwrap(); // opt-in (default OFF — recall trade, see guc.rs)
 
-        // Tombstone 5 index slots (ids 0..5) via the FFI sweep — the post-DELETE/VACUUM state.
-        let dead: Vec<i64> = (0..5i32).map(|id| heap_tid_i64("re", id)).collect();
-        unsafe {
+        // Tombstone 12 index slots (ids 0..12) via the FFI sweep — the post-DELETE/VACUUM state.
+        let dead: Vec<i64> = (0..12i32).map(|id| heap_tid_i64("re", id)).collect();
+        let before = unsafe {
             let oid: pg_sys::Oid = pgrx::Spi::get_one("SELECT 're_idx'::regclass::oid").unwrap().expect("oid");
             let rel = pg_sys::index_open(oid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
             let meta = read_meta(rel).expect("read_meta");
             let mut is_dead = |t: i64| dead.contains(&t);
-            assert_eq!(tombstone_sweep(rel, &meta, &mut is_dead), 5, "5 tombstones created");
-            assert_eq!(count_tombstones(rel, &meta), 5, "5 tombstones present");
+            assert_eq!(tombstone_sweep(rel, &meta, &mut is_dead), 12, "12 tombstones created");
+            let c = count_tombstones(rel, &meta);
             pg_sys::index_close(rel, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
-        }
+            c
+        };
+        assert_eq!(before, 12, "12 tombstones present before the inserts");
 
-        // Insert 5 NEW rows (near live nodes 10..15 → real neighbors) → aminsert must REUSE the 5 tombstoned slots.
-        for i in 0..5i32 {
-            let (id, base) = (100 + i, 10 + i);
+        // Insert 12 NEW rows (near live nodes 12..24) → aminsert REUSES the level-0 tombstoned slots (the rest fall
+        // to pending). At least SOME tombstones are reclaimed (count drops), proving the reuse path is exercised.
+        for i in 0..12i32 {
+            let (id, base) = (100 + i, 12 + i);
             let (a, b, c, d) = (base as f32, (base % 7) as f32, (base % 5) as f32, base as f32 * 0.1 + 0.01);
             pgrx::Spi::run(&format!("INSERT INTO re VALUES ({id}, '[{a},{b},{c},{d}]')")).unwrap();
         }
-        unsafe {
+        let after = unsafe {
             let oid: pg_sys::Oid = pgrx::Spi::get_one("SELECT 're_idx'::regclass::oid").unwrap().expect("oid");
             let rel = pg_sys::index_open(oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
             let meta = read_meta(rel).expect("read_meta");
-            assert_eq!(count_tombstones(rel, &meta), 0, "all 5 tombstones were REUSED by the 5 inserts (no pending growth)");
+            let c = count_tombstones(rel, &meta);
             pg_sys::index_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
-        }
+            c
+        };
+        assert!(after < before, "some tombstones were REUSED by the inserts (count {after} < {before})");
 
-        // Each new row is found by an index scan on its own vector (proves the in-place insert LINKED it).
+        // Each new row is found by an index scan on its own vector (reused → linked in the graph; non-reused →
+        // pending, scanned brute-force). Either way the in-place insert (or pending fallback) keeps it findable.
         pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
-        for i in 0..5i32 {
+        for i in 0..12i32 {
             let id = 100 + i;
             let q: String = pgrx::Spi::get_one(&format!("SELECT e::text FROM re WHERE id = {id}")).unwrap().unwrap();
             let got = topk_ids_tbl("re", &q, 1);
