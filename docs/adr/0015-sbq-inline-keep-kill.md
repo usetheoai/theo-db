@@ -13,8 +13,10 @@ variância; senão honest-negative + ADR mantendo f32. Este ADR registra a decis
 
 ## Evidência medida (`docs/benchmarks/m51-sbq-inline.{md,json}`, n=25k×128, cosine, 3 runs)
 
-- **Recall gate ≥0.99: ATINGIDO.** SBQ-inline (8-bit, ef=400, over_fetch=16) → recall@10 = **0.9993**; é o único
-  spec que ultrapassa 0.99 (f32/pgvector topam ~0.93–0.95). Correção do read path provada por 12 pg_test.
+- **Recall gate ≥0.99: ATINGIDO.** SBQ-inline (8-bit, ef=400, over_fetch=16) → recall@10 = **0.9993** — a prova de
+  que o read path recupera recall corretamente. (Único spec >0.99 NESTE benchmark, mas por comparação **não-casada**:
+  os baselines f32/pgvector só foram varridos até ef=400; a ef≈6400 casado atingiriam recall comparável — UNBENCHMARKED,
+  ver `m51-sbq-inline.md § 1`.) Correção do read path provada por 12+ pg_test.
 - **QPS a 25k: SBQ NÃO é mais rápido** — paridade-a-mais-lento vs f32 no recall casado (of=2: 0.946@93qps vs f32
   0.93@95qps); no gate ≥0.99 custa QPS (27–38 qps). **Sem pressão de memória** (o corpus f32 cabe em RAM a 25k), a
   compressão do SBQ não tem onde ganhar QPS — consistente com o veredito do M50.

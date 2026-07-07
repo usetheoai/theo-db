@@ -36,6 +36,8 @@ pgvector` só é mensurável em **escala com pressão de memória** (≥250k @15
 (o QPS a esta box contendida é poluído). Requer: box dedicada/quieta OU o streaming build do M55 (`collect_corpus`
 materializa o corpus em RAM sem teto). Ver `docs/adr/0015-sbq-inline-keep-kill.md` (critério de reabertura da
 decisão de composição) + `docs/benchmarks/m51-sbq-inline.md § 4`. Prioridade: ALTA (é o gate de valor do M51).
+> **Nota de review (council-vector-ann):** o mesmo run de escala deve incluir um ponto f32 a `ef_search` elevado (≥1600, exige subir o cap MAX_EF_SEARCH=1000) para fechar o UNBENCHMARKED do teto de recall casado — converte a nota honesta atual em medição.
+
 
 ## [M51 review L1] Teste de crash-safety end-to-end do fold v2 (SBQ)
 council-index-storage (não-bloqueante): adicionar um pg_test que builda `WITH (sbq_bits=4)`, dispara
