@@ -51,11 +51,12 @@ const SLOT: usize = 6; // (u32 blkno, u16 offno)
 const fn maxalign(n: usize) -> usize {
     (n + 7) & !7
 }
-fn elem_size(dim: usize) -> usize {
-    ELEM_HEADER + dim * 4
+/// Element tuple size: header + f32 vector + optional trailing SBQ code (`code_len` bytes; 0 ⇒ v1 f32-only).
+fn elem_size(dim: usize, code_len: usize) -> usize {
+    ELEM_HEADER + dim * 4 + code_len
 }
-fn elems_per_page(dim: usize) -> usize {
-    (USABLE / (ITEMID + maxalign(elem_size(dim)))).max(1)
+fn elems_per_page(dim: usize, code_len: usize) -> usize {
+    (USABLE / (ITEMID + maxalign(elem_size(dim, code_len)))).max(1)
 }
 /// Total neighbor slots for a node at `level`: `m` per upper layer (`level` of them) + `m0` on the ground.
 fn nbr_slots(level: usize, m: usize, m0: usize) -> usize {
@@ -90,6 +91,10 @@ pub(crate) struct HnswMeta {
     pub(crate) elem_npages: u32,
     pub(crate) nbr_first: u32,
     pub(crate) nbr_npages: u32,
+    /// M51 layout v2: SBQ bits-per-dim (0 = f32-only / legacy v1). > 0 ⇒ `codebook` carries the persisted
+    /// quantizer (`SbqQuantizer::to_meta_bytes`) so the scan reproduces the build-time quantization.
+    pub(crate) sbq_bits: u8,
+    pub(crate) codebook: Vec<u8>,
 }
 
 impl HnswMeta {
@@ -99,12 +104,17 @@ impl HnswMeta {
     }
 }
 
-const META_LEN: usize = 4 + 4 + 1 + 4 + 2 + 2 + 4 + 2 + 2 + 4 + 4 + 4 + 4 + 4; // = 45 bytes
+const META_LEN: usize = 4 + 4 + 1 + 4 + 2 + 2 + 4 + 2 + 2 + 4 + 4 + 4 + 4 + 4; // = 45 bytes (v1 core)
+const HNSW_STRUCT_VERSION_SBQ: u32 = 2; // M51 layout v2: same core header + trailing [sbq_bits:u8][cb_len:u32][codebook]
 
+/// Encode the meta item. `sbq_bits == 0` ⇒ emit the byte-identical **v1** layout (legacy indexes + f32-only
+/// builds are unchanged; existing tests stay green). `sbq_bits > 0` ⇒ emit **v2** = the same 45-byte core with
+/// `HNSW_STRUCT_VERSION_SBQ` in the version slot, then `[sbq_bits:u8][codebook_len:u32 LE][codebook bytes]`.
 fn encode_meta(m: &HnswMeta) -> Vec<u8> {
-    let mut b = Vec::with_capacity(META_LEN);
+    let version = if m.sbq_bits == 0 { HNSW_STRUCT_VERSION } else { HNSW_STRUCT_VERSION_SBQ };
+    let mut b = Vec::with_capacity(META_LEN + if m.sbq_bits == 0 { 0 } else { 5 + m.codebook.len() });
     b.extend_from_slice(&HNSW_STRUCT_MAGIC.to_le_bytes());
-    b.extend_from_slice(&HNSW_STRUCT_VERSION.to_le_bytes());
+    b.extend_from_slice(&version.to_le_bytes());
     b.push(m.metric_tag);
     b.extend_from_slice(&m.dim.to_le_bytes());
     b.extend_from_slice(&m.m.to_le_bytes());
@@ -117,10 +127,16 @@ fn encode_meta(m: &HnswMeta) -> Vec<u8> {
     b.extend_from_slice(&m.elem_npages.to_le_bytes());
     b.extend_from_slice(&m.nbr_first.to_le_bytes());
     b.extend_from_slice(&m.nbr_npages.to_le_bytes());
+    if m.sbq_bits != 0 {
+        b.push(m.sbq_bits);
+        b.extend_from_slice(&(m.codebook.len() as u32).to_le_bytes());
+        b.extend_from_slice(&m.codebook);
+    }
     b
 }
 
 /// Parse the meta item. Fail-fast typed `Err` on truncation / bad magic / unknown version — never panic.
+/// Handles both v1 (legacy, no SBQ) and v2 (M51, trailing codebook); v1 indexes stay readable.
 pub(crate) fn decode_meta(b: &[u8]) -> Result<HnswMeta, String> {
     if b.len() < META_LEN {
         return Err("theodb hnsw: truncated meta page".into());
@@ -130,11 +146,31 @@ pub(crate) fn decode_meta(b: &[u8]) -> Result<HnswMeta, String> {
         return Err("theodb hnsw: bad structured meta magic (REINDEX to upgrade the M26 blob to the M35 \
                     page-native format)".into());
     }
-    if u32::from_le_bytes(b[4..8].try_into().unwrap()) != HNSW_STRUCT_VERSION {
-        return Err("theodb hnsw: unsupported structured meta version".into());
+    let version = u32::from_le_bytes(b[4..8].try_into().unwrap());
+    if version != HNSW_STRUCT_VERSION && version != HNSW_STRUCT_VERSION_SBQ {
+        return Err(format!(
+            "theodb hnsw: unsupported structured meta version v{version} — REINDEX with a compatible theodb build"
+        ));
     }
     let u16a = |o: usize| u16::from_le_bytes(b[o..o + 2].try_into().unwrap());
     let u32a = |o: usize| u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+    // v2 trailer: [sbq_bits:u8][codebook_len:u32][codebook]. Validate exact length (Rule 8) before slicing.
+    let (sbq_bits, codebook) = if version == HNSW_STRUCT_VERSION_SBQ {
+        if b.len() < META_LEN + 5 {
+            return Err("theodb hnsw: truncated v2 SBQ trailer".into());
+        }
+        let bits = b[META_LEN];
+        let cb_len = u32::from_le_bytes(b[META_LEN + 1..META_LEN + 5].try_into().unwrap()) as usize;
+        if b.len() != META_LEN + 5 + cb_len {
+            return Err(format!(
+                "theodb hnsw: v2 codebook length mismatch (declared {cb_len}, have {})",
+                b.len() - META_LEN - 5
+            ));
+        }
+        (bits, b[META_LEN + 5..].to_vec())
+    } else {
+        (0u8, Vec::new())
+    };
     Ok(HnswMeta {
         metric_tag: b[8],
         dim: u32a(9),
@@ -148,6 +184,8 @@ pub(crate) fn decode_meta(b: &[u8]) -> Result<HnswMeta, String> {
         elem_npages: u32a(33),
         nbr_first: u32a(37),
         nbr_npages: u32a(41),
+        sbq_bits,
+        codebook,
     })
 }
 
@@ -158,6 +196,8 @@ pub(crate) struct ElementView<'a> {
     pub(crate) tid: i64,
     pub(crate) nbr_addr: Addr,
     pub(crate) vec_bytes: &'a [u8],
+    /// M51 layout v2: the trailing SBQ code bytes (empty for v1 f32-only tuples). Scored by `sbq::hamming`.
+    pub(crate) code_bytes: &'a [u8],
 }
 
 pub(crate) fn decode_element(b: &[u8]) -> Result<ElementView<'_>, String> {
@@ -177,6 +217,9 @@ pub(crate) fn decode_element(b: &[u8]) -> Result<ElementView<'_>, String> {
             u16::from_le_bytes(b[E_NBR_OFF..E_NBR_OFF + 2].try_into().unwrap()),
         ),
         vec_bytes: &b[E_VEC..end],
+        // v1: nothing after the vec (empty). v2: the SBQ code occupies `[end..]` (its length = the item's
+        // trailing bytes; the caller knows `bytes_per_vector(dim, meta.sbq_bits)` to validate if needed).
+        code_bytes: &b[end..],
     })
 }
 
@@ -230,8 +273,10 @@ pub(crate) fn decode_neighbors_into(
     Ok(())
 }
 
-fn encode_element(idx: &HnswIndex, node: usize, nbr_addr: Addr, dim: usize) -> Vec<u8> {
-    let mut b = vec![0u8; elem_size(dim)];
+/// Encode an element tuple. `code` is the node's SBQ code (empty ⇒ v1 f32-only, byte-identical to before);
+/// when non-empty it is written immediately after the f32 vector (layout v2).
+fn encode_element(idx: &HnswIndex, node: usize, nbr_addr: Addr, dim: usize, code: &[u8]) -> Vec<u8> {
+    let mut b = vec![0u8; elem_size(dim, code.len())];
     b[E_TAG] = ELEM_TAG;
     b[E_LEVEL] = idx.node_level(node) as u8;
     b[E_TID..E_TID + 8].copy_from_slice(&idx.node_id(node).to_le_bytes());
@@ -240,6 +285,9 @@ fn encode_element(idx: &HnswIndex, node: usize, nbr_addr: Addr, dim: usize) -> V
     b[E_DIM..E_DIM + 2].copy_from_slice(&(dim as u16).to_le_bytes());
     for (j, &f) in idx.node_vector(node).iter().enumerate() {
         b[E_VEC + j * 4..E_VEC + j * 4 + 4].copy_from_slice(&f.to_le_bytes());
+    }
+    if !code.is_empty() {
+        b[E_VEC + dim * 4..].copy_from_slice(code);
     }
     b
 }
@@ -270,7 +318,14 @@ fn encode_neighbors(idx: &HnswIndex, node: usize, elem_addr: &[Addr], m: usize, 
 /// neighbor tuple would exceed one page (impossible under the build's level cap, asserted here defensively).
 pub(crate) fn pack(idx: &HnswIndex) -> Result<Packed, String> {
     // The initial build / buildempty writes a contiguous generation starting right after the meta (block 1).
-    pack_at(idx, 1)
+    pack_at(idx, 1, 0)
+}
+
+/// Like [`pack`] but emits **layout v2**: trains an SBQ quantizer from the graph's vectors, persists the codebook
+/// in the meta, and writes each node's compact SBQ code inline after its f32 vector (M51 T1.1/T2.1). `sbq_bits==0`
+/// is identical to [`pack`].
+pub(crate) fn pack_sbq(idx: &HnswIndex, sbq_bits: u8) -> Result<Packed, String> {
+    pack_at(idx, 1, sbq_bits)
 }
 
 /// Like [`pack`], but places the generation body starting at block `base` (M48 / issue #47). The meta's element
@@ -278,24 +333,41 @@ pub(crate) fn pack(idx: &HnswIndex) -> Result<Packed, String> {
 /// relative to `base`, so the packed image is position-independent — the crash-safe fold writes it at the tail
 /// (or a reclaimed contiguous region) and pivots block 0 to it. Readers already follow the meta pointers, so no
 /// read path changes: the graph is relocatable for free (unlike IVF, whose directory needed an explicit gen_base).
-pub(crate) fn pack_at(idx: &HnswIndex, base: usize) -> Result<Packed, String> {
+pub(crate) fn pack_at(idx: &HnswIndex, base: usize, sbq_bits: u8) -> Result<Packed, String> {
     let (metric, m, m0, _ef) = idx.params();
     let n = idx.node_count();
     let dim = idx.dim();
 
     // Empty graph: meta only, entry_level = -1. `base` is irrelevant (no body pages) — record it anyway so
     // pending_start (= nbr_first + nbr_npages = base) is consistent with a non-empty generation at `base`.
+    // An empty index has no vectors to train the quantizer on, so it stays v1 (SBQ arrives on the first fold
+    // after data lands — REINDEX/VACUUM).
     if n == 0 {
         let meta = encode_meta(&HnswMeta {
             metric_tag: metric.tag(), dim: dim as u32, m: m as u16, m0: m0 as u16,
             entry_blkno: 0, entry_offno: 0, entry_level: -1, node_count: 0,
             elem_first: base as u32, elem_npages: 0, nbr_first: base as u32, nbr_npages: 0,
+            sbq_bits: 0, codebook: Vec::new(),
         });
         return Ok(Packed { meta, pages: Vec::new() });
     }
 
+    // M51 T1.1/T2.1: when SBQ is enabled, train the quantizer from the graph's vectors, emit one compact code per
+    // node (packed u64 words → LE bytes) and the codebook for the meta. `code_len == 0` ⇒ the v1 f32-only path.
+    let (code_len, codes, codebook) = if sbq_bits > 0 {
+        let vecs: Vec<Vec<f32>> = (0..n).map(|i| idx.node_vector(i).to_vec()).collect();
+        let q = crate::sbq::SbqQuantizer::train(&vecs, sbq_bits);
+        let codes: Vec<Vec<u8>> = vecs
+            .iter()
+            .map(|v| q.quantize(v).iter().flat_map(|w| w.to_le_bytes()).collect())
+            .collect();
+        (crate::sbq::SbqQuantizer::bytes_per_vector(dim, sbq_bits), codes, q.to_meta_bytes())
+    } else {
+        (0usize, Vec::new(), Vec::new())
+    };
+
     // 1. Analytic element addresses (fixed size ⇒ node i is at block base+i/ipp, offset 1+i%ipp).
-    let ipp = elems_per_page(dim);
+    let ipp = elems_per_page(dim, code_len);
     let elem_npages = n.div_ceil(ipp);
     let elem_addr: Vec<Addr> =
         (0..n).map(|i| ((base + i / ipp) as u32, (1 + i % ipp) as u16)).collect();
@@ -329,7 +401,15 @@ pub(crate) fn pack_at(idx: &HnswIndex, base: usize) -> Result<Packed, String> {
     // 3. Element pages: fixed ipp items per page (matches the analytic addrs), neighbortid = the packed nbr addr.
     let mut elem_pages: Vec<Vec<Vec<u8>>> = Vec::with_capacity(elem_npages);
     for chunk in (0..n).collect::<Vec<_>>().chunks(ipp) {
-        elem_pages.push(chunk.iter().map(|&node| encode_element(idx, node, nbr_addr[node], dim)).collect());
+        elem_pages.push(
+            chunk
+                .iter()
+                .map(|&node| {
+                    let code: &[u8] = if code_len > 0 { &codes[node] } else { &[] };
+                    encode_element(idx, node, nbr_addr[node], dim, code)
+                })
+                .collect(),
+        );
     }
 
     // 4. Meta with the entry point resolved to its element addr.
@@ -340,6 +420,7 @@ pub(crate) fn pack_at(idx: &HnswIndex, base: usize) -> Result<Packed, String> {
         entry_blkno: eb, entry_offno: eo, entry_level: idx.node_level(entry_node) as i16,
         node_count: n as u32, elem_first: base as u32, elem_npages: elem_npages as u32,
         nbr_first: nbr_first as u32, nbr_npages: nbr_npages as u32,
+        sbq_bits: if code_len > 0 { sbq_bits } else { 0 }, codebook,
     });
 
     let mut pages = elem_pages;
@@ -444,14 +525,33 @@ unsafe fn load(
     q: &[f32],
     metric: Metric,
     is_l2: bool,
+    qcode: Option<&[u8]>,
     nblocks: u32,
     reads: &mut usize,
 ) -> Result<Cand, String> {
     *reads += 1;
     page::with_page_item(rel, blk, off, nblocks, |b| {
         let ev = decode_element(b)?;
+        // M51: when a quantized query code is present (SBQ index), guide the walk by the cheap Hamming distance
+        // on the inline codes; the f32 vector is NOT touched here (that is the SBQ scan-cost saving). The exact
+        // f32 rerank of the survivors happens once, in `traverse`, after the walk. Rule 8: the element code MUST
+        // be exactly the query code's length (both = bytes_per_vector(dim, sbq_bits)); a truncated on-disk code
+        // (corruption / orphan page) is a typed Err, never a silently-wrong Hamming distance.
+        let d = match qcode {
+            Some(qc) => {
+                if ev.code_bytes.len() != qc.len() {
+                    return Err(format!(
+                        "theodb hnsw: element SBQ code is {} bytes, expected {} — REINDEX (v2 corruption)",
+                        ev.code_bytes.len(),
+                        qc.len()
+                    ));
+                }
+                crate::sbq::hamming_bytes(qc, ev.code_bytes) as f64
+            }
+            None => score(metric, q, ev.vec_bytes, is_l2),
+        };
         Ok(Cand {
-            d: score(metric, q, ev.vec_bytes, is_l2),
+            d,
             blk,
             off,
             nbr_blk: ev.nbr_addr.0,
@@ -518,15 +618,35 @@ pub(crate) unsafe fn traverse(
     // M41: cache the block count once (was read per-item inside read_page_item_at — a syscall-ish call ×2/node).
     let nblocks = page::main_fork_nblocks(rel);
 
+    // M51: for an SBQ index (v2), reconstruct the quantizer from the persisted codebook and quantize the query
+    // once. The walk then scores by cheap Hamming on the inline codes; the exact f32 rerank of the survivors runs
+    // once after the ground search. `None` (v1) ⇒ the walk scores by exact f32 — byte-identical to before.
+    let qcode_owned: Option<Vec<u8>> = if meta.sbq_bits > 0 {
+        let quant = crate::sbq::SbqQuantizer::from_meta_bytes(&meta.codebook)?;
+        // Defense-in-depth (F1): the persisted codebook must cover the index dim, else `quantize(q)` (q.len() ==
+        // meta.dim, enforced by the scan dim-guard) would index the codebook OOB. A typed Err, never a panic.
+        if quant.dim() != meta.dim as usize {
+            return Err(format!(
+                "theodb hnsw: SBQ codebook dim {} != index dim {} — REINDEX (v2 corruption)",
+                quant.dim(),
+                meta.dim
+            ));
+        }
+        Some(quant.quantize(q).iter().flat_map(|w| w.to_le_bytes()).collect())
+    } else {
+        None
+    };
+    let qcode: Option<&[u8]> = qcode_owned.as_deref();
+
     // Entry point (from meta), then greedy-descend the upper layers keeping a single best candidate.
-    let mut ep = load(rel, meta.entry_blkno, meta.entry_offno, q, metric, is_l2, nblocks, &mut reads)?;
+    let mut ep = load(rel, meta.entry_blkno, meta.entry_offno, q, metric, is_l2, qcode, nblocks, &mut reads)?;
     let mut lc = meta.entry_level as usize;
     while lc >= 1 {
         loop {
             let nbrs = neighbors_of(rel, &ep, lc, m, m0, nblocks, &mut reads)?;
             let mut improved = false;
             for (nb, no) in nbrs {
-                let cand = load(rel, nb, no, q, metric, is_l2, nblocks, &mut reads)?;
+                let cand = load(rel, nb, no, q, metric, is_l2, qcode, nblocks, &mut reads)?;
                 if cand.d < ep.d {
                     ep = cand;
                     improved = true;
@@ -550,12 +670,38 @@ pub(crate) unsafe fn traverse(
         q,
         metric,
         is_l2,
+        qcode,
         m,
         m0,
         reads: std::cell::Cell::new(reads),
     };
-    let out = crate::ann::scan_core::ground_search(&pg_src, ep, ef, m0, true)?;
-    reads = pg_src.reads.get();
+    let out = if qcode.is_some() {
+        // SBQ (M51): the ground walk ranked candidates by Hamming. Widen the candidate pool by `over_fetch`
+        // (scan GUC) so the true NN survives the approximate ranking, then rerank the survivors by EXACT f32 —
+        // this is where recall is recovered (carrier-limited, M40). Only the surviving `walk_ef` pages are
+        // re-read for their f32 vectors; the walk itself paid only the cheap Hamming cost.
+        let over_fetch = crate::am::guc::over_fetch().max(1);
+        let walk_ef = ef.saturating_mul(over_fetch);
+        let nodes = crate::ann::scan_core::ground_search_nodes(&pg_src, ep, walk_ef, m0, true)?;
+        reads = pg_src.reads.get();
+        let mut reranked: Vec<(i64, f64)> = Vec::with_capacity(nodes.len());
+        for (cand, _ham) in &nodes {
+            let d = page::with_page_item(rel, cand.blk, cand.off, nblocks, |b| {
+                Ok(score(metric, q, decode_element(b)?.vec_bytes, is_l2))
+            })?;
+            reads += 1;
+            reranked.push((cand.tid, d));
+        }
+        reranked.sort_by(|a, b| {
+            a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(&b.0))
+        });
+        reranked.truncate(ef); // return the ef best by exact f32; the scan takes top-k
+        reranked
+    } else {
+        let o = crate::ann::scan_core::ground_search(&pg_src, ep, ef, m0, true)?;
+        reads = pg_src.reads.get();
+        o
+    };
 
     if std::env::var("THEODB_SCAN_PROFILE").is_ok_and(|v| v == "1") {
         // The wiring-triad runtime metric: pages read must be O(ef·M), flat in N (server LOG, not client WARNING).
@@ -574,6 +720,8 @@ struct PageNeighborSource<'a> {
     q: &'a [f32],
     metric: Metric,
     is_l2: bool,
+    /// M51: the quantized query code (SBQ index) — `Some` ⇒ the walk scores by Hamming; `None` ⇒ f32.
+    qcode: Option<&'a [u8]>,
     m: usize,
     m0: usize,
     reads: std::cell::Cell<usize>,
@@ -604,7 +752,9 @@ impl<'a> crate::ann::scan_core::NeighborSource for PageNeighborSource<'a> {
     }
     fn load(&self, r: &Addr) -> Result<Cand, String> {
         let mut reads = 0usize;
-        let cand = unsafe { load(self.rel, r.0, r.1, self.q, self.metric, self.is_l2, self.nblocks, &mut reads) };
+        let cand = unsafe {
+            load(self.rel, r.0, r.1, self.q, self.metric, self.is_l2, self.qcode, self.nblocks, &mut reads)
+        };
         self.reads.set(self.reads.get() + reads);
         cand
     }
@@ -632,7 +782,7 @@ mod tests {
         let idx = HnswIndex::build(&corpus(), 16, 64, Metric::L2, 42);
         let packed = pack(&idx).expect("pack");
         let dim = idx.dim();
-        let ipp = elems_per_page(dim);
+        let ipp = elems_per_page(dim, 0);
         // Element pages are the first `elem_npages`; each element decodes and its addr maps back to its node.
         let meta = decode_meta(&packed.meta).unwrap();
         for p in 0..meta.elem_npages as usize {
@@ -653,7 +803,7 @@ mod tests {
         let packed = pack(&idx).expect("pack");
         let meta = decode_meta(&packed.meta).unwrap();
         let dim = idx.dim();
-        let ipp = elems_per_page(dim);
+        let ipp = elems_per_page(dim, 0);
         let n = idx.node_count();
         // For every node, decode each layer's neighbor addrs, map back to node indices, and assert the SET equals
         // the in-memory `neighbors[node][lc]` — the load-bearing correctness check (blueprint R2).
@@ -699,7 +849,7 @@ mod tests {
         let (_metric, m, m0, _ef) = idx.params();
         let packed = pack(&idx).expect("pack");
         let dim = idx.dim();
-        let ipp = elems_per_page(dim);
+        let ipp = elems_per_page(dim, 0);
         for node in 0..idx.node_count() {
             let level = idx.node_level(node);
             let ea = ((1 + node / ipp) as u32, (1 + node % ipp) as u16);
@@ -727,11 +877,111 @@ mod tests {
         assert!(decode_meta(&bad).is_err(), "bad magic must Err");
     }
 
+    // --- M51 T1.1: layout v2 meta carries the SBQ codebook; v1 (f32-only) stays byte-identical. ---
+    fn meta_fixture(sbq_bits: u8, codebook: Vec<u8>) -> HnswMeta {
+        HnswMeta {
+            metric_tag: Metric::L2.tag(), dim: 3, m: 16, m0: 32,
+            entry_blkno: 1, entry_offno: 1, entry_level: 2, node_count: 5,
+            elem_first: 1, elem_npages: 1, nbr_first: 2, nbr_npages: 1, sbq_bits, codebook,
+        }
+    }
+
+    #[pgrx::pg_test]
+    fn hnsw_meta_v2_roundtrips_codebook() {
+        let cb = vec![4u8, 3, 0, 0, 0, 1, 2, 3, 4]; // arbitrary codebook bytes (e.g. to_meta_bytes output)
+        let bytes = encode_meta(&meta_fixture(4, cb.clone()));
+        assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), HNSW_STRUCT_VERSION_SBQ, "must be v2");
+        let d = decode_meta(&bytes).expect("v2 decodes");
+        assert_eq!(d.sbq_bits, 4);
+        assert_eq!(d.codebook, cb, "codebook roundtrips byte-exact");
+        assert_eq!(d.dim, 3);
+        assert_eq!(d.node_count, 5);
+    }
+
+    #[pgrx::pg_test]
+    fn hnsw_meta_v1_byte_identical_when_no_sbq() {
+        let bytes = encode_meta(&meta_fixture(0, Vec::new()));
+        assert_eq!(bytes.len(), META_LEN, "f32-only meta must be exactly the 45-byte v1 layout");
+        assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), HNSW_STRUCT_VERSION, "must stay v1");
+        let d = decode_meta(&bytes).unwrap();
+        assert_eq!(d.sbq_bits, 0);
+        assert!(d.codebook.is_empty());
+    }
+
+    #[pgrx::pg_test]
+    fn hnsw_meta_v2_rejects_truncated_codebook() {
+        let mut bytes = encode_meta(&meta_fixture(1, vec![1, 2, 3, 4]));
+        bytes.truncate(bytes.len() - 1); // drop one codebook byte → declared cb_len mismatch
+        assert!(decode_meta(&bytes).is_err(), "truncated v2 codebook must Err (Rule 8)");
+    }
+
+    #[pgrx::pg_test]
+    fn pack_sbq_writes_codebook_and_matching_codes() {
+        // T1.1-build + T2.1-write (M51): pack_sbq trains the quantizer, persists the codebook in the v2 meta, and
+        // writes each node's inline code == the quantizer's code for that node's vector.
+        let idx = HnswIndex::build(&corpus(), 16, 64, Metric::L2, 9);
+        let bits = 2u8;
+        let packed = pack_sbq(&idx, bits).expect("pack_sbq");
+        let meta = decode_meta(&packed.meta).unwrap();
+        assert_eq!(meta.sbq_bits, bits, "meta records SBQ bits");
+        assert!(!meta.codebook.is_empty(), "codebook persisted in meta");
+        // reconstruct the quantizer from the persisted codebook and verify each element's code matches.
+        let q = crate::sbq::SbqQuantizer::from_meta_bytes(&meta.codebook).expect("codebook decodes");
+        let dim = idx.dim();
+        let ipp = elems_per_page(dim, crate::sbq::SbqQuantizer::bytes_per_vector(dim, bits));
+        for node in 0..idx.node_count() {
+            let ep = packed.pages[node / ipp][node % ipp].as_slice();
+            let ev = decode_element(ep).unwrap();
+            let expect: Vec<u8> =
+                q.quantize(idx.node_vector(node)).iter().flat_map(|w| w.to_le_bytes()).collect();
+            assert_eq!(ev.code_bytes, expect.as_slice(), "node {node}: inline code == quantize(vec)");
+        }
+    }
+
+    #[pgrx::pg_test]
+    fn element_code_length_is_exact_so_load_guard_detects_truncation() {
+        // H2 (M51 review, Rule 8): a truncated on-disk SBQ code must be caught, not silently Hamming'd. The guard
+        // in `load` compares `ev.code_bytes.len()` to the query code length (both = bytes_per_vector). This proves
+        // `decode_element` exposes the EXACT trailing length, so any truncation is observable by that guard.
+        let idx = HnswIndex::build(&corpus(), 16, 64, Metric::L2, 5);
+        let dim = idx.dim();
+        let full = crate::sbq::SbqQuantizer::bytes_per_vector(dim, 2);
+        let code = vec![0xAAu8; full];
+        let e = encode_element(&idx, 0, (1, 1), dim, &code);
+        assert_eq!(decode_element(&e).unwrap().code_bytes.len(), full, "full code exposes its exact length");
+        // a shorter (truncated) code decodes to a SHORTER code_bytes → the load guard (len != qcode.len()) fires.
+        let e_short = encode_element(&idx, 0, (1, 1), dim, &code[..full - 1]);
+        assert_eq!(decode_element(&e_short).unwrap().code_bytes.len(), full - 1, "truncation is observable");
+    }
+
+    #[pgrx::pg_test]
+    fn element_tuple_carries_optional_sbq_code() {
+        // T2.1 (M51): an element tuple optionally carries the SBQ code after the f32 vec; v1 (no code) stays
+        // byte-identical and the f32 vec bytes are untouched when a code is appended.
+        let idx = HnswIndex::build(&corpus(), 16, 64, Metric::L2, 7);
+        let dim = idx.dim();
+        let e1 = encode_element(&idx, 0, (1, 1), dim, &[]);
+        assert_eq!(e1.len(), elem_size(dim, 0), "v1 tuple size unchanged");
+        let v1 = decode_element(&e1).unwrap();
+        assert!(v1.code_bytes.is_empty(), "v1 tuple has no SBQ code");
+
+        let code = vec![0xABu8, 0xCD, 0x01, 0x02];
+        let e2 = encode_element(&idx, 0, (1, 1), dim, &code);
+        assert_eq!(e2.len(), elem_size(dim, code.len()), "v2 tuple grows by the code length");
+        let v2 = decode_element(&e2).unwrap();
+        assert_eq!(v2.code_bytes, code.as_slice(), "SBQ code roundtrips inline after the vec");
+        assert_eq!(v2.vec_bytes, v1.vec_bytes, "appending a code must not change the f32 vec bytes");
+    }
+
     /// Collect the id column of `SELECT id FROM rn ORDER BY e <-> q LIMIT k` under the current planner GUCs,
     /// via a real Spi round-trip — the only way to exercise the on-disk `traverse` (it needs a live Relation).
     #[cfg(any(test, feature = "pg_test"))]
     fn topk_ids(query_lit: &str, k: i64) -> Vec<i32> {
-        let sql = format!("SELECT id FROM rn ORDER BY e <-> '{query_lit}'::vector LIMIT {k}");
+        topk_ids_tbl("rn", query_lit, k)
+    }
+    #[cfg(any(test, feature = "pg_test"))]
+    fn topk_ids_tbl(tbl: &str, query_lit: &str, k: i64) -> Vec<i32> {
+        let sql = format!("SELECT id FROM {tbl} ORDER BY e <-> '{query_lit}'::vector LIMIT {k}");
         pgrx::Spi::connect(|client| {
             // pgrx 0.16.1: `select`'s 3rd arg is `args: &[DatumWithOid]` (a slice) — `&[]`, never `None`
             // (matches hybrid.rs / ann_query.rs). Column ordinals are 1-based → `row.get::<i32>(1)`.
@@ -784,5 +1034,63 @@ mod tests {
     #[pgrx::pg_test(error = "outside the valid range")]
     fn ef_search_zero_rejected_at_guc_boundary() {
         pgrx::Spi::run("SET theodb_hnsw.ef_search = 0").unwrap();
+    }
+
+    /// M51 reloption connect: `CREATE INDEX ... WITH (sbq_bits=4)` builds a v2 index (SBQ codes inline). Until the
+    /// traverse uses the Hamming path (T3.1), the f32 rerank scan MUST still return the exact top-k — proving the
+    /// inline codes do not corrupt the vector scoring and the reloption is wired end-to-end.
+    #[pgrx::pg_test]
+    fn create_index_with_sbq_bits_scans_correctly() {
+        pgrx::Spi::run("CREATE TEMP TABLE rs (id int PRIMARY KEY, e vector(4))").unwrap();
+        for i in 0..30i32 {
+            let (a, b, c, d) = (i as f32, (i % 7) as f32, (i % 5) as f32, i as f32 * 0.1);
+            pgrx::Spi::run(&format!("INSERT INTO rs VALUES ({i}, '[{a},{b},{c},{d}]')")).unwrap();
+        }
+        pgrx::Spi::run("CREATE INDEX rs_idx ON rs USING theodb_hnsw (e) WITH (sbq_bits = 4)").unwrap();
+        pgrx::Spi::run("SET theodb_hnsw.ef_search = 200").unwrap();
+        let probe = "[3.3,1.1,2.2,0.4]";
+        pgrx::Spi::run("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on").unwrap();
+        let exact = topk_ids_tbl("rs", probe, 5);
+        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        let mut via_index = topk_ids_tbl("rs", probe, 5);
+        assert!(!via_index.is_empty(), "the SBQ-built index must be scannable (reloption wired)");
+        let (mut si, mut se) = (via_index.clone(), exact.clone());
+        si.sort_unstable();
+        se.sort_unstable();
+        via_index.sort_unstable();
+        assert_eq!(si, se, "SBQ v2 index top-5 must equal exact top-5 (codes present don't corrupt f32 scoring)");
+    }
+
+    /// M51 T3.1 recall gate: on a corpus where the Hamming walk does NOT cover everything (walk_ef < node_count),
+    /// the cheap-Hamming navigation + exact-f32 rerank still recovers high recall@10 vs the exact oracle. This is
+    /// the property M40 predicts (carrier-limited: over_fetch widens the pool so the true NN survives the rerank).
+    /// NOTE: `sbq_bits=2` recovers here because the corpus is low-dim (16-d, structured). At high dim (128-d) 2-bit
+    /// navigation is too lossy (`docs/benchmarks/m51-sbq-inline.md § 3` measured recall 0.52); the benchmark uses
+    /// 8-bit for the ≥0.99 gate. This unit test proves the read-path MECHANISM, not that 2-bit is safe in general.
+    #[pgrx::pg_test]
+    fn sbq_traverse_hamming_then_rerank_recall_high() {
+        pgrx::Spi::run("CREATE TEMP TABLE rq (id int PRIMARY KEY, e vector(16))").unwrap();
+        for i in 0..400i32 {
+            // deterministic, well-spread distinct points (id-dominated with a per-dim ripple → clear NN structure)
+            let v: Vec<String> = (0..16)
+                .map(|j| format!("{:.3}", i as f32 * 0.5 + ((i * 7 + j * 13) % 29) as f32 * 0.3))
+                .collect();
+            pgrx::Spi::run(&format!("INSERT INTO rq VALUES ({i}, '[{}]')", v.join(","))).unwrap();
+        }
+        pgrx::Spi::run("CREATE INDEX rq_idx ON rq USING theodb_hnsw (e) WITH (sbq_bits = 2)").unwrap();
+        // walk_ef = ef_search * over_fetch = 50 * 6 = 300 < 400 → navigation + rerank genuinely tested.
+        pgrx::Spi::run("SET theodb_hnsw.ef_search = 50; SET theodb_hnsw.over_fetch = 6").unwrap();
+        let probe = "[40,41,42,40,41,42,40,41,42,40,41,42,40,41,42,40]";
+        pgrx::Spi::run("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on").unwrap();
+        let exact = topk_ids_tbl("rq", probe, 10);
+        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        let via_index = topk_ids_tbl("rq", probe, 10);
+        let hits = via_index.iter().filter(|id| exact.contains(id)).count();
+        let recall = hits as f64 / exact.len().max(1) as f64;
+        assert!(
+            recall >= 0.9,
+            "SBQ Hamming+rerank recall@10 = {recall:.2} (hits {hits}/{}) — expected >= 0.9 (over_fetch=6 recovers it)",
+            exact.len()
+        );
     }
 }

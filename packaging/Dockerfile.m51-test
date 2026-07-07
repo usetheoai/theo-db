@@ -1,0 +1,23 @@
+# Test-harness builder para o TDD do theodb_rs via `cargo pgrx test` (M51+).
+# FROM o builder que já tem rust+cargo-pgrx+pg17 dev headers; adiciona pgvector (source, versão pinada do
+# Dockerfile de produção) + o umbrella `theodb` (make install), pois `theodb_rs.control` requires 'vector, theodb'.
+# Uma imagem única → iterações rápidas de `cargo pgrx test` (sem rebuild por RED-GREEN).
+FROM theodb-builder:fu1
+
+ARG PG_MAJOR=17
+# pgvector (mesma ref pinada do Dockerfile de produção, linha 54)
+ADD https://github.com/pgvector/pgvector.git#586e7515bafe6912c425164d186d56550657c349 /tmp/pgvector
+RUN cd /tmp/pgvector && make OPTFLAGS="" && make install && rm -rf /tmp/pgvector
+
+# pgvectorscale — copia os artefatos já compilados da imagem runtime (o umbrella `theodb` os requer via CASCADE)
+COPY --from=theodb:m49-p3 /usr/lib/postgresql/17/lib/vectorscale-0.9.0.so /usr/lib/postgresql/17/lib/
+COPY --from=theodb:m49-p3 /usr/share/postgresql/17/extension/vectorscale.control /usr/share/postgresql/17/extension/
+COPY --from=theodb:m49-p3 /usr/share/postgresql/17/extension/vectorscale--0.9.0.sql /usr/share/postgresql/17/extension/
+
+# umbrella `theodb` (SQL-only, PGXS) — control + sql do repo
+COPY theodb.control /tmp/theodb-umbrella/
+COPY Makefile /tmp/theodb-umbrella/
+COPY sql /tmp/theodb-umbrella/sql
+RUN cd /tmp/theodb-umbrella && (make install 2>/dev/null || \
+    { SHAREDIR=$(pg_config --sharedir); cp theodb.control $SHAREDIR/extension/ && \
+      for f in sql/theodb--*.sql; do cp "$f" "$SHAREDIR/extension/"; done; }) && rm -rf /tmp/theodb-umbrella

@@ -89,10 +89,71 @@ impl SbqQuantizer {
     pub(crate) fn bytes_per_vector(dim: usize, bits: u8) -> usize {
         (dim * bits as usize).div_ceil(64) * 8
     }
+
+    /// The dimensionality this codebook was trained on (per-dim means). Used by the scan to fail-fast if a
+    /// persisted codebook's dim disagrees with the index meta (defense-in-depth against a corrupt v2 meta).
+    pub(crate) fn dim(&self) -> usize {
+        self.mean.len()
+    }
+
+    /// Serialize the codebook (bits + per-dim means + per-dim std) to LE bytes for the layout-v3 meta page
+    /// (T1.1, M51). Format: `[bits:u8][dim:u32 LE][mean: dim×f32 LE][std: dim×f32 LE, n-bit only]`.
+    pub(crate) fn to_meta_bytes(&self) -> Vec<u8> {
+        let dim = self.mean.len();
+        let mut b = Vec::with_capacity(5 + dim * 8);
+        b.push(self.bits);
+        b.extend_from_slice(&(dim as u32).to_le_bytes());
+        for m in &self.mean {
+            b.extend_from_slice(&m.to_le_bytes());
+        }
+        for s in &self.std {
+            b.extend_from_slice(&s.to_le_bytes());
+        }
+        b
+    }
+
+    /// Decode a codebook from meta bytes. Validates the exact length first (Rule 8: typed `Err` on
+    /// truncation/corruption, never a panic crossing the C boundary).
+    pub(crate) fn from_meta_bytes(bytes: &[u8]) -> Result<Self, String> {
+        if bytes.len() < 5 {
+            return Err(format!("sbq codebook: truncated header ({} bytes, need ≥ 5)", bytes.len()));
+        }
+        let bits = bytes[0];
+        let dim = u32::from_le_bytes(bytes[1..5].try_into().unwrap()) as usize;
+        let has_std = bits > 1;
+        let expected = 5 + dim * 4 + if has_std { dim * 4 } else { 0 };
+        if bytes.len() != expected {
+            return Err(format!("sbq codebook: expected {expected} bytes for dim {dim} bits {bits}, got {}", bytes.len()));
+        }
+        let mut off = 5;
+        let read_f32 = |o: usize| f32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
+        let mut mean = Vec::with_capacity(dim);
+        for _ in 0..dim {
+            mean.push(read_f32(off));
+            off += 4;
+        }
+        let std = if has_std {
+            let mut s = Vec::with_capacity(dim);
+            for _ in 0..dim {
+                s.push(read_f32(off));
+                off += 4;
+            }
+            s
+        } else {
+            Vec::new()
+        };
+        Ok(SbqQuantizer { bits, mean, std })
+    }
 }
 
 /// Hamming distance between two equal-length packed codes: `popcount(a XOR b)` (hardware `count_ones`).
 pub(crate) fn hamming(a: &[u64], b: &[u64]) -> u32 {
+    a.iter().zip(b).map(|(x, y)| (x ^ y).count_ones()).sum()
+}
+
+/// Hamming distance over the raw LE code bytes (as stored inline in the element tuple, M51). Byte-wise XOR
+/// popcount equals the word-wise result. Compares up to the shorter length (defensive; equal-length in practice).
+pub(crate) fn hamming_bytes(a: &[u8], b: &[u8]) -> u32 {
     a.iter().zip(b).map(|(x, y)| (x ^ y).count_ones()).sum()
 }
 
@@ -244,6 +305,27 @@ mod tests {
             near_ham < far_ham - 0.5,
             "Hamming carries no NN signal: near_mean={near_ham:.2} not < far_mean={far_ham:.2}"
         );
+    }
+    #[pg_test]
+    fn sbq_codebook_roundtrips_through_meta_bytes() {
+        // T1.1 (M51): o codebook (means/std/bits) serializa para bytes e volta byte-exato — é o que a meta
+        // page do layout v3 persiste para o scan reproduzir a quantização do build (means fixados no build).
+        let q = SbqQuantizer::train(&[vec![1.0, -2.0, 3.0], vec![3.0, 0.0, 1.0], vec![-1.0, 2.0, 0.0]], 2);
+        let bytes = q.to_meta_bytes();
+        let q2 = SbqQuantizer::from_meta_bytes(&bytes).expect("codebook decodes");
+        assert_eq!(q.bits, q2.bits, "bits mismatch");
+        assert_eq!(q.mean, q2.mean, "mean mismatch");
+        assert_eq!(q.std, q2.std, "std mismatch");
+        // e o comportamento observável (quantize) é idêntico
+        assert_eq!(q.quantize(&[2.0, -1.0, 2.0]), q2.quantize(&[2.0, -1.0, 2.0]));
+    }
+    #[pg_test]
+    fn sbq_codebook_from_bytes_rejects_truncated() {
+        // negative case (Rule 8): bytes truncados → Err tipado, nunca panic.
+        let q = SbqQuantizer::train(&[vec![1.0, 2.0]], 1);
+        let mut bytes = q.to_meta_bytes();
+        bytes.truncate(bytes.len() - 1);
+        assert!(SbqQuantizer::from_meta_bytes(&bytes).is_err(), "truncated codebook must be rejected");
     }
     #[pg_test]
     fn sbq_deterministic_train() {

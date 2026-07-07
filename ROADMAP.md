@@ -671,7 +671,7 @@ normalizar-vs-computar documentada (âncora pgvector `vector_negative_inner_prod
 inner product não é métrica (sem desigualdade triangular) — HNSW-sobre-IP funciona empiricamente
 (precedente pgvector), mas o plano registra o caveat e o oráculo de paridade cobre IP explicitamente.
 
-### M50 — [ ] Calibração da régua SOTA — pgvectorscale diskann + dataset realista + higiene de artefatos
+### M50 — [x] Calibração da régua SOTA — pgvectorscale diskann + dataset realista + higiene de artefatos
 
 **Objective:** Toda a evidência vetorial é UM dataset (SIFT1M/128d/L2), UM eixo (read-only, warm, 1 cliente),
 numa box que já invalidou 3 medições (M41/M42/M46). E a comparação SOTA justa **nunca foi feita**: o

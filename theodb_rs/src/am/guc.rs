@@ -24,6 +24,14 @@ const MAX_EF_SEARCH: i32 = 1000; // pgvector's hnsw.ef_search ceiling
 
 pub(crate) static EF_SEARCH: GucSetting<i32> = GucSetting::<i32>::new(DEFAULT_EF_SEARCH);
 
+/// M51 — `SET theodb_hnsw.over_fetch = N`: for an SBQ index, widen the Hamming-ranked candidate pool by ×N before
+/// the exact f32 rerank, so the true NN survives the approximate ranking (recall recovery, M40). Default 1 (the
+/// `ef_search` pool is reranked as-is); higher trades scan cost for recall. No effect on a v1 f32-only index.
+pub(crate) const DEFAULT_OVER_FETCH: i32 = 1;
+const MIN_OVER_FETCH: i32 = 1;
+const MAX_OVER_FETCH: i32 = 64;
+pub(crate) static OVER_FETCH: GucSetting<i32> = GucSetting::<i32>::new(DEFAULT_OVER_FETCH);
+
 /// M48 (T3.1) — `SET theodb.vacuum_pending_threshold = N`: a VACUUM folds the pending region into the main
 /// structure when it exceeds N pages, even with zero dead tuples, so an insert-only workload's scan returns to
 /// O(structure) instead of paying O(pending) forever. Operational knob (Userset), NOT a build reloption. Default
@@ -130,6 +138,16 @@ pub(crate) fn init() {
         GucContext::Userset,
         GucFlags::default(),
     );
+    GucRegistry::define_int_guc(
+        c"theodb_hnsw.over_fetch",
+        c"For an SBQ index, widen the Hamming candidate pool by this factor before the exact f32 rerank",
+        c"Higher value increases recall on a quantized index at the cost of scan speed; 1 = rerank the ef_search pool as-is. No effect on an f32-only index.",
+        &OVER_FETCH,
+        MIN_OVER_FETCH,
+        MAX_OVER_FETCH,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
 }
 
 /// The effective probes for a scan: the GUC value (never below 1). The caller still clamps to the actual list count.
@@ -140,4 +158,9 @@ pub(crate) fn probes() -> usize {
 /// The effective `ef_search` for a theodb_hnsw scan (never below 1).
 pub(crate) fn ef_search() -> usize {
     EF_SEARCH.get().max(MIN_EF_SEARCH) as usize
+}
+
+/// The effective SBQ `over_fetch` factor for a theodb_hnsw scan (never below 1).
+pub(crate) fn over_fetch() -> usize {
+    OVER_FETCH.get().max(MIN_OVER_FETCH) as usize
 }

@@ -103,8 +103,10 @@ pub extern "C-unwind" fn ambuild_hnsw(
             &corpus, HNSW_M, HNSW_EF_CONSTRUCTION, metric, BUILD_SEED, &|| { pgrx::check_for_interrupts!(); },
         );
         // M35: persist the STRUCTURED page-native layout (meta + element + neighbor tuples) so scans traverse the
-        // graph ON DEMAND (O(ef·M) pages), not deserialize the whole blob (O(N)).
-        match crate::am::hnsw_page::pack(&idx) {
+        // graph ON DEMAND (O(ef·M) pages), not deserialize the whole blob (O(N)). M51: `WITH (sbq_bits=N)` enables
+        // the inline SBQ codes (0 = f32-only v1, the default).
+        let sbq_bits = crate::am::options::sbq_bits_from_relation(indexrel);
+        match crate::am::hnsw_page::pack_sbq(&idx, sbq_bits) {
             Ok(packed) => crate::am::hnsw_page::write_structured(indexrel, pg_sys::ForkNumber::MAIN_FORKNUM, &packed),
             Err(e) => pg_sys::error!("theodb hnsw build: {e}"),
         }
@@ -242,7 +244,9 @@ unsafe fn vacuum_rebuild_hnsw_structured(indexrel: pg_sys::Relation, dead: &mut 
     // independent and readers (which follow meta.elem_first/nbr_first/entry_blkno) need no change. T2.2: pack once
     // at base 1 to count pages (the count is base-independent), pick a base that reuses the dead low region when
     // it fits (bounded growth), and repack only if the base changed.
-    let probe = match crate::am::hnsw_page::pack_at(&idx, 1) {
+    // Preserve the index's SBQ layout across the fold (M51): re-quantize the live vectors with a freshly-trained
+    // codebook — the plan's "códigos gerados no fold". `meta.sbq_bits == 0` ⇒ the fold stays v1 f32-only.
+    let probe = match crate::am::hnsw_page::pack_at(&idx, 1, meta.sbq_bits) {
         Ok(p) => p,
         Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
     };
@@ -252,7 +256,7 @@ unsafe fn vacuum_rebuild_hnsw_structured(indexrel: pg_sys::Relation, dead: &mut 
     let packed = if base == 1 {
         probe
     } else {
-        match crate::am::hnsw_page::pack_at(&idx, base as usize) {
+        match crate::am::hnsw_page::pack_at(&idx, base as usize, meta.sbq_bits) {
             Ok(p) => p,
             Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
         }
