@@ -191,9 +191,9 @@ fn _vectorizer_claim_batch(
         name!(attempts, i32),
     ),
 > {
-    let rows = Spi::connect(|client| {
+    let rows = Spi::connect_mut(|client| {
         let tbl = client
-            .select(
+            .update(
                 "UPDATE theodb.vectorizer_queue \
                  SET state='processing', owner=$1, lease_deadline=now() + make_interval(secs => $3), \
                      attempts = attempts + 1 \
@@ -230,16 +230,20 @@ fn _vectorizer_claim_batch(
 /// caller MUST discard its result and NOT write, else it would clobber the new owner (H1 fencing).
 #[pg_extern]
 fn _vectorizer_mark_done(job_id: i64, owner: &str) -> bool {
-    Spi::get_one_with_args::<i64>(
-        "WITH d AS (DELETE FROM theodb.vectorizer_queue \
-         WHERE job_id=$1 AND owner=$2 AND state='processing' RETURNING 1) \
-         SELECT count(*) FROM d",
-        &[job_id.into(), owner.into()],
-    )
-    .ok()
-    .flatten()
-    .map(|n| n > 0)
-    .unwrap_or(false)
+    Spi::connect_mut(|client| {
+        client
+            .update(
+                "WITH d AS (DELETE FROM theodb.vectorizer_queue \
+                 WHERE job_id=$1 AND owner=$2 AND state='processing' RETURNING 1) \
+                 SELECT count(*) FROM d",
+                None,
+                &[job_id.into(), owner.into()],
+            )
+            .ok()
+            .and_then(|t| t.first().get::<i64>(1).ok().flatten())
+            .map(|n| n > 0)
+            .unwrap_or(false)
+    })
 }
 
 /// Owner-guarded failure. Recoverable vs terminal is decided IN SQL by `attempts` (burned on claim): below
@@ -248,18 +252,22 @@ fn _vectorizer_mark_done(job_id: i64, owner: &str) -> bool {
 /// recorded (Rule 8 — never swallow). Returns true iff the guarded row matched (false = lease lost, discard).
 #[pg_extern]
 fn _vectorizer_mark_failed(job_id: i64, owner: &str, err: &str, max_attempts: i32) -> bool {
-    Spi::get_one_with_args::<i64>(
-        "WITH u AS (UPDATE theodb.vectorizer_queue \
-         SET state = CASE WHEN attempts >= $4 THEN 'failed' ELSE 'pending' END, \
-             owner = NULL, lease_deadline = NULL, last_error = $3 \
-         WHERE job_id=$1 AND owner=$2 AND state='processing' RETURNING 1) \
-         SELECT count(*) FROM u",
-        &[job_id.into(), owner.into(), err.into(), max_attempts.into()],
-    )
-    .ok()
-    .flatten()
-    .map(|n| n > 0)
-    .unwrap_or(false)
+    Spi::connect_mut(|client| {
+        client
+            .update(
+                "WITH u AS (UPDATE theodb.vectorizer_queue \
+                 SET state = CASE WHEN attempts >= $4 THEN 'failed' ELSE 'pending' END, \
+                     owner = NULL, lease_deadline = NULL, last_error = $3 \
+                 WHERE job_id=$1 AND owner=$2 AND state='processing' RETURNING 1) \
+                 SELECT count(*) FROM u",
+                None,
+                &[job_id.into(), owner.into(), err.into(), max_attempts.into()],
+            )
+            .ok()
+            .and_then(|t| t.first().get::<i64>(1).ok().flatten())
+            .map(|n| n > 0)
+            .unwrap_or(false)
+    })
 }
 
 /// Owner-guarded lease renewal for long batches: extend `lease_deadline` for jobs still owned by `owner`.
@@ -268,16 +276,20 @@ fn _vectorizer_mark_failed(job_id: i64, owner: &str, err: &str, max_attempts: i3
 /// silently skipped — they belong to another owner now). `job_ids` is a bigint[].
 #[pg_extern]
 fn _vectorizer_renew_lease(job_ids: Vec<i64>, owner: &str, lease_secs: i32) -> i64 {
-    Spi::get_one_with_args::<i64>(
-        "WITH u AS (UPDATE theodb.vectorizer_queue \
-         SET lease_deadline = now() + make_interval(secs => $3) \
-         WHERE job_id = ANY($1) AND owner=$2 AND state='processing' RETURNING 1) \
-         SELECT count(*) FROM u",
-        &[job_ids.into(), owner.into(), lease_secs.into()],
-    )
-    .ok()
-    .flatten()
-    .unwrap_or(0)
+    Spi::connect_mut(|client| {
+        client
+            .update(
+                "WITH u AS (UPDATE theodb.vectorizer_queue \
+                 SET lease_deadline = now() + make_interval(secs => $3) \
+                 WHERE job_id = ANY($1) AND owner=$2 AND state='processing' RETURNING 1) \
+                 SELECT count(*) FROM u",
+                None,
+                &[job_ids.into(), owner.into(), lease_secs.into()],
+            )
+            .ok()
+            .and_then(|t| t.first().get::<i64>(1).ok().flatten())
+            .unwrap_or(0)
+    })
 }
 
 /// Look up a vectorizer's config. Diverges (typed) if the id is unknown. `model` may be NULL.
@@ -411,8 +423,8 @@ pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
     while BackgroundWorker::wait_latch(Some(std::time::Duration::from_secs(WORKER_POLL_SECS))) {
         // Phase 1 — claim a batch (its own txn; the committed lease protects the jobs across phases).
         let jobs: Vec<(i64, i32, String, String)> = BackgroundWorker::transaction(|| {
-            Spi::connect(|c| {
-                let t = match c.select(
+            Spi::connect_mut(|c| {
+                let t = match c.update(
                     "SELECT job_id, vectorizer_id, source_pk, op \
                      FROM theodb_rs._vectorizer_claim_batch($1, $2, $3, $4)",
                     None,
