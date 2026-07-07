@@ -823,7 +823,7 @@ para o vectorizer; a função `embed` continua síncrona).
 sinais, shutdown limpo); fila crash-safe tem sutilezas de visibilidade — mitigação: discover primeiro,
 estados tipados, e o worker nunca segura transação do usuário (async por design).
 
-### M55 — [ ] Decisão: manutenção do índice a escala — fold incremental vs in-place (o muro do VACUUM)
+### M55 — [x] Decisão: manutenção do índice a escala — fold incremental vs in-place (o muro do VACUUM)
 
 **Objective (milestone-decisão, precedente M30):** o desenho deliberado do ADR-1/M35 (grafo imutável +
 rebuild total no VACUUM) tem um muro estrutural: o fold materializa o corpus O(N) em RAM
