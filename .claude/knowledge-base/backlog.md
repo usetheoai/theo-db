@@ -44,3 +44,10 @@ council-index-storage (não-bloqueante): adicionar um pg_test que builda `WITH (
 `theodb.test_crash_phase=1` num VACUUM fold, e após recovery assere que `decode_meta` ainda dá v2 com
 `sbq_bits==4` e o scan retorna o top-k correto. O mecanismo de fold (meta-pivot M48) já é crash-proven para v1;
 o codebook é payload dentro do item block-0 que o pivot protege atomicamente — por isso não-bloqueante. Prioridade: MÉDIA.
+
+## [M52 follow-up] Iterative scan resume-from-discarded (otimização de QPS)
+O iterative scan do M52 (ADR-1) re-busca o grafo inteiro com ef dobrado a cada esgotamento (KISS). O pgvector 0.8
+resume do `discarded` set (não re-percorre) → ~3× mais rápido no caso seletivo (m52: theodb 58ms vs pgvector 17ms
+@1%). theodb IGUALA o RECALL (0.973 ≥ 0.967) mas paga QPS. Otimização: expor um `discarded` set resumível do
+`traverse` (estado de scan entre chamadas de amgettuple) em vez de re-buscar. Ver `docs/benchmarks/m52-filtered-ann.md § 2`.
+Prioridade: MÉDIA (recall já em paridade; é custo, não correção).
