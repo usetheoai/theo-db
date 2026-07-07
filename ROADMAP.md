@@ -768,7 +768,7 @@ seletivo — resolver isso planner-integrado é diferencial genuíno e citável.
 mais sutil da Index AM API; mitigação: discover + âncora nos 2 designs OSS existentes (pgvector iterative,
 pgvectorscale labels).
 
-### M53 — [ ] Híbrida de verdade — WHERE relacional + leg BM25 + benchmark BEIR real
+### M53 — [x] Híbrida de verdade — WHERE relacional + leg BM25 + benchmark BEIR real
 
 **Objective:** Três dívidas da superfície híbrida: (a) o `FUSION_TEMPLATE` (`hybrid.rs:24-46`) **não aceita
 filtro WHERE** — a própria tese de unificação não está exposta na API (`api.rs:432-449` sem parâmetro de
