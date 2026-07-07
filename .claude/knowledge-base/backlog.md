@@ -85,3 +85,10 @@ significância entre as 300 queries. O harness já coleta arrays per-query (`ret
 bootstrap/paired t-test p/ decidir se o edge é significativo ou ruído. Também: híbrida-com-BM25 (leg opt-in)
 vs híbrida-com-ts_rank_cd (exige rebuild da imagem bm25 c/ theodb_rs do M53); cross-check pytrec_eval; nfcorpus.
 Prioridade: MÉDIA (o DoD "não regride" já está cumprido; isto qualificaria um claim de superioridade).
+
+## [M54 review — deferidos honestos (v1 single-worker OK; endereçar antes do multi-worker)]
+- **council-index HIGH-1 (async-embed):** o embed HTTP roda SÍNCRONO dentro de uma txn (embed lê GUCs via SPI). Sob endpoint saudável é ~100ms (negligível); sob endpoint pendurado prende o xmin horizon até ~90s (bounded pelo timeout), atrasando VACUUM. Fix completo: 3-fases real (txn A lê content+cfg+commit → embed sem txn via um run_batch que recebe cfg resolvido → txn B escreve+marca). Exige split de embed.rs (resolve_cfg público + run_batch_resolved sem GUC). Prioridade: MÉDIA (mitigado por timeout; async é o correto).
+- **council-index M-2 (latest-wins):** sem ordenação garantida por source_pk entre jobs; sob multi-worker/update-storm um embed stale pode sobrescrever o mais novo. Fix: coluna version/enqueued_at no alvo (write-if-newer) OU coalescer jobs por (vectorizer_id, source_pk) pegando o mais recente no claim. Prioridade: MÉDIA (v1 single-worker processa in-order).
+- **council-rust L-1 (target UPDATE fencing):** o UPDATE do embedding no alvo não é owner-fenced (só mark_done é). Janela teórica de stale-write se o conteúdo mudou entre fetches sob multi-worker. Idempotente/last-writer-wins hoje. Prioridade: BAIXA.
+- **Multi-worker + multi-DB:** hoje 1 worker, DB fixo (`WORKER_DBNAME='postgres'`). N workers (o SKIP LOCKED já suporta) + launcher por-DB são o próximo passo de throughput/portabilidade. Requer os fixes acima primeiro. Prioridade: MÉDIA.
+- **Chunking recursivo separator-aware:** `theodb.chunk_text` v1 é janela de caracteres; o splitter recursivo (parágrafo→frase→palavra→char, à la LangChain) é o upgrade. Prioridade: BAIXA (v1 suficiente).
