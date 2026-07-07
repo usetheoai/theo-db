@@ -13,7 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- Benchmark M52 filtered ANN (`benchmarks/run_m52_filtered_ann.py` → `docs/benchmarks/m52-filtered-ann.{md,json}`): recall@10 sob `WHERE` seletivo (1%/10%/50%) vs pgvector 0.8 iterative. **Paridade no caso seletivo (1%): theodb 0.973 ≥ pgvector 0.967** (o gate do DoD). A 10%/50% o recall é o base do HNSW (não-seletivo); QPS do theodb ~3× o do pgvector no caso seletivo (re-busca vs resume-from-discarded, follow-up ADR-1). (M52)
+- Benchmark M52 filtered ANN (`benchmarks/run_m52_filtered_ann.py` → `docs/benchmarks/m52-filtered-ann.{md,json}`): recall@10 sob `WHERE` seletivo (1%/10%/50%) vs pgvector 0.8 iterative. **Paridade no caso seletivo (1%): theodb 0.971 ≥ pgvector 0.964** (o gate do DoD). A 10%/50% (não-seletivos) o delta está dentro da variância de run (paridade nos 3); QPS do theodb ~3× o do pgvector no caso seletivo (re-busca vs resume-from-discarded, follow-up ADR-1). (M52)
 - Filtered ANN planner-integrado (M52): sob um `WHERE` seletivo, o scan `theodb_hnsw` faz **iterative scan** (re-busca com `ef` crescente + dedup dos tids emitidos, ordem RELAXED estilo pgvector 0.8) até `SET theodb_hnsw.max_scan_tuples = N` (default 20000, 0 = off), preservando recall onde o HNSW ingênuo (≤ ef_search tuplas) colapsaria. Zero regressão no path unfiltered (`LIMIT k` com ef≫k nunca dispara o grow). Blueprint `m52-filtered-ann-blueprint.md` (ADR: iterative RELAXED vs resume-from-discarded/ACORN/labels). (M52)
 
 ### Changed
