@@ -158,6 +158,71 @@ mod simd_x86 {
         }
         s
     }
+
+    /// M58: the cosine kernel — `(Σq·r, Σq², Σr²)` with AVX2+FMA over unaligned LE-f32 `raw`, three lane
+    /// accumulators reduced once. Same SAFETY contract as [`l2_sq`] (caller ensures AVX2+FMA available AND
+    /// `raw.len() == query.len()*4`). Feeds `cosine_dist_from_bytes` / `ip_dist_from_bytes` — the scan hot path for
+    /// real (OpenAI/Cohere) cosine/IP embeddings, which until now ran scalar (the M58 P2 gap). Approximate (SIMD FMA
+    /// rounds differently than the scalar sum) — same parity-not-identity rule as L2's SIMD (operators stay scalar).
+    #[target_feature(enable = "avx2,fma")]
+    pub(super) unsafe fn cosine_terms(query: &[f32], raw: &[u8]) -> (f32, f32, f32) {
+        let dim = query.len();
+        let qp = query.as_ptr();
+        let rp = raw.as_ptr();
+        let (mut adot, mut anq, mut anr) = (_mm256_setzero_ps(), _mm256_setzero_ps(), _mm256_setzero_ps());
+        let mut i = 0usize;
+        while i + 8 <= dim {
+            let q = _mm256_loadu_ps(qp.add(i));
+            let r = _mm256_loadu_ps(rp.add(i * 4) as *const f32);
+            adot = _mm256_fmadd_ps(q, r, adot);
+            anq = _mm256_fmadd_ps(q, q, anq);
+            anr = _mm256_fmadd_ps(r, r, anr);
+            i += 8;
+        }
+        let mut ld = [0f32; 8];
+        let mut lq = [0f32; 8];
+        let mut lr = [0f32; 8];
+        _mm256_storeu_ps(ld.as_mut_ptr(), adot);
+        _mm256_storeu_ps(lq.as_mut_ptr(), anq);
+        _mm256_storeu_ps(lr.as_mut_ptr(), anr);
+        let (mut dot, mut nq, mut nr) = (ld.iter().sum::<f32>(), lq.iter().sum::<f32>(), lr.iter().sum::<f32>());
+        while i < dim {
+            let o = i * 4;
+            let r = f32::from_le_bytes([*rp.add(o), *rp.add(o + 1), *rp.add(o + 2), *rp.add(o + 3)]);
+            let q = *qp.add(i);
+            dot += q * r;
+            nq += q * q;
+            nr += r * r;
+            i += 1;
+        }
+        (dot, nq, nr)
+    }
+
+    /// M58: fused dot `Σq·r` with AVX2+FMA (the inner-product kernel). Same SAFETY contract as [`l2_sq`].
+    #[target_feature(enable = "avx2,fma")]
+    pub(super) unsafe fn dot(query: &[f32], raw: &[u8]) -> f32 {
+        let dim = query.len();
+        let qp = query.as_ptr();
+        let rp = raw.as_ptr();
+        let mut acc = _mm256_setzero_ps();
+        let mut i = 0usize;
+        while i + 8 <= dim {
+            let q = _mm256_loadu_ps(qp.add(i));
+            let r = _mm256_loadu_ps(rp.add(i * 4) as *const f32);
+            acc = _mm256_fmadd_ps(q, r, acc);
+            i += 8;
+        }
+        let mut lanes = [0f32; 8];
+        _mm256_storeu_ps(lanes.as_mut_ptr(), acc);
+        let mut s: f32 = lanes.iter().sum();
+        while i < dim {
+            let o = i * 4;
+            let r = f32::from_le_bytes([*rp.add(o), *rp.add(o + 1), *rp.add(o + 2), *rp.add(o + 3)]);
+            s += *qp.add(i) * r;
+            i += 1;
+        }
+        s
+    }
 }
 
 /// L2 distance between two f32 slices, using the SAME AVX2+FMA kernel as the scan (M43). Reuses `l2_dist_from_bytes`
@@ -207,14 +272,26 @@ pub(crate) fn l2_dist_from_bytes(query: &[f32], raw: &[u8]) -> f64 {
 /// the ROADMAP flagged for cosine/ip). Reads each f32 inline from `raw`. The length invariant is enforced ALWAYS
 /// so no OOB. (AVX2 for the dot term is a Phase-4 parity optimization if the benchmark shows cosine/ip lag L2's
 /// AVX2 kernel; the zero-alloc contract — the M49 DoD — is already met by this scalar path.)
-fn dot_from_bytes(query: &[f32], raw: &[u8]) -> f32 {
-    assert_eq!(raw.len(), query.len() * 4, "dot_from_bytes: raw must be exactly dim*4 bytes");
+fn dot_from_bytes_scalar(query: &[f32], raw: &[u8]) -> f32 {
     let mut dot = 0f32;
     for (i, &qi) in query.iter().enumerate() {
         let r = f32::from_le_bytes([raw[i * 4], raw[i * 4 + 1], raw[i * 4 + 2], raw[i * 4 + 3]]);
         dot += qi * r;
     }
     dot
+}
+
+/// M58: dispatches to the AVX2+FMA `dot` kernel when available (cached), else the scalar fallback. Length
+/// invariant enforced ALWAYS so the `unsafe` SIMD path can never OOB. Approximate (SIMD rounding) — the scan
+/// walk/rerank tolerate it (parity-not-identity, like L2); the SQL `<#>` operator uses the exact scalar path.
+fn dot_from_bytes(query: &[f32], raw: &[u8]) -> f32 {
+    assert_eq!(raw.len(), query.len() * 4, "dot_from_bytes: raw must be exactly dim*4 bytes");
+    #[cfg(target_arch = "x86_64")]
+    if simd_x86::available() {
+        // SAFETY: `available()` confirmed AVX2+FMA; the `assert_eq!` guarantees `raw.len()==query.len()*4`.
+        return unsafe { simd_x86::dot(query, raw) };
+    }
+    dot_from_bytes_scalar(query, raw)
 }
 
 /// M49: negative inner product `-Σ q·r` from raw bytes (the `<#>` ORDER BY key — smaller = closer, pgvector
@@ -225,8 +302,7 @@ pub(crate) fn ip_dist_from_bytes(query: &[f32], raw: &[u8]) -> f64 {
 
 /// M49: cosine distance `1 - dot/sqrt(‖q‖²·‖r‖²)` from raw bytes, one pass, clamp to [-1,1]. Zero-alloc. A
 /// zero-norm `raw` yields NaN (0/0) — ordered LAST by the scan's `Cand` "NaN LAST" comparator (`ann/mod.rs`).
-pub(crate) fn cosine_dist_from_bytes(query: &[f32], raw: &[u8]) -> f64 {
-    assert_eq!(raw.len(), query.len() * 4, "cosine_dist_from_bytes: raw must be exactly dim*4 bytes");
+fn cosine_terms_scalar(query: &[f32], raw: &[u8]) -> (f32, f32, f32) {
     let (mut dot, mut nq, mut nr) = (0f32, 0f32, 0f32);
     for (i, &qi) in query.iter().enumerate() {
         let r = f32::from_le_bytes([raw[i * 4], raw[i * 4 + 1], raw[i * 4 + 2], raw[i * 4 + 3]]);
@@ -234,6 +310,21 @@ pub(crate) fn cosine_dist_from_bytes(query: &[f32], raw: &[u8]) -> f64 {
         nq += qi * qi;
         nr += r * r;
     }
+    (dot, nq, nr)
+}
+
+pub(crate) fn cosine_dist_from_bytes(query: &[f32], raw: &[u8]) -> f64 {
+    assert_eq!(raw.len(), query.len() * 4, "cosine_dist_from_bytes: raw must be exactly dim*4 bytes");
+    // M58: AVX2+FMA cosine kernel when available (the real-embedding scan hot path); scalar fallback otherwise.
+    #[cfg(target_arch = "x86_64")]
+    let (dot, nq, nr) = if simd_x86::available() {
+        // SAFETY: `available()` confirmed AVX2+FMA; the `assert_eq!` guarantees `raw.len()==query.len()*4`.
+        unsafe { simd_x86::cosine_terms(query, raw) }
+    } else {
+        cosine_terms_scalar(query, raw)
+    };
+    #[cfg(not(target_arch = "x86_64"))]
+    let (dot, nq, nr) = cosine_terms_scalar(query, raw);
     let sim = (dot as f64) / ((nq as f64) * (nr as f64)).sqrt();
     1.0 - sim.clamp(-1.0, 1.0)
 }
@@ -359,6 +450,32 @@ mod tests {
                 (got - oracle).abs() <= eps,
                 "dim={dim}: fused={got} vs scalar-oracle={oracle} (eps={eps})"
             );
+        }
+    }
+
+    /// M58: the SIMD (AVX2+FMA) cosine/IP kernels match the exact scalar oracle within a tiny eps, across dims
+    /// (including tails past the 8-lane boundary), for BOTH the AVX and scalar dispatch branches. Approximate
+    /// (lane-reduce rounding), recall-preserving — NOT bit-identical (same rule as L2's SIMD; SQL operators stay exact).
+    #[pg_test]
+    fn cosine_and_ip_from_bytes_match_scalar_within_eps_across_dims() {
+        for dim in [1usize, 7, 8, 9, 16, 17, 128, 768] {
+            let q: Vec<f32> = (0..dim).map(|i| (i as f32) * 0.3 - 2.0).collect();
+            let c: Vec<f32> = (0..dim).map(|i| 1.5 - (i as f32) * 0.2).collect();
+            let raw = to_le_bytes(&c);
+            let cos_oracle = cosine_distance(&q, &c);
+            let dot_oracle: f64 = q.iter().zip(&c).map(|(a, b)| (*a as f64) * (*b as f64)).sum();
+            for avx in [true, false] {
+                simd_x86::force_for_test(avx);
+                let cos = cosine_dist_from_bytes(&q, &raw);
+                assert!(
+                    (cos - cos_oracle).abs() <= 1e-4 * (dim as f64).sqrt(),
+                    "cosine dim={dim} avx={avx}: {cos} vs {cos_oracle}"
+                );
+                let ip = ip_dist_from_bytes(&q, &raw);
+                let eps = 1e-4 * (dim as f64).sqrt() * dot_oracle.abs().max(1.0);
+                assert!((ip - (-dot_oracle)).abs() <= eps, "ip dim={dim} avx={avx}: {ip} vs {}", -dot_oracle);
+            }
+            simd_x86::reset_for_test();
         }
     }
 }

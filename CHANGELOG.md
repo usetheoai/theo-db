@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **M58 (P2) — SIMD para cosine/inner-product**: `cosine_dist_from_bytes`/`ip_dist_from_bytes` (o hot-path do scan para embeddings reais OpenAI/Cohere) passam a dispatchar para kernels **AVX2+FMA** (`simd_x86::cosine_terms` — 3 acumuladores dot/‖q‖²/‖r‖²; `simd_x86::dot`) quando disponível, com fallback escalar. Até agora só o L2 tinha SIMD (`vec.rs`) — cosine/IP rodavam escalar (o gap P2 do deep-view). Aproximado (arredondamento lane-reduce, parity-not-identity como o L2); o operador SQL `<=>`/`<#>` mantém o caminho escalar exato. pg_test de paridade dentro de eps (ambos branches, dims com tail 7/9/17/768).
 
 ### Changed
 
