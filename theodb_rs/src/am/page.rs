@@ -258,6 +258,36 @@ pub(crate) unsafe fn read_all_page_items(rel: pg_sys::Relation, block: pg_sys::B
     Ok(out)
 }
 
+/// M56 fase 2: like [`read_all_page_items`] but returns each item's `OffsetNumber` alongside its bytes, so a
+/// caller (the in-place-insert slot finder) can build the element `Addr` `(block, off)` of a reusable slot.
+pub(crate) unsafe fn read_all_page_items_with_off(
+    rel: pg_sys::Relation,
+    block: pg_sys::BlockNumber,
+) -> Result<Vec<(u16, Vec<u8>)>, String> {
+    let buf = pg_sys::ReadBufferExtended(
+        rel,
+        pg_sys::ForkNumber::MAIN_FORKNUM,
+        block,
+        pg_sys::ReadBufferMode::RBM_NORMAL,
+        std::ptr::null_mut(),
+    );
+    pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_SHARE as i32);
+    let page = pg_sys::BufferGetPage(buf);
+    let max_off = page_get_max_offset(page);
+    let mut out = Vec::with_capacity(max_off);
+    for off in 1..=max_off {
+        let item_id = page_get_item_id(page, off as pg_sys::OffsetNumber);
+        let len = (*item_id).lp_len() as usize;
+        if len == 0 {
+            continue;
+        }
+        let ptr = page_get_item(page, item_id) as *const u8;
+        out.push((off as u16, std::slice::from_raw_parts(ptr, len).to_vec()));
+    }
+    pg_sys::UnlockReleaseBuffer(buf);
+    Ok(out)
+}
+
 /// M56: edit the items of ONE page IN PLACE under a single `GenericXLog` (crash-safe, per-page — no advisory
 /// index lock, no O(N) rebuild). For each item, `f` receives the item's mutable bytes and returns `true` iff it
 /// modified them (the item size MUST NOT change — this is a fixed-offset byte edit, e.g. the tombstone flag).

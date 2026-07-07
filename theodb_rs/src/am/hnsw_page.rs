@@ -544,6 +544,28 @@ pub(crate) unsafe fn count_tombstones(rel: pg_sys::Relation, meta: &HnswMeta) ->
     n
 }
 
+/// M56 fase 2 (T1.1 — RepairGraph/in-place insert slot-reuse): find a tombstoned element slot reusable for a
+/// NEW node of level `need_level` — a slot whose element is `deleted` AND whose stored level ≥ `need_level`, so
+/// the new node's fixed-per-level neighbor tuple (`level*m + m0` slots) fits where the old node's did (ADR-R1).
+/// Bounded scan of the element pages; returns the first match as its `(block, off)` address. `None` ⇒ no reusable
+/// slot (the caller falls back to `append_pending`). Read-only (SHARE-locked); never mutates.
+pub(crate) unsafe fn find_reusable_slot(rel: pg_sys::Relation, meta: &HnswMeta, need_level: usize) -> Option<Addr> {
+    for blk in meta.elem_first..(meta.elem_first + meta.elem_npages) {
+        let items = match page::read_all_page_items_with_off(rel, blk) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        for (off, bytes) in items {
+            if let Ok(ev) = decode_element(&bytes) {
+                if ev.deleted && ev.level as usize >= need_level {
+                    return Some((blk, off));
+                }
+            }
+        }
+    }
+    None
+}
+
 // (M48) The old in-place `rewrite_structured` was replaced by the crash-safe `fold::fold` (meta-pivot) — it
 // rewrote block 0 first, so a crash mid-vacuum left the meta pointing at pages that still held old bytes (#47).
 
@@ -1530,6 +1552,34 @@ mod tests {
             "recall@10 under 20% accumulated tombstones (no compaction) = {mean_recall:.3} — expected >= 0.9 \
              (navigate-through preserves recall ⇒ phase-2 RepairGraph not urgent)"
         );
+    }
+
+    /// M56 fase 2 T1.1: `find_reusable_slot` returns None with no tombstones, and the tombstoned node's
+    /// `(block, off)` after one is marked — the entry point of the in-place-insert slot-reuse (RepairGraph).
+    #[pgrx::pg_test]
+    fn find_reusable_slot_locates_a_tombstoned_slot() {
+        pgrx::Spi::run("CREATE TABLE fr (id int PRIMARY KEY, e vector(4))").unwrap();
+        for i in 0..30i32 {
+            let (a, b, c, d) = (i as f32, (i % 7) as f32, (i % 5) as f32, i as f32 * 0.1);
+            pgrx::Spi::run(&format!("INSERT INTO fr VALUES ({i}, '[{a},{b},{c},{d}]')")).unwrap();
+        }
+        pgrx::Spi::run("CREATE INDEX fr_idx ON fr USING theodb_hnsw (e)").unwrap();
+        let dead_tid = heap_tid_i64("fr", 5);
+        unsafe {
+            let oid: pg_sys::Oid = pgrx::Spi::get_one("SELECT 'fr_idx'::regclass::oid").unwrap().expect("oid");
+            let rel = pg_sys::index_open(oid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+            let meta = read_meta(rel).expect("read_meta");
+            assert!(find_reusable_slot(rel, &meta, 0).is_none(), "no tombstones ⇒ no reusable slot");
+            let mut is_dead = |tid: i64| tid == dead_tid;
+            assert_eq!(tombstone_sweep(rel, &meta, &mut is_dead), 1, "tombstone node id=5");
+            let slot = find_reusable_slot(rel, &meta, 0);
+            assert!(slot.is_some(), "after tombstoning, a level-0 reusable slot exists");
+            let (blk, off) = slot.unwrap();
+            let item = page::read_page_item_at(rel, blk, off).expect("read slot");
+            assert!(decode_element(&item).unwrap().deleted, "the found slot is the tombstone");
+            assert!(find_reusable_slot(rel, &meta, 99).is_none(), "no slot has level ≥ 99 (nbr tuple wouldn't fit)");
+            pg_sys::index_close(rel, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+        }
     }
 }
 
