@@ -48,6 +48,99 @@ CREATE INDEX IF NOT EXISTS vectorizer_queue_claim_idx
     name = "theodb_vectorizer_schema",
 );
 
+// The declarative surface (plpgsql — dynamic DDL is natural here, KISS): a generic AFTER-row trigger that
+// enqueues on INSERT/UPDATE/DELETE, `theodb.create_vectorizer` that wires it to a source table, and a v1
+// chunking helper. The trigger does ONLY a cheap INSERT into the queue (no HTTP) — all model latency stays
+// in the worker, off the writer's transaction (ADR 0016 / blueprint R5).
+extension_sql!(
+    r#"
+-- Generic enqueue trigger: TG_ARGV[0]=vectorizer_id, TG_ARGV[1]=source_pk_col. The PK is extracted as text
+-- via to_jsonb(row)->>col (no dynamic EXECUTE needed). Enqueues 'delete' on DELETE, else 'upsert'.
+CREATE FUNCTION theodb._vectorizer_enqueue() RETURNS trigger LANGUAGE plpgsql AS $fn$
+DECLARE
+    vid   int  := TG_ARGV[0]::int;
+    pkcol text := TG_ARGV[1];
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        INSERT INTO theodb.vectorizer_queue (vectorizer_id, source_pk, op)
+        VALUES (vid, to_jsonb(OLD) ->> pkcol, 'delete');
+        RETURN OLD;
+    END IF;
+    INSERT INTO theodb.vectorizer_queue (vectorizer_id, source_pk, op)
+    VALUES (vid, to_jsonb(NEW) ->> pkcol, 'upsert');
+    RETURN NEW;
+END;
+$fn$;
+
+-- Declarative registration: record the config + attach the enqueue trigger to the source table. Returns the
+-- vectorizer id. Idempotent-ish: a second call on the same table creates a second vectorizer/trigger (by id)
+-- — callers dedupe by not re-registering. The AFTER trigger name is namespaced by id so several can coexist.
+CREATE FUNCTION theodb.create_vectorizer(
+    source_table  regclass,
+    source_pk_col text,
+    content_col   text,
+    target_table  text,
+    target_col    text,
+    model         text DEFAULT NULL,
+    dims          int  DEFAULT NULL
+) RETURNS int LANGUAGE plpgsql AS $fn$
+DECLARE
+    vid    int;
+    tgname text;
+BEGIN
+    INSERT INTO theodb.vectorizer (source_table, source_pk_col, content_col, target_table, target_col, model, dims)
+    VALUES (source_table::text, source_pk_col, content_col, target_table, target_col, model, dims)
+    RETURNING id INTO vid;
+
+    tgname := format('theodb_vectorizer_%s', vid);
+    EXECUTE format(
+        'CREATE TRIGGER %I AFTER INSERT OR UPDATE OR DELETE ON %s '
+        'FOR EACH ROW EXECUTE FUNCTION theodb._vectorizer_enqueue(%L, %L)',
+        tgname, source_table::text, vid::text, source_pk_col);
+    RETURN vid;
+END;
+$fn$;
+
+COMMENT ON FUNCTION theodb.create_vectorizer(regclass, text, text, text, text, text, int) IS
+  'Declaratively maintain an embedding column: attach an AFTER INSERT/UPDATE/DELETE trigger to source_table '
+  'that enqueues jobs into theodb.vectorizer_queue; the background worker drains them (M54, ADR 0016). The '
+  'trigger only enqueues (cheap, no HTTP) — model latency stays off the writer transaction.';
+
+-- v1 chunking helper: a fixed-size CHARACTER window with overlap (the simplest correct chunker). HONEST v1
+-- scope (YAGNI): this is NOT a separator-aware recursive splitter (paragraph/sentence/word hierarchy) — that
+-- is a tracked follow-up. Fail-fast typed on bad params (Rule 8). Empty/NULL input → empty array.
+CREATE FUNCTION theodb.chunk_text(content text, chunk_size int DEFAULT 512, overlap int DEFAULT 64)
+RETURNS text[] LANGUAGE plpgsql IMMUTABLE AS $fn$
+DECLARE
+    result text[] := '{}';
+    pos    int := 1;
+    len    int := length(coalesce(content, ''));
+    step   int;
+BEGIN
+    IF chunk_size <= 0 THEN
+        RAISE EXCEPTION 'theodb.chunk_text: chunk_size must be > 0 (got %)', chunk_size;
+    END IF;
+    IF overlap < 0 OR overlap >= chunk_size THEN
+        RAISE EXCEPTION 'theodb.chunk_text: overlap must be in [0, chunk_size) (got %, chunk_size %)', overlap, chunk_size;
+    END IF;
+    IF len = 0 THEN
+        RETURN '{}';
+    END IF;
+    step := chunk_size - overlap;
+    WHILE pos <= len LOOP
+        result := array_append(result, substr(content, pos, chunk_size));
+        pos := pos + step;
+    END LOOP;
+    RETURN result;
+END;
+$fn$;
+
+REVOKE ALL ON FUNCTION theodb.create_vectorizer(regclass, text, text, text, text, text, int) FROM PUBLIC;
+"#,
+    name = "theodb_vectorizer_surface",
+    requires = ["theodb_vectorizer_schema"],
+);
+
 // All `#[pg_extern]` entrypoints live in the `theodb_rs` schema (project convention — mirrors
 // `api.rs`'s `#[pg_schema] mod theodb_rs`). pgrx merges same-named `#[pg_schema]` modules across files.
 #[pgrx::pg_schema]
@@ -303,5 +396,64 @@ mod tests {
         assert_eq!(w2n, 0, "a non-owner renews nothing (fencing)");
         let w1n: i64 = Spi::get_one(&format!("SELECT theodb_rs._vectorizer_renew_lease({arr}, 'w1', 120)")).unwrap().unwrap();
         assert_eq!(w1n, 2, "the owner renews all its jobs");
+    }
+
+    #[pg_test]
+    fn create_vectorizer_enqueues_on_dml() {
+        Spi::run("CREATE TEMP TABLE docs (id int PRIMARY KEY, body text)").unwrap();
+        let vid: i32 = Spi::get_one(
+            "SELECT theodb.create_vectorizer('docs'::regclass, 'id', 'body', 'docs', 'emb', 'm', 3)",
+        )
+        .unwrap()
+        .unwrap();
+        assert!(vid > 0, "create_vectorizer returns the new vectorizer id");
+        // INSERT → one pending 'upsert' job keyed by the row PK.
+        Spi::run("INSERT INTO docs VALUES (42, 'hello world')").unwrap();
+        let (pk, op, state): (String, String, String) = Spi::connect(|c| {
+            let r = c
+                .select("SELECT source_pk, op, state FROM theodb.vectorizer_queue ORDER BY job_id DESC LIMIT 1", None, &[])
+                .unwrap()
+                .first();
+            (
+                r.get::<String>(1).unwrap().unwrap(),
+                r.get::<String>(2).unwrap().unwrap(),
+                r.get::<String>(3).unwrap().unwrap(),
+            )
+        });
+        assert_eq!((pk.as_str(), op.as_str(), state.as_str()), ("42", "upsert", "pending"),
+            "INSERT enqueues a pending upsert for the row PK");
+        // UPDATE → another upsert; DELETE → a delete job.
+        Spi::run("UPDATE docs SET body='changed' WHERE id=42").unwrap();
+        Spi::run("DELETE FROM docs WHERE id=42").unwrap();
+        let ops: Vec<String> = Spi::connect(|c| {
+            c.select("SELECT op FROM theodb.vectorizer_queue ORDER BY job_id", None, &[])
+                .unwrap()
+                .filter_map(|r| r.get::<String>(1).unwrap())
+                .collect()
+        });
+        assert_eq!(ops, vec!["upsert", "upsert", "delete"], "INSERT/UPDATE enqueue upsert, DELETE enqueues delete");
+    }
+
+    #[pg_test]
+    fn chunk_text_windows_with_overlap() {
+        // 'abcdefghij' (len 10), size 4, overlap 1 → step 3 → positions 1,4,7,10 → abcd,defg,ghij,j.
+        let chunks: Vec<String> = Spi::connect(|c| {
+            c.select("SELECT unnest(theodb.chunk_text('abcdefghij', 4, 1))", None, &[])
+                .unwrap()
+                .filter_map(|r| r.get::<String>(1).unwrap())
+                .collect()
+        });
+        assert_eq!(chunks, vec!["abcd", "defg", "ghij", "j"], "fixed-size character window with overlap");
+    }
+
+    #[pg_test]
+    fn chunk_text_empty_returns_empty() {
+        let n: i32 = Spi::get_one("SELECT array_length(theodb.chunk_text(''), 1)").unwrap().unwrap_or(0);
+        assert_eq!(n, 0, "empty content yields an empty chunk array (NULL length → 0)");
+    }
+
+    #[pg_test(error = "theodb.chunk_text: overlap must be in [0, chunk_size) (got 5, chunk_size 4)")]
+    fn chunk_text_rejects_overlap_ge_size() {
+        Spi::run("SELECT theodb.chunk_text('abc', 4, 5)").unwrap();
     }
 }

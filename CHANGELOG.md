@@ -13,7 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- Fundação do vectorizer declarativo (M54, ADR 0016): fila de jobs crash-safe (`theodb.vectorizer_queue`) com estados tipados (pending/processing/failed), fencing por owner token e visibility-timeout — worker morto libera o job (lease expirado → re-claimável), owner obsoleto não sobrescreve o novo (evita duplo-processamento), poison-pill vira dead-letter no teto de tentativas (nunca loop). 6 pg_test cobrem o state machine sem worker/preload/OpenAI.
+- Vectorizer declarativo (M54, ADR 0016): `theodb.create_vectorizer(source_table, source_pk_col, content_col, target_table, target_col, model, dims)` anexa um trigger AFTER INSERT/UPDATE/DELETE que enfileira jobs (só INSERT barato, sem HTTP — latência do modelo fica fora da transação do escritor). Fila crash-safe (`theodb.vectorizer_queue`) com estados tipados (pending/processing/failed), fencing por owner token e visibility-timeout — worker morto libera o job (lease expirado → re-claimável), owner obsoleto não sobrescreve o novo (evita duplo-processamento), poison-pill vira dead-letter no teto de tentativas (nunca loop). Helper de chunking `theodb.chunk_text(content, chunk_size, overlap)` (janela de caracteres com overlap, v1). 10 pg_test cobrem o state machine + trigger + chunking sem worker/preload/OpenAI.
 
 ### Changed
 
