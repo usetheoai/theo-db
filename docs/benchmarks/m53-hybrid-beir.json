@@ -1,0 +1,58 @@
+{
+  "dataset": "scifact",
+  "split": "test",
+  "model": "text-embedding-3-small",
+  "dim": 1536,
+  "k_rrf": 60,
+  "top": 100,
+  "runs": 3,
+  "limit_queries": null,
+  "timestamp": "2026-07-07",
+  "nproc": 12,
+  "load_pre": 10.21,
+  "status": "OK",
+  "n_docs": 5183,
+  "n_queries": 300,
+  "warm_s": 5.16,
+  "load_per_run": [
+    9.87,
+    14.97,
+    12.45
+  ],
+  "load_post": 11.73,
+  "per_retriever": {
+    "vector": {
+      "ndcg10": 0.729644,
+      "recall100": 0.973333,
+      "deterministic": true,
+      "spread_ndcg10": 0.0,
+      "spread_recall100": 0.0
+    },
+    "fts": {
+      "ndcg10": 0.070275,
+      "recall100": 0.069444,
+      "deterministic": true,
+      "spread_ndcg10": 0.0,
+      "spread_recall100": 0.0
+    },
+    "hybrid": {
+      "ndcg10": 0.733724,
+      "recall100": 0.973333,
+      "deterministic": true,
+      "spread_ndcg10": 0.0,
+      "spread_recall100": 0.0
+    },
+    "bm25": {
+      "ndcg10": 0.688075,
+      "recall100": 0.918222,
+      "deterministic": true,
+      "spread_ndcg10": 0.0,
+      "spread_recall100": 0.0
+    }
+  },
+  "bm25_status": "INCLUDED",
+  "caveats": [
+    "embeddings model=text-embedding-3-small dim=1536 (real API, pre-warmed + disk-cached)",
+    "RRF fusion is the in-DB ai.hybrid_search_rrf function (product path), not an offline twin"
+  ]
+}

@@ -26,10 +26,16 @@ def rrf_fuse(leg_rankings: list, k: int = 60) -> list:
 
 
 def run_three_retrievers(db, dataset, embed_fn, dim: int, table: str = "hybrid_eval",
-                         k_rrf: int = 60, top: int = 100, include_bm25: bool = False) -> dict:
+                         k_rrf: int = 60, top: int = 100, include_bm25: bool = False,
+                         return_per_query: bool = False) -> dict:
     """Load the labelled corpus into a documents table, then score pure-vector / pure-FTS / RRF-hybrid
     retrievers with nDCG@10 + Recall@100 (BEIR methodology). Returns {name: {ndcg10, recall100}}.
     When include_bm25=True, also scores a `bm25` leg via pg_textsearch (requires the throwaway bm25 image).
+
+    When return_per_query=True, the result also carries a `_per_query` key holding, per retriever, the
+    aligned per-query score lists ({"qids", "ndcg10", "recall100"}) — so a caller can audit the score
+    DISTRIBUTION (mean can hide a cherry-picked query) instead of trusting the aggregate alone. Callers
+    that ignore the flag are unaffected: the default return shape is unchanged.
 
     embed_fn(text) -> vector (deterministic lexical embedder for CI, or theodb.embed for the real eval).
     """
@@ -51,15 +57,20 @@ def run_three_retrievers(db, dataset, embed_fn, dim: int, table: str = "hybrid_e
         retrievers["bm25"] = lambda qtext, qvec: db.bm25_query(table, qtext, top)
 
     out: dict = {}
+    per_query: dict = {}
     for name, retrieve in retrievers.items():
-        ndcgs, recalls = [], []
+        qids, ndcgs, recalls = [], [], []
         for qid, qtext in dataset.queries.items():
             qvec = embed_fn(qtext)
             ranked = retrieve(qtext, qvec)
+            qids.append(qid)
             ndcgs.append(ndcg_at_k(ranked, dataset.qrels.get(qid, {}), 10))
             recalls.append(recall_at_n(ranked, dataset.qrels.get(qid, {}), 100))
         out[name] = {
             "ndcg10": sum(ndcgs) / len(ndcgs),
             "recall100": sum(recalls) / len(recalls),
         }
+        per_query[name] = {"qids": qids, "ndcg10": ndcgs, "recall100": recalls}
+    if return_per_query:
+        out["_per_query"] = per_query
     return out

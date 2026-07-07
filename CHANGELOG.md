@@ -24,6 +24,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.44.0] - 2026-07-07
+
+### Added
+- Hybrid search agora aceita um filtro relacional e um idioma de FTS: `ai.hybrid_search_rrf(…, language, filter_sql)` — o `filter_sql` é confinado ao WHERE de ambos os legs (vetorial + lexical) e executa com o privilégio do chamador (SECURITY INVOKER), rejeitando terminador de statement (`;`) e comentários SQL; `language` parametriza `plainto_tsquery` (antes 'english' fixo) (M53).
+- Leg lexical BM25 opt-in no hybrid search: `ai.hybrid_search_rrf(…, lexical_engine, content_text_col)` — `lexical_engine='bm25'` roteia o leg lexical para `pg_textsearch` (operador `<@>`, ordenação por menor distância) sobre uma coluna TEXT indexada `USING bm25`, com `ts_rank_cd` preservado como default (regressão zero). Falha-rápido tipada (22023) em engine inválido ou `content_text_col` ausente; `0A000` claro quando a extensão `pg_textsearch` não está presente (imagem shipada). Executa a exceção permissiva do ADR 0013 sem reabrir out-of-scope (M53).
+- Benchmark BEIR real do hybrid search (`docs/benchmarks/m53-hybrid-beir.{md,json}`, harness `benchmarks/run_m53_hybrid_beir.py`): scifact (5.183 docs, 300 queries) embedado com OpenAI `text-embedding-3-small`, comparando hybrid RRF vs vector vs BM25 vs `ts_rank_cd`. Evidência decision-grade (antes só um fixture de 12 docs "not decision-grade"): híbrida iguala vector-only (recall@100 paridade 0.9733; edge marginal +0.004 nDCG@10 não testado p/ significância); BM25 é retriever lexical forte (nDCG@10 0.6881 ≈ vector 0.730 sobre seu top-k) muito acima do `ts_rank_cd` (0.0703) — executa o gate de adoção do ADR 0013 (M53).
+
 ## [0.43.0] - 2026-07-07
 
 ### Added

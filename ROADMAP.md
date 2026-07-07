@@ -744,7 +744,7 @@ milestone mede).
 **Dependencies:** M50 (GATE — o veredito escrito do M50 autoriza ou re-escopa esta aposta). **Risco (ALTO):**
 mudança de formato on-disk + calibração de over_fetch (recall); mitigado pelo gate D3 e pelo REINDEX path.
 
-### M52 — [ ] Filtered ANN planner-integrado — `WHERE … ORDER BY embedding <=> $1` com recall preservado
+### M52 — [x] Filtered ANN planner-integrado — `WHERE … ORDER BY embedding <=> $1` com recall preservado
 
 **Objective:** O gap CRÍTICO vs o campo: filtered vector search é o flagship do AlloyDB (adaptive filtering),
 está no pgvector 0.8 (iterative index scans) e no pgvectorscale (label filtering) — e no TheoDB tem **zero

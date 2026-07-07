@@ -66,3 +66,22 @@ multi-seed (ex.: [42,99,7]) reportando mean±std do delta por seletividade, e (b
 {0, 20000}` do theodb por seletividade (prova o trigger). Committar o json regenerado. Numa versão anterior do
 artefato esses controles foram citados como "medidos" em prosa sem código/raw — retirados; este é o débito de
 torná-los reproduzíveis. Prioridade: MÉDIA (o gate 1% já é medido e passa; isto fecha o "por que 10%/50%").
+
+## [M53 review — council-security F1] Filtro estruturado fail-closed p/ ai.hybrid_search_rrf
+council-security: o parâmetro `filter_sql` (M53) é SQL cru interpolado (`%5$s`) sob SECURITY INVOKER. O guard
+rejeita `;` e comentários (`--`/`/*`/`*/`), mas NÃO é um parser — uma subquery de leitura ainda compõe
+(caller-privilege, por design). Payload que passa o guard: `filter_sql => '(SELECT count(*) FROM t) >= 0'`.
+Não é escalonamento hoje (INVOKER + read-only SPI + REVOKE FROM PUBLIC se sustentam), MAS vira BLOCKER latente
+sob qualquer wrapper SECURITY DEFINER ou GRANT a role isolado (colide com o modelo de tenant do theo-data).
+Fixes JÁ APLICADOS: doc/COMMENT corrigidos (removida a falsa garantia "injection-safe" no path filter_sql;
+declarado SQL cru caller-privilege) + guard estendido p/ comentários + teste negativo `hybrid_filter_rejects_sql_comment`.
+FOLLOW-UP (ADR): expor filtro estruturado (coluna/operador/valor com `%I` + bind de valor) como alternativa
+fail-closed ao predicado cru — a única defesa realmente fail-closed p/ input não-confiável. Prioridade: MÉDIA
+(hoje seguro sob INVOKER; sobe p/ ALTA se `ai.hybrid_search_rrf` for exposto no data-plane multi-tenant).
+
+## [M53 review — council-benchmark] Teste de significância pareado hybrid vs vector (BEIR)
+O edge +0.004 nDCG@10 da híbrida vs vector-only (scifact) é determinístico entre runs mas NÃO testado p/
+significância entre as 300 queries. O harness já coleta arrays per-query (`return_per_query=True`). Adicionar
+bootstrap/paired t-test p/ decidir se o edge é significativo ou ruído. Também: híbrida-com-BM25 (leg opt-in)
+vs híbrida-com-ts_rank_cd (exige rebuild da imagem bm25 c/ theodb_rs do M53); cross-check pytrec_eval; nfcorpus.
+Prioridade: MÉDIA (o DoD "não regride" já está cumprido; isto qualificaria um claim de superioridade).
