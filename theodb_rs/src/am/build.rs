@@ -95,12 +95,15 @@ pub extern "C-unwind" fn ambuild_hnsw(
 ) -> *mut pg_sys::IndexBuildResult {
     unsafe {
         let (corpus, ntuples) = collect_corpus(heaprel, indexrel, index_info);
+        let corpus_len = corpus.len(); // capture before `build_owned` consumes `corpus` (DoD-4 move, not clone)
         // T4.1: inject the cancellation seam so a long `CREATE INDEX` responds to `pg_cancel_backend` within one
         // parallel batch. `check_for_interrupts!` runs on the leader between batches (all workers joined) — safe
         // to longjmp. Under `#[pg_guard]` (this callback), the ereport(ERROR) unwinds cleanly across the C boundary.
         let metric = resolve_metric(indexrel); // M49: cosine/ip/L2 from the opclass (ADR-1)
-        let idx = HnswIndex::build_cancellable(
-            &corpus, HNSW_M, HNSW_EF_CONSTRUCTION, metric, BUILD_SEED, &|| { pgrx::check_for_interrupts!(); },
+        // M56 DoD-4: `build_owned` MOVES the corpus into the graph (no clone) so a 1M×768d CREATE INDEX never
+        // holds the f32 vectors twice — the corpus is freed as it is drained.
+        let idx = HnswIndex::build_owned(
+            corpus, HNSW_M, HNSW_EF_CONSTRUCTION, metric, BUILD_SEED, &|| { pgrx::check_for_interrupts!(); },
         );
         // M35: persist the STRUCTURED page-native layout (meta + element + neighbor tuples) so scans traverse the
         // graph ON DEMAND (O(ef·M) pages), not deserialize the whole blob (O(N)). M51: `WITH (sbq_bits=N)` enables
@@ -110,7 +113,7 @@ pub extern "C-unwind" fn ambuild_hnsw(
             Ok(packed) => crate::am::hnsw_page::write_structured(indexrel, pg_sys::ForkNumber::MAIN_FORKNUM, &packed),
             Err(e) => pg_sys::error!("theodb hnsw build: {e}"),
         }
-        build_result(ntuples, corpus.len())
+        build_result(ntuples, corpus_len)
     }
 }
 
@@ -269,10 +272,13 @@ unsafe fn vacuum_rebuild_hnsw_structured(indexrel: pg_sys::Relation, dead: &mut 
         Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
     }
     let live: Vec<(i64, Vec<f32>)> = all.into_iter().filter(|(id, _)| !dead(*id)).collect();
+    let live_len = live.len(); // capture before `build_owned` consumes `live` (DoD-4 move, not clone)
     // HNSW build params are fixed consts (no reloption), so rebuild with them; preserve the metric from meta.
     // T4.1: the fold's rebuild is also cancellable (a VACUUM of a huge index responds to cancel per batch).
-    let idx = HnswIndex::build_cancellable(
-        &live, HNSW_M, HNSW_EF_CONSTRUCTION, metric, BUILD_SEED, &|| { pgrx::check_for_interrupts!(); },
+    // M56 DoD-4: `build_owned` MOVES `live` into the graph (no clone) so the compaction fold of a 1M index
+    // does not hold the live f32 vectors twice.
+    let idx = HnswIndex::build_owned(
+        live, HNSW_M, HNSW_EF_CONSTRUCTION, metric, BUILD_SEED, &|| { pgrx::check_for_interrupts!(); },
     );
     // M48 (#47): crash-safe fold — pack the new generation at a fresh base, write it to inert pages, then pivot
     // block 0. `pack_at` resolves the graph's pointers relative to `base`, so the packed image is position-
@@ -297,7 +303,7 @@ unsafe fn vacuum_rebuild_hnsw_structured(indexrel: pg_sys::Relation, dead: &mut 
         }
     };
     crate::am::fold::fold(indexrel, &packed.meta, &packed.pages, base);
-    live.len()
+    live_len
 }
 
 /// VACUUM fold for the structured IVFFlat layout (M31): enumerate all list entries + pending, drop dead, rebuild,

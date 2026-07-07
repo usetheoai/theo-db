@@ -36,8 +36,30 @@ impl HnswIndex {
     /// seam that keeps the `ann/` layer pure (zero `pg_sys`): the domain declares the contract (`&dyn Fn()`), the
     /// `am/` infrastructure implements it with `pgrx::check_for_interrupts!`. Same pattern as the FU-1
     /// `NeighborSource` seam. The closure runs only between batches, where all workers are joined (longjmp-safe).
+    ///
+    /// Borrow wrapper over the consuming [`build_owned`]: it clones the corpus first. Domain callers (tests, the
+    /// criterion bench, the ad-hoc in-memory ANN in `ann_query`) keep ownership of their corpus and use this — at
+    /// their scale the clone is immaterial. The PostgreSQL AM build path (`ambuild_hnsw`, the VACUUM fold) feeds
+    /// the owned heap-scan result to [`build_owned`] DIRECTLY, skipping this clone (M56 DoD-4).
     pub(crate) fn build_cancellable(
         corpus: &[(i64, Vec<f32>)],
+        m: usize,
+        ef_construction: usize,
+        metric: Metric,
+        seed: u64,
+        check_interrupt: &(dyn Fn() + Sync),
+    ) -> Self {
+        Self::build_owned(corpus.to_vec(), m, ef_construction, metric, seed, check_interrupt)
+    }
+
+    /// Consuming build — MOVES each vector out of `corpus` into the graph, never cloning, so the build's peak
+    /// working set is O(N) once (the graph's `vectors`), not the corpus-plus-copy ~O(2N) the borrow wrapper holds.
+    /// `ambuild_hnsw` and the VACUUM fold pass their owned heap-scan `Vec` here directly — this is the M56 DoD-4
+    /// memory ceiling for `CREATE INDEX` / `REINDEX` of a 1M×768d relation (the corpus is freed as it is drained,
+    /// so the f32 vectors are never resident twice). The HNSW graph is inherently O(N) in vectors; DoD-4 removes
+    /// the AVOIDABLE second copy, not the intrinsic floor.
+    pub(crate) fn build_owned(
+        corpus: Vec<(i64, Vec<f32>)>,
         m: usize,
         ef_construction: usize,
         metric: Metric,
@@ -62,8 +84,14 @@ impl HnswIndex {
             return Self::build_sequential(corpus, m, ef_construction, metric, &levels);
         }
 
-        let vectors: Vec<Vec<f32>> = corpus.iter().map(|(_, v)| v.clone()).collect();
-        let ids: Vec<i64> = corpus.iter().map(|(id, _)| *id).collect();
+        // DoD-4: drain the corpus into `vectors`/`ids` by MOVE — no `.clone()`. The corpus `Vec` is consumed
+        // here, so the graph's `vectors` is the ONLY O(N) copy of the f32 data resident during the parallel link.
+        let mut vectors: Vec<Vec<f32>> = Vec::with_capacity(n);
+        let mut ids: Vec<i64> = Vec::with_capacity(n);
+        for (id, v) in corpus {
+            ids.push(id);
+            vectors.push(v);
+        }
         let m0 = m * 2;
         let efc = ef_construction.max(m);
         let (neighbors, entry, max_level) =
@@ -84,8 +112,9 @@ impl HnswIndex {
 
     /// The sequential graph build (deterministic given `levels`): insert every node in order into a growing graph.
     /// Used directly for corpora below `PARALLEL_BUILD_THRESHOLD` and as the reference the parallel path matches.
+    /// Consumes `corpus`, moving each vector into `insert` (no clone) — the same DoD-4 discipline as the parallel path.
     fn build_sequential(
-        corpus: &[(i64, Vec<f32>)],
+        corpus: Vec<(i64, Vec<f32>)>,
         m: usize,
         ef_construction: usize,
         metric: Metric,
@@ -103,8 +132,8 @@ impl HnswIndex {
             entry: None,
             max_level: 0,
         };
-        for (i, (id, v)) in corpus.iter().enumerate() {
-            idx.insert(*id, v.clone(), levels[i]);
+        for (i, (id, v)) in corpus.into_iter().enumerate() {
+            idx.insert(id, v, levels[i]);
         }
         idx
     }
