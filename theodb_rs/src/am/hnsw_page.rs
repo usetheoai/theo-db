@@ -1877,6 +1877,7 @@ mod tests {
         }
         pgrx::Spi::run("CREATE INDEX re_idx ON re USING theodb_hnsw (e)").unwrap();
         pgrx::Spi::run("SET theodb_hnsw.ef_search = 200").unwrap();
+        pgrx::Spi::run("SET theodb.hnsw_slot_reuse = on").unwrap(); // opt-in (default OFF — recall trade, see guc.rs)
 
         // Tombstone 5 index slots (ids 0..5) via the FFI sweep — the post-DELETE/VACUUM state.
         let dead: Vec<i64> = (0..5i32).map(|id| heap_tid_i64("re", id)).collect();

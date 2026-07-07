@@ -1,0 +1,54 @@
+{
+  "milestone": "M56-fase2",
+  "n": 5000,
+  "dim": 8,
+  "cycles": 10,
+  "churn_frac": 0.2,
+  "reuse_on": {
+    "sizes_bytes": [
+      1384448,
+      1384448,
+      1384448,
+      1384448,
+      1384448,
+      1384448,
+      1384448,
+      1384448,
+      1384448,
+      1384448,
+      1384448
+    ],
+    "growth_bytes": 0,
+    "growth_pct": 0.0,
+    "recall_at_10": 0.475
+  },
+  "reuse_off": {
+    "sizes_bytes": [
+      1384448,
+      1441792,
+      1490944,
+      1548288,
+      1597440,
+      1646592,
+      1703936,
+      1753088,
+      1802240,
+      1859584,
+      1908736
+    ],
+    "growth_bytes": 524288,
+    "growth_pct": 37.9,
+    "recall_at_10": 0.53
+  },
+  "verdict": {
+    "reuse_on_growth_pct": 0.0,
+    "reuse_off_growth_pct": 37.9,
+    "slot_reuse_bounds_growth": true,
+    "size_reduction_ratio": 1.38,
+    "recall_preserved_on": false
+  },
+  "caveats": [
+    "compaction disabled (hnsw_tombstone_compact_pct=0) so the A/B isolates slot-reuse (else the fold would reclaim for both modes); in production the fold ALSO bounds the OFF case, just less promptly.",
+    "size via pg_relation_size (bytes); recall@10 re-checked per mode so a smaller index is not bought with broken search. Characterization on one box, not a competitive claim."
+  ]
+}
