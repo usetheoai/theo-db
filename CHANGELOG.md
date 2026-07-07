@@ -24,6 +24,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.45.0] - 2026-07-07
+
+### Added
+- Vectorizer declarativo (M54, ADR 0016): `theodb.create_vectorizer(source_table, source_pk_col, content_col, target_table, target_col, model, dims)` anexa um trigger AFTER INSERT/UPDATE/DELETE que enfileira jobs (só INSERT barato, sem HTTP — latência do modelo fica fora da transação do escritor). Fila crash-safe (`theodb.vectorizer_queue`) com estados tipados (pending/processing/failed), fencing por owner uuid e visibility-timeout — worker morto libera o job (lease expirado → re-claimável), owner obsoleto não sobrescreve o novo (evita duplo-processamento), poison-pill vira dead-letter no teto de tentativas (reaper dead-letra órfãos presos em `processing`). Helper de chunking `theodb.chunk_text(content, chunk_size, overlap)` (janela de caracteres com overlap, v1). Background worker pgrx (`theodb_embed_worker_main`, registrado via `shared_preload_libraries`) drena a fila em **batch via `embed_batch`** (1 HTTP round-trip por grupo de mesmo vectorizer), com fallback per-job (isolado por subtransação + renovação de lease) em falha de endpoint; design 3-fases (claim commita o lease → embed → mark owner-guarded), falha de endpoint vira `failed` tipado, nunca crash do worker. Provado end-to-end por `scripts/vectorizer-e2e.sh` (container preload + stub: INSERT→embedding aparece; UPDATE→re-embed; falha→retry bounded→failed). Métrica consultável `theodb.vectorizer_stats()` (processados/falhados + profundidade da fila por estado). 13 pg_test cobrem o state machine + trigger + chunking + reaper + stats sem preload/OpenAI; 2 council reviews (rust-pgrx + index-storage) → READY_TO_MERGE após fixes de crash-safety FFI.
+
 ## [0.44.0] - 2026-07-07
 
 ### Added
