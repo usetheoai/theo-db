@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Filtered ANN planner-integrado (M52): sob um `WHERE` seletivo, o scan `theodb_hnsw` faz **iterative scan** (re-busca com `ef` crescente + dedup dos tids emitidos, ordem RELAXED estilo pgvector 0.8) até `SET theodb_hnsw.max_scan_tuples = N` (default 20000, 0 = off), preservando recall onde o HNSW ingênuo (≤ ef_search tuplas) colapsaria. Zero regressão no path unfiltered (`LIMIT k` com ef≫k nunca dispara o grow). Blueprint `m52-filtered-ann-blueprint.md` (ADR: iterative RELAXED vs resume-from-discarded/ACORN/labels). (M52)
 
 ### Changed
 

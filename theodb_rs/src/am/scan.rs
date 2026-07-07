@@ -42,6 +42,15 @@ impl PartialOrd for Scored {
 /// phase the M36 measurement flagged. `Reverse` turns the max-heap into a min-heap (nearest first).
 struct ScanState {
     heap: BinaryHeap<Reverse<Scored>>,
+    // M52 iterative scan (HNSW only): when the heap exhausts and the executor keeps pulling (a selective WHERE
+    // rejected the emitted tuples), re-search with a growing `ef`, dedup already-emitted tids, up to
+    // `max_scan_tuples`. Empty query / non-HNSW index ⇒ `iterative = false` (pre-M52 behavior: at most ef_search).
+    query: Vec<f32>,
+    rel: pg_sys::Relation,
+    ef: usize,
+    emitted: std::collections::HashSet<i64>,
+    iterative: bool,
+    exhausted: bool,
 }
 
 #[pg_guard]
@@ -51,7 +60,15 @@ pub extern "C-unwind" fn ambeginscan(
     norderbys: ::std::os::raw::c_int,
 ) -> pg_sys::IndexScanDesc {
     let scandesc = unsafe { pg_sys::RelationGetIndexScan(index_relation, nkeys, norderbys) };
-    let state = Box::new(ScanState { heap: BinaryHeap::new() });
+    let state = Box::new(ScanState {
+        heap: BinaryHeap::new(),
+        query: Vec::new(),
+        rel: index_relation,
+        ef: 0,
+        emitted: std::collections::HashSet::new(),
+        iterative: false,
+        exhausted: false,
+    });
     unsafe { (*scandesc).opaque = Box::into_raw(state).cast::<std::os::raw::c_void>() };
     scandesc
 }
@@ -74,7 +91,11 @@ pub extern "C-unwind" fn amrescan(
     unsafe {
         let scan_ref = &mut *scan;
         let state = &mut *scan_ref.opaque.cast::<ScanState>();
+        // M52: reset the iterative-scan state on every rescan (the executor may rescan the same descriptor).
         state.heap.clear();
+        state.emitted.clear();
+        state.exhausted = false;
+        state.iterative = false;
 
         if norderbys < 1 || orderbys.is_null() {
             return; // no ORDER BY <-> key → no index-ordered scan
@@ -103,7 +124,14 @@ pub extern "C-unwind" fn amrescan(
         state.heap = if magic == page::IVF_STRUCT_MAGIC {
             scan_ivf_structured(rel, &query)
         } else if magic == crate::am::hnsw_page::HNSW_STRUCT_MAGIC {
-            scan_hnsw_structured(rel, &query)
+            // M52: HNSW is the only layout with iterative scan. Record the query + starting ef so `amgettuple`
+            // can grow the search under a selective WHERE. iterative is armed only when max_scan_tuples > 0.
+            let ef = crate::am::guc::ef_search();
+            state.query = query.clone();
+            state.rel = rel;
+            state.ef = ef;
+            state.iterative = crate::am::guc::max_scan_tuples() > 0;
+            scan_hnsw_structured(rel, &query, ef)
         } else {
             scan_blob(rel, &query)
         };
@@ -113,7 +141,14 @@ pub extern "C-unwind" fn amrescan(
 /// M35 partial-read HNSW scan: read the meta (1 page), traverse the graph ON DEMAND reading only visited nodes'
 /// element/neighbor tuples (∝ ef·M, flat in N — never the whole graph), then fold the pending region. Ascending
 /// distance. Replaces the O(N) `scan_blob` path for structured `theodb_hnsw` indexes.
-unsafe fn scan_hnsw_structured(rel: pg_sys::Relation, query: &[f32]) -> BinaryHeap<Reverse<Scored>> {
+unsafe fn scan_hnsw_structured(rel: pg_sys::Relation, query: &[f32], ef: usize) -> BinaryHeap<Reverse<Scored>> {
+    heapify(gather_hnsw_candidates(rel, query, ef))
+}
+
+/// M52: gather the HNSW scan candidates (traverse at `ef` + pending fold) as a raw `(tid, dist)` Vec. Extracted
+/// so the iterative scan (`amgettuple`) can re-run it with a growing `ef` and dedup already-emitted tids, without
+/// re-heapifying inside. `ef` is a parameter (not the GUC) precisely so the iterative loop can grow it.
+unsafe fn gather_hnsw_candidates(rel: pg_sys::Relation, query: &[f32], ef: usize) -> Vec<(i64, f64)> {
     let meta = match crate::am::hnsw_page::read_meta(rel) {
         Ok(m) => m,
         Err(e) => pg_sys::error!("theodb am scan: {e}"),
@@ -128,7 +163,6 @@ unsafe fn scan_hnsw_structured(rel: pg_sys::Relation, query: &[f32]) -> BinaryHe
     if meta.node_count > 0 && query.len() != meta.dim as usize {
         pg_sys::error!("theodb hnsw: query dim {} != index dim {}", query.len(), meta.dim);
     }
-    let ef = crate::am::guc::ef_search();
     let mut results = match crate::am::hnsw_page::traverse(rel, &meta, query, ef) {
         Ok(r) => r,
         Err(e) => pg_sys::error!("theodb am scan: {e}"),
@@ -141,8 +175,7 @@ unsafe fn scan_hnsw_structured(rel: pg_sys::Relation, query: &[f32]) -> BinaryHe
     for (tidv, v) in pending {
         results.push((tidv, metric.dist(query, &v)));
     }
-    // M36: heapify (O(C)) instead of the old O(C·log C) sort — `amgettuple` pops the top-K lazily.
-    heapify(results)
+    results
 }
 
 /// M31 partial-page scan: read the meta + centroids (∝ nlists), pick the `SCAN_PROBES` nearest centroids, and read
@@ -264,16 +297,47 @@ pub extern "C-unwind" fn amgettuple(
     unsafe {
         let scan_ref = &mut *scan;
         let state = &mut *scan_ref.opaque.cast::<ScanState>();
-        // M36: pop the next-nearest candidate from the lazy min-heap — O(log C) per call, and the executor only
-        // pulls ~k times for a `LIMIT k`, so the scan never pays the full O(C·log C) sort.
-        let Some(Reverse(scored)) = state.heap.pop() else {
-            return false;
-        };
-        tid::set_on(scored.tid, &mut scan_ref.xs_heaptid);
-        // Our stored vectors are the heap vectors, so the emitted distance order is exact — no recheck needed.
-        scan_ref.xs_recheckorderby = false;
-        scan_ref.xs_recheck = false;
-        true
+        loop {
+            // M36: pop the next-nearest candidate from the lazy min-heap — O(log C) per call, and the executor
+            // only pulls ~k times for a `LIMIT k`, so the scan never pays the full O(C·log C) sort.
+            if let Some(Reverse(scored)) = state.heap.pop() {
+                // M52: dedup across iterative re-searches (a grown-ef search re-emits earlier candidates).
+                if !state.emitted.insert(scored.tid) {
+                    continue;
+                }
+                tid::set_on(scored.tid, &mut scan_ref.xs_heaptid);
+                // Our stored vectors are the heap vectors, so within a batch the order is exact. Across iterative
+                // batches the order is RELAXED (pgvector-0.8 default) — acceptable for a filtered scan; no recheck.
+                scan_ref.xs_recheckorderby = false;
+                scan_ref.xs_recheck = false;
+                return true;
+            }
+            // M52 iterative scan: the heap is empty. Under a selective WHERE the executor keeps pulling, so grow
+            // `ef` and re-search until `max_scan_tuples` distinct candidates are emitted (recall preserved).
+            if !state.iterative || state.exhausted {
+                return false;
+            }
+            let cap = crate::am::guc::max_scan_tuples();
+            if state.emitted.len() >= cap {
+                state.exhausted = true;
+                return false;
+            }
+            let new_ef = state.ef.saturating_mul(2).min(cap);
+            if new_ef <= state.ef {
+                state.exhausted = true; // ef already at the ceiling — no wider search possible
+                return false;
+            }
+            state.ef = new_ef;
+            let fresh: Vec<(i64, f64)> = gather_hnsw_candidates(state.rel, &state.query, new_ef)
+                .into_iter()
+                .filter(|(tid, _)| !state.emitted.contains(tid))
+                .collect();
+            if fresh.is_empty() {
+                state.exhausted = true; // grew ef but found nothing new — the whole graph is emitted (recall 1.0)
+                return false;
+            }
+            state.heap = heapify(fresh);
+        }
     }
 }
 
