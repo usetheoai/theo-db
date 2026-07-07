@@ -44,3 +44,25 @@ council-index-storage (não-bloqueante): adicionar um pg_test que builda `WITH (
 `theodb.test_crash_phase=1` num VACUUM fold, e após recovery assere que `decode_meta` ainda dá v2 com
 `sbq_bits==4` e o scan retorna o top-k correto. O mecanismo de fold (meta-pivot M48) já é crash-proven para v1;
 o codebook é payload dentro do item block-0 que o pivot protege atomicamente — por isso não-bloqueante. Prioridade: MÉDIA.
+
+## [M52 follow-up] Iterative scan resume-from-discarded (otimização de QPS)
+O iterative scan do M52 (ADR-1) re-busca o grafo inteiro com ef dobrado a cada esgotamento (KISS). O pgvector 0.8
+resume do `discarded` set (não re-percorre) → ~3× mais rápido no caso seletivo (m52: theodb 58ms vs pgvector 17ms
+@1%). theodb IGUALA o RECALL (0.973 ≥ 0.967) mas paga QPS. Otimização: expor um `discarded` set resumível do
+`traverse` (estado de scan entre chamadas de amgettuple) em vez de re-buscar. Ver `docs/benchmarks/m52-filtered-ann.md § 2`.
+Prioridade: MÉDIA (recall já em paridade; é custo, não correção).
+
+## [M52 review LOW] Testes diretos de terminação/rescan do iterative scan
+council-index-storage (não-bloqueante): o amgettuple não tem teste unit direto (o módulo scan_heap_tests não
+registra no cargo pgrx test — classe pré-existente). Adicionar: (i) teste com `max_scan_tuples=5` provando
+terminação por cap, (ii) self-join/nested-loop provando que emitted.clear() evita skip/dup entre rescans,
+(iii) exit por ef-ceiling. A prova de terminação é airtight por construção (3 bounds), mas testes diretos
+reforçariam. Prioridade: BAIXA.
+
+## [M52 review HIGH-2] Controle multi-seed + ON/OFF formal no harness M52
+council-benchmark: o delta theodb-vs-pgvector a 10%/50% é pequeno e oscila de sinal entre runs (variância). Para
+CONFIRMAR (não supor) que é ruído e que o iterative dispara: estender `run_m52_filtered_ann.py` com (a) um loop
+multi-seed (ex.: [42,99,7]) reportando mean±std do delta por seletividade, e (b) uma varredura `max_scan_tuples ∈
+{0, 20000}` do theodb por seletividade (prova o trigger). Committar o json regenerado. Numa versão anterior do
+artefato esses controles foram citados como "medidos" em prosa sem código/raw — retirados; este é o débito de
+torná-los reproduzíveis. Prioridade: MÉDIA (o gate 1% já é medido e passa; isto fecha o "por que 10%/50%").

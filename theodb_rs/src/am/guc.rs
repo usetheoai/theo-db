@@ -32,6 +32,19 @@ const MIN_OVER_FETCH: i32 = 1;
 const MAX_OVER_FETCH: i32 = 64;
 pub(crate) static OVER_FETCH: GucSetting<i32> = GucSetting::<i32>::new(DEFAULT_OVER_FETCH);
 
+/// M52 — `SET theodb_hnsw.max_scan_tuples = N`: the iterative-scan ceiling. Under a selective `WHERE`, the
+/// executor keeps pulling tuples the filter rejects; the `theodb_hnsw` scan then re-searches with a growing `ef`
+/// (RELAXED order, pgvector-0.8 style) until `max_scan_tuples` distinct candidates have been emitted, preserving
+/// recall under the filter. `0` = iterative scan OFF (the pre-M52 behavior: at most `ef_search` tuples).
+///
+/// DELIBERATE DIVERGENCE from pgvector: pgvector gates iterative scan behind a SEPARATE `hnsw.iterative_scan` GUC
+/// that defaults to `off`; here a non-zero `max_scan_tuples` (default 20000) enables it directly, so theodb's
+/// iterative scan is ON by default. Rationale: filtered ANN with preserved recall is the North-Star behavior;
+/// unfiltered `LIMIT k` (k ≤ ef_search) never triggers the grow, so there is no unfiltered regression. Set 0 to
+/// reproduce pgvector's default-OFF semantics.
+pub(crate) const DEFAULT_MAX_SCAN_TUPLES: i32 = 20000;
+pub(crate) static MAX_SCAN_TUPLES: GucSetting<i32> = GucSetting::<i32>::new(DEFAULT_MAX_SCAN_TUPLES);
+
 /// M48 (T3.1) — `SET theodb.vacuum_pending_threshold = N`: a VACUUM folds the pending region into the main
 /// structure when it exceeds N pages, even with zero dead tuples, so an insert-only workload's scan returns to
 /// O(structure) instead of paying O(pending) forever. Operational knob (Userset), NOT a build reloption. Default
@@ -148,6 +161,16 @@ pub(crate) fn init() {
         GucContext::Userset,
         GucFlags::default(),
     );
+    GucRegistry::define_int_guc(
+        c"theodb_hnsw.max_scan_tuples",
+        c"Iterative-scan ceiling: max distinct candidates a theodb_hnsw scan emits under a selective WHERE (0 = off)",
+        c"Under a filter, the scan re-searches with a growing ef until this many tuples are emitted, preserving recall. 0 disables iterative scan (at most ef_search tuples).",
+        &MAX_SCAN_TUPLES,
+        0,
+        10_000_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
 }
 
 /// The effective probes for a scan: the GUC value (never below 1). The caller still clamps to the actual list count.
@@ -163,4 +186,10 @@ pub(crate) fn ef_search() -> usize {
 /// The effective SBQ `over_fetch` factor for a theodb_hnsw scan (never below 1).
 pub(crate) fn over_fetch() -> usize {
     OVER_FETCH.get().max(MIN_OVER_FETCH) as usize
+}
+
+/// The iterative-scan ceiling (M52). 0 ⇒ iterative scan off. The scan grows `ef` until this many distinct
+/// candidates are emitted, so a selective `WHERE` still finds its top-k (recall preserved).
+pub(crate) fn max_scan_tuples() -> usize {
+    MAX_SCAN_TUPLES.get().max(0) as usize
 }

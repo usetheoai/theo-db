@@ -1093,4 +1093,66 @@ mod tests {
             exact.len()
         );
     }
+
+    #[cfg(any(test, feature = "pg_test"))]
+    fn filtered_topk(tbl: &str, filter: &str, q: &str, k: i64) -> Vec<i32> {
+        let sql = format!("SELECT id FROM {tbl} WHERE {filter} ORDER BY e <-> '{q}'::vector LIMIT {k}");
+        pgrx::Spi::connect(|c| {
+            c.select(&sql, None, &[]).unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect::<Vec<i32>>()
+        })
+    }
+
+    /// M52 recall gate: under a SELECTIVE `WHERE` a naive HNSW (≤ ef_search tuples) would miss the top-k that pass
+    /// the filter; the iterative scan grows ef until `max_scan_tuples`, so the index-scan top-k EQUALS the exact
+    /// seqscan top-k (recall preserved). The executor applies `cat = 7` as a recheck over the ordered index emit.
+    #[pgrx::pg_test]
+    fn filtered_scan_preserves_recall_via_iterative() {
+        pgrx::Spi::run("CREATE TEMP TABLE ft (id int PRIMARY KEY, cat int, e vector(8))").unwrap();
+        for i in 0..500i32 {
+            let cat = i % 100; // `WHERE cat = 7` selects ~5 rows (~1% selectivity)
+            let v: Vec<String> = (0..8)
+                .map(|j| format!("{:.3}", i as f32 * 0.1 + j as f32 + ((i * 7 + j) % 13) as f32 * 0.2))
+                .collect();
+            pgrx::Spi::run(&format!("INSERT INTO ft VALUES ({i}, {cat}, '[{}]')", v.join(","))).unwrap();
+        }
+        pgrx::Spi::run("CREATE INDEX ft_idx ON ft USING theodb_hnsw (e)").unwrap();
+        pgrx::Spi::run("SET theodb_hnsw.ef_search = 40; SET theodb_hnsw.max_scan_tuples = 20000").unwrap();
+        let probe = "[20,21,22,23,24,25,26,27]";
+        pgrx::Spi::run("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on").unwrap();
+        let exact = filtered_topk("ft", "cat = 7", probe, 3);
+        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        let via_index = filtered_topk("ft", "cat = 7", probe, 3);
+        assert!(!exact.is_empty(), "the filtered oracle must return rows (test setup)");
+        assert!(!via_index.is_empty(), "the filtered index scan must return results (iterative scan)");
+        let hits = via_index.iter().filter(|id| exact.contains(id)).count();
+        assert_eq!(
+            hits,
+            exact.len(),
+            "iterative-scan recall under a selective filter must equal exact seqscan ({hits}/{})",
+            exact.len()
+        );
+    }
+
+    /// M52 OFF switch: `max_scan_tuples = 0` disables the iterative scan (pre-M52 behavior) — at most the
+    /// ef_search window is emitted; no panic / infinite loop under a selective filter.
+    #[pgrx::pg_test]
+    fn iterative_scan_off_when_max_scan_tuples_zero() {
+        pgrx::Spi::run("CREATE TEMP TABLE fo (id int PRIMARY KEY, cat int, e vector(4))").unwrap();
+        for i in 0..300i32 {
+            pgrx::Spi::run(&format!(
+                "INSERT INTO fo VALUES ({i}, {}, '[{},{},{},{}]')",
+                i % 100,
+                i as f32 * 0.1,
+                (i % 7) as f32,
+                (i % 5) as f32,
+                i as f32 / 30.0
+            ))
+            .unwrap();
+        }
+        pgrx::Spi::run("CREATE INDEX fo_idx ON fo USING theodb_hnsw (e)").unwrap();
+        pgrx::Spi::run("SET theodb_hnsw.ef_search = 10; SET theodb_hnsw.max_scan_tuples = 0").unwrap();
+        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        let got = filtered_topk("fo", "cat = 3", "[5,1,2,0.5]", 3);
+        assert!(got.len() <= 3, "OFF path returns at most k, no infinite loop (got {})", got.len());
+    }
 }
