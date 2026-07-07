@@ -32,7 +32,12 @@ const USABLE: usize = BLCKSZ - PAGE_HEADER;
 // Element tuple: fixed header + the raw f32 vector. `nbr_blkno/nbr_offno` point to this node's neighbor tuple.
 const E_TAG: usize = 0;
 const E_LEVEL: usize = 1;
-// bytes 2..4 = pad (keeps the i64 tid 4-aligned)
+// M56: bytes 2..4 were pad (kept the i64 tid 4-aligned) — always zero in v1/v2. Byte 2 = tombstone flag,
+// byte 3 = version. Both fit WITHOUT changing the tuple size or any analytic address (elem_size/pack_at
+// unchanged). A v1/v2 index reads pad=0 → deleted=0/version=0 (live) — backward-compatible, REINDEX optional.
+// Mirrors pgvector's HnswElementTupleData `uint8 deleted; uint8 version` (hnsw.h:361-362).
+const E_DELETED: usize = 2;
+const E_VERSION: usize = 3;
 const E_TID: usize = 4;
 const E_NBR_BLK: usize = 12;
 const E_NBR_OFF: usize = 16;
@@ -198,6 +203,12 @@ pub(crate) struct ElementView<'a> {
     pub(crate) vec_bytes: &'a [u8],
     /// M51 layout v2: the trailing SBQ code bytes (empty for v1 f32-only tuples). Scored by `sbq::hamming`.
     pub(crate) code_bytes: &'a [u8],
+    /// M56: tombstone flag. A `deleted` node is still navigated THROUGH by the scan (its arcs preserve graph
+    /// connectivity — live nodes still point at it) but is NEVER emitted to the result set. Set in-place by
+    /// `ambulkdelete`; dropped by the next compaction (`fold`). `version` bumps on delete (forward-compat hook
+    /// for a phase-2 slot-reuse insert; NOT load-bearing in phase 1 — the M52 iterative scan dedups by tid).
+    pub(crate) deleted: bool,
+    pub(crate) version: u8,
 }
 
 pub(crate) fn decode_element(b: &[u8]) -> Result<ElementView<'_>, String> {
@@ -220,7 +231,22 @@ pub(crate) fn decode_element(b: &[u8]) -> Result<ElementView<'_>, String> {
         // v1: nothing after the vec (empty). v2: the SBQ code occupies `[end..]` (its length = the item's
         // trailing bytes; the caller knows `bytes_per_vector(dim, meta.sbq_bits)` to validate if needed).
         code_bytes: &b[end..],
+        deleted: b[E_DELETED] != 0,
+        version: b[E_VERSION],
     })
+}
+
+/// M56: mark an element tuple's bytes as a tombstone IN PLACE (byte 2 = deleted flag, byte 3 = version bump).
+/// The tuple size is unchanged, so this is a pure byte-write on the fixed-offset item — safe to do on a pinned
+/// buffer under a single `GenericXLog` (no `PageIndexTupleOverwrite`). Idempotent: re-marking a tombstone is a
+/// no-op on the flag and does not double-bump. Returns true iff this call flipped a live tuple to deleted.
+pub(crate) fn mark_tombstone_in_place(b: &mut [u8]) -> bool {
+    if b.len() < ELEM_HEADER || b[E_TAG] != ELEM_TAG || b[E_DELETED] != 0 {
+        return false;
+    }
+    b[E_DELETED] = 1;
+    b[E_VERSION] = b[E_VERSION].wrapping_add(1);
+    true
 }
 
 /// Neighbor addresses of a node at `level` on `layer` `lc`, skipping empty `(0,0)` slots. Per-layer slice math
@@ -1262,5 +1288,59 @@ mod tests {
              lexical_engine => 'bm25', content_text_col => 'body')",
         )
         .unwrap();
+    }
+}
+
+// M56 — pure unit tests for the tombstone byte-layout (CI-runnable via `cargo test`, no DB/pgrx needed).
+#[cfg(test)]
+mod m56_tombstone_layout {
+    use super::*;
+
+    /// A minimal live element tuple: ELEM_TAG, pad(deleted/version)=0, dim=2, zero vector, no SBQ code.
+    fn live_tuple() -> Vec<u8> {
+        let dim = 2usize;
+        let mut b = vec![0u8; ELEM_HEADER + dim * 4];
+        b[E_TAG] = ELEM_TAG;
+        b[E_DIM..E_DIM + 2].copy_from_slice(&(dim as u16).to_le_bytes());
+        b
+    }
+
+    #[test]
+    fn fresh_tuple_decodes_as_live() {
+        let b = live_tuple();
+        let ev = decode_element(&b).expect("decode");
+        assert!(!ev.deleted, "a fresh tuple (pad=0) decodes as live");
+        assert_eq!(ev.version, 0, "fresh version is 0");
+    }
+
+    #[test]
+    fn mark_tombstone_flips_deleted_and_bumps_version_idempotently() {
+        let mut b = live_tuple();
+        assert!(mark_tombstone_in_place(&mut b), "marking a live tuple returns true");
+        let ev = decode_element(&b).expect("decode");
+        assert!(ev.deleted, "marked tuple decodes as deleted");
+        assert_eq!(ev.version, 1, "version bumped to 1 on first delete");
+        // Idempotent: re-marking a tombstone is a no-op (no double-bump, returns false).
+        assert!(!mark_tombstone_in_place(&mut b), "re-marking a tombstone returns false");
+        assert_eq!(decode_element(&b).unwrap().version, 1, "version stays 1 (no double-bump)");
+    }
+
+    #[test]
+    fn tombstone_preserves_tid_nbr_and_vec_bytes() {
+        // The tombstone flag must NOT corrupt tid/neighbor/vector (the node is still navigated THROUGH).
+        let dim = 2usize;
+        let mut b = vec![0u8; ELEM_HEADER + dim * 4];
+        b[E_TAG] = ELEM_TAG;
+        b[E_LEVEL] = 3;
+        b[E_TID..E_TID + 8].copy_from_slice(&42i64.to_le_bytes());
+        b[E_NBR_BLK..E_NBR_BLK + 4].copy_from_slice(&7u32.to_le_bytes());
+        b[E_NBR_OFF..E_NBR_OFF + 2].copy_from_slice(&9u16.to_le_bytes());
+        b[E_DIM..E_DIM + 2].copy_from_slice(&(dim as u16).to_le_bytes());
+        b[E_VEC..E_VEC + 4].copy_from_slice(&1.5f32.to_le_bytes());
+        mark_tombstone_in_place(&mut b);
+        let ev = decode_element(&b).expect("decode");
+        assert_eq!((ev.tid, ev.level, ev.nbr_addr), (42, 3, (7, 9)), "tid/level/neighbor intact");
+        assert_eq!(f32::from_le_bytes(ev.vec_bytes[0..4].try_into().unwrap()), 1.5, "vector intact (navigation needs it)");
+        assert!(ev.deleted);
     }
 }
