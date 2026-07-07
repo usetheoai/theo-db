@@ -32,7 +32,12 @@ const USABLE: usize = BLCKSZ - PAGE_HEADER;
 // Element tuple: fixed header + the raw f32 vector. `nbr_blkno/nbr_offno` point to this node's neighbor tuple.
 const E_TAG: usize = 0;
 const E_LEVEL: usize = 1;
-// bytes 2..4 = pad (keeps the i64 tid 4-aligned)
+// M56: bytes 2..4 were pad (kept the i64 tid 4-aligned) — always zero in v1/v2. Byte 2 = tombstone flag,
+// byte 3 = version. Both fit WITHOUT changing the tuple size or any analytic address (elem_size/pack_at
+// unchanged). A v1/v2 index reads pad=0 → deleted=0/version=0 (live) — backward-compatible, REINDEX optional.
+// Mirrors pgvector's HnswElementTupleData `uint8 deleted; uint8 version` (hnsw.h:361-362).
+const E_DELETED: usize = 2;
+const E_VERSION: usize = 3;
 const E_TID: usize = 4;
 const E_NBR_BLK: usize = 12;
 const E_NBR_OFF: usize = 16;
@@ -198,6 +203,13 @@ pub(crate) struct ElementView<'a> {
     pub(crate) vec_bytes: &'a [u8],
     /// M51 layout v2: the trailing SBQ code bytes (empty for v1 f32-only tuples). Scored by `sbq::hamming`.
     pub(crate) code_bytes: &'a [u8],
+    /// M56: tombstone flag. A `deleted` node is still navigated THROUGH by the scan (its arcs preserve graph
+    /// connectivity — live nodes still point at it) but is NEVER emitted to the result set. Set in-place by
+    /// `ambulkdelete`; dropped by the next compaction (`fold`). `version` bumps on delete (forward-compat hook
+    /// for a phase-2 slot-reuse insert; NOT load-bearing in phase 1 — the M52 iterative scan dedups by tid).
+    pub(crate) deleted: bool,
+    #[allow(dead_code)] // phase-2 slot-reuse hook: written on delete, not yet consumed in phase 1
+    pub(crate) version: u8,
 }
 
 pub(crate) fn decode_element(b: &[u8]) -> Result<ElementView<'_>, String> {
@@ -220,7 +232,22 @@ pub(crate) fn decode_element(b: &[u8]) -> Result<ElementView<'_>, String> {
         // v1: nothing after the vec (empty). v2: the SBQ code occupies `[end..]` (its length = the item's
         // trailing bytes; the caller knows `bytes_per_vector(dim, meta.sbq_bits)` to validate if needed).
         code_bytes: &b[end..],
+        deleted: b[E_DELETED] != 0,
+        version: b[E_VERSION],
     })
+}
+
+/// M56: mark an element tuple's bytes as a tombstone IN PLACE (byte 2 = deleted flag, byte 3 = version bump).
+/// The tuple size is unchanged, so this is a pure byte-write on the fixed-offset item — safe to do on a pinned
+/// buffer under a single `GenericXLog` (no `PageIndexTupleOverwrite`). Idempotent: re-marking a tombstone is a
+/// no-op on the flag and does not double-bump. Returns true iff this call flipped a live tuple to deleted.
+pub(crate) fn mark_tombstone_in_place(b: &mut [u8]) -> bool {
+    if b.len() < ELEM_HEADER || b[E_TAG] != ELEM_TAG || b[E_DELETED] != 0 {
+        return false;
+    }
+    b[E_DELETED] = 1;
+    b[E_VERSION] = b[E_VERSION].wrapping_add(1);
+    true
 }
 
 /// Neighbor addresses of a node at `level` on `layer` `lc`, skipping empty `(0,0)` slots. Per-layer slice math
@@ -462,6 +489,12 @@ pub(crate) unsafe fn enumerate_entries(
     for blk in meta.elem_first..(meta.elem_first + meta.elem_npages) {
         for item in page::read_all_page_items(rel, blk)? {
             let ev = decode_element(&item)?;
+            // M56: compaction reuses this enumerate → the rebuild drops tombstoned nodes here (they are gone
+            // from the fresh graph, reclaiming their space). This is the ONLY reclaim path in phase 1 (slot
+            // reuse on INSERT is phase 2 — it would mutate the immutable M35 graph).
+            if ev.deleted {
+                continue;
+            }
             let dim = ev.vec_bytes.len() / 4;
             let mut v = vec![0f32; dim];
             for (i, s) in v.iter_mut().enumerate() {
@@ -471,6 +504,272 @@ pub(crate) unsafe fn enumerate_entries(
         }
     }
     Ok(out)
+}
+
+/// M56: mark every DEAD element tuple as a tombstone IN PLACE, per page under WAL (no O(N) rebuild, no advisory
+/// EXCLUSIVE). `is_dead(tid)` is the executor's visibility callback. Returns the count newly tombstoned. A
+/// tombstone is navigated-through-but-not-emitted by the scan; its space is reclaimed by the next compaction.
+pub(crate) unsafe fn tombstone_sweep(
+    rel: pg_sys::Relation,
+    meta: &HnswMeta,
+    is_dead: &mut impl FnMut(i64) -> bool,
+) -> u32 {
+    let mut total = 0u32;
+    for blk in meta.elem_first..(meta.elem_first + meta.elem_npages) {
+        total += page::modify_items_under_wal(rel, blk, |item| {
+            if item.len() < ELEM_HEADER || item[E_TAG] != ELEM_TAG || item[E_DELETED] != 0 {
+                return false; // not an element tuple, or already a tombstone
+            }
+            let tid = i64::from_le_bytes(item[E_TID..E_TID + 8].try_into().unwrap());
+            if is_dead(tid) {
+                mark_tombstone_in_place(item)
+            } else {
+                false
+            }
+        });
+    }
+    total
+}
+
+/// M56: count the tombstoned element tuples (SHARE-locked read) — the numerator of the compaction ratio.
+pub(crate) unsafe fn count_tombstones(rel: pg_sys::Relation, meta: &HnswMeta) -> u32 {
+    let mut n = 0u32;
+    for blk in meta.elem_first..(meta.elem_first + meta.elem_npages) {
+        for item in page::read_all_page_items(rel, blk).unwrap_or_default() {
+            if item.len() >= ELEM_HEADER && item[E_TAG] == ELEM_TAG && item[E_DELETED] != 0 {
+                n += 1;
+            }
+        }
+    }
+    n
+}
+
+/// M56 fase 2: count CHURNED element slots — those whose `version > 0`, i.e. tombstoned OR revived-by-reuse since
+/// the last fold (which resets `version` to 0 on rebuild). This is the trigger for the compaction that REPAIRS the
+/// graph: with slot-reuse ON, tombstones are consumed by inserts before they reach the tombstone-ratio threshold,
+/// so a tombstone-only trigger never fires and the incremental-insert degradation is never repaired (the churn
+/// benchmark measured recall collapsing). Triggering on `version > 0` counts BOTH tombstones and reused slots, so
+/// the fold fires under reuse churn too, keeping recall bounded. SHARE-locked read.
+pub(crate) unsafe fn count_churned(rel: pg_sys::Relation, meta: &HnswMeta) -> u32 {
+    let mut n = 0u32;
+    for blk in meta.elem_first..(meta.elem_first + meta.elem_npages) {
+        for item in page::read_all_page_items(rel, blk).unwrap_or_default() {
+            if item.len() >= ELEM_HEADER && item[E_TAG] == ELEM_TAG && item[E_VERSION] != 0 {
+                n += 1;
+            }
+        }
+    }
+    n
+}
+
+/// M56 fase 2 (T1.1 — RepairGraph/in-place insert slot-reuse): find a tombstoned element slot reusable for a
+/// NEW node of level `need_level` — a slot whose element is `deleted` AND whose stored level ≥ `need_level`, so
+/// the new node's fixed-per-level neighbor tuple (`level*m + m0` slots) fits where the old node's did (ADR-R1).
+/// Bounded scan of the element pages; returns the first match as its `(block, off)` address. `None` ⇒ no reusable
+/// slot (the caller falls back to `append_pending`). Read-only (SHARE-locked); never mutates.
+pub(crate) unsafe fn find_reusable_slot(rel: pg_sys::Relation, meta: &HnswMeta, need_level: usize) -> Option<Addr> {
+    for blk in meta.elem_first..(meta.elem_first + meta.elem_npages) {
+        let items = match page::read_all_page_items_with_off(rel, blk) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        for (off, bytes) in items {
+            // Never reuse the entry node's slot — it must keep its high level + entry role, else the descent from
+            // meta.entry would read garbage upper-layer links. Match the level EXACTLY so the revived node Z is a
+            // CLEAN node of that level (no stale upper-layer links inherited from a higher-level tombstone), which
+            // the churn benchmark showed is required to keep recall from collapsing.
+            if blk == meta.entry_blkno && off == meta.entry_offno {
+                continue;
+            }
+            if let Ok(ev) = decode_element(&bytes) {
+                if ev.deleted && ev.level as usize == need_level {
+                    return Some((blk, off));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// M56 fase 2 (T1.2): revive a tombstoned element slot as a NEW node — overwrite its `tid` + f32 vector in place,
+/// clear `deleted`, bump `version`; KEEP its `level`, neighbor-tuple address and `dim` (Z reuses X's graph slot so
+/// its inbound arcs Y→slot now serve Z, correctly scored by Z's stored vector). v1 (f32-only) slots ONLY: a v2
+/// (inline-SBQ) slot also carries a code region that would still hold X's code — reusing it would misroute the
+/// Hamming walk, so we refuse (the item is longer than `E_VEC + dim*4`) and the caller falls back to `append_pending`
+/// (recomputing Z's SBQ code in place is a tracked follow-up). Crash-safe via `page::modify_item_at` (GenericXLog).
+/// Returns `true` iff the slot was revived.
+pub(crate) unsafe fn write_reused_element(rel: pg_sys::Relation, elem_addr: Addr, tid: i64, vec: &[f32]) -> bool {
+    let (blk, off) = elem_addr;
+    page::modify_item_at(rel, blk, off, |item| {
+        // Atomic claim: revive ONLY a still-tombstoned slot. `modify_item_at` holds the buffer EXCLUSIVE, so two
+        // concurrent inserts racing for the same slot serialize here — the first flips `deleted=0` and wins; the
+        // second sees `deleted==0` and returns false (the caller then falls back to `append_pending`). No lost write.
+        if item.len() < ELEM_HEADER || item[E_TAG] != ELEM_TAG || item[E_DELETED] == 0 {
+            return false;
+        }
+        let dim = u16::from_le_bytes([item[E_DIM], item[E_DIM + 1]]) as usize;
+        // v1 only (exact size = header + vec, no trailing SBQ code) AND matching dim.
+        if item.len() != E_VEC + dim * 4 || vec.len() != dim {
+            return false;
+        }
+        item[E_DELETED] = 0;
+        item[E_VERSION] = item[E_VERSION].wrapping_add(1);
+        item[E_TID..E_TID + 8].copy_from_slice(&tid.to_le_bytes());
+        for (i, &x) in vec.iter().enumerate() {
+            item[E_VEC + i * 4..E_VEC + i * 4 + 4].copy_from_slice(&x.to_le_bytes());
+        }
+        true
+    })
+}
+
+/// M56 fase 2 (T1.3): set the GROUND-layer neighbor slots of an existing neighbor tuple IN PLACE — write up to
+/// `m0` addrs into the ground region (`[level*m .. level*m + m0)`), zero-padding the remainder with `(0,0)` =
+/// empty. The tuple size is fixed by `level`, so this is a same-size byte edit under GenericXLog (crash-safe).
+/// Used to set the reused node Z's ground neighbors after its insert search (its upper-layer slots are left as
+/// the reused tuple had them — a level-0 Z has none). Returns `true` iff the slots were written.
+pub(crate) unsafe fn set_ground_neighbors_inplace(
+    rel: pg_sys::Relation,
+    nbr_addr: Addr,
+    level: usize,
+    m: usize,
+    m0: usize,
+    neighbors: &[Addr],
+) -> bool {
+    let (blk, off) = nbr_addr;
+    page::modify_item_at(rel, blk, off, |b| {
+        if b.len() < NBR_HEADER || b[N_TAG] != NBR_TAG {
+            return false;
+        }
+        let start = level * m;
+        if b.len() < NBR_HEADER + (start + m0) * SLOT {
+            return false;
+        }
+        for i in 0..m0 {
+            let (nb_blk, nb_off) = neighbors.get(i).copied().unwrap_or((0, 0));
+            let o = NBR_HEADER + (start + i) * SLOT;
+            b[o..o + 4].copy_from_slice(&nb_blk.to_le_bytes());
+            b[o + 4..o + 6].copy_from_slice(&nb_off.to_le_bytes());
+        }
+        true
+    })
+}
+
+/// M56 fase 2 (T2.1): the insert-time neighbor search — greedy-descend the upper layers to a ground entry (exactly
+/// as the scan's [`traverse`] does), then ground-search with `ef_construction` and return the `m0` nearest LIVE
+/// nodes' ELEMENT addresses (the candidates the reused node Z will link to). v1 (exact f32) path — the reused-slot
+/// insert is v1-only, so the walk scores by f32 and the candidates are already f32-ranked. Read-only.
+pub(crate) unsafe fn insert_search_ground(
+    rel: pg_sys::Relation,
+    meta: &HnswMeta,
+    q: &[f32],
+    ef_construction: usize,
+) -> Result<Vec<Addr>, String> {
+    if meta.entry_level < 0 || meta.node_count == 0 {
+        return Ok(Vec::new());
+    }
+    let metric = Metric::from_tag(meta.metric_tag).ok_or("theodb hnsw: unknown metric tag")?;
+    let is_l2 = matches!(metric, Metric::L2);
+    let (m, m0) = (meta.m as usize, meta.m0 as usize);
+    let ef = ef_construction.max(m0);
+    let mut reads = 0usize;
+    let nblocks = page::main_fork_nblocks(rel);
+    let qcode: Option<&[u8]> = None; // v1 only (the reused-slot insert gates to v1)
+
+    let mut ep = load(rel, meta.entry_blkno, meta.entry_offno, q, metric, is_l2, qcode, nblocks, &mut reads)?;
+    let mut lc = meta.entry_level as usize;
+    while lc >= 1 {
+        loop {
+            let nbrs = neighbors_of(rel, &ep, lc, m, m0, nblocks, &mut reads)?;
+            let mut improved = false;
+            for (nb, no) in nbrs {
+                let cand = load(rel, nb, no, q, metric, is_l2, qcode, nblocks, &mut reads)?;
+                if cand.d < ep.d {
+                    ep = cand;
+                    improved = true;
+                }
+            }
+            if !improved {
+                break;
+            }
+        }
+        lc -= 1;
+    }
+
+    let pg_src = PageNeighborSource {
+        rel,
+        nblocks,
+        q,
+        metric,
+        is_l2,
+        qcode,
+        m,
+        m0,
+        reads: std::cell::Cell::new(reads),
+    };
+    let nodes = crate::ann::scan_core::ground_search_nodes(&pg_src, ep, ef, m0, true)?;
+    let mut cands: Vec<(f64, Addr)> = nodes.iter().map(|(c, _)| (c.d, (c.blk, c.off))).collect();
+    cands.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(cands.into_iter().take(m0).map(|(_, a)| a).collect())
+}
+
+/// M56 fase 2 (T3.1): the in-place insert with SLOT-REUSE — revive a tombstoned slot as the new node Z, properly
+/// linked into the graph (`pgvector/hnswinsert.c` pattern adapted to the M35 layout). Returns `Ok(true)` iff a slot
+/// was reused (the caller is done), `Ok(false)` iff there is no reusable v1 slot (the caller falls back to
+/// `append_pending`). Steps, all crash-safe per page (GenericXLog), ordered so a crash never corrupts the graph:
+///   1. find a reusable tombstoned v1 slot (`None` ⇒ fallback);
+///   2. search the CURRENT graph for Z's `m0` nearest LIVE neighbors (the tombstone is navigated-through, not Z);
+///   3. revive the slot as Z (tid + vec, `deleted=0`) — v1-gated, `false` ⇒ fallback;
+///   4. set Z's ground neighbors (forward links);
+///   5. add Z to each neighbor's ground list IF it has room (backward links; skip-if-full is a valid asymmetric
+///      HNSW edge — the fold re-balances). Z's inbound arcs Y→slot (inherited from the reused tombstone) already
+///      make Z reachable, correctly scored by its own vector, so recall is preserved (measured in T4).
+pub(crate) unsafe fn insert_inplace(
+    rel: pg_sys::Relation,
+    meta: &HnswMeta,
+    tid: i64,
+    vec: &[f32],
+) -> Result<bool, String> {
+    if meta.sbq_bits > 0 {
+        return Ok(false); // v2/SBQ slot revive needs Z's recomputed inline code — tracked follow-up
+    }
+    let (m, m0) = (meta.m as usize, meta.m0 as usize);
+    let slot = match find_reusable_slot(rel, meta, 0) {
+        Some(s) => s,
+        None => return Ok(false),
+    };
+    // (2) find Z's neighbors in the CURRENT graph, before the slot becomes Z.
+    let neighbors = insert_search_ground(rel, meta, vec, crate::am::build::HNSW_EF_CONSTRUCTION)?;
+    // (3) revive the slot as Z (v1 only).
+    if !write_reused_element(rel, slot, tid, vec) {
+        return Ok(false);
+    }
+    // (4) set Z's ground neighbors. Read Z's kept level + neighbor-tuple address.
+    let (zlvl, znbr) = {
+        let zb = page::read_page_item_at(rel, slot.0, slot.1)?;
+        let z = decode_element(&zb)?;
+        (z.level as usize, z.nbr_addr)
+    };
+    set_ground_neighbors_inplace(rel, znbr, zlvl, m, m0, &neighbors);
+    // (5) backward links: add Z (element addr == `slot`) to each neighbor's ground list if it has a free slot.
+    for &n in &neighbors {
+        if n == slot {
+            continue;
+        }
+        let (nlvl, nnbr) = {
+            let nb = page::read_page_item_at(rel, n.0, n.1)?;
+            let ne = decode_element(&nb)?;
+            (ne.level as usize, ne.nbr_addr)
+        };
+        let mut ground = {
+            let nnb = page::read_page_item_at(rel, nnbr.0, nnbr.1)?;
+            decode_neighbors(&nnb, nlvl, 0, m, m0)?
+        };
+        if ground.len() < m0 && !ground.contains(&slot) {
+            ground.push(slot);
+            set_ground_neighbors_inplace(rel, nnbr, nlvl, m, m0, &ground);
+        }
+    }
+    Ok(true)
 }
 
 // (M48) The old in-place `rewrite_structured` was replaced by the crash-safe `fold::fold` (meta-pivot) — it
@@ -486,6 +785,9 @@ struct Cand {
     nbr_off: u16,
     level: u8,
     tid: i64,
+    /// M56: a tombstoned node is navigated THROUGH (its arcs preserve connectivity — it enters the candidate
+    /// heap and is expanded) but is NEVER pushed to the result set. Set from `ElementView.deleted`.
+    deleted: bool,
 }
 impl PartialEq for Cand {
     fn eq(&self, o: &Self) -> bool {
@@ -558,6 +860,7 @@ unsafe fn load(
             nbr_off: ev.nbr_addr.1,
             level: ev.level,
             tid: ev.tid,
+            deleted: ev.deleted,
         })
     })
 }
@@ -736,6 +1039,10 @@ impl<'a> crate::ann::scan_core::NeighborSource for PageNeighborSource<'a> {
     }
     fn tid(&self, node: &Cand) -> i64 {
         node.tid
+    }
+    /// M56: a tombstoned node is navigated through (its neighbors still expand) but never emitted.
+    fn emittable(&self, node: &Cand) -> bool {
+        !node.deleted
     }
     fn node_key(&self, node: &Cand) -> u64 {
         ((node.blk as u64) << 16) | node.off as u64
@@ -1031,7 +1338,7 @@ mod tests {
     /// Negative case (testing.md §4.1): `ef_search = 0` is rejected at the GUC boundary (MIN_EF_SEARCH=1) with a
     /// typed error — it can never reach `traverse`, so the internal `ef_search.max(1)` clamp is defense-in-depth.
     /// This fail-fast-at-the-boundary is the honest form of the plan's "ef=0 → clamp, no crash" acceptance.
-    #[pgrx::pg_test(error = "outside the valid range")]
+    #[pgrx::pg_test(error = "0 is outside the valid range for parameter \"theodb_hnsw.ef_search\" (1 .. 1000)")]
     fn ef_search_zero_rejected_at_guc_boundary() {
         pgrx::Spi::run("SET theodb_hnsw.ef_search = 0").unwrap();
     }
@@ -1262,5 +1569,438 @@ mod tests {
              lexical_engine => 'bm25', content_text_col => 'body')",
         )
         .unwrap();
+    }
+
+    /// M56: decode the heap `ctid` of a row into the i64 the index packs (`(block << 16) | offset`, per
+    /// `crate::am::tid::encode`), so a test can name specific on-disk nodes for the tombstone sweep.
+    fn heap_tid_i64(tbl: &str, id: i32) -> i64 {
+        let txt: String = pgrx::Spi::get_one(&format!("SELECT ctid::text FROM {tbl} WHERE id = {id}"))
+            .unwrap()
+            .expect("row exists");
+        // ctid text form is "(block,offset)".
+        let inner = txt.trim_start_matches('(').trim_end_matches(')');
+        let (b, o) = inner.split_once(',').expect("ctid has block,offset");
+        let block: i64 = b.trim().parse().expect("block int");
+        let offset: i64 = o.trim().parse().expect("offset int");
+        (block << 16) | offset
+    }
+
+    /// M56 DoD — the DELETE path tombstones dead nodes IN PLACE and the scan NAVIGATES THROUGH tombstones but
+    /// NEVER emits them, proven END-TO-END against a REAL on-disk graph. VACUUM the *command* cannot run inside a
+    /// pg_test transaction (M55/M48 precedent drives the command from an external harness), so this test invokes
+    /// the FFI sweep DIRECTLY — the same `tombstone_sweep` `ambulkdelete` calls — against the built index.
+    ///
+    /// The load-bearing subtlety: the heap rows are NOT deleted. The executor's heap-recheck therefore CANNOT
+    /// hide the swept nodes; the ONLY thing that can drop them from the result is the tombstone `emittable`
+    /// filter. This isolates the filter under test from the heap-recheck backstop (which would mask a broken
+    /// filter). A regular (WAL-logged) table exercises the real GenericXLog per-page path, not the temp/local-
+    /// buffer path.
+    #[pgrx::pg_test]
+    fn tombstone_sweep_filters_dead_and_preserves_recall() {
+        pgrx::Spi::run("CREATE TABLE tz (id int PRIMARY KEY, e vector(4))").unwrap();
+        // 30 deterministic, distinct points — no distance ties near the probe → unambiguous exact NN (100%
+        // recall at ef=200, so index order == exact order; same corpus as the recall-neutrality test above).
+        for i in 0..30i32 {
+            let (a, b, c, d) = (i as f32, (i % 7) as f32, (i % 5) as f32, i as f32 * 0.1);
+            pgrx::Spi::run(&format!("INSERT INTO tz VALUES ({i}, '[{a},{b},{c},{d}]')")).unwrap();
+        }
+        pgrx::Spi::run("CREATE INDEX tz_idx ON tz USING theodb_hnsw (e)").unwrap();
+        pgrx::Spi::run("SET theodb_hnsw.ef_search = 200").unwrap();
+
+        let probe = "[3.3,1.1,2.2,0.4]";
+        // Exact oracle over the full live set (seqscan): top-7 tells us the 2 victims AND the post-sweep truth.
+        pgrx::Spi::run("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on").unwrap();
+        let exact_full = topk_ids_tbl("tz", probe, 7);
+        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        let before = topk_ids_tbl("tz", probe, 5);
+        assert_eq!(before.len(), 5, "index returns 5 results before any tombstone");
+
+        // Tombstone the 2 nearest nodes IN the index (their heap rows stay ALIVE — see the doc comment).
+        let victims = [before[0], before[1]];
+        let victim_tids: Vec<i64> = victims.iter().map(|&id| heap_tid_i64("tz", id)).collect();
+        unsafe {
+            let oid: pg_sys::Oid =
+                pgrx::Spi::get_one("SELECT 'tz_idx'::regclass::oid").unwrap().expect("index oid");
+            let rel = pg_sys::index_open(oid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+            let meta = read_meta(rel).expect("read_meta");
+            let mut is_dead = |tid: i64| victim_tids.contains(&tid);
+            let swept = tombstone_sweep(rel, &meta, &mut is_dead);
+            let counted = count_tombstones(rel, &meta);
+            pg_sys::index_close(rel, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+            assert_eq!(swept, 2, "sweep tombstones exactly the 2 dead nodes in place (per-page WAL, no rebuild)");
+            assert_eq!(counted, 2, "count_tombstones sees exactly the 2 on-page marks");
+        }
+
+        // After the sweep the scan must NOT emit the tombstoned nodes, yet still return 5 LIVE results — it
+        // navigated THROUGH the 2 tombstones (their arcs preserved connectivity, so the graph is not severed).
+        let after = topk_ids_tbl("tz", probe, 5);
+        for v in &victims {
+            assert!(!after.contains(v), "tombstoned node {v} is filtered (heap row still live → only the emittable filter can drop it)");
+        }
+        assert_eq!(after.len(), 5, "scan navigates through tombstones and still returns 5 live results (graph not disconnected)");
+
+        // Recall preserved: post-sweep index top-5 == exact top-5 of (live set minus the 2 victims).
+        let mut oracle: Vec<i32> = exact_full.into_iter().filter(|id| !victims.contains(id)).take(5).collect();
+        let mut got = after.clone();
+        oracle.sort_unstable();
+        got.sort_unstable();
+        assert_eq!(got, oracle, "navigate-through-don't-emit preserves recall: top-5 == exact top-5 of the survivors");
+    }
+
+    /// M56: the compaction ratio path — when tombstones exceed `theodb.hnsw_tombstone_compact_pct` of the graph,
+    /// `vacuum_delete_inplace` folds (rebuild) to reclaim their space, dropping them from the physical layout.
+    /// With the GUC set low and enough nodes swept, the fold runs and `count_tombstones` returns 0 afterwards
+    /// (they are gone, not merely flagged), while the surviving live nodes still scan correctly.
+    #[pgrx::pg_test]
+    fn compaction_reclaims_tombstones_past_ratio_threshold() {
+        pgrx::Spi::run("CREATE TABLE tc (id int PRIMARY KEY, e vector(4))").unwrap();
+        for i in 0..30i32 {
+            let (a, b, c, d) = (i as f32, (i % 7) as f32, (i % 5) as f32, i as f32 * 0.1);
+            pgrx::Spi::run(&format!("INSERT INTO tc VALUES ({i}, '[{a},{b},{c},{d}]')")).unwrap();
+        }
+        pgrx::Spi::run("CREATE INDEX tc_idx ON tc USING theodb_hnsw (e)").unwrap();
+        pgrx::Spi::run("SET theodb_hnsw.ef_search = 200").unwrap();
+        // Compact as soon as >10% of the graph is tombstoned; we will tombstone ~1/3 → well past the ratio.
+        pgrx::Spi::run("SET theodb.hnsw_tombstone_compact_pct = 10").unwrap();
+
+        // Delete 10 of 30 rows FROM THE HEAP so the executor callback agrees they are dead, then drive the
+        // in-place delete path (which compacts because 10/30 > 10%).
+        pgrx::Spi::run("DELETE FROM tc WHERE id < 10").unwrap();
+
+        unsafe {
+            let oid: pg_sys::Oid =
+                pgrx::Spi::get_one("SELECT 'tc_idx'::regclass::oid").unwrap().expect("index oid");
+            // Predicate: a node is dead iff its heap row no longer exists (id < 10 were deleted).
+            // Map each index tid back to its heap id via the surviving set: query which ids remain.
+            let surviving: std::collections::HashSet<i64> = {
+                let mut s = std::collections::HashSet::new();
+                for id in 10..30i32 {
+                    s.insert(heap_tid_i64("tc", id));
+                }
+                s
+            };
+            let rel = pg_sys::index_open(oid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+            let mut dead = |tid: i64| !surviving.contains(&tid);
+            let live = crate::am::build::vacuum_delete_inplace(rel, &mut dead);
+            pg_sys::index_close(rel, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+            assert_eq!(live, 20, "vacuum_delete_inplace reports 20 live nodes after compacting away 10");
+            // After compaction the tombstones are physically GONE (reclaimed), not merely flagged.
+            let rel2 = pg_sys::index_open(oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            let meta2 = read_meta(rel2).expect("read_meta after compaction");
+            let remaining = count_tombstones(rel2, &meta2);
+            assert_eq!(meta2.node_count, 20, "compacted graph has exactly the 20 surviving nodes");
+            assert_eq!(remaining, 0, "compaction reclaimed the tombstones (0 left in the physical layout)");
+            pg_sys::index_close(rel2, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+        }
+
+        // The compacted index still scans correctly against the surviving live set.
+        let probe = "[13.3,1.1,2.2,1.4]"; // near ids in the surviving 10..30 range
+        pgrx::Spi::run("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on").unwrap();
+        let exact = topk_ids_tbl("tc", probe, 5);
+        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        let mut via_index = topk_ids_tbl("tc", probe, 5);
+        assert!(via_index.iter().all(|id| *id >= 10), "no compacted-away node leaks into results");
+        let (mut si, mut se) = (via_index.clone(), exact.clone());
+        si.sort_unstable();
+        se.sort_unstable();
+        via_index.sort_unstable();
+        assert_eq!(si, se, "compacted index top-5 == exact top-5 of the surviving set");
+    }
+
+    /// M56 DoD 2 — "recall BETWEEN compactions": as tombstones ACCUMULATE (up to the compaction threshold)
+    /// WITHOUT a fold, does recall degrade? This is the blueprint's KEY uncertainty — it decides whether the
+    /// phase-2 `RepairGraph`/slot-reuse (pgvector `hnswvacuum.c`) is needed NOW. We tombstone 20% of the graph
+    /// in place (the `tombstone_sweep` is called DIRECTLY → NO fold, regardless of the GUC), delete those rows
+    /// from the heap so the exact oracle agrees, and measure recall@10 (index vs exact seqscan of the 320
+    /// survivors) averaged over 6 probes. High recall here ⇒ accumulated tombstones do NOT sever navigation ⇒
+    /// phase 2 is deferred WITH EVIDENCE, not by omission.
+    #[pgrx::pg_test]
+    fn recall_holds_under_20pct_accumulated_tombstones() {
+        pgrx::Spi::run("CREATE TABLE rc2 (id int PRIMARY KEY, e vector(16))").unwrap();
+        for i in 0..400i32 {
+            let v: Vec<String> = (0..16)
+                .map(|j| format!("{:.3}", i as f32 * 0.5 + ((i * 7 + j * 13) % 29) as f32 * 0.3))
+                .collect();
+            pgrx::Spi::run(&format!("INSERT INTO rc2 VALUES ({i}, '[{}]')", v.join(","))).unwrap();
+        }
+        pgrx::Spi::run("CREATE INDEX rc2_idx ON rc2 USING theodb_hnsw (e)").unwrap();
+        pgrx::Spi::run("SET theodb_hnsw.ef_search = 100").unwrap();
+
+        // Tombstone 20% (ids 0..80): capture their tids BEFORE deleting, delete from heap, sweep DIRECTLY (no fold).
+        let dead_tids: Vec<i64> = (0..80i32).map(|id| heap_tid_i64("rc2", id)).collect();
+        pgrx::Spi::run("DELETE FROM rc2 WHERE id < 80").unwrap();
+        unsafe {
+            let oid: pg_sys::Oid = pgrx::Spi::get_one("SELECT 'rc2_idx'::regclass::oid").unwrap().expect("oid");
+            let rel = pg_sys::index_open(oid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+            let meta = read_meta(rel).expect("read_meta");
+            let mut is_dead = |tid: i64| dead_tids.contains(&tid);
+            let swept = tombstone_sweep(rel, &meta, &mut is_dead); // DIRECT sweep → NO compaction
+            pg_sys::index_close(rel, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+            assert_eq!(swept, 80, "20% of the 400-node graph tombstoned in place, no fold");
+        }
+
+        // recall@10 over 6 surviving probes (each probe = a survivor's own vector) vs the exact seqscan oracle.
+        let probe_ids = [100, 150, 200, 250, 300, 350];
+        let mut total_recall = 0.0f64;
+        for &pid in &probe_ids {
+            let probe: String = pgrx::Spi::get_one(&format!("SELECT e::text FROM rc2 WHERE id = {pid}"))
+                .unwrap().expect("survivor vector");
+            pgrx::Spi::run("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on").unwrap();
+            let exact = topk_ids_tbl("rc2", &probe, 10);
+            pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+            let via_index = topk_ids_tbl("rc2", &probe, 10);
+            let hits = via_index.iter().filter(|id| exact.contains(id)).count();
+            total_recall += hits as f64 / exact.len().max(1) as f64;
+        }
+        let mean_recall = total_recall / probe_ids.len() as f64;
+        assert!(
+            mean_recall >= 0.9,
+            "recall@10 under 20% accumulated tombstones (no compaction) = {mean_recall:.3} — expected >= 0.9 \
+             (navigate-through preserves recall ⇒ phase-2 RepairGraph not urgent)"
+        );
+    }
+
+    /// M56 fase 2 T1.1: `find_reusable_slot` returns None with no tombstones, and the tombstoned node's
+    /// `(block, off)` after one is marked — the entry point of the in-place-insert slot-reuse (RepairGraph).
+    #[pgrx::pg_test]
+    fn find_reusable_slot_locates_a_tombstoned_slot() {
+        pgrx::Spi::run("CREATE TABLE fr (id int PRIMARY KEY, e vector(4))").unwrap();
+        for i in 0..30i32 {
+            let (a, b, c, d) = (i as f32, (i % 7) as f32, (i % 5) as f32, i as f32 * 0.1);
+            pgrx::Spi::run(&format!("INSERT INTO fr VALUES ({i}, '[{a},{b},{c},{d}]')")).unwrap();
+        }
+        pgrx::Spi::run("CREATE INDEX fr_idx ON fr USING theodb_hnsw (e)").unwrap();
+        // Tombstone a batch (ids 0..12) so at least one is a level-0 non-entry node (find_reusable_slot matches
+        // level EXACTLY and skips the entry).
+        let dead: Vec<i64> = (0..12i32).map(|id| heap_tid_i64("fr", id)).collect();
+        unsafe {
+            let oid: pg_sys::Oid = pgrx::Spi::get_one("SELECT 'fr_idx'::regclass::oid").unwrap().expect("oid");
+            let rel = pg_sys::index_open(oid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+            let meta = read_meta(rel).expect("read_meta");
+            assert!(find_reusable_slot(rel, &meta, 0).is_none(), "no tombstones ⇒ no reusable slot");
+            let mut is_dead = |tid: i64| dead.contains(&tid);
+            assert_eq!(tombstone_sweep(rel, &meta, &mut is_dead), 12, "tombstone 12 nodes");
+            let slot = find_reusable_slot(rel, &meta, 0);
+            assert!(slot.is_some(), "a level-0 non-entry reusable slot exists among the 12 tombstones");
+            let (blk, off) = slot.unwrap();
+            assert!((blk, off) != (meta.entry_blkno, meta.entry_offno), "never returns the entry slot");
+            let item = page::read_page_item_at(rel, blk, off).expect("read slot");
+            let ev = decode_element(&item).unwrap();
+            assert!(ev.deleted && ev.level == 0, "the found slot is a level-0 tombstone");
+            assert!(find_reusable_slot(rel, &meta, 99).is_none(), "no slot has level == 99");
+            pg_sys::index_close(rel, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+        }
+    }
+
+    /// M56 fase 2 T1.2: `write_reused_element` revives a tombstoned slot with a new tid + vector, clears
+    /// `deleted`, bumps `version`, and KEEPS the slot's level + neighbor-tuple address (Z takes X's graph position).
+    #[pgrx::pg_test]
+    fn write_reused_element_revives_slot_keeping_graph_position() {
+        pgrx::Spi::run("CREATE TABLE wr (id int PRIMARY KEY, e vector(4))").unwrap();
+        for i in 0..30i32 {
+            let (a, b, c, d) = (i as f32, (i % 7) as f32, (i % 5) as f32, i as f32 * 0.1);
+            pgrx::Spi::run(&format!("INSERT INTO wr VALUES ({i}, '[{a},{b},{c},{d}]')")).unwrap();
+        }
+        pgrx::Spi::run("CREATE INDEX wr_idx ON wr USING theodb_hnsw (e)").unwrap();
+        let dead_tid = heap_tid_i64("wr", 7);
+        unsafe {
+            let oid: pg_sys::Oid = pgrx::Spi::get_one("SELECT 'wr_idx'::regclass::oid").unwrap().expect("oid");
+            let rel = pg_sys::index_open(oid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+            let meta = read_meta(rel).expect("read_meta");
+            let mut is_dead = |t: i64| t == dead_tid;
+            assert_eq!(tombstone_sweep(rel, &meta, &mut is_dead), 1, "tombstone node id=7");
+            let slot = find_reusable_slot(rel, &meta, 0).expect("reusable slot");
+            let bytes_before = page::read_page_item_at(rel, slot.0, slot.1).unwrap();
+            let before = decode_element(&bytes_before).unwrap();
+            let (lvl, nbr, ver) = (before.level, before.nbr_addr, before.version);
+            assert!(before.deleted, "slot is a tombstone before revive");
+
+            let newvec = [9.0f32, 8.0, 7.0, 6.0];
+            assert!(write_reused_element(rel, slot, 424242, &newvec), "revive the v1 slot");
+            let bytes_after = page::read_page_item_at(rel, slot.0, slot.1).unwrap();
+            let after = decode_element(&bytes_after).unwrap();
+            assert!(!after.deleted, "revived slot is live");
+            assert_eq!(after.tid, 424242, "new tid written");
+            assert_eq!(after.version, ver.wrapping_add(1), "version bumped");
+            assert_eq!((after.level, after.nbr_addr), (lvl, nbr), "graph position (level + nbr slot) preserved");
+            assert_eq!(f32::from_le_bytes(after.vec_bytes[0..4].try_into().unwrap()), 9.0, "new vector written");
+            pg_sys::index_close(rel, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+        }
+    }
+
+    /// M56 fase 2 T1.3: `set_ground_neighbors_inplace` writes the given addrs into a node's ground slots (and the
+    /// round-trip through `decode_neighbors` returns exactly them), the in-place neighbor-write half of the insert.
+    #[pgrx::pg_test]
+    fn set_ground_neighbors_inplace_round_trips() {
+        pgrx::Spi::run("CREATE TABLE sg (id int PRIMARY KEY, e vector(4))").unwrap();
+        for i in 0..30i32 {
+            let (a, b, c, d) = (i as f32, (i % 7) as f32, (i % 5) as f32, i as f32 * 0.1);
+            pgrx::Spi::run(&format!("INSERT INTO sg VALUES ({i}, '[{a},{b},{c},{d}]')")).unwrap();
+        }
+        pgrx::Spi::run("CREATE INDEX sg_idx ON sg USING theodb_hnsw (e)").unwrap();
+        unsafe {
+            let oid: pg_sys::Oid = pgrx::Spi::get_one("SELECT 'sg_idx'::regclass::oid").unwrap().expect("oid");
+            let rel = pg_sys::index_open(oid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+            let meta = read_meta(rel).expect("read_meta");
+            let (m, m0) = (meta.m as usize, meta.m0 as usize);
+            // node 0 = first element at (elem_first, 1); take its level + neighbor-tuple address.
+            let ebytes = page::read_page_item_at(rel, meta.elem_first, 1).unwrap();
+            let ev = decode_element(&ebytes).unwrap();
+            let (lvl, nbr) = (ev.level as usize, ev.nbr_addr);
+            let wanted: Vec<Addr> = vec![(meta.elem_first, 3), (meta.elem_first, 5)];
+            assert!(set_ground_neighbors_inplace(rel, nbr, lvl, m, m0, &wanted), "write ground slots");
+            let nbytes = page::read_page_item_at(rel, nbr.0, nbr.1).unwrap();
+            let got = decode_neighbors(&nbytes, lvl, 0, m, m0).unwrap();
+            assert_eq!(got, wanted, "ground slots round-trip through decode_neighbors (empties padded, dropped)");
+            pg_sys::index_close(rel, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+        }
+    }
+
+    /// M56 fase 2 T2.1: `insert_search_ground` (descent + ground search) returns LIVE element addrs; querying with
+    /// a node's OWN vector puts that node (distance ~0) as the nearest candidate — proves the on-disk insert search.
+    #[pgrx::pg_test]
+    fn insert_search_ground_finds_live_neighbors() {
+        pgrx::Spi::run("CREATE TABLE ins (id int PRIMARY KEY, e vector(4))").unwrap();
+        for i in 0..30i32 {
+            let (a, b, c, d) = (i as f32, (i % 7) as f32, (i % 5) as f32, i as f32 * 0.1);
+            pgrx::Spi::run(&format!("INSERT INTO ins VALUES ({i}, '[{a},{b},{c},{d}]')")).unwrap();
+        }
+        pgrx::Spi::run("CREATE INDEX ins_idx ON ins USING theodb_hnsw (e)").unwrap();
+        let qtext: String = pgrx::Spi::get_one("SELECT e::text FROM ins WHERE id = 12").unwrap().expect("vec");
+        let qv: Vec<f32> = qtext.trim_matches(|c| c == '[' || c == ']')
+            .split(',').map(|s| s.trim().parse().unwrap()).collect();
+        unsafe {
+            let oid: pg_sys::Oid = pgrx::Spi::get_one("SELECT 'ins_idx'::regclass::oid").unwrap().expect("oid");
+            let rel = pg_sys::index_open(oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            let meta = read_meta(rel).expect("read_meta");
+            let cands = insert_search_ground(rel, &meta, &qv, 100).expect("insert search");
+            assert!(!cands.is_empty(), "search returns candidates");
+            assert!(cands.len() <= meta.m0 as usize, "at most m0 ground neighbors");
+            for (blk, off) in &cands {
+                let b = page::read_page_item_at(rel, *blk, *off).unwrap();
+                assert!(!decode_element(&b).unwrap().deleted, "each candidate is a LIVE element");
+            }
+            let (nblk, noff) = cands[0];
+            let nb = page::read_page_item_at(rel, nblk, noff).unwrap();
+            let nev = decode_element(&nb).unwrap();
+            let d: f32 = (0..4)
+                .map(|i| {
+                    let x = f32::from_le_bytes(nev.vec_bytes[i * 4..i * 4 + 4].try_into().unwrap());
+                    (qv[i] - x) * (qv[i] - x)
+                })
+                .sum();
+            assert!(d < 0.01, "nearest candidate is node 12 itself (d={d})");
+            pg_sys::index_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+        }
+    }
+
+    /// M56 fase 2 T4.1 (ACCEPTANCE — DoD-1 slot-reuse): after tombstones exist, `aminsert` REUSES them via a proper
+    /// in-place insert instead of growing the pending region — the tombstones are reclaimed (count → 0) AND each new
+    /// row is properly linked (found by an index scan on its own vector). This is the end-to-end slot-reuse.
+    #[pgrx::pg_test]
+    fn aminsert_reuses_tombstoned_slots_and_links_new_rows() {
+        pgrx::Spi::run("CREATE TABLE re (id int PRIMARY KEY, e vector(4))").unwrap();
+        for i in 0..30i32 {
+            let (a, b, c, d) = (i as f32, (i % 7) as f32, (i % 5) as f32, i as f32 * 0.1);
+            pgrx::Spi::run(&format!("INSERT INTO re VALUES ({i}, '[{a},{b},{c},{d}]')")).unwrap();
+        }
+        pgrx::Spi::run("CREATE INDEX re_idx ON re USING theodb_hnsw (e)").unwrap();
+        pgrx::Spi::run("SET theodb_hnsw.ef_search = 200").unwrap();
+        pgrx::Spi::run("SET theodb.hnsw_slot_reuse = on").unwrap(); // opt-in (default OFF — recall trade, see guc.rs)
+
+        // Tombstone 12 index slots (ids 0..12) via the FFI sweep — the post-DELETE/VACUUM state.
+        let dead: Vec<i64> = (0..12i32).map(|id| heap_tid_i64("re", id)).collect();
+        let before = unsafe {
+            let oid: pg_sys::Oid = pgrx::Spi::get_one("SELECT 're_idx'::regclass::oid").unwrap().expect("oid");
+            let rel = pg_sys::index_open(oid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+            let meta = read_meta(rel).expect("read_meta");
+            let mut is_dead = |t: i64| dead.contains(&t);
+            assert_eq!(tombstone_sweep(rel, &meta, &mut is_dead), 12, "12 tombstones created");
+            let c = count_tombstones(rel, &meta);
+            pg_sys::index_close(rel, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+            c
+        };
+        assert_eq!(before, 12, "12 tombstones present before the inserts");
+
+        // Insert 12 NEW rows (near live nodes 12..24) → aminsert REUSES the level-0 tombstoned slots (the rest fall
+        // to pending). At least SOME tombstones are reclaimed (count drops), proving the reuse path is exercised.
+        for i in 0..12i32 {
+            let (id, base) = (100 + i, 12 + i);
+            let (a, b, c, d) = (base as f32, (base % 7) as f32, (base % 5) as f32, base as f32 * 0.1 + 0.01);
+            pgrx::Spi::run(&format!("INSERT INTO re VALUES ({id}, '[{a},{b},{c},{d}]')")).unwrap();
+        }
+        let after = unsafe {
+            let oid: pg_sys::Oid = pgrx::Spi::get_one("SELECT 're_idx'::regclass::oid").unwrap().expect("oid");
+            let rel = pg_sys::index_open(oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            let meta = read_meta(rel).expect("read_meta");
+            let c = count_tombstones(rel, &meta);
+            pg_sys::index_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            c
+        };
+        assert!(after < before, "some tombstones were REUSED by the inserts (count {after} < {before})");
+
+        // Each new row is found by an index scan on its own vector (reused → linked in the graph; non-reused →
+        // pending, scanned brute-force). Either way the in-place insert (or pending fallback) keeps it findable.
+        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        for i in 0..12i32 {
+            let id = 100 + i;
+            let q: String = pgrx::Spi::get_one(&format!("SELECT e::text FROM re WHERE id = {id}")).unwrap().unwrap();
+            let got = topk_ids_tbl("re", &q, 1);
+            assert!(got.contains(&id), "new row {id} is found by the index scan on its own vector (got {got:?})");
+        }
+    }
+}
+
+// M56 — pure unit tests for the tombstone byte-layout (CI-runnable via `cargo test`, no DB/pgrx needed).
+#[cfg(test)]
+mod m56_tombstone_layout {
+    use super::*;
+
+    /// A minimal live element tuple: ELEM_TAG, pad(deleted/version)=0, dim=2, zero vector, no SBQ code.
+    fn live_tuple() -> Vec<u8> {
+        let dim = 2usize;
+        let mut b = vec![0u8; ELEM_HEADER + dim * 4];
+        b[E_TAG] = ELEM_TAG;
+        b[E_DIM..E_DIM + 2].copy_from_slice(&(dim as u16).to_le_bytes());
+        b
+    }
+
+    #[test]
+    fn fresh_tuple_decodes_as_live() {
+        let b = live_tuple();
+        let ev = decode_element(&b).expect("decode");
+        assert!(!ev.deleted, "a fresh tuple (pad=0) decodes as live");
+        assert_eq!(ev.version, 0, "fresh version is 0");
+    }
+
+    #[test]
+    fn mark_tombstone_flips_deleted_and_bumps_version_idempotently() {
+        let mut b = live_tuple();
+        assert!(mark_tombstone_in_place(&mut b), "marking a live tuple returns true");
+        let ev = decode_element(&b).expect("decode");
+        assert!(ev.deleted, "marked tuple decodes as deleted");
+        assert_eq!(ev.version, 1, "version bumped to 1 on first delete");
+        // Idempotent: re-marking a tombstone is a no-op (no double-bump, returns false).
+        assert!(!mark_tombstone_in_place(&mut b), "re-marking a tombstone returns false");
+        assert_eq!(decode_element(&b).unwrap().version, 1, "version stays 1 (no double-bump)");
+    }
+
+    #[test]
+    fn tombstone_preserves_tid_nbr_and_vec_bytes() {
+        // The tombstone flag must NOT corrupt tid/neighbor/vector (the node is still navigated THROUGH).
+        let dim = 2usize;
+        let mut b = vec![0u8; ELEM_HEADER + dim * 4];
+        b[E_TAG] = ELEM_TAG;
+        b[E_LEVEL] = 3;
+        b[E_TID..E_TID + 8].copy_from_slice(&42i64.to_le_bytes());
+        b[E_NBR_BLK..E_NBR_BLK + 4].copy_from_slice(&7u32.to_le_bytes());
+        b[E_NBR_OFF..E_NBR_OFF + 2].copy_from_slice(&9u16.to_le_bytes());
+        b[E_DIM..E_DIM + 2].copy_from_slice(&(dim as u16).to_le_bytes());
+        b[E_VEC..E_VEC + 4].copy_from_slice(&1.5f32.to_le_bytes());
+        mark_tombstone_in_place(&mut b);
+        let ev = decode_element(&b).expect("decode");
+        assert_eq!((ev.tid, ev.level, ev.nbr_addr), (42, 3, (7, 9)), "tid/level/neighbor intact");
+        assert_eq!(f32::from_le_bytes(ev.vec_bytes[0..4].try_into().unwrap()), 1.5, "vector intact (navigation needs it)");
+        assert!(ev.deleted);
     }
 }

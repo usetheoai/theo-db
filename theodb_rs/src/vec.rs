@@ -283,9 +283,11 @@ mod tests {
     #[pg_test]
     fn f32_accumulation_not_f64() {
         // ADR-D2: prove we accumulate in f32 (like pgvector), not f64. With a large base, many tiny additions
-        // fall below the f32 ULP and are lost — an f64 accumulator would keep them. Σa² in f32 = big² exactly
-        // (the +64 of unit terms is below ULP(1e14)≈8e6); l2 = sqrt of that.
-        let big = 1.0e7_f32;
+        // fall below the f32 ULP and are lost — an f64 accumulator would keep them. `big` MUST be a power of two
+        // so that `big²` is EXACTLY representable in f32 (else the squaring itself rounds and `got` drifts off
+        // `big` regardless of the accumulator width). big = 2^16 → big² = 2^32, ULP(2^32) = 512 ≫ 64, so the
+        // 64 unit terms are lost in f32 (Σ = 2^32 exactly) but kept in f64 — the exact discriminator we assert.
+        let big = 65536.0_f32; // 2^16
         let a: Vec<f32> = std::iter::once(big).chain(std::iter::repeat_n(1.0, 64)).collect();
         let b: Vec<f32> = std::iter::repeat_n(0.0, 65).collect();
         let got = l2_distance(&a, &b);
@@ -294,7 +296,7 @@ mod tests {
         assert_ne!(got, f64_acc, "an f64 accumulator would NOT lose the +64");
     }
 
-    #[pg_test(error = "different vector dimensions")]
+    #[pg_test(error = "theodb vector op: different vector dimensions 2 and 1")]
     fn dim_mismatch_rejected_22023() {
         // EC-1 negative: mismatched dims fail-fast with the typed 22023 (err_input).
         let _ = l2_distance(&[1.0, 2.0], &[3.0]);

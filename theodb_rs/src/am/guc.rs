@@ -57,6 +57,36 @@ pub(crate) fn vacuum_pending_threshold() -> u32 {
     VACUUM_PENDING_THRESHOLD.get().max(1) as u32
 }
 
+/// M56 — `SET theodb.hnsw_tombstone_compact_pct = N`: a VACUUM tombstones dead nodes in place (cheap, no O(N),
+/// no stall); once tombstones reach N% of the graph, the same VACUUM ALSO runs the (rare, O(N)) compaction fold
+/// to reclaim their space and re-densify. Default 20%. `0` disables ratio-compaction (only pending-threshold
+/// folds). This is the knob that trades delete-latency (low) against index bloat between compactions.
+pub(crate) const DEFAULT_HNSW_TOMBSTONE_COMPACT_PCT: i32 = 20;
+pub(crate) static HNSW_TOMBSTONE_COMPACT_PCT: GucSetting<i32> =
+    GucSetting::<i32>::new(DEFAULT_HNSW_TOMBSTONE_COMPACT_PCT);
+
+/// The effective tombstone-compaction percentage (0..=100; 0 = disabled).
+pub(crate) fn hnsw_tombstone_compact_pct() -> i32 {
+    HNSW_TOMBSTONE_COMPACT_PCT.get().clamp(0, 100)
+}
+
+/// M56 fase 2 — `SET theodb.hnsw_slot_reuse = on|off`: when ON, `aminsert` REUSES a tombstoned element slot via a
+/// proper in-place insert (search + link) before growing the pending region, bounding relation growth under
+/// DELETE+INSERT churn. **Default OFF.** The churn benchmark (`docs/benchmarks/m56-slot-reuse-churn.md`) drove the
+/// design: the original slot-reuse SUPPRESSED the ratio-compaction (tombstones consumed before the threshold, so
+/// the graph-REPAIRING fold never fired) and recall@10 collapsed to ~0.57. The fix — reuse only clean level-0
+/// non-entry slots + trigger the fold on CHURN (`count_churned`, not just tombstones) — makes it recall-SAFE
+/// (~0.955). BUT the benchmark then showed the net benefit is MARGINAL: the size win is ~1.04–1.18× and slot-reuse
+/// never beats the plain navigate-through + fold path on recall. So it stays OFF by default (the simpler
+/// navigate-through + fold is the recommended path), opt-in for niche churn-heavy workloads that want the marginal
+/// between-fold size win.
+pub(crate) static HNSW_SLOT_REUSE: GucSetting<bool> = GucSetting::<bool>::new(false);
+
+/// Whether `aminsert` should reuse tombstoned slots in place (M56 fase 2).
+pub(crate) fn hnsw_slot_reuse() -> bool {
+    HNSW_SLOT_REUSE.get()
+}
+
 // M48 (T2.3) — deterministic crash-injection for the VACUUM fold's crash tests. `injection_points` is NOT
 // compiled into the packaged Debian PG17 (blueprint §Q9, verified), so we ship a tiny always-compiled test hook
 // instead. Both default to 0 (off) ⇒ ZERO effect in production; both are `Suset` (only a superuser can set them,
@@ -128,6 +158,24 @@ pub(crate) fn init() {
         &VACUUM_PENDING_THRESHOLD,
         1,
         65536,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+    GucRegistry::define_int_guc(
+        c"theodb.hnsw_tombstone_compact_pct",
+        c"After tombstones reach this % of the theodb_hnsw graph, a VACUUM also runs the O(N) compaction fold (0 = disabled)",
+        c"Deletes tombstone in place (cheap, no stall); compaction reclaims their space. Higher = less compaction but more bloat.",
+        &HNSW_TOMBSTONE_COMPACT_PCT,
+        0,
+        100,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+    GucRegistry::define_bool_guc(
+        c"theodb.hnsw_slot_reuse",
+        c"When on, theodb_hnsw aminsert reuses a tombstoned slot in place (search + link) before growing pending",
+        c"Bounds relation growth under DELETE+INSERT churn (M56 fase 2). Off = legacy pending-append (kill-switch / A/B).",
+        &HNSW_SLOT_REUSE,
         GucContext::Userset,
         GucFlags::default(),
     );

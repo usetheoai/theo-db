@@ -309,7 +309,7 @@ fn collect_relations(node: &Value, acc: &mut Vec<(String, String)>) {
 // end-to-end cross-language parity stays proven by benchmarks/tests/test_nl_sql.py (35).
 #[cfg(any(test, feature = "pg_test"))]
 #[pg_schema]
-mod nl_tests {
+mod tests {
     use super::*;
 
     #[pg_test]
@@ -399,8 +399,11 @@ mod nl_tests {
         // SELECT/WITH guard) — proves l2_validate still calls first_banned_token.
         let e = l2_validate("SELECT pg_read_file('/etc/passwd')").unwrap_err();
         assert!(e.contains("banned token"), "got: {e}");
-        // The procedural-block wiring: a DO $$ block trips has_do_block — proves that call survived extraction.
-        let e2 = l2_validate("do $$ begin perform 1; end $$").unwrap_err();
+        // The procedural-block wiring: a DO $$ block smuggled after a SELECT (no ';', so it clears the
+        // multi-statement guard L2a; "do" is not banned, so it clears L2c) reaches has_do_block (L2d) — proves
+        // that call survived extraction. (A bare "do $$…" would be caught earlier by the SELECT/WITH-only guard,
+        // and "…; do $$…" by the multi-statement guard; neither would exercise has_do_block itself.)
+        let e2 = l2_validate("select 1 do $$ perform 1 $$").unwrap_err();
         assert!(e2.contains("procedural blocks are not allowed"), "got: {e2}");
     }
 

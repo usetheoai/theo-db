@@ -275,7 +275,7 @@ const IVF_VERSION: u32 = 1;
 
 #[cfg(any(test, feature = "pg_test"))]
 #[pgrx::pg_schema]
-mod ivf_persist_tests {
+mod tests {
     use super::*;
 
     fn corpus() -> Vec<(i64, Vec<f32>)> {

@@ -61,19 +61,32 @@ def _load():
 
 
 def _make_dataset(cur, table, n, dim, seed):
-    import random
-    rnd = random.Random(seed)
+    # M57: stream the gaussian corpus via COPY with NUMPY generation (O(1) client RAM, and numpy removes the
+    # per-float `random.gauss` bottleneck that makes 1M×768d unusably slow in pure Python). A `read()`-only
+    # file-like feeds `copy_expert` chunk-by-chunk so client RAM stays bounded regardless of n.
+    import numpy as np
+    rng = np.random.default_rng(seed)
     cur.execute(f"DROP TABLE IF EXISTS {table}")
     cur.execute(f"CREATE TABLE {table} (id int, v vector({dim}))")
-    rows = []
-    for i in range(n):
-        vec = "[" + ",".join(f"{rnd.gauss(0, 1):.4f}" for _ in range(dim)) + "]"
-        rows.append((i, vec))
-        if len(rows) >= 1000:
-            cur.executemany(f"INSERT INTO {table} VALUES (%s,%s)", rows)
-            rows = []
-    if rows:
-        cur.executemany(f"INSERT INTO {table} VALUES (%s,%s)", rows)
+
+    class _NpReader:
+        # Return ONE full chunk per read() (ignoring `size`) — psycopg2 streams whatever we return. This avoids
+        # the O(n²) trap of buffering a big chunk then slicing it `size` bytes at a time (which quadratic-blows at
+        # 1M). Each chunk is generated fresh with numpy, so client RAM stays O(chunk), not O(n).
+        def __init__(self):
+            self.i = 0
+
+        def read(self, size=-1):
+            m = min(20000, n - self.i)
+            if m <= 0:
+                return ""
+            arr = rng.standard_normal((m, dim)).astype(np.float32)
+            fmt = np.char.mod("%.4f", arr)  # (m, dim) string array — the %.4f formatting runs at C speed
+            base = self.i
+            self.i += m
+            return "".join(f"{base + r}\t[" + ",".join(fmt[r]) + "]\n" for r in range(m))
+
+    cur.copy_expert(f"COPY {table} (id, v) FROM STDIN", _NpReader())
     cur.execute(f"ANALYZE {table}")
 
 

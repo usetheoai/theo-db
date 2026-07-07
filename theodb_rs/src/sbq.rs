@@ -357,14 +357,14 @@ mod tests {
         );
         assert_eq!(r.len(), 3);
     }
-    #[pg_test(error = "bits must be in")]
+    #[pg_test(error = "theodb sbq: bits must be in [1, 8]")]
     fn sbq_knn_bad_bits_rejected() {
         let _ = knn(
             "t", "e", "id", "l2", &[0.0],
             SbqParams { qdim: 1, k: 5, bits: 9, lists: 4, probes: 4, over_fetch: 8, seed: 42 },
         );
     }
-    #[pg_test(error = "unknown metric")]
+    #[pg_test(error = "theodb sbq: unknown metric 'nope' (use l2|cosine|ip)")]
     fn sbq_knn_bad_metric_rejected() {
         let _ = knn(
             "t", "e", "id", "nope", &[0.0],

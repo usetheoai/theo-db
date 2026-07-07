@@ -53,33 +53,34 @@ mod api;
 mod tests {
     use pgrx::prelude::*;
 
-    #[pg_test(error = "must not be NULL")]
+    #[pg_test(error = "theodb.embed: content must not be NULL")]
     fn embed_null_content_rejected() {
         Spi::run("SET theodb.embedding_endpoint = 'http://127.0.0.1:1/v1/embeddings'").unwrap();
         let _ = Spi::get_one::<String>("SELECT theodb_rs._embed_text(NULL, NULL)");
     }
 
-    #[pg_test(error = "embedding_endpoint is not set")]
+    #[pg_test(error = "theodb.embed: theodb.embedding_endpoint is not set — SET theodb.embedding_endpoint = 'http://host:port/v1/embeddings'")]
     fn embed_unset_endpoint_rejected() {
         // Ensure the GUC is unset for this test (ignore error if it was never set).
         Spi::run("RESET theodb.embedding_endpoint").ok();
         let _ = Spi::get_one::<String>("SELECT theodb_rs._embed_text('x', NULL)");
     }
 
-    #[pg_test(error = "http(s)")]
+    #[pg_test(error = "theodb.embed: endpoint must be http(s)://")]
     fn embed_non_http_scheme_rejected() {
         Spi::run("SET theodb.embedding_endpoint = 'file:///etc/passwd'").unwrap();
         let _ = Spi::get_one::<String>("SELECT theodb_rs._embed_text('x', NULL)");
     }
 
-    #[pg_test(error = "call failed")]
+    #[pg_test(error = "theodb.embed: endpoint call failed: Connection refused (os error 111)")]
     fn embed_unreachable_endpoint_fails_typed() {
-        // Port 1 is unreachable -> connect error -> "call failed" (38000).
+        // Port 1 is unreachable -> connect error -> "call failed" (38000). The OS error (111 = ECONNREFUSED
+        // on Linux) is part of the exact match pgrx-tests 0.16.1 requires; the suite runs in the Linux builder.
         Spi::run("SET theodb.embedding_endpoint = 'http://127.0.0.1:1/v1/embeddings'").unwrap();
         let _ = Spi::get_one::<String>("SELECT theodb_rs._embed_text('x', NULL)");
     }
 
-    #[pg_test(error = "must not be NULL")]
+    #[pg_test(error = "theodb.embed_batch: array elements must not be NULL")]
     fn embed_batch_rejects_null_element() {
         // A NULL element breaks N-in/N-out alignment -> 22023, BEFORE any GUC/HTTP (endpoint set but unused).
         Spi::run("SET theodb.embedding_endpoint = 'http://127.0.0.1:1/v1/embeddings'").unwrap();

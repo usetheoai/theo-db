@@ -14,7 +14,7 @@ use pgrx::prelude::*;
 use crate::am::options::{lists_from_relation, DEFAULT_LISTS};
 /// HNSW build params for the persisted AM (mirror the SQL-callable defaults).
 pub(crate) const HNSW_M: usize = 16;
-const HNSW_EF_CONSTRUCTION: usize = 64;
+pub(crate) const HNSW_EF_CONSTRUCTION: usize = 64;
 const BUILD_SEED: u64 = 42;
 
 /// Collected during the heap scan (one entry per live, non-NULL-vector heap tuple).
@@ -95,12 +95,15 @@ pub extern "C-unwind" fn ambuild_hnsw(
 ) -> *mut pg_sys::IndexBuildResult {
     unsafe {
         let (corpus, ntuples) = collect_corpus(heaprel, indexrel, index_info);
+        let corpus_len = corpus.len(); // capture before `build_owned` consumes `corpus` (DoD-4 move, not clone)
         // T4.1: inject the cancellation seam so a long `CREATE INDEX` responds to `pg_cancel_backend` within one
         // parallel batch. `check_for_interrupts!` runs on the leader between batches (all workers joined) — safe
         // to longjmp. Under `#[pg_guard]` (this callback), the ereport(ERROR) unwinds cleanly across the C boundary.
         let metric = resolve_metric(indexrel); // M49: cosine/ip/L2 from the opclass (ADR-1)
-        let idx = HnswIndex::build_cancellable(
-            &corpus, HNSW_M, HNSW_EF_CONSTRUCTION, metric, BUILD_SEED, &|| { pgrx::check_for_interrupts!(); },
+        // M56 DoD-4: `build_owned` MOVES the corpus into the graph (no clone) so a 1M×768d CREATE INDEX never
+        // holds the f32 vectors twice — the corpus is freed as it is drained.
+        let idx = HnswIndex::build_owned(
+            corpus, HNSW_M, HNSW_EF_CONSTRUCTION, metric, BUILD_SEED, &|| { pgrx::check_for_interrupts!(); },
         );
         // M35: persist the STRUCTURED page-native layout (meta + element + neighbor tuples) so scans traverse the
         // graph ON DEMAND (O(ef·M) pages), not deserialize the whole blob (O(N)). M51: `WITH (sbq_bits=N)` enables
@@ -110,7 +113,7 @@ pub extern "C-unwind" fn ambuild_hnsw(
             Ok(packed) => crate::am::hnsw_page::write_structured(indexrel, pg_sys::ForkNumber::MAIN_FORKNUM, &packed),
             Err(e) => pg_sys::error!("theodb hnsw build: {e}"),
         }
-        build_result(ntuples, corpus.len())
+        build_result(ntuples, corpus_len)
     }
 }
 
@@ -159,6 +162,24 @@ pub unsafe extern "C-unwind" fn aminsert(
     crate::am::lock::index_shared(indexrel);
     let v = datum_to_vec_f32(*values);
     let encoded = tid::encode(heap_tid);
+    // M56 fase 2 (DoD-1): for an HNSW structured index, try to REUSE a tombstoned slot via a proper in-place insert
+    // (search + link, pgvector `hnswinsert.c` pattern) BEFORE growing the pending region — this bounds relation
+    // growth under DELETE+INSERT churn (slot-reuse). `Ok(false)` ⇒ no reusable v1 slot ⇒ fall through to pending
+    // (the O(1) path, unchanged). The share lock excludes the compaction fold (exclusive); the atomic per-slot
+    // claim in `write_reused_element` makes concurrent inserts safe.
+    if crate::am::guc::hnsw_slot_reuse() {
+        if let Ok(magic) = page::peek_magic(indexrel) {
+            if magic == crate::am::hnsw_page::HNSW_STRUCT_MAGIC {
+                if let Ok(meta) = crate::am::hnsw_page::read_meta(indexrel) {
+                    match crate::am::hnsw_page::insert_inplace(indexrel, &meta, encoded, &v) {
+                        Ok(true) => return true, // reused a tombstoned slot — done, relation did not grow
+                        Ok(false) => {}          // no reusable slot — fall through to the pending append
+                        Err(e) => pg_sys::error!("theodb am insert (in-place): {e}"),
+                    }
+                }
+            }
+        }
+    }
     match page::append_pending(indexrel, encoded, &v) {
         Ok(()) => true,
         Err(e) => pg_sys::error!("theodb am insert: {e}"),
@@ -168,6 +189,46 @@ pub unsafe extern "C-unwind" fn aminsert(
 /// Rebuild the main index over only the live heap TIDs (M26 Phase 5 — called by VACUUM's `ambulkdelete`). Reads
 /// the current main index + pending, keeps entries the `dead` predicate rejects, rebuilds, and rewrites the blob
 /// (folding pending in + dropping dead TIDs). Returns the number of live entries.
+/// M56: VACUUM bulk-delete via IN-PLACE tombstones for the HNSW structured layout — mark each dead node as a
+/// tombstone per page (buffer-EXCLUSIVE + GenericXLog, NO advisory index lock, NO O(N) rebuild → NO total stall),
+/// then run the (rare) O(N) compaction fold ONLY when tombstones exceed the ratio GUC. IVF/blob layouts have no
+/// in-place path yet → they keep the existing O(N) rebuild (out of M56 scope). Returns the live graph count.
+pub(crate) unsafe fn vacuum_delete_inplace(
+    indexrel: pg_sys::Relation,
+    dead: &mut dyn FnMut(i64) -> bool,
+) -> usize {
+    let magic = match page::peek_magic(indexrel) {
+        Ok(m) => m,
+        Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
+    };
+    if magic != crate::am::hnsw_page::HNSW_STRUCT_MAGIC {
+        return vacuum_rebuild(indexrel, dead); // IVF / blob / unbuilt — no in-place tombstone path
+    }
+    let meta = match crate::am::hnsw_page::read_meta(indexrel) {
+        Ok(m) => m,
+        Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
+    };
+    // Phase 1 — tombstone the dead in place (crash-safe per page, no advisory EXCLUSIVE, no stall).
+    {
+        let mut is_dead = |id: i64| dead(id);
+        crate::am::hnsw_page::tombstone_sweep(indexrel, &meta, &mut is_dead);
+    } // `is_dead` (which borrowed `dead`) is dropped here — `dead` is free again for the compaction path.
+    // Ratio-triggered compaction: reclaim + re-densify (and REPAIR the graph) once churn passes the GUC %. The
+    // trigger counts CHURN (`version>0` = tombstones + slots revived by reuse), not just current tombstones — else
+    // slot-reuse (which consumes tombstones before they accumulate) would suppress the fold and let the incremental
+    // -insert degradation compound (the M56 fase-2 churn benchmark measured recall collapsing). The live count
+    // returned below is still node_count − tombstones (revived slots are live).
+    let total_tomb = crate::am::hnsw_page::count_tombstones(indexrel, &meta) as u64;
+    let churned = crate::am::hnsw_page::count_churned(indexrel, &meta) as u64;
+    let node_count = meta.node_count as u64;
+    let pct = crate::am::guc::hnsw_tombstone_compact_pct() as u64;
+    if pct > 0 && node_count > 0 && churned * 100 > node_count * pct {
+        // Compaction = the full crash-safe fold (takes advisory EXCLUSIVE); `enumerate_entries` drops tombstones.
+        return vacuum_rebuild(indexrel, dead);
+    }
+    (node_count.saturating_sub(total_tomb)) as usize
+}
+
 pub(crate) unsafe fn vacuum_rebuild(
     indexrel: pg_sys::Relation,
     dead: &mut dyn FnMut(i64) -> bool,
@@ -234,10 +295,13 @@ unsafe fn vacuum_rebuild_hnsw_structured(indexrel: pg_sys::Relation, dead: &mut 
         Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
     }
     let live: Vec<(i64, Vec<f32>)> = all.into_iter().filter(|(id, _)| !dead(*id)).collect();
+    let live_len = live.len(); // capture before `build_owned` consumes `live` (DoD-4 move, not clone)
     // HNSW build params are fixed consts (no reloption), so rebuild with them; preserve the metric from meta.
     // T4.1: the fold's rebuild is also cancellable (a VACUUM of a huge index responds to cancel per batch).
-    let idx = HnswIndex::build_cancellable(
-        &live, HNSW_M, HNSW_EF_CONSTRUCTION, metric, BUILD_SEED, &|| { pgrx::check_for_interrupts!(); },
+    // M56 DoD-4: `build_owned` MOVES `live` into the graph (no clone) so the compaction fold of a 1M index
+    // does not hold the live f32 vectors twice.
+    let idx = HnswIndex::build_owned(
+        live, HNSW_M, HNSW_EF_CONSTRUCTION, metric, BUILD_SEED, &|| { pgrx::check_for_interrupts!(); },
     );
     // M48 (#47): crash-safe fold — pack the new generation at a fresh base, write it to inert pages, then pivot
     // block 0. `pack_at` resolves the graph's pointers relative to `base`, so the packed image is position-
@@ -262,7 +326,7 @@ unsafe fn vacuum_rebuild_hnsw_structured(indexrel: pg_sys::Relation, dead: &mut 
         }
     };
     crate::am::fold::fold(indexrel, &packed.meta, &packed.pages, base);
-    live.len()
+    live_len
 }
 
 /// VACUUM fold for the structured IVFFlat layout (M31): enumerate all list entries + pending, drop dead, rebuild,

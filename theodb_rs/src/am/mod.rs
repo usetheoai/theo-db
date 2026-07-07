@@ -181,7 +181,10 @@ pub extern "C-unwind" fn ambulkdelete(
                 None => false,
             }
         };
-        let live = build::vacuum_rebuild(indexrel, &mut dead);
+        // M56: HNSW deletes are now in-place tombstones (no O(N) rebuild, no advisory EXCLUSIVE → no total
+        // stall); the rare O(N) compaction fold runs inside this call only when tombstones pass the ratio GUC.
+        // IVF/blob fall back to the O(N) rebuild internally.
+        let live = build::vacuum_delete_inplace(indexrel, &mut dead);
         (*results).num_index_tuples = live as f64;
         results
     }

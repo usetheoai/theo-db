@@ -39,6 +39,12 @@ pub(crate) trait NeighborSource {
     fn neighbors_into(&self, node: &Self::Node, out: &mut Vec<Self::Ref>) -> Result<(), String>;
     /// Load an unloaded ref into a node (distance + tid + expansion handle). One read. Only for fresh refs.
     fn load(&self, r: &Self::Ref) -> Result<Self::Node, String>;
+    /// M56: whether a loaded node may enter the RESULT set. A tombstoned node is still navigated THROUGH (it
+    /// enters the candidate heap and its neighbors are expanded — connectivity is preserved) but is NOT emitted.
+    /// Default `true` (a graph without tombstones behaves byte-identically to the pre-M56 search).
+    fn emittable(&self, _node: &Self::Node) -> bool {
+        true
+    }
 }
 
 /// A `(distance, node)` pair ordered by distance, NaN LAST (worst) — mirrors the on-disk `Cand` ordering
@@ -119,8 +125,13 @@ pub(crate) fn ground_search_nodes<S: NeighborSource>(
 
     let entry_d = src.dist(&entry);
     visited.insert(src.node_key(&entry));
+    // M56: navigate FROM the entry always (it may be a tombstone that bridges live regions), but only emit it
+    // when live. The result heap holds only emittable nodes, so the ef/worst bound counts LIVE results — the
+    // search naturally widens until `ef` live nodes are found (the tombstone over-fetch is automatic).
     cands.push(Reverse(Ranked { d: entry_d, node: entry }));
-    result.push(Ranked { d: entry_d, node: entry });
+    if src.emittable(&entry) {
+        result.push(Ranked { d: entry_d, node: entry });
+    }
 
     while let Some(Reverse(Ranked { d: cd, node: c })) = cands.pop() {
         let worst = result.peek().map(|w| w.d).unwrap_or(f64::INFINITY);
@@ -137,10 +148,14 @@ pub(crate) fn ground_search_nodes<S: NeighborSource>(
             let nd = src.dist(&cand);
             let worst = result.peek().map(|w| w.d).unwrap_or(f64::INFINITY);
             if nd < worst || result.len() < ef {
+                // Navigate through this node regardless of tombstone status (preserves connectivity)…
                 cands.push(Reverse(Ranked { d: nd, node: cand }));
-                result.push(Ranked { d: nd, node: cand });
-                if result.len() > ef {
-                    result.pop();
+                // …but only a live node enters the result set (M56 tombstone filter).
+                if src.emittable(&cand) {
+                    result.push(Ranked { d: nd, node: cand });
+                    if result.len() > ef {
+                        result.pop();
+                    }
                 }
             }
         }
