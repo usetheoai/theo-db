@@ -1478,6 +1478,59 @@ mod tests {
         via_index.sort_unstable();
         assert_eq!(si, se, "compacted index top-5 == exact top-5 of the surviving set");
     }
+
+    /// M56 DoD 2 — "recall BETWEEN compactions": as tombstones ACCUMULATE (up to the compaction threshold)
+    /// WITHOUT a fold, does recall degrade? This is the blueprint's KEY uncertainty — it decides whether the
+    /// phase-2 `RepairGraph`/slot-reuse (pgvector `hnswvacuum.c`) is needed NOW. We tombstone 20% of the graph
+    /// in place (the `tombstone_sweep` is called DIRECTLY → NO fold, regardless of the GUC), delete those rows
+    /// from the heap so the exact oracle agrees, and measure recall@10 (index vs exact seqscan of the 320
+    /// survivors) averaged over 6 probes. High recall here ⇒ accumulated tombstones do NOT sever navigation ⇒
+    /// phase 2 is deferred WITH EVIDENCE, not by omission.
+    #[pgrx::pg_test]
+    fn recall_holds_under_20pct_accumulated_tombstones() {
+        pgrx::Spi::run("CREATE TABLE rc2 (id int PRIMARY KEY, e vector(16))").unwrap();
+        for i in 0..400i32 {
+            let v: Vec<String> = (0..16)
+                .map(|j| format!("{:.3}", i as f32 * 0.5 + ((i * 7 + j * 13) % 29) as f32 * 0.3))
+                .collect();
+            pgrx::Spi::run(&format!("INSERT INTO rc2 VALUES ({i}, '[{}]')", v.join(","))).unwrap();
+        }
+        pgrx::Spi::run("CREATE INDEX rc2_idx ON rc2 USING theodb_hnsw (e)").unwrap();
+        pgrx::Spi::run("SET theodb_hnsw.ef_search = 100").unwrap();
+
+        // Tombstone 20% (ids 0..80): capture their tids BEFORE deleting, delete from heap, sweep DIRECTLY (no fold).
+        let dead_tids: Vec<i64> = (0..80i32).map(|id| heap_tid_i64("rc2", id)).collect();
+        pgrx::Spi::run("DELETE FROM rc2 WHERE id < 80").unwrap();
+        unsafe {
+            let oid: pg_sys::Oid = pgrx::Spi::get_one("SELECT 'rc2_idx'::regclass::oid").unwrap().expect("oid");
+            let rel = pg_sys::index_open(oid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+            let meta = read_meta(rel).expect("read_meta");
+            let mut is_dead = |tid: i64| dead_tids.contains(&tid);
+            let swept = tombstone_sweep(rel, &meta, &mut is_dead); // DIRECT sweep → NO compaction
+            pg_sys::index_close(rel, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+            assert_eq!(swept, 80, "20% of the 400-node graph tombstoned in place, no fold");
+        }
+
+        // recall@10 over 6 surviving probes (each probe = a survivor's own vector) vs the exact seqscan oracle.
+        let probe_ids = [100, 150, 200, 250, 300, 350];
+        let mut total_recall = 0.0f64;
+        for &pid in &probe_ids {
+            let probe: String = pgrx::Spi::get_one(&format!("SELECT e::text FROM rc2 WHERE id = {pid}"))
+                .unwrap().expect("survivor vector");
+            pgrx::Spi::run("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on").unwrap();
+            let exact = topk_ids_tbl("rc2", &probe, 10);
+            pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+            let via_index = topk_ids_tbl("rc2", &probe, 10);
+            let hits = via_index.iter().filter(|id| exact.contains(id)).count();
+            total_recall += hits as f64 / exact.len().max(1) as f64;
+        }
+        let mean_recall = total_recall / probe_ids.len() as f64;
+        assert!(
+            mean_recall >= 0.9,
+            "recall@10 under 20% accumulated tombstones (no compaction) = {mean_recall:.3} — expected >= 0.9 \
+             (navigate-through preserves recall ⇒ phase-2 RepairGraph not urgent)"
+        );
+    }
 }
 
 // M56 — pure unit tests for the tombstone byte-layout (CI-runnable via `cargo test`, no DB/pgrx needed).
