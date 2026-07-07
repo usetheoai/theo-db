@@ -373,6 +373,51 @@ fn _vectorizer_process_delete(vectorizer_id: i32, source_pk: &str) {
     let _ = Spi::run_with_args(&del_q, &[source_pk.into()]);
 }
 
+/// Process a BATCH of `upsert` jobs from the SAME vectorizer in ONE `embed_batch` HTTP round-trip (DoD:
+/// "worker consome em batch via embed_batch" — the N→1 fix reused from `embed.rs:55`). Fetches all contents,
+/// embeds them in a single call, and upserts + marks each done. On ANY endpoint failure the whole call
+/// diverges (embed_batch longjmps) — the worker traps it and falls back to per-job `_vectorizer_process_upsert`
+/// so a single poison row cannot fail the batch. `job_ids[i]` aligns with `source_pks[i]`. Returns the count
+/// marked done (fencing-guarded: a lost lease contributes 0).
+#[pg_extern]
+fn _vectorizer_process_upsert_batch(
+    vectorizer_id: i32,
+    job_ids: Vec<i64>,
+    source_pks: Vec<String>,
+    owner: &str,
+) -> i64 {
+    let (source_table, source_pk_col, content_col, target_table, target_col, model) =
+        lookup_config(vectorizer_id);
+    let fetch_q = build_sql(
+        "SELECT %1$I::text FROM %2$s WHERE %3$I::text = $1",
+        &content_col,
+        &source_table,
+        &source_pk_col,
+    );
+    let contents: Vec<Option<String>> = source_pks
+        .iter()
+        .map(|pk| Spi::get_one_with_args::<String>(&fetch_q, &[pk.as_str().into()]).ok().flatten())
+        .collect();
+    // ONE HTTP round-trip for the whole batch (may diverge on failure — caught by the worker → per-job fallback).
+    let items: Vec<Option<&str>> = contents.iter().map(|c| c.as_deref()).collect();
+    let vecs = crate::embed::run_batch(&items, model.as_deref());
+    let upd_q = build_sql(
+        "UPDATE %2$s SET %1$I = $1::vector WHERE %3$I::text = $2",
+        &target_col,
+        &target_table,
+        &source_pk_col,
+    );
+    let mut done = 0i64;
+    for (i, pk) in source_pks.iter().enumerate() {
+        Spi::run_with_args(&upd_q, &[vecs[i].as_str().into(), pk.as_str().into()])
+            .unwrap_or_else(|e| crate::pg::err_input(&format!("vectorizer batch upsert failed: {e:?}")));
+        if _vectorizer_mark_done(job_ids[i], owner) {
+            done += 1;
+        }
+    }
+    done
+}
+
 /// Bump the worker throughput counter (wiring triad pillar c — queryable via theodb.vectorizer_stats()).
 #[pg_extern]
 fn _vectorizer_bump_stats(processed: i64, failed: i64) {
@@ -449,10 +494,11 @@ pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
         }
 
         let (mut processed, mut failed) = (0i64, 0i64);
-        for (job_id, vid, pk, op) in jobs {
-            // Phase 2 — process in its own txn; PgTryBuilder converts an embed/write longjmp into `false`
-            // (the txn commits nothing on failure) so the worker never dies on a poison endpoint (B1).
-            let is_delete = op == "delete";
+
+        // Per-job process + owner-guarded mark, each in its own txn (the fallback + the delete path). The
+        // PgTryBuilder converts an embed/write longjmp into `false` so the worker never dies (B1).
+        let process_one = |job_id: i64, vid: i32, pk: &str, is_delete: bool| -> bool {
+            let pk = pk.to_string();
             let ok: bool = BackgroundWorker::transaction(|| {
                 PgTryBuilder::new(|| {
                     let call = if is_delete {
@@ -465,23 +511,56 @@ pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
                 .catch_others(|_| false)
                 .execute()
             });
-            // Phase 3 — mark the outcome in a fresh txn (owner-guarded; a lost lease affects 0 rows).
             BackgroundWorker::transaction(|| {
                 let sql = if ok {
                     format!("SELECT theodb_rs._vectorizer_mark_done({job_id}, '{owner}')")
                 } else {
-                    format!(
-                        "SELECT theodb_rs._vectorizer_mark_failed({job_id}, '{owner}', 'embed/upsert failed', {WORKER_MAX_ATTEMPTS})"
-                    )
+                    format!("SELECT theodb_rs._vectorizer_mark_failed({job_id}, '{owner}', 'embed/upsert failed', {WORKER_MAX_ATTEMPTS})")
                 };
                 let _ = Spi::run(&sql);
             });
-            if ok {
-                processed += 1;
+            ok
+        };
+
+        // Deletes: per-job (no embed). Upserts: grouped by vectorizer for ONE embed_batch HTTP round-trip.
+        let mut groups: std::collections::HashMap<i32, Vec<(i64, String)>> = std::collections::HashMap::new();
+        for (job_id, vid, pk, op) in jobs {
+            if op == "delete" {
+                if process_one(job_id, vid, &pk, true) { processed += 1 } else { failed += 1 }
             } else {
-                failed += 1;
+                groups.entry(vid).or_default().push((job_id, pk));
             }
         }
+        for (vid, group) in groups {
+            let job_ids: Vec<i64> = group.iter().map(|(j, _)| *j).collect();
+            let pks: Vec<String> = group.iter().map(|(_, p)| p.clone()).collect();
+            // Phase 2 (batch) — ONE embed_batch for the whole group; the function marks each done inside its
+            // txn. A batch endpoint failure diverges → caught here → per-job fallback isolates the poison row.
+            let batch_done: Option<i64> = BackgroundWorker::transaction(|| {
+                PgTryBuilder::new(|| {
+                    Spi::connect_mut(|c| {
+                        c.update(
+                            "SELECT theodb_rs._vectorizer_process_upsert_batch($1, $2, $3, $4)",
+                            None,
+                            &[vid.into(), job_ids.clone().into(), pks.clone().into(), owner.clone().into()],
+                        )
+                        .ok()
+                        .and_then(|t| t.first().get::<i64>(1).ok().flatten())
+                    })
+                })
+                .catch_others(|_| None)
+                .execute()
+            });
+            match batch_done {
+                Some(n) => processed += n,
+                None => {
+                    for (job_id, pk) in group {
+                        if process_one(job_id, vid, &pk, false) { processed += 1 } else { failed += 1 }
+                    }
+                }
+            }
+        }
+
         BackgroundWorker::transaction(|| {
             let _ = Spi::run_with_args(
                 "SELECT theodb_rs._vectorizer_bump_stats($1, $2)",
