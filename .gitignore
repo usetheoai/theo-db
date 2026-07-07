@@ -46,3 +46,5 @@ dist/
 theodb_rs/target/
 system-design-output/
 architecture-output/
+benchmarks/.cache/
+benchmarks/benchmarks/

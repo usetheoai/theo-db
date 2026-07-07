@@ -1,0 +1,16 @@
+# TheoDB M53 — THROWAWAY measurement image: theodb:m52 (theodb + pgvector + vectorscale) + pg_textsearch
+# (permissive BM25), for the BEIR real benchmark ONLY. NOT the shipped distribution. Per measurement-first
+# (ADR 0002 / ADR 0003 / ADR 0013), pg_textsearch is built here solely to measure the BM25-only leg of the
+# hybrid-vs-vector-vs-bm25-vs-fts comparison on real BEIR (scifact). Adopting it into the shipped image stays
+# a future gated decision. pg_textsearch is PostgreSQL License (permissive, D1-clean — ADR 0003).
+# Run with: docker run ... -c shared_preload_libraries=pg_textsearch
+FROM theodb:m52
+
+ARG PGTS_TAG=v1.3.1
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential git ca-certificates postgresql-server-dev-17 \
+ && git clone --depth 1 --branch "$PGTS_TAG" https://github.com/timescale/pg_textsearch /tmp/pgts \
+ && cd /tmp/pgts && make && make install \
+ && rm -rf /tmp/pgts /var/lib/apt/lists/*
+USER postgres
