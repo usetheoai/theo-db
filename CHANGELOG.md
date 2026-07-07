@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Roadmap amendado (deep-view 2026-07-07): milestones M56–M59 da trilha de **superioridade vetorial** (o eixo do North Star ainda aberto) — M56 (P3: manutenção in-place/tombstone, remove o muro do VACUUM), M57 (P0: SBQ inline ≥2× QPS a 1M provado — o "fork na estrada"), M58 (P2: SIMD cosine/IP), M59 (P1: quantização anisotrópica + AH para fechar o gap ~25× vs ScaNN). Análise em `.claude/knowledge-base/audits/deep-view-sota-ai-native-2026-07-07.md`.
 
 ### Changed
 

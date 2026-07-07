@@ -856,6 +856,96 @@ ganha milestone próprio via `/roadmap-feature` após o ADR.
 
 ---
 
+### M56 — [ ] Manutenção in-place (tombstone) — remove o muro do VACUUM (P3, implementa ADR 0017 fase 1)
+
+**Objective (deep-view 2026-07-07, gap P3):** a deep-view mediu o muro: o fold O(N) whole-index segura o
+advisory EXCLUSIVE por ~86 s a 100k×768d (parada total de queries) → ~14 min projetado a 1M
+(`docs/benchmarks/m55-vacuum-wall.md`). O ADR 0017 **decidiu** o caminho (híbrido tombstone-in-place +
+fold-para-compaction) mas a implementação foi deixada como milestone própria. Esta milestone entrega a
+**fase 1**: DELETE vira tombstone in-place por página (à la pgvectorscale `plain/node.rs` / pgvector
+`hnswvacuum.c`), removendo o rebuild O(N) sob EXCLUSIVE do caminho de delete — pré-requisito honesto de
+v1.0 (`public-copy.md §3`) **e** de medir o P0 (M57) a 1M.
+
+**Definition of done:**
+
+- [ ] DELETE marca tombstone in-place por página (element-tuple `deleted`+`version`), **sem O(N)-RAM, sem
+  EXCLUSIVE index-wide**; reúso de slot no `aminsert` (padrão `hnswinsert.c:45`); scan filtra tombstones.
+- [ ] Recall preservado sob tombstones; **medir recall entre compactions** (decide se a fase 2 —
+  `RepairGraph` in-place do pgvector — é necessária; é a incerteza-chave do blueprint M55).
+- [ ] Compaction por threshold **reusa o `fold.rs` do M48** (crash-safe, meta-pivot atômico); disparo por
+  `#tombstones/#live > X%`.
+- [ ] Teto de memória do **BUILD**: `collect_corpus` (`build.rs:28`) streaming/batched — `CREATE INDEX`/
+  `REINDEX` de 1M×768d não materializa O(N) antes do primeiro nó.
+- [ ] Benchmark: parada do DELETE-path **≪ 86 s do rebuild** + RAM O(#deletados) não O(N), comparado ao
+  baseline M55 → `docs/benchmarks/m56-inplace-maintenance.{md,json}`.
+- [ ] Layout `Changed` (magic bump + REINDEX path); crash-injection e2e (build → restart → scan idêntico).
+
+**Dependencies:** M55 (a decisão ADR 0017), M48 (o `fold.rs` reusado na compaction). **Risco (ALTO):** quebra
+parcial da imutabilidade do M35 no caminho de delete; máquina de `version`; fragmentação/degradação de recall
+entre compactions (a medir); FFI de VACUUM in-place por página.
+
+### M57 — [ ] Superioridade vetorial PROVADA — SBQ inline ≥2× QPS a 1M sob pressão de RAM (P0, o fork na estrada)
+
+**Objective (deep-view 2026-07-07, gap P0):** o claim `≥2× QPS do SBQ inline a recall≥0.99` está
+**UNBENCHMARKED** — o M51 provou correção mas o ganho de QPS não se materializou a 25k (corpus cabe em RAM,
+compressão 4× sem onde ganhar; `docs/benchmarks/m51-sbq-inline.md`). **Toda a tese do AM próprio (ADR 0015)
+depende desse número**, e enquanto for hipótese, "superioridade vetorial" viola a Regra 5 (performance é
+claim, não opinião). Esta milestone roda o head-to-head decision-grade que **valida ou mata** a aposta.
+
+**Definition of done:**
+
+- [ ] Benchmark reproduzível a **1M@768d (ou ≥250k@1536d)** numa box com **RAM < corpus f32** (pressão real
+  de memória), box dedicada/quieta (load-guard M46), mean±std ≥3 runs: SBQ (of=k) vs f32 vs pgvector hnsw a
+  **recall casado ≥0.99** → `docs/benchmarks/m57-sbq-superiority.{md,json}`.
+- [ ] **Veredito D3-style (gate):** reter a tese do AM próprio SÓ se SBQ **≥2× QPS** a recall≥0.99 sob
+  pressão (efeito > variância); senão **honest-negative + ADR reabrindo o 0015** (composição vs own-code).
+- [ ] Posicionamento vs o gap ScaNN do M33 (onde estamos no eixo AlloyDB, honesto).
+- [ ] **Nenhum claim de "superioridade vetorial" antes deste artefato** (Regra 5 / `public-copy.md §4`).
+
+**Dependencies:** M56 (o muro do VACUUM removido torna build/maintenance de 1M viável na box), M51 (SBQ
+inline). **Risco (MÉDIO):** box dedicada/quieta a 1M (custo/infra); se SBQ não materializar, reabre a decisão
+do AM próprio — resultado VÁLIDO (anti-sunk-cost), não fracasso.
+
+### M58 — [ ] SIMD para cosine/inner-product — o hot path dos embeddings reais (P2, ganho barato)
+
+**Objective (deep-view 2026-07-07, gap P2):** `dot_from_bytes`/`cosine_dist_from_bytes` (`vec.rs:210-239`)
+rodam **escalares** — só o L2 tem AVX2 (`vec.rs:133`). Mas embeddings reais (OpenAI/Cohere) são **cosine/IP**
+→ o hot path deles não é vetorizado. É um ganho de fator-constante **não-colhido** no eixo exato onde
+perdemos para o pgvector (~1.6× latência 1-cliente, `docs/benchmarks/m50-sota-ruler.md`). Arquitetura
+intocada; independente de M56/M57 (pode paralelizar).
+
+**Definition of done:**
+
+- [ ] `dot_from_bytes`/`cosine_dist_from_bytes` com kernels **AVX2/FMA + fallback escalar**, dispatch runtime
+  (mesmo padrão do L2 existente); **recall bit-idêntico** ao escalar (mesma matemática).
+- [ ] Micro-bench same-graph (criterion) provando o speedup por-candidato + macro recall×QPS
+  neutro-em-recall → `docs/benchmarks/m58-simd-cosine.{md,json}`.
+- [ ] Teste de paridade escalar↔SIMD (fixture/property-based) — sem regressão de correção; edge do tail de
+  vetor (dim não-múltipla de 8/16).
+
+**Dependencies:** M40 (infra SIMD/carrier existente). **Risco (BAIXO):** fator-constante; alinhamento/tail.
+
+### M59 — [ ] Quantização anisotrópica + Asymmetric Hashing SIMD — fechar o gap de ~25× vs ScaNN (P1)
+
+**Objective (deep-view 2026-07-07, gap P1):** o gap de ~25× QPS vs ScaNN/AlloyDB (`docs/benchmarks/m33-scann-headtohead.md`: ScaNN 1920 QPS @0.99 vs theodb 78) é **quantização anisotrópica + Asymmetric Hashing
+(AH) SIMD**, não bit-quantization — o SBQ é fator-constante, não asymptote de recall×QPS. É o lever nomeado
+no M39. Esta milestone ataca o eixo algorítmico real do North Star.
+
+**Definition of done:**
+
+- [ ] **Discover (blueprint):** ScaNN anisotropic score-aware loss + AH (LUT SIMD), com papers + evidência
+  dos peers; decisão de integração no AM (nova quantização vs. o SBQ atual) por **ADR com alternativas**.
+- [ ] Quantização anisotrópica + AH scoring via **LUT SIMD** implementados; recall×QPS medido vs SBQ (M57) e
+  vs o gap ScaNN (M33) → `docs/benchmarks/m59-anisotropic-ah.{md,json}`.
+- [ ] **Veredito:** fecha (ou reduz mensuravelmente) o gap ~25× a recall≥0.99? Senão honest-negative +
+  decisão registrada (disk-resident/DiskANN pode ser o complemento — próximo milestone).
+
+**Dependencies:** M57 (medir o SBQ PRIMEIRO — informa se AH é o próximo teto ou o pivot da decisão do AM),
+M58 (o AH depende do dispatch SIMD). **Risco (ALTO):** é o algoritmo, não a plumbing; esforço alto; pode não
+fechar o gap sozinho (complementar a disk-resident).
+
+---
+
 ## Sequência e paralelismo
 
 ```
