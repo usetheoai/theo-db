@@ -354,7 +354,7 @@ pub extern "C-unwind" fn amendscan(scan: pg_sys::IndexScanDesc) {
 
 #[cfg(any(test, feature = "pg_test"))]
 #[pgrx::pg_schema]
-mod scan_heap_tests {
+mod tests {
     use super::*;
 
     /// The lazy min-heap MUST emit candidates in the exact order the old `results.sort_by` did — ascending by

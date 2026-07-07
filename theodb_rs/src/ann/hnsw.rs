@@ -401,7 +401,7 @@ const HNSW_MAX_LEVEL: usize = 32;
 
 #[cfg(any(test, feature = "pg_test"))]
 #[pgrx::pg_schema]
-mod hnsw_persist_tests {
+mod tests {
     use super::*;
 
     fn corpus() -> Vec<(i64, Vec<f32>)> {

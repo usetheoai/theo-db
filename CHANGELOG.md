@@ -24,6 +24,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Removed
 
 ### Fixed
+- **Suíte `cargo pgrx test` volta a 100% verde (134/134)** — corrigidas 37 falhas **pré-existentes** (presentes desde antes do M56; o CI não roda `cargo pgrx test`, por isso passavam despercebidas). Três causas: **(1)** 22 testes em módulos `#[pg_schema] mod <nome≠tests>` (`nl_tests`, `scan_heap_tests`, `hnsw_persist_tests`, `ivf_persist_tests`) criavam os wrappers no schema errado — o pgrx-tests 0.16.1 **hardcoda** `SELECT "tests"."<fn>"()` (framework.rs:122), então renomeados para `mod tests`; **(2)** 12 testes `#[pg_test(error="substring")]` com string parcial — o pgrx 0.16.1 exige match **exato** (`Some(received) == expected`), ajustadas para a mensagem completa; **(3)** 3 asserções com premissa incorreta — `l2_validate` (input de bloco procedural precisa começar com SELECT e sem `;` para alcançar `has_do_block`), `f32_accumulation` (`big` precisa ser potência de 2 para `big²` ser exato em f32), `free_region` (o teste confundia extend-para-o-tail-bloco-1 com reuse).
 
 ### Security
 

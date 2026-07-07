@@ -287,7 +287,7 @@ mod tests {
         }
     }
 
-    #[pg_test(error = "is not divisible by m")]
+    #[pg_test(error = "theodb pq: vector dim 8 is not divisible by m 3 (subspaces must be equal-sized)")]
     fn pq_train_rejects_indivisible_dim() {
         // D=8, m=3 → 8 % 3 != 0 → typed error 22023 (pgrx ereport; asserted via the pg_test error attr).
         let corpus = rand_corpus(8, 8, 1);
@@ -354,7 +354,7 @@ mod tests {
         assert!(rows.iter().all(|r| (0..=3).contains(&r.1)), "ids come from the corpus");
     }
 
-    #[pg_test(error = "m must be in")]
+    #[pg_test(error = "theodb pq: m must be in [1, 64]")]
     fn pq_knn_bad_m_rejected() {
         let _ = knn(
             "t", "e", "id", "l2", &[0.0],
@@ -362,7 +362,7 @@ mod tests {
         );
     }
 
-    #[pg_test(error = "not divisible by m")]
+    #[pg_test(error = "theodb pq: qdim 7 is not divisible by m 2 (subspaces must be equal-sized)")]
     fn pq_knn_qdim_not_multiple_of_m_rejected() {
         let _ = knn(
             "t", "e", "id", "l2", &[0.0],

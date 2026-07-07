@@ -1110,7 +1110,7 @@ mod tests {
     /// Negative case (testing.md §4.1): `ef_search = 0` is rejected at the GUC boundary (MIN_EF_SEARCH=1) with a
     /// typed error — it can never reach `traverse`, so the internal `ef_search.max(1)` clamp is defense-in-depth.
     /// This fail-fast-at-the-boundary is the honest form of the plan's "ef=0 → clamp, no crash" acceptance.
-    #[pgrx::pg_test(error = "outside the valid range")]
+    #[pgrx::pg_test(error = "0 is outside the valid range for parameter \"theodb_hnsw.ef_search\" (1 .. 1000)")]
     fn ef_search_zero_rejected_at_guc_boundary() {
         pgrx::Spi::run("SET theodb_hnsw.ef_search = 0").unwrap();
     }

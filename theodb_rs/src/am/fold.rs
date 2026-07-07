@@ -130,11 +130,15 @@ mod tests {
             for need in 0u32..40 {
                 for nblocks in cur..80 {
                     let base = free_region(cur, nblocks, need);
-                    if base == 1 {
+                    // The reuse branch is taken iff the dead low region [1, cur) exists AND fits `need`. Detect
+                    // reuse by that CONDITION, not by `base == 1` — the extend branch ALSO returns 1 when
+                    // nblocks == 1 (the tail block right after the meta), which is legitimate, not a reuse.
+                    let reused = cur > 1 && cur - 1 >= need;
+                    if reused {
+                        assert_eq!(base, 1, "reuse returns base 1 (cur={cur} need={need})");
                         assert!(1 + need <= cur, "reuse must fit strictly below the live gen (cur={cur} need={need})");
-                        assert!(cur > 1, "reuse requires a non-empty dead low region");
                     } else {
-                        assert!(base >= nblocks.max(1), "extend must be at/after the tail");
+                        assert_eq!(base, nblocks.max(1), "extend goes to the tail (cur={cur} nblocks={nblocks})");
                     }
                 }
             }
