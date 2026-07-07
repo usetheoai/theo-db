@@ -856,7 +856,7 @@ ganha milestone próprio via `/roadmap-feature` após o ADR.
 
 ---
 
-### M56 — [ ] Manutenção in-place (tombstone) — remove o muro do VACUUM (P3, implementa ADR 0017 fase 1)
+### M56 — [x] Manutenção in-place (tombstone) — remove o muro do VACUUM (P3, implementa ADR 0017 fase 1)
 
 **Objective (deep-view 2026-07-07, gap P3):** a deep-view mediu o muro: o fold O(N) whole-index segura o
 advisory EXCLUSIVE por ~86 s a 100k×768d (parada total de queries) → ~14 min projetado a 1M
