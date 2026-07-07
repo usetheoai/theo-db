@@ -594,6 +594,38 @@ pub(crate) unsafe fn write_reused_element(rel: pg_sys::Relation, elem_addr: Addr
     })
 }
 
+/// M56 fase 2 (T1.3): set the GROUND-layer neighbor slots of an existing neighbor tuple IN PLACE — write up to
+/// `m0` addrs into the ground region (`[level*m .. level*m + m0)`), zero-padding the remainder with `(0,0)` =
+/// empty. The tuple size is fixed by `level`, so this is a same-size byte edit under GenericXLog (crash-safe).
+/// Used to set the reused node Z's ground neighbors after its insert search (its upper-layer slots are left as
+/// the reused tuple had them — a level-0 Z has none). Returns `true` iff the slots were written.
+pub(crate) unsafe fn set_ground_neighbors_inplace(
+    rel: pg_sys::Relation,
+    nbr_addr: Addr,
+    level: usize,
+    m: usize,
+    m0: usize,
+    neighbors: &[Addr],
+) -> bool {
+    let (blk, off) = nbr_addr;
+    page::modify_item_at(rel, blk, off, |b| {
+        if b.len() < NBR_HEADER || b[N_TAG] != NBR_TAG {
+            return false;
+        }
+        let start = level * m;
+        if b.len() < NBR_HEADER + (start + m0) * SLOT {
+            return false;
+        }
+        for i in 0..m0 {
+            let (nb_blk, nb_off) = neighbors.get(i).copied().unwrap_or((0, 0));
+            let o = NBR_HEADER + (start + i) * SLOT;
+            b[o..o + 4].copy_from_slice(&nb_blk.to_le_bytes());
+            b[o + 4..o + 6].copy_from_slice(&nb_off.to_le_bytes());
+        }
+        true
+    })
+}
+
 // (M48) The old in-place `rewrite_structured` was replaced by the crash-safe `fold::fold` (meta-pivot) — it
 // rewrote block 0 first, so a crash mid-vacuum left the meta pointing at pages that still held old bytes (#47).
 
@@ -1642,6 +1674,34 @@ mod tests {
             assert_eq!(after.version, ver.wrapping_add(1), "version bumped");
             assert_eq!((after.level, after.nbr_addr), (lvl, nbr), "graph position (level + nbr slot) preserved");
             assert_eq!(f32::from_le_bytes(after.vec_bytes[0..4].try_into().unwrap()), 9.0, "new vector written");
+            pg_sys::index_close(rel, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+        }
+    }
+
+    /// M56 fase 2 T1.3: `set_ground_neighbors_inplace` writes the given addrs into a node's ground slots (and the
+    /// round-trip through `decode_neighbors` returns exactly them), the in-place neighbor-write half of the insert.
+    #[pgrx::pg_test]
+    fn set_ground_neighbors_inplace_round_trips() {
+        pgrx::Spi::run("CREATE TABLE sg (id int PRIMARY KEY, e vector(4))").unwrap();
+        for i in 0..30i32 {
+            let (a, b, c, d) = (i as f32, (i % 7) as f32, (i % 5) as f32, i as f32 * 0.1);
+            pgrx::Spi::run(&format!("INSERT INTO sg VALUES ({i}, '[{a},{b},{c},{d}]')")).unwrap();
+        }
+        pgrx::Spi::run("CREATE INDEX sg_idx ON sg USING theodb_hnsw (e)").unwrap();
+        unsafe {
+            let oid: pg_sys::Oid = pgrx::Spi::get_one("SELECT 'sg_idx'::regclass::oid").unwrap().expect("oid");
+            let rel = pg_sys::index_open(oid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+            let meta = read_meta(rel).expect("read_meta");
+            let (m, m0) = (meta.m as usize, meta.m0 as usize);
+            // node 0 = first element at (elem_first, 1); take its level + neighbor-tuple address.
+            let ebytes = page::read_page_item_at(rel, meta.elem_first, 1).unwrap();
+            let ev = decode_element(&ebytes).unwrap();
+            let (lvl, nbr) = (ev.level as usize, ev.nbr_addr);
+            let wanted: Vec<Addr> = vec![(meta.elem_first, 3), (meta.elem_first, 5)];
+            assert!(set_ground_neighbors_inplace(rel, nbr, lvl, m, m0, &wanted), "write ground slots");
+            let nbytes = page::read_page_item_at(rel, nbr.0, nbr.1).unwrap();
+            let got = decode_neighbors(&nbytes, lvl, 0, m, m0).unwrap();
+            assert_eq!(got, wanted, "ground slots round-trip through decode_neighbors (empties padded, dropped)");
             pg_sys::index_close(rel, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
         }
     }
