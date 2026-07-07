@@ -23,6 +23,9 @@
 pub unsafe extern "C-unwind" fn _PG_init() {
     am::options::init();
     am::guc::init();
+    // M54: register the vectorizer background worker (only when preloaded — guarded internally, no-op in a
+    // backend CREATE EXTENSION so it stays silent there).
+    vectorizer::register_worker();
 }
 
 mod am;
