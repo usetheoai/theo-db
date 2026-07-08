@@ -45,6 +45,35 @@ const E_DIM: usize = 18;
 const E_VEC: usize = 20; // ELEM_HEADER
 const ELEM_HEADER: usize = E_VEC;
 
+// M59 v4 (AQ) — HOT element tuple: the code-only tuple the walk reads. It carries NO f32 (the root-cause fix of
+// ADR-0019: co-locating the 4 B code with the ~3 KB f32 kept the hot working set at f32 size → paridade). The f32
+// lives in a SEPARATE cold raw-f32 tuple, addressed by `E4_RAW_BLK/OFF` and read ONLY at rerank. Offsets are the
+// byte layout signed off in `knowledge-base/designs/m59-v4-code-vector-separation.md` (teste de mesa).
+const E4_TAG: usize = 0;
+// byte 1 = level (mirrors E_LEVEL — the descent needs it)
+const E4_LEVEL: usize = 1;
+const E4_DELETED: usize = 2;
+const E4_VERSION: usize = 3; // = HNSW_ELEM_VERSION_V4
+const E4_TID: usize = 4;
+const E4_NBR_BLK: usize = 12;
+const E4_NBR_OFF: usize = 16;
+const E4_RAW_BLK: usize = 18; // ┐ NOVO vs v3: pointer to this node's raw-f32 tuple (cold region) — rerank only
+const E4_RAW_OFF: usize = 22; // ┘
+const E4_DIM: usize = 24;
+const E4_CODE: usize = 26; // ELEM_HEADER_V4 — the ⌈m/2⌉ code bytes trail here; NO f32
+const ELEM_HEADER_V4: usize = E4_CODE;
+/// The `version` byte written into a v4 hot element tuple (`E4_VERSION`). Discriminates the hot v4 tuple from a
+/// v1/v2 tuple (whose byte-3 version is 0). A tombstone bumps it (`wrapping_add`), so ≥ 4 still reads as v4.
+const HNSW_ELEM_VERSION_V4: u8 = 4;
+
+// M59 v4 (AQ) — COLD raw-f32 tuple: the exact f32 vector, in a region SEPARATE from the hot tuples, read only when
+// a survivor is reranked. `[R_TAG 0][pad 1..4][R_VEC 4..4+dim*4]`. The 4-byte header keeps the f32 payload
+// 4-aligned (same discipline as the element header) so `f32::from_le_bytes` slices land on aligned boundaries.
+const R_TAG: usize = 0;
+const R_VEC: usize = 4; // RAW_HEADER
+const RAW_HEADER: usize = R_VEC;
+const RAW_TAG: u8 = 3; // distinct from ELEM_TAG(1)/NBR_TAG(2) — a raw tuple read as an element fails fast
+
 // Neighbor tuple: header + `count` slots, each a 6-byte index pointer (blkno u32, offno u16). (0,0) = empty slot.
 const N_TAG: usize = 0;
 // byte 1 = version (0)
@@ -62,6 +91,21 @@ fn elem_size(dim: usize, code_len: usize) -> usize {
 }
 fn elems_per_page(dim: usize, code_len: usize) -> usize {
     (USABLE / (ITEMID + maxalign(elem_size(dim, code_len)))).max(1)
+}
+/// M59 v4 HOT element tuple size: header + `code_len` code bytes (NO f32). Independent of `dim` (dim is stored as
+/// a u16 tag; the f32 payload lives in the cold raw region), so hundreds of hot tuples fit one page (30 B @ m=8).
+fn elem_size_v4(code_len: usize) -> usize {
+    ELEM_HEADER_V4 + code_len
+}
+fn elems_per_page_v4(code_len: usize) -> usize {
+    (USABLE / (ITEMID + maxalign(elem_size_v4(code_len)))).max(1)
+}
+/// M59 v4 COLD raw-f32 tuple size: header + `dim` f32s. This is where the ~3 KB/vector lives — read only at rerank.
+fn raw_size(dim: usize) -> usize {
+    RAW_HEADER + dim * 4
+}
+fn raws_per_page(dim: usize) -> usize {
+    (USABLE / (ITEMID + maxalign(raw_size(dim)))).max(1)
 }
 /// Total neighbor slots for a node at `level`: `m` per upper layer (`level` of them) + `m0` on the ground.
 fn nbr_slots(level: usize, m: usize, m0: usize) -> usize {
@@ -134,6 +178,12 @@ pub(crate) struct HnswMeta {
     pub(crate) aq_cb_first: u32,
     /// M59 fix: number of codebook pages (`⌈cb_len / CB_CHUNK⌉`, 0 when `aq_m == 0`).
     pub(crate) aq_cb_npages: u32,
+    /// M59 v4: first block of the COLD raw-f32 region (0 for v1/v2/v3). The v4 AQ layout separates the f32 out of
+    /// the hot element tuple into this region; each hot element carries its own `raw_addr` into it (read only at
+    /// rerank). Recorded in the meta so `pending_start` reserves the region and the fold can bound the read.
+    pub(crate) raw_first: u32,
+    /// M59 v4: number of raw-f32 pages (0 for v1/v2/v3). `v4 index ⇒ aq_m > 0 AND raw_npages > 0`.
+    pub(crate) raw_npages: u32,
 }
 
 impl HnswMeta {
@@ -141,17 +191,23 @@ impl HnswMeta {
     /// meta, the element+neighbor pages `[elem_first, nbr_first+nbr_npages)`, then (v3) the AQ-codebook pages
     /// `[aq_cb_first, aq_cb_first+aq_cb_npages)` — which are packed at the tail, so they extend the reserved range.
     pub(crate) fn pending_start(&self) -> u32 {
-        (self.nbr_first + self.nbr_npages).max(self.aq_cb_first + self.aq_cb_npages)
+        (self.nbr_first + self.nbr_npages)
+            .max(self.aq_cb_first + self.aq_cb_npages)
+            .max(self.raw_first + self.raw_npages)
     }
 }
 
 const META_LEN: usize = 4 + 4 + 1 + 4 + 2 + 2 + 4 + 2 + 2 + 4 + 4 + 4 + 4 + 4; // = 45 bytes (v1 core)
 const HNSW_STRUCT_VERSION_SBQ: u32 = 2; // M51 layout v2: same core header + trailing [sbq_bits:u8][cb_len:u32][codebook]
 const HNSW_STRUCT_VERSION_AQ: u32 = 3; // M59 layout v3: same core header + trailing AQ descriptor (codebook on pages)
+const HNSW_STRUCT_VERSION_V4: u32 = 4; // M59 layout v4: v3 AQ descriptor + raw-f32 region descriptor (code/vec split)
 /// M59 fix: the v3 meta trailer is a FIXED 13-byte descriptor `[aq_m:u8][cb_len:u32][cb_first:u32][cb_npages:u32]`.
 /// Unlike v2 (SBQ codebook inline — always ≤ a few hundred bytes, fits one page), the AQ codebook is ~48 KB at
 /// dim=768 and lives on dedicated pages; the meta only points at them. So the whole v3 meta ITEM is always tiny.
 const AQ_DESC_LEN: usize = 1 + 4 + 4 + 4;
+/// M59 v4: the v4 meta trailer extends the v3 AQ descriptor with the raw-f32 region pointer
+/// `[…v3 13 B…][raw_first:u32][raw_npages:u32]` = 21 bytes. Still tiny (dim-independent) → never overflows a page.
+const V4_DESC_LEN: usize = AQ_DESC_LEN + 4 + 4;
 /// Bytes of AQ codebook per dedicated page (one item per page). Same budget as the IVF blob chunk (`page::CHUNK`):
 /// BLCKSZ − header − item-id − alignment slack; 8000 is safe. At dim=768 the ~48 KB codebook needs ⌈48 KB/8000⌉=7
 /// pages. Kept local (parsimony) — `page.rs`'s `CHUNK` is private and this is a different layer's constant.
@@ -166,14 +222,20 @@ const CB_CHUNK: usize = 8000;
 /// and SBQ are mutually exclusive (an AQ index has `sbq_bits==0`), so exactly one trailer is emitted; the version
 /// tells the reader which one. The v3 meta item is always tiny — no dependence on `dim`, so it can never overflow.
 fn encode_meta(m: &HnswMeta) -> Vec<u8> {
-    let version = if m.aq_m != 0 {
+    // v4 (AQ code/vec split) is discriminated by a non-empty raw-f32 region; a v4 index always has aq_m > 0 too.
+    let is_v4 = m.raw_npages != 0;
+    let version = if is_v4 {
+        HNSW_STRUCT_VERSION_V4
+    } else if m.aq_m != 0 {
         HNSW_STRUCT_VERSION_AQ
     } else if m.sbq_bits != 0 {
         HNSW_STRUCT_VERSION_SBQ
     } else {
         HNSW_STRUCT_VERSION
     };
-    let trailer = if m.aq_m != 0 {
+    let trailer = if is_v4 {
+        V4_DESC_LEN
+    } else if m.aq_m != 0 {
         AQ_DESC_LEN
     } else if m.sbq_bits != 0 {
         5 + m.codebook.len()
@@ -196,12 +258,18 @@ fn encode_meta(m: &HnswMeta) -> Vec<u8> {
     b.extend_from_slice(&m.nbr_first.to_le_bytes());
     b.extend_from_slice(&m.nbr_npages.to_le_bytes());
     if m.aq_m != 0 {
-        // v3: DESCRIPTOR only — `cb_len` lets the reader validate the reassembled codebook length; `cb_first`/
-        // `cb_npages` locate the dedicated pages. The codebook bytes are NOT written here.
+        // v3/v4: DESCRIPTOR — `cb_len` lets the reader validate the reassembled codebook length; `cb_first`/
+        // `cb_npages` locate the dedicated codebook pages. The codebook bytes are NOT written here. v4 additionally
+        // appends the raw-f32 region pointer `[raw_first][raw_npages]` (the cold f32 store, separate from the hot
+        // code tuples).
         b.push(m.aq_m);
         b.extend_from_slice(&(m.aq_codebook.len() as u32).to_le_bytes());
         b.extend_from_slice(&m.aq_cb_first.to_le_bytes());
         b.extend_from_slice(&m.aq_cb_npages.to_le_bytes());
+        if is_v4 {
+            b.extend_from_slice(&m.raw_first.to_le_bytes());
+            b.extend_from_slice(&m.raw_npages.to_le_bytes());
+        }
     } else if m.sbq_bits != 0 {
         b.push(m.sbq_bits);
         b.extend_from_slice(&(m.codebook.len() as u32).to_le_bytes());
@@ -228,23 +296,40 @@ fn decode_trailer(b: &[u8], label: &str) -> Result<(u8, Vec<u8>), String> {
     Ok((byte, b[META_LEN + 5..].to_vec()))
 }
 
-/// Parse the v3 AQ DESCRIPTOR `[aq_m:u8][cb_len:u32][cb_first:u32][cb_npages:u32]` at `META_LEN` (M59 fix). The
-/// codebook bytes are NOT here — they live on the dedicated pages `[cb_first, cb_first+cb_npages)`; the FFI
-/// `read_meta` reassembles them. Returns `(aq_m, cb_len, cb_first, cb_npages)`. Typed `Err` on truncation (Rule 8).
-fn decode_aq_descriptor(b: &[u8]) -> Result<(u8, usize, u32, u32), String> {
-    if b.len() != META_LEN + AQ_DESC_LEN {
+/// The parsed AQ descriptor: `aq_m`, declared codebook length, codebook page range, and (v4 only) the raw-f32
+/// region page range. For v3 the raw region is `(0, 0)` — v3 co-locates the f32 in the element tuple.
+struct AqDescriptor {
+    aq_m: u8,
+    cb_len: usize,
+    cb_first: u32,
+    cb_npages: u32,
+    raw_first: u32,
+    raw_npages: u32,
+}
+
+/// Parse the v3 AQ DESCRIPTOR `[aq_m:u8][cb_len:u32][cb_first:u32][cb_npages:u32]` (M59 fix), OR the v4 descriptor
+/// which appends `[raw_first:u32][raw_npages:u32]` (the cold raw-f32 region). `is_v4` selects the expected length.
+/// The codebook bytes are NOT here — they live on `[cb_first, cb_first+cb_npages)`; the FFI `read_meta` reassembles
+/// them. Typed `Err` on truncation (Rule 8) — never a slice panic across the C boundary.
+fn decode_aq_descriptor(b: &[u8], is_v4: bool) -> Result<AqDescriptor, String> {
+    let want = META_LEN + if is_v4 { V4_DESC_LEN } else { AQ_DESC_LEN };
+    if b.len() != want {
         return Err(format!(
-            "theodb hnsw: v3 AQ descriptor length mismatch (expected {}, have {})",
-            META_LEN + AQ_DESC_LEN,
+            "theodb hnsw: {} descriptor length mismatch (expected {want}, have {})",
+            if is_v4 { "v4 AQ" } else { "v3 AQ" },
             b.len()
         ));
     }
-    let aq_m = b[META_LEN];
     let u32a = |o: usize| u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
-    let cb_len = u32a(META_LEN + 1) as usize;
-    let cb_first = u32a(META_LEN + 5);
-    let cb_npages = u32a(META_LEN + 9);
-    Ok((aq_m, cb_len, cb_first, cb_npages))
+    let (raw_first, raw_npages) = if is_v4 { (u32a(META_LEN + 13), u32a(META_LEN + 17)) } else { (0, 0) };
+    Ok(AqDescriptor {
+        aq_m: b[META_LEN],
+        cb_len: u32a(META_LEN + 1) as usize,
+        cb_first: u32a(META_LEN + 5),
+        cb_npages: u32a(META_LEN + 9),
+        raw_first,
+        raw_npages,
+    })
 }
 
 /// Parse the meta item. Fail-fast typed `Err` on truncation / bad magic / unknown version — never panic.
@@ -263,6 +348,7 @@ pub(crate) fn decode_meta(b: &[u8]) -> Result<HnswMeta, String> {
     if version != HNSW_STRUCT_VERSION
         && version != HNSW_STRUCT_VERSION_SBQ
         && version != HNSW_STRUCT_VERSION_AQ
+        && version != HNSW_STRUCT_VERSION_V4
     {
         return Err(format!(
             "theodb hnsw: unsupported structured meta version v{version} — REINDEX with a compatible theodb build"
@@ -270,16 +356,19 @@ pub(crate) fn decode_meta(b: &[u8]) -> Result<HnswMeta, String> {
     }
     let u16a = |o: usize| u16::from_le_bytes(b[o..o + 2].try_into().unwrap());
     let u32a = |o: usize| u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
-    // Exactly one trailer follows the core header, keyed by version. v2 = SBQ (inline codebook), v3 = AQ
-    // (descriptor only — the codebook is on dedicated pages, reassembled by the FFI `read_meta`); v1 = none.
+    // Exactly one trailer follows the core header, keyed by version. v2 = SBQ (inline codebook), v3/v4 = AQ
+    // (descriptor only — the codebook is on dedicated pages, reassembled by the FFI `read_meta`); v4 additionally
+    // carries the raw-f32 region pointer; v1 = none.
     let (mut sbq_bits, mut codebook) = (0u8, Vec::new());
     let (mut aq_m, mut aq_cb_first, mut aq_cb_npages) = (0u8, 0u32, 0u32);
+    let (mut raw_first, mut raw_npages) = (0u32, 0u32);
     if version == HNSW_STRUCT_VERSION_SBQ {
         let (bits, cb) = decode_trailer(b, "v2 SBQ")?;
         (sbq_bits, codebook) = (bits, cb);
-    } else if version == HNSW_STRUCT_VERSION_AQ {
-        let (m, _cb_len, first, npages) = decode_aq_descriptor(b)?;
-        (aq_m, aq_cb_first, aq_cb_npages) = (m, first, npages);
+    } else if version == HNSW_STRUCT_VERSION_AQ || version == HNSW_STRUCT_VERSION_V4 {
+        let d = decode_aq_descriptor(b, version == HNSW_STRUCT_VERSION_V4)?;
+        (aq_m, aq_cb_first, aq_cb_npages) = (d.aq_m, d.cb_first, d.cb_npages);
+        (raw_first, raw_npages) = (d.raw_first, d.raw_npages);
     }
     Ok(HnswMeta {
         metric_tag: b[8],
@@ -302,6 +391,8 @@ pub(crate) fn decode_meta(b: &[u8]) -> Result<HnswMeta, String> {
         aq_codebook: Vec::new(),
         aq_cb_first,
         aq_cb_npages,
+        raw_first,
+        raw_npages,
     })
 }
 
@@ -346,6 +437,80 @@ pub(crate) fn decode_element(b: &[u8]) -> Result<ElementView<'_>, String> {
         deleted: b[E_DELETED] != 0,
         version: b[E_VERSION],
     })
+}
+
+/// M59 v4: a decoded HOT element tuple. It carries the AQ code + the neighbor-tuple address (for the walk) + the
+/// raw-f32 tuple address (for the rerank) — but CRUCIALLY **no `vec_bytes` field**. That absence is the structural
+/// guarantee ADR-0019 requires: the walk/score path can never accidentally page the f32, because the hot view
+/// physically does not expose it (the f32 lives in the cold raw tuple at `raw_addr`, read only at rerank).
+pub(crate) struct ElementViewV4<'a> {
+    pub(crate) level: u8,
+    pub(crate) tid: i64,
+    pub(crate) nbr_addr: Addr,
+    /// The cold raw-f32 tuple's address — held, NOT read, during the walk. Followed once per survivor at rerank.
+    pub(crate) raw_addr: Addr,
+    pub(crate) dim: u16,
+    /// The ⌈m/2⌉ AQ code bytes — the ONLY per-node payload the walk touches (scored via `ah_score`).
+    pub(crate) code_bytes: &'a [u8],
+    pub(crate) deleted: bool,
+    #[allow(dead_code)] // phase-2 slot-reuse hook, mirrors ElementView.version
+    pub(crate) version: u8,
+}
+
+/// Decode a v4 HOT element tuple. Fail-fast typed `Err` (Rule 8) on truncation / wrong tag — never a slice panic
+/// across the C boundary. Reads the code + both addresses; the f32 is NOT here (it is in the raw tuple `raw_addr`).
+pub(crate) fn decode_element_v4(b: &[u8]) -> Result<ElementViewV4<'_>, String> {
+    if b.len() < ELEM_HEADER_V4 || b[E4_TAG] != ELEM_TAG {
+        return Err("theodb hnsw: bad v4 element tuple".into());
+    }
+    let u32a = |o: usize| u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+    let u16a = |o: usize| u16::from_le_bytes(b[o..o + 2].try_into().unwrap());
+    Ok(ElementViewV4 {
+        level: b[E4_LEVEL],
+        tid: i64::from_le_bytes(b[E4_TID..E4_TID + 8].try_into().unwrap()),
+        nbr_addr: (u32a(E4_NBR_BLK), u16a(E4_NBR_OFF)),
+        raw_addr: (u32a(E4_RAW_BLK), u16a(E4_RAW_OFF)),
+        dim: u16a(E4_DIM),
+        code_bytes: &b[E4_CODE..],
+        deleted: b[E4_DELETED] != 0,
+        version: b[E4_VERSION],
+    })
+}
+
+/// Decode a v4 COLD raw-f32 tuple into the f32 vector byte slice (scored directly via the SIMD `*_from_bytes`
+/// helpers at rerank — no per-node `Vec<f32>` alloc). Typed `Err` on truncation / wrong tag (Rule 8): a corrupt
+/// `raw_addr` (orphan / torn page pointing at a non-raw item) fails fast, never a silently-wrong rerank distance.
+pub(crate) fn decode_raw_vec(b: &[u8]) -> Result<&[u8], String> {
+    if b.len() < RAW_HEADER || b[R_TAG] != RAW_TAG {
+        return Err("theodb hnsw: bad v4 raw-f32 tuple".into());
+    }
+    Ok(&b[R_VEC..])
+}
+
+/// Encode a v4 HOT element tuple: header (level/tid/nbr_addr/raw_addr/dim/version=4) + the `code` bytes. NO f32.
+fn encode_element_v4(idx: &HnswIndex, node: usize, nbr_addr: Addr, raw_addr: Addr, dim: usize, code: &[u8]) -> Vec<u8> {
+    let mut b = vec![0u8; elem_size_v4(code.len())];
+    b[E4_TAG] = ELEM_TAG;
+    b[E4_LEVEL] = idx.node_level(node) as u8;
+    b[E4_VERSION] = HNSW_ELEM_VERSION_V4;
+    b[E4_TID..E4_TID + 8].copy_from_slice(&idx.node_id(node).to_le_bytes());
+    b[E4_NBR_BLK..E4_NBR_BLK + 4].copy_from_slice(&nbr_addr.0.to_le_bytes());
+    b[E4_NBR_OFF..E4_NBR_OFF + 2].copy_from_slice(&nbr_addr.1.to_le_bytes());
+    b[E4_RAW_BLK..E4_RAW_BLK + 4].copy_from_slice(&raw_addr.0.to_le_bytes());
+    b[E4_RAW_OFF..E4_RAW_OFF + 2].copy_from_slice(&raw_addr.1.to_le_bytes());
+    b[E4_DIM..E4_DIM + 2].copy_from_slice(&(dim as u16).to_le_bytes());
+    b[E4_CODE..].copy_from_slice(code);
+    b
+}
+
+/// Encode a v4 COLD raw-f32 tuple: `[RAW_TAG][pad][f32 vector]`. Read back by [`decode_raw_vec`].
+fn encode_raw_vec(vec: &[f32]) -> Vec<u8> {
+    let mut b = vec![0u8; raw_size(vec.len())];
+    b[R_TAG] = RAW_TAG;
+    for (j, &f) in vec.iter().enumerate() {
+        b[R_VEC + j * 4..R_VEC + j * 4 + 4].copy_from_slice(&f.to_le_bytes());
+    }
+    b
 }
 
 /// M56: mark an element tuple's bytes as a tombstone IN PLACE (byte 2 = deleted flag, byte 3 = version bump).
@@ -529,17 +694,117 @@ pub(crate) fn pack_sbq(idx: &HnswIndex, sbq_bits: u8) -> Result<Packed, String> 
     pack_at(idx, 1, sbq_bits)
 }
 
-/// Like [`pack`] but emits **layout v3**: trains an [`crate::am::aq::AqQuantizer`] from the graph's vectors,
-/// persists the AQ codebook in the meta, and writes each node's `⌈m/2⌉`-byte 4-bit code inline after its f32
-/// vector (M59 T3.1). `m == 0` falls back to the v1 f32-only pack. The generation starts at `base` (position-
-/// independent — the fold re-packs v3 the same way SBQ preserves v2).
+/// Like [`pack`] but emits **layout v4** (M59 — the code/vector separation of ADR-0019): trains an
+/// [`crate::am::aq::AqQuantizer`], persists the codebook on dedicated pages, and writes each node's HOT element
+/// tuple (`⌈m/2⌉`-byte 4-bit code + `raw_addr`, **no f32**) plus a SEPARATE cold raw-f32 tuple linked by `raw_addr`.
+/// This is the fix that shrinks the walk's hot working set (30 B/node vs ~3 KB): the f32 leaves the hot path and is
+/// read only at rerank. `m == 0` falls back to the v1 f32-only pack. Position-independent (`base`) so the fold
+/// relocates it for free.
 ///
 /// M59 T3.3: wired into production — `ambuild_hnsw` (`pack_hnsw_for_build`, initial build reads the reloption)
-/// and the VACUUM compaction fold (`pack_fold_layout`, reads the AQ params off the persisted v3 meta so a fold
+/// and the VACUUM compaction fold (`pack_fold_layout`, reads the AQ params off the persisted meta so a fold
 /// re-quantizes identically).
 pub(crate) fn pack_aq(idx: &HnswIndex, base: usize, m: usize, bits: u8, aq_threshold: f32) -> Result<Packed, String> {
-    let kind = if m == 0 { CodeKind::None } else { CodeKind::Aq { m, bits, aq_threshold } };
-    pack_kind(idx, base, &kind)
+    if m == 0 {
+        // Empty-corpus / AQ-off fallback: identical to the v1 f32-only pack (no code, no raw region, no trailer).
+        return pack_kind(idx, base, &CodeKind::None);
+    }
+    pack_v4(idx, base, &CodeKind::Aq { m, bits, aq_threshold })
+}
+
+/// The v4 pack core (M59 code/vector separation). Layout of the generation body, all resolved from `base`:
+///   `[HOT element pages][neighbor pages][AQ codebook pages][COLD raw-f32 pages]`.
+/// Each HOT element carries its own `raw_addr` into the raw-f32 region → the walk reads ONLY hot pages (code +
+/// neighbor tuples); the f32 is paged in ONLY when a survivor is reranked. Mirrors the v1/v2/v3 `pack_kind` shape
+/// (analytic element addrs, free-space neighbor packing) — the delta is the hot tuple has no f32 and the f32 moves
+/// to its own analytic region.
+fn pack_v4(idx: &HnswIndex, base: usize, kind: &CodeKind) -> Result<Packed, String> {
+    let (metric, m, m0, _ef) = idx.params();
+    let n = idx.node_count();
+    let dim = idx.dim();
+
+    let CodeSpec { code_len, codes, aq_m, aq_codebook, .. } = train_codes(idx, kind)?;
+    debug_assert!(aq_m != 0 && code_len > 0, "pack_v4 is the AQ path — code must be present");
+
+    // 1. Analytic HOT element addresses (fixed size = header + code, dim-independent ⇒ hundreds per page).
+    let ipp = elems_per_page_v4(code_len);
+    let elem_npages = n.div_ceil(ipp);
+    let elem_addr: Vec<Addr> = (0..n).map(|i| ((base + i / ipp) as u32, (1 + i % ipp) as u16)).collect();
+    let nbr_first = base + elem_npages;
+
+    // 2. Neighbor tuples by free space (identical to pack_kind — the graph is unchanged; only the f32 moved).
+    let mut nbr_pages: Vec<Vec<Vec<u8>>> = vec![Vec::new()];
+    let mut used = 0usize;
+    let mut nbr_addr: Vec<Addr> = Vec::with_capacity(n);
+    for node in 0..n {
+        let level = idx.node_level(node);
+        let size = nbr_size(level, m, m0);
+        let cost = ITEMID + maxalign(size);
+        if cost > USABLE {
+            return Err(format!("theodb hnsw: neighbor tuple for a level-{level} node exceeds one page \
+                                ({size} B) — build must cap max level"));
+        }
+        if used + cost > USABLE && !nbr_pages.last().unwrap().is_empty() {
+            nbr_pages.push(Vec::new());
+            used = 0;
+        }
+        let blkno = (nbr_first + nbr_pages.len() - 1) as u32;
+        let page = nbr_pages.last_mut().unwrap();
+        let offno = (page.len() + 1) as u16;
+        nbr_addr.push((blkno, offno));
+        page.push(encode_neighbors(idx, node, &elem_addr, m, m0));
+        used += cost;
+    }
+    let nbr_npages = nbr_pages.len();
+
+    // 3. AQ codebook pages (right after the neighbor pages — same tail placement as v3).
+    let cb_first = nbr_first + nbr_npages;
+    let cb_pages = codebook_pages(&aq_codebook);
+    let aq_cb_npages = cb_pages.len();
+
+    // 4. COLD raw-f32 region: analytic addrs (fixed raw tuple size) starting right after the codebook pages. Each
+    // node's raw tuple holds its exact f32; the hot element links it via `raw_addr[node]`. This is the ~1.5 GB
+    // cold store (@500k×768) that the walk NEVER touches — only rerank reads it.
+    let raw_first = cb_first + aq_cb_npages;
+    let rpp = raws_per_page(dim);
+    let raw_npages = n.div_ceil(rpp);
+    let raw_addr: Vec<Addr> = (0..n).map(|i| ((raw_first + i / rpp) as u32, (1 + i % rpp) as u16)).collect();
+    let mut raw_pages: Vec<Vec<Vec<u8>>> = Vec::with_capacity(raw_npages);
+    for chunk in (0..n).collect::<Vec<_>>().chunks(rpp) {
+        raw_pages.push(chunk.iter().map(|&node| encode_raw_vec(idx.node_vector(node))).collect());
+    }
+
+    // 5. HOT element pages: fixed ipp items/page (matches the analytic addrs); each links its nbr + raw addr + code.
+    let mut elem_pages: Vec<Vec<Vec<u8>>> = Vec::with_capacity(elem_npages);
+    for chunk in (0..n).collect::<Vec<_>>().chunks(ipp) {
+        elem_pages.push(
+            chunk
+                .iter()
+                .map(|&node| encode_element_v4(idx, node, nbr_addr[node], raw_addr[node], dim, &codes[node]))
+                .collect(),
+        );
+    }
+
+    // 6. Meta: entry point → its hot element addr, plus the AQ codebook descriptor AND the raw-f32 region pointer.
+    let entry_node = idx.entry().ok_or("theodb hnsw: non-empty graph without an entry point")?;
+    let (eb, eo) = elem_addr[entry_node];
+    let meta = encode_meta(&HnswMeta {
+        metric_tag: metric.tag(), dim: dim as u32, m: m as u16, m0: m0 as u16,
+        entry_blkno: eb, entry_offno: eo, entry_level: idx.node_level(entry_node) as i16,
+        node_count: n as u32, elem_first: base as u32, elem_npages: elem_npages as u32,
+        nbr_first: nbr_first as u32, nbr_npages: nbr_npages as u32,
+        sbq_bits: 0, codebook: Vec::new(),
+        aq_m, aq_codebook,
+        aq_cb_first: cb_first as u32, aq_cb_npages: aq_cb_npages as u32,
+        raw_first: raw_first as u32, raw_npages: raw_npages as u32,
+    });
+
+    // Body order MUST match the analytic/tail addresses above: hot elems, neighbors, codebook, raw f32.
+    let mut pages = elem_pages;
+    pages.extend(nbr_pages);
+    pages.extend(cb_pages);
+    pages.extend(raw_pages);
+    Ok(Packed { meta, pages })
 }
 
 /// Like [`pack`], but places the generation body starting at block `base` (M48 / issue #47). The meta's element
@@ -569,11 +834,17 @@ fn pack_kind(idx: &HnswIndex, base: usize, kind: &CodeKind) -> Result<Packed, St
             entry_blkno: 0, entry_offno: 0, entry_level: -1, node_count: 0,
             elem_first: base as u32, elem_npages: 0, nbr_first: base as u32, nbr_npages: 0,
             sbq_bits: 0, codebook: Vec::new(), aq_m: 0, aq_codebook: Vec::new(),
-            aq_cb_first: 0, aq_cb_npages: 0,
+            aq_cb_first: 0, aq_cb_npages: 0, raw_first: 0, raw_npages: 0,
         });
         return Ok(Packed { meta, pages: Vec::new() });
     }
 
+    // pack_kind now serves ONLY v1 (None) and v2 (SBQ). The AQ path is v4 (code/vec split) — routed through
+    // `pack_v4` by `pack_aq`. A stray `Aq` kind reaching here is a wiring bug, not a runtime input, so it is a
+    // typed Err (Rule 8) rather than silently emitting a v3-shaped (co-located) tuple.
+    if matches!(kind, CodeKind::Aq { .. }) {
+        return Err("theodb hnsw: internal — AQ must be packed via pack_v4 (v4 code/vector split), not pack_kind".into());
+    }
     let CodeSpec { code_len, codes, sbq_bits, codebook, aq_m, aq_codebook } = train_codes(idx, kind)?;
 
     // 1. Analytic element addresses (fixed size ⇒ node i is at block base+i/ipp, offset 1+i%ipp).
@@ -645,6 +916,9 @@ fn pack_kind(idx: &HnswIndex, base: usize, kind: &CodeKind) -> Result<Packed, St
         aq_codebook,
         aq_cb_first: if aq_m != 0 { cb_first as u32 } else { 0 },
         aq_cb_npages: if aq_m != 0 { aq_cb_npages as u32 } else { 0 },
+        // v1/v2 have no separate raw-f32 region (the f32 lives inline in the element tuple); v4 (AQ) is packed by
+        // `pack_v4`, never here.
+        raw_first: 0, raw_npages: 0,
     });
 
     let mut pages = elem_pages;
@@ -692,8 +966,9 @@ pub(crate) unsafe fn read_meta(rel: pg_sys::Relation) -> Result<HnswMeta, String
     let mut meta = decode_meta(&b)?;
     if meta.aq_m != 0 {
         // Re-decode the descriptor for the declared codebook length (decode_meta drops it, keeping HnswMeta lean).
-        let (_aq_m, cb_len, _first, _npages) = decode_aq_descriptor(&b)?;
-        meta.aq_codebook = read_codebook_pages(rel, meta.aq_cb_first, meta.aq_cb_npages, cb_len)?;
+        // `raw_npages != 0` ⇒ this is a v4 (code/vec split) descriptor, which is longer than a v3 one.
+        let d = decode_aq_descriptor(&b, meta.raw_npages != 0)?;
+        meta.aq_codebook = read_codebook_pages(rel, meta.aq_cb_first, meta.aq_cb_npages, d.cb_len)?;
     }
     Ok(meta)
 }
@@ -708,6 +983,16 @@ unsafe fn read_codebook_pages(
     npages: u32,
     cb_len: usize,
 ) -> Result<Vec<u8>, String> {
+    // Bounds-check the descriptor's page range against the relation BEFORE reading (the descriptor is on-disk and
+    // corruptible). u64 arithmetic avoids the u32 `first + npages` wrap. A range past the fork end is a typed
+    // REINDEX Err — consistent with the codebook-length guard below — not a generic C `smgrread` ERROR.
+    let nblocks = pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM) as u64;
+    if first as u64 + npages as u64 > nblocks {
+        return Err(format!(
+            "theodb hnsw: AQ codebook pages [{first}, {}) out of range (nblocks {nblocks}) — REINDEX (v3 corruption)",
+            first as u64 + npages as u64
+        ));
+    }
     let mut cb = Vec::with_capacity(cb_len);
     for blk in first..first + npages {
         for item in page::read_all_page_items(rel, blk)? {
@@ -729,21 +1014,48 @@ pub(crate) unsafe fn enumerate_entries(
     meta: &HnswMeta,
 ) -> Result<Vec<(i64, Vec<f32>)>, String> {
     let mut out = Vec::with_capacity(meta.node_count as usize);
+    // v4 (AQ code/vec split): the element pages hold HOT tuples (no f32) — the f32 lives in the cold raw region.
+    // A fold enumerating a v4 index reads each live node's f32 by following its `raw_addr` into that region. v1/v2
+    // keep the f32 inline in the element tuple (read it directly) — byte-identical to before.
+    let is_v4 = meta.raw_npages != 0;
+    let nblocks = page::main_fork_nblocks(rel);
+    let bytes_to_vec = |vb: &[u8]| -> Vec<f32> {
+        let dim = vb.len() / 4;
+        let mut v = vec![0f32; dim];
+        for (i, s) in v.iter_mut().enumerate() {
+            *s = f32::from_le_bytes(vb[i * 4..i * 4 + 4].try_into().unwrap());
+        }
+        v
+    };
     for blk in meta.elem_first..(meta.elem_first + meta.elem_npages) {
         for item in page::read_all_page_items(rel, blk)? {
-            let ev = decode_element(&item)?;
             // M56: compaction reuses this enumerate → the rebuild drops tombstoned nodes here (they are gone
             // from the fresh graph, reclaiming their space). This is the ONLY reclaim path in phase 1 (slot
             // reuse on INSERT is phase 2 — it would mutate the immutable M35 graph).
-            if ev.deleted {
-                continue;
+            if is_v4 {
+                let ev = decode_element_v4(&item)?;
+                if ev.deleted {
+                    continue;
+                }
+                let vb = page::with_page_item(rel, ev.raw_addr.0, ev.raw_addr.1, nblocks, |b| {
+                    Ok(decode_raw_vec(b)?.to_vec())
+                })?;
+                // Rule 8 defense: the raw tuple's f32 count MUST match the hot tuple's recorded dim — a mismatch is
+                // a torn/orphan raw page (corruption), a typed Err over a silently-wrong reconstructed vector.
+                if vb.len() != ev.dim as usize * 4 {
+                    return Err(format!(
+                        "theodb hnsw: v4 raw tuple has {} f32 bytes, hot tuple dim says {} — REINDEX (v4 corruption)",
+                        vb.len(), ev.dim as usize * 4
+                    ));
+                }
+                out.push((ev.tid, bytes_to_vec(&vb)));
+            } else {
+                let ev = decode_element(&item)?;
+                if ev.deleted {
+                    continue;
+                }
+                out.push((ev.tid, bytes_to_vec(ev.vec_bytes)));
             }
-            let dim = ev.vec_bytes.len() / 4;
-            let mut v = vec![0f32; dim];
-            for (i, s) in v.iter_mut().enumerate() {
-                *s = f32::from_le_bytes(ev.vec_bytes[i * 4..i * 4 + 4].try_into().unwrap());
-            }
-            out.push((ev.tid, v));
         }
     }
     Ok(out)
@@ -974,8 +1286,11 @@ pub(crate) unsafe fn insert_inplace(
     tid: i64,
     vec: &[f32],
 ) -> Result<bool, String> {
-    if meta.sbq_bits > 0 {
-        return Ok(false); // v2/SBQ slot revive needs Z's recomputed inline code — tracked follow-up
+    if meta.sbq_bits > 0 || meta.aq_m > 0 {
+        // v2 (SBQ) slot revive needs Z's recomputed inline code; v4 (AQ) needs Z's recomputed 4-bit code AND a raw
+        // tuple write — both a tracked follow-up. Refuse ⇒ the caller falls back to `append_pending`. (The v4 hot
+        // tuple offsets also differ from v1, so the v1-shaped revive path below must never touch a v4 index.)
+        return Ok(false);
     }
     let (m, m0) = (meta.m as usize, meta.m0 as usize);
     let slot = match find_reusable_slot(rel, meta, 0) {
@@ -1028,6 +1343,11 @@ struct Cand {
     off: u16,
     nbr_blk: u32,
     nbr_off: u16,
+    /// M59 v4: the cold raw-f32 tuple address for this candidate. `(0,0)` for v1/v2 (their f32 is inline in the
+    /// element tuple). For a v4 (AQ) index the walk carries it WITHOUT reading it; rerank follows it once per
+    /// survivor to fetch the exact f32. This is the pointer that keeps the f32 out of the hot walk path.
+    raw_blk: u32,
+    raw_off: u16,
     level: u8,
     tid: i64,
     /// M56: a tombstoned node is navigated THROUGH (its arcs preserve connectivity — it enters the candidate
@@ -1080,26 +1400,40 @@ unsafe fn load(
 ) -> Result<Cand, String> {
     *reads += 1;
     page::with_page_item(rel, blk, off, nblocks, |b| {
-        let ev = decode_element(b)?;
-        // M59 (v3, AQ): when a per-query AH LUT is present, guide the walk by the near-free `Σ LUT[i][code_i]`
-        // over the inline 4-bit codes — no f32 multiply, no decode (blueprint T2). Like the SBQ path, the f32
-        // vector is NOT touched here; the exact f32 rerank of the survivors runs once in `traverse` after the
-        // walk. Rule 8: the on-disk code MUST be exactly ⌈m/2⌉ bytes; a truncated code (corruption / orphan page)
-        // is a typed Err, never a silently-wrong (or panicking) AH score. M51 (v2, SBQ): cheap Hamming, same
-        // shape. `None`/`None` (v1) ⇒ the walk scores by exact f32 — byte-identical to before.
-        let d = match (lut, qcode) {
-            (Some(l), _) => {
-                let want = l.m().div_ceil(2);
-                if ev.code_bytes.len() != want {
-                    return Err(format!(
-                        "theodb hnsw: element AQ code is {} bytes, expected {} — REINDEX (v3 corruption)",
-                        ev.code_bytes.len(),
-                        want
-                    ));
-                }
-                crate::vec::ah::ah_score(l, ev.code_bytes) as f64
+        // M59 v4 (AQ, code/vec split): a per-query AH LUT ⇒ this is a v4 HOT element tuple — decode it via
+        // `decode_element_v4` (code + nbr_addr + raw_addr, NO f32) and score by the near-free `Σ LUT[i][code_i]`
+        // over the 4-bit codes. The f32 is NEVER paged here (it lives in the cold raw tuple at `raw_addr`, read
+        // only at rerank). This is the ADR-0019 fix: the walk's hot working set is the 30 B hot tuple, not ~3 KB.
+        // Rule 8: the on-disk code MUST be exactly ⌈m/2⌉ bytes — a truncated code is a typed Err, never a
+        // silently-wrong (or panicking) AH score.
+        if let Some(l) = lut {
+            let ev = decode_element_v4(b)?;
+            let want = l.m().div_ceil(2);
+            if ev.code_bytes.len() != want {
+                return Err(format!(
+                    "theodb hnsw: v4 element AQ code is {} bytes, expected {} — REINDEX (v4 corruption)",
+                    ev.code_bytes.len(),
+                    want
+                ));
             }
-            (None, Some(qc)) => {
+            return Ok(Cand {
+                d: crate::vec::ah::ah_score(l, ev.code_bytes) as f64,
+                blk,
+                off,
+                nbr_blk: ev.nbr_addr.0,
+                nbr_off: ev.nbr_addr.1,
+                raw_blk: ev.raw_addr.0,
+                raw_off: ev.raw_addr.1,
+                level: ev.level,
+                tid: ev.tid,
+                deleted: ev.deleted,
+            });
+        }
+        // v1/v2: the f32 is inline in the element tuple. `Some(qc)` (SBQ v2) ⇒ cheap Hamming; `None` (v1) ⇒ exact
+        // f32 — both byte-identical to before v4. `raw_addr = (0,0)` (no cold region; rerank re-reads this tuple).
+        let ev = decode_element(b)?;
+        let d = match qcode {
+            Some(qc) => {
                 if ev.code_bytes.len() != qc.len() {
                     return Err(format!(
                         "theodb hnsw: element SBQ code is {} bytes, expected {} — REINDEX (v2 corruption)",
@@ -1109,7 +1443,7 @@ unsafe fn load(
                 }
                 crate::sbq::hamming_bytes(qc, ev.code_bytes) as f64
             }
-            (None, None) => score(metric, q, ev.vec_bytes, is_l2),
+            None => score(metric, q, ev.vec_bytes, is_l2),
         };
         Ok(Cand {
             d,
@@ -1117,6 +1451,8 @@ unsafe fn load(
             off,
             nbr_blk: ev.nbr_addr.0,
             nbr_off: ev.nbr_addr.1,
+            raw_blk: 0,
+            raw_off: 0,
             level: ev.level,
             tid: ev.tid,
             deleted: ev.deleted,
@@ -1277,9 +1613,19 @@ pub(crate) unsafe fn traverse(
         reads = pg_src.reads.get();
         let mut reranked: Vec<(i64, f64)> = Vec::with_capacity(nodes.len());
         for (cand, _ham) in &nodes {
-            let d = page::with_page_item(rel, cand.blk, cand.off, nblocks, |b| {
-                Ok(score(metric, q, decode_element(b)?.vec_bytes, is_l2))
-            })?;
+            // v4 (AQ): the survivor's f32 is in the COLD raw tuple at `raw_addr` (the walk never read it) — follow
+            // the pointer once here. v2 (SBQ): `raw_addr == (0,0)` ⇒ the f32 is inline in the element tuple, re-read
+            // it as before. This one cold read per survivor (~ef·over_fetch of them) is the ONLY f32 I/O of a v4
+            // scan — the whole point of the code/vector split (ADR-0019).
+            let d = if cand.raw_blk != 0 {
+                page::with_page_item(rel, cand.raw_blk, cand.raw_off, nblocks, |b| {
+                    Ok(score(metric, q, decode_raw_vec(b)?, is_l2))
+                })?
+            } else {
+                page::with_page_item(rel, cand.blk, cand.off, nblocks, |b| {
+                    Ok(score(metric, q, decode_element(b)?.vec_bytes, is_l2))
+                })?
+            };
             reads += 1;
             reranked.push((cand.tid, d));
         }
@@ -1481,7 +1827,7 @@ mod tests {
             metric_tag: Metric::L2.tag(), dim: 3, m: 16, m0: 32,
             entry_blkno: 1, entry_offno: 1, entry_level: 2, node_count: 5,
             elem_first: 1, elem_npages: 1, nbr_first: 2, nbr_npages: 1, sbq_bits, codebook,
-            aq_m: 0, aq_codebook: Vec::new(), aq_cb_first: 0, aq_cb_npages: 0,
+            aq_m: 0, aq_codebook: Vec::new(), aq_cb_first: 0, aq_cb_npages: 0, raw_first: 0, raw_npages: 0,
         }
     }
 
@@ -1492,6 +1838,18 @@ mod tests {
             entry_blkno: 1, entry_offno: 1, entry_level: 2, node_count: 5,
             elem_first: 1, elem_npages: 1, nbr_first: 2, nbr_npages: 1,
             sbq_bits: 0, codebook: Vec::new(), aq_m, aq_codebook, aq_cb_first: 3, aq_cb_npages: 1,
+            raw_first: 0, raw_npages: 0,
+        }
+    }
+
+    // --- M59 v4: layout v4 meta carries the AQ codebook descriptor + the raw-f32 region pointer. ---
+    fn v4_meta_fixture(aq_m: u8, aq_codebook: Vec<u8>) -> HnswMeta {
+        HnswMeta {
+            metric_tag: Metric::L2.tag(), dim: 8, m: 16, m0: 32,
+            entry_blkno: 1, entry_offno: 1, entry_level: 2, node_count: 5,
+            elem_first: 1, elem_npages: 1, nbr_first: 2, nbr_npages: 1,
+            sbq_bits: 0, codebook: Vec::new(), aq_m, aq_codebook, aq_cb_first: 3, aq_cb_npages: 1,
+            raw_first: 4, raw_npages: 2,
         }
     }
 
@@ -1646,32 +2004,44 @@ mod tests {
     }
 
     #[pgrx::pg_test]
-    fn pack_aq_writes_codebook_and_matching_codes() {
-        // T3.1 pack (mirror pack_sbq_writes_codebook_and_matching_codes): pack_aq trains the AQ quantizer,
-        // persists the codebook in the v3 meta, and writes each node's inline code == AqQuantizer::encode(vec).
+    fn pack_v4_writes_codebook_hot_codes_and_separate_raw_region() {
+        // M59 v4 pack: pack_aq trains the AQ quantizer, persists the codebook on dedicated pages, writes each
+        // node's HOT tuple (code + raw_addr, NO f32) into the element region, and its exact f32 into the SEPARATE
+        // cold raw region. This is the ADR-0019 code/vector separation — proven at the pack level here.
         let idx = HnswIndex::build(&aq_corpus(), 16, 64, Metric::L2, 9);
         let (m_sub, bits, thr) = (4usize, 4u8, 2.0f32);
         let packed = pack_aq(&idx, 1, m_sub, bits, thr).expect("pack_aq");
         let meta = decode_meta(&packed.meta).unwrap();
         assert_eq!(meta.aq_m as usize, m_sub, "meta records AQ subspace count");
-        assert_eq!(meta.sbq_bits, 0, "v3 index has no SBQ");
-        // M59 fix: the codebook is on the trailing dedicated pages, not inline in the meta. Reassemble it from
-        // those pages (the in-memory dual of what the FFI `read_meta` does from the real relation).
+        assert_eq!(meta.sbq_bits, 0, "v4 index has no SBQ");
+        assert_eq!(u32::from_le_bytes(packed.meta[4..8].try_into().unwrap()), HNSW_STRUCT_VERSION_V4, "meta is v4");
+        assert!(meta.raw_npages > 0, "v4 records a non-empty raw-f32 region");
+        assert!(meta.raw_first >= meta.aq_cb_first + meta.aq_cb_npages, "raw region follows the codebook pages");
+        // Codebook on the dedicated pages (reassembled — the in-memory dual of the FFI read_meta).
         let cb = codebook_from_packed(&packed, meta.aq_cb_first, meta.aq_cb_npages);
-        assert!(!cb.is_empty(), "AQ codebook trained and carried on the packed codebook pages");
-        assert_eq!(meta.aq_cb_npages as usize, cb.len().div_ceil(CB_CHUNK).max(1),
-            "meta records exactly enough codebook pages for the trained blob");
-        // Reconstruct the quantizer from the reassembled codebook and verify each element's code matches.
         let q = crate::am::aq::AqQuantizer::from_meta_bytes(&cb).expect("AQ codebook decodes");
         let dim = idx.dim();
-        let ipp = elems_per_page(dim, crate::am::aq::AqQuantizer::bytes_per_vector(dim, m_sub));
+        let code_len = crate::am::aq::AqQuantizer::bytes_per_vector(dim, m_sub);
+        let ipp = elems_per_page_v4(code_len);
+        let rpp = raws_per_page(dim);
         for node in 0..idx.node_count() {
+            // HOT tuple: code matches encode(vec); the hot tuple size is header+code (dim-independent, NO f32).
             let ep = packed.pages[node / ipp][node % ipp].as_slice();
-            let ev = decode_element(ep).unwrap();
-            let expect = q.encode(idx.node_vector(node));
-            assert_eq!(ev.code_bytes, expect.as_slice(), "node {node}: inline code == encode(vec)");
+            let ev = decode_element_v4(ep).unwrap();
+            assert_eq!(ev.code_bytes, q.encode(idx.node_vector(node)).as_slice(), "node {node}: hot code == encode(vec)");
             assert_eq!(ev.code_bytes.len(), m_sub.div_ceil(2), "code is ⌈m/2⌉ bytes");
+            assert_eq!(ep.len(), elem_size_v4(code_len), "hot tuple = header + code, NO f32 (dim-independent)");
+            // The raw_addr the hot tuple links must point into the raw region and round-trip the exact f32 vector.
+            assert!(ev.raw_addr.0 >= meta.raw_first, "raw_addr points into the cold raw region");
+            let rp = packed.pages[(ev.raw_addr.0 - 1) as usize][(ev.raw_addr.1 - 1) as usize].as_slice();
+            let vb = decode_raw_vec(rp).expect("raw tuple decodes");
+            let got: Vec<f32> = vb.chunks(4).map(|c| f32::from_le_bytes(c.try_into().unwrap())).collect();
+            assert_eq!(got.as_slice(), idx.node_vector(node), "node {node}: raw tuple round-trips the exact f32");
         }
+        // The analytic raw addr matches the linked raw_addr (node i → raw_first + i/rpp, off 1 + i%rpp).
+        let ev0 = decode_element_v4(packed.pages[0][0].as_slice()).unwrap();
+        assert_eq!(ev0.raw_addr, (meta.raw_first, 1), "node 0's raw tuple is the first item of the raw region");
+        let _ = rpp;
     }
 
     #[pgrx::pg_test]
@@ -1687,13 +2057,13 @@ mod tests {
 
     #[pgrx::pg_test]
     fn decode_meta_rejects_unknown_version() {
-        // Negative (Rule 8): a v4 (or any unknown) version in the slot ⇒ typed Err, never a panic across the C
-        // boundary. Also asserts a truncated v3 AQ DESCRIPTOR is rejected (short descriptor).
+        // Negative (Rule 8): an UNSUPPORTED version (v5+, now that v4 is valid) in the slot ⇒ typed Err, never a
+        // panic across the C boundary. Also asserts a truncated v3 AQ DESCRIPTOR is rejected (short descriptor).
         let cb = vec![4u8, 2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 128, 63, 9, 8, 7, 6];
         let mut bytes = encode_meta(&aq_meta_fixture(2, cb));
-        // Bump the version slot to v4 (unsupported).
-        bytes[4..8].copy_from_slice(&4u32.to_le_bytes());
-        assert!(decode_meta(&bytes).is_err(), "unknown version v4 must Err, not panic");
+        // Bump the version slot to v5 (unsupported — v1..v4 are the known versions).
+        bytes[4..8].copy_from_slice(&5u32.to_le_bytes());
+        assert!(decode_meta(&bytes).is_err(), "unknown version v5 must Err, not panic");
         // A truncated v3 descriptor (fewer than the fixed 13 bytes present) must also Err.
         let mut short = encode_meta(&aq_meta_fixture(2, vec![1u8, 2, 3, 4, 5]));
         short.truncate(short.len() - 1);
@@ -1701,20 +2071,80 @@ mod tests {
     }
 
     #[pgrx::pg_test]
-    fn aq_element_tuple_roundtrips_code_and_size() {
-        // Round-trip element tuple with an AQ code trailing: encode → decode reads the code identically and
-        // `elem_size` accounts for the ⌈m/2⌉ trailing bytes exactly (the analytic-address invariant for v3).
+    fn v4_meta_roundtrips_raw_region_descriptor() {
+        // M59 v4: the v4 meta trailer carries the AQ codebook descriptor PLUS the raw-f32 region pointer, and
+        // decodes back byte-for-byte. v1/v2/v3 stay discriminated by their own versions (backward-compat).
+        let cb = vec![4u8, 2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 128, 63, 9, 8, 7, 6];
+        let bytes = encode_meta(&v4_meta_fixture(2, cb.clone()));
+        assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), HNSW_STRUCT_VERSION_V4, "must be v4");
+        let d = decode_meta(&bytes).expect("v4 decodes");
+        assert_eq!(d.aq_m, 2, "v4 AQ subspace count round-trips");
+        assert_eq!((d.raw_first, d.raw_npages), (4, 2), "v4 raw-f32 region pointer round-trips");
+        assert_eq!(d.sbq_bits, 0, "v4 is not SBQ");
+        // A v3 (aq) fixture must NOT be read as v4 (no raw region) — the version keeps them apart.
+        let v3 = decode_meta(&encode_meta(&aq_meta_fixture(2, cb))).expect("v3 decodes");
+        assert_eq!((v3.raw_first, v3.raw_npages), (0, 0), "a v3 index has no raw region");
+    }
+
+    /// M59 v4 — THE BYTE TEST the owner required: prove the walk/score path physically cannot touch the f32.
+    /// The hot v4 element tuple decodes via `decode_element_v4`, whose view exposes ONLY the code + the two
+    /// addresses — there is NO `vec_bytes` field. Scoring a candidate (`ah_score`) consumes just `code_bytes`.
+    /// So the f32 is structurally absent from the hot-path: it lives in a SEPARATE raw tuple reached only by the
+    /// rerank via `raw_addr`. This is the structural guarantee ADR-0019 demands (co-location was the root cause).
+    #[pgrx::pg_test]
+    fn v4_hot_tuple_has_no_f32_walk_never_pages_the_vector() {
+        let idx = HnswIndex::build(&aq_corpus(), 16, 64, Metric::L2, 5);
+        let (m_sub, dim) = (4usize, idx.dim());
+        let q = crate::am::aq::AqQuantizer::train(
+            &(0..idx.node_count()).map(|i| idx.node_vector(i).to_vec()).collect::<Vec<_>>(),
+            m_sub, 4, 2.0, AQ_BUILD_SEED,
+        ).expect("train");
+        let code = q.encode(idx.node_vector(0));
+        // Build a hot tuple whose linked raw_addr is a DELIBERATELY POISONED sentinel (u32::MAX, u16::MAX): if the
+        // walk/score path read the f32, it would have to dereference this address and fail. It must NOT.
+        let poison = (u32::MAX, u16::MAX);
+        let hot = encode_element_v4(&idx, 0, (7, 3), poison, dim, &code);
+        // (1) The hot tuple size is header+code — it does NOT contain dim*4 f32 bytes.
+        assert_eq!(hot.len(), elem_size_v4(code.len()), "hot tuple carries no f32 (size = header + code only)");
+        assert!(hot.len() < ELEM_HEADER_V4 + dim * 4, "hot tuple is far smaller than a co-located f32 tuple");
+        // (2) The decoded HOT view exposes NO vector — only code + addresses. Scoring uses just the code.
+        let ev = decode_element_v4(&hot).unwrap();
+        assert_eq!(ev.code_bytes, code.as_slice(), "hot view exposes the code");
+        assert_eq!(ev.raw_addr, poison, "hot view carries raw_addr WITHOUT reading it");
+        let lut = crate::vec::ah::build_lut16(idx.node_vector(0), &q).expect("lut");
+        // Scoring the candidate succeeds using ONLY the hot code — the poisoned raw_addr is never dereferenced.
+        let _score = crate::vec::ah::ah_score(&lut, ev.code_bytes);
+        // (3) The type system enforces it: `ElementViewV4` has no `vec_bytes`. (Compile-time proof — this line
+        // documents that the ONLY way to the f32 is `decode_raw_vec` on a SEPARATE raw tuple, at rerank.)
+    }
+
+    #[pgrx::pg_test]
+    fn v4_element_and_raw_tuple_roundtrip() {
+        // M59 v4: round-trip the HOT element tuple (code + nbr_addr + raw_addr, NO f32) AND the SEPARATE raw-f32
+        // tuple. `elem_size_v4` accounts for the ⌈m/2⌉ code exactly (analytic-address invariant); the raw tuple
+        // holds the f32.
         let idx = HnswIndex::build(&aq_corpus(), 16, 64, Metric::L2, 7);
         let dim = idx.dim();
         // m=6 → ⌈6/2⌉ = 3 code bytes; last byte holds one nibble (odd m edge).
         let code = vec![0x21u8, 0x43, 0x05];
-        let e = encode_element(&idx, 0, (1, 1), dim, &code);
-        assert_eq!(e.len(), elem_size(dim, code.len()), "v3 tuple size = header + f32 + ⌈m/2⌉ code");
-        let ev = decode_element(&e).unwrap();
-        assert_eq!(ev.code_bytes, code.as_slice(), "AQ code roundtrips inline after the f32 vec");
-        // The f32 vec is untouched by the trailing code (same as v2 — code_bytes just occupies [end..]).
-        let e0 = encode_element(&idx, 0, (1, 1), dim, &[]);
-        assert_eq!(ev.vec_bytes, decode_element(&e0).unwrap().vec_bytes, "trailing AQ code must not disturb the f32 vec");
+        let (nbr, raw) = ((7u32, 3u16), (99u32, 5u16));
+        let e = encode_element_v4(&idx, 0, nbr, raw, dim, &code);
+        assert_eq!(e.len(), elem_size_v4(code.len()), "v4 hot tuple size = header + ⌈m/2⌉ code (NO f32)");
+        let ev = decode_element_v4(&e).unwrap();
+        assert_eq!(ev.code_bytes, code.as_slice(), "AQ code roundtrips in the hot tuple");
+        assert_eq!(ev.nbr_addr, nbr, "neighbor addr roundtrips");
+        assert_eq!(ev.raw_addr, raw, "raw addr roundtrips");
+        assert_eq!(ev.dim as usize, dim, "dim tag roundtrips");
+        assert_eq!(ev.version, HNSW_ELEM_VERSION_V4, "v4 version byte set");
+        // The separate raw-f32 tuple round-trips the exact vector.
+        let r = encode_raw_vec(idx.node_vector(0));
+        assert_eq!(r.len(), raw_size(dim), "raw tuple size = header + dim*4");
+        let vb = decode_raw_vec(&r).unwrap();
+        let got: Vec<f32> = vb.chunks(4).map(|c| f32::from_le_bytes(c.try_into().unwrap())).collect();
+        assert_eq!(got.as_slice(), idx.node_vector(0), "raw tuple round-trips the exact f32 vector");
+        // Negative (Rule 8): a raw tuple read as a hot element (wrong tag) fails fast, and vice-versa.
+        assert!(decode_element_v4(&r).is_err(), "a raw tuple is not a hot element (tag guard)");
+        assert!(decode_raw_vec(&e).is_err(), "a hot element is not a raw tuple (tag guard)");
     }
 
     /// Collect the id column of `SELECT id FROM rn ORDER BY e <-> q LIMIT k` under the current planner GUCs,
@@ -2445,13 +2875,13 @@ mod tests {
             .collect();
         let quant = crate::am::aq::AqQuantizer::train(&corpus, 4, 4, 2.0, 7).expect("train");
         let lut = crate::vec::ah::build_lut16(&corpus[0], &quant).expect("lut");
-        // A live element tuple whose trailing code is 1 byte (short: m=4 wants ⌈4/2⌉=2). decode_element exposes
-        // exactly that short code_bytes → the AH branch's length guard must reject it as a typed Err.
+        // A live v4 HOT tuple whose trailing code is 1 byte (short: m=4 wants ⌈4/2⌉=2). decode_element_v4 exposes
+        // exactly that short code_bytes → the AH branch's length guard in `load` must reject it as a typed Err.
         let dim = 8usize;
         let idx = HnswIndex::build(&aq_corpus(), 16, 64, Metric::L2, 3);
         let short_code = vec![0x21u8]; // 1 byte where 2 are required
-        let e = encode_element(&idx, 0, (1, 1), dim, &short_code);
-        let ev = decode_element(&e).unwrap();
+        let e = encode_element_v4(&idx, 0, (1, 1), (2, 1), dim, &short_code);
+        let ev = decode_element_v4(&e).unwrap();
         assert_eq!(ev.code_bytes.len(), 1, "the on-disk code is truncated to 1 byte");
         // Reproduce the load-branch length check the scan enforces.
         let want = lut.m().div_ceil(2);
