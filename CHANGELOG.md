@@ -13,13 +13,26 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.49.0] - 2026-07-08
+
+### Added
 - **Roadmap: M57 concluído (re-escopado) + M60 aberto (sign-off do usuário 2026-07-08)**: o M57 entregou o veredito D3 (SBQ NÃO é superior — honest-negative). O checkpoint `recall casado ≥0.99` foi re-escopado para o M57 (comparação entregue a recall casado 0.974, o teto do grafo HNSW do theodb) e o gate literal `≥0.99` movido para o novo **M60 — Qualidade de recall do HNSW** (gap ~2pt vs pgvector), por ser **ortogonal ao SBQ** (provado por 3 fixes medidos-e-refutados + bissecção; afeta f32 e SBQ igualmente). M57 marcado `[x]`.
 - **M57 — `THEODB_HNSW_PARALLEL_THRESHOLD` (env) para forçar o build sequencial a escala**: override do limiar que decide build paralelo vs sequencial do HNSW (default inalterado = 4096). Permite reproduzir o build determinístico a escala e **bissecionar** se o teto de recall (~0.974) vem da contenção paralela ou do algoritmo base — sem tocar o código do build. Ver `docs/benchmarks/m57-sbq-superiority.md`.
 - **M57 (P0) — veredito D3 do SBQ-inline: HONEST-NEGATIVE (medido)**: benchmark de superioridade vetorial a escala + pressão de RAM (`docs/benchmarks/m57-sbq-superiority.md`, dados brutos em `docs/benchmarks/m57-raw/`). A tese "SBQ inline entrega ≥2× QPS a recall≥0.99 sob pressão" está **FALSIFICADA**: a 500k×768d o SBQ é recall-neutro vs f32 mas **0.35–0.77× do QPS** (mais lento) em TODOS os regimes (in-RAM, pressão 1.8GB, 1.3GB). Mecanismo: o HNSW tem localidade de acesso (o índice f32 não thrasha sob pressão) e o read-path Hamming-walk+rerank do SBQ é mais caro por query. Achado positivo à parte: theodb HNSW ~1.2× QPS > pgvector a 100k (recall equivalente). Decisão em `docs/adr/0018-m57-sbq-inline-not-superior.md` (finaliza o D3 do ADR-0015; reenquadra o P1/M59 para quantização anisotrópica).
 - **M57 — driver de pressão de RAM** `benchmarks/run_m57_pressure.py`: split `--phase build|measure` que reusa o harness M51 (Regra 9) para constranger a RAM do container ENTRE build e medição (`docker update --memory`), medindo o QPS sob pressão de verdade.
 
-- **M57 — achado de qualidade do grafo HNSW (medido, honesto)**: o grafo do `theodb_hnsw` satura em recall@10 ~0.974 a 500k×768d (abaixo do gate 0.99 mesmo a ef_search=1000, o máximo). Tentou-se elevar `ef_construction` 64→200 para cruzar o gate, mas **DEGRADOU** o recall (→0.832, medido em 3 runs) — o oposto do esperado. O theodb JÁ aplica a poda por diversidade estilo-pgvector (`select_from` em `ann/hnsw.rs`), então o teto NÃO é "falta do heurístico"; a causa-raiz não está isolada (candidatos: config do `m0`/layer-0, anomalia `efc`↔`select_from`, ou busca query-time). Config mantida em efc=64 (a melhor). Cruzar 0.99 exige uma investigação de qualidade-de-grafo própria (FORA do escopo do M57, que mede o SBQ). Ver `docs/adr/0018` + `docs/benchmarks/m57-sbq-superiority.md` (§ caveat 3).
-- **M57 — harness: sweep de `ef_search` mais alto p/ sondar o gate recall≥0.99**: `run_m51_sbq_inline.py` agora varre f32 em `[200,400,800,1000]` e o SBQ com `EF_SBQ` (env, default 800) — necessário para caracterizar o teto de recall do grafo a escala (mediu-se que o theodb satura em ~0.974 a 500k; causa-raiz = build paralelo racy, ver `docs/benchmarks/m57-sbq-superiority.md`).
+- **M57 — harness: sweep de `ef_search` mais alto p/ sondar o gate recall≥0.99**: `run_m51_sbq_inline.py` agora varre f32 em `[200,400,800,1000]` e o SBQ com `EF_SBQ` (env, default 800) — para caracterizar o teto de recall do grafo a escala (o consolidado da investigação está na entrada § Fixed abaixo e no M60).
 - **M57 (P0) — harness build-once**: `run_m51_sbq_inline.py` builda cada índice UMA vez e mede `runs×` (antes rebuildava por run → 9 builds a runs=3, o que tornava o 1M×768d impraticável). Mesmo mean±std na métrica que varia (QPS/recall) a 1/runs do custo de build. Junto com o SIMD cosine do M58 (3.15×), viabiliza o benchmark P0 a 1M.
 
 ### Deprecated
