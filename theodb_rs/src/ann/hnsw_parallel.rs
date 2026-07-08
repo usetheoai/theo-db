@@ -107,16 +107,37 @@ fn insert_node(
         let m_layer = if layer == 0 { m0 } else { m };
         let selected = select_from(vectors, metric, candidates, m_layer);
 
-        // This node's own neighbors on this layer. Honest note (M44 review, LOW): the assignment OVERWRITES the
-        // list, so an in-flight back-link another thread pushed to `node[layer]` (having reached `node` via a
-        // higher layer) can be clobbered — a LOGICAL lost-update (not a data race: both under this write lock).
-        // It only slightly reduces in-edges → a recall effect, well inside the accepted racy-build envelope (ADR
-        // D2) and empirically covered by the recall-parity gate (Δ +0.0055 @50k). If recall ever regresses under
-        // high contention, the minimal fix is to MERGE (extend+prune) instead of overwrite — YAGNI until measured.
+        // This node's own neighbors on this layer. M57: MERGE (extend+prune) instead of OVERWRITE. The old code did
+        // `nn[layer] = selected`, which clobbered any in-flight back-link another thread had already pushed to
+        // `node[layer]` (having reached `node` via a higher layer) — a LOGICAL lost-update (not a data race: both
+        // under this write lock). MEDIDO no M57 que isso degrada o recall a escala (teto ~0.974 a 500k) e PIORA com
+        // `ef_construction` maior (mais candidatos → mais back-links a nós populares → mais edges clobberadas):
+        // 0.974→0.832 a efc=200. A condição "YAGNI until measured" do comentário original agora está satisfeita.
+        // Fix: preservar os back-links in-flight mesclando-os com `selected`, deduplicando, e podando ao m_layer com
+        // a mesma heurística de diversidade (query = o próprio `node`). Ver `docs/adr/0018` + benchmark M57.
         {
             let mut nn = neighbors[node].write().unwrap();
             if layer < nn.len() {
-                nn[layer] = selected.clone();
+                for &s in &selected {
+                    if !nn[layer].contains(&s) {
+                        nn[layer].push(s);
+                    }
+                }
+                if nn[layer].len() > m_layer {
+                    let cand: Vec<Cand> = nn[layer]
+                        .iter()
+                        .map(|&x| Cand { d: metric.dist_simd(q, &vectors[x]), i: x })
+                        .collect();
+                    nn[layer] = select_from(vectors, metric, cand, m_layer);
+                } else {
+                    // keep nearest-first order so the layer-descent entry (`selected.first()`) stays meaningful
+                    nn[layer].sort_by(|&a, &b| {
+                        metric
+                            .dist_simd(q, &vectors[a])
+                            .partial_cmp(&metric.dist_simd(q, &vectors[b]))
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                }
             }
         }
         // Back-link: add `node` to each selected neighbor, pruning if it overflows. One node lock at a time.
