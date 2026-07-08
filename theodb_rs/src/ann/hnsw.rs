@@ -80,7 +80,7 @@ impl HnswIndex {
 
         // Small corpora: the unchanged sequential build (deterministic, no thread overhead — the tiny AM test
         // corpora take this path). Large corpora: the M44 parallel build.
-        if n < crate::ann::hnsw_parallel::PARALLEL_BUILD_THRESHOLD {
+        if n < crate::ann::hnsw_parallel::parallel_threshold() {
             return Self::build_sequential(corpus, m, ef_construction, metric, &levels);
         }
 

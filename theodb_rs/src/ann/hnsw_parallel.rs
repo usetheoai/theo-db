@@ -17,6 +17,16 @@ use std::sync::RwLock;
 /// thread-overhead-free — the tiny AM test corpora stay on the unchanged sequential path).
 pub(super) const PARALLEL_BUILD_THRESHOLD: usize = 4096;
 
+/// The effective threshold, overridable via `THEODB_HNSW_PARALLEL_THRESHOLD` (env). Default = the const above, so
+/// shipped behavior is unchanged. Purpose: force the deterministic SEQUENTIAL build at scale for reproducibility /
+/// graph-quality bisection (M57 — separar contenção-paralela de qualidade-do-algoritmo sem tocar o código do build).
+pub(super) fn parallel_threshold() -> usize {
+    std::env::var("THEODB_HNSW_PARALLEL_THRESHOLD")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(PARALLEL_BUILD_THRESHOLD)
+}
+
 /// Build the HNSW graph concurrently over `vectors` (all equal-dim) with pre-assigned `levels` (deterministic).
 /// Node 0 is the seed entry. Returns `(neighbors, entry, max_level)` in the same shape the sequential build yields.
 /// Every this many nodes, the leader joins all workers and calls `check_interrupt` (M48 T4.1). Batching is what
