@@ -14,10 +14,20 @@ com LUT16 SIMD (`pshufb`)**. O M59 implementou e mediu.
 
 ## Decisão
 
-**Reconhecer, por medição + análise, que o eixo anisotrópico-PQ+AH está corretamente implementado, mas o layout
-de persistência v3 CO-LOCALIZA o código AQ com o vetor f32 no mesmo element tuple — então o working set quente do
-walk HNSW NÃO encolheu, e a paridade com o f32 é consequência disso.** O gap ~25× NÃO é fechado pelo M59 v3
-(honest-negative), e a correção primária é de **layout** (separar códigos dos vetores), não a troca de carrier.
+**Reconhecer, por medição + análise + implementação testada, que o eixo anisotrópico-PQ+AH está corretamente
+implementado (v3 co-localizado E v4 separado), mas NÃO supera o f32 em QPS a recall casado em NENHUMA config
+medida no carrier HNSW — a superioridade que o ScaNN reporta exige o carrier IVF batch-scan, não o pointer-chasing
+do HNSW.** Honest-negative rigoroso e completo.
+
+### Atualização (v4 implementado e medido)
+
+O v3 co-localizava código+f32 (working set não encolheu → paridade). O **v4 separou** (element tuple = só código;
+f32 numa região raw contígua separada, rerank-only; byte-test prova o f32 fora do hot-path do código; páginas
+contíguas confirmadas por inspeção — interleaving refutado). **Medido a 500k×768d sob pressão forte (700m): ainda
+paridade** (AQ 2.3 vs f32 2.1). Causa estrutural: sob pressão o rerank lê `k·over_fetch` vetores f32 frios
+(NN-leaves, pouco cacheáveis), compensando a economia de reads do walk (o f32 revisita hub-nodes cache-friendly).
+A quantização reduz o VOLUME de reads mas não os torna cache-friendly no walk pointer-chasing. Portanto a correção
+de layout (v4) era necessária mas **não suficiente** — o carrier HNSW é o limite.
 
 ## Evidência (500k×768d cosine, box limpa, `theodb:m59fix`)
 

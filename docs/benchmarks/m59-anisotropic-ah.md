@@ -90,12 +90,16 @@ diagnósticos da curva por-`over_fetch` sob pressão:
 1. **O rerank é BARATO, não o gargalo:** o AQ atinge recall 0.958 já a `over_fetch=4` (a quantização AH é
    acurada), e o p50 é **flat** em over_fetch ∈ {4,8,16,32} (491→431 ms) — se os `k·over_fetch` reads de f32 frio
    dominassem, o p50 escalaria 8× entre over_fetch 4 e 32. Não escala → o rerank não domina.
-2. **O WALK domina e o v4 não o acelerou sob pressão** (AQ 2.3 ≈ f32 2.1). Apesar do byte-test provar que o
-   *código* do walk não decodifica o f32, o walk do AQ v4 não ficou mais rápido. **Hipótese mais provável
-   (a ressalva de projeto do owner):** as páginas hot-element e raw-f32 estão **interleaved** no `Packed` v4 → ler
-   uma página hot puxa a página raw adjacente para o cache → poluição → a separação é derrotada no nível de PÁGINA
-   (o byte-test garante a separação no nível de CÓDIGO, mas não no nível de layout físico das páginas). Verificar/
-   corrigir a ordenação das páginas (todas hot juntas, depois todas raw) é o próximo passo medido.
+2. **O rerank de f32 FRIO é o gargalo real sob pressão (não o walk, e NÃO interleaving de páginas).** Inspeção do
+   código (`hnsw_page.rs`): o layout emite regiões **contíguas e separadas** — block 0 meta, `[1..elem_npages)` hot
+   elements, depois neighbors, codebook, e a região raw `[raw_first..)` num bloco separado. As páginas hot NÃO
+   estão interleaved com as raw (hipótese de page-pollution **REFUTADA** por leitura de código). O que resta:
+   sob pressão, o rerank lê `k·over_fetch` vetores f32 da região fria de 1.5 GB (uncached) — o p50-flat-em-over_fetch
+   é um **artefato de warming do sweep** (over_fetch 4→8→16→32 na mesma query aquece as páginas raw
+   progressivamente), não evidência de rerank barato. O f32 baseline lê ~ef vetores no walk, mas revisita **hub
+   nodes** (cache-friendly); o rerank do AQ lê os **NN-leaves** reais (menos cacheáveis). Net: os reads frios se
+   equilibram → **paridade**. É um fenômeno estrutural do carrier HNSW: a redução de reads da quantização é
+   compensada pelos reads serem a locais menos cache-friendly.
 
 ## Veredito D3
 
@@ -104,11 +108,13 @@ diagnósticos da curva por-`over_fetch` sob pressão:
 - **O eixo anisotrópico + AH está implementado e correto** (a fundação testada, 175 pg_tests). A causa-raiz da
   paridade é **de layout**: o código está co-localizado com o f32, então o working set quente nunca encolheu.
 - **O layout v4 (código separado do f32) foi implementado e medido — e NÃO fechou o gap** (Resultado 3): paridade
-  sob pressão forte (700m), ambos ~2 QPS. O byte-test prova a separação no nível de CÓDIGO, mas a paridade indica
-  que a separação não se traduziu em ganho de I/O — hipótese medível: **interleaving das páginas hot/raw** no
-  `Packed` (poluição de cache no nível de página). Este é o próximo passo concreto: garantir páginas hot contíguas
-  (todas juntas) antes das raw, e re-medir; se ainda paridade, a conclusão é que o carrier HNSW pointer-chasing não
-  materializa o ganho de quantização — o caminho seria o carrier IVF batch-scan (contíguo por design, como ScaNN).
+  sob pressão forte (700m). O byte-test prova a separação no nível de código E a inspeção confirma páginas
+  contíguas/separadas (interleaving refutado). A causa da paridade é **estrutural do carrier HNSW**: sob pressão o
+  rerank lê `k·over_fetch` vetores f32 frios (NN-leaves, pouco cacheáveis), o que compensa a economia de reads do
+  walk — o f32 baseline revisita hub-nodes cache-friendly. A quantização reduz reads, mas não os torna mais
+  cache-friendly no walk pointer-chasing. **O caminho que ScaNN usa para o 25× é o carrier IVF batch-scan** (listas
+  contíguas → reads sequenciais cache-friendly + o kernel AH batched de 4.75×), fundamentalmente diferente do
+  pointer-chasing do HNSW. Registrado como o próximo lever medido.
 - **Honest-negative rigoroso e medido:** o eixo anisotrópico-PQ+AH está implementado, correto (177 pg_tests) e o
   código está estruturalmente separado (v4), mas **em nenhuma config medida (v3 co-localizado, v4 separado, in-RAM,
   pressão 1.3g/700m) o AQ superou o f32 em QPS a recall casado.** A superioridade que o ScaNN reporta não se
