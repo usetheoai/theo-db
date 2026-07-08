@@ -906,7 +906,7 @@ claim, não opinião). Esta milestone roda o head-to-head decision-grade que **v
 inline). **Risco (MÉDIO):** box dedicada/quieta a 1M (custo/infra); se SBQ não materializar, reabre a decisão
 do AM próprio — resultado VÁLIDO (anti-sunk-cost), não fracasso.
 
-### M58 — [ ] SIMD para cosine/inner-product — o hot path dos embeddings reais (P2, ganho barato)
+### M58 — [x] SIMD para cosine/inner-product — o hot path dos embeddings reais (P2, ganho barato)
 
 **Objective (deep-view 2026-07-07, gap P2):** `dot_from_bytes`/`cosine_dist_from_bytes` (`vec.rs:210-239`)
 rodam **escalares** — só o L2 tem AVX2 (`vec.rs:133`). Mas embeddings reais (OpenAI/Cohere) são **cosine/IP**
