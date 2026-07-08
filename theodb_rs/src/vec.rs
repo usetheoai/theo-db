@@ -16,6 +16,12 @@
 //! best-effort (ADR D3) — parity is asserted to pgvector's rounded TEXT output.
 use crate::pg::err_input;
 
+// M59 Phase 2 — the Asymmetric-Hashing LUT16 `pshufb` scoring kernel lives in a sibling file so neither this
+// module nor `ah.rs` exceeds the 500-LoC budget (`rules/architecture.md`). `#[path]` keeps `vec.rs` a plain
+// file (not a `vec/mod.rs` dir) — minimal diff, no reshuffle of the M20/M58 code above.
+#[path = "vec/ah.rs"]
+pub(crate) mod ah;
+
 /// Reject mismatched dimensions, fail-fast at the boundary (Unbreakable Rule 8). Both TheoDB and pgvector's
 /// `CheckDims` reject `a->dim != b->dim`; pgvector raises SQLSTATE 22000 (data_exception) while TheoDB uses
 /// its house typed error 22023 (invalid_parameter_value, via `err_input`) — same fail-fast semantics, a
