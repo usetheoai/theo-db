@@ -478,4 +478,38 @@ mod tests {
             simd_x86::reset_for_test();
         }
     }
+
+    /// M58 micro-bench (DoD item 2): per-candidate cosine cost, AVX2+FMA vs scalar, dim=768 (the real-embedding
+    /// dim). Times a large batch through the DISPATCHED `cosine_dist_from_bytes` under each forced branch and logs
+    /// the ratio (server LOG — the artifact `docs/benchmarks/m58-simd-cosine.md` records it). Asserts only that
+    /// SIMD is NOT SLOWER (a loose, non-flaky regression guard — the magnitude is reported, not gated on timing).
+    #[pg_test]
+    fn cosine_simd_per_candidate_speedup() {
+        let dim = 768usize;
+        let q: Vec<f32> = (0..dim).map(|i| ((i * 7 % 13) as f32) * 0.1 - 0.6).collect();
+        let c: Vec<f32> = (0..dim).map(|i| ((i * 5 % 11) as f32) * 0.1 - 0.5).collect();
+        let raw = to_le_bytes(&c);
+        let iters = 200_000u64;
+        let timed = |avx: bool| -> f64 {
+            simd_x86::force_for_test(avx);
+            let t0 = std::time::Instant::now();
+            let mut acc = 0f64;
+            for _ in 0..iters {
+                acc += cosine_dist_from_bytes(std::hint::black_box(&q), std::hint::black_box(&raw));
+            }
+            std::hint::black_box(acc);
+            t0.elapsed().as_secs_f64()
+        };
+        let (t_avx, t_scalar) = (timed(true), timed(false));
+        simd_x86::reset_for_test();
+        let speedup = t_scalar / t_avx.max(1e-9);
+        let line = format!(
+            "M58 cosine micro-bench dim={dim} iters={iters}: scalar={t_scalar:.4}s avx={t_avx:.4}s speedup={speedup:.2}x"
+        );
+        pgrx::log!("{line}");
+        // Also drop the measured ratio to the (mounted) build dir so the benchmark doc can quote it (server LOG is
+        // swallowed on a passing pg_test). Best-effort — a write failure never fails the micro-bench.
+        let _ = std::fs::write("/build/target/m58-speedup.txt", &line);
+        assert!(t_avx <= t_scalar * 1.2, "SIMD cosine must not be slower than scalar (avx={t_avx} scalar={t_scalar})");
+    }
 }
