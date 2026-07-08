@@ -75,10 +75,29 @@ fn nbr_size(level: usize, m: usize, m0: usize) -> usize {
 pub(crate) type Addr = (u32, u16);
 
 /// Fully-resolved page images ready for a dumb WAL writer to flush. `pages[0]` is block 1, `pages[1]` block 2, …
-/// (block 0 is `meta`). Element pages come first, then neighbor pages.
+/// (block 0 is `meta`). Element pages come first, then neighbor pages, then (v3 only) the AQ codebook pages.
+///
+/// M59 fix: the AQ codebook is `⌈m/2⌉·16·sub_dim·4` bytes — ~48 KB at dim=768 — so it CANNOT live inline in the
+/// meta item (BLCKSZ 8 KB ⇒ `PageAddItem failed`). It is split across dedicated codebook pages (one item each,
+/// ≤ `CB_CHUNK` bytes), exactly as element/neighbor tuples already spread across pages — appended at the tail of
+/// `pages` (after element + neighbor pages). The meta item carries only a fixed descriptor
+/// `[aq_m][cb_len][cb_first][cb_npages]` (13 B) that locates them; the FFI `read_meta` reassembles the codebook.
 pub(crate) struct Packed {
     pub(crate) meta: Vec<u8>,
     pub(crate) pages: Vec<Vec<Vec<u8>>>, // pages[p] = the item blobs for block (p+1), in offset order
+}
+
+/// Reassemble an AQ codebook from the tail codebook pages of a [`Packed`] (in-memory dual of [`read_codebook_pages`]).
+/// `first` is the codebook's first block (`aq_cb_first`); `pages[0]` is block 1, so page index = `first - 1`.
+#[cfg(any(test, feature = "pg_test"))]
+pub(crate) fn codebook_from_packed(packed: &Packed, first: u32, npages: u32) -> Vec<u8> {
+    let mut cb = Vec::new();
+    for p in first..first + npages {
+        for item in &packed.pages[(p - 1) as usize] {
+            cb.extend_from_slice(item);
+        }
+    }
+    cb
 }
 
 /// Parsed meta (block 0). `entry_level < 0` ⇒ empty graph.
@@ -105,25 +124,47 @@ pub(crate) struct HnswMeta {
     /// SBQ are mutually exclusive per index: `aq_m > 0` ⇒ `sbq_bits == 0` (the version discriminates which
     /// trailing code the element tuple carries). `⌈aq_m/2⌉` code bytes trail each element (Phase-2 `pshufb`).
     pub(crate) aq_m: u8,
+    /// The AQ codebook bytes. On disk this is NOT inline in the meta item (it is ~48 KB at dim=768 — one page
+    /// cannot hold it) — the meta carries only `aq_cb_first`/`aq_cb_npages` (below) and the codebook lives on
+    /// those dedicated pages. `decode_meta` (a pure byte codec) leaves this empty; the FFI `read_meta` fills it
+    /// after reading the codebook pages. In `pack`'s in-memory result it is the trained blob (see [`Packed`]).
     pub(crate) aq_codebook: Vec<u8>,
+    /// M59 fix: first block of the dedicated AQ-codebook page range (0 when `aq_m == 0`). Absolute (position-
+    /// independent, resolved from `base` like `elem_first`/`nbr_first`), so a relocatable fold keeps it valid.
+    pub(crate) aq_cb_first: u32,
+    /// M59 fix: number of codebook pages (`⌈cb_len / CB_CHUNK⌉`, 0 when `aq_m == 0`).
+    pub(crate) aq_cb_npages: u32,
 }
 
 impl HnswMeta {
-    /// First block of the pending region (the structured index occupies blocks `0 ..= nbr_first+nbr_npages-1`).
+    /// First block of the pending region. The structured index occupies blocks `0 ..= pending_start-1`: block 0
+    /// meta, the element+neighbor pages `[elem_first, nbr_first+nbr_npages)`, then (v3) the AQ-codebook pages
+    /// `[aq_cb_first, aq_cb_first+aq_cb_npages)` — which are packed at the tail, so they extend the reserved range.
     pub(crate) fn pending_start(&self) -> u32 {
-        self.nbr_first + self.nbr_npages
+        (self.nbr_first + self.nbr_npages).max(self.aq_cb_first + self.aq_cb_npages)
     }
 }
 
 const META_LEN: usize = 4 + 4 + 1 + 4 + 2 + 2 + 4 + 2 + 2 + 4 + 4 + 4 + 4 + 4; // = 45 bytes (v1 core)
 const HNSW_STRUCT_VERSION_SBQ: u32 = 2; // M51 layout v2: same core header + trailing [sbq_bits:u8][cb_len:u32][codebook]
-const HNSW_STRUCT_VERSION_AQ: u32 = 3; // M59 layout v3: same core header + trailing [aq_m:u8][cb_len:u32][aq_codebook]
+const HNSW_STRUCT_VERSION_AQ: u32 = 3; // M59 layout v3: same core header + trailing AQ descriptor (codebook on pages)
+/// M59 fix: the v3 meta trailer is a FIXED 13-byte descriptor `[aq_m:u8][cb_len:u32][cb_first:u32][cb_npages:u32]`.
+/// Unlike v2 (SBQ codebook inline — always ≤ a few hundred bytes, fits one page), the AQ codebook is ~48 KB at
+/// dim=768 and lives on dedicated pages; the meta only points at them. So the whole v3 meta ITEM is always tiny.
+const AQ_DESC_LEN: usize = 1 + 4 + 4 + 4;
+/// Bytes of AQ codebook per dedicated page (one item per page). Same budget as the IVF blob chunk (`page::CHUNK`):
+/// BLCKSZ − header − item-id − alignment slack; 8000 is safe. At dim=768 the ~48 KB codebook needs ⌈48 KB/8000⌉=7
+/// pages. Kept local (parsimony) — `page.rs`'s `CHUNK` is private and this is a different layer's constant.
+const CB_CHUNK: usize = 8000;
 
 /// Encode the meta item. The version slot (bytes 4..8) is the discriminator: **v1** (f32-only, `sbq_bits==0` and
 /// `aq_m==0`) is the byte-identical 45-byte core (legacy indexes + f32 builds unchanged, existing tests stay
-/// green); **v2** (`sbq_bits>0`, M51) is the core + `[sbq_bits:u8][cb_len:u32][codebook]`; **v3** (`aq_m>0`, M59)
-/// is the core + `[aq_m:u8][cb_len:u32][aq_codebook]`. AQ and SBQ are mutually exclusive (an AQ index has
-/// `sbq_bits==0`), so exactly one trailer is emitted; the version tells the reader which one.
+/// green); **v2** (`sbq_bits>0`, M51) is the core + `[sbq_bits:u8][cb_len:u32][codebook]` (SBQ codebook inline —
+/// it is small); **v3** (`aq_m>0`, M59) is the core + the fixed 13-byte AQ DESCRIPTOR
+/// `[aq_m:u8][cb_len:u32][cb_first:u32][cb_npages:u32]` — the codebook itself is NOT inline (it lives on the
+/// dedicated codebook pages `[aq_cb_first, aq_cb_first+aq_cb_npages)`; ~48 KB at dim=768 overflows one page). AQ
+/// and SBQ are mutually exclusive (an AQ index has `sbq_bits==0`), so exactly one trailer is emitted; the version
+/// tells the reader which one. The v3 meta item is always tiny — no dependence on `dim`, so it can never overflow.
 fn encode_meta(m: &HnswMeta) -> Vec<u8> {
     let version = if m.aq_m != 0 {
         HNSW_STRUCT_VERSION_AQ
@@ -133,7 +174,7 @@ fn encode_meta(m: &HnswMeta) -> Vec<u8> {
         HNSW_STRUCT_VERSION
     };
     let trailer = if m.aq_m != 0 {
-        5 + m.aq_codebook.len()
+        AQ_DESC_LEN
     } else if m.sbq_bits != 0 {
         5 + m.codebook.len()
     } else {
@@ -155,9 +196,12 @@ fn encode_meta(m: &HnswMeta) -> Vec<u8> {
     b.extend_from_slice(&m.nbr_first.to_le_bytes());
     b.extend_from_slice(&m.nbr_npages.to_le_bytes());
     if m.aq_m != 0 {
+        // v3: DESCRIPTOR only — `cb_len` lets the reader validate the reassembled codebook length; `cb_first`/
+        // `cb_npages` locate the dedicated pages. The codebook bytes are NOT written here.
         b.push(m.aq_m);
         b.extend_from_slice(&(m.aq_codebook.len() as u32).to_le_bytes());
-        b.extend_from_slice(&m.aq_codebook);
+        b.extend_from_slice(&m.aq_cb_first.to_le_bytes());
+        b.extend_from_slice(&m.aq_cb_npages.to_le_bytes());
     } else if m.sbq_bits != 0 {
         b.push(m.sbq_bits);
         b.extend_from_slice(&(m.codebook.len() as u32).to_le_bytes());
@@ -166,9 +210,9 @@ fn encode_meta(m: &HnswMeta) -> Vec<u8> {
     b
 }
 
-/// Parse a v2/v3 trailing quantizer trailer `[byte:u8][cb_len:u32 LE][codebook]` at `META_LEN`. Validates the
-/// exact length (Rule 8: typed `Err`, never a slice panic across the C boundary) and returns `(byte, codebook)`.
-/// Shared by the v2 (SBQ) and v3 (AQ) arms — identical wire shape, different meaning of `byte` (bits vs `m`).
+/// Parse the v2 SBQ trailer `[sbq_bits:u8][cb_len:u32 LE][codebook]` at `META_LEN` (the SBQ codebook is inline —
+/// it is small). Validates the exact length (Rule 8: typed `Err`, never a slice panic across the C boundary) and
+/// returns `(sbq_bits, codebook)`.
 fn decode_trailer(b: &[u8], label: &str) -> Result<(u8, Vec<u8>), String> {
     if b.len() < META_LEN + 5 {
         return Err(format!("theodb hnsw: truncated {label} trailer"));
@@ -182,6 +226,25 @@ fn decode_trailer(b: &[u8], label: &str) -> Result<(u8, Vec<u8>), String> {
         ));
     }
     Ok((byte, b[META_LEN + 5..].to_vec()))
+}
+
+/// Parse the v3 AQ DESCRIPTOR `[aq_m:u8][cb_len:u32][cb_first:u32][cb_npages:u32]` at `META_LEN` (M59 fix). The
+/// codebook bytes are NOT here — they live on the dedicated pages `[cb_first, cb_first+cb_npages)`; the FFI
+/// `read_meta` reassembles them. Returns `(aq_m, cb_len, cb_first, cb_npages)`. Typed `Err` on truncation (Rule 8).
+fn decode_aq_descriptor(b: &[u8]) -> Result<(u8, usize, u32, u32), String> {
+    if b.len() != META_LEN + AQ_DESC_LEN {
+        return Err(format!(
+            "theodb hnsw: v3 AQ descriptor length mismatch (expected {}, have {})",
+            META_LEN + AQ_DESC_LEN,
+            b.len()
+        ));
+    }
+    let aq_m = b[META_LEN];
+    let u32a = |o: usize| u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+    let cb_len = u32a(META_LEN + 1) as usize;
+    let cb_first = u32a(META_LEN + 5);
+    let cb_npages = u32a(META_LEN + 9);
+    Ok((aq_m, cb_len, cb_first, cb_npages))
 }
 
 /// Parse the meta item. Fail-fast typed `Err` on truncation / bad magic / unknown version — never panic.
@@ -207,15 +270,16 @@ pub(crate) fn decode_meta(b: &[u8]) -> Result<HnswMeta, String> {
     }
     let u16a = |o: usize| u16::from_le_bytes(b[o..o + 2].try_into().unwrap());
     let u32a = |o: usize| u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
-    // Exactly one trailer follows the core header, keyed by version. v2 = SBQ, v3 = AQ; v1 = none.
+    // Exactly one trailer follows the core header, keyed by version. v2 = SBQ (inline codebook), v3 = AQ
+    // (descriptor only — the codebook is on dedicated pages, reassembled by the FFI `read_meta`); v1 = none.
     let (mut sbq_bits, mut codebook) = (0u8, Vec::new());
-    let (mut aq_m, mut aq_codebook) = (0u8, Vec::new());
+    let (mut aq_m, mut aq_cb_first, mut aq_cb_npages) = (0u8, 0u32, 0u32);
     if version == HNSW_STRUCT_VERSION_SBQ {
         let (bits, cb) = decode_trailer(b, "v2 SBQ")?;
         (sbq_bits, codebook) = (bits, cb);
     } else if version == HNSW_STRUCT_VERSION_AQ {
-        let (m, cb) = decode_trailer(b, "v3 AQ")?;
-        (aq_m, aq_codebook) = (m, cb);
+        let (m, _cb_len, first, npages) = decode_aq_descriptor(b)?;
+        (aq_m, aq_cb_first, aq_cb_npages) = (m, first, npages);
     }
     Ok(HnswMeta {
         metric_tag: b[8],
@@ -233,7 +297,11 @@ pub(crate) fn decode_meta(b: &[u8]) -> Result<HnswMeta, String> {
         sbq_bits,
         codebook,
         aq_m,
-        aq_codebook,
+        // `decode_meta` is a pure byte codec — it cannot read the codebook pages, so `aq_codebook` is empty here.
+        // The FFI `read_meta` fills it from `[aq_cb_first, aq_cb_first+aq_cb_npages)` after decoding this descriptor.
+        aq_codebook: Vec::new(),
+        aq_cb_first,
+        aq_cb_npages,
     })
 }
 
@@ -501,6 +569,7 @@ fn pack_kind(idx: &HnswIndex, base: usize, kind: &CodeKind) -> Result<Packed, St
             entry_blkno: 0, entry_offno: 0, entry_level: -1, node_count: 0,
             elem_first: base as u32, elem_npages: 0, nbr_first: base as u32, nbr_npages: 0,
             sbq_bits: 0, codebook: Vec::new(), aq_m: 0, aq_codebook: Vec::new(),
+            aq_cb_first: 0, aq_cb_npages: 0,
         });
         return Ok(Packed { meta, pages: Vec::new() });
     }
@@ -553,7 +622,15 @@ fn pack_kind(idx: &HnswIndex, base: usize, kind: &CodeKind) -> Result<Packed, St
         );
     }
 
-    // 4. Meta with the entry point resolved to its element addr.
+    // 4. (v3 only) AQ codebook pages: the ~48 KB codebook (dim=768) does NOT fit the meta item, so it is split
+    // into dedicated one-item pages `[cb_first, cb_first+cb_npages)` right after the neighbor pages (position-
+    // independent — resolved from `base`, so a relocatable fold keeps the pointer valid). v1/v2 have no such pages
+    // (SBQ's small codebook stays inline in the meta). Mirrors how element/neighbor tuples already span pages.
+    let cb_first = nbr_first + nbr_npages;
+    let cb_pages = codebook_pages(&aq_codebook);
+    let aq_cb_npages = cb_pages.len();
+
+    // 5. Meta with the entry point resolved to its element addr, plus the AQ-codebook page descriptor.
     let entry_node = idx.entry().ok_or("theodb hnsw: non-empty graph without an entry point")?;
     let (eb, eo) = elem_addr[entry_node];
     let meta = encode_meta(&HnswMeta {
@@ -563,12 +640,27 @@ fn pack_kind(idx: &HnswIndex, base: usize, kind: &CodeKind) -> Result<Packed, St
         nbr_first: nbr_first as u32, nbr_npages: nbr_npages as u32,
         // `train_codes` already zeroes the code kind for v1; pass the spec through unchanged (D1: at most one
         // of sbq_bits / aq_m is non-zero, so `encode_meta` emits exactly one trailer).
-        sbq_bits, codebook, aq_m, aq_codebook,
+        sbq_bits, codebook,
+        aq_m,
+        aq_codebook,
+        aq_cb_first: if aq_m != 0 { cb_first as u32 } else { 0 },
+        aq_cb_npages: if aq_m != 0 { aq_cb_npages as u32 } else { 0 },
     });
 
     let mut pages = elem_pages;
     pages.extend(nbr_pages);
+    pages.extend(cb_pages);
     Ok(Packed { meta, pages })
+}
+
+/// Split the AQ codebook into one-item-per-page images (`≤ CB_CHUNK` bytes each). Empty codebook ⇒ no pages (v1/v2
+/// carry no AQ codebook pages). Each returned `Vec<Vec<u8>>` is a page holding exactly one codebook chunk item,
+/// matching the `Packed.pages` shape the WAL writer consumes. Read back by [`read_codebook_pages`], concatenated.
+fn codebook_pages(codebook: &[u8]) -> Vec<Vec<Vec<u8>>> {
+    if codebook.is_empty() {
+        return Vec::new();
+    }
+    codebook.chunks(CB_CHUNK).map(|chunk| vec![chunk.to_vec()]).collect()
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -590,10 +682,45 @@ pub(crate) unsafe fn write_structured(
     }
 }
 
-/// Read + parse the meta page (block 0). Fail-fast typed `Err` on truncation / bad magic.
+/// Read + parse the meta page (block 0). Fail-fast typed `Err` on truncation / bad magic. For a v3 (AQ) index the
+/// codebook is NOT in the meta item (it is ~48 KB at dim=768 — one page cannot hold it): after decoding the
+/// descriptor, reassemble `aq_codebook` from its dedicated pages `[aq_cb_first, aq_cb_first+aq_cb_npages)` and
+/// validate the length against the descriptor's `cb_len` (Rule 8 — a torn/short codebook is a typed REINDEX Err,
+/// never a silently-wrong quantizer). v1/v2 read exactly as before (no codebook pages to touch).
 pub(crate) unsafe fn read_meta(rel: pg_sys::Relation) -> Result<HnswMeta, String> {
     let b = page::read_page_item_at(rel, 0, 1)?;
-    decode_meta(&b)
+    let mut meta = decode_meta(&b)?;
+    if meta.aq_m != 0 {
+        // Re-decode the descriptor for the declared codebook length (decode_meta drops it, keeping HnswMeta lean).
+        let (_aq_m, cb_len, _first, _npages) = decode_aq_descriptor(&b)?;
+        meta.aq_codebook = read_codebook_pages(rel, meta.aq_cb_first, meta.aq_cb_npages, cb_len)?;
+    }
+    Ok(meta)
+}
+
+/// Reassemble the AQ codebook from its `npages` dedicated pages starting at `first` (one item per page). Validates
+/// the total length equals the descriptor's `cb_len` — a mismatch (torn page, orphan, corrupt descriptor) is a
+/// typed Err → REINDEX, never a silently-wrong codebook. `npages == 0` ⇒ empty (defensive; a v3 index always has
+/// ≥ 1 codebook page).
+unsafe fn read_codebook_pages(
+    rel: pg_sys::Relation,
+    first: u32,
+    npages: u32,
+    cb_len: usize,
+) -> Result<Vec<u8>, String> {
+    let mut cb = Vec::with_capacity(cb_len);
+    for blk in first..first + npages {
+        for item in page::read_all_page_items(rel, blk)? {
+            cb.extend_from_slice(&item);
+        }
+    }
+    if cb.len() != cb_len {
+        return Err(format!(
+            "theodb hnsw: AQ codebook length mismatch (declared {cb_len}, read {}) — REINDEX (v3 corruption)",
+            cb.len()
+        ));
+    }
+    Ok(cb)
 }
 
 /// Enumerate every stored `(tid, vector)` from the element tuples (VACUUM fold rebuilds over the live TIDs).
@@ -1354,7 +1481,7 @@ mod tests {
             metric_tag: Metric::L2.tag(), dim: 3, m: 16, m0: 32,
             entry_blkno: 1, entry_offno: 1, entry_level: 2, node_count: 5,
             elem_first: 1, elem_npages: 1, nbr_first: 2, nbr_npages: 1, sbq_bits, codebook,
-            aq_m: 0, aq_codebook: Vec::new(),
+            aq_m: 0, aq_codebook: Vec::new(), aq_cb_first: 0, aq_cb_npages: 0,
         }
     }
 
@@ -1364,7 +1491,7 @@ mod tests {
             metric_tag: Metric::L2.tag(), dim: 8, m: 16, m0: 32,
             entry_blkno: 1, entry_offno: 1, entry_level: 2, node_count: 5,
             elem_first: 1, elem_npages: 1, nbr_first: 2, nbr_npages: 1,
-            sbq_bits: 0, codebook: Vec::new(), aq_m, aq_codebook,
+            sbq_bits: 0, codebook: Vec::new(), aq_m, aq_codebook, aq_cb_first: 3, aq_cb_npages: 1,
         }
     }
 
@@ -1473,13 +1600,20 @@ mod tests {
 
     #[pgrx::pg_test]
     fn aq_meta_v3_roundtrips() {
-        // encode_meta(v3) → decode_meta yields identical AQ params + codebook, byte-exact (mirror the v2 test).
+        // encode_meta(v3) → decode_meta yields the identical AQ DESCRIPTOR (aq_m + codebook page pointers), byte-
+        // exact. M59 fix: the codebook bytes are NOT inline in the meta item anymore (they overflow one page at
+        // dim=768) — they live on the pages `[aq_cb_first, aq_cb_first+aq_cb_npages)`. So the pure codec exposes
+        // an EMPTY `aq_codebook` (the FFI `read_meta` reassembles it from pages); the descriptor round-trips here.
         let cb = vec![4u8, 2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 128, 63, 9, 8, 7, 6]; // arbitrary AqQuantizer::to_meta_bytes-shaped bytes
         let bytes = encode_meta(&aq_meta_fixture(2, cb.clone()));
         assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), HNSW_STRUCT_VERSION_AQ, "must be v3");
+        // The v3 meta ITEM is tiny (core + 13-byte descriptor) — it can NEVER overflow a page, regardless of dim.
+        assert_eq!(bytes.len(), META_LEN + AQ_DESC_LEN, "v3 meta item is core + fixed 13-byte descriptor only");
         let d = decode_meta(&bytes).expect("v3 decodes");
         assert_eq!(d.aq_m, 2, "aq_m roundtrips");
-        assert_eq!(d.aq_codebook, cb, "AQ codebook roundtrips byte-exact");
+        assert!(d.aq_codebook.is_empty(), "codebook is NOT inline — it lives on pages (read_meta reassembles it)");
+        assert_eq!(d.aq_cb_first, 3, "codebook first-page pointer roundtrips");
+        assert_eq!(d.aq_cb_npages, 1, "codebook page-count roundtrips");
         assert_eq!(d.sbq_bits, 0, "AQ index carries no SBQ (mutually exclusive, D1)");
         assert!(d.codebook.is_empty(), "no v2 codebook on a v3 index");
         assert_eq!(d.dim, 8);
@@ -1521,9 +1655,14 @@ mod tests {
         let meta = decode_meta(&packed.meta).unwrap();
         assert_eq!(meta.aq_m as usize, m_sub, "meta records AQ subspace count");
         assert_eq!(meta.sbq_bits, 0, "v3 index has no SBQ");
-        assert!(!meta.aq_codebook.is_empty(), "AQ codebook persisted in meta");
-        // Reconstruct the quantizer from the persisted codebook and verify each element's code matches.
-        let q = crate::am::aq::AqQuantizer::from_meta_bytes(&meta.aq_codebook).expect("AQ codebook decodes");
+        // M59 fix: the codebook is on the trailing dedicated pages, not inline in the meta. Reassemble it from
+        // those pages (the in-memory dual of what the FFI `read_meta` does from the real relation).
+        let cb = codebook_from_packed(&packed, meta.aq_cb_first, meta.aq_cb_npages);
+        assert!(!cb.is_empty(), "AQ codebook trained and carried on the packed codebook pages");
+        assert_eq!(meta.aq_cb_npages as usize, cb.len().div_ceil(CB_CHUNK).max(1),
+            "meta records exactly enough codebook pages for the trained blob");
+        // Reconstruct the quantizer from the reassembled codebook and verify each element's code matches.
+        let q = crate::am::aq::AqQuantizer::from_meta_bytes(&cb).expect("AQ codebook decodes");
         let dim = idx.dim();
         let ipp = elems_per_page(dim, crate::am::aq::AqQuantizer::bytes_per_vector(dim, m_sub));
         for node in 0..idx.node_count() {
@@ -1549,16 +1688,16 @@ mod tests {
     #[pgrx::pg_test]
     fn decode_meta_rejects_unknown_version() {
         // Negative (Rule 8): a v4 (or any unknown) version in the slot ⇒ typed Err, never a panic across the C
-        // boundary. Also asserts a truncated v3 AQ trailer is rejected (short codebook).
+        // boundary. Also asserts a truncated v3 AQ DESCRIPTOR is rejected (short descriptor).
         let cb = vec![4u8, 2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 128, 63, 9, 8, 7, 6];
         let mut bytes = encode_meta(&aq_meta_fixture(2, cb));
         // Bump the version slot to v4 (unsupported).
         bytes[4..8].copy_from_slice(&4u32.to_le_bytes());
         assert!(decode_meta(&bytes).is_err(), "unknown version v4 must Err, not panic");
-        // A truncated v3 codebook (declared length > present) must also Err.
+        // A truncated v3 descriptor (fewer than the fixed 13 bytes present) must also Err.
         let mut short = encode_meta(&aq_meta_fixture(2, vec![1u8, 2, 3, 4, 5]));
         short.truncate(short.len() - 1);
-        assert!(decode_meta(&short).is_err(), "truncated v3 AQ codebook must Err (Rule 8)");
+        assert!(decode_meta(&short).is_err(), "truncated v3 AQ descriptor must Err (Rule 8)");
     }
 
     #[pgrx::pg_test]

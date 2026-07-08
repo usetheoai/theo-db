@@ -637,7 +637,10 @@ mod tests {
             std::env::set_var("THEODB_HNSW_PARALLEL_THRESHOLD", t);
             let idx = HnswIndex::build(&corpus, HNSW_M, HNSW_EF_CONSTRUCTION, Metric::L2, BUILD_SEED);
             let packed = pack_aq(&idx, 1, m, bits, thr).expect("pack_aq");
-            crate::am::hnsw_page::decode_meta(&packed.meta).unwrap().aq_codebook
+            // M59 fix: the codebook is on the packed codebook pages (no longer inline in the meta item — it
+            // overflows one page at large dim). Reassemble it from those pages to compare seq-vs-parallel.
+            let meta = crate::am::hnsw_page::decode_meta(&packed.meta).unwrap();
+            crate::am::hnsw_page::codebook_from_packed(&packed, meta.aq_cb_first, meta.aq_cb_npages)
         };
         let seq = pack_with_threshold("100000000"); // threshold ≫ n ⇒ sequential
         let par = pack_with_threshold("1"); // threshold 1 ⇒ parallel
@@ -685,5 +688,54 @@ mod tests {
     #[pgrx::pg_test(error = "theodb hnsw build: theodb aq: vector dim 8 is not divisible by m 3 (subspaces must be equal-sized)")]
     fn ambuild_v3_rejects_indivisible_dim() {
         build_indexed_table("aqbad", 20, "pq_subspaces=3, pq_bits=4");
+    }
+
+    /// Build a dim-`dim` table `tbl` with `n` distinct rows, then `CREATE INDEX ... USING theodb_hnsw` with `with`.
+    /// Generalizes `build_indexed_table` to realistic embedding dims (768/1536) so the AQ codebook is multi-page.
+    fn build_indexed_table_dim(tbl: &str, n: i64, dim: usize, with: &str) {
+        pgrx::Spi::run(&format!("CREATE TABLE {tbl} (id int PRIMARY KEY, e vector({dim}))")).unwrap();
+        for i in 0..n {
+            // Distinct, deterministic vectors (varying so k-means has real structure to quantize).
+            let lit = (0..dim)
+                .map(|j| (((i as usize * 31 + j * 7) % 97) as f32 * 0.1).to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            pgrx::Spi::run(&format!("INSERT INTO {tbl} VALUES ({}, '[{lit}]')", i + 1)).unwrap();
+        }
+        let clause = if with.is_empty() { String::new() } else { format!(" WITH ({with})") };
+        pgrx::Spi::run(&format!("CREATE INDEX {tbl}_idx ON {tbl} USING theodb_hnsw (e){clause}")).unwrap();
+    }
+
+    /// M59 REGRESSION (the bug the benchmark's Phase 5 hit): `CREATE INDEX ... WITH (pq_subspaces=8, …)` on a
+    /// dim=768 corpus. The AQ codebook is `m·16·(dim/m)·4 = 8·16·96·4 ≈ 48 KB` — SIX× the 8 KB page — so the old
+    /// codec (codebook inline in the meta item) blew `PageAddItem failed (item too large / page full?)` at build.
+    /// After the M59 fix the codebook is split across dedicated pages, so:
+    ///   1. CREATE INDEX SUCCEEDS (no PageAddItem failure) — this is the RED assertion that failed before the fix;
+    ///   2. the persisted codebook reassembles BIT-EXACT (round-trip through the real pages) and re-encodes a probe
+    ///      identically to a freshly-trained quantizer over the SAME live vectors (deterministic AQ_BUILD_SEED);
+    ///   3. an index scan returns the exact top-k (the multi-page codebook did not corrupt the AH walk / f32 rerank).
+    #[pgrx::pg_test]
+    fn ambuild_dim768_pq_subspaces_multipage_codebook_no_page_overflow() {
+        // dim=768, m=8 → sub_dim=96 → codebook 8*16*96*4 = 49152 B ≈ 6 pages at 8 KB. This CREATE INDEX is the
+        // exact call that raised `PageAddItem failed` before the codebook was paged.
+        build_indexed_table_dim("aq768", 40, 768, "pq_subspaces=8, pq_bits=4, aq_threshold=4100");
+        let meta = unsafe { meta_of("aq768") };
+        assert_eq!(meta.aq_m, 8, "v3 index built with 8 subspaces");
+        assert_eq!(meta.dim, 768, "dim=768");
+        assert!(meta.aq_cb_npages >= 2, "the dim=768 codebook needs MULTIPLE dedicated pages (got {})", meta.aq_cb_npages);
+        // (2) the reassembled codebook round-trips bit-exact and re-encodes identically to a fresh train.
+        let expected_len = 13 + 8 * crate::am::aq::AQ_K_STAR * (768 / 8) * 4; // to_meta_bytes header + centroids
+        assert_eq!(meta.aq_codebook.len(), expected_len, "reassembled codebook is the full multi-page blob");
+        let q = crate::am::aq::AqQuantizer::from_meta_bytes(&meta.aq_codebook).expect("multi-page codebook decodes");
+        assert_eq!(q.m(), 8);
+        assert_eq!(q.dim(), 768, "the decoded codebook covers the full index dim");
+        // The reloption `aq_threshold=4100` is MILLI-scaled (η×1000) → the trained quantizer stores η=4.1.
+        assert!((q.aq_threshold() - 4.1).abs() < 0.01, "η=4.1 (reloption 4100/1000) round-tripped through the paged codebook");
+        // (3) an index scan returns the exact top-k over the built rows.
+        let probe = (0..768).map(|j| (((5usize * 31 + j * 7) % 97) as f32 * 0.1).to_string()).collect::<Vec<_>>().join(",");
+        let (mut exact, mut idx) = topk_sets("aq768", &format!("[{probe}]"), 5);
+        exact.sort_unstable();
+        idx.sort_unstable();
+        assert_eq!(idx, exact, "the dim=768 v3 scan returns the exact top-5 (multi-page codebook intact)");
     }
 }
