@@ -14,11 +14,12 @@ use pgrx::prelude::*;
 use crate::am::options::{lists_from_relation, DEFAULT_LISTS};
 /// HNSW build params for the persisted AM index. Mantidos em (16, 64) — mirror dos defaults SQL de `api.rs`.
 /// NOTA MEDIDA (M57): tentou-se efc=200 para cruzar o gate recall 0.99, mas **degradou** o recall (0.974 -> 0.832
-/// a 500k x 768d, 3 runs; build ~20% mais lento confirmando que efc=200 foi de fato aplicado). Isso revela que o
-/// teto de recall (~0.974) do grafo do theodb NAO e limitado pela profundidade de construcao (efc) e sim por um gap
-/// no heuristico de SELECAO DE VIZINHOS (o theodb nao aplica a poda por diversidade do HNSW/pgvector: mais
-/// candidatos -> vizinhos pior-podados -> grafo menos navegavel). Cruzar 0.99 exige implementar essa poda — um
-/// milestone de qualidade-de-grafo proprio, FORA do escopo do M57 (medicao do SBQ). Ver `docs/adr/0018` + benchmark.
+/// a 500k x 768d, 3 runs; build ~20% mais lento confirmando que efc=200 foi de fato aplicado) — o oposto do
+/// esperado. O theodb JA aplica a poda por diversidade estilo-pgvector (`select_from` em `ann/hnsw.rs`), entao o
+/// teto de recall (~0.974) e a degradacao-por-efc NAO sao "falta do heuristico". A causa-raiz do teto NAO esta
+/// isolada (candidatos: config do m0/layer-0, uma anomalia na interacao efc<->select_from, ou busca query-time);
+/// cruzar 0.99 exige uma INVESTIGACAO de qualidade-de-grafo propria, FORA do escopo do M57 (medicao do SBQ).
+/// Ver `docs/adr/0018` + benchmark M57. Config mantida em (16, 64) por ser a melhor medida.
 pub(crate) const HNSW_M: usize = 16;
 pub(crate) const HNSW_EF_CONSTRUCTION: usize = 64;
 const BUILD_SEED: u64 = 42;

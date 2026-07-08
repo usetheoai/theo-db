@@ -76,12 +76,14 @@ não expõe esse gargalo.
    pede. Baseline pgvector só existe a 100k (Resultado 1). Não afeta o veredito (SBQ vs f32, ambos theodb).
 3. **recall casado 0.974 < 0.99 a 500k — teto de qualidade do grafo do theodb, e o gate 0.99 NÃO é alcançável por
    tuning de build.** Testado: `ef_construction` 64→200 **DEGRADOU** o recall (0.974 → **0.832** a 500k, 3 runs;
-   build ~20% mais lento confirmando que efc=200 foi aplicado) — o oposto do esperado. Isso revela que o teto NÃO é
-   profundidade de construção (efc) e sim um **gap no heurístico de seleção de vizinhos** (o theodb não aplica a poda
-   por diversidade do HNSW/pgvector → mais candidatos = vizinhos pior-podados = grafo menos navegável). `M` está
-   travado em 16 pelo layout de página (`hnsw.rs:428`). **Cruzar 0.99 exige implementar a poda por diversidade — um
-   milestone de qualidade-de-grafo próprio, FORA do escopo do M57** (que mede o SBQ). O veredito SBQ é robusto ao
-   recall casado medido (0.974, SBQ sempre < f32). Evidência da degradação: `m57-raw/m57p_efc200_r{1,2,3}.json`.
+   build ~20% mais lento confirmando que efc=200 foi aplicado) — o oposto do esperado. O theodb **JÁ aplica** a poda
+   por diversidade estilo-pgvector (`select_from` em `ann/hnsw.rs:255` — mantém um candidato só se estiver mais perto
+   da query que de qualquer vizinho já-mantido), então o teto de 0.974 e a degradação-por-efc **NÃO** são "falta do
+   heurístico". A causa-raiz do teto **não está isolada** (candidatos: config do `m0`/layer-0, uma anomalia na
+   interação `ef_construction`↔`select_from`, ou a busca em query-time); `M` está travado em 16 pelo layout de página
+   (`hnsw.rs:428`). **Cruzar 0.99 exige uma INVESTIGAÇÃO de qualidade-de-grafo própria, FORA do escopo do M57** (que
+   mede o SBQ). O veredito SBQ é robusto ao recall casado medido (0.974, SBQ sempre < f32). Evidência da degradação:
+   `m57-raw/m57p_efc200_r{1,2,3}.json`.
    pgvector a 500k (shm=8g): recall 0.936, ~289 qps — baseline (theodb f32 0.974 tem recall *maior* a 500k).
 4. **1-cliente** (sem concorrência). Um QPS multi-cliente pode mudar absolutos, não a razão SBQ<f32 (mesmo custo
    por query relativo).
