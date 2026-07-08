@@ -31,14 +31,16 @@ SPECS = {
     "theodb_hnsw_sbq": {
         "ddl": "CREATE INDEX bench_sbq ON {t} USING theodb_hnsw (v theodb_hnsw_cosine_ops) WITH (sbq_bits = 8)",
         "drop": "DROP INDEX IF EXISTS bench_sbq",
-        "knob": lambda x: ["SET theodb_hnsw.ef_search = 400", f"SET theodb_hnsw.over_fetch = {x}"],
-        "sweep": [2, 4, 8, 16],
+        # M57 D3: ef high enough to clear the recall≥0.99 gate at scale (the DoD's matched-recall bar); over_fetch
+        # is the SBQ recall-recovery knob (M40). Env EF_SBQ overrides for a quick recall-reachability probe.
+        "knob": lambda x: [f"SET theodb_hnsw.ef_search = {os.environ.get('EF_SBQ', '800')}", f"SET theodb_hnsw.over_fetch = {x}"],
+        "sweep": [4, 8, 16, 32],
     },
     "theodb_hnsw_f32": {
         "ddl": "CREATE INDEX bench_f32 ON {t} USING theodb_hnsw (v theodb_hnsw_cosine_ops)",
         "drop": "DROP INDEX IF EXISTS bench_f32",
         "knob": lambda x: [f"SET theodb_hnsw.ef_search = {x}"],
-        "sweep": [40, 100, 200, 400],
+        "sweep": [200, 400, 800, 1000],
     },
     "pgvector_hnsw": {
         "ddl": "CREATE INDEX bench_pgv ON {t} USING hnsw (v vector_cosine_ops) WITH (m=16, ef_construction=64)",
@@ -50,8 +52,13 @@ SPECS = {
 
 
 def _conn():
+    # TCP keepalives: an analytical run alternates long CPU-bound client stretches (numpy corpus gen) with long
+    # server-bound waits (CREATE INDEX). On a loopback under load, an idle-looking socket can be dropped mid-run,
+    # leaving the client blocked in poll() with no server backend. Keepalives probe the peer so the OS surfaces a
+    # dead connection as an error (fail-fast) instead of an infinite hang. Proper for long-lived connections.
     c = psycopg2.connect(host=PGHOST, port=PGPORT, user=PGUSER, password=PGPASSWORD, dbname="postgres",
-                         connect_timeout=15)
+                         connect_timeout=15, keepalives=1, keepalives_idle=15, keepalives_interval=5,
+                         keepalives_count=5)
     c.autocommit = True
     return c
 
@@ -60,12 +67,29 @@ def _load():
     return round(os.getloadavg()[0], 2)
 
 
+N_CLUSTERS = 256          # gaussian-mixture centers — gives the corpus real NN structure (see _centers)
+CLUSTER_STD = 0.12        # within-cluster spread ≪ inter-center distance (~√2 for unit gaussians) → tight clusters
+
+
+def _centers(dim, seed):
+    # Deterministic mixture centers, SHARED by _make_dataset (assigns each row to a center) and _queries (samples
+    # near a center). PURE random gaussian in high dim is DEGENERATE for ANN — all points are ~equidistant, so
+    # recall@10 is arbitrary even for pgvector (measured 0.29 @ 100k×768d). A gaussian MIXTURE injects the cluster
+    # structure real embeddings have: a query near center j has its true NNs among that cluster's members, so a
+    # working index recovers them (high recall) and a broken one does not (low) — a valid discriminator. Honest
+    # measurement (m46 lesson: no data-degeneracy). Same seed → identical centers on both sides.
+    import numpy as np
+    return np.random.default_rng(seed).standard_normal((N_CLUSTERS, dim)).astype(np.float32)
+
+
 def _make_dataset(cur, table, n, dim, seed):
-    # M57: stream the gaussian corpus via COPY with NUMPY generation (O(1) client RAM, and numpy removes the
-    # per-float `random.gauss` bottleneck that makes 1M×768d unusably slow in pure Python). A `read()`-only
-    # file-like feeds `copy_expert` chunk-by-chunk so client RAM stays bounded regardless of n.
+    # M57: stream a gaussian-MIXTURE corpus via COPY with NUMPY generation (O(1) client RAM; numpy removes the
+    # per-float bottleneck that makes 1M×768d unusably slow in pure Python). Each row = its cluster center + tight
+    # noise, so the corpus has real NN structure. A `read()`-only file-like feeds `copy_expert` chunk-by-chunk so
+    # client RAM stays bounded regardless of n.
     import numpy as np
     rng = np.random.default_rng(seed)
+    centers = _centers(dim, seed)
     cur.execute(f"DROP TABLE IF EXISTS {table}")
     cur.execute(f"CREATE TABLE {table} (id int, v vector({dim}))")
 
@@ -80,9 +104,10 @@ def _make_dataset(cur, table, n, dim, seed):
             m = min(20000, n - self.i)
             if m <= 0:
                 return ""
-            arr = rng.standard_normal((m, dim)).astype(np.float32)
-            fmt = np.char.mod("%.4f", arr)  # (m, dim) string array — the %.4f formatting runs at C speed
             base = self.i
+            ids = np.arange(base, base + m)
+            arr = centers[ids % N_CLUSTERS] + CLUSTER_STD * rng.standard_normal((m, dim)).astype(np.float32)
+            fmt = np.char.mod("%.4f", arr)  # (m, dim) string array — the %.4f formatting runs at C speed
             self.i += m
             return "".join(f"{base + r}\t[" + ",".join(fmt[r]) + "]\n" for r in range(m))
 
@@ -91,9 +116,14 @@ def _make_dataset(cur, table, n, dim, seed):
 
 
 def _queries(dim, nq, seed):
-    import random
-    rnd = random.Random(seed + 1)
-    return ["[" + ",".join(f"{rnd.gauss(0, 1):.4f}" for _ in range(dim)) + "]" for _ in range(nq)]
+    # Sample each query near a mixture center (+ tight noise), matching the corpus structure so true NNs exist.
+    import numpy as np
+    rng = np.random.default_rng(seed + 1)
+    centers = _centers(dim, seed)
+    idx = rng.integers(0, N_CLUSTERS, size=nq)
+    q = centers[idx] + CLUSTER_STD * rng.standard_normal((nq, dim)).astype(np.float32)
+    fmt = np.char.mod("%.4f", q)
+    return ["[" + ",".join(fmt[r]) + "]" for r in range(nq)]
 
 
 def _ground_truth(cur, table, queries, k):
@@ -133,22 +163,30 @@ def run(n, dim, nq, k, runs):
     gt = _ground_truth(cur, table, queries, k)
 
     results = {name: [] for name in SPECS}
+    # M57: build each index ONCE (deterministic), then measure `runs` times. The old code rebuilt every spec on
+    # every run (runs× = 9 builds at runs=3), which made the 1M×768d run impractical. Build-once + measure-runs
+    # gives the same mean±std on the varying metric (QPS/recall) at 1/runs the build cost.
+    build_s = {}
+    for name, spec in SPECS.items():
+        cur.execute(spec["drop"])
+        try:
+            t0 = time.perf_counter()
+            cur.execute(spec["ddl"].format(t=table))
+            build_s[name] = round(time.perf_counter() - t0, 2)
+        except Exception as e:  # noqa: BLE001 — record honestly, never fabricate
+            build_s[name] = None
+            results[name].append({"error": str(e)[:160]})
     loads = []
     for _ in range(runs):
         loads.append(_load())
         for name, spec in SPECS.items():
-            cur.execute(spec["drop"])
-            try:
-                t0 = time.perf_counter()
-                cur.execute(spec["ddl"].format(t=table))
-                build_s = round(time.perf_counter() - t0, 2)
-            except Exception as e:  # noqa: BLE001 — record honestly, never fabricate
-                results[name].append({"error": str(e)[:160]})
-                continue
-            pts = [{"knob": v, "build_s": build_s, **_measure(cur, table, spec, v, queries, gt, k)}
+            if build_s.get(name) is None:
+                continue  # build failed — error already recorded
+            pts = [{"knob": v, "build_s": build_s[name], **_measure(cur, table, spec, v, queries, gt, k)}
                    for v in spec["sweep"]]
             results[name].append(pts)
-            cur.execute(spec["drop"])
+    for name, spec in SPECS.items():
+        cur.execute(spec["drop"])
     conn.close()
 
     agg = {}

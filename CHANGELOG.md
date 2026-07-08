@@ -24,6 +24,28 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.49.0] - 2026-07-08
+
+### Added
+- **Roadmap: M57 concluído (re-escopado) + M60 aberto (sign-off do usuário 2026-07-08)**: o M57 entregou o veredito D3 (SBQ NÃO é superior — honest-negative). O checkpoint `recall casado ≥0.99` foi re-escopado para o M57 (comparação entregue a recall casado 0.974, o teto do grafo HNSW do theodb) e o gate literal `≥0.99` movido para o novo **M60 — Qualidade de recall do HNSW** (gap ~2pt vs pgvector), por ser **ortogonal ao SBQ** (provado por 3 fixes medidos-e-refutados + bissecção; afeta f32 e SBQ igualmente). M57 marcado `[x]`.
+- **M57 — `THEODB_HNSW_PARALLEL_THRESHOLD` (env) para forçar o build sequencial a escala**: override do limiar que decide build paralelo vs sequencial do HNSW (default inalterado = 4096). Permite reproduzir o build determinístico a escala e **bissecionar** se o teto de recall (~0.974) vem da contenção paralela ou do algoritmo base — sem tocar o código do build. Ver `docs/benchmarks/m57-sbq-superiority.md`.
+- **M57 (P0) — veredito D3 do SBQ-inline: HONEST-NEGATIVE (medido)**: benchmark de superioridade vetorial a escala + pressão de RAM (`docs/benchmarks/m57-sbq-superiority.md`, dados brutos em `docs/benchmarks/m57-raw/`). A tese "SBQ inline entrega ≥2× QPS a recall≥0.99 sob pressão" está **FALSIFICADA**: a 500k×768d o SBQ é recall-neutro vs f32 mas **0.35–0.77× do QPS** (mais lento) em TODOS os regimes (in-RAM, pressão 1.8GB, 1.3GB). Mecanismo: o HNSW tem localidade de acesso (o índice f32 não thrasha sob pressão) e o read-path Hamming-walk+rerank do SBQ é mais caro por query. Achado positivo à parte: theodb HNSW ~1.2× QPS > pgvector a 100k (recall equivalente). Decisão em `docs/adr/0018-m57-sbq-inline-not-superior.md` (finaliza o D3 do ADR-0015; reenquadra o P1/M59 para quantização anisotrópica).
+- **M57 — driver de pressão de RAM** `benchmarks/run_m57_pressure.py`: split `--phase build|measure` que reusa o harness M51 (Regra 9) para constranger a RAM do container ENTRE build e medição (`docker update --memory`), medindo o QPS sob pressão de verdade.
+
+- **M57 — harness: sweep de `ef_search` mais alto p/ sondar o gate recall≥0.99**: `run_m51_sbq_inline.py` agora varre f32 em `[200,400,800,1000]` e o SBQ com `EF_SBQ` (env, default 800) — para caracterizar o teto de recall do grafo a escala (o consolidado da investigação está na entrada § Fixed abaixo e no M60).
+- **M57 (P0) — harness build-once**: `run_m51_sbq_inline.py` builda cada índice UMA vez e mede `runs×` (antes rebuildava por run → 9 builds a runs=3, o que tornava o 1M×768d impraticável). Mesmo mean±std na métrica que varia (QPS/recall) a 1/runs do custo de build. Junto com o SIMD cosine do M58 (3.15×), viabiliza o benchmark P0 a 1M.
+
+### Deprecated
+
+### Removed
+
+### Fixed
+- **M57 — investigação do teto de recall do HNSW (TRÊS tentativas de fix REFUTADAS por medição, honesto)**: o grafo HNSW satura em recall@10 ~0.96–0.974 a 100k–500k×768d (< gate 0.99). Tentou-se e mediu-se PIOR em todas: (1) `ef_construction` 64→200 → 0.832; (2) MERGE de back-links no build paralelo → 0.846; (3) `HNSW_M` 16→32 → 0.952 (mais conectividade PIORANDO o recall — anômalo). Todas revertidas (config 16/64/OVERWRITE, a melhor medida). Bissecção (`THEODB_HNSW_PARALLEL_THRESHOLD`): build sequencial ≈ paralelo → NÃO é contenção paralela. **Lead forte p/ o M60:** o recall é não-monotônico/plateau em `ef_search` e nenhuma mudança de BUILD move o teto → provável **bug no SCAN** (`am/hnsw_page.rs` traverse — beam search/heap), comum aos dois builds. Exige investigação própria (M60-class), fora do escopo do M57. O veredito SBQ (0.31–0.77×, falsificado) é robusto ao recall casado. Ver `docs/benchmarks/m57-sbq-superiority.md` § caveat 3 + `docs/adr/0018`.
+- **M57 (P0) — dataset degenerado corrigido no harness**: `run_m51_sbq_inline.py` gerava um corpus gaussian **puro** (`standard_normal`), degenerado para ANN — em 768d todos os pontos são ~equidistantes, então o recall@10 é arbitrário (medido 100k×768d: SBQ=f32=0.033, até pgvector só 0.29). Trocado por **gaussian-mixture** (256 centros, cada ponto = centro + ruído tight) que injeta estrutura de vizinhança real; validado a 5k×768d: SBQ=f32=pgvector recall **1.0**. Sem isso o veredito D3 do M57 mediria lixo (honestidade de medição, Regra 3; lição m46 data-degeneracy).
+- **M57 (P0) — keepalives TCP no harness**: `_conn()` agora usa `keepalives=1` (idle 15s) — um run analítico alterna trechos longos CPU-bound (geração numpy) e server-bound (CREATE INDEX); em loopback sob carga um socket ocioso podia ser derrubado, deixando o cliente pendurado em `poll()` sem backend. Keepalives fazem o SO surfar a conexão morta como erro (fail-fast) em vez de hang infinito.
+
+### Security
+
 ## [0.48.0] - 2026-07-07
 
 ### Added

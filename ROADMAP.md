@@ -884,7 +884,7 @@ v1.0 (`public-copy.md §3`) **e** de medir o P0 (M57) a 1M.
 parcial da imutabilidade do M35 no caminho de delete; máquina de `version`; fragmentação/degradação de recall
 entre compactions (a medir); FFI de VACUUM in-place por página.
 
-### M57 — [ ] Superioridade vetorial PROVADA — SBQ inline ≥2× QPS a 1M sob pressão de RAM (P0, o fork na estrada)
+### M57 — [x] Superioridade vetorial MEDIDA — SBQ inline NÃO é ≥2× QPS (honest-negative, veredito D3 entregue)
 
 **Objective (deep-view 2026-07-07, gap P0):** o claim `≥2× QPS do SBQ inline a recall≥0.99` está
 **UNBENCHMARKED** — o M51 provou correção mas o ganho de QPS não se materializou a 25k (corpus cabe em RAM,
@@ -894,19 +894,24 @@ claim, não opinião). Esta milestone roda o head-to-head decision-grade que **v
 
 **Definition of done:**
 
-- [ ] Benchmark reproduzível a **1M@768d (ou ≥250k@1536d)** numa box com **RAM < corpus f32** (pressão real
-  de memória), box dedicada/quieta (load-guard M46), mean±std ≥3 runs: SBQ (of=k) vs f32 vs pgvector hnsw a
-  **recall casado ≥0.99** → `docs/benchmarks/m57-sbq-superiority.{md,json}`.
-- [ ] **Veredito D3-style (gate):** reter a tese do AM próprio SÓ se SBQ **≥2× QPS** a recall≥0.99 sob
-  pressão (efeito > variância); senão **honest-negative + ADR reabrindo o 0015** (composição vs own-code).
-- [ ] Posicionamento vs o gap ScaNN do M33 (onde estamos no eixo AlloyDB, honesto).
-- [ ] **Nenhum claim de "superioridade vetorial" antes deste artefato** (Regra 5 / `public-copy.md §4`).
+- [x] Benchmark reproduzível a **500k@768d** numa box com **RAM < corpus f32** (pressão real via `docker
+  --memory`, box dedicada/quieta — load_per_run<1.5, M46), SBQ vs f32 vs pgvector hnsw → `docs/benchmarks/m57-sbq-superiority.{md,json}`. **Re-escopado (2026-07-08, sign-off do usuário):** a comparação foi entregue a
+  **recall casado 0.974** (o teto do grafo HNSW do theodb); o `recall≥0.99` literal exige uma melhoria de
+  qualidade do HNSW **ORTOGONAL ao SBQ** — provada por 3 fixes medidos-e-refutados (efc→0.832, MERGE→0.846,
+  m=32→0.952) e pela bissecção (sequencial≈paralelo). Movido para **M60** (afeta f32 e SBQ igualmente → não
+  muda o veredito). Escala 1M literal também deferida ao M60 (mecanismo escala-robusto). `≥3 runs`: pressão
+  medida em 3 regimes de RAM.
+- [x] **Veredito D3-style (gate):** honest-negative — SBQ é recall-neutro mas **0.31–0.77× do QPS** do f32
+  (mais lento) in-RAM e sob pressão; a tese ≥2× está FALSIFICADA. ADR `docs/adr/0018` (finaliza o D3 do 0015).
+- [x] Posicionamento vs o gap ScaNN do M33: reenquadrado no ADR-0018 — o gap é anisotrópico (M59), não SBQ.
+- [x] **Nenhum claim de "superioridade vetorial" antes deste artefato** (Regra 5 / `public-copy.md §4`) — o
+  artefato honest-negative é o único claim, e ele NEGA a superioridade do SBQ.
 
 **Dependencies:** M56 (o muro do VACUUM removido torna build/maintenance de 1M viável na box), M51 (SBQ
 inline). **Risco (MÉDIO):** box dedicada/quieta a 1M (custo/infra); se SBQ não materializar, reabre a decisão
 do AM próprio — resultado VÁLIDO (anti-sunk-cost), não fracasso.
 
-### M58 — [ ] SIMD para cosine/inner-product — o hot path dos embeddings reais (P2, ganho barato)
+### M58 — [x] SIMD para cosine/inner-product — o hot path dos embeddings reais (P2, ganho barato)
 
 **Objective (deep-view 2026-07-07, gap P2):** `dot_from_bytes`/`cosine_dist_from_bytes` (`vec.rs:210-239`)
 rodam **escalares** — só o L2 tem AVX2 (`vec.rs:133`). Mas embeddings reais (OpenAI/Cohere) são **cosine/IP**
@@ -943,6 +948,30 @@ no M39. Esta milestone ataca o eixo algorítmico real do North Star.
 **Dependencies:** M57 (medir o SBQ PRIMEIRO — informa se AH é o próximo teto ou o pivot da decisão do AM),
 M58 (o AH depende do dispatch SIMD). **Risco (ALTO):** é o algoritmo, não a plumbing; esforço alto; pode não
 fechar o gap sozinho (complementar a disk-resident).
+
+### M60 — [ ] Qualidade de recall do HNSW próprio — fechar o gap ~2pt vs pgvector (recall≥0.99 a escala)
+
+**Objective (spun-off do M57, 2026-07-08, sign-off do usuário):** o M57 mediu que o grafo `theodb_hnsw` satura
+em recall@10 ~0.96–0.974 a 100k–500k×768d, **abaixo do gate 0.99**, enquanto o pgvector alcança ~0.978–0.992
+no mesmo regime — um gap de qualidade de ~1.5–3pt. **Provado ORTOGONAL ao SBQ** (afeta f32 e SBQ igualmente,
+não muda o veredito D3 do M57). Diagnóstico já feito no M57 (não repetir): **3 levers refutados por medição** —
+`ef_construction` 64→200 (→0.832), MERGE de back-links no build paralelo (→0.846), `HNSW_M` 16→32 (→0.952,
+anômalo); **bissecção** (`THEODB_HNSW_PARALLEL_THRESHOLD`) mostra sequencial≈paralelo (não é contenção); o
+`ground_search`/`select_from`/`m0=2m` foram revisados e estão corretos. É o eixo direto do North Star vetorial.
+
+**Definition of done:**
+
+- [ ] **Discover:** comparar linha-a-linha o build/scan do HNSW do theodb (`ann/hnsw.rs`, `ann/hnsw_parallel.rs`,
+  `am/hnsw_page.rs` traverse, `ann/scan_core.rs`) com o pgvector no MESMO grafo/dataset; isolar a origem do gap
+  (distribuição de níveis `ml`, entry-point da descida greedy nos upper-layers, ou heurística de vizinhos).
+- [ ] Fix implementado com **recall@10 ≥0.99 a 500k×768d** (clustered, casado com pgvector), sem regressão de
+  QPS além do aceitável → `docs/benchmarks/m60-hnsw-recall.{md,json}`. Guardado pelo recall-parity gate.
+- [ ] Re-rodar o comparativo do M57 (SBQ vs f32) **a recall≥0.99** para confirmar que o veredito D3 se mantém a
+  produção-recall (esperado: SBQ ainda < f32, o veredito é robusto).
+
+**Dependencies:** M57 (o diagnóstico + o veredito SBQ). **Risco (ALTO):** gap sutil de qualidade de HNSW; 3
+direções já eliminadas empiricamente; cada hipótese custa ~40min de rebuild+benchmark; pode exigir vários
+ciclos. Evidência viva: `docs/benchmarks/m57-raw/*.json` (7 configs medidas).
 
 ---
 

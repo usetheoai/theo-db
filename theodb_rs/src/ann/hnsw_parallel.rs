@@ -17,6 +17,16 @@ use std::sync::RwLock;
 /// thread-overhead-free — the tiny AM test corpora stay on the unchanged sequential path).
 pub(super) const PARALLEL_BUILD_THRESHOLD: usize = 4096;
 
+/// The effective threshold, overridable via `THEODB_HNSW_PARALLEL_THRESHOLD` (env). Default = the const above, so
+/// shipped behavior is unchanged. Purpose: force the deterministic SEQUENTIAL build at scale for reproducibility /
+/// graph-quality bisection (M57 — separar contenção-paralela de qualidade-do-algoritmo sem tocar o código do build).
+pub(super) fn parallel_threshold() -> usize {
+    std::env::var("THEODB_HNSW_PARALLEL_THRESHOLD")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(PARALLEL_BUILD_THRESHOLD)
+}
+
 /// Build the HNSW graph concurrently over `vectors` (all equal-dim) with pre-assigned `levels` (deterministic).
 /// Node 0 is the seed entry. Returns `(neighbors, entry, max_level)` in the same shape the sequential build yields.
 /// Every this many nodes, the leader joins all workers and calls `check_interrupt` (M48 T4.1). Batching is what
@@ -110,9 +120,12 @@ fn insert_node(
         // This node's own neighbors on this layer. Honest note (M44 review, LOW): the assignment OVERWRITES the
         // list, so an in-flight back-link another thread pushed to `node[layer]` (having reached `node` via a
         // higher layer) can be clobbered — a LOGICAL lost-update (not a data race: both under this write lock).
-        // It only slightly reduces in-edges → a recall effect, well inside the accepted racy-build envelope (ADR
-        // D2) and empirically covered by the recall-parity gate (Δ +0.0055 @50k). If recall ever regresses under
-        // high contention, the minimal fix is to MERGE (extend+prune) instead of overwrite — YAGNI until measured.
+        // M57 NOTA MEDIDA: testou-se o "minimal fix" MERGE (extend+prune) que o comentário previa — e ele PIOROU o
+        // recall (0.974→0.846 a 500k, com recall NÃO-monotônico em ef_search: sinal de grafo corrompido). Ou seja,
+        // manter o conjunto `selected` limpo (diversity-pruned dos MELHORES candidatos) é superior a mesclá-lo com
+        // back-links arbitrários. O OVERWRITE fica. O teto de recall (~0.974 a 500k) do build paralelo NÃO é o
+        // lost-update — a causa-raiz continua não-isolada e exige investigação de grafo própria (M60). Ver
+        // `docs/benchmarks/m57-sbq-superiority.md` § caveat 3 (duas tentativas de fix refutadas por medição).
         {
             let mut nn = neighbors[node].write().unwrap();
             if layer < nn.len() {
