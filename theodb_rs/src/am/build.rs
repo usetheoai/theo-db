@@ -12,15 +12,14 @@ use pgrx::prelude::*;
 /// Default IVFFlat list count — the reloption default lives in `options::DEFAULT_LISTS` (M34). Re-exported here for
 /// the empty/HNSW build paths that don't read the reloption.
 use crate::am::options::{lists_from_relation, DEFAULT_LISTS};
-/// HNSW build params for the persisted AM index. Mantidos em (16, 64) — mirror dos defaults SQL de `api.rs`.
-/// NOTA MEDIDA (M57): tentou-se efc=200 para cruzar o gate recall 0.99, mas **degradou** o recall (0.974 -> 0.832
-/// a 500k x 768d, 3 runs; build ~20% mais lento confirmando que efc=200 foi de fato aplicado) — o oposto do
-/// esperado. O theodb JA aplica a poda por diversidade estilo-pgvector (`select_from` em `ann/hnsw.rs`), entao o
-/// teto de recall (~0.974) e a degradacao-por-efc NAO sao "falta do heuristico". A causa-raiz do teto NAO esta
-/// isolada (candidatos: config do m0/layer-0, uma anomalia na interacao efc<->select_from, ou busca query-time);
-/// cruzar 0.99 exige uma INVESTIGACAO de qualidade-de-grafo propria, FORA do escopo do M57 (medicao do SBQ).
-/// Ver `docs/adr/0018` + benchmark M57. Config mantida em (16, 64) por ser a melhor medida.
-pub(crate) const HNSW_M: usize = 16;
+/// HNSW build params for the persisted AM index. `m=32` (M57 recall gate): a conectividade do grafo (`M`) e o lever
+/// canonico de recall do HNSW. MEDIDO no M57 que a config antiga m=16 satura em recall ~0.96-0.974 a 100k-500k
+/// (< gate 0.99), tanto no build paralelo quanto no sequencial (bissectado — NAO e contencao paralela, e a
+/// conectividade base). Antes tentou-se efc=200 (degradou p/ 0.832) e o MERGE de back-links (degradou p/ 0.846) —
+/// ambos refutados por medicao e revertidos. `m=32` dobra a conectividade; page-safe: `nbr_size(32) = 4 + (m0 +
+/// 32*m)*6 = 4 + (64 + 1024)*6 = 6532 B < BLCKSZ(8192)`. `m0 = m*2 = 64` (auto). Custo: build/indice ~2x (aceito —
+/// Esforco != Complexidade). Ver `docs/adr/0018` + `docs/benchmarks/m57-sbq-superiority.md`.
+pub(crate) const HNSW_M: usize = 32;
 pub(crate) const HNSW_EF_CONSTRUCTION: usize = 64;
 const BUILD_SEED: u64 = 42;
 
