@@ -50,8 +50,13 @@ SPECS = {
 
 
 def _conn():
+    # TCP keepalives: an analytical run alternates long CPU-bound client stretches (numpy corpus gen) with long
+    # server-bound waits (CREATE INDEX). On a loopback under load, an idle-looking socket can be dropped mid-run,
+    # leaving the client blocked in poll() with no server backend. Keepalives probe the peer so the OS surfaces a
+    # dead connection as an error (fail-fast) instead of an infinite hang. Proper for long-lived connections.
     c = psycopg2.connect(host=PGHOST, port=PGPORT, user=PGUSER, password=PGPASSWORD, dbname="postgres",
-                         connect_timeout=15)
+                         connect_timeout=15, keepalives=1, keepalives_idle=15, keepalives_interval=5,
+                         keepalives_count=5)
     c.autocommit = True
     return c
 
@@ -60,12 +65,29 @@ def _load():
     return round(os.getloadavg()[0], 2)
 
 
+N_CLUSTERS = 256          # gaussian-mixture centers — gives the corpus real NN structure (see _centers)
+CLUSTER_STD = 0.12        # within-cluster spread ≪ inter-center distance (~√2 for unit gaussians) → tight clusters
+
+
+def _centers(dim, seed):
+    # Deterministic mixture centers, SHARED by _make_dataset (assigns each row to a center) and _queries (samples
+    # near a center). PURE random gaussian in high dim is DEGENERATE for ANN — all points are ~equidistant, so
+    # recall@10 is arbitrary even for pgvector (measured 0.29 @ 100k×768d). A gaussian MIXTURE injects the cluster
+    # structure real embeddings have: a query near center j has its true NNs among that cluster's members, so a
+    # working index recovers them (high recall) and a broken one does not (low) — a valid discriminator. Honest
+    # measurement (m46 lesson: no data-degeneracy). Same seed → identical centers on both sides.
+    import numpy as np
+    return np.random.default_rng(seed).standard_normal((N_CLUSTERS, dim)).astype(np.float32)
+
+
 def _make_dataset(cur, table, n, dim, seed):
-    # M57: stream the gaussian corpus via COPY with NUMPY generation (O(1) client RAM, and numpy removes the
-    # per-float `random.gauss` bottleneck that makes 1M×768d unusably slow in pure Python). A `read()`-only
-    # file-like feeds `copy_expert` chunk-by-chunk so client RAM stays bounded regardless of n.
+    # M57: stream a gaussian-MIXTURE corpus via COPY with NUMPY generation (O(1) client RAM; numpy removes the
+    # per-float bottleneck that makes 1M×768d unusably slow in pure Python). Each row = its cluster center + tight
+    # noise, so the corpus has real NN structure. A `read()`-only file-like feeds `copy_expert` chunk-by-chunk so
+    # client RAM stays bounded regardless of n.
     import numpy as np
     rng = np.random.default_rng(seed)
+    centers = _centers(dim, seed)
     cur.execute(f"DROP TABLE IF EXISTS {table}")
     cur.execute(f"CREATE TABLE {table} (id int, v vector({dim}))")
 
@@ -80,9 +102,10 @@ def _make_dataset(cur, table, n, dim, seed):
             m = min(20000, n - self.i)
             if m <= 0:
                 return ""
-            arr = rng.standard_normal((m, dim)).astype(np.float32)
-            fmt = np.char.mod("%.4f", arr)  # (m, dim) string array — the %.4f formatting runs at C speed
             base = self.i
+            ids = np.arange(base, base + m)
+            arr = centers[ids % N_CLUSTERS] + CLUSTER_STD * rng.standard_normal((m, dim)).astype(np.float32)
+            fmt = np.char.mod("%.4f", arr)  # (m, dim) string array — the %.4f formatting runs at C speed
             self.i += m
             return "".join(f"{base + r}\t[" + ",".join(fmt[r]) + "]\n" for r in range(m))
 
@@ -91,9 +114,14 @@ def _make_dataset(cur, table, n, dim, seed):
 
 
 def _queries(dim, nq, seed):
-    import random
-    rnd = random.Random(seed + 1)
-    return ["[" + ",".join(f"{rnd.gauss(0, 1):.4f}" for _ in range(dim)) + "]" for _ in range(nq)]
+    # Sample each query near a mixture center (+ tight noise), matching the corpus structure so true NNs exist.
+    import numpy as np
+    rng = np.random.default_rng(seed + 1)
+    centers = _centers(dim, seed)
+    idx = rng.integers(0, N_CLUSTERS, size=nq)
+    q = centers[idx] + CLUSTER_STD * rng.standard_normal((nq, dim)).astype(np.float32)
+    fmt = np.char.mod("%.4f", q)
+    return ["[" + ",".join(fmt[r]) + "]" for r in range(nq)]
 
 
 def _ground_truth(cur, table, queries, k):

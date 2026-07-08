@@ -22,6 +22,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Removed
 
 ### Fixed
+- **M57 (P0) — dataset degenerado corrigido no harness**: `run_m51_sbq_inline.py` gerava um corpus gaussian **puro** (`standard_normal`), degenerado para ANN — em 768d todos os pontos são ~equidistantes, então o recall@10 é arbitrário (medido 100k×768d: SBQ=f32=0.033, até pgvector só 0.29). Trocado por **gaussian-mixture** (256 centros, cada ponto = centro + ruído tight) que injeta estrutura de vizinhança real; validado a 5k×768d: SBQ=f32=pgvector recall **1.0**. Sem isso o veredito D3 do M57 mediria lixo (honestidade de medição, Regra 3; lição m46 data-degeneracy).
+- **M57 (P0) — keepalives TCP no harness**: `_conn()` agora usa `keepalives=1` (idle 15s) — um run analítico alterna trechos longos CPU-bound (geração numpy) e server-bound (CREATE INDEX); em loopback sob carga um socket ocioso podia ser derrubado, deixando o cliente pendurado em `poll()` sem backend. Keepalives fazem o SO surfar a conexão morta como erro (fail-fast) em vez de hang infinito.
 
 ### Security
 
