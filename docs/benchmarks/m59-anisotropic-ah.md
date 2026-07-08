@@ -28,46 +28,64 @@ batch-scan contíguo (IVF)**, não a caminhada pointer-chasing do HNSW. ADR `doc
 | 20k | **0.995 / 1494** | 0.995 / 1298 | 0.995 / 1286 | 1.0 / 1259 | **1.16×** |
 | 100k | 0.978 / 1017 | 0.978 / 1041 | 0.978 / 1047 | 0.996 / 484 | 0.97× |
 
-- A **20k in-RAM o AQ VENCE o f32 (1.16×)** — o **primeiro** índice quantizado do theodb a superar o f32 (o
-  SBQ do M57 era 0.35–0.77×, mais lento). Confirma que o AH-LUT é o lever certo (não bit-quantization).
-- A **100k a vantagem evapora** (AQ ≈ f32, paridade) — o grafo satura em recall 0.978 (o teto do HNSW do
-  theodb, gap M60/ortogonal; pgvector chega a 0.996) e o scoring deixa de ser o gargalo.
+- A **20k in-RAM o AQ mede 1.16× o f32** — **consistente com o lever AH-LUT (não bit-quantization), mas dentro do
+  ruído de 1 run / 20 queries** (Δp50 ~0.1 ms sub-ms, `load_per_run≈4`; NÃO é uma "vitória" decision-grade — o
+  `analysis-golden-rule.md § 3` pede ≥3 runs mean±std). Ainda assim é o 1º sinal de um quantizado do theodb ≥ f32
+  (o SBQ do M57 era 0.35–0.77×, mais lento). O veredito D3 **não depende deste ponto** — o discriminador é a
+  paridade a 500k (abaixo), robusta.
+- A **100k a paridade (AQ ≈ f32)** já aparece — o grafo satura em recall 0.978 (o teto do HNSW do theodb, gap
+  M60/ortogonal; pgvector chega a 0.996) e o scoring deixa de ser o gargalo.
 
 ## Resultado 2 — AQ vs f32 sob pressão de RAM (o discriminador D3, 500k×768d)
 
-recall casado ≥0.957 (o teto comum do grafo a esta escala), QPS 1-cliente:
+recall casado ≥0.957 (o teto comum do grafo a esta escala), QPS 1-cliente. **1 run** (não decision-grade
+estatístico — o padrão é a paridade, não o ponto exato). O f32 alcança um recall MAIOR (0.974 vs AQ 0.958) se
+aceitar ~26% menos QPS — o AQ satura em 0.958 (quantização coarse); a comparação abaixo é ao recall CASADO:
 
-| Regime | AQ QPS | f32 QPS | **AQ/f32** |
+| Regime | AQ recall / QPS | f32 recall / QPS | **AQ/f32 (recall casado)** |
 |---|---|---|---|
-| in-RAM (16 GB) | 204 | 201 | **1.01×** |
-| pressão (`--memory=1.3g`, < índice f32 ~1.5 GB) | 207 | 202 | **1.03×** |
+| in-RAM (16 GB) | 0.958 / 204 | 0.974 / 201 (casado: 202) | **1.01×** |
+| pressão (`--memory=1.3g`, < índice f32 ~1.5 GB) | 0.958 / 207 | 0.974 / 202 | **1.03×** |
 
 **Paridade em ambos os regimes.** A tese ≥2× (códigos AQ de 4 bytes cacheiam enquanto o f32 de 3072 bytes
 spilla) **NÃO se materializou** — nem sob pressão a 1.3 GB (onde o índice f32 excede a RAM).
 
-## Por que o ganho não materializou (mecanismo — medido, preciso)
+## Por que o ganho não materializou (mecanismo — validado por matemática)
 
-1. **HNSW tem localidade de acesso** (a lição do M57, confirmada para o AQ): uma query toca ~`ef·log N` nós; as
-   páginas quentes ficam cacheadas mesmo com o índice f32 excedendo a RAM → o f32 **não thrasha** sob pressão →
-   os códigos pequenos do AQ não compram vantagem de I/O.
-2. **O kernel AH batched (o lever de 4.75× — `docs/benchmarks/`, Fase 2) precisa de candidatos CONTÍGUOS** para
-   alimentar o `_mm256_shuffle_epi8` (32 lookups/instrução). Mas a caminhada do HNSW visita nós **um-a-um**
-   (pointer-chasing dos vizinhos), então na prática só o `ah_score` **single-code** roda — e esse, medido na
-   Fase 2, é *mais lento* que um table-lookup escalar (paga `_mm_extract_epi8`/subespaço). O ganho SIMD do AH
-   fica **inacessível no carrier HNSW**. Isto é **exatamente o risco ADR-D4 do blueprint**, agora medido.
+O gargalo NÃO é o scoring: o AH single-code é ~100× mais barato que o cosine f32 (3.8 µs/candidato no f32 SIMD vs
+dezenas de ns no LUT). Se o scoring dominasse, o AQ seria ~100× mais rápido. Está em paridade → o gargalo é o
+**page-read / working set** do walk. E a causa-raiz é o **LAYOUT**:
 
-O ScaNN/FAISS obtêm o 25× porque usam um **carrier IVF de batch-scan**: listas invertidas contíguas onde o
-`pshufb` pontua 32+ códigos por instrução. O eixo algorítmico (anisotropic-PQ + AH) está correto e implementado;
-o **carrier** é a peça que falta.
+1. **O layout v3 co-localiza o código AQ com o vetor f32 no mesmo element tuple:**
+   `element tuple = [header][f32: dim×4 = 3072 B][código AQ: ⌈m/2⌉ = 4 B]`. Para ler o código de 4 B de um nó, o
+   walk **pagina o tuple inteiro de ~3 KB**. Logo o working set quente do AQ é o MESMO do f32:
+
+   | | working set quente (acesso aleatório do walk) @500k×768 |
+   |---|---|
+   | f32 index | 500k × 3072 B ≈ **1.5 GB** |
+   | **AQ v3 (hoje)** | 500k × 3076 B ≈ **1.5 GB** — código JUNTO do f32 |
+
+   Os "códigos 768× menores" são **irrelevantes ao I/O** porque estão guardados *ao lado* do f32, não *no lugar*
+   dele. Sob pressão de RAM o AQ thrasha idêntico → **paridade**. A conta bate exatamente com a medição.
+2. **O que ScaNN/FAISS fazem (e o v3 não fez):** guardam **apenas os códigos** numa estrutura compacta e contígua
+   no hot-path; os f32 (rerank) ficam **separados**, tocados só no reordenamento final. Working set quente = `m
+   bytes/vetor`, não `dim×4` → cacheável sob pressão. **Esta é a peça que falta — de LAYOUT, não de carrier.**
+3. **Secundário — batching SIMD:** o kernel AH batched (`ah_score_block`, 4.75× no micro-bench
+   `theodb_rs/src/vec/ah_tests.rs::ah_simd_per_candidate_speedup`) precisa de códigos **contíguos** para o `pshufb`;
+   a caminhada HNSW é nó-a-nó, então hoje só o `ah_score` single-code roda. Mas o scoring já não é o gargalo — o
+   batching só importa DEPOIS de separar o layout (ganho de segunda ordem).
 
 ## Veredito D3
 
-- **NÃO fecha o gap ~25× vs ScaNN no carrier HNSW.** Honest-negative — o AQ é recall-competitivo (0.958 vs f32
-  0.974, um hair abaixo pela quantização coarse pq_subspaces=8) e QPS-paridade a recall casado, não ≥2×.
-- **O eixo anisotrópico + AH está implementado e correto** (a fundação medida): a 20k in-RAM já supera o f32
-  (1.16×), provando o lever. O que falta é o **carrier de batch-scan contíguo (IVF)** — o próximo milestone
-  (M61-class, o fallback ADR-D4), agora **motivado por medição**, não especulação.
-- Decisão registrada em `docs/adr/0019-m59-ah-needs-batch-scan-carrier.md`.
+- **NÃO fecha o gap ~25× vs ScaNN no layout v3.** Honest-negative — o AQ é recall-competitivo (0.958 vs f32 0.974,
+  um hair abaixo pela quantização coarse pq_subspaces=8) e QPS-paridade a recall casado, não ≥2×.
+- **O eixo anisotrópico + AH está implementado e correto** (a fundação testada, 175 pg_tests). A causa-raiz da
+  paridade é **de layout**: o código está co-localizado com o f32, então o working set quente nunca encolheu.
+- **Próximo passo (o fix real): layout v4 — código separado do f32** (element tuple = só o código; f32 numa região
+  rerank-only). Conta @500k: hot ~50 MB (códigos 2 MB + grafo 48 MB) vs 1.5 GB → cache-resident sob pressão → o
+  ganho materializa. **Ressalva:** o grafo TAMBÉM precisa ficar separado/compacto (teste de mesa verifica quais
+  bytes o `score_candidate` toca). Medir a **2M** (f32 ≈ 6 GB ≫ RAM), não só `--memory=800m`.
+- Decisão registrada em `docs/adr/0019-m59-ah-needs-code-vector-separation.md`.
 
 ## Caveats honestos
 
