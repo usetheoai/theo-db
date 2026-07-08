@@ -12,15 +12,15 @@ use pgrx::prelude::*;
 /// Default IVFFlat list count — the reloption default lives in `options::DEFAULT_LISTS` (M34). Re-exported here for
 /// the empty/HNSW build paths that don't read the reloption.
 use crate::am::options::{lists_from_relation, DEFAULT_LISTS};
-/// HNSW build params for the persisted AM index (the `CREATE INDEX ... USING theodb_hnsw` path). Distinct from the
-/// SQL-callable brute-ANN defaults in `api.rs` (efc=64) — the index deliberately builds a higher-quality graph.
-/// `ef_construction=200`: M57 (D3) mediu que o grafo com efc=64 satura em recall@10 ~0.974 a 500k×768d, abaixo do
-/// gate 0.99 mesmo a ef_search=1000 (o máximo) — enquanto o pgvector alcança 0.992 no MESMO efc=64. O efc é a
-/// profundidade de busca na construção (qualidade do grafo); 200 é o valor "alta-qualidade" canônico do HNSW e
-/// cruza o gate 0.99 sem tocar o layout de página (só `M` afeta o tamanho da lista de vizinhos — `hnsw.rs:428` —
-/// e fica em 16). Custo: build mais lento (aceito — Esforço ≠ Complexidade). Ver `docs/adr/0018` + benchmark M57.
+/// HNSW build params for the persisted AM index. Mantidos em (16, 64) — mirror dos defaults SQL de `api.rs`.
+/// NOTA MEDIDA (M57): tentou-se efc=200 para cruzar o gate recall 0.99, mas **degradou** o recall (0.974 -> 0.832
+/// a 500k x 768d, 3 runs; build ~20% mais lento confirmando que efc=200 foi de fato aplicado). Isso revela que o
+/// teto de recall (~0.974) do grafo do theodb NAO e limitado pela profundidade de construcao (efc) e sim por um gap
+/// no heuristico de SELECAO DE VIZINHOS (o theodb nao aplica a poda por diversidade do HNSW/pgvector: mais
+/// candidatos -> vizinhos pior-podados -> grafo menos navegavel). Cruzar 0.99 exige implementar essa poda — um
+/// milestone de qualidade-de-grafo proprio, FORA do escopo do M57 (medicao do SBQ). Ver `docs/adr/0018` + benchmark.
 pub(crate) const HNSW_M: usize = 16;
-pub(crate) const HNSW_EF_CONSTRUCTION: usize = 200;
+pub(crate) const HNSW_EF_CONSTRUCTION: usize = 64;
 const BUILD_SEED: u64 = 42;
 
 /// Collected during the heap scan (one entry per live, non-NULL-vector heap tuple).

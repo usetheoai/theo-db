@@ -1,0 +1,130 @@
+{
+  "mem_note": "inram_r3",
+  "n": 500000,
+  "dim": 768,
+  "k": 10,
+  "load": 2.7,
+  "sbq_qps_at_recall99": null,
+  "f32_qps_at_recall99": null,
+  "sbq_over_f32_ratio": null,
+  "thesis_2x_met": false,
+  "per_spec": {
+    "theodb_hnsw_sbq": {
+      "best": {
+        "knob": 4,
+        "build_s": 492.4,
+        "recall": 0.832,
+        "p50_ms": 2.43,
+        "qps_1client": 411.5
+      },
+      "sweep": [
+        {
+          "knob": 4,
+          "build_s": 492.4,
+          "recall": 0.832,
+          "p50_ms": 2.43,
+          "qps_1client": 411.5
+        },
+        {
+          "knob": 8,
+          "build_s": 492.4,
+          "recall": 0.832,
+          "p50_ms": 1.408,
+          "qps_1client": 710.4
+        },
+        {
+          "knob": 16,
+          "build_s": 492.4,
+          "recall": 0.832,
+          "p50_ms": 1.373,
+          "qps_1client": 728.1
+        },
+        {
+          "knob": 32,
+          "build_s": 492.4,
+          "recall": 0.832,
+          "p50_ms": 1.394,
+          "qps_1client": 717.6
+        }
+      ]
+    },
+    "theodb_hnsw_f32": {
+      "best": {
+        "knob": 200,
+        "build_s": 464.75,
+        "recall": 0.832,
+        "p50_ms": 1.403,
+        "qps_1client": 712.6
+      },
+      "sweep": [
+        {
+          "knob": 200,
+          "build_s": 464.75,
+          "recall": 0.832,
+          "p50_ms": 1.403,
+          "qps_1client": 712.6
+        },
+        {
+          "knob": 400,
+          "build_s": 464.75,
+          "recall": 0.832,
+          "p50_ms": 1.424,
+          "qps_1client": 702.4
+        },
+        {
+          "knob": 800,
+          "build_s": 464.75,
+          "recall": 0.832,
+          "p50_ms": 1.421,
+          "qps_1client": 703.7
+        },
+        {
+          "knob": 1000,
+          "build_s": 464.75,
+          "recall": 0.832,
+          "p50_ms": 1.39,
+          "qps_1client": 719.2
+        }
+      ]
+    },
+    "pgvector_hnsw": {
+      "best": {
+        "knob": 400,
+        "build_s": 80.96,
+        "recall": 0.936,
+        "p50_ms": 3.455,
+        "qps_1client": 289.4
+      },
+      "sweep": [
+        {
+          "knob": 40,
+          "build_s": 80.96,
+          "recall": 0.832,
+          "p50_ms": 1.393,
+          "qps_1client": 717.7
+        },
+        {
+          "knob": 100,
+          "build_s": 80.96,
+          "recall": 0.914,
+          "p50_ms": 2.232,
+          "qps_1client": 448.1
+        },
+        {
+          "knob": 200,
+          "build_s": 80.96,
+          "recall": 0.932,
+          "p50_ms": 2.694,
+          "qps_1client": 371.2
+        },
+        {
+          "knob": 400,
+          "build_s": 80.96,
+          "recall": 0.936,
+          "p50_ms": 3.455,
+          "qps_1client": 289.4
+        }
+      ]
+    }
+  }
+}
