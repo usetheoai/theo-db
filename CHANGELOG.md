@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **M59 (P1) — plan: plano de implementação anisotrópica + AH SIMD** (`.claude/knowledge-base/plans/m59-anisotropic-ah-plan.md`): 5 fases / 12 tasks TDD (codebook anisotrópico → kernel AH LUT16 pshufb → persistência layout M35 v3 → wiring no scan → integration+benchmark), 4 ADRs com alternativas (D1 reloption no AM existente; D2 k-means anisotrópico std-only; D3 LUT16 4-bit; D4 HNSW-first + IVF fallback medido), Coverage Matrix 100%, baseline context real (file:line+SHA). Gate `/plan-confidence`: **SHIPPABLE_WITH_CAVEATS**. Fase plan do ciclo M59; implement/benchmark/release restam.
 - **M59 (P1) — discover: blueprint de quantização anisotrópica + Asymmetric Hashing SIMD** (`.claude/knowledge-base/discoveries/blueprints/m59-anisotropic-ah-blueprint.md`): pesquisa profunda (ScaNN anisotropic score-aware loss, ICML 2020; FAISS PQ-fastscan/AH LUT SIMD; DiskANN/SOAR) do eixo algorítmico real do gap ~25× vs ScaNN (o SBQ foi medido não-superior no M57/ADR-0018). Recomendação (ADR-1a): novo reloption/opclass no AM HNSW M35 existente (`aq.rs` espelhando `sbq.rs` + kernel AH LUT16 `_mm256_shuffle_epi8` em `vec.rs` + branch no `hnsw_page.rs::traverse`), não um novo AM nem substituir o SBQ. Primeiro passo do ciclo do M59; plan/implement/benchmark/release restam.
 
 ### Changed
