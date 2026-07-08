@@ -17,6 +17,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - **M59 (P1) — discover: blueprint de quantização anisotrópica + Asymmetric Hashing SIMD** (`.claude/knowledge-base/discoveries/blueprints/m59-anisotropic-ah-blueprint.md`): pesquisa profunda (ScaNN anisotropic score-aware loss, ICML 2020; FAISS PQ-fastscan/AH LUT SIMD; DiskANN/SOAR) do eixo algorítmico real do gap ~25× vs ScaNN (o SBQ foi medido não-superior no M57/ADR-0018). Recomendação (ADR-1a): novo reloption/opclass no AM HNSW M35 existente (`aq.rs` espelhando `sbq.rs` + kernel AH LUT16 `_mm256_shuffle_epi8` em `vec.rs` + branch no `hnsw_page.rs::traverse`), não um novo AM nem substituir o SBQ. Primeiro passo do ciclo do M59; plan/implement/benchmark/release restam.
 
 ### Changed
+- **Regra de rigor do discover: R0 — busca web obrigatória (REGRA MÁXIMA)** (`.claude/rules/discover-phd-rigor.md`): todo deep research (fase discover, `/deep-research`, varredura SOTA) DEVE usar WebSearch+WebFetch para buscar evidência em papers/OSS/blogs e citá-la — conhecimento interno + leitura de código local não bastam. Agentes de discover devem receber instrução explícita de buscar na web. Elevado a regra máxima pelo owner (2026-07-08).
 
 ### Deprecated
 
