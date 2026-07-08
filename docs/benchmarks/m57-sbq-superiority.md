@@ -84,10 +84,15 @@ não expõe esse gargalo.
    is NON-DETERMINISTIC — racy insert order"). O recall do grafo cai com a escala (5k=1.0 → 100k=0.974 → 500k=0.956)
    e, anomalamente, com `ef_construction` maior (0.974→0.832 a efc=200) — sinal de que o **pruning de vizinhos sob
    contenção de lock** (`select_from` chamado no linking concorrente) descarta arestas boas com base em leituras
-   stale quando há mais candidatos. `M` está travado em 16 pelo layout de página (`hnsw.rs:428`). **Cruzar 0.99 exige
-   corrigir a qualidade do build paralelo — um milestone de qualidade-de-grafo próprio (M60-class), FORA do escopo do
-   M57** (que mede o SBQ). O veredito SBQ é robusto ao recall casado medido (0.974, SBQ sempre < f32). Evidência da
-   degradação: `m57-raw/m57p_efc200_r{1,2,3}.json`.
+   stale quando há mais candidatos. `M` está travado em 16 pelo layout de página (`hnsw.rs:428`). **DUAS tentativas
+   de fix foram REFUTADAS por medição** (honestidade, Regra 3): (a) `ef_construction` 64→200 → recall 0.832 (pior);
+   (b) o "minimal fix" MERGE (mesclar back-links in-flight em vez de sobrescrever `node[layer]`, que o próprio
+   comentário do código previa) → recall **0.846** com recall **não-monotônico em ef_search** (sinal de grafo
+   corrompido — manter o conjunto `selected` diversity-pruned é superior a mesclar back-links arbitrários). Ambas
+   revertidas; a melhor config medida (OVERWRITE + efc=64, recall 0.974) foi mantida. **Cruzar 0.99 exige uma
+   investigação de qualidade-de-grafo do build paralelo mais profunda — milestone próprio (M60-class), FORA do
+   escopo do M57** (que mede o SBQ). O veredito SBQ é robusto ao recall casado medido (0.974, SBQ sempre < f32).
+   Evidência: `m57-raw/m57p_efc200_r{1,2,3}.json` (efc), `m57-raw/m57_recallfix.json` (MERGE).
    pgvector a 500k (shm=8g): recall 0.936, ~289 qps — baseline (theodb f32 0.974 tem recall *maior* a 500k).
 4. **1-cliente** (sem concorrência). Um QPS multi-cliente pode mudar absolutos, não a razão SBQ<f32 (mesmo custo
    por query relativo).

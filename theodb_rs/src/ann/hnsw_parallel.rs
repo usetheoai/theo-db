@@ -107,37 +107,19 @@ fn insert_node(
         let m_layer = if layer == 0 { m0 } else { m };
         let selected = select_from(vectors, metric, candidates, m_layer);
 
-        // This node's own neighbors on this layer. M57: MERGE (extend+prune) instead of OVERWRITE. The old code did
-        // `nn[layer] = selected`, which clobbered any in-flight back-link another thread had already pushed to
-        // `node[layer]` (having reached `node` via a higher layer) — a LOGICAL lost-update (not a data race: both
-        // under this write lock). MEDIDO no M57 que isso degrada o recall a escala (teto ~0.974 a 500k) e PIORA com
-        // `ef_construction` maior (mais candidatos → mais back-links a nós populares → mais edges clobberadas):
-        // 0.974→0.832 a efc=200. A condição "YAGNI until measured" do comentário original agora está satisfeita.
-        // Fix: preservar os back-links in-flight mesclando-os com `selected`, deduplicando, e podando ao m_layer com
-        // a mesma heurística de diversidade (query = o próprio `node`). Ver `docs/adr/0018` + benchmark M57.
+        // This node's own neighbors on this layer. Honest note (M44 review, LOW): the assignment OVERWRITES the
+        // list, so an in-flight back-link another thread pushed to `node[layer]` (having reached `node` via a
+        // higher layer) can be clobbered — a LOGICAL lost-update (not a data race: both under this write lock).
+        // M57 NOTA MEDIDA: testou-se o "minimal fix" MERGE (extend+prune) que o comentário previa — e ele PIOROU o
+        // recall (0.974→0.846 a 500k, com recall NÃO-monotônico em ef_search: sinal de grafo corrompido). Ou seja,
+        // manter o conjunto `selected` limpo (diversity-pruned dos MELHORES candidatos) é superior a mesclá-lo com
+        // back-links arbitrários. O OVERWRITE fica. O teto de recall (~0.974 a 500k) do build paralelo NÃO é o
+        // lost-update — a causa-raiz continua não-isolada e exige investigação de grafo própria (M60). Ver
+        // `docs/benchmarks/m57-sbq-superiority.md` § caveat 3 (duas tentativas de fix refutadas por medição).
         {
             let mut nn = neighbors[node].write().unwrap();
             if layer < nn.len() {
-                for &s in &selected {
-                    if !nn[layer].contains(&s) {
-                        nn[layer].push(s);
-                    }
-                }
-                if nn[layer].len() > m_layer {
-                    let cand: Vec<Cand> = nn[layer]
-                        .iter()
-                        .map(|&x| Cand { d: metric.dist_simd(q, &vectors[x]), i: x })
-                        .collect();
-                    nn[layer] = select_from(vectors, metric, cand, m_layer);
-                } else {
-                    // keep nearest-first order so the layer-descent entry (`selected.first()`) stays meaningful
-                    nn[layer].sort_by(|&a, &b| {
-                        metric
-                            .dist_simd(q, &vectors[a])
-                            .partial_cmp(&metric.dist_simd(q, &vectors[b]))
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    });
-                }
+                nn[layer] = selected.clone();
             }
         }
         // Back-link: add `node` to each selected neighbor, pruning if it overflows. One node lock at a time.
