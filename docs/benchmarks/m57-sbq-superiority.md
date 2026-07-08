@@ -89,10 +89,14 @@ não expõe esse gargalo.
    (b) o "minimal fix" MERGE (mesclar back-links in-flight em vez de sobrescrever `node[layer]`, que o próprio
    comentário do código previa) → recall **0.846** com recall **não-monotônico em ef_search** (sinal de grafo
    corrompido — manter o conjunto `selected` diversity-pruned é superior a mesclar back-links arbitrários). Ambas
-   revertidas; a melhor config medida (OVERWRITE + efc=64, recall 0.974) foi mantida. **Cruzar 0.99 exige uma
-   investigação de qualidade-de-grafo do build paralelo mais profunda — milestone próprio (M60-class), FORA do
-   escopo do M57** (que mede o SBQ). O veredito SBQ é robusto ao recall casado medido (0.974, SBQ sempre < f32).
-   Evidência: `m57-raw/m57p_efc200_r{1,2,3}.json` (efc), `m57-raw/m57_recallfix.json` (MERGE).
+   revertidas; a melhor config medida (OVERWRITE + efc=64, recall 0.974) foi mantida. **BISSECÇÃO DECISIVA
+   (`THEODB_HNSW_PARALLEL_THRESHOLD`): o build SEQUENCIAL determinístico a 100k dá recall 0.96 — igual/pior que o
+   paralelo (0.974).** Logo o teto **NÃO é contenção paralela** (o que refuta os fixes de linking, incl. o MERGE) e
+   sim a **qualidade do ALGORITMO BASE do HNSW** do theodb (`search_layer`/`greedy_descend`/`select_from`),
+   presente nos dois builds. theodb 0.96 vs pgvector 0.978 @100k (mesmo run) = gap algorítmico de ~1.8pt. **Cruzar
+   0.99 exige melhorar o algoritmo base do HNSW — milestone próprio (M60-class), FORA do escopo do M57** (que mede o
+   SBQ). O veredito SBQ é robusto ao recall casado medido (SBQ sempre < f32). Evidência: `m57-raw/m57p_efc200_r*`
+   (efc), `m57_recallfix.json` (MERGE), `m57_seq100k.json` (bissecção sequencial — o achado decisivo).
    pgvector a 500k (shm=8g): recall 0.936, ~289 qps — baseline (theodb f32 0.974 tem recall *maior* a 500k).
 4. **1-cliente** (sem concorrência). Um QPS multi-cliente pode mudar absolutos, não a razão SBQ<f32 (mesmo custo
    por query relativo).
