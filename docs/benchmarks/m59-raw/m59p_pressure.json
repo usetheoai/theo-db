@@ -1,0 +1,92 @@
+{
+  "mem_note": "pressure_1.3g",
+  "n": 500000,
+  "dim": 768,
+  "k": 10,
+  "load": 0.83,
+  "matched_recall_gate": 0.957,
+  "aq_qps": 207.0,
+  "f32_qps": 201.9,
+  "aq_over_f32_ratio": 1.03,
+  "thesis_2x_met": false,
+  "per_spec": {
+    "theodb_hnsw_aq": {
+      "best": {
+        "knob": 4,
+        "build_s": 658.4,
+        "recall": 0.958,
+        "p50_ms": 5.684,
+        "qps_1client": 175.9
+      },
+      "sweep": [
+        {
+          "knob": 4,
+          "build_s": 658.4,
+          "recall": 0.958,
+          "p50_ms": 5.684,
+          "qps_1client": 175.9
+        },
+        {
+          "knob": 8,
+          "build_s": 658.4,
+          "recall": 0.958,
+          "p50_ms": 4.96,
+          "qps_1client": 201.6
+        },
+        {
+          "knob": 16,
+          "build_s": 658.4,
+          "recall": 0.958,
+          "p50_ms": 4.942,
+          "qps_1client": 202.4
+        },
+        {
+          "knob": 32,
+          "build_s": 658.4,
+          "recall": 0.958,
+          "p50_ms": 4.832,
+          "qps_1client": 207.0
+        }
+      ]
+    },
+    "theodb_hnsw_f32": {
+      "best": {
+        "knob": 1000,
+        "build_s": 374.63,
+        "recall": 0.974,
+        "p50_ms": 6.295,
+        "qps_1client": 158.8
+      },
+      "sweep": [
+        {
+          "knob": 200,
+          "build_s": 374.63,
+          "recall": 0.898,
+          "p50_ms": 2.692,
+          "qps_1client": 371.5
+        },
+        {
+          "knob": 400,
+          "build_s": 374.63,
+          "recall": 0.956,
+          "p50_ms": 3.614,
+          "qps_1client": 276.7
+        },
+        {
+          "knob": 800,
+          "build_s": 374.63,
+          "recall": 0.958,
+          "p50_ms": 4.952,
+          "qps_1client": 201.9
+        },
+        {
+          "knob": 1000,
+          "build_s": 374.63,
+          "recall": 0.974,
+          "p50_ms": 6.295,
+          "qps_1client": 158.8
+        }
+      ]
+    }
+  }
+}

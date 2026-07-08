@@ -1,0 +1,300 @@
+{
+  "n": 20000,
+  "dim": 768,
+  "queries": 20,
+  "k": 10,
+  "runs": 1,
+  "metric": "cosine",
+  "pq_subspaces": 8,
+  "aq_threshold_milli": "4100",
+  "load_pre": 0.08,
+  "load_per_run": [
+    4.04
+  ],
+  "nproc": 8,
+  "aq_best_recall_at_10": 0.995,
+  "qps_at_recall_0_99": {
+    "aq": 1494.0,
+    "sbq": 1298.0,
+    "f32": 1285.6,
+    "pgvector": 1259.0
+  },
+  "aq_over_f32_ratio": 1.16,
+  "aq_over_pgvector_ratio": 1.19,
+  "per_spec": {
+    "theodb_hnsw_aq": {
+      "curve": [
+        {
+          "knob": 4,
+          "recall_mean": 0.995,
+          "recall_std": 0.0,
+          "p50_ms_mean": 0.754,
+          "qps_1client_mean": 1325.6,
+          "build_s": 23.4
+        },
+        {
+          "knob": 8,
+          "recall_mean": 0.995,
+          "recall_std": 0.0,
+          "p50_ms_mean": 0.758,
+          "qps_1client_mean": 1319.5,
+          "build_s": 23.4
+        },
+        {
+          "knob": 16,
+          "recall_mean": 0.995,
+          "recall_std": 0.0,
+          "p50_ms_mean": 0.669,
+          "qps_1client_mean": 1494.0,
+          "build_s": 23.4
+        },
+        {
+          "knob": 32,
+          "recall_mean": 0.995,
+          "recall_std": 0.0,
+          "p50_ms_mean": 0.797,
+          "qps_1client_mean": 1254.7,
+          "build_s": 23.4
+        }
+      ]
+    },
+    "theodb_hnsw_sbq": {
+      "curve": [
+        {
+          "knob": 4,
+          "recall_mean": 0.995,
+          "recall_std": 0.0,
+          "p50_ms_mean": 0.77,
+          "qps_1client_mean": 1298.0,
+          "build_s": 13.77
+        },
+        {
+          "knob": 8,
+          "recall_mean": 0.995,
+          "recall_std": 0.0,
+          "p50_ms_mean": 0.772,
+          "qps_1client_mean": 1294.7,
+          "build_s": 13.77
+        },
+        {
+          "knob": 16,
+          "recall_mean": 0.995,
+          "recall_std": 0.0,
+          "p50_ms_mean": 0.786,
+          "qps_1client_mean": 1272.9,
+          "build_s": 13.77
+        },
+        {
+          "knob": 32,
+          "recall_mean": 0.995,
+          "recall_std": 0.0,
+          "p50_ms_mean": 0.771,
+          "qps_1client_mean": 1297.7,
+          "build_s": 13.77
+        }
+      ]
+    },
+    "theodb_hnsw_f32": {
+      "curve": [
+        {
+          "knob": 200,
+          "recall_mean": 0.995,
+          "recall_std": 0.0,
+          "p50_ms_mean": 0.797,
+          "qps_1client_mean": 1255.0,
+          "build_s": 13.05
+        },
+        {
+          "knob": 400,
+          "recall_mean": 0.995,
+          "recall_std": 0.0,
+          "p50_ms_mean": 0.778,
+          "qps_1client_mean": 1285.6,
+          "build_s": 13.05
+        },
+        {
+          "knob": 800,
+          "recall_mean": 0.995,
+          "recall_std": 0.0,
+          "p50_ms_mean": 0.793,
+          "qps_1client_mean": 1260.8,
+          "build_s": 13.05
+        },
+        {
+          "knob": 1000,
+          "recall_mean": 0.995,
+          "recall_std": 0.0,
+          "p50_ms_mean": 0.804,
+          "qps_1client_mean": 1243.7,
+          "build_s": 13.05
+        }
+      ]
+    },
+    "pgvector_hnsw": {
+      "curve": [
+        {
+          "knob": 40,
+          "recall_mean": 0.995,
+          "recall_std": 0.0,
+          "p50_ms_mean": 0.794,
+          "qps_1client_mean": 1259.0,
+          "build_s": 6.52
+        },
+        {
+          "knob": 100,
+          "recall_mean": 1.0,
+          "recall_std": 0.0,
+          "p50_ms_mean": 1.109,
+          "qps_1client_mean": 901.4,
+          "build_s": 6.52
+        },
+        {
+          "knob": 200,
+          "recall_mean": 1.0,
+          "recall_std": 0.0,
+          "p50_ms_mean": 1.279,
+          "qps_1client_mean": 781.8,
+          "build_s": 6.52
+        },
+        {
+          "knob": 400,
+          "recall_mean": 1.0,
+          "recall_std": 0.0,
+          "p50_ms_mean": 1.988,
+          "qps_1client_mean": 503.1,
+          "build_s": 6.52
+        }
+      ]
+    }
+  },
+  "raw": {
+    "theodb_hnsw_aq": [
+      [
+        {
+          "knob": 4,
+          "build_s": 23.4,
+          "recall": 0.995,
+          "p50_ms": 0.754,
+          "qps_1client": 1325.6
+        },
+        {
+          "knob": 8,
+          "build_s": 23.4,
+          "recall": 0.995,
+          "p50_ms": 0.758,
+          "qps_1client": 1319.5
+        },
+        {
+          "knob": 16,
+          "build_s": 23.4,
+          "recall": 0.995,
+          "p50_ms": 0.669,
+          "qps_1client": 1494.0
+        },
+        {
+          "knob": 32,
+          "build_s": 23.4,
+          "recall": 0.995,
+          "p50_ms": 0.797,
+          "qps_1client": 1254.7
+        }
+      ]
+    ],
+    "theodb_hnsw_sbq": [
+      [
+        {
+          "knob": 4,
+          "build_s": 13.77,
+          "recall": 0.995,
+          "p50_ms": 0.77,
+          "qps_1client": 1298.0
+        },
+        {
+          "knob": 8,
+          "build_s": 13.77,
+          "recall": 0.995,
+          "p50_ms": 0.772,
+          "qps_1client": 1294.7
+        },
+        {
+          "knob": 16,
+          "build_s": 13.77,
+          "recall": 0.995,
+          "p50_ms": 0.786,
+          "qps_1client": 1272.9
+        },
+        {
+          "knob": 32,
+          "build_s": 13.77,
+          "recall": 0.995,
+          "p50_ms": 0.771,
+          "qps_1client": 1297.7
+        }
+      ]
+    ],
+    "theodb_hnsw_f32": [
+      [
+        {
+          "knob": 200,
+          "build_s": 13.05,
+          "recall": 0.995,
+          "p50_ms": 0.797,
+          "qps_1client": 1255.0
+        },
+        {
+          "knob": 400,
+          "build_s": 13.05,
+          "recall": 0.995,
+          "p50_ms": 0.778,
+          "qps_1client": 1285.6
+        },
+        {
+          "knob": 800,
+          "build_s": 13.05,
+          "recall": 0.995,
+          "p50_ms": 0.793,
+          "qps_1client": 1260.8
+        },
+        {
+          "knob": 1000,
+          "build_s": 13.05,
+          "recall": 0.995,
+          "p50_ms": 0.804,
+          "qps_1client": 1243.7
+        }
+      ]
+    ],
+    "pgvector_hnsw": [
+      [
+        {
+          "knob": 40,
+          "build_s": 6.52,
+          "recall": 0.995,
+          "p50_ms": 0.794,
+          "qps_1client": 1259.0
+        },
+        {
+          "knob": 100,
+          "build_s": 6.52,
+          "recall": 1.0,
+          "p50_ms": 1.109,
+          "qps_1client": 901.4
+        },
+        {
+          "knob": 200,
+          "build_s": 6.52,
+          "recall": 1.0,
+          "p50_ms": 1.279,
+          "qps_1client": 781.8
+        },
+        {
+          "knob": 400,
+          "build_s": 6.52,
+          "recall": 1.0,
+          "p50_ms": 1.988,
+          "qps_1client": 503.1
+        }
+      ]
+    ]
+  }
+}

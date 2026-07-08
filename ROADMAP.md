@@ -930,7 +930,7 @@ intocada; independente de M56/M57 (pode paralelizar).
 
 **Dependencies:** M40 (infra SIMD/carrier existente). **Risco (BAIXO):** fator-constante; alinhamento/tail.
 
-### M59 — [ ] Quantização anisotrópica + Asymmetric Hashing SIMD — fechar o gap de ~25× vs ScaNN (P1)
+### M59 — [x] Quantização anisotrópica + Asymmetric Hashing SIMD — MEDIDO (honest-negative: carrier HNSW não materializa; caminho é IVF) (P1)
 
 **Objective (deep-view 2026-07-07, gap P1):** o gap de ~25× QPS vs ScaNN/AlloyDB (`docs/benchmarks/m33-scann-headtohead.md`: ScaNN 1920 QPS @0.99 vs theodb 78) é **quantização anisotrópica + Asymmetric Hashing
 (AH) SIMD**, não bit-quantization — o SBQ é fator-constante, não asymptote de recall×QPS. É o lever nomeado
@@ -938,12 +938,16 @@ no M39. Esta milestone ataca o eixo algorítmico real do North Star.
 
 **Definition of done:**
 
-- [ ] **Discover (blueprint):** ScaNN anisotropic score-aware loss + AH (LUT SIMD), com papers + evidência
-  dos peers; decisão de integração no AM (nova quantização vs. o SBQ atual) por **ADR com alternativas**.
-- [ ] Quantização anisotrópica + AH scoring via **LUT SIMD** implementados; recall×QPS medido vs SBQ (M57) e
-  vs o gap ScaNN (M33) → `docs/benchmarks/m59-anisotropic-ah.{md,json}`.
-- [ ] **Veredito:** fecha (ou reduz mensuravelmente) o gap ~25× a recall≥0.99? Senão honest-negative +
-  decisão registrada (disk-resident/DiskANN pode ser o complemento — próximo milestone).
+- [x] **Discover (blueprint):** ScaNN anisotropic score-aware loss + AH (LUT SIMD), com papers + evidência web
+  (R0: 9 fontes via WebSearch/WebFetch — arXiv:1908.10396, FAISS FastScan, Milvus/Zilliz) + ADR com alternativas
+  (D1-D4). `knowledge-base/discoveries/blueprints/m59-anisotropic-ah-blueprint.md`.
+- [x] Quantização anisotrópica (`aq.rs`) + AH scoring via **LUT16 SIMD** (`vec/ah.rs`, `_mm256_shuffle_epi8`) +
+  persistência v3/v4 + scan — **177 pg_tests GREEN**. recall×QPS medido vs SBQ/f32/pgvector (20k/100k/500k, in-RAM
+  + pressão) → `docs/benchmarks/m59-anisotropic-ah.{md,json}` + `m59-raw/`.
+- [x] **Veredito: HONEST-NEGATIVE (medido, rigoroso).** O AQ+AH está correto e completo mas NÃO supera o f32 em QPS
+  a recall casado em nenhuma config no carrier HNSW (v3 co-localizado E v4 separado; in-RAM E pressão). Causa
+  estrutural: o pointer-chasing do HNSW + rerank de f32 frios compensa a economia da quantização. O 25× do ScaNN
+  exige o **carrier IVF batch-scan** — registrado como próximo lever medido. ADR `docs/adr/0019`.
 
 **Dependencies:** M57 (medir o SBQ PRIMEIRO — informa se AH é o próximo teto ou o pivot da decisão do AM),
 M58 (o AH depende do dispatch SIMD). **Risco (ALTO):** é o algoritmo, não a plumbing; esforço alto; pode não

@@ -23,14 +23,39 @@ pub(crate) const DEFAULT_SBQ_BITS: i32 = 0;
 const MIN_SBQ_BITS: i32 = 0;
 const MAX_SBQ_BITS: i32 = 8;
 
+/// M59 — `theodb_hnsw` build knob `WITH (pq_subspaces = M)`: number of anisotropic-PQ subspaces (0 = AQ off /
+/// v1|v2, the default, so every existing index is byte-for-byte unchanged). `> 0` enables meta layout v3: an
+/// `AqQuantizer` trained at build + `⌈m/2⌉`-byte codes inline. `dim % m == 0` is checked at build (typed error),
+/// not here. A scan knob (over_fetch) is reused as the AH rerank pool (GUC), not a reloption.
+pub(crate) const DEFAULT_PQ_SUBSPACES: i32 = 0;
+const MIN_PQ_SUBSPACES: i32 = 0;
+const MAX_PQ_SUBSPACES: i32 = 2048; // one 4-bit code per subspace; 2048 covers the largest realistic dim/1.
+
+/// M59 — `WITH (pq_bits = N)`: bits per subquantizer. Only 4 is supported (the LUT16 `pshufb` sweet spot, ADR
+/// D3); the default 4 makes `WITH (pq_subspaces=M)` alone enable AQ. Non-4 is rejected at build (typed error).
+pub(crate) const DEFAULT_PQ_BITS: i32 = 4;
+const MIN_PQ_BITS: i32 = 4;
+const MAX_PQ_BITS: i32 = 4;
+
+/// M59 — `WITH (aq_threshold = N)`: the anisotropic parallel/orthogonal weight ratio `η`, stored **milli-scaled**
+/// (`η × 1000`) so a single int reloption carries the float knob (KISS — no second reloption type). Default 1000
+/// (`η = 1.0`, isotropic). Clamped to `≥ 1000` at resolve time (`η < 1` is meaningless — `aq.rs` clamps too).
+pub(crate) const DEFAULT_AQ_THRESHOLD_MILLI: i32 = 1000;
+const MIN_AQ_THRESHOLD_MILLI: i32 = 1000;
+const MAX_AQ_THRESHOLD_MILLI: i32 = 1_000_000; // η up to 1000×; far above any useful ScaNN T.
+
 /// Parsed reloptions shared by the two AMs (`amoptions` is shared — `mod.rs`). `#[repr(C)]` with the varlena
 /// header first (never touch `vl_len_` directly — `build_reloptions` sets it). `lists` is an ivfflat build knob;
-/// `sbq_bits` is a theodb_hnsw build knob (M51). Each AM reads only the option it uses.
+/// `sbq_bits` (M51) + `pq_subspaces`/`pq_bits`/`aq_threshold_milli` (M59) are theodb_hnsw build knobs. Each AM
+/// reads only the option it uses; new fields default to OFF so an index built without them is byte-identical.
 #[repr(C)]
 struct TheodbIvfflatOptions {
     vl_len_: i32, // varlena header (managed by build_reloptions)
     lists: i32,
     sbq_bits: i32,
+    pq_subspaces: i32,
+    pq_bits: i32,
+    aq_threshold_milli: i32,
 }
 
 static mut RELOPT_KIND: pg_sys::relopt_kind::Type = 0;
@@ -59,6 +84,33 @@ pub(crate) unsafe fn init() {
         MAX_SBQ_BITS,
         pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
     );
+    pg_sys::add_int_reloption(
+        RELOPT_KIND,
+        "pq_subspaces".as_pg_cstr(),
+        "Number of anisotropic-PQ subspaces for the theodb_hnsw AQ codes (0 = AQ off, M59)".as_pg_cstr(),
+        DEFAULT_PQ_SUBSPACES,
+        MIN_PQ_SUBSPACES,
+        MAX_PQ_SUBSPACES,
+        pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
+    );
+    pg_sys::add_int_reloption(
+        RELOPT_KIND,
+        "pq_bits".as_pg_cstr(),
+        "Bits per subquantizer for the theodb_hnsw AQ codes (only 4 is supported, M59)".as_pg_cstr(),
+        DEFAULT_PQ_BITS,
+        MIN_PQ_BITS,
+        MAX_PQ_BITS,
+        pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
+    );
+    pg_sys::add_int_reloption(
+        RELOPT_KIND,
+        "aq_threshold".as_pg_cstr(),
+        "Anisotropic parallel/orthogonal weight ratio η × 1000 for the theodb_hnsw AQ codes (1000 = isotropic, M59)".as_pg_cstr(),
+        DEFAULT_AQ_THRESHOLD_MILLI,
+        MIN_AQ_THRESHOLD_MILLI,
+        MAX_AQ_THRESHOLD_MILLI,
+        pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
+    );
 }
 
 /// The `amoptions` callback: parse `pg_class.reloptions` text[] into the `TheodbIvfflatOptions` bytea that fills
@@ -69,7 +121,7 @@ pub(crate) unsafe extern "C-unwind" fn amoptions(
     reloptions: pg_sys::Datum,
     validate: bool,
 ) -> *mut pg_sys::bytea {
-    let tab: [pg_sys::relopt_parse_elt; 2] = [
+    let tab: [pg_sys::relopt_parse_elt; 5] = [
         pg_sys::relopt_parse_elt {
             optname: "lists".as_pg_cstr(),
             opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
@@ -79,6 +131,21 @@ pub(crate) unsafe extern "C-unwind" fn amoptions(
             optname: "sbq_bits".as_pg_cstr(),
             opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
             offset: std::mem::offset_of!(TheodbIvfflatOptions, sbq_bits) as i32,
+        },
+        pg_sys::relopt_parse_elt {
+            optname: "pq_subspaces".as_pg_cstr(),
+            opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
+            offset: std::mem::offset_of!(TheodbIvfflatOptions, pq_subspaces) as i32,
+        },
+        pg_sys::relopt_parse_elt {
+            optname: "pq_bits".as_pg_cstr(),
+            opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
+            offset: std::mem::offset_of!(TheodbIvfflatOptions, pq_bits) as i32,
+        },
+        pg_sys::relopt_parse_elt {
+            optname: "aq_threshold".as_pg_cstr(),
+            opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
+            offset: std::mem::offset_of!(TheodbIvfflatOptions, aq_threshold_milli) as i32,
         },
     ];
     pg_sys::build_reloptions(
@@ -128,4 +195,61 @@ pub(crate) unsafe fn sbq_bits_from_relation(indexrel: pg_sys::Relation) -> u8 {
     } else {
         0
     }
+}
+
+/// M59 — resolve the build-time `pq_subspaces` (m) for a `theodb_hnsw` index: the `WITH (pq_subspaces=M)` value,
+/// or 0 (AQ off) when the option is absent (`rd_options` null → v1/v2 byte-identical). A fold reads `m` off the
+/// persisted v3 meta, not the reloption, so this is only the initial-build gate.
+///
+/// # Safety
+/// `indexrel` must be a valid open index relation.
+// M59 T3.3: wired into `ambuild_hnsw` (`pack_hnsw_for_build`) — decides the v3 AQ layout at initial build.
+pub(crate) unsafe fn pq_subspaces_from_relation(indexrel: pg_sys::Relation) -> usize {
+    let rd_options = (*indexrel).rd_options;
+    if rd_options.is_null() {
+        return DEFAULT_PQ_SUBSPACES as usize;
+    }
+    let m = (*(rd_options as *const TheodbIvfflatOptions)).pq_subspaces;
+    if m < MIN_PQ_SUBSPACES {
+        DEFAULT_PQ_SUBSPACES as usize
+    } else {
+        m as usize
+    }
+}
+
+/// M59 — resolve `pq_bits` for a `theodb_hnsw` index: the `WITH (pq_bits=N)` value, or the default 4. Only 4 is
+/// valid (the LUT16 path); `build_reloptions` already rejects anything outside [4,4] at DDL, so a resolved value
+/// out of range falls back to the 4 default defensively.
+///
+/// # Safety
+/// `indexrel` must be a valid open index relation.
+// M59 T3.3: wired into `ambuild_hnsw` (`pack_hnsw_for_build`).
+pub(crate) unsafe fn pq_bits_from_relation(indexrel: pg_sys::Relation) -> u8 {
+    let rd_options = (*indexrel).rd_options;
+    if rd_options.is_null() {
+        return DEFAULT_PQ_BITS as u8;
+    }
+    let bits = (*(rd_options as *const TheodbIvfflatOptions)).pq_bits;
+    if (MIN_PQ_BITS..=MAX_PQ_BITS).contains(&bits) {
+        bits as u8
+    } else {
+        DEFAULT_PQ_BITS as u8
+    }
+}
+
+/// M59 — resolve `aq_threshold` (`η`) for a `theodb_hnsw` index: the milli-scaled `WITH (aq_threshold=N)` value
+/// divided by 1000 (default `η = 1.0`, isotropic). Clamped to `≥ 1.0` (`η < 1` is meaningless — `aq.rs` clamps
+/// too). Read at build to train the codebook; the fold reads the persisted `η`, not this.
+///
+/// # Safety
+/// `indexrel` must be a valid open index relation.
+// M59 T3.3: wired into `ambuild_hnsw` (`pack_hnsw_for_build`); the fold reads η off the persisted meta instead.
+pub(crate) unsafe fn aq_threshold_from_relation(indexrel: pg_sys::Relation) -> f32 {
+    let rd_options = (*indexrel).rd_options;
+    let milli = if rd_options.is_null() {
+        DEFAULT_AQ_THRESHOLD_MILLI
+    } else {
+        (*(rd_options as *const TheodbIvfflatOptions)).aq_threshold_milli
+    };
+    (milli as f32 / 1000.0).max(1.0)
 }

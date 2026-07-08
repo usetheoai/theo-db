@@ -1,0 +1,300 @@
+{
+  "n": 100000,
+  "dim": 768,
+  "queries": 50,
+  "k": 10,
+  "runs": 1,
+  "metric": "cosine",
+  "pq_subspaces": 8,
+  "aq_threshold_milli": "4100",
+  "load_pre": 2.74,
+  "load_per_run": [
+    4.14
+  ],
+  "nproc": 8,
+  "aq_best_recall_at_10": 0.978,
+  "qps_at_recall_0_99": {
+    "aq": null,
+    "sbq": null,
+    "f32": null,
+    "pgvector": 861.4
+  },
+  "aq_over_f32_ratio": null,
+  "aq_over_pgvector_ratio": null,
+  "per_spec": {
+    "theodb_hnsw_aq": {
+      "curve": [
+        {
+          "knob": 4,
+          "recall_mean": 0.978,
+          "recall_std": 0.0,
+          "p50_ms_mean": 0.983,
+          "qps_1client_mean": 1017.0,
+          "build_s": 107.05
+        },
+        {
+          "knob": 8,
+          "recall_mean": 0.978,
+          "recall_std": 0.0,
+          "p50_ms_mean": 0.946,
+          "qps_1client_mean": 1057.5,
+          "build_s": 107.05
+        },
+        {
+          "knob": 16,
+          "recall_mean": 0.978,
+          "recall_std": 0.0,
+          "p50_ms_mean": 0.957,
+          "qps_1client_mean": 1045.0,
+          "build_s": 107.05
+        },
+        {
+          "knob": 32,
+          "recall_mean": 0.978,
+          "recall_std": 0.0,
+          "p50_ms_mean": 0.924,
+          "qps_1client_mean": 1081.9,
+          "build_s": 107.05
+        }
+      ]
+    },
+    "theodb_hnsw_sbq": {
+      "curve": [
+        {
+          "knob": 4,
+          "recall_mean": 0.978,
+          "recall_std": 0.0,
+          "p50_ms_mean": 0.961,
+          "qps_1client_mean": 1041.1,
+          "build_s": 64.3
+        },
+        {
+          "knob": 8,
+          "recall_mean": 0.978,
+          "recall_std": 0.0,
+          "p50_ms_mean": 0.96,
+          "qps_1client_mean": 1041.4,
+          "build_s": 64.3
+        },
+        {
+          "knob": 16,
+          "recall_mean": 0.978,
+          "recall_std": 0.0,
+          "p50_ms_mean": 0.951,
+          "qps_1client_mean": 1051.5,
+          "build_s": 64.3
+        },
+        {
+          "knob": 32,
+          "recall_mean": 0.978,
+          "recall_std": 0.0,
+          "p50_ms_mean": 0.952,
+          "qps_1client_mean": 1050.6,
+          "build_s": 64.3
+        }
+      ]
+    },
+    "theodb_hnsw_f32": {
+      "curve": [
+        {
+          "knob": 200,
+          "recall_mean": 0.978,
+          "recall_std": 0.0,
+          "p50_ms_mean": 0.955,
+          "qps_1client_mean": 1047.0,
+          "build_s": 61.02
+        },
+        {
+          "knob": 400,
+          "recall_mean": 0.978,
+          "recall_std": 0.0,
+          "p50_ms_mean": 0.959,
+          "qps_1client_mean": 1042.2,
+          "build_s": 61.02
+        },
+        {
+          "knob": 800,
+          "recall_mean": 0.978,
+          "recall_std": 0.0,
+          "p50_ms_mean": 0.958,
+          "qps_1client_mean": 1043.6,
+          "build_s": 61.02
+        },
+        {
+          "knob": 1000,
+          "recall_mean": 0.978,
+          "recall_std": 0.0,
+          "p50_ms_mean": 0.948,
+          "qps_1client_mean": 1055.2,
+          "build_s": 61.02
+        }
+      ]
+    },
+    "pgvector_hnsw": {
+      "curve": [
+        {
+          "knob": 40,
+          "recall_mean": 0.978,
+          "recall_std": 0.0,
+          "p50_ms_mean": 0.945,
+          "qps_1client_mean": 1058.7,
+          "build_s": 34.96
+        },
+        {
+          "knob": 100,
+          "recall_mean": 0.992,
+          "recall_std": 0.0,
+          "p50_ms_mean": 1.161,
+          "qps_1client_mean": 861.4,
+          "build_s": 34.96
+        },
+        {
+          "knob": 200,
+          "recall_mean": 0.994,
+          "recall_std": 0.0,
+          "p50_ms_mean": 1.384,
+          "qps_1client_mean": 722.7,
+          "build_s": 34.96
+        },
+        {
+          "knob": 400,
+          "recall_mean": 0.996,
+          "recall_std": 0.0,
+          "p50_ms_mean": 2.068,
+          "qps_1client_mean": 483.7,
+          "build_s": 34.96
+        }
+      ]
+    }
+  },
+  "raw": {
+    "theodb_hnsw_aq": [
+      [
+        {
+          "knob": 4,
+          "build_s": 107.05,
+          "recall": 0.978,
+          "p50_ms": 0.983,
+          "qps_1client": 1017.0
+        },
+        {
+          "knob": 8,
+          "build_s": 107.05,
+          "recall": 0.978,
+          "p50_ms": 0.946,
+          "qps_1client": 1057.5
+        },
+        {
+          "knob": 16,
+          "build_s": 107.05,
+          "recall": 0.978,
+          "p50_ms": 0.957,
+          "qps_1client": 1045.0
+        },
+        {
+          "knob": 32,
+          "build_s": 107.05,
+          "recall": 0.978,
+          "p50_ms": 0.924,
+          "qps_1client": 1081.9
+        }
+      ]
+    ],
+    "theodb_hnsw_sbq": [
+      [
+        {
+          "knob": 4,
+          "build_s": 64.3,
+          "recall": 0.978,
+          "p50_ms": 0.961,
+          "qps_1client": 1041.1
+        },
+        {
+          "knob": 8,
+          "build_s": 64.3,
+          "recall": 0.978,
+          "p50_ms": 0.96,
+          "qps_1client": 1041.4
+        },
+        {
+          "knob": 16,
+          "build_s": 64.3,
+          "recall": 0.978,
+          "p50_ms": 0.951,
+          "qps_1client": 1051.5
+        },
+        {
+          "knob": 32,
+          "build_s": 64.3,
+          "recall": 0.978,
+          "p50_ms": 0.952,
+          "qps_1client": 1050.6
+        }
+      ]
+    ],
+    "theodb_hnsw_f32": [
+      [
+        {
+          "knob": 200,
+          "build_s": 61.02,
+          "recall": 0.978,
+          "p50_ms": 0.955,
+          "qps_1client": 1047.0
+        },
+        {
+          "knob": 400,
+          "build_s": 61.02,
+          "recall": 0.978,
+          "p50_ms": 0.959,
+          "qps_1client": 1042.2
+        },
+        {
+          "knob": 800,
+          "build_s": 61.02,
+          "recall": 0.978,
+          "p50_ms": 0.958,
+          "qps_1client": 1043.6
+        },
+        {
+          "knob": 1000,
+          "build_s": 61.02,
+          "recall": 0.978,
+          "p50_ms": 0.948,
+          "qps_1client": 1055.2
+        }
+      ]
+    ],
+    "pgvector_hnsw": [
+      [
+        {
+          "knob": 40,
+          "build_s": 34.96,
+          "recall": 0.978,
+          "p50_ms": 0.945,
+          "qps_1client": 1058.7
+        },
+        {
+          "knob": 100,
+          "build_s": 34.96,
+          "recall": 0.992,
+          "p50_ms": 1.161,
+          "qps_1client": 861.4
+        },
+        {
+          "knob": 200,
+          "build_s": 34.96,
+          "recall": 0.994,
+          "p50_ms": 1.384,
+          "qps_1client": 722.7
+        },
+        {
+          "knob": 400,
+          "build_s": 34.96,
+          "recall": 0.996,
+          "p50_ms": 2.068,
+          "qps_1client": 483.7
+        }
+      ]
+    ]
+  }
+}
