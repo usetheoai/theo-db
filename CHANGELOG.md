@@ -15,6 +15,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 ### Changed
+- **M57 (P0) — harness build-once**: `run_m51_sbq_inline.py` builda cada índice UMA vez e mede `runs×` (antes rebuildava por run → 9 builds a runs=3, o que tornava o 1M×768d impraticável). Mesmo mean±std na métrica que varia (QPS/recall) a 1/runs do custo de build. Junto com o SIMD cosine do M58 (3.15×), viabiliza o benchmark P0 a 1M.
 
 ### Deprecated
 

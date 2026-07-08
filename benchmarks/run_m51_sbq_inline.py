@@ -133,22 +133,30 @@ def run(n, dim, nq, k, runs):
     gt = _ground_truth(cur, table, queries, k)
 
     results = {name: [] for name in SPECS}
+    # M57: build each index ONCE (deterministic), then measure `runs` times. The old code rebuilt every spec on
+    # every run (runs× = 9 builds at runs=3), which made the 1M×768d run impractical. Build-once + measure-runs
+    # gives the same mean±std on the varying metric (QPS/recall) at 1/runs the build cost.
+    build_s = {}
+    for name, spec in SPECS.items():
+        cur.execute(spec["drop"])
+        try:
+            t0 = time.perf_counter()
+            cur.execute(spec["ddl"].format(t=table))
+            build_s[name] = round(time.perf_counter() - t0, 2)
+        except Exception as e:  # noqa: BLE001 — record honestly, never fabricate
+            build_s[name] = None
+            results[name].append({"error": str(e)[:160]})
     loads = []
     for _ in range(runs):
         loads.append(_load())
         for name, spec in SPECS.items():
-            cur.execute(spec["drop"])
-            try:
-                t0 = time.perf_counter()
-                cur.execute(spec["ddl"].format(t=table))
-                build_s = round(time.perf_counter() - t0, 2)
-            except Exception as e:  # noqa: BLE001 — record honestly, never fabricate
-                results[name].append({"error": str(e)[:160]})
-                continue
-            pts = [{"knob": v, "build_s": build_s, **_measure(cur, table, spec, v, queries, gt, k)}
+            if build_s.get(name) is None:
+                continue  # build failed — error already recorded
+            pts = [{"knob": v, "build_s": build_s[name], **_measure(cur, table, spec, v, queries, gt, k)}
                    for v in spec["sweep"]]
             results[name].append(pts)
-            cur.execute(spec["drop"])
+    for name, spec in SPECS.items():
+        cur.execute(spec["drop"])
     conn.close()
 
     agg = {}
