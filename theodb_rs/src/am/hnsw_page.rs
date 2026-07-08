@@ -100,6 +100,12 @@ pub(crate) struct HnswMeta {
     /// quantizer (`SbqQuantizer::to_meta_bytes`) so the scan reproduces the build-time quantization.
     pub(crate) sbq_bits: u8,
     pub(crate) codebook: Vec<u8>,
+    /// M59 layout v3 (AQ): the anisotropic-PQ subspace count (`m`, 0 = not AQ). > 0 ⇒ `aq_codebook` carries the
+    /// persisted quantizer (`AqQuantizer::to_meta_bytes`) so the scan reproduces the build-time codebook. AQ and
+    /// SBQ are mutually exclusive per index: `aq_m > 0` ⇒ `sbq_bits == 0` (the version discriminates which
+    /// trailing code the element tuple carries). `⌈aq_m/2⌉` code bytes trail each element (Phase-2 `pshufb`).
+    pub(crate) aq_m: u8,
+    pub(crate) aq_codebook: Vec<u8>,
 }
 
 impl HnswMeta {
@@ -111,13 +117,29 @@ impl HnswMeta {
 
 const META_LEN: usize = 4 + 4 + 1 + 4 + 2 + 2 + 4 + 2 + 2 + 4 + 4 + 4 + 4 + 4; // = 45 bytes (v1 core)
 const HNSW_STRUCT_VERSION_SBQ: u32 = 2; // M51 layout v2: same core header + trailing [sbq_bits:u8][cb_len:u32][codebook]
+const HNSW_STRUCT_VERSION_AQ: u32 = 3; // M59 layout v3: same core header + trailing [aq_m:u8][cb_len:u32][aq_codebook]
 
-/// Encode the meta item. `sbq_bits == 0` ⇒ emit the byte-identical **v1** layout (legacy indexes + f32-only
-/// builds are unchanged; existing tests stay green). `sbq_bits > 0` ⇒ emit **v2** = the same 45-byte core with
-/// `HNSW_STRUCT_VERSION_SBQ` in the version slot, then `[sbq_bits:u8][codebook_len:u32 LE][codebook bytes]`.
+/// Encode the meta item. The version slot (bytes 4..8) is the discriminator: **v1** (f32-only, `sbq_bits==0` and
+/// `aq_m==0`) is the byte-identical 45-byte core (legacy indexes + f32 builds unchanged, existing tests stay
+/// green); **v2** (`sbq_bits>0`, M51) is the core + `[sbq_bits:u8][cb_len:u32][codebook]`; **v3** (`aq_m>0`, M59)
+/// is the core + `[aq_m:u8][cb_len:u32][aq_codebook]`. AQ and SBQ are mutually exclusive (an AQ index has
+/// `sbq_bits==0`), so exactly one trailer is emitted; the version tells the reader which one.
 fn encode_meta(m: &HnswMeta) -> Vec<u8> {
-    let version = if m.sbq_bits == 0 { HNSW_STRUCT_VERSION } else { HNSW_STRUCT_VERSION_SBQ };
-    let mut b = Vec::with_capacity(META_LEN + if m.sbq_bits == 0 { 0 } else { 5 + m.codebook.len() });
+    let version = if m.aq_m != 0 {
+        HNSW_STRUCT_VERSION_AQ
+    } else if m.sbq_bits != 0 {
+        HNSW_STRUCT_VERSION_SBQ
+    } else {
+        HNSW_STRUCT_VERSION
+    };
+    let trailer = if m.aq_m != 0 {
+        5 + m.aq_codebook.len()
+    } else if m.sbq_bits != 0 {
+        5 + m.codebook.len()
+    } else {
+        0
+    };
+    let mut b = Vec::with_capacity(META_LEN + trailer);
     b.extend_from_slice(&HNSW_STRUCT_MAGIC.to_le_bytes());
     b.extend_from_slice(&version.to_le_bytes());
     b.push(m.metric_tag);
@@ -132,7 +154,11 @@ fn encode_meta(m: &HnswMeta) -> Vec<u8> {
     b.extend_from_slice(&m.elem_npages.to_le_bytes());
     b.extend_from_slice(&m.nbr_first.to_le_bytes());
     b.extend_from_slice(&m.nbr_npages.to_le_bytes());
-    if m.sbq_bits != 0 {
+    if m.aq_m != 0 {
+        b.push(m.aq_m);
+        b.extend_from_slice(&(m.aq_codebook.len() as u32).to_le_bytes());
+        b.extend_from_slice(&m.aq_codebook);
+    } else if m.sbq_bits != 0 {
         b.push(m.sbq_bits);
         b.extend_from_slice(&(m.codebook.len() as u32).to_le_bytes());
         b.extend_from_slice(&m.codebook);
@@ -140,8 +166,27 @@ fn encode_meta(m: &HnswMeta) -> Vec<u8> {
     b
 }
 
+/// Parse a v2/v3 trailing quantizer trailer `[byte:u8][cb_len:u32 LE][codebook]` at `META_LEN`. Validates the
+/// exact length (Rule 8: typed `Err`, never a slice panic across the C boundary) and returns `(byte, codebook)`.
+/// Shared by the v2 (SBQ) and v3 (AQ) arms — identical wire shape, different meaning of `byte` (bits vs `m`).
+fn decode_trailer(b: &[u8], label: &str) -> Result<(u8, Vec<u8>), String> {
+    if b.len() < META_LEN + 5 {
+        return Err(format!("theodb hnsw: truncated {label} trailer"));
+    }
+    let byte = b[META_LEN];
+    let cb_len = u32::from_le_bytes(b[META_LEN + 1..META_LEN + 5].try_into().unwrap()) as usize;
+    if b.len() != META_LEN + 5 + cb_len {
+        return Err(format!(
+            "theodb hnsw: {label} codebook length mismatch (declared {cb_len}, have {})",
+            b.len() - META_LEN - 5
+        ));
+    }
+    Ok((byte, b[META_LEN + 5..].to_vec()))
+}
+
 /// Parse the meta item. Fail-fast typed `Err` on truncation / bad magic / unknown version — never panic.
-/// Handles both v1 (legacy, no SBQ) and v2 (M51, trailing codebook); v1 indexes stay readable.
+/// Handles v1 (legacy, no code), v2 (M51 SBQ, trailing SBQ codebook), and v3 (M59 AQ, trailing AQ codebook);
+/// v1/v2 indexes stay readable byte-for-byte (the version slot discriminates which trailer, if any, follows).
 pub(crate) fn decode_meta(b: &[u8]) -> Result<HnswMeta, String> {
     if b.len() < META_LEN {
         return Err("theodb hnsw: truncated meta page".into());
@@ -152,30 +197,26 @@ pub(crate) fn decode_meta(b: &[u8]) -> Result<HnswMeta, String> {
                     page-native format)".into());
     }
     let version = u32::from_le_bytes(b[4..8].try_into().unwrap());
-    if version != HNSW_STRUCT_VERSION && version != HNSW_STRUCT_VERSION_SBQ {
+    if version != HNSW_STRUCT_VERSION
+        && version != HNSW_STRUCT_VERSION_SBQ
+        && version != HNSW_STRUCT_VERSION_AQ
+    {
         return Err(format!(
             "theodb hnsw: unsupported structured meta version v{version} — REINDEX with a compatible theodb build"
         ));
     }
     let u16a = |o: usize| u16::from_le_bytes(b[o..o + 2].try_into().unwrap());
     let u32a = |o: usize| u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
-    // v2 trailer: [sbq_bits:u8][codebook_len:u32][codebook]. Validate exact length (Rule 8) before slicing.
-    let (sbq_bits, codebook) = if version == HNSW_STRUCT_VERSION_SBQ {
-        if b.len() < META_LEN + 5 {
-            return Err("theodb hnsw: truncated v2 SBQ trailer".into());
-        }
-        let bits = b[META_LEN];
-        let cb_len = u32::from_le_bytes(b[META_LEN + 1..META_LEN + 5].try_into().unwrap()) as usize;
-        if b.len() != META_LEN + 5 + cb_len {
-            return Err(format!(
-                "theodb hnsw: v2 codebook length mismatch (declared {cb_len}, have {})",
-                b.len() - META_LEN - 5
-            ));
-        }
-        (bits, b[META_LEN + 5..].to_vec())
-    } else {
-        (0u8, Vec::new())
-    };
+    // Exactly one trailer follows the core header, keyed by version. v2 = SBQ, v3 = AQ; v1 = none.
+    let (mut sbq_bits, mut codebook) = (0u8, Vec::new());
+    let (mut aq_m, mut aq_codebook) = (0u8, Vec::new());
+    if version == HNSW_STRUCT_VERSION_SBQ {
+        let (bits, cb) = decode_trailer(b, "v2 SBQ")?;
+        (sbq_bits, codebook) = (bits, cb);
+    } else if version == HNSW_STRUCT_VERSION_AQ {
+        let (m, cb) = decode_trailer(b, "v3 AQ")?;
+        (aq_m, aq_codebook) = (m, cb);
+    }
     Ok(HnswMeta {
         metric_tag: b[8],
         dim: u32a(9),
@@ -191,6 +232,8 @@ pub(crate) fn decode_meta(b: &[u8]) -> Result<HnswMeta, String> {
         nbr_npages: u32a(41),
         sbq_bits,
         codebook,
+        aq_m,
+        aq_codebook,
     })
 }
 
@@ -348,11 +391,89 @@ pub(crate) fn pack(idx: &HnswIndex) -> Result<Packed, String> {
     pack_at(idx, 1, 0)
 }
 
+/// Which trailing per-node code (if any) a `pack` writes inline + which meta trailer it emits. `None` ⇒ v1
+/// (f32-only), `Sbq` ⇒ v2 (M51), `Aq` ⇒ v3 (M59). AQ and SBQ are mutually exclusive per index (D1).
+enum CodeKind {
+    None,
+    Sbq { bits: u8 },
+    Aq { m: usize, bits: u8, aq_threshold: f32 },
+}
+
+/// The trained per-node codes + the two meta-trailer slots for a given `CodeKind`. `code_len == 0` ⇒ v1.
+/// Exactly one of (`sbq_bits`,`codebook`) / (`aq_m`,`aq_codebook`) is non-default — never both (D1).
+struct CodeSpec {
+    code_len: usize,
+    codes: Vec<Vec<u8>>,
+    sbq_bits: u8,
+    codebook: Vec<u8>,
+    aq_m: u8,
+    aq_codebook: Vec<u8>,
+}
+
+/// Train the quantizer for `kind` over the graph's live vectors and emit one inline code per node + the meta
+/// trailer bytes. Called once per pack; `CodeKind::None` yields the zero spec (v1 f32-only, byte-identical).
+fn train_codes(idx: &HnswIndex, kind: &CodeKind) -> Result<CodeSpec, String> {
+    let n = idx.node_count();
+    let dim = idx.dim();
+    match kind {
+        CodeKind::None => Ok(CodeSpec {
+            code_len: 0, codes: Vec::new(), sbq_bits: 0, codebook: Vec::new(),
+            aq_m: 0, aq_codebook: Vec::new(),
+        }),
+        // M51 T1.1/T2.1: train SBQ, emit packed-u64 → LE codes + the codebook.
+        CodeKind::Sbq { bits } => {
+            let vecs: Vec<Vec<f32>> = (0..n).map(|i| idx.node_vector(i).to_vec()).collect();
+            let q = crate::sbq::SbqQuantizer::train(&vecs, *bits);
+            let codes: Vec<Vec<u8>> = vecs
+                .iter()
+                .map(|v| q.quantize(v).iter().flat_map(|w| w.to_le_bytes()).collect())
+                .collect();
+            Ok(CodeSpec {
+                code_len: crate::sbq::SbqQuantizer::bytes_per_vector(dim, *bits),
+                codes, sbq_bits: *bits, codebook: q.to_meta_bytes(),
+                aq_m: 0, aq_codebook: Vec::new(),
+            })
+        }
+        // M59 T3.1: train the anisotropic PQ, emit each node's ⌈m/2⌉-byte 4-bit code + the codebook. The seed is
+        // fixed (deterministic build, mirrors SBQ's parameter-free train — the fold re-trains identically).
+        CodeKind::Aq { m, bits, aq_threshold } => {
+            let vecs: Vec<Vec<f32>> = (0..n).map(|i| idx.node_vector(i).to_vec()).collect();
+            let q = crate::am::aq::AqQuantizer::train(&vecs, *m, *bits, *aq_threshold, AQ_BUILD_SEED)?;
+            let codes: Vec<Vec<u8>> = vecs.iter().map(|v| q.encode(v)).collect();
+            Ok(CodeSpec {
+                code_len: crate::am::aq::AqQuantizer::bytes_per_vector(dim, *m),
+                codes, sbq_bits: 0, codebook: Vec::new(),
+                aq_m: *m as u8, aq_codebook: q.to_meta_bytes(),
+            })
+        }
+    }
+}
+
+/// Fixed training seed so a v3 build (and every VACUUM re-fold of it) produces a byte-identical AQ codebook from
+/// the same live corpus — the deterministic-build / relocatable-fold invariant (D1, mirrors SBQ's parameterless
+/// deterministic train). Chosen arbitrarily; only its stability across folds matters.
+const AQ_BUILD_SEED: u64 = 0x5943_4E41; // "ANCY" — anisotropic build.
+
 /// Like [`pack`] but emits **layout v2**: trains an SBQ quantizer from the graph's vectors, persists the codebook
 /// in the meta, and writes each node's compact SBQ code inline after its f32 vector (M51 T1.1/T2.1). `sbq_bits==0`
 /// is identical to [`pack`].
 pub(crate) fn pack_sbq(idx: &HnswIndex, sbq_bits: u8) -> Result<Packed, String> {
     pack_at(idx, 1, sbq_bits)
+}
+
+/// Like [`pack`] but emits **layout v3**: trains an [`crate::am::aq::AqQuantizer`] from the graph's vectors,
+/// persists the AQ codebook in the meta, and writes each node's `⌈m/2⌉`-byte 4-bit code inline after its f32
+/// vector (M59 T3.1). `m == 0` falls back to the v1 f32-only pack. The generation starts at `base` (position-
+/// independent — the fold re-packs v3 the same way SBQ preserves v2).
+///
+/// NOTE (M59 T3.1 wiring): the production caller (`ambuild_hnsw` + the VACUUM fold) lands in Phase 3 T3.3
+/// (Dependency Graph 3→4). In THIS task the v3 pack path is exercised only by the `#[pg_test]` suite below —
+/// the codec + pack are complete and correct, but not yet wired into `build.rs`. The `allow(dead_code)` in
+/// non-test builds is honest about that one-task deferral; T3.3 removes it by adding the caller.
+#[cfg_attr(not(any(test, feature = "pg_test")), allow(dead_code))]
+pub(crate) fn pack_aq(idx: &HnswIndex, base: usize, m: usize, bits: u8, aq_threshold: f32) -> Result<Packed, String> {
+    let kind = if m == 0 { CodeKind::None } else { CodeKind::Aq { m, bits, aq_threshold } };
+    pack_kind(idx, base, &kind)
 }
 
 /// Like [`pack`], but places the generation body starting at block `base` (M48 / issue #47). The meta's element
@@ -361,37 +482,32 @@ pub(crate) fn pack_sbq(idx: &HnswIndex, sbq_bits: u8) -> Result<Packed, String> 
 /// (or a reclaimed contiguous region) and pivots block 0 to it. Readers already follow the meta pointers, so no
 /// read path changes: the graph is relocatable for free (unlike IVF, whose directory needed an explicit gen_base).
 pub(crate) fn pack_at(idx: &HnswIndex, base: usize, sbq_bits: u8) -> Result<Packed, String> {
+    let kind = if sbq_bits == 0 { CodeKind::None } else { CodeKind::Sbq { bits: sbq_bits } };
+    pack_kind(idx, base, &kind)
+}
+
+/// The shared pack core: resolves analytic element addrs, packs neighbor tuples, writes element tuples with the
+/// `kind`'s inline code, and emits the meta with the `kind`'s trailer (v1/v2/v3). One code path, three layouts.
+fn pack_kind(idx: &HnswIndex, base: usize, kind: &CodeKind) -> Result<Packed, String> {
     let (metric, m, m0, _ef) = idx.params();
     let n = idx.node_count();
     let dim = idx.dim();
 
     // Empty graph: meta only, entry_level = -1. `base` is irrelevant (no body pages) — record it anyway so
     // pending_start (= nbr_first + nbr_npages = base) is consistent with a non-empty generation at `base`.
-    // An empty index has no vectors to train the quantizer on, so it stays v1 (SBQ arrives on the first fold
+    // An empty index has no vectors to train the quantizer on, so it stays v1 (a code arrives on the first fold
     // after data lands — REINDEX/VACUUM).
     if n == 0 {
         let meta = encode_meta(&HnswMeta {
             metric_tag: metric.tag(), dim: dim as u32, m: m as u16, m0: m0 as u16,
             entry_blkno: 0, entry_offno: 0, entry_level: -1, node_count: 0,
             elem_first: base as u32, elem_npages: 0, nbr_first: base as u32, nbr_npages: 0,
-            sbq_bits: 0, codebook: Vec::new(),
+            sbq_bits: 0, codebook: Vec::new(), aq_m: 0, aq_codebook: Vec::new(),
         });
         return Ok(Packed { meta, pages: Vec::new() });
     }
 
-    // M51 T1.1/T2.1: when SBQ is enabled, train the quantizer from the graph's vectors, emit one compact code per
-    // node (packed u64 words → LE bytes) and the codebook for the meta. `code_len == 0` ⇒ the v1 f32-only path.
-    let (code_len, codes, codebook) = if sbq_bits > 0 {
-        let vecs: Vec<Vec<f32>> = (0..n).map(|i| idx.node_vector(i).to_vec()).collect();
-        let q = crate::sbq::SbqQuantizer::train(&vecs, sbq_bits);
-        let codes: Vec<Vec<u8>> = vecs
-            .iter()
-            .map(|v| q.quantize(v).iter().flat_map(|w| w.to_le_bytes()).collect())
-            .collect();
-        (crate::sbq::SbqQuantizer::bytes_per_vector(dim, sbq_bits), codes, q.to_meta_bytes())
-    } else {
-        (0usize, Vec::new(), Vec::new())
-    };
+    let CodeSpec { code_len, codes, sbq_bits, codebook, aq_m, aq_codebook } = train_codes(idx, kind)?;
 
     // 1. Analytic element addresses (fixed size ⇒ node i is at block base+i/ipp, offset 1+i%ipp).
     let ipp = elems_per_page(dim, code_len);
@@ -447,7 +563,9 @@ pub(crate) fn pack_at(idx: &HnswIndex, base: usize, sbq_bits: u8) -> Result<Pack
         entry_blkno: eb, entry_offno: eo, entry_level: idx.node_level(entry_node) as i16,
         node_count: n as u32, elem_first: base as u32, elem_npages: elem_npages as u32,
         nbr_first: nbr_first as u32, nbr_npages: nbr_npages as u32,
-        sbq_bits: if code_len > 0 { sbq_bits } else { 0 }, codebook,
+        // `train_codes` already zeroes the code kind for v1; pass the spec through unchanged (D1: at most one
+        // of sbq_bits / aq_m is non-zero, so `encode_meta` emits exactly one trailer).
+        sbq_bits, codebook, aq_m, aq_codebook,
     });
 
     let mut pages = elem_pages;
@@ -1190,6 +1308,17 @@ mod tests {
             metric_tag: Metric::L2.tag(), dim: 3, m: 16, m0: 32,
             entry_blkno: 1, entry_offno: 1, entry_level: 2, node_count: 5,
             elem_first: 1, elem_npages: 1, nbr_first: 2, nbr_npages: 1, sbq_bits, codebook,
+            aq_m: 0, aq_codebook: Vec::new(),
+        }
+    }
+
+    // --- M59 T3.1: layout v3 meta carries the AQ codebook; SBQ off (AQ ⟂ SBQ per index, D1). ---
+    fn aq_meta_fixture(aq_m: u8, aq_codebook: Vec<u8>) -> HnswMeta {
+        HnswMeta {
+            metric_tag: Metric::L2.tag(), dim: 8, m: 16, m0: 32,
+            entry_blkno: 1, entry_offno: 1, entry_level: 2, node_count: 5,
+            elem_first: 1, elem_npages: 1, nbr_first: 2, nbr_npages: 1,
+            sbq_bits: 0, codebook: Vec::new(), aq_m, aq_codebook,
         }
     }
 
@@ -1278,6 +1407,129 @@ mod tests {
         let v2 = decode_element(&e2).unwrap();
         assert_eq!(v2.code_bytes, code.as_slice(), "SBQ code roundtrips inline after the vec");
         assert_eq!(v2.vec_bytes, v1.vec_bytes, "appending a code must not change the f32 vec bytes");
+    }
+
+    // ============================ M59 T3.1 — meta v3 codec + AQ pack path ============================
+
+    /// A dim-8 corpus (divisible by the AQ subspace counts used in these tests, m ∈ {2,4}) so
+    /// `AqQuantizer::train` accepts it (`dim % m == 0`, Rule 8). Distinct points, deterministic.
+    fn aq_corpus() -> Vec<(i64, Vec<f32>)> {
+        (0..40)
+            .map(|i| {
+                let f = i as f32;
+                (
+                    i as i64 + 200,
+                    vec![f, (i % 7) as f32, (i % 5) as f32, (i % 3) as f32, f * 0.1, (i % 11) as f32, (i % 2) as f32, f * 0.5],
+                )
+            })
+            .collect()
+    }
+
+    #[pgrx::pg_test]
+    fn aq_meta_v3_roundtrips() {
+        // encode_meta(v3) → decode_meta yields identical AQ params + codebook, byte-exact (mirror the v2 test).
+        let cb = vec![4u8, 2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 128, 63, 9, 8, 7, 6]; // arbitrary AqQuantizer::to_meta_bytes-shaped bytes
+        let bytes = encode_meta(&aq_meta_fixture(2, cb.clone()));
+        assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), HNSW_STRUCT_VERSION_AQ, "must be v3");
+        let d = decode_meta(&bytes).expect("v3 decodes");
+        assert_eq!(d.aq_m, 2, "aq_m roundtrips");
+        assert_eq!(d.aq_codebook, cb, "AQ codebook roundtrips byte-exact");
+        assert_eq!(d.sbq_bits, 0, "AQ index carries no SBQ (mutually exclusive, D1)");
+        assert!(d.codebook.is_empty(), "no v2 codebook on a v3 index");
+        assert_eq!(d.dim, 8);
+        assert_eq!(d.node_count, 5);
+    }
+
+    #[pgrx::pg_test]
+    fn v1_v2_meta_still_decodes() {
+        // BACKWARD-COMPAT (the most important test): pre-existing v1 and v2 meta bytes decode UNCHANGED after the
+        // v3 codec was added. v1 stays the exact 45-byte layout; v2 keeps its SBQ trailer; neither grows an AQ
+        // field. A v3-aware reader must read old indexes bit-for-bit (WAL/crash-safety invariant).
+        // -- v1 (f32-only) --
+        let v1 = encode_meta(&meta_fixture(0, Vec::new()));
+        assert_eq!(v1.len(), META_LEN, "v1 stays the byte-identical 45-byte core");
+        assert_eq!(u32::from_le_bytes(v1[4..8].try_into().unwrap()), HNSW_STRUCT_VERSION, "v1 version unchanged");
+        let d1 = decode_meta(&v1).expect("v1 still decodes");
+        assert_eq!(d1.sbq_bits, 0);
+        assert!(d1.codebook.is_empty());
+        assert_eq!(d1.aq_m, 0, "v1 carries no AQ");
+        assert!(d1.aq_codebook.is_empty());
+        // -- v2 (SBQ) --
+        let cb = vec![4u8, 3, 0, 0, 0, 1, 2, 3, 4];
+        let v2 = encode_meta(&meta_fixture(4, cb.clone()));
+        assert_eq!(u32::from_le_bytes(v2[4..8].try_into().unwrap()), HNSW_STRUCT_VERSION_SBQ, "v2 version unchanged");
+        let d2 = decode_meta(&v2).expect("v2 still decodes");
+        assert_eq!(d2.sbq_bits, 4, "v2 SBQ bits unchanged");
+        assert_eq!(d2.codebook, cb, "v2 codebook unchanged");
+        assert_eq!(d2.aq_m, 0, "v2 carries no AQ");
+        assert!(d2.aq_codebook.is_empty());
+    }
+
+    #[pgrx::pg_test]
+    fn pack_aq_writes_codebook_and_matching_codes() {
+        // T3.1 pack (mirror pack_sbq_writes_codebook_and_matching_codes): pack_aq trains the AQ quantizer,
+        // persists the codebook in the v3 meta, and writes each node's inline code == AqQuantizer::encode(vec).
+        let idx = HnswIndex::build(&aq_corpus(), 16, 64, Metric::L2, 9);
+        let (m_sub, bits, thr) = (4usize, 4u8, 2.0f32);
+        let packed = pack_aq(&idx, 1, m_sub, bits, thr).expect("pack_aq");
+        let meta = decode_meta(&packed.meta).unwrap();
+        assert_eq!(meta.aq_m as usize, m_sub, "meta records AQ subspace count");
+        assert_eq!(meta.sbq_bits, 0, "v3 index has no SBQ");
+        assert!(!meta.aq_codebook.is_empty(), "AQ codebook persisted in meta");
+        // Reconstruct the quantizer from the persisted codebook and verify each element's code matches.
+        let q = crate::am::aq::AqQuantizer::from_meta_bytes(&meta.aq_codebook).expect("AQ codebook decodes");
+        let dim = idx.dim();
+        let ipp = elems_per_page(dim, crate::am::aq::AqQuantizer::bytes_per_vector(dim, m_sub));
+        for node in 0..idx.node_count() {
+            let ep = packed.pages[node / ipp][node % ipp].as_slice();
+            let ev = decode_element(ep).unwrap();
+            let expect = q.encode(idx.node_vector(node));
+            assert_eq!(ev.code_bytes, expect.as_slice(), "node {node}: inline code == encode(vec)");
+            assert_eq!(ev.code_bytes.len(), m_sub.div_ceil(2), "code is ⌈m/2⌉ bytes");
+        }
+    }
+
+    #[pgrx::pg_test]
+    fn pack_aq_m_zero_is_v1_identical() {
+        // Edge: pack_aq with m=0 falls back to the byte-identical v1 f32-only pack (no code, no trailer).
+        let idx = HnswIndex::build(&aq_corpus(), 16, 64, Metric::L2, 3);
+        let v1 = pack(&idx).expect("pack v1");
+        let aq0 = pack_aq(&idx, 1, 0, 4, 1.0).expect("pack_aq m=0");
+        assert_eq!(aq0.meta, v1.meta, "pack_aq(m=0) meta must be byte-identical to the v1 pack");
+        let d = decode_meta(&aq0.meta).unwrap();
+        assert_eq!(d.aq_m, 0, "m=0 ⇒ no AQ trailer");
+    }
+
+    #[pgrx::pg_test]
+    fn decode_meta_rejects_unknown_version() {
+        // Negative (Rule 8): a v4 (or any unknown) version in the slot ⇒ typed Err, never a panic across the C
+        // boundary. Also asserts a truncated v3 AQ trailer is rejected (short codebook).
+        let cb = vec![4u8, 2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 128, 63, 9, 8, 7, 6];
+        let mut bytes = encode_meta(&aq_meta_fixture(2, cb));
+        // Bump the version slot to v4 (unsupported).
+        bytes[4..8].copy_from_slice(&4u32.to_le_bytes());
+        assert!(decode_meta(&bytes).is_err(), "unknown version v4 must Err, not panic");
+        // A truncated v3 codebook (declared length > present) must also Err.
+        let mut short = encode_meta(&aq_meta_fixture(2, vec![1u8, 2, 3, 4, 5]));
+        short.truncate(short.len() - 1);
+        assert!(decode_meta(&short).is_err(), "truncated v3 AQ codebook must Err (Rule 8)");
+    }
+
+    #[pgrx::pg_test]
+    fn aq_element_tuple_roundtrips_code_and_size() {
+        // Round-trip element tuple with an AQ code trailing: encode → decode reads the code identically and
+        // `elem_size` accounts for the ⌈m/2⌉ trailing bytes exactly (the analytic-address invariant for v3).
+        let idx = HnswIndex::build(&aq_corpus(), 16, 64, Metric::L2, 7);
+        let dim = idx.dim();
+        // m=6 → ⌈6/2⌉ = 3 code bytes; last byte holds one nibble (odd m edge).
+        let code = vec![0x21u8, 0x43, 0x05];
+        let e = encode_element(&idx, 0, (1, 1), dim, &code);
+        assert_eq!(e.len(), elem_size(dim, code.len()), "v3 tuple size = header + f32 + ⌈m/2⌉ code");
+        let ev = decode_element(&e).unwrap();
+        assert_eq!(ev.code_bytes, code.as_slice(), "AQ code roundtrips inline after the f32 vec");
+        // The f32 vec is untouched by the trailing code (same as v2 — code_bytes just occupies [end..]).
+        let e0 = encode_element(&idx, 0, (1, 1), dim, &[]);
+        assert_eq!(ev.vec_bytes, decode_element(&e0).unwrap().vec_bytes, "trailing AQ code must not disturb the f32 vec");
     }
 
     /// Collect the id column of `SELECT id FROM rn ORDER BY e <-> q LIMIT k` under the current planner GUCs,
