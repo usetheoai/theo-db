@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Roadmap v3 ATIVADO no `ROADMAP.md`** (M61–M68): promovido do draft ao roadmap ativo que o cycle-kit lê — 4 pilares de amplitude (HTAP, vector-relational, AI-native, auto-tuning). Início do CYCLE por M61 (embarcar columnar/HTAP).
 - **Roadmap v3 (DRAFT) — amplitude de produto** (`ROADMAP-v3.md`, sign-off do owner 2026-07-08): sucessor estratégico do v2 (vetorial entregue em paridade pgvector). 8 milestones (M61–M68) em 4 pilares — HTAP (adotar columnar permissivo), vector-relational unificado (vector join + RAG-sobre-SQL), AI-native (rerank + chunking), auto-tuning/operabilidade — com DoD measurement-first, dependências e out-of-scope. M60 (recall HNSW) e o carrier IVF (25× ScaNN) diferidos. Draft para revisão.
 
 ### Changed

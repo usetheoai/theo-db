@@ -979,6 +979,103 @@ ciclos. Evidência viva: `docs/benchmarks/m57-raw/*.json` (7 configs medidas).
 
 ---
 
+# Roadmap v3 — Amplitude de produto (HTAP + vector-relational + AI-native + operabilidade)
+
+> Ativado 2026-07-08 (sign-off do owner). Detalhe estratégico completo em `ROADMAP-v3.md`. 4 pilares, M61–M68.
+> Herda todas as travas do v2 (measurement-first, licenças D1, engine Postgres mantido, Regra 9). M60 diferido.
+
+### M61 — [ ] Embarcar o columnar/HTAP (pg_mooncake/pg_duckdb) na distribuição — o gate de adoção do M30
+
+**Objective:** o M30/ADR-0013 decidiu MANTER o columnar permissivo (medido ~14× a 5M) mas **não o embarcou**.
+Esta milestone faz a adoção: buildar a peça no PG17 (ou bump PG18), smoke end-to-end, e o gate de licença/CVE.
+
+**Definition of done:**
+- [ ] `pg_mooncake` (ou `pg_duckdb`, o que passar no gate) buildado na imagem do TheoDB; `CREATE EXTENSION` + smoke (columnstore + query analítica) verde em CI.
+- [ ] Gate de licença (D1 — MIT ✓) + `/deps-audit` (CVE) da peça e transitivas.
+- [ ] Benchmark de adoção reproduzível: columnstore vs row-store no MESMO dataset/box → `docs/benchmarks/m61-columnar-adoption.{md,json}`.
+- [ ] Honestidade (Regra 9): columnar é **exceção permissiva adotada**, não own-code.
+
+**Dependencies:** M30. **Risco (MÉDIO):** compat de build PG17/18; peso da imagem.
+
+### M62 — [ ] Superfície HTAP unificada — transacional + analítico na mesma tabela
+
+**Objective:** com o columnar embarcado, entregar a experiência HTAP real (pilar-chave do AlloyDB): a mesma tabela serve OLTP (row) e OLAP (column) sem ETL manual, roteamento por tipo de query.
+
+**Definition of done:**
+- [ ] Fluxo declarativo row-store transacional + coluna analítica sincronizada, documentado como "HTAP do TheoDB".
+- [ ] Benchmark HTAP: carga mista (INSERTs OLTP + agregações OLAP concorrentes) → `docs/benchmarks/m62-htap.{md,json}`.
+- [ ] Veredito honesto vs AlloyDB HTAP (nosso é lakehouse/columnar-adotado — aposta diferente D2, declarada).
+
+**Dependencies:** M61. **Risco (MÉDIO-ALTO):** sincronização row↔column; consistência sob carga mista.
+
+### M63 — [ ] Vector JOIN — vetor como first-class no join relacional
+
+**Objective:** o vetor é first-class no `ORDER BY` (M52); faltam os JOINs vetoriais (`a JOIN b ON a.emb <=> b.emb < τ`) planner-integrados, tornando o vetor parte do modelo relacional.
+
+**Definition of done:**
+- [ ] Similarity join com uso do índice (não nested-loop O(n²)); planner escolhe o AM vetorial; recall preservado.
+- [ ] TDD + benchmark de recall/latência do join vs seqscan → `docs/benchmarks/m63-vector-join.{md,json}`.
+- [ ] Caso end-to-end: deduplicação/entity-resolution por similaridade em SQL puro.
+
+**Dependencies:** M52, M35. **Risco (ALTO):** integração no planner de join.
+
+### M64 — [ ] RAG-sobre-SQL unificado — a query única (relacional + vetor + analítico)
+
+**Objective:** o "one query" story: filtro relacional + retrieval vetorial + (opcional) agregação columnar numa query só — o RAG que não sai do banco.
+
+**Definition of done:**
+- [ ] Query de referência: `WHERE <filtro> ORDER BY <vetor> LIMIT k` + join com agregação columnar, planner-integrado, recall + latência medidos.
+- [ ] Doc do padrão RAG-nativo (retrieval + rerank + contexto) em SQL + benchmark.
+- [ ] Veredito honesto vs pgvector + app-layer (o que ganhamos por ser unificado).
+
+**Dependencies:** M63, M61, M53. **Risco (MÉDIO).**
+
+### M65 — [ ] Reranking own-code (`ai.rerank`) — qualidade de retrieval de 2ª ordem
+
+**Objective:** o RAG SOTA rerankeia os top-k com cross-encoder; falta a superfície `ai.rerank` (own-code Rust + HTTP client mínimo, como o resto do `ai.*`), fechando o lifecycle retrieval→rerank.
+
+**Definition of done:**
+- [ ] `ai.rerank(query, docs[])` própria (Rust), integrável com a híbrida (M53) e o vector join (M63).
+- [ ] Qualidade medida: nDCG@10 / MRR em BEIR com vs sem rerank → `docs/benchmarks/m65-rerank.{md,json}` (gate: melhora o nDCG).
+- [ ] Honestidade: se não melhorar, honest-negative + decisão.
+
+**Dependencies:** M53, M18. **Risco (MÉDIO).**
+
+### M66 — [ ] Estratégias de chunking declarativas no vectorizer
+
+**Objective:** o vectorizer (M54) auto-embeda, mas o chunking domina a qualidade do RAG; faltam estratégias declarativas (fixed/sentence/semantic/overlap) com medida de impacto.
+
+**Definition of done:**
+- [ ] Chunking configurável no vectorizer (`WITH (chunk_strategy=…, chunk_size=…, overlap=…)`), own-code.
+- [ ] Benchmark: recall de RAG por estratégia num corpus real → `docs/benchmarks/m66-chunking.{md,json}`.
+- [ ] Edge/negative: documentos degenerados (vazio, gigante, 1 token) → typed error/handling.
+
+**Dependencies:** M54. **Risco (BAIXO-MÉDIO).**
+
+### M67 — [ ] Índices vetoriais auto-tunados — ef/probes por workload
+
+**Objective:** `ef_search`/`probes` são knobs manuais; um banco maduro auto-ajusta pela workload (P7). Own-code: observar o padrão de queries e ajustar o knob para o alvo recall×latência.
+
+**Definition of done:**
+- [ ] Coletor de estatística de scan (recall estimado, pages read, latência) por índice — own-code.
+- [ ] Auto-tune (ou recomendação) do `ef_search`/`probes` para um alvo de recall; medida de convergência → `docs/benchmarks/m67-autotune.{md,json}`.
+- [ ] `amcostestimate` refinado com a estatística real (fecha o gap M48/cost).
+
+**Dependencies:** M35, M34. **Risco (MÉDIO).**
+
+### M68 — [ ] Observabilidade do query vetorial — EXPLAIN + métricas
+
+**Objective:** operabilidade: o scan vetorial é opaco; expor `EXPLAIN (ANALYZE)` com pages-read/recall-est + métricas runtime para o operador diagnosticar em produção.
+
+**Definition of done:**
+- [ ] `EXPLAIN` do scan vetorial mostra: índice, ef/probes efetivo, pages read, candidatos vistos.
+- [ ] Métricas runtime (counter/histogram) do scan vetorial expostas (pilar (c) do wiring-triad).
+- [ ] Doc de operação: diagnosticar recall baixo / latência alta em produção.
+
+**Dependencies:** M67. **Risco (BAIXO).**
+
+---
+
 ## Sequência e paralelismo
 
 ```
