@@ -1,0 +1,90 @@
+# M57 (P0) — SBQ-inline superiority: recall×QPS a escala + pressão de RAM (veredito D3)
+
+**Veredito: HONEST-NEGATIVE.** A tese "o AM próprio se justifica porque o SBQ inline entrega **≥2× QPS** a
+recall≥0.99 sob pressão de memória" está **FALSIFICADA** por medição. O SBQ é recall-neutro vs f32 mas
+**consistentemente MAIS LENTO** (nunca mais rápido) — in-RAM e sob pressão. Consequência: reabrir o ADR-0015
+(ver `docs/adr/0018-m57-sbq-inline-not-superior.md`).
+
+## Método
+
+- **Harness:** `benchmarks/run_m51_sbq_inline.py` (recall gate + comparação a pgvector) e
+  `benchmarks/run_m57_pressure.py` (split `--phase build|measure` para constranger RAM ENTRE build e medição —
+  um build HNSW precisa de `maintenance_work_mem` que o estado constrangido não daria). Ambos reusam SPECS/_conn/
+  _measure/_ground_truth (Regra 9). GT = seqscan exato cosine. Métrica: recall@10 + p50 + QPS 1-cliente.
+- **Dados:** gaussian-**mixture** (256 centros, ruído tight) — o gaussian puro é degenerado para ANN (recall
+  arbitrário; ver § Caveat 1). Cosine, dim=768 (eixo dos embeddings reais).
+- **Ambiente:** droplet DigitalOcean c-8 (8 vCPU dedicado / 16 GB), box **limpa** (`load_per_run < 1.5` — sem
+  saturação, lição m46). PG `theodb:m58` (com o cosine SIMD do M58), `shared_buffers=1GB`, `--network host`.
+- **Pressão:** build a 16 GB → `docker update --memory=<N> pgm57` + `drop_caches` → measure. Índices a 500k×768d:
+  f32 ~1.5 GB, códigos SBQ (8-bit) ~384 MB, tabela ~1.5 GB.
+- **Configs SBQ:** `sbq_bits=8`, `ef_search=400`, `over_fetch ∈ {2,4,8,16}` (o knob de recuperação de recall, M40).
+
+## Resultado 1 — recall gate + comparação a pgvector (100k×768d, in-RAM)
+
+| Índice | recall@10 | p50 | QPS | build |
+|---|---|---|---|---|
+| theodb_hnsw_sbq | 0.974 | 1.18 ms | 848 | 67 s |
+| theodb_hnsw_f32 | 0.974 | 1.07 ms | 938 | 63 s |
+| pgvector_hnsw | 0.992 | 1.41 ms | 708 | 41 s |
+
+- SBQ é **recall-neutro vs f32** (0.974 = 0.974) — o rerank exato f32 preserva recall (DoD do M51 vale a escala).
+- theodb HNSW é **~1.2× QPS > pgvector** a recall equivalente — o AM tem valor geral, **mas não vindo do SBQ**.
+- Já aqui o SBQ (848) é mais lento que o f32 (938): **nenhuma vantagem in-RAM**.
+
+## Resultado 2 — SBQ vs f32 sob pressão de RAM (500k×768d, o núcleo P0)
+
+recall idêntico 0.956 em todos os regimes (SBQ = f32 — recall-neutro; o 0.956 < 0.99 é a qualidade do grafo HNSW
+do theodb a esta escala/ef, não do SBQ). QPS 1-cliente, melhor ponto do sweep:
+
+| Regime | SBQ QPS | f32 QPS | **SBQ/f32** |
+|---|---|---|---|
+| in-RAM (16 GB, tudo cacheado) | 90 | 256 | **0.35×** |
+| pressão (`--memory=1.8g`) | 194 | 266 | **0.73×** |
+| pressão tight (`--memory=1.3g`, < shared_buffers+índice f32) | 218 | 284 | **0.77×** |
+
+**O f32 vence o SBQ em TODOS os regimes.** A tese ≥2× exigiria SBQ ≥2× *mais rápido*; medimos SBQ *0.35–0.77×*
+(mais lento).
+
+## Por que a tese falhou (mecanismo)
+
+1. **HNSW tem localidade de acesso.** Uma query toca ~`ef·log N` nós, não o índice inteiro. As páginas quentes
+   (camadas superiores + nós visitados) permanecem cacheadas mesmo quando o índice f32 (1.5 GB) excede a RAM — logo
+   o f32 **não thrasha** sob pressão (QPS f32 até *subiu* de 256→284 entre in-RAM e tight, dentro do ruído). A
+   premissa "índice não cabe → I/O de disco por query" não vale para HNSW.
+2. **O caminho de leitura do SBQ é fundamentalmente mais caro por query:** Hamming-walk sobre os códigos + rerank
+   exato f32 no top `k·over_fetch`. Esse custo de CPU domina e **cresce relativamente com a escala** (100k: SBQ
+   0.90× do f32; 500k: 0.35× in-RAM) — o oposto do que a tese previa.
+
+O ganho do SBQ (códigos pequenos) só pagaria se o gargalo fosse I/O de índice sob pressão — e o HNSW, por design,
+não expõe esse gargalo.
+
+## Veredito D3
+
+- **NÃO reter** a tese do AM próprio *pela superioridade do SBQ inline*. O SBQ é recall-neutro mas mais lento —
+  não há caso de QPS que o justifique sobre o f32 HNSW simples.
+- O AM próprio ainda tem **valor geral medido** (theodb HNSW ~1.2× > pgvector a 100k) — mas essa é uma tese
+  DIFERENTE (qualidade do grafo/scan), não a do SBQ. Ver ADR-0018.
+- Reabrir o **ADR-0015** (own-AM) reenquadrando a justificativa: não é o SBQ. `docs/adr/0018-...`.
+
+## Caveats honestos
+
+1. **Dados sintéticos gaussian-mixture**, não embeddings reais (SIFT1M/OpenAI). Estrutura de cluster é uma
+   aproximação; um dataset real pode mover os absolutos. Mas a **direção** (SBQ mais lento que f32, sem thrash do
+   f32) é mecânica (localidade do HNSW + custo do rerank), não dependente do dataset. Follow-up: repetir em SIFT1M.
+2. **pgvector não buildou a 500k** — `/dev/shm=64MB` (default do docker) < 6.4 GB que o build paralelo do pgvector
+   pede. Baseline pgvector só existe a 100k (Resultado 1). Não afeta o veredito (SBQ vs f32, ambos theodb).
+3. **recall 0.956 < 0.99 a 500k** (ambos SBQ e f32) — qualidade do grafo HNSW do theodb a este ef/escala; item
+   separado do veredito do SBQ (que é sobre QPS a recall *igual*). Rastreado à parte.
+4. **1-cliente** (sem concorrência). Um QPS multi-cliente pode mudar absolutos, não a razão SBQ<f32 (mesmo custo
+   por query relativo).
+
+## Reprodução
+
+```
+# build (16 GB):   python3 run_m57_pressure.py --phase build --n 500000 --dim 768 --nq 50 --make --state S.json
+# in-RAM:          python3 run_m57_pressure.py --phase measure --state S.json --mem-note unconstrained
+# pressão:         docker update --memory=1300m --memory-swap=1300m pgm57 && sync && echo 3>/proc/sys/vm/drop_caches
+#                  python3 run_m57_pressure.py --phase measure --state S.json --mem-note pressure_1.3g
+```
+
+Dados brutos: `docs/benchmarks/m57-raw/{m57_100k_clustered,m57p_unconstrained,m57p_pressure,m57p_pressure_tight}.json`.

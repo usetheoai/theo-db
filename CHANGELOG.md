@@ -13,6 +13,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **M57 (P0) — veredito D3 do SBQ-inline: HONEST-NEGATIVE (medido)**: benchmark de superioridade vetorial a escala + pressão de RAM (`docs/benchmarks/m57-sbq-superiority.md`, dados brutos em `docs/benchmarks/m57-raw/`). A tese "SBQ inline entrega ≥2× QPS a recall≥0.99 sob pressão" está **FALSIFICADA**: a 500k×768d o SBQ é recall-neutro vs f32 mas **0.35–0.77× do QPS** (mais lento) em TODOS os regimes (in-RAM, pressão 1.8GB, 1.3GB). Mecanismo: o HNSW tem localidade de acesso (o índice f32 não thrasha sob pressão) e o read-path Hamming-walk+rerank do SBQ é mais caro por query. Achado positivo à parte: theodb HNSW ~1.2× QPS > pgvector a 100k (recall equivalente). Decisão em `docs/adr/0018-m57-sbq-inline-not-superior.md` (finaliza o D3 do ADR-0015; reenquadra o P1/M59 para quantização anisotrópica).
+- **M57 — driver de pressão de RAM** `benchmarks/run_m57_pressure.py`: split `--phase build|measure` que reusa o harness M51 (Regra 9) para constranger a RAM do container ENTRE build e medição (`docker update --memory`), medindo o QPS sob pressão de verdade.
 
 ### Changed
 - **M57 (P0) — harness build-once**: `run_m51_sbq_inline.py` builda cada índice UMA vez e mede `runs×` (antes rebuildava por run → 9 builds a runs=3, o que tornava o 1M×768d impraticável). Mesmo mean±std na métrica que varia (QPS/recall) a 1/runs do custo de build. Junto com o SIMD cosine do M58 (3.15×), viabiliza o benchmark P0 a 1M.

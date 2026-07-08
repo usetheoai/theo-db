@@ -1,0 +1,94 @@
+{
+  "mem_note": "unconstrained_16g",
+  "n": 500000,
+  "dim": 768,
+  "k": 10,
+  "load": 1.39,
+  "sbq_qps_at_recall99": null,
+  "f32_qps_at_recall99": null,
+  "sbq_over_f32_ratio": null,
+  "thesis_2x_met": false,
+  "per_spec": {
+    "theodb_hnsw_sbq": {
+      "best": {
+        "knob": 2,
+        "build_s": 410.75,
+        "recall": 0.956,
+        "p50_ms": 11.108,
+        "qps_1client": 90.0
+      },
+      "sweep": [
+        {
+          "knob": 2,
+          "build_s": 410.75,
+          "recall": 0.956,
+          "p50_ms": 11.108,
+          "qps_1client": 90.0
+        },
+        {
+          "knob": 4,
+          "build_s": 410.75,
+          "recall": 0.956,
+          "p50_ms": 4.07,
+          "qps_1client": 245.7
+        },
+        {
+          "knob": 8,
+          "build_s": 410.75,
+          "recall": 0.956,
+          "p50_ms": 3.911,
+          "qps_1client": 255.7
+        },
+        {
+          "knob": 16,
+          "build_s": 410.75,
+          "recall": 0.956,
+          "p50_ms": 3.833,
+          "qps_1client": 260.9
+        }
+      ]
+    },
+    "theodb_hnsw_f32": {
+      "best": {
+        "knob": 400,
+        "build_s": 380.33,
+        "recall": 0.956,
+        "p50_ms": 3.91,
+        "qps_1client": 255.7
+      },
+      "sweep": [
+        {
+          "knob": 40,
+          "build_s": 380.33,
+          "recall": 0.776,
+          "p50_ms": 1.616,
+          "qps_1client": 619.0
+        },
+        {
+          "knob": 100,
+          "build_s": 380.33,
+          "recall": 0.864,
+          "p50_ms": 2.235,
+          "qps_1client": 447.5
+        },
+        {
+          "knob": 200,
+          "build_s": 380.33,
+          "recall": 0.898,
+          "p50_ms": 3.104,
+          "qps_1client": 322.2
+        },
+        {
+          "knob": 400,
+          "build_s": 380.33,
+          "recall": 0.956,
+          "p50_ms": 3.91,
+          "qps_1client": 255.7
+        }
+      ]
+    },
+    "pgvector_hnsw": {
+      "error": "build failed"
+    }
+  }
+}
