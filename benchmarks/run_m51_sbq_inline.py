@@ -31,14 +31,16 @@ SPECS = {
     "theodb_hnsw_sbq": {
         "ddl": "CREATE INDEX bench_sbq ON {t} USING theodb_hnsw (v theodb_hnsw_cosine_ops) WITH (sbq_bits = 8)",
         "drop": "DROP INDEX IF EXISTS bench_sbq",
-        "knob": lambda x: ["SET theodb_hnsw.ef_search = 400", f"SET theodb_hnsw.over_fetch = {x}"],
-        "sweep": [2, 4, 8, 16],
+        # M57 D3: ef high enough to clear the recall≥0.99 gate at scale (the DoD's matched-recall bar); over_fetch
+        # is the SBQ recall-recovery knob (M40). Env EF_SBQ overrides for a quick recall-reachability probe.
+        "knob": lambda x: [f"SET theodb_hnsw.ef_search = {os.environ.get('EF_SBQ', '800')}", f"SET theodb_hnsw.over_fetch = {x}"],
+        "sweep": [4, 8, 16, 32],
     },
     "theodb_hnsw_f32": {
         "ddl": "CREATE INDEX bench_f32 ON {t} USING theodb_hnsw (v theodb_hnsw_cosine_ops)",
         "drop": "DROP INDEX IF EXISTS bench_f32",
         "knob": lambda x: [f"SET theodb_hnsw.ef_search = {x}"],
-        "sweep": [40, 100, 200, 400],
+        "sweep": [200, 400, 800, 1000],
     },
     "pgvector_hnsw": {
         "ddl": "CREATE INDEX bench_pgv ON {t} USING hnsw (v vector_cosine_ops) WITH (m=16, ef_construction=64)",
