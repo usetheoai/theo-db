@@ -36,14 +36,15 @@ recall≥0.99 sob pressão de memória" está **FALSIFICADA** por medição. O S
 recall idêntico 0.956 em todos os regimes (SBQ = f32 — recall-neutro; o 0.956 < 0.99 é a qualidade do grafo HNSW
 do theodb a esta escala/ef, não do SBQ). QPS 1-cliente, melhor ponto do sweep:
 
-| Regime | SBQ QPS | f32 QPS | **SBQ/f32** |
+| Regime (ef_search=400) | SBQ QPS | f32 QPS | **SBQ/f32** |
 |---|---|---|---|
 | in-RAM (16 GB, tudo cacheado) | 90 | 256 | **0.35×** |
 | pressão (`--memory=1.8g`) | 194 | 266 | **0.73×** |
 | pressão tight (`--memory=1.3g`, < shared_buffers+índice f32) | 218 | 284 | **0.77×** |
+| in-RAM, ef_search=1000 (recall casado 0.974, o máximo do grafo) | 47.7 | 152 | **0.31×** |
 
-**O f32 vence o SBQ em TODOS os regimes.** A tese ≥2× exigiria SBQ ≥2× *mais rápido*; medimos SBQ *0.35–0.77×*
-(mais lento).
+**O f32 vence o SBQ em TODOS os regimes** (in-RAM, sob pressão, ef baixo/alto). A tese ≥2× exigiria SBQ ≥2× *mais
+rápido*; medimos SBQ *0.31–0.77×* (mais lento). A ef alto o SBQ piora (mais nós visitados → mais Hamming+rerank).
 
 ## Por que a tese falhou (mecanismo)
 
@@ -73,8 +74,12 @@ não expõe esse gargalo.
    f32) é mecânica (localidade do HNSW + custo do rerank), não dependente do dataset. Follow-up: repetir em SIFT1M.
 2. **pgvector não buildou a 500k** — `/dev/shm=64MB` (default do docker) < 6.4 GB que o build paralelo do pgvector
    pede. Baseline pgvector só existe a 100k (Resultado 1). Não afeta o veredito (SBQ vs f32, ambos theodb).
-3. **recall 0.956 < 0.99 a 500k** (ambos SBQ e f32) — qualidade do grafo HNSW do theodb a este ef/escala; item
-   separado do veredito do SBQ (que é sobre QPS a recall *igual*). Rastreado à parte.
+3. **recall casado 0.974 < 0.99 a 500k — teto de qualidade do grafo do theodb, NÃO alcança o gate 0.99 nem a
+   ef_search=1000 (o máximo).** Achado à parte do veredito SBQ (que é sobre QPS a recall *igual*, e ambos batem
+   0.974). pgvector alcançou 0.992 a 100k (m=16, efc=64) — o grafo do theodb precisa de `m`/`ef_construction`
+   maiores no BUILD para cruzar 0.99. **Isto bloqueia o bar literal "recall casado ≥0.99" do DoD do M57** e é um
+   item de qualidade-de-grafo próprio (candidato a milestone/ADR separado); o veredito SBQ é robusto ao recall
+   casado medido. Rigor pendente do DoD: recomparar a recall≥0.99 (rebuild com `m` maior) + ≥3 runs + escala 1M.
 4. **1-cliente** (sem concorrência). Um QPS multi-cliente pode mudar absolutos, não a razão SBQ<f32 (mesmo custo
    por query relativo).
 

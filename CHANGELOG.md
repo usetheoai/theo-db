@@ -17,6 +17,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - **M57 — driver de pressão de RAM** `benchmarks/run_m57_pressure.py`: split `--phase build|measure` que reusa o harness M51 (Regra 9) para constranger a RAM do container ENTRE build e medição (`docker update --memory`), medindo o QPS sob pressão de verdade.
 
 ### Changed
+- **M57 — qualidade do grafo HNSW: `ef_construction` 64 → 200 no índice AM**: o M57 mediu que o grafo do `theodb_hnsw` com efc=64 satura em recall@10 ~0.974 a 500k×768d (abaixo do gate 0.99 mesmo a ef_search=1000, o máximo), enquanto o pgvector alcança 0.992 no MESMO efc=64 — um gap de qualidade do grafo. Elevar o `ef_construction` (profundidade de busca na construção; não afeta o layout de página, só `M` afetaria — fica em 16) cruza o gate 0.99. Custo: build de índice mais lento (aceito — Esforço ≠ Complexidade). Só o índice AM (`CREATE INDEX ... USING theodb_hnsw`); os defaults da ANN-brute SQL (`api.rs`, efc=64) não mudam. Ver `docs/adr/0018` + `docs/benchmarks/m57-sbq-superiority.md`.
 - **M57 (P0) — harness build-once**: `run_m51_sbq_inline.py` builda cada índice UMA vez e mede `runs×` (antes rebuildava por run → 9 builds a runs=3, o que tornava o 1M×768d impraticável). Mesmo mean±std na métrica que varia (QPS/recall) a 1/runs do custo de build. Junto com o SIMD cosine do M58 (3.15×), viabiliza o benchmark P0 a 1M.
 
 ### Deprecated
