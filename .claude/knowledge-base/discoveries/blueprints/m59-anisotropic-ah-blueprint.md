@@ -166,8 +166,10 @@ handful of cycles — this is the concrete mechanism behind the 25× the M36 pro
 narrowing the f32 distance alone (because AH also collapses the `score` phase to near-free AND shrinks the bytes/
 candidate that dominate `reads`).
 
-**Peer symbols (concrete):** FAISS `faiss/impl/pq4_fast_scan.cpp` (`pq4_lookup`, `pq4_accumulate_loop`),
-`faiss/impl/simd_result_handlers.h`, `IndexPQFastScan` / `IndexIVFPQFastScan`; ScaNN
+**Peer symbols (concrete; FAISS paths web-verified via `gh api` — see § Evidência web [5]):** FAISS
+`faiss/impl/fast_scan/fast_scan.cpp` + `accumulate_loops.h` + `kernels_simd256.h` + `impl-avx2.cpp` +
+`simd_result_handlers.h` (the current layout; the older `faiss/impl/pq4_fast_scan.cpp` path is STALE upstream),
+`IndexPQFastScan` / `IndexIVFPQFastScan`; ScaNN
 `scann/scann/hashes/asymmetric_hashing2/` (`LUT16`, `PackedDataset`, the `pshufb` scoring in
 `internal/lut16_*_avx2.inc` / `avx512`). Both Apache/MIT — the algorithm and layout are studyable and portable to
 `std::arch`; **no code is copied**, the kernel is re-derived in Rust.
@@ -299,10 +301,126 @@ survivors recovers recall; `m/2` bytes/vector (half the SBQ 1-bit budget at m=di
 
 - **[RESOLVED]** ScaNN anisotropic weight `η` (M39 left `BLOCKED partial`): it is the tunable
   `anisotropic_quantization_threshold T`; `η = 1` ⇔ isotropic PQ; larger `T` ⇒ larger parallel penalty. Sourced
-  from arXiv:1908.10396 + ScaNN API. The exact per-dataset default is a tuning knob, not a fixed constant — not
-  required for the go/no-go.
+  from arXiv:1908.10396 + ScaNN API. **Now web-verified (R0):** Theorem 3.4 gives the high-dimensional limit
+  `lim_{d→∞} η / (d−1) = (T/‖x‖)² / (1 − (T/‖x‖)²)`, and Fig. 3(a) uses `T = 0.2 ⇒ η ≈ 4.125` on Glove-1.2M — so `η`
+  grows linearly with dimension and the paper's own operating knob is `T`, not a fixed `η` (see § Evidência web,
+  source [1]). The exact per-dataset default is a tuning knob, not a fixed constant — not required for the go/no-go.
 - **[OPEN — Unresolved Q1]** Does HNSW's per-node pointer-chasing walk feed `pshufb` as efficiently as a contiguous
   IVF-list sweep? Layout-sensitive; resolved by measurement in the implement cycle (ADR-1 a-lite is the fallback).
+
+## Evidência web (R0 — WebSearch/WebFetch)
+
+Varredura web obrigatória (`discover-phd-rigor.md` R0/R2/R3): cada técnica é ancorada em **≥2 fontes primárias
+independentes** com URL + autor/ano/venue **ou** símbolo de código verificado. Toda afirmação de performance carrega
+**metodologia + números da fonte** ou o marcador `UNBENCHMARKED`. **9 fontes web foram efetivamente ABERTAS via
+WebFetch** (não citadas de memória); as citações de PDF que o parser não conseguiu ler são marcadas honestamente.
+
+### Técnica T1 — Anisotropic (score-aware) vector quantization
+
+**[1] Guo, Sun, Lindgren, Geng, Simcha, Chern, Kumar (2020) — "Accelerating Large-Scale Inference with Anisotropic
+Vector Quantization", ICML / PMLR 119:3887-3896.** — <https://arxiv.org/abs/1908.10396> (abstract, WebFetch OK) +
+<https://ar5iv.labs.arxiv.org/abs/1908.10396> (HTML full-text, WebFetch OK). **Extraído (verificado da fonte):**
+- Autores/venue confirmados; submetido 2019-08-27, revisão final 2020-12-04.
+- **Theorem 3.2** (loss decomposition, citação exata): `ℓ(xᵢ,x̃ᵢ,w) = h∥(w,‖xᵢ‖)·‖r∥(xᵢ,x̃ᵢ)‖² +
+  h⊥(w,‖xᵢ‖)·‖r⊥(xᵢ,x̃ᵢ)‖²` — confirma o split paralelo/ortogonal que o blueprint descreve em Corner 4 T1.
+- **Theorem 3.3:** `h∥(w,‖xᵢ‖) ≥ h⊥(w,‖xᵢ‖)` para funções-peso monotonicamente não-decrescentes ⇒ erro paralelo
+  penalizado mais forte (a base formal do "score-aware").
+- **Theorem 3.4** (limite alto-dimensional, citação exata): `lim_{d→∞} η(𝟙(t≥T),‖xᵢ‖)/(d−1) =
+  (T/‖xᵢ‖)² / (1 − (T/‖xᵢ‖)²)` ⇒ **`η` cresce linearmente com `(d−1)`** — resolve o `η` que M39 deixara `BLOCKED
+  partial`, agora da fonte primária, não de memória.
+- **Operating point (Fig. 3a):** `T = 0.2 ⇒ η ≈ 4.125` melhora `Recall1@10` vs. reconstruction-loss em Glove-1.2M.
+- **Perf (Fig. 4):** "achieves the fastest performance in the high recall regime" vs **11 baselines** do
+  ann-benchmarks.com. Número exato de speedup em texto: `UNBENCHMARKED` no abstract/HTML (está em figura).
+
+**[2] Google Research blog — "Announcing ScaNN: Efficient Vector Similarity Search".** —
+<https://research.google/blog/announcing-scann-efficient-vector-similarity-search/> (WebFetch OK). **Extraído:**
+- Claim de perf **citável, com metodologia**: em **glove-100-angular** (ann-benchmarks.com), ScaNN "handling **roughly
+  twice as many queries per second** for a given accuracy as the next-fastest library", batendo **11** bibliotecas
+  concorrentes. Este é o "~2× vs next-fastest lib" que o bluprint já afirmava — agora com a fonte aberta e citada.
+- Intuição anisotrópica confirmada da fonte: erro **ortogonal** tem impacto mínimo no inner product; erro **paralelo**
+  "disproportionately impacts high inner products, which by definition are the ones that MIPS is trying to estimate".
+
+**[3] PDF PMLR `guo20h.pdf` + PDF VLDB `p288-andre.pdf` — `BLOCKED` (parser binário).** O WebFetch baixou os PDFs
+(603 KB / 606 KB) mas o extrator de texto não decodificou as equações/tabelas (fluxo binário comprimido). Honesto:
+os números de figura desses PDFs **não** foram lidos diretamente — foram recuperados via o HTML ar5iv [1] e o blog
+[2]. Não inventei números de PDF que não consegui abrir.
+
+### Técnica T2 — Asymmetric Hashing (AH) / LUT16 `pshufb` SIMD
+
+**[4] FAISS Wiki — "Fast accumulation of PQ and AQ codes (FastScan)".** —
+<https://github.com/facebookresearch/faiss/wiki/Fast-accumulation-of-PQ-and-AQ-codes-(FastScan)> (WebFetch OK).
+**Extraído (verificado da fonte):**
+- Layout: códigos empacotados em **blocos de `bbs=32`** vetores; cada bloco de 32 bytes = 2 subquantizadores × 32
+  vetores (`sub-q 0/1` no offset 0, `2/3` no offset 32, …) — confirma o "transposed/interleaved block layout" do
+  blueprint (Corner 4 T2).
+- Kernel: **4-bit (16 centroides) ⇒ LUT de 16 entradas cabe num lane de 128 bits**; lookup in-register via
+  **`_mm256_shuffle_epi8` (pshufb)**; acumulação em inteiro com termos de normalização `A/B`
+  (`A·(distance[b] − B) ≈ distance_i[b]`) escolhidos p/ (1) maximizar A, (2) não estourar o acumulador de 16 bits,
+  (3) não saturar a LUT de 8 bits — **valida o parágrafo "SIMD trick" do blueprint**.
+- Proveniência: "The implementation is **heavily inspired by Google's SCANN**" — confirma que AH(ScaNN) e PQ4-fastscan
+  (FAISS) são a mesma família, como o blueprint afirma.
+- **Perf citável (metodologia da fonte):** sem rerank, 4-bit PQ atinge **até 1M QPS**; com rerank, **280k QPS @
+  1-recall@1 = 0.9, i.e. 2× o HNSW (140k QPS)** usando **2.7× menos memória**. (Isto é FAISS-medido; comparar ao
+  nosso stack = `UNBENCHMARKED` até rodar `benchmarks/theodb_bench/`.)
+
+**[5] FAISS `main` — símbolos de código verificados via GitHub API (não de memória).** **Correção de citação
+(R2):** o blueprint citava `faiss/impl/pq4_fast_scan.cpp` e `faiss/impl/simd_result_handlers.h` — esses caminhos
+**foram reorganizados** no upstream atual. Path real hoje (resolvido via `gh api .../contents/faiss/impl/fast_scan`):
+`faiss/impl/fast_scan/` contém `fast_scan.cpp`, `fast_scan.h`, `accumulate_loops.h`, `kernels_simd256.h`,
+`kernels_simd512.h`, `impl-avx2.cpp`, `impl-avx512.cpp`, `impl-neon.cpp`, `simd_result_handlers.h`,
+`LookupTableScaler.h`, `decompose_qbs.h`. **Estes são os símbolos a estudar (MIT)** — o `pq4_fast_scan.*` legado do
+blueprint está stale e deve ser lido como `faiss/impl/fast_scan/*` no `/to-plan`.
+
+**[6] FAISS docs — `IndexPQFastScan` / `IndexIVFPQFastScan`.** —
+<https://faiss.ai/cpp_api/struct/structfaiss_1_1IndexPQFastScan.html> (via WebSearch; struct confirmado). Confirma a
+API de referência (`bbs=32`, rerank via `IndexRefine`/`k_factor`) — os dois níveis de oráculo de teste do blueprint.
+
+**[7] André, Kermarrec, Le Scouarnec (2015/2016) — "Cache locality is not enough: High-Performance Nearest Neighbor
+Search with Product Quantization Fast Scan", PVLDB 9(4):288-299.** — metadata via
+<https://dblp.uni-trier.de/rec/journals/pvldb/AndreKS15.html> + <https://inria.hal.science/hal-01239055>; PDF
+<http://www.vldb.org/pvldb/vol9/p288-andre.pdf> **`BLOCKED` (parser binário)** — números de figura não lidos direto.
+**Extraído do abstract/metadata (verificado):** é o **`pshufb` original** que transforma LUTs cache-resident em
+tabelas que cabem em registradores SIMD; responde "**4-6× mais rápido** que o PQ Scan" para o grosso das queries.
+Nota honesta: este paper usa **8-bit subquantizers + minimum tables** (não 4-bit genuíno) — o **4-bit genuíno** é do
+**Quick ADC** (André et al. 2017, <https://arxiv.org/pdf/1704.07355>) e do ScaNN, que é o caminho que o blueprint
+adota (ADR-3). Fonte de código BSD: `github.com/technicolor-research/pq-fast-scan` (study-only).
+
+### Blog técnico especializado (engenharia de vector-DB)
+
+**[8] Milvus/Zilliz Engineering blog — "A Brief Introduction to the ScaNN Index".** —
+<https://milvus.io/blog/a-brief-introduction-to-the-scann-index.md> (WebFetch OK). **Extraído (verificado, com
+metodologia):**
+- Score-aware/anisotrópico: "**only the parallel component affects the result, so a larger penalty term should be
+  applied**" — corrobora [1]/[2] de uma fonte de engenharia independente (a 2ª fonte primária de T1, R2).
+- FastScan: **16 classes/subvetor (4-bit) ⇒ LUT `16 × 8 = 128 bits` em registrador**, "efficient SIMD shuffle CPU
+  instruction" no lugar de leituras de memória — 2ª fonte independente do mecanismo LUT16 de T2 (R2).
+- **Perf citável (metodologia da fonte):** integrado ao Milvus, ScaNN/FastScan deu **~5× o QPS do IVFFLAT em
+  Cohere1M**, e **~6× vs IVF_PQ** (`1265 QPS` ScaNN sem raw-data vs `208 QPS` IVF_PQ). Compressão **1/16**
+  (`128×4 B → 32×1 B`). Trade-off de recall honesto: **0.7066 sem raw-data vs 0.9389 com raw-data** — exatamente o
+  padrão "código 4-bit + f32 rerank dos survivors" que o blueprint (ADR-3) prescreve.
+
+**[9] Yamaguchi (Kumon), Medium — "Similarity Search: ScaNN and 4-bit PQ".** —
+<https://medium.com/@kumon/similarity-search-scann-and-4-bit-pq-ab98766b32bd> (WebFetch OK). **Extraído:** 8-bit PQ
+⇒ tabela `2⁸ × 32 bits = 8192 bits` (não cabe em registrador); 4-bit ⇒ `2⁴ × 8 = 128 bits` (cabe); "**16 lookups
+are performed in 1 cycle**" — 3ª corroboração independente do porquê do 4-bit (ADR-3) ser o sweet spot SOTA.
+
+### Como isto fortalece o blueprint (cross-check)
+
+| Afirmação existente | Antes | Agora (R0) |
+|---|---|---|
+| Loss anisotrópica `h∥·‖r∥‖² + h⊥·‖r⊥‖²` (Corner 4 T1) | conhecimento interno | **Theorem 3.2 citado direto** [1] |
+| `η` cresce com `d`; `η=1` ⇔ isotrópico; knob = `T` | "resolvido" sem fonte aberta | **Theorem 3.4 + `T=0.2⇒η≈4.125`** [1] |
+| ScaNN ~2× vs next-fastest lib (11 libs, glove-100) | blog citado de memória | **blog aberto + número confirmado** [2] |
+| LUT16 `pshufb`, bloco `bbs=32`, `A/B` int8/int16 | conhecimento interno | **FAISS Wiki citada, mecânica confirmada** [4] |
+| Símbolos FAISS `pq4_fast_scan.*` | **path STALE** | **corrigido p/ `faiss/impl/fast_scan/*` (gh api)** [5] |
+| 4-bit é o sweet spot (ADR-3) | asserção | **3 fontes** [4][8][9] + Quick ADC [7] |
+| Recall recuperado por f32-rerank dos 4-bit survivors | padrão ADR-0018 | **Milvus 0.71→0.94 c/ raw-data; FAISS `k_factor`** [8][6] |
+| ScaNN/FastScan fecha QPS-gap com recall-parity | M33 (interno) | **peer: 5-6× QPS em Milvus/Cohere1M** [8] (peer, não nosso stack) |
+
+**Honestidade (R3/R6):** nenhum número foi atribuído ao **nosso** stack — todos os QPS acima são das fontes (FAISS,
+Milvus, ScaNN paper) e permanecem `UNBENCHMARKED` para TheoDB até `benchmarks/theodb_bench/` rodar (o gate D3 do
+ADR-1). Os 2 PDFs primários (`guo20h.pdf`, `p288-andre.pdf`) ficaram `BLOCKED` no parser de texto binário — os
+números foram recuperados de espelhos HTML (ar5iv) e fontes de engenharia, nunca inventados.
 
 ## Related
 
