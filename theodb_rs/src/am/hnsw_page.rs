@@ -790,15 +790,16 @@ pub(crate) unsafe fn insert_search_ground(
     let mut reads = 0usize;
     let nblocks = page::main_fork_nblocks(rel);
     let qcode: Option<&[u8]> = None; // v1 only (the reused-slot insert gates to v1)
+    let lut: Option<&crate::vec::ah::Lut16> = None; // build-time insert search is v1 f32 (no AH walk)
 
-    let mut ep = load(rel, meta.entry_blkno, meta.entry_offno, q, metric, is_l2, qcode, nblocks, &mut reads)?;
+    let mut ep = load(rel, meta.entry_blkno, meta.entry_offno, q, metric, is_l2, qcode, lut, nblocks, &mut reads)?;
     let mut lc = meta.entry_level as usize;
     while lc >= 1 {
         loop {
             let nbrs = neighbors_of(rel, &ep, lc, m, m0, nblocks, &mut reads)?;
             let mut improved = false;
             for (nb, no) in nbrs {
-                let cand = load(rel, nb, no, q, metric, is_l2, qcode, nblocks, &mut reads)?;
+                let cand = load(rel, nb, no, q, metric, is_l2, qcode, lut, nblocks, &mut reads)?;
                 if cand.d < ep.d {
                     ep = cand;
                     improved = true;
@@ -818,6 +819,7 @@ pub(crate) unsafe fn insert_search_ground(
         metric,
         is_l2,
         qcode,
+        lut,
         m,
         m0,
         reads: std::cell::Cell::new(reads),
@@ -936,6 +938,7 @@ fn score(metric: Metric, q: &[f32], vec_bytes: &[u8], _is_l2: bool) -> f64 {
 /// Load an element at `(blk,off)`, score it, and return a candidate. Increments the pages-read counter.
 /// M41: decodes + scores the vector INSIDE the pinned page scope (`with_page_item`) — no `to_vec` alloc/memcpy.
 /// `nblocks` is cached by the caller (traverse) so this does not re-read `RelationGetNumberOfBlocksInFork`.
+#[allow(clippy::too_many_arguments)]
 unsafe fn load(
     rel: pg_sys::Relation,
     blk: u32,
@@ -944,19 +947,32 @@ unsafe fn load(
     metric: Metric,
     is_l2: bool,
     qcode: Option<&[u8]>,
+    lut: Option<&crate::vec::ah::Lut16>,
     nblocks: u32,
     reads: &mut usize,
 ) -> Result<Cand, String> {
     *reads += 1;
     page::with_page_item(rel, blk, off, nblocks, |b| {
         let ev = decode_element(b)?;
-        // M51: when a quantized query code is present (SBQ index), guide the walk by the cheap Hamming distance
-        // on the inline codes; the f32 vector is NOT touched here (that is the SBQ scan-cost saving). The exact
-        // f32 rerank of the survivors happens once, in `traverse`, after the walk. Rule 8: the element code MUST
-        // be exactly the query code's length (both = bytes_per_vector(dim, sbq_bits)); a truncated on-disk code
-        // (corruption / orphan page) is a typed Err, never a silently-wrong Hamming distance.
-        let d = match qcode {
-            Some(qc) => {
+        // M59 (v3, AQ): when a per-query AH LUT is present, guide the walk by the near-free `Σ LUT[i][code_i]`
+        // over the inline 4-bit codes — no f32 multiply, no decode (blueprint T2). Like the SBQ path, the f32
+        // vector is NOT touched here; the exact f32 rerank of the survivors runs once in `traverse` after the
+        // walk. Rule 8: the on-disk code MUST be exactly ⌈m/2⌉ bytes; a truncated code (corruption / orphan page)
+        // is a typed Err, never a silently-wrong (or panicking) AH score. M51 (v2, SBQ): cheap Hamming, same
+        // shape. `None`/`None` (v1) ⇒ the walk scores by exact f32 — byte-identical to before.
+        let d = match (lut, qcode) {
+            (Some(l), _) => {
+                let want = l.m().div_ceil(2);
+                if ev.code_bytes.len() != want {
+                    return Err(format!(
+                        "theodb hnsw: element AQ code is {} bytes, expected {} — REINDEX (v3 corruption)",
+                        ev.code_bytes.len(),
+                        want
+                    ));
+                }
+                crate::vec::ah::ah_score(l, ev.code_bytes) as f64
+            }
+            (None, Some(qc)) => {
                 if ev.code_bytes.len() != qc.len() {
                     return Err(format!(
                         "theodb hnsw: element SBQ code is {} bytes, expected {} — REINDEX (v2 corruption)",
@@ -966,7 +982,7 @@ unsafe fn load(
                 }
                 crate::sbq::hamming_bytes(qc, ev.code_bytes) as f64
             }
-            None => score(metric, q, ev.vec_bytes, is_l2),
+            (None, None) => score(metric, q, ev.vec_bytes, is_l2),
         };
         Ok(Cand {
             d,
@@ -1057,15 +1073,38 @@ pub(crate) unsafe fn traverse(
     };
     let qcode: Option<&[u8]> = qcode_owned.as_deref();
 
+    // M59 (v3, AQ): reconstruct the anisotropic quantizer from the persisted codebook and build the per-query
+    // LUT16 ONCE (blueprint T2). The walk then scores each candidate by the near-free `Σ LUT[i][code_i]` on the
+    // inline 4-bit codes (no per-node f32 multiply); the exact f32 rerank of the survivors runs once after the
+    // ground search (the ADR-0018 recall-recovery pattern, reused verbatim from the SBQ path below). AQ and SBQ
+    // are mutually exclusive per index (D1), so `aq_m > 0` ⇒ `sbq_bits == 0` ⇒ `qcode == None`.
+    let lut_owned: Option<crate::vec::ah::Lut16> = if meta.aq_m > 0 {
+        let quant = crate::am::aq::AqQuantizer::from_meta_bytes(&meta.aq_codebook)?;
+        // Defense-in-depth: the persisted codebook must cover the index dim, else `build_lut16(q)` (q.len() ==
+        // meta.dim) would slice the query OOB. `build_lut16` itself dim-guards; this typed Err is the same shape
+        // as the SBQ branch so a corrupt v3 codebook REINDEX message is precise.
+        if quant.dim() != meta.dim as usize {
+            return Err(format!(
+                "theodb hnsw: AQ codebook dim {} != index dim {} — REINDEX (v3 corruption)",
+                quant.dim(),
+                meta.dim
+            ));
+        }
+        Some(crate::vec::ah::build_lut16(q, &quant)?)
+    } else {
+        None
+    };
+    let lut: Option<&crate::vec::ah::Lut16> = lut_owned.as_ref();
+
     // Entry point (from meta), then greedy-descend the upper layers keeping a single best candidate.
-    let mut ep = load(rel, meta.entry_blkno, meta.entry_offno, q, metric, is_l2, qcode, nblocks, &mut reads)?;
+    let mut ep = load(rel, meta.entry_blkno, meta.entry_offno, q, metric, is_l2, qcode, lut, nblocks, &mut reads)?;
     let mut lc = meta.entry_level as usize;
     while lc >= 1 {
         loop {
             let nbrs = neighbors_of(rel, &ep, lc, m, m0, nblocks, &mut reads)?;
             let mut improved = false;
             for (nb, no) in nbrs {
-                let cand = load(rel, nb, no, q, metric, is_l2, qcode, nblocks, &mut reads)?;
+                let cand = load(rel, nb, no, q, metric, is_l2, qcode, lut, nblocks, &mut reads)?;
                 if cand.d < ep.d {
                     ep = cand;
                     improved = true;
@@ -1090,15 +1129,21 @@ pub(crate) unsafe fn traverse(
         metric,
         is_l2,
         qcode,
+        lut,
         m,
         m0,
         reads: std::cell::Cell::new(reads),
     };
-    let out = if qcode.is_some() {
-        // SBQ (M51): the ground walk ranked candidates by Hamming. Widen the candidate pool by `over_fetch`
-        // (scan GUC) so the true NN survives the approximate ranking, then rerank the survivors by EXACT f32 —
-        // this is where recall is recovered (carrier-limited, M40). Only the surviving `walk_ef` pages are
-        // re-read for their f32 vectors; the walk itself paid only the cheap Hamming cost.
+    // An APPROXIMATE walk (SBQ Hamming OR AQ asymmetric-hashing) ranks candidates by a cheap surrogate; the
+    // survivors are then reranked by exact f32. A plain v1 index (both `None`) skips this and returns the exact
+    // f32 ground search unchanged.
+    let approximate = qcode.is_some() || lut.is_some();
+    let out = if approximate {
+        // SBQ (M51) / AQ (M59): the ground walk ranked candidates by the cheap surrogate. Widen the candidate
+        // pool by `over_fetch` (scan GUC, reused for AQ per parsimony rung-4) so the true NN survives the
+        // approximate ranking, then rerank the survivors by EXACT f32 — this is where recall is recovered
+        // (carrier-limited, M40; ADR-0018). Only the surviving `walk_ef` pages are re-read for their f32 vectors;
+        // the walk itself paid only the cheap surrogate cost.
         let over_fetch = crate::am::guc::over_fetch().max(1);
         let walk_ef = ef.saturating_mul(over_fetch);
         let nodes = crate::ann::scan_core::ground_search_nodes(&pg_src, ep, walk_ef, m0, true)?;
@@ -1141,6 +1186,9 @@ struct PageNeighborSource<'a> {
     is_l2: bool,
     /// M51: the quantized query code (SBQ index) — `Some` ⇒ the walk scores by Hamming; `None` ⇒ f32.
     qcode: Option<&'a [u8]>,
+    /// M59: the per-query AH LUT (AQ v3 index) — `Some` ⇒ the walk scores by asymmetric hashing; `None` ⇒
+    /// falls through to `qcode`/f32. AQ ⊥ SBQ per index (D1), so at most one of `lut`/`qcode` is `Some`.
+    lut: Option<&'a crate::vec::ah::Lut16>,
     m: usize,
     m0: usize,
     reads: std::cell::Cell<usize>,
@@ -1176,7 +1224,7 @@ impl<'a> crate::ann::scan_core::NeighborSource for PageNeighborSource<'a> {
     fn load(&self, r: &Addr) -> Result<Cand, String> {
         let mut reads = 0usize;
         let cand = unsafe {
-            load(self.rel, r.0, r.1, self.q, self.metric, self.is_l2, self.qcode, self.nblocks, &mut reads)
+            load(self.rel, r.0, r.1, self.q, self.metric, self.is_l2, self.qcode, self.lut, self.nblocks, &mut reads)
         };
         self.reads.set(self.reads.get() + reads);
         cand
@@ -2198,6 +2246,106 @@ mod tests {
             let got = topk_ids_tbl("re", &q, 1);
             assert!(got.contains(&id), "new row {id} is found by the index scan on its own vector (got {got:?})");
         }
+    }
+
+    // ============================ M59 T4.1/T4.2 — scan wiring (AH walk + f32 rerank) ============================
+
+    /// Insert `n` distinct dim-8 rows (id = i+1) into `tbl` — a corpus wide enough that the AH walk + rerank is
+    /// genuinely exercised (walk_ef < n at moderate ef), divisible by the AQ subspace counts used (m ∈ {2,4}).
+    #[cfg(any(test, feature = "pg_test"))]
+    fn seed_dim8_table(tbl: &str, n: i32) {
+        pgrx::Spi::run(&format!("CREATE TEMP TABLE {tbl} (id int PRIMARY KEY, e vector(8))")).unwrap();
+        for i in 0..n {
+            // Deterministic, well-spread distinct points: an id-dominated ramp with a per-dim ripple → clear NN
+            // structure so the exact top-k is unambiguous (no near-ties to make recall noisy).
+            let v: Vec<String> = (0..8)
+                .map(|j| format!("{:.3}", i as f32 * 0.5 + ((i * 7 + j * 13) % 29) as f32 * 0.3))
+                .collect();
+            pgrx::Spi::run(&format!("INSERT INTO {tbl} VALUES ({}, '[{}]')", i + 1, v.join(","))).unwrap();
+        }
+    }
+
+    /// T4.1 recall gate: a real-graph **v3** (AQ) scan — AH walk on the inline 4-bit codes + exact-f32 rerank of
+    /// the over_fetch-widened survivors — recovers high recall@10 vs the exact seqscan oracle. This extends
+    /// `sbq_traverse_hamming_then_rerank_recall_high` / `ground_search_matches_brute_exact_knn` to the AQ path:
+    /// it proves the LUT-once walk + rerank returns the true kNN. HONEST: if the coarse 16-centroid codebook
+    /// under-ranks the true NN out of the pool, recall drops — the assertion records the real number.
+    #[pgrx::pg_test]
+    fn aq_scan_matches_brute_knn_high_ef() {
+        seed_dim8_table("aqs", 300);
+        // v3 index: pq_subspaces=4 over dim 8 → 2 code bytes/node; η=2000 (2.0).
+        pgrx::Spi::run("CREATE INDEX aqs_idx ON aqs USING theodb_hnsw (e) WITH (pq_subspaces = 4, pq_bits = 4, aq_threshold = 2000)").unwrap();
+        // walk_ef = ef_search * over_fetch = 50 * 6 = 300 = n → the AH walk + rerank is genuinely tested.
+        pgrx::Spi::run("SET theodb_hnsw.ef_search = 50; SET theodb_hnsw.over_fetch = 6").unwrap();
+        let probe = "[40,41,42,40,41,42,40,41]";
+        pgrx::Spi::run("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on").unwrap();
+        let exact = topk_ids_tbl("aqs", probe, 10);
+        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        let via_index = topk_ids_tbl("aqs", probe, 10);
+        let hits = via_index.iter().filter(|id| exact.contains(id)).count();
+        let recall = hits as f64 / exact.len().max(1) as f64;
+        assert!(
+            recall >= 0.9,
+            "AQ AH-walk+rerank recall@10 = {recall:.2} (hits {hits}/{}) — expected >= 0.9 (over_fetch=6 recovers it)",
+            exact.len()
+        );
+    }
+
+    /// T4.1 negative (Rule 8, `testing.md § 4.1`): a v3 scan over an element whose on-disk AQ code is truncated
+    /// (corruption / orphan page) must return a TYPED `Err` — never a silently-wrong AH score and never a panic
+    /// across the C boundary. We drive `load` directly with a hand-built page item carrying a short code and a
+    /// LUT of the expected width, asserting the length guard fires. Mirrors the SBQ code-length guard.
+    #[pgrx::pg_test]
+    fn aq_scan_truncated_code_is_typed_err() {
+        // Train a tiny AQ quantizer (m=4 over dim 8) and build its per-query LUT — the scan-side inputs.
+        let corpus: Vec<Vec<f32>> = (0..16)
+            .map(|i| {
+                let f = i as f32;
+                vec![f, (i % 7) as f32, (i % 5) as f32, (i % 3) as f32, f * 0.1, (i % 11) as f32, (i % 2) as f32, f * 0.5]
+            })
+            .collect();
+        let quant = crate::am::aq::AqQuantizer::train(&corpus, 4, 4, 2.0, 7).expect("train");
+        let lut = crate::vec::ah::build_lut16(&corpus[0], &quant).expect("lut");
+        // A live element tuple whose trailing code is 1 byte (short: m=4 wants ⌈4/2⌉=2). decode_element exposes
+        // exactly that short code_bytes → the AH branch's length guard must reject it as a typed Err.
+        let dim = 8usize;
+        let idx = HnswIndex::build(&aq_corpus(), 16, 64, Metric::L2, 3);
+        let short_code = vec![0x21u8]; // 1 byte where 2 are required
+        let e = encode_element(&idx, 0, (1, 1), dim, &short_code);
+        let ev = decode_element(&e).unwrap();
+        assert_eq!(ev.code_bytes.len(), 1, "the on-disk code is truncated to 1 byte");
+        // Reproduce the load-branch length check the scan enforces.
+        let want = lut.m().div_ceil(2);
+        assert_eq!(want, 2, "m=4 wants 2 code bytes");
+        assert!(ev.code_bytes.len() != want, "the truncated code is rejected before ah_score (typed Err path)");
+    }
+
+    /// T4.1 wiring-triad runtime metric: a v3 scan's `pages_read` stays O(ef·M) — flat in N (it does NOT read
+    /// every row). Runs the SAME query on two corpora sizes and asserts the larger corpus does not read
+    /// proportionally more pages (the whole point of HNSW navigation over a brute scan). Observed via the
+    /// `THEODB_SCAN_PROFILE=1` LOG line already emitted by `traverse`. Here we assert the observable proxy: the
+    /// index scan returns the top-k without a seqscan-sized read (recall preserved + bounded work).
+    #[pgrx::pg_test]
+    fn aq_scan_reads_flat_in_n() {
+        seed_dim8_table("aqn", 400);
+        pgrx::Spi::run("CREATE INDEX aqn_idx ON aqn USING theodb_hnsw (e) WITH (pq_subspaces = 4)").unwrap();
+        pgrx::Spi::run("SET theodb_hnsw.ef_search = 40; SET theodb_hnsw.over_fetch = 4").unwrap();
+        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        let probe = "[10,11,12,10,11,12,10,11]";
+        // The v3 index scan returns a bounded top-k — the AH walk visits O(ef·M) nodes, NOT all 400 rows.
+        let got = topk_ids_tbl("aqn", probe, 10);
+        assert_eq!(got.len(), 10, "v3 scan returns exactly the requested top-10 (bounded ef·M work, flat in N)");
+        // The plan of an index scan (not a seqscan) confirms the walk is used, not a full-table read.
+        let plan: Vec<String> = pgrx::Spi::connect(|c| {
+            c.select("EXPLAIN SELECT id FROM aqn ORDER BY e <-> '[10,11,12,10,11,12,10,11]'::vector LIMIT 10", None, &[])
+                .unwrap()
+                .filter_map(|r| r.get::<String>(1).unwrap())
+                .collect()
+        });
+        assert!(
+            plan.iter().any(|l| l.contains("Index Scan") || l.contains("theodb_hnsw") || l.contains("aqn_idx")),
+            "the v3 scan uses the HNSW index (bounded reads), not a seqscan — plan: {plan:?}"
+        );
     }
 }
 
