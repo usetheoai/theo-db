@@ -12,6 +12,7 @@
 //! functions needed, because `ambuild` uses `crate::ann::Metric` directly.
 use pgrx::*;
 
+mod aq; // M59 — anisotropic product quantizer (score-aware 4-bit PQ codebook, Phase 1 domain)
 mod build; // ambuild / ambuildempty (Phase 2) + shared datum/metric helpers
 mod cost; // M48 T5.1 — honest amcostestimate visit-ratio (pgvector cost model)
 mod fold; // M48 — crash-safe VACUUM fold (meta-pivot, issue #47)
