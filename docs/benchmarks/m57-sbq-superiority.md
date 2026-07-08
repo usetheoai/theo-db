@@ -79,11 +79,15 @@ não expõe esse gargalo.
    build ~20% mais lento confirmando que efc=200 foi aplicado) — o oposto do esperado. O theodb **JÁ aplica** a poda
    por diversidade estilo-pgvector (`select_from` em `ann/hnsw.rs:255` — mantém um candidato só se estiver mais perto
    da query que de qualquer vizinho já-mantido), então o teto de 0.974 e a degradação-por-efc **NÃO** são "falta do
-   heurístico". A causa-raiz do teto **não está isolada** (candidatos: config do `m0`/layer-0, uma anomalia na
-   interação `ef_construction`↔`select_from`, ou a busca em query-time); `M` está travado em 16 pelo layout de página
-   (`hnsw.rs:428`). **Cruzar 0.99 exige uma INVESTIGAÇÃO de qualidade-de-grafo própria, FORA do escopo do M57** (que
-   mede o SBQ). O veredito SBQ é robusto ao recall casado medido (0.974, SBQ sempre < f32). Evidência da degradação:
-   `m57-raw/m57p_efc200_r{1,2,3}.json`.
+   heurístico" (`m0=2*m=32` também está correto, = pgvector). **Causa-raiz ISOLADA: o build paralelo do HNSW**
+   (`ann/hnsw_parallel.rs`, usado acima de 4096 nós) tem links **racy** (o comentário do módulo admite: "the build
+   is NON-DETERMINISTIC — racy insert order"). O recall do grafo cai com a escala (5k=1.0 → 100k=0.974 → 500k=0.956)
+   e, anomalamente, com `ef_construction` maior (0.974→0.832 a efc=200) — sinal de que o **pruning de vizinhos sob
+   contenção de lock** (`select_from` chamado no linking concorrente) descarta arestas boas com base em leituras
+   stale quando há mais candidatos. `M` está travado em 16 pelo layout de página (`hnsw.rs:428`). **Cruzar 0.99 exige
+   corrigir a qualidade do build paralelo — um milestone de qualidade-de-grafo próprio (M60-class), FORA do escopo do
+   M57** (que mede o SBQ). O veredito SBQ é robusto ao recall casado medido (0.974, SBQ sempre < f32). Evidência da
+   degradação: `m57-raw/m57p_efc200_r{1,2,3}.json`.
    pgvector a 500k (shm=8g): recall 0.936, ~289 qps — baseline (theodb f32 0.974 tem recall *maior* a 500k).
 4. **1-cliente** (sem concorrência). Um QPS multi-cliente pode mudar absolutos, não a razão SBQ<f32 (mesmo custo
    por query relativo).
