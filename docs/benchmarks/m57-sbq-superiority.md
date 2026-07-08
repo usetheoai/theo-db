@@ -95,8 +95,12 @@ não expõe esse gargalo.
    sim a **qualidade do ALGORITMO BASE do HNSW** do theodb (`search_layer`/`greedy_descend`/`select_from`),
    presente nos dois builds. theodb 0.96 vs pgvector 0.978 @100k (mesmo run) = gap algorítmico de ~1.8pt. **Cruzar
    0.99 exige melhorar o algoritmo base do HNSW — milestone próprio (M60-class), FORA do escopo do M57** (que mede o
-   SBQ). O veredito SBQ é robusto ao recall casado medido (SBQ sempre < f32). Evidência: `m57-raw/m57p_efc200_r*`
-   (efc), `m57_recallfix.json` (MERGE), `m57_seq100k.json` (bissecção sequencial — o achado decisivo).
+   SBQ). **TRÊS tentativas de fix refutadas por medição** (efc→0.832, MERGE→0.846, m=32→0.952 — todas PIORES ou
+   iguais, todas revertidas; `m=32` piorar é anômalo). **Lead forte:** o recall é plateau/não-monotônico em
+   `ef_search` e NENHUMA mudança de build move o teto → o gargalo é provavelmente o **SCAN** (`am/hnsw_page.rs`
+   traverse), não a conectividade do grafo — investigar o beam-search/heap do traverse primeiro no M60. O veredito
+   SBQ é robusto ao recall casado medido (SBQ sempre < f32). Evidência: `m57-raw/m57p_efc200_r*` (efc),
+   `m57_recallfix.json` (MERGE), `m57_seq100k.json` (bissecção), `m57_m32_100k.json` (m=32).
    pgvector a 500k (shm=8g): recall 0.936, ~289 qps — baseline (theodb f32 0.974 tem recall *maior* a 500k).
 4. **1-cliente** (sem concorrência). Um QPS multi-cliente pode mudar absolutos, não a razão SBQ<f32 (mesmo custo
    por query relativo).

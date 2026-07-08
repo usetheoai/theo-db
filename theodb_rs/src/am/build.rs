@@ -12,14 +12,14 @@ use pgrx::prelude::*;
 /// Default IVFFlat list count — the reloption default lives in `options::DEFAULT_LISTS` (M34). Re-exported here for
 /// the empty/HNSW build paths that don't read the reloption.
 use crate::am::options::{lists_from_relation, DEFAULT_LISTS};
-/// HNSW build params for the persisted AM index. `m=32` (M57 recall gate): a conectividade do grafo (`M`) e o lever
-/// canonico de recall do HNSW. MEDIDO no M57 que a config antiga m=16 satura em recall ~0.96-0.974 a 100k-500k
-/// (< gate 0.99), tanto no build paralelo quanto no sequencial (bissectado — NAO e contencao paralela, e a
-/// conectividade base). Antes tentou-se efc=200 (degradou p/ 0.832) e o MERGE de back-links (degradou p/ 0.846) —
-/// ambos refutados por medicao e revertidos. `m=32` dobra a conectividade; page-safe: `nbr_size(32) = 4 + (m0 +
-/// 32*m)*6 = 4 + (64 + 1024)*6 = 6532 B < BLCKSZ(8192)`. `m0 = m*2 = 64` (auto). Custo: build/indice ~2x (aceito —
-/// Esforco != Complexidade). Ver `docs/adr/0018` + `docs/benchmarks/m57-sbq-superiority.md`.
-pub(crate) const HNSW_M: usize = 32;
+/// HNSW build params for the persisted AM index (16, 64). O M57 mediu que o recall satura em ~0.96-0.974 a
+/// 100k-500k (< gate 0.99). TRES tentativas de fix REFUTADAS por medicao (todas revertidas): efc=200 → 0.832;
+/// MERGE de back-links → 0.846; m=32 → 0.952 (PIOR que m=16 — mais conectividade degradando o recall e
+/// fundamentalmente anomalo). Bissecao (`THEODB_HNSW_PARALLEL_THRESHOLD`): sequencial ≈ paralelo → NAO e contencao.
+/// LEAD FORTE p/ o M60: o recall e NAO-MONOTONICO em `ef_search` (melhor no MENOR ef) → o teto e provavelmente um
+/// BUG NO SCAN (`am/hnsw_page.rs` traverse — beam search/heap), comum aos dois builds, e nao a conectividade do
+/// grafo. Investigar o traverse primeiro no M60. Ver `docs/adr/0018` + `docs/benchmarks/m57-sbq-superiority.md`.
+pub(crate) const HNSW_M: usize = 16;
 pub(crate) const HNSW_EF_CONSTRUCTION: usize = 64;
 const BUILD_SEED: u64 = 42;
 
