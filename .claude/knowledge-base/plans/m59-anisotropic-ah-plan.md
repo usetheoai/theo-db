@@ -242,9 +242,9 @@ VERIFY:  cargo pgrx test --package theodb_rs (aq_* tests)
 
 #### DoD (Definition of Done)
 - [ ] All tasks completed and validated.
-- [ ] `cargo pgrx test` green (aq_* subset).
-- [ ] `cargo clippy` zero warnings.
-- [ ] File-size budget respected.
+- [ ] `cargo pgrx test --package theodb_rs aq_train_deterministic aq_eta_one_reduces_to_isotropic aq_train_empty_corpus_no_panic` exits 0.
+- [ ] `cargo clippy --package theodb_rs -- -D warnings` exits 0.
+- [ ] `wc -l theodb_rs/src/am/aq.rs` reports ≤ 500 (per `rules/architecture.md`).
 
 ### T1.2 — `AqQuantizer::encode` (4-bit codes) + codebook meta round-trip
 
@@ -313,7 +313,7 @@ VERIFY:  cargo pgrx test --package theodb_rs (aq_* tests)
 - [ ] Size — `wc -l theodb_rs/src/am/aq.rs` reports ≤ 500.
 
 #### DoD
-- [ ] `cargo pgrx test` green; clippy clean; file-size budget respected.
+- [ ] `cargo pgrx test --package theodb_rs` exits 0; `cargo clippy --package theodb_rs -- -D warnings` exits 0; every changed file's `wc -l` is ≤ 500.
 
 ---
 
@@ -387,7 +387,7 @@ VERIFY:  cargo pgrx test --package theodb_rs (ah_* tests)
 - [ ] Size — `wc -l theodb_rs/src/vec.rs` reports ≤ 500; since it is 515 LoC today, the AH LUT builder+scorer land in a `vec::ah` submodule file (`theodb_rs/src/vec/ah.rs`) so no single file exceeds 500 (verified by `wc -l`).
 
 #### DoD
-- [ ] `cargo pgrx test` green; clippy clean; file-size budget respected (submodule if needed).
+- [ ] `cargo pgrx test --package theodb_rs` exits 0; `cargo clippy --package theodb_rs -- -D warnings` exits 0; `wc -l theodb_rs/src/vec/ah.rs` ≤ 500.
 
 ### T2.2 — `ah_score` AVX2 `pshufb` accumulate + runtime dispatch (SIMD, `unsafe`)
 
@@ -455,7 +455,7 @@ VERIFY:  cargo pgrx test --package theodb_rs (ah_simd_* tests)
 - [ ] Size — `wc -l theodb_rs/src/vec/ah.rs` reports ≤ 500.
 
 #### DoD
-- [ ] `cargo pgrx test` green; clippy clean; file-size budget respected.
+- [ ] `cargo pgrx test --package theodb_rs` exits 0; `cargo clippy --package theodb_rs -- -D warnings` exits 0; every changed file's `wc -l` is ≤ 500.
 
 ### T2.3 — Criterion micro-bench for the AH kernel (per-candidate cost)
 
@@ -513,7 +513,7 @@ VERIFY:  cargo pgrx test --package theodb_rs (ah_simd_per_candidate_speedup)
 - [ ] Lint — `cargo clippy --package theodb_rs -- -D warnings` exits 0 on the changed file.
 
 #### DoD
-- [ ] `cargo pgrx test` green; ratio recorded for the Phase-5 doc.
+- [ ] `cargo pgrx test --package theodb_rs ah_simd_per_candidate_speedup` exits 0 and `/build/target/m59-ah-speedup.txt` exists with the ratio recorded for the Phase-5 doc (`test -s /build/target/m59-ah-speedup.txt`).
 
 ---
 
@@ -581,12 +581,13 @@ VERIFY:  cargo pgrx test --package theodb_rs (aq_meta_* / pack_aq_*)
 ```
 
 #### Acceptance Criteria
-- [ ] All 4 RED tests green; v1/v2 decode is byte-identical.
-- [ ] `elem_size`/`pack_at` analytic addresses unchanged for v1/v2 indexes.
-- [ ] Pass: complexity ≤ 10, coverage ≥ 90% on changed functions, clippy clean, `hnsw_page.rs` change keeps functions ≤ 10 CC.
+- [ ] `cargo pgrx test --package theodb_rs aq_meta_v3_roundtrips v1_v2_meta_still_decodes pack_aq_writes_codebook_and_matching_codes decode_meta_rejects_unknown_version` exits 0.
+- [ ] v1/v2 decode is byte-identical — `v1_v2_meta_still_decodes` asserts pre-existing v1 and v2 meta bytes decode to the same `HnswMeta` fields as before; `elem_size`/`pack_at` analytic addresses are unchanged for v1/v2 (asserted by the existing SBQ pack tests staying green in the same run).
+- [ ] Lint — `cargo clippy --package theodb_rs -- -D warnings` exits 0 on `hnsw_page.rs`.
+- [ ] Complexity — no new `hnsw_page.rs` function exceeds cyclomatic 10, verified by `cargo clippy -p theodb_rs -- -W clippy::cognitive_complexity` reporting zero warnings on the changed functions.
 
 #### DoD
-- [ ] `cargo pgrx test` green; clippy clean; file-size budget respected.
+- [ ] `cargo pgrx test --package theodb_rs` exits 0; `cargo clippy --package theodb_rs -- -D warnings` exits 0; every changed file's `wc -l` is ≤ 500.
 
 ### T3.2 — Reloption `WITH (pq_subspaces, pq_bits, aq_threshold)` + resolvers
 
@@ -641,12 +642,13 @@ VERIFY:  cargo pgrx test --package theodb_rs (pq_reloption_*)
 ```
 
 #### Acceptance Criteria
-- [ ] Defaults keep existing indexes byte-identical (AQ off).
-- [ ] Out-of-range values are a typed DDL error, not a scan-time crash.
-- [ ] Pass: complexity ≤ 10, clippy clean, file-size budget respected.
+- [ ] `cargo pgrx test --package theodb_rs pq_reloption_defaults_off pq_reloption_parses` exits 0 — `pq_reloption_defaults_off` asserts `pq_subspaces_from_relation == 0` when no `WITH()` is given (existing indexes byte-identical).
+- [ ] Out-of-range values raise a typed DDL error — `pq_reloption_parses` asserts `CREATE INDEX … WITH (pq_bits=99)` errors at DDL (via `build_reloptions` min/max), not at scan time.
+- [ ] Lint — `cargo clippy --package theodb_rs -- -D warnings` exits 0 on `options.rs`.
+- [ ] Size — `wc -l theodb_rs/src/am/options.rs` reports ≤ 500.
 
 #### DoD
-- [ ] `cargo pgrx test` green; clippy clean; file-size budget respected.
+- [ ] `cargo pgrx test --package theodb_rs` exits 0; `cargo clippy --package theodb_rs -- -D warnings` exits 0; every changed file's `wc -l` is ≤ 500.
 
 ### T3.3 — Build + fold wiring (`build.rs`) preserves v3 across VACUUM
 
@@ -696,18 +698,20 @@ REFACTOR: "None expected".
 VERIFY:  cargo pgrx test --package theodb_rs (aq_index_survives_vacuum_fold)
 ```
 
-#### Concurrency tests (applicable — VACUUM fold takes an advisory EXCLUSIVE while scans hold share)
+#### Concurrency tests (applicable — the HNSW build is parallel and the VACUUM fold takes an advisory EXCLUSIVE while scans/inserts hold share)
 ```
-RACE:    the fold path reuses the existing M56/M48 lock discipline (build.rs:243 index_exclusive, aminsert index_shared:168) UNCHANGED — AQ adds no new shared mutable state (the codebook is packed into fresh pages before the block-0 pivot, build.rs:334). Assert: an interleaved aminsert during a v3 fold does not corrupt the index (reuse the existing crash-safe fold + lock tests as the harness; AQ rides the same GenericXLog pivot). If AQ introduced NO new lock, state exactly "(none new — reuses M48/M56 fold lock; no new shared state)".
+RACE-1 (parallel-build codebook determinism):  aq_codebook_deterministic_under_parallel_build() — build the SAME v3 index twice, once forcing the sequential path and once the parallel path (via THEODB_HNSW_PARALLEL_THRESHOLD, build.rs:16-18), and assert the persisted AQ codebook bytes are IDENTICAL. The codebook is trained on the drained corpus, so a data race in the parallel drain would surface as a codebook divergence. Sequential-vs-parallel parity is the race-aware signal (mirrors the M46 sequential≈parallel bisection, build.rs:18).
+RACE-2 (fold vs concurrent insert):  aq_fold_survives_concurrent_insert() — reuse the existing M48/M56 crash-safe-fold lock harness: while a v3 VACUUM fold holds the advisory EXCLUSIVE (build.rs:243 index_exclusive), an aminsert that took index_shared (build.rs:168) must serialize (not corrupt). AQ adds NO new shared mutable state — the codebook is packed into fresh pages before the block-0 pivot (build.rs:334) — so this asserts the AQ fold rides the same GenericXLog pivot without a new lock. Assert: post-fold scan returns the correct top-k and the concurrently-inserted row is present after the next fold.
 ```
 
 #### Acceptance Criteria
-- [ ] `aq_index_survives_vacuum_fold` green.
-- [ ] The fold reuses the existing crash-safe lock discipline (no new shared mutable state).
-- [ ] Pass: complexity ≤ 10, coverage ≥ 90% on changed functions, clippy clean, `build.rs` functions ≤ 10 CC.
+- [ ] `cargo pgrx test --package theodb_rs aq_index_survives_vacuum_fold aq_codebook_deterministic_under_parallel_build aq_fold_survives_concurrent_insert` exits 0.
+- [ ] The AQ fold introduces NO new lock — `grep -n 'index_exclusive\|index_shared' theodb_rs/src/am/build.rs` shows the AQ fold reuses the existing M48/M56 lock calls, not a new one (asserted by review of the diff).
+- [ ] Lint — `cargo clippy --package theodb_rs -- -D warnings` exits 0 on `build.rs`.
+- [ ] Complexity — no changed `build.rs` function exceeds cyclomatic 10, verified by `cargo clippy -p theodb_rs -- -W clippy::cognitive_complexity` reporting zero warnings on them.
 
 #### DoD
-- [ ] `cargo pgrx test` green; clippy clean; file-size budget respected; CHANGELOG `[Unreleased] § Added` updated.
+- [ ] `cargo pgrx test --package theodb_rs` exits 0; `cargo clippy --package theodb_rs -- -D warnings` exits 0; `wc -l theodb_rs/src/am/build.rs` change keeps every function ≤ 500 lines; `grep -q 'pq_subspaces\|anisotropic' CHANGELOG.md` confirms the `[Unreleased] § Added` entry.
 
 ---
 
@@ -775,14 +779,13 @@ VERIFY:  cargo pgrx test --package theodb_rs (aq_scan_*)
 ```
 
 #### Acceptance Criteria
-- [ ] `aq_scan_matches_brute_knn_high_ef` green (recall preserved on the real graph).
-- [ ] `aq_scan_truncated_code_is_typed_err` green (negative case).
-- [ ] `aq_scan_reads_flat_in_n` green (pages_read O(ef·M)).
-- [ ] The `NeighborSource` seam (`scan_core.rs`) is UNCHANGED (diff shows no edit there).
-- [ ] Pass: complexity ≤ 10, coverage ≥ 90% on changed functions, clippy clean, file-size budget respected.
+- [ ] `cargo pgrx test --package theodb_rs aq_scan_matches_brute_knn_high_ef aq_scan_truncated_code_is_typed_err aq_scan_reads_flat_in_n` exits 0 — the first asserts the v3 scan returns the exact-kNN set at high ef (recall preserved on the real graph), the second asserts a corrupt AQ code yields a typed `Err`, the third asserts `pages_read` is O(ef·M).
+- [ ] The `NeighborSource` seam is UNCHANGED — `git diff --stat theodb_rs/src/ann/scan_core.rs` shows 0 changed lines.
+- [ ] Lint — `cargo clippy --package theodb_rs -- -D warnings` exits 0 on `hnsw_page.rs`.
+- [ ] Complexity — no changed `traverse`/`load` function exceeds cyclomatic 10, verified by `cargo clippy -p theodb_rs -- -W clippy::cognitive_complexity` reporting zero warnings on them.
 
 #### DoD
-- [ ] `cargo pgrx test` green; clippy clean; file-size budget respected.
+- [ ] `cargo pgrx test --package theodb_rs` exits 0; `cargo clippy --package theodb_rs -- -D warnings` exits 0; `wc -l theodb_rs/src/am/hnsw_page.rs` change does not push any function over the budget.
 
 ### T4.2 — Scan GUC for the AH rerank pool
 
@@ -828,11 +831,11 @@ VERIFY:  cargo pgrx test --package theodb_rs
 ```
 
 #### Acceptance Criteria
-- [ ] The AH rerank pool is tunable per session (via over_fetch or aq_rerank); default keeps v1/v2 unaffected.
-- [ ] Pass: clippy clean; file-size budget respected.
+- [ ] The AH rerank pool is tunable per session — `SET theodb_hnsw.over_fetch = 4` then a v3 scan reranks a 4× pool (covered by `aq_scan_matches_brute_knn_high_ef` which sets `over_fetch`); the default (1) leaves v1/v2 indexes byte-identical (asserted by the existing SBQ/f32 scan tests staying green).
+- [ ] Lint — `cargo clippy --package theodb_rs -- -D warnings` exits 0 on `guc.rs`.
 
 #### DoD
-- [ ] `cargo pgrx test` green; clippy clean.
+- [ ] `cargo pgrx test --package theodb_rs` exits 0; `cargo clippy --package theodb_rs -- -D warnings` exits 0.
 
 ---
 
