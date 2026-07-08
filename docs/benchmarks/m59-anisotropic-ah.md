@@ -75,16 +75,45 @@ dezenas de ns no LUT). Se o scoring dominasse, o AQ seria ~100× mais rápido. E
    a caminhada HNSW é nó-a-nó, então hoje só o `ah_score` single-code roda. Mas o scoring já não é o gargalo — o
    batching só importa DEPOIS de separar o layout (ganho de segunda ordem).
 
+## Resultado 3 — layout v4 (código separado do f32) sob pressão FORTE (500k×768d, sb=128MB)
+
+O v4 move o f32 do element tuple para uma região raw separada (byte-test prova: `ElementViewV4` não tem
+`vec_bytes` → o f32 é estruturalmente inacessível ao walk). Conta de mesa: hot ~63 MB vs f32 1.5 GB. Medição:
+
+| Regime | AQ v4 recall / QPS | f32 recall / QPS | AQ/f32 |
+|---|---|---|---|
+| in-RAM (16 GB, sb=128MB) | 0.958 / 70 | 0.974 / 71 | 0.99× |
+| pressão FORTE (`--memory=700m`) | 0.958 / 2.3 | 0.974 / 2.1 | 1.1× |
+
+**O v4 sozinho NÃO produziu o ganho — paridade, e sob 700m AMBOS colapsam para ~2 QPS (p50 ~450 ms).** Dois
+diagnósticos da curva por-`over_fetch` sob pressão:
+1. **O rerank é BARATO, não o gargalo:** o AQ atinge recall 0.958 já a `over_fetch=4` (a quantização AH é
+   acurada), e o p50 é **flat** em over_fetch ∈ {4,8,16,32} (491→431 ms) — se os `k·over_fetch` reads de f32 frio
+   dominassem, o p50 escalaria 8× entre over_fetch 4 e 32. Não escala → o rerank não domina.
+2. **O WALK domina e o v4 não o acelerou sob pressão** (AQ 2.3 ≈ f32 2.1). Apesar do byte-test provar que o
+   *código* do walk não decodifica o f32, o walk do AQ v4 não ficou mais rápido. **Hipótese mais provável
+   (a ressalva de projeto do owner):** as páginas hot-element e raw-f32 estão **interleaved** no `Packed` v4 → ler
+   uma página hot puxa a página raw adjacente para o cache → poluição → a separação é derrotada no nível de PÁGINA
+   (o byte-test garante a separação no nível de CÓDIGO, mas não no nível de layout físico das páginas). Verificar/
+   corrigir a ordenação das páginas (todas hot juntas, depois todas raw) é o próximo passo medido.
+
 ## Veredito D3
 
 - **NÃO fecha o gap ~25× vs ScaNN no layout v3.** Honest-negative — o AQ é recall-competitivo (0.958 vs f32 0.974,
   um hair abaixo pela quantização coarse pq_subspaces=8) e QPS-paridade a recall casado, não ≥2×.
 - **O eixo anisotrópico + AH está implementado e correto** (a fundação testada, 175 pg_tests). A causa-raiz da
   paridade é **de layout**: o código está co-localizado com o f32, então o working set quente nunca encolheu.
-- **Próximo passo (o fix real): layout v4 — código separado do f32** (element tuple = só o código; f32 numa região
-  rerank-only). Conta @500k: hot ~50 MB (códigos 2 MB + grafo 48 MB) vs 1.5 GB → cache-resident sob pressão → o
-  ganho materializa. **Ressalva:** o grafo TAMBÉM precisa ficar separado/compacto (teste de mesa verifica quais
-  bytes o `score_candidate` toca). Medir a **2M** (f32 ≈ 6 GB ≫ RAM), não só `--memory=800m`.
+- **O layout v4 (código separado do f32) foi implementado e medido — e NÃO fechou o gap** (Resultado 3): paridade
+  sob pressão forte (700m), ambos ~2 QPS. O byte-test prova a separação no nível de CÓDIGO, mas a paridade indica
+  que a separação não se traduziu em ganho de I/O — hipótese medível: **interleaving das páginas hot/raw** no
+  `Packed` (poluição de cache no nível de página). Este é o próximo passo concreto: garantir páginas hot contíguas
+  (todas juntas) antes das raw, e re-medir; se ainda paridade, a conclusão é que o carrier HNSW pointer-chasing não
+  materializa o ganho de quantização — o caminho seria o carrier IVF batch-scan (contíguo por design, como ScaNN).
+- **Honest-negative rigoroso e medido:** o eixo anisotrópico-PQ+AH está implementado, correto (177 pg_tests) e o
+  código está estruturalmente separado (v4), mas **em nenhuma config medida (v3 co-localizado, v4 separado, in-RAM,
+  pressão 1.3g/700m) o AQ superou o f32 em QPS a recall casado.** A superioridade que o ScaNN reporta não se
+  reproduziu no carrier HNSW do TheoDB. Isto é ciência measurement-first: a hipótese foi testada a fundo e não se
+  sustentou; o próximo lever (page-ordering do v4, depois carrier IVF) fica registrado e motivado por medição.
 - Decisão registrada em `docs/adr/0019-m59-ah-needs-code-vector-separation.md`.
 
 ## Caveats honestos
