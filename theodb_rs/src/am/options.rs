@@ -203,8 +203,7 @@ pub(crate) unsafe fn sbq_bits_from_relation(indexrel: pg_sys::Relation) -> u8 {
 ///
 /// # Safety
 /// `indexrel` must be a valid open index relation.
-// M59 T3.2: caller (ambuild AQ path) lands in T3.3/Phase 4 — not-yet-wired foundation, not unreachable.
-#[allow(dead_code)]
+// M59 T3.3: wired into `ambuild_hnsw` (`pack_hnsw_for_build`) — decides the v3 AQ layout at initial build.
 pub(crate) unsafe fn pq_subspaces_from_relation(indexrel: pg_sys::Relation) -> usize {
     let rd_options = (*indexrel).rd_options;
     if rd_options.is_null() {
@@ -224,7 +223,7 @@ pub(crate) unsafe fn pq_subspaces_from_relation(indexrel: pg_sys::Relation) -> u
 ///
 /// # Safety
 /// `indexrel` must be a valid open index relation.
-#[allow(dead_code)] // M59 T3.2: caller lands in T3.3 (not-yet-wired foundation).
+// M59 T3.3: wired into `ambuild_hnsw` (`pack_hnsw_for_build`).
 pub(crate) unsafe fn pq_bits_from_relation(indexrel: pg_sys::Relation) -> u8 {
     let rd_options = (*indexrel).rd_options;
     if rd_options.is_null() {
@@ -244,7 +243,7 @@ pub(crate) unsafe fn pq_bits_from_relation(indexrel: pg_sys::Relation) -> u8 {
 ///
 /// # Safety
 /// `indexrel` must be a valid open index relation.
-#[allow(dead_code)] // M59 T3.2: caller lands in T3.3 (not-yet-wired foundation).
+// M59 T3.3: wired into `ambuild_hnsw` (`pack_hnsw_for_build`); the fold reads η off the persisted meta instead.
 pub(crate) unsafe fn aq_threshold_from_relation(indexrel: pg_sys::Relation) -> f32 {
     let rd_options = (*indexrel).rd_options;
     let milli = if rd_options.is_null() {

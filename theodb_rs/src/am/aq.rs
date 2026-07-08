@@ -111,6 +111,12 @@ impl AqQuantizer {
         self.m
     }
 
+    /// The bits-per-subquantizer this codebook was trained with (only 4 is valid; the LUT16 path). The VACUUM
+    /// fold reads it off the persisted codebook to re-train the AQ generation identically (M59 T3.3).
+    pub(crate) fn bits(&self) -> u8 {
+        self.bits
+    }
+
     /// The full dimensionality this codebook covers (`m · sub_dim`). `0` for an empty-corpus codebook.
     pub(crate) fn dim(&self) -> usize {
         self.m * self.sub_dim

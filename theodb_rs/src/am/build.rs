@@ -113,13 +113,32 @@ pub extern "C-unwind" fn ambuild_hnsw(
         );
         // M35: persist the STRUCTURED page-native layout (meta + element + neighbor tuples) so scans traverse the
         // graph ON DEMAND (O(ef·M) pages), not deserialize the whole blob (O(N)). M51: `WITH (sbq_bits=N)` enables
-        // the inline SBQ codes (0 = f32-only v1, the default).
-        let sbq_bits = crate::am::options::sbq_bits_from_relation(indexrel);
-        match crate::am::hnsw_page::pack_sbq(&idx, sbq_bits) {
+        // the inline SBQ codes (0 = f32-only v1, the default). M59 T3.3: `WITH (pq_subspaces=M)` enables the
+        // anisotropic-PQ v3 layout instead (AQ ⊥ SBQ per index, D1) — the AQ path wins the discriminator.
+        match pack_hnsw_for_build(&idx, indexrel) {
             Ok(packed) => crate::am::hnsw_page::write_structured(indexrel, pg_sys::ForkNumber::MAIN_FORKNUM, &packed),
             Err(e) => pg_sys::error!("theodb hnsw build: {e}"),
         }
         build_result(ntuples, corpus_len)
+    }
+}
+
+/// M59 T3.3 — pick the persisted layout for an initial `theodb_hnsw` build from the reloptions: `WITH
+/// (pq_subspaces=M)` (M > 0) trains the anisotropic PQ and packs **v3** (AQ ⊥ SBQ per index, D1); otherwise
+/// `WITH (sbq_bits=N)` packs v2 (or v1 when both are 0 — byte-identical to the pre-M51/M59 build). The AQ params
+/// come from the reloption at initial build; the VACUUM fold instead reads them off the persisted v3 meta (so a
+/// tuned index re-folds identically without re-reading the reloption).
+unsafe fn pack_hnsw_for_build(
+    idx: &HnswIndex,
+    indexrel: pg_sys::Relation,
+) -> Result<crate::am::hnsw_page::Packed, String> {
+    let m = crate::am::options::pq_subspaces_from_relation(indexrel); // 0 = AQ off
+    if m > 0 {
+        let bits = crate::am::options::pq_bits_from_relation(indexrel);
+        let thr = crate::am::options::aq_threshold_from_relation(indexrel);
+        crate::am::hnsw_page::pack_aq(idx, 1, m, bits, thr)
+    } else {
+        crate::am::hnsw_page::pack_sbq(idx, crate::am::options::sbq_bits_from_relation(indexrel))
     }
 }
 
@@ -314,9 +333,12 @@ unsafe fn vacuum_rebuild_hnsw_structured(indexrel: pg_sys::Relation, dead: &mut 
     // independent and readers (which follow meta.elem_first/nbr_first/entry_blkno) need no change. T2.2: pack once
     // at base 1 to count pages (the count is base-independent), pick a base that reuses the dead low region when
     // it fits (bounded growth), and repack only if the base changed.
-    // Preserve the index's SBQ layout across the fold (M51): re-quantize the live vectors with a freshly-trained
-    // codebook — the plan's "códigos gerados no fold". `meta.sbq_bits == 0` ⇒ the fold stays v1 f32-only.
-    let probe = match crate::am::hnsw_page::pack_at(&idx, 1, meta.sbq_bits) {
+    // Preserve the index's quantized layout across the fold: re-quantize the live vectors with a freshly-trained
+    // codebook — the plan's "códigos gerados no fold". M51 SBQ (`meta.sbq_bits > 0`) and M59 AQ (`meta.aq_m > 0`)
+    // are mutually exclusive (D1); `pack_fold_layout` reads the persisted meta (NOT the reloption) to pick which
+    // one, so a tuned v2/v3 index re-folds identically. `sbq_bits == 0 && aq_m == 0` ⇒ the fold stays v1 f32-only.
+    let pack_at_base = |base: usize| pack_fold_layout(&idx, base, &meta);
+    let probe = match pack_at_base(1) {
         Ok(p) => p,
         Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
     };
@@ -326,13 +348,33 @@ unsafe fn vacuum_rebuild_hnsw_structured(indexrel: pg_sys::Relation, dead: &mut 
     let packed = if base == 1 {
         probe
     } else {
-        match crate::am::hnsw_page::pack_at(&idx, base as usize, meta.sbq_bits) {
+        match pack_at_base(base as usize) {
             Ok(p) => p,
             Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
         }
     };
     crate::am::fold::fold(indexrel, &packed.meta, &packed.pages, base);
     live_len
+}
+
+/// M59 T3.3 — pack the fold's new generation preserving the index's persisted quantized layout. Reads the layout
+/// discriminator off the persisted `meta` (NOT the reloption — a fold must re-emit the same layout the index was
+/// built with even if the reloption changed): `aq_m > 0` ⇒ re-train AQ and pack **v3** (recovering `bits`/`η`
+/// from the persisted codebook so the fold re-quantizes identically); else pack v2/v1 via `sbq_bits`. The pack is
+/// position-independent (`base`), so the crash-safe fold relocates it for free.
+fn pack_fold_layout(
+    idx: &HnswIndex,
+    base: usize,
+    meta: &crate::am::hnsw_page::HnswMeta,
+) -> Result<crate::am::hnsw_page::Packed, String> {
+    if meta.aq_m == 0 {
+        return crate::am::hnsw_page::pack_at(idx, base, meta.sbq_bits);
+    }
+    // Recover the AQ params (bits + η) from the persisted codebook so the re-trained fold generation is identical
+    // to the build's (deterministic AQ_BUILD_SEED). The codebook itself is re-trained on the LIVE vectors inside
+    // `pack_aq` — dropping dead nodes but keeping the same (m, bits, η), the "códigos gerados no fold".
+    let q = crate::am::aq::AqQuantizer::from_meta_bytes(&meta.aq_codebook)?;
+    crate::am::hnsw_page::pack_aq(idx, base, meta.aq_m as usize, q.bits(), q.aq_threshold())
 }
 
 /// VACUUM fold for the structured IVFFlat layout (M31): enumerate all list entries + pending, drop dead, rebuild,
@@ -440,4 +482,208 @@ pub(crate) unsafe fn datum_to_vec_f32(datum: pg_sys::Datum) -> Vec<f32> {
         out.push(floats.add(i).read_unaligned());
     }
     out
+}
+
+// ================================ M59 T3.3 — build + fold wiring preserves AQ v3 ================================
+#[cfg(any(test, feature = "pg_test"))]
+#[pgrx::pg_schema]
+mod tests {
+    use super::*;
+    use crate::am::hnsw_page::{pack_aq, read_meta};
+
+    /// A dim-8 corpus (divisible by the AQ subspace counts used here, m ∈ {2,4}) so `AqQuantizer::train` accepts
+    /// it (`dim % m == 0`). Distinct, deterministic points, `n` rows.
+    fn aq_corpus8(n: i64) -> Vec<(i64, Vec<f32>)> {
+        (0..n)
+            .map(|i| {
+                let f = i as f32;
+                (
+                    i + 1,
+                    vec![f, (i % 7) as f32, (i % 5) as f32, (i % 3) as f32, f * 0.1, (i % 11) as f32, (i % 2) as f32, f * 0.5],
+                )
+            })
+            .collect()
+    }
+
+    /// Build a dim-8 table `tbl` with `n` distinct rows (id = i+1), then `CREATE INDEX ... USING theodb_hnsw`
+    /// with the given `with` clause (empty ⇒ no reloption). Returns nothing; the index is `{tbl}_idx`.
+    fn build_indexed_table(tbl: &str, n: i64, with: &str) {
+        pgrx::Spi::run(&format!("CREATE TABLE {tbl} (id int PRIMARY KEY, e vector(8))")).unwrap();
+        for (id, v) in aq_corpus8(n) {
+            let lit = v.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",");
+            pgrx::Spi::run(&format!("INSERT INTO {tbl} VALUES ({id}, '[{lit}]')")).unwrap();
+        }
+        let clause = if with.is_empty() { String::new() } else { format!(" WITH ({with})") };
+        pgrx::Spi::run(&format!("CREATE INDEX {tbl}_idx ON {tbl} USING theodb_hnsw (e){clause}")).unwrap();
+    }
+
+    /// Read the persisted meta of `{tbl}_idx` via the real Relation (the only way to see what `ambuild` packed).
+    unsafe fn meta_of(tbl: &str) -> crate::am::hnsw_page::HnswMeta {
+        let oid: pg_sys::Oid =
+            pgrx::Spi::get_one(&format!("SELECT '{tbl}_idx'::regclass::oid")).unwrap().expect("oid");
+        let rel = pg_sys::index_open(oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+        let meta = read_meta(rel).expect("read_meta");
+        pg_sys::index_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+        meta
+    }
+
+    /// ctid → the encoded i64 the AM stores, for driving the FFI fold's `dead` predicate.
+    fn heap_tid_i64(tbl: &str, id: i32) -> i64 {
+        let txt: String = pgrx::Spi::get_one(&format!("SELECT ctid::text FROM {tbl} WHERE id = {id}"))
+            .unwrap()
+            .expect("row exists");
+        let inner = txt.trim_start_matches('(').trim_end_matches(')');
+        let (b, o) = inner.split_once(',').expect("ctid has block,offset");
+        (b.trim().parse::<i64>().unwrap() << 16) | o.trim().parse::<i64>().unwrap()
+    }
+
+    /// Exact top-k via seqscan (oracle), then index scan; returns `(exact, via_index)` id sets.
+    fn topk_sets(tbl: &str, probe: &str, k: i64) -> (Vec<i32>, Vec<i32>) {
+        let sql = format!("SELECT id FROM {tbl} ORDER BY e <-> '{probe}'::vector LIMIT {k}");
+        let run = |sql: &str| -> Vec<i32> {
+            pgrx::Spi::connect(|c| {
+                c.select(sql, None, &[]).unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
+            })
+        };
+        pgrx::Spi::run("SET theodb_hnsw.ef_search = 200").unwrap();
+        pgrx::Spi::run("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on").unwrap();
+        let exact = run(&sql);
+        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        let idx = run(&sql);
+        (exact, idx)
+    }
+
+    /// T3.3 ACCEPTANCE (build): `CREATE INDEX ... WITH (pq_subspaces=4, pq_bits=4, aq_threshold=2000)` packs a v3
+    /// index — the persisted meta carries the AQ codebook + `aq_m=4` (NOT SBQ), each node has ⌈4/2⌉=2 trailing
+    /// code bytes, and the f32-rerank scan still returns the exact top-k (the inline codes do not corrupt scoring).
+    #[pgrx::pg_test]
+    fn ambuild_with_pq_subspaces_packs_v3_and_scans_correctly() {
+        build_indexed_table("aqb", 40, "pq_subspaces=4, pq_bits=4, aq_threshold=2000");
+        let meta = unsafe { meta_of("aqb") };
+        assert_eq!(meta.aq_m, 4, "ambuild picked v3 (aq_m=4) from the reloption");
+        assert_eq!(meta.sbq_bits, 0, "v3 index carries NO SBQ (AQ ⊥ SBQ, D1)");
+        assert!(!meta.aq_codebook.is_empty(), "the AQ codebook is persisted in the v3 meta");
+        // The persisted codebook decodes and reports the η we asked for (2.0), proving the reloption reached train.
+        let q = crate::am::aq::AqQuantizer::from_meta_bytes(&meta.aq_codebook).expect("codebook decodes");
+        assert_eq!(q.m(), 4);
+        assert!((q.aq_threshold() - 2.0).abs() < 1e-3, "η=2.0 round-tripped from the reloption");
+        // ⌈m/2⌉ = 2 trailing bytes per node.
+        assert_eq!(crate::am::aq::AqQuantizer::bytes_per_vector(8, 4), 2);
+        // f32 rerank still exact.
+        let (mut exact, mut idx) = topk_sets("aqb", "[3,3,2,0,0.3,4,1,1.5]", 5);
+        exact.sort_unstable();
+        idx.sort_unstable();
+        assert_eq!(idx, exact, "v3 scan returns the exact top-5 (inline AQ codes don't corrupt f32 rerank)");
+    }
+
+    /// T3.3 NON-REGRESSION (build): with NO reloption, `ambuild_hnsw` packs the byte-identical v1 layout — the
+    /// meta carries neither an AQ nor an SBQ codebook (`aq_m == 0 && sbq_bits == 0`). Guards the "existing indexes
+    /// stay v1/v2 byte-identical" invariant against the new AQ branch.
+    #[pgrx::pg_test]
+    fn ambuild_without_reloption_stays_v1() {
+        build_indexed_table("aqv1", 30, "");
+        let meta = unsafe { meta_of("aqv1") };
+        assert_eq!(meta.aq_m, 0, "no reloption ⇒ NOT v3");
+        assert_eq!(meta.sbq_bits, 0, "no reloption ⇒ NOT v2 either — plain v1 f32-only");
+        assert!(meta.aq_codebook.is_empty() && meta.codebook.is_empty(), "v1 has no codebook of any kind");
+    }
+
+    /// T3.3 ACCEPTANCE (fold): a v3 index survives the VACUUM compaction fold — the codebook is RE-TRAINED (not
+    /// dropped to v1, not corrupted). VACUUM the *command* cannot run inside a pg_test transaction, so drive the
+    /// fold at the FFI level (as the M56 tests do): tombstone the dead, then call `vacuum_rebuild` (the compaction
+    /// path). Post-fold: the meta is still v3 (aq_m preserved) AND an index scan returns the exact top-k over the
+    /// live rows.
+    #[pgrx::pg_test]
+    fn aq_index_survives_vacuum_fold() {
+        build_indexed_table("aqf", 40, "pq_subspaces=4, pq_bits=4, aq_threshold=1500");
+        let before = unsafe { meta_of("aqf") };
+        assert_eq!(before.aq_m, 4, "built v3");
+        // Delete ids 1..=10 at the SQL level, then drive the FFI fold over the remaining live TIDs.
+        let dead: Vec<i64> = (1..=10i32).map(|id| heap_tid_i64("aqf", id)).collect();
+        pgrx::Spi::run("DELETE FROM aqf WHERE id <= 10").unwrap();
+        let live = unsafe {
+            let oid: pg_sys::Oid = pgrx::Spi::get_one("SELECT 'aqf_idx'::regclass::oid").unwrap().expect("oid");
+            let rel = pg_sys::index_open(oid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+            let mut is_dead = |t: i64| dead.contains(&t);
+            let live = vacuum_rebuild(rel, &mut is_dead); // the compaction fold (advisory EXCLUSIVE)
+            pg_sys::index_close(rel, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+            live
+        };
+        assert_eq!(live, 30, "the fold kept the 30 live rows (40 built − 10 dead)");
+        let after = unsafe { meta_of("aqf") };
+        assert_eq!(after.aq_m, 4, "the fold PRESERVED v3 (codebook re-trained, not dropped to v1)");
+        assert_eq!(after.sbq_bits, 0, "still not SBQ after the fold");
+        assert!(!after.aq_codebook.is_empty(), "the re-trained AQ codebook is persisted");
+        assert_eq!(after.node_count, 30, "the folded graph holds only the 30 live nodes");
+        // A scan over the folded v3 index returns the exact top-k of the live rows (none of the deleted ids 1..10).
+        let (mut exact, mut idx) = topk_sets("aqf", "[20,6,0,2,2.0,9,0,10.0]", 5);
+        exact.sort_unstable();
+        idx.sort_unstable();
+        assert_eq!(idx, exact, "the folded v3 index scans correctly");
+        assert!(idx.iter().all(|&id| id > 10), "no deleted id survives the fold (got {idx:?})");
+    }
+
+    /// T3.3 RACE-1 (parallel-build codebook determinism): building the SAME v3 index twice — once forcing the
+    /// SEQUENTIAL path (a huge parallel threshold) and once the PARALLEL path (threshold 1) — must yield a
+    /// BYTE-IDENTICAL persisted AQ codebook. The codebook is trained on the drained corpus, so a data race in the
+    /// parallel drain would surface as a codebook divergence. Sequential-vs-parallel parity is the race-aware
+    /// signal (mirrors the M46/M57 sequential≈parallel bisection). A `#[pg_test]` (single-threaded pg backend) so
+    /// the process-global `set_var` toggle cannot race a concurrent test thread.
+    #[pgrx::pg_test]
+    fn aq_codebook_deterministic_under_parallel_build() {
+        let corpus = aq_corpus8(300); // ≥ any reasonable parallel threshold so the parallel path really engages
+        let (m, bits, thr) = (4usize, 4u8, 2.0f32);
+        let pack_with_threshold = |t: &str| -> Vec<u8> {
+            std::env::set_var("THEODB_HNSW_PARALLEL_THRESHOLD", t);
+            let idx = HnswIndex::build(&corpus, HNSW_M, HNSW_EF_CONSTRUCTION, Metric::L2, BUILD_SEED);
+            let packed = pack_aq(&idx, 1, m, bits, thr).expect("pack_aq");
+            crate::am::hnsw_page::decode_meta(&packed.meta).unwrap().aq_codebook
+        };
+        let seq = pack_with_threshold("100000000"); // threshold ≫ n ⇒ sequential
+        let par = pack_with_threshold("1"); // threshold 1 ⇒ parallel
+        std::env::remove_var("THEODB_HNSW_PARALLEL_THRESHOLD");
+        assert!(!seq.is_empty(), "the v3 codebook is non-empty");
+        assert_eq!(seq, par, "the AQ codebook is byte-identical seq-vs-parallel (no data race in the drain)");
+    }
+
+    /// T3.3 RACE-2 (fold vs concurrent insert): the AQ fold introduces NO new lock — it rides the SAME advisory
+    /// EXCLUSIVE the SBQ/v1 fold uses (`vacuum_rebuild` → `index_exclusive`), while `aminsert` takes
+    /// `index_shared`. This test proves the SERIALIZATION preserves v3: fold the v3 index, then insert a new row,
+    /// then confirm the index is still v3 AND the new row is findable (it lands in pending, folded on the next
+    /// fold). AQ adds no shared mutable state — the codebook is packed into fresh pages before the block-0 pivot —
+    /// so it needs no new lock. The lock-reuse itself is asserted structurally (grep in the plan's AC).
+    #[pgrx::pg_test]
+    fn aq_fold_survives_concurrent_insert() {
+        build_indexed_table("aqr", 40, "pq_subspaces=4, pq_bits=4, aq_threshold=1000");
+        // Fold (drop nothing) — exercises the compaction path holding the advisory EXCLUSIVE.
+        unsafe {
+            let oid: pg_sys::Oid = pgrx::Spi::get_one("SELECT 'aqr_idx'::regclass::oid").unwrap().expect("oid");
+            let rel = pg_sys::index_open(oid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+            let mut none_dead = |_: i64| false;
+            assert_eq!(vacuum_rebuild(rel, &mut none_dead), 40, "fold kept all 40 rows");
+            pg_sys::index_close(rel, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+        }
+        assert_eq!(unsafe { meta_of("aqr") }.aq_m, 4, "v3 preserved across a no-op fold");
+        // A concurrent insert (serialized by index_shared vs the fold's index_exclusive) lands in pending.
+        pgrx::Spi::run("INSERT INTO aqr VALUES (999, '[41,6,1,2,4.1,9,1,20.5]')").unwrap();
+        assert_eq!(unsafe { meta_of("aqr") }.aq_m, 4, "insert into a v3 index keeps it v3 (pending, not a downgrade)");
+        // The new row is findable by an index scan on its own vector (pending brute-force fold in the scan).
+        pgrx::Spi::run("SET theodb_hnsw.ef_search = 200").unwrap();
+        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        let got: Vec<i32> = pgrx::Spi::connect(|c| {
+            c.select("SELECT id FROM aqr ORDER BY e <-> '[41,6,1,2,4.1,9,1,20.5]'::vector LIMIT 1", None, &[])
+                .unwrap()
+                .filter_map(|r| r.get::<i32>(1).unwrap())
+                .collect()
+        });
+        assert_eq!(got, vec![999], "the concurrently-inserted row is present after the fold (got {got:?})");
+    }
+
+    /// T3.3 NEGATIVE (Rule 8): a v3 build whose vector dim is NOT divisible by `pq_subspaces` must raise a TYPED
+    /// error at CREATE INDEX (from `AqQuantizer::train`), not a panic across the C boundary. dim=8, pq_subspaces=3
+    /// ⇒ 8 % 3 ≠ 0 ⇒ the typed "not divisible by m" error surfaces as a build ERROR.
+    #[pgrx::pg_test(error = "theodb hnsw build: theodb aq: vector dim 8 is not divisible by m 3 (subspaces must be equal-sized)")]
+    fn ambuild_v3_rejects_indivisible_dim() {
+        build_indexed_table("aqbad", 20, "pq_subspaces=3, pq_bits=4");
+    }
 }

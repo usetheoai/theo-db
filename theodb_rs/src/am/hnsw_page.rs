@@ -466,11 +466,9 @@ pub(crate) fn pack_sbq(idx: &HnswIndex, sbq_bits: u8) -> Result<Packed, String> 
 /// vector (M59 T3.1). `m == 0` falls back to the v1 f32-only pack. The generation starts at `base` (position-
 /// independent — the fold re-packs v3 the same way SBQ preserves v2).
 ///
-/// NOTE (M59 T3.1 wiring): the production caller (`ambuild_hnsw` + the VACUUM fold) lands in Phase 3 T3.3
-/// (Dependency Graph 3→4). In THIS task the v3 pack path is exercised only by the `#[pg_test]` suite below —
-/// the codec + pack are complete and correct, but not yet wired into `build.rs`. The `allow(dead_code)` in
-/// non-test builds is honest about that one-task deferral; T3.3 removes it by adding the caller.
-#[cfg_attr(not(any(test, feature = "pg_test")), allow(dead_code))]
+/// M59 T3.3: wired into production — `ambuild_hnsw` (`pack_hnsw_for_build`, initial build reads the reloption)
+/// and the VACUUM compaction fold (`pack_fold_layout`, reads the AQ params off the persisted v3 meta so a fold
+/// re-quantizes identically).
 pub(crate) fn pack_aq(idx: &HnswIndex, base: usize, m: usize, bits: u8, aq_threshold: f32) -> Result<Packed, String> {
     let kind = if m == 0 { CodeKind::None } else { CodeKind::Aq { m, bits, aq_threshold } };
     pack_kind(idx, base, &kind)
