@@ -1,0 +1,4 @@
+{"milestone":"M58","kernel":"cosine AVX2+FMA vs scalar","dim":768,"iters":200000,
+ "scalar_s":2.3927,"avx_s":0.7597,"speedup":3.15,
+ "correctness":"parity within eps (both branches, tails), recall-preserving; SQL operator stays exact scalar",
+ "caveat":"micro-bench on one box; approximate (not bit-identical) by design like L2 SIMD"}
