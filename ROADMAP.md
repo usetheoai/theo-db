@@ -1076,6 +1076,37 @@ Esta milestone faz a adoção: buildar a peça no PG17 (ou bump PG18), smoke end
 
 ---
 
+# Roadmap v4 — Independência do pgvector (own vector type)
+
+> Ativado 2026-07-09 via `/roadmap-feature own-vector-type-drop-pgvector`. Objetivo explícito do North Star (`CLAUDE.md`: "substituir pgvector/pgvectorscale por código próprio é o **objetivo**") e o fecho dos milestones v2 M20→M22 (gated em paridade medida). Fonte de verdade da decisão: blueprint SHIPPABLE (99.7) em `.claude/knowledge-base/discoveries/blueprints/own-vector-type-drop-pgvector-blueprint.md` — veredito **A** (tipo próprio nomeado `vector`, `#[repr(C)]` byte-idêntico, drop-in), decomposto em 2 milestones com gate de paridade. **Finding honesto:** TheoDB seria o 1º AM permissivo a shipar tipo `vector` próprio em pgrx (VectorChord e pgvectorscale ambos reusam o do pgvector).
+
+### M69 — [ ] Tipo vetorial próprio own-code (coexistindo com pgvector, gated por paridade)
+
+**Objective:** shipar um tipo `vector` próprio no theodb_rs (I/O, typmod, operadores, casts) com layout `#[repr(C)]` byte-idêntico ao pgvector, **coexistindo** com o pgvector e provado byte-a-byte — a fundação para remover o pgvector sem tocar o hot path do índice (o P0 do North Star).
+
+**Definition of done:**
+- [ ] **Spike pgrx (gate de continuação, ADR-D3 do blueprint):** validado em pg17 real que pgrx 0.16.1 define um tipo denso de dimensão-variável via `extension_sql!(CREATE TYPE)` + funcs I/O `#[pg_extern]` com layout `#[repr(C)]` (`vl_len_ i32 · dim i16 · unused i16 · f32[]`) byte-idêntico ao `Vector` do pgvector. Falha do spike → reavaliar A vs C (honestidade Regra 3).
+- [ ] Tipo próprio `vector`: I/O in/out/recv/send (parse `[..]`, wire binário com `unused`==0), typmod (dim 1..16000), validação (NaN/Inf reject, dim-mismatch typed), operadores `<->`(L2)/`<#>`(neg-ip)/`<=>`(cosine) + casts (`real[]`↔, `float8[]`↔, `text`↔) **e cast bidirecional com o `vector` do pgvector** (a peça que permite coexistência + migração binária depois).
+- [ ] **Gate de paridade byte-a-byte:** suíte espelho do corpus pgvector (`vector_type.sql` + `cast.sql` + `copy.sql` round-trip **binário**, incl. NaN/Inf, typmod, malformados, dim=0) — output bit-idêntico ao pgvector. pg_tests GREEN em pg17 real (stack completa).
+- [ ] pgvector permanece instalado; os AMs `theodb_hnsw`/`theodb_ivfflat` ainda usam `FOR TYPE vector` do pgvector — **zero regressão possível no índice** (não tocado nesta fase).
+
+**Dependencies:** M68 (roadmap v3 completo). **Risco (MÉDIO-ALTO)** — a incerteza é o spike D3 (nenhum peer pgrx shipa tipo próprio); mitigada por ser gate de continuação e por não tocar o AM.
+
+### M70 — [ ] Remover pgvector (e pgvectorscale) totalmente — opclasses sobre o tipo próprio + migração
+
+**Objective:** religar as opclasses dos AMs próprios ao tipo próprio, migrar tabelas existentes, e **remover pgvector + pgvectorscale** da distribuição — fechando "remover a dependência do pgvector totalmente".
+
+**Definition of done:**
+- [ ] Opclasses `theodb_hnsw`/`theodb_ivfflat` religadas `FOR TYPE` do tipo próprio (preservando o mecanismo M49 metric-from-opclass, `theodb_rs/src/am/build.rs`); os ~44 `::vector` do `theodb_rs/src` reescritos.
+- [ ] **Migração de tabelas de usuário existentes** via `CREATE CAST (vector AS <tipo próprio>) WITHOUT FUNCTION` + `ALTER TABLE … ALTER COLUMN TYPE` (cast binário grátis, sem reescrita de heap, pois byte-idêntico) + **REINDEX** dos índices ANN (opfamily muda). Documentado + testado.
+- [ ] `requires` zerado (`theodb.control`, `theodb_rs.control` sem `vector, vectorscale`); Dockerfile sem pgvector nem pgvectorscale (remover stage-1 do pgvectorscale + `ADD pgvector.git`/`make install` + `COPY vectorscale*`); **pg_duckdb intocado** (columnar MIT, independente); diskann movido para **benchmark-only**.
+- [ ] **Gate de não-regressão de recall:** os 55 pg_tests `set-equal-vs-seqscan` de `theodb_rs/src/am/hnsw_page.rs` GREEN sobre o tipo próprio, em pg17 real — top-k via índice == top-k exato (o gate executável que já existe).
+- [ ] pgvector + pgvectorscale **ausentes** da imagem; `CREATE EXTENSION theodb` sem CASCADE de terceiros; suíte v1 (prova de paridade) verde.
+
+**Dependencies:** M69. **Risco (MÉDIO)** — regressão silenciosa de recall na troca de opclass; mitigada pelo gate set-equal + pelo rollback barato via coexistência de M69 (anti-sunk-cost).
+
+---
+
 ## Sequência e paralelismo
 
 ```
