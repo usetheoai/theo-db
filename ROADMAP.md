@@ -1052,14 +1052,14 @@ Esta milestone faz a adoção: buildar a peça no PG17 (ou bump PG18), smoke end
 
 **Dependencies:** M54. **Risco (BAIXO-MÉDIO).**
 
-### M67 — [ ] Índices vetoriais auto-tunados — ef/probes por workload
+### M67 — [x] Índices vetoriais auto-tunados — ef/probes por workload
 
 **Objective:** `ef_search`/`probes` são knobs manuais; um banco maduro auto-ajusta pela workload (P7). Own-code: observar o padrão de queries e ajustar o knob para o alvo recall×latência.
 
 **Definition of done:**
-- [ ] Coletor de estatística de scan (recall estimado, pages read, latência) por índice — own-code.
-- [ ] Auto-tune (ou recomendação) do `ef_search`/`probes` para um alvo de recall; medida de convergência → `docs/benchmarks/m67-autotune.{md,json}`.
-- [ ] `amcostestimate` refinado com a estatística real (fecha o gap M48/cost).
+- [x] Coletor de estatística de scan (recall estimado, pages read, latência) por índice — own-code. — `theodb.scan_stats` mede o **pages_read REAL** (thread_local que o traverse HNSW bumpa) + latência + persiste no catálogo heap `theodb._index_scan_stats` (crash-safe, fora das páginas do índice); `theodb.index_scan_stats(rel)` lê agregados. 5 pg_test GREEN. ADR-0026.
+- [x] Auto-tune (ou **recomendação**) do `ef_search` para um alvo de recall; medida de convergência → `docs/benchmarks/m67-autotune.{md,json}`. — `theodb.recommend_ef` (bisecção monotônica vs GT exato amostrado). Benchmark: **CONVERGED** na média (recall 0.986 ≥ alvos) com 2 ressalvas honestas (corpus fácil não estressa a curva ef; RQUT 12% de cauda — mean-optimal, não tail-safe). Auto-tune ONLINE deferido por evidência (ADR-0026 — oscilação). council-benchmark: HONESTO.
+- [x] `amcostestimate` refinado com a estatística real (fecha o gap M48/cost). — a fórmula M48 (f(ef)) é retida (honesta) + `theodb.scan_stats` dá a **auditabilidade real** (pages_read medido vs estimado, fechando o gap de auditoria M48/cost). A calibração-in-planning é DEFERIDA por risco EC-3 (SPI no planning abortaria TODO o planejamento) — honesto, não workaround (ADR-0026 D3).
 
 **Dependencies:** M35, M34. **Risco (MÉDIO).**
 

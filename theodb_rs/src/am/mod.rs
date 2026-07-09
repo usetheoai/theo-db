@@ -13,6 +13,7 @@
 use pgrx::*;
 
 pub(crate) mod aq; // M59 — anisotropic product quantizer (Phase 1 domain); the Phase 2 AH kernel (vec::ah) consumes AqQuantizer
+pub(crate) mod autotune; // M67 — deterministic ef_search recommender + scan-stats collector
 mod build; // ambuild / ambuildempty (Phase 2) + shared datum/metric helpers
 mod cost; // M48 T5.1 — honest amcostestimate visit-ratio (pgvector cost model)
 mod fold; // M48 — crash-safe VACUUM fold (meta-pivot, issue #47)

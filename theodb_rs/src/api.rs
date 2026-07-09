@@ -45,6 +45,37 @@ mod theodb_rs {
         crate::chunk::chunk(content, strategy, chunk_size as usize, overlap as usize)
     }
 
+    /// api-surface: `theodb_rs._recommend_ef(tbl, vec_col, samples, recall_target, k)` — the M67 deterministic
+    /// ef_search recommender (the SQL `theodb.recommend_ef`). Bisects the monotone recall(ef) curve against a
+    /// sampled EXACT ground truth; returns the least ef_search reaching the target. Read-only.
+    #[pg_extern]
+    fn _recommend_ef(
+        tbl: &str,
+        vec_col: &str,
+        samples: Vec<Option<String>>,
+        recall_target: f64,
+        k: i32,
+    ) -> i32 {
+        let refs: Vec<&str> = samples.iter().filter_map(|o| o.as_deref()).collect();
+        crate::am::autotune::recommend_ef(tbl, vec_col, &refs, recall_target, k)
+    }
+
+    /// api-surface: `theodb_rs._scan_stats(...)` — the M67 live scan-stats collector (the SQL `theodb.scan_stats`).
+    /// Runs one index scan at `ef` and returns the OBSERVED pages_read + latency (from the backend-local counter
+    /// the HNSW scan feeds), persisting the observation into `theodb._index_scan_stats`. Read-only on the index.
+    #[pg_extern]
+    fn _scan_stats(
+        relid: pg_sys::Oid,
+        tbl: &str,
+        vec_col: &str,
+        query: &str,
+        ef: i32,
+        k: i32,
+    ) -> TableIterator<'static, (name!(pages_read, i64), name!(latency_us, i64), name!(results, i64))> {
+        let (p, l, r) = crate::am::autotune::scan_stats(u32::from(relid) as i64, tbl, vec_col, query, ef, k);
+        TableIterator::once((p, l, r))
+    }
+
     // ── M18: the generative ai.* surface (was plpython3u in sql/50) ──────────────────────────────────
     // Thin delegates to `crate::chat`; the public `ai.*` SQL wrappers (below) carry the documented names,
     // return types, VOLATILE, and REVOKE. `ai._chat` stays SQL-callable so ai.generate/summarize/the
@@ -412,6 +443,56 @@ COMMENT ON FUNCTION theodb.chunk(text, text, int, int) IS
 "#,
     name = "theodb_chunk_wrapper",
     requires = [_chunk_text],
+);
+
+// SQL wrapper: the M67 deterministic ef_search recommender (`theodb.recommend_ef`). Runs exact + ANN scans
+// over the sample (dynamic SQL over the caller's table) → REVOKEd from PUBLIC (least-privilege: it reads the
+// caller's table and sets session GUCs). The operator applies the returned ef with `SET theodb_hnsw.ef_search`.
+extension_sql!(
+    r#"
+CREATE FUNCTION theodb.recommend_ef(index_table regclass, vector_col text, sample_queries text[],
+                                    recall_target float DEFAULT 0.95, k int DEFAULT 10)
+RETURNS int LANGUAGE sql
+AS $$ SELECT theodb_rs._recommend_ef(index_table::text, vector_col, sample_queries, recall_target, k) $$;
+
+COMMENT ON FUNCTION theodb.recommend_ef(regclass, text, text[], float, int) IS
+  'Recommend the minimum theodb_hnsw.ef_search that reaches recall_target (default 0.95) on a sample of query '
+  'vectors, measured against an exact seqscan ground truth (bisection over the monotone recall(ef) curve, M67). '
+  'Read-only; the operator applies the result with SET theodb_hnsw.ef_search. Not granted to PUBLIC.';
+
+REVOKE ALL ON FUNCTION theodb.recommend_ef(regclass, text, text[], float, int) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb_rs._recommend_ef(text, text, text[], float, int) FROM PUBLIC;
+"#,
+    name = "theodb_recommend_ef_wrapper",
+    requires = [_recommend_ef],
+);
+
+// SQL wrappers: the M67 scan-stats collector. `theodb.scan_stats` measures one scan (real pages_read + latency)
+// and persists it; `theodb.index_scan_stats` reads the aggregated per-relation stats. REVOKEd from PUBLIC (they
+// read the caller's table + set session GUCs). The collector closes the M48/cost auditability gap: the operator
+// compares the estimated cost (amcostestimate f(ef), honest since M48) against the REAL pages_read here.
+extension_sql!(
+    r#"
+CREATE FUNCTION theodb.scan_stats(index_table regclass, vector_col text, query text,
+                                  ef int DEFAULT 100, k int DEFAULT 10)
+RETURNS TABLE(pages_read bigint, latency_us bigint, results bigint) LANGUAGE sql
+AS $$ SELECT pages_read, latency_us, results FROM theodb_rs._scan_stats(index_table::oid, index_table::text, vector_col, query, ef, k) $$;
+
+CREATE FUNCTION theodb.index_scan_stats(rel regclass)
+RETURNS TABLE(n_scans bigint, avg_pages_read numeric, avg_latency_us numeric, last_ef int, last_updated timestamptz)
+LANGUAGE sql STABLE
+AS $$ SELECT n_scans, round(sum_pages_read::numeric/GREATEST(n_scans,1),1), round(sum_latency_us::numeric/GREATEST(n_scans,1),1), last_ef, last_updated
+      FROM theodb._index_scan_stats WHERE relid = rel::oid $$;
+
+COMMENT ON FUNCTION theodb.scan_stats(regclass, text, text, int, int) IS
+  'Measure one theodb_hnsw scan at ef: returns the REAL observed pages_read + latency (M67 collector) and '
+  'persists it into theodb._index_scan_stats. Lets the operator audit amcostestimate against reality. Not PUBLIC.';
+
+REVOKE ALL ON FUNCTION theodb.scan_stats(regclass, text, text, int, int) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb_rs._scan_stats(oid, text, text, text, int, int) FROM PUBLIC;
+"#,
+    name = "theodb_scan_stats_wrapper",
+    requires = [_scan_stats],
 );
 
 // SQL wrappers: the public generative `ai.*` surface (M18 — was plpython3u in sql/50, now Rust). Created

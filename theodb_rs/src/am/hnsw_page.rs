@@ -1640,6 +1640,10 @@ pub(crate) unsafe fn traverse(
         o
     };
 
+    // M67: feed the backend-local scan-stats collector (a cheap in-memory add; no page write, no crash-safety
+    // impact) so the recommender/`theodb.index_scan_stats` can persist real pages_read per index.
+    crate::am::autotune::bump_scan_pages(reads as i64);
+
     if std::env::var("THEODB_SCAN_PROFILE").is_ok_and(|v| v == "1") {
         // The wiring-triad runtime metric: pages read must be O(ef·M), flat in N (server LOG, not client WARNING).
         pgrx::log!("theodb hnsw scan profile: pages_read={reads} ef={ef} m={m} m0={m0} results={}", out.len());
