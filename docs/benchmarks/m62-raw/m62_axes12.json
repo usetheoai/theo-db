@@ -1,0 +1,13 @@
+{
+  "n": 5000000,
+  "axis1_olap_columnar": {
+    "olap_ms_mean": 15.9,
+    "heap_ms_mean": 492.9,
+    "olap_over_heap_speedup": 30.93,
+    "olap_wins": true
+  },
+  "axis2_refresh_cost": {
+    "refresh_ms_mean": 1211.7,
+    "note": "row\u2192Parquet COPY, statement-level"
+  }
+}
