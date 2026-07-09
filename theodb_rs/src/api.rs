@@ -72,7 +72,7 @@ mod theodb_rs {
         ef: i32,
         k: i32,
     ) -> TableIterator<'static, (name!(pages_read, i64), name!(latency_us, i64), name!(results, i64))> {
-        let (p, l, r) = crate::am::autotune::scan_stats(relid.as_u32() as i64, tbl, vec_col, query, ef, k);
+        let (p, l, r) = crate::am::autotune::scan_stats(u32::from(relid) as i64, tbl, vec_col, query, ef, k);
         TableIterator::once((p, l, r))
     }
 
