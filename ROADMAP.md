@@ -1008,14 +1008,14 @@ Esta milestone faz a adoção: buildar a peça no PG17 (ou bump PG18), smoke end
 
 **Dependencies:** M61. **Risco (MÉDIO-ALTO):** sincronização row↔column; consistência sob carga mista.
 
-### M63 — [ ] Vector JOIN — vetor como first-class no join relacional
+### M63 — [x] Vector JOIN — vetor como first-class no join relacional
 
 **Objective:** o vetor é first-class no `ORDER BY` (M52); faltam os JOINs vetoriais (`a JOIN b ON a.emb <=> b.emb < τ`) planner-integrados, tornando o vetor parte do modelo relacional.
 
 **Definition of done:**
-- [ ] Similarity join com uso do índice (não nested-loop O(n²)); planner escolhe o AM vetorial; recall preservado.
-- [ ] TDD + benchmark de recall/latência do join vs seqscan → `docs/benchmarks/m63-vector-join.{md,json}`.
-- [ ] Caso end-to-end: deduplicação/entity-resolution por similaridade em SQL puro.
+- [x] Similarity join com uso do índice (não nested-loop O(n²)); planner escolhe o AM vetorial; recall preservado. — provado por `#[pg_test] vector_join_uses_index_scan` (EXPLAIN assere `Index Scan using vjb_idx ... Order By` no ramo interno do LATERAL, ausência de `Seq Scan on vjb`); recall 0.9948 paridade com pgvector (ADR-0022).
+- [x] TDD + benchmark de recall/latência do join vs seqscan → `docs/benchmarks/m63-vector-join.{md,json}`. — 4 `#[pg_test]` GREEN + 16 pytest; T1 LATERAL-index 0.452ms **2.16× mais rápido** que T2 naive O(n·m) 0.977ms, paridade com pgvector.
+- [x] Caso end-to-end: deduplicação/entity-resolution por similaridade em SQL puro. — dedup self-join, recall 1.0 (20/20 duplicatas plantadas achadas), precisão 0.115 (função do τ).
 
 **Dependencies:** M52, M35. **Risco (ALTO):** integração no planner de join.
 
