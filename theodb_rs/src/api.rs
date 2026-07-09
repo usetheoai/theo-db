@@ -33,6 +33,18 @@ mod theodb_rs {
         crate::embed::run_batch(&refs, model)
     }
 
+    /// api-surface: `theodb_rs._chunk_text(content, strategy, chunk_size, overlap)` — declarative chunking
+    /// (M66, the SQL `theodb.chunk`). Pure string logic in `crate::chunk` (fixed/sentence/recursive +
+    /// overlap, Unicode-safe); NULL content → zero chunks. Replaces the dead plpgsql `theodb.chunk_text`.
+    #[pg_extern]
+    fn _chunk_text(content: Option<&str>, strategy: &str, chunk_size: i32, overlap: i32) -> Vec<String> {
+        let content = content.unwrap_or("");
+        if chunk_size < 0 || overlap < 0 {
+            crate::pg::err_input("theodb.chunk: chunk_size and overlap must be >= 0");
+        }
+        crate::chunk::chunk(content, strategy, chunk_size as usize, overlap as usize)
+    }
+
     // ── M18: the generative ai.* surface (was plpython3u in sql/50) ──────────────────────────────────
     // Thin delegates to `crate::chat`; the public `ai.*` SQL wrappers (below) carry the documented names,
     // return types, VOLATILE, and REVOKE. `ai._chat` stays SQL-callable so ai.generate/summarize/the
@@ -381,6 +393,25 @@ REVOKE ALL ON FUNCTION theodb_rs._embed_batch_text(text[], text) FROM PUBLIC;
 "#,
     name = "theodb_embed_batch_wrapper",
     requires = [_embed_batch_text],
+);
+
+// SQL wrapper: the public declarative chunking surface (M66 — `theodb.chunk`). Pure string logic (no HTTP,
+// no privilege escalation) → granted to PUBLIC (unlike embed/ai.* which make outbound calls). Replaces the
+// dead plpgsql `theodb.chunk_text` (removed from vectorizer.rs) with the Rust chunker (fixed/sentence/recursive).
+extension_sql!(
+    r#"
+CREATE FUNCTION theodb.chunk(content text, strategy text DEFAULT 'recursive',
+                             chunk_size int DEFAULT 512, overlap int DEFAULT 64)
+RETURNS text[] LANGUAGE sql IMMUTABLE
+AS $$ SELECT theodb_rs._chunk_text(content, strategy, chunk_size, overlap) $$;
+
+COMMENT ON FUNCTION theodb.chunk(text, text, int, int) IS
+  'Declarative text chunking (M66): split content into overlapping chunks by strategy '
+  '(fixed | sentence | recursive). Char-based, Unicode-safe (never splits a multibyte grapheme). '
+  'Empty content -> zero chunks; overlap must be < chunk_size (else typed error). Implemented in Rust (theodb_rs).';
+"#,
+    name = "theodb_chunk_wrapper",
+    requires = [_chunk_text],
 );
 
 // SQL wrappers: the public generative `ai.*` surface (M18 — was plpython3u in sql/50, now Rust). Created

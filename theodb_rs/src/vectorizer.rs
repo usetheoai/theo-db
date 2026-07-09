@@ -114,34 +114,8 @@ COMMENT ON FUNCTION theodb.create_vectorizer(regclass, text, text, regclass, tex
   'that enqueues jobs into theodb.vectorizer_queue; the background worker drains them (M54, ADR 0016). The '
   'trigger only enqueues (cheap, no HTTP) — model latency stays off the writer transaction.';
 
--- v1 chunking helper: a fixed-size CHARACTER window with overlap (the simplest correct chunker). HONEST v1
--- scope (YAGNI): this is NOT a separator-aware recursive splitter (paragraph/sentence/word hierarchy) — that
--- is a tracked follow-up. Fail-fast typed on bad params (Rule 8). Empty/NULL input → empty array.
-CREATE FUNCTION theodb.chunk_text(content text, chunk_size int DEFAULT 512, overlap int DEFAULT 64)
-RETURNS text[] LANGUAGE plpgsql IMMUTABLE AS $fn$
-DECLARE
-    result text[] := '{}';
-    pos    int := 1;
-    len    int := length(coalesce(content, ''));
-    step   int;
-BEGIN
-    IF chunk_size <= 0 THEN
-        RAISE EXCEPTION 'theodb.chunk_text: chunk_size must be > 0 (got %)', chunk_size;
-    END IF;
-    IF overlap < 0 OR overlap >= chunk_size THEN
-        RAISE EXCEPTION 'theodb.chunk_text: overlap must be in [0, chunk_size) (got %, chunk_size %)', overlap, chunk_size;
-    END IF;
-    IF len = 0 THEN
-        RETURN '{}';
-    END IF;
-    step := chunk_size - overlap;
-    WHILE pos <= len LOOP
-        result := array_append(result, substr(content, pos, chunk_size));
-        pos := pos + step;
-    END LOOP;
-    RETURN result;
-END;
-$fn$;
+-- (M66) the v1 plpgsql `theodb.chunk_text` was removed here — superseded by the Rust `theodb.chunk`
+-- (fixed/sentence/recursive + overlap, Unicode-safe; `theodb_rs::chunk`, wired in api.rs). One chunker (KISS).
 
 REVOKE ALL ON FUNCTION theodb.create_vectorizer(regclass, text, text, regclass, text, text, int) FROM PUBLIC;
 
@@ -838,28 +812,8 @@ mod tests {
         assert_eq!(ops, vec!["upsert", "upsert", "delete"], "INSERT/UPDATE enqueue upsert, DELETE enqueues delete");
     }
 
-    #[pg_test]
-    fn chunk_text_windows_with_overlap() {
-        // 'abcdefghij' (len 10), size 4, overlap 1 → step 3 → positions 1,4,7,10 → abcd,defg,ghij,j.
-        let chunks: Vec<String> = Spi::connect(|c| {
-            c.select("SELECT unnest(theodb.chunk_text('abcdefghij', 4, 1))", None, &[])
-                .unwrap()
-                .filter_map(|r| r.get::<String>(1).unwrap())
-                .collect()
-        });
-        assert_eq!(chunks, vec!["abcd", "defg", "ghij", "j"], "fixed-size character window with overlap");
-    }
-
-    #[pg_test]
-    fn chunk_text_empty_returns_empty() {
-        let n: i32 = Spi::get_one("SELECT array_length(theodb.chunk_text(''), 1)").unwrap().unwrap_or(0);
-        assert_eq!(n, 0, "empty content yields an empty chunk array (NULL length → 0)");
-    }
-
-    #[pg_test(error = "theodb.chunk_text: overlap must be in [0, chunk_size) (got 5, chunk_size 4)")]
-    fn chunk_text_rejects_overlap_ge_size() {
-        Spi::run("SELECT theodb.chunk_text('abc', 4, 5)").unwrap();
-    }
+    // (M66) the `chunk_text_*` SPI tests were removed with the dead plpgsql `theodb.chunk_text`; the
+    // chunker is now `theodb_rs::chunk` (pure Rust) with its own unit + pg_tests in chunk.rs.
 
     #[pg_test]
     fn process_delete_nulls_target_embedding() {

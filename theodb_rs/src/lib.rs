@@ -32,6 +32,7 @@ mod am;
 mod ann;
 mod ann_query;
 mod chat;
+mod chunk;
 mod sbq;
 mod embed;
 mod http;
