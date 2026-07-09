@@ -1,0 +1,27 @@
+[package]
+name = "theovec_spike"
+version = "0.0.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+default = []
+pg17 = ["pgrx/pg17"]
+pg_test = []
+
+[dependencies]
+pgrx = "=0.16.1"
+
+[dev-dependencies]
+pgrx-tests = "=0.16.1"
+
+[profile.dev]
+panic = "unwind"
+
+[profile.release]
+panic = "unwind"
+opt-level = 3
+lto = "fat"
+codegen-units = 1
