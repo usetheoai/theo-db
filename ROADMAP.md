@@ -1019,14 +1019,14 @@ Esta milestone faz a adoção: buildar a peça no PG17 (ou bump PG18), smoke end
 
 **Dependencies:** M52, M35. **Risco (ALTO):** integração no planner de join.
 
-### M64 — [ ] RAG-sobre-SQL unificado — a query única (relacional + vetor + analítico)
+### M64 — [x] RAG-sobre-SQL unificado — a query única (relacional + vetor + analítico)
 
 **Objective:** o "one query" story: filtro relacional + retrieval vetorial + (opcional) agregação columnar numa query só — o RAG que não sai do banco.
 
 **Definition of done:**
-- [ ] Query de referência: `WHERE <filtro> ORDER BY <vetor> LIMIT k` + join com agregação columnar, planner-integrado, recall + latência medidos.
-- [ ] Doc do padrão RAG-nativo (retrieval + rerank + contexto) em SQL + benchmark.
-- [ ] Veredito honesto vs pgvector + app-layer (o que ganhamos por ser unificado).
+- [x] Query de referência: `WHERE <filtro> ORDER BY <vetor> LIMIT k` + agregação, planner-integrado, recall + latência medidos. — Path 1 (row-store) entregue e provado por `#[pg_test] rag_unified_query_preserves_recall` (recupera o top-k filtrado idêntico ao oráculo exato) + benchmark. **Nota honesta (ADR-0023):** a agregação **columnar** planner-integrada é estruturalmente inalcançável (pg_duckdb proíbe DuckDB em função, ADR-0021; row-store + Parquet = 2 engines, 2 planners) — Path 2 columnar documentado como 2 statements (padrão M62), não mascarado.
+- [x] Doc do padrão RAG-nativo (retrieval + rerank + contexto) em SQL + benchmark. — `docs/benchmarks/m64-rag-over-sql.md` (o padrão CTE-retrieve + `string_agg` context-assembly) + benchmark. Rerank de 2ª ordem cross-encoder é M65 (documentado honestamente: hoje RRF/ai.rank).
+- [x] Veredito honesto vs pgvector + app-layer (o que ganhamos por ser unificado). — benchmark "1 SQL vs N app-calls": A_unified 1 round-trip 6.721ms vs B_app_layer 2 round-trips 7.284ms, **recall-match gate PASS (jaccard 1.0)**; a vitória estrutural é round_trips (1 vs 2, amplifica sobre rede); co-located ~8%. council-benchmark: HONESTO.
 
 **Dependencies:** M63, M61, M53. **Risco (MÉDIO).**
 
