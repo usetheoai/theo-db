@@ -12,7 +12,7 @@ mostram **o que o scan de fato fez**, algo que pgvector/pgvectorscale não expõ
 | `theodb.scan_stats(index_table, vector_col, query, ef, k)` | pages_read + candidates_seen + latência de um scan; **persiste** no catálogo |
 | `theodb.index_scan_stats(rel)` | agregados por índice: n_scans, avg_pages_read, avg_candidates, avg_latência, last_ef |
 
-> **Nota honesta (não há `amexplain` no PG18):** o Postgres não tem um hook para o AM injetar linhas no
+> **Nota honesta (não há `amexplain` no PG17/PG18):** o Postgres não tem um hook para o AM injetar linhas no
 > `EXPLAIN` do plano. `theodb.explain_scan` é uma **função diagnóstica separada** — o mesmo padrão de
 > Qdrant (`/telemetry`) e Milvus (métricas). É a forma correta e portável.
 

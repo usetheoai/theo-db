@@ -55,8 +55,9 @@ fn read_scan_candidates() -> i64 {
 // M67 — the per-index scan-stats catalog. A HEAP table keyed by the index OID, OUTSIDE the index pages
 // (ADR-0026-b: writing scan stats into the index pages via GenericXLog would violate partial-read +
 // the M35 graph immutability; a heap catalog keeps the scan read-only, the IndexAmRoutine contract intact).
-// Molded on `theodb.vectorizer_worker_stats`. Aggregates (sampled — the recommender records; hot-path scans
-// do not bump per query).
+// Molded on `theodb.vectorizer_worker_stats`. The catalog is written only by the sampled collector
+// (`record_scan_stat`, invoked from `scan_stats`) — NOT per hot-path query. Every hot-path scan DOES bump the
+// backend-local thread_local counters (cheap in-memory add), but the SPI write into this catalog is sampled.
 pgrx::extension_sql!(
     r#"
 CREATE TABLE IF NOT EXISTS theodb._index_scan_stats (

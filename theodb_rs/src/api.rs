@@ -60,9 +60,10 @@ mod theodb_rs {
         crate::am::autotune::recommend_ef(tbl, vec_col, &refs, recall_target, k)
     }
 
-    /// api-surface: `theodb_rs._scan_stats(...)` — the M67 live scan-stats collector (the SQL `theodb.scan_stats`).
-    /// Runs one index scan at `ef` and returns the OBSERVED pages_read + latency (from the backend-local counter
-    /// the HNSW scan feeds), persisting the observation into `theodb._index_scan_stats`. Read-only on the index.
+    /// api-surface: `theodb_rs._scan_stats(...)` — the live scan-stats collector (the SQL `theodb.scan_stats`).
+    /// Runs one index scan at `ef` and returns the OBSERVED 4-tuple `(pages_read, candidates_seen, latency_us,
+    /// results)` from the backend-local counters the HNSW scan feeds (pages_read: M67; candidates_seen: M68),
+    /// persisting the observation into `theodb._index_scan_stats`. Read-only on the index.
     #[pg_extern]
     fn _scan_stats(
         relid: pg_sys::Oid,
@@ -81,7 +82,7 @@ mod theodb_rs {
 
     /// api-surface: `theodb_rs._explain_scan(...)` — the M68 diagnostic (the SQL `theodb.explain_scan`). Shows
     /// what the vector scan did: index name, effective ef, pages_read, candidates_seen, latency, results.
-    /// There is NO `amexplain` hook in PG18 — a separate diagnostic function is the pattern (Qdrant/Milvus).
+    /// There is NO `amexplain` hook in PG17/PG18 — a separate diagnostic function is the pattern (Qdrant/Milvus).
     #[pg_extern]
     fn _explain_scan(
         relid: pg_sys::Oid,
@@ -525,8 +526,8 @@ REVOKE ALL ON FUNCTION theodb_rs._scan_stats(oid, text, text, text, int, int) FR
     requires = [_scan_stats],
 );
 
-// SQL wrapper: the M68 vector-scan EXPLAIN. There is NO amexplain hook in PG18 → a diagnostic function is the
-// pattern (Qdrant/Milvus). Shows index + effective ef + pages_read + candidates_seen + latency for a scan.
+// SQL wrapper: the M68 vector-scan EXPLAIN. There is NO amexplain hook in PG17/PG18 → a diagnostic function is
+// the pattern (Qdrant/Milvus). Shows index + effective ef + pages_read + candidates_seen + latency for a scan.
 extension_sql!(
     r#"
 CREATE FUNCTION theodb.explain_scan(index_table regclass, vector_col text, query text,

@@ -92,3 +92,12 @@ Prioridade: MÉDIA (o DoD "não regride" já está cumprido; isto qualificaria u
 - **council-rust L-1 (target UPDATE fencing):** o UPDATE do embedding no alvo não é owner-fenced (só mark_done é). Janela teórica de stale-write se o conteúdo mudou entre fetches sob multi-worker. Idempotente/last-writer-wins hoje. Prioridade: BAIXA.
 - **Multi-worker + multi-DB:** hoje 1 worker, DB fixo (`WORKER_DBNAME='postgres'`). N workers (o SKIP LOCKED já suporta) + launcher por-DB são o próximo passo de throughput/portabilidade. Requer os fixes acima primeiro. Prioridade: MÉDIA.
 - **Chunking recursivo separator-aware:** `theodb.chunk_text` v1 é janela de caracteres; o splitter recursivo (parágrafo→frase→palavra→char, à la LangChain) é o upgrade. Prioridade: BAIXA (v1 suficiente).
+
+## [M67/M68 review — council-rust-pgrx LOW (pré-existente M67)] Quotar identificadores nas funções scan-stats
+`exact_topk`/`recall_at_ef`/`scan_stats` (`theodb_rs/src/am/autotune.rs`) interpolam `tbl`/`vec_col`/`query`
+direto no SQL via `format!` em vez de parametrizar / `quote_ident`. Mitigado hoje: as funções `theodb.scan_stats`
+/`theodb.explain_scan`/`theodb.recommend_ef` são `REVOKE ALL ... FROM PUBLIC` (privilégio), e `tbl` chega via
+`regclass::text` (nome já resolvido/quotado pelo cast). Mas `vec_col`/`query` são `text` livres. NÃO é regressão
+do M68 (o M68 só adicionou `sum_candidates` à query já parametrizada `$1..$5` de `record_scan_stat`, correta).
+Fix: `quote_ident` para os identificadores (col) + bind de valores onde possível. Prioridade: BAIXA (funções
+admin, REVOKE FROM PUBLIC; sobe se expostas a role não-privilegiado).
