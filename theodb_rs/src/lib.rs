@@ -33,6 +33,7 @@ mod ann;
 mod ann_query;
 mod chat;
 mod chunk;
+mod dtype;
 mod sbq;
 mod embed;
 mod http;
