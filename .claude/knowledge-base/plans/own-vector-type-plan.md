@@ -113,8 +113,10 @@ Fase 1 é a fundação (bloqueia todas). Fases 2 e 3 dependem de 1 (o tipo + dat
 - RED: `#[pg_test] fn roundtrip_text_io` — `SELECT '[1,2,3]'::theodb.vector::text` == `[1,2,3]` (falha: tipo não existe).
 - RED: `#[pg_test(error = "NaN not allowed")] fn nan_rejected` — `SELECT '[1,NaN,3]'::theodb.vector`.
 - RED: `#[pg_test(error = "at least 1 dimension")] fn dim0_rejected` — `SELECT '[]'::theodb.vector`.
+- RED (EC-2, boundary): `#[pg_test] fn dim_boundary` — `'[1]'::theodb.vector` (dim=1) e dim=16000 round-trip OK; `'[...]'::theodb.vector` com 16001 dims → erro "cannot exceed 16000" (paridade `vector.c:88-100`).
+- RED (EC-1, memória): `#[pg_test] fn datum_roundtrip_no_uaf` — loop SQL 1000× `SELECT ('[1,2,3]'::theodb.vector)::theodb.vector(3)` (cast recebe E retorna o mesmo ptr) sem crash — pega double-free/use-after-free na disciplina `into_raw`/`Drop`.
 - GWT: Given o tipo criado, When parse de `[1,2,3]`, Then round-trip byte-idêntico; When NaN/Inf/dim0, Then erro tipado (paridade `vector_type.sql`).
-- GREEN: implementar `dtype.rs` (header, `TheoVec`, 6 traits, `parse_theovec`/`format_theovec` espelhando `vector.c:172-320`, `theodb_vector_in`/`out`, CREATE TYPE shell+full no schema `theodb`).
+- GREEN: implementar `dtype.rs` (header, `TheoVec`, 6 traits, `parse_theovec`/`format_theovec` espelhando `vector.c:172-320`, `theodb_vector_in`/`out`, CREATE TYPE shell+full no schema `theodb`). **DISCIPLINA DE MEMÓRIA (EC-1):** `into_datum` DEVE consumir `self` via `into_raw()` (`mem::forget`) — o Drop libera SÓ no path onde o valor não é retornado; nunca ambos (double-free) nem nenhum (leak). Espelha o spike (`into_raw` + `Drop`).
 
 #### Files to edit
 - `theodb_rs/src/dtype.rs` (NEW) — o tipo core.
@@ -146,6 +148,7 @@ Fase 1 é a fundação (bloqueia todas). Fases 2 e 3 dependem de 1 (o tipo + dat
 - RED: `#[pg_test(error = "expected 3 dimensions, not 2")] fn typmod_enforced_on_column` — `CREATE TEMP TABLE t(e theodb.vector(3)); INSERT INTO t VALUES('[1,2]')`.
 - RED: `#[pg_test] fn typmod_ok` — `'[1,2,3]'::theodb.vector(3)::text` == `[1,2,3]`.
 - RED: `#[pg_test] fn binary_roundtrip_copy` — `COPY t TO ... FORMAT binary` → `COPY t2 FROM ... FORMAT binary` preserva os valores + linha NULL (exercita recv/send com `unused`==0).
+- RED (EC-3, recv adversário): `#[pg_test(error = "expected unused to be 0")] fn recv_rejects_nonzero_unused` — wire binário construído com `unused=1` é rejeitado no recv (paridade `vector.c:378-388`).
 - GREEN: `theodb_vector_typmod_in` (dim 1..16000), `theodb_vector` length-coercion cast `(theodb.vector,int,bool)` + `CREATE CAST (theodb.vector AS theodb.vector)`, `theodb_vector_recv`/`send` (wire `int16 dim + int16 unused + f32[] big-endian`, espelha `vector.c:369-416`).
 
 #### Files to edit
@@ -175,7 +178,7 @@ Estende o CREATE TYPE da T1.1 (mesma `extension_sql!` block OU um bloco `require
 #### TDD
 - RED: `#[pg_test] fn operators_match_kernels` — `'[0,0]'::theodb.vector <-> '[3,4]'` == 5; `<#>` == neg-inner; `<=>` == cosine (valores vs `vec.rs` oracle).
 - RED: `#[pg_test] fn casts_array_roundtrip` — `ARRAY[1,2,3]::real[]::theodb.vector::real[]` == `{1,2,3}`; `float8[]`, `text`.
-- RED: `#[pg_test] fn binary_compat_with_pgvector` — `CREATE CAST (vector AS theodb.vector) WITHOUT FUNCTION` + `'[1,2,3]'::vector::theodb.vector::text` == `[1,2,3]` (e o inverso). **O GATE do layout byte-idêntico.**
+- RED: `#[pg_test] fn binary_compat_with_pgvector` — `CREATE CAST (vector AS theodb.vector) WITHOUT FUNCTION` + `'[1,2,3]'::vector::theodb.vector::text` == `[1,2,3]` (e o inverso), **testado em dim=1, dim=3 E dim=128 (EC-4)** — o layout `8+4·dim` tem que ser byte-idêntico em qualquer dim, não só dim=3. **O GATE do layout byte-idêntico.**
 - GREEN: `theodb_vector_l2/ip/cosine_distance` (reuso `vec.rs`), CREATE OPERATOR `<->`/`<#>`/`<=>`, casts `real[]`/`float8[]`/`text`↔ + `CREATE CAST (public.vector AS theodb.vector) WITHOUT FUNCTION` + inverso.
 
 #### Files to edit
