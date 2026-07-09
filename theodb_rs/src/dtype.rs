@@ -53,6 +53,9 @@ impl Vector {
         }
         unsafe {
             let size = VecHeader::size_of(slice.len());
+            // SET_VARSIZE_4B usa os 30 bits altos; com MAX_DIM=16000, size ≤ 64008 (cabe folgado).
+            // Guard à prova de futuro (HIGH-2 review) caso MAX_DIM suba: o shift não pode transbordar.
+            debug_assert!(size < (1 << 30), "theodb.vector varlena size overflow");
             let ptr = pgrx::pg_sys::palloc0(size) as *mut VecHeader;
             (&raw mut (*ptr).varlena).write((size << 2) as u32); // SET_VARSIZE_4B little-endian
             (&raw mut (*ptr).dim).write(slice.len() as u16);
@@ -146,7 +149,7 @@ unsafe impl<'fcx> ArgAbi<'fcx> for Vector {
         let idx = arg.index();
         unsafe {
             arg.unbox_arg_using_from_datum()
-                .unwrap_or_else(|| panic!("argument {idx} must not be null"))
+                .unwrap_or_else(|| crate::pg::err_input(&format!("argument {idx} must not be null")))
         }
     }
 }
@@ -192,6 +195,11 @@ fn parse(text: &str) -> Vec<f32> {
             pg::err_input("infinite value not allowed in theodb.vector");
         }
         out.push(v);
+        // Fail-fast dentro do loop (M2 review, espelha vector.c:205) — não acumula um Vec gigante
+        // antes de rejeitar (mitiga alocação de input adversário com milhões de tokens).
+        if out.len() > MAX_DIM {
+            pg::err_input(&format!("theodb.vector cannot have more than {MAX_DIM} dimensions"));
+        }
     }
     out
 }
@@ -253,7 +261,7 @@ fn theodb_vector_typmod_in(list: pgrx::Array<&CStr>) -> i32 {
 #[pg_extern(immutable, strict, parallel_safe)]
 fn theodb_vector_coerce(v: Vector, typmod: i32, _explicit: bool) -> Vector {
     let n = v.as_slice().len();
-    if typmod >= 0 && typmod as usize != n {
+    if typmod > 0 && typmod as usize != n {
         pg::err_input(&format!("expected {typmod} dimensions, not {n}"));
     }
     v
@@ -530,26 +538,41 @@ mod tests {
         assert_eq!(nearest, 1);
     }
 
-    /// GATE: layout byte-idêntico ao pgvector — cast binário WITHOUT FUNCTION nos 2 sentidos, dim variado.
+    /// GATE (M3): layout byte-idêntico ao pgvector — cast WITHOUT FUNCTION nos 2 sentidos +
+    /// asserção BYTE-CRUA `md5(::bytea)` (não só texto) em dims que cruzam o byte alto do `u16 dim`:
+    /// dim=1, 3, 5, 128 e **300 (>255)** — um off-by-one no header do dim só apareceria em dim>255.
     #[pg_test]
     fn binary_compat_with_pgvector() {
         Spi::run("CREATE EXTENSION IF NOT EXISTS vector").unwrap();
         Spi::run("CREATE CAST (vector AS theodb.vector) WITHOUT FUNCTION AS IMPLICIT").unwrap();
         Spi::run("CREATE CAST (theodb.vector AS vector) WITHOUT FUNCTION AS IMPLICIT").unwrap();
-        for dims in ["[1,2,3]", "[7]", "[10,20,30,40,50]"] {
-            let fwd = Spi::get_one::<String>(&format!(
-                "SELECT ('{dims}'::vector::theodb.vector)::text"
-            ))
-            .unwrap()
-            .unwrap();
-            assert_eq!(fwd, dims, "cast pgvector→theodb.vector dim-variado");
-            let back = Spi::get_one::<String>(&format!(
-                "SELECT ('{dims}'::theodb.vector::vector)::text"
-            ))
-            .unwrap()
-            .unwrap();
-            assert_eq!(back, dims, "cast theodb.vector→pgvector dim-variado");
+        let mk = |n: usize| format!("[{}]", (0..n).map(|i| ((i % 7) as f32 + 0.5).to_string()).collect::<Vec<_>>().join(","));
+        for n in [1usize, 3, 5, 128, 300] {
+            let lit = mk(n);
+            // texto round-trip nos 2 sentidos
+            let fwd = Spi::get_one::<String>(&format!("SELECT ('{lit}'::vector::theodb.vector)::text")).unwrap().unwrap();
+            assert_eq!(fwd, lit, "texto pgvector→theodb.vector dim={n}");
+            let back = Spi::get_one::<String>(&format!("SELECT ('{lit}'::theodb.vector::vector)::text")).unwrap().unwrap();
+            assert_eq!(back, lit, "texto theodb.vector→pgvector dim={n}");
+            // BYTE-CRU: o wire binário (send) idêntico entre os dois tipos ⇒ layout byte-a-byte.
+            // Usa as funções send diretamente (o tipo vector não tem cast p/ bytea).
+            let same_bytes = Spi::get_one::<bool>(&format!(
+                "SELECT md5(vector_send('{lit}'::vector)) = md5(theodb_vector_send('{lit}'::theodb.vector))"
+            )).unwrap().unwrap();
+            assert!(same_bytes, "wire binário (send) byte-idêntico ao pgvector, dim={n}");
         }
+    }
+
+    #[pg_test(error = "theodb.vector cannot have more than 16000 dimensions")]
+    fn parse_fail_fast_over_max() {
+        // M2: rejeita antes de acumular Vec gigante (checagem no loop)
+        Spi::run("SELECT ('[' || array_to_string(array_fill(1.0::real, ARRAY[16050]), ',') || ']')::theodb.vector").unwrap();
+    }
+
+    #[pg_test(error = "invalid input syntax for type theodb.vector: \"\"")]
+    fn parse_pathological_double_comma() {
+        // M1: token vazio entre vírgulas (paridade: pgvector também rejeita)
+        Spi::run("SELECT '[1,,3]'::theodb.vector").unwrap();
     }
 
     #[pg_test]

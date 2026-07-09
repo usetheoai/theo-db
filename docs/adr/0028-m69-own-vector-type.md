@@ -47,7 +47,13 @@ O tipo é `theodb.vector` — nome `vector` no schema `theodb`. Coexiste com `pu
 - O tipo coexiste com o pgvector em M69 (o AM ainda usa `public.vector`); a coexistência exige o pgvector instalado (por design; removido em M70).
 - `recv/send` binário: `send` construído em Rust big-endian (robusto, sem StringInfo FFI); `recv` via `pq_getmsgint`/`pq_getmsgfloat4` — validado por COPY BINARY round-trip.
 
-**Validação:** 14/14 dtype pg_tests GREEN (paridade `vector_type`/`cast`/`copy` binário + byte-compat dim-variado + typmod + negative-cases + memória sem UAF) + 13/13 HNSW AM GREEN (não-regressão), em pg17 real + pgvector coexistindo. **Sem claim de performance** (M69 é correção/paridade; o dado exigido é o gate de paridade byte-a-byte, cumprido).
+**Validação:** dtype pg_tests GREEN (paridade `vector_type`/`cast`/`copy` binário + byte-compat dim-variado + typmod + negative-cases + memória sem UAF) + 13/13 HNSW AM GREEN (não-regressão), em pg17 real + pgvector coexistindo. **Sem claim de performance** (M69 é correção/paridade; o dado exigido é o gate de paridade byte-a-byte, cumprido).
+
+### Escopo da "paridade" (honestidade, review dos councils)
+
+A paridade com o pgvector é de **VALOR + WIRE BYTE-A-BYTE**, não de texto-de-erro:
+- **Provado byte-a-byte:** o layout on-disk + o wire binário (send) são idênticos — o gate `binary_compat_with_pgvector` compara `md5('...'::vector::bytea) = md5('...'::theodb.vector::bytea)` em dims 1/3/5/128/**300** (>255, exercita o byte alto do `u16 dim`), além do cast `WITHOUT FUNCTION` nos 2 sentidos. É isso que habilita a migração grátis do M70.
+- **NÃO idêntico (deliberado):** as MENSAGENS de erro e o SQLSTATE são próprios do TheoDB (`err_input` → `22023 invalid_parameter_value`), não verbatim os do pgvector (`22P02` para sintaxe, `22000` para NaN/dim). Os erros são tipados e claros (fail-fast), mas um cliente que discrimina por SQLSTATE verá o código do TheoDB. Consistente com a divergência deliberada de SQLSTATE já assumida em `vec.rs`. Os `#[pg_test(error=...)]` asseveram as strings do TheoDB (não as do pgvector) — por design.
 
 ## Licença (INQUEBRÁVEL, D1 do projeto)
 
