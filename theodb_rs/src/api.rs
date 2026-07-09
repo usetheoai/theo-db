@@ -60,9 +60,10 @@ mod theodb_rs {
         crate::am::autotune::recommend_ef(tbl, vec_col, &refs, recall_target, k)
     }
 
-    /// api-surface: `theodb_rs._scan_stats(...)` — the M67 live scan-stats collector (the SQL `theodb.scan_stats`).
-    /// Runs one index scan at `ef` and returns the OBSERVED pages_read + latency (from the backend-local counter
-    /// the HNSW scan feeds), persisting the observation into `theodb._index_scan_stats`. Read-only on the index.
+    /// api-surface: `theodb_rs._scan_stats(...)` — the live scan-stats collector (the SQL `theodb.scan_stats`).
+    /// Runs one index scan at `ef` and returns the OBSERVED 4-tuple `(pages_read, candidates_seen, latency_us,
+    /// results)` from the backend-local counters the HNSW scan feeds (pages_read: M67; candidates_seen: M68),
+    /// persisting the observation into `theodb._index_scan_stats`. Read-only on the index.
     #[pg_extern]
     fn _scan_stats(
         relid: pg_sys::Oid,
@@ -71,9 +72,39 @@ mod theodb_rs {
         query: &str,
         ef: i32,
         k: i32,
-    ) -> TableIterator<'static, (name!(pages_read, i64), name!(latency_us, i64), name!(results, i64))> {
-        let (p, l, r) = crate::am::autotune::scan_stats(u32::from(relid) as i64, tbl, vec_col, query, ef, k);
-        TableIterator::once((p, l, r))
+    ) -> TableIterator<
+        'static,
+        (name!(pages_read, i64), name!(candidates_seen, i64), name!(latency_us, i64), name!(results, i64)),
+    > {
+        let (p, c, l, r) = crate::am::autotune::scan_stats(u32::from(relid) as i64, tbl, vec_col, query, ef, k);
+        TableIterator::once((p, c, l, r))
+    }
+
+    /// api-surface: `theodb_rs._explain_scan(...)` — the M68 diagnostic (the SQL `theodb.explain_scan`). Shows
+    /// what the vector scan did: index name, effective ef, pages_read, candidates_seen, latency, results.
+    /// There is NO `amexplain` hook in PG17/PG18 — a separate diagnostic function is the pattern (Qdrant/Milvus).
+    #[pg_extern]
+    fn _explain_scan(
+        relid: pg_sys::Oid,
+        index_name: &str,
+        tbl: &str,
+        vec_col: &str,
+        query: &str,
+        ef: i32,
+        k: i32,
+    ) -> TableIterator<
+        'static,
+        (
+            name!(index_name, String),
+            name!(ef_effective, i32),
+            name!(pages_read, i64),
+            name!(candidates_seen, i64),
+            name!(latency_us, i64),
+            name!(results, i64),
+        ),
+    > {
+        let (p, c, l, r) = crate::am::autotune::scan_stats(u32::from(relid) as i64, tbl, vec_col, query, ef, k);
+        TableIterator::once((index_name.to_string(), ef, p, c, l, r))
     }
 
     // ── M18: the generative ai.* surface (was plpython3u in sql/50) ──────────────────────────────────
@@ -475,24 +506,53 @@ extension_sql!(
     r#"
 CREATE FUNCTION theodb.scan_stats(index_table regclass, vector_col text, query text,
                                   ef int DEFAULT 100, k int DEFAULT 10)
-RETURNS TABLE(pages_read bigint, latency_us bigint, results bigint) LANGUAGE sql
-AS $$ SELECT pages_read, latency_us, results FROM theodb_rs._scan_stats(index_table::oid, index_table::text, vector_col, query, ef, k) $$;
+RETURNS TABLE(pages_read bigint, candidates_seen bigint, latency_us bigint, results bigint) LANGUAGE sql
+AS $$ SELECT pages_read, candidates_seen, latency_us, results FROM theodb_rs._scan_stats(index_table::oid, index_table::text, vector_col, query, ef, k) $$;
 
 CREATE FUNCTION theodb.index_scan_stats(rel regclass)
-RETURNS TABLE(n_scans bigint, avg_pages_read numeric, avg_latency_us numeric, last_ef int, last_updated timestamptz)
+RETURNS TABLE(n_scans bigint, avg_pages_read numeric, avg_candidates numeric, avg_latency_us numeric, last_ef int, last_updated timestamptz)
 LANGUAGE sql STABLE
-AS $$ SELECT n_scans, round(sum_pages_read::numeric/GREATEST(n_scans,1),1), round(sum_latency_us::numeric/GREATEST(n_scans,1),1), last_ef, last_updated
+AS $$ SELECT n_scans, round(sum_pages_read::numeric/GREATEST(n_scans,1),1), round(sum_candidates::numeric/GREATEST(n_scans,1),1), round(sum_latency_us::numeric/GREATEST(n_scans,1),1), last_ef, last_updated
       FROM theodb._index_scan_stats WHERE relid = rel::oid $$;
 
 COMMENT ON FUNCTION theodb.scan_stats(regclass, text, text, int, int) IS
-  'Measure one theodb_hnsw scan at ef: returns the REAL observed pages_read + latency (M67 collector) and '
-  'persists it into theodb._index_scan_stats. Lets the operator audit amcostestimate against reality. Not PUBLIC.';
+  'Measure one theodb_hnsw scan at ef: returns the REAL observed pages_read + candidates_seen + latency (M67/M68 '
+  'collector) and persists it. Lets the operator audit amcostestimate against reality. Not PUBLIC.';
 
 REVOKE ALL ON FUNCTION theodb.scan_stats(regclass, text, text, int, int) FROM PUBLIC;
 REVOKE ALL ON FUNCTION theodb_rs._scan_stats(oid, text, text, text, int, int) FROM PUBLIC;
 "#,
     name = "theodb_scan_stats_wrapper",
     requires = [_scan_stats],
+);
+
+// SQL wrapper: the M68 vector-scan EXPLAIN. There is NO amexplain hook in PG17/PG18 → a diagnostic function is
+// the pattern (Qdrant/Milvus). Shows index + effective ef + pages_read + candidates_seen + latency for a scan.
+extension_sql!(
+    r#"
+CREATE FUNCTION theodb.explain_scan(index_table regclass, vector_col text, query text,
+                                    ef int DEFAULT 100, k int DEFAULT 10)
+RETURNS TABLE(index_name text, ef_effective int, pages_read bigint, candidates_seen bigint, latency_us bigint, results bigint)
+LANGUAGE sql
+AS $$ SELECT index_name, ef_effective, pages_read, candidates_seen, latency_us, results
+      FROM theodb_rs._explain_scan(
+        index_table::oid,
+        COALESCE((SELECT ci.relname FROM pg_index i JOIN pg_class ci ON ci.oid = i.indexrelid
+                  JOIN pg_am a ON a.oid = ci.relam
+                  WHERE i.indrelid = index_table AND a.amname = 'theodb_hnsw' LIMIT 1),
+                 '(no theodb_hnsw index on this table)'),
+        index_table::text, vector_col, query, ef, k) $$;
+
+COMMENT ON FUNCTION theodb.explain_scan(regclass, text, text, int, int) IS
+  'EXPLAIN the vector scan (M68): index, effective ef, pages_read, candidates_seen (the beam pool navigated), '
+  'latency, results. A diagnostic function (PG18 has no amexplain hook — the Qdrant/Milvus pattern). See '
+  'docs/ops/vector-scan-diagnostics.md. Not granted to PUBLIC.';
+
+REVOKE ALL ON FUNCTION theodb.explain_scan(regclass, text, text, int, int) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb_rs._explain_scan(oid, text, text, text, text, int, int) FROM PUBLIC;
+"#,
+    name = "theodb_explain_scan_wrapper",
+    requires = [_explain_scan],
 );
 
 // SQL wrappers: the public generative `ai.*` surface (M18 — was plpython3u in sql/50, now Rust). Created
