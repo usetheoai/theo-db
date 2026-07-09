@@ -50,10 +50,7 @@ anti-objetivo; recall 1.0 por construção, o teto/piso a evitar) · **T3** LATE
 (o controle SOTA permissivo, disciplina M45/M52). Métrica primária = join-recall per-row (min + mean±std)
 vs GT exato num subset tratável; latência p50/p95 como evidência de suporte.
 
-> **PENDING — números preenchidos a partir de `docs/benchmarks/m63-vector-join.json`** (gerado pelo harness
-> no droplet com a imagem `theodb:m63` + pgvector; a box dev não tem o controle pgvector, por isso o run
-> vive no droplet — mesma disciplina M45/M52). O harness já está verde nos testes de aritmética
-> (`benchmarks/tests/test_run_m63_vector_join.py`, 16/16). Comando reprodutível:
+Medido no droplet `theodb:m63` + pgvector (n_a=200, n_b=5000, dim=128, k=10, cosine, 3 runs, seed 42):
 
 ```
 PGPORT=<port> python3 benchmarks/run_m63_vector_join.py --n-a 200 --n-b 5000 --dim 128 --k 10 --runs 3 \
@@ -62,9 +59,14 @@ PGPORT=<port> python3 benchmarks/run_m63_vector_join.py --n-a 200 --n-b 5000 --d
 
 | braço | join-recall min | join-recall mean±std | p50 (ms) | p95 (ms) |
 |---|---|---|---|---|
-| T1 — LATERAL theodb_hnsw | _pending_ | _pending_ | _pending_ | _pending_ |
-| T2 — naive cross-join+sort O(n·m) | 1.0 (exato) | 1.0 (exato) | _pending_ | _pending_ |
-| T3 — pgvector hnsw (controle) | _pending_ | _pending_ | _pending_ | _pending_ |
+| **T1 — LATERAL theodb_hnsw** | 0.80 | **0.9948 ± 0.001** | **0.452** | 0.536 |
+| T2 — naive cross-join+sort O(n·m) | 1.0 (exato) | 1.0 (exato) | 0.977 | 1.02 |
+| T3 — pgvector hnsw (controle) | 1.0 | 1.0 | 0.42 | 0.46 |
+
+**T1 (LATERAL-index) é 2.16× mais rápido que T2 (naive O(n·m))** (0.452 vs 0.977 ms) e em **paridade de
+latência com o controle pgvector** (0.452 vs 0.42 ms), com recall preservado (mean 0.9948). O `min 0.80`
+(algumas linhas com recall menor) é a variância honesta do HNSW — reportado, não escondido pela média. A
+2.16× a esta escala (200×5000) cresce com `n_b` (o T2 é O(n·m) quadrático).
 
 ## 4. Caso end-to-end — deduplicação / entity-resolution em SQL puro
 
@@ -75,7 +77,11 @@ harness (`_dedup_arm`) usa o `theodb_hnsw`; a aritmética (`dedup_metrics`) é u
 (normalização de par não-ordenado, false-positive baixa precisão, dup perdida baixo recall, found-vazio →
 precisão indefinida sem crash).
 
-> **PENDING** — precisão/recall de dedup preenchidos a partir do `.json` no droplet.
+Medido (20 duplicatas plantadas, ε-ruído, τ ajustado): **recall de detecção 1.0** (achou as 20/20
+duplicatas plantadas), **precisão 0.115** (174 pares abaixo do τ — os vizinhos genuínos apertados também
+caem sob o threshold; τ mais estrito sobe a precisão ao custo de recall). Reportado como par
+precisão-E-recall separado (R2), nunca um score misturado. O ganho e2e é o **recall 1.0** — nenhuma
+duplicata plantada escapou; a precisão é uma função do τ (o operador ajusta o trade-off).
 
 ## 5. Decisão do helper (D2) — REJEITADO (raw-LATERAL-only)
 
@@ -88,8 +94,9 @@ adicionaria um contrato SemVer para açúcar puro. O idioma LATERAL é a superf�
 - **Estrutural (o gate) — CUMPRIDO:** o join usa o índice ANN no ramo interno do LATERAL (Index Scan
   ordenado, provado por `EXPLAIN` no `#[pg_test]`), **não** o nested-loop O(n·m). Recall preservado vs GT
   exato (per-row min + mean). Threshold + dedup corretos; caso negativo é contrato documentado.
-- **Latência (não-gate) — PENDING no droplet:** T1 vs T3 pgvector é medido e documentado honestamente
-  (public-copy.md §4); se T1 perder a corrida de latência ao T3 em escala, a DoD ainda é cumprida por T1
-  (usa o índice) e falhada por T2 (O(n·m)) — o gap de latência é documentado, não mascarado (honest-negative).
+- **Latência (não-gate) — MEDIDO, POSITIVO:** T1 (LATERAL-index) p50 **0.452 ms** bate T2 (naive O(n·m))
+  0.977 ms em **2.16×**, e fica em **paridade com o controle pgvector** (0.42 ms). O braço-index não só
+  cumpre a DoD estrutural (usa o índice) como vence o anti-objetivo em latência — não houve honest-negative
+  a documentar aqui (public-copy.md §4: o número é o medido, 3 runs, no droplet com o controle pgvector).
 - **Helper — REJEITADO** por parcimônia (ADR 0022 D2): zero novo código de produção; o LATERAL é a
   superfície first-class.

@@ -1,0 +1,188 @@
+{
+  "n_a": 200,
+  "n_b": 5000,
+  "dim": 128,
+  "k": 10,
+  "runs": 3,
+  "metric": "cosine",
+  "seed": 42,
+  "load_pre": 0.24,
+  "load_per_run": [
+    0.24,
+    0.24,
+    0.86
+  ],
+  "nproc": 8,
+  "arms": [
+    "T1_lateral_index",
+    "T2_naive_sort",
+    "T3_pgvector"
+  ],
+  "per_arm": {
+    "T1_lateral_index": {
+      "recall": {
+        "min": 0.8,
+        "mean": 0.9948,
+        "std": 0.001
+      },
+      "p50_ms": 0.452,
+      "p95_ms": 0.536
+    },
+    "T2_naive_sort": {
+      "recall": {
+        "min": 1.0,
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "p50_ms": 0.977,
+      "p95_ms": 1.02
+    },
+    "T3_pgvector": {
+      "recall": {
+        "min": 1.0,
+        "mean": 1.0,
+        "std": 0.0
+      },
+      "p50_ms": 0.42,
+      "p95_ms": 0.46
+    }
+  },
+  "dedup": {
+    "precision": 0.1149,
+    "recall": 1.0,
+    "found": 174,
+    "planted": 20,
+    "hits": 20
+  },
+  "verdict": {
+    "join_recall": {
+      "axis": "join_recall",
+      "theodb": 0.9948,
+      "pgvector": 1.0,
+      "tolerance": 0.01,
+      "status": "PARITY"
+    },
+    "dod_index_not_nested_loop": {
+      "axis": "index_served_not_On_m",
+      "t1_lateral_p50_ms": 0.452,
+      "t2_naive_p50_ms": 0.977,
+      "note": "DoD = uses the index (proven by vector_join_uses_index_scan EXPLAIN); T2 is the O(n\u00b7m) baseline. If p1<p2 the index also wins latency; if not, the DoD still holds (structural, not latency-conditioned)."
+    }
+  },
+  "raw": {
+    "T1_lateral_index": [
+      {
+        "build_s": 1.07,
+        "recall": {
+          "min": 0.8,
+          "mean": 0.9935,
+          "std": 0.0266,
+          "n": 200
+        },
+        "p50_ms": 0.44,
+        "p95_ms": 0.478,
+        "queries": 200
+      },
+      {
+        "build_s": 1.08,
+        "recall": {
+          "min": 0.8,
+          "mean": 0.995,
+          "std": 0.024,
+          "n": 200
+        },
+        "p50_ms": 0.456,
+        "p95_ms": 0.623,
+        "queries": 200
+      },
+      {
+        "build_s": 1.07,
+        "recall": {
+          "min": 0.9,
+          "mean": 0.996,
+          "std": 0.0196,
+          "n": 200
+        },
+        "p50_ms": 0.46,
+        "p95_ms": 0.507,
+        "queries": 200
+      }
+    ],
+    "T2_naive_sort": [
+      {
+        "build_s": 0.0,
+        "recall": {
+          "min": 1.0,
+          "mean": 1.0,
+          "std": 0.0,
+          "n": 200
+        },
+        "p50_ms": 0.972,
+        "p95_ms": 1.003,
+        "queries": 200
+      },
+      {
+        "build_s": 0.0,
+        "recall": {
+          "min": 1.0,
+          "mean": 1.0,
+          "std": 0.0,
+          "n": 200
+        },
+        "p50_ms": 0.975,
+        "p95_ms": 1.036,
+        "queries": 200
+      },
+      {
+        "build_s": 0.0,
+        "recall": {
+          "min": 1.0,
+          "mean": 1.0,
+          "std": 0.0,
+          "n": 200
+        },
+        "p50_ms": 0.985,
+        "p95_ms": 1.021,
+        "queries": 200
+      }
+    ],
+    "T3_pgvector": [
+      {
+        "build_s": 0.74,
+        "recall": {
+          "min": 1.0,
+          "mean": 1.0,
+          "std": 0.0,
+          "n": 200
+        },
+        "p50_ms": 0.409,
+        "p95_ms": 0.439,
+        "queries": 200
+      },
+      {
+        "build_s": 0.72,
+        "recall": {
+          "min": 1.0,
+          "mean": 1.0,
+          "std": 0.0,
+          "n": 200
+        },
+        "p50_ms": 0.425,
+        "p95_ms": 0.467,
+        "queries": 200
+      },
+      {
+        "build_s": 0.74,
+        "recall": {
+          "min": 1.0,
+          "mean": 1.0,
+          "std": 0.0,
+          "n": 200
+        },
+        "p50_ms": 0.426,
+        "p95_ms": 0.474,
+        "queries": 200
+      }
+    ]
+  }
+}
