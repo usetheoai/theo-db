@@ -59,14 +59,21 @@ PGPORT=<port> python3 benchmarks/run_m63_vector_join.py --n-a 200 --n-b 5000 --d
 
 | braço | join-recall min | join-recall mean±std | p50 (ms) | p95 (ms) |
 |---|---|---|---|---|
-| **T1 — LATERAL theodb_hnsw** | 0.80 | **0.9948 ± 0.001** | **0.452** | 0.536 |
+| **T1 — LATERAL theodb_hnsw** | 0.80 | **0.9948** (±0.001 entre-runs) | **0.452** | 0.536 |
 | T2 — naive cross-join+sort O(n·m) | 1.0 (exato) | 1.0 (exato) | 0.977 | 1.02 |
 | T3 — pgvector hnsw (controle) | 1.0 | 1.0 | 0.42 | 0.46 |
 
 **T1 (LATERAL-index) é 2.16× mais rápido que T2 (naive O(n·m))** (0.452 vs 0.977 ms) e em **paridade de
 latência com o controle pgvector** (0.452 vs 0.42 ms), com recall preservado (mean 0.9948). O `min 0.80`
-(algumas linhas com recall menor) é a variância honesta do HNSW — reportado, não escondido pela média. A
-2.16× a esta escala (200×5000) cresce com `n_b` (o T2 é O(n·m) quadrático).
+(algumas linhas com recall menor) é a variância honesta do HNSW — reportado, não escondido pela média.
+
+**Nota estatística honesta (transparência, não spin):** (a) o `±0.001` é o desvio **entre as 3
+médias-por-run**, NÃO a dispersão por-linha — o std por-linha real é ~0.024 (a cauda que produz o `min 0.80`);
+o `mean±std` aqui mede a estabilidade da média entre runs, não a variância por-query. (b) A afirmação "a 2.16×
+cresce com `n_b`" é uma **projeção do mecanismo** (T2 é O(n·m), T1 é O(log n) por linha), NÃO uma curva
+medida — há **1 ponto** (n_b=5000); medir n_b∈{5k,10k,20k} é débito rastreado, não um claim fechado.
+(c) O run 3 teve um spike de `load_avg` (0.24→0.86); os 3 runs são o piso mínimo — o gap 2.16× é robusto a
+esse ruído (a p50 de T1 variou só 0.44→0.46), mas a box não estava perfeitamente idle no run 3.
 
 ## 4. Caso end-to-end — deduplicação / entity-resolution em SQL puro
 
