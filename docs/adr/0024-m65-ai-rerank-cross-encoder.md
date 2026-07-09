@@ -67,12 +67,23 @@ benchmark mede o delta real (mesmo top-k, rerankear, medir nDCG@10) e o `rerank_
 
 ## Evidência (medida)
 
-<!-- preenchido a partir de docs/benchmarks/m65-rerank.json após o droplet -->
-- pg_test offline GREEN (`cargo pgrx test pg17 rerank`): guards (NULL query/doc, empty→no-HTTP, unset endpoint,
-  SSRF non-http, connrefused tipado) + parser (align-by-index, size-mismatch, dup, out-of-range, non-numeric → 38000).
-- Oracle `test_rerank_sql.py` contra o cross-encoder real (rerank_server.py): idx alinhado + ordenação por relevância.
+- **14 pg_test GREEN** (`cargo pgrx test pg17 rerank` — 14 passed, na stack real theodb_rs+vector+vectorscale+theodb):
+  guards (NULL query/doc, empty→no-HTTP, unset endpoint, SSRF non-http, connrefused tipado) + parser
+  (align-by-index, size-mismatch, dup, out-of-range, non-numeric → 38000).
 - 11 pytest aritmética (mrr_at_k, rerank_verdict) GREEN, ruff clean.
-- Benchmark BEIR (SciFact) nDCG@10/MRR com vs sem rerank + Recall@k conservado + p95/p99 — ver `.md` (PASS ou honest-negative).
+- **Benchmark BEIR/SciFact (100 queries, 3 runs determinísticos) — VEREDITO HONEST-NEGATIVE:** o rerank
+  (BGE-reranker-base) **degradou** o nDCG@10 em **−3.8%** (baseline 0.7327 → rerank 0.6947), ao custo de ~1.96 s
+  p50/query. Recall@50 conservado (0.92 == 0.92, sanity ✓). Exatamente o previsto pela literatura (cross-encoder
+  off-the-shelf regride em corpus fora de distribuição — SciFact é fact-checking científico). `docs/benchmarks/m65-rerank.{md,json}`.
+
+## Decisão pós-benchmark (o DoD exige "honest-negative + decisão")
+
+- **`ai.rerank` embarca** — a superfície own-code está correta, testada e medível (o valor é fechar o lifecycle
+  retrieve→rerank de forma mensurável e model-agnostic, NÃO um ganho universal).
+- **NÃO se afirma ganho de qualidade** (public-copy.md §4) — o benchmark mostra regressão no par (BGE-base, SciFact).
+  O operador escolhe o reranker adequado ao seu corpus por GUC; um reranker in-domain pode ganhar onde este perdeu,
+  mas isso exige o próprio benchmark, não extrapolação.
+- **Rerank é opt-in** — custo ~2 s/query sem ganho garantido; não é default.
 
 ## Consequências
 

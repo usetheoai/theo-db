@@ -174,7 +174,7 @@ mod tests {
         let _ = parse_rerank_results(&body, 1);
     }
 
-    #[pg_test(error = "ai.rerank: unexpected rerank response shape")]
+    #[pg_test(error = "ai.rerank: unexpected rerank response shape: {\"data\":[]}")]
     fn parse_missing_results_key_fails_typed() {
         let body = json!({"data": []});
         let _ = parse_rerank_results(&body, 1);
