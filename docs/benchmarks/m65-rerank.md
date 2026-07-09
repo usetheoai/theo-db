@@ -44,7 +44,8 @@ cacheados a disco (determinísticos). Métricas `theodb_bench.metrics.ndcg_at_k`
 A discovery (blueprint, R0) já documentava o risco com números: cross-encoders off-the-shelf (ms-marco-MiniLM,
 BGE-reranker-base) **degradaram nDCG −0.3% a −3.1%** em corpora fora da distribuição de treino (o nosso −3.8% é
 consistente). SciFact é **fact-checking científico** — fora da distribuição de web-search em que o BGE-reranker-base
-foi treinado. Os 3 modos de falha da literatura, aplicados:
+foi treinado. 2 dos 3 modos de falha da literatura aplicam-se aqui (o 3º — recall baixo — não, pois o
+Recall@50 já é 0.92):
 1. **Retrieval já bom:** o baseline nDCG@10 0.73 já é alto — o chunk certo já está no topo; reordenar só arrisca
    demover um relevante.
 2. **Distribution shift:** o reranker over-weighta sinais que não transferem para o domínio científico.
