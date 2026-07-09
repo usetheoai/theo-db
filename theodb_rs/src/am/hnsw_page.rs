@@ -2916,6 +2916,237 @@ mod tests {
             "the v3 scan uses the HNSW index (bounded reads), not a seqscan — plan: {plan:?}"
         );
     }
+
+    // ─── M63 — vector JOIN via LATERAL-index-scan (Phase 1) ──────────────────────────────────────────
+    //
+    // The `CROSS JOIN LATERAL (SELECT … FROM b ORDER BY b.emb <=> a.emb LIMIT k) j` pattern is already a
+    // planner-integrated similarity join: each LATERAL iteration reduces `b.emb <=> a.emb` to the
+    // index-served single-vector top-k (`ORDER BY <op> LIMIT k`) that `amcanorderbyop` (mod.rs:78) serves
+    // — exactly the `WHERE … ORDER BY` shape M52 proved (`filtered_scan_preserves_recall_via_iterative`).
+    // These tests prove it with NO engine change (blueprint ADR-1 / plan D1): GREEN = the AM already serves
+    // it. TDD RED-first: each assertion fails if the planner Seq-Scans the inner branch or drops neighbours.
+    // Cited rules: `.claude/rules/testing.md` §4.1 (edge + negative cases both) and `error-handling.md`
+    // (no panic across the C boundary on a bad τ; the specific contract asserted, not merely "it errors").
+
+    /// Read the plan text of an `EXPLAIN` as one joined string (each row is one plan line).
+    fn vjoin_explain_plan(sql: &str) -> String {
+        let explain = format!("EXPLAIN (COSTS OFF, VERBOSE) {sql}");
+        pgrx::Spi::connect(|c| {
+            c.select(&explain, None, &[])
+                .unwrap()
+                .filter_map(|r| r.get::<String>(1).unwrap())
+                .collect::<Vec<String>>()
+        })
+        .join("\n")
+    }
+
+    /// Seed a `(id int, emb vector(dim=8))` table with a deterministic clustered corpus + a theodb_hnsw
+    /// cosine index. Small n so the exact O(n·m) GT is cheap. Mirrors `seed_dim8_table` but with the `emb`
+    /// column name + an explicit cosine opclass (the `<=>` operator is what the M63 join uses).
+    fn seed_vjoin_table(tbl: &str, n: i32) {
+        pgrx::Spi::run(&format!("CREATE TEMP TABLE {tbl} (id int PRIMARY KEY, emb vector(8))")).unwrap();
+        for i in 0..n {
+            // 5 tight clusters → real NN structure (avoids ANN-degenerate uniform data, ADR 0012 lesson).
+            let center = (i % 5) as f32;
+            let v: Vec<String> = (0..8)
+                .map(|j| format!("{:.3}", 1.0 + center + 0.02 * (((i * 7 + j * 3) % 11) as f32 - 5.0)))
+                .collect();
+            pgrx::Spi::run(&format!("INSERT INTO {tbl} VALUES ({i}, '[{}]')", v.join(","))).unwrap();
+        }
+        pgrx::Spi::run(&format!(
+            "CREATE INDEX {tbl}_idx ON {tbl} USING theodb_hnsw (emb theodb_hnsw_cosine_ops)"
+        ))
+        .unwrap();
+    }
+
+    /// Exact per-row top-k of `b` for a single outer probe vector (seqscan brute force = the recall oracle).
+    fn vjoin_exact_topk(tbl: &str, probe: &str, k: i64) -> Vec<i32> {
+        pgrx::Spi::run("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on").unwrap();
+        let sql = format!("SELECT id FROM {tbl} ORDER BY emb <=> '{probe}'::vector LIMIT {k}");
+        pgrx::Spi::connect(|c| {
+            c.select(&sql, None, &[]).unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect::<Vec<i32>>()
+        })
+    }
+
+    /// T1.1 — the structural oracle: `EXPLAIN` proves the inner LATERAL branch is an Index Scan on the
+    /// `theodb_hnsw` index, NOT a `Seq Scan` + `Sort` over the cross product (the O(n·m) anti-objective).
+    /// Blueprint [A1] shows the top-level column-vs-column join does NOT use the index; this proves the
+    /// LATERAL inner DOES (blueprint [C1]/[B1]). Covers the dedup shape (`WHERE b.id <> a.id`, Q1) too.
+    #[pgrx::pg_test]
+    fn vector_join_uses_index_scan() {
+        seed_vjoin_table("vja", 5);
+        seed_vjoin_table("vjb", 50);
+        // Force the planner toward the index (parity with the M52 tests) so the assertion measures the
+        // AM's capability, not a cost-model tie-break on a tiny table.
+        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        pgrx::Spi::run("SET theodb_hnsw.ef_search = 40").unwrap();
+
+        // Oracle: the inner branch of the LATERAL must be `Index Scan using <idx> on ... vjb` — the
+        // theodb_hnsw index name is `vjb_idx` (Postgres prints the INDEX name, not the AM name, in the
+        // plan; the AM identity is asserted structurally: an ordered Index Scan serving `emb <=> a.emb`
+        // exists ONLY because `theodb_hnsw` set `amcanorderbyop = true`, mod.rs:78). The outer side `vja`
+        // is legitimately a Seq Scan (it is the LATERAL driver); the forbidden shape is a Seq Scan on the
+        // INNER relation `vjb` (that would be the O(n·m) nested-loop the DoD rejects).
+        let plan = vjoin_explain_plan(
+            "SELECT vja.id, j.id FROM vja CROSS JOIN LATERAL \
+             (SELECT vjb.id FROM vjb ORDER BY vjb.emb <=> vja.emb LIMIT 3) j",
+        );
+        assert!(
+            plan.contains("Index Scan using vjb_idx") && plan.contains("Order By:"),
+            "the inner LATERAL branch must be an ordered Index Scan on the theodb_hnsw index (vjb_idx) — \
+             plan was:\n{plan}"
+        );
+        assert!(
+            !plan.contains("Seq Scan on pg_temp.vjb") && !plan.contains("Seq Scan on vjb"),
+            "the inner relation vjb must NOT be Seq-Scanned (that is the O(n·m) nested-loop) — plan:\n{plan}"
+        );
+
+        // Q1 — the dedup self-join shape keeps the Index Scan despite the extra `b.id <> a.id` predicate.
+        let dedup_plan = vjoin_explain_plan(
+            "SELECT a.id, j.id FROM vjb a CROSS JOIN LATERAL \
+             (SELECT b.id FROM vjb b WHERE b.id <> a.id ORDER BY b.emb <=> a.emb LIMIT 1) j",
+        );
+        assert!(
+            dedup_plan.contains("Index Scan using vjb_idx") && dedup_plan.contains("Order By:"),
+            "the dedup self-join (WHERE b.id <> a.id) must still Index-Scan the theodb_hnsw index (Q1) — \
+             plan:\n{dedup_plan}"
+        );
+    }
+
+    /// T1.2 — the correctness oracle: join-recall matches the exact O(n·m) ground truth within tolerance.
+    /// For each outer row `a_i`, recall_i = |ANN_i ∩ EXACT_i| / k; assert the MIN over rows (not just the
+    /// mean — R2: a mean hides a recall-0 row) and the mean are ≥ tolerance. An index-served join that
+    /// silently drops neighbours is worse than no join. Includes k=1 (nearest-neighbour join) and k≥|b|
+    /// (all of b, recall must be 1.0) edge cases.
+    #[pgrx::pg_test]
+    fn vector_join_recall_matches_exact_within_tol() {
+        seed_vjoin_table("vra", 5);
+        seed_vjoin_table("vrb", 60);
+        pgrx::Spi::run("SET theodb_hnsw.ef_search = 60").unwrap();
+        const TOL: f64 = 0.9; // tight-cluster data → high recall; modest floor guards against flake.
+        const K: i64 = 3;
+
+        // The outer probes = the emb column of `vra`, read back as text to feed the exact oracle.
+        let probes: Vec<String> = pgrx::Spi::connect(|c| {
+            c.select("SELECT emb::text FROM vra ORDER BY id", None, &[])
+                .unwrap()
+                .filter_map(|r| r.get::<String>(1).unwrap())
+                .collect()
+        });
+        assert!(!probes.is_empty(), "test setup: vra must have outer rows");
+
+        let mut recalls: Vec<f64> = Vec::new();
+        for probe in &probes {
+            let exact = vjoin_exact_topk("vrb", probe, K);
+            pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on")
+                .unwrap();
+            let ann_sql = format!("SELECT id FROM vrb ORDER BY emb <=> '{probe}'::vector LIMIT {K}");
+            let ann: Vec<i32> = pgrx::Spi::connect(|c| {
+                c.select(&ann_sql, None, &[]).unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
+            });
+            let hits = ann.iter().filter(|id| exact.contains(id)).count();
+            recalls.push(hits as f64 / exact.len().max(1) as f64);
+        }
+        let min_recall = recalls.iter().cloned().fold(f64::INFINITY, f64::min);
+        let mean_recall = recalls.iter().sum::<f64>() / recalls.len() as f64;
+        assert!(
+            min_recall >= TOL,
+            "min per-row join-recall {min_recall:.3} < tol {TOL} (a row lost its neighbours) — recalls {recalls:?}"
+        );
+        assert!(mean_recall >= TOL, "mean join-recall {mean_recall:.3} < tol {TOL}");
+
+        // Edge k=1 (nearest-neighbour join): the single nearest neighbour must match the exact NN.
+        let probe0 = &probes[0];
+        let exact1 = vjoin_exact_topk("vrb", probe0, 1);
+        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        let ann1: Vec<i32> = pgrx::Spi::connect(|c| {
+            c.select(&format!("SELECT id FROM vrb ORDER BY emb <=> '{probe0}'::vector LIMIT 1"), None, &[])
+                .unwrap()
+                .filter_map(|r| r.get::<i32>(1).unwrap())
+                .collect()
+        });
+        assert_eq!(ann1, exact1, "k=1 nearest-neighbour join must equal the exact NN");
+
+        // Edge k ≥ |b|: asking for more than the table returns all of b → recall is trivially 1.0.
+        let all_n: i64 = pgrx::Spi::get_one("SELECT count(*) FROM vrb").unwrap().unwrap();
+        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        let ann_all: i64 = pgrx::Spi::get_one(&format!(
+            "SELECT count(*) FROM (SELECT id FROM vrb ORDER BY emb <=> '{probe0}'::vector LIMIT {}) s",
+            all_n + 10
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(ann_all, all_n, "k ≥ |b| must return all of b (recall 1.0)");
+    }
+
+    /// T1.3 — threshold/range join correctness. Phrased as the R1-mitigated `ORDER BY <op> LIMIT n`
+    /// (index-served) with an OUTER `WHERE dist < τ` — the bare `< τ` WITHOUT `ORDER BY … LIMIT` may not
+    /// push the index (blueprint R1/[B1]), so the correct idiom filters on the ordered emit. Asserts the
+    /// pair count matches the exact seqscan oracle at τ ∈ {0, mid, large}.
+    #[pgrx::pg_test]
+    fn vector_join_threshold_correct() {
+        seed_vjoin_table("vta", 5);
+        seed_vjoin_table("vtb", 40);
+        pgrx::Spi::run("SET theodb_hnsw.ef_search = 40").unwrap();
+        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+
+        // Count pairs below τ via the index-served idiom: LATERAL top-k (wide), then outer `WHERE d < τ`.
+        let pairs_below = |tau: f64| -> i64 {
+            let sql = format!(
+                "SELECT count(*) FROM vta CROSS JOIN LATERAL \
+                 (SELECT vtb.id, vtb.emb <=> vta.emb AS d FROM vtb \
+                  ORDER BY vtb.emb <=> vta.emb LIMIT 40) j WHERE j.d < {tau}"
+            );
+            pgrx::Spi::get_one::<i64>(&sql).unwrap().unwrap()
+        };
+        // Same, computed by the exact seqscan oracle (index off) — the ground-truth pair count.
+        let exact_below = |tau: f64| -> i64 {
+            pgrx::Spi::run("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on")
+                .unwrap();
+            let sql = format!("SELECT count(*) FROM vta, vtb WHERE (vtb.emb <=> vta.emb) < {tau}");
+            let n = pgrx::Spi::get_one::<i64>(&sql).unwrap().unwrap();
+            pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on")
+                .unwrap();
+            n
+        };
+
+        // τ = 0 → cosine distance is never < 0 → empty (edge: only an exact-collinear pair could be 0).
+        assert_eq!(pairs_below(0.0), 0, "τ=0: cosine distance is never < 0 → no pairs");
+        // τ large (all cosine pairs) → within the LIMIT-40 window every ordered pair passes.
+        assert_eq!(
+            pairs_below(2.0),
+            exact_below(2.0).min(5 * 40),
+            "τ=2 (all cosine pairs): index idiom must match the exact count within the LIMIT window"
+        );
+        // τ mid → the index-served count equals the exact count (recall preserved on the threshold shape).
+        let mid = 0.05;
+        let idx_mid = pairs_below(mid);
+        let exact_mid = exact_below(mid);
+        assert_eq!(
+            idx_mid, exact_mid,
+            "τ={mid} mid threshold: index-served pair count {idx_mid} must equal exact {exact_mid}"
+        );
+    }
+
+    /// T1.3 negative-case (Rule 8 / `error-handling.md`): a NEGATIVE τ on the raw-SQL path returns a
+    /// documented EMPTY set — no distance can be < 0, so the range is vacuous. This is the *contract*
+    /// (asserted specifically), not a crash. No panic crosses the C boundary. (When the D2 helper is
+    /// shipped it upgrades this to a typed ERROR at the boundary; the raw-SQL idiom's contract is the
+    /// empty set, documented in ADR 0022.)
+    #[pgrx::pg_test]
+    fn vector_join_negative_threshold_returns_empty() {
+        seed_vjoin_table("vna", 3);
+        seed_vjoin_table("vnb", 20);
+        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        let n: i64 = pgrx::Spi::get_one(
+            "SELECT count(*) FROM vna CROSS JOIN LATERAL \
+             (SELECT vnb.id, vnb.emb <=> vna.emb AS d FROM vnb \
+              ORDER BY vnb.emb <=> vna.emb LIMIT 20) j WHERE j.d < -1.0",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(n, 0, "negative τ → empty set (vacuous range), the documented raw-SQL contract; no crash");
+    }
 }
 
 // M56 — pure unit tests for the tombstone byte-layout (CI-runnable via `cargo test`, no DB/pgrx needed).
