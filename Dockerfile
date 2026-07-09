@@ -150,5 +150,10 @@ CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE;
 CREATE EXTENSION IF NOT EXISTS pg_duckdb;
 EOF
 
+# M62 — the HTAP snapshot directory (theodb.htap_refresh_sql writes row→Parquet snapshots here, server-side as
+# the postgres OS user). Created + chowned at build so the COPY does not fail with "No such file or directory".
+# Outside PGDATA (/var/lib/postgresql/data volume) — snapshots are regenerable (re-refresh), not durable state.
+RUN mkdir -p /var/lib/postgresql/htap && chown postgres:postgres /var/lib/postgresql/htap
+
 HEALTHCHECK --interval=5s --timeout=5s --start-period=10s --retries=5 \
   CMD pg_isready -h localhost -p 5432 -U postgres -q

@@ -224,7 +224,7 @@ def test_freshness_reflects_lag_and_olap_is_stale_until_refresh(db):
 
     # mutate the heap WITHOUT re-refreshing — the snapshot must NOT change; freshness lag must grow
     with db._cursor() as cur:
-        cur.execute(f"INSERT INTO {_TABLE} SELECT g, 'cat' || (g %% 5), (g %% 1000) * 1.5 "
+        cur.execute(f"INSERT INTO {_TABLE} SELECT g, 'cat' || (g % 5), (g % 1000) * 1.5 "
                     f"FROM generate_series(1000001, 1005000) g")
         time.sleep(1.0)
         cur.execute("SELECT theodb.htap_freshness(%s::regclass)", (_TABLE,))
@@ -359,7 +359,7 @@ def test_olap_reads_consistent_snapshot_during_concurrent_inserts(db):
         conn = VectorDB(_dsn()).connect()
         barrier.wait()
         with conn._cursor() as cur:
-            cur.execute(f"INSERT INTO {_TABLE} SELECT g, 'cat' || (g %% 5), (g %% 1000) * 1.5 "
+            cur.execute(f"INSERT INTO {_TABLE} SELECT g, 'cat' || (g % 5), (g % 1000) * 1.5 "
                         f"FROM generate_series(2000001, 2010000) g")
         conn.close()
 
