@@ -66,11 +66,11 @@ do theodb_rs, não do umbrella theodb).
 
 ## Evidência (medida)
 
-<!-- preenchido a partir de docs/benchmarks/m66-chunking.json após o droplet -->
-- pg_test GREEN (`cargo pgrx test pg17 chunk vectorizer`): chunker (3 estratégias + edge/negative + multibyte) +
-  chunk-table mode (cria a chunk table + config; default NULL preservado; delete remove N chunks). 9 unit-tests puros.
-- Benchmark BEIR: recall@k/nDCG@10 por estratégia (fixed/sentence/recursive) — ver `.md` (qual move o recall;
-  honest-negative onde não move).
+- **pg_test GREEN (stack real):** chunk 16/16 (3 estratégias + edge/negative + multibyte + error-paths) +
+  vectorizer 13/13 (chunk-table criada + config; default NULL preservado; delete remove N chunks). 9 unit-tests puros.
+- **Benchmark BEIR/NFCorpus (50 queries) — STRATEGY_MATTERS:** `sentence` nDCG@10 **0.397** > `recursive` 0.391 >
+  `fixed` 0.372, spread **0.025** (> ruído). A estratégia move o recall (k-adaptativo iguala o budget). Dependente
+  de corpus (não-universal). `docs/benchmarks/m66-chunking.{md,json}`.
 
 ## Consequências
 
