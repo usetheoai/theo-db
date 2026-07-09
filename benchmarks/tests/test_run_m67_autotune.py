@@ -18,8 +18,8 @@ def test_recall_from_sets_empty_gt_is_none():
 
 
 def test_mae_vs_target():
-    # recalls [0.9, 1.0, 0.95] vs target 0.95 → |−0.05|+0+0 → 0.05/3.
-    assert mae_vs_target([0.9, 1.0, 0.95], 0.95) == pytest.approx(0.05 / 3)
+    # recalls [0.9, 1.0, 0.95] vs target 0.95 → |−0.05|+|+0.05|+0 = 0.10, /3.
+    assert mae_vs_target([0.9, 1.0, 0.95], 0.95) == pytest.approx(0.10 / 3)
 
 
 def test_mae_skips_none():
