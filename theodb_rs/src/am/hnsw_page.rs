@@ -3147,6 +3147,141 @@ mod tests {
         .unwrap();
         assert_eq!(n, 0, "negative τ → empty set (vacuous range), the documented raw-SQL contract; no crash");
     }
+
+    // ── M64 — RAG-over-SQL unified: the composed reference query preserves recall + read-your-writes ──
+
+    /// Seed a RAG-shaped table: (id, cat filter column, content text, emb vector). 5 tight clusters give
+    /// real NN structure (ADR 0012 — avoid ANN-degenerate uniform data). `cat` = the relational filter the
+    /// unified RAG query applies; `content` = the text the context-assembly `string_agg` concatenates.
+    fn seed_rag_table(tbl: &str, n: i32) {
+        pgrx::Spi::run(&format!(
+            "CREATE TEMP TABLE {tbl} (id int PRIMARY KEY, cat int, content text, emb vector(8))"
+        ))
+        .unwrap();
+        for i in 0..n {
+            let center = (i % 5) as f32;
+            let cat = i % 3; // the relational filter dimension
+            let v: Vec<String> = (0..8)
+                .map(|j| format!("{:.3}", 1.0 + center + 0.02 * (((i * 7 + j * 3) % 11) as f32 - 5.0)))
+                .collect();
+            pgrx::Spi::run(&format!(
+                "INSERT INTO {tbl} VALUES ({i}, {cat}, 'doc-{i}', '[{}]')",
+                v.join(",")
+            ))
+            .unwrap();
+        }
+        pgrx::Spi::run(&format!(
+            "CREATE INDEX {tbl}_idx ON {tbl} USING theodb_hnsw (emb theodb_hnsw_cosine_ops)"
+        ))
+        .unwrap();
+    }
+
+    /// T1.1 — the unified RAG reference query (`WITH retrieved AS (WHERE <filtro> ORDER BY emb <=> $q
+    /// LIMIT k) SELECT string_agg(content), count(*) FROM retrieved`) preserves the recall of its pieces:
+    /// the `retrieved.id` set MUST equal the exact filtered oracle `SELECT id WHERE cat=$c ORDER BY emb
+    /// <=> $q LIMIT k` (M52 discipline, mirrors `filtered_scan_preserves_recall_via_iterative`). Composing
+    /// retrieval + context-assembly into one SQL must not silently drop a neighbour.
+    #[pgrx::pg_test]
+    fn rag_unified_query_preserves_recall() {
+        seed_rag_table("rag1", 60);
+        pgrx::Spi::run("SET theodb_hnsw.ef_search = 60").unwrap();
+        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        // The query probe = the emb of row 0 (a real point → a real NN structure to retrieve against).
+        let probe: String = pgrx::Spi::get_one("SELECT emb::text FROM rag1 WHERE id = 0").unwrap().unwrap();
+        let cat0: i32 = pgrx::Spi::get_one("SELECT cat FROM rag1 WHERE id = 0").unwrap().unwrap();
+        const K: i64 = 5;
+
+        // The unified RAG query: filter (WHERE cat) → retrieve (ORDER BY emb) → assemble (string_agg).
+        // We read back the retrieved ids to compare against the oracle (the assembly is over the same set).
+        let unified_ids: Vec<i32> = pgrx::Spi::connect(|c| {
+            c.select(
+                &format!(
+                    "WITH retrieved AS (\
+                       SELECT id, content FROM rag1 WHERE cat = {cat0} \
+                       ORDER BY emb <=> '{probe}'::vector LIMIT {K}\
+                     ) SELECT id FROM retrieved ORDER BY id"
+                ),
+                None,
+                &[],
+            )
+            .unwrap()
+            .filter_map(|r| r.get::<i32>(1).unwrap())
+            .collect()
+        });
+
+        // The exact filtered oracle (seqscan brute force) — the recall ground truth.
+        pgrx::Spi::run("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on").unwrap();
+        let mut oracle_ids: Vec<i32> = pgrx::Spi::connect(|c| {
+            c.select(
+                &format!(
+                    "SELECT id FROM rag1 WHERE cat = {cat0} ORDER BY emb <=> '{probe}'::vector LIMIT {K}"
+                ),
+                None,
+                &[],
+            )
+            .unwrap()
+            .filter_map(|r| r.get::<i32>(1).unwrap())
+            .collect()
+        });
+        oracle_ids.sort_unstable();
+
+        assert_eq!(
+            unified_ids, oracle_ids,
+            "the unified RAG query (filter+retrieve+assemble) must retrieve exactly the filtered top-k \
+             oracle set (recall preserved) — unified {unified_ids:?} vs oracle {oracle_ids:?}"
+        );
+
+        // And the context-assembly itself works: string_agg over the retrieved top-k concatenates exactly
+        // K docs (the assembly does not lose or duplicate rows).
+        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        let ctx_count: i64 = pgrx::Spi::get_one(&format!(
+            "WITH retrieved AS (SELECT content FROM rag1 WHERE cat = {cat0} \
+             ORDER BY emb <=> '{probe}'::vector LIMIT {K}) \
+             SELECT array_length(string_to_array(string_agg(content, E'\\n'), E'\\n'), 1) FROM retrieved"
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(ctx_count, K, "context-assembly must concatenate exactly K retrieved docs");
+    }
+
+    /// T1.2 — read-your-writes: a row INSERTed inside a transaction is retrievable by the RAG query in the
+    /// SAME transaction and the SAME MVCC snapshot (the pending region serves not-yet-folded tuples, M40/M48).
+    /// A correctness property, not a latency number (blueprint §d). Rigor note: an app-layer client also gets
+    /// read-your-writes if it opens an explicit transaction; the Path-1 differential is doing it in ONE SQL,
+    /// ONE snapshot, without coordinating multiple client round-trips.
+    #[pgrx::pg_test]
+    fn rag_unified_read_your_writes() {
+        seed_rag_table("rag2", 40);
+        pgrx::Spi::run("SET theodb_hnsw.ef_search = 60").unwrap();
+        // Insert a NEW row whose embedding is an exact copy of an existing cluster centre → it is guaranteed
+        // to be among the nearest neighbours of a probe at that centre. cat = 0 (matches the filter below).
+        let probe: String = pgrx::Spi::get_one("SELECT emb::text FROM rag2 WHERE id = 0").unwrap().unwrap();
+        pgrx::Spi::run(&format!(
+            "INSERT INTO rag2 VALUES (99999, 0, 'fresh-doc', '{probe}'::vector)"
+        ))
+        .unwrap();
+
+        // The RAG query in the SAME txn must surface the freshly-inserted row (id 99999) in its top-k.
+        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        let ids: Vec<i32> = pgrx::Spi::connect(|c| {
+            c.select(
+                &format!(
+                    "WITH retrieved AS (SELECT id FROM rag2 WHERE cat = 0 \
+                     ORDER BY emb <=> '{probe}'::vector LIMIT 5) SELECT id FROM retrieved"
+                ),
+                None,
+                &[],
+            )
+            .unwrap()
+            .filter_map(|r| r.get::<i32>(1).unwrap())
+            .collect()
+        });
+        assert!(
+            ids.contains(&99999),
+            "the row INSERTed in this txn must be read-your-writes-visible in the RAG query (pending region) \
+             — top-k ids were {ids:?}"
+        );
+    }
 }
 
 // M56 — pure unit tests for the tombstone byte-layout (CI-runnable via `cargo test`, no DB/pgrx needed).
