@@ -139,7 +139,9 @@ def _make_dataset(cur, table, n, dim, seed):
     rnd = random.Random(seed)
     centers = [[rnd.gauss(0, 1) for _ in range(dim)] for _ in range(N_CLUSTERS)]
     cur.execute(f"DROP TABLE IF EXISTS {table}")
-    cur.execute(f"CREATE TABLE {table} (id int, cat int, content text, v vector({dim}))")
+    # PRIMARY KEY on id — a real table has one; without it the app-layer hydrate (`WHERE id = ANY(...)`)
+    # would seqscan the whole table, which would be a STRAW-MAN inflating arm B (not the round-trip cost).
+    cur.execute(f"CREATE TABLE {table} (id int PRIMARY KEY, cat int, content text, v vector({dim}))")
     rows = []
     for i in range(n):
         c = centers[i % N_CLUSTERS]

@@ -3245,9 +3245,10 @@ mod tests {
     }
 
     /// T1.2 — read-your-writes: a row INSERTed inside a transaction is retrievable by the RAG query in the
-    /// SAME transaction (the pending region serves not-yet-folded tuples, M40/M48). This is the transactional
-    /// consistency the app-layer does NOT get for free (it would see the row only after commit + re-index) —
-    /// a correctness property, not a latency number (blueprint §d).
+    /// SAME transaction and the SAME MVCC snapshot (the pending region serves not-yet-folded tuples, M40/M48).
+    /// A correctness property, not a latency number (blueprint §d). Rigor note: an app-layer client also gets
+    /// read-your-writes if it opens an explicit transaction; the Path-1 differential is doing it in ONE SQL,
+    /// ONE snapshot, without coordinating multiple client round-trips.
     #[pgrx::pg_test]
     fn rag_unified_read_your_writes() {
         seed_rag_table("rag2", 40);
