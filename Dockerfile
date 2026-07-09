@@ -128,8 +128,9 @@ RUN set -eux; \
     cd /tmp/theodb; \
     cat sql/30-theodb-embed.sql sql/40-theodb-hybrid.sql sql/50-theodb-ai.sql \
         sql/60-theodb-nl.sql sql/61-theodb-nl-config.sql sql/70-theodb-ml.sql \
-        sql/80-theodb-migrate.sql > sql/theodb--1.0.sql; \
-    install -m 0644 theodb.control sql/theodb--1.0.sql sql/theodb--1.0--1.1.sql sql/theodb--1.1--1.2.sql sql/theodb--1.2--1.3.sql \
+        sql/80-theodb-migrate.sql sql/85-theodb-htap.sql > sql/theodb--1.0.sql; \
+    install -m 0644 theodb.control sql/theodb--1.0.sql sql/theodb--1.0--1.1.sql sql/theodb--1.1--1.2.sql \
+        sql/theodb--1.2--1.3.sql sql/theodb--1.3--1.4.sql \
         "/usr/share/postgresql/$PG_MAJOR/extension/"; \
     rm -rf /tmp/theodb
 
@@ -148,6 +149,11 @@ CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE;
 -- Requires shared_preload_libraries='pg_duckdb' (set in postgresql.conf.sample at build).
 CREATE EXTENSION IF NOT EXISTS pg_duckdb;
 EOF
+
+# M62 — the HTAP snapshot directory (theodb.htap_refresh_sql writes row→Parquet snapshots here, server-side as
+# the postgres OS user). Created + chowned at build so the COPY does not fail with "No such file or directory".
+# Outside PGDATA (/var/lib/postgresql/data volume) — snapshots are regenerable (re-refresh), not durable state.
+RUN mkdir -p /var/lib/postgresql/htap && chown postgres:postgres /var/lib/postgresql/htap
 
 HEALTHCHECK --interval=5s --timeout=5s --start-period=10s --retries=5 \
   CMD pg_isready -h localhost -p 5432 -U postgres -q

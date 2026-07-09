@@ -997,14 +997,14 @@ Esta milestone faz a adoção: buildar a peça no PG17 (ou bump PG18), smoke end
 
 **Dependencies:** M30. **Risco (MÉDIO):** compat de build PG17/18; peso da imagem.
 
-### M62 — [ ] Superfície HTAP unificada — transacional + analítico na mesma tabela
+### M62 — [x] Superfície HTAP unificada — transacional + analítico na mesma tabela
 
 **Objective:** com o columnar embarcado, entregar a experiência HTAP real (pilar-chave do AlloyDB): a mesma tabela serve OLTP (row) e OLAP (column) sem ETL manual, roteamento por tipo de query.
 
 **Definition of done:**
-- [ ] Fluxo declarativo row-store transacional + coluna analítica sincronizada, documentado como "HTAP do TheoDB".
-- [ ] Benchmark HTAP: carga mista (INSERTs OLTP + agregações OLAP concorrentes) → `docs/benchmarks/m62-htap.{md,json}`.
-- [ ] Veredito honesto vs AlloyDB HTAP (nosso é lakehouse/columnar-adotado — aposta diferente D2, declarada).
+- [x] Fluxo declarativo row-store transacional + coluna analítica sincronizada, documentado como "HTAP do TheoDB".
+- [x] Benchmark HTAP: carga mista (INSERTs OLTP + agregações OLAP concorrentes) → `docs/benchmarks/m62-htap.{md,json}`.
+- [x] Veredito honesto vs AlloyDB HTAP (nosso é lakehouse/columnar-adotado — aposta diferente D2, declarada).
 
 **Dependencies:** M61. **Risco (MÉDIO-ALTO):** sincronização row↔column; consistência sob carga mista.
 
