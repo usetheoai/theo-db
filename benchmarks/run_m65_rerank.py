@@ -134,6 +134,12 @@ def run(name, k, runs, dim, model, cache_dir, limit_queries=None):
 
     conn = _conn()
     cur = conn.cursor()
+    # Point ai.rerank at the configured cross-encoder endpoint (the rerank_server / a real provider).
+    rerank_endpoint = os.environ.get("THEODB_RERANK_ENDPOINT")
+    if not rerank_endpoint:
+        conn.close()
+        raise SystemExit("THEODB_RERANK_ENDPOINT not set — cannot call ai.rerank (fail-fast, no lixo).")
+    cur.execute("SET theodb.rerank_endpoint = %s", (rerank_endpoint,))
     _index_corpus(cur, dataset, embed_fn, dim)
 
     per_run = []
