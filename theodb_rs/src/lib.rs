@@ -40,6 +40,7 @@ mod migrate;
 mod nl;
 mod pg;
 mod pq;
+mod rerank;
 mod vec;
 mod vectorizer;
 
@@ -97,6 +98,58 @@ mod tests {
         )
         .unwrap();
         assert_eq!(n, Some(0));
+    }
+
+    // ── M65 — ai.rerank offline guards (input-path + SSRF + no-HTTP short-circuit; no network) ──────────
+
+    #[pg_test(error = "ai.rerank: query must not be NULL")]
+    fn rerank_null_query_rejected() {
+        Spi::run("SET theodb.rerank_endpoint = 'http://127.0.0.1:1/rerank'").unwrap();
+        Spi::run("SELECT * FROM theodb_rs._ai_rerank(NULL, ARRAY['d']::text[], NULL, NULL)").unwrap();
+    }
+
+    #[pg_test(error = "ai.rerank: documents must not be NULL")]
+    fn rerank_null_documents_rejected() {
+        Spi::run("SET theodb.rerank_endpoint = 'http://127.0.0.1:1/rerank'").unwrap();
+        Spi::run("SELECT * FROM theodb_rs._ai_rerank('q', NULL, NULL, NULL)").unwrap();
+    }
+
+    #[pg_test(error = "ai.rerank: document array elements must not be NULL")]
+    fn rerank_null_element_rejected() {
+        // A NULL element breaks N-in/N-out alignment -> 22023, BEFORE any GUC/HTTP (endpoint set but unused).
+        Spi::run("SET theodb.rerank_endpoint = 'http://127.0.0.1:1/rerank'").unwrap();
+        Spi::run("SELECT * FROM theodb_rs._ai_rerank('q', ARRAY['d', NULL]::text[], NULL, NULL)").unwrap();
+    }
+
+    #[pg_test]
+    fn rerank_empty_documents_makes_no_call() {
+        // Empty docs -> zero rows with NO HTTP call (endpoint unreachable; if called this would error).
+        Spi::run("SET theodb.rerank_endpoint = 'http://127.0.0.1:1/rerank'").unwrap();
+        let n = Spi::get_one::<i64>(
+            "SELECT count(*) FROM theodb_rs._ai_rerank('q', ARRAY[]::text[], NULL, NULL)",
+        )
+        .unwrap();
+        assert_eq!(n, Some(0));
+    }
+
+    #[pg_test(error = "ai.rerank: theodb.rerank_endpoint is not set — SET theodb.rerank_endpoint = 'http://host:port/rerank'")]
+    fn rerank_unset_endpoint_rejected() {
+        Spi::run("RESET theodb.rerank_endpoint").ok();
+        Spi::run("SELECT * FROM theodb_rs._ai_rerank('q', ARRAY['d']::text[], NULL, NULL)").unwrap();
+    }
+
+    #[pg_test(error = "ai.rerank: endpoint must be http(s)://")]
+    fn rerank_non_http_scheme_rejected() {
+        Spi::run("SET theodb.rerank_endpoint = 'file:///etc/passwd'").unwrap();
+        Spi::run("SELECT * FROM theodb_rs._ai_rerank('q', ARRAY['d']::text[], NULL, NULL)").unwrap();
+    }
+
+    #[pg_test(error = "ai.rerank: endpoint call failed: Connection refused (os error 111)")]
+    fn rerank_unreachable_endpoint_fails_typed() {
+        // Port 1 unreachable -> connect error -> "call failed" (38000). The OS error string is part of the
+        // exact match pgrx-tests 0.16.1 requires (the suite runs in the Linux builder).
+        Spi::run("SET theodb.rerank_endpoint = 'http://127.0.0.1:1/rerank'").unwrap();
+        Spi::run("SELECT * FROM theodb_rs._ai_rerank('q', ARRAY['d']::text[], NULL, NULL)").unwrap();
     }
 }
 
