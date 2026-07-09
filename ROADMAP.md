@@ -1063,16 +1063,16 @@ Esta milestone faz a adoção: buildar a peça no PG17 (ou bump PG18), smoke end
 
 **Dependencies:** M35, M34. **Risco (MÉDIO).**
 
-### M68 — [ ] Observabilidade do query vetorial — EXPLAIN + métricas
+### M68 — [x] Observabilidade do query vetorial — EXPLAIN + métricas
 
 **Objective:** operabilidade: o scan vetorial é opaco; expor `EXPLAIN (ANALYZE)` com pages-read/recall-est + métricas runtime para o operador diagnosticar em produção.
 
 **Definition of done:**
-- [ ] `EXPLAIN` do scan vetorial mostra: índice, ef/probes efetivo, pages read, candidatos vistos.
-- [ ] Métricas runtime (counter/histogram) do scan vetorial expostas (pilar (c) do wiring-triad).
-- [ ] Doc de operação: diagnosticar recall baixo / latência alta em produção.
+- [x] `EXPLAIN` do scan vetorial mostra: índice, ef/probes efetivo, pages read, candidatos vistos. — `theodb.explain_scan(index_table, vector_col, query, ef, k)` retorna `index_name, ef_effective, pages_read, candidates_seen, latency_us, results`. **Honestidade (ADR-0027 D1):** é uma **função diagnóstica separada**, NÃO uma linha dentro do `EXPLAIN` do plano — não existe hook `amexplain` no PG17/PG18; é o padrão Qdrant/Milvus. Validado por pg_test `explain_scan_shows_index_and_candidates` (droplet pg17 real).
+- [x] Métricas runtime (counter/histogram) do scan vetorial expostas (pilar (c) do wiring-triad). — thread_local `SCAN_CANDIDATES` (+`SCAN_PAGES_READ` do M67) bumpado em todo scan; agregado no catálogo heap consultável `theodb._index_scan_stats` (`sum_candidates`/`avg_candidates` via `theodb.index_scan_stats`). **Honestidade (ADR-0027 D3):** catálogo consultável, crash-safe (heap-page, M35), **não** histograma Prometheus/OTel (exporter adiado por YAGNI — passo de plataforma, sem consumidor hoje).
+- [x] Doc de operação: diagnosticar recall baixo / latência alta em produção. — `docs/ops/vector-scan-diagnostics.md` (playbook Passo-0-índice-usado + recall-baixo + latência-alta + tabela sinal→causa→ação; `candidates_seen` distingue grafo-caro de I/O-pesado).
 
-**Dependencies:** M67. **Risco (BAIXO).**
+**Dependencies:** M67. **Risco (BAIXO).** — **Concluído** (v0.58.0, 2026-07-09). Observabilidade → validado por pg_test determinístico (6/6 autotune incl. os 2 novos M68 + 13/13 correção HNSW, recall preservado após a mudança de assinatura `ground_search_nodes`), **sem benchmark de performance** (nenhum claim "Nx"; Regra 5 não se aplica). Councils index-storage + rust-pgrx: READY_TO_MERGE (zero BLOCKER/HIGH).
 
 ---
 
