@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **M63 — discover: blueprint de vector JOIN** (`.claude/knowledge-base/discoveries/blueprints/m63-vector-join-blueprint.md`): deep research R0 (pgvector issues #812/#713/#703/#645, PG docs LATERAL §7.2.1.5, arXiv:2402.13397 Xling ANN-join, Milvus). Achado (maintainer pgvector @ankane): join column-vs-column NÃO usa índice (Nested Loop O(n·m)); o índice ANN serve **`CROSS JOIN LATERAL (… ORDER BY b.emb <=> a.emb LIMIT k)`** — o mesmo shape index-served do M52. Recomendação (ADR): LATERAL-index-scan, NÃO custom join node (PhD-level, sem ganho, Regra 9). M63 = validar+medir+documentar + helper opcional `theodb.vector_join`. Benchmark: join-recall (mean±std, GT exato) vs cross-join O(n·m) vs pgvector. O LATERAL já é vector-join first-class funcional; falta (fora do M63) push-down em join de topo + amortização de batch.
 
 ### Changed
 
