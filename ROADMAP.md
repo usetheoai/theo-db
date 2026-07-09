@@ -1030,14 +1030,14 @@ Esta milestone faz a adoção: buildar a peça no PG17 (ou bump PG18), smoke end
 
 **Dependencies:** M63, M61, M53. **Risco (MÉDIO).**
 
-### M65 — [ ] Reranking own-code (`ai.rerank`) — qualidade de retrieval de 2ª ordem
+### M65 — [x] Reranking own-code (`ai.rerank`) — qualidade de retrieval de 2ª ordem
 
 **Objective:** o RAG SOTA rerankeia os top-k com cross-encoder; falta a superfície `ai.rerank` (own-code Rust + HTTP client mínimo, como o resto do `ai.*`), fechando o lifecycle retrieval→rerank.
 
 **Definition of done:**
-- [ ] `ai.rerank(query, docs[])` própria (Rust), integrável com a híbrida (M53) e o vector join (M63).
-- [ ] Qualidade medida: nDCG@10 / MRR em BEIR com vs sem rerank → `docs/benchmarks/m65-rerank.{md,json}` (gate: melhora o nDCG).
-- [ ] Honestidade: se não melhorar, honest-negative + decisão.
+- [x] `ai.rerank(query, docs[])` própria (Rust), integrável com a híbrida (M53) e o vector join (M63). — `ai.rerank(query text, docs text[], model text DEFAULT NULL, top_n int DEFAULT NULL) RETURNS TABLE(idx int, score real)` em `rerank.rs` (espelha `embed.rs`, reusa `http.rs`); 14 `#[pg_test]` GREEN; compõe via `ORDER BY score DESC` + join do idx (como M53/M63). ADR-0024.
+- [x] Qualidade medida: nDCG@10 / MRR em BEIR com vs sem rerank → `docs/benchmarks/m65-rerank.{md,json}`. — SciFact 100 queries, 3 runs determinísticos: baseline nDCG@10 0.7327 vs rerank (BGE-reranker-base) 0.6947, Recall@50 conservado (0.92). council-benchmark: HONESTO (idx-mapping verificado, sem bug).
+- [x] Honestidade: se não melhorar, honest-negative + decisão. — **HONEST-NEGATIVE:** o rerank degradou o nDCG@10 em −3.8% (SciFact fora da distribuição do reranker, previsto pela literatura). **Decisão:** `ai.rerank` embarca (superfície model-agnostic correta e medível), sem claim de ganho (public-copy §4), rerank opt-in (custo ~2s/query sem ganho garantido; operador escolhe o reranker por GUC).
 
 **Dependencies:** M53, M18. **Risco (MÉDIO).**
 

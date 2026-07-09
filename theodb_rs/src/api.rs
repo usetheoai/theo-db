@@ -77,6 +77,36 @@ mod theodb_rs {
         crate::chat::ai_generate_batch(&refs, model)
     }
 
+    /// `theodb_rs._ai_rerank` — cross-encoder rerank (the SQL `ai.rerank`). Scores each document against
+    /// the query via the rerank endpoint (crate::rerank), returns `TABLE(idx, score)` sorted by score DESC
+    /// (`idx` is 0-based into the input `documents` array — join it back to the source rows). `top_n` NULL
+    /// → all rows. NULL docs array → 22023; NULL element → 22023; empty docs → zero rows (no HTTP call).
+    #[pg_extern]
+    fn _ai_rerank(
+        query: Option<&str>,
+        documents: Option<Vec<Option<String>>>,
+        model: Option<&str>,
+        top_n: Option<i32>,
+    ) -> TableIterator<'static, (name!(idx, i32), name!(score, f32))> {
+        let documents = match documents {
+            Some(d) => d,
+            None => crate::pg::err_input("ai.rerank: documents must not be NULL"),
+        };
+        let refs: Vec<Option<&str>> = documents.iter().map(|o| o.as_deref()).collect();
+        let scores = crate::rerank::run(query, &refs, model);
+        // (input index, score) — sort by score DESC so the most relevant document is first (Cohere/AlloyDB
+        // convention); `idx` still points at the ORIGINAL input position for the join back.
+        let mut rows: Vec<(i32, f32)> =
+            scores.iter().enumerate().map(|(i, s)| (i as i32, *s)).collect();
+        rows.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        if let Some(n) = top_n {
+            if n >= 0 {
+                rows.truncate(n as usize);
+            }
+        }
+        TableIterator::new(rows)
+    }
+
     // ── M19: NL→SQL (the last plpython3u) — anti-injection L1/L2/L4 + L3 sandbox, now Rust ───────────────
     /// `theodb_rs._nl_to_sql` — validate a question into ONE read-only SELECT over the allowlist (the SQL
     /// `ai.nl_to_sql`). Returns the validated SQL; raises 22023 on any violation. Does NOT execute.
@@ -398,6 +428,29 @@ REVOKE ALL ON FUNCTION theodb_rs._ai_generate_batch(text[], text) FROM PUBLIC;
 "#,
     name = "theodb_ai_wrappers",
     requires = [_ai_chat, _ai_if, _ai_sentiment, _ai_rank, _ai_generate_batch],
+);
+
+// SQL wrapper: the public cross-encoder rerank surface (M65 — `ai.rerank`). Created INTO the existing `ai`
+// schema; RETURNS TABLE(idx, score) sorted by score DESC (`idx` 0-based into the input `documents`). Makes an
+// outbound HTTP call to theodb.rerank_endpoint (http(s)-only, no redirects — reuses the ai.embed client), so
+// both the public wrapper AND the internal function are REVOKEd from PUBLIC (least-privilege parity with ai.*).
+extension_sql!(
+    r#"
+CREATE FUNCTION ai.rerank(query text, documents text[], model text DEFAULT NULL, top_n int DEFAULT NULL)
+RETURNS TABLE(idx int, score real) LANGUAGE sql VOLATILE
+AS $$ SELECT idx, score FROM theodb_rs._ai_rerank(query, documents, model, top_n) $$;
+
+COMMENT ON FUNCTION ai.rerank(text, text[], text, int) IS
+  'Cross-encoder rerank (M65): scores each document against the query via theodb.rerank_endpoint '
+  '(http(s)-only, no redirects) and returns TABLE(idx, score) sorted by relevance DESC — idx is 0-based '
+  'into the documents array (join it back to the source rows). top_n NULL = all. Implemented in Rust '
+  '(theodb_rs), reusing the ai.embed HTTP client. Not granted to PUBLIC. theodb.rerank_api_key is a session GUC.';
+
+REVOKE ALL ON FUNCTION ai.rerank(text, text[], text, int) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb_rs._ai_rerank(text, text[], text, int) FROM PUBLIC;
+"#,
+    name = "theodb_ai_rerank_wrapper",
+    requires = [_ai_rerank],
 );
 
 // SQL wrappers: the public NL→SQL surface (M19 — `ai.nl_to_sql` was the last plpython3u, now Rust). Created

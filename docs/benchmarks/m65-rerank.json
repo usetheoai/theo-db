@@ -1,0 +1,73 @@
+{
+  "dataset": "scifact",
+  "top_k": 50,
+  "runs": 3,
+  "embed_model": "text-embedding-3-small",
+  "dim": 1536,
+  "limit_queries": 100,
+  "status": "MEASURED",
+  "load_per_run": [
+    7.0,
+    7.86,
+    7.92
+  ],
+  "per_run": [
+    {
+      "A_ndcg10": 0.732684,
+      "B_ndcg10": 0.69472,
+      "A_mrr10": 0.700694,
+      "B_mrr10": 0.665107,
+      "A_recall_k": 0.92,
+      "B_recall_k": 0.92,
+      "rerank_p50_ms": 1953.061,
+      "rerank_p95_ms": 2241.125,
+      "n_queries": 100
+    },
+    {
+      "A_ndcg10": 0.732684,
+      "B_ndcg10": 0.69472,
+      "A_mrr10": 0.700694,
+      "B_mrr10": 0.665107,
+      "A_recall_k": 0.92,
+      "B_recall_k": 0.92,
+      "rerank_p50_ms": 1982.8,
+      "rerank_p95_ms": 2298.179,
+      "n_queries": 100
+    },
+    {
+      "A_ndcg10": 0.732684,
+      "B_ndcg10": 0.69472,
+      "A_mrr10": 0.700694,
+      "B_mrr10": 0.665107,
+      "A_recall_k": 0.92,
+      "B_recall_k": 0.92,
+      "rerank_p50_ms": 1958.553,
+      "rerank_p95_ms": 2295.264,
+      "n_queries": 100
+    }
+  ],
+  "per_arm": {
+    "A_baseline": {
+      "ndcg10": 0.732684,
+      "mrr10": 0.700694,
+      "recall_k": 0.92
+    },
+    "B_rerank": {
+      "ndcg10": 0.69472,
+      "mrr10": 0.665107,
+      "recall_k": 0.92,
+      "rerank_p50_ms": 1964.804667,
+      "rerank_p95_ms": 2278.189333
+    }
+  },
+  "recall_conserved": true,
+  "verdict": {
+    "axis": "ndcg_at_10",
+    "baseline": 0.732684,
+    "rerank": 0.69472,
+    "delta": -0.037964,
+    "noise_tol": 0.005,
+    "status": "HONEST_NEGATIVE",
+    "note": "rerank only reorders the SAME top-k (Recall@k conserved); the milestone is whether it improves nDCG@10 on real BEIR. HONEST_NEGATIVE if delta <= noise (literature: gain is not universal, cross-encoders can regress on out-of-distribution corpora)."
+  }
+}
