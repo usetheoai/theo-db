@@ -1263,7 +1263,7 @@ pub(crate) unsafe fn insert_search_ground(
         m0,
         reads: std::cell::Cell::new(reads),
     };
-    let nodes = crate::ann::scan_core::ground_search_nodes(&pg_src, ep, ef, m0, true)?;
+    let (nodes, _candidates) = crate::ann::scan_core::ground_search_nodes(&pg_src, ep, ef, m0, true)?;
     let mut cands: Vec<(f64, Addr)> = nodes.iter().map(|(c, _)| (c.d, (c.blk, c.off))).collect();
     cands.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
     Ok(cands.into_iter().take(m0).map(|(_, a)| a).collect())
@@ -1601,6 +1601,7 @@ pub(crate) unsafe fn traverse(
     // survivors are then reranked by exact f32. A plain v1 index (both `None`) skips this and returns the exact
     // f32 ground search unchanged.
     let approximate = qcode.is_some() || lut.is_some();
+    let mut candidates_seen: usize = 0; // M68: the nodes navigated in the beam (observability)
     let out = if approximate {
         // SBQ (M51) / AQ (M59): the ground walk ranked candidates by the cheap surrogate. Widen the candidate
         // pool by `over_fetch` (scan GUC, reused for AQ per parsimony rung-4) so the true NN survives the
@@ -1609,7 +1610,8 @@ pub(crate) unsafe fn traverse(
         // the walk itself paid only the cheap surrogate cost.
         let over_fetch = crate::am::guc::over_fetch().max(1);
         let walk_ef = ef.saturating_mul(over_fetch);
-        let nodes = crate::ann::scan_core::ground_search_nodes(&pg_src, ep, walk_ef, m0, true)?;
+        let (nodes, cand) = crate::ann::scan_core::ground_search_nodes(&pg_src, ep, walk_ef, m0, true)?;
+        candidates_seen = cand; // the walk pool is `walk_ef = ef·over_fetch` here (honest — what it navigated)
         reads = pg_src.reads.get();
         let mut reranked: Vec<(i64, f64)> = Vec::with_capacity(nodes.len());
         for (cand, _ham) in &nodes {
@@ -1635,14 +1637,18 @@ pub(crate) unsafe fn traverse(
         reranked.truncate(ef); // return the ef best by exact f32; the scan takes top-k
         reranked
     } else {
-        let o = crate::ann::scan_core::ground_search(&pg_src, ep, ef, m0, true)?;
+        // v1 exact f32 ground search. Use `ground_search_nodes` (not the `ground_search` wrapper) so the
+        // candidates_seen count is captured for observability; map to (tid, dist) as the wrapper did.
+        let (nodes, cand) = crate::ann::scan_core::ground_search_nodes(&pg_src, ep, ef, m0, true)?;
+        candidates_seen = cand;
         reads = pg_src.reads.get();
-        o
+        nodes.into_iter().map(|(node, d)| (pg_src.tid(&node), d)).collect()
     };
 
-    // M67: feed the backend-local scan-stats collector (a cheap in-memory add; no page write, no crash-safety
-    // impact) so the recommender/`theodb.index_scan_stats` can persist real pages_read per index.
+    // M67/M68: feed the backend-local scan-stats collectors (cheap in-memory adds; no page write, no
+    // crash-safety impact) so `theodb.scan_stats`/`explain_scan`/`index_scan_stats` report real per-scan cost.
     crate::am::autotune::bump_scan_pages(reads as i64);
+    crate::am::autotune::bump_scan_candidates(candidates_seen as i64);
 
     if std::env::var("THEODB_SCAN_PROFILE").is_ok_and(|v| v == "1") {
         // The wiring-triad runtime metric: pages read must be O(ef·M), flat in N (server LOG, not client WARNING).
