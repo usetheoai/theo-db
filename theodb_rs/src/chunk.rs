@@ -178,9 +178,10 @@ fn pack_with_overlap(atoms: &[String], joiner: &str, size: usize, overlap: usize
 }
 
 // M66 — negative-case pg_tests (the typed-error boundary needs pgrx; run under `cargo pgrx test`).
+// Module name = SQL schema `tests` (the codebase convention, matches lib.rs/vectorizer.rs; NOT `pg_*`).
 #[cfg(any(test, feature = "pg_test"))]
 #[pgrx::pg_schema]
-mod pg_tests {
+mod tests {
     use super::*;
     use pgrx::prelude::*;
 

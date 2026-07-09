@@ -947,7 +947,7 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        assert_eq!(cols, 4, "the {target}_chunks table has the 4 expected columns");
+        assert_eq!(cols, 4, "the target_chunks table has the 4 expected columns");
         Spi::run("DROP TABLE IF EXISTS cdocs_chunks; DROP TABLE cdocs").unwrap();
     }
 
