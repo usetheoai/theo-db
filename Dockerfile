@@ -47,7 +47,23 @@ RUN cargo pgrx init --pg$PG_MAJOR "$(which pg_config)"
 COPY theodb_rs/ /tmp/theodb_rs/
 RUN cd /tmp/theodb_rs && cargo pgrx install --release --features pg$PG_MAJOR
 
-# ---- Stage 2: runtime (postgres:17 + pgvector + pgvectorscale + theodb_rs) ----
+# ---- Stage 1c: build pg_duckdb (M61 — columnar/HTAP adoption; MIT, ADR 0013/0020) ----
+# Adoption, NOT own-code (Regra 9): pg_duckdb (github.com/duckdb/pg_duckdb, MIT, GA v1.1.1, PG14-18 native)
+# embeds the DuckDB analytical engine as a Postgres extension. Built statically (DUCKDB_BUILD=ReleaseStatic →
+# one self-contained pg_duckdb.so, no separate libduckdb.so — ADR D2). C++/cmake/ninja, NO Rust.
+FROM ${BASE_IMAGE} AS pgduckdb-builder
+ARG PG_MAJOR=17
+ARG PGDUCKDB_REF=v1.1.1
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential postgresql-server-dev-$PG_MAJOR libssl-dev pkg-config git cmake ninja-build \
+      ca-certificates curl liblz4-dev libcurl4-openssl-dev zlib1g-dev && \
+    rm -rf /var/lib/apt/lists/*
+RUN git clone https://github.com/duckdb/pg_duckdb /tmp/pg_duckdb && \
+    cd /tmp/pg_duckdb && git checkout $PGDUCKDB_REF && \
+    git submodule update --init --recursive
+RUN cd /tmp/pg_duckdb && DUCKDB_BUILD=ReleaseStatic make install -j"$(nproc)"
+
+# ---- Stage 2: runtime (postgres:17 + pgvector + pgvectorscale + theodb_rs + pg_duckdb) ----
 FROM ${BASE_IMAGE}
 ARG PG_MAJOR=17
 
@@ -78,14 +94,28 @@ COPY --from=scale-builder /usr/share/postgresql/$PG_MAJOR/extension/vectorscale*
 COPY --from=theodb-rs-builder /usr/lib/postgresql/$PG_MAJOR/lib/theodb_rs* /usr/lib/postgresql/$PG_MAJOR/lib/
 COPY --from=theodb-rs-builder /usr/share/postgresql/$PG_MAJOR/extension/theodb_rs* /usr/share/postgresql/$PG_MAJOR/extension/
 
+# M61 — pg_duckdb artifacts (columnar/HTAP; MIT; static DuckDB engine linked into pg_duckdb.so). Artifact-only
+# COPY (no C++ toolchain in runtime), same pattern as pgvectorscale/theodb_rs. pg_duckdb REQUIRES
+# shared_preload_libraries (loaded at boot, unlike pgvector's lazy LOAD) — appended idempotently below.
+COPY --from=pgduckdb-builder /usr/lib/postgresql/$PG_MAJOR/lib/pg_duckdb* /usr/lib/postgresql/$PG_MAJOR/lib/
+COPY --from=pgduckdb-builder /usr/share/postgresql/$PG_MAJOR/extension/pg_duckdb* /usr/share/postgresql/$PG_MAJOR/extension/
+# Append pg_duckdb to shared_preload_libraries in the initdb template (ADR D3 — append-to-sample, not
+# ALTER SYSTEM which only takes effect post-restart, too late for the init-time CREATE EXTENSION). Idempotent:
+# only appends if not already present. Fail-closed: the smoke test asserts the extension loads.
+RUN grep -q "shared_preload_libraries.*pg_duckdb" /usr/share/postgresql/$PG_MAJOR/postgresql.conf.sample || \
+    echo "shared_preload_libraries = 'pg_duckdb'" >> /usr/share/postgresql/$PG_MAJOR/postgresql.conf.sample
+
 # NO plpython3u — the whole `theodb` surface (embed M17, ai.* M18, nl_to_sql M19) is served by the Rust
 # `theodb_rs` extension; `theodb.control` requires only vector+vectorscale (no plpython3u). The image no
 # longer ships `postgresql-plpython3` (it was dead weight since M19).
 # ca-certificates IS still required for TLS verification on HTTPS cloud endpoints — used by the Rust AI
 # surface (minreq/native-tls/OpenSSL) in theodb_rs; without it cert verification fails.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates && \
+    apt-get install -y --no-install-recommends ca-certificates libcurl4 && \
     rm -rf /var/lib/apt/lists/*
+# M61: pg_duckdb.so dynamically links libcurl (DuckDB's httpfs) → the runtime needs libcurl4 (the DuckDB
+# engine itself is static via ReleaseStatic, but system libcurl is not bundled). Without it PG fails to boot
+# (shared_preload_libraries load error). Added to the ca-certificates layer above.
 
 # M15 — TheoDB ships as an INSTALLABLE EXTENSION (CREATE EXTENSION theodb), not init-scripts.
 # Build the install script (concat of the modular bodies in load order) and install the SQL-only extension
@@ -113,6 +143,10 @@ CREATE EXTENSION IF NOT EXISTS theodb CASCADE;
 -- `theodb` (the schema owner) and installs the public theodb.embed INTO the existing theodb schema
 -- (its own objects live in schema theodb_rs). CASCADE pulls `vector`.
 CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE;
+-- M61: pg_duckdb (columnar/HTAP, MIT — ADR 0013/0020) is part of the distribution but NOT a theodb.control
+-- dependency (it is an analytical adjunct, not required by the vector/AI surface), so create it explicitly.
+-- Requires shared_preload_libraries='pg_duckdb' (set in postgresql.conf.sample at build).
+CREATE EXTENSION IF NOT EXISTS pg_duckdb;
 EOF
 
 HEALTHCHECK --interval=5s --timeout=5s --start-period=10s --retries=5 \
