@@ -1041,14 +1041,14 @@ Esta milestone faz a adoção: buildar a peça no PG17 (ou bump PG18), smoke end
 
 **Dependencies:** M53, M18. **Risco (MÉDIO).**
 
-### M66 — [ ] Estratégias de chunking declarativas no vectorizer
+### M66 — [x] Estratégias de chunking declarativas no vectorizer
 
 **Objective:** o vectorizer (M54) auto-embeda, mas o chunking domina a qualidade do RAG; faltam estratégias declarativas (fixed/sentence/semantic/overlap) com medida de impacto.
 
 **Definition of done:**
-- [ ] Chunking configurável no vectorizer (`WITH (chunk_strategy=…, chunk_size=…, overlap=…)`), own-code.
-- [ ] Benchmark: recall de RAG por estratégia num corpus real → `docs/benchmarks/m66-chunking.{md,json}`.
-- [ ] Edge/negative: documentos degenerados (vazio, gigante, 1 token) → typed error/handling.
+- [x] Chunking configurável no vectorizer (`WITH (chunk_strategy=…, chunk_size=…, overlap=…)`), own-code. — `theodb.chunk` (chunk.rs Rust, fixed/sentence/recursive + overlap, char-based Unicode-safe) + modo chunk-table opt-in no vectorizer (`create_vectorizer(..., chunk_strategy, chunk_size, chunk_overlap)` → 1-doc→N-chunks; 1→1 in-place preservado). chunk 16/16 + vectorizer 13/13 pg_test GREEN. `semantic` DEFERIDO por evidência (arXiv:2410.13070). ADR-0025.
+- [x] Benchmark: recall de RAG por estratégia num corpus real → `docs/benchmarks/m66-chunking.{md,json}`. — NFCorpus 50 queries, k-adaptativo: `sentence`/`recursive` (nDCG@10 0.397/0.391) > `fixed` (0.372). **STRATEGY_MATTERS** (degrau robusto sentence > fixed Δ0.025; degrau fino sentence vs recursive Δ0.006 é empate estatístico — declarado, n=1). council-benchmark: HONESTO.
+- [x] Edge/negative: documentos degenerados (vazio, gigante, 1 token) → typed error/handling. — pg_test: vazio→0 chunks, doc<size→1 chunk, palavra gigante→char-cut forçado (sem loop infinito), multibyte→fronteira de char (nunca byte), overlap≥size/size≤0/strategy desconhecida→typed error 22023.
 
 **Dependencies:** M54. **Risco (BAIXO-MÉDIO).**
 
