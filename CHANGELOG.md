@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **M63 — plan: vector JOIN (LATERAL-index-scan)** (`.claude/knowledge-base/plans/m63-vector-join-plan.md`): 4 fases/6 tasks TDD (validar LATERAL usa Index Scan via EXPLAIN → join-recall vs GT exato O(n·m) → benchmark 3-braços + dedup e2e → integration). 2 ADRs (LATERAL vs custom join node — Regra 9; helper `theodb.vector_join` só se EXPLAIN provar que preserva o Index Scan, senão raw-LATERAL-only). ADR=0022. Coverage 100%. Gate SHIPPABLE_WITH_CAVEATS (73.6). Honesto: o LATERAL-index já é vector-join first-class; M63 valida+mede+documenta, não constrói mecanismo.
 - **M63 — discover: blueprint de vector JOIN** (`.claude/knowledge-base/discoveries/blueprints/m63-vector-join-blueprint.md`): deep research R0 (pgvector issues #812/#713/#703/#645, PG docs LATERAL §7.2.1.5, arXiv:2402.13397 Xling ANN-join, Milvus). Achado (maintainer pgvector @ankane): join column-vs-column NÃO usa índice (Nested Loop O(n·m)); o índice ANN serve **`CROSS JOIN LATERAL (… ORDER BY b.emb <=> a.emb LIMIT k)`** — o mesmo shape index-served do M52. Recomendação (ADR): LATERAL-index-scan, NÃO custom join node (PhD-level, sem ganho, Regra 9). M63 = validar+medir+documentar + helper opcional `theodb.vector_join`. Benchmark: join-recall (mean±std, GT exato) vs cross-join O(n·m) vs pgvector. O LATERAL já é vector-join first-class funcional; falta (fora do M63) push-down em join de topo + amortização de batch.
 
 ### Changed
