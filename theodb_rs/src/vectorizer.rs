@@ -23,15 +23,20 @@ use pgrx::prelude::*;
 extension_sql!(
     r#"
 CREATE TABLE IF NOT EXISTS theodb.vectorizer (
-    id            serial PRIMARY KEY,
-    source_table  text NOT NULL,
-    source_pk_col text NOT NULL,
-    content_col   text NOT NULL,
-    target_table  text NOT NULL,
-    target_col    text NOT NULL,
-    model         text,
-    dims          int,
-    created_at    timestamptz NOT NULL DEFAULT now()
+    id             serial PRIMARY KEY,
+    source_table   text NOT NULL,
+    source_pk_col  text NOT NULL,
+    content_col    text NOT NULL,
+    target_table   text NOT NULL,
+    target_col     text NOT NULL,
+    model          text,
+    dims           int,
+    -- M66: opt-in declarative chunking. NULL chunk_strategy → the v1 in-place mode (1 doc → 1 vector,
+    -- non-breaking). Non-NULL → 1 doc → N chunks → N rows in the `{target_table}_chunks` table.
+    chunk_strategy text,
+    chunk_size     int NOT NULL DEFAULT 512,
+    chunk_overlap  int NOT NULL DEFAULT 64,
+    created_at     timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS theodb.vectorizer_queue (
@@ -84,21 +89,42 @@ $fn$;
 -- vectorizer id. Idempotent-ish: a second call on the same table creates a second vectorizer/trigger (by id)
 -- — callers dedupe by not re-registering. The AFTER trigger name is namespaced by id so several can coexist.
 CREATE FUNCTION theodb.create_vectorizer(
-    source_table  regclass,
-    source_pk_col text,
-    content_col   text,
-    target_table  regclass,
-    target_col    text,
-    model         text DEFAULT NULL,
-    dims          int  DEFAULT NULL
+    source_table   regclass,
+    source_pk_col  text,
+    content_col    text,
+    target_table   regclass,
+    target_col     text,
+    model          text DEFAULT NULL,
+    dims           int  DEFAULT NULL,
+    chunk_strategy text DEFAULT NULL,
+    chunk_size     int  DEFAULT 512,
+    chunk_overlap  int  DEFAULT 64
 ) RETURNS int LANGUAGE plpgsql AS $fn$
 DECLARE
     vid    int;
     tgname text;
 BEGIN
-    INSERT INTO theodb.vectorizer (source_table, source_pk_col, content_col, target_table, target_col, model, dims)
-    VALUES (source_table::text, source_pk_col, content_col, target_table, target_col, model, dims)
+    -- Validate chunking config at the boundary (fail-fast, Rule 8) — the chunker also validates, but the
+    -- DDL should reject a bad config before any row is processed.
+    IF chunk_strategy IS NOT NULL THEN
+        IF chunk_strategy NOT IN ('fixed','sentence','recursive') THEN
+            RAISE EXCEPTION 'theodb.create_vectorizer: unknown chunk_strategy % (valid: fixed, sentence, recursive)', chunk_strategy;
+        END IF;
+        IF chunk_size <= 0 OR chunk_overlap < 0 OR chunk_overlap >= chunk_size THEN
+            RAISE EXCEPTION 'theodb.create_vectorizer: require chunk_size > 0 and 0 <= overlap < chunk_size (got size %, overlap %)', chunk_size, chunk_overlap;
+        END IF;
+    END IF;
+    INSERT INTO theodb.vectorizer (source_table, source_pk_col, content_col, target_table, target_col, model, dims, chunk_strategy, chunk_size, chunk_overlap)
+    VALUES (source_table::text, source_pk_col, content_col, target_table, target_col, model, dims, chunk_strategy, chunk_size, chunk_overlap)
     RETURNING id INTO vid;
+
+    -- M66: when chunking is enabled, provision the sibling chunk table (1 doc → N chunks). Idempotent.
+    IF chunk_strategy IS NOT NULL THEN
+        EXECUTE format(
+            'CREATE TABLE IF NOT EXISTS %s_chunks (source_pk text NOT NULL, chunk_index int NOT NULL, '
+            'chunk_text text NOT NULL, embedding vector%s, PRIMARY KEY (source_pk, chunk_index))',
+            target_table::text, CASE WHEN dims IS NULL THEN '' ELSE '('||dims||')' END);
+    END IF;
 
     tgname := format('theodb_vectorizer_%s', vid);
     EXECUTE format(
@@ -109,7 +135,7 @@ BEGIN
 END;
 $fn$;
 
-COMMENT ON FUNCTION theodb.create_vectorizer(regclass, text, text, regclass, text, text, int) IS
+COMMENT ON FUNCTION theodb.create_vectorizer(regclass, text, text, regclass, text, text, int, text, int, int) IS
   'Declaratively maintain an embedding column: attach an AFTER INSERT/UPDATE/DELETE trigger to source_table '
   'that enqueues jobs into theodb.vectorizer_queue; the background worker drains them (M54, ADR 0016). The '
   'trigger only enqueues (cheap, no HTTP) — model latency stays off the writer transaction.';
@@ -117,7 +143,7 @@ COMMENT ON FUNCTION theodb.create_vectorizer(regclass, text, text, regclass, tex
 -- (M66) the v1 plpgsql `theodb.chunk_text` was removed here — superseded by the Rust `theodb.chunk`
 -- (fixed/sentence/recursive + overlap, Unicode-safe; `theodb_rs::chunk`, wired in api.rs). One chunker (KISS).
 
-REVOKE ALL ON FUNCTION theodb.create_vectorizer(regclass, text, text, regclass, text, text, int) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb.create_vectorizer(regclass, text, text, regclass, text, text, int, text, int, int) FROM PUBLIC;
 
 -- Runtime metric (wiring triad pillar c): a single-row counter of jobs the worker processed / failed. The
 -- worker bumps it via theodb_rs._vectorizer_bump_stats. Queryable (not just a LOG line) via theodb.vectorizer_stats().
@@ -275,12 +301,26 @@ fn _vectorizer_renew_lease(job_ids: Vec<i64>, owner: &str, lease_secs: i32) -> i
 }
 
 /// Look up a vectorizer's config. Diverges (typed) if the id is unknown. `model` may be NULL.
-fn lookup_config(vectorizer_id: i32) -> (String, String, String, String, String, Option<String>) {
+/// Resolved vectorizer config. `chunk_strategy == None` → the v1 in-place mode (1 doc → 1 vector);
+/// `Some(_)` → the M66 chunk-table mode (1 doc → N chunks → N rows in `{target_table}_chunks`).
+struct VecCfg {
+    source_table: String,
+    source_pk_col: String,
+    content_col: String,
+    target_table: String,
+    target_col: String,
+    model: Option<String>,
+    chunk_strategy: Option<String>,
+    chunk_size: i32,
+    chunk_overlap: i32,
+}
+
+fn lookup_config(vectorizer_id: i32) -> VecCfg {
     Spi::connect(|c| {
         let t = c
             .select(
-                "SELECT source_table, source_pk_col, content_col, target_table, target_col, model \
-                 FROM theodb.vectorizer WHERE id=$1",
+                "SELECT source_table, source_pk_col, content_col, target_table, target_col, model, \
+                 chunk_strategy, chunk_size, chunk_overlap FROM theodb.vectorizer WHERE id=$1",
                 None,
                 &[vectorizer_id.into()],
             )
@@ -289,15 +329,43 @@ fn lookup_config(vectorizer_id: i32) -> (String, String, String, String, String,
             crate::pg::err_input(&format!("vectorizer {vectorizer_id} not found"));
         }
         let r = t.first();
-        (
-            r.get::<String>(1).ok().flatten().unwrap_or_default(),
-            r.get::<String>(2).ok().flatten().unwrap_or_default(),
-            r.get::<String>(3).ok().flatten().unwrap_or_default(),
-            r.get::<String>(4).ok().flatten().unwrap_or_default(),
-            r.get::<String>(5).ok().flatten().unwrap_or_default(),
-            r.get::<String>(6).ok().flatten(),
-        )
+        VecCfg {
+            source_table: r.get::<String>(1).ok().flatten().unwrap_or_default(),
+            source_pk_col: r.get::<String>(2).ok().flatten().unwrap_or_default(),
+            content_col: r.get::<String>(3).ok().flatten().unwrap_or_default(),
+            target_table: r.get::<String>(4).ok().flatten().unwrap_or_default(),
+            target_col: r.get::<String>(5).ok().flatten().unwrap_or_default(),
+            model: r.get::<String>(6).ok().flatten(),
+            chunk_strategy: r.get::<String>(7).ok().flatten(),
+            chunk_size: r.get::<i32>(8).ok().flatten().unwrap_or(512),
+            chunk_overlap: r.get::<i32>(9).ok().flatten().unwrap_or(64),
+        }
     })
+}
+
+/// M66 chunk-table upsert: chunk `content` → embed each chunk in ONE round-trip → replace the doc's chunk
+/// rows atomically (DELETE the PK's old chunks, then INSERT the new ones — no orphans on re-embed).
+fn upsert_chunks(cfg: &VecCfg, source_pk: &str, content: &str) {
+    let strategy = cfg.chunk_strategy.as_deref().unwrap_or("recursive");
+    let chunks = crate::chunk::chunk(content, strategy, cfg.chunk_size as usize, cfg.chunk_overlap as usize);
+    let chunk_tbl = format!("{}_chunks", cfg.target_table);
+    // Always clear the doc's existing chunks first (re-embed must not leave orphans).
+    let del = format!("DELETE FROM {chunk_tbl} WHERE source_pk = $1");
+    Spi::run_with_args(&del, &[source_pk.into()])
+        .unwrap_or_else(|e| crate::pg::err_input(&format!("vectorizer chunk delete failed: {e:?}")));
+    if chunks.is_empty() {
+        return; // empty/whitespace doc → no chunks, no embed call
+    }
+    let items: Vec<Option<&str>> = chunks.iter().map(|s| Some(s.as_str())).collect();
+    let vecs = crate::embed::run_batch(&items, cfg.model.as_deref()); // ONE HTTP round-trip for N chunks
+    let ins = format!("INSERT INTO {chunk_tbl} (source_pk, chunk_index, chunk_text, embedding) VALUES ($1, $2, $3, $4::vector)");
+    for (i, (chunk_text, vec_text)) in chunks.iter().zip(vecs.iter()).enumerate() {
+        Spi::run_with_args(
+            &ins,
+            &[source_pk.into(), (i as i32).into(), chunk_text.as_str().into(), vec_text.as_str().into()],
+        )
+        .unwrap_or_else(|e| crate::pg::err_input(&format!("vectorizer chunk insert failed: {e:?}")));
+    }
 }
 
 /// Build one dynamic SQL string with Postgres-native `format()` over SPI. COLUMN identifiers use `%I`
@@ -320,23 +388,27 @@ fn build_sql(template: &str, a: &str, b: &str, c: &str) -> String {
 /// == source; or a sibling table carrying that PK column). Chunking is a follow-up (1 row → 1 embedding).
 #[pg_extern]
 fn _vectorizer_process_upsert(vectorizer_id: i32, source_pk: &str) {
-    let (source_table, source_pk_col, content_col, target_table, target_col, model) =
-        lookup_config(vectorizer_id);
+    let cfg = lookup_config(vectorizer_id);
     let fetch_q = build_sql(
         "SELECT %1$I::text FROM %2$s WHERE %3$I::text = $1",
-        &content_col,
-        &source_table,
-        &source_pk_col,
+        &cfg.content_col,
+        &cfg.source_table,
+        &cfg.source_pk_col,
     );
     let content = Spi::get_one_with_args::<String>(&fetch_q, &[source_pk.into()]).ok().flatten();
+    // M66: chunk-table mode (opt-in) writes N chunk rows; the default in-place mode writes 1 vector.
+    if cfg.chunk_strategy.is_some() {
+        upsert_chunks(&cfg, source_pk, content.as_deref().unwrap_or(""));
+        return;
+    }
     // May diverge (ereport) on any embed failure — intentional: the worker's PgTryBuilder converts it to a
     // typed `failed` transition (Rule 8 — never swallow). embed reads GUCs via SPI, so this runs in a txn.
-    let vec_text = crate::embed::run(content.as_deref(), model.as_deref());
+    let vec_text = crate::embed::run(content.as_deref(), cfg.model.as_deref());
     let upd_q = build_sql(
         "UPDATE %2$s SET %1$I = $1::vector WHERE %3$I::text = $2",
-        &target_col,
-        &target_table,
-        &source_pk_col,
+        &cfg.target_col,
+        &cfg.target_table,
+        &cfg.source_pk_col,
     );
     Spi::run_with_args(&upd_q, &[vec_text.into(), source_pk.into()])
         .unwrap_or_else(|e| crate::pg::err_input(&format!("vectorizer upsert failed: {e:?}")));
@@ -347,12 +419,18 @@ fn _vectorizer_process_upsert(vectorizer_id: i32, source_pk: &str) {
 /// case (nulls the orphan embedding).
 #[pg_extern]
 fn _vectorizer_process_delete(vectorizer_id: i32, source_pk: &str) {
-    let (_, source_pk_col, _, target_table, target_col, _) = lookup_config(vectorizer_id);
+    let cfg = lookup_config(vectorizer_id);
+    // M66 chunk-table mode: delete all N chunk rows of the removed doc.
+    if cfg.chunk_strategy.is_some() {
+        let del = format!("DELETE FROM {}_chunks WHERE source_pk = $1", cfg.target_table);
+        let _ = Spi::run_with_args(&del, &[source_pk.into()]);
+        return;
+    }
     let del_q = build_sql(
         "UPDATE %2$s SET %1$I = NULL WHERE %3$I::text = $1",
-        &target_col,
-        &target_table,
-        &source_pk_col,
+        &cfg.target_col,
+        &cfg.target_table,
+        &cfg.source_pk_col,
     );
     let _ = Spi::run_with_args(&del_q, &[source_pk.into()]);
 }
@@ -370,26 +448,37 @@ fn _vectorizer_process_upsert_batch(
     source_pks: Vec<String>,
     owner: &str,
 ) -> i64 {
-    let (source_table, source_pk_col, content_col, target_table, target_col, model) =
-        lookup_config(vectorizer_id);
+    let cfg = lookup_config(vectorizer_id);
     let fetch_q = build_sql(
         "SELECT %1$I::text FROM %2$s WHERE %3$I::text = $1",
-        &content_col,
-        &source_table,
-        &source_pk_col,
+        &cfg.content_col,
+        &cfg.source_table,
+        &cfg.source_pk_col,
     );
     let contents: Vec<Option<String>> = source_pks
         .iter()
         .map(|pk| Spi::get_one_with_args::<String>(&fetch_q, &[pk.as_str().into()]).ok().flatten())
         .collect();
+    // M66 chunk-table mode: each doc fans out to N chunks (already 1 embed_batch round-trip per doc via
+    // upsert_chunks). The cross-doc batch optimization is for the 1→1 in-place mode.
+    if cfg.chunk_strategy.is_some() {
+        let mut done = 0i64;
+        for (i, pk) in source_pks.iter().enumerate() {
+            upsert_chunks(&cfg, pk, contents[i].as_deref().unwrap_or(""));
+            if _vectorizer_mark_done(job_ids[i], owner) {
+                done += 1;
+            }
+        }
+        return done;
+    }
     // ONE HTTP round-trip for the whole batch (may diverge on failure — caught by the worker → per-job fallback).
     let items: Vec<Option<&str>> = contents.iter().map(|c| c.as_deref()).collect();
-    let vecs = crate::embed::run_batch(&items, model.as_deref());
+    let vecs = crate::embed::run_batch(&items, cfg.model.as_deref());
     let upd_q = build_sql(
         "UPDATE %2$s SET %1$I = $1::vector WHERE %3$I::text = $2",
-        &target_col,
-        &target_table,
-        &source_pk_col,
+        &cfg.target_col,
+        &cfg.target_table,
+        &cfg.source_pk_col,
     );
     let mut done = 0i64;
     for (i, pk) in source_pks.iter().enumerate() {
@@ -828,6 +917,70 @@ mod tests {
         let is_null: bool =
             Spi::get_one("SELECT emb IS NULL FROM docs WHERE id=7").unwrap().unwrap();
         assert!(is_null, "process_delete nulls the target embedding for the removed source row");
+    }
+
+    // ── M66 — chunk-table mode (opt-in): schema + catalog + delete (the embed path is droplet/e2e) ──
+
+    #[pg_test]
+    fn chunk_mode_creates_chunk_table_and_stores_config() {
+        Spi::run("CREATE TABLE cdocs (id int PRIMARY KEY, body text)").unwrap();
+        // Opt-in chunking: strategy 'recursive', size 100, overlap 20. target_table = the source (exists as
+        // regclass); the chunk table `cdocs_chunks` is derived + provisioned by create_vectorizer.
+        let vid: i32 = Spi::get_one(
+            "SELECT theodb.create_vectorizer('cdocs'::regclass, 'id', 'body', 'cdocs', 'embedding', 'm', 3, 'recursive', 100, 20)",
+        )
+        .unwrap()
+        .unwrap();
+        assert!(vid > 0);
+        // The catalog stored the chunking config.
+        let (strat, size, ov): (String, i32, i32) = Spi::connect(|c| {
+            let r = c
+                .select("SELECT chunk_strategy, chunk_size, chunk_overlap FROM theodb.vectorizer WHERE id=$1",
+                        None, &[vid.into()]).unwrap().first();
+            (r.get::<String>(1).unwrap().unwrap(), r.get::<i32>(2).unwrap().unwrap(), r.get::<i32>(3).unwrap().unwrap())
+        });
+        assert_eq!((strat.as_str(), size, ov), ("recursive", 100, 20));
+        // The sibling chunk table `cdocs_chunks` was provisioned (source_pk, chunk_index, chunk_text, embedding).
+        let cols: i64 = Spi::get_one(
+            "SELECT count(*) FROM information_schema.columns WHERE table_name='cdocs_chunks' \
+             AND column_name IN ('source_pk','chunk_index','chunk_text','embedding')",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(cols, 4, "the {target}_chunks table has the 4 expected columns");
+        Spi::run("DROP TABLE IF EXISTS cdocs_chunks; DROP TABLE cdocs").unwrap();
+    }
+
+    #[pg_test]
+    fn default_mode_has_null_chunk_strategy() {
+        // No chunk_strategy → the v1 in-place mode is preserved (non-breaking).
+        Spi::run("CREATE TEMP TABLE ddocs (id int PRIMARY KEY, body text, emb vector(3))").unwrap();
+        let vid: i32 = Spi::get_one(
+            "SELECT theodb.create_vectorizer('ddocs'::regclass, 'id', 'body', 'ddocs', 'emb', 'm', 3)",
+        )
+        .unwrap()
+        .unwrap();
+        let is_null: bool =
+            Spi::get_one(&format!("SELECT chunk_strategy IS NULL FROM theodb.vectorizer WHERE id={vid}"))
+                .unwrap()
+                .unwrap();
+        assert!(is_null, "default (no chunk_strategy) → NULL → in-place mode preserved");
+    }
+
+    #[pg_test]
+    fn chunk_mode_process_delete_removes_chunk_rows() {
+        Spi::run("CREATE TABLE edocs (id int PRIMARY KEY, body text)").unwrap();
+        let vid: i32 = Spi::get_one(
+            "SELECT theodb.create_vectorizer('edocs'::regclass, 'id', 'body', 'edocs', 'embedding', 'm', 3, 'fixed', 50, 10)",
+        )
+        .unwrap()
+        .unwrap();
+        // Seed 3 chunk rows for pk '9' directly (simulating a prior upsert without needing the embed HTTP).
+        Spi::run("INSERT INTO edocs_chunks VALUES ('9',0,'a','[1,2,3]'),('9',1,'b','[4,5,6]'),('9',2,'c','[7,8,9]')").unwrap();
+        Spi::run(&format!("SELECT theodb_rs._vectorizer_process_delete({vid}, '9')")).unwrap();
+        let n: i64 = Spi::get_one("SELECT count(*) FROM edocs_chunks WHERE source_pk='9'").unwrap().unwrap();
+        assert_eq!(n, 0, "chunk-mode process_delete removes all N chunk rows of the doc");
+        Spi::run("DROP TABLE IF EXISTS edocs_chunks; DROP TABLE edocs").unwrap();
     }
 
     #[pg_test]
