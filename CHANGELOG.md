@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **M62 — plan: superfície HTAP unificada** (`.claude/knowledge-base/plans/m62-htap-unified-surface-plan.md`): 4 fases/6 tasks TDD (funções `theodb.htap_refresh`/`theodb.olap`/`theodb.htap_freshness` own-code SQL em `sql/85-theodb-htap.sql` → carga mista OLTP↔OLAP race-aware → benchmark de 3 eixos → integration). 2 ADRs (lakehouse-materializado vs 5 alternativas incl. moonlink-BSL/MotherDuck-SaaS/AGPL; SQL/plpgsql vs Rust). ADR formal = 0021. Coverage 100%. Gate SHIPPABLE_WITH_CAVEATS (89.0). Honesto: fluxo row↔colunar com freshness datada, não HTAP-transparente.
 - **M62 — discover: blueprint da superfície HTAP unificada** (`.claude/knowledge-base/discoveries/blueprints/m62-htap-unified-surface-blueprint.md`): deep research R0 (arXiv:2404.15670 HTAP survey, AlloyDB columnar doc, TiFlash, pg_duckdb Iceberg/MotherDuck, pg_mooncake/moonlink LICENSE). Achado: pg_mooncake Iceberg-mirror depende do **moonlink (BSL 1.1 — barrado D1)**; MotherDuck é SaaS; Hydra/Citus AGPL. Recomendação (ADR c/ alternativas): HTAP **lakehouse-materializado** — `theodb.htap_refresh(table)` (row→Parquet) + `theodb.olap(table)` (roteia p/ snapshot colunar via DuckDB, ~9× do M61) com freshness datada explícita. Honesto: NÃO é HTAP-transparente (é fluxo row↔colunar), aposta lakehouse/D2. Benchmark de 3 eixos (speedup OLAP, freshness/custo refresh, latência OLTP sob OLAP concorrente).
 
 ### Changed
