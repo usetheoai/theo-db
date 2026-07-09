@@ -68,9 +68,12 @@ do theodb_rs, não do umbrella theodb).
 
 - **pg_test GREEN (stack real):** chunk 16/16 (3 estratégias + edge/negative + multibyte + error-paths) +
   vectorizer 13/13 (chunk-table criada + config; default NULL preservado; delete remove N chunks). 9 unit-tests puros.
-- **Benchmark BEIR/NFCorpus (50 queries) — STRATEGY_MATTERS:** `sentence` nDCG@10 **0.397** > `recursive` 0.391 >
-  `fixed` 0.372, spread **0.025** (> ruído). A estratégia move o recall (k-adaptativo iguala o budget). Dependente
-  de corpus (não-universal). `docs/benchmarks/m66-chunking.{md,json}`.
+- **Benchmark BEIR/NFCorpus (50 queries) — STRATEGY_MATTERS (rigor declarado):** `sentence`/`recursive`
+  (nDCG@10 0.397/0.391) > `fixed` (0.372), spread total **0.025** — o degrau robusto é **sentence > fixed (Δ0.025)**;
+  o degrau fino **sentence vs recursive (Δ0.0055) é empate estatístico** (dentro do ruído de 50 queries; NÃO
+  afirmado). k-adaptativo iguala o budget (comparação justa). Dependente de corpus (não-universal). **Débito honesto
+  (council-benchmark):** n=1 run, `noise_tol` assumido; separar sentence/recursive exige std pareado + ≥3 runs
+  (`analysis-golden-rule §3`) — o harness agora reporta ndcg10_std. `docs/benchmarks/m66-chunking.{md,json}`.
 
 ## Consequências
 

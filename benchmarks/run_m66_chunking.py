@@ -95,24 +95,30 @@ def _chunk_via_sql(cur, content, strategy, size, overlap):
     return row[0] if row and row[0] else []
 
 
-def _index_strategy(cur, dataset, embed_fn, dim, strategy, size, overlap):
+def _index_strategy(cur, dataset, embedder, dim, strategy, size, overlap):
     """Chunk every doc via theodb.chunk, embed each chunk, index in a per-strategy chunk table. Returns the
-    average chunk length (chars) for k-adaptive."""
+    average chunk length (chars) for k-adaptive. The CachedOpenAIEmbedder is cache-only after warm(), so the
+    chunk texts (which differ per strategy) MUST be warmed before embed_fn is called."""
     tbl = f"m66_{strategy}"
     cur.execute(f"DROP TABLE IF EXISTS {tbl}")
     cur.execute(f"CREATE TABLE {tbl} (doc_id text, chunk_index int, emb vector({dim}))")
-    total_chars, total_chunks = 0, 0
+    # Pass 1 — chunk every doc, collect all chunk texts.
+    doc_chunks = []  # (doc_id, chunk_index, chunk_text)
     for doc_id, content in dataset.corpus.items():
-        chunks = _chunk_via_sql(cur, content, strategy, size, overlap)
-        for i, ch in enumerate(chunks):
-            total_chars += len(ch)
-            total_chunks += 1
-            vec = "[" + ",".join(f"{x:.6f}" for x in embed_fn(ch)) + "]"
-            cur.execute(f"INSERT INTO {tbl} VALUES (%s,%s,%s)", (doc_id, i, vec))
+        for i, ch in enumerate(_chunk_via_sql(cur, content, strategy, size, overlap)):
+            doc_chunks.append((doc_id, i, ch))
+    # Warm ALL chunk embeddings for this strategy in one batched pass (fills the disk cache).
+    embedder.warm([ch for _, _, ch in doc_chunks])
+    embed_fn = embedder.as_embed_fn()
+    total_chars = 0
+    for doc_id, i, ch in doc_chunks:
+        total_chars += len(ch)
+        vec = "[" + ",".join(f"{x:.6f}" for x in embed_fn(ch)) + "]"
+        cur.execute(f"INSERT INTO {tbl} VALUES (%s,%s,%s)", (doc_id, i, vec))
     cur.execute(f"CREATE INDEX {tbl}_idx ON {tbl} USING theodb_hnsw (emb theodb_hnsw_cosine_ops)")
     cur.execute("SET theodb_hnsw.ef_search = 100")
     cur.execute(f"ANALYZE {tbl}")
-    return (total_chars / total_chunks) if total_chunks else float(size)
+    return (total_chars / len(doc_chunks)) if doc_chunks else float(size)
 
 
 def _retrieve_docs(cur, strategy, qvec, k_chunks):
@@ -148,7 +154,7 @@ def run(name, size, overlap, dim, model, cache_dir, limit_queries, target_tokens
     strategies = ["fixed", "sentence", "recursive"]
     per_strategy = {}
     for strat in strategies:
-        avg_chunk_chars = _index_strategy(cur, dataset, embed_fn, dim, strat, size, overlap)
+        avg_chunk_chars = _index_strategy(cur, dataset, embedder, dim, strat, size, overlap)
         k = k_adaptive(target_tokens, avg_chunk_chars)
         ndcgs, recalls = [], []
         for qid, qtext in dataset.queries.items():
@@ -162,6 +168,9 @@ def run(name, size, overlap, dim, model, cache_dir, limit_queries, target_tokens
             recalls.append(doc_recall_at_k(ranked_docs, qrels, k))
         per_strategy[strat] = {
             "ndcg10": round(statistics.mean(ndcgs), 6) if ndcgs else 0.0,
+            # Per-query std of nDCG@10 — the honest error bar (council-benchmark: a Δ between strategies
+            # smaller than ~std/sqrt(n) is within noise; adjacent strategies must clear it to be separable).
+            "ndcg10_std": round(statistics.pstdev(ndcgs), 6) if len(ndcgs) > 1 else 0.0,
             "doc_recall": round(statistics.mean(recalls), 6) if recalls else 0.0,
             "avg_chunk_chars": round(avg_chunk_chars, 1), "k_adaptive": k, "n_queries": len(ndcgs),
         }

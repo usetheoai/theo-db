@@ -4,10 +4,15 @@
 **Harness:** `benchmarks/run_m66_chunking.py` (chunka via `theodb.chunk` = o SUT; reusa `theodb_bench.metrics`/beir/openai_embed) · **JSON:** `docs/benchmarks/m66-chunking.json`
 **ADR:** [`0025-m66-chunking-strategies.md`](../adr/0025-m66-chunking-strategies.md)
 
-> **VEREDITO: STRATEGY_MATTERS.** A estratégia de chunking **move o recall** neste corpus: `sentence` (nDCG@10
-> **0.397**) > `recursive` (0.391) > `fixed` (0.372), spread **0.025** (> ruído 0.005). O chunking por sentença
-> vence o fixed-size por ~2.5 pontos nDCG@10 no NFCorpus — a estratégia importa, e a escolha é **dependente de
-> corpus** (a literatura mostra config X vencendo num corpus e perdendo noutro; reportamos por-corpus, honesto).
+> **VEREDITO: STRATEGY_MATTERS (com rigor estatístico declarado).** A estratégia de chunking **move o recall**
+> neste corpus: `sentence`/`recursive` (nDCG@10 **0.397**/**0.391**) > `fixed` (**0.372**), spread total **0.025**.
+> **Honestidade estatística (n=1 run, 50 queries):** o degrau robusto é **`sentence` > `fixed` (Δ0.025)** — ~2.5
+> pontos, provável de sobreviver a um teste pareado. O degrau fino **`sentence` vs `recursive` (Δ0.0055)** está
+> **dentro do ruído plausível** (com 50 queries o erro-padrão da média de nDCG@10 é da ordem de 0.03) — NÃO
+> afirmamos que sentence bate recursive; são um **empate estatístico**. A escolha é **dependente de corpus** (a
+> literatura mostra config X vencendo num corpus e perdendo noutro; reportamos por-corpus). **Débito honesto:** o
+> `analysis-golden-rule §3` pede ≥3 runs + mean±std pareado; este artefato é n=1 (o embed é determinístico-cacheado,
+> a variância vem do `ef_search` do HNSW) — o harness agora reporta o std per-estratégia para runs futuros.
 
 ---
 
@@ -31,11 +36,15 @@ nDCG@10 no top-10. `load` 7.23 (box carregada — mas o resultado de qualidade �
 
 ## 2. Veredito (honesto, por-corpus)
 
-- **STRATEGY_MATTERS:** o spread de nDCG@10 (**0.025**) é > a tolerância de ruído (0.005) → a escolha de
-  estratégia move o recall neste corpus. **NÃO é honest-negative** (a estratégia importa aqui).
-- **Ranking:** `sentence` > `recursive` > `fixed`. O `sentence` evita "hanging sentences" (fragmentos
-  gramaticais que embedam mal) — consistente com o default do LlamaIndex. O `fixed` (corte duro por chars,
-  chunks maiores 455) perde ~2.5 pontos.
+- **STRATEGY_MATTERS (o degrau robusto):** `sentence`/`recursive` (0.397/0.391) batem `fixed` (0.372) por
+  **~0.025** nDCG@10 — a escolha de estratégia move o recall neste corpus. **NÃO é honest-negative.**
+- **O degrau fino é empate estatístico:** `sentence` vs `recursive` diferem só **0.0055** — dentro do ruído
+  plausível de 50 queries (não afirmamos sentence > recursive). Ambos evitam "hanging sentences" (fragmentos
+  gramaticais que embedam mal — o `sentence`/`recursive` respeitam limites; o `fixed` corta duro por chars,
+  chunks maiores 455, e perde os ~2.5 pontos).
+- **Rigor (débito honesto):** n=1 run, `noise_tol` foi uma constante assumida (não um IC medido). Para separar
+  `sentence` de `recursive` seria preciso o std da diferença pareada (Wilcoxon) sobre as mesmas queries + ≥3 runs
+  (`analysis-golden-rule §3`). Declarado, não escondido.
 - **k-adaptativo (a comparação justa):** cada estratégia recupera um k diferente (18-21) para entregar ~o
   mesmo budget de contexto — sem isso, a estratégia com chunks menores "ganharia" recall de página trivialmente
   (o erro que o benchmark do Vecta expôs). Reportado.
