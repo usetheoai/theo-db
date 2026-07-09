@@ -984,16 +984,16 @@ ciclos. Evidência viva: `docs/benchmarks/m57-raw/*.json` (7 configs medidas).
 > Ativado 2026-07-08 (sign-off do owner). Detalhe estratégico completo em `ROADMAP-v3.md`. 4 pilares, M61–M68.
 > Herda todas as travas do v2 (measurement-first, licenças D1, engine Postgres mantido, Regra 9). M60 diferido.
 
-### M61 — [ ] Embarcar o columnar/HTAP (pg_mooncake/pg_duckdb) na distribuição — o gate de adoção do M30
+### M61 — [x] Embarcar o columnar/HTAP (pg_mooncake/pg_duckdb) na distribuição — o gate de adoção do M30
 
 **Objective:** o M30/ADR-0013 decidiu MANTER o columnar permissivo (medido ~14× a 5M) mas **não o embarcou**.
 Esta milestone faz a adoção: buildar a peça no PG17 (ou bump PG18), smoke end-to-end, e o gate de licença/CVE.
 
 **Definition of done:**
-- [ ] `pg_mooncake` (ou `pg_duckdb`, o que passar no gate) buildado na imagem do TheoDB; `CREATE EXTENSION` + smoke (columnstore + query analítica) verde em CI.
-- [ ] Gate de licença (D1 — MIT ✓) + `/deps-audit` (CVE) da peça e transitivas.
-- [ ] Benchmark de adoção reproduzível: columnstore vs row-store no MESMO dataset/box → `docs/benchmarks/m61-columnar-adoption.{md,json}`.
-- [ ] Honestidade (Regra 9): columnar é **exceção permissiva adotada**, não own-code.
+- [x] `pg_mooncake` (ou `pg_duckdb`, o que passar no gate) buildado na imagem do TheoDB; `CREATE EXTENSION` + smoke (columnstore + query analítica) verde em CI.
+- [x] Gate de licença (D1 — MIT ✓) + `/deps-audit` (CVE) da peça e transitivas.
+- [x] Benchmark de adoção reproduzível: columnstore vs row-store no MESMO dataset/box → `docs/benchmarks/m61-columnar-adoption.{md,json}`.
+- [x] Honestidade (Regra 9): columnar é **exceção permissiva adotada**, não own-code.
 
 **Dependencies:** M30. **Risco (MÉDIO):** compat de build PG17/18; peso da imagem.
 
