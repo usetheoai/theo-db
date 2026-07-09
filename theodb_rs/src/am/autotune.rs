@@ -205,7 +205,6 @@ pub(crate) fn recommend_ef(tbl: &str, col: &str, samples: &[&str], target: f64, 
 #[pgrx::pg_schema]
 mod tests {
     use super::*;
-    use pgrx::prelude::*;
 
     /// Seed a small clustered table + theodb_hnsw index and return a few query vectors (as text literals).
     fn seed(tbl: &str, n: i32) -> Vec<String> {

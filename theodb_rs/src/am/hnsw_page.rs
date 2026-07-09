@@ -1601,7 +1601,7 @@ pub(crate) unsafe fn traverse(
     // survivors are then reranked by exact f32. A plain v1 index (both `None`) skips this and returns the exact
     // f32 ground search unchanged.
     let approximate = qcode.is_some() || lut.is_some();
-    let mut candidates_seen: usize = 0; // M68: the nodes navigated in the beam (observability)
+    let candidates_seen: usize; // M68: the nodes navigated in the beam (observability); both arms assign it
     let out = if approximate {
         // SBQ (M51) / AQ (M59): the ground walk ranked candidates by the cheap surrogate. Widen the candidate
         // pool by `over_fetch` (scan GUC, reused for AQ per parsimony rung-4) so the true NN survives the
@@ -1642,7 +1642,9 @@ pub(crate) unsafe fn traverse(
         let (nodes, cand) = crate::ann::scan_core::ground_search_nodes(&pg_src, ep, ef, m0, true)?;
         candidates_seen = cand;
         reads = pg_src.reads.get();
-        nodes.into_iter().map(|(node, d)| (pg_src.tid(&node), d)).collect()
+        // `Cand` carries its own `tid` field (same the `ground_search` wrapper mapped via `NeighborSource::tid`);
+        // use it directly so the trait need not be imported at this call site.
+        nodes.into_iter().map(|(node, d)| (node.tid, d)).collect()
     };
 
     // M67/M68: feed the backend-local scan-stats collectors (cheap in-memory adds; no page write, no
