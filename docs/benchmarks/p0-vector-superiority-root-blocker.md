@@ -46,6 +46,34 @@ construídos, ground-search accept, `select_from` diversity+keep-back, page-layo
    pgvector no custo/candidato), útil no M71 mesmo sem fechar a razão.
 3. **norm-hoist do cosseno** (`vec.rs:183-185` recomputa `‖q‖²`/candidato) — win puro de custo/candidato, recall-neutral.
 
+## ATUALIZAÇÃO 2026-07-10 (2ª rodada de droplet) — 2 achados que reformulam o problema
+
+Experimento efc × modo-de-build (`docs/benchmarks/m60-raw/m60_efc_sweep_100k768d.json` + `m60_efc_seq_vs_parallel_500k768d.json`):
+
+| n | efc | modo | recall@10 |
+|---|---|---|---|
+| **100k**×768d | 64 | sequential | **0.998** |
+| 100k×768d | 64 | parallel | **0.998** |
+| 100k×768d | 128 | sequential/parallel | 0.998 / 0.998 |
+| **500k**×768d | 64 | sequential | **0.974** |
+| 500k×768d | 64 | parallel | 0.972 |
+
+**Achado 1 — o "gap de recall" é DEGRADAÇÃO POR ESCALA, não defeito fixo.** A 100k×768d o theodb chega a
+**recall@10 = 0.998** (excelente — ≈ ou acima do pgvector). O plateau 0.974 só aparece a 500k. Ou seja: o HNSW
+próprio é **correto e de alta qualidade em escala moderada** (≤100k cobre uma fração enorme de workloads reais); o
+gap é uma **degradação de qualidade-de-grafo específica de escala** (5× mais nós). Notícia de produto relevante:
+para ≤100k vetores, o vetor do theodb está em paridade/superioridade com o pgvector.
+
+**Achado 2 — a hipótese do OVERWRITE (paralelo) é REFUTADA (7º lever).** O teste decisivo sequential-vs-parallel a
+500k: **sequential 0.974 ≈ parallel 0.972** — idênticos. O build SEQUENCIAL não tem o overwrite lost-update, e mesmo
+assim produz o MESMO plateau. Logo a degradação por escala é **inerente ao algoritmo de build nos DOIS modos**, não
+o overwrite paralelo (a suspeita principal). No 100k não há inversão de efc (saturado em 0.998 a efc 64 e 128).
+
+**Estado: 7 levers refutados.** A degradação por escala do grafo (0.998@100k → 0.974@500k, seq≡paralelo) resiste a
+todos. A causa remanescente mais provável (não testada, cara): a heurística de diversidade/RobustPrune (`select_from`)
+produzir um grafo menos navegável **a escala** vs a do pgvector (Alg.4 do HNSW paper, `extendCandidates` /
+`keepPrunedConnections` com o alpha correto) — mas exige comparar a navegabilidade dos grafos a 500k, outro ciclo.
+
 ## Recomendação estratégica (decisão do owner)
 
 O pilar P0 é um **programa de pesquisa multi-sessão gated num único problema** (navegabilidade do grafo). Opções:

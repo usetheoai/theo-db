@@ -23,6 +23,18 @@ pub(crate) const HNSW_M: usize = 16;
 pub(crate) const HNSW_EF_CONSTRUCTION: usize = 64;
 const BUILD_SEED: u64 = 42;
 
+/// Effective build `ef_construction`, overridable via `THEODB_HNSW_EF_CONSTRUCTION` (env). Default = the const
+/// above, so shipped behavior is unchanged. Purpose: sweep efc for the M60/M71 graph-navigability investigation
+/// (does recall rise monotonically with efc, as a correct HNSW must?) without recompiling — mirrors
+/// `hnsw_parallel::parallel_threshold`. Benchmark-only knob; production uses the default.
+pub(crate) fn hnsw_ef_construction() -> usize {
+    std::env::var("THEODB_HNSW_EF_CONSTRUCTION")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|&v| v >= HNSW_M)
+        .unwrap_or(HNSW_EF_CONSTRUCTION)
+}
+
 /// Collected during the heap scan (one entry per live, non-NULL-vector heap tuple).
 struct BuildState {
     corpus: Vec<(i64, Vec<f32>)>,
@@ -109,7 +121,7 @@ pub extern "C-unwind" fn ambuild_hnsw(
         // M56 DoD-4: `build_owned` MOVES the corpus into the graph (no clone) so a 1M×768d CREATE INDEX never
         // holds the f32 vectors twice — the corpus is freed as it is drained.
         let idx = HnswIndex::build_owned(
-            corpus, HNSW_M, HNSW_EF_CONSTRUCTION, metric, BUILD_SEED, &|| { pgrx::check_for_interrupts!(); },
+            corpus, HNSW_M, hnsw_ef_construction(), metric, BUILD_SEED, &|| { pgrx::check_for_interrupts!(); },
         );
         // M35: persist the STRUCTURED page-native layout (meta + element + neighbor tuples) so scans traverse the
         // graph ON DEMAND (O(ef·M) pages), not deserialize the whole blob (O(N)). M51: `WITH (sbq_bits=N)` enables
@@ -326,7 +338,7 @@ unsafe fn vacuum_rebuild_hnsw_structured(indexrel: pg_sys::Relation, dead: &mut 
     // M56 DoD-4: `build_owned` MOVES `live` into the graph (no clone) so the compaction fold of a 1M index
     // does not hold the live f32 vectors twice.
     let idx = HnswIndex::build_owned(
-        live, HNSW_M, HNSW_EF_CONSTRUCTION, metric, BUILD_SEED, &|| { pgrx::check_for_interrupts!(); },
+        live, HNSW_M, hnsw_ef_construction(), metric, BUILD_SEED, &|| { pgrx::check_for_interrupts!(); },
     );
     // M48 (#47): crash-safe fold — pack the new generation at a fresh base, write it to inert pages, then pivot
     // block 0. `pack_at` resolves the graph's pointers relative to `base`, so the packed image is position-

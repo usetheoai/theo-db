@@ -1,0 +1,34 @@
+[
+  {
+    "efc": 64,
+    "mode": "sequential",
+    "ef_search": 1000,
+    "recall": 0.998,
+    "p50_ms": 9.55,
+    "build_s": 351.66
+  },
+  {
+    "efc": 64,
+    "mode": "parallel",
+    "ef_search": 1000,
+    "recall": 0.998,
+    "p50_ms": 10.195,
+    "build_s": 67.51
+  },
+  {
+    "efc": 128,
+    "mode": "sequential",
+    "ef_search": 1000,
+    "recall": 0.998,
+    "p50_ms": 10.591,
+    "build_s": 406.29
+  },
+  {
+    "efc": 128,
+    "mode": "parallel",
+    "ef_search": 1000,
+    "recall": 0.998,
+    "p50_ms": 9.967,
+    "build_s": 75.86
+  }
+]
