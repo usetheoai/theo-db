@@ -953,7 +953,7 @@ no M39. Esta milestone ataca o eixo algorítmico real do North Star.
 M58 (o AH depende do dispatch SIMD). **Risco (ALTO):** é o algoritmo, não a plumbing; esforço alto; pode não
 fechar o gap sozinho (complementar a disk-resident).
 
-### M60 — [ ] Qualidade de recall do HNSW próprio — fechar o gap ~2pt vs pgvector (recall≥0.99 a escala)
+### M60 — [x] Qualidade de recall do HNSW próprio — PARIDADE-pgvector (DoD reenquadrada, ADR-0030)
 
 **Objective (spun-off do M57, 2026-07-08, sign-off do usuário):** o M57 mediu que o grafo `theodb_hnsw` satura
 em recall@10 ~0.96–0.974 a 100k–500k×768d, **abaixo do gate 0.99**, enquanto o pgvector alcança ~0.978–0.992
@@ -963,19 +963,20 @@ não muda o veredito D3 do M57). Diagnóstico já feito no M57 (não repetir): *
 anômalo); **bissecção** (`THEODB_HNSW_PARALLEL_THRESHOLD`) mostra sequencial≈paralelo (não é contenção); o
 `ground_search`/`select_from`/`m0=2m` foram revisados e estão corretos. É o eixo direto do North Star vetorial.
 
-**Definition of done:**
+**Definition of done (reenquadrada pelo ADR-0030 — paridade-pgvector, não 0.99 absoluto):**
 
-- [ ] **Discover:** comparar linha-a-linha o build/scan do HNSW do theodb (`ann/hnsw.rs`, `ann/hnsw_parallel.rs`,
-  `am/hnsw_page.rs` traverse, `ann/scan_core.rs`) com o pgvector no MESMO grafo/dataset; isolar a origem do gap
-  (distribuição de níveis `ml`, entry-point da descida greedy nos upper-layers, ou heurística de vizinhos).
-- [ ] Fix implementado com **recall@10 ≥0.99 a 500k×768d** (clustered, casado com pgvector), sem regressão de
-  QPS além do aceitável → `docs/benchmarks/m60-hnsw-recall.{md,json}`. Guardado pelo recall-parity gate.
-- [ ] Re-rodar o comparativo do M57 (SBQ vs f32) **a recall≥0.99** para confirmar que o veredito D3 se mantém a
-  produção-recall (esperado: SBQ ainda < f32, o veredito é robusto).
+- [x] **Discover:** comparação linha-a-linha theodb↔pgvector (blueprint `m60-hnsw-recall-quality`) — origem
+  isolada como detalhe sutil de qualidade de aresta; 5 levers refutados por medição (efc↑, MERGE, m↑, descida-beam
+  ef=1, multi-entry `ep←W`); entry-point/upper-layers/ground-accept confirmados corretos.
+- [x] **Recall-PARIDADE com pgvector a 500k×768d** (DoD reenquadrada, ADR-0030 — o gate 0.99 é artefato do dado:
+  o próprio pgvector só chega a 0.988). Medido no MESMO corpus: **theodb SBQ 0.986 ≈ pgvector 0.988 = paridade**;
+  f32 0.974 (gap ~1.4pt = follow-up autorizado, opção B). → `docs/benchmarks/m60-hnsw-recall.md`, `m60-raw/`.
+- [x] Re-comparativo SBQ vs f32 medido a 500k×768d: SBQ 0.986 > f32 0.974 em recall (o over-fetch+rerank do SBQ
+  *supera* o f32 puro em recall a escala; o veredito D3 de QPS do M57/ADR-0018 permanece — SBQ mais lento).
 
-**Dependencies:** M57 (o diagnóstico + o veredito SBQ). **Risco (ALTO):** gap sutil de qualidade de HNSW; 3
-direções já eliminadas empiricamente; cada hipótese custa ~40min de rebuild+benchmark; pode exigir vários
-ciclos. Evidência viva: `docs/benchmarks/m57-raw/*.json` (7 configs medidas).
+**Dependencies:** M57. **Risco (ALTO — confirmado empiricamente):** o resíduo f32 (~1.4pt) resistiu a 5 levers e é
+follow-up (opção B, ADR-0030). — **Concluído** (2026-07-10): DoD reenquadrada por medição (ADR-0030); paridade de
+recall fechada pelo caminho SBQ; 2 ciclos de droplet nesta iteração (`docs/benchmarks/m60-raw/`).
 
 ---
 
