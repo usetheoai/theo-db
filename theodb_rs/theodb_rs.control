@@ -11,4 +11,4 @@ superuser = true
 # Requires `vector` (the return type + text::vector cast) AND `theodb` (the umbrella owns the `theodb`
 # schema into which theodb.embed is installed — theodb_rs creates the function there but NOT the schema,
 # avoiding a cross-extension CREATE SCHEMA ownership conflict). theodb_rs's own objects live in schema theodb_rs.
-requires = 'vector, theodb'
+# requires: NENHUM (M70 — theodb_rs provê o tipo 'vector' + o schema 'theodb'; base da stack)

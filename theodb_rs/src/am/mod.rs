@@ -254,7 +254,7 @@ extension_sql!(
         OPERATOR 1 <-> (vector, vector) FOR ORDER BY float_ops;
     "#,
     name = "theodb_ivfflat_opclasses",
-    requires = [theodb_ivfflat_amhandler],
+    requires = [theodb_ivfflat_amhandler, "vector_type"],
 );
 
 // The DEFAULT l2 operator class for the HNSW AM (same shape; metric L2 baked into the persisted graph).
@@ -264,7 +264,7 @@ extension_sql!(
         OPERATOR 1 <-> (vector, vector) FOR ORDER BY float_ops;
     "#,
     name = "theodb_hnsw_opclasses",
-    requires = [theodb_hnsw_amhandler],
+    requires = [theodb_hnsw_amhandler, "vector_type"],
 );
 
 // M49: non-default cosine (`<=>`) + inner-product (`<#>`) opclasses for both AMs. Strategy is always 1
@@ -287,6 +287,7 @@ extension_sql!(
     "#,
     name = "theodb_cosine_ip_opclasses",
     requires = [
+        "vector_type",
         theodb_ivfflat_amhandler,
         theodb_hnsw_amhandler,
         "theodb_ivfflat_opclasses",
