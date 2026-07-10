@@ -10,7 +10,6 @@
 -- runs in the caller's transaction and cannot. Same %I-quoted, regclass-validated, parameter-bound discipline
 -- in both. This file keeps the `theodb` schema bootstrap + the chunked PROCEDURE.
 
-CREATE SCHEMA IF NOT EXISTS theodb;
 
 -- theodb.import_vectors_chunked(...) — M-audit-remediation (audit #6 unbounded_collection / #7 memory_inefficiency).
 -- The theodb.import_vectors FUNCTION (now Rust, theodb_rs/src/migrate.rs) ingests the WHOLE export in ONE

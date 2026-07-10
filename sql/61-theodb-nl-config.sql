@@ -7,7 +7,6 @@
 -- extension is intentional (ADR D1): we ship the three core capabilities in schema `ai`.
 -- Idempotent: safe to re-run / load from docker-entrypoint-initdb.d AFTER sql/60.
 
-CREATE SCHEMA IF NOT EXISTS ai;
 
 -- nl_config — binds an app config to its allowed_relations, persisted schema context, a template, a model.
 CREATE TABLE IF NOT EXISTS ai.nl_config (

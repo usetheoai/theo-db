@@ -38,7 +38,6 @@
 -- NULL. NO function calls duckdb.query internally — that is the whole point of this pivot.
 -- Idempotent: safe to re-run / load from the extension install script (CREATE OR REPLACE / IF NOT EXISTS).
 
-CREATE SCHEMA IF NOT EXISTS theodb;
 
 -- Snapshot catalog — one row per materialized relation. The refreshed_at is the freshness clock the whole
 -- surface reads: theodb.olap_sql resolves the path from it, theodb.htap_freshness derives the lag from it.

@@ -15,4 +15,3 @@
 -- Idempotent: safe to re-run / load from docker-entrypoint-initdb.d.
 
 -- dep (vector) declared in theodb.control `requires` (M15) — not created here
-CREATE SCHEMA IF NOT EXISTS ai;

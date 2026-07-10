@@ -13,4 +13,3 @@
 -- Idempotent: safe to re-run / load from docker-entrypoint-initdb.d.
 
 -- deps (vector, vectorscale) declared in theodb.control `requires` (M15; plpython3u dropped in M19) — not created here
-CREATE SCHEMA IF NOT EXISTS theodb;
