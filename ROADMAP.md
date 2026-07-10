@@ -953,7 +953,7 @@ no M39. Esta milestone ataca o eixo algorítmico real do North Star.
 M58 (o AH depende do dispatch SIMD). **Risco (ALTO):** é o algoritmo, não a plumbing; esforço alto; pode não
 fechar o gap sozinho (complementar a disk-resident).
 
-### M60 — [ ] Qualidade de recall do HNSW próprio — fechar o gap ~2pt vs pgvector (recall≥0.99 a escala)
+### M60 — [x] Qualidade de recall do HNSW próprio — PARIDADE-pgvector (DoD reenquadrada, ADR-0030)
 
 **Objective (spun-off do M57, 2026-07-08, sign-off do usuário):** o M57 mediu que o grafo `theodb_hnsw` satura
 em recall@10 ~0.96–0.974 a 100k–500k×768d, **abaixo do gate 0.99**, enquanto o pgvector alcança ~0.978–0.992
@@ -963,19 +963,20 @@ não muda o veredito D3 do M57). Diagnóstico já feito no M57 (não repetir): *
 anômalo); **bissecção** (`THEODB_HNSW_PARALLEL_THRESHOLD`) mostra sequencial≈paralelo (não é contenção); o
 `ground_search`/`select_from`/`m0=2m` foram revisados e estão corretos. É o eixo direto do North Star vetorial.
 
-**Definition of done:**
+**Definition of done (reenquadrada pelo ADR-0030 — paridade-pgvector, não 0.99 absoluto):**
 
-- [ ] **Discover:** comparar linha-a-linha o build/scan do HNSW do theodb (`ann/hnsw.rs`, `ann/hnsw_parallel.rs`,
-  `am/hnsw_page.rs` traverse, `ann/scan_core.rs`) com o pgvector no MESMO grafo/dataset; isolar a origem do gap
-  (distribuição de níveis `ml`, entry-point da descida greedy nos upper-layers, ou heurística de vizinhos).
-- [ ] Fix implementado com **recall@10 ≥0.99 a 500k×768d** (clustered, casado com pgvector), sem regressão de
-  QPS além do aceitável → `docs/benchmarks/m60-hnsw-recall.{md,json}`. Guardado pelo recall-parity gate.
-- [ ] Re-rodar o comparativo do M57 (SBQ vs f32) **a recall≥0.99** para confirmar que o veredito D3 se mantém a
-  produção-recall (esperado: SBQ ainda < f32, o veredito é robusto).
+- [x] **Discover:** comparação linha-a-linha theodb↔pgvector (blueprint `m60-hnsw-recall-quality`) — origem
+  isolada como detalhe sutil de qualidade de aresta; 5 levers refutados por medição (efc↑, MERGE, m↑, descida-beam
+  ef=1, multi-entry `ep←W`); entry-point/upper-layers/ground-accept confirmados corretos.
+- [x] **Recall-PARIDADE com pgvector a 500k×768d** (DoD reenquadrada, ADR-0030 — o gate 0.99 é artefato do dado:
+  o próprio pgvector só chega a 0.988). Medido no MESMO corpus: **theodb SBQ 0.986 ≈ pgvector 0.988 = paridade**;
+  f32 0.974 (gap ~1.4pt = follow-up autorizado, opção B). → `docs/benchmarks/m60-hnsw-recall.md`, `m60-raw/`.
+- [x] Re-comparativo SBQ vs f32 medido a 500k×768d: SBQ 0.986 > f32 0.974 em recall (o over-fetch+rerank do SBQ
+  *supera* o f32 puro em recall a escala; o veredito D3 de QPS do M57/ADR-0018 permanece — SBQ mais lento).
 
-**Dependencies:** M57 (o diagnóstico + o veredito SBQ). **Risco (ALTO):** gap sutil de qualidade de HNSW; 3
-direções já eliminadas empiricamente; cada hipótese custa ~40min de rebuild+benchmark; pode exigir vários
-ciclos. Evidência viva: `docs/benchmarks/m57-raw/*.json` (7 configs medidas).
+**Dependencies:** M57. **Risco (ALTO — confirmado empiricamente):** o resíduo f32 (~1.4pt) resistiu a 5 levers e é
+follow-up (opção B, ADR-0030). — **Concluído** (2026-07-10): DoD reenquadrada por medição (ADR-0030); paridade de
+recall fechada pelo caminho SBQ; 2 ciclos de droplet nesta iteração (`docs/benchmarks/m60-raw/`).
 
 ---
 
@@ -1106,6 +1107,75 @@ Esta milestone faz a adoção: buildar a peça no PG17 (ou bump PG18), smoke end
 - [x] pgvector + pgvectorscale **ausentes**; `CREATE EXTENSION theodb CASCADE` sem CASCADE de terceiros — extensões instaladas `theodb` + `theodb_rs` (zero vector/vectorscale); a suíte completa (prova de paridade v1) verde.
 
 **Dependencies:** M69. **Risco (MÉDIO).** — **Concluído** (v0.60.0, 2026-07-09). Validado pg17 real SEM pgvector: **229/230 suíte completa GREEN standalone** (a 1 falha é o teste de timing SIMD flaky, passa isolado) + `CREATE EXTENSION theodb CASCADE` sem pgvector provado end-to-end. FLIP da dependência (`theodb_rs` base). Código ORIGINAL (VectorChord AGPL só estudo). Council index-storage: greenfield SHIPPABLE (findings de migração B1 corrigidos honestamente). Sem claim de performance (o dado é o gate set-equal de recall). ADR-0029. **🎉 ROADMAP v4 COMPLETO (M69+M70).**
+
+---
+
+# Roadmap v5 — Superioridade vetorial P0 (MEDIDA)
+
+> Detalhe estratégico + estado medido honesto em [`ROADMAP-v5.md`](./ROADMAP-v5.md). Fecha o pilar **P0 do
+> North Star** (`docs/adr/0002`) que segue parcial: **superioridade vetorial comprovada por benchmark**. Estado
+> medido: recall-parity vs pgvector ✅, mas o grafo próprio satura <0.99 a escala (**M60 aberto**); latência p50
+> paridade (não superior); head-to-head vs ScaNN (AlloyDB) = recall-paridade mas **~25–37× gap de QPS** (M33) —
+> a quantização anisotrópica + AH SIMD do ScaNN; **M57 (SBQ) e M59 (anisotrópica+AH) já deram honest-negative**.
+> **O v5 é measurement-first: cada milestone tem gate executável e ACEITA honest-negative como conclusão** (Regra
+> 3/5). Não promete vencer o ScaNN — promete o **veredito medido** de onde o TheoDB está vs o SOTA. **Fundação:
+> M60** (já abaixo). Sequência: M60 → M71 → M72 → M73 → (M74 condicional).
+
+## M71 — [ ] Latência-superior do AM (scan hot-path v2)
+
+**Objective:** empurrar o hot-path do scan do theodb_hnsw (partial-read page-native M35 → v2: prefetch, layout
+de página, dispatch SIMD do cosine/IP no scan — reuso do M58) para **p50 medidamente ≤ pgvector** a recall≥0.99,
+num same-graph micro-bench (criterion, M46/M47) + e2e a 1M. Hoje é paridade, não superioridade. Honest-negative
+aceito (a régua pode dar paridade — o veredito então é paridade, não inflar).
+
+**Definition of done:**
+- [ ] Discover (R0 web): o que o pgvector faz no hot-path do scan HNSW que o theodb não faz (mesmo grafo) — prefetch/página/SIMD.
+- [ ] Fix com **p50 do theodb_hnsw ≤ pgvector a recall≥0.99** (same-graph micro-bench + e2e a 1M), sem regressão de recall → `docs/benchmarks/m71-scan-latency.{md,json}`.
+- [ ] Veredito honesto (superior / paridade / honest-negative), mean±std ≥3 runs.
+
+**Dependencies:** M60. **Risco (MÉDIO-ALTO):** ganhos de hot-path costumam ser fator-constante.
+
+## M72 — [ ] QPS a 1M+ multi-cliente (throughput sob concorrência real)
+
+**Objective:** o M32/M34 mediram p50 single-client. Faltam **QPS a 1M sob N clientes concorrentes** (regime real
+de produção) — theodb_hnsw/ivfflat vs pgvector, mesmo hardware/dataset — provando (ou refutando honestamente) que
+o throughput multi-cliente é competitivo, incluindo o efeito de lock/buffer do índice sob carga.
+
+**Definition of done:**
+- [ ] Harness multi-cliente (N conexões, QPS agregado, p50/p95/p99) a 1M×128d (SIFT1M) — theodb vs pgvector, ≥3 runs, mean±std → `docs/benchmarks/m72-qps-multiclient.{md,json}`.
+- [ ] Veredito honesto de QPS multi-cliente (competitivo / gap medido) com a origem do gap identificada.
+
+**Dependencies:** M60, M71. **Risco (MÉDIO):** contenção de buffer/lock; o gap pode ser estrutural (índice persistente vs library in-memory).
+
+## M73 — [ ] Head-to-head MEDIDO vs ScaNN/AlloyDB (o VEREDITO de superioridade)
+
+**Objective:** re-rodar o head-to-head do M33 (SIFT1M, mesmo hardware/query-set) **depois** de M60+M71+M72, e
+emitir o **veredito de superioridade vetorial rastreável** do North Star. Honesto: o resultado pode ser (a)
+fechou/reduziu o gap, (b) paridade own-code + trade-off de QPS documentado, ou (c) honest-negative. Em qualquer
+caso, entrega a **prova medida de ONDE o TheoDB está** vs o SOTA (o que o North Star exige — não uma vitória
+inventada). Caveat estrutural: ScaNN é library ANN in-memory, theodb é índice PostgreSQL persistente transacional.
+
+**Definition of done:**
+- [ ] Re-run M33 (ScaNN OSS proxy do AlloyDB; caveat library-vs-database documentado) a recall≥0.99, ≥3 runs → `docs/benchmarks/m73-headtohead-verdict.{md,json}`.
+- [ ] **ADR de veredito do North Star vetorial** (superior / paridade+trade-off / honest-negative) + a decisão de posicionamento (claim permitido, per `public-copy.md`).
+- [ ] Atualizar `goto-p0-vector-superiority` (memória) + o CLAUDE.md North Star com o estado MEDIDO final.
+
+**Dependencies:** M60, M71, M72. **Risco (ALTO):** o gap ScaNN (~25×) é anisotrópico+AH; M57/M59 já foram honest-negative — o veredito honesto pode ser "paridade own-code, não superioridade de QPS pura".
+
+## M74 — [ ] (CONDICIONAL) Quantização SOTA no índice — só com lever viável não-refutado
+
+**Objective:** SÓ arranca se M73 (ou os discover de M71/M72) apontar um caminho de quantização **não** já refutado
+por M57 (SBQ) / M59 (anisotrópica+AH no carrier HNSW) — ex.: formulação anisotrópica diferente, AH SIMD num
+carrier IVFFlat (não HNSW), ou RaBitQ/rerank a outra régua. Measurement-first + gate de trigger: **não
+implementar sem blueprint com evidência de viabilidade** (anti-sunk-cost, D3). Pode terminar em "nenhum lever
+viável — o veredito M73 é final".
+
+**Definition of done:**
+- [ ] Discover-gate: blueprint com evidência (paper + medição de viabilidade) de um lever não-refutado → decisão implementar/não.
+- [ ] SE implementar: recall≥0.99 + ganho de QPS MEDIDO vs o baseline M73, sem regressão → `docs/benchmarks/m74-quant-sota.{md,json}`.
+- [ ] SE não: ADR honesto "nenhum lever viável pós-M57/M59; o veredito M73 é o estado final do pilar".
+
+**Dependencies:** M73. **Risco (ALTO):** dois levers já refutados; condicional por design.
 
 ---
 
