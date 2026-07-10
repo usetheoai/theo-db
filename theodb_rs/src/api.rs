@@ -4,11 +4,10 @@
 //! generated schema + install script are byte-identical; `lib.rs` is now a thin composition/module root.
 use pgrx::prelude::*;
 
-// theodb_rs owns its OWN schema `theodb_rs` (so it never tries to CREATE the `theodb` schema, which
-// is owned by the umbrella `theodb` extension — PG forbids a second extension from CREATE-IF-NOT-EXISTS
-// on a schema it does not own). The public `theodb.embed` wrapper is created INTO the existing `theodb`
-// schema via extension_sql (creating an object in another extension's schema is allowed; only CREATE
-// SCHEMA conflicts). theodb_rs `requires = 'theodb'` so the `theodb` schema exists first.
+// M70 (flip ADR-0029 D1): theodb_rs é a BASE — ele PROVÊ os schemas `theodb`/`ai` (bloco
+// `theodb_schema_bootstrap` em dtype.rs, requerido por estes wrappers) e o tipo `public.vector`. Os
+// `#[pg_extern]` internos ficam no schema `theodb_rs`; os wrappers públicos `theodb.*`/`ai.*` abaixo são
+// criados nos schemas `theodb`/`ai` que o próprio theodb_rs cria. O umbrella `theodb` requer `theodb_rs`.
 #[pg_schema]
 mod theodb_rs {
     use pgrx::prelude::*;

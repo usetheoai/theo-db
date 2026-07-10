@@ -101,3 +101,14 @@ direto no SQL via `format!` em vez de parametrizar / `quote_ident`. Mitigado hoj
 do M68 (o M68 só adicionou `sum_candidates` à query já parametrizada `$1..$5` de `record_scan_stat`, correta).
 Fix: `quote_ident` para os identificadores (col) + bind de valores onde possível. Prioridade: BAIXA (funções
 admin, REVOKE FROM PUBLIC; sobe se expostas a role não-privilegiado).
+
+## [M70 review — council-index-storage] Migração byte-level (sem reescrita) de instalações com pgvector
+O M70 entrega o tipo `public.vector` own-code. A migração de bancos que já têm colunas `vector` do pgvector
+usa hoje um intermediário `real[]` (`docs/ops/pgvector-migration.md`): ALTER COLUMN→real[]→DROP pgvector→
+CREATE theodb→ALTER COLUMN→vector + REINDEX. É correto e seguro mas **reescreve o heap** (não é O(1)) e exige
+janela de manutenção. Uma migração byte-level (aproveitando o layout byte-idêntico do M69) exigiria instalar
+o tipo próprio num schema temporário (`theodb.vector`) durante a transição + `ALTER TYPE … SET SCHEMA public`
+após dropar o pgvector — NÃO implementado (o tipo é fixo em `public.vector`). Otimização: prover um modo de
+instalação schema-qualified do theodb_rs para a transição. Prioridade: BAIXA (o caminho `real[]` funciona;
+greenfield — o caso primário — não precisa de migração). Origem: review M70 B1 (corrigido no doc — a alegação
+de byte-cast direto era falsa para instalações com pgvector).

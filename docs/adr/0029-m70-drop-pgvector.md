@@ -36,14 +36,20 @@ prefixadas `theodb_vector_*` (herança do M69, sem custo).
 **Rationale:** o veredito A do blueprint quer `::vector` drop-in. **Alternativa rejeitada:** `theodb.vector`
 permanente (não é drop-in). Precedente: M69 (a transição planejada).
 
-### D3 — Migração de instalações existentes via cast binário
+### D3 — Migração de instalações existentes via intermediário `real[]` (janela de manutenção)
 
-Upgrade de um banco com colunas `vector` do pgvector: `CREATE CAST (vector AS theodb.vector) WITHOUT
-FUNCTION` + `ALTER COLUMN TYPE` (byte-cast grátis, O(1), sem reescrita de heap) + REINDEX dos índices ANN.
-Documentado em `docs/ops/pgvector-migration.md`.
+**Honestidade (Regra 3):** como o tipo próprio do M70 ocupa `public.vector` — o MESMO nome do pgvector — os
+dois NÃO coexistem (colisão de nome), então o byte-cast direto do M69 (que exigia `theodb.vector` num schema
+distinto) não se aplica a um upgrade. A migração usa um intermediário neutro `real[]`: `ALTER COLUMN … TYPE
+real[]` → `DROP EXTENSION vector` → `CREATE EXTENSION theodb` → `ALTER COLUMN … TYPE vector` → REINDEX.
+Preserva os dados (os floats sobrevivem no `real[]`) mas reescreve o heap (não é O(1)) e exige janela de
+manutenção. Documentado em `docs/ops/pgvector-migration.md`.
 
-**Rationale:** o layout byte-idêntico (M69) torna a migração de dados grátis. **Alternativa rejeitada:**
-dump/restore (downtime + reescrita O(N)).
+**Rationale:** o intermediário `real[]` é a única sequência válida sem coexistência dos dois `public.vector`.
+**Alternativa rejeitada (byte-level sem reescrita):** instalar o tipo próprio num schema temporário durante a
+transição + `SET SCHEMA public` — NÃO implementado no M70 (o tipo é fixo em `public.vector`); rastreado no
+backlog como otimização. **Alternativa rejeitada (dump/restore total):** mais downtime que o `real[]` in-place.
+**Greenfield** (o caminho primário, validado) não precisa de migração — nasce `public.vector`.
 
 ### D4 — Gate de não-regressão: os AM pg_tests set-equal sobre o tipo próprio, SEM pgvector
 

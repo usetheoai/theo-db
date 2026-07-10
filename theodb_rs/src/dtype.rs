@@ -3,7 +3,8 @@
 //! Layout `#[repr(C)]` BYTE-IDÊNTICO ao `Vector` do pgvector (`vl_len_ i32 · dim i16 · unused i16 ·
 //! f32[]`; 8+4·dim bytes) — a pré-condição do cast binário `WITHOUT FUNCTION` (coexistência em M69,
 //! migração grátis em M70). Coexiste com `public.vector` (pgvector) SEM colisão: o tipo próprio é
-//! `vector` (schema `theodb`); o M70 fará `SET SCHEMA public` ⇒ drop-in (ADR-D5).
+//! M70: o tipo é `public.vector` (drop-in — o pgvector foi REMOVIDO; sem colisão). O flip (ADR-0029 D1)
+//! faz o theodb_rs prover o tipo + os schemas theodb/ai; o umbrella `theodb` requer o theodb_rs.
 //!
 //! Código ORIGINAL. Técnica de varlena aprendida de fontes permissivas (`pgvector` = PostgreSQL
 //! License, `vector.c/.h`; `postgres.h` SET_VARSIZE; docs pgrx). VectorChord é AGPL (D1) = SÓ estudo.
@@ -546,14 +547,11 @@ mod tests {
         assert_eq!(nearest, 1);
     }
 
-    /// GATE (M3): layout byte-idêntico ao pgvector — cast WITHOUT FUNCTION nos 2 sentidos +
-    /// asserção BYTE-CRUA `md5(::bytea)` (não só texto) em dims que cruzam o byte alto do `u16 dim`:
-    /// dim=1, 3, 5, 128 e **300 (>255)** — um off-by-one no header do dim só apareceria em dim>255.
     // M70: a paridade byte-a-byte com o pgvector foi provada e RELEASED no M69 (v0.59.0,
     // `binary_compat_with_pgvector` sobre `md5(vector_send)` em dims 1/3/5/128/300). No M70 o pgvector
     // é REMOVIDO — o tipo `vector` é 100% own-code, então esse teste (que exigia o pgvector coexistindo)
-    // não roda mais na suíte standalone. A verificação do cast binário de MIGRAÇÃO (para instalações que
-    // ainda têm o pgvector) é o teste gated `migration_binary_cast` (T4.1) + `docs/ops/pgvector-migration.md`.
+    // não roda mais na suíte standalone. A migração de instalações com pgvector (via intermediário `real[]`,
+    // não byte-cast) está em `docs/ops/pgvector-migration.md`; a paridade byte já está coberta no M69 v0.59.0.
 
     #[pg_test(error = "vector cannot have more than 16000 dimensions")]
     fn parse_fail_fast_over_max() {
