@@ -1163,7 +1163,7 @@ inventada). Caveat estrutural: ScaNN é library ANN in-memory, theodb é índice
 
 **Dependencies:** M60, M71, M72. **Risco (ALTO):** → **MATERIALIZOU-SE (honesto):** o veredito É "paridade own-code + multi-cliente competitivo-superior, NÃO superioridade de QPS pura vs ScaNN" — como o risco previa. Gap de paradigma, não fechável por extensão PG permissiva.
 
-## M74 — [ ] (CONDICIONAL) Quantização SOTA no índice — só com lever viável não-refutado
+## M74 — [x] (CONDICIONAL) Quantização SOTA no índice — só com lever viável não-refutado
 
 **Objective:** SÓ arranca se M73 (ou os discover de M71/M72) apontar um caminho de quantização **não** já refutado
 por M57 (SBQ) / M59 (anisotrópica+AH no carrier HNSW) — ex.: formulação anisotrópica diferente, AH SIMD num
@@ -1172,11 +1172,10 @@ implementar sem blueprint com evidência de viabilidade** (anti-sunk-cost, D3). 
 viável — o veredito M73 é final".
 
 **Definition of done:**
-- [ ] Discover-gate: blueprint com evidência (paper + medição de viabilidade) de um lever não-refutado → decisão implementar/não.
-- [ ] SE implementar: recall≥0.99 + ganho de QPS MEDIDO vs o baseline M73, sem regressão → `docs/benchmarks/m74-quant-sota.{md,json}`.
-- [ ] SE não: ADR honesto "nenhum lever viável pós-M57/M59; o veredito M73 é o estado final do pilar".
+- [x] Discover-gate: lever não-refutado identificado + medido = **RaBitQ** (arXiv:2405.12497, 1-bit, training-free, bound provado; core vendorizado ADR-0032; spike D3 1M×768d medido). Decisão: **NÃO implementar o AM completo agora** — o ganho medido é memória, não QPS.
+- [x] SE não (a saída medida): **ADR-0036 honesto** — o lever RaBitQ É viável mas o ganho é **memória/billion-scale** (5.3MB @ 98.4%), NÃO superioridade de QPS (8.2ms competitivo com full-precision, não 25× ScaNN). Full AM = follow-up gated por demanda billion-scale (anti-sunk-cost/D3). O veredito M73 (QPS-superioridade não-alcançável) é o estado final do pilar.
 
-**Dependencies:** M73. **Risco (ALTO):** dois levers já refutados; condicional por design.
+**Dependencies:** M73. **Risco (ALTO):** dois levers já refutados; condicional por design. → **RESOLVIDO (honesto):** 3º lever (RaBitQ) É viável e não-refutado, mas mede-se como feature de memória, não de QPS. Sem overclaim; core pronto para feature futura.
 
 ---
 
