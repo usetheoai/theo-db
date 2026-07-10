@@ -166,9 +166,26 @@ impl HnswIndex {
         let mut entries: Vec<usize> = vec![ep];
         while lc >= 0 {
             let layer = lc as usize;
-            let candidates = self.search_layer(&q, &entries, self.ef_construction, layer);
+            let mut candidates = self.search_layer(&q, &entries, self.ef_construction, layer);
             let next_entries: Vec<usize> = candidates.iter().map(|c| c.i).collect();
             let m_layer = if layer == 0 { self.m0 } else { self.m };
+            // Gap-1 fix (navigability): extendCandidates (Malkov-Yashunin INSERT, `extendCandidates=true` — the
+            // paper recommends it for EXTREMELY CLUSTERED data, which is exactly our regime). Extend the candidate
+            // pool with the candidates' own layer-`layer` neighbors before the diversity `select_from`. White-box
+            // anatomy (scratch) proved this collapses the ef-insensitive routing gap: recall@10 0.975→1.000 at
+            // 80k×768d and holds across scale (meanHop entry→trueNN → 0). Without it, the graph lacks long-range
+            // "highways" → high hop-distance → the beam needs a wide ef → the iso-recall latency gap vs pgvector.
+            if crate::ann::hnsw_parallel::extend_candidates() {
+                let mut seen: std::collections::HashSet<usize> = candidates.iter().map(|c| c.i).collect();
+                let base: Vec<usize> = candidates.iter().map(|c| c.i).collect();
+                for ci in base {
+                    for &nb in self.neighbors[ci].get(layer).map(|v| v.as_slice()).unwrap_or(&[]) {
+                        if seen.insert(nb) {
+                            candidates.push(Cand { d: self.metric.dist_simd(&q, &self.vectors[nb]), i: nb });
+                        }
+                    }
+                }
+            }
             let selected = self.select_from(candidates, m_layer);
             self.neighbors[node][layer] = selected.clone();
             for &nb in &selected {

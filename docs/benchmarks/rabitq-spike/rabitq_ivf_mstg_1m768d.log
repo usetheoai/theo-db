@@ -1,0 +1,1713 @@
+CLONE 2026-07-10T14:49:32Z
+Cloning into '/root/rabitq-rs'...
+BUILD 2026-07-10T14:49:33Z
+   Compiling rabitq-rs v0.9.0 (/root/rabitq-rs)
+    Finished `release` profile [optimized] target(s) in 2m 19s
+RUN_1M 2026-07-10T14:52:20Z
+    Finished `release` profile [optimized] target(s) in 0.08s
+     Running `target/release/examples/bench_ivf_vs_mstg --random --n 1000000 --dim 768 --k 10`
+
+========================================================
+  IVF vs MSTG-mem vs MSTG-disk Benchmark
+========================================================
+
+Loading data ...
+  generating 1000000 random vectors (dim=768) ...
+  computing brute-force ground truth ...
+
+  vectors  : 1000000
+  queries  : 100
+  dim      : 768
+  k        : 10
+  metric   : L2
+  load time: 100027 ms
+
+--- IVF (nlist=1000) ---
+Training k-means on original data (1000 clusters, 30 iterations)...
+  K-means: 256000 points, 1000 clusters, 30 iterations, 1 restarts
+    Restart 1/1: objective = 6.31e7
+K-means training complete
+Huge pages: DISABLED (compile with --features huge_pages to enable)
+Rotating data vectors...
+Rotating centroids...
+Quantizing vectors...
+  Quantized 50/1000 clusters (5.0%)
+  Quantized 100/1000 clusters (10.0%)
+  Quantized 150/1000 clusters (15.0%)
+  Quantized 200/1000 clusters (20.0%)
+  Quantized 250/1000 clusters (25.0%)
+  Quantized 300/1000 clusters (30.0%)
+  Quantized 350/1000 clusters (35.0%)
+  Quantized 400/1000 clusters (40.0%)
+  Quantized 450/1000 clusters (45.0%)
+  Quantized 500/1000 clusters (50.0%)
+  Quantized 550/1000 clusters (55.0%)
+  Quantized 600/1000 clusters (60.0%)
+  Quantized 650/1000 clusters (65.0%)
+  Quantized 700/1000 clusters (70.0%)
+  Quantized 750/1000 clusters (75.0%)
+  Quantized 800/1000 clusters (80.0%)
+  Quantized 850/1000 clusters (85.0%)
+  Quantized 900/1000 clusters (90.0%)
+  Quantized 950/1000 clusters (95.0%)
+  Quantized 1000/1000 clusters (100.0%)
+Quantization complete
+Building clusters with unified memory layout...
+Cluster construction complete
+  build    : 67110 ms
+  memory   : 702.9 MB
+[FastScan] Using AVX-512 optimized path
+
+    nprobe    recall@K     latency         QPS
+  --------  ----------  ----------  ----------
+         1        0.8%       371 us        2697
+         2        1.7%       444 us        2252
+         4        2.8%       569 us        1758
+         8        4.1%       770 us        1299
+        25        9.8%      1465 us         683
+        37       11.8%      1879 us         532
+        55       16.0%      2485 us         402
+        82       23.5%      3305 us         303
+       123       29.7%      4414 us         227
+       184       42.7%      5921 us         169
+       276       54.9%      8103 us         123
+       414       70.3%     11117 us          90
+       621       84.7%     15171 us          66
+       931       91.0%     17752 us          56
+      1000       91.0%     17863 us          56
+
+--- MSTG-mem (epsilon=0.02) ---
+Building MSTG index for 1000000 vectors
+Step 1: Hierarchical balanced clustering...
+Starting hierarchical clustering: 1000000 vectors, max_size=1000, branching=8
+  Iteration 1: Splitting cluster of size 1000000 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.39e7
+  Iteration 2: Splitting cluster of size 32997 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.10e6
+  Iteration 3: Splitting cluster of size 5062 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.20e5
+  Iteration 4: Splitting cluster of size 1008 into 8 subclusters
+  K-means: 1008 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.29e4
+  Iteration 5: Splitting cluster of size 3085 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.95e5
+  Iteration 6: Splitting cluster of size 7119 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 4.51e5
+  Iteration 7: Splitting cluster of size 1418 into 8 subclusters
+  K-means: 1418 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.89e4
+  Iteration 8: Splitting cluster of size 1301 into 8 subclusters
+  K-means: 1301 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.15e4
+  Iteration 9: Splitting cluster of size 1271 into 8 subclusters
+  K-means: 1271 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.96e4
+  Iteration 10: Splitting cluster of size 1385 into 8 subclusters
+  K-means: 1385 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.69e4
+  Iteration 11: Splitting cluster of size 1125 into 8 subclusters
+  K-means: 1125 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.04e4
+  Iteration 12: Splitting cluster of size 6266 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.96e5
+  Iteration 13: Splitting cluster of size 1336 into 8 subclusters
+  K-means: 1336 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.35e4
+  Iteration 14: Splitting cluster of size 1137 into 8 subclusters
+  K-means: 1137 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.10e4
+  Iteration 15: Splitting cluster of size 5130 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.24e5
+  Iteration 16: Splitting cluster of size 1499 into 8 subclusters
+  K-means: 1499 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 9.39e4
+  Iteration 17: Splitting cluster of size 4030 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.54e5
+  Iteration 18: Splitting cluster of size 1180 into 8 subclusters
+  K-means: 1180 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.39e4
+  Iteration 19: Splitting cluster of size 143737 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 9.17e6
+  Iteration 20: Splitting cluster of size 41178 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.62e6
+  Iteration 21: Splitting cluster of size 6941 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 4.39e5
+  Iteration 22: Splitting cluster of size 1426 into 8 subclusters
+  K-means: 1426 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.91e4
+  Iteration 23: Splitting cluster of size 1144 into 8 subclusters
+  K-means: 1144 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.16e4
+  Iteration 24: Splitting cluster of size 1763 into 8 subclusters
+  K-means: 1763 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.11e5
+  Iteration 25: Splitting cluster of size 1644 into 8 subclusters
+  K-means: 1644 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.03e5
+  Iteration 26: Splitting cluster of size 1674 into 8 subclusters
+  K-means: 1674 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.05e5
+  Iteration 27: Splitting cluster of size 11969 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.59e5
+  Iteration 28: Splitting cluster of size 1652 into 8 subclusters
+  K-means: 1652 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.04e5
+  Iteration 29: Splitting cluster of size 2473 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.56e5
+  Iteration 30: Splitting cluster of size 2013 into 8 subclusters
+  K-means: 2013 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.26e5
+  Iteration 31: Splitting cluster of size 3103 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.96e5
+  Iteration 32: Splitting cluster of size 1249 into 8 subclusters
+  K-means: 1249 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.81e4
+  Iteration 33: Splitting cluster of size 2691 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.69e5
+  Iteration 34: Splitting cluster of size 6264 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.97e5
+  Iteration 35: Splitting cluster of size 1663 into 8 subclusters
+  K-means: 1663 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.04e5
+  Iteration 36: Splitting cluster of size 1295 into 8 subclusters
+  K-means: 1295 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.11e4
+  Iteration 37: Splitting cluster of size 1063 into 8 subclusters
+  K-means: 1063 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.63e4
+  Iteration 38: Splitting cluster of size 4506 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.85e5
+  Iteration 39: Splitting cluster of size 1267 into 8 subclusters
+  K-means: 1267 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.94e4
+  Iteration 40: Splitting cluster of size 5489 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.47e5
+  Iteration 41: Splitting cluster of size 1080 into 8 subclusters
+  K-means: 1080 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.75e4
+  Iteration 42: Splitting cluster of size 11689 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.41e5
+  Iteration 43: Splitting cluster of size 2640 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.66e5
+  Iteration 44: Splitting cluster of size 2028 into 8 subclusters
+  K-means: 2028 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.27e5
+  Iteration 45: Splitting cluster of size 2384 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.50e5
+  Iteration 46: Splitting cluster of size 1470 into 8 subclusters
+  K-means: 1470 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 9.21e4
+  Iteration 47: Splitting cluster of size 1121 into 8 subclusters
+  K-means: 1121 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.99e4
+  Iteration 48: Splitting cluster of size 1823 into 8 subclusters
+  K-means: 1823 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.14e5
+  Iteration 49: Splitting cluster of size 38716 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.46e6
+  Iteration 50: Splitting cluster of size 6043 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.82e5
+  Iteration 51: Splitting cluster of size 1196 into 8 subclusters
+  K-means: 1196 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.50e4
+  Iteration 52: Splitting cluster of size 1099 into 8 subclusters
+  K-means: 1099 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.87e4
+  Iteration 53: Splitting cluster of size 1308 into 8 subclusters
+  K-means: 1308 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.20e4
+  Iteration 54: Splitting cluster of size 6039 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.82e5
+  Iteration 55: Splitting cluster of size 1072 into 8 subclusters
+  K-means: 1072 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.70e4
+  Iteration 56: Splitting cluster of size 2071 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.30e5
+  Iteration 57: Splitting cluster of size 1063 into 8 subclusters
+  K-means: 1063 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.65e4
+  Iteration 58: Splitting cluster of size 1134 into 8 subclusters
+  K-means: 1134 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.10e4
+  Iteration 59: Splitting cluster of size 8795 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 5.58e5
+  Iteration 60: Splitting cluster of size 2506 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.58e5
+  Iteration 61: Splitting cluster of size 1055 into 8 subclusters
+  K-means: 1055 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.60e4
+  Iteration 62: Splitting cluster of size 1639 into 8 subclusters
+  K-means: 1639 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.03e5
+  Iteration 63: Splitting cluster of size 1318 into 8 subclusters
+  K-means: 1318 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.26e4
+  Iteration 64: Splitting cluster of size 1854 into 8 subclusters
+  K-means: 1854 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.16e5
+  Iteration 65: Splitting cluster of size 9176 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 5.82e5
+  Iteration 66: Splitting cluster of size 1947 into 8 subclusters
+  K-means: 1947 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.22e5
+  Iteration 67: Splitting cluster of size 1053 into 8 subclusters
+  K-means: 1053 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.58e4
+  Iteration 68: Splitting cluster of size 2075 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.30e5
+  Iteration 69: Splitting cluster of size 1023 into 8 subclusters
+  K-means: 1023 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.38e4
+  Iteration 70: Splitting cluster of size 4367 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.76e5
+  Iteration 71: Splitting cluster of size 1104 into 8 subclusters
+  K-means: 1104 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.91e4
+  Iteration 72: Splitting cluster of size 12939 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.21e5
+  Iteration 73: Splitting cluster of size 1334 into 8 subclusters
+  K-means: 1334 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.36e4
+  Iteration 74: Splitting cluster of size 2968 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.87e5
+  Iteration 75: Splitting cluster of size 2534 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.60e5
+  Iteration 76: Splitting cluster of size 2214 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.39e5
+  Iteration 77: Splitting cluster of size 1315 into 8 subclusters
+  K-means: 1315 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.23e4
+  Iteration 78: Splitting cluster of size 1853 into 8 subclusters
+  K-means: 1853 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.16e5
+  Iteration 79: Splitting cluster of size 1287 into 8 subclusters
+  K-means: 1287 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.07e4
+  Iteration 80: Splitting cluster of size 19772 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.26e6
+  Iteration 81: Splitting cluster of size 2968 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.87e5
+  Iteration 82: Splitting cluster of size 5988 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.79e5
+  Iteration 83: Splitting cluster of size 1192 into 8 subclusters
+  K-means: 1192 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.46e4
+  Iteration 84: Splitting cluster of size 1449 into 8 subclusters
+  K-means: 1449 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 9.07e4
+  Iteration 85: Splitting cluster of size 3373 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.13e5
+  Iteration 86: Splitting cluster of size 4123 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.60e5
+  Iteration 87: Splitting cluster of size 9730 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.17e5
+  Iteration 88: Splitting cluster of size 1166 into 8 subclusters
+  K-means: 1166 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.29e4
+  Iteration 89: Splitting cluster of size 2010 into 8 subclusters
+  K-means: 2010 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.26e5
+  Iteration 90: Splitting cluster of size 1241 into 8 subclusters
+  K-means: 1241 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.77e4
+  Iteration 91: Splitting cluster of size 1649 into 8 subclusters
+  K-means: 1649 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.03e5
+  Iteration 92: Splitting cluster of size 2004 into 8 subclusters
+  K-means: 2004 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.26e5
+  Iteration 93: Splitting cluster of size 1060 into 8 subclusters
+  K-means: 1060 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.63e4
+  Iteration 94: Splitting cluster of size 8426 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 5.34e5
+  Iteration 95: Splitting cluster of size 1396 into 8 subclusters
+  K-means: 1396 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.75e4
+  Iteration 96: Splitting cluster of size 1432 into 8 subclusters
+  K-means: 1432 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.97e4
+  Iteration 97: Splitting cluster of size 1454 into 8 subclusters
+  K-means: 1454 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 9.10e4
+  Iteration 98: Splitting cluster of size 1326 into 8 subclusters
+  K-means: 1326 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.32e4
+  Iteration 99: Splitting cluster of size 1088 into 8 subclusters
+  K-means: 1088 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.79e4
+  Iteration 100: Splitting cluster of size 171100 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.09e7
+  Iteration 101: Splitting cluster of size 35929 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.28e6
+  Iteration 102: Splitting cluster of size 1733 into 8 subclusters
+  K-means: 1733 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.09e5
+  Iteration 103: Splitting cluster of size 8641 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 5.47e5
+  Iteration 104: Splitting cluster of size 2047 into 8 subclusters
+  K-means: 2047 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.28e5
+  Iteration 105: Splitting cluster of size 1578 into 8 subclusters
+  K-means: 1578 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 9.88e4
+  Iteration 106: Splitting cluster of size 1925 into 8 subclusters
+  K-means: 1925 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.21e5
+  Iteration 107: Splitting cluster of size 1512 into 8 subclusters
+  K-means: 1512 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 9.47e4
+  Iteration 108: Splitting cluster of size 2034 into 8 subclusters
+  K-means: 2034 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.28e5
+  Iteration 109: Splitting cluster of size 9028 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 5.72e5
+  Iteration 110: Splitting cluster of size 1077 into 8 subclusters
+  K-means: 1077 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.74e4
+  Iteration 111: Splitting cluster of size 1810 into 8 subclusters
+  K-means: 1810 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.14e5
+  Iteration 112: Splitting cluster of size 1397 into 8 subclusters
+  K-means: 1397 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.76e4
+  Iteration 113: Splitting cluster of size 1549 into 8 subclusters
+  K-means: 1549 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 9.71e4
+  Iteration 114: Splitting cluster of size 1451 into 8 subclusters
+  K-means: 1451 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 9.09e4
+  Iteration 115: Splitting cluster of size 2472 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.55e5
+  Iteration 116: Splitting cluster of size 10153 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.43e5
+  Iteration 117: Splitting cluster of size 1520 into 8 subclusters
+  K-means: 1520 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 9.53e4
+  Iteration 118: Splitting cluster of size 1935 into 8 subclusters
+  K-means: 1935 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.22e5
+  Iteration 119: Splitting cluster of size 1129 into 8 subclusters
+  K-means: 1129 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.07e4
+  Iteration 120: Splitting cluster of size 1395 into 8 subclusters
+  K-means: 1395 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.73e4
+  Iteration 121: Splitting cluster of size 1186 into 8 subclusters
+  K-means: 1186 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.41e4
+  Iteration 122: Splitting cluster of size 1137 into 8 subclusters
+  K-means: 1137 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.11e4
+  Iteration 123: Splitting cluster of size 20075 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.28e6
+  Iteration 124: Splitting cluster of size 1987 into 8 subclusters
+  K-means: 1987 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.25e5
+  Iteration 125: Splitting cluster of size 2610 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.64e5
+  Iteration 126: Splitting cluster of size 2503 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.58e5
+  Iteration 127: Splitting cluster of size 4993 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.16e5
+  Iteration 128: Splitting cluster of size 1029 into 8 subclusters
+  K-means: 1029 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.42e4
+  Iteration 129: Splitting cluster of size 3644 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.30e5
+  Iteration 130: Splitting cluster of size 1111 into 8 subclusters
+  K-means: 1111 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.95e4
+  Iteration 131: Splitting cluster of size 2541 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.60e5
+  Iteration 132: Splitting cluster of size 1607 into 8 subclusters
+  K-means: 1607 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.01e5
+  Iteration 133: Splitting cluster of size 15136 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 9.61e5
+  Iteration 134: Splitting cluster of size 1072 into 8 subclusters
+  K-means: 1072 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.71e4
+  Iteration 135: Splitting cluster of size 3936 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.48e5
+  Iteration 136: Splitting cluster of size 3120 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.97e5
+  Iteration 137: Splitting cluster of size 1434 into 8 subclusters
+  K-means: 1434 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.98e4
+  Iteration 138: Splitting cluster of size 3821 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.41e5
+  Iteration 139: Splitting cluster of size 1143 into 8 subclusters
+  K-means: 1143 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.14e4
+  Iteration 140: Splitting cluster of size 1068 into 8 subclusters
+  K-means: 1068 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.68e4
+  Iteration 141: Splitting cluster of size 52959 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.37e6
+  Iteration 142: Splitting cluster of size 1646 into 8 subclusters
+  K-means: 1646 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.03e5
+  Iteration 143: Splitting cluster of size 4981 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.15e5
+  Iteration 144: Splitting cluster of size 1242 into 8 subclusters
+  K-means: 1242 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.79e4
+  Iteration 145: Splitting cluster of size 11410 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.24e5
+  Iteration 146: Splitting cluster of size 1507 into 8 subclusters
+  K-means: 1507 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 9.45e4
+  Iteration 147: Splitting cluster of size 1165 into 8 subclusters
+  K-means: 1165 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.29e4
+  Iteration 148: Splitting cluster of size 1024 into 8 subclusters
+  K-means: 1024 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.40e4
+  Iteration 149: Splitting cluster of size 1377 into 8 subclusters
+  K-means: 1377 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.62e4
+  Iteration 150: Splitting cluster of size 1782 into 8 subclusters
+  K-means: 1782 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.12e5
+  Iteration 151: Splitting cluster of size 1803 into 8 subclusters
+  K-means: 1803 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.13e5
+  Iteration 152: Splitting cluster of size 1294 into 8 subclusters
+  K-means: 1294 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.11e4
+  Iteration 153: Splitting cluster of size 1458 into 8 subclusters
+  K-means: 1458 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 9.14e4
+  Iteration 154: Splitting cluster of size 5161 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.26e5
+  Iteration 155: Splitting cluster of size 1193 into 8 subclusters
+  K-means: 1193 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.47e4
+  Iteration 156: Splitting cluster of size 5040 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.19e5
+  Iteration 157: Splitting cluster of size 1015 into 8 subclusters
+  K-means: 1015 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.34e4
+  Iteration 158: Splitting cluster of size 4541 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.87e5
+  Iteration 159: Splitting cluster of size 6492 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 4.11e5
+  Iteration 160: Splitting cluster of size 1040 into 8 subclusters
+  K-means: 1040 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.49e4
+  Iteration 161: Splitting cluster of size 1096 into 8 subclusters
+  K-means: 1096 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.85e4
+  Iteration 162: Splitting cluster of size 1312 into 8 subclusters
+  K-means: 1312 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.21e4
+  Iteration 163: Splitting cluster of size 1159 into 8 subclusters
+  K-means: 1159 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.25e4
+  Iteration 164: Splitting cluster of size 13688 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.68e5
+  Iteration 165: Splitting cluster of size 1114 into 8 subclusters
+  K-means: 1114 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.96e4
+  Iteration 166: Splitting cluster of size 1332 into 8 subclusters
+  K-means: 1332 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.35e4
+  Iteration 167: Splitting cluster of size 1996 into 8 subclusters
+  K-means: 1996 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.25e5
+  Iteration 168: Splitting cluster of size 1904 into 8 subclusters
+  K-means: 1904 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.20e5
+  Iteration 169: Splitting cluster of size 1302 into 8 subclusters
+  K-means: 1302 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.14e4
+  Iteration 170: Splitting cluster of size 3120 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.97e5
+  Iteration 171: Splitting cluster of size 1938 into 8 subclusters
+  K-means: 1938 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.22e5
+  Iteration 172: Splitting cluster of size 23872 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.52e6
+  Iteration 173: Splitting cluster of size 2714 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.71e5
+  Iteration 174: Splitting cluster of size 2063 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.30e5
+  Iteration 175: Splitting cluster of size 2094 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.31e5
+  Iteration 176: Splitting cluster of size 1887 into 8 subclusters
+  K-means: 1887 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.18e5
+  Iteration 177: Splitting cluster of size 2722 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.72e5
+  Iteration 178: Splitting cluster of size 5905 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.73e5
+  Iteration 179: Splitting cluster of size 3665 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.31e5
+  Iteration 180: Splitting cluster of size 2822 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.78e5
+  Iteration 181: Splitting cluster of size 16071 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.02e6
+  Iteration 182: Splitting cluster of size 2040 into 8 subclusters
+  K-means: 2040 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.28e5
+  Iteration 183: Splitting cluster of size 1732 into 8 subclusters
+  K-means: 1732 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.09e5
+  Iteration 184: Splitting cluster of size 2332 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.47e5
+  Iteration 185: Splitting cluster of size 4610 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.92e5
+  Iteration 186: Splitting cluster of size 1428 into 8 subclusters
+  K-means: 1428 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.95e4
+  Iteration 187: Splitting cluster of size 1066 into 8 subclusters
+  K-means: 1066 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.66e4
+  Iteration 188: Splitting cluster of size 2540 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.60e5
+  Iteration 189: Splitting cluster of size 1147 into 8 subclusters
+  K-means: 1147 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.17e4
+  Iteration 190: Splitting cluster of size 1524 into 8 subclusters
+  K-means: 1524 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 9.55e4
+  Iteration 191: Splitting cluster of size 6616 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 4.19e5
+  Iteration 192: Splitting cluster of size 1172 into 8 subclusters
+  K-means: 1172 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.32e4
+  Iteration 193: Splitting cluster of size 1172 into 8 subclusters
+  K-means: 1172 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.33e4
+  Iteration 194: Splitting cluster of size 139829 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.92e6
+  Iteration 195: Splitting cluster of size 27789 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.77e6
+  Iteration 196: Splitting cluster of size 4134 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.61e5
+  Iteration 197: Splitting cluster of size 1118 into 8 subclusters
+  K-means: 1118 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.00e4
+  Iteration 198: Splitting cluster of size 2373 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.49e5
+  Iteration 199: Splitting cluster of size 5246 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.32e5
+  Iteration 200: Splitting cluster of size 4130 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.61e5
+  Iteration 201: Splitting cluster of size 4032 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.55e5
+  Iteration 202: Splitting cluster of size 5346 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.38e5
+  Iteration 203: Splitting cluster of size 1096 into 8 subclusters
+  K-means: 1096 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.85e4
+  Iteration 204: Splitting cluster of size 1098 into 8 subclusters
+  K-means: 1098 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.86e4
+  Iteration 205: Splitting cluster of size 2258 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.42e5
+  Iteration 206: Splitting cluster of size 21650 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.38e6
+  Iteration 207: Splitting cluster of size 3403 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.15e5
+  Iteration 208: Splitting cluster of size 1202 into 8 subclusters
+  K-means: 1202 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.53e4
+  Iteration 209: Splitting cluster of size 2322 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.46e5
+  Iteration 210: Splitting cluster of size 4217 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.66e5
+  Iteration 211: Splitting cluster of size 4149 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.62e5
+  Iteration 212: Splitting cluster of size 1006 into 8 subclusters
+  K-means: 1006 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.28e4
+  Iteration 213: Splitting cluster of size 3472 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.19e5
+  Iteration 214: Splitting cluster of size 2358 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.48e5
+  Iteration 215: Splitting cluster of size 18018 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.14e6
+  Iteration 216: Splitting cluster of size 2768 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.74e5
+  Iteration 217: Splitting cluster of size 2185 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.37e5
+  Iteration 218: Splitting cluster of size 1521 into 8 subclusters
+  K-means: 1521 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 9.54e4
+  Iteration 219: Splitting cluster of size 3866 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.44e5
+  Iteration 220: Splitting cluster of size 3155 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.99e5
+  Iteration 221: Splitting cluster of size 2983 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.88e5
+  Iteration 222: Splitting cluster of size 6812 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 4.32e5
+  Iteration 223: Splitting cluster of size 1182 into 8 subclusters
+  K-means: 1182 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.39e4
+  Iteration 224: Splitting cluster of size 1653 into 8 subclusters
+  K-means: 1653 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.04e5
+  Iteration 225: Splitting cluster of size 1357 into 8 subclusters
+  K-means: 1357 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.51e4
+  Iteration 226: Splitting cluster of size 15469 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 9.82e5
+  Iteration 227: Splitting cluster of size 1223 into 8 subclusters
+  K-means: 1223 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.68e4
+  Iteration 228: Splitting cluster of size 3238 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.04e5
+  Iteration 229: Splitting cluster of size 2778 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.75e5
+  Iteration 230: Splitting cluster of size 3881 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.45e5
+  Iteration 231: Splitting cluster of size 2740 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.72e5
+  Iteration 232: Splitting cluster of size 5363 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.39e5
+  Iteration 233: Splitting cluster of size 1087 into 8 subclusters
+  K-means: 1087 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.81e4
+  Iteration 234: Splitting cluster of size 1093 into 8 subclusters
+  K-means: 1093 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.83e4
+  Iteration 235: Splitting cluster of size 24930 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.58e6
+  Iteration 236: Splitting cluster of size 6789 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 4.30e5
+  Iteration 237: Splitting cluster of size 1047 into 8 subclusters
+  K-means: 1047 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.54e4
+  Iteration 238: Splitting cluster of size 1240 into 8 subclusters
+  K-means: 1240 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.76e4
+  Iteration 239: Splitting cluster of size 1646 into 8 subclusters
+  K-means: 1646 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.03e5
+  Iteration 240: Splitting cluster of size 3588 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.26e5
+  Iteration 241: Splitting cluster of size 5584 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.53e5
+  Iteration 242: Splitting cluster of size 1257 into 8 subclusters
+  K-means: 1257 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.87e4
+  Iteration 243: Splitting cluster of size 1802 into 8 subclusters
+  K-means: 1802 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.13e5
+  Iteration 244: Splitting cluster of size 1834 into 8 subclusters
+  K-means: 1834 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.15e5
+  Iteration 245: Splitting cluster of size 3107 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.96e5
+  Iteration 246: Splitting cluster of size 19798 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.26e6
+  Iteration 247: Splitting cluster of size 1347 into 8 subclusters
+  K-means: 1347 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.44e4
+  Iteration 248: Splitting cluster of size 2064 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.29e5
+  Iteration 249: Splitting cluster of size 1143 into 8 subclusters
+  K-means: 1143 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.15e4
+  Iteration 250: Splitting cluster of size 4694 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.97e5
+  Iteration 251: Splitting cluster of size 1694 into 8 subclusters
+  K-means: 1694 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.06e5
+  Iteration 252: Splitting cluster of size 3764 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.38e5
+  Iteration 253: Splitting cluster of size 4896 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.10e5
+  Iteration 254: Splitting cluster of size 62301 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.97e6
+  Iteration 255: Splitting cluster of size 3026 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.91e5
+  Iteration 256: Splitting cluster of size 8117 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 5.14e5
+  Iteration 257: Splitting cluster of size 1580 into 8 subclusters
+  K-means: 1580 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 9.91e4
+  Iteration 258: Splitting cluster of size 1936 into 8 subclusters
+  K-means: 1936 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.22e5
+  Iteration 259: Splitting cluster of size 1016 into 8 subclusters
+  K-means: 1016 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.34e4
+  Iteration 260: Splitting cluster of size 1672 into 8 subclusters
+  K-means: 1672 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.05e5
+  Iteration 261: Splitting cluster of size 14803 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 9.40e5
+  Iteration 262: Splitting cluster of size 1674 into 8 subclusters
+  K-means: 1674 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.05e5
+  Iteration 263: Splitting cluster of size 1656 into 8 subclusters
+  K-means: 1656 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.04e5
+  Iteration 264: Splitting cluster of size 1271 into 8 subclusters
+  K-means: 1271 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.96e4
+  Iteration 265: Splitting cluster of size 2760 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.74e5
+  Iteration 266: Splitting cluster of size 1656 into 8 subclusters
+  K-means: 1656 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.04e5
+  Iteration 267: Splitting cluster of size 2406 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.51e5
+  Iteration 268: Splitting cluster of size 2512 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.58e5
+  Iteration 269: Splitting cluster of size 10362 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.57e5
+  Iteration 270: Splitting cluster of size 1943 into 8 subclusters
+  K-means: 1943 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.22e5
+  Iteration 271: Splitting cluster of size 1559 into 8 subclusters
+  K-means: 1559 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 9.78e4
+  Iteration 272: Splitting cluster of size 1222 into 8 subclusters
+  K-means: 1222 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.64e4
+  Iteration 273: Splitting cluster of size 1472 into 8 subclusters
+  K-means: 1472 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 9.22e4
+  Iteration 274: Splitting cluster of size 1900 into 8 subclusters
+  K-means: 1900 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.19e5
+  Iteration 275: Splitting cluster of size 3948 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.49e5
+  Iteration 276: Splitting cluster of size 10920 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.93e5
+  Iteration 277: Splitting cluster of size 1385 into 8 subclusters
+  K-means: 1385 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.68e4
+  Iteration 278: Splitting cluster of size 1546 into 8 subclusters
+  K-means: 1546 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 9.70e4
+  Iteration 279: Splitting cluster of size 1082 into 8 subclusters
+  K-means: 1082 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.77e4
+  Iteration 280: Splitting cluster of size 1746 into 8 subclusters
+  K-means: 1746 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.10e5
+  Iteration 281: Splitting cluster of size 2142 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.35e5
+  Iteration 282: Splitting cluster of size 1366 into 8 subclusters
+  K-means: 1366 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.55e4
+  Iteration 283: Splitting cluster of size 10703 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.79e5
+  Iteration 284: Splitting cluster of size 3946 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.49e5
+  Iteration 285: Splitting cluster of size 1009 into 8 subclusters
+  K-means: 1009 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.30e4
+  Iteration 286: Splitting cluster of size 1585 into 8 subclusters
+  K-means: 1585 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 9.94e4
+  Iteration 287: Splitting cluster of size 1356 into 8 subclusters
+  K-means: 1356 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.49e4
+  Iteration 288: Splitting cluster of size 1061 into 8 subclusters
+  K-means: 1061 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.64e4
+  Iteration 289: Splitting cluster of size 1344 into 8 subclusters
+  K-means: 1344 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.42e4
+  Iteration 290: Splitting cluster of size 138120 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.81e6
+  Iteration 291: Splitting cluster of size 27767 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.76e6
+  Iteration 292: Splitting cluster of size 4015 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.53e5
+  Iteration 293: Splitting cluster of size 3844 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.42e5
+  Iteration 294: Splitting cluster of size 1120 into 8 subclusters
+  K-means: 1120 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.00e4
+  Iteration 295: Splitting cluster of size 5551 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.51e5
+  Iteration 296: Splitting cluster of size 1007 into 8 subclusters
+  K-means: 1007 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.30e4
+  Iteration 297: Splitting cluster of size 1121 into 8 subclusters
+  K-means: 1121 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.00e4
+  Iteration 298: Splitting cluster of size 3469 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.19e5
+  Iteration 299: Splitting cluster of size 2931 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.85e5
+  Iteration 300: Splitting cluster of size 5326 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.37e5
+  Iteration 301: Splitting cluster of size 1017 into 8 subclusters
+  K-means: 1017 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.36e4
+  Iteration 302: Splitting cluster of size 1301 into 8 subclusters
+  K-means: 1301 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.15e4
+  Iteration 303: Splitting cluster of size 1728 into 8 subclusters
+  K-means: 1728 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.09e5
+  Iteration 304: Splitting cluster of size 21697 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.38e6
+  Iteration 305: Splitting cluster of size 2465 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.55e5
+  Iteration 306: Splitting cluster of size 2170 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.36e5
+  Iteration 307: Splitting cluster of size 1299 into 8 subclusters
+  K-means: 1299 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.14e4
+  Iteration 308: Splitting cluster of size 3778 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.38e5
+  Iteration 309: Splitting cluster of size 1055 into 8 subclusters
+  K-means: 1055 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.59e4
+  Iteration 310: Splitting cluster of size 1973 into 8 subclusters
+  K-means: 1973 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.24e5
+  Iteration 311: Splitting cluster of size 5282 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.34e5
+  Iteration 312: Splitting cluster of size 1001 into 8 subclusters
+  K-means: 1001 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.25e4
+  Iteration 313: Splitting cluster of size 1900 into 8 subclusters
+  K-means: 1900 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.19e5
+  Iteration 314: Splitting cluster of size 3802 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.40e5
+  Iteration 315: Splitting cluster of size 12851 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.15e5
+  Iteration 316: Splitting cluster of size 1108 into 8 subclusters
+  K-means: 1108 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.92e4
+  Iteration 317: Splitting cluster of size 2900 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.83e5
+  Iteration 318: Splitting cluster of size 2577 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.62e5
+  Iteration 319: Splitting cluster of size 3597 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.27e5
+  Iteration 320: Splitting cluster of size 1433 into 8 subclusters
+  K-means: 1433 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.98e4
+  Iteration 321: Splitting cluster of size 19024 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.21e6
+  Iteration 322: Splitting cluster of size 2104 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.32e5
+  Iteration 323: Splitting cluster of size 2837 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.79e5
+  Iteration 324: Splitting cluster of size 2080 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.31e5
+  Iteration 325: Splitting cluster of size 4423 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.80e5
+  Iteration 326: Splitting cluster of size 1384 into 8 subclusters
+  K-means: 1384 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.68e4
+  Iteration 327: Splitting cluster of size 2321 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.46e5
+  Iteration 328: Splitting cluster of size 2959 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.87e5
+  Iteration 329: Splitting cluster of size 1889 into 8 subclusters
+  K-means: 1889 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.19e5
+  Iteration 330: Splitting cluster of size 19394 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.23e6
+  Iteration 331: Splitting cluster of size 3044 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.92e5
+  Iteration 332: Splitting cluster of size 2279 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.43e5
+  Iteration 333: Splitting cluster of size 3074 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.94e5
+  Iteration 334: Splitting cluster of size 3786 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.39e5
+  Iteration 335: Splitting cluster of size 1442 into 8 subclusters
+  K-means: 1442 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 9.04e4
+  Iteration 336: Splitting cluster of size 3566 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.25e5
+  Iteration 337: Splitting cluster of size 2147 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.35e5
+  Iteration 338: Splitting cluster of size 23580 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.50e6
+  Iteration 339: Splitting cluster of size 4974 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.15e5
+  Iteration 340: Splitting cluster of size 1335 into 8 subclusters
+  K-means: 1335 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.37e4
+  Iteration 341: Splitting cluster of size 1073 into 8 subclusters
+  K-means: 1073 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.71e4
+  Iteration 342: Splitting cluster of size 3828 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.42e5
+  Iteration 343: Splitting cluster of size 5970 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.78e5
+  Iteration 344: Splitting cluster of size 1351 into 8 subclusters
+  K-means: 1351 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.45e4
+  Iteration 345: Splitting cluster of size 1285 into 8 subclusters
+  K-means: 1285 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.05e4
+  Iteration 346: Splitting cluster of size 4186 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.64e5
+  Iteration 347: Splitting cluster of size 3112 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.96e5
+  Iteration 348: Splitting cluster of size 13144 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.34e5
+  Iteration 349: Splitting cluster of size 1764 into 8 subclusters
+  K-means: 1764 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.11e5
+  Iteration 350: Splitting cluster of size 2552 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.61e5
+  Iteration 351: Splitting cluster of size 1038 into 8 subclusters
+  K-means: 1038 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.49e4
+  Iteration 352: Splitting cluster of size 1182 into 8 subclusters
+  K-means: 1182 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.40e4
+  Iteration 353: Splitting cluster of size 1567 into 8 subclusters
+  K-means: 1567 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 9.84e4
+  Iteration 354: Splitting cluster of size 1999 into 8 subclusters
+  K-means: 1999 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.26e5
+  Iteration 355: Splitting cluster of size 1370 into 8 subclusters
+  K-means: 1370 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.59e4
+  Iteration 356: Splitting cluster of size 1968 into 8 subclusters
+  K-means: 1968 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.23e5
+  Iteration 357: Splitting cluster of size 93348 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 5.95e6
+  Iteration 358: Splitting cluster of size 21764 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.38e6
+  Iteration 359: Splitting cluster of size 4203 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.65e5
+  Iteration 360: Splitting cluster of size 3665 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.31e5
+  Iteration 361: Splitting cluster of size 2710 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.71e5
+  Iteration 362: Splitting cluster of size 5961 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.77e5
+  Iteration 363: Splitting cluster of size 1168 into 8 subclusters
+  K-means: 1168 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.31e4
+  Iteration 364: Splitting cluster of size 1366 into 8 subclusters
+  K-means: 1366 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.56e4
+  Iteration 365: Splitting cluster of size 3697 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.33e5
+  Iteration 366: Splitting cluster of size 4215 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.66e5
+  Iteration 367: Splitting cluster of size 2683 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.69e5
+  Iteration 368: Splitting cluster of size 11746 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.45e5
+  Iteration 369: Splitting cluster of size 1329 into 8 subclusters
+  K-means: 1329 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.32e4
+  Iteration 370: Splitting cluster of size 1604 into 8 subclusters
+  K-means: 1604 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.01e5
+  Iteration 371: Splitting cluster of size 2718 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.71e5
+  Iteration 372: Splitting cluster of size 1654 into 8 subclusters
+  K-means: 1654 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.04e5
+  Iteration 373: Splitting cluster of size 2035 into 8 subclusters
+  K-means: 2035 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.28e5
+  Iteration 374: Splitting cluster of size 1679 into 8 subclusters
+  K-means: 1679 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.05e5
+  Iteration 375: Splitting cluster of size 12853 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.16e5
+  Iteration 376: Splitting cluster of size 2091 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.31e5
+  Iteration 377: Splitting cluster of size 2672 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.68e5
+  Iteration 378: Splitting cluster of size 2103 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.32e5
+  Iteration 379: Splitting cluster of size 1006 into 8 subclusters
+  K-means: 1006 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.28e4
+  Iteration 380: Splitting cluster of size 3439 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.17e5
+  Iteration 381: Splitting cluster of size 28048 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.78e6
+  Iteration 382: Splitting cluster of size 3687 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.33e5
+  Iteration 383: Splitting cluster of size 1032 into 8 subclusters
+  K-means: 1032 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.45e4
+  Iteration 384: Splitting cluster of size 5851 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.70e5
+  Iteration 385: Splitting cluster of size 1541 into 8 subclusters
+  K-means: 1541 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 9.67e4
+  Iteration 386: Splitting cluster of size 3282 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.07e5
+  Iteration 387: Splitting cluster of size 1175 into 8 subclusters
+  K-means: 1175 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.34e4
+  Iteration 388: Splitting cluster of size 2860 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.80e5
+  Iteration 389: Splitting cluster of size 3093 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.95e5
+  Iteration 390: Splitting cluster of size 7604 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 4.82e5
+  Iteration 391: Splitting cluster of size 1178 into 8 subclusters
+  K-means: 1178 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.37e4
+  Iteration 392: Splitting cluster of size 1516 into 8 subclusters
+  K-means: 1516 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 9.51e4
+  Iteration 393: Splitting cluster of size 1515 into 8 subclusters
+  K-means: 1515 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 9.50e4
+  Iteration 394: Splitting cluster of size 1015 into 8 subclusters
+  K-means: 1015 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.34e4
+  Iteration 395: Splitting cluster of size 11899 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.55e5
+  Iteration 396: Splitting cluster of size 1561 into 8 subclusters
+  K-means: 1561 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 9.79e4
+  Iteration 397: Splitting cluster of size 1811 into 8 subclusters
+  K-means: 1811 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.13e5
+  Iteration 398: Splitting cluster of size 1430 into 8 subclusters
+  K-means: 1430 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.96e4
+  Iteration 399: Splitting cluster of size 2309 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.45e5
+  Iteration 400: Splitting cluster of size 2641 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.66e5
+  Iteration 401: Splitting cluster of size 218568 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.39e7
+  Iteration 402: Splitting cluster of size 10381 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.58e5
+  Iteration 403: Splitting cluster of size 1120 into 8 subclusters
+  K-means: 1120 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.00e4
+  Iteration 404: Splitting cluster of size 2400 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.51e5
+  Iteration 405: Splitting cluster of size 1599 into 8 subclusters
+  K-means: 1599 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.00e5
+  Iteration 406: Splitting cluster of size 1616 into 8 subclusters
+  K-means: 1616 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.01e5
+  Iteration 407: Splitting cluster of size 1683 into 8 subclusters
+  K-means: 1683 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.06e5
+  Iteration 408: Splitting cluster of size 34152 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.17e6
+  Iteration 409: Splitting cluster of size 4350 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.75e5
+  Iteration 410: Splitting cluster of size 5028 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.18e5
+  Iteration 411: Splitting cluster of size 1090 into 8 subclusters
+  K-means: 1090 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.81e4
+  Iteration 412: Splitting cluster of size 4248 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.68e5
+  Iteration 413: Splitting cluster of size 1394 into 8 subclusters
+  K-means: 1394 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.73e4
+  Iteration 414: Splitting cluster of size 8163 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 5.17e5
+  Iteration 415: Splitting cluster of size 1230 into 8 subclusters
+  K-means: 1230 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.70e4
+  Iteration 416: Splitting cluster of size 1260 into 8 subclusters
+  K-means: 1260 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.89e4
+  Iteration 417: Splitting cluster of size 1195 into 8 subclusters
+  K-means: 1195 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.48e4
+  Iteration 418: Splitting cluster of size 1227 into 8 subclusters
+  K-means: 1227 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.69e4
+  Iteration 419: Splitting cluster of size 1606 into 8 subclusters
+  K-means: 1606 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.01e5
+  Iteration 420: Splitting cluster of size 1278 into 8 subclusters
+  K-means: 1278 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.01e4
+  Iteration 421: Splitting cluster of size 2956 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.86e5
+  Iteration 422: Splitting cluster of size 3819 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.41e5
+  Iteration 423: Splitting cluster of size 5521 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.49e5
+  Iteration 424: Splitting cluster of size 1033 into 8 subclusters
+  K-means: 1033 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.45e4
+  Iteration 425: Splitting cluster of size 1043 into 8 subclusters
+  K-means: 1043 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.51e4
+  Iteration 426: Splitting cluster of size 21486 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.37e6
+  Iteration 427: Splitting cluster of size 3022 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.91e5
+  Iteration 428: Splitting cluster of size 2730 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.72e5
+  Iteration 429: Splitting cluster of size 3322 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.09e5
+  Iteration 430: Splitting cluster of size 2665 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.68e5
+  Iteration 431: Splitting cluster of size 3312 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.09e5
+  Iteration 432: Splitting cluster of size 3541 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.24e5
+  Iteration 433: Splitting cluster of size 1108 into 8 subclusters
+  K-means: 1108 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.94e4
+  Iteration 434: Splitting cluster of size 2475 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.56e5
+  Iteration 435: Splitting cluster of size 19531 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.24e6
+  Iteration 436: Splitting cluster of size 3755 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.37e5
+  Iteration 437: Splitting cluster of size 4869 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.08e5
+  Iteration 438: Splitting cluster of size 1108 into 8 subclusters
+  K-means: 1108 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.92e4
+  Iteration 439: Splitting cluster of size 3187 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.01e5
+  Iteration 440: Splitting cluster of size 6095 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.86e5
+  Iteration 441: Splitting cluster of size 1530 into 8 subclusters
+  K-means: 1530 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 9.59e4
+  Iteration 442: Splitting cluster of size 1156 into 8 subclusters
+  K-means: 1156 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.23e4
+  Iteration 443: Splitting cluster of size 1243 into 8 subclusters
+  K-means: 1243 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.78e4
+  Iteration 444: Splitting cluster of size 25002 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.59e6
+  Iteration 445: Splitting cluster of size 5884 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.72e5
+  Iteration 446: Splitting cluster of size 1423 into 8 subclusters
+  K-means: 1423 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.91e4
+  Iteration 447: Splitting cluster of size 1383 into 8 subclusters
+  K-means: 1383 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.65e4
+  Iteration 448: Splitting cluster of size 3965 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.50e5
+  Iteration 449: Splitting cluster of size 1822 into 8 subclusters
+  K-means: 1822 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.14e5
+  Iteration 450: Splitting cluster of size 3848 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.43e5
+  Iteration 451: Splitting cluster of size 4847 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.06e5
+  Iteration 452: Splitting cluster of size 1193 into 8 subclusters
+  K-means: 1193 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.46e4
+  Iteration 453: Splitting cluster of size 1146 into 8 subclusters
+  K-means: 1146 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.17e4
+  Iteration 454: Splitting cluster of size 1793 into 8 subclusters
+  K-means: 1793 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.13e5
+  Iteration 455: Splitting cluster of size 1697 into 8 subclusters
+  K-means: 1697 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.07e5
+  Iteration 456: Splitting cluster of size 12656 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.03e5
+  Iteration 457: Splitting cluster of size 1238 into 8 subclusters
+  K-means: 1238 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.74e4
+  Iteration 458: Splitting cluster of size 1636 into 8 subclusters
+  K-means: 1636 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.02e5
+  Iteration 459: Splitting cluster of size 2448 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.54e5
+  Iteration 460: Splitting cluster of size 1875 into 8 subclusters
+  K-means: 1875 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.18e5
+  Iteration 461: Splitting cluster of size 1338 into 8 subclusters
+  K-means: 1338 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.38e4
+  Iteration 462: Splitting cluster of size 1019 into 8 subclusters
+  K-means: 1019 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.38e4
+  Iteration 463: Splitting cluster of size 1066 into 8 subclusters
+  K-means: 1066 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.67e4
+  Iteration 464: Splitting cluster of size 2036 into 8 subclusters
+  K-means: 2036 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.28e5
+  Iteration 465: Splitting cluster of size 29934 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.90e6
+  Iteration 466: Splitting cluster of size 1717 into 8 subclusters
+  K-means: 1717 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.08e5
+  Iteration 467: Splitting cluster of size 3030 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.91e5
+  Iteration 468: Splitting cluster of size 1089 into 8 subclusters
+  K-means: 1089 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.80e4
+  Iteration 469: Splitting cluster of size 6502 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 4.12e5
+  Iteration 470: Splitting cluster of size 1656 into 8 subclusters
+  K-means: 1656 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.04e5
+  Iteration 471: Splitting cluster of size 1412 into 8 subclusters
+  K-means: 1412 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.85e4
+  Iteration 472: Splitting cluster of size 1172 into 8 subclusters
+  K-means: 1172 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.34e4
+  Iteration 473: Splitting cluster of size 4974 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.14e5
+  Iteration 474: Splitting cluster of size 1235 into 8 subclusters
+  K-means: 1235 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.73e4
+  Iteration 475: Splitting cluster of size 5995 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.79e5
+  Iteration 476: Splitting cluster of size 1370 into 8 subclusters
+  K-means: 1370 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.58e4
+  Iteration 477: Splitting cluster of size 1274 into 8 subclusters
+  K-means: 1274 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.98e4
+  Iteration 478: Splitting cluster of size 5804 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.67e5
+  Iteration 479: Splitting cluster of size 1285 into 8 subclusters
+  K-means: 1285 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.05e4
+  Iteration 480: Splitting cluster of size 1135 into 8 subclusters
+  K-means: 1135 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.09e4
+  Iteration 481: Splitting cluster of size 65426 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 4.17e6
+  Iteration 482: Splitting cluster of size 12593 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.99e5
+  Iteration 483: Splitting cluster of size 2627 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.65e5
+  Iteration 484: Splitting cluster of size 3589 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.27e5
+  Iteration 485: Splitting cluster of size 1914 into 8 subclusters
+  K-means: 1914 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.20e5
+  Iteration 486: Splitting cluster of size 1215 into 8 subclusters
+  K-means: 1215 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.60e4
+  Iteration 487: Splitting cluster of size 1698 into 8 subclusters
+  K-means: 1698 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.06e5
+  Iteration 488: Splitting cluster of size 2802 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.76e5
+  Iteration 489: Splitting cluster of size 5538 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.50e5
+  Iteration 490: Splitting cluster of size 1590 into 8 subclusters
+  K-means: 1590 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 9.97e4
+  Iteration 491: Splitting cluster of size 8231 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 5.21e5
+  Iteration 492: Splitting cluster of size 1370 into 8 subclusters
+  K-means: 1370 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 8.58e4
+  Iteration 493: Splitting cluster of size 2186 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.37e5
+  Iteration 494: Splitting cluster of size 1495 into 8 subclusters
+  K-means: 1495 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 9.36e4
+  Iteration 495: Splitting cluster of size 1108 into 8 subclusters
+  K-means: 1108 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.93e4
+  Iteration 496: Splitting cluster of size 18576 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.18e6
+  Iteration 497: Splitting cluster of size 2294 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.44e5
+  Iteration 498: Splitting cluster of size 4693 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.97e5
+  Iteration 499: Splitting cluster of size 2981 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.88e5
+  Iteration 500: Splitting cluster of size 2810 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.77e5
+  Iteration 501: Splitting cluster of size 1689 into 8 subclusters
+  K-means: 1689 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.06e5
+  Iteration 502: Splitting cluster of size 3305 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 2.08e5
+  Iteration 503: Splitting cluster of size 8972 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 5.69e5
+  Iteration 504: Splitting cluster of size 1931 into 8 subclusters
+  K-means: 1931 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.21e5
+  Iteration 505: Splitting cluster of size 1701 into 8 subclusters
+  K-means: 1701 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.07e5
+  Iteration 506: Splitting cluster of size 1638 into 8 subclusters
+  K-means: 1638 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.03e5
+  Iteration 507: Splitting cluster of size 1192 into 8 subclusters
+  K-means: 1192 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.47e4
+  Iteration 508: Splitting cluster of size 1181 into 8 subclusters
+  K-means: 1181 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 7.39e4
+  Iteration 509: Splitting cluster of size 5870 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 3.71e5
+  Iteration 510: Splitting cluster of size 1816 into 8 subclusters
+  K-means: 1816 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.14e5
+  Iteration 511: Splitting cluster of size 1103 into 8 subclusters
+  K-means: 1103 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 6.90e4
+  Iteration 512: Splitting cluster of size 2844 into 8 subclusters
+  K-means: 2048 points, 8 clusters, 100 iterations, 1 restarts
+    Restart 1/1: objective = 1.79e5
+Hierarchical clustering complete: 3585 final clusters
+  Created 3585 clusters
+Step 2: Closure assignment with RNG rule...
+  Average replication factor: 4.97
+Step 3: Creating and quantizing posting lists...
+  Created 3585 posting lists with 4974379 total vectors
+Step 3.5: Building FastScan batch layouts...
+Step 4: Building centroid index...
+  Built centroid index with 3585 centroids (BF16 precision)
+MSTG index build complete
+  Memory usage estimate: ~3410.47 MB
+  build    : 249082 ms
+  repl     : 4.97x
+  memory   : 3410.5 MB
+
+       profile    recall@K     latency         QPS      ef / eps
+  ------------  ----------  ----------  ----------  ------------
+   low-latency       21.0%      2278 us         439  ef=50  e=0.3
+  balanced-low       40.0%      3035 us         329  ef=100 e=0.5
+      balanced       56.4%      3742 us         267  ef=150 e=0.6
+  balanced-high       69.9%      4509 us         222  ef=200 e=0.8
+   high-recall       88.7%      5785 us         173  ef=300 e=1.0
+    max-recall       98.4%      8219 us         122  ef=500 e=1.5
+
+--- MSTG-disk (mmap, same index) ---
+  save     : 5331 ms
+Loaded MSTG in disk mode: 3585 centroids, posting lists on mmap
+  mmap load: 8707 ms
+  memory   : 5.3 MB (centroid + directory only)
+
+       profile    recall@K     latency         QPS      ef / eps
+  ------------  ----------  ----------  ----------  ------------
+   low-latency       21.0%     40703 us          25  ef=50  e=0.3
+  balanced-low       40.0%     63623 us          16  ef=100 e=0.5
+      balanced       56.4%     87124 us          11  ef=150 e=0.6
+  balanced-high       69.9%    109525 us           9  ef=200 e=0.8
+   high-recall       88.7%    154720 us           6  ef=300 e=1.0
+    max-recall       98.4%    245486 us           4  ef=500 e=1.5
+
+========================================================
+  Head-to-head (matched recall)
+========================================================
+
+  MSTG-mem vs IVF:
+    recall ~21%: MSTG-mem(mem-low-latency) 2278us vs IVF(nprobe=82) 3305us => MSTG-mem 1.45x faster
+    recall ~40%: MSTG-mem(mem-balanced-low) 3035us vs IVF(nprobe=184) 5921us => MSTG-mem 1.95x faster
+    recall ~56%: MSTG-mem(mem-balanced) 3742us vs IVF(nprobe=276) 8103us => MSTG-mem 2.17x faster
+    recall ~70%: MSTG-mem(mem-balanced-high) 4509us vs IVF(nprobe=414) 11117us => MSTG-mem 2.47x faster
+    recall ~89%: MSTG-mem(mem-high-recall) 5785us vs IVF(nprobe=931) 17752us => MSTG-mem 3.07x faster
+    recall ~98%: MSTG-mem(mem-max-recall) 8219us vs IVF(nprobe=931) 17752us => MSTG-mem 2.16x faster
+
+  MSTG-disk vs MSTG-mem:
+    recall ~21%: disk 40703us vs mem 2278us => disk 17.9x slower
+    recall ~40%: disk 63623us vs mem 3035us => disk 21.0x slower
+    recall ~56%: disk 87124us vs mem 3742us => disk 23.3x slower
+    recall ~70%: disk 109525us vs mem 4509us => disk 24.3x slower
+    recall ~89%: disk 154720us vs mem 5785us => disk 26.7x slower
+    recall ~98%: disk 245486us vs mem 8219us => disk 29.9x slower
+
+========================================================
+  Summary
+========================================================
+
+  MSTG config: epsilon=0.02, replication=4.97x
+  MSTG-mem : build=249082ms, memory=3410.5MB
+  MSTG-disk: save=5331ms, mmap_load=8707ms, memory=5.3MB
+  Build: IVF 67110ms vs MSTG 249082ms (IVF 3.7x faster)
+  Peak recall: IVF 91.0% (nprobe=1000) vs MSTG-mem 98.4% (mem-max-recall)
+  Peak recall: MSTG-mem 98.4% (mem-max-recall) vs MSTG-disk 98.4% (disk-max-recall)
+
+Done.
+	Command being timed: "cargo run --release --example bench_ivf_vs_mstg -- --random --n 1000000 --dim 768 --k 10"
+	User time (seconds): 2451.03
+	System time (seconds): 89.02
+	Percent of CPU this job got: 492%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 8:35.50
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 15841884
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 46199
+	Minor (reclaiming a frame) page faults: 15153612
+	Voluntary context switches: 170880
+	Involuntary context switches: 80822
+	Swaps: 0
+	File system inputs: 138160376
+	File system outputs: 6990784
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0
+RABITQ_1M_EXIT=0 2026-07-10T15:00:56Z

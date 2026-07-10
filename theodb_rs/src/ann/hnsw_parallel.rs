@@ -27,6 +27,14 @@ pub(super) fn parallel_threshold() -> usize {
         .unwrap_or(PARALLEL_BUILD_THRESHOLD)
 }
 
+/// Whether the build extends the candidate pool with the candidates' own neighbors before the diversity select
+/// (Malkov-Yashunin `extendCandidates`). Default ON — measured to lift recall@10 0.974→0.990 at 500k×768d by
+/// closing the routing/navigability gap on clustered data (`docs/benchmarks/gap1-extend-candidates.md`). Opt-out via
+/// `THEODB_HNSW_EXTEND_CANDIDATES=0` for the ~2-3× faster build when recall-per-ef is not the priority.
+pub(super) fn extend_candidates() -> bool {
+    !matches!(std::env::var("THEODB_HNSW_EXTEND_CANDIDATES").ok().as_deref(), Some("0") | Some("false"))
+}
+
 /// Build the HNSW graph concurrently over `vectors` (all equal-dim) with pre-assigned `levels` (deterministic).
 /// Node 0 is the seed entry. Returns `(neighbors, entry, max_level)` in the same shape the sequential build yields.
 /// Every this many nodes, the leader joins all workers and calls `check_interrupt` (M48 T4.1). Batching is what
@@ -117,9 +125,27 @@ fn insert_node(
     let mut entries: Vec<usize> = vec![ep];
     while lc >= 0 {
         let layer = lc as usize;
-        let candidates = search_layer(q, &entries, ef_construction, layer, vectors, neighbors, metric);
+        let mut candidates = search_layer(q, &entries, ef_construction, layer, vectors, neighbors, metric);
         let next_entries: Vec<usize> = candidates.iter().map(|c| c.i).collect();
         let m_layer = if layer == 0 { m0 } else { m };
+        // Gap-1 fix (navigability): extendCandidates — see `hnsw.rs::insert` for the rationale (Malkov-Yashunin,
+        // recommended for clustered data; white-box-proven to close the ef-insensitive routing gap). Read each
+        // candidate's neighbor slice under a brief read lock (no write held here → no deadlock).
+        if extend_candidates() {
+            let mut seen: std::collections::HashSet<usize> = candidates.iter().map(|c| c.i).collect();
+            let base: Vec<usize> = candidates.iter().map(|c| c.i).collect();
+            for ci in base {
+                let nbs: Vec<usize> = {
+                    let g = neighbors[ci].read().unwrap();
+                    g.get(layer).map(|v| v.clone()).unwrap_or_default()
+                };
+                for nb in nbs {
+                    if seen.insert(nb) {
+                        candidates.push(Cand { d: metric.dist_simd(q, &vectors[nb]), i: nb });
+                    }
+                }
+            }
+        }
         let selected = select_from(vectors, metric, candidates, m_layer);
 
         // This node's own neighbors on this layer. Honest note (M44 review, LOW): the assignment OVERWRITES the
