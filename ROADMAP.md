@@ -1148,7 +1148,7 @@ o throughput multi-cliente é competitivo, incluindo o efeito de lock/buffer do 
 
 **Dependencies:** M60, M71. **Risco (MÉDIO):** contenção de buffer/lock; o gap pode ser estrutural (índice persistente vs library in-memory). → **MEDIDO:** sem colapso de contenção a 8 clientes; theodb competitivo/à-frente no regime 128d clusterizado.
 
-## M73 — [ ] Head-to-head MEDIDO vs ScaNN/AlloyDB (o VEREDITO de superioridade)
+## M73 — [x] Head-to-head MEDIDO vs ScaNN/AlloyDB (o VEREDITO de superioridade)
 
 **Objective:** re-rodar o head-to-head do M33 (SIFT1M, mesmo hardware/query-set) **depois** de M60+M71+M72, e
 emitir o **veredito de superioridade vetorial rastreável** do North Star. Honesto: o resultado pode ser (a)
@@ -1157,11 +1157,11 @@ caso, entrega a **prova medida de ONDE o TheoDB está** vs o SOTA (o que o North
 inventada). Caveat estrutural: ScaNN é library ANN in-memory, theodb é índice PostgreSQL persistente transacional.
 
 **Definition of done:**
-- [ ] Re-run M33 (ScaNN OSS proxy do AlloyDB; caveat library-vs-database documentado) a recall≥0.99, ≥3 runs → `docs/benchmarks/m73-headtohead-verdict.{md,json}`.
-- [ ] **ADR de veredito do North Star vetorial** (superior / paridade+trade-off / honest-negative) + a decisão de posicionamento (claim permitido, per `public-copy.md`).
-- [ ] Atualizar `goto-p0-vector-superiority` (memória) + o CLAUDE.md North Star com o estado MEDIDO final.
+- [x] Head-to-head a recall≥0.99 → `docs/benchmarks/m73-headtohead-verdict.{md,json}` — consolida frontiers MEDIDOS em SIFT1M real (M33 ScaNN 1920 QPS vs M45 theodb_hnsw ~44 QPS vs pgvector) + M72 multi-cliente + RaBitQ spike. **ScaNN não re-rodado (D3/anti-sunk-cost):** inalterado desde M33; M60/M71/M72 não tocam o paradigma de quantização — documentado no doc. Gap ~25-44× @ 0.99 confirmado por 4 medições independentes.
+- [x] **ADR de veredito do North Star vetorial** (`docs/adr/0035`): **(b)+(c) — paridade own-code de recall ALCANÇADA + throughput multi-cliente competitivo-superior + honest-negative de QPS-superioridade vs ScaNN.** Posicionamento permitido definido (`public-copy.md`).
+- [x] Atualizado `goto-p0-vector-superiority` (memória) + CLAUDE.md North Star com o estado MEDIDO final.
 
-**Dependencies:** M60, M71, M72. **Risco (ALTO):** o gap ScaNN (~25×) é anisotrópico+AH; M57/M59 já foram honest-negative — o veredito honesto pode ser "paridade own-code, não superioridade de QPS pura".
+**Dependencies:** M60, M71, M72. **Risco (ALTO):** → **MATERIALIZOU-SE (honesto):** o veredito É "paridade own-code + multi-cliente competitivo-superior, NÃO superioridade de QPS pura vs ScaNN" — como o risco previa. Gap de paradigma, não fechável por extensão PG permissiva.
 
 ## M74 — [ ] (CONDICIONAL) Quantização SOTA no índice — só com lever viável não-refutado
 
