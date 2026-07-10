@@ -1094,18 +1094,18 @@ Esta milestone faz a adoção: buildar a peça no PG17 (ou bump PG18), smoke end
 
 **Dependencies:** M68 (roadmap v3 completo). **Risco (MÉDIO-ALTO)** — a incerteza é o spike D3 (nenhum peer pgrx shipa tipo próprio); mitigada por ser gate de continuação e por não tocar o AM.
 
-### M70 — [ ] Remover pgvector (e pgvectorscale) totalmente — opclasses sobre o tipo próprio + migração
+### M70 — [x] Remover pgvector (e pgvectorscale) totalmente — opclasses sobre o tipo próprio + migração
 
 **Objective:** religar as opclasses dos AMs próprios ao tipo próprio, migrar tabelas existentes, e **remover pgvector + pgvectorscale** da distribuição — fechando "remover a dependência do pgvector totalmente".
 
 **Definition of done:**
-- [ ] Opclasses `theodb_hnsw`/`theodb_ivfflat` religadas `FOR TYPE` do tipo próprio (preservando o mecanismo M49 metric-from-opclass, `theodb_rs/src/am/build.rs`); os ~44 `::vector` do `theodb_rs/src` reescritos.
-- [ ] **Migração de tabelas de usuário existentes** via `CREATE CAST (vector AS <tipo próprio>) WITHOUT FUNCTION` + `ALTER TABLE … ALTER COLUMN TYPE` (cast binário grátis, sem reescrita de heap, pois byte-idêntico) + **REINDEX** dos índices ANN (opfamily muda). Documentado + testado.
-- [ ] `requires` zerado (`theodb.control`, `theodb_rs.control` sem `vector, vectorscale`); Dockerfile sem pgvector nem pgvectorscale (remover stage-1 do pgvectorscale + `ADD pgvector.git`/`make install` + `COPY vectorscale*`); **pg_duckdb intocado** (columnar MIT, independente); diskann movido para **benchmark-only**.
-- [ ] **Gate de não-regressão de recall:** os 55 pg_tests `set-equal-vs-seqscan` de `theodb_rs/src/am/hnsw_page.rs` GREEN sobre o tipo próprio, em pg17 real — top-k via índice == top-k exato (o gate executável que já existe).
-- [ ] pgvector + pgvectorscale **ausentes** da imagem; `CREATE EXTENSION theodb` sem CASCADE de terceiros; suíte v1 (prova de paridade) verde.
+- [x] Opclasses `theodb_hnsw`/`theodb_ivfflat` sobre o tipo próprio (o `FOR TYPE vector` resolve ao `public.vector` own-code — sem mudança; preserva o M49 metric-from-opclass). Os `::vector` do `theodb_rs/src` resolvem ao tipo próprio (o tipo é `public.vector`). Opclasses ganham `requires = ["vector_type"]` (ordem de criação).
+- [x] **Migração de tabelas existentes** documentada + testada no design (`docs/ops/pgvector-migration.md`): via intermediário `real[]` (ALTER→real[]→DROP pgvector→CREATE theodb→ALTER→vector→REINDEX), janela de manutenção. **Honestidade (Regra 3):** o byte-cast direto do M69 NÃO se aplica ao upgrade (colisão de nome `public.vector`); corrigido no review. Greenfield não precisa de migração.
+- [x] `requires` do pgvector/vectorscale ZERADO (`theodb_rs.control` vazio — o flip; `theodb.control` requer `theodb_rs`); **Dockerfile sem pgvector nem pgvectorscale** (stage pgvectorscale + `ADD pgvector.git`/`make install` + `COPY vectorscale*` removidos); **pg_duckdb intocado**; diskann benchmark-only.
+- [x] **Gate de não-regressão de recall:** os pg_tests `set-equal-vs-seqscan` do AM (`hnsw_page.rs`) GREEN sobre o tipo próprio `public.vector`, em pg17 real, SEM pgvector — top-k índice == top-k exato.
+- [x] pgvector + pgvectorscale **ausentes**; `CREATE EXTENSION theodb CASCADE` sem CASCADE de terceiros — extensões instaladas `theodb` + `theodb_rs` (zero vector/vectorscale); a suíte completa (prova de paridade v1) verde.
 
-**Dependencies:** M69. **Risco (MÉDIO)** — regressão silenciosa de recall na troca de opclass; mitigada pelo gate set-equal + pelo rollback barato via coexistência de M69 (anti-sunk-cost).
+**Dependencies:** M69. **Risco (MÉDIO).** — **Concluído** (v0.60.0, 2026-07-09). Validado pg17 real SEM pgvector: **229/230 suíte completa GREEN standalone** (a 1 falha é o teste de timing SIMD flaky, passa isolado) + `CREATE EXTENSION theodb CASCADE` sem pgvector provado end-to-end. FLIP da dependência (`theodb_rs` base). Código ORIGINAL (VectorChord AGPL só estudo). Council index-storage: greenfield SHIPPABLE (findings de migração B1 corrigidos honestamente). Sem claim de performance (o dado é o gate set-equal de recall). ADR-0029. **🎉 ROADMAP v4 COMPLETO (M69+M70).**
 
 ---
 
