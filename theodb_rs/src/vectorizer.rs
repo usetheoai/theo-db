@@ -59,6 +59,7 @@ CREATE INDEX IF NOT EXISTS vectorizer_queue_claim_idx
     WHERE state IN ('pending', 'processing');
 "#,
     name = "theodb_vectorizer_schema",
+    requires = ["theodb_schema_bootstrap"], // M70: schema theodb criado pelo theodb_rs (flip ADR-D1)
 );
 
 // The declarative surface (plpgsql — dynamic DDL is natural here, KISS): a generic AFTER-row trigger that

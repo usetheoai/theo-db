@@ -1,9 +1,10 @@
-//! M69 — o tipo vetorial PRÓPRIO own-code `theodb.vector` (roadmap v4, blueprint veredito A).
+//! M69 — o tipo vetorial PRÓPRIO own-code `vector` (roadmap v4, blueprint veredito A).
 //!
 //! Layout `#[repr(C)]` BYTE-IDÊNTICO ao `Vector` do pgvector (`vl_len_ i32 · dim i16 · unused i16 ·
 //! f32[]`; 8+4·dim bytes) — a pré-condição do cast binário `WITHOUT FUNCTION` (coexistência em M69,
 //! migração grátis em M70). Coexiste com `public.vector` (pgvector) SEM colisão: o tipo próprio é
-//! `theodb.vector` (schema `theodb`); o M70 fará `SET SCHEMA public` ⇒ drop-in (ADR-D5).
+//! M70: o tipo é `public.vector` (drop-in — o pgvector foi REMOVIDO; sem colisão). O flip (ADR-0029 D1)
+//! faz o theodb_rs prover o tipo + os schemas theodb/ai; o umbrella `theodb` requer o theodb_rs.
 //!
 //! Código ORIGINAL. Técnica de varlena aprendida de fontes permissivas (`pgvector` = PostgreSQL
 //! License, `vector.c/.h`; `postgres.h` SET_VARSIZE; docs pgrx). VectorChord é AGPL (D1) = SÓ estudo.
@@ -46,16 +47,16 @@ pub struct Vector(NonNull<VecHeader>);
 impl Vector {
     fn from_floats(slice: &[f32]) -> Self {
         if slice.is_empty() {
-            pg::err_input("theodb.vector must have at least 1 dimension");
+            pg::err_input("vector must have at least 1 dimension");
         }
         if slice.len() > MAX_DIM {
-            pg::err_input(&format!("theodb.vector cannot have more than {MAX_DIM} dimensions"));
+            pg::err_input(&format!("vector cannot have more than {MAX_DIM} dimensions"));
         }
         unsafe {
             let size = VecHeader::size_of(slice.len());
             // SET_VARSIZE_4B usa os 30 bits altos; com MAX_DIM=16000, size ≤ 64008 (cabe folgado).
             // Guard à prova de futuro (HIGH-2 review) caso MAX_DIM suba: o shift não pode transbordar.
-            debug_assert!(size < (1 << 30), "theodb.vector varlena size overflow");
+            debug_assert!(size < (1 << 30), "vector varlena size overflow");
             let ptr = pgrx::pg_sys::palloc0(size) as *mut VecHeader;
             (&raw mut (*ptr).varlena).write((size << 2) as u32); // SET_VARSIZE_4B little-endian
             (&raw mut (*ptr).dim).write(slice.len() as u16);
@@ -75,10 +76,10 @@ impl Vector {
         let dim = (&raw const (*q.as_ptr()).dim).read() as usize;
         let sz = ((&raw const (*q.as_ptr()).varlena).read() as usize) >> 2;
         if sz != VecHeader::size_of(dim) {
-            pg::err_input("theodb.vector: corrupt varlena (size mismatch)");
+            pg::err_input("vector: corrupt varlena (size mismatch)");
         }
         if (&raw const (*q.as_ptr()).unused).read() != 0 {
-            pg::err_input("theodb.vector: expected unused to be 0");
+            pg::err_input("vector: expected unused to be 0");
         }
         Vector(q)
     }
@@ -137,10 +138,10 @@ unsafe impl UnboxDatum for Vector {
 
 unsafe impl SqlTranslatable for Vector {
     fn argument_sql() -> Result<SqlMapping, ArgumentError> {
-        Ok(SqlMapping::As(String::from("theodb.vector")))
+        Ok(SqlMapping::As(String::from("vector")))
     }
     fn return_sql() -> Result<Returns, ReturnsError> {
-        Ok(Returns::One(SqlMapping::As(String::from("theodb.vector"))))
+        Ok(Returns::One(SqlMapping::As(String::from("vector"))))
     }
 }
 
@@ -169,15 +170,15 @@ fn parse(text: &str) -> Vec<f32> {
     let s = text.trim();
     let inner = match s.strip_prefix('[') {
         Some(r) => r,
-        None => pg::err_input("invalid input syntax for type theodb.vector: must start with \"[\""),
+        None => pg::err_input("invalid input syntax for type vector: must start with \"[\""),
     };
     let inner = match inner.strip_suffix(']') {
         Some(r) => r,
-        None => pg::err_input("invalid input syntax for type theodb.vector: junk after closing"),
+        None => pg::err_input("invalid input syntax for type vector: junk after closing"),
     };
     let inner = inner.trim();
     if inner.is_empty() {
-        pg::err_input("theodb.vector must have at least 1 dimension");
+        pg::err_input("vector must have at least 1 dimension");
     }
     let mut out = Vec::new();
     for tok in inner.split(',') {
@@ -185,20 +186,20 @@ fn parse(text: &str) -> Vec<f32> {
         let v: f32 = match t.parse() {
             Ok(v) => v,
             Err(_) => pg::err_input(&format!(
-                "invalid input syntax for type theodb.vector: \"{t}\""
+                "invalid input syntax for type vector: \"{t}\""
             )),
         };
         if v.is_nan() {
-            pg::err_input("NaN not allowed in theodb.vector");
+            pg::err_input("NaN not allowed in vector");
         }
         if v.is_infinite() {
-            pg::err_input("infinite value not allowed in theodb.vector");
+            pg::err_input("infinite value not allowed in vector");
         }
         out.push(v);
         // Fail-fast dentro do loop (M2 review, espelha vector.c:205) — não acumula um Vec gigante
         // antes de rejeitar (mitiga alocação de input adversário com milhões de tokens).
         if out.len() > MAX_DIM {
-            pg::err_input(&format!("theodb.vector cannot have more than {MAX_DIM} dimensions"));
+            pg::err_input(&format!("vector cannot have more than {MAX_DIM} dimensions"));
         }
     }
     out
@@ -223,7 +224,7 @@ fn format(slice: &[f32]) -> String {
 fn theodb_vector_in(input: &CStr, _oid: Oid, typmod: i32) -> Vector {
     let text = match input.to_str() {
         Ok(t) => t,
-        Err(_) => pg::err_input("theodb.vector: input não-UTF8"),
+        Err(_) => pg::err_input("vector: input não-UTF8"),
     };
     let vals = parse(text);
     if typmod > 0 && typmod as usize != vals.len() {
@@ -241,22 +242,22 @@ fn theodb_vector_out(v: Vector) -> CString {
 fn theodb_vector_typmod_in(list: pgrx::Array<&CStr>) -> i32 {
     let first = match list.get(0).flatten() {
         Some(c) => c,
-        None => pg::err_input("theodb.vector: typmod vazio"),
+        None => pg::err_input("vector: typmod vazio"),
     };
     let n: i32 = match first.to_str().unwrap_or("").trim().parse() {
         Ok(n) => n,
-        Err(_) => pg::err_input("invalid type modifier for theodb.vector"),
+        Err(_) => pg::err_input("invalid type modifier for vector"),
     };
     if n < 1 {
-        pg::err_input("dimensions for type theodb.vector must be at least 1");
+        pg::err_input("dimensions for type vector must be at least 1");
     }
     if n as usize > MAX_DIM {
-        pg::err_input(&format!("dimensions for type theodb.vector cannot exceed {MAX_DIM}"));
+        pg::err_input(&format!("dimensions for type vector cannot exceed {MAX_DIM}"));
     }
     n
 }
 
-/// Length-coercion cast — o Postgres chama isto para APLICAR `theodb.vector(N)` em inserts/atribuições
+/// Length-coercion cast — o Postgres chama isto para APLICAR `vector(N)` em inserts/atribuições
 /// (espelha pgvector `vector(vector,integer,boolean)` + `CREATE CAST (vector AS vector)`, vector.sql:134,154).
 #[pg_extern(immutable, strict, parallel_safe)]
 fn theodb_vector_coerce(v: Vector, typmod: i32, _explicit: bool) -> Vector {
@@ -273,14 +274,14 @@ fn theodb_vector_coerce(v: Vector, typmod: i32, _explicit: bool) -> Vector {
 fn theodb_vector_recv(mut internal: pgrx::datum::Internal, _oid: Oid, typmod: i32) -> Vector {
     unsafe {
         let buf: *mut pgrx::pg_sys::StringInfoData =
-            internal.get_mut().expect("theodb.vector recv: null StringInfo");
+            internal.get_mut().expect("vector recv: null StringInfo");
         let dim = pgrx::pg_sys::pq_getmsgint(buf, 2) as i16;
         let unused = pgrx::pg_sys::pq_getmsgint(buf, 2) as i16;
         if dim < 1 {
-            pg::err_input("theodb.vector must have at least 1 dimension");
+            pg::err_input("vector must have at least 1 dimension");
         }
         if dim as usize > MAX_DIM {
-            pg::err_input(&format!("theodb.vector cannot have more than {MAX_DIM} dimensions"));
+            pg::err_input(&format!("vector cannot have more than {MAX_DIM} dimensions"));
         }
         if typmod > 0 && typmod != dim as i32 {
             pg::err_input(&format!("expected {typmod} dimensions, not {dim}"));
@@ -292,10 +293,10 @@ fn theodb_vector_recv(mut internal: pgrx::datum::Internal, _oid: Oid, typmod: i3
         for _ in 0..dim {
             let f = pgrx::pg_sys::pq_getmsgfloat4(buf);
             if f.is_nan() {
-                pg::err_input("NaN not allowed in theodb.vector");
+                pg::err_input("NaN not allowed in vector");
             }
             if f.is_infinite() {
-                pg::err_input("infinite value not allowed in theodb.vector");
+                pg::err_input("infinite value not allowed in vector");
             }
             vals.push(f);
         }
@@ -340,7 +341,7 @@ fn theodb_vector_cosine_distance(a: Vector, b: Vector) -> f64 {
 fn check_dims(a: &Vector, b: &Vector) {
     let (x, y) = (a.as_slice().len(), b.as_slice().len());
     if x != y {
-        pg::err_input(&format!("different theodb.vector dimensions {x} and {y}"));
+        pg::err_input(&format!("different vector dimensions {x} and {y}"));
     }
 }
 
@@ -350,10 +351,10 @@ fn check_dims(a: &Vector, b: &Vector) {
 fn theodb_vector_from_real_array(arr: Vec<f32>) -> Vector {
     for v in &arr {
         if v.is_nan() {
-            pg::err_input("NaN not allowed in theodb.vector");
+            pg::err_input("NaN not allowed in vector");
         }
         if v.is_infinite() {
-            pg::err_input("infinite value not allowed in theodb.vector");
+            pg::err_input("infinite value not allowed in vector");
         }
     }
     Vector::from_floats(&arr)
@@ -370,17 +371,25 @@ fn theodb_vector_from_float8_array(arr: Vec<f64>) -> Vector {
     theodb_vector_from_real_array(f32s)
 }
 
-// ---- DDL: CREATE TYPE theodb.vector + operadores + casts (o schema `theodb` já existe via umbrella) ----
-
+// ---- DDL: CREATE TYPE vector + operadores + casts ----
+// O shell type é o ÚNICO bootstrap (pgrx só permite um; o usa p/ as funcs I/O referenciarem o tipo).
+// M70: o schema `theodb` (antes do umbrella — flip ADR-D1) é criado no bloco do catálogo (autotune.rs).
 extension_sql!(
-    "CREATE TYPE theodb.vector;",
+    "CREATE TYPE vector;",
     name = "vector_shell",
     bootstrap,
 );
 
+// M70 (flip ADR-D1): o theodb_rs provê o schema `theodb` (antes vinha do umbrella). Bloco nomeado que
+// os catálogos `theodb.*` (autotune, vectorizer) declaram em `requires` p/ garantir a ordem de criação.
+extension_sql!(
+    "CREATE SCHEMA IF NOT EXISTS theodb; CREATE SCHEMA IF NOT EXISTS ai;",
+    name = "theodb_schema_bootstrap",
+);
+
 extension_sql!(
     r#"
-CREATE TYPE theodb.vector (
+CREATE TYPE vector (
     INPUT     = theodb_vector_in,
     OUTPUT    = theodb_vector_out,
     RECEIVE   = theodb_vector_recv,
@@ -390,25 +399,25 @@ CREATE TYPE theodb.vector (
     INTERNALLENGTH = variable
 );
 
-CREATE CAST (theodb.vector AS theodb.vector)
-    WITH FUNCTION theodb_vector_coerce(theodb.vector, integer, boolean) AS IMPLICIT;
+CREATE CAST (vector AS vector)
+    WITH FUNCTION theodb_vector_coerce(vector, integer, boolean) AS IMPLICIT;
 
 CREATE OPERATOR <-> (
-    LEFTARG = theodb.vector, RIGHTARG = theodb.vector,
+    LEFTARG = vector, RIGHTARG = vector,
     PROCEDURE = theodb_vector_l2_distance, COMMUTATOR = '<->'
 );
 CREATE OPERATOR <#> (
-    LEFTARG = theodb.vector, RIGHTARG = theodb.vector,
+    LEFTARG = vector, RIGHTARG = vector,
     PROCEDURE = theodb_vector_neg_inner_product, COMMUTATOR = '<#>'
 );
 CREATE OPERATOR <=> (
-    LEFTARG = theodb.vector, RIGHTARG = theodb.vector,
+    LEFTARG = vector, RIGHTARG = vector,
     PROCEDURE = theodb_vector_cosine_distance, COMMUTATOR = '<=>'
 );
 
-CREATE CAST (real[] AS theodb.vector)  WITH FUNCTION theodb_vector_from_real_array(real[]);
-CREATE CAST (theodb.vector AS real[])  WITH FUNCTION theodb_vector_to_real_array(theodb.vector);
-CREATE CAST (double precision[] AS theodb.vector) WITH FUNCTION theodb_vector_from_float8_array(double precision[]);
+CREATE CAST (real[] AS vector)  WITH FUNCTION theodb_vector_from_real_array(real[]);
+CREATE CAST (vector AS real[])  WITH FUNCTION theodb_vector_to_real_array(vector);
+CREATE CAST (double precision[] AS vector) WITH FUNCTION theodb_vector_from_float8_array(double precision[]);
 "#,
     name = "vector_type",
     requires = [
@@ -437,55 +446,55 @@ mod tests {
 
     #[pg_test]
     fn roundtrip_text_io() {
-        let out = Spi::get_one::<String>("SELECT '[1,2,3]'::theodb.vector::text").unwrap().unwrap();
+        let out = Spi::get_one::<String>("SELECT '[1,2,3]'::vector::text").unwrap().unwrap();
         assert_eq!(out, "[1,2,3]");
     }
 
-    #[pg_test(error = "NaN not allowed in theodb.vector")]
+    #[pg_test(error = "NaN not allowed in vector")]
     fn nan_rejected() {
-        Spi::run("SELECT '[1,NaN,3]'::theodb.vector").unwrap();
+        Spi::run("SELECT '[1,NaN,3]'::vector").unwrap();
     }
 
-    #[pg_test(error = "theodb.vector must have at least 1 dimension")]
+    #[pg_test(error = "vector must have at least 1 dimension")]
     fn dim0_rejected() {
-        Spi::run("SELECT '[]'::theodb.vector").unwrap();
+        Spi::run("SELECT '[]'::vector").unwrap();
     }
 
-    #[pg_test(error = "invalid input syntax for type theodb.vector: must start with \"[\"")]
+    #[pg_test(error = "invalid input syntax for type vector: must start with \"[\"")]
     fn malformed_no_bracket() {
-        Spi::run("SELECT '1,2,3'::theodb.vector").unwrap();
+        Spi::run("SELECT '1,2,3'::vector").unwrap();
     }
 
     #[pg_test]
     fn dim_boundary() {
         // dim=1 (mínimo) e um vetor grande round-trip
         assert_eq!(
-            Spi::get_one::<String>("SELECT '[1]'::theodb.vector::text").unwrap().unwrap(),
+            Spi::get_one::<String>("SELECT '[1]'::vector::text").unwrap().unwrap(),
             "[1]"
         );
         let big = format!("[{}]", (0..128).map(|i| i.to_string()).collect::<Vec<_>>().join(","));
-        let n = Spi::get_one::<i64>(&format!("SELECT array_length(('{big}'::theodb.vector)::real[],1)"))
+        let n = Spi::get_one::<i64>(&format!("SELECT array_length(('{big}'::vector)::real[],1)"))
             .unwrap()
             .unwrap();
         assert_eq!(n, 128);
     }
 
-    #[pg_test(error = "theodb.vector cannot have more than 16000 dimensions")]
+    #[pg_test(error = "vector cannot have more than 16000 dimensions")]
     fn dim_over_max_rejected() {
-        Spi::run("SELECT ('[' || array_to_string(array_fill(1.0::real, ARRAY[16001]), ',') || ']')::theodb.vector").unwrap();
+        Spi::run("SELECT ('[' || array_to_string(array_fill(1.0::real, ARRAY[16001]), ',') || ']')::vector").unwrap();
     }
 
     #[pg_test]
     fn typmod_ok() {
         assert_eq!(
-            Spi::get_one::<String>("SELECT '[1,2,3]'::theodb.vector(3)::text").unwrap().unwrap(),
+            Spi::get_one::<String>("SELECT '[1,2,3]'::vector(3)::text").unwrap().unwrap(),
             "[1,2,3]"
         );
     }
 
     #[pg_test(error = "expected 3 dimensions, not 2")]
     fn typmod_mismatch_on_column() {
-        Spi::run("CREATE TEMP TABLE tt (e theodb.vector(3))").unwrap();
+        Spi::run("CREATE TEMP TABLE tt (e vector(3))").unwrap();
         Spi::run("INSERT INTO tt VALUES ('[1,2]')").unwrap();
     }
 
@@ -493,22 +502,22 @@ mod tests {
     fn datum_roundtrip_no_uaf() {
         // EC-1: cast recebe E retorna o mesmo ptr, 1000× — pega double-free/UAF.
         Spi::run(
-            "DO $$ BEGIN FOR i IN 1..1000 LOOP PERFORM ('[1,2,3]'::theodb.vector)::theodb.vector(3); END LOOP; END $$",
+            "DO $$ BEGIN FOR i IN 1..1000 LOOP PERFORM ('[1,2,3]'::vector)::vector(3); END LOOP; END $$",
         )
         .unwrap();
     }
 
     #[pg_test]
     fn operators_match_kernels() {
-        let l2 = Spi::get_one::<f64>("SELECT '[0,0]'::theodb.vector <-> '[3,4]'::theodb.vector")
+        let l2 = Spi::get_one::<f64>("SELECT '[0,0]'::vector <-> '[3,4]'::vector")
             .unwrap()
             .unwrap();
         assert!((l2 - 5.0).abs() < 1e-6, "L2=5, got {l2}");
-        let ip = Spi::get_one::<f64>("SELECT '[1,2]'::theodb.vector <#> '[3,4]'::theodb.vector")
+        let ip = Spi::get_one::<f64>("SELECT '[1,2]'::vector <#> '[3,4]'::vector")
             .unwrap()
             .unwrap();
         assert!((ip - (-11.0)).abs() < 1e-6, "neg-ip=-(1*3+2*4)=-11, got {ip}");
-        let cos = Spi::get_one::<f64>("SELECT '[1,0]'::theodb.vector <=> '[0,1]'::theodb.vector")
+        let cos = Spi::get_one::<f64>("SELECT '[1,0]'::vector <=> '[0,1]'::vector")
             .unwrap()
             .unwrap();
         assert!((cos - 1.0).abs() < 1e-6, "cosine([1,0],[0,1])=1, got {cos}");
@@ -516,11 +525,11 @@ mod tests {
 
     #[pg_test]
     fn casts_array_roundtrip() {
-        let back = Spi::get_one::<String>("SELECT (ARRAY[1,2,3]::real[]::theodb.vector)::real[]::text")
+        let back = Spi::get_one::<String>("SELECT (ARRAY[1,2,3]::real[]::vector)::real[]::text")
             .unwrap()
             .unwrap();
         assert_eq!(back, "{1,2,3}");
-        let f8 = Spi::get_one::<String>("SELECT (ARRAY[1.5,2.5]::float8[]::theodb.vector)::text")
+        let f8 = Spi::get_one::<String>("SELECT (ARRAY[1.5,2.5]::float8[]::vector)::text")
             .unwrap()
             .unwrap();
         assert_eq!(f8, "[1.5,2.5]");
@@ -528,64 +537,45 @@ mod tests {
 
     #[pg_test]
     fn table_column_and_order_by() {
-        Spi::run("CREATE TEMP TABLE tv (id int, e theodb.vector(2))").unwrap();
+        Spi::run("CREATE TEMP TABLE tv (id int, e vector(2))").unwrap();
         Spi::run("INSERT INTO tv VALUES (1,'[0,0]'),(2,'[1,1]'),(3,'[5,5]')").unwrap();
         let nearest = Spi::get_one::<i32>(
-            "SELECT id FROM tv ORDER BY e <-> '[0,0]'::theodb.vector LIMIT 1",
+            "SELECT id FROM tv ORDER BY e <-> '[0,0]'::vector LIMIT 1",
         )
         .unwrap()
         .unwrap();
         assert_eq!(nearest, 1);
     }
 
-    /// GATE (M3): layout byte-idêntico ao pgvector — cast WITHOUT FUNCTION nos 2 sentidos +
-    /// asserção BYTE-CRUA `md5(::bytea)` (não só texto) em dims que cruzam o byte alto do `u16 dim`:
-    /// dim=1, 3, 5, 128 e **300 (>255)** — um off-by-one no header do dim só apareceria em dim>255.
-    #[pg_test]
-    fn binary_compat_with_pgvector() {
-        Spi::run("CREATE EXTENSION IF NOT EXISTS vector").unwrap();
-        Spi::run("CREATE CAST (vector AS theodb.vector) WITHOUT FUNCTION AS IMPLICIT").unwrap();
-        Spi::run("CREATE CAST (theodb.vector AS vector) WITHOUT FUNCTION AS IMPLICIT").unwrap();
-        let mk = |n: usize| format!("[{}]", (0..n).map(|i| ((i % 7) as f32 + 0.5).to_string()).collect::<Vec<_>>().join(","));
-        for n in [1usize, 3, 5, 128, 300] {
-            let lit = mk(n);
-            // texto round-trip nos 2 sentidos
-            let fwd = Spi::get_one::<String>(&format!("SELECT ('{lit}'::vector::theodb.vector)::text")).unwrap().unwrap();
-            assert_eq!(fwd, lit, "texto pgvector→theodb.vector dim={n}");
-            let back = Spi::get_one::<String>(&format!("SELECT ('{lit}'::theodb.vector::vector)::text")).unwrap().unwrap();
-            assert_eq!(back, lit, "texto theodb.vector→pgvector dim={n}");
-            // BYTE-CRU: o wire binário (send) idêntico entre os dois tipos ⇒ layout byte-a-byte.
-            // Usa as funções send diretamente (o tipo vector não tem cast p/ bytea).
-            let same_bytes = Spi::get_one::<bool>(&format!(
-                "SELECT md5(vector_send('{lit}'::vector)) = md5(theodb_vector_send('{lit}'::theodb.vector))"
-            )).unwrap().unwrap();
-            assert!(same_bytes, "wire binário (send) byte-idêntico ao pgvector, dim={n}");
-        }
-    }
+    // M70: a paridade byte-a-byte com o pgvector foi provada e RELEASED no M69 (v0.59.0,
+    // `binary_compat_with_pgvector` sobre `md5(vector_send)` em dims 1/3/5/128/300). No M70 o pgvector
+    // é REMOVIDO — o tipo `vector` é 100% own-code, então esse teste (que exigia o pgvector coexistindo)
+    // não roda mais na suíte standalone. A migração de instalações com pgvector (via intermediário `real[]`,
+    // não byte-cast) está em `docs/ops/pgvector-migration.md`; a paridade byte já está coberta no M69 v0.59.0.
 
-    #[pg_test(error = "theodb.vector cannot have more than 16000 dimensions")]
+    #[pg_test(error = "vector cannot have more than 16000 dimensions")]
     fn parse_fail_fast_over_max() {
         // M2: rejeita antes de acumular Vec gigante (checagem no loop)
-        Spi::run("SELECT ('[' || array_to_string(array_fill(1.0::real, ARRAY[16050]), ',') || ']')::theodb.vector").unwrap();
+        Spi::run("SELECT ('[' || array_to_string(array_fill(1.0::real, ARRAY[16050]), ',') || ']')::vector").unwrap();
     }
 
-    #[pg_test(error = "invalid input syntax for type theodb.vector: \"\"")]
+    #[pg_test(error = "invalid input syntax for type vector: \"\"")]
     fn parse_pathological_double_comma() {
         // M1: token vazio entre vírgulas (paridade: pgvector também rejeita)
-        Spi::run("SELECT '[1,,3]'::theodb.vector").unwrap();
+        Spi::run("SELECT '[1,,3]'::vector").unwrap();
     }
 
     #[pg_test]
     fn copy_binary_roundtrip() {
-        Spi::run("CREATE TEMP TABLE cb (e theodb.vector(3))").unwrap();
+        Spi::run("CREATE TEMP TABLE cb (e vector(3))").unwrap();
         Spi::run("INSERT INTO cb VALUES ('[1,2,3]'),(NULL),('[4,5,6]')").unwrap();
         // round-trip via COPY BINARY exercita recv/send (unused==0 no wire)
-        Spi::run("CREATE TEMP TABLE cb2 (e theodb.vector(3))").unwrap();
+        Spi::run("CREATE TEMP TABLE cb2 (e vector(3))").unwrap();
         Spi::run("COPY cb TO '/tmp/theodb_cb.bin' WITH (FORMAT binary)").unwrap();
         Spi::run("COPY cb2 FROM '/tmp/theodb_cb.bin' WITH (FORMAT binary)").unwrap();
         let n = Spi::get_one::<i64>("SELECT count(*) FROM cb2 WHERE e IS NOT NULL").unwrap().unwrap();
         assert_eq!(n, 2, "COPY BINARY preservou 2 não-nulos");
-        let first = Spi::get_one::<String>("SELECT e::text FROM cb2 WHERE e IS NOT NULL ORDER BY e <-> '[0,0,0]'::theodb.vector LIMIT 1").unwrap().unwrap();
+        let first = Spi::get_one::<String>("SELECT e::text FROM cb2 WHERE e IS NOT NULL ORDER BY e <-> '[0,0,0]'::vector LIMIT 1").unwrap().unwrap();
         assert_eq!(first, "[1,2,3]");
     }
 }

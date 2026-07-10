@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS theodb._index_scan_stats (
 );
 "#,
     name = "theodb_index_scan_stats_schema",
+    requires = ["theodb_schema_bootstrap"], // M70: schema theodb criado pelo theodb_rs (flip ADR-D1)
 );
 
 /// Record one scan observation for a relation (aggregated). Sampled by design — the collector calls this,

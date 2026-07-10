@@ -4,11 +4,10 @@
 //! generated schema + install script are byte-identical; `lib.rs` is now a thin composition/module root.
 use pgrx::prelude::*;
 
-// theodb_rs owns its OWN schema `theodb_rs` (so it never tries to CREATE the `theodb` schema, which
-// is owned by the umbrella `theodb` extension — PG forbids a second extension from CREATE-IF-NOT-EXISTS
-// on a schema it does not own). The public `theodb.embed` wrapper is created INTO the existing `theodb`
-// schema via extension_sql (creating an object in another extension's schema is allowed; only CREATE
-// SCHEMA conflicts). theodb_rs `requires = 'theodb'` so the `theodb` schema exists first.
+// M70 (flip ADR-0029 D1): theodb_rs é a BASE — ele PROVÊ os schemas `theodb`/`ai` (bloco
+// `theodb_schema_bootstrap` em dtype.rs, requerido por estes wrappers) e o tipo `public.vector`. Os
+// `#[pg_extern]` internos ficam no schema `theodb_rs`; os wrappers públicos `theodb.*`/`ai.*` abaixo são
+// criados nos schemas `theodb`/`ai` que o próprio theodb_rs cria. O umbrella `theodb` requer `theodb_rs`.
 #[pg_schema]
 mod theodb_rs {
     use pgrx::prelude::*;
@@ -427,7 +426,7 @@ REVOKE ALL ON FUNCTION theodb_rs._embed_text(text, text) FROM PUBLIC;
     // Reference the pgrx function as a bare-ident PositioningRef::FullPath (matches the extern by
     // `unaliased_name`, like pgvectorscale's `requires = [smallint_array_overlap]`) so the wrapper's
     // SQL-language body, which validates `theodb_rs._embed_text` at CREATE time, is emitted AFTER it.
-    requires = [_embed_text],
+    requires = [_embed_text, "theodb_schema_bootstrap"],
 );
 
 // SQL wrapper: the public `theodb.embed_batch(content text[], model DEFAULT NULL) RETURNS vector[]`.
@@ -454,7 +453,7 @@ REVOKE ALL ON FUNCTION theodb.embed_batch(text[], text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION theodb_rs._embed_batch_text(text[], text) FROM PUBLIC;
 "#,
     name = "theodb_embed_batch_wrapper",
-    requires = [_embed_batch_text],
+    requires = [_embed_batch_text, "theodb_schema_bootstrap"],
 );
 
 // SQL wrapper: the public declarative chunking surface (M66 — `theodb.chunk`). Pure string logic (no HTTP,
@@ -473,7 +472,7 @@ COMMENT ON FUNCTION theodb.chunk(text, text, int, int) IS
   'Empty content -> zero chunks; overlap must be < chunk_size (else typed error). Implemented in Rust (theodb_rs).';
 "#,
     name = "theodb_chunk_wrapper",
-    requires = [_chunk_text],
+    requires = [_chunk_text, "theodb_schema_bootstrap"],
 );
 
 // SQL wrapper: the M67 deterministic ef_search recommender (`theodb.recommend_ef`). Runs exact + ANN scans
@@ -495,7 +494,7 @@ REVOKE ALL ON FUNCTION theodb.recommend_ef(regclass, text, text[], float, int) F
 REVOKE ALL ON FUNCTION theodb_rs._recommend_ef(text, text, text[], float, int) FROM PUBLIC;
 "#,
     name = "theodb_recommend_ef_wrapper",
-    requires = [_recommend_ef],
+    requires = [_recommend_ef, "theodb_schema_bootstrap"],
 );
 
 // SQL wrappers: the M67 scan-stats collector. `theodb.scan_stats` measures one scan (real pages_read + latency)
@@ -523,7 +522,7 @@ REVOKE ALL ON FUNCTION theodb.scan_stats(regclass, text, text, int, int) FROM PU
 REVOKE ALL ON FUNCTION theodb_rs._scan_stats(oid, text, text, text, int, int) FROM PUBLIC;
 "#,
     name = "theodb_scan_stats_wrapper",
-    requires = [_scan_stats],
+    requires = [_scan_stats, "theodb_schema_bootstrap"],
 );
 
 // SQL wrapper: the M68 vector-scan EXPLAIN. There is NO amexplain hook in PG17/PG18 → a diagnostic function is
@@ -552,7 +551,7 @@ REVOKE ALL ON FUNCTION theodb.explain_scan(regclass, text, text, int, int) FROM 
 REVOKE ALL ON FUNCTION theodb_rs._explain_scan(oid, text, text, text, text, int, int) FROM PUBLIC;
 "#,
     name = "theodb_explain_scan_wrapper",
-    requires = [_explain_scan],
+    requires = [_explain_scan, "theodb_schema_bootstrap"],
 );
 
 // SQL wrappers: the public generative `ai.*` surface (M18 — was plpython3u in sql/50, now Rust). Created
@@ -599,7 +598,7 @@ REVOKE ALL ON FUNCTION theodb_rs._ai_rank(text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION theodb_rs._ai_generate_batch(text[], text) FROM PUBLIC;
 "#,
     name = "theodb_ai_wrappers",
-    requires = [_ai_chat, _ai_if, _ai_sentiment, _ai_rank, _ai_generate_batch],
+    requires = [_ai_chat, _ai_if, _ai_sentiment, _ai_rank, _ai_generate_batch, "theodb_schema_bootstrap"],
 );
 
 // SQL wrapper: the public cross-encoder rerank surface (M65 — `ai.rerank`). Created INTO the existing `ai`
@@ -622,7 +621,7 @@ REVOKE ALL ON FUNCTION ai.rerank(text, text[], text, int) FROM PUBLIC;
 REVOKE ALL ON FUNCTION theodb_rs._ai_rerank(text, text[], text, int) FROM PUBLIC;
 "#,
     name = "theodb_ai_rerank_wrapper",
-    requires = [_ai_rerank],
+    requires = [_ai_rerank, "theodb_schema_bootstrap"],
 );
 
 // SQL wrappers: the public NL→SQL surface (M19 — `ai.nl_to_sql` was the last plpython3u, now Rust). Created
@@ -645,7 +644,7 @@ REVOKE ALL ON FUNCTION ai.nl_to_sql(text, text[], text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION theodb_rs._nl_to_sql(text, text[], text) FROM PUBLIC;
 "#,
     name = "theodb_nl_wrappers",
-    requires = [_nl_to_sql],
+    requires = [_nl_to_sql, "theodb_schema_bootstrap"],
 );
 
 // SQL wrappers: the public hybrid-search surface (M19 — was plpgsql in sql/40, now Rust). Created INTO the
@@ -711,7 +710,7 @@ REVOKE ALL ON FUNCTION theodb_rs._hybrid_search_rrf(text, text, text, text, text
 REVOKE ALL ON FUNCTION theodb_rs._hybrid_search_json(jsonb) FROM PUBLIC;
 "#,
     name = "theodb_hybrid_wrappers",
-    requires = [_hybrid_search_rrf, _hybrid_search_json],
+    requires = [_hybrid_search_rrf, _hybrid_search_json, "theodb_schema_bootstrap"],
 );
 
 // SQL wrapper: the public migration helper `theodb.import_vectors` (M19 — was plpgsql in sql/80, now Rust).
@@ -740,7 +739,7 @@ REVOKE ALL ON FUNCTION theodb.import_vectors(regclass, jsonb, text, text, text) 
 REVOKE ALL ON FUNCTION theodb_rs._import_vectors(text, jsonb, text, text, text) FROM PUBLIC;
 "#,
     name = "theodb_import_wrapper",
-    requires = [_import_vectors],
+    requires = [_import_vectors, "theodb_schema_bootstrap"],
 );
 
 // SQL wrappers: TheoDB's own distance functions (M20 — own f32-parity ops over pgvector's values). Created
@@ -783,7 +782,7 @@ REVOKE ALL ON FUNCTION theodb_rs._vec_ip(real[], real[]) FROM PUBLIC;
 REVOKE ALL ON FUNCTION theodb_rs._vec_cosine(real[], real[]) FROM PUBLIC;
 "#,
     name = "theodb_vector_ops_wrapper",
-    requires = [_vec_l2, _vec_ip, _vec_cosine],
+    requires = [_vec_l2, _vec_ip, _vec_cosine, "theodb_schema_bootstrap"],
 );
 
 // SQL wrappers: TheoDB's own ANN index search (M21 — own HNSW + IVFFlat in Rust, recall-gated). Created INTO
@@ -855,7 +854,7 @@ REVOKE ALL ON FUNCTION theodb_rs._hnsw_knn(text, text, text, text, real[], int, 
 REVOKE ALL ON FUNCTION theodb_rs._ivfflat_knn(text, text, text, text, real[], int, int, int, int, bigint) FROM PUBLIC;
 "#,
     name = "theodb_ann_wrappers",
-    requires = [_hnsw_knn, _ivfflat_knn],
+    requires = [_hnsw_knn, _ivfflat_knn, "theodb_schema_bootstrap"],
 );
 
 // SQL wrappers: TheoDB's own SBQ quantized search (M22 — own scalar quantization, recall + memory gated).
@@ -909,7 +908,7 @@ REVOKE ALL ON FUNCTION theodb.sbq_bytes_per_vector(int, int) FROM PUBLIC;
 REVOKE ALL ON FUNCTION theodb_rs._sbq_bytes_per_vector(int, int) FROM PUBLIC;
 "#,
     name = "theodb_sbq_wrappers",
-    requires = [_sbq_knn, _sbq_bytes_per_vector],
+    requires = [_sbq_knn, _sbq_bytes_per_vector, "theodb_schema_bootstrap"],
 );
 
 // M39: `theodb.pq_knn` — own Product Quantization quantized ANN search. Same query-major flatten bridge as
@@ -952,5 +951,5 @@ REVOKE ALL ON FUNCTION theodb.pq_knn(regclass, text, vector[], int, int, int, in
 REVOKE ALL ON FUNCTION theodb_rs._pq_knn(text, text, text, text, real[], int, int, int, int, int, int, bigint) FROM PUBLIC;
 "#,
     name = "theodb_pq_wrappers",
-    requires = [_pq_knn],
+    requires = [_pq_knn, "theodb_schema_bootstrap"],
 );

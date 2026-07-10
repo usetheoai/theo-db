@@ -15,7 +15,6 @@
 -- Idempotent: safe to re-run / load from docker-entrypoint-initdb.d.
 
 -- dep (vector) declared in theodb.control `requires` (M15) — not created here
-CREATE SCHEMA IF NOT EXISTS ai;
 
 -- ai.nl_query — L3 read-only sandbox execution (M19 ADR-F: stays plpgsql — transaction-control + dynamic
 -- EXECUTE are inherently SQL operations; the M18 precedent kept the chunked import PROCEDURE plpgsql). It

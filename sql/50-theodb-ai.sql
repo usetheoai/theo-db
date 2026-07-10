@@ -13,7 +13,6 @@
 -- Idempotent: safe to re-run / load from docker-entrypoint-initdb.d.
 
 -- M18: ai._chat + the generative wrappers are Rust (theodb_rs); plpython3u dropped from requires in M19. Not created here.
-CREATE SCHEMA IF NOT EXISTS ai;
 
 -- ai.generate — raw text completion. plpgsql (late-bound) so its body is not validated against ai._chat at
 -- CREATE time (ai._chat lives in theodb_rs, created after theodb). VOLATILE: an LLM call is non-deterministic

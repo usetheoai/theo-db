@@ -8,7 +8,7 @@ relocatable = false
 # theodb.embed makes server-side outbound HTTP to the configured endpoint — privileged, like the
 # plpython3u original (sql/30). Not granted to PUBLIC (REVOKE in the install SQL).
 superuser = true
-# Requires `vector` (the return type + text::vector cast) AND `theodb` (the umbrella owns the `theodb`
-# schema into which theodb.embed is installed — theodb_rs creates the function there but NOT the schema,
-# avoiding a cross-extension CREATE SCHEMA ownership conflict). theodb_rs's own objects live in schema theodb_rs.
-requires = 'vector, theodb'
+# M70 (flip ADR-0029 D1): NENHUM `requires`. O theodb_rs é a BASE da stack — provê o tipo `public.vector`
+# own-code, os AMs ANN, e os schemas `theodb`/`ai` (bloco `theodb_schema_bootstrap`). O umbrella `theodb`
+# passa a requerer `theodb_rs` (antes ambos requeriam o pgvector, agora removido). Objetos próprios do
+# theodb_rs vivem no schema `theodb_rs`; os wrappers públicos `theodb.*`/`ai.*` vão nos schemas que ele cria.
