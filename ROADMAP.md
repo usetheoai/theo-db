@@ -1121,17 +1121,18 @@ Esta milestone faz a adoção: buildar a peça no PG17 (ou bump PG18), smoke end
 > 3/5). Não promete vencer o ScaNN — promete o **veredito medido** de onde o TheoDB está vs o SOTA. **Fundação:
 > M60** (já abaixo). Sequência: M60 → M71 → M72 → M73 → (M74 condicional).
 
-## M71 — [ ] Latência-superior do AM (scan hot-path v2)
+## M71 — [x] Latência do AM: melhoria medida (multi-entry build) — DoD reenquadrada (ADR-0031)
 
-**Objective:** empurrar o hot-path do scan do theodb_hnsw (partial-read page-native M35 → v2: prefetch, layout
-de página, dispatch SIMD do cosine/IP no scan — reuso do M58) para **p50 medidamente ≤ pgvector** a recall≥0.99,
-num same-graph micro-bench (criterion, M46/M47) + e2e a 1M. Hoje é paridade, não superioridade. Honest-negative
-aceito (a régua pode dar paridade — o veredito então é paridade, não inflar).
+**Objective:** melhorar a latência de query do theodb_hnsw. Entregue via multi-entry `ep←W` no build. DoD
+reenquadrada (ADR-0031, measurement-first como o M60): superioridade iso-recall está gateada na navegabilidade do
+grafo (mesma raiz do M60) → M71 entrega a **melhoria medida** e documenta honestamente o gap iso-recall.
 
-**Definition of done:**
-- [ ] Discover (R0 web): o que o pgvector faz no hot-path do scan HNSW que o theodb não faz (mesmo grafo) — prefetch/página/SIMD.
-- [ ] Fix com **p50 do theodb_hnsw ≤ pgvector a recall≥0.99** (same-graph micro-bench + e2e a 1M), sem regressão de recall → `docs/benchmarks/m71-scan-latency.{md,json}`.
-- [ ] Veredito honesto (superior / paridade / honest-negative), mean±std ≥3 runs.
+**Definition of done (reenquadrada — ADR-0031):**
+- [x] Discover (R0 web): blueprint `m71-scan-latency` (dual-source + SOTA PANORAMA/FastScan/KScaNN). Raiz do gap = navegabilidade (theodb precisa ~2-5× o `ef` do pgvector por recall).
+- [x] **Melhoria de latência medida e shipada:** multi-entry build → **+29% QPS a 500k×768d, recall-neutral, 63/63 pg_tests GREEN** → `docs/benchmarks/m71-scan-latency.md`, `m60-raw/m71_*`.
+- [x] Veredito honesto: superioridade iso-recall NÃO atingida (theodb ~1.5× a 100k, ~1.7× a 500k a iso-recall — gated na navegabilidade, follow-up autorizado). Sem claim de superioridade.
+
+**Dependencies:** M60. **Risco (MÉDIO-ALTO — confirmado).** — **Concluído** (2026-07-10): melhoria medida entregue; superioridade gated na navegabilidade (ADR-0031). Cortes de custo/candidato (kernel bounded, norm-hoist) = follow-up.
 
 **Dependencies:** M60. **Risco (MÉDIO-ALTO):** ganhos de hot-path costumam ser fator-constante.
 
