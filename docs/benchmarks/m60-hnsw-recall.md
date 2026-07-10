@@ -39,6 +39,25 @@ pgvector *também* é ef=1 — logo a descida **nunca foi** a diferença theodb-
 (após efc 64→200, MERGE back-links, m 16→32 do M57). O fix foi **revertido** (não se faz merge de um no-op cujo
 comentário alega corrigir o recall — Regra 3).
 
+## Hipótese de fix #2 (multi-entry-point no build, `ep ← W`) — REFUTADA por medição
+
+Segunda causa-raiz testada: theodb colapsava o resultado de busca `W` a um ÚNICO nó (`ep = selected.first()`) entre
+as camadas do build, enquanto Malkov-Yashunin Alg.1 (`ep ← W`) e o pgvector (`hnswutils.c` `HnswFindElementNeighbors`
+`ep = w`) carregam o **conjunto completo** `W` (até `efConstruction` entradas). Corrigido em ambos os builds (seq +
+paralelo), medido a 500k×768d: **recall 0.972 @ef=1000 — estatisticamente idêntico** (±1 slot de GT) ao 0.974
+pré-fix. **Não fecha o gap.** Raw: `docs/benchmarks/m60-raw/m60_theodb_f32_fix2_multientry_500k768d.json`. Revertido.
+
+**Observação lateral (relevante ao M71, NÃO ao M60):** o grafo mais bem-conectado do multi-entry rendeu **+29% de
+QPS** (82.8 vs 64.2 a ef=1000) a recall ~igual — um lever de LATÊNCIA/throughput, ao custo de build mais lento.
+Registrado para o M71 (não aplicado agora: é no-op de recall e trocar build-time por QPS exige a análise do M71).
+
+## Levers refutados por medição no M60 (não repetir) — 5 até agora
+
+efc 64→200 (M57, piorou→0.832) · MERGE back-links (M57→0.846) · m 16→32 (M57→0.952) · **descida de build por beam
+ef=1** (M60, no-op — `search_layer(ef=1)` ≡ hill-climb) · **multi-entry `ep←W` no build** (M60, no-op — 0.972).
+Refutados por LEITURA (corretos): entry-point promotion, upper-layers construídos, ground-search accept, efc default
+(=64, casado com pgvector), diversity + keep-back.
+
 ## O gap real (~1.4pt f32) — onde investigar a seguir (não perseguido nesta iteração)
 
 Refutados por medição/leitura (não repetir): entry-point promotion (correto), upper-layers construídos (correto),
