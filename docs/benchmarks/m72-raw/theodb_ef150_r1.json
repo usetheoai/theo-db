@@ -1,0 +1,15 @@
+{
+  "engine": "theodb",
+  "n": 1000000,
+  "dim": 128,
+  "clients": 8,
+  "ef": 150,
+  "recall": 0.917,
+  "build_s": 366.9,
+  "wall_s": 15.05,
+  "total_queries": 8988,
+  "qps_aggregate": 597.2,
+  "p50_ms": 13.606,
+  "p95_ms": 16.166,
+  "p99_ms": 18.381
+}

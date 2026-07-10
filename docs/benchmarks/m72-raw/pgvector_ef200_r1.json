@@ -1,0 +1,15 @@
+{
+  "engine": "pgvector",
+  "n": 1000000,
+  "dim": 128,
+  "clients": 8,
+  "ef": 200,
+  "recall": 0.9095,
+  "build_s": "reused",
+  "wall_s": 15.04,
+  "total_queries": 8114,
+  "qps_aggregate": 539.5,
+  "p50_ms": 16.513,
+  "p95_ms": 17.6,
+  "p99_ms": 18.153
+}
