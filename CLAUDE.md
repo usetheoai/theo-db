@@ -66,6 +66,14 @@ buscar **superioridade de performance no pilar vetorial comprovada por benchmark
 - **Measurement-first:** o harness de recall@k reproduzível **existe** (`benchmarks/theodb_bench/`) e é
   pré-requisito de qualquer claim de performance. Estado medido: SIFT1M vs ScaNN (M33 — gap ~25× QPS) e vs
   pgvector hnsw (M45 — **paridade** recall×QPS). Nenhuma afirmação de performance sem artefato em `docs/benchmarks/`.
+- **VEREDITO MEDIDO FINAL do pilar vetorial (M73, 2026-07-10, `docs/adr/0035` + `docs/benchmarks/m73-headtohead-verdict.md`):**
+  **paridade own-code de recall classe-pgvector ALCANÇADA** (M60/M69/M70); **throughput multi-cliente
+  competitivo-a-superior** vs pgvector no regime 128d clusterizado (M72, +11% QPS a recall casado); **superioridade
+  de QPS vetorial sobre o ScaNN/AlloyDB MEDIDA como NÃO-ALCANÇÁVEL** por extensão PG permissiva (gap ~25-44× @ 0.99 é
+  de paradigma — AH-LUT anisotrópico + não pagar o imposto MVCC/WAL; RaBitQ, melhor quantizador permissivo, dá
+  memória não QPS — M74/ADR-0036). Posicionamento permitido: "paridade recall + memória billion-scale + AI-native/
+  HTAP/aberto"; **jamais** "mais rápido que o AlloyDB no vetor". Reposicionamento formal do North Star: `docs/adr/0033`
+  (proposto, decisão do owner — o mandato LOCKED ADR-0002 permanece até assinatura).
 - **Fork é condicional** ao benchmark de gatilho (D3); não forkar antes de medir (anti-sunk-cost).
 - **Columnar (lakehouse, D2)** é uma aposta **diferente e competitiva**, não cópia do AlloyDB — forçado pela
   licença permissiva (D1 barra AGPL). Paridade interna *literal* (Opção β) exigiria reabrir D1/D2/D7 — fora de
