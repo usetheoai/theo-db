@@ -1,0 +1,113 @@
+{
+  "n": 500000,
+  "dim": 768,
+  "k": 10,
+  "nq": 50,
+  "qps_runs": 3,
+  "load": 3.0,
+  "metric": "cosine",
+  "specs": {
+    "theodb_hnsw_f32": {
+      "build_s": "reused",
+      "sweep": [
+        {
+          "knob": 200,
+          "recall": 0.898,
+          "qps_mean": 119.1,
+          "qps_std": 1.01,
+          "qps_runs": [
+            118.4,
+            118.3,
+            120.5
+          ]
+        },
+        {
+          "knob": 400,
+          "recall": 0.956,
+          "qps_mean": 91.8,
+          "qps_std": 0.79,
+          "qps_runs": [
+            90.7,
+            92.5,
+            92.2
+          ]
+        },
+        {
+          "knob": 800,
+          "recall": 0.958,
+          "qps_mean": 71.7,
+          "qps_std": 0.17,
+          "qps_runs": [
+            71.5,
+            71.9,
+            71.6
+          ]
+        },
+        {
+          "knob": 1000,
+          "recall": 0.974,
+          "qps_mean": 64.2,
+          "qps_std": 0.54,
+          "qps_runs": [
+            64.9,
+            63.6,
+            64.0
+          ]
+        }
+      ]
+    },
+    "theodb_hnsw_sbq": {
+      "build_s": 456.67,
+      "sweep": [
+        {
+          "knob": 4,
+          "recall": 0.986,
+          "qps_mean": 18.0,
+          "qps_std": 0.08,
+          "qps_runs": [
+            18.1,
+            17.9,
+            18.0
+          ]
+        },
+        {
+          "knob": 8,
+          "recall": 0.986,
+          "qps_mean": 8.6,
+          "qps_std": 0.05,
+          "qps_runs": [
+            8.7,
+            8.6,
+            8.6
+          ]
+        },
+        {
+          "knob": 16,
+          "recall": 0.986,
+          "qps_mean": 4.1,
+          "qps_std": 0.05,
+          "qps_runs": [
+            4.1,
+            4.0,
+            4.1
+          ]
+        },
+        {
+          "knob": 32,
+          "recall": 0.986,
+          "qps_mean": 1.9,
+          "qps_std": 0.0,
+          "qps_runs": [
+            1.9,
+            1.9,
+            1.9
+          ]
+        }
+      ]
+    }
+  },
+  "f32_best_recall": 0.974,
+  "f32_best_ef": 1000,
+  "m60_gate_met": false,
+  "sbq_best_recall": 0.986
+}
