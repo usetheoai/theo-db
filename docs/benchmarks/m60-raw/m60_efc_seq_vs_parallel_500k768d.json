@@ -1,0 +1,18 @@
+[
+  {
+    "efc": 64,
+    "mode": "sequential",
+    "ef_search": 1000,
+    "recall": 0.974,
+    "p50_ms": 15.254,
+    "build_s": 2086.9
+  },
+  {
+    "efc": 64,
+    "mode": "parallel",
+    "ef_search": 1000,
+    "recall": 0.972,
+    "p50_ms": 15.673,
+    "build_s": 400.48
+  }
+]

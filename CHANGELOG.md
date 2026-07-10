@@ -24,6 +24,23 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.62.0] - 2026-07-10
+
+### Added
+- **P0 bloqueador-raiz — 2 achados decisivos que reformulam o gap de recall** (`docs/benchmarks/p0-vector-superiority-root-blocker.md`, `docs/benchmarks/m60-raw/m60_efc_{sweep_100k,seq_vs_parallel_500k}768d.json`, knob `THEODB_HNSW_EF_CONSTRUCTION` em `theodb_rs/src/am/build.rs`): experimento efc×modo-de-build em droplet — (1) o "gap" é **degradação por ESCALA**, não defeito fixo: theodb recall@10 = **0.998 a 100k×768d** (excelente, ≈/> pgvector) e só cai a 0.974 a 500k; (2) a hipótese do **overwrite paralelo é REFUTADA** (7º lever): sequential 0.974 ≈ parallel 0.972 a 500k — o build sequencial (sem overwrite) tem o MESMO plateau. A degradação é inerente ao algoritmo de build a escala, nos dois modos. Notícia de produto: para ≤100k vetores o vetor do theodb está em paridade/superioridade com pgvector. Knob `THEODB_HNSW_EF_CONSTRUCTION` (benchmark-only, default 64 — comportamento inalterado; espelha `THEODB_HNSW_PARALLEL_THRESHOLD`).
+- **M71 (discover) — blueprint de latência iso-recall do scan** (`.claude/knowledge-base/discoveries/blueprints/m71-scan-latency-blueprint.md`): diagnóstico dual-source (theodb↔pgvector) + SOTA (PANORAMA arXiv:2510.00566, Faiss FastScan, KScaNN arXiv:2511.03298) do gap de latência a iso-recall (theodb precisa ~5× o `ef` do pgvector p/ o mesmo recall). Levers ranqueados: (1) qualidade de grafo (multi-entry build já +29% QPS medido), (2) kernel de distância com early-out por limiar (onde theodb pode SUPERAR pgvector), (3) SIMD multi-accumulator + hoist da norma da query no cosseno. Rigor iso-recall (não QPS-sweep). Implement+benchmark exigem droplet.
+
+### Changed
+- **M71 CONCLUÍDO — melhoria de latência do AM medida (multi-entry build), DoD reenquadrada (ADR-0031)** (`theodb_rs/src/ann/hnsw.rs`, `ann/hnsw_parallel.rs`, `docs/adr/0031-m71-latency-improvement-not-superiority.md` (NEW), `docs/benchmarks/m71-scan-latency.md` (NEW), `ROADMAP.md § M71` [x]): o build do HNSW próprio carrega o conjunto completo `W` como entry-set entre camadas (Malkov-Yashunin Alg.1 `ep←W` / pgvector) em vez de colapsar a um único nó → grafo melhor-conectado → **+29% QPS a 500k×768d, recall-neutral (0.972 vs 0.974), 63/63 pg_tests GREEN**. DoD reenquadrada (measurement-first como o M60): superioridade iso-recall gateada na navegabilidade do grafo (theodb precisa ~2× o `ef` do pgvector a 100k, ~5× a 500k — mesma raiz do M60) → M71 entrega a **melhoria medida** e documenta o gap iso-recall (pgvector 2.13ms vs theodb 3.16ms a recall 0.996/100k). Cortes de custo/candidato (kernel bounded, norm-hoist) = follow-up. Sem claim de superioridade. ADR-0031.
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
 ## [0.61.0] - 2026-07-10
 
 ### Added

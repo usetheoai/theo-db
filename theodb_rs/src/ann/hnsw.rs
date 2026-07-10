@@ -158,9 +158,16 @@ impl HnswIndex {
             lc -= 1;
         }
         let mut lc = level.min(self.max_level) as isize;
+        // M71 (latency): carry the FULL search result W forward as the next layer's entry SET (Malkov-Yashunin
+        // INSERT Alg.1 `ep ← W`; pgvector `HnswFindElementNeighbors` `ep = w`, hnswutils.c). The previous
+        // `ep = selected.first()` collapsed W to a SINGLE node between layers, yielding a less-connected graph that
+        // needs a wider query beam. Carrying W builds a better-connected graph → **+29% query QPS at equal recall**,
+        // measured at 500k×768d (docs/benchmarks/m60-raw/m60_theodb_f32_fix2_multientry_500k768d.json). Recall-neutral.
+        let mut entries: Vec<usize> = vec![ep];
         while lc >= 0 {
             let layer = lc as usize;
-            let candidates = self.search_layer(&q, &[ep], self.ef_construction, layer);
+            let candidates = self.search_layer(&q, &entries, self.ef_construction, layer);
+            let next_entries: Vec<usize> = candidates.iter().map(|c| c.i).collect();
             let m_layer = if layer == 0 { self.m0 } else { self.m };
             let selected = self.select_from(candidates, m_layer);
             self.neighbors[node][layer] = selected.clone();
@@ -178,8 +185,8 @@ impl HnswIndex {
                     self.neighbors[nb][layer] = self.select_from(cand, m_layer);
                 }
             }
-            if let Some(&best) = selected.first() {
-                ep = best;
+            if !next_entries.is_empty() {
+                entries = next_entries;
             }
             lc -= 1;
         }
