@@ -538,6 +538,30 @@ unsafe fn main_index_pages(rel: pg_sys::Relation) -> Result<u32, String> {
         // pending offset (silently dropping INSERTed rows). v2 (M34) has an implicit gen_base of 1; v3 (M48)
         // carries it explicitly. Reject anything else with the REINDEX error.
         let ver = u32::from_le_bytes(m[4..8].try_into().unwrap());
+        if ver == 4 {
+            // v4 (M77 AQ): pending starts after meta(gen_base) + dir + codebook + centroids + Σ list pages.
+            if m.len() < 37 {
+                return Err("theodb am: truncated v4 meta".into());
+            }
+            let nlists4 = u32::from_le_bytes(m[13..17].try_into().unwrap()) as usize;
+            let codebook_npages = u32::from_le_bytes(m[21..25].try_into().unwrap());
+            let dir_npages4 = u32::from_le_bytes(m[25..29].try_into().unwrap());
+            let centroid_npages4 = u32::from_le_bytes(m[29..33].try_into().unwrap());
+            let gen_base4 = u32::from_le_bytes(m[33..37].try_into().unwrap());
+            let dbytes4 = read_chunked(rel, gen_base4, dir_npages4)?;
+            if dbytes4.len() < nlists4 * 12 {
+                return Err("theodb am: truncated v4 directory".into());
+            }
+            let mut total4 = gen_base4
+                .saturating_add(dir_npages4)
+                .saturating_add(codebook_npages)
+                .saturating_add(centroid_npages4);
+            for i in 0..nlists4 {
+                let o = i * 12 + 4; // np field within the 12-byte dir entry
+                total4 = total4.saturating_add(u32::from_le_bytes(dbytes4[o..o + 4].try_into().unwrap()));
+            }
+            return Ok(total4);
+        }
         if ver != 2 && ver != 3 {
             return Err(format!(
                 "theodb am: unsupported structured format v{ver} — REINDEX to upgrade to the M48 relocatable generation (v3)"

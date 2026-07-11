@@ -353,6 +353,16 @@ unsafe fn scan_ivf_aq(rel: pg_sys::Relation, query: &[f32]) -> BinaryHeap<Revers
         };
         results.push((tid, d));
     }
+    // M81 — fold in pending (rows INSERTed after build): f32, scored EXACTLY (never quantized), no rebuild. Same
+    // contract as the v3 f32 path — else post-build INSERTs are silently dropped from a WITH (pq_subspaces) index.
+    match page::read_pending(rel) {
+        Ok(pending) => {
+            for (tidv, v) in pending {
+                results.push((tidv, metric.dist(query, &v)));
+            }
+        }
+        Err(e) => pg_sys::error!("theodb am scan (pending): {e}"),
+    }
     heapify(results)
 }
 
