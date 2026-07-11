@@ -1299,6 +1299,49 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 
 ---
 
+# Roadmap v7 — Storage-Separated ScaNN-fidelity (classe AlloyDB in-Postgres)
+
+> Origem: deep research web-grounded 2026-07-11 (`docs/research/scann-storage-separation-2026-07.md`). Ataca a **única** alavanca não-testada que o ADR-0037 (M82) nomeou: **separar os códigos AQ dos vetores f32 em cadeias de páginas distintas** (FastScan/AlloyDB/VectorChord/pgvectorscale todos fazem). **Alvo honesto (arXiv:2603.23710 + teto AlloyDB):** recuperar ~4–6× → classe "AlloyDB-ScaNN in-Postgres" (~4× sobre pgvector HNSW), **jamais** vencer o ScaNN-biblioteca (imposto MVCC/WAL é ~4–6× irrecuperável). **Serial, gate-driven; honest-negative é terminal válido em cada etapa.**
+
+## M83 — [ ] Fase 0 v7: spike D3 storage-separation (o GATE measurement-first)
+
+**Objective:** medir, no AM REAL (não in-memory — lição do M82), se separar códigos↔f32 em páginas distintas recupera QPS. Layout v5 atrás de reloption `separate_storage=on` (v3/v4/236 pg_tests intactos); scan em 2 fases (Fase 1 só-códigos AH-poda; Fase 2 random-read f32 só dos sobreviventes).
+
+**Definition of done:**
+- [ ] `write_ivf_aq_split`/`read_ivf_aq_meta_v5`/`scan_ivf_aq_split` (~185 LoC, `am/page.rs`+`am/scan.rs`) atrás de reloption; recall@10 byte-classe-idêntico ao v4/v3.
+- [ ] `benchmarks/m83_split_bench.py` (A/B same-data M46: v5+v4+v3 na MESMA tabela 1M) → `docs/benchmarks/m83-split-storage-spike.{md,json}` com **cold E warm cache** best-of-3 + `pages_read` via profiler + veredito D3 explícito.
+- [ ] 236 pg_tests GREEN; CHANGELOG atualizado.
+
+**GATE D3:** ≥**3× v4** a recall 0.985 (≥~235 QPS) **E** pages_read confirma queda de I/O → **GO M84**. 1.3–3× → HONEST-PARTIAL. <1.3× → HONEST-NEGATIVE-FINAL (fecha a track, ADR estende M73/M82).
+**⚠️ Caveat load-bearing:** a 1M o f32 cabe em RAM → separação pode salvar só faults lógicos, não I/O de disco; a vantagem real é bilhão-scale (M88). Reportar cold-cache; rotular 1M como projeção. **Dependencies:** M82.
+
+## M84 — [ ] Layout v5 produção (WAL/VACUUM/cost) *(gated M83 GO)*
+
+**Objective:** promover o layout do spike a variante AM completa: `write_ivf_aq_split` WAL-safe, VACUUM/fold das 2 regiões, `amcostestimate` v5-aware (custo ∝ Fase1-códigos + Fase2-rerank).
+**DoD:** crash-safety pg_tests (espelha suíte fold v3/v4); VACUUM reclama as 2 regiões; head-to-head re-medido sem regressão vs spike. **GATE:** crash-safe (sem torn-page em kill no meio do fold) + QPS ≥ spike. **Dependencies:** M83.
+
+## M85 — [ ] Refine SQ8/PQ-maior (rerank mais barato) *(gated M84)*
+
+**Objective:** trocar o rerank full-f32 por uma região de refine SQ8 (Faiss `Refine(SQ8)`) → Fase 2 lê 128 B não 512 B/sobrevivente.
+**DoD:** curva recall×QPS por m/bits; paridade de recall dentro de ε declarado. **GATE:** QPS↑ a recall casado com perda ≤ ε. **Dependencies:** M84.
+
+## M86 — [ ] SOAR spill (menos probes p/ mesmo recall) *(gated M85)*
+
+**Objective:** assignment redundante multi-cluster (SOAR, arXiv:2404.00774, redundância 2.0–3.0) → ataca o *centroid-probe bind* (a outra metade do ADR-0037).
+**DoD:** recall@10 a probes-fixo vs baseline; delta de tamanho de índice medido. **GATE:** recall-a-probes-fixo↑ material com crescimento de tamanho aceitável. **Dependencies:** M85.
+
+## M87 — [ ] Filtered ANN + integração planner *(gated M86)*
+
+**Objective:** filtered-ANN sobre o layout separado + `amcostestimate` que modela o I/O de 2 fases → optimizer escolhe v5 corretamente.
+**DoD:** recall/QPS filtrado; planner escolhe v5 vs seqscan em WHERE seletivo. **GATE:** planner escolhe v5 quando deve; recall filtrado preservado. **Dependencies:** M86.
+
+## M88 — [ ] Head-to-head bilhão-scale + North Star re-measure *(gated M87)*
+
+**Objective:** a medição terminal num regime onde o f32 NÃO cabe em RAM (a vantagem real da separação, não projetada) vs ScaNN/AlloyDB.
+**DoD:** `docs/benchmarks/m88-*.md` a ≥100M/1B; ADR estendendo/revisando 0037; sign-off council-benchmark. **GATE:** veredito terminal do North Star para a track separada (o próximo dado da linhagem M33/M73/M82). **Dependencies:** M87.
+
+---
+
 ## Sequência e paralelismo
 
 ```
