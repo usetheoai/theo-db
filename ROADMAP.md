@@ -1315,7 +1315,7 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 **GATE D3:** ≥**3× v4** a recall 0.985 (≥~235 QPS) **E** pages_read confirma queda de I/O → **GO M84**. 1.3–3× → HONEST-PARTIAL. <1.3× → HONEST-NEGATIVE-FINAL (fecha a track, ADR estende M73/M82).
 **⚠️ Caveat load-bearing:** a 1M o f32 cabe em RAM → separação pode salvar só faults lógicos, não I/O de disco; a vantagem real é bilhão-scale (M88). Reportar cold-cache; rotular 1M como projeção. **Dependencies:** M82.
 
-## M84 — [ ] Layout v5 produção (WAL/VACUUM/cost) *(gated M83 GO)*
+## M84 — [x] Layout v5 produção (WAL/VACUUM/cost) *(gated M83 GO)*
 
 **Objective:** promover o layout do spike a variante AM completa: `write_ivf_aq_split` WAL-safe, VACUUM/fold das 2 regiões, `amcostestimate` v5-aware (custo ∝ Fase1-códigos + Fase2-rerank).
 **DoD:** crash-safety pg_tests (espelha suíte fold v3/v4); VACUUM reclama as 2 regiões; head-to-head re-medido sem regressão vs spike. **GATE:** crash-safe (sem torn-page em kill no meio do fold) + QPS ≥ spike. **Dependencies:** M83.

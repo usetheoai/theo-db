@@ -305,7 +305,11 @@ unsafe fn scan_ivf_aq(rel: pg_sys::Relation, query: &[f32]) -> BinaryHeap<Revers
         meta.centroids.iter().enumerate().map(|(i, c)| (metric.dist(query, c), i)).collect();
     cd.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
     let probes = crate::am::guc::probes().clamp(1, meta.centroids.len().max(1));
-    let rerank_pool = crate::am::guc::over_fetch().max(64);
+    // M84 — AQ rerank pool = base 64 × over_fetch factor. Fixes a latent no-op: the old `over_fetch().max(64)`
+    // was ALWAYS 64 (over_fetch ≤ 64, so the .max(64) floor always won), so `theodb_hnsw.over_fetch` never
+    // widened the AQ rerank pool. `64 * over_fetch()` keeps the default (over_fetch=1 → 64) but lets a wider pool
+    // recover recall when the AH prune quality caps it (the M83 recall-ceiling lever).
+    let rerank_pool = 64 * crate::am::guc::over_fetch();
 
     // Stage 1 — batched AH scan of probed lists. Cache each list's bytes for the rerank (read once, O(probes)).
     let mut listbytes: Vec<(usize, Vec<u8>)> = Vec::new(); // (n, bytes)
@@ -399,7 +403,11 @@ unsafe fn scan_ivf_aq_split(rel: pg_sys::Relation, query: &[f32]) -> BinaryHeap<
         meta.centroids.iter().enumerate().map(|(i, c)| (metric.dist(query, c), i)).collect();
     cd.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
     let probes = crate::am::guc::probes().clamp(1, meta.centroids.len().max(1));
-    let rerank_pool = crate::am::guc::over_fetch().max(64);
+    // M84 — AQ rerank pool = base 64 × over_fetch factor. Fixes a latent no-op: the old `over_fetch().max(64)`
+    // was ALWAYS 64 (over_fetch ≤ 64, so the .max(64) floor always won), so `theodb_hnsw.over_fetch` never
+    // widened the AQ rerank pool. `64 * over_fetch()` keeps the default (over_fetch=1 → 64) but lets a wider pool
+    // recover recall when the AH prune quality caps it (the M83 recall-ceiling lever).
+    let rerank_pool = 64 * crate::am::guc::over_fetch();
 
     // Stage 1 — read ONLY the CODE pages of each probed list; AH-score; keep (score, tid, list_ci, ordinal).
     let mut cands: Vec<(i32, i64, usize, usize)> = Vec::new();
