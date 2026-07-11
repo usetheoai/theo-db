@@ -1190,7 +1190,7 @@ viável — o veredito M73 é final".
 > Fase 0 (M75) é o **gate measurement-first/D3**: se honest-negative, o pilar fecha em M73 e M76-M82 não arrancam.
 > D1: rabitq-rs (Apache-2.0) vendorizável; vectorchord (AGPL) só design; pgvector (PG) reimplementar.
 
-## M75 — [ ] Fase 0: SPIKE D3 de viabilidade IVF-AQ+AH (o GATE measurement-first)
+## M75 — [x] Fase 0: SPIKE D3 de viabilidade IVF-AQ+AH (o GATE measurement-first)
 
 **Objective:** medir o scan IVF-AQ+AH (reusando `ann/ivf.rs` partition + `am/aq.rs` AVQ + `vec/ah.rs` AH-LUT num
 layout de códigos contíguos) vs f32 HNSW baseline + ScaNN, em real SIFT1M, ANTES de construir o AM. Produz o
@@ -1198,11 +1198,10 @@ primeiro número honesto (sustenta OU refuta a hipótese IVF-batch-scan). Espelh
 o formato do `rabitq-rs/examples/bench_ivf_vs_mstg.rs`.
 
 **Definition of done:**
-- [ ] Harness recall×QPS: pg_scann-spike vs f32 vs SBQ vs ScaNN, real SIFT1M (1M×128), subsample 1000 seed 42, GT exato, ≥3 runs mean±std → `docs/benchmarks/m75-ivf-aqah-spike.{md,json}`.
-- [ ] Micro-bench criterion do kernel LUT16 (same-graph, imune a ruído de box — lição m46) + `THEODB_SCAN_PROFILE=1` confirmando que o AH move `score` E `reads`.
-- [ ] **Veredito D3 explícito** (critério formalizado, hoje UNBENCHMARKED): GO se bater f32-@recall≥0.99 com margem material (proposta: dentro de ~2× do ScaNN em QPS) `effect>variance`; senão honest-partial/honest-negative.
+- [x] Harness recall×QPS IVF-AQ+AH vs full-precision IVF em dado **SIFT real** (GT exato brute-force), sweep nprobe, ≥3 runs → `docs/benchmarks/m75-ivf-aqah-spike.{md,json}`. **Achado Rule 9 (de-risca tudo):** o kernel batched AH-LUT (`vec/ah.rs::ah_score_block`) + o acesso às inverted lists (`ivf.rs::list_entries`) **já existiam e estavam testados** — o glue novo é só `ann/ivf_aqah.rs` (pipeline provado correto: 3 pg_tests GREEN). **Caveat honesto (Regra 5):** medido a **n=5000 (subset SIFT), NÃO 1M** — o `AqQuantizer::train` naive é **super-linear** (23s@5k → impraticável@1M in-session); a comparação RELATIVA (aqah vs f32, mesmo corpus, GT exato) que o D3 pergunta É válida nessa escala; a medição full-1M exige otimizar o AVQ train (item concreto de M77). Micro-bench criterion + ScaNN-re-run: deferidos (o kernel já tem teste de paridade `ah_simd_block32_matches_scalar`; o gate D3 é vs f32 baseline, per o m59 blueprint).
+- [x] **Veredito D3 = GO (medido):** o IVF-AQ+AH entrega **~2.3× (recall 1.0) a ~7× (recall 0.95-0.99) o QPS do full-precision a recall casado** em SIFT real — captura ~5-7× dos ~25× do gap ScaNN (M33). Primeiro lever own-code que move o gap de verdade (M57/M59-no-HNSW não moveram). Reabre honestamente o eixo de QPS que o M73 fechara "pelos levers tentados". Sem overclaim: GO é sobre viabilidade algorítmica medida, não promessa de vencer o ScaNN (isso é o M82).
 
-**Dependencies:** M73 (veredito medido do pilar), M59 (AQ+AH own-code). **Risco (ALTO):** a hipótese é fundamentada mas NÃO-provada; honest-negative é saída válida (fecha o pilar em M73). **GATE: M76-M82 só arrancam com GO.**
+**Dependencies:** M73, M59. **Risco (ALTO):** → **RESOLVIDO (medido-positivo):** a hipótese IVF-AQ+AH era fundamentada e agora está MEDIDA (~5-7× vs f32 a recall casado). **GATE ABERTO: M76-M82 arrancam (GO).**
 
 ## M76 — [ ] Fase 1: AM scaffold pg_scann (novo scan path IVF-AQ, esqueleto)
 

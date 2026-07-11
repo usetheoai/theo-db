@@ -18,6 +18,7 @@ use std::cmp::Ordering;
 mod hnsw;
 mod hnsw_parallel;
 mod ivf;
+mod ivf_aqah; // M75 — IVF-AQ+AH spike index (ROADMAP v6, pg_scann Fase 0)
 pub(crate) mod scan_core;
 mod wire;
 
