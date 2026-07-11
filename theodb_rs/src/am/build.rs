@@ -326,6 +326,14 @@ pub(crate) unsafe fn vacuum_rebuild(
         return 0; // unbuilt
     }
     if magic == page::IVF_STRUCT_MAGIC {
+        // M81 — a v4 (AQ) IVF index: the f32 v3 rebuild would reject/corrupt it. Correctness holds WITHOUT a
+        // structure rebuild — the scan folds the pending region (scan.rs::scan_ivf_aq) and the executor's MVCC
+        // heap re-check filters dead tuples out of the returned TIDs. Compacting the v4 lists/pending needs a
+        // v4-aware fold — a documented follow-up (REINDEX rebuilds cleanly today). So a routine VACUUM is a
+        // safe no-op on the structure, never a crash on `read_ivf_meta(v4)`.
+        if page::ivf_is_v4(indexrel) {
+            return 0;
+        }
         return vacuum_rebuild_structured(indexrel, dead);
     }
     if magic == crate::am::hnsw_page::HNSW_STRUCT_MAGIC {
@@ -667,6 +675,39 @@ mod tests {
         let e: std::collections::HashSet<i32> = exact.iter().copied().collect();
         let recall = idx.iter().filter(|id| e.contains(id)).count() as f64 / (exact.len().max(1) as f64);
         assert!(recall >= 0.8, "IVF-AQ v4 recall@10 {recall:.2} < 0.8 (exact={exact:?} idx={idx:?})");
+    }
+
+    /// M81 (pg_scann lifecycle) — a row INSERTed AFTER a v4 IVF-AQ index is built (goes to the pending region,
+    /// not the persisted AQ lists) is FOLDED into the scan: `scan_ivf_aq` reads + exact-scores the pending, so
+    /// post-build INSERTs are never silently dropped. (VACUUM safety is by construction — `vacuum_rebuild` no-ops
+    /// on v4 instead of the f32 rebuild that would reject `read_ivf_meta(v4)`; VACUUM cannot run inside the test tx.)
+    #[pgrx::pg_test]
+    fn ivf_aq_v4_folds_post_build_inserts() {
+        pgrx::Spi::run("CREATE TABLE ivfaqp (id int PRIMARY KEY, e vector(8))").unwrap();
+        for i in 0..100usize {
+            let lit =
+                (0..8).map(|j| (((i * 31 + j * 7) % 97) as f32 * 0.1).to_string()).collect::<Vec<_>>().join(",");
+            pgrx::Spi::run(&format!("INSERT INTO ivfaqp VALUES ({}, '[{lit}]')", i + 1)).unwrap();
+        }
+        pgrx::Spi::run(
+            "CREATE INDEX ivfaqp_idx ON ivfaqp USING theodb_ivfflat (e) WITH (lists=4, pq_subspaces=4, aq_threshold=2000)",
+        )
+        .unwrap();
+        // INSERT a distinctive row AFTER build → lands in the pending region (not the persisted AQ lists).
+        pgrx::Spi::run("INSERT INTO ivfaqp VALUES (9999, '[50,50,50,50,50,50,50,50]')").unwrap();
+        pgrx::Spi::run("SET theodb_ivfflat.probes = 4").unwrap();
+        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        let ids: Vec<i32> = pgrx::Spi::connect(|c| {
+            c.select(
+                "SELECT id FROM ivfaqp ORDER BY e <-> '[50,50,50,50,50,50,50,50]'::vector LIMIT 3",
+                None,
+                &[],
+            )
+            .unwrap()
+            .filter_map(|r| r.get::<i32>(1).unwrap())
+            .collect()
+        });
+        assert!(ids.contains(&9999), "post-build INSERT (id 9999) folded into the v4 AQ scan (got {ids:?})");
     }
 
     /// T3.3 NON-REGRESSION (build): with NO reloption, `ambuild_hnsw` packs the byte-identical v1 layout — the

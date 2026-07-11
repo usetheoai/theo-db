@@ -65,7 +65,12 @@ pub(crate) fn ratio_for(magic: Option<u32>, tuples: f64, probes: usize, lists: u
 pub(crate) unsafe fn scan_visit_ratio(rel: pg_sys::Relation, tuples: f64) -> f64 {
     let magic = page::peek_magic(rel).ok();
     let lists = if magic == Some(page::IVF_STRUCT_MAGIC) {
-        page::read_ivf_meta(rel).map(|meta| meta.dir.len()).unwrap_or(0)
+        // v3 f32 OR v4 AQ (M77) — read_ivf_meta rejects v4, so fall back to the v4 meta for its list count. Still
+        // fail-safe: either Err → 0 → ratio 1.0 (never aborts planning).
+        page::read_ivf_meta(rel)
+            .map(|meta| meta.dir.len())
+            .or_else(|_| page::read_ivf_aq_meta(rel).map(|meta| meta.dir.len()))
+            .unwrap_or(0)
     } else {
         0
     };
