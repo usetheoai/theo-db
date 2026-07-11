@@ -562,6 +562,32 @@ unsafe fn main_index_pages(rel: pg_sys::Relation) -> Result<u32, String> {
             }
             return Ok(total4);
         }
+        if ver == 5 {
+            // v5 (M83 storage-separated): pending starts after meta(gen_base) + dir(20B) + codebook + centroids +
+            // Σ(code pages + vec pages). Dir entry = (code_fb, code_np, vec_fb, vec_np, cnt) — sum np fields o+4, o+12.
+            if m.len() < 37 {
+                return Err("theodb am: truncated v5 meta".into());
+            }
+            let nlists5 = u32::from_le_bytes(m[13..17].try_into().unwrap()) as usize;
+            let codebook_npages5 = u32::from_le_bytes(m[21..25].try_into().unwrap());
+            let dir_npages5 = u32::from_le_bytes(m[25..29].try_into().unwrap());
+            let centroid_npages5 = u32::from_le_bytes(m[29..33].try_into().unwrap());
+            let gen_base5 = u32::from_le_bytes(m[33..37].try_into().unwrap());
+            let dbytes5 = read_chunked(rel, gen_base5, dir_npages5)?;
+            if dbytes5.len() < nlists5 * 20 {
+                return Err("theodb am: truncated v5 directory".into());
+            }
+            let mut total5 = gen_base5
+                .saturating_add(dir_npages5)
+                .saturating_add(codebook_npages5)
+                .saturating_add(centroid_npages5);
+            for i in 0..nlists5 {
+                let o = i * 20;
+                total5 = total5.saturating_add(u32::from_le_bytes(dbytes5[o + 4..o + 8].try_into().unwrap()));
+                total5 = total5.saturating_add(u32::from_le_bytes(dbytes5[o + 12..o + 16].try_into().unwrap()));
+            }
+            return Ok(total5);
+        }
         if ver != 2 && ver != 3 {
             return Err(format!(
                 "theodb am: unsupported structured format v{ver} — REINDEX to upgrade to the M48 relocatable generation (v3)"
@@ -989,6 +1015,232 @@ pub(crate) unsafe fn read_ivf_aq_meta(rel: pg_sys::Relation) -> Result<IvfAqMeta
         return Err("theodb ivf-aq: truncated centroid region".into());
     }
     Ok(IvfAqMeta { dim, metric_tag, m: mval, codebook, centroids, dir })
+}
+
+// ============================================================================================================
+// M83 — IVF-AQ v5 STORAGE-SEPARATED layout (Roadmap v7 D3 spike): per-list codes and f32 live on DISTINCT page
+// ranges so the scan reads ONLY the compact codes for the whole list (Stage 1 AH prune), then random-reads the
+// f32 for the `over_fetch` survivors ONLY (Stage 2 rerank). Fixes the v4 interleaving that made M82 I/O-bound
+// (ADR-0037). Behind `WITH (separate_storage=1)`; v3/v4 untouched. Layout from gen_base=1:
+//   [block 0 meta v5] · dir(20B/list) · codebook · centroid · (per-list: CODE pages then VECTOR pages)
+// CODE bytes = [ids i64×n][AQ codes ceil(n/32)·pairs·32 block32]; VECTOR bytes = [f32 (dim×4)×n].
+// dir entry = (code_fb u32, code_np u32, vec_fb u32, vec_np u32, cnt u32).
+// ============================================================================================================
+
+pub(crate) struct IvfAqMetaV5 {
+    pub dim: u32,
+    pub metric_tag: u8,
+    pub m: u32,
+    pub codebook: Vec<u8>,
+    pub centroids: Vec<Vec<f32>>,
+    pub dir: Vec<(u32, u32, u32, u32, u32)>, // code_fb, code_np, vec_fb, vec_np, cnt
+}
+
+/// True iff the index's structured meta is v5 (AQ storage-separated) — cheap 8-byte read of block 0.
+pub(crate) unsafe fn ivf_is_v5(rel: pg_sys::Relation) -> bool {
+    match read_page_item(rel, 0) {
+        Ok(m) if m.len() >= 8 => {
+            u32::from_le_bytes(m[0..4].try_into().unwrap()) == IVF_STRUCT_MAGIC
+                && u32::from_le_bytes(m[4..8].try_into().unwrap()) == 5
+        }
+        _ => false,
+    }
+}
+
+/// Persist an IVF-AQ index in the v5 storage-separated layout: each list's `[ids][codes]` and `[f32]` go on
+/// distinct page ranges. `codes[i]` is list `i`'s block32-transposed AQ code bytes; `codebook` is
+/// `AqQuantizer::to_meta_bytes()`.
+pub(crate) unsafe fn write_ivf_aq_split(
+    rel: pg_sys::Relation,
+    dim: u32,
+    metric_tag: u8,
+    m: u32,
+    codebook: &[u8],
+    centroids: &[Vec<f32>],
+    lists: &[Vec<(i64, Vec<f32>)>],
+    codes: &[Vec<u8>],
+) {
+    let base: u32 = 1;
+    let nlists = centroids.len() as u32;
+    let mut cbytes = Vec::with_capacity(centroids.len() * dim as usize * 4);
+    for c in centroids {
+        for x in c {
+            cbytes.extend_from_slice(&x.to_le_bytes());
+        }
+    }
+    // Per list: a CODE blob [ids][codes] and a separate VECTOR blob [f32].
+    let enc_code: Vec<Vec<u8>> = lists
+        .iter()
+        .zip(codes.iter())
+        .map(|(l, cd)| {
+            let mut b = Vec::with_capacity(l.len() * 8 + cd.len());
+            for (tid, _) in l {
+                b.extend_from_slice(&tid.to_le_bytes());
+            }
+            b.extend_from_slice(cd);
+            b
+        })
+        .collect();
+    let enc_vec: Vec<Vec<u8>> = lists
+        .iter()
+        .map(|l| {
+            let mut b = Vec::with_capacity(l.len() * dim as usize * 4);
+            for (_, v) in l {
+                for x in v {
+                    b.extend_from_slice(&x.to_le_bytes());
+                }
+            }
+            b
+        })
+        .collect();
+
+    let dir_npages = npages_for(nlists as usize * 20);
+    let codebook_npages = npages_for(codebook.len());
+    let centroid_npages = npages_for(cbytes.len());
+    let mut cursor = base + dir_npages + codebook_npages + centroid_npages;
+    let mut dir: Vec<(u32, u32, u32, u32, u32)> = Vec::with_capacity(lists.len());
+    for i in 0..lists.len() {
+        let cnp = npages_for(enc_code[i].len());
+        let code_fb = cursor;
+        cursor += cnp;
+        let vnp = npages_for(enc_vec[i].len());
+        let vec_fb = cursor;
+        cursor += vnp;
+        dir.push((code_fb, cnp, vec_fb, vnp, lists[i].len() as u32));
+    }
+    let mut dirbytes = Vec::with_capacity(dir.len() * 20);
+    for (cfb, cnp, vfb, vnp, cnt) in &dir {
+        dirbytes.extend_from_slice(&cfb.to_le_bytes());
+        dirbytes.extend_from_slice(&cnp.to_le_bytes());
+        dirbytes.extend_from_slice(&vfb.to_le_bytes());
+        dirbytes.extend_from_slice(&vnp.to_le_bytes());
+        dirbytes.extend_from_slice(&cnt.to_le_bytes());
+    }
+
+    let mut meta = Vec::with_capacity(37);
+    meta.extend_from_slice(&IVF_STRUCT_MAGIC.to_le_bytes());
+    meta.extend_from_slice(&5u32.to_le_bytes());
+    meta.push(metric_tag);
+    meta.extend_from_slice(&dim.to_le_bytes());
+    meta.extend_from_slice(&nlists.to_le_bytes());
+    meta.extend_from_slice(&m.to_le_bytes());
+    meta.extend_from_slice(&codebook_npages.to_le_bytes());
+    meta.extend_from_slice(&dir_npages.to_le_bytes());
+    meta.extend_from_slice(&centroid_npages.to_le_bytes());
+    meta.extend_from_slice(&base.to_le_bytes());
+
+    let mut items: Vec<Vec<u8>> = vec![meta];
+    let push_chunks = |items: &mut Vec<Vec<u8>>, data: &[u8]| {
+        if data.is_empty() {
+            items.push(Vec::new());
+        } else {
+            for chunk in data.chunks(CHUNK) {
+                items.push(chunk.to_vec());
+            }
+        }
+    };
+    push_chunks(&mut items, &dirbytes);
+    push_chunks(&mut items, codebook);
+    push_chunks(&mut items, &cbytes);
+    for i in 0..lists.len() {
+        push_chunks(&mut items, &enc_code[i]);
+        push_chunks(&mut items, &enc_vec[i]);
+    }
+    for item in items {
+        extend_page_with_item(rel, pg_sys::ForkNumber::MAIN_FORKNUM, &item);
+    }
+}
+
+/// Read the v5 meta + codebook + centroid + dir regions (∝ nlists/codebook, NOT ∝ N). Typed `Err` on corruption.
+pub(crate) unsafe fn read_ivf_aq_meta_split(rel: pg_sys::Relation) -> Result<IvfAqMetaV5, String> {
+    let m = read_page_item(rel, 0)?;
+    if m.len() < 37 {
+        return Err("theodb ivf-aq: truncated v5 meta".into());
+    }
+    if u32::from_le_bytes(m[0..4].try_into().unwrap()) != IVF_STRUCT_MAGIC
+        || u32::from_le_bytes(m[4..8].try_into().unwrap()) != 5
+    {
+        return Err("theodb ivf-aq: not a v5 structured index".into());
+    }
+    let metric_tag = m[8];
+    let dim = u32::from_le_bytes(m[9..13].try_into().unwrap());
+    let nlists = u32::from_le_bytes(m[13..17].try_into().unwrap()) as usize;
+    let mval = u32::from_le_bytes(m[17..21].try_into().unwrap());
+    let codebook_npages = u32::from_le_bytes(m[21..25].try_into().unwrap());
+    let dir_npages = u32::from_le_bytes(m[25..29].try_into().unwrap());
+    let centroid_npages = u32::from_le_bytes(m[29..33].try_into().unwrap());
+    let gen_base = u32::from_le_bytes(m[33..37].try_into().unwrap());
+
+    let dbytes = read_chunked(rel, gen_base, dir_npages)?;
+    if dbytes.len() < nlists * 20 {
+        return Err("theodb ivf-aq: truncated v5 directory".into());
+    }
+    let mut dir = Vec::with_capacity(nlists);
+    for i in 0..nlists {
+        let o = i * 20;
+        dir.push((
+            u32::from_le_bytes(dbytes[o..o + 4].try_into().unwrap()),
+            u32::from_le_bytes(dbytes[o + 4..o + 8].try_into().unwrap()),
+            u32::from_le_bytes(dbytes[o + 8..o + 12].try_into().unwrap()),
+            u32::from_le_bytes(dbytes[o + 12..o + 16].try_into().unwrap()),
+            u32::from_le_bytes(dbytes[o + 16..o + 20].try_into().unwrap()),
+        ));
+    }
+    let codebook = read_chunked(rel, gen_base + dir_npages, codebook_npages)?;
+    let cbytes = read_chunked(rel, gen_base + dir_npages + codebook_npages, centroid_npages)?;
+    let d = dim as usize;
+    let mut centroids = Vec::with_capacity(nlists);
+    if d > 0 && cbytes.len() >= nlists * d * 4 {
+        for i in 0..nlists {
+            let mut c = Vec::with_capacity(d);
+            for j in 0..d {
+                let o = (i * d + j) * 4;
+                c.push(f32::from_le_bytes(cbytes[o..o + 4].try_into().unwrap()));
+            }
+            centroids.push(c);
+        }
+    } else if nlists != 0 {
+        return Err("theodb ivf-aq: truncated v5 centroid region".into());
+    }
+    Ok(IvfAqMetaV5 { dim, metric_tag, m: mval, codebook, centroids, dir })
+}
+
+/// M83 — random-read ONE f32 vector (`ordinal` within a list's VECTOR range) touching only the 1-2 pages that
+/// hold it — the Stage-2 rerank I/O the storage separation exists to minimize. Bytes are chunked CHUNK-per-item,
+/// so vector `i` at global offset `i·dim·4` lives in item `off/CHUNK` at local `off%CHUNK`, straddling into the
+/// next item when it crosses a chunk boundary.
+pub(crate) unsafe fn read_vec_at(
+    rel: pg_sys::Relation,
+    vec_first_block: u32,
+    vec_npages: u32,
+    ordinal: usize,
+    dim: usize,
+) -> Result<Vec<u8>, String> {
+    let vlen = dim * 4;
+    let off = ordinal * vlen;
+    let p0 = off / CHUNK;
+    let lo = off % CHUNK;
+    if p0 as u32 >= vec_npages {
+        return Err("theodb ivf-aq v5: vector ordinal out of range".into());
+    }
+    let mut buf = Vec::new();
+    read_page_item_into(rel, vec_first_block + p0 as u32, &mut buf)?;
+    if lo + vlen <= buf.len() {
+        return Ok(buf[lo..lo + vlen].to_vec());
+    }
+    // Straddles into the next chunk item — read it and stitch tail+head.
+    if (p0 + 1) as u32 >= vec_npages {
+        return Err("theodb ivf-aq v5: truncated straddled vector".into());
+    }
+    let mut out = buf[lo..].to_vec();
+    let need = vlen - out.len();
+    let mut buf2 = Vec::new();
+    read_page_item_into(rel, vec_first_block + (p0 + 1) as u32, &mut buf2)?;
+    if buf2.len() < need {
+        return Err("theodb ivf-aq v5: truncated straddled vector".into());
+    }
+    out.extend_from_slice(&buf2[..need]);
+    Ok(out)
 }
 
 /// Read ONE list's raw page bytes (`npages` chunks from `first_block`) — the hot scan path scores entries directly

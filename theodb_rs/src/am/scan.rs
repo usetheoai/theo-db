@@ -185,6 +185,10 @@ unsafe fn scan_ivf_structured(rel: pg_sys::Relation, query: &[f32]) -> BinaryHea
     if page::ivf_is_v4(rel) {
         return scan_ivf_aq(rel, query);
     }
+    // M83 (Roadmap v7): an IVF-AQ v5 index (built WITH separate_storage=1) takes the storage-separated path.
+    if page::ivf_is_v5(rel) {
+        return scan_ivf_aq_split(rel, query);
+    }
     let meta = match page::read_ivf_meta(rel) {
         Ok(m) => m,
         Err(e) => pg_sys::error!("theodb am scan: {e}"),
@@ -301,7 +305,11 @@ unsafe fn scan_ivf_aq(rel: pg_sys::Relation, query: &[f32]) -> BinaryHeap<Revers
         meta.centroids.iter().enumerate().map(|(i, c)| (metric.dist(query, c), i)).collect();
     cd.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
     let probes = crate::am::guc::probes().clamp(1, meta.centroids.len().max(1));
-    let rerank_pool = crate::am::guc::over_fetch().max(64);
+    // M84 — AQ rerank pool = base 64 × over_fetch factor. Fixes a latent no-op: the old `over_fetch().max(64)`
+    // was ALWAYS 64 (over_fetch ≤ 64, so the .max(64) floor always won), so `theodb_hnsw.over_fetch` never
+    // widened the AQ rerank pool. `64 * over_fetch()` keeps the default (over_fetch=1 → 64) but lets a wider pool
+    // recover recall when the AH prune quality caps it (the M83 recall-ceiling lever).
+    let rerank_pool = 64 * crate::am::guc::over_fetch();
 
     // Stage 1 — batched AH scan of probed lists. Cache each list's bytes for the rerank (read once, O(probes)).
     let mut listbytes: Vec<(usize, Vec<u8>)> = Vec::new(); // (n, bytes)
@@ -355,6 +363,103 @@ unsafe fn scan_ivf_aq(rel: pg_sys::Relation, query: &[f32]) -> BinaryHeap<Revers
     }
     // M81 — fold in pending (rows INSERTed after build): f32, scored EXACTLY (never quantized), no rebuild. Same
     // contract as the v3 f32 path — else post-build INSERTs are silently dropped from a WITH (pq_subspaces) index.
+    match page::read_pending(rel) {
+        Ok(pending) => {
+            for (tidv, v) in pending {
+                results.push((tidv, metric.dist(query, &v)));
+            }
+        }
+        Err(e) => pg_sys::error!("theodb am scan (pending): {e}"),
+    }
+    heapify(results)
+}
+
+/// M83 (Roadmap v7 D3 spike) — the IVF-AQ v5 STORAGE-SEPARATED scan: Stage 1 reads ONLY each probed list's
+/// compact CODE pages (ids + block32 codes, ~24 B/vec) and AH-prunes; Stage 2 random-reads the f32 for the
+/// `over_fetch` survivors ONLY (~512 B/vec × R). Fixes the v4 interleaving (ADR-0037) that forced the full f32
+/// I/O on every candidate. Recall is byte-identical to v4/v3 (same AH prune + exact rerank); the win is the far
+/// smaller working set paged in during the scan-heavy Stage 1.
+unsafe fn scan_ivf_aq_split(rel: pg_sys::Relation, query: &[f32]) -> BinaryHeap<Reverse<Scored>> {
+    let meta = match page::read_ivf_aq_meta_split(rel) {
+        Ok(m) => m,
+        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+    };
+    let quant = match crate::am::aq::AqQuantizer::from_meta_bytes(&meta.codebook) {
+        Ok(q) => q,
+        Err(e) => pg_sys::error!("theodb am scan (aq codebook): {e}"),
+    };
+    let lut = match crate::vec::ah::build_lut16(query, &quant) {
+        Ok(l) => l,
+        Err(e) => pg_sys::error!("theodb am scan (aq lut): {e}"),
+    };
+    let metric = match Metric::from_tag(meta.metric_tag) {
+        Some(m) => m,
+        None => pg_sys::error!("theodb am scan: unknown metric tag"),
+    };
+    let dim = meta.dim as usize;
+    let pairs = (meta.m as usize).div_ceil(2);
+
+    let mut cd: Vec<(f64, usize)> =
+        meta.centroids.iter().enumerate().map(|(i, c)| (metric.dist(query, c), i)).collect();
+    cd.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    let probes = crate::am::guc::probes().clamp(1, meta.centroids.len().max(1));
+    // M84 — AQ rerank pool = base 64 × over_fetch factor. Fixes a latent no-op: the old `over_fetch().max(64)`
+    // was ALWAYS 64 (over_fetch ≤ 64, so the .max(64) floor always won), so `theodb_hnsw.over_fetch` never
+    // widened the AQ rerank pool. `64 * over_fetch()` keeps the default (over_fetch=1 → 64) but lets a wider pool
+    // recover recall when the AH prune quality caps it (the M83 recall-ceiling lever).
+    let rerank_pool = 64 * crate::am::guc::over_fetch();
+
+    // Stage 1 — read ONLY the CODE pages of each probed list; AH-score; keep (score, tid, list_ci, ordinal).
+    let mut cands: Vec<(i32, i64, usize, usize)> = Vec::new();
+    for &(_, ci) in cd.iter().take(probes) {
+        let (cfb, cnp, _vfb, _vnp, cnt) = meta.dir[ci];
+        let n = cnt as usize;
+        if n == 0 {
+            continue;
+        }
+        let cbytes = match page::read_ivf_list_bytes(rel, cfb, cnp) {
+            Ok(b) => b,
+            Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        };
+        let codes_off = 8 * n; // codes start right after the n ids
+        let nblocks = n.div_ceil(32);
+        let mut out = [0i32; 32];
+        for b in 0..nblocks {
+            let bn = (n - b * 32).min(32);
+            let base = codes_off + b * pairs * 32;
+            if cbytes.len() < base + pairs * 32 {
+                break;
+            }
+            crate::vec::ah::ah_score_block(&lut, &cbytes[base..base + pairs * 32], bn, &mut out[..bn]);
+            for (j, &score) in out.iter().enumerate().take(bn) {
+                let ordinal = b * 32 + j;
+                let tid = i64::from_le_bytes(cbytes[ordinal * 8..ordinal * 8 + 8].try_into().unwrap());
+                cands.push((score, tid, ci, ordinal));
+            }
+        }
+    }
+
+    // Stage 2 — rerank the `rerank_pool` best (smaller AH score = closer); random-read f32 for survivors ONLY.
+    let rn = rerank_pool.min(cands.len());
+    if rn < cands.len() {
+        cands.select_nth_unstable_by_key(rn, |c| c.0);
+        cands.truncate(rn);
+    }
+    let mut results: Vec<(i64, f64)> = Vec::with_capacity(cands.len());
+    for (_, tid, ci, ordinal) in &cands {
+        let (_cfb, _cnp, vfb, vnp, _cnt) = meta.dir[*ci];
+        let raw = match page::read_vec_at(rel, vfb, vnp, *ordinal, dim) {
+            Ok(b) => b,
+            Err(e) => pg_sys::error!("theodb am scan (v5 rerank): {e}"),
+        };
+        let d = match metric {
+            Metric::L2 => crate::vec::l2_dist_from_bytes(query, &raw),
+            Metric::Ip => crate::vec::ip_dist_from_bytes(query, &raw),
+            Metric::Cosine => crate::vec::cosine_dist_from_bytes(query, &raw),
+        };
+        results.push((*tid, d));
+    }
+    // M81 — fold in pending (rows INSERTed after build): f32, scored EXACTLY, no rebuild. Same contract as v3/v4.
     match page::read_pending(rel) {
         Ok(pending) => {
             for (tidv, v) in pending {

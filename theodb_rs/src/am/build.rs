@@ -120,16 +120,31 @@ pub extern "C-unwind" fn ambuild(
                     let pairs = m.div_ceil(2);
                     let codes: Vec<Vec<u8>> =
                         entries.iter().map(|l| pack_block32_codes(&quant, l, pairs)).collect();
-                    page::write_ivf_aq(
-                        indexrel,
-                        dim,
-                        metric.tag(),
-                        m as u32,
-                        &quant.to_meta_bytes(),
-                        idx.centroids(),
-                        &entries,
-                        &codes,
-                    );
+                    // M83 (Roadmap v7 D3): `WITH (separate_storage=1)` → v5 layout (codes/f32 on distinct pages)
+                    // so the scan reads codes-only in Stage 1 (ADR-0037 lever). Default off → v4 (interleaved).
+                    if crate::am::options::separate_storage_from_relation(indexrel) {
+                        page::write_ivf_aq_split(
+                            indexrel,
+                            dim,
+                            metric.tag(),
+                            m as u32,
+                            &quant.to_meta_bytes(),
+                            idx.centroids(),
+                            &entries,
+                            &codes,
+                        );
+                    } else {
+                        page::write_ivf_aq(
+                            indexrel,
+                            dim,
+                            metric.tag(),
+                            m as u32,
+                            &quant.to_meta_bytes(),
+                            idx.centroids(),
+                            &entries,
+                            &codes,
+                        );
+                    }
                 }
                 Err(e) => pg_sys::error!("theodb ivf-aq build: {e}"),
             }
@@ -340,7 +355,9 @@ pub(crate) unsafe fn vacuum_rebuild(
         // heap re-check filters dead tuples out of the returned TIDs. Compacting the v4 lists/pending needs a
         // v4-aware fold — a documented follow-up (REINDEX rebuilds cleanly today). So a routine VACUUM is a
         // safe no-op on the structure, never a crash on `read_ivf_meta(v4)`.
-        if page::ivf_is_v4(indexrel) {
+        // M83 — v5 (storage-separated AQ) is safe no-op for the same reason as v4: the f32 v3 rebuild would
+        // reject/corrupt it; correctness holds via the scan's pending fold + MVCC heap re-check.
+        if page::ivf_is_v4(indexrel) || page::ivf_is_v5(indexrel) {
             return 0;
         }
         return vacuum_rebuild_structured(indexrel, dead);
@@ -717,6 +734,74 @@ mod tests {
             .collect()
         });
         assert!(ids.contains(&9999), "post-build INSERT (id 9999) folded into the v4 AQ scan (got {ids:?})");
+    }
+
+    /// M83 (Roadmap v7 D3) — `WITH (pq_subspaces=M, separate_storage=1)` takes the v5 STORAGE-SEPARATED layout
+    /// (codes and f32 on distinct page ranges) and the two-phase scan (codes-only prune → random-read f32 rerank)
+    /// returns high recall vs the exact seqscan top-k. The correctness gate: the v5 build + split scan is wired,
+    /// the codes region carries the ids, and `read_vec_at` random-reads the right f32 for the rerank.
+    #[pgrx::pg_test]
+    fn ambuild_ivf_pq_subspaces_v5_split_scans_high_recall() {
+        pgrx::Spi::run("CREATE TABLE ivfaq5 (id int PRIMARY KEY, e vector(8))").unwrap();
+        for i in 0..200usize {
+            let lit =
+                (0..8).map(|j| (((i * 31 + j * 7) % 97) as f32 * 0.1).to_string()).collect::<Vec<_>>().join(",");
+            pgrx::Spi::run(&format!("INSERT INTO ivfaq5 VALUES ({}, '[{lit}]')", i + 1)).unwrap();
+        }
+        pgrx::Spi::run(
+            "CREATE INDEX ivfaq5_idx ON ivfaq5 USING theodb_ivfflat (e) WITH (lists=8, pq_subspaces=4, aq_threshold=2000, separate_storage=1)",
+        )
+        .unwrap();
+        // The index took the v5 storage-separated layout (not v4 interleaved, not v3 f32).
+        let (is_v5, is_v4) = unsafe {
+            let oid: pg_sys::Oid =
+                pgrx::Spi::get_one("SELECT 'ivfaq5_idx'::regclass::oid").unwrap().expect("oid");
+            let rel = pg_sys::index_open(oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            let v5 = crate::am::page::ivf_is_v5(rel);
+            let v4 = crate::am::page::ivf_is_v4(rel);
+            pg_sys::index_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            (v5, v4)
+        };
+        assert!(is_v5, "separate_storage=1 index took the v5 storage-separated layout");
+        assert!(!is_v4, "v5 is not misdetected as v4");
+        pgrx::Spi::run("SET theodb_ivfflat.probes = 8").unwrap();
+        let probe: String =
+            (0..8).map(|j| (((5 * 31 + j * 7) % 97) as f32 * 0.1).to_string()).collect::<Vec<_>>().join(",");
+        let (exact, idx) = topk_sets("ivfaq5", &format!("[{probe}]"), 10);
+        assert!(!idx.is_empty(), "the v5 split AQ scan returned rows");
+        let e: std::collections::HashSet<i32> = exact.iter().copied().collect();
+        let recall = idx.iter().filter(|id| e.contains(id)).count() as f64 / (exact.len().max(1) as f64);
+        assert!(recall >= 0.8, "IVF-AQ v5 recall@10 {recall:.2} < 0.8 (exact={exact:?} idx={idx:?})");
+    }
+
+    /// M83 — a row INSERTed AFTER a v5 index is built (pending region) is FOLDED into the split scan, exactly like
+    /// v4. Guards that the storage-separated path did not regress the M81 pending-fold lifecycle.
+    #[pgrx::pg_test]
+    fn ivf_aq_v5_folds_post_build_inserts() {
+        pgrx::Spi::run("CREATE TABLE ivfaq5p (id int PRIMARY KEY, e vector(8))").unwrap();
+        for i in 0..100usize {
+            let lit =
+                (0..8).map(|j| (((i * 31 + j * 7) % 97) as f32 * 0.1).to_string()).collect::<Vec<_>>().join(",");
+            pgrx::Spi::run(&format!("INSERT INTO ivfaq5p VALUES ({}, '[{lit}]')", i + 1)).unwrap();
+        }
+        pgrx::Spi::run(
+            "CREATE INDEX ivfaq5p_idx ON ivfaq5p USING theodb_ivfflat (e) WITH (lists=4, pq_subspaces=4, aq_threshold=2000, separate_storage=1)",
+        )
+        .unwrap();
+        pgrx::Spi::run("INSERT INTO ivfaq5p VALUES (9999, '[50,50,50,50,50,50,50,50]')").unwrap();
+        pgrx::Spi::run("SET theodb_ivfflat.probes = 4").unwrap();
+        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        let ids: Vec<i32> = pgrx::Spi::connect(|c| {
+            c.select(
+                "SELECT id FROM ivfaq5p ORDER BY e <-> '[50,50,50,50,50,50,50,50]'::vector LIMIT 3",
+                None,
+                &[],
+            )
+            .unwrap()
+            .filter_map(|r| r.get::<i32>(1).unwrap())
+            .collect()
+        });
+        assert!(ids.contains(&9999), "post-build INSERT (id 9999) folded into the v5 split scan (got {ids:?})");
     }
 
     /// T3.3 NON-REGRESSION (build): with NO reloption, `ambuild_hnsw` packs the byte-identical v1 layout — the
