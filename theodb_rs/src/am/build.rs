@@ -99,9 +99,55 @@ pub extern "C-unwind" fn ambuild(
         // M31: persist in the STRUCTURED layout (meta + centroids + per-list pages) so scans read only probed
         // lists (O(probes)), not the whole blob (O(N)).
         let dim = corpus.first().map(|(_, v)| v.len()).unwrap_or(0) as u32;
-        page::write_ivf_structured(indexrel, dim, metric.tag(), idx.centroids(), &idx.list_entries());
+        // M77 (pg_scann): `WITH (pq_subspaces=M)` (M>0) persists the IVF-AQ v4 layout — per-list AQ codes (block32,
+        // for the batched-AH scan) + f32 (rerank) + codebook. M==0 keeps the v3 f32 path (byte-identical, untouched).
+        let m = crate::am::options::pq_subspaces_from_relation(indexrel);
+        if m > 0 && dim > 0 {
+            let all: Vec<Vec<f32>> = corpus.iter().map(|(_, v)| v.clone()).collect();
+            let thr = crate::am::options::aq_threshold_from_relation(indexrel);
+            match crate::am::aq::AqQuantizer::train(&all, m, 4, thr, BUILD_SEED) {
+                Ok(quant) => {
+                    let entries = idx.list_entries();
+                    let pairs = m.div_ceil(2);
+                    let codes: Vec<Vec<u8>> =
+                        entries.iter().map(|l| pack_block32_codes(&quant, l, pairs)).collect();
+                    page::write_ivf_aq(
+                        indexrel,
+                        dim,
+                        metric.tag(),
+                        m as u32,
+                        &quant.to_meta_bytes(),
+                        idx.centroids(),
+                        &entries,
+                        &codes,
+                    );
+                }
+                Err(e) => pg_sys::error!("theodb ivf-aq build: {e}"),
+            }
+        } else {
+            // M31: STRUCTURED f32 layout (meta + centroids + per-list pages) — scans read only probed lists.
+            page::write_ivf_structured(indexrel, dim, metric.tag(), idx.centroids(), &idx.list_entries());
+        }
         build_result(ntuples, corpus.len())
     }
+}
+
+/// M77 — pack one inverted list's AQ codes into the transposed block32 layout `blocks[b·pairs·32 + p·32 + v]` that
+/// `vec::ah::ah_score_block` consumes (FAISS bbs=32). `pairs = ceil(m/2)` bytes/code. Padding entries score high
+/// (all-zero code → the LUT's first centroid); the scan trims to the list's real `count` from the directory.
+fn pack_block32_codes(quant: &crate::am::aq::AqQuantizer, entries: &[(i64, Vec<f32>)], pairs: usize) -> Vec<u8> {
+    let n = entries.len();
+    let nblocks = n.div_ceil(32);
+    let mut blocks = vec![0u8; nblocks * pairs * 32];
+    for (i, (_, v)) in entries.iter().enumerate() {
+        let code = quant.encode(v); // `pairs` bytes
+        let base = (i / 32) * pairs * 32;
+        let vb = i % 32;
+        for (p, &cb) in code.iter().enumerate().take(pairs) {
+            blocks[base + p * 32 + vb] = cb;
+        }
+    }
+    blocks
 }
 
 /// `theodb_hnsw` build — same persistence layer, an HNSW graph instead of IVFFlat lists (M26 Phase 6).
@@ -586,6 +632,41 @@ mod tests {
         exact.sort_unstable();
         idx.sort_unstable();
         assert_eq!(idx, exact, "v3 scan returns the exact top-5 (inline AQ codes don't corrupt f32 rerank)");
+    }
+
+    /// M77 (pg_scann) — `CREATE INDEX ... USING theodb_ivfflat WITH (pq_subspaces=M)` takes the v4 IVF-AQ layout
+    /// (persisted AQ block32 codes + f32 rerank) and the batched-AH scan returns high recall vs the exact seqscan
+    /// top-k. This is the M77 correctness gate: the v4 build + scan path is wired and correct.
+    #[pgrx::pg_test]
+    fn ambuild_ivf_pq_subspaces_v4_scans_high_recall() {
+        pgrx::Spi::run("CREATE TABLE ivfaq (id int PRIMARY KEY, e vector(8))").unwrap();
+        for i in 0..200usize {
+            let lit =
+                (0..8).map(|j| (((i * 31 + j * 7) % 97) as f32 * 0.1).to_string()).collect::<Vec<_>>().join(",");
+            pgrx::Spi::run(&format!("INSERT INTO ivfaq VALUES ({}, '[{lit}]')", i + 1)).unwrap();
+        }
+        pgrx::Spi::run(
+            "CREATE INDEX ivfaq_idx ON ivfaq USING theodb_ivfflat (e) WITH (lists=8, pq_subspaces=4, aq_threshold=2000)",
+        )
+        .unwrap();
+        // The index took the v4 AQ layout (not the v3 f32 fallback).
+        let is_v4 = unsafe {
+            let oid: pg_sys::Oid =
+                pgrx::Spi::get_one("SELECT 'ivfaq_idx'::regclass::oid").unwrap().expect("oid");
+            let rel = pg_sys::index_open(oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            let v = crate::am::page::ivf_is_v4(rel);
+            pg_sys::index_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            v
+        };
+        assert!(is_v4, "pq_subspaces IVF index took the v4 AQ layout");
+        pgrx::Spi::run("SET theodb_ivfflat.probes = 8").unwrap(); // all lists → recall bound by AQ+rerank, not probing
+        let probe: String =
+            (0..8).map(|j| (((5 * 31 + j * 7) % 97) as f32 * 0.1).to_string()).collect::<Vec<_>>().join(",");
+        let (exact, idx) = topk_sets("ivfaq", &format!("[{probe}]"), 10);
+        assert!(!idx.is_empty(), "the v4 AQ scan returned rows");
+        let e: std::collections::HashSet<i32> = exact.iter().copied().collect();
+        let recall = idx.iter().filter(|id| e.contains(id)).count() as f64 / (exact.len().max(1) as f64);
+        assert!(recall >= 0.8, "IVF-AQ v4 recall@10 {recall:.2} < 0.8 (exact={exact:?} idx={idx:?})");
     }
 
     /// T3.3 NON-REGRESSION (build): with NO reloption, `ambuild_hnsw` packs the byte-identical v1 layout — the
