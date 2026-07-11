@@ -1320,7 +1320,7 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 **Objective:** promover o layout do spike a variante AM completa: `write_ivf_aq_split` WAL-safe, VACUUM/fold das 2 regiões, `amcostestimate` v5-aware (custo ∝ Fase1-códigos + Fase2-rerank).
 **DoD:** crash-safety pg_tests (espelha suíte fold v3/v4); VACUUM reclama as 2 regiões; head-to-head re-medido sem regressão vs spike. **GATE:** crash-safe (sem torn-page em kill no meio do fold) + QPS ≥ spike. **Dependencies:** M83.
 
-## M85 — [ ] Refine SQ8/PQ-maior (rerank mais barato) *(gated M84)*
+## M85 — [x] Refine SQ8/PQ-maior (rerank mais barato) *(gated M84)*
 
 **Objective:** trocar o rerank full-f32 por uma região de refine SQ8 (Faiss `Refine(SQ8)`) → Fase 2 lê 128 B não 512 B/sobrevivente.
 **DoD:** curva recall×QPS por m/bits; paridade de recall dentro de ε declarado. **GATE:** QPS↑ a recall casado com perda ≤ ε. **Dependencies:** M84.

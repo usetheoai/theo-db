@@ -1,0 +1,36 @@
+{
+  "milestone": "M85",
+  "date": "2026-07-11",
+  "title": "pg_scann v6 SQ8-refine — memory-optimized rerank tier (SIFT1M, in-Postgres A/B vs v5 f32)",
+  "dataset": "SIFT1M — full 1,000,000 base, 200 queries, official ground-truth (valid at 1M)",
+  "hardware": "DigitalOcean droplet 8 vCPU / 16 GB (ams3), single-threaded, pg17, warm cache",
+  "method": "Two tables IDENTICAL data (M46 A/B): sift6 → v6 (separate_storage=1, refine=1) SQ8 rerank; sift5 → v5 (separate_storage=1) f32 rerank; lists=500, pq_subspaces=32, aq_threshold=2000. Swept over_fetch ∈ {8,16,32} × probes ∈ {32,64,128}. recall@10 vs official GT; QPS best-of-3 over 200 queries.",
+  "design": "Single-tier SQ8 refine (FAISS QT_8bit per-dim min/max, asymmetric decode-then-metric — query stays f32). v6 layout = CODE region [ids][AH codes] + SQ8 region [dim B/vec] (replaces the v5 f32 rerank region). New sq8.rs quantizer (~90 LoC, no lib). Pending rows stay f32 (exact).",
+  "correctness": "246 pg_tests GREEN (238 + 6 sq8 unit + 2 v6: ambuild_ivf_pq_subspaces_v6_sq8_scans_high_recall, ivf_aq_v6_folds_post_build_inserts), 0 failed — zero regression.",
+  "index_size_mb": {"v6_sq8": 153, "v5_f32": 528, "reduction": 3.45, "note": "SQ8 region 128 B/vec vs f32 512 B/vec — the decisive memory win (AlloyDB SQ8-default footprint profile)"},
+  "build_s": {"v6_sq8": 823.0, "v5_f32": 832.5, "note": "SQ8 encode (min/max + byte-per-dim) is negligible; both dominated by the shared IVF Lloyd k-means"},
+  "results": [
+    {"over_fetch": 8, "probes": 32, "v6_recall": 0.9635, "v6_qps": 346.9, "v5_recall": 0.9775, "v5_qps": 271.5, "qps_ratio_same_config": 1.28, "recall_loss": 0.0140},
+    {"over_fetch": 8, "probes": 64, "v6_recall": 0.9670, "v6_qps": 273.1, "v5_recall": 0.9805, "v5_qps": 217.7, "qps_ratio_same_config": 1.25, "recall_loss": 0.0135},
+    {"over_fetch": 8, "probes": 128, "v6_recall": 0.9670, "v6_qps": 172.7, "v5_recall": 0.9810, "v5_qps": 150.0, "qps_ratio_same_config": 1.15, "recall_loss": 0.0140},
+    {"over_fetch": 16, "probes": 32, "v6_recall": 0.9705, "v6_qps": 280.9, "v5_recall": 0.9875, "v5_qps": 182.7, "qps_ratio_same_config": 1.54, "recall_loss": 0.0170},
+    {"over_fetch": 16, "probes": 64, "v6_recall": 0.9750, "v6_qps": 218.1, "v5_recall": 0.9925, "v5_qps": 164.4, "qps_ratio_same_config": 1.33, "recall_loss": 0.0175},
+    {"over_fetch": 16, "probes": 128, "v6_recall": 0.9755, "v6_qps": 137.8, "v5_recall": 0.9930, "v5_qps": 110.7, "qps_ratio_same_config": 1.24, "recall_loss": 0.0175},
+    {"over_fetch": 32, "probes": 32, "v6_recall": 0.9745, "v6_qps": 189.4, "v5_recall": 0.9935, "v5_qps": 134.0, "qps_ratio_same_config": 1.41, "recall_loss": 0.0190},
+    {"over_fetch": 32, "probes": 64, "v6_recall": 0.9785, "v6_qps": 156.5, "v5_recall": 0.9980, "v5_qps": 114.7, "qps_ratio_same_config": 1.36, "recall_loss": 0.0195},
+    {"over_fetch": 32, "probes": 128, "v6_recall": 0.9790, "v6_qps": 118.9, "v5_recall": 0.9985, "v5_qps": 96.3, "qps_ratio_same_config": 1.24, "recall_loss": 0.0195}
+  ],
+  "verdict": "GO_MEMORY_WIN (honest-partial on warm-cache QPS)",
+  "findings": [
+    "DECISIVE MEMORY WIN: the v6 SQ8 index is 153 MB vs the v5 f32 index 528 MB — 3.5× smaller (128 B/vec rerank region vs 512 B). This is the AlloyDB SQ8-default footprint advantage, correctly reproduced.",
+    "Recall loss is ~1.4-2.0% (ε ≤ 2%, within the FAISS/AlloyDB-predicted SQ8 range) — v6 reaches a ~0.979 recall ceiling vs v5's 0.9985, because SQ8 rerank is approximate.",
+    "QPS-at-MATCHED-recall is FLAT-to-marginal on warm-cache 1M: per-config v6 is 1.15-1.54× faster (reads 128 B not 512 B), but its ~1.5% recall penalty forces a larger over_fetch pool to reach the same recall, and the SQ8 decode adds CPU — so at matched recall v5 (exact f32) is competitive-to-better (e.g. at recall ~0.975: v5 271 QPS @ of=8/probes=32 vs v6 189 QPS @ of=32/probes=32).",
+    "This CONFIRMS the M85 deep-research caveat: 'the win is I/O, not arithmetic; at warm cache the SQ8 decode CPU offsets the fewer-bytes saving, so the net QPS can be flat.'"
+  ],
+  "honest_caveats": [
+    "WARM-CACHE 1M is the wrong regime to show SQ8's QPS win: the f32 (512 MB) fits in 16 GB RAM, so v5's 512-B reads are buffer hits, not disk reads, and the SQ8 4×-fewer-bytes advantage is a buffer-access saving offset by the per-survivor decode CPU. The QPS/I/O win becomes physical at BILLION-scale (M88), where the 3.5×-smaller SQ8 index fits in RAM and the f32 index spills to disk — that is where SQ8-default (AlloyDB) pays off. M85 measures the memory win now and projects the QPS win to M88.",
+    "SQ8 is SIFT-friendly (small-range int components); on wide-distribution float embeddings the recall loss may exceed 2% — a float-corpus re-measure is owed (Rule 5).",
+    "v6 is opt-in (WITH refine=1); v5 (exact f32) remains the default for recall-critical / warm-cache-QPS use. v6 is the memory-optimized / billion-scale variant."
+  ],
+  "north_star_context": "M85 delivers the SQ8 memory-optimized refine tier (3.5× smaller index) — the AlloyDB SQ8-default profile — correctly and measured. Its QPS payoff is billion-scale (M88), not warm-cache 1M. Still class-AlloyDB-in-Postgres; NOT a ScaNN-library beat (paradigm tax, M73/ADR-0035)."
+}

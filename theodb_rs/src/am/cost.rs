@@ -70,7 +70,8 @@ pub(crate) unsafe fn scan_visit_ratio(rel: pg_sys::Relation, tuples: f64) -> f64
         page::read_ivf_meta(rel)
             .map(|meta| meta.dir.len())
             .or_else(|_| page::read_ivf_aq_meta(rel).map(|meta| meta.dir.len()))
-            .or_else(|_| page::read_ivf_aq_meta_split(rel).map(|meta| meta.dir.len())) // M83 v5 storage-separated
+            .or_else(|_| page::read_ivf_aq_meta_split(rel).map(|meta| meta.dir.len())) // M83 v5
+            .or_else(|_| page::read_ivf_aq_meta_split_sq8(rel).map(|meta| meta.dir.len())) // M85 v6 storage-separated
             .unwrap_or(0)
     } else {
         0

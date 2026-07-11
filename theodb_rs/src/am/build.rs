@@ -120,9 +120,39 @@ pub extern "C-unwind" fn ambuild(
                     let pairs = m.div_ceil(2);
                     let codes: Vec<Vec<u8>> =
                         entries.iter().map(|l| pack_block32_codes(&quant, l, pairs)).collect();
-                    // M83 (Roadmap v7 D3): `WITH (separate_storage=1)` → v5 layout (codes/f32 on distinct pages)
-                    // so the scan reads codes-only in Stage 1 (ADR-0037 lever). Default off → v4 (interleaved).
-                    if crate::am::options::separate_storage_from_relation(indexrel) {
+                    // M83/M85 (Roadmap v7): `WITH (separate_storage=1)` → v5 layout (codes/f32 on distinct pages)
+                    // so the scan reads codes-only in Stage 1 (ADR-0037 lever). Adding `refine=1` → v6, whose
+                    // per-list rerank region is SQ8 (¼ the f32 bytes, M85). Default off → v4 (interleaved).
+                    if crate::am::options::separate_storage_from_relation(indexrel)
+                        && crate::am::options::refine_sq8_from_relation(indexrel)
+                    {
+                        // v6 — train SQ8 on the FULL corpus (min/max is a cheap one-pass, exact) and encode each
+                        // list's codes in ordinal order (matching the AH block32 order the scan derives).
+                        let corpus_vecs: Vec<Vec<f32>> = corpus.iter().map(|(_, v)| v.clone()).collect();
+                        let sq8 = crate::sq8::Sq8Quantizer::train(&corpus_vecs);
+                        let sq8_codes: Vec<Vec<u8>> = entries
+                            .iter()
+                            .map(|l| {
+                                let mut b = Vec::with_capacity(l.len() * dim as usize);
+                                for (_, v) in l {
+                                    b.extend_from_slice(&sq8.encode(v));
+                                }
+                                b
+                            })
+                            .collect();
+                        page::write_ivf_aq_split_sq8(
+                            indexrel,
+                            dim,
+                            metric.tag(),
+                            m as u32,
+                            &quant.to_meta_bytes(),
+                            &sq8.to_meta_bytes(),
+                            idx.centroids(),
+                            &entries,
+                            &codes,
+                            &sq8_codes,
+                        );
+                    } else if crate::am::options::separate_storage_from_relation(indexrel) {
                         page::write_ivf_aq_split(
                             indexrel,
                             dim,
@@ -355,9 +385,9 @@ pub(crate) unsafe fn vacuum_rebuild(
         // heap re-check filters dead tuples out of the returned TIDs. Compacting the v4 lists/pending needs a
         // v4-aware fold — a documented follow-up (REINDEX rebuilds cleanly today). So a routine VACUUM is a
         // safe no-op on the structure, never a crash on `read_ivf_meta(v4)`.
-        // M83 — v5 (storage-separated AQ) is safe no-op for the same reason as v4: the f32 v3 rebuild would
-        // reject/corrupt it; correctness holds via the scan's pending fold + MVCC heap re-check.
-        if page::ivf_is_v4(indexrel) || page::ivf_is_v5(indexrel) {
+        // M83/M85 — v5 (storage-separated) and v6 (SQ8-refine) are safe no-ops for the same reason as v4: the f32
+        // v3 rebuild would reject/corrupt them; correctness holds via the scan's pending fold + MVCC heap re-check.
+        if page::ivf_is_v4(indexrel) || page::ivf_is_v5(indexrel) || page::ivf_is_v6(indexrel) {
             return 0;
         }
         return vacuum_rebuild_structured(indexrel, dead);
@@ -802,6 +832,75 @@ mod tests {
             .collect()
         });
         assert!(ids.contains(&9999), "post-build INSERT (id 9999) folded into the v5 split scan (got {ids:?})");
+    }
+
+    /// M85 (Roadmap v7) — `WITH (pq_subspaces=M, separate_storage=1, refine=1)` takes the v6 SQ8-refine layout
+    /// (rerank on SQ8 codes, not raw f32) and returns high recall vs the exact seqscan top-k. The correctness
+    /// gate: the v6 build (AQ codes + SQ8 codes on distinct pages, both codebooks persisted) + the SQ8-decode
+    /// rerank is wired and correct.
+    #[pgrx::pg_test]
+    fn ambuild_ivf_pq_subspaces_v6_sq8_scans_high_recall() {
+        pgrx::Spi::run("CREATE TABLE ivfaq6 (id int PRIMARY KEY, e vector(8))").unwrap();
+        for i in 0..200usize {
+            let lit =
+                (0..8).map(|j| (((i * 31 + j * 7) % 97) as f32 * 0.1).to_string()).collect::<Vec<_>>().join(",");
+            pgrx::Spi::run(&format!("INSERT INTO ivfaq6 VALUES ({}, '[{lit}]')", i + 1)).unwrap();
+        }
+        pgrx::Spi::run(
+            "CREATE INDEX ivfaq6_idx ON ivfaq6 USING theodb_ivfflat (e) WITH (lists=8, pq_subspaces=4, aq_threshold=2000, separate_storage=1, refine=1)",
+        )
+        .unwrap();
+        // The index took the v6 SQ8-refine layout (not v5, not v4).
+        let (is_v6, is_v5) = unsafe {
+            let oid: pg_sys::Oid =
+                pgrx::Spi::get_one("SELECT 'ivfaq6_idx'::regclass::oid").unwrap().expect("oid");
+            let rel = pg_sys::index_open(oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            let v6 = crate::am::page::ivf_is_v6(rel);
+            let v5 = crate::am::page::ivf_is_v5(rel);
+            pg_sys::index_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            (v6, v5)
+        };
+        assert!(is_v6, "refine=1 index took the v6 SQ8-refine layout");
+        assert!(!is_v5, "v6 is not misdetected as v5");
+        pgrx::Spi::run("SET theodb_ivfflat.probes = 8").unwrap();
+        pgrx::Spi::run("SET theodb_hnsw.over_fetch = 8").unwrap(); // widen the pool so SQ8's ε loss doesn't cap recall
+        let probe: String =
+            (0..8).map(|j| (((5 * 31 + j * 7) % 97) as f32 * 0.1).to_string()).collect::<Vec<_>>().join(",");
+        let (exact, idx) = topk_sets("ivfaq6", &format!("[{probe}]"), 10);
+        assert!(!idx.is_empty(), "the v6 SQ8 scan returned rows");
+        let e: std::collections::HashSet<i32> = exact.iter().copied().collect();
+        let recall = idx.iter().filter(|id| e.contains(id)).count() as f64 / (exact.len().max(1) as f64);
+        assert!(recall >= 0.8, "IVF-AQ v6 SQ8 recall@10 {recall:.2} < 0.8 (exact={exact:?} idx={idx:?})");
+    }
+
+    /// M85 — a row INSERTed AFTER a v6 index is built (pending region, f32) is FOLDED into the SQ8 scan and scored
+    /// EXACTLY, like v4/v5. Guards that the SQ8-refine path did not regress the M81 pending-fold lifecycle.
+    #[pgrx::pg_test]
+    fn ivf_aq_v6_folds_post_build_inserts() {
+        pgrx::Spi::run("CREATE TABLE ivfaq6p (id int PRIMARY KEY, e vector(8))").unwrap();
+        for i in 0..100usize {
+            let lit =
+                (0..8).map(|j| (((i * 31 + j * 7) % 97) as f32 * 0.1).to_string()).collect::<Vec<_>>().join(",");
+            pgrx::Spi::run(&format!("INSERT INTO ivfaq6p VALUES ({}, '[{lit}]')", i + 1)).unwrap();
+        }
+        pgrx::Spi::run(
+            "CREATE INDEX ivfaq6p_idx ON ivfaq6p USING theodb_ivfflat (e) WITH (lists=4, pq_subspaces=4, aq_threshold=2000, separate_storage=1, refine=1)",
+        )
+        .unwrap();
+        pgrx::Spi::run("INSERT INTO ivfaq6p VALUES (9999, '[50,50,50,50,50,50,50,50]')").unwrap();
+        pgrx::Spi::run("SET theodb_ivfflat.probes = 4").unwrap();
+        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        let ids: Vec<i32> = pgrx::Spi::connect(|c| {
+            c.select(
+                "SELECT id FROM ivfaq6p ORDER BY e <-> '[50,50,50,50,50,50,50,50]'::vector LIMIT 3",
+                None,
+                &[],
+            )
+            .unwrap()
+            .filter_map(|r| r.get::<i32>(1).unwrap())
+            .collect()
+        });
+        assert!(ids.contains(&9999), "post-build INSERT (id 9999) folded into the v6 SQ8 scan (got {ids:?})");
     }
 
     /// T3.3 NON-REGRESSION (build): with NO reloption, `ambuild_hnsw` packs the byte-identical v1 layout — the
