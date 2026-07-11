@@ -181,6 +181,10 @@ unsafe fn gather_hnsw_candidates(rel: pg_sys::Relation, query: &[f32], ef: usize
 /// M31 partial-page scan: read the meta + centroids (∝ nlists), pick the `SCAN_PROBES` nearest centroids, and read
 /// ONLY those lists' pages (∝ probes) — never the whole index. Merge the pending region. Ascending distance.
 unsafe fn scan_ivf_structured(rel: pg_sys::Relation, query: &[f32]) -> BinaryHeap<Reverse<Scored>> {
+    // M77 (pg_scann): an IVF-AQ v4 index (built WITH pq_subspaces) takes the batched-AH + rerank path.
+    if page::ivf_is_v4(rel) {
+        return scan_ivf_aq(rel, query);
+    }
     let meta = match page::read_ivf_meta(rel) {
         Ok(m) => m,
         Err(e) => pg_sys::error!("theodb am scan: {e}"),
@@ -266,6 +270,90 @@ unsafe fn scan_ivf_structured(rel: pg_sys::Relation, query: &[f32]) -> BinaryHea
         );
     }
     heap
+}
+
+/// M77 (pg_scann) — the IVF-AQ v4 scan: probe nprobe lists → batched AH-LUT scan over the block32 codes (the
+/// ~5-7× QPS lever the M75 spike proved) → rerank the `over_fetch` best by exact f32. O(probes) page reads, like
+/// the f32 IVF path, but the per-candidate score is a near-free LUT lookup instead of 128 mults. Ports
+/// `ann::ivf_aqah::search` to read from the persisted v4 pages.
+unsafe fn scan_ivf_aq(rel: pg_sys::Relation, query: &[f32]) -> BinaryHeap<Reverse<Scored>> {
+    let meta = match page::read_ivf_aq_meta(rel) {
+        Ok(m) => m,
+        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+    };
+    let quant = match crate::am::aq::AqQuantizer::from_meta_bytes(&meta.codebook) {
+        Ok(q) => q,
+        Err(e) => pg_sys::error!("theodb am scan (aq codebook): {e}"),
+    };
+    let lut = match crate::vec::ah::build_lut16(query, &quant) {
+        Ok(l) => l,
+        Err(e) => pg_sys::error!("theodb am scan (aq lut): {e}"),
+    };
+    let metric = match Metric::from_tag(meta.metric_tag) {
+        Some(m) => m,
+        None => pg_sys::error!("theodb am scan: unknown metric tag"),
+    };
+    let dim = meta.dim as usize;
+    let entry_f32 = dim * 4;
+    let pairs = (meta.m as usize).div_ceil(2);
+
+    let mut cd: Vec<(f64, usize)> =
+        meta.centroids.iter().enumerate().map(|(i, c)| (metric.dist(query, c), i)).collect();
+    cd.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    let probes = crate::am::guc::probes().clamp(1, meta.centroids.len().max(1));
+    let rerank_pool = crate::am::guc::over_fetch().max(64);
+
+    // Stage 1 — batched AH scan of probed lists. Cache each list's bytes for the rerank (read once, O(probes)).
+    let mut listbytes: Vec<(usize, Vec<u8>)> = Vec::new(); // (n, bytes)
+    let mut cands: Vec<(i32, usize, usize)> = Vec::new(); // (ah_score, listbytes_idx, entry)
+    for &(_, ci) in cd.iter().take(probes) {
+        let (fb, np, cnt) = meta.dir[ci];
+        let n = cnt as usize;
+        if n == 0 {
+            continue;
+        }
+        let bytes = match page::read_ivf_list_bytes(rel, fb, np) {
+            Ok(b) => b,
+            Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        };
+        let codes_off = 8 * n + entry_f32 * n;
+        let nblocks = n.div_ceil(32);
+        let lbidx = listbytes.len();
+        let mut out = [0i32; 32];
+        for b in 0..nblocks {
+            let bn = (n - b * 32).min(32);
+            let base = codes_off + b * pairs * 32;
+            if bytes.len() < base + pairs * 32 {
+                break; // page shorter than the directory count claims — stop this list
+            }
+            crate::vec::ah::ah_score_block(&lut, &bytes[base..base + pairs * 32], bn, &mut out[..bn]);
+            for (j, &score) in out.iter().enumerate().take(bn) {
+                cands.push((score, lbidx, b * 32 + j));
+            }
+        }
+        listbytes.push((n, bytes));
+    }
+
+    // Stage 2 — rerank the `rerank_pool` best (smaller AH score = closer) with the exact f32 distance.
+    let rn = rerank_pool.min(cands.len());
+    if rn < cands.len() {
+        cands.select_nth_unstable_by_key(rn, |c| c.0);
+        cands.truncate(rn);
+    }
+    let mut results: Vec<(i64, f64)> = Vec::with_capacity(cands.len());
+    for (_, lbidx, entry) in &cands {
+        let (n, bytes) = &listbytes[*lbidx];
+        let tid = i64::from_le_bytes(bytes[entry * 8..entry * 8 + 8].try_into().unwrap());
+        let f32_off = 8 * n + entry * entry_f32;
+        let raw = &bytes[f32_off..f32_off + entry_f32];
+        let d = match metric {
+            Metric::L2 => crate::vec::l2_dist_from_bytes(query, raw),
+            Metric::Ip => crate::vec::ip_dist_from_bytes(query, raw),
+            Metric::Cosine => crate::vec::cosine_dist_from_bytes(query, raw),
+        };
+        results.push((tid, d));
+    }
+    heapify(results)
 }
 
 /// The M26 blob scan path — HNSW (and any legacy blob index): deserialize the whole index + search. O(N).

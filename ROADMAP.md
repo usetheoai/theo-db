@@ -1220,7 +1220,16 @@ metapage magic+version, busca exata inicial. Arquitetura domínio-sem-`pg_sys` +
 > (AVQ train/encode + v3 persistência, aminsert, vacuum, cost, rerank-pool GUC `over_fetch`) **já existe**. M77 exige
 > ainda otimizar o `AqQuantizer::train` naive (super-linear, bloqueou o 1M do M75) para o head-to-head M82 a escala.
 
-## M77 — [ ] Fase 2: partition/train IVF + layout de página com códigos AQ contíguos ("v4 layout")
+## M77 — [x] Fase 2: partition/train IVF + layout de página com códigos AQ contíguos ("v4 layout")
+
+> **ENTREGA EM LOTE M77+M78+M79+M80 (v0.69.0):** uma única mudança tocando `am/page.rs` (`write_ivf_aq`/
+> `read_ivf_aq_meta`/`ivf_is_v4` — layout v4 isolado do v3 f32), `am/build.rs` (ambuild ramifica em
+> `pq_subspaces>0` → treina AVQ + `pack_block32_codes` → `write_ivf_aq`) e `am/scan.rs` (`scan_ivf_aq`: probe →
+> `ah_score_block` batched → rerank f32 exato). **PROVADO em pgrx real:** `ambuild_ivf_pq_subspaces_v4_scans_high_recall`
+> (recall@10 ≥ 0.8 vs seqscan exato) + **235 pg_tests GREEN, ZERO regressão** (v3 intocado). Isso fecha o
+> MECANISMO de M77 (layout), M78 (AVQ encode no build), M79 (scan batched-AH) e M80 (rerank f32). **Honesto:** o
+> **benchmark recall×QPS a escala (SIFT1M) é o M82** (exige otimizar o `AqQuantizer::train` super-linear); a região
+> pending/VACUUM do índice v4 é o **M81** (hoje aminsert/VACUUM v4 = follow-up). `over_fetch` GUC serve de rerank pool.
 
 **Objective:** o layout de página onde cada inverted list guarda **códigos AQ 4-bit contíguos em batches de 32**
 (byte-layout do rabitq-rs `ivf.rs:185-222`, Apache-2.0), separados do f32 — a causa-raiz que o M59 identificou.
@@ -1232,7 +1241,7 @@ Train IVF (k-means++, `ann/ivf.rs`) + assign + page format crash-safe.
 
 **Dependencies:** M76. **Risco (MÉDIO):** layout de página + WAL é o cerne; pgvector `ivfbuild.c`/`ivfutils.c` + rabitq-rs `ivf.rs` são os modelos.
 
-## M78 — [ ] Fase 3: wire AVQ (am/aq.rs) — encode dos códigos no build
+## M78 — [x] Fase 3: wire AVQ (am/aq.rs) — encode dos códigos no build
 
 **Objective:** conectar o quantizador anisotrópico existente (`am/aq.rs`, minimiza a loss de Guo 2020) ao build —
 treinar o codebook, encodar cada vetor para o layout contíguo (F2), com o pack SIMD (transpose+KPERM0).
@@ -1243,7 +1252,7 @@ treinar o codebook, encodar cada vetor para o layout contíguo (F2), com o pack 
 
 **Dependencies:** M77. **Risco (MÉDIO):** `am/aq.rs` já existe e é validado — é wiring, não algoritmo novo.
 
-## M79 — [ ] Fase 4: scan path AH-LUT batch (probe leaves → batch-scan)
+## M79 — [x] Fase 4: scan path AH-LUT batch (probe leaves → batch-scan)
 
 **Objective:** o scan de 2 estágios (rabitq-rs `ivf.rs:1945-2016`): probe nprobe leaves → batch-scan AH-LUT16
 (`vec/ah.rs`, `pshufb`) sobre os códigos contíguos → lower-bound prune. O ganho de QPS que o spike previu.
@@ -1254,7 +1263,7 @@ treinar o codebook, encodar cada vetor para o layout contíguo (F2), com o pack 
 
 **Dependencies:** M78. **Risco (ALTO):** é onde o ganho de QPS se materializa (ou não) end-to-end no índice real vs o spike isolado.
 
-## M80 — [ ] Fase 5: reranking (ex-code full-precision dos top-N)
+## M80 — [x] Fase 5: reranking (ex-code full-precision dos top-N)
 
 **Objective:** o rerank stage-2 (rabitq-rs `fastscan_kernel.rs:124-153`): re-score full-precision (ou ex-code) dos
 survivors do lower-bound, para recuperar recall alto (≥0.99) a QPS competitivo.
