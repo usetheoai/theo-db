@@ -24,6 +24,18 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.71.0] - 2026-07-11
+
+### Added
+- M82 (pg_scann fase 7 — veredito final): head-to-head MEDIDO do índice v4 IVF-AQ+AH como Access Method, dentro do
+  Postgres, a SIFT1M completo (GT oficial válido a 1M) vs a baseline f32-IVF own-code na mesma tabela (rigor A/B
+  same-data M46). Artefatos `docs/benchmarks/m82-pgscann-headtohead.{md,json}` + veredito `docs/adr/0037-m82-am-ivf-aq-measured-verdict.md`. **Achado honesto:** o índice v4 é funcionalmente correto (recall byte-idêntico ao f32-IVF exato — AH pruning lossless), mas **não entrega ganho de QPS** no AM (78.5 QPS @ recall 0.985, classe f32-IVF, ~24× abaixo do ScaNN) — os 5-7× in-memory do M75 são mascarados pelo custo I/O+probe do AM. Confirma e estende o veredito M73 (ADR-0035). Fecha o track pg_scann (M75→M82) e o Roadmap v6.
+
+### Changed
+- M82: treino do codebook AVQ no `ambuild` passa a amostrar deterministicamente (stride) até 50k vetores antes de
+  encodar TODOS — torna o `CREATE INDEX` do índice v4 tratável a 1M+ (o treino ingênuo era super-linear, o blocker
+  do M75). Recall inalterado (medido byte-idêntico ao f32-IVF exato a 1M).
+
 ## [0.70.0] - 2026-07-11
 
 ### Added

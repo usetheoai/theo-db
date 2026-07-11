@@ -103,9 +103,18 @@ pub extern "C-unwind" fn ambuild(
         // for the batched-AH scan) + f32 (rerank) + codebook. M==0 keeps the v3 f32 path (byte-identical, untouched).
         let m = crate::am::options::pq_subspaces_from_relation(indexrel);
         if m > 0 && dim > 0 {
-            let all: Vec<Vec<f32>> = corpus.iter().map(|(_, v)| v.clone()).collect();
+            // M82 — train the AVQ codebook on a capped deterministic sample (ScaNN trains on ~250k; the codebook
+            // is a global 16-centroid-per-subspace map that converges well below the full N), then encode ALL
+            // vectors. Keeps CREATE INDEX tractable at 1M+ (the naive train is super-linear — the M75 blocker).
+            const AQ_TRAIN_SAMPLE: usize = 50_000;
+            let train: Vec<Vec<f32>> = if corpus.len() > AQ_TRAIN_SAMPLE {
+                let step = corpus.len() / AQ_TRAIN_SAMPLE; // deterministic stride (seed-free, reproducible)
+                (0..AQ_TRAIN_SAMPLE).map(|i| corpus[i * step].1.clone()).collect()
+            } else {
+                corpus.iter().map(|(_, v)| v.clone()).collect()
+            };
             let thr = crate::am::options::aq_threshold_from_relation(indexrel);
-            match crate::am::aq::AqQuantizer::train(&all, m, 4, thr, BUILD_SEED) {
+            match crate::am::aq::AqQuantizer::train(&train, m, 4, thr, BUILD_SEED) {
                 Ok(quant) => {
                     let entries = idx.list_entries();
                     let pairs = m.div_ceil(2);

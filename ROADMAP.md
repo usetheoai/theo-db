@@ -1286,7 +1286,7 @@ append-only por lista; DELETE→tombstone lógico; VACUUM cleanup→reempacota p
 
 **Dependencies:** M80. **Risco (ALTO):** lifecycle transacional de índice quantizado é a parte mais difícil; vectorchord é o modelo de design (AGPL — reimplementar).
 
-## M82 — [ ] Fase 7: integração completa com o planner + veredito final
+## M82 — [x] Fase 7: integração completa com o planner + veredito final
 
 **Objective:** `amcostestimate` fiel (custo ∝ nprobe + rerank), selectividade, e o **head-to-head final MEDIDO** do
 pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente — o North Star de QPS).
