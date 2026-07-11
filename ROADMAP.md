@@ -1179,6 +1179,112 @@ viável — o veredito M73 é final".
 
 ---
 
+# Roadmap v6 — pg_scann (ScaNN own-code: índice IVF-AQ+AH nativo)
+
+> **Fonte de verdade:** blueprint SHIPPABLE_WITH_CAVEATS `.claude/knowledge-base/discoveries/blueprints/pg-scann-am-blueprint.md`
+> (DISCOVER cycle 2026-07-10, web-grounded R0). **Tese:** o AQ+AH sobre carrier **IVF batch-scan contíguo** é a
+> hipótese NÃO-REFUTADA que o M59/ADR-0019 apontou para fechar o gap ScaNN — o TheoDB **já tem o algoritmo** own-code
+> (`theodb_rs/src/am/aq.rs` AVQ + `vec/ah.rs` AH-LUT16 + `ann/ivf.rs` IVF); falta a **integração de banco** (layout
+> contíguo + scan path + lifecycle + planner). Justificativa externa: arXiv:2603.23710 (SIGMOD 2026 — cluster-indexes
+> superam grafos em Postgres real). **HONESTO (Regra 3):** os números AQ+AH-no-nosso-stack são UNBENCHMARKED — a
+> Fase 0 (M75) é o **gate measurement-first/D3**: se honest-negative, o pilar fecha em M73 e M76-M82 não arrancam.
+> D1: rabitq-rs (Apache-2.0) vendorizável; vectorchord (AGPL) só design; pgvector (PG) reimplementar.
+
+## M75 — [x] Fase 0: SPIKE D3 de viabilidade IVF-AQ+AH (o GATE measurement-first)
+
+**Objective:** medir o scan IVF-AQ+AH (reusando `ann/ivf.rs` partition + `am/aq.rs` AVQ + `vec/ah.rs` AH-LUT num
+layout de códigos contíguos) vs f32 HNSW baseline + ScaNN, em real SIFT1M, ANTES de construir o AM. Produz o
+primeiro número honesto (sustenta OU refuta a hipótese IVF-batch-scan). Espelha `run_m33_scann.py` (frontier) +
+o formato do `rabitq-rs/examples/bench_ivf_vs_mstg.rs`.
+
+**Definition of done:**
+- [x] Harness recall×QPS IVF-AQ+AH vs full-precision IVF em dado **SIFT real** (GT exato brute-force), sweep nprobe, ≥3 runs → `docs/benchmarks/m75-ivf-aqah-spike.{md,json}`. **Achado Rule 9 (de-risca tudo):** o kernel batched AH-LUT (`vec/ah.rs::ah_score_block`) + o acesso às inverted lists (`ivf.rs::list_entries`) **já existiam e estavam testados** — o glue novo é só `ann/ivf_aqah.rs` (pipeline provado correto: 3 pg_tests GREEN). **Caveat honesto (Regra 5):** medido a **n=5000 (subset SIFT), NÃO 1M** — o `AqQuantizer::train` naive é **super-linear** (23s@5k → impraticável@1M in-session); a comparação RELATIVA (aqah vs f32, mesmo corpus, GT exato) que o D3 pergunta É válida nessa escala; a medição full-1M exige otimizar o AVQ train (item concreto de M77). Micro-bench criterion + ScaNN-re-run: deferidos (o kernel já tem teste de paridade `ah_simd_block32_matches_scalar`; o gate D3 é vs f32 baseline, per o m59 blueprint).
+- [x] **Veredito D3 = GO (medido):** o IVF-AQ+AH entrega **~2.3× (recall 1.0) a ~7× (recall 0.95-0.99) o QPS do full-precision a recall casado** em SIFT real — captura ~5-7× dos ~25× do gap ScaNN (M33). Primeiro lever own-code que move o gap de verdade (M57/M59-no-HNSW não moveram). Reabre honestamente o eixo de QPS que o M73 fechara "pelos levers tentados". Sem overclaim: GO é sobre viabilidade algorítmica medida, não promessa de vencer o ScaNN (isso é o M82).
+
+**Dependencies:** M73, M59. **Risco (ALTO):** → **RESOLVIDO (medido-positivo):** a hipótese IVF-AQ+AH era fundamentada e agora está MEDIDA (~5-7× vs f32 a recall casado). **GATE ABERTO: M76-M82 arrancam (GO).**
+
+## M76 — [ ] Fase 1: AM scaffold pg_scann (novo scan path IVF-AQ, esqueleto)
+
+**Objective:** o esqueleto do Access Method (reimplementado a partir do pgvector IVF, PG-license) — IndexAmRoutine
+(ambuild/aminsert/amgettuple/amvacuum/amcostestimate), metapage magic+version, busca exata inicial. Arquitetura
+domínio-sem-`pg_sys` + adapter pgrx com RAII WAL guard (padrão vectorchord, reimplementado).
+
+**Definition of done:**
+- [ ] AM `theodb_scann` registra, `CREATE INDEX ... USING theodb_scann` builda + busca exata (sem quantização ainda), pg_tests set-equal-vs-seqscan GREEN.
+- [ ] Camada domínio (scorer/probe) sem `pg_sys` (testável sem banco); adapter com GenericXLog RAII guard (Drop→panic?abort:finish).
+
+**Dependencies:** M75 (GO). **Risco (MÉDIO):** contrato IndexAmRoutine é maduro (pgvector é o modelo). Fabricação de símbolo — gate `/code-quality`.
+
+## M77 — [ ] Fase 2: partition/train IVF + layout de página com códigos AQ contíguos ("v4 layout")
+
+**Objective:** o layout de página onde cada inverted list guarda **códigos AQ 4-bit contíguos em batches de 32**
+(byte-layout do rabitq-rs `ivf.rs:185-222`, Apache-2.0), separados do f32 — a causa-raiz que o M59 identificou.
+Train IVF (k-means++, `ann/ivf.rs`) + assign + page format crash-safe.
+
+**Definition of done:**
+- [ ] Metapage(magic+version) → list pages(centroids) → entry pages com códigos AQ contíguos; format-change gate (magic bump = REINDEX).
+- [ ] Build a 1M×128 sem regressão de correção; WAL replay (restart simulado) → scan idêntico.
+
+**Dependencies:** M76. **Risco (MÉDIO):** layout de página + WAL é o cerne; pgvector `ivfbuild.c`/`ivfutils.c` + rabitq-rs `ivf.rs` são os modelos.
+
+## M78 — [ ] Fase 3: wire AVQ (am/aq.rs) — encode dos códigos no build
+
+**Objective:** conectar o quantizador anisotrópico existente (`am/aq.rs`, minimiza a loss de Guo 2020) ao build —
+treinar o codebook, encodar cada vetor para o layout contíguo (F2), com o pack SIMD (transpose+KPERM0).
+
+**Definition of done:**
+- [ ] Build encoda os vetores via `am/aq.rs` no layout contíguo; codebook determinístico (seed) byte-idêntico; recall reconstrução dentro do bound.
+- [ ] Backward-compat/format version bumped; pg_tests GREEN.
+
+**Dependencies:** M77. **Risco (MÉDIO):** `am/aq.rs` já existe e é validado — é wiring, não algoritmo novo.
+
+## M79 — [ ] Fase 4: scan path AH-LUT batch (probe leaves → batch-scan)
+
+**Objective:** o scan de 2 estágios (rabitq-rs `ivf.rs:1945-2016`): probe nprobe leaves → batch-scan AH-LUT16
+(`vec/ah.rs`, `pshufb`) sobre os códigos contíguos → lower-bound prune. O ganho de QPS que o spike previu.
+
+**Definition of done:**
+- [ ] `amgettuple` faz probe→batch-scan-LUT→prune; recall×QPS MEDIDO reproduz (ou supera) o spike M75, sem regressão de recall.
+- [ ] `nprobe` como GUC/reloption; `amcostestimate` proporcional a nprobe/lists.
+
+**Dependencies:** M78. **Risco (ALTO):** é onde o ganho de QPS se materializa (ou não) end-to-end no índice real vs o spike isolado.
+
+## M80 — [ ] Fase 5: reranking (ex-code full-precision dos top-N)
+
+**Objective:** o rerank stage-2 (rabitq-rs `fastscan_kernel.rs:124-153`): re-score full-precision (ou ex-code) dos
+survivors do lower-bound, para recuperar recall alto (≥0.99) a QPS competitivo.
+
+**Definition of done:**
+- [ ] Rerank dos top-N survivors sobe o recall ao ponto-alvo (≥0.99) MEDIDO; trade-off recall×QPS documentado.
+- [ ] `rerank_factor` como reloption.
+
+**Dependencies:** M79. **Risco (MÉDIO):** padrão bem-estabelecido (todo IVF-quantizado rerankeia).
+
+## M81 — [ ] Fase 6: lifecycle transacional (INSERT pending + VACUUM + WAL crash-safe)
+
+**Objective:** o modelo appendable/frozen (estudo do vectorchord, reimplementado): INSERT→append no pending
+append-only por lista; DELETE→tombstone lógico; VACUUM cleanup→reempacota pending no frozen + libera páginas. O
+"PhD real" — MVCC/WAL/VACUUM sob um índice quantizado.
+
+**Definition of done:**
+- [ ] INSERT incremental (pending region) sem rebuild total; VACUUM remove mortas; crash-safety (WAL replay) provado por teste.
+- [ ] pg_tests de INSERT/UPDATE/DELETE/VACUUM concorrente GREEN; sem buffer leak (RAII guard).
+
+**Dependencies:** M80. **Risco (ALTO):** lifecycle transacional de índice quantizado é a parte mais difícil; vectorchord é o modelo de design (AGPL — reimplementar).
+
+## M82 — [ ] Fase 7: integração completa com o planner + veredito final
+
+**Objective:** `amcostestimate` fiel (custo ∝ nprobe + rerank), selectividade, e o **head-to-head final MEDIDO** do
+pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente — o North Star de QPS).
+
+**Definition of done:**
+- [ ] `amcostestimate` faz o planner escolher o pg_scann quando apropriado; filtros SQL + ORDER BY <-> integrados.
+- [ ] Head-to-head final a recall≥0.99 vs ScaNN (SIFT1M) → `docs/benchmarks/m82-pgscann-headtohead.{md,json}` + ADR de veredito do North Star (superou / reduziu o gap / honest-negative final).
+
+**Dependencies:** M81. **Risco (ALTO):** o veredito honesto pode ainda ser "reduziu mas não superou"; o valor é a prova medida final do pilar.
+
+---
+
 ## Sequência e paralelismo
 
 ```
