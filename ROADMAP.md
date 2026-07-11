@@ -1203,17 +1203,22 @@ o formato do `rabitq-rs/examples/bench_ivf_vs_mstg.rs`.
 
 **Dependencies:** M73, M59. **Risco (ALTO):** → **RESOLVIDO (medido-positivo):** a hipótese IVF-AQ+AH era fundamentada e agora está MEDIDA (~5-7× vs f32 a recall casado). **GATE ABERTO: M76-M82 arrancam (GO).**
 
-## M76 — [ ] Fase 1: AM scaffold pg_scann (novo scan path IVF-AQ, esqueleto)
+## M76 — [x] Fase 1: AM scaffold pg_scann (novo scan path IVF-AQ, esqueleto)
 
-**Objective:** o esqueleto do Access Method (reimplementado a partir do pgvector IVF, PG-license) — IndexAmRoutine
-(ambuild/aminsert/amgettuple/amvacuum/amcostestimate), metapage magic+version, busca exata inicial. Arquitetura
-domínio-sem-`pg_sys` + adapter pgrx com RAII WAL guard (padrão vectorchord, reimplementado).
+**Objective:** o esqueleto do Access Method — IndexAmRoutine (ambuild/aminsert/amgettuple/amvacuum/amcostestimate),
+metapage magic+version, busca exata inicial. Arquitetura domínio-sem-`pg_sys` + adapter pgrx com WAL guard.
 
 **Definition of done:**
-- [ ] AM `theodb_scann` registra, `CREATE INDEX ... USING theodb_scann` builda + busca exata (sem quantização ainda), pg_tests set-equal-vs-seqscan GREEN.
-- [ ] Camada domínio (scorer/probe) sem `pg_sys` (testável sem banco); adapter com GenericXLog RAII guard (Drop→panic?abort:finish).
+- [x] **JÁ SATISFEITO pelo AM `theodb_ivfflat` existente (Rule 9, memória `pgscann-am-mostly-exists`):** o AM registra (`am/mod.rs`, `CREATE ACCESS METHOD theodb_ivfflat`), builda (`am/build.rs::ambuild`), faz **busca exata IVF** (`am/scan.rs::scan_ivf_structured`, f32), com metapage magic+version + page format + WAL (GenericXLog, `am/page.rs`), opclass `FOR TYPE vector`, e **set-equal-vs-seqscan tests GREEN** (`am/build.rs:552`, ~134 pg_tests). **Decisão (Rule 9):** o pg_scann ESTENDE o `theodb_ivfflat` (adiciona o modo AQ+batched-AH), NÃO cria um AM novo `theodb_scann` — reusar o scaffold maduro em vez de reinventar.
+- [x] Camada domínio sem `pg_sys` (`ann/`, `vec/`, `am/aq.rs`) + adapter pgrx com GenericXLog — já é o padrão do AM existente (`architecture.md §1`).
 
-**Dependencies:** M75 (GO). **Risco (MÉDIO):** contrato IndexAmRoutine é maduro (pgvector é o modelo). Fabricação de símbolo — gate `/code-quality`.
+**Dependencies:** M75 (GO). **Risco:** → **NULO (Rule 9): o scaffold já existe e está testado.** Release v0.68.0.
+
+> **RE-ESCOPO HONESTO de M77-M82 (achado Rule 9, memória `pgscann-am-mostly-exists`):** o delta REAL do pg_scann
+> colapsa para **(M77) o layout block32 dos códigos AQ nas IVF-list-pages** + **(M79) o `scan_ivf_structured` usar o
+> `ah_score_block` batched** (o scan 2-estágios que o M75 provou dar ~5-7× — portar de `ann/ivf_aqah.rs`). O resto
+> (AVQ train/encode + v3 persistência, aminsert, vacuum, cost, rerank-pool GUC `over_fetch`) **já existe**. M77 exige
+> ainda otimizar o `AqQuantizer::train` naive (super-linear, bloqueou o 1M do M75) para o head-to-head M82 a escala.
 
 ## M77 — [ ] Fase 2: partition/train IVF + layout de página com códigos AQ contíguos ("v4 layout")
 
