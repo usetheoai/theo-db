@@ -1274,7 +1274,7 @@ survivors do lower-bound, para recuperar recall alto (≥0.99) a QPS competitivo
 
 **Dependencies:** M79. **Risco (MÉDIO):** padrão bem-estabelecido (todo IVF-quantizado rerankeia).
 
-## M81 — [ ] Fase 6: lifecycle transacional (INSERT pending + VACUUM + WAL crash-safe)
+## M81 — [x] Fase 6: lifecycle transacional (INSERT pending + VACUUM + WAL crash-safe)
 
 **Objective:** o modelo appendable/frozen (estudo do vectorchord, reimplementado): INSERT→append no pending
 append-only por lista; DELETE→tombstone lógico; VACUUM cleanup→reempacota pending no frozen + libera páginas. O
