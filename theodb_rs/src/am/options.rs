@@ -44,6 +44,14 @@ pub(crate) const DEFAULT_AQ_THRESHOLD_MILLI: i32 = 1000;
 const MIN_AQ_THRESHOLD_MILLI: i32 = 1000;
 const MAX_AQ_THRESHOLD_MILLI: i32 = 1_000_000; // η up to 1000×; far above any useful ScaNN T.
 
+/// M83 (Roadmap v7 D3 spike) — `WITH (separate_storage = 1)`: on an AQ index (`pq_subspaces > 0`), persist the
+/// v5 STORAGE-SEPARATED layout (codes and f32 on distinct page ranges) instead of the v4 interleaved layout, so
+/// the scan reads only the compact codes for pruning and random-reads f32 only for rerank survivors (ADR-0037
+/// lever). 0 = v4 interleaved (default, byte-identical). Int 0/1 (KISS — matches the other int reloptions).
+pub(crate) const DEFAULT_SEPARATE_STORAGE: i32 = 0;
+const MIN_SEPARATE_STORAGE: i32 = 0;
+const MAX_SEPARATE_STORAGE: i32 = 1;
+
 /// Parsed reloptions shared by the two AMs (`amoptions` is shared — `mod.rs`). `#[repr(C)]` with the varlena
 /// header first (never touch `vl_len_` directly — `build_reloptions` sets it). `lists` is an ivfflat build knob;
 /// `sbq_bits` (M51) + `pq_subspaces`/`pq_bits`/`aq_threshold_milli` (M59) are theodb_hnsw build knobs. Each AM
@@ -56,6 +64,7 @@ struct TheodbIvfflatOptions {
     pq_subspaces: i32,
     pq_bits: i32,
     aq_threshold_milli: i32,
+    separate_storage: i32,
 }
 
 static mut RELOPT_KIND: pg_sys::relopt_kind::Type = 0;
@@ -111,6 +120,15 @@ pub(crate) unsafe fn init() {
         MAX_AQ_THRESHOLD_MILLI,
         pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
     );
+    pg_sys::add_int_reloption(
+        RELOPT_KIND,
+        "separate_storage".as_pg_cstr(),
+        "Persist the v5 storage-separated IVF-AQ layout (codes/f32 on distinct pages) when 1 (M83)".as_pg_cstr(),
+        DEFAULT_SEPARATE_STORAGE,
+        MIN_SEPARATE_STORAGE,
+        MAX_SEPARATE_STORAGE,
+        pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
+    );
 }
 
 /// The `amoptions` callback: parse `pg_class.reloptions` text[] into the `TheodbIvfflatOptions` bytea that fills
@@ -121,7 +139,7 @@ pub(crate) unsafe extern "C-unwind" fn amoptions(
     reloptions: pg_sys::Datum,
     validate: bool,
 ) -> *mut pg_sys::bytea {
-    let tab: [pg_sys::relopt_parse_elt; 5] = [
+    let tab: [pg_sys::relopt_parse_elt; 6] = [
         pg_sys::relopt_parse_elt {
             optname: "lists".as_pg_cstr(),
             opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
@@ -146,6 +164,11 @@ pub(crate) unsafe extern "C-unwind" fn amoptions(
             optname: "aq_threshold".as_pg_cstr(),
             opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
             offset: std::mem::offset_of!(TheodbIvfflatOptions, aq_threshold_milli) as i32,
+        },
+        pg_sys::relopt_parse_elt {
+            optname: "separate_storage".as_pg_cstr(),
+            opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
+            offset: std::mem::offset_of!(TheodbIvfflatOptions, separate_storage) as i32,
         },
     ];
     pg_sys::build_reloptions(
@@ -252,4 +275,18 @@ pub(crate) unsafe fn aq_threshold_from_relation(indexrel: pg_sys::Relation) -> f
         (*(rd_options as *const TheodbIvfflatOptions)).aq_threshold_milli
     };
     (milli as f32 / 1000.0).max(1.0)
+}
+
+/// M83 — resolve `separate_storage` for a `theodb_ivfflat` AQ index: `true` iff `WITH (separate_storage=1)`.
+/// Read at initial build to pick the v5 storage-separated layout over the v4 interleaved one. Off (v4) when the
+/// option is absent, so every existing index is byte-identical.
+///
+/// # Safety
+/// `indexrel` must be a valid open index relation.
+pub(crate) unsafe fn separate_storage_from_relation(indexrel: pg_sys::Relation) -> bool {
+    let rd_options = (*indexrel).rd_options;
+    if rd_options.is_null() {
+        return false;
+    }
+    (*(rd_options as *const TheodbIvfflatOptions)).separate_storage == 1
 }

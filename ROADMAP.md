@@ -1303,7 +1303,7 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 
 > Origem: deep research web-grounded 2026-07-11 (`docs/research/scann-storage-separation-2026-07.md`). Ataca a **única** alavanca não-testada que o ADR-0037 (M82) nomeou: **separar os códigos AQ dos vetores f32 em cadeias de páginas distintas** (FastScan/AlloyDB/VectorChord/pgvectorscale todos fazem). **Alvo honesto (arXiv:2603.23710 + teto AlloyDB):** recuperar ~4–6× → classe "AlloyDB-ScaNN in-Postgres" (~4× sobre pgvector HNSW), **jamais** vencer o ScaNN-biblioteca (imposto MVCC/WAL é ~4–6× irrecuperável). **Serial, gate-driven; honest-negative é terminal válido em cada etapa.**
 
-## M83 — [ ] Fase 0 v7: spike D3 storage-separation (o GATE measurement-first)
+## M83 — [x] Fase 0 v7: spike D3 storage-separation (o GATE measurement-first)
 
 **Objective:** medir, no AM REAL (não in-memory — lição do M82), se separar códigos↔f32 em páginas distintas recupera QPS. Layout v5 atrás de reloption `separate_storage=on` (v3/v4/236 pg_tests intactos); scan em 2 fases (Fase 1 só-códigos AH-poda; Fase 2 random-read f32 só dos sobreviventes).
 
