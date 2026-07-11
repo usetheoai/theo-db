@@ -52,6 +52,14 @@ pub(crate) const DEFAULT_SEPARATE_STORAGE: i32 = 0;
 const MIN_SEPARATE_STORAGE: i32 = 0;
 const MAX_SEPARATE_STORAGE: i32 = 1;
 
+/// M85 (Roadmap v7) — `WITH (refine = 1)`: on a storage-separated AQ index (`separate_storage=1`), persist the v6
+/// SQ8-refine layout — the per-list rerank region is SQ8 codes (`dim` B/vec) instead of raw f32 (`dim·4` B/vec),
+/// so Stage-2 survivor reads shrink 4× at the high-recall frontier (M84). 0 = v5 f32 rerank (default, exact). Int
+/// 0/1 (0=f32, 1=sq8 — KISS, matches the other int reloptions). Only meaningful with `separate_storage=1`.
+pub(crate) const DEFAULT_REFINE: i32 = 0;
+const MIN_REFINE: i32 = 0;
+const MAX_REFINE: i32 = 1;
+
 /// Parsed reloptions shared by the two AMs (`amoptions` is shared — `mod.rs`). `#[repr(C)]` with the varlena
 /// header first (never touch `vl_len_` directly — `build_reloptions` sets it). `lists` is an ivfflat build knob;
 /// `sbq_bits` (M51) + `pq_subspaces`/`pq_bits`/`aq_threshold_milli` (M59) are theodb_hnsw build knobs. Each AM
@@ -65,6 +73,7 @@ struct TheodbIvfflatOptions {
     pq_bits: i32,
     aq_threshold_milli: i32,
     separate_storage: i32,
+    refine: i32,
 }
 
 static mut RELOPT_KIND: pg_sys::relopt_kind::Type = 0;
@@ -129,6 +138,15 @@ pub(crate) unsafe fn init() {
         MAX_SEPARATE_STORAGE,
         pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
     );
+    pg_sys::add_int_reloption(
+        RELOPT_KIND,
+        "refine".as_pg_cstr(),
+        "Rerank the storage-separated IVF-AQ scan on SQ8 codes (v6) when 1, raw f32 (v5) when 0 (M85)".as_pg_cstr(),
+        DEFAULT_REFINE,
+        MIN_REFINE,
+        MAX_REFINE,
+        pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
+    );
 }
 
 /// The `amoptions` callback: parse `pg_class.reloptions` text[] into the `TheodbIvfflatOptions` bytea that fills
@@ -139,7 +157,7 @@ pub(crate) unsafe extern "C-unwind" fn amoptions(
     reloptions: pg_sys::Datum,
     validate: bool,
 ) -> *mut pg_sys::bytea {
-    let tab: [pg_sys::relopt_parse_elt; 6] = [
+    let tab: [pg_sys::relopt_parse_elt; 7] = [
         pg_sys::relopt_parse_elt {
             optname: "lists".as_pg_cstr(),
             opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
@@ -169,6 +187,11 @@ pub(crate) unsafe extern "C-unwind" fn amoptions(
             optname: "separate_storage".as_pg_cstr(),
             opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
             offset: std::mem::offset_of!(TheodbIvfflatOptions, separate_storage) as i32,
+        },
+        pg_sys::relopt_parse_elt {
+            optname: "refine".as_pg_cstr(),
+            opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
+            offset: std::mem::offset_of!(TheodbIvfflatOptions, refine) as i32,
         },
     ];
     pg_sys::build_reloptions(
@@ -289,4 +312,17 @@ pub(crate) unsafe fn separate_storage_from_relation(indexrel: pg_sys::Relation) 
         return false;
     }
     (*(rd_options as *const TheodbIvfflatOptions)).separate_storage == 1
+}
+
+/// M85 — resolve `refine` for a `theodb_ivfflat` AQ index: `true` iff `WITH (refine=1)` (SQ8 rerank, v6). Off
+/// (v5 f32 rerank) when absent, so every existing index is byte-identical. Only consulted when `separate_storage=1`.
+///
+/// # Safety
+/// `indexrel` must be a valid open index relation.
+pub(crate) unsafe fn refine_sq8_from_relation(indexrel: pg_sys::Relation) -> bool {
+    let rd_options = (*indexrel).rd_options;
+    if rd_options.is_null() {
+        return false;
+    }
+    (*(rd_options as *const TheodbIvfflatOptions)).refine == 1
 }

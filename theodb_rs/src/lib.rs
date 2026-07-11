@@ -35,6 +35,7 @@ mod chat;
 mod chunk;
 mod dtype;
 mod sbq;
+mod sq8;
 mod embed;
 mod http;
 mod hybrid;

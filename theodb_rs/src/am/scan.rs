@@ -189,6 +189,10 @@ unsafe fn scan_ivf_structured(rel: pg_sys::Relation, query: &[f32]) -> BinaryHea
     if page::ivf_is_v5(rel) {
         return scan_ivf_aq_split(rel, query);
     }
+    // M85 (Roadmap v7): an IVF-AQ v6 index (built WITH separate_storage=1, refine=sq8) reranks on SQ8 codes.
+    if page::ivf_is_v6(rel) {
+        return scan_ivf_aq_split_sq8(rel, query);
+    }
     let meta = match page::read_ivf_meta(rel) {
         Ok(m) => m,
         Err(e) => pg_sys::error!("theodb am scan: {e}"),
@@ -460,6 +464,101 @@ unsafe fn scan_ivf_aq_split(rel: pg_sys::Relation, query: &[f32]) -> BinaryHeap<
         results.push((*tid, d));
     }
     // M81 — fold in pending (rows INSERTed after build): f32, scored EXACTLY, no rebuild. Same contract as v3/v4.
+    match page::read_pending(rel) {
+        Ok(pending) => {
+            for (tidv, v) in pending {
+                results.push((tidv, metric.dist(query, &v)));
+            }
+        }
+        Err(e) => pg_sys::error!("theodb am scan (pending): {e}"),
+    }
+    heapify(results)
+}
+
+/// M85 (Roadmap v7) — the IVF-AQ v6 SQ8-REFINE scan: identical to the v5 split scan (Stage 1 AH prune over
+/// codes-only pages) but Stage 2 reranks the `over_fetch` survivors on SQ8 codes (`dim` B/vec) instead of raw f32
+/// (`dim·4` B/vec) — 4× less Stage-2 random-read I/O at the high-recall frontier (M84). Rerank is asymmetric: the
+/// SQ8 code is decoded to an approximate f32, then the EXACT `Metric::dist` is applied against the f32 query, so
+/// the query is never quantized (recall degrades on one side only). Recall is SQ8-approximate for built rows,
+/// EXACT for pending rows (the pending region stays f32).
+unsafe fn scan_ivf_aq_split_sq8(rel: pg_sys::Relation, query: &[f32]) -> BinaryHeap<Reverse<Scored>> {
+    let meta = match page::read_ivf_aq_meta_split_sq8(rel) {
+        Ok(m) => m,
+        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+    };
+    let quant = match crate::am::aq::AqQuantizer::from_meta_bytes(&meta.aq_codebook) {
+        Ok(q) => q,
+        Err(e) => pg_sys::error!("theodb am scan (aq codebook): {e}"),
+    };
+    let sq8 = match crate::sq8::Sq8Quantizer::from_meta_bytes(&meta.sq8_codebook) {
+        Ok(q) => q,
+        Err(e) => pg_sys::error!("theodb am scan (sq8 codebook): {e}"),
+    };
+    let lut = match crate::vec::ah::build_lut16(query, &quant) {
+        Ok(l) => l,
+        Err(e) => pg_sys::error!("theodb am scan (aq lut): {e}"),
+    };
+    let metric = match Metric::from_tag(meta.metric_tag) {
+        Some(m) => m,
+        None => pg_sys::error!("theodb am scan: unknown metric tag"),
+    };
+    let dim = meta.dim as usize;
+    let pairs = (meta.m as usize).div_ceil(2);
+
+    let mut cd: Vec<(f64, usize)> =
+        meta.centroids.iter().enumerate().map(|(i, c)| (metric.dist(query, c), i)).collect();
+    cd.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    let probes = crate::am::guc::probes().clamp(1, meta.centroids.len().max(1));
+    let rerank_pool = 64 * crate::am::guc::over_fetch();
+
+    // Stage 1 — read ONLY the CODE pages of each probed list; AH-score; keep (score, tid, list_ci, ordinal).
+    let mut cands: Vec<(i32, i64, usize, usize)> = Vec::new();
+    for &(_, ci) in cd.iter().take(probes) {
+        let (cfb, cnp, _sfb, _snp, cnt) = meta.dir[ci];
+        let n = cnt as usize;
+        if n == 0 {
+            continue;
+        }
+        let cbytes = match page::read_ivf_list_bytes(rel, cfb, cnp) {
+            Ok(b) => b,
+            Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        };
+        let codes_off = 8 * n;
+        let nblocks = n.div_ceil(32);
+        let mut out = [0i32; 32];
+        for b in 0..nblocks {
+            let bn = (n - b * 32).min(32);
+            let base = codes_off + b * pairs * 32;
+            if cbytes.len() < base + pairs * 32 {
+                break;
+            }
+            crate::vec::ah::ah_score_block(&lut, &cbytes[base..base + pairs * 32], bn, &mut out[..bn]);
+            for (j, &score) in out.iter().enumerate().take(bn) {
+                let ordinal = b * 32 + j;
+                let tid = i64::from_le_bytes(cbytes[ordinal * 8..ordinal * 8 + 8].try_into().unwrap());
+                cands.push((score, tid, ci, ordinal));
+            }
+        }
+    }
+
+    // Stage 2 — rerank the `rerank_pool` best; random-read the SQ8 code for those survivors ONLY, decode, and
+    // apply the exact metric against the f32 query (asymmetric). 128 B/survivor at dim=128, not 512 B.
+    let rn = rerank_pool.min(cands.len());
+    if rn < cands.len() {
+        cands.select_nth_unstable_by_key(rn, |c| c.0);
+        cands.truncate(rn);
+    }
+    let mut results: Vec<(i64, f64)> = Vec::with_capacity(cands.len());
+    for (_, tid, ci, ordinal) in &cands {
+        let (_cfb, _cnp, sfb, snp, _cnt) = meta.dir[*ci];
+        let code = match page::read_sq8_at(rel, sfb, snp, *ordinal, dim) {
+            Ok(b) => b,
+            Err(e) => pg_sys::error!("theodb am scan (v6 sq8 rerank): {e}"),
+        };
+        let approx = sq8.decode(&code);
+        results.push((*tid, metric.dist(query, &approx)));
+    }
+    // M81 — fold in pending (rows INSERTed after build): f32, scored EXACTLY (never quantized). Same as v3/v4/v5.
     match page::read_pending(rel) {
         Ok(pending) => {
             for (tidv, v) in pending {
