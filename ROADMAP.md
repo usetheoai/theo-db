@@ -1346,6 +1346,17 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 
 ---
 
+# Pós-v7 — linhagem "build escalável a bilhão-scale" (destrava o DoD ≥100M que o M88 não alcançou)
+
+> Origem: achado MEDIDO do M88 (ADR-0038 + `docs/benchmarks/m88-billion-scale-verdict.md`) — o `ambuild` do `theodb_ivfflat` pica ~4× o dataset base em RAM (2 OOM-kills a 30M num box de 62 GB usáveis), então um índice genuinamente out-of-RAM não é construível em RAM commodity. O roadmap v7 fechou `ROADMAP_COMPLETED` (18/18, v0.76.0); esta linhagem retoma a **única alavanca nomeada** para o crossover de QPS out-of-RAM ficar medível. Serial, gate-driven, measurement-first.
+
+## M89 — [ ] ambuild streaming (flush incremental — derruba o teto de memória de build) *(gated M88)*
+
+**Objective:** reescrever o `ambuild` do `theodb_ivfflat` para **flush incremental de páginas via `tuplesort`/spool nativo do Postgres** (Regra 9 — o mecanismo do ambuild do btree e do build HNSW do pgvector), em vez de bufferizar o `AnnIndex` inteiro + cópias em RAM, derrubando o pico de ~4× o base para ~1× base — o teto que causou 2 OOM-kills a 30M no M88.
+**DoD:** (1) pico anon-rss do build **≤ ~1.5× o dataset base, MEDIDO** num build de **30M** que completa num box de 64 GB (o cenário que OOMou no M88); (2) **zero regressão** — 249 pg_tests GREEN + recall **byte-idêntico** a ≤1M (A/B same-data M46); (3) `docs/benchmarks/m89-*.{md,json}` com pico anon-rss vs N (16M, 30M) build-antigo vs novo provando que o pico deixou de escalar ~4×; (4) `maintenance_work_mem` respeitado; (5) sem novas deps externas (`tuplesort` é do próprio Postgres via `pg_sys`); (6) sign-off council-rust-pgrx (FFI do tuplesort) + council-index-storage (build/page). **Escopo:** SÓ o build escalável — a medição terminal bilhão-scale (≥100M) é **M90 gated por M89**. **Risks:** (a) API do `tuplesortstate` via `pg_sys` (FFI/`extern "C-unwind"`) — mitigar espelhando o build HNSW do pgvector + council-rust-pgrx; (b) build mais lento a ≤1M onde tudo cabe em RAM — mitigar com fast-path in-RAM quando `N·base ≤ maintenance_work_mem`. **Dependencies:** M88.
+
+---
+
 ## Sequência e paralelismo
 
 ```
