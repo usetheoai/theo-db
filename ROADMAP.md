@@ -1373,6 +1373,14 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 
 ---
 
+## M91 — [ ] adaptive filter strategy (pre/inline/post pela cardinalidade do bitmap) *(gated M90)*
+
+**Objective:** escolher AUTOMÁTICAMENTE, em runtime, a estratégia de filtered vector search pela **cardinalidade do `TIDBitmap`** já computado (a seletividade estimada): **ultra-seletivo (<~0.1%) → PRE** (fetch dos poucos TIDs do bitmap + rerank exato, sem travessia ANN); **médio (0.1–5%) → INLINE** (o path do M90); **loose (>~5%) → POST** (o M87, índice ANN puro + filtro barato). É a peça "adaptive (AM-local)" da tier ② — o AM/Custom Scan ramifica na cardinalidade no início do scan, dando **recall+custo estáveis em TODA a faixa** sem o usuário escolher (o que cada estratégia FIXA não consegue). **Fora de escopo (limite honesto):** o re-plan cross-index mid-query do core do AlloyDB (tier ③) — não-alcançável por extensão pura; documentado.
+**GATE (measurement-first):** um benchmark **varrendo a seletividade (0.01% → 30%)** mostra que o adaptive **domina o envelope** das 3 estratégias fixas isoladas (recall@10 alto E custo baixo em toda a faixa) ANTES de fechar; honest-negative é terminal válido.
+**DoD:** (1) o AM ramifica pre/inline/post pela cardinalidade do bitmap, thresholds ajustáveis (GUC/reloption, não hardcoded); (2) **benchmark de varredura de seletividade mede o adaptive dominando as 3 fixas** (`docs/benchmarks/m91-adaptive-filter.{md,json}`); (3) EXPLAIN/contador runtime revela a estratégia escolhida (observabilidade — wiring triad); (4) **zero regressão** — 250+ pg_tests GREEN, testes por regime (ultra/médio/loose); (5) sign-off council-index-storage + council-benchmark. **Risks:** (a) calibração dos thresholds pre↔inline↔post (dados/hardware-dependente) — mitigar calibrando no benchmark + thresholds ajustáveis; (b) o adaptive pode não dominar as 3 fixas (overhead de decidir + bitmap sempre) → honest-negative (o gate mede o envelope antes). **Dependencies:** M90 (o inline, 1 das 3 estratégias), M87 (o post), M89. **Prior art (estudo, Regra 9):** pgvectorscale (permissivo, já em refs); AlloyDB fechado → só design publicado. **NÃO é claim de QPS-superior** (teto de paradigma M73/M82) — é claim de recall+custo estáveis em toda seletividade.
+
+---
+
 ## Sequência e paralelismo
 
 ```
