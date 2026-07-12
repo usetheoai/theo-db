@@ -5,6 +5,13 @@ use super::{Cand, Metric, Rng};
 /// Bounded Lloyd (k-means) refinement iterations — enough to converge centroids without unbounded work.
 const LLOYD_ITERS: usize = 10;
 
+/// M88 — cap on the k-means training subsample. `n ≤ this` trains on the whole corpus (byte-identical to the
+/// pre-M88 build — every test + the 1M benchmarks unchanged); a larger corpus (100M+) trains centroids on a
+/// deterministic stride subsample of this size, so the O(k·train·d) seeding + O(iters·train·k·d) Lloyd stay
+/// bounded by the ~1M-scale cost. The full-N assignment is separate (and parallel). 1.1M keeps the 1M benchmarks
+/// on the exact path while giving ≥ ~34 points/centroid even at the 32768-list max.
+const KMEANS_TRAIN_SAMPLE: usize = 1_100_000;
+
 /// Own IVFFlat index: k-means++ centroids partition the corpus into inverted lists; search scans the `probes`
 /// nearest lists.
 pub(crate) struct IvfflatIndex {
@@ -32,12 +39,42 @@ impl IvfflatIndex {
         }
         let k = lists.clamp(1, n);
         idx.centroids = idx.kmeanspp(k, seed);
+        // M88: assign every vector to its nearest centroid IN PARALLEL — O(N·k·d) is the build bottleneck at 100M+
+        // (a single thread is ~hours). The per-vector assignment is order-independent (`nearest_in` is
+        // deterministic), so the lists are built sequentially by ascending `i` afterward — BYTE-IDENTICAL to the
+        // single-threaded assignment, so every existing recall/persist test is unchanged.
+        let assignment = idx.assign_all_parallel();
         idx.lists = vec![Vec::new(); idx.centroids.len()];
-        for i in 0..idx.vectors.len() {
-            let c = idx.nearest_in(&idx.centroids, &idx.vectors[i]);
+        for (i, &c) in assignment.iter().enumerate() {
             idx.lists[c].push(i);
         }
         idx
+    }
+
+    /// M88 — assign every vector to its nearest centroid across all CPU cores (`std::thread::scope`, mirroring
+    /// `hnsw_parallel`). `assignment[i]` is deterministic (`nearest_in` — min distance, first-index tie-break), so
+    /// the result is independent of thread count → byte-identical to the sequential assignment. Read-only over
+    /// `self.centroids`/`self.vectors`; disjoint mutable output slices, no shared mutable state.
+    fn assign_all_parallel(&self) -> Vec<usize> {
+        let n = self.vectors.len();
+        let mut assignment = vec![0usize; n];
+        if n == 0 || self.centroids.is_empty() {
+            return assignment;
+        }
+        let nthreads = std::thread::available_parallelism().map(|x| x.get()).unwrap_or(1).min(n);
+        let chunk = n.div_ceil(nthreads);
+        std::thread::scope(|s| {
+            for (t, out) in assignment.chunks_mut(chunk).enumerate() {
+                let base = t * chunk;
+                let this = &*self;
+                s.spawn(move || {
+                    for (j, slot) in out.iter_mut().enumerate() {
+                        *slot = this.nearest_in(&this.centroids, &this.vectors[base + j]);
+                    }
+                });
+            }
+        });
+        assignment
     }
 
     /// M86 (Roadmap v7) — SOAR spill (Sun et al., NeurIPS 2023, arXiv:2404.00774): assign each vector to a SECOND
@@ -86,18 +123,26 @@ impl IvfflatIndex {
 
     fn kmeanspp(&self, k: usize, seed: u64) -> Vec<Vec<f32>> {
         let mut rng = Rng::new(seed);
-        let n = self.vectors.len();
-        let dim = self.vectors[0].len();
+        // M88: train the centroids on a bounded deterministic subsample so the O(k·train·d) seeding + the
+        // O(iters·train·k·d) Lloyd stay tractable at 100M+ (the full-N assignment is separate + parallel). When
+        // `n ≤ KMEANS_TRAIN_SAMPLE` the sample IS the whole corpus, so the seeding/Lloyd — and every recall/persist
+        // test + the 1M benchmarks — are byte-for-byte unchanged (same RNG order, same centroids).
+        let n_all = self.vectors.len();
+        let train: Vec<&Vec<f32>> = if n_all > KMEANS_TRAIN_SAMPLE {
+            let step = n_all / KMEANS_TRAIN_SAMPLE; // deterministic stride (seed-free, reproducible)
+            (0..KMEANS_TRAIN_SAMPLE).map(|i| &self.vectors[i * step]).collect()
+        } else {
+            self.vectors.iter().collect()
+        };
+        let n = train.len();
+        let dim = train[0].len();
         let mut centers: Vec<Vec<f32>> = Vec::with_capacity(k);
-        let first = self.vectors[(rng.next_u64() as usize) % n].clone();
+        let first = train[(rng.next_u64() as usize) % n].clone();
         // `d2[i]` = squared distance from point i to the NEAREST chosen center, maintained INCREMENTALLY (fold each
         // new center into the running min). This is the standard k-means++ at O(k·n·d), not the O(k²·n·d) of
-        // recomputing the min over ALL centers every step — at `lists=1000` on 1M that quadratic was ~10¹³ ops
-        // (hours). The result is IDENTICAL (min over chosen centers is associative) + the RNG is consumed in the
-        // exact same order (only on `sum > 0`), so the produced centroids — and every recall/persist test — are
-        // byte-for-byte unchanged.
-        let mut d2: Vec<f64> = self
-            .vectors
+        // recomputing the min over ALL centers every step. The RNG is consumed in the exact same order (only on
+        // `sum > 0`), so the produced centroids are byte-for-byte unchanged when the sample is the whole corpus.
+        let mut d2: Vec<f64> = train
             .iter()
             .map(|v| {
                 let d = crate::vec::l2_distance(v, &first);
@@ -121,8 +166,8 @@ impl IvfflatIndex {
                 }
                 c
             };
-            let center = self.vectors[chosen].clone();
-            for (i, v) in self.vectors.iter().enumerate() {
+            let center = train[chosen].clone();
+            for (i, v) in train.iter().enumerate() {
                 let d = crate::vec::l2_distance(v, &center);
                 let dd = d * d;
                 if dd < d2[i] {
@@ -131,11 +176,11 @@ impl IvfflatIndex {
             }
             centers.push(center);
         }
-        // Bounded Lloyd refinement.
+        // Bounded Lloyd refinement (over the training sample).
         for _ in 0..LLOYD_ITERS {
             let mut sums = vec![vec![0f64; dim]; centers.len()];
             let mut counts = vec![0usize; centers.len()];
-            for v in &self.vectors {
+            for v in &train {
                 let c = self.nearest_in(&centers, v);
                 counts[c] += 1;
                 for (j, x) in v.iter().enumerate() {

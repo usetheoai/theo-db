@@ -1301,6 +1301,8 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 
 # Roadmap v7 — Storage-Separated ScaNN-fidelity (classe AlloyDB in-Postgres)
 
+> **`ROADMAP_COMPLETED` (2026-07-12)** — M83→M88 todos `[x]`; **18/18 milestones do roadmap ativo entregues**. Veredito terminal da track: **classe "AlloyDB-ScaNN in-Postgres" alcançada em tamanho/memória** (SQ8 3.52× menor, storage-separation 3–12× a 1M M84-M87), **crossover de QPS out-of-RAM direcional-não-provado** (teto de memória de build descoberto no M88; DoD ≥100M não atingido honestamente — ver M88 Outcome + ADR `0038`). **Superioridade sobre o ScaNN-biblioteca permanece NÃO-alcançável** (imposto de paradigma MVCC/WAL, M73/M82). Próxima linhagem (fora deste roadmap): ambuild streaming + bilhão-scale real.
+>
 > Origem: deep research web-grounded 2026-07-11 (`docs/research/scann-storage-separation-2026-07.md`). Ataca a **única** alavanca não-testada que o ADR-0037 (M82) nomeou: **separar os códigos AQ dos vetores f32 em cadeias de páginas distintas** (FastScan/AlloyDB/VectorChord/pgvectorscale todos fazem). **Alvo honesto (arXiv:2603.23710 + teto AlloyDB):** recuperar ~4–6× → classe "AlloyDB-ScaNN in-Postgres" (~4× sobre pgvector HNSW), **jamais** vencer o ScaNN-biblioteca (imposto MVCC/WAL é ~4–6× irrecuperável). **Serial, gate-driven; honest-negative é terminal válido em cada etapa.**
 
 ## M83 — [x] Fase 0 v7: spike D3 storage-separation (o GATE measurement-first)
@@ -1335,10 +1337,12 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 **Objective:** filtered-ANN sobre o layout separado + `amcostestimate` que modela o I/O de 2 fases → optimizer escolhe v5 corretamente.
 **DoD:** recall/QPS filtrado; planner escolhe v5 vs seqscan em WHERE seletivo. **GATE:** planner escolhe v5 quando deve; recall filtrado preservado. **Dependencies:** M86.
 
-## M88 — [ ] Head-to-head bilhão-scale + North Star re-measure *(gated M87)*
+## M88 — [x] Head-to-head bilhão-scale + North Star re-measure *(gated M87)*
 
 **Objective:** a medição terminal num regime onde o f32 NÃO cabe em RAM (a vantagem real da separação, não projetada) vs ScaNN/AlloyDB.
 **DoD:** `docs/benchmarks/m88-*.md` a ≥100M/1B; ADR estendendo/revisando 0037; sign-off council-benchmark. **GATE:** veredito terminal do North Star para a track separada (o próximo dado da linhagem M33/M73/M82). **Dependencies:** M87.
+
+**Outcome (2026-07-12, veredito `SIZE_CONFIRMED / OUT_OF_RAM_QPS_INCONCLUSIVE` — `docs/benchmarks/m88-billion-scale-verdict.{md,json}` + ADR `0038`, sign-off council-benchmark):** MEDIDO a **16M** — índice SQ8 (v6) **3.52× menor** que f32 (v5), confirmando o 3.5× do M85 em 16× a escala; **+21% cold-QPS @ probes=32** (direcional, limite inferior). **DoD ≥100M NÃO atingido honestamente:** descoberto um **teto de memória de build** (ambuild pica ~4× o base → 2 OOM-kills medidos a 30M num box de 62 GB usáveis), 16M foi o maior viável; a recall sintética (0.291) é tie-degenerada (SIFT1M real = 0.98, M84). Crossover QPS out-of-RAM fica **direcional-não-provado**; **nenhuma** claim de superioridade sobre ScaNN/AlloyDB (teto de paradigma M73/M82 permanece). Fechado na disciplina honest-negative de M73/M82. Follow-up (nova linhagem): **ambuild streaming** (derruba o teto ~4×-base → 100M+ em RAM commodity) + dados ANN reais bilhão-scale + harness cold-cache por-query. Phase 1 (build escalável, commit `fba16d0`, 249 pg_tests GREEN, byte-idêntico ≤1M) foi o que tornou os builds 16M/30M tratáveis.
 
 ---
 
