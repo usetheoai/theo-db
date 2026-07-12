@@ -95,7 +95,11 @@ pub extern "C-unwind" fn ambuild(
         let (corpus, ntuples) = collect_corpus(heaprel, indexrel, index_info);
         let lists = lists_from_relation(indexrel); // M34 — WITH (lists=N), default 100
         let metric = resolve_metric(indexrel); // M49: cosine/ip/L2 from the opclass, not hardcoded
-        let idx = IvfflatIndex::build(&corpus, lists, metric, BUILD_SEED);
+        // M86 (Roadmap v7): `WITH (soar_lambda=N)` (N>0) spills each vector to a SOAR-chosen second list (fewer
+        // probes for the same recall). λ=0 (default) → primary-only, byte-identical. Only the code is duplicated
+        // (the f32/SQ8 packing follows `list_entries()`, which now returns spilled vectors in both lists).
+        let soar_lambda = crate::am::options::soar_lambda_from_relation(indexrel);
+        let idx = IvfflatIndex::build(&corpus, lists, metric, BUILD_SEED).with_soar_spill(soar_lambda);
         // M31: persist in the STRUCTURED layout (meta + centroids + per-list pages) so scans read only probed
         // lists (O(probes)), not the whole blob (O(N)).
         let dim = corpus.first().map(|(_, v)| v.len()).unwrap_or(0) as u32;
@@ -901,6 +905,37 @@ mod tests {
             .collect()
         });
         assert!(ids.contains(&9999), "post-build INSERT (id 9999) folded into the v6 SQ8 scan (got {ids:?})");
+    }
+
+    /// M86 (Roadmap v7) — `WITH (..., soar_lambda=N)` (N>0) spills each vector to a SOAR-chosen second list; the
+    /// scan still returns correct high recall (duplicates are de-duplicated by tid at emit time). Correctness
+    /// gate for the SOAR build path: spilling does not corrupt the index or double-count in the top-k.
+    #[pgrx::pg_test]
+    fn ambuild_ivf_soar_spill_scans_high_recall_no_dupes() {
+        pgrx::Spi::run("CREATE TABLE ivfsoar (id int PRIMARY KEY, e vector(8))").unwrap();
+        for i in 0..200usize {
+            let lit =
+                (0..8).map(|j| (((i * 31 + j * 7) % 97) as f32 * 0.1).to_string()).collect::<Vec<_>>().join(",");
+            pgrx::Spi::run(&format!("INSERT INTO ivfsoar VALUES ({}, '[{lit}]')", i + 1)).unwrap();
+        }
+        pgrx::Spi::run(
+            "CREATE INDEX ivfsoar_idx ON ivfsoar USING theodb_ivfflat (e) WITH (lists=8, pq_subspaces=4, aq_threshold=2000, separate_storage=1, soar_lambda=1000)",
+        )
+        .unwrap();
+        pgrx::Spi::run("SET theodb_ivfflat.probes = 8").unwrap();
+        pgrx::Spi::run("SET theodb_hnsw.over_fetch = 8").unwrap();
+        let probe: String =
+            (0..8).map(|j| (((5 * 31 + j * 7) % 97) as f32 * 0.1).to_string()).collect::<Vec<_>>().join(",");
+        let (exact, idx) = topk_sets("ivfsoar", &format!("[{probe}]"), 10);
+        assert!(!idx.is_empty(), "the SOAR-spilled scan returned rows");
+        // No duplicate ids in the returned top-k (dedup-by-tid at emit works despite the vector being in 2 lists).
+        let mut sorted = idx.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), idx.len(), "SOAR scan returned duplicate ids (dedup-by-tid failed): {idx:?}");
+        let e: std::collections::HashSet<i32> = exact.iter().copied().collect();
+        let recall = idx.iter().filter(|id| e.contains(id)).count() as f64 / (exact.len().max(1) as f64);
+        assert!(recall >= 0.8, "SOAR recall@10 {recall:.2} < 0.8 (exact={exact:?} idx={idx:?})");
     }
 
     /// T3.3 NON-REGRESSION (build): with NO reloption, `ambuild_hnsw` packs the byte-identical v1 layout — the
