@@ -271,6 +271,19 @@ mod tests {
         assert_eq!(r.len(), 2);
     }
     #[pg_test]
+    fn ivfflat_parallel_assignment_deterministic_and_total() {
+        // M88: the parallel per-vector assignment (assign_all_parallel) must be BYTE-IDENTICAL across builds
+        // (nearest_in is deterministic; lists built by ascending i, independent of thread count) AND partition all
+        // N (no vector lost or duplicated). This guards the 100M-scalability refactor against a thread race.
+        let c: Vec<(i64, Vec<f32>)> =
+            (0..300i64).map(|i| (i, vec![(i % 17) as f32, (i % 13) as f32, (i % 7) as f32])).collect();
+        let a = IvfflatIndex::build(&c, 16, Metric::L2, 42).list_entries();
+        let b = IvfflatIndex::build(&c, 16, Metric::L2, 42).list_entries();
+        assert_eq!(a, b, "parallel IVF assignment must be deterministic across builds");
+        let total: usize = a.iter().map(|l| l.len()).sum();
+        assert_eq!(total, 300, "partition must cover all N exactly (got {total})");
+    }
+    #[pg_test]
     fn empty_corpus_returns_empty() {
         let c: Vec<(i64, Vec<f32>)> = vec![];
         assert!(HnswIndex::build(&c, 16, 64, Metric::L2, 42).search(&[0.0], 5, 40).is_empty());
