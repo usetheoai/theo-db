@@ -345,7 +345,7 @@ extension_sql!(
         END IF;
     END;
     $$;
-    CREATE OPERATOR CLASS theodb_ivfflat_label_ops FOR TYPE smallint[] USING theodb_ivfflat AS
+    CREATE OPERATOR CLASS theodb_ivfflat_label_ops DEFAULT FOR TYPE smallint[] USING theodb_ivfflat AS
         OPERATOR 1 && (smallint[], smallint[]);
     "#,
     name = "theodb_ivfflat_label_opclass",
