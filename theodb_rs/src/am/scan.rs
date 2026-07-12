@@ -48,6 +48,15 @@ struct ScanState {
     query: Vec<f32>,
     rel: pg_sys::Relation,
     ef: usize,
+    // M87 — IVF iterative cursor: the `probes` the next re-search grows from. `> 0` ⇒ the index is IVF (grow
+    // probes); `0` ⇒ HNSW (grow `ef`). Under a selective WHERE the executor keeps pulling, so we probe MORE lists
+    // (the true NN may be in an unprobed list) AND widen the AQ rerank pool (once all lists are probed, the pool
+    // caps the distinct emitted candidates — a selective filter needs more reranked to find k survivors) until
+    // `max_scan_tuples` distinct tids are emitted (recall preserved).
+    probes: usize,
+    rerank_pool: usize,
+    lists: usize, // M87 — total IVF list count; the iterative re-search grows `probes` up to this, then stops.
+    last_total: usize, // M87 — candidates the last IVF scan returned; growth stops once it stops increasing.
     emitted: std::collections::HashSet<i64>,
     iterative: bool,
     exhausted: bool,
@@ -65,6 +74,10 @@ pub extern "C-unwind" fn ambeginscan(
         query: Vec::new(),
         rel: index_relation,
         ef: 0,
+        probes: 0,
+        rerank_pool: 0,
+        lists: 0,
+        last_total: 0,
         emitted: std::collections::HashSet::new(),
         iterative: false,
         exhausted: false,
@@ -122,7 +135,20 @@ pub extern "C-unwind" fn amrescan(
         // M36: the scan functions heapify their candidates into a lazy min-heap (O(C)) so `amgettuple` pops the
         // top-K in O(k·log C) — replacing the old O(C·log C) full sort (the measured ~38% `sort` phase).
         state.heap = if magic == page::IVF_STRUCT_MAGIC {
-            scan_ivf_structured(rel, &query)
+            // M87: IVF (v3/v4/v5/v6) now participates in iterative scan — under a selective WHERE the executor keeps
+            // pulling, so `amgettuple` re-searches with a GROWN `probes` (more lists) until `max_scan_tuples`
+            // distinct tids are emitted (recall preserved). Armed only when max_scan_tuples > 0.
+            let probes0 = crate::am::guc::probes();
+            let pool0 = 64 * crate::am::guc::over_fetch();
+            state.query = query.clone();
+            state.rel = rel;
+            state.probes = probes0;
+            state.rerank_pool = pool0;
+            state.lists = page::ivf_list_count(rel);
+            state.iterative = crate::am::guc::max_scan_tuples() > 0;
+            let init = scan_ivf_structured(rel, &query, probes0, pool0);
+            state.last_total = init.len();
+            heapify(init)
         } else if magic == crate::am::hnsw_page::HNSW_STRUCT_MAGIC {
             // M52: HNSW is the only layout with iterative scan. Record the query + starting ef so `amgettuple`
             // can grow the search under a selective WHERE. iterative is armed only when max_scan_tuples > 0.
@@ -180,19 +206,29 @@ unsafe fn gather_hnsw_candidates(rel: pg_sys::Relation, query: &[f32], ef: usize
 
 /// M31 partial-page scan: read the meta + centroids (∝ nlists), pick the `SCAN_PROBES` nearest centroids, and read
 /// ONLY those lists' pages (∝ probes) — never the whole index. Merge the pending region. Ascending distance.
-unsafe fn scan_ivf_structured(rel: pg_sys::Relation, query: &[f32]) -> BinaryHeap<Reverse<Scored>> {
+// M87 — returns the candidate `(tid, distance)` Vec (NOT a heap) so the caller can dedup already-emitted tids on
+// an iterative re-search under a selective WHERE. `probes` is passed in (the iterative cursor grows it), not read
+// from the GUC. Dispatches to the v4/v5/v6 AQ gathers or the v3 f32 path.
+unsafe fn scan_ivf_structured(
+    rel: pg_sys::Relation,
+    query: &[f32],
+    probes: usize,
+    rerank_pool: usize,
+) -> Vec<(i64, f64)> {
     // M77 (pg_scann): an IVF-AQ v4 index (built WITH pq_subspaces) takes the batched-AH + rerank path.
     if page::ivf_is_v4(rel) {
-        return scan_ivf_aq(rel, query);
+        return scan_ivf_aq(rel, query, probes, rerank_pool);
     }
     // M83 (Roadmap v7): an IVF-AQ v5 index (built WITH separate_storage=1) takes the storage-separated path.
     if page::ivf_is_v5(rel) {
-        return scan_ivf_aq_split(rel, query);
+        return scan_ivf_aq_split(rel, query, probes, rerank_pool);
     }
     // M85 (Roadmap v7): an IVF-AQ v6 index (built WITH separate_storage=1, refine=sq8) reranks on SQ8 codes.
     if page::ivf_is_v6(rel) {
-        return scan_ivf_aq_split_sq8(rel, query);
+        return scan_ivf_aq_split_sq8(rel, query, probes, rerank_pool);
     }
+    // v3 f32 IVF reranks ALL probed candidates exactly (no AH prune pool) — `rerank_pool` unused here.
+    let _ = rerank_pool;
     let meta = match page::read_ivf_meta(rel) {
         Ok(m) => m,
         Err(e) => pg_sys::error!("theodb am scan: {e}"),
@@ -207,7 +243,7 @@ unsafe fn scan_ivf_structured(rel: pg_sys::Relation, query: &[f32]) -> BinaryHea
     let mut cd: Vec<(f64, usize)> =
         meta.centroids.iter().enumerate().map(|(i, c)| (metric.dist(query, c), i)).collect();
     cd.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    let probes = crate::am::guc::probes().clamp(1, meta.centroids.len().max(1));
+    let probes = probes.clamp(1, meta.centroids.len().max(1));
     let dim = meta.dim as usize;
     let entry = 8 + dim * 4;
 
@@ -260,31 +296,25 @@ unsafe fn scan_ivf_structured(rel: pg_sys::Relation, query: &[f32]) -> BinaryHea
     for (tidv, v) in pending {
         results.push((tidv, metric.dist(query, &v)));
     }
-    // M36: heapify (O(C)) instead of the old O(C·log C) full sort — the lazy min-heap the executor pops top-K from.
-    let t_heapify = std::time::Instant::now();
-    let heap = heapify(results);
     if profile {
         // Phase attribution for the scan (opt-in observability — the wiring-triad runtime metric). `nonempty`
-        // surfaces list-balance health: a near-1 value on distinct data signals a degenerate build/corpus.
-        let heapify_us = t_heapify.elapsed().as_micros();
+        // surfaces list-balance health: a near-1 value on distinct data signals a degenerate build/corpus. M87:
+        // heapify moved to the caller (the iterative re-search needs the raw Vec to dedup already-emitted tids).
         let nonempty = meta.dir.iter().filter(|(_, _, c)| *c > 0).count();
-        // LOG (server log, not client) — a diagnostic is not a WARNING; keeps client output + warn-as-error tooling
-        // clean while `THEODB_SCAN_PROFILE=1`. Read via the server log (`docker logs`). `heapify` replaced `sort`
-        // in M36 (O(C) vs O(C·log C)); per-pop cost moved to `amgettuple` (bounded by the executor's LIMIT).
         pgrx::log!(
             "theodb scan profile: cand={cand} nonempty_lists={nonempty}/{} probes={probes} \
-             reads={read_us}us score={score_us}us heapify={heapify_us}us",
+             reads={read_us}us score={score_us}us",
             meta.centroids.len()
         );
     }
-    heap
+    results
 }
 
 /// M77 (pg_scann) — the IVF-AQ v4 scan: probe nprobe lists → batched AH-LUT scan over the block32 codes (the
 /// ~5-7× QPS lever the M75 spike proved) → rerank the `over_fetch` best by exact f32. O(probes) page reads, like
 /// the f32 IVF path, but the per-candidate score is a near-free LUT lookup instead of 128 mults. Ports
 /// `ann::ivf_aqah::search` to read from the persisted v4 pages.
-unsafe fn scan_ivf_aq(rel: pg_sys::Relation, query: &[f32]) -> BinaryHeap<Reverse<Scored>> {
+unsafe fn scan_ivf_aq(rel: pg_sys::Relation, query: &[f32], probes: usize, rerank_pool: usize) -> Vec<(i64, f64)> {
     let meta = match page::read_ivf_aq_meta(rel) {
         Ok(m) => m,
         Err(e) => pg_sys::error!("theodb am scan: {e}"),
@@ -308,12 +338,14 @@ unsafe fn scan_ivf_aq(rel: pg_sys::Relation, query: &[f32]) -> BinaryHeap<Revers
     let mut cd: Vec<(f64, usize)> =
         meta.centroids.iter().enumerate().map(|(i, c)| (metric.dist(query, c), i)).collect();
     cd.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    let probes = crate::am::guc::probes().clamp(1, meta.centroids.len().max(1));
+    let probes = probes.clamp(1, meta.centroids.len().max(1));
     // M84 — AQ rerank pool = base 64 × over_fetch factor. Fixes a latent no-op: the old `over_fetch().max(64)`
     // was ALWAYS 64 (over_fetch ≤ 64, so the .max(64) floor always won), so `theodb_hnsw.over_fetch` never
     // widened the AQ rerank pool. `64 * over_fetch()` keeps the default (over_fetch=1 → 64) but lets a wider pool
     // recover recall when the AH prune quality caps it (the M83 recall-ceiling lever).
-    let rerank_pool = 64 * crate::am::guc::over_fetch();
+    // M87: `rerank_pool` is a parameter — the iterative re-search widens it (once all lists are probed, the pool
+    // caps the distinct emitted; a selective filter needs more reranked). Floored at 1 for a degenerate call.
+    let rerank_pool = rerank_pool.max(1);
 
     // Stage 1 — batched AH scan of probed lists. Cache each list's bytes for the rerank (read once, O(probes)).
     let mut listbytes: Vec<(usize, Vec<u8>)> = Vec::new(); // (n, bytes)
@@ -375,7 +407,7 @@ unsafe fn scan_ivf_aq(rel: pg_sys::Relation, query: &[f32]) -> BinaryHeap<Revers
         }
         Err(e) => pg_sys::error!("theodb am scan (pending): {e}"),
     }
-    heapify(results)
+    results
 }
 
 /// M83 (Roadmap v7 D3 spike) — the IVF-AQ v5 STORAGE-SEPARATED scan: Stage 1 reads ONLY each probed list's
@@ -383,7 +415,12 @@ unsafe fn scan_ivf_aq(rel: pg_sys::Relation, query: &[f32]) -> BinaryHeap<Revers
 /// `over_fetch` survivors ONLY (~512 B/vec × R). Fixes the v4 interleaving (ADR-0037) that forced the full f32
 /// I/O on every candidate. Recall is byte-identical to v4/v3 (same AH prune + exact rerank); the win is the far
 /// smaller working set paged in during the scan-heavy Stage 1.
-unsafe fn scan_ivf_aq_split(rel: pg_sys::Relation, query: &[f32]) -> BinaryHeap<Reverse<Scored>> {
+unsafe fn scan_ivf_aq_split(
+    rel: pg_sys::Relation,
+    query: &[f32],
+    probes: usize,
+    rerank_pool: usize,
+) -> Vec<(i64, f64)> {
     let meta = match page::read_ivf_aq_meta_split(rel) {
         Ok(m) => m,
         Err(e) => pg_sys::error!("theodb am scan: {e}"),
@@ -406,12 +443,14 @@ unsafe fn scan_ivf_aq_split(rel: pg_sys::Relation, query: &[f32]) -> BinaryHeap<
     let mut cd: Vec<(f64, usize)> =
         meta.centroids.iter().enumerate().map(|(i, c)| (metric.dist(query, c), i)).collect();
     cd.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    let probes = crate::am::guc::probes().clamp(1, meta.centroids.len().max(1));
+    let probes = probes.clamp(1, meta.centroids.len().max(1));
     // M84 — AQ rerank pool = base 64 × over_fetch factor. Fixes a latent no-op: the old `over_fetch().max(64)`
     // was ALWAYS 64 (over_fetch ≤ 64, so the .max(64) floor always won), so `theodb_hnsw.over_fetch` never
     // widened the AQ rerank pool. `64 * over_fetch()` keeps the default (over_fetch=1 → 64) but lets a wider pool
     // recover recall when the AH prune quality caps it (the M83 recall-ceiling lever).
-    let rerank_pool = 64 * crate::am::guc::over_fetch();
+    // M87: `rerank_pool` is a parameter — the iterative re-search widens it (once all lists are probed, the pool
+    // caps the distinct emitted; a selective filter needs more reranked). Floored at 1 for a degenerate call.
+    let rerank_pool = rerank_pool.max(1);
 
     // Stage 1 — read ONLY the CODE pages of each probed list; AH-score; keep (score, tid, list_ci, ordinal).
     let mut cands: Vec<(i32, i64, usize, usize)> = Vec::new();
@@ -472,7 +511,7 @@ unsafe fn scan_ivf_aq_split(rel: pg_sys::Relation, query: &[f32]) -> BinaryHeap<
         }
         Err(e) => pg_sys::error!("theodb am scan (pending): {e}"),
     }
-    heapify(results)
+    results
 }
 
 /// M85 (Roadmap v7) — the IVF-AQ v6 SQ8-REFINE scan: identical to the v5 split scan (Stage 1 AH prune over
@@ -481,7 +520,12 @@ unsafe fn scan_ivf_aq_split(rel: pg_sys::Relation, query: &[f32]) -> BinaryHeap<
 /// SQ8 code is decoded to an approximate f32, then the EXACT `Metric::dist` is applied against the f32 query, so
 /// the query is never quantized (recall degrades on one side only). Recall is SQ8-approximate for built rows,
 /// EXACT for pending rows (the pending region stays f32).
-unsafe fn scan_ivf_aq_split_sq8(rel: pg_sys::Relation, query: &[f32]) -> BinaryHeap<Reverse<Scored>> {
+unsafe fn scan_ivf_aq_split_sq8(
+    rel: pg_sys::Relation,
+    query: &[f32],
+    probes: usize,
+    rerank_pool: usize,
+) -> Vec<(i64, f64)> {
     let meta = match page::read_ivf_aq_meta_split_sq8(rel) {
         Ok(m) => m,
         Err(e) => pg_sys::error!("theodb am scan: {e}"),
@@ -508,8 +552,10 @@ unsafe fn scan_ivf_aq_split_sq8(rel: pg_sys::Relation, query: &[f32]) -> BinaryH
     let mut cd: Vec<(f64, usize)> =
         meta.centroids.iter().enumerate().map(|(i, c)| (metric.dist(query, c), i)).collect();
     cd.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    let probes = crate::am::guc::probes().clamp(1, meta.centroids.len().max(1));
-    let rerank_pool = 64 * crate::am::guc::over_fetch();
+    let probes = probes.clamp(1, meta.centroids.len().max(1));
+    // M87: `rerank_pool` is a parameter — the iterative re-search widens it (once all lists are probed, the pool
+    // caps the distinct emitted; a selective filter needs more reranked). Floored at 1 for a degenerate call.
+    let rerank_pool = rerank_pool.max(1);
 
     // Stage 1 — read ONLY the CODE pages of each probed list; AH-score; keep (score, tid, list_ci, ordinal).
     let mut cands: Vec<(i32, i64, usize, usize)> = Vec::new();
@@ -567,7 +613,7 @@ unsafe fn scan_ivf_aq_split_sq8(rel: pg_sys::Relation, query: &[f32]) -> BinaryH
         }
         Err(e) => pg_sys::error!("theodb am scan (pending): {e}"),
     }
-    heapify(results)
+    results
 }
 
 /// The M26 blob scan path — HNSW (and any legacy blob index): deserialize the whole index + search. O(N).
@@ -624,21 +670,52 @@ pub extern "C-unwind" fn amgettuple(
                 state.exhausted = true;
                 return false;
             }
-            let new_ef = state.ef.saturating_mul(2).min(cap);
-            if new_ef <= state.ef {
-                state.exhausted = true; // ef already at the ceiling — no wider search possible
-                return false;
+            // M87: grow the search. HNSW (state.probes == 0) grows `ef`; IVF (state.probes > 0) LOOPS growing both
+            // `probes` (reach unprobed lists) and the AQ rerank pool (once all lists are probed the pool caps the
+            // distinct emitted — a selective filter needs more reranked to find k). An empty intermediate list (or
+            // a grow whose candidates were all already emitted) must NOT terminate — keep growing until fresh
+            // candidates appear OR the scan saturates (all lists probed AND the returned total stops increasing).
+            if state.probes == 0 {
+                let new_ef = state.ef.saturating_mul(2).min(cap);
+                if new_ef <= state.ef {
+                    state.exhausted = true; // ef already at the ceiling — no wider search possible
+                    return false;
+                }
+                state.ef = new_ef;
+                let fresh: Vec<(i64, f64)> = gather_hnsw_candidates(state.rel, &state.query, new_ef)
+                    .into_iter()
+                    .filter(|(tid, _)| !state.emitted.contains(tid))
+                    .collect();
+                if fresh.is_empty() {
+                    state.exhausted = true; // grew ef but found nothing new — the whole graph is emitted (recall 1.0)
+                    return false;
+                }
+                state.heap = heapify(fresh);
+            } else {
+                loop {
+                    if state.emitted.len() >= cap {
+                        state.exhausted = true;
+                        return false;
+                    }
+                    state.probes = state.probes.saturating_mul(2);
+                    state.rerank_pool = state.rerank_pool.saturating_mul(2);
+                    let all = scan_ivf_structured(state.rel, &state.query, state.probes, state.rerank_pool);
+                    let total = all.len();
+                    let fresh: Vec<(i64, f64)> =
+                        all.into_iter().filter(|(tid, _)| !state.emitted.contains(tid)).collect();
+                    if !fresh.is_empty() {
+                        state.heap = heapify(fresh);
+                        break;
+                    }
+                    // Nothing new. Exhaust only when fully saturated: every list probed AND the returned total
+                    // stopped growing (the pool now covers all candidates). Else keep growing.
+                    if state.probes >= state.lists.max(1) && total <= state.last_total {
+                        state.exhausted = true;
+                        return false;
+                    }
+                    state.last_total = total;
+                }
             }
-            state.ef = new_ef;
-            let fresh: Vec<(i64, f64)> = gather_hnsw_candidates(state.rel, &state.query, new_ef)
-                .into_iter()
-                .filter(|(tid, _)| !state.emitted.contains(tid))
-                .collect();
-            if fresh.is_empty() {
-                state.exhausted = true; // grew ef but found nothing new — the whole graph is emitted (recall 1.0)
-                return false;
-            }
-            state.heap = heapify(fresh);
         }
     }
 }

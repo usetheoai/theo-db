@@ -1313,6 +1313,18 @@ pub(crate) struct IvfAqMetaV6 {
     pub dir: Vec<(u32, u32, u32, u32, u32)>, // code_fb, code_np, sq8_fb, sq8_np, cnt
 }
 
+/// M87 — the IVF list count (v3/v4/v5/v6), via the same fallback chain as the cost model. 0 on any unreadable
+/// meta (fail-safe — the iterative scan then bounds growth by `max_scan_tuples` alone). Used by `amrescan` to bound
+/// the iterative re-search (grow `probes` until all lists are probed, then stop).
+pub(crate) unsafe fn ivf_list_count(rel: pg_sys::Relation) -> usize {
+    read_ivf_meta(rel)
+        .map(|m| m.dir.len())
+        .or_else(|_| read_ivf_aq_meta(rel).map(|m| m.dir.len()))
+        .or_else(|_| read_ivf_aq_meta_split(rel).map(|m| m.dir.len()))
+        .or_else(|_| read_ivf_aq_meta_split_sq8(rel).map(|m| m.dir.len()))
+        .unwrap_or(0)
+}
+
 /// True iff the index's structured meta is v6 (AQ + SQ8-refine, storage-separated) — cheap 8-byte read of block 0.
 pub(crate) unsafe fn ivf_is_v6(rel: pg_sys::Relation) -> bool {
     match read_page_item(rel, 0) {
