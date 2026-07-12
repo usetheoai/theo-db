@@ -99,10 +99,15 @@ pub extern "C-unwind" fn ambuild(
         // probes for the same recall). λ=0 (default) → primary-only, byte-identical. Only the code is duplicated
         // (the f32/SQ8 packing follows `list_entries()`, which now returns spilled vectors in both lists).
         let soar_lambda = crate::am::options::soar_lambda_from_relation(indexrel);
-        let idx = IvfflatIndex::build(&corpus, lists, metric, BUILD_SEED).with_soar_spill(soar_lambda);
         // M31: persist in the STRUCTURED layout (meta + centroids + per-list pages) so scans read only probed
-        // lists (O(probes)), not the whole blob (O(N)).
+        // lists (O(probes)), not the whole blob (O(N)). `dim` captured BEFORE the corpus is moved into the index.
         let dim = corpus.first().map(|(_, v)| v.len()).unwrap_or(0) as u32;
+        let ntuples_built = corpus.len();
+        // M89 (Roadmap v7 — ambuild streaming Increment 1): MOVE the owned corpus into the index (`build_owned`)
+        // instead of cloning it — eliminates the redundant 2nd full copy the M88 OOM was partly made of
+        // (`docs/adr/0038`). The AQ/SQ8 encode below reads the vectors back from `idx` (no `corpus` / `corpus_vecs`
+        // clone). Byte-identical build.
+        let idx = IvfflatIndex::build_owned(corpus, lists, metric, BUILD_SEED).with_soar_spill(soar_lambda);
         // M77 (pg_scann): `WITH (pq_subspaces=M)` (M>0) persists the IVF-AQ v4 layout — per-list AQ codes (block32,
         // for the batched-AH scan) + f32 (rerank) + codebook. M==0 keeps the v3 f32 path (byte-identical, untouched).
         let m = crate::am::options::pq_subspaces_from_relation(indexrel);
@@ -111,35 +116,37 @@ pub extern "C-unwind" fn ambuild(
             // is a global 16-centroid-per-subspace map that converges well below the full N), then encode ALL
             // vectors. Keeps CREATE INDEX tractable at 1M+ (the naive train is super-linear — the M75 blocker).
             const AQ_TRAIN_SAMPLE: usize = 50_000;
-            let train: Vec<Vec<f32>> = if corpus.len() > AQ_TRAIN_SAMPLE {
-                let step = corpus.len() / AQ_TRAIN_SAMPLE; // deterministic stride (seed-free, reproducible)
-                (0..AQ_TRAIN_SAMPLE).map(|i| corpus[i * step].1.clone()).collect()
-            } else {
-                corpus.iter().map(|(_, v)| v.clone()).collect()
-            };
+            // M89 — sample from the index (same vectors, same order) instead of the corpus (moved into `idx`).
+            // Byte-identical to the pre-M89 stride-of-corpus sample.
+            let train: Vec<Vec<f32>> = idx.train_sample(AQ_TRAIN_SAMPLE);
             let thr = crate::am::options::aq_threshold_from_relation(indexrel);
             match crate::am::aq::AqQuantizer::train(&train, m, 4, thr, BUILD_SEED) {
                 Ok(quant) => {
-                    let entries = idx.list_entries();
                     let pairs = m.div_ceil(2);
+                    // M89 (streaming Increment 2): pack the AQ codes from list POSITIONS reading vectors by
+                    // reference (no `list_entries()` clone). Codes are ~pairs bytes/vec — buffering all lists' codes
+                    // is small (30M×~16B ≈ 0.5GB); the f32 (the ~4× copy) is streamed by the writers per list.
+                    let positions = idx.list_positions();
+                    let idsr = idx.ids();
+                    let vecs = idx.vectors();
                     let codes: Vec<Vec<u8>> =
-                        entries.iter().map(|l| pack_block32_codes(&quant, l, pairs)).collect();
+                        positions.iter().map(|pos| pack_block32_codes(&quant, pos, vecs, pairs)).collect();
                     // M83/M85 (Roadmap v7): `WITH (separate_storage=1)` → v5 layout (codes/f32 on distinct pages)
                     // so the scan reads codes-only in Stage 1 (ADR-0037 lever). Adding `refine=1` → v6, whose
                     // per-list rerank region is SQ8 (¼ the f32 bytes, M85). Default off → v4 (interleaved).
                     if crate::am::options::separate_storage_from_relation(indexrel)
                         && crate::am::options::refine_sq8_from_relation(indexrel)
                     {
-                        // v6 — train SQ8 on the FULL corpus (min/max is a cheap one-pass, exact) and encode each
-                        // list's codes in ordinal order (matching the AH block32 order the scan derives).
-                        let corpus_vecs: Vec<Vec<f32>> = corpus.iter().map(|(_, v)| v.clone()).collect();
-                        let sq8 = crate::sq8::Sq8Quantizer::train(&corpus_vecs);
-                        let sq8_codes: Vec<Vec<u8>> = entries
+                        // v6 — train SQ8 from `idx.vectors()` by reference (M89: no `corpus_vecs` clone) and encode
+                        // each list's codes in ordinal order (matching the AH block32 order the scan derives), reading
+                        // vectors by position. sq8 is ¼ the f32 bytes — buffering all is ~30M×128B ≈ 3.8GB (< 1.5×).
+                        let sq8 = crate::sq8::Sq8Quantizer::train(vecs);
+                        let sq8_codes: Vec<Vec<u8>> = positions
                             .iter()
-                            .map(|l| {
-                                let mut b = Vec::with_capacity(l.len() * dim as usize);
-                                for (_, v) in l {
-                                    b.extend_from_slice(&sq8.encode(v));
+                            .map(|pos| {
+                                let mut b = Vec::with_capacity(pos.len() * dim as usize);
+                                for &p in pos {
+                                    b.extend_from_slice(&sq8.encode(&vecs[p]));
                                 }
                                 b
                             })
@@ -152,7 +159,8 @@ pub extern "C-unwind" fn ambuild(
                             &quant.to_meta_bytes(),
                             &sq8.to_meta_bytes(),
                             idx.centroids(),
-                            &entries,
+                            positions,
+                            idsr,
                             &codes,
                             &sq8_codes,
                         );
@@ -164,10 +172,15 @@ pub extern "C-unwind" fn ambuild(
                             m as u32,
                             &quant.to_meta_bytes(),
                             idx.centroids(),
-                            &entries,
+                            positions,
+                            idsr,
+                            vecs,
                             &codes,
                         );
                     } else {
+                        // v4 (interleaved) — legacy, non-storage-separated. Not the M89 streaming target; builds the
+                        // `entries` copy for the unchanged writer (OOMs at billion-scale, pre-M89 behavior).
+                        let entries = idx.list_entries();
                         page::write_ivf_aq(
                             indexrel,
                             dim,
@@ -186,19 +199,25 @@ pub extern "C-unwind" fn ambuild(
             // M31: STRUCTURED f32 layout (meta + centroids + per-list pages) — scans read only probed lists.
             page::write_ivf_structured(indexrel, dim, metric.tag(), idx.centroids(), &idx.list_entries());
         }
-        build_result(ntuples, corpus.len())
+        build_result(ntuples, ntuples_built)
     }
 }
 
 /// M77 — pack one inverted list's AQ codes into the transposed block32 layout `blocks[b·pairs·32 + p·32 + v]` that
 /// `vec::ah::ah_score_block` consumes (FAISS bbs=32). `pairs = ceil(m/2)` bytes/code. Padding entries score high
 /// (all-zero code → the LUT's first centroid); the scan trims to the list's real `count` from the directory.
-fn pack_block32_codes(quant: &crate::am::aq::AqQuantizer, entries: &[(i64, Vec<f32>)], pairs: usize) -> Vec<u8> {
-    let n = entries.len();
+fn pack_block32_codes(
+    quant: &crate::am::aq::AqQuantizer,
+    positions: &[usize],
+    vectors: &[Vec<f32>],
+    pairs: usize,
+) -> Vec<u8> {
+    // M89 — read each list member's vector by position from the index (no `entries` clone). Byte-identical output.
+    let n = positions.len();
     let nblocks = n.div_ceil(32);
     let mut blocks = vec![0u8; nblocks * pairs * 32];
-    for (i, (_, v)) in entries.iter().enumerate() {
-        let code = quant.encode(v); // `pairs` bytes
+    for (i, &pos) in positions.iter().enumerate() {
+        let code = quant.encode(&vectors[pos]); // `pairs` bytes
         let base = (i / 32) * pairs * 32;
         let vb = i % 32;
         for (p, &cb) in code.iter().enumerate().take(pairs) {
