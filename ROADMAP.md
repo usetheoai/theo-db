@@ -1346,6 +1346,21 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 
 ---
 
+# Pós-v7 — linhagem "build escalável a bilhão-scale" (destrava o DoD ≥100M que o M88 não alcançou)
+
+> **`ROADMAP_COMPLETED` (2026-07-12) — 19/19 milestones do roadmap ativo `[x]`.** M89 entregue (v0.77.0): o teto de memória do build (~4× base, M88) foi derrubado para **1.28× (v5) / 1.50× (v6)** a 30M, MEDIDO — o build de 30M agora completa num box de 64 GB (byte-idêntico, sem REINDEX, 250 pg_tests GREEN). **Limite honesto:** ainda carrega a cópia 1× `idx.vectors` (não é `O(maintenance_work_mem)`), então 100M+ (~51 GB base) ainda não cabe em RAM commodity — o `tuplesort` streaming dos vetores (nunca materializar o corpus) é o próximo follow-up honesto p/ a medição ≥100M do M88.
+>
+> Origem: achado MEDIDO do M88 (ADR-0038 + `docs/benchmarks/m88-billion-scale-verdict.md`) — o `ambuild` do `theodb_ivfflat` pica ~4× o dataset base em RAM (2 OOM-kills a 30M num box de 62 GB usáveis), então um índice genuinamente out-of-RAM não é construível em RAM commodity. O roadmap v7 fechou `ROADMAP_COMPLETED` (18/18, v0.76.0); esta linhagem retoma a **única alavanca nomeada** para o crossover de QPS out-of-RAM ficar medível. Serial, gate-driven, measurement-first.
+
+## M89 — [x] ambuild streaming (flush incremental — derruba o teto de memória de build) *(gated M88)*
+
+**Outcome (2026-07-12, veredito `DOD_MET` — `docs/benchmarks/m89-ambuild-streaming.{md,json}` + ADR `0039`, sign-off council-index-storage + rust-pgrx + benchmark):** o build de 30M agora **completa num box de 64 GB** com pico **1.28× (v5) / 1.50× (v6)** base MEDIDO (vs old-build 4.21×/64.7 GB OOM, reproduzindo o M88). Fix: `build_owned` move o corpus + os writers v5/v6 escrevem cada lista incrementalmente (elimina os clones `list_entries`/`enc_vec`/`items`), byte-idêntico (sem REINDEX). 250 pg_tests GREEN, zero regressão. **Desvio parsimony honesto:** o plano previa FFI do `tuplesort` (Opção B); a MEDIÇÃO mostrou que clone-elimination + streaming page-writes atingem o DoD de 30M com risco muito menor (zero FFI) — a FFI era YAGNI p/ 30M. **Limite honesto:** NÃO é `O(maintenance_work_mem)` (pico ainda tem a cópia 1× `idx.vectors`) → 100M+ (~51 GB base) ainda não cabe em RAM commodity; o `tuplesort` streaming dos vetores é o follow-up.
+
+**Objective:** reescrever o `ambuild` do `theodb_ivfflat` para **flush incremental de páginas via `tuplesort`/spool nativo do Postgres** (Regra 9 — o mecanismo do ambuild do btree e do build HNSW do pgvector), em vez de bufferizar o `AnnIndex` inteiro + cópias em RAM, derrubando o pico de ~4× o base para ~1× base — o teto que causou 2 OOM-kills a 30M no M88.
+**DoD:** (1) pico anon-rss do build **≤ ~1.5× o dataset base, MEDIDO** num build de **30M** que completa num box de 64 GB (o cenário que OOMou no M88); (2) **zero regressão** — 249 pg_tests GREEN + recall **byte-idêntico** a ≤1M (A/B same-data M46); (3) `docs/benchmarks/m89-*.{md,json}` com pico anon-rss vs N (16M, 30M) build-antigo vs novo provando que o pico deixou de escalar ~4×; (4) `maintenance_work_mem` respeitado; (5) sem novas deps externas (`tuplesort` é do próprio Postgres via `pg_sys`); (6) sign-off council-rust-pgrx (FFI do tuplesort) + council-index-storage (build/page). **Escopo:** SÓ o build escalável — a medição terminal bilhão-scale (≥100M) é **M90 gated por M89**. **Risks:** (a) API do `tuplesortstate` via `pg_sys` (FFI/`extern "C-unwind"`) — mitigar espelhando o build HNSW do pgvector + council-rust-pgrx; (b) build mais lento a ≤1M onde tudo cabe em RAM — mitigar com fast-path in-RAM quando `N·base ≤ maintenance_work_mem`. **Dependencies:** M88.
+
+---
+
 ## Sequência e paralelismo
 
 ```

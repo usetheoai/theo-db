@@ -1078,6 +1078,11 @@ pub(crate) unsafe fn ivf_is_v5(rel: pg_sys::Relation) -> bool {
 /// Persist an IVF-AQ index in the v5 storage-separated layout: each list's `[ids][codes]` and `[f32]` go on
 /// distinct page ranges. `codes[i]` is list `i`'s block32-transposed AQ code bytes; `codebook` is
 /// `AqQuantizer::to_meta_bytes()`.
+/// M89 (ambuild streaming Increment 2) — writes the v5 layout by STREAMING: the vectors are read from `vectors`
+/// via each list's `positions` (no `list_entries()` clone) and each list's CODE + VECTOR blob is materialized,
+/// written to pages, and FREED one list at a time (no `enc_vec` / `items` full-buffering). Byte-identical page
+/// image to the pre-M89 buffering writer (same order: meta, dir, codebook, centroids, then per-list [code][vec]);
+/// the change is only WHEN the bytes are built. Peak memory drops from ~4× base to ~1× base + one list's blob.
 pub(crate) unsafe fn write_ivf_aq_split(
     rel: pg_sys::Relation,
     dim: u32,
@@ -1085,7 +1090,9 @@ pub(crate) unsafe fn write_ivf_aq_split(
     m: u32,
     codebook: &[u8],
     centroids: &[Vec<f32>],
-    lists: &[Vec<(i64, Vec<f32>)>],
+    positions: &[Vec<usize>],
+    ids: &[i64],
+    vectors: &[Vec<f32>],
     codes: &[Vec<u8>],
 ) {
     let base: u32 = 1;
@@ -1096,45 +1103,23 @@ pub(crate) unsafe fn write_ivf_aq_split(
             cbytes.extend_from_slice(&x.to_le_bytes());
         }
     }
-    // Per list: a CODE blob [ids][codes] and a separate VECTOR blob [f32].
-    let enc_code: Vec<Vec<u8>> = lists
-        .iter()
-        .zip(codes.iter())
-        .map(|(l, cd)| {
-            let mut b = Vec::with_capacity(l.len() * 8 + cd.len());
-            for (tid, _) in l {
-                b.extend_from_slice(&tid.to_le_bytes());
-            }
-            b.extend_from_slice(cd);
-            b
-        })
-        .collect();
-    let enc_vec: Vec<Vec<u8>> = lists
-        .iter()
-        .map(|l| {
-            let mut b = Vec::with_capacity(l.len() * dim as usize * 4);
-            for (_, v) in l {
-                for x in v {
-                    b.extend_from_slice(&x.to_le_bytes());
-                }
-            }
-            b
-        })
-        .collect();
-
+    // Directory computed from COUNTS (+ codes lengths) — no per-list blob is materialized to size the regions.
+    let dim_bytes = dim as usize * 4;
     let dir_npages = npages_for(nlists as usize * 20);
     let codebook_npages = npages_for(codebook.len());
     let centroid_npages = npages_for(cbytes.len());
     let mut cursor = base + dir_npages + codebook_npages + centroid_npages;
-    let mut dir: Vec<(u32, u32, u32, u32, u32)> = Vec::with_capacity(lists.len());
-    for i in 0..lists.len() {
-        let cnp = npages_for(enc_code[i].len());
+    let mut dir: Vec<(u32, u32, u32, u32, u32)> = Vec::with_capacity(positions.len());
+    for i in 0..positions.len() {
+        let code_len = positions[i].len() * 8 + codes[i].len();
+        let cnp = npages_for(code_len);
         let code_fb = cursor;
         cursor += cnp;
-        let vnp = npages_for(enc_vec[i].len());
+        let vec_len = positions[i].len() * dim_bytes;
+        let vnp = npages_for(vec_len);
         let vec_fb = cursor;
         cursor += vnp;
-        dir.push((code_fb, cnp, vec_fb, vnp, lists[i].len() as u32));
+        dir.push((code_fb, cnp, vec_fb, vnp, positions[i].len() as u32));
     }
     let mut dirbytes = Vec::with_capacity(dir.len() * 20);
     for (cfb, cnp, vfb, vnp, cnt) in &dir {
@@ -1157,25 +1142,48 @@ pub(crate) unsafe fn write_ivf_aq_split(
     meta.extend_from_slice(&centroid_npages.to_le_bytes());
     meta.extend_from_slice(&base.to_le_bytes());
 
-    let mut items: Vec<Vec<u8>> = vec![meta];
-    let push_chunks = |items: &mut Vec<Vec<u8>>, data: &[u8]| {
-        if data.is_empty() {
-            items.push(Vec::new());
-        } else {
-            for chunk in data.chunks(CHUNK) {
-                items.push(chunk.to_vec());
+    // Stream each region straight to pages — no `items` accumulation.
+    write_item(rel, &meta);
+    write_chunks(rel, &dirbytes);
+    write_chunks(rel, codebook);
+    write_chunks(rel, &cbytes);
+    for i in 0..positions.len() {
+        // CODE blob [ids][codes] for list i.
+        let mut ecode = Vec::with_capacity(positions[i].len() * 8 + codes[i].len());
+        for &pos in &positions[i] {
+            ecode.extend_from_slice(&ids[pos].to_le_bytes());
+        }
+        ecode.extend_from_slice(&codes[i]);
+        write_chunks(rel, &ecode);
+        drop(ecode);
+        // VECTOR blob [f32] for list i — read from `vectors` by position, then freed.
+        let mut evec = Vec::with_capacity(positions[i].len() * dim_bytes);
+        for &pos in &positions[i] {
+            for x in &vectors[pos] {
+                evec.extend_from_slice(&x.to_le_bytes());
             }
         }
-    };
-    push_chunks(&mut items, &dirbytes);
-    push_chunks(&mut items, codebook);
-    push_chunks(&mut items, &cbytes);
-    for i in 0..lists.len() {
-        push_chunks(&mut items, &enc_code[i]);
-        push_chunks(&mut items, &enc_vec[i]);
+        write_chunks(rel, &evec);
+        drop(evec);
     }
-    for item in items {
-        extend_page_with_item(rel, pg_sys::ForkNumber::MAIN_FORKNUM, &item);
+}
+
+/// M89 — write one page item (mirrors the pre-M89 `extend_page_with_item` call site).
+#[inline]
+unsafe fn write_item(rel: pg_sys::Relation, data: &[u8]) {
+    extend_page_with_item(rel, pg_sys::ForkNumber::MAIN_FORKNUM, data);
+}
+
+/// M89 — write `data` as CHUNK-sized page items (byte-identical to the pre-M89 `push_chunks` split), streaming
+/// directly to pages without an intermediate `Vec<Vec<u8>>`. An empty region still writes one empty item.
+#[inline]
+unsafe fn write_chunks(rel: pg_sys::Relation, data: &[u8]) {
+    if data.is_empty() {
+        write_item(rel, &[]);
+    } else {
+        for chunk in data.chunks(CHUNK) {
+            write_item(rel, chunk);
+        }
     }
 }
 
@@ -1340,6 +1348,10 @@ pub(crate) unsafe fn ivf_is_v6(rel: pg_sys::Relation) -> bool {
 /// is list `i`'s SQ8 code bytes (`dim`×n, ordinal order matching `lists[i]`). `aq_codebook`/`sq8_codebook` are the
 /// two quantizers' `to_meta_bytes()`.
 #[allow(clippy::too_many_arguments)]
+/// M89 (ambuild streaming Increment 2) — v6 (SQ8) streaming writer. Same contract as `write_ivf_aq_split` but the
+/// per-list VECTOR region is the SQ8 code (`sq8_codes[i]`, already ¼ the f32 bytes) instead of f32. Reads TIDs from
+/// `ids` by position (no `list_entries()` clone) and streams each list's [ids][codes] + sq8 blob to pages without
+/// the `items` full-buffer. Byte-identical page image to the pre-M89 buffering writer.
 pub(crate) unsafe fn write_ivf_aq_split_sq8(
     rel: pg_sys::Relation,
     dim: u32,
@@ -1348,7 +1360,8 @@ pub(crate) unsafe fn write_ivf_aq_split_sq8(
     aq_codebook: &[u8],
     sq8_codebook: &[u8],
     centroids: &[Vec<f32>],
-    lists: &[Vec<(i64, Vec<f32>)>],
+    positions: &[Vec<usize>],
+    ids: &[i64],
     codes: &[Vec<u8>],
     sq8_codes: &[Vec<u8>],
 ) {
@@ -1360,33 +1373,21 @@ pub(crate) unsafe fn write_ivf_aq_split_sq8(
             cbytes.extend_from_slice(&x.to_le_bytes());
         }
     }
-    let enc_code: Vec<Vec<u8>> = lists
-        .iter()
-        .zip(codes.iter())
-        .map(|(l, cd)| {
-            let mut b = Vec::with_capacity(l.len() * 8 + cd.len());
-            for (tid, _) in l {
-                b.extend_from_slice(&tid.to_le_bytes());
-            }
-            b.extend_from_slice(cd);
-            b
-        })
-        .collect();
-
     let dir_npages = npages_for(nlists as usize * 20);
     let aq_codebook_npages = npages_for(aq_codebook.len());
     let sq8_codebook_npages = npages_for(sq8_codebook.len());
     let centroid_npages = npages_for(cbytes.len());
     let mut cursor = base + dir_npages + aq_codebook_npages + sq8_codebook_npages + centroid_npages;
-    let mut dir: Vec<(u32, u32, u32, u32, u32)> = Vec::with_capacity(lists.len());
-    for i in 0..lists.len() {
-        let cnp = npages_for(enc_code[i].len());
+    let mut dir: Vec<(u32, u32, u32, u32, u32)> = Vec::with_capacity(positions.len());
+    for i in 0..positions.len() {
+        let code_len = positions[i].len() * 8 + codes[i].len();
+        let cnp = npages_for(code_len);
         let code_fb = cursor;
         cursor += cnp;
         let snp = npages_for(sq8_codes[i].len());
         let sq8_fb = cursor;
         cursor += snp;
-        dir.push((code_fb, cnp, sq8_fb, snp, lists[i].len() as u32));
+        dir.push((code_fb, cnp, sq8_fb, snp, positions[i].len() as u32));
     }
     let mut dirbytes = Vec::with_capacity(dir.len() * 20);
     for (cfb, cnp, sfb, snp, cnt) in &dir {
@@ -1410,26 +1411,20 @@ pub(crate) unsafe fn write_ivf_aq_split_sq8(
     meta.extend_from_slice(&base.to_le_bytes());
     meta.extend_from_slice(&sq8_codebook_npages.to_le_bytes());
 
-    let mut items: Vec<Vec<u8>> = vec![meta];
-    let push_chunks = |items: &mut Vec<Vec<u8>>, data: &[u8]| {
-        if data.is_empty() {
-            items.push(Vec::new());
-        } else {
-            for chunk in data.chunks(CHUNK) {
-                items.push(chunk.to_vec());
-            }
+    write_item(rel, &meta);
+    write_chunks(rel, &dirbytes);
+    write_chunks(rel, aq_codebook);
+    write_chunks(rel, sq8_codebook);
+    write_chunks(rel, &cbytes);
+    for i in 0..positions.len() {
+        let mut ecode = Vec::with_capacity(positions[i].len() * 8 + codes[i].len());
+        for &pos in &positions[i] {
+            ecode.extend_from_slice(&ids[pos].to_le_bytes());
         }
-    };
-    push_chunks(&mut items, &dirbytes);
-    push_chunks(&mut items, aq_codebook);
-    push_chunks(&mut items, sq8_codebook);
-    push_chunks(&mut items, &cbytes);
-    for i in 0..lists.len() {
-        push_chunks(&mut items, &enc_code[i]);
-        push_chunks(&mut items, &sq8_codes[i]);
-    }
-    for item in items {
-        extend_page_with_item(rel, pg_sys::ForkNumber::MAIN_FORKNUM, &item);
+        ecode.extend_from_slice(&codes[i]);
+        write_chunks(rel, &ecode);
+        drop(ecode);
+        write_chunks(rel, &sq8_codes[i]);
     }
 }
 

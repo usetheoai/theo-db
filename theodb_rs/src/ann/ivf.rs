@@ -24,9 +24,25 @@ pub(crate) struct IvfflatIndex {
 
 impl IvfflatIndex {
     pub(crate) fn build(corpus: &[(i64, Vec<f32>)], lists: usize, metric: Metric, seed: u64) -> Self {
+        // Borrow-taking entry point (small "carrier" builds: sbq/pq/ivf_aqah). Delegates to `build_owned` by
+        // cloning once — negligible for the tiny corpora these callers pass.
+        Self::build_owned(corpus.to_vec(), lists, metric, seed)
+    }
+
+    /// M89 (Roadmap v7 — ambuild streaming Increment 1) — ownership-taking build that MOVES the corpus vectors into
+    /// `self.vectors` instead of cloning them (`ivf.rs` pre-M89 cloned the whole corpus → the 2nd of the ~4× copies
+    /// the M88 OOM was made of, `docs/adr/0038`). The `ambuild` caller hands its owned `collect_corpus` output here
+    /// and no longer holds a second copy; the AQ/SQ8 encode reads the vectors back from `self.vectors()` (no
+    /// `corpus_vecs` clone). BYTE-IDENTICAL to the pre-M89 build (same vectors, same order, same kmeans) — the only
+    /// change is who owns the bytes.
+    pub(crate) fn build_owned(corpus: Vec<(i64, Vec<f32>)>, lists: usize, metric: Metric, seed: u64) -> Self {
         let n = corpus.len();
-        let vectors: Vec<Vec<f32>> = corpus.iter().map(|(_, v)| v.clone()).collect();
-        let ids: Vec<i64> = corpus.iter().map(|(id, _)| *id).collect();
+        let mut ids: Vec<i64> = Vec::with_capacity(n);
+        let mut vectors: Vec<Vec<f32>> = Vec::with_capacity(n);
+        for (id, v) in corpus {
+            ids.push(id);
+            vectors.push(v); // MOVE — no clone
+        }
         let mut idx = IvfflatIndex {
             metric,
             centroids: Vec::new(),
@@ -250,6 +266,51 @@ impl IvfflatIndex {
         &self.centroids
     }
 
+    /// M89 — the stored vectors, by reference (no clone). Used by `ambuild` to train the SQ8 quantizer (a cheap
+    /// one-pass min/max) directly from the index instead of cloning the corpus (`build.rs` pre-M89 `corpus_vecs`).
+    pub(crate) fn vectors(&self) -> &[Vec<f32>] {
+        &self.vectors
+    }
+
+    /// M89 (ambuild streaming Increment 2) — each inverted list as POSITIONS into `vectors()`/`ids()`, by reference
+    /// (no clone). The streaming page writers read `vectors()[pos]`/`ids()[pos]` per list and flush one list at a
+    /// time, so the full corpus is never re-materialized as `Vec<(id, vector)>` (the `list_entries()` clone that,
+    /// with the writers' `enc_vec`/`items` buffering, made the M88 build peak ~4× base — `docs/adr/0038`).
+    pub(crate) fn list_positions(&self) -> &[Vec<usize>] {
+        &self.lists
+    }
+
+    /// M89 — the stored heap TIDs, by reference (parallel to `vectors()`, indexed by list position).
+    pub(crate) fn ids(&self) -> &[i64] {
+        &self.ids
+    }
+
+    /// M89 — number of stored vectors (the corpus size). Used for `build_result` after the owned corpus is moved in.
+    pub(crate) fn len(&self) -> usize {
+        self.vectors.len()
+    }
+
+    /// M89 — companion to `len()` (satisfies clippy `len_without_is_empty`; a zero-vector index is the empty build).
+    pub(crate) fn is_empty(&self) -> bool {
+        self.vectors.is_empty()
+    }
+
+    /// M89 — a deterministic stride subsample of the stored vectors (for the AQ codebook train, which pre-M89
+    /// sampled the corpus directly). `k >= n` returns clones of all; the stride is seed-free/reproducible so the
+    /// trained codebook is byte-identical to the pre-M89 sample-of-corpus.
+    pub(crate) fn train_sample(&self, k: usize) -> Vec<Vec<f32>> {
+        let n = self.vectors.len();
+        if n == 0 {
+            return Vec::new();
+        }
+        if n > k {
+            let step = n / k;
+            (0..k).map(|i| self.vectors[i * step].clone()).collect()
+        } else {
+            self.vectors.clone()
+        }
+    }
+
     /// Each centroid's inverted-list entries as `(id, vector)` (M31 — the AM persists these as list pages).
     pub(crate) fn list_entries(&self) -> Vec<Vec<(i64, Vec<f32>)>> {
         self.lists
@@ -374,6 +435,22 @@ mod tests {
             (30, vec![0.0, 0.0, 1.0]),
             (40, vec![0.9, 0.1, 0.0]),
         ]
+    }
+
+    /// M89 (Roadmap v7 — ambuild streaming Increment 1) — `build_owned` (MOVE, no clone) is BYTE-IDENTICAL to the
+    /// borrow-taking `build` (clone). The whole point: eliminate the redundant corpus copy without changing a single
+    /// bit of the resulting index (same vectors, same order, same kmeans seed → same centroids/lists/bytes).
+    #[pgrx::pg_test]
+    fn ivfflat_build_owned_byte_identical() {
+        let borrowed = IvfflatIndex::build(&corpus(), 2, Metric::L2, 42).to_bytes();
+        let owned = IvfflatIndex::build_owned(corpus(), 2, Metric::L2, 42).to_bytes();
+        assert_eq!(borrowed, owned, "build_owned MUST be byte-identical to build");
+        // And the M89 accessors are consistent with the corpus.
+        let idx = IvfflatIndex::build_owned(corpus(), 2, Metric::L2, 42);
+        assert_eq!(idx.len(), 4);
+        assert_eq!(idx.vectors().len(), 4);
+        assert_eq!(idx.train_sample(2).len(), 2);
+        assert_eq!(idx.train_sample(100).len(), 4, "k>=n returns all");
     }
 
     #[pgrx::pg_test]
