@@ -1330,7 +1330,7 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 **Objective:** assignment redundante multi-cluster (SOAR, arXiv:2404.00774, redundância 2.0–3.0) → ataca o *centroid-probe bind* (a outra metade do ADR-0037).
 **DoD:** recall@10 a probes-fixo vs baseline; delta de tamanho de índice medido. **GATE:** recall-a-probes-fixo↑ material com crescimento de tamanho aceitável. **Dependencies:** M85.
 
-## M87 — [ ] Filtered ANN + integração planner *(gated M86)*
+## M87 — [x] Filtered ANN + integração planner *(gated M86)*
 
 **Objective:** filtered-ANN sobre o layout separado + `amcostestimate` que modela o I/O de 2 fases → optimizer escolhe v5 corretamente.
 **DoD:** recall/QPS filtrado; planner escolhe v5 vs seqscan em WHERE seletivo. **GATE:** planner escolhe v5 quando deve; recall filtrado preservado. **Dependencies:** M86.

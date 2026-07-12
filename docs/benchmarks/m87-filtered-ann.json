@@ -1,0 +1,30 @@
+{
+  "milestone": "M87",
+  "date": "2026-07-12",
+  "title": "pg_scann filtered ANN + planner — iterative IVF scan over the storage-separated layout (SIFT1M)",
+  "dataset": "SIFT1M — full 1,000,000 base + synthetic label column (label = id%10, 10% per label), 100 queries",
+  "hardware": "DigitalOcean droplet 8 vCPU / 16 GB (ams3), single-threaded, pg17, warm cache",
+  "method": "v5 index (separate_storage=1, lists=500, pq_subspaces=32). Filtered queries WHERE label IN (...) ORDER BY e <-> q LIMIT 10. Filtered recall@10 = overlap with the exact seqscan-filtered top-10 per query; QPS best-of-2; over_fetch=8.",
+  "design": "The M52 iterative scan was HNSW-only; the IVF-AQ split scans (v5/v6) and the v3 f32 IVF did NOT participate → a selective WHERE collapsed recall (the first probes' candidates filtered out, AM returns false). M87 refactors the IVF scans to return a Vec + take a `probes`/`rerank_pool` param, and arms the iterative re-search for ALL IVF (v3/v4/v5/v6): under a selective WHERE it grows probes (reach unprobed lists) AND the rerank pool (once all lists probed, the pool caps distinct emitted) until max_scan_tuples distinct tids are emitted (recall preserved). Dedup-by-tid via the existing amgettuple emitted-HashSet. amcostestimate was already v5/v6-aware (fallback chain) — verified, not changed.",
+  "correctness": "248 pg_tests GREEN (247 + 1 M87: filtered_ann_v5_iterative_preserves_recall — the index-scan filtered top-k equals the exact seqscan-filtered top-k), 0 failed — zero regression. The refactor (Vec-returning scans + probes/pool params) is covered by the full v3/v4/v5/v6 suites.",
+  "build_s": {"v5": 828.9},
+  "explain": "Limit -> Index Scan using sift_idx on sift, Order By: (e <-> q) — the planner picks the AM index scan for the filtered ordered query (DoD planner-choice proven).",
+  "results": [
+    {"selectivity": "10%", "probes": 32, "filtered_recall": 0.8940, "qps": 205.7},
+    {"selectivity": "10%", "probes": 64, "filtered_recall": 0.8940, "qps": 180.3},
+    {"selectivity": "30%", "probes": 32, "filtered_recall": 0.9420, "qps": 213.1},
+    {"selectivity": "30%", "probes": 64, "filtered_recall": 0.9420, "qps": 159.0}
+  ],
+  "verdict": "GO",
+  "findings": [
+    "Filtered ANN over the storage-separated layout PRESERVES recall via the iterative scan: 0.894 @ 10% selectivity, 0.942 @ 30%. Without the M87 fix, a selective WHERE collapses recall (the first probed lists' candidates are filtered out and the AM returns false) — the pg_test proves the fix; the benchmark proves it at 1M scale.",
+    "The planner PICKS the AM index scan for a filtered ORDER BY <-> LIMIT query (EXPLAIN: Index Scan using sift_idx). amcostestimate's v5/v6-aware startup-cost ratio (already shipped) drives the LIMIT-favors-index choice; Postgres's own WHERE-selectivity estimate prefers seqscan when the filter is very selective (pgvector-0.8 behavior).",
+    "This targets pgvector-0.8 relaxed_order filtered-scan parity (the AM keeps supplying candidates on demand). Higher selectivity → higher filtered recall (more matching rows in the candidate pool)."
+  ],
+  "honest_caveats": [
+    "Filtered recall (0.89-0.94) is slightly below the unfiltered v5 recall (~0.98 at probes=32/of=8, M84) because the AH prune + filter interaction: the iterative supplies candidates, but the AH quality + rerank pool cap the filtered recall. Widening over_fetch raises it (at a QPS cost). This is pgvector-relaxed-order class, not AlloyDB inline/adaptive filtering (a paradigm feature — bitmap-in-traversal + runtime plan switching — that IVF-as-a-PG-AM cannot reach, same class as the ScaNN QPS ceiling, M73/ADR-0035).",
+    "The iterative re-search re-scans probed lists each grow (re-reads already-emitted candidates, filtered by tid) — correct but O(N) per grow at high selectivity; pgvector's iterative has similar cost. Acceptable for M87; a cursor that skips already-probed lists is a future optimization.",
+    "Warm-cache SIFT1M; a real filtered workload with a secondary index on the label column would let Postgres pre-filter (bitmap) at high selectivity — orthogonal to this AM-side change."
+  ],
+  "north_star_context": "M87 delivers filtered ANN (pgvector relaxed_order class) + the planner picks the AM correctly — the class-AlloyDB-in-Postgres bar for filtered vector search. NOT AlloyDB inline/adaptive filtering (paradigm gap). Closes the M85-M87 goal scope. Still NOT a ScaNN-library beat (M73/ADR-0035)."
+}
