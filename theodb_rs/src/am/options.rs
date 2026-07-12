@@ -60,6 +60,14 @@ pub(crate) const DEFAULT_REFINE: i32 = 0;
 const MIN_REFINE: i32 = 0;
 const MAX_REFINE: i32 = 1;
 
+/// M86 (Roadmap v7) — `WITH (soar_lambda = N)`: SOAR spill's orthogonality-penalty weight `λ`, stored
+/// **milli-scaled** (`λ × 1000`) so one int reloption carries the float knob (KISS, mirrors `aq_threshold`).
+/// 0 = SOAR off (default, primary-only assignment, byte-identical). `> 0` spills each vector to a second list
+/// (the paper recommends λ=1.0 at 1M, 1.5 at billion-scale). Only meaningful on an AQ index.
+pub(crate) const DEFAULT_SOAR_LAMBDA_MILLI: i32 = 0;
+const MIN_SOAR_LAMBDA_MILLI: i32 = 0;
+const MAX_SOAR_LAMBDA_MILLI: i32 = 5000; // λ up to 5.0 (ScaNN redundancy_factor range top)
+
 /// Parsed reloptions shared by the two AMs (`amoptions` is shared — `mod.rs`). `#[repr(C)]` with the varlena
 /// header first (never touch `vl_len_` directly — `build_reloptions` sets it). `lists` is an ivfflat build knob;
 /// `sbq_bits` (M51) + `pq_subspaces`/`pq_bits`/`aq_threshold_milli` (M59) are theodb_hnsw build knobs. Each AM
@@ -74,6 +82,7 @@ struct TheodbIvfflatOptions {
     aq_threshold_milli: i32,
     separate_storage: i32,
     refine: i32,
+    soar_lambda_milli: i32,
 }
 
 static mut RELOPT_KIND: pg_sys::relopt_kind::Type = 0;
@@ -147,6 +156,15 @@ pub(crate) unsafe fn init() {
         MAX_REFINE,
         pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
     );
+    pg_sys::add_int_reloption(
+        RELOPT_KIND,
+        "soar_lambda".as_pg_cstr(),
+        "SOAR spill orthogonality-penalty λ × 1000 for the IVF-AQ build (0 = off, M86)".as_pg_cstr(),
+        DEFAULT_SOAR_LAMBDA_MILLI,
+        MIN_SOAR_LAMBDA_MILLI,
+        MAX_SOAR_LAMBDA_MILLI,
+        pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
+    );
 }
 
 /// The `amoptions` callback: parse `pg_class.reloptions` text[] into the `TheodbIvfflatOptions` bytea that fills
@@ -157,7 +175,7 @@ pub(crate) unsafe extern "C-unwind" fn amoptions(
     reloptions: pg_sys::Datum,
     validate: bool,
 ) -> *mut pg_sys::bytea {
-    let tab: [pg_sys::relopt_parse_elt; 7] = [
+    let tab: [pg_sys::relopt_parse_elt; 8] = [
         pg_sys::relopt_parse_elt {
             optname: "lists".as_pg_cstr(),
             opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
@@ -192,6 +210,11 @@ pub(crate) unsafe extern "C-unwind" fn amoptions(
             optname: "refine".as_pg_cstr(),
             opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
             offset: std::mem::offset_of!(TheodbIvfflatOptions, refine) as i32,
+        },
+        pg_sys::relopt_parse_elt {
+            optname: "soar_lambda".as_pg_cstr(),
+            opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
+            offset: std::mem::offset_of!(TheodbIvfflatOptions, soar_lambda_milli) as i32,
         },
     ];
     pg_sys::build_reloptions(
@@ -325,4 +348,19 @@ pub(crate) unsafe fn refine_sq8_from_relation(indexrel: pg_sys::Relation) -> boo
         return false;
     }
     (*(rd_options as *const TheodbIvfflatOptions)).refine == 1
+}
+
+/// M86 — resolve SOAR `λ` for a `theodb_ivfflat` AQ index: the milli-scaled `WITH (soar_lambda=N)` / 1000. 0.0 =
+/// SOAR off (default, primary-only assignment, byte-identical). Read at build to spill; the fold does not re-spill.
+///
+/// # Safety
+/// `indexrel` must be a valid open index relation.
+pub(crate) unsafe fn soar_lambda_from_relation(indexrel: pg_sys::Relation) -> f64 {
+    let rd_options = (*indexrel).rd_options;
+    let milli = if rd_options.is_null() {
+        DEFAULT_SOAR_LAMBDA_MILLI
+    } else {
+        (*(rd_options as *const TheodbIvfflatOptions)).soar_lambda_milli
+    };
+    (milli.max(0) as f64) / 1000.0
 }

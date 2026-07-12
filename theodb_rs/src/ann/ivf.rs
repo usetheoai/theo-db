@@ -40,6 +40,50 @@ impl IvfflatIndex {
         idx
     }
 
+    /// M86 (Roadmap v7) — SOAR spill (Sun et al., NeurIPS 2023, arXiv:2404.00774): assign each vector to a SECOND
+    /// list chosen to minimize the orthogonality-amplified residual loss `‖v−c′‖² + λ·⟨v−c′, r⟩²/‖r‖²`
+    /// (`r = v − c₁`, the primary residual). The secondary is the "backup route" that is good precisely when the
+    /// primary partition mis-estimates the query — so a query probing FEWER lists still finds the vector (fewer
+    /// probes for the same recall, attacking the centroid-probe bind). Only the vector's index (→ its code) is
+    /// duplicated; the f32 stays single-copy. `λ ≤ 0` is a no-op (byte-identical to the primary-only build). A
+    /// vector found via both its lists is de-duplicated by tid at scan time. The exact `argmin` over all centroids
+    /// matches the paper (§3.5); cost is ≈ one extra assignment pass.
+    pub(crate) fn with_soar_spill(mut self, lambda: f64) -> Self {
+        if lambda <= 0.0 || self.centroids.is_empty() || self.vectors.is_empty() {
+            return self;
+        }
+        for i in 0..self.vectors.len() {
+            let v = self.vectors[i].clone();
+            let c1 = self.nearest_in(&self.centroids, &v);
+            // r = v − c₁ (primary residual); r_norm2 guarded against a degenerate zero residual.
+            let r: Vec<f32> = v.iter().zip(&self.centroids[c1]).map(|(x, c)| x - c).collect();
+            let r_norm2 = r.iter().map(|x| (*x as f64) * (*x as f64)).sum::<f64>().max(1e-12);
+            let mut best_loss = f64::INFINITY;
+            let mut best_c = usize::MAX;
+            for (ci, cen) in self.centroids.iter().enumerate() {
+                if ci == c1 {
+                    continue;
+                }
+                let mut d2 = 0.0f64;
+                let mut dot = 0.0f64;
+                for ((x, cc), rr) in v.iter().zip(cen).zip(&r) {
+                    let rp = (*x - *cc) as f64; // r′ component
+                    d2 += rp * rp;
+                    dot += rp * (*rr as f64); // ⟨r′, r⟩
+                }
+                let loss = d2 + lambda * dot * dot / r_norm2;
+                if loss < best_loss {
+                    best_loss = loss;
+                    best_c = ci;
+                }
+            }
+            if best_c != usize::MAX {
+                self.lists[best_c].push(i);
+            }
+        }
+        self
+    }
+
     fn kmeanspp(&self, k: usize, seed: u64) -> Vec<Vec<f32>> {
         let mut rng = Rng::new(seed);
         let n = self.vectors.len();

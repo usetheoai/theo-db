@@ -1325,7 +1325,7 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 **Objective:** trocar o rerank full-f32 por uma região de refine SQ8 (Faiss `Refine(SQ8)`) → Fase 2 lê 128 B não 512 B/sobrevivente.
 **DoD:** curva recall×QPS por m/bits; paridade de recall dentro de ε declarado. **GATE:** QPS↑ a recall casado com perda ≤ ε. **Dependencies:** M84.
 
-## M86 — [ ] SOAR spill (menos probes p/ mesmo recall) *(gated M85)*
+## M86 — [x] SOAR spill (menos probes p/ mesmo recall) *(gated M85)*
 
 **Objective:** assignment redundante multi-cluster (SOAR, arXiv:2404.00774, redundância 2.0–3.0) → ataca o *centroid-probe bind* (a outra metade do ADR-0037).
 **DoD:** recall@10 a probes-fixo vs baseline; delta de tamanho de índice medido. **GATE:** recall-a-probes-fixo↑ material com crescimento de tamanho aceitável. **Dependencies:** M85.
