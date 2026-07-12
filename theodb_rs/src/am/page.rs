@@ -562,11 +562,12 @@ unsafe fn main_index_pages(rel: pg_sys::Relation) -> Result<u32, String> {
             }
             return Ok(total4);
         }
-        if ver == 5 {
-            // v5 (M83 storage-separated): pending starts after meta(gen_base) + dir(20B) + codebook + centroids +
-            // Σ(code pages + vec pages). Dir entry = (code_fb, code_np, vec_fb, vec_np, cnt) — sum np fields o+4, o+12.
+        if ver == 5 || ver == 7 {
+            // v5 (M83 storage-separated) AND v7 (M90 label-aware): identical page accounting — the label region
+            // lives INSIDE the per-list code pages (already counted in code_np), and the meta/dir shape is the same.
+            // pending starts after meta(gen_base) + dir(20B) + codebook + centroids + Σ(code pages + vec pages).
             if m.len() < 37 {
-                return Err("theodb am: truncated v5 meta".into());
+                return Err("theodb am: truncated v5/v7 meta".into());
             }
             let nlists5 = u32::from_le_bytes(m[13..17].try_into().unwrap()) as usize;
             let codebook_npages5 = u32::from_le_bytes(m[21..25].try_into().unwrap());
@@ -1075,6 +1076,17 @@ pub(crate) unsafe fn ivf_is_v5(rel: pg_sys::Relation) -> bool {
     }
 }
 
+/// M90 — the v7 (label-aware) layout: same meta shape as v5 (magic `7`), code blob widened to `[ids][labels][codes]`.
+pub(crate) unsafe fn ivf_is_v7(rel: pg_sys::Relation) -> bool {
+    match read_page_item(rel, 0) {
+        Ok(m) if m.len() >= 8 => {
+            u32::from_le_bytes(m[0..4].try_into().unwrap()) == IVF_STRUCT_MAGIC
+                && u32::from_le_bytes(m[4..8].try_into().unwrap()) == 7
+        }
+        _ => false,
+    }
+}
+
 /// Persist an IVF-AQ index in the v5 storage-separated layout: each list's `[ids][codes]` and `[f32]` go on
 /// distinct page ranges. `codes[i]` is list `i`'s block32-transposed AQ code bytes; `codebook` is
 /// `AqQuantizer::to_meta_bytes()`.
@@ -1168,6 +1180,119 @@ pub(crate) unsafe fn write_ivf_aq_split(
     }
 }
 
+/// M90 (inline label filter) — fixed number of `smallint` labels stored per vector in the v7 code blob. Vectors
+/// with fewer labels are padded with `LABEL_PAD` (a sentinel outside valid `i16` label use is impossible since any
+/// i16 is a valid label, so we store the COUNT per vector and pad the rest — see `encode_labels_fixed`). 8 covers
+/// the overwhelming majority of tag/category filters; variable-length labels are a documented follow-up.
+pub(crate) const LABEL_K: usize = 8;
+
+/// M90 — encode one vector's label set into `2 + LABEL_K*2` bytes: a u16 count, then LABEL_K i16 slots (unused
+/// slots are 0). The count disambiguates padding from a real 0 label. Overflow (> LABEL_K labels) is truncated to
+/// the first LABEL_K (deterministic; documented boundary).
+#[inline]
+fn encode_labels_fixed(labels: &[i16], out: &mut Vec<u8>) {
+    let n = labels.len().min(LABEL_K) as u16;
+    out.extend_from_slice(&n.to_le_bytes());
+    for i in 0..LABEL_K {
+        let v = if i < labels.len() { labels[i] } else { 0 };
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+}
+
+/// M90 — the v7 layout: identical to v5 (`write_ivf_aq_split`) except the per-list CODE blob is
+/// `[ids][labels_fixed][codes]` (each vector carries `2 + LABEL_K*2` label bytes right after its id), so the Stage-1
+/// scan can skip non-overlapping candidates before the Stage-2 f32 rerank. Magic `7`; the label bytes per vector
+/// are constant, so all offsets are computable from counts (streaming, byte-deterministic). `labels[pos]` is the
+/// sorted-deduped label set for the vector at global position `pos` (parallel to `ids`/`vectors`).
+#[allow(clippy::too_many_arguments)]
+pub(crate) unsafe fn write_ivf_aq_split_v7(
+    rel: pg_sys::Relation,
+    dim: u32,
+    metric_tag: u8,
+    m: u32,
+    codebook: &[u8],
+    centroids: &[Vec<f32>],
+    positions: &[Vec<usize>],
+    ids: &[i64],
+    vectors: &[Vec<f32>],
+    codes: &[Vec<u8>],
+    labels: &[Vec<i16>],
+) {
+    let base: u32 = 1;
+    let nlists = centroids.len() as u32;
+    let label_bytes = 2 + LABEL_K * 2; // per vector
+    let mut cbytes = Vec::with_capacity(centroids.len() * dim as usize * 4);
+    for c in centroids {
+        for x in c {
+            cbytes.extend_from_slice(&x.to_le_bytes());
+        }
+    }
+    let dim_bytes = dim as usize * 4;
+    let dir_npages = npages_for(nlists as usize * 20);
+    let codebook_npages = npages_for(codebook.len());
+    let centroid_npages = npages_for(cbytes.len());
+    let mut cursor = base + dir_npages + codebook_npages + centroid_npages;
+    let mut dir: Vec<(u32, u32, u32, u32, u32)> = Vec::with_capacity(positions.len());
+    for i in 0..positions.len() {
+        // CODE blob now = [ids (8B)][labels (label_bytes)][codes].
+        let code_len = positions[i].len() * (8 + label_bytes) + codes[i].len();
+        let cnp = npages_for(code_len);
+        let code_fb = cursor;
+        cursor += cnp;
+        let vec_len = positions[i].len() * dim_bytes;
+        let vnp = npages_for(vec_len);
+        let vec_fb = cursor;
+        cursor += vnp;
+        dir.push((code_fb, cnp, vec_fb, vnp, positions[i].len() as u32));
+    }
+    let mut dirbytes = Vec::with_capacity(dir.len() * 20);
+    for (cfb, cnp, vfb, vnp, cnt) in &dir {
+        dirbytes.extend_from_slice(&cfb.to_le_bytes());
+        dirbytes.extend_from_slice(&cnp.to_le_bytes());
+        dirbytes.extend_from_slice(&vfb.to_le_bytes());
+        dirbytes.extend_from_slice(&vnp.to_le_bytes());
+        dirbytes.extend_from_slice(&cnt.to_le_bytes());
+    }
+    let mut meta = Vec::with_capacity(37);
+    meta.extend_from_slice(&IVF_STRUCT_MAGIC.to_le_bytes());
+    meta.extend_from_slice(&7u32.to_le_bytes()); // v7
+    meta.push(metric_tag);
+    meta.extend_from_slice(&dim.to_le_bytes());
+    meta.extend_from_slice(&nlists.to_le_bytes());
+    meta.extend_from_slice(&m.to_le_bytes());
+    meta.extend_from_slice(&codebook_npages.to_le_bytes());
+    meta.extend_from_slice(&dir_npages.to_le_bytes());
+    meta.extend_from_slice(&centroid_npages.to_le_bytes());
+    meta.extend_from_slice(&base.to_le_bytes());
+
+    write_item(rel, &meta);
+    write_chunks(rel, &dirbytes);
+    write_chunks(rel, codebook);
+    write_chunks(rel, &cbytes);
+    for i in 0..positions.len() {
+        // CODE blob [ids][labels_fixed][codes] for list i.
+        let mut ecode = Vec::with_capacity(positions[i].len() * (8 + label_bytes) + codes[i].len());
+        for &pos in &positions[i] {
+            ecode.extend_from_slice(&ids[pos].to_le_bytes());
+        }
+        for &pos in &positions[i] {
+            encode_labels_fixed(&labels[pos], &mut ecode);
+        }
+        ecode.extend_from_slice(&codes[i]);
+        write_chunks(rel, &ecode);
+        drop(ecode);
+        // VECTOR blob [f32] for list i.
+        let mut evec = Vec::with_capacity(positions[i].len() * dim_bytes);
+        for &pos in &positions[i] {
+            for x in &vectors[pos] {
+                evec.extend_from_slice(&x.to_le_bytes());
+            }
+        }
+        write_chunks(rel, &evec);
+        drop(evec);
+    }
+}
+
 /// M89 — write one page item (mirrors the pre-M89 `extend_page_with_item` call site).
 #[inline]
 unsafe fn write_item(rel: pg_sys::Relation, data: &[u8]) {
@@ -1188,15 +1313,16 @@ unsafe fn write_chunks(rel: pg_sys::Relation, data: &[u8]) {
 }
 
 /// Read the v5 meta + codebook + centroid + dir regions (∝ nlists/codebook, NOT ∝ N). Typed `Err` on corruption.
+/// M90: also accepts the v7 (label-aware) meta — identical shape (magic 7); the label region lives inside the per-
+/// list CODE blob, so the meta/dir are byte-identical to v5. The scan branches on `ivf_is_v7` for the code offsets.
 pub(crate) unsafe fn read_ivf_aq_meta_split(rel: pg_sys::Relation) -> Result<IvfAqMetaV5, String> {
     let m = read_page_item(rel, 0)?;
     if m.len() < 37 {
         return Err("theodb ivf-aq: truncated v5 meta".into());
     }
-    if u32::from_le_bytes(m[0..4].try_into().unwrap()) != IVF_STRUCT_MAGIC
-        || u32::from_le_bytes(m[4..8].try_into().unwrap()) != 5
-    {
-        return Err("theodb ivf-aq: not a v5 structured index".into());
+    let ver = u32::from_le_bytes(m[4..8].try_into().unwrap());
+    if u32::from_le_bytes(m[0..4].try_into().unwrap()) != IVF_STRUCT_MAGIC || (ver != 5 && ver != 7) {
+        return Err("theodb ivf-aq: not a v5/v7 structured index".into());
     }
     let metric_tag = m[8];
     let dim = u32::from_le_bytes(m[9..13].try_into().unwrap());

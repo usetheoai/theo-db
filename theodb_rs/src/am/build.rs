@@ -39,6 +39,23 @@ pub(crate) fn hnsw_ef_construction() -> usize {
 struct BuildState {
     corpus: Vec<(i64, Vec<f32>)>,
     dim: Option<usize>,
+    // M90 (inline label filter): when the index has a 2nd `smallint[]` column, each vector's sorted-deduped label
+    // set (parallel to `corpus`; empty = the row's label was NULL). `has_labels=false` for vector-only indexes →
+    // stays empty and the build produces the unchanged v5/v6 layout.
+    has_labels: bool,
+    labels: Vec<Vec<i16>>,
+}
+
+/// M90 — read a `smallint[]` Datum into a sorted-deduped label set (own code; empty on NULL/empty). Sorted+deduped
+/// so the scan-side overlap check is a cheap merge and the stored form is canonical.
+unsafe fn datum_to_labelset(datum: pg_sys::Datum, is_null: bool) -> Vec<i16> {
+    if is_null {
+        return Vec::new();
+    }
+    let mut v: Vec<i16> = Vec::<i16>::from_datum(datum, false).unwrap_or_default();
+    v.sort_unstable();
+    v.dedup();
+    v
 }
 
 /// Scan the heap once, collecting `(encoded heap TID, vector)` for every live non-NULL-vector tuple. Shared by
@@ -47,8 +64,10 @@ unsafe fn collect_corpus(
     heaprel: pg_sys::Relation,
     indexrel: pg_sys::Relation,
     index_info: *mut pg_sys::IndexInfo,
-) -> (Vec<(i64, Vec<f32>)>, f64) {
-    let mut state = BuildState { corpus: Vec::new(), dim: None };
+) -> (Vec<(i64, Vec<f32>)>, Vec<Vec<i16>>, f64) {
+    // M90: a 2nd index column (`smallint[]`) means label filtering; `ii_NumIndexAttrs > 1`.
+    let has_labels = (*index_info).ii_NumIndexAttrs > 1;
+    let mut state = BuildState { corpus: Vec::new(), dim: None, has_labels, labels: Vec::new() };
     let ntuples = pg_sys::table_index_build_scan(
         heaprel,
         indexrel,
@@ -59,7 +78,7 @@ unsafe fn collect_corpus(
         (&mut state as *mut BuildState).cast::<std::os::raw::c_void>(),
         std::ptr::null_mut(),
     );
-    (state.corpus, ntuples as f64)
+    (state.corpus, state.labels, ntuples as f64)
 }
 
 unsafe fn build_result(ntuples: f64, nindexed: usize) -> *mut pg_sys::IndexBuildResult {
@@ -92,7 +111,7 @@ pub extern "C-unwind" fn ambuild(
     index_info: *mut pg_sys::IndexInfo,
 ) -> *mut pg_sys::IndexBuildResult {
     unsafe {
-        let (corpus, ntuples) = collect_corpus(heaprel, indexrel, index_info);
+        let (corpus, labels, ntuples) = collect_corpus(heaprel, indexrel, index_info);
         let lists = lists_from_relation(indexrel); // M34 — WITH (lists=N), default 100
         let metric = resolve_metric(indexrel); // M49: cosine/ip/L2 from the opclass, not hardcoded
         // M86 (Roadmap v7): `WITH (soar_lambda=N)` (N>0) spills each vector to a SOAR-chosen second list (fewer
@@ -165,18 +184,36 @@ pub extern "C-unwind" fn ambuild(
                             &sq8_codes,
                         );
                     } else if crate::am::options::separate_storage_from_relation(indexrel) {
-                        page::write_ivf_aq_split(
-                            indexrel,
-                            dim,
-                            metric.tag(),
-                            m as u32,
-                            &quant.to_meta_bytes(),
-                            idx.centroids(),
-                            positions,
-                            idsr,
-                            vecs,
-                            &codes,
-                        );
+                        // M90: when the index carries a label column, persist the v7 layout (label co-located in the
+                        // code blob → Stage-1 inline skip). No label column → the unchanged v5 writer (byte-identical).
+                        if !labels.is_empty() {
+                            page::write_ivf_aq_split_v7(
+                                indexrel,
+                                dim,
+                                metric.tag(),
+                                m as u32,
+                                &quant.to_meta_bytes(),
+                                idx.centroids(),
+                                positions,
+                                idsr,
+                                vecs,
+                                &codes,
+                                &labels,
+                            );
+                        } else {
+                            page::write_ivf_aq_split(
+                                indexrel,
+                                dim,
+                                metric.tag(),
+                                m as u32,
+                                &quant.to_meta_bytes(),
+                                idx.centroids(),
+                                positions,
+                                idsr,
+                                vecs,
+                                &codes,
+                            );
+                        }
                     } else {
                         // v4 (interleaved) — legacy, non-storage-separated. Not the M89 streaming target; builds the
                         // `entries` copy for the unchanged writer (OOMs at billion-scale, pre-M89 behavior).
@@ -235,7 +272,7 @@ pub extern "C-unwind" fn ambuild_hnsw(
     index_info: *mut pg_sys::IndexInfo,
 ) -> *mut pg_sys::IndexBuildResult {
     unsafe {
-        let (corpus, ntuples) = collect_corpus(heaprel, indexrel, index_info);
+        let (corpus, _labels_hnsw, ntuples) = collect_corpus(heaprel, indexrel, index_info);
         let corpus_len = corpus.len(); // capture before `build_owned` consumes `corpus` (DoD-4 move, not clone)
         // T4.1: inject the cancellation seam so a long `CREATE INDEX` responds to `pg_cancel_backend` within one
         // parallel batch. `check_for_interrupts!` runs on the leader between batches (all workers joined) — safe
@@ -296,6 +333,11 @@ unsafe extern "C-unwind" fn build_callback(
         Some(d) if d != v.len() => return, // dimension mismatch guard (defensive; the type enforces dim)
         None => st.dim = Some(v.len()),
         _ => {}
+    }
+    // M90: read the 2nd column (label set) when the index declares it. `values`/`isnull` are C arrays of length
+    // ii_NumIndexAttrs; `has_labels` guarantees index 1 is in bounds. A NULL label → empty set (row matches no filter).
+    if st.has_labels {
+        st.labels.push(datum_to_labelset(*values.add(1), *isnull.add(1)));
     }
     st.corpus.push((tid::encode(htid), v));
 }
@@ -408,9 +450,15 @@ pub(crate) unsafe fn vacuum_rebuild(
         // heap re-check filters dead tuples out of the returned TIDs. Compacting the v4 lists/pending needs a
         // v4-aware fold — a documented follow-up (REINDEX rebuilds cleanly today). So a routine VACUUM is a
         // safe no-op on the structure, never a crash on `read_ivf_meta(v4)`.
-        // M83/M85 — v5 (storage-separated) and v6 (SQ8-refine) are safe no-ops for the same reason as v4: the f32
-        // v3 rebuild would reject/corrupt them; correctness holds via the scan's pending fold + MVCC heap re-check.
-        if page::ivf_is_v4(indexrel) || page::ivf_is_v5(indexrel) || page::ivf_is_v6(indexrel) {
+        // M83/M85/M90 — v5 (storage-separated), v6 (SQ8-refine), and v7 (label-aware) are safe no-ops for the same
+        // reason as v4: the f32 v3 rebuild (`read_ivf_meta`, v2/v3-only) would REJECT them (typed Err → error!) —
+        // correctness holds via the scan's pending fold + MVCC heap re-check. M90: without v7 here, VACUUM on a
+        // labeled index errored every time (the un-vacuumable-index blocker caught in review).
+        if page::ivf_is_v4(indexrel)
+            || page::ivf_is_v5(indexrel)
+            || page::ivf_is_v6(indexrel)
+            || page::ivf_is_v7(indexrel)
+        {
             return 0;
         }
         return vacuum_rebuild_structured(indexrel, dead);
@@ -1005,6 +1053,144 @@ mod tests {
         let e: std::collections::HashSet<i32> = exact_ids.iter().copied().collect();
         let recall = idx_ids.iter().filter(|id| e.contains(id)).count() as f64 / 5.0;
         assert!(recall >= 0.8, "filtered recall@5 {recall:.2} < 0.8 (idx={idx_ids:?} exact={exact_ids:?})");
+    }
+
+    /// M90 (inline label filter) — a v7 index (built with a `smallint[]` label column) is detected as v7, and a
+    /// `WHERE lbl && '{k}' ORDER BY e <-> q LIMIT n` index scan returns the CORRECT filtered top-n (== exact
+    /// seqscan-filtered): the Stage-1 inline skip drops non-overlapping candidates, and `xs_recheck` guarantees
+    /// correctness. Also asserts the label-less path stays v5 (v7 is opt-in on the 2nd column).
+    #[pgrx::pg_test]
+    fn v7_inline_label_filter_scans_correct() {
+        pgrx::Spi::run("CREATE TABLE ivfv7 (id int PRIMARY KEY, lbl smallint[], e vector(8))").unwrap();
+        for i in 0..300usize {
+            let lit =
+                (0..8).map(|j| (((i * 31 + j * 7) % 97) as f32 * 0.1).to_string()).collect::<Vec<_>>().join(",");
+            // Label = i % 5 (5 tags, ~20% each). Row i also carries tag 9 when i%50==0 (a sparse ~2% tag).
+            let tag = i % 5;
+            let lbl = if i % 50 == 0 { format!("{{{tag},9}}") } else { format!("{{{tag}}}") };
+            pgrx::Spi::run(&format!("INSERT INTO ivfv7 VALUES ({}, '{lbl}', '[{lit}]')", i + 1)).unwrap();
+        }
+        pgrx::Spi::run(
+            "CREATE INDEX ivfv7_idx ON ivfv7 USING theodb_ivfflat (e, lbl) WITH (lists=16, pq_subspaces=4, aq_threshold=2000, separate_storage=1)",
+        )
+        .unwrap();
+        // The label column ⇒ the v7 (label-aware) layout, not v5.
+        let (is_v7, is_v5) = unsafe {
+            let oid: pg_sys::Oid = pgrx::Spi::get_one("SELECT 'ivfv7_idx'::regclass::oid").unwrap().expect("oid");
+            let rel = pg_sys::index_open(oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            let v7 = crate::am::page::ivf_is_v7(rel);
+            let v5 = crate::am::page::ivf_is_v5(rel);
+            pg_sys::index_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            (v7, v5)
+        };
+        assert!(is_v7, "a label column ⇒ the v7 layout");
+        assert!(!is_v5, "v7 is not misdetected as v5");
+        pgrx::Spi::run("SET theodb_ivfflat.probes = 16").unwrap();
+        let q = "[5,2,0,4,1,3,6,0.5]";
+        let filt = "lbl && '{3}'::smallint[]";
+        let idx_ids: Vec<i32> = pgrx::Spi::connect(|c| {
+            c.select("SET enable_seqscan=off; SET enable_indexscan=on", None, &[]).ok();
+            c.select(
+                &format!("SELECT id FROM ivfv7 WHERE {filt} ORDER BY e <-> '{q}'::vector LIMIT 5"),
+                None,
+                &[],
+            )
+            .unwrap()
+            .filter_map(|r| r.get::<i32>(1).unwrap())
+            .collect()
+        });
+        // Exact filtered top-5 via seqscan.
+        let exact_ids: Vec<i32> = pgrx::Spi::connect(|c| {
+            c.select("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on", None, &[]).ok();
+            c.select(
+                &format!("SELECT id FROM ivfv7 WHERE {filt} ORDER BY e <-> '{q}'::vector LIMIT 5"),
+                None,
+                &[],
+            )
+            .unwrap()
+            .filter_map(|r| r.get::<i32>(1).unwrap())
+            .collect()
+        });
+        // Every id the index scan returns MUST satisfy the filter (correctness of the inline skip + xs_recheck).
+        let matching: Vec<i32> = pgrx::Spi::connect(|c| {
+            c.select(&format!("SELECT id FROM ivfv7 WHERE {filt}"), None, &[])
+                .unwrap()
+                .filter_map(|r| r.get::<i32>(1).unwrap())
+                .collect()
+        });
+        let mset: std::collections::HashSet<i32> = matching.iter().copied().collect();
+        assert!(idx_ids.iter().all(|id| mset.contains(id)), "every filtered idx row satisfies lbl && {{3}} (idx={idx_ids:?})");
+        let e: std::collections::HashSet<i32> = exact_ids.iter().copied().collect();
+        let recall = idx_ids.iter().filter(|id| e.contains(id)).count() as f64 / (exact_ids.len().max(1) as f64);
+        assert!(recall >= 0.8, "v7 filtered recall@5 {recall:.2} < 0.8 (idx={idx_ids:?} exact={exact_ids:?})");
+    }
+
+    /// M90 (review blocker regression) — VACUUM on a v7 (labeled) index must be a SAFE NO-OP, not an error. Before
+    /// the fix, `amvacuumcleanup` fell through to the v3 rebuild (`read_ivf_meta`, v2/v3-only) which rejected v7 →
+    /// every autovacuum errored (un-vacuumable labeled index). Asserts VACUUM succeeds AND the filtered scan still
+    /// returns only matching LIVE rows after a DELETE.
+    #[pgrx::pg_test]
+    fn v7_vacuum_is_safe_noop() {
+        pgrx::Spi::run("CREATE TABLE ivfv7v (id int PRIMARY KEY, lbl smallint[], e vector(8))").unwrap();
+        for i in 0..200usize {
+            let lit =
+                (0..8).map(|j| (((i * 13 + j * 5) % 89) as f32 * 0.1).to_string()).collect::<Vec<_>>().join(",");
+            pgrx::Spi::run(&format!("INSERT INTO ivfv7v VALUES ({}, '{{{}}}', '[{lit}]')", i + 1, i % 4)).unwrap();
+        }
+        pgrx::Spi::run("CREATE INDEX ivfv7v_idx ON ivfv7v USING theodb_ivfflat (e, lbl) WITH (lists=8, pq_subspaces=4, aq_threshold=2000, separate_storage=1)").unwrap();
+        // The fix: the VACUUM rebuild entry (`vacuum_rebuild`) must be a SAFE NO-OP for v7 (return 0, no error) —
+        // exactly like v4/v5/v6. Called directly (SQL `VACUUM` can't run inside a pg_test's transaction block).
+        // Before the fix it fell through to the v3 rebuild which rejected v7 → error.
+        let noop = unsafe {
+            let oid: pg_sys::Oid = pgrx::Spi::get_one("SELECT 'ivfv7v_idx'::regclass::oid").unwrap().expect("oid");
+            let rel = pg_sys::index_open(oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            let mut dead = |_id: i64| false; // nothing dead
+            let r = vacuum_rebuild(rel, &mut dead);
+            pg_sys::index_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            r
+        };
+        assert_eq!(noop, 0, "vacuum_rebuild on a v7 index is a safe no-op (returns 0), not an error");
+        // The filtered scan still works after the (no-op) vacuum.
+        pgrx::Spi::run("SET theodb_ivfflat.probes = 8").unwrap();
+        let ids: Vec<i32> = pgrx::Spi::connect(|c| {
+            c.select("SET enable_seqscan=off; SET enable_indexscan=on", None, &[]).ok();
+            c.select("SELECT id FROM ivfv7v WHERE lbl && '{1}'::smallint[] ORDER BY e <-> '[1,2,3,4,5,6,7,8]'::vector LIMIT 5", None, &[])
+                .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
+        });
+        // Row i (0-based) has id=i+1 and label i%4; label 1 ⇒ i%4==1 ⇒ id%4==2. The filter returns only those.
+        assert!(ids.iter().all(|&id| id % 4 == 2), "filtered scan returns only label-1 rows (got {ids:?})");
+    }
+
+    /// M90 (review blocker regression) — a PENDING (post-build INSERT) row with a NON-matching label must NOT be a
+    /// false positive. The pending region stores no label, so the inline skip cannot filter it; only the executor's
+    /// heap re-check (`xs_recheck=true`, kept ON by `amgettuple` when a label predicate is active) filters it.
+    /// Before the fix, `amgettuple` cleared `xs_recheck` on every tuple → the non-matching pending row was returned.
+    #[pgrx::pg_test]
+    fn v7_pending_non_matching_label_is_filtered() {
+        pgrx::Spi::run("CREATE TABLE ivfv7p (id int PRIMARY KEY, lbl smallint[], e vector(8))").unwrap();
+        for i in 0..100usize {
+            let lit =
+                (0..8).map(|j| (((i * 17 + j * 3) % 83) as f32 * 0.1).to_string()).collect::<Vec<_>>().join(",");
+            pgrx::Spi::run(&format!("INSERT INTO ivfv7p VALUES ({}, '{{1}}', '[{lit}]')", i + 1)).unwrap();
+        }
+        pgrx::Spi::run("CREATE INDEX ivfv7p_idx ON ivfv7p USING theodb_ivfflat (e, lbl) WITH (lists=8, pq_subspaces=4, aq_threshold=2000, separate_storage=1)").unwrap();
+        // Post-build INSERT → PENDING region, with a NON-matching label {2} and a vector near the query.
+        pgrx::Spi::run("INSERT INTO ivfv7p VALUES (999, '{2}', '[0,0,0,0,0,0,0,0]')").unwrap();
+        pgrx::Spi::run("SET theodb_ivfflat.probes = 8").unwrap();
+        // Query filters for label {1}; the pending row {2} MUST NOT appear (executor recheck filters it).
+        let ids: Vec<i32> = pgrx::Spi::connect(|c| {
+            c.select("SET enable_seqscan=off; SET enable_indexscan=on", None, &[]).ok();
+            c.select("SELECT id FROM ivfv7p WHERE lbl && '{1}'::smallint[] ORDER BY e <-> '[0,0,0,0,0,0,0,0]'::vector LIMIT 10", None, &[])
+                .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
+        });
+        assert!(!ids.contains(&999), "the non-matching pending row {{2}} must be filtered by xs_recheck (got {ids:?})");
+        // And a query for {2} DOES find the pending row (pending fold + recheck pass).
+        let ids2: Vec<i32> = pgrx::Spi::connect(|c| {
+            c.select("SET enable_seqscan=off; SET enable_indexscan=on", None, &[]).ok();
+            c.select("SELECT id FROM ivfv7p WHERE lbl && '{2}'::smallint[] ORDER BY e <-> '[0,0,0,0,0,0,0,0]'::vector LIMIT 10", None, &[])
+                .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
+        });
+        assert!(ids2.contains(&999), "the matching pending row {{2}} IS found (got {ids2:?})");
     }
 
     /// T3.3 NON-REGRESSION (build): with NO reloption, `ambuild_hnsw` packs the byte-identical v1 layout — the

@@ -1361,6 +1361,33 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 
 ---
 
+# Pós-M89 — filtered vector search inline/adaptive (fecha o gap de filtragem vs AlloyDB)
+
+> Origem: discussão com o owner (2026-07-12) — o "inline/adaptive filtering" do AlloyDB **NÃO é um gap de paradigma** (correção honesta): é implementável por extensão via o **Custom Scan Provider** do Postgres (o mesmo mecanismo de TimescaleDB/Citus/pg_strom, mais poderoso que o `amgettuple`), reusando o motor de bitmap nativo (`BitmapAnd`→`TIDBitmap`, Regra 9). O M87 fechou o **post-filter** (classe pgvector-relaxed_order); esta linhagem fecha o **inline** (M90) e o **adaptive** (M91). **NÃO é claim de QPS-superior** (teto de paradigma M73/M82 permanece) — é claim de **recall-estável-sob-filtro**, medível. Serial, gate-driven, measurement-first (honest-negative é terminal válido).
+
+## M90 — [x] inline filter pushdown (label scan-key, IVF-AQ-native) *(gated M87, M89)*
+
+> **Re-escopo pela DISCOVER (2026-07-12, `knowledge-base/discoveries/blueprints/inline-filter-pushdown-blueprint.md`):** a pesquisa Staff-DB (lendo o pgvectorscale real, permissivo) determinou que o inline parsimony-correto para o DoD é o **Approach A — label scan-key** (o que o pgvectorscale usa: label no índice + operador `&&` + scan-key pushdown), NÃO o Custom Scan Provider (Approach B, arbitrary-WHERE), que é YAGNI aqui e foi movido para o **M91**. Achado honesto: o inline do AlloyDB é **ScaNN-only, não IVF** — mas o nosso IVF-AQ storage-separated (Stage-1 código / Stage-2 rerank) é um *encaixe melhor* (label nas code-pages → Stage-1 poda antes do rerank).
+
+**Objective:** empurrar o filtro de **label** (`WHERE labels && '{…}' ORDER BY e <-> q LIMIT k`) para DENTRO da travessia do IVF-AQ via o mecanismo de **scan-key** (o nosso `amrescan` já recebe `_keys` — hoje ignora): `amcanmulticol=true` + opclass própria `&&` para `smallint[]` (código próprio, Regra 9 — pgvectorscale é estudo-de-design) faz o planner empurrar o predicado como Index Cond; o build lê a 2ª coluna e guarda o label **nas code-pages** (novo layout v7); a Stage-1 pula candidatos sem overlap ANTES do rerank; `xs_recheck=true`. Interage com o M87 (grow-probes recupera recall se uma lista probed tem poucos matches).
+**GATE (D3-style, measurement-first):** mede **recall@10 sob filtro de label ~1% INLINE vs o M87 post-filter** num benchmark reproduzível — **GO só se o inline melhora o recall medido**; honest-negative fecha (anti-sunk-cost).
+**DoD:** (1) `labels && '{…}'` chega ao `amrescan` como ScanKey e a Stage-1 pula não-matching inline; (2) **recall@10 sob filtro de label seletivo (~1%) MEDIDO estritamente > M87 post-filter** (`docs/benchmarks/m90-inline-filter.{md,json}`); (3) EXPLAIN mostra o label como Index Cond; (4) **zero regressão** — 250+ pg_tests GREEN, path sem-label byte-idempotente (v5/v6 inalterados); (5) crash-safety no v7 (build→restart→scan-identical); (6) sign-off council-index-storage + council-benchmark. **Boundary honesto:** só a coluna de label declarada + `&&` (arbitrary-WHERE é o M91). **Risks:** (a) format bump v7 (label nas code-pages) + REINDEX — mitigar com magic novo + gate de crash-safety; (b) o inline pode não bater o recall do M87 → honest-negative (o gate mede antes). **Dependencies:** M87 (scan iterativo), M89 (build escalável). **Prior art (estudo, código próprio):** pgvectorscale (PostgreSQL License, Rust+pgrx); AlloyDB fechado → só design publicado.
+
+---
+
+
+**Outcome (2026-07-12, veredito `GO` — `docs/benchmarks/m90-inline-filter.{md,json}` + ADR `0040`, sign-off council-index-storage+rust-pgrx+benchmark):** MEDIDO (DO c-8, 500k, ~1% seletividade) **recall@10 1.00 (inline v7) vs 0.52 (M87 post-filter) — delta +0.48 + ~19× QPS**. Approach A (scan-key/label, layout v7 co-localizado, inline-skip na Stage-1 + xs_recheck). 253 pg_tests GREEN (250 + 3 v7), zero regressão; vetor-only/v5/v6 sem-label byte-idênticos. 2 blockers de correção achados no review e corrigidos (VACUUM no-op v7; xs_recheck no pending region). Honesto: só label + `&&`, v7+REINDEX; o arbitrary-WHERE inline (Custom Scan) é o M91; NÃO vence ScaNN (teto M73/M82).
+
+## M91 — [ ] arbitrary-WHERE inline via Custom Scan Provider + adaptive (paridade AlloyDB) *(gated M90)*
+
+> **Re-escopo pela DISCOVER (2026-07-12):** com o M90 fechando o inline de **label** (scan-key, Approach A), o M91 é o **Approach B — o Custom Scan Provider** que dá inline para `WHERE` ARBITRÁRIO (qualquer coluna via B-trees existentes → `TIDBitmap`), exatamente o que o AlloyDB faz (Custom Scan "vector scan" + Bitmap Index Scan). O **adaptive** (inline⇄pre-filter pela cardinalidade do bitmap) vive AQUI porque é bitmap-driven — é a paridade honesta com o AlloyDB.
+
+**Objective:** um **Custom Scan Provider** (`set_rel_pathlist_hook` + `CustomScanMethods`/`CustomExecMethods`) intercepta `WHERE <preds escalares arbitrários> ORDER BY e <-> q LIMIT k`, roda o sub-plano bitmap nativo (`BitmapAnd` sobre os B-trees existentes → `TIDBitmap`, MVCC-correto, Regra 9) e o passa para o `scan_ivf_aq*` como teste de membership na Stage-1; e escolhe AUTOMÁTICAMENTE pela **cardinalidade do bitmap**: ultra-seletivo (<~0.1%) → **PRE** (fetch dos TIDs + rerank exato); médio → **INLINE**; loose → **POST** (M87). Dá recall+custo estáveis em TODA a seletividade sem o usuário escolher. **Fora de escopo (limite honesto):** o re-plan cross-index mid-query do core do AlloyDB (tier ③) — não-alcançável por extensão pura.
+**GATE (measurement-first):** benchmark **varrendo a seletividade (0.01% → 30%)** mostra o adaptive **dominando o envelope** das estratégias fixas; honest-negative é terminal válido.
+**DoD:** (1) Custom Scan intercepta o padrão arbitrary-WHERE + bitmap-into-Stage-1; (2) ramifica pre/inline/post pela cardinalidade do bitmap, thresholds ajustáveis (GUC/reloption); (3) **benchmark de varredura mede o adaptive dominando as fixas** (`docs/benchmarks/m91-adaptive-filter.{md,json}`); (4) EXPLAIN/contador runtime revela a estratégia; (5) **zero regressão** — 250+ pg_tests GREEN; (6) sign-off council-index-storage + council-rust-pgrx + council-benchmark. **Risks:** (a) integração Custom Scan Provider ↔ scan state do AM sem quebrar MVCC/snapshot — mitigar espelhando o design + council-rust-pgrx; (b) calibração dos thresholds + o adaptive pode não dominar → honest-negative (o gate mede antes). **Dependencies:** M90 (o inline de label, base), M87 (o post), M89. **Prior art (estudo, Regra 9):** pgvectorscale (permissivo) + design publicado do AlloyDB. **NÃO é claim de QPS-superior** (teto de paradigma M73/M82) — é claim de recall+custo estáveis em toda seletividade.
+
+---
+
 ## Sequência e paralelismo
 
 ```

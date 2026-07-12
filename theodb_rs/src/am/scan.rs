@@ -60,6 +60,15 @@ struct ScanState {
     emitted: std::collections::HashSet<i64>,
     iterative: bool,
     exhausted: bool,
+    // M90 (inline label filter): the query's sorted-deduped label set parsed from the `labels && '{…}'` ScanKey in
+    // `amrescan`. Empty = no label predicate (unchanged v3/v4/v5/v6 scan). A v7 index consults it in Stage-1 to skip
+    // non-overlapping candidates before the rerank.
+    query_labels: Vec<i16>,
+    // M90: a label predicate is active → `amgettuple` MUST keep `xs_recheck=true` so the executor re-checks
+    // `labels && …` on the heap tuple. Load-bearing for the PENDING region (post-build INSERTs carry no stored
+    // label → the inline skip cannot filter them; only the executor recheck can). Without this the pending row
+    // would be a false positive (review blocker).
+    filtering: bool,
 }
 
 #[pg_guard]
@@ -81,6 +90,8 @@ pub extern "C-unwind" fn ambeginscan(
         emitted: std::collections::HashSet::new(),
         iterative: false,
         exhausted: false,
+        query_labels: Vec::new(),
+        filtering: false,
     });
     unsafe { (*scandesc).opaque = Box::into_raw(state).cast::<std::os::raw::c_void>() };
     scandesc
@@ -96,8 +107,8 @@ fn heapify(candidates: Vec<(i64, f64)>) -> BinaryHeap<Reverse<Scored>> {
 #[pg_guard]
 pub extern "C-unwind" fn amrescan(
     scan: pg_sys::IndexScanDesc,
-    _keys: pg_sys::ScanKey,
-    _nkeys: ::std::os::raw::c_int,
+    keys: pg_sys::ScanKey,
+    nkeys: ::std::os::raw::c_int,
     orderbys: pg_sys::ScanKey,
     norderbys: ::std::os::raw::c_int,
 ) {
@@ -109,6 +120,26 @@ pub extern "C-unwind" fn amrescan(
         state.emitted.clear();
         state.exhausted = false;
         state.iterative = false;
+        // M90: parse the `labels && '{…}'` ScanKey (our only pushable search predicate — the label opclass's
+        // `OPERATOR 1 &&`) into the query label set. A non-NULL key argument is the query `smallint[]`. `xs_recheck`
+        // is set so the executor re-checks the predicate on the heap tuple (correctness even if the inline skip is
+        // lossy). No keys → empty set → unchanged scan.
+        state.query_labels.clear();
+        if nkeys > 0 && !keys.is_null() {
+            let ks = std::slice::from_raw_parts(keys, nkeys as usize);
+            for k in ks {
+                if k.sk_flags as u32 & pg_sys::SK_ISNULL == 0 {
+                    if let Some(mut v) = Vec::<i16>::from_datum(k.sk_argument, false) {
+                        v.sort_unstable();
+                        v.dedup();
+                        state.query_labels = v;
+                        (*scan).xs_recheck = true;
+                        break;
+                    }
+                }
+            }
+        }
+        state.filtering = !state.query_labels.is_empty();
 
         if norderbys < 1 || orderbys.is_null() {
             return; // no ORDER BY <-> key → no index-ordered scan
@@ -146,7 +177,7 @@ pub extern "C-unwind" fn amrescan(
             state.rerank_pool = pool0;
             state.lists = page::ivf_list_count(rel);
             state.iterative = crate::am::guc::max_scan_tuples() > 0;
-            let init = scan_ivf_structured(rel, &query, probes0, pool0);
+            let init = scan_ivf_structured(rel, &query, probes0, pool0, &state.query_labels);
             state.last_total = init.len();
             heapify(init)
         } else if magic == crate::am::hnsw_page::HNSW_STRUCT_MAGIC {
@@ -214,7 +245,14 @@ unsafe fn scan_ivf_structured(
     query: &[f32],
     probes: usize,
     rerank_pool: usize,
+    query_labels: &[i16],
 ) -> Vec<(i64, f64)> {
+    // M90 (inline label filter): an IVF-AQ v7 index (built WITH a label column) reads the co-located label per
+    // candidate and skips non-overlapping ones in Stage-1 before the rerank. Empty `query_labels` ⇒ no filter (the
+    // v7 scan behaves like v5). Checked first (distinct magic 7).
+    if page::ivf_is_v7(rel) {
+        return scan_ivf_aq_split_v7(rel, query, probes, rerank_pool, query_labels);
+    }
     // M77 (pg_scann): an IVF-AQ v4 index (built WITH pq_subspaces) takes the batched-AH + rerank path.
     if page::ivf_is_v4(rel) {
         return scan_ivf_aq(rel, query, probes, rerank_pool);
@@ -514,6 +552,132 @@ unsafe fn scan_ivf_aq_split(
     results
 }
 
+/// M90 (inline label filter) — the IVF-AQ v7 scan: identical to the v5 split scan, EXCEPT the per-list CODE blob is
+/// `[ids][labels_fixed][codes]`, so (a) the codes start `n·label_bytes` further in, and (b) each candidate's label
+/// set is read inline in Stage 1 and, when the query carries a label predicate, non-overlapping candidates are
+/// SKIPPED before they cost a rerank slot (the inline filter). `xs_recheck=true` (set in `amrescan`) guarantees
+/// correctness even for the label-less pending region. Empty `query_labels` ⇒ no filter (behaves like v5).
+unsafe fn scan_ivf_aq_split_v7(
+    rel: pg_sys::Relation,
+    query: &[f32],
+    probes: usize,
+    rerank_pool: usize,
+    query_labels: &[i16],
+) -> Vec<(i64, f64)> {
+    let meta = match page::read_ivf_aq_meta_split(rel) {
+        Ok(m) => m,
+        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+    };
+    let quant = match crate::am::aq::AqQuantizer::from_meta_bytes(&meta.codebook) {
+        Ok(q) => q,
+        Err(e) => pg_sys::error!("theodb am scan (aq codebook): {e}"),
+    };
+    let lut = match crate::vec::ah::build_lut16(query, &quant) {
+        Ok(l) => l,
+        Err(e) => pg_sys::error!("theodb am scan (aq lut): {e}"),
+    };
+    let metric = match Metric::from_tag(meta.metric_tag) {
+        Some(m) => m,
+        None => pg_sys::error!("theodb am scan: unknown metric tag"),
+    };
+    let dim = meta.dim as usize;
+    let pairs = (meta.m as usize).div_ceil(2);
+    let label_bytes = 2 + page::LABEL_K * 2;
+    let filtering = !query_labels.is_empty();
+
+    let mut cd: Vec<(f64, usize)> =
+        meta.centroids.iter().enumerate().map(|(i, c)| (metric.dist(query, c), i)).collect();
+    cd.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    let probes = probes.clamp(1, meta.centroids.len().max(1));
+    let rerank_pool = rerank_pool.max(1);
+
+    // Stage 1 — read ONLY the CODE pages; AH-score; INLINE-SKIP non-overlapping labels before they cost a slot.
+    let mut cands: Vec<(i32, i64, usize, usize)> = Vec::new();
+    for &(_, ci) in cd.iter().take(probes) {
+        let (cfb, cnp, _vfb, _vnp, cnt) = meta.dir[ci];
+        let n = cnt as usize;
+        if n == 0 {
+            continue;
+        }
+        let cbytes = match page::read_ivf_list_bytes(rel, cfb, cnp) {
+            Ok(b) => b,
+            Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        };
+        let labels_off = 8 * n; // labels start right after the n ids
+        let codes_off = 8 * n + n * label_bytes; // codes start after ids + the fixed label region
+        let nblocks = n.div_ceil(32);
+        let mut out = [0i32; 32];
+        for b in 0..nblocks {
+            let bn = (n - b * 32).min(32);
+            let base = codes_off + b * pairs * 32;
+            if cbytes.len() < base + pairs * 32 {
+                break;
+            }
+            crate::vec::ah::ah_score_block(&lut, &cbytes[base..base + pairs * 32], bn, &mut out[..bn]);
+            for (j, &score) in out.iter().enumerate().take(bn) {
+                let ordinal = b * 32 + j;
+                // INLINE FILTER: skip candidates whose stored label set does not overlap the query's.
+                if filtering && !v7_label_overlaps(&cbytes, labels_off, ordinal, label_bytes, query_labels) {
+                    continue;
+                }
+                let tid = i64::from_le_bytes(cbytes[ordinal * 8..ordinal * 8 + 8].try_into().unwrap());
+                cands.push((score, tid, ci, ordinal));
+            }
+        }
+    }
+
+    // Stage 2 — rerank the `rerank_pool` best; random-read f32 for survivors ONLY.
+    let rn = rerank_pool.min(cands.len());
+    if rn < cands.len() {
+        cands.select_nth_unstable_by_key(rn, |c| c.0);
+        cands.truncate(rn);
+    }
+    let mut results: Vec<(i64, f64)> = Vec::with_capacity(cands.len());
+    for (_, tid, ci, ordinal) in &cands {
+        let (_cfb, _cnp, vfb, vnp, _cnt) = meta.dir[*ci];
+        let raw = match page::read_vec_at(rel, vfb, vnp, *ordinal, dim) {
+            Ok(b) => b,
+            Err(e) => pg_sys::error!("theodb am scan (v7 rerank): {e}"),
+        };
+        let d = match metric {
+            Metric::L2 => crate::vec::l2_dist_from_bytes(query, &raw),
+            Metric::Ip => crate::vec::ip_dist_from_bytes(query, &raw),
+            Metric::Cosine => crate::vec::cosine_dist_from_bytes(query, &raw),
+        };
+        results.push((*tid, d));
+    }
+    // Pending region (post-build INSERTs) has NO stored label — emit it and let `xs_recheck` filter on the heap.
+    match page::read_pending(rel) {
+        Ok(pending) => {
+            for (tidv, v) in pending {
+                results.push((tidv, metric.dist(query, &v)));
+            }
+        }
+        Err(e) => pg_sys::error!("theodb am scan (pending): {e}"),
+    }
+    results
+}
+
+/// M90 — does the label set stored for `ordinal` (a `[u16 count][LABEL_K × i16]` record at `labels_off + ordinal·
+/// label_bytes`) share any element with `query_labels`? Both label sets are tiny (≤ LABEL_K), so a nested scan is
+/// cheapest. A stored count of 0 (NULL label at build) never overlaps.
+#[inline]
+fn v7_label_overlaps(cbytes: &[u8], labels_off: usize, ordinal: usize, label_bytes: usize, query_labels: &[i16]) -> bool {
+    let rec = labels_off + ordinal * label_bytes;
+    if cbytes.len() < rec + label_bytes {
+        return false;
+    }
+    let cnt = u16::from_le_bytes(cbytes[rec..rec + 2].try_into().unwrap()) as usize;
+    for i in 0..cnt.min(page::LABEL_K) {
+        let o = rec + 2 + i * 2;
+        let lbl = i16::from_le_bytes(cbytes[o..o + 2].try_into().unwrap());
+        if query_labels.contains(&lbl) {
+            return true;
+        }
+    }
+    false
+}
+
 /// M85 (Roadmap v7) — the IVF-AQ v6 SQ8-REFINE scan: identical to the v5 split scan (Stage 1 AH prune over
 /// codes-only pages) but Stage 2 reranks the `over_fetch` survivors on SQ8 codes (`dim` B/vec) instead of raw f32
 /// (`dim·4` B/vec) — 4× less Stage-2 random-read I/O at the high-recall frontier (M84). Rerank is asymmetric: the
@@ -657,7 +821,10 @@ pub extern "C-unwind" fn amgettuple(
                 // Our stored vectors are the heap vectors, so within a batch the order is exact. Across iterative
                 // batches the order is RELAXED (pgvector-0.8 default) — acceptable for a filtered scan; no recheck.
                 scan_ref.xs_recheckorderby = false;
-                scan_ref.xs_recheck = false;
+                // M90: keep the executor's heap re-check ON when a label predicate is active — the PENDING region
+                // emits label-less rows the inline skip cannot filter (review blocker: else a non-matching pending
+                // row is a false positive). No predicate ⇒ false (unchanged).
+                scan_ref.xs_recheck = state.filtering;
                 return true;
             }
             // M52 iterative scan: the heap is empty. Under a selective WHERE the executor keeps pulling, so grow
@@ -699,7 +866,8 @@ pub extern "C-unwind" fn amgettuple(
                     }
                     state.probes = state.probes.saturating_mul(2);
                     state.rerank_pool = state.rerank_pool.saturating_mul(2);
-                    let all = scan_ivf_structured(state.rel, &state.query, state.probes, state.rerank_pool);
+                    let all =
+                        scan_ivf_structured(state.rel, &state.query, state.probes, state.rerank_pool, &state.query_labels);
                     let total = all.len();
                     let fresh: Vec<(i64, f64)> =
                         all.into_iter().filter(|(tid, _)| !state.emitted.contains(tid)).collect();
