@@ -79,7 +79,10 @@ fn make_amroutine(ambuild: AmBuildFn, ambuildempty: AmBuildEmptyFn) -> PgBox<pg_
     amroutine.amcanorderbyop = true; // enables the `ORDER BY embedding <-> $1 LIMIT k` pushdown (Phase 4)
     amroutine.amcanbackward = false;
     amroutine.amcanunique = false;
-    amroutine.amcanmulticol = false;
+    // M90 (inline label filter, Approach A): the index MAY carry a 2nd `smallint[]` label column so the planner
+    // pushes `labels && '{…}'` as a ScanKey the scan evaluates inline (Stage-1 prune). Single-column (vector-only)
+    // indexes are unaffected — the 2nd column is optional.
+    amroutine.amcanmulticol = true;
     amroutine.amoptionalkey = true;
     amroutine.amsearcharray = false;
     amroutine.amsearchnulls = false;
@@ -244,6 +247,30 @@ fn theodb_metric_cosine() -> i32 {
     crate::ann::Metric::Cosine.tag() as i32
 }
 
+/// M90 (inline label filter): the `&&` (array overlap) predicate for `smallint[]` label sets — own code (Rule 9;
+/// pgvectorscale's `smallint_array_overlap` is study-of-design only). Returns true iff the two label arrays share
+/// at least one element. Backs `OPERATOR 1 &&` of the label opclass, so the planner pushes `labels && '{…}'` as a
+/// ScanKey the scan evaluates inline. Empty arrays never overlap. `create_or_replace` so re-install is idempotent.
+#[pg_extern(immutable, parallel_safe, create_or_replace)]
+fn theodb_smallint_array_overlap(left: Array<i16>, right: Array<i16>) -> bool {
+    if left.is_empty() || right.is_empty() {
+        return false;
+    }
+    // Small arrays: quadratic is cheaper than hashing (labels are typically 1-3 tags).
+    if left.len() <= 8 && right.len() <= 8 {
+        for a in left.iter().flatten() {
+            for b in right.iter().flatten() {
+                if a == b {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+    let set: std::collections::HashSet<i16> = left.into_iter().flatten().collect();
+    right.into_iter().flatten().any(|b| set.contains(&b))
+}
+
 // The DEFAULT l2 operator class — the ORDER-BY operator binding `<->` to this AM (no support procs; L2 is the
 // fallback metric). M49 adds the non-default cosine (`<=>`) / ip (`<#>`) opclasses below, each with a
 // `FUNCTION 1` metric-tag support proc that `resolve_metric` reads at ambuild (ADR-1). Requires pgvector's
@@ -295,4 +322,32 @@ extension_sql!(
         theodb_metric_cosine,
         theodb_metric_ip,
     ],
+);
+
+// M90 (inline label filter, Approach A): a label opclass on `smallint[]` binding `OPERATOR 1 &&` (array overlap) so
+// a multicolumn index `(embedding, labels)` lets the planner push `labels && '{…}'` as a ScanKey (Index Cond), which
+// the scan evaluates inline (Stage-1 prune). Mirrors pgvectorscale's mechanism (own code, Rule 9). The `&&` operator
+// for `smallint[]` is created guarded (the generic `anyarray &&` exists, but a type-specific entry backed by OUR
+// procedure is what the opclass binds); `contsel`/`contjoinsel` give the planner a selectivity estimate.
+extension_sql!(
+    r#"
+    DO $$
+    BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_operator
+            WHERE oprname = '&&' AND oprleft = 'smallint[]'::regtype AND oprright = 'smallint[]'::regtype
+        ) THEN
+            CREATE OPERATOR && (
+                LEFTARG = smallint[], RIGHTARG = smallint[],
+                PROCEDURE = theodb_smallint_array_overlap,
+                COMMUTATOR = &&, RESTRICT = contsel, JOIN = contjoinsel
+            );
+        END IF;
+    END;
+    $$;
+    CREATE OPERATOR CLASS theodb_ivfflat_label_ops FOR TYPE smallint[] USING theodb_ivfflat AS
+        OPERATOR 1 && (smallint[], smallint[]);
+    "#,
+    name = "theodb_ivfflat_label_opclass",
+    requires = [theodb_ivfflat_amhandler, theodb_smallint_array_overlap, "theodb_ivfflat_opclasses"],
 );
