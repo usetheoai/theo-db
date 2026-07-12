@@ -64,6 +64,11 @@ struct ScanState {
     // `amrescan`. Empty = no label predicate (unchanged v3/v4/v5/v6 scan). A v7 index consults it in Stage-1 to skip
     // non-overlapping candidates before the rerank.
     query_labels: Vec<i16>,
+    // M90: a label predicate is active → `amgettuple` MUST keep `xs_recheck=true` so the executor re-checks
+    // `labels && …` on the heap tuple. Load-bearing for the PENDING region (post-build INSERTs carry no stored
+    // label → the inline skip cannot filter them; only the executor recheck can). Without this the pending row
+    // would be a false positive (review blocker).
+    filtering: bool,
 }
 
 #[pg_guard]
@@ -86,6 +91,7 @@ pub extern "C-unwind" fn ambeginscan(
         iterative: false,
         exhausted: false,
         query_labels: Vec::new(),
+        filtering: false,
     });
     unsafe { (*scandesc).opaque = Box::into_raw(state).cast::<std::os::raw::c_void>() };
     scandesc
@@ -133,6 +139,7 @@ pub extern "C-unwind" fn amrescan(
                 }
             }
         }
+        state.filtering = !state.query_labels.is_empty();
 
         if norderbys < 1 || orderbys.is_null() {
             return; // no ORDER BY <-> key → no index-ordered scan
@@ -814,7 +821,10 @@ pub extern "C-unwind" fn amgettuple(
                 // Our stored vectors are the heap vectors, so within a batch the order is exact. Across iterative
                 // batches the order is RELAXED (pgvector-0.8 default) — acceptable for a filtered scan; no recheck.
                 scan_ref.xs_recheckorderby = false;
-                scan_ref.xs_recheck = false;
+                // M90: keep the executor's heap re-check ON when a label predicate is active — the PENDING region
+                // emits label-less rows the inline skip cannot filter (review blocker: else a non-matching pending
+                // row is a false positive). No predicate ⇒ false (unchanged).
+                scan_ref.xs_recheck = state.filtering;
                 return true;
             }
             // M52 iterative scan: the heap is empty. Under a selective WHERE the executor keeps pulling, so grow

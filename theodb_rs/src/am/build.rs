@@ -450,9 +450,15 @@ pub(crate) unsafe fn vacuum_rebuild(
         // heap re-check filters dead tuples out of the returned TIDs. Compacting the v4 lists/pending needs a
         // v4-aware fold — a documented follow-up (REINDEX rebuilds cleanly today). So a routine VACUUM is a
         // safe no-op on the structure, never a crash on `read_ivf_meta(v4)`.
-        // M83/M85 — v5 (storage-separated) and v6 (SQ8-refine) are safe no-ops for the same reason as v4: the f32
-        // v3 rebuild would reject/corrupt them; correctness holds via the scan's pending fold + MVCC heap re-check.
-        if page::ivf_is_v4(indexrel) || page::ivf_is_v5(indexrel) || page::ivf_is_v6(indexrel) {
+        // M83/M85/M90 — v5 (storage-separated), v6 (SQ8-refine), and v7 (label-aware) are safe no-ops for the same
+        // reason as v4: the f32 v3 rebuild (`read_ivf_meta`, v2/v3-only) would REJECT them (typed Err → error!) —
+        // correctness holds via the scan's pending fold + MVCC heap re-check. M90: without v7 here, VACUUM on a
+        // labeled index errored every time (the un-vacuumable-index blocker caught in review).
+        if page::ivf_is_v4(indexrel)
+            || page::ivf_is_v5(indexrel)
+            || page::ivf_is_v6(indexrel)
+            || page::ivf_is_v7(indexrel)
+        {
             return 0;
         }
         return vacuum_rebuild_structured(indexrel, dead);
@@ -1117,6 +1123,74 @@ mod tests {
         let e: std::collections::HashSet<i32> = exact_ids.iter().copied().collect();
         let recall = idx_ids.iter().filter(|id| e.contains(id)).count() as f64 / (exact_ids.len().max(1) as f64);
         assert!(recall >= 0.8, "v7 filtered recall@5 {recall:.2} < 0.8 (idx={idx_ids:?} exact={exact_ids:?})");
+    }
+
+    /// M90 (review blocker regression) — VACUUM on a v7 (labeled) index must be a SAFE NO-OP, not an error. Before
+    /// the fix, `amvacuumcleanup` fell through to the v3 rebuild (`read_ivf_meta`, v2/v3-only) which rejected v7 →
+    /// every autovacuum errored (un-vacuumable labeled index). Asserts VACUUM succeeds AND the filtered scan still
+    /// returns only matching LIVE rows after a DELETE.
+    #[pgrx::pg_test]
+    fn v7_vacuum_is_safe_noop() {
+        pgrx::Spi::run("CREATE TABLE ivfv7v (id int PRIMARY KEY, lbl smallint[], e vector(8))").unwrap();
+        for i in 0..200usize {
+            let lit =
+                (0..8).map(|j| (((i * 13 + j * 5) % 89) as f32 * 0.1).to_string()).collect::<Vec<_>>().join(",");
+            pgrx::Spi::run(&format!("INSERT INTO ivfv7v VALUES ({}, '{{{}}}', '[{lit}]')", i + 1, i % 4)).unwrap();
+        }
+        pgrx::Spi::run("CREATE INDEX ivfv7v_idx ON ivfv7v USING theodb_ivfflat (e, lbl) WITH (lists=8, pq_subspaces=4, aq_threshold=2000, separate_storage=1)").unwrap();
+        // The fix: the VACUUM rebuild entry (`vacuum_rebuild`) must be a SAFE NO-OP for v7 (return 0, no error) —
+        // exactly like v4/v5/v6. Called directly (SQL `VACUUM` can't run inside a pg_test's transaction block).
+        // Before the fix it fell through to the v3 rebuild which rejected v7 → error.
+        let noop = unsafe {
+            let oid: pg_sys::Oid = pgrx::Spi::get_one("SELECT 'ivfv7v_idx'::regclass::oid").unwrap().expect("oid");
+            let rel = pg_sys::index_open(oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            let mut dead = |_id: i64| false; // nothing dead
+            let r = vacuum_rebuild(rel, &mut dead);
+            pg_sys::index_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            r
+        };
+        assert_eq!(noop, 0, "vacuum_rebuild on a v7 index is a safe no-op (returns 0), not an error");
+        // The filtered scan still works after the (no-op) vacuum.
+        pgrx::Spi::run("SET theodb_ivfflat.probes = 8").unwrap();
+        let ids: Vec<i32> = pgrx::Spi::connect(|c| {
+            c.select("SET enable_seqscan=off; SET enable_indexscan=on", None, &[]).ok();
+            c.select("SELECT id FROM ivfv7v WHERE lbl && '{1}'::smallint[] ORDER BY e <-> '[1,2,3,4,5,6,7,8]'::vector LIMIT 5", None, &[])
+                .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
+        });
+        // Row i (0-based) has id=i+1 and label i%4; label 1 ⇒ i%4==1 ⇒ id%4==2. The filter returns only those.
+        assert!(ids.iter().all(|&id| id % 4 == 2), "filtered scan returns only label-1 rows (got {ids:?})");
+    }
+
+    /// M90 (review blocker regression) — a PENDING (post-build INSERT) row with a NON-matching label must NOT be a
+    /// false positive. The pending region stores no label, so the inline skip cannot filter it; only the executor's
+    /// heap re-check (`xs_recheck=true`, kept ON by `amgettuple` when a label predicate is active) filters it.
+    /// Before the fix, `amgettuple` cleared `xs_recheck` on every tuple → the non-matching pending row was returned.
+    #[pgrx::pg_test]
+    fn v7_pending_non_matching_label_is_filtered() {
+        pgrx::Spi::run("CREATE TABLE ivfv7p (id int PRIMARY KEY, lbl smallint[], e vector(8))").unwrap();
+        for i in 0..100usize {
+            let lit =
+                (0..8).map(|j| (((i * 17 + j * 3) % 83) as f32 * 0.1).to_string()).collect::<Vec<_>>().join(",");
+            pgrx::Spi::run(&format!("INSERT INTO ivfv7p VALUES ({}, '{{1}}', '[{lit}]')", i + 1)).unwrap();
+        }
+        pgrx::Spi::run("CREATE INDEX ivfv7p_idx ON ivfv7p USING theodb_ivfflat (e, lbl) WITH (lists=8, pq_subspaces=4, aq_threshold=2000, separate_storage=1)").unwrap();
+        // Post-build INSERT → PENDING region, with a NON-matching label {2} and a vector near the query.
+        pgrx::Spi::run("INSERT INTO ivfv7p VALUES (999, '{2}', '[0,0,0,0,0,0,0,0]')").unwrap();
+        pgrx::Spi::run("SET theodb_ivfflat.probes = 8").unwrap();
+        // Query filters for label {1}; the pending row {2} MUST NOT appear (executor recheck filters it).
+        let ids: Vec<i32> = pgrx::Spi::connect(|c| {
+            c.select("SET enable_seqscan=off; SET enable_indexscan=on", None, &[]).ok();
+            c.select("SELECT id FROM ivfv7p WHERE lbl && '{1}'::smallint[] ORDER BY e <-> '[0,0,0,0,0,0,0,0]'::vector LIMIT 10", None, &[])
+                .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
+        });
+        assert!(!ids.contains(&999), "the non-matching pending row {{2}} must be filtered by xs_recheck (got {ids:?})");
+        // And a query for {2} DOES find the pending row (pending fold + recheck pass).
+        let ids2: Vec<i32> = pgrx::Spi::connect(|c| {
+            c.select("SET enable_seqscan=off; SET enable_indexscan=on", None, &[]).ok();
+            c.select("SELECT id FROM ivfv7p WHERE lbl && '{2}'::smallint[] ORDER BY e <-> '[0,0,0,0,0,0,0,0]'::vector LIMIT 10", None, &[])
+                .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
+        });
+        assert!(ids2.contains(&999), "the matching pending row {{2}} IS found (got {ids2:?})");
     }
 
     /// T3.3 NON-REGRESSION (build): with NO reloption, `ambuild_hnsw` packs the byte-identical v1 layout — the
