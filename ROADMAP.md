@@ -1361,6 +1361,18 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 
 ---
 
+# Pós-M89 — filtered vector search inline/adaptive (fecha o gap de filtragem vs AlloyDB)
+
+> Origem: discussão com o owner (2026-07-12) — o "inline/adaptive filtering" do AlloyDB **NÃO é um gap de paradigma** (correção honesta): é implementável por extensão via o **Custom Scan Provider** do Postgres (o mesmo mecanismo de TimescaleDB/Citus/pg_strom, mais poderoso que o `amgettuple`), reusando o motor de bitmap nativo (`BitmapAnd`→`TIDBitmap`, Regra 9). O M87 fechou o **post-filter** (classe pgvector-relaxed_order); esta linhagem fecha o **inline** (M90) e o **adaptive** (M91). **NÃO é claim de QPS-superior** (teto de paradigma M73/M82 permanece) — é claim de **recall-estável-sob-filtro**, medível. Serial, gate-driven, measurement-first (honest-negative é terminal válido).
+
+## M90 — [ ] inline filter pushdown (bitmap-in-traversal via Custom Scan) *(gated M87, M89)*
+
+**Objective:** empurrar o filtro escalar (`WHERE marca=X AND preco<Y ORDER BY e <-> q LIMIT k`) **para DENTRO da travessia** do índice IVF-AQ — um **Custom Scan Provider** (`set_rel_pathlist_hook` + `CustomScanMethods`/`CustomExecMethods`) roda o sub-plano bitmap nativo (`BitmapAnd` sobre os B-trees existentes → `TIDBitmap`, MVCC-correto, Regra 9) e o passa para o `scan_ivf_aq_split` (já param `probes`/`rerank_pool` no M87), que consulta o bitmap na **Fase 1** da travessia: candidato reprovado é PULADO antes de custar um slot do top-k; cresce probes se o top-k não encheu. Fecha o regime de **seletividade média (0.1–5%)** onde o post-filter do M87 degrada e o pre-filter é caro.
+**GATE (D3-style, measurement-first):** um spike mínimo mede **recall@10 sob filtro ~1% INLINE vs o M87 post-filter** num benchmark reproduzível ANTES de construir o Custom Scan completo — **GO só se o inline melhora o recall medido**; honest-negative fecha honesto e barato (anti-sunk-cost).
+**DoD:** (1) Custom Scan intercepta o padrão + consulta o bitmap na travessia; (2) **recall@10 sob filtro seletivo (~1%) MEDIDO estritamente > M87** (`docs/benchmarks/m90-inline-filter.{md,json}`); (3) EXPLAIN mostra o custom scan node; (4) **zero regressão** — 250+ pg_tests GREEN, path sem-filtro byte-idempotente (mesmo do M87); (5) sign-off council-index-storage + council-benchmark; (6) sem novas deps de runtime (Custom Scan é do core PG). **Risks:** (a) integração Custom Scan Provider ↔ scan state do AM sem quebrar MVCC/snapshot — mitigar espelhando o pgvectorscale (Rust+pgrx, PostgreSQL License, `knowledge-base/references/pgvectorscale/…/labels/`) + spike-first + council; (b) o inline pode não bater o recall do M87 → honest-negative (o gate D3 mede antes). **Dependencies:** M87 (o scan iterativo, ponto de integração), M89 (build escalável). **Prior art (estudo, código próprio Regra 9):** pgvectorscale (permissivo); AlloyDB fechado → só design publicado.
+
+---
+
 ## Sequência e paralelismo
 
 ```
