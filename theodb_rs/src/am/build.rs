@@ -938,6 +938,56 @@ mod tests {
         assert!(recall >= 0.8, "SOAR recall@10 {recall:.2} < 0.8 (exact={exact:?} idx={idx:?})");
     }
 
+    /// M87 (Roadmap v7) — filtered ANN over a v5 storage-separated index preserves recall: under a SELECTIVE
+    /// `WHERE`, the M87 IVF iterative re-search grows `probes` so the AM keeps supplying candidates until the
+    /// executor's LIMIT is satisfied (else the first probes' candidates are all filtered out → recall collapses,
+    /// the pre-M87 gap). Gate: the index-scan filtered top-k equals the exact seqscan-filtered top-k.
+    #[pgrx::pg_test]
+    fn filtered_ann_v5_iterative_preserves_recall() {
+        pgrx::Spi::run("CREATE TABLE ivffilt (id int PRIMARY KEY, grp int, e vector(8))").unwrap();
+        for i in 0..300usize {
+            let lit =
+                (0..8).map(|j| (((i * 31 + j * 7) % 97) as f32 * 0.1).to_string()).collect::<Vec<_>>().join(",");
+            pgrx::Spi::run(&format!("INSERT INTO ivffilt VALUES ({}, {}, '[{lit}]')", i + 1, (i + 1) % 10)).unwrap();
+        }
+        pgrx::Spi::run(
+            "CREATE INDEX ivffilt_idx ON ivffilt USING theodb_ivfflat (e) WITH (lists=16, pq_subspaces=4, aq_threshold=2000, separate_storage=1)",
+        )
+        .unwrap();
+        // A 10%-selective filter (grp=3) + tiny probes: without the iterative re-search, the few probed lists'
+        // candidates would mostly be filtered out and the top-5 would be short.
+        pgrx::Spi::run("SET theodb_ivfflat.probes = 1").unwrap();
+        let q = "[5,2,0,4,1,3,6,0.5]";
+        let filt = "grp = 3";
+        let idx_ids: Vec<i32> = pgrx::Spi::connect(|c| {
+            c.select("SET enable_seqscan=off; SET enable_indexscan=on", None, &[]).ok();
+            c.select(
+                &format!("SELECT id FROM ivffilt WHERE {filt} ORDER BY e <-> '{q}'::vector LIMIT 5"),
+                None,
+                &[],
+            )
+            .unwrap()
+            .filter_map(|r| r.get::<i32>(1).unwrap())
+            .collect()
+        });
+        // Exact filtered top-5 via seqscan.
+        let exact_ids: Vec<i32> = pgrx::Spi::connect(|c| {
+            c.select("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on", None, &[]).ok();
+            c.select(
+                &format!("SELECT id FROM ivffilt WHERE {filt} ORDER BY e <-> '{q}'::vector LIMIT 5"),
+                None,
+                &[],
+            )
+            .unwrap()
+            .filter_map(|r| r.get::<i32>(1).unwrap())
+            .collect()
+        });
+        assert_eq!(idx_ids.len(), 5, "filtered index scan returned {} rows, expected 5 (iterative supplied enough)", idx_ids.len());
+        let e: std::collections::HashSet<i32> = exact_ids.iter().copied().collect();
+        let recall = idx_ids.iter().filter(|id| e.contains(id)).count() as f64 / 5.0;
+        assert!(recall >= 0.8, "filtered recall@5 {recall:.2} < 0.8 (idx={idx_ids:?} exact={exact_ids:?})");
+    }
+
     /// T3.3 NON-REGRESSION (build): with NO reloption, `ambuild_hnsw` packs the byte-identical v1 layout — the
     /// meta carries neither an AQ nor an SBQ codebook (`aq_m == 0 && sbq_bits == 0`). Guards the "existing indexes
     /// stay v1/v2 byte-identical" invariant against the new AQ branch.
