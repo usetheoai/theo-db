@@ -48,3 +48,6 @@ system-design-output/
 architecture-output/
 benchmarks/.cache/
 benchmarks/benchmarks/
+
+# Top-level reference clones (3rd-party, reproducible via clone commands — not project source)
+knowledge-base/references/*/
