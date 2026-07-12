@@ -39,6 +39,23 @@ pub(crate) fn hnsw_ef_construction() -> usize {
 struct BuildState {
     corpus: Vec<(i64, Vec<f32>)>,
     dim: Option<usize>,
+    // M90 (inline label filter): when the index has a 2nd `smallint[]` column, each vector's sorted-deduped label
+    // set (parallel to `corpus`; empty = the row's label was NULL). `has_labels=false` for vector-only indexes →
+    // stays empty and the build produces the unchanged v5/v6 layout.
+    has_labels: bool,
+    labels: Vec<Vec<i16>>,
+}
+
+/// M90 — read a `smallint[]` Datum into a sorted-deduped label set (own code; empty on NULL/empty). Sorted+deduped
+/// so the scan-side overlap check is a cheap merge and the stored form is canonical.
+unsafe fn datum_to_labelset(datum: pg_sys::Datum, is_null: bool) -> Vec<i16> {
+    if is_null {
+        return Vec::new();
+    }
+    let mut v: Vec<i16> = Vec::<i16>::from_datum(datum, false).unwrap_or_default();
+    v.sort_unstable();
+    v.dedup();
+    v
 }
 
 /// Scan the heap once, collecting `(encoded heap TID, vector)` for every live non-NULL-vector tuple. Shared by
@@ -47,8 +64,10 @@ unsafe fn collect_corpus(
     heaprel: pg_sys::Relation,
     indexrel: pg_sys::Relation,
     index_info: *mut pg_sys::IndexInfo,
-) -> (Vec<(i64, Vec<f32>)>, f64) {
-    let mut state = BuildState { corpus: Vec::new(), dim: None };
+) -> (Vec<(i64, Vec<f32>)>, Vec<Vec<i16>>, f64) {
+    // M90: a 2nd index column (`smallint[]`) means label filtering; `ii_NumIndexAttrs > 1`.
+    let has_labels = (*index_info).ii_NumIndexAttrs > 1;
+    let mut state = BuildState { corpus: Vec::new(), dim: None, has_labels, labels: Vec::new() };
     let ntuples = pg_sys::table_index_build_scan(
         heaprel,
         indexrel,
@@ -59,7 +78,7 @@ unsafe fn collect_corpus(
         (&mut state as *mut BuildState).cast::<std::os::raw::c_void>(),
         std::ptr::null_mut(),
     );
-    (state.corpus, ntuples as f64)
+    (state.corpus, state.labels, ntuples as f64)
 }
 
 unsafe fn build_result(ntuples: f64, nindexed: usize) -> *mut pg_sys::IndexBuildResult {
@@ -92,7 +111,7 @@ pub extern "C-unwind" fn ambuild(
     index_info: *mut pg_sys::IndexInfo,
 ) -> *mut pg_sys::IndexBuildResult {
     unsafe {
-        let (corpus, ntuples) = collect_corpus(heaprel, indexrel, index_info);
+        let (corpus, _labels, ntuples) = collect_corpus(heaprel, indexrel, index_info);
         let lists = lists_from_relation(indexrel); // M34 — WITH (lists=N), default 100
         let metric = resolve_metric(indexrel); // M49: cosine/ip/L2 from the opclass, not hardcoded
         // M86 (Roadmap v7): `WITH (soar_lambda=N)` (N>0) spills each vector to a SOAR-chosen second list (fewer
@@ -235,7 +254,7 @@ pub extern "C-unwind" fn ambuild_hnsw(
     index_info: *mut pg_sys::IndexInfo,
 ) -> *mut pg_sys::IndexBuildResult {
     unsafe {
-        let (corpus, ntuples) = collect_corpus(heaprel, indexrel, index_info);
+        let (corpus, _labels_hnsw, ntuples) = collect_corpus(heaprel, indexrel, index_info);
         let corpus_len = corpus.len(); // capture before `build_owned` consumes `corpus` (DoD-4 move, not clone)
         // T4.1: inject the cancellation seam so a long `CREATE INDEX` responds to `pg_cancel_backend` within one
         // parallel batch. `check_for_interrupts!` runs on the leader between batches (all workers joined) — safe
@@ -296,6 +315,11 @@ unsafe extern "C-unwind" fn build_callback(
         Some(d) if d != v.len() => return, // dimension mismatch guard (defensive; the type enforces dim)
         None => st.dim = Some(v.len()),
         _ => {}
+    }
+    // M90: read the 2nd column (label set) when the index declares it. `values`/`isnull` are C arrays of length
+    // ii_NumIndexAttrs; `has_labels` guarantees index 1 is in bounds. A NULL label → empty set (row matches no filter).
+    if st.has_labels {
+        st.labels.push(datum_to_labelset(*values.add(1), *isnull.add(1)));
     }
     st.corpus.push((tid::encode(htid), v));
 }
