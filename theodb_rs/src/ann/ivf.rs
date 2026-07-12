@@ -290,6 +290,11 @@ impl IvfflatIndex {
         self.vectors.len()
     }
 
+    /// M89 — companion to `len()` (satisfies clippy `len_without_is_empty`; a zero-vector index is the empty build).
+    pub(crate) fn is_empty(&self) -> bool {
+        self.vectors.is_empty()
+    }
+
     /// M89 — a deterministic stride subsample of the stored vectors (for the AQ codebook train, which pre-M89
     /// sampled the corpus directly). `k >= n` returns clones of all; the stride is seed-free/reproducible so the
     /// trained codebook is byte-identical to the pre-M89 sample-of-corpus.

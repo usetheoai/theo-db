@@ -1,0 +1,30 @@
+{
+  "milestone": "M89",
+  "title": "ambuild streaming — bounded-memory IVF build",
+  "date": "2026-07-12",
+  "verdict": "DOD_MET",
+  "host": {"provider": "DigitalOcean", "size": "m-8vcpu-64gb", "cpu": "Intel Xeon Platinum 8358 @ 2.60GHz", "vcpu": 8, "ram_gb": 62},
+  "postgres": {"version": "17.10-pgrx", "shared_buffers": "2GB", "maintenance_work_mem": "default"},
+  "methodology": {"peak": "kernel VmHWM (high-water anon-rss) of the CREATE INDEX backend, sampled every 0.3s + read at completion", "runs_per_config": 1, "runs_note": "N=1; VmHWM is a deterministic high-water of the allocation path (low variance) -> defensible for peak-RSS without >=3 runs; build_s is single-run/indicative, NOT the DoD metric (DoD is peak ratio)"},
+  "dataset": {"rows": 30000000, "dim": 128, "dtype": "float32", "base_gb": 15.4, "clusters": 2000, "seed": 42, "note": "synthetic clustered; the build MEMORY peak is dataset-independent of recall — this measures build RSS, not recall"},
+  "index": {"am": "theodb_ivfflat", "lists": 800, "pq_subspaces": 32, "aq_threshold": 2000, "separate_storage": 1},
+  "results": [
+    {"build": "pre-M89 (Increment 1 clone-elim only)", "engine": "v5f32", "peak_gb": 64.7, "ratio": 4.21, "build_s": 1912, "size": null, "outcome": "OOM-killed"},
+    {"build": "M89 (Increment 2 streaming)", "engine": "v5f32", "peak_gb": 19.7, "ratio": 1.28, "build_s": 2128, "size": "15 GB", "outcome": "completes"},
+    {"build": "M89 (Increment 2 streaming)", "engine": "v6sq8", "peak_gb": 23.1, "ratio": 1.50, "build_s": 1990, "size": "4.46 GB", "outcome": "completes"}
+  ],
+  "sq8_vs_f32_size_ratio": 3.36,
+  "correctness": {"pg_tests": 250, "failed": 0, "new_test": "ivfflat_build_owned_byte_identical", "note": "v5/v6 scan==seqscan suites exercise the streaming writers -> byte-correct pages; build_owned asserted byte-identical to build; no magic bump -> no REINDEX"},
+  "findings": {
+    "dod_met": "30M build completes on a 64GB box at 1.28x (v5) / 1.50x (v6) base; pre-M89 OOM'd at 4.21x (reproduces M88)",
+    "increment1_insufficient_measured": "clone-elimination alone re-measured at 4.21x OOM -> the list_entries() clone + writers' enc_vec/items buffering were the dominant copies; streaming page-writes (Increment 2) is what bounded the peak",
+    "sq8_size": "v6/SQ8 index 3.36x smaller than v5/f32 (15GB vs 4.46GB) -- confirms M85/M88"
+  },
+  "caveats": [
+    "plan specified Postgres tuplesort FFI (Option B); implementation achieved the DoD with clone-elimination + streaming page-writes (no FFI) at lower risk -- tuplesort was YAGNI for 30M (parsimony deviation, ADR-0039)",
+    "NOT O(maintenance_work_mem): peak still carries the 1x idx.vectors copy (~15.4GB) -> 100M (~51GB base) still won't fit commodity RAM; true tuplesort vector-streaming is the 100M+ follow-up",
+    "v6/SQ8 at the 1.50x boundary (sq8_codes ~3.8GB buffered); streaming sq8 per-list would lower it, not needed for DoD",
+    "v3/v4 interleaved (non-storage-separated) build paths unchanged -- legacy/non-DoD, still OOM at billion-scale"
+  ],
+  "provenance": {"impl_commit": "fea5dfc", "increment1": "IvfflatIndex::build_owned + accessors", "increment2": "write_ivf_aq_split/_sq8 streaming + pack_block32_codes-by-position", "adr": "docs/adr/0039-m89-ambuild-streaming-verdict.md"}
+}
