@@ -1,0 +1,101 @@
+{
+  "milestone": "M95",
+  "dataset": "SIFT1M",
+  "n": 1000000,
+  "nq": 100,
+  "k": 10,
+  "lists": 1000,
+  "probes": 64,
+  "hardware": "Intel(R) Xeon(R) Platinum 8358 CPU @ 2.60GHz",
+  "methodology": "honest cost model (vecfilter_force=off) auto-selection + forced INLINE vs native POST",
+  "verdict": "HONEST_NEGATIVE_ON_AUTOSELECT_POSITIVE_ON_VALUE",
+  "findings": [
+    "chosen_node=False at every selectivity (R4: native post-filter is probe-blind/under-priced in M48 \u2192 honest node never auto-selected)",
+    "honest cost PREVENTS the loose over-selection harm (the node no longer hijacks any query)",
+    "forced INLINE recall 0.88-0.95 vs native POST recall 0.55-0.67 across 1-25% selectivity (POST is recall-broken in that band; the planner cannot see recall)",
+    "forced INLINE QPS 13x POST at 1% (211 vs 16); QPS crossover ~5-8%",
+    "resolution: theodb.vecfilter_force is the explicit override for the recall the planner is blind to; GUC stays opt-in"
+  ],
+  "sweep": [
+    {
+      "sel": "0.1pct",
+      "chosen_node": false,
+      "post_recall": 1.0,
+      "post_qps": 261.0,
+      "inline_recall": 0.921,
+      "inline_qps": 250.7
+    },
+    {
+      "sel": "0.5pct",
+      "chosen_node": false,
+      "post_recall": 1.0,
+      "post_qps": 77.8,
+      "inline_recall": 0.947,
+      "inline_qps": 232.5
+    },
+    {
+      "sel": "1pct",
+      "chosen_node": false,
+      "post_recall": 0.673,
+      "post_qps": 16.5,
+      "inline_recall": 0.953,
+      "inline_qps": 211.5
+    },
+    {
+      "sel": "2pct",
+      "chosen_node": false,
+      "post_recall": 0.638,
+      "post_qps": 31.2,
+      "inline_recall": 0.937,
+      "inline_qps": 170.7
+    },
+    {
+      "sel": "5pct",
+      "chosen_node": false,
+      "post_recall": 0.593,
+      "post_qps": 71.4,
+      "inline_recall": 0.915,
+      "inline_qps": 104.4
+    },
+    {
+      "sel": "8pct",
+      "chosen_node": false,
+      "post_recall": 0.574,
+      "post_qps": 115.8,
+      "inline_recall": 0.894,
+      "inline_qps": 81.5
+    },
+    {
+      "sel": "12pct",
+      "chosen_node": false,
+      "post_recall": 0.558,
+      "post_qps": 176.9,
+      "inline_recall": 0.89,
+      "inline_qps": 52.6
+    },
+    {
+      "sel": "15pct",
+      "chosen_node": false,
+      "post_recall": 0.551,
+      "post_qps": 227.4,
+      "inline_recall": 0.881,
+      "inline_qps": 48.4
+    },
+    {
+      "sel": "25pct",
+      "chosen_node": false,
+      "post_recall": 0.577,
+      "post_qps": 339.0,
+      "inline_recall": 0.878,
+      "inline_qps": 28.3
+    },
+    {
+      "sel": "50pct",
+      "chosen_node": false,
+      "post_recall": 0.7,
+      "post_qps": 359.4,
+      "inline_recall": 0.85,
+      "inline_qps": 14.1
+    }
+  ]
+}

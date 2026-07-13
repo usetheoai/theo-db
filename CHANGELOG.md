@@ -13,6 +13,17 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Roadmap amended: added M96 tuplesort-streaming ambuild (the M89 follow-up — never materialize the corpus; 100M-build-in-commodity-RAM gate; unlocks the M88 out-of-RAM measurement) (M96)
+- Roadmap amended: added M97 Columnar/HTAP (D2) discovery-first (blueprint + viability benchmark + GO/NO-GO ADR; zero product code by design) (M97)
+
+## [0.82.0] - 2026-07-13
+
+### Added
+- **M95 (honest vecfilter cost model, veredito `READY_TO_MERGE`): the spike's forced `total_cost = min_cost × 0.1` selection heuristic is replaced by an HONEST cost** = term_B (the bitmap sub-plan's produce-only cost — `indextotalcost` for a single-predicate `IndexPath`, no heap-fetch double-count) + term_V (`cost::vecfilter_scan_cost`, re-derived from the bitmap selectivity via `cost::effective_probes`, imaging the M91 adaptive loop; the child IndexPath cost is probe-blind so it cannot be reused). Fail-safe (EC-3): any unreadable meta / null bitmapqual / degenerate input degrades to NOT adding the node (native plan wins) — a `set_rel_pathlist_hook` must never error. The forced hack that made the node hijack EVERY filtered query is gone (`m95_loose_selectivity_not_chosen`). **MEASURED (SIFT1M, DO Xeon Platinum 8358):** the honest cost correctly PREVENTS over-selection; the planner does not auto-select the node at any selectivity because the native post-filter competitor is probe-blind/under-priced (M48 `amcostestimate` unchanged — the blueprint's predicted R4). The node stays correctness-critical: native POST recall 0.55-0.67 vs forced INLINE 0.88-0.95 across 1-25% selectivity + 13× QPS at 1% — the planner cannot see recall (`docs/benchmarks/m95-cost-model.{md,json}`). **Resolution: new `theodb.vecfilter_force` GUC (default off)** — an explicit user override (same rationale as the `enable_*` knobs) for a selective filter whose recall the planner is blind to; the honest cost is the safe default. 273 tests GREEN (6 cost unit tests + loose-not-chosen + multi-predicate regression); no page-format change; GUC-off byte-identical. Sign-off council-index-storage (2 HIGH found in review — heap-fetch double-count + a planner-hook longjmp on a torn meta page — both fixed). Follow-up (tracked): making M48 probe-aware for the filtered case would unlock auto-selection. NOT a QPS-superiority claim vs ScaNN/AlloyDB (teto M73/M82). (M95)
+
+### Fixed
+- `read_page_item_into` now bounds-checks `block < nblocks` (mirroring `read_page_item_at`) — a torn/concurrently-folded meta page no longer raises a C `ereport(ERROR)` longjmp that would abort ALL query planning from a planner hook; it degrades to a typed `Err` → fail-safe (M95 review HIGH-2; also hardens the M48 amcostestimate read path)
+- Roadmap amended: added M95 honest cost model for the vecfilter node (M95)
 
 ### Changed
 

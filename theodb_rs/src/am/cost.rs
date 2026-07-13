@@ -79,12 +79,108 @@ pub(crate) unsafe fn scan_visit_ratio(rel: pg_sys::Relation, tuples: f64) -> f64
     ratio_for(magic, tuples, guc::probes(), lists, HNSW_M, guc::ef_search())
 }
 
+// ---- M95: honest cost model for the vecfilter Custom Scan node ----
+//
+// The node's cost = term_B (the bitmap sub-plan that PRODUCES the membership) + term_V (the vector scan that
+// filters by it). term_B is read directly from the child `bitmapqual.total_cost` by the planner hook. term_V is
+// the part that must be honest about the M91 adaptive probing: a selective filter probes MORE lists at runtime
+// until `rerank_pool` matching candidates accumulate (`scan.rs:641`), so term_V CANNOT reuse the child
+// IndexPath's default-probe cost — it re-derives the effective probe count from the bitmap selectivity here.
+
+/// M95 — the runtime probe count the M91 loop reaches under a filter of selectivity `s` (= matching fraction).
+/// A candidate matches with probability `s`; each probed list yields `avg_list_size` candidates; the loop keeps
+/// probing nearest lists until `rerank_pool` MATCHING candidates accumulate → `probes ≈ rerank_pool /
+/// (s * avg_list_size)`, never below the fixed default (the loop's `probed >= probes` short-circuit) and bounded
+/// by the total list count. Selective `s` → many probes (costlier, higher recall); loose `s` → the default
+/// already fills the pool (cheap — the byte-identical no-filter path).
+///
+/// Fail-safe (EC-3): degenerate inputs (`s <= 0`, `avg_list_size <= 0`, `lists == 0`) return `0.0`, the sentinel
+/// the planner hook treats as "meta unreadable → do not add the node". NEVER panics / divides by zero — a cost
+/// function that aborts would take down ALL query planning.
+pub(crate) fn effective_probes(
+    s: f64,
+    lists: usize,
+    avg_list_size: f64,
+    rerank_pool: f64,
+    probes_default: usize,
+) -> f64 {
+    if s <= 0.0 || avg_list_size <= 0.0 || lists == 0 {
+        return 0.0; // fail-safe sentinel
+    }
+    let needed = rerank_pool / (s * avg_list_size);
+    needed.max(probes_default as f64).clamp(1.0, lists as f64)
+}
+
+/// M95 — the vector-scan-with-membership cost (term_V), priced with the same page/CPU globals `cost_index` uses.
+/// Stage-1 reads `eff_probes` code-page lists; Stage-2 reranks `rerank_pool` survivors with random f32 reads;
+/// per-candidate AH scoring + the centroid sort are CPU. `eff_probes == 0.0` (the fail-safe sentinel) → `0.0`
+/// so the caller detects the degenerate case and falls back.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn vecfilter_scan_cost(
+    eff_probes: f64,
+    pages_per_list: f64,
+    avg_list_size: f64,
+    rerank_pool: f64,
+    lists: usize,
+    spc_random_page_cost: f64,
+    cpu_operator_cost: f64,
+) -> f64 {
+    if eff_probes <= 0.0 {
+        return 0.0; // propagate the fail-safe sentinel
+    }
+    let code_reads = eff_probes * pages_per_list;
+    let candidates = eff_probes * avg_list_size;
+    code_reads * spc_random_page_cost                // Stage-1 code-page reads (partial, O(probes))
+        + rerank_pool * spc_random_page_cost         // Stage-2 rerank random f32 reads
+        + candidates * cpu_operator_cost             // AH scoring per candidate
+        + lists as f64 * cpu_operator_cost // Stage-0 centroid sort
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     // A magic that is neither IVF nor HNSW (forged — a v1/legacy/blob or garbage page).
     const UNKNOWN_MAGIC: u32 = 0xDEAD_BEEF;
+
+    // ---- M95 vecfilter cost model ----
+
+    #[test]
+    fn m95_effective_probes_loose_is_default() {
+        // s=0.5, avg=1000 → needed=64/(0.5*1000)=0.128 → max(8, 0.128)=8. Loose filter → default probes.
+        assert_eq!(effective_probes(0.5, 1024, 1000.0, 64.0, 8), 8.0);
+    }
+
+    #[test]
+    fn m95_effective_probes_selective_grows() {
+        // s=0.001, avg=1000 → needed=64/(0.001*1000)=64 → ≈64 probes (pool-fill count).
+        assert!(effective_probes(0.001, 1024, 1000.0, 64.0, 8) >= 60.0);
+    }
+
+    #[test]
+    fn m95_effective_probes_clamped_to_lists() {
+        // s=1e-6 → needed huge → clamped to the list count.
+        assert_eq!(effective_probes(1e-6, 128, 1000.0, 64.0, 8), 128.0);
+    }
+
+    #[test]
+    fn m95_effective_probes_degenerate_returns_sentinel() {
+        assert_eq!(effective_probes(0.0, 1024, 1000.0, 64.0, 8), 0.0); // s<=0
+        assert_eq!(effective_probes(0.5, 1024, 0.0, 64.0, 8), 0.0); // avg_list_size==0
+        assert_eq!(effective_probes(0.5, 0, 1000.0, 64.0, 8), 0.0); // lists==0
+    }
+
+    #[test]
+    fn m95_scan_cost_monotone_in_probes() {
+        let c8 = vecfilter_scan_cost(8.0, 5.0, 1000.0, 64.0, 1024, 4.0, 0.0025);
+        let c64 = vecfilter_scan_cost(64.0, 5.0, 1000.0, 64.0, 1024, 4.0, 0.0025);
+        assert!(c64 > c8, "cost must grow with probes: c8={c8} c64={c64}");
+    }
+
+    #[test]
+    fn m95_scan_cost_sentinel_propagates() {
+        assert_eq!(vecfilter_scan_cost(0.0, 5.0, 1000.0, 64.0, 1024, 4.0, 0.0025), 0.0);
+    }
 
     #[test]
     fn ivf_ratio_is_probes_over_lists_clamped() {
