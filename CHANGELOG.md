@@ -14,6 +14,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 - Roadmap amended: added M92 arbitrary-WHERE filtered vector search via Custom Scan Provider (Approach B — bitmap over existing indexes → TIDBitmap membership test in the AM Stage-1 scan, for filters on any column; the AlloyDB tier ③ deferred by M90/M91)
+- Roadmap amended: added M93 Custom Scan node integration — assembles the proven M92 spike primitives (node lifecycle + AM membership skip + bitmap materialize) into the 2-child node: MultiExec the bitmapqual sub-plan → materialize → set_membership → drive the vector-ordered child → ExecQual MVCC recheck (lossy/pending/EPQ). Closes M92 end-to-end
 - M92 spike (experimental, OFF by default behind `theodb.enable_vecfilter`): a hand-rolled Custom Scan Provider scaffold + a TID-membership inline skip in the IVF-AQ Stage-1 scan. v0 proves the Custom Scan node lifecycle in pgrx (EXPLAIN shows the node; pass-through result correct); v1a proves an arbitrary TID membership set reaches Stage-1 and filters correctly; v1b-materialize proves a native `TIDBitmap` iterates into exact-TID + lossy-block membership sets. Not yet a user-facing feature — the node↔bitmap sub-plan wiring (MultiExec) and MVCC recheck (v1c) are pending (M92)
 
 ### Changed
