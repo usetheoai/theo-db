@@ -19,9 +19,10 @@ in flight. The bound target is `O(maintenance_work_mem + sample)` — **independ
 | 3,000,000 | 1.5 GB | **0.62 GB** | 0.404× | 722 s |
 | 10,000,000 | 5.1 GB | **0.56 GB** | 0.110× | 1713 s |
 
-**The peak did NOT grow when N tripled (0.65 GB → 0.62 GB, within noise) while the base dataset grew 3× (0.5 → 1.5
-GB).** The `ratio vs base` collapses (1.26× → 0.40×) precisely because the peak is a constant (`≈ mwm + sample +
-one-list buffer`), not a function of N. This is the definitive signature of the `O(maintenance_work_mem)` bound.
+**The peak did NOT grow across a 10× data range (0.65 → 0.62 → 0.56 GB, within noise) while the base dataset grew
+10× (0.5 → 5.1 GB).** The `ratio vs base` collapses (1.26× → 0.11×) precisely because the peak is a constant
+(`≈ mwm + sample + one-list buffer`), not a function of N. This is the definitive signature of the
+`O(maintenance_work_mem)` bound.
 
 ## Comparison to the M88 in-RAM baseline (the wall this removes)
 

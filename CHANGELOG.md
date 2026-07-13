@@ -13,8 +13,15 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- Roadmap amended: added M96 tuplesort-streaming ambuild (the M89 follow-up — never materialize the corpus; 100M-build-in-commodity-RAM gate; unlocks the M88 out-of-RAM measurement) (M96)
 - Roadmap amended: added M97 Columnar/HTAP (D2) discovery-first (blueprint + viability benchmark + GO/NO-GO ADR; zero product code by design) (M97)
+
+## [0.83.0] - 2026-07-13
+
+### Added
+- **M96 (tuplesort-streaming ambuild, veredito `READY_TO_MERGE`): the IVF-AQ v5 build no longer materializes the corpus — peak build RAM is now `O(maintenance_work_mem + sample)`, independent of N.** Mirrors pgvector's `ivfbuild.c` (PostgreSQL License — study, own code): two heap scans (sample-train the centroids + AQ codebook on a bounded 200k prefix, then stream-assign each vector to its nearest centroid inline and `puttupleslot` it into a `tuplesort` that spills past `maintenance_work_mem`), `performsort` by list#, and write the pages list-by-list from the sorted read-back (one list in flight, O(N/lists) buffer). **MEASURED (DO Xeon Platinum 8358, dim 128, mwm=256MB): peak RSS FLAT across a 10× data range — 1M 0.65GB / 3M 0.62GB / 10M 0.56GB, ratio-vs-base collapsing 1.26×→0.11×** (`docs/benchmarks/m96-streaming-build.{md,json}`) — the definitive O(mwm) signature, vs the M88 in-RAM 4.21×-base build that OOM'd at 30M. 30M/100M peaks honestly PROJECTED from the flat curve (~0.6GB vs 64.7GB OOM / impossible), NOT fabricated — the single-threaded assignment wall-clock makes a direct 100M build impractical here (parallel-assign is the deferred follow-up). A per-row bytea leak was found BY the measurement (1.84→0.65GB at 1M) and fixed. Byte-identical v5 on-disk format (no REINDEX); the ≤mwm in-RAM fast-path stays byte-identical; streaming is recall-EQUAL (bounded-sample training). Dispatch is exact on the layout flags — SQ8/v6, label/v7, SOAR keep the in-RAM build (never a silent wrong path); streaming v6/v7 + parallel assignment are documented follow-ups. 277 tests GREEN (4 new: tuplesort FFI roundtrip + 50k-row external spill, streaming recall-in-band, streamed-scan durable). Sign-off council-rust-pgrx (1 HIGH found + fixed — missing `#[pg_guard]` on the two build-scan callbacks → panic/longjmp-across-C). NOT a QPS claim (teto M73/M82). (M96)
+
+### Fixed
+- Roadmap amended: added M96 tuplesort-streaming ambuild (M96)
 
 ## [0.82.0] - 2026-07-13
 
