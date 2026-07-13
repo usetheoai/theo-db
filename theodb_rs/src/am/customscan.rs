@@ -135,8 +135,24 @@ pub fn init() {
     }
 }
 
-/// The planner hook: for a base relation, add a pass-through CustomPath that wraps the cheapest total path.
-/// Gated behind `theodb.enable_vecfilter` (default OFF) so it is inert in production until the spike is enabled.
+/// M93 — the node's exec-time state. Embeds `CustomScanState` as the FIRST field (nodeCustom.c:34-42 sanctions the
+/// provider allocating a larger struct), so `*mut VecFilterState` and `*mut CustomScanState` are interchangeable.
+/// Holds the two child PlanStates: the vector-ordered index scan (which carries the scalar `WHERE` as its own qpqual
+/// Filter — that Filter IS the MVCC recheck of the lossy/pending over-admits) and the bitmap sub-plan (MultiExec'd to
+/// a TIDBitmap for the membership).
+#[repr(C)]
+struct VecFilterState {
+    css: pg_sys::CustomScanState,
+    vector_child: *mut pg_sys::PlanState,
+    bitmap_child: *mut pg_sys::PlanState,
+    membership_active: bool,
+}
+
+/// The planner hook: intercept a filtered vector query — a base rel that has BOTH a vector-ordered path (an
+/// `IndexPath` with distance `pathkeys`, from `ORDER BY e <-> q`) AND a `BitmapHeapPath` (the planner's native bitmap
+/// over the scalar `WHERE`, Rule 9 — reuse its BitmapAnd/Or composition). Build a 2-child `CustomPath`
+/// `[vector_ordered, bitmapqual]`. Anything else (no order, or no indexable filter) is left untouched. Gated behind
+/// `theodb.enable_vecfilter` (default OFF).
 #[pg_guard]
 unsafe extern "C-unwind" fn pathlist_hook(
     root: *mut pg_sys::PlannerInfo,
@@ -144,84 +160,91 @@ unsafe extern "C-unwind" fn pathlist_hook(
     rti: pg_sys::Index,
     rte: *mut pg_sys::RangeTblEntry,
 ) {
-    // Chain the previous hook first (never drop it).
     if let Some(prev) = PREV_HOOK {
         prev(root, rel, rti, rte);
     }
     if !crate::am::guc::vecfilter_enabled() {
         return;
     }
-    // Spike v0: only a plain base relation is wrapped.
     let relref = &mut *rel;
     if relref.reloptkind != pg_sys::RelOptKind::RELOPT_BASEREL {
         return;
     }
-    // NOTE: `cheapest_total_path` is NOT yet set at hook time — `set_cheapest(rel)` runs AFTER the hook in
-    // `set_rel_pathlist()`. So pick the child from the already-generated `rel->pathlist` (the cheapest by
-    // total_cost). Empty pathlist ⇒ nothing to wrap.
+    // Find the vector-ordered path (the only base path with pathkeys — our index's distance ORDER BY) + a
+    // BitmapHeapPath (the scalar filter). Both must exist for this to be a filtered vector query worth intercepting.
     let paths = PgList::<pg_sys::Path>::from_pg(relref.pathlist);
-    let mut child: *mut pg_sys::Path = std::ptr::null_mut();
-    let mut best = f64::INFINITY;
+    let mut vector_path: *mut pg_sys::Path = std::ptr::null_mut();
+    let mut bitmap_path: *mut pg_sys::Path = std::ptr::null_mut();
     for i in 0..paths.len() {
         if let Some(p) = paths.get_ptr(i) {
-            if (*p).total_cost < best {
-                best = (*p).total_cost;
-                child = p;
+            if !(*p).pathkeys.is_null() && vector_path.is_null() {
+                vector_path = p;
+            }
+            if (*p).pathtype == pg_sys::NodeTag::T_BitmapHeapScan && bitmap_path.is_null() {
+                bitmap_path = p;
             }
         }
     }
-    if child.is_null() {
+    if vector_path.is_null() || bitmap_path.is_null() {
         return;
     }
 
-    // Hand-roll `create_customscan_path`: alloc a CustomPath node and populate it by hand.
+    // Hand-roll `create_customscan_path` — a 2-child CustomPath. Preserve the vector path's pathkeys so the node
+    // reports distance-ordered output (no redundant Sort above it). Cost below the vector path so the planner picks
+    // it (past the 1% add_path fuzz factor — spike posture; the real cost model is a follow-up).
     let mut cpath = PgBox::<pg_sys::CustomPath>::alloc_node(pg_sys::NodeTag::T_CustomPath);
     let path = &mut cpath.path;
     path.pathtype = pg_sys::NodeTag::T_CustomScan;
     path.parent = rel;
     path.pathtarget = relref.reltarget;
     path.param_info = std::ptr::null_mut();
-    path.rows = (*child).rows;
-    // Cost must be MEANINGFULLY below the child — `add_path` uses `compare_path_costs_fuzzily` with a 1% fuzz
-    // factor (STD_FUZZ_FACTOR), so a tiny epsilon delta reads as a tie and the new path is rejected in favour of
-    // the existing seqscan. Spike v0 halves the cost to force selection and prove the lifecycle; the real feature
-    // costs the filtered scan honestly.
-    path.startup_cost = (*child).startup_cost * 0.5;
-    path.total_cost = (*child).total_cost * 0.5;
+    path.pathkeys = (*vector_path).pathkeys;
+    path.rows = (*vector_path).rows;
+    // Cost below the CHEAPEST base path so the ordered node beats even a selective bitmap+Sort (which is very cheap
+    // at high selectivity). Spike posture: force selection to prove correctness; an honest cost model (membership-
+    // reduced candidate count) is a follow-up. `startup=0` so a LIMIT prefers it.
+    let mut min_cost = (*vector_path).total_cost;
+    for i in 0..paths.len() {
+        if let Some(p) = paths.get_ptr(i) {
+            if (*p).total_cost < min_cost {
+                min_cost = (*p).total_cost;
+            }
+        }
+    }
+    path.startup_cost = 0.0;
+    path.total_cost = min_cost * 0.1;
     cpath.flags = 0;
-    // Carry the child path so PlanCustomPath receives its planned form in `custom_plans`.
     let mut children = PgList::<pg_sys::Path>::new();
-    children.push(child);
+    children.push(vector_path); // [0] — ordered + carries the scalar Filter (the recheck)
+    children.push(bitmap_path); // [1] — the whole BitmapHeapPath; its planned BitmapHeapScan.lefttree is the
+                                //        bitmap-producing sub-plan (BitmapIndexScan/BitmapAnd) we MultiExec
     cpath.custom_paths = children.into_pg();
     cpath.custom_private = std::ptr::null_mut();
     cpath.methods = &PATH_METHODS.0;
-
     pg_sys::add_path(rel, cpath.into_pg() as *mut pg_sys::Path);
 }
 
-/// Path -> Plan: hand-roll `make_custom_scan`. The child path was planned by the core and handed back in
-/// `custom_plans`; wrap it in a CustomScan node.
+/// Path -> Plan: hand-roll `make_custom_scan`. `custom_plans` holds the planned [vector, bitmap] children. The
+/// node's own `qual` stays empty — the vector child's own qpqual Filter is the recheck (the scalar `WHERE` was
+/// attached to the vector IndexScan by the planner), so the node does not re-filter.
 #[pg_guard]
 unsafe extern "C-unwind" fn plan_custom_path(
     _root: *mut pg_sys::PlannerInfo,
     rel: *mut pg_sys::RelOptInfo,
     _best_path: *mut pg_sys::CustomPath,
     tlist: *mut pg_sys::List,
-    clauses: *mut pg_sys::List,
+    _clauses: *mut pg_sys::List,
     custom_plans: *mut pg_sys::List,
 ) -> *mut pg_sys::Plan {
     let mut cscan = PgBox::<pg_sys::CustomScan>::alloc_node(pg_sys::NodeTag::T_CustomScan);
     let plan = &mut cscan.scan.plan;
     plan.targetlist = tlist;
-    // `clauses` are RestrictInfo nodes — a plan's `qual` must hold BARE expression nodes, so extract them
-    // (else the executor hits "unrecognized node type: T_RestrictInfo"). v0: the child already applies the
-    // filter, so keeping them here is belt-and-suspenders (and the v1 recheck site).
-    plan.qual = pg_sys::extract_actual_clauses(clauses, false);
+    plan.qual = std::ptr::null_mut(); // recheck lives on the vector child's Filter, not on the node
     plan.lefttree = std::ptr::null_mut();
     plan.righttree = std::ptr::null_mut();
     cscan.scan.scanrelid = (*rel).relid;
     cscan.flags = 0;
-    cscan.custom_plans = custom_plans; // the planned child(ren)
+    cscan.custom_plans = custom_plans; // [vector_plan, bitmap_plan]
     cscan.custom_exprs = std::ptr::null_mut();
     cscan.custom_private = std::ptr::null_mut();
     cscan.custom_scan_tlist = std::ptr::null_mut();
@@ -230,66 +253,111 @@ unsafe extern "C-unwind" fn plan_custom_path(
     cscan.into_pg() as *mut pg_sys::Plan
 }
 
-/// Plan -> ScanState: allocate the CustomScanState with our exec methods. v0 keeps state in `custom_ps`
-/// (the child PlanState list), so no custom-struct embedding is needed yet.
+/// Plan -> ScanState: allocate the `VecFilterState` (embeds CustomScanState first) via `palloc0` and set the node
+/// tag + exec methods by hand (`PgBox::alloc_node` only knows the base struct).
 #[pg_guard]
-unsafe extern "C-unwind" fn create_custom_scan_state(cscan: *mut pg_sys::CustomScan) -> *mut pg_sys::Node {
-    let mut css = PgBox::<pg_sys::CustomScanState>::alloc_node(pg_sys::NodeTag::T_CustomScanState);
-    css.methods = &EXEC_METHODS.0;
-    // Stash nothing else in v0; `custom_ps` is filled at BeginCustomScan from cscan.custom_plans.
-    let _ = cscan;
-    css.into_pg() as *mut pg_sys::Node
+unsafe extern "C-unwind" fn create_custom_scan_state(_cscan: *mut pg_sys::CustomScan) -> *mut pg_sys::Node {
+    let ptr = pg_sys::palloc0(std::mem::size_of::<VecFilterState>()) as *mut VecFilterState;
+    let st = &mut *ptr;
+    st.css.ss.ps.type_ = pg_sys::NodeTag::T_CustomScanState;
+    st.css.methods = &EXEC_METHODS.0;
+    ptr as *mut pg_sys::Node
 }
 
-/// Exec init: initialize the child plan into a PlanState and stash it in `custom_ps`.
+/// Exec init: init both children; MultiExec the bitmap child → TIDBitmap → materialize → `set_membership`. The
+/// membership is set BEFORE the vector child is first pulled (in `exec`), so the AM Stage-1 pre-filters by it.
 #[pg_guard]
 unsafe extern "C-unwind" fn begin_custom_scan(
     node: *mut pg_sys::CustomScanState,
     estate: *mut pg_sys::EState,
     eflags: c_int,
 ) {
-    let css = &mut *node;
-    let cscan = css.ss.ps.plan as *mut pg_sys::CustomScan;
+    // Defensive: clear any membership a prior scan in this backend left behind on an `error!` longjmp (anti-leak).
+    set_membership(None);
+    let st = &mut *(node as *mut VecFilterState);
+    let cscan = st.css.ss.ps.plan as *mut pg_sys::CustomScan;
     let planned = PgList::<pg_sys::Plan>::from_pg((*cscan).custom_plans);
-    let child_plan = match planned.get_ptr(0) {
+    let vplan = match planned.get_ptr(0) {
         Some(p) => p,
-        None => pg_sys::error!("theodb vecfilter: CustomScan has no child plan"),
+        None => pg_sys::error!("theodb vecfilter: missing vector child plan"),
     };
-    let child_ps = pg_sys::ExecInitNode(child_plan, estate, eflags);
+    let bplan = match planned.get_ptr(1) {
+        Some(p) => p,
+        None => pg_sys::error!("theodb vecfilter: missing bitmap child plan"),
+    };
+    // `bplan` is the planned BitmapHeapScan; its `lefttree` is the bitmap-PRODUCING sub-plan (BitmapIndexScan or
+    // BitmapAnd) — the node MultiExecs THAT, not the heap scan. (`create_plan(bitmapqual)` alone would make a plain
+    // IndexScan, which MultiExecProcNode rejects as "unrecognized node type: T_IndexScanState".)
+    let bitmap_subplan = (*bplan).lefttree;
+    if bitmap_subplan.is_null() {
+        pg_sys::error!("theodb vecfilter: BitmapHeapScan has no bitmap sub-plan");
+    }
+    st.vector_child = pg_sys::ExecInitNode(vplan, estate, eflags);
+    st.bitmap_child = pg_sys::ExecInitNode(bitmap_subplan, estate, eflags);
+    // Show the vector child under the node in EXPLAIN.
     let mut ps_list = PgList::<pg_sys::PlanState>::new();
-    ps_list.push(child_ps);
-    css.custom_ps = ps_list.into_pg();
+    ps_list.push(st.vector_child);
+    st.css.custom_ps = ps_list.into_pg();
+    // Under `EXPLAIN` without `ANALYZE` (EXEC_FLAG_EXPLAIN_ONLY) the children are init'd for DISPLAY only, not for
+    // execution — `MultiExecProcNode` on an un-run bitmap child would crash. Skip the bitmap materialization; the
+    // node just shows its shape.
+    if (eflags & pg_sys::EXEC_FLAG_EXPLAIN_ONLY as c_int) != 0 {
+        return;
+    }
+    // MultiExec the bitmap → TIDBitmap (nodeBitmapHeapscan.c:110 pattern; tag-check, not the absent `IsA`).
+    let res = pg_sys::MultiExecProcNode(st.bitmap_child);
+    if res.is_null() || (*(res as *mut pg_sys::Node)).type_ != pg_sys::NodeTag::T_TIDBitmap {
+        pg_sys::error!("theodb vecfilter: bitmap subplan did not return a TIDBitmap");
+    }
+    let (exact, lossy) = materialize_bitmap(res as *mut pg_sys::TIDBitmap);
+    set_membership(Some(Membership { exact, lossy }));
+    st.membership_active = true;
 }
 
-/// Exec next tuple: pure pass-through — pull from the child and return its slot.
+/// Exec next tuple: pull the next distance-ordered, membership-surviving tuple from the vector child. The child's own
+/// qpqual Filter has already rechecked the scalar `WHERE` on the heap tuple (removing lossy/pending over-admits), so
+/// the node just forwards it.
 #[pg_guard]
 unsafe extern "C-unwind" fn exec_custom_scan(node: *mut pg_sys::CustomScanState) -> *mut pg_sys::TupleTableSlot {
-    let css = &mut *node;
-    let ps_list = PgList::<pg_sys::PlanState>::from_pg(css.custom_ps);
-    let child_ps = match ps_list.get_ptr(0) {
-        Some(p) => p,
-        None => return std::ptr::null_mut(),
-    };
-    pg_sys::ExecProcNode(child_ps)
+    let st = &mut *(node as *mut VecFilterState);
+    if st.vector_child.is_null() {
+        return std::ptr::null_mut();
+    }
+    pg_sys::ExecProcNode(st.vector_child)
 }
 
-/// Exec teardown: end the child PlanState.
+/// Exec teardown: clear the membership (anti-leak contract) and end both children. The TIDBitmap is owned by the
+/// bitmap child's context — do NOT `tbm_free` it (double-free); `ExecEndNode(bitmap_child)` frees it.
 #[pg_guard]
 unsafe extern "C-unwind" fn end_custom_scan(node: *mut pg_sys::CustomScanState) {
-    let css = &mut *node;
-    let ps_list = PgList::<pg_sys::PlanState>::from_pg(css.custom_ps);
-    if let Some(child_ps) = ps_list.get_ptr(0) {
-        pg_sys::ExecEndNode(child_ps);
+    let st = &mut *(node as *mut VecFilterState);
+    if st.membership_active {
+        set_membership(None);
+        st.membership_active = false;
+    }
+    if !st.vector_child.is_null() {
+        pg_sys::ExecEndNode(st.vector_child);
+    }
+    if !st.bitmap_child.is_null() {
+        pg_sys::ExecEndNode(st.bitmap_child);
     }
 }
 
-/// ReScan: forward to the child.
+/// ReScan: re-derive the membership (the bitmap child may depend on changed params) and rescan both children.
 #[pg_guard]
 unsafe extern "C-unwind" fn rescan_custom_scan(node: *mut pg_sys::CustomScanState) {
-    let css = &mut *node;
-    let ps_list = PgList::<pg_sys::PlanState>::from_pg(css.custom_ps);
-    if let Some(child_ps) = ps_list.get_ptr(0) {
-        pg_sys::ExecReScan(child_ps);
+    let st = &mut *(node as *mut VecFilterState);
+    if !st.bitmap_child.is_null() {
+        pg_sys::ExecReScan(st.bitmap_child);
+        let res = pg_sys::MultiExecProcNode(st.bitmap_child);
+        if !res.is_null() && (*(res as *mut pg_sys::Node)).type_ == pg_sys::NodeTag::T_TIDBitmap {
+            let (exact, lossy) = materialize_bitmap(res as *mut pg_sys::TIDBitmap);
+            set_membership(Some(Membership { exact, lossy }));
+            st.membership_active = true;
+        }
+    }
+    if !st.vector_child.is_null() {
+        pg_sys::ExecReScan(st.vector_child);
     }
 }
 
@@ -298,39 +366,68 @@ unsafe extern "C-unwind" fn rescan_custom_scan(node: *mut pg_sys::CustomScanStat
 mod tests {
     use pgrx::prelude::*;
 
-    /// M92 spike v0 — the Custom Scan Provider lifecycle proof. With `theodb.enable_vecfilter=on`, a filtered
-    /// vector query is intercepted by the pass-through Custom Scan node: EXPLAIN shows the node AND the result is
-    /// byte-identical to the un-hooked plan (pass-through correctness). Guards the hand-rolled node construction
-    /// (registration → pathlist hook → CustomPath → CustomScan → exec) end-to-end.
+    /// M93 T2.1 — arbitrary-`WHERE` filtered vector search via the 2-child Custom Scan node equals the exact
+    /// seqscan-filtered result, on a NON-label scalar column (`cat`, btree-indexed → a bitmap sub-plan). The hook
+    /// injects the node (EXPLAIN shows `Custom Scan (theodb_vecfilter)` with 2 children); the node MultiExecs the
+    /// bitmap → membership → drives the vector-ordered child (whose own qpqual Filter is the MVCC recheck). The
+    /// filtered id set MUST equal the exact seqscan-filtered top-k.
     #[pgrx::pg_test]
-    fn m92_customscan_lifecycle_passthrough() {
+    fn m93_t2_customscan_arbitrary_where_equals_seqscan() {
+        use std::collections::HashSet;
         Spi::run("CREATE TABLE cs92 (id int PRIMARY KEY, cat int, e vector(4))").unwrap();
-        for i in 1..=60i32 {
-            let lit = format!("[{},{},{},{}]", i, i * 2, i * 3, i % 7);
-            Spi::run(&format!("INSERT INTO cs92 VALUES ({i}, {}, '{lit}')", i % 5)).unwrap();
-        }
-        Spi::run("CREATE INDEX cs92_e ON cs92 USING theodb_ivfflat (e) WITH (lists=4, pq_subspaces=2, aq_threshold=2000, separate_storage=1)").unwrap();
+        // 1000 rows, cat = id%100 (1% per value → the planner generates a BitmapHeapPath for the filter).
+        Spi::run("INSERT INTO cs92 SELECT g, g%100, ('['||g||','||(g*2)||','||(g*3)||','||(g%7)||']')::vector FROM generate_series(1,1000) g").unwrap();
+        Spi::run("CREATE INDEX cs92_e ON cs92 USING theodb_ivfflat (e) WITH (lists=8, pq_subspaces=2, aq_threshold=2000, separate_storage=1)").unwrap();
+        Spi::run("CREATE INDEX cs92_cat ON cs92 (cat)").unwrap();
+        Spi::run("ANALYZE cs92").unwrap();
         let q = "[10,20,30,3]";
-        let filt = "cat = 2";
-        // Baseline: hook OFF.
-        let base: Vec<i32> = Spi::connect(|c| {
-            c.select("SET theodb.enable_vecfilter=off", None, &[]).ok();
+        let filt = "cat = 7";
+        // Exact ground truth via seqscan.
+        let exact: HashSet<i32> = Spi::connect(|c| {
+            c.select("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on", None, &[]).ok();
             c.select(&format!("SELECT id FROM cs92 WHERE {filt} ORDER BY e <-> '{q}'::vector LIMIT 5"), None, &[])
                 .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
         });
-        // Hook ON: the plan must contain the Custom Scan node AND return the identical result.
+        // Hook ON — reset every enable_* GUC the exact block flipped (they persist in-session), then force the
+        // bitmap path (enable_seqscan off so the planner keeps the BitmapHeapPath the hook needs).
+        let hooked_setup = "SET theodb.enable_vecfilter=on; SET enable_indexscan=on; SET enable_bitmapscan=on; SET enable_seqscan=off; SET theodb_ivfflat.probes=8";
         let plan: String = Spi::connect(|c| {
-            c.select("SET theodb.enable_vecfilter=on", None, &[]).ok();
+            c.select(hooked_setup, None, &[]).ok();
             c.select(&format!("EXPLAIN (COSTS OFF) SELECT id FROM cs92 WHERE {filt} ORDER BY e <-> '{q}'::vector LIMIT 5"), None, &[])
                 .unwrap().filter_map(|r| r.get::<String>(1).unwrap()).collect::<Vec<_>>().join("\n")
         });
         assert!(plan.contains("Custom Scan (theodb_vecfilter)"), "hook ON must inject the Custom Scan node (plan:\n{plan})");
-        let hooked: Vec<i32> = Spi::connect(|c| {
-            c.select("SET theodb.enable_vecfilter=on", None, &[]).ok();
+        let hooked: HashSet<i32> = Spi::connect(|c| {
+            c.select(hooked_setup, None, &[]).ok();
             c.select(&format!("SELECT id FROM cs92 WHERE {filt} ORDER BY e <-> '{q}'::vector LIMIT 5"), None, &[])
                 .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
         });
-        assert_eq!(hooked, base, "the pass-through Custom Scan must return the identical result to the un-hooked plan");
+        assert_eq!(hooked, exact, "the 2-child Custom Scan filtered result must equal the exact seqscan-filtered top-5 (hooked={hooked:?} exact={exact:?})");
+    }
+
+    /// M93 T2.1 — a post-build INSERT with a NON-matching `cat` (pending region, no stored membership) must NOT
+    /// appear in a filtered result: the vector child's qpqual Filter rechecks `cat` on the heap tuple and rejects it.
+    #[pgrx::pg_test]
+    fn m93_t2_customscan_pending_rechecked() {
+        Spi::run("CREATE TABLE cs92p (id int PRIMARY KEY, cat int, e vector(4))").unwrap();
+        Spi::run("INSERT INTO cs92p SELECT g, g%100, ('['||g||','||(g*2)||',0,0]')::vector FROM generate_series(1,1000) g").unwrap();
+        Spi::run("CREATE INDEX cs92p_e ON cs92p USING theodb_ivfflat (e) WITH (lists=8, pq_subspaces=2, aq_threshold=2000, separate_storage=1)").unwrap();
+        Spi::run("CREATE INDEX cs92p_cat ON cs92p (cat)").unwrap();
+        // Post-build INSERT → PENDING region, cat=99 (NON-matching the cat=7 filter), vector right at the query.
+        Spi::run("INSERT INTO cs92p VALUES (9999, 99, '[0,0,0,0]')").unwrap();
+        Spi::run("ANALYZE cs92p").unwrap();
+        let plan: String = Spi::connect(|c| {
+            c.select("SET theodb.enable_vecfilter=on; SET enable_seqscan=off; SET theodb_ivfflat.probes=8", None, &[]).ok();
+            c.select("EXPLAIN (COSTS OFF) SELECT id FROM cs92p WHERE cat=7 ORDER BY e <-> '[0,0,0,0]'::vector LIMIT 10", None, &[])
+                .unwrap().filter_map(|r| r.get::<String>(1).unwrap()).collect::<Vec<_>>().join("\n")
+        });
+        assert!(plan.contains("Custom Scan (theodb_vecfilter)"), "the node must fire so its recheck is exercised (plan:\n{plan})");
+        let ids: Vec<i32> = Spi::connect(|c| {
+            c.select("SET theodb.enable_vecfilter=on; SET enable_seqscan=off; SET theodb_ivfflat.probes=8", None, &[]).ok();
+            c.select("SELECT id FROM cs92p WHERE cat=7 ORDER BY e <-> '[0,0,0,0]'::vector LIMIT 10", None, &[])
+                .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
+        });
+        assert!(!ids.contains(&9999), "the non-matching pending row (cat=99) must be rechecked out of a cat=7 filter (got {ids:?})");
     }
 
     /// The hook is inert when the GUC is off (default): no Custom Scan node appears — production queries untouched.
