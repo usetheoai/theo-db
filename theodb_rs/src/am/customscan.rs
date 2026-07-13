@@ -311,7 +311,11 @@ unsafe extern "C-unwind" fn begin_custom_scan(
     };
     // `bplan` is the planned BitmapHeapScan; its `lefttree` is the bitmap-PRODUCING sub-plan (BitmapIndexScan or
     // BitmapAnd) — the node MultiExecs THAT, not the heap scan. (`create_plan(bitmapqual)` alone would make a plain
-    // IndexScan, which MultiExecProcNode rejects as "unrecognized node type: T_IndexScanState".)
+    // IndexScan, which MultiExecProcNode rejects as "unrecognized node type: T_IndexScanState".) Tag-check first
+    // (council M2 — defense in depth before dereferencing `.lefttree`).
+    if (*bplan).type_ != pg_sys::NodeTag::T_BitmapHeapScan {
+        pg_sys::error!("theodb vecfilter: bitmap child is not a BitmapHeapScan");
+    }
     let bitmap_subplan = (*bplan).lefttree;
     if bitmap_subplan.is_null() {
         pg_sys::error!("theodb vecfilter: BitmapHeapScan has no bitmap sub-plan");
