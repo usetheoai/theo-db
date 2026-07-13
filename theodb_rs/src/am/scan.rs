@@ -501,10 +501,20 @@ unsafe fn scan_ivf_aq_split(
     // engages on the plain-vector v5 layout (not just the v7 label layout): Stage-1 skips candidates whose TID is
     // not a member, so the rerank pool fills with matching candidates instead of being starved by the post-filter.
     let membership = crate::am::customscan::membership();
+    // M91 selectivity-adaptive probing (generalized to v5): a selective membership starves the fixed `probes` (the
+    // true matching NN hide in unprobed lists — measured INLINE recall 0.91 vs POST 1.0 at fixed probes), so when
+    // filtering, keep probing nearest lists past `probes` until the matching-candidate pool reaches `rerank_pool`.
+    // Empty membership ⇒ break at exactly `probes` (byte-identical to the old `.take(probes)` scan).
+    let filtering = membership.is_some();
 
     // Stage 1 — read ONLY the CODE pages of each probed list; AH-score; keep (score, tid, list_ci, ordinal).
     let mut cands: Vec<(i32, i64, usize, usize)> = Vec::new();
-    for &(_, ci) in cd.iter().take(probes) {
+    let mut probed = 0usize;
+    for &(_, ci) in cd.iter() {
+        if probed >= probes && (!filtering || cands.len() >= rerank_pool) {
+            break;
+        }
+        probed += 1;
         let (cfb, cnp, _vfb, _vnp, cnt) = meta.dir[ci];
         let n = cnt as usize;
         if n == 0 {
