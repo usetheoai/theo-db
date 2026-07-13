@@ -1,0 +1,45 @@
+{
+  "milestone": "M92/M93",
+  "title": "arbitrary-WHERE filtered vector search — INLINE (Custom Scan node, bitmap→membership) vs POST (native post-filter), SIFT1M",
+  "date": "2026-07-13",
+  "verdict": "GO — INLINE dominates POST on BOTH recall and QPS at the selective regime where post-filter starves",
+  "host": {"provider": "DigitalOcean", "cpu": "Intel Xeon Gold 6548N", "vcpu": 8, "ram_gb": 15},
+  "dataset": {"name": "SIFT1M", "rows": 1000000, "dim": 128, "queries": 100, "scalar_column": "cat = id%1000 (btree-indexed, NON-label)", "note": "real SIFT neighbors — recall meaningful (M91 tie-density lesson)"},
+  "params": {"lists": 1000, "pq_subspaces": 32, "index": "v5 plain-vector IVF-AQ (separate_storage=1) — the realistic plain-(e)-index case", "k": 10, "probes_post": 64, "build_s": 692},
+  "ground_truth": "exact seqscan-filtered top-10 (WHERE <scalar> ORDER BY e <-> q LIMIT 10), same 100 SIFT queries",
+  "methodology": "matched-recall / recall-QPS frontier (M45): POST = native vector index scan + Filter (enable_indexscan on, vecfilter off); INLINE = the Custom Scan node (bitmap sub-plan → TID membership → v5 Stage-1 inline skip + M91 adaptive probing), probe-swept",
+  "results": {
+    "1pct_where_cat_lt_10": {
+      "post": {"recall": 0.673, "qps": 21.2},
+      "inline": [
+        {"probes": 64, "recall": 0.953, "qps": 265.7},
+        {"probes": 128, "recall": 0.969, "qps": 206.4},
+        {"probes": 256, "recall": 0.968, "qps": 146.7},
+        {"probes": 500, "recall": 0.969, "qps": 93.3}
+      ]
+    },
+    "5pct_where_cat_lt_50": {
+      "post": {"recall": 0.593, "qps": 91.9},
+      "inline": [
+        {"probes": 64, "recall": 0.915, "qps": 125.9},
+        {"probes": 128, "recall": 0.910, "qps": 106.8},
+        {"probes": 256, "recall": 0.910, "qps": 82.0},
+        {"probes": 500, "recall": 0.912, "qps": 56.1}
+      ]
+    }
+  },
+  "verdict_detail": {
+    "1pct": "INLINE (probes=64) recall 0.953 @ 266 qps vs POST recall 0.673 @ 21 qps — +0.28 recall AND ~12x QPS",
+    "5pct": "INLINE (probes=64) recall 0.915 @ 126 qps vs POST recall 0.593 @ 92 qps — +0.32 recall AND ~1.4x QPS",
+    "why": "POST (native post-filter) starves at selective filters — the vector index scan scores candidates then the executor Filter drops the non-matching, so the top-k is starved (the M87/M90 problem). INLINE pre-filters via the bitmap membership in Stage-1 (only matching candidates enter the rerank pool) + M91 adaptive probing, so recall is high AND the scan is fast."
+  },
+  "correctness": {"tests_total": 263, "tests_note": "count is the full `cargo pgrx test` output (pg_tests + unit tests); node presence in the timed path is asserted by the m93_t2 pg_test (EXPLAIN contains the node). the m93_t2 pg_tests prove the INLINE result is byte-identical to exact seqscan on a non-label column; pending + lossy-block rechecked; GUC-off path byte-identical (0 regression)"},
+  "boundary": [
+    "the inline pre-filter engages on both the v5 plain-vector and v7 label IVF-AQ layouts; the Custom Scan node is OFF by default (theodb.enable_vecfilter)",
+    "single run per point (the margin is large: +0.28 recall, up to 12x QPS)",
+    "the node's cost model is a spike heuristic (cost below cheapest to force selection); an honest cost model is a follow-up",
+    "NOT a QPS-superiority claim vs ScaNN/AlloyDB (paradigm ceiling M73/M82) — a capability + recall-QPS-Pareto result vs the native post-filter, measured",
+    "boundary: scalar WHERE over existing indexes; NOT the AlloyDB core cross-index mid-query re-plan (tier IV)"
+  ],
+  "provenance": {"harness": "benchmarks/m92_arbitrary_where_bench.py", "raw_log": "docs/benchmarks/m92-arbitrary-where.log", "impl_commits": ["4d542a7", "c8db947", "05b7940"], "blueprint": "knowledge-base/discoveries/blueprints/arbitrary-where-custom-scan-blueprint.md"}
+}
