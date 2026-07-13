@@ -24,6 +24,17 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.81.0] - 2026-07-13
+
+### Added
+- **M94 (per-scan membership scoping, veredito `READY_TO_MERGE`): filtered `UNION`/self-join/partitioned-`Append` vector queries now WORK** — the capability the M93 fail-loud guard refused. Each vecfilter Custom Scan node stores its membership in a thread-local registry keyed by the node pointer and installs it only during its own synchronous child-pull windows (RAII swap-discipline, re-entrant for SubPlan nesting); xact/subxact-abort callbacks close the longjmp-leak paths (incl. PL/pgSQL `EXCEPTION` = subxact abort, and `PREPARE TRANSACTION`). Resolves the M92/M93 review's convergent BLOCKER (per-backend membership cross-contamination) — the owning council re-reviewed against the PG17 source and declared it "genuinely fixed, not papered over". New pg_tests: UNION of two filtered scans == union of exact seqscans (both nodes asserted in the plan), rescanned inner correct, subxact abort clears a stale membership. **265 tests GREEN**; benchmark spot-check recall **byte-identical** to v0.80.1 at every point (QPS delta = droplet host variance, both arms uniformly; documented). (M94)
+
+### Fixed
+- vecfilter: a fresh `TIDBitmap` was leaked on every node begin/rescan (`ExecEndBitmapIndexScan` does not free it — the prior comment claiming otherwise was wrong); now freed immediately after materialization (M94 review MEDIUM-2)
+- vecfilter: the membership swap-restore is now unwind-safe via an RAII guard (a PG error inside the child pull no longer relies solely on the abort callbacks) (M94 review MEDIUM-1)
+- vecfilter: the planner hook now requires unparameterized children — a parameterized LATERAL bitmap path would have violated the node's `param_info = NULL` contract; such queries fall back to native plans (M94 hardening)
+- Roadmap amended: added M94 per-scan membership scoping (M94)
+
 ## [0.80.1] - 2026-07-13
 
 ### Fixed

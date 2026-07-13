@@ -40,16 +40,30 @@ pub(crate) struct Membership {
 }
 
 thread_local! {
+    // The ACTIVE slot the AM reads. M94: only ever non-None DURING a vecfilter node's pull window (swap-discipline)
+    // — never across statements, so multiple nodes in one plan each see only their own set.
     static SCAN_MEMBERSHIP: RefCell<Option<Rc<Membership>>> = const { RefCell::new(None) };
+    // M94 — per-node membership registry, keyed by the CustomScanState pointer. Rust-side storage (normal Drop) —
+    // NEVER store an `Rc` inside the palloc0'd VecFilterState: Postgres frees that memory without running Drop, so
+    // the (potentially tens-of-MB) HashSets would leak per query (ADR M94-2).
+    static NODE_MEMBERSHIPS: RefCell<std::collections::HashMap<usize, Rc<Membership>>> =
+        RefCell::new(std::collections::HashMap::new());
 }
 
-/// Set the TID membership the next index scan in THIS backend must filter by. `None` clears it. Called by the Custom
-/// Scan node's `BeginCustomScan` before driving the AM scan.
+/// Set the ACTIVE membership slot directly. Test-only API (the node path goes through the registry + swap).
 pub(crate) fn set_membership(m: Option<Membership>) {
     SCAN_MEMBERSHIP.with(|c| *c.borrow_mut() = m.map(Rc::new));
 }
 
-/// Read the active membership (cheap Rc clone) for this backend, or `None`. Read by the AM Stage-1 scan.
+/// M94 — swap the ACTIVE slot, returning the previous value. The save/restore stack discipline around each child
+/// pull: re-entrant by construction (a SubPlan inside the child's Filter that runs another vecfilter node nests
+/// correctly — it saves ours, installs its own, restores ours).
+pub(crate) fn swap_active(m: Option<Rc<Membership>>) -> Option<Rc<Membership>> {
+    SCAN_MEMBERSHIP.with(|c| std::mem::replace(&mut *c.borrow_mut(), m))
+}
+
+/// Read the active membership (cheap Rc clone) for this backend, or `None`. Read by the AM Stage-1 scan — only ever
+/// non-None inside the owning node's pull window (M94).
 pub(crate) fn membership() -> Option<Rc<Membership>> {
     SCAN_MEMBERSHIP.with(|c| c.borrow().clone())
 }
@@ -57,6 +71,47 @@ pub(crate) fn membership() -> Option<Rc<Membership>> {
 /// Whether a membership filter is active (used by `amrescan` to keep `xs_recheck` on).
 pub(crate) fn has_membership() -> bool {
     SCAN_MEMBERSHIP.with(|c| c.borrow().is_some())
+}
+
+/// M94 — store a node's membership in the per-node registry (replacing any previous entry for the node).
+fn registry_insert(node: usize, m: Membership) {
+    NODE_MEMBERSHIPS.with(|r| {
+        r.borrow_mut().insert(node, Rc::new(m));
+    });
+}
+
+/// M94 — fetch a node's membership from the registry (cheap Rc clone).
+fn registry_get(node: usize) -> Option<Rc<Membership>> {
+    NODE_MEMBERSHIPS.with(|r| r.borrow().get(&node).cloned())
+}
+
+/// M94 — drop a node's registry entry (frees the sets via normal Rust Drop).
+fn registry_remove(node: usize) {
+    NODE_MEMBERSHIPS.with(|r| {
+        r.borrow_mut().remove(&node);
+    });
+}
+
+/// M94 — wholesale cleanup at transaction end: entries orphaned by an error-longjmp (EndCustomScan skipped) are
+/// freed here; the ACTIVE slot is cleared too.
+fn clear_all_memberships() {
+    let _ = swap_active(None);
+    NODE_MEMBERSHIPS.with(|r| r.borrow_mut().clear());
+}
+
+/// M94 review MEDIUM-1 — RAII guard making the pull-window swap locally unwind-safe: a PG ERROR inside the child
+/// pull becomes (via pgrx's FFI guard) a Rust panic that unwinds through our frame — Drop restores the previous
+/// ACTIVE value even then, demoting the xact/subxact abort callbacks to belt-and-braces.
+struct ActiveGuard(Option<Rc<Membership>>);
+impl ActiveGuard {
+    fn install(mine: Option<Rc<Membership>>) -> Self {
+        ActiveGuard(swap_active(mine))
+    }
+}
+impl Drop for ActiveGuard {
+    fn drop(&mut self) {
+        let _ = swap_active(self.0.take());
+    }
 }
 
 /// M92 v1b — materialize a native `TIDBitmap` (produced by a bitmap sub-plan's `MultiExecProcNode`) into the
@@ -126,23 +181,50 @@ static EXEC_METHODS: Methods<pg_sys::CustomExecMethods> = Methods(pg_sys::Custom
 // The previous `set_rel_pathlist_hook` in the chain (Postgres allows only one; we must call it).
 static mut PREV_HOOK: pg_sys::set_rel_pathlist_hook_type = None;
 
-/// Clears the backend membership on transaction ABORT — so a `pg_sys::error!` longjmp mid-scan (which skips
-/// `end_custom_scan`) cannot leave a stale membership that a later plain IVF scan in the same backend would wrongly
-/// filter by (council-index-storage MEDIUM-1 / council-rust-pgrx H1).
+/// Transaction-end cleanup (M94): on COMMIT and ABORT (+ parallel variants), clear the ACTIVE slot AND the whole
+/// registry — entries orphaned by an error-longjmp (EndCustomScan skipped) are freed here, bounding any leak to
+/// one transaction. On ABORT this is also the correctness guard: a `pg_sys::error!` longjmp mid-pull skips the
+/// swap-restore, and this clear prevents the stale ACTIVE from filtering a later plain scan (council H1/MEDIUM-1).
 #[pg_guard]
 unsafe extern "C-unwind" fn xact_clear_membership(event: pg_sys::XactEvent::Type, _arg: *mut std::ffi::c_void) {
-    if event == pg_sys::XactEvent::XACT_EVENT_ABORT || event == pg_sys::XactEvent::XACT_EVENT_PARALLEL_ABORT {
-        set_membership(None);
+    use pg_sys::XactEvent as XE;
+    if event == XE::XACT_EVENT_ABORT
+        || event == XE::XACT_EVENT_PARALLEL_ABORT
+        || event == XE::XACT_EVENT_COMMIT
+        || event == XE::XACT_EVENT_PARALLEL_COMMIT
+        || event == XE::XACT_EVENT_PREPARE
+    {
+        // PREPARE (review LOW-2): `PREPARE TRANSACTION` ends the local xact without a COMMIT/ABORT event —
+        // clear here too so orphaned entries never survive into the backend's next transaction.
+        clear_all_memberships();
     }
 }
 
-/// Register the Custom Scan methods + install the pathlist hook + the xact-abort membership guard. From `_PG_init`.
+/// Subtransaction-abort cleanup (M94, ADR M94-3): a PL/pgSQL `EXCEPTION` handler aborts only the SUBxact — the
+/// xact callback never fires — so a mid-pull longjmp caught by an EXCEPTION block would leave a stale ACTIVE slot.
+/// Clear ONLY the ACTIVE slot here: registry entries of unrelated live scans (e.g. an open cursor over a filtered
+/// vector scan) must survive an unrelated subxact abort — their next pull re-installs from the registry
+/// (self-healing), and orphaned entries are freed at xact end.
+#[pg_guard]
+unsafe extern "C-unwind" fn subxact_clear_membership(
+    event: pg_sys::SubXactEvent::Type,
+    _my_subid: pg_sys::SubTransactionId,
+    _parent_subid: pg_sys::SubTransactionId,
+    _arg: *mut std::ffi::c_void,
+) {
+    if event == pg_sys::SubXactEvent::SUBXACT_EVENT_ABORT_SUB {
+        let _ = swap_active(None);
+    }
+}
+
+/// Register the Custom Scan methods + install the pathlist hook + the xact/subxact membership guards. From `_PG_init`.
 pub fn init() {
     unsafe {
         pg_sys::RegisterCustomScanMethods(&SCAN_METHODS.0);
         PREV_HOOK = pg_sys::set_rel_pathlist_hook;
         pg_sys::set_rel_pathlist_hook = Some(pathlist_hook);
         pg_sys::RegisterXactCallback(Some(xact_clear_membership), std::ptr::null_mut());
+        pg_sys::RegisterSubXactCallback(Some(subxact_clear_membership), std::ptr::null_mut());
     }
 }
 
@@ -190,14 +272,21 @@ unsafe extern "C-unwind" fn pathlist_hook(
         if let Some(p) = paths.get_ptr(i) {
             // The vector-ordered path is the base IndexScan that carries distance pathkeys (only an amcanorderby
             // index — ours — produces base-rel pathkeys from `ORDER BY e <-> q`). Require T_IndexScan so an
-            // unrelated ordered path can't be hijacked (council H3).
+            // unrelated ordered path can't be hijacked (council H3). Require UNPARAMETERIZED children (M94
+            // hardening): our CustomPath declares `param_info = NULL`, so wrapping a parameterized child (e.g. a
+            // LATERAL `cat = outer.col` bitmap) would break the planner's param contract — such queries fall back
+            // to the native plans (correct, just not our fast path; honest boundary).
             if !(*p).pathkeys.is_null()
                 && (*p).pathtype == pg_sys::NodeTag::T_IndexScan
+                && (*p).param_info.is_null()
                 && vector_path.is_null()
             {
                 vector_path = p;
             }
-            if (*p).pathtype == pg_sys::NodeTag::T_BitmapHeapScan && bitmap_path.is_null() {
+            if (*p).pathtype == pg_sys::NodeTag::T_BitmapHeapScan
+                && (*p).param_info.is_null()
+                && bitmap_path.is_null()
+            {
                 bitmap_path = p;
             }
         }
@@ -289,15 +378,9 @@ unsafe extern "C-unwind" fn begin_custom_scan(
     estate: *mut pg_sys::EState,
     eflags: c_int,
 ) {
-    // FAIL-LOUD on concurrency: the membership is a per-backend channel, but the executor runs every node's
-    // BeginCustomScan (Init) before any pull (Exec), and our AM reads the membership lazily at scan time. Two
-    // vecfilter nodes in one plan (UNION / self-join / partitioned Append) would cross-contaminate → SILENTLY WRONG
-    // results (council BLOCKER). Until per-scan membership scoping lands (follow-up), refuse the second node loudly
-    // rather than return wrong rows (Unbreakable Rule 8). Stale-from-abort membership is cleared by the xact
-    // callback, so an active membership here genuinely means a concurrent node.
-    if has_membership() {
-        pg_sys::error!("theodb vecfilter: concurrent filtered vector scans in one plan are not supported");
-    }
+    // M94: no concurrency guard needed anymore — each node stores its membership in the per-node REGISTRY and
+    // installs it only during its own pull windows (swap-discipline in exec/rescan), so multiple vecfilter nodes in
+    // one plan (UNION / self-join / partitioned Append) each see only their own set.
     let st = &mut *(node as *mut VecFilterState);
     let cscan = st.css.ss.ps.plan as *mut pg_sys::CustomScan;
     let planned = PgList::<pg_sys::Plan>::from_pg((*cscan).custom_plans);
@@ -338,29 +421,42 @@ unsafe extern "C-unwind" fn begin_custom_scan(
         pg_sys::error!("theodb vecfilter: bitmap subplan did not return a TIDBitmap");
     }
     let (exact, lossy) = materialize_bitmap(res as *mut pg_sys::TIDBitmap);
-    set_membership(Some(Membership { exact, lossy }));
+    // Free the bitmap NOW (review MEDIUM-2): `MultiExecBitmapIndexScan` tbm_create's a FRESH bitmap per call and
+    // `ExecEndBitmapIndexScan` does NOT free it (only core's BitmapHeapScan consumer does) — without this, every
+    // begin/rescan leaks a work_mem-sized bitmap until the query context resets. We copied the TIDs out into owned
+    // Rust sets above (copy-out-before-release), so the free is safe.
+    pg_sys::tbm_free(res as *mut pg_sys::TIDBitmap);
+    registry_insert(node as usize, Membership { exact, lossy });
     st.membership_active = true;
 }
 
-/// Exec next tuple: pull the next distance-ordered, membership-surviving tuple from the vector child. The child's own
-/// qpqual Filter has already rechecked the scalar `WHERE` on the heap tuple (removing lossy/pending over-admits), so
-/// the node just forwards it.
+/// Exec next tuple (M94 swap-discipline): install THIS node's membership from the registry for the duration of the
+/// synchronous child pull (all AM work — amrescan / amgettuple / iterative re-search — runs inside it), restore the
+/// previous value after (RAII — restored even if the pull errors/unwinds). The child's own qpqual Filter has already
+/// rechecked the scalar `WHERE` on the heap tuple (removing lossy/pending over-admits), so the node forwards the slot.
 #[pg_guard]
 unsafe extern "C-unwind" fn exec_custom_scan(node: *mut pg_sys::CustomScanState) -> *mut pg_sys::TupleTableSlot {
     let st = &mut *(node as *mut VecFilterState);
     if st.vector_child.is_null() {
         return std::ptr::null_mut();
     }
+    let mine = registry_get(node as usize);
+    if mine.is_none() && st.membership_active {
+        // The node materialized a membership but the registry entry is gone (corrupt lifecycle) — fail loud,
+        // never run the filtered scan unfiltered (Rule 8).
+        pg_sys::error!("theodb vecfilter: membership missing for this scan");
+    }
+    let _guard = ActiveGuard::install(mine);
     pg_sys::ExecProcNode(st.vector_child)
 }
 
-/// Exec teardown: clear the membership (anti-leak contract) and end both children. The TIDBitmap is owned by the
-/// bitmap child's context — do NOT `tbm_free` it (double-free); `ExecEndNode(bitmap_child)` frees it.
+/// Exec teardown: drop this node's registry entry (frees the sets) and end both children. The TIDBitmap was already
+/// freed at materialization time (begin/rescan) — see the MEDIUM-2 note there.
 #[pg_guard]
 unsafe extern "C-unwind" fn end_custom_scan(node: *mut pg_sys::CustomScanState) {
     let st = &mut *(node as *mut VecFilterState);
     if st.membership_active {
-        set_membership(None);
+        registry_remove(node as usize);
         st.membership_active = false;
     }
     if !st.vector_child.is_null() {
@@ -371,27 +467,33 @@ unsafe extern "C-unwind" fn end_custom_scan(node: *mut pg_sys::CustomScanState) 
     }
 }
 
-/// ReScan: re-derive the membership (the bitmap child may depend on changed params) and rescan both children.
+/// ReScan: re-derive this node's membership (the bitmap child may depend on changed state) into the registry, and
+/// rescan both children — the vector child inside the swap window (its amrescan runs the Stage-1 scan synchronously,
+/// which must see THIS node's membership).
 #[pg_guard]
 unsafe extern "C-unwind" fn rescan_custom_scan(node: *mut pg_sys::CustomScanState) {
     let st = &mut *(node as *mut VecFilterState);
     if !st.bitmap_child.is_null() {
-        // Clear-then-set (mirror begin): drop the previous iteration's membership, re-derive from the rescanned
-        // bitmap child, and fail loud on a non-TIDBitmap (a rescanned bitmap child MUST produce one — Rule 8).
-        if st.membership_active {
-            set_membership(None);
-            st.membership_active = false;
-        }
+        // Replace-then-set (mirror begin): re-derive from the rescanned bitmap child; fail loud on a non-TIDBitmap
+        // (a rescanned bitmap child MUST produce one — Rule 8).
         pg_sys::ExecReScan(st.bitmap_child);
         let res = pg_sys::MultiExecProcNode(st.bitmap_child);
         if res.is_null() || (*(res as *mut pg_sys::Node)).type_ != pg_sys::NodeTag::T_TIDBitmap {
             pg_sys::error!("theodb vecfilter: rescanned bitmap subplan did not return a TIDBitmap");
         }
         let (exact, lossy) = materialize_bitmap(res as *mut pg_sys::TIDBitmap);
-        set_membership(Some(Membership { exact, lossy }));
+        // Free the fresh bitmap now (review MEDIUM-2) — nothing downstream frees it; the sets were copied out.
+        pg_sys::tbm_free(res as *mut pg_sys::TIDBitmap);
+        registry_insert(node as usize, Membership { exact, lossy });
         st.membership_active = true;
     }
     if !st.vector_child.is_null() {
+        let mine = registry_get(node as usize);
+        if mine.is_none() && st.membership_active {
+            // Symmetry with exec (review LOW-3): a filtered scan must never rescan unfiltered.
+            pg_sys::error!("theodb vecfilter: membership missing for this rescan");
+        }
+        let _guard = ActiveGuard::install(mine);
         pg_sys::ExecReScan(st.vector_child);
     }
 }
@@ -440,23 +542,89 @@ mod tests {
         assert_eq!(hooked, exact, "the 2-child Custom Scan filtered result must equal the exact seqscan-filtered top-5 (hooked={hooked:?} exact={exact:?})");
     }
 
-    /// M93 review fix — two vecfilter nodes in one plan (a UNION of two filtered vector queries) FAIL LOUD instead
-    /// of silently cross-contaminating their membership (council BLOCKER). The error text is asserted by the harness.
-    #[pgrx::pg_test(error = "theodb vecfilter: concurrent filtered vector scans in one plan are not supported")]
-    fn m93_concurrent_vecfilter_fails_loud() {
-        Spi::run("CREATE TABLE cs92u (id int PRIMARY KEY, cat int, e vector(4))").unwrap();
-        Spi::run("INSERT INTO cs92u SELECT g, g%100, ('['||g||','||(g*2)||',0,0]')::vector FROM generate_series(1,1000) g").unwrap();
-        Spi::run("CREATE INDEX cs92u_e ON cs92u USING theodb_ivfflat (e) WITH (lists=8, pq_subspaces=2, aq_threshold=2000, separate_storage=1)").unwrap();
-        Spi::run("CREATE INDEX cs92u_cat ON cs92u (cat)").unwrap();
-        Spi::run("ANALYZE cs92u").unwrap();
-        Spi::run("SET theodb.enable_vecfilter=on; SET enable_seqscan=off; SET enable_bitmapscan=on; SET theodb_ivfflat.probes=8").unwrap();
-        // Two vecfilter nodes (one per UNION branch) → the second BeginCustomScan must error loudly.
-        Spi::run(
-            "(SELECT id FROM cs92u WHERE cat=1 ORDER BY e <-> '[0,0,0,0]'::vector LIMIT 3) \
-             UNION ALL \
-             (SELECT id FROM cs92u WHERE cat=2 ORDER BY e <-> '[0,0,0,0]'::vector LIMIT 3)",
-        )
-        .unwrap();
+    /// M94 T1.1 — two vecfilter nodes in one plan (a UNION ALL of two filtered vector queries) each see their OWN
+    /// membership (the pull-window swap-discipline). The branches filter on DISJOINT cat values, so any
+    /// cross-contamination (the M93 BLOCKER this replaces) shows as a wrong id in one branch. Result must equal the
+    /// union of the two exact seqscan-filtered top-3 sets.
+    #[pgrx::pg_test]
+    fn m94_union_two_filtered_scans_correct() {
+        use std::collections::HashSet;
+        Spi::run("CREATE TABLE cs94u (id int PRIMARY KEY, cat int, e vector(4))").unwrap();
+        Spi::run("INSERT INTO cs94u SELECT g, g%100, ('['||g||','||(g*2)||',0,0]')::vector FROM generate_series(1,1000) g").unwrap();
+        Spi::run("CREATE INDEX cs94u_e ON cs94u USING theodb_ivfflat (e) WITH (lists=8, pq_subspaces=2, aq_threshold=2000, separate_storage=1)").unwrap();
+        Spi::run("CREATE INDEX cs94u_cat ON cs94u (cat)").unwrap();
+        Spi::run("ANALYZE cs94u").unwrap();
+        let q = "[0,0,0,0]";
+        // Exact per-branch ground truth via seqscan.
+        let exact = |cat: i32| -> HashSet<i32> {
+            Spi::connect(|c| {
+                c.select("SET theodb.enable_vecfilter=off; SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on", None, &[]).ok();
+                c.select(&format!("SELECT id FROM cs94u WHERE cat={cat} ORDER BY e <-> '{q}'::vector LIMIT 3"), None, &[])
+                    .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
+            })
+        };
+        let want: HashSet<i32> = exact(1).union(&exact(2)).copied().collect();
+        let hooked_setup = "SET theodb.enable_vecfilter=on; SET enable_indexscan=on; SET enable_bitmapscan=on; SET enable_seqscan=off; SET theodb_ivfflat.probes=8";
+        // Both branches must get the node (2 occurrences) — proves TWO nodes coexist in the plan.
+        let plan: String = Spi::connect(|c| {
+            c.select(hooked_setup, None, &[]).ok();
+            c.select(&format!("EXPLAIN (COSTS OFF) (SELECT id FROM cs94u WHERE cat=1 ORDER BY e <-> '{q}'::vector LIMIT 3) UNION ALL (SELECT id FROM cs94u WHERE cat=2 ORDER BY e <-> '{q}'::vector LIMIT 3)"), None, &[])
+                .unwrap().filter_map(|r| r.get::<String>(1).unwrap()).collect::<Vec<_>>().join("\n")
+        });
+        let nodes = plan.matches("Custom Scan (theodb_vecfilter)").count();
+        assert_eq!(nodes, 2, "both UNION branches must be intercepted (got {nodes} nodes; plan:\n{plan})");
+        let got: HashSet<i32> = Spi::connect(|c| {
+            c.select(hooked_setup, None, &[]).ok();
+            c.select(&format!("(SELECT id FROM cs94u WHERE cat=1 ORDER BY e <-> '{q}'::vector LIMIT 3) UNION ALL (SELECT id FROM cs94u WHERE cat=2 ORDER BY e <-> '{q}'::vector LIMIT 3)"), None, &[])
+                .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
+        });
+        assert_eq!(got, want, "each UNION branch must be filtered by ITS OWN membership (got {got:?} want {want:?})");
+    }
+
+    /// M94 T1.1 — a rescanned vecfilter node (nested-loop inner, materialization off) re-derives its membership and
+    /// stays correct across repeated executions: each outer row's inner result equals the exact seqscan-filtered set.
+    #[pgrx::pg_test]
+    fn m94_rescan_reuses_membership_correct() {
+        use std::collections::HashSet;
+        Spi::run("CREATE TABLE cs94r (id int PRIMARY KEY, cat int, e vector(4))").unwrap();
+        Spi::run("INSERT INTO cs94r SELECT g, g%100, ('['||g||','||(g*2)||',0,0]')::vector FROM generate_series(1,1000) g").unwrap();
+        Spi::run("CREATE INDEX cs94r_e ON cs94r USING theodb_ivfflat (e) WITH (lists=8, pq_subspaces=2, aq_threshold=2000, separate_storage=1)").unwrap();
+        Spi::run("CREATE INDEX cs94r_cat ON cs94r (cat)").unwrap();
+        Spi::run("ANALYZE cs94r").unwrap();
+        let q = "[0,0,0,0]";
+        let exact: HashSet<i32> = Spi::connect(|c| {
+            c.select("SET theodb.enable_vecfilter=off; SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on", None, &[]).ok();
+            c.select(&format!("SELECT id FROM cs94r WHERE cat=7 ORDER BY e <-> '{q}'::vector LIMIT 3"), None, &[])
+                .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
+        });
+        // A 2-row outer CROSS JOIN LATERAL over a constant filtered inner + materialization off → the inner vecfilter
+        // node is re-executed (rescan) per outer row; both inner results must equal the exact set.
+        let rows: Vec<(i32, i32)> = Spi::connect(|c| {
+            c.select("SET theodb.enable_vecfilter=on; SET enable_indexscan=on; SET enable_bitmapscan=on; SET enable_seqscan=off; SET enable_material=off; SET theodb_ivfflat.probes=8", None, &[]).ok();
+            c.select(&format!("SELECT v.o, s.id FROM (VALUES (1),(2)) v(o) CROSS JOIN LATERAL (SELECT id FROM cs94r WHERE cat=7 ORDER BY e <-> '{q}'::vector LIMIT 3) s ORDER BY v.o"), None, &[])
+                .unwrap()
+                .filter_map(|r| Some((r.get::<i32>(1).unwrap()?, r.get::<i32>(2).unwrap()?)))
+                .collect()
+        });
+        for o in [1, 2] {
+            let inner: HashSet<i32> = rows.iter().filter(|(oo, _)| *oo == o).map(|(_, id)| *id).collect();
+            assert_eq!(inner, exact, "outer row {o}: the rescanned inner must equal the exact filtered set (got {inner:?})");
+        }
+    }
+
+    /// M94 ADR M94-3 — a PL/pgSQL EXCEPTION handler (subxact abort) clears a stale ACTIVE membership: after the
+    /// abort, `has_membership()` is false, so a later plain scan cannot be silently starved by the dead filter.
+    #[pgrx::pg_test]
+    fn m94_subxact_abort_clears_membership() {
+        // Simulate a mid-pull longjmp leaving the ACTIVE slot set (the swap-restore was skipped).
+        super::set_membership(Some(super::Membership {
+            exact: std::collections::HashSet::from([1i64]),
+            lossy: std::collections::HashSet::new(),
+        }));
+        assert!(super::has_membership(), "precondition: ACTIVE slot set");
+        // A plpgsql EXCEPTION block aborts a SUBtransaction — the subxact callback must clear the ACTIVE slot.
+        Spi::run("DO $$ BEGIN RAISE EXCEPTION 'boom'; EXCEPTION WHEN OTHERS THEN NULL; END $$").unwrap();
+        assert!(!super::has_membership(), "subxact abort must clear the stale ACTIVE membership");
     }
 
     /// M93 T2.1 — a post-build INSERT with a NON-matching `cat` (pending region, no stored membership) must NOT
