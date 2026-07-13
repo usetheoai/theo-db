@@ -13,6 +13,9 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Roadmap amended: added M95 honest cost model for the vecfilter node (replaces the spike's forced-selection heuristic; graduates M90-M94 filtered search from experimental toward default-capable; plan-decision benchmark as the gate) (M95)
+- Roadmap amended: added M96 tuplesort-streaming ambuild (the M89 follow-up — never materialize the corpus; 100M-build-in-commodity-RAM gate; unlocks the M88 out-of-RAM measurement) (M96)
+- Roadmap amended: added M97 Columnar/HTAP (D2) discovery-first (blueprint + viability benchmark + GO/NO-GO ADR; zero product code by design) (M97)
 
 ### Changed
 
