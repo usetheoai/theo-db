@@ -1,0 +1,18 @@
+M91U_ROWS 1000000
+M91U_BUILD 1659s
+M91U sel=0.0001 probes=64 recall=0.7410 qps=150.9
+M91U sel=0.0001 probes=128 recall=0.7890 qps=197.8
+M91U sel=0.0001 probes=256 recall=0.9690 qps=155.3
+M91U sel=0.0001 probes=500 recall=1.0000 qps=95.1
+M91U sel=0.0001 probes=1000 recall=1.0000 qps=52.2
+M91U sel=0.0010 probes=64 recall=0.8860 qps=300.5
+M91U sel=0.0010 probes=128 recall=0.9740 qps=238.4
+M91U sel=0.0010 probes=256 recall=0.9960 qps=159.6
+M91U sel=0.0010 probes=500 recall=0.9960 qps=96.9
+M91U sel=0.0010 probes=1000 recall=0.9960 qps=52.5
+M91U sel=0.0100 probes=64 recall=0.9510 qps=289.6
+M91U sel=0.0100 probes=128 recall=0.9630 qps=241.8
+M91U sel=0.0100 probes=256 recall=0.9640 qps=159.6
+M91U sel=0.0100 probes=500 recall=0.9640 qps=96.7
+M91U sel=0.0100 probes=1000 recall=0.9650 qps=52.4
+M91U_DONE

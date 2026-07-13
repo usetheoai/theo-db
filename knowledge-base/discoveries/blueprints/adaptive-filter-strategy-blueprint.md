@@ -2,6 +2,28 @@
 
 **Date:** 2026-07-12 · **Milestone:** M91 · **Source:** council-index-storage deep research (code-grounded; pgvectorscale checked out, AlloyDB blueprint-cited per M90's web-fetch — R0 honesty: WebSearch unavailable this session, grounded on the cloned refs + M90's fetched blueprint).
 
+---
+
+## § MEASURED VERDICT (2026-07-13) — supersedes the design below
+
+The measurement-first mandate re-scoped M91. Full data: `docs/benchmarks/m91-adaptive-filter.{json,md}` (SIFT1M, real neighbors, 8-vCPU Xeon 8280). Three findings:
+
+1. **No strategy crossover.** On real data (SIFT1M) the M90 INLINE (v7) strategy DOMINATES the M87 POST (v5) strategy at EVERY selectivity (recall 0.74–0.95 vs 0.33–0.79). The hypothesized INLINE⇄POST adaptive switch is **FALSIFIED** — POST never wins. A strategy selector is YAGNI.
+2. **The synthetic "collapse" was a tie-density artifact.** The pre-SIFT synthetic sweep (500k well-separated clusters) showed a fake INLINE recall collapse at loose selectivity (0.088 @ 30%) that looked like a crossover case. On SIFT it VANISHES (INLINE holds 0.85–0.95 @ 0.5–30%). Base unfiltered recall was stuck at 0.024 even at probes=200 → pure tie-density (2500 pts/cluster ⇒ top-10 are near-ties). **Measurement-first caught a phantom before any code was written.**
+3. **The real adaptive axis is PROBES, not strategy.** INLINE's only weakness is ultra-selective (≤0.1%): the true filtered NN hide in unprobed lists. Cranking probes recovers it: 0.01% sel, probes 64→500 lifts recall **0.741→1.000**; 0.1% sel, 64→256 lifts 0.886→0.996; 1%+ (already ≥0.95) is flat.
+
+**THE DESIGN (measured):** `scan_ivf_aq_split_v7` today probes a fixed `.take(probes)` lists. Change: **when a label filter is active, keep probing nearest lists past the default until the accumulated matching-candidate count reaches the rerank target** (bounded by total lists). Self-tuning on the measured match count — no threshold GUC, no plan-time plumbing, no new format, no new strategy. Non-filter path stays byte-identical (break at `probed >= probes`). Why the M87 iterative doesn't already do this: it grows probes only on heap UNDERFLOW (< LIMIT), but ultra-selective still yields ≥ LIMIT *non-optimal* matches → LIMIT satisfied with a wrong top-10 → never triggers. M91 triggers on the matching-candidate count inside the scan.
+
+**GATE:** re-run the SIFT sweep with the adaptive v7; show it rides the recall envelope (ultra-selective → ~1.0) while matching loose-selectivity QPS (no regression where default probes suffice).
+
+**Boundary (honest):** at extreme selectivity (matches ≪ rerank pool) adaptive probing degenerates toward a near-full-list scan (O(lists) reads) — bounded and correct; a GUC ceiling is a follow-up only if measured needed. NOT a QPS-superiority claim vs ScaNN/AlloyDB (M73/M82 ceiling stands).
+
+**What survives from the design below:** Approach A (AM-local on the label scan-key, NOT Custom Scan) ✅; measurement-first on the "new strategy" (PRE) ✅ — and it paid off: PRE was NOT needed (probes recover it). The INLINE⇄POST switch framing is superseded by §MEASURED above.
+
+---
+
+### (pre-measurement design — retained for audit trail)
+
 ## The load-bearing finding (re-scopes M91)
 
 **Neither pgvectorscale nor AlloyDB does adaptive strategy selection for the label case.**
