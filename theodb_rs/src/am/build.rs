@@ -1193,6 +1193,76 @@ mod tests {
         assert!(ids2.contains(&999), "the matching pending row {{2}} IS found (got {ids2:?})");
     }
 
+    /// M91 T1.1 — selectivity-adaptive probing recovers filtered recall at LOW probes. A rare label ({7}, ~4% of
+    /// rows) is scattered across many IVF lists; with `probes = 1` the OLD fixed `.take(probes)` scan would see at
+    /// most one list's candidates (≈ 0 matches) and starve. The adaptive loop keeps probing nearest lists past
+    /// `probes` until the matching-candidate pool reaches the rerank target — since only ~16 rows carry {7} (< the
+    /// default pool), it probes all lists, finds every match, and returns the EXACT filtered top-5. Behavioral proof
+    /// of adaptivity: high recall at probes=1 is only reachable if the loop probed well beyond 1 list.
+    #[pgrx::pg_test]
+    fn v7_adaptive_probing_recovers_selective_recall() {
+        pgrx::Spi::run("CREATE TABLE ivfv7a (id int PRIMARY KEY, lbl smallint[], e vector(8))").unwrap();
+        for i in 0..400usize {
+            // Scatter vectors across the space so the rare-label rows land in many different lists (not clustered).
+            let lit =
+                (0..8).map(|j| (((i * 53 + j * 29) % 101) as f32 * 0.1).to_string()).collect::<Vec<_>>().join(",");
+            // Label = i % 6 (6 common tags) PLUS the sparse tag {7} on every 25th row (16 rows ≈ 4%).
+            let lbl = if i % 25 == 0 { format!("{{{},7}}", i % 6) } else { format!("{{{}}}", i % 6) };
+            pgrx::Spi::run(&format!("INSERT INTO ivfv7a VALUES ({}, '{lbl}', '[{lit}]')", i + 1)).unwrap();
+        }
+        pgrx::Spi::run("CREATE INDEX ivfv7a_idx ON ivfv7a USING theodb_ivfflat (e, lbl) WITH (lists=32, pq_subspaces=4, aq_threshold=2000, separate_storage=1)").unwrap();
+        // probes = 1: without adaptive probing the rare-label matches (scattered across ~16 lists) would be missed.
+        pgrx::Spi::run("SET theodb_ivfflat.probes = 1").unwrap();
+        let q = "[5,2,0,4,1,3,6,0.5]";
+        let filt = "lbl && '{7}'::smallint[]";
+        let idx_ids: Vec<i32> = pgrx::Spi::connect(|c| {
+            c.select("SET enable_seqscan=off; SET enable_indexscan=on", None, &[]).ok();
+            c.select(&format!("SELECT id FROM ivfv7a WHERE {filt} ORDER BY e <-> '{q}'::vector LIMIT 5"), None, &[])
+                .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
+        });
+        let exact_ids: Vec<i32> = pgrx::Spi::connect(|c| {
+            c.select("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on", None, &[]).ok();
+            c.select(&format!("SELECT id FROM ivfv7a WHERE {filt} ORDER BY e <-> '{q}'::vector LIMIT 5"), None, &[])
+                .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
+        });
+        let e: std::collections::HashSet<i32> = exact_ids.iter().copied().collect();
+        let recall = idx_ids.iter().filter(|id| e.contains(id)).count() as f64 / (exact_ids.len().max(1) as f64);
+        assert!(recall >= 0.8, "M91 adaptive recall@5 {recall:.2} < 0.8 at probes=1 — the loop must probe past 1 list to find the scattered {{7}} matches (idx={idx_ids:?} exact={exact_ids:?})");
+    }
+
+    /// M91 T1.1 — no-regression on the NON-filter path. With `probes = lists` and no label predicate, the adaptive
+    /// loop must visit every list (break condition `!filtering ⇒ break at probes`, and probes=all ⇒ no early break)
+    /// and return the EXACT unfiltered top-5. Guards that the loop refactor did not skip lists or grow probes for a
+    /// non-filtered scan.
+    #[pgrx::pg_test]
+    fn v7_non_filter_scan_unchanged() {
+        pgrx::Spi::run("CREATE TABLE ivfv7n (id int PRIMARY KEY, lbl smallint[], e vector(8))").unwrap();
+        for i in 0..200usize {
+            let lit =
+                (0..8).map(|j| (((i * 37 + j * 11) % 89) as f32 * 0.1).to_string()).collect::<Vec<_>>().join(",");
+            pgrx::Spi::run(&format!("INSERT INTO ivfv7n VALUES ({}, '{{{}}}', '[{lit}]')", i + 1, i % 4)).unwrap();
+        }
+        pgrx::Spi::run("CREATE INDEX ivfv7n_idx ON ivfv7n USING theodb_ivfflat (e, lbl) WITH (lists=8, pq_subspaces=4, aq_threshold=2000, separate_storage=1)").unwrap();
+        // Probe ALL lists, no filter → the scan must equal the exact unfiltered top-5 (full probe = exact rerank).
+        pgrx::Spi::run("SET theodb_ivfflat.probes = 8").unwrap();
+        let q = "[3,1,4,1,5,2,6,0.5]";
+        let idx_ids: Vec<i32> = pgrx::Spi::connect(|c| {
+            c.select("SET enable_seqscan=off; SET enable_indexscan=on", None, &[]).ok();
+            c.select(&format!("SELECT id FROM ivfv7n ORDER BY e <-> '{q}'::vector LIMIT 5"), None, &[])
+                .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
+        });
+        let exact_ids: Vec<i32> = pgrx::Spi::connect(|c| {
+            c.select("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on", None, &[]).ok();
+            c.select(&format!("SELECT id FROM ivfv7n ORDER BY e <-> '{q}'::vector LIMIT 5"), None, &[])
+                .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
+        });
+        let mut a = idx_ids.clone();
+        a.sort_unstable();
+        let mut b = exact_ids.clone();
+        b.sort_unstable();
+        assert_eq!(a, b, "M91: unfiltered v7 scan at probes=all must equal exact top-5 (idx={idx_ids:?} exact={exact_ids:?})");
+    }
+
     /// T3.3 NON-REGRESSION (build): with NO reloption, `ambuild_hnsw` packs the byte-identical v1 layout — the
     /// meta carries neither an AQ nor an SBQ codebook (`aq_m == 0 && sbq_bits == 0`). Guards the "existing indexes
     /// stay v1/v2 byte-identical" invariant against the new AQ branch.
