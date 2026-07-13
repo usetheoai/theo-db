@@ -99,6 +99,21 @@ fn clear_all_memberships() {
     NODE_MEMBERSHIPS.with(|r| r.borrow_mut().clear());
 }
 
+/// M94 review MEDIUM-1 — RAII guard making the pull-window swap locally unwind-safe: a PG ERROR inside the child
+/// pull becomes (via pgrx's FFI guard) a Rust panic that unwinds through our frame — Drop restores the previous
+/// ACTIVE value even then, demoting the xact/subxact abort callbacks to belt-and-braces.
+struct ActiveGuard(Option<Rc<Membership>>);
+impl ActiveGuard {
+    fn install(mine: Option<Rc<Membership>>) -> Self {
+        ActiveGuard(swap_active(mine))
+    }
+}
+impl Drop for ActiveGuard {
+    fn drop(&mut self) {
+        let _ = swap_active(self.0.take());
+    }
+}
+
 /// M92 v1b — materialize a native `TIDBitmap` (produced by a bitmap sub-plan's `MultiExecProcNode`) into the
 /// membership representation the AM Stage-1 consumes: a set of EXACT encoded TIDs (`(block<<16)|offset`, matching
 /// `tid::encode`) plus a set of LOSSY block numbers. A page goes lossy under memory pressure (`ntuples < 0`,
@@ -177,7 +192,10 @@ unsafe extern "C-unwind" fn xact_clear_membership(event: pg_sys::XactEvent::Type
         || event == XE::XACT_EVENT_PARALLEL_ABORT
         || event == XE::XACT_EVENT_COMMIT
         || event == XE::XACT_EVENT_PARALLEL_COMMIT
+        || event == XE::XACT_EVENT_PREPARE
     {
+        // PREPARE (review LOW-2): `PREPARE TRANSACTION` ends the local xact without a COMMIT/ABORT event —
+        // clear here too so orphaned entries never survive into the backend's next transaction.
         clear_all_memberships();
     }
 }
@@ -254,14 +272,21 @@ unsafe extern "C-unwind" fn pathlist_hook(
         if let Some(p) = paths.get_ptr(i) {
             // The vector-ordered path is the base IndexScan that carries distance pathkeys (only an amcanorderby
             // index — ours — produces base-rel pathkeys from `ORDER BY e <-> q`). Require T_IndexScan so an
-            // unrelated ordered path can't be hijacked (council H3).
+            // unrelated ordered path can't be hijacked (council H3). Require UNPARAMETERIZED children (M94
+            // hardening): our CustomPath declares `param_info = NULL`, so wrapping a parameterized child (e.g. a
+            // LATERAL `cat = outer.col` bitmap) would break the planner's param contract — such queries fall back
+            // to the native plans (correct, just not our fast path; honest boundary).
             if !(*p).pathkeys.is_null()
                 && (*p).pathtype == pg_sys::NodeTag::T_IndexScan
+                && (*p).param_info.is_null()
                 && vector_path.is_null()
             {
                 vector_path = p;
             }
-            if (*p).pathtype == pg_sys::NodeTag::T_BitmapHeapScan && bitmap_path.is_null() {
+            if (*p).pathtype == pg_sys::NodeTag::T_BitmapHeapScan
+                && (*p).param_info.is_null()
+                && bitmap_path.is_null()
+            {
                 bitmap_path = p;
             }
         }
@@ -396,14 +421,19 @@ unsafe extern "C-unwind" fn begin_custom_scan(
         pg_sys::error!("theodb vecfilter: bitmap subplan did not return a TIDBitmap");
     }
     let (exact, lossy) = materialize_bitmap(res as *mut pg_sys::TIDBitmap);
+    // Free the bitmap NOW (review MEDIUM-2): `MultiExecBitmapIndexScan` tbm_create's a FRESH bitmap per call and
+    // `ExecEndBitmapIndexScan` does NOT free it (only core's BitmapHeapScan consumer does) — without this, every
+    // begin/rescan leaks a work_mem-sized bitmap until the query context resets. We copied the TIDs out into owned
+    // Rust sets above (copy-out-before-release), so the free is safe.
+    pg_sys::tbm_free(res as *mut pg_sys::TIDBitmap);
     registry_insert(node as usize, Membership { exact, lossy });
     st.membership_active = true;
 }
 
 /// Exec next tuple (M94 swap-discipline): install THIS node's membership from the registry for the duration of the
 /// synchronous child pull (all AM work — amrescan / amgettuple / iterative re-search — runs inside it), restore the
-/// previous value after. The child's own qpqual Filter has already rechecked the scalar `WHERE` on the heap tuple
-/// (removing lossy/pending over-admits), so the node just forwards the slot.
+/// previous value after (RAII — restored even if the pull errors/unwinds). The child's own qpqual Filter has already
+/// rechecked the scalar `WHERE` on the heap tuple (removing lossy/pending over-admits), so the node forwards the slot.
 #[pg_guard]
 unsafe extern "C-unwind" fn exec_custom_scan(node: *mut pg_sys::CustomScanState) -> *mut pg_sys::TupleTableSlot {
     let st = &mut *(node as *mut VecFilterState);
@@ -416,14 +446,12 @@ unsafe extern "C-unwind" fn exec_custom_scan(node: *mut pg_sys::CustomScanState)
         // never run the filtered scan unfiltered (Rule 8).
         pg_sys::error!("theodb vecfilter: membership missing for this scan");
     }
-    let prev = swap_active(mine);
-    let slot = pg_sys::ExecProcNode(st.vector_child);
-    let _ = swap_active(prev);
-    slot
+    let _guard = ActiveGuard::install(mine);
+    pg_sys::ExecProcNode(st.vector_child)
 }
 
-/// Exec teardown: drop this node's registry entry (frees the sets) and end both children. The TIDBitmap is owned by
-/// the bitmap child's context — do NOT `tbm_free` it (double-free); `ExecEndNode(bitmap_child)` frees it.
+/// Exec teardown: drop this node's registry entry (frees the sets) and end both children. The TIDBitmap was already
+/// freed at materialization time (begin/rescan) — see the MEDIUM-2 note there.
 #[pg_guard]
 unsafe extern "C-unwind" fn end_custom_scan(node: *mut pg_sys::CustomScanState) {
     let st = &mut *(node as *mut VecFilterState);
@@ -454,14 +482,19 @@ unsafe extern "C-unwind" fn rescan_custom_scan(node: *mut pg_sys::CustomScanStat
             pg_sys::error!("theodb vecfilter: rescanned bitmap subplan did not return a TIDBitmap");
         }
         let (exact, lossy) = materialize_bitmap(res as *mut pg_sys::TIDBitmap);
+        // Free the fresh bitmap now (review MEDIUM-2) — nothing downstream frees it; the sets were copied out.
+        pg_sys::tbm_free(res as *mut pg_sys::TIDBitmap);
         registry_insert(node as usize, Membership { exact, lossy });
         st.membership_active = true;
     }
     if !st.vector_child.is_null() {
         let mine = registry_get(node as usize);
-        let prev = swap_active(mine);
+        if mine.is_none() && st.membership_active {
+            // Symmetry with exec (review LOW-3): a filtered scan must never rescan unfiltered.
+            pg_sys::error!("theodb vecfilter: membership missing for this rescan");
+        }
+        let _guard = ActiveGuard::install(mine);
         pg_sys::ExecReScan(st.vector_child);
-        let _ = swap_active(prev);
     }
 }
 
