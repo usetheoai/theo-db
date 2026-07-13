@@ -28,7 +28,14 @@ Ground truth = exact seqscan-filtered top-10 (`WHERE <scalar> ORDER BY e <-> q L
 - **POST (native post-filter):** the vector index scan scores candidates in distance order; the executor Filter drops
   the non-matching ones AFTER. At a selective filter, the probed lists' rerank pool is dominated by non-matching rows,
   so the filtered top-k is **starved** (recall 0.59–0.67) and the M87 iterative re-search thrashes (21–92 QPS). This is
-  the exact problem M90 identified for label filters, here for arbitrary columns.
+  the exact problem M90 identified for label filters, here for arbitrary columns. POST runs with its default
+  `theodb_hnsw.max_scan_tuples = 20000` iterative ceiling — that ceiling does not let it reach INLINE's recall/QPS
+  frontier at these selectivities (its recall stays 0.59–0.67 while thrashing), so POST is not sandbagged: it is the
+  strongest native alternative to the node.
+
+**Methodology note (honest):** this is a **Pareto-dominance** comparison, not matched-recall — POST's recall floor
+(0.59–0.67) sits *below* INLINE's entire probe sweep (0.91–0.97), so a matched-recall QPS comparison is infeasible
+(POST never reaches INLINE's recall). INLINE strictly dominates: higher recall AND higher QPS simultaneously.
 - **INLINE (Custom Scan node):** the bitmap membership is consulted in Stage-1 — non-matching candidates are **skipped
   before** they cost a rerank slot, so the pool fills with matching candidates → recall stays high (0.92–0.97); the
   M91 adaptive probing keeps it fast. Result: **higher recall AND higher QPS**.
@@ -37,13 +44,16 @@ Ground truth = exact seqscan-filtered top-10 (`WHERE <scalar> ORDER BY e <-> q L
 
 The `m93_t2` pg_tests prove the INLINE result is **byte-identical to the exact seqscan-filtered top-k** on a non-label
 column; the **pending region** (post-build INSERTs) and **lossy bitmap blocks** are rechecked out by the vector child's
-own qpqual Filter (the MVCC recheck). **262 pg_tests GREEN**; the GUC-off path is byte-identical (zero regression). The
+own qpqual Filter (the MVCC recheck). **263 tests GREEN** (`cargo pgrx test` — pg_tests + unit); the GUC-off path is byte-identical (zero regression). The
 node is OFF by default (`theodb.enable_vecfilter`).
 
 ## Honest boundary
 
 - The inline pre-filter engages on both the **v5 plain-vector** and **v7 label** IVF-AQ layouts (the realistic
-  plain-`(e)`-index case).
+  plain-`(e)`-index case); the v7 engagement is proven by pg_tests, not measured in this v5 run.
+- **Concurrency limit (fail-loud):** two vecfilter nodes in one plan (a `UNION` / self-join / partitioned `Append`
+  of two filtered vector queries) are refused with a clear error (the membership is per-backend today) — never a
+  silent wrong answer (Unbreakable Rule 8). Per-scan membership scoping is a follow-up.
 - **Single run** per point — the margin is large (+0.28 recall, up to 12× QPS), so the direction is unambiguous; a
   multi-run mean±std is a follow-up if a tighter claim is needed.
 - The node's **cost model is a spike heuristic** (cost below the cheapest base path to force selection); an honest

@@ -126,12 +126,23 @@ static EXEC_METHODS: Methods<pg_sys::CustomExecMethods> = Methods(pg_sys::Custom
 // The previous `set_rel_pathlist_hook` in the chain (Postgres allows only one; we must call it).
 static mut PREV_HOOK: pg_sys::set_rel_pathlist_hook_type = None;
 
-/// Register the Custom Scan methods + install the pathlist hook. Called from `_PG_init`.
+/// Clears the backend membership on transaction ABORT — so a `pg_sys::error!` longjmp mid-scan (which skips
+/// `end_custom_scan`) cannot leave a stale membership that a later plain IVF scan in the same backend would wrongly
+/// filter by (council-index-storage MEDIUM-1 / council-rust-pgrx H1).
+#[pg_guard]
+unsafe extern "C-unwind" fn xact_clear_membership(event: pg_sys::XactEvent::Type, _arg: *mut std::ffi::c_void) {
+    if event == pg_sys::XactEvent::XACT_EVENT_ABORT || event == pg_sys::XactEvent::XACT_EVENT_PARALLEL_ABORT {
+        set_membership(None);
+    }
+}
+
+/// Register the Custom Scan methods + install the pathlist hook + the xact-abort membership guard. From `_PG_init`.
 pub fn init() {
     unsafe {
         pg_sys::RegisterCustomScanMethods(&SCAN_METHODS.0);
         PREV_HOOK = pg_sys::set_rel_pathlist_hook;
         pg_sys::set_rel_pathlist_hook = Some(pathlist_hook);
+        pg_sys::RegisterXactCallback(Some(xact_clear_membership), std::ptr::null_mut());
     }
 }
 
@@ -177,7 +188,13 @@ unsafe extern "C-unwind" fn pathlist_hook(
     let mut bitmap_path: *mut pg_sys::Path = std::ptr::null_mut();
     for i in 0..paths.len() {
         if let Some(p) = paths.get_ptr(i) {
-            if !(*p).pathkeys.is_null() && vector_path.is_null() {
+            // The vector-ordered path is the base IndexScan that carries distance pathkeys (only an amcanorderby
+            // index — ours — produces base-rel pathkeys from `ORDER BY e <-> q`). Require T_IndexScan so an
+            // unrelated ordered path can't be hijacked (council H3).
+            if !(*p).pathkeys.is_null()
+                && (*p).pathtype == pg_sys::NodeTag::T_IndexScan
+                && vector_path.is_null()
+            {
                 vector_path = p;
             }
             if (*p).pathtype == pg_sys::NodeTag::T_BitmapHeapScan && bitmap_path.is_null() {
@@ -272,8 +289,15 @@ unsafe extern "C-unwind" fn begin_custom_scan(
     estate: *mut pg_sys::EState,
     eflags: c_int,
 ) {
-    // Defensive: clear any membership a prior scan in this backend left behind on an `error!` longjmp (anti-leak).
-    set_membership(None);
+    // FAIL-LOUD on concurrency: the membership is a per-backend channel, but the executor runs every node's
+    // BeginCustomScan (Init) before any pull (Exec), and our AM reads the membership lazily at scan time. Two
+    // vecfilter nodes in one plan (UNION / self-join / partitioned Append) would cross-contaminate → SILENTLY WRONG
+    // results (council BLOCKER). Until per-scan membership scoping lands (follow-up), refuse the second node loudly
+    // rather than return wrong rows (Unbreakable Rule 8). Stale-from-abort membership is cleared by the xact
+    // callback, so an active membership here genuinely means a concurrent node.
+    if has_membership() {
+        pg_sys::error!("theodb vecfilter: concurrent filtered vector scans in one plan are not supported");
+    }
     let st = &mut *(node as *mut VecFilterState);
     let cscan = st.css.ss.ps.plan as *mut pg_sys::CustomScan;
     let planned = PgList::<pg_sys::Plan>::from_pg((*cscan).custom_plans);
@@ -348,13 +372,20 @@ unsafe extern "C-unwind" fn end_custom_scan(node: *mut pg_sys::CustomScanState) 
 unsafe extern "C-unwind" fn rescan_custom_scan(node: *mut pg_sys::CustomScanState) {
     let st = &mut *(node as *mut VecFilterState);
     if !st.bitmap_child.is_null() {
+        // Clear-then-set (mirror begin): drop the previous iteration's membership, re-derive from the rescanned
+        // bitmap child, and fail loud on a non-TIDBitmap (a rescanned bitmap child MUST produce one — Rule 8).
+        if st.membership_active {
+            set_membership(None);
+            st.membership_active = false;
+        }
         pg_sys::ExecReScan(st.bitmap_child);
         let res = pg_sys::MultiExecProcNode(st.bitmap_child);
-        if !res.is_null() && (*(res as *mut pg_sys::Node)).type_ == pg_sys::NodeTag::T_TIDBitmap {
-            let (exact, lossy) = materialize_bitmap(res as *mut pg_sys::TIDBitmap);
-            set_membership(Some(Membership { exact, lossy }));
-            st.membership_active = true;
+        if res.is_null() || (*(res as *mut pg_sys::Node)).type_ != pg_sys::NodeTag::T_TIDBitmap {
+            pg_sys::error!("theodb vecfilter: rescanned bitmap subplan did not return a TIDBitmap");
         }
+        let (exact, lossy) = materialize_bitmap(res as *mut pg_sys::TIDBitmap);
+        set_membership(Some(Membership { exact, lossy }));
+        st.membership_active = true;
     }
     if !st.vector_child.is_null() {
         pg_sys::ExecReScan(st.vector_child);
@@ -403,6 +434,25 @@ mod tests {
                 .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
         });
         assert_eq!(hooked, exact, "the 2-child Custom Scan filtered result must equal the exact seqscan-filtered top-5 (hooked={hooked:?} exact={exact:?})");
+    }
+
+    /// M93 review fix — two vecfilter nodes in one plan (a UNION of two filtered vector queries) FAIL LOUD instead
+    /// of silently cross-contaminating their membership (council BLOCKER). The error text is asserted by the harness.
+    #[pgrx::pg_test(error = "theodb vecfilter: concurrent filtered vector scans in one plan are not supported")]
+    fn m93_concurrent_vecfilter_fails_loud() {
+        Spi::run("CREATE TABLE cs92u (id int PRIMARY KEY, cat int, e vector(4))").unwrap();
+        Spi::run("INSERT INTO cs92u SELECT g, g%100, ('['||g||','||(g*2)||',0,0]')::vector FROM generate_series(1,1000) g").unwrap();
+        Spi::run("CREATE INDEX cs92u_e ON cs92u USING theodb_ivfflat (e) WITH (lists=8, pq_subspaces=2, aq_threshold=2000, separate_storage=1)").unwrap();
+        Spi::run("CREATE INDEX cs92u_cat ON cs92u (cat)").unwrap();
+        Spi::run("ANALYZE cs92u").unwrap();
+        Spi::run("SET theodb.enable_vecfilter=on; SET enable_seqscan=off; SET enable_bitmapscan=on; SET theodb_ivfflat.probes=8").unwrap();
+        // Two vecfilter nodes (one per UNION branch) → the second BeginCustomScan must error loudly.
+        Spi::run(
+            "(SELECT id FROM cs92u WHERE cat=1 ORDER BY e <-> '[0,0,0,0]'::vector LIMIT 3) \
+             UNION ALL \
+             (SELECT id FROM cs92u WHERE cat=2 ORDER BY e <-> '[0,0,0,0]'::vector LIMIT 3)",
+        )
+        .unwrap();
     }
 
     /// M93 T2.1 — a post-build INSERT with a NON-matching `cat` (pending region, no stored membership) must NOT
