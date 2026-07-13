@@ -24,6 +24,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.80.1] - 2026-07-13
+
+### Fixed
+- Integrity: ship the v5 selectivity-adaptive probing loop + the Pareto-frontier benchmark harness that the M92/M93 263-test suite and the SIFT `INLINE-dominates-POST` measurement actually ran against — they were left uncommitted when v0.80.0 was cut, so the released source now matches the benchmark artifact (`docs/benchmarks/m92-arbitrary-where.{md,json}`). No behavior change at the benchmarked 1%/5% selectivity; the v5 adaptive only materially affects ultra-selective (<0.1%) recall (M92)
+
 ## [0.80.0] - 2026-07-13
 
 ### Added
