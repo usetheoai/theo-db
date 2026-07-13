@@ -646,9 +646,12 @@ unsafe fn scan_ivf_aq_split_v7(
                     continue;
                 }
                 let tid = i64::from_le_bytes(cbytes[ordinal * 8..ordinal * 8 + 8].try_into().unwrap());
-                // M92 v1a: arbitrary-WHERE inline skip — drop candidates whose TID is not in the membership set.
+                // M92 arbitrary-WHERE inline skip — admit a candidate whose exact TID is a member OR whose block is a
+                // lossy-bitmap block (over-admit → the node's ExecQual recheck filters it, ADR M93-2). Dropping the
+                // lossy case would under-admit (silently miss valid rows on lossy pages).
                 if let Some(m) = &membership {
-                    if !m.contains(&tid) {
+                    let block = (tid >> 16) as u32;
+                    if !m.exact.contains(&tid) && !m.lossy.contains(&block) {
                         continue;
                     }
                 }

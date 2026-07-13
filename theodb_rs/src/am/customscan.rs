@@ -28,18 +28,29 @@ use std::rc::Rc;
 // membership). MVCC correctness still relies on the node re-running the original qual on the heap tuple (v1c):
 // membership is an *admission* filter, never the final authority (lossy bitmap pages + the pending region can
 // over-admit).
-thread_local! {
-    static SCAN_MEMBERSHIP: RefCell<Option<Rc<HashSet<i64>>>> = const { RefCell::new(None) };
+/// The admission set the AM Stage-1 filters by. `exact` holds encoded TIDs (`tid::encode` = `(block<<16)|offset`)
+/// from non-lossy bitmap pages; `lossy` holds block numbers whose per-offset detail the bitmap dropped under memory
+/// pressure (`ntuples < 0`). A candidate is ADMITTED when its exact TID is in `exact` OR its block is in `lossy` —
+/// the lossy case over-admits every candidate on the block, which the Custom Scan node's `ExecQual` recheck then
+/// filters (membership is an admission filter, never the final authority). Dropping lossy blocks would UNDER-admit
+/// (silently miss valid rows) — the correctness bug ADR M93-2 guards against.
+pub(crate) struct Membership {
+    pub exact: HashSet<i64>,
+    pub lossy: HashSet<u32>,
 }
 
-/// Set the TID membership the next index scan in THIS backend must filter by (encoded `tid::encode` i64s).
-/// `None` clears it. Called by the Custom Scan node's `BeginCustomScan` before driving the AM scan.
-pub(crate) fn set_membership(m: Option<HashSet<i64>>) {
+thread_local! {
+    static SCAN_MEMBERSHIP: RefCell<Option<Rc<Membership>>> = const { RefCell::new(None) };
+}
+
+/// Set the TID membership the next index scan in THIS backend must filter by. `None` clears it. Called by the Custom
+/// Scan node's `BeginCustomScan` before driving the AM scan.
+pub(crate) fn set_membership(m: Option<Membership>) {
     SCAN_MEMBERSHIP.with(|c| *c.borrow_mut() = m.map(Rc::new));
 }
 
 /// Read the active membership (cheap Rc clone) for this backend, or `None`. Read by the AM Stage-1 scan.
-pub(crate) fn membership() -> Option<Rc<HashSet<i64>>> {
+pub(crate) fn membership() -> Option<Rc<Membership>> {
     SCAN_MEMBERSHIP.with(|c| c.borrow().clone())
 }
 
@@ -366,7 +377,7 @@ mod tests {
                 .collect()
         });
         assert_eq!(mset.len(), 5, "resolved 5 member ctids");
-        super::set_membership(Some(mset));
+        super::set_membership(Some(super::Membership { exact: mset, lossy: HashSet::new() }));
         // Plain vector scan, NO WHERE → the membership is the ONLY filter. LIMIT high enough to pull all members.
         let got: Vec<i32> = Spi::connect(|c| {
             c.select("SET enable_seqscan=off; SET enable_indexscan=on; SET theodb_ivfflat.probes=4", None, &[]).ok();
@@ -392,7 +403,10 @@ mod tests {
             Spi::run(&format!("INSERT INTO m92c VALUES ({i}, '{{1}}', '[{i},{},0,0]')", i * 2)).unwrap();
         }
         Spi::run("CREATE INDEX m92c_e ON m92c USING theodb_ivfflat (e, lbl) WITH (lists=2, pq_subspaces=2, aq_threshold=2000, separate_storage=1)").unwrap();
-        super::set_membership(Some(std::collections::HashSet::from([1i64])));
+        super::set_membership(Some(super::Membership {
+            exact: std::collections::HashSet::from([1i64]),
+            lossy: std::collections::HashSet::new(),
+        }));
         super::set_membership(None);
         let got: Vec<i32> = Spi::connect(|c| {
             c.select("SET enable_seqscan=off; SET enable_indexscan=on; SET theodb_ivfflat.probes=2", None, &[]).ok();
@@ -402,6 +416,46 @@ mod tests {
                 .collect()
         });
         assert!(got.len() >= 5, "cleared membership ⇒ a normal scan returns many rows (got {got:?})");
+    }
+
+    /// M93 T1.1 — the membership admits a candidate on a LOSSY-bitmap block (over-admit → the node recheck filters),
+    /// never under-admits. Proof: a membership with only a lossy block admits that block's rows; an empty membership
+    /// (no exact, no lossy) admits nothing. Guards ADR M93-2 (dropping lossy pages would silently miss valid rows).
+    #[pgrx::pg_test]
+    fn m93_t1_membership_admits_lossy_block() {
+        use std::collections::HashSet;
+        Spi::run("CREATE TABLE m92l (id int PRIMARY KEY, lbl smallint[], e vector(4))").unwrap();
+        for i in 1..=40i32 {
+            Spi::run(&format!("INSERT INTO m92l VALUES ({i}, '{{1}}', '[{i},{},0,0]')", i * 2)).unwrap();
+        }
+        Spi::run("CREATE INDEX m92l_e ON m92l USING theodb_ivfflat (e, lbl) WITH (lists=2, pq_subspaces=2, aq_threshold=2000, separate_storage=1)").unwrap();
+        let block0: u32 = Spi::connect(|c| {
+            c.select("SELECT ctid::text FROM m92l WHERE id=1", None, &[])
+                .unwrap()
+                .filter_map(|r| r.get::<String>(1).unwrap())
+                .next()
+                .map(|s| {
+                    let inner = s.trim_matches(|ch| ch == '(' || ch == ')');
+                    inner.split(',').next().unwrap().parse().unwrap()
+                })
+                .unwrap()
+        });
+        let run = || -> Vec<i32> {
+            Spi::connect(|c| {
+                c.select("SET enable_seqscan=off; SET enable_indexscan=on; SET theodb_ivfflat.probes=2", None, &[]).ok();
+                c.select("SELECT id FROM m92l ORDER BY e <-> '[5,10,0,0]'::vector LIMIT 20", None, &[])
+                    .unwrap()
+                    .filter_map(|r| r.get::<i32>(1).unwrap())
+                    .collect()
+            })
+        };
+        super::set_membership(Some(super::Membership { exact: HashSet::new(), lossy: HashSet::from([block0]) }));
+        let via_lossy = run();
+        super::set_membership(Some(super::Membership { exact: HashSet::new(), lossy: HashSet::new() }));
+        let via_empty = run();
+        super::set_membership(None);
+        assert!(!via_lossy.is_empty(), "a lossy-member block must admit its rows (got {via_lossy:?})");
+        assert!(via_empty.is_empty(), "empty membership (no exact, no lossy) admits nothing (got {via_empty:?})");
     }
 
     /// M92 v1b — the bitmap-materialization step: iterate a native `TIDBitmap` into the exact-TID + lossy-block
