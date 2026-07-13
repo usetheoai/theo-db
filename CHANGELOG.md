@@ -13,10 +13,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- Roadmap amended: added M92 arbitrary-WHERE filtered vector search via Custom Scan Provider (Approach B — bitmap over existing indexes → TIDBitmap membership test in the AM Stage-1 scan, for filters on any column; the AlloyDB tier ③ deferred by M90/M91)
-- Roadmap amended: added M93 Custom Scan node integration — assembles the proven M92 spike primitives (node lifecycle + AM membership skip + bitmap materialize) into the 2-child node: MultiExec the bitmapqual sub-plan → materialize → set_membership → drive the vector-ordered child → ExecQual MVCC recheck (lossy/pending/EPQ). Closes M92 end-to-end
-- M93 (experimental, OFF by default behind `theodb.enable_vecfilter`): arbitrary-`WHERE` filtered vector search via the 2-child Custom Scan node now works end-to-end and MVCC-correctly. The hook intercepts `WHERE <scalar> ORDER BY e <-> q LIMIT k` (finds the planner's BitmapHeapPath + the vector-ordered IndexPath); the node MultiExecs the bitmap sub-plan → materializes a lossy-safe membership → drives the vector-ordered child (whose own qpqual Filter is the MVCC recheck of lossy/pending over-admits). Result is byte-identical to exact seqscan on a non-label column; the pending region + lossy blocks are rechecked. The inline membership skip engages on BOTH the plain-vector v5 layout and the v7 label layout (the realistic plain-`(e)`-index case). 263 tests GREEN (cargo pgrx test: pg_tests + unit), GUC-off path byte-identical. Concurrent filtered vector scans in one plan (UNION/self-join) fail loud (per-backend membership; per-scan scoping is a follow-up) — never silently wrong (M93)
-- M92 spike (experimental, OFF by default behind `theodb.enable_vecfilter`): a hand-rolled Custom Scan Provider scaffold + a TID-membership inline skip in the IVF-AQ Stage-1 scan. v0 proves the Custom Scan node lifecycle in pgrx (EXPLAIN shows the node; pass-through result correct); v1a proves an arbitrary TID membership set reaches Stage-1 and filters correctly; v1b-materialize proves a native `TIDBitmap` iterates into exact-TID + lossy-block membership sets. Not yet a user-facing feature — the node↔bitmap sub-plan wiring (MultiExec) and MVCC recheck (v1c) are pending (M92)
 
 ### Changed
 
@@ -27,6 +23,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 ### Security
+
+## [0.80.0] - 2026-07-13
+
+### Added
+- **M92/M93 (arbitrary-WHERE filtered vector search via a Custom Scan Provider, veredito `GO` — experimental, OFF by default behind `theodb.enable_vecfilter`): push an arbitrary scalar `WHERE` INTO the IVF-AQ vector scan.** A hand-rolled 2-child Custom Scan node intercepts `WHERE <scalar> ORDER BY e <-> q LIMIT k`, runs the planner's native bitmap sub-plan over the scalar column (Rule 9 — reuses BitmapAnd/Or), materializes a lossy-safe TID membership, and the vector scan's Stage-1 skips non-members inline (+ M91 adaptive probing); the vector child's own qpqual Filter is the MVCC recheck of the lossy/pending over-admits. **MEASURED (DO 8-vCPU Xeon Gold 6548N, SIFT1M, real neighbors): INLINE dominates the native post-filter on BOTH recall AND QPS — 1% sel recall 0.953 @ 266 QPS vs POST 0.673 @ 21 QPS (+0.28 recall, ~12× QPS); 5% sel 0.915 @ 126 vs 0.593 @ 92 (+0.32, ~1.4×)** (`docs/benchmarks/m92-arbitrary-where.{md,json}`). Correctness proven byte-identical to exact seqscan on a non-label column (pending + lossy rechecked); the inline skip engages on both the v5 plain-vector and v7 label layouts. **263 tests GREEN, GUC-off path byte-identical.** Concurrent filtered vector scans in one plan (UNION/self-join) **fail loud** (per-backend membership; per-scan scoping is a follow-up) — never silently wrong (Rule 8). Sign-off council-rust-pgrx + council-index-storage + council-benchmark (1 BLOCKER + 3 HIGH found in review and fixed). NOT a QPS-superiority claim vs ScaNN/AlloyDB (teto M73/M82) — the AlloyDB "inline filtering" tier ③ mechanism in a permissive OSS Postgres extension. (M92, M93)
+- Roadmap amended: added M92 arbitrary-WHERE Custom Scan Provider + M93 Custom Scan node integration (`/roadmap-feature`) (M92, M93)
 
 ## [0.79.0] - 2026-07-13
 
