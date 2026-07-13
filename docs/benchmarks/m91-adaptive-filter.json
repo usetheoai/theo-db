@@ -33,7 +33,7 @@
 
   "finding_1_no_strategy_crossover": "INLINE (v7) DOMINATES POST (v5) on recall at EVERY selectivity (0.74-0.95 vs 0.33-0.79). A 2-way INLINE⇄POST adaptive switch is FALSIFIED — POST never wins. The M91 premise 'different fixed strategies win in different regimes' does NOT hold on real data for this pair.",
 
-  "finding_2_synthetic_artifact": "The pre-SIFT synthetic sweep (500k, 200 well-separated clusters, scale 20) showed a fake recall COLLAPSE at loose selectivity (INLINE 0.088 @ 30%). That was 100% a TIE-DENSITY artifact — with 2500 pts/cluster the true top-10 are hundreds of near-ties, so recall@10 is a coin-flip; probing all 200 lists did NOT help (base unfiltered recall stuck at 0.024 @ probes=200). On SIFT (real neighbors) the collapse VANISHES: INLINE holds 0.85-0.95 across 0.5%-30%. Measurement-first caught a phantom before any code was written.",
+  "finding_2_synthetic_artifact": "The pre-SIFT synthetic sweep (500k, 200 well-separated clusters, scale 20) showed a fake recall COLLAPSE at loose selectivity (INLINE 0.088 @ 30%, traced in m91-synthetic-tiedensity-sweep.log). That was 100% a TIE-DENSITY artifact — with 2500 pts/cluster the true top-10 are hundreds of near-ties, so recall@10 is a coin-flip; probing all 200 lists did NOT help (base unfiltered recall stuck at 0.024 @ probes=200, traced in m91-synthetic-tiedensity-diag.log M91D_BASE). On SIFT (real neighbors) the collapse VANISHES: INLINE holds 0.85-0.95 across 0.5%-30%. Measurement-first caught a phantom before any code was written.",
 
   "probe_recovery_ultra_selective": {
     "note": "at ultra-selective, does cranking probes recover INLINE recall? YES — decisively",
@@ -85,11 +85,11 @@
     "gate": {
       "ultra_selective_recovery": "recall 0.741 -> 1.000 at 0.01% (>= 0.97 target MET)",
       "loose_no_recall_regression": "recall identical or better at every point >= 0.1%",
-      "loose_qps_within_noise": "QPS -2% to -10% vs fixed baseline (loop checks the break condition per list; the true NN set is unchanged) — within noise, no regression where the default probes suffice",
+      "loose_qps_bounded_overhead": "QPS -2% to -11% vs fixed baseline (measured deltas: -4.0/-3.6/-1.9/-5.1/-10.5/-9.9% at 0.1..30%). This is a bounded per-list break-condition-check overhead (the loop evaluates `probed>=probes && ...` per list), NOT stochastic noise — the returned NN set is unchanged (identical recall). No regression in correctness where the default probes suffice",
       "honest_cost": "ultra-selective QPS 147 -> 72.7 (the correct trade: 74% recall is broken; 100% at 72 qps is correct; bounded — it stops once matches accumulate, faster than the probes=1000 -> 52 qps full scan)"
     },
     "correctness": {"pg_tests": 255, "failed": 0, "new_tests": ["v7_adaptive_probing_recovers_selective_recall", "v7_non_filter_scan_unchanged"], "note": "full suite green; the no-filter path is byte-identical (break at probed>=probes when !filtering)"}
   },
   "verdict_final": "GO — selectivity-adaptive probing SHIPPED and VALIDATED: filtered recall@10 recovers 0.741 -> 1.000 at 0.01% selectivity while loose/unfiltered scans stay within noise. The honest re-scope (adaptive=probes, not strategy) is the measured, parsimony-correct realization of adaptive filtered search.",
-  "provenance": {"harness": "benchmarks/m91_filter_bench.py (SIFT sweep + probe-recovery); validation via m91_validate.py (adaptive v7 at default probes)", "raw_logs": "docs/benchmarks/m91-sift-sweep.log, m91-ultra-recovery.log", "impl_commit": "1d1cd5f", "supersedes_synthetic": "the 500k synthetic sweep is retained only as the tie-density counter-example"}
+  "provenance": {"harness": "benchmarks/m91_filter_bench.py (SIFT sweep + probe-recovery); validation via m91_validate.py (adaptive v7 at default probes)", "raw_logs": "docs/benchmarks/m91-sift-sweep.log, m91-ultra-recovery.log, m91-adaptive-validation.log, m91-synthetic-tiedensity-sweep.log, m91-synthetic-tiedensity-diag.log", "impl_commit": "1d1cd5f", "supersedes_synthetic": "the 500k synthetic sweep is retained only as the tie-density counter-example (logs committed for traceability)"}
 }

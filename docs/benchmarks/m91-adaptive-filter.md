@@ -28,12 +28,13 @@ original M91 premise ("different fixed strategies win in different regimes") doe
 ## Finding 2 — the synthetic "collapse" was a tie-density artifact (measurement-first caught a phantom)
 
 An earlier synthetic sweep (500k, 200 well-separated clusters, scale 20) showed a dramatic INLINE recall **collapse**
-at loose selectivity (0.088 @ 30%) — which looked like a real crossover case begging for an adaptive switch. It was
-**100% a measurement artifact**: with 2500 points per cluster the true top-10 are hundreds of near-ties, so recall@10
-is a coin-flip. Proof: base **unfiltered** recall stuck at **0.024 even at probes=200 (all lists)** — probing
-everything didn't help because the "neighbors" were tied. On SIFT (real neighbor structure) the collapse **vanishes**:
-INLINE holds 0.85–0.95 across 0.5%–30%. **We nearly built an adaptive strategy to fix a phantom; the SIFT re-measure
-stopped it.** This is exactly what measurement-first exists for.
+at loose selectivity (0.088 @ 30%, `m91-synthetic-tiedensity-sweep.log`) — which looked like a real crossover case
+begging for an adaptive switch. It was **100% a measurement artifact**: with 2500 points per cluster the true top-10
+are hundreds of near-ties, so recall@10 is a coin-flip. Proof: base **unfiltered** recall stuck at **0.024 even at
+probes=200 (all lists)** (`m91-synthetic-tiedensity-diag.log`, `M91D_BASE`) — probing everything didn't help because
+the "neighbors" were tied. On SIFT (real neighbor structure) the collapse **vanishes**: INLINE holds 0.85–0.95 across
+0.5%–30%. **We nearly built an adaptive strategy to fix a phantom; the SIFT re-measure stopped it.** This is exactly
+what measurement-first exists for.
 
 ## Finding 3 — cranking probes recovers ultra-selective recall (the real adaptive axis)
 
@@ -94,9 +95,10 @@ loop self-adapts — no per-query tuning):
 - **Ultra-selective recovery:** recall **0.741 → 1.000** at 0.01% (gate ≥ 0.97 MET). The loop auto-probes more lists
   to find the 100 scattered matches. Honest cost: QPS 147 → 72.7 — the correct trade (74% recall is broken; 100% at
   72 QPS is correct), and **bounded** (it stops once matches accumulate — faster than the probes=1000 full scan's 52 QPS).
-- **Loose selectivity:** recall **identical or better** at every point ≥ 0.1%; QPS within −2% to −10% of the fixed
-  baseline (the loop checks its break condition per list; the returned NN set is unchanged) — no regression where the
-  default probes suffice.
+- **Loose selectivity:** recall **identical or better** at every point ≥ 0.1%; QPS a bounded **−2% to −11%** vs the
+  fixed baseline (measured −4.0/−3.6/−1.9/−5.1/−10.5/−9.9% at 0.1–30%) — a per-list break-condition-check overhead, NOT
+  stochastic noise; the returned NN set is unchanged (identical recall). No correctness regression where the default
+  probes suffice.
 - **Correctness:** the full **255 pg_tests pass, 0 failed** (incl. `v7_adaptive_probing_recovers_selective_recall`
   and `v7_non_filter_scan_unchanged`); the no-filter path is byte-identical.
 
@@ -108,5 +110,7 @@ honest, data-driven realization of adaptive filtered search — and the shipped 
 
 ## Provenance
 
-- Harness: `benchmarks/m91_filter_bench.py` (SIFT sweep + probe-recovery). Raw: `m91_sift.log`, `m91_ultra.log`.
-- Blueprint: `knowledge-base/discoveries/blueprints/adaptive-filter-strategy-blueprint.md`. Raw JSON: `docs/benchmarks/m91-adaptive-filter.json`.
+- Harness: `benchmarks/m91_filter_bench.py` (SIFT sweep + probe-recovery), `benchmarks/m91_validate.py` (Phase-3 adaptive).
+- Raw logs (all committed, every number traces): `m91-sift-sweep.log`, `m91-ultra-recovery.log`,
+  `m91-adaptive-validation.log`, `m91-synthetic-tiedensity-sweep.log`, `m91-synthetic-tiedensity-diag.log` (all under `docs/benchmarks/`).
+- Blueprint: `knowledge-base/discoveries/blueprints/adaptive-filter-strategy-blueprint.md`. Raw JSON: `docs/benchmarks/m91-adaptive-filter.json`. Impl: commit `1d1cd5f`.
