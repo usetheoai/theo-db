@@ -96,6 +96,19 @@ pub(crate) fn vecfilter_enabled() -> bool {
     ENABLE_VECFILTER.get()
 }
 
+/// M95 — force the vecfilter node's selection by pricing it below the cheapest base path (the pre-M95 posture),
+/// bypassing the honest cost model. Default OFF: the honest cost is the default. This is an explicit user
+/// override — the same rationale as Postgres's `enable_*` knobs — for the case the planner cannot see: a
+/// selective filter where the node's higher HONEST cost loses to the probe-blind native post-filter, yet the
+/// node wins on RECALL (measured, M92). Also the deterministic switch the membership-mechanism tests use to
+/// exercise the node independently of planner selection.
+pub(crate) static VECFILTER_FORCE: GucSetting<bool> = GucSetting::<bool>::new(false);
+
+/// Whether to force the vecfilter node's selection (bypass the honest cost model). See `VECFILTER_FORCE`.
+pub(crate) fn vecfilter_force() -> bool {
+    VECFILTER_FORCE.get()
+}
+
 // M48 (T2.3) — deterministic crash-injection for the VACUUM fold's crash tests. `injection_points` is NOT
 // compiled into the packaged Debian PG17 (blueprint §Q9, verified), so we ship a tiny always-compiled test hook
 // instead. Both default to 0 (off) ⇒ ZERO effect in production; both are `Suset` (only a superuser can set them,
@@ -193,6 +206,14 @@ pub(crate) fn init() {
         c"When on, the M92 arbitrary-WHERE Custom Scan Provider intercepts filtered vector queries (spike)",
         c"Default off (kill-switch). A planner hook affects every query, so the spike stays inert until enabled.",
         &ENABLE_VECFILTER,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+    GucRegistry::define_bool_guc(
+        c"theodb.vecfilter_force",
+        c"When on, force the vecfilter node's selection (bypass the honest M95 cost model)",
+        c"Default off (the honest cost model decides). An explicit override for a selective filter where the node wins on RECALL but its higher honest cost loses to the probe-blind native post-filter.",
+        &VECFILTER_FORCE,
         GucContext::Userset,
         GucFlags::default(),
     );

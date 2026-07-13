@@ -11,6 +11,7 @@
 //! hook that misbehaves breaks EVERY query on the instance, so the spike is inert until explicitly enabled.
 //! Every callback is `extern "C-unwind"` and routes corrupt/unexpected state to `pg_sys::error!`, never a panic.
 
+use crate::am::{cost, guc, page};
 use pgrx::pg_sys;
 use pgrx::prelude::*;
 use pgrx::{PgBox, PgList};
@@ -295,9 +296,32 @@ unsafe extern "C-unwind" fn pathlist_hook(
         return;
     }
 
+    // M95 — HONEST cost (replaces the spike's forced `min_cost * 0.1`). cost = term_B (produce the membership
+    // bitmap) + term_V (the vector scan that filters by it). The planner then picks the node ONLY where it wins;
+    // pathkeys (below) credit us the Sort the BitmapHeapScan+Sort competitor must pay. Fail-safe (EC-3): any
+    // unreadable input degrades to NOT adding the node (native plan wins) — a planner hook must never error.
+    let (startup_cost, total_cost) = if guc::vecfilter_force() {
+        // Explicit user override (theodb.vecfilter_force): price below the cheapest base path so the planner picks
+        // the node deterministically — for a selective filter where the node wins on RECALL but the probe-blind
+        // native post-filter is under-priced (R4). Same rationale as an `enable_*` knob.
+        let mut min_cost = (*vector_path).total_cost;
+        for i in 0..paths.len() {
+            if let Some(p) = paths.get_ptr(i) {
+                if (*p).total_cost < min_cost {
+                    min_cost = (*p).total_cost;
+                }
+            }
+        }
+        (0.0, min_cost * 0.1)
+    } else {
+        match vecfilter_honest_cost(rel, vector_path, bitmap_path) {
+            Some(c) => c,
+            None => return, // fail-safe: degenerate meta / null bitmapqual → skip the node, native plan is used
+        }
+    };
     // Hand-roll `create_customscan_path` — a 2-child CustomPath. Preserve the vector path's pathkeys so the node
-    // reports distance-ordered output (no redundant Sort above it). Cost below the vector path so the planner picks
-    // it (past the 1% add_path fuzz factor — spike posture; the real cost model is a follow-up).
+    // reports distance-ordered output (no redundant Sort above it) and the planner credits us against a
+    // Sort-paying competitor.
     let mut cpath = PgBox::<pg_sys::CustomPath>::alloc_node(pg_sys::NodeTag::T_CustomPath);
     let path = &mut cpath.path;
     path.pathtype = pg_sys::NodeTag::T_CustomScan;
@@ -306,19 +330,8 @@ unsafe extern "C-unwind" fn pathlist_hook(
     path.param_info = std::ptr::null_mut();
     path.pathkeys = (*vector_path).pathkeys;
     path.rows = (*vector_path).rows;
-    // Cost below the CHEAPEST base path so the ordered node beats even a selective bitmap+Sort (which is very cheap
-    // at high selectivity). Spike posture: force selection to prove correctness; an honest cost model (membership-
-    // reduced candidate count) is a follow-up. `startup=0` so a LIMIT prefers it.
-    let mut min_cost = (*vector_path).total_cost;
-    for i in 0..paths.len() {
-        if let Some(p) = paths.get_ptr(i) {
-            if (*p).total_cost < min_cost {
-                min_cost = (*p).total_cost;
-            }
-        }
-    }
-    path.startup_cost = 0.0;
-    path.total_cost = min_cost * 0.1;
+    path.startup_cost = startup_cost;
+    path.total_cost = total_cost;
     cpath.flags = 0;
     let mut children = PgList::<pg_sys::Path>::new();
     children.push(vector_path); // [0] — ordered + carries the scalar Filter (the recheck)
@@ -328,6 +341,86 @@ unsafe extern "C-unwind" fn pathlist_hook(
     cpath.custom_private = std::ptr::null_mut();
     cpath.methods = &PATH_METHODS.0;
     pg_sys::add_path(rel, cpath.into_pg() as *mut pg_sys::Path);
+}
+
+/// M95 — the honest cost of the vecfilter node: `Some((startup, total))` or `None` when any input is unreadable
+/// (EC-3 fail-safe — the caller then does NOT add the node, so the native plan wins; a planner hook must never
+/// `error!`). `term_B` = the bitmap sub-plan's OWN cost (`bitmapqual.total_cost`, NOT the parent BitmapHeapPath
+/// total — that would double-count the heap fetch we never perform). `term_V` = the vector scan re-priced for the
+/// M91 adaptive probing derived from the bitmap selectivity (`cost::effective_probes` / `vecfilter_scan_cost`).
+unsafe fn vecfilter_honest_cost(
+    rel: *mut pg_sys::RelOptInfo,
+    vector_path: *mut pg_sys::Path,
+    bitmap_path: *mut pg_sys::Path,
+) -> Option<(pg_sys::Cost, pg_sys::Cost)> {
+    // term_B — the membership-production cost, read from the bitmap sub-plan (guard the null deref).
+    let bpath = bitmap_path as *mut pg_sys::BitmapHeapPath;
+    let bitmapqual = (*bpath).bitmapqual;
+    if bitmapqual.is_null() {
+        return None;
+    }
+    let term_b = (*bitmapqual).total_cost;
+
+    // Selectivity `s` = matching-tuple fraction = bitmap rows / rel tuples (the planner's own estimates).
+    let rel_tuples = (*rel).tuples;
+    if rel_tuples <= 0.0 {
+        return None; // never-ANALYZEd / empty rel — fall back to the native plan
+    }
+    let s = ((*bitmap_path).rows / rel_tuples).clamp(1e-9, 1.0);
+
+    // Index geometry from the vector IndexPath: page count + tuple count + oid for a fail-safe meta read.
+    let ipath = vector_path as *mut pg_sys::IndexPath;
+    let ii = (*ipath).indexinfo;
+    if ii.is_null() {
+        return None;
+    }
+    let index_pages = (*ii).pages as f64;
+    let idx_tuples = if (*ii).tuples > 0.0 { (*ii).tuples } else { rel_tuples };
+
+    // `lists` from the IVF meta — fail-safe like `cost::scan_visit_ratio` (any unreadable/torn meta → skip node).
+    let irel = pg_sys::index_open((*ii).indexoid, pg_sys::NoLock as pg_sys::LOCKMODE);
+    let lists = page::read_ivf_aq_meta_split(irel)
+        .map(|m| m.dir.len())
+        .or_else(|_| page::read_ivf_aq_meta(irel).map(|m| m.dir.len()))
+        .or_else(|_| page::read_ivf_meta(irel).map(|m| m.dir.len()))
+        .unwrap_or(0);
+    pg_sys::index_close(irel, pg_sys::NoLock as pg_sys::LOCKMODE);
+    if lists == 0 {
+        return None; // not an IVF index we can cost honestly (e.g. HNSW) → let the native plan win
+    }
+
+    let avg_list_size = idx_tuples / lists as f64;
+    let pages_per_list = (index_pages / lists as f64).max(1.0);
+    let rerank_pool = 64.0 * guc::over_fetch() as f64;
+
+    let eff = cost::effective_probes(s, lists, avg_list_size, rerank_pool, guc::probes());
+    if eff <= 0.0 {
+        return None; // fail-safe sentinel from a degenerate input
+    }
+
+    // Page/CPU cost globals (same source `cost_index` uses; per-tablespace random/seq).
+    let mut spc_random: f64 = 0.0;
+    let mut spc_seq: f64 = 0.0;
+    pg_sys::get_tablespace_page_costs((*ii).reltablespace, &mut spc_random, &mut spc_seq);
+    if spc_random <= 0.0 {
+        spc_random = pg_sys::random_page_cost;
+    }
+    let term_v = cost::vecfilter_scan_cost(
+        eff,
+        pages_per_list,
+        avg_list_size,
+        rerank_pool,
+        lists,
+        spc_random,
+        pg_sys::cpu_operator_cost,
+    );
+
+    // The ANN scan is not incremental: it gathers Stage-0/1 candidates before emitting the first ordered tuple, so
+    // the whole term_V is front-loaded into startup (a LIMIT cannot skip it), plus term_B (the bitmap is
+    // MultiExec'd eagerly in begin). total = the same (the scan then just pops the heap).
+    let startup = term_b + term_v;
+    let total = term_b + term_v;
+    Some((startup, total))
 }
 
 /// Path -> Plan: hand-roll `make_custom_scan`. `custom_plans` holds the planned [vector, bitmap] children. The
@@ -527,7 +620,7 @@ mod tests {
         });
         // Hook ON — reset every enable_* GUC the exact block flipped (they persist in-session), then force the
         // bitmap path (enable_seqscan off so the planner keeps the BitmapHeapPath the hook needs).
-        let hooked_setup = "SET theodb.enable_vecfilter=on; SET enable_indexscan=on; SET enable_bitmapscan=on; SET enable_seqscan=off; SET theodb_ivfflat.probes=8";
+        let hooked_setup = "SET theodb.enable_vecfilter=on; SET theodb.vecfilter_force=on; SET enable_indexscan=on; SET enable_bitmapscan=on; SET enable_seqscan=off; SET theodb_ivfflat.probes=8";
         let plan: String = Spi::connect(|c| {
             c.select(hooked_setup, None, &[]).ok();
             c.select(&format!("EXPLAIN (COSTS OFF) SELECT id FROM cs92 WHERE {filt} ORDER BY e <-> '{q}'::vector LIMIT 5"), None, &[])
@@ -564,7 +657,7 @@ mod tests {
             })
         };
         let want: HashSet<i32> = exact(1).union(&exact(2)).copied().collect();
-        let hooked_setup = "SET theodb.enable_vecfilter=on; SET enable_indexscan=on; SET enable_bitmapscan=on; SET enable_seqscan=off; SET theodb_ivfflat.probes=8";
+        let hooked_setup = "SET theodb.enable_vecfilter=on; SET theodb.vecfilter_force=on; SET enable_indexscan=on; SET enable_bitmapscan=on; SET enable_seqscan=off; SET theodb_ivfflat.probes=8";
         // Both branches must get the node (2 occurrences) — proves TWO nodes coexist in the plan.
         let plan: String = Spi::connect(|c| {
             c.select(hooked_setup, None, &[]).ok();
@@ -600,7 +693,7 @@ mod tests {
         // A 2-row outer CROSS JOIN LATERAL over a constant filtered inner + materialization off → the inner vecfilter
         // node is re-executed (rescan) per outer row; both inner results must equal the exact set.
         let rows: Vec<(i32, i32)> = Spi::connect(|c| {
-            c.select("SET theodb.enable_vecfilter=on; SET enable_indexscan=on; SET enable_bitmapscan=on; SET enable_seqscan=off; SET enable_material=off; SET theodb_ivfflat.probes=8", None, &[]).ok();
+            c.select("SET theodb.enable_vecfilter=on; SET theodb.vecfilter_force=on; SET enable_indexscan=on; SET enable_bitmapscan=on; SET enable_seqscan=off; SET enable_material=off; SET theodb_ivfflat.probes=8", None, &[]).ok();
             c.select(&format!("SELECT v.o, s.id FROM (VALUES (1),(2)) v(o) CROSS JOIN LATERAL (SELECT id FROM cs94r WHERE cat=7 ORDER BY e <-> '{q}'::vector LIMIT 3) s ORDER BY v.o"), None, &[])
                 .unwrap()
                 .filter_map(|r| Some((r.get::<i32>(1).unwrap()?, r.get::<i32>(2).unwrap()?)))
@@ -627,6 +720,32 @@ mod tests {
         assert!(!super::has_membership(), "subxact abort must clear the stale ACTIVE membership");
     }
 
+    /// M95 — the honest cost is NOT the forced `min_cost * 0.1` hack anymore. At LOOSE selectivity (a predicate
+    /// matching ~all rows) the bitmap-production cost (term_B over the whole table) makes the node lose to the
+    /// native vector IndexScan+Filter → the node is NOT chosen. Before M95 the forced cost made the node ALWAYS
+    /// appear regardless of selectivity; this test is the direct proof the hack is gone AND the cost discriminates.
+    #[pgrx::pg_test]
+    fn m95_loose_selectivity_not_chosen() {
+        Spi::run("CREATE TABLE cs95l (id int PRIMARY KEY, cat int, e vector(4))").unwrap();
+        Spi::run("INSERT INTO cs95l SELECT g, 1, ('['||g||','||(g*2)||',0,0]')::vector FROM generate_series(1,2000) g").unwrap();
+        Spi::run("CREATE INDEX cs95l_e ON cs95l USING theodb_ivfflat (e) WITH (lists=8, pq_subspaces=2, aq_threshold=1000, separate_storage=1)").unwrap();
+        Spi::run("CREATE INDEX cs95l_cat ON cs95l (cat)").unwrap();
+        Spi::run("ANALYZE cs95l").unwrap();
+        let plan: String = Spi::connect(|c| {
+            c.select("SET theodb.enable_vecfilter=on; SET enable_seqscan=off; SET theodb_ivfflat.probes=8", None, &[]).ok();
+            // cat=1 matches ALL 2000 rows (loose) — the bitmap covers the whole table, term_B is high.
+            c.select("EXPLAIN (COSTS OFF) SELECT id FROM cs95l WHERE cat=1 ORDER BY e <-> '[0,0,0,0]'::vector LIMIT 10", None, &[])
+                .unwrap().filter_map(|r| r.get::<String>(1).unwrap()).collect::<Vec<_>>().join("\n")
+        });
+        assert!(!plan.contains("theodb_vecfilter"), "loose selectivity ⇒ honest cost must NOT pick the node (plan:\n{plan})");
+    }
+
+    // M95 auto-selection at TIGHT selectivity is measured on SIFT1M (T3.1 sweep, `docs/benchmarks/m95-cost-model`),
+    // NOT asserted here: with M48 unchanged the native post-filter competitor is probe-blind (under-priced), so
+    // whether the planner AUTO-picks the node at tight is a measured, honest question — the blueprint's R4. The
+    // node's honest cost correctness is proven by the `cost::` unit tests; the integration proof that the forced
+    // `min_cost * 0.1` hack is GONE (no over-selection) is `m95_loose_selectivity_not_chosen` above.
+
     /// M93 T2.1 — a post-build INSERT with a NON-matching `cat` (pending region, no stored membership) must NOT
     /// appear in a filtered result: the vector child's qpqual Filter rechecks `cat` on the heap tuple and rejects it.
     #[pgrx::pg_test]
@@ -639,13 +758,13 @@ mod tests {
         Spi::run("INSERT INTO cs92p VALUES (9999, 99, '[0,0,0,0]')").unwrap();
         Spi::run("ANALYZE cs92p").unwrap();
         let plan: String = Spi::connect(|c| {
-            c.select("SET theodb.enable_vecfilter=on; SET enable_seqscan=off; SET theodb_ivfflat.probes=8", None, &[]).ok();
+            c.select("SET theodb.enable_vecfilter=on; SET theodb.vecfilter_force=on; SET enable_seqscan=off; SET theodb_ivfflat.probes=8", None, &[]).ok();
             c.select("EXPLAIN (COSTS OFF) SELECT id FROM cs92p WHERE cat=7 ORDER BY e <-> '[0,0,0,0]'::vector LIMIT 10", None, &[])
                 .unwrap().filter_map(|r| r.get::<String>(1).unwrap()).collect::<Vec<_>>().join("\n")
         });
         assert!(plan.contains("Custom Scan (theodb_vecfilter)"), "the node must fire so its recheck is exercised (plan:\n{plan})");
         let ids: Vec<i32> = Spi::connect(|c| {
-            c.select("SET theodb.enable_vecfilter=on; SET enable_seqscan=off; SET theodb_ivfflat.probes=8", None, &[]).ok();
+            c.select("SET theodb.enable_vecfilter=on; SET theodb.vecfilter_force=on; SET enable_seqscan=off; SET theodb_ivfflat.probes=8", None, &[]).ok();
             c.select("SELECT id FROM cs92p WHERE cat=7 ORDER BY e <-> '[0,0,0,0]'::vector LIMIT 10", None, &[])
                 .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
         });
