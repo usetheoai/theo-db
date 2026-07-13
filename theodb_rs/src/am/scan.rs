@@ -139,7 +139,14 @@ pub extern "C-unwind" fn amrescan(
                 }
             }
         }
-        state.filtering = !state.query_labels.is_empty();
+        // M92 v1a: a TID membership set (from a Custom Scan node's bitmap sub-plan) is an additional inline filter.
+        // Like the label predicate it keeps `xs_recheck` on — membership is an ADMISSION filter (lossy bitmap pages
+        // + the label-less pending region can over-admit), so the executor / Custom Scan node re-checks the real qual.
+        let has_membership = crate::am::customscan::has_membership();
+        if has_membership {
+            (*scan).xs_recheck = true;
+        }
+        state.filtering = !state.query_labels.is_empty() || has_membership;
 
         if norderbys < 1 || orderbys.is_null() {
             return; // no ORDER BY <-> key → no index-ordered scan
@@ -583,7 +590,13 @@ unsafe fn scan_ivf_aq_split_v7(
     let dim = meta.dim as usize;
     let pairs = (meta.m as usize).div_ceil(2);
     let label_bytes = 2 + page::LABEL_K * 2;
-    let filtering = !query_labels.is_empty();
+    let label_filtering = !query_labels.is_empty();
+    // M92 v1a: arbitrary-WHERE TID membership (from a Custom Scan node) — an inline skip orthogonal to the label
+    // predicate; works on any IVF-AQ index (no label column required). Read once per scan (backend-local).
+    let membership = crate::am::customscan::membership();
+    // `filtering` drives the M91 adaptive probing: a selective membership must probe MORE lists too (else it
+    // starves exactly like a selective label). Either an active label OR membership arms it.
+    let filtering = label_filtering || membership.is_some();
 
     let mut cd: Vec<(f64, usize)> =
         meta.centroids.iter().enumerate().map(|(i, c)| (metric.dist(query, c), i)).collect();
@@ -629,10 +642,16 @@ unsafe fn scan_ivf_aq_split_v7(
             for (j, &score) in out.iter().enumerate().take(bn) {
                 let ordinal = b * 32 + j;
                 // INLINE FILTER: skip candidates whose stored label set does not overlap the query's.
-                if filtering && !v7_label_overlaps(&cbytes, labels_off, ordinal, label_bytes, query_labels) {
+                if label_filtering && !v7_label_overlaps(&cbytes, labels_off, ordinal, label_bytes, query_labels) {
                     continue;
                 }
                 let tid = i64::from_le_bytes(cbytes[ordinal * 8..ordinal * 8 + 8].try_into().unwrap());
+                // M92 v1a: arbitrary-WHERE inline skip — drop candidates whose TID is not in the membership set.
+                if let Some(m) = &membership {
+                    if !m.contains(&tid) {
+                        continue;
+                    }
+                }
                 cands.push((score, tid, ci, ordinal));
             }
         }

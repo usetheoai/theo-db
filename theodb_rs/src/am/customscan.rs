@@ -14,7 +14,39 @@
 use pgrx::pg_sys;
 use pgrx::prelude::*;
 use pgrx::{PgBox, PgList};
+use std::cell::RefCell;
+use std::collections::HashSet;
 use std::os::raw::c_int;
+use std::rc::Rc;
+
+// ---- M92 v1a — TID membership side channel (Custom Scan node → index AM) ----
+//
+// The bitmap from a native sub-plan is UNORDERED and cannot ride a ScanKey (a TIDBitmap is not a SQL operator),
+// so the Custom Scan node hands the materialized membership set to the index AM through this backend-local channel
+// (a Postgres backend serves one query at a time — no cross-backend sharing). The AM's `amrescan` reads it and the
+// Stage-1 scan skips non-member candidates inline (the M90 mechanism generalized from label-overlap to TID
+// membership). MVCC correctness still relies on the node re-running the original qual on the heap tuple (v1c):
+// membership is an *admission* filter, never the final authority (lossy bitmap pages + the pending region can
+// over-admit).
+thread_local! {
+    static SCAN_MEMBERSHIP: RefCell<Option<Rc<HashSet<i64>>>> = const { RefCell::new(None) };
+}
+
+/// Set the TID membership the next index scan in THIS backend must filter by (encoded `tid::encode` i64s).
+/// `None` clears it. Called by the Custom Scan node's `BeginCustomScan` before driving the AM scan.
+pub(crate) fn set_membership(m: Option<HashSet<i64>>) {
+    SCAN_MEMBERSHIP.with(|c| *c.borrow_mut() = m.map(Rc::new));
+}
+
+/// Read the active membership (cheap Rc clone) for this backend, or `None`. Read by the AM Stage-1 scan.
+pub(crate) fn membership() -> Option<Rc<HashSet<i64>>> {
+    SCAN_MEMBERSHIP.with(|c| c.borrow().clone())
+}
+
+/// Whether a membership filter is active (used by `amrescan` to keep `xs_recheck` on).
+pub(crate) fn has_membership() -> bool {
+    SCAN_MEMBERSHIP.with(|c| c.borrow().is_some())
+}
 
 // ---- static method tables (registered once; addresses are stable for the postmaster lifetime) ----
 //
@@ -275,5 +307,71 @@ mod tests {
                 .unwrap().filter_map(|r| r.get::<String>(1).unwrap()).collect::<Vec<_>>().join("\n")
         });
         assert!(!plan.contains("theodb_vecfilter"), "GUC off ⇒ no Custom Scan node (plan:\n{plan})");
+    }
+
+    /// M92 v1a — the AM-side TID membership primitive (the correctness core of unknown #2). A membership set is
+    /// pushed via the backend-local side channel; a plain vector index scan (NO WHERE) must then return ONLY rows
+    /// whose heap TID is a member — proving the bitmap-membership inline skip reaches Stage-1 and filters correctly.
+    /// This is the mechanism the Custom Scan node will drive in v1b (with a real TIDBitmap).
+    #[pgrx::pg_test]
+    fn m92_v1a_membership_skip_returns_only_members() {
+        use std::collections::HashSet;
+        Spi::run("CREATE TABLE m92m (id int PRIMARY KEY, lbl smallint[], e vector(4))").unwrap();
+        for i in 1..=60i32 {
+            Spi::run(&format!("INSERT INTO m92m VALUES ({i}, '{{1}}', '[{i},{},{},{}]')", i * 2, i * 3, i % 7)).unwrap();
+        }
+        Spi::run("CREATE INDEX m92m_e ON m92m USING theodb_ivfflat (e, lbl) WITH (lists=4, pq_subspaces=2, aq_threshold=2000, separate_storage=1)").unwrap();
+        // Encode the heap ctids of a chosen id subset into the membership i64s (tid::encode = (block<<16)|offset).
+        let member_ids: HashSet<i32> = [5, 12, 20, 33, 41].into_iter().collect();
+        let mset: HashSet<i64> = Spi::connect(|c| {
+            c.select("SELECT ctid::text FROM m92m WHERE id IN (5,12,20,33,41)", None, &[])
+                .unwrap()
+                .filter_map(|r| r.get::<String>(1).unwrap())
+                .map(|s| {
+                    let inner = s.trim_matches(|ch| ch == '(' || ch == ')');
+                    let mut it = inner.split(',');
+                    let b: i64 = it.next().unwrap().parse().unwrap();
+                    let o: i64 = it.next().unwrap().parse().unwrap();
+                    (b << 16) | o
+                })
+                .collect()
+        });
+        assert_eq!(mset.len(), 5, "resolved 5 member ctids");
+        super::set_membership(Some(mset));
+        // Plain vector scan, NO WHERE → the membership is the ONLY filter. LIMIT high enough to pull all members.
+        let got: Vec<i32> = Spi::connect(|c| {
+            c.select("SET enable_seqscan=off; SET enable_indexscan=on; SET theodb_ivfflat.probes=4", None, &[]).ok();
+            c.select("SELECT id FROM m92m ORDER BY e <-> '[10,20,30,3]'::vector LIMIT 20", None, &[])
+                .unwrap()
+                .filter_map(|r| r.get::<i32>(1).unwrap())
+                .collect()
+        });
+        super::set_membership(None); // CRITICAL: clear so the filter does not leak to other queries in this backend.
+        assert!(!got.is_empty(), "membership scan returned nothing — the skip filtered everything (plumbing broken)");
+        assert!(
+            got.iter().all(|id| member_ids.contains(id)),
+            "every returned id must be a member (got {got:?}, members {member_ids:?})"
+        );
+    }
+
+    /// M92 v1a — membership is inert once cleared: after `set_membership(None)` a plain scan returns non-members
+    /// again (proves the side channel does not leak across queries — the EndCustomScan clear contract).
+    #[pgrx::pg_test]
+    fn m92_v1a_membership_cleared_is_inert() {
+        Spi::run("CREATE TABLE m92c (id int PRIMARY KEY, lbl smallint[], e vector(4))").unwrap();
+        for i in 1..=30i32 {
+            Spi::run(&format!("INSERT INTO m92c VALUES ({i}, '{{1}}', '[{i},{},0,0]')", i * 2)).unwrap();
+        }
+        Spi::run("CREATE INDEX m92c_e ON m92c USING theodb_ivfflat (e, lbl) WITH (lists=2, pq_subspaces=2, aq_threshold=2000, separate_storage=1)").unwrap();
+        super::set_membership(Some(std::collections::HashSet::from([1i64])));
+        super::set_membership(None);
+        let got: Vec<i32> = Spi::connect(|c| {
+            c.select("SET enable_seqscan=off; SET enable_indexscan=on; SET theodb_ivfflat.probes=2", None, &[]).ok();
+            c.select("SELECT id FROM m92c ORDER BY e <-> '[5,10,0,0]'::vector LIMIT 10", None, &[])
+                .unwrap()
+                .filter_map(|r| r.get::<i32>(1).unwrap())
+                .collect()
+        });
+        assert!(got.len() >= 5, "cleared membership ⇒ a normal scan returns many rows (got {got:?})");
     }
 }
