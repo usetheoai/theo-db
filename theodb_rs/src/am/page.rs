@@ -1478,6 +1478,120 @@ pub(crate) unsafe fn ivf_is_v6(rel: pg_sys::Relation) -> bool {
 /// per-list VECTOR region is the SQ8 code (`sq8_codes[i]`, already ¼ the f32 bytes) instead of f32. Reads TIDs from
 /// `ids` by position (no `list_entries()` clone) and streams each list's [ids][codes] + sq8 blob to pages without
 /// the `items` full-buffer. Byte-identical page image to the pre-M89 buffering writer.
+/// M96 — the STREAMING v5 writer: byte-identical on-disk output to [`write_ivf_aq_split`] but the per-list `(id,
+/// vector)` members are pulled from a callback (the sorted tuplesort read-back) ONE LIST AT A TIME instead of from
+/// full `positions`/`ids`/`vectors` arrays held in RAM. `counts[i]` is list i's member count (known from the
+/// assignment histogram before the read-back); `next_list_member()` yields the next `(id, vector)` in sorted-by-list
+/// order — the writer consumes exactly `counts[i]` of them per list. Peak extra RAM is O(one list) = O(N/lists), not
+/// O(N). Same directory math, same magic (v5), same blob order → no REINDEX. The AQ codes are packed per list here
+/// (block32) from the list buffer, matching the in-RAM `pack_block32_codes` layout (self-consistent order).
+#[allow(clippy::too_many_arguments)]
+pub(crate) unsafe fn write_ivf_aq_split_streaming(
+    rel: pg_sys::Relation,
+    dim: u32,
+    metric_tag: u8,
+    m: u32,
+    codebook: &[u8],
+    centroids: &[Vec<f32>],
+    counts: &[u32],
+    quant: &crate::am::aq::AqQuantizer,
+    mut next_list_member: impl FnMut() -> Option<(i64, Vec<f32>)>,
+) {
+    let base: u32 = 1;
+    let nlists = centroids.len() as u32;
+    let pairs = (m as usize).div_ceil(2);
+    let dim_bytes = dim as usize * 4;
+    let mut cbytes = Vec::with_capacity(centroids.len() * dim_bytes);
+    for c in centroids {
+        for x in c {
+            cbytes.extend_from_slice(&x.to_le_bytes());
+        }
+    }
+    // Directory from COUNTS (code_len = count*8 ids + count*pairs codes; vec_len = count*dim_bytes) — no blob held.
+    let dir_npages = npages_for(nlists as usize * 20);
+    let codebook_npages = npages_for(codebook.len());
+    let centroid_npages = npages_for(cbytes.len());
+    let mut cursor = base + dir_npages + codebook_npages + centroid_npages;
+    let mut dir: Vec<(u32, u32, u32, u32, u32)> = Vec::with_capacity(counts.len());
+    for &cnt in counts {
+        let cnt = cnt as usize;
+        let nblocks = cnt.div_ceil(32);
+        let code_len = cnt * 8 + nblocks * pairs * 32; // ids + block32-padded codes (matches the streamed pack below)
+        let cnp = npages_for(code_len);
+        let code_fb = cursor;
+        cursor += cnp;
+        let vec_len = cnt * dim_bytes;
+        let vnp = npages_for(vec_len);
+        let vec_fb = cursor;
+        cursor += vnp;
+        dir.push((code_fb, cnp, vec_fb, vnp, cnt as u32));
+    }
+    let mut dirbytes = Vec::with_capacity(dir.len() * 20);
+    for (cfb, cnp, vfb, vnp, cnt) in &dir {
+        dirbytes.extend_from_slice(&cfb.to_le_bytes());
+        dirbytes.extend_from_slice(&cnp.to_le_bytes());
+        dirbytes.extend_from_slice(&vfb.to_le_bytes());
+        dirbytes.extend_from_slice(&vnp.to_le_bytes());
+        dirbytes.extend_from_slice(&cnt.to_le_bytes());
+    }
+
+    let mut meta = Vec::with_capacity(37);
+    meta.extend_from_slice(&IVF_STRUCT_MAGIC.to_le_bytes());
+    meta.extend_from_slice(&5u32.to_le_bytes());
+    meta.push(metric_tag);
+    meta.extend_from_slice(&dim.to_le_bytes());
+    meta.extend_from_slice(&nlists.to_le_bytes());
+    meta.extend_from_slice(&m.to_le_bytes());
+    meta.extend_from_slice(&codebook_npages.to_le_bytes());
+    meta.extend_from_slice(&dir_npages.to_le_bytes());
+    meta.extend_from_slice(&centroid_npages.to_le_bytes());
+    meta.extend_from_slice(&base.to_le_bytes());
+
+    write_item(rel, &meta);
+    write_chunks(rel, &dirbytes);
+    write_chunks(rel, codebook);
+    write_chunks(rel, &cbytes);
+    // Per list: pull its `count` members from the sorted stream into a small buffer, pack codes (block32), write.
+    for &cnt in counts {
+        let cnt = cnt as usize;
+        let mut list_ids: Vec<i64> = Vec::with_capacity(cnt);
+        let mut list_vecs: Vec<Vec<f32>> = Vec::with_capacity(cnt);
+        for _ in 0..cnt {
+            let (id, v) = next_list_member().expect("streaming writer: fewer members than the count histogram");
+            list_ids.push(id);
+            list_vecs.push(v);
+        }
+        // CODE blob [ids][block32 codes] — pack in buffer order (self-consistent with the [vectors] blob below).
+        let nblocks = cnt.div_ceil(32);
+        let mut ecode = Vec::with_capacity(cnt * 8 + nblocks * pairs * 32);
+        for &id in &list_ids {
+            ecode.extend_from_slice(&id.to_le_bytes());
+        }
+        let mut blocks = vec![0u8; nblocks * pairs * 32];
+        for (i, v) in list_vecs.iter().enumerate() {
+            let code = quant.encode(v);
+            let bbase = (i / 32) * pairs * 32;
+            let vb = i % 32;
+            for (p, &cb) in code.iter().enumerate().take(pairs) {
+                blocks[bbase + p * 32 + vb] = cb;
+            }
+        }
+        ecode.extend_from_slice(&blocks);
+        write_chunks(rel, &ecode);
+        drop(ecode);
+        drop(blocks);
+        // VECTOR blob [f32] in the same buffer order.
+        let mut evec = Vec::with_capacity(cnt * dim_bytes);
+        for v in &list_vecs {
+            for x in v {
+                evec.extend_from_slice(&x.to_le_bytes());
+            }
+        }
+        write_chunks(rel, &evec);
+        // list_ids / list_vecs freed here — only one list's worth held at a time (O(N/lists)).
+    }
+}
+
 pub(crate) unsafe fn write_ivf_aq_split_sq8(
     rel: pg_sys::Relation,
     dim: u32,
@@ -1672,6 +1786,14 @@ unsafe fn read_page_item_into(
     block: pg_sys::BlockNumber,
     out: &mut Vec<u8>,
 ) -> Result<(), String> {
+    // Bounds guard (M95 review HIGH-2): mirror `read_page_item_at` — a torn/concurrently-folded meta page can name
+    // a block past end-of-relation; `ReadBufferExtended(RBM_NORMAL)` on it raises a C `ereport(ERROR)` longjmp,
+    // which from a planner hook (cost.rs / customscan.rs meta reads) aborts ALL query planning. A typed `Err`
+    // degrades to the fail-safe path instead.
+    let nblocks = pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM);
+    if block >= nblocks {
+        return Err(format!("theodb am: page {block} out of range (nblocks={nblocks})"));
+    }
     let buf = pg_sys::ReadBufferExtended(
         rel,
         pg_sys::ForkNumber::MAIN_FORKNUM,

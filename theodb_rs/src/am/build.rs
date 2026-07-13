@@ -81,6 +81,23 @@ unsafe fn collect_corpus(
     (state.corpus, state.labels, ntuples as f64)
 }
 
+/// M96 — the indexed vector column's dimension from its typmod (our `vector` type stores `dim` as the typmod,
+/// pgvector convention), read from the index's first attribute. `0` when unavailable (→ streaming dispatch falls
+/// back to the in-RAM build, never a wrong decision).
+unsafe fn index_vector_dim(indexrel: pg_sys::Relation) -> i32 {
+    let tupdesc = (*indexrel).rd_att;
+    if tupdesc.is_null() || (*tupdesc).natts < 1 {
+        return 0;
+    }
+    let attr = (*tupdesc).attrs.as_ptr(); // first attribute (the vector column)
+    let typmod = (*attr).atttypmod;
+    if typmod > 0 {
+        typmod
+    } else {
+        0
+    }
+}
+
 unsafe fn build_result(ntuples: f64, nindexed: usize) -> *mut pg_sys::IndexBuildResult {
     let mut result = PgBox::<pg_sys::IndexBuildResult>::alloc0();
     result.heap_tuples = ntuples;
@@ -111,6 +128,35 @@ pub extern "C-unwind" fn ambuild(
     index_info: *mut pg_sys::IndexInfo,
 ) -> *mut pg_sys::IndexBuildResult {
     unsafe {
+        // M96 — STREAMING dispatch (before materializing the corpus): the v5 plain-f32 AQ-split path, on a build
+        // whose estimated corpus exceeds `maintenance_work_mem`, streams via a tuplesort spool (peak O(mwm+sample),
+        // never the 1× corpus M88/M89 wall). Estimate N from `reltuples` (post-ANALYZE) with a block-count floor so
+        // a freshly-loaded (un-ANALYZEd) table still triggers streaming rather than OOMing. Streaming supports ONLY
+        // the v5 plain path — SQ8 (v6), labels (v7), and SOAR keep the in-RAM build (blueprint scope caveat); the
+        // dispatch is exact on those flags so no build ever silently takes the wrong path.
+        {
+            let m0 = crate::am::options::pq_subspaces_from_relation(indexrel);
+            let separate = crate::am::options::separate_storage_from_relation(indexrel);
+            let sq8 = crate::am::options::refine_sq8_from_relation(indexrel);
+            let has_labels = (*index_info).ii_NumIndexAttrs > 1;
+            let soar0 = crate::am::options::soar_lambda_from_relation(indexrel);
+            let est_dim = index_vector_dim(indexrel);
+            if m0 > 0 && separate && !sq8 && !has_labels && soar0 <= 0.0 && est_dim > 0 {
+                let reltuples = (*(*heaprel).rd_rel).reltuples;
+                let blocks =
+                    pg_sys::RelationGetNumberOfBlocksInFork(heaprel, pg_sys::ForkNumber::MAIN_FORKNUM) as f64;
+                let rows_per_block = (8192.0 / (est_dim as f64 * 4.0 + 28.0)).max(1.0);
+                let est_n = (reltuples as f64).max(blocks * rows_per_block).max(0.0) as usize;
+                if crate::am::build_stream::should_stream(est_n, est_dim as usize) {
+                    let lists = lists_from_relation(indexrel);
+                    let metric = resolve_metric(indexrel);
+                    let n = crate::am::build_stream::ambuild_streaming(
+                        heaprel, indexrel, index_info, lists, metric, m0 as usize, BUILD_SEED,
+                    );
+                    return build_result(n as f64, n);
+                }
+            }
+        }
         let (corpus, labels, ntuples) = collect_corpus(heaprel, indexrel, index_info);
         let lists = lists_from_relation(indexrel); // M34 — WITH (lists=N), default 100
         let metric = resolve_metric(indexrel); // M49: cosine/ip/L2 from the opclass, not hardcoded
