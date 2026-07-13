@@ -36,3 +36,11 @@ fail-safe mandatory (never error in a planner hook — `cost.rs:65` pattern).
 ## Sources
 `costsize.c:1013-1144` (cost_bitmap_heap_scan / cost_bitmap_tree_node), `costsize.c:506-515` (cost_sort),
 `pathnodes.h` (BitmapHeapPath.bitmapqual), `theodb_rs/src/am/cost.rs` (M48 reuse), `scan.rs:641` (M91 loop).
+
+## Follow-up (tracked debt, M95 review finding #3)
+The honest cost is correct, but the planner never AUTO-selects the node because the NATIVE post-filter competitor
+is priced by M48 `amcostestimate`, which is probe-blind (default-probe cost, blind to the M91 adaptive growth under
+a filter) → the competitor is under-priced. Making M48 probe-aware for the filtered case is the follow-up that would
+unlock auto-selection where the node wins. Until then: `theodb.vecfilter_force` is the explicit override (opt-in),
+and the honest cost is the safe default (never hijacks). This is honest scoping — M95 priced the NODE honestly; the
+competitor's pricing is a separate surface.
