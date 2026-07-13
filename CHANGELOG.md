@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Roadmap amended: added M92 arbitrary-WHERE filtered vector search via Custom Scan Provider (Approach B — bitmap over existing indexes → TIDBitmap membership test in the AM Stage-1 scan, for filters on any column; the AlloyDB tier ③ deferred by M90/M91)
 
 ### Changed
 
