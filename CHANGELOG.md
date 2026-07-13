@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Roadmap amended: added M94 per-scan membership scoping — swap-discipline around each vector-child pull (thread-local registry keyed by node + save/restore active slot) so multiple filtered vector scans in one plan (UNION/self-join/Append) each see their OWN membership; replaces the M93 fail-loud guard with real support (M94)
 
 ### Changed
 
