@@ -1378,7 +1378,7 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 
 **Outcome (2026-07-12, veredito `GO` — `docs/benchmarks/m90-inline-filter.{md,json}` + ADR `0040`, sign-off council-index-storage+rust-pgrx+benchmark):** MEDIDO (DO c-8, 500k, ~1% seletividade) **recall@10 1.00 (inline v7) vs 0.52 (M87 post-filter) — delta +0.48 + ~19× QPS**. Approach A (scan-key/label, layout v7 co-localizado, inline-skip na Stage-1 + xs_recheck). 253 pg_tests GREEN (250 + 3 v7), zero regressão; vetor-only/v5/v6 sem-label byte-idênticos. 2 blockers de correção achados no review e corrigidos (VACUUM no-op v7; xs_recheck no pending region). Honesto: só label + `&&`, v7+REINDEX; o arbitrary-WHERE inline (Custom Scan) é o M91; NÃO vence ScaNN (teto M73/M82).
 
-## M91 — [ ] adaptive filter strategy (AM-local no scan-key de label) *(gated M90)*
+## M91 — [x] adaptive filter strategy (AM-local no scan-key de label) *(gated M90)*
 
 > **Re-escopo pela DISCOVER (2026-07-12, `knowledge-base/discoveries/blueprints/adaptive-filter-strategy-blueprint.md`):** a pesquisa Staff-DB determinou que o adaptive parsimony-correto é **AM-local no scan-key de label** (Approach A — reusa o INLINE do M90 + o POST do M87), NÃO o Custom Scan Provider (Approach B, arbitrary-WHERE), que é YAGNI para o DoD (o sweep é de seletividade de LABEL) e vira milestone futuro. Achados: nem o pgvectorscale nem o AlloyDB fazem adaptive para o caso de label (pgvectorscale = 1 estratégia; AlloyDB adaptive = ScaNN-only+bitmap). As "3 fixas" são as NOSSAS (M87/M90/PRE). Sem novo formato on-disk (v7 já tem o label), sem REINDEX, `xs_recheck` já correto.
 
