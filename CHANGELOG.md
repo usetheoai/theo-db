@@ -14,6 +14,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 - Roadmap amended: added M92 arbitrary-WHERE filtered vector search via Custom Scan Provider (Approach B — bitmap over existing indexes → TIDBitmap membership test in the AM Stage-1 scan, for filters on any column; the AlloyDB tier ③ deferred by M90/M91)
+- M92 spike (experimental, OFF by default behind `theodb.enable_vecfilter`): a hand-rolled Custom Scan Provider scaffold + a TID-membership inline skip in the IVF-AQ Stage-1 scan. v0 proves the Custom Scan node lifecycle in pgrx (EXPLAIN shows the node; pass-through result correct); v1a proves an arbitrary TID membership set reaches Stage-1 and filters correctly. Not yet a user-facing feature — the bitmap sub-plan wiring (v1b) and MVCC recheck (v1c) are pending (M92)
 
 ### Changed
 
