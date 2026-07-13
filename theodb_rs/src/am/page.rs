@@ -1557,7 +1557,13 @@ pub(crate) unsafe fn write_ivf_aq_split_streaming(
         let mut list_ids: Vec<i64> = Vec::with_capacity(cnt);
         let mut list_vecs: Vec<Vec<f32>> = Vec::with_capacity(cnt);
         for _ in 0..cnt {
-            let (id, v) = next_list_member().expect("streaming writer: fewer members than the count histogram");
+            let (id, v) = match next_list_member() {
+                Some(m) => m,
+                // Fail-loud (review LOW): the histogram and the stream must agree by construction; a shortfall is a
+                // build bug — a typed error over a bare panic across the build (Rule 8). Runs after the C scan
+                // returned, so this unwinds only to the guarded `ambuild`.
+                None => pg_sys::error!("theodb streaming writer: stream shorter than the count histogram"),
+            };
             list_ids.push(id);
             list_vecs.push(v);
         }

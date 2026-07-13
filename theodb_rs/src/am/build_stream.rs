@@ -11,6 +11,7 @@
 
 use pgrx::datum::{FromDatum, IntoDatum};
 use pgrx::pg_sys;
+use pgrx::prelude::pg_guard;
 
 /// Encode an f32 vector to little-endian bytes (the bytea payload carried through the sorter). The inverse of
 /// [`bytes_to_vec`]; the round-trip MUST be byte-identical (recall-critical).
@@ -137,6 +138,7 @@ struct SampleState {
 /// Pass-1 callback: prefix-sample up to `STREAM_TRAIN_SAMPLE` vectors for training (bounded RAM). We take the prefix
 /// (deterministic, order-independent enough for kmeans++ which reseeds) rather than a reservoir — simpler and the
 /// sample is only used to TRAIN, never to build the final lists.
+#[pg_guard]
 unsafe extern "C-unwind" fn sample_callback(
     _index: pg_sys::Relation,
     _htid: pg_sys::ItemPointer,
@@ -170,6 +172,7 @@ struct AssignState<'a> {
 
 /// Pass-2 callback: assign each live vector to its nearest centroid, bump the per-list count, and `puttupleslot`
 /// `(list#, tid, vector)` into the sorter — then DROP the vector (never accumulate; the O(mwm) bound).
+#[pg_guard]
 unsafe extern "C-unwind" fn assign_callback(
     _index: pg_sys::Relation,
     htid: pg_sys::ItemPointer,
@@ -183,6 +186,11 @@ unsafe extern "C-unwind" fn assign_callback(
     }
     let st = &mut *(state as *mut AssignState);
     let v = crate::am::build::datum_to_vec_f32(*values);
+    // Dimension guard (review LOW): mirror the in-RAM `build_callback` — a row whose vector dim differs from the
+    // trained centroids' would silently produce a wrong (zip-truncated) distance. Skip it rather than mis-assign.
+    if !st.centroids.is_empty() && v.len() != st.centroids[0].len() {
+        return;
+    }
     // Nearest centroid (min distance; first-index tie-break — deterministic, matching `nearest_in`).
     let mut best = 0usize;
     let mut best_d = f64::INFINITY;
@@ -202,12 +210,18 @@ unsafe extern "C-unwind" fn assign_callback(
     let nulls = std::slice::from_raw_parts_mut((*slot).tts_isnull, 3);
     vals[0] = (best as i32).into_datum().unwrap();
     vals[1] = tid.into_datum().unwrap();
-    vals[2] = vec_to_bytes(&v).into_datum().unwrap();
+    let bytea_datum = vec_to_bytes(&v).into_datum().unwrap();
+    vals[2] = bytea_datum;
     nulls[0] = false;
     nulls[1] = false;
     nulls[2] = false;
     pg_sys::ExecStoreVirtualTuple(slot);
     pg_sys::tuplesort_puttupleslot(st.sorter, slot);
+    // `puttupleslot` COPIES the tuple into the sorter's own context — the per-row bytea we palloc'd above is NOT
+    // freed by that, so without this pfree it accumulates in the scan's memory context (measured: ~512 MB leaked at
+    // 1M → the peak would GROW with N and break the O(mwm) bound). pgvector uses a per-tuple temp context reset;
+    // freeing the one varlena we allocate is the minimal equivalent. (list#/tid are by-value ints — nothing to free.)
+    pg_sys::pfree(bytea_datum.cast_mut_ptr());
 }
 
 /// M96 — the streaming v5 build: two heap scans (sample-train, then stream-assign into a `tuplesort`), sort by
