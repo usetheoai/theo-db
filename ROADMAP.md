@@ -1386,7 +1386,7 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 **GATE (measurement-first):** benchmark **varrendo a seletividade de label (0.01% → 30%)** mostra o adaptive **dominando o envelope** das estratégias fixas (recall alto E custo baixo em CADA ponto); honest-negative é terminal válido.
 **DoD:** (1) estimador de seletividade in-scan + branch adaptive INLINE⇄POST (+ PRE só se medido) no `scan_ivf_structured`/`amrescan`, threshold ajustável (GUC); (2) **benchmark de varredura (0.01%→30%) mede o adaptive dominando as fixas** (`docs/benchmarks/m91-adaptive-filter.{md,json}`); (3) contador/log runtime revela a estratégia escolhida (observabilidade); (4) **zero regressão** — 253+ pg_tests GREEN, testes por regime; (5) sign-off council-index-storage + council-benchmark. **Boundary:** label-only (arbitrary-WHERE é o Custom Scan futuro); sem novo formato. **Risks:** (a) o estimador in-scan pode ser ruidoso → calibrar no sweep + threshold GUC; (b) o adaptive pode não dominar (INLINE já domina em toda a faixa?) → honest-negative (o gate mede antes; se INLINE domina, o M91 é "INLINE é a estratégia" documentado). **Dependencies:** M90 (INLINE), M87 (POST). **Prior art (estudo, Regra 9):** pgvectorscale (permissivo — prova que adaptive é adição NOSSA). **NÃO é claim de QPS-superior** (teto M73/M82).
 
-## M92 — [ ] arbitrary-WHERE filtered vector search via Custom Scan Provider (paridade AlloyDB tier ③) *(gated M90, M91)*
+## M92 — [x] arbitrary-WHERE filtered vector search via Custom Scan Provider (paridade AlloyDB tier ③) *(gated M90, M91)*
 
 > **Origem (2026-07-13):** o M90/M91 fecharam o inline+adaptive para o **label declarado** (`smallint[]` + `&&`, via scan-key no AM — Approach A). O gap honesto que resta vs AlloyDB é o **`WHERE` em QUALQUER coluna** (`WHERE price < 100 AND category = 'x' ORDER BY e <-> q LIMIT k`), que hoje ainda cai no post-filter. Fechar isso é o **Approach B** — o Custom Scan Provider — deferido explicitamente pelo M90 (ADR-0040) e M91 (blueprint). É o tier ③ do AlloyDB ("inline/adaptive filtering" sobre índices arbitrários), menos o re-plan cross-index mid-query do core (não-alcançável por extensão pura).
 
@@ -1398,7 +1398,7 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 
 > **Nota (2026-07-13):** o **spike do M92 (v0/v1a/v1b) já PROVOU as 3 primitivas** em isolamento (blueprint `knowledge-base/discoveries/blueprints/arbitrary-where-custom-scan-blueprint.md`; commits `7224ae0`/`c20db0f`/`a882027`): (v0) o Custom Scan node hand-rolled funciona em runtime; (v1a) a membership de TID chega à Stage-1 do AM e filtra; (v1b) `materialize_bitmap()` itera o `TIDBitmap` → exact+lossy sets. Tudo gated OFF (`theodb.enable_vecfilter`), 260 pg_tests GREEN. O DoD acima permanece o alvo do M92; a **integração** dessas peças é o M93 abaixo.
 
-## M93 — [ ] Custom Scan node integration — MultiExec bitmap + MVCC recheck (fecha o M92) *(gated M92)*
+## M93 — [x] Custom Scan node integration — MultiExec bitmap + MVCC recheck (fecha o M92) *(gated M92)*
 
 > **Origem (2026-07-13):** o spike do M92 provou as 3 primitivas em isolamento (node lifecycle, membership skip no AM, materialize do TIDBitmap). O M93 as **assembla** no Custom Scan node de 2 filhos — a parte de executor-lifecycle (`MultiExecProcNode`/`ExecInitQual`/`ExecQual`/`econtext`) que fecha o inline arbitrary-WHERE end-to-end. É o único bloco restante para o M92 virar feature de verdade.
 
