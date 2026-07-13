@@ -1,0 +1,38 @@
+{
+  "milestone": "M96",
+  "index": "theodb_ivfflat v5 (plain f32 + AQ split)",
+  "dim": 128,
+  "lists": 1000,
+  "maintenance_work_mem": "256MB",
+  "hardware": "Intel Xeon Platinum 8358 @ 2.60GHz (DO m-8vcpu-64gb)",
+  "verdict": "MEMORY_BOUND_PROVEN_FLAT",
+  "findings": [
+    "peak RSS is FLAT (~0.6GB) across a 10x data range (1M->10M) while base grows 0.5->5.1GB \u2014 ratio collapses 1.264x->0.110x: the O(maintenance_work_mem+sample) bound, MEASURED",
+    "a per-row bytea leak (1.84->0.65GB at 1M) was found BY the measurement and fixed (per-row pfree)",
+    "vs M88 in-RAM 4.21x-base baseline (OOM at 30M) \u2014 streaming removes the 1x-corpus wall",
+    "30M peak projected ~0.6GB (vs 64.7GB OOM), 100M ~0.6GB (vs impossible) \u2014 honest projection from the flat curve, NOT measured (single-threaded assignment wall-clock makes 100M impractical; parallel-assign is the deferred follow-up)"
+  ],
+  "sweep": [
+    {
+      "n": 1000000,
+      "base_gb": 0.5,
+      "peak_gb": 0.65,
+      "ratio": 1.264,
+      "build_s": 438
+    },
+    {
+      "n": 3000000,
+      "base_gb": 1.5,
+      "peak_gb": 0.62,
+      "ratio": 0.404,
+      "build_s": 722
+    },
+    {
+      "n": 10000000,
+      "base_gb": 5.1,
+      "peak_gb": 0.56,
+      "ratio": 0.11,
+      "build_s": 1713
+    }
+  ]
+}
