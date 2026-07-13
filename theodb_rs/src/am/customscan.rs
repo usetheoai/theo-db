@@ -48,6 +48,35 @@ pub(crate) fn has_membership() -> bool {
     SCAN_MEMBERSHIP.with(|c| c.borrow().is_some())
 }
 
+/// M92 v1b — materialize a native `TIDBitmap` (produced by a bitmap sub-plan's `MultiExecProcNode`) into the
+/// membership representation the AM Stage-1 consumes: a set of EXACT encoded TIDs (`(block<<16)|offset`, matching
+/// `tid::encode`) plus a set of LOSSY block numbers. A page goes lossy under memory pressure (`ntuples < 0`,
+/// `tidbitmap.h`) — its individual offsets are forgotten, so only the block is known and every candidate on that
+/// block must be ADMITTED then rechecked on the heap (the executor / Custom Scan node re-runs the real qual). The
+/// exact set is authoritative; the lossy set over-admits (safe under recheck).
+pub(crate) unsafe fn materialize_bitmap(tbm: *mut pg_sys::TIDBitmap) -> (HashSet<i64>, HashSet<u32>) {
+    let mut exact: HashSet<i64> = HashSet::new();
+    let mut lossy: HashSet<u32> = HashSet::new();
+    let iter = pg_sys::tbm_begin_iterate(tbm);
+    loop {
+        let res = pg_sys::tbm_iterate(iter);
+        if res.is_null() {
+            break;
+        }
+        let r = &*res;
+        if r.ntuples < 0 {
+            lossy.insert(r.blockno); // lossy page — offsets gone; admit-then-recheck by block
+        } else {
+            let offs = r.offsets.as_slice(r.ntuples as usize);
+            for &off in offs {
+                exact.insert(((r.blockno as i64) << 16) | (off as i64));
+            }
+        }
+    }
+    pg_sys::tbm_end_iterate(iter);
+    (exact, lossy)
+}
+
 // ---- static method tables (registered once; addresses are stable for the postmaster lifetime) ----
 //
 // The method tables hold a `*const c_char` (CustomName) + raw fn pointers, so they are not `Sync` and cannot be
@@ -373,5 +402,28 @@ mod tests {
                 .collect()
         });
         assert!(got.len() >= 5, "cleared membership ⇒ a normal scan returns many rows (got {got:?})");
+    }
+
+    /// M92 v1b — the bitmap-materialization step: iterate a native `TIDBitmap` into the exact-TID + lossy-block
+    /// membership sets. Builds a bitmap by hand (`tbm_create` + `tbm_add_tuples`) so the iteration + encoding are
+    /// tested in isolation, before wiring the node to `MultiExecProcNode` a real sub-plan.
+    #[pgrx::pg_test]
+    fn m92_v1b_materialize_bitmap_exact() {
+        use std::collections::HashSet;
+        unsafe {
+            let tbm = pgrx::pg_sys::tbm_create(1024 * 1024, std::ptr::null_mut());
+            let mk = |b: u32, o: u16| pgrx::pg_sys::ItemPointerData {
+                ip_blkid: pgrx::pg_sys::BlockIdData { bi_hi: (b >> 16) as u16, bi_lo: (b & 0xffff) as u16 },
+                ip_posid: o,
+            };
+            // sorted (block, offset): (0,5) (0,12) (2,3)
+            let mut tids = [mk(0, 5), mk(0, 12), mk(2, 3)];
+            pgrx::pg_sys::tbm_add_tuples(tbm, tids.as_mut_ptr(), 3, false);
+            let (exact, lossy) = super::materialize_bitmap(tbm);
+            pgrx::pg_sys::tbm_free(tbm);
+            assert!(lossy.is_empty(), "a 3-tuple bitmap must not go lossy (got {lossy:?})");
+            let expect: HashSet<i64> = [(0i64 << 16) | 5, (0i64 << 16) | 12, (2i64 << 16) | 3].into_iter().collect();
+            assert_eq!(exact, expect, "materialized exact TIDs must match the added tuples");
+        }
     }
 }
