@@ -1,0 +1,279 @@
+//! M92 spike v0 — Custom Scan Provider scaffold (pass-through).
+//!
+//! Goal of THIS spike (ADR M92-3, de-risk unknown #1): prove that a Postgres Custom Scan Provider can be
+//! hand-rolled in pgrx 0.16.1 (pg17) WITHOUT the absent `create_customscan_path`/`make_custom_scan` inline
+//! helpers — i.e. register the methods, install `set_rel_pathlist_hook`, add a `CustomPath` that wins, plan it
+//! into a `CustomScan`, execute it, and have `EXPLAIN` show the node. v0 is a PURE PASS-THROUGH: it wraps the
+//! rel's existing cheapest path as a child and just forwards its tuples — so a correct result proves the
+//! lifecycle end-to-end. The bitmap membership + MVCC recheck (unknown #2, ADR M92-1) layer on top in v1.
+//!
+//! SAFETY POSTURE: the whole hook is gated behind the GUC `theodb.enable_vecfilter` (default OFF). A planner
+//! hook that misbehaves breaks EVERY query on the instance, so the spike is inert until explicitly enabled.
+//! Every callback is `extern "C-unwind"` and routes corrupt/unexpected state to `pg_sys::error!`, never a panic.
+
+use pgrx::pg_sys;
+use pgrx::prelude::*;
+use pgrx::{PgBox, PgList};
+use std::os::raw::c_int;
+
+// ---- static method tables (registered once; addresses are stable for the postmaster lifetime) ----
+//
+// The method tables hold a `*const c_char` (CustomName) + raw fn pointers, so they are not `Sync` and cannot be
+// plain statics. They are immutable and read only by Postgres (single-threaded per backend), so a newtype with a
+// hand-asserted `Sync` is the standard, safe wrapper.
+struct Methods<T>(T);
+unsafe impl<T> Sync for Methods<T> {}
+
+static PATH_METHODS: Methods<pg_sys::CustomPathMethods> = Methods(pg_sys::CustomPathMethods {
+    CustomName: c"theodb_vecfilter".as_ptr(),
+    PlanCustomPath: Some(plan_custom_path),
+    ReparameterizeCustomPathByChild: None,
+});
+
+static SCAN_METHODS: Methods<pg_sys::CustomScanMethods> = Methods(pg_sys::CustomScanMethods {
+    CustomName: c"theodb_vecfilter".as_ptr(),
+    CreateCustomScanState: Some(create_custom_scan_state),
+});
+
+static EXEC_METHODS: Methods<pg_sys::CustomExecMethods> = Methods(pg_sys::CustomExecMethods {
+    CustomName: c"theodb_vecfilter".as_ptr(),
+    BeginCustomScan: Some(begin_custom_scan),
+    ExecCustomScan: Some(exec_custom_scan),
+    EndCustomScan: Some(end_custom_scan),
+    ReScanCustomScan: Some(rescan_custom_scan),
+    MarkPosCustomScan: None,
+    RestrPosCustomScan: None,
+    EstimateDSMCustomScan: None,
+    InitializeDSMCustomScan: None,
+    ReInitializeDSMCustomScan: None,
+    InitializeWorkerCustomScan: None,
+    ShutdownCustomScan: None,
+    ExplainCustomScan: None,
+});
+
+// The previous `set_rel_pathlist_hook` in the chain (Postgres allows only one; we must call it).
+static mut PREV_HOOK: pg_sys::set_rel_pathlist_hook_type = None;
+
+/// Register the Custom Scan methods + install the pathlist hook. Called from `_PG_init`.
+pub fn init() {
+    unsafe {
+        pg_sys::RegisterCustomScanMethods(&SCAN_METHODS.0);
+        PREV_HOOK = pg_sys::set_rel_pathlist_hook;
+        pg_sys::set_rel_pathlist_hook = Some(pathlist_hook);
+    }
+}
+
+/// The planner hook: for a base relation, add a pass-through CustomPath that wraps the cheapest total path.
+/// Gated behind `theodb.enable_vecfilter` (default OFF) so it is inert in production until the spike is enabled.
+#[pg_guard]
+unsafe extern "C-unwind" fn pathlist_hook(
+    root: *mut pg_sys::PlannerInfo,
+    rel: *mut pg_sys::RelOptInfo,
+    rti: pg_sys::Index,
+    rte: *mut pg_sys::RangeTblEntry,
+) {
+    // Chain the previous hook first (never drop it).
+    if let Some(prev) = PREV_HOOK {
+        prev(root, rel, rti, rte);
+    }
+    if !crate::am::guc::vecfilter_enabled() {
+        return;
+    }
+    // Spike v0: only a plain base relation is wrapped.
+    let relref = &mut *rel;
+    if relref.reloptkind != pg_sys::RelOptKind::RELOPT_BASEREL {
+        return;
+    }
+    // NOTE: `cheapest_total_path` is NOT yet set at hook time — `set_cheapest(rel)` runs AFTER the hook in
+    // `set_rel_pathlist()`. So pick the child from the already-generated `rel->pathlist` (the cheapest by
+    // total_cost). Empty pathlist ⇒ nothing to wrap.
+    let paths = PgList::<pg_sys::Path>::from_pg(relref.pathlist);
+    let mut child: *mut pg_sys::Path = std::ptr::null_mut();
+    let mut best = f64::INFINITY;
+    for i in 0..paths.len() {
+        if let Some(p) = paths.get_ptr(i) {
+            if (*p).total_cost < best {
+                best = (*p).total_cost;
+                child = p;
+            }
+        }
+    }
+    if child.is_null() {
+        return;
+    }
+
+    // Hand-roll `create_customscan_path`: alloc a CustomPath node and populate it by hand.
+    let mut cpath = PgBox::<pg_sys::CustomPath>::alloc_node(pg_sys::NodeTag::T_CustomPath);
+    let path = &mut cpath.path;
+    path.pathtype = pg_sys::NodeTag::T_CustomScan;
+    path.parent = rel;
+    path.pathtarget = relref.reltarget;
+    path.param_info = std::ptr::null_mut();
+    path.rows = (*child).rows;
+    // Cost must be MEANINGFULLY below the child — `add_path` uses `compare_path_costs_fuzzily` with a 1% fuzz
+    // factor (STD_FUZZ_FACTOR), so a tiny epsilon delta reads as a tie and the new path is rejected in favour of
+    // the existing seqscan. Spike v0 halves the cost to force selection and prove the lifecycle; the real feature
+    // costs the filtered scan honestly.
+    path.startup_cost = (*child).startup_cost * 0.5;
+    path.total_cost = (*child).total_cost * 0.5;
+    cpath.flags = 0;
+    // Carry the child path so PlanCustomPath receives its planned form in `custom_plans`.
+    let mut children = PgList::<pg_sys::Path>::new();
+    children.push(child);
+    cpath.custom_paths = children.into_pg();
+    cpath.custom_private = std::ptr::null_mut();
+    cpath.methods = &PATH_METHODS.0;
+
+    pg_sys::add_path(rel, cpath.into_pg() as *mut pg_sys::Path);
+}
+
+/// Path -> Plan: hand-roll `make_custom_scan`. The child path was planned by the core and handed back in
+/// `custom_plans`; wrap it in a CustomScan node.
+#[pg_guard]
+unsafe extern "C-unwind" fn plan_custom_path(
+    _root: *mut pg_sys::PlannerInfo,
+    rel: *mut pg_sys::RelOptInfo,
+    _best_path: *mut pg_sys::CustomPath,
+    tlist: *mut pg_sys::List,
+    clauses: *mut pg_sys::List,
+    custom_plans: *mut pg_sys::List,
+) -> *mut pg_sys::Plan {
+    let mut cscan = PgBox::<pg_sys::CustomScan>::alloc_node(pg_sys::NodeTag::T_CustomScan);
+    let plan = &mut cscan.scan.plan;
+    plan.targetlist = tlist;
+    // `clauses` are RestrictInfo nodes — a plan's `qual` must hold BARE expression nodes, so extract them
+    // (else the executor hits "unrecognized node type: T_RestrictInfo"). v0: the child already applies the
+    // filter, so keeping them here is belt-and-suspenders (and the v1 recheck site).
+    plan.qual = pg_sys::extract_actual_clauses(clauses, false);
+    plan.lefttree = std::ptr::null_mut();
+    plan.righttree = std::ptr::null_mut();
+    cscan.scan.scanrelid = (*rel).relid;
+    cscan.flags = 0;
+    cscan.custom_plans = custom_plans; // the planned child(ren)
+    cscan.custom_exprs = std::ptr::null_mut();
+    cscan.custom_private = std::ptr::null_mut();
+    cscan.custom_scan_tlist = std::ptr::null_mut();
+    cscan.custom_relids = std::ptr::null_mut();
+    cscan.methods = &SCAN_METHODS.0;
+    cscan.into_pg() as *mut pg_sys::Plan
+}
+
+/// Plan -> ScanState: allocate the CustomScanState with our exec methods. v0 keeps state in `custom_ps`
+/// (the child PlanState list), so no custom-struct embedding is needed yet.
+#[pg_guard]
+unsafe extern "C-unwind" fn create_custom_scan_state(cscan: *mut pg_sys::CustomScan) -> *mut pg_sys::Node {
+    let mut css = PgBox::<pg_sys::CustomScanState>::alloc_node(pg_sys::NodeTag::T_CustomScanState);
+    css.methods = &EXEC_METHODS.0;
+    // Stash nothing else in v0; `custom_ps` is filled at BeginCustomScan from cscan.custom_plans.
+    let _ = cscan;
+    css.into_pg() as *mut pg_sys::Node
+}
+
+/// Exec init: initialize the child plan into a PlanState and stash it in `custom_ps`.
+#[pg_guard]
+unsafe extern "C-unwind" fn begin_custom_scan(
+    node: *mut pg_sys::CustomScanState,
+    estate: *mut pg_sys::EState,
+    eflags: c_int,
+) {
+    let css = &mut *node;
+    let cscan = css.ss.ps.plan as *mut pg_sys::CustomScan;
+    let planned = PgList::<pg_sys::Plan>::from_pg((*cscan).custom_plans);
+    let child_plan = match planned.get_ptr(0) {
+        Some(p) => p,
+        None => pg_sys::error!("theodb vecfilter: CustomScan has no child plan"),
+    };
+    let child_ps = pg_sys::ExecInitNode(child_plan, estate, eflags);
+    let mut ps_list = PgList::<pg_sys::PlanState>::new();
+    ps_list.push(child_ps);
+    css.custom_ps = ps_list.into_pg();
+}
+
+/// Exec next tuple: pure pass-through — pull from the child and return its slot.
+#[pg_guard]
+unsafe extern "C-unwind" fn exec_custom_scan(node: *mut pg_sys::CustomScanState) -> *mut pg_sys::TupleTableSlot {
+    let css = &mut *node;
+    let ps_list = PgList::<pg_sys::PlanState>::from_pg(css.custom_ps);
+    let child_ps = match ps_list.get_ptr(0) {
+        Some(p) => p,
+        None => return std::ptr::null_mut(),
+    };
+    pg_sys::ExecProcNode(child_ps)
+}
+
+/// Exec teardown: end the child PlanState.
+#[pg_guard]
+unsafe extern "C-unwind" fn end_custom_scan(node: *mut pg_sys::CustomScanState) {
+    let css = &mut *node;
+    let ps_list = PgList::<pg_sys::PlanState>::from_pg(css.custom_ps);
+    if let Some(child_ps) = ps_list.get_ptr(0) {
+        pg_sys::ExecEndNode(child_ps);
+    }
+}
+
+/// ReScan: forward to the child.
+#[pg_guard]
+unsafe extern "C-unwind" fn rescan_custom_scan(node: *mut pg_sys::CustomScanState) {
+    let css = &mut *node;
+    let ps_list = PgList::<pg_sys::PlanState>::from_pg(css.custom_ps);
+    if let Some(child_ps) = ps_list.get_ptr(0) {
+        pg_sys::ExecReScan(child_ps);
+    }
+}
+
+#[cfg(any(test, feature = "pg_test"))]
+#[pgrx::pg_schema]
+mod tests {
+    use pgrx::prelude::*;
+
+    /// M92 spike v0 — the Custom Scan Provider lifecycle proof. With `theodb.enable_vecfilter=on`, a filtered
+    /// vector query is intercepted by the pass-through Custom Scan node: EXPLAIN shows the node AND the result is
+    /// byte-identical to the un-hooked plan (pass-through correctness). Guards the hand-rolled node construction
+    /// (registration → pathlist hook → CustomPath → CustomScan → exec) end-to-end.
+    #[pgrx::pg_test]
+    fn m92_customscan_lifecycle_passthrough() {
+        Spi::run("CREATE TABLE cs92 (id int PRIMARY KEY, cat int, e vector(4))").unwrap();
+        for i in 1..=60i32 {
+            let lit = format!("[{},{},{},{}]", i, i * 2, i * 3, i % 7);
+            Spi::run(&format!("INSERT INTO cs92 VALUES ({i}, {}, '{lit}')", i % 5)).unwrap();
+        }
+        Spi::run("CREATE INDEX cs92_e ON cs92 USING theodb_ivfflat (e) WITH (lists=4, pq_subspaces=2, aq_threshold=2000, separate_storage=1)").unwrap();
+        let q = "[10,20,30,3]";
+        let filt = "cat = 2";
+        // Baseline: hook OFF.
+        let base: Vec<i32> = Spi::connect(|c| {
+            c.select("SET theodb.enable_vecfilter=off", None, &[]).ok();
+            c.select(&format!("SELECT id FROM cs92 WHERE {filt} ORDER BY e <-> '{q}'::vector LIMIT 5"), None, &[])
+                .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
+        });
+        // Hook ON: the plan must contain the Custom Scan node AND return the identical result.
+        let plan: String = Spi::connect(|c| {
+            c.select("SET theodb.enable_vecfilter=on", None, &[]).ok();
+            c.select(&format!("EXPLAIN (COSTS OFF) SELECT id FROM cs92 WHERE {filt} ORDER BY e <-> '{q}'::vector LIMIT 5"), None, &[])
+                .unwrap().filter_map(|r| r.get::<String>(1).unwrap()).collect::<Vec<_>>().join("\n")
+        });
+        assert!(plan.contains("Custom Scan (theodb_vecfilter)"), "hook ON must inject the Custom Scan node (plan:\n{plan})");
+        let hooked: Vec<i32> = Spi::connect(|c| {
+            c.select("SET theodb.enable_vecfilter=on", None, &[]).ok();
+            c.select(&format!("SELECT id FROM cs92 WHERE {filt} ORDER BY e <-> '{q}'::vector LIMIT 5"), None, &[])
+                .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
+        });
+        assert_eq!(hooked, base, "the pass-through Custom Scan must return the identical result to the un-hooked plan");
+    }
+
+    /// The hook is inert when the GUC is off (default): no Custom Scan node appears — production queries untouched.
+    #[pgrx::pg_test]
+    fn m92_customscan_inert_when_disabled() {
+        Spi::run("CREATE TABLE cs92b (id int PRIMARY KEY, cat int, e vector(4))").unwrap();
+        for i in 1..=20i32 {
+            Spi::run(&format!("INSERT INTO cs92b VALUES ({i}, {}, '[{i},{},0,0]')", i % 3, i * 2)).unwrap();
+        }
+        Spi::run("CREATE INDEX cs92b_e ON cs92b USING theodb_ivfflat (e) WITH (lists=2, pq_subspaces=2, aq_threshold=2000, separate_storage=1)").unwrap();
+        let plan: String = Spi::connect(|c| {
+            c.select("SET theodb.enable_vecfilter=off", None, &[]).ok();
+            c.select("EXPLAIN (COSTS OFF) SELECT id FROM cs92b WHERE cat=1 ORDER BY e <-> '[5,10,2,0]'::vector LIMIT 3", None, &[])
+                .unwrap().filter_map(|r| r.get::<String>(1).unwrap()).collect::<Vec<_>>().join("\n")
+        });
+        assert!(!plan.contains("theodb_vecfilter"), "GUC off ⇒ no Custom Scan node (plan:\n{plan})");
+    }
+}

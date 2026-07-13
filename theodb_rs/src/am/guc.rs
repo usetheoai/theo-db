@@ -87,6 +87,15 @@ pub(crate) fn hnsw_slot_reuse() -> bool {
     HNSW_SLOT_REUSE.get()
 }
 
+/// M92 spike — whether the arbitrary-WHERE Custom Scan Provider pathlist hook is active. Default OFF: a planner
+/// hook that misbehaves breaks EVERY query, so the spike stays inert until explicitly enabled.
+pub(crate) static ENABLE_VECFILTER: GucSetting<bool> = GucSetting::<bool>::new(false);
+
+/// Whether the M92 vecfilter Custom Scan Provider hook is enabled (spike kill-switch).
+pub(crate) fn vecfilter_enabled() -> bool {
+    ENABLE_VECFILTER.get()
+}
+
 // M48 (T2.3) — deterministic crash-injection for the VACUUM fold's crash tests. `injection_points` is NOT
 // compiled into the packaged Debian PG17 (blueprint §Q9, verified), so we ship a tiny always-compiled test hook
 // instead. Both default to 0 (off) ⇒ ZERO effect in production; both are `Suset` (only a superuser can set them,
@@ -176,6 +185,14 @@ pub(crate) fn init() {
         c"When on, theodb_hnsw aminsert reuses a tombstoned slot in place (search + link) before growing pending",
         c"Bounds relation growth under DELETE+INSERT churn (M56 fase 2). Off = legacy pending-append (kill-switch / A/B).",
         &HNSW_SLOT_REUSE,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+    GucRegistry::define_bool_guc(
+        c"theodb.enable_vecfilter",
+        c"When on, the M92 arbitrary-WHERE Custom Scan Provider intercepts filtered vector queries (spike)",
+        c"Default off (kill-switch). A planner hook affects every query, so the spike stays inert until enabled.",
+        &ENABLE_VECFILTER,
         GucContext::Userset,
         GucFlags::default(),
     );
