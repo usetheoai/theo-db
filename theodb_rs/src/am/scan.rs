@@ -497,6 +497,11 @@ unsafe fn scan_ivf_aq_split(
     // caps the distinct emitted; a selective filter needs more reranked). Floored at 1 for a degenerate call.
     let rerank_pool = rerank_pool.max(1);
 
+    // M92: arbitrary-WHERE TID membership (from a Custom Scan node's bitmap sub-plan) — the inline pre-filter also
+    // engages on the plain-vector v5 layout (not just the v7 label layout): Stage-1 skips candidates whose TID is
+    // not a member, so the rerank pool fills with matching candidates instead of being starved by the post-filter.
+    let membership = crate::am::customscan::membership();
+
     // Stage 1 — read ONLY the CODE pages of each probed list; AH-score; keep (score, tid, list_ci, ordinal).
     let mut cands: Vec<(i32, i64, usize, usize)> = Vec::new();
     for &(_, ci) in cd.iter().take(probes) {
@@ -522,6 +527,14 @@ unsafe fn scan_ivf_aq_split(
             for (j, &score) in out.iter().enumerate().take(bn) {
                 let ordinal = b * 32 + j;
                 let tid = i64::from_le_bytes(cbytes[ordinal * 8..ordinal * 8 + 8].try_into().unwrap());
+                // M92 arbitrary-WHERE inline skip — admit exact members OR lossy-bitmap blocks (recheck filters the
+                // over-admit); empty membership ⇒ unchanged v5 scan.
+                if let Some(m) = &membership {
+                    let block = (tid >> 16) as u32;
+                    if !m.exact.contains(&tid) && !m.lossy.contains(&block) {
+                        continue;
+                    }
+                }
                 cands.push((score, tid, ci, ordinal));
             }
         }
