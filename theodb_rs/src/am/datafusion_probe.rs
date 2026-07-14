@@ -7,10 +7,15 @@
 //! qual pushdown, batch materialization) is M100 — this only de-risks that by proving the crate can drive
 //! DataFusion end-to-end from a backend without an arrow-version/ABI conflict.
 //!
-//! Safety (blueprint Q1 artifact): the synchronous `block_on` runs under a `HeldInterrupts` guard — a
-//! `CHECK_FOR_INTERRUPTS` taken mid-`block_on` would call `proc_exit`, which does NOT unwind the Rust stack, so
-//! the live tokio runtime would drop and abort the process. Holding interrupts across the block_on and resuming
-//! after is the exact discipline M100 inherits.
+//! Safety (blueprint Q1 artifact, corrected per the M98 review H1): the synchronous `block_on` runs under a
+//! `HeldInterrupts` guard that holds off a **query-cancel** (`ProcessInterrupts` → `ereport(ERROR)` → siglongjmp).
+//! Without it, a cancel firing mid-`block_on` would longjmp straight PAST the live tokio runtime — never running
+//! the Rust `Drop`s that quiesce it, leaking it / tearing PG state. (It does NOT — and cannot — guard a
+//! SIGTERM/FATAL `proc_exit`; no holdoff count saves you from that.)
+//!
+//! M100 NOTE: holding across the WHOLE `block_on` is fine for a 3-row smoke, but the real CustomScan executor must
+//! NOT hold across a full columnar scan (that would make the query uncancellable) — it must hold only around the
+//! non-reentrant runtime hand-off and service interrupts BETWEEN batches.
 
 use datafusion::arrow::array::{Int64Array, RecordBatch};
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
@@ -49,7 +54,7 @@ fn theodb_df_probe() -> i64 {
         Ok(rt) => rt,
         Err(e) => error!("theodb_df_probe: tokio runtime: {e}"),
     };
-    let _held = HeldInterrupts::hold();
+    let held = HeldInterrupts::hold();
     let result: Result<usize, datafusion::error::DataFusionError> = rt.block_on(async {
         let ctx = SessionContext::new();
         let schema = Arc::new(Schema::new(vec![Field::new("x", DataType::Int64, false)]));
@@ -58,6 +63,10 @@ fn theodb_df_probe() -> i64 {
         // `count()` plans + executes a vectorized aggregate over the batch → the row count.
         df.count().await
     });
+    // H2: restore the interrupt holdoff (and drop the tokio runtime) BEFORE the error path — so `error!`'s
+    // ereport/panic unwinds with interrupts already resumed, not relying on `panic = "unwind"` running Drop.
+    drop(held);
+    drop(rt);
     match result {
         Ok(n) => n as i64,
         Err(e) => error!("theodb_df_probe: DataFusion: {e}"),

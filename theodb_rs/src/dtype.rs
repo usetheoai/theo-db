@@ -379,6 +379,9 @@ fn theodb_vector_from_float8_array(arr: Vec<f64>) -> Vector {
 // ---- DDL: CREATE TYPE vector + operadores + casts ----
 // O shell type é o ÚNICO bootstrap (pgrx só permite um; o usa p/ as funcs I/O referenciarem o tipo).
 // M70: o schema `theodb` (antes do umbrella — flip ADR-D1) é criado no bloco do catálogo (autotune.rs).
+// REQUIRED (M98 review M2): `SqlTranslatable for Vector` is `TypeOrigin::External`, so pgrx does NOT emit a
+// `CREATE TYPE` — THIS bootstrap is the SOLE creator of the `vector` type. Removing it silently breaks the
+// extension (the type never gets created). The External⇄bootstrap coupling is load-bearing.
 extension_sql!(
     "CREATE TYPE vector;",
     name = "vector_shell",

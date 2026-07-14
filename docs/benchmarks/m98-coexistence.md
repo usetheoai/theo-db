@@ -29,3 +29,12 @@ in ONE crate, and does DataFusion execute inside a Postgres backend?
   it is a build/link/runtime feasibility gate.
 - The pillar's honest ceiling (locked): DuckDB/Photon-class 15-30× on columnar-resident data — capability-match
   AlloyDB, never superiority (M73/M97).
+
+## Scope caveats (M98 review M3/H3)
+
+- **Core-features coexistence only.** `datafusion = { default-features = false }` — the probe uses only
+  `SessionContext::read_batch().count()` (core in-memory compute). The GATE proves LINKAGE + core execution
+  coexist; M100 MUST re-verify coexistence when it enables the expression/qual-pushdown features it needs.
+- **Reproducibility (B1 fix):** the `Cargo.lock` resolving pgrx 0.19 + datafusion 54 + arrow 58 (the exact graph
+  the 279-GREEN run used) is committed alongside this note, so the single-arrow-major claim is reproducible from
+  the repo, not only from the droplet.
