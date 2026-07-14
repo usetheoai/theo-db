@@ -16,6 +16,7 @@ pub(crate) mod aq; // M59 — anisotropic product quantizer (Phase 1 domain); th
 pub(crate) mod autotune; // M67 — deterministic ef_search recommender + scan-stats collector
 mod build; // ambuild / ambuildempty (Phase 2) + shared datum/metric helpers
 mod build_stream; // M96 — tuplesort-streaming ambuild (bounded-memory build spool)
+mod datafusion_probe; // M98 — DataFusion coexistence smoke (the pillar GATE)
 mod cost; // M48 T5.1 — honest amcostestimate visit-ratio (pgvector cost model)
 pub(crate) mod customscan; // M92 spike — arbitrary-WHERE Custom Scan Provider (pathlist hook + custom node)
 mod fold; // M48 — crash-safe VACUUM fold (meta-pivot, issue #47)
