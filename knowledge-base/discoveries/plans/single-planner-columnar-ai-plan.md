@@ -1,6 +1,6 @@
 # Discovery Plan: Single-Planner In-Postgres Columnar + Vectorized Execution + AI (AlloyDB-class HTAP)
 
-**Version:** v1.0
+**Version:** v1.1 (edge-cases absorbed — `single-planner-columnar-ai-edge-cases-2026-07-14.md`)
 **Slug:** `single-planner-columnar-ai`
 **Owner:** paulohenriquevn (CTO) / Eng
 **Created:** 2026-07-14
@@ -74,6 +74,23 @@ are study-only-design vs reusable-permissive.
 **Consequences:** the blueprint's feasibility claims from paradedb are "the pattern is proven to work" not "here is
 the code" — the own-code glue effort is scoped as essential complexity (Esforço ≠ Complexidade).
 
+### D3 — Feasibility gates + honest coexistence framing (from edge-cases EC-2/EC-3/EC-4)
+
+**Decision:** Q6 (version coexistence) and Q7 (`TableAmRoutine` FFI) are the bet's GO/NO-GO gates. The blueprint MUST
+(a) present a version MATRIX and flag pgrx-0.16.1 + datafusion-54 + arrow-58 coexistence as **UNPROVEN until a
+`cargo tree`/build spike** — never asserted from Cargo.toml pins alone (Rule 5); (b) record that the Rust-version gate
+is **already satisfied** (TheoDB `rust-toolchain.toml` = 1.91.0 ≥ datafusion-54's 1.88); (c) reference **upstream
+`apache/datafusion`**, noting pg_search's `datafusion-distributed` fork (Apache-2.0) is pg_search's choice, not ours
+(Rule 9 / supply-chain hygiene).
+
+**Rationale:** a version pin is not proof of compatibility (`.claude/rules/public-copy.md` — performance/feasibility
+is a claim, not opinion). If Q6/Q7 return NO, the techniques findings (Q1-Q5) remain design study and the roadmap
+pivots (keep shipped pg_duckdb + build only the rungs that don't need a native TAM) — the discovery delivers KNOWLEDGE
+regardless, which is why it precedes any code.
+
+**Consequences:** the blueprint's compatibility statement is a matrix + an explicit downstream spike-gate, not a
+green check; the roadmap's α/β milestones are conditional on that spike.
+
 ## Research Questions
 
 Each question maps to exactly one Coverage Corner, declares its method (Fase A broad map + Fase B deep read), and a
@@ -120,6 +137,8 @@ For `/discover-execute`:
 | After answering Qx | the blueprint section under Qx has ≥1 `.claude/knowledge-base/references/` citation | Re-iterate Qx (1 retry max) |
 | AGPL-study guard (Q1, Q3-cross-check, Q10) | the blueprint captures DESIGN/pattern + file:line, NOT copied AGPL code | If code was transcribed, rewrite as design-prose (D2) |
 | Per-project time budget | project budget (D1) not exhausted | When exhausted, mark that project's remaining Qx BLOCKED "budget exhausted", advance |
+| Q2 big-file guard (EC-1) | for `columnar_tableam.c` (4030 LoC) / `columnar_reader.c` (2271 LoC), Fase A `grep -n` the callback names FIRST; Fase B Reads only those line-ranges | if a whole-file Read is attempted, abort it and re-scope to the grepped ranges |
+| Q6 coexistence honesty (EC-2) | the Q6 answer is a version MATRIX + an explicit "coexistence UNPROVEN until a build spike" flag — never "compatible" from pins alone | if the blueprint asserts compatibility without the spike-gate flag, rewrite per D3 |
 | Before promising complete | all 4 coverage corners have populated sections + ≥1 ADR synthesized | Refuse promise, continue iterating |
 
 ## Acceptance Criteria
