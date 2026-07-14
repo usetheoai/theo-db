@@ -1446,6 +1446,75 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 
 ---
 
+# Pilar single-planner columnar+AI (AlloyDB-class HTAP) — o roadmap α→ε
+
+> **Origem (2026-07-14):** o deep-research + o cycle DISCOVER `single-planner-columnar-ai` (blueprint SHIPPABLE 98.8,
+> `knowledge-base/discoveries/blueprints/single-planner-columnar-ai-blueprint.md`) achou a rota que o M97/ADR-0041
+> NÃO examinou: um **DataFusion-CustomScan single-planner** (um engine, um planner) que quebra o teto de dois-engines
+> do pg_duckdb (ADR-0023), com **Hydra columnar Apache-2.0** (o ADR-0041 errou dizendo AGPL). Veredito **GO-CONDITIONAL**.
+> **Teto honesto TRAVADO em todos os milestones abaixo (ADR D2 do blueprint):** DuckDB/Photon-class 15–30× em dados
+> columnar-residentes — **igualar a capacidade do AlloyDB, JAMAIS afirmar superioridade** sobre o engine in-core in-memory
+> dele (disciplina M73/M97). Refs AGPL (paradedb/pg_search, citus columnar) = **estudo de design, nunca copiar código** (D1/D3).
+
+## M98 — [ ] pgrx-upgrade + DataFusion/Arrow coexistence spike (o GATE) *(gated M97)*
+
+> **Rung M-0 do blueprint.** O achado afiado de Q6: o pg_search prova o stack vetorizado em **pgrx 0.19.0**, mas o TheoDB
+> está em **pgrx 0.16.1** — logo a coexistência `datafusion 54 + arrow 58 + pgrx` está provada em 0.19.0, NÃO em 0.16.1.
+> A coexistência num crate só **só é provável por build, não por leitura de Cargo.toml** (Regra 5). Este é o gate que
+> destrava α/β.
+
+**Objective:** (1) upgrade `pgrx =0.16.1 → =0.19.0` no `theodb_rs` (toca `IndexAmRoutine`/`CustomScan`/`pg_sys` — API churn); (2) adicionar `datafusion` + `arrow` (upstream `apache/datafusion`, NÃO o fork `datafusion-distributed` da paradedb — Regra 9) como deps e provar que **linkam** com o pgrx num crate único; (3) um smoke-test mínimo: uma query trivial roteada por um `CustomScan` que roda um `ExecutionPlan` DataFusion e devolve tuplas ao PG. Rust 1.91 ≥ 1.88 (MSRV do datafusion) já está satisfeito.
+**GATE (build primeiro):** `cargo pgrx test pg17` **verde com os 277 testes existentes** no pgrx 0.19.0 + datafusion/arrow linkados; `cargo tree` sem conflito de versão de arrow; o smoke CustomScan→DataFusion→tupla passa. Honest-negative é terminal válido: se a coexistência quebrar (conflito de arrow, símbolo, ABI), documenta-se o bloqueio e o pilar re-escopa (fica no pg_duckdb).
+**DoD:** (1) `theodb_rs` compila+testa em pgrx 0.19.0 (todos os testes verdes, zero regressão); (2) datafusion+arrow linkados, `cargo tree` limpo; (3) smoke-test CustomScan↔DataFusion↔TupleTableSlot passa (1 pg_test); (4) benchmark/nota de que o build funciona (`docs/benchmarks/m98-coexistence.md`); (5) sign-off council-rust-pgrx (o upgrade de pgrx + a superfície FFI). **Risks:** (a) API churn 0.16→0.19 pode tocar muito código de AM → esforço medido, sem workaround; (b) conflito de versão de arrow (datafusion-main usa 59, pg_search 58) → pinar; (c) coexistência pode simplesmente falhar → honest-negative documentado. **Dependencies:** M97 (a decisão de perseguir o pilar). **Prior art:** blueprint Q6/Q7 + `theodb_rs/src/am/{mod.rs,customscan.rs}` (o IndexAmRoutine/CustomScan que o upgrade toca). **NÃO é claim de performance** — é um gate de viabilidade.
+
+## M99 — [ ] columnar TAM append-only (Hydra-model, Apache-2.0) *(gated M98)*
+
+> **Rung M-α.** O primeiro storage columnar nativo — um `TableAmRoutine` próprio, append-optimized, com MVCC delegado
+> ao catálogo (o truque do Hydra: visibilidade em granularidade de stripe via snapshot no `columnar.stripe`).
+
+**Objective:** um columnar TAM próprio (código próprio; Hydra Apache-2.0 = estudo do design, `columnar_storage.c`/`columnar_tableam.c`): layout stripe (150k) → chunk_group (10k) → chunk por-coluna + compressão por-coluna (zstd/lz4) + min/max skip para chunk-group pruning; TID = row_number sintético → binary search no catálogo de stripes; WAL via `GenericXLog` (reusa `am/page.rs`); MVCC append-only (stripe visível ⟺ linha de catálogo visível) + delete via row_mask sob advisory lock. **Escopo append-mostly honesto:** SEM update in-place, SEM parallel/bitmap/sample (o mesmo NULL/ERROR set do Hydra).
+**GATE (correção primeiro):** result-equivalence — `SELECT` sobre a tabela columnar == a mesma tabela row-store (agregações idênticas); **pgisolation permutations** provando visibilidade MVCC sob txns concorrentes (stripe não-commitada invisível; REPEATABLE READ segura o snapshot); crash-safety (insert stripes → restart → scan idêntico; abort → restart → sem stripe parcial). **Sem isolation permutations verde, "MVCC-correct columnar" é over-claiming.**
+**DoD:** (1) `theodb_columnar` TAM registrável (`CREATE ACCESS METHOD ... TYPE TABLE`); (2) result-equivalence pg_tests vs row-store; (3) **pgisolation permutation specs** (MVCC) verdes — precisa wire do `isolationtester` (gap de tooling do blueprint Corner 3); (4) crash-safety WAL-replay; (5) benchmark de scan analítico columnar vs heap (`docs/benchmarks/m99-columnar-tam.{md,json}`) — ganho de compressão+skip (~2-5×, honesto, SEM execução vetorizada ainda); (6) sign-off council-index-storage + council-rust-pgrx. **Boundary honesto:** append-only analytical, NÃO updatable HTAP (claim de "updatable columnar" seria over-claiming). **Risks:** (a) bugs de MVCC só aparecem sob concorrência → permutations não-opcionais; (b) TID sintético + binary search no catálogo é território novo; (c) o unwind boundary (todo callback → `pg_sys::error!`, nunca panic). **Dependencies:** M98 (pgrx 0.19 + o build). **Prior art:** blueprint Q2/Q7/Q9 + `theodb_rs/src/am/{mod.rs,page.rs,tid.rs}` (IndexAmRoutine/GenericXLog/TID codec — NÃO é greenfield). **Prior art de estudo (Apache-2.0):** `hydra/columnar`.
+
+## M100 — [ ] executor DataFusion CustomScan vetorizado *(gated M99)*
+
+> **Rung M-β.** O coração: o `CustomScan` que batcheia em Arrow e roda um `ExecutionPlan` do DataFusion num plano só —
+> a execução vetorizada que dá o 15–30× (o pg_duckdb não faz single-planner; o TAM do M99 sozinho é row-at-a-time).
+
+**Objective:** ligar o columnar TAM (M99) a um executor vetorizado DataFusion via `CustomScan` (o seam provado pelo pg_search [AGPL-design]; TheoDB já tem `customscan.rs`): planner hooks (`set_rel_pathlist_hook`/`create_upper_paths_hook`) montam o `CustomPath`; o exec constrói o `ExecutionPlan` DataFusion, `block_on` no `SendableRecordBatchStream`, projeta cada `RecordBatch` Arrow → `TupleTableSlot`; a leaf implementa `TableProvider` puxando as stripes columnar como Arrow batches; tradução de qual/agg PG → DataFusion `Expr` (gate `schema=="pg_catalog"`). **Disciplina de segurança own-code (o artefato #1 do blueprint):** `HeldInterrupts` em volta do `block_on` (senão `proc_exit` mata o backend), `MemoryPool` limitado a `work_mem` que ERRA (não panica), `unsafe impl Send` pinado numa thread (sem multi-partition até provar), todo panic → `pg_sys::error!`.
+**GATE (measurement-first):** correção (result == heap/row-store byte-a-byte nas agregações) PRIMEIRO; depois o benchmark: OLAP columnar-vetorizado vs pg_duckdb vs heap GROUP BY no MESMO box, **em dados columnar-residentes** (o ganho não existe sobre heap — M61 mediu 0.63-0.89×). Honest-negative terminal válido.
+**DoD:** (1) `CustomScan` DataFusion sobre o TAM M99, plano único (EXPLAIN mostra o node); (2) result-equivalence vs row-store; (3) a disciplina de interrupt/MemoryPool/Send implementada + testada (crash sob interrupt não mata o backend); (4) **benchmark medido** OLAP vetorizado vs pg_duckdb vs heap (`docs/benchmarks/m100-datafusion-executor.{md,json}`), teto DuckDB/Photon-class honesto; (5) sign-off council-rust-pgrx (FFI/panic-across-C) + council-benchmark. **Boundary honesto:** ganho SÓ em dados columnar-residentes; **NÃO é claim de superioridade vs AlloyDB in-core** (teto de paradigma travado). **Risks:** (a) o seam FFI é o mais perigoso do pilar (runtime async dentro de callback C síncrono) → disciplina de interrupt desde o dia 1; (b) `unsafe impl Send` vira data-race com parallel exec → single-thread pinning; (c) churn de versão do DataFusion → shim fino atrás da nossa interface (DIP). **Dependencies:** M99 (o storage). **Prior art:** blueprint Q1/Q3 + `theodb_rs/src/am/customscan.rs` (o seam M94/M95). **Estudo (AGPL):** `paradedb/pg_search/src/postgres/customscan/` (design-only).
+
+## M101 — [ ] Arrow columnar cache heap-authoritative (MVCC-correto HTAP) *(gated M100)*
+
+> **Rung M-γ.** O modelo do AlloyDB feito permissivo: o heap continua a fonte-de-verdade; o columnar é um cache Arrow
+> DERIVADO, em memória, que o DataFusion lê zero-copy. Resolve o problema MVCC mais difícil mantendo o heap autoritativo.
+
+**Objective:** um cache columnar Arrow **derivado do heap row-store** (heap = fonte-de-verdade → MVCC correto por construção), que o executor DataFusion (M100) lê zero-copy; invalidação/refresh no write; o planner escolhe o cache para scans analíticos (custo) e cai no heap senão. **Primeiro cut manual:** um pragma "columnarize estas colunas" (o auto-populate/evict por workload — o que o AlloyDB faz — é a cauda ambiciosa, follow-up).
+**GATE:** MVCC-correto sob concorrência (o cache carrega metadados de visibilidade; escrita no heap invalida) — pgisolation permutations provando que uma leitura analítica vê exatamente o snapshot correto; result-equivalence heap vs cache; não-interferência OLTP (o cache read-only não degrada o p95 do heap, o padrão M62).
+**DoD:** (1) cache Arrow derivado + refresh/invalidação no write; (2) planner escolhe cache vs heap por custo; (3) **pgisolation MVCC permutations** verdes (o cache respeita snapshot isolation); (4) benchmark HTAP (`docs/benchmarks/m101-arrow-cache.{md,json}`): OLAP acelerado + OLTP p95 não-degradado sob carga concorrente; (5) sign-off council-index-storage + council-benchmark. **Boundary honesto:** o pragma é manual (não auto-tuned como o AlloyDB); heap-authoritative = MVCC correto mas com custo de refresh (2× storage do cache). **Risks:** (a) consistência cache↔heap sob write concorrente → invalidação testada por permutations; (b) refresh caro em tabelas quentes → o pragma deixa o operador decidir. **Dependencies:** M100 (o executor). **Prior art:** blueprint Q4/D-γ + AlloyDB columnar-engine (estudo do design, proprietário) + M62 (o padrão materializado). **NÃO é o engine in-memory auto-mantido do AlloyDB** (declarado honestamente).
+
+## M102 — [ ] operadores de AI como plan nodes (AI.IF/sem_filter pushable) *(gated M100)*
+
+> **Rung M-δ.** Fecha o gap que o usuário levantou: hoje `ai.generate`/`ai.nl_to_sql` são FUNÇÕES (caixa-preta que o
+> planner não custa/reordena/batcheia). Vira operador de plano — o planner empurra o filtro relacional barato antes do
+> AI caro e batcheia a inferência.
+
+**Objective:** expor os operadores de AI (`ai.generate`/`AI.IF`/`sem_filter`) como **nodes de plano** (`CustomScan`/table-func set-oriented, não plpgsql per-row) com: (1) um cost hook de 3 eixos (custo/tempo/qualidade + selectivity) em `am/cost.rs` — modelo do Palimpzest [MIT]; (2) uma regra de push-down dependency-safe (`depends_on ∩ generated_fields = ∅`) que roda o `WHERE` relacional barato antes do operador de AI caro; (3) opcional: a cascata proxy→oracle do LOTUS [Apache-2.0] com thresholds aprendidos de sample p/ um alvo de recall com garantia estatística. Requer revisitar a inferência HTTP per-row (ADR-0007) para **batching** (senão o ganho columnar é jogado fora um round-trip por vez) — ADR novo.
+**GATE:** correção (o resultado do operador-plano == o da função per-row) + o benchmark de composição: `AI.IF` num `WHERE` sobre um scan vetorizado com push-down do filtro barato antes — custo/latência medidos vs o caminho per-row; a cascata reporta **o alvo de recall + a metodologia de sample** (nunca "AI.IF é rápido" sem o ponto de qualidade).
+**DoD:** (1) `AI.IF`/`ai.generate` como node de plano (EXPLAIN mostra + reordena); (2) cost hook 3-eixos + push-down dependency-safe; (3) result-equivalence vs a função per-row; (4) benchmark (`docs/benchmarks/m102-ai-operators.{md,json}`): push-down + (opcional) cascata com recall-target medido; (5) ADR revisitando ADR-0007 (batched inference); (6) sign-off council-ai-in-db + council-security (superfície NL→SQL/AI). **Boundary honesto:** ortogonal a recall vetorial; ganho de **composabilidade/custo com acurácia ESTATÍSTICA** (reportar sempre com metodologia). **Risks:** (a) calibração do cost model exige telemetria de sample (senão estimativa naive sem garantia); (b) prompt-injection na superfície AI-operator → council-security obrigatório; (c) batching muda o ADR-0007. **Dependencies:** M100 (o executor vetorizado — o batch vem dele). **Prior art:** blueprint Q5 + `lotus`/`palimpzest` (Apache/MIT) + `theodb_rs/src/{nl.rs,chat.rs,am/customscan.rs,am/cost.rs}` + ADR-0007/0033.
+
+## M103 — [ ] vetor + columnar num substrato único (Lance-inspired) *(gated M100)*
+
+> **Rung M-ε.** O topo: busca vetorial filtrada + agregação analítica num scan columnar só — o índice IVF/HNSW vive
+> como colunas Arrow ao lado dos escalares (o insight do Lance), com o prefiltro escalar como `RowAddrMask` first-class.
+
+**Objective:** um substrato columnar compartilhado onde o índice vetorial (IVF partições → row-ranges contíguos; códigos AQ/SQ como colunas Arrow — layout do Lance [Apache-2.0], código próprio) co-reside com as colunas escalares, de modo que `WHERE <escalar> ORDER BY <vetor> LIMIT k` + uma agregação columnar compõem num plano vetorizado só: prefiltro escalar → `RowAddrMask` → sub-index search só nas partições sondadas → rerank + projeção das colunas analíticas por row-id. Reusa o IVF/AQ próprio (M60-M89) re-materializado como colunas.
+**GATE (correção + honestidade):** result-equivalence do vetor filtrado vs o caminho atual (M90-M95) — recall byte-idêntico; o benchmark mede **custo/escala** (out-of-RAM, column pruning) — **NÃO recall e NÃO o gap de QPS do ScaNN** (o teto M73/M74 permanece; qualquer claim de recall/QPS-superior é barrado).
+**DoD:** (1) índice vetorial como colunas Arrow no substrato columnar; (2) `WHERE escalar + ORDER BY vetor` + agregação num plano vetorizado; (3) result-equivalence de recall vs M90-M95; (4) benchmark (`docs/benchmarks/m103-vector-columnar.{md,json}`): ganho de custo/escala (out-of-RAM/pruning), honesto; (5) sign-off council-vector-ann + council-index-storage + council-benchmark. **Boundary honesto:** ganho de **cost/scale/composabilidade, NÃO recall, NÃO QPS-vs-ScaNN** (teto de paradigma travado); Lance é file-format → integração lakehouse/side-store, não substitui o AM transacional. **Risks:** (a) consistência dual-store (row-store verdade + réplica columnar); (b) manutenção incremental de índice sobre segmentos imutáveis; (c) tentação de over-claim recall → GATE barra. **Dependencies:** M100 (o executor vetorizado). **Prior art:** blueprint Q4 + `lance` (Apache-2.0, estudo do layout) + `theodb_rs/src/ann/{ivf.rs,hnsw.rs}` + `am/page.rs` (o IVF/AQ próprio) + ADRs 0035/0037.
+
+---
+
 ## Sequência e paralelismo
 
 ```
