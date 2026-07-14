@@ -1456,7 +1456,7 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 > columnar-residentes — **igualar a capacidade do AlloyDB, JAMAIS afirmar superioridade** sobre o engine in-core in-memory
 > dele (disciplina M73/M97). Refs AGPL (paradedb/pg_search, citus columnar) = **estudo de design, nunca copiar código** (D1/D3).
 
-## M98 — [ ] pgrx-upgrade + DataFusion/Arrow coexistence spike (o GATE) *(gated M97)*
+## M98 — [x] pgrx-upgrade + DataFusion/Arrow coexistence spike (o GATE) *(gated M97)*
 
 > **Rung M-0 do blueprint.** O achado afiado de Q6: o pg_search prova o stack vetorizado em **pgrx 0.19.0**, mas o TheoDB
 > está em **pgrx 0.16.1** — logo a coexistência `datafusion 54 + arrow 58 + pgrx` está provada em 0.19.0, NÃO em 0.16.1.
