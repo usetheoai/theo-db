@@ -13,7 +13,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- Roadmap amended: added M97 Columnar/HTAP (D2) discovery-first (blueprint + viability benchmark + GO/NO-GO ADR; zero product code by design) (M97)
+
+## [0.84.0] - 2026-07-13
+
+### Added
+- **M97 (Columnar/HTAP (D2) discovery, veredito `DEFER` — discovery-only, ZERO product code):** a rigorous, web-grounded (R0) answer to "is a NEW columnar pillar worth months?" — **DEFER**. The only D1-permissive columnar route (pg_duckdb + DuckDB, MIT) is ALREADY shipped (M61/M62/M64, ADRs 0020/0021/0023); every "go further" differentiator is **license-barred** (moonlink/pg_mooncake sync = BSL 1.1; Hydra columnar + Citus columnar = AGPLv3 — all barred by D1) or **paradigm-blocked** (TheoDB is structurally two engines / two planners — ADR 0023 — so it cannot match AlloyDB's in-core in-memory single-planner columnar engine; the M73 vector lesson applied). **Viability benchmark MEASURED (20M-row `hits`, same box): DuckDB columnar 15–23× faster than PG row-store on analytical aggregations** (`docs/benchmarks/m97-htap-viability.{md,json}`) — confirming columnar's value AND that the shipped pg_duckdb already delivers it (no new differentiator to chase). Deliverables: blueprint (SHIPPABLE 98.8, `knowledge-base/discoveries/blueprints/columnar-htap-blueprint.md`) + the viability benchmark + the DEFER decision ADR (`docs/adr/0041-m97-columnar-defer.md`, owner sign-off pending) with a moonlink-license watch-item. The honest terminal: deliver KNOWLEDGE, position honestly ("on-demand vectorized columnar via pg_duckdb, a lakehouse D2 bet — NOT AlloyDB's in-memory-auto engine"), don't over-invest chasing a closed/barred SOTA. (M97)
 
 ## [0.83.0] - 2026-07-13
 
