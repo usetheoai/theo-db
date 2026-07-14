@@ -166,7 +166,7 @@ mod simd_ah {
     /// register shuffles. This scores a single code (per-node HNSW walk, ADR D4); a batched block variant is a
     /// Phase-4 follow-up if the walk under-feeds `pshufb`.
     #[target_feature(enable = "avx2")]
-    pub(super) unsafe fn ah_score(lut: &Lut16, code: &[u8]) -> i32 {
+    pub(super) unsafe fn ah_score(lut: &Lut16, code: &[u8]) -> i32 { unsafe {
         let m = lut.m();
         let tab = lut.tables_ptr();
         let mut acc = 0i32;
@@ -191,7 +191,7 @@ mod simd_ah {
             }
         }
         acc
-    }
+    }}
 
     /// Batched AH score of a block of `n` codes, subspace-major transposed layout (FAISS FastScan `bbs`): the
     /// caller lays `codes` out so `codes[s*n + v]` holds the packed nibble of subspace-pair `s` for vector `v`.
@@ -201,7 +201,7 @@ mod simd_ah {
     ///
     /// SAFETY: caller guarantees AVX2 available; `n <= 32`; `codes.len() == ceil(m/2) * n`; `out.len() == n`.
     #[target_feature(enable = "avx2")]
-    pub(super) unsafe fn ah_score_block32(lut: &Lut16, codes: &[u8], n: usize, out: &mut [i32]) {
+    pub(super) unsafe fn ah_score_block32(lut: &Lut16, codes: &[u8], n: usize, out: &mut [i32]) { unsafe {
         let m = lut.m();
         let tab = lut.tables_ptr();
         // Two i16 accumulators cover 32 lanes (16 per YMM half after widening).
@@ -235,15 +235,15 @@ mod simd_ah {
         for (v, o) in out.iter_mut().enumerate().take(n) {
             *o = buf[v] as i32;
         }
-    }
+    }}
 
     /// Broadcast a 16-byte LUT lane into both 128-bit halves of a YMM so `_mm256_shuffle_epi8` (which shuffles
     /// per-128-bit-lane) uses the same table in each half.
     #[target_feature(enable = "avx2")]
-    unsafe fn broadcast_lane(p: *const i8) -> __m256i {
+    unsafe fn broadcast_lane(p: *const i8) -> __m256i { unsafe {
         let lane = _mm_loadu_si128(p as *const __m128i);
         _mm256_set_m128i(lane, lane)
-    }
+    }}
 
     /// Widen 32 int8 partials into the two i16 accumulators (avoids overflow across `m` subspaces, blueprint T2).
     /// Uses `_mm256_cvtepi8_epi16` on each 128-bit half so byte-lane `v` maps to i16-lane `v` IN ORDER — the

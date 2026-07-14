@@ -20,7 +20,7 @@
 /// `theodb_ivfflat.probes` scan GUC. Runs once in the postmaster before any DDL (pgrx honors a user `_PG_init`).
 #[allow(non_snake_case)]
 #[::pgrx::pg_guard]
-pub unsafe extern "C-unwind" fn _PG_init() {
+pub unsafe extern "C-unwind" fn _PG_init() { unsafe {
     am::options::init();
     am::guc::init();
     // M92 spike — register the arbitrary-WHERE Custom Scan Provider methods + install the pathlist hook
@@ -29,7 +29,7 @@ pub unsafe extern "C-unwind" fn _PG_init() {
     // M54: register the vectorizer background worker (only when preloaded — guarded internally, no-op in a
     // backend CREATE EXTENSION so it stays silent there).
     vectorizer::register_worker();
-}
+}}
 
 mod am;
 mod ann;

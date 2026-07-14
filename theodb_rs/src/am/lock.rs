@@ -4,7 +4,7 @@
 //! torn blob and a concurrent insert could be lost. Scans/inserts take SHARE; the VACUUM fold takes EXCLUSIVE.
 use pgrx::pg_sys;
 
-unsafe fn acquire(oid: pg_sys::Oid, mode: pg_sys::LOCKMODE) {
+unsafe fn acquire(oid: pg_sys::Oid, mode: pg_sys::LOCKMODE) { unsafe {
     let mut tag: pg_sys::LOCKTAG = std::mem::zeroed();
     tag.locktag_field1 = pg_sys::MyDatabaseId.to_u32();
     tag.locktag_field2 = oid.to_u32();
@@ -14,7 +14,7 @@ unsafe fn acquire(oid: pg_sys::Oid, mode: pg_sys::LOCKMODE) {
     tag.locktag_lockmethodid = pg_sys::USER_LOCKMETHOD as u8;
     // sessionLock=false → released at transaction end; dontWait=false → block until granted.
     pg_sys::LockAcquire(&tag, mode, false, false);
-}
+}}
 
 /// SHARE the index-fold lock — compatible with other scans/inserts, blocks a concurrent VACUUM rewrite.
 pub(crate) fn index_shared(rel: pg_sys::Relation) {

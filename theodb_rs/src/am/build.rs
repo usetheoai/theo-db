@@ -48,7 +48,7 @@ struct BuildState {
 
 /// M90 — read a `smallint[]` Datum into a sorted-deduped label set (own code; empty on NULL/empty). Sorted+deduped
 /// so the scan-side overlap check is a cheap merge and the stored form is canonical.
-unsafe fn datum_to_labelset(datum: pg_sys::Datum, is_null: bool) -> Vec<i16> {
+unsafe fn datum_to_labelset(datum: pg_sys::Datum, is_null: bool) -> Vec<i16> { unsafe {
     if is_null {
         return Vec::new();
     }
@@ -56,7 +56,7 @@ unsafe fn datum_to_labelset(datum: pg_sys::Datum, is_null: bool) -> Vec<i16> {
     v.sort_unstable();
     v.dedup();
     v
-}
+}}
 
 /// Scan the heap once, collecting `(encoded heap TID, vector)` for every live non-NULL-vector tuple. Shared by
 /// both AMs' `ambuild`. Returns `(corpus, heap_tuple_count)`.
@@ -64,7 +64,7 @@ unsafe fn collect_corpus(
     heaprel: pg_sys::Relation,
     indexrel: pg_sys::Relation,
     index_info: *mut pg_sys::IndexInfo,
-) -> (Vec<(i64, Vec<f32>)>, Vec<Vec<i16>>, f64) {
+) -> (Vec<(i64, Vec<f32>)>, Vec<Vec<i16>>, f64) { unsafe {
     // M90: a 2nd index column (`smallint[]`) means label filtering; `ii_NumIndexAttrs > 1`.
     let has_labels = (*index_info).ii_NumIndexAttrs > 1;
     let mut state = BuildState { corpus: Vec::new(), dim: None, has_labels, labels: Vec::new() };
@@ -79,12 +79,12 @@ unsafe fn collect_corpus(
         std::ptr::null_mut(),
     );
     (state.corpus, state.labels, ntuples as f64)
-}
+}}
 
 /// M96 — the indexed vector column's dimension from its typmod (our `vector` type stores `dim` as the typmod,
 /// pgvector convention), read from the index's first attribute. `0` when unavailable (→ streaming dispatch falls
 /// back to the in-RAM build, never a wrong decision).
-unsafe fn index_vector_dim(indexrel: pg_sys::Relation) -> i32 {
+unsafe fn index_vector_dim(indexrel: pg_sys::Relation) -> i32 { unsafe {
     let tupdesc = (*indexrel).rd_att;
     if tupdesc.is_null() || (*tupdesc).natts < 1 {
         return 0;
@@ -96,14 +96,14 @@ unsafe fn index_vector_dim(indexrel: pg_sys::Relation) -> i32 {
     } else {
         0
     }
-}
+}}
 
-unsafe fn build_result(ntuples: f64, nindexed: usize) -> *mut pg_sys::IndexBuildResult {
+unsafe fn build_result(ntuples: f64, nindexed: usize) -> *mut pg_sys::IndexBuildResult { unsafe {
     let mut result = PgBox::<pg_sys::IndexBuildResult>::alloc0();
     result.heap_tuples = ntuples;
     result.index_tuples = nindexed as f64;
     result.into_pg()
-}
+}}
 
 /// `theodb_ivfflat` build. The DEFAULT l2 opclass sets the metric; cosine/ip opclasses are a follow-up (pgrx 0.16
 /// does not expose `get_opfamily_name` for opclass→metric resolution). The metric is persisted in the blob.
@@ -112,14 +112,14 @@ unsafe fn build_result(ntuples: f64, nindexed: usize) -> *mut pg_sys::IndexBuild
 /// `theodb_metric_{cosine,ip}()` (returns the metric tag); the DEFAULT L2 opclass has NO support proc, so
 /// `index_getprocid` returns `InvalidOid` → fall back to L2. Closes the "always L2" build hardcode; the scan and
 /// both VACUUM rebuilds already honor the persisted `metric_tag`.
-unsafe fn resolve_metric(indexrel: pg_sys::Relation) -> Metric {
+unsafe fn resolve_metric(indexrel: pg_sys::Relation) -> Metric { unsafe {
     let procid = pg_sys::index_getprocid(indexrel, 1, 1);
     if procid == pg_sys::InvalidOid {
         return Metric::L2;
     }
     let datum = pg_sys::OidFunctionCall0Coll(procid, pg_sys::InvalidOid);
     Metric::from_tag(datum.value() as u8).unwrap_or(Metric::L2)
-}
+}}
 
 #[pg_guard]
 pub extern "C-unwind" fn ambuild(
@@ -349,7 +349,7 @@ pub extern "C-unwind" fn ambuild_hnsw(
 unsafe fn pack_hnsw_for_build(
     idx: &HnswIndex,
     indexrel: pg_sys::Relation,
-) -> Result<crate::am::hnsw_page::Packed, String> {
+) -> Result<crate::am::hnsw_page::Packed, String> { unsafe {
     let m = crate::am::options::pq_subspaces_from_relation(indexrel); // 0 = AQ off
     if m > 0 {
         let bits = crate::am::options::pq_bits_from_relation(indexrel);
@@ -358,7 +358,7 @@ unsafe fn pack_hnsw_for_build(
     } else {
         crate::am::hnsw_page::pack_sbq(idx, crate::am::options::sbq_bits_from_relation(indexrel))
     }
-}
+}}
 
 /// Called once per heap tuple during the build scan. Skips NULL vectors (pgvector index semantics).
 #[pg_guard]
@@ -369,7 +369,7 @@ unsafe extern "C-unwind" fn build_callback(
     isnull: *mut bool,
     _tuple_is_alive: bool,
     state: *mut std::os::raw::c_void,
-) {
+) { unsafe {
     if *isnull {
         return; // NULL vector — not indexed (EC: pgvector semantics)
     }
@@ -386,7 +386,7 @@ unsafe extern "C-unwind" fn build_callback(
         st.labels.push(datum_to_labelset(*values.add(1), *isnull.add(1)));
     }
     st.corpus.push((tid::encode(htid), v));
-}
+}}
 
 /// Incremental insert (M26 Phase 5, ADR-2): append the new `(heap TID, vector)` to the pending region — O(1)
 /// amortized, NO index rebuild. Scans fold the pending region into the ranking; VACUUM later folds it into the
@@ -402,7 +402,7 @@ pub unsafe extern "C-unwind" fn aminsert(
     _check_unique: pg_sys::IndexUniqueCheck::Type,
     _index_unchanged: bool,
     _index_info: *mut pg_sys::IndexInfo,
-) -> bool {
+) -> bool { unsafe {
     if *isnull {
         return false;
     }
@@ -432,7 +432,7 @@ pub unsafe extern "C-unwind" fn aminsert(
         Ok(()) => true,
         Err(e) => pg_sys::error!("theodb am insert: {e}"),
     }
-}
+}}
 
 /// Rebuild the main index over only the live heap TIDs (M26 Phase 5 — called by VACUUM's `ambulkdelete`). Reads
 /// the current main index + pending, keeps entries the `dead` predicate rejects, rebuilds, and rewrites the blob
@@ -444,7 +444,7 @@ pub unsafe extern "C-unwind" fn aminsert(
 pub(crate) unsafe fn vacuum_delete_inplace(
     indexrel: pg_sys::Relation,
     dead: &mut dyn FnMut(i64) -> bool,
-) -> usize {
+) -> usize { unsafe {
     let magic = match page::peek_magic(indexrel) {
         Ok(m) => m,
         Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
@@ -475,12 +475,12 @@ pub(crate) unsafe fn vacuum_delete_inplace(
         return vacuum_rebuild(indexrel, dead);
     }
     (node_count.saturating_sub(total_tomb)) as usize
-}
+}}
 
 pub(crate) unsafe fn vacuum_rebuild(
     indexrel: pg_sys::Relation,
     dead: &mut dyn FnMut(i64) -> bool,
-) -> usize {
+) -> usize { unsafe {
     // Exclusive the fold lock — wait for all concurrent scans/inserts (share) to finish, then rewrite alone.
     crate::am::lock::index_exclusive(indexrel);
     let magic = match page::peek_magic(indexrel) {
@@ -537,11 +537,11 @@ pub(crate) unsafe fn vacuum_rebuild(
     let rebuilt = idx.rebuilt_with(&live, BUILD_SEED);
     page::rewrite_blob(indexrel, &rebuilt.to_bytes());
     live.len()
-}
+}}
 
 /// M35 VACUUM fold for the structured HNSW layout: enumerate every element tuple + pending, drop dead, rebuild the
 /// graph, and rewrite the structured layout in place (folding pending in, dropping dead TIDs). Returns live count.
-unsafe fn vacuum_rebuild_hnsw_structured(indexrel: pg_sys::Relation, dead: &mut dyn FnMut(i64) -> bool) -> usize {
+unsafe fn vacuum_rebuild_hnsw_structured(indexrel: pg_sys::Relation, dead: &mut dyn FnMut(i64) -> bool) -> usize { unsafe {
     let meta = match crate::am::hnsw_page::read_meta(indexrel) {
         Ok(m) => m,
         Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
@@ -594,7 +594,7 @@ unsafe fn vacuum_rebuild_hnsw_structured(indexrel: pg_sys::Relation, dead: &mut 
     };
     crate::am::fold::fold(indexrel, &packed.meta, &packed.pages, base);
     live_len
-}
+}}
 
 /// M59 T3.3 — pack the fold's new generation preserving the index's persisted quantized layout. Reads the layout
 /// discriminator off the persisted `meta` (NOT the reloption — a fold must re-emit the same layout the index was
@@ -618,7 +618,7 @@ fn pack_fold_layout(
 
 /// VACUUM fold for the structured IVFFlat layout (M31): enumerate all list entries + pending, drop dead, rebuild,
 /// and rewrite the structured layout in place.
-unsafe fn vacuum_rebuild_structured(indexrel: pg_sys::Relation, dead: &mut dyn FnMut(i64) -> bool) -> usize {
+unsafe fn vacuum_rebuild_structured(indexrel: pg_sys::Relation, dead: &mut dyn FnMut(i64) -> bool) -> usize { unsafe {
     let meta = match page::read_ivf_meta(indexrel) {
         Ok(m) => m,
         Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
@@ -661,7 +661,7 @@ unsafe fn vacuum_rebuild_structured(indexrel: pg_sys::Relation, dead: &mut dyn F
     let body: Vec<Vec<Vec<u8>>> = body_items.iter().map(|it| vec![it.clone()]).collect();
     crate::am::fold::fold(indexrel, meta, &body, base);
     live.len()
-}
+}}
 
 /// Empty index for an UNLOGGED table: Postgres calls `ambuildempty` to populate the INIT fork (the template
 /// copied to the main fork on crash-recovery reset) — NOT the main fork. Writing MAIN here would append spurious
@@ -698,18 +698,18 @@ pub extern "C-unwind" fn ambuildempty_hnsw(indexrel: pg_sys::Relation) {
 /// comes up empty/zeroed and `aminsert` fails with "truncated meta page" until REINDEX. Pattern is the
 /// upstream fix verbatim: pgvector `hnswbuild.c:1137-1138` / gist `gist.c:133-150` (`log_newpage_range`
 /// with FPIs for the whole fork). Called as the LAST step of buildempty so the range covers every page.
-unsafe fn wal_log_init_fork(indexrel: pg_sys::Relation) {
+unsafe fn wal_log_init_fork(indexrel: pg_sys::Relation) { unsafe {
     let fork = pg_sys::ForkNumber::INIT_FORKNUM;
     let nblocks = pg_sys::RelationGetNumberOfBlocksInFork(indexrel, fork);
     if nblocks > 0 {
         pg_sys::log_newpage_range(indexrel, fork, 0, nblocks, true);
     }
-}
+}}
 
 /// Convert a pgvector `vector` Datum into a `Vec<f32>`. pgvector's on-disk layout (studied in M20): a varlena
 /// header, then `int16 dim`, `int16 unused`, then `dim × float4`. Detoast first (vectors are plain-stored but be
 /// safe). Ported to a raw reader because the AM callback receives the raw Datum (no SQL `::real[]` cast here).
-pub(crate) unsafe fn datum_to_vec_f32(datum: pg_sys::Datum) -> Vec<f32> {
+pub(crate) unsafe fn datum_to_vec_f32(datum: pg_sys::Datum) -> Vec<f32> { unsafe {
     let detoasted = pg_sys::pg_detoast_datum(datum.cast_mut_ptr::<pg_sys::varlena>());
     let base = detoasted.cast::<u8>();
     // VARHDRSZ (4-byte varlena header) — pgvector always uses the 4-byte header for `vector`.
@@ -721,7 +721,7 @@ pub(crate) unsafe fn datum_to_vec_f32(datum: pg_sys::Datum) -> Vec<f32> {
         out.push(floats.add(i).read_unaligned());
     }
     out
-}
+}}
 
 // ================================ M59 T3.3 — build + fold wiring preserves AQ v3 ================================
 #[cfg(any(test, feature = "pg_test"))]
@@ -757,14 +757,14 @@ mod tests {
     }
 
     /// Read the persisted meta of `{tbl}_idx` via the real Relation (the only way to see what `ambuild` packed).
-    unsafe fn meta_of(tbl: &str) -> crate::am::hnsw_page::HnswMeta {
+    unsafe fn meta_of(tbl: &str) -> crate::am::hnsw_page::HnswMeta { unsafe {
         let oid: pg_sys::Oid =
             pgrx::Spi::get_one(&format!("SELECT '{tbl}_idx'::regclass::oid")).unwrap().expect("oid");
         let rel = pg_sys::index_open(oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
         let meta = read_meta(rel).expect("read_meta");
         pg_sys::index_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
         meta
-    }
+    }}
 
     /// ctid → the encoded i64 the AM stores, for driving the FFI fold's `dead` predicate.
     fn heap_tid_i64(tbl: &str, id: i32) -> i64 {
@@ -1367,7 +1367,8 @@ mod tests {
         let corpus = aq_corpus8(300); // ≥ any reasonable parallel threshold so the parallel path really engages
         let (m, bits, thr) = (4usize, 4u8, 2.0f32);
         let pack_with_threshold = |t: &str| -> Vec<u8> {
-            std::env::set_var("THEODB_HNSW_PARALLEL_THRESHOLD", t);
+            // FIXME: Audit that the environment access only happens in single-threaded code.
+            unsafe { std::env::set_var("THEODB_HNSW_PARALLEL_THRESHOLD", t) };
             let idx = HnswIndex::build(&corpus, HNSW_M, HNSW_EF_CONSTRUCTION, Metric::L2, BUILD_SEED);
             let packed = pack_aq(&idx, 1, m, bits, thr).expect("pack_aq");
             // M59 fix: the codebook is on the packed codebook pages (no longer inline in the meta item — it
@@ -1377,7 +1378,8 @@ mod tests {
         };
         let seq = pack_with_threshold("100000000"); // threshold ≫ n ⇒ sequential
         let par = pack_with_threshold("1"); // threshold 1 ⇒ parallel
-        std::env::remove_var("THEODB_HNSW_PARALLEL_THRESHOLD");
+        // FIXME: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::remove_var("THEODB_HNSW_PARALLEL_THRESHOLD") };
         assert!(!seq.is_empty(), "the v3 codebook is non-empty");
         assert_eq!(seq, par, "the AQ codebook is byte-identical seq-vs-parallel (no data race in the drain)");
     }

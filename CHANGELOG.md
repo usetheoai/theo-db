@@ -12,6 +12,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.85.0] - 2026-07-14
+
+### Changed
+- **M98 (pgrx 0.19 upgrade + DataFusion/Arrow coexistence GATE — the single-planner columnar+AI pillar's go/no-go): upgraded theodb_rs from pgrx 0.16.1 to 0.19.0** (Rust edition 2021→2024 via `cargo fix --edition`; the pgrx 0.18 One-Compile model — removed `src/bin/pgrx_embed.rs` + the `pgrx_embed` bin + `crate-type "lib"`; the `public.vector` type's `SqlTranslatable` migrated to the const API with `TypeOrigin::External` so the SQL name stays `vector`, no REINDEX / no user-SQL change) + bumped `rust-toolchain` 1.91→1.97 (pgrx 0.19 MSRV is 1.96). **MEASURED: 277 existing tests GREEN on pgrx 0.19 (zero regression)** + Apache DataFusion 54 + Arrow 58 linked with `cargo tree` showing a SINGLE arrow major (no ABI/version conflict — the coexistence proof) + 2 new smoke tests proving DataFusion executes in-process AND inside a PG backend (`SELECT theodb_df_probe()`=3, a DataFusion aggregate over an Arrow batch under the `HeldInterrupts` discipline). 279 total GREEN. The full planner-integrated CustomScan executor is M100; this GATE proves coexistence + DataFusion-runs-in-a-backend (`docs/benchmarks/m98-coexistence.md`). No page-format change; NOT a performance claim — a build/link/runtime feasibility gate. Honest ceiling locked: DuckDB/Photon-class, capability-match not superiority (M73/M97). (M98)
+
+### Added
+- Roadmap amended: single-planner columnar+AI pillar (AlloyDB-class HTAP) — 6 milestones M98-M103 from the `single-planner-columnar-ai` discovery (blueprint SHIPPABLE 98.8, GO-CONDITIONAL): M98 pgrx-0.19-upgrade + DataFusion/Arrow coexistence spike (the GATE), M99 append-only columnar TAM (Hydra-model, Apache-2.0), M100 DataFusion CustomScan vectorized executor (the single-planner seam), M101 heap-authoritative Arrow columnar cache (MVCC-correct HTAP), M102 AI operators as pushable plan nodes (LOTUS/Palimpzest), M103 vector+columnar unified substrate (Lance-inspired). Honest ceiling locked in every DoD: DuckDB/Photon-class 15-30× on columnar-resident data — capability-match AlloyDB, never superiority over its in-core engine (M73/M97). Supersedes ADR-0041's DEFER + corrects its Hydra-license error (Apache-2.0, not AGPL) (M98, M99, M100, M101, M102, M103)
+
 ## [0.84.1] - 2026-07-13
 
 ### Fixed

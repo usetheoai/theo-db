@@ -1,16 +1,12 @@
 [package]
 name = "theodb_rs"
 version = "1.0.0"
-edition = "2021"
+edition = "2024"
 description = "TheoDB's own PostgreSQL extension in Rust (pgrx) — theodb.embed (M17, ROADMAP-v2 / ADR 0006)"
 license = "Apache-2.0"
 
 [lib]
-crate-type = ["cdylib", "lib"]
-
-[[bin]]
-name = "pgrx_embed_theodb_rs"
-path = "./src/bin/pgrx_embed.rs"
+crate-type = ["cdylib"]
 
 [features]
 default = ["pg17"]
@@ -22,15 +18,21 @@ pg17 = ["pgrx/pg17", "pgrx-tests/pg17"]
 pg_test = []
 
 [dependencies]
-pgrx = "=0.16.1"
+pgrx = "=0.19.0"
 # Minimal audited HTTP client (ISC). `https-native` = OpenSSL/native-tls (NOT rustls) — deps-audit
 # measured the rustls path pulls vulnerable rustls-webpki (RUSTSEC-2026-0098/0099/0104); OpenSSL is
 # already in the builder stage. See plan ADR D2.
 minreq = { version = "2", features = ["https-native", "json-using-serde"] }
 serde_json = "1"
+# M98 — the single-planner columnar+AI pillar's vectorized executor (upstream apache/datafusion, NOT paradedb's
+# fork — Rule 9). Pinned to pg_search's proven datafusion-54/arrow-58 set; the coexistence with pgrx 0.19 is proven
+# by build (`cargo tree -i arrow` single major). default-features=false to keep the cdylib lean (parsimony).
+datafusion = { version = "54", default-features = false }
+arrow = { version = "58", default-features = false }
+tokio = { version = "1", features = ["rt"], default-features = false }
 
 [dev-dependencies]
-pgrx-tests = "=0.16.1"
+pgrx-tests = "=0.19.0"
 # FU-1: criterion drives the same-graph scan-allocation micro-bench (`benches/scan_hot_path.rs`). Dev-only →
 # never links into the released cdylib (parsimony rung 4). Pinned to pgvectorscale's version (same pgrx stack).
 criterion = "0.5.1"

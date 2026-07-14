@@ -16,7 +16,7 @@ use pgrx::callconv::{Arg, ArgAbi, BoxRet, FcInfo};
 use pgrx::datum::{Datum as DatumLt, FromDatum, IntoDatum, UnboxDatum};
 use pgrx::pg_sys::{Datum, Oid};
 use pgrx::pgrx_sql_entity_graph::metadata::{
-    ArgumentError, Returns, ReturnsError, SqlMapping, SqlTranslatable,
+    ArgumentError, ReturnsError, ReturnsRef, SqlMappingRef, SqlTranslatable, TypeOrigin,
 };
 use pgrx::prelude::*;
 use std::ffi::CString;
@@ -70,7 +70,7 @@ impl Vector {
         }
     }
 
-    unsafe fn from_datum_ptr(datum: Datum) -> Self {
+    unsafe fn from_datum_ptr(datum: Datum) -> Self { unsafe {
         let raw = pgrx::pg_sys::pg_detoast_datum_copy(datum.cast_mut_ptr());
         let q = NonNull::new(raw.cast::<VecHeader>()).unwrap();
         let dim = (&raw const (*q.as_ptr()).dim).read() as usize;
@@ -82,7 +82,7 @@ impl Vector {
             pg::err_input("vector: expected unused to be 0");
         }
         Vector(q)
-    }
+    }}
 
     fn as_slice(&self) -> &[f32] {
         unsafe {
@@ -136,13 +136,18 @@ unsafe impl UnboxDatum for Vector {
     }
 }
 
+// M98 — pgrx 0.18 One-Compile: `SqlTranslatable` is now compile-time consts (was method-based). `public.vector`
+// is a MANUAL mapping to an existing SQL type — it is created by our hand-written `extension_sql!` bootstrap
+// (`CREATE TYPE vector`, bare/unqualified = public), NOT by a `#[derive(PostgresType)]`. Per the v18 migration
+// guide, a manual mapping to an existing SQL type uses `TypeOrigin::External` so the emitted SQL is the bare
+// `ARGUMENT_SQL` literal (`vector`, matching the drop-in M70 contract), NOT the module-path-qualified
+// `theodb_rs.vector` that `ThisExtension` would emit. The SQL name stays `vector` (byte-identical, no REINDEX /
+// no user-SQL change — the m69 round-trip tests are the oracle).
 unsafe impl SqlTranslatable for Vector {
-    fn argument_sql() -> Result<SqlMapping, ArgumentError> {
-        Ok(SqlMapping::As(String::from("vector")))
-    }
-    fn return_sql() -> Result<Returns, ReturnsError> {
-        Ok(Returns::One(SqlMapping::As(String::from("vector"))))
-    }
+    const TYPE_IDENT: &'static str = pgrx::pgrx_resolved_type!(Vector);
+    const TYPE_ORIGIN: TypeOrigin = TypeOrigin::External;
+    const ARGUMENT_SQL: Result<SqlMappingRef, ArgumentError> = Ok(SqlMappingRef::literal("vector"));
+    const RETURN_SQL: Result<ReturnsRef, ReturnsError> = Ok(ReturnsRef::One(SqlMappingRef::literal("vector")));
 }
 
 unsafe impl<'fcx> ArgAbi<'fcx> for Vector {
@@ -374,6 +379,9 @@ fn theodb_vector_from_float8_array(arr: Vec<f64>) -> Vector {
 // ---- DDL: CREATE TYPE vector + operadores + casts ----
 // O shell type é o ÚNICO bootstrap (pgrx só permite um; o usa p/ as funcs I/O referenciarem o tipo).
 // M70: o schema `theodb` (antes do umbrella — flip ADR-D1) é criado no bloco do catálogo (autotune.rs).
+// REQUIRED (M98 review M2): `SqlTranslatable for Vector` is `TypeOrigin::External`, so pgrx does NOT emit a
+// `CREATE TYPE` — THIS bootstrap is the SOLE creator of the `vector` type. Removing it silently breaks the
+// extension (the type never gets created). The External⇄bootstrap coupling is load-bearing.
 extension_sql!(
     "CREATE TYPE vector;",
     name = "vector_shell",

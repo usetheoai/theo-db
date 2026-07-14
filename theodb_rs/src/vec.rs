@@ -137,7 +137,7 @@ mod simd_x86 {
     /// candidate vector byte-slice has exactly `dim` f32. `_mm256_loadu_ps` handles unaligned addresses, so reading
     /// `&[u8]` page bytes as `*const f32` is sound; only the LENGTH invariant is the caller's obligation.
     #[target_feature(enable = "avx2,fma")]
-    pub(super) unsafe fn l2_sq(query: &[f32], raw: &[u8]) -> f32 {
+    pub(super) unsafe fn l2_sq(query: &[f32], raw: &[u8]) -> f32 { unsafe {
         let dim = query.len();
         let qp = query.as_ptr();
         let rp = raw.as_ptr();
@@ -163,7 +163,7 @@ mod simd_x86 {
             i += 1;
         }
         s
-    }
+    }}
 
     /// M58: the cosine kernel — `(Σq·r, Σq², Σr²)` with AVX2+FMA over unaligned LE-f32 `raw`, three lane
     /// accumulators reduced once. Same SAFETY contract as [`l2_sq`] (caller ensures AVX2+FMA available AND
@@ -171,7 +171,7 @@ mod simd_x86 {
     /// real (OpenAI/Cohere) cosine/IP embeddings, which until now ran scalar (the M58 P2 gap). Approximate (SIMD FMA
     /// rounds differently than the scalar sum) — same parity-not-identity rule as L2's SIMD (operators stay scalar).
     #[target_feature(enable = "avx2,fma")]
-    pub(super) unsafe fn cosine_terms(query: &[f32], raw: &[u8]) -> (f32, f32, f32) {
+    pub(super) unsafe fn cosine_terms(query: &[f32], raw: &[u8]) -> (f32, f32, f32) { unsafe {
         let dim = query.len();
         let qp = query.as_ptr();
         let rp = raw.as_ptr();
@@ -202,11 +202,11 @@ mod simd_x86 {
             i += 1;
         }
         (dot, nq, nr)
-    }
+    }}
 
     /// M58: fused dot `Σq·r` with AVX2+FMA (the inner-product kernel). Same SAFETY contract as [`l2_sq`].
     #[target_feature(enable = "avx2,fma")]
-    pub(super) unsafe fn dot(query: &[f32], raw: &[u8]) -> f32 {
+    pub(super) unsafe fn dot(query: &[f32], raw: &[u8]) -> f32 { unsafe {
         let dim = query.len();
         let qp = query.as_ptr();
         let rp = raw.as_ptr();
@@ -228,7 +228,7 @@ mod simd_x86 {
             i += 1;
         }
         s
-    }
+    }}
 }
 
 /// L2 distance between two f32 slices, using the SAME AVX2+FMA kernel as the scan (M43). Reuses `l2_dist_from_bytes`
