@@ -12,7 +12,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Added
+## [0.84.1] - 2026-07-13
+
+### Fixed
+- Integrity: commit the M95 review HIGH-1 fix to `customscan.rs` (`term_B` uses `indextotalcost` for a single-predicate `IndexPath` — mirroring `cost_bitmap_tree_node`, no heap double-count — instead of `.total_cost`) + the `m95_multi_predicate_filter_correct` regression test. These were reviewed + tested green on the droplet (the M96/M97 277-test runs used them via the working tree) but the `fix(m95 review)` commit staged only the blueprint `.md`, so v0.82.0–v0.84.0 shipped without them; the released source now matches the reviewed/tested state (the page.rs HIGH-2 bounds guard was already committed). Plan-cost only — no user-visible behavior change (the node isn't auto-selected, R4) (M95)
 
 ## [0.84.0] - 2026-07-13
 

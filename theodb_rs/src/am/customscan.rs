@@ -353,13 +353,22 @@ unsafe fn vecfilter_honest_cost(
     vector_path: *mut pg_sys::Path,
     bitmap_path: *mut pg_sys::Path,
 ) -> Option<(pg_sys::Cost, pg_sys::Cost)> {
-    // term_B — the membership-production cost, read from the bitmap sub-plan (guard the null deref).
+    // term_B — the membership-PRODUCTION cost of the bitmap sub-plan (guard the null deref). Mirror
+    // `cost_bitmap_tree_node` (costsize.c:1113-1136, Rule 9), NOT a blanket `.total_cost` read (M95 review HIGH-1):
+    // for a plain `IndexPath` (the common single-predicate `cat=K` case) `.total_cost` INCLUDES the heap-tuple
+    // fetch run cost — the fetch we never perform — so use `indextotalcost` + the bitmap-manipulation charge
+    // instead; for `BitmapAndPath`/`BitmapOrPath` the node's own `.total_cost` is already the produce-only cost.
     let bpath = bitmap_path as *mut pg_sys::BitmapHeapPath;
     let bitmapqual = (*bpath).bitmapqual;
     if bitmapqual.is_null() {
         return None;
     }
-    let term_b = (*bitmapqual).total_cost;
+    let term_b = if (*bitmapqual).type_ == pg_sys::NodeTag::T_IndexPath {
+        let ip = bitmapqual as *mut pg_sys::IndexPath;
+        (*ip).indextotalcost + 0.1 * pg_sys::cpu_operator_cost * (*bitmapqual).rows
+    } else {
+        (*bitmapqual).total_cost // BitmapAnd/BitmapOr — already produce-only
+    };
 
     // Selectivity `s` = matching-tuple fraction = bitmap rows / rel tuples (the planner's own estimates).
     let rel_tuples = (*rel).tuples;
@@ -738,6 +747,38 @@ mod tests {
                 .unwrap().filter_map(|r| r.get::<String>(1).unwrap()).collect::<Vec<_>>().join("\n")
         });
         assert!(!plan.contains("theodb_vecfilter"), "loose selectivity ⇒ honest cost must NOT pick the node (plan:\n{plan})");
+    }
+
+    /// M95 review HIGH-1 regression — a multi-predicate filter (two indexed columns) whose `bitmapqual` the planner
+    /// may build as a `BitmapAndPath` exercises the term_B else-branch; with the honest cost active (force off) the
+    /// query must PLAN and RUN without error (the term_B nodeTag branch + the fail-safe meta read are on the
+    /// planning path of every filtered vector query, chosen or not). Forcing the node then proves correctness.
+    #[pgrx::pg_test]
+    fn m95_multi_predicate_filter_correct() {
+        Spi::run("CREATE TABLE cs95m (id int PRIMARY KEY, cat int, grp int, e vector(4))").unwrap();
+        Spi::run("INSERT INTO cs95m SELECT g, g%100, g%50, ('['||g||','||(g*2)||',0,0]')::vector FROM generate_series(1,1000) g").unwrap();
+        Spi::run("CREATE INDEX cs95m_e ON cs95m USING theodb_ivfflat (e) WITH (lists=8, pq_subspaces=2, aq_threshold=2000, separate_storage=1)").unwrap();
+        Spi::run("CREATE INDEX cs95m_cat ON cs95m (cat)").unwrap();
+        Spi::run("CREATE INDEX cs95m_grp ON cs95m (grp)").unwrap();
+        Spi::run("ANALYZE cs95m").unwrap();
+        // Honest cost active (force OFF): planning executes vecfilter_honest_cost incl. the term_B branch — must not error.
+        let _plan: String = Spi::connect(|c| {
+            c.select("SET theodb.enable_vecfilter=on; SET theodb.vecfilter_force=off; SET enable_seqscan=off; SET theodb_ivfflat.probes=8", None, &[]).ok();
+            c.select("EXPLAIN (COSTS OFF) SELECT id FROM cs95m WHERE cat=7 AND grp=7 ORDER BY e <-> '[0,0,0,0]'::vector LIMIT 5", None, &[])
+                .unwrap().filter_map(|r| r.get::<String>(1).unwrap()).collect::<Vec<_>>().join("\n")
+        });
+        // Forced node on the multi-predicate filter: result == exact seqscan-filtered.
+        let want: Vec<i32> = Spi::connect(|c| {
+            c.select("SET theodb.enable_vecfilter=off; SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on", None, &[]).ok();
+            c.select("SELECT id FROM cs95m WHERE cat=7 AND grp=7 ORDER BY e <-> '[0,0,0,0]'::vector LIMIT 5", None, &[])
+                .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
+        });
+        let got: Vec<i32> = Spi::connect(|c| {
+            c.select("SET theodb.enable_vecfilter=on; SET theodb.vecfilter_force=on; SET enable_seqscan=off; SET enable_indexscan=on; SET enable_bitmapscan=on; SET theodb_ivfflat.probes=8", None, &[]).ok();
+            c.select("SELECT id FROM cs95m WHERE cat=7 AND grp=7 ORDER BY e <-> '[0,0,0,0]'::vector LIMIT 5", None, &[])
+                .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
+        });
+        assert_eq!(got, want, "multi-predicate forced node must match exact seqscan (got {got:?} want {want:?})");
     }
 
     // M95 auto-selection at TIGHT selectivity is measured on SIFT1M (T3.1 sweep, `docs/benchmarks/m95-cost-model`),
