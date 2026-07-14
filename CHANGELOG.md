@@ -12,6 +12,9 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **Correction (honesty, Rule 3 + D1 license gate):** the M98 roadmap amendment (v0.85.0) mislabeled M99's columnar TAM as "Hydra-model, **Apache-2.0**". Hydra's `columnar/` subtree is **AGPLv3** (`hydra/README.md:83`), barred by D1. M99 is corrected to **own-code** (study the AGPL design as literature only, Rule 9 — copy no source, link no library; same posture as the vector pillar vs AGPL VectorChord). The only Apache-2.0 native-columnar reference is `cstore_fdw` (an FDW, deprecated); `arrow-rs` (Apache-2.0) codecs are the permissive compression reuse. Recorded in `docs/adr/0042-m99-own-code-columnar-tam.md` (supersedes ADR-0041's DEFER *for the own-code path* — the option 0041 never evaluated). ROADMAP.md M99 corrected. (M99)
+
 ## [0.85.0] - 2026-07-14
 
 ### Changed
