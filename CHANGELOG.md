@@ -12,6 +12,9 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Roadmap amended: single-planner columnar+AI pillar (AlloyDB-class HTAP) — 6 milestones M98-M103 from the `single-planner-columnar-ai` discovery (blueprint SHIPPABLE 98.8, GO-CONDITIONAL): M98 pgrx-0.19-upgrade + DataFusion/Arrow coexistence spike (the GATE), M99 append-only columnar TAM (Hydra-model, Apache-2.0), M100 DataFusion CustomScan vectorized executor (the single-planner seam), M101 heap-authoritative Arrow columnar cache (MVCC-correct HTAP), M102 AI operators as pushable plan nodes (LOTUS/Palimpzest), M103 vector+columnar unified substrate (Lance-inspired). Honest ceiling locked in every DoD: DuckDB/Photon-class 15-30× on columnar-resident data — capability-match AlloyDB, never superiority over its in-core engine (M73/M97). Supersedes ADR-0041's DEFER + corrects its Hydra-license error (Apache-2.0, not AGPL) (M98, M99, M100, M101, M102, M103)
+
 ## [0.84.1] - 2026-07-13
 
 ### Fixed
