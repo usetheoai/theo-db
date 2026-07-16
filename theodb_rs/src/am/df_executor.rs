@@ -150,9 +150,21 @@ pub(super) unsafe fn run_columnar_aggs(
     let rt = tokio::runtime::Builder::new_current_thread()
         .build()
         .map_err(|e| format!("df_executor: tokio runtime: {e}"))?;
+    // Safety discipline (M100 D3): a MemoryPool bounded to `work_mem` so DataFusion returns `ResourcesExhausted`
+    // (a typed error → clean SQL error) instead of OOM-panicking; and `target_partitions = 1` so no second thread
+    // ever touches the PG pointers behind the Arrow batch (the `unsafe impl Send` pin — no multi-partition parallel
+    // exec until proven safe).
+    let work_mem_bytes = (pg_sys::work_mem.max(64) as usize) * 1024;
     let held = HeldInterrupts::hold();
     let out: Result<Vec<RecordBatch>, DataFusionError> = rt.block_on(async move {
-        let ctx = SessionContext::new();
+        use datafusion::execution::memory_pool::GreedyMemoryPool;
+        use datafusion::execution::runtime_env::RuntimeEnvBuilder;
+        use datafusion::prelude::SessionConfig;
+        let runtime = RuntimeEnvBuilder::new()
+            .with_memory_pool(std::sync::Arc::new(GreedyMemoryPool::new(work_mem_bytes)))
+            .build_arc()?;
+        let config = SessionConfig::new().with_target_partitions(1);
+        let ctx = SessionContext::new_with_config_rt(config, runtime);
         ctx.read_batch(batch)?.aggregate(vec![], exprs)?.collect().await
     });
     drop(held);
