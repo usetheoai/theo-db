@@ -200,6 +200,15 @@ mod theodb_rs {
         idx.part_id
     }
 
+    /// `theodb_rs._vindex_decode_bytes` — decode the named columns of a `theodb_columnar` table and return the
+    /// total decoded byte count. Isolates the column-DECODE cost from the vector rerank so the benchmark can
+    /// measure the actual pruning win (decode of the index columns vs all columns) without the L2 confound.
+    #[pg_extern]
+    fn _vindex_decode_bytes(idx: pg_sys::Oid, cols: pgrx::Array<'_, &str>) -> i64 {
+        let names: Vec<String> = cols.iter().flatten().map(|s| s.to_string()).collect();
+        unsafe { super::decode_bytes_impl(idx, &names) }.unwrap_or_else(|e| crate::pg::err_input(&e))
+    }
+
     /// `theodb_rs._vindex_knn_columnar` — the co-resident filtered top-k over a `theodb_columnar` table. Reads
     /// ONLY the index columns (`tid`, `part_id`, `label`, `vec`) via a COLUMN-PRUNED decode (skips the analytical
     /// columns), reconstructs the index, and runs the scalar-prefiltered vector search at full probe (the GATE
@@ -264,6 +273,30 @@ unsafe fn knn_columnar_impl(
     out
 }
 
+/// Decode only the named columns and return the total decoded byte count (isolates the column-decode cost from the
+/// vector rerank — the benchmark control that quantifies the pruning win, decode-of-index-cols vs decode-of-all).
+unsafe fn decode_bytes_impl(idx: pg_sys::Oid, names: &[String]) -> Result<i64, String> {
+    let rel = pg_sys::relation_open(idx, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+    let out = (|| {
+        let mut proj = Vec::with_capacity(names.len());
+        for name in names {
+            proj.push(
+                crate::am::columnar::column_index(rel, name)
+                    .ok_or_else(|| format!("vindex: column '{name}' not found"))?,
+            );
+        }
+        let cols = crate::am::columnar::decode_columns(rel, Some(&proj))?;
+        let total: i64 = cols
+            .iter()
+            .flat_map(|(_, _, vals)| vals.iter())
+            .map(|v| v.as_ref().map(|b| b.len() as i64).unwrap_or(0))
+            .sum();
+        Ok(total)
+    })();
+    pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+    out
+}
+
 fn v8(b: &[u8]) -> Result<[u8; 8], String> {
     b.get(..8).and_then(|s| s.try_into().ok()).ok_or_else(|| "vindex: int8 column < 8 bytes".to_string())
 }
@@ -285,17 +318,24 @@ CREATE FUNCTION theodb.vindex_knn_columnar(idx regclass, query float4[], k int, 
 RETURNS TABLE(tid bigint, dist float8) LANGUAGE sql VOLATILE
 AS $$ SELECT * FROM theodb_rs._vindex_knn_columnar(idx::oid, query, k, probes, label) $$;
 
+CREATE FUNCTION theodb.vindex_decode_bytes(idx regclass, cols text[]) RETURNS bigint LANGUAGE sql VOLATILE
+AS $$ SELECT theodb_rs._vindex_decode_bytes(idx::oid, cols) $$;
+
 COMMENT ON FUNCTION theodb.vindex_knn_columnar(regclass, float4[], int, int, int) IS
   'M103 — co-resident filtered vector top-k over a theodb_columnar index: reads ONLY the tid/part_id/label/vec '
-  'columns (column pruning), scalar prefilter + IVF + exact rerank, byte-identical to the exact filtered search.';
+  'columns (column pruning), scalar prefilter + exact rerank, byte-identical to the exact filtered search. The '
+  'probes argument is RESERVED — the columnar path currently runs full-probe (the byte-identity GATE); reduced-'
+  'probe over columnar-stored centroids is a documented follow-up.';
 
 REVOKE ALL ON FUNCTION theodb.vindex_knn_columnar(regclass, float4[], int, int, int) FROM PUBLIC;
 REVOKE ALL ON FUNCTION theodb.vindex_assign(bytea[], int) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb.vindex_decode_bytes(regclass, text[]) FROM PUBLIC;
 REVOKE ALL ON FUNCTION theodb_rs._vindex_knn_columnar(oid, float4[], int, int, int) FROM PUBLIC;
 REVOKE ALL ON FUNCTION theodb_rs._vindex_assign(bytea[], int) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb_rs._vindex_decode_bytes(oid, text[]) FROM PUBLIC;
 "#,
     name = "theodb_vindex",
-    requires = [_f32vec_to_bytea, _vindex_assign, _vindex_knn_columnar, "theodb_schema_bootstrap"],
+    requires = [_f32vec_to_bytea, _vindex_assign, _vindex_knn_columnar, _vindex_decode_bytes, "theodb_schema_bootstrap"],
 );
 
 #[cfg(any(test, feature = "pg_test"))]

@@ -41,11 +41,15 @@ test (larger harness; the exact-brute-force oracle is a STRONGER statement — t
 another approximate path). The `part_id` column carries the real IVF partition, so reduced-probe is a real IVF
 approximation (tested for ordering); the GATE claim is full-probe byte-identity.
 
-### D3 — Column pruning is the measured cost win; latency invariant to analytical width
+### D3 — Column pruning is the measured cost win (isolated from the L2 confound)
 
-`vindex_knn_columnar` decodes only `tid`/`part_id`/`label`/`vec`; the analytical columns are never decoded.
-**Measured:** knn latency 79.43 ms (narrow, 1 payload col) vs 79.27 ms (wide, 16 payload cols) — ratio **0.998** —
-while the wide index is **4.67× larger on disk**. The analytical width does not touch the vector scan.
+`vindex_knn_columnar` decodes only `tid`/`part_id`/`label`/`vec`; the analytical columns are never decoded. The
+end-to-end knn is L2-dominated (full-probe rerank over all N rows, identical regardless of payload width), so it
+cannot quantify the win — it only shows pruning adds no width-dependent cost (knn ratio 1.014, within a stddev).
+**The isolated control (`theodb.vindex_decode_bytes`) quantifies it:** decoding only the 4 index columns
+(49.6 ms ± 0.3) vs ALL columns (219.8 ms ± 1.8) on the wide index — **pruning saves 77.4 % of the decode time**,
+well above the noise floor (council-benchmark correction). On-disk size (4.67× wide) is stated separately — on-disk
+size is not decode cost. The VALUE at out-of-RAM scale is the honest projection (not measured; M57/M88 discipline).
 
 ### D4 — Honest ceiling: cost/scale/composability only; recall equal-by-construction, NO QPS-vs-ScaNN
 

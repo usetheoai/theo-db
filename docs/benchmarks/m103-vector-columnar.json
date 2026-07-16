@@ -1,14 +1,20 @@
 {
   "milestone": "M103",
-  "n": 50000, "dim": 8, "wide_analytical_cols": 16, "runs": 5,
-  "column_pruning": {
-    "knn_ms_narrow_payload": 79.43,
-    "knn_ms_wide_payload": 79.27,
-    "wide_over_narrow_ratio": 0.998,
-    "on_disk_bytes_wide": 1490944,
-    "on_disk_bytes_narrow": 319488,
-    "note": "the co-resident filtered top-k decodes ONLY the 4 index columns; a ratio ~1.0 proves the analytical columns (whose on-disk size grows with width) are NOT decoded — column pruning. The wide index is much larger on disk yet the knn latency is ~unchanged."
+  "n": 50000, "dim": 8, "wide_analytical_cols": 16, "runs": 5, "warmup_discarded": 1,
+  "isolated_decode_cost_wide_index": {
+    "decode_index_cols_ms_mean": 49.57, "decode_index_cols_ms_stddev": 0.29, "decode_index_cols_ms_min": 49.17,
+    "decode_all_cols_ms_mean": 219.81, "decode_all_cols_ms_stddev": 1.78, "decode_all_cols_ms_min": 218.02,
+    "decode_bytes_index_cols": 2400000, "decode_bytes_all_cols": 8800000,
+    "pruning_saving_pct_of_decode_time": 77.4,
+    "note": "THE control that quantifies the win, free of the full-probe L2 confound: decoding only the 4 index columns vs ALL columns on the WIDE index (same rows, no rerank). This isolates the pruning win as a real, above-floor magnitude (stddev reported) — the decode-time saved by NOT touching the analytical columns."
   },
-  "composed_filter_knn_plus_aggregation_ms": 225.69,
-  "honest_ceiling": "Recall is EQUAL by construction (proven by the byte-identity pg_test m103_full_probe_byte_identical_to_exact_filtered) — NOT a claim. Cost/scale/composability win only: column-pruned filtered vector search + analytical projection in one scan. NO QPS-vs-ScaNN claim (the M73/M74 paradigm ceiling is untouched by co-residence). Out-of-RAM at billion-scale is the honest projection, not measured here."
+  "knn_latency_invariance": {
+    "knn_ms_narrow_mean": 77.91, "knn_ms_narrow_stddev": 0.42,
+    "knn_ms_wide_mean": 78.58, "knn_ms_wide_stddev": 0.65,
+    "wide_over_narrow_ratio": 1.009,
+    "note": "SECONDARY: the end-to-end knn latency is dominated by the full-probe L2 rerank over all N rows (identical narrow vs wide), so a ratio ~1.0 shows pruning ADDS NO width-dependent cost — it does NOT quantify the win (the isolated decode control above does). On-disk size (below) is NOT decode cost."
+  },
+  "on_disk_bytes_wide": 1490944, "on_disk_bytes_narrow": 319488,
+  "composed_filter_knn_plus_aggregation_ms_mean": 225.41, "composed_ms_stddev": 1.02,
+  "honest_ceiling": "Recall is EQUAL by construction (proven by the byte-identity pg_test m103_full_probe_byte_identical_to_exact_filtered) — NOT a claim. Cost/scale/composability only. Column pruning is ARCHITECTURALLY GUARANTEED (code + pg_test) AND measured: the isolated decode control shows pruning saves 77.4% of decode time (index-cols vs all-cols on the wide index, above the noise floor). The end-to-end knn is L2-dominated so pruning shows there as no-added-cost, not as the win. Out-of-RAM at billion-scale (where pruning avoids reading whole segments) is the honest projection, measured only in-RAM here (M57/M88 discipline). NO QPS-vs-ScaNN claim (the M73/M74 paradigm ceiling is untouched by co-residence)."
 }
