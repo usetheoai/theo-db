@@ -82,11 +82,27 @@ struct StripeMeta {
     header_block: u32,
 }
 
+/// Run `f` with a guaranteed active snapshot. SPI needs one, but a flush point (`finish_bulk_insert` /
+/// pre-commit `XactCallback`) runs where the executor has not pushed a snapshot → SPI raises "cannot execute SQL
+/// without an outer snapshot or portal". During a scan an active snapshot already exists (the query's), so this is a
+/// no-op there and the SPI SELECT correctly reads under that snapshot (respecting the xact's isolation level).
+unsafe fn with_active_snapshot<T>(f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    let pushed = !pg_sys::ActiveSnapshotSet();
+    if pushed {
+        pg_sys::PushActiveSnapshot(pg_sys::GetTransactionSnapshot());
+    }
+    let r = f();
+    if pushed {
+        pg_sys::PopActiveSnapshot();
+    }
+    r
+}
+
 /// Read the stripes VISIBLE to the current snapshot for `rel_oid`, from the heap catalog. SPI runs under the active
 /// snapshot, so an uncommitted/aborted/committed-after stripe is filtered out by MVCC for free — no visibility code
 /// here. Ordered by `first_row_number` for a deterministic, heap-matching scan order.
 unsafe fn read_visible_stripes(rel_oid: pg_sys::Oid) -> Result<Vec<StripeMeta>, String> {
-    Spi::connect(|c| {
+    with_active_snapshot(|| Spi::connect(|c| {
         let t = c
             .select(
                 "SELECT header_block FROM columnar.stripe WHERE relid = $1 ORDER BY first_row_number, stripe_id",
@@ -103,7 +119,7 @@ unsafe fn read_visible_stripes(rel_oid: pg_sys::Oid) -> Result<Vec<StripeMeta>, 
             out.push(StripeMeta { header_block: hb as u32 });
         }
         Ok(out)
-    })
+    }))
 }
 
 /// Insert the visibility-granting catalog row for a just-written stripe. Runs inside the current xact via SPI, so the
@@ -119,19 +135,21 @@ unsafe fn insert_stripe_row(
     first_row_number: i64,
     ncols: i16,
 ) -> Result<(), String> {
-    Spi::run_with_args(
-        "INSERT INTO columnar.stripe (relid, stripe_id, header_block, row_count, first_row_number, ncols) \
-         VALUES ($1, $2, $3, $4, $5, $6)",
-        &[
-            rel_oid.into(),
-            stripe_id.into(),
-            (header_block as i32).into(),
-            (row_count as i32).into(),
-            first_row_number.into(),
-            ncols.into(),
-        ],
-    )
-    .map_err(|e| format!("theodb_columnar: stripe catalog insert failed: {e:?}"))
+    with_active_snapshot(|| {
+        Spi::run_with_args(
+            "INSERT INTO columnar.stripe (relid, stripe_id, header_block, row_count, first_row_number, ncols) \
+             VALUES ($1, $2, $3, $4, $5, $6)",
+            &[
+                rel_oid.into(),
+                stripe_id.into(),
+                (header_block as i32).into(),
+                (row_count as i32).into(),
+                first_row_number.into(),
+                ncols.into(),
+            ],
+        )
+        .map_err(|e| format!("theodb_columnar: stripe catalog insert failed: {e:?}"))
+    })
 }
 
 /// Pre-commit flush: a plain `INSERT ... VALUES` never triggers `finish_bulk_insert`, so its accumulated rows would

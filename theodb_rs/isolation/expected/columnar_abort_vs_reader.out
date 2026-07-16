@@ -1,0 +1,18 @@
+Parsed test spec with 2 sessions
+
+starting permutation: wbegin wins rmid wabort rafter
+step wbegin: BEGIN;
+step wins: INSERT INTO cw SELECT g FROM generate_series(2, 6) g;
+step rmid: SELECT count(*) FROM cw;
+count
+-----
+    1
+(1 row)
+
+step wabort: ROLLBACK;
+step rafter: SELECT count(*) FROM cw;
+count
+-----
+    1
+(1 row)
+

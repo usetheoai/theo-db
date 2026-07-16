@@ -51,3 +51,7 @@ benchmarks/benchmarks/
 
 # Top-level reference clones (3rd-party, reproducible via clone commands — not project source)
 knowledge-base/references/*/
+
+# M99 isolation harness scratch output (expected/ is committed; results/ is generated)
+theodb_rs/isolation/results/
+theodb_rs/isolation/tmp_check/
