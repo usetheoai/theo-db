@@ -576,7 +576,7 @@ fn in_subtxn<T>(f: impl FnOnce() -> T) -> Option<T> {
 }
 
 #[pg_guard]
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
     use pgrx::bgworkers::*;
     BackgroundWorker::attach_signal_handlers(SignalWakeFlags::SIGHUP | SignalWakeFlags::SIGTERM);
