@@ -24,6 +24,22 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.92.0] - 2026-07-16
+
+### Added
+- Durability crash-recovery proofs for the AM (closes the ADR-0014 "Prova pendente"): `theodb_rs/isolation/crash_fold.sh` induces **3 real backend crashes (SIGABRT)** across all VACUUM-fold phases (before-pivot / post-pivot / mid-reclaim) + WAL replay and asserts the #47 guarantee — crash before the meta-pivot ⇒ old generation correct; crash after ⇒ fail-loud REINDEX; **never a silently-wrong result**. `theodb_rs/isolation/crash_unlogged.sh` proves the #46 fix via standby promotion (a RED/GREEN toggle shows `wal_log_init_fork` is load-bearing: without it the promoted UNLOGGED index is broken; with it, INSERT + scan work). Wired as `make -C theodb_rs/isolation check-crash`. Issues #46/#47 verified & closed.
+
+### Changed
+- Forward-compat with newer Rust (edition 2024, rustc ≥ 1.85): `#[no_mangle]` → `#[unsafe(no_mangle)]` on the vectorizer bgworker entrypoint (`theodb_rs/src/vectorizer.rs`) so the extension builds on current stable toolchains.
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
 ## [0.91.0] - 2026-07-16
 
 ### Added

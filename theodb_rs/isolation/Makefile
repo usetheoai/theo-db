@@ -6,4 +6,12 @@
 check-isolation:
 	bash run.sh
 
-.PHONY: check-isolation
+# Durability crash-recovery proofs (issues #46 / #47 — the ADR-0014 "Prova pendente"). Each spins a real cluster,
+# induces a REAL crash (SIGABRT via the M48 test-crash GUCs / standby promotion), and asserts consistency after
+# WAL replay. Run on the build droplet after `cargo pgrx install`.
+check-crash:
+	bash crash.sh          # #M99 — committed columnar stripe survives crash + WAL replay
+	bash crash_fold.sh     # #47  — VACUUM meta-pivot crash-safe across all fold phases (never silently wrong)
+	bash crash_unlogged.sh # #46  — UNLOGGED index survives standby promotion (INIT fork WAL-logged)
+
+.PHONY: check-isolation check-crash

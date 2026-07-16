@@ -70,8 +70,16 @@ crash-safe = M55** (`ROADMAP § M55` — "fold incremental vs in-place", pré-re
   estabiliza mas não encolhe ao mínimo (alternância low/high ⇒ ~2 gerações + pending).
 - **Formato:** meta structured do IVF migrada para **v3** (campo `gen_base`); v2 continua legível (gen_base
   implícito = 1) e migra no primeiro fold. HNSW não muda de formato (elem_first/nbr_first já são pointers).
-- **Prova pendente (dependência T2.2 → T2.3):** o teste que exercita o crash **no meio do reclaim** e prova
-  o fail-loud é o T2.3 (crash-injection GUC). Até lá, "reclaim crash-safe fail-loud" é DEVIDO, não fechado.
+- **Prova pendente — FECHADA (2026-07-16).** O teste end-to-end de crash-recovery real (SIGABRT via os GUCs de
+  crash-injection + WAL replay num cluster de verdade) foi construído e roda: `theodb_rs/isolation/crash_fold.sh`
+  (`make -C theodb_rs/isolation check-crash`). Exercita os **3** pontos de crash do fold — after-body-page (antes do
+  pivot), post-pivot, mid-reclaim (forçado via um fold que encolhe → reusa a região baixa) — com **3 SIGABRT reais
+  confirmados no log do Postgres** (guard não-vacuoso: exige ≥ 3 crashes, senão o fold não disparou). Veredito
+  MEDIDO: crash ANTES do pivot ⇒ geração antiga correta (índice pós-crash == rebuild limpo); crash APÓS o pivot /
+  mid-reclaim ⇒ **fail-loud REINDEX típado, NUNCA silenciosamente errado** (o pior caso do #47). O #46 (INIT fork
+  UNLOGGED) tem prova irmã `crash_unlogged.sh` — promoção de standby, toggle RED/GREEN provando que `wal_log_init_fork`
+  é load-bearing (sem o fix: "aminsert before build" no nó promovido; com o fix: INSERT+scan funcionam). Issues
+  #46/#47 fechados com esta evidência.
 
 ## Notas de implementação descobertas em /implement (T2.3)
 
@@ -88,6 +96,12 @@ crash-safe = M55** (`ROADMAP § M55` — "fold incremental vs in-place", pré-re
 - **Garantia real do #47 (redação honesta):** o núcleo — **corrupção silenciosa (scan pontuando bytes stale
   como vetores)** — está ELIMINADO em todos os pontos de crash. A garantia é "consistente **OU** fail-loud com
   REINDEX, nunca silenciosamente errado" — MAIS FRACA que "sempre utilizável sem REINDEX", que é o M55.
+- **Torn-pivot-page (bloco 0) — segurança argumentada, não crash-injetada (council F2, 2026-07-16).** Um crash
+  *durante a escrita do próprio registro WAL do pivot* (página 0 rasgada no redo) NÃO tem ponto de injeção no
+  `crash_fold.sh`; a segurança vem do flag `GENERIC_XLOG_FULL_IMAGE` no `pivot_meta_page` (`page.rs`) — o registro
+  carrega a imagem completa do bloco 0, torn-page-proof no redo — combinado com `full_page_writes=on` (que o harness
+  seta). Herdado do precedente nbtree (`nbtxlog.c`), não de um crash mid-record independente. Os 3 pontos injetados
+  (after-body-page / post-pivot / mid-reclaim) cercam a fronteira de atomicidade onde o GenericXLog realmente falha.
 
 ## Rules consumidas
 
