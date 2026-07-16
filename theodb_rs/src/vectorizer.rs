@@ -57,6 +57,14 @@ CREATE TABLE IF NOT EXISTS theodb.vectorizer_queue (
 CREATE INDEX IF NOT EXISTS vectorizer_queue_claim_idx
     ON theodb.vectorizer_queue (state, enqueued_at)
     WHERE state IN ('pending', 'processing');
+
+-- M104 producer backpressure via COALESCING: at most ONE pending job per (vectorizer_id, source_pk). A bulk
+-- backfill / repeated UPDATE that re-enqueues the same row is de-duplicated (ON CONFLICT DO NOTHING on the
+-- enqueue), so the pending queue depth is bounded by the DISTINCT pending work set — the single worker cannot be
+-- flooded past the number of distinct rows that actually changed (the audit's producer-faster-than-consumer gap).
+CREATE UNIQUE INDEX IF NOT EXISTS vectorizer_queue_pending_uniq
+    ON theodb.vectorizer_queue (vectorizer_id, source_pk)
+    WHERE state = 'pending';
 "#,
     name = "theodb_vectorizer_schema",
     requires = ["theodb_schema_bootstrap"], // M70: schema theodb criado pelo theodb_rs (flip ADR-D1)
@@ -77,11 +85,13 @@ DECLARE
 BEGIN
     IF TG_OP = 'DELETE' THEN
         INSERT INTO theodb.vectorizer_queue (vectorizer_id, source_pk, op)
-        VALUES (vid, to_jsonb(OLD) ->> pkcol, 'delete');
+        VALUES (vid, to_jsonb(OLD) ->> pkcol, 'delete')
+        ON CONFLICT (vectorizer_id, source_pk) WHERE state = 'pending' DO NOTHING; -- coalesce: one pending/PK
         RETURN OLD;
     END IF;
     INSERT INTO theodb.vectorizer_queue (vectorizer_id, source_pk, op)
-    VALUES (vid, to_jsonb(NEW) ->> pkcol, 'upsert');
+    VALUES (vid, to_jsonb(NEW) ->> pkcol, 'upsert')
+    ON CONFLICT (vectorizer_id, source_pk) WHERE state = 'pending' DO NOTHING; -- coalesce: one pending/PK
     RETURN NEW;
 END;
 $fn$;
@@ -1050,5 +1060,38 @@ mod tests {
         assert_eq!(purged, 7, "purge removed all but the most recent 3");
         let after: i64 = Spi::get_one("SELECT count(*) FROM theodb.vectorizer_queue WHERE state='failed'").unwrap().unwrap();
         assert_eq!(after, 3, "dead-letter bounded to the retained cap");
+    }
+
+    // M104 producer backpressure: the enqueue trigger COALESCES — repeated writes to the SAME source row
+    // produce at most ONE pending job (bounded queue depth), so a hot row cannot flood the single worker.
+    #[pg_test]
+    fn m104_enqueue_coalesces_repeated_writes_to_one_pending() {
+        Spi::run("CREATE TABLE csrc(id int PRIMARY KEY, body text)").unwrap();
+        Spi::run("CREATE TABLE cdst(id int PRIMARY KEY, emb text)").unwrap();
+        let vid: i32 = Spi::get_one(
+            "SELECT theodb.create_vectorizer('csrc','id','body','cdst','emb','m',3)",
+        )
+        .unwrap()
+        .unwrap();
+        // One INSERT + three UPDATEs to the SAME row: naive enqueue would create 4 pending jobs.
+        Spi::run("INSERT INTO csrc VALUES (1,'a')").unwrap();
+        Spi::run("UPDATE csrc SET body='b' WHERE id=1").unwrap();
+        Spi::run("UPDATE csrc SET body='c' WHERE id=1").unwrap();
+        Spi::run("UPDATE csrc SET body='d' WHERE id=1").unwrap();
+        let pending: i64 = Spi::get_one(&format!(
+            "SELECT count(*) FROM theodb.vectorizer_queue WHERE vectorizer_id={vid} AND source_pk='1' AND state='pending'"
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(pending, 1, "4 writes to the same row coalesce into a single pending job (backpressure)");
+
+        // A DISTINCT row still enqueues independently — coalescing is per-(vectorizer,pk), not global.
+        Spi::run("INSERT INTO csrc VALUES (2,'x')").unwrap();
+        let total: i64 = Spi::get_one(&format!(
+            "SELECT count(*) FROM theodb.vectorizer_queue WHERE vectorizer_id={vid} AND state='pending'"
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(total, 2, "distinct rows are not coalesced together");
     }
 }
