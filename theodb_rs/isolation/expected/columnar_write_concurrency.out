@@ -1,0 +1,15 @@
+Parsed test spec with 3 sessions
+
+starting permutation: s1b s2b s1i s2i s1c s2c total
+step s1b: BEGIN;
+step s2b: BEGIN;
+step s1i: INSERT INTO cw SELECT g, 1 FROM generate_series(1, 5) g;
+step s2i: INSERT INTO cw SELECT g, 2 FROM generate_series(1, 5) g;
+step s1c: COMMIT;
+step s2c: COMMIT;
+step total: SELECT count(*) AS n, count(DISTINCT (a, sess)) AS distinct_pairs FROM cw;
+ n|distinct_pairs
+--+--------------
+10|            10
+(1 row)
+

@@ -1,0 +1,26 @@
+Parsed test spec with 2 sessions
+
+starting permutation: rbegin rc1 wbegin wins wcommit rc2 rcommit rc3
+step rbegin: BEGIN ISOLATION LEVEL REPEATABLE READ;
+step rc1: SELECT count(*) FROM cw;
+count
+-----
+    1
+(1 row)
+
+step wbegin: BEGIN;
+step wins: INSERT INTO cw VALUES (2);
+step wcommit: COMMIT;
+step rc2: SELECT count(*) FROM cw;
+count
+-----
+    1
+(1 row)
+
+step rcommit: COMMIT;
+step rc3: SELECT count(*) FROM cw;
+count
+-----
+    2
+(1 row)
+
