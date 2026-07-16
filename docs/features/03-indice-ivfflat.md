@@ -28,20 +28,27 @@ Instala a extensão `pgvector`, necessária para criar índices `ivfflat` e exec
 
 ---
 
-# 2. Criar índice IVFFlat básico
+# 2. Criar índice IVFFlat básico (AM próprio `theodb_ivfflat`)
 
 ```sql
 CREATE INDEX products_ivfflat_idx
 ON products
-USING ivfflat (
-    description_embedding vector_cosine_ops
+USING theodb_ivfflat (
+    description_embedding theodb_ivfflat_cosine_ops
 )
 WITH (
     lists = 100
 );
 ```
 
-Cria um índice `IVFFlat` para busca aproximada de vizinhos mais próximos.
+Cria um índice `IVFFlat` para busca aproximada de vizinhos mais próximos usando o
+access method **próprio** do TheoDB (`theodb_ivfflat`). Opclass default é
+`theodb_ivfflat_l2_ops`; use `theodb_ivfflat_cosine_ops` / `theodb_ivfflat_ip_ops`
+para cosseno / produto interno.
+
+> **Coexistência:** o TheoDB também expõe o IVFFlat do pgvector (`USING ivfflat (…
+> vector_cosine_ops)`). Essa superfície mira o AM do pgvector, **não** o AM próprio
+> `theodb_ivfflat`.
 
 ---
 
@@ -80,15 +87,15 @@ Coluna que armazena embeddings no tipo `vector`.
 ```sql
 CREATE INDEX products_ivfflat_l2
 ON products
-USING ivfflat (
-    description_embedding vector_l2_ops
+USING theodb_ivfflat (
+    description_embedding theodb_ivfflat_l2_ops
 )
 WITH (
     lists = 100
 );
 ```
 
-Cria índice usando distância Euclidiana.
+Cria índice usando distância Euclidiana (opclass default).
 
 ---
 
@@ -97,8 +104,8 @@ Cria índice usando distância Euclidiana.
 ```sql
 CREATE INDEX products_ivfflat_ip
 ON products
-USING ivfflat (
-    description_embedding vector_ip_ops
+USING theodb_ivfflat (
+    description_embedding theodb_ivfflat_ip_ops
 )
 WITH (
     lists = 100
@@ -114,8 +121,8 @@ Cria índice usando produto interno.
 ```sql
 CREATE INDEX products_ivfflat_cosine
 ON products
-USING ivfflat (
-    description_embedding vector_cosine_ops
+USING theodb_ivfflat (
+    description_embedding theodb_ivfflat_cosine_ops
 )
 WITH (
     lists = 100
@@ -145,9 +152,9 @@ Valores maiores tendem a melhorar recall, mas podem aumentar custo de busca e cr
 ```sql
 CREATE INDEX products_ivfflat_real_array
 ON products
-USING ivfflat (
+USING theodb_ivfflat (
     CAST(description_embedding AS vector(768))
-    vector_cosine_ops
+    theodb_ivfflat_cosine_ops
 )
 WITH (
     lists = 100
@@ -283,10 +290,7 @@ Retorna os 20 vetores mais semelhantes.
 SELECT *
 FROM products
 ORDER BY description_embedding
-<=> embedding(
-    'theodb-embedding-005',
-    'running shoes'
-)::vector
+<=> theodb.embed('running shoes', 'text-embedding-3-small')
 LIMIT 10;
 ```
 
@@ -294,16 +298,13 @@ Gera embedding a partir de texto e compara com os embeddings armazenados.
 
 ---
 
-# 22. Cast obrigatório de `embedding()` para `vector`
+# 22. `theodb.embed()` já retorna `vector`
 
 ```sql
-embedding(
-    'theodb-embedding-005',
-    'running shoes'
-)::vector
+theodb.embed('running shoes', 'text-embedding-3-small')
 ```
 
-Necessário porque `embedding()` retorna `real[]`.
+`theodb.embed(content, model)` retorna o tipo `vector` diretamente — não é preciso cast.
 
 ---
 
@@ -314,10 +315,7 @@ SELECT *
 FROM products
 WHERE category_id = 3
 ORDER BY description_embedding
-<=> embedding(
-    'theodb-embedding-005',
-    'comfortable shoes'
-)::vector
+<=> theodb.embed('comfortable shoes', 'text-embedding-3-small')
 LIMIT 5;
 ```
 
@@ -334,10 +332,7 @@ SELECT
     price
 FROM products
 ORDER BY description_embedding
-<=> embedding(
-    'theodb-embedding-005',
-    'casual hoodie'
-)::vector
+<=> theodb.embed('casual hoodie', 'text-embedding-3-small')
 LIMIT 5;
 ```
 
@@ -352,10 +347,7 @@ SELECT
     product_id,
     name,
     description_embedding
-    <=> embedding(
-        'theodb-embedding-005',
-        'casual hoodie'
-    )::vector AS distance
+    <=> theodb.embed('casual hoodie', 'text-embedding-3-small') AS distance
 FROM products
 ORDER BY distance
 LIMIT 5;
@@ -382,8 +374,8 @@ CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE INDEX products_ivfflat_idx
 ON products
-USING ivfflat (
-    description_embedding vector_cosine_ops
+USING theodb_ivfflat (
+    description_embedding theodb_ivfflat_cosine_ops
 )
 WITH (
     lists = 100
@@ -393,10 +385,7 @@ SELECT
     product_id,
     name,
     description_embedding
-    <=> embedding(
-        'theodb-embedding-005',
-        'wireless headphones'
-    )::vector AS distance
+    <=> theodb.embed('wireless headphones', 'text-embedding-3-small') AS distance
 FROM products
 ORDER BY distance
 LIMIT 10;

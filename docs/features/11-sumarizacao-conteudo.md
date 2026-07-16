@@ -13,44 +13,41 @@
 > o teste de contrato contra o container. As seções abaixo (versionamento `theodb_ml`, flags de preview) descrevem
 > a API-alvo estilo AlloyDB; a superfície entregue do TheoDB é `ai.summarize` / `ai.agg_summarize` no schema `ai`.
 
-Esta página cobre as funções `ai.summarize()` e `ai.agg_summarize()` — consultas SQL, parâmetros e
-modos de execução (escalar, baseado em arrays, baseado em cursor e agregado) para gerar resumos de texto.
+Esta página cobre as funções `ai.summarize()` (escalar) e `ai.agg_summarize()` (agregada) — assinaturas,
+parâmetros e uso para gerar resumos de texto.
 
 ---
 
-# 1. Verificar versão da extensão
+# 1. Assinaturas das funções
 
 ```sql
-SELECT extversion
-FROM pg_extension
-WHERE extname = 'theodb_ml';
+FUNCTION ai.summarize(
+    content TEXT,
+    model TEXT DEFAULT NULL
+)
+RETURNS TEXT;
+
+AGGREGATE ai.agg_summarize(TEXT) RETURNS TEXT;
 ```
 
-Verifica se a extensão `theodb_ml` está na versão **1.5.7** ou superior.
+`ai.summarize` resume um único texto por chamada; `ai.agg_summarize` é um agregado que colapsa várias linhas
+num único resumo. Não requerem `CREATE EXTENSION` nem flags de preview — as funções `ai.*` vivem no schema `ai`.
 
 ---
 
-# 2. Atualizar para versão Preview
+# 2. (opcional) Registrar/selecionar um modelo
 
 ```sql
-CALL theodb_ml.upgrade_to_preview_version();
+SELECT theodb_ml.create_model('theodb-text-lite', '<your-llm-endpoint>', 'theodb-text-lite');
+SELECT theodb_ml.apply_model('theodb-text-lite');
 ```
 
-Atualiza a extensão para a versão Preview que disponibiliza `ai.summarize()`.
+`theodb_ml` é um schema + registry de modelos (não uma extensão). Registrar/aplicar um modelo é opcional; sem
+isso, o modelo padrão vem das GUCs de sessão (`theodb.llm_endpoint`/`theodb.llm_model`).
 
 ---
 
-# 3. Habilitar funções Preview
-
-```sql
-SET theodb_ml.enable_preview_ai_functions = 'on';
-```
-
-Habilita as funções experimentais de IA para a sessão atual.
-
----
-
-# 4. Criar tabela de avaliações
+# 3. Criar tabela de avaliações
 
 ```sql
 CREATE TABLE movie_reviews (
@@ -78,9 +75,7 @@ Popula a tabela com avaliações de filmes.
 # 6. Resumir um único texto
 
 ```sql
-SELECT ai.summarize(
-    prompt => 'TEXT_CONTENT'
-);
+SELECT ai.summarize('TEXT_CONTENT');
 ```
 
 Executa a versão escalar da função para um único texto.
@@ -91,22 +86,22 @@ Executa a versão escalar da função para um único texto.
 
 ```sql
 SELECT ai.summarize(
-    prompt => 'TEXT_CONTENT',
-    model_id => 'theodb-text-lite'
+    'TEXT_CONTENT',
+    'theodb-text-lite'
 );
 ```
 
-Permite escolher explicitamente o modelo.
+Permite escolher explicitamente o modelo (segundo argumento `model`).
 
 ---
 
 # 8. Modelo padrão
 
 ```sql
-model_id => 'theodb-text-lite'
+SELECT ai.summarize('TEXT_CONTENT');
 ```
 
-Modelo utilizado quando `model_id` não é informado.
+Quando o segundo argumento `model` é omitido, o modelo padrão (das GUCs de sessão) é utilizado.
 
 ---
 
@@ -133,6 +128,13 @@ FROM movie_reviews;
 Retorna o resumo associado a cada registro.
 
 ---
+
+## 🎯 API-alvo / roadmap (não-shipped)
+
+**As seções 11–31 abaixo descrevem os modos array-based e cursor-based estilo AlloyDB e NÃO estão
+implementados.** A superfície entregue de `ai.summarize` é **escalar** (`content, model`); o modo **agregado**
+`ai.agg_summarize` (seções 32+ abaixo) também está entregue. Não use os exemplos desta seção (arrays com
+`prompts =>`/`batch_size =>`, `REFCURSOR`, `input_cursor =>`) como código executável.
 
 # 11. Assinatura baseada em arrays
 
@@ -401,6 +403,8 @@ Verifica os resumos gerados.
 
 ---
 
+## ✅ Superfície entregue (continuação): agregado `ai.agg_summarize`
+
 # 32. Resumo agregado
 
 ```sql
@@ -461,7 +465,9 @@ Resume individualmente cada avaliação.
 
 ---
 
-# 37. Fluxo completo (processamento em lote)
+# 37. Fluxo completo (processamento em lote) — 🎯 roadmap (não-shipped)
+
+> Modo array-based não implementado — ver "API-alvo / roadmap" acima. Não executável.
 
 ```sql
 WITH summarized_results AS (
@@ -481,7 +487,9 @@ Executa resumos em lote utilizando arrays.
 
 ---
 
-# 38. Fluxo completo (cursores)
+# 38. Fluxo completo (cursores) — 🎯 roadmap (não-shipped)
+
+> Modo cursor-based não implementado — ver "API-alvo / roadmap" acima. Não executável.
 
 ```sql
 DO $$
@@ -525,9 +533,6 @@ Gera um resumo consolidado para cada grupo de registros.
 
 # 40. Modos de execução suportados
 
-As funções de sumarização do TheoDB oferecem quatro formas principais de processamento:
-
-* **Scalar (`ai.summarize`)**: resume um único texto por chamada.
-* **Array-based (`ai.summarize`)**: resume múltiplos textos em lote usando arrays.
-* **Cursor-based (`ai.summarize`)**: processa grandes volumes utilizando `REFCURSOR`, reduzindo o consumo de memória.
-* **Aggregate (`ai.agg_summarize`)**: combina várias linhas em uma única entrada para produzir um resumo consolidado por grupo.
+* **Scalar (`ai.summarize`)** — ✅ entregue: resume um único texto por chamada (`content, model`).
+* **Aggregate (`ai.agg_summarize`)** — ✅ entregue: combina várias linhas em um único resumo consolidado por grupo.
+* **Array-based / Cursor-based** — 🎯 roadmap: ver a seção "API-alvo / roadmap" acima; não implementados.

@@ -16,6 +16,59 @@ Esta página cobre a criação de índices vetoriais IVF no TheoDB — consultas
 
 ---
 
+## ✅ Caminho SHIPPED — IVF via `theodb_ivfflat`
+
+A capacidade IVF (listas invertidas + quantização) está **entregue hoje** pelo access
+method próprio `theodb_ivfflat`. **Não** existe um AM `ivf` literal — use `theodb_ivfflat`.
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE INDEX products_ivf_idx
+ON products
+USING theodb_ivfflat (
+    description_embedding theodb_ivfflat_l2_ops
+)
+WITH (
+    lists = 100,
+    pq_subspaces = 16,
+    pq_bits = 8,
+    separate_storage = true
+);
+
+SELECT
+    product_id,
+    name,
+    description_embedding
+    <=> theodb.embed('wireless headphones', 'text-embedding-3-small') AS distance
+FROM products
+ORDER BY distance
+LIMIT 10;
+```
+
+Reloptions reais do `theodb_ivfflat`:
+
+* `lists` — número de listas/partições (Voronoi cells).
+* `pq_subspaces` — número de subespaços do Product Quantization (habilita AQ/PQ).
+* `pq_bits` — bits por subespaço do PQ.
+* `separate_storage` — separa os códigos quantizados dos vetores f32 em páginas distintas.
+
+Opclasses: default `theodb_ivfflat_l2_ops`, mais `theodb_ivfflat_cosine_ops` /
+`theodb_ivfflat_ip_ops` / `theodb_ivfflat_label_ops`. GUC de probes:
+`SET theodb_ivfflat.probes = N`.
+
+---
+
+## 🎯 API-alvo / roadmap (não-shipped)
+
+> **Não entregue.** A sintaxe `USING ivf (…)` com `quantizer='SQ8'|'FLAT'` abaixo é
+> **API-alvo** — não existe um access method `ivf` literal (nem no pgvector nem no
+> TheoDB). Para a capacidade equivalente entregue hoje, use o caminho SHIPPED acima
+> (`theodb_ivfflat` com as reloptions `lists` / `pq_subspaces` / `pq_bits` /
+> `separate_storage`). Os exemplos a seguir descrevem a superfície-alvo, não a atual.
+
+---
+
 # 1. Instalar extensão `vector`
 
 ```sql

@@ -22,13 +22,13 @@ Instala a extensão `pgvector` utilizada pelo TheoDB para armazenar vetores e cr
 
 ---
 
-# 2. Criar índice HNSW
+# 2. Criar índice HNSW (AM próprio `theodb_hnsw`)
 
 ```sql
 CREATE INDEX my_hnsw_index
 ON products
-USING hnsw (
-    description_embedding vector_cosine_ops
+USING theodb_hnsw (
+    description_embedding theodb_hnsw_cosine_ops
 )
 WITH (
     m = 16,
@@ -36,7 +36,14 @@ WITH (
 );
 ```
 
-Cria um índice baseado no algoritmo **Hierarchical Navigable Small World (HNSW)**.
+Cria um índice baseado no algoritmo **Hierarchical Navigable Small World (HNSW)**
+usando o access method **próprio** do TheoDB (`theodb_hnsw`). Opclass default é
+`theodb_hnsw_l2_ops`; use `theodb_hnsw_cosine_ops` / `theodb_hnsw_ip_ops` para
+cosseno / produto interno.
+
+> **Coexistência:** o TheoDB também expõe o HNSW do pgvector (`USING hnsw (…
+> vector_cosine_ops)`). Essa superfície mira o AM do pgvector, **não** o AM próprio
+> `theodb_hnsw`.
 
 ---
 
@@ -75,12 +82,12 @@ Coluna que armazena os vetores (`vector`).
 ```sql
 CREATE INDEX my_index
 ON products
-USING hnsw (
-    description_embedding vector_l2_ops
+USING theodb_hnsw (
+    description_embedding theodb_hnsw_l2_ops
 );
 ```
 
-Cria índice baseado em distância Euclidiana.
+Cria índice baseado em distância Euclidiana (opclass default).
 
 ---
 
@@ -89,8 +96,8 @@ Cria índice baseado em distância Euclidiana.
 ```sql
 CREATE INDEX my_index
 ON products
-USING hnsw (
-    description_embedding vector_ip_ops
+USING theodb_hnsw (
+    description_embedding theodb_hnsw_ip_ops
 );
 ```
 
@@ -103,8 +110,8 @@ Cria índice utilizando produto interno.
 ```sql
 CREATE INDEX my_index
 ON products
-USING hnsw (
-    description_embedding vector_cosine_ops
+USING theodb_hnsw (
+    description_embedding theodb_hnsw_cosine_ops
 );
 ```
 
@@ -152,8 +159,8 @@ Valores maiores:
 ```sql
 CREATE INDEX products_hnsw
 ON products
-USING hnsw (
-    embedding vector_cosine_ops
+USING theodb_hnsw (
+    embedding theodb_hnsw_cosine_ops
 )
 WITH (
     m = 32,
@@ -289,20 +296,18 @@ Utiliza um vetor conhecido.
 
 ---
 
-# 22. Consulta usando `embedding()`
+# 22. Consulta usando `theodb.embed()`
 
 ```sql
 SELECT *
 FROM products
 ORDER BY embedding
-<-> embedding(
-    'theodb-embedding-005',
-    'wireless headphones'
-)::vector
+<-> theodb.embed('wireless headphones', 'text-embedding-3-small')
 LIMIT 10;
 ```
 
-Converte texto em embedding durante a consulta.
+Converte texto em embedding durante a consulta. `theodb.embed(content, model)`
+recebe o conteúdo primeiro e retorna `vector` diretamente.
 
 ---
 
@@ -312,10 +317,7 @@ Converte texto em embedding durante a consulta.
 SELECT *
 FROM products
 ORDER BY embedding
-<=> embedding(
-    'theodb-embedding-005',
-    'running shoes'
-)::vector
+<=> theodb.embed('running shoes', 'text-embedding-3-small')
 LIMIT 10;
 ```
 
@@ -329,10 +331,7 @@ Busca semântica baseada em texto.
 SELECT *
 FROM products
 ORDER BY embedding
-<#> embedding(
-    'theodb-embedding-005',
-    'smartphone'
-)::vector
+<#> theodb.embed('smartphone', 'text-embedding-3-small')
 LIMIT 10;
 ```
 
@@ -340,16 +339,13 @@ Executa busca usando Inner Product.
 
 ---
 
-# 25. Converter `embedding()` para `vector`
+# 25. `theodb.embed()` já retorna `vector`
 
 ```sql
-embedding(
-    'theodb-embedding-005',
-    'shoe'
-)::vector
+theodb.embed('shoe', 'text-embedding-3-small')
 ```
 
-Como `embedding()` retorna `real[]`, é obrigatório fazer o cast para `vector`.
+`theodb.embed(content, model)` retorna o tipo `vector` diretamente — não é preciso cast.
 
 ---
 
@@ -360,10 +356,7 @@ SELECT *
 FROM products
 WHERE category_id = 2
 ORDER BY embedding
-<=> embedding(
-    'theodb-embedding-005',
-    'hoodie'
-)::vector
+<=> theodb.embed('hoodie', 'text-embedding-3-small')
 LIMIT 5;
 ```
 
@@ -380,10 +373,7 @@ SELECT
     price
 FROM products
 ORDER BY embedding
-<=> embedding(
-    'theodb-embedding-005',
-    'hoodie'
-)::vector
+<=> theodb.embed('hoodie', 'text-embedding-3-small')
 LIMIT 5;
 ```
 
@@ -398,10 +388,7 @@ SELECT
     *,
     embedding
     <=>
-    embedding(
-        'theodb-embedding-005',
-        'hoodie'
-    )::vector AS distance
+    theodb.embed('hoodie', 'text-embedding-3-small') AS distance
 FROM products
 ORDER BY distance;
 ```
@@ -427,8 +414,8 @@ CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE INDEX products_hnsw
 ON products
-USING hnsw (
-    embedding vector_cosine_ops
+USING theodb_hnsw (
+    embedding theodb_hnsw_cosine_ops
 )
 WITH (
     m = 16,
@@ -438,10 +425,7 @@ WITH (
 SELECT *
 FROM products
 ORDER BY embedding
-<=> embedding(
-    'theodb-embedding-005',
-    'wireless headphones'
-)::vector
+<=> theodb.embed('wireless headphones', 'text-embedding-3-small')
 LIMIT 10;
 ```
 

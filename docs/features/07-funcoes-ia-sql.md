@@ -1,165 +1,116 @@
 # Consultas SQL inteligentes com funções de IA
 
-> **✅ Entregue (M7-S3 + M10/M11 + M13):** funções `ai.*` (generate/if/analyze_sentiment/summarize/rank,
-> agg_summarize, generate_batch) + o **registry `theodb_ml`** (M13: `create_model`/`apply_model` sobre
-> `(endpoint, model_name)`). Ver [`docs/sql-ai-functions.md`](../sql-ai-functions.md).
+> **✅ Entregue (M7-S3 + M10/M11 + M13):** funções `ai.*` (generate/if_batch/if_costly/analyze_sentiment/
+> summarize/rank/rerank, agg_summarize, generate_batch) + o **registry `theodb_ml`** (M13: `create_model`/
+> `apply_model`). Ver [`docs/sql-ai-functions.md`](../sql-ai-functions.md).
 > **Divergência honesta (ADR D2):** o `theodb_ml` **não** persiste credenciais (sem coluna `api_key`) — as
 > chaves permanecem GUC de sessão (`theodb.llm_api_key`); `apply_model` faz a ponte via GUCs em vez do
 > `model_id =>` por-chamada / `CALL …(model_auth_type=>…)` literais do AlloyDB (deferidos).
 
 > **Status:** ✅ **Entregue — núcleo escalar + registry (M7-S3 + M10/M11 + M13).** Funções `ai.*`: `ai.generate`,
-> `ai.summarize`, `ai.agg_summarize` (`sql/50-theodb-ai.sql:21,32,82`); `ai.if`, `ai.analyze_sentiment`, `ai.rank`,
-> `ai.generate_batch`, `ai._chat` (Rust `theodb_rs/src/api.rs:334-355` + `theodb_rs/src/chat.rs`); registry
-> `theodb_ml` (`create_model`/`apply_model`/`list_models`, `sql/70-theodb-ml.sql:26,68`), tudo `REVOKE`do de PUBLIC.
+> `ai.summarize`, `ai.agg_summarize` (`sql/50-theodb-ai.sql:21,32,82`); `ai.if_batch`, `ai.if_costly`,
+> `ai.analyze_sentiment`, `ai.rank`, `ai.rerank`, `ai.generate_batch`, `ai._chat` (Rust
+> `theodb_rs/src/api.rs:334-355` + `theodb_rs/src/chat.rs`); registry `theodb_ml`
+> (`create_model`/`apply_model`/`drop_model`/`list_models`, `sql/70-theodb-ml.sql:26,68`), tudo `REVOKE`do de PUBLIC.
 > Provado por `benchmarks/tests/test_ai_sql.py` (33 testes + 3 real-OpenAI) + `benchmarks/tests/test_theodb_ml.py`.
-> **Honestidade:** os modos **array-based e cursor-based** desta página **não estão implementados** (follow-up YAGNI);
+> **Honestidade:** os modos **cursor-based** desta página **não estão implementados** (follow-up YAGNI);
 > o registry não persiste credencial (chave via GUC de sessão, ADR D2). O núcleo escalar está entregue e testado.
 
-Esta página cobre as funções SQL de IA do TheoDB (`ai.if`, `ai.generate`, `ai.rank`): suas assinaturas, parâmetros, modos de processamento (escalar, em lote e via cursor) e casos de uso para filtragem, geração e ranking inteligentes em SQL.
+Esta página cobre as funções SQL de IA do TheoDB (`ai.if_batch`/`ai.if_costly`, `ai.generate`, `ai.rank`): suas assinaturas, parâmetros e casos de uso para filtragem, geração e ranking inteligentes em SQL.
 
-> **Superfície implementada (M7-S3):** as funções **escalares** `ai.generate`/`ai.if`/`ai.rank`/`ai.analyze_sentiment`/`ai.summarize`
-> estão entregues (`sql/50-theodb-ai.sql`) sobre um **endpoint chat-completions OpenAI-compatible configurável**
-> (GUCs `theodb.llm_endpoint`/`theodb.llm_model`/`theodb.llm_api_key`), model-agnostic, fail-fast tipado e
-> `REVOKE`das de PUBLIC. Doc operacional: `docs/sql-ai-functions.md`. Os modos **em lote (array) e via cursor**
-> ("aceleradas") desta página são um **follow-up documentado** (não nesta fatia — KISS/YAGNI). A extensão
-> empacotada `theodb_ml` e os comandos `CALL theodb_ml.*` são a forma-alvo; hoje as funções vivem no schema `ai`.
-
----
-
-# 1. Verificar versão da extensão
-
-```sql
-SELECT extversion
-FROM pg_extension
-WHERE extname = 'theodb_ml';
-```
-
-Consulta a versão instalada da extensão `theodb_ml`.
+> **Superfície implementada (M7-S3):** as funções **escalares** `ai.generate`/`ai.if_costly`/`ai.rank`/`ai.analyze_sentiment`/`ai.summarize`
+> (mais a variante em lote `ai.if_batch`) estão entregues (`sql/50-theodb-ai.sql`) sobre um **endpoint chat-completions
+> OpenAI-compatible configurável** (GUCs `theodb.llm_endpoint`/`theodb.llm_model`/`theodb.llm_api_key`),
+> model-agnostic, fail-fast tipado e `REVOKE`das de PUBLIC. Doc operacional: `docs/sql-ai-functions.md`. O modo
+> **via cursor** desta página é um **follow-up documentado** (não nesta fatia — KISS/YAGNI). O `theodb_ml` é um
+> **schema + registry de modelos** (`theodb_ml.create_model`/`apply_model`), não uma extensão — as funções vivem no schema `ai`.
 
 ---
 
-# 2. Instalar extensão
+# 1. Registrar um modelo no registry `theodb_ml`
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS theodb_ml;
-```
-
-Instala a extensão responsável pela integração com modelos configuráveis do TheoDB.
-
----
-
-# 3. Atualizar extensão
-
-```sql
-ALTER EXTENSION theodb_ml UPDATE;
-```
-
-Atualiza a extensão para a versão mais recente.
-
----
-
-# 4. Habilitar AI Query Engine na sessão
-
-```sql
-SET theodb_ml.enable_ai_query_engine = on;
-```
-
-Ativa as funções `ai.*` apenas para a sessão atual.
-
----
-
-# 5. Habilitar AI Query Engine para o banco
-
-```sql
-ALTER DATABASE my_database
-SET theodb_ml.enable_ai_query_engine = 'on';
-```
-
-Ativa permanentemente para um banco específico.
-
----
-
-# 6. Habilitar AI Query Engine para um usuário
-
-```sql
-ALTER ROLE postgres
-SET theodb_ml.enable_ai_query_engine = 'on';
-```
-
-Ativa para todas as sessões desse usuário.
-
----
-
-# 7. Registrar endpoint de modelo
-
-```sql
-CALL theodb_ml.create_model(
-    model_id => 'theodb-text-lite-global',
-    model_type => 'llm',
-    model_provider => 'theodb',
-    model_qualified_name => 'theodb-text-lite',
-    model_request_url => '<your-llm-endpoint>',
-    model_auth_type => 'theodb_service_agent'
+SELECT theodb_ml.create_model(
+    'theodb-text-lite',                 -- nome lógico do modelo
+    '<your-llm-endpoint>',              -- endpoint chat-completions OpenAI-compatible
+    'theodb-text-lite'                  -- model_name enviado ao endpoint
 );
 ```
 
-Registra um endpoint remoto para uso pelas funções AI.
+`theodb_ml` é um **schema + registry de modelos** (não uma extensão): `theodb_ml.create_model` cadastra um
+apelido de modelo sobre um endpoint configurável. Ver também `theodb_ml.apply_model`, `theodb_ml.drop_model`
+e `theodb_ml.list_models`.
 
 ---
 
-# 8. Registrar modelo de texto avançado
+# 2. Listar modelos registrados
 
 ```sql
-CALL theodb_ml.create_model(
-    model_id => 'theodb-text-pro-preview-model',
-    model_request_url => '<your-llm-endpoint>',
-    model_qualified_name => 'theodb-text-pro-preview',
-    model_provider => 'theodb',
-    model_type => 'llm',
-    model_auth_type => 'theodb_service_agent'
-);
+SELECT theodb_ml.list_models();
 ```
 
-Registra um modelo disponível apenas via endpoint global.
+Lista os modelos cadastrados no registry.
 
 ---
 
-# 9. Gerar texto usando modelo registrado
+# 3. Aplicar um modelo como padrão da sessão
+
+```sql
+SELECT theodb_ml.apply_model('theodb-text-lite');
+```
+
+Faz a ponte do modelo registrado para as GUCs de sessão (`theodb.llm_endpoint`/`theodb.llm_model`), de forma
+que as funções `ai.*` passem a usá-lo quando `model` for omitido.
+
+---
+
+# 4. Remover um modelo do registry
+
+```sql
+SELECT theodb_ml.drop_model('theodb-text-lite');
+```
+
+Remove o modelo cadastrado.
+
+---
+
+# 5. Gerar texto usando modelo registrado
 
 ```sql
 SELECT ai.generate(
-    prompt => 'What is TheoDB?',
-    model_id => 'theodb-text-pro-preview-model'
+    'What is TheoDB?',
+    'theodb-text-lite'
 );
 ```
 
-Executa geração de texto utilizando um modelo previamente registrado.
+Executa geração de texto utilizando um modelo previamente registrado (segundo argumento `model`).
 
 ---
 
-# 10. Assinatura do `ai.if`
+# 6. Assinatura do `ai.if_costly`
 
 ```sql
-FUNCTION ai.if(
-    prompt TEXT,
-    model_id VARCHAR DEFAULT NULL
+FUNCTION ai.if_costly(
+    condition TEXT,
+    val TEXT,
+    model TEXT DEFAULT NULL
 )
 RETURNS BOOLEAN;
 ```
 
-Avalia uma condição em linguagem natural e retorna `TRUE` ou `FALSE`.
+Avalia uma condição em linguagem natural sobre um valor e retorna `TRUE` ou `FALSE`. (Não existe um `ai.if`
+escalar de argumento único — a forma escalar é `ai.if_costly`; para lote use `ai.if_batch`.)
 
 ---
 
-# 11. Filtrar registros com `ai.if`
+# 7. Filtrar registros com `ai.if_costly`
 
 ```sql
 SELECT name
 FROM restaurant_reviews
-WHERE ai.if(
-    location_city ||
-    ' has a population greater than 100000 and this is a positive review: '
-    || review
+WHERE ai.if_costly(
+    'Is this a positive review?',
+    review
 );
 ```
 
@@ -167,14 +118,15 @@ Filtra registros utilizando conhecimento do modelo.
 
 ---
 
-# 12. Filtrar usando modelo específico
+# 8. Filtrar usando modelo específico
 
 ```sql
 SELECT name
 FROM restaurant_reviews
-WHERE ai.if(
-    prompt => location_city || ' ... ' || review,
-    model_id => 'theodb-text-lite'
+WHERE ai.if_costly(
+    'Is this a positive review?',
+    location_city || ' ... ' || review,
+    'theodb-text-lite'
 );
 ```
 
@@ -182,14 +134,14 @@ Executa a mesma avaliação utilizando um modelo definido.
 
 ---
 
-# 13. `GROUP BY` com `ai.if`
+# 9. `GROUP BY` com `ai.if_costly`
 
 ```sql
 SELECT
     name,
     location_city
 FROM restaurant_reviews
-WHERE ai.if(...)
+WHERE ai.if_costly('Is this a positive review?', review)
 GROUP BY
     name,
     location_city
@@ -200,18 +152,16 @@ Combina filtro inteligente com agregações SQL.
 
 ---
 
-# 14. JOIN usando `ai.if`
+# 10. JOIN usando `ai.if_costly`
 
 ```sql
 SELECT item_name,
        COUNT(*)
 FROM menu_items
 JOIN user_reviews
-ON ai.if(
-    prompt =>
-        'Does this review mention the menu item? '
-        || user_reviews.review_text
-        || item_name
+ON ai.if_costly(
+    'Does this review mention the menu item?',
+    user_reviews.review_text || ' item: ' || item_name
 )
 GROUP BY item_name;
 ```
@@ -220,94 +170,65 @@ Permite realizar joins semânticos.
 
 ---
 
-# 15. `ai.if` baseado em arrays
+# 11. Assinatura do `ai.if_batch`
 
 ```sql
-ai.if(
-    prompts => ARRAY_AGG(prompt),
-    model_id => 'theodb-text-lite',
-    batch_size => 20
+FUNCTION ai.if_batch(
+    condition TEXT,
+    vals TEXT[],
+    model TEXT DEFAULT NULL
 )
+RETURNS BOOLEAN[];
 ```
 
-Executa várias avaliações em lote.
+Avalia a mesma condição sobre um array de valores e retorna um array de booleanos — N valores em uma chamada.
 
 ---
 
-# 16. Configurar `batch_size`
+# 12. Avaliar em lote com `ai.if_batch`
 
 ```sql
-batch_size => 20
+SELECT ai.if_batch(
+    'Is this a positive review?',
+    ARRAY_AGG(review),
+    'theodb-text-lite'
+)
+FROM restaurant_reviews;
 ```
 
-Define quantos prompts serão enviados por chamada.
+Executa várias avaliações em lote (N→1 round-trip HTTP).
 
 ---
 
-# 17. Converter linhas em arrays
+# 13. Converter linhas em arrays
 
 ```sql
 ARRAY_AGG(review)
 ```
 
-Agrupa várias linhas para processamento em lote.
+Agrupa várias linhas para processamento em lote com `ai.if_batch` / `ai.generate_batch`.
 
 ---
 
-# 18. Expandir resultado do array
+# 14. Expandir resultado do array
 
 ```sql
-generate_series(
-    1,
-    array_length(review_ids,1)
+SELECT UNNEST(
+    ai.if_batch('Is this a positive review?', ARRAY_AGG(review))
 )
+FROM restaurant_reviews;
 ```
 
-Reconstrói as linhas após o processamento.
+Transforma o array de resultados de volta em linhas SQL.
 
 ---
 
-# 19. `ai.if` usando cursor
-
-```sql
-result_cursor := ai.if(
-    'Is the statement true?',
-    prompt_cursor,
-    model_id => 'theodb-text-lite'
-);
-```
-
-Executa processamento de grandes volumes utilizando cursores.
-
----
-
-# 20. Ler resultados do cursor
-
-```sql
-FETCH result_cursor INTO rec;
-```
-
-Recupera uma linha do cursor.
-
----
-
-# 21. Inserir resultado do cursor
-
-```sql
-INSERT INTO filtered_results
-VALUES(rec.input, rec.output);
-```
-
-Armazena resultados processados.
-
----
-
-# 22. Assinatura do `ai.generate`
+# 15. Assinatura do `ai.generate`
 
 ```sql
 FUNCTION ai.generate(
     prompt TEXT,
-    model_id VARCHAR DEFAULT NULL
+    model TEXT DEFAULT NULL
 )
 RETURNS TEXT;
 ```
@@ -316,13 +237,11 @@ Gera texto baseado no prompt.
 
 ---
 
-# 23. Gerar resumo
+# 16. Gerar resumo
 
 ```sql
 SELECT ai.generate(
-    prompt =>
-        'Summarize in 20 words: '
-        || review
+    'Summarize in 20 words: ' || review
 )
 FROM user_reviews;
 ```
@@ -331,60 +250,41 @@ Resume textos individualmente.
 
 ---
 
-# 24. `ai.generate` baseado em arrays
+# 17. Assinatura do `ai.generate_batch`
+
+```sql
+FUNCTION ai.generate_batch(
+    prompts TEXT[],
+    model TEXT DEFAULT NULL
+)
+RETURNS TEXT[];
+```
+
+Gera N respostas em UM round-trip HTTP (N-in/N-out) — evita o N+1 de chamadas por-linha.
+
+---
+
+# 18. Gerar múltiplos textos em lote
 
 ```sql
 SELECT UNNEST(
-    ai.generate(
-        prompts => ARRAY_AGG(review)
+    ai.generate_batch(
+        ARRAY_AGG('Summarize in 20 words: ' || review)
     )
-);
+)
+FROM user_reviews;
 ```
 
-Gera múltiplos resumos em lote.
+Gera múltiplos resumos em lote e expande o array de volta em linhas.
 
 ---
 
-# 25. Expandir respostas
-
-```sql
-UNNEST(...)
-```
-
-Transforma o array retornado em linhas SQL.
-
----
-
-# 26. `ai.generate` usando cursor
-
-```sql
-summary_cursor := ai.generate(
-    'Summarize:',
-    prompt_cursor
-);
-```
-
-Processa milhões de linhas utilizando streaming.
-
----
-
-# 27. Salvar resumos
-
-```sql
-INSERT INTO summary_results
-VALUES(rec.output);
-```
-
-Persiste os textos gerados.
-
----
-
-# 28. Assinatura do `ai.rank`
+# 19. Assinatura do `ai.rank`
 
 ```sql
 FUNCTION ai.rank(
     prompt TEXT,
-    model_id VARCHAR DEFAULT NULL
+    model TEXT DEFAULT NULL
 )
 RETURNS REAL;
 ```
@@ -393,14 +293,13 @@ Calcula um score baseado em linguagem natural.
 
 ---
 
-# 29. Ordenar utilizando IA
+# 20. Ordenar utilizando IA
 
 ```sql
 SELECT review
 FROM user_reviews
 ORDER BY ai.rank(
-    'Score this review: '
-    || review
+    'Score this review: ' || review
 ) DESC
 LIMIT 20;
 ```
@@ -409,140 +308,59 @@ Ordena resultados usando critérios definidos pelo prompt.
 
 ---
 
-# 30. `LIMIT`
+# 21. Assinatura do `ai.rerank`
 
 ```sql
-LIMIT 20;
+FUNCTION ai.rerank(
+    query TEXT,
+    documents TEXT[],
+    model TEXT DEFAULT NULL,
+    top_n INT DEFAULT NULL
+)
+RETURNS TABLE(idx INT, score REAL);
 ```
 
-Retorna somente os itens melhor classificados.
+Reordena um conjunto de documentos por relevância a uma consulta, retornando o índice original e o score.
 
 ---
 
-# 31. `ai.rank` baseado em arrays
+# 22. Reordenar documentos
 
 ```sql
-SELECT UNNEST(
-    ai.rank(
-        ARRAY_AGG(review)
-    )
+SELECT idx, score
+FROM ai.rerank(
+    'best pizza in town',
+    ARRAY['great pasta', 'amazing pizza', 'good coffee'],
+    top_n => 2
 );
 ```
 
-Calcula vários scores em uma única chamada.
+Retorna os `top_n` documentos mais relevantes.
 
 ---
 
-# 32. `ai.rank` usando cursor
+# 23. Fluxo completo de filtragem inteligente
 
 ```sql
-score_cursor := ai.rank(
-    'Score this review:',
-    prompt_cursor
-);
-```
-
-Executa ranking sobre grandes conjuntos de dados.
-
----
-
-# 33. Armazenar score
-
-```sql
-INSERT INTO scored_results
-VALUES(
-    rec.input,
-    rec.output
-);
-```
-
-Persiste os valores calculados.
-
----
-
-# 34. Cursor de entrada
-
-```sql
-OPEN prompt_cursor
-FOR
-SELECT review
-FROM user_reviews;
-```
-
-Abre o cursor que alimentará a função AI.
-
----
-
-# 35. Loop de leitura
-
-```sql
-LOOP
-    FETCH score_cursor INTO rec;
-    EXIT WHEN NOT FOUND;
-END LOOP;
-```
-
-Processa todos os resultados do cursor.
-
----
-
-# 36. Fechar cursor
-
-```sql
-CLOSE score_cursor;
-```
-
-Libera os recursos do cursor.
-
----
-
-# 37. Executar bloco PL/pgSQL
-
-```sql
-DO $$
-...
-$$;
-```
-
-Permite executar fluxos completos envolvendo cursores e funções AI.
-
----
-
-# 38. Categorias de funções AI
-
-As funções AI do TheoDB são divididas em três categorias:
-
-* **Scalar**: processa um único valor por chamada. Indicado para menos de 50 chamadas.
-* **Array-based**: processa arrays inteiros em uma única chamada, oferecendo maior throughput.
-* **Cursor-based**: processa grandes volumes (milhares ou milhões de linhas) usando cursores e streaming.
-
----
-
-# 39. Fluxo completo de filtragem inteligente
-
-```sql
-SET theodb_ml.enable_ai_query_engine = on;
-
 SELECT name
 FROM restaurant_reviews
-WHERE ai.if(
-    prompt => 'Is this a positive review? '
-              || review,
-    model_id => 'theodb-text-lite'
+WHERE ai.if_costly(
+    'Is this a positive review?',
+    review,
+    'theodb-text-lite'
 );
 ```
 
-Fluxo para habilitar o AI Query Engine e filtrar registros semanticamente.
+Fluxo para filtrar registros semanticamente com `ai.if_costly`.
 
 ---
 
-# 40. Fluxo completo de geração de texto
+# 24. Fluxo completo de geração de texto
 
 ```sql
 SELECT ai.generate(
-    prompt => 'Summarize the following review in 20 words: '
-              || review,
-    model_id => 'theodb-text-lite'
+    'Summarize the following review in 20 words: ' || review,
+    'theodb-text-lite'
 )
 FROM user_reviews;
 ```
@@ -551,17 +369,47 @@ Fluxo para gerar resumos de texto utilizando um modelo configurável do TheoDB.
 
 ---
 
-# 41. Fluxo completo de ranking inteligente
+# 25. Fluxo completo de ranking inteligente
 
 ```sql
 SELECT review
 FROM user_reviews
 ORDER BY ai.rank(
-    prompt => 'Score this review from 1 to 10 based on customer satisfaction: '
-              || review,
-    model_id => 'theodb-text-lite'
+    'Score this review from 1 to 10 based on customer satisfaction: ' || review,
+    'theodb-text-lite'
 ) DESC
 LIMIT 20;
 ```
 
 Fluxo para ranquear resultados utilizando critérios definidos em linguagem natural por um modelo configurável do TheoDB.
+
+---
+
+## 🎯 API-alvo / roadmap (não-shipped)
+
+As formas abaixo (processamento **via cursor** para streaming de milhões de linhas) descrevem a superfície-alvo
+estilo AlloyDB e **não estão implementadas** hoje. A superfície entregue é escalar + em lote (`ai.generate` /
+`ai.generate_batch` / `ai.if_costly` / `ai.if_batch` / `ai.rank` / `ai.rerank`). Não use como código executável.
+
+```sql
+-- ROADMAP (não-shipped): processamento via cursor
+summary_cursor := ai.generate('Summarize:', prompt_cursor);
+
+score_cursor := ai.rank('Score this review:', prompt_cursor);
+
+OPEN prompt_cursor FOR SELECT review FROM user_reviews;
+
+LOOP
+    FETCH score_cursor INTO rec;
+    EXIT WHEN NOT FOUND;
+    INSERT INTO scored_results VALUES (rec.input, rec.output);
+END LOOP;
+
+CLOSE score_cursor;
+```
+
+Categorias-alvo de funções AI (a categoria **Cursor-based** é roadmap; hoje só há Scalar + Array-based):
+
+* **Scalar** — processa um único valor por chamada. ✅ entregue.
+* **Array-based** — processa arrays inteiros em uma única chamada (N→1 round-trip). ✅ entregue.
+* **Cursor-based** — processa grandes volumes via cursores e streaming. 🎯 roadmap.

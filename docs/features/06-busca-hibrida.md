@@ -2,8 +2,11 @@
 
 > **✅ Entregue (M7-S1 + M13):** capacidade RRF via `ai.hybrid_search_rrf(...)` (M7-S1) + a superfície JSON
 > literal **`ai.hybrid_search(config jsonb)`** (M13, wrapper fino — paridade testada com o rrf). Ver
-> [`docs/sql-ai-functions.md`](../sql-ai-functions.md) § "Packaged surface". A superfície literal abaixo
-> permanece como API-alvo; `theodb_scann` (índice) não é entregue (usamos DiskANN/HNSW — specs 02/05).
+> [`docs/sql-ai-functions.md`](../sql-ai-functions.md) § "Packaged surface". As chaves JSON **realmente
+> honradas** pelo código são: `table`, `id_col`, `content_tsv_col`, `content_text_col`, `vector_col`,
+> `query_text`, `query_vector`, `k`, `per_leg_limit`, `result_limit`, `language`, `filter_sql`,
+> `lexical_engine` (ver § 9). A fusão é **RRF pura (sem pesos)** com `<=>` cosseno + `ts_rank_cd` nativo.
+> `theodb_scann` (índice) **não** é entregue (usamos DiskANN/HNSW — specs 02/05).
 
 > **Status:** ✅ **Entregue (M7-S1 + M13 + M19).** A busca híbrida está disponível: `ai.hybrid_search_rrf(...)`
 > (Rust `theodb_rs/src/hybrid.rs`, wrapper SQL `theodb_rs/src/api.rs:399`) e `ai.hybrid_search(config jsonb)`
@@ -24,17 +27,7 @@ Esta página cobre a busca híbrida no TheoDB — combinação de busca vetorial
 
 ---
 
-# 1. Habilitar funções Preview
-
-```sql
-SET theodb_ml.enable_preview_ai_functions = true;
-```
-
-Ativa as funções experimentais necessárias para `ai.hybrid_search()`.
-
----
-
-# 2. Criar tabela de documentos
+# 1. Criar tabela de documentos
 
 ```sql
 CREATE TABLE documents (
@@ -69,27 +62,24 @@ Insere os documentos que participarão da busca híbrida.
 
 ---
 
-# 4. Instalar extensão ScaNN
+# 4. Instalar extensão de vetores
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS theodb_scann;
+CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
-Habilita o mecanismo de indexação vetorial ScaNN.
+Habilita o mecanismo de busca vetorial (`pgvector`). O índice ANN entregue é
+DiskANN/HNSW (specs 02/05), não ScaNN.
 
 ---
 
-# 5. Criar índice ScaNN
+# 5. Criar índice vetorial (HNSW)
 
 ```sql
 CREATE INDEX documents_text_embedding_idx
 ON documents
-USING scann (
-    text_embedding cosine
-)
-WITH (
-    num_leaves = 10,
-    quantizer = 'SQ8'
+USING hnsw (
+    text_embedding vector_cosine_ops
 );
 ```
 
@@ -139,233 +129,110 @@ USING rum (
 
 ---
 
-# 9. Assinatura básica de `ai.hybrid_search`
+# 9. Assinatura e contrato JSON de `ai.hybrid_search`
 
 ```sql
-SELECT *
-FROM ai.hybrid_search(
-    search_inputs => ARRAY[
-        ...json...
-    ]
-);
+SELECT id, score
+FROM ai.hybrid_search('{ ...config... }'::jsonb);
 ```
 
-Executa busca híbrida utilizando múltiplos mecanismos de pesquisa.
+Assinatura entregue: `ai.hybrid_search(config jsonb) RETURNS TABLE(id text, score real)`.
+Executa busca híbrida via fusão RRF pura (sem pesos) de uma perna vetorial (`<=>` cosseno)
+com uma perna de texto (FTS nativo do PostgreSQL, `ts_rank_cd`). As chaves do `config`
+realmente honradas pelo código são:
+
+| Chave | Descrição |
+|---|---|
+| `table` | Tabela consultada. |
+| `id_col` | Coluna identificadora do documento. |
+| `content_tsv_col` | Coluna `tsvector` para a perna FTS. |
+| `content_text_col` | Coluna de texto original (para `ts_rank_cd`/`plainto_tsquery`). |
+| `vector_col` | Coluna de embeddings para a perna vetorial. |
+| `query_text` | Texto da consulta (perna FTS). |
+| `query_vector` | Embedding da consulta (perna vetorial). |
+| `k` | Constante RRF (`score = Σ 1/(k+rank)`, default 60). |
+| `per_leg_limit` | Máximo de candidatos por perna. |
+| `result_limit` | Máximo de resultados finais. |
+| `language` | Configuração de idioma do FTS (ex.: `english`). |
+| `filter_sql` | Predicado SQL adicional aplicado às pernas. |
+| `lexical_engine` | Motor lexical: `ts_rank_cd` (default, FTS nativo entregue) ou `bm25` (gated — requer `pg_textsearch`). Outro valor → erro tipado `22023`. |
 
 ---
 
-# 10. Definir componente vetorial
+# 10. Definir tabela e colunas
 
 ```json
 {
-  "data_type":"vector"
+  "table": "documents",
+  "id_col": "doc_id",
+  "content_tsv_col": "text_tsv",
+  "content_text_col": "content",
+  "vector_col": "text_embedding"
 }
 ```
 
-Indica que o componente utiliza busca vetorial.
+Aponta a tabela e as colunas usadas por cada perna da fusão.
 
 ---
 
-# 11. Definir componente textual
+# 11. Definir a consulta (texto + vetor)
 
 ```json
 {
-  "data_type":"text"
+  "query_text": "managed database",
+  "query_vector": "[0.12, 0.98, ...]"
 }
 ```
 
-Indica que o componente utiliza Full Text Search.
+`query_text` alimenta a perna FTS; `query_vector` é o embedding da consulta
+(gere-o com `theodb.embed('managed database', 'theodb-embedding-001')` — assinatura `theodb.embed(content, model)`, conteúdo primeiro).
 
 ---
 
-# 12. Definir peso (`weight`)
-
-```json
-"weight":0.5
-```
-
-Peso relativo utilizado no cálculo do score final.
-
----
-
-# 13. Definir tabela
-
-```json
-"table_name":"documents"
-```
-
-Tabela consultada.
-
----
-
-# 14. Definir chave
-
-```json
-"key_column":"doc_id"
-```
-
-Coluna identificadora do documento.
-
----
-
-# 15. Definir coluna vetorial
-
-```json
-"vec_column":"text_embedding"
-```
-
-Coluna contendo embeddings.
-
----
-
-# 16. Definir operador vetorial
-
-```json
-"distance_operator":"public.<=>"
-```
-
-Operador utilizado para distância cosseno.
-
----
-
-# 17. Definir limite
-
-```json
-"limit":5
-```
-
-Quantidade máxima de resultados por componente.
-
----
-
-# 18. Definir vetor da consulta
-
-```json
-"query_vector":
-"ai.embedding('theodb-embedding-001','managed database')::vector"
-```
-
-Embedding gerado dinamicamente.
-
----
-
-# 19. Definir coluna textual
-
-```json
-"text_column":"text_tsv"
-```
-
-Coluna utilizada pelo Full Text Search.
-
----
-
-# 20. Definir função de ranking
-
-```json
-"ranking_function":"ts_rank"
-```
-
-Função utilizada para calcular relevância textual.
-
----
-
-# 21. Definir texto pesquisado
-
-```json
-"query_text_input":"database"
-```
-
-Texto utilizado na pesquisa Full Text.
-
----
-
-# 22. Executar busca híbrida
-
-```sql
-SELECT *
-FROM ai.hybrid_search(
-    search_inputs => ARRAY[
-        ...
-    ],
-    include_json_output => false
-);
-```
-
-Retorna apenas:
-
-* id
-* score
-
----
-
-# 23. Incluir JSON detalhado
-
-```sql
-include_json_output => true
-```
-
-Inclui um JSON contendo o cálculo completo do ranking.
-
----
-
-# 24. Estrutura do JSON
+# 12. Ajustar RRF e limites
 
 ```json
 {
-  "component_1": {...},
-  "component_2": {...},
-  "final_score": ...
+  "k": 60,
+  "per_leg_limit": 50,
+  "result_limit": 5
 }
 ```
 
-Mostra:
-
-* ranking vetorial;
-* ranking textual;
-* peso;
-* score individual;
-* score final;
-* tempo de execução.
+`k` é a constante do RRF; `per_leg_limit` limita candidatos por perna;
+`result_limit` corta o resultado final.
 
 ---
 
-# 25. Definir tipo do ID
+# 13. Idioma e filtro
 
-```sql
-id_type => NULL::INTEGER
+```json
+{
+  "language": "english",
+  "filter_sql": "status = 'published'"
+}
 ```
 
-Converte automaticamente o identificador retornado.
+`language` define a configuração de FTS; `filter_sql` restringe ambas as pernas.
 
 ---
 
-# 26. Exemplo de cast
+# 14. Motor lexical (`lexical_engine`)
 
-```sql
-SELECT
-    id,
-    pg_typeof(id)
-FROM ai.hybrid_search(
-    ...,
-    id_type => NULL::INTEGER
-);
+```json
+{
+  "lexical_engine": "postgres"
+}
 ```
 
-Retorna IDs do tipo `INTEGER`.
+A perna de texto entregue é o **FTS nativo do PostgreSQL** (`ts_rank_cd`/GIN),
+selecionado por `"postgres"` (default). Uma perna BM25 permissiva
+(`"lexical_engine": "bm25"`) existe no código, porém está **desligada na imagem
+entregue** (requer a extensão `pg_textsearch`). Ver a nota de honestidade no topo.
 
 ---
 
-# 27. Utilizar `g_to_tsquery`
-
-```sql
-g_to_tsquery(...)
-```
-
-Parser padrão recomendado pelo TheoDB para buscas textuais.
-
----
-
-# 28. Utilizar `plainto_tsquery`
+# 15. Utilizar `plainto_tsquery`
 
 ```sql
 plainto_tsquery('database')
@@ -392,9 +259,9 @@ SELECT
     id
 FROM products
 ORDER BY embedding
-<=> ai.embedding(
-    'theodb-embedding-001',
-    'managed database'
+<=> theodb.embed(
+    'managed database',
+    'theodb-embedding-001'
 )
 LIMIT 10;
 ```
@@ -407,7 +274,7 @@ Primeira etapa da busca híbrida manual.
 
 ```sql
 RANK() OVER (
-    ORDER BY embedding <=> ai.embedding(...)
+    ORDER BY embedding <=> theodb.embed(...)
 )
 ```
 
@@ -523,35 +390,27 @@ Retorna apenas os cinco melhores documentos.
 # 40. Fluxo completo usando `ai.hybrid_search`
 
 ```sql
-SELECT *
+SELECT id, score
 FROM ai.hybrid_search(
-    search_inputs => ARRAY[
-        '{
-            "data_type":"vector",
-            "weight":0.5,
-            "table_name":"documents",
-            "key_column":"doc_id",
-            "vec_column":"text_embedding",
-            "distance_operator":"public.<=>",
-            "query_vector":"ai.embedding(''theodb-embedding-001'',''managed database'')::vector",
-            "limit":5
-        }'::jsonb,
-        '{
-            "data_type":"text",
-            "weight":0.5,
-            "table_name":"documents",
-            "key_column":"doc_id",
-            "text_column":"text_tsv",
-            "ranking_function":"ts_rank",
-            "query_text_input":"database",
-            "limit":5
-        }'::jsonb
-    ],
-    include_json_output => false
+    jsonb_build_object(
+        'table',            'documents',
+        'id_col',           'doc_id',
+        'content_tsv_col',  'text_tsv',
+        'content_text_col', 'content',
+        'vector_col',       'text_embedding',
+        'query_text',       'managed database',
+        'query_vector',     theodb.embed('managed database', 'theodb-embedding-001'),
+        'k',                60,
+        'per_leg_limit',    50,
+        'result_limit',     5,
+        'language',         'english',
+        'lexical_engine',   'postgres'
+    )
 );
 ```
 
-Fluxo recomendado para busca híbrida utilizando a função nativa do TheoDB.
+Fluxo recomendado para busca híbrida utilizando a função nativa do TheoDB —
+fusão RRF pura (sem pesos) de vetorial (`<=>`) + FTS nativo (`ts_rank_cd`).
 
 ---
 
@@ -563,9 +422,9 @@ WITH vector_search AS (
         id,
         RANK() OVER (
             ORDER BY embedding
-            <=> ai.embedding(
-                'theodb-embedding-001',
-                'database'
+            <=> theodb.embed(
+                'database',
+                'theodb-embedding-001'
             )
         ) AS rank
     FROM products
@@ -616,7 +475,28 @@ LIMIT 5;
 
 Fluxo completo da implementação manual de busca híbrida utilizando:
 
-1. busca vetorial (`pgvector`/ScaNN, HNSW, IVF ou IVFFlat);
+1. busca vetorial (`pgvector`: HNSW, DiskANN, IVF ou IVFFlat);
 2. Full Text Search (`GIN` ou `RUM`);
 3. cálculo do **Reciprocal Rank Fusion (RRF)**;
 4. reranqueamento final dos documentos mais relevantes.
+
+---
+
+## 🎯 API-alvo / roadmap (não-shipped)
+
+> As chaves abaixo aparecem em material antigo mas **não são honradas pelo código
+> entregue**. A fusão atual é **RRF pura (sem pesos)**, então `weight` é ignorado; o
+> operador de distância é fixo em `<=>` (cosseno) e a função de ranking textual é fixa
+> em `ts_rank_cd` nativo. Estão documentadas aqui apenas como intenção futura — **não use
+> em exemplos executáveis**. Use as chaves reais da § 9.
+
+| Chave (não-shipped) | Intenção futura |
+|---|---|
+| `weight` | Fusão ponderada por perna (hoje: RRF sem pesos). |
+| `distance_operator` | Operador de distância configurável (hoje: fixo `<=>` cosseno). |
+| `ranking_function` | Função de ranking textual configurável (hoje: fixo `ts_rank_cd`). |
+| `include_json_output` | Saída JSON detalhada do cálculo de ranking. |
+| `id_type` | Cast automático do tipo do ID retornado (hoje: `id text`). |
+
+O parser `g_to_tsquery` também **não existe** — a superfície entregue usa o
+`plainto_tsquery` nativo do PostgreSQL.

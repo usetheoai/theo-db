@@ -1515,7 +1515,7 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 
 ---
 
-## M104 — [ ] system-design hardening: fechar as findings da auditoria (health 4.2 → ≥4.9/5) *(gated M103)*
+## M104 — [x] system-design hardening: fechar as findings da auditoria (health 4.2 → ≥4.9/5) *(gated M103)*
 
 > Added 2026-07-16 by `/roadmap-feature` (slug: `system-design-hardening-49`). Fonte: auditoria Staff-level
 > `/loop-system-design` (`system-design-output/final_report.md`, overall **4.2/5**). See CHANGELOG `[Unreleased] § Added`.
@@ -1550,6 +1550,65 @@ findings vivem) + a auditoria concluída. **Prior art:** `system-design-output/f
 drafts `system-design-output/adrs/{0045-northstar-governance,0046-rabitq-vendor-disposition}.md` + os in-tree
 `am/build_stream.rs` (streaming M89), `am/df_executor.rs` (GreedyMemoryPool M100), `am/fold.rs` (crash-safe M48) +
 issues #99/#100/#102/#104/#106/#108.
+
+---
+
+## M105 — [ ] docs/features honestas — reconciliar as specs com a superfície entregue (pré-lançamento) *(gated M104)*
+
+> Added 2026-07-16 by `/roadmap-feature` (slug: `docs-features-reality-reconciliation`). Fonte: auditoria de features
+> (3 agentes, spec↔código↔testes) sobre `docs/features/*.md`. See CHANGELOG `[Unreleased] § Added`.
+
+**Objective:** todo exemplo SQL em `docs/features/*.md` OU roda num install limpo (copy-paste) OU está sob um banner
+claramente rotulado **"🎯 API-alvo / roadmap (não-shipped)"**. Nenhum `42883 undefined_function` silencioso. Pré-lançamento,
+sem usuários: doc que mente é pior que doc que falta — mata a primeira impressão de um produto OSS. **Docs-only, ZERO código.**
+
+**GATE (verificação honesta):** varredura por-arquivo — cada símbolo SQL runnable (não-rotulado) nas 12 specs resolve
+a uma função/AM/opclass REAL no código (grep-confirmado, zero símbolo fabricado); cada superfície aspiracional está sob a
+seção rotulada. Nenhuma spec afirma "shipped" o que o código não entrega.
+
+**DoD:** (1) `theodb_ml.embedding('MODEL','TEXT')` → `theodb.embed(content, model)` corrigido em 01/03/04/05 (nome,
+schema, ordem dos args; modelo literal fictício removido); (2) exemplos de índice usam o AM+opclass **próprios**
+(`USING theodb_hnsw (embedding theodb_hnsw_l2_ops)`, `theodb_ivfflat_l2_ops`) em 02/03 — exemplos da superfície pgvector
+rotulados como coexistência, não como o AM próprio; (3) `CREATE EXTENSION theodb_ml` corrigido — é **schema** + registry
+(`theodb_ml.create_model/apply_model/...`), não extensão; (4) **09** reconciliada ao reranker real `ai.rerank(query,
+documents[], model, top_n) RETURNS TABLE(idx,score)` (idx 0-based; o off-by-one do exemplo RAG corrigido) — o `ai.rank`
+fantasma (4-arg) removido/rotulado; (5) **06** — chaves JSON não-implementadas (`weight`/`distance_operator`/
+`ranking_function`/`include_json_output`/`id_type`) + `g_to_tsquery`/`theodb_scann` removidas dos exemplos runnable ou
+movidas p/ target-API; contrato JSON real documentado (`table/id_col/content_tsv_col/…/lexical_engine`); (6) superfícies
+aspiracionais/diferidas (04 `USING ivf`, 05 `USING scann` + **ScaNN-QPS measured-negative** ADR-0035/0036, 08 Proxy Model,
+12 `theodb_ai_nl.*`) sob banner **"🎯 API-alvo / roadmap (não-shipped)"**, com a via SHIPPED documentada primeiro. **Boundary
+honesto:** ZERO mudança de capacidade/código — só alinhar doc↔realidade e rotular o aspiracional (não implementa nada novo).
+**Risks:** (a) afirmar shipped o que não é (honestidade, Regra 3) → mitigação: grep-verify por exemplo antes de marcar
+runnable; (b) scope creep p/ reescrever specs inteiras → mitigação: "corrige+rotula, não reescreve"; DoD é checklist
+por-arquivo. **Dependencies:** M104 (estado shipped mais recente que o audit reflete). **Prior art:** o audit de features
++ `docs/features/*.md` + `theodb_rs/src/{api,hybrid,rerank,nl,chat,embed}.rs` + `am/mod.rs` (AMs/opclasses reais).
+
+---
+
+## M106 — [ ] higiene de API pré-usuários — canonizar ai.rank/rerank + honrar `weight` no hybrid *(gated M105)*
+
+> Added 2026-07-16 by `/roadmap-feature` (slug: `api-consistency-prelaunch`). Fonte: mesma auditoria de features
+> (gaps 06/09). See CHANGELOG `[Unreleased] § Added`. **Opcional:** se a decisão for "doc segue o código", M105 já resolve
+> e este milestone é dispensável — existe para o caso de preferir enriquecer o CÓDIGO à API mais atraente já documentada.
+
+**Objective:** eliminar as 2 inconsistências API↔doc que o audit achou, escolhendo UMA superfície pública canônica e
+implementando o lado código quando a API documentada mais atraente vale a pena — **antes** de haver usuários que congelem
+o contrato. Não é feature nova de capacidade (reranker e RRF já existem e são testados); é higiene de nome/parametrização.
+
+**GATE:** novos `pg_test` provam o contrato canônico escolhido; `cargo pgrx test pg17` GREEN, 0 regressão.
+
+**DoD:** (1) **09 rerank** — decidir o nome público canônico: OU adicionar overload `ai.rank(query text, documents text[],
+model text, top_n int) RETURNS TABLE(idx int, score real)` espelhando `ai.rerank` (o nome já documentado/atraente), OU
+consolidar em `ai.rerank` e deprecar o outro — **um só** nome público, com teste de alinhamento de índice N-in/N-out;
+(2) **06 hybrid** — honrar `weight`: RRF ponderado real (`Σ wᵢ/(k+rankᵢ)`) em `run_rrf_json`, com teste provando que
+`weight` muda a ordem; default `weight=1` preserva o comportamento atual (não-ponderado); (3) todo símbolo público novo
+com `REVOKE ALL … FROM PUBLIC` (convenção least-privilege) + wiring triad (caller + teste + observável); (4) CHANGELOG
+atualizado. **Boundary honesto:** enriquecimento pequeno de superfície de API — **NÃO** muda a capacidade de retrieval;
+só consistência de nome/contrato antes de congelar o público. **Risks:** (a) alias duplica superfície (2 nomes p/ 1 coisa)
+→ mitigação: escolher UM canônico e deprecar o outro no mesmo PR; (b) weighted-RRF muda ranking → mitigação: pré-launch
+sem usuários + `weight=1` default = comportamento idêntico ao atual. **Dependencies:** M105 (docs reconciliadas primeiro,
+p/ a escolha do nome canônico ser deliberada, não acidental). **Prior art:** `theodb_rs/src/{rerank,hybrid,api}.rs` +
+`benchmarks/tests/{test_rerank_sql,test_integration}.py` + o audit de features.
 
 ---
 

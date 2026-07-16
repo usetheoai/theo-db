@@ -3,39 +3,87 @@
 > **Status:** ✅ **Entregue (M11 + M18).** A aceleração de funções de IA está disponível: `ai.generate_batch(prompts
 > text[], model text DEFAULT NULL) RETURNS text[]` responde N prompts em UM round-trip HTTP
 > (`theodb_rs/src/api.rs`, lógica em `theodb_rs/src/chat.rs` `ai_generate_batch`) — o padrão N-in/N-out que evita o
-> N+1 de chamadas por-linha; e `ai.if(prompt text, model text DEFAULT NULL) RETURNS boolean` para classificação
-> rápida (`theodb_rs/src/chat.rs` `ai_if`). Provado por `benchmarks/tests/test_ai_sql.py` (9 testes de
-> `generate_batch` + testes de `ai.if`). **Nota de honestidade:** a aceleração é o batching de round-trips (N→1);
+> N+1 de chamadas por-linha; e `ai.if_batch(condition text, vals text[], model text DEFAULT NULL) RETURNS
+> boolean[]` para classificação booleana em massa (mais o escalar `ai.if_costly`), em
+> `theodb_rs/src/chat.rs`. Provado por `benchmarks/tests/test_ai_sql.py` (9 testes de `generate_batch` + testes
+> de `ai.if_batch`/`ai.if_costly`). **Nota de honestidade:** a aceleração é o batching de round-trips (N→1);
 > o "Proxy Model local" descrito abaixo (estilo AlloyDB) não é a superfície entregue — a nossa é `ai.generate_batch`
-> / `ai.if`. Qualidade/latência dependem do LLM configurado (ADR `docs/adr/0007-synchronous-per-row-model-http.md`).
+> / `ai.if_batch`. Qualidade/latência dependem do LLM configurado (ADR `docs/adr/0007-synchronous-per-row-model-http.md`).
 
-Esta página cobre as **Optimized AI Functions** do TheoDB: consultas SQL, comandos, parâmetros e o uso do Proxy Model local para acelerar a classificação por IA com `ai.if()`.
+Esta página cobre a aceleração de funções de IA do TheoDB. A superfície **entregue** é o batching de
+round-trips com `ai.generate_batch` (N prompts → 1 chamada HTTP), documentado primeiro. A seção
+**🎯 API-alvo / roadmap (não-shipped)** ao final descreve o "Proxy Model local" estilo AlloyDB, que **não**
+está implementado.
 
 ---
 
-# 1. Verificar versão da extensão
+# 1. A aceleração entregue: `ai.generate_batch`
 
 ```sql
-SELECT extversion
-FROM pg_extension
-WHERE extname = 'theodb_ml';
+FUNCTION ai.generate_batch(
+    prompts TEXT[],
+    model TEXT DEFAULT NULL
+)
+RETURNS TEXT[];
 ```
 
-Verifica se a extensão `theodb_ml` está instalada na versão **1.5.8** ou superior.
+`ai.generate_batch` responde N prompts em **um único round-trip HTTP** (N-in/N-out), eliminando o N+1 de
+chamadas por-linha. É o mecanismo de aceleração real do TheoDB. Chamadas grandes são fatiadas automaticamente
+em blocos de `theodb.ai_max_batch`.
 
 ---
 
-# 2. Atualizar extensão
+# 2. Acelerar geração linha-a-linha com batching
 
 ```sql
-ALTER EXTENSION theodb_ml UPDATE;
+SELECT UNNEST(
+    ai.generate_batch(
+        ARRAY_AGG('Summarize in 20 words: ' || review)
+    )
+)
+FROM restaurant_reviews;
 ```
 
-Atualiza a extensão para suportar Optimized AI Functions.
+Colapsa N gerações por-linha numa só chamada ao endpoint e reexpande o array de respostas em linhas.
 
 ---
 
-# 3. Criar tabela de exemplo
+# 3. Acelerar classificação em lote com `ai.if_batch`
+
+```sql
+SELECT UNNEST(
+    ai.if_batch(
+        'Is this a positive review?',
+        ARRAY_AGG(review)
+    )
+)
+FROM restaurant_reviews;
+```
+
+Para classificação booleana em massa, `ai.if_batch(condition TEXT, vals TEXT[], model TEXT DEFAULT NULL)`
+retorna um array de booleanos numa única chamada — o análogo de classificação do `ai.generate_batch`.
+
+---
+
+# 4. Configurar o tamanho de bloco (`theodb.ai_max_batch`)
+
+```sql
+SET theodb.ai_max_batch = 20;
+```
+
+Define quantos prompts por chamada HTTP são enviados; arrays maiores são fatiados em blocos deste tamanho.
+
+---
+
+## 🎯 API-alvo / roadmap (não-shipped)
+
+**Tudo abaixo descreve a superfície-alvo estilo AlloyDB e NÃO está implementado.** O "Proxy Model local"
+(2-arg `ai.if(prompt, embedding)`, `theodb_ml.enable_ai_query_engine`, `theodb_ml.runtime_accuracy_check`,
+treinamento local disparado por `PREPARE`, e o DDL de extensão `CREATE EXTENSION`/`ALTER EXTENSION theodb_ml`)
+é roadmap. A aceleração **entregue** é `ai.generate_batch` / `ai.if_batch` (seções 1–4 acima). Não use os
+exemplos desta seção como código executável.
+
+# 5. Criar tabela de exemplo
 
 ```sql
 CREATE TABLE restaurant_reviews (

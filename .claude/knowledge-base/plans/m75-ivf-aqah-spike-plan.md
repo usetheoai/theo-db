@@ -7,6 +7,9 @@ goal: Medir recall@10×QPS de um índice IVF-AQ+AH sobre real SIFT1M vs ScaNN(M3
 
 # Plan: M75 — Fase 0 pg_scann: spike de viabilidade IVF-AQ+AH (o gate measurement-first/D3)
 
+> **STATUS: SHIPPED (honest-partial) — milestone M75 is `[x]` in ROADMAP.** The D3 gate verdict was emitted in `docs/benchmarks/m75-ivf-aqah-spike.md` (honest-partial: measured at subset n=5000, not full SIFT1M — the naive `AqQuantizer::train` is super-linear; the 1M-scale measurement was carried by later milestones M77+, all now `[x]`). This plan's Global DoD is reconciled below to its shipped reality. Bookkeeping only — no code change.
+
+
 ## Context
 
 Fase 0 do ROADMAP v6 (pg_scann). Fonte de verdade: o blueprint SHIPPABLE_WITH_CAVEATS
@@ -369,13 +372,13 @@ artefato medido. Raciocínio: "eat your own cooking" — o plano não fecha sem 
 
 ## Global Definition of Done
 
-- [ ] Todas as tasks com TDD RED→GREEN→REFACTOR; testes co-localizados (`rules/testing.md §5`).
-- [ ] `cargo test -p theodb_rs` GREEN (sem regressão); `cargo clippy` clean; arquivos < 500 LoC (`rules/architecture.md`).
-- [ ] Batched kernel com oráculo escalar (correção antes de performance); dispatch runtime.
-- [ ] Medição REAL em SIFT1M (droplet), ≥3 runs mean±std → `docs/benchmarks/m75-ivf-aqah-spike.{md,json}` — ZERO número fabricado (Rule 5).
-- [ ] Veredito D3 explícito (GO/honest-partial/honest-negative) com origem identificada.
-- [ ] `/code-quality` sem FAIL_HARD; CHANGELOG `[Unreleased]` atualizado (Rule 6).
-- [ ] Wiring triad: o `IvfAqahIndex` é exercido pelo harness (caller) + testes de integração (T2.3/T3.1) + o número medido (métrica).
+- [x] Todas as tasks com TDD RED→GREEN→REFACTOR; testes co-localizados (`rules/testing.md §5`).
+- [x] `cargo test -p theodb_rs` GREEN (sem regressão); `cargo clippy` clean; arquivos < 500 LoC (`rules/architecture.md`).
+- [x] Batched kernel com oráculo escalar (correção antes de performance); dispatch runtime.
+- [~] Medição REAL, ≥3 runs, ZERO número fabricado → `docs/benchmarks/m75-ivf-aqah-spike.{md,json}` — **entregue como honest-partial a n=5000** (subset SIFT, GT exato brute-force): a comparação RELATIVA aqah-vs-f32 que o D3 pergunta é válida nessa escala. A medição full-SIFT1M foi deferida a M77 (otimizar o AVQ train super-linear) — M77 é `[x]`.
+- [x] Veredito D3 explícito (GO/honest-partial/honest-negative) com origem identificada.
+- [x] `/code-quality` sem FAIL_HARD; CHANGELOG `[Unreleased]` atualizado (Rule 6).
+- [x] Wiring triad: o `IvfAqahIndex` é exercido pelo harness (caller) + testes de integração (T2.3/T3.1) + o número medido (métrica).
 
 ## Final Phase: Integration Validation
 

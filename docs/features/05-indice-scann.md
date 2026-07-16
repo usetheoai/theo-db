@@ -17,7 +17,57 @@
 > `benchmarks/tests/test_harness.py::test_build_config_diskann_only` + `benchmarks/tests/test_sbq_index.py`.
 > A superfície `USING scann (…)` desta página permanece como API-alvo condicional (reabre se um benchmark justificar).
 
-Esta página cobre a criação de índices `ScaNN` no TheoDB via extensão `theodb_scann`, incluindo os modos automático e manual, os quantizadores suportados, parâmetros de árvore, manutenção do índice e exemplos de consulta vetorial.
+Esta página cobre a criação de índices `ScaNN` no TheoDB, incluindo os modos automático e manual, os quantizadores suportados, parâmetros de árvore, manutenção do índice e exemplos de consulta vetorial.
+
+---
+
+## ✅ Caminho SHIPPED — ScaNN-inspired via `theodb_ivfflat` (IVF-AQ+AH)
+
+**Não** existe um access method `theodb_scann` / `USING scann` nem uma extensão
+`theodb_scann`. A técnica ScaNN-inspired **entregue hoje** é IVF + Asymmetric Hashing
+(AQ/AH) em código próprio, exposta pelo access method `theodb_ivfflat` com Product
+Quantization habilitado via a reloption `pq_subspaces`:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE INDEX products_scann_like_idx
+ON products
+USING theodb_ivfflat (
+    description_embedding theodb_ivfflat_l2_ops
+)
+WITH (
+    lists = 1000,
+    pq_subspaces = 16,
+    pq_bits = 8,
+    separate_storage = true
+);
+
+SELECT *
+FROM products
+ORDER BY description_embedding
+<=> theodb.embed('wireless headphones', 'text-embedding-3-small')
+LIMIT 10;
+```
+
+> **Nota honesta (medida):** este caminho own-code alcança **paridade de recall**
+> classe-pgvector. A **superioridade de QPS vetorial sobre o ScaNN/AlloyDB é
+> MEDIDA como NÃO-ALCANÇÁVEL** por uma extensão PostgreSQL permissiva (gap ~25–44×
+> @ 0.99 recall é de paradigma — AH-LUT anisotrópico + não pagar o imposto MVCC/WAL).
+> Isso é um limite de paradigma documentado (`docs/adr/0035`, `docs/adr/0036`), **não**
+> um gap a fechar. Nenhuma afirmação de desempenho sem artefato em `docs/benchmarks/`
+> (regra TheoDB 5).
+
+---
+
+## 🎯 API-alvo / roadmap (não-shipped)
+
+> **Não entregue.** Toda a superfície `USING scann (…)` / `CREATE EXTENSION theodb_scann`
+> abaixo é **API-alvo condicional** — o access method `theodb_scann` literal **não é
+> implementado por decisão explícita** (NO-FORK M14, gated por benchmark —
+> [`docs/adr/0004-scann-fork-decision.md`](../adr/0004-scann-fork-decision.md)). Para a
+> capacidade equivalente entregue hoje, use o caminho SHIPPED acima (`theodb_ivfflat`
+> com `pq_subspaces`). Os exemplos a seguir descrevem a superfície-alvo, não a atual.
 
 ---
 

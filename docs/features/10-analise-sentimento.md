@@ -8,44 +8,39 @@
 > configurado (modelo síncrono por-linha, ADR `docs/adr/0007-synchronous-per-row-model-http.md`); não há benchmark
 > de acurácia de sentimento publicado.
 
-Esta página cobre a função `ai.analyze_sentiment()` — consultas SQL, parâmetros e modos de execução
-(escalar, baseado em arrays e baseado em cursor) para classificar o sentimento de textos.
+Esta página cobre a função `ai.analyze_sentiment()` — assinatura, parâmetros e uso escalar para classificar
+o sentimento de textos.
 
 ---
 
-# 1. Verificar versão da extensão
+# 1. Assinatura da função
 
 ```sql
-SELECT extversion
-FROM pg_extension
-WHERE extname = 'theodb_ml';
+FUNCTION ai.analyze_sentiment(
+    content TEXT,
+    model TEXT DEFAULT NULL
+)
+RETURNS TEXT;
 ```
 
-Verifica se a extensão `theodb_ml` está na versão **1.5.7** ou superior.
+Classifica o texto num rótulo de sentimento (`positive` / `negative` / `neutral`) via LLM. Não requer
+`CREATE EXTENSION` nem flags de preview — as funções `ai.*` vivem no schema `ai`.
 
 ---
 
-# 2. Atualizar para versão Preview
+# 2. (opcional) Registrar/selecionar um modelo
 
 ```sql
-CALL theodb_ml.upgrade_to_preview_version();
+SELECT theodb_ml.create_model('theodb-text-lite', '<your-llm-endpoint>', 'theodb-text-lite');
+SELECT theodb_ml.apply_model('theodb-text-lite');
 ```
 
-Atualiza a extensão para a versão Preview que contém `ai.analyze_sentiment()`.
+`theodb_ml` é um schema + registry de modelos (não uma extensão). Registrar/aplicar um modelo é opcional; sem
+isso, o modelo padrão vem das GUCs de sessão (`theodb.llm_endpoint`/`theodb.llm_model`).
 
 ---
 
-# 3. Habilitar funções Preview
-
-```sql
-SET theodb_ml.enable_preview_ai_functions = 'on';
-```
-
-Ativa as funções experimentais de IA para a sessão atual.
-
----
-
-# 4. Criar tabela de avaliações
+# 3. Criar tabela de avaliações
 
 ```sql
 CREATE TABLE IF NOT EXISTS reviews (
@@ -82,9 +77,7 @@ Popula a tabela para testes de análise de sentimento.
 # 6. Analisar sentimento de um texto
 
 ```sql
-SELECT ai.analyze_sentiment(
-    prompt => 'This movie is very good'
-);
+SELECT ai.analyze_sentiment('This movie is very good');
 ```
 
 Executa a versão escalar da função para um único texto.
@@ -95,22 +88,22 @@ Executa a versão escalar da função para um único texto.
 
 ```sql
 SELECT ai.analyze_sentiment(
-    prompt => 'This movie is very good',
-    model_id => 'theodb-text-lite'
+    'This movie is very good',
+    'theodb-text-lite'
 );
 ```
 
-Permite utilizar um modelo diferente do padrão.
+Permite utilizar um modelo diferente do padrão (segundo argumento `model`).
 
 ---
 
 # 8. Utilizar modelo padrão
 
 ```sql
-model_id => 'theodb-text-lite'
+SELECT ai.analyze_sentiment('This movie is very good');
 ```
 
-Caso `model_id` seja omitido, este modelo é utilizado automaticamente.
+Quando o segundo argumento `model` é omitido, o modelo padrão (das GUCs de sessão) é utilizado automaticamente.
 
 ---
 
@@ -150,6 +143,13 @@ neutral
 A função retorna uma destas três classificações.
 
 ---
+
+## 🎯 API-alvo / roadmap (não-shipped)
+
+**As seções 12–38 abaixo descrevem os modos array-based e cursor-based estilo AlloyDB e NÃO estão
+implementados.** A superfície entregue de `ai.analyze_sentiment` é **escalar** (`content, model`) — seções
+1–11 acima. Não use os exemplos desta seção (arrays com `prompts =>`/`batch_size =>`, `REFCURSOR`,
+`input_cursor =>`) como código executável.
 
 # 12. Assinatura baseada em arrays
 
@@ -512,34 +512,26 @@ Fluxo recomendado para grandes volumes de dados utilizando cursores.
 
 # 39. Modos de execução suportados
 
-A função `ai.analyze_sentiment()` possui **três modos de processamento**:
-
-* **Scalar**: processa um único texto por chamada.
-* **Array-based**: processa múltiplos textos em lote utilizando arrays.
-* **Cursor-based**: processa grandes conjuntos de dados utilizando `REFCURSOR`, permitindo streaming e menor consumo de memória.
+* **Scalar** (entregue): processa um único texto por chamada — `ai.analyze_sentiment(content, model)`.
+* **Array-based** / **Cursor-based** (🎯 roadmap): ver a seção "API-alvo / roadmap" acima; não implementados.
 
 ---
 
-# 40. Fluxo geral recomendado
+# 40. Fluxo geral recomendado (shipped)
 
 ```sql
-SELECT extversion
-FROM pg_extension
-WHERE extname = 'theodb_ml';
+-- (opcional) registrar e aplicar um modelo
+SELECT theodb_ml.create_model('theodb-text-lite', '<your-llm-endpoint>', 'theodb-text-lite');
+SELECT theodb_ml.apply_model('theodb-text-lite');
 
-CALL theodb_ml.upgrade_to_preview_version();
-
-SET theodb_ml.enable_preview_ai_functions = 'on';
-
+-- classificar sentimento linha-a-linha
 SELECT
     id,
     ai.analyze_sentiment(review_content)
 FROM reviews;
 ```
 
-Fluxo completo recomendado:
+Fluxo entregue:
 
-1. verificar a versão da extensão;
-2. atualizar para a versão Preview (se necessário);
-3. habilitar as funções Preview;
-4. utilizar `ai.analyze_sentiment()` no modo escalar, em lote ou com cursores conforme o volume de dados.
+1. (opcional) registrar/aplicar um modelo no registry `theodb_ml`;
+2. utilizar `ai.analyze_sentiment(content, model)` no modo escalar, linha a linha.
