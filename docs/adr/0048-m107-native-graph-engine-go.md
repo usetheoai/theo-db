@@ -18,14 +18,14 @@ Graph is a recurring, cross-system, frequently-used capability (not YAGNI), and 
 
 ## Evidence (the D3 gate)
 
-Reproducible spike (`docs/benchmarks/m107-graph-spike.md`, 4 trials/scale, oracle PASS on all 8):
+Reproducible spike (`docs/benchmarks/m107-graph-spike.md`, 4 trials/scale, oracle PASS on all 8 vs BOTH baselines):
 
-| Scale | Native traverse | Recursive-CTE | Speedup (traverse) | Speedup (end-to-end) |
-|---|---|---|---|---|
-| 100k edges | 0.27 ms | 190.9 ms | **732×** | 108× |
-| 1M edges | 1.08 ms | 283.1 ms | **262×** | 8.3× |
+| Scale | Native traverse | CTE `UNION ALL` (theo-rag) | CTE `UNION` (dedup, fairer) | traverse vs UNION ALL | traverse vs dedup |
+|---|---|---|---|---|---|
+| 100k edges | 0.25 ms | 181.6 ms | 55.2 ms | **738×** | **232×** |
+| 1M edges | 1.38 ms | 222.5 ms | 139.2 ms | **169×** | **106×** |
 
-The reachable-set correctness oracle (count + checksum) matched the CTE on every trial. The fairer `UNION`-dedup CTE (181.9 ms @1M) is still ~170× slower than native traverse — the conclusion survives a non-strawman baseline.
+The reachable-set correctness oracle (count + checksum, plus an independent set-hash re-check) matched BOTH CTE variants on every trial. Native traverse wins **106–232×** even against the fairer `UNION`-dedup baseline — the conclusion survives a non-strawman baseline. The spike isolates the reachable-set expansion (the CTE's dominant cost), not the full retriever chunk-scoring tail (which would make the CTE cost *higher* — the spike is conservative).
 
 ## Alternatives considered
 

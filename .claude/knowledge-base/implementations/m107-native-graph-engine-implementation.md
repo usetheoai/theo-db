@@ -19,14 +19,14 @@ goal: Phase-0 gate of the native graph pillar — SOTA blueprint + reproducible 
 | 4 | ADR of the architecture decision | ✅ | `docs/adr/0048-m107-native-graph-engine-go.md` (native-over-columnar vs Apache AGE vs recursive-CTE; license note) |
 | 5 | Rule-9 reuse discipline | ✅ | spike is own-code (no new deps); blueprint mandates reuse of columnar M99–M103 + vector AM + SIMD kernels — no columnar reimplementation, no PG rewrite |
 
-## Measured evidence (the gate)
+## Measured evidence (the gate — both baselines reproducible, oracle PASS on all 8)
 
-| Scale | Native traverse | Native total | Recursive-CTE | Speedup traverse | Speedup total | Oracle |
+| Scale | Native traverse | CTE `UNION ALL` | CTE `UNION` dedup | traverse vs UNION ALL | traverse vs dedup | total vs UNION ALL |
 |---|---|---|---|---|---|---|
-| 100k edges | 0.27 ms ± 0.04 | 1.89 ms | 190.9 ms ± 32.8 | **732× ± 167** | 108× ± 37 | PASS 4/4 |
-| 1M edges | 1.08 ms ± 0.30 | 39.27 ms | 283.1 ms ± 90.5 | **262× ± 38** | 8.3× ± 3.5 | PASS 4/4 |
+| 100k | 0.25 ± 0.07 ms | 181.6 ± 40.8 ms | 55.2 ± 10.4 ms | **738× ± 94** | **232× ± 52** | 131× ± 32 |
+| 1M | 1.38 ± 0.43 ms | 222.5 ± 39.0 ms | 139.2 ± 23.4 ms | **169× ± 29** | **106× ± 19** | 6.9× ± 1.5 |
 
-Fairer `UNION`-dedup CTE (182 ms @1M) still ~170× slower than native traverse — no strawman.
+Both baselines (theo-rag `UNION ALL` + fairer `UNION`-dedup) are in the harness with mean±std; native traverse wins 106–232× even vs the fairer baseline — no strawman. The spike isolates the reachable-set expansion (dominant CTE cost), not the full retriever tail (conservative).
 
 ## Key finding shaping Phase 1
 
