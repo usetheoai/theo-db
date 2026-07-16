@@ -641,6 +641,71 @@ unsafe fn materialize_rows(rel: pg_sys::Relation) -> Result<Vec<Vec<u8>>, String
     }
 }
 
+/// M100 — decode all visible stripes (+ this backend's pending rows) into per-column value vectors, BEFORE the
+/// row transposition — the input the DataFusion Arrow batch builder needs (`df_executor.rs`). Returns one tuple per
+/// column: (column name, atttypid, values[row] = Some(stored bytes) | None). The stored bytes are the same encoding
+/// the codec produced (fixed: attlen LE bytes; varlena: logical payload) — `df_executor` maps them to Arrow arrays.
+pub(super) unsafe fn decode_columns(
+    rel: pg_sys::Relation,
+) -> Result<Vec<(String, u32, Vec<Option<Vec<u8>>>)>, String> {
+    let tupdesc = (*rel).rd_att;
+    let natts = (*tupdesc).natts as usize;
+    let cols = (0..natts).map(|i| coldesc(tupdesc, i)).collect::<Result<Vec<_>, _>>()?;
+    let names: Vec<String> = (0..natts)
+        .map(|i| {
+            let attr = (*tupdesc).attrs.as_ptr().add(i);
+            std::ffi::CStr::from_ptr((*attr).attname.data.as_ptr()).to_string_lossy().into_owned()
+        })
+        .collect();
+    let typids: Vec<u32> = (0..natts).map(|i| (*(*tupdesc).attrs.as_ptr().add(i)).atttypid.to_u32()).collect();
+
+    let mut columns: Vec<Vec<Option<Vec<u8>>>> = vec![Vec::new(); natts];
+    for sm in read_visible_stripes((*rel).rd_id)? {
+        let hdr_items = super::page::read_all_page_items(rel, sm.header_block)?;
+        let hdr_bytes = hdr_items.into_iter().next().ok_or("theodb_columnar: stripe header page empty")?;
+        let header = StripeHeader::from_bytes(&hdr_bytes)?;
+        if header.ncols as usize != natts {
+            return Err(format!("theodb_columnar: stripe ncols {} != natts {natts}", header.ncols));
+        }
+        let dir_bytes = super::page::read_chunked(rel, header.dir_first_block, header.dir_n_pages)?;
+        let entries = codec::deserialize_directory(&dir_bytes, header.n_chunk_groups as usize * natts)?;
+        for cg in 0..header.n_chunk_groups as usize {
+            let cg_rows = entries[cg * natts].row_count as usize;
+            for col in 0..natts {
+                let e = &entries[cg * natts + col];
+                let comp = super::page::read_chunked(rel, e.first_block, e.n_pages)?;
+                let raw = zstd::decode_all(&comp[..e.comp_len as usize])
+                    .map_err(|x| format!("theodb_columnar: zstd decode failed: {x}"))?;
+                let mut vals = codec::decode_column(&raw, cols[col].attlen_fixed, cg_rows, e.has_nulls)?;
+                columns[col].append(&mut vals);
+            }
+        }
+    }
+    // Same-xact pending rows (heap-tuple bytes) → deform into the per-column vectors so a same-xact vectorized scan
+    // sees its own not-yet-flushed inserts (mirrors materialize_rows' pending append).
+    let oid = (*rel).rd_id.to_u32();
+    let pending: Option<Vec<Vec<u8>>> = WRITE_STATES.with(|w| w.borrow().get(&oid).cloned());
+    if let Some(rows) = pending {
+        let mut values = vec![pg_sys::Datum::from(0usize); natts];
+        let mut isnull = vec![false; natts];
+        for rbytes in &rows {
+            let mut htup: pg_sys::HeapTupleData = std::mem::zeroed();
+            htup.t_len = rbytes.len() as u32;
+            htup.t_data = rbytes.as_ptr() as pg_sys::HeapTupleHeader;
+            pg_sys::heap_deform_tuple(&mut htup, tupdesc, values.as_mut_ptr(), isnull.as_mut_ptr());
+            for i in 0..natts {
+                if isnull[i] {
+                    columns[i].push(None);
+                } else {
+                    columns[i].push(Some(extract_value_bytes(&cols[i], values[i])?));
+                }
+            }
+        }
+    }
+
+    Ok(names.into_iter().zip(typids).zip(columns).map(|((n, t), v)| (n, t, v)).collect())
+}
+
 #[pg_guard]
 pub unsafe extern "C-unwind" fn columnar_scan_begin(
     rel: pg_sys::Relation,
