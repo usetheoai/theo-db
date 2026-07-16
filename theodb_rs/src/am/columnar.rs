@@ -22,6 +22,11 @@
 
 use super::columnar_codec::{self as codec, StripeHeader};
 use pgrx::prelude::*;
+
+// The column-major byval encoding (`Datum::value().to_le_bytes()[..attlen]`) and the SET_VARSIZE_4B reconstruction
+// assume a little-endian target (x86-64). Make the assumption a compile-time failure on a big-endian build rather
+// than a silent wrong-answer at runtime (council-rust-pgrx review).
+const _: () = assert!(cfg!(target_endian = "little"), "theodb_columnar column-major encoding requires a little-endian target");
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::mem::size_of;

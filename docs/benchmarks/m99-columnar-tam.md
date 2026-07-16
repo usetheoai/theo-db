@@ -21,9 +21,18 @@
 
 ## Methodology
 
-- **Dataset:** 1,000,000 rows, 4 columns — `id int` (monotonic, low-compressibility), `category text` (10 distinct
-  values, high-compressibility), `measure float8`, `flag bool`. Same data inserted into a `theodb_columnar` table
-  and a heap table.
+- **Dataset:** 1,000,000 rows, 4 columns — `id int` (monotonic), `category text` (10 distinct values),
+  `measure float8` (= `id * 1.5`), `flag bool`. Same data inserted into a `theodb_columnar` table and a heap table.
+- **Compression is dataset-dependent — the 9.2× is NOT a universal multiplier.** All four columns here are
+  compression-favorable by construction (10-value category, monotonic `id`, linearly-derived `measure`, boolean
+  `flag`). High-entropy data (random UUIDs, uncorrelated floats) compresses far less. The on-disk win is real but
+  data-specific.
+- **Size scope:** `pg_relation_size('t_col')` measures the columnar MAIN fork only. The MVCC visibility catalog
+  `columnar.stripe` (≈1 row per stripe — a single stripe / a few KB at this scale) is a separate heap and is NOT
+  included; immaterial to the ratio here, but disclosed.
+- **Result-equivalence scope:** the harness cross-checks `count(*)` + `round(sum(measure))` columnar-vs-heap
+  (`"t"`); per-group GROUP BY correctness is proven by the isolation suite (`theodb_rs/isolation/columnar_*.spec`),
+  not re-measured here.
 - **Hardware:** 8 vCPU, 15 GB RAM DigitalOcean droplet; PostgreSQL 17.10 (pgrx-managed), `shared_buffers=1GB`,
   `max_parallel_workers_per_gather=0` (single-threaded, apples-to-apples).
 - **Timing:** `EXPLAIN (ANALYZE, TIMING OFF, BUFFERS OFF)` execution time, 1 warm-up discarded + 5 measured runs,
