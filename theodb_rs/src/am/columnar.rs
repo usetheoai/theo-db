@@ -60,6 +60,18 @@ CREATE TABLE IF NOT EXISTS columnar.stripe (
     PRIMARY KEY (relid, stripe_id)
 );
 CREATE INDEX IF NOT EXISTS columnar_stripe_relid_rownum ON columnar.stripe (relid, first_row_number);
+
+-- Reclaim orphaned stripe rows when a columnar table is dropped, so a later OID reuse can never inherit stale
+-- stripes (the catalog has no FK to pg_class — the object is already gone by row-delete time).
+CREATE OR REPLACE FUNCTION columnar._drop_cleanup() RETURNS event_trigger LANGUAGE plpgsql AS $fn$
+BEGIN
+    DELETE FROM columnar.stripe s
+    USING pg_event_trigger_dropped_objects() d
+    WHERE d.classid = 'pg_catalog.pg_class'::regclass AND s.relid = d.objid;
+END;
+$fn$;
+DROP EVENT TRIGGER IF EXISTS columnar_drop_cleanup;
+CREATE EVENT TRIGGER columnar_drop_cleanup ON sql_drop EXECUTE FUNCTION columnar._drop_cleanup();
 "#,
     name = "theodb_columnar_catalog",
 );
@@ -1262,6 +1274,35 @@ mod tests {
         let cnt_disk = Spi::get_one::<i64>("SELECT count(*) FROM m99_mv").unwrap().unwrap();
         assert_eq!(cnt_disk, 100, "rows visible via the catalog stripe after flush");
         Spi::run("DROP TABLE m99_mv").unwrap();
+    }
+
+    /// M99 Phase C2 — DROP TABLE reclaims the table's `columnar.stripe` rows (the `sql_drop` event trigger), so a
+    /// later OID reuse can never inherit stale stripes. Without this the catalog (which has no FK to pg_class) would
+    /// leak orphan rows.
+    #[pg_test]
+    fn m99_drop_table_reclaims_catalog_rows() {
+        Spi::run("CREATE TABLE m99_dc (a int) USING theodb_columnar").unwrap();
+        Spi::run("INSERT INTO m99_dc SELECT g FROM generate_series(1, 50) g").unwrap();
+        let oid = Spi::get_one::<pg_sys::Oid>("SELECT 'm99_dc'::regclass::oid").unwrap().unwrap();
+        Spi::get_one_with_args::<String>("SELECT theodb_columnar_test_stripe_info($1)", &[oid.into()])
+            .unwrap()
+            .unwrap(); // flush → one catalog row
+        let before = Spi::get_one_with_args::<i64>(
+            "SELECT count(*) FROM columnar.stripe WHERE relid = $1",
+            &[oid.into()],
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(before, 1, "one catalog row before drop");
+        Spi::run("DROP TABLE m99_dc").unwrap();
+        // The dropped table's OID must have no surviving catalog rows.
+        let after = Spi::get_one_with_args::<i64>(
+            "SELECT count(*) FROM columnar.stripe WHERE relid = $1",
+            &[oid.into()],
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(after, 0, "DROP TABLE reclaimed the columnar.stripe rows (event trigger)");
     }
 
     /// M99 A1 — `CREATE TABLE ... USING theodb_columnar` loads end-to-end and registers in `pg_am`, and an empty
