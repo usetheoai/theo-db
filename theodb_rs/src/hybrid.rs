@@ -23,10 +23,12 @@ use serde_json::Value;
 use crate::pg::{err_input, err_unsupported};
 
 /// The RRF fusion template (default `ts_rank_cd` lexical leg). `%1$I`=id_col, `%2$I`=vector_col,
-/// `%3$s`=tbl (regclass::text, already quoted), `%4$I`=lexical column (tsvector), `%5$s`=filter_sql —
-/// substituted by Postgres `format()` (injection-safe). The `$1..$6` placeholders are LITERAL here (format
-/// only touches `%` specifiers) and bind at execution: $1=qvec(text→::vector), $2=query_text,
-/// $3=per_leg_limit, $4=k, $5=result_limit, $6=language(regconfig). Byte-faithful to sql/40:76-106.
+/// `%3$s`=tbl (regclass::text, already quoted), `%4$I`=lexical column (tsvector), `%5$s`=filter_sql,
+/// `%6$s`=vec_weight, `%7$s`=text_weight (M106: per-leg RRF weights, validated finite ≥ 0 and formatted as
+/// numeric literals — injection-safe; default 1.0 each = the pre-M106 unweighted fusion) — all substituted by
+/// Postgres `format()`. The `$1..$6` placeholders are LITERAL here (format only touches `%` specifiers) and
+/// bind at execution: $1=qvec(text→::vector), $2=query_text, $3=per_leg_limit, $4=k, $5=result_limit,
+/// $6=language(regconfig). Byte-faithful to sql/40:76-106 when both weights are 1.0.
 const FUSION_TEMPLATE_TSRANK: &str = r#"WITH vec AS (
     SELECT %1$I AS _id,
            RANK() OVER (ORDER BY %2$I <=> $1::vector) AS rank
@@ -44,8 +46,8 @@ fts AS (
     LIMIT $3
 )
 SELECT COALESCE(vec._id, fts._id)::text AS id,
-       (COALESCE(1.0 / ($4 + vec.rank), 0.0)
-      + COALESCE(1.0 / ($4 + fts.rank), 0.0))::real AS score
+       (%6$s * COALESCE(1.0 / ($4 + vec.rank), 0.0)
+      + %7$s * COALESCE(1.0 / ($4 + fts.rank), 0.0))::real AS score
 FROM vec
 FULL OUTER JOIN fts ON vec._id = fts._id
 ORDER BY score DESC, id ASC
@@ -76,8 +78,8 @@ fts AS (
     LIMIT $3
 )
 SELECT COALESCE(vec._id, fts._id)::text AS id,
-       (COALESCE(1.0 / ($4 + vec.rank), 0.0)
-      + COALESCE(1.0 / ($4 + fts.rank), 0.0))::real AS score
+       (%6$s * COALESCE(1.0 / ($4 + vec.rank), 0.0)
+      + %7$s * COALESCE(1.0 / ($4 + fts.rank), 0.0))::real AS score
 FROM vec
 FULL OUTER JOIN fts ON vec._id = fts._id
 ORDER BY score DESC, id ASC
@@ -101,10 +103,22 @@ pub(crate) fn run_rrf(
     filter_sql: Option<&str>,
     lexical_engine: &str,
     content_text_col: Option<&str>,
+    vec_weight: f64,
+    text_weight: f64,
 ) -> Vec<(String, f32)> {
     // Fail-fast, typed (Rule 8) — mirror sql/40:45-57.
     if k <= 0 {
         err_input(&format!("ai.hybrid_search_rrf: k must be > 0 (got {k})"));
+    }
+    // M106 — weighted RRF: each leg's reciprocal-rank term is scaled by its weight. Weights must be finite
+    // and non-negative (a negative weight would invert the fusion; NaN/inf would poison the numeric literal).
+    // Default 1.0 each ⇒ byte-identical to the pre-M106 unweighted fusion. 0.0 disables a leg (valid).
+    for (name, w) in [("vector_weight", vec_weight), ("text_weight", text_weight)] {
+        if !w.is_finite() || w < 0.0 {
+            err_input(&format!(
+                "ai.hybrid_search: {name} must be a finite number >= 0 (got {w})"
+            ));
+        }
     }
     if per_leg_limit <= 0 {
         err_input(&format!(
@@ -175,10 +189,19 @@ pub(crate) fn run_rrf(
     // Build the fusion SQL with Postgres-native %I quoting (injection-safe) — one format() call over SPI.
     // `%1$I..%4$I` = identifiers (quoted), `%3$s` = regclass text, `%5$s` = the confined filter predicate.
     // The template is dollar-quoted ($fq$…$fq$); its literal $1..$6 survive and bind at execution.
-    let build_q = format!("SELECT format($fq${template}$fq$, $1, $2, $3, $4, $5)");
+    // M106: the two weights are rendered as fixed-precision decimal literals (validated finite ≥ 0 above, so
+    // the string is pure numeric — injection-safe) and passed as the `%6$s`/`%7$s` format args. The `+ 0.0`
+    // normalizes IEEE-754 negative zero (`-0.0` passes `>= 0.0`) to `+0.0`, so the literal never carries a
+    // stray leading `-` (keeps the "unsigned decimal literal" invariant; semantically `-0.0` == `0.0`).
+    let vec_w_lit = format!("{:.6}", vec_weight + 0.0);
+    let text_w_lit = format!("{:.6}", text_weight + 0.0);
+    let build_q = format!("SELECT format($fq${template}$fq$, $1, $2, $3, $4, $5, $6, $7)");
     let built = Spi::get_one_with_args::<String>(
         &build_q,
-        &[id_col.into(), vector_col.into(), tbl_text.into(), lexical_col.into(), filter.into()],
+        &[
+            id_col.into(), vector_col.into(), tbl_text.into(), lexical_col.into(), filter.into(),
+            vec_w_lit.into(), text_w_lit.into(),
+        ],
     )
     .ok()
     .flatten()
@@ -265,6 +288,11 @@ pub(crate) fn run_rrf_json(cfg: Value) -> Vec<(String, f32)> {
     let filter_sql = get_str("filter_sql");
     let lexical_engine = get_str("lexical_engine").unwrap_or("ts_rank_cd");
     let content_text_col = get_str("content_text_col");
+    // M106 — per-leg RRF weights (default 1.0 = unweighted). Accepts int or float JSON; run_rrf validates
+    // finite ≥ 0. This honors the `vector_weight`/`text_weight` keys the docs promised (audit gap 06).
+    let as_f64 = |k: &str, d: f64| cfg.get(k).and_then(|v| v.as_f64()).unwrap_or(d);
+    let vec_weight = as_f64("vector_weight", 1.0);
+    let text_weight = as_f64("text_weight", 1.0);
 
     // Resolve the bare table name to a regclass::text (same as the plpgsql `(config->>'table')::regclass`
     // then `tbl::text`) — Postgres quotes it safely; a non-existent relation raises naturally.
@@ -275,6 +303,72 @@ pub(crate) fn run_rrf_json(cfg: Value) -> Vec<(String, f32)> {
 
     run_rrf(
         &tbl_text, id_col, content_tsv_col, vector_col, query_text, query_vector, k, per_leg_limit,
-        result_limit, language, filter_sql, lexical_engine, content_text_col,
+        result_limit, language, filter_sql, lexical_engine, content_text_col, vec_weight, text_weight,
     )
+}
+
+#[cfg(any(test, feature = "pg_test"))]
+#[pgrx::pg_schema]
+mod tests {
+    use pgrx::prelude::*;
+
+    // Two SINGLE-LEG docs so the weight cleanly decides the winner: `dv` is ONLY in the vector leg (has an
+    // embedding, no 'database' term → absent from FTS), `df` is ONLY in the FTS leg (`embedding IS NULL` →
+    // excluded by the vector leg's `IS NOT NULL` guard, has 'database'). Each contributes w_leg/(k+1), so the
+    // ranking is decided purely by which leg's weight is larger. Query supplies query_vector (no embed needed).
+    fn seed() {
+        Spi::run(
+            "CREATE TABLE hybw (doc_id text PRIMARY KEY, body text, text_tsv tsvector, embedding vector(3))",
+        )
+        .unwrap();
+        Spi::run(
+            "INSERT INTO hybw VALUES \
+             ('dv','unrelated lexical words', to_tsvector('english','unrelated lexical words'), '[1,0,0]'), \
+             ('df','database database database', to_tsvector('english','database database database'), NULL)",
+        )
+        .unwrap();
+    }
+
+    fn top(vector_weight: &str, text_weight: &str) -> String {
+        seed();
+        let sql = format!(
+            "SELECT id FROM ai.hybrid_search(jsonb_build_object(\
+             'table','hybw','id_col','doc_id','content_tsv_col','text_tsv','vector_col','embedding',\
+             'query_text','database','query_vector','[1,0,0]','result_limit',5,\
+             'vector_weight',{vector_weight},'text_weight',{text_weight})) LIMIT 1"
+        );
+        Spi::get_one::<String>(&sql).unwrap().unwrap()
+    }
+
+    // M106: upweighting the vector leg lifts its top doc (dv) to #1; upweighting the text leg flips it to df.
+    #[pg_test]
+    fn m106_vector_weight_lifts_vector_leg_top() {
+        assert_eq!(top("3", "1"), "dv", "vector_weight=3 must rank the vector-leg winner first");
+    }
+
+    #[pg_test]
+    fn m106_text_weight_flips_ranking_to_fts_leg_top() {
+        assert_eq!(top("1", "3"), "df", "text_weight=3 must flip the ranking to the FTS-leg winner");
+    }
+
+    // M106 (review LOW): IEEE-754 `-0.0` passes the `>= 0` guard; it must be treated as `0.0` (disable the
+    // leg) and MUST NOT emit a stray `-` into the SQL literal. `-0.0` on the vector leg ⇒ FTS-leg doc wins.
+    #[pg_test]
+    fn m106_negative_zero_weight_behaves_as_zero() {
+        assert_eq!(top("-0.0", "1"), "df", "vector_weight=-0.0 disables the vector leg (behaves as 0.0)");
+    }
+
+    // M106: a negative weight is rejected with a typed 22023 (fail-fast).
+    #[pg_test]
+    fn m106_negative_weight_rejected() {
+        seed();
+        let r = std::panic::catch_unwind(|| {
+            Spi::run(
+                "SELECT id FROM ai.hybrid_search(jsonb_build_object(\
+                 'table','hybw','id_col','doc_id','content_tsv_col','text_tsv','vector_col','embedding',\
+                 'query_text','database','vector_weight',-1))",
+            )
+        });
+        assert!(r.is_err(), "a negative vector_weight must raise (not silently proceed)");
+    }
 }

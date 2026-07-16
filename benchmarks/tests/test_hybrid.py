@@ -23,6 +23,36 @@ def test_rrf_fuse_empty_leg():
     assert [i for i, _ in fused] == ["A", "B"]  # other leg preserved, no crash
 
 
+def test_rrf_fuse_default_weights_equal_unweighted():
+    # M106: weights=[1,1] must be byte-identical to no weights (backward-compat).
+    legs = [["A", "B", "C"], ["B", "D"]]
+    assert rrf_fuse(legs, k=60) == rrf_fuse(legs, k=60, weights=[1.0, 1.0])
+
+
+def test_rrf_fuse_weight_changes_order():
+    # M106: leg1 ranks A first, leg2 ranks D first. Unweighted, B (in both) wins and A>D.
+    # Upweighting leg2 (text) enough MUST lift D above A — proving weight changes the ranking.
+    legs = [["A", "B", "C"], ["D", "B"]]
+    unweighted = [i for i, _ in rrf_fuse(legs, k=60)]
+    assert unweighted.index("A") < unweighted.index("D"), unweighted  # A before D unweighted
+    weighted = [i for i, _ in rrf_fuse(legs, k=60, weights=[1.0, 5.0])]
+    assert weighted.index("D") < weighted.index("A"), weighted  # D lifted above A by the leg-2 weight
+
+
+def test_rrf_fuse_zero_weight_disables_leg():
+    # M106: weight 0.0 makes a leg contribute nothing (valid, not an error).
+    legs = [["A", "B"], ["C", "D"]]
+    fused = dict(rrf_fuse(legs, k=60, weights=[1.0, 0.0]))
+    assert fused["C"] == 0.0 and fused["D"] == 0.0
+    assert fused["A"] > 0.0
+
+
+def test_rrf_fuse_rejects_negative_weight():
+    import pytest
+    with pytest.raises(ValueError, match="finite number >= 0"):
+        rrf_fuse([["A"], ["B"]], k=60, weights=[1.0, -1.0])
+
+
 def test_ndcg_at_k_perfect_is_1():
     qrels = {"a": 3, "b": 2, "c": 1}
     assert math.isclose(ndcg_at_k(["a", "b", "c"], qrels, 10), 1.0, rel_tol=1e-9)

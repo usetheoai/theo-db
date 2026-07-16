@@ -239,6 +239,54 @@ def test_hybrid_search_json_matches_rrf():
         conn.close()
 
 
+def _hybrid_json(cur, cfg):
+    import json as _json
+    cur.execute("SELECT id, score FROM ai.hybrid_search(%s::jsonb)", (_json.dumps(cfg),))
+    return cur.fetchall()
+
+
+def test_hybrid_search_json_weight_changes_ranking():
+    # M106: per-leg weights (vector_weight/text_weight) skew the RRF fusion. Seed two docs where the vector
+    # leg and the FTS leg each rank a DIFFERENT doc first; upweighting a leg must lift ITS top doc to #1.
+    import json as _json
+    conn = _raw_conn()
+    try:
+        with conn.cursor() as cur:
+            # Single-leg docs so the weight alone decides: dv only in the vector leg (embedding, no 'database');
+            # df only in the FTS leg (NULL embedding → excluded from the vector leg, has 'database').
+            _seed_documents(cur, "hyb_w", [
+                ("dv", "unrelated lexical words", "[1,0,0]"),   # vector leg #1; NO 'database' FTS
+                ("df", "database database database", None),      # FTS leg #1; NULL embedding → not in vector leg
+            ])
+            base = {"table": "hyb_w", "id_col": "doc_id", "content_tsv_col": "text_tsv",
+                    "vector_col": "embedding", "query_text": "database", "query_vector": "[1,0,0]",
+                    "result_limit": 5}
+            # default (1,1) must equal explicit (1,1) — backward-compat
+            assert _hybrid_json(cur, base) == _hybrid_json(cur, {**base, "vector_weight": 1, "text_weight": 1})
+            # upweight the VECTOR leg -> its top doc (dv) must rank first
+            vec_first = [r[0] for r in _hybrid_json(cur, {**base, "vector_weight": 3, "text_weight": 1})]
+            assert vec_first[0] == "dv", f"vector_weight should lift dv to #1, got {vec_first}"
+            # upweight the TEXT leg -> its top doc (df) must rank first (ranking FLIPPED by weight)
+            txt_first = [r[0] for r in _hybrid_json(cur, {**base, "vector_weight": 1, "text_weight": 3})]
+            assert txt_first[0] == "df", f"text_weight should lift df to #1, got {txt_first}"
+    finally:
+        conn.close()
+
+
+def test_hybrid_search_json_negative_weight_raises():
+    conn = _raw_conn()
+    try:
+        with conn.cursor() as cur:
+            _seed_documents(cur, "hyb_wn", [("d1", "database", "[1,0,0]")])
+            cfg = {"table": "hyb_wn", "id_col": "doc_id", "content_tsv_col": "text_tsv",
+                   "vector_col": "embedding", "query_text": "database", "vector_weight": -1}
+            import json as _json
+            with pytest.raises(psycopg2.errors.InvalidParameterValue):  # 22023 — weight must be >= 0
+                cur.execute("SELECT * FROM ai.hybrid_search(%s::jsonb)", (_json.dumps(cfg),))
+    finally:
+        conn.close()
+
+
 def test_hybrid_search_json_missing_keys_raises():
     conn = _raw_conn()
     try:

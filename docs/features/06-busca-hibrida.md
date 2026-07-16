@@ -5,7 +5,9 @@
 > [`docs/sql-ai-functions.md`](../sql-ai-functions.md) § "Packaged surface". As chaves JSON **realmente
 > honradas** pelo código são: `table`, `id_col`, `content_tsv_col`, `content_text_col`, `vector_col`,
 > `query_text`, `query_vector`, `k`, `per_leg_limit`, `result_limit`, `language`, `filter_sql`,
-> `lexical_engine` (ver § 9). A fusão é **RRF pura (sem pesos)** com `<=>` cosseno + `ts_rank_cd` nativo.
+> `lexical_engine`, `vector_weight`, `text_weight` (ver § 9). A fusão é **RRF ponderável** (M106):
+> `score = vector_weight/(k+rank_vec) + text_weight/(k+rank_fts)` com `<=>` cosseno + `ts_rank_cd` nativo;
+> pesos default `1.0` = RRF pura.
 > `theodb_scann` (índice) **não** é entregue (usamos DiskANN/HNSW — specs 02/05).
 
 > **Status:** ✅ **Entregue (M7-S1 + M13 + M19).** A busca híbrida está disponível: `ai.hybrid_search_rrf(...)`
@@ -155,6 +157,8 @@ realmente honradas pelo código são:
 | `result_limit` | Máximo de resultados finais. |
 | `language` | Configuração de idioma do FTS (ex.: `english`). |
 | `filter_sql` | Predicado SQL adicional aplicado às pernas. |
+| `vector_weight` | Peso da perna vetorial no RRF (default `1.0`; finito ≥ 0; `0` desliga a perna). (M106) |
+| `text_weight` | Peso da perna FTS no RRF (default `1.0`; finito ≥ 0). Peso negativo → erro tipado `22023`. (M106) |
 | `lexical_engine` | Motor lexical: `ts_rank_cd` (default, FTS nativo entregue) ou `bm25` (gated — requer `pg_textsearch`). Outro valor → erro tipado `22023`. |
 
 ---
@@ -485,14 +489,13 @@ Fluxo completo da implementação manual de busca híbrida utilizando:
 ## 🎯 API-alvo / roadmap (não-shipped)
 
 > As chaves abaixo aparecem em material antigo mas **não são honradas pelo código
-> entregue**. A fusão atual é **RRF pura (sem pesos)**, então `weight` é ignorado; o
-> operador de distância é fixo em `<=>` (cosseno) e a função de ranking textual é fixa
-> em `ts_rank_cd` nativo. Estão documentadas aqui apenas como intenção futura — **não use
-> em exemplos executáveis**. Use as chaves reais da § 9.
+> entregue**. A fusão ponderada por perna **já é entregue** (M106) via `vector_weight`/`text_weight`
+> (§ 9) — a chave genérica `weight` do material AlloyDB não é usada. O operador de distância é fixo
+> em `<=>` (cosseno) e a função de ranking textual é fixa em `ts_rank_cd` nativo. As chaves abaixo
+> ficam como intenção futura — **não use em exemplos executáveis**. Use as chaves reais da § 9.
 
 | Chave (não-shipped) | Intenção futura |
 |---|---|
-| `weight` | Fusão ponderada por perna (hoje: RRF sem pesos). |
 | `distance_operator` | Operador de distância configurável (hoje: fixo `<=>` cosseno). |
 | `ranking_function` | Função de ranking textual configurável (hoje: fixo `ts_rank_cd`). |
 | `include_json_output` | Saída JSON detalhada do cálculo de ranking. |
