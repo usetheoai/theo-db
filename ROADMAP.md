@@ -1553,7 +1553,7 @@ issues #99/#100/#102/#104/#106/#108.
 
 ---
 
-## M105 — [ ] docs/features honestas — reconciliar as specs com a superfície entregue (pré-lançamento) *(gated M104)*
+## M105 — [x] docs/features honestas — reconciliar as specs com a superfície entregue (pré-lançamento) *(gated M104)*
 
 > Added 2026-07-16 by `/roadmap-feature` (slug: `docs-features-reality-reconciliation`). Fonte: auditoria de features
 > (3 agentes, spec↔código↔testes) sobre `docs/features/*.md`. See CHANGELOG `[Unreleased] § Added`.
