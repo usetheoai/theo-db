@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Roadmap amended: added the native graph pillar follow-on milestones **M108–M113** (persisted-CSR index-AM → vectorized MS-BFS operator → `theodb.graph_expand`/`ai.extract_graph` surface → vector-on-nodes flow → PPR/community (gated on measured need) → SQL/PGQ surface (optional)), each with its own measurement gate per ADR-0048 (`/roadmap-feature` ×6)
 
 ### Changed
 

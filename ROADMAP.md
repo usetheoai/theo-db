@@ -1654,6 +1654,54 @@ LazyGraphRAG (MS Research), HippoRAG 2; baseline a bater = `theo-rag/packages/co
 
 ---
 
+## M108 — [ ] Grafo Fase 1: persisted-CSR index-AM (build 1× + manutenção incremental) *(gated M107)*
+
+> Added 2026-07-16 by `/roadmap-feature` (slug: `graph-persisted-csr-am`). Fonte: ADR-0048 (follow-on #1) — o achado do spike M107 (build CSR on-the-fly domina a 1M → end-to-end cai p/ ~7×).
+
+**Objective:** um **AM de índice** que **persiste a adjacência CSR** de uma tabela de arestas — construída 1× no `ambuild` e mantida **incremental** no `aminsert` + `amvacuumcleanup` — para a travessia NÃO pagar o rebuild O(N) por query. **GATE:** benchmark reproduzível provando que a travessia sobre o CSR persistido **preserva o ganho ~100–700×** do M107 **sem** o custo de build por query (end-to-end ≈ traverse-only); **crash-safe** (WAL/GenericXLog) provado por harness de crash (abort→íntegro; committed→sobrevive replay); ZERO número fabricado (Regra 5). **DoD:** (1) AM `theodb_graph` (ou estrutura CSR sobre a edge-table) registrado com `ambuild`/`aminsert`/`amvacuumcleanup`; (2) CSR persistido em páginas WAL-logged (reusa a page/WAL machinery do pilar vetorial); (3) manutenção incremental (pending-region + fold no VACUUM, padrão M48/M89); (4) benchmark end-to-end vs o M107 baseline em `docs/benchmarks/`; (5) prova de crash. **Boundary honesto:** só a **persistência+manutenção** do CSR — o operador de travessia é o M109. **Risks:** (a) manutenção incremental correta sob concorrência → reusar o invariante MVCC/crash do pilar vetorial + provas de isolation; (b) build dominar mesmo persistido se a manutenção for cara → medir manutenção amortizada. **Dependencies:** M107. **Prior art:** `theodb_rs/src/am/{mod,page,build,fold}.rs` (index-AM+WAL+VACUUM), ADR-0048, DuckPGQ (CSR), USPTO 11,093,459 (CSR-in-RDBMS incremental).
+
+---
+
+## M109 — [ ] Grafo Fase 2: operador MS-BFS vetorizado (SIMD, multi-source) *(gated M108)*
+
+> Added 2026-07-16 by `/roadmap-feature` (slug: `graph-msbfs-operator`). Fonte: ADR-0048 (follow-on #2).
+
+**Objective:** **Multi-Source BFS vetorizado** sobre o CSR persistido (M108) como operador in-engine — bitset visited + SIMD, muitas seeds simultâneas (o MS-BFS do DuckPGQ: um registro AVX512 avança até 512 buscas). **GATE:** **oracle set-hash** = mesmo reachable-set do baseline recursive-CTE em cada trial; throughput MS-BFS medido (≥3 runs mean±std) e o ganho de N-seeds-em-paralelo vs N BFS sequenciais quantificado; `docs/benchmarks/`. **DoD:** (1) operador MS-BFS own-code reusando os kernels SIMD `vec/ah.rs`; (2) semântica bounded ≤H hops idêntica ao theo-rag (differential test / set-hash, NÃO count+sum — dívida do M107); (3) benchmark N-seeds; (4) integração com o AM M108. **Boundary honesto:** só o **primitivo de travessia** (reachable-set + scoring por peso de aresta) — a superfície SQL é o M110; PPR é o M112. **Risks:** (a) SIMD de bitset visited correto (falso-compartilhamento/alinhamento) → oracle set-hash + testes de borda; (b) grafo denso estourar frontier → medir memória do frontier. **Dependencies:** M108. **Prior art:** `vec/ah.rs` (SIMD/FastScan), ADR-0048, DuckPGQ MS-BFS, `benchmarks/m107_graph_spike/` (o BFS de referência).
+
+---
+
+## M110 — [ ] Grafo Fase 3: `theodb.graph_expand` + `ai.extract_graph` (a superfície que o theo-rag adota) *(gated M109)*
+
+> Added 2026-07-16 by `/roadmap-feature` (slug: `graph-surface-graphexpand`). Fonte: ADR-0048 (follow-on #3) — o **payoff de reduzir a complexidade do theo-rag**.
+
+**Objective:** a superfície SQL que o **theo-rag troca já** por chamadas in-DB: **`theodb.graph_expand(seeds, max_hops, filter?)`** (travessia via M109) + **`ai.extract_graph(text)` / `ai.extract_entities(text)`** (extração de entidades/arestas in-DB — heurística primeiro, LLM-opcional depois), com upsert idempotente de nós/arestas. **GATE:** a estratégia `graph` do theo-rag roda contra estas funções (prova de integração end-to-end); **baseline de qualidade de extração** (cobertura de entidades vs o `graph-extractor.ts` heurístico) medido — extração ruim invalida o motor rápido (qualidade do grafo ≠ velocidade). **DoD:** (1) `theodb.graph_expand` (`#[pg_extern]`, REVOKE-from-PUBLIC, wiring triad); (2) `ai.extract_graph`/`ai.extract_entities` reusando `ai.*`; (3) upsert idempotente de entities/edges (padrão do theo-rag); (4) prova de integração com o theo-rag; (5) benchmark de qualidade de extração. **Boundary honesto:** superfície pragmática **pré-SQL/PGQ** (funções, não `MATCH`); a linguagem padrão é o M113. **Risks:** (a) segurança da extração/`filter` (SQL-injection, SSRF na chamada LLM) → seguir a postura NL→SQL (denylist, fail-closed, REVOKE); (b) extração heurística fraca → o gate de qualidade decide se LLM-extraction é necessária. **Dependencies:** M109. **Prior art:** `theo-rag/.../domain/{extraction/graph-extractor,graph-store/graph-store}.ts` (a portar), `theodb_rs/src/{ai_op,chat,nl}.rs` (`ai.*`+segurança), ADR-0048.
+
+---
+
+## M111 — [ ] Grafo Fase 4: vector-nos-nós + fluxo vector-entry→traversal→rerank *(gated M110)*
+
+> Added 2026-07-16 by `/roadmap-feature` (slug: `graph-vector-nodes-flow`). Fonte: ADR-0048 (follow-on #4) — o pattern GraphRAG SOTA (LazyGraphRAG/HippoRAG) zero-copy num só engine.
+
+**Objective:** embeddings dos **nós do grafo** indexados pelo AM vetorial; o fluxo GraphRAG **vector-entry → bounded-traversal → rerank** como um caminho in-DB único, zero-copy (cosseno acha as entry entities → `graph_expand` → `ai.rerank`). **GATE:** **eval estratificado** (local-fact / multi-hop / global-sensemaking, metodologia BenchmarkQED/Microsoft): o fluxo grafo×vetor **bate hybrid+rerank** em multi-hop/global — **honest-negative em local-fact é resultado válido** (vetor puro vence local); `docs/benchmarks/`. **DoD:** (1) índice vetorial nos nós (reusa AM vetorial); (2) o fluxo composto num caminho (entry→expand→rerank); (3) eval estratificado com origem identificada (ZERO número fabricado); (4) synonymy-edges opcional (cosseno>0.8, HippoRAG) se o eval justificar. **Boundary honesto:** o **retrieval**, não a geração (a resposta LLM continua no consumidor). **Risks:** (a) eval honesto exige corpus rotulado real, não sintético → usar um dataset GraphRAG público + o eval do theo-rag; (b) o ganho depende da qualidade do grafo (M110) → o gate mede o fluxo, não salva grafo ruim. **Dependencies:** M110. **Prior art:** AM vetorial `am/mod.rs`, `ai.rerank`, HippoRAG (vector-entry→PPR), LazyGraphRAG, ADR-0048, o eval do theo-rag (`packages/core/.../eval`).
+
+---
+
+## M112 — [ ] Grafo Fase 5: Personalized PageRank + community summarization *(gated M111 — gated em necessidade MEDIDA)*
+
+> Added 2026-07-16 by `/roadmap-feature` (slug: `graph-ppr-community`). Fonte: ADR-0048 (follow-on #5) — o mais **diferível** (LazyGraphRAG: community summaries custam 700×).
+
+**Objective:** **Personalized PageRank** a partir das seeds vetoriais (HippoRAG) + **community detection/summarization** opcional (GraphRAG global, Microsoft) como computação **columnar iterativa**. **GATE (D3 — anti-sunk-cost):** eval provando que PPR/community **bate** o bounded-BFS-scoring (M111) em **global-sensemaking** — senão **honest-negative FECHA** (bounded BFS + rerank basta; o SOTA mostra que community é caro e nem sempre vale). `docs/benchmarks/`. **DoD:** (1) PPR iterativo sobre o CSR (columnar, reusa M99–M103); (2) community detection (Leiden/Louvain) + summarization via `ai.summarize` — SÓ se o eval de global justificar; (3) eval estratificado global vs M111. **Boundary honesto:** só arranca se o eval do M111 mostrar gap em global-sensemaking; caso contrário é YAGNI e o pilar para no M111. **Risks:** (a) custo de indexação de community (o driver de 75% do custo GraphRAG) → medir custo/benefício antes de shipar; (b) PPR não convergir barato em grafo grande → medir iterações/convergência. **Dependencies:** M111. **Prior art:** columnar M99–M103 (iteração), `ai.summarize`, Microsoft GraphRAG (communities), HippoRAG (PPR), LazyGraphRAG (defer-communities), ADR-0048.
+
+---
+
+## M113 — [ ] Grafo Fase 6: superfície SQL/PGQ (SQL:2023) *(gated M110 — opcional/diferível)*
+
+> Added 2026-07-16 by `/roadmap-feature` (slug: `graph-sqlpgq-surface`). Fonte: ADR-0048 (follow-on, ergonomia de longo prazo).
+
+**Objective:** a superfície **SQL/PGQ (SQL:2023)** — `MATCH ()-[]->()`, path patterns, `SHORTEST`/bounded, `ELEMENT_ID` — compondo com SQL + vetor + `ai.*` num só statement, substituindo gradualmente as funções `graph_*` do M110. **GATE:** um **subset de conformância SQL/PGQ** (as construções que o GraphRAG usa — pattern match + bounded path) passa; compõe com um `<=>`/`ai.rerank` no mesmo statement (prova); NÃO exige conformância total. **DoD:** (1) parser-extension SQL/PGQ (padrão DuckPGQ: mapear para o plano lógico + operadores M108/M109, minimizando intrusão no core); (2) subset de conformância testado; (3) exemplo GraphRAG end-to-end num só SQL/PGQ statement. **Boundary honesto:** **camada ergonômica**, não capacidade nova — as funções `graph_*` do M110 já servem o theo-rag; SQL/PGQ é a superfície padrão de longo prazo. É o mais **diferível** (só quando a ergonomia justificar o esforço de parser). **Risks:** (a) parser SQL/PGQ é grande → escopo bounded ao subset GraphRAG, não conformância total (YAGNI); (b) intrusão no planner do PG → seguir o approach UDF-minimal do DuckPGQ. **Dependencies:** M110 (o motor+superfície funcional primeiro). **Prior art:** DuckPGQ (parser-extension SQL/PGQ, CIDR/VLDB 2023), SQL/PGQ SQL:2023 (arXiv 2505.07595), ADR-0048.
+
+---
+
 ## Sequência e paralelismo
 
 ```
