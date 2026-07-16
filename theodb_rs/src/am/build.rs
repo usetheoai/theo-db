@@ -505,9 +505,7 @@ pub(crate) unsafe fn vacuum_rebuild(
     // correctness is UNCHANGED (the scan folds the pending region + the executor's MVCC heap re-check drops dead
     // TIDs; the modern IVF v4–v7 formats already no-op here). The operator compacts a large index via REINDEX (the
     // fully-bounded streaming fold is M55). This turns a possible OOM into a documented, safe deferral.
-    let fold_cap_mb = crate::pg::guc("theodb.vacuum_fold_max_mb")
-        .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(1024);
+    let fold_cap_mb = crate::am::guc::vacuum_fold_max_mb();
     let idx_bytes = pg_sys::RelationGetNumberOfBlocksInFork(indexrel, pg_sys::ForkNumber::MAIN_FORKNUM) as u64 * 8192;
     if fold_cap_mb > 0 && idx_bytes > fold_cap_mb.saturating_mul(1024 * 1024) {
         pg_sys::warning!(

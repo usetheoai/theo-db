@@ -237,7 +237,7 @@ fn run_batch_chat(
     system_for: impl Fn(usize) -> String,
     model: Option<&str>,
 ) -> Vec<Option<String>> {
-    let max = guc("theodb.ai_max_batch").and_then(|s| s.parse::<usize>().ok()).unwrap_or(256).max(1);
+    let max = crate::am::guc::ai_max_batch();
     let mut out = Vec::with_capacity(prompts.len());
     for chunk in prompts.chunks(max) {
         let k = chunk.len();

@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-use crate::pg::{err_external, guc, warn};
+use crate::pg::{err_external, warn};
 
 /// Max retries for the recoverable class (3 attempts total). Bounded so a down endpoint can never hang
 /// beyond `(MAX_RETRIES + 1) × timeout` (`error-handling.md` — retry with backoff, never unbounded).
@@ -27,7 +27,6 @@ pub(crate) const MAX_RETRIES: u32 = 2;
 // `open_ms`, then a single HALF-OPEN probe decides re-close vs re-open. Wraps the send loop; does not touch the
 // SSRF/redirect=0/api-key-in-header/38000 posture.
 const BREAKER_K: u32 = 5; // consecutive failures to trip (audit suggestion; simpler than a rate window, adequate per-backend)
-const BREAKER_OPEN_MS_DEFAULT: u64 = 30_000; // one HTTP timeout; GUC `theodb.http_breaker_open_ms`
 
 #[derive(Clone, Copy)]
 enum BreakerState {
@@ -41,7 +40,7 @@ thread_local! {
 }
 
 fn breaker_open_ms() -> u64 {
-    guc("theodb.http_breaker_open_ms").and_then(|s| s.parse().ok()).unwrap_or(BREAKER_OPEN_MS_DEFAULT)
+    crate::am::guc::http_breaker_open_ms()
 }
 
 /// Gate a call: `Ok` = proceed (Closed, or Half-Open probe); `Err` = the breaker is Open → fail fast, no TCP.

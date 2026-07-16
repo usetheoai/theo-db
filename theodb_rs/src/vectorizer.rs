@@ -634,9 +634,7 @@ pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
                 &[WORKER_MAX_ATTEMPTS.into()],
             );
             // M104 — bound the on-disk dead-letter (purge old `failed` rows beyond the retained cap).
-            let keep = crate::pg::guc("theodb.vectorizer_dead_letter_max")
-                .and_then(|s| s.parse::<i32>().ok())
-                .unwrap_or(1000);
+            let keep = crate::am::guc::vectorizer_dead_letter_max();
             let _ = Spi::run_with_args("SELECT theodb_rs._vectorizer_purge_dead_letters($1)", &[keep.into()]);
         });
 
@@ -767,6 +765,33 @@ pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
         });
     }
 }
+
+// M104 (review MEDIUM) — least-privilege: the `_vectorizer_*` internals are SECURITY INVOKER helpers the worker
+// and enqueue trigger call; no external role should hold EXECUTE on them. The `theodb_rs` schema is not
+// blanket-REVOKE'd, so `#[pg_extern]` functions default to PUBLIC EXECUTE — revoke the whole family (the existing
+// claim/mark/process/reap set + the new dead-letter purge) to match the codebase's per-function REVOKE convention.
+// Dynamic (`::regprocedure`) so there are no fragile hand-written signatures to drift; `~ '^_vectorizer_'` matches
+// the family by literal prefix (no LIKE wildcard ambiguity).
+extension_sql!(
+    r#"
+DO $$
+DECLARE r record;
+BEGIN
+    FOR r IN SELECT p.oid::regprocedure AS sig
+             FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+             WHERE n.nspname = 'theodb_rs' AND p.proname ~ '^_vectorizer_'
+    LOOP
+        EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC', r.sig);
+    END LOOP;
+END $$;
+"#,
+    name = "theodb_vectorizer_revoke",
+    requires = [
+        _vectorizer_claim_batch, _vectorizer_mark_done, _vectorizer_mark_failed, _vectorizer_renew_lease,
+        _vectorizer_process_upsert, _vectorizer_process_delete, _vectorizer_process_upsert_batch,
+        _vectorizer_bump_stats, _vectorizer_reap_orphans, _vectorizer_purge_dead_letters,
+    ],
+);
 
 #[cfg(any(test, feature = "pg_test"))]
 #[pgrx::pg_schema]
@@ -1098,5 +1123,31 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(total, 2, "distinct rows are not coalesced together");
+    }
+
+    // M104 (review H1): the bounded-memory GUC is REGISTERED, so `SET` actually takes effect (not silently
+    // ignored by an unregistered `current_setting`).
+    #[pg_test]
+    fn m104_dead_letter_max_guc_is_registered_and_settable() {
+        Spi::run("SET theodb.vectorizer_dead_letter_max = 42").unwrap();
+        let v: String = Spi::get_one("SELECT current_setting('theodb.vectorizer_dead_letter_max')").unwrap().unwrap();
+        assert_eq!(v, "42", "a registered GUC round-trips through SET/current_setting");
+    }
+
+    // M104 (review MEDIUM): the `_vectorizer_*` internals are revoked from PUBLIC (least privilege).
+    #[pg_test]
+    fn m104_vectorizer_internals_revoked_from_public() {
+        let purge_public: bool = Spi::get_one(
+            "SELECT has_function_privilege('public', 'theodb_rs._vectorizer_purge_dead_letters(integer)', 'EXECUTE')",
+        )
+        .unwrap()
+        .unwrap();
+        assert!(!purge_public, "the dead-letter purge internal is NOT executable by PUBLIC");
+        let claim_public: bool = Spi::get_one(
+            "SELECT has_function_privilege('public', 'theodb_rs._vectorizer_reap_orphans(integer)', 'EXECUTE')",
+        )
+        .unwrap()
+        .unwrap();
+        assert!(!claim_public, "the whole _vectorizer_* family is revoked, not just the new function");
     }
 }
