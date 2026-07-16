@@ -55,6 +55,7 @@ mod pq;
 mod rerank;
 mod vec;
 mod vectorizer;
+mod vindex;
 
 mod api;
 

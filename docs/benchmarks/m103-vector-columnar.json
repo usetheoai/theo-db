@@ -1,0 +1,14 @@
+{
+  "milestone": "M103",
+  "n": 50000, "dim": 8, "wide_analytical_cols": 16, "runs": 5,
+  "column_pruning": {
+    "knn_ms_narrow_payload": 79.43,
+    "knn_ms_wide_payload": 79.27,
+    "wide_over_narrow_ratio": 0.998,
+    "on_disk_bytes_wide": 1490944,
+    "on_disk_bytes_narrow": 319488,
+    "note": "the co-resident filtered top-k decodes ONLY the 4 index columns; a ratio ~1.0 proves the analytical columns (whose on-disk size grows with width) are NOT decoded — column pruning. The wide index is much larger on disk yet the knn latency is ~unchanged."
+  },
+  "composed_filter_knn_plus_aggregation_ms": 225.69,
+  "honest_ceiling": "Recall is EQUAL by construction (proven by the byte-identity pg_test m103_full_probe_byte_identical_to_exact_filtered) — NOT a claim. Cost/scale/composability win only: column-pruned filtered vector search + analytical projection in one scan. NO QPS-vs-ScaNN claim (the M73/M74 paradigm ceiling is untouched by co-residence). Out-of-RAM at billion-scale is the honest projection, not measured here."
+}
