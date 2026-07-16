@@ -1,0 +1,173 @@
+{
+  "date": "2026-07-16",
+  "hops": 3,
+  "n_seeds": 5,
+  "trials_per_scale": 4,
+  "host": "local docker postgres:17 (PG 17.10) + native Rust release",
+  "rows": [
+    {
+      "edges": 100000,
+      "nodes": 20000,
+      "trial": 1,
+      "hops": 3,
+      "native_build_ms": 1.007,
+      "native_traverse_ms": 0.206,
+      "native_total_ms": 1.2129999999999999,
+      "cte_ms": 207.097,
+      "cte_timed_out": false,
+      "reached": 8507,
+      "oracle": "PASS"
+    },
+    {
+      "edges": 100000,
+      "nodes": 20000,
+      "trial": 2,
+      "hops": 3,
+      "native_build_ms": 2.197,
+      "native_traverse_ms": 0.319,
+      "native_total_ms": 2.516,
+      "cte_ms": 217.152,
+      "cte_timed_out": false,
+      "reached": 7718,
+      "oracle": "PASS"
+    },
+    {
+      "edges": 100000,
+      "nodes": 20000,
+      "trial": 3,
+      "hops": 3,
+      "native_build_ms": 1.735,
+      "native_traverse_ms": 0.295,
+      "native_total_ms": 2.0300000000000002,
+      "cte_ms": 204.776,
+      "cte_timed_out": false,
+      "reached": 7958,
+      "oracle": "PASS"
+    },
+    {
+      "edges": 100000,
+      "nodes": 20000,
+      "trial": 4,
+      "hops": 3,
+      "native_build_ms": 1.568,
+      "native_traverse_ms": 0.245,
+      "native_total_ms": 1.8130000000000002,
+      "cte_ms": 134.646,
+      "cte_timed_out": false,
+      "reached": 7752,
+      "oracle": "PASS"
+    },
+    {
+      "edges": 1000000,
+      "nodes": 200000,
+      "trial": 1,
+      "hops": 3,
+      "native_build_ms": 25.78,
+      "native_traverse_ms": 1.063,
+      "native_total_ms": 26.843,
+      "cte_ms": 288.793,
+      "cte_timed_out": false,
+      "reached": 37899,
+      "oracle": "PASS"
+    },
+    {
+      "edges": 1000000,
+      "nodes": 200000,
+      "trial": 2,
+      "hops": 3,
+      "native_build_ms": 27.57,
+      "native_traverse_ms": 0.678,
+      "native_total_ms": 28.248,
+      "cte_ms": 200.216,
+      "cte_timed_out": false,
+      "reached": 34376,
+      "oracle": "PASS"
+    },
+    {
+      "edges": 1000000,
+      "nodes": 200000,
+      "trial": 3,
+      "hops": 3,
+      "native_build_ms": 33.443,
+      "native_traverse_ms": 1.515,
+      "native_total_ms": 34.958,
+      "cte_ms": 428.691,
+      "cte_timed_out": false,
+      "reached": 36570,
+      "oracle": "PASS"
+    },
+    {
+      "edges": 1000000,
+      "nodes": 200000,
+      "trial": 4,
+      "hops": 3,
+      "native_build_ms": 65.959,
+      "native_traverse_ms": 1.081,
+      "native_total_ms": 67.04,
+      "cte_ms": 214.563,
+      "cte_timed_out": false,
+      "reached": 33271,
+      "oracle": "PASS"
+    }
+  ],
+  "summary": [
+    {
+      "edges": 100000,
+      "trials": 4,
+      "native_build_ms": {
+        "mean": 1.627,
+        "std": 0.426
+      },
+      "native_traverse_ms": {
+        "mean": 0.266,
+        "std": 0.044
+      },
+      "native_total_ms": {
+        "mean": 1.893,
+        "std": 0.468
+      },
+      "cte_ms": {
+        "mean": 190.918,
+        "std": 32.82
+      },
+      "cte_timeouts": 0,
+      "speedup_traverse_x": {
+        "mean": 732.446,
+        "std": 167.366
+      },
+      "speedup_total_x": {
+        "mean": 108.045,
+        "std": 37.398
+      }
+    },
+    {
+      "edges": 1000000,
+      "trials": 4,
+      "native_build_ms": {
+        "mean": 38.188,
+        "std": 16.282
+      },
+      "native_traverse_ms": {
+        "mean": 1.084,
+        "std": 0.296
+      },
+      "native_total_ms": {
+        "mean": 39.272,
+        "std": 16.322
+      },
+      "cte_ms": {
+        "mean": 283.066,
+        "std": 90.549
+      },
+      "cte_timeouts": 0,
+      "speedup_traverse_x": {
+        "mean": 262.108,
+        "std": 37.671
+      },
+      "speedup_total_x": {
+        "mean": 8.327,
+        "std": 3.508
+      }
+    }
+  ]
+}
