@@ -27,95 +27,132 @@ use std::collections::HashMap;
 use std::mem::size_of;
 use std::sync::OnceLock;
 
-/// Per-backend pending write state: relation OID → accumulated row blobs (each = a formed heap tuple's bytes). A
-/// stripe is flushed from here at scan time (so same-xact INSERT→SELECT sees the rows) and on xact pre-commit.
+/// Per-backend pending write state: relation OID → accumulated row blobs (each = a formed heap tuple's bytes). These
+/// rows are visible ONLY to this backend's own transaction (a same-xact scan appends them directly — no MVCC leak);
+/// they are flushed to a durable stripe + its `columnar.stripe` catalog row at xact pre-commit (and at COPY's
+/// `finish_bulk_insert`).
 thread_local! {
     static WRITE_STATES: RefCell<HashMap<u32, Vec<Vec<u8>>>> = RefCell::new(HashMap::new());
 }
 
-/// A stripe descriptor, stored in the metapage tail. Fixed 28 bytes.
-#[derive(Clone, Copy)]
-struct StripeDesc {
-    first_block: u32,
-    n_blocks: u32,
-    byte_len: u64,
+// ===========================================================================================================
+// M99 Phase C2 — MVCC via a heap catalog (`columnar.stripe`), not the metapage (ADR-0042 D2)
+// ===========================================================================================================
+//
+// A stripe becomes visible to a scan IFF its `columnar.stripe` catalog row is visible under the scan's snapshot —
+// delegating snapshot isolation, WAL, crash recovery and abort-rollback to Postgres for free. The metapage tail is
+// physical/WAL state: its buffer changes are durable regardless of the enclosing xact's commit/abort, so a stripe
+// descriptor written there would be visible even for an uncommitted or aborted INSERT (the MVCC violation). Moving
+// the stripe directory to an ordinary heap table makes the catalog row's own xmin/xmax the visibility gate. The
+// metapage now keeps ONLY the monotonic reservation counters. The on-disk TCS1 header/directory already indexes
+// chunk groups + columns, so ONE catalog table (not chunk_group/chunk tables) is the minimum (council-index-storage).
+
+extension_sql!(
+    r#"
+CREATE SCHEMA IF NOT EXISTS columnar;
+CREATE TABLE IF NOT EXISTS columnar.stripe (
+    relid            oid      NOT NULL,   -- pg_class OID of the columnar table (every scan filters on this)
+    stripe_id        bigint   NOT NULL,   -- from reserve(StripeId); stable identity + tie-break order
+    header_block     integer  NOT NULL,   -- block of the stripe's TCS1 header (navigates everything below)
+    row_count        integer  NOT NULL,   -- rows in the stripe (planner stat)
+    first_row_number bigint   NOT NULL,   -- reserve(RowNumber) base; deterministic scan order
+    ncols            smallint NOT NULL,   -- cross-check vs live tupdesc.natts
+    PRIMARY KEY (relid, stripe_id)
+);
+CREATE INDEX IF NOT EXISTS columnar_stripe_relid_rownum ON columnar.stripe (relid, first_row_number);
+"#,
+    name = "theodb_columnar_catalog",
+);
+
+/// A committed stripe's catalog metadata (the visibility-scoped row). The TCS1 header at `header_block` carries
+/// everything below the stripe (directory, per-column chunks, min/max).
+struct StripeMeta {
+    header_block: u32,
+}
+
+/// Read the stripes VISIBLE to the current snapshot for `rel_oid`, from the heap catalog. SPI runs under the active
+/// snapshot, so an uncommitted/aborted/committed-after stripe is filtered out by MVCC for free — no visibility code
+/// here. Ordered by `first_row_number` for a deterministic, heap-matching scan order.
+unsafe fn read_visible_stripes(rel_oid: pg_sys::Oid) -> Result<Vec<StripeMeta>, String> {
+    Spi::connect(|c| {
+        let t = c
+            .select(
+                "SELECT header_block FROM columnar.stripe WHERE relid = $1 ORDER BY first_row_number, stripe_id",
+                None,
+                &[rel_oid.into()],
+            )
+            .map_err(|e| format!("theodb_columnar: stripe catalog read failed: {e:?}"))?;
+        let mut out = Vec::new();
+        for row in t {
+            let hb = row
+                .get::<i32>(1)
+                .map_err(|e| format!("theodb_columnar: header_block read: {e:?}"))?
+                .ok_or("theodb_columnar: null header_block in catalog")?;
+            out.push(StripeMeta { header_block: hb as u32 });
+        }
+        Ok(out)
+    })
+}
+
+/// Insert the visibility-granting catalog row for a just-written stripe. Runs inside the current xact via SPI, so the
+/// row inherits that xact's xid as its `xmin` — the stripe becomes visible exactly when/whom the INSERT's commit
+/// becomes visible, and an abort makes it invisible forever (its data pages become recoverable orphans). Called from
+/// `flush_pending` AFTER every referenced data page is durable and every buffer lock is released (no SPI under a
+/// buffer lock — council-rust-pgrx).
+unsafe fn insert_stripe_row(
+    rel_oid: pg_sys::Oid,
+    stripe_id: i64,
+    header_block: u32,
     row_count: u32,
-    first_row_number: u64,
+    first_row_number: i64,
+    ncols: i16,
+) -> Result<(), String> {
+    Spi::run_with_args(
+        "INSERT INTO columnar.stripe (relid, stripe_id, header_block, row_count, first_row_number, ncols) \
+         VALUES ($1, $2, $3, $4, $5, $6)",
+        &[
+            rel_oid.into(),
+            stripe_id.into(),
+            (header_block as i32).into(),
+            (row_count as i32).into(),
+            first_row_number.into(),
+            ncols.into(),
+        ],
+    )
+    .map_err(|e| format!("theodb_columnar: stripe catalog insert failed: {e:?}"))
 }
-const STRIPE_DESC_LEN: usize = 28;
-const META_HEAD_LEN: usize = 28; // 24-byte counters head + n_stripes(4)
 
-impl StripeDesc {
-    fn write_into(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&self.first_block.to_le_bytes());
-        out.extend_from_slice(&self.n_blocks.to_le_bytes());
-        out.extend_from_slice(&self.byte_len.to_le_bytes());
-        out.extend_from_slice(&self.row_count.to_le_bytes());
-        out.extend_from_slice(&self.first_row_number.to_le_bytes());
-    }
-    fn read_from(b: &[u8]) -> Self {
-        StripeDesc {
-            first_block: u32::from_le_bytes(b[0..4].try_into().unwrap()),
-            n_blocks: u32::from_le_bytes(b[4..8].try_into().unwrap()),
-            byte_len: u64::from_le_bytes(b[8..16].try_into().unwrap()),
-            row_count: u32::from_le_bytes(b[16..20].try_into().unwrap()),
-            first_row_number: u64::from_le_bytes(b[20..28].try_into().unwrap()),
+/// Pre-commit flush: a plain `INSERT ... VALUES` never triggers `finish_bulk_insert`, so its accumulated rows would
+/// be lost at commit without this. At `PRE_COMMIT`/`PREPARE` flush every pending relation into a durable stripe +
+/// its catalog row (still inside the committing xact → correct MVCC). On abort, discard the pending rows (the stripe
+/// never existed). An `ereport(ERROR)` here safely converts the commit to an abort (pre-commit is before the commit
+/// record) — never a panic (council-index-storage + council-rust-pgrx).
+#[pg_guard]
+unsafe extern "C-unwind" fn columnar_xact_flush(event: pg_sys::XactEvent::Type, _arg: *mut std::ffi::c_void) {
+    use pg_sys::XactEvent as XE;
+    if event == XE::XACT_EVENT_PRE_COMMIT
+        || event == XE::XACT_EVENT_PARALLEL_PRE_COMMIT
+        || event == XE::XACT_EVENT_PREPARE
+    {
+        let oids: Vec<u32> = WRITE_STATES
+            .with(|w| w.borrow().iter().filter(|(_, v)| !v.is_empty()).map(|(k, _)| *k).collect());
+        for oid in oids {
+            let relid = pg_sys::Oid::from_u32_unchecked(oid);
+            let rel = pg_sys::relation_open(relid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+            let res = flush_pending(rel);
+            pg_sys::relation_close(rel, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+            if let Err(e) = res {
+                pg_sys::error!("{e}");
+            }
         }
+    } else if event == XE::XACT_EVENT_ABORT || event == XE::XACT_EVENT_PARALLEL_ABORT {
+        WRITE_STATES.with(|w| w.borrow_mut().clear());
     }
 }
 
-/// Read the metapage item (block 0) raw bytes.
-unsafe fn read_meta_bytes(rel: pg_sys::Relation) -> Result<Vec<u8>, String> {
-    let items = super::page::read_all_page_items(rel, 0)?;
-    items.into_iter().next().ok_or_else(|| "theodb_columnar: metapage has no item".to_string())
-}
-
-/// Decode the stripe descriptors from the metapage tail (bytes `META_HEAD_LEN..`). An item shorter than the head
-/// (legacy 24-byte A2 metapage) means zero stripes.
-unsafe fn read_stripes(rel: pg_sys::Relation) -> Result<Vec<StripeDesc>, String> {
-    let bytes = read_meta_bytes(rel)?;
-    // Validate the head (magic/version) via the counters decoder — fail-fast on a foreign/corrupt fork.
-    ColumnarMeta::from_bytes(&bytes)?;
-    if bytes.len() < META_HEAD_LEN {
-        return Ok(Vec::new());
-    }
-    let n = u32::from_le_bytes(bytes[24..28].try_into().unwrap()) as usize;
-    let mut out = Vec::with_capacity(n);
-    for i in 0..n {
-        let off = META_HEAD_LEN + i * STRIPE_DESC_LEN;
-        if off + STRIPE_DESC_LEN > bytes.len() {
-            return Err(format!("theodb_columnar: metapage truncated (stripe {i} of {n})"));
-        }
-        out.push(StripeDesc::read_from(&bytes[off..off + STRIPE_DESC_LEN]));
-    }
-    Ok(out)
-}
-
-/// Append a stripe descriptor to the metapage and bump `n_stripes`, preserving the current counters head (which the
-/// caller has just advanced via `reserve`). Full-image rewrite of block 0 (torn-page-proof, reuses `page.rs`).
-unsafe fn append_stripe(rel: pg_sys::Relation, desc: StripeDesc) -> Result<(), String> {
-    let cur = read_meta_bytes(rel)?;
-    ColumnarMeta::from_bytes(&cur)?;
-    let n = if cur.len() >= META_HEAD_LEN {
-        u32::from_le_bytes(cur[24..28].try_into().unwrap())
-    } else {
-        0
-    };
-    // Rebuild: 24-byte counters head (unchanged) + new n_stripes + existing descs + the new desc.
-    let mut out = Vec::with_capacity(META_HEAD_LEN + (n as usize + 1) * STRIPE_DESC_LEN);
-    out.extend_from_slice(&cur[0..24]);
-    out.extend_from_slice(&(n + 1).to_le_bytes());
-    if cur.len() >= META_HEAD_LEN {
-        out.extend_from_slice(&cur[META_HEAD_LEN..META_HEAD_LEN + n as usize * STRIPE_DESC_LEN]);
-    }
-    desc.write_into(&mut out);
-    // A page item must fit in one 8 KB page (≈ BLCKSZ − header − line pointer). Beyond this the stripe directory
-    // needs its own paged region — a later-phase concern (honest MVP limit ≈ 285 stripes).
-    if out.len() > 8000 {
-        return Err("theodb_columnar: too many stripes for one metapage (stripe directory paging is a later phase)".into());
-    }
-    super::page::pivot_meta_page(rel, &out);
-    Ok(())
+/// Register the columnar pre-commit flush callback. Called once from `_PG_init`.
+pub(crate) fn init() {
+    unsafe { pg_sys::RegisterXactCallback(Some(columnar_xact_flush), std::ptr::null_mut()) };
 }
 
 /// The `theodb_columnar` table_am_handler. Idempotent install (skips if `pg_am` already has it — safe re-`CREATE
@@ -504,17 +541,17 @@ unsafe fn form_row(
     Ok(bytes)
 }
 
-/// Decode one column-major stripe into heap-tuple byte blobs: read its header (block = `StripeDesc.first_block`),
-/// its directory, then for each chunk group decode every column and transpose back to rows.
+/// Decode one column-major stripe into heap-tuple byte blobs: read its TCS1 header (at `header_block`, from the
+/// catalog row), its directory, then for each chunk group decode every column and transpose back to rows.
 unsafe fn decode_stripe(
     rel: pg_sys::Relation,
-    st: &StripeDesc,
+    header_block: u32,
     tupdesc: pg_sys::TupleDesc,
     cols: &[ColDesc],
     natts: usize,
     out: &mut Vec<Vec<u8>>,
 ) -> Result<(), String> {
-    let hdr_items = super::page::read_all_page_items(rel, st.first_block)?;
+    let hdr_items = super::page::read_all_page_items(rel, header_block)?;
     let hdr_bytes = hdr_items.into_iter().next().ok_or("theodb_columnar: stripe header page empty")?;
     let header = StripeHeader::from_bytes(&hdr_bytes)?;
     if header.ncols as usize != natts {
@@ -546,20 +583,25 @@ unsafe fn decode_stripe(
     Ok(())
 }
 
-/// Materialize all visible rows for `rel`: flush this backend's pending writes (so same-xact INSERT is seen), then
-/// decode every column-major stripe back into heap-tuple blobs. Single-backend MVP visibility (all flushed stripes);
-/// snapshot-scoped cross-backend visibility is Phase C2/D.
+/// Materialize the rows VISIBLE to this scan: (1) the committed stripes visible under the current snapshot (MVCC
+/// delegated to the `columnar.stripe` heap catalog), decoded column-major; then (2) this backend's not-yet-flushed
+/// pending rows (thread-local — visible only to its own xact, so no cross-xact leak). Flushing is done at pre-commit,
+/// NOT here — reading is side-effect-free.
 unsafe fn materialize_rows(rel: pg_sys::Relation) -> Result<Vec<Vec<u8>>, String> {
     unsafe {
-        flush_pending(rel)?;
-        let stripes = read_stripes(rel)?;
         let tupdesc = (*rel).rd_att;
         let natts = (*tupdesc).natts as usize;
         let cols = (0..natts).map(|i| coldesc(tupdesc, i)).collect::<Result<Vec<_>, _>>()?;
         let mut out = Vec::new();
-        for st in &stripes {
-            decode_stripe(rel, st, tupdesc, &cols, natts, &mut out)?;
+        for sm in read_visible_stripes((*rel).rd_id)? {
+            decode_stripe(rel, sm.header_block, tupdesc, &cols, natts, &mut out)?;
         }
+        let oid = (*rel).rd_id.to_u32();
+        WRITE_STATES.with(|w| {
+            if let Some(rows) = w.borrow().get(&oid) {
+                out.extend(rows.iter().cloned());
+            }
+        });
         Ok(out)
     }
 }
@@ -798,7 +840,7 @@ unsafe fn flush_pending(rel: pg_sys::Relation) -> Result<(), String> {
 
         // Reserve the row_number range (base needed by the header) + a stripe id.
         let base = reserve(rel, Counter::RowNumber, row_count as u64)?;
-        let _stripe_id = reserve(rel, Counter::StripeId, 1)?;
+        let stripe_id = reserve(rel, Counter::StripeId, 1)? as i64;
 
         // Write the directory, then the header (single item pointing at the directory).
         let dir_bytes = codec::serialize_directory(&dir);
@@ -815,18 +857,9 @@ unsafe fn flush_pending(rel: pg_sys::Relation) -> Result<(), String> {
         let header_block =
             super::page::extend_page_with_item(rel, pg_sys::ForkNumber::MAIN_FORKNUM, &header.to_bytes());
 
-        // Publish the stripe LAST (its visibility root). `n_blocks`/`byte_len` are vestigial in the column-major
-        // format (the reader navigates via the header) — kept for the unchanged 28-byte StripeDesc metapage layout.
-        append_stripe(
-            rel,
-            StripeDesc {
-                first_block: header_block,
-                n_blocks: 1,
-                byte_len: 0,
-                row_count: row_count as u32,
-                first_row_number: base,
-            },
-        )?;
+        // Publish the stripe LAST via its heap-catalog row (the MVCC visibility root) — after every referenced data
+        // page is durable and every buffer lock is released. Its xmin ties visibility to this xact's commit.
+        insert_stripe_row((*rel).rd_id, stripe_id, header_block, row_count as u32, base as i64, natts as i16)?;
     }
     Ok(())
 }
@@ -1010,17 +1043,17 @@ fn theodb_columnar_test_reserve_rows(rel_oid: pg_sys::Oid, n: i64) -> i64 {
 #[pg_extern]
 fn theodb_columnar_test_stripe_info(rel_oid: pg_sys::Oid) -> String {
     unsafe {
-        let rel = pg_sys::relation_open(rel_oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+        let rel = pg_sys::relation_open(rel_oid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
         let res = (|| -> Result<String, String> {
             flush_pending(rel)?;
-            let stripes = read_stripes(rel)?;
+            let stripes = read_visible_stripes((*rel).rd_id)?;
             if stripes.is_empty() {
                 return Ok("empty".into());
             }
             let tupdesc = (*rel).rd_att;
             let natts = (*tupdesc).natts as usize;
             let st = &stripes[0];
-            let hdr_items = super::page::read_all_page_items(rel, st.first_block)?;
+            let hdr_items = super::page::read_all_page_items(rel, st.header_block)?;
             let hdr_bytes = hdr_items.into_iter().next().ok_or("no header item")?;
             let header = StripeHeader::from_bytes(&hdr_bytes)?; // validates the real "TCS1" magic
             let dir_bytes = super::page::read_chunked(rel, header.dir_first_block, header.dir_n_pages)?;
@@ -1048,7 +1081,7 @@ fn theodb_columnar_test_stripe_info(rel_oid: pg_sys::Oid) -> String {
                 maxr
             ))
         })();
-        pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+        pg_sys::relation_close(rel, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
         match res {
             Ok(s) => s,
             Err(e) => pgrx::error!("{e}"),
@@ -1140,7 +1173,12 @@ mod tests {
         Spi::run(&format!("INSERT INTO m99_cz {ins}")).unwrap();
         Spi::run(&format!("INSERT INTO m99_hz {ins}")).unwrap();
 
-        // Force the columnar flush (scan) then measure on-disk size.
+        // Force the columnar flush (the introspection helper flushes pending → durable stripe) then measure on-disk
+        // size — the pending rows live in memory until flush, so we must materialize the stripe before pg_relation_size.
+        let oid = Spi::get_one::<pg_sys::Oid>("SELECT 'm99_cz'::regclass::oid").unwrap().unwrap();
+        Spi::get_one_with_args::<String>("SELECT theodb_columnar_test_stripe_info($1)", &[oid.into()])
+            .unwrap()
+            .unwrap();
         let cnt = Spi::get_one::<i64>("SELECT count(*) FROM m99_cz").unwrap().unwrap();
         assert_eq!(cnt, 20000, "round-trip through compression must return all rows");
 
@@ -1164,7 +1202,11 @@ mod tests {
     fn m99_stripe_is_column_major() {
         Spi::run("CREATE TABLE m99_cm (a int, b text, c float8) USING theodb_columnar").unwrap();
         Spi::run("INSERT INTO m99_cm SELECT g, 'row-' || g, g::float8 FROM generate_series(1, 25000) g").unwrap();
+        Spi::run("INSERT INTO m99_cm VALUES (25001, NULL, NULL)").unwrap(); // NULL text + NULL float
         let oid = Spi::get_one::<pg_sys::Oid>("SELECT 'm99_cm'::regclass::oid").unwrap().unwrap();
+        // The introspection helper flushes the 25001 pending rows into ONE durable column-major stripe + its MVCC
+        // catalog row, then reports the on-disk format — so the subsequent SELECTs read back through the real
+        // disk-decode + catalog-read path (not the in-memory pending buffer).
         let info = Spi::get_one_with_args::<String>(
             "SELECT theodb_columnar_test_stripe_info($1)",
             &[oid.into()],
@@ -1173,19 +1215,53 @@ mod tests {
         .unwrap();
         assert!(info.contains("magic=TCS1"), "stripe must be the column-major TCS1 format: {info}");
         assert!(info.contains("ncols=3"), "3 columns: {info}");
-        assert!(info.contains("cg=3"), "25000 rows / 10000-row chunk groups = 3: {info}");
+        assert!(info.contains("cg=3"), "25001 rows / 10000-row chunk groups = 3: {info}");
         assert!(info.contains("col0_hasmm=true"), "int column must carry min/max: {info}");
         assert!(info.contains("col0_min=1;"), "chunk-group 0 (rows 1..10000) min(a) = 1: {info}");
         assert!(info.contains("col0_max=10000"), "chunk-group 0 max(a) = 10000: {info}");
 
-        // Result-equivalence still holds through the column-major encode/decode.
+        // Result-equivalence through the column-major encode → disk → decode + MVCC-catalog read path.
         let cnt = Spi::get_one::<i64>("SELECT count(*) FROM m99_cm").unwrap().unwrap();
-        assert_eq!(cnt, 25000, "all rows read back");
+        assert_eq!(cnt, 25001, "all rows read back from the durable stripe");
         let suma = Spi::get_one::<i64>("SELECT sum(a)::bigint FROM m99_cm").unwrap().unwrap();
-        assert_eq!(suma, (1..=25000i64).sum::<i64>(), "sum(a) matches");
+        assert_eq!(suma, (1..=25001i64).sum::<i64>(), "sum(a) matches");
+        let sumc = Spi::get_one::<f64>("SELECT sum(c) FROM m99_cm").unwrap().unwrap();
+        assert!((sumc - (1..=25000i64).map(|g| g as f64).sum::<f64>()).abs() < 1e-3, "sum(c) matches: {sumc}");
         let sample = Spi::get_one::<String>("SELECT b FROM m99_cm WHERE a = 12345").unwrap().unwrap();
-        assert_eq!(sample, "row-12345", "text round-trips across a chunk-group boundary");
+        assert_eq!(sample, "row-12345", "text round-trips across a chunk-group boundary via disk decode");
+        let nulls = Spi::get_one::<i64>("SELECT count(*) FROM m99_cm WHERE b IS NULL").unwrap().unwrap();
+        assert_eq!(nulls, 1, "the NULL-text row round-trips through the column null-bitmap on disk");
         Spi::run("DROP TABLE m99_cm").unwrap();
+    }
+
+    /// M99 Phase C2 — MVCC delegation to the `columnar.stripe` heap catalog: a stripe committed by another session
+    /// becomes visible; the catalog row's own xmin/xmax is the visibility gate. This single-session test proves the
+    /// catalog is the visibility root (flushed stripe visible via the catalog; a pending-only table shows via the
+    /// in-memory buffer). The full cross-xact permutations (uncommitted invisible / RR holds snapshot / abort) are
+    /// the Phase D `pg_isolation_regress` proof.
+    #[pg_test]
+    fn m99_mvcc_catalog_is_visibility_root() {
+        Spi::run("CREATE TABLE m99_mv (a int) USING theodb_columnar").unwrap();
+        Spi::run("INSERT INTO m99_mv SELECT g FROM generate_series(1, 100) g").unwrap();
+        let oid = Spi::get_one::<pg_sys::Oid>("SELECT 'm99_mv'::regclass::oid").unwrap().unwrap();
+        // Before flush: nothing in the catalog, rows visible only via the same-xact pending buffer.
+        let pre = Spi::get_one::<i64>("SELECT count(*) FROM columnar.stripe WHERE relid = 'm99_mv'::regclass")
+            .unwrap()
+            .unwrap();
+        assert_eq!(pre, 0, "no catalog row before flush");
+        let cnt_pending = Spi::get_one::<i64>("SELECT count(*) FROM m99_mv").unwrap().unwrap();
+        assert_eq!(cnt_pending, 100, "pending rows visible to same xact before flush");
+        // Flush → exactly one catalog stripe row appears (the visibility root).
+        Spi::get_one_with_args::<String>("SELECT theodb_columnar_test_stripe_info($1)", &[oid.into()])
+            .unwrap()
+            .unwrap();
+        let post = Spi::get_one::<i64>("SELECT count(*) FROM columnar.stripe WHERE relid = 'm99_mv'::regclass")
+            .unwrap()
+            .unwrap();
+        assert_eq!(post, 1, "exactly one catalog stripe row after flush");
+        let cnt_disk = Spi::get_one::<i64>("SELECT count(*) FROM m99_mv").unwrap().unwrap();
+        assert_eq!(cnt_disk, 100, "rows visible via the catalog stripe after flush");
+        Spi::run("DROP TABLE m99_mv").unwrap();
     }
 
     /// M99 A1 — `CREATE TABLE ... USING theodb_columnar` loads end-to-end and registers in `pg_am`, and an empty

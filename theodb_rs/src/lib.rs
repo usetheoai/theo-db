@@ -26,6 +26,9 @@ pub unsafe extern "C-unwind" fn _PG_init() { unsafe {
     // M92 spike — register the arbitrary-WHERE Custom Scan Provider methods + install the pathlist hook
     // (inert unless `theodb.enable_vecfilter` is on).
     am::customscan::init();
+    // M99 Phase C2: register the columnar pre-commit flush callback (persists pending INSERT rows into durable
+    // stripes + their MVCC catalog rows before commit).
+    am::columnar::init();
     // M54: register the vectorizer background worker (only when preloaded — guarded internally, no-op in a
     // backend CREATE EXTENSION so it stays silent there).
     vectorizer::register_worker();
