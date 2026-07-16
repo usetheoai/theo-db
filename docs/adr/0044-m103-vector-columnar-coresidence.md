@@ -59,8 +59,11 @@ public-copy.md, the M73/M74 paradigm ceiling from ADR 0035). Co-residence does n
 
 ## Consequences
 
-- **Measured (docs/benchmarks/m103-vector-columnar.*):** column-pruning ratio 0.998 (latency invariant to analytical
-  width, 4.67× on-disk difference); composed filtered-knn + aggregation in one plan (225.7 ms).
+- **Measured (docs/benchmarks/m103-vector-columnar.*):** the isolated decode control quantifies the pruning win —
+  decoding only the 4 index columns (49.57 ms ± 0.29) vs ALL columns (219.81 ms ± 1.78) on the wide index = **77.4 %
+  of decode time saved** (above the noise floor); the end-to-end knn latency is invariant to analytical width (ratio
+  1.009, within a stddev — pruning adds no width-dependent cost, the L2 rerank dominates); composed filtered-knn +
+  aggregation in one plan (225.41 ms ± 1.02). On-disk 4.67× (wide vs narrow) is a separate fact, not decode cost.
 - **Proven (pg_test, 312 GREEN, +5 M103):** the byte-identity GATE (`m103_full_probe_byte_identical_to_exact_filtered`),
   the scalar prefilter (label mask), reduced-probe ordering, empty-mask handling, and the end-to-end columnar
   co-residence + composition (`m103_columnar_coresident_filtered_topk_matches_exact_and_composes`).

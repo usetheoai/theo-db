@@ -25,8 +25,8 @@ columns, on the WIDE index (16 analytical cols), same rows, no rerank.
 
 | Decode | Columns | Bytes decoded | Time (mean ± stddev, 5 runs) |
 |---|---|---|---|
-| pruned (index only) | tid, part_id, label, vec | 2.4 MB | **49.6 ms ± 0.3** |
-| full | + 16 × float8 payload | 8.8 MB | **219.8 ms ± 1.8** |
+| pruned (index only) | tid, part_id, label, vec | 2.4 MB | **49.57 ms ± 0.29** |
+| full | + 16 × float8 payload | 8.8 MB | **219.81 ms ± 1.78** |
 
 **Column pruning saves 77.4 % of the decode time** — a real, above-the-floor win (the stddevs, ~0.3–1.8 ms, are far
 smaller than the 170 ms gap). Decoding only the index columns is **4.4× faster** than decoding the full row.
@@ -35,11 +35,11 @@ smaller than the 170 ms gap). Decoding only the index columns is **4.4× faster*
 
 | Index | Analytical payload | knn latency (mean ± stddev) |
 |---|---|---|
-| `idx_narrow` | 1 × float8 | 77.6 ms ± 0.4 |
-| `idx_wide` | 16 × float8 | 78.7 ms ± 0.9 |
-| **wide / narrow ratio** | | **1.014** |
+| `idx_narrow` | 1 × float8 | 77.91 ms ± 0.42 |
+| `idx_wide` | 16 × float8 | 78.58 ms ± 0.65 |
+| **wide / narrow ratio** | | **1.009** |
 
-The end-to-end filtered vector scan latency is ~unchanged (ratio 1.014, within a stddev) as the payload grows from 1
+The end-to-end filtered vector scan latency is ~unchanged (ratio 1.009, within a stddev) as the payload grows from 1
 to 16 columns. This shows pruning **adds no width-dependent cost** to the query — but it is the isolated decode
 control above, not this ratio, that quantifies the win (the knn latency is L2-dominated). On-disk size (wide 1.49 MB
 vs narrow 0.32 MB, 4.67×) is stated as a separate fact; **on-disk size is not decode cost** — the measured decode
@@ -48,7 +48,7 @@ delta (77.4 %) is the real magnitude.
 ## Composed filtered-knn + analytical aggregation
 
 `SELECT avg(i.p0) FROM theodb.vindex_knn_columnar(idx, q, 10, 64, 0) knn JOIN idx i USING(tid)` — the scalar-prefiltered
-vector top-k + the analytical aggregation compose in **one plan** (**224.7 ms ± 2.1**).
+vector top-k + the analytical aggregation compose in **one plan** (**225.41 ms ± 1.02**).
 
 ## Honest ceiling (ADR D4)
 
