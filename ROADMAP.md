@@ -1612,7 +1612,7 @@ p/ a escolha do nome canônico ser deliberada, não acidental). **Prior art:** `
 
 ---
 
-## M107 — [ ] Pilar de grafo nativo — Fase 0: blueprint SOTA + spike medido (CSR + MS-BFS vetorizado + SQL/PGQ) fundido ao columnar+vetorial+AI *(gated M104)*
+## M107 — [x] Pilar de grafo nativo — Fase 0: blueprint SOTA + spike medido (CSR + MS-BFS vetorizado + SQL/PGQ) fundido ao columnar+vetorial+AI *(gated M104)*
 
 > Added 2026-07-16 by `/roadmap-feature` (slug: `native-graph-engine`). Fonte: deep research SOTA (DuckPGQ CIDR/VLDB
 > 2023, Kùzu CIDR 2023, GRFusion, SQL/PGQ SQL:2023, Microsoft GraphRAG/LazyGraphRAG, HippoRAG 2) + gap analysis do
