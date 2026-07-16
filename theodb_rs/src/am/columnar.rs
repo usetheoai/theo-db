@@ -365,21 +365,24 @@ unsafe fn materialize_rows(rel: pg_sys::Relation) -> Result<Vec<Vec<u8>>, String
         let stripes = read_stripes(rel)?;
         let mut out = Vec::new();
         for st in stripes {
-            // Concatenate the stripe's data pages (one item per page, written by flush).
-            let mut payload = Vec::with_capacity(st.byte_len as usize);
+            // Concatenate the stripe's compressed data pages (one item per page, written by flush).
+            let mut compressed = Vec::with_capacity(st.byte_len as usize);
             for b in st.first_block..st.first_block + st.n_blocks {
                 let items = super::page::read_all_page_items(rel, b)?;
                 if let Some(chunk) = items.into_iter().next() {
-                    payload.extend_from_slice(&chunk);
+                    compressed.extend_from_slice(&chunk);
                 }
             }
-            if payload.len() != st.byte_len as usize {
+            if compressed.len() != st.byte_len as usize {
                 return Err(format!(
-                    "theodb_columnar: stripe payload length mismatch ({} != {})",
-                    payload.len(),
+                    "theodb_columnar: stripe on-disk length mismatch ({} != {})",
+                    compressed.len(),
                     st.byte_len
                 ));
             }
+            // Decompress to the row-blob payload.
+            let payload = zstd::decode_all(&compressed[..])
+                .map_err(|e| format!("theodb_columnar: zstd decompress failed: {e}"))?;
             // Split payload into row blobs: [u32 len][bytes]…
             let mut off = 0usize;
             for _ in 0..st.row_count {
@@ -563,10 +566,15 @@ unsafe fn flush_pending(rel: pg_sys::Relation) -> Result<(), String> {
         payload.extend_from_slice(&(r.len() as u32).to_le_bytes());
         payload.extend_from_slice(r);
     }
+    // Compress the whole stripe with zstd (level 3 — the DuckDB/Parquet default balance). This is the measurable
+    // columnar space benefit; the self-describing zstd frame carries the decompressed size, so `byte_len` on disk =
+    // the COMPRESSED length. (Per-column chunking + min/max skip-pruning is the follow-up slice.)
+    let compressed = zstd::encode_all(&payload[..], 3)
+        .map_err(|e| format!("theodb_columnar: zstd compress failed: {e}"))?;
     unsafe {
         let first_block = pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM);
         let mut n_blocks: u32 = 0;
-        for chunk in payload.chunks(8000) {
+        for chunk in compressed.chunks(8000) {
             super::page::extend_page_with_item(rel, pg_sys::ForkNumber::MAIN_FORKNUM, chunk);
             n_blocks += 1;
         }
@@ -577,7 +585,7 @@ unsafe fn flush_pending(rel: pg_sys::Relation) -> Result<(), String> {
             StripeDesc {
                 first_block,
                 n_blocks,
-                byte_len: payload.len() as u64,
+                byte_len: compressed.len() as u64,
                 row_count: rows.len() as u32,
                 first_row_number: base,
             },
@@ -829,6 +837,34 @@ mod tests {
         assert_eq!(sample, "row-42", "text values must round-trip exactly");
 
         Spi::run("DROP TABLE m99_rt2").unwrap();
+    }
+
+    /// M99 (zstd) — the stripe is zstd-compressed on disk: a highly-repetitive column compresses well, so the
+    /// columnar table's on-disk size is materially smaller than the same rows in a heap table (MEASURED, not
+    /// asserted by opinion). Also proves the round-trip still holds through the compress/decompress path.
+    #[pg_test]
+    fn m99_stripe_compression_shrinks_ondisk() {
+        // Highly compressible: a constant text + a monotonic int.
+        Spi::run("CREATE TABLE m99_cz (a int, b text) USING theodb_columnar").unwrap();
+        Spi::run("CREATE TABLE m99_hz (a int, b text)").unwrap(); // heap control
+        let ins = "SELECT g, repeat('x', 200) FROM generate_series(1, 20000) g";
+        Spi::run(&format!("INSERT INTO m99_cz {ins}")).unwrap();
+        Spi::run(&format!("INSERT INTO m99_hz {ins}")).unwrap();
+
+        // Force the columnar flush (scan) then measure on-disk size.
+        let cnt = Spi::get_one::<i64>("SELECT count(*) FROM m99_cz").unwrap().unwrap();
+        assert_eq!(cnt, 20000, "round-trip through compression must return all rows");
+
+        let cz = Spi::get_one::<i64>("SELECT pg_relation_size('m99_cz')").unwrap().unwrap();
+        let hz = Spi::get_one::<i64>("SELECT pg_relation_size('m99_hz')").unwrap().unwrap();
+        // The repeat('x',200) column compresses ~massively; require at least a 2× on-disk shrink vs the heap.
+        assert!(
+            cz > 0 && (cz as f64) < (hz as f64) / 2.0,
+            "columnar on-disk size {cz} must be < half the heap size {hz} (zstd compression benefit)"
+        );
+
+        Spi::run("DROP TABLE m99_cz").unwrap();
+        Spi::run("DROP TABLE m99_hz").unwrap();
     }
 
     /// M99 A1 — `CREATE TABLE ... USING theodb_columnar` loads end-to-end and registers in `pg_am`, and an empty

@@ -3141,6 +3141,7 @@ dependencies = [
  "pgrx-tests",
  "serde_json",
  "tokio",
+ "zstd",
 ]
 
 [[package]]
