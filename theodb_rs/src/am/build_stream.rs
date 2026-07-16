@@ -111,7 +111,7 @@ pub(crate) unsafe fn tuplesort_roundtrip(
 
 // ---- Phase 2 — the streaming build pipeline (v5 plain-f32 AQ-split layout) ----
 
-use crate::am::aq::AqQuantizer;
+use crate::vec::aq::AqQuantizer;
 use crate::ann::{IvfflatIndex, Metric};
 
 /// Reservoir/prefix sample cap for training the streaming build's centroids + AQ codebook (bounded, independent of

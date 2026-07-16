@@ -14,12 +14,12 @@
 //! raw integer accumulator `acc` alone preserves the ADC RANKING — which is all the scan+rerank needs. The
 //! requantization is a bounded tolerance, asserted (not ignored) by `ah_lut_requant_bounded`.
 //!
-//! Domain layer: NO `pg_sys` (architecture.md § 1) — consumes only `crate::am::aq::AqQuantizer` + `crate::vec`.
+//! Domain layer: NO `pg_sys` (architecture.md § 1) — consumes only `crate::vec::aq::AqQuantizer` + `crate::vec`.
 //! Production callers (the v3 scan) land in Phase 4 (Dependency Graph 2→3→4); in this phase the kernel is
 //! exercised by the `#[pg_test]` suite below (pillar-a caller deferred per the M59 plan, honest `dead_code`).
 #![allow(dead_code)]
 
-use crate::am::aq::AqQuantizer;
+use crate::vec::aq::AqQuantizer;
 
 /// int8 LUT range: partials map to `[0, LUT_MAX]`. 127 keeps the value inside `i8` with a saturation guard AND
 /// bounds the `m`-way i16 accumulate: `m · 127 ≤ 32767` ⇒ safe for any `m ≤ 258` (SIFT1M uses `m ≤ 128`).

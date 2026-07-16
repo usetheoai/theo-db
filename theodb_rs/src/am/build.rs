@@ -185,7 +185,7 @@ pub extern "C-unwind" fn ambuild(
             // Byte-identical to the pre-M89 stride-of-corpus sample.
             let train: Vec<Vec<f32>> = idx.train_sample(AQ_TRAIN_SAMPLE);
             let thr = crate::am::options::aq_threshold_from_relation(indexrel);
-            match crate::am::aq::AqQuantizer::train(&train, m, 4, thr, BUILD_SEED) {
+            match crate::vec::aq::AqQuantizer::train(&train, m, 4, thr, BUILD_SEED) {
                 Ok(quant) => {
                     let pairs = m.div_ceil(2);
                     // M89 (streaming Increment 2): pack the AQ codes from list POSITIONS reading vectors by
@@ -263,6 +263,15 @@ pub extern "C-unwind" fn ambuild(
                     } else {
                         // v4 (interleaved) — legacy, non-storage-separated. Not the M89 streaming target; builds the
                         // `entries` copy for the unchanged writer (OOMs at billion-scale, pre-M89 behavior).
+                        // M104: WARN that this path materializes the corpus (the audit's inverted-default finding) —
+                        // point the user at the streaming, storage-separated layout. The default is NOT flipped
+                        // (that would change the on-disk format of existing `pq_subspaces` indexes); the WARN is the
+                        // safe bound, and `WITH (separate_storage=1)` selects the bounded-memory v5/v6 build.
+                        pg_sys::warning!(
+                            "theodb_ivfflat: building the legacy v4 (interleaved) IVF-AQ layout — it materializes \
+                             the whole corpus and can OOM at billion-scale. For a bounded-memory build use \
+                             WITH (separate_storage=1) (the M89 streaming v5/v6 layout)."
+                        );
                         let entries = idx.list_entries();
                         page::write_ivf_aq(
                             indexrel,
@@ -290,7 +299,7 @@ pub extern "C-unwind" fn ambuild(
 /// `vec::ah::ah_score_block` consumes (FAISS bbs=32). `pairs = ceil(m/2)` bytes/code. Padding entries score high
 /// (all-zero code → the LUT's first centroid); the scan trims to the list's real `count` from the directory.
 fn pack_block32_codes(
-    quant: &crate::am::aq::AqQuantizer,
+    quant: &crate::vec::aq::AqQuantizer,
     positions: &[usize],
     vectors: &[Vec<f32>],
     pairs: usize,
@@ -490,6 +499,24 @@ pub(crate) unsafe fn vacuum_rebuild(
     if magic == 0 {
         return 0; // unbuilt
     }
+    // M104 — bound the fold's memory blast radius: the blob (M26 legacy) + v3-structured + HNSW-structured
+    // compaction paths materialize the live set in RAM (O(N), the M55 window). If the index-on-disk size exceeds
+    // `theodb.vacuum_fold_max_mb` (default 1024), SKIP the in-VACUUM fold with a WARN instead of risking an OOM —
+    // correctness is UNCHANGED (the scan folds the pending region + the executor's MVCC heap re-check drops dead
+    // TIDs; the modern IVF v4–v7 formats already no-op here). The operator compacts a large index via REINDEX (the
+    // fully-bounded streaming fold is M55). This turns a possible OOM into a documented, safe deferral.
+    let fold_cap_mb = crate::am::guc::vacuum_fold_max_mb();
+    let idx_bytes = pg_sys::RelationGetNumberOfBlocksInFork(indexrel, pg_sys::ForkNumber::MAIN_FORKNUM) as u64 * 8192;
+    if fold_cap_mb > 0 && idx_bytes > fold_cap_mb.saturating_mul(1024 * 1024) {
+        pg_sys::warning!(
+            "theodb am vacuum: index is {} MB (> theodb.vacuum_fold_max_mb = {} MB) — skipping the in-VACUUM \
+             compaction fold to avoid an O(N)-in-RAM OOM; correctness is preserved (scan pending-fold + MVCC \
+             re-check). REINDEX to compact (the bounded streaming fold is a follow-up, M55).",
+            idx_bytes / (1024 * 1024),
+            fold_cap_mb
+        );
+        return 0;
+    }
     if magic == page::IVF_STRUCT_MAGIC {
         // M81 — a v4 (AQ) IVF index: the f32 v3 rebuild would reject/corrupt it. Correctness holds WITHOUT a
         // structure rebuild — the scan folds the pending region (scan.rs::scan_ivf_aq) and the executor's MVCC
@@ -512,7 +539,10 @@ pub(crate) unsafe fn vacuum_rebuild(
     if magic == crate::am::hnsw_page::HNSW_STRUCT_MAGIC {
         return vacuum_rebuild_hnsw_structured(indexrel, dead);
     }
-    // Blob (M26 legacy) path.
+    // DEPRECATED (M104) — the blob (M26 legacy, single-serialized-index) layout. Superseded by the structured
+    // IVF (M31, v3–v7) and structured HNSW (M35) layouts; only pre-M31 indexes still carry it, and a REINDEX
+    // migrates them to the current format. Kept for read/VACUUM back-compat; will be removed once no blob indexes
+    // remain in the field (follow-up). New builds never produce a blob.
     let blob = match page::read_blob(indexrel) {
         Ok(b) => b,
         Err(e) => pg_sys::error!("theodb am vacuum: {e}"),
@@ -612,7 +642,7 @@ fn pack_fold_layout(
     // Recover the AQ params (bits + η) from the persisted codebook so the re-trained fold generation is identical
     // to the build's (deterministic AQ_BUILD_SEED). The codebook itself is re-trained on the LIVE vectors inside
     // `pack_aq` — dropping dead nodes but keeping the same (m, bits, η), the "códigos gerados no fold".
-    let q = crate::am::aq::AqQuantizer::from_meta_bytes(&meta.aq_codebook)?;
+    let q = crate::vec::aq::AqQuantizer::from_meta_bytes(&meta.aq_codebook)?;
     crate::am::hnsw_page::pack_aq(idx, base, meta.aq_m as usize, q.bits(), q.aq_threshold())
 }
 
@@ -803,11 +833,11 @@ mod tests {
         assert_eq!(meta.sbq_bits, 0, "v3 index carries NO SBQ (AQ ⊥ SBQ, D1)");
         assert!(!meta.aq_codebook.is_empty(), "the AQ codebook is persisted in the v3 meta");
         // The persisted codebook decodes and reports the η we asked for (2.0), proving the reloption reached train.
-        let q = crate::am::aq::AqQuantizer::from_meta_bytes(&meta.aq_codebook).expect("codebook decodes");
+        let q = crate::vec::aq::AqQuantizer::from_meta_bytes(&meta.aq_codebook).expect("codebook decodes");
         assert_eq!(q.m(), 4);
         assert!((q.aq_threshold() - 2.0).abs() < 1e-3, "η=2.0 round-tripped from the reloption");
         // ⌈m/2⌉ = 2 trailing bytes per node.
-        assert_eq!(crate::am::aq::AqQuantizer::bytes_per_vector(8, 4), 2);
+        assert_eq!(crate::vec::aq::AqQuantizer::bytes_per_vector(8, 4), 2);
         // f32 rerank still exact.
         let (mut exact, mut idx) = topk_sets("aqb", "[3,3,2,0,0.3,4,1,1.5]", 5);
         exact.sort_unstable();
@@ -1459,9 +1489,9 @@ mod tests {
         assert_eq!(meta.dim, 768, "dim=768");
         assert!(meta.aq_cb_npages >= 2, "the dim=768 codebook needs MULTIPLE dedicated pages (got {})", meta.aq_cb_npages);
         // (2) the reassembled codebook round-trips bit-exact and re-encodes identically to a fresh train.
-        let expected_len = 13 + 8 * crate::am::aq::AQ_K_STAR * (768 / 8) * 4; // to_meta_bytes header + centroids
+        let expected_len = 13 + 8 * crate::vec::aq::AQ_K_STAR * (768 / 8) * 4; // to_meta_bytes header + centroids
         assert_eq!(meta.aq_codebook.len(), expected_len, "reassembled codebook is the full multi-page blob");
-        let q = crate::am::aq::AqQuantizer::from_meta_bytes(&meta.aq_codebook).expect("multi-page codebook decodes");
+        let q = crate::vec::aq::AqQuantizer::from_meta_bytes(&meta.aq_codebook).expect("multi-page codebook decodes");
         assert_eq!(q.m(), 8);
         assert_eq!(q.dim(), 768, "the decoded codebook covers the full index dim");
         // The reloption `aq_threshold=4100` is MILLI-scaled (η×1000) → the trained quantizer stores η=4.1.

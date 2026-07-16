@@ -57,6 +57,14 @@ CREATE TABLE IF NOT EXISTS theodb.vectorizer_queue (
 CREATE INDEX IF NOT EXISTS vectorizer_queue_claim_idx
     ON theodb.vectorizer_queue (state, enqueued_at)
     WHERE state IN ('pending', 'processing');
+
+-- M104 producer backpressure via COALESCING: at most ONE pending job per (vectorizer_id, source_pk). A bulk
+-- backfill / repeated UPDATE that re-enqueues the same row is de-duplicated (ON CONFLICT DO NOTHING on the
+-- enqueue), so the pending queue depth is bounded by the DISTINCT pending work set — the single worker cannot be
+-- flooded past the number of distinct rows that actually changed (the audit's producer-faster-than-consumer gap).
+CREATE UNIQUE INDEX IF NOT EXISTS vectorizer_queue_pending_uniq
+    ON theodb.vectorizer_queue (vectorizer_id, source_pk)
+    WHERE state = 'pending';
 "#,
     name = "theodb_vectorizer_schema",
     requires = ["theodb_schema_bootstrap"], // M70: schema theodb criado pelo theodb_rs (flip ADR-D1)
@@ -77,11 +85,16 @@ DECLARE
 BEGIN
     IF TG_OP = 'DELETE' THEN
         INSERT INTO theodb.vectorizer_queue (vectorizer_id, source_pk, op)
-        VALUES (vid, to_jsonb(OLD) ->> pkcol, 'delete');
+        VALUES (vid, to_jsonb(OLD) ->> pkcol, 'delete')
+        -- coalesce: one pending job per (vectorizer,PK); last op wins (a delete after a pending upsert must
+        -- supersede it — the net state is "deleted"). enqueued_at is preserved to keep FIFO order (a hot row
+        -- re-touched forever cannot starve older work by resetting its position).
+        ON CONFLICT (vectorizer_id, source_pk) WHERE state = 'pending' DO UPDATE SET op = EXCLUDED.op;
         RETURN OLD;
     END IF;
     INSERT INTO theodb.vectorizer_queue (vectorizer_id, source_pk, op)
-    VALUES (vid, to_jsonb(NEW) ->> pkcol, 'upsert');
+    VALUES (vid, to_jsonb(NEW) ->> pkcol, 'upsert')
+    ON CONFLICT (vectorizer_id, source_pk) WHERE state = 'pending' DO UPDATE SET op = EXCLUDED.op;
     RETURN NEW;
 END;
 $fn$;
@@ -524,6 +537,28 @@ fn _vectorizer_reap_orphans(max_attempts: i32) -> i64 {
             .unwrap_or(0)
     })
 }
+
+/// M104 — bound the dead-letter: keep the most recent `keep` `failed` rows (highest job_id), delete older ones.
+/// Without this, a persistent poison row or a mis-set endpoint accumulates `failed` tombstones on-disk forever
+/// (the audit's unbounded on-disk dead-letter finding) — the partial claim index hides the growth from the hot
+/// path, so it is silent. `done` jobs are already DELETEd; this bounds the retained `failed` history. Returns the
+/// count purged. Called by the worker's periodic maintenance (`theodb.vectorizer_dead_letter_max`, default 1000).
+#[pg_extern]
+fn _vectorizer_purge_dead_letters(keep: i32) -> i64 {
+    Spi::connect_mut(|client| {
+        client
+            .update(
+                "WITH d AS (DELETE FROM theodb.vectorizer_queue WHERE state='failed' AND job_id NOT IN \
+                 (SELECT job_id FROM theodb.vectorizer_queue WHERE state='failed' ORDER BY job_id DESC LIMIT $1) \
+                 RETURNING 1) SELECT count(*) FROM d",
+                None,
+                &[keep.max(0).into()],
+            )
+            .ok()
+            .and_then(|t| t.first().get::<i64>(1).ok().flatten())
+            .unwrap_or(0)
+    })
+}
 } // mod theodb_rs
 
 // ── The background worker (ADR 0016) — the ONLY non-CI-testable piece (needs shared_preload_libraries). It
@@ -598,6 +633,9 @@ pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
                 "SELECT theodb_rs._vectorizer_reap_orphans($1)",
                 &[WORKER_MAX_ATTEMPTS.into()],
             );
+            // M104 — bound the on-disk dead-letter (purge old `failed` rows beyond the retained cap).
+            let keep = crate::am::guc::vectorizer_dead_letter_max();
+            let _ = Spi::run_with_args("SELECT theodb_rs._vectorizer_purge_dead_letters($1)", &[keep.into()]);
         });
 
         // Phase 1 — claim a batch (its own txn; the committed lease protects the jobs across phases).
@@ -727,6 +765,33 @@ pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
         });
     }
 }
+
+// M104 (review MEDIUM) — least-privilege: the `_vectorizer_*` internals are SECURITY INVOKER helpers the worker
+// and enqueue trigger call; no external role should hold EXECUTE on them. The `theodb_rs` schema is not
+// blanket-REVOKE'd, so `#[pg_extern]` functions default to PUBLIC EXECUTE — revoke the whole family (the existing
+// claim/mark/process/reap set + the new dead-letter purge) to match the codebase's per-function REVOKE convention.
+// Dynamic (`::regprocedure`) so there are no fragile hand-written signatures to drift; `~ '^_vectorizer_'` matches
+// the family by literal prefix (no LIKE wildcard ambiguity).
+extension_sql!(
+    r#"
+DO $$
+DECLARE r record;
+BEGIN
+    FOR r IN SELECT p.oid::regprocedure AS sig
+             FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+             WHERE n.nspname = 'theodb_rs' AND p.proname ~ '^_vectorizer_'
+    LOOP
+        EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC', r.sig);
+    END LOOP;
+END $$;
+"#,
+    name = "theodb_vectorizer_revoke",
+    requires = [
+        _vectorizer_claim_batch, _vectorizer_mark_done, _vectorizer_mark_failed, _vectorizer_renew_lease,
+        _vectorizer_process_upsert, _vectorizer_process_delete, _vectorizer_process_upsert_batch,
+        _vectorizer_bump_stats, _vectorizer_reap_orphans, _vectorizer_purge_dead_letters,
+    ],
+);
 
 #[cfg(any(test, feature = "pg_test"))]
 #[pgrx::pg_schema]
@@ -890,7 +955,9 @@ mod tests {
         });
         assert_eq!((pk.as_str(), op.as_str(), state.as_str()), ("42", "upsert", "pending"),
             "INSERT enqueues a pending upsert for the row PK");
-        // UPDATE → another upsert; DELETE → a delete job.
+        // M104 coalescing: UPDATE then DELETE on the SAME never-processed PK collapse into the SINGLE pending
+        // job, and the LAST op wins — the net state of insert+update+delete is "delete", so the worker does one
+        // delete, not three redundant jobs (producer backpressure without losing the final intent).
         Spi::run("UPDATE docs SET body='changed' WHERE id=42").unwrap();
         Spi::run("DELETE FROM docs WHERE id=42").unwrap();
         let ops: Vec<String> = Spi::connect(|c| {
@@ -899,7 +966,7 @@ mod tests {
                 .filter_map(|r| r.get::<String>(1).unwrap())
                 .collect()
         });
-        assert_eq!(ops, vec!["upsert", "upsert", "delete"], "INSERT/UPDATE enqueue upsert, DELETE enqueues delete");
+        assert_eq!(ops, vec!["delete"], "INSERT+UPDATE+DELETE on one unprocessed PK coalesce to a single 'delete'");
     }
 
     // (M66) the `chunk_text_*` SPI tests were removed with the dead plpgsql `theodb.chunk_text`; the
@@ -1010,5 +1077,77 @@ mod tests {
         assert_eq!(reaped, 1, "the reaper dead-letters the stuck orphan");
         let state: String = Spi::get_one("SELECT state FROM theodb.vectorizer_queue").unwrap().unwrap();
         assert_eq!(state, "failed", "reaped orphan is failed, not stuck in processing forever");
+    }
+
+    // M104 — the dead-letter purge bounds the on-disk `failed` tombstones: keep the most recent N, delete older.
+    #[pg_test]
+    fn m104_dead_letter_purge_bounds_failed_rows() {
+        seed(10);
+        Spi::run("UPDATE theodb.vectorizer_queue SET state='failed'").unwrap();
+        let before: i64 = Spi::get_one("SELECT count(*) FROM theodb.vectorizer_queue WHERE state='failed'").unwrap().unwrap();
+        assert_eq!(before, 10, "10 dead-letter rows before purge");
+        let purged: i64 = Spi::get_one("SELECT theodb_rs._vectorizer_purge_dead_letters(3)").unwrap().unwrap();
+        assert_eq!(purged, 7, "purge removed all but the most recent 3");
+        let after: i64 = Spi::get_one("SELECT count(*) FROM theodb.vectorizer_queue WHERE state='failed'").unwrap().unwrap();
+        assert_eq!(after, 3, "dead-letter bounded to the retained cap");
+    }
+
+    // M104 producer backpressure: the enqueue trigger COALESCES — repeated writes to the SAME source row
+    // produce at most ONE pending job (bounded queue depth), so a hot row cannot flood the single worker.
+    #[pg_test]
+    fn m104_enqueue_coalesces_repeated_writes_to_one_pending() {
+        Spi::run("CREATE TABLE csrc(id int PRIMARY KEY, body text)").unwrap();
+        Spi::run("CREATE TABLE cdst(id int PRIMARY KEY, emb text)").unwrap();
+        let vid: i32 = Spi::get_one(
+            "SELECT theodb.create_vectorizer('csrc','id','body','cdst','emb','m',3)",
+        )
+        .unwrap()
+        .unwrap();
+        // One INSERT + three UPDATEs to the SAME row: naive enqueue would create 4 pending jobs.
+        Spi::run("INSERT INTO csrc VALUES (1,'a')").unwrap();
+        Spi::run("UPDATE csrc SET body='b' WHERE id=1").unwrap();
+        Spi::run("UPDATE csrc SET body='c' WHERE id=1").unwrap();
+        Spi::run("UPDATE csrc SET body='d' WHERE id=1").unwrap();
+        let pending: i64 = Spi::get_one(&format!(
+            "SELECT count(*) FROM theodb.vectorizer_queue WHERE vectorizer_id={vid} AND source_pk='1' AND state='pending'"
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(pending, 1, "4 writes to the same row coalesce into a single pending job (backpressure)");
+
+        // A DISTINCT row still enqueues independently — coalescing is per-(vectorizer,pk), not global.
+        Spi::run("INSERT INTO csrc VALUES (2,'x')").unwrap();
+        let total: i64 = Spi::get_one(&format!(
+            "SELECT count(*) FROM theodb.vectorizer_queue WHERE vectorizer_id={vid} AND state='pending'"
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(total, 2, "distinct rows are not coalesced together");
+    }
+
+    // M104 (review H1): the bounded-memory GUC is REGISTERED, so `SET` actually takes effect (not silently
+    // ignored by an unregistered `current_setting`).
+    #[pg_test]
+    fn m104_dead_letter_max_guc_is_registered_and_settable() {
+        Spi::run("SET theodb.vectorizer_dead_letter_max = 42").unwrap();
+        let v: String = Spi::get_one("SELECT current_setting('theodb.vectorizer_dead_letter_max')").unwrap().unwrap();
+        assert_eq!(v, "42", "a registered GUC round-trips through SET/current_setting");
+    }
+
+    // M104 (review MEDIUM): the `_vectorizer_*` internals are revoked from PUBLIC (least privilege).
+    #[pg_test]
+    fn m104_vectorizer_internals_revoked_from_public() {
+        let purge_public: bool = Spi::get_one(
+            "SELECT has_function_privilege('public', 'theodb_rs._vectorizer_purge_dead_letters(integer)', 'EXECUTE')",
+        )
+        .unwrap()
+        .unwrap();
+        assert!(!purge_public, "the dead-letter purge internal is NOT executable by PUBLIC");
+        let claim_public: bool = Spi::get_one(
+            "SELECT has_function_privilege('public', 'theodb_rs._vectorizer_reap_orphans(integer)', 'EXECUTE')",
+        )
+        .unwrap()
+        .unwrap();
+        assert!(!claim_public, "the whole _vectorizer_* family is revoked, not just the new function");
     }
 }

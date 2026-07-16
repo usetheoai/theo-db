@@ -152,6 +152,36 @@ pub(crate) fn maybe_crash_at_phase(phase: i32) {
 }
 
 /// Register `theodb_ivfflat.probes` + `theodb_hnsw.ef_search` + the M48 test-crash GUCs. Called once from `_PG_init`.
+// M104 — the hardening arc's bounded-memory / resilience knobs. Registered here (not just read via
+// `current_setting`) so `SET theodb.<name> = N` actually takes effect and the value shows in `pg_settings` —
+// the review's H1: an advertised "configurable bound" that isn't registered silently ignores the SET.
+pub(crate) static VACUUM_FOLD_MAX_MB: GucSetting<i32> = GucSetting::<i32>::new(1024);
+pub(crate) static ARROW_CACHE_MAX_ENTRIES: GucSetting<i32> = GucSetting::<i32>::new(16);
+pub(crate) static VECTORIZER_DEAD_LETTER_MAX: GucSetting<i32> = GucSetting::<i32>::new(1000);
+pub(crate) static HTTP_BREAKER_OPEN_MS: GucSetting<i32> = GucSetting::<i32>::new(30_000);
+pub(crate) static AI_MAX_BATCH: GucSetting<i32> = GucSetting::<i32>::new(256);
+
+/// VACUUM skips the in-index compaction fold above this on-disk size (MB); 0 disables the guard. Default 1024.
+pub(crate) fn vacuum_fold_max_mb() -> u64 {
+    VACUUM_FOLD_MAX_MB.get().max(0) as u64
+}
+/// Max distinct tables held in the per-backend Arrow cache before eviction (never below 1). Default 16.
+pub(crate) fn arrow_cache_max_entries() -> usize {
+    ARROW_CACHE_MAX_ENTRIES.get().max(1) as usize
+}
+/// Retained `failed` dead-letter rows per vectorizer job before purge (never below 0). Default 1000.
+pub(crate) fn vectorizer_dead_letter_max() -> i32 {
+    VECTORIZER_DEAD_LETTER_MAX.get().max(0)
+}
+/// How long the AI HTTP circuit breaker stays open before a half-open probe (ms; never below 0). Default 30000.
+pub(crate) fn http_breaker_open_ms() -> u64 {
+    HTTP_BREAKER_OPEN_MS.get().max(0) as u64
+}
+/// Max prompts per batched AI request before chunking into multiple round-trips (never below 1). Default 256.
+pub(crate) fn ai_max_batch() -> usize {
+    AI_MAX_BATCH.get().max(1) as usize
+}
+
 pub(crate) fn init() {
     GucRegistry::define_int_guc(
         c"theodb.test_crash_after_pages",
@@ -254,6 +284,57 @@ pub(crate) fn init() {
         &MAX_SCAN_TUPLES,
         0,
         10_000_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+    // M104 bounded-memory / resilience knobs (review H1).
+    GucRegistry::define_int_guc(
+        c"theodb.vacuum_fold_max_mb",
+        c"VACUUM skips the in-index compaction fold above this on-disk size in MB (0 = never skip)",
+        c"A large legacy/HNSW index folds O(N) in RAM; above this bound VACUUM WARNs and defers compaction to REINDEX (correctness preserved). Default 1024.",
+        &VACUUM_FOLD_MAX_MB,
+        0,
+        1_048_576,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+    GucRegistry::define_int_guc(
+        c"theodb.arrow_cache_max_entries",
+        c"Max distinct tables held in the per-backend Arrow cache before eviction",
+        c"Bounds the M101 per-backend columnar Arrow cache. Higher = fewer rebuilds, more RAM. Default 16.",
+        &ARROW_CACHE_MAX_ENTRIES,
+        1,
+        1_000_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+    GucRegistry::define_int_guc(
+        c"theodb.vectorizer_dead_letter_max",
+        c"Retained `failed` dead-letter rows per vectorizer job before the worker purges older ones",
+        c"Bounds the on-disk dead-letter so a poison row / bad endpoint cannot accumulate tombstones forever. Default 1000.",
+        &VECTORIZER_DEAD_LETTER_MAX,
+        0,
+        100_000_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+    GucRegistry::define_int_guc(
+        c"theodb.http_breaker_open_ms",
+        c"How long the AI HTTP circuit breaker stays open before a half-open probe (milliseconds)",
+        c"After K consecutive failures the breaker opens and calls fail-fast for this long, then one probe decides re-close. Default 30000.",
+        &HTTP_BREAKER_OPEN_MS,
+        0,
+        3_600_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+    GucRegistry::define_int_guc(
+        c"theodb.ai_max_batch",
+        c"Max prompts per batched AI request before chunking into multiple round-trips",
+        c"A huge array becomes several bounded requests instead of one giant request/response. Default 256.",
+        &AI_MAX_BATCH,
+        1,
+        1_000_000,
         GucContext::Userset,
         GucFlags::default(),
     );

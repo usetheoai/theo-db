@@ -19,6 +19,8 @@ use crate::pg::err_input;
 // M59 Phase 2 — the Asymmetric-Hashing LUT16 `pshufb` scoring kernel lives in a sibling file so neither this
 // module nor `ah.rs` exceeds the 500-LoC budget (`rules/architecture.md`). `#[path]` keeps `vec.rs` a plain
 // file (not a `vec/mod.rs` dir) — minimal diff, no reshuffle of the M20/M58 code above.
+#[path = "vec/aq.rs"]
+pub(crate) mod aq; // M104 — relocated from am/ (pure domain quantizer; fixes the vec->am layering inversion)
 #[path = "vec/ah.rs"]
 pub(crate) mod ah;
 

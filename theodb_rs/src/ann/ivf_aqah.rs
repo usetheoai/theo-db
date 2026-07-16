@@ -4,7 +4,7 @@
 //! scan → rerank full-precision. Domínio puro (sem `pg_sys`, `rules/architecture.md §1`) — testável sem banco.
 //! NÃO é o AM pgrx (page format/WAL): isso é M76+. Aqui mede-se o ALGORITMO (a hipótese IVF-AQ+AH do M59/ADR-0019).
 
-use crate::am::aq::AqQuantizer;
+use crate::vec::aq::AqQuantizer;
 use crate::ann::ivf::IvfflatIndex;
 use crate::ann::Metric;
 use crate::vec::ah::{ah_score_block, build_lut16};
