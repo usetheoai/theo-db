@@ -43,9 +43,11 @@ echo "PRE_KNN=$PRE"
 
 FAILS=0
 next_seq=$((N+1))
+sig6() { local n; n=$(grep -c "was terminated by signal 6" "$DATA/log" 2>/dev/null || true); echo "${n:-0}"; }
 run_phase() {
   local name="$1"; local setguc="$2"; local expect="$3"; local shrink="${4:-}"   # expect: same|loud
   wait_up || { echo "$name: cluster down"; FAILS=$((FAILS+1)); return; }
+  local c0; c0=$(sig6)   # crash count BEFORE this phase (per-phase non-vacuous guard, council F1)
   # fresh pending region so THIS phase's VACUUM has a multi-page body to fold
   q "INSERT INTO t SELECT g, $(vrow 11 5) FROM generate_series($next_seq,$((next_seq+M-1))) g;" >/dev/null
   next_seq=$((next_seq+M))
@@ -68,6 +70,10 @@ $setguc
 VACUUM (INDEX_CLEANUP ON) t;
 SQL
   wait_up || { echo "$name: cluster did not recover after crash"; FAILS=$((FAILS+1)); return; }
+  # per-phase non-vacuous guard (council F1): THIS phase's fold must have crashed EXACTLY once — closes the
+  # theoretical "2+1+0 aggregates to 3" loophole. If it did not crash, this phase's fold did not run.
+  local c1; c1=$(sig6); local delta=$((c1 - c0))
+  if [ "$delta" -ne 1 ]; then echo "$name: FAIL — this phase fired $delta crashes (expected exactly 1 → its fold did not trigger)"; FAILS=$((FAILS+1)); fi
   # The robust #47 check (imune to data changes AND to IVF approximation): compare the POST-crash index answer to
   # a FRESH REINDEX answer over the SAME current data (the ground truth the index should give). Correct ⇒ equal;
   # fail-loud ⇒ a typed REINDEX error; SILENT CORRUPTION ⇒ a different answer with NO error (the #47 worst case).

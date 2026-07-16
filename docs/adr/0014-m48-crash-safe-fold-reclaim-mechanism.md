@@ -96,6 +96,12 @@ crash-safe = M55** (`ROADMAP § M55` — "fold incremental vs in-place", pré-re
 - **Garantia real do #47 (redação honesta):** o núcleo — **corrupção silenciosa (scan pontuando bytes stale
   como vetores)** — está ELIMINADO em todos os pontos de crash. A garantia é "consistente **OU** fail-loud com
   REINDEX, nunca silenciosamente errado" — MAIS FRACA que "sempre utilizável sem REINDEX", que é o M55.
+- **Torn-pivot-page (bloco 0) — segurança argumentada, não crash-injetada (council F2, 2026-07-16).** Um crash
+  *durante a escrita do próprio registro WAL do pivot* (página 0 rasgada no redo) NÃO tem ponto de injeção no
+  `crash_fold.sh`; a segurança vem do flag `GENERIC_XLOG_FULL_IMAGE` no `pivot_meta_page` (`page.rs`) — o registro
+  carrega a imagem completa do bloco 0, torn-page-proof no redo — combinado com `full_page_writes=on` (que o harness
+  seta). Herdado do precedente nbtree (`nbtxlog.c`), não de um crash mid-record independente. Os 3 pontos injetados
+  (after-body-page / post-pivot / mid-reclaim) cercam a fronteira de atomicidade onde o GenericXLog realmente falha.
 
 ## Rules consumidas
 
