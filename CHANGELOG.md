@@ -24,6 +24,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.96.0] - 2026-07-16
+
+### Added
+- **M107 Phase 0 — native graph engine D3 gate = GO:** SOTA blueprint (DuckPGQ/Kùzu/GRFusion/SQL-PGQ/GraphRAG) + a reproducible own-code spike proving native **CSR adjacency + frontier BFS** beats the theo-rag recursive-CTE baseline by **262–732× on traversal** (8–108× end-to-end), correctness-oracle PASS on all 8 trials (`docs/benchmarks/m107-graph-spike.{md,json}`). Honest caveat measured: on-the-fly CSR build dominates at 1M → Phase 1 persists the CSR (ADR-0048). Architecture decided: native traversal operators over the existing columnar+vector substrate — NOT recursive-CTE, NOT Apache AGE (Cypher-on-joins, same per-hop tax), NOT a bundled graph engine (Rule 9). Phase 0 = gate only; the engine phases are follow-on milestones authorized by the GO. (M107)
+- Roadmap amended: added M107 native graph pillar Phase 0 — SOTA blueprint + measurement-first spike gate (CSR + vectorized MS-BFS + SQL/PGQ fused with the columnar+vector+AI engine) (`/roadmap-feature native-graph-engine`)
+
 ## [0.95.0] - 2026-07-16
 
 ### Added
