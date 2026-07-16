@@ -13,6 +13,20 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.87.0] - 2026-07-16
+
+### Added
 - **M99 /review sign-off (council-index-storage + council-rust-pgrx + council-benchmark = READY_TO_MERGE):** the three domain councils reviewed the final implementation (storage/WAL/MVCC, FFI safety, benchmark honesty) and signed off with zero blockers. Applied their non-blocking corrections: a compile-time `assert!(cfg!(target_endian = "little"))` guard on the column-major byval encoding (fail the build on a big-endian target, not silently at runtime); and 3 honesty qualifiers on the benchmark doc (9.2× compression is dataset-dependent not universal; the `columnar.stripe` catalog heap is not counted in the on-disk size; result-equivalence here is count/sum, GROUP BY correctness is the isolation suite). Filed 2 follow-up issues: #99 (WRITE_STATES flush unbounded → OOM on a giant single-xact INSERT...SELECT) and #100 (`relation_estimate_size` returns tuples=0 → planner blind). (M99)
 - **M99 Phase D2 (crash-safety WAL-replay + honest columnar-vs-heap benchmark — completes the M99 DoD):** (1) **Crash-safety** (`theodb_rs/isolation/crash.sh`): a committed columnar INSERT of 10000 rows survives an *immediate* (crash) shutdown + recovery byte-for-byte — **MEASURED: PRE=POST count 10000, sum 50005000, sample `v5000`, 1 catalog stripe, all identical after WAL replay** (the column-chunk/header pages are GenericXLog-WAL'd, the visibility-granting `columnar.stripe` row is heap-WAL'd; crash-before-commit ≡ abort, already proven by the D1 `columnar_abort_vs_reader` permutation). (2) **Benchmark** (`docs/benchmarks/m99-columnar-tam.{md,json}`, `theodb_rs/isolation/bench.sh`): 1M rows × 4 columns, 5 runs, single-threaded, on the droplet — **MEASURED: 9.2× on-disk compression (columnar 6.5 MB vs heap 60.2 MB), aggregates result-identical to heap.** Scan wall-time is honestly **slower** (full-aggregate 2331 ms vs heap 88 ms; GROUP BY 2887 ms vs 179 ms) **by design** — M99 has no projection/skip/vectorization pushdown (a plain seqscan decodes every column of every chunk group and reconstructs full heap tuples), so the win is on-disk size; scan speed is the **M100** deliverable (which consumes the min/max directory + projection this milestone stores). **No superiority claim** (Rule 5 / M73/M97). (M99)
 - **M99 Phase D1 (MVCC isolation permutation proofs — the correctness GATE):** wired a standalone `pg_isolation_regress` harness (`theodb_rs/isolation/`, Citus-style — CI does not run `cargo pgrx test`) with 3 permutation specs, run against a temp instance of the pgrx-managed pg17 with the extension installed. **MEASURED — all 3 GREEN on the droplet:** (a) `columnar_reader_vs_writer` — a REPEATABLE READ reader sees count=1, another session commits a new stripe, the RR reader STILL sees 1 (snapshot held), a fresh xact then sees 2 → the `columnar.stripe` catalog row's visibility is correctly bound to the scan snapshot; (b) `columnar_abort_vs_reader` — an uncommitted writer's rows are invisible to a concurrent reader (count=1) and stay invisible after ROLLBACK (no leaked stripe); (c) `columnar_write_concurrency` — two concurrent OPEN transactions insert 5 rows each; after both commit the table has exactly 10 distinct rows (non-overlapping row_number ranges reserved under the metapage buffer lock; concurrent pre-commit flush correct). This closes the "MVCC-correct columnar is over-claiming without isolation permutations" gate (ROADMAP M99 DoD #3). Also fixed a real bug the single-backend pg_tests could not catch: SPI at a flush point (`finish_bulk_insert` / pre-commit) ran without a pushed active snapshot (`ERROR: cannot execute SQL without an outer snapshot or portal`) — now wrapped in `PushActiveSnapshot(GetTransactionSnapshot())` when none is set (no-op during a scan, so the SPI read still honors the query's isolation-level snapshot). (M99)
