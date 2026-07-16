@@ -29,6 +29,8 @@ pub unsafe extern "C-unwind" fn _PG_init() { unsafe {
     // M99 Phase C2: register the columnar pre-commit flush callback (persists pending INSERT rows into durable
     // stripes + their MVCC catalog rows before commit).
     am::columnar::init();
+    // M100 Phase C: register the columnar-aggregate CustomScan (upper-paths hook + methods + GUC, default OFF).
+    am::columnar_agg::init();
     // M54: register the vectorizer background worker (only when preloaded — guarded internally, no-op in a
     // backend CREATE EXTENSION so it stays silent there).
     vectorizer::register_worker();

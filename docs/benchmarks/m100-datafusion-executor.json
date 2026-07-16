@@ -1,0 +1,18 @@
+{
+  "milestone": "M100",
+  "benchmark": "DataFusion vectorized CustomScan aggregate vs M99 seqscan vs heap",
+  "hardware": "8 vCPU, 15GB RAM (DigitalOcean droplet)",
+  "pg_version": "17.10 (pgrx-managed)",
+  "rows": 2000000,
+  "runs_per_query": 5,
+  "query": "SELECT count(*), sum(measure) FROM <table>",
+  "vectorized_path_is_customscan": true,
+  "result_equivalence_vec_eq_heap": "t",
+  "exec_ms_mean_stddev": {
+    "vectorized_columnar": { "mean": 531.215, "stddev": 2.98847 },
+    "m99_seqscan_columnar": { "mean": 5251.18, "stddev": 16.0819 },
+    "heap": { "mean": 147.311, "stddev": 0.596679 }
+  },
+  "vectorized_speedup_over_m99_seqscan": 9.89,
+  "honest_ceiling": "The gain claim is VECTORIZED vs the M99 row-at-a-time TAM seqscan on the SAME columnar data (projection pushdown + no heap-tuple form/deform + Arrow aggregate). vs HEAP is context only (different storage). NOT a superiority claim vs AlloyDB's in-core engine (M73/M97). Slice-1 covers count(*)/sum(float8) without GROUP BY/WHERE; those + GROUP BY pushdown widen the gain in later slices."
+}

@@ -1467,7 +1467,7 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 **GATE (build primeiro):** `cargo pgrx test pg17` **verde com os 277 testes existentes** no pgrx 0.19.0 + datafusion/arrow linkados; `cargo tree` sem conflito de versão de arrow; o smoke CustomScan→DataFusion→tupla passa. Honest-negative é terminal válido: se a coexistência quebrar (conflito de arrow, símbolo, ABI), documenta-se o bloqueio e o pilar re-escopa (fica no pg_duckdb).
 **DoD:** (1) `theodb_rs` compila+testa em pgrx 0.19.0 (todos os testes verdes, zero regressão); (2) datafusion+arrow linkados, `cargo tree` limpo; (3) smoke-test CustomScan↔DataFusion↔TupleTableSlot passa (1 pg_test); (4) benchmark/nota de que o build funciona (`docs/benchmarks/m98-coexistence.md`); (5) sign-off council-rust-pgrx (o upgrade de pgrx + a superfície FFI). **Risks:** (a) API churn 0.16→0.19 pode tocar muito código de AM → esforço medido, sem workaround; (b) conflito de versão de arrow (datafusion-main usa 59, pg_search 58) → pinar; (c) coexistência pode simplesmente falhar → honest-negative documentado. **Dependencies:** M97 (a decisão de perseguir o pilar). **Prior art:** blueprint Q6/Q7 + `theodb_rs/src/am/{mod.rs,customscan.rs}` (o IndexAmRoutine/CustomScan que o upgrade toca). **NÃO é claim de performance** — é um gate de viabilidade.
 
-## M99 — [ ] columnar TAM append-only (own-code; Hydra design = AGPL study-only) *(gated M98)*
+## M99 — [x] columnar TAM append-only (own-code; Hydra design = AGPL study-only) *(gated M98)*
 
 > **Rung M-α.** O primeiro storage columnar nativo — um `TableAmRoutine` próprio, append-optimized, com MVCC delegado
 > ao catálogo (o truque do Hydra: visibilidade em granularidade de stripe via snapshot no `columnar.stripe`).
