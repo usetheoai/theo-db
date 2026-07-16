@@ -436,6 +436,7 @@ struct ColDesc {
     attlen_fixed: Option<usize>,
     byval: bool,
     mm: codec::MinMaxKind,
+    typid: u32,
 }
 
 /// Read the i-th column's descriptor from the flex-array `attrs` (council-rust-pgrx idiom: `attrs.as_ptr().add(i)`,
@@ -462,7 +463,7 @@ unsafe fn coldesc(tupdesc: pg_sys::TupleDesc, i: usize) -> Result<ColDesc, Strin
         701 => codec::MinMaxKind::F8,  // FLOAT8OID
         _ => codec::MinMaxKind::None,
     };
-    Ok(ColDesc { attlen_fixed, byval, mm })
+    Ok(ColDesc { attlen_fixed, byval, mm, typid })
 }
 
 /// Extract the storable value bytes of a NON-NULL datum (caller checked `isnull` first — detoasting a null-garbage
@@ -641,25 +642,49 @@ unsafe fn materialize_rows(rel: pg_sys::Relation) -> Result<Vec<Vec<u8>>, String
     }
 }
 
-/// M100 — decode all visible stripes (+ this backend's pending rows) into per-column value vectors, BEFORE the
-/// row transposition — the input the DataFusion Arrow batch builder needs (`df_executor.rs`). Returns one tuple per
-/// column: (column name, atttypid, values[row] = Some(stored bytes) | None). The stored bytes are the same encoding
-/// the codec produced (fixed: attlen LE bytes; varlena: logical payload) — `df_executor` maps them to Arrow arrays.
+/// M100 — resolve a column name to its 0-based attribute index (for projection pushdown). Returns None if absent.
+pub(super) unsafe fn column_index(rel: pg_sys::Relation, name: &str) -> Option<usize> {
+    let tupdesc = (*rel).rd_att;
+    let natts = (*tupdesc).natts as usize;
+    (0..natts).find(|&i| {
+        std::ffi::CStr::from_ptr((*(*tupdesc).attrs.as_ptr().add(i)).attname.data.as_ptr())
+            .to_string_lossy()
+            == name
+    })
+}
+
+/// M100 — decode visible stripes (+ this backend's pending rows) into per-column value vectors, BEFORE the row
+/// transposition — the input the DataFusion Arrow batch builder needs (`df_executor.rs`). Returns one tuple per
+/// RETURNED column: (name, atttypid, values[row] = Some(stored bytes) | None). `projection = Some(&[col_idx])`
+/// decodes + returns ONLY those columns (projection pushdown — skips `read_chunked`/zstd on unprojected columns, the
+/// columnar performance lever); `None` returns all. The stored bytes are the codec encoding (fixed: attlen LE bytes;
+/// varlena: logical payload) — `df_executor` maps them to Arrow arrays.
 pub(super) unsafe fn decode_columns(
     rel: pg_sys::Relation,
+    projection: Option<&[usize]>,
 ) -> Result<Vec<(String, u32, Vec<Option<Vec<u8>>>)>, String> {
     let tupdesc = (*rel).rd_att;
     let natts = (*tupdesc).natts as usize;
     let cols = (0..natts).map(|i| coldesc(tupdesc, i)).collect::<Result<Vec<_>, _>>()?;
-    let names: Vec<String> = (0..natts)
-        .map(|i| {
-            let attr = (*tupdesc).attrs.as_ptr().add(i);
-            std::ffi::CStr::from_ptr((*attr).attname.data.as_ptr()).to_string_lossy().into_owned()
-        })
-        .collect();
-    let typids: Vec<u32> = (0..natts).map(|i| (*(*tupdesc).attrs.as_ptr().add(i)).atttypid.to_u32()).collect();
+    let wanted: Vec<usize> = match projection {
+        Some(p) => {
+            for &i in p {
+                if i >= natts {
+                    return Err(format!("theodb_columnar: projection column {i} out of range (natts {natts})"));
+                }
+            }
+            p.to_vec()
+        }
+        None => (0..natts).collect(),
+    };
+    let name_of = |i: usize| -> String {
+        std::ffi::CStr::from_ptr((*(*tupdesc).attrs.as_ptr().add(i)).attname.data.as_ptr())
+            .to_string_lossy()
+            .into_owned()
+    };
 
-    let mut columns: Vec<Vec<Option<Vec<u8>>>> = vec![Vec::new(); natts];
+    // Per WANTED column, its accumulated values (indexed positionally with `wanted`).
+    let mut columns: Vec<Vec<Option<Vec<u8>>>> = vec![Vec::new(); wanted.len()];
     for sm in read_visible_stripes((*rel).rd_id)? {
         let hdr_items = super::page::read_all_page_items(rel, sm.header_block)?;
         let hdr_bytes = hdr_items.into_iter().next().ok_or("theodb_columnar: stripe header page empty")?;
@@ -671,18 +696,17 @@ pub(super) unsafe fn decode_columns(
         let entries = codec::deserialize_directory(&dir_bytes, header.n_chunk_groups as usize * natts)?;
         for cg in 0..header.n_chunk_groups as usize {
             let cg_rows = entries[cg * natts].row_count as usize;
-            for col in 0..natts {
+            for (wi, &col) in wanted.iter().enumerate() {
                 let e = &entries[cg * natts + col];
                 let comp = super::page::read_chunked(rel, e.first_block, e.n_pages)?;
                 let raw = zstd::decode_all(&comp[..e.comp_len as usize])
                     .map_err(|x| format!("theodb_columnar: zstd decode failed: {x}"))?;
                 let mut vals = codec::decode_column(&raw, cols[col].attlen_fixed, cg_rows, e.has_nulls)?;
-                columns[col].append(&mut vals);
+                columns[wi].append(&mut vals);
             }
         }
     }
-    // Same-xact pending rows (heap-tuple bytes) → deform into the per-column vectors so a same-xact vectorized scan
-    // sees its own not-yet-flushed inserts (mirrors materialize_rows' pending append).
+    // Same-xact pending rows (heap-tuple bytes) → deform ALL atts (heap_deform is all-or-nothing), keep the wanted.
     let oid = (*rel).rd_id.to_u32();
     let pending: Option<Vec<Vec<u8>>> = WRITE_STATES.with(|w| w.borrow().get(&oid).cloned());
     if let Some(rows) = pending {
@@ -693,17 +717,21 @@ pub(super) unsafe fn decode_columns(
             htup.t_len = rbytes.len() as u32;
             htup.t_data = rbytes.as_ptr() as pg_sys::HeapTupleHeader;
             pg_sys::heap_deform_tuple(&mut htup, tupdesc, values.as_mut_ptr(), isnull.as_mut_ptr());
-            for i in 0..natts {
-                if isnull[i] {
-                    columns[i].push(None);
+            for (wi, &col) in wanted.iter().enumerate() {
+                if isnull[col] {
+                    columns[wi].push(None);
                 } else {
-                    columns[i].push(Some(extract_value_bytes(&cols[i], values[i])?));
+                    columns[wi].push(Some(extract_value_bytes(&cols[col], values[col])?));
                 }
             }
         }
     }
 
-    Ok(names.into_iter().zip(typids).zip(columns).map(|((n, t), v)| (n, t, v)).collect())
+    Ok(wanted
+        .iter()
+        .enumerate()
+        .map(|(wi, &col)| (name_of(col), cols[col].typid, std::mem::take(&mut columns[wi])))
+        .collect())
 }
 
 #[pg_guard]
