@@ -1,0 +1,18 @@
+{
+  "milestone": "M101",
+  "benchmark": "heap-authoritative Arrow cache aggregate vs native heap aggregate (HTAP)",
+  "hardware": "8 vCPU, 15GB RAM (DigitalOcean droplet)",
+  "pg_version": "17.10 (pgrx-managed)",
+  "rows": 2000000,
+  "runs_per_query": 5,
+  "query": "SELECT count(*), sum(measure) FROM h (heap table, one column cached)",
+  "cache_path_is_customscan": true,
+  "result_equivalence_cache_eq_heap": "t
+t",
+  "exec_ms_mean_stddev": {
+    "arrow_cache": { "mean": 52.3772, "stddev": 0.30325 },
+    "native_heap": { "mean": 130.016, "stddev": 0.564907 }
+  },
+  "cache_speedup_over_native_heap": 2.48,
+  "honest_ceiling": "Gain is the vectorized Arrow-cache aggregate (reuse a pre-built in-memory batch, no heap seqscan) vs the native heap aggregate (seqscan + PG aggregate) for a repeated read-heavy query. MVCC-correct (invalidate-on-write + snapshot-gate, proven by the isolation permutations); a write invalidates the cache and the next read pays a rebuild. NON-interference: the cache is read-only, per-backend, built via an ordinary SPI seqscan under the reader's snapshot (no extra lock held on the heap during reads) — a full pgbench concurrent OLTP-p95 measurement is a follow-up. Boundary: MANUAL columnarize pragma, NOT AlloyDB's auto-maintained engine; single-column-cached slice."
+}

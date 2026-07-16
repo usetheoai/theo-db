@@ -41,7 +41,7 @@ impl Drop for HeldInterrupts {
 /// Map the decoded columnar columns (name, atttypid, per-row stored bytes) to an Arrow schema + arrays. The stored
 /// bytes are the codec encoding (fixed: attlen LE bytes; varlena: logical payload). Builtin type OIDs (pg_type.dat,
 /// ABI-stable) drive the Arrow `DataType`.
-fn build_arrow(cols: &[(String, u32, Vec<Option<Vec<u8>>>)]) -> Result<(Schema, Vec<ArrayRef>), String> {
+pub(super) fn build_arrow(cols: &[(String, u32, Vec<Option<Vec<u8>>>)]) -> Result<(Schema, Vec<ArrayRef>), String> {
     let mut fields = Vec::with_capacity(cols.len());
     let mut arrays: Vec<ArrayRef> = Vec::with_capacity(cols.len());
     for (name, typid, values) in cols {
@@ -137,7 +137,16 @@ pub(super) unsafe fn run_columnar_aggs(
     let sum_cols: Vec<String> =
         aggs.iter().filter_map(|a| if let AggSpec::SumFloat8(n) = a { Some(n.clone()) } else { None }).collect();
     let batch = decode_to_batch(rel, &sum_cols)?;
+    run_aggs_on_batch(batch, aggs)
+}
 
+/// Run the aggregates over an already-built Arrow `RecordBatch` via a vectorized DataFusion plan under
+/// `HeldInterrupts` + a `work_mem` MemoryPool + `target_partitions=1`. Shared by the M100 columnar path
+/// (`run_columnar_aggs`) and the M101 heap-authoritative Arrow cache path (`arrow_cache.rs`).
+pub(super) unsafe fn run_aggs_on_batch(
+    batch: RecordBatch,
+    aggs: &[AggSpec],
+) -> Result<Vec<(pg_sys::Datum, bool)>, String> {
     let mut exprs = Vec::with_capacity(aggs.len());
     for (i, a) in aggs.iter().enumerate() {
         let alias = format!("a{i}");
