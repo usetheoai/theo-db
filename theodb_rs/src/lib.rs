@@ -37,6 +37,7 @@ pub unsafe extern "C-unwind" fn _PG_init() { unsafe {
 }}
 
 mod am;
+mod ai_op;
 mod ann;
 mod ann_query;
 mod chat;

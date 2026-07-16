@@ -8,10 +8,88 @@
 //!   * input/parse errors -> SQLSTATE 22023; endpoint/response failures -> SQLSTATE 38000;
 //!   * the parsers replicate the plpython3u logic exactly (first-token bool/label, first-number rank,
 //!     markdown-fence-strip + JSON-array batch with JSON-null -> SQL NULL).
+use std::cell::Cell;
+
 use serde_json::{json, Value};
 
 use crate::http::{post_json, truncate};
 use crate::pg::{err_external, err_input, guc};
+
+// M102 — inference round-trip counter (the wiring-triad runtime metric for the AI-operator surface). Every
+// `chat()` call is ONE round-trip (real HTTP OR the deterministic test model), so this counts round-trips
+// honestly for both the hermetic result-equivalence test and the real-AI benchmark. Thread-local: one backend.
+thread_local! {
+    static AI_CALLS: Cell<u64> = const { Cell::new(0) };
+}
+
+/// Round-trips issued by this backend since the last reset (M102 observability / the "1 call for N rows" proof).
+pub(crate) fn ai_call_count() -> u64 {
+    AI_CALLS.with(|c| c.get())
+}
+
+/// Reset the round-trip counter (test/benchmark harness).
+pub(crate) fn ai_call_reset() {
+    AI_CALLS.with(|c| c.set(0));
+}
+
+/// Parse a model reply into a boolean via the SAME first-token rule as `ai.if` (yes/true/1/y/t vs no/false/0/n/f).
+/// `None` when the reply is not a recognizable boolean — the caller decides whether that is an error or a NULL.
+pub(crate) fn parse_bool(out: &str) -> Option<bool> {
+    let first = first_token(out, |c| c.is_ascii_alphanumeric());
+    match first.as_str() {
+        "yes" | "true" | "1" | "y" | "t" => Some(true),
+        "no" | "false" | "0" | "n" | "f" => Some(false),
+        _ => None,
+    }
+}
+
+/// M102 — the deterministic test model (`SET theodb.llm_test_model = 'parity'`): a hermetic, HTTP-free inference
+/// used ONLY by tests/benchmarks so result-equivalence of the batched operator vs the per-row path is provable
+/// without a flaky/paid live LLM (ADR D3). Rule: extract the LAST integer of each item; answer "yes" iff even.
+/// Format-aware — a batched call (system asks for a JSON array) returns a JSON array; a single call returns one
+/// word — so the batched operator and the per-row `ai.if` agree item-for-item. Production leaves the GUC unset.
+fn test_model_reply(kind: &str, prompt: &str, system: Option<&str>) -> String {
+    if kind != "parity" {
+        err_input(&format!(
+            "ai._chat: unknown theodb.llm_test_model '{kind}' (only 'parity' is defined)"
+        ));
+    }
+    let batched = system.is_some_and(|s| s.contains("JSON array"));
+    if batched {
+        // The batched user message is "1. <item>\n2. <item>\n…" (see `ai_generate_batch`).
+        let answers: Vec<String> = prompt
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|line| {
+                let item = line.splitn(2, ". ").nth(1).unwrap_or(line);
+                if last_int_is_even(item) { "yes".to_string() } else { "no".to_string() }
+            })
+            .collect();
+        serde_json::to_string(&answers).expect("Vec<String> serializes")
+    } else if last_int_is_even(prompt) {
+        "yes".to_string()
+    } else {
+        "no".to_string()
+    }
+}
+
+/// The last maximal run of ASCII digits in `s`, parsed as u128, is even. No digit → false ("no").
+fn last_int_is_even(s: &str) -> bool {
+    let b = s.as_bytes();
+    let mut end = b.len();
+    // find the end of the last digit run
+    while end > 0 && !b[end - 1].is_ascii_digit() {
+        end -= 1;
+    }
+    if end == 0 {
+        return false;
+    }
+    let mut start = end;
+    while start > 0 && b[start - 1].is_ascii_digit() {
+        start -= 1;
+    }
+    s[start..end].parse::<u128>().map(|n| n % 2 == 0).unwrap_or(false)
+}
 
 /// One configurable chat-completions round-trip + parse of `choices[0].message.content`. The single HTTP
 /// source of truth for the generative `ai.*` (exposed as the SQL function `ai._chat`). Byte-identical message
@@ -21,6 +99,12 @@ pub(crate) fn chat(prompt: Option<&str>, system: Option<&str>, model: Option<&st
         Some(p) => p,
         None => err_input("ai._chat: prompt must not be NULL"),
     };
+    // M102 — one round-trip per chat() (counted for BOTH the real HTTP path and the test model, so the
+    // benchmark's round-trip count is honest). The deterministic test model short-circuits before any HTTP.
+    AI_CALLS.with(|c| c.set(c.get() + 1));
+    if let Some(kind) = guc("theodb.llm_test_model") {
+        return test_model_reply(&kind, prompt, system);
+    }
     let (endpoint, mdl, api_key) = resolve_chat_cfg(model);
 
     let mut messages: Vec<Value> = Vec::new();
@@ -56,17 +140,13 @@ pub(crate) fn chat(prompt: Option<&str>, system: Option<&str>, model: Option<&st
 /// `ai.if` — natural-language condition -> boolean. First-token match (not startswith); unparseable -> 22023.
 pub(crate) fn ai_if(prompt: Option<&str>, model: Option<&str>) -> bool {
     let out = chat(prompt, Some("Answer with exactly one word: yes or no."), model);
-    let first = first_token(&out, |c| c.is_ascii_alphanumeric()); // re.split(r"[^a-z0-9]+", ...)[0]
-    if matches!(first.as_str(), "yes" | "true" | "1" | "y" | "t") {
-        return true;
+    match parse_bool(&out) {
+        Some(b) => b,
+        None => err_input(&format!(
+            "ai.if: unparseable boolean from model: {}",
+            truncate(&out, 50)
+        )),
     }
-    if matches!(first.as_str(), "no" | "false" | "0" | "n" | "f") {
-        return false;
-    }
-    err_input(&format!(
-        "ai.if: unparseable boolean from model: {}",
-        truncate(&out, 50)
-    ));
 }
 
 /// `ai.analyze_sentiment` — content -> one of {positive,negative,neutral}. First-token match; else 22023.
@@ -115,18 +195,47 @@ pub(crate) fn ai_generate_batch(prompts: &[Option<&str>], model: Option<&str>) -
         );
     }
 
+    let system = format!(
+        "You are given {n} numbered items. Respond with ONLY a JSON array of exactly {n} strings — the \
+         answer to each item, in order. No prose, no markdown."
+    );
+    run_batch_chat(prompts, &system, model)
+}
+
+/// M102 — batched BOOLEAN inference: N yes/no questions answered in ONE round-trip, each parsed to a bool. The
+/// system prompt instructs yes/no (the SAME framing the per-row `ai.if` uses), so the batched answers are
+/// directly comparable to the per-row path on a live model — not just under the deterministic test model
+/// (closes the council-ai-in-db "no boolean shaping" finding). An unparseable item -> `None` (SQL NULL).
+pub(crate) fn ai_if_batch_answers(prompts: &[Option<&str>], model: Option<&str>) -> Vec<Option<bool>> {
+    let n = prompts.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    if prompts.iter().any(|p| p.is_none()) {
+        err_input("ai.if_batch: prompts must not contain NULL elements (breaks the N-in/N-out alignment)");
+    }
+    let system = format!(
+        "You are given {n} numbered yes/no questions. Respond with ONLY a JSON array of exactly {n} strings \
+         — 'yes' or 'no' for each, in order. No prose, no markdown."
+    );
+    run_batch_chat(prompts, &system, model)
+        .iter()
+        .map(|o| o.as_deref().and_then(parse_bool))
+        .collect()
+}
+
+/// The shared batched round-trip: number the (non-NULL) items into one user message, one `chat()` call under
+/// `system`, parse the reply as a JSON array of exactly N (string|null). Callers guarantee `!prompts.is_empty()`
+/// and no NULL element. DRY core of `ai_generate_batch` (generative) and `ai_if_batch_answers` (boolean).
+fn run_batch_chat(prompts: &[Option<&str>], system: &str, model: Option<&str>) -> Vec<Option<String>> {
+    let n = prompts.len();
     let user = prompts
         .iter()
         .enumerate()
         .map(|(i, p)| format!("{}. {}", i + 1, p.unwrap()))
         .collect::<Vec<_>>()
         .join("\n");
-    let system = format!(
-        "You are given {n} numbered items. Respond with ONLY a JSON array of exactly {n} strings — the \
-         answer to each item, in order. No prose, no markdown."
-    );
-
-    let out = chat(Some(&user), Some(&system), model);
+    let out = chat(Some(&user), Some(system), model);
     parse_batch(&out, n)
 }
 

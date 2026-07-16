@@ -24,6 +24,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.90.0] - 2026-07-16
+
+### Added
+- **M102 — AI predicates as SET-oriented, planner-optimizable operators (`AI.IF` pushable):** `ai.if_batch(condition, vals[])` answers N rows in ONE inference round-trip (a yes/no-shaped batched call — same boolean framing as per-row `ai.if`) instead of one HTTP call per row, and `ai.if_costly(condition, val)` is declared with a high `COST` so Postgres's `order_qual_clauses` evaluates cheap relational filters FIRST — LOTUS's dependency-safe filter push-down, delegated to the planner (Rule 9). New `ai.call_count()` / `ai.call_reset()` expose the inference round-trip count as the wiring-triad runtime metric. A hermetic `theodb.llm_test_model = 'parity'` proves the batched operator equals the per-row `ai.if` WITHOUT a live LLM (ADR D3). **MEASURED on droplet (pg17):** batched **1 round-trip vs per-row 1000** for N=1000; push-down `WHERE id<=100 AND ai.if_costly(...)` evaluates the AI on **100 survivors, not 1000**; real OpenAI `gpt-4o-mini` (K=16, 3 runs) **≈12× lower latency** batched vs per-row (`docs/benchmarks/m102-ai-operators.{md,json}`). 307 pg_tests GREEN (+4), zero regression. Sign-off: council-ai-in-db + council-security both READY_TO_MERGE (2 HIGH from council-ai-in-db — boolean shaping + ADR honesty — fixed and re-verified). ADR-0043 revisits ADR-0007 (batched inference). Honest ceiling: a composability / round-trip win with statistical accuracy, **orthogonal to vector recall** — never framed as "faster at vectors". Follow-up #106. (M102)
+
 ## [0.89.0] - 2026-07-16
 
 ### Added
