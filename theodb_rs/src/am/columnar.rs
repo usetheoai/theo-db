@@ -21,8 +21,101 @@
 #![allow(non_snake_case)]
 
 use pgrx::prelude::*;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::mem::size_of;
 use std::sync::OnceLock;
+
+/// Per-backend pending write state: relation OID → accumulated row blobs (each = a formed heap tuple's bytes). A
+/// stripe is flushed from here at scan time (so same-xact INSERT→SELECT sees the rows) and on xact pre-commit.
+thread_local! {
+    static WRITE_STATES: RefCell<HashMap<u32, Vec<Vec<u8>>>> = RefCell::new(HashMap::new());
+}
+
+/// A stripe descriptor, stored in the metapage tail. Fixed 28 bytes.
+#[derive(Clone, Copy)]
+struct StripeDesc {
+    first_block: u32,
+    n_blocks: u32,
+    byte_len: u64,
+    row_count: u32,
+    first_row_number: u64,
+}
+const STRIPE_DESC_LEN: usize = 28;
+const META_HEAD_LEN: usize = 28; // 24-byte counters head + n_stripes(4)
+
+impl StripeDesc {
+    fn write_into(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(&self.first_block.to_le_bytes());
+        out.extend_from_slice(&self.n_blocks.to_le_bytes());
+        out.extend_from_slice(&self.byte_len.to_le_bytes());
+        out.extend_from_slice(&self.row_count.to_le_bytes());
+        out.extend_from_slice(&self.first_row_number.to_le_bytes());
+    }
+    fn read_from(b: &[u8]) -> Self {
+        StripeDesc {
+            first_block: u32::from_le_bytes(b[0..4].try_into().unwrap()),
+            n_blocks: u32::from_le_bytes(b[4..8].try_into().unwrap()),
+            byte_len: u64::from_le_bytes(b[8..16].try_into().unwrap()),
+            row_count: u32::from_le_bytes(b[16..20].try_into().unwrap()),
+            first_row_number: u64::from_le_bytes(b[20..28].try_into().unwrap()),
+        }
+    }
+}
+
+/// Read the metapage item (block 0) raw bytes.
+unsafe fn read_meta_bytes(rel: pg_sys::Relation) -> Result<Vec<u8>, String> {
+    let items = super::page::read_all_page_items(rel, 0)?;
+    items.into_iter().next().ok_or_else(|| "theodb_columnar: metapage has no item".to_string())
+}
+
+/// Decode the stripe descriptors from the metapage tail (bytes `META_HEAD_LEN..`). An item shorter than the head
+/// (legacy 24-byte A2 metapage) means zero stripes.
+unsafe fn read_stripes(rel: pg_sys::Relation) -> Result<Vec<StripeDesc>, String> {
+    let bytes = read_meta_bytes(rel)?;
+    // Validate the head (magic/version) via the counters decoder — fail-fast on a foreign/corrupt fork.
+    ColumnarMeta::from_bytes(&bytes)?;
+    if bytes.len() < META_HEAD_LEN {
+        return Ok(Vec::new());
+    }
+    let n = u32::from_le_bytes(bytes[24..28].try_into().unwrap()) as usize;
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        let off = META_HEAD_LEN + i * STRIPE_DESC_LEN;
+        if off + STRIPE_DESC_LEN > bytes.len() {
+            return Err(format!("theodb_columnar: metapage truncated (stripe {i} of {n})"));
+        }
+        out.push(StripeDesc::read_from(&bytes[off..off + STRIPE_DESC_LEN]));
+    }
+    Ok(out)
+}
+
+/// Append a stripe descriptor to the metapage and bump `n_stripes`, preserving the current counters head (which the
+/// caller has just advanced via `reserve`). Full-image rewrite of block 0 (torn-page-proof, reuses `page.rs`).
+unsafe fn append_stripe(rel: pg_sys::Relation, desc: StripeDesc) -> Result<(), String> {
+    let cur = read_meta_bytes(rel)?;
+    ColumnarMeta::from_bytes(&cur)?;
+    let n = if cur.len() >= META_HEAD_LEN {
+        u32::from_le_bytes(cur[24..28].try_into().unwrap())
+    } else {
+        0
+    };
+    // Rebuild: 24-byte counters head (unchanged) + new n_stripes + existing descs + the new desc.
+    let mut out = Vec::with_capacity(META_HEAD_LEN + (n as usize + 1) * STRIPE_DESC_LEN);
+    out.extend_from_slice(&cur[0..24]);
+    out.extend_from_slice(&(n + 1).to_le_bytes());
+    if cur.len() >= META_HEAD_LEN {
+        out.extend_from_slice(&cur[META_HEAD_LEN..META_HEAD_LEN + n as usize * STRIPE_DESC_LEN]);
+    }
+    desc.write_into(&mut out);
+    // A page item must fit in one 8 KB page (≈ BLCKSZ − header − line pointer). Beyond this the stripe directory
+    // needs its own paged region — a later-phase concern (honest MVP limit ≈ 285 stripes).
+    if out.len() > 8000 {
+        return Err("theodb_columnar: too many stripes for one metapage (stripe directory paging is a later phase)".into());
+    }
+    super::page::pivot_meta_page(rel, &out);
+    Ok(())
+}
 
 /// The `theodb_columnar` table_am_handler. Idempotent install (skips if `pg_am` already has it — safe re-`CREATE
 /// EXTENSION`). Mirrors the `theodb_ivfflat_amhandler` SQL shape in `am/mod.rs`, but `TYPE TABLE`.
@@ -254,8 +347,58 @@ pub unsafe extern "C-unwind" fn columnar_slot_callbacks(
     &raw const pg_sys::TTSOpsVirtual
 }
 
-/// Begin a scan: allocate a minimal `TableScanDescData`, record the relation + snapshot. Phase A returns no rows;
-/// the real column-chunk reader is Phase C.
+/// Scan cursor state. Embeds `TableScanDescData` as the FIRST field (C-struct-inheritance idiom) so a
+/// `TableScanDesc` pointer round-trips, plus a boxed materialization of every visible row's bytes and a cursor.
+#[repr(C)]
+struct ColumnarScanState {
+    base: pg_sys::TableScanDescData,
+    rows: *mut Vec<Vec<u8>>, // Rust-heap Box, freed in scan_end
+    cursor: usize,
+}
+
+/// Materialize all visible rows for `rel`: flush this backend's pending writes (so same-xact INSERT is seen), then
+/// read every stripe's data pages and split them back into row blobs. Single-backend MVP visibility (all flushed
+/// stripes); snapshot-scoped cross-backend visibility is Phase C2/D.
+unsafe fn materialize_rows(rel: pg_sys::Relation) -> Result<Vec<Vec<u8>>, String> {
+    unsafe {
+        flush_pending(rel)?;
+        let stripes = read_stripes(rel)?;
+        let mut out = Vec::new();
+        for st in stripes {
+            // Concatenate the stripe's data pages (one item per page, written by flush).
+            let mut payload = Vec::with_capacity(st.byte_len as usize);
+            for b in st.first_block..st.first_block + st.n_blocks {
+                let items = super::page::read_all_page_items(rel, b)?;
+                if let Some(chunk) = items.into_iter().next() {
+                    payload.extend_from_slice(&chunk);
+                }
+            }
+            if payload.len() != st.byte_len as usize {
+                return Err(format!(
+                    "theodb_columnar: stripe payload length mismatch ({} != {})",
+                    payload.len(),
+                    st.byte_len
+                ));
+            }
+            // Split payload into row blobs: [u32 len][bytes]…
+            let mut off = 0usize;
+            for _ in 0..st.row_count {
+                if off + 4 > payload.len() {
+                    return Err("theodb_columnar: stripe row header truncated".into());
+                }
+                let len = u32::from_le_bytes(payload[off..off + 4].try_into().unwrap()) as usize;
+                off += 4;
+                if off + len > payload.len() {
+                    return Err("theodb_columnar: stripe row body truncated".into());
+                }
+                out.push(payload[off..off + len].to_vec());
+                off += len;
+            }
+        }
+        Ok(out)
+    }
+}
+
 #[pg_guard]
 pub unsafe extern "C-unwind" fn columnar_scan_begin(
     rel: pg_sys::Relation,
@@ -266,13 +409,19 @@ pub unsafe extern "C-unwind" fn columnar_scan_begin(
     flags: u32,
 ) -> pg_sys::TableScanDesc {
     unsafe {
-        let scan = pg_sys::palloc0(size_of::<pg_sys::TableScanDescData>()) as *mut pg_sys::TableScanDescData;
-        (*scan).rs_rd = rel;
-        (*scan).rs_snapshot = snapshot;
-        (*scan).rs_nkeys = nkeys;
-        (*scan).rs_key = key;
-        (*scan).rs_parallel = pscan;
-        (*scan).rs_flags = flags;
+        let rows = match materialize_rows(rel) {
+            Ok(r) => r,
+            Err(e) => pg_sys::error!("{e}"),
+        };
+        let scan = pg_sys::palloc0(size_of::<ColumnarScanState>()) as *mut ColumnarScanState;
+        (*scan).base.rs_rd = rel;
+        (*scan).base.rs_snapshot = snapshot;
+        (*scan).base.rs_nkeys = nkeys;
+        (*scan).base.rs_key = key;
+        (*scan).base.rs_parallel = pscan;
+        (*scan).base.rs_flags = flags;
+        (*scan).rows = Box::into_raw(Box::new(rows));
+        (*scan).cursor = 0;
         scan as pg_sys::TableScanDesc
     }
 }
@@ -281,6 +430,10 @@ pub unsafe extern "C-unwind" fn columnar_scan_begin(
 pub unsafe extern "C-unwind" fn columnar_scan_end(scan: pg_sys::TableScanDesc) {
     unsafe {
         if !scan.is_null() {
+            let st = scan as *mut ColumnarScanState;
+            if !(*st).rows.is_null() {
+                drop(Box::from_raw((*st).rows)); // free the Rust-heap materialization
+            }
             pg_sys::pfree(scan as *mut std::os::raw::c_void);
         }
     }
@@ -288,24 +441,149 @@ pub unsafe extern "C-unwind" fn columnar_scan_end(scan: pg_sys::TableScanDesc) {
 
 #[pg_guard]
 pub unsafe extern "C-unwind" fn columnar_scan_rescan(
-    _scan: pg_sys::TableScanDesc,
+    scan: pg_sys::TableScanDesc,
     _key: *mut pg_sys::ScanKeyData,
     _set_params: bool,
     _allow_strat: bool,
     _allow_sync: bool,
     _allow_pagemode: bool,
 ) {
-    // Phase A: empty scan has no cursor state to reset.
+    unsafe {
+        let st = scan as *mut ColumnarScanState;
+        (*st).cursor = 0;
+    }
 }
 
-/// Phase A: no rows yet (INSERT is Phase B, the real chunk reader is Phase C). Returning false = end of scan.
+/// Emit the next row: reconstruct a `HeapTupleData` over the stored bytes, deform it into the virtual slot, and
+/// store it. Returns false at end of the materialized set.
 #[pg_guard]
 pub unsafe extern "C-unwind" fn columnar_scan_getnextslot(
-    _scan: pg_sys::TableScanDesc,
+    scan: pg_sys::TableScanDesc,
     _direction: pg_sys::ScanDirection::Type,
-    _slot: *mut pg_sys::TupleTableSlot,
+    slot: *mut pg_sys::TupleTableSlot,
 ) -> bool {
-    false
+    unsafe {
+        let st = scan as *mut ColumnarScanState;
+        let rows = &*(*st).rows;
+        if (*st).cursor >= rows.len() {
+            pg_sys::ExecClearTuple(slot);
+            return false;
+        }
+        let bytes = &rows[(*st).cursor];
+        (*st).cursor += 1;
+
+        let mut htup: pg_sys::HeapTupleData = std::mem::zeroed();
+        htup.t_len = bytes.len() as u32;
+        htup.t_data = bytes.as_ptr() as pg_sys::HeapTupleHeader;
+
+        let tupdesc = (*(*st).base.rs_rd).rd_att;
+        pg_sys::ExecClearTuple(slot);
+        pg_sys::heap_deform_tuple(&mut htup, tupdesc, (*slot).tts_values, (*slot).tts_isnull);
+        pg_sys::ExecStoreVirtualTuple(slot);
+        true
+    }
+}
+
+// ===========================================================================================================
+// M99 B — write path (accumulate rows per backend, flush to a stripe at scan time / commit)
+// ===========================================================================================================
+//
+// HONEST SCOPE: this slice stores each row as its formed heap-tuple bytes (row-major on disk) — a correct, general
+// INSERT→SELECT round-trip on any column set. The true column-major encoding (per-column chunks + zstd + min/max
+// skip-pruning — the actual columnar *benefit*) is the follow-up refactor within M99; TDD order is correct-first.
+// The `datumSerialize`/`TupleDescAttr` column-major primitives are absent from the pgrx 0.19 bindings, so the
+// column-major slice will encode via the tuple descriptor's attlen/attbyval directly.
+
+/// Accumulate one row into this backend's pending write state for `rel`.
+unsafe fn accumulate_row(rel: pg_sys::Relation, slot: *mut pg_sys::TupleTableSlot) {
+    unsafe {
+        pg_sys::slot_getallattrs(slot);
+        let tupdesc = (*rel).rd_att;
+        let htup = pg_sys::heap_form_tuple(tupdesc, (*slot).tts_values, (*slot).tts_isnull);
+        let len = (*htup).t_len as usize;
+        let bytes = std::slice::from_raw_parts((*htup).t_data as *const u8, len).to_vec();
+        pg_sys::heap_freetuple(htup);
+        let oid = (*rel).rd_id.to_u32();
+        WRITE_STATES.with(|w| w.borrow_mut().entry(oid).or_default().push(bytes));
+    }
+}
+
+#[pg_guard]
+pub unsafe extern "C-unwind" fn columnar_tuple_insert(
+    rel: pg_sys::Relation,
+    slot: *mut pg_sys::TupleTableSlot,
+    _cid: pg_sys::CommandId,
+    _options: std::os::raw::c_int,
+    _bistate: *mut pg_sys::BulkInsertStateData,
+) {
+    unsafe { accumulate_row(rel, slot) };
+}
+
+#[pg_guard]
+pub unsafe extern "C-unwind" fn columnar_multi_insert(
+    rel: pg_sys::Relation,
+    slots: *mut *mut pg_sys::TupleTableSlot,
+    nslots: std::os::raw::c_int,
+    _cid: pg_sys::CommandId,
+    _options: std::os::raw::c_int,
+    _bistate: *mut pg_sys::BulkInsertStateData,
+) {
+    unsafe {
+        for i in 0..nslots as isize {
+            accumulate_row(rel, *slots.offset(i));
+        }
+    }
+}
+
+#[pg_guard]
+pub unsafe extern "C-unwind" fn columnar_finish_bulk_insert(
+    rel: pg_sys::Relation,
+    _options: std::os::raw::c_int,
+) {
+    // Flush at the end of a bulk (COPY) so the rows are durable + visible to a following scan in this xact.
+    if let Err(e) = unsafe { flush_pending(rel) } {
+        pg_sys::error!("{e}");
+    }
+}
+
+/// Flush this backend's pending rows for `rel` into a new stripe: write the row blobs across data pages, reserve the
+/// row_number range + stripe id, and append the stripe descriptor to the metapage. WAL-logged throughout (GenericXLog
+/// via `page.rs`), so an aborted xact rolls the metapage-descriptor + data pages back → the stripe never becomes
+/// visible (the single-backend MVCC MVP; true cross-backend snapshot visibility is Phase C2/D).
+unsafe fn flush_pending(rel: pg_sys::Relation) -> Result<(), String> {
+    let oid = unsafe { (*rel).rd_id.to_u32() };
+    let rows = WRITE_STATES.with(|w| w.borrow_mut().remove(&oid));
+    let Some(rows) = rows else { return Ok(()) };
+    if rows.is_empty() {
+        return Ok(());
+    }
+    // Stripe payload = for each row: u32 length prefix + the row's heap-tuple bytes.
+    let mut payload = Vec::new();
+    for r in &rows {
+        payload.extend_from_slice(&(r.len() as u32).to_le_bytes());
+        payload.extend_from_slice(r);
+    }
+    unsafe {
+        let first_block = pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM);
+        let mut n_blocks: u32 = 0;
+        for chunk in payload.chunks(8000) {
+            super::page::extend_page_with_item(rel, pg_sys::ForkNumber::MAIN_FORKNUM, chunk);
+            n_blocks += 1;
+        }
+        let base = reserve(rel, Counter::RowNumber, rows.len() as u64)?;
+        let _stripe_id = reserve(rel, Counter::StripeId, 1)?;
+        append_stripe(
+            rel,
+            StripeDesc {
+                first_block,
+                n_blocks,
+                byte_len: payload.len() as u64,
+                row_count: rows.len() as u32,
+                first_row_number: base,
+            },
+        )?;
+    }
+    Ok(())
 }
 
 // ===========================================================================================================
@@ -447,14 +725,11 @@ columnar_unsupported!(columnar_tuple_tid_valid(_s: pg_sys::TableScanDesc, _t: pg
 columnar_unsupported!(columnar_tuple_get_latest_tid(_s: pg_sys::TableScanDesc, _t: pg_sys::ItemPointer), "latest-TID lookup");
 columnar_unsupported!(columnar_tuple_satisfies_snapshot(_r: pg_sys::Relation, _sl: *mut pg_sys::TupleTableSlot, _sn: pg_sys::Snapshot) -> bool, "tuple visibility by TID");
 columnar_unsupported!(columnar_index_delete_tuples(_r: pg_sys::Relation, _d: *mut pg_sys::TM_IndexDeleteOp) -> pg_sys::TransactionId, "index delete");
-columnar_unsupported!(columnar_tuple_insert(_r: pg_sys::Relation, _sl: *mut pg_sys::TupleTableSlot, _c: pg_sys::CommandId, _o: std::os::raw::c_int, _b: *mut pg_sys::BulkInsertStateData), "INSERT (wired in Phase B)");
 columnar_unsupported!(columnar_tuple_insert_speculative(_r: pg_sys::Relation, _sl: *mut pg_sys::TupleTableSlot, _c: pg_sys::CommandId, _o: std::os::raw::c_int, _b: *mut pg_sys::BulkInsertStateData, _t: u32), "speculative insert");
 columnar_unsupported!(columnar_tuple_complete_speculative(_r: pg_sys::Relation, _sl: *mut pg_sys::TupleTableSlot, _t: u32, _s: bool), "speculative insert");
-columnar_unsupported!(columnar_multi_insert(_r: pg_sys::Relation, _sl: *mut *mut pg_sys::TupleTableSlot, _n: std::os::raw::c_int, _c: pg_sys::CommandId, _o: std::os::raw::c_int, _b: *mut pg_sys::BulkInsertStateData), "COPY multi-insert (wired in Phase B)");
 columnar_unsupported!(columnar_tuple_delete(_r: pg_sys::Relation, _t: pg_sys::ItemPointer, _c: pg_sys::CommandId, _sn: pg_sys::Snapshot, _cr: pg_sys::Snapshot, _w: bool, _f: *mut pg_sys::TM_FailureData, _cp: bool) -> pg_sys::TM_Result::Type, "DELETE");
 columnar_unsupported!(columnar_tuple_update(_r: pg_sys::Relation, _o: pg_sys::ItemPointer, _sl: *mut pg_sys::TupleTableSlot, _c: pg_sys::CommandId, _sn: pg_sys::Snapshot, _cr: pg_sys::Snapshot, _w: bool, _f: *mut pg_sys::TM_FailureData, _lm: *mut pg_sys::LockTupleMode::Type, _ui: *mut pg_sys::TU_UpdateIndexes::Type) -> pg_sys::TM_Result::Type, "UPDATE");
 columnar_unsupported!(columnar_tuple_lock(_r: pg_sys::Relation, _t: pg_sys::ItemPointer, _sn: pg_sys::Snapshot, _sl: *mut pg_sys::TupleTableSlot, _c: pg_sys::CommandId, _m: pg_sys::LockTupleMode::Type, _wp: pg_sys::LockWaitPolicy::Type, _fl: u8, _f: *mut pg_sys::TM_FailureData) -> pg_sys::TM_Result::Type, "SELECT FOR UPDATE / row lock");
-columnar_unsupported!(columnar_finish_bulk_insert(_r: pg_sys::Relation, _o: std::os::raw::c_int), "finish bulk insert (wired in Phase B)");
 columnar_unsupported!(columnar_relation_nontransactional_truncate(_r: pg_sys::Relation), "TRUNCATE (wired in Phase B)");
 columnar_unsupported!(columnar_relation_copy_data(_r: pg_sys::Relation, _n: *const pg_sys::RelFileLocator), "ALTER TABLE SET TABLESPACE");
 columnar_unsupported!(columnar_relation_copy_for_cluster(_ot: pg_sys::Relation, _nt: pg_sys::Relation, _oi: pg_sys::Relation, _us: bool, _ox: pg_sys::TransactionId, _xc: *mut pg_sys::TransactionId, _mc: *mut pg_sys::MultiXactId, _nt2: *mut f64, _tv: *mut f64, _trd: *mut f64), "CLUSTER / VACUUM FULL");
@@ -522,6 +797,38 @@ mod tests {
         .unwrap();
         assert_eq!(next, 1005, "after reserving a batch of 5, the next single must be 1005");
         Spi::run("DROP TABLE m99_rt").unwrap();
+    }
+
+    /// M99 B/C1 — INSERT→SELECT round-trip: rows written to a columnar table read back identical (values, order of
+    /// aggregation, NULLs) — the result-equivalence GATE vs a row-store, single-transaction MVP. Column-major
+    /// encoding + compression + min/max pruning are the follow-up slice; this proves correct storage+retrieval.
+    #[pg_test]
+    fn m99_insert_select_roundtrip() {
+        Spi::run("CREATE TABLE m99_rt2 (a int, b text, c float8) USING theodb_columnar").unwrap();
+        Spi::run(
+            "INSERT INTO m99_rt2 SELECT g, 'row-' || g, g * 1.5 FROM generate_series(1, 5000) g",
+        )
+        .unwrap();
+        // NULL handling: a row with a NULL text + NULL float.
+        Spi::run("INSERT INTO m99_rt2 VALUES (5001, NULL, NULL)").unwrap();
+
+        let cnt = Spi::get_one::<i64>("SELECT count(*) FROM m99_rt2").unwrap().unwrap();
+        assert_eq!(cnt, 5001, "columnar table must return all inserted rows");
+
+        let suma = Spi::get_one::<i64>("SELECT sum(a)::bigint FROM m99_rt2").unwrap().unwrap();
+        assert_eq!(suma, (1..=5001i64).sum::<i64>(), "sum(a) must match");
+
+        let sumc = Spi::get_one::<f64>("SELECT sum(c) FROM m99_rt2").unwrap().unwrap();
+        let expect_c: f64 = (1..=5000i64).map(|g| g as f64 * 1.5).sum();
+        assert!((sumc - expect_c).abs() < 1e-6, "sum(c) must match ({sumc} vs {expect_c})");
+
+        let nulls = Spi::get_one::<i64>("SELECT count(*) FROM m99_rt2 WHERE b IS NULL").unwrap().unwrap();
+        assert_eq!(nulls, 1, "the one NULL-text row must read back as NULL");
+
+        let sample = Spi::get_one::<String>("SELECT b FROM m99_rt2 WHERE a = 42").unwrap().unwrap();
+        assert_eq!(sample, "row-42", "text values must round-trip exactly");
+
+        Spi::run("DROP TABLE m99_rt2").unwrap();
     }
 
     /// M99 A1 — `CREATE TABLE ... USING theodb_columnar` loads end-to-end and registers in `pg_am`, and an empty
