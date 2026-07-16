@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Roadmap amended: added M105 docs/features reality reconciliation + M106 API-consistency hygiene (`/roadmap-feature docs-features-reality-reconciliation`)
 
 ### Changed
 
