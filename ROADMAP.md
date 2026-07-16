@@ -1515,6 +1515,44 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 
 ---
 
+## M104 — [ ] system-design hardening: fechar as findings da auditoria (health 4.2 → ≥4.9/5) *(gated M103)*
+
+> Added 2026-07-16 by `/roadmap-feature` (slug: `system-design-hardening-49`). Fonte: auditoria Staff-level
+> `/loop-system-design` (`system-design-output/final_report.md`, overall **4.2/5**). See CHANGELOG `[Unreleased] § Added`.
+
+**Objective:** fechar o CRÍTICO + todos os HIGH (e os wins baratos de boundary/deletion/data-flow + a dívida de
+governança) da auditoria de system-design, elevando o score de saúde de **4.2 → ≥4.9/5** — reusando os padrões de
+memória-limitada que **já existem in-tree** (streaming build M89/M96, tuplesort spill, GreedyMemoryPool), sem reinventar.
+
+**GATE (verificação honesta):** re-rodar `/loop-system-design --mode=full` deve pontuar **≥4.9/5** overall, com o
+CRÍTICO e TODOS os HIGH resolvidos. Refactors da via columnar (MVCC-load-bearing) DEVEM re-passar as provas de crash
+(`make -C theodb_rs/isolation check-crash`) + as permutações de isolation — nenhuma regressão de MVCC/crash-safety.
+
+**DoD:** (1) **CRÍTICO** — via de escrita columnar bounded-memory (flush em fronteira de stripe/row-count, padrão
+M89/M96), sem RAM O(rows-in-xact) (#99), provado por teste de envelope de memória num `INSERT...SELECT` grande;
+(2) **4 HIGH** — (a) seq-scan columnar em streaming (não full-materialize); (b) VACUUM fold bounded ou cap
+documentado+benchmarkado (janela M55); (c) Arrow cache M101 com eviction/limite de tamanho; (d) cliente AI HTTP com
+**circuit breaker** + reuso de conexão + cap de batch; (3) **deletion/boundary** — árvore `rabitq/vendor/` inerte
+deletada OU `#[cfg(feature)]`-gated + `VENDORED.md` corrigido (ADR); inversão de layering `vec/ah.rs → am::aq`
+corrigida (realocar `AqQuantizer`); `columnar::decode_columns` com acessor tipado de projeção (mata o leak
+`vindex → am::columnar` internals); paths legacy blob/v4 com `#[deprecated]`/WARN + default v4-OOM invertido;
+(4) **data-flow** — backpressure do produtor do vectorizer + bound de retenção/purge do dead-letter; (5) **governança
+(owner)** — ADR-0033 **assinado** OU nota de supersede no ADR-0002 (LOCKED) apontando para os verdicts medidos
+0035/0036 — fecha o único trade-off com rationale inválido (não-código; decisão do owner); (6) **verificado** —
+re-auditoria `/loop-system-design` ≥4.9/5. **Boundary honesto:** é *hardening* de qualidade de design (memória
+limitada, resiliência, higiene de deleção, governança) — **NÃO** muda capacidade vetorial nem o teto de paradigma
+M73/M74 (nenhum claim de QPS/recall superior entra por esta porta). **Risks:** (a) scope creep — 5 dimensões num
+milestone; mitigação: DoD é checklist independente + a re-auditoria é o único gate de aceite (medium/low podem ser
+diferidos com nota se não movem o score); (b) refatorar a via columnar MVCC-load-bearing pode introduzir regressão de
+MVCC/crash-safety em código recém-provado; mitigação: preservar o invariante de visibilidade heap-catalog do M99 +
+re-rodar as provas de crash e as permutações de isolation. **Dependencies:** M103 (última do pilar columnar/AI onde as
+findings vivem) + a auditoria concluída. **Prior art:** `system-design-output/final_report.md` (26 findings) + os
+drafts `system-design-output/adrs/{0045-northstar-governance,0046-rabitq-vendor-disposition}.md` + os in-tree
+`am/build_stream.rs` (streaming M89), `am/df_executor.rs` (GreedyMemoryPool M100), `am/fold.rs` (crash-safe M48) +
+issues #99/#100/#102/#104/#106/#108.
+
+---
+
 ## Sequência e paralelismo
 
 ```
