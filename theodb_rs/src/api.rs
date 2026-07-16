@@ -209,9 +209,11 @@ mod theodb_rs {
         lexical_engine: &str,
         content_text_col: Option<&str>,
     ) -> TableIterator<'static, (name!(id, String), name!(score, f32))> {
+        // The positional entrypoint stays UNWEIGHTED (1.0/1.0) — its public signature is unchanged. Per-leg
+        // weights (M106) are exposed via the JSON `ai.hybrid_search(vector_weight/text_weight)` surface.
         TableIterator::new(crate::hybrid::run_rrf(
             tbl_text, id_col, content_tsv_col, vector_col, query_text, query_vector_text, k,
-            per_leg_limit, result_limit, language, filter_sql, lexical_engine, content_text_col,
+            per_leg_limit, result_limit, language, filter_sql, lexical_engine, content_text_col, 1.0, 1.0,
         ))
     }
 

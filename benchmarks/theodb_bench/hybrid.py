@@ -9,18 +9,28 @@ from __future__ import annotations
 from collections import defaultdict
 
 
-def rrf_fuse(leg_rankings: list, k: int = 60) -> list:
-    """Fuse N ranked id-lists via RRF. Returns [(id, score), ...] sorted by score desc, id asc (stable).
+def rrf_fuse(leg_rankings: list, k: int = 60, weights: list | None = None) -> list:
+    """Fuse N ranked id-lists via (weighted) RRF. Returns [(id, score), ...] sorted score desc, id asc.
 
     leg_rankings: list of ranked lists; each is [id_1, id_2, ...] best-first (1-based rank).
     An id absent from a leg contributes 0 for that leg (mirrors the SQL COALESCE empty-leg handling).
+    weights: optional per-leg weight (M106 — twin of the in-DB `vector_weight`/`text_weight`). Default is
+    1.0 for every leg (byte-identical to the pre-M106 unweighted fusion): `score(d) = sum_legs w_leg/(k+rank)`.
+    Each weight must be a finite number >= 0 (a negative weight would invert the fusion).
     """
     if k <= 0:
         raise ValueError(f"k must be > 0 (got {k})")
+    if weights is None:
+        weights = [1.0] * len(leg_rankings)
+    if len(weights) != len(leg_rankings):
+        raise ValueError(f"weights length {len(weights)} != legs {len(leg_rankings)}")
+    for w in weights:
+        if w != w or w in (float("inf"), float("-inf")) or w < 0:  # finite and >= 0
+            raise ValueError(f"weight must be a finite number >= 0 (got {w})")
     scores: dict = defaultdict(float)
-    for leg in leg_rankings:
+    for leg, w in zip(leg_rankings, weights):
         for rank, doc_id in enumerate(leg, start=1):
-            scores[doc_id] += 1.0 / (k + rank)
+            scores[doc_id] += w * (1.0 / (k + rank))
     # deterministic tie-break: score desc, then id asc
     return sorted(scores.items(), key=lambda kv: (-kv[1], str(kv[0])))
 
