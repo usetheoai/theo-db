@@ -130,6 +130,119 @@ fn build_columnar_amroutine_in_top() -> *mut pg_sys::TableAmRoutine {
 }
 
 // ===========================================================================================================
+// M99 A2 — columnar metapage (block 0): monotonic row_number / stripe_id reservation counters
+// ===========================================================================================================
+//
+// The metapage lives in block 0 of the relation's MAIN fork as a single fixed-size page item. It holds the two
+// monotonic counters the writer reserves from (row_number for synthetic TIDs, stripe_id for the catalog). The
+// reservation is a read-modify-write of block 0 under a buffer EXCLUSIVE lock, WAL-logged full-image via GenericXLog
+// — so two concurrent inserters can never get overlapping ranges (proven under concurrency in Phase D). This mirrors
+// Hydra's `ColumnarStorageReserveRowNumber`/`ReserveStripeId` (studied only — ADR-0042), reusing our own `page.rs`
+// GenericXLog discipline (Rule 9).
+
+const META_MAGIC: u32 = 0x54_43_4F_4C; // "TCOL" (Theo COLumnar) — distinguishes a columnar fork from the IVF/HNSW blob.
+const META_VERSION: u32 = 1;
+const META_LEN: usize = 24; // magic(4) + version(4) + reserved_row_number(8) + reserved_stripe_id(8)
+
+#[derive(Clone, Copy)]
+struct ColumnarMeta {
+    reserved_row_number: u64,
+    reserved_stripe_id: u64,
+}
+
+impl ColumnarMeta {
+    fn to_bytes(&self) -> [u8; META_LEN] {
+        let mut b = [0u8; META_LEN];
+        b[0..4].copy_from_slice(&META_MAGIC.to_le_bytes());
+        b[4..8].copy_from_slice(&META_VERSION.to_le_bytes());
+        b[8..16].copy_from_slice(&self.reserved_row_number.to_le_bytes());
+        b[16..24].copy_from_slice(&self.reserved_stripe_id.to_le_bytes());
+        b
+    }
+
+    /// Decode + validate the metapage bytes. A wrong magic/version is a corrupt or foreign fork → typed error
+    /// (fail-fast at the trust boundary, never a silent wrong answer).
+    fn from_bytes(b: &[u8]) -> Result<Self, String> {
+        if b.len() < META_LEN {
+            return Err(format!("theodb_columnar: metapage too short ({} < {META_LEN})", b.len()));
+        }
+        let magic = u32::from_le_bytes(b[0..4].try_into().unwrap());
+        if magic != META_MAGIC {
+            return Err(format!("theodb_columnar: bad metapage magic {magic:#x} (expected {META_MAGIC:#x})"));
+        }
+        let version = u32::from_le_bytes(b[4..8].try_into().unwrap());
+        if version != META_VERSION {
+            return Err(format!("theodb_columnar: unsupported metapage version {version}"));
+        }
+        Ok(ColumnarMeta {
+            reserved_row_number: u64::from_le_bytes(b[8..16].try_into().unwrap()),
+            reserved_stripe_id: u64::from_le_bytes(b[16..24].try_into().unwrap()),
+        })
+    }
+}
+
+/// Initialize the metapage (block 0) with both counters at 0. Called from `relation_set_new_filelocator` right after
+/// the storage is created, so block 0 always exists before any reservation. Reuses `page::extend_page_with_item`
+/// (WAL-logged extend under the relation-extension lock).
+unsafe fn init_metapage(rel: pg_sys::Relation) {
+    let meta = ColumnarMeta { reserved_row_number: 0, reserved_stripe_id: 0 };
+    unsafe { super::page::extend_page_with_item(rel, pg_sys::ForkNumber::MAIN_FORKNUM, &meta.to_bytes()) };
+}
+
+/// Which counter a reservation bumps.
+#[derive(Clone, Copy)]
+enum Counter {
+    RowNumber,
+    StripeId,
+}
+
+/// Atomically reserve `n` ids from a metapage counter and return the FIRST reserved id (the range is `[base, base+n)`).
+/// Read-modify-write of block 0 under a buffer EXCLUSIVE lock + GenericXLog full-image — the range is durable and
+/// non-overlapping across concurrent backends.
+unsafe fn reserve(rel: pg_sys::Relation, counter: Counter, n: u64) -> Result<u64, String> {
+    let buf = pg_sys::ReadBufferExtended(
+        rel,
+        pg_sys::ForkNumber::MAIN_FORKNUM,
+        0,
+        pg_sys::ReadBufferMode::RBM_NORMAL,
+        std::ptr::null_mut(),
+    );
+    pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_EXCLUSIVE as i32);
+    let state = pg_sys::GenericXLogStart(rel);
+    let page = pg_sys::GenericXLogRegisterBuffer(state, buf, pg_sys::GENERIC_XLOG_FULL_IMAGE as i32);
+
+    // The metapage is the single item at FirstOffsetNumber.
+    let itemid = pg_sys::PageGetItemId(page, pg_sys::FirstOffsetNumber);
+    let item = pg_sys::PageGetItem(page, itemid) as *mut u8;
+    let cur = std::slice::from_raw_parts(item, META_LEN);
+    let mut meta = match ColumnarMeta::from_bytes(cur) {
+        Ok(m) => m,
+        Err(e) => {
+            // Abort the xlog + release before failing loud (no half-written WAL record).
+            pg_sys::GenericXLogAbort(state);
+            pg_sys::UnlockReleaseBuffer(buf);
+            return Err(e);
+        }
+    };
+
+    let field = match counter {
+        Counter::RowNumber => &mut meta.reserved_row_number,
+        Counter::StripeId => &mut meta.reserved_stripe_id,
+    };
+    let base = *field;
+    *field = base + n;
+
+    // Overwrite the item in place (same length) — no PageAddItem churn.
+    let bytes = meta.to_bytes();
+    std::ptr::copy_nonoverlapping(bytes.as_ptr(), item, META_LEN);
+
+    pg_sys::MarkBufferDirty(buf);
+    pg_sys::GenericXLogFinish(state);
+    pg_sys::UnlockReleaseBuffer(buf);
+    Ok(base)
+}
+
+// ===========================================================================================================
 // Real: slot + scan lifecycle (Phase A — empty scan)
 // ===========================================================================================================
 
@@ -199,8 +312,9 @@ pub unsafe extern "C-unwind" fn columnar_scan_getnextslot(
 // Real: relation lifecycle (create storage + metapage init)
 // ===========================================================================================================
 
-/// Create the relation's physical storage (main fork). Phase A initializes storage so `CREATE TABLE` succeeds and
-/// `relation_size` has a fork to measure; the columnar metapage/catalog is written on first insert (Phase B).
+/// Create the relation's physical storage (main fork) + initialize the columnar metapage (block 0) so `CREATE
+/// TABLE` succeeds, `relation_size` has a fork to measure, and the reservation counters exist before the first
+/// INSERT (M99 A2). The stripe/chunk catalog rows are inserted by the writer (Phase B).
 #[pg_guard]
 pub unsafe extern "C-unwind" fn columnar_relation_set_new_filelocator(
     rel: pg_sys::Relation,
@@ -227,6 +341,10 @@ pub unsafe extern "C-unwind" fn columnar_relation_set_new_filelocator(
         // CREATE cleans up the file.
         let srel = pg_sys::RelationCreateStorage(*newrlocator, persistence, true);
         pg_sys::smgrclose(srel);
+
+        // Initialize the metapage (block 0) with both reservation counters at 0 (M99 A2), so block 0 always exists
+        // before the first INSERT reserves from it.
+        init_metapage(rel);
     }
 }
 
@@ -350,10 +468,61 @@ columnar_unsupported!(columnar_scan_bitmap_next_tuple(_s: pg_sys::TableScanDesc,
 columnar_unsupported!(columnar_scan_sample_next_block(_s: pg_sys::TableScanDesc, _ss: *mut pg_sys::SampleScanState) -> bool, "TABLESAMPLE");
 columnar_unsupported!(columnar_scan_sample_next_tuple(_s: pg_sys::TableScanDesc, _ss: *mut pg_sys::SampleScanState, _sl: *mut pg_sys::TupleTableSlot) -> bool, "TABLESAMPLE");
 
+/// M99 A2 test helper — reserve `n` row_numbers from a columnar table's metapage and return the FIRST reserved id.
+/// Test-only (gated behind `pg_test`) so the monotonicity test can drive the reservation RMW from SQL.
+#[cfg(any(test, feature = "pg_test"))]
+#[pg_extern]
+fn theodb_columnar_test_reserve_rows(rel_oid: pg_sys::Oid, n: i64) -> i64 {
+    unsafe {
+        let rel = pg_sys::relation_open(rel_oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+        let base = reserve(rel, Counter::RowNumber, n as u64);
+        pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+        match base {
+            Ok(b) => b as i64,
+            Err(e) => pgrx::error!("{e}"),
+        }
+    }
+}
+
 #[cfg(any(test, feature = "pg_test"))]
 #[pgrx::pg_schema]
 mod tests {
     use pgrx::prelude::*;
+
+    /// M99 A2 — the metapage reservation counter is monotonic + gap-free (row_number → synthetic TID uniqueness).
+    /// 1000 single reservations return 0,1,…,999; a batch reserve of 5 returns 1000 and advances the counter by 5.
+    /// Each reservation reads back the value the previous one wrote (a round-trip through block 0 under the buffer
+    /// lock), so this proves the RMW is correct within a session; cross-backend non-overlap + crash-durability are
+    /// proven in Phase D (isolation permutations + WAL replay).
+    #[pg_test]
+    fn m99_reserve_row_number_monotonic() {
+        Spi::run("CREATE TABLE m99_rt (a int) USING theodb_columnar").unwrap();
+        let oid = Spi::get_one::<pg_sys::Oid>("SELECT 'm99_rt'::regclass::oid").unwrap().unwrap();
+        for i in 0..1000i64 {
+            let r = Spi::get_one_with_args::<i64>(
+                "SELECT theodb_columnar_test_reserve_rows($1, 1)",
+                &[oid.into()],
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(r, i, "reservation #{i} must return {i} (monotonic, gap-free)");
+        }
+        let base = Spi::get_one_with_args::<i64>(
+            "SELECT theodb_columnar_test_reserve_rows($1, 5)",
+            &[oid.into()],
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(base, 1000, "batch reserve base after 1000 singles must be 1000");
+        let next = Spi::get_one_with_args::<i64>(
+            "SELECT theodb_columnar_test_reserve_rows($1, 1)",
+            &[oid.into()],
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(next, 1005, "after reserving a batch of 5, the next single must be 1005");
+        Spi::run("DROP TABLE m99_rt").unwrap();
+    }
 
     /// M99 A1 — `CREATE TABLE ... USING theodb_columnar` loads end-to-end and registers in `pg_am`, and an empty
     /// seqscan returns zero rows (INSERT is Phase B). Proves the TableAM FFI/registration path on pgrx 0.19 / pg17.

@@ -70,7 +70,8 @@ pub(crate) unsafe fn read_blob(rel: pg_sys::Relation) -> Result<Vec<u8>, String>
 }
 
 /// Extend the given fork by one page and write `data` as its single item, WAL-logged.
-unsafe fn extend_page_with_item(rel: pg_sys::Relation, fork: pg_sys::ForkNumber::Type, data: &[u8]) {
+/// (M99: reused by the columnar TAM to create its metapage — block 0 — on relation creation.)
+pub(crate) unsafe fn extend_page_with_item(rel: pg_sys::Relation, fork: pg_sys::ForkNumber::Type, data: &[u8]) {
     debug_assert!(data.len() < CHUNK + 1);
     // Extend: serialize extension with the relation-extension lock (pgvectorscale util/buffer.rs:62).
     pg_sys::LockRelationForExtension(rel, pg_sys::ExclusiveLock as pg_sys::LOCKMODE);
