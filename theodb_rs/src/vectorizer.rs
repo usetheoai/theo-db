@@ -86,12 +86,15 @@ BEGIN
     IF TG_OP = 'DELETE' THEN
         INSERT INTO theodb.vectorizer_queue (vectorizer_id, source_pk, op)
         VALUES (vid, to_jsonb(OLD) ->> pkcol, 'delete')
-        ON CONFLICT (vectorizer_id, source_pk) WHERE state = 'pending' DO NOTHING; -- coalesce: one pending/PK
+        -- coalesce: one pending job per (vectorizer,PK); last op wins (a delete after a pending upsert must
+        -- supersede it — the net state is "deleted"). enqueued_at is preserved to keep FIFO order (a hot row
+        -- re-touched forever cannot starve older work by resetting its position).
+        ON CONFLICT (vectorizer_id, source_pk) WHERE state = 'pending' DO UPDATE SET op = EXCLUDED.op;
         RETURN OLD;
     END IF;
     INSERT INTO theodb.vectorizer_queue (vectorizer_id, source_pk, op)
     VALUES (vid, to_jsonb(NEW) ->> pkcol, 'upsert')
-    ON CONFLICT (vectorizer_id, source_pk) WHERE state = 'pending' DO NOTHING; -- coalesce: one pending/PK
+    ON CONFLICT (vectorizer_id, source_pk) WHERE state = 'pending' DO UPDATE SET op = EXCLUDED.op;
     RETURN NEW;
 END;
 $fn$;
@@ -927,7 +930,9 @@ mod tests {
         });
         assert_eq!((pk.as_str(), op.as_str(), state.as_str()), ("42", "upsert", "pending"),
             "INSERT enqueues a pending upsert for the row PK");
-        // UPDATE → another upsert; DELETE → a delete job.
+        // M104 coalescing: UPDATE then DELETE on the SAME never-processed PK collapse into the SINGLE pending
+        // job, and the LAST op wins — the net state of insert+update+delete is "delete", so the worker does one
+        // delete, not three redundant jobs (producer backpressure without losing the final intent).
         Spi::run("UPDATE docs SET body='changed' WHERE id=42").unwrap();
         Spi::run("DELETE FROM docs WHERE id=42").unwrap();
         let ops: Vec<String> = Spi::connect(|c| {
@@ -936,7 +941,7 @@ mod tests {
                 .filter_map(|r| r.get::<String>(1).unwrap())
                 .collect()
         });
-        assert_eq!(ops, vec!["upsert", "upsert", "delete"], "INSERT/UPDATE enqueue upsert, DELETE enqueues delete");
+        assert_eq!(ops, vec!["delete"], "INSERT+UPDATE+DELETE on one unprocessed PK coalesce to a single 'delete'");
     }
 
     // (M66) the `chunk_text_*` SPI tests were removed with the dead plpgsql `theodb.chunk_text`; the
