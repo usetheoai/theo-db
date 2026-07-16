@@ -151,6 +151,12 @@ unsafe fn admit(
         if !(*agg).aggfilter.is_null() || !(*agg).aggorder.is_null() || !(*agg).aggdistinct.is_null() {
             return None;
         }
+        // Only a SIMPLE (non-split) aggregate has the FINAL result type (int8/float8). A partial/parallel split
+        // (AGGSPLIT_INITIAL_SERIAL etc.) produces the aggregate's transtype (internal/bytea), which would NOT match
+        // the int8/float8 Datum we emit → fail-safe to the native plan (council-rust-pgrx HIGH).
+        if (*agg).aggsplit != pg_sys::AggSplit::AGGSPLIT_SIMPLE {
+            return None;
+        }
         let fname = pg_sys::get_func_name((*agg).aggfnoid);
         if fname.is_null() {
             return None;

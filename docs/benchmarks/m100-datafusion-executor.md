@@ -16,9 +16,17 @@
 | M99 seqscan columnar (GUC off) | 5251.2 ± 16.1 ms | 1.0× (baseline) |
 | Heap row-store (context) | 147.3 ± 0.6 ms | — |
 
-- **Vectorized path is the CustomScan:** ✅ (`EXPLAIN` confirms the `Custom Scan (theodb_columnar_agg)` node — the
-  measurement is of the real vectorized path, not a fallback).
+- **Vectorized path is the CustomScan:** ✅ (`EXPLAIN` confirms a `Custom Scan` node — the harness greps `EXPLAIN
+  (COSTS OFF)` for `Custom Scan`; the node is named `theodb_columnar_agg` in the source — so the measurement is of
+  the real vectorized path, not a fallback to the native plan).
 - **Result-equivalence:** ✅ the vectorized aggregate equals the heap aggregate (`count`/`sum` identical).
+- **The 9.89× reflects a 5-column table.** The M99 seqscan baseline decodes ALL 5 columns + forms a heap tuple per
+  row; the M100 CustomScan decodes only the projected `measure` column. The factor scales with table WIDTH (the
+  baseline pays for the unprojected columns) — it shrinks on narrower tables and grows on wider ones; it is the
+  projection-pushdown gain, not an intrinsic property of the aggregate.
+- **Setup asymmetry (intentional, does not affect the claim):** `t_heap` gets `VACUUM ANALYZE`; `t_col` gets a
+  `count(*)` to flush its stripes. Heap is context only; the measured pair (VEC vs SEQ) shares the exact same
+  `t_col`, so the asymmetry cannot contaminate the 9.89×.
 
 ## Methodology
 
