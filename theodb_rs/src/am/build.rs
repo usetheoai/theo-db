@@ -185,7 +185,7 @@ pub extern "C-unwind" fn ambuild(
             // Byte-identical to the pre-M89 stride-of-corpus sample.
             let train: Vec<Vec<f32>> = idx.train_sample(AQ_TRAIN_SAMPLE);
             let thr = crate::am::options::aq_threshold_from_relation(indexrel);
-            match crate::am::aq::AqQuantizer::train(&train, m, 4, thr, BUILD_SEED) {
+            match crate::vec::aq::AqQuantizer::train(&train, m, 4, thr, BUILD_SEED) {
                 Ok(quant) => {
                     let pairs = m.div_ceil(2);
                     // M89 (streaming Increment 2): pack the AQ codes from list POSITIONS reading vectors by
@@ -290,7 +290,7 @@ pub extern "C-unwind" fn ambuild(
 /// `vec::ah::ah_score_block` consumes (FAISS bbs=32). `pairs = ceil(m/2)` bytes/code. Padding entries score high
 /// (all-zero code → the LUT's first centroid); the scan trims to the list's real `count` from the directory.
 fn pack_block32_codes(
-    quant: &crate::am::aq::AqQuantizer,
+    quant: &crate::vec::aq::AqQuantizer,
     positions: &[usize],
     vectors: &[Vec<f32>],
     pairs: usize,
@@ -612,7 +612,7 @@ fn pack_fold_layout(
     // Recover the AQ params (bits + η) from the persisted codebook so the re-trained fold generation is identical
     // to the build's (deterministic AQ_BUILD_SEED). The codebook itself is re-trained on the LIVE vectors inside
     // `pack_aq` — dropping dead nodes but keeping the same (m, bits, η), the "códigos gerados no fold".
-    let q = crate::am::aq::AqQuantizer::from_meta_bytes(&meta.aq_codebook)?;
+    let q = crate::vec::aq::AqQuantizer::from_meta_bytes(&meta.aq_codebook)?;
     crate::am::hnsw_page::pack_aq(idx, base, meta.aq_m as usize, q.bits(), q.aq_threshold())
 }
 
@@ -803,11 +803,11 @@ mod tests {
         assert_eq!(meta.sbq_bits, 0, "v3 index carries NO SBQ (AQ ⊥ SBQ, D1)");
         assert!(!meta.aq_codebook.is_empty(), "the AQ codebook is persisted in the v3 meta");
         // The persisted codebook decodes and reports the η we asked for (2.0), proving the reloption reached train.
-        let q = crate::am::aq::AqQuantizer::from_meta_bytes(&meta.aq_codebook).expect("codebook decodes");
+        let q = crate::vec::aq::AqQuantizer::from_meta_bytes(&meta.aq_codebook).expect("codebook decodes");
         assert_eq!(q.m(), 4);
         assert!((q.aq_threshold() - 2.0).abs() < 1e-3, "η=2.0 round-tripped from the reloption");
         // ⌈m/2⌉ = 2 trailing bytes per node.
-        assert_eq!(crate::am::aq::AqQuantizer::bytes_per_vector(8, 4), 2);
+        assert_eq!(crate::vec::aq::AqQuantizer::bytes_per_vector(8, 4), 2);
         // f32 rerank still exact.
         let (mut exact, mut idx) = topk_sets("aqb", "[3,3,2,0,0.3,4,1,1.5]", 5);
         exact.sort_unstable();
@@ -1459,9 +1459,9 @@ mod tests {
         assert_eq!(meta.dim, 768, "dim=768");
         assert!(meta.aq_cb_npages >= 2, "the dim=768 codebook needs MULTIPLE dedicated pages (got {})", meta.aq_cb_npages);
         // (2) the reassembled codebook round-trips bit-exact and re-encodes identically to a fresh train.
-        let expected_len = 13 + 8 * crate::am::aq::AQ_K_STAR * (768 / 8) * 4; // to_meta_bytes header + centroids
+        let expected_len = 13 + 8 * crate::vec::aq::AQ_K_STAR * (768 / 8) * 4; // to_meta_bytes header + centroids
         assert_eq!(meta.aq_codebook.len(), expected_len, "reassembled codebook is the full multi-page blob");
-        let q = crate::am::aq::AqQuantizer::from_meta_bytes(&meta.aq_codebook).expect("multi-page codebook decodes");
+        let q = crate::vec::aq::AqQuantizer::from_meta_bytes(&meta.aq_codebook).expect("multi-page codebook decodes");
         assert_eq!(q.m(), 8);
         assert_eq!(q.dim(), 768, "the decoded codebook covers the full index dim");
         // The reloption `aq_threshold=4100` is MILLI-scaled (η×1000) → the trained quantizer stores η=4.1.

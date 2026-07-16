@@ -1504,7 +1504,7 @@ pub(crate) unsafe fn write_ivf_aq_split_streaming(
     codebook: &[u8],
     centroids: &[Vec<f32>],
     counts: &[u32],
-    quant: &crate::am::aq::AqQuantizer,
+    quant: &crate::vec::aq::AqQuantizer,
     mut next_list_member: impl FnMut() -> Option<(i64, Vec<f32>)>,
 ) {
     let base: u32 = 1;

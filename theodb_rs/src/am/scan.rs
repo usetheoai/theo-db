@@ -364,7 +364,7 @@ unsafe fn scan_ivf_aq(rel: pg_sys::Relation, query: &[f32], probes: usize, reran
         Ok(m) => m,
         Err(e) => pg_sys::error!("theodb am scan: {e}"),
     };
-    let quant = match crate::am::aq::AqQuantizer::from_meta_bytes(&meta.codebook) {
+    let quant = match crate::vec::aq::AqQuantizer::from_meta_bytes(&meta.codebook) {
         Ok(q) => q,
         Err(e) => pg_sys::error!("theodb am scan (aq codebook): {e}"),
     };
@@ -470,7 +470,7 @@ unsafe fn scan_ivf_aq_split(
         Ok(m) => m,
         Err(e) => pg_sys::error!("theodb am scan: {e}"),
     };
-    let quant = match crate::am::aq::AqQuantizer::from_meta_bytes(&meta.codebook) {
+    let quant = match crate::vec::aq::AqQuantizer::from_meta_bytes(&meta.codebook) {
         Ok(q) => q,
         Err(e) => pg_sys::error!("theodb am scan (aq codebook): {e}"),
     };
@@ -598,7 +598,7 @@ unsafe fn scan_ivf_aq_split_v7(
         Ok(m) => m,
         Err(e) => pg_sys::error!("theodb am scan: {e}"),
     };
-    let quant = match crate::am::aq::AqQuantizer::from_meta_bytes(&meta.codebook) {
+    let quant = match crate::vec::aq::AqQuantizer::from_meta_bytes(&meta.codebook) {
         Ok(q) => q,
         Err(e) => pg_sys::error!("theodb am scan (aq codebook): {e}"),
     };
@@ -762,7 +762,7 @@ unsafe fn scan_ivf_aq_split_sq8(
         Ok(m) => m,
         Err(e) => pg_sys::error!("theodb am scan: {e}"),
     };
-    let quant = match crate::am::aq::AqQuantizer::from_meta_bytes(&meta.aq_codebook) {
+    let quant = match crate::vec::aq::AqQuantizer::from_meta_bytes(&meta.aq_codebook) {
         Ok(q) => q,
         Err(e) => pg_sys::error!("theodb am scan (aq codebook): {e}"),
     };

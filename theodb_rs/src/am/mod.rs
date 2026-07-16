@@ -12,7 +12,6 @@
 //! functions needed, because `ambuild` uses `crate::ann::Metric` directly.
 use pgrx::*;
 
-pub(crate) mod aq; // M59 — anisotropic product quantizer (Phase 1 domain); the Phase 2 AH kernel (vec::ah) consumes AqQuantizer
 pub(crate) mod autotune; // M67 — deterministic ef_search recommender + scan-stats collector
 mod build; // ambuild / ambuildempty (Phase 2) + shared datum/metric helpers
 mod build_stream; // M96 — tuplesort-streaming ambuild (bounded-memory build spool)

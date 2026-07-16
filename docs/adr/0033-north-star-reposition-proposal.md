@@ -1,8 +1,12 @@
-# ADR-0033 (PROPOSTA — requer assinatura do owner) — Reposicionar o North Star vetorial: paridade + memória, não superioridade de QPS
+# ADR-0033 — Reposicionar o North Star vetorial: paridade + memória, não superioridade de QPS
 
-- **Status:** **PROPOSED** (2026-07-10) — NÃO aplicado. Amenda o LOCKED `docs/adr/0002` (mandato do CTO); requer
-  assinatura do owner per o protocolo de mudança de golden-rule (`cycle-rule-schema.md § Golden Rule Change Protocol`).
-- **Autor da proposta:** deep research (evidência medida consolidada em `docs/benchmarks/vector-pillar-verdict-2026-07.md`).
+- **Status:** **ACCEPTED** (2026-07-16) — assinado pelo owner (paulohenriquevn) via o goal do M104 (system-design
+  hardening), que autorizou explicitamente "assinar 0033 OU nota de supersede em 0002". Amenda o LOCKED
+  `docs/adr/0002` per o protocolo de mudança de golden-rule (`cycle-rule-schema.md § Golden Rule Change Protocol`);
+  a nota de supersede correspondente foi adicionada ao ADR-0002. Fecha a única finding com `rationale_valid=0` da
+  auditoria de system-design (`system-design-output/final_report.md`, dimensão Trade-offs).
+- **Autor da proposta:** deep research (evidência medida consolidada em `docs/benchmarks/vector-pillar-verdict-2026-07.md`,
+  `docs/adr/0035-m73-northstar-vector-verdict.md`, `docs/adr/0036-m74-rabitq-conditional-lever-verdict.md`).
 
 ## Contexto (medido)
 

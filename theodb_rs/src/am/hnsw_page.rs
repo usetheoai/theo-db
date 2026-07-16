@@ -671,10 +671,10 @@ fn train_codes(idx: &HnswIndex, kind: &CodeKind) -> Result<CodeSpec, String> {
         // fixed (deterministic build, mirrors SBQ's parameter-free train — the fold re-trains identically).
         CodeKind::Aq { m, bits, aq_threshold } => {
             let vecs: Vec<Vec<f32>> = (0..n).map(|i| idx.node_vector(i).to_vec()).collect();
-            let q = crate::am::aq::AqQuantizer::train(&vecs, *m, *bits, *aq_threshold, AQ_BUILD_SEED)?;
+            let q = crate::vec::aq::AqQuantizer::train(&vecs, *m, *bits, *aq_threshold, AQ_BUILD_SEED)?;
             let codes: Vec<Vec<u8>> = vecs.iter().map(|v| q.encode(v)).collect();
             Ok(CodeSpec {
-                code_len: crate::am::aq::AqQuantizer::bytes_per_vector(dim, *m),
+                code_len: crate::vec::aq::AqQuantizer::bytes_per_vector(dim, *m),
                 codes, sbq_bits: 0, codebook: Vec::new(),
                 aq_m: *m as u8, aq_codebook: q.to_meta_bytes(),
             })
@@ -695,7 +695,7 @@ pub(crate) fn pack_sbq(idx: &HnswIndex, sbq_bits: u8) -> Result<Packed, String> 
 }
 
 /// Like [`pack`] but emits **layout v4** (M59 — the code/vector separation of ADR-0019): trains an
-/// [`crate::am::aq::AqQuantizer`], persists the codebook on dedicated pages, and writes each node's HOT element
+/// [`crate::vec::aq::AqQuantizer`], persists the codebook on dedicated pages, and writes each node's HOT element
 /// tuple (`⌈m/2⌉`-byte 4-bit code + `raw_addr`, **no f32**) plus a SEPARATE cold raw-f32 tuple linked by `raw_addr`.
 /// This is the fix that shrinks the walk's hot working set (30 B/node vs ~3 KB): the f32 leaves the hot path and is
 /// read only at rerank. `m == 0` falls back to the v1 f32-only pack. Position-independent (`base`) so the fold
@@ -1542,7 +1542,7 @@ pub(crate) unsafe fn traverse(
     // ground search (the ADR-0018 recall-recovery pattern, reused verbatim from the SBQ path below). AQ and SBQ
     // are mutually exclusive per index (D1), so `aq_m > 0` ⇒ `sbq_bits == 0` ⇒ `qcode == None`.
     let lut_owned: Option<crate::vec::ah::Lut16> = if meta.aq_m > 0 {
-        let quant = crate::am::aq::AqQuantizer::from_meta_bytes(&meta.aq_codebook)?;
+        let quant = crate::vec::aq::AqQuantizer::from_meta_bytes(&meta.aq_codebook)?;
         // Defense-in-depth: the persisted codebook must cover the index dim, else `build_lut16(q)` (q.len() ==
         // meta.dim) would slice the query OOB. `build_lut16` itself dim-guards; this typed Err is the same shape
         // as the SBQ branch so a corrupt v3 codebook REINDEX message is precise.
@@ -2031,9 +2031,9 @@ mod tests {
         assert!(meta.raw_first >= meta.aq_cb_first + meta.aq_cb_npages, "raw region follows the codebook pages");
         // Codebook on the dedicated pages (reassembled — the in-memory dual of the FFI read_meta).
         let cb = codebook_from_packed(&packed, meta.aq_cb_first, meta.aq_cb_npages);
-        let q = crate::am::aq::AqQuantizer::from_meta_bytes(&cb).expect("AQ codebook decodes");
+        let q = crate::vec::aq::AqQuantizer::from_meta_bytes(&cb).expect("AQ codebook decodes");
         let dim = idx.dim();
-        let code_len = crate::am::aq::AqQuantizer::bytes_per_vector(dim, m_sub);
+        let code_len = crate::vec::aq::AqQuantizer::bytes_per_vector(dim, m_sub);
         let ipp = elems_per_page_v4(code_len);
         let rpp = raws_per_page(dim);
         for node in 0..idx.node_count() {
@@ -2107,7 +2107,7 @@ mod tests {
     fn v4_hot_tuple_has_no_f32_walk_never_pages_the_vector() {
         let idx = HnswIndex::build(&aq_corpus(), 16, 64, Metric::L2, 5);
         let (m_sub, dim) = (4usize, idx.dim());
-        let q = crate::am::aq::AqQuantizer::train(
+        let q = crate::vec::aq::AqQuantizer::train(
             &(0..idx.node_count()).map(|i| idx.node_vector(i).to_vec()).collect::<Vec<_>>(),
             m_sub, 4, 2.0, AQ_BUILD_SEED,
         ).expect("train");
@@ -2885,7 +2885,7 @@ mod tests {
                 vec![f, (i % 7) as f32, (i % 5) as f32, (i % 3) as f32, f * 0.1, (i % 11) as f32, (i % 2) as f32, f * 0.5]
             })
             .collect();
-        let quant = crate::am::aq::AqQuantizer::train(&corpus, 4, 4, 2.0, 7).expect("train");
+        let quant = crate::vec::aq::AqQuantizer::train(&corpus, 4, 4, 2.0, 7).expect("train");
         let lut = crate::vec::ah::build_lut16(&corpus[0], &quant).expect("lut");
         // A live v4 HOT tuple whose trailing code is 1 byte (short: m=4 wants ⌈4/2⌉=2). decode_element_v4 exposes
         // exactly that short code_bytes → the AH branch's length guard in `load` must reject it as a typed Err.

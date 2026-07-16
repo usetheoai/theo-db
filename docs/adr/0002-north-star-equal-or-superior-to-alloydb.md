@@ -1,6 +1,6 @@
 # ADR 0002 — North Star: TheoDB igual ou superior ao AlloyDB (Opção α)
 
-**Status:** Accepted (LOCKED) · **⚠️ Superseded in part by [ADR 0006](0006-own-code-postgres-based-rust-go.md) (2026-06-29)** — "compor > construir" deu lugar a "construir código próprio em Rust/Go" (measurement-first preservado) · **Data:** 2026-06-27 · **Owner:** CTO (paulohenriquevn)
+**Status:** Accepted (LOCKED) · **⚠️ Superseded in part by [ADR 0006](0006-own-code-postgres-based-rust-go.md) (2026-06-29)** — "compor > construir" deu lugar a "construir código próprio em Rust/Go" (measurement-first preservado) · **⚠️ Eixo de QPS vetorial superseded by [ADR 0033](0033-north-star-reposition-proposal.md) (ACCEPTED 2026-07-16, assinado pelo owner):** o mandato de "superioridade de QPS vetorial comprovada por benchmark" foi MEDIDO como não-alcançável por extensão PG permissiva — teto de paradigma ~25–44× vs ScaNN ([ADR 0035](0035-m73-northstar-vector-verdict.md) M73, [ADR 0036](0036-m74-rabitq-conditional-lever-verdict.md) M74). O North Star reposicionado é **paridade de recall + memória billion-scale + AI-native/HTAP/aberto** (0033); a cláusula de superioridade-de-QPS deste ADR está aposentada por evidência medida. · **Data:** 2026-06-27 · **Owner:** CTO (paulohenriquevn)
 **Supersede:** — · **Relacionado:** ADR `0001-no-engine-fork`, PRD §15 (D1–D7), `ROADMAP.md`, blueprint `alloydb-vector-ai-implementation`
 
 > Esta é a **fonte de verdade da estratégia de produto**. Mudá-la exige sign-off explícito do CTO +
