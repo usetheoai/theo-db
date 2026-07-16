@@ -13,8 +13,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- **M105 — docs/features reconciliadas com a superfície entregue:** os 12 specs em `docs/features/` foram alinhados ao código real — `theodb_ml.embedding`→`theodb.embed`; opclasses próprias (`theodb_hnsw_l2_ops`/`theodb_ivfflat_l2_ops`) nos exemplos de AM próprio; `CREATE EXTENSION theodb_ml`→schema+registry; o `ai.rank` fantasma de 4-arg→`ai.rerank(query, documents[], model, top_n)` real (idx 0-based, off-by-one do RAG corrigido); chaves JSON não-implementadas do hybrid + `g_to_tsquery` removidas dos exemplos runnable. Superfícies aspiracionais (04 `USING ivf`, 05 `USING scann` — ScaNN-QPS measured-negative ADR-0035/0036, 08 Proxy Model, 12 `theodb_ai_nl.*`) movidas para seções **🎯 API-alvo / roadmap (não-shipped)**. GATE: varredura determinística confirma que todo bloco SQL runnable da seção shipped referencia só símbolos reais (12/12). Docs-only, zero mudança de código. (M105)
-- Roadmap amended: added M105 docs/features reality reconciliation + M106 API-consistency hygiene (`/roadmap-feature docs-features-reality-reconciliation`)
 
 ### Changed
 
@@ -25,6 +23,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 ### Security
+
+## [0.94.0] - 2026-07-16
+
+### Added
+- **M105 — docs/features reconciliadas com a superfície entregue:** os 12 specs em `docs/features/` foram alinhados ao código real — `theodb_ml.embedding`→`theodb.embed`; opclasses próprias (`theodb_hnsw_l2_ops`/`theodb_ivfflat_l2_ops`) nos exemplos de AM próprio; `CREATE EXTENSION theodb_ml`→schema+registry; o `ai.rank` fantasma de 4-arg→`ai.rerank(query, documents[], model, top_n)` real (idx 0-based, off-by-one do RAG corrigido); chaves JSON não-implementadas do hybrid + `g_to_tsquery` removidas dos exemplos runnable. Superfícies aspiracionais (04 `USING ivf`, 05 `USING scann` — ScaNN-QPS measured-negative ADR-0035/0036, 08 Proxy Model, 12 `theodb_ai_nl.*`) movidas para seções **🎯 API-alvo / roadmap (não-shipped)**. GATE: varredura determinística confirma que todo bloco SQL runnable da seção shipped referencia só símbolos reais (12/12). Docs-only, zero mudança de código. (M105)
+- Roadmap amended: added M105 docs/features reality reconciliation + M106 API-consistency hygiene (`/roadmap-feature docs-features-reality-reconciliation`)
 
 ## [0.93.0] - 2026-07-16
 
