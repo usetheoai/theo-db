@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Roadmap amended: added M107 native graph pillar Phase 0 — SOTA blueprint + measurement-first spike gate (CSR + vectorized MS-BFS + SQL/PGQ fused with the columnar+vector+AI engine) (`/roadmap-feature native-graph-engine`)
 
 ### Changed
 

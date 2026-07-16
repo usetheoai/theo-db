@@ -1612,6 +1612,48 @@ p/ a escolha do nome canônico ser deliberada, não acidental). **Prior art:** `
 
 ---
 
+## M107 — [ ] Pilar de grafo nativo — Fase 0: blueprint SOTA + spike medido (CSR + MS-BFS vetorizado + SQL/PGQ) fundido ao columnar+vetorial+AI *(gated M104)*
+
+> Added 2026-07-16 by `/roadmap-feature` (slug: `native-graph-engine`). Fonte: deep research SOTA (DuckPGQ CIDR/VLDB
+> 2023, Kùzu CIDR 2023, GRFusion, SQL/PGQ SQL:2023, Microsoft GraphRAG/LazyGraphRAG, HippoRAG 2) + gap analysis do
+> theo-rag (grafo hoje = recursive-CTE). See CHANGELOG `[Unreleased] § Added`.
+
+**Objective:** produzir o **blueprint SOTA-ancorado** de um **motor de grafo NATIVO** — **CSR (compressed sparse row)
+adjacency + MS-BFS vetorizado (SIMD) + superfície SQL/PGQ (SQL:2023)** — **FUNDIDO** aos pilares que já existem
+(columnar DataFusion/Arrow M99–M103; AM vetorial próprio + kernels SIMD `vec/ah.rs`; `ai.*` in-SQL) — e **PROVAR por
+spike reproduzível** que a travessia nativa-sobre-columnar **bate o recursive-CTE** (o baseline do theo-rag) na carga
+GraphRAG-alvo (multi-hop + expansão de vizinhança). Grafo é capability recorrente/cross-system (não YAGNI) e AI-native:
+o pattern SOTA é **vector-entry → travessia bounded → rerank** (LazyGraphRAG/HippoRAG) rodando **zero-copy num só engine**.
+
+**GATE (measurement-first / D3 — anti-sunk-cost):** benchmark reproduzível em `docs/benchmarks/` comparando **CSR+MS-BFS
+own-code vs recursive-CTE** (e, onde viável, vs Apache AGE) em queries multi-hop + vizinhança a escala representativa
+(~10⁵–10⁶ arestas), **≥3 runs mean±std**, veredito explícito **GO / honest-partial / honest-negative**. Se a via nativa
+NÃO superar o CTE de forma significativa na carga-alvo → **NO-GO honesto** (saída válida: fica relacional-com-helpers).
+ZERO número fabricado (Regra 5). O motor completo só arranca se o gate for GO.
+
+**DoD:** (1) **blueprint** (cycle-discover, ≥2 fontes web por técnica — `discover-phd-rigor` R0/R2): design CSR
+(index-AM vs materializado), MS-BFS vetorizado reusando os kernels SIMD, escopo WCOJ/factorização, superfície SQL/PGQ vs
+funções `graph_*`, o fluxo vector-entry→bounded-traversal→rerank, e o acoplamento com columnar (community/PPR) + `ai.*`
+(`extract_graph`); cita DuckPGQ, Kùzu, GRFusion, SQL/PGQ, GraphRAG/LazyGraphRAG/HippoRAG; (2) **spike own-code**: CSR +
+MS-BFS mínimo sobre uma tabela de arestas vs o baseline recursive-CTE, medido, artefato `docs/benchmarks/m107-graph-spike.{md,json}`;
+(3) **veredito D3 explícito** (GO/honest-partial/honest-negative) que decide os milestones seguintes do pilar; (4) **ADR**
+registrando a decisão de arquitetura (nativo-sobre-columnar vs Apache AGE vs recursive-CTE) com a evidência medida + nota
+de licença (own-code inspirado em MIT DuckPGQ/Kùzu; AGE Apache-2.0 avaliado e rejeitado por arquitetura, não por licença);
+(5) **reuso (Regra 9)**: constrói SOBRE o columnar M99–M103 + AM vetorial + kernels SIMD — **NÃO** reimplementa o columnar
+(fora de escopo do v2) nem reescreve o PostgreSQL. **Boundary honesto:** é **Fase 0** — discovery + gate medido, **NÃO** o
+motor. Entrega blueprint + spike + veredito. O motor real (persistência CSR, operador MS-BFS, parser SQL/PGQ, integração
+com o planner, vetor-nos-nós, community/PPR) são milestones seguintes, adicionados **só se o gate for GO** (anti-sunk-cost:
+honest-negative fecha o pilar barato). **Risks:** (a) construir o motor antes de provar o ganho → o gate D3 é o DoD, o motor
+é gated; (b) qualidade do GraphRAG depende da **extração** (`ai.extract_graph`), não só da travessia → o blueprint escopa a
+qualidade da extração, não só o engine; (c) explosão de escopo (uma linguagem de grafo inteira) → a Fase 0 limita ao
+primitivo de travessia + o fluxo de retrieval GraphRAG, não conformância openCypher/SQL/PGQ completa. **Dependencies:** M104
+(a fundação columnar/vetorial/AI endurecida que o grafo funde). **Prior art:** DuckPGQ (CIDR 2023 p66 / VLDB vol16 p4034),
+Kùzu (CIDR 2023 p48), WCOJ (arXiv 2505.19918), GRFusion (arXiv 1709.06715), SQL/PGQ (SQL:2023), Microsoft GraphRAG /
+LazyGraphRAG (MS Research), HippoRAG 2; baseline a bater = `theo-rag/packages/core/src/domain/retrievers/graph-retriever.ts`
+(recursive-CTE); reuso interno = `theodb_rs/src/am/df_executor.rs` (columnar M100), `vec/ah.rs` (SIMD), `am/mod.rs` (AM vetorial).
+
+---
+
 ## Sequência e paralelismo
 
 ```
