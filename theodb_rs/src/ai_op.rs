@@ -18,13 +18,15 @@
 
 use pgrx::prelude::*;
 
-use crate::chat::{ai_generate_batch, ai_if, parse_bool};
+use crate::chat::{ai_if, ai_if_batch_answers};
 
 /// The per-item prompt the batched operator and the per-row scalar BOTH build, so their results are equal
 /// item-for-item under the same model. Keeping this the single source of the prompt shape is what makes the
-/// result-equivalence contract (ADR D3) hold by construction rather than by coincidence.
+/// result-equivalence contract (ADR D3) hold by construction rather than by coincidence. Newlines in the
+/// untrusted `value` are collapsed to spaces so a value cannot forge a new numbered line in the batched prompt
+/// (the batch protocol joins items with '\n' — council-security/ai-in-db hardening).
 fn per_item_prompt(condition: &str, value: &str) -> String {
-    format!("{condition}: {value}")
+    format!("{condition}: {}", value.replace(['\n', '\r'], " "))
 }
 
 /// SET-oriented AI.IF: N values → N booleans in ONE inference round-trip. A NULL value yields a NULL bool and
@@ -47,9 +49,11 @@ pub(crate) fn ai_if_batch_impl(
         return out; // all NULL → no round-trip
     }
     let refs: Vec<Option<&str>> = owned.iter().map(|(_, p)| Some(p.as_str())).collect();
-    let answers = ai_generate_batch(&refs, model); // <-- the single round-trip for all non-null items
+    // ONE round-trip, boolean-shaped (yes/no system prompt) so the batched answers are directly comparable to
+    // the per-row `ai.if` on a live model — not merely under the deterministic test model.
+    let answers = ai_if_batch_answers(&refs, model);
     for ((i, _), ans) in owned.iter().zip(answers.iter()) {
-        out[*i] = ans.as_deref().and_then(parse_bool);
+        out[*i] = *ans;
     }
     out
 }
@@ -128,11 +132,14 @@ CREATE FUNCTION ai.call_reset() RETURNS void LANGUAGE sql VOLATILE
 AS $$ SELECT theodb_rs._ai_call_reset() $$;
 
 COMMENT ON FUNCTION ai.if_batch(text, text[], text) IS
-  'SET-oriented AI.IF: N values -> N booleans in ONE inference round-trip (batched). Equivalent to the per-row '
-  'ai.if on "{condition}: {value}". NULL value -> NULL bool. Implemented in Rust (theodb_rs, M102).';
+  'SET-oriented AI.IF: N values -> N booleans in ONE inference round-trip (batched, yes/no-shaped). '
+  'Comparable to the per-row ai.if on "{condition}: {value}". NULL value -> NULL bool. SECURITY: values become '
+  'LLM prompt input (prompt-injection surface, blast radius = the row own boolean); NEVER GRANT to an isolated '
+  'role. Implemented in Rust (theodb_rs, M102).';
 COMMENT ON FUNCTION ai.if_costly(text, text, text) IS
   'Per-row AI.IF declared with a high COST so the planner evaluates cheaper relational quals first '
-  '(dependency-safe filter push-down). Observe the row reduction via ai.call_count(). theodb_rs, M102.';
+  '(dependency-safe filter push-down). Observe the row reduction via ai.call_count(). SECURITY: values become '
+  'LLM prompt input; NEVER GRANT to an isolated role. theodb_rs, M102.';
 
 REVOKE ALL ON FUNCTION ai.if_batch(text, text[], text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION ai.if_costly(text, text, text) FROM PUBLIC;

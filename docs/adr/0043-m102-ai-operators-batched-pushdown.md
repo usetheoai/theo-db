@@ -23,8 +23,10 @@ M102 makes the predicate surface **set-oriented and planner-friendly** without a
 Ship two surfaces over the SAME inference (`crate::chat`):
 
 - **`ai.if_batch(condition, vals[]) -> bool[]`** — builds N per-item prompts `"{condition}: {value}"` and answers
-  them in **ONE** batched round-trip (`ai_generate_batch`), parsing each yes/no to a bool. Element-for-element equal
-  to the per-row `ai.if` on the same per-item prompt.
+  them in **ONE** batched round-trip via a **yes/no-shaped** batched inference (`ai_if_batch_answers` — a batched
+  system prompt that instructs "'yes' or 'no' for each", the SAME framing the per-row `ai.if` uses), parsing each to
+  a bool. Because both surfaces now carry the yes/no instruction, their answers are directly comparable on a live
+  model — not merely under the deterministic test model.
 - **`ai.if_costly(condition, val) -> bool`** — a per-row scalar declared with **`COST 100000`** so Postgres's own
   `order_qual_clauses` evaluates cheaper relational quals FIRST. `WHERE cheap AND ai.if_costly(...)` then
   short-circuits the expensive AI on the rows the cheap qual already dropped — LOTUS's **dependency-safe filter
@@ -53,11 +55,21 @@ Ship two surfaces over the SAME inference (`crate::chat`):
   deterministic); push-down evaluates the AI on **≤ K survivors** not all N; real OpenAI `gpt-4o-mini` latency
   **≈ 12×** lower batched vs per-row at K=16 (two runs: 12.17×, 11.81×).
 - **Honest ceiling (public-copy.md / North-Star ADR 0033):** a composability / round-trip win with STATISTICAL
-  accuracy, **orthogonal to vector recall**. Never framed as "faster at vectors". The batched and per-row prompts
-  differ, so answers are NOT asserted identical on a live model — that is the follow-up (proxy/oracle cascade).
-- **Security (council-security):** the AI-operator surface takes untrusted values; the per-item prompt quotes the
-  value into a bounded template, the functions are `REVOKE`d from PUBLIC (least-privilege parity with the other
-  `ai.*`), and the SSRF `http(s)://` endpoint guard in `chat::resolve_chat_cfg` is unchanged.
+  accuracy, **orthogonal to vector recall**. Never framed as "faster at vectors". Both surfaces now carry the same
+  yes/no framing, so the correctness of the mechanism (1 round-trip, NULL alignment, push-down) is proven
+  deterministically; the RESIDUAL difference on a live model is context-bleed drift (all N questions share one
+  batched message) — a genuinely statistical effect whose bounded-recall version (a LOTUS proxy/oracle cascade) is
+  the follow-up. Answers are NOT asserted byte-identical on a live model; the deterministic `parity` model is the
+  correctness gate.
+- **Security (council-security: READY_TO_MERGE):** the AI-operator surface takes untrusted values that become LLM
+  prompt input — an inherent prompt-injection surface identical to the pre-existing `ai.if` / `ai.generate_batch`,
+  with the blast radius bounded to the row's OWN boolean (an unparseable/poisoned answer becomes `NULL`, never an
+  escalation). There is **no injection-proof quoting for a free-text LLM prompt** (unlike SQL `%I`); the honest
+  control is least-privilege — the functions are `REVOKE`d from PUBLIC (parity with the other `ai.*`) and carry a
+  `NEVER GRANT to an isolated role` COMMENT. As defence-in-depth, `per_item_prompt` collapses newlines in the value
+  so it cannot forge a new numbered line in the batched protocol. The SSRF `http(s)://` guard in
+  `chat::resolve_chat_cfg` is unchanged; the `theodb.llm_test_model` hook short-circuits BEFORE endpoint resolution
+  (cannot weaken the guard it never reaches) and MUST be left unset in production (silent-stub footgun otherwise).
 - **Deferred (tracked):** a sampled-telemetry-calibrated 3-axis cost model; a semantic-filter CustomScan node; the
   LOTUS proxy/oracle cascade with a recall guarantee.
 

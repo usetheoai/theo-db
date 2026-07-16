@@ -51,10 +51,15 @@ batched path pays once instead of K times.
   not make TheoDB "faster at vectors"; it makes AI-predicate queries issue O(1) round-trips instead of O(N).
 - **Correctness of the mechanism** (batched == per-row, exactly 1 round-trip, NULL→NULL, push-down reduction) is
   proven deterministically by the `parity` test model (4 `pg_test`s, GREEN) — not by a flaky live-LLM assertion.
-- **Real-AI answer quality** is a per-model statistical question. The batched and per-row prompts use different
-  system framings, so their answers are **not asserted identical** on a live model — that comparison (a LOTUS-style
-  proxy/oracle cascade with a recall guarantee) is the ambitious follow-up (plan Unresolved Questions), not a
-  slice-1 claim.
+- **Real-AI answer quality** is a per-model statistical question. Both surfaces now carry the SAME yes/no framing
+  (the batched inference uses a "'yes' or 'no' for each" system prompt, matching the per-row `ai.if`), so a live
+  model is instructed to answer boolean on both — the residual difference is context-bleed drift (all N questions
+  share one batched message), not a missing instruction. Answers are **not asserted byte-identical** on a live
+  model — a bounded-recall comparison (a LOTUS-style proxy/oracle cascade) is the ambitious follow-up (plan
+  Unresolved Questions), not a slice-1 claim.
+- **Injection hardening:** the untrusted value's newlines are collapsed to spaces in `per_item_prompt` so a value
+  cannot forge a new numbered line in the batched protocol; the blast radius of LLM content-injection is bounded to
+  the row's own boolean (a poisoned/unparseable answer → `NULL`). The functions are `REVOKE`d from PUBLIC.
 - **Not measured:** end-to-end throughput under concurrency; cost-model calibration from sampled telemetry (the
   `COST` is a fixed high constant today, sufficient for the qual-ordering push-down but not a learned 3-axis model).
 

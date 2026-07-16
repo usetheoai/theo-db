@@ -195,18 +195,47 @@ pub(crate) fn ai_generate_batch(prompts: &[Option<&str>], model: Option<&str>) -
         );
     }
 
+    let system = format!(
+        "You are given {n} numbered items. Respond with ONLY a JSON array of exactly {n} strings — the \
+         answer to each item, in order. No prose, no markdown."
+    );
+    run_batch_chat(prompts, &system, model)
+}
+
+/// M102 — batched BOOLEAN inference: N yes/no questions answered in ONE round-trip, each parsed to a bool. The
+/// system prompt instructs yes/no (the SAME framing the per-row `ai.if` uses), so the batched answers are
+/// directly comparable to the per-row path on a live model — not just under the deterministic test model
+/// (closes the council-ai-in-db "no boolean shaping" finding). An unparseable item -> `None` (SQL NULL).
+pub(crate) fn ai_if_batch_answers(prompts: &[Option<&str>], model: Option<&str>) -> Vec<Option<bool>> {
+    let n = prompts.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    if prompts.iter().any(|p| p.is_none()) {
+        err_input("ai.if_batch: prompts must not contain NULL elements (breaks the N-in/N-out alignment)");
+    }
+    let system = format!(
+        "You are given {n} numbered yes/no questions. Respond with ONLY a JSON array of exactly {n} strings \
+         — 'yes' or 'no' for each, in order. No prose, no markdown."
+    );
+    run_batch_chat(prompts, &system, model)
+        .iter()
+        .map(|o| o.as_deref().and_then(parse_bool))
+        .collect()
+}
+
+/// The shared batched round-trip: number the (non-NULL) items into one user message, one `chat()` call under
+/// `system`, parse the reply as a JSON array of exactly N (string|null). Callers guarantee `!prompts.is_empty()`
+/// and no NULL element. DRY core of `ai_generate_batch` (generative) and `ai_if_batch_answers` (boolean).
+fn run_batch_chat(prompts: &[Option<&str>], system: &str, model: Option<&str>) -> Vec<Option<String>> {
+    let n = prompts.len();
     let user = prompts
         .iter()
         .enumerate()
         .map(|(i, p)| format!("{}. {}", i + 1, p.unwrap()))
         .collect::<Vec<_>>()
         .join("\n");
-    let system = format!(
-        "You are given {n} numbered items. Respond with ONLY a JSON array of exactly {n} strings — the \
-         answer to each item, in order. No prose, no markdown."
-    );
-
-    let out = chat(Some(&user), Some(&system), model);
+    let out = chat(Some(&user), Some(system), model);
     parse_batch(&out, n)
 }
 

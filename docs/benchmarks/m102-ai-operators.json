@@ -2,12 +2,12 @@
   "milestone": "M102",
   "deterministic": {
     "n": 1000,
-    "batch_ms": 8.533000, "batch_round_trips": 1,
-    "perrow_ms": 33.097000, "perrow_round_trips": 1000,
+    "batch_ms": 8.725000, "batch_round_trips": 1,
+    "perrow_ms": 37.012000, "perrow_round_trips": 1000,
     "roundtrip_reduction": "1 vs 1000",
     "pushdown_k": 100, "pushdown_ai_calls": 100,
     "pushdown_note": "AI predicate evaluated on <=100 survivors of 1000 rows (cheap qual ordered first by COST)"
   },
-  "real_ai": {"model":"gpt-4o-mini","k":16,"runs":3,"batch_ms_mean":1008,"perrow_ms_mean":12269,"batch_calls":1,"perrow_calls":16,"speedup":12.17},
+  "real_ai": {"model":"gpt-4o-mini","k":16,"runs":3,"batch_ms_mean":1260,"perrow_ms_mean":15529,"batch_calls":1,"perrow_calls":16,"speedup":12.32},
   "honest_ceiling": "Composability/round-trip win with STATISTICAL accuracy; orthogonal to vector recall. Correctness proven by the deterministic 'parity' model; real-AI answer quality is a per-model statistical question, not asserted equal here."
 }
