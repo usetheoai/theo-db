@@ -643,7 +643,7 @@ unsafe fn materialize_rows(rel: pg_sys::Relation) -> Result<Vec<Vec<u8>>, String
 }
 
 /// M100 — resolve a column name to its 0-based attribute index (for projection pushdown). Returns None if absent.
-pub(super) unsafe fn column_index(rel: pg_sys::Relation, name: &str) -> Option<usize> {
+pub(crate) unsafe fn column_index(rel: pg_sys::Relation, name: &str) -> Option<usize> {
     let tupdesc = (*rel).rd_att;
     let natts = (*tupdesc).natts as usize;
     (0..natts).find(|&i| {
@@ -659,7 +659,7 @@ pub(super) unsafe fn column_index(rel: pg_sys::Relation, name: &str) -> Option<u
 /// decodes + returns ONLY those columns (projection pushdown — skips `read_chunked`/zstd on unprojected columns, the
 /// columnar performance lever); `None` returns all. The stored bytes are the codec encoding (fixed: attlen LE bytes;
 /// varlena: logical payload) — `df_executor` maps them to Arrow arrays.
-pub(super) unsafe fn decode_columns(
+pub(crate) unsafe fn decode_columns(
     rel: pg_sys::Relation,
     projection: Option<&[usize]>,
 ) -> Result<Vec<(String, u32, Vec<Option<Vec<u8>>>)>, String> {

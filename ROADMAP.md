@@ -1494,7 +1494,7 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 **GATE:** MVCC-correto sob concorrência (o cache carrega metadados de visibilidade; escrita no heap invalida) — pgisolation permutations provando que uma leitura analítica vê exatamente o snapshot correto; result-equivalence heap vs cache; não-interferência OLTP (o cache read-only não degrada o p95 do heap, o padrão M62).
 **DoD:** (1) cache Arrow derivado + refresh/invalidação no write; (2) planner escolhe cache vs heap por custo; (3) **pgisolation MVCC permutations** verdes (o cache respeita snapshot isolation); (4) benchmark HTAP (`docs/benchmarks/m101-arrow-cache.{md,json}`): OLAP acelerado + OLTP p95 não-degradado sob carga concorrente; (5) sign-off council-index-storage + council-benchmark. **Boundary honesto:** o pragma é manual (não auto-tuned como o AlloyDB); heap-authoritative = MVCC correto mas com custo de refresh (2× storage do cache). **Risks:** (a) consistência cache↔heap sob write concorrente → invalidação testada por permutations; (b) refresh caro em tabelas quentes → o pragma deixa o operador decidir. **Dependencies:** M100 (o executor). **Prior art:** blueprint Q4/D-γ + AlloyDB columnar-engine (estudo do design, proprietário) + M62 (o padrão materializado). **NÃO é o engine in-memory auto-mantido do AlloyDB** (declarado honestamente).
 
-## M102 — [ ] operadores de AI como plan nodes (AI.IF/sem_filter pushable) *(gated M100)*
+## M102 — [x] operadores de AI como plan nodes (AI.IF/sem_filter pushable) *(gated M100)*
 
 > **Rung M-δ.** Fecha o gap que o usuário levantou: hoje `ai.generate`/`ai.nl_to_sql` são FUNÇÕES (caixa-preta que o
 > planner não custa/reordena/batcheia). Vira operador de plano — o planner empurra o filtro relacional barato antes do
