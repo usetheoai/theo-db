@@ -1,0 +1,15 @@
+{
+  "milestone": "M99",
+  "benchmark": "columnar-vs-heap scan (theodb_columnar TAM)",
+  "hardware": "8 vCPU, 15GB RAM (DigitalOcean droplet)",
+  "pg_version": "17.10 (pgrx-managed)",
+  "rows": 1000000,
+  "runs_per_query": 5,
+  "result_equivalence_col_eq_heap": "t",
+  "on_disk_bytes": { "columnar": 6545408, "heap": 60235776, "compression_ratio_heap_over_col": 9.20 },
+  "scan_ms_mean_stddev": {
+    "full_aggregate": { "columnar_mean": 2331.3, "columnar_stddev": 6.39038, "heap_mean": 87.7066, "heap_stddev": 0.781995 },
+    "group_by_category": { "columnar_mean": 2886.69, "columnar_stddev": 8.62217, "heap_mean": 178.746, "heap_stddev": 1.07883 }
+  },
+  "honest_ceiling": "M99 seqscan decodes ALL columns of ALL chunk groups (no projection/skip/vectorization pushdown — that is M100). The measured win is ON-DISK SIZE (compression); scan wall-time is expected at parity-or-slower vs heap. NOT a superiority claim (M73/M97)."
+}
