@@ -13,6 +13,20 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.93.0] - 2026-07-16
+
+### Added
 - **M104 review fixes (H1 + MEDIUM):** the five M104 bounded-memory/resilience knobs (`theodb.vacuum_fold_max_mb`, `arrow_cache_max_entries`, `vectorizer_dead_letter_max`, `http_breaker_open_ms`, `ai_max_batch`) are now REGISTERED via `GucRegistry` (were read via `current_setting` only, so `SET` was silently ignored — the review's H1: an advertised 'configurable bound' that wasn't operable). And the `_vectorizer_*` internal functions (claim/mark/process/reap + the new dead-letter purge) are now `REVOKE ALL ... FROM PUBLIC` (dynamic `::regprocedure` block) — matching the codebase's per-function least-privilege convention. Proven: `m104_dead_letter_max_guc_is_registered_and_settable`, `m104_vectorizer_internals_revoked_from_public`. 321 pg_tests GREEN (+2). (M104)
 - **M104 Phase H — Boundaries + Scaling trade-off documentation:** split the 1986-LoC `am/page.rs` god-module into `am/page/{mod,ivf}.rs` (generic page/buffer/WAL primitives vs the IVF/AQ on-disk format cluster; facade re-export keeps all 47 call-sites unchanged; 319/319 pg_tests GREEN) — closes the audit's tangled-namespace Boundaries finding physically. ADR-0047 records the three residual Scaling items as **deliberate bounded designs with migration paths** (in-VACUUM fold guard + REINDEX; external-memory HNSW fold is research-scope/YAGNI-deferred; HTTP conn-pool mitigated by `ai_max_batch` batching; v4 default retained for on-disk-format stability with WARN). (M104)
 - **M104 Phase G — vectorizer producer backpressure via coalescing (MEDIUM):** the enqueue trigger now COALESCES — a partial `UNIQUE (vectorizer_id, source_pk) WHERE state='pending'` index plus `ON CONFLICT DO NOTHING` means repeated writes to the SAME source row produce at most ONE pending job. A hot row / bulk backfill can no longer flood the single worker past the DISTINCT changed-row set: pending queue depth is bounded by distinct pending work, not by write volume (the audit's producer-faster-than-consumer data-flow gap). Proven: `m104_enqueue_coalesces_repeated_writes_to_one_pending` (4 writes → 1 pending; distinct rows stay independent). 319 pg_tests GREEN (+1). (M104)
@@ -25,16 +39,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - **M104 Phase C — AI HTTP circuit breaker (per-backend, HIGH):** `http.rs` gains a `thread_local` closed/open/half-open circuit breaker (Nygard / MS / resilience4j) keyed by endpoint — after K=5 consecutive failures the breaker OPENS and further calls fail FAST (SQLSTATE 38000, no TCP attempt) for `theodb.http_breaker_open_ms` (default 30s), then one half-open probe decides re-close. A per-row `ai.*` surface over a dead endpoint now costs ~K probes instead of N × retries × timeout. The SSRF/redirect=0/api-key-in-header/38000 posture is unchanged. 2 pg_tests GREEN (opens+fails-fast <100ms; success closes). 316 pg_tests total (+2). Cross-backend (shared-shm) coordination is a documented non-goal until measured. (M104)
 - **M104 Phase A — bounded columnar write memory (#99 CRITICAL closed):** the columnar TAM now flushes a stripe INCREMENTALLY once pending bytes exceed `maintenance_work_mem` (the DuckDB row-group / ClickHouse one-part-per-INSERT pattern, reusing the existing atomic `flush_pending`), so a big `INSERT...SELECT` holds **O(maintenance_work_mem)** — not O(rows-in-xact) — in RAM. **MEASURED (`docs/benchmarks/m104-write-envelope.{md,json}`):** 64× more rows → 46× more stripes (linear) while the peak pending set stays ~constant (~2–3 MB ≈ mwm). Snapshot-safe (H1: self-referential INSERT honors its snapshot) + crash-safe (H3: `crash_columnar_incremental.sh` — aborted multi-stripe INSERT → 0 rows, committed → survives crash+WAL-replay byte-identical; no #46/#47 regression). 314 pg_tests GREEN (+2). (M104)
 - Roadmap amended: added M104 system-design hardening — fechar as findings da auditoria `/loop-system-design` (health 4.2 → ≥4.9/5) (`/roadmap-feature system-design-hardening-49`)
-
-### Changed
-
-### Deprecated
-
-### Removed
-
-### Fixed
-
-### Security
 
 ## [0.92.0] - 2026-07-16
 
