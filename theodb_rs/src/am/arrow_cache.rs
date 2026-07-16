@@ -47,6 +47,13 @@ $fn$;
 );
 
 /// Read the current invalidation generation + the columnarized columns for `rel_oid`, or None if not columnarized.
+///
+/// MVCC-LOAD-BEARING: this MUST stay a read-only SPI (`c.select`, not a mutating query). A read-only SPI in a
+/// still-immutable xact runs under the reader's ActiveSnapshot, so the generation read here and the seqscan in
+/// `build_cache` are CO-SNAPSHOT — that is exactly what makes `built_generation == current_generation` a correct
+/// "the committed set I see is the set the cache captured" test (RR-safe). Switching to a mutating SPI (fresh
+/// per-statement snapshot) or reading the cache in an already-mutated xact would silently break the RR guarantee
+/// (council-index-storage M101 review).
 unsafe fn cache_state(rel_oid: pg_sys::Oid) -> Result<Option<(i64, Vec<String>)>, String> {
     Spi::connect(|c| {
         let t = c

@@ -17,9 +17,11 @@
 
 - **Cache path is the CustomScan:** ✅ (`EXPLAIN` shows the `Custom Scan` node — the measurement is of the real
   vectorized cache path, not a fallback).
-- **MVCC-correct under concurrency:** ✅ proven by `theodb_rs/isolation/arrow_cache_{invalidation,rr_snapshot}.spec`
+- **MVCC-correct under concurrency:** ✅ proven by `theodb_rs/isolation/specs/arrow_cache_{invalidation,rr_snapshot}.spec`
   (a committed write invalidates the cache → rebuild; a REPEATABLE READ reader holds its snapshot across a concurrent
   write; a fresh xact after commit sees the new row).
+- **OLTP p95 under concurrent load: NOT MEASURED** — the non-interference argument below is structural (read-only,
+  no extra heap lock); a load-measured concurrent OLTP-p95 is an honest follow-up, not asserted here.
 
 ## Methodology
 
@@ -41,11 +43,13 @@
 2. **A write costs a rebuild (honest).** Any INSERT/UPDATE/DELETE bumps the `columnar.cache_state` generation (the
    statement trigger); the next read rebuilds the cache under the reader's snapshot. So the cache pays off when reads
    dominate writes; a write-heavy table would rebuild constantly (the operator's `columnarize` decision).
-3. **Result-equivalence — where it is proven.** The harness's inline `result_equivalence` check is weak (it compares
-   the heap to itself); the authoritative cache-vs-heap result-equivalence is the pg_test
-   `m101_heap_cache_customscan_matches_heap` (the aggregate over the cache CustomScan equals the native heap
-   aggregate, byte-for-byte) plus the isolation permutations. This artifact reports the timing; correctness is the
-   test suite's.
+3. **Result-equivalence — where it is proven.** The harness's inline `result_equivalence` JSON field is weak (it
+   compares the heap to itself — always `t`, measures nothing; see the harness `EQ` line); ignore it. The
+   authoritative cache-vs-**native-heap** result-equivalence is the pg_test **`m101_cache_agg_matches_heap`** (the
+   aggregate over the Arrow cache equals `SELECT count(*), sum(measure) FROM <heap>`, floats within `1e-6`). The
+   pg_test `m101_heap_cache_customscan_matches_heap` additionally proves the cache aggregate is *planned as a
+   CustomScan* (EXPLAIN) and stays correct after a write. Plus the two isolation permutations for MVCC. This artifact
+   reports the timing only; correctness is the test suite's.
 4. **OLTP non-interference (structural, not yet measured under load).** The cache is read-only, per-backend, and built
    via an ordinary SPI seqscan under the reader's snapshot — it holds no extra lock on the heap during reads. A full
    pgbench concurrent OLTP-p95-under-analytical-load measurement (the AlloyDB non-degradation claim) is an honest
