@@ -30,6 +30,9 @@ serde_json = "1"
 datafusion = { version = "54", default-features = false }
 arrow = { version = "58", default-features = false }
 tokio = { version = "1", features = ["rt"], default-features = false }
+# M99 — columnar stripe compression (zstd). Already in the tree transitively via datafusion/arrow (parsimony rung 4
+# — reuse before adding); MIT/BSD-licensed, D1-clean. default-features=false keeps it lean.
+zstd = { version = "0.13", default-features = false }
 
 [dev-dependencies]
 pgrx-tests = "=0.19.0"
