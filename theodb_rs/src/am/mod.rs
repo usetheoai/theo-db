@@ -18,6 +18,7 @@ mod build; // ambuild / ambuildempty (Phase 2) + shared datum/metric helpers
 mod build_stream; // M96 — tuplesort-streaming ambuild (bounded-memory build spool)
 mod datafusion_probe; // M98 — DataFusion coexistence smoke (the pillar GATE)
 mod df_executor; // M100 — DataFusion vectorized executor over the theodb_columnar TAM
+pub(crate) mod columnar_agg; // M100 Phase C — planner CustomScan integration for vectorized columnar aggregates
 mod cost; // M48 T5.1 — honest amcostestimate visit-ratio (pgvector cost model)
 pub(crate) mod columnar; // M99 — theodb_columnar append-only columnar Table Access Method (registration + column-major + MVCC)
 mod columnar_codec; // M99 Phase C — pure column-major stripe codec (FFI-free, locally unit-tested)

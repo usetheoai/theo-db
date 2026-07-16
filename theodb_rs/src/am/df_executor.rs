@@ -100,48 +100,95 @@ fn build_arrow(cols: &[(String, u32, Vec<Option<Vec<u8>>>)]) -> Result<(Schema, 
     Ok((Schema::new(fields), arrays))
 }
 
-/// Run `SELECT count(*), sum(<num_col>) FROM t` over the columnar table via DataFusion; return `count=N;sum=X`.
-unsafe fn run_columnar_agg(rel: pg_sys::Relation, num_col: &str) -> Result<String, String> {
-    // Projection pushdown: the aggregate only needs `num_col` — decode ONLY that column (skip read_chunked/zstd on
-    // the rest). `count(*)` is the projected column's row count.
-    let idx = super::columnar::column_index(rel, num_col)
-        .ok_or_else(|| format!("df_executor: column '{num_col}' not found"))?;
-    let cols = super::columnar::decode_columns(rel, Some(&[idx]))?;
+/// A supported aggregate for the vectorized columnar path. Restricted (Phase C slice 1) to the cases where the Arrow
+/// result type matches the PostgreSQL aggregate output type WITHOUT a cast: `count(*)` → `int8`, `sum(<float8 col>)`
+/// → `float8`. `avg`, `sum` over integer/numeric, GROUP BY, and WHERE pushdown are later slices.
+pub(super) enum AggSpec {
+    CountStar,
+    SumFloat8(String),
+}
+
+/// Decode the columnar table's projected columns into one Arrow `RecordBatch` (projection pushdown). Always projects
+/// ≥ 1 column so `count(*)` has a row count.
+unsafe fn decode_to_batch(rel: pg_sys::Relation, sum_cols: &[String]) -> Result<RecordBatch, String> {
+    let mut proj: Vec<usize> = Vec::new();
+    for name in sum_cols {
+        let idx = super::columnar::column_index(rel, name)
+            .ok_or_else(|| format!("df_executor: column '{name}' not found"))?;
+        if !proj.contains(&idx) {
+            proj.push(idx);
+        }
+    }
+    if proj.is_empty() {
+        proj.push(0); // count(*) needs a column to establish the row count
+    }
+    let cols = super::columnar::decode_columns(rel, Some(&proj))?;
     let (schema, arrays) = build_arrow(&cols)?;
-    let batch =
-        RecordBatch::try_new(Arc::new(schema), arrays).map_err(|e| format!("df_executor: arrow batch: {e}"))?;
+    RecordBatch::try_new(Arc::new(schema), arrays).map_err(|e| format!("df_executor: arrow batch: {e}"))
+}
+
+/// Run the aggregates over the columnar table via a vectorized DataFusion plan under `HeldInterrupts`; return one
+/// `(Datum, is_null)` per agg, in `aggs` order, ready to store in a `TupleTableSlot`. `count(*)`→`int8` Datum;
+/// `sum(float8)`→`float8` Datum. This is the executor the planner `CustomScan` (Phase C) drives at exec time.
+pub(super) unsafe fn run_columnar_aggs(
+    rel: pg_sys::Relation,
+    aggs: &[AggSpec],
+) -> Result<Vec<(pg_sys::Datum, bool)>, String> {
+    let sum_cols: Vec<String> =
+        aggs.iter().filter_map(|a| if let AggSpec::SumFloat8(n) = a { Some(n.clone()) } else { None }).collect();
+    let batch = decode_to_batch(rel, &sum_cols)?;
+
+    let mut exprs = Vec::with_capacity(aggs.len());
+    for (i, a) in aggs.iter().enumerate() {
+        let alias = format!("a{i}");
+        exprs.push(match a {
+            AggSpec::CountStar => count(lit(1i64)).alias(alias),
+            AggSpec::SumFloat8(name) => sum(col(name.as_str())).alias(alias),
+        });
+    }
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .build()
         .map_err(|e| format!("df_executor: tokio runtime: {e}"))?;
     let held = HeldInterrupts::hold();
-    // DataFrame aggregate API (no SQL parser needed): count(*) + sum(<num_col>).
-    let num_col = num_col.to_string();
     let out: Result<Vec<RecordBatch>, DataFusionError> = rt.block_on(async move {
         let ctx = SessionContext::new();
-        let df = ctx.read_batch(batch)?.aggregate(
-            vec![],
-            vec![count(lit(1i64)).alias("c"), sum(col(num_col.as_str())).alias("s")],
-        )?;
-        df.collect().await
+        ctx.read_batch(batch)?.aggregate(vec![], exprs)?.collect().await
     });
     drop(held);
     drop(rt);
 
     let batches = out.map_err(|e| format!("df_executor: DataFusion: {e}"))?;
     let b = batches.first().ok_or("df_executor: no result batch")?;
-    let c = b
-        .column(0)
-        .as_any()
-        .downcast_ref::<Int64Array>()
-        .ok_or("df_executor: count not Int64")?
-        .value(0);
-    let s_col = b.column(1);
-    let s = if s_col.is_null(0) {
-        0.0
-    } else {
-        s_col.as_any().downcast_ref::<Float64Array>().ok_or("df_executor: sum not Float64")?.value(0)
-    };
+    let mut result = Vec::with_capacity(aggs.len());
+    for (i, a) in aggs.iter().enumerate() {
+        let arr = b.column(i);
+        if arr.is_null(0) {
+            result.push((pg_sys::Datum::from(0usize), true));
+            continue;
+        }
+        let datum = match a {
+            AggSpec::CountStar => {
+                let v = arr.as_any().downcast_ref::<Int64Array>().ok_or("df_executor: count not Int64")?.value(0);
+                v.into_datum().ok_or("df_executor: int8 datum")?
+            }
+            AggSpec::SumFloat8(_) => {
+                let v =
+                    arr.as_any().downcast_ref::<Float64Array>().ok_or("df_executor: sum not Float64")?.value(0);
+                v.into_datum().ok_or("df_executor: float8 datum")?
+            }
+        };
+        result.push((datum, false));
+    }
+    Ok(result)
+}
+
+/// Run `count(*)`, `sum(<num_col>)` over the columnar table and format `count=N;sum=X` (Phase A/B test driver — the
+/// planner-integrated automatic path is Phase C `columnar_agg.rs`).
+unsafe fn run_columnar_agg(rel: pg_sys::Relation, num_col: &str) -> Result<String, String> {
+    let r = run_columnar_aggs(rel, &[AggSpec::CountStar, AggSpec::SumFloat8(num_col.to_string())])?;
+    let c = i64::from_datum(r[0].0, r[0].1).unwrap_or(0);
+    let s = f64::from_datum(r[1].0, r[1].1).unwrap_or(0.0);
     Ok(format!("count={c};sum={s:.4}"))
 }
 
