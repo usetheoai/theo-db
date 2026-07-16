@@ -13,7 +13,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- **M106 — weighted RRF na busca híbrida (`vector_weight`/`text_weight`):** a fusão `ai.hybrid_search(jsonb)` agora honra pesos por perna — `score = vector_weight/(k+rank_vec) + text_weight/(k+rank_fts)` (default 1.0/1.0 = RRF pura, byte-idêntico ao anterior; peso finito ≥ 0, `0` desliga a perna, negativo → erro tipado 22023). Move a chave `weight` documentada-mas-não-entregue (audit gap 06) para shipped. Injeção segura: pesos validados e formatados como literais numéricos. **MEDIDO** (`docs/benchmarks/m106-weighted-rrf.md`): com o mesmo corpus, `vector_weight=3` sobe o doc da perna vetorial ao topo e `text_weight=3` FLIPA para o doc da perna FTS. Provado: 3 pg_tests Rust + 5 testes do twin offline + 2 de integração SQL. 324 pg_tests GREEN (+3), 0 regressão. (M106)
 
 ### Changed
 
@@ -24,6 +23,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 ### Security
+
+## [0.95.0] - 2026-07-16
+
+### Added
+- **M106 — weighted RRF na busca híbrida (`vector_weight`/`text_weight`):** a fusão `ai.hybrid_search(jsonb)` agora honra pesos por perna — `score = vector_weight/(k+rank_vec) + text_weight/(k+rank_fts)` (default 1.0/1.0 = RRF pura, byte-idêntico ao anterior; peso finito ≥ 0, `0` desliga a perna, negativo → erro tipado 22023). Move a chave `weight` documentada-mas-não-entregue (audit gap 06) para shipped. Injeção segura: pesos validados e formatados como literais numéricos. **MEDIDO** (`docs/benchmarks/m106-weighted-rrf.md`): com o mesmo corpus, `vector_weight=3` sobe o doc da perna vetorial ao topo e `text_weight=3` FLIPA para o doc da perna FTS. Provado: 3 pg_tests Rust + 5 testes do twin offline + 2 de integração SQL. 324 pg_tests GREEN (+3), 0 regressão. (M106)
 
 ## [0.94.0] - 2026-07-16
 
