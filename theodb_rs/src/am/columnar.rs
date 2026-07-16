@@ -32,12 +32,20 @@ use std::collections::HashMap;
 use std::mem::size_of;
 use std::sync::OnceLock;
 
-/// Per-backend pending write state: relation OID → accumulated row blobs (each = a formed heap tuple's bytes). These
-/// rows are visible ONLY to this backend's own transaction (a same-xact scan appends them directly — no MVCC leak);
-/// they are flushed to a durable stripe + its `columnar.stripe` catalog row at xact pre-commit (and at COPY's
-/// `finish_bulk_insert`).
+/// Per-backend pending write state: relation OID → accumulated row blobs (each = a formed heap tuple's bytes) + a
+/// running byte counter. These rows are visible ONLY to this backend's own transaction (a same-xact scan appends them
+/// directly — no MVCC leak). M104 (#99): the pending set is flushed to a durable stripe **incrementally** once its
+/// bytes exceed `maintenance_work_mem` (bounded write memory, N-independent — the DuckDB row-group / ClickHouse
+/// one-part-per-INSERT pattern), plus a final drain at xact pre-commit and COPY's `finish_bulk_insert`. Every stripe's
+/// `columnar.stripe` catalog row carries the same xact xid, so all stripes of one INSERT commit/abort atomically —
+/// the crash-safety invariant (pages durable → catalog row LAST) is preserved per-stripe by construction.
+#[derive(Default)]
+struct PendingWrite {
+    rows: Vec<Vec<u8>>,
+    bytes: usize,
+}
 thread_local! {
-    static WRITE_STATES: RefCell<HashMap<u32, Vec<Vec<u8>>>> = RefCell::new(HashMap::new());
+    static WRITE_STATES: RefCell<HashMap<u32, PendingWrite>> = RefCell::new(HashMap::new());
 }
 
 // ===========================================================================================================
@@ -170,7 +178,7 @@ unsafe extern "C-unwind" fn columnar_xact_flush(event: pg_sys::XactEvent::Type, 
         || event == XE::XACT_EVENT_PREPARE
     {
         let oids: Vec<u32> = WRITE_STATES
-            .with(|w| w.borrow().iter().filter(|(_, v)| !v.is_empty()).map(|(k, _)| *k).collect());
+            .with(|w| w.borrow().iter().filter(|(_, v)| !v.rows.is_empty()).map(|(k, _)| *k).collect());
         for oid in oids {
             let relid = pg_sys::Oid::from_u32_unchecked(oid);
             let rel = pg_sys::relation_open(relid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
@@ -634,8 +642,8 @@ unsafe fn materialize_rows(rel: pg_sys::Relation) -> Result<Vec<Vec<u8>>, String
         }
         let oid = (*rel).rd_id.to_u32();
         WRITE_STATES.with(|w| {
-            if let Some(rows) = w.borrow().get(&oid) {
-                out.extend(rows.iter().cloned());
+            if let Some(p) = w.borrow().get(&oid) {
+                out.extend(p.rows.iter().cloned());
             }
         });
         Ok(out)
@@ -708,7 +716,7 @@ pub(crate) unsafe fn decode_columns(
     }
     // Same-xact pending rows (heap-tuple bytes) → deform ALL atts (heap_deform is all-or-nothing), keep the wanted.
     let oid = (*rel).rd_id.to_u32();
-    let pending: Option<Vec<Vec<u8>>> = WRITE_STATES.with(|w| w.borrow().get(&oid).cloned());
+    let pending: Option<Vec<Vec<u8>>> = WRITE_STATES.with(|w| w.borrow().get(&oid).map(|p| p.rows.clone()));
     if let Some(rows) = pending {
         let mut values = vec![pg_sys::Datum::from(0usize); natts];
         let mut isnull = vec![false; natts];
@@ -839,7 +847,25 @@ unsafe fn accumulate_row(rel: pg_sys::Relation, slot: *mut pg_sys::TupleTableSlo
         let bytes = std::slice::from_raw_parts((*htup).t_data as *const u8, len).to_vec();
         pg_sys::heap_freetuple(htup);
         let oid = (*rel).rd_id.to_u32();
-        WRITE_STATES.with(|w| w.borrow_mut().entry(oid).or_default().push(bytes));
+        // Accumulate the row + its bytes; report the pending byte total for the incremental-flush decision.
+        let pending_bytes = WRITE_STATES.with(|w| {
+            let mut m = w.borrow_mut();
+            let p = m.entry(oid).or_default();
+            p.bytes += bytes.len();
+            p.rows.push(bytes);
+            p.bytes
+        });
+        // M104 (#99): flush a stripe once the pending set exceeds `maintenance_work_mem`, so a big INSERT...SELECT
+        // holds O(maintenance_work_mem) — not O(rows-in-xact) — in RAM. `flush_pending` is the SAME atomic
+        // pages→catalog-row-LAST unit used at pre-commit; calling it mid-executor is snapshot-safe because
+        // `with_active_snapshot` is a no-op under the INSERT's active snapshot (H1). Every stripe carries this
+        // xact's xid, so a crash/abort mid-multi-stripe INSERT leaves ALL stripes invisible (H3, by construction).
+        let mwm = (pg_sys::maintenance_work_mem as usize).saturating_mul(1024).max(1);
+        if pending_bytes > mwm {
+            if let Err(e) = flush_pending(rel) {
+                pg_sys::error!("{e}");
+            }
+        }
     }
 }
 
@@ -908,7 +934,7 @@ unsafe fn write_chunk(rel: pg_sys::Relation, bytes: &[u8]) -> (u32, u32) {
 /// over garbage (the crash-safety invariant; cross-backend snapshot visibility is Phase C2/D).
 unsafe fn flush_pending(rel: pg_sys::Relation) -> Result<(), String> {
     let oid = unsafe { (*rel).rd_id.to_u32() };
-    let rows = WRITE_STATES.with(|w| w.borrow_mut().remove(&oid));
+    let rows = WRITE_STATES.with(|w| w.borrow_mut().remove(&oid).map(|p| p.rows));
     let Some(rows) = rows else { return Ok(()) };
     if rows.is_empty() {
         return Ok(());
@@ -1255,6 +1281,46 @@ mod tests {
         .unwrap();
         assert_eq!(next, 1005, "after reserving a batch of 5, the next single must be 1005");
         Spi::run("DROP TABLE m99_rt").unwrap();
+    }
+
+    // M104 (#99) — a big INSERT with a small maintenance_work_mem flushes INCREMENTALLY: it produces MULTIPLE stripes
+    // (not one whole-transaction buffer), and the committed rows are correct. Proves the O(maintenance_work_mem)
+    // write-memory bound (the peak pending set never holds the whole INSERT).
+    #[pg_test]
+    fn m104_incremental_flush_produces_multiple_stripes() {
+        Spi::run("SET maintenance_work_mem = '1MB'").unwrap();
+        Spi::run("CREATE TABLE m104_inc (a int, b text) USING theodb_columnar").unwrap();
+        // ~50k rows of ~40-byte tuples ≈ 2MB > 1MB mwm → at least 2 incremental stripes.
+        Spi::run("INSERT INTO m104_inc SELECT g, repeat('x', 30) FROM generate_series(1, 50000) g").unwrap();
+        let cnt = Spi::get_one::<i64>("SELECT count(*) FROM m104_inc").unwrap().unwrap();
+        assert_eq!(cnt, 50000, "all rows committed and readable");
+        let sum = Spi::get_one::<i64>("SELECT sum(a) FROM m104_inc").unwrap().unwrap();
+        assert_eq!(sum, 50000i64 * 50001 / 2, "values intact across incremental stripes");
+        let stripes = Spi::get_one::<i64>(
+            "SELECT count(*) FROM columnar.stripe WHERE relid = 'm104_inc'::regclass",
+        )
+        .unwrap()
+        .unwrap();
+        assert!(stripes > 1, "incremental flush produced MULTIPLE stripes (got {stripes}) — write memory is bounded, not O(N)");
+        Spi::run("DROP TABLE m104_inc").unwrap();
+    }
+
+    // M104 H1 — self-referential INSERT under incremental flush: `INSERT INTO c SELECT FROM c` must honor INSERT
+    // snapshot semantics — it reads the rows committed BEFORE the statement, NOT the stripes it incrementally flushes
+    // mid-statement. Result = exactly 2× the pre-statement rows (no self-visible mid-flush stripes, no runaway).
+    #[pg_test]
+    fn m104_self_referential_insert_snapshot_safe() {
+        Spi::run("SET maintenance_work_mem = '1MB'").unwrap();
+        Spi::run("CREATE TABLE m104_self (a int, b text) USING theodb_columnar").unwrap();
+        Spi::run("INSERT INTO m104_self SELECT g, repeat('y', 30) FROM generate_series(1, 40000) g").unwrap();
+        let before = Spi::get_one::<i64>("SELECT count(*) FROM m104_self").unwrap().unwrap();
+        assert_eq!(before, 40000);
+        // self-referential: even though this INSERT incrementally flushes stripes mid-statement, its SELECT reads the
+        // pre-statement snapshot (40000), so the table ends at exactly 80000 — not more (mid-flush stripes not re-read).
+        Spi::run("INSERT INTO m104_self SELECT a, b FROM m104_self").unwrap();
+        let after = Spi::get_one::<i64>("SELECT count(*) FROM m104_self").unwrap().unwrap();
+        assert_eq!(after, 80000, "self-referential INSERT honors its snapshot (2x), not its own mid-flush stripes");
+        Spi::run("DROP TABLE m104_self").unwrap();
     }
 
     /// M99 B/C1 — INSERT→SELECT round-trip: rows written to a columnar table read back identical (values, order of
