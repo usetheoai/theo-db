@@ -1585,7 +1585,7 @@ por-arquivo. **Dependencies:** M104 (estado shipped mais recente que o audit ref
 
 ---
 
-## M106 — [ ] higiene de API pré-usuários — canonizar ai.rank/rerank + honrar `weight` no hybrid *(gated M105)*
+## M106 — [x] higiene de API pré-usuários — canonizar ai.rank/rerank + honrar `weight` no hybrid *(gated M105)*
 
 > Added 2026-07-16 by `/roadmap-feature` (slug: `api-consistency-prelaunch`). Fonte: mesma auditoria de features
 > (gaps 06/09). See CHANGELOG `[Unreleased] § Added`. **Opcional:** se a decisão for "doc segue o código", M105 já resolve
