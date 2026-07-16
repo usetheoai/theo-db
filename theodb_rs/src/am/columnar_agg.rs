@@ -85,13 +85,6 @@ pub(crate) fn init() {
     }
 }
 
-/// Read a column's name from a live relation's tuple descriptor by 1-based attno.
-unsafe fn column_name(rel: pg_sys::Relation, attno: i32) -> String {
-    let tupdesc = (*rel).rd_att;
-    let attr = (*tupdesc).attrs.as_ptr().add((attno - 1) as usize);
-    CStr::from_ptr((*attr).attname.data.as_ptr()).to_string_lossy().into_owned()
-}
-
 /// The parsed, admissible aggregate: (kind, attno). kind 0 = count(*), 1 = sum(float8). attno is the 1-based column
 /// for sum (0 for count).
 struct ParsedAgg {
@@ -100,12 +93,13 @@ struct ParsedAgg {
 }
 
 /// Admission guard: is this a simple `count(*)` / `sum(float8)` aggregate (no GROUP BY/HAVING/WHERE/DISTINCT/window)
-/// over a single columnar base relation? Returns the base RTE index + the parsed aggs, or None (→ native plan).
+/// over a single base relation that is EITHER a columnar table (mode 0 — decode stripes) OR a heap table with a
+/// usable Arrow cache (mode 1 — M101 HTAP)? Returns (mode, base RTE index, parsed aggs), or None (→ native plan).
 unsafe fn admit(
     root: *mut pg_sys::PlannerInfo,
     input_rel: *mut pg_sys::RelOptInfo,
     output_rel: *mut pg_sys::RelOptInfo,
-) -> Option<(i32, Vec<ParsedAgg>)> {
+) -> Option<(i32, i32, Vec<ParsedAgg>)> {
     let parse = (*root).parse;
     if !(*parse).groupClause.is_null()
         || !(*parse).groupingSets.is_null()
@@ -123,13 +117,8 @@ unsafe fn admit(
     if relid <= 0 {
         return None;
     }
-    // The base relation must use the theodb_columnar TAM.
     let rte = *(*root).simple_rte_array.add(relid as usize);
     if rte.is_null() || (*rte).rtekind != pg_sys::RTEKind::RTE_RELATION {
-        return None;
-    }
-    let amoid = columnar_amoid();
-    if amoid == pg_sys::InvalidOid || pg_sys::get_rel_relam((*rte).relid) != amoid {
         return None;
     }
     // Every output target must be a supported bare aggregate.
@@ -184,7 +173,33 @@ unsafe fn admit(
             return None;
         }
     }
-    Some((relid, aggs))
+
+    // Mode: a columnar table (decode stripes) vs a heap table with a usable Arrow cache (M101 HTAP).
+    let amoid = columnar_amoid();
+    let is_columnar = amoid != pg_sys::InvalidOid && pg_sys::get_rel_relam((*rte).relid) == amoid;
+    if is_columnar {
+        return Some((0, relid, aggs));
+    }
+    // Heap: admissible IFF this backend has a cache covering the summed columns (the exec-time get_or_build then
+    // does the generation check + snapshot-correct rebuild). Resolve the sum column names via the syscache.
+    let sum_names: Vec<String> = aggs
+        .iter()
+        .filter(|a| a.kind == 1)
+        .filter_map(|a| {
+            let n = pg_sys::get_attname((*rte).relid, a.attno as pg_sys::AttrNumber, true);
+            if n.is_null() {
+                None
+            } else {
+                Some(CStr::from_ptr(n).to_string_lossy().into_owned())
+            }
+        })
+        .collect();
+    if sum_names.len() == aggs.iter().filter(|a| a.kind == 1).count()
+        && super::arrow_cache::has_cached_columns((*rte).relid.to_u32(), &sum_names)
+    {
+        return Some((1, relid, aggs));
+    }
+    None
 }
 
 /// `create_upper_paths_hook` — intercept a simple columnar aggregate and add the vectorized `CustomPath`.
@@ -202,12 +217,13 @@ unsafe extern "C-unwind" fn upper_paths_hook(
     if !ENABLE_COLUMNAR_AGG.get() || stage != pg_sys::UpperRelationKind::UPPERREL_GROUP_AGG {
         return;
     }
-    let Some((relid, aggs)) = admit(root, input_rel, output_rel) else {
+    let Some((mode, relid, aggs)) = admit(root, input_rel, output_rel) else {
         return; // fail-safe: any unsupported shape → native plan
     };
 
-    // Encode the plan in custom_private as an IntList [relid, kind0, attno0, kind1, attno1, ...].
-    let mut priv_list: *mut pg_sys::List = pg_sys::lappend_int(std::ptr::null_mut(), relid);
+    // Encode the plan in custom_private as an IntList [mode, relid, kind0, attno0, kind1, attno1, ...].
+    let mut priv_list: *mut pg_sys::List = pg_sys::lappend_int(std::ptr::null_mut(), mode);
+    priv_list = pg_sys::lappend_int(priv_list, relid);
     for a in &aggs {
         priv_list = pg_sys::lappend_int(priv_list, a.kind);
         priv_list = pg_sys::lappend_int(priv_list, a.attno);
@@ -288,26 +304,39 @@ unsafe extern "C-unwind" fn begin_custom_scan(
     let cscan = st.css.ss.ps.plan as *mut pg_sys::CustomScan;
     let priv_list = (*cscan).custom_private;
     let n = pg_sys::list_length(priv_list);
-    let relidx = pg_sys::list_nth_int(priv_list, 0);
+    let mode = pg_sys::list_nth_int(priv_list, 0);
+    let relidx = pg_sys::list_nth_int(priv_list, 1);
     let rte = pg_sys::list_nth((*estate).es_range_table, relidx - 1) as *mut pg_sys::RangeTblEntry;
-    let rel = pg_sys::relation_open((*rte).relid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+    let relid = (*rte).relid;
 
     let res = (|| -> Result<Vec<(pg_sys::Datum, bool)>, String> {
+        // Parse specs (kind, attno), resolving the sum column names via the syscache (`get_attname`).
         let mut specs = Vec::new();
-        let mut i = 1;
+        let mut i = 2;
         while i + 1 < n {
             let kind = pg_sys::list_nth_int(priv_list, i);
             let attno = pg_sys::list_nth_int(priv_list, i + 1);
             i += 2;
             match kind {
                 0 => specs.push(AggSpec::CountStar),
-                1 => specs.push(AggSpec::SumFloat8(column_name(rel, attno))),
+                1 => {
+                    let nm = pg_sys::get_attname(relid, attno as pg_sys::AttrNumber, false);
+                    specs.push(AggSpec::SumFloat8(CStr::from_ptr(nm).to_string_lossy().into_owned()));
+                }
                 _ => return Err(format!("columnar_agg: bad agg kind {kind}")),
             }
         }
-        run_columnar_aggs(rel, &specs)
+        if mode == 1 {
+            // M101 HTAP: aggregate the heap-authoritative Arrow cache (rebuilt snapshot-correctly if invalidated).
+            super::arrow_cache::run_cache_aggs(relid, &specs)
+        } else {
+            // M100: decode the columnar table's stripes.
+            let rel = pg_sys::relation_open(relid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            let r = run_columnar_aggs(rel, &specs);
+            pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            r
+        }
     })();
-    pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
     match res {
         Ok(v) => st.result = Box::into_raw(Box::new(v)),
         Err(e) => pg_sys::error!("{e}"),

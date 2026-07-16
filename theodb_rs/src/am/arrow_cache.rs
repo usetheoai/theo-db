@@ -144,6 +144,28 @@ unsafe fn build_cache(rel_oid: pg_sys::Oid, cols: &[String]) -> Result<RecordBat
     })
 }
 
+/// Does this backend hold a cache for `relid_u32` whose batch schema contains every column in `cols`? A cheap
+/// thread-local check (no SPI) the planner hook uses to decide admission — the exec-time `get_or_build` then does the
+/// generation check + snapshot-correct rebuild.
+pub(super) fn has_cached_columns(relid_u32: u32, cols: &[String]) -> bool {
+    CACHE.with(|c| {
+        c.borrow().get(&relid_u32).is_some_and(|(batch, _)| {
+            let schema = batch.schema();
+            cols.iter().all(|name| schema.field_with_name(name).is_ok())
+        })
+    })
+}
+
+/// Run the aggregates over the heap-authoritative Arrow cache (rebuilding under the current snapshot if a write has
+/// invalidated it) — the exec-time entry point the planner `CustomScan` (M101 Phase C) drives for a cached heap table.
+pub(super) unsafe fn run_cache_aggs(
+    rel_oid: pg_sys::Oid,
+    aggs: &[AggSpec],
+) -> Result<Vec<(pg_sys::Datum, bool)>, String> {
+    let batch = get_or_build(rel_oid)?;
+    run_aggs_on_batch(batch, aggs)
+}
+
 /// Pragma: register a heap table's columns for the Arrow cache — records `columnar.cache_state`, installs the
 /// invalidate-on-write statement trigger, and builds the backend's cache. Rebuilds (bumps the generation) if called
 /// again. Returns true.
@@ -261,5 +283,38 @@ mod tests {
         assert_eq!(after, format!("count={hc};sum={hs:.4}"), "the cache must rebuild and match the heap after the write");
         assert_ne!(before, after, "the cache result must change after the write (not stale)");
         Spi::run("DROP TABLE m101_iv").unwrap();
+    }
+
+    /// M101 Phase C — a heap table WITH a usable Arrow cache is planned as the vectorized `CustomScan` (EXPLAIN shows
+    /// the node) and is result-identical to the native heap aggregate; after a write it stays correct (the cache
+    /// rebuilds snapshot-correctly at exec). Wires the M101 cache into the M100 planner CustomScan path.
+    #[pg_test]
+    fn m101_heap_cache_customscan_matches_heap() {
+        Spi::run("SET theodb.enable_columnar_agg = on").unwrap();
+        Spi::run("CREATE TABLE m101_hc (id int, measure float8)").unwrap();
+        Spi::run("INSERT INTO m101_hc SELECT g, (g * 1.5)::float8 FROM generate_series(1, 20000) g").unwrap();
+        let oid = Spi::get_one::<pg_sys::Oid>("SELECT 'm101_hc'::regclass::oid").unwrap().unwrap();
+        Spi::get_one_with_args::<bool>("SELECT theodb_columnarize($1, ARRAY['measure'])", &[oid.into()])
+            .unwrap()
+            .unwrap();
+
+        // EXPLAIN: the heap aggregate with a cache is our CustomScan.
+        let top = Spi::get_one::<String>("EXPLAIN (COSTS OFF) SELECT count(*), sum(measure) FROM m101_hc")
+            .unwrap()
+            .unwrap();
+        assert!(top.contains("Custom Scan"), "heap-with-cache aggregate must be a CustomScan: {top}");
+
+        // Result-equivalence (the aggregate runs over the Arrow cache).
+        let cc = Spi::get_one::<i64>("SELECT count(*) FROM m101_hc").unwrap().unwrap();
+        assert_eq!(cc, 20000, "cache count matches");
+        let cs = Spi::get_one::<f64>("SELECT sum(measure) FROM m101_hc").unwrap().unwrap();
+        let expect = (1..=20000i64).map(|g| g as f64 * 1.5).sum::<f64>();
+        assert!((cs - expect).abs() < 1e-2, "cache sum matches the heap ({cs} vs {expect})");
+
+        // After a write, the CustomScan stays correct (get_or_build rebuilds the invalidated cache at exec).
+        Spi::run("INSERT INTO m101_hc VALUES (20001, 3.0)").unwrap();
+        let cc2 = Spi::get_one::<i64>("SELECT count(*) FROM m101_hc").unwrap().unwrap();
+        assert_eq!(cc2, 20001, "after the write, the count reflects the new row (cache rebuilt)");
+        Spi::run("DROP TABLE m101_hc").unwrap();
     }
 }
