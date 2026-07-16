@@ -21,25 +21,15 @@ Não confunda as duas: `ai.rank` é escalar (1→1); `ai.rerank` é o batch (N�
 
 ---
 
-# 1. Verificar versão da extensão
+# 1. Instalar a extensão
 
 ```sql
-SELECT extversion
-FROM pg_extension
-WHERE extname = 'theodb_ml';
+CREATE EXTENSION IF NOT EXISTS theodb;
 ```
 
-Consulta a versão instalada da extensão `theodb_ml`.
-
----
-
-# 2. Instalar extensão
-
-```sql
-CREATE EXTENSION IF NOT EXISTS theodb_ml;
-```
-
-Instala a extensão necessária para utilizar modelos de IA.
+Instala a extensão `theodb`, que fornece as funções `ai.*` (incluindo `ai.rerank`/`ai.rank`) e o
+schema `theodb_ml` (registro de modelos). `theodb_ml` é um **schema** dentro da extensão `theodb`,
+não uma extensão separada.
 
 ---
 

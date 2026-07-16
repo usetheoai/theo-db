@@ -155,7 +155,7 @@ realmente honradas pelo código são:
 | `result_limit` | Máximo de resultados finais. |
 | `language` | Configuração de idioma do FTS (ex.: `english`). |
 | `filter_sql` | Predicado SQL adicional aplicado às pernas. |
-| `lexical_engine` | Motor lexical: `postgres` (default, entregue) ou `bm25`. |
+| `lexical_engine` | Motor lexical: `ts_rank_cd` (default, FTS nativo entregue) ou `bm25` (gated — requer `pg_textsearch`). Outro valor → erro tipado `22023`. |
 
 ---
 
@@ -185,7 +185,7 @@ Aponta a tabela e as colunas usadas por cada perna da fusão.
 ```
 
 `query_text` alimenta a perna FTS; `query_vector` é o embedding da consulta
-(gere-o com `theodb.embed('theodb-embedding-001', 'managed database')`).
+(gere-o com `theodb.embed('managed database', 'theodb-embedding-001')` — assinatura `theodb.embed(content, model)`, conteúdo primeiro).
 
 ---
 
