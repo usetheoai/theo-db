@@ -190,9 +190,11 @@ pub(crate) fn run_rrf(
     // `%1$I..%4$I` = identifiers (quoted), `%3$s` = regclass text, `%5$s` = the confined filter predicate.
     // The template is dollar-quoted ($fq$…$fq$); its literal $1..$6 survive and bind at execution.
     // M106: the two weights are rendered as fixed-precision decimal literals (validated finite ≥ 0 above, so
-    // the string is pure numeric — injection-safe) and passed as the `%6$s`/`%7$s` format args.
-    let vec_w_lit = format!("{vec_weight:.6}");
-    let text_w_lit = format!("{text_weight:.6}");
+    // the string is pure numeric — injection-safe) and passed as the `%6$s`/`%7$s` format args. The `+ 0.0`
+    // normalizes IEEE-754 negative zero (`-0.0` passes `>= 0.0`) to `+0.0`, so the literal never carries a
+    // stray leading `-` (keeps the "unsigned decimal literal" invariant; semantically `-0.0` == `0.0`).
+    let vec_w_lit = format!("{:.6}", vec_weight + 0.0);
+    let text_w_lit = format!("{:.6}", text_weight + 0.0);
     let build_q = format!("SELECT format($fq${template}$fq$, $1, $2, $3, $4, $5, $6, $7)");
     let built = Spi::get_one_with_args::<String>(
         &build_q,
@@ -347,6 +349,13 @@ mod tests {
     #[pg_test]
     fn m106_text_weight_flips_ranking_to_fts_leg_top() {
         assert_eq!(top("1", "3"), "df", "text_weight=3 must flip the ranking to the FTS-leg winner");
+    }
+
+    // M106 (review LOW): IEEE-754 `-0.0` passes the `>= 0` guard; it must be treated as `0.0` (disable the
+    // leg) and MUST NOT emit a stray `-` into the SQL literal. `-0.0` on the vector leg ⇒ FTS-leg doc wins.
+    #[pg_test]
+    fn m106_negative_zero_weight_behaves_as_zero() {
+        assert_eq!(top("-0.0", "1"), "df", "vector_weight=-0.0 disables the vector leg (behaves as 0.0)");
     }
 
     // M106: a negative weight is rejected with a typed 22023 (fail-fast).
