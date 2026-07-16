@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **M101 Phase A (heap-authoritative Arrow columnar cache — the HTAP substrate de-risked):** new `am/arrow_cache.rs` + a `theodb_columnarize(table, cols)` pragma build an in-memory Arrow `RecordBatch` from a HEAP table's projected columns (via SPI over the heap's committed rows — the heap stays the source of truth) that the M100 DataFusion executor aggregates. Split `df_executor::run_aggs_on_batch` (the batch→DataFusion-aggregate half, shared by the M100 columnar path and the cache) out of `run_columnar_aggs`. **MEASURED on droplet (pg17): a `count(*)` + `sum(measure)` over the Arrow cache of a 50000-row heap table is result-identical to the same aggregate over the heap** (`m101_cache_agg_matches_heap` pg_test; full suite 301 GREEN, zero regression). This de-risks the heap→Arrow build + aggregate before the MVCC machinery. Follow-up phases: invalidate-on-write trigger + snapshot-compatibility gate (B), planner `CustomScan` admitting a heap-with-valid-cache (C), the pg_isolation MVCC permutations + HTAP benchmark (D). Own-code glue (Rule 9). (M101)
 
 ### Changed
 
