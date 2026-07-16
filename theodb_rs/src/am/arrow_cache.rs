@@ -15,9 +15,71 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 thread_local! {
-    /// Per-backend Arrow cache: relation OID → the cached RecordBatch. (Shared-memory residency is a follow-up;
-    /// per-backend is the simplest MVCC-safe slice — each backend builds under its own snapshot.)
-    static CACHE: RefCell<HashMap<u32, RecordBatch>> = RefCell::new(HashMap::new());
+    /// Per-backend Arrow cache: relation OID → (the cached RecordBatch, the `columnar.cache_state.generation` it was
+    /// built at). Reused IFF the current generation is unchanged (no write since the build); otherwise rebuilt under
+    /// the reader's own snapshot — which makes the cache snapshot-correct by construction (it materializes exactly
+    /// what the reader's snapshot sees). Shared-memory residency is a follow-up; per-backend is the MVCC-safe slice.
+    static CACHE: RefCell<HashMap<u32, (RecordBatch, i64)>> = RefCell::new(HashMap::new());
+}
+
+// The MVCC substrate (M101 Phase B): a shared `columnar.cache_state` catalog carries the invalidation generation
+// per cached table; a statement trigger installed by `columnarize` bumps it on any INSERT/UPDATE/DELETE/TRUNCATE
+// (within the writing xact). A read reuses its per-backend cache only when its built generation matches the current
+// generation — so a write forces a rebuild under the reader's snapshot (heap-authoritative; the cache never carries
+// per-row xmin/xmax visibility — that would re-implement MVCC, the M99 D2 trap).
+extension_sql!(
+    r#"
+CREATE SCHEMA IF NOT EXISTS columnar;
+CREATE TABLE IF NOT EXISTS columnar.cache_state (
+    relid      oid       PRIMARY KEY,
+    generation bigint    NOT NULL DEFAULT 0,
+    cols       text[]    NOT NULL
+);
+CREATE OR REPLACE FUNCTION columnar._invalidate() RETURNS trigger LANGUAGE plpgsql AS $fn$
+BEGIN
+    UPDATE columnar.cache_state SET generation = generation + 1 WHERE relid = TG_RELID;
+    RETURN NULL;
+END;
+$fn$;
+"#,
+    name = "theodb_arrow_cache_state",
+    requires = ["theodb_columnar_catalog"], // reuse the `columnar` schema created by the M99 columnar catalog
+);
+
+/// Read the current invalidation generation + the columnarized columns for `rel_oid`, or None if not columnarized.
+unsafe fn cache_state(rel_oid: pg_sys::Oid) -> Result<Option<(i64, Vec<String>)>, String> {
+    Spi::connect(|c| {
+        let t = c
+            .select(
+                "SELECT generation, cols FROM columnar.cache_state WHERE relid = $1",
+                None,
+                &[rel_oid.into()],
+            )
+            .map_err(|e| format!("arrow_cache: cache_state read: {e:?}"))?;
+        if t.is_empty() {
+            return Ok(None);
+        }
+        let r = t.first();
+        let cur_gen = r.get::<i64>(1).map_err(|e| format!("{e:?}"))?.ok_or("null generation")?;
+        let cols = r.get::<Vec<String>>(2).map_err(|e| format!("{e:?}"))?.ok_or("null cols")?;
+        Ok(Some((cur_gen, cols)))
+    })
+}
+
+/// Get the cache batch for `rel_oid`, rebuilding it under the CURRENT snapshot when the invalidation generation has
+/// advanced since the backend's cache was built (or the cache is absent). Snapshot-correct by construction: a
+/// rebuild runs the SPI seqscan under the reader's active snapshot, so it materializes exactly the reader's view.
+unsafe fn get_or_build(rel_oid: pg_sys::Oid) -> Result<RecordBatch, String> {
+    let oid = rel_oid.to_u32();
+    let (cur_gen, cols) = cache_state(rel_oid)?.ok_or("arrow_cache: table not columnarized")?;
+    if let Some((batch, built_gen)) = CACHE.with(|c| c.borrow().get(&oid).cloned()) {
+        if built_gen == cur_gen {
+            return Ok(batch); // no write since the build → the committed set is unchanged → reuse
+        }
+    }
+    let batch = build_cache(rel_oid, &cols)?;
+    CACHE.with(|c| c.borrow_mut().insert(oid, (batch.clone(), cur_gen)));
+    Ok(batch)
 }
 
 /// Extract one SPI cell (row column `col1`, 1-based) as the byte layout `build_arrow` consumes (fixed: attlen LE
@@ -82,15 +144,38 @@ unsafe fn build_cache(rel_oid: pg_sys::Oid, cols: &[String]) -> Result<RecordBat
     })
 }
 
-/// Pragma: build (or rebuild) the Arrow cache for a heap table's columns.
+/// Pragma: register a heap table's columns for the Arrow cache — records `columnar.cache_state`, installs the
+/// invalidate-on-write statement trigger, and builds the backend's cache. Rebuilds (bumps the generation) if called
+/// again. Returns true.
 #[pg_extern]
 fn theodb_columnarize(table: pg_sys::Oid, cols: Vec<String>) -> bool {
     unsafe {
-        match build_cache(table, &cols) {
-            Ok(batch) => {
-                CACHE.with(|c| c.borrow_mut().insert(table.to_u32(), batch));
-                true
-            }
+        let res = (|| -> Result<(), String> {
+            // Register / refresh the cache_state row (a re-columnarize bumps the generation so every backend rebuilds).
+            Spi::run_with_args(
+                "INSERT INTO columnar.cache_state (relid, generation, cols) VALUES ($1, 0, $2) \
+                 ON CONFLICT (relid) DO UPDATE SET cols = EXCLUDED.cols, generation = columnar.cache_state.generation + 1",
+                &[table.into(), cols.clone().into()],
+            )
+            .map_err(|e| format!("arrow_cache: cache_state upsert: {e:?}"))?;
+            // Install the invalidate-on-write statement trigger on the heap table (idempotent).
+            let relname = std::ffi::CStr::from_ptr(pg_sys::get_rel_name(table)).to_string_lossy().into_owned();
+            let nspname = std::ffi::CStr::from_ptr(pg_sys::get_namespace_name(pg_sys::get_rel_namespace(table)))
+                .to_string_lossy()
+                .into_owned();
+            let qual = format!("\"{nspname}\".\"{relname}\"");
+            Spi::run(&format!("DROP TRIGGER IF EXISTS columnar_invalidate ON {qual}"))
+                .map_err(|e| format!("arrow_cache: drop trigger: {e:?}"))?;
+            Spi::run(&format!(
+                "CREATE TRIGGER columnar_invalidate AFTER INSERT OR UPDATE OR DELETE OR TRUNCATE ON {qual} \
+                 FOR EACH STATEMENT EXECUTE FUNCTION columnar._invalidate()"
+            ))
+            .map_err(|e| format!("arrow_cache: create trigger: {e:?}"))?;
+            // Prime this backend's cache.
+            get_or_build(table).map(|_| ())
+        })();
+        match res {
+            Ok(()) => true,
             Err(e) => error!("{e}"),
         }
     }
@@ -100,8 +185,10 @@ fn theodb_columnarize(table: pg_sys::Oid, cols: Vec<String>) -> bool {
 #[pg_extern]
 fn theodb_cache_agg(table: pg_sys::Oid, num_col: String) -> String {
     unsafe {
-        let batch = CACHE.with(|c| c.borrow().get(&table.to_u32()).cloned());
-        let Some(batch) = batch else { error!("arrow_cache: no cache for this table (call theodb_columnarize first)") };
+        let batch = match get_or_build(table) {
+            Ok(b) => b,
+            Err(e) => error!("{e}"),
+        };
         let res = run_aggs_on_batch(batch, &[AggSpec::CountStar, AggSpec::SumFloat8(num_col)]);
         match res {
             Ok(r) => {
@@ -142,5 +229,37 @@ mod tests {
         let hs = Spi::get_one::<f64>("SELECT sum(measure) FROM m101_h").unwrap().unwrap();
         assert_eq!(cache, format!("count={hc};sum={hs:.4}"), "the cache aggregate must match the heap");
         Spi::run("DROP TABLE m101_h").unwrap();
+    }
+
+    /// M101 Phase B — invalidate-on-write: after the cache is built, a write bumps the `columnar.cache_state`
+    /// generation (the statement trigger), so the next read REBUILDS under the current snapshot and reflects the new
+    /// row — the cache never returns a stale answer. Proves the invalidation + rebuild-on-stale substrate (the full
+    /// cross-xact snapshot correctness is the Phase D isolation permutations).
+    #[pg_test]
+    fn m101_write_invalidates_cache() {
+        Spi::run("CREATE TABLE m101_iv (id int, measure float8)").unwrap();
+        Spi::run("INSERT INTO m101_iv SELECT g, (g * 2.0)::float8 FROM generate_series(1, 10000) g").unwrap();
+        let oid = Spi::get_one::<pg_sys::Oid>("SELECT 'm101_iv'::regclass::oid").unwrap().unwrap();
+        Spi::get_one_with_args::<bool>("SELECT theodb_columnarize($1, ARRAY['measure'])", &[oid.into()])
+            .unwrap()
+            .unwrap();
+
+        // Cache reflects the 10000 rows.
+        let before = Spi::get_one_with_args::<String>("SELECT theodb_cache_agg($1, 'measure')", &[oid.into()])
+            .unwrap()
+            .unwrap();
+        assert!(before.starts_with("count=10000;"), "cache before write: {before}");
+
+        // A write bumps the generation via the trigger → the next cache read must rebuild and see 10001 rows.
+        Spi::run("INSERT INTO m101_iv VALUES (10001, 5.0)").unwrap();
+        let after = Spi::get_one_with_args::<String>("SELECT theodb_cache_agg($1, 'measure')", &[oid.into()])
+            .unwrap()
+            .unwrap();
+        let hc = Spi::get_one::<i64>("SELECT count(*) FROM m101_iv").unwrap().unwrap();
+        let hs = Spi::get_one::<f64>("SELECT sum(measure) FROM m101_iv").unwrap().unwrap();
+        assert_eq!(hc, 10001, "the heap now has 10001 rows");
+        assert_eq!(after, format!("count={hc};sum={hs:.4}"), "the cache must rebuild and match the heap after the write");
+        assert_ne!(before, after, "the cache result must change after the write (not stale)");
+        Spi::run("DROP TABLE m101_iv").unwrap();
     }
 }
