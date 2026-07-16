@@ -524,6 +524,28 @@ fn _vectorizer_reap_orphans(max_attempts: i32) -> i64 {
             .unwrap_or(0)
     })
 }
+
+/// M104 — bound the dead-letter: keep the most recent `keep` `failed` rows (highest job_id), delete older ones.
+/// Without this, a persistent poison row or a mis-set endpoint accumulates `failed` tombstones on-disk forever
+/// (the audit's unbounded on-disk dead-letter finding) — the partial claim index hides the growth from the hot
+/// path, so it is silent. `done` jobs are already DELETEd; this bounds the retained `failed` history. Returns the
+/// count purged. Called by the worker's periodic maintenance (`theodb.vectorizer_dead_letter_max`, default 1000).
+#[pg_extern]
+fn _vectorizer_purge_dead_letters(keep: i32) -> i64 {
+    Spi::connect_mut(|client| {
+        client
+            .update(
+                "WITH d AS (DELETE FROM theodb.vectorizer_queue WHERE state='failed' AND job_id NOT IN \
+                 (SELECT job_id FROM theodb.vectorizer_queue WHERE state='failed' ORDER BY job_id DESC LIMIT $1) \
+                 RETURNING 1) SELECT count(*) FROM d",
+                None,
+                &[keep.max(0).into()],
+            )
+            .ok()
+            .and_then(|t| t.first().get::<i64>(1).ok().flatten())
+            .unwrap_or(0)
+    })
+}
 } // mod theodb_rs
 
 // ── The background worker (ADR 0016) — the ONLY non-CI-testable piece (needs shared_preload_libraries). It
@@ -598,6 +620,11 @@ pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
                 "SELECT theodb_rs._vectorizer_reap_orphans($1)",
                 &[WORKER_MAX_ATTEMPTS.into()],
             );
+            // M104 — bound the on-disk dead-letter (purge old `failed` rows beyond the retained cap).
+            let keep = crate::pg::guc("theodb.vectorizer_dead_letter_max")
+                .and_then(|s| s.parse::<i32>().ok())
+                .unwrap_or(1000);
+            let _ = Spi::run_with_args("SELECT theodb_rs._vectorizer_purge_dead_letters($1)", &[keep.into()]);
         });
 
         // Phase 1 — claim a batch (its own txn; the committed lease protects the jobs across phases).
@@ -1010,5 +1037,18 @@ mod tests {
         assert_eq!(reaped, 1, "the reaper dead-letters the stuck orphan");
         let state: String = Spi::get_one("SELECT state FROM theodb.vectorizer_queue").unwrap().unwrap();
         assert_eq!(state, "failed", "reaped orphan is failed, not stuck in processing forever");
+    }
+
+    // M104 — the dead-letter purge bounds the on-disk `failed` tombstones: keep the most recent N, delete older.
+    #[pg_test]
+    fn m104_dead_letter_purge_bounds_failed_rows() {
+        seed(10);
+        Spi::run("UPDATE theodb.vectorizer_queue SET state='failed'").unwrap();
+        let before: i64 = Spi::get_one("SELECT count(*) FROM theodb.vectorizer_queue WHERE state='failed'").unwrap().unwrap();
+        assert_eq!(before, 10, "10 dead-letter rows before purge");
+        let purged: i64 = Spi::get_one("SELECT theodb_rs._vectorizer_purge_dead_letters(3)").unwrap().unwrap();
+        assert_eq!(purged, 7, "purge removed all but the most recent 3");
+        let after: i64 = Spi::get_one("SELECT count(*) FROM theodb.vectorizer_queue WHERE state='failed'").unwrap().unwrap();
+        assert_eq!(after, 3, "dead-letter bounded to the retained cap");
     }
 }

@@ -263,6 +263,15 @@ pub extern "C-unwind" fn ambuild(
                     } else {
                         // v4 (interleaved) — legacy, non-storage-separated. Not the M89 streaming target; builds the
                         // `entries` copy for the unchanged writer (OOMs at billion-scale, pre-M89 behavior).
+                        // M104: WARN that this path materializes the corpus (the audit's inverted-default finding) —
+                        // point the user at the streaming, storage-separated layout. The default is NOT flipped
+                        // (that would change the on-disk format of existing `pq_subspaces` indexes); the WARN is the
+                        // safe bound, and `WITH (separate_storage=1)` selects the bounded-memory v5/v6 build.
+                        pg_sys::warning!(
+                            "theodb_ivfflat: building the legacy v4 (interleaved) IVF-AQ layout — it materializes \
+                             the whole corpus and can OOM at billion-scale. For a bounded-memory build use \
+                             WITH (separate_storage=1) (the M89 streaming v5/v6 layout)."
+                        );
                         let entries = idx.list_entries();
                         page::write_ivf_aq(
                             indexrel,
