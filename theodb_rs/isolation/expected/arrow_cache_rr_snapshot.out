@@ -1,0 +1,35 @@
+Parsed test spec with 2 sessions
+
+starting permutation: a_begin a_refresh a1 b_ins a2 a_commit a3
+theodb_columnarize
+------------------
+t                 
+(1 row)
+
+step a_begin: BEGIN ISOLATION LEVEL REPEATABLE READ;
+step a_refresh: SELECT theodb_cache_refresh('hc'::regclass);
+theodb_cache_refresh
+--------------------
+t                   
+(1 row)
+
+step a1: SELECT count(*) FROM hc;
+count
+-----
+    3
+(1 row)
+
+step b_ins: INSERT INTO hc VALUES (4, 4.0);
+step a2: SELECT count(*) FROM hc;
+count
+-----
+    3
+(1 row)
+
+step a_commit: COMMIT;
+step a3: SELECT count(*) FROM hc;
+count
+-----
+    4
+(1 row)
+

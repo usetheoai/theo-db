@@ -203,6 +203,19 @@ fn theodb_columnarize(table: pg_sys::Oid, cols: Vec<String>) -> bool {
     }
 }
 
+/// Prime THIS backend's Arrow cache from the already-registered `columnar.cache_state` (built under the current
+/// snapshot), WITHOUT bumping the invalidation generation. Used to build a reader's cache after another session
+/// installed the cache_state/trigger (the per-backend cache is not shared) — e.g. in the isolation harness.
+#[pg_extern]
+fn theodb_cache_refresh(table: pg_sys::Oid) -> bool {
+    unsafe {
+        match get_or_build(table) {
+            Ok(_) => true,
+            Err(e) => error!("{e}"),
+        }
+    }
+}
+
 #[cfg(any(test, feature = "pg_test"))]
 #[pg_extern]
 fn theodb_cache_agg(table: pg_sys::Oid, num_col: String) -> String {
