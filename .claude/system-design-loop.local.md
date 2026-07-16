@@ -1,11 +1,11 @@
 ---
-active: false
+active: true
 target: /home/paulo/Projetos/usetheo/theo-data/theo-db/theodb_rs
 scope: ''
-current_phase: 1
-phase_name: baseline
+current_phase: 3
+phase_name: data_flow
 phase_iteration: 3
-global_iteration: 3
+global_iteration: 10
 max_global_iterations: 80
 completion_promise: SYSTEM DESIGN AUDIT COMPLETE
 started_at: '2026-07-16T15:23:51Z'
