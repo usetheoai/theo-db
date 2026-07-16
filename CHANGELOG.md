@@ -13,7 +13,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- **M103 — vector + columnar in one substrate (Lance-inspired co-residence):** the IVF vector index (`part_id` + raw `vec` bytea) is stored AS columns co-resident with the scalar `label` + the analytical columns in a `theodb_columnar` table, so a scalar-prefiltered vector top-k + an analytical aggregation compose in ONE column-pruned scan. New `theodb.vindex_assign` (IVF partition per row, materialized as a column), `theodb.vindex_knn_columnar` (filtered top-k reading ONLY the 4 index columns), `theodb.f32vec_to_bytea`. **GATE (recall correctness):** the co-resident filtered top-k is BYTE-IDENTICAL to the exact filtered brute-force (shared `am/scan.rs::Scored` tie-break + `vec::l2_dist_from_bytes` kernel) — proven by `m103_full_probe_byte_identical_to_exact_filtered` (312 pg_tests GREEN, +5). **MEASURED (`docs/benchmarks/m103-vector-columnar.{md,json}`):** column pruning — the filtered vector scan latency is INVARIANT to analytical-column width (79.43 ms narrow vs 79.27 ms wide, ratio 0.998) while the wide index is 4.67× larger on disk (the analytical columns are never decoded); composed filter-knn + aggregation in one plan (225.7 ms). ADR-0044. **Honest ceiling:** a cost/scale/composability win — recall EQUAL by construction (not a claim), **NO QPS-vs-ScaNN claim** (the M73/M74 paradigm ceiling is untouched by co-residence). (M103)
 
 ### Changed
 
@@ -24,6 +23,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 ### Security
+
+## [0.91.0] - 2026-07-16
+
+### Added
+- **M103 — vector + columnar in one substrate (Lance-inspired co-residence):** the IVF vector index (`part_id` + raw `vec` bytea) is stored AS columns co-resident with the scalar `label` + the analytical columns in a `theodb_columnar` table, so a scalar-prefiltered vector top-k + an analytical aggregation compose in ONE column-pruned scan. New `theodb.vindex_assign` (IVF partition per row, materialized as a column), `theodb.vindex_knn_columnar` (filtered top-k reading ONLY the 4 index columns), `theodb.vindex_decode_bytes`, `theodb.f32vec_to_bytea`. **GATE (recall correctness):** the co-resident filtered top-k is BYTE-IDENTICAL to the exact filtered brute-force (shared `am/scan.rs::Scored` tie-break + `vec::l2_dist_from_bytes` kernel) — proven by `m103_full_probe_byte_identical_to_exact_filtered` (312 pg_tests GREEN, +5). **MEASURED (`docs/benchmarks/m103-vector-columnar.{md,json}`):** column pruning quantified by an isolated decode control — decoding only the 4 index columns (49.57 ms ± 0.29) vs ALL columns (219.81 ms ± 1.78) on the wide index = **77.4 % of decode time saved**; the end-to-end knn latency is invariant to analytical width (ratio 1.009); composed filter-knn + aggregation in one plan (225.41 ms ± 1.02). ADR-0044. Sign-off: council-vector-ann + council-index-storage + council-benchmark all READY_TO_MERGE. **Honest ceiling:** a cost/scale/composability win — recall EQUAL by construction (not a claim), **NO QPS-vs-ScaNN claim** (the M73/M74 paradigm ceiling is untouched by co-residence); the out-of-RAM value is a projection, not measured. Follow-up #108. (M103)
 
 ## [0.90.0] - 2026-07-16
 
