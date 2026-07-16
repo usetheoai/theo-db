@@ -499,6 +499,26 @@ pub(crate) unsafe fn vacuum_rebuild(
     if magic == 0 {
         return 0; // unbuilt
     }
+    // M104 — bound the fold's memory blast radius: the blob (M26 legacy) + v3-structured + HNSW-structured
+    // compaction paths materialize the live set in RAM (O(N), the M55 window). If the index-on-disk size exceeds
+    // `theodb.vacuum_fold_max_mb` (default 1024), SKIP the in-VACUUM fold with a WARN instead of risking an OOM —
+    // correctness is UNCHANGED (the scan folds the pending region + the executor's MVCC heap re-check drops dead
+    // TIDs; the modern IVF v4–v7 formats already no-op here). The operator compacts a large index via REINDEX (the
+    // fully-bounded streaming fold is M55). This turns a possible OOM into a documented, safe deferral.
+    let fold_cap_mb = crate::pg::guc("theodb.vacuum_fold_max_mb")
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(1024);
+    let idx_bytes = pg_sys::RelationGetNumberOfBlocksInFork(indexrel, pg_sys::ForkNumber::MAIN_FORKNUM) as u64 * 8192;
+    if fold_cap_mb > 0 && idx_bytes > fold_cap_mb.saturating_mul(1024 * 1024) {
+        pg_sys::warning!(
+            "theodb am vacuum: index is {} MB (> theodb.vacuum_fold_max_mb = {} MB) — skipping the in-VACUUM \
+             compaction fold to avoid an O(N)-in-RAM OOM; correctness is preserved (scan pending-fold + MVCC \
+             re-check). REINDEX to compact (the bounded streaming fold is a follow-up, M55).",
+            idx_bytes / (1024 * 1024),
+            fold_cap_mb
+        );
+        return 0;
+    }
     if magic == page::IVF_STRUCT_MAGIC {
         // M81 — a v4 (AQ) IVF index: the f32 v3 rebuild would reject/corrupt it. Correctness holds WITHOUT a
         // structure rebuild — the scan folds the pending region (scan.rs::scan_ivf_aq) and the executor's MVCC
@@ -521,7 +541,10 @@ pub(crate) unsafe fn vacuum_rebuild(
     if magic == crate::am::hnsw_page::HNSW_STRUCT_MAGIC {
         return vacuum_rebuild_hnsw_structured(indexrel, dead);
     }
-    // Blob (M26 legacy) path.
+    // DEPRECATED (M104) — the blob (M26 legacy, single-serialized-index) layout. Superseded by the structured
+    // IVF (M31, v3–v7) and structured HNSW (M35) layouts; only pre-M31 indexes still carry it, and a REINDEX
+    // migrates them to the current format. Kept for read/VACUUM back-compat; will be removed once no blob indexes
+    // remain in the field (follow-up). New builds never produce a blob.
     let blob = match page::read_blob(indexrel) {
         Ok(b) => b,
         Err(e) => pg_sys::error!("theodb am vacuum: {e}"),

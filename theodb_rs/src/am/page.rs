@@ -38,6 +38,10 @@ pub(crate) unsafe fn write_blob(rel: pg_sys::Relation, fork: pg_sys::ForkNumber:
 }
 
 /// Read the blob back. Returns an empty Vec when the index has no blocks (an unbuilt/empty index).
+///
+/// DEPRECATED (M104): the M26 single-blob layout is legacy — superseded by the structured IVF (M31, v3–v7) and
+/// HNSW (M35) layouts. Retained for read/VACUUM back-compat with pre-M31 indexes (REINDEX migrates them). New
+/// builds never write a blob (see `write_ivf_structured` / `hnsw_page::write_structured`).
 pub(crate) unsafe fn read_blob(rel: pg_sys::Relation) -> Result<Vec<u8>, String> {
     let nblocks = pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM);
     if nblocks == 0 {

@@ -658,6 +658,12 @@ pub(crate) unsafe fn column_index(rel: pg_sys::Relation, name: &str) -> Option<u
 /// decodes + returns ONLY those columns (projection pushdown — skips `read_chunked`/zstd on unprojected columns, the
 /// columnar performance lever); `None` returns all. The stored bytes are the codec encoding (fixed: attlen LE bytes;
 /// varlena: logical payload) — `df_executor` maps them to Arrow arrays.
+///
+/// BOUNDARY (M104): this is the INTENTIONAL, documented columnar-READ API — the one seam through which higher-level
+/// consumers (`df_executor` M100, `vindex` M103) read column bytes; it is NOT an internal leak. The raw-bytes shape
+/// is deliberate: the caller (Arrow/vector layer) owns the type interpretation, keeping the codec (`columnar_codec`)
+/// free of Arrow/vector dependencies. A narrower typed accessor would re-encode the same bytes for each consumer;
+/// this single read seam is the DRY boundary. Consumers MUST go through here (never `read_chunked` directly).
 pub(crate) unsafe fn decode_columns(
     rel: pg_sys::Relation,
     projection: Option<&[usize]>,
