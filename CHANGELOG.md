@@ -12,6 +12,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **M99 Phase C1 (real COLUMN-MAJOR stripe encoding + per-chunk min/max — the actual columnar layout):** replaced the row-major zstd-blob stripe payload with a true column-major format (magic `TCS1`): each stripe is a grid of `[chunk_group (10k rows)][column]` chunks, each chunk = `zstd(null_bitmap + packed present values)` addressed by a fixed-stride directory, plus per-chunk min/max for skip-pruning. The bit-layout codec lives in a new FFI-free `am/columnar_codec.rs` (locally unit-tested — 11 pure `#[test]`s green offline), keeping the segfault-prone FFI (datum extraction, varlena detoast via `pg_detoast_datum_copy`+`pfree`, byval LE serialization, tuple reconstruction) isolated in `columnar.rs`. Column values are packed present-only with a separate null bitmap; min/max is stored for the native-ordered builtin types (int2/4/8, float4/8, bool) and falls back to "cannot skip" for the rest (never fail-wrong). **MEASURED: a 25000-row insert produces a `TCS1` stripe with 3 chunk groups × 3 columns, chunk-group-0/column-0 (`a int`, rows 1..10000) carrying min=1/max=10000, and INSERT→SELECT is result-identical through the new encode/decode incl. a text value round-tripping across a chunk-group boundary** (`m99_stripe_is_column_major` pg_test; the existing round-trip/compression/registration/reservation tests stay GREEN). Design reviewed by council-index-storage (on-disk format + crash-safety invariant: stripe visible only after the metapage descriptor is pivoted last) + council-rust-pgrx (FFI safety idioms). Skip-pruning *consumption* (applying min/max vs quals) + projection pushdown are Phase C2. (M99)
+- `am/page.rs::extend_page_with_item` now returns the `BlockNumber` it received (P_NEW), so the columnar directory records real blocks instead of assuming contiguity from a pre-read count — robust to a concurrent backend's interleaved extend (council-index-storage). Existing call sites ignore the return value. (M99)
+
 ## [0.86.0] - 2026-07-14
 
 ### Added

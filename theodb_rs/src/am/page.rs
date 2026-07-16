@@ -13,7 +13,7 @@ use pgrx::pg_sys;
 const META_MAGIC: u32 = 0x5449_4D45; // "TIME" (Theodb Index MEta)
 const META_VERSION: u32 = 1;
 /// Max blob bytes per data page. BLCKSZ 8192 − page header − item-id − item alignment slack. 8000 is safe.
-const CHUNK: usize = 8000;
+pub(crate) const CHUNK: usize = 8000;
 
 /// Write `blob` across freshly-extended, WAL-logged pages of the (empty) index relation `rel`, in fork `fork`
 /// (`MAIN_FORKNUM` for `ambuild`; `INIT_FORKNUM` for `ambuildempty` on unlogged indexes). The fork is assumed to
@@ -69,9 +69,16 @@ pub(crate) unsafe fn read_blob(rel: pg_sys::Relation) -> Result<Vec<u8>, String>
     Ok(blob)
 }
 
-/// Extend the given fork by one page and write `data` as its single item, WAL-logged.
+/// Extend the given fork by one page and write `data` as its single item, WAL-logged. Returns the `BlockNumber` the
+/// extension actually received (P_NEW), so a caller building a directory records the real blocks rather than assuming
+/// contiguity from a pre-read `nblocks` — the latter races another backend's concurrent extend (council-index-storage,
+/// M99). Existing call sites simply ignore the return value.
 /// (M99: reused by the columnar TAM to create its metapage — block 0 — on relation creation.)
-pub(crate) unsafe fn extend_page_with_item(rel: pg_sys::Relation, fork: pg_sys::ForkNumber::Type, data: &[u8]) {
+pub(crate) unsafe fn extend_page_with_item(
+    rel: pg_sys::Relation,
+    fork: pg_sys::ForkNumber::Type,
+    data: &[u8],
+) -> pg_sys::BlockNumber {
     debug_assert!(data.len() < CHUNK + 1);
     // Extend: serialize extension with the relation-extension lock (pgvectorscale util/buffer.rs:62).
     pg_sys::LockRelationForExtension(rel, pg_sys::ExclusiveLock as pg_sys::LOCKMODE);
@@ -96,9 +103,11 @@ pub(crate) unsafe fn extend_page_with_item(rel: pg_sys::Relation, fork: pg_sys::
         0,
     );
     assert!(off != pg_sys::InvalidOffsetNumber, "theodb am: PageAddItem failed (chunk too large?)");
+    let blkno = pg_sys::BufferGetBlockNumber(buf);
     pg_sys::MarkBufferDirty(buf);
     pg_sys::GenericXLogFinish(state);
     pg_sys::UnlockReleaseBuffer(buf);
+    blkno
 }
 
 /// The block where the pending region starts, read from the meta page: `1 + nchunks` (block 0 = meta, blocks
@@ -672,12 +681,12 @@ fn encode_list(entries: &[(i64, Vec<f32>)]) -> Vec<u8> {
 
 /// Number of CHUNK-sized pages needed to store `nbytes` (min 1 — an empty list still gets one page so the
 /// directory's `first_block` always points at a real page).
-fn npages_for(nbytes: usize) -> u32 {
+pub(crate) fn npages_for(nbytes: usize) -> u32 {
     (nbytes.div_ceil(CHUNK)).max(1) as u32
 }
 
 /// Read `npages` chunk-items starting at `first_block` and concatenate them.
-unsafe fn read_chunked(rel: pg_sys::Relation, first_block: u32, npages: u32) -> Result<Vec<u8>, String> {
+pub(crate) unsafe fn read_chunked(rel: pg_sys::Relation, first_block: u32, npages: u32) -> Result<Vec<u8>, String> {
     let mut out = Vec::new();
     for b in first_block..first_block + npages {
         // M38: append each chunk's bytes DIRECTLY into `out` (one copy) — was `extend_from_slice(&read_page_item(...))`
