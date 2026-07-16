@@ -1,4 +1,4 @@
-# Consultas em linguagem natural (`theodb_ai_nl`)
+# Consultas em linguagem natural (`ai.nl_to_sql` / `ai.nl_query`)
 
 > **Status:** ✅ **Entregue (M19, superfície M7-S4).** A função `ai.nl_to_sql(question text, allowed_relations
 > text[], model text DEFAULT NULL) RETURNS text` (`theodb_rs/src/api.rs:372`, implementada em
@@ -16,9 +16,92 @@
 > relações = "views parametrizadas seguras"). A superfície completa de configuração/templates/value-index do
 > `theodb_ai_nl` abaixo é o alvo AlloyDB, **deferida** (YAGNI). Doc operacional: `docs/sql-ai-functions.md`.
 
-Esta página cobre as consultas SQL e as APIs da extensão `theodb_ai_nl`, que traduz perguntas em
-linguagem natural para SQL — configuração, contexto de schema, templates, fragmentos, concept types,
-value index e geração/execução de consultas.
+Esta página cobre as consultas em linguagem natural do TheoDB. A superfície **entregue** é
+`ai.nl_to_sql` (gera+valida SQL) + `ai.nl_query` (executa em sandbox read-only) + as funções de configuração
+`ai.nl_*` — documentada primeiro. A seção **🎯 API-alvo / roadmap (não-shipped)** ao final descreve a
+superfície completa `theodb_ai_nl.*` estilo AlloyDB, que **não** está implementada.
+
+## ✅ Superfície entregue (`ai.nl_*`)
+
+### A. Assinaturas entregues
+
+```sql
+FUNCTION ai.nl_to_sql(
+    question TEXT,
+    allowed_relations TEXT[],
+    model TEXT DEFAULT NULL
+)
+RETURNS TEXT;
+
+FUNCTION ai.nl_query(
+    question TEXT,
+    allowed_relations TEXT[],
+    model TEXT DEFAULT NULL,
+    max_rows INT DEFAULT NULL
+)
+RETURNS JSONB;
+```
+
+`ai.nl_to_sql` gera SQL a partir de linguagem natural restrito a um allow-list de relações e o valida;
+`ai.nl_query` gera, valida e **executa** a consulta num sandbox read-only, retornando JSONB.
+
+Funções de configuração/templates/value-index entregues: `ai.nl_add_config`, `ai.nl_add_template`,
+`ai.nl_set_value_index`, `ai.nl_refresh_value_index`, `ai.nl_set_template_enabled`, `ai.nl_query_cfg`.
+
+### B. Postura de segurança (4 camadas)
+
+A geração NL→SQL é **fail-closed** por design:
+
+1. **Single-statement, SELECT/WITH-only** — apenas uma instrução de leitura é aceita.
+2. **Denylist de tokens** — palavras-chave perigosas (DDL/DML/funções administrativas) são bloqueadas.
+3. **Allowlist de relações via EXPLAIN** — só as relações em `allowed_relations` podem ser referenciadas
+   (verificado pelo plano EXPLAIN, não por parsing frágil).
+4. **Sandbox read-only** com `statement_timeout` — a execução ocorre num contexto somente-leitura limitado.
+
+### C. Gerar SQL a partir de linguagem natural
+
+```sql
+SELECT ai.nl_to_sql(
+    'What is the population of the United States?',
+    ARRAY['public.countries']
+);
+```
+
+Retorna a string SQL gerada, restrita às relações permitidas.
+
+### D. Executar uma pergunta em linguagem natural
+
+```sql
+SELECT ai.nl_query(
+    'List the 5 countries with the largest population',
+    ARRAY['public.countries'],
+    max_rows => 5
+);
+```
+
+Gera, valida e executa a consulta num sandbox read-only, retornando o resultado em JSONB.
+
+### E. Registrar configuração / template / value-index
+
+```sql
+SELECT ai.nl_add_config('my_app_cfg');
+SELECT ai.nl_add_template('my_app_cfg', 'top N countries by population', 'SELECT ...');
+SELECT ai.nl_set_value_index('my_app_cfg', 'public.countries.name');
+SELECT ai.nl_refresh_value_index('my_app_cfg');
+SELECT ai.nl_set_template_enabled('my_app_cfg', 1, TRUE);
+SELECT ai.nl_query_cfg('my_app_cfg', 'Which country has the most people?');
+```
+
+Configura a geração NL→SQL (contexto, templates, índice de valores) usando as funções `ai.nl_*`.
+
+---
+
+## 🎯 API-alvo / roadmap (não-shipped)
+
+**Tudo abaixo (a extensão `theodb_ai_nl` e sua superfície `g_create_configuration`, `get_sql`,
+`execute_nl_query`, `create_value_index`, `associate_concept_type`, `generate_schema_context`, etc.) descreve
+a superfície-alvo estilo AlloyDB e NÃO está implementada.** A superfície entregue é `ai.nl_to_sql` /
+`ai.nl_query` + funções `ai.nl_*` (acima). Não use os exemplos desta seção como código executável.
 
 1. **Instalar extensão**
 

@@ -99,11 +99,12 @@ Habilita o `pgvector`, chamado de `vector` no TheoDB.
 SELECT *
 FROM TABLE
 ORDER BY EMBEDDING_COLUMN::vector
-<=> theodb_ml.embedding('MODEL_IDVERSION_TAG', 'TEXT')
+<=> theodb.embed('TEXT', 'MODEL')
 LIMIT ROW_COUNT;
 ```
 
-Converte texto em embedding e compara com embeddings armazenados.
+Converte texto em embedding e compara com embeddings armazenados. A função é
+`theodb.embed(content text, model text DEFAULT NULL)` — conteúdo primeiro, modelo depois.
 
 12. **Cast explícito para `vector`**
 
@@ -116,7 +117,7 @@ Garante compatibilidade com operadores do `pgvector`.
 13. **Gerar embedding a partir de texto**
 
 ```sql
-theodb_ml.embedding('MODEL_IDVERSION_TAG', 'TEXT')
+theodb.embed('TEXT', 'MODEL')
 ```
 
 Transforma texto em vetor usando um modelo de embeddings.
@@ -124,18 +125,19 @@ Transforma texto em vetor usando um modelo de embeddings.
 14. **Modelo recomendado**
 
 ```sql
-theodb_ml.embedding('theodb-embedding-005', 'TEXT')
+theodb.embed('TEXT', 'text-embedding-3-small')
 ```
 
-Usa o modelo configurável de embeddings de texto.
+Usa o modelo configurável de embeddings de texto. Omitir o 2º argumento
+(`theodb.embed('TEXT')`) usa o modelo default.
 
-15. **Modelo com version tag**
+15. **Batch de embeddings**
 
 ```sql
-theodb_ml.embedding('theodb-embedding-005@VERSION_TAG', 'TEXT')
+theodb.embed_batch(ARRAY['TEXT A', 'TEXT B'], 'text-embedding-3-small')
 ```
 
-Fixa uma versão específica do modelo para evitar mudanças inesperadas.
+Gera embeddings para vários textos em uma chamada.
 
 16. **Busca com texto real**
 
@@ -143,7 +145,7 @@ Fixa uma versão específica do modelo para evitar mudanças inesperadas.
 SELECT *
 FROM products
 ORDER BY description_embedding::vector
-<=> theodb_ml.embedding('theodb-embedding-005', 'running shoes')
+<=> theodb.embed('running shoes', 'text-embedding-3-small')
 LIMIT 5;
 ```
 
@@ -155,7 +157,7 @@ Retorna os 5 produtos semanticamente mais próximos de “running shoes”.
 SELECT *
 FROM products
 ORDER BY description_embedding::vector
-<=> theodb_ml.embedding('theodb-embedding-005', 'waterproof backpack')
+<=> theodb.embed('waterproof backpack', 'text-embedding-3-small')
 LIMIT 10;
 ```
 
@@ -196,11 +198,11 @@ A ordenação crescente coloca os vetores mais semelhantes no topo.
 21. **Consulta sem bulk search**
 
 ```sql
--- Não suportado pelo theodb_scann:
--- múltiplas buscas vetoriais em lote na mesma operação
+-- Não suportado hoje:
+-- múltiplas buscas vetoriais KNN em lote na mesma operação
 ```
 
-O documento indica que bulk search não é suportado com `theodb_scann`.
+Bulk search (várias buscas KNN numa só operação) não é suportado hoje.
 
 22. **Uso consistente da métrica**
 
@@ -217,7 +219,7 @@ SELECT *
 FROM products
 WHERE category_id = 3
 ORDER BY description_embedding::vector
-<=> theodb_ml.embedding('theodb-embedding-005', 'comfortable shoes')
+<=> theodb.embed('comfortable shoes', 'text-embedding-3-small')
 LIMIT 5;
 ```
 
@@ -229,7 +231,7 @@ Combina filtro SQL tradicional com busca vetorial.
 SELECT product_id, name, price
 FROM products
 ORDER BY description_embedding::vector
-<=> theodb_ml.embedding('theodb-embedding-005', 'casual hoodie')
+<=> theodb.embed('casual hoodie', 'text-embedding-3-small')
 LIMIT 3;
 ```
 
@@ -240,7 +242,7 @@ Retorna apenas os campos necessários.
 ```sql
 SELECT *,
        description_embedding::vector
-       <=> theodb_ml.embedding('theodb-embedding-005', 'casual hoodie') AS distance
+       <=> theodb.embed('casual hoodie', 'text-embedding-3-small') AS distance
 FROM products
 ORDER BY distance
 LIMIT 3;
@@ -273,7 +275,7 @@ Usa um vetor já conhecido, sem chamar modelo de embedding.
 SELECT *
 FROM items
 ORDER BY item_embedding::vector
-<=> theodb_ml.embedding('theodb-embedding-005', :search_text)
+<=> theodb.embed(:search_text, 'text-embedding-3-small')
 LIMIT :limit;
 ```
 
@@ -285,7 +287,7 @@ Padrão para aplicações com parâmetros externos.
 SELECT document_id, title
 FROM documents
 ORDER BY content_embedding::vector
-<=> theodb_ml.embedding('theodb-embedding-005', 'refund policy')
+<=> theodb.embed('refund policy', 'text-embedding-3-small')
 LIMIT 5;
 ```
 
@@ -297,7 +299,7 @@ Aplica o padrão em documentos textuais.
 SELECT product_id, name
 FROM products
 ORDER BY description_embedding::vector
-<=> theodb_ml.embedding('theodb-embedding-005', 'lightweight running footwear')
+<=> theodb.embed('lightweight running footwear', 'text-embedding-3-small')
 LIMIT 5;
 ```
 

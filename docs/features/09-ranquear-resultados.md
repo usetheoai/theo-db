@@ -8,7 +8,16 @@
 > **Nota de honestidade:** a qualidade do ranking depende do modelo LLM configurado (modelo síncrono por-linha,
 > ADR `docs/adr/0007-synchronous-per-row-model-http.md`); não há benchmark de qualidade de ranking publicado.
 
-Esta página cobre o uso de `ai.rank()` para ranking e reranking de resultados de busca no TheoDB, incluindo o pipeline híbrido que combina busca vetorial (`pgvector`) com reranking semântico para aplicações RAG.
+Esta página cobre duas funções **distintas** entregues no TheoDB, incluindo o pipeline
+híbrido que combina busca vetorial (`pgvector`) com reranking semântico para aplicações RAG:
+
+- **`ai.rank(prompt text, model text DEFAULT NULL) RETURNS real`** — um scorer **escalar**:
+  recebe **um** prompt e devolve **um** score de relevância (float). Um prompt → um score.
+- **`ai.rerank(query text, documents text[], model text DEFAULT NULL, top_n int DEFAULT NULL) RETURNS TABLE(idx int, score real)`**
+  — o reranker **em lote** (cross-encoder): recebe a query + um array de documentos e devolve
+  `(idx, score)` por documento, onde **`idx` é 0-based** (o primeiro documento é `idx = 0`).
+
+Não confunda as duas: `ai.rank` é escalar (1→1); `ai.rerank` é o batch (N→N com `idx`/`score`).
 
 ---
 
@@ -34,55 +43,13 @@ Instala a extensão necessária para utilizar modelos de IA.
 
 ---
 
-# 3. Atualizar extensão
+# 3. Assinatura básica de `ai.rerank` (batch)
 
 ```sql
-ALTER EXTENSION theodb_ml UPDATE;
-```
-
-Atualiza a extensão para uma versão compatível.
-
----
-
-# 4. Habilitar AI Query Engine na sessão
-
-```sql
-SET theodb_ml.enable_ai_query_engine = on;
-```
-
-Ativa o mecanismo de IA para a sessão atual.
-
----
-
-# 5. Habilitar AI Query Engine para o banco
-
-```sql
-ALTER DATABASE my_database
-SET theodb_ml.enable_ai_query_engine = 'on';
-```
-
-Ativa permanentemente para um banco específico.
-
----
-
-# 6. Habilitar AI Query Engine para um usuário
-
-```sql
-ALTER ROLE postgres
-SET theodb_ml.enable_ai_query_engine = 'on';
-```
-
-Ativa para todas as sessões do usuário.
-
----
-
-# 7. Assinatura básica de `ai.rank`
-
-```sql
-SELECT ai.rank(
-    model_id => 'MODEL_ID',
-    search_string => 'SEARCH_STRING',
-    documents => ARRAY[
+SELECT idx, score
+FROM ai.rerank(
+    'SEARCH_STRING',
+    ARRAY[
         'DOCUMENT_1',
         'DOCUMENT_2',
         'DOCUMENT_3'
@@ -90,41 +57,43 @@ SELECT ai.rank(
 );
 ```
 
-Classifica documentos de acordo com sua relevância para uma consulta.
+Assinatura entregue: `ai.rerank(query text, documents text[], model text DEFAULT NULL, top_n int DEFAULT NULL)`.
+Classifica documentos de acordo com sua relevância para uma consulta, retornando
+`(idx, score)` por documento — `idx` é **0-based**.
 
 ---
 
-# 8. Definir `model_id`
+# 8. Definir o modelo (opcional)
 
 ```sql
-model_id => 'theodb-ranker-default-003'
+ai.rerank('query', ARRAY['a','b'], model => 'theodb-ranker-default-003')
 ```
 
-Especifica o modelo de ranking utilizado.
+O 3º argumento (`model`) é opcional; quando `NULL` usa o modelo padrão configurado.
 
 ---
 
-# 9. Definir `search_string`
+# 9. Definir a query
 
 ```sql
-search_string => 'Affordable family-friendly vacation spots'
+'Affordable family-friendly vacation spots'
 ```
 
-Texto utilizado como critério de busca.
+Texto utilizado como critério de busca (1º argumento posicional).
 
 ---
 
 # 10. Definir documentos
 
 ```sql
-documents => ARRAY[
+ARRAY[
     'Documento A',
     'Documento B',
     'Documento C'
 ]
 ```
 
-Lista de documentos que serão classificados.
+Lista de documentos que serão classificados (2º argumento).
 
 ---
 
@@ -132,12 +101,11 @@ Lista de documentos que serão classificados.
 
 ```sql
 SELECT
-    index,
+    idx,
     score
-FROM ai.rank(
-    model_id => 'theodb-ranker-default-003',
-    search_string => 'Affordable family-friendly vacation spots',
-    documents => ARRAY[
+FROM ai.rerank(
+    'Affordable family-friendly vacation spots',
+    ARRAY[
         'Luxury resorts in South Korea',
         'Family vacation packages for Vietnam',
         'Budget beaches in Thailand'
@@ -145,7 +113,7 @@ FROM ai.rank(
 );
 ```
 
-Retorna a posição (`index`) e o score de relevância de cada documento.
+Retorna a posição **0-based** (`idx`) e o score de relevância de cada documento.
 
 ---
 
@@ -153,12 +121,11 @@ Retorna a posição (`index`) e o score de relevância de cada documento.
 
 ```sql
 SELECT
-    index,
+    idx,
     score
-FROM ai.rank(
-    model_id => 'theodb-ranker-default-003',
-    search_string => 'TheoDB AI database',
-    documents => ARRAY[
+FROM ai.rerank(
+    'TheoDB AI database',
+    ARRAY[
         'Alloys are combinations of metals',
         'Enterprise-ready PostgreSQL database',
         'Apartment heating systems'
@@ -170,6 +137,19 @@ Ordena documentos conforme sua relevância para a consulta.
 
 ---
 
+# 12b. Score escalar com `ai.rank`
+
+```sql
+SELECT ai.rank(
+    'A busca "PostgreSQL vetorial" é relevante para: Enterprise-ready PostgreSQL database'
+);
+```
+
+`ai.rank(prompt text, model text DEFAULT NULL) RETURNS real` avalia **um** prompt e
+devolve **um** float de relevância. Distinta de `ai.rerank` (que é batch, N→N).
+
+---
+
 # 13. Recuperar Top-N após ranking vetorial
 
 ```sql
@@ -177,12 +157,12 @@ WITH initial_ranking AS (
     SELECT
         id,
         description,
-        ROW_NUMBER() OVER() AS ref_number
+        ROW_NUMBER() OVER () - 1 AS idx
     FROM product
     ORDER BY embedding
-        <=> theodb_ml.embedding(
-            'theodb-embedding-001',
-            'personal fitness equipment'
+        <=> theodb.embed(
+            'personal fitness equipment',
+            'theodb-embedding-001'
         )::vector
     LIMIT 10
 )
@@ -190,26 +170,28 @@ SELECT *
 FROM initial_ranking;
 ```
 
-Obtém inicialmente os 10 documentos mais próximos via busca vetorial.
+Obtém inicialmente os 10 documentos mais próximos via busca vetorial. Note o
+`ROW_NUMBER() OVER () - 1` — alinhado ao `idx` **0-based** de `ai.rerank`.
 
 ---
 
 # 14. Gerar numeração dos documentos
 
 ```sql
-ROW_NUMBER() OVER() AS ref_number
+ROW_NUMBER() OVER () - 1 AS idx
 ```
 
-Cria uma referência utilizada posteriormente no reranking.
+Cria uma referência **0-based** utilizada posteriormente no reranking (casa com o
+`idx` retornado por `ai.rerank`).
 
 ---
 
 # 15. Buscar embedding
 
 ```sql
-theodb_ml.embedding(
-    'theodb-embedding-001',
-    'personal fitness equipment'
+theodb.embed(
+    'personal fitness equipment',
+    'theodb-embedding-001'
 )::vector
 ```
 
@@ -240,31 +222,31 @@ Seleciona apenas os candidatos para reranking.
 # 18. Agrupar documentos para o ranking
 
 ```sql
-ARRAY_AGG(description ORDER BY ref_number)
+ARRAY_AGG(description ORDER BY idx)
 ```
 
 Converte os candidatos em um array para envio ao modelo.
 
 ---
 
-# 19. Reranking com `ai.rank`
+# 19. Reranking com `ai.rerank`
 
 ```sql
 SELECT
-    index,
+    idx,
     score
-FROM ai.rank(
-    model_id => 'theodb-ranker-default-003',
-    search_string => 'personal fitness equipment',
-    documents => (
-        SELECT ARRAY_AGG(description ORDER BY ref_number)
+FROM ai.rerank(
+    'personal fitness equipment',
+    (
+        SELECT ARRAY_AGG(description ORDER BY idx)
         FROM initial_ranking
     ),
     top_n => 5
 );
 ```
 
-Reordena semanticamente os candidatos da busca vetorial.
+Reordena semanticamente os candidatos da busca vetorial. O `idx` retornado é
+**0-based** e casa com o `idx` do CTE.
 
 ---
 
@@ -289,8 +271,8 @@ SELECT
     description
 FROM initial_ranking,
      reranked_results
-WHERE initial_ranking.ref_number =
-      reranked_results.index
+WHERE initial_ranking.idx =
+      reranked_results.idx
 ORDER BY
       reranked_results.score DESC;
 ```
@@ -302,11 +284,12 @@ Fluxo completo de reranking.
 # 22. Relacionar índices
 
 ```sql
-WHERE initial_ranking.ref_number =
-      reranked_results.index
+WHERE initial_ranking.idx =
+      reranked_results.idx
 ```
 
-Relaciona os documentos originais ao ranking produzido pela IA.
+Relaciona os documentos originais ao ranking produzido pela IA. Ambos os lados são
+**0-based** (`ROW_NUMBER() OVER () - 1` no CTE, `idx` de `ai.rerank`) — sem off-by-one.
 
 ---
 
@@ -328,20 +311,20 @@ WITH initial_ranking AS (
         product_id,
         name,
         review,
-        ROW_NUMBER() OVER() AS ref_number
+        ROW_NUMBER() OVER () - 1 AS idx
     FROM user_reviews
     ORDER BY
         review_desc_embedding
         <=>
-        theodb_ml.embedding(
-            'theodb-embedding-001',
-            'good desserts'
+        theodb.embed(
+            'good desserts',
+            'theodb-embedding-001'
         )::vector
     LIMIT 10
 )
 ```
 
-Obtém candidatos utilizando embeddings das avaliações.
+Obtém candidatos utilizando embeddings das avaliações (`idx` **0-based**).
 
 ---
 
@@ -349,15 +332,15 @@ Obtém candidatos utilizando embeddings das avaliações.
 
 ```sql
 SELECT
-    index,
+    idx,
     score
-FROM ai.rank(
-    model_id => 'theodb-ranker-512',
-    search_string => 'good desserts',
-    documents => (
-        SELECT ARRAY_AGG(review ORDER BY ref_number)
+FROM ai.rerank(
+    'good desserts',
+    (
+        SELECT ARRAY_AGG(review ORDER BY idx)
         FROM initial_ranking
     ),
+    model => 'theodb-ranker-512',
     top_n => 5
 );
 ```
@@ -374,8 +357,8 @@ SELECT
     name
 FROM initial_ranking,
      reranked_results
-WHERE initial_ranking.ref_number =
-      reranked_results.index
+WHERE initial_ranking.idx =
+      reranked_results.idx
 ORDER BY
       reranked_results.score DESC;
 ```
@@ -387,7 +370,7 @@ Retorna os produtos associados aos melhores documentos.
 # 27. Utilizar `theodb-ranker-default-003`
 
 ```sql
-model_id => 'theodb-ranker-default-003'
+ai.rerank('query', ARRAY[...], model => 'theodb-ranker-default-003')
 ```
 
 Modelo de ranking semântico padrão.
@@ -397,7 +380,7 @@ Modelo de ranking semântico padrão.
 # 28. Utilizar `theodb-ranker-512`
 
 ```sql
-model_id => 'theodb-ranker-512'
+ai.rerank('query', ARRAY[...], model => 'theodb-ranker-512')
 ```
 
 Modelo alternativo para reranking.
@@ -413,9 +396,9 @@ SELECT
 FROM product
 ORDER BY
     embedding
-    <=> theodb_ml.embedding(
-        'theodb-embedding-001',
-        'fitness equipment'
+    <=> theodb.embed(
+        'fitness equipment',
+        'theodb-embedding-001'
     )::vector
 LIMIT 10;
 ```
@@ -431,27 +414,27 @@ WITH initial_ranking AS (
     SELECT
         id,
         description,
-        ROW_NUMBER() OVER() AS ref_number
+        ROW_NUMBER() OVER () - 1 AS idx
     FROM product
     ORDER BY
         embedding
-        <=> theodb_ml.embedding(
-            'theodb-embedding-001',
-            'fitness equipment'
+        <=> theodb.embed(
+            'fitness equipment',
+            'theodb-embedding-001'
         )::vector
     LIMIT 10
 ),
 reranked_results AS (
     SELECT
-        index,
+        idx,
         score
-    FROM ai.rank(
-        model_id => 'theodb-ranker-default-003',
-        search_string => 'fitness equipment',
-        documents => (
-            SELECT ARRAY_AGG(description ORDER BY ref_number)
+    FROM ai.rerank(
+        'fitness equipment',
+        (
+            SELECT ARRAY_AGG(description ORDER BY idx)
             FROM initial_ranking
         ),
+        model => 'theodb-ranker-default-003',
         top_n => 5
     )
 )
@@ -460,7 +443,7 @@ SELECT
     description
 FROM initial_ranking,
      reranked_results
-WHERE initial_ranking.ref_number = reranked_results.index
+WHERE initial_ranking.idx = reranked_results.idx
 ORDER BY reranked_results.score DESC;
 ```
 
@@ -469,6 +452,6 @@ Fluxo completo recomendado para aplicações RAG (Retrieval-Augmented Generation
 1. gera o embedding da consulta;
 2. executa busca vetorial (`pgvector`);
 3. recupera os candidatos mais próximos;
-4. envia os candidatos ao modelo `ai.rank`;
-5. reranqueia semanticamente;
+4. envia os candidatos ao reranker em lote `ai.rerank`;
+5. reranqueia semanticamente (`idx` **0-based** casa com `ROW_NUMBER() OVER () - 1`);
 6. retorna os documentos em ordem de maior relevância.
