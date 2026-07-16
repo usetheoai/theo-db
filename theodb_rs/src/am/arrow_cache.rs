@@ -85,7 +85,25 @@ unsafe fn get_or_build(rel_oid: pg_sys::Oid) -> Result<RecordBatch, String> {
         }
     }
     let batch = build_cache(rel_oid, &cols)?;
-    CACHE.with(|c| c.borrow_mut().insert(oid, (batch.clone(), cur_gen)));
+    // M104 — bound the per-backend cache: evict entries until under the entry cap before inserting a new table, so
+    // a backend that columnarizes many tables cannot grow the cache without limit (the audit's unbounded-cache
+    // finding). `theodb.arrow_cache_max_entries` (default 16). Eviction is arbitrary (HashMap order) — a coarse
+    // size bound, not strict LRU; the generation gate makes a re-fetch of an evicted table simply rebuild.
+    let cap = crate::pg::guc("theodb.arrow_cache_max_entries")
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(16)
+        .max(1);
+    CACHE.with(|c| {
+        let mut m = c.borrow_mut();
+        while m.len() >= cap && !m.contains_key(&oid) {
+            if let Some(&k) = m.keys().next() {
+                m.remove(&k);
+            } else {
+                break;
+            }
+        }
+        m.insert(oid, (batch.clone(), cur_gen));
+    });
     Ok(batch)
 }
 

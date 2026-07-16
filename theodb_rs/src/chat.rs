@@ -195,11 +195,12 @@ pub(crate) fn ai_generate_batch(prompts: &[Option<&str>], model: Option<&str>) -
         );
     }
 
-    let system = format!(
-        "You are given {n} numbered items. Respond with ONLY a JSON array of exactly {n} strings — the \
-         answer to each item, in order. No prose, no markdown."
-    );
-    run_batch_chat(prompts, &system, model)
+    run_batch_chat(prompts, |k| {
+        format!(
+            "You are given {k} numbered items. Respond with ONLY a JSON array of exactly {k} strings — the \
+             answer to each item, in order. No prose, no markdown."
+        )
+    }, model)
 }
 
 /// M102 — batched BOOLEAN inference: N yes/no questions answered in ONE round-trip, each parsed to a bool. The
@@ -214,29 +215,42 @@ pub(crate) fn ai_if_batch_answers(prompts: &[Option<&str>], model: Option<&str>)
     if prompts.iter().any(|p| p.is_none()) {
         err_input("ai.if_batch: prompts must not contain NULL elements (breaks the N-in/N-out alignment)");
     }
-    let system = format!(
-        "You are given {n} numbered yes/no questions. Respond with ONLY a JSON array of exactly {n} strings \
-         — 'yes' or 'no' for each, in order. No prose, no markdown."
-    );
-    run_batch_chat(prompts, &system, model)
-        .iter()
-        .map(|o| o.as_deref().and_then(parse_bool))
-        .collect()
+    run_batch_chat(prompts, |k| {
+        format!(
+            "You are given {k} numbered yes/no questions. Respond with ONLY a JSON array of exactly {k} strings \
+             — 'yes' or 'no' for each, in order. No prose, no markdown."
+        )
+    }, model)
+    .iter()
+    .map(|o| o.as_deref().and_then(parse_bool))
+    .collect()
 }
 
-/// The shared batched round-trip: number the (non-NULL) items into one user message, one `chat()` call under
-/// `system`, parse the reply as a JSON array of exactly N (string|null). Callers guarantee `!prompts.is_empty()`
-/// and no NULL element. DRY core of `ai_generate_batch` (generative) and `ai_if_batch_answers` (boolean).
-fn run_batch_chat(prompts: &[Option<&str>], system: &str, model: Option<&str>) -> Vec<Option<String>> {
-    let n = prompts.len();
-    let user = prompts
-        .iter()
-        .enumerate()
-        .map(|(i, p)| format!("{}. {}", i + 1, p.unwrap()))
-        .collect::<Vec<_>>()
-        .join("\n");
-    let out = chat(Some(&user), Some(system), model);
-    parse_batch(&out, n)
+/// The shared batched round-trip: number the (non-NULL) items into one user message, one `chat()` call under the
+/// per-chunk `system` (built by `system_for(chunk_len)`), parse the reply as a JSON array of exactly chunk_len
+/// (string|null). M104 (Q3): the prompts are CHUNKED into `theodb.ai_max_batch`-sized groups (default 256) — a
+/// huge array becomes several bounded round-trips (each ≤ max) instead of ONE giant request/response that would
+/// blow the model context / payload limit. Order is preserved across chunks. DRY core of `ai_generate_batch` +
+/// `ai_if_batch_answers`. Callers guarantee `!prompts.is_empty()` and no NULL element.
+fn run_batch_chat(
+    prompts: &[Option<&str>],
+    system_for: impl Fn(usize) -> String,
+    model: Option<&str>,
+) -> Vec<Option<String>> {
+    let max = guc("theodb.ai_max_batch").and_then(|s| s.parse::<usize>().ok()).unwrap_or(256).max(1);
+    let mut out = Vec::with_capacity(prompts.len());
+    for chunk in prompts.chunks(max) {
+        let k = chunk.len();
+        let user = chunk
+            .iter()
+            .enumerate()
+            .map(|(i, p)| format!("{}. {}", i + 1, p.unwrap()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let reply = chat(Some(&user), Some(&system_for(k)), model);
+        out.extend(parse_batch(&reply, k));
+    }
+    out
 }
 
 /// Resolve the chat endpoint (with SSRF http(s) guard), model, and optional api key from the `theodb.llm_*`
