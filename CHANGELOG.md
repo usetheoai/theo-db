@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- AI predicates as SET-oriented, planner-optimizable operators (M102): `ai.if_batch(condition, vals[])` answers N rows in ONE inference round-trip (vs one HTTP call per row), and `ai.if_costly(condition, val)` is declared with a high COST so the planner runs cheap relational filters first (dependency-safe push-down, delegated to `order_qual_clauses`). New `ai.call_count()` / `ai.call_reset()` expose the inference round-trip count as a runtime metric. A hermetic `theodb.llm_test_model = 'parity'` proves the batched operator equals the per-row `ai.if` without a live LLM (#M102).
 
 ### Changed
 
