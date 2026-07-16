@@ -1515,7 +1515,7 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 
 ---
 
-## M104 — [ ] system-design hardening: fechar as findings da auditoria (health 4.2 → ≥4.9/5) *(gated M103)*
+## M104 — [x] system-design hardening: fechar as findings da auditoria (health 4.2 → ≥4.9/5) *(gated M103)*
 
 > Added 2026-07-16 by `/roadmap-feature` (slug: `system-design-hardening-49`). Fonte: auditoria Staff-level
 > `/loop-system-design` (`system-design-output/final_report.md`, overall **4.2/5**). See CHANGELOG `[Unreleased] § Added`.
