@@ -431,10 +431,19 @@ pub unsafe extern "C-unwind" fn columnar_slot_callbacks(
 /// Scan cursor state. Embeds `TableScanDescData` as the FIRST field (C-struct-inheritance idiom) so a
 /// `TableScanDesc` pointer round-trips, plus a boxed materialization of every visible row's bytes and a cursor.
 #[repr(C)]
+// M104 (Q2) — a LAZY, one-stripe-at-a-time scan cursor. `columnar_scan_begin` resolves the visible-stripe SET
+// once (MVCC-correct, snapshot-fixed for the scan's life), then `getnextslot` decodes ONE stripe into `current`
+// only when the previous one is exhausted, and drains the same-xact WRITE_STATES pending rows as the FINAL batch.
+// Peak scan memory is O(one stripe ≈ maintenance_work_mem), not O(the whole visible table) — the Arrow
+// RecordBatch / DuckDB row-group-at-a-time streaming pattern. Row ORDER is byte-identical to the old eager
+// materialization (stripes in catalog order, then pending), so scan results are unchanged.
 struct ColumnarScanState {
     base: pg_sys::TableScanDescData,
-    rows: *mut Vec<Vec<u8>>, // Rust-heap Box, freed in scan_end
+    stripes: *mut Vec<StripeMeta>, // the visible stripe set (resolved once at begin — MVCC-fixed)
+    stripe_idx: usize,
+    current: *mut Vec<Vec<u8>>, // the currently-decoded stripe's rows (or the pending tail); freed on advance/end
     cursor: usize,
+    pending_loaded: bool, // the WRITE_STATES same-xact tail has been loaded as the final batch
 }
 
 /// Per-column layout descriptor derived from the live tupdesc (never from disk): fixed width (`Some(attlen)`) vs
@@ -627,28 +636,10 @@ unsafe fn decode_stripe(
     Ok(())
 }
 
-/// Materialize the rows VISIBLE to this scan: (1) the committed stripes visible under the current snapshot (MVCC
-/// delegated to the `columnar.stripe` heap catalog), decoded column-major; then (2) this backend's not-yet-flushed
-/// pending rows (thread-local — visible only to its own xact, so no cross-xact leak). Flushing is done at pre-commit,
-/// NOT here — reading is side-effect-free.
-unsafe fn materialize_rows(rel: pg_sys::Relation) -> Result<Vec<Vec<u8>>, String> {
-    unsafe {
-        let tupdesc = (*rel).rd_att;
-        let natts = (*tupdesc).natts as usize;
-        let cols = (0..natts).map(|i| coldesc(tupdesc, i)).collect::<Result<Vec<_>, _>>()?;
-        let mut out = Vec::new();
-        for sm in read_visible_stripes((*rel).rd_id)? {
-            decode_stripe(rel, sm.header_block, tupdesc, &cols, natts, &mut out)?;
-        }
-        let oid = (*rel).rd_id.to_u32();
-        WRITE_STATES.with(|w| {
-            if let Some(p) = w.borrow().get(&oid) {
-                out.extend(p.rows.iter().cloned());
-            }
-        });
-        Ok(out)
-    }
-}
+// M104 (Q2): the eager `materialize_rows` (decode ALL visible stripes + pending into one Vec up front) was replaced
+// by the lazy one-stripe-at-a-time `load_next_batch` (peak memory O(one stripe), not O(the whole table)). The MVCC
+// visibility model is unchanged (the stripe set is resolved once at scan_begin under the scan snapshot; pending rows
+// are the same-xact tail); the row ORDER (stripes in catalog order, then pending) is byte-identical.
 
 /// M100 — resolve a column name to its 0-based attribute index (for projection pushdown). Returns None if absent.
 pub(crate) unsafe fn column_index(rel: pg_sys::Relation, name: &str) -> Option<usize> {
@@ -752,8 +743,10 @@ pub unsafe extern "C-unwind" fn columnar_scan_begin(
     flags: u32,
 ) -> pg_sys::TableScanDesc {
     unsafe {
-        let rows = match materialize_rows(rel) {
-            Ok(r) => r,
+        // Resolve the visible stripe SET once, under this scan's snapshot (MVCC-correct + fixed for the scan life).
+        // Decode is deferred to getnextslot — peak memory is one stripe, not the whole table.
+        let stripes = match read_visible_stripes((*rel).rd_id) {
+            Ok(s) => s,
             Err(e) => pg_sys::error!("{e}"),
         };
         let scan = pg_sys::palloc0(size_of::<ColumnarScanState>()) as *mut ColumnarScanState;
@@ -763,9 +756,54 @@ pub unsafe extern "C-unwind" fn columnar_scan_begin(
         (*scan).base.rs_key = key;
         (*scan).base.rs_parallel = pscan;
         (*scan).base.rs_flags = flags;
-        (*scan).rows = Box::into_raw(Box::new(rows));
+        (*scan).stripes = Box::into_raw(Box::new(stripes));
+        (*scan).stripe_idx = 0;
+        (*scan).current = Box::into_raw(Box::new(Vec::new()));
         (*scan).cursor = 0;
+        (*scan).pending_loaded = false;
         scan as pg_sys::TableScanDesc
+    }
+}
+
+/// Decode the next batch into `(*st).current`: the next visible stripe (catalog order), or — when all stripes are
+/// consumed — the same-xact WRITE_STATES pending rows as the FINAL batch. Returns false when there is nothing left.
+/// The row order matches the old eager materialization exactly (byte-identical scan results).
+unsafe fn load_next_batch(st: *mut ColumnarScanState) -> bool {
+    unsafe {
+        let rel = (*st).base.rs_rd;
+        let tupdesc = (*rel).rd_att;
+        let natts = (*tupdesc).natts as usize;
+        let stripes = &*(*st).stripes;
+        // free the previous batch
+        drop(Box::from_raw((*st).current));
+        let mut batch: Vec<Vec<u8>> = Vec::new();
+        let loaded_a_source;
+        if (*st).stripe_idx < stripes.len() {
+            let hb = stripes[(*st).stripe_idx].header_block;
+            (*st).stripe_idx += 1;
+            let cols = match (0..natts).map(|i| coldesc(tupdesc, i)).collect::<Result<Vec<_>, _>>() {
+                Ok(c) => c,
+                Err(e) => pg_sys::error!("{e}"),
+            };
+            if let Err(e) = decode_stripe(rel, hb, tupdesc, &cols, natts, &mut batch) {
+                pg_sys::error!("{e}");
+            }
+            loaded_a_source = true;
+        } else if !(*st).pending_loaded {
+            (*st).pending_loaded = true;
+            let oid = (*rel).rd_id.to_u32();
+            WRITE_STATES.with(|w| {
+                if let Some(p) = w.borrow().get(&oid) {
+                    batch = p.rows.clone();
+                }
+            });
+            loaded_a_source = true;
+        } else {
+            loaded_a_source = false; // all stripes consumed + pending drained → terminal
+        }
+        (*st).current = Box::into_raw(Box::new(batch));
+        (*st).cursor = 0;
+        loaded_a_source
     }
 }
 
@@ -774,8 +812,11 @@ pub unsafe extern "C-unwind" fn columnar_scan_end(scan: pg_sys::TableScanDesc) {
     unsafe {
         if !scan.is_null() {
             let st = scan as *mut ColumnarScanState;
-            if !(*st).rows.is_null() {
-                drop(Box::from_raw((*st).rows)); // free the Rust-heap materialization
+            if !(*st).stripes.is_null() {
+                drop(Box::from_raw((*st).stripes));
+            }
+            if !(*st).current.is_null() {
+                drop(Box::from_raw((*st).current)); // free the current stripe batch
             }
             pg_sys::pfree(scan as *mut std::os::raw::c_void);
         }
@@ -792,7 +833,12 @@ pub unsafe extern "C-unwind" fn columnar_scan_rescan(
     _allow_pagemode: bool,
 ) {
     unsafe {
+        // reset ALL cursors so the scan restarts from the first stripe (R3 — a partial reset would skip rows).
         let st = scan as *mut ColumnarScanState;
+        (*st).stripe_idx = 0;
+        (*st).pending_loaded = false;
+        drop(Box::from_raw((*st).current));
+        (*st).current = Box::into_raw(Box::new(Vec::new()));
         (*st).cursor = 0;
     }
 }
@@ -807,12 +853,16 @@ pub unsafe extern "C-unwind" fn columnar_scan_getnextslot(
 ) -> bool {
     unsafe {
         let st = scan as *mut ColumnarScanState;
-        let rows = &*(*st).rows;
-        if (*st).cursor >= rows.len() {
-            pg_sys::ExecClearTuple(slot);
-            return false;
+        // Advance to a batch that has a row to emit (decoding the next stripe / the pending tail lazily). An
+        // empty stripe is skipped by looping; when no source remains, the scan is done.
+        while (*st).cursor >= (&*(*st).current).len() {
+            if !load_next_batch(st) {
+                pg_sys::ExecClearTuple(slot);
+                return false;
+            }
         }
-        let bytes = &rows[(*st).cursor];
+        let current = &*(*st).current;
+        let bytes = &current[(*st).cursor];
         (*st).cursor += 1;
 
         let mut htup: pg_sys::HeapTupleData = std::mem::zeroed();
@@ -1303,6 +1353,32 @@ mod tests {
         .unwrap();
         assert!(stripes > 1, "incremental flush produced MULTIPLE stripes (got {stripes}) — write memory is bounded, not O(N)");
         Spi::run("DROP TABLE m104_inc").unwrap();
+    }
+
+    // M104 (Q2) — the LAZY streaming scan returns the identical rows (count, sum, order) as an eager scan would,
+    // across MULTIPLE stripes (via a low mwm) + same-xact pending rows. Peak scan memory is one stripe, not the
+    // whole table, but the result is byte-identical.
+    #[pg_test]
+    fn m104_streaming_scan_matches_full_result() {
+        Spi::run("SET maintenance_work_mem = '1MB'").unwrap();
+        Spi::run("CREATE TABLE m104_scan (a int, b text) USING theodb_columnar").unwrap();
+        // committed rows across multiple stripes
+        Spi::run("INSERT INTO m104_scan SELECT g, 'r'||g FROM generate_series(1, 60000) g").unwrap();
+        let cnt = Spi::get_one::<i64>("SELECT count(*) FROM m104_scan").unwrap().unwrap();
+        assert_eq!(cnt, 60000, "streaming scan over multiple stripes returns every row");
+        let sum = Spi::get_one::<i64>("SELECT sum(a) FROM m104_scan").unwrap().unwrap();
+        assert_eq!(sum, 60000i64 * 60001 / 2, "values intact across lazily-decoded stripes");
+        // a specific row (order + content) and the last row
+        let mid = Spi::get_one::<String>("SELECT b FROM m104_scan WHERE a = 30000").unwrap().unwrap();
+        assert_eq!(mid, "r30000");
+        // ordered read still monotonic (streaming preserves stripe/catalog order → row order)
+        let ordered = Spi::get_one::<i64>(
+            "SELECT count(*) FROM (SELECT a, lag(a) OVER () AS prev FROM m104_scan) t WHERE prev IS NOT NULL AND a <= prev",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(ordered, 0, "streaming scan preserves the stored row order");
+        Spi::run("DROP TABLE m104_scan").unwrap();
     }
 
     // M104 H1 — self-referential INSERT under incremental flush: `INSERT INTO c SELECT FROM c` must honor INSERT
