@@ -72,6 +72,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 - **Vector research (E2 impl T1.1): `theodb_symqg` co-located page layout** (`am/page/symqg.rs`). Persisted per-vertex row `[nbr_ids][1-bit sign bytes][nr/w factors]` (degree padded to 32; sentinel-skipped slots) + `SymqgMeta` + directory; rows are chunked so a high-dim×degree row spans pages (EC-2). Pure codec (SymqgMeta encode/decode, pack_row/decode_row, sign-bit pack) proven 6/6 standalone (round-trip, bad-magic reject, padding, row-spans-pages, truncated→typed-Err EC-7); crate compiles clean. Foundation for `ambuild_symqg`/`scan_symqg_structured`.
 
+- **Vector research (E2 impl T2.1+T3.1): `theodb_symqg` build + scan WORKING in-PG** (`am/build.rs` ambuild_symqg, `am/scan.rs` scan_symqg_structured, `am/mod.rs` handler+opclass). `CREATE INDEX … USING theodb_symqg` persists the co-located graph (HNSW base adjacency + 1-bit sign codes + rotated vector P·x per row); `SELECT … ORDER BY e <-> q LIMIT k` beam-searches reading one row/hop, reusing the off-PG-validated `estimate_sign` + the rotation trick (exact dist=‖q_r‖² and q_r=rot_q−rot in one O(D) subtraction, no per-hop rotate). L2-only (fail-fast), EC-1 build cancellation, EC-3 query-dim guard, sqrt-L2 scale (E1 lesson). **Measured: recall@10=1.0000 vs exact brute-force** (2000×16d, 20 queries) — correctness proven end-to-end. Next: T4.1 reloptions/VACUUM/crash + T5.1 SIFT1M A/B vs theodb_hnsw.
+
 ### Changed
 
 ### Deprecated

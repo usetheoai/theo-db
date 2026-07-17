@@ -196,6 +196,14 @@ pub extern "C-unwind" fn amrescan(
             state.ef = ef;
             state.iterative = crate::am::guc::max_scan_tuples() > 0;
             scan_hnsw_structured(rel, &query, ef)
+        } else if magic == crate::am::page::SYMQG_MAGIC {
+            // E2: SymphonyQG co-located quantized graph — beam search reading rows per hop.
+            let ef = crate::am::guc::ef_search();
+            state.query = query.clone();
+            state.rel = rel;
+            state.ef = ef;
+            state.iterative = false; // iterative-grow scan is a follow-up; the ORDER BY LIMIT path is served
+            scan_symqg_structured(rel, &query, ef)
         } else {
             scan_blob(rel, &query)
         };
@@ -238,6 +246,126 @@ unsafe fn gather_hnsw_candidates(rel: pg_sys::Relation, query: &[f32], ef: usize
     };
     for (tidv, v) in pending {
         results.push((tidv, metric.dist(query, &v)));
+    }
+    results
+}
+
+/// E2 T3.1 — SymphonyQG scan: beam search over the persisted co-located graph, reading one vertex row per hop.
+/// Reuses the off-PG-validated estimator (`symqg_spike::estimate_sign`) and the rotation trick: the row stores
+/// `rot = P·x_p`, so `q_r = rot_q − rot_p` gives BOTH the exact distance (`‖q_r‖²`, rotation-invariant) and the
+/// per-neighbour estimate in one O(D) subtraction (no per-hop rotate — the spike's speed lever). Answer = the k
+/// smallest EXACT among popped vertices (no re-rank), mapped ordinal→tid; pending rows scored exact.
+unsafe fn scan_symqg_structured(rel: pg_sys::Relation, query: &[f32], ef: usize) -> BinaryHeap<Reverse<Scored>> {
+    heapify(gather_symqg_candidates(rel, query, ef))
+}
+
+/// Ordered f64 for the beam heaps (all distances ≥ 0, finite here).
+#[derive(Clone, Copy, PartialEq)]
+struct OrdF(f64);
+impl Eq for OrdF {}
+impl PartialOrd for OrdF {
+    fn partial_cmp(&self, o: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(o))
+    }
+}
+impl Ord for OrdF {
+    fn cmp(&self, o: &Self) -> std::cmp::Ordering {
+        self.0.partial_cmp(&o.0).unwrap_or(std::cmp::Ordering::Equal)
+    }
+}
+
+unsafe fn gather_symqg_candidates(rel: pg_sys::Relation, query: &[f32], ef: usize) -> Vec<(i64, f64)> {
+    use crate::am::page;
+    let meta = match page::read_symqg_meta(rel) {
+        Ok(m) => m,
+        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+    };
+    let metric = match Metric::from_tag(meta.metric_tag) {
+        Some(m) => m,
+        None => pg_sys::error!("theodb am scan: unknown metric tag"),
+    };
+    if meta.n == 0 {
+        return Vec::new(); // empty index (EC-4)
+    }
+    if query.len() != meta.dim as usize {
+        pg_sys::error!("theodb_symqg: query dim {} != index dim {}", query.len(), meta.dim); // EC-3
+    }
+    let dim = meta.dim as usize;
+    let degree = meta.degree_bound as usize;
+    let rot_bytes = match page::read_chunked(rel, meta.gen_base, meta.rot_codebook_npages) {
+        Ok(b) => b,
+        Err(e) => pg_sys::error!("theodb am scan (rotation): {e}"),
+    };
+    let rq = match crate::vec::rabitq::RabitqQuantizer::from_meta_bytes(&rot_bytes) {
+        Ok(q) => q,
+        Err(e) => pg_sys::error!("theodb am scan (rabitq): {e}"),
+    };
+    let rot_q = rq.rotate(query);
+    let dir = match page::read_symqg_dir(rel, &meta) {
+        Ok(d) => d,
+        Err(e) => pg_sys::error!("theodb am scan (dir): {e}"),
+    };
+    let tids = match page::read_symqg_tids(rel, &meta) {
+        Ok(t) => t,
+        Err(e) => pg_sys::error!("theodb am scan (tids): {e}"),
+    };
+    let ef = ef.max(1);
+    let read_row = |ord: u32| -> page::SymqgRow {
+        let (fb, np) = dir[ord as usize];
+        match page::read_symqg_row(rel, fb, np, dim, degree) {
+            Ok(r) => r,
+            Err(e) => pg_sys::error!("theodb am scan (row {ord}): {e}"),
+        }
+    };
+    let mut visited: std::collections::HashSet<u32> = std::collections::HashSet::new();
+    let mut cand: BinaryHeap<Reverse<(OrdF, u32)>> = BinaryHeap::new();
+    let mut beamw: BinaryHeap<OrdF> = BinaryHeap::new();
+    let mut results: Vec<(i64, f64)> = Vec::new();
+    let entry = meta.entry;
+    visited.insert(entry);
+    // Seed the beam with the entry vertex's exact distance (its q_r norm) as its estimate.
+    let erow = read_row(entry);
+    let eq: Vec<f32> = rot_q.iter().zip(&erow.rot).map(|(&a, &b)| a - b).collect();
+    let e_ex: f64 = eq.iter().map(|&x| (x as f64) * (x as f64)).sum();
+    cand.push(Reverse((OrdF(e_ex), entry)));
+    beamw.push(OrdF(e_ex));
+    while let Some(Reverse((OrdF(est_p), p))) = cand.pop() {
+        if beamw.len() >= ef {
+            if let Some(&OrdF(worst)) = beamw.peek() {
+                if est_p > worst {
+                    break;
+                }
+            }
+        }
+        let row = read_row(p);
+        let q_r: Vec<f32> = rot_q.iter().zip(&row.rot).map(|(&a, &b)| a - b).collect();
+        let qc2: f64 = q_r.iter().map(|&x| (x as f64) * (x as f64)).sum(); // ‖q−x_p‖² (rotation-invariant)
+        // Record the popped centre's EXACT distance on the sqrt-L2 scale (same as `metric.dist` / pending — the
+        // E1 lesson: never mix squared and sqrt scales in the ORDER BY comparison).
+        results.push((tids[p as usize], qc2.max(0.0).sqrt()));
+        for (ord, code) in &row.neighbours {
+            if !visited.insert(*ord) {
+                continue;
+            }
+            let est = crate::ann::symqg_spike::estimate_sign(code, &q_r, qc2).max(0.0);
+            let admit = beamw.len() < ef || beamw.peek().map(|&OrdF(w)| est < w).unwrap_or(true);
+            if admit {
+                cand.push(Reverse((OrdF(est), *ord)));
+                beamw.push(OrdF(est));
+                if beamw.len() > ef {
+                    beamw.pop();
+                }
+            }
+        }
+    }
+    // Pending rows (INSERTed after build) — scored EXACT (sqrt L2), same scale as the popped centres.
+    match page::read_pending(rel) {
+        Ok(pending) => {
+            for (tidv, v) in pending {
+                results.push((tidv, metric.dist(query, &v)));
+            }
+        }
+        Err(e) => pg_sys::error!("theodb am scan (pending): {e}"),
     }
     results
 }

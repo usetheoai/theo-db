@@ -394,6 +394,73 @@ pub extern "C-unwind" fn ambuild_hnsw(
     }
 }
 
+/// E2 degree bound R for the co-located symqg graph (a multiple of 32 for FastScan alignment; HNSW base-layer
+/// m0 = 2·HNSW_M ≤ R so no neighbour is truncated, only padded). T4.1 promotes this to a reloption.
+const SYMQG_DEGREE: usize = 32;
+
+/// E2 T2.1 — `ambuild_symqg`: build the HNSW base graph, encode per-parent 1-bit sign codes (`SymqgSpike`), and
+/// persist the co-located page layout (`page::pack_symqg`). Mirrors `ambuild_hnsw`; the search reads the persisted
+/// rows per hop (`scan_symqg_structured`, T3.1). L2-only (the sign estimator is L2-only) — fail-fast at build.
+#[pg_guard]
+pub extern "C-unwind" fn ambuild_symqg(
+    heaprel: pg_sys::Relation,
+    indexrel: pg_sys::Relation,
+    index_info: *mut pg_sys::IndexInfo,
+) -> *mut pg_sys::IndexBuildResult {
+    unsafe {
+        let (corpus, _labels, ntuples) = collect_corpus(heaprel, indexrel, index_info);
+        let corpus_len = corpus.len();
+        let metric = resolve_metric(indexrel);
+        if metric != Metric::L2 {
+            pg_sys::error!("theodb_symqg: requires the L2 opclass (the 1-bit sign estimator is L2-only)");
+        }
+        // EC-1: both the HNSW build and the sign-encode loop take the cancellation seam so a long CREATE INDEX
+        // responds to pg_cancel_backend (check_for_interrupts! runs under #[pg_guard] — unwinds cleanly across C).
+        let idx = crate::ann::HnswIndex::build_owned(
+            corpus, HNSW_M, hnsw_ef_construction(), metric, BUILD_SEED, &|| { pgrx::check_for_interrupts!(); },
+        );
+        let spike = crate::ann::symqg_spike::SymqgSpike::build_cancellable(
+            &idx, 1, BUILD_SEED, &|| { pgrx::check_for_interrupts!(); },
+        );
+        if !spike.is_sign_mode() {
+            pg_sys::error!("theodb_symqg: internal — expected 1-bit sign mode");
+        }
+        let n = idx.spike_len();
+        let dim = if n > 0 { idx.spike_vector(0).len() } else { 0 };
+        let degree = SYMQG_DEGREE;
+        let mut rows: Vec<Vec<u8>> = Vec::with_capacity(n);
+        let mut tids: Vec<i64> = Vec::with_capacity(n);
+        for p in 0..n {
+            pgrx::check_for_interrupts!();
+            tids.push(idx.spike_id(p));
+            let rot = spike.rot_vec_of(p); // P·x_p — exact dist = ‖rot_q − rot‖², q_r = rot_q − rot (one subtraction)
+            let scodes = spike.sign_codes_of(p);
+            let mut nbrs: Vec<(u32, crate::ann::symqg_spike::SignCode)> = Vec::with_capacity(degree);
+            for (nb_node, code) in scodes.iter().take(degree) {
+                nbrs.push((*nb_node as u32, code.clone()));
+            }
+            while nbrs.len() < degree {
+                nbrs.push((page::SENTINEL_ORD, crate::ann::symqg_spike::SignCode { u: vec![0i8; dim], nr: 0.0, w: 0.0 }));
+            }
+            rows.push(page::pack_row(rot, &nbrs, dim, degree));
+        }
+        let entry = idx.spike_entry().unwrap_or(0) as u32;
+        let rot_codebook = spike.rq().to_meta_bytes();
+        page::pack_symqg(indexrel, metric.tag(), dim as u32, degree as u32, entry, &rot_codebook, &tids, &rows);
+        build_result(ntuples, corpus_len)
+    }
+}
+
+/// E2 T2.1 — empty `theodb_symqg` index (CREATE INDEX on an empty table). Builds a 0-vertex graph + persists an
+/// empty layout so `peek_magic` returns SYMQG_MAGIC and the scan short-circuits to [] (EC-4).
+#[pg_guard]
+pub extern "C-unwind" fn ambuildempty_symqg(indexrel: pg_sys::Relation) {
+    unsafe {
+        // dim/degree unknown with no rows; a 0-vertex layout: no rows, empty rotation codebook.
+        page::pack_symqg(indexrel, Metric::L2.tag(), 0, SYMQG_DEGREE as u32, 0, &[], &[], &[]);
+    }
+}
+
 /// M59 T3.3 — pick the persisted layout for an initial `theodb_hnsw` build from the reloptions: `WITH
 /// (pq_subspaces=M)` (M > 0) trains the anisotropic PQ and packs **v3** (AQ ⊥ SBQ per index, D1); otherwise
 /// `WITH (sbq_bits=N)` packs v2 (or v1 when both are 0 — byte-identical to the pre-M51/M59 build). The AQ params

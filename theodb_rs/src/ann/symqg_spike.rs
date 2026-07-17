@@ -46,6 +46,7 @@ pub(crate) struct SearchStat {
 /// parent `c`. `nr = ‖x−c‖`, `w = ⟨u, o'⟩ = Σ|o'[d]|` (o' = unit rotated residual). Estimate (squared-L2):
 /// `‖q−x‖² ≈ qc2 + nr² − 2·nr·(⟨q_r,u⟩ / w)`, `q_r = P·(q−c)`, `qc2 = ‖q_r‖²` — same shape as E1's estimator,
 /// with the code specialized to signs so the per-neighbor dot `⟨q_r,u⟩` becomes a FastScan-friendly signed sum.
+#[derive(Clone)]
 pub(crate) struct SignCode {
     pub u: Vec<i8>, // ±1 per dim
     pub nr: f32,
@@ -65,9 +66,10 @@ fn encode_sign(rq: &RabitqQuantizer, residual: &[f32]) -> SignCode {
     SignCode { u, nr, w }
 }
 
-/// Scalar 1-bit estimate (the FastScan oracle for Stage 2). `q_r = P·(q−c)`, `qc2 = ‖q_r‖²`.
+/// Scalar 1-bit estimate (the FastScan oracle for Stage 2). `q_r = P·(q−c)`, `qc2 = ‖q_r‖²`. Reused by the in-PG
+/// scan (`scan_symqg_structured`) — the SAME estimator the off-PG spike validated.
 #[inline]
-fn estimate_sign(code: &SignCode, q_r: &[f32], qc2: f64) -> f64 {
+pub(crate) fn estimate_sign(code: &SignCode, q_r: &[f32], qc2: f64) -> f64 {
     if code.w == 0.0 || code.nr == 0.0 {
         return qc2 + (code.nr as f64) * (code.nr as f64);
     }
@@ -98,6 +100,19 @@ impl SymqgSpike {
     /// (`bits=1`); higher bits available for the honest bit-sweep. O(N·degree·D²) — the dense O(D²) rotate is the
     /// spike's build cost (the paper uses Fast-JL O(D log D); noted as a build-time caveat, not a recall factor).
     pub(crate) fn build(g: &HnswIndex, bits: u8, seed: u64) -> Self {
+        Self::build_cancellable(g, bits, seed, &|| {})
+    }
+
+    /// EC-1: the encode loop calls `check_interrupt` every 4096 vertices so a long `CREATE INDEX` responds to
+    /// `pg_cancel_backend` (the AM injects `pgrx::check_for_interrupts!`; the pure `ann/` layer only declares the
+    /// `Fn()` seam — same DIP pattern as `HnswIndex::build_cancellable`). Without it, a 32M-iteration encode ignores
+    /// cancel until it finishes (the exact E1 k-means bug where only a postmaster kill worked).
+    pub(crate) fn build_cancellable(
+        g: &HnswIndex,
+        bits: u8,
+        seed: u64,
+        check_interrupt: &(dyn Fn() + Sync),
+    ) -> Self {
         let dim = g.spike_vector(0).len();
         let rq = RabitqQuantizer::train(dim, bits, seed);
         let sign_mode = bits == 1; // true 1-bit sign path (multi-bit rq is degenerate at bits=1)
@@ -106,6 +121,9 @@ impl SymqgSpike {
         let mut sign_codes: Vec<Vec<(usize, SignCode)>> = Vec::with_capacity(if sign_mode { n } else { 0 });
         let mut rot_vec: Vec<Vec<f32>> = Vec::with_capacity(n);
         for p in 0..n {
+            if p % 4096 == 0 {
+                check_interrupt();
+            }
             let pv = g.spike_vector(p);
             rot_vec.push(rq.rotate(pv)); // P·x_p — precomputed so per-hop q_r is a subtraction, not a rotate
             let nbrs = g.spike_base_neighbors(p);
@@ -126,6 +144,23 @@ impl SymqgSpike {
             }
         }
         SymqgSpike { codes, sign_codes, sign_mode, rot_vec, rq }
+    }
+
+    /// Persistence accessors (T2.1 `ambuild_symqg` reads these to pack the co-located page rows).
+    pub(crate) fn is_sign_mode(&self) -> bool {
+        self.sign_mode
+    }
+    pub(crate) fn rq(&self) -> &RabitqQuantizer {
+        &self.rq
+    }
+    /// Vertex `p`'s co-located neighbours as `(neighbour_node, sign_code)` (sign_mode only).
+    pub(crate) fn sign_codes_of(&self, p: usize) -> &[(usize, SignCode)] {
+        &self.sign_codes[p]
+    }
+    /// Vertex `p`'s ROTATED vector `P·x_p` (stored per-row so the in-PG scan gets exact-dist + q_r in one O(D)
+    /// subtraction, no per-hop rotate).
+    pub(crate) fn rot_vec_of(&self, p: usize) -> &[f32] {
+        &self.rot_vec[p]
     }
 
     /// SymphonyQG traversal (Algorithm 1): pop the min-ESTIMATED candidate, compute its EXACT distance (the
