@@ -13,6 +13,20 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.98.0] - 2026-07-16
+
+### Added
 - **M109 — vectorized Multi-Source BFS operator (native graph pillar Phase 2):** `theodb.graph_expand_multi` /
   `graph_expand_multi_card` advance up to 64 independent BFS lanes per CSR sweep via per-vertex `u64`
   source-masks (frontier-driven, bit `l` = lane `l`; auto-vectorized bitwise-OR — the source-parallel
@@ -25,16 +39,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   (Then VLDB'14, DuckPGQ CIDR'23/VLDB'23, HippoRAG, GAP) corrected the ROADMAP "reuse ah.rs kernels" misframing
   and caught a row-materialization benchmark confound that had masked the win. 337 pg_tests GREEN (+7, 0
   regression). (M109)
-
-### Changed
-
-### Deprecated
-
-### Removed
-
-### Fixed
-
-### Security
 
 ## [0.97.0] - 2026-07-16
 
