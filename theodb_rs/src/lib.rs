@@ -46,6 +46,7 @@ mod dtype;
 mod sbq;
 mod sq8;
 mod embed;
+mod graph; // M108 — persisted-CSR graph structure (build 1× + traverse without rebuild, crash-safe via PG bytea)
 mod http;
 mod hybrid;
 mod migrate;

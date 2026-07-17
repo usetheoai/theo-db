@@ -1,0 +1,17 @@
+{
+  "milestone": "M108",
+  "date": "2026-07-16",
+  "host": "DigitalOcean s-4vcpu-8gb (fra1), pgrx 0.19.0 / PostgreSQL 17.10, --release",
+  "graph": {"edges": 200000, "nodes": 40000, "hub_bias": "25% dst -> top-1% hubs", "hops": 3, "seeds": 5},
+  "oracle": {"reached": 27752, "status": "PASS (graph_expand count == recursive-CTE count(DISTINCT))"},
+  "release": {
+    "graph_build_ms": 273.849,
+    "graph_expand_cold_ms": 26.356,
+    "graph_expand_warm_mean_ms": 16.505,
+    "recursive_cte_union_dedup_mean_ms": 263.392,
+    "warm_speedup_x": 16.0,
+    "cold_speedup_x": 10.0
+  },
+  "debug_cross_check": {"graph_expand_warm_mean_ms": 36.485, "cte_mean_ms": 298.637, "warm_speedup_x": 8.2},
+  "verdict": "GATE MET — persisted+cached CSR serves traversal 10-16x faster than recursive-CTE without per-query rebuild; oracle PASS; 4 M108 pg_tests + full 329-test suite GREEN (0 regression)"
+}
