@@ -13,6 +13,18 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **M110 — in-DB graph extraction surface (native graph pillar Phase 3):** `ai.extract_entities` /
+  `ai.extract_graph` (heuristic-default: capitalized-run entities + windowed co-occurrence edges — a byte-identical
+  Rust port of theo-rag's `graph-extractor.ts`; `use_llm` opt-in reuses `chat::chat` with a GraphRAG delimited
+  prompt, parser-tested, fail-soft to heuristic) + idempotent `theodb.graph_upsert` into CSR-shaped
+  `theodb.graph_nodes`/`graph_edges` (`ON CONFLICT … mention_count/weight +=`, mirrors theo-rag `graph-store.ts`).
+  **Gate = cross-language parity (100% coverage, golden from the real theo-rag extractor) + E2E set-hash**
+  (extract→`graph_build`→`graph_expand`) → downstream recall non-regressed BY CONSTRUCTION (blueprint ADR-2).
+  Deep research (GraphRAG arXiv:2404.16130, HippoRAG 2405.14831, KGGen/MINE 2502.09956) established the extrinsic
+  gate over entity-F1 and the honest heuristic-vs-LLM delta. **MEASURED (`docs/benchmarks/m110-extraction`):**
+  extraction 1537 chunks/sec, parity 100%. Payoff: theo-rag's graph strategy sheds `extraction/` + `graph-store/`
+  + the recursive CTE for 3 SQL calls. Security: parameterized-data-only, REVOKE-from-PUBLIC, newline-collapse
+  prompt-injection guard (ADR-3). No new crate (Rule 9 — port + reuse). 347 pg_tests GREEN (+10, 0 regression). (M110)
 
 ### Changed
 
