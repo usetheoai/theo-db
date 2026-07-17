@@ -707,6 +707,27 @@ pub(crate) struct IvfAqMetaV6 {
     pub centroids: Vec<Vec<f32>>,
     pub dir: Vec<(u32, u32, u32, u32, u32)>, // code_fb, code_np, sq8_fb, sq8_np, cnt
 }
+/// E1 — v8 (refine=rabitq) meta. Same shape as v6 with the SQ8 codebook replaced by the RaBitQ codebook (rotation
+/// + bits). `centroids` are REQUIRED at scan (the residual query `q_r = P(q−c)` needs the per-list centroid).
+pub(crate) struct IvfAqMetaV8 {
+    pub dim: u32,
+    pub metric_tag: u8,
+    pub m: u32,
+    pub aq_codebook: Vec<u8>,
+    pub rabitq_codebook: Vec<u8>,
+    pub centroids: Vec<Vec<f32>>,
+    pub dir: Vec<(u32, u32, u32, u32, u32)>, // code_fb, code_np, rq_fb, rq_np, cnt
+}
+/// E1 — random-read ONE RaBitQ residual record (reclen = `dim + 8` = [i8×dim][nr f32][w f32]) for a v8 survivor.
+pub(crate) unsafe fn read_rabitq_at(
+    rel: pg_sys::Relation,
+    rq_first_block: u32,
+    rq_npages: u32,
+    ordinal: usize,
+    dim: usize,
+) -> Result<Vec<u8>, String> {
+    read_record_at(rel, rq_first_block, rq_npages, ordinal, dim + 8)
+}
 /// M87 — the IVF list count (v3/v4/v5/v6), via the same fallback chain as the cost model. 0 on any unreadable
 /// meta (fail-safe — the iterative scan then bounds growth by `max_scan_tuples` alone). Used by `amrescan` to bound
 /// the iterative re-search (grow `probes` until all lists are probed, then stop).
@@ -716,7 +737,18 @@ pub(crate) unsafe fn ivf_list_count(rel: pg_sys::Relation) -> usize {
         .or_else(|_| read_ivf_aq_meta(rel).map(|m| m.dir.len()))
         .or_else(|_| read_ivf_aq_meta_split(rel).map(|m| m.dir.len()))
         .or_else(|_| read_ivf_aq_meta_split_sq8(rel).map(|m| m.dir.len()))
+        .or_else(|_| read_ivf_aq_meta_split_rabitq(rel).map(|m| m.dir.len()))
         .unwrap_or(0)
+}
+/// True iff the index's structured meta is v8 (AQ + RaBitQ residual refine, storage-separated).
+pub(crate) unsafe fn ivf_is_v8(rel: pg_sys::Relation) -> bool {
+    match read_page_item(rel, 0) {
+        Ok(m) if m.len() >= 8 => {
+            u32::from_le_bytes(m[0..4].try_into().unwrap()) == IVF_STRUCT_MAGIC
+                && u32::from_le_bytes(m[4..8].try_into().unwrap()) == 8
+        }
+        _ => false,
+    }
 }
 /// True iff the index's structured meta is v6 (AQ + SQ8-refine, storage-separated) — cheap 8-byte read of block 0.
 pub(crate) unsafe fn ivf_is_v6(rel: pg_sys::Relation) -> bool {
@@ -988,6 +1020,143 @@ pub(crate) unsafe fn read_ivf_aq_meta_split_sq8(rel: pg_sys::Relation) -> Result
         return Err("theodb ivf-aq: truncated v6 centroid region".into());
     }
     Ok(IvfAqMetaV6 { dim, metric_tag, m: mval, aq_codebook, sq8_codebook, centroids, dir })
+}
+/// E1 — persist an IVF-AQ index in the v8 RaBitQ-refine layout. Byte-for-byte the v6 writer with version 8 and the
+/// refine blob = per-list RaBitQ residual records (`rabitq_codes[i]`, `(dim+8)`×n). `rabitq_codebook` = rotation+bits.
+#[allow(clippy::too_many_arguments)]
+pub(crate) unsafe fn write_ivf_aq_split_rabitq(
+    rel: pg_sys::Relation,
+    dim: u32,
+    metric_tag: u8,
+    m: u32,
+    aq_codebook: &[u8],
+    rabitq_codebook: &[u8],
+    centroids: &[Vec<f32>],
+    positions: &[Vec<usize>],
+    ids: &[i64],
+    codes: &[Vec<u8>],
+    rabitq_codes: &[Vec<u8>],
+) {
+    let base: u32 = 1;
+    let nlists = centroids.len() as u32;
+    let mut cbytes = Vec::with_capacity(centroids.len() * dim as usize * 4);
+    for c in centroids {
+        for x in c {
+            cbytes.extend_from_slice(&x.to_le_bytes());
+        }
+    }
+    let dir_npages = npages_for(nlists as usize * 20);
+    let aq_codebook_npages = npages_for(aq_codebook.len());
+    let rabitq_codebook_npages = npages_for(rabitq_codebook.len());
+    let centroid_npages = npages_for(cbytes.len());
+    let mut cursor = base + dir_npages + aq_codebook_npages + rabitq_codebook_npages + centroid_npages;
+    let mut dir: Vec<(u32, u32, u32, u32, u32)> = Vec::with_capacity(positions.len());
+    for i in 0..positions.len() {
+        let code_len = positions[i].len() * 8 + codes[i].len();
+        let cnp = npages_for(code_len);
+        let code_fb = cursor;
+        cursor += cnp;
+        let rnp = npages_for(rabitq_codes[i].len());
+        let rq_fb = cursor;
+        cursor += rnp;
+        dir.push((code_fb, cnp, rq_fb, rnp, positions[i].len() as u32));
+    }
+    let mut dirbytes = Vec::with_capacity(dir.len() * 20);
+    for (cfb, cnp, rfb, rnp, cnt) in &dir {
+        dirbytes.extend_from_slice(&cfb.to_le_bytes());
+        dirbytes.extend_from_slice(&cnp.to_le_bytes());
+        dirbytes.extend_from_slice(&rfb.to_le_bytes());
+        dirbytes.extend_from_slice(&rnp.to_le_bytes());
+        dirbytes.extend_from_slice(&cnt.to_le_bytes());
+    }
+
+    let mut meta = Vec::with_capacity(41);
+    meta.extend_from_slice(&IVF_STRUCT_MAGIC.to_le_bytes());
+    meta.extend_from_slice(&8u32.to_le_bytes());
+    meta.push(metric_tag);
+    meta.extend_from_slice(&dim.to_le_bytes());
+    meta.extend_from_slice(&nlists.to_le_bytes());
+    meta.extend_from_slice(&m.to_le_bytes());
+    meta.extend_from_slice(&aq_codebook_npages.to_le_bytes());
+    meta.extend_from_slice(&dir_npages.to_le_bytes());
+    meta.extend_from_slice(&centroid_npages.to_le_bytes());
+    meta.extend_from_slice(&base.to_le_bytes());
+    meta.extend_from_slice(&rabitq_codebook_npages.to_le_bytes());
+
+    write_item(rel, &meta);
+    write_chunks(rel, &dirbytes);
+    write_chunks(rel, aq_codebook);
+    write_chunks(rel, rabitq_codebook);
+    write_chunks(rel, &cbytes);
+    for i in 0..positions.len() {
+        let mut ecode = Vec::with_capacity(positions[i].len() * 8 + codes[i].len());
+        for &pos in &positions[i] {
+            ecode.extend_from_slice(&ids[pos].to_le_bytes());
+        }
+        ecode.extend_from_slice(&codes[i]);
+        write_chunks(rel, &ecode);
+        drop(ecode);
+        write_chunks(rel, &rabitq_codes[i]);
+    }
+}
+/// E1 — read the v8 meta + AQ codebook + RaBitQ codebook + centroid + dir regions. Typed `Err` on corruption.
+pub(crate) unsafe fn read_ivf_aq_meta_split_rabitq(rel: pg_sys::Relation) -> Result<IvfAqMetaV8, String> {
+    let m = read_page_item(rel, 0)?;
+    if m.len() < 41 {
+        return Err("theodb ivf-aq: truncated v8 meta".into());
+    }
+    if u32::from_le_bytes(m[0..4].try_into().unwrap()) != IVF_STRUCT_MAGIC
+        || u32::from_le_bytes(m[4..8].try_into().unwrap()) != 8
+    {
+        return Err("theodb ivf-aq: not a v8 structured index".into());
+    }
+    let metric_tag = m[8];
+    let dim = u32::from_le_bytes(m[9..13].try_into().unwrap());
+    let nlists = u32::from_le_bytes(m[13..17].try_into().unwrap()) as usize;
+    let mval = u32::from_le_bytes(m[17..21].try_into().unwrap());
+    let aq_codebook_npages = u32::from_le_bytes(m[21..25].try_into().unwrap());
+    let dir_npages = u32::from_le_bytes(m[25..29].try_into().unwrap());
+    let centroid_npages = u32::from_le_bytes(m[29..33].try_into().unwrap());
+    let gen_base = u32::from_le_bytes(m[33..37].try_into().unwrap());
+    let rabitq_codebook_npages = u32::from_le_bytes(m[37..41].try_into().unwrap());
+
+    let dbytes = read_chunked(rel, gen_base, dir_npages)?;
+    if dbytes.len() < nlists * 20 {
+        return Err("theodb ivf-aq: truncated v8 directory".into());
+    }
+    let mut dir = Vec::with_capacity(nlists);
+    for i in 0..nlists {
+        let o = i * 20;
+        dir.push((
+            u32::from_le_bytes(dbytes[o..o + 4].try_into().unwrap()),
+            u32::from_le_bytes(dbytes[o + 4..o + 8].try_into().unwrap()),
+            u32::from_le_bytes(dbytes[o + 8..o + 12].try_into().unwrap()),
+            u32::from_le_bytes(dbytes[o + 12..o + 16].try_into().unwrap()),
+            u32::from_le_bytes(dbytes[o + 16..o + 20].try_into().unwrap()),
+        ));
+    }
+    let aq_codebook = read_chunked(rel, gen_base + dir_npages, aq_codebook_npages)?;
+    let rabitq_codebook = read_chunked(rel, gen_base + dir_npages + aq_codebook_npages, rabitq_codebook_npages)?;
+    let cbytes = read_chunked(
+        rel,
+        gen_base + dir_npages + aq_codebook_npages + rabitq_codebook_npages,
+        centroid_npages,
+    )?;
+    let d = dim as usize;
+    let mut centroids = Vec::with_capacity(nlists);
+    if d > 0 && cbytes.len() >= nlists * d * 4 {
+        for i in 0..nlists {
+            let mut c = Vec::with_capacity(d);
+            for j in 0..d {
+                let o = (i * d + j) * 4;
+                c.push(f32::from_le_bytes(cbytes[o..o + 4].try_into().unwrap()));
+            }
+            centroids.push(c);
+        }
+    } else if nlists != 0 {
+        return Err("theodb ivf-aq: truncated v8 centroid region".into());
+    }
+    Ok(IvfAqMetaV8 { dim, metric_tag, m: mval, aq_codebook, rabitq_codebook, centroids, dir })
 }
 /// Read ONE list's raw page bytes (`npages` chunks from `first_block`) — the hot scan path scores entries directly
 /// off these bytes with a reused scratch buffer (M31), avoiding a `Vec<f32>` allocation per entry.

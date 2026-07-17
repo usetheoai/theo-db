@@ -23,6 +23,15 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   the FINAL ranking f32-free, deleting the exact Stage-2 f32-rerank bind measured in M82/v5. NOT yet wired to the
   AM scan (next: dedicated code page + f32-free `scan_ivf_aq_split` Stage-2 + SIFT1M A/B). Research blueprint:
   `knowledge-base/discoveries/blueprints/vec-f32free-rerank-blueprint.md`.
+- **Vector research (E1 wiring): IVF-AQ v8 index `WITH (separate_storage=1, refine=2, rabitq_bits=N)` — f32-FREE
+  residual-RaBitQ Stage-2 rerank (L2-only).** Wires the validated `vec/rabitq.rs` codec into the
+  `theodb_ivfflat` AM. Build encodes the per-list residual `x − centroid[ci]` into a dedicated RaBitQ code page
+  (`[i8×dim][nr][w]` = dim+8 B/vec), on pages distinct from both the AH codes and the f32 vectors (v5 storage
+  separation preserved). Scan `scan_ivf_aq_split_rabitq`: Stage-1 AH prune over codes-only pages (identical to
+  v5/v6), Stage-2 reranks the `rerank_pool` survivors via `estimate_l2_sq` on the RaBitQ codes — **removing the
+  exact-f32 random-read bind measured in M82/v5** (zero raw vector touched at rerank). Pending (post-build INSERT)
+  rows stay f32-exact. New reloption `rabitq_bits` (default 7, range 1–8); `refine=2` selects RaBitQ. 6-file AM
+  surgery (`options.rs`, `page/ivf.rs`, `build.rs`, `scan.rs`, meta v8). QPS/recall A/B (v5 vs v8) pending on SIFT1M.
 
 ### Changed
 

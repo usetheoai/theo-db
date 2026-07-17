@@ -118,6 +118,61 @@ impl RabitqQuantizer {
         let nr = code.nr as f64;
         qc2 + nr * nr - 2.0 * nr * ip_qo
     }
+
+    /// Serialize the quantizer for the index meta page: `[dim u32][bits u8][rotation f32 × dim²]`. Since the full
+    /// rotation is stored, `from_meta_bytes` reconstructs the EXACT quantizer (no re-seeding needed).
+    pub(crate) fn to_meta_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(5 + self.rotation.len() * 4);
+        out.extend_from_slice(&(self.dim as u32).to_le_bytes());
+        out.push(self.bits);
+        for &f in &self.rotation {
+            out.extend_from_slice(&f.to_le_bytes());
+        }
+        out
+    }
+
+    /// Reconstruct from `to_meta_bytes`. Typed `Err` on truncation (Rule 8).
+    pub(crate) fn from_meta_bytes(bytes: &[u8]) -> Result<RabitqQuantizer, String> {
+        if bytes.len() < 5 {
+            return Err("theodb rabitq: truncated meta header".into());
+        }
+        let dim = u32::from_le_bytes(bytes[0..4].try_into().unwrap()) as usize;
+        let bits = bytes[4];
+        let need = 5 + dim * dim * 4;
+        if bytes.len() != need {
+            return Err(format!("theodb rabitq: meta length mismatch (got {}, want {need})", bytes.len()));
+        }
+        let rotation: Vec<f32> = bytes[5..].chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
+        Ok(RabitqQuantizer { dim, bits, rotation })
+    }
+
+    /// Per-vector page-record byte size: `[i8 × dim][nr f32][w f32]` = `dim + 8`.
+    pub(crate) fn record_bytes(dim: usize) -> usize {
+        dim + 8
+    }
+
+    /// Serialize one encoded vector to its page record `[i8 × dim][nr f32 LE][w f32 LE]` (dim+8 bytes).
+    pub(crate) fn code_to_record(code: &RabitqCode) -> Vec<u8> {
+        let mut out = Vec::with_capacity(code.code.len() + 8);
+        for &c in &code.code {
+            out.push(c as u8);
+        }
+        out.extend_from_slice(&code.nr.to_le_bytes());
+        out.extend_from_slice(&code.w.to_le_bytes());
+        out
+    }
+
+    /// Parse a page record back into a `RabitqCode`. Typed `Err` on truncation.
+    pub(crate) fn record_to_code(rec: &[u8], dim: usize) -> Result<RabitqCode, String> {
+        let need = dim + 8;
+        if rec.len() < need {
+            return Err(format!("theodb rabitq: truncated record (got {}, want {need})", rec.len()));
+        }
+        let code: Vec<i8> = rec[..dim].iter().map(|&b| b as i8).collect();
+        let nr = f32::from_le_bytes(rec[dim..dim + 4].try_into().unwrap());
+        let w = f32::from_le_bytes(rec[dim + 4..dim + 8].try_into().unwrap());
+        Ok(RabitqCode { code, nr, w })
+    }
 }
 
 /// A seeded random orthogonal `dim×dim` matrix (row-major), via Gram–Schmidt on a Gaussian matrix. Deterministic.
@@ -259,6 +314,29 @@ mod tests {
                 assert!(mean_abs_rel < 0.02, "bits=7: mean rel err {mean_abs_rel:.4} must be small enough for f32-free rerank");
             }
         }
+    }
+
+    // Meta + per-vector record serialization round-trips: a reconstructed quantizer + parsed code give the
+    // byte-identical distance estimate (the page-storage contract for the v8 AM path).
+    #[test]
+    fn rabitq_serialization_round_trips() {
+        let d = 48;
+        let q = RabitqQuantizer::train(d, 7, 99);
+        let q2 = RabitqQuantizer::from_meta_bytes(&q.to_meta_bytes()).expect("meta round-trip");
+        assert_eq!(q2.dim, d);
+        assert_eq!(q2.bits, 7);
+        let mut rng = SplitMix64::new(3);
+        let x: Vec<f32> = (0..d).map(|_| rng.next_gaussian() as f32).collect();
+        let qy: Vec<f32> = (0..d).map(|_| rng.next_gaussian() as f32).collect();
+        let code = q.encode(&x);
+        let rec = RabitqQuantizer::code_to_record(&code);
+        assert_eq!(rec.len(), RabitqQuantizer::record_bytes(d));
+        let code2 = RabitqQuantizer::record_to_code(&rec, d).expect("record round-trip");
+        let q_rot = q2.rotate(&qy);
+        let qc2 = dot(&qy, &qy);
+        let e1 = q.estimate_l2_sq(&code, &q_rot, qc2);
+        let e2 = q2.estimate_l2_sq(&code2, &q_rot, qc2);
+        assert!((e1 - e2).abs() < 1e-3, "estimate must survive serialization: {e1} vs {e2}");
     }
 
     // Zero residual (x == c) is handled without panic and estimates exactly qc2.

@@ -138,10 +138,11 @@ pub extern "C-unwind" fn ambuild(
             let m0 = crate::am::options::pq_subspaces_from_relation(indexrel);
             let separate = crate::am::options::separate_storage_from_relation(indexrel);
             let sq8 = crate::am::options::refine_sq8_from_relation(indexrel);
+            let rabitq = crate::am::options::refine_rabitq_from_relation(indexrel);
             let has_labels = (*index_info).ii_NumIndexAttrs > 1;
             let soar0 = crate::am::options::soar_lambda_from_relation(indexrel);
             let est_dim = index_vector_dim(indexrel);
-            if m0 > 0 && separate && !sq8 && !has_labels && soar0 <= 0.0 && est_dim > 0 {
+            if m0 > 0 && separate && !sq8 && !rabitq && !has_labels && soar0 <= 0.0 && est_dim > 0 {
                 let reltuples = (*(*heaprel).rd_rel).reltuples;
                 let blocks =
                     pg_sys::RelationGetNumberOfBlocksInFork(heaprel, pg_sys::ForkNumber::MAIN_FORKNUM) as f64;
@@ -200,6 +201,49 @@ pub extern "C-unwind" fn ambuild(
                     // so the scan reads codes-only in Stage 1 (ADR-0037 lever). Adding `refine=1` → v6, whose
                     // per-list rerank region is SQ8 (¼ the f32 bytes, M85). Default off → v4 (interleaved).
                     if crate::am::options::separate_storage_from_relation(indexrel)
+                        && crate::am::options::refine_rabitq_from_relation(indexrel)
+                    {
+                        // E1 (v8) — f32-FREE residual RaBitQ rerank. The estimator is L2-only (rabitq.rs); fail loud
+                        // at BUILD (Rule 8 — the boundary) if the opclass is not L2.
+                        if metric != Metric::L2 {
+                            pg_sys::error!(
+                                "theodb_ivfflat: refine=2 (RaBitQ) requires the L2 opclass (the RaBitQ estimator is L2-only)"
+                            );
+                        }
+                        let bits = crate::am::options::rabitq_bits_from_relation(indexrel);
+                        // The rotation is data-independent (random orthogonal) — no train_sample needed (unlike SQ8's
+                        // min/max pass). Encode the RESIDUAL x−centroid[ci] per list position, in the SAME ordinal
+                        // order the block32 AH codes use (`positions`), to `[i8×dim][nr][w]` = dim+8 B/vec.
+                        let rq = crate::vec::rabitq::RabitqQuantizer::train(dim as usize, bits, BUILD_SEED);
+                        let centroids = idx.centroids();
+                        let rabitq_codes: Vec<Vec<u8>> = positions
+                            .iter()
+                            .enumerate()
+                            .map(|(ci, pos)| {
+                                let c = &centroids[ci];
+                                let mut b = Vec::with_capacity(pos.len() * (dim as usize + 8));
+                                for &p in pos {
+                                    let residual: Vec<f32> = vecs[p].iter().zip(c).map(|(x, cc)| x - cc).collect();
+                                    let code = rq.encode(&residual);
+                                    b.extend_from_slice(&crate::vec::rabitq::RabitqQuantizer::code_to_record(&code));
+                                }
+                                b
+                            })
+                            .collect();
+                        page::write_ivf_aq_split_rabitq(
+                            indexrel,
+                            dim,
+                            metric.tag(),
+                            m as u32,
+                            &quant.to_meta_bytes(),
+                            &rq.to_meta_bytes(),
+                            idx.centroids(),
+                            positions,
+                            idsr,
+                            &codes,
+                            &rabitq_codes,
+                        );
+                    } else if crate::am::options::separate_storage_from_relation(indexrel)
                         && crate::am::options::refine_sq8_from_relation(indexrel)
                     {
                         // v6 — train SQ8 from `idx.vectors()` by reference (M89: no `corpus_vecs` clone) and encode
@@ -531,6 +575,7 @@ pub(crate) unsafe fn vacuum_rebuild(
             || page::ivf_is_v5(indexrel)
             || page::ivf_is_v6(indexrel)
             || page::ivf_is_v7(indexrel)
+            || page::ivf_is_v8(indexrel)
         {
             return 0;
         }

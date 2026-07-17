@@ -58,7 +58,14 @@ const MAX_SEPARATE_STORAGE: i32 = 1;
 /// 0/1 (0=f32, 1=sq8 — KISS, matches the other int reloptions). Only meaningful with `separate_storage=1`.
 pub(crate) const DEFAULT_REFINE: i32 = 0;
 const MIN_REFINE: i32 = 0;
-const MAX_REFINE: i32 = 1;
+const MAX_REFINE: i32 = 2; // 0=f32 (v5), 1=sq8 (v6), 2=rabitq (v8, f32-free residual rerank)
+
+/// Vector-research E1 — `WITH (rabitq_bits = N)`: bits-per-dim for the v8 (`refine=2`) extended-multi-bit RaBitQ
+/// residual rerank codes. 7 = the paper's f32-free-recall sweet spot (arXiv:2409.09913 — 99% recall with no raw
+/// vector access). Only meaningful with `refine=2`.
+pub(crate) const DEFAULT_RABITQ_BITS: i32 = 7;
+const MIN_RABITQ_BITS: i32 = 1;
+const MAX_RABITQ_BITS: i32 = 8;
 
 /// M86 (Roadmap v7) — `WITH (soar_lambda = N)`: SOAR spill's orthogonality-penalty weight `λ`, stored
 /// **milli-scaled** (`λ × 1000`) so one int reloption carries the float knob (KISS, mirrors `aq_threshold`).
@@ -83,6 +90,7 @@ struct TheodbIvfflatOptions {
     separate_storage: i32,
     refine: i32,
     soar_lambda_milli: i32,
+    rabitq_bits: i32,
 }
 
 static mut RELOPT_KIND: pg_sys::relopt_kind::Type = 0;
@@ -165,6 +173,15 @@ pub(crate) unsafe fn init() {
         MAX_SOAR_LAMBDA_MILLI,
         pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
     );
+    pg_sys::add_int_reloption(
+        RELOPT_KIND,
+        "rabitq_bits".as_pg_cstr(),
+        "Bits-per-dim for the v8 (refine=2) f32-free RaBitQ residual rerank codes (7 = f32-free 0.99 recall, E1)".as_pg_cstr(),
+        DEFAULT_RABITQ_BITS,
+        MIN_RABITQ_BITS,
+        MAX_RABITQ_BITS,
+        pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
+    );
 }
 
 /// The `amoptions` callback: parse `pg_class.reloptions` text[] into the `TheodbIvfflatOptions` bytea that fills
@@ -175,7 +192,7 @@ pub(crate) unsafe extern "C-unwind" fn amoptions(
     reloptions: pg_sys::Datum,
     validate: bool,
 ) -> *mut pg_sys::bytea {
-    let tab: [pg_sys::relopt_parse_elt; 8] = [
+    let tab: [pg_sys::relopt_parse_elt; 9] = [
         pg_sys::relopt_parse_elt {
             optname: "lists".as_pg_cstr(),
             opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
@@ -215,6 +232,11 @@ pub(crate) unsafe extern "C-unwind" fn amoptions(
             optname: "soar_lambda".as_pg_cstr(),
             opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
             offset: std::mem::offset_of!(TheodbIvfflatOptions, soar_lambda_milli) as i32,
+        },
+        pg_sys::relopt_parse_elt {
+            optname: "rabitq_bits".as_pg_cstr(),
+            opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
+            offset: std::mem::offset_of!(TheodbIvfflatOptions, rabitq_bits) as i32,
         },
     ];
     pg_sys::build_reloptions(
@@ -348,6 +370,35 @@ pub(crate) unsafe fn refine_sq8_from_relation(indexrel: pg_sys::Relation) -> boo
         return false;
     }
     (*(rd_options as *const TheodbIvfflatOptions)).refine == 1
+}
+
+/// E1 — `WITH (refine = 2)` on a storage-separated AQ index: the v8 f32-free residual-RaBitQ rerank path.
+///
+/// # Safety
+/// `indexrel` must be a live open relation.
+pub(crate) unsafe fn refine_rabitq_from_relation(indexrel: pg_sys::Relation) -> bool {
+    let rd_options = (*indexrel).rd_options;
+    if rd_options.is_null() {
+        return false;
+    }
+    (*(rd_options as *const TheodbIvfflatOptions)).refine == 2
+}
+
+/// E1 — bits-per-dim for the v8 RaBitQ rerank codes (`WITH (rabitq_bits = N)`, default 7).
+///
+/// # Safety
+/// `indexrel` must be a live open relation.
+pub(crate) unsafe fn rabitq_bits_from_relation(indexrel: pg_sys::Relation) -> u8 {
+    let rd_options = (*indexrel).rd_options;
+    if rd_options.is_null() {
+        return DEFAULT_RABITQ_BITS as u8;
+    }
+    let bits = (*(rd_options as *const TheodbIvfflatOptions)).rabitq_bits;
+    if (MIN_RABITQ_BITS..=MAX_RABITQ_BITS).contains(&bits) {
+        bits as u8
+    } else {
+        DEFAULT_RABITQ_BITS as u8
+    }
 }
 
 /// M86 — resolve SOAR `λ` for a `theodb_ivfflat` AQ index: the milli-scaled `WITH (soar_lambda=N)` / 1000. 0.0 =

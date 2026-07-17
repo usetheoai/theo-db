@@ -272,6 +272,10 @@ unsafe fn scan_ivf_structured(
     if page::ivf_is_v6(rel) {
         return scan_ivf_aq_split_sq8(rel, query, probes, rerank_pool);
     }
+    // E1: an IVF-AQ v8 index (built WITH separate_storage=1, refine=2) reranks on f32-FREE RaBitQ residual codes.
+    if page::ivf_is_v8(rel) {
+        return scan_ivf_aq_split_rabitq(rel, query, probes, rerank_pool);
+    }
     // v3 f32 IVF reranks ALL probed candidates exactly (no AH prune pool) — `rerank_pool` unused here.
     let _ = rerank_pool;
     let meta = match page::read_ivf_meta(rel) {
@@ -837,6 +841,117 @@ unsafe fn scan_ivf_aq_split_sq8(
         results.push((*tid, metric.dist(query, &approx)));
     }
     // M81 — fold in pending (rows INSERTed after build): f32, scored EXACTLY (never quantized). Same as v3/v4/v5.
+    match page::read_pending(rel) {
+        Ok(pending) => {
+            for (tidv, v) in pending {
+                results.push((tidv, metric.dist(query, &v)));
+            }
+        }
+        Err(e) => pg_sys::error!("theodb am scan (pending): {e}"),
+    }
+    results
+}
+
+/// E1 — the IVF-AQ v8 RaBitQ-REFINE scan: identical Stage-1 to v5/v6 (AH prune over codes-only pages) but Stage-2
+/// reranks the `rerank_pool` survivors on **f32-FREE** RaBitQ residual codes (`estimate_l2_sq`, no raw vector
+/// touched — removing the exact M82/v5 Stage-2 f32 random-read bind). Residual-based: per PROBED list, precompute
+/// `q_r = P·(query − centroid[ci])` and `qc2 = ‖query − centroid[ci]‖²`, then estimate per survivor. L2-only
+/// (guarded at build). Pending rows stay f32-EXACT (never RaBitQ-encoded — they carry no centroid assignment).
+unsafe fn scan_ivf_aq_split_rabitq(
+    rel: pg_sys::Relation,
+    query: &[f32],
+    probes: usize,
+    rerank_pool: usize,
+) -> Vec<(i64, f64)> {
+    let meta = match page::read_ivf_aq_meta_split_rabitq(rel) {
+        Ok(m) => m,
+        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+    };
+    let quant = match crate::vec::aq::AqQuantizer::from_meta_bytes(&meta.aq_codebook) {
+        Ok(q) => q,
+        Err(e) => pg_sys::error!("theodb am scan (aq codebook): {e}"),
+    };
+    let rq = match crate::vec::rabitq::RabitqQuantizer::from_meta_bytes(&meta.rabitq_codebook) {
+        Ok(q) => q,
+        Err(e) => pg_sys::error!("theodb am scan (rabitq codebook): {e}"),
+    };
+    let lut = match crate::vec::ah::build_lut16(query, &quant) {
+        Ok(l) => l,
+        Err(e) => pg_sys::error!("theodb am scan (aq lut): {e}"),
+    };
+    let metric = match Metric::from_tag(meta.metric_tag) {
+        Some(m) => m,
+        None => pg_sys::error!("theodb am scan: unknown metric tag"),
+    };
+    let dim = meta.dim as usize;
+    let pairs = (meta.m as usize).div_ceil(2);
+
+    let mut cd: Vec<(f64, usize)> =
+        meta.centroids.iter().enumerate().map(|(i, c)| (metric.dist(query, c), i)).collect();
+    cd.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    let probes = probes.clamp(1, meta.centroids.len().max(1));
+    let rerank_pool = rerank_pool.max(1);
+
+    // Stage 1 — read ONLY the CODE pages of each probed list; AH-score; keep (score, tid, list_ci, ordinal).
+    let mut cands: Vec<(i32, i64, usize, usize)> = Vec::new();
+    for &(_, ci) in cd.iter().take(probes) {
+        let (cfb, cnp, _rfb, _rnp, cnt) = meta.dir[ci];
+        let n = cnt as usize;
+        if n == 0 {
+            continue;
+        }
+        let cbytes = match page::read_ivf_list_bytes(rel, cfb, cnp) {
+            Ok(b) => b,
+            Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        };
+        let codes_off = 8 * n;
+        let nblocks = n.div_ceil(32);
+        let mut out = [0i32; 32];
+        for b in 0..nblocks {
+            let bn = (n - b * 32).min(32);
+            let base = codes_off + b * pairs * 32;
+            if cbytes.len() < base + pairs * 32 {
+                break;
+            }
+            crate::vec::ah::ah_score_block(&lut, &cbytes[base..base + pairs * 32], bn, &mut out[..bn]);
+            for (j, &score) in out.iter().enumerate().take(bn) {
+                let ordinal = b * 32 + j;
+                let tid = i64::from_le_bytes(cbytes[ordinal * 8..ordinal * 8 + 8].try_into().unwrap());
+                cands.push((score, tid, ci, ordinal));
+            }
+        }
+    }
+
+    // Stage 2 — rerank the best `rerank_pool` survivors on f32-FREE RaBitQ residual codes. Per distinct probed list
+    // `ci`, precompute (q_r = P·(query − centroid[ci]), qc2 = ‖query − centroid[ci]‖²) once (rotate is O(dim²)).
+    let rn = rerank_pool.min(cands.len());
+    if rn < cands.len() {
+        cands.select_nth_unstable_by_key(rn, |c| c.0);
+        cands.truncate(rn);
+    }
+    let mut qcache: Vec<Option<(Vec<f32>, f64)>> = vec![None; meta.centroids.len()];
+    let mut results: Vec<(i64, f64)> = Vec::with_capacity(cands.len());
+    for (_, tid, ci, ordinal) in &cands {
+        let (_cfb, _cnp, rfb, rnp, _cnt) = meta.dir[*ci];
+        if qcache[*ci].is_none() {
+            let c = &meta.centroids[*ci];
+            let qmc: Vec<f32> = query.iter().zip(c).map(|(&x, &cc)| x - cc).collect();
+            let q_r = rq.rotate(&qmc);
+            let qc2 = metric.dist(query, c); // L2 dist IS squared-L2 (same scale as estimate_l2_sq)
+            qcache[*ci] = Some((q_r, qc2));
+        }
+        let (q_r, qc2) = qcache[*ci].as_ref().unwrap();
+        let rec = match page::read_rabitq_at(rel, rfb, rnp, *ordinal, dim) {
+            Ok(b) => b,
+            Err(e) => pg_sys::error!("theodb am scan (v8 rabitq rerank): {e}"),
+        };
+        let code = match crate::vec::rabitq::RabitqQuantizer::record_to_code(&rec, dim) {
+            Ok(c) => c,
+            Err(e) => pg_sys::error!("theodb am scan (v8 rabitq record): {e}"),
+        };
+        results.push((*tid, rq.estimate_l2_sq(&code, q_r, *qc2)));
+    }
+    // Pending rows (INSERTed after build): f32, scored EXACTLY (same as v5/v6). Never RaBitQ-encoded.
     match page::read_pending(rel) {
         Ok(pending) => {
             for (tidv, v) in pending {
