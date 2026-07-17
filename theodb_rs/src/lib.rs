@@ -48,6 +48,7 @@ mod sq8;
 mod embed;
 mod graph; // M108 — persisted-CSR graph structure (build 1× + traverse without rebuild, crash-safe via PG bytea)
 mod graph_extract; // M110 — in-DB graph extraction surface (ai.extract_graph + theodb.graph_upsert, theo-rag parity)
+mod graph_rag; // M111 — vector-on-nodes + vector-entry→traversal→rerank GraphRAG flow (theodb.graph_rag_search)
 mod http;
 mod hybrid;
 mod migrate;

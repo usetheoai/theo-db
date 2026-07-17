@@ -201,6 +201,49 @@ impl Csr {
         }
         result
     }
+
+    /// M112 — Personalized PageRank from `seeds` (HippoRAG's ranking mechanism). Power iteration over the
+    /// undirected CSR: `π = (1-d)·s + d·(Wᵀ·π)` where `s` is the restart distribution (uniform over seeds), `W`
+    /// is the row-stochastic random walk (from u, uniform over its `deg(u)` neighbors), and `d` is the damping.
+    /// Returns the stationary PPR score per node. Unweighted (M108 CSR stores adjacency, not weights).
+    fn ppr(&self, seeds: &[i64], damping: f64, iters: i32) -> Vec<f64> {
+        let nn = self.nnodes as usize;
+        if nn == 0 {
+            return Vec::new();
+        }
+        let d = damping.clamp(0.0, 0.999);
+        let deg: Vec<f64> = (0..nn).map(|u| (self.offsets[u + 1] - self.offsets[u]) as f64).collect();
+        // restart distribution: uniform over the valid seeds (sums to 1); if no valid seed, uniform over all.
+        let mut s = vec![0.0f64; nn];
+        let valid: Vec<usize> = seeds.iter().filter(|&&x| x >= 0 && (x as u64) < self.nnodes).map(|&x| x as usize).collect();
+        if valid.is_empty() {
+            let u = 1.0 / nn as f64;
+            s.iter_mut().for_each(|x| *x = u);
+        } else {
+            let w = 1.0 / valid.len() as f64;
+            for &si in &valid {
+                s[si] += w;
+            }
+        }
+        let mut pi = s.clone();
+        for _ in 0..iters.max(1) {
+            let mut next = vec![0.0f64; nn];
+            // π_next[v] = (1-d)·s[v] + d·Σ_{u ∈ neighbors(v)} π[u]/deg(u)   (undirected: neighbors(v) = adj(v))
+            for v in 0..nn {
+                let (a0, a1) = (self.offsets[v] as usize, self.offsets[v + 1] as usize);
+                let mut acc = 0.0;
+                for &nbr in &self.adj[a0..a1] {
+                    let u = nbr as usize;
+                    if deg[u] > 0.0 {
+                        acc += pi[u] / deg[u];
+                    }
+                }
+                next[v] = (1.0 - d) * s[v] + d * acc;
+            }
+            pi = next;
+        }
+        pi
+    }
 }
 
 /// Scan the edge relation and build the undirected CSR. `edge_rel` is a table name; `src_col`/`dst_col` are the
@@ -360,6 +403,24 @@ mod theodb_rs {
         csr.expand(&seed_ids, max_hops).len() as i64
     }
 
+    /// `graph_ppr(edge_rel text, seeds bigint[], damping float8, iters int) -> TABLE(node bigint, score float8)`
+    /// — M112 Personalized PageRank from `seeds` over the persisted CSR (HippoRAG ranking). Returns only nodes
+    /// with score > 0, highest first.
+    #[pg_extern]
+    fn graph_ppr(
+        edge_rel: &str,
+        seeds: Vec<Option<i64>>,
+        damping: f64,
+        iters: i32,
+    ) -> TableIterator<'static, (name!(node, i64), name!(score, f64))> {
+        let csr = load_cached_csr(edge_rel);
+        let seed_ids: Vec<i64> = seeds.into_iter().flatten().collect();
+        let pi = csr.ppr(&seed_ids, damping, iters);
+        let mut rows: Vec<(i64, f64)> = pi.into_iter().enumerate().filter(|(_, s)| *s > 1e-12).map(|(i, s)| (i as i64, s)).collect();
+        rows.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap().then(a.0.cmp(&b.0)));
+        TableIterator::new(rows.into_iter())
+    }
+
     /// `graph_expand_multi(edge_rel text, set_ids int[], seeds bigint[], max_hops int) -> TABLE(set_id int,
     /// node bigint)` — M109 batched Multi-Source BFS. `set_ids`/`seeds` are PARALLEL arrays: `seeds[i]` belongs
     /// to lane `set_ids[i]` (ragged sets, built from `SELECT array_agg(set_id), array_agg(seed) ...`). Returns,
@@ -442,7 +503,7 @@ BEGIN
 END $$;
 "#,
     name = "theodb_graph_revoke",
-    requires = [graph_build, graph_refold, graph_expand, graph_expand_card, graph_expand_multi, graph_expand_multi_card],
+    requires = [graph_build, graph_refold, graph_expand, graph_expand_card, graph_expand_multi, graph_expand_multi_card, graph_ppr],
 );
 
 // Public `theodb.graph_*` surface (the pg_extern lives in schema `theodb_rs`; expose curated wrappers in `theodb`).
@@ -468,9 +529,13 @@ REVOKE ALL ON FUNCTION theodb.graph_expand(text,bigint[],int) FROM PUBLIC;
 REVOKE ALL ON FUNCTION theodb.graph_expand_card(text,bigint[],int) FROM PUBLIC;
 REVOKE ALL ON FUNCTION theodb.graph_expand_multi(text,int[],bigint[],int) FROM PUBLIC;
 REVOKE ALL ON FUNCTION theodb.graph_expand_multi_card(text,int[],bigint[],int) FROM PUBLIC;
+CREATE FUNCTION theodb.graph_ppr(edge_rel text, seeds bigint[], damping float8 DEFAULT 0.5, iters int DEFAULT 20)
+  RETURNS TABLE(node bigint, score float8)
+  LANGUAGE sql VOLATILE AS $fn$ SELECT * FROM theodb_rs.graph_ppr($1,$2,$3,$4) $fn$;
+REVOKE ALL ON FUNCTION theodb.graph_ppr(text,bigint[],float8,int) FROM PUBLIC;
 "#,
     name = "theodb_graph_wrappers",
-    requires = [graph_build, graph_refold, graph_expand, graph_expand_card, graph_expand_multi, graph_expand_multi_card, "theodb_graph_schema"],
+    requires = [graph_build, graph_refold, graph_expand, graph_expand_card, graph_expand_multi, graph_expand_multi_card, graph_ppr, "theodb_graph_schema"],
 );
 
 // M108 (review HIGH-1): drop the persisted CSR row when its edge relation is DROPped, so a later relation that
@@ -626,6 +691,28 @@ mod tests {
         // the sql_drop trigger deleted the row; nothing references the freed oid
         let orphans: i64 = Spi::get_one("SELECT count(*) FROM theodb.graph_csr WHERE edge_rel NOT IN (SELECT oid FROM pg_class)").unwrap().unwrap();
         assert_eq!(orphans, 0, "sql_drop trigger removes the orphaned CSR row (no OID-reuse wrong answer)");
+    }
+
+    // M112: Personalized PageRank oracle — on a symmetric line 0-1-2-3-4 seeded at the CENTER (2), PPR must be
+    // symmetric (score[1]==score[3], score[0]==score[4]) and monotonically decay from the seed
+    // (score[2]>score[1]>score[0]). A rigorous behavioral oracle (no fabricated numbers).
+    #[pg_test]
+    fn m112_ppr_symmetry_and_decay() {
+        Spi::run("CREATE TABLE gline(src bigint, dst bigint)").unwrap();
+        Spi::run("INSERT INTO gline VALUES (0,1),(1,2),(2,3),(3,4)").unwrap();
+        Spi::get_one::<i64>("SELECT theodb.graph_build('gline','src','dst')").unwrap();
+        let sc = |n: i64| -> f64 {
+            Spi::get_one(&format!("SELECT score FROM theodb.graph_ppr('gline', ARRAY[2]::bigint[], 0.5, 40) WHERE node={n}")).unwrap().unwrap_or(0.0)
+        };
+        let (s0, s1, s2, s3, s4) = (sc(0), sc(1), sc(2), sc(3), sc(4));
+        assert!((s1 - s3).abs() < 1e-6, "PPR symmetric: score[1]={s1} == score[3]={s3}");
+        assert!((s0 - s4).abs() < 1e-6, "PPR symmetric: score[0]={s0} == score[4]={s4}");
+        assert!(s2 > s1 && s1 > s0, "PPR decays monotonically from the seed: {s2} > {s1} > {s0}");
+        // seed at an endpoint (0): the seed keeps the most mass, decay toward the far end.
+        let e = |n: i64| -> f64 {
+            Spi::get_one(&format!("SELECT score FROM theodb.graph_ppr('gline', ARRAY[0]::bigint[], 0.5, 40) WHERE node={n}")).unwrap().unwrap_or(0.0)
+        };
+        assert!(e(0) > e(1) && e(1) > e(2) && e(2) > e(3), "endpoint-seeded PPR decays along the line");
     }
 
     // M108: expand on an unbuilt relation fails fast (typed), not a silent empty.

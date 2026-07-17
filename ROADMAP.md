@@ -1670,7 +1670,7 @@ LazyGraphRAG (MS Research), HippoRAG 2; baseline a bater = `theo-rag/packages/co
 
 ---
 
-## M110 — [ ] Grafo Fase 3: `theodb.graph_expand` + `ai.extract_graph` (a superfície que o theo-rag adota) *(gated M109)*
+## M110 — [x] Grafo Fase 3: `theodb.graph_expand` + `ai.extract_graph` (a superfície que o theo-rag adota) *(gated M109)*
 
 > Added 2026-07-16 by `/roadmap-feature` (slug: `graph-surface-graphexpand`). Fonte: ADR-0048 (follow-on #3) — o **payoff de reduzir a complexidade do theo-rag**.
 
