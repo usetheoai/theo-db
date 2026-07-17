@@ -797,20 +797,60 @@ mod tests {
                 }
                 seq_nodes_ms.push(t.elapsed().as_secs_f64() * 1000.0);
             }
+            let std = |v: &[f64], m: f64| (v.iter().map(|x| (x - m).powi(2)).sum::<f64>() / v.len() as f64).sqrt();
             let (bm, scm, snm) = (mean(&batch_ms), mean(&seq_card_ms), mean(&seq_nodes_ms));
+            let (bstd, scstd) = (std(&batch_ms, bm), std(&seq_card_ms, scm));
             let speedup_pure = scm / bm.max(1e-9); // isolates (a)+(b): both count in Rust
             let speedup_naive = snm / bm.max(1e-9); // vs the naive N-call node-streaming baseline
             if crossover < 0 && speedup_pure >= 1.0 {
                 crossover = n;
             }
             max_pure_speedup = max_pure_speedup.max(speedup_pure);
-            pgrx::warning!("M109_SWEEP n={n} batched_ms={bm:.3} seq_card_ms={scm:.3} seq_nodes_ms={snm:.3} pure_speedup={speedup_pure:.3} naive_speedup={speedup_naive:.3}");
+            pgrx::warning!("M109_SWEEP n={n} batched_ms={bm:.3}±{bstd:.3} seq_card_ms={scm:.3}±{scstd:.3} pure_speedup={speedup_pure:.3} naive_speedup={speedup_naive:.3}");
             points.push(format!(
-                "{{\"n\":{n},\"batched_ms\":{bm:.4},\"seq_card_ms\":{scm:.4},\"seq_nodes_ms\":{snm:.4},\"pure_speedup\":{speedup_pure:.3},\"naive_speedup\":{speedup_naive:.3}}}"
+                "{{\"n\":{n},\"batched_ms\":{bm:.4},\"batched_std\":{bstd:.4},\"seq_card_ms\":{scm:.4},\"seq_card_std\":{scstd:.4},\"seq_nodes_ms\":{snm:.4},\"pure_speedup\":{speedup_pure:.3},\"naive_speedup\":{speedup_naive:.3}}}"
             ));
         }
+        // TOPOLOGY-FLOOR datapoint (review LOW): the hub graph is MS-BFS's best case (lanes share hubs). A
+        // UNIFORM-random graph (no hub concentration) bounds the floor — how much of the win survives when
+        // seeds share little structure. Measured at N=64, same methodology, oracle PASS.
+        Spi::run(
+            "CREATE TABLE geu AS SELECT (abs(hashint8(g))%40000)::bigint AS src, (abs(hashint8(g*2654435761))%40000)::bigint AS dst \
+             FROM generate_series(1,200000) g",
+        ).unwrap();
+        Spi::run("CREATE INDEX ON geu(src); CREATE INDEX ON geu(dst); ANALYZE geu").unwrap();
+        Spi::get_one::<i64>("SELECT theodb.graph_build('geu','src','dst')").unwrap();
+        let fn64: i64 = 64;
+        let fseeds: Vec<i64> = (1..=fn64).map(|k| (k * 617) % 40000).collect();
+        let fsids = format!("ARRAY[{}]::int[]", (1..=fn64).map(|k| k.to_string()).collect::<Vec<_>>().join(","));
+        let fsds = format!("ARRAY[{}]::bigint[]", fseeds.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(","));
+        let fbh: i64 = Spi::get_one(&format!("SELECT coalesce(bit_xor(hashint8(set_id::bigint*1000003 + node)),0) FROM theodb.graph_expand_multi('geu', {fsids}, {fsds}, 3)")).unwrap().unwrap();
+        let mut fsh: i64 = 0;
+        for (i, &sk) in fseeds.iter().enumerate() {
+            let k = (i + 1) as i64;
+            fsh ^= Spi::get_one::<i64>(&format!("SELECT coalesce(bit_xor(hashint8({k}::bigint*1000003 + node)),0) FROM theodb.graph_expand('geu', ARRAY[{sk}]::bigint[], 3) AS t(node)")).unwrap().unwrap();
+        }
+        assert_eq!(fbh, fsh, "M109 oracle @ uniform-floor N=64: batched == N sequential");
+        let _ = Spi::get_one::<i64>(&format!("SELECT count(*) FROM theodb.graph_expand_multi_card('geu', {fsids}, {fsds}, 3)")).unwrap();
+        let mut fb = Vec::new();
+        for _ in 0..3 {
+            let t = std::time::Instant::now();
+            let _ = Spi::get_one::<i64>(&format!("SELECT count(*) FROM theodb.graph_expand_multi_card('geu', {fsids}, {fsds}, 3)")).unwrap();
+            fb.push(t.elapsed().as_secs_f64() * 1000.0);
+        }
+        let mut fs = Vec::new();
+        for _ in 0..3 {
+            let t = std::time::Instant::now();
+            for &sk in &fseeds {
+                let _ = Spi::get_one::<i64>(&format!("SELECT theodb.graph_expand_card('geu', ARRAY[{sk}]::bigint[], 3)")).unwrap();
+            }
+            fs.push(t.elapsed().as_secs_f64() * 1000.0);
+        }
+        let floor_speedup = mean(&fs) / mean(&fb).max(1e-9);
+        pgrx::warning!("M109_FLOOR uniform_graph N=64 pure_speedup={floor_speedup:.3}");
+
         let json = format!(
-            "{{\"graph\":{{\"nodes\":40000,\"edges\":{built}}},\"max_hops\":3,\"runs\":3,\
+            "{{\"graph\":{{\"nodes\":40000,\"edges\":{built}}},\"hardware\":\"DO-Regular 4 vCPU @ 2.0GHz, 7.8GB (pgrx 0.19/PG17)\",\"uniform_floor_speedup_n64\":{floor_speedup:.3},\"max_hops\":3,\"runs\":3,\
              \"methodology\":\"traversal-only. batched=graph_expand_multi_card (count in Rust). pure_speedup vs seq_card (N x graph_expand_card, also count in Rust) isolates MS-BFS edge-sharing + 1-SPI-call-vs-N. naive_speedup vs N x count(*) over graph_expand (streams nodes).\",\
              \"crossover_n_pure\":{crossover},\"curve\":[{}]}}\n",
             points.join(",")

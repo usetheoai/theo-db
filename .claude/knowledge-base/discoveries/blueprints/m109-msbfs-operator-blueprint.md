@@ -119,8 +119,9 @@ saturating-frontier regime.
 
 ## Honest caveats — RESOLVED by measurement (2026-07-16)
 
-- ~~UNBENCHMARKED~~ → **BENCHMARKED (`docs/benchmarks/m109-msbfs`):** batched MS-BFS beats N sequential BFS
-  **1.33× @N=1 → ~7× @N=64+** (pure traversal, confound-free), up to ~19× naive-caller, oracle PASS every N.
+- ~~UNBENCHMARKED~~ → **BENCHMARKED (`docs/benchmarks/m109-msbfs`, mean±std):** batched MS-BFS beats N
+  sequential BFS **~1.7× @N=1 → ~5–8× @N≥16** (pure traversal, confound-free); ~10× on a uniform-random graph
+  at N=64 (win is not hub-gamed); oracle PASS every N=1..512.
 - A first benchmark showed a spurious 0.44–0.62× **loss** — root-caused to a **row-materialization confound**
   (timing `count(*)` over ~1.28M returned node rows + an intermediate-Vec bug), NOT a real property. The
   traversal-only re-measurement (per-lane cardinality, count-in-Rust on both sides) reverses the verdict.

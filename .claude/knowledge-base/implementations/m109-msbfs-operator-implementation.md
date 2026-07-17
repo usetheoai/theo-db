@@ -29,17 +29,18 @@ up to 64 independent BFS lanes per CSR sweep via per-vertex `u64` source-masks (
 
 ## Measured result (`docs/benchmarks/m109-msbfs.{md,json}`)
 
-Traversal-only, hub graph 40k/200k, ≤3 hops, oracle PASS at every N:
+Traversal-only, hub graph 40k/200k, ≤3 hops, mean±std over 3 runs, oracle PASS at every N:
 
-| N | batched ms | seq (count-in-Rust) ms | pure_speedup | naive_speedup |
+| N | batched ms (±std) | seq count-in-Rust ms (±std) | pure_speedup | naive_speedup |
 |---:|---:|---:|---:|---:|
-| 1 | 2.22 | 2.96 | 1.33× | 1.98× |
-| 16 | 10.70 | 52.54 | 4.91× | 8.25× |
-| 64 | 25.74 | 185.26 | **7.20×** | 12.21× |
-| 256 | 95.66 | 673.10 | 7.04× | 17.81× |
-| 512 | 277.29 | 1713.78 | 6.18× | 13.86× |
+| 1 | 1.63 ±0.08 | 2.77 ±0.81 | 1.70× | 2.71× |
+| 16 | 8.49 ±0.59 | 61.40 ±8.18 | 7.24× | 19.16× |
+| 64 | 33.04 ±1.26 | 213.75 ±14.78 | **6.47×** | 12.60× |
+| 256 | 145.23 ±9.62 | 723.22 ±12.11 | 4.98× | 10.41× |
+| 512 | 183.06 ±14.85 | 1430.11 ±5.39 | 7.81× | 17.09× |
 
-Crossover N=1; pure_speedup grows 1.33×→7× with N (Then et al. edge-sharing mechanism, confirmed empirically).
+Crossover N=1; pure_speedup ~5–8× across N≥16 (Then et al. edge-sharing, confirmed empirically). **Topology
+floor:** a uniform-random graph at N=64 gives ~10.2× — the win is robust across topologies, not hub-gamed.
 
 ## DoD verification
 
