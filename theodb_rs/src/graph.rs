@@ -124,6 +124,83 @@ impl Csr {
         }
         (0..nn).filter(|&i| is(&visited, i)).map(|i| i as i64).collect()
     }
+
+    /// M109 — Multi-Source BFS. `seed_sets[l]` is lane `l`'s source set; returns lane `l`'s reachable node
+    /// set (undirected, ≤`max_hops`) at `result[l]`. Top-down Aggregated-Neighbor-Processing (Then et al.,
+    /// VLDB'14): per-vertex `u64` source-mask (bit `l` = "lane l reached this vertex"), so ONE sweep of the
+    /// CSR advances up to 64 BFSs at once via bitwise-OR (auto-vectorized plain Rust — the source-parallel
+    /// mechanism, NOT the candidate-parallel `pshufb` of `vec/ah.rs`; ADR-1). Lanes are tiled at 64; the same
+    /// deserialized `Csr` is reused across tiles. INVARIANT (ADR-3): `expand_multi([[s]],h)[0]` set-equals
+    /// `expand(&[s],h)` — MS-BFS is exactly N single-source BFSs sharing edge traversal.
+    fn expand_multi(&self, seed_sets: &[Vec<i64>], max_hops: i32) -> Vec<Vec<i64>> {
+        let nn = self.nnodes as usize;
+        let hops = max_hops.max(0);
+        let nsets = seed_sets.len();
+        let mut result: Vec<Vec<i64>> = vec![Vec::new(); nsets];
+        let mut base = 0;
+        while base < nsets {
+            let tile = (nsets - base).min(64);
+            // FRONTIER-DRIVEN MS-BFS (ADR-2): iterate only ACTIVE vertices — NOT a full O(nnodes) per-hop sweep
+            // (a shared hub reached by many lanes has its high-degree adjacency traversed ONCE with the OR'd
+            // lane bits, instead of once per lane in N sequential BFSs). MEASURED traversal-only (confound-free,
+            // `docs/benchmarks/m109-msbfs`): pure_speedup 1.33× @N=1 → ~7× @N=64+, oracle PASS at every N. The
+            // growth-with-N is exactly Then et al.'s (VLDB'14) edge-sharing mechanism. `visit[v]` is a u64
+            // source-mask (bit l = lane `base+l`), auto-vectorized bitwise-OR — source-parallel, NOT the
+            // candidate-parallel `pshufb` of `vec/ah.rs` (ADR-1).
+            let mut visit = vec![0u64; nn]; // bit l set ⇒ lane l propagates from this vertex next hop
+            let mut seen = vec![0u64; nn]; // accumulated reached-by-lane bits
+            let mut frontier: Vec<u32> = Vec::new();
+            for l in 0..tile {
+                let bit = 1u64 << l;
+                for &s in &seed_sets[base + l] {
+                    if s < 0 || (s as u64) >= self.nnodes {
+                        continue; // out-of-range seed skipped (same as `expand`)
+                    }
+                    let si = s as usize;
+                    if seen[si] == 0 {
+                        frontier.push(si as u32); // add each seed vertex to the frontier once
+                    }
+                    seen[si] |= bit;
+                    visit[si] |= bit;
+                }
+            }
+            for _ in 0..hops {
+                if frontier.is_empty() {
+                    break;
+                }
+                let mut visit_next = vec![0u64; nn];
+                let mut next_frontier: Vec<u32> = Vec::new();
+                for &v in &frontier {
+                    let vv = visit[v as usize];
+                    let (a0, a1) = (self.offsets[v as usize] as usize, self.offsets[v as usize + 1] as usize);
+                    for &nbr in &self.adj[a0..a1] {
+                        let ni = nbr as usize;
+                        let new_bits = vv & !seen[ni]; // lanes that reach nbr and haven't seen it yet
+                        if new_bits != 0 {
+                            if visit_next[ni] == 0 {
+                                next_frontier.push(nbr); // add nbr to next frontier once per hop
+                            }
+                            visit_next[ni] |= new_bits;
+                            seen[ni] |= new_bits;
+                        }
+                    }
+                }
+                visit = visit_next;
+                frontier = next_frontier;
+            }
+            // Extract: distribute each vertex's set bits to the owning lane's result.
+            for (v, &mask) in seen.iter().enumerate() {
+                let mut m = mask;
+                while m != 0 {
+                    let l = m.trailing_zeros() as usize;
+                    result[base + l].push(v as i64);
+                    m &= m - 1;
+                }
+            }
+            base += tile;
+        }
+        result
+    }
 }
 
 /// Scan the edge relation and build the undirected CSR. `edge_rel` is a table name; `src_col`/`dst_col` are the
@@ -227,27 +304,23 @@ mod theodb_rs {
         }
     }
 
-    /// `graph_expand(edge_rel text, seeds bigint[], max_hops int) -> SETOF bigint` — load the PERSISTED CSR (no
-    /// rebuild) and return the reachable node set within `max_hops` from `seeds` (undirected frontier BFS).
-    #[pg_extern]
-    fn graph_expand(edge_rel: &str, seeds: Vec<Option<i64>>, max_hops: i32) -> SetOfIterator<'static, i64> {
-        // Resolve the edge-relation oid + its persisted `built_at` epoch (cheap — NO bytea load).
-        let (oid, epoch): (pg_sys::Oid, i64) = super::CSR_CACHE.with(|_| {
-            Spi::get_two_with_args::<pg_sys::Oid, i64>(
-                "SELECT ($1)::regclass::oid, (extract(epoch from built_at)*1e6)::bigint \
-                 FROM theodb.graph_csr WHERE edge_rel = ($1)::regclass::oid",
-                &[edge_rel.into()],
+    /// Resolve the PERSISTED CSR for `edge_rel` from the per-backend cache (M108). Cheap oid+built_at resolve;
+    /// on a miss (or stale epoch) loads the bytea, deserializes, and caches an `Rc<Csr>`. Fails fast (typed) if
+    /// no CSR was built. Shared by `graph_expand` (single-source) and `graph_expand_multi` (M109).
+    fn load_cached_csr(edge_rel: &str) -> Rc<Csr> {
+        let (oid, epoch): (pg_sys::Oid, i64) = Spi::get_two_with_args::<pg_sys::Oid, i64>(
+            "SELECT ($1)::regclass::oid, (extract(epoch from built_at)*1e6)::bigint \
+             FROM theodb.graph_csr WHERE edge_rel = ($1)::regclass::oid",
+            &[edge_rel.into()],
+        )
+        .ok()
+        .and_then(|(o, e)| Some((o?, e?)))
+        .unwrap_or_else(|| {
+            crate::pg::err_unsupported(
+                "theodb graph: no persisted CSR for this edge relation — run theodb.graph_build(edge_rel, src_col, dst_col) first",
             )
-            .ok()
-            .and_then(|(o, e)| Some((o?, e?)))
-            .unwrap_or_else(|| {
-                crate::pg::err_unsupported(
-                    "theodb.graph_expand: no persisted CSR for this edge relation — run theodb.graph_build(edge_rel, src_col, dst_col) first",
-                )
-            })
         });
-        // Cache hit (same oid + built_at) → skip the load+deserialize; else load the bytea, deserialize, cache.
-        let csr: Rc<Csr> = super::CSR_CACHE.with(|c| {
+        super::CSR_CACHE.with(|c| {
             if let Some((ep, rc)) = c.borrow().get(&oid) {
                 if *ep == epoch {
                     return rc.clone();
@@ -259,16 +332,101 @@ mod theodb_rs {
             )
             .ok()
             .flatten()
-            .unwrap_or_else(|| crate::pg::err_input("theodb.graph_expand: persisted CSR row vanished mid-query"));
+            .unwrap_or_else(|| crate::pg::err_input("theodb graph: persisted CSR row vanished mid-query"));
             let rc = Rc::new(
-                Csr::from_bytes(&bytes).unwrap_or_else(|e| crate::pg::err_input(&format!("theodb.graph_expand: {e}"))),
+                Csr::from_bytes(&bytes).unwrap_or_else(|e| crate::pg::err_input(&format!("theodb graph: {e}"))),
             );
             c.borrow_mut().insert(oid, (epoch, rc.clone()));
             rc
-        });
+        })
+    }
+
+    /// `graph_expand(edge_rel text, seeds bigint[], max_hops int) -> SETOF bigint` — load the PERSISTED CSR (no
+    /// rebuild) and return the reachable node set within `max_hops` from `seeds` (undirected frontier BFS).
+    #[pg_extern]
+    fn graph_expand(edge_rel: &str, seeds: Vec<Option<i64>>, max_hops: i32) -> SetOfIterator<'static, i64> {
+        let csr = load_cached_csr(edge_rel);
         let seed_ids: Vec<i64> = seeds.into_iter().flatten().collect();
         SetOfIterator::new(csr.expand(&seed_ids, max_hops).into_iter())
     }
+
+    /// `graph_expand_card(edge_rel text, seeds bigint[], max_hops int) -> bigint` — single-source reachable-set
+    /// CARDINALITY (count computed in Rust, one row out). The count-in-Rust twin of `graph_expand`; used to
+    /// isolate MS-BFS traversal speedup from SQL row-streaming in the crossover benchmark (both sides count in Rust).
+    #[pg_extern]
+    fn graph_expand_card(edge_rel: &str, seeds: Vec<Option<i64>>, max_hops: i32) -> i64 {
+        let csr = load_cached_csr(edge_rel);
+        let seed_ids: Vec<i64> = seeds.into_iter().flatten().collect();
+        csr.expand(&seed_ids, max_hops).len() as i64
+    }
+
+    /// `graph_expand_multi(edge_rel text, set_ids int[], seeds bigint[], max_hops int) -> TABLE(set_id int,
+    /// node bigint)` — M109 batched Multi-Source BFS. `set_ids`/`seeds` are PARALLEL arrays: `seeds[i]` belongs
+    /// to lane `set_ids[i]` (ragged sets, built from `SELECT array_agg(set_id), array_agg(seed) ...`). Returns,
+    /// per input `set_id`, its reachable node set — one MS-BFS sweep advances up to 64 lanes at once (ADR-3).
+    #[pg_extern]
+    fn graph_expand_multi(
+        edge_rel: &str,
+        set_ids: Vec<Option<i32>>,
+        seeds: Vec<Option<i64>>,
+        max_hops: i32,
+    ) -> TableIterator<'static, (name!(set_id, i32), name!(node, i64))> {
+        let (lanes, lane_set_id) = super::group_seed_lanes(set_ids, seeds);
+        let csr = load_cached_csr(edge_rel);
+        let reached = csr.expand_multi(&lanes, max_hops);
+        // Flatten (lane → original set_id) × reachable nodes into rows (no intermediate Vec — lazy iterator).
+        TableIterator::new(reached.into_iter().enumerate().flat_map(move |(lane, nodes)| {
+            let sid = lane_set_id[lane];
+            nodes.into_iter().map(move |n| (sid, n))
+        }))
+    }
+
+    /// `graph_expand_multi_card(edge_rel text, set_ids int[], seeds bigint[], max_hops int) -> TABLE(set_id
+    /// int, card bigint)` — M109 batched MS-BFS returning only each lane's reachable-set CARDINALITY (not the
+    /// nodes). Cheap: N rows out (one per lane), so the SQL row-return does NOT confound a traversal benchmark;
+    /// it is also a lightweight per-entity ≤H-hop reach-count signal. Same MS-BFS traversal as `graph_expand_multi`.
+    #[pg_extern]
+    fn graph_expand_multi_card(
+        edge_rel: &str,
+        set_ids: Vec<Option<i32>>,
+        seeds: Vec<Option<i64>>,
+        max_hops: i32,
+    ) -> TableIterator<'static, (name!(set_id, i32), name!(card, i64))> {
+        let (lanes, lane_set_id) = super::group_seed_lanes(set_ids, seeds);
+        let csr = load_cached_csr(edge_rel);
+        let reached = csr.expand_multi(&lanes, max_hops);
+        let rows: Vec<(i32, i64)> = reached
+            .into_iter()
+            .enumerate()
+            .map(|(lane, nodes)| (lane_set_id[lane], nodes.len() as i64))
+            .collect();
+        TableIterator::new(rows.into_iter())
+    }
+}
+
+/// Group parallel `set_ids`/`seeds` arrays into contiguous lanes (lane `k` ↔ `lane_set_id[k]`), preserving
+/// first-appearance order. Fails fast (typed) on unequal lengths; skips NULL element pairs. Shared by the
+/// `graph_expand_multi{,_card}` entrypoints (DRY).
+fn group_seed_lanes(set_ids: Vec<Option<i32>>, seeds: Vec<Option<i64>>) -> (Vec<Vec<i64>>, Vec<i32>) {
+    if set_ids.len() != seeds.len() {
+        crate::pg::err_input("theodb graph_expand_multi: set_ids and seeds must be parallel arrays of equal length");
+    }
+    let mut lane_of: HashMap<i32, usize> = HashMap::new();
+    let mut lane_set_id: Vec<i32> = Vec::new();
+    let mut lanes: Vec<Vec<i64>> = Vec::new();
+    for (sid, seed) in set_ids.into_iter().zip(seeds.into_iter()) {
+        let (sid, seed) = match (sid, seed) {
+            (Some(a), Some(b)) => (a, b),
+            _ => continue, // NULL element in either array → skip that pair
+        };
+        let lane = *lane_of.entry(sid).or_insert_with(|| {
+            lane_set_id.push(sid);
+            lanes.push(Vec::new());
+            lanes.len() - 1
+        });
+        lanes[lane].push(seed);
+    }
+    (lanes, lane_set_id)
 }
 
 // REVOKE the graph functions from PUBLIC (least-privilege — they read arbitrary edge relations; the caller
@@ -284,7 +442,7 @@ BEGIN
 END $$;
 "#,
     name = "theodb_graph_revoke",
-    requires = [graph_build, graph_refold, graph_expand],
+    requires = [graph_build, graph_refold, graph_expand, graph_expand_card, graph_expand_multi, graph_expand_multi_card],
 );
 
 // Public `theodb.graph_*` surface (the pg_extern lives in schema `theodb_rs`; expose curated wrappers in `theodb`).
@@ -296,12 +454,23 @@ CREATE FUNCTION theodb.graph_refold(edge_rel text) RETURNS bigint
   LANGUAGE sql VOLATILE AS $fn$ SELECT theodb_rs.graph_refold($1) $fn$;
 CREATE FUNCTION theodb.graph_expand(edge_rel text, seeds bigint[], max_hops int) RETURNS SETOF bigint
   LANGUAGE sql VOLATILE AS $fn$ SELECT theodb_rs.graph_expand($1,$2,$3) $fn$;
+CREATE FUNCTION theodb.graph_expand_card(edge_rel text, seeds bigint[], max_hops int) RETURNS bigint
+  LANGUAGE sql VOLATILE AS $fn$ SELECT theodb_rs.graph_expand_card($1,$2,$3) $fn$;
+CREATE FUNCTION theodb.graph_expand_multi(edge_rel text, set_ids int[], seeds bigint[], max_hops int)
+  RETURNS TABLE(set_id int, node bigint)
+  LANGUAGE sql VOLATILE AS $fn$ SELECT * FROM theodb_rs.graph_expand_multi($1,$2,$3,$4) $fn$;
+CREATE FUNCTION theodb.graph_expand_multi_card(edge_rel text, set_ids int[], seeds bigint[], max_hops int)
+  RETURNS TABLE(set_id int, card bigint)
+  LANGUAGE sql VOLATILE AS $fn$ SELECT * FROM theodb_rs.graph_expand_multi_card($1,$2,$3,$4) $fn$;
 REVOKE ALL ON FUNCTION theodb.graph_build(text,text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION theodb.graph_refold(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION theodb.graph_expand(text,bigint[],int) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb.graph_expand_card(text,bigint[],int) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb.graph_expand_multi(text,int[],bigint[],int) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb.graph_expand_multi_card(text,int[],bigint[],int) FROM PUBLIC;
 "#,
     name = "theodb_graph_wrappers",
-    requires = [graph_build, graph_refold, graph_expand, "theodb_graph_schema"],
+    requires = [graph_build, graph_refold, graph_expand, graph_expand_card, graph_expand_multi, graph_expand_multi_card, "theodb_graph_schema"],
 );
 
 // M108 (review HIGH-1): drop the persisted CSR row when its edge relation is DROPped, so a later relation that
@@ -467,5 +636,230 @@ mod tests {
             Spi::run("SELECT theodb.graph_expand('g2', ARRAY[0]::bigint[], 1)")
         });
         assert!(r.is_err(), "expand without a prior build must raise, not return empty");
+    }
+
+    // M109 (T1.1/T2.1): the DECOMPOSITION invariant — each MS-BFS lane's reachable set is byte-identical
+    // (set-hash) to the single-source `expand` of that lane's seed. This is the primary correctness gate; a
+    // word-boundary / tail-padding / axis-conflation bug changes a lane's set → the set-hash diverges.
+    #[pg_test]
+    fn m109_expand_multi_matches_expand_per_lane() {
+        seed();
+        Spi::get_one::<i64>("SELECT theodb.graph_build('g','src','dst')").unwrap();
+        // 3 lanes, single seed each: set 1={4}, set 2={0}, set 3={1}. Check H=1,2,3.
+        for h in 1..=3 {
+            for (sid, s) in [(1i32, 4i64), (2, 0), (3, 1)] {
+                let multi: i64 = Spi::get_one(&format!(
+                    "SELECT coalesce(bit_xor(hashint8(node)),0) FROM theodb.graph_expand_multi('g', ARRAY[1,2,3]::int[], ARRAY[4,0,1]::bigint[], {h}) WHERE set_id={sid}"
+                )).unwrap().unwrap();
+                let single: i64 = Spi::get_one(&format!(
+                    "SELECT coalesce(bit_xor(hashint8(node)),0) FROM theodb.graph_expand('g', ARRAY[{s}]::bigint[], {h}) AS t(node)"
+                )).unwrap().unwrap();
+                assert_eq!(multi, single, "lane {sid} (seed {s}) H={h}: MS-BFS set-hash must equal single-source expand");
+            }
+        }
+    }
+
+    // M109 (T1.1): a lane with MULTIPLE seeds equals the union single-source expand of those seeds.
+    #[pg_test]
+    fn m109_expand_multi_multiseed_lane() {
+        seed();
+        Spi::get_one::<i64>("SELECT theodb.graph_build('g','src','dst')").unwrap();
+        let multi: i64 = Spi::get_one(
+            "SELECT coalesce(bit_xor(hashint8(node)),0) FROM theodb.graph_expand_multi('g', ARRAY[7,7]::int[], ARRAY[4,1]::bigint[], 1) WHERE set_id=7"
+        ).unwrap().unwrap();
+        let single: i64 = Spi::get_one(
+            "SELECT coalesce(bit_xor(hashint8(node)),0) FROM theodb.graph_expand('g', ARRAY[4,1]::bigint[], 1) AS t(node)"
+        ).unwrap().unwrap();
+        assert_eq!(multi, single, "multi-seed lane must equal the union single-source expand");
+    }
+
+    // M109 (T1.1): out-of-range seed contributes nothing; lanes are independent (no cross-lane bit leak).
+    #[pg_test]
+    fn m109_expand_multi_lanes_independent() {
+        seed();
+        Spi::get_one::<i64>("SELECT theodb.graph_build('g','src','dst')").unwrap();
+        let l1: i64 = Spi::get_one("SELECT count(*) FROM theodb.graph_expand_multi('g', ARRAY[1,2]::int[], ARRAY[4,99]::bigint[], 3) WHERE set_id=1").unwrap().unwrap();
+        let l2: i64 = Spi::get_one("SELECT count(*) FROM theodb.graph_expand_multi('g', ARRAY[1,2]::int[], ARRAY[4,99]::bigint[], 3) WHERE set_id=2").unwrap().unwrap();
+        assert_eq!(l1, 5, "lane 1 (seed 4, 3 hops) reaches all 5 nodes");
+        assert_eq!(l2, 0, "lane 2 (out-of-range seed) reaches nothing — lanes independent");
+    }
+
+    // M109 (T1.2): > 64 seed-sets force TILING (64 + 1). Each lane across the tile boundary still matches its
+    // single-source expand — catches tile-boundary index / lane-map bugs.
+    #[pg_test]
+    fn m109_expand_multi_tiling_65_sets() {
+        seed();
+        Spi::get_one::<i64>("SELECT theodb.graph_build('g','src','dst')").unwrap();
+        for k in [1i32, 64, 65] {
+            let s = ((k - 1) % 5) as i64;
+            let multi: i64 = Spi::get_one(&format!(
+                "WITH q AS (SELECT g AS sid, ((g-1)%5)::bigint AS sd FROM generate_series(1,65) g) \
+                 SELECT coalesce(bit_xor(hashint8(node)),0) FROM theodb.graph_expand_multi('g', \
+                   (SELECT array_agg(sid ORDER BY sid)::int[] FROM q), (SELECT array_agg(sd ORDER BY sid) FROM q), 2) WHERE set_id={k}"
+            )).unwrap().unwrap();
+            let single: i64 = Spi::get_one(&format!(
+                "SELECT coalesce(bit_xor(hashint8(node)),0) FROM theodb.graph_expand('g', ARRAY[{s}]::bigint[], 2) AS t(node)"
+            )).unwrap().unwrap();
+            assert_eq!(multi, single, "tiling lane {k} (seed {s}) crosses the 64-lane tile boundary correctly");
+        }
+    }
+
+    // M109 (T2.1 negative): unbuilt relation → typed error, not silent empty.
+    #[pg_test]
+    fn m109_expand_multi_without_build_errors() {
+        Spi::run("CREATE TABLE g3(src bigint, dst bigint)").unwrap();
+        let r = std::panic::catch_unwind(|| {
+            Spi::run("SELECT * FROM theodb.graph_expand_multi('g3', ARRAY[1]::int[], ARRAY[0]::bigint[], 1)")
+        });
+        assert!(r.is_err(), "expand_multi without a prior build must raise, not return empty");
+    }
+
+    // M109 (T2.1 negative): unequal set_ids/seeds lengths → typed error at the boundary.
+    #[pg_test]
+    fn m109_expand_multi_length_mismatch_errors() {
+        seed();
+        Spi::get_one::<i64>("SELECT theodb.graph_build('g','src','dst')").unwrap();
+        let r = std::panic::catch_unwind(|| {
+            Spi::run("SELECT * FROM theodb.graph_expand_multi('g', ARRAY[1,2]::int[], ARRAY[0]::bigint[], 1)")
+        });
+        assert!(r.is_err(), "unequal set_ids/seeds lengths must raise a typed error");
+    }
+
+    // M109 GATE benchmark (T3.1): the MS-BFS CROSSOVER SWEEP. Measures batched MS-BFS vs N sequential
+    // single-source BFS across N ∈ {1..512} on the M108 hub graph — TRAVERSAL-ONLY (per-lane cardinality via
+    // graph_expand_multi_card vs count(*) per expand), so the ~1.28M-row SQL materialization does NOT confound
+    // the traversal comparison. The set-hash oracle HARD-gates correctness at every N. This empirically locates
+    // the crossover the literature predicts at ~100–256 sources (Then et al. VLDB'14 Fig 1/6): below it,
+    // sequential wins (few-seed GraphRAG regime); above it, MS-BFS's shared-hub traversal amortizes. Writes
+    // /tmp/m109_crossover.json (the curve). An honest-negative at small N is a VALID measured outcome (ADR-3).
+    #[pg_test]
+    fn m109_bench_crossover_sweep() {
+        use std::time::Instant;
+        Spi::run(
+            "CREATE TABLE ge AS \
+             SELECT (abs(hashint8(g))%40000)::bigint AS src, \
+                    (CASE WHEN abs(hashint8(g*7))%100 < 25 THEN abs(hashint8(g*3))%400 \
+                          ELSE abs(hashint8(g*13))%40000 END)::bigint AS dst \
+             FROM generate_series(1,200000) g",
+        ).unwrap();
+        Spi::run("CREATE INDEX ON ge(src); CREATE INDEX ON ge(dst); ANALYZE ge").unwrap();
+        let built: i64 = Spi::get_one("SELECT theodb.graph_build('ge','src','dst')").unwrap().unwrap();
+
+        let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
+        let ns: [i64; 7] = [1, 4, 16, 64, 128, 256, 512];
+        let mut points: Vec<String> = Vec::new();
+        let mut crossover: i64 = -1;
+        let mut max_pure_speedup: f64 = 0.0;
+        for &n in &ns {
+            let seeds_vec: Vec<i64> = (1..=n).map(|k| (k * 617) % 40000).collect();
+            let sids_arr = format!("ARRAY[{}]::int[]", (1..=n).map(|k| k.to_string()).collect::<Vec<_>>().join(","));
+            let sds_arr = format!("ARRAY[{}]::bigint[]", seeds_vec.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(","));
+
+            // Oracle FIRST (gates the number at THIS N): batched reachable sets == N sequential expands.
+            let batched_hash: i64 = Spi::get_one(&format!(
+                "SELECT coalesce(bit_xor(hashint8(set_id::bigint*1000003 + node)),0) FROM theodb.graph_expand_multi('ge', {sids_arr}, {sds_arr}, 3)"
+            )).unwrap().unwrap();
+            let mut seq_hash: i64 = 0;
+            for (i, &sk) in seeds_vec.iter().enumerate() {
+                let k = (i + 1) as i64;
+                let h: i64 = Spi::get_one(&format!(
+                    "SELECT coalesce(bit_xor(hashint8({k}::bigint*1000003 + node)),0) FROM theodb.graph_expand('ge', ARRAY[{sk}]::bigint[], 3) AS t(node)"
+                )).unwrap().unwrap();
+                seq_hash ^= h;
+            }
+            assert_eq!(batched_hash, seq_hash, "M109 oracle @ N={n}: batched reachable sets must equal N sequential expands");
+
+            // TRAVERSAL-ONLY timing. batched = graph_expand_multi_card (N cardinality rows out, count in Rust).
+            // Two sequential baselines to DECOMPOSE the win honestly:
+            //   seq_card  = N × graph_expand_card  → count in Rust too, so this isolates (a) MS-BFS edge-sharing
+            //               + (b) 1 SPI call vs N — the PURE traversal+call speedup, no row-streaming asymmetry.
+            //   seq_nodes = N × count(*) over graph_expand → streams every reachable node row (the naive caller).
+            let _ = Spi::get_one::<i64>(&format!("SELECT count(*) FROM theodb.graph_expand_multi_card('ge', {sids_arr}, {sds_arr}, 3)")).unwrap();
+            let mut batch_ms = Vec::new();
+            for _ in 0..3 {
+                let t = Instant::now();
+                let _ = Spi::get_one::<i64>(&format!("SELECT count(*) FROM theodb.graph_expand_multi_card('ge', {sids_arr}, {sds_arr}, 3)")).unwrap();
+                batch_ms.push(t.elapsed().as_secs_f64() * 1000.0);
+            }
+            let mut seq_card_ms = Vec::new();
+            for _ in 0..3 {
+                let t = Instant::now();
+                for &sk in &seeds_vec {
+                    let _ = Spi::get_one::<i64>(&format!("SELECT theodb.graph_expand_card('ge', ARRAY[{sk}]::bigint[], 3)")).unwrap();
+                }
+                seq_card_ms.push(t.elapsed().as_secs_f64() * 1000.0);
+            }
+            let mut seq_nodes_ms = Vec::new();
+            for _ in 0..3 {
+                let t = Instant::now();
+                for &sk in &seeds_vec {
+                    let _ = Spi::get_one::<i64>(&format!("SELECT count(*) FROM theodb.graph_expand('ge', ARRAY[{sk}]::bigint[], 3)")).unwrap();
+                }
+                seq_nodes_ms.push(t.elapsed().as_secs_f64() * 1000.0);
+            }
+            let std = |v: &[f64], m: f64| (v.iter().map(|x| (x - m).powi(2)).sum::<f64>() / v.len() as f64).sqrt();
+            let (bm, scm, snm) = (mean(&batch_ms), mean(&seq_card_ms), mean(&seq_nodes_ms));
+            let (bstd, scstd) = (std(&batch_ms, bm), std(&seq_card_ms, scm));
+            let speedup_pure = scm / bm.max(1e-9); // isolates (a)+(b): both count in Rust
+            let speedup_naive = snm / bm.max(1e-9); // vs the naive N-call node-streaming baseline
+            if crossover < 0 && speedup_pure >= 1.0 {
+                crossover = n;
+            }
+            max_pure_speedup = max_pure_speedup.max(speedup_pure);
+            pgrx::warning!("M109_SWEEP n={n} batched_ms={bm:.3}±{bstd:.3} seq_card_ms={scm:.3}±{scstd:.3} pure_speedup={speedup_pure:.3} naive_speedup={speedup_naive:.3}");
+            points.push(format!(
+                "{{\"n\":{n},\"batched_ms\":{bm:.4},\"batched_std\":{bstd:.4},\"seq_card_ms\":{scm:.4},\"seq_card_std\":{scstd:.4},\"seq_nodes_ms\":{snm:.4},\"pure_speedup\":{speedup_pure:.3},\"naive_speedup\":{speedup_naive:.3}}}"
+            ));
+        }
+        // TOPOLOGY-FLOOR datapoint (review LOW): the hub graph is MS-BFS's best case (lanes share hubs). A
+        // UNIFORM-random graph (no hub concentration) bounds the floor — how much of the win survives when
+        // seeds share little structure. Measured at N=64, same methodology, oracle PASS.
+        Spi::run(
+            "CREATE TABLE geu AS SELECT (abs(hashint8(g))%40000)::bigint AS src, (abs(hashint8(g*2654435761))%40000)::bigint AS dst \
+             FROM generate_series(1,200000) g",
+        ).unwrap();
+        Spi::run("CREATE INDEX ON geu(src); CREATE INDEX ON geu(dst); ANALYZE geu").unwrap();
+        Spi::get_one::<i64>("SELECT theodb.graph_build('geu','src','dst')").unwrap();
+        let fn64: i64 = 64;
+        let fseeds: Vec<i64> = (1..=fn64).map(|k| (k * 617) % 40000).collect();
+        let fsids = format!("ARRAY[{}]::int[]", (1..=fn64).map(|k| k.to_string()).collect::<Vec<_>>().join(","));
+        let fsds = format!("ARRAY[{}]::bigint[]", fseeds.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(","));
+        let fbh: i64 = Spi::get_one(&format!("SELECT coalesce(bit_xor(hashint8(set_id::bigint*1000003 + node)),0) FROM theodb.graph_expand_multi('geu', {fsids}, {fsds}, 3)")).unwrap().unwrap();
+        let mut fsh: i64 = 0;
+        for (i, &sk) in fseeds.iter().enumerate() {
+            let k = (i + 1) as i64;
+            fsh ^= Spi::get_one::<i64>(&format!("SELECT coalesce(bit_xor(hashint8({k}::bigint*1000003 + node)),0) FROM theodb.graph_expand('geu', ARRAY[{sk}]::bigint[], 3) AS t(node)")).unwrap().unwrap();
+        }
+        assert_eq!(fbh, fsh, "M109 oracle @ uniform-floor N=64: batched == N sequential");
+        let _ = Spi::get_one::<i64>(&format!("SELECT count(*) FROM theodb.graph_expand_multi_card('geu', {fsids}, {fsds}, 3)")).unwrap();
+        let mut fb = Vec::new();
+        for _ in 0..3 {
+            let t = std::time::Instant::now();
+            let _ = Spi::get_one::<i64>(&format!("SELECT count(*) FROM theodb.graph_expand_multi_card('geu', {fsids}, {fsds}, 3)")).unwrap();
+            fb.push(t.elapsed().as_secs_f64() * 1000.0);
+        }
+        let mut fs = Vec::new();
+        for _ in 0..3 {
+            let t = std::time::Instant::now();
+            for &sk in &fseeds {
+                let _ = Spi::get_one::<i64>(&format!("SELECT theodb.graph_expand_card('geu', ARRAY[{sk}]::bigint[], 3)")).unwrap();
+            }
+            fs.push(t.elapsed().as_secs_f64() * 1000.0);
+        }
+        let floor_speedup = mean(&fs) / mean(&fb).max(1e-9);
+        pgrx::warning!("M109_FLOOR uniform_graph N=64 pure_speedup={floor_speedup:.3}");
+
+        let json = format!(
+            "{{\"graph\":{{\"nodes\":40000,\"edges\":{built}}},\"hardware\":\"DO-Regular 4 vCPU @ 2.0GHz, 7.8GB (pgrx 0.19/PG17)\",\"uniform_floor_speedup_n64\":{floor_speedup:.3},\"max_hops\":3,\"runs\":3,\
+             \"methodology\":\"traversal-only. batched=graph_expand_multi_card (count in Rust). pure_speedup vs seq_card (N x graph_expand_card, also count in Rust) isolates MS-BFS edge-sharing + 1-SPI-call-vs-N. naive_speedup vs N x count(*) over graph_expand (streams nodes).\",\
+             \"crossover_n_pure\":{crossover},\"curve\":[{}]}}\n",
+            points.join(",")
+        );
+        let _ = std::fs::write("/tmp/m109_crossover.json", &json);
+        pgrx::warning!("M109_CROSSOVER crossover_n={crossover} max_pure_speedup={max_pure_speedup:.2} (>=1.0x speedup first at this N; -1 = never within swept range)");
+        // GATE: the oracle (correctness at every N) already hard-gated each point. Regression gate: batched
+        // MS-BFS traversal MUST beat the count-in-Rust sequential baseline by > 2× somewhere in the swept range
+        // (measured ~7× at N=64; a conservative 2× floor guards against a regression that erases the win).
+        assert!(max_pure_speedup > 2.0, "M109 GATE: batched MS-BFS pure-traversal speedup must exceed 2× (got {max_pure_speedup:.2}×)");
     }
 }

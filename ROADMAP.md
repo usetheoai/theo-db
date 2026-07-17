@@ -1654,7 +1654,7 @@ LazyGraphRAG (MS Research), HippoRAG 2; baseline a bater = `theo-rag/packages/co
 
 ---
 
-## M108 — [ ] Grafo Fase 1: persisted-CSR index-AM (build 1× + manutenção incremental) *(gated M107)*
+## M108 — [x] Grafo Fase 1: persisted-CSR index-AM (build 1× + manutenção incremental) *(gated M107)*
 
 > Added 2026-07-16 by `/roadmap-feature` (slug: `graph-persisted-csr-am`). Fonte: ADR-0048 (follow-on #1) — o achado do spike M107 (build CSR on-the-fly domina a 1M → end-to-end cai p/ ~7×).
 
