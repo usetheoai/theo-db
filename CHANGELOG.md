@@ -24,7 +24,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   gate over entity-F1 and the honest heuristic-vs-LLM delta. **MEASURED (`docs/benchmarks/m110-extraction`):**
   extraction 1537 chunks/sec, parity 100%. Payoff: theo-rag's graph strategy sheds `extraction/` + `graph-store/`
   + the recursive CTE for 3 SQL calls. Security: parameterized-data-only, REVOKE-from-PUBLIC, newline-collapse
-  prompt-injection guard (ADR-3). No new crate (Rule 9 — port + reuse). 347 pg_tests GREEN (+10, 0 regression). (M110)
+  prompt-injection guard (ADR-3). No new crate (Rule 9 — port + reuse). Review (council-security + council-ai-in-db)
+  fixed 2 MEDIUM (edge `description` COALESCE-upgrade on re-ingest; corrected the parity-coverage claim to
+  ASCII/English scope) + filed 2 pre-existing platform gaps (#117 SSRF `llm_endpoint`, #118 tenant-blind
+  `graph_build`). 348 pg_tests GREEN (+11, 0 regression). (M110)
 
 ### Changed
 

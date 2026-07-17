@@ -147,7 +147,21 @@ fn extract_heuristic(text: &str, max_entities: usize, window: usize) -> (Vec<Ent
 fn parse_llm_extraction(reply: &str, window: usize) -> (Vec<Entity>, Vec<Edge>) {
     let mut order: Vec<String> = Vec::new();
     let mut ent: HashMap<String, Entity> = HashMap::new();
-    let mut edges: Vec<Edge> = Vec::new();
+    // Deduped, canonicalized (src≤dst) edge accumulator — same discipline as the heuristic path.
+    let mut ew: HashMap<(String, String), (i32, String)> = HashMap::new();
+    let mut edge_order: Vec<(String, String)> = Vec::new();
+    let mut add_edge = |a: String, b: String, desc: String, ew: &mut HashMap<(String, String), (i32, String)>, edge_order: &mut Vec<(String, String)>| {
+        let key = if a <= b { (a, b) } else { (b, a) };
+        if let Some(v) = ew.get_mut(&key) {
+            v.0 += 1;
+            if v.1.is_empty() && !desc.is_empty() {
+                v.1 = desc;
+            }
+        } else {
+            ew.insert(key.clone(), (1, desc));
+            edge_order.push(key);
+        }
+    };
     for line in reply.lines() {
         let parts: Vec<&str> = line.split("<|>").map(|p| p.trim()).collect();
         match parts.as_slice() {
@@ -168,23 +182,23 @@ fn parse_llm_extraction(reply: &str, window: usize) -> (Vec<Entity>, Vec<Edge>) 
                 if sn.is_empty() || dn.is_empty() || sn == dn {
                     continue;
                 }
-                let (a, b) = if sn <= dn { (sn, dn) } else { (dn, sn) };
-                edges.push((a, b, 1, desc.to_string()));
+                add_edge(sn, dn, desc.to_string(), &mut ew, &mut edge_order);
             }
             _ => {}
         }
     }
     let entities: Vec<Entity> = order.iter().map(|n| ent[n].clone()).collect();
-    // If the LLM gave entities but no relation lines, fall back to windowed co-occurrence (structural edges).
-    if edges.is_empty() && order.len() > 1 {
+    // If the LLM gave entities but no relation lines, fall back to canonical windowed co-occurrence.
+    if edge_order.is_empty() && order.len() > 1 {
         for i in 0..order.len() {
             let mut j = i + 1;
             while j <= i + window && j < order.len() {
-                edges.push((order[i].clone(), order[j].clone(), 1, String::new()));
+                add_edge(order[i].clone(), order[j].clone(), String::new(), &mut ew, &mut edge_order);
                 j += 1;
             }
         }
     }
+    let edges: Vec<Edge> = edge_order.iter().map(|k| (k.0.clone(), k.1.clone(), ew[k].0, ew[k].1.clone())).collect();
     (entities, edges)
 }
 
@@ -298,6 +312,7 @@ mod theodb_rs {
                  VALUES ($1,$2,$3,$4,$5,$6,ARRAY[$7]::text[]) \
                  ON CONFLICT (workspace_id, collection_id, src_id, dst_id) \
                  DO UPDATE SET weight = theodb.graph_edges.weight + EXCLUDED.weight, \
+                   description = COALESCE(NULLIF(theodb.graph_edges.description, ''), EXCLUDED.description), \
                    source_chunk_ids = (SELECT array_agg(DISTINCT x) FROM unnest(theodb.graph_edges.source_chunk_ids || EXCLUDED.source_chunk_ids) x)",
                 &[
                     workspace_id.into(), collection_id.into(), sid.into(), did.into(),
@@ -485,6 +500,30 @@ mod tests {
         assert_eq!(edges[0], ("acme".to_string(), "alice".to_string(), 1, "works at".to_string()), "edge canonicalized src≤dst");
     }
 
+    // M110 (review MEDIUM #1 regression): a later upsert with a non-empty edge description upgrades a stored
+    // empty description (COALESCE(NULLIF(existing,''), EXCLUDED)) — theo-rag graph-store.ts:178 semantics.
+    #[pg_test]
+    fn m110_upsert_description_upgrades_from_empty() {
+        // heuristic ingest → edge description '' (co-occurrence carries no relation label)
+        Spi::get_one::<i64>("SELECT theodb.graph_upsert('dsc','c','k1','Alice knows Bob.')").unwrap();
+        let d0: String = Spi::get_one("SELECT description FROM theodb.graph_edges WHERE workspace_id='dsc'").unwrap().unwrap();
+        assert_eq!(d0, "", "heuristic edge has empty description");
+        // now upsert the SAME edge with a non-empty description via a direct edge insert path simulating the LLM
+        // description (same canonical node pair). Re-run the same chunk but craft a description through the store:
+        let sid: i64 = Spi::get_one("SELECT id FROM theodb.graph_nodes WHERE workspace_id='dsc' AND normalized_name='alice'").unwrap().unwrap();
+        let did: i64 = Spi::get_one("SELECT id FROM theodb.graph_nodes WHERE workspace_id='dsc' AND normalized_name='bob'").unwrap().unwrap();
+        let (lo, hi) = if sid <= did { (sid, did) } else { (did, sid) };
+        Spi::run(&format!(
+            "INSERT INTO theodb.graph_edges (workspace_id,collection_id,src_id,dst_id,weight,description,source_chunk_ids) \
+             VALUES ('dsc','c',{lo},{hi},1,'knows',ARRAY['k2']::text[]) \
+             ON CONFLICT (workspace_id,collection_id,src_id,dst_id) \
+             DO UPDATE SET weight=theodb.graph_edges.weight+EXCLUDED.weight, \
+               description=COALESCE(NULLIF(theodb.graph_edges.description,''),EXCLUDED.description)"
+        )).unwrap();
+        let d1: String = Spi::get_one("SELECT description FROM theodb.graph_edges WHERE workspace_id='dsc'").unwrap().unwrap();
+        assert_eq!(d1, "knows", "empty description upgraded to the non-empty one (not lost)");
+    }
+
     // M110 benchmark (Phase 4): in-DB extraction throughput (chunks/sec) — heuristic path, no LLM. Also asserts
     // parity coverage = 100% (the parity tests prove exact-match on fixtures) and writes /tmp/m110_bench.json.
     #[pg_test]
@@ -522,7 +561,7 @@ mod tests {
         let json = format!(
             "{{\"chunks\":{n},\"hardware\":\"DO-Regular 4 vCPU @ 2.0GHz (pgrx 0.19/PG17)\",\"extract_ms_mean\":{em:.2},\
              \"extract_chunks_per_sec\":{extract_cps:.1},\"upsert_chunks_per_sec\":{upsert_cps:.1},\
-             \"total_edges\":{total_edges},\"parity_coverage\":\"100% (entity+edge sets byte-identical to theo-rag graph-extractor.ts on fixtures)\"}}\n"
+             \"total_edges\":{total_edges},\"parity_coverage\":\"byte-identical to theo-rag graph-extractor.ts on the ASCII/English fixtures; non-ASCII edge cases (Roman numerals, combining marks, astral chars) may diverge and are documented, not tested\"}}\n"
         );
         let _ = std::fs::write("/tmp/m110_bench.json", &json);
         pgrx::warning!("M110_BENCH extract_cps={extract_cps:.1} upsert_cps={upsert_cps:.1} total_edges={total_edges}");
