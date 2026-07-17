@@ -13,6 +13,20 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.100.0] - 2026-07-17
+
+### Added
 - **M111/M112 — GraphRAG retrieval flow (vector-entry→traversal→rerank) + Personalized PageRank (native graph
   pillar Phases 4–5):** `theodb.graph_rag_search` (cosine-entry over `graph_nodes.embedding` → `graph_expand`
   → edge-weight rank), `theodb.graph_embed_nodes` (reuse `ai.embed`), and `theodb.graph_ppr` (Personalized
@@ -25,16 +39,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   graph-RAG can drop below standard RAG on factual tasks). Anti-sunk-cost (D3): the pillar's real value is its
   fast engine + extraction surface (M108 16×, M109 5–8×, M110 theo-rag→3-SQL-calls), NOT a retrieval-quality
   win over vectors. 356 pg_tests GREEN (+8, 0 regression). (M111, M112)
-
-### Changed
-
-### Deprecated
-
-### Removed
-
-### Fixed
-
-### Security
 
 ## [0.99.0] - 2026-07-16
 
