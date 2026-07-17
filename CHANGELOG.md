@@ -74,6 +74,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 - **Vector research (E2 impl T2.1+T3.1): `theodb_symqg` build + scan WORKING in-PG** (`am/build.rs` ambuild_symqg, `am/scan.rs` scan_symqg_structured, `am/mod.rs` handler+opclass). `CREATE INDEX … USING theodb_symqg` persists the co-located graph (HNSW base adjacency + 1-bit sign codes + rotated vector P·x per row); `SELECT … ORDER BY e <-> q LIMIT k` beam-searches reading one row/hop, reusing the off-PG-validated `estimate_sign` + the rotation trick (exact dist=‖q_r‖² and q_r=rot_q−rot in one O(D) subtraction, no per-hop rotate). L2-only (fail-fast), EC-1 build cancellation, EC-3 query-dim guard, sqrt-L2 scale (E1 lesson). **Measured: recall@10=1.0000 vs exact brute-force** (2000×16d, 20 queries) — correctness proven end-to-end. Next: T4.1 reloptions/VACUUM/crash + T5.1 SIFT1M A/B vs theodb_hnsw.
 
+- **Vector research (E2 impl T4.1): `theodb_symqg` production hardening — reloption + VACUUM + INSERT/pending + crash-safety.** `WITH (degree_bound=R)` reloption (`am/options.rs`, R multiple of 32, HNSW m=R/2); VACUUM is a safe no-op on the co-located graph (scan pending-fold + MVCC re-check drop dead TIDs, same as IVF v4-v8); INSERT→pending fixed (`am/page/mod.rs` `main_index_pages` symqg branch — the E1-class pending-region-base gap); crash-safety inherited from GenericXLog (`extend_page_with_item`). **Validated on DISTINCT random data (a degenerate-test-data false-pass was caught + fixed): recall@10=0.97 vs exact (ef=100, 3000×16d), INSERT dup found at dist 0 (top-2), DELETE+VACUUM leaks 0 rows.** T2.1+T3.1+T4.1 GREEN end-to-end. Next: T5.1 SIFT1M A/B vs theodb_hnsw.
+
 ### Changed
 
 ### Deprecated

@@ -414,10 +414,14 @@ pub extern "C-unwind" fn ambuild_symqg(
         if metric != Metric::L2 {
             pg_sys::error!("theodb_symqg: requires the L2 opclass (the 1-bit sign estimator is L2-only)");
         }
+        // WITH (degree_bound=R): the co-located out-degree. Build the HNSW base graph with m = R/2 so m0 = R fills
+        // the row (R=32 default = HNSW m0). Larger R → denser graph + bigger rows.
+        let degree = crate::am::options::degree_bound_from_relation(indexrel);
+        let hnsw_m = (degree / 2).max(1);
         // EC-1: both the HNSW build and the sign-encode loop take the cancellation seam so a long CREATE INDEX
         // responds to pg_cancel_backend (check_for_interrupts! runs under #[pg_guard] — unwinds cleanly across C).
         let idx = crate::ann::HnswIndex::build_owned(
-            corpus, HNSW_M, hnsw_ef_construction(), metric, BUILD_SEED, &|| { pgrx::check_for_interrupts!(); },
+            corpus, hnsw_m, hnsw_ef_construction(), metric, BUILD_SEED, &|| { pgrx::check_for_interrupts!(); },
         );
         let spike = crate::ann::symqg_spike::SymqgSpike::build_cancellable(
             &idx, 1, BUILD_SEED, &|| { pgrx::check_for_interrupts!(); },
@@ -427,7 +431,6 @@ pub extern "C-unwind" fn ambuild_symqg(
         }
         let n = idx.spike_len();
         let dim = if n > 0 { idx.spike_vector(0).len() } else { 0 };
-        let degree = SYMQG_DEGREE;
         let mut rows: Vec<Vec<u8>> = Vec::with_capacity(n);
         let mut tids: Vec<i64> = Vec::with_capacity(n);
         for p in 0..n {
@@ -647,6 +650,13 @@ pub(crate) unsafe fn vacuum_rebuild(
             return 0;
         }
         return vacuum_rebuild_structured(indexrel, dead);
+    }
+    if magic == page::SYMQG_MAGIC {
+        // E2: SymphonyQG co-located graph — a routine VACUUM is a safe NO-OP on the structure (same rationale as
+        // IVF v4-v8): the scan folds the pending region + the executor's MVCC heap re-check drops dead TIDs, so a
+        // deleted row never surfaces. Compacting the graph (dropping dead vertices + re-encoding) is a REINDEX-only
+        // path for v1 (a symqg-aware in-VACUUM fold is a documented follow-up). Never a crash on `read_blob(symqg)`.
+        return 0;
     }
     if magic == crate::am::hnsw_page::HNSW_STRUCT_MAGIC {
         return vacuum_rebuild_hnsw_structured(indexrel, dead);
