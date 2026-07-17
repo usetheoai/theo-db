@@ -13,6 +13,16 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Vector research (E1 core): extended multi-bit RaBitQ quantizer own-code (`vec/rabitq.rs`).** From-scratch
+  reimplementation of the extended multi-bit RaBitQ algorithm (arXiv:2409.09913, Apache-2.0; the vendored tree
+  was deleted in ADR-0046) — the **f32-free rerank codec**. Estimator stores per vector only the B-bit code `u`,
+  the residual norm, and `W = ⟨u, o'⟩`; at search `⟨q_r, o⟩ ≈ ⟨q_r, u⟩/W` (Δ and ‖ō‖ cancel → a pure
+  integer-weighted dot, **no raw vector touched**). Random orthogonal rotation via seeded Gram–Schmidt, std-only
+  (no new deps, D1/D4). **VALIDATED own-code (hermetic Monte-Carlo, droplet-free, `docs/benchmarks/rabitq-estimator-validation`):**
+  mean relative error 7.16% (1-bit) → **0.09% (7-bit)** with ~zero bias — a 7-bit code is accurate enough to be
+  the FINAL ranking f32-free, deleting the exact Stage-2 f32-rerank bind measured in M82/v5. NOT yet wired to the
+  AM scan (next: dedicated code page + f32-free `scan_ivf_aq_split` Stage-2 + SIFT1M A/B). Research blueprint:
+  `knowledge-base/discoveries/blueprints/vec-f32free-rerank-blueprint.md`.
 
 ### Changed
 
