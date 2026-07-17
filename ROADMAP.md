@@ -1694,7 +1694,7 @@ LazyGraphRAG (MS Research), HippoRAG 2; baseline a bater = `theo-rag/packages/co
 
 ---
 
-## M113 — [ ] Grafo Fase 6: superfície SQL/PGQ (SQL:2023) *(gated M110 — opcional/diferível)*
+## M113 — [x] Grafo Fase 6: superfície SQL/PGQ (SQL:2023) *(gated M110 — opcional/diferível)*
 
 > Added 2026-07-16 by `/roadmap-feature` (slug: `graph-sqlpgq-surface`). Fonte: ADR-0048 (follow-on, ergonomia de longo prazo).
 
