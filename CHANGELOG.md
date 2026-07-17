@@ -50,6 +50,16 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   transfer to a warm-QPS win over ScaNN (paradigm ceiling stands, M73/M82); realistic prize = beat our OWN
   HNSW/IVF-AQ in-PG; index GROWS (replicated codes). Gate: hermetic own-code spike must beat our best engine ≥1.5×
   @ recall 0.95 off-PG BEFORE any in-PG AM build (anti-sunk-cost).
+- **Vector research (E2 spike): SymphonyQG mechanism MEASURED — recall parity + 12–26× fewer exact distances, but
+  wall-clock gated on a FastScan 1-bit kernel** (`ann/symqg_spike.rs`, `docs/benchmarks/e2-symqg-spike.md`).
+  Clean-room own-code (D1): HNSW base graph + per-parent co-located RaBitQ codes (`encode(x_i − x_parent)`, reusing
+  E1's `estimate_l2_sq` with `c`=parent) + faithful Algorithm-1 beam search (estimate-keyed beam, separate exact-NN;
+  a first-cut termination bug that mixed estimate/exact scales was found+fixed). Measured on SIFT via an in-PG
+  `symqg_spike_bench` entrypoint: **7-bit symqg recall == exact recall at every beam, at 12–26× fewer EXACT distance
+  computations** (mechanism GREEN); but **wall-clock 0.45–0.82× (slower)** because a SCALAR estimate costs ≈ one L2,
+  so the all-neighbors estimates outweigh the pruned exacts. The ≥1.5× gate is now localized to ONE unbuilt
+  component: a batched FastScan 1-bit RaBitQ kernel (~8–16× cheaper than exact) — RaBitQ-Library (Apache-2.0) as
+  permissive reference. Spike-first gate did its job: de-risked the mechanism, priced the remaining work honestly.
 
 ### Changed
 

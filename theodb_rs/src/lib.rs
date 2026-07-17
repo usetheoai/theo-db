@@ -39,6 +39,7 @@ pub unsafe extern "C-unwind" fn _PG_init() { unsafe {
 mod am;
 mod ai_op;
 mod ann;
+mod bench_symqg; // E2 — SymphonyQG spike in-PG benchmark entrypoint (symqg_spike_bench)
 mod ann_query;
 mod chat;
 mod chunk;

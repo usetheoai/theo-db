@@ -138,6 +138,28 @@ impl HnswIndex {
         idx
     }
 
+    /// E2 SymphonyQG spike accessors (read-only; reuse the real graph as the base proximity graph for the
+    /// co-located-quantization experiment — no fork of the build). Layer-0 adjacency is the dense base graph.
+    pub(crate) fn spike_len(&self) -> usize {
+        self.vectors.len()
+    }
+    pub(crate) fn spike_vector(&self, node: usize) -> &[f32] {
+        &self.vectors[node]
+    }
+    pub(crate) fn spike_id(&self, node: usize) -> i64 {
+        self.ids[node]
+    }
+    pub(crate) fn spike_entry(&self) -> Option<usize> {
+        self.entry
+    }
+    pub(crate) fn spike_metric(&self) -> Metric {
+        self.metric
+    }
+    /// Layer-0 (base) neighbours of `node` — the densest layer, the proximity graph the spike traverses.
+    pub(crate) fn spike_base_neighbors(&self, node: usize) -> &[usize] {
+        self.neighbors[node].first().map(|v| v.as_slice()).unwrap_or(&[])
+    }
+
     fn insert(&mut self, id: i64, vec: Vec<f32>, level: usize) {
         let node = self.vectors.len();
         self.vectors.push(vec);

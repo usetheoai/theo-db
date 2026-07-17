@@ -20,6 +20,7 @@ mod hnsw_parallel;
 mod ivf;
 mod ivf_aqah; // M75 — IVF-AQ+AH spike index (ROADMAP v6, pg_scann Fase 0)
 pub(crate) mod scan_core;
+pub(crate) mod symqg_spike; // E2 — SymphonyQG clean-room spike (co-located quantized graph traversal)
 mod wire;
 
 pub(crate) use hnsw::{HnswIndex, HNSW_MAGIC};
