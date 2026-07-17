@@ -41,10 +41,51 @@ pub(crate) struct SearchStat {
     pub exact_dists: usize,
 }
 
+/// A TRUE 1-bit RaBitQ code (the SymphonyQG variant): `u[d] = sign(P·(x−c)[d]) ∈ {−1,+1}` (our multi-bit
+/// `RabitqQuantizer` is DEGENERATE at bits=1 — `L = 2^0−1 = 0` gives all-zero codes). Stored relative to the
+/// parent `c`. `nr = ‖x−c‖`, `w = ⟨u, o'⟩ = Σ|o'[d]|` (o' = unit rotated residual). Estimate (squared-L2):
+/// `‖q−x‖² ≈ qc2 + nr² − 2·nr·(⟨q_r,u⟩ / w)`, `q_r = P·(q−c)`, `qc2 = ‖q_r‖²` — same shape as E1's estimator,
+/// with the code specialized to signs so the per-neighbor dot `⟨q_r,u⟩` becomes a FastScan-friendly signed sum.
+pub(crate) struct SignCode {
+    pub u: Vec<i8>, // ±1 per dim
+    pub nr: f32,
+    pub w: f32,
+}
+
+/// Encode `residual = x − c` to a 1-bit sign code, reusing `rq`'s rotation `P`.
+fn encode_sign(rq: &RabitqQuantizer, residual: &[f32]) -> SignCode {
+    let rr = rq.rotate(residual); // P·(x−c)
+    let nr = (rr.iter().map(|&v| (v as f64) * (v as f64)).sum::<f64>()).sqrt() as f32;
+    if nr == 0.0 {
+        return SignCode { u: vec![0i8; rr.len()], nr: 0.0, w: 0.0 };
+    }
+    let u: Vec<i8> = rr.iter().map(|&v| if v >= 0.0 { 1i8 } else { -1i8 }).collect();
+    // w = ⟨u, o'⟩ = Σ u·(rr/nr) = (Σ|rr|)/nr
+    let w = (rr.iter().map(|&v| v.abs() as f64).sum::<f64>() as f32) / nr;
+    SignCode { u, nr, w }
+}
+
+/// Scalar 1-bit estimate (the FastScan oracle for Stage 2). `q_r = P·(q−c)`, `qc2 = ‖q_r‖²`.
+#[inline]
+fn estimate_sign(code: &SignCode, q_r: &[f32], qc2: f64) -> f64 {
+    if code.w == 0.0 || code.nr == 0.0 {
+        return qc2 + (code.nr as f64) * (code.nr as f64);
+    }
+    let mut dot = 0.0f64; // ⟨q_r, u⟩
+    for (i, &qi) in q_r.iter().enumerate() {
+        dot += (qi as f64) * (code.u[i] as f64);
+    }
+    let nr = code.nr as f64;
+    qc2 + nr * nr - 2.0 * nr * (dot / code.w as f64)
+}
+
 pub(crate) struct SymqgSpike {
     /// Per parent node: its (neighbor_node, code-encoded-relative-to-this-parent). Replicated per parent — the
     /// SymphonyQG co-location. Squared-L2 semantics via `estimate_l2_sq`.
     codes: Vec<Vec<(usize, RabitqCode)>>,
+    /// Sign-code variant (used when `bits == 1`) — the true 1-bit path that the FastScan kernel targets.
+    sign_codes: Vec<Vec<(usize, SignCode)>>,
+    sign_mode: bool,
     /// `P·x_p` per node — the rotated vertex vector, precomputed at build so the per-hop query residual is a cheap
     /// O(D) subtraction `rotate(q) − rot_vec[p]` (rotation is linear) instead of an O(D²) rotate per hop. This is
     /// the SymphonyQG "rotate the query once" lever — without it the naive spike is I/O-cheap but compute-bound.
@@ -59,21 +100,32 @@ impl SymqgSpike {
     pub(crate) fn build(g: &HnswIndex, bits: u8, seed: u64) -> Self {
         let dim = g.spike_vector(0).len();
         let rq = RabitqQuantizer::train(dim, bits, seed);
+        let sign_mode = bits == 1; // true 1-bit sign path (multi-bit rq is degenerate at bits=1)
         let n = g.spike_len();
-        let mut codes: Vec<Vec<(usize, RabitqCode)>> = Vec::with_capacity(n);
+        let mut codes: Vec<Vec<(usize, RabitqCode)>> = Vec::with_capacity(if sign_mode { 0 } else { n });
+        let mut sign_codes: Vec<Vec<(usize, SignCode)>> = Vec::with_capacity(if sign_mode { n } else { 0 });
         let mut rot_vec: Vec<Vec<f32>> = Vec::with_capacity(n);
         for p in 0..n {
             let pv = g.spike_vector(p);
             rot_vec.push(rq.rotate(pv)); // P·x_p — precomputed so per-hop q_r is a subtraction, not a rotate
             let nbrs = g.spike_base_neighbors(p);
-            let mut row = Vec::with_capacity(nbrs.len());
-            for &nb in nbrs {
-                let resid: Vec<f32> = g.spike_vector(nb).iter().zip(pv).map(|(&x, &c)| x - c).collect();
-                row.push((nb, rq.encode(&resid)));
+            if sign_mode {
+                let mut row = Vec::with_capacity(nbrs.len());
+                for &nb in nbrs {
+                    let resid: Vec<f32> = g.spike_vector(nb).iter().zip(pv).map(|(&x, &c)| x - c).collect();
+                    row.push((nb, encode_sign(&rq, &resid)));
+                }
+                sign_codes.push(row);
+            } else {
+                let mut row = Vec::with_capacity(nbrs.len());
+                for &nb in nbrs {
+                    let resid: Vec<f32> = g.spike_vector(nb).iter().zip(pv).map(|(&x, &c)| x - c).collect();
+                    row.push((nb, rq.encode(&resid)));
+                }
+                codes.push(row);
             }
-            codes.push(row);
         }
-        SymqgSpike { codes, rot_vec, rq }
+        SymqgSpike { codes, sign_codes, sign_mode, rot_vec, rq }
     }
 
     /// SymphonyQG traversal (Algorithm 1): pop the min-ESTIMATED candidate, compute its EXACT distance (the
@@ -124,18 +176,33 @@ impl SymqgSpike {
             let rp = &self.rot_vec[p];
             let q_r: Vec<f32> = rot_q.iter().zip(rp).map(|(&a, &b)| a - b).collect();
             let qc2: f64 = q_r.iter().map(|&d| (d as f64) * (d as f64)).sum(); // ‖q−c‖²=‖q_r‖² (rotation preserves norm)
-            for (nb, code) in &self.codes[p] {
-                if !visited.insert(*nb) {
-                    continue;
-                }
-                let est = self.rq.estimate_l2_sq(code, &q_r, qc2).max(0.0);
+            let admit_neighbor = |nb: usize, est: f64,
+                                      cand: &mut BinaryHeap<Reverse<(OrdF, usize)>>,
+                                      beamw: &mut BinaryHeap<OrdF>| {
                 let admit = beamw.len() < beam || beamw.peek().map(|&OrdF(w)| est < w).unwrap_or(true);
                 if admit {
-                    cand.push(Reverse((OrdF(est), *nb)));
+                    cand.push(Reverse((OrdF(est), nb)));
                     beamw.push(OrdF(est));
                     if beamw.len() > beam {
                         beamw.pop();
                     }
+                }
+            };
+            if self.sign_mode {
+                for (nb, code) in &self.sign_codes[p] {
+                    if !visited.insert(*nb) {
+                        continue;
+                    }
+                    let est = estimate_sign(code, &q_r, qc2).max(0.0);
+                    admit_neighbor(*nb, est, &mut cand, &mut beamw);
+                }
+            } else {
+                for (nb, code) in &self.codes[p] {
+                    if !visited.insert(*nb) {
+                        continue;
+                    }
+                    let est = self.rq.estimate_l2_sq(code, &q_r, qc2).max(0.0);
+                    admit_neighbor(*nb, est, &mut cand, &mut beamw);
                 }
             }
         }
