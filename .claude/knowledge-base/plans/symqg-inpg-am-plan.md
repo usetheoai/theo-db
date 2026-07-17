@@ -6,7 +6,7 @@ goal: ship the theodb_symqg in-PG index AM and prove ≥1.5× QPS vs theodb_hnsw
 
 # Plan: theodb_symqg — in-PG SymphonyQG quantized-graph index AM
 
-> **Version 1.0** — Productize the E2 off-PG spike (measured under `docs/benchmarks/`: recall parity + 1.8–2.66× faster than exact traversal on SIFT1M, scalar 1-bit sign) into a real PostgreSQL index Access Method, `theodb_symqg`. The AM persists a co-located quantized graph (per vertex: neighbor IDs + 1-bit sign RaBitQ codes + nr/w factors) to index pages, builds it by reusing our own `HnswIndex` for the base adjacency + `encode_sign`, and scans it with the spike-validated beam search reading pages per hop. The make-or-break the spike could NOT answer — the per-hop random-page-read tax that a standalone lib avoids — is settled by an in-PG A/B against our own `theodb_hnsw`. Clean-room from the paper (arXiv:2411.12229); the NTUITIVE-licensed C++ is study-only (D5).
+> **Version 1.1** (edge-cases absorbed: EC-1 build-cancel, EC-2 row-spans-page, EC-3 query-dim guard + SHOULD-TEST/DOCUMENT items) — Productize the E2 off-PG spike (measured under `docs/benchmarks/`: recall parity + 1.8–2.66× faster than exact traversal on SIFT1M, scalar 1-bit sign) into a real PostgreSQL index Access Method, `theodb_symqg`. The AM persists a co-located quantized graph (per vertex: neighbor IDs + 1-bit sign RaBitQ codes + nr/w factors) to index pages, builds it by reusing our own `HnswIndex` for the base adjacency + `encode_sign`, and scans it with the spike-validated beam search reading pages per hop. The make-or-break the spike could NOT answer — the per-hop random-page-read tax that a standalone lib avoids — is settled by an in-PG A/B against our own `theodb_hnsw`. Clean-room from the paper (arXiv:2411.12229); the NTUITIVE-licensed C++ is study-only (D5).
 
 ## Goal
 
@@ -109,6 +109,7 @@ The vector pillar's warm-QPS ceiling is paradigm-bound for a PG extension (M73/M
 | **Page-tax may erase the win** — off-PG was pure in-RAM; in-PG each hop is a random page read the standalone lib avoids. The whole gate may come back negative. | High | This is the explicit measured question (Phase 5). Co-location keeps the 32-neighbor scoring on ONE page (mitigates); if still negative, record the honest negative (like M74). | vector |
 | **Index size grows** (replicated codes, ~1–2× raw-vector overhead) — opposite of E1's memory win. | Medium | Measure size in the A/B; document the size↔speed trade-off; 1-bit keeps it minimal vs multi-bit. | vector |
 | **Build cost** — HNSW build + per-parent encode is O(N·R·D²) with the dense rotate (spike: 814s+720s at 1M). | Medium | Acceptable one-time cost for the spike/AM; Fast-JL O(D log D) is a later lever (out of scope, noted). | vector |
+| **Build memory ceiling** (EC-10) — replicated codes are O(N·R) resident (~4.5 GB at 1M/R=32); billion-scale exceeds commodity RAM. | Medium | Document the ceiling; streaming encode + Fast-JL are the follow-up levers (out of scope). | vector |
 | **Crash mid-build / torn page** — a new page format must be WAL-safe. | High | GenericXLog for every page write (reuse `page/mod.rs` helpers, the proven `theodb_hnsw` pattern); crash test in Phase 4. | vector |
 | **pgrx unsafe/FFI across the C boundary** in the AM callbacks (panic-across-C). | Medium | Mirror the existing `theodb_hnsw` callback signatures (`extern "C-unwind"`, `pg_guard`); no new FFI shapes; council-rust-pgrx review at `/review`. | vector |
 
@@ -116,7 +117,7 @@ The vector pillar's warm-QPS ceiling is paradigm-bound for a PG extension (M73/M
 
 - Q1 — Does the per-hop random page read erase the 1.8–2.66× off-PG win? (The core gate — answered only by Phase 5's in-PG A/B.)
 - Q2 — What `degree_bound R` (32/64/128) best trades index size vs recall/QPS in-PG? (Swept in Phase 5.)
-- Q3 — Does `aminsert` (post-build INSERT) need a pending region like the IVF/HNSW AMs, or is build-only acceptable for v1? (Resolved in Phase 4: mirror the HNSW pending pattern OR document build-only with a REINDEX-to-refresh caveat.)
+- Q3 — RESOLVED (EC-9): mirror `theodb_hnsw` — post-build INSERT → pending region scored EXACT at scan; DELETE → tombstone-at-scan + full rebuild at `amvacuumcleanup`; the co-located graph is IMMUTABLE between VACUUM rebuilds (no incremental code insertion). Documented in T2.1/T4.1.
 - Q4 — Should the base graph be our HNSW layer-0 (spike's first cut) or a proper NSG degree-R refinement (paper)? (v1 uses HNSW layer-0 per the spike; NSG refinement is a follow-up if recall/QPS underperforms.)
 
 ## Dependency Graph
@@ -166,8 +167,10 @@ theodb_rs/src/am/mod.rs — `mod symqg_page;` declaration only
 
 #### Deep Dives
 - Data structures: `SymqgMeta { magic:u32, version:u32, dim:u32, degree_bound:u32, n:u32, entry:u32, gen_base:u32, rotation_codebook_npages:u32 }`; row = `R×i64 ids ‖ ceil(R·D/8) sign-bit bytes ‖ R×(nr:f32, w:f32)`.
+- **EC-2 MUST-FIX (row spans pages):** a row can exceed one 8 KB page at high dim × degree (dim=768, R=128 ⇒ ~12 KB sign bytes). Rows are written via the CHUNKED writer + a per-vertex offset directory (the v5/v6 `dir` pattern in `page/ivf.rs`), NOT a single `write_item`; `decode_symqg_row` reads a row across pages via the directory offset. (SIFT dim=128/R=32 ≈ 4 KB fits, but the format must be correct for high-dim, not just SIFT.)
 - Invariants: pack→decode is byte-identical (round-trip test); degree padded to multiple of 32 with sentinel ids for empty slots.
-- Edge cases: vertex with < R real neighbors (pad with a sentinel id skipped at scan); empty index (`ambuildempty`).
+- Edge cases: vertex with < R real neighbors (pad with a sentinel id skipped at scan, EC-5); vertex identical to a parent → `nr=0` sign code, `estimate_sign` returns `qc2` (EC-6); empty index (`ambuildempty`, EC-4).
+- Negative cases: truncated/corrupt row bytes → `decode_symqg_row` returns a typed `Err`, never a panic/OOB (EC-7, the E1 decoder discipline).
 
 #### Pseudo-code / Signatures
 ```pseudocode
@@ -191,6 +194,9 @@ fn pack_symqg(idx: &HnswIndex, spike: &SymqgSpike, degree_bound: usize) -> Packe
 RED:  symqg_page_meta_round_trips() — decode_symqg_meta(encode) == original
 RED:  symqg_page_row_round_trips() — decode_symqg_row(pack row) yields identical ids/codes/factors
 RED:  symqg_page_pads_partial_degree() — a vertex with < R neighbors round-trips with sentinel-skipped slots
+RED:  symqg_page_row_spans_multiple_pages() — EC-2: a dim=768/R=128 row (>8KB) packs+decodes byte-identical across pages
+RED:  symqg_encode_sign_zero_residual() — EC-6: x==parent ⇒ nr=0,w=0 and estimate_sign returns exactly qc2 (no div-by-zero)
+RED:  symqg_decode_truncated_row_errs() — EC-7: a short byte slice yields a typed Err, not a panic/OOB
 GREEN: implement pack/decode
 REFACTOR: extract the sign-bit pack/unpack if duplicated
 VERIFY: cargo pgrx test pg17 symqg_page  (or cargo test --lib symqg_page after `cargo pgrx install`)
@@ -243,7 +249,8 @@ theodb_rs/src/ann/symqg_spike.rs — expose a pack-friendly accessor over sign_c
 
 #### Deep Dives
 - Invariant: the `TableAmRoutine`/`IndexAmRoutine` is allocated per the pgrx pattern the HNSW handler uses (`am/mod.rs:74`) — no dangling routine (memory note `tableam-rd-tableam-topmemcontext` is TAM-specific; IndexAM uses pgrx's `PgBox` pattern already proven for `theodb_hnsw`).
-- Edge cases: empty relation (`ambuildempty_symqg`); non-L2 opclass → `error!` at build (the sign estimator is L2-only, mirror the v8 build guard `build.rs:208`).
+- **EC-1 MUST-FIX (build cancellation):** the per-parent sign-encode loop (~N·R iterations, 32M at 1M/R=32) MUST call `pgrx::check_for_interrupts!()` every ~4096 vertices — a plain loop ignores `pg_cancel_backend` (the exact E1 k-means bug where only a postmaster kill worked).
+- Edge cases: empty relation (`ambuildempty_symqg`, EC-4); non-L2 opclass → `error!` at build (the sign estimator is L2-only, mirror the v8 build guard `build.rs:208`).
 
 #### Tasks
 1. Add `theodb_symqg_amhandler` + `CREATE ACCESS METHOD` SQL (mirror `am/mod.rs:64-74`).
@@ -255,7 +262,9 @@ theodb_rs/src/ann/symqg_spike.rs — expose a pack-friendly accessor over sign_c
 ```
 RED:  symqg_ambuild_creates_scannable_index() — CREATE INDEX on a small table succeeds + pg_relation_size > 0 (pg_test)
 RED:  symqg_ambuild_rejects_non_l2() — non-L2 opclass errors at build
-GREEN: implement ambuild_symqg + handler
+RED:  symqg_ambuild_empty_then_scan_returns_empty() — EC-4: build on 0 rows, scan returns 0, no panic
+RED:  symqg_ambuild_responds_to_cancel() — EC-1: a cancel signal during a large build is honored within one check_for_interrupts window (not postmaster-kill)
+GREEN: implement ambuild_symqg + handler + check_for_interrupts! every ~4096 vertices in the encode loop
 REFACTOR: share the heap-scan corpus assembly with ambuild_hnsw if trivially factorable (else leave — DRY vs coupling)
 VERIFY: cargo pgrx test pg17 symqg_ambuild
 ```
@@ -310,6 +319,8 @@ theodb_rs/src/am/symqg_page.rs — decode_symqg_row used per hop (read a vertex'
 ```pseudocode
 fn scan_symqg_structured(rel, query, ef) -> topk
   meta = decode_symqg_meta(read_meta_page(rel))
+  if query.len() != meta.dim: error!("query dim != index dim")   # EC-3 MUST-FIX: validate at boundary (Rule 8)
+  ef = max(ef, k)                                                 # EC-8: clamp beam >= k
   rot_q = rotate(query)            # once
   beam search (spike logic):
     pop min-estimate p
@@ -328,6 +339,8 @@ fn scan_symqg_structured(rel, query, ef) -> topk
 ```
 RED:  symqg_scan_recall_matches_spike() — on a fixed small corpus, in-PG top-10 == off-PG SymqgSpike::search top-10 (±1pp) (pg_test)
 RED:  symqg_scan_returns_k() — LIMIT k returns exactly k ordered by distance
+RED:  symqg_scan_query_dim_mismatch_errs() — EC-3: a wrong-dim query yields a typed error, not a panic/OOB
+RED:  symqg_scan_ef_below_k_clamps() — EC-8: ef_search=1, LIMIT 10 still returns 10 ordered rows
 GREEN: implement scan_symqg_structured + dispatch
 REFACTOR: factor the row-decode-to-SignCode adapter
 VERIFY: cargo pgrx test pg17 symqg_scan
@@ -455,6 +468,7 @@ VERIFY: python3 benchmarks/e2_symqg_inpg.py on the droplet
 (none — single-threaded)
 
 #### Acceptance Criteria
+- [ ] EC-11: N equals the GT base size (1,000,000) — a subset yields a false recall ceiling (the spike's N=200k trap)
 - [ ] Verdict doc reports theodb_symqg vs theodb_hnsw QPS at matched recall@10 ≥ 0.95, warm AND cold, with index sizes
 - [ ] **GATE:** theodb_symqg QPS ≥ 1.5× theodb_hnsw at matched recall — OR an honest measured negative documented (the page-tax verdict)
 - [ ] No performance claim without the benchmark artifact (Rule 5, public-copy.md)
