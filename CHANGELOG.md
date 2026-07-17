@@ -41,6 +41,15 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   parity** (QPS 0.86–1.08×, buffers/query 1.01–1.02×): Stage-2 refinement is not the in-RAM bottleneck (M85
   holds). The win is memory + billion-scale (the North-Star-credited axis, ADR-0035); it is NOT a warm
   vector-QPS-superiority claim over ScaNN/AlloyDB (that ceiling stands — M73/M82/ADR-0036).
+- **Vector research (E2 discovery): SymphonyQG clean-room blueprint** (`knowledge-base/discoveries/blueprints/symphonyqg-graph-quant-blueprint.md`).
+  Maps the SymphonyQG design (arXiv:2411.12229, SIGMOD'25) from the paper + a STUDY-ONLY clone of the
+  NTUITIVE-non-commercial reference (D1: never copied/transcribed — clean-room from the paper only, like the RaBitQ
+  own-code per ADR-0046). Design: per-vertex row co-locates the R neighbors' 1-bit RaBitQ codes (FastScan block-32)
+  + factors + IDs; beam search FastScan-estimates all neighbors per hop with NO separate rerank — the lever that
+  attacks the Stage-1/traversal bottleneck E1 measured. Honest gap: standalone-C++ 3.5–17× vs HNSWlib does NOT
+  transfer to a warm-QPS win over ScaNN (paradigm ceiling stands, M73/M82); realistic prize = beat our OWN
+  HNSW/IVF-AQ in-PG; index GROWS (replicated codes). Gate: hermetic own-code spike must beat our best engine ≥1.5×
+  @ recall 0.95 off-PG BEFORE any in-PG AM build (anti-sunk-cost).
 
 ### Changed
 
