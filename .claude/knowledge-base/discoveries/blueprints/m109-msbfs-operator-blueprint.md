@@ -117,12 +117,18 @@ for undirected, but unused work now). DuckPGQ ships uni-directional and still wi
 alternative (recorded):** direction-optimizing (Beamer SC'12) — revisit only if a benchmark shows a
 saturating-frontier regime.
 
-## Honest caveats / UNBENCHMARKED markers
+## Honest caveats — RESOLVED by measurement (2026-07-16)
 
-- TheoDB's batched-MS-BFS speedup vs looping `expand` is **UNBENCHMARKED** — the M109 gate measures it.
-- The 12–88× literature numbers are millions-of-sources closeness centrality — **not** our regime.
-- If no caller batches ≥ dozens of seed-sets, M109 risks failing YAGNI rung-1; the measurement gate is
-  the honest arbiter. Building the primitive + benchmark IS the roadmap-authorized way to find out.
+- ~~UNBENCHMARKED~~ → **BENCHMARKED (`docs/benchmarks/m109-msbfs`):** batched MS-BFS beats N sequential BFS
+  **1.33× @N=1 → ~7× @N=64+** (pure traversal, confound-free), up to ~19× naive-caller, oracle PASS every N.
+- A first benchmark showed a spurious 0.44–0.62× **loss** — root-caused to a **row-materialization confound**
+  (timing `count(*)` over ~1.28M returned node rows + an intermediate-Vec bug), NOT a real property. The
+  traversal-only re-measurement (per-lane cardinality, count-in-Rust on both sides) reverses the verdict.
+- The 12–88× literature numbers are millions-of-sources closeness centrality; our 6–7× at 16–512 seeds is a
+  different regime (few-seed, hub-topology, reachable-set), and the pure_speedup's growth-with-N matches Then
+  et al.'s edge-sharing mechanism exactly.
+- Per-seed separation earns its place: 6–7× faster than looping when per-seed answers are needed. For the pure
+  UNION neighborhood, M108 `expand(all_seeds)` still suffices (documented honestly).
 
 ## Recommended design (hand-off to /to-plan)
 

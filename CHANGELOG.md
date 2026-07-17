@@ -13,6 +13,17 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **M109 — vectorized Multi-Source BFS operator (native graph pillar Phase 2):** `theodb.graph_expand_multi` /
+  `graph_expand_multi_card` advance up to 64 independent BFS lanes per CSR sweep via per-vertex `u64`
+  source-masks (frontier-driven, bit `l` = lane `l`; auto-vectorized bitwise-OR — the source-parallel
+  mechanism, NOT `vec/ah.rs`'s candidate-parallel `pshufb`). Each lane's reachable set is proven byte-identical
+  (per-lane set-hash oracle) to single-source `expand`. **MEASURED traversal-only (`docs/benchmarks/m109-msbfs`,
+  confound-free):** batched MS-BFS beats N sequential single-source BFS **1.33× @N=1 → ~7× @N=64+** (pure), up
+  to **~19×** for the naive node-streaming caller, oracle PASS at every N=1..512 — the growth-with-N is Then et
+  al.'s (VLDB'14) edge-sharing mechanism. Also `graph_expand_card` (single-source reach-count). Deep research
+  (Then VLDB'14, DuckPGQ CIDR'23/VLDB'23, HippoRAG, GAP) corrected the ROADMAP "reuse ah.rs kernels" misframing
+  and caught a row-materialization benchmark confound that had masked the win. 337 pg_tests GREEN (+7, 0
+  regression). (M109)
 
 ### Changed
 
