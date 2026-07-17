@@ -937,7 +937,9 @@ unsafe fn scan_ivf_aq_split_rabitq(
             let c = &meta.centroids[*ci];
             let qmc: Vec<f32> = query.iter().zip(c).map(|(&x, &cc)| x - cc).collect();
             let q_r = rq.rotate(&qmc);
-            let qc2 = metric.dist(query, c); // L2 dist IS squared-L2 (same scale as estimate_l2_sq)
+            // qc2 = ‖q−c‖² (SQUARED L2). NOT metric.dist — that returns sqrt(‖·‖²) for L2, and the estimator
+            // mixes qc2 with the squared residual norm nr², so a sqrt here corrupts the cross-list ranking.
+            let qc2: f64 = qmc.iter().map(|&d| (d as f64) * (d as f64)).sum();
             qcache[*ci] = Some((q_r, qc2));
         }
         let (q_r, qc2) = qcache[*ci].as_ref().unwrap();
@@ -949,7 +951,10 @@ unsafe fn scan_ivf_aq_split_rabitq(
             Ok(c) => c,
             Err(e) => pg_sys::error!("theodb am scan (v8 rabitq record): {e}"),
         };
-        results.push((*tid, rq.estimate_l2_sq(&code, q_r, *qc2)));
+        // estimate_l2_sq returns SQUARED L2; sqrt it so v8 distances share the sqrt-L2 scale of the pending rows
+        // (metric.dist) and of v5/v6 — the ORDER BY comparison must not mix squared and sqrt scales. Clamp the
+        // rare negative estimate (quantization noise near d≈0) before the sqrt.
+        results.push((*tid, rq.estimate_l2_sq(&code, q_r, *qc2).max(0.0).sqrt()));
     }
     // Pending rows (INSERTed after build): f32, scored EXACTLY (same as v5/v6). Never RaBitQ-encoded.
     match page::read_pending(rel) {
