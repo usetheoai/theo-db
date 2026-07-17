@@ -304,6 +304,24 @@ REVOKE ALL ON FUNCTION theodb.graph_expand(text,bigint[],int) FROM PUBLIC;
     requires = [graph_build, graph_refold, graph_expand, "theodb_graph_schema"],
 );
 
+// M108 (review HIGH-1): drop the persisted CSR row when its edge relation is DROPped, so a later relation that
+// REUSES the freed OID cannot be served the old graph's CSR (a silent wrong answer). An `sql_drop` event trigger
+// is the correct hook — `graph_csr.edge_rel` is a bare oid with no pg_depend edge.
+extension_sql!(
+    r#"
+CREATE FUNCTION theodb.graph_on_drop() RETURNS event_trigger LANGUAGE plpgsql AS $fn$
+DECLARE r record;
+BEGIN
+    FOR r IN SELECT objid FROM pg_event_trigger_dropped_objects() WHERE object_type = 'table' LOOP
+        DELETE FROM theodb.graph_csr WHERE edge_rel = r.objid;
+    END LOOP;
+END $fn$;
+CREATE EVENT TRIGGER theodb_graph_drop ON sql_drop EXECUTE FUNCTION theodb.graph_on_drop();
+"#,
+    name = "theodb_graph_drop_trigger",
+    requires = ["theodb_graph_schema"],
+);
+
 #[cfg(any(test, feature = "pg_test"))]
 #[pgrx::pg_schema]
 mod tests {
@@ -336,7 +354,10 @@ mod tests {
     }
 
     // M108: expand does NOT rebuild — it reflects the CSR AT BUILD TIME until a refold; a new edge appears only
-    // after graph_refold (the fold-on-demand maintenance).
+    // after graph_refold. This is ALSO the same-transaction cache-invalidation regression test (review HIGH-2):
+    // the first expand populates the per-backend cache at built_at epoch E1; the refold rewrites built_at with
+    // clock_timestamp() → E2 ≠ E1 (within ONE txn — `now()` would give E1==E2 and serve the STALE cached CSR,
+    // making `after` wrong). So this test fails with `now()` and passes with `clock_timestamp()`.
     #[pg_test]
     fn m108_refold_folds_new_edges() {
         seed();
@@ -398,8 +419,19 @@ mod tests {
         let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
         let em = mean(&exp_ms);
         let cm = mean(&cte_ms);
-        // Correctness oracle: persisted-expand reachable-set count == recursive-CTE count.
-        assert_eq!(exp_reached, cte_reached, "M108 oracle: persisted expand must match the CTE reachable set");
+        let _ = (exp_reached, cte_reached); // counts logged below; the SET-HASH oracle is the real check
+        // Correctness oracle (review MEDIUM): SET-HASH — bit_xor(hashint8(node)) over the reachable SET, not just
+        // count(==count can collide on unequal sets). Persisted-expand set-hash MUST equal the CTE's.
+        let exp_hash: i64 = Spi::get_one(&format!(
+            "SELECT coalesce(bit_xor(hashint8(node)),0) FROM theodb.graph_expand('ge', {seeds}, 3) AS t(node)"
+        )).unwrap().unwrap();
+        let cte_hash: i64 = Spi::get_one(&format!(
+            "WITH RECURSIVE reach(node,hop) AS (SELECT unnest({seeds}),0 UNION \
+             SELECT CASE WHEN e.src=r.node THEN e.dst ELSE e.src END, r.hop+1 \
+             FROM reach r JOIN ge e ON (e.src=r.node OR e.dst=r.node) WHERE r.hop<3) \
+             SELECT coalesce(bit_xor(hashint8(node)),0) FROM (SELECT DISTINCT node FROM reach) s"
+        )).unwrap().unwrap();
+        assert_eq!(exp_hash, cte_hash, "M108 set-hash oracle: persisted expand must yield the SAME reachable set as the CTE");
         let line = format!(
             "M108_BENCH edges={built} build_ms={build_ms:.3} cold_expand_ms={cold_ms:.3} warm_expand_mean_ms={em:.4} cte_mean_ms={cm:.3} warm_speedup={:.1} reached={exp_reached}\n",
             cm / em.max(1e-9)
@@ -409,6 +441,22 @@ mod tests {
         // Gate: the WARM per-query persisted expand (cache hit → traverse only) is faster than the recursive CTE —
         // the M107 traverse-only win, now WITHOUT the per-query build (paid ONCE) and WITHOUT re-deserialize (cached).
         assert!(em < cm, "M108 gate: warm persisted expand ({em:.3}ms) must beat the recursive CTE ({cm:.3}ms) per query");
+    }
+
+    // M108 (review HIGH-1): DROPping the edge relation removes its persisted CSR row (sql_drop event trigger),
+    // so a reused OID can never be served the old graph's CSR. After DROP, expand fails fast (no stale answer).
+    #[pg_test]
+    fn m108_drop_removes_persisted_csr() {
+        seed();
+        Spi::get_one::<i64>("SELECT theodb.graph_build('g','src','dst')").unwrap();
+        assert_eq!(
+            Spi::get_one::<i64>("SELECT count(*) FROM theodb.graph_csr WHERE edge_rel='g'::regclass::oid").unwrap().unwrap(),
+            1, "CSR row present before DROP"
+        );
+        Spi::run("DROP TABLE g").unwrap();
+        // the sql_drop trigger deleted the row; nothing references the freed oid
+        let orphans: i64 = Spi::get_one("SELECT count(*) FROM theodb.graph_csr WHERE edge_rel NOT IN (SELECT oid FROM pg_class)").unwrap().unwrap();
+        assert_eq!(orphans, 0, "sql_drop trigger removes the orphaned CSR row (no OID-reuse wrong answer)");
     }
 
     // M108: expand on an unbuilt relation fails fast (typed), not a silent empty.
