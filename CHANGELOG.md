@@ -31,7 +31,16 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   v5/v6), Stage-2 reranks the `rerank_pool` survivors via `estimate_l2_sq` on the RaBitQ codes — **removing the
   exact-f32 random-read bind measured in M82/v5** (zero raw vector touched at rerank). Pending (post-build INSERT)
   rows stay f32-exact. New reloption `rabitq_bits` (default 7, range 1–8); `refine=2` selects RaBitQ. 6-file AM
-  surgery (`options.rs`, `page/ivf.rs`, `build.rs`, `scan.rs`, meta v8). QPS/recall A/B (v5 vs v8) pending on SIFT1M.
+  surgery (`options.rs`, `page/ivf.rs`, `build.rs`, `scan.rs`, meta v8).
+- **Vector research (E1 VERDICT): f32-free RaBitQ rerank MEASURED on SIFT1M in-PG (`docs/benchmarks/e1-rabitq-inpg-verdict`).**
+  Same-data v5 (f32 rerank) vs v8 (7-bit RaBitQ rerank) A/B, 1M vectors, official GT, real `theodb_ivfflat` scan.
+  **Recall parity** (v8 within ~1.5 pp of v5 across the full sweep, e.g. 0.979 vs 0.9925 @ of=16/probes=64);
+  **index 3.28× smaller** (161 MB vs 528 MB — the f32-free rerank drops the raw-vector refine region); **cold /
+  out-of-RAM latency 2.5–2.8× lower** at recall parity (75 ms vs 189 ms @ of=16/probes=64 with the OS cache
+  dropped per query) — the E1 gate (≥2× QPS at recall parity) is MET in the out-of-RAM regime. **Warm/in-RAM is
+  parity** (QPS 0.86–1.08×, buffers/query 1.01–1.02×): Stage-2 refinement is not the in-RAM bottleneck (M85
+  holds). The win is memory + billion-scale (the North-Star-credited axis, ADR-0035); it is NOT a warm
+  vector-QPS-superiority claim over ScaNN/AlloyDB (that ceiling stands — M73/M82/ADR-0036).
 
 ### Changed
 

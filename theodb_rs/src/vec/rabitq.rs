@@ -353,4 +353,32 @@ mod tests {
         let est = quant.estimate_l2_sq(&code, &q_rot, qc2);
         assert!((est - qc2).abs() < 1e-6, "zero-residual distance must equal ‖q−c‖²={qc2}, got {est}");
     }
+
+    // Regression (E1 in-PG scan bug): `qc2` MUST be the SQUARED residual norm ‖q−c‖², not the sqrt L2 distance.
+    // The AM scan originally passed `metric.dist(q,c)` (= sqrt(‖·‖²) for L2), which mixed a linear-scale term with
+    // the squared nr² inside the estimator and corrupted cross-list ranking (SIFT1M recall fell to 0.13–0.23,
+    // DROPPING with more probes). This test pins the contract: squared qc2 is accurate; sqrt(qc2) is grossly wrong.
+    #[test]
+    fn rabitq_qc2_must_be_squared_not_sqrt() {
+        let d = 64;
+        let quant = RabitqQuantizer::train(d, 7, 21);
+        let mut rng = SplitMix64::new(5);
+        // A residual with a deliberately large norm so ‖q−c‖ and ‖q−c‖² differ by a wide factor.
+        let c: Vec<f32> = (0..d).map(|_| rng.next_gaussian() as f32).collect();
+        let x: Vec<f32> = c.iter().map(|&cc| cc + rng.next_gaussian() as f32 * 3.0).collect();
+        let q: Vec<f32> = c.iter().map(|&cc| cc + rng.next_gaussian() as f32 * 3.0).collect();
+        let residual: Vec<f32> = x.iter().zip(&c).map(|(&xi, &ci)| xi - ci).collect();
+        let code = quant.encode(&residual);
+        let qmc: Vec<f32> = q.iter().zip(&c).map(|(&qi, &ci)| qi - ci).collect();
+        let q_rot = quant.rotate(&qmc);
+        let true_d2: f64 = q.iter().zip(&x).map(|(&qi, &xi)| { let e = (qi - xi) as f64; e * e }).sum();
+        let qc2_sq: f64 = qmc.iter().map(|&e| (e as f64) * (e as f64)).sum(); // ‖q−c‖² (CORRECT)
+        let qc2_sqrt = qc2_sq.sqrt(); // the wrong value the scan bug passed
+        let est_ok = quant.estimate_l2_sq(&code, &q_rot, qc2_sq);
+        let est_bad = quant.estimate_l2_sq(&code, &q_rot, qc2_sqrt);
+        let err_ok = (est_ok - true_d2).abs() / true_d2;
+        let err_bad = (est_bad - true_d2).abs() / true_d2;
+        assert!(err_ok < 0.05, "squared qc2 must estimate the true ‖q−x‖²={true_d2:.1} (got {est_ok:.1}, err {err_ok:.3})");
+        assert!(err_bad > 0.3, "sqrt(qc2) must be grossly wrong — the guard against reintroducing the scan bug (err {err_bad:.3})");
+    }
 }
