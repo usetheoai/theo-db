@@ -13,6 +13,18 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **M111/M112 — GraphRAG retrieval flow (vector-entry→traversal→rerank) + Personalized PageRank (native graph
+  pillar Phases 4–5):** `theodb.graph_rag_search` (cosine-entry over `graph_nodes.embedding` → `graph_expand`
+  → edge-weight rank), `theodb.graph_embed_nodes` (reuse `ai.embed`), and `theodb.graph_ppr` (Personalized
+  PageRank power-iteration over the CSR, HippoRAG ranking; hermetic oracle: symmetric + monotone-decaying from
+  seeds). Mechanisms BUILT + proven. **HONEST MEASURED VERDICT on real HotpotQA distractor** (HuggingFace
+  `hotpotqa/hotpot_qa`, `text-embedding-3-small`, `docs/benchmarks/m111-m112-graphrag-retrieval`): pure vector
+  wins in EVERY configuration — graph-only heuristic 0.32, hybrid 0.72, **LLM(gpt-4o-mini)-extraction + PPR
+  0.53, hybrid 0.83** all < **pure vector 0.85–0.87** (recall@4). Even the full HippoRAG recipe does not beat a
+  strong modern dense embedder on HotpotQA (HippoRAG's gains were vs weaker 2024 retrievers; HippoRAG-2 warns
+  graph-RAG can drop below standard RAG on factual tasks). Anti-sunk-cost (D3): the pillar's real value is its
+  fast engine + extraction surface (M108 16×, M109 5–8×, M110 theo-rag→3-SQL-calls), NOT a retrieval-quality
+  win over vectors. 356 pg_tests GREEN (+8, 0 regression). (M111, M112)
 
 ### Changed
 
