@@ -24,6 +24,17 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.101.0] - 2026-07-17
+
+### Added
+- **M113 — SQL/PGQ-subset surface (native graph pillar Phase 6):** `theodb.pgq_match(edge_rel, source_ids,
+  pattern, default_max)` — a DuckPGQ-style UDF-minimal bounded-path `MATCH` that parses the SQL/PGQ quantifier
+  (`*min..max`, `*N`, `*`, bare edge) and dispatches to the M108/M109 traversal (min-hop shell via subtracting
+  the `<min` reachable set). Composes with `<=>` (vector) and `ai.rerank` in one SQL statement (the
+  composability gate, proven). Honest scope: the ergonomic SUBSET GraphRAG needs (bounded reachability), NOT
+  full SQL/PGQ conformance (path variables / ELEMENT_ID / pattern-WHERE) — a real grammar-level parser hook is
+  the deferrable part the milestone scopes out. No new crate. 359 pg_tests GREEN (+3, 0 regression). (M113)
+
 ## [0.100.0] - 2026-07-17
 
 ### Added
