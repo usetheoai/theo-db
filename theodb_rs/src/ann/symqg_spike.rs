@@ -260,7 +260,24 @@ pub(crate) fn exact_beam_search(g: &HnswIndex, query: &[f32], k: usize, beam: us
 
 #[cfg(test)]
 mod tests {
-    use super::{exact_beam_search, SymqgSpike};
+    use super::{encode_sign, estimate_sign, exact_beam_search, SymqgSpike};
+    use crate::vec::rabitq::RabitqQuantizer;
+
+    // EC-6: a neighbour identical to its parent → residual 0 → nr=0, w=0; estimate_sign returns exactly qc2
+    // (no div-by-zero). Pins the encode_sign guard so a refactor cannot regress it.
+    #[test]
+    fn symqg_encode_sign_zero_residual() {
+        let dim = 32;
+        let rq = RabitqQuantizer::train(dim, 1, 5);
+        let zero = vec![0.0f32; dim];
+        let c = encode_sign(&rq, &zero);
+        assert_eq!(c.nr, 0.0);
+        assert_eq!(c.w, 0.0);
+        let q_r: Vec<f32> = (0..dim).map(|i| i as f32 * 0.1).collect();
+        let qc2: f64 = q_r.iter().map(|&x| (x as f64) * (x as f64)).sum();
+        assert!((estimate_sign(&c, &q_r, qc2) - qc2).abs() < 1e-9);
+    }
+
     use crate::ann::{HnswIndex, Metric};
     use std::time::Instant;
 

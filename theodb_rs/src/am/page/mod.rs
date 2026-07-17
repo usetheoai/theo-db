@@ -15,6 +15,8 @@ use pgrx::pg_sys;
 // flat so every existing `page::write_ivf_*` / `page::read_ivf_*` call site is unchanged.
 mod ivf;
 pub(crate) use ivf::*;
+mod symqg; // E2 — theodb_symqg co-located page layout (reaches the private helpers via `use super::*`)
+pub(crate) use symqg::*;
 
 const META_MAGIC: u32 = 0x5449_4D45; // "TIME" (Theodb Index MEta)
 const META_VERSION: u32 = 1;

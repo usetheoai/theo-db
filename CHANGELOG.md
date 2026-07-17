@@ -70,6 +70,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   (≥1.5×) is MET. Caveat: off-PG (pure in-RAM search; no heap/WAL/MVCC) — the next gate is the in-PG AM (per-hop
   random page read). `docs/benchmarks/e2-symqg-spike.md`.
 
+- **Vector research (E2 impl T1.1): `theodb_symqg` co-located page layout** (`am/page/symqg.rs`). Persisted per-vertex row `[nbr_ids][1-bit sign bytes][nr/w factors]` (degree padded to 32; sentinel-skipped slots) + `SymqgMeta` + directory; rows are chunked so a high-dim×degree row spans pages (EC-2). Pure codec (SymqgMeta encode/decode, pack_row/decode_row, sign-bit pack) proven 6/6 standalone (round-trip, bad-magic reject, padding, row-spans-pages, truncated→typed-Err EC-7); crate compiles clean. Foundation for `ambuild_symqg`/`scan_symqg_structured`.
+
 ### Changed
 
 ### Deprecated
