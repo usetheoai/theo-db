@@ -1,3 +1,30 @@
+# E2 — SymphonyQG spike: off-PG gate MET — recall parity + ~2.2× faster at 1M (1-bit sign, scalar)
+
+> **VERDICT UPDATE (2026-07-17, N=1M confirming run):** the off-PG gate (≥1.5× at matched recall) is **MET**.
+> The first draft below concluded "wall-clock gated on a kernel" — that was the **multi-bit** estimator (a full
+> i8×f32 dot, ≈ one L2). The fix is the SymphonyQG **1-bit SIGN** code: the neighbor dot becomes `Σ ±q_r[d]`,
+> **multiply-free** (conditional negate + add), ~2-3× cheaper per element than exact L2. Our multi-bit
+> `RabitqQuantizer` is DEGENERATE at bits=1 (`L=2^0−1=0` → all-zero codes), so a dedicated sign codec
+> (`encode_sign`/`estimate_sign`) was added. **Measured on the FULL SIFT1M (correct GT, real recall):**
+>
+> | beam | symqg recall@10 | exact recall@10 | **speedup** | exact-dist ratio |
+> |---:|---:|---:|---:|---:|
+> | 80 | 0.9495 | 0.9870 | **2.24×** | 21.7× |
+> | 160 | 0.9810 | 0.9970 | **2.24×** | 19.4× |
+> | 320 | 0.9955 | 0.9985 | **2.66×** | 17.1× |
+> | 640 | 0.9985 | 0.9995 | 1.81× | 14.8× |
+>
+> symqg reaches recall parity (0.998) and is **1.8–2.66× faster** than exact-distance traversal on the SAME HNSW
+> graph, at 15–27× fewer exact distances — **SCALAR** (no SIMD kernel). The FastScan 1-bit kernel is now an
+> ADDITIONAL multiplier on top, not the gate. **Caveat:** this is OFF-PG (pure in-RAM graph search; no heap/WAL/
+> MVCC on the search path). The next gate is the in-PG AM, where each graph hop is a random page read — the PG tax
+> a standalone lib avoids. HNSW build 814 s + sign-encode 720 s at 1M (unoptimized dense O(D²) rotate; the paper's
+> Fast-JL O(D log D) is the build-cost lever, out of spike scope).
+
+---
+
+# (first-draft finding — superseded by the verdict above, kept for the honest record)
+
 # E2 — SymphonyQG spike: mechanism VALIDATED, wall-clock GATED on a FastScan 1-bit kernel
 
 **Date:** 2026-07-17 · **Module:** `theodb_rs/src/ann/symqg_spike.rs` (clean-room from arXiv:2411.12229; the

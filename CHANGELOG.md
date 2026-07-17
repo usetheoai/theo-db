@@ -60,6 +60,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   so the all-neighbors estimates outweigh the pruned exacts. The ≥1.5× gate is now localized to ONE unbuilt
   component: a batched FastScan 1-bit RaBitQ kernel (~8–16× cheaper than exact) — RaBitQ-Library (Apache-2.0) as
   permissive reference. Spike-first gate did its job: de-risked the mechanism, priced the remaining work honestly.
+- **Vector research (E2 gate MET): 1-bit SIGN codec — recall parity + ~2.2× faster at SIFT1M, off-PG (scalar).**
+  The multi-bit estimator lost because its dot ≈ one L2; the SymphonyQG **1-bit sign** makes the neighbor dot
+  `Σ ±q_r[d]` multiply-free (~2-3× cheaper/elem). Our multi-bit codec is degenerate at bits=1, so a dedicated sign
+  codec was added. **Measured on the FULL SIFT1M (correct GT, real recall@10):** symqg reaches recall parity
+  (0.998) and is **1.8–2.66× faster** than exact-distance traversal on the same HNSW graph at recall 0.95–0.99,
+  15–27× fewer exact distances — SCALAR (FastScan SIMD kernel is an ADDITIONAL multiplier). The off-PG gate
+  (≥1.5×) is MET. Caveat: off-PG (pure in-RAM search; no heap/WAL/MVCC) — the next gate is the in-PG AM (per-hop
+  random page read). `docs/benchmarks/e2-symqg-spike.md`.
 
 ### Changed
 
