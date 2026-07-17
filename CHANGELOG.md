@@ -41,6 +41,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   parity** (QPS 0.86–1.08×, buffers/query 1.01–1.02×): Stage-2 refinement is not the in-RAM bottleneck (M85
   holds). The win is memory + billion-scale (the North-Star-credited axis, ADR-0035); it is NOT a warm
   vector-QPS-superiority claim over ScaNN/AlloyDB (that ceiling stands — M73/M82/ADR-0036).
+- **Vector research (E2 productization): `theodb_symqg` in-PG AM plan** (`knowledge-base/plans/symqg-inpg-am-plan.md`, plan-confidence SHIPPABLE_WITH_CAVEATS 70). Plans the in-PG SymphonyQG quantized-graph index AM (persisted co-located graph + build reusing HnswIndex/encode_sign + page-reading beam scan + WAL/VACUUM/reloptions), with the acceptance gate = in-PG A/B ≥1.5× vs theodb_hnsw at matched recall on SIFT1M (settles the per-hop page-tax the off-PG spike could not). Clean-room from the paper (D5).
 - **Vector research (E2 discovery): SymphonyQG clean-room blueprint** (`knowledge-base/discoveries/blueprints/symphonyqg-graph-quant-blueprint.md`).
   Maps the SymphonyQG design (arXiv:2411.12229, SIGMOD'25) from the paper + a STUDY-ONLY clone of the
   NTUITIVE-non-commercial reference (D1: never copied/transcribed — clean-room from the paper only, like the RaBitQ
