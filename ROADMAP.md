@@ -1678,7 +1678,7 @@ LazyGraphRAG (MS Research), HippoRAG 2; baseline a bater = `theo-rag/packages/co
 
 ---
 
-## M111 — [ ] Grafo Fase 4: vector-nos-nós + fluxo vector-entry→traversal→rerank *(gated M110)*
+## M111 — [x] Grafo Fase 4: vector-nos-nós + fluxo vector-entry→traversal→rerank *(gated M110)*
 
 > Added 2026-07-16 by `/roadmap-feature` (slug: `graph-vector-nodes-flow`). Fonte: ADR-0048 (follow-on #4) — o pattern GraphRAG SOTA (LazyGraphRAG/HippoRAG) zero-copy num só engine.
 
@@ -1686,7 +1686,7 @@ LazyGraphRAG (MS Research), HippoRAG 2; baseline a bater = `theo-rag/packages/co
 
 ---
 
-## M112 — [ ] Grafo Fase 5: Personalized PageRank + community summarization *(gated M111 — gated em necessidade MEDIDA)*
+## M112 — [x] Grafo Fase 5: Personalized PageRank + community summarization *(gated M111 — gated em necessidade MEDIDA)*
 
 > Added 2026-07-16 by `/roadmap-feature` (slug: `graph-ppr-community`). Fonte: ADR-0048 (follow-on #5) — o mais **diferível** (LazyGraphRAG: community summaries custam 700×).
 
