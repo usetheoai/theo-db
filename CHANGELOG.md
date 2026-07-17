@@ -13,6 +13,20 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.99.0] - 2026-07-16
+
+### Added
 - **M110 — in-DB graph extraction surface (native graph pillar Phase 3):** `ai.extract_entities` /
   `ai.extract_graph` (heuristic-default: capitalized-run entities + windowed co-occurrence edges — a byte-identical
   Rust port of theo-rag's `graph-extractor.ts`; `use_llm` opt-in reuses `chat::chat` with a GraphRAG delimited
@@ -28,16 +42,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   fixed 2 MEDIUM (edge `description` COALESCE-upgrade on re-ingest; corrected the parity-coverage claim to
   ASCII/English scope) + filed 2 pre-existing platform gaps (#117 SSRF `llm_endpoint`, #118 tenant-blind
   `graph_build`). 348 pg_tests GREEN (+11, 0 regression). (M110)
-
-### Changed
-
-### Deprecated
-
-### Removed
-
-### Fixed
-
-### Security
 
 ## [0.98.0] - 2026-07-16
 
