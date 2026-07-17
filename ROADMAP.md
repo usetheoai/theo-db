@@ -1662,7 +1662,7 @@ LazyGraphRAG (MS Research), HippoRAG 2; baseline a bater = `theo-rag/packages/co
 
 ---
 
-## M109 — [ ] Grafo Fase 2: operador MS-BFS vetorizado (SIMD, multi-source) *(gated M108)*
+## M109 — [x] Grafo Fase 2: operador MS-BFS vetorizado (SIMD, multi-source) *(gated M108)*
 
 > Added 2026-07-16 by `/roadmap-feature` (slug: `graph-msbfs-operator`). Fonte: ADR-0048 (follow-on #2).
 
