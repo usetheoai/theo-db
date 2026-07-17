@@ -275,9 +275,9 @@ mod tests {
         let n = 200usize; // data vectors
         let nq = 40usize; // queries
         let mut rng = SplitMix64::new(7);
-        let gen = |rng: &mut SplitMix64| -> Vec<f32> { (0..d).map(|_| rng.next_gaussian() as f32).collect() };
-        let data: Vec<Vec<f32>> = (0..n).map(|_| gen(&mut rng)).collect();
-        let queries: Vec<Vec<f32>> = (0..nq).map(|_| gen(&mut rng)).collect();
+        let sample_vec = |rng: &mut SplitMix64| -> Vec<f32> { (0..d).map(|_| rng.next_gaussian() as f32).collect() };
+        let data: Vec<Vec<f32>> = (0..n).map(|_| sample_vec(&mut rng)).collect();
+        let queries: Vec<Vec<f32>> = (0..nq).map(|_| sample_vec(&mut rng)).collect();
 
         let mut prev_err = f64::INFINITY;
         for &bits in &[1u8, 3, 5, 7] {
