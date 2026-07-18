@@ -7,10 +7,14 @@
 //! ```text
 //! block 0: SymqgMeta (write_item)
 //! rotation codebook (RabitqQuantizer::to_meta_bytes; write_chunks)
-//! directory: n × (row_first_block:u32, row_npages:u32)          — locates each vertex row by ORDINAL
 //! tids:      n × i64                                            — vertex ordinal → heap tid (result mapping)
-//! rows:      n × pack_row bytes (chunked; a high-dim×degree row MAY span pages — EC-2)
+//! rows:      n × pack_row bytes, PACKED CONTIGUOUS (one `write_chunks` over the concatenation)
 //! ```
+//! v2 packs the rows region contiguously (CHUNK bytes/page) instead of the v1 one-page-per-row layout: every row
+//! is FIXED-SIZE (`row_bytes(dim,degree)`), so its byte offset is `ord · row_bytes` — no per-vertex directory is
+//! needed (the v1 `(first_block, npages)` directory was pure page-waste: a 1408-byte row consumed a full 8 KB
+//! page, inflating the 1 M-vertex SIFT index to ~7.8 GB / out-of-RAM). Contiguous packing folds it to ~1.4 GB
+//! (in-RAM), which the in-PG A/B (T5.1) showed is the difference between the page tax dominating and not.
 //! Per-vertex row (`degree_bound R` a multiple of 32; padded slots carry `SENTINEL_ORD`, skipped at scan):
 //! ```text
 //! [dim × f32 rot vector] [R × u32 neighbour ORDINALS] [R × ⌈dim/8⌉ sign-bit bytes] [R × (nr:f32, w:f32) factors]
@@ -22,7 +26,7 @@ use super::*;
 use crate::ann::symqg_spike::SignCode;
 
 pub(crate) const SYMQG_MAGIC: u32 = 0x5351_4753; // "SQGS" — Theodb SymphonyQG Structured
-pub(crate) const SYMQG_VERSION: u32 = 1;
+pub(crate) const SYMQG_VERSION: u32 = 2; // v2: contiguous fixed-size rows (v1 was one page/row — page-waste)
 /// Padding ordinal for a vertex with < R real neighbours; skipped at scan.
 pub(crate) const SENTINEL_ORD: u32 = u32::MAX;
 
@@ -37,13 +41,12 @@ pub(crate) struct SymqgMeta {
     pub entry: u32,
     pub gen_base: u32,
     pub rot_codebook_npages: u32,
-    pub dir_npages: u32,
     pub tids_npages: u32,
 }
 
 impl SymqgMeta {
     pub(crate) fn encode(&self) -> Vec<u8> {
-        let mut b = Vec::with_capacity(41);
+        let mut b = Vec::with_capacity(37);
         b.extend_from_slice(&SYMQG_MAGIC.to_le_bytes());
         b.extend_from_slice(&SYMQG_VERSION.to_le_bytes());
         b.push(self.metric_tag);
@@ -53,13 +56,12 @@ impl SymqgMeta {
         b.extend_from_slice(&self.entry.to_le_bytes());
         b.extend_from_slice(&self.gen_base.to_le_bytes());
         b.extend_from_slice(&self.rot_codebook_npages.to_le_bytes());
-        b.extend_from_slice(&self.dir_npages.to_le_bytes());
         b.extend_from_slice(&self.tids_npages.to_le_bytes());
         b
     }
     pub(crate) fn decode(b: &[u8]) -> Result<SymqgMeta, String> {
-        if b.len() < 41 {
-            return Err(format!("theodb_symqg: truncated meta ({} < 41 bytes)", b.len()));
+        if b.len() < 37 {
+            return Err(format!("theodb_symqg: truncated meta ({} < 37 bytes)", b.len()));
         }
         let magic = u32::from_le_bytes(b[0..4].try_into().unwrap());
         if magic != SYMQG_MAGIC {
@@ -77,9 +79,22 @@ impl SymqgMeta {
             entry: u32::from_le_bytes(b[21..25].try_into().unwrap()),
             gen_base: u32::from_le_bytes(b[25..29].try_into().unwrap()),
             rot_codebook_npages: u32::from_le_bytes(b[29..33].try_into().unwrap()),
-            dir_npages: u32::from_le_bytes(b[33..37].try_into().unwrap()),
-            tids_npages: u32::from_le_bytes(b[37..41].try_into().unwrap()),
+            tids_npages: u32::from_le_bytes(b[33..37].try_into().unwrap()),
         })
+    }
+
+    /// First block of the contiguous rows region: right after the meta, rotation codebook, and tids regions.
+    #[inline]
+    pub(crate) fn rows_base(&self) -> u32 {
+        self.gen_base
+            .saturating_add(self.rot_codebook_npages)
+            .saturating_add(self.tids_npages)
+    }
+
+    /// First block of the tids region: right after the meta + rotation codebook.
+    #[inline]
+    pub(crate) fn tids_base(&self) -> u32 {
+        self.gen_base.saturating_add(self.rot_codebook_npages)
     }
 }
 
@@ -157,10 +172,11 @@ pub(crate) fn decode_row(b: &[u8], dim: usize, degree: usize) -> Result<SymqgRow
     Ok(SymqgRow { rot, neighbours })
 }
 
-/// Write the whole index: meta + rotation codebook + directory + tids + rows. Mirrors `write_ivf_aq_split_sq8`'s
-/// cursor/dir discipline. `rows[i]` is the packed row bytes for vertex ordinal `i` (from `pack_row`); a row may
-/// exceed one page (EC-2) — `write_chunks` + the per-vertex directory handle multi-page rows. `tids[i]` is the
-/// heap tid of vertex ordinal `i`.
+/// Write the whole index: meta + rotation codebook + tids + rows (PACKED CONTIGUOUS). `rows[i]` is the packed row
+/// bytes for vertex ordinal `i` (from `pack_row`) — all rows are the SAME fixed size, so no per-vertex directory is
+/// stored (row `i` lives at byte offset `i · row_bytes` inside the contiguous rows region; see `read_symqg_row`).
+/// `tids[i]` is the heap tid of vertex ordinal `i`. A high-dim×degree row MAY exceed one page (EC-2) — the region is
+/// one flat byte stream chunked at CHUNK, so multi-page rows are handled by the offset arithmetic at read time.
 pub(crate) unsafe fn pack_symqg(
     rel: pg_sys::Relation,
     metric_tag: u8,
@@ -174,20 +190,15 @@ pub(crate) unsafe fn pack_symqg(
     let base: u32 = 1;
     let n = rows.len() as u32;
     let rot_npages = npages_for(rot_codebook.len());
-    let dir_npages = npages_for(n as usize * 8); // n × (first_block:u32, npages:u32)
     let tids_npages = npages_for(n as usize * 8); // n × i64
-    let mut cursor = base + rot_npages + dir_npages + tids_npages;
-    let mut dir = Vec::with_capacity(n as usize * 8);
-    for row in rows {
-        let fb = cursor;
-        let np = npages_for(row.len());
-        cursor += np;
-        dir.extend_from_slice(&fb.to_le_bytes());
-        dir.extend_from_slice(&np.to_le_bytes());
-    }
     let mut tid_bytes = Vec::with_capacity(n as usize * 8);
     for &t in tids {
         tid_bytes.extend_from_slice(&t.to_le_bytes());
+    }
+    // Concatenate all fixed-size rows into ONE contiguous byte stream — the packing that folds the v1 page-waste.
+    let mut row_bytes_all = Vec::with_capacity(rows.iter().map(|r| r.len()).sum());
+    for row in rows {
+        row_bytes_all.extend_from_slice(row);
     }
     let meta = SymqgMeta {
         metric_tag,
@@ -197,16 +208,12 @@ pub(crate) unsafe fn pack_symqg(
         entry,
         gen_base: base,
         rot_codebook_npages: rot_npages,
-        dir_npages,
         tids_npages,
     };
     write_item(rel, &meta.encode());
     write_chunks(rel, rot_codebook);
-    write_chunks(rel, &dir);
     write_chunks(rel, &tid_bytes);
-    for row in rows {
-        write_chunks(rel, row);
-    }
+    write_chunks(rel, &row_bytes_all);
 }}
 
 /// Read + parse the meta page (block 0).
@@ -215,27 +222,9 @@ pub(crate) unsafe fn read_symqg_meta(rel: pg_sys::Relation) -> Result<SymqgMeta,
     SymqgMeta::decode(&m)
 }
 
-/// The per-vertex directory `(first_block, npages)` for all `n` vertices.
-pub(crate) unsafe fn read_symqg_dir(rel: pg_sys::Relation, meta: &SymqgMeta) -> Result<Vec<(u32, u32)>, String> {
-    let dir_base = meta.gen_base + meta.rot_codebook_npages;
-    let bytes = unsafe { read_chunked(rel, dir_base, meta.dir_npages) }?;
-    if bytes.len() < meta.n as usize * 8 {
-        return Err("theodb_symqg: truncated directory".into());
-    }
-    let mut out = Vec::with_capacity(meta.n as usize);
-    for i in 0..meta.n as usize {
-        let o = i * 8;
-        let fb = u32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
-        let np = u32::from_le_bytes(bytes[o + 4..o + 8].try_into().unwrap());
-        out.push((fb, np));
-    }
-    Ok(out)
-}
-
 /// The ordinal → heap-tid table.
 pub(crate) unsafe fn read_symqg_tids(rel: pg_sys::Relation, meta: &SymqgMeta) -> Result<Vec<i64>, String> {
-    let tids_base = meta.gen_base + meta.rot_codebook_npages + meta.dir_npages;
-    let bytes = unsafe { read_chunked(rel, tids_base, meta.tids_npages) }?;
+    let bytes = unsafe { read_chunked(rel, meta.tids_base(), meta.tids_npages) }?;
     if bytes.len() < meta.n as usize * 8 {
         return Err("theodb_symqg: truncated tids region".into());
     }
@@ -244,15 +233,40 @@ pub(crate) unsafe fn read_symqg_tids(rel: pg_sys::Relation, meta: &SymqgMeta) ->
         .collect())
 }
 
-/// Read + decode one vertex's row. `(first_block, npages)` come from the directory.
+/// Read `len` bytes at global `byte_offset` inside a contiguous region that starts at block `region_base` (a region
+/// written by `write_chunks`: CHUNK data bytes per page). A fixed-size row spans ≤ ⌈row_bytes/CHUNK⌉ pages — for the
+/// common 128-d/degree-32 row (1408 B < CHUNK) that is ONE page (the packing win); a high-dim EC-2 row spans a few.
+unsafe fn read_region_bytes(
+    rel: pg_sys::Relation,
+    region_base: u32,
+    byte_offset: usize,
+    len: usize,
+) -> Result<Vec<u8>, String> {
+    let start_page = byte_offset / CHUNK;
+    let end_page = (byte_offset + len - 1) / CHUNK; // inclusive
+    let mut buf = Vec::with_capacity((end_page - start_page + 1) * CHUNK);
+    for p in start_page..=end_page {
+        unsafe { read_page_item_into(rel, region_base + p as u32, &mut buf) }?;
+    }
+    let local = byte_offset - start_page * CHUNK;
+    if buf.len() < local + len {
+        return Err(format!("theodb_symqg: truncated rows region at byte offset {byte_offset} (need {len})"));
+    }
+    Ok(buf[local..local + len].to_vec())
+}
+
+/// Read + decode vertex `ord`'s row from the contiguous rows region. Row `ord` lives at byte offset
+/// `ord · row_bytes(dim,degree)` (fixed-size rows ⇒ no directory lookup — the v2 packing).
 pub(crate) unsafe fn read_symqg_row(
     rel: pg_sys::Relation,
-    first_block: u32,
-    npages: u32,
+    rows_base: u32,
+    ord: u32,
     dim: usize,
     degree: usize,
 ) -> Result<SymqgRow, String> {
-    let bytes = unsafe { read_chunked(rel, first_block, npages) }?;
+    let rb = row_bytes(dim, degree);
+    let byte_offset = ord as usize * rb;
+    let bytes = unsafe { read_region_bytes(rel, rows_base, byte_offset, rb) }?;
     decode_row(&bytes, dim, degree)
 }
 
@@ -274,16 +288,17 @@ mod tests {
             entry: 42,
             gen_base: 1,
             rot_codebook_npages: 3,
-            dir_npages: 2,
             tids_npages: 2,
         };
         assert_eq!(SymqgMeta::decode(&m.encode()).unwrap(), m);
+        assert_eq!(m.tids_base(), 4, "tids right after meta+codebook");
+        assert_eq!(m.rows_base(), 6, "rows right after meta+codebook+tids");
     }
 
     #[test]
     fn symqg_page_meta_rejects_bad_magic_and_short() {
         assert!(SymqgMeta::decode(&[0u8; 10]).is_err());
-        let mut b = SymqgMeta { metric_tag: 0, dim: 4, degree_bound: 32, n: 1, entry: 0, gen_base: 1, rot_codebook_npages: 0, dir_npages: 0, tids_npages: 0 }.encode();
+        let mut b = SymqgMeta { metric_tag: 0, dim: 4, degree_bound: 32, n: 1, entry: 0, gen_base: 1, rot_codebook_npages: 0, tids_npages: 0 }.encode();
         b[0] ^= 0xFF;
         assert!(SymqgMeta::decode(&b).is_err());
     }

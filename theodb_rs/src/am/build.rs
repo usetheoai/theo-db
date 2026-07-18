@@ -423,32 +423,34 @@ pub extern "C-unwind" fn ambuild_symqg(
         let idx = crate::ann::HnswIndex::build_owned(
             corpus, hnsw_m, hnsw_ef_construction(), metric, BUILD_SEED, &|| { pgrx::check_for_interrupts!(); },
         );
-        let spike = crate::ann::symqg_spike::SymqgSpike::build_cancellable(
-            &idx, 1, BUILD_SEED, &|| { pgrx::check_for_interrupts!(); },
-        );
-        if !spike.is_sign_mode() {
-            pg_sys::error!("theodb_symqg: internal — expected 1-bit sign mode");
-        }
+        // STREAMING encode (EC-10 fix): encode + pack each vertex's row and DROP its codes immediately, instead of
+        // materializing all N·R sign codes at once (`SymqgSpike::build` — which OOM'd at 1M on 16 GB). Peak memory
+        // is the HNSW graph + the packed rows (O(N·row_bytes)) + O(R) transient codes — no O(N·R·dim) code buffer.
         let n = idx.spike_len();
         let dim = if n > 0 { idx.spike_vector(0).len() } else { 0 };
+        let rq = crate::vec::rabitq::RabitqQuantizer::train(dim, 1, BUILD_SEED);
         let mut rows: Vec<Vec<u8>> = Vec::with_capacity(n);
         let mut tids: Vec<i64> = Vec::with_capacity(n);
         for p in 0..n {
-            pgrx::check_for_interrupts!();
+            if p % 4096 == 0 {
+                pgrx::check_for_interrupts!(); // EC-1
+            }
             tids.push(idx.spike_id(p));
-            let rot = spike.rot_vec_of(p); // P·x_p — exact dist = ‖rot_q − rot‖², q_r = rot_q − rot (one subtraction)
-            let scodes = spike.sign_codes_of(p);
+            let pv = idx.spike_vector(p);
+            let rot = rq.rotate(pv); // P·x_p — exact dist = ‖rot_q − rot‖², q_r = rot_q − rot (one subtraction at scan)
+            let nbr_nodes = idx.spike_base_neighbors(p);
             let mut nbrs: Vec<(u32, crate::ann::symqg_spike::SignCode)> = Vec::with_capacity(degree);
-            for (nb_node, code) in scodes.iter().take(degree) {
-                nbrs.push((*nb_node as u32, code.clone()));
+            for &nb in nbr_nodes.iter().take(degree) {
+                let resid: Vec<f32> = idx.spike_vector(nb).iter().zip(pv).map(|(&x, &c)| x - c).collect();
+                nbrs.push((nb as u32, crate::ann::symqg_spike::encode_sign(&rq, &resid)));
             }
             while nbrs.len() < degree {
                 nbrs.push((page::SENTINEL_ORD, crate::ann::symqg_spike::SignCode { u: vec![0i8; dim], nr: 0.0, w: 0.0 }));
             }
-            rows.push(page::pack_row(rot, &nbrs, dim, degree));
+            rows.push(page::pack_row(&rot, &nbrs, dim, degree)); // rot + nbrs codes dropped here
         }
         let entry = idx.spike_entry().unwrap_or(0) as u32;
-        let rot_codebook = spike.rq().to_meta_bytes();
+        let rot_codebook = rq.to_meta_bytes();
         page::pack_symqg(indexrel, metric.tag(), dim as u32, degree as u32, entry, &rot_codebook, &tids, &rows);
         build_result(ntuples, corpus_len)
     }

@@ -672,24 +672,12 @@ unsafe fn main_index_pages(rel: pg_sys::Relation) -> Result<u32, String> {
         // M35 structured HNSW: pending starts right after the neighbor page range (nbr_first + nbr_npages).
         Ok(crate::am::hnsw_page::decode_meta(&m)?.pending_start())
     } else if magic == symqg::SYMQG_MAGIC {
-        // E2: pending starts after gen_base + rotation codebook + directory + tids + Σ(row pages). Read the
-        // directory (8B entries: first_block:u32, npages:u32) and sum the row page counts — the true tail.
+        // E2 v2: rows are FIXED-SIZE and packed contiguously (no directory) — pending starts right after
+        // gen_base + rotation codebook + tids + the packed rows region (npages_for(n · row_bytes)).
         let meta = symqg::SymqgMeta::decode(&m)?;
-        let dir_base = meta.gen_base.saturating_add(meta.rot_codebook_npages);
-        let dbytes = read_chunked(rel, dir_base, meta.dir_npages)?;
-        if dbytes.len() < meta.n as usize * 8 {
-            return Err("theodb am: truncated symqg directory".into());
-        }
-        let mut total = meta
-            .gen_base
-            .saturating_add(meta.rot_codebook_npages)
-            .saturating_add(meta.dir_npages)
-            .saturating_add(meta.tids_npages);
-        for i in 0..meta.n as usize {
-            let o = i * 8 + 4; // npages field within the 8-byte dir entry
-            total = total.saturating_add(u32::from_le_bytes(dbytes[o..o + 4].try_into().unwrap()));
-        }
-        Ok(total)
+        let rows_bytes = (meta.n as usize)
+            .saturating_mul(symqg::row_bytes(meta.dim as usize, meta.degree_bound as usize));
+        Ok(meta.rows_base().saturating_add(npages_for(rows_bytes)))
     } else {
         // blob (M26 legacy / old HNSW): 1 meta + nchunks data pages.
         if m.len() < 20 {

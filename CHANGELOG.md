@@ -13,6 +13,26 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Vector research (E2): `theodb_symqg` index AM — SymphonyQG co-located quantized graph in-PG (own-code,
+  clean-room).** New custom index AM `CREATE INDEX … USING theodb_symqg (col vector_l2_ops) WITH (degree_bound=N)`.
+  Persists a co-located quantized graph (own-code, clean-room from arXiv:2411.12229 — the NTUITIVE-licensed
+  reference C++ is **study-only, never copied**, D1): each vertex row stores its rotated vector `P·x` plus, per
+  ≤`degree_bound` neighbour, a **1-bit RaBitQ sign code**, so a beam-search hop estimates all neighbours from the
+  co-located codes and the popped centre's exact distance is a local read (no separate rerank). Build reuses the
+  own-code HNSW for the base adjacency (`ann/symqg_spike.rs::encode_sign`), streaming encode+pack per vertex (no
+  N·R materialization — the 1M OOM fix). Page layout `page/symqg.rs`: meta · rotation codebook · tids ·
+  **contiguous fixed-size rows** (arithmetic `ord·row_bytes` addressing, no directory — folds the index 5.66×);
+  GenericXLog crash-safety, `INSERT`→pending, `VACUUM`, MVCC-delete all validated on real SIFT1M. L2-only.
+- **Vector research (E2 VERDICT): in-PG A/B `theodb_symqg` vs `theodb_hnsw` on SIFT1M
+  (`docs/benchmarks/e2-symqg-inpg-verdict`).** Settles the per-hop random-page-read tax the off-PG spike could not.
+  **Honest measured negative: the gate (symqg QPS ≥ 1.5× hnsw at recall@10 ≥ 0.95) is NOT met** — `theodb_hnsw` is
+  **2.6–3.9× faster** at matched recall (0.95–0.994), warm. The page tax was real and dominant (v1 one-page-per-row
+  layout, 7828 MB out-of-RAM → 8.5× loss) and **mitigable** (v2 contiguous packing → **1383 MB, 5.66× smaller,
+  +2.3× QPS**), but a residual gap remains: the off-PG spike's 1.8–2.66× advantage did not transfer against the
+  mature HNSW AM (first-cut symqg scan + per-hop 1408-byte row decode vs M35–M46-optimized hnsw). AM correctness
+  (recall parity 0.857–0.9995, pending/VACUUM/MVCC) is proven; only the QPS gate is unmet. **No symqg QPS-win claim
+  is made** (`public-copy.md`). Next lever (separate scope): FastScan 1-bit SIMD sign kernel (reuses
+  `vec/ah.rs::ah_score_block`) + copy-free row reads.
 - **Vector research (E1 core): extended multi-bit RaBitQ quantizer own-code (`vec/rabitq.rs`).** From-scratch
   reimplementation of the extended multi-bit RaBitQ algorithm (arXiv:2409.09913, Apache-2.0; the vendored tree
   was deleted in ADR-0046) — the **f32-free rerank codec**. Estimator stores per vector only the B-bit code `u`,

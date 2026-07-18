@@ -301,18 +301,14 @@ unsafe fn gather_symqg_candidates(rel: pg_sys::Relation, query: &[f32], ef: usiz
         Err(e) => pg_sys::error!("theodb am scan (rabitq): {e}"),
     };
     let rot_q = rq.rotate(query);
-    let dir = match page::read_symqg_dir(rel, &meta) {
-        Ok(d) => d,
-        Err(e) => pg_sys::error!("theodb am scan (dir): {e}"),
-    };
     let tids = match page::read_symqg_tids(rel, &meta) {
         Ok(t) => t,
         Err(e) => pg_sys::error!("theodb am scan (tids): {e}"),
     };
+    let rows_base = meta.rows_base();
     let ef = ef.max(1);
     let read_row = |ord: u32| -> page::SymqgRow {
-        let (fb, np) = dir[ord as usize];
-        match page::read_symqg_row(rel, fb, np, dim, degree) {
+        match page::read_symqg_row(rel, rows_base, ord, dim, degree) {
             Ok(r) => r,
             Err(e) => pg_sys::error!("theodb am scan (row {ord}): {e}"),
         }

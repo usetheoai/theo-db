@@ -53,8 +53,10 @@ pub(crate) struct SignCode {
     pub w: f32,
 }
 
-/// Encode `residual = x − c` to a 1-bit sign code, reusing `rq`'s rotation `P`.
-fn encode_sign(rq: &RabitqQuantizer, residual: &[f32]) -> SignCode {
+/// Encode `residual = x − c` to a 1-bit sign code, reusing `rq`'s rotation `P`. `pub(crate)` so the in-PG
+/// `ambuild_symqg` can STREAM the encode (per-vertex, freeing codes as it packs) instead of materializing all
+/// codes at once like `SymqgSpike::build` — the EC-10 build-memory ceiling that OOM'd at 1M.
+pub(crate) fn encode_sign(rq: &RabitqQuantizer, residual: &[f32]) -> SignCode {
     let rr = rq.rotate(residual); // P·(x−c)
     let nr = (rr.iter().map(|&v| (v as f64) * (v as f64)).sum::<f64>()).sqrt() as f32;
     if nr == 0.0 {
@@ -144,23 +146,6 @@ impl SymqgSpike {
             }
         }
         SymqgSpike { codes, sign_codes, sign_mode, rot_vec, rq }
-    }
-
-    /// Persistence accessors (T2.1 `ambuild_symqg` reads these to pack the co-located page rows).
-    pub(crate) fn is_sign_mode(&self) -> bool {
-        self.sign_mode
-    }
-    pub(crate) fn rq(&self) -> &RabitqQuantizer {
-        &self.rq
-    }
-    /// Vertex `p`'s co-located neighbours as `(neighbour_node, sign_code)` (sign_mode only).
-    pub(crate) fn sign_codes_of(&self, p: usize) -> &[(usize, SignCode)] {
-        &self.sign_codes[p]
-    }
-    /// Vertex `p`'s ROTATED vector `P·x_p` (stored per-row so the in-PG scan gets exact-dist + q_r in one O(D)
-    /// subtraction, no per-hop rotate).
-    pub(crate) fn rot_vec_of(&self, p: usize) -> &[f32] {
-        &self.rot_vec[p]
     }
 
     /// SymphonyQG traversal (Algorithm 1): pop the min-ESTIMATED candidate, compute its EXACT distance (the
