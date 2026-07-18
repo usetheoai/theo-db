@@ -105,6 +105,77 @@ pub(crate) fn build_lut16(query: &[f32], q: &AqQuantizer) -> Result<Lut16, Strin
     Ok(Lut16 { m, tables, scale, bias: lo })
 }
 
+// ------------------------------------------------------------------------------------------------------------
+// E2 FastScan 1-bit sign kernel (plan symqg-fastscan-1bit T1.1). The SymphonyQG per-neighbour estimate needs the
+// dot `⟨q_r, u⟩` with `u ∈ {−1,+1}^dim`. Reformulated as a LUT16-pshufb scan (RaBitQ FastScan): group 4 sign-dims;
+// the 4-bit sign pattern `p ∈ 0..16` indexes the signed sum `Σ_{b<4} q_r[4g+b]·(bit(p,b)? +1 : −1)`. `m = dim/4`
+// groups reproduce the full dot (up to the int8 requant). REUSES `ah_score_block` unchanged (it is LUT-agnostic).
+// ------------------------------------------------------------------------------------------------------------
+
+/// Build the per-query sign LUT for the FastScan 1-bit estimate. Eligibility (D5, enforced by the scan caller):
+/// `dim % 4 == 0` (4-dim groups) and `dim/4 ≤ 258` (int16-accumulator-safe, see `LUT_MAX`). The `debug_assert`
+/// is the backstop; the caller gates before calling. int8 requant mirrors `build_lut16` (one global affine map).
+pub(crate) fn build_sign_lut16(q_r: &[f32]) -> Result<Lut16, String> {
+    if q_r.is_empty() || !q_r.len().is_multiple_of(4) {
+        return Err(format!(
+            "build_sign_lut16: q_r len {} must be a positive multiple of 4 (fail-fast, Rule 8)",
+            q_r.len()
+        ));
+    }
+    let m = q_r.len() / 4;
+    debug_assert!(m <= 258, "build_sign_lut16: m={m} exceeds the i16-accumulator-safe 258 (gate dim/4<=258)");
+    // All m*16 signed-sum partials, tracking global min/max for the affine requant.
+    let mut partials: Vec<f32> = Vec::with_capacity(m * 16);
+    let mut lo = f32::INFINITY;
+    let mut hi = f32::NEG_INFINITY;
+    for g in 0..m {
+        for p in 0..16u32 {
+            let mut s = 0.0f32;
+            for (b, &v) in q_r[4 * g..4 * g + 4].iter().enumerate() {
+                s += if (p >> b) & 1 == 1 { v } else { -v };
+            }
+            partials.push(s);
+            lo = lo.min(s);
+            hi = hi.max(s);
+        }
+    }
+    let range = (hi - lo).max(f32::MIN_POSITIVE); // guard max==min (degenerate: q_r all zero) — no div-by-zero.
+    let scale = range / LUT_MAX as f32;
+    let inv = LUT_MAX as f32 / range;
+    let tables: Vec<i8> = partials
+        .iter()
+        .map(|&v| (((v - lo) * inv).round() as i32).clamp(0, LUT_MAX) as i8)
+        .collect();
+    Ok(Lut16 { m, tables, scale, bias: lo })
+}
+
+/// FastScan estimate for up to 32 neighbours in one block. `codes` is the block32-nibble layout for the `n`
+/// neighbours (`codes[pair*32 + v]`); `ah_score_block` yields the requantized dot per neighbour, then a cheap
+/// per-neighbour finalize reproduces `estimate_sign`: `est = qc2 + nr² − 2·nr·(dot/w)` (with the same `w==0 ||
+/// nr==0 ⇒ qc2 + nr²` early branch). `nr.len() == w.len() == out.len() == n`.
+pub(crate) fn sign_estimate_block(
+    lut: &Lut16,
+    codes: &[u8],
+    n: usize,
+    nr: &[f32],
+    w: &[f32],
+    qc2: f64,
+    out: &mut [f64],
+) {
+    debug_assert!(nr.len() >= n && w.len() >= n && out.len() >= n);
+    let mut acc = vec![0i32; n];
+    ah_score_block(lut, codes, n, &mut acc);
+    for k in 0..n {
+        let (nrk, wk) = (nr[k] as f64, w[k] as f64);
+        out[k] = if wk == 0.0 || nrk == 0.0 {
+            qc2 + nrk * nrk
+        } else {
+            let dot = lut.dequantize(acc[k]) as f64; // ≈ ⟨q_r, u_k⟩
+            qc2 + nrk * nrk - 2.0 * nrk * (dot / wk)
+        };
+    }
+}
+
 /// The 4-bit code index of subspace `i` from packed code bytes (even → low nibble, odd → high nibble). Mirrors
 /// `AqQuantizer`'s packing exactly so a code encoded there scores here.
 #[inline]
