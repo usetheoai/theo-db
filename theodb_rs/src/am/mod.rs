@@ -22,6 +22,7 @@ mod arrow_cache; // M101 — heap-authoritative in-memory Arrow columnar cache (
 mod cost; // M48 T5.1 — honest amcostestimate visit-ratio (pgvector cost model)
 pub(crate) mod columnar; // M99 — theodb_columnar append-only columnar Table Access Method (registration + column-major + MVCC)
 mod columnar_codec; // M99 Phase C — pure column-major stripe codec (FFI-free, locally unit-tested)
+mod zonemap; // columnar zone-map skip-pruning: pure min/max exclusion test (predicate pushdown consumer)
 pub(crate) mod customscan; // M92 spike — arbitrary-WHERE Custom Scan Provider (pathlist hook + custom node)
 mod fold; // M48 — crash-safe VACUUM fold (meta-pivot, issue #47)
 pub(crate) mod guc; // M34 — theodb_ivfflat.probes scan GUC
