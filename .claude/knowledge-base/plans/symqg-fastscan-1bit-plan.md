@@ -211,11 +211,11 @@ fn build_sign_lut16(q_r: &[f32]) -> Result<Lut16, String>
 
 #### TDD
 ```
-RED:  sign_lut_dequant_within_tol() — build_sign_lut16(q_r); for random 1-bit codes, |lut.dequantize(ah_score_block(...)) − exact ⟨q_r,u⟩| ≤ scale (one requant step). MUST fail before build_sign_lut16 exists.
-RED:  sign_fastscan_matches_estimate_sign() — for 32 random SignCodes, sign_estimate_block estimates match estimate_sign within 2·scale tolerance (rank-order identical on a sorted sample).
-RED:  sign_lut_empty_q_r_errs() — build_sign_lut16(&[]) returns typed Err (fail-fast).
-RED:  sign_fastscan_matches_estimate_sign_mixed_sign_qr() [EC-4] — mixed-sign q_r (so lo<0) still matches estimate_sign within tolerance (the affine map handles negative partials; assert, don't assume — build_lut16's partials are never negative).
-RED:  sign_lut_degenerate_range_all_zero_qr() [EC-6] — build_sign_lut16(&[0.0;128]) is a valid Lut16 (max==min guard) and sign_estimate_block returns qc2+nr² per neighbour.
+RED:  test_sign_lut_dequant_within_tol() — build_sign_lut16(q_r); for random 1-bit codes, |lut.dequantize(ah_score_block(...)) − exact ⟨q_r,u⟩| ≤ scale (one requant step). MUST fail before build_sign_lut16 exists.
+RED:  test_sign_fastscan_matches_estimate_sign() — for 32 random SignCodes, sign_estimate_block estimates match estimate_sign within 2·scale tolerance (rank-order identical on a sorted sample).
+RED:  test_sign_lut_empty_q_r_errs() — build_sign_lut16(&[]) returns typed Err (fail-fast).
+RED:  test_sign_fastscan_matches_estimate_sign_mixed_sign_qr() [EC-4] — mixed-sign q_r (so lo<0) still matches estimate_sign within tolerance (the affine map handles negative partials; assert, don't assume — build_lut16's partials are never negative).
+RED:  test_sign_lut_degenerate_range_all_zero_qr() [EC-6] — build_sign_lut16(&[0.0;128]) is a valid Lut16 (max==min guard) and sign_estimate_block returns qc2+nr² per neighbour.
 RED:  build_sign_lut16 backstop — debug_assert!(m<=258) inside build_sign_lut16 (the D5 dispatch guarantees eligibility; the assert is the belt-and-suspenders backstop).
 GREEN: implement build_sign_lut16 + sign_estimate_block.
 REFACTOR: factor the shared affine-requant with build_lut16 only if it does not couple the AQ and sign paths (DRY vs KISS — duplicate the ~6-line requant if extraction couples them).
@@ -294,11 +294,11 @@ for v in 0..degree:                      # neighbour (block lane)
 
 #### TDD
 ```
-RED:  symqg_row_block32_round_trips() — pack_row(block32) then decode recovers the SAME per-neighbour sign bits + nr/w + ordinals (sentinel-skipped). MUST fail before the layout change.
-RED:  symqg_row_block32_degree64_multiblock() [EC-3] — degree=64 packs 2 block32 blocks; decode recovers all 64 neighbours' sign bits + neighbour_u(v) matches for v in {0,31,32,63}.
-RED:  symqg_row_neighbour_u_reconstructs() [D5] — neighbour_u(v) un-transposes the block32 back to the exact ±1 vector the neighbour was encoded with.
-RED:  symqg_v3_version_gate() — decoding a v2 meta magic/version yields a typed REINDEX Err.
-RED:  symqg_row_bytes_unchanged() — row_bytes(128,32) == 1408 AND row_bytes(128,64) == 2·(block bytes) (the contiguous-packing invariant holds for multi-block).
+RED:  test_symqg_row_block32_round_trips() — pack_row(block32) then decode recovers the SAME per-neighbour sign bits + nr/w + ordinals (sentinel-skipped). MUST fail before the layout change.
+RED:  test_symqg_row_block32_degree64_multiblock() [EC-3] — degree=64 packs 2 block32 blocks; decode recovers all 64 neighbours' sign bits + neighbour_u(v) matches for v in {0,31,32,63}.
+RED:  test_symqg_row_neighbour_u_reconstructs() [D5] — neighbour_u(v) un-transposes the block32 back to the exact ±1 vector the neighbour was encoded with.
+RED:  test_symqg_v3_version_gate() — decoding a v2 meta magic/version yields a typed REINDEX Err.
+RED:  test_symqg_row_bytes_unchanged() — row_bytes(128,32) == 1408 AND row_bytes(128,64) == 2·(block bytes) (the contiguous-packing invariant holds for multi-block).
 GREEN: implement block32 pack/decode (multi-block) + neighbour_u + version bump.
 REFACTOR: None expected (keep the codec flat).
 VERIFY: standalone `rustc --test` on the pure codec (T1.1 pattern — no pgrx link needed).
@@ -356,9 +356,9 @@ theodb_rs/src/am/scan.rs — gather_symqg_candidates: build_sign_lut16 per hop +
 
 #### TDD
 ```
-RED:  symqg_scan_recall_preserved_inpg() — in-PG #[pg_test], 128-dim distinct corpus: FastScan scan returns the SAME top-k as the v2 scalar scan (recall unchanged) within the requant tolerance. MUST fail before wiring.
-RED:  symqg_scan_all_sentinel_block_no_admit() [EC-5] — a vertex whose neighbours are all sentinel (n_real=0) yields no admits, no panic (sign_estimate_block not called).
-RED:  symqg_scan_ineligible_dim_falls_back() [EC-1/2] — a 130-dim (or a >1032-dim) index takes the scalar path and returns correct top-k (no overflow/panic, recall identical to pre-FastScan).
+RED:  test_symqg_scan_recall_preserved_inpg() — in-PG #[pg_test], 128-dim distinct corpus: FastScan scan returns the SAME top-k as the v2 scalar scan (recall unchanged) within the requant tolerance. MUST fail before wiring.
+RED:  test_symqg_scan_all_sentinel_block_no_admit() [EC-5] — a vertex whose neighbours are all sentinel (n_real=0) yields no admits, no panic (sign_estimate_block not called).
+RED:  test_symqg_scan_ineligible_dim_falls_back() [EC-1/2] — a 130-dim (or a >1032-dim) index takes the scalar path and returns correct top-k (no overflow/panic, recall identical to pre-FastScan).
 GREEN: wire the D5 dispatch + FastScan chunk loop + scalar fallback + with_page_item.
 REFACTOR: None expected.
 VERIFY: cargo pgrx test (droplet) symqg_scan_* ; + the psql PG-as-theo integration smoke (CREATE INDEX on vector(128) AND vector(130) + ORDER BY <->).
@@ -420,7 +420,7 @@ CHANGELOG.md — [Unreleased] entry for the FastScan kernel + verdict
 
 #### TDD
 ```
-RED:  (measurement task — no unit test; the A/B harness IS the assertion). The recall gate is the RED: if v3 recall regresses > 1.5 pp vs v2, the slice FAILs and loops back.
+RED:  test_ab_recall_gate() — assert v3_recall_at_matched_ef >= v2_scalar_recall - 0.015 (the recall gate; the A/B harness is the oracle). If v3 recall regresses > 1.5 pp vs v2, the slice FAILs and loops back.
 GREEN: verdict artifact written with real measured numbers.
 REFACTOR: None.
 VERIFY: benchmarks/e2_symqg_inpg.py emits E2AB_DONE; recall within tolerance; verdict cites real numbers.
