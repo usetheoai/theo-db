@@ -13,18 +13,23 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- **Vector research (E2 FastScan, Phase 1/3 — WIP, NOT yet wired/measured): `build_sign_lut16` +
-  `sign_estimate_block` 1-bit sign kernel (`vec/ah.rs`).** The E2 in-PG A/B measured `theodb_symqg` 2.6–3.9×
-  slower than `theodb_hnsw` (`docs/benchmarks/e2-symqg-inpg-verdict.md`); the per-hop bottleneck is the 32 scalar
-  sign-dot estimates. Phase 1 of the FastScan slice (plan `symqg-fastscan-1bit`) adds the batched estimate:
-  `build_sign_lut16(q_r)` reformulates the 1-bit dot `⟨q_r,u⟩` as a LUT16-pshufb scan (4 sign-dims → 16 patterns
-  → signed-sum LUT, int8 requant mirroring `build_lut16`), and `sign_estimate_block` reuses the existing tested
-  `ah_score_block` (Rule 9) to score 32 neighbours in one SIMD pass + a cheap per-neighbour finalize reproducing
-  `estimate_sign`. **Arithmetic proven off-PG** (standalone: dequantized dot within the requant bound for
-  dim ∈ {8,128,768,1032}, incl. the m≤258 eligibility boundary; degenerate q_r=0 → 0; fail-fast on dim%4≠0 /
-  empty; `estimate_sign` parity). **NOT yet wired into the scan and NOT measured in-PG** — Phase 2 (block32 page
-  layout + scan dispatch D5 with scalar fallback for ineligible dims/degrees) + Phase 3 (SIFT1M A/B) pending on a
-  pgrx/droplet environment. **No performance claim is made** (`public-copy.md`, rule 5).
+- **Vector research (E2 FastScan): `theodb_symqg` v3 FastScan 1-bit SIMD sign kernel — full slice, MEASURED
+  (`docs/benchmarks/e2-symqg-fastscan-verdict.md`).** The E2 verdict showed `theodb_symqg` slower than
+  `theodb_hnsw`; the per-hop bottleneck is the 32 scalar sign-dot estimates. This slice (plan `symqg-fastscan-1bit`)
+  batches them: `vec/ah.rs::build_sign_lut16` reformulates the 1-bit dot `⟨q_r,u⟩` as a LUT16-pshufb scan
+  (`⌈dim/4⌉` groups of ≤4 sign-dims → 16 patterns → signed-sum LUT, int8 requant mirroring `build_lut16`), and
+  `sign_estimate_block` reuses the tested `ah_score_block` (Rule 9) to score 32 neighbours in one SIMD pass + a
+  cheap per-neighbour finalize reproducing `estimate_sign`. `page/symqg.rs` v3 packs neighbour sign-codes in
+  block32-nibble transposed layout (`row_bytes` unchanged; `⌈degree/32⌉` blocks). `scan.rs` dispatches per index
+  (**D5**): FastScan when `⌈dim/4⌉ ≤ 258` (int16-safe), else the scalar `estimate_sign` fallback — protecting
+  1536-dim OpenAI embeddings from an int16-accumulator overflow. New GUC `theodb.symqg_fastscan` (default on) is
+  the same-index A/B kill-switch. **VERDICT (SIFT1M, dedicated c-8, warm): gate NOT met.** The FastScan kernel is
+  **correct and recall-neutral** (same-index ablation: recall identical to scalar within 0.1 pp; int8 requant
+  preserves ranking), but its **measured speedup is modest — 1.07–1.22×** (grows with ef), NOT the ~2.8× a naive
+  cross-box v2-vs-v3 comparison suggested (that was the steal→dedicated box change: `theodb_hnsw` itself went
+  287→712 QPS from the box alone). `theodb_hnsw` remains 2.1–3.5× faster at matched recall (0.95–0.994), parity
+  only at 0.999. The estimate is not the sole per-hop bottleneck (decode + heap + page-read dominate — Amdahl; the
+  E1/E2 lesson repeats). **No symqg QPS-win claim is made** (`public-copy.md`, rule 5).
 - **Vector research (E2): `theodb_symqg` index AM — SymphonyQG co-located quantized graph in-PG (own-code,
   clean-room).** New custom index AM `CREATE INDEX … USING theodb_symqg (col vector_l2_ops) WITH (degree_bound=N)`.
   Persists a co-located quantized graph (own-code, clean-room from arXiv:2411.12229 — the NTUITIVE-licensed

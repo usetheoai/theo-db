@@ -307,7 +307,17 @@ unsafe fn gather_symqg_candidates(rel: pg_sys::Relation, query: &[f32], ef: usiz
     };
     let rows_base = meta.rows_base();
     let ef = ef.max(1);
-    let read_row = |ord: u32| -> page::SymqgRow {
+    // D5 eligibility dispatch: the FastScan int16 accumulator is safe only for `m = ⌈dim/4⌉ ≤ 258` (dim ≤ 1032).
+    // Larger dims (e.g. 1536-dim embeddings) fall back to the scalar `estimate_sign` path — always correct. The
+    // `symqg_fastscan` GUC (default on) is the same-index A/B kill-switch that isolates the kernel's effect.
+    let fastscan_ok = crate::am::guc::symqg_fastscan() && dim.div_ceil(4) <= 258;
+    let read_fast = |ord: u32| -> page::SymqgRowFast {
+        match page::read_symqg_row_fast(rel, rows_base, ord, dim, degree) {
+            Ok(r) => r,
+            Err(e) => pg_sys::error!("theodb am scan (row {ord}): {e}"),
+        }
+    };
+    let read_scalar = |ord: u32| -> page::SymqgRow {
         match page::read_symqg_row(rel, rows_base, ord, dim, degree) {
             Ok(r) => r,
             Err(e) => pg_sys::error!("theodb am scan (row {ord}): {e}"),
@@ -319,12 +329,14 @@ unsafe fn gather_symqg_candidates(rel: pg_sys::Relation, query: &[f32], ef: usiz
     let mut results: Vec<(i64, f64)> = Vec::new();
     let entry = meta.entry;
     visited.insert(entry);
-    // Seed the beam with the entry vertex's exact distance (its q_r norm) as its estimate.
-    let erow = read_row(entry);
+    // Seed the beam with the entry vertex's exact distance (its q_r norm) as its estimate. `read_fast` gives `rot`
+    // cheaply in either mode (no `u` reconstruction).
+    let erow = read_fast(entry);
     let eq: Vec<f32> = rot_q.iter().zip(&erow.rot).map(|(&a, &b)| a - b).collect();
     let e_ex: f64 = eq.iter().map(|&x| (x as f64) * (x as f64)).sum();
     cand.push(Reverse((OrdF(e_ex), entry)));
     beamw.push(OrdF(e_ex));
+    let mut out_est = vec![0f64; 32]; // reused FastScan block output buffer
     while let Some(Reverse((OrdF(est_p), p))) = cand.pop() {
         if beamw.len() >= ef {
             if let Some(&OrdF(worst)) = beamw.peek() {
@@ -333,23 +345,61 @@ unsafe fn gather_symqg_candidates(rel: pg_sys::Relation, query: &[f32], ef: usiz
                 }
             }
         }
-        let row = read_row(p);
-        let q_r: Vec<f32> = rot_q.iter().zip(&row.rot).map(|(&a, &b)| a - b).collect();
-        let qc2: f64 = q_r.iter().map(|&x| (x as f64) * (x as f64)).sum(); // ‖q−x_p‖² (rotation-invariant)
         // Record the popped centre's EXACT distance on the sqrt-L2 scale (same as `metric.dist` / pending — the
-        // E1 lesson: never mix squared and sqrt scales in the ORDER BY comparison).
-        results.push((tids[p as usize], qc2.max(0.0).sqrt()));
-        for (ord, code) in &row.neighbours {
-            if !visited.insert(*ord) {
-                continue;
+        // E1 lesson: never mix squared and sqrt scales in the ORDER BY comparison). Then estimate its neighbours.
+        if fastscan_ok {
+            let row = read_fast(p);
+            let q_r: Vec<f32> = rot_q.iter().zip(&row.rot).map(|(&a, &b)| a - b).collect();
+            let qc2: f64 = q_r.iter().map(|&x| (x as f64) * (x as f64)).sum();
+            results.push((tids[p as usize], qc2.max(0.0).sqrt()));
+            let lut = match crate::vec::ah::build_sign_lut16(&q_r) {
+                Ok(l) => l,
+                Err(e) => pg_sys::error!("theodb am scan (sign lut): {e}"),
+            };
+            for c in 0..row.nblocks() {
+                let base = c * 32;
+                crate::vec::ah::sign_estimate_block(
+                    &lut,
+                    row.block_codes(c, dim),
+                    32,
+                    &row.nr[base..base + 32],
+                    &row.w[base..base + 32],
+                    qc2,
+                    &mut out_est,
+                );
+                for v in 0..32 {
+                    let ord = row.ords[base + v];
+                    if ord == page::SENTINEL_ORD || !visited.insert(ord) {
+                        continue;
+                    }
+                    let est = out_est[v].max(0.0);
+                    let admit = beamw.len() < ef || beamw.peek().map(|&OrdF(w)| est < w).unwrap_or(true);
+                    if admit {
+                        cand.push(Reverse((OrdF(est), ord)));
+                        beamw.push(OrdF(est));
+                        if beamw.len() > ef {
+                            beamw.pop();
+                        }
+                    }
+                }
             }
-            let est = crate::ann::symqg_spike::estimate_sign(code, &q_r, qc2).max(0.0);
-            let admit = beamw.len() < ef || beamw.peek().map(|&OrdF(w)| est < w).unwrap_or(true);
-            if admit {
-                cand.push(Reverse((OrdF(est), *ord)));
-                beamw.push(OrdF(est));
-                if beamw.len() > ef {
-                    beamw.pop();
+        } else {
+            let row = read_scalar(p);
+            let q_r: Vec<f32> = rot_q.iter().zip(&row.rot).map(|(&a, &b)| a - b).collect();
+            let qc2: f64 = q_r.iter().map(|&x| (x as f64) * (x as f64)).sum();
+            results.push((tids[p as usize], qc2.max(0.0).sqrt()));
+            for (ord, code) in &row.neighbours {
+                if !visited.insert(*ord) {
+                    continue;
+                }
+                let est = crate::ann::symqg_spike::estimate_sign(code, &q_r, qc2).max(0.0);
+                let admit = beamw.len() < ef || beamw.peek().map(|&OrdF(w)| est < w).unwrap_or(true);
+                if admit {
+                    cand.push(Reverse((OrdF(est), *ord)));
+                    beamw.push(OrdF(est));
+                    if beamw.len() > ef {
+                        beamw.pop();
+                    }
                 }
             }
         }

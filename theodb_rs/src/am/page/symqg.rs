@@ -26,7 +26,7 @@ use super::*;
 use crate::ann::symqg_spike::SignCode;
 
 pub(crate) const SYMQG_MAGIC: u32 = 0x5351_4753; // "SQGS" — Theodb SymphonyQG Structured
-pub(crate) const SYMQG_VERSION: u32 = 2; // v2: contiguous fixed-size rows (v1 was one page/row — page-waste)
+pub(crate) const SYMQG_VERSION: u32 = 3; // v3: block32-nibble signs (FastScan-ready); v2 was per-neighbour bit-packed
 /// Padding ordinal for a vertex with < R real neighbours; skipped at scan.
 pub(crate) const SENTINEL_ORD: u32 = u32::MAX;
 
@@ -98,41 +98,103 @@ impl SymqgMeta {
     }
 }
 
-/// A decoded vertex row: its ROTATED vector P·x (‖q−x‖²=‖rot_q−rot‖², so exact-dist + q_r are one subtraction) + its real (sentinel-skipped) neighbours as `(ordinal, sign_code)`.
+/// A decoded vertex row for the SCALAR path: rot + real (sentinel-skipped) neighbours as `(ordinal, SignCode)`
+/// with `u` reconstructed. The FastScan path uses [`SymqgRowFast`] (no per-neighbour `u`).
 pub(crate) struct SymqgRow {
     pub rot: Vec<f32>,
     pub neighbours: Vec<(u32, SignCode)>,
 }
 
-/// Bytes per row: `dim·4 (rot P·x) + R·4 (ordinals) + R·⌈dim/8⌉ (signs) + R·8 (factors)`.
-#[inline]
-pub(crate) fn row_bytes(dim: usize, degree: usize) -> usize {
-    let sign_bytes = dim.div_ceil(8);
-    dim * 4 + degree * 4 + degree * sign_bytes + degree * 8
+/// A decoded vertex row for the FastScan path: rot + all-`degree` slots `(ord, nr, w)` + the RAW block32-nibble
+/// signs region. No per-neighbour `u` reconstruction — that O(degree·dim) work is exactly what FastScan avoids
+/// (the block32 codes feed `ah_score_block` directly).
+pub(crate) struct SymqgRowFast {
+    pub rot: Vec<f32>,
+    pub ords: Vec<u32>, // `degree` slots (SENTINEL_ORD = padding)
+    pub nr: Vec<f32>,   // `degree`
+    pub w: Vec<f32>,    // `degree`
+    pub signs: Vec<u8>, // block32-nibble region: `nblocks · pairs · 32` bytes
 }
 
-/// Pack one vertex's rot vector + neighbours (already padded to exactly `degree`; sentinel slots use
-/// `(SENTINEL_ORD, zero-code)`) into the row byte layout.
+impl SymqgRowFast {
+    /// The `pairs·32`-byte block32 codes slice for block `c` (neighbours `32c..32c+32`) — feeds `ah_score_block`.
+    #[inline]
+    pub(crate) fn block_codes(&self, c: usize, dim: usize) -> &[u8] {
+        let pairs = sign_groups(dim).1;
+        &self.signs[c * pairs * 32..(c + 1) * pairs * 32]
+    }
+    #[inline]
+    pub(crate) fn nblocks(&self) -> usize {
+        self.ords.len().div_ceil(32)
+    }
+}
+
+/// Bytes per row (UNCHANGED v2→v3: the block32 signs region `nblocks·pairs·32` equals the old `degree·⌈dim/8⌉`
+/// because `⌈⌈dim/4⌉/2⌉ = ⌈dim/8⌉` and `degree` is a multiple of 32): `dim·4 + degree·4 + degree·⌈dim/8⌉ + degree·8`.
+#[inline]
+pub(crate) fn row_bytes(dim: usize, degree: usize) -> usize {
+    dim * 4 + degree * 4 + degree * dim.div_ceil(8) + degree * 8
+}
+
+/// `(m, pairs)` for the block32 sign layout: `m = ⌈dim/4⌉` groups of ≤4 sign-dims; `pairs = ⌈m/2⌉` bytes/neighbour
+/// (two group-nibbles per byte) `== ⌈dim/8⌉`.
+#[inline]
+fn sign_groups(dim: usize) -> (usize, usize) {
+    let m = dim.div_ceil(4);
+    (m, m.div_ceil(2))
+}
+
+/// The 4-bit sign pattern of group `g` for sign vector `u` (bit `b` set iff `u[4g+b] > 0`; out-of-range → 0).
+#[inline]
+fn sign_nibble(u: &[i8], g: usize) -> u8 {
+    let dim = u.len();
+    (0..4).filter(|&b| 4 * g + b < dim).map(|b| if u[4 * g + b] > 0 { 1u8 << b } else { 0 }).sum()
+}
+
+/// Reconstruct neighbour `j`'s sign vector `u ∈ {−1,+1}^dim` from the block32-nibble signs region (scalar path).
+fn decode_neighbour_u(signs: &[u8], j: usize, dim: usize, m: usize, pairs: usize) -> Vec<i8> {
+    let (c, v) = (j / 32, j % 32);
+    let mut u = Vec::with_capacity(dim);
+    for g in 0..m {
+        let byte = signs[c * pairs * 32 + (g / 2) * 32 + v];
+        let nib = if g % 2 == 0 { byte & 0x0F } else { (byte >> 4) & 0x0F };
+        for bpos in 0..4 {
+            if 4 * g + bpos < dim {
+                u.push(if (nib >> bpos) & 1 == 1 { 1i8 } else { -1 });
+            }
+        }
+    }
+    u
+}
+
+/// Pack one vertex's rot vector + neighbours (padded to exactly `degree`; sentinel slots carry a zero SignCode)
+/// into the v3 row layout with block32-nibble signs. `degree` MUST be a multiple of 32 (from
+/// `degree_bound_from_relation`); a partial last dim-group is handled (`sign_nibble` ignores out-of-range dims).
 pub(crate) fn pack_row(rot: &[f32], neighbours: &[(u32, SignCode)], dim: usize, degree: usize) -> Vec<u8> {
     debug_assert_eq!(rot.len(), dim);
     debug_assert_eq!(neighbours.len(), degree);
-    let sign_bytes = dim.div_ceil(8);
+    let (m, pairs) = sign_groups(dim);
+    let nblocks = degree.div_ceil(32);
     let mut b = Vec::with_capacity(row_bytes(dim, degree));
-    for &x in rot { // the stored rotated vector P·x
+    for &x in rot {
         b.extend_from_slice(&x.to_le_bytes());
     }
     for (ord, _) in neighbours {
         b.extend_from_slice(&ord.to_le_bytes());
     }
-    for (_, code) in neighbours {
-        let mut bits = vec![0u8; sign_bytes];
-        for (d, &u) in code.u.iter().enumerate().take(dim) {
-            if u > 0 {
-                bits[d / 8] |= 1u8 << (d % 8); // +1 → bit set, −1 → clear
+    // block32-nibble signs: block c (neighbours 32c..32c+32), pair pr, lane v → one byte (two group-nibbles).
+    let mut signs = vec![0u8; nblocks * pairs * 32];
+    for c in 0..nblocks {
+        for v in 0..32 {
+            let u = &neighbours[c * 32 + v].1.u;
+            for pr in 0..pairs {
+                let lo = sign_nibble(u, 2 * pr);
+                let hi = if 2 * pr + 1 < m { sign_nibble(u, 2 * pr + 1) } else { 0 };
+                signs[c * pairs * 32 + pr * 32 + v] = lo | (hi << 4);
             }
         }
-        b.extend_from_slice(&bits);
     }
+    b.extend_from_slice(&signs);
     for (_, code) in neighbours {
         b.extend_from_slice(&code.nr.to_le_bytes());
         b.extend_from_slice(&code.w.to_le_bytes());
@@ -140,36 +202,55 @@ pub(crate) fn pack_row(rot: &[f32], neighbours: &[(u32, SignCode)], dim: usize, 
     b
 }
 
-/// Decode a row into its rot vector + real neighbours (sentinel slots SKIPPED). Typed `Err` on a short/corrupt
-/// slice (EC-7 — never a panic/OOB).
+/// Decode a row into its rot vector + real neighbours (sentinel slots SKIPPED), reconstructing `u` per neighbour
+/// (SCALAR path). Typed `Err` on a short/corrupt slice (EC-7 — never a panic/OOB).
 pub(crate) fn decode_row(b: &[u8], dim: usize, degree: usize) -> Result<SymqgRow, String> {
     let need = row_bytes(dim, degree);
     if b.len() < need {
         return Err(format!("theodb_symqg: truncated row ({} < {} bytes)", b.len(), need));
     }
-    let sign_bytes = dim.div_ceil(8);
+    let (m, pairs) = sign_groups(dim);
     let rot: Vec<f32> = (0..dim).map(|d| f32::from_le_bytes(b[d * 4..d * 4 + 4].try_into().unwrap())).collect();
     let ord_base = dim * 4;
     let signs_base = ord_base + degree * 4;
-    let factors_base = signs_base + degree * sign_bytes;
+    let factors_base = signs_base + degree * dim.div_ceil(8);
+    let signs = &b[signs_base..factors_base];
     let mut neighbours = Vec::with_capacity(degree);
     for j in 0..degree {
         let ord = u32::from_le_bytes(b[ord_base + j * 4..ord_base + j * 4 + 4].try_into().unwrap());
         if ord == SENTINEL_ORD {
             continue; // padding slot
         }
-        let sbase = signs_base + j * sign_bytes;
-        let mut u = Vec::with_capacity(dim);
-        for d in 0..dim {
-            let bit = (b[sbase + d / 8] >> (d % 8)) & 1;
-            u.push(if bit == 1 { 1i8 } else { -1i8 });
-        }
+        let u = decode_neighbour_u(signs, j, dim, m, pairs);
         let fbase = factors_base + j * 8;
         let nr = f32::from_le_bytes(b[fbase..fbase + 4].try_into().unwrap());
         let w = f32::from_le_bytes(b[fbase + 4..fbase + 8].try_into().unwrap());
         neighbours.push((ord, SignCode { u, nr, w }));
     }
     Ok(SymqgRow { rot, neighbours })
+}
+
+/// Decode a row for the FastScan path: rot + all-`degree` `(ord, nr, w)` + the raw block32 signs region. No `u`
+/// reconstruction. Typed `Err` on a short slice (EC-7).
+pub(crate) fn decode_row_fast(b: &[u8], dim: usize, degree: usize) -> Result<SymqgRowFast, String> {
+    let need = row_bytes(dim, degree);
+    if b.len() < need {
+        return Err(format!("theodb_symqg: truncated row ({} < {} bytes)", b.len(), need));
+    }
+    let rot: Vec<f32> = (0..dim).map(|d| f32::from_le_bytes(b[d * 4..d * 4 + 4].try_into().unwrap())).collect();
+    let ord_base = dim * 4;
+    let signs_base = ord_base + degree * 4;
+    let factors_base = signs_base + degree * dim.div_ceil(8);
+    let ords: Vec<u32> = (0..degree)
+        .map(|j| u32::from_le_bytes(b[ord_base + j * 4..ord_base + j * 4 + 4].try_into().unwrap()))
+        .collect();
+    let (mut nr, mut w) = (Vec::with_capacity(degree), Vec::with_capacity(degree));
+    for j in 0..degree {
+        let fbase = factors_base + j * 8;
+        nr.push(f32::from_le_bytes(b[fbase..fbase + 4].try_into().unwrap()));
+        w.push(f32::from_le_bytes(b[fbase + 4..fbase + 8].try_into().unwrap()));
+    }
+    Ok(SymqgRowFast { rot, ords, nr, w, signs: b[signs_base..factors_base].to_vec() })
 }
 
 /// Write the whole index: meta + rotation codebook + tids + rows (PACKED CONTIGUOUS). `rows[i]` is the packed row
@@ -270,6 +351,19 @@ pub(crate) unsafe fn read_symqg_row(
     decode_row(&bytes, dim, degree)
 }
 
+/// FastScan variant of [`read_symqg_row`]: decodes to [`SymqgRowFast`] (raw block32 signs, no `u` reconstruction).
+pub(crate) unsafe fn read_symqg_row_fast(
+    rel: pg_sys::Relation,
+    rows_base: u32,
+    ord: u32,
+    dim: usize,
+    degree: usize,
+) -> Result<SymqgRowFast, String> {
+    let rb = row_bytes(dim, degree);
+    let bytes = unsafe { read_region_bytes(rel, rows_base, ord as usize * rb, rb) }?;
+    decode_row_fast(&bytes, dim, degree)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -355,5 +449,53 @@ mod tests {
         let (dim, degree) = (16, 32);
         let short = vec![0u8; row_bytes(dim, degree) - 1];
         assert!(decode_row(&short, dim, degree).is_err());
+    }
+
+    #[test]
+    fn symqg_page_row_block32_degree64_multiblock() {
+        // EC-3: degree=64 packs 2 block32 blocks; both blocks' neighbours (incl. lane 63) round-trip.
+        let (dim, degree) = (128usize, 64usize);
+        let rot = vec![0.5f32; dim];
+        let nbrs: Vec<(u32, SignCode)> = (0..degree)
+            .map(|j| (j as u32, code((0..dim).map(|d| if (d + j) % 2 == 0 { 1 } else { -1 }).collect(), j as f32, 1.0)))
+            .collect();
+        let packed = pack_row(&rot, &nbrs, dim, degree);
+        assert_eq!(packed.len(), row_bytes(dim, degree));
+        let got = decode_row(&packed, dim, degree).unwrap();
+        assert_eq!(got.neighbours.len(), degree, "all 64 real neighbours (none sentinel)");
+        // spot-check a neighbour in block 0 (v=31) and block 1 (v=32, v=63) for exact sign round-trip.
+        for &j in &[0usize, 31, 32, 63] {
+            assert_eq!(got.neighbours[j].0, j as u32);
+            assert_eq!(got.neighbours[j].1.u, nbrs[j].1.u, "j={j} sign round-trip across blocks");
+        }
+    }
+
+    #[test]
+    fn symqg_page_fast_decode_matches_scalar() {
+        // decode_row_fast exposes rot + (ord,nr,w) + raw block32 signs; block_codes(c) + neighbour_u agree with
+        // the scalar decode_row's reconstructed u (the two scan paths see the same neighbours).
+        let (dim, degree) = (130usize, 32usize); // dim%4 != 0 exercises the tail group
+        let rot: Vec<f32> = (0..dim).map(|d| d as f32 * 0.25).collect();
+        let mut nbrs: Vec<(u32, SignCode)> = vec![
+            (5, code((0..dim).map(|d| if d % 3 == 0 { 1 } else { -1 }).collect(), 2.0, 1.5)),
+            (77, code((0..dim).map(|d| if d % 5 == 0 { 1 } else { -1 }).collect(), 3.0, 0.9)),
+        ];
+        while nbrs.len() < degree {
+            nbrs.push((SENTINEL_ORD, code(vec![0i8; dim], 0.0, 0.0)));
+        }
+        let packed = pack_row(&rot, &nbrs, dim, degree);
+        let fast = decode_row_fast(&packed, dim, degree).unwrap();
+        let scalar = decode_row(&packed, dim, degree).unwrap();
+        assert_eq!(fast.rot, rot);
+        assert_eq!(fast.ords[0], 5);
+        assert_eq!(fast.ords[1], 77);
+        assert_eq!(fast.ords[2], SENTINEL_ORD);
+        assert_eq!(fast.nblocks(), 1);
+        assert_eq!(fast.block_codes(0, dim).len(), dim.div_ceil(8) * 32);
+        assert!((fast.nr[0] - 2.0).abs() < 1e-6 && (fast.w[1] - 0.9).abs() < 1e-6);
+        // reconstruct u for the two real neighbours from the fast signs, compare to scalar path.
+        let (m, pairs) = sign_groups(dim);
+        assert_eq!(decode_neighbour_u(&fast.signs, 0, dim, m, pairs), scalar.neighbours[0].1.u);
+        assert_eq!(decode_neighbour_u(&fast.signs, 1, dim, m, pairs), scalar.neighbours[1].1.u);
     }
 }

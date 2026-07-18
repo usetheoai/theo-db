@@ -273,7 +273,7 @@
         let pairs = m.div_ceil(2);
         let mut codes = vec![0u8; pairs * 32];
         for (v, u) in us.iter().enumerate() {
-            let nib = |g: usize| -> u8 { (0..4).map(|b| if u[4 * g + b] > 0 { 1u8 << b } else { 0 }).sum() };
+            let nib = |g: usize| -> u8 { (0..4).filter(|&b| 4 * g + b < u.len()).map(|b| if u[4 * g + b] > 0 { 1u8 << b } else { 0 }).sum() };
             for pair in 0..pairs {
                 let lo = nib(2 * pair);
                 let hi = if 2 * pair + 1 < m { nib(2 * pair + 1) } else { 0 };
@@ -290,8 +290,8 @@
     #[pg_test]
     fn test_sign_lut_dequant_within_tol() {
         // build_sign_lut16 + ah_score_block: the dequantized accumulator ≈ exact ⟨q_r,u⟩ within the requant bound.
-        for &dim in &[128usize, 8, 768, 1032] {
-            let m = dim / 4;
+        for &dim in &[128usize, 8, 130, 768, 1032] {
+            let m = dim.div_ceil(4);
             let mut rng = TestRng::new(0xABCD ^ dim as u64);
             let q_r: Vec<f32> = (0..dim).map(|_| rng.next_f32() * 10.0).collect();
             let lut = build_sign_lut16(&q_r).expect("eligible dim");
@@ -340,7 +340,8 @@
     #[pg_test]
     fn test_sign_lut_empty_q_r_errs() {
         assert!(build_sign_lut16(&[]).is_err(), "empty q_r must fail-fast");
-        assert!(build_sign_lut16(&vec![1.0f32; 130]).is_err(), "dim%4!=0 must fail-fast");
+        assert!(build_sign_lut16(&vec![1.0f32; 130]).is_ok(), "dim=130 (m=33) valid via tail group");
+        assert!(build_sign_lut16(&vec![1.0f32; 1536]).is_err(), "dim=1536 (m=384>258) must fail-fast → scalar");
     }
 
     #[pg_test]

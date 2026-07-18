@@ -112,26 +112,32 @@ pub(crate) fn build_lut16(query: &[f32], q: &AqQuantizer) -> Result<Lut16, Strin
 // groups reproduce the full dot (up to the int8 requant). REUSES `ah_score_block` unchanged (it is LUT-agnostic).
 // ------------------------------------------------------------------------------------------------------------
 
-/// Build the per-query sign LUT for the FastScan 1-bit estimate. Eligibility (D5, enforced by the scan caller):
-/// `dim % 4 == 0` (4-dim groups) and `dim/4 ≤ 258` (int16-accumulator-safe, see `LUT_MAX`). The `debug_assert`
-/// is the backstop; the caller gates before calling. int8 requant mirrors `build_lut16` (one global affine map).
+/// Build the per-query sign LUT for the FastScan 1-bit estimate. `m = ⌈dim/4⌉` groups of ≤4 sign-dims (the last
+/// group may be partial — no `dim % 4 == 0` requirement, so any dim is layout-compatible; `⌈⌈dim/4⌉/2⌉ = ⌈dim/8⌉`
+/// keeps `row_bytes` unchanged). Eligibility (D5, gated by the scan caller): `m ≤ 258` (int16-accumulator-safe,
+/// see `LUT_MAX`) — larger dims (e.g. 1536-dim ⇒ m=384) fall back to the scalar `estimate_sign`. Fail-fast `Err`
+/// on empty or `m > 258`. int8 requant mirrors `build_lut16` (one global affine map).
 pub(crate) fn build_sign_lut16(q_r: &[f32]) -> Result<Lut16, String> {
-    if q_r.is_empty() || !q_r.len().is_multiple_of(4) {
+    if q_r.is_empty() {
+        return Err("build_sign_lut16: empty q_r (fail-fast, Rule 8)".to_string());
+    }
+    let dim = q_r.len();
+    let m = dim.div_ceil(4);
+    if m > 258 {
         return Err(format!(
-            "build_sign_lut16: q_r len {} must be a positive multiple of 4 (fail-fast, Rule 8)",
-            q_r.len()
+            "build_sign_lut16: dim {dim} → m {m} exceeds the i16-accumulator-safe 258 (caller must gate; use scalar)"
         ));
     }
-    let m = q_r.len() / 4;
-    debug_assert!(m <= 258, "build_sign_lut16: m={m} exceeds the i16-accumulator-safe 258 (gate dim/4<=258)");
-    // All m*16 signed-sum partials, tracking global min/max for the affine requant.
+    // All m*16 signed-sum partials (subspace-major), tracking global min/max for the affine requant. The last
+    // group sums only its real dims (`end`); a partial group's phantom pattern-bits are 0 at encode and ignored.
     let mut partials: Vec<f32> = Vec::with_capacity(m * 16);
     let mut lo = f32::INFINITY;
     let mut hi = f32::NEG_INFINITY;
     for g in 0..m {
+        let end = ((g + 1) * 4).min(dim);
         for p in 0..16u32 {
             let mut s = 0.0f32;
-            for (b, &v) in q_r[4 * g..4 * g + 4].iter().enumerate() {
+            for (b, &v) in q_r[g * 4..end].iter().enumerate() {
                 s += if (p >> b) & 1 == 1 { v } else { -v };
             }
             partials.push(s);
