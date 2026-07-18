@@ -12,6 +12,9 @@
 #![allow(non_snake_case)]
 
 use super::df_executor::{run_columnar_aggs, AggSpec};
+use super::columnar_codec::MinMaxKind;
+use super::zonemap::{ZoneOp, ZonePredicate};
+use pgrx::datum::FromDatum;
 use pgrx::{pg_guard, pg_sys, PgBox, PgList};
 use pgrx::{GucContext, GucFlags, GucRegistry, GucSetting};
 use std::ffi::{c_int, c_void, CStr};
@@ -95,20 +98,120 @@ struct ParsedAgg {
 /// Admission guard: is this a simple `count(*)` / `sum(float8)` aggregate (no GROUP BY/HAVING/WHERE/DISTINCT/window)
 /// over a single base relation that is EITHER a columnar table (mode 0 — decode stripes) OR a heap table with a
 /// usable Arrow cache (mode 1 — M101 HTAP)? Returns (mode, base RTE index, parsed aggs), or None (→ native plan).
+/// Commute a `ZoneOp` for a `Const OP Var` clause normalised to `Var OP' Const`.
+fn flip_op(op: ZoneOp) -> ZoneOp {
+    match op {
+        ZoneOp::Lt => ZoneOp::Gt,
+        ZoneOp::Le => ZoneOp::Ge,
+        ZoneOp::Eq => ZoneOp::Eq,
+        ZoneOp::Ge => ZoneOp::Le,
+        ZoneOp::Gt => ZoneOp::Lt,
+    }
+}
+
+/// Encode a `Const`'s Datum to `const_bits` in the column's `MinMaxKind` domain — MUST match `compute_minmax`
+/// (ints as `i64 as u64`, floats as `f64::to_bits`). `None` on a domain mismatch (fail-safe → clause not pushed).
+unsafe fn encode_const_bits(datum: pg_sys::Datum, kind: MinMaxKind) -> Option<u64> {
+    Some(match kind {
+        MinMaxKind::I2 => (i16::from_datum(datum, false)? as i64) as u64,
+        MinMaxKind::I4 => (i32::from_datum(datum, false)? as i64) as u64,
+        MinMaxKind::I8 => (i64::from_datum(datum, false)?) as u64,
+        MinMaxKind::Bool => (bool::from_datum(datum, false)? as i64) as u64,
+        MinMaxKind::F4 => (f32::from_datum(datum, false)? as f64).to_bits(),
+        MinMaxKind::F8 => f64::from_datum(datum, false)?.to_bits(),
+        MinMaxKind::None => return None,
+    })
+}
+
+/// Extract a pushable zone-map predicate from a base-rel qual (ADR D2/D5): `Var(col) <op> Const` where the operator
+/// is the column-type-NATIVE btree comparison (strategy 1-5, both input types == the column type) and the const is
+/// the same type. Returns `None` for ANY other shape (function, OR, cross-type, two-Var, NULL const, non-min/max-able
+/// column) → the caller MUST fall back to the native plan so the WHERE is applied correctly.
+unsafe fn extract_zone_predicate(clause: *mut pg_sys::Node, relid: i32) -> Option<ZonePredicate> {
+    if clause.is_null() || (*clause).type_ != pg_sys::NodeTag::T_OpExpr {
+        return None;
+    }
+    let op = clause as *mut pg_sys::OpExpr;
+    let args = PgList::<pg_sys::Node>::from_pg((*op).args);
+    if args.len() != 2 {
+        return None;
+    }
+    let (a0, a1) = (args.get_ptr(0)?, args.get_ptr(1)?);
+    let (var, konst, flipped) = if (*a0).type_ == pg_sys::NodeTag::T_Var && (*a1).type_ == pg_sys::NodeTag::T_Const {
+        (a0 as *mut pg_sys::Var, a1 as *mut pg_sys::Const, false)
+    } else if (*a0).type_ == pg_sys::NodeTag::T_Const && (*a1).type_ == pg_sys::NodeTag::T_Var {
+        (a1 as *mut pg_sys::Var, a0 as *mut pg_sys::Const, true)
+    } else {
+        return None; // two-Var / function / etc.
+    };
+    if (*var).varno as i32 != relid || (*konst).constisnull {
+        return None;
+    }
+    let vartype = (*var).vartype;
+    if (*konst).consttype != vartype {
+        return None; // cross-type (D5): the const must be the column type
+    }
+    let kind = super::columnar::minmax_kind_of(vartype.to_u32());
+    if kind == MinMaxKind::None {
+        return None;
+    }
+    // The operator's btree strategy in the column type's default opfamily (D5 — no hardcoded OIDs).
+    let opclass = pg_sys::GetDefaultOpClass(vartype, pg_sys::BTREE_AM_OID);
+    if opclass == pg_sys::InvalidOid {
+        return None;
+    }
+    let opfamily = pg_sys::get_opclass_family(opclass);
+    if !pg_sys::op_in_opfamily((*op).opno, opfamily) {
+        return None;
+    }
+    let (mut strategy, mut lt, mut rt): (c_int, pg_sys::Oid, pg_sys::Oid) =
+        (0, pg_sys::InvalidOid, pg_sys::InvalidOid);
+    pg_sys::get_op_opfamily_properties((*op).opno, opfamily, false, &mut strategy, &mut lt, &mut rt);
+    if lt != vartype || rt != vartype {
+        return None; // not the same-type native comparison (D5)
+    }
+    let base = match strategy {
+        1 => ZoneOp::Lt,
+        2 => ZoneOp::Le,
+        3 => ZoneOp::Eq,
+        4 => ZoneOp::Ge,
+        5 => ZoneOp::Gt,
+        _ => return None,
+    };
+    let col = ((*var).varattno as i32).checked_sub(1)?; // 1-based AttrNumber → 0-based col; system cols (≤0) rejected
+    Some(ZonePredicate {
+        col: col as usize,
+        op: if flipped { flip_op(base) } else { base },
+        const_bits: encode_const_bits((*konst).constvalue, kind)?,
+    })
+}
+
+/// Extract ALL of the base rel's WHERE quals as pushable predicates. Returns `None` if ANY qual is NOT pushable —
+/// the DataFusion filter can only represent `col <op> const`, so an un-pushable qual means the CustomScan cannot
+/// apply the full WHERE and MUST decline (the native plan then applies it correctly).
+unsafe fn extract_all_predicates(input_rel: *mut pg_sys::RelOptInfo, relid: i32) -> Option<Vec<ZonePredicate>> {
+    let ris = PgList::<pg_sys::RestrictInfo>::from_pg((*input_rel).baserestrictinfo);
+    let mut preds = Vec::with_capacity(ris.len());
+    for i in 0..ris.len() {
+        let ri = ris.get_ptr(i)?;
+        preds.push(extract_zone_predicate((*ri).clause as *mut pg_sys::Node, relid)?);
+    }
+    Some(preds)
+}
+
 unsafe fn admit(
     root: *mut pg_sys::PlannerInfo,
     input_rel: *mut pg_sys::RelOptInfo,
     output_rel: *mut pg_sys::RelOptInfo,
-) -> Option<(i32, i32, Vec<ParsedAgg>)> {
+) -> Option<(i32, i32, Vec<ParsedAgg>, Vec<ZonePredicate>)> {
     let parse = (*root).parse;
     if !(*parse).groupClause.is_null()
         || !(*parse).groupingSets.is_null()
         || !(*parse).havingQual.is_null()
         || !(*parse).distinctClause.is_null()
         || (*parse).hasWindowFuncs
-        || !(*parse).jointree.is_null() && !(*(*parse).jointree).quals.is_null()
     {
-        return None; // GROUP BY / HAVING / DISTINCT / window / WHERE → not slice 1
+        return None; // GROUP BY / HAVING / DISTINCT / window → not slice 1 (WHERE is now handled via zone-map pushdown)
     }
     if (*input_rel).reloptkind != pg_sys::RelOptKind::RELOPT_BASEREL {
         return None;
@@ -178,7 +281,14 @@ unsafe fn admit(
     let amoid = columnar_amoid();
     let is_columnar = amoid != pg_sys::InvalidOid && pg_sys::get_rel_relam((*rte).relid) == amoid;
     if is_columnar {
-        return Some((0, relid, aggs));
+        // WHERE → zone-map predicates. ALL quals must be pushable (`col <op> const`), else decline so the native
+        // plan applies the WHERE correctly (the DataFusion filter can only represent pushable clauses).
+        let preds = extract_all_predicates(input_rel, relid)?;
+        return Some((0, relid, aggs, preds));
+    }
+    // Heap (M101 cache) path does NOT filter → decline any WHERE.
+    if !(*input_rel).baserestrictinfo.is_null() {
+        return None;
     }
     // Heap: admissible IFF this backend has a cache covering the summed columns (the exec-time get_or_build then
     // does the generation check + snapshot-correct rebuild). Resolve the sum column names via the syscache.
@@ -197,7 +307,7 @@ unsafe fn admit(
     if sum_names.len() == aggs.iter().filter(|a| a.kind == 1).count()
         && super::arrow_cache::has_cached_columns((*rte).relid.to_u32(), &sum_names)
     {
-        return Some((1, relid, aggs));
+        return Some((1, relid, aggs, Vec::new()));
     }
     None
 }
@@ -217,16 +327,26 @@ unsafe extern "C-unwind" fn upper_paths_hook(
     if !ENABLE_COLUMNAR_AGG.get() || stage != pg_sys::UpperRelationKind::UPPERREL_GROUP_AGG {
         return;
     }
-    let Some((mode, relid, aggs)) = admit(root, input_rel, output_rel) else {
+    let Some((mode, relid, aggs, preds)) = admit(root, input_rel, output_rel) else {
         return; // fail-safe: any unsupported shape → native plan
     };
 
-    // Encode the plan in custom_private as an IntList [mode, relid, kind0, attno0, kind1, attno1, ...].
+    // Encode the plan in custom_private as an IntList:
+    //   [mode, relid, nagg, (kind,attno)×nagg, npred, (col, op, cbits_hi, cbits_lo)×npred].
+    // u64 const_bits is split into two i32 (List holds C `int`); reassembled at exec (begin_custom_scan).
     let mut priv_list: *mut pg_sys::List = pg_sys::lappend_int(std::ptr::null_mut(), mode);
     priv_list = pg_sys::lappend_int(priv_list, relid);
+    priv_list = pg_sys::lappend_int(priv_list, aggs.len() as i32);
     for a in &aggs {
         priv_list = pg_sys::lappend_int(priv_list, a.kind);
         priv_list = pg_sys::lappend_int(priv_list, a.attno);
+    }
+    priv_list = pg_sys::lappend_int(priv_list, preds.len() as i32);
+    for p in &preds {
+        priv_list = pg_sys::lappend_int(priv_list, p.col as i32);
+        priv_list = pg_sys::lappend_int(priv_list, p.op as i32);
+        priv_list = pg_sys::lappend_int(priv_list, (p.const_bits >> 32) as i32);
+        priv_list = pg_sys::lappend_int(priv_list, (p.const_bits & 0xFFFF_FFFF) as i32);
     }
 
     let mut cpath = PgBox::<pg_sys::CustomPath>::alloc_node(pg_sys::NodeTag::T_CustomPath);
@@ -310,10 +430,11 @@ unsafe extern "C-unwind" fn begin_custom_scan(
     let relid = (*rte).relid;
 
     let res = (|| -> Result<Vec<(pg_sys::Datum, bool)>, String> {
-        // Parse specs (kind, attno), resolving the sum column names via the syscache (`get_attname`).
-        let mut specs = Vec::new();
-        let mut i = 2;
-        while i + 1 < n {
+        // Parse the IntList: [mode, relid, nagg, (kind,attno)×nagg, npred, (col,op,cbits_hi,cbits_lo)×npred].
+        let nagg = pg_sys::list_nth_int(priv_list, 2) as usize;
+        let mut specs = Vec::with_capacity(nagg);
+        let mut i = 3;
+        for _ in 0..nagg {
             let kind = pg_sys::list_nth_int(priv_list, i);
             let attno = pg_sys::list_nth_int(priv_list, i + 1);
             i += 2;
@@ -326,13 +447,32 @@ unsafe extern "C-unwind" fn begin_custom_scan(
                 _ => return Err(format!("columnar_agg: bad agg kind {kind}")),
             }
         }
+        let npred = if i < n { pg_sys::list_nth_int(priv_list, i) as usize } else { 0 };
+        i += 1;
+        let mut preds = Vec::with_capacity(npred);
+        for _ in 0..npred {
+            let col = pg_sys::list_nth_int(priv_list, i) as usize;
+            let opn = pg_sys::list_nth_int(priv_list, i + 1);
+            let hi = pg_sys::list_nth_int(priv_list, i + 2) as u32 as u64;
+            let lo = pg_sys::list_nth_int(priv_list, i + 3) as u32 as u64;
+            i += 4;
+            let op = match opn {
+                0 => ZoneOp::Lt,
+                1 => ZoneOp::Le,
+                2 => ZoneOp::Eq,
+                3 => ZoneOp::Ge,
+                4 => ZoneOp::Gt,
+                _ => return Err(format!("columnar_agg: bad zone op {opn}")),
+            };
+            preds.push(ZonePredicate { col, op, const_bits: (hi << 32) | lo });
+        }
         if mode == 1 {
             // M101 HTAP: aggregate the heap-authoritative Arrow cache (rebuilt snapshot-correctly if invalidated).
             super::arrow_cache::run_cache_aggs(relid, &specs)
         } else {
-            // M100: decode the columnar table's stripes.
+            // M100: decode the columnar table's stripes, with zone-map skip-pruning (predicates + GUC kill-switch).
             let rel = pg_sys::relation_open(relid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
-            let r = run_columnar_aggs(rel, &specs);
+            let r = run_columnar_aggs(rel, &specs, &preds, super::guc::columnar_zonemap_skip());
             pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
             r
         }

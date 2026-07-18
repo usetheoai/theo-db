@@ -471,7 +471,14 @@ unsafe fn coldesc(tupdesc: pg_sys::TupleDesc, i: usize) -> Result<ColDesc, Strin
     } else {
         return Err(format!("theodb_columnar: unsupported attlen {attlen} at column {i} (cstring/expanded)"));
     };
-    let mm = match typid {
+    let mm = minmax_kind_of(typid);
+    Ok(ColDesc { attlen_fixed, byval, mm, typid })
+}
+
+/// The min/max comparison domain for a Postgres type OID (shared by `coldesc` on the write/decode side and by the
+/// zone-map predicate extraction on the plan side — DRY). `None` for any type without a cheap native order.
+pub(crate) fn minmax_kind_of(typid: u32) -> codec::MinMaxKind {
+    match typid {
         16 => codec::MinMaxKind::Bool, // BOOLOID
         20 => codec::MinMaxKind::I8,   // INT8OID
         21 => codec::MinMaxKind::I2,   // INT2OID
@@ -479,8 +486,7 @@ unsafe fn coldesc(tupdesc: pg_sys::TupleDesc, i: usize) -> Result<ColDesc, Strin
         700 => codec::MinMaxKind::F4,  // FLOAT4OID
         701 => codec::MinMaxKind::F8,  // FLOAT8OID
         _ => codec::MinMaxKind::None,
-    };
-    Ok(ColDesc { attlen_fixed, byval, mm, typid })
+    }
 }
 
 /// Extract the storable value bytes of a NON-NULL datum (caller checked `isnull` first — detoasting a null-garbage
@@ -667,6 +673,8 @@ pub(crate) unsafe fn column_index(rel: pg_sys::Relation, name: &str) -> Option<u
 pub(crate) unsafe fn decode_columns(
     rel: pg_sys::Relation,
     projection: Option<&[usize]>,
+    predicates: &[super::zonemap::ZonePredicate],
+    skip: bool,
 ) -> Result<Vec<(String, u32, Vec<Option<Vec<u8>>>)>, String> {
     let tupdesc = (*rel).rd_att;
     let natts = (*tupdesc).natts as usize;
@@ -690,6 +698,7 @@ pub(crate) unsafe fn decode_columns(
 
     // Per WANTED column, its accumulated values (indexed positionally with `wanted`).
     let mut columns: Vec<Vec<Option<Vec<u8>>>> = vec![Vec::new(); wanted.len()];
+    let (mut skipped_cg, mut total_cg) = (0usize, 0usize); // zone-map skip-ratio metric (wiring pillar c)
     for sm in read_visible_stripes((*rel).rd_id)? {
         let hdr_items = super::page::read_all_page_items(rel, sm.header_block)?;
         let hdr_bytes = hdr_items.into_iter().next().ok_or("theodb_columnar: stripe header page empty")?;
@@ -701,6 +710,23 @@ pub(crate) unsafe fn decode_columns(
         let entries = codec::deserialize_directory(&dir_bytes, header.n_chunk_groups as usize * natts)?;
         for cg in 0..header.n_chunk_groups as usize {
             let cg_rows = entries[cg * natts].row_count as usize;
+            total_cg += 1;
+            // Zone-map skip-pruning (ADR D3): skip the WHOLE chunk group (all wanted columns together → the value
+            // vectors stay aligned) when any pushed predicate's min/max PROVES no row can match. Fail-safe —
+            // `p.col < natts` guards OOB (EC-2), `chunk_can_match` returns "must scan" on `has_minmax=false`. The
+            // skip is an admission filter: surviving over-admitted rows are still filtered by the executor's real
+            // predicate (the final authority), so the aggregate is byte-identical to skip-off.
+            if skip
+                && predicates.iter().any(|p| {
+                    p.col < natts && {
+                        let e = &entries[cg * natts + p.col];
+                        !super::zonemap::chunk_can_match(e.has_minmax, e.min_bits, e.max_bits, cols[p.col].mm, p)
+                    }
+                })
+            {
+                skipped_cg += 1;
+                continue;
+            }
             for (wi, &col) in wanted.iter().enumerate() {
                 let e = &entries[cg * natts + col];
                 let comp = super::page::read_chunked(rel, e.first_block, e.n_pages)?;
@@ -711,6 +737,12 @@ pub(crate) unsafe fn decode_columns(
             }
         }
     }
+    // Zone-map skip-ratio (wiring pillar c, opt-in THEODB_SCAN_PROFILE=1): how many chunk groups the predicate
+    // pruned. `skipped/total` is the A/B evidence that the min/max directory is being consumed (0 when skip off).
+    if skip && !predicates.is_empty() && std::env::var("THEODB_SCAN_PROFILE").is_ok_and(|v| v == "1") {
+        pgrx::log!("theodb_columnar zonemap: skipped {skipped_cg}/{total_cg} chunk groups");
+    }
+
     // Same-xact pending rows (heap-tuple bytes) → deform ALL atts (heap_deform is all-or-nothing), keep the wanted.
     let oid = (*rel).rd_id.to_u32();
     let pending: Option<Vec<Vec<u8>>> = WRITE_STATES.with(|w| w.borrow().get(&oid).map(|p| p.rows.clone()));

@@ -7,10 +7,8 @@
 //! Encoding contract (MUST match `compute_minmax`): integer kinds (I2/I4/I8/Bool) store the value as `i64`, bits
 //! = `i64 as u64`; float kinds (F4/F8) widen to `f64`, bits = `f64::to_bits`. `ZonePredicate::const_bits` is
 //! encoded by `admit` in the SAME domain as the column's `MinMaxKind` (ADR D5 — same-domain-or-fallback).
-//!
-//! Phase 1 of the slice: the pure test is proven off-PG; its production caller (`decode_columns` skip guard +
-//! `admit` extraction) lands in Phase 2. `allow(dead_code)` until then (the `ah.rs` precedent).
-#![allow(dead_code)]
+//! Wired: `columnar_agg::extract_zone_predicate` (plan-time) → `decode_columns` skip guard (`chunk_can_match`) +
+//! the DataFusion filter (`df_executor::build_filter_expr`, the final authority).
 use super::columnar_codec::MinMaxKind;
 
 /// A pushed btree comparison, reduced to the column's min/max domain (ADR D2/D5). `Var(col) <op> const`.

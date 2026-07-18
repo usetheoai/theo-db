@@ -13,17 +13,22 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- **Columnar/HTAP (zone-map skip-pruning, Phase 1/3 — WIP, pure kernel proven off-PG): `am/zonemap.rs`
-  `chunk_can_match`.** The `theodb_columnar` TAM already WRITES a per-`(chunk_group, column)` min/max zone-map
-  (`columnar_codec::compute_minmax`) but never reads it to skip anything — this slice (plan
-  `columnar-zonemap-skip-pruning`) builds the missing consumer. Phase 1 adds the pure, `pg_sys`-free predicate
-  test: `ZonePredicate {col, op, const_bits}` + `chunk_can_match(has_minmax, min_bits, max_bits, kind, pred)` that
-  returns "skip" ONLY when the zone-map PROVES no row can match (fail-safe: `has_minmax=false` / `kind=None` / NaN
-  → "must scan"). Encoding matches `compute_minmax` exactly (ints as i64 two's-complement bits, floats as
-  `f64::to_bits`). **Proven off-PG** (standalone `rustc --test`, 6 tests): below/above/eq range with boundary,
-  fail-safe, negative-i64 two's-complement order (EC-3), NULL/NaN chunk (EC-4). **NOT yet wired** — Phase 2
-  (`admit` predicate extraction via btree strategy + `decode_columns` skip guard + `theodb.columnar_zonemap_skip`
-  GUC) + Phase 3 (in-PG byte-identical A/B) pending on a droplet. **No performance claim** (`public-copy.md`).
+- **Columnar/HTAP: zone-map skip-pruning (predicate pushdown consumer) — full slice, MEASURED
+  (`docs/benchmarks/columnar-zonemap-verdict.md`).** The `theodb_columnar` TAM already WROTE a per-`(chunk_group,
+  column)` min/max zone-map (`compute_minmax`) but never read it — this slice (plan `columnar-zonemap-skip-pruning`)
+  builds the missing consumer, closing the M99/M100/M103 "where pruning unproven" gap. The M100 planner
+  `CustomScan` now **admits a `WHERE`**: `columnar_agg::extract_zone_predicate` extracts `col <op> const` clauses
+  (operator resolved by **btree strategy number**, const in the column's SAME native type — ADR D5
+  same-domain-or-fallback; any un-pushable qual → native plan), carried plan-time→exec in `custom_private`. A
+  **DataFusion Filter** (`df_executor::build_filter_expr`) applies the predicate (the final authority — ADR D3), and
+  `decode_columns` **skips** chunk groups whose min/max PROVE no row can match (`am/zonemap.rs::chunk_can_match`,
+  pure + off-PG-proven; fail-safe on `has_minmax=false`). New GUC `theodb.columnar_zonemap_skip` (default on) +
+  `THEODB_SCAN_PROFILE` skip-ratio metric. **VERDICT (1M clustered, 10%-selective, c-8, warm): GOAL MET.**
+  Byte-identical to full decode (incl. the partial-overlap chunk group where the Filter drops non-matching
+  survivors); skips **89/100 chunk groups** (decodes 11% ≤ the 25% target) for a **measured 7.29× lower latency**
+  (19.3 ms vs 140.8 ms). A real measured win on the columnar/lakehouse axis (not the vector-QPS ceiling). Honest
+  caveat: the skip ratio tracks selectivity × clustering — unsorted columns prune little; the 7.29× is on a
+  clustered column, not unconditional (`public-copy.md`).
 - **Vector research (E2 FastScan): `theodb_symqg` v3 FastScan 1-bit SIMD sign kernel — full slice, MEASURED
   (`docs/benchmarks/e2-symqg-fastscan-verdict.md`).** The E2 verdict showed `theodb_symqg` slower than
   `theodb_hnsw`; the per-hop bottleneck is the 32 scalar sign-dot estimates. This slice (plan `symqg-fastscan-1bit`)

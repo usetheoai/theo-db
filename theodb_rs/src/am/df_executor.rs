@@ -18,7 +18,8 @@ use datafusion::arrow::datatypes::{DataType, Field, Schema};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::error::DataFusionError;
 use datafusion::functions_aggregate::expr_fn::{count, sum};
-use datafusion::prelude::{col, lit, SessionContext};
+use datafusion::prelude::{col, lit, Expr, SessionContext};
+use std::ffi::CStr;
 use pgrx::prelude::*;
 use std::sync::Arc;
 
@@ -108,9 +109,16 @@ pub(super) enum AggSpec {
     SumFloat8(String),
 }
 
-/// Decode the columnar table's projected columns into one Arrow `RecordBatch` (projection pushdown). Always projects
-/// ≥ 1 column so `count(*)` has a row count.
-unsafe fn decode_to_batch(rel: pg_sys::Relation, sum_cols: &[String]) -> Result<RecordBatch, String> {
+/// Decode the columnar table's projected columns into one Arrow `RecordBatch` (projection pushdown). Projects the
+/// `sum` columns PLUS every zone-map predicate's column (so the DataFusion Filter can re-check it — ADR D3), and
+/// always ≥ 1 column so `count(*)` has a row count. Passes the predicates + `skip` to `decode_columns` so the
+/// min/max zone-map can skip proven-non-matching chunk groups.
+unsafe fn decode_to_batch(
+    rel: pg_sys::Relation,
+    sum_cols: &[String],
+    predicates: &[super::zonemap::ZonePredicate],
+    skip: bool,
+) -> Result<RecordBatch, String> {
     let mut proj: Vec<usize> = Vec::new();
     for name in sum_cols {
         let idx = super::columnar::column_index(rel, name)
@@ -119,25 +127,76 @@ unsafe fn decode_to_batch(rel: pg_sys::Relation, sum_cols: &[String]) -> Result<
             proj.push(idx);
         }
     }
+    for p in predicates {
+        if !proj.contains(&p.col) {
+            proj.push(p.col); // the filter column MUST be decoded so the DataFusion Filter can re-check it (D3)
+        }
+    }
     if proj.is_empty() {
         proj.push(0); // count(*) needs a column to establish the row count
     }
-    let cols = super::columnar::decode_columns(rel, Some(&proj))?;
+    let cols = super::columnar::decode_columns(rel, Some(&proj), predicates, skip)?;
     let (schema, arrays) = build_arrow(&cols)?;
     RecordBatch::try_new(Arc::new(schema), arrays).map_err(|e| format!("df_executor: arrow batch: {e}"))
+}
+
+/// Build the DataFusion filter `Expr` for the pushed zone-map predicates (a conjunction of `col <op> const`), the
+/// FINAL authority over rows in surviving chunk groups (ADR D3 — the skip is only an admission filter). `col` is
+/// resolved to its name via the tupdesc; the literal is typed to the column's `MinMaxKind` (matching `build_arrow`).
+unsafe fn build_filter_expr(rel: pg_sys::Relation, predicates: &[super::zonemap::ZonePredicate]) -> Option<Expr> {
+    use super::columnar_codec::MinMaxKind;
+    use super::zonemap::ZoneOp;
+    let tupdesc = (*rel).rd_att;
+    let natts = (*tupdesc).natts as usize;
+    let mut acc: Option<Expr> = None;
+    for p in predicates {
+        if p.col >= natts {
+            continue; // fail-safe (EC-2): unknown column → do not build a filter term on it
+        }
+        let att = (*tupdesc).attrs.as_ptr().add(p.col);
+        let name = CStr::from_ptr((*att).attname.data.as_ptr()).to_string_lossy().into_owned();
+        let c = col(name.as_str());
+        let b = p.const_bits;
+        let val = match super::columnar::minmax_kind_of((*att).atttypid.to_u32()) {
+            MinMaxKind::I2 => lit(b as i64 as i16),
+            MinMaxKind::I4 => lit(b as i64 as i32),
+            MinMaxKind::I8 => lit(b as i64),
+            MinMaxKind::Bool => lit(b != 0),
+            MinMaxKind::F4 => lit(f64::from_bits(b) as f32),
+            MinMaxKind::F8 => lit(f64::from_bits(b)),
+            MinMaxKind::None => continue, // not min/max-able → cannot have been pushed
+        };
+        let e = match p.op {
+            ZoneOp::Lt => c.lt(val),
+            ZoneOp::Le => c.lt_eq(val),
+            ZoneOp::Eq => c.eq(val),
+            ZoneOp::Ge => c.gt_eq(val),
+            ZoneOp::Gt => c.gt(val),
+        };
+        acc = Some(match acc {
+            Some(prev) => prev.and(e),
+            None => e,
+        });
+    }
+    acc
 }
 
 /// Run the aggregates over the columnar table via a vectorized DataFusion plan under `HeldInterrupts`; return one
 /// `(Datum, is_null)` per agg, in `aggs` order, ready to store in a `TupleTableSlot`. `count(*)`→`int8` Datum;
 /// `sum(float8)`→`float8` Datum. This is the executor the planner `CustomScan` (Phase C) drives at exec time.
+/// `predicates`/`skip`: the zone-map pushdown — the batch is filtered by the predicate (D3 final authority) and the
+/// decode skips proven-non-matching chunk groups.
 pub(super) unsafe fn run_columnar_aggs(
     rel: pg_sys::Relation,
     aggs: &[AggSpec],
+    predicates: &[super::zonemap::ZonePredicate],
+    skip: bool,
 ) -> Result<Vec<(pg_sys::Datum, bool)>, String> {
     let sum_cols: Vec<String> =
         aggs.iter().filter_map(|a| if let AggSpec::SumFloat8(n) = a { Some(n.clone()) } else { None }).collect();
-    let batch = decode_to_batch(rel, &sum_cols)?;
-    run_aggs_on_batch(batch, aggs)
+    let batch = decode_to_batch(rel, &sum_cols, predicates, skip)?;
+    let filter = build_filter_expr(rel, predicates);
+    run_aggs_on_batch(batch, aggs, filter)
 }
 
 /// Run the aggregates over an already-built Arrow `RecordBatch` via a vectorized DataFusion plan under
@@ -146,6 +205,7 @@ pub(super) unsafe fn run_columnar_aggs(
 pub(super) unsafe fn run_aggs_on_batch(
     batch: RecordBatch,
     aggs: &[AggSpec],
+    filter: Option<Expr>,
 ) -> Result<Vec<(pg_sys::Datum, bool)>, String> {
     let mut exprs = Vec::with_capacity(aggs.len());
     for (i, a) in aggs.iter().enumerate() {
@@ -174,7 +234,13 @@ pub(super) unsafe fn run_aggs_on_batch(
             .build_arc()?;
         let config = SessionConfig::new().with_target_partitions(1);
         let ctx = SessionContext::new_with_config_rt(config, runtime);
-        ctx.read_batch(batch)?.aggregate(vec![], exprs)?.collect().await
+        let df = ctx.read_batch(batch)?;
+        // Zone-map predicate as the FINAL authority over surviving rows (D3): filter BEFORE aggregating.
+        let df = match filter {
+            Some(f) => df.filter(f)?,
+            None => df,
+        };
+        df.aggregate(vec![], exprs)?.collect().await
     });
     drop(held);
     drop(rt);
@@ -207,7 +273,7 @@ pub(super) unsafe fn run_aggs_on_batch(
 /// Run `count(*)`, `sum(<num_col>)` over the columnar table and format `count=N;sum=X` (Phase A/B test driver — the
 /// planner-integrated automatic path is Phase C `columnar_agg.rs`).
 unsafe fn run_columnar_agg(rel: pg_sys::Relation, num_col: &str) -> Result<String, String> {
-    let r = run_columnar_aggs(rel, &[AggSpec::CountStar, AggSpec::SumFloat8(num_col.to_string())])?;
+    let r = run_columnar_aggs(rel, &[AggSpec::CountStar, AggSpec::SumFloat8(num_col.to_string())], &[], false)?;
     let c = i64::from_datum(r[0].0, r[0].1).unwrap_or(0);
     let s = f64::from_datum(r[1].0, r[1].1).unwrap_or(0.0);
     Ok(format!("count={c};sum={s:.4}"))

@@ -185,7 +185,7 @@ pub(super) unsafe fn run_cache_aggs(
     aggs: &[AggSpec],
 ) -> Result<Vec<(pg_sys::Datum, bool)>, String> {
     let batch = get_or_build(rel_oid)?;
-    run_aggs_on_batch(batch, aggs)
+    run_aggs_on_batch(batch, aggs, None)
 }
 
 /// Pragma: register a heap table's columns for the Arrow cache — records `columnar.cache_state`, installs the
@@ -246,7 +246,7 @@ fn theodb_cache_agg(table: pg_sys::Oid, num_col: String) -> String {
             Ok(b) => b,
             Err(e) => error!("{e}"),
         };
-        let res = run_aggs_on_batch(batch, &[AggSpec::CountStar, AggSpec::SumFloat8(num_col)]);
+        let res = run_aggs_on_batch(batch, &[AggSpec::CountStar, AggSpec::SumFloat8(num_col)], None);
         match res {
             Ok(r) => {
                 let cnt = i64::from_datum(r[0].0, r[0].1).unwrap_or(0);
