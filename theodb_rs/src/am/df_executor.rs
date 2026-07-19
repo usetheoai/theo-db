@@ -22,6 +22,7 @@ use datafusion::functions_aggregate::expr_fn::{avg, count, sum};
 use datafusion::prelude::{col, lit, Expr, SessionContext};
 use datafusion::scalar::ScalarValue;
 use std::ffi::CStr;
+use pgrx::datum::FromDatum;
 use pgrx::prelude::*;
 use std::sync::Arc;
 
@@ -375,7 +376,53 @@ pub(super) unsafe fn run_columnar_grouped_aggs(
             rows.push(row_out);
         }
     }
+    // Sort the (few) group rows ASCending nulls-last by the group-key output slots — reproduces the GroupAgg order for
+    // the M115 Agg-swap of an AGG_SORTED node. Numeric/temporal keys only (text AGG_SORTED is declined at swap time);
+    // a Rust sort over the small grouped result avoids the DataFusion sort's memory-pool reservation.
+    let gk: Vec<(usize, u32)> = layout
+        .iter()
+        .enumerate()
+        .filter_map(|(slot, &(kind, idx))| if kind == 0 { Some((slot, group_cols[idx].1)) } else { None })
+        .collect();
+    if !gk.is_empty() && !gk.iter().any(|&(_, t)| matches!(t, 25 | 1042 | 1043)) {
+        rows.sort_by(|a, b| {
+            for &(slot, typ) in &gk {
+                let ord = cmp_group_datum(a[slot], b[slot], typ);
+                if ord != std::cmp::Ordering::Equal {
+                    return ord;
+                }
+            }
+            std::cmp::Ordering::Equal
+        });
+    }
     Ok(rows)
+}
+
+/// Compare two group-key `(Datum, is_null)` cells for the ASCending-nulls-last ordering of the swapped grouped result
+/// (numeric/temporal/bool types — text is declined upstream). NULL sorts last (PG default for ASC).
+fn cmp_group_datum(a: (pg_sys::Datum, bool), b: (pg_sys::Datum, bool), typoid: u32) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    match (a.1, b.1) {
+        (true, true) => return Ordering::Equal,
+        (true, false) => return Ordering::Greater, // nulls last
+        (false, true) => return Ordering::Less,
+        (false, false) => {}
+    }
+    unsafe {
+        match typoid {
+            20 | 1114 | 1184 => i64::from_datum(a.0, false).cmp(&i64::from_datum(b.0, false)),
+            23 | 1082 => i32::from_datum(a.0, false).cmp(&i32::from_datum(b.0, false)),
+            21 => i16::from_datum(a.0, false).cmp(&i16::from_datum(b.0, false)),
+            16 => bool::from_datum(a.0, false).cmp(&bool::from_datum(b.0, false)),
+            700 => f32::from_datum(a.0, false)
+                .partial_cmp(&f32::from_datum(b.0, false))
+                .unwrap_or(Ordering::Equal),
+            701 => f64::from_datum(a.0, false)
+                .partial_cmp(&f64::from_datum(b.0, false))
+                .unwrap_or(Ordering::Equal),
+            _ => Ordering::Equal,
+        }
+    }
 }
 
 /// Convert one aggregate cell (`arr[row]`) to a PG `(Datum, is_null)`: `count(*)`→int8, `sum(float8)`→float8.
