@@ -13,6 +13,20 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.105.0] - 2026-07-19
+
+### Added
 - **Columnar `min(col)`/`max(col)` aggregate + zone-map directory fast-path — MEASURED
   (`docs/benchmarks/columnar-minmax-zonemap-verdict.md`).** Admits `min`/`max` on ordered native types (int2/4/8,
   float4/8, timestamp/date) in the columnar CustomScan byte-identical to PostgreSQL (output type = input column type,
