@@ -11,7 +11,7 @@
 //! `customscan.rs` machinery idioms.
 #![allow(non_snake_case)]
 
-use super::df_executor::{run_columnar_aggs, AggSpec};
+use super::df_executor::{run_columnar_aggs, run_columnar_grouped_aggs, AggSpec};
 use super::columnar_codec::MinMaxKind;
 use super::zonemap::{ZoneOp, ZonePredicate};
 use pgrx::datum::FromDatum;
@@ -50,13 +50,14 @@ static EXEC_METHODS: Methods<pg_sys::CustomExecMethods> = Methods(pg_sys::Custom
     ExplainCustomScan: None,
 });
 
-/// Node exec state: the CustomScanState (first, C-struct inheritance) + the computed aggregate result (a leaked
-/// `Box<Vec<(Datum, is_null)>>` freed in `end`) + an emitted flag.
+/// Node exec state: the CustomScanState (first, C-struct inheritance) + the computed result ROWS (a leaked
+/// `Box<Vec<Vec<(Datum, is_null)>>>` freed in `end`; one inner Vec per output row — a single row for a scalar
+/// aggregate, N rows for GROUP BY) + a `cursor` over those rows (one emitted per `exec` call).
 #[repr(C)]
 struct ColumnarAggState {
     css: pg_sys::CustomScanState,
-    result: *mut Vec<(pg_sys::Datum, bool)>,
-    done: bool,
+    result: *mut Vec<Vec<(pg_sys::Datum, bool)>>,
+    cursor: usize,
 }
 
 static mut PREV_UPPER_HOOK: pg_sys::create_upper_paths_hook_type = None;
@@ -199,20 +200,33 @@ unsafe fn extract_all_predicates(input_rel: *mut pg_sys::RelOptInfo, relid: i32)
     Some(preds)
 }
 
+/// Admission result. `group_cols` = (attno, typoid) per GROUP BY key; `layout` maps each output-target slot to its
+/// source (kind 0=group→`group_cols[idx]`, 1=agg→`aggs[idx]`) so exec emits rows in target order (ADR-2). Non-grouped
+/// admissions leave `group_cols`/`layout` empty (the scalar path needs no layout — aggs are already in target order).
+struct Admitted {
+    mode: i32,
+    relid: i32,
+    aggs: Vec<ParsedAgg>,
+    preds: Vec<ZonePredicate>,
+    group_cols: Vec<(i32, u32)>,
+    layout: Vec<(u8, usize)>,
+}
+
 unsafe fn admit(
     root: *mut pg_sys::PlannerInfo,
     input_rel: *mut pg_sys::RelOptInfo,
     output_rel: *mut pg_sys::RelOptInfo,
-) -> Option<(i32, i32, Vec<ParsedAgg>, Vec<ZonePredicate>)> {
+) -> Option<Admitted> {
     let parse = (*root).parse;
-    if !(*parse).groupClause.is_null()
-        || !(*parse).groupingSets.is_null()
+    // GROUP BY is now admissible; groupingSets / HAVING / DISTINCT / window are still out of scope → native plan.
+    if !(*parse).groupingSets.is_null()
         || !(*parse).havingQual.is_null()
         || !(*parse).distinctClause.is_null()
         || (*parse).hasWindowFuncs
     {
-        return None; // GROUP BY / HAVING / DISTINCT / window → not slice 1 (WHERE is now handled via zone-map pushdown)
+        return None;
     }
+    let grouped = !(*parse).groupClause.is_null();
     if (*input_rel).reloptkind != pg_sys::RelOptKind::RELOPT_BASEREL {
         return None;
     }
@@ -224,7 +238,6 @@ unsafe fn admit(
     if rte.is_null() || (*rte).rtekind != pg_sys::RTEKind::RTE_RELATION {
         return None;
     }
-    // Every output target must be a supported bare aggregate.
     let target = (*output_rel).reltarget;
     if target.is_null() {
         return None;
@@ -233,61 +246,96 @@ unsafe fn admit(
     if exprs.is_empty() {
         return None;
     }
-    let mut aggs = Vec::with_capacity(exprs.len());
+    // Walk the output target: each expr is a bare group `Var` (only when GROUP BY is present) or a supported `Aggref`.
+    // Build the aggs, the group keys, and the output layout (ADR-2) in one pass, in target order.
+    let mut aggs: Vec<ParsedAgg> = Vec::with_capacity(exprs.len());
+    let mut group_cols: Vec<(i32, u32)> = Vec::new();
+    let mut layout: Vec<(u8, usize)> = Vec::with_capacity(exprs.len());
     for i in 0..exprs.len() {
         let node = exprs.get_ptr(i)?;
-        if (*node).type_ != pg_sys::NodeTag::T_Aggref {
-            return None;
-        }
-        let agg = node as *mut pg_sys::Aggref;
-        if !(*agg).aggfilter.is_null() || !(*agg).aggorder.is_null() || !(*agg).aggdistinct.is_null() {
-            return None;
-        }
-        // Only a SIMPLE (non-split) aggregate has the FINAL result type (int8/float8). A partial/parallel split
-        // (AGGSPLIT_INITIAL_SERIAL etc.) produces the aggregate's transtype (internal/bytea), which would NOT match
-        // the int8/float8 Datum we emit → fail-safe to the native plan (council-rust-pgrx HIGH).
-        if (*agg).aggsplit != pg_sys::AggSplit::AGGSPLIT_SIMPLE {
-            return None;
-        }
-        let fname = pg_sys::get_func_name((*agg).aggfnoid);
-        if fname.is_null() {
-            return None;
-        }
-        let name = CStr::from_ptr(fname).to_string_lossy();
-        if name == "count" && (*agg).aggstar {
-            aggs.push(ParsedAgg { kind: 0, attno: 0 });
-        } else if name == "sum" {
-            // sum(<bare Var of type float8>) — resolve the column attno.
-            let args = PgList::<pg_sys::TargetEntry>::from_pg((*agg).args);
-            if args.len() != 1 {
+        if (*node).type_ == pg_sys::NodeTag::T_Var {
+            // A bare column reference in the target of a GROUP BY query is a grouping key (PG guarantees this). Only
+            // when GROUP BY is present, and only for a base-rel column of a `build_arrow`-supported type.
+            if !grouped {
                 return None;
             }
-            let te = args.get_ptr(0)?;
-            let e = (*te).expr as *mut pg_sys::Node;
-            if e.is_null() || (*e).type_ != pg_sys::NodeTag::T_Var {
+            let var = node as *mut pg_sys::Var;
+            if (*var).varno as i32 != relid {
+                return None; // a Var from another rel → not a bare base-rel key
+            }
+            let attno = (*var).varattno as i32;
+            if attno <= 0 {
+                return None; // system / whole-row column → decline
+            }
+            if !super::df_executor::arrow_supported_group_type((*var).vartype.to_u32()) {
+                return None; // unsupported key type (numeric, etc.) → native plan
+            }
+            layout.push((0, group_cols.len()));
+            group_cols.push((attno, (*var).vartype.to_u32()));
+        } else if (*node).type_ == pg_sys::NodeTag::T_Aggref {
+            let agg = node as *mut pg_sys::Aggref;
+            if !(*agg).aggfilter.is_null() || !(*agg).aggorder.is_null() || !(*agg).aggdistinct.is_null() {
                 return None;
             }
-            let var = e as *mut pg_sys::Var;
-            if (*var).vartype != pg_sys::FLOAT8OID || (*var).varno as i32 != relid {
+            // Only a SIMPLE (non-split) aggregate has the FINAL result type (int8/float8). A partial/parallel split
+            // produces the transtype (internal/bytea) → fail-safe to the native plan (council-rust-pgrx HIGH).
+            if (*agg).aggsplit != pg_sys::AggSplit::AGGSPLIT_SIMPLE {
                 return None;
             }
-            aggs.push(ParsedAgg { kind: 1, attno: (*var).varattno as i32 });
+            let fname = pg_sys::get_func_name((*agg).aggfnoid);
+            if fname.is_null() {
+                return None;
+            }
+            let name = CStr::from_ptr(fname).to_string_lossy();
+            if name == "count" && (*agg).aggstar {
+                layout.push((1, aggs.len()));
+                aggs.push(ParsedAgg { kind: 0, attno: 0 });
+            } else if name == "sum" {
+                let args = PgList::<pg_sys::TargetEntry>::from_pg((*agg).args);
+                if args.len() != 1 {
+                    return None;
+                }
+                let te = args.get_ptr(0)?;
+                let e = (*te).expr as *mut pg_sys::Node;
+                if e.is_null() || (*e).type_ != pg_sys::NodeTag::T_Var {
+                    return None;
+                }
+                let var = e as *mut pg_sys::Var;
+                if (*var).vartype != pg_sys::FLOAT8OID || (*var).varno as i32 != relid {
+                    return None;
+                }
+                layout.push((1, aggs.len()));
+                aggs.push(ParsedAgg { kind: 1, attno: (*var).varattno as i32 });
+            } else {
+                return None;
+            }
         } else {
-            return None;
+            return None; // grouping expression (date_trunc(...)) / anything else → decline
         }
+    }
+    if grouped && group_cols.is_empty() {
+        return None; // GROUP BY with no bare-column key (e.g. GROUP BY on an expression only) → native plan
     }
 
     // Mode: a columnar table (decode stripes) vs a heap table with a usable Arrow cache (M101 HTAP).
     let amoid = columnar_amoid();
     let is_columnar = amoid != pg_sys::InvalidOid && pg_sys::get_rel_relam((*rte).relid) == amoid;
     if is_columnar {
-        // WHERE → zone-map predicates. ALL quals must be pushable (`col <op> const`), else decline so the native
-        // plan applies the WHERE correctly (the DataFusion filter can only represent pushable clauses).
+        if grouped {
+            // GROUP BY + WHERE combined is a later slice — decline when both are present so the native plan applies
+            // the WHERE correctly (keeps the group and predicate-pushdown axes orthogonal).
+            if !(*input_rel).baserestrictinfo.is_null() {
+                return None;
+            }
+            return Some(Admitted { mode: 0, relid, aggs, preds: Vec::new(), group_cols, layout });
+        }
+        // Non-grouped: WHERE → zone-map predicates. ALL quals must be pushable (`col <op> const`), else decline so
+        // the native plan applies the WHERE correctly.
         let preds = extract_all_predicates(input_rel, relid)?;
-        return Some((0, relid, aggs, preds));
+        return Some(Admitted { mode: 0, relid, aggs, preds, group_cols: Vec::new(), layout: Vec::new() });
     }
-    // Heap (M101 cache) path does NOT filter → decline any WHERE.
-    if !(*input_rel).baserestrictinfo.is_null() {
+    // Heap (M101 cache) path: non-grouped only in this slice, and does NOT filter → decline GROUP BY or any WHERE.
+    if grouped || !(*input_rel).baserestrictinfo.is_null() {
         return None;
     }
     // Heap: admissible IFF this backend has a cache covering the summed columns (the exec-time get_or_build then
@@ -307,7 +355,7 @@ unsafe fn admit(
     if sum_names.len() == aggs.iter().filter(|a| a.kind == 1).count()
         && super::arrow_cache::has_cached_columns((*rte).relid.to_u32(), &sum_names)
     {
-        return Some((1, relid, aggs, Vec::new()));
+        return Some(Admitted { mode: 1, relid, aggs, preds: Vec::new(), group_cols: Vec::new(), layout: Vec::new() });
     }
     None
 }
@@ -327,26 +375,38 @@ unsafe extern "C-unwind" fn upper_paths_hook(
     if !ENABLE_COLUMNAR_AGG.get() || stage != pg_sys::UpperRelationKind::UPPERREL_GROUP_AGG {
         return;
     }
-    let Some((mode, relid, aggs, preds)) = admit(root, input_rel, output_rel) else {
+    let Some(adm) = admit(root, input_rel, output_rel) else {
         return; // fail-safe: any unsupported shape → native plan
     };
 
     // Encode the plan in custom_private as an IntList:
-    //   [mode, relid, nagg, (kind,attno)×nagg, npred, (col, op, cbits_hi, cbits_lo)×npred].
-    // u64 const_bits is split into two i32 (List holds C `int`); reassembled at exec (begin_custom_scan).
-    let mut priv_list: *mut pg_sys::List = pg_sys::lappend_int(std::ptr::null_mut(), mode);
-    priv_list = pg_sys::lappend_int(priv_list, relid);
-    priv_list = pg_sys::lappend_int(priv_list, aggs.len() as i32);
-    for a in &aggs {
+    //   [mode, relid, nagg, (kind,attno)×nagg, npred, (col, op, cbits_hi, cbits_lo)×npred,
+    //    ngroup, (attno, typoid)×ngroup, noutput, (kind, idx)×noutput].
+    // u64 const_bits is split into two i32 (List holds C `int`); reassembled at exec (begin_custom_scan). The group
+    // block is appended last so old-shape parsers (npred-terminated) stay backward compatible (ngroup defaults 0).
+    let mut priv_list: *mut pg_sys::List = pg_sys::lappend_int(std::ptr::null_mut(), adm.mode);
+    priv_list = pg_sys::lappend_int(priv_list, adm.relid);
+    priv_list = pg_sys::lappend_int(priv_list, adm.aggs.len() as i32);
+    for a in &adm.aggs {
         priv_list = pg_sys::lappend_int(priv_list, a.kind);
         priv_list = pg_sys::lappend_int(priv_list, a.attno);
     }
-    priv_list = pg_sys::lappend_int(priv_list, preds.len() as i32);
-    for p in &preds {
+    priv_list = pg_sys::lappend_int(priv_list, adm.preds.len() as i32);
+    for p in &adm.preds {
         priv_list = pg_sys::lappend_int(priv_list, p.col as i32);
         priv_list = pg_sys::lappend_int(priv_list, p.op as i32);
         priv_list = pg_sys::lappend_int(priv_list, (p.const_bits >> 32) as i32);
         priv_list = pg_sys::lappend_int(priv_list, (p.const_bits & 0xFFFF_FFFF) as i32);
+    }
+    priv_list = pg_sys::lappend_int(priv_list, adm.group_cols.len() as i32);
+    for &(attno, typoid) in &adm.group_cols {
+        priv_list = pg_sys::lappend_int(priv_list, attno);
+        priv_list = pg_sys::lappend_int(priv_list, typoid as i32);
+    }
+    priv_list = pg_sys::lappend_int(priv_list, adm.layout.len() as i32);
+    for &(kind, idx) in &adm.layout {
+        priv_list = pg_sys::lappend_int(priv_list, kind as i32);
+        priv_list = pg_sys::lappend_int(priv_list, idx as i32);
     }
 
     let mut cpath = PgBox::<pg_sys::CustomPath>::alloc_node(pg_sys::NodeTag::T_CustomPath);
@@ -355,7 +415,9 @@ unsafe extern "C-unwind" fn upper_paths_hook(
     path.parent = output_rel;
     path.pathtarget = (*output_rel).reltarget;
     path.param_info = std::ptr::null_mut();
-    path.rows = 1.0;
+    // The planner's row estimate for this upper rel (the group count; 1 for a scalar aggregate) — accurate rows keep
+    // any ORDER BY / LIMIT above the GROUP BY costed sanely.
+    path.rows = if (*output_rel).rows > 0.0 { (*output_rel).rows } else { 1.0 };
     path.startup_cost = 0.0;
     path.total_cost = 1.0; // cheap → wins over the native Agg for the admitted shape (opt-in GUC gates it)
     cpath.flags = 0;
@@ -405,7 +467,7 @@ unsafe extern "C-unwind" fn create_custom_scan_state(_cscan: *mut pg_sys::Custom
     st.css.ss.ps.type_ = pg_sys::NodeTag::T_CustomScanState;
     st.css.methods = &EXEC_METHODS.0;
     st.result = std::ptr::null_mut();
-    st.done = false;
+    st.cursor = 0;
     ptr as *mut pg_sys::Node
 }
 
@@ -416,7 +478,7 @@ unsafe extern "C-unwind" fn begin_custom_scan(
     eflags: c_int,
 ) {
     let st = &mut *(node as *mut ColumnarAggState);
-    st.done = false;
+    st.cursor = 0;
     st.result = std::ptr::null_mut();
     if (eflags & pg_sys::EXEC_FLAG_EXPLAIN_ONLY as c_int) != 0 {
         return; // EXPLAIN without ANALYZE: show the node, do not execute
@@ -429,8 +491,12 @@ unsafe extern "C-unwind" fn begin_custom_scan(
     let rte = pg_sys::list_nth((*estate).es_range_table, relidx - 1) as *mut pg_sys::RangeTblEntry;
     let relid = (*rte).relid;
 
-    let res = (|| -> Result<Vec<(pg_sys::Datum, bool)>, String> {
-        // Parse the IntList: [mode, relid, nagg, (kind,attno)×nagg, npred, (col,op,cbits_hi,cbits_lo)×npred].
+    // Materialize the result rows in the durable per-query context so text/varlena GROUP BY key datums survive across
+    // exec() calls (ADR-3). By-value datums (int8/float8/date/timestamptz) are context-independent.
+    let oldcxt = pg_sys::MemoryContextSwitchTo((*estate).es_query_cxt);
+    let res = (|| -> Result<Vec<Vec<(pg_sys::Datum, bool)>>, String> {
+        // IntList: [mode, relid, nagg, (kind,attno)×nagg, npred, (col,op,hi,lo)×npred,
+        //           ngroup, (attno,typoid)×ngroup, noutput, (kind,idx)×noutput].
         let nagg = pg_sys::list_nth_int(priv_list, 2) as usize;
         let mut specs = Vec::with_capacity(nagg);
         let mut i = 3;
@@ -466,17 +532,45 @@ unsafe extern "C-unwind" fn begin_custom_scan(
             };
             preds.push(ZonePredicate { col, op, const_bits: (hi << 32) | lo });
         }
-        if mode == 1 {
-            // M101 HTAP: aggregate the heap-authoritative Arrow cache (rebuilt snapshot-correctly if invalidated).
-            super::arrow_cache::run_cache_aggs(relid, &specs)
-        } else {
-            // M100: decode the columnar table's stripes, with zone-map skip-pruning (predicates + GUC kill-switch).
+        // Group block (appended last; absent → ngroup 0 → scalar path, backward compatible).
+        let ngroup = if i < n { pg_sys::list_nth_int(priv_list, i) as usize } else { 0 };
+        i += 1;
+        let mut group_cols: Vec<(String, u32)> = Vec::with_capacity(ngroup);
+        for _ in 0..ngroup {
+            let attno = pg_sys::list_nth_int(priv_list, i);
+            let typoid = pg_sys::list_nth_int(priv_list, i + 1) as u32;
+            i += 2;
+            let nm = pg_sys::get_attname(relid, attno as pg_sys::AttrNumber, false);
+            group_cols.push((CStr::from_ptr(nm).to_string_lossy().into_owned(), typoid));
+        }
+        let noutput = if i < n { pg_sys::list_nth_int(priv_list, i) as usize } else { 0 };
+        i += 1;
+        let mut layout: Vec<(u8, usize)> = Vec::with_capacity(noutput);
+        for _ in 0..noutput {
+            let kind = pg_sys::list_nth_int(priv_list, i) as u8;
+            let idx = pg_sys::list_nth_int(priv_list, i + 1) as usize;
+            i += 2;
+            layout.push((kind, idx));
+        }
+
+        if ngroup > 0 {
+            // GROUP BY (columnar only — admit declined grouped heap / grouped+WHERE). Multi-row result.
             let rel = pg_sys::relation_open(relid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
-            let r = run_columnar_aggs(rel, &specs, &preds, super::guc::columnar_zonemap_skip());
+            let r = run_columnar_grouped_aggs(rel, &group_cols, &specs, &layout);
+            pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            r
+        } else if mode == 1 {
+            // M101 HTAP: aggregate the heap-authoritative Arrow cache. Single row → wrap.
+            super::arrow_cache::run_cache_aggs(relid, &specs).map(|row| vec![row])
+        } else {
+            // M100 scalar: decode the columnar stripes with zone-map skip-pruning. Single row → wrap.
+            let rel = pg_sys::relation_open(relid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            let r = run_columnar_aggs(rel, &specs, &preds, super::guc::columnar_zonemap_skip()).map(|row| vec![row]);
             pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
             r
         }
     })();
+    pg_sys::MemoryContextSwitchTo(oldcxt);
     match res {
         Ok(v) => st.result = Box::into_raw(Box::new(v)),
         Err(e) => pg_sys::error!("{e}"),
@@ -487,10 +581,14 @@ unsafe extern "C-unwind" fn begin_custom_scan(
 unsafe extern "C-unwind" fn exec_custom_scan(node: *mut pg_sys::CustomScanState) -> *mut pg_sys::TupleTableSlot {
     let st = &mut *(node as *mut ColumnarAggState);
     let slot = st.css.ss.ss_ScanTupleSlot;
-    if st.done || st.result.is_null() {
+    if st.result.is_null() {
         return pg_sys::ExecClearTuple(slot);
     }
-    let vals = &*st.result;
+    let rows = &*st.result;
+    if st.cursor >= rows.len() {
+        return pg_sys::ExecClearTuple(slot); // all rows emitted (scalar: 1 row; GROUP BY: N rows; empty: 0)
+    }
+    let vals = &rows[st.cursor];
     pg_sys::ExecClearTuple(slot);
     let natts = (*(*slot).tts_tupleDescriptor).natts as usize;
     let tts_values = std::slice::from_raw_parts_mut((*slot).tts_values, natts);
@@ -500,7 +598,7 @@ unsafe extern "C-unwind" fn exec_custom_scan(node: *mut pg_sys::CustomScanState)
         tts_isnull[i] = vals[i].1;
     }
     pg_sys::ExecStoreVirtualTuple(slot);
-    st.done = true;
+    st.cursor += 1;
     slot
 }
 
@@ -516,9 +614,9 @@ unsafe extern "C-unwind" fn end_custom_scan(node: *mut pg_sys::CustomScanState) 
 #[pg_guard]
 unsafe extern "C-unwind" fn rescan_custom_scan(node: *mut pg_sys::CustomScanState) {
     // The aggregate is unparameterized (admission required no correlated Var / param_info), so its result is
-    // invariant across rescans — just re-emit the cached result.
+    // invariant across rescans — just rewind the cursor and re-emit the cached rows.
     let st = &mut *(node as *mut ColumnarAggState);
-    st.done = false;
+    st.cursor = 0;
 }
 
 #[cfg(any(test, feature = "pg_test"))]
@@ -556,5 +654,89 @@ mod tests {
 
         Spi::run("DROP TABLE m100_ca").unwrap();
         Spi::run("DROP TABLE m100_ha").unwrap();
+    }
+
+    /// GROUP BY pushdown — a grouped aggregate over a columnar table is a CustomScan and produces a result set
+    /// byte-identical to the heap plan (fetched at top level via Spi and compared row-by-row — including a `text` key
+    /// exercising the ADR-3 datum lifetime across the multi-row emit, a NULL group, and the ADR-2 agg-before-key
+    /// column order). The full 1M in-PG A/B (`benchmarks/columnar_groupby_ab.py`) is the broader correctness gate.
+    #[pg_test]
+    fn test_admit_groupby_single_key_is_customscan_and_matches_heap() {
+        Spi::run("SET theodb.enable_columnar_agg = on").unwrap();
+        Spi::run("CREATE TABLE gb_c (k int, lbl text, x float8) USING theodb_columnar").unwrap();
+        Spi::run("CREATE TABLE gb_h (k int, lbl text, x float8)").unwrap();
+        // 5 groups on k (g%5); a text key with a NULL every 7th row; x monotonic.
+        let gen_sql = "SELECT (g%5), CASE WHEN g%7=0 THEN NULL ELSE ('t'||(g%3)) END, g::float8 FROM generate_series(1,10000) g";
+        Spi::run(&format!("INSERT INTO gb_c {gen_sql}")).unwrap();
+        Spi::run(&format!("INSERT INTO gb_h {gen_sql}")).unwrap();
+
+        // CustomScan engaged for the grouped aggregate.
+        let plan = Spi::get_one::<String>("EXPLAIN (COSTS OFF) SELECT k, sum(x) FROM gb_c GROUP BY k").unwrap().unwrap();
+        assert!(plan.contains("Custom Scan") || plan.contains("theodb_columnar_agg"), "GROUP BY must be a CustomScan: {plan}");
+
+        // Fetch a grouped result set at TOP LEVEL (only bare Var/Aggref in the target so the CustomScan is admitted)
+        // and compare the row lists. `q` is `(int_key, sum, count)` sorted by key.
+        // Bare Var/Aggref target only (so the CustomScan is admitted); round sum(x) in Rust for a stable compare.
+        let fetch = |t: &str| -> Vec<(i32, i64, i64)> {
+            Spi::connect(|c| {
+                let rows = c
+                    .select(&format!("SELECT k, sum(x), count(*) FROM {t} GROUP BY k ORDER BY k"), None, &[])
+                    .unwrap();
+                rows.map(|r| {
+                    (
+                        r.get::<i32>(1).unwrap().unwrap(),
+                        r.get::<f64>(2).unwrap().unwrap().round() as i64,
+                        r.get::<i64>(3).unwrap().unwrap(),
+                    )
+                })
+                .collect::<Vec<_>>()
+            })
+        };
+        assert_eq!(fetch("gb_c"), fetch("gb_h"), "int GROUP BY (key, sum, count) result set must match the heap");
+
+        // ADR-2: agg-BEFORE-key column order maps correctly (sum first, key second).
+        let fetch_ab = |t: &str| -> Vec<(i64, i32)> {
+            Spi::connect(|c| {
+                let rows = c
+                    .select(&format!("SELECT sum(x), k FROM {t} GROUP BY k ORDER BY k"), None, &[])
+                    .unwrap();
+                rows.map(|r| (r.get::<f64>(1).unwrap().unwrap().round() as i64, r.get::<i32>(2).unwrap().unwrap())).collect::<Vec<_>>()
+            })
+        };
+        assert_eq!(fetch_ab("gb_c"), fetch_ab("gb_h"), "agg-before-key (ADR-2) result set must match the heap");
+
+        // ADR-3: a text key (palloc'd varlena) grouped over multiple emitted rows, incl. the NULL group.
+        let fetch_txt = |t: &str| -> Vec<(Option<String>, i64)> {
+            Spi::connect(|c| {
+                let rows = c
+                    .select(&format!("SELECT lbl, count(*) FROM {t} GROUP BY lbl ORDER BY lbl NULLS FIRST"), None, &[])
+                    .unwrap();
+                rows.map(|r| (r.get::<String>(1).unwrap(), r.get::<i64>(2).unwrap().unwrap())).collect::<Vec<_>>()
+            })
+        };
+        assert_eq!(fetch_txt("gb_c"), fetch_txt("gb_h"), "text GROUP BY (incl NULL group) must match the heap");
+
+        Spi::run("DROP TABLE gb_c").unwrap();
+        Spi::run("DROP TABLE gb_h").unwrap();
+    }
+
+    /// admit declines GROUP BY + WHERE combined (deferred slice) and a grouping expression → native plan (correct).
+    #[pg_test]
+    fn test_admit_groupby_where_and_expr_key_decline() {
+        Spi::run("SET theodb.enable_columnar_agg = on").unwrap();
+        Spi::run("CREATE TABLE gbd (k int, ts timestamptz, x float8) USING theodb_columnar").unwrap();
+        Spi::run("INSERT INTO gbd SELECT g%5, timestamptz '2020-01-01'+(g*interval '1 min'), g::float8 FROM generate_series(1,2000) g").unwrap();
+
+        let with_where = Spi::get_one::<String>("EXPLAIN (COSTS OFF) SELECT k, sum(x) FROM gbd WHERE x>0 GROUP BY k").unwrap().unwrap();
+        assert!(!with_where.contains("theodb_columnar_agg"), "GROUP BY + WHERE must decline to native: {with_where}");
+
+        let expr_key = Spi::get_one::<String>("EXPLAIN (COSTS OFF) SELECT date_trunc('day',ts), sum(x) FROM gbd GROUP BY date_trunc('day',ts)").unwrap().unwrap();
+        assert!(!expr_key.contains("theodb_columnar_agg"), "grouping expression must decline to native: {expr_key}");
+
+        // But a bare temporal key GROUP BY IS admitted (reuses the temporal Arrow support).
+        let temporal = Spi::get_one::<String>("EXPLAIN (COSTS OFF) SELECT ts, count(*) FROM gbd GROUP BY ts").unwrap().unwrap();
+        assert!(temporal.contains("Custom Scan") || temporal.contains("theodb_columnar_agg"), "bare temporal key GROUP BY must be a CustomScan: {temporal}");
+
+        Spi::run("DROP TABLE gbd").unwrap();
     }
 }

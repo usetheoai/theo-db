@@ -13,6 +13,20 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Columnar/HTAP: GROUP BY pushdown — MEASURED (`docs/benchmarks/columnar-groupby-verdict.md`).** The M100
+  `CustomScan` admitted only a scalar aggregate (one output row); this slice (plan `columnar-groupby-pushdown`) adds
+  vectorized `GROUP BY key, count(*)/sum(float8)`. `columnar_agg::admit` now accepts a `groupClause` — classifying
+  each output-target expr as a bare group `Var` (a `build_arrow`-supported type, incl. temporal) or a supported
+  `Aggref`, and building an explicit **output layout** so PG's target order (even agg-before-key) is honored (ADR-2).
+  `df_executor::run_columnar_grouped_aggs` runs DataFusion `.aggregate(group_exprs, agg_exprs)`;
+  `arrow_value_to_datum` converts group keys back to PG datums (reverse of `build_arrow`), materialized in
+  `es_query_cxt` so `text`-key varlena datums survive the multi-row emit (ADR-3); `exec_custom_scan` emits N rows via
+  a cursor (the scalar path is the N=1 case). **VERDICT (1M rows, c-8, warm): GOAL MET** — top-level grouped result
+  byte-identical to the heap, CustomScan engaged, **4.53×–9.75×** faster across int / multi-key / temporal (date) /
+  agg-before-key shapes. Scope: `count(*)`/`sum(float8)`, bare-column keys, no simultaneous WHERE (declines to native).
+  Honest caveat: consuming a columnar-aggregate output VALUE inside an enclosing expression hits a pre-existing M100
+  limitation (the scalar path fails identically) — orthogonal to GROUP BY, tracked separately; canonical top-level
+  `SELECT key, agg … GROUP BY key` works.
 - **Columnar/HTAP: zone-map skip-pruning (predicate pushdown consumer) — full slice, MEASURED
   (`docs/benchmarks/columnar-zonemap-verdict.md`).** The `theodb_columnar` TAM already WROTE a per-`(chunk_group,
   column)` min/max zone-map (`compute_minmax`) but never read it — this slice (plan `columnar-zonemap-skip-pruning`)
