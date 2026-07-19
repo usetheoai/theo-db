@@ -13,6 +13,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Roadmap amended: added M114 Columnar analytical aggregate completeness (GROUP BY+WHERE + avg/sum(int)) (`/roadmap-feature columnar-aggregate-completeness`)
+- Roadmap amended: added M115 Composabilidade do M100 (saída columnar-agg usável em subquery/join) (`/roadmap-feature columnar-aggregate-completeness`)
 - **Columnar/HTAP: GROUP BY pushdown — MEASURED (`docs/benchmarks/columnar-groupby-verdict.md`).** The M100
   `CustomScan` admitted only a scalar aggregate (one output row); this slice (plan `columnar-groupby-pushdown`) adds
   vectorized `GROUP BY key, count(*)/sum(float8)`. `columnar_agg::admit` now accepts a `groupClause` — classifying
