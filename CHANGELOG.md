@@ -24,7 +24,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
-## [0.71.0] - 2026-07-19
+## [0.102.0] - 2026-07-19
 
 ### Added
 - **M114 — Columnar analytical aggregate completeness — MEASURED (`docs/benchmarks/m114-columnar-aggregate-verdict.md`).**
