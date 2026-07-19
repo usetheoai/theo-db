@@ -13,6 +13,20 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.104.0] - 2026-07-19
+
+### Added
 - **Numeric-output integer aggregates — `sum(int8)` + `avg(int2/4/8)` byte-identical — MEASURED
   (`docs/benchmarks/numeric-output-aggregates-verdict.md`).** Extends the columnar aggregate CustomScan to admit the two
   integer aggregates M114 declined because their output is PG `numeric`. The columnar path computes
