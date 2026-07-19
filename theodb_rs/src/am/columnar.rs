@@ -777,6 +777,140 @@ pub(crate) unsafe fn decode_columns(
         .collect())
 }
 
+/// Fold two min/max candidates in the `MinMaxKind` BIT domain (ints stored as `i64 as u64`, floats as `f64::to_bits`).
+/// NEVER a raw `u64` compare — negatives would order as huge (columnar-minmax blueprint trap B).
+fn fold_minmax_bits(a: u64, b: u64, mm: codec::MinMaxKind, want_max: bool) -> u64 {
+    use codec::MinMaxKind::*;
+    let pick_b = match mm {
+        // I2/I4/I8/Bool + temporal (timestamp→I8, date→I4): compare in the signed integer domain.
+        I2 | I4 | I8 | Bool => {
+            let (ai, bi) = (a as i64, b as i64);
+            if want_max { bi > ai } else { bi < ai }
+        }
+        // Only float MIN reaches the fold (float MAX is gated out; NaN groups are has_minmax=false → excluded).
+        F4 | F8 => {
+            let (af, bf) = (f64::from_bits(a), f64::from_bits(b));
+            if want_max { bf > af } else { bf < af }
+        }
+        None => false,
+    };
+    if pick_b { b } else { a }
+}
+
+/// Decode a folded min/max bit value into the column's native PG datum (reverse of `encode_const_bits`). I4 covers
+/// int4 AND date (both 4-byte by-value); I8 covers int8 AND timestamp/timestamptz (8-byte by-value μs).
+unsafe fn decode_minmax_datum(bits: u64, mm: codec::MinMaxKind) -> Result<pg_sys::Datum, String> {
+    use codec::MinMaxKind::*;
+    let d = match mm {
+        I2 => (bits as i64 as i16).into_datum(),
+        I4 => (bits as i64 as i32).into_datum(),
+        I8 => (bits as i64).into_datum(),
+        Bool => (bits != 0).into_datum(),
+        F4 => (f64::from_bits(bits) as f32).into_datum(),
+        F8 => f64::from_bits(bits).into_datum(),
+        None => return Err("directory_minmax: unordered kind".into()),
+    };
+    d.ok_or_else(|| "directory_minmax: null min/max datum".into())
+}
+
+/// M-minmax Phase B — answer a scalar `min(col)`/`max(col)` (no WHERE, no GROUP BY) by folding the zone-map directory
+/// `min_bits`/`max_bits` over the VISIBLE stripes + the same-xact pending rows, WITHOUT decoding any column chunk.
+/// Returns `Ok(Some(cell))` when the fast-path is byte-identical-safe, `Ok(None)` when the caller MUST fall back to the
+/// full DataFusion scan (Phase A). Gating (verified by council-index-storage — see blueprint § 7 conditions):
+///   - unordered type → None; `max` on a float kind → None (compute_minmax skips NaN, PG max returns NaN);
+///   - any VISIBLE chunk-group with `has_minmax==false` on the column → None (all-NULL or NaN-float, indistinguishable);
+///   - pending rows with non-null values but no usable min/max (all-NaN float min) → None.
+/// Empty (no visible groups + no pending) → `Some(NULL)`. MVCC-correct: append-only + stripe-atomic visibility mean
+/// every row of a visible stripe is visible, so folding the visible directory == the snapshot-visible min/max.
+pub(crate) unsafe fn directory_minmax(
+    rel: pg_sys::Relation,
+    col_name: &str,
+    typid: u32,
+    want_max: bool,
+) -> Result<Option<(pg_sys::Datum, bool)>, String> {
+    let mm = minmax_kind_of(typid);
+    if mm == codec::MinMaxKind::None {
+        return Ok(None);
+    }
+    if want_max && matches!(mm, codec::MinMaxKind::F4 | codec::MinMaxKind::F8) {
+        return Ok(None); // NaN gate: directory max_bits skipped NaN; native max(float) returns NaN
+    }
+    let tupdesc = (*rel).rd_att;
+    let natts = (*tupdesc).natts as usize;
+    let col_idx = match (0..natts).find(|&i| {
+        std::ffi::CStr::from_ptr((*(*tupdesc).attrs.as_ptr().add(i)).attname.data.as_ptr()).to_string_lossy() == col_name
+    }) {
+        Some(x) => x,
+        None => return Ok(None),
+    };
+
+    // Fold the directory min/max over VISIBLE stripes only (snapshot-correct — never all physical stripes).
+    let mut acc: Option<u64> = None;
+    for sm in read_visible_stripes((*rel).rd_id)? {
+        let hdr_items = super::page::read_all_page_items(rel, sm.header_block)?;
+        let hdr_bytes = hdr_items.into_iter().next().ok_or("theodb_columnar: stripe header page empty")?;
+        let header = StripeHeader::from_bytes(&hdr_bytes)?;
+        if header.ncols as usize != natts {
+            return Err(format!("theodb_columnar: stripe ncols {} != natts {natts}", header.ncols));
+        }
+        let dir_bytes = super::page::read_chunked(rel, header.dir_first_block, header.dir_n_pages)?;
+        let entries = codec::deserialize_directory(&dir_bytes, header.n_chunk_groups as usize * natts)?;
+        for cg in 0..header.n_chunk_groups as usize {
+            let e = &entries[cg * natts + col_idx];
+            if e.row_count == 0 {
+                continue;
+            }
+            if !e.has_minmax {
+                return Ok(None); // all-NULL or NaN-float group → fall back to the full scan (byte-safe)
+            }
+            let cand = if want_max { e.max_bits } else { e.min_bits };
+            acc = Some(match acc {
+                None => cand,
+                Some(a) => fold_minmax_bits(a, cand, mm, want_max),
+            });
+        }
+    }
+
+    // Fold the same-xact pending rows (no directory entry) via compute_minmax — the identical bit domain.
+    let oid = (*rel).rd_id.to_u32();
+    let pending: Option<Vec<Vec<u8>>> = WRITE_STATES.with(|w| w.borrow().get(&oid).map(|p| p.rows.clone()));
+    if let Some(rows) = pending {
+        if !rows.is_empty() {
+            let cols = (0..natts).map(|i| coldesc(tupdesc, i)).collect::<Result<Vec<_>, _>>()?;
+            let mut values = vec![pg_sys::Datum::from(0usize); natts];
+            let mut isnull = vec![false; natts];
+            let mut colvals: Vec<Option<Vec<u8>>> = Vec::with_capacity(rows.len());
+            for rbytes in &rows {
+                let mut htup: pg_sys::HeapTupleData = std::mem::zeroed();
+                htup.t_len = rbytes.len() as u32;
+                htup.t_data = rbytes.as_ptr() as pg_sys::HeapTupleHeader;
+                pg_sys::heap_deform_tuple(&mut htup, tupdesc, values.as_mut_ptr(), isnull.as_mut_ptr());
+                if isnull[col_idx] {
+                    colvals.push(None);
+                } else {
+                    colvals.push(Some(extract_value_bytes(&cols[col_idx], values[col_idx])?));
+                }
+            }
+            let (has, pmin, pmax) = codec::compute_minmax(&colvals, mm);
+            if has {
+                let cand = if want_max { pmax } else { pmin };
+                acc = Some(match acc {
+                    None => cand,
+                    Some(a) => fold_minmax_bits(a, cand, mm, want_max),
+                });
+            } else if colvals.iter().any(|v| v.is_some()) {
+                return Ok(None); // pending has non-null but no usable min/max (all-NaN float) → fall back
+            }
+            // else: all pending NULL → contributes nothing, keep acc
+        }
+    }
+
+    match acc {
+        None => Ok(Some((pg_sys::Datum::from(0usize), true))), // no visible/pending rows → SQL NULL
+        Some(bits) => Ok(Some((decode_minmax_datum(bits, mm)?, false))),
+    }
+}
+
 #[pg_guard]
 pub unsafe extern "C-unwind" fn columnar_scan_begin(
     rel: pg_sys::Relation,
