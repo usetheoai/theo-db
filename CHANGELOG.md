@@ -13,6 +13,17 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **M114 — Columnar analytical aggregate completeness — MEASURED (`docs/benchmarks/m114-columnar-aggregate-verdict.md`).**
+  Broadens the M100 columnar `CustomScan` to admit **GROUP BY combined with a WHERE** (zone-map skip + DataFusion
+  Filter + hash aggregate in one plan), **`avg(float8)`**, and **`sum(int2/int4)`** — each byte-identical to the native
+  plan. `df_executor::AggSpec` gains `SumInt`/`AvgFloat8` variants and `agg_datum` emits the exact PG output type per
+  variant (`sum(int2/4)`→int8 = Arrow Int64, no overflow; `avg(float8)`→float8 = Arrow Float64); the grouped executor
+  now accepts predicates + a filter (filter-before-aggregate). `admit` widens the sum/avg arg-type guards and runs
+  `extract_all_predicates` in the grouped branch. The numeric-output shapes (`avg(int*)`, `sum(int8)`, `sum(float4)`,
+  `avg(float4)`) **decline to the native plan** (which returns the exact numeric) — a byte-fidelity call backed by the
+  blueprint's primary-source analysis (PG docs + DataFusion 54 source + Citus pattern), not a defect. **VERDICT (1M
+  rows, c-8, warm): GOAL MET** — byte-identical + CustomScan for every shipped shape, **6.58×–12.99×** faster;
+  declined shapes native + correct (proven by EXPLAIN + spot-check). Milestone M114.
 - Roadmap amended: added M114 Columnar analytical aggregate completeness (GROUP BY+WHERE + avg/sum(int)) (`/roadmap-feature columnar-aggregate-completeness`)
 - Roadmap amended: added M115 Composabilidade do M100 (saída columnar-agg usável em subquery/join) (`/roadmap-feature columnar-aggregate-completeness`)
 - **Columnar/HTAP: GROUP BY pushdown — MEASURED (`docs/benchmarks/columnar-groupby-verdict.md`).** The M100

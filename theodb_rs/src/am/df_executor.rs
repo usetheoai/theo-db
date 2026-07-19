@@ -18,7 +18,7 @@ use datafusion::arrow::array::{
 use datafusion::arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::error::DataFusionError;
-use datafusion::functions_aggregate::expr_fn::{count, sum};
+use datafusion::functions_aggregate::expr_fn::{avg, count, sum};
 use datafusion::prelude::{col, lit, Expr, SessionContext};
 use datafusion::scalar::ScalarValue;
 use std::ffi::CStr;
@@ -124,12 +124,36 @@ pub(super) fn arrow_supported_group_type(typoid: u32) -> bool {
     matches!(typoid, 21 | 23 | 20 | 700 | 701 | 16 | 25 | 1042 | 1043 | 1114 | 1184 | 1082)
 }
 
-/// A supported aggregate for the vectorized columnar path. Restricted (Phase C slice 1) to the cases where the Arrow
-/// result type matches the PostgreSQL aggregate output type WITHOUT a cast: `count(*)` → `int8`, `sum(<float8 col>)`
-/// → `float8`. `avg`, `sum` over integer/numeric, GROUP BY, and WHERE pushdown are later slices.
+/// A supported aggregate for the vectorized columnar path — ONLY shapes whose Arrow result type maps to the exact
+/// PostgreSQL output type (M114 blueprint E1/E2/E3): `count(*)`→int8, `sum(float8)`→float8, `sum(int2/int4)`→int8
+/// (Arrow Int64 = PG bigint, no overflow), `avg(float8)`→float8. Numeric-output shapes (`avg(int)`, `sum(int8)`,
+/// `sum(float4)`) are DECLINED at admit time (ADR-M114-1) — never reach here.
 pub(super) enum AggSpec {
     CountStar,
     SumFloat8(String),
+    /// `sum(int2/int4)` → PG int8. DataFusion coerces int2/int4 → Int64; the datum is int8 (no overflow).
+    SumInt(String),
+    /// `avg(float8)` → PG float8. DataFusion `avg` → Float64.
+    AvgFloat8(String),
+}
+
+impl AggSpec {
+    /// The source column this aggregate reads (None for `count(*)`), for projection.
+    fn col_name(&self) -> Option<&str> {
+        match self {
+            AggSpec::CountStar => None,
+            AggSpec::SumFloat8(n) | AggSpec::SumInt(n) | AggSpec::AvgFloat8(n) => Some(n.as_str()),
+        }
+    }
+}
+
+/// Build the aliased DataFusion aggregate expression for one `AggSpec`. Shared by the scalar + grouped paths (DRY).
+fn agg_expr(spec: &AggSpec, alias: String) -> Expr {
+    match spec {
+        AggSpec::CountStar => count(lit(1i64)).alias(alias),
+        AggSpec::SumFloat8(name) | AggSpec::SumInt(name) => sum(col(name.as_str())).alias(alias),
+        AggSpec::AvgFloat8(name) => avg(col(name.as_str())).alias(alias),
+    }
 }
 
 /// Decode the columnar table's projected columns into one Arrow `RecordBatch` (projection pushdown). Projects the
@@ -222,9 +246,8 @@ pub(super) unsafe fn run_columnar_aggs(
     predicates: &[super::zonemap::ZonePredicate],
     skip: bool,
 ) -> Result<Vec<(pg_sys::Datum, bool)>, String> {
-    let sum_cols: Vec<String> =
-        aggs.iter().filter_map(|a| if let AggSpec::SumFloat8(n) = a { Some(n.clone()) } else { None }).collect();
-    let batch = decode_to_batch(rel, &sum_cols, predicates, skip)?;
+    let agg_cols: Vec<String> = aggs.iter().filter_map(|a| a.col_name().map(str::to_string)).collect();
+    let batch = decode_to_batch(rel, &agg_cols, predicates, skip)?;
     let filter = build_filter_expr(rel, predicates);
     run_aggs_on_batch(batch, aggs, filter)
 }
@@ -239,11 +262,7 @@ pub(super) unsafe fn run_aggs_on_batch(
 ) -> Result<Vec<(pg_sys::Datum, bool)>, String> {
     let mut exprs = Vec::with_capacity(aggs.len());
     for (i, a) in aggs.iter().enumerate() {
-        let alias = format!("a{i}");
-        exprs.push(match a {
-            AggSpec::CountStar => count(lit(1i64)).alias(alias),
-            AggSpec::SumFloat8(name) => sum(col(name.as_str())).alias(alias),
-        });
+        exprs.push(agg_expr(a, format!("a{i}")));
     }
 
     let batches = run_df_collect(batch, move |df| {
@@ -297,37 +316,46 @@ where
 /// Grouped columnar aggregate (M100 GROUP BY pushdown). Decode the group + sum columns, run
 /// `.aggregate(group_exprs, agg_exprs)`, and materialize the multi-row result in the PG output-target order given by
 /// `layout` (ADR-2): each output slot is either group key `idx` (batch col `idx`) or agg `idx` (batch col
-/// `ngroup+idx`). `group_cols` is `(name, typoid)` per key (typoid drives the reverse Arrow→Datum conversion). No
-/// WHERE in this slice (predicates handled only on the scalar path). Returns one inner Vec per group, in `layout`
-/// (target) order. The CALLER runs this in a durable memory context (ADR-3) for text group-key datums.
+/// `ngroup+idx`). `group_cols` is `(name, typoid)` per key (typoid drives the reverse Arrow→Datum conversion).
+/// `predicates` + `skip` apply the zone-map skip-pruning + DataFusion Filter (M114 GROUP BY+WHERE); empty = no WHERE.
+/// Returns one inner Vec per group, in `layout` (target) order. The CALLER runs this in a durable memory context
+/// (ADR-3) for text group-key datums.
 pub(super) unsafe fn run_columnar_grouped_aggs(
     rel: pg_sys::Relation,
     group_cols: &[(String, u32)],
     aggs: &[AggSpec],
     layout: &[(u8, usize)],
+    predicates: &[super::zonemap::ZonePredicate],
+    skip: bool,
 ) -> Result<Vec<Vec<(pg_sys::Datum, bool)>>, String> {
-    // Project group columns ∪ sum columns (count(*) needs no column; decode_to_batch guarantees ≥1).
+    // Project group columns ∪ agg columns (count(*) needs no column; decode_to_batch also projects predicate cols
+    // and guarantees ≥1).
     let mut proj_cols: Vec<String> = group_cols.iter().map(|(n, _)| n.clone()).collect();
     for a in aggs {
-        if let AggSpec::SumFloat8(n) = a {
-            if !proj_cols.contains(n) {
-                proj_cols.push(n.clone());
+        if let Some(n) = a.col_name() {
+            if !proj_cols.iter().any(|p| p == n) {
+                proj_cols.push(n.to_string());
             }
         }
     }
-    let batch = decode_to_batch(rel, &proj_cols, &[], false)?;
+    let batch = decode_to_batch(rel, &proj_cols, predicates, skip)?;
+    let filter = build_filter_expr(rel, predicates);
 
     let group_exprs: Vec<Expr> = group_cols.iter().map(|(n, _)| col(n.as_str())).collect();
     let mut agg_exprs = Vec::with_capacity(aggs.len());
     for (i, a) in aggs.iter().enumerate() {
-        let alias = format!("a{i}");
-        agg_exprs.push(match a {
-            AggSpec::CountStar => count(lit(1i64)).alias(alias),
-            AggSpec::SumFloat8(name) => sum(col(name.as_str())).alias(alias),
-        });
+        agg_exprs.push(agg_expr(a, format!("a{i}")));
     }
     let ngroup = group_cols.len();
-    let batches = run_df_collect(batch, move |df| df.aggregate(group_exprs, agg_exprs))?;
+    // Filter BEFORE aggregating (SQL WHERE … GROUP BY — M114 blueprint E4); the zone-map skip above is only an
+    // admission filter, the DataFusion Filter is the final row authority.
+    let batches = run_df_collect(batch, move |df| {
+        let df = match filter {
+            Some(f) => df.filter(f)?,
+            None => df,
+        };
+        df.aggregate(group_exprs, agg_exprs)
+    })?;
 
     // DataFusion output columns: [group_0..group_{ngroup-1}, a0..a{nagg-1}]. Emit rows in `layout` (target) order.
     let mut rows: Vec<Vec<(pg_sys::Datum, bool)>> = Vec::new();
@@ -357,12 +385,14 @@ fn agg_datum(arr: &dyn Array, row: usize, spec: &AggSpec) -> Result<(pg_sys::Dat
         return Ok((pg_sys::Datum::from(0usize), true));
     }
     let datum = match spec {
-        AggSpec::CountStar => {
-            let v = arr.as_any().downcast_ref::<Int64Array>().ok_or("df_executor: count not Int64")?.value(row);
+        // int8 output: count(*), sum(int2/int4) (DataFusion → Int64 = PG bigint).
+        AggSpec::CountStar | AggSpec::SumInt(_) => {
+            let v = arr.as_any().downcast_ref::<Int64Array>().ok_or("df_executor: agg not Int64")?.value(row);
             v.into_datum().ok_or("df_executor: int8 datum")?
         }
-        AggSpec::SumFloat8(_) => {
-            let v = arr.as_any().downcast_ref::<Float64Array>().ok_or("df_executor: sum not Float64")?.value(row);
+        // float8 output: sum(float8), avg(float8) (DataFusion → Float64 = PG double precision).
+        AggSpec::SumFloat8(_) | AggSpec::AvgFloat8(_) => {
+            let v = arr.as_any().downcast_ref::<Float64Array>().ok_or("df_executor: agg not Float64")?.value(row);
             v.into_datum().ok_or("df_executor: float8 datum")?
         }
     };

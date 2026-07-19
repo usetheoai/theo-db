@@ -290,7 +290,11 @@ unsafe fn admit(
             if name == "count" && (*agg).aggstar {
                 layout.push((1, aggs.len()));
                 aggs.push(ParsedAgg { kind: 0, attno: 0 });
-            } else if name == "sum" {
+            } else if name == "sum" || name == "avg" {
+                // sum/avg of a bare base-rel Var. Only the shapes whose Arrow output maps to the EXACT PG output type
+                // are admitted (M114 blueprint E1/E2/E3): sum(float8)→float8 (kind 1), sum(int2/int4)→int8 (kind 2,
+                // Arrow Int64=bigint, no overflow), avg(float8)→float8 (kind 3). DECLINED (→ native plan, PG returns
+                // the exact numeric): avg(int*), sum(int8), sum(float4), avg(float4) (ADR-M114-1).
                 let args = PgList::<pg_sys::TargetEntry>::from_pg((*agg).args);
                 if args.len() != 1 {
                     return None;
@@ -301,11 +305,25 @@ unsafe fn admit(
                     return None;
                 }
                 let var = e as *mut pg_sys::Var;
-                if (*var).vartype != pg_sys::FLOAT8OID || (*var).varno as i32 != relid {
+                if (*var).varno as i32 != relid {
                     return None;
                 }
+                let vartype = (*var).vartype;
+                let kind = if name == "sum" {
+                    if vartype == pg_sys::FLOAT8OID {
+                        1
+                    } else if vartype == pg_sys::INT2OID || vartype == pg_sys::INT4OID {
+                        2
+                    } else {
+                        return None; // sum(int8)→numeric, sum(float4)→real: decline
+                    }
+                } else if vartype == pg_sys::FLOAT8OID {
+                    3 // avg(float8)→float8
+                } else {
+                    return None; // avg(int*)/avg(float4)→numeric/float8-ULP: decline
+                };
                 layout.push((1, aggs.len()));
-                aggs.push(ParsedAgg { kind: 1, attno: (*var).varattno as i32 });
+                aggs.push(ParsedAgg { kind, attno: (*var).varattno as i32 });
             } else {
                 return None;
             }
@@ -322,12 +340,11 @@ unsafe fn admit(
     let is_columnar = amoid != pg_sys::InvalidOid && pg_sys::get_rel_relam((*rte).relid) == amoid;
     if is_columnar {
         if grouped {
-            // GROUP BY + WHERE combined is a later slice — decline when both are present so the native plan applies
-            // the WHERE correctly (keeps the group and predicate-pushdown axes orthogonal).
-            if !(*input_rel).baserestrictinfo.is_null() {
-                return None;
-            }
-            return Some(Admitted { mode: 0, relid, aggs, preds: Vec::new(), group_cols, layout });
+            // GROUP BY + WHERE combined (M114): extract the zone-map predicates like the scalar path. If ANY qual is
+            // un-pushable, `extract_all_predicates` returns None → decline so the native plan applies the WHERE (the
+            // DataFusion Filter can only represent pushable clauses); the skip + Filter compose with the grouping.
+            let preds = extract_all_predicates(input_rel, relid)?;
+            return Some(Admitted { mode: 0, relid, aggs, preds, group_cols, layout });
         }
         // Non-grouped: WHERE → zone-map predicates. ALL quals must be pushable (`col <op> const`), else decline so
         // the native plan applies the WHERE correctly.
@@ -504,12 +521,15 @@ unsafe extern "C-unwind" fn begin_custom_scan(
             let kind = pg_sys::list_nth_int(priv_list, i);
             let attno = pg_sys::list_nth_int(priv_list, i + 1);
             i += 2;
+            let col_name = |ano: i32| -> String {
+                let nm = pg_sys::get_attname(relid, ano as pg_sys::AttrNumber, false);
+                CStr::from_ptr(nm).to_string_lossy().into_owned()
+            };
             match kind {
                 0 => specs.push(AggSpec::CountStar),
-                1 => {
-                    let nm = pg_sys::get_attname(relid, attno as pg_sys::AttrNumber, false);
-                    specs.push(AggSpec::SumFloat8(CStr::from_ptr(nm).to_string_lossy().into_owned()));
-                }
+                1 => specs.push(AggSpec::SumFloat8(col_name(attno))),
+                2 => specs.push(AggSpec::SumInt(col_name(attno))),
+                3 => specs.push(AggSpec::AvgFloat8(col_name(attno))),
                 _ => return Err(format!("columnar_agg: bad agg kind {kind}")),
             }
         }
@@ -556,7 +576,8 @@ unsafe extern "C-unwind" fn begin_custom_scan(
         if ngroup > 0 {
             // GROUP BY (columnar only — admit declined grouped heap / grouped+WHERE). Multi-row result.
             let rel = pg_sys::relation_open(relid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
-            let r = run_columnar_grouped_aggs(rel, &group_cols, &specs, &layout);
+            let r =
+                run_columnar_grouped_aggs(rel, &group_cols, &specs, &layout, &preds, super::guc::columnar_zonemap_skip());
             pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
             r
         } else if mode == 1 {
@@ -720,23 +741,41 @@ mod tests {
         Spi::run("DROP TABLE gb_h").unwrap();
     }
 
-    /// admit declines GROUP BY + WHERE combined (deferred slice) and a grouping expression → native plan (correct).
+    /// M114 admission surface: GROUP BY + WHERE combined is NOW admitted (pushable qual); avg(float8) + sum(int2/int4)
+    /// admitted (byte-identical output types); avg(int*), sum(int8), sum(float4), and a grouping expression DECLINE to
+    /// the native plan (numeric/ULP output — ADR-M114-1). Includes a byte-identical scalar spot-check vs the heap.
     #[pg_test]
-    fn test_admit_groupby_where_and_expr_key_decline() {
+    fn test_m114_aggregate_admission_and_declines() {
         Spi::run("SET theodb.enable_columnar_agg = on").unwrap();
-        Spi::run("CREATE TABLE gbd (k int, ts timestamptz, x float8) USING theodb_columnar").unwrap();
-        Spi::run("INSERT INTO gbd SELECT g%5, timestamptz '2020-01-01'+(g*interval '1 min'), g::float8 FROM generate_series(1,2000) g").unwrap();
+        Spi::run("CREATE TABLE m114c (k int, ts timestamptz, x float8, i4 int4, i2 int2, b int8, f4 real) USING theodb_columnar").unwrap();
+        Spi::run("CREATE TABLE m114h (k int, ts timestamptz, x float8, i4 int4, i2 int2, b int8, f4 real)").unwrap();
+        let gen_sql = "SELECT g%5, timestamptz '2020-01-01'+(g*interval '1 min'), g::float8, g, (g%100), g::int8, g::real FROM generate_series(1,5000) g";
+        Spi::run(&format!("INSERT INTO m114c {gen_sql}")).unwrap();
+        Spi::run(&format!("INSERT INTO m114h {gen_sql}")).unwrap();
+        let is_cs = |sql: &str| -> bool {
+            Spi::get_one::<String>(&format!("EXPLAIN (COSTS OFF) {sql}")).unwrap().unwrap().contains("theodb_columnar_agg")
+        };
 
-        let with_where = Spi::get_one::<String>("EXPLAIN (COSTS OFF) SELECT k, sum(x) FROM gbd WHERE x>0 GROUP BY k").unwrap().unwrap();
-        assert!(!with_where.contains("theodb_columnar_agg"), "GROUP BY + WHERE must decline to native: {with_where}");
+        // ADMITTED (M114):
+        assert!(is_cs("SELECT k, sum(x) FROM m114c WHERE k>=0 GROUP BY k"), "GROUP BY + pushable WHERE must be a CustomScan");
+        assert!(is_cs("SELECT avg(x) FROM m114c"), "avg(float8) must be a CustomScan");
+        assert!(is_cs("SELECT sum(i4) FROM m114c"), "sum(int4) must be a CustomScan");
+        assert!(is_cs("SELECT sum(i2) FROM m114c"), "sum(int2) must be a CustomScan");
+        // DECLINED (numeric / ULP output → native plan):
+        assert!(!is_cs("SELECT avg(i4) FROM m114c"), "avg(int4)→numeric must decline");
+        assert!(!is_cs("SELECT sum(b) FROM m114c"), "sum(int8)→numeric must decline");
+        assert!(!is_cs("SELECT sum(f4) FROM m114c"), "sum(real) must decline");
+        assert!(!is_cs("SELECT date_trunc('day',ts), sum(x) FROM m114c GROUP BY date_trunc('day',ts)"), "grouping expr must decline");
 
-        let expr_key = Spi::get_one::<String>("EXPLAIN (COSTS OFF) SELECT date_trunc('day',ts), sum(x) FROM gbd GROUP BY date_trunc('day',ts)").unwrap().unwrap();
-        assert!(!expr_key.contains("theodb_columnar_agg"), "grouping expression must decline to native: {expr_key}");
+        // Byte-identical scalar spot-check (top-level single-row → Spi::get_one works despite the M100 composability limit).
+        let cavg = Spi::get_one::<f64>("SELECT avg(x) FROM m114c").unwrap().unwrap();
+        let havg = Spi::get_one::<f64>("SELECT avg(x) FROM m114h").unwrap().unwrap();
+        assert_eq!(cavg, havg, "avg(float8) must be byte-identical to the heap");
+        let csi = Spi::get_one::<i64>("SELECT sum(i4) FROM m114c").unwrap().unwrap();
+        let hsi = Spi::get_one::<i64>("SELECT sum(i4) FROM m114h").unwrap().unwrap();
+        assert_eq!(csi, hsi, "sum(int4) must be byte-identical to the heap");
 
-        // But a bare temporal key GROUP BY IS admitted (reuses the temporal Arrow support).
-        let temporal = Spi::get_one::<String>("EXPLAIN (COSTS OFF) SELECT ts, count(*) FROM gbd GROUP BY ts").unwrap().unwrap();
-        assert!(temporal.contains("Custom Scan") || temporal.contains("theodb_columnar_agg"), "bare temporal key GROUP BY must be a CustomScan: {temporal}");
-
-        Spi::run("DROP TABLE gbd").unwrap();
+        Spi::run("DROP TABLE m114c").unwrap();
+        Spi::run("DROP TABLE m114h").unwrap();
     }
 }
