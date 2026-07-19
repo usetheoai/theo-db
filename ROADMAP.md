@@ -1702,7 +1702,7 @@ LazyGraphRAG (MS Research), HippoRAG 2; baseline a bater = `theo-rag/packages/co
 
 ---
 
-## M114 — [ ] Columnar analytical aggregate completeness: GROUP BY+WHERE combinado + avg/sum(int) *(gated M100)*
+## M114 — [x] Columnar analytical aggregate completeness: GROUP BY+WHERE combinado + avg/sum(int) *(gated M100)*
 
 > Added 2026-07-19 by `/roadmap-feature` (slug: `columnar-aggregate-completeness`). Fonte: caveats dos slices ad-hoc columnar (`docs/benchmarks/columnar-groupby-verdict.md`). See CHANGELOG `[Unreleased] § Added`.
 

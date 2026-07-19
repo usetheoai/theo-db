@@ -25,11 +25,6 @@ pub(crate) static ENABLE_COLUMNAR_AGG: GucSetting<bool> = GucSetting::<bool>::ne
 struct Methods<T>(T);
 unsafe impl<T> Sync for Methods<T> {}
 
-static PATH_METHODS: Methods<pg_sys::CustomPathMethods> = Methods(pg_sys::CustomPathMethods {
-    CustomName: c"theodb_columnar_agg".as_ptr(),
-    PlanCustomPath: Some(plan_custom_path),
-    ReparameterizeCustomPathByChild: None,
-});
 static SCAN_METHODS: Methods<pg_sys::CustomScanMethods> = Methods(pg_sys::CustomScanMethods {
     CustomName: c"theodb_columnar_agg".as_ptr(),
     CreateCustomScanState: Some(create_custom_scan_state),
@@ -61,6 +56,24 @@ struct ColumnarAggState {
 }
 
 static mut PREV_UPPER_HOOK: pg_sys::create_upper_paths_hook_type = None;
+static mut PREV_PLANNER_HOOK: pg_sys::planner_hook_type = None;
+
+/// M115 — the Agg-swap rearchitecture. `admit` runs at `upper_paths_hook` (parse-tree stage, where it can inspect the
+/// query cleanly) but does NOT add a CustomPath — instead it STASHES the admission result keyed by the base table's
+/// OID. The `planner_hook` then lets `standard_planner` build a NORMAL `Agg` node (whose output the parent nodes
+/// reference as plain Vars via OUTER_VAR — NO Aggref leaks), and POST-planning (after `set_plan_refs`) swaps that Agg
+/// → our `CustomScan`. Because the swap replaces an already-wired Agg with a node of the same output shape and the
+/// CustomScan's targetlist is plain typed Vars (no Aggref), the aggregate output is consumable in
+/// subqueries/joins/agg-ORDER-BY (fixes `cache lookup failed for attribute N of relation 0`) with no re-fixing.
+#[derive(Clone)]
+struct StashedAdmit {
+    table_oid: u32,
+    adm: Admitted,
+    consumed: bool,
+}
+thread_local! {
+    static ADMIT_STASH: std::cell::RefCell<Vec<StashedAdmit>> = const { std::cell::RefCell::new(Vec::new()) };
+}
 
 /// Cached OID of the `theodb_columnar` table AM (resolved once per backend).
 fn columnar_amoid() -> pg_sys::Oid {
@@ -86,11 +99,14 @@ pub(crate) fn init() {
         pg_sys::RegisterCustomScanMethods(&SCAN_METHODS.0);
         PREV_UPPER_HOOK = pg_sys::create_upper_paths_hook;
         pg_sys::create_upper_paths_hook = Some(upper_paths_hook);
+        PREV_PLANNER_HOOK = pg_sys::planner_hook;
+        pg_sys::planner_hook = Some(planner_hook);
     }
 }
 
-/// The parsed, admissible aggregate: (kind, attno). kind 0 = count(*), 1 = sum(float8). attno is the 1-based column
-/// for sum (0 for count).
+/// The parsed, admissible aggregate: (kind, attno). kind 0 = count(*), 1 = sum(float8), 2 = sum(int)→int8,
+/// 3 = avg(float8). attno is the 1-based column (0 for count).
+#[derive(Clone)]
 struct ParsedAgg {
     kind: i32,
     attno: i32,
@@ -203,6 +219,7 @@ unsafe fn extract_all_predicates(input_rel: *mut pg_sys::RelOptInfo, relid: i32)
 /// Admission result. `group_cols` = (attno, typoid) per GROUP BY key; `layout` maps each output-target slot to its
 /// source (kind 0=group→`group_cols[idx]`, 1=agg→`aggs[idx]`) so exec emits rows in target order (ADR-2). Non-grouped
 /// admissions leave `group_cols`/`layout` empty (the scalar path needs no layout — aggs are already in target order).
+#[derive(Clone)]
 struct Admitted {
     mode: i32,
     relid: i32,
@@ -210,6 +227,14 @@ struct Admitted {
     preds: Vec<ZonePredicate>,
     group_cols: Vec<(i32, u32)>,
     layout: Vec<(u8, usize)>,
+}
+
+impl Admitted {
+    /// The number of output columns this admission produces — the layout length when grouped, else one per aggregate
+    /// (the scalar path leaves `layout` empty). Used by the M115 swap's shape guard (review B3).
+    fn expected_arity(&self) -> usize {
+        if self.layout.is_empty() { self.aggs.len() } else { self.layout.len() }
+    }
 }
 
 unsafe fn admit(
@@ -380,7 +405,10 @@ unsafe fn admit(
     None
 }
 
-/// `create_upper_paths_hook` — intercept a simple columnar aggregate and add the vectorized `CustomPath`.
+/// `create_upper_paths_hook` — run `admit` and STASH the result keyed by the base table's OID (M115). Does NOT add a
+/// CustomPath: `standard_planner` then builds a normal `Agg`, and `planner_hook` swaps it post-planning. Stashing at
+/// this stage reuses `admit`'s clean parse-tree analysis (aggs, group cols, pushable WHERE) instead of re-deriving it
+/// from planned nodes.
 #[pg_guard]
 unsafe extern "C-unwind" fn upper_paths_hook(
     root: *mut pg_sys::PlannerInfo,
@@ -398,86 +426,255 @@ unsafe extern "C-unwind" fn upper_paths_hook(
     let Some(adm) = admit(root, input_rel, output_rel) else {
         return; // fail-safe: any unsupported shape → native plan
     };
-
-    // Encode the plan in custom_private as an IntList:
-    //   [mode, relid, nagg, (kind,attno)×nagg, npred, (col, op, cbits_hi, cbits_lo)×npred,
-    //    ngroup, (attno, typoid)×ngroup, noutput, (kind, idx)×noutput].
-    // u64 const_bits is split into two i32 (List holds C `int`); reassembled at exec (begin_custom_scan). The group
-    // block is appended last so old-shape parsers (npred-terminated) stay backward compatible (ngroup defaults 0).
-    let mut priv_list: *mut pg_sys::List = pg_sys::lappend_int(std::ptr::null_mut(), adm.mode);
-    priv_list = pg_sys::lappend_int(priv_list, adm.relid);
-    priv_list = pg_sys::lappend_int(priv_list, adm.aggs.len() as i32);
-    for a in &adm.aggs {
-        priv_list = pg_sys::lappend_int(priv_list, a.kind);
-        priv_list = pg_sys::lappend_int(priv_list, a.attno);
+    // Resolve the base table's stable pg_class OID (the swap matches the planned Agg's child scan by OID).
+    let rte = *(*root).simple_rte_array.add(adm.relid as usize);
+    if rte.is_null() {
+        return;
     }
-    priv_list = pg_sys::lappend_int(priv_list, adm.preds.len() as i32);
-    for p in &adm.preds {
-        priv_list = pg_sys::lappend_int(priv_list, p.col as i32);
-        priv_list = pg_sys::lappend_int(priv_list, p.op as i32);
-        priv_list = pg_sys::lappend_int(priv_list, (p.const_bits >> 32) as i32);
-        priv_list = pg_sys::lappend_int(priv_list, (p.const_bits & 0xFFFF_FFFF) as i32);
-    }
-    priv_list = pg_sys::lappend_int(priv_list, adm.group_cols.len() as i32);
-    for &(attno, typoid) in &adm.group_cols {
-        priv_list = pg_sys::lappend_int(priv_list, attno);
-        priv_list = pg_sys::lappend_int(priv_list, typoid as i32);
-    }
-    priv_list = pg_sys::lappend_int(priv_list, adm.layout.len() as i32);
-    for &(kind, idx) in &adm.layout {
-        priv_list = pg_sys::lappend_int(priv_list, kind as i32);
-        priv_list = pg_sys::lappend_int(priv_list, idx as i32);
-    }
-
-    let mut cpath = PgBox::<pg_sys::CustomPath>::alloc_node(pg_sys::NodeTag::T_CustomPath);
-    let path = &mut cpath.path;
-    path.pathtype = pg_sys::NodeTag::T_CustomScan;
-    path.parent = output_rel;
-    path.pathtarget = (*output_rel).reltarget;
-    path.param_info = std::ptr::null_mut();
-    // The planner's row estimate for this upper rel (the group count; 1 for a scalar aggregate) — accurate rows keep
-    // any ORDER BY / LIMIT above the GROUP BY costed sanely.
-    path.rows = if (*output_rel).rows > 0.0 { (*output_rel).rows } else { 1.0 };
-    path.startup_cost = 0.0;
-    path.total_cost = 1.0; // cheap → wins over the native Agg for the admitted shape (opt-in GUC gates it)
-    cpath.flags = 0;
-    cpath.custom_paths = std::ptr::null_mut();
-    cpath.custom_private = priv_list;
-    cpath.methods = &PATH_METHODS.0;
-    pg_sys::add_path(output_rel, cpath.into_pg() as *mut pg_sys::Path);
+    let table_oid = (*rte).relid.to_u32();
+    ADMIT_STASH.with(|s| s.borrow_mut().push(StashedAdmit { table_oid, adm, consumed: false }));
 }
 
-/// Path → Plan: a `CustomScan` with `scanrelid = 0` (synthetic aggregate result). `custom_scan_tlist` carries the
-/// SAME aggregate output tlist as `plan.targetlist` — so `setrefs.c` rewrites the node's targetlist into INDEX_VAR
-/// Vars referencing the custom_scan_tlist (resolving them), and the executor derives the scan tupdesc from the
-/// aggregate output types via `ExecTypeFromTL(custom_scan_tlist)` WITHOUT evaluating the `Aggref`s (we fill the
-/// scan slot with the computed values at exec time). A copy is used so setrefs' in-place rewrite of the plan
-/// targetlist cannot corrupt the scan tlist.
+/// `planner_hook` — run the standard planner (which builds a normal `Agg` for each admitted columnar aggregate), then
+/// swap those Aggs → our `CustomScan` post-`set_plan_refs` (M115 Agg-swap). The stash is per-planning-run.
 #[pg_guard]
-unsafe extern "C-unwind" fn plan_custom_path(
-    _root: *mut pg_sys::PlannerInfo,
-    _rel: *mut pg_sys::RelOptInfo,
-    best_path: *mut pg_sys::CustomPath,
-    tlist: *mut pg_sys::List,
-    _clauses: *mut pg_sys::List,
-    _custom_plans: *mut pg_sys::List,
-) -> *mut pg_sys::Plan {
-    let scan_tlist = pg_sys::copyObjectImpl(tlist as *const std::ffi::c_void) as *mut pg_sys::List;
+unsafe extern "C-unwind" fn planner_hook(
+    parse: *mut pg_sys::Query,
+    query_string: *const std::os::raw::c_char,
+    cursor_options: c_int,
+    bound_params: pg_sys::ParamListInfo,
+) -> *mut pg_sys::PlannedStmt {
+    // Save the enclosing run's stash and restore it on scope exit — INCLUDING a planner longjmp/ereport (pgrx
+    // converts the C longjmp to a Rust unwind at the `#[pg_guard]` boundary, so `Drop` runs). Without this a planning
+    // ERROR would leave a stale inner-run stash that a later query could mis-consume (review H1).
+    struct StashGuard(Vec<StashedAdmit>);
+    impl Drop for StashGuard {
+        fn drop(&mut self) {
+            ADMIT_STASH.with(|s| *s.borrow_mut() = std::mem::take(&mut self.0));
+        }
+    }
+    let _guard = StashGuard(ADMIT_STASH.with(|s| std::mem::replace(&mut *s.borrow_mut(), Vec::new())));
+    let stmt = match PREV_PLANNER_HOOK {
+        Some(prev) => prev(parse, query_string, cursor_options, bound_params),
+        None => pg_sys::standard_planner(parse, query_string, cursor_options, bound_params),
+    };
+    let have_stash = ADMIT_STASH.with(|s| !s.borrow().is_empty());
+    if ENABLE_COLUMNAR_AGG.get() && !stmt.is_null() && have_stash {
+        swap_walk(&mut (*stmt).planTree, (*stmt).rtable);
+        let subplans = (*stmt).subplans;
+        if !subplans.is_null() {
+            let n = (*subplans).length;
+            for i in 0..n {
+                let cell = (*subplans).elements.add(i as usize);
+                swap_walk(&mut (*cell).ptr_value as *mut _ as *mut *mut pg_sys::Plan, (*stmt).rtable);
+            }
+        }
+    }
+    stmt // `_guard` restores the enclosing run's stash on drop (incl. unwind)
+}
+
+/// Find the base-relation scanrelid of the Agg's DIRECT input scan: a `SeqScan`, optionally under a `Sort` (the
+/// GroupAgg input sort). STOPS at anything else (`Agg`, `SubqueryScan`, join, …) → `None`, so a nested aggregation is
+/// NOT mistaken for the current Agg's columnar scan (else an outer `sum(s) FROM (grouped)` would match the inner
+/// table and be swapped wrongly).
+unsafe fn find_scan_relid(plan: *mut pg_sys::Plan) -> Option<u32> {
+    if plan.is_null() {
+        return None;
+    }
+    match (*plan).type_ {
+        pg_sys::NodeTag::T_SeqScan => {
+            let rid = (*(plan as *mut pg_sys::SeqScan)).scan.scanrelid;
+            if rid > 0 { Some(rid) } else { None }
+        }
+        pg_sys::NodeTag::T_Sort => find_scan_relid((*plan).lefttree),
+        _ => None,
+    }
+}
+
+/// Build the plain-typed-`Var(INDEX_VAR, resno)` targetlist matching `tlist` positionally — NO `Aggref` (M115). The
+/// exec callback fills the scan slot; the node never evaluates an aggregate, so no `Var` can escape into an upper node.
+unsafe fn plain_var_tlist(tlist: *mut pg_sys::List) -> *mut pg_sys::List {
+    let src = PgList::<pg_sys::TargetEntry>::from_pg(tlist);
+    let mut out: *mut pg_sys::List = std::ptr::null_mut();
+    for i in 0..src.len() {
+        let te = src.get_ptr(i).expect("tlist entry");
+        let e = (*te).expr as *mut pg_sys::Node;
+        let var = pg_sys::makeVar(
+            pg_sys::INDEX_VAR as i32,
+            (i + 1) as pg_sys::AttrNumber,
+            pg_sys::exprType(e),
+            pg_sys::exprTypmod(e),
+            pg_sys::exprCollation(e),
+            0,
+        );
+        let nte = pg_sys::makeTargetEntry(var as *mut pg_sys::Expr, (i + 1) as pg_sys::AttrNumber, (*te).resname, (*te).resjunk);
+        out = pg_sys::lappend(out, nte as *mut c_void);
+    }
+    out
+}
+
+/// Encode a stashed admission as the CustomScan's `custom_private` IntList (M115 layout, table OID first):
+/// `[table_oid, mode, nagg, (kind,attno)×nagg, npred, (col,op,hi,lo)×npred, ngroup, (attno,typoid)×ngroup,
+///  noutput, (kind,idx)×noutput]`.
+unsafe fn encode_private(adm: &Admitted, table_oid: u32) -> *mut pg_sys::List {
+    let mut pl = pg_sys::lappend_int(std::ptr::null_mut(), table_oid as i32);
+    pl = pg_sys::lappend_int(pl, adm.mode);
+    pl = pg_sys::lappend_int(pl, adm.aggs.len() as i32);
+    for a in &adm.aggs {
+        pl = pg_sys::lappend_int(pl, a.kind);
+        pl = pg_sys::lappend_int(pl, a.attno);
+    }
+    pl = pg_sys::lappend_int(pl, adm.preds.len() as i32);
+    for p in &adm.preds {
+        pl = pg_sys::lappend_int(pl, p.col as i32);
+        pl = pg_sys::lappend_int(pl, p.op as i32);
+        pl = pg_sys::lappend_int(pl, (p.const_bits >> 32) as i32);
+        pl = pg_sys::lappend_int(pl, (p.const_bits & 0xFFFF_FFFF) as i32);
+    }
+    pl = pg_sys::lappend_int(pl, adm.group_cols.len() as i32);
+    for &(attno, typoid) in &adm.group_cols {
+        pl = pg_sys::lappend_int(pl, attno);
+        pl = pg_sys::lappend_int(pl, typoid as i32);
+    }
+    pl = pg_sys::lappend_int(pl, adm.layout.len() as i32);
+    for &(kind, idx) in &adm.layout {
+        pl = pg_sys::lappend_int(pl, kind as i32);
+        pl = pg_sys::lappend_int(pl, idx as i32);
+    }
+    pl
+}
+
+/// If `plan` is an `Agg` over a columnar table matching an unconsumed stash entry, build the replacement `CustomScan`
+/// (plain-Var tlist, scanrelid=0, custom_private from the stash) with the same output shape; else `None`.
+unsafe fn try_swap_agg(plan: *mut pg_sys::Plan, rtable: *mut pg_sys::List) -> Option<*mut pg_sys::Plan> {
+    let agg = plan as *mut pg_sys::Agg;
+    // B1 (review): only a SIMPLE (non-split) aggregate carries the FINAL result. A parallel plan splits into
+    // Finalize(SIMPLE)→Gather→Partial(INITIAL_SERIAL)→ParallelSeqScan; swapping the Partial would emit the FINAL value
+    // where a partial transvalue is expected → wrong result. Decline any non-SIMPLE split.
+    if (*agg).aggsplit != pg_sys::AggSplit::AGGSPLIT_SIMPLE {
+        return None;
+    }
+    // MIXED (grouping sets) is out of scope. PLAIN (scalar) and HASHED (unordered — any ORDER BY has an explicit Sort
+    // ABOVE) swap freely. SORTED (GroupAgg) relies on its INPUT sort for output order; our exec re-imposes an ASC
+    // nulls-last sort on the group keys — so a SORTED node is admitted ONLY when its input Sort is exactly ASC
+    // nulls-last on numeric/temporal keys (checked below); DESC / nulls-first / text → decline (review B2).
+    let strat = (*agg).aggstrategy;
+    if strat != pg_sys::AggStrategy::AGG_PLAIN
+        && strat != pg_sys::AggStrategy::AGG_HASHED
+        && strat != pg_sys::AggStrategy::AGG_SORTED
+    {
+        return None;
+    }
+    let scanrelid = find_scan_relid((*agg).plan.lefttree)?;
+    let scan_rte = pg_sys::list_nth(rtable, (scanrelid - 1) as i32) as *mut pg_sys::RangeTblEntry;
+    if scan_rte.is_null() {
+        return None;
+    }
+    let table_oid = (*scan_rte).relid.to_u32();
+    let out_arity = pg_sys::list_length((*agg).plan.targetlist) as usize;
+    let numcols = (*agg).numCols as usize;
+    // B3 (review): match the first unconsumed stash entry for this OID WHOSE SHAPE matches the planned Agg — same
+    // group-key count and output arity — so a scalar Agg cannot bind a grouped `Admitted` (or vice-versa) on the same
+    // table, which would emit the wrong row shape.
+    let adm = ADMIT_STASH.with(|s| {
+        let mut v = s.borrow_mut();
+        v.iter_mut()
+            .find(|e| {
+                !e.consumed
+                    && e.table_oid == table_oid
+                    && e.adm.group_cols.len() == numcols
+                    && e.adm.expected_arity() == out_arity
+            })
+            .map(|e| {
+                e.consumed = true;
+                e.adm.clone()
+            })
+    })?;
+    // B2 (review): a SORTED GroupAgg is only swappable when our ASC-nulls-last group sort reproduces its output order.
+    if strat == pg_sys::AggStrategy::AGG_SORTED {
+        // Text keys: PG collation order ≠ byte-wise sort → decline.
+        if adm.group_cols.iter().any(|&(_, t)| matches!(t, 25 | 1042 | 1043)) {
+            return None;
+        }
+        // The input Sort must be exactly ASC nulls-last (else the plan's output order isn't our ASC order).
+        let child = (*agg).plan.lefttree;
+        if child.is_null() || (*child).type_ != pg_sys::NodeTag::T_Sort {
+            return None;
+        }
+        let s = child as *mut pg_sys::Sort;
+        for i in 0..(*s).numCols as usize {
+            if *(*s).nullsFirst.add(i) {
+                return None; // nulls-first ≠ our nulls-last
+            }
+            let opno = *(*s).sortOperators.add(i);
+            let (mut opfamily, mut opcintype, mut strategy) =
+                (pg_sys::InvalidOid, pg_sys::InvalidOid, 0i16);
+            pg_sys::get_ordering_op_properties(opno, &mut opfamily, &mut opcintype, &mut strategy);
+            if strategy != pg_sys::BTLessStrategyNumber as i16 {
+                return None; // DESC (or non-btree) ≠ our ascending
+            }
+        }
+    }
+
+    let tlist = (*agg).plan.targetlist;
     let mut cscan = PgBox::<pg_sys::CustomScan>::alloc_node(pg_sys::NodeTag::T_CustomScan);
-    let plan = &mut cscan.scan.plan;
-    plan.targetlist = tlist;
-    plan.qual = std::ptr::null_mut();
-    plan.lefttree = std::ptr::null_mut();
-    plan.righttree = std::ptr::null_mut();
+    {
+        let plan_out = &mut cscan.scan.plan;
+        plan_out.targetlist = plain_var_tlist(tlist);
+        plan_out.qual = std::ptr::null_mut();
+        plan_out.lefttree = std::ptr::null_mut(); // drop the Agg's child subtree — the CustomScan scans itself
+        plan_out.righttree = std::ptr::null_mut();
+        plan_out.plan_node_id = (*agg).plan.plan_node_id;
+        plan_out.startup_cost = (*agg).plan.startup_cost;
+        plan_out.total_cost = (*agg).plan.total_cost;
+        plan_out.plan_rows = (*agg).plan.plan_rows;
+        plan_out.plan_width = (*agg).plan.plan_width;
+        plan_out.parallel_aware = false;
+        plan_out.parallel_safe = (*agg).plan.parallel_safe;
+    }
     cscan.scan.scanrelid = 0;
     cscan.flags = 0;
     cscan.custom_plans = std::ptr::null_mut();
     cscan.custom_exprs = std::ptr::null_mut();
-    cscan.custom_private = (*best_path).custom_private;
-    cscan.custom_scan_tlist = scan_tlist;
+    cscan.custom_private = encode_private(&adm, table_oid);
+    cscan.custom_scan_tlist = plain_var_tlist(tlist);
     cscan.custom_relids = std::ptr::null_mut();
     cscan.methods = &SCAN_METHODS.0;
-    cscan.into_pg() as *mut pg_sys::Plan
+    Some(cscan.into_pg() as *mut pg_sys::Plan)
+}
+
+/// Walk the plan tree via a mutable node slot, swapping matching `Agg` nodes → our `CustomScan` in place.
+unsafe fn swap_walk(slot: *mut *mut pg_sys::Plan, rtable: *mut pg_sys::List) {
+    let plan = *slot;
+    if plan.is_null() {
+        return;
+    }
+    if (*plan).type_ == pg_sys::NodeTag::T_Agg {
+        if let Some(newnode) = try_swap_agg(plan, rtable) {
+            *slot = newnode;
+            return; // replaced — the Agg's child subtree is dropped
+        }
+    }
+    swap_walk(&mut (*plan).lefttree, rtable);
+    swap_walk(&mut (*plan).righttree, rtable);
+    match (*plan).type_ {
+        pg_sys::NodeTag::T_Append => swap_walk_list((*(plan as *mut pg_sys::Append)).appendplans, rtable),
+        pg_sys::NodeTag::T_MergeAppend => swap_walk_list((*(plan as *mut pg_sys::MergeAppend)).mergeplans, rtable),
+        pg_sys::NodeTag::T_SubqueryScan => swap_walk(&mut (*(plan as *mut pg_sys::SubqueryScan)).subplan, rtable),
+        _ => {}
+    }
+}
+
+/// Walk a List of child plans with mutable slots (Append/MergeAppend members).
+unsafe fn swap_walk_list(list: *mut pg_sys::List, rtable: *mut pg_sys::List) {
+    if list.is_null() {
+        return;
+    }
+    let n = (*list).length;
+    for i in 0..n {
+        let cell = (*list).elements.add(i as usize);
+        swap_walk(&mut (*cell).ptr_value as *mut _ as *mut *mut pg_sys::Plan, rtable);
+    }
 }
 
 #[pg_guard]
@@ -506,10 +703,10 @@ unsafe extern "C-unwind" fn begin_custom_scan(
     let cscan = st.css.ss.ps.plan as *mut pg_sys::CustomScan;
     let priv_list = (*cscan).custom_private;
     let n = pg_sys::list_length(priv_list);
-    let mode = pg_sys::list_nth_int(priv_list, 0);
-    let relidx = pg_sys::list_nth_int(priv_list, 1);
-    let rte = pg_sys::list_nth((*estate).es_range_table, relidx - 1) as *mut pg_sys::RangeTblEntry;
-    let relid = (*rte).relid;
+    // M115 layout: [table_oid, mode, nagg, ...]. The base table is resolved by its stable pg_class OID (the Agg-swap
+    // dropped the child scan, so there is no scanrelid to index es_range_table).
+    let relid = pg_sys::Oid::from_u32_unchecked(pg_sys::list_nth_int(priv_list, 0) as u32);
+    let mode = pg_sys::list_nth_int(priv_list, 1);
 
     // Materialize the result rows in the durable per-query context so text/varlena GROUP BY key datums survive across
     // exec() calls (ADR-3). By-value datums (int8/float8/date/timestamptz) are context-independent.
@@ -783,5 +980,37 @@ mod tests {
 
         Spi::run("DROP TABLE m114c").unwrap();
         Spi::run("DROP TABLE m114h").unwrap();
+    }
+
+    /// M115 composability: the columnar-aggregate output is consumable inside an enclosing expression (subquery over a
+    /// grouped agg, scalar `s+1`, JOIN on the grouped output) — byte-identical to the heap — instead of raising
+    /// `cache lookup failed for attribute N of relation 0`. Also asserts the top-level GROUP BY is unchanged.
+    #[pg_test]
+    fn test_m115_columnar_aggregate_output_is_composable() {
+        Spi::run("SET theodb.enable_columnar_agg = on").unwrap();
+        Spi::run("CREATE TABLE m115c (k int, x float8) USING theodb_columnar").unwrap();
+        Spi::run("CREATE TABLE m115h (k int, x float8)").unwrap();
+        let gen_sql = "SELECT g%10, g::float8 FROM generate_series(1,5000) g";
+        Spi::run(&format!("INSERT INTO m115c {gen_sql}")).unwrap();
+        Spi::run(&format!("INSERT INTO m115h {gen_sql}")).unwrap();
+
+        // Subquery over a grouped columnar aggregate (the shape that used to error). Byte-identical to the heap.
+        let sub = |t: &str| Spi::get_one::<f64>(&format!("SELECT sum(s) FROM (SELECT k, sum(x) s FROM {t} GROUP BY k) q")).unwrap().unwrap();
+        assert_eq!(sub("m115c"), sub("m115h"), "subquery over grouped agg must be byte-identical");
+
+        // Scalar aggregate consumed in an outer expression.
+        let scal = |t: &str| Spi::get_one::<f64>(&format!("SELECT s+1 FROM (SELECT sum(x) s FROM {t}) q")).unwrap().unwrap();
+        assert_eq!(scal("m115c"), scal("m115h"), "scalar s+1 over subquery must be byte-identical");
+
+        // JOIN on the grouped output — 10 matching groups.
+        let jc = Spi::get_one::<i64>("SELECT count(*) FROM (SELECT k, sum(x) s FROM m115c GROUP BY k) a JOIN (SELECT k, sum(x) s FROM m115h GROUP BY k) b USING(k)").unwrap().unwrap();
+        assert_eq!(jc, 10, "join on grouped output must match all 10 groups");
+
+        // Top-level GROUP BY still a CustomScan (no regression).
+        let plan = Spi::get_one::<String>("EXPLAIN (COSTS OFF) SELECT k, sum(x) FROM m115c GROUP BY k").unwrap().unwrap();
+        assert!(plan.contains("Custom Scan") || plan.contains("theodb_columnar_agg"), "top-level GROUP BY must stay a CustomScan: {plan}");
+
+        Spi::run("DROP TABLE m115c").unwrap();
+        Spi::run("DROP TABLE m115h").unwrap();
     }
 }

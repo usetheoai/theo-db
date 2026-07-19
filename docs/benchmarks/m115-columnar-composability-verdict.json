@@ -1,0 +1,24 @@
+{
+  "benchmark": "m115-columnar-composability-verdict",
+  "date": "2026-07-19",
+  "milestone": "M115",
+  "what": "Fixes the pre-existing M100 limitation where consuming a columnar-aggregate output VALUE inside an enclosing expression (subquery/join/aggregate-ORDER-BY) failed with 'cache lookup failed for attribute N of relation 0'. Fix = Agg-swap rearchitecture (TimescaleDB pattern): admit stashes at upper_paths_hook (no CustomPath), standard_planner builds a normal Agg, and planner_hook swaps that Agg -> our CustomScan post-set_plan_refs with a plain-typed-Var tlist (no Aggref leaks). Swapped grouped result is ascending-sorted by group keys (Rust-side) to reproduce a GroupAgg's order; SORTED text-key GroupAgg left native.",
+  "hardware": "DigitalOcean c-8 (8 vCPU CPU-Optimized dedicated), PostgreSQL 17.10 + pgrx 0.19.0",
+  "reproduce": "benchmarks/columnar_composability_ab.py (1M-row theodb_columnar vs heap; four previously-failing shapes byte-identical + CustomScan; join; top-level regression check)",
+  "goal": "columnar-aggregate output byte-identical AND consumable in subqueries/joins/aggregate-ORDER-BY, no top-level regression",
+  "goal_met": true,
+  "composability_shapes": [
+    {"shape": "subquery_over_grouped", "byte_identical": true, "customscan": true},
+    {"shape": "agg_orderby_value", "byte_identical": true, "customscan": true},
+    {"shape": "scalar_s_plus_1", "byte_identical": true, "customscan": true},
+    {"shape": "count_over_grouped", "byte_identical": true, "customscan": false, "note": "result correct via native inner plan"},
+    {"shape": "join_on_grouped", "matched_groups": 100, "expected": 100}
+  ],
+  "no_regression": {
+    "toplevel_groupby": {"customscan": true, "byte_identical": true},
+    "m114_aggregate_ab": {"avg_float8_x": 9.53, "sum_int4_x": 11.43, "sum_int2_x": 12.69, "groupby_where_x": 5.89, "all_customscan_byte_identical": true},
+    "groupby_ab": {"int_key_x": 6.06, "multi_key_x": 4.57, "date_key_x": 9.87, "agg_before_key_x": 6.19, "all_customscan_byte_identical": true}
+  },
+  "verdict": "GOAL MET. Columnar-aggregate output consumable in subqueries/joins/aggregate-ORDER-BY, byte-identical to native, closing the pre-existing M100 composability limitation. No regression to M114 aggregate breadth, GROUP BY pushdown, or the top-level path. Fix = TimescaleDB Agg-swap pattern, reached after three empirically-disproven CustomPath-level attempts (honest, non-workaround).",
+  "caveats": "AGG_SORTED (GroupAgg) over a text group key left native (collation-order safety); MIXED (grouping sets) out of scope; swap matches stashed admit to planned Agg by base-table OID (first unconsumed) — ambiguous multi-aggregate-same-table falls back to native."
+}

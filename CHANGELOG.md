@@ -24,6 +24,22 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.103.0] - 2026-07-19
+
+### Added
+- **M115 — columnar-aggregate CustomScan composability — MEASURED
+  (`docs/benchmarks/m115-columnar-composability-verdict.md`).** Fixes the pre-existing M100 limitation where consuming
+  a columnar-aggregate output VALUE inside an enclosing expression (subquery / join / aggregate-`ORDER BY`) failed with
+  `cache lookup failed for attribute N of relation 0`. Fix = **Agg-swap rearchitecture** (TimescaleDB `vector_agg`
+  pattern): `admit` now STASHES its result at `upper_paths_hook` (no CustomPath added), `standard_planner` builds a
+  normal `Agg` (whose output the parent references as plain Vars — no `Aggref` leaks), and a `planner_hook` swaps that
+  `Agg` → our `CustomScan` post-`set_plan_refs` with a plain-typed-`Var` tlist. The swapped grouped result is
+  ascending-sorted by the group keys (Rust-side) to reproduce a `GroupAgg`'s output order (`SORTED` text-key GroupAgg
+  left native — collation safety). Reached after **three empirically-disproven CustomPath-level attempts** (the honest,
+  non-workaround path). **VERDICT (1M rows, c-8): GOAL MET** — the four previously-failing shapes byte-identical +
+  CustomScan; **no regression** (M114 aggregate breadth 5.89–12.69×, GROUP BY 4.57–9.87×, top-level all still columnar
+  + byte-identical). Milestone M115.
+
 ## [0.102.0] - 2026-07-19
 
 ### Added
