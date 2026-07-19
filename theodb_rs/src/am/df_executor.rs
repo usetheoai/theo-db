@@ -486,6 +486,8 @@ fn agg_datum(b: &RecordBatch, col: usize, row: usize, spec: &AggSpec) -> Result<
             v.into_datum().ok_or("df_executor: float8 datum")?
         }
         // numeric output: sum(int8) = exact Decimal128(38,0) i128 → AnyNumeric (scale 0). Int64 sum would wrap.
+        // A Decimal128(38,0) overflow (>10^38, unreachable at realistic row counts) surfaces as a DataFusion error
+        // at run_df_collect, never a panic across the C boundary.
         AggSpec::SumInt8Numeric(_) => {
             let s = arr.as_any().downcast_ref::<Decimal128Array>().ok_or("df_executor: sum-int8 not Decimal128")?.value(row);
             AnyNumeric::from(s).into_datum().ok_or("df_executor: numeric datum")?
