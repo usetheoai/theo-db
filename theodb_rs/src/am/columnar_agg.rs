@@ -336,16 +336,20 @@ unsafe fn admit(
                 let vartype = (*var).vartype;
                 let kind = if name == "sum" {
                     if vartype == pg_sys::FLOAT8OID {
-                        1
+                        1 // sum(float8)→float8
                     } else if vartype == pg_sys::INT2OID || vartype == pg_sys::INT4OID {
-                        2
+                        2 // sum(int2/4)→int8 (Arrow Int64, no overflow)
+                    } else if vartype == pg_sys::INT8OID {
+                        4 // sum(int8)→numeric (exact Decimal128 → AnyNumeric — numeric-output blueprint ADR-N1)
                     } else {
-                        return None; // sum(int8)→numeric, sum(float4)→real: decline
+                        return None; // sum(float4)→real, sum(numeric): decline
                     }
                 } else if vartype == pg_sys::FLOAT8OID {
                     3 // avg(float8)→float8
+                } else if vartype == pg_sys::INT2OID || vartype == pg_sys::INT4OID || vartype == pg_sys::INT8OID {
+                    5 // avg(int2/4/8)→numeric (AnyNumeric division = PG numeric_div — ADR-N1)
                 } else {
-                    return None; // avg(int*)/avg(float4)→numeric/float8-ULP: decline
+                    return None; // avg(float4)→float8-ULP, avg(numeric): decline
                 };
                 layout.push((1, aggs.len()));
                 aggs.push(ParsedAgg { kind, attno: (*var).varattno as i32 });
@@ -730,6 +734,8 @@ unsafe extern "C-unwind" fn begin_custom_scan(
                 1 => specs.push(AggSpec::SumFloat8(col_name(attno))),
                 2 => specs.push(AggSpec::SumInt(col_name(attno))),
                 3 => specs.push(AggSpec::AvgFloat8(col_name(attno))),
+                4 => specs.push(AggSpec::SumInt8Numeric(col_name(attno))),
+                5 => specs.push(AggSpec::AvgIntNumeric(col_name(attno))),
                 _ => return Err(format!("columnar_agg: bad agg kind {kind}")),
             }
         }
@@ -961,9 +967,10 @@ mod tests {
         assert!(is_cs("SELECT avg(x) FROM m114c"), "avg(float8) must be a CustomScan");
         assert!(is_cs("SELECT sum(i4) FROM m114c"), "sum(int4) must be a CustomScan");
         assert!(is_cs("SELECT sum(i2) FROM m114c"), "sum(int2) must be a CustomScan");
-        // DECLINED (numeric / ULP output → native plan):
-        assert!(!is_cs("SELECT avg(i4) FROM m114c"), "avg(int4)→numeric must decline");
-        assert!(!is_cs("SELECT sum(b) FROM m114c"), "sum(int8)→numeric must decline");
+        // ADMITTED (numeric-output slice — byte-identical via AnyNumeric = PG numeric_div):
+        assert!(is_cs("SELECT avg(i4) FROM m114c"), "avg(int4)→numeric must be a CustomScan (numeric-output slice)");
+        assert!(is_cs("SELECT sum(b) FROM m114c"), "sum(int8)→numeric must be a CustomScan (numeric-output slice)");
+        // DECLINED (real output / numeric-column input still out of scope):
         assert!(!is_cs("SELECT sum(f4) FROM m114c"), "sum(real) must decline");
         assert!(!is_cs("SELECT date_trunc('day',ts), sum(x) FROM m114c GROUP BY date_trunc('day',ts)"), "grouping expr must decline");
         // B1 regression (M114 heap M101-cache path): sum(int4) over a heap table with NO cache covering the column
@@ -980,6 +987,50 @@ mod tests {
 
         Spi::run("DROP TABLE m114c").unwrap();
         Spi::run("DROP TABLE m114h").unwrap();
+    }
+
+    /// Numeric-output slice: sum(int8)→numeric and avg(int2/4/8)→numeric are byte-identical to the heap,
+    /// including PG's DATA-DEPENDENT avg scale (16 sig-digits for small sums, shrinking as the sum grows) and
+    /// i128 exactness for a sum exceeding i64. Compared as TEXT so any scale/rounding drift fails the assert.
+    #[pg_test]
+    fn test_numeric_output_aggregates_byte_identical() {
+        Spi::run("SET theodb.enable_columnar_agg = on").unwrap();
+        Spi::run("CREATE TABLE numc (g int, s2 int2, s4 int4, s8 int8, big int8) USING theodb_columnar").unwrap();
+        Spi::run("CREATE TABLE numh (g int, s2 int2, s4 int4, s8 int8, big int8)").unwrap();
+        // g%4 groups; small values (avg scale 16), ~1e9 in s8 (avg scale shrinks), and `big`=2e15 whose sum over 5000
+        // rows (1e19) EXCEEDS i64 max (9.2e18) — a wrapping Int64 sum would go negative, so an identical numeric result
+        // proves the exact Decimal128/i128 path is load-bearing.
+        let gen_sql = "SELECT g%4, (g%100)::int2, g, (g::int8*1000000), 2000000000000000::int8 \
+                   FROM generate_series(1,5000) g";
+        Spi::run(&format!("INSERT INTO numc {gen_sql}")).unwrap();
+        Spi::run(&format!("INSERT INTO numh {gen_sql}")).unwrap();
+
+        let is_cs = |sql: &str| -> bool {
+            Spi::get_one::<String>(&format!("EXPLAIN (COSTS OFF) {sql}")).unwrap().unwrap().contains("theodb_columnar_agg")
+        };
+        // Compare scalar numeric aggregate output rendered as TEXT (captures scale exactly).
+        let eq_text = |agg: &str| {
+            assert!(is_cs(&format!("SELECT {agg} FROM numc")), "{agg} over columnar must be a CustomScan");
+            let c = Spi::get_one::<String>(&format!("SELECT ({agg})::text FROM numc")).unwrap().unwrap();
+            let h = Spi::get_one::<String>(&format!("SELECT ({agg})::text FROM numh")).unwrap().unwrap();
+            assert_eq!(c, h, "{agg} must be byte-identical (as text) to the heap");
+        };
+
+        // sum(int8): exact scale-0 numeric, and `big`'s sum (5000 × 4e9 = 2e13) fits i64 but sum(s8) over 5000 rows
+        // of up to 5e9 exceeds i64 — proves the Decimal128 i128 path (not the wrapping Int64 path).
+        eq_text("sum(s8)");
+        eq_text("sum(big)");
+        // avg(int2/4/8): PG numeric_div with data-dependent scale — small (scale 16) and large (shrinking) sums.
+        eq_text("avg(s2)");
+        eq_text("avg(s4)");
+        eq_text("avg(s8)");
+
+        // Empty group → NULL (zero-count guard), matching PG's finalfn. Spi::get_one already returns Ok(None) on NULL.
+        let cnull = Spi::get_one::<String>("SELECT (avg(s4))::text FROM numc WHERE g < 0").unwrap();
+        assert_eq!(cnull, None, "avg over an empty set must be SQL NULL");
+
+        Spi::run("DROP TABLE numc").unwrap();
+        Spi::run("DROP TABLE numh").unwrap();
     }
 
     /// M115 composability: the columnar-aggregate output is consumable inside an enclosing expression (subquery over a
