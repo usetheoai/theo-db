@@ -13,6 +13,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`NOTICE` file** na raiz agregando a atribuição das extensões permissivas (PostgreSQL License)
+  redistribuídas na imagem — `pgvector` e `pgvectorscale` (refs pinadas) — para satisfazer a
+  obrigação da PostgreSQL License de que o aviso de copyright apareça "in all copies". Complementa
+  (não duplica) a due-diligence AGPL em `docs/packaging/license-audit.md`. Resultado de uma auditoria
+  de proveniência/similaridade `loop-check-licence` (veredito **CLEAN**: 100% cobertura, zero cópia
+  incompatível, zero lacuna de atribuição — `.claude/knowledge-base/audits/licence-compliance-2026-07-19.md`).
 
 ### Changed
 
