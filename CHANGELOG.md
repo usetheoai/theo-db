@@ -13,6 +13,20 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.103.0] - 2026-07-19
+
+### Added
 - **M115 — columnar-aggregate CustomScan composability — MEASURED
   (`docs/benchmarks/m115-columnar-composability-verdict.md`).** Fixes the pre-existing M100 limitation where consuming
   a columnar-aggregate output VALUE inside an enclosing expression (subquery / join / aggregate-`ORDER BY`) failed with
@@ -25,16 +39,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   non-workaround path). **VERDICT (1M rows, c-8): GOAL MET** — the four previously-failing shapes byte-identical +
   CustomScan; **no regression** (M114 aggregate breadth 5.89–12.69×, GROUP BY 4.57–9.87×, top-level all still columnar
   + byte-identical). Milestone M115.
-
-### Changed
-
-### Deprecated
-
-### Removed
-
-### Fixed
-
-### Security
 
 ## [0.102.0] - 2026-07-19
 
