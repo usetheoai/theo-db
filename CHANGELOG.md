@@ -29,6 +29,18 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   (19.3 ms vs 140.8 ms). A real measured win on the columnar/lakehouse axis (not the vector-QPS ceiling). Honest
   caveat: the skip ratio tracks selectivity × clustering — unsorted columns prune little; the 7.29× is on a
   clustered column, not unconditional (`public-copy.md`).
+- **Columnar/HTAP: zone-map skip-pruning extended to TEMPORAL columns — MEASURED
+  (`docs/benchmarks/columnar-zonemap-temporal-verdict.md`).** The zone-map consumer covered int/float/bool but
+  `minmax_kind_of` returned `None` for temporal types, so a time-range filter (`WHERE ts BETWEEN …`) — the most
+  common analytical filter on time-series — did not prune. This slice maps `timestamp`/`timestamptz` (int64 µs) to
+  the proven **I8** skip path and `date` (int32 days) to **I4** — the stored bytes ARE the internal int, so
+  `chunk_can_match` / `compute_minmax` / `extract_zone_predicate` / `encode_const_bits` reuse the i64/i32 path
+  unchanged. `df_executor::build_arrow` builds naive-tz Arrow `Timestamp(µs)` / `Date32` arrays and
+  `build_filter_expr` emits a matching Arrow-typed literal so the DataFusion Filter stays type-correct (D3).
+  **VERDICT (1M clustered monotonic time-series, 10%-selective, c-8, warm): GOAL MET** for both columns —
+  byte-identical, `CustomScan` engaged, skips **89/100** (timestamptz, **8.69×**) and **88/100** (date, **8.19×**)
+  chunk groups. Honest caveat: same selectivity × clustering dependence — the win is on a monotonic `ts` (the natural
+  time-series case). `arrow_cache` (M101 heap path) untouched — no regression.
 - **Vector research (E2 FastScan): `theodb_symqg` v3 FastScan 1-bit SIMD sign kernel — full slice, MEASURED
   (`docs/benchmarks/e2-symqg-fastscan-verdict.md`).** The E2 verdict showed `theodb_symqg` slower than
   `theodb_hnsw`; the per-hop bottleneck is the 32 scalar sign-dot estimates. This slice (plan `symqg-fastscan-1bit`)

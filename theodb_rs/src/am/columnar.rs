@@ -485,6 +485,12 @@ pub(crate) fn minmax_kind_of(typid: u32) -> codec::MinMaxKind {
         23 => codec::MinMaxKind::I4,   // INT4OID
         700 => codec::MinMaxKind::F4,  // FLOAT4OID
         701 => codec::MinMaxKind::F8,  // FLOAT8OID
+        // Temporal types share an integer min/max domain (the stored bytes ARE the internal int): timestamp /
+        // timestamptz are int64 microseconds → I8; date is int32 days → I4. Numeric-order compare (chunk_can_match)
+        // + compute_minmax + encode_const_bits all reuse the proven I8/I4 path unchanged. The Arrow-facing type
+        // (build_arrow / build_filter_expr) still branches on the OID so the DataFusion Filter stays type-correct.
+        1114 | 1184 => codec::MinMaxKind::I8, // TIMESTAMPOID / TIMESTAMPTZOID (int64 μs since 2000-01-01)
+        1082 => codec::MinMaxKind::I4,        // DATEOID (int32 days since 2000-01-01)
         _ => codec::MinMaxKind::None,
     }
 }

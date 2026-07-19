@@ -141,6 +141,21 @@ mod tests {
     }
 
     #[test]
+    fn test_zonemap_temporal_domain_i8_i4() {
+        // Temporal types reuse the I8 (timestamp/timestamptz μs) / I4 (date days) path — the stored bytes ARE the
+        // internal int. A chunk group over June 2024 timestamps (μs since 2000-01-01) must prune a Jan-2024 filter.
+        let (jan2024, jun2024_lo, jun2024_hi) = (757_382_400_000_000i64, 773_020_800_000_000i64, 775_612_800_000_000i64);
+        let (h, lo, hi) = ichunk(jun2024_lo, jun2024_hi);
+        assert!(!chunk_can_match(h, lo, hi, MinMaxKind::I8, &ipred(0, ZoneOp::Lt, jan2024)), "ts < Jan2024 → skip (chunk is Jun)");
+        assert!(!chunk_can_match(h, lo, hi, MinMaxKind::I8, &ipred(0, ZoneOp::Gt, jun2024_hi)), "ts > chunk-max → skip");
+        assert!(chunk_can_match(h, lo, hi, MinMaxKind::I8, &ipred(0, ZoneOp::Ge, jun2024_lo)), "ts >= chunk-min → scan");
+        // date domain (I4): days since 2000-01-01. 2024-06-01 ≈ day 8918; a chunk [8918,8948] excludes day < 8918.
+        let (dh, dlo, dhi) = ichunk(8918, 8948);
+        assert!(!chunk_can_match(dh, dlo, dhi, MinMaxKind::I4, &ipred(0, ZoneOp::Lt, 8000)), "date < 8000 → skip");
+        assert!(chunk_can_match(dh, dlo, dhi, MinMaxKind::I4, &ipred(0, ZoneOp::Eq, 8930)), "date = 8930 (in) → scan");
+    }
+
+    #[test]
     fn test_zonemap_chunk_with_nulls_and_nan() {
         // EC-4: min/max is over PRESENT non-NaN values only (compute_minmax skips NaN). A chunk whose present
         // values are [10,20] (but that also has NULL/NaN rows): y>100 skip is SAFE (NULL/NaN never match y>100).

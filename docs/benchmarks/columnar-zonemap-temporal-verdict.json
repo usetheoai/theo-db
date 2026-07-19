@@ -1,0 +1,17 @@
+{
+  "benchmark": "columnar-zonemap-temporal-verdict",
+  "date": "2026-07-19",
+  "what": "Extends the theodb_columnar zone-map skip-pruning consumer (shipped 2026-07-18, int/float/bool) to TEMPORAL columns: timestamp/timestamptz (int64 microseconds -> reuses the I8 skip path) and date (int32 days -> I4). minmax_kind_of maps the temporal OIDs to the integer min/max domain (skip + compute_minmax + extract_zone_predicate + encode_const_bits reuse the proven i64/i32 path unchanged); build_arrow builds naive-tz Arrow Timestamp/Date arrays; build_filter_expr emits an Arrow-typed temporal literal so the DataFusion Filter (final authority, D3) stays type-correct. Measured on a clustered 1M-row monotonic time-series table.",
+  "hardware": "DigitalOcean c-8 (8 vCPU CPU-Optimized dedicated), PostgreSQL 17.10 + pgrx 0.19.0, shared_buffers=2GB",
+  "dataset": {"table": "theodb_columnar", "n": 1000000, "chunk_group_rows": 10000, "chunk_groups": 100, "clustered_on": "ts timestamptz (monotonic, 1-minute steps from 2020-01-01 -> tight per-chunk-group ranges); d = ts::date"},
+  "reproduce": "benchmarks/columnar_zonemap_ts_ab.py (SET theodb.enable_columnar_agg=on; SET theodb.columnar_zonemap_skip on/off; SELECT sum(x) FROM czt WHERE ts BETWEEN <lit> AND <lit> and the same on d date -- ~10%-selective; literal timestamp/date constants so the qual RHS folds to a Const and can be pushed)",
+  "goal": "byte-identical filtered-aggregate result AND skip path decodes <= 25% of the chunk groups the skip-off baseline decodes, for BOTH the timestamptz and the date column",
+  "goal_met": true,
+  "results": [
+    {"column": "timestamptz", "byte_identical": true, "sum": 300002.0, "customscan_engaged": true, "chunk_groups_total": 100, "chunk_groups_skipped": 89, "decoded_ratio": 0.11, "latency_ms_skip_on": 18.1, "latency_ms_skip_off": 157.6, "skip_speedup_x": 8.69},
+    {"column": "date", "byte_identical": true, "sum": 302400.0, "customscan_engaged": true, "chunk_groups_total": 100, "chunk_groups_skipped": 88, "decoded_ratio": 0.12, "latency_ms_skip_on": 17.1, "latency_ms_skip_off": 139.8, "skip_speedup_x": 8.19}
+  ],
+  "verdict": "GOAL MET for both temporal columns. byte-identical AND skips 88-89/100 chunk groups (decodes 11-12% <= 25% target) for a MEASURED 8.2-8.7x lower latency. Extends the columnar predicate-pushdown advantage to the canonical time-series filter (WHERE ts BETWEEN ...). Reuses the proven I8/I4 skip path; temporal knowledge localized to build_arrow/build_filter_expr + the OID->domain map.",
+  "honesty_note": "Skip ratio tracks selectivity x clustering. The 8.2-8.7x is on a monotonic ts (the natural time-series case). An unsorted timestamp column prunes little (public-copy.md rule 5).",
+  "scope": "timestamptz / timestamp / date on the M100 CustomScan aggregate path. Deferred: time/interval, text zone-maps, seqscan path, GROUP BY pushdown, out-of-RAM. arrow_cache (M101 heap path) still declines temporal at encode_cell -- untouched, no regression."
+}

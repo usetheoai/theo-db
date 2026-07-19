@@ -12,13 +12,15 @@
 #![allow(non_snake_case)]
 
 use datafusion::arrow::array::{
-    Array, ArrayRef, BooleanArray, Float32Array, Float64Array, Int16Array, Int32Array, Int64Array, StringArray,
+    Array, ArrayRef, BooleanArray, Date32Array, Float32Array, Float64Array, Int16Array, Int32Array, Int64Array,
+    StringArray, TimestampMicrosecondArray,
 };
-use datafusion::arrow::datatypes::{DataType, Field, Schema};
+use datafusion::arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::error::DataFusionError;
 use datafusion::functions_aggregate::expr_fn::{count, sum};
 use datafusion::prelude::{col, lit, Expr, SessionContext};
+use datafusion::scalar::ScalarValue;
 use std::ffi::CStr;
 use pgrx::prelude::*;
 use std::sync::Arc;
@@ -89,6 +91,21 @@ pub(super) fn build_arrow(cols: &[(String, u32, Vec<Option<Vec<u8>>>)]) -> Resul
                     values.iter().map(|v| v.as_ref().map(|b| String::from_utf8_lossy(b).into_owned())),
                 )),
             ),
+            // Temporal: the stored bytes ARE the internal int (timestamp/timestamptz = int64 μs, date = int32 days).
+            // Both mapped to a naive (tz=None) Arrow type — the comparison is on the raw int domain (tz is display
+            // only), so `build_filter_expr`'s matching-typed literal compares correctly (D3).
+            1114 | 1184 => (
+                DataType::Timestamp(TimeUnit::Microsecond, None),
+                Arc::new(TimestampMicrosecondArray::from_iter(
+                    values.iter().map(|v| v.as_ref().map(|b| i64::from_le_bytes(b[..8].try_into().unwrap()))),
+                )),
+            ),
+            1082 => (
+                DataType::Date32,
+                Arc::new(Date32Array::from_iter(
+                    values.iter().map(|v| v.as_ref().map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]))),
+                )),
+            ),
             other => {
                 return Err(format!(
                     "df_executor: unsupported column type oid {other} (Phase A: int2/4/8, float4/8, bool, text)"
@@ -157,14 +174,21 @@ unsafe fn build_filter_expr(rel: pg_sys::Relation, predicates: &[super::zonemap:
         let name = CStr::from_ptr((*att).attname.data.as_ptr()).to_string_lossy().into_owned();
         let c = col(name.as_str());
         let b = p.const_bits;
-        let val = match super::columnar::minmax_kind_of((*att).atttypid.to_u32()) {
-            MinMaxKind::I2 => lit(b as i64 as i16),
-            MinMaxKind::I4 => lit(b as i64 as i32),
-            MinMaxKind::I8 => lit(b as i64),
-            MinMaxKind::Bool => lit(b != 0),
-            MinMaxKind::F4 => lit(f64::from_bits(b) as f32),
-            MinMaxKind::F8 => lit(f64::from_bits(b)),
-            MinMaxKind::None => continue, // not min/max-able → cannot have been pushed
+        // Temporal columns share the I8/I4 min/max domain but need an Arrow-typed literal so the Filter matches the
+        // Timestamp/Date column type built in `build_arrow` (a bare Int64 lit would type-mismatch). Intercept by OID
+        // BEFORE the MinMaxKind dispatch. tz=None to match build_arrow (raw-int compare — D3).
+        let val = match (*att).atttypid.to_u32() {
+            1114 | 1184 => lit(ScalarValue::TimestampMicrosecond(Some(b as i64), None)),
+            1082 => lit(ScalarValue::Date32(Some(b as i64 as i32))),
+            _ => match super::columnar::minmax_kind_of((*att).atttypid.to_u32()) {
+                MinMaxKind::I2 => lit(b as i64 as i16),
+                MinMaxKind::I4 => lit(b as i64 as i32),
+                MinMaxKind::I8 => lit(b as i64),
+                MinMaxKind::Bool => lit(b != 0),
+                MinMaxKind::F4 => lit(f64::from_bits(b) as f32),
+                MinMaxKind::F8 => lit(f64::from_bits(b)),
+                MinMaxKind::None => continue, // not min/max-able → cannot have been pushed
+            },
         };
         let e = match p.op {
             ZoneOp::Lt => c.lt(val),
