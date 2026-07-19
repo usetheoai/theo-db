@@ -1710,7 +1710,7 @@ LazyGraphRAG (MS Research), HippoRAG 2; baseline a bater = `theo-rag/packages/co
 
 ---
 
-## M115 — [ ] Composabilidade do M100: saída columnar-agg usável em subquery/join *(gated M100)*
+## M115 — [x] Composabilidade do M100: saída columnar-agg usável em subquery/join *(gated M100)*
 
 > Added 2026-07-19 by `/roadmap-feature` (slug: `columnar-aggregate-completeness`). Fonte: caveat medido em `docs/benchmarks/columnar-groupby-verdict.md` (limitação pré-existente do M100). See CHANGELOG `[Unreleased] § Added`.
 
