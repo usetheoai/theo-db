@@ -12,8 +12,8 @@
 #![allow(non_snake_case)]
 
 use datafusion::arrow::array::{
-    Array, ArrayRef, BooleanArray, Date32Array, Float32Array, Float64Array, Int16Array, Int32Array, Int64Array,
-    StringArray, TimestampMicrosecondArray,
+    Array, ArrayRef, BooleanArray, Date32Array, Decimal128Array, Float32Array, Float64Array, Int16Array, Int32Array,
+    Int64Array, StringArray, TimestampMicrosecondArray,
 };
 use datafusion::arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use datafusion::arrow::record_batch::RecordBatch;
@@ -23,6 +23,7 @@ use datafusion::prelude::{col, lit, Expr, SessionContext};
 use datafusion::scalar::ScalarValue;
 use std::ffi::CStr;
 use pgrx::datum::FromDatum;
+use pgrx::AnyNumeric;
 use pgrx::prelude::*;
 use std::sync::Arc;
 
@@ -136,6 +137,12 @@ pub(super) enum AggSpec {
     SumInt(String),
     /// `avg(float8)` → PG float8. DataFusion `avg` → Float64.
     AvgFloat8(String),
+    /// `sum(int8)` → PG `numeric` (exact). DataFusion `sum(cast(col AS Decimal128(38,0)))` → i128; the datum is a PG
+    /// numeric via `AnyNumeric` (blueprint ADR-N1 — Int64 sum would wrap).
+    SumInt8Numeric(String),
+    /// `avg(int2/4/8)` → PG `numeric` (data-dependent scale). Decomposed to `sum(cast Decimal128(38,0))` + `count`;
+    /// the datum is `AnyNumeric(sum) / AnyNumeric(count)` = PG's `numeric_div` (ADR-N1/N2). Emits TWO batch columns.
+    AvgIntNumeric(String),
 }
 
 impl AggSpec {
@@ -143,18 +150,44 @@ impl AggSpec {
     fn col_name(&self) -> Option<&str> {
         match self {
             AggSpec::CountStar => None,
-            AggSpec::SumFloat8(n) | AggSpec::SumInt(n) | AggSpec::AvgFloat8(n) => Some(n.as_str()),
+            AggSpec::SumFloat8(n)
+            | AggSpec::SumInt(n)
+            | AggSpec::AvgFloat8(n)
+            | AggSpec::SumInt8Numeric(n)
+            | AggSpec::AvgIntNumeric(n) => Some(n.as_str()),
+        }
+    }
+
+    /// The number of DataFusion output columns this aggregate produces (avg-int decomposes to sum + count — ADR-N2).
+    fn ncols(&self) -> usize {
+        match self {
+            AggSpec::AvgIntNumeric(_) => 2,
+            _ => 1,
         }
     }
 }
 
-/// Build the aliased DataFusion aggregate expression for one `AggSpec`. Shared by the scalar + grouped paths (DRY).
-fn agg_expr(spec: &AggSpec, alias: String) -> Expr {
+/// Push the aliased DataFusion aggregate expression(s) for one `AggSpec` (usually 1; avg-int emits sum + count).
+/// Aliases are sequential (`a{k}`) by the running column position, so a multi-column spec keeps unique aliases.
+fn push_agg_exprs(spec: &AggSpec, exprs: &mut Vec<Expr>) {
+    let k = exprs.len();
     match spec {
-        AggSpec::CountStar => count(lit(1i64)).alias(alias),
-        AggSpec::SumFloat8(name) | AggSpec::SumInt(name) => sum(col(name.as_str())).alias(alias),
-        AggSpec::AvgFloat8(name) => avg(col(name.as_str())).alias(alias),
+        AggSpec::CountStar => exprs.push(count(lit(1i64)).alias(format!("a{k}"))),
+        AggSpec::SumFloat8(name) | AggSpec::SumInt(name) => exprs.push(sum(col(name.as_str())).alias(format!("a{k}"))),
+        AggSpec::AvgFloat8(name) => exprs.push(avg(col(name.as_str())).alias(format!("a{k}"))),
+        AggSpec::SumInt8Numeric(name) => {
+            exprs.push(sum(dec128_cast(name)).alias(format!("a{k}")));
+        }
+        AggSpec::AvgIntNumeric(name) => {
+            exprs.push(sum(dec128_cast(name)).alias(format!("a{k}")));
+            exprs.push(count(col(name.as_str())).alias(format!("a{}", k + 1)));
+        }
     }
+}
+
+/// `cast(col AS Decimal128(38,0))` — the exact integer-sum path (Int64 sum wraps; blueprint ADR-N1).
+fn dec128_cast(name: &str) -> Expr {
+    datafusion::logical_expr::cast(col(name), DataType::Decimal128(38, 0))
 }
 
 /// Decode the columnar table's projected columns into one Arrow `RecordBatch` (projection pushdown). Projects the
@@ -262,8 +295,8 @@ pub(super) unsafe fn run_aggs_on_batch(
     filter: Option<Expr>,
 ) -> Result<Vec<(pg_sys::Datum, bool)>, String> {
     let mut exprs = Vec::with_capacity(aggs.len());
-    for (i, a) in aggs.iter().enumerate() {
-        exprs.push(agg_expr(a, format!("a{i}")));
+    for a in aggs {
+        push_agg_exprs(a, &mut exprs);
     }
 
     let batches = run_df_collect(batch, move |df| {
@@ -276,8 +309,10 @@ pub(super) unsafe fn run_aggs_on_batch(
     })?;
     let b = batches.first().ok_or("df_executor: no result batch")?;
     let mut result = Vec::with_capacity(aggs.len());
-    for (i, a) in aggs.iter().enumerate() {
-        result.push(agg_datum(b.column(i), 0, a)?);
+    let mut off = 0; // batch column cursor — a multi-column spec (avg-int) consumes >1 column
+    for a in aggs {
+        result.push(agg_datum(b, off, 0, a)?);
+        off += a.ncols();
     }
     Ok(result)
 }
@@ -344,8 +379,11 @@ pub(super) unsafe fn run_columnar_grouped_aggs(
 
     let group_exprs: Vec<Expr> = group_cols.iter().map(|(n, _)| col(n.as_str())).collect();
     let mut agg_exprs = Vec::with_capacity(aggs.len());
-    for (i, a) in aggs.iter().enumerate() {
-        agg_exprs.push(agg_expr(a, format!("a{i}")));
+    // Per-agg batch-column offset (relative to the first agg column) — a multi-column spec (avg-int) shifts the rest.
+    let mut agg_off: Vec<usize> = Vec::with_capacity(aggs.len());
+    for a in aggs {
+        agg_off.push(agg_exprs.len());
+        push_agg_exprs(a, &mut agg_exprs);
     }
     let ngroup = group_cols.len();
     // Filter BEFORE aggregating (SQL WHERE … GROUP BY — M114 blueprint E4); the zone-map skip above is only an
@@ -358,7 +396,8 @@ pub(super) unsafe fn run_columnar_grouped_aggs(
         df.aggregate(group_exprs, agg_exprs)
     })?;
 
-    // DataFusion output columns: [group_0..group_{ngroup-1}, a0..a{nagg-1}]. Emit rows in `layout` (target) order.
+    // DataFusion output columns: [group_0..group_{ngroup-1}, agg columns…]. Agg `idx` starts at batch column
+    // `ngroup + agg_off[idx]` (a multi-column spec shifts the rest). Emit rows in `layout` (target) order.
     let mut rows: Vec<Vec<(pg_sys::Datum, bool)>> = Vec::new();
     for b in &batches {
         for r in 0..b.num_rows() {
@@ -369,7 +408,7 @@ pub(super) unsafe fn run_columnar_grouped_aggs(
                     arrow_value_to_datum(b.column(idx), r, typoid)?
                 } else {
                     let a = aggs.get(idx).ok_or("df_executor: layout agg idx oob")?;
-                    agg_datum(b.column(ngroup + idx), r, a)?
+                    agg_datum(b, ngroup + agg_off[idx], r, a)?
                 };
                 row_out.push(cell);
             }
@@ -425,9 +464,13 @@ fn cmp_group_datum(a: (pg_sys::Datum, bool), b: (pg_sys::Datum, bool), typoid: u
     }
 }
 
-/// Convert one aggregate cell (`arr[row]`) to a PG `(Datum, is_null)`: `count(*)`→int8, `sum(float8)`→float8.
-/// Shared by the scalar path (`run_aggs_on_batch`, row 0) and the grouped path (`run_columnar_grouped_aggs`, per row).
-fn agg_datum(arr: &dyn Array, row: usize, spec: &AggSpec) -> Result<(pg_sys::Datum, bool), String> {
+/// Convert one aggregate's cell(s) at `batch[col..][row]` to a PG `(Datum, is_null)`. Single-column for count/sum/avg
+/// (`count(*)`→int8, `sum(int2/4)`→int8, `sum/avg(float8)`→float8, `sum(int8)`→numeric); TWO columns for `avg(int)`
+/// (sum + count → `AnyNumeric(sum)/AnyNumeric(count)` = PG `numeric_div`, ADR-N1/N2). Shared by the scalar (row 0) and
+/// grouped (per row) paths.
+fn agg_datum(b: &RecordBatch, col: usize, row: usize, spec: &AggSpec) -> Result<(pg_sys::Datum, bool), String> {
+    let arr = b.column(col);
+    // NULL propagation: an empty/all-NULL group makes the (first) aggregate cell null → SQL NULL (ADR-N3).
     if arr.is_null(row) {
         return Ok((pg_sys::Datum::from(0usize), true));
     }
@@ -441,6 +484,27 @@ fn agg_datum(arr: &dyn Array, row: usize, spec: &AggSpec) -> Result<(pg_sys::Dat
         AggSpec::SumFloat8(_) | AggSpec::AvgFloat8(_) => {
             let v = arr.as_any().downcast_ref::<Float64Array>().ok_or("df_executor: agg not Float64")?.value(row);
             v.into_datum().ok_or("df_executor: float8 datum")?
+        }
+        // numeric output: sum(int8) = exact Decimal128(38,0) i128 → AnyNumeric (scale 0). Int64 sum would wrap.
+        // A Decimal128(38,0) overflow (>10^38, unreachable at realistic row counts) surfaces as a DataFusion error
+        // at run_df_collect, never a panic across the C boundary.
+        AggSpec::SumInt8Numeric(_) => {
+            let s = arr.as_any().downcast_ref::<Decimal128Array>().ok_or("df_executor: sum-int8 not Decimal128")?.value(row);
+            AnyNumeric::from(s).into_datum().ok_or("df_executor: numeric datum")?
+        }
+        // numeric output: avg(int) = AnyNumeric(sum) / AnyNumeric(count) = PG numeric_div (data-dependent scale).
+        AggSpec::AvgIntNumeric(_) => {
+            let s = arr.as_any().downcast_ref::<Decimal128Array>().ok_or("df_executor: avg-int sum not Decimal128")?.value(row);
+            let cnt_arr = b.column(col + 1);
+            // count(col) counts non-NULLs; a zero count (all-NULL group) → SQL NULL, never a divide-by-zero (ADR-N3).
+            if cnt_arr.is_null(row) {
+                return Ok((pg_sys::Datum::from(0usize), true));
+            }
+            let n = cnt_arr.as_any().downcast_ref::<Int64Array>().ok_or("df_executor: avg-int count not Int64")?.value(row);
+            if n == 0 {
+                return Ok((pg_sys::Datum::from(0usize), true));
+            }
+            (AnyNumeric::from(s) / AnyNumeric::from(n)).into_datum().ok_or("df_executor: numeric datum")?
         }
     };
     Ok((datum, false))

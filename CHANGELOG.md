@@ -24,6 +24,32 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.104.0] - 2026-07-19
+
+### Added
+- **Numeric-output integer aggregates — `sum(int8)` + `avg(int2/4/8)` byte-identical — MEASURED
+  (`docs/benchmarks/numeric-output-aggregates-verdict.md`).** Extends the columnar aggregate CustomScan to admit the two
+  integer aggregates M114 declined because their output is PG `numeric`. The columnar path computes
+  `sum(cast(col AS Decimal128(38,0)))` (i128-exact) + `count(col)` in DataFusion and builds the PG numeric in Rust via
+  pgrx `AnyNumeric` — for `avg`, `AnyNumeric(sum) / AnyNumeric(count)` delegates to PG's own `numeric_div`, so the
+  DATA-DEPENDENT result scale (`select_div_scale`) is PG's, not a fixed-scale reimplementation. **VERDICT (1M rows,
+  c-8): GOAL MET** — every shape a CustomScan AND byte-identical to the heap as TEXT: `sum(int8)` including a sum of
+  **1e19 that exceeds i64 max** (proves the Decimal128/i128 path is load-bearing — a wrapping Int64 sum would go
+  negative), and `avg(int2/4/8)` reproducing PG's shrinking avg scale byte-for-byte (**16 → 12 → 8** sig-digits as the
+  sum grows). Empty group → SQL `NULL` (zero-count guard). Scalar + GROUP BY; 7.14–10.10× vs native (context, not a new
+  perf claim). Scope: integer input only — `sum/avg(numeric)` column input deferred (needs Arrow `Decimal128` column
+  decode).
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
 ## [0.103.0] - 2026-07-19
 
 ### Added

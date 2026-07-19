@@ -1,0 +1,29 @@
+{
+  "slice": "numeric-output-aggregates",
+  "date": "2026-07-19",
+  "environment": {
+    "host": "do-droplet-159.89.85.126",
+    "pg": "17.10 (pgrx-managed)",
+    "build": "release",
+    "gucs": {"max_parallel_workers_per_gather": 0, "shared_buffers": "2GB", "work_mem": "256MB"},
+    "rows": 1000000
+  },
+  "verdict": "GOAL_MET",
+  "all_identical_and_customscan": true,
+  "shapes": [
+    {"shape": "sum_int8", "customscan": true, "identical": true, "value": "500000500000000000", "columnar_ms": 107.9, "native_ms": 770.1, "speedup": 7.14},
+    {"shape": "sum_int8_over_i64", "customscan": true, "identical": true, "value": "10000000000000000000", "exceeds_i64_max": true, "columnar_ms": 78.6, "native_ms": 793.5, "speedup": 10.10},
+    {"shape": "avg_int2_scale16", "customscan": true, "identical": true, "value": "49.5000000000000000", "avg_scale": 16, "columnar_ms": 81.1, "native_ms": 797.2, "speedup": 9.83},
+    {"shape": "avg_int4_shrink", "customscan": true, "identical": true, "value": "500000.500000000000", "avg_scale": 12, "columnar_ms": 83.2, "native_ms": 795.3, "speedup": 9.56},
+    {"shape": "avg_int8_shrink", "customscan": true, "identical": true, "value": "500000500000.00000000", "avg_scale": 8, "columnar_ms": 101.1, "native_ms": 801.4, "speedup": 7.92},
+    {"shape": "groupby_sum_int8", "customscan": true, "identical": true, "rows": 4},
+    {"shape": "groupby_avg_int4", "customscan": true, "identical": true, "rows": 4},
+    {"shape": "avg_over_empty", "result": "NULL", "pass": true}
+  ],
+  "proves": [
+    "Decimal128/i128 path load-bearing: sum(big)=1e19 exceeds i64 max 9.2e18, byte-identical to PG's i128 accumulator",
+    "PG data-dependent avg scale reproduced byte-for-byte: 16->12->8 sig-digits as the sum grows",
+    "zero-count guard: avg over empty set returns SQL NULL"
+  ],
+  "scope_deferred": "sum/avg(numeric) column input (needs Arrow Decimal128 column decode in the columnar codec)"
+}
