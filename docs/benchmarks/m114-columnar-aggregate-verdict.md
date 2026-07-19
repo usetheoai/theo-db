@@ -54,5 +54,13 @@ E4) with the hash aggregate in one plan.
 
 - GROUP BY+WHERE requires a **pushable** predicate (`col <op> const` on a native-min/max type); an un-pushable qual
   declines to the native plan (correct, unpruned). Warm regime; speedup is GUC-on vs GUC-off on the same table.
+- **`sum(int4/int2)` overflow boundary (review H1):** byte-identical up to the int64 accumulator limit. PG's
+  `sum(int4)→int8` raises `bigint out of range` past 9.2e18; DataFusion's Int64 accumulator wraps. They diverge ONLY
+  past that sum, which requires **> 4.4e9 max-valued int4 rows** — astronomically beyond the columnar warm-path regime
+  and 7+ orders above the measured 1M-row sums. Documented as an accepted boundary (Rule 3); the exact-`numeric`
+  alternative is the deferred ADR-M114-1 path.
+- **Heap M101-cache admission (review B1, fixed):** the heap-cache path now gates admission on the cache covering the
+  source column of EVERY column-bearing aggregate (kinds 1/2/3), not only `sum(float8)` — an un-cached `sum(int4)`/
+  `avg(float8)` over a heap table correctly declines to the native plan (regression `#[pg_test]` added).
 - The pre-existing M100 composability limitation (consuming an agg output value in an enclosing expression) is
   unchanged — it is the subject of M115, not M114.

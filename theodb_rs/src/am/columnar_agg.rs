@@ -355,11 +355,14 @@ unsafe fn admit(
     if grouped || !(*input_rel).baserestrictinfo.is_null() {
         return None;
     }
-    // Heap: admissible IFF this backend has a cache covering the summed columns (the exec-time get_or_build then
-    // does the generation check + snapshot-correct rebuild). Resolve the sum column names via the syscache.
-    let sum_names: Vec<String> = aggs
+    // Heap (M101 cache): admissible IFF this backend has a cache covering the source column of EVERY column-bearing
+    // aggregate (kinds 1/2/3 = SumFloat8/SumInt/AvgFloat8; count(*)=kind 0 needs no column). Resolve the attnos via
+    // the syscache; if ANY is unresolved OR uncached, decline so the native plan runs. (M114 regression fix: filtering
+    // only kind==1 left sum(int)/avg(float8) with an EMPTY name set → has_cached_columns([])==true → mode-1 admitted
+    // with the column NOT cached → a runtime error on a query the native plan runs correctly.)
+    let col_aggs: Vec<&ParsedAgg> = aggs.iter().filter(|a| a.kind != 0).collect();
+    let col_names: Vec<String> = col_aggs
         .iter()
-        .filter(|a| a.kind == 1)
         .filter_map(|a| {
             let n = pg_sys::get_attname((*rte).relid, a.attno as pg_sys::AttrNumber, true);
             if n.is_null() {
@@ -369,8 +372,8 @@ unsafe fn admit(
             }
         })
         .collect();
-    if sum_names.len() == aggs.iter().filter(|a| a.kind == 1).count()
-        && super::arrow_cache::has_cached_columns((*rte).relid.to_u32(), &sum_names)
+    if col_names.len() == col_aggs.len()
+        && super::arrow_cache::has_cached_columns((*rte).relid.to_u32(), &col_names)
     {
         return Some(Admitted { mode: 1, relid, aggs, preds: Vec::new(), group_cols: Vec::new(), layout: Vec::new() });
     }
@@ -766,6 +769,9 @@ mod tests {
         assert!(!is_cs("SELECT sum(b) FROM m114c"), "sum(int8)→numeric must decline");
         assert!(!is_cs("SELECT sum(f4) FROM m114c"), "sum(real) must decline");
         assert!(!is_cs("SELECT date_trunc('day',ts), sum(x) FROM m114c GROUP BY date_trunc('day',ts)"), "grouping expr must decline");
+        // B1 regression (M114 heap M101-cache path): sum(int4) over a heap table with NO cache covering the column
+        // must DECLINE — before the fix the empty kind==1 name-set made has_cached_columns([]) admit mode 1 wrongly.
+        assert!(!is_cs("SELECT sum(i4) FROM m114h"), "heap sum(int4) with no cache must decline (B1 regression)");
 
         // Byte-identical scalar spot-check (top-level single-row → Spi::get_one works despite the M100 composability limit).
         let cavg = Spi::get_one::<f64>("SELECT avg(x) FROM m114c").unwrap().unwrap();
