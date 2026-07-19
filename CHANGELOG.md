@@ -24,6 +24,31 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.105.0] - 2026-07-19
+
+### Added
+- **Columnar `min(col)`/`max(col)` aggregate + zone-map directory fast-path — MEASURED
+  (`docs/benchmarks/columnar-minmax-zonemap-verdict.md`).** Admits `min`/`max` on ordered native types (int2/4/8,
+  float4/8, timestamp/date) in the columnar CustomScan byte-identical to PostgreSQL (output type = input column type,
+  emitted via the `build_arrow` reverse). Adds a **directory-only fast-path** (Phase B) that answers a scalar
+  `min`/`max` with no WHERE by folding the zone-map `min_bits`/`max_bits` already written per (chunk_group, col) — never
+  decoding a column chunk. **VERDICT (1M rows, c-8): GOAL MET** — integer/temporal scalar min/max answer in **< 1 ms
+  (~1300–1400× faster than the native scan)**, every shape byte-identical (as TEXT). MVCC-correct (verified by
+  `council-index-storage`): folds only visible-stripe directory entries + scans same-xact pending rows (proven: an
+  uncommitted `INSERT` is seen by `max()`). `max(float)` correctly falls back to the decoded scan (directory skips NaN
+  while PG `max` returns NaN); GROUP BY / WHERE / empty / all-NULL all byte-identical. Scope: ordered native types
+  (bool has no PG min/max aggregate; text/numeric deferred).
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
 ## [0.104.0] - 2026-07-19
 
 ### Added

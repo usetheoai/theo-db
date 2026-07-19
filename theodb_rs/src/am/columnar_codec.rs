@@ -290,7 +290,7 @@ pub(crate) fn decode_column(
 /// Compute (has_minmax, min_bits, max_bits) over the present values for a native-ordered numeric kind. Non-numeric
 /// kinds (`None`), or all-NaN float columns, yield `has_minmax=false` (the pruner then cannot skip — fail-safe).
 /// Integers are stored as their i64 two's-complement bits; floats (incl. f4 widened) as f64 bits.
-fn compute_minmax(values: &[Option<Vec<u8>>], mm: MinMaxKind) -> (bool, u64, u64) {
+pub(crate) fn compute_minmax(values: &[Option<Vec<u8>>], mm: MinMaxKind) -> (bool, u64, u64) {
     match mm {
         MinMaxKind::None => (false, 0, 0),
         MinMaxKind::I2 | MinMaxKind::I4 | MinMaxKind::I8 | MinMaxKind::Bool => {

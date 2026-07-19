@@ -1,0 +1,37 @@
+{
+  "slice": "columnar-minmax-zonemap",
+  "date": "2026-07-19",
+  "environment": {
+    "host": "do-droplet-138.197.74.150-c8",
+    "pg": "17.10 (pgrx-managed)",
+    "build": "release",
+    "gucs": {"THEODB_SCAN_PROFILE": 1, "max_parallel_workers_per_gather": 0, "shared_buffers": "2GB", "work_mem": "256MB"},
+    "rows": 1000000
+  },
+  "verdict": "GOAL_MET",
+  "all_identical": true,
+  "scalar_shapes": [
+    {"col": "int2", "min_path": "fastpath", "max_path": "fastpath", "identical": true, "min": "-500", "max": "499", "columnar_ms": 0.7, "native_ms": 1043.9, "speedup": 1395.30},
+    {"col": "int4", "min_path": "fastpath", "max_path": "fastpath", "identical": true, "min": "-499999", "max": "500000", "columnar_ms": 0.8, "native_ms": 1044.2, "speedup": 1331.97},
+    {"col": "int8", "min_path": "fastpath", "max_path": "fastpath", "identical": true, "min": "-499999000000", "max": "500000000000", "columnar_ms": 0.7, "native_ms": 1036.3, "speedup": 1411.24},
+    {"col": "real", "min_path": "fastpath", "max_path": "scan", "identical": true, "min": "-749998.5", "max": "750000", "columnar_ms": 65.9, "native_ms": 1045.7, "speedup": 15.86, "note": "max(float) NaN gate -> scan"},
+    {"col": "float8", "min_path": "fastpath", "max_path": "scan", "identical": true, "min": "-1249997.5", "max": "1250000", "columnar_ms": 76.9, "native_ms": 1050.1, "speedup": 13.65, "note": "max(float) NaN gate -> scan"},
+    {"col": "timestamptz", "min_path": "fastpath", "max_path": "fastpath", "identical": true, "min": "2020-01-01 00:00:01+00", "max": "2020-01-12 13:46:40+00", "columnar_ms": 0.8, "native_ms": 1053.1, "speedup": 1357.05},
+    {"col": "date", "min_path": "fastpath", "max_path": "fastpath", "identical": true, "min": "2020-01-01", "max": "2029-12-28", "columnar_ms": 0.8, "native_ms": 1052.2, "speedup": 1350.07}
+  ],
+  "edge_cases": {
+    "groupby_min_max_int4": {"identical": true, "rows": 4},
+    "where_max_int4": {"identical": true, "path": "scan"},
+    "empty_set": {"result": "NULL", "pass": true},
+    "all_null": {"result": "NULL", "pass": true},
+    "float_nan": {"max": "NaN", "max_path": "scan", "min": "1", "pass": true},
+    "same_xact_pending": {"max_after_insert": "999999999", "includes_uncommitted": true}
+  },
+  "proves": [
+    "directory-only fold answers scalar int/temporal min/max in <1ms (~1300-1400x vs native scan), no chunk decode",
+    "NaN gate: max(float) falls back to scan and returns NaN (byte-identical to PG btree NaN-greatest ordering)",
+    "MVCC pending fold: same-xact uncommitted rows included in max()",
+    "gated shapes (float-max, WHERE, GROUP BY) fall back to Phase A, still byte-identical"
+  ],
+  "scope_out": "bool (no PG min/max aggregate), text/numeric min/max (unordered / needs collation or Decimal128 decode)"
+}

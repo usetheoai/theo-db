@@ -18,7 +18,7 @@ use datafusion::arrow::array::{
 use datafusion::arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::error::DataFusionError;
-use datafusion::functions_aggregate::expr_fn::{avg, count, sum};
+use datafusion::functions_aggregate::expr_fn::{avg, count, max, min, sum};
 use datafusion::prelude::{col, lit, Expr, SessionContext};
 use datafusion::scalar::ScalarValue;
 use std::ffi::CStr;
@@ -143,6 +143,12 @@ pub(super) enum AggSpec {
     /// `avg(int2/4/8)` → PG `numeric` (data-dependent scale). Decomposed to `sum(cast Decimal128(38,0))` + `count`;
     /// the datum is `AnyNumeric(sum) / AnyNumeric(count)` = PG's `numeric_div` (ADR-N1/N2). Emits TWO batch columns.
     AvgIntNumeric(String),
+    /// `min(col)`/`max(col)` on an ordered native type → PG output type = the input column type. DataFusion `min()`/
+    /// `max()` yields an Arrow array of the source column's type; the datum is emitted by `arrow_value_to_datum`
+    /// against the carried output typoid (columnar-minmax blueprint ADR-MM1/MM3). NaN-correct because it decodes
+    /// actual values — unlike the Phase-B directory fold which gates `max(float)` out.
+    MinCol(String, u32),
+    MaxCol(String, u32),
 }
 
 impl AggSpec {
@@ -154,7 +160,9 @@ impl AggSpec {
             | AggSpec::SumInt(n)
             | AggSpec::AvgFloat8(n)
             | AggSpec::SumInt8Numeric(n)
-            | AggSpec::AvgIntNumeric(n) => Some(n.as_str()),
+            | AggSpec::AvgIntNumeric(n)
+            | AggSpec::MinCol(n, _)
+            | AggSpec::MaxCol(n, _) => Some(n.as_str()),
         }
     }
 
@@ -182,6 +190,8 @@ fn push_agg_exprs(spec: &AggSpec, exprs: &mut Vec<Expr>) {
             exprs.push(sum(dec128_cast(name)).alias(format!("a{k}")));
             exprs.push(count(col(name.as_str())).alias(format!("a{}", k + 1)));
         }
+        AggSpec::MinCol(name, _) => exprs.push(min(col(name.as_str())).alias(format!("a{k}"))),
+        AggSpec::MaxCol(name, _) => exprs.push(max(col(name.as_str())).alias(format!("a{k}"))),
     }
 }
 
@@ -505,6 +515,12 @@ fn agg_datum(b: &RecordBatch, col: usize, row: usize, spec: &AggSpec) -> Result<
                 return Ok((pg_sys::Datum::from(0usize), true));
             }
             (AnyNumeric::from(s) / AnyNumeric::from(n)).into_datum().ok_or("df_executor: numeric datum")?
+        }
+        // min/max output = input column type. The DataFusion min()/max() result array has the source column's Arrow
+        // type, so the build_arrow reverse emits the exact native datum against the carried output typoid (ADR-MM3).
+        // `arr.is_null(row)` (guarded above) already handled the empty/all-NULL → NULL case.
+        AggSpec::MinCol(_, typoid) | AggSpec::MaxCol(_, typoid) => {
+            return arrow_value_to_datum(arr, row, *typoid);
         }
     };
     Ok((datum, false))

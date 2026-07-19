@@ -315,11 +315,13 @@ unsafe fn admit(
             if name == "count" && (*agg).aggstar {
                 layout.push((1, aggs.len()));
                 aggs.push(ParsedAgg { kind: 0, attno: 0 });
-            } else if name == "sum" || name == "avg" {
-                // sum/avg of a bare base-rel Var. Only the shapes whose Arrow output maps to the EXACT PG output type
-                // are admitted (M114 blueprint E1/E2/E3): sum(float8)→float8 (kind 1), sum(int2/int4)→int8 (kind 2,
-                // Arrow Int64=bigint, no overflow), avg(float8)→float8 (kind 3). DECLINED (→ native plan, PG returns
-                // the exact numeric): avg(int*), sum(int8), sum(float4), avg(float4) (ADR-M114-1).
+            } else if name == "sum" || name == "avg" || name == "min" || name == "max" {
+                // sum/avg/min/max of a bare base-rel Var. sum/avg admit only the shapes whose output maps to the EXACT
+                // PG output type (M114 blueprint E1/E2/E3 + numeric-output ADR-N1): sum(float8)→float8 (kind 1),
+                // sum(int2/4)→int8 (kind 2), avg(float8)→float8 (kind 3), sum(int8)→numeric (kind 4), avg(int2/4/8)→
+                // numeric (kind 5). min/max (columnar-minmax ADR-MM1) admit any ORDERED native type (int2/4/8, float4/8,
+                // bool, timestamp/date) → kind 6 (min) / 7 (max); output type = the input column type, emitted by
+                // arrow_value_to_datum. DECLINED (→ native plan): sum(float4), avg(float4), min/max on unordered types.
                 let args = PgList::<pg_sys::TargetEntry>::from_pg((*agg).args);
                 if args.len() != 1 {
                     return None;
@@ -327,7 +329,7 @@ unsafe fn admit(
                 let te = args.get_ptr(0)?;
                 let e = (*te).expr as *mut pg_sys::Node;
                 if e.is_null() || (*e).type_ != pg_sys::NodeTag::T_Var {
-                    return None;
+                    return None; // bare column Var only — reject min(col+1) / cast (directory is pre-projection)
                 }
                 let var = e as *mut pg_sys::Var;
                 if (*var).varno as i32 != relid {
@@ -344,12 +346,24 @@ unsafe fn admit(
                     } else {
                         return None; // sum(float4)→real, sum(numeric): decline
                     }
-                } else if vartype == pg_sys::FLOAT8OID {
-                    3 // avg(float8)→float8
-                } else if vartype == pg_sys::INT2OID || vartype == pg_sys::INT4OID || vartype == pg_sys::INT8OID {
-                    5 // avg(int2/4/8)→numeric (AnyNumeric division = PG numeric_div — ADR-N1)
+                } else if name == "avg" {
+                    if vartype == pg_sys::FLOAT8OID {
+                        3 // avg(float8)→float8
+                    } else if vartype == pg_sys::INT2OID || vartype == pg_sys::INT4OID || vartype == pg_sys::INT8OID {
+                        5 // avg(int2/4/8)→numeric (AnyNumeric division = PG numeric_div — ADR-N1)
+                    } else {
+                        return None; // avg(float4)→float8-ULP, avg(numeric): decline
+                    }
                 } else {
-                    return None; // avg(float4)→float8-ULP, avg(numeric): decline
+                    // min/max: any ordered native type (same set the zone-map supports) → output = input type.
+                    if super::columnar::minmax_kind_of(vartype.to_u32()) == MinMaxKind::None {
+                        return None; // unordered type (text/numeric/…) → native plan
+                    }
+                    if name == "min" {
+                        6
+                    } else {
+                        7
+                    }
                 };
                 layout.push((1, aggs.len()));
                 aggs.push(ParsedAgg { kind, attno: (*var).varattno as i32 });
@@ -729,6 +743,8 @@ unsafe extern "C-unwind" fn begin_custom_scan(
                 let nm = pg_sys::get_attname(relid, ano as pg_sys::AttrNumber, false);
                 CStr::from_ptr(nm).to_string_lossy().into_owned()
             };
+            // min/max output type = the input column type; recover its OID from the relation attribute (kinds 6/7).
+            let col_typoid = |ano: i32| -> u32 { pg_sys::get_atttype(relid, ano as pg_sys::AttrNumber).to_u32() };
             match kind {
                 0 => specs.push(AggSpec::CountStar),
                 1 => specs.push(AggSpec::SumFloat8(col_name(attno))),
@@ -736,6 +752,8 @@ unsafe extern "C-unwind" fn begin_custom_scan(
                 3 => specs.push(AggSpec::AvgFloat8(col_name(attno))),
                 4 => specs.push(AggSpec::SumInt8Numeric(col_name(attno))),
                 5 => specs.push(AggSpec::AvgIntNumeric(col_name(attno))),
+                6 => specs.push(AggSpec::MinCol(col_name(attno), col_typoid(attno))),
+                7 => specs.push(AggSpec::MaxCol(col_name(attno), col_typoid(attno))),
                 _ => return Err(format!("columnar_agg: bad agg kind {kind}")),
             }
         }
@@ -792,7 +810,51 @@ unsafe extern "C-unwind" fn begin_custom_scan(
         } else {
             // M100 scalar: decode the columnar stripes with zone-map skip-pruning. Single row → wrap.
             let rel = pg_sys::relation_open(relid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
-            let r = run_columnar_aggs(rel, &specs, &preds, super::guc::columnar_zonemap_skip()).map(|row| vec![row]);
+            // Phase B (columnar-minmax): a scalar all-min/max output with NO predicate can be answered from the
+            // zone-map directory (+ pending) WITHOUT decoding any column chunk. Try every agg; if all fold, emit that
+            // row; if any gates out (unordered, max-float, has_minmax=false group, all-NaN pending), fall back to the
+            // full Phase-A scan below. Byte-identical either way (blueprint ADR-MM1).
+            let all_minmax =
+                !specs.is_empty() && specs.iter().all(|s| matches!(s, AggSpec::MinCol(..) | AggSpec::MaxCol(..)));
+            let fast: Option<Result<Vec<Vec<(pg_sys::Datum, bool)>>, String>> = if preds.is_empty() && all_minmax {
+                let mut row = Vec::with_capacity(specs.len());
+                let mut ok = true;
+                let mut err = None;
+                for s in &specs {
+                    let (name, typoid, want_max) = match s {
+                        AggSpec::MinCol(n, t) => (n.as_str(), *t, false),
+                        AggSpec::MaxCol(n, t) => (n.as_str(), *t, true),
+                        _ => unreachable!(),
+                    };
+                    match super::columnar::directory_minmax(rel, name, typoid, want_max) {
+                        Ok(Some(cell)) => row.push(cell),
+                        Ok(None) => {
+                            ok = false;
+                            break;
+                        }
+                        Err(e) => {
+                            err = Some(e);
+                            break;
+                        }
+                    }
+                }
+                match (ok, err) {
+                    (_, Some(e)) => Some(Err(e)),
+                    (true, None) => Some(Ok(vec![row])),
+                    (false, None) => None, // gated out → Phase A
+                }
+            } else {
+                None
+            };
+            // Honest path signal for the A/B (opt-in): which path answered this scalar min/max.
+            if all_minmax && std::env::var("THEODB_SCAN_PROFILE").is_ok_and(|v| v == "1") {
+                let taken = matches!(fast, Some(Ok(_)));
+                pgrx::notice!("theodb_columnar minmax path={}", if taken { "fastpath" } else { "scan" });
+            }
+            let r = match fast {
+                Some(res) => res,
+                None => run_columnar_aggs(rel, &specs, &preds, super::guc::columnar_zonemap_skip()).map(|row| vec![row]),
+            };
             pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
             r
         }
@@ -1031,6 +1093,77 @@ mod tests {
 
         Spi::run("DROP TABLE numc").unwrap();
         Spi::run("DROP TABLE numh").unwrap();
+    }
+
+    /// columnar-minmax Phase A: min(col)/max(col) on ordered native types byte-identical via the DataFusion scan path
+    /// (output type = input column type), incl. max(float)-with-NaN (returns NaN because it decodes actual values).
+    /// The bare-Var gate declines min(col+1); unordered types decline.
+    #[pg_test]
+    fn test_columnar_minmax_phase_a_byte_identical() {
+        Spi::run("SET theodb.enable_columnar_agg = on").unwrap();
+        Spi::run("CREATE TABLE mmc (i4 int4, i2 int2, i8 int8, f8 float8, b bool, ts timestamptz) USING theodb_columnar").unwrap();
+        Spi::run("CREATE TABLE mmh (i4 int4, i2 int2, i8 int8, f8 float8, b bool, ts timestamptz)").unwrap();
+        let g = "SELECT g-5000, (g%200-100)::int2, g::int8*1000, (g*1.5-7500)::float8, (g%2=0), timestamptz '2020-01-01'+(g*interval '1 min') FROM generate_series(1,10000) g";
+        Spi::run(&format!("INSERT INTO mmc {g}")).unwrap();
+        Spi::run(&format!("INSERT INTO mmh {g}")).unwrap();
+        let is_cs = |sql: &str| Spi::get_one::<String>(&format!("EXPLAIN (COSTS OFF) {sql}")).unwrap().unwrap().contains("theodb_columnar_agg");
+        // WHERE forces Phase A (npred>0) — still byte-identical; assert every ordered type min+max.
+        // NOTE: PG has no min/max aggregate for bool (only bool_and/bool_or), so `b` is not aggregated here.
+        for (c, w) in [("i4", "WHERE i4 > -999999"), ("i2", "WHERE i4 > -999999"), ("i8", "WHERE i4 > -999999"),
+                       ("f8", "WHERE i4 > -999999"), ("ts", "WHERE i4 > -999999")] {
+            for agg in ["min", "max"] {
+                let sql = format!("SELECT {agg}({c}) FROM mmc {w}");
+                assert!(is_cs(&sql), "{agg}({c}) with WHERE must be a CustomScan");
+                let vc = Spi::get_one::<String>(&format!("SELECT ({agg}({c}))::text FROM mmc {w}")).unwrap();
+                let vh = Spi::get_one::<String>(&format!("SELECT ({agg}({c}))::text FROM mmh {w}")).unwrap();
+                assert_eq!(vc, vh, "{agg}({c}) must be byte-identical to the heap");
+            }
+        }
+        // Bare-Var gate: min(col+1) must decline the CustomScan.
+        assert!(!is_cs("SELECT min(i4+1) FROM mmc"), "min(col+1) must decline (not a bare Var)");
+        // max(float) with a NaN row → NaN (Phase A decodes actual values).
+        Spi::run("INSERT INTO mmc (i4, f8) VALUES (1, 'NaN')").unwrap();
+        Spi::run("INSERT INTO mmh (i4, f8) VALUES (1, 'NaN')").unwrap();
+        let mc = Spi::get_one::<String>("SELECT (max(f8))::text FROM mmc").unwrap();
+        let mh = Spi::get_one::<String>("SELECT (max(f8))::text FROM mmh").unwrap();
+        assert_eq!(mc, mh, "max(float) with NaN must equal the heap (NaN)");
+        Spi::run("DROP TABLE mmc").unwrap();
+        Spi::run("DROP TABLE mmh").unwrap();
+    }
+
+    /// columnar-minmax Phase B: the zone-map directory fast-path answers scalar min/max (no WHERE) byte-identically,
+    /// folds same-xact pending rows, and correctly falls back for max(float-with-NaN) and all-NULL.
+    #[pg_test]
+    fn test_columnar_minmax_fast_path() {
+        Spi::run("SET theodb.enable_columnar_agg = on").unwrap();
+        Spi::run("CREATE TABLE fpc (v int4) USING theodb_columnar").unwrap();
+        Spi::run("CREATE TABLE fph (v int4)").unwrap();
+        let g = "SELECT g-5000 FROM generate_series(1,20000) g";
+        Spi::run(&format!("INSERT INTO fpc {g}")).unwrap();
+        Spi::run(&format!("INSERT INTO fph {g}")).unwrap();
+        // (a) clean scalar int min/max byte-identical (fast-path path; correctness is the assertion here).
+        for agg in ["min", "max"] {
+            let vc = Spi::get_one::<String>(&format!("SELECT ({agg}(v))::text FROM fpc")).unwrap();
+            let vh = Spi::get_one::<String>(&format!("SELECT ({agg}(v))::text FROM fph")).unwrap();
+            assert_eq!(vc, vh, "scalar {agg}(int4) must be byte-identical (fast-path)");
+        }
+        // (b) same-xact pending fold: this INSERT is uncommitted (pg_test runs in one xact) → max must see it.
+        Spi::run("INSERT INTO fpc VALUES (999999)").unwrap();
+        let pc = Spi::get_one::<i32>("SELECT max(v) FROM fpc").unwrap();
+        assert_eq!(pc, Some(999999), "max must fold the same-xact pending row");
+        // (c) all-NULL column → NULL.
+        Spi::run("CREATE TABLE fpn (v int4) USING theodb_columnar").unwrap();
+        Spi::run("INSERT INTO fpn SELECT NULL FROM generate_series(1,1000)").unwrap();
+        assert_eq!(Spi::get_one::<i32>("SELECT max(v) FROM fpn").unwrap(), None, "all-NULL max → NULL");
+        // (d) max(float) with NaN falls back and returns NaN.
+        Spi::run("CREATE TABLE fpf (v float8) USING theodb_columnar").unwrap();
+        Spi::run("INSERT INTO fpf SELECT CASE WHEN g=1 THEN 'NaN'::float8 ELSE g::float8 END FROM generate_series(1,1000) g").unwrap();
+        let f = Spi::get_one::<String>("SELECT (max(v))::text FROM fpf").unwrap();
+        assert_eq!(f.as_deref(), Some("NaN"), "max(float) with NaN must return NaN (fallback)");
+        Spi::run("DROP TABLE fpc").unwrap();
+        Spi::run("DROP TABLE fph").unwrap();
+        Spi::run("DROP TABLE fpn").unwrap();
+        Spi::run("DROP TABLE fpf").unwrap();
     }
 
     /// M115 composability: the columnar-aggregate output is consumable inside an enclosing expression (subquery over a
