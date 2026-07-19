@@ -55,6 +55,23 @@ All previously raised `cache lookup failed for attribute N of relation 0` (crash
 - The fix is the TimescaleDB `vector_agg` pattern (swap a planned `Agg`), reached after three empirically-disproven
   CustomPath-level attempts — the honest, non-workaround path (blueprint + memory `m115-composability-blocked`).
 
+## Review fixes (pre-merge review found + fixed 4 blockers/highs)
+
+A pre-merge review (council-rust-pgrx) caught real correctness gaps the first evidence pass missed (it had disabled
+parallelism); all are fixed + re-validated:
+
+- **B1 — partial-aggregate double-swap under a parallel plan:** `try_swap_agg` now declines any non-`AGGSPLIT_SIMPLE`
+  Agg (a `Finalize`/`Partial` split), so a parallel plan never swaps a partial transvalue. Validated: forced-parallel
+  `sum(x)` and `sum(s) FROM (grouped)` byte-identical (`M115_PARALLEL`). In practice the `theodb_columnar` TAM does not
+  parallelize, so the columnar CustomScan still engages under default parallelism (no perf regression).
+- **B2 — hardcoded ASC sort vs `ORDER BY … DESC`:** a `SORTED` GroupAgg is admitted ONLY when its input Sort is
+  exactly ASC nulls-last (checked via `get_ordering_op_properties`); DESC / nulls-first / text → native. Validated:
+  `GROUP BY k ORDER BY k DESC` byte-identical (`M115_DESC`).
+- **B3 — same-OID stash cross-match:** the swap now matches a stash entry by base-table OID AND shape (group-key count
+  + output arity), so a scalar Agg cannot bind a grouped `Admitted` (or vice-versa).
+- **H1 — stash not restored on a planner longjmp:** a `Drop`-based `StashGuard` restores the enclosing run's stash even
+  when `standard_planner` `ereport`s (pgrx converts the longjmp to an unwind).
+
 ## Caveats (honest)
 
 - A `GroupAgg` (`AGG_SORTED`) over a **text** group key is left to the native plan (PG's collation order differs from

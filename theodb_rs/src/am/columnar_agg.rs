@@ -229,6 +229,14 @@ struct Admitted {
     layout: Vec<(u8, usize)>,
 }
 
+impl Admitted {
+    /// The number of output columns this admission produces — the layout length when grouped, else one per aggregate
+    /// (the scalar path leaves `layout` empty). Used by the M115 swap's shape guard (review B3).
+    fn expected_arity(&self) -> usize {
+        if self.layout.is_empty() { self.aggs.len() } else { self.layout.len() }
+    }
+}
+
 unsafe fn admit(
     root: *mut pg_sys::PlannerInfo,
     input_rel: *mut pg_sys::RelOptInfo,
@@ -436,8 +444,16 @@ unsafe extern "C-unwind" fn planner_hook(
     cursor_options: c_int,
     bound_params: pg_sys::ParamListInfo,
 ) -> *mut pg_sys::PlannedStmt {
-    let outer = ADMIT_STASH.with(|s| std::mem::take(&mut *s.borrow_mut())); // save an enclosing run's stash
-    ADMIT_STASH.with(|s| *s.borrow_mut() = Vec::new());
+    // Save the enclosing run's stash and restore it on scope exit — INCLUDING a planner longjmp/ereport (pgrx
+    // converts the C longjmp to a Rust unwind at the `#[pg_guard]` boundary, so `Drop` runs). Without this a planning
+    // ERROR would leave a stale inner-run stash that a later query could mis-consume (review H1).
+    struct StashGuard(Vec<StashedAdmit>);
+    impl Drop for StashGuard {
+        fn drop(&mut self) {
+            ADMIT_STASH.with(|s| *s.borrow_mut() = std::mem::take(&mut self.0));
+        }
+    }
+    let _guard = StashGuard(ADMIT_STASH.with(|s| std::mem::replace(&mut *s.borrow_mut(), Vec::new())));
     let stmt = match PREV_PLANNER_HOOK {
         Some(prev) => prev(parse, query_string, cursor_options, bound_params),
         None => pg_sys::standard_planner(parse, query_string, cursor_options, bound_params),
@@ -454,8 +470,7 @@ unsafe extern "C-unwind" fn planner_hook(
             }
         }
     }
-    ADMIT_STASH.with(|s| *s.borrow_mut() = outer); // restore the enclosing run's stash
-    stmt
+    stmt // `_guard` restores the enclosing run's stash on drop (incl. unwind)
 }
 
 /// Find the base-relation scanrelid of the Agg's DIRECT input scan: a `SeqScan`, optionally under a `Sort` (the
@@ -533,11 +548,16 @@ unsafe fn encode_private(adm: &Admitted, table_oid: u32) -> *mut pg_sys::List {
 /// (plain-Var tlist, scanrelid=0, custom_private from the stash) with the same output shape; else `None`.
 unsafe fn try_swap_agg(plan: *mut pg_sys::Plan, rtable: *mut pg_sys::List) -> Option<*mut pg_sys::Plan> {
     let agg = plan as *mut pg_sys::Agg;
-    // MIXED strategy (grouping sets) is out of scope. PLAIN (scalar, 1 row) and HASHED (unordered — any ORDER BY has
-    // an explicit Sort ABOVE) swap freely. SORTED (GroupAgg) relies on its INPUT sort for output order; our exec
-    // re-imposes an ASCending sort on the group keys (`run_columnar_grouped_aggs`), which matches the GroupAgg's
-    // default ASC-nulls-last order for the numeric/temporal keys — EXCEPT text, whose PG collation order differs from
-    // the byte-wise sort, so a SORTED text-key GroupAgg is left to the native plan.
+    // B1 (review): only a SIMPLE (non-split) aggregate carries the FINAL result. A parallel plan splits into
+    // Finalize(SIMPLE)→Gather→Partial(INITIAL_SERIAL)→ParallelSeqScan; swapping the Partial would emit the FINAL value
+    // where a partial transvalue is expected → wrong result. Decline any non-SIMPLE split.
+    if (*agg).aggsplit != pg_sys::AggSplit::AGGSPLIT_SIMPLE {
+        return None;
+    }
+    // MIXED (grouping sets) is out of scope. PLAIN (scalar) and HASHED (unordered — any ORDER BY has an explicit Sort
+    // ABOVE) swap freely. SORTED (GroupAgg) relies on its INPUT sort for output order; our exec re-imposes an ASC
+    // nulls-last sort on the group keys — so a SORTED node is admitted ONLY when its input Sort is exactly ASC
+    // nulls-last on numeric/temporal keys (checked below); DESC / nulls-first / text → decline (review B2).
     let strat = (*agg).aggstrategy;
     if strat != pg_sys::AggStrategy::AGG_PLAIN
         && strat != pg_sys::AggStrategy::AGG_HASHED
@@ -551,20 +571,49 @@ unsafe fn try_swap_agg(plan: *mut pg_sys::Plan, rtable: *mut pg_sys::List) -> Op
         return None;
     }
     let table_oid = (*scan_rte).relid.to_u32();
-    // Match the first unconsumed stash entry for this table OID.
+    let out_arity = pg_sys::list_length((*agg).plan.targetlist) as usize;
+    let numcols = (*agg).numCols as usize;
+    // B3 (review): match the first unconsumed stash entry for this OID WHOSE SHAPE matches the planned Agg — same
+    // group-key count and output arity — so a scalar Agg cannot bind a grouped `Admitted` (or vice-versa) on the same
+    // table, which would emit the wrong row shape.
     let adm = ADMIT_STASH.with(|s| {
         let mut v = s.borrow_mut();
-        v.iter_mut().find(|e| !e.consumed && e.table_oid == table_oid).map(|e| {
-            e.consumed = true;
-            e.adm.clone()
-        })
+        v.iter_mut()
+            .find(|e| {
+                !e.consumed
+                    && e.table_oid == table_oid
+                    && e.adm.group_cols.len() == numcols
+                    && e.adm.expected_arity() == out_arity
+            })
+            .map(|e| {
+                e.consumed = true;
+                e.adm.clone()
+            })
     })?;
-    // SORTED GroupAgg with a text group key → collation-order mismatch risk → decline (native). (Un-consume: leave the
-    // stash entry available — but it is already consumed; a re-planned native GroupAgg simply ignores it.)
-    if strat == pg_sys::AggStrategy::AGG_SORTED
-        && adm.group_cols.iter().any(|&(_, t)| matches!(t, 25 | 1042 | 1043))
-    {
-        return None;
+    // B2 (review): a SORTED GroupAgg is only swappable when our ASC-nulls-last group sort reproduces its output order.
+    if strat == pg_sys::AggStrategy::AGG_SORTED {
+        // Text keys: PG collation order ≠ byte-wise sort → decline.
+        if adm.group_cols.iter().any(|&(_, t)| matches!(t, 25 | 1042 | 1043)) {
+            return None;
+        }
+        // The input Sort must be exactly ASC nulls-last (else the plan's output order isn't our ASC order).
+        let child = (*agg).plan.lefttree;
+        if child.is_null() || (*child).type_ != pg_sys::NodeTag::T_Sort {
+            return None;
+        }
+        let s = child as *mut pg_sys::Sort;
+        for i in 0..(*s).numCols as usize {
+            if *(*s).nullsFirst.add(i) {
+                return None; // nulls-first ≠ our nulls-last
+            }
+            let opno = *(*s).sortOperators.add(i);
+            let (mut opfamily, mut opcintype, mut strategy) =
+                (pg_sys::InvalidOid, pg_sys::InvalidOid, 0i16);
+            pg_sys::get_ordering_op_properties(opno, &mut opfamily, &mut opcintype, &mut strategy);
+            if strategy != pg_sys::BTLessStrategyNumber as i16 {
+                return None; // DESC (or non-btree) ≠ our ascending
+            }
+        }
     }
 
     let tlist = (*agg).plan.targetlist;

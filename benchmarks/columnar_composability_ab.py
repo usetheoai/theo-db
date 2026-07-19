@@ -42,6 +42,20 @@ for label, tmpl in SHAPES:
 jc = scalar("SELECT count(*) FROM (SELECT k, sum(x) s FROM cc GROUP BY k) a JOIN (SELECT k, sum(x) s FROM ch GROUP BY k) b USING(k)")
 emit(f"M115_SHAPE join_on_grouped matched_groups={jc} (expect 100)")
 
+# Review B2 — ORDER BY DESC must be byte-identical (the swap declines a DESC AGG_SORTED → native, correct order).
+dc = scalar("SELECT string_agg(k::text, ',' ORDER BY k DESC) FROM (SELECT k, sum(x) s FROM cc GROUP BY k ORDER BY k DESC) q")
+dh = scalar("SELECT string_agg(k::text, ',' ORDER BY k DESC) FROM (SELECT k, sum(x) s FROM ch GROUP BY k ORDER BY k DESC) q")
+emit(f"M115_DESC identical={'YES' if dc==dh else 'NO'}")
+
+# Review B1 — under FORCED parallelism the aggregate stays correct (the swap declines any partial/finalize split).
+cur.execute("SET max_parallel_workers_per_gather=4"); cur.execute("SET parallel_setup_cost=0")
+cur.execute("SET parallel_tuple_cost=0"); cur.execute("SET min_parallel_table_scan_size=0")
+pc = scalar("SELECT sum(x) FROM cc"); ph = scalar("SELECT sum(x) FROM ch")
+pgc = scalar("SELECT sum(s) FROM (SELECT k, sum(x) s FROM cc GROUP BY k) q")
+pgh = scalar("SELECT sum(s) FROM (SELECT k, sum(x) s FROM ch GROUP BY k) q")
+emit(f"M115_PARALLEL scalar_identical={'YES' if pc==ph else 'NO'} grouped_identical={'YES' if pgc==pgh else 'NO'}")
+cur.execute("SET max_parallel_workers_per_gather=0")
+
 # Top-level regression: GROUP BY (+ORDER BY) unchanged, byte-identical, CustomScan engaged.
 tl_cs = engages_customscan("SELECT k, sum(x) FROM cc GROUP BY k")
 def gset(t):
