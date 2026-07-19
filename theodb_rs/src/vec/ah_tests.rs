@@ -260,3 +260,104 @@
         // NOT present both paths are the identical scalar loop, so only the "not materially slower" bound holds.
         assert!(t_avx <= t_scalar * 1.2, "AH block32 must not be slower than the scalar loop (block={t_avx} scalar={t_scalar})");
     }
+
+    // ============================================================================================================
+    // E2 FastScan 1-bit sign kernel (plan symqg-fastscan-1bit T1.1). Validates the REAL build_sign_lut16 +
+    // sign_estimate_block against the exact dot / scalar estimate_sign oracle. Mirrors the standalone arithmetic
+    // proof, exercised here through the actual Lut16 + ah_score_block pshufb path.
+    // ============================================================================================================
+
+    /// Pack a block of ≤32 neighbours' sign vectors `u ∈ {−1,+1}^dim` into the block32-nibble layout the FastScan
+    /// kernel expects (`codes[pair*32 + v]`; group `g`'s 4-bit sign pattern is the nibble). Mirrors the T2.1 pack.
+    fn pack_block32_signs(us: &[Vec<i8>], m: usize) -> Vec<u8> {
+        let pairs = m.div_ceil(2);
+        let mut codes = vec![0u8; pairs * 32];
+        for (v, u) in us.iter().enumerate() {
+            let nib = |g: usize| -> u8 { (0..4).filter(|&b| 4 * g + b < u.len()).map(|b| if u[4 * g + b] > 0 { 1u8 << b } else { 0 }).sum() };
+            for pair in 0..pairs {
+                let lo = nib(2 * pair);
+                let hi = if 2 * pair + 1 < m { nib(2 * pair + 1) } else { 0 };
+                codes[pair * 32 + v] = lo | (hi << 4);
+            }
+        }
+        codes
+    }
+
+    fn exact_dot(q_r: &[f32], u: &[i8]) -> f64 {
+        q_r.iter().zip(u).map(|(&q, &s)| q as f64 * s as f64).sum()
+    }
+
+    #[pg_test]
+    fn test_sign_lut_dequant_within_tol() {
+        // build_sign_lut16 + ah_score_block: the dequantized accumulator ≈ exact ⟨q_r,u⟩ within the requant bound.
+        for &dim in &[128usize, 8, 130, 768, 1032] {
+            let m = dim.div_ceil(4);
+            let mut rng = TestRng::new(0xABCD ^ dim as u64);
+            let q_r: Vec<f32> = (0..dim).map(|_| rng.next_f32() * 10.0).collect();
+            let lut = build_sign_lut16(&q_r).expect("eligible dim");
+            let us: Vec<Vec<i8>> = (0..32)
+                .map(|_| (0..dim).map(|_| if rng.next_f32() > 0.0 { 1i8 } else { -1 }).collect())
+                .collect();
+            let codes = pack_block32_signs(&us, m);
+            let mut acc = vec![0i32; 32];
+            ah_score_block(&lut, &codes, 32, &mut acc);
+            let bound = m as f64 * lut.scale as f64; // ≥ worst-case m·scale/2
+            for v in 0..32 {
+                let dq = lut.dequantize(acc[v]) as f64;
+                let ex = exact_dot(&q_r, &us[v]);
+                assert!((dq - ex).abs() <= bound, "dim={dim} v={v}: |{dq}-{ex}| > {bound}");
+            }
+        }
+    }
+
+    #[pg_test]
+    fn test_sign_fastscan_matches_estimate_sign() {
+        // sign_estimate_block reproduces estimate_sign (the scalar oracle) within the propagated requant tolerance.
+        use crate::ann::symqg_spike::{estimate_sign, SignCode};
+        let dim = 128usize;
+        let m = dim / 4;
+        let mut rng = TestRng::new(0x5151);
+        let q_r: Vec<f32> = (0..dim).map(|_| rng.next_f32() * 8.0).collect();
+        let lut = build_sign_lut16(&q_r).unwrap();
+        let qc2 = 42.0f64;
+        let codes_u: Vec<Vec<i8>> = (0..32)
+            .map(|_| (0..dim).map(|_| if rng.next_f32() > 0.0 { 1i8 } else { -1 }).collect())
+            .collect();
+        let nr: Vec<f32> = (0..32).map(|_| rng.next_f32().abs() * 3.0 + 0.5).collect();
+        let w: Vec<f32> = (0..32).map(|_| rng.next_f32().abs() * 2.0 + 0.5).collect();
+        let codes = pack_block32_signs(&codes_u, m);
+        let mut out = vec![0f64; 32];
+        sign_estimate_block(&lut, &codes, 32, &nr, &w, qc2, &mut out);
+        let bound = m as f64 * lut.scale as f64;
+        for k in 0..32 {
+            let sc = SignCode { u: codes_u[k].clone(), nr: nr[k], w: w[k] };
+            let exact = estimate_sign(&sc, &q_r, qc2);
+            let est_tol = 2.0 * nr[k] as f64 / w[k] as f64 * bound + 1e-3;
+            assert!((out[k] - exact).abs() <= est_tol, "k={k}: fast {} vs exact {} tol {est_tol}", out[k], exact);
+        }
+    }
+
+    #[pg_test]
+    fn test_sign_lut_empty_q_r_errs() {
+        assert!(build_sign_lut16(&[]).is_err(), "empty q_r must fail-fast");
+        assert!(build_sign_lut16(&vec![1.0f32; 130]).is_ok(), "dim=130 (m=33) valid via tail group");
+        assert!(build_sign_lut16(&vec![1.0f32; 1536]).is_err(), "dim=1536 (m=384>258) must fail-fast → scalar");
+    }
+
+    #[pg_test]
+    fn test_sign_lut_degenerate_range_all_zero_qr() {
+        // q_r all zero → max==min guard; every dequantized dot is 0, estimate = qc2 + nr².
+        use crate::ann::symqg_spike::SignCode;
+        let dim = 128usize;
+        let lut = build_sign_lut16(&vec![0.0f32; dim]).expect("degenerate is valid");
+        let us: Vec<Vec<i8>> = vec![vec![1i8; dim]; 32];
+        let codes = pack_block32_signs(&us, dim / 4);
+        let nr = vec![2.0f32; 32];
+        let w = vec![1.5f32; 32];
+        let mut out = vec![0f64; 32];
+        sign_estimate_block(&lut, &codes, 32, &nr, &w, 7.0, &mut out);
+        for k in 0..32 {
+            assert!((out[k] - (7.0 + 4.0)).abs() < 1e-4, "all-zero q_r: est {} != qc2+nr²", out[k]);
+        }
+        let _ = SignCode { u: vec![1i8; dim], nr: 2.0, w: 1.5 };
+    }

@@ -15,6 +15,8 @@ use pgrx::pg_sys;
 // flat so every existing `page::write_ivf_*` / `page::read_ivf_*` call site is unchanged.
 mod ivf;
 pub(crate) use ivf::*;
+mod symqg; // E2 — theodb_symqg co-located page layout (reaches the private helpers via `use super::*`)
+pub(crate) use symqg::*;
 
 const META_MAGIC: u32 = 0x5449_4D45; // "TIME" (Theodb Index MEta)
 const META_VERSION: u32 = 1;
@@ -608,11 +610,13 @@ unsafe fn main_index_pages(rel: pg_sys::Relation) -> Result<u32, String> {
             }
             return Ok(total5);
         }
-        if ver == 6 {
-            // v6 (M85 SQ8-refine): pending starts after meta(gen_base) + dir(20B) + AQ codebook + SQ8 codebook +
-            // centroids + Σ(code pages + sq8 pages). Dir entry = (code_fb, code_np, sq8_fb, sq8_np, cnt).
+        if ver == 6 || ver == 8 {
+            // v6 (M85 SQ8-refine) AND v8 (E1 RaBitQ-refine): byte-identical page accounting — the refine codebook
+            // npages sits at m[37..41] (SQ8 for v6, RaBitQ for v8) and the dir-entry shape is the same 20B
+            // (code_fb, code_np, refine_fb, refine_np, cnt). pending starts after meta(gen_base) + dir(20B) +
+            // AQ codebook + refine codebook + centroids + Σ(code pages + refine pages).
             if m.len() < 41 {
-                return Err("theodb am: truncated v6 meta".into());
+                return Err("theodb am: truncated v6/v8 meta".into());
             }
             let nlists6 = u32::from_le_bytes(m[13..17].try_into().unwrap()) as usize;
             let aq_codebook_npages6 = u32::from_le_bytes(m[21..25].try_into().unwrap());
@@ -667,6 +671,13 @@ unsafe fn main_index_pages(rel: pg_sys::Relation) -> Result<u32, String> {
     } else if magic == crate::am::hnsw_page::HNSW_STRUCT_MAGIC {
         // M35 structured HNSW: pending starts right after the neighbor page range (nbr_first + nbr_npages).
         Ok(crate::am::hnsw_page::decode_meta(&m)?.pending_start())
+    } else if magic == symqg::SYMQG_MAGIC {
+        // E2 v2: rows are FIXED-SIZE and packed contiguously (no directory) — pending starts right after
+        // gen_base + rotation codebook + tids + the packed rows region (npages_for(n · row_bytes)).
+        let meta = symqg::SymqgMeta::decode(&m)?;
+        let rows_bytes = (meta.n as usize)
+            .saturating_mul(symqg::row_bytes(meta.dim as usize, meta.degree_bound as usize));
+        Ok(meta.rows_base().saturating_add(npages_for(rows_bytes)))
     } else {
         // blob (M26 legacy / old HNSW): 1 meta + nchunks data pages.
         if m.len() < 20 {

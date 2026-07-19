@@ -21,6 +21,7 @@ use crate::pg::err_input;
 // file (not a `vec/mod.rs` dir) — minimal diff, no reshuffle of the M20/M58 code above.
 #[path = "vec/aq.rs"]
 pub(crate) mod aq; // M104 — relocated from am/ (pure domain quantizer; fixes the vec->am layering inversion)
+pub(crate) mod rabitq; // vector E1 — extended multi-bit RaBitQ (f32-free rerank codec; own-code, arXiv:2409.09913)
 #[path = "vec/ah.rs"]
 pub(crate) mod ah;
 

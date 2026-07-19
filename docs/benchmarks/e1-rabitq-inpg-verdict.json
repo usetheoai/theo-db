@@ -1,0 +1,54 @@
+{
+  "benchmark": "e1-rabitq-inpg-verdict",
+  "date": "2026-07-17",
+  "dataset": "SIFT1M (ann-benchmarks sift-128-euclidean, L2)",
+  "n": 1000000,
+  "nq": 200,
+  "lists": 500,
+  "rabitq_bits": 7,
+  "hardware": "DigitalOcean 8-vCPU / 15 GB, PostgreSQL 17.10 + pgrx 0.19.0",
+  "arms": {
+    "v5": "WITH (separate_storage=1) — Stage-2 rerank on raw f32 vectors",
+    "v8": "WITH (separate_storage=1, refine=2, rabitq_bits=7) — Stage-2 f32-free RaBitQ residual rerank"
+  },
+  "index_size": { "v5_idx": "528 MB", "v8_idx": "161 MB", "ratio": 3.28 },
+  "build_seconds": { "v8": 1138.0, "v5": 1138.2 },
+  "warm": {
+    "shared_buffers": "6GB",
+    "note": "all-in-RAM; QPS best-of-3; recall@10 vs official GT",
+    "results": [
+      {"of": 8,  "probes": 32,  "v8_recall": 0.9660, "v8_qps": 119.7, "v5_recall": 0.9775, "v5_qps": 138.4, "qps_ratio": 0.86},
+      {"of": 8,  "probes": 64,  "v8_recall": 0.9695, "v8_qps": 97.9,  "v5_recall": 0.9805, "v5_qps": 94.7,  "qps_ratio": 1.03},
+      {"of": 8,  "probes": 128, "v8_recall": 0.9695, "v8_qps": 61.0,  "v5_recall": 0.9810, "v5_qps": 64.2,  "qps_ratio": 0.95},
+      {"of": 8,  "probes": 256, "v8_recall": 0.9685, "v8_qps": 29.6,  "v5_recall": 0.9800, "v5_qps": 29.7,  "qps_ratio": 1.00},
+      {"of": 16, "probes": 32,  "v8_recall": 0.9740, "v8_qps": 104.1, "v5_recall": 0.9875, "v5_qps": 104.6, "qps_ratio": 1.00},
+      {"of": 16, "probes": 64,  "v8_recall": 0.9790, "v8_qps": 78.2,  "v5_recall": 0.9925, "v5_qps": 81.6,  "qps_ratio": 0.96},
+      {"of": 16, "probes": 128, "v8_recall": 0.9795, "v8_qps": 53.9,  "v5_recall": 0.9930, "v5_qps": 58.2,  "qps_ratio": 0.93},
+      {"of": 16, "probes": 256, "v8_recall": 0.9795, "v8_qps": 27.9,  "v5_recall": 0.9930, "v5_qps": 27.9,  "qps_ratio": 1.00},
+      {"of": 32, "probes": 32,  "v8_recall": 0.9785, "v8_qps": 76.5,  "v5_recall": 0.9935, "v5_qps": 74.5,  "qps_ratio": 1.03},
+      {"of": 32, "probes": 64,  "v8_recall": 0.9830, "v8_qps": 68.0,  "v5_recall": 0.9980, "v5_qps": 62.8,  "qps_ratio": 1.08},
+      {"of": 32, "probes": 128, "v8_recall": 0.9835, "v8_qps": 45.1,  "v5_recall": 0.9985, "v5_qps": 45.5,  "qps_ratio": 0.99},
+      {"of": 32, "probes": 256, "v8_recall": 0.9835, "v8_qps": 25.0,  "v5_recall": 0.9985, "v5_qps": 25.2,  "qps_ratio": 0.99},
+      {"of": 64, "probes": 32,  "v8_recall": 0.9790, "v8_qps": 53.2,  "v5_recall": 0.9945, "v5_qps": 50.6,  "qps_ratio": 1.05},
+      {"of": 64, "probes": 64,  "v8_recall": 0.9835, "v8_qps": 44.5,  "v5_recall": 0.9990, "v5_qps": 43.2,  "qps_ratio": 1.03},
+      {"of": 64, "probes": 128, "v8_recall": 0.9840, "v8_qps": 34.5,  "v5_recall": 0.9995, "v5_qps": 35.7,  "qps_ratio": 0.96},
+      {"of": 64, "probes": 256, "v8_recall": 0.9840, "v8_qps": 22.2,  "v5_recall": 0.9995, "v5_qps": 21.7,  "qps_ratio": 1.02}
+    ],
+    "buffers_per_query": [
+      {"of": 16, "probes": 64,  "v8_bufpq": 3200.1,  "v5_bufpq": 3235.7,  "ratio": 1.01},
+      {"of": 32, "probes": 128, "v8_bufpq": 6113.3,  "v5_bufpq": 6228.4,  "ratio": 1.02},
+      {"of": 64, "probes": 256, "v8_bufpq": 11892.5, "v5_bufpq": 12168.6, "ratio": 1.02}
+    ]
+  },
+  "cold": {
+    "shared_buffers": "256MB",
+    "note": "OS page cache dropped before every query (out-of-RAM proxy); nq=100; latency in ms",
+    "results": [
+      {"of": 16, "probes": 64,  "v8_recall": 0.9820, "v8_mean_ms": 75.1,  "v8_p50": 61.9, "v8_p95": 181.4, "v5_recall": 0.9940, "v5_mean_ms": 189.3, "v5_p50": 178.6, "v5_p95": 371.7, "latency_speedup": 2.52},
+      {"of": 32, "probes": 128, "v8_recall": 0.9850, "v8_mean_ms": 84.1,  "v8_p50": 56.8, "v8_p95": 253.9, "v5_recall": 1.0000, "v5_mean_ms": 226.3, "v5_p50": 218.2, "v5_p95": 460.0, "latency_speedup": 2.69},
+      {"of": 64, "probes": 256, "v8_recall": 0.9850, "v8_mean_ms": 121.0, "v8_p50": 87.4, "v8_p95": 311.2, "v5_recall": 1.0000, "v5_mean_ms": 335.7, "v5_p50": 297.6, "v5_p95": 795.7, "latency_speedup": 2.77}
+    ]
+  },
+  "gate": "MET (out-of-RAM): >=2x QPS at recall parity with measured 3.28x index-size / f32-read drop",
+  "verdict": "f32-free RaBitQ rerank: recall parity + 3.28x smaller index + 2.5-2.8x lower cold latency; warm QPS parity (Stage-2 not the in-RAM bottleneck, M85 holds). Does NOT claim warm vector-QPS superiority over ScaNN/AlloyDB."
+}

@@ -24,6 +24,164 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.102.0] - 2026-07-19
+
+### Added
+- **M114 — Columnar analytical aggregate completeness — MEASURED (`docs/benchmarks/m114-columnar-aggregate-verdict.md`).**
+  Broadens the M100 columnar `CustomScan` to admit **GROUP BY combined with a WHERE** (zone-map skip + DataFusion
+  Filter + hash aggregate in one plan), **`avg(float8)`**, and **`sum(int2/int4)`** — each byte-identical to the native
+  plan. `df_executor::AggSpec` gains `SumInt`/`AvgFloat8` variants and `agg_datum` emits the exact PG output type per
+  variant (`sum(int2/4)`→int8 = Arrow Int64, no overflow; `avg(float8)`→float8 = Arrow Float64); the grouped executor
+  now accepts predicates + a filter (filter-before-aggregate). `admit` widens the sum/avg arg-type guards and runs
+  `extract_all_predicates` in the grouped branch. The numeric-output shapes (`avg(int*)`, `sum(int8)`, `sum(float4)`,
+  `avg(float4)`) **decline to the native plan** (which returns the exact numeric) — a byte-fidelity call backed by the
+  blueprint's primary-source analysis (PG docs + DataFusion 54 source + Citus pattern), not a defect. **VERDICT (1M
+  rows, c-8, warm): GOAL MET** — byte-identical + CustomScan for every shipped shape, **6.58×–12.99×** faster;
+  declined shapes native + correct (proven by EXPLAIN + spot-check). Milestone M114.
+- Roadmap amended: added M114 Columnar analytical aggregate completeness (GROUP BY+WHERE + avg/sum(int)) (`/roadmap-feature columnar-aggregate-completeness`)
+- Roadmap amended: added M115 Composabilidade do M100 (saída columnar-agg usável em subquery/join) (`/roadmap-feature columnar-aggregate-completeness`)
+- **Columnar/HTAP: GROUP BY pushdown — MEASURED (`docs/benchmarks/columnar-groupby-verdict.md`).** The M100
+  `CustomScan` admitted only a scalar aggregate (one output row); this slice (plan `columnar-groupby-pushdown`) adds
+  vectorized `GROUP BY key, count(*)/sum(float8)`. `columnar_agg::admit` now accepts a `groupClause` — classifying
+  each output-target expr as a bare group `Var` (a `build_arrow`-supported type, incl. temporal) or a supported
+  `Aggref`, and building an explicit **output layout** so PG's target order (even agg-before-key) is honored (ADR-2).
+  `df_executor::run_columnar_grouped_aggs` runs DataFusion `.aggregate(group_exprs, agg_exprs)`;
+  `arrow_value_to_datum` converts group keys back to PG datums (reverse of `build_arrow`), materialized in
+  `es_query_cxt` so `text`-key varlena datums survive the multi-row emit (ADR-3); `exec_custom_scan` emits N rows via
+  a cursor (the scalar path is the N=1 case). **VERDICT (1M rows, c-8, warm): GOAL MET** — top-level grouped result
+  byte-identical to the heap, CustomScan engaged, **4.53×–9.75×** faster across int / multi-key / temporal (date) /
+  agg-before-key shapes. Scope: `count(*)`/`sum(float8)`, bare-column keys, no simultaneous WHERE (declines to native).
+  Honest caveat: consuming a columnar-aggregate output VALUE inside an enclosing expression hits a pre-existing M100
+  limitation (the scalar path fails identically) — orthogonal to GROUP BY, tracked separately; canonical top-level
+  `SELECT key, agg … GROUP BY key` works.
+- **Columnar/HTAP: zone-map skip-pruning (predicate pushdown consumer) — full slice, MEASURED
+  (`docs/benchmarks/columnar-zonemap-verdict.md`).** The `theodb_columnar` TAM already WROTE a per-`(chunk_group,
+  column)` min/max zone-map (`compute_minmax`) but never read it — this slice (plan `columnar-zonemap-skip-pruning`)
+  builds the missing consumer, closing the M99/M100/M103 "where pruning unproven" gap. The M100 planner
+  `CustomScan` now **admits a `WHERE`**: `columnar_agg::extract_zone_predicate` extracts `col <op> const` clauses
+  (operator resolved by **btree strategy number**, const in the column's SAME native type — ADR D5
+  same-domain-or-fallback; any un-pushable qual → native plan), carried plan-time→exec in `custom_private`. A
+  **DataFusion Filter** (`df_executor::build_filter_expr`) applies the predicate (the final authority — ADR D3), and
+  `decode_columns` **skips** chunk groups whose min/max PROVE no row can match (`am/zonemap.rs::chunk_can_match`,
+  pure + off-PG-proven; fail-safe on `has_minmax=false`). New GUC `theodb.columnar_zonemap_skip` (default on) +
+  `THEODB_SCAN_PROFILE` skip-ratio metric. **VERDICT (1M clustered, 10%-selective, c-8, warm): GOAL MET.**
+  Byte-identical to full decode (incl. the partial-overlap chunk group where the Filter drops non-matching
+  survivors); skips **89/100 chunk groups** (decodes 11% ≤ the 25% target) for a **measured 7.29× lower latency**
+  (19.3 ms vs 140.8 ms). A real measured win on the columnar/lakehouse axis (not the vector-QPS ceiling). Honest
+  caveat: the skip ratio tracks selectivity × clustering — unsorted columns prune little; the 7.29× is on a
+  clustered column, not unconditional (`public-copy.md`).
+- **Columnar/HTAP: zone-map skip-pruning extended to TEMPORAL columns — MEASURED
+  (`docs/benchmarks/columnar-zonemap-temporal-verdict.md`).** The zone-map consumer covered int/float/bool but
+  `minmax_kind_of` returned `None` for temporal types, so a time-range filter (`WHERE ts BETWEEN …`) — the most
+  common analytical filter on time-series — did not prune. This slice maps `timestamp`/`timestamptz` (int64 µs) to
+  the proven **I8** skip path and `date` (int32 days) to **I4** — the stored bytes ARE the internal int, so
+  `chunk_can_match` / `compute_minmax` / `extract_zone_predicate` / `encode_const_bits` reuse the i64/i32 path
+  unchanged. `df_executor::build_arrow` builds naive-tz Arrow `Timestamp(µs)` / `Date32` arrays and
+  `build_filter_expr` emits a matching Arrow-typed literal so the DataFusion Filter stays type-correct (D3).
+  **VERDICT (1M clustered monotonic time-series, 10%-selective, c-8, warm): GOAL MET** for both columns —
+  byte-identical, `CustomScan` engaged, skips **89/100** (timestamptz, **8.69×**) and **88/100** (date, **8.19×**)
+  chunk groups. Honest caveat: same selectivity × clustering dependence — the win is on a monotonic `ts` (the natural
+  time-series case). `arrow_cache` (M101 heap path) untouched — no regression.
+- **Vector research (E2 FastScan): `theodb_symqg` v3 FastScan 1-bit SIMD sign kernel — full slice, MEASURED
+  (`docs/benchmarks/e2-symqg-fastscan-verdict.md`).** The E2 verdict showed `theodb_symqg` slower than
+  `theodb_hnsw`; the per-hop bottleneck is the 32 scalar sign-dot estimates. This slice (plan `symqg-fastscan-1bit`)
+  batches them: `vec/ah.rs::build_sign_lut16` reformulates the 1-bit dot `⟨q_r,u⟩` as a LUT16-pshufb scan
+  (`⌈dim/4⌉` groups of ≤4 sign-dims → 16 patterns → signed-sum LUT, int8 requant mirroring `build_lut16`), and
+  `sign_estimate_block` reuses the tested `ah_score_block` (Rule 9) to score 32 neighbours in one SIMD pass + a
+  cheap per-neighbour finalize reproducing `estimate_sign`. `page/symqg.rs` v3 packs neighbour sign-codes in
+  block32-nibble transposed layout (`row_bytes` unchanged; `⌈degree/32⌉` blocks). `scan.rs` dispatches per index
+  (**D5**): FastScan when `⌈dim/4⌉ ≤ 258` (int16-safe), else the scalar `estimate_sign` fallback — protecting
+  1536-dim OpenAI embeddings from an int16-accumulator overflow. New GUC `theodb.symqg_fastscan` (default on) is
+  the same-index A/B kill-switch. **VERDICT (SIFT1M, dedicated c-8, warm): gate NOT met.** The FastScan kernel is
+  **correct and recall-neutral** (same-index ablation: recall identical to scalar within 0.1 pp; int8 requant
+  preserves ranking), but its **measured speedup is modest — 1.07–1.22×** (grows with ef), NOT the ~2.8× a naive
+  cross-box v2-vs-v3 comparison suggested (that was the steal→dedicated box change: `theodb_hnsw` itself went
+  287→712 QPS from the box alone). `theodb_hnsw` remains 2.1–3.5× faster at matched recall (0.95–0.994), parity
+  only at 0.999. The estimate is not the sole per-hop bottleneck (decode + heap + page-read dominate — Amdahl; the
+  E1/E2 lesson repeats). **No symqg QPS-win claim is made** (`public-copy.md`, rule 5).
+- **Vector research (E2): `theodb_symqg` index AM — SymphonyQG co-located quantized graph in-PG (own-code,
+  clean-room).** New custom index AM `CREATE INDEX … USING theodb_symqg (col vector_l2_ops) WITH (degree_bound=N)`.
+  Persists a co-located quantized graph (own-code, clean-room from arXiv:2411.12229 — the NTUITIVE-licensed
+  reference C++ is **study-only, never copied**, D1): each vertex row stores its rotated vector `P·x` plus, per
+  ≤`degree_bound` neighbour, a **1-bit RaBitQ sign code**, so a beam-search hop estimates all neighbours from the
+  co-located codes and the popped centre's exact distance is a local read (no separate rerank). Build reuses the
+  own-code HNSW for the base adjacency (`ann/symqg_spike.rs::encode_sign`), streaming encode+pack per vertex (no
+  N·R materialization — the 1M OOM fix). Page layout `page/symqg.rs`: meta · rotation codebook · tids ·
+  **contiguous fixed-size rows** (arithmetic `ord·row_bytes` addressing, no directory — folds the index 5.66×);
+  GenericXLog crash-safety, `INSERT`→pending, `VACUUM`, MVCC-delete all validated on real SIFT1M. L2-only.
+- **Vector research (E2 VERDICT): in-PG A/B `theodb_symqg` vs `theodb_hnsw` on SIFT1M
+  (`docs/benchmarks/e2-symqg-inpg-verdict`).** Settles the per-hop random-page-read tax the off-PG spike could not.
+  **Honest measured negative: the gate (symqg QPS ≥ 1.5× hnsw at recall@10 ≥ 0.95) is NOT met** — `theodb_hnsw` is
+  **2.6–3.9× faster** at matched recall (0.95–0.994), warm. The page tax was real and dominant (v1 one-page-per-row
+  layout, 7828 MB out-of-RAM → 8.5× loss) and **mitigable** (v2 contiguous packing → **1383 MB, 5.66× smaller,
+  +2.3× QPS**), but a residual gap remains: the off-PG spike's 1.8–2.66× advantage did not transfer against the
+  mature HNSW AM (first-cut symqg scan + per-hop 1408-byte row decode vs M35–M46-optimized hnsw). AM correctness
+  (recall parity 0.857–0.9995, pending/VACUUM/MVCC) is proven; only the QPS gate is unmet. **No symqg QPS-win claim
+  is made** (`public-copy.md`). Next lever (separate scope): FastScan 1-bit SIMD sign kernel (reuses
+  `vec/ah.rs::ah_score_block`) + copy-free row reads.
+- **Vector research (E1 core): extended multi-bit RaBitQ quantizer own-code (`vec/rabitq.rs`).** From-scratch
+  reimplementation of the extended multi-bit RaBitQ algorithm (arXiv:2409.09913, Apache-2.0; the vendored tree
+  was deleted in ADR-0046) — the **f32-free rerank codec**. Estimator stores per vector only the B-bit code `u`,
+  the residual norm, and `W = ⟨u, o'⟩`; at search `⟨q_r, o⟩ ≈ ⟨q_r, u⟩/W` (Δ and ‖ō‖ cancel → a pure
+  integer-weighted dot, **no raw vector touched**). Random orthogonal rotation via seeded Gram–Schmidt, std-only
+  (no new deps, D1/D4). **VALIDATED own-code (hermetic Monte-Carlo, droplet-free, `docs/benchmarks/rabitq-estimator-validation`):**
+  mean relative error 7.16% (1-bit) → **0.09% (7-bit)** with ~zero bias — a 7-bit code is accurate enough to be
+  the FINAL ranking f32-free, deleting the exact Stage-2 f32-rerank bind measured in M82/v5. NOT yet wired to the
+  AM scan (next: dedicated code page + f32-free `scan_ivf_aq_split` Stage-2 + SIFT1M A/B). Research blueprint:
+  `knowledge-base/discoveries/blueprints/vec-f32free-rerank-blueprint.md`.
+- **Vector research (E1 wiring): IVF-AQ v8 index `WITH (separate_storage=1, refine=2, rabitq_bits=N)` — f32-FREE
+  residual-RaBitQ Stage-2 rerank (L2-only).** Wires the validated `vec/rabitq.rs` codec into the
+  `theodb_ivfflat` AM. Build encodes the per-list residual `x − centroid[ci]` into a dedicated RaBitQ code page
+  (`[i8×dim][nr][w]` = dim+8 B/vec), on pages distinct from both the AH codes and the f32 vectors (v5 storage
+  separation preserved). Scan `scan_ivf_aq_split_rabitq`: Stage-1 AH prune over codes-only pages (identical to
+  v5/v6), Stage-2 reranks the `rerank_pool` survivors via `estimate_l2_sq` on the RaBitQ codes — **removing the
+  exact-f32 random-read bind measured in M82/v5** (zero raw vector touched at rerank). Pending (post-build INSERT)
+  rows stay f32-exact. New reloption `rabitq_bits` (default 7, range 1–8); `refine=2` selects RaBitQ. 6-file AM
+  surgery (`options.rs`, `page/ivf.rs`, `build.rs`, `scan.rs`, meta v8).
+- **Vector research (E1 VERDICT): f32-free RaBitQ rerank MEASURED on SIFT1M in-PG (`docs/benchmarks/e1-rabitq-inpg-verdict`).**
+  Same-data v5 (f32 rerank) vs v8 (7-bit RaBitQ rerank) A/B, 1M vectors, official GT, real `theodb_ivfflat` scan.
+  **Recall parity** (v8 within ~1.5 pp of v5 across the full sweep, e.g. 0.979 vs 0.9925 @ of=16/probes=64);
+  **index 3.28× smaller** (161 MB vs 528 MB — the f32-free rerank drops the raw-vector refine region); **cold /
+  out-of-RAM latency 2.5–2.8× lower** at recall parity (75 ms vs 189 ms @ of=16/probes=64 with the OS cache
+  dropped per query) — the E1 gate (≥2× QPS at recall parity) is MET in the out-of-RAM regime. **Warm/in-RAM is
+  parity** (QPS 0.86–1.08×, buffers/query 1.01–1.02×): Stage-2 refinement is not the in-RAM bottleneck (M85
+  holds). The win is memory + billion-scale (the North-Star-credited axis, ADR-0035); it is NOT a warm
+  vector-QPS-superiority claim over ScaNN/AlloyDB (that ceiling stands — M73/M82/ADR-0036).
+- **Vector research (E2 productization): `theodb_symqg` in-PG AM plan** (`knowledge-base/plans/symqg-inpg-am-plan.md`, plan-confidence SHIPPABLE_WITH_CAVEATS 70). Plans the in-PG SymphonyQG quantized-graph index AM (persisted co-located graph + build reusing HnswIndex/encode_sign + page-reading beam scan + WAL/VACUUM/reloptions), with the acceptance gate = in-PG A/B ≥1.5× vs theodb_hnsw at matched recall on SIFT1M (settles the per-hop page-tax the off-PG spike could not). Clean-room from the paper (D5).
+- **Vector research (E2 discovery): SymphonyQG clean-room blueprint** (`knowledge-base/discoveries/blueprints/symphonyqg-graph-quant-blueprint.md`).
+  Maps the SymphonyQG design (arXiv:2411.12229, SIGMOD'25) from the paper + a STUDY-ONLY clone of the
+  NTUITIVE-non-commercial reference (D1: never copied/transcribed — clean-room from the paper only, like the RaBitQ
+  own-code per ADR-0046). Design: per-vertex row co-locates the R neighbors' 1-bit RaBitQ codes (FastScan block-32)
+  + factors + IDs; beam search FastScan-estimates all neighbors per hop with NO separate rerank — the lever that
+  attacks the Stage-1/traversal bottleneck E1 measured. Honest gap: standalone-C++ 3.5–17× vs HNSWlib does NOT
+  transfer to a warm-QPS win over ScaNN (paradigm ceiling stands, M73/M82); realistic prize = beat our OWN
+  HNSW/IVF-AQ in-PG; index GROWS (replicated codes). Gate: hermetic own-code spike must beat our best engine ≥1.5×
+  @ recall 0.95 off-PG BEFORE any in-PG AM build (anti-sunk-cost).
+- **Vector research (E2 spike): SymphonyQG mechanism MEASURED — recall parity + 12–26× fewer exact distances, but
+  wall-clock gated on a FastScan 1-bit kernel** (`ann/symqg_spike.rs`, `docs/benchmarks/e2-symqg-spike.md`).
+  Clean-room own-code (D1): HNSW base graph + per-parent co-located RaBitQ codes (`encode(x_i − x_parent)`, reusing
+  E1's `estimate_l2_sq` with `c`=parent) + faithful Algorithm-1 beam search (estimate-keyed beam, separate exact-NN;
+  a first-cut termination bug that mixed estimate/exact scales was found+fixed). Measured on SIFT via an in-PG
+  `symqg_spike_bench` entrypoint: **7-bit symqg recall == exact recall at every beam, at 12–26× fewer EXACT distance
+  computations** (mechanism GREEN); but **wall-clock 0.45–0.82× (slower)** because a SCALAR estimate costs ≈ one L2,
+  so the all-neighbors estimates outweigh the pruned exacts. The ≥1.5× gate is now localized to ONE unbuilt
+  component: a batched FastScan 1-bit RaBitQ kernel (~8–16× cheaper than exact) — RaBitQ-Library (Apache-2.0) as
+  permissive reference. Spike-first gate did its job: de-risked the mechanism, priced the remaining work honestly.
+- **Vector research (E2 gate MET): 1-bit SIGN codec — recall parity + ~2.2× faster at SIFT1M, off-PG (scalar).**
+  The multi-bit estimator lost because its dot ≈ one L2; the SymphonyQG **1-bit sign** makes the neighbor dot
+  `Σ ±q_r[d]` multiply-free (~2-3× cheaper/elem). Our multi-bit codec is degenerate at bits=1, so a dedicated sign
+  codec was added. **Measured on the FULL SIFT1M (correct GT, real recall@10):** symqg reaches recall parity
+  (0.998) and is **1.8–2.66× faster** than exact-distance traversal on the same HNSW graph at recall 0.95–0.99,
+  15–27× fewer exact distances — SCALAR (FastScan SIMD kernel is an ADDITIONAL multiplier). The off-PG gate
+  (≥1.5×) is MET. Caveat: off-PG (pure in-RAM search; no heap/WAL/MVCC) — the next gate is the in-PG AM (per-hop
+  random page read). `docs/benchmarks/e2-symqg-spike.md`.
+
+- **Vector research (E2 impl T1.1): `theodb_symqg` co-located page layout** (`am/page/symqg.rs`). Persisted per-vertex row `[nbr_ids][1-bit sign bytes][nr/w factors]` (degree padded to 32; sentinel-skipped slots) + `SymqgMeta` + directory; rows are chunked so a high-dim×degree row spans pages (EC-2). Pure codec (SymqgMeta encode/decode, pack_row/decode_row, sign-bit pack) proven 6/6 standalone (round-trip, bad-magic reject, padding, row-spans-pages, truncated→typed-Err EC-7); crate compiles clean. Foundation for `ambuild_symqg`/`scan_symqg_structured`.
+
+- **Vector research (E2 impl T2.1+T3.1): `theodb_symqg` build + scan WORKING in-PG** (`am/build.rs` ambuild_symqg, `am/scan.rs` scan_symqg_structured, `am/mod.rs` handler+opclass). `CREATE INDEX … USING theodb_symqg` persists the co-located graph (HNSW base adjacency + 1-bit sign codes + rotated vector P·x per row); `SELECT … ORDER BY e <-> q LIMIT k` beam-searches reading one row/hop, reusing the off-PG-validated `estimate_sign` + the rotation trick (exact dist=‖q_r‖² and q_r=rot_q−rot in one O(D) subtraction, no per-hop rotate). L2-only (fail-fast), EC-1 build cancellation, EC-3 query-dim guard, sqrt-L2 scale (E1 lesson). **Measured: recall@10=1.0000 vs exact brute-force** (2000×16d, 20 queries) — correctness proven end-to-end. Next: T4.1 reloptions/VACUUM/crash + T5.1 SIFT1M A/B vs theodb_hnsw.
+
+- **Vector research (E2 impl T4.1): `theodb_symqg` production hardening — reloption + VACUUM + INSERT/pending + crash-safety.** `WITH (degree_bound=R)` reloption (`am/options.rs`, R multiple of 32, HNSW m=R/2); VACUUM is a safe no-op on the co-located graph (scan pending-fold + MVCC re-check drop dead TIDs, same as IVF v4-v8); INSERT→pending fixed (`am/page/mod.rs` `main_index_pages` symqg branch — the E1-class pending-region-base gap); crash-safety inherited from GenericXLog (`extend_page_with_item`). **Validated on DISTINCT random data (a degenerate-test-data false-pass was caught + fixed): recall@10=0.97 vs exact (ef=100, 3000×16d), INSERT dup found at dist 0 (top-2), DELETE+VACUUM leaks 0 rows.** T2.1+T3.1+T4.1 GREEN end-to-end. Next: T5.1 SIFT1M A/B vs theodb_hnsw.
+
 ## [0.101.0] - 2026-07-17
 
 ### Added

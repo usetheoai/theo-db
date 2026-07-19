@@ -138,10 +138,11 @@ pub extern "C-unwind" fn ambuild(
             let m0 = crate::am::options::pq_subspaces_from_relation(indexrel);
             let separate = crate::am::options::separate_storage_from_relation(indexrel);
             let sq8 = crate::am::options::refine_sq8_from_relation(indexrel);
+            let rabitq = crate::am::options::refine_rabitq_from_relation(indexrel);
             let has_labels = (*index_info).ii_NumIndexAttrs > 1;
             let soar0 = crate::am::options::soar_lambda_from_relation(indexrel);
             let est_dim = index_vector_dim(indexrel);
-            if m0 > 0 && separate && !sq8 && !has_labels && soar0 <= 0.0 && est_dim > 0 {
+            if m0 > 0 && separate && !sq8 && !rabitq && !has_labels && soar0 <= 0.0 && est_dim > 0 {
                 let reltuples = (*(*heaprel).rd_rel).reltuples;
                 let blocks =
                     pg_sys::RelationGetNumberOfBlocksInFork(heaprel, pg_sys::ForkNumber::MAIN_FORKNUM) as f64;
@@ -200,6 +201,49 @@ pub extern "C-unwind" fn ambuild(
                     // so the scan reads codes-only in Stage 1 (ADR-0037 lever). Adding `refine=1` → v6, whose
                     // per-list rerank region is SQ8 (¼ the f32 bytes, M85). Default off → v4 (interleaved).
                     if crate::am::options::separate_storage_from_relation(indexrel)
+                        && crate::am::options::refine_rabitq_from_relation(indexrel)
+                    {
+                        // E1 (v8) — f32-FREE residual RaBitQ rerank. The estimator is L2-only (rabitq.rs); fail loud
+                        // at BUILD (Rule 8 — the boundary) if the opclass is not L2.
+                        if metric != Metric::L2 {
+                            pg_sys::error!(
+                                "theodb_ivfflat: refine=2 (RaBitQ) requires the L2 opclass (the RaBitQ estimator is L2-only)"
+                            );
+                        }
+                        let bits = crate::am::options::rabitq_bits_from_relation(indexrel);
+                        // The rotation is data-independent (random orthogonal) — no train_sample needed (unlike SQ8's
+                        // min/max pass). Encode the RESIDUAL x−centroid[ci] per list position, in the SAME ordinal
+                        // order the block32 AH codes use (`positions`), to `[i8×dim][nr][w]` = dim+8 B/vec.
+                        let rq = crate::vec::rabitq::RabitqQuantizer::train(dim as usize, bits, BUILD_SEED);
+                        let centroids = idx.centroids();
+                        let rabitq_codes: Vec<Vec<u8>> = positions
+                            .iter()
+                            .enumerate()
+                            .map(|(ci, pos)| {
+                                let c = &centroids[ci];
+                                let mut b = Vec::with_capacity(pos.len() * (dim as usize + 8));
+                                for &p in pos {
+                                    let residual: Vec<f32> = vecs[p].iter().zip(c).map(|(x, cc)| x - cc).collect();
+                                    let code = rq.encode(&residual);
+                                    b.extend_from_slice(&crate::vec::rabitq::RabitqQuantizer::code_to_record(&code));
+                                }
+                                b
+                            })
+                            .collect();
+                        page::write_ivf_aq_split_rabitq(
+                            indexrel,
+                            dim,
+                            metric.tag(),
+                            m as u32,
+                            &quant.to_meta_bytes(),
+                            &rq.to_meta_bytes(),
+                            idx.centroids(),
+                            positions,
+                            idsr,
+                            &codes,
+                            &rabitq_codes,
+                        );
+                    } else if crate::am::options::separate_storage_from_relation(indexrel)
                         && crate::am::options::refine_sq8_from_relation(indexrel)
                     {
                         // v6 — train SQ8 from `idx.vectors()` by reference (M89: no `corpus_vecs` clone) and encode
@@ -347,6 +391,78 @@ pub extern "C-unwind" fn ambuild_hnsw(
             Err(e) => pg_sys::error!("theodb hnsw build: {e}"),
         }
         build_result(ntuples, corpus_len)
+    }
+}
+
+/// E2 degree bound R for the co-located symqg graph (a multiple of 32 for FastScan alignment; HNSW base-layer
+/// m0 = 2·HNSW_M ≤ R so no neighbour is truncated, only padded). T4.1 promotes this to a reloption.
+const SYMQG_DEGREE: usize = 32;
+
+/// E2 T2.1 — `ambuild_symqg`: build the HNSW base graph, encode per-parent 1-bit sign codes (`SymqgSpike`), and
+/// persist the co-located page layout (`page::pack_symqg`). Mirrors `ambuild_hnsw`; the search reads the persisted
+/// rows per hop (`scan_symqg_structured`, T3.1). L2-only (the sign estimator is L2-only) — fail-fast at build.
+#[pg_guard]
+pub extern "C-unwind" fn ambuild_symqg(
+    heaprel: pg_sys::Relation,
+    indexrel: pg_sys::Relation,
+    index_info: *mut pg_sys::IndexInfo,
+) -> *mut pg_sys::IndexBuildResult {
+    unsafe {
+        let (corpus, _labels, ntuples) = collect_corpus(heaprel, indexrel, index_info);
+        let corpus_len = corpus.len();
+        let metric = resolve_metric(indexrel);
+        if metric != Metric::L2 {
+            pg_sys::error!("theodb_symqg: requires the L2 opclass (the 1-bit sign estimator is L2-only)");
+        }
+        // WITH (degree_bound=R): the co-located out-degree. Build the HNSW base graph with m = R/2 so m0 = R fills
+        // the row (R=32 default = HNSW m0). Larger R → denser graph + bigger rows.
+        let degree = crate::am::options::degree_bound_from_relation(indexrel);
+        let hnsw_m = (degree / 2).max(1);
+        // EC-1: both the HNSW build and the sign-encode loop take the cancellation seam so a long CREATE INDEX
+        // responds to pg_cancel_backend (check_for_interrupts! runs under #[pg_guard] — unwinds cleanly across C).
+        let idx = crate::ann::HnswIndex::build_owned(
+            corpus, hnsw_m, hnsw_ef_construction(), metric, BUILD_SEED, &|| { pgrx::check_for_interrupts!(); },
+        );
+        // STREAMING encode (EC-10 fix): encode + pack each vertex's row and DROP its codes immediately, instead of
+        // materializing all N·R sign codes at once (`SymqgSpike::build` — which OOM'd at 1M on 16 GB). Peak memory
+        // is the HNSW graph + the packed rows (O(N·row_bytes)) + O(R) transient codes — no O(N·R·dim) code buffer.
+        let n = idx.spike_len();
+        let dim = if n > 0 { idx.spike_vector(0).len() } else { 0 };
+        let rq = crate::vec::rabitq::RabitqQuantizer::train(dim, 1, BUILD_SEED);
+        let mut rows: Vec<Vec<u8>> = Vec::with_capacity(n);
+        let mut tids: Vec<i64> = Vec::with_capacity(n);
+        for p in 0..n {
+            if p % 4096 == 0 {
+                pgrx::check_for_interrupts!(); // EC-1
+            }
+            tids.push(idx.spike_id(p));
+            let pv = idx.spike_vector(p);
+            let rot = rq.rotate(pv); // P·x_p — exact dist = ‖rot_q − rot‖², q_r = rot_q − rot (one subtraction at scan)
+            let nbr_nodes = idx.spike_base_neighbors(p);
+            let mut nbrs: Vec<(u32, crate::ann::symqg_spike::SignCode)> = Vec::with_capacity(degree);
+            for &nb in nbr_nodes.iter().take(degree) {
+                let resid: Vec<f32> = idx.spike_vector(nb).iter().zip(pv).map(|(&x, &c)| x - c).collect();
+                nbrs.push((nb as u32, crate::ann::symqg_spike::encode_sign(&rq, &resid)));
+            }
+            while nbrs.len() < degree {
+                nbrs.push((page::SENTINEL_ORD, crate::ann::symqg_spike::SignCode { u: vec![0i8; dim], nr: 0.0, w: 0.0 }));
+            }
+            rows.push(page::pack_row(&rot, &nbrs, dim, degree)); // rot + nbrs codes dropped here
+        }
+        let entry = idx.spike_entry().unwrap_or(0) as u32;
+        let rot_codebook = rq.to_meta_bytes();
+        page::pack_symqg(indexrel, metric.tag(), dim as u32, degree as u32, entry, &rot_codebook, &tids, &rows);
+        build_result(ntuples, corpus_len)
+    }
+}
+
+/// E2 T2.1 — empty `theodb_symqg` index (CREATE INDEX on an empty table). Builds a 0-vertex graph + persists an
+/// empty layout so `peek_magic` returns SYMQG_MAGIC and the scan short-circuits to [] (EC-4).
+#[pg_guard]
+pub extern "C-unwind" fn ambuildempty_symqg(indexrel: pg_sys::Relation) {
+    unsafe {
+        // dim/degree unknown with no rows; a 0-vertex layout: no rows, empty rotation codebook.
+        page::pack_symqg(indexrel, Metric::L2.tag(), 0, SYMQG_DEGREE as u32, 0, &[], &[], &[]);
     }
 }
 
@@ -531,10 +647,18 @@ pub(crate) unsafe fn vacuum_rebuild(
             || page::ivf_is_v5(indexrel)
             || page::ivf_is_v6(indexrel)
             || page::ivf_is_v7(indexrel)
+            || page::ivf_is_v8(indexrel)
         {
             return 0;
         }
         return vacuum_rebuild_structured(indexrel, dead);
+    }
+    if magic == page::SYMQG_MAGIC {
+        // E2: SymphonyQG co-located graph — a routine VACUUM is a safe NO-OP on the structure (same rationale as
+        // IVF v4-v8): the scan folds the pending region + the executor's MVCC heap re-check drops dead TIDs, so a
+        // deleted row never surfaces. Compacting the graph (dropping dead vertices + re-encoding) is a REINDEX-only
+        // path for v1 (a symqg-aware in-VACUUM fold is a documented follow-up). Never a crash on `read_blob(symqg)`.
+        return 0;
     }
     if magic == crate::am::hnsw_page::HNSW_STRUCT_MAGIC {
         return vacuum_rebuild_hnsw_structured(indexrel, dead);

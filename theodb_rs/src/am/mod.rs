@@ -22,6 +22,7 @@ mod arrow_cache; // M101 — heap-authoritative in-memory Arrow columnar cache (
 mod cost; // M48 T5.1 — honest amcostestimate visit-ratio (pgvector cost model)
 pub(crate) mod columnar; // M99 — theodb_columnar append-only columnar Table Access Method (registration + column-major + MVCC)
 mod columnar_codec; // M99 Phase C — pure column-major stripe codec (FFI-free, locally unit-tested)
+mod zonemap; // columnar zone-map skip-pruning: pure min/max exclusion test (predicate pushdown consumer)
 pub(crate) mod customscan; // M92 spike — arbitrary-WHERE Custom Scan Provider (pathlist hook + custom node)
 mod fold; // M48 — crash-safe VACUUM fold (meta-pivot, issue #47)
 pub(crate) mod guc; // M34 — theodb_ivfflat.probes scan GUC
@@ -73,6 +74,23 @@ fn theodb_ivfflat_amhandler(_fcinfo: pg_sys::FunctionCallInfo) -> PgBox<pg_sys::
 ")]
 fn theodb_hnsw_amhandler(_fcinfo: pg_sys::FunctionCallInfo) -> PgBox<pg_sys::IndexAmRoutine> {
     make_amroutine(build::ambuild_hnsw, build::ambuildempty_hnsw)
+}
+
+/// The `theodb_symqg` handler (E2) — the SAME shared plumbing (scan/vacuum/cost dispatch on the persisted blob's
+/// magic), only the build persists a co-located SymphonyQG quantized graph instead of an HNSW blob.
+#[pg_extern(sql = "
+    CREATE OR REPLACE FUNCTION theodb_symqg_amhandler(internal) RETURNS index_am_handler
+        PARALLEL SAFE IMMUTABLE STRICT COST 0.0001 LANGUAGE c AS '@MODULE_PATHNAME@', '@FUNCTION_NAME@';
+    DO $$
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_am WHERE amname = 'theodb_symqg') THEN
+            CREATE ACCESS METHOD theodb_symqg TYPE INDEX HANDLER theodb_symqg_amhandler;
+        END IF;
+    END;
+    $$;
+")]
+fn theodb_symqg_amhandler(_fcinfo: pg_sys::FunctionCallInfo) -> PgBox<pg_sys::IndexAmRoutine> {
+    make_amroutine(build::ambuild_symqg, build::ambuildempty_symqg)
 }
 
 /// Fill an `IndexAmRoutine` with the shared hooks + the given per-algorithm build callbacks.
@@ -299,6 +317,17 @@ extension_sql!(
     "#,
     name = "theodb_hnsw_opclasses",
     requires = [theodb_hnsw_amhandler, "vector_type"],
+);
+
+// E2: the DEFAULT L2 operator class for the SymphonyQG AM (L2-only — the 1-bit sign estimator is L2-only, so no
+// cosine/ip opclass is offered; a non-L2 build fails fast in `ambuild_symqg`).
+extension_sql!(
+    r#"
+    CREATE OPERATOR CLASS theodb_symqg_l2_ops DEFAULT FOR TYPE vector USING theodb_symqg AS
+        OPERATOR 1 <-> (vector, vector) FOR ORDER BY float_ops;
+    "#,
+    name = "theodb_symqg_opclasses",
+    requires = [theodb_symqg_amhandler, "vector_type"],
 );
 
 // M49: non-default cosine (`<=>`) + inner-product (`<#>`) opclasses for both AMs. Strategy is always 1

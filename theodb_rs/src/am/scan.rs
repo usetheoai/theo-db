@@ -196,6 +196,14 @@ pub extern "C-unwind" fn amrescan(
             state.ef = ef;
             state.iterative = crate::am::guc::max_scan_tuples() > 0;
             scan_hnsw_structured(rel, &query, ef)
+        } else if magic == crate::am::page::SYMQG_MAGIC {
+            // E2: SymphonyQG co-located quantized graph — beam search reading rows per hop.
+            let ef = crate::am::guc::ef_search();
+            state.query = query.clone();
+            state.rel = rel;
+            state.ef = ef;
+            state.iterative = false; // iterative-grow scan is a follow-up; the ORDER BY LIMIT path is served
+            scan_symqg_structured(rel, &query, ef)
         } else {
             scan_blob(rel, &query)
         };
@@ -242,6 +250,172 @@ unsafe fn gather_hnsw_candidates(rel: pg_sys::Relation, query: &[f32], ef: usize
     results
 }
 
+/// E2 T3.1 — SymphonyQG scan: beam search over the persisted co-located graph, reading one vertex row per hop.
+/// Reuses the off-PG-validated estimator (`symqg_spike::estimate_sign`) and the rotation trick: the row stores
+/// `rot = P·x_p`, so `q_r = rot_q − rot_p` gives BOTH the exact distance (`‖q_r‖²`, rotation-invariant) and the
+/// per-neighbour estimate in one O(D) subtraction (no per-hop rotate — the spike's speed lever). Answer = the k
+/// smallest EXACT among popped vertices (no re-rank), mapped ordinal→tid; pending rows scored exact.
+unsafe fn scan_symqg_structured(rel: pg_sys::Relation, query: &[f32], ef: usize) -> BinaryHeap<Reverse<Scored>> {
+    heapify(gather_symqg_candidates(rel, query, ef))
+}
+
+/// Ordered f64 for the beam heaps (all distances ≥ 0, finite here).
+#[derive(Clone, Copy, PartialEq)]
+struct OrdF(f64);
+impl Eq for OrdF {}
+impl PartialOrd for OrdF {
+    fn partial_cmp(&self, o: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(o))
+    }
+}
+impl Ord for OrdF {
+    fn cmp(&self, o: &Self) -> std::cmp::Ordering {
+        self.0.partial_cmp(&o.0).unwrap_or(std::cmp::Ordering::Equal)
+    }
+}
+
+unsafe fn gather_symqg_candidates(rel: pg_sys::Relation, query: &[f32], ef: usize) -> Vec<(i64, f64)> {
+    use crate::am::page;
+    let meta = match page::read_symqg_meta(rel) {
+        Ok(m) => m,
+        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+    };
+    let metric = match Metric::from_tag(meta.metric_tag) {
+        Some(m) => m,
+        None => pg_sys::error!("theodb am scan: unknown metric tag"),
+    };
+    if meta.n == 0 {
+        return Vec::new(); // empty index (EC-4)
+    }
+    if query.len() != meta.dim as usize {
+        pg_sys::error!("theodb_symqg: query dim {} != index dim {}", query.len(), meta.dim); // EC-3
+    }
+    let dim = meta.dim as usize;
+    let degree = meta.degree_bound as usize;
+    let rot_bytes = match page::read_chunked(rel, meta.gen_base, meta.rot_codebook_npages) {
+        Ok(b) => b,
+        Err(e) => pg_sys::error!("theodb am scan (rotation): {e}"),
+    };
+    let rq = match crate::vec::rabitq::RabitqQuantizer::from_meta_bytes(&rot_bytes) {
+        Ok(q) => q,
+        Err(e) => pg_sys::error!("theodb am scan (rabitq): {e}"),
+    };
+    let rot_q = rq.rotate(query);
+    let tids = match page::read_symqg_tids(rel, &meta) {
+        Ok(t) => t,
+        Err(e) => pg_sys::error!("theodb am scan (tids): {e}"),
+    };
+    let rows_base = meta.rows_base();
+    let ef = ef.max(1);
+    // D5 eligibility dispatch: the FastScan int16 accumulator is safe only for `m = ⌈dim/4⌉ ≤ 258` (dim ≤ 1032).
+    // Larger dims (e.g. 1536-dim embeddings) fall back to the scalar `estimate_sign` path — always correct. The
+    // `symqg_fastscan` GUC (default on) is the same-index A/B kill-switch that isolates the kernel's effect.
+    let fastscan_ok = crate::am::guc::symqg_fastscan() && dim.div_ceil(4) <= 258;
+    let read_fast = |ord: u32| -> page::SymqgRowFast {
+        match page::read_symqg_row_fast(rel, rows_base, ord, dim, degree) {
+            Ok(r) => r,
+            Err(e) => pg_sys::error!("theodb am scan (row {ord}): {e}"),
+        }
+    };
+    let read_scalar = |ord: u32| -> page::SymqgRow {
+        match page::read_symqg_row(rel, rows_base, ord, dim, degree) {
+            Ok(r) => r,
+            Err(e) => pg_sys::error!("theodb am scan (row {ord}): {e}"),
+        }
+    };
+    let mut visited: std::collections::HashSet<u32> = std::collections::HashSet::new();
+    let mut cand: BinaryHeap<Reverse<(OrdF, u32)>> = BinaryHeap::new();
+    let mut beamw: BinaryHeap<OrdF> = BinaryHeap::new();
+    let mut results: Vec<(i64, f64)> = Vec::new();
+    let entry = meta.entry;
+    visited.insert(entry);
+    // Seed the beam with the entry vertex's exact distance (its q_r norm) as its estimate. `read_fast` gives `rot`
+    // cheaply in either mode (no `u` reconstruction).
+    let erow = read_fast(entry);
+    let eq: Vec<f32> = rot_q.iter().zip(&erow.rot).map(|(&a, &b)| a - b).collect();
+    let e_ex: f64 = eq.iter().map(|&x| (x as f64) * (x as f64)).sum();
+    cand.push(Reverse((OrdF(e_ex), entry)));
+    beamw.push(OrdF(e_ex));
+    let mut out_est = vec![0f64; 32]; // reused FastScan block output buffer
+    while let Some(Reverse((OrdF(est_p), p))) = cand.pop() {
+        if beamw.len() >= ef {
+            if let Some(&OrdF(worst)) = beamw.peek() {
+                if est_p > worst {
+                    break;
+                }
+            }
+        }
+        // Record the popped centre's EXACT distance on the sqrt-L2 scale (same as `metric.dist` / pending — the
+        // E1 lesson: never mix squared and sqrt scales in the ORDER BY comparison). Then estimate its neighbours.
+        if fastscan_ok {
+            let row = read_fast(p);
+            let q_r: Vec<f32> = rot_q.iter().zip(&row.rot).map(|(&a, &b)| a - b).collect();
+            let qc2: f64 = q_r.iter().map(|&x| (x as f64) * (x as f64)).sum();
+            results.push((tids[p as usize], qc2.max(0.0).sqrt()));
+            let lut = match crate::vec::ah::build_sign_lut16(&q_r) {
+                Ok(l) => l,
+                Err(e) => pg_sys::error!("theodb am scan (sign lut): {e}"),
+            };
+            for c in 0..row.nblocks() {
+                let base = c * 32;
+                crate::vec::ah::sign_estimate_block(
+                    &lut,
+                    row.block_codes(c, dim),
+                    32,
+                    &row.nr[base..base + 32],
+                    &row.w[base..base + 32],
+                    qc2,
+                    &mut out_est,
+                );
+                for v in 0..32 {
+                    let ord = row.ords[base + v];
+                    if ord == page::SENTINEL_ORD || !visited.insert(ord) {
+                        continue;
+                    }
+                    let est = out_est[v].max(0.0);
+                    let admit = beamw.len() < ef || beamw.peek().map(|&OrdF(w)| est < w).unwrap_or(true);
+                    if admit {
+                        cand.push(Reverse((OrdF(est), ord)));
+                        beamw.push(OrdF(est));
+                        if beamw.len() > ef {
+                            beamw.pop();
+                        }
+                    }
+                }
+            }
+        } else {
+            let row = read_scalar(p);
+            let q_r: Vec<f32> = rot_q.iter().zip(&row.rot).map(|(&a, &b)| a - b).collect();
+            let qc2: f64 = q_r.iter().map(|&x| (x as f64) * (x as f64)).sum();
+            results.push((tids[p as usize], qc2.max(0.0).sqrt()));
+            for (ord, code) in &row.neighbours {
+                if !visited.insert(*ord) {
+                    continue;
+                }
+                let est = crate::ann::symqg_spike::estimate_sign(code, &q_r, qc2).max(0.0);
+                let admit = beamw.len() < ef || beamw.peek().map(|&OrdF(w)| est < w).unwrap_or(true);
+                if admit {
+                    cand.push(Reverse((OrdF(est), *ord)));
+                    beamw.push(OrdF(est));
+                    if beamw.len() > ef {
+                        beamw.pop();
+                    }
+                }
+            }
+        }
+    }
+    // Pending rows (INSERTed after build) — scored EXACT (sqrt L2), same scale as the popped centres.
+    match page::read_pending(rel) {
+        Ok(pending) => {
+            for (tidv, v) in pending {
+                results.push((tidv, metric.dist(query, &v)));
+            }
+        }
+        Err(e) => pg_sys::error!("theodb am scan (pending): {e}"),
+    }
+    results
+}
+
 /// M31 partial-page scan: read the meta + centroids (∝ nlists), pick the `SCAN_PROBES` nearest centroids, and read
 /// ONLY those lists' pages (∝ probes) — never the whole index. Merge the pending region. Ascending distance.
 // M87 — returns the candidate `(tid, distance)` Vec (NOT a heap) so the caller can dedup already-emitted tids on
@@ -271,6 +445,10 @@ unsafe fn scan_ivf_structured(
     // M85 (Roadmap v7): an IVF-AQ v6 index (built WITH separate_storage=1, refine=sq8) reranks on SQ8 codes.
     if page::ivf_is_v6(rel) {
         return scan_ivf_aq_split_sq8(rel, query, probes, rerank_pool);
+    }
+    // E1: an IVF-AQ v8 index (built WITH separate_storage=1, refine=2) reranks on f32-FREE RaBitQ residual codes.
+    if page::ivf_is_v8(rel) {
+        return scan_ivf_aq_split_rabitq(rel, query, probes, rerank_pool);
     }
     // v3 f32 IVF reranks ALL probed candidates exactly (no AH prune pool) — `rerank_pool` unused here.
     let _ = rerank_pool;
@@ -837,6 +1015,122 @@ unsafe fn scan_ivf_aq_split_sq8(
         results.push((*tid, metric.dist(query, &approx)));
     }
     // M81 — fold in pending (rows INSERTed after build): f32, scored EXACTLY (never quantized). Same as v3/v4/v5.
+    match page::read_pending(rel) {
+        Ok(pending) => {
+            for (tidv, v) in pending {
+                results.push((tidv, metric.dist(query, &v)));
+            }
+        }
+        Err(e) => pg_sys::error!("theodb am scan (pending): {e}"),
+    }
+    results
+}
+
+/// E1 — the IVF-AQ v8 RaBitQ-REFINE scan: identical Stage-1 to v5/v6 (AH prune over codes-only pages) but Stage-2
+/// reranks the `rerank_pool` survivors on **f32-FREE** RaBitQ residual codes (`estimate_l2_sq`, no raw vector
+/// touched — removing the exact M82/v5 Stage-2 f32 random-read bind). Residual-based: per PROBED list, precompute
+/// `q_r = P·(query − centroid[ci])` and `qc2 = ‖query − centroid[ci]‖²`, then estimate per survivor. L2-only
+/// (guarded at build). Pending rows stay f32-EXACT (never RaBitQ-encoded — they carry no centroid assignment).
+unsafe fn scan_ivf_aq_split_rabitq(
+    rel: pg_sys::Relation,
+    query: &[f32],
+    probes: usize,
+    rerank_pool: usize,
+) -> Vec<(i64, f64)> {
+    let meta = match page::read_ivf_aq_meta_split_rabitq(rel) {
+        Ok(m) => m,
+        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+    };
+    let quant = match crate::vec::aq::AqQuantizer::from_meta_bytes(&meta.aq_codebook) {
+        Ok(q) => q,
+        Err(e) => pg_sys::error!("theodb am scan (aq codebook): {e}"),
+    };
+    let rq = match crate::vec::rabitq::RabitqQuantizer::from_meta_bytes(&meta.rabitq_codebook) {
+        Ok(q) => q,
+        Err(e) => pg_sys::error!("theodb am scan (rabitq codebook): {e}"),
+    };
+    let lut = match crate::vec::ah::build_lut16(query, &quant) {
+        Ok(l) => l,
+        Err(e) => pg_sys::error!("theodb am scan (aq lut): {e}"),
+    };
+    let metric = match Metric::from_tag(meta.metric_tag) {
+        Some(m) => m,
+        None => pg_sys::error!("theodb am scan: unknown metric tag"),
+    };
+    let dim = meta.dim as usize;
+    let pairs = (meta.m as usize).div_ceil(2);
+
+    let mut cd: Vec<(f64, usize)> =
+        meta.centroids.iter().enumerate().map(|(i, c)| (metric.dist(query, c), i)).collect();
+    cd.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    let probes = probes.clamp(1, meta.centroids.len().max(1));
+    let rerank_pool = rerank_pool.max(1);
+
+    // Stage 1 — read ONLY the CODE pages of each probed list; AH-score; keep (score, tid, list_ci, ordinal).
+    let mut cands: Vec<(i32, i64, usize, usize)> = Vec::new();
+    for &(_, ci) in cd.iter().take(probes) {
+        let (cfb, cnp, _rfb, _rnp, cnt) = meta.dir[ci];
+        let n = cnt as usize;
+        if n == 0 {
+            continue;
+        }
+        let cbytes = match page::read_ivf_list_bytes(rel, cfb, cnp) {
+            Ok(b) => b,
+            Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        };
+        let codes_off = 8 * n;
+        let nblocks = n.div_ceil(32);
+        let mut out = [0i32; 32];
+        for b in 0..nblocks {
+            let bn = (n - b * 32).min(32);
+            let base = codes_off + b * pairs * 32;
+            if cbytes.len() < base + pairs * 32 {
+                break;
+            }
+            crate::vec::ah::ah_score_block(&lut, &cbytes[base..base + pairs * 32], bn, &mut out[..bn]);
+            for (j, &score) in out.iter().enumerate().take(bn) {
+                let ordinal = b * 32 + j;
+                let tid = i64::from_le_bytes(cbytes[ordinal * 8..ordinal * 8 + 8].try_into().unwrap());
+                cands.push((score, tid, ci, ordinal));
+            }
+        }
+    }
+
+    // Stage 2 — rerank the best `rerank_pool` survivors on f32-FREE RaBitQ residual codes. Per distinct probed list
+    // `ci`, precompute (q_r = P·(query − centroid[ci]), qc2 = ‖query − centroid[ci]‖²) once (rotate is O(dim²)).
+    let rn = rerank_pool.min(cands.len());
+    if rn < cands.len() {
+        cands.select_nth_unstable_by_key(rn, |c| c.0);
+        cands.truncate(rn);
+    }
+    let mut qcache: Vec<Option<(Vec<f32>, f64)>> = vec![None; meta.centroids.len()];
+    let mut results: Vec<(i64, f64)> = Vec::with_capacity(cands.len());
+    for (_, tid, ci, ordinal) in &cands {
+        let (_cfb, _cnp, rfb, rnp, _cnt) = meta.dir[*ci];
+        if qcache[*ci].is_none() {
+            let c = &meta.centroids[*ci];
+            let qmc: Vec<f32> = query.iter().zip(c).map(|(&x, &cc)| x - cc).collect();
+            let q_r = rq.rotate(&qmc);
+            // qc2 = ‖q−c‖² (SQUARED L2). NOT metric.dist — that returns sqrt(‖·‖²) for L2, and the estimator
+            // mixes qc2 with the squared residual norm nr², so a sqrt here corrupts the cross-list ranking.
+            let qc2: f64 = qmc.iter().map(|&d| (d as f64) * (d as f64)).sum();
+            qcache[*ci] = Some((q_r, qc2));
+        }
+        let (q_r, qc2) = qcache[*ci].as_ref().unwrap();
+        let rec = match page::read_rabitq_at(rel, rfb, rnp, *ordinal, dim) {
+            Ok(b) => b,
+            Err(e) => pg_sys::error!("theodb am scan (v8 rabitq rerank): {e}"),
+        };
+        let code = match crate::vec::rabitq::RabitqQuantizer::record_to_code(&rec, dim) {
+            Ok(c) => c,
+            Err(e) => pg_sys::error!("theodb am scan (v8 rabitq record): {e}"),
+        };
+        // estimate_l2_sq returns SQUARED L2; sqrt it so v8 distances share the sqrt-L2 scale of the pending rows
+        // (metric.dist) and of v5/v6 — the ORDER BY comparison must not mix squared and sqrt scales. Clamp the
+        // rare negative estimate (quantization noise near d≈0) before the sqrt.
+        results.push((*tid, rq.estimate_l2_sq(&code, q_r, *qc2).max(0.0).sqrt()));
+    }
+    // Pending rows (INSERTed after build): f32, scored EXACTLY (same as v5/v6). Never RaBitQ-encoded.
     match page::read_pending(rel) {
         Ok(pending) => {
             for (tidv, v) in pending {

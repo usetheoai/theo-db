@@ -12,13 +12,16 @@
 #![allow(non_snake_case)]
 
 use datafusion::arrow::array::{
-    Array, ArrayRef, BooleanArray, Float32Array, Float64Array, Int16Array, Int32Array, Int64Array, StringArray,
+    Array, ArrayRef, BooleanArray, Date32Array, Float32Array, Float64Array, Int16Array, Int32Array, Int64Array,
+    StringArray, TimestampMicrosecondArray,
 };
-use datafusion::arrow::datatypes::{DataType, Field, Schema};
+use datafusion::arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::error::DataFusionError;
-use datafusion::functions_aggregate::expr_fn::{count, sum};
-use datafusion::prelude::{col, lit, SessionContext};
+use datafusion::functions_aggregate::expr_fn::{avg, count, sum};
+use datafusion::prelude::{col, lit, Expr, SessionContext};
+use datafusion::scalar::ScalarValue;
+use std::ffi::CStr;
 use pgrx::prelude::*;
 use std::sync::Arc;
 
@@ -88,6 +91,21 @@ pub(super) fn build_arrow(cols: &[(String, u32, Vec<Option<Vec<u8>>>)]) -> Resul
                     values.iter().map(|v| v.as_ref().map(|b| String::from_utf8_lossy(b).into_owned())),
                 )),
             ),
+            // Temporal: the stored bytes ARE the internal int (timestamp/timestamptz = int64 μs, date = int32 days).
+            // Both mapped to a naive (tz=None) Arrow type — the comparison is on the raw int domain (tz is display
+            // only), so `build_filter_expr`'s matching-typed literal compares correctly (D3).
+            1114 | 1184 => (
+                DataType::Timestamp(TimeUnit::Microsecond, None),
+                Arc::new(TimestampMicrosecondArray::from_iter(
+                    values.iter().map(|v| v.as_ref().map(|b| i64::from_le_bytes(b[..8].try_into().unwrap()))),
+                )),
+            ),
+            1082 => (
+                DataType::Date32,
+                Arc::new(Date32Array::from_iter(
+                    values.iter().map(|v| v.as_ref().map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]))),
+                )),
+            ),
             other => {
                 return Err(format!(
                     "df_executor: unsupported column type oid {other} (Phase A: int2/4/8, float4/8, bool, text)"
@@ -100,17 +118,54 @@ pub(super) fn build_arrow(cols: &[(String, u32, Vec<Option<Vec<u8>>>)]) -> Resul
     Ok((Schema::new(fields), arrays))
 }
 
-/// A supported aggregate for the vectorized columnar path. Restricted (Phase C slice 1) to the cases where the Arrow
-/// result type matches the PostgreSQL aggregate output type WITHOUT a cast: `count(*)` → `int8`, `sum(<float8 col>)`
-/// → `float8`. `avg`, `sum` over integer/numeric, GROUP BY, and WHERE pushdown are later slices.
+/// Whether `build_arrow` / `arrow_value_to_datum` support this OID as a GROUP BY key column (the same set
+/// `build_arrow` maps: int2/4/8, float4/8, bool, text/varchar/bpchar, timestamp/timestamptz, date).
+pub(super) fn arrow_supported_group_type(typoid: u32) -> bool {
+    matches!(typoid, 21 | 23 | 20 | 700 | 701 | 16 | 25 | 1042 | 1043 | 1114 | 1184 | 1082)
+}
+
+/// A supported aggregate for the vectorized columnar path — ONLY shapes whose Arrow result type maps to the exact
+/// PostgreSQL output type (M114 blueprint E1/E2/E3): `count(*)`→int8, `sum(float8)`→float8, `sum(int2/int4)`→int8
+/// (Arrow Int64 = PG bigint, no overflow), `avg(float8)`→float8. Numeric-output shapes (`avg(int)`, `sum(int8)`,
+/// `sum(float4)`) are DECLINED at admit time (ADR-M114-1) — never reach here.
 pub(super) enum AggSpec {
     CountStar,
     SumFloat8(String),
+    /// `sum(int2/int4)` → PG int8. DataFusion coerces int2/int4 → Int64; the datum is int8 (no overflow).
+    SumInt(String),
+    /// `avg(float8)` → PG float8. DataFusion `avg` → Float64.
+    AvgFloat8(String),
 }
 
-/// Decode the columnar table's projected columns into one Arrow `RecordBatch` (projection pushdown). Always projects
-/// ≥ 1 column so `count(*)` has a row count.
-unsafe fn decode_to_batch(rel: pg_sys::Relation, sum_cols: &[String]) -> Result<RecordBatch, String> {
+impl AggSpec {
+    /// The source column this aggregate reads (None for `count(*)`), for projection.
+    fn col_name(&self) -> Option<&str> {
+        match self {
+            AggSpec::CountStar => None,
+            AggSpec::SumFloat8(n) | AggSpec::SumInt(n) | AggSpec::AvgFloat8(n) => Some(n.as_str()),
+        }
+    }
+}
+
+/// Build the aliased DataFusion aggregate expression for one `AggSpec`. Shared by the scalar + grouped paths (DRY).
+fn agg_expr(spec: &AggSpec, alias: String) -> Expr {
+    match spec {
+        AggSpec::CountStar => count(lit(1i64)).alias(alias),
+        AggSpec::SumFloat8(name) | AggSpec::SumInt(name) => sum(col(name.as_str())).alias(alias),
+        AggSpec::AvgFloat8(name) => avg(col(name.as_str())).alias(alias),
+    }
+}
+
+/// Decode the columnar table's projected columns into one Arrow `RecordBatch` (projection pushdown). Projects the
+/// `sum` columns PLUS every zone-map predicate's column (so the DataFusion Filter can re-check it — ADR D3), and
+/// always ≥ 1 column so `count(*)` has a row count. Passes the predicates + `skip` to `decode_columns` so the
+/// min/max zone-map can skip proven-non-matching chunk groups.
+unsafe fn decode_to_batch(
+    rel: pg_sys::Relation,
+    sum_cols: &[String],
+    predicates: &[super::zonemap::ZonePredicate],
+    skip: bool,
+) -> Result<RecordBatch, String> {
     let mut proj: Vec<usize> = Vec::new();
     for name in sum_cols {
         let idx = super::columnar::column_index(rel, name)
@@ -119,25 +174,82 @@ unsafe fn decode_to_batch(rel: pg_sys::Relation, sum_cols: &[String]) -> Result<
             proj.push(idx);
         }
     }
+    for p in predicates {
+        if !proj.contains(&p.col) {
+            proj.push(p.col); // the filter column MUST be decoded so the DataFusion Filter can re-check it (D3)
+        }
+    }
     if proj.is_empty() {
         proj.push(0); // count(*) needs a column to establish the row count
     }
-    let cols = super::columnar::decode_columns(rel, Some(&proj))?;
+    let cols = super::columnar::decode_columns(rel, Some(&proj), predicates, skip)?;
     let (schema, arrays) = build_arrow(&cols)?;
     RecordBatch::try_new(Arc::new(schema), arrays).map_err(|e| format!("df_executor: arrow batch: {e}"))
+}
+
+/// Build the DataFusion filter `Expr` for the pushed zone-map predicates (a conjunction of `col <op> const`), the
+/// FINAL authority over rows in surviving chunk groups (ADR D3 — the skip is only an admission filter). `col` is
+/// resolved to its name via the tupdesc; the literal is typed to the column's `MinMaxKind` (matching `build_arrow`).
+unsafe fn build_filter_expr(rel: pg_sys::Relation, predicates: &[super::zonemap::ZonePredicate]) -> Option<Expr> {
+    use super::columnar_codec::MinMaxKind;
+    use super::zonemap::ZoneOp;
+    let tupdesc = (*rel).rd_att;
+    let natts = (*tupdesc).natts as usize;
+    let mut acc: Option<Expr> = None;
+    for p in predicates {
+        if p.col >= natts {
+            continue; // fail-safe (EC-2): unknown column → do not build a filter term on it
+        }
+        let att = (*tupdesc).attrs.as_ptr().add(p.col);
+        let name = CStr::from_ptr((*att).attname.data.as_ptr()).to_string_lossy().into_owned();
+        let c = col(name.as_str());
+        let b = p.const_bits;
+        // Temporal columns share the I8/I4 min/max domain but need an Arrow-typed literal so the Filter matches the
+        // Timestamp/Date column type built in `build_arrow` (a bare Int64 lit would type-mismatch). Intercept by OID
+        // BEFORE the MinMaxKind dispatch. tz=None to match build_arrow (raw-int compare — D3).
+        let val = match (*att).atttypid.to_u32() {
+            1114 | 1184 => lit(ScalarValue::TimestampMicrosecond(Some(b as i64), None)),
+            1082 => lit(ScalarValue::Date32(Some(b as i64 as i32))),
+            _ => match super::columnar::minmax_kind_of((*att).atttypid.to_u32()) {
+                MinMaxKind::I2 => lit(b as i64 as i16),
+                MinMaxKind::I4 => lit(b as i64 as i32),
+                MinMaxKind::I8 => lit(b as i64),
+                MinMaxKind::Bool => lit(b != 0),
+                MinMaxKind::F4 => lit(f64::from_bits(b) as f32),
+                MinMaxKind::F8 => lit(f64::from_bits(b)),
+                MinMaxKind::None => continue, // not min/max-able → cannot have been pushed
+            },
+        };
+        let e = match p.op {
+            ZoneOp::Lt => c.lt(val),
+            ZoneOp::Le => c.lt_eq(val),
+            ZoneOp::Eq => c.eq(val),
+            ZoneOp::Ge => c.gt_eq(val),
+            ZoneOp::Gt => c.gt(val),
+        };
+        acc = Some(match acc {
+            Some(prev) => prev.and(e),
+            None => e,
+        });
+    }
+    acc
 }
 
 /// Run the aggregates over the columnar table via a vectorized DataFusion plan under `HeldInterrupts`; return one
 /// `(Datum, is_null)` per agg, in `aggs` order, ready to store in a `TupleTableSlot`. `count(*)`→`int8` Datum;
 /// `sum(float8)`→`float8` Datum. This is the executor the planner `CustomScan` (Phase C) drives at exec time.
+/// `predicates`/`skip`: the zone-map pushdown — the batch is filtered by the predicate (D3 final authority) and the
+/// decode skips proven-non-matching chunk groups.
 pub(super) unsafe fn run_columnar_aggs(
     rel: pg_sys::Relation,
     aggs: &[AggSpec],
+    predicates: &[super::zonemap::ZonePredicate],
+    skip: bool,
 ) -> Result<Vec<(pg_sys::Datum, bool)>, String> {
-    let sum_cols: Vec<String> =
-        aggs.iter().filter_map(|a| if let AggSpec::SumFloat8(n) = a { Some(n.clone()) } else { None }).collect();
-    let batch = decode_to_batch(rel, &sum_cols)?;
-    run_aggs_on_batch(batch, aggs)
+    let agg_cols: Vec<String> = aggs.iter().filter_map(|a| a.col_name().map(str::to_string)).collect();
+    let batch = decode_to_batch(rel, &agg_cols, predicates, skip)?;
+    let filter = build_filter_expr(rel, predicates);
+    run_aggs_on_batch(batch, aggs, filter)
 }
 
 /// Run the aggregates over an already-built Arrow `RecordBatch` via a vectorized DataFusion plan under
@@ -146,23 +258,42 @@ pub(super) unsafe fn run_columnar_aggs(
 pub(super) unsafe fn run_aggs_on_batch(
     batch: RecordBatch,
     aggs: &[AggSpec],
+    filter: Option<Expr>,
 ) -> Result<Vec<(pg_sys::Datum, bool)>, String> {
     let mut exprs = Vec::with_capacity(aggs.len());
     for (i, a) in aggs.iter().enumerate() {
-        let alias = format!("a{i}");
-        exprs.push(match a {
-            AggSpec::CountStar => count(lit(1i64)).alias(alias),
-            AggSpec::SumFloat8(name) => sum(col(name.as_str())).alias(alias),
-        });
+        exprs.push(agg_expr(a, format!("a{i}")));
     }
 
+    let batches = run_df_collect(batch, move |df| {
+        // Zone-map predicate as the FINAL authority over surviving rows (D3): filter BEFORE aggregating.
+        let df = match filter {
+            Some(f) => df.filter(f)?,
+            None => df,
+        };
+        df.aggregate(vec![], exprs)
+    })?;
+    let b = batches.first().ok_or("df_executor: no result batch")?;
+    let mut result = Vec::with_capacity(aggs.len());
+    for (i, a) in aggs.iter().enumerate() {
+        result.push(agg_datum(b.column(i), 0, a)?);
+    }
+    Ok(result)
+}
+
+/// Build the DataFusion runtime (bounded `work_mem` MemoryPool + `target_partitions=1` — M100 D3 safety), read the
+/// Arrow batch, let `build` finish the plan (filter/aggregate), and `collect` under `HeldInterrupts`. Shared by the
+/// scalar (`run_aggs_on_batch`) and grouped (`run_columnar_grouped_aggs`) paths so the tokio/pool/interrupt discipline
+/// lives in ONE place (DRY).
+unsafe fn run_df_collect<F>(batch: RecordBatch, build: F) -> Result<Vec<RecordBatch>, String>
+where
+    F: FnOnce(
+        datafusion::dataframe::DataFrame,
+    ) -> Result<datafusion::dataframe::DataFrame, DataFusionError>,
+{
     let rt = tokio::runtime::Builder::new_current_thread()
         .build()
         .map_err(|e| format!("df_executor: tokio runtime: {e}"))?;
-    // Safety discipline (M100 D3): a MemoryPool bounded to `work_mem` so DataFusion returns `ResourcesExhausted`
-    // (a typed error → clean SQL error) instead of OOM-panicking; and `target_partitions = 1` so no second thread
-    // ever touches the PG pointers behind the Arrow batch (the `unsafe impl Send` pin — no multi-partition parallel
-    // exec until proven safe).
     let work_mem_bytes = (pg_sys::work_mem.max(64) as usize) * 1024;
     let held = HeldInterrupts::hold();
     let out: Result<Vec<RecordBatch>, DataFusionError> = rt.block_on(async move {
@@ -174,40 +305,141 @@ pub(super) unsafe fn run_aggs_on_batch(
             .build_arc()?;
         let config = SessionConfig::new().with_target_partitions(1);
         let ctx = SessionContext::new_with_config_rt(config, runtime);
-        ctx.read_batch(batch)?.aggregate(vec![], exprs)?.collect().await
+        let df = ctx.read_batch(batch)?;
+        build(df)?.collect().await
     });
     drop(held);
     drop(rt);
+    out.map_err(|e| format!("df_executor: DataFusion: {e}"))
+}
 
-    let batches = out.map_err(|e| format!("df_executor: DataFusion: {e}"))?;
-    let b = batches.first().ok_or("df_executor: no result batch")?;
-    let mut result = Vec::with_capacity(aggs.len());
-    for (i, a) in aggs.iter().enumerate() {
-        let arr = b.column(i);
-        if arr.is_null(0) {
-            result.push((pg_sys::Datum::from(0usize), true));
-            continue;
+/// Grouped columnar aggregate (M100 GROUP BY pushdown). Decode the group + sum columns, run
+/// `.aggregate(group_exprs, agg_exprs)`, and materialize the multi-row result in the PG output-target order given by
+/// `layout` (ADR-2): each output slot is either group key `idx` (batch col `idx`) or agg `idx` (batch col
+/// `ngroup+idx`). `group_cols` is `(name, typoid)` per key (typoid drives the reverse Arrow→Datum conversion).
+/// `predicates` + `skip` apply the zone-map skip-pruning + DataFusion Filter (M114 GROUP BY+WHERE); empty = no WHERE.
+/// Returns one inner Vec per group, in `layout` (target) order. The CALLER runs this in a durable memory context
+/// (ADR-3) for text group-key datums.
+pub(super) unsafe fn run_columnar_grouped_aggs(
+    rel: pg_sys::Relation,
+    group_cols: &[(String, u32)],
+    aggs: &[AggSpec],
+    layout: &[(u8, usize)],
+    predicates: &[super::zonemap::ZonePredicate],
+    skip: bool,
+) -> Result<Vec<Vec<(pg_sys::Datum, bool)>>, String> {
+    // Project group columns ∪ agg columns (count(*) needs no column; decode_to_batch also projects predicate cols
+    // and guarantees ≥1).
+    let mut proj_cols: Vec<String> = group_cols.iter().map(|(n, _)| n.clone()).collect();
+    for a in aggs {
+        if let Some(n) = a.col_name() {
+            if !proj_cols.iter().any(|p| p == n) {
+                proj_cols.push(n.to_string());
+            }
         }
-        let datum = match a {
-            AggSpec::CountStar => {
-                let v = arr.as_any().downcast_ref::<Int64Array>().ok_or("df_executor: count not Int64")?.value(0);
-                v.into_datum().ok_or("df_executor: int8 datum")?
-            }
-            AggSpec::SumFloat8(_) => {
-                let v =
-                    arr.as_any().downcast_ref::<Float64Array>().ok_or("df_executor: sum not Float64")?.value(0);
-                v.into_datum().ok_or("df_executor: float8 datum")?
-            }
-        };
-        result.push((datum, false));
     }
-    Ok(result)
+    let batch = decode_to_batch(rel, &proj_cols, predicates, skip)?;
+    let filter = build_filter_expr(rel, predicates);
+
+    let group_exprs: Vec<Expr> = group_cols.iter().map(|(n, _)| col(n.as_str())).collect();
+    let mut agg_exprs = Vec::with_capacity(aggs.len());
+    for (i, a) in aggs.iter().enumerate() {
+        agg_exprs.push(agg_expr(a, format!("a{i}")));
+    }
+    let ngroup = group_cols.len();
+    // Filter BEFORE aggregating (SQL WHERE … GROUP BY — M114 blueprint E4); the zone-map skip above is only an
+    // admission filter, the DataFusion Filter is the final row authority.
+    let batches = run_df_collect(batch, move |df| {
+        let df = match filter {
+            Some(f) => df.filter(f)?,
+            None => df,
+        };
+        df.aggregate(group_exprs, agg_exprs)
+    })?;
+
+    // DataFusion output columns: [group_0..group_{ngroup-1}, a0..a{nagg-1}]. Emit rows in `layout` (target) order.
+    let mut rows: Vec<Vec<(pg_sys::Datum, bool)>> = Vec::new();
+    for b in &batches {
+        for r in 0..b.num_rows() {
+            let mut row_out = Vec::with_capacity(layout.len());
+            for &(kind, idx) in layout {
+                let cell = if kind == 0 {
+                    let typoid = group_cols.get(idx).ok_or("df_executor: layout group idx oob")?.1;
+                    arrow_value_to_datum(b.column(idx), r, typoid)?
+                } else {
+                    let a = aggs.get(idx).ok_or("df_executor: layout agg idx oob")?;
+                    agg_datum(b.column(ngroup + idx), r, a)?
+                };
+                row_out.push(cell);
+            }
+            rows.push(row_out);
+        }
+    }
+    Ok(rows)
+}
+
+/// Convert one aggregate cell (`arr[row]`) to a PG `(Datum, is_null)`: `count(*)`→int8, `sum(float8)`→float8.
+/// Shared by the scalar path (`run_aggs_on_batch`, row 0) and the grouped path (`run_columnar_grouped_aggs`, per row).
+fn agg_datum(arr: &dyn Array, row: usize, spec: &AggSpec) -> Result<(pg_sys::Datum, bool), String> {
+    if arr.is_null(row) {
+        return Ok((pg_sys::Datum::from(0usize), true));
+    }
+    let datum = match spec {
+        // int8 output: count(*), sum(int2/int4) (DataFusion → Int64 = PG bigint).
+        AggSpec::CountStar | AggSpec::SumInt(_) => {
+            let v = arr.as_any().downcast_ref::<Int64Array>().ok_or("df_executor: agg not Int64")?.value(row);
+            v.into_datum().ok_or("df_executor: int8 datum")?
+        }
+        // float8 output: sum(float8), avg(float8) (DataFusion → Float64 = PG double precision).
+        AggSpec::SumFloat8(_) | AggSpec::AvgFloat8(_) => {
+            let v = arr.as_any().downcast_ref::<Float64Array>().ok_or("df_executor: agg not Float64")?.value(row);
+            v.into_datum().ok_or("df_executor: float8 datum")?
+        }
+    };
+    Ok((datum, false))
+}
+
+/// Reverse of `build_arrow` for a GROUP BY key cell: an Arrow array value at `row` → a PG `(Datum, is_null)` of the
+/// group column's PG type. Covers every OID `build_arrow` produces. NOTE (temporal): Arrow Date32/Timestamp have a
+/// 1970 epoch but `build_arrow` stuffed the raw PG-epoch bytes in; GROUP BY only uses raw-value equality/hash (never
+/// Arrow's temporal semantics), and we pull the same raw int back out here → the PG value round-trips exactly.
+/// The CALLER must run in a durable memory context (ADR-3): a text/varlena datum is palloc'd here.
+fn arrow_value_to_datum(arr: &dyn Array, row: usize, typoid: u32) -> Result<(pg_sys::Datum, bool), String> {
+    if arr.is_null(row) {
+        return Ok((pg_sys::Datum::from(0usize), true));
+    }
+    let d = match typoid {
+        21 => arr.as_any().downcast_ref::<Int16Array>().ok_or("df_executor: gk not i16")?.value(row).into_datum(),
+        23 => arr.as_any().downcast_ref::<Int32Array>().ok_or("df_executor: gk not i32")?.value(row).into_datum(),
+        20 => arr.as_any().downcast_ref::<Int64Array>().ok_or("df_executor: gk not i64")?.value(row).into_datum(),
+        700 => arr.as_any().downcast_ref::<Float32Array>().ok_or("df_executor: gk not f32")?.value(row).into_datum(),
+        701 => arr.as_any().downcast_ref::<Float64Array>().ok_or("df_executor: gk not f64")?.value(row).into_datum(),
+        16 => arr.as_any().downcast_ref::<BooleanArray>().ok_or("df_executor: gk not bool")?.value(row).into_datum(),
+        25 | 1042 | 1043 => arr
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .ok_or("df_executor: gk not str")?
+            .value(row)
+            .to_string()
+            .into_datum(),
+        // timestamp/timestamptz: the raw i64 IS the timestamptz Datum (by-value μs); date: the raw i32 IS the date
+        // Datum (by-value days) — same raw value we stored in build_arrow (epoch interpretation is irrelevant here).
+        1114 | 1184 => arr
+            .as_any()
+            .downcast_ref::<TimestampMicrosecondArray>()
+            .ok_or("df_executor: gk not ts")?
+            .value(row)
+            .into_datum(),
+        1082 => arr.as_any().downcast_ref::<Date32Array>().ok_or("df_executor: gk not date")?.value(row).into_datum(),
+        other => return Err(format!("df_executor: unsupported group key oid {other}")),
+    };
+    Ok((d.ok_or("df_executor: group key datum")?, false))
 }
 
 /// Run `count(*)`, `sum(<num_col>)` over the columnar table and format `count=N;sum=X` (Phase A/B test driver — the
 /// planner-integrated automatic path is Phase C `columnar_agg.rs`).
 unsafe fn run_columnar_agg(rel: pg_sys::Relation, num_col: &str) -> Result<String, String> {
-    let r = run_columnar_aggs(rel, &[AggSpec::CountStar, AggSpec::SumFloat8(num_col.to_string())])?;
+    let r = run_columnar_aggs(rel, &[AggSpec::CountStar, AggSpec::SumFloat8(num_col.to_string())], &[], false)?;
     let c = i64::from_datum(r[0].0, r[0].1).unwrap_or(0);
     let s = f64::from_datum(r[1].0, r[1].1).unwrap_or(0.0);
     Ok(format!("count={c};sum={s:.4}"))

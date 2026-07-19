@@ -1,0 +1,57 @@
+{
+  "benchmark": "e2-symqg-fastscan-verdict",
+  "date": "2026-07-18",
+  "what": "FastScan 1-bit SIMD sign kernel for theodb_symqg (plan symqg-fastscan-1bit). Two measurements on ONE dedicated c-8 droplet (no CPU steal): (1) primary A/B theodb_symqg v3 FastScan vs theodb_hnsw at matched recall; (2) ablation FastScan ON vs OFF (SET theodb.symqg_fastscan) on the SAME index — isolates the kernel's effect (the v2-vs-v3 cross-box comparison was confounded by the box change).",
+  "hardware": "DigitalOcean c-8 (8 vCPU CPU-Optimized DEDICATED, no steal), PostgreSQL 17.10 + pgrx 0.19.0, shared_buffers=2GB",
+  "dataset": {"name": "sift-128-euclidean", "metric": "L2", "n": 1000000, "dim": 128, "nq": 200, "k": 10, "degree_bound": 32},
+  "reproduce": "benchmarks/e2_symqg_inpg.py (primary) + benchmarks/e2_symqg_fastscan_ablation.py (ablation, SET theodb.symqg_fastscan on/off)",
+  "gate": "theodb_symqg QPS >= 1.5x theodb_hnsw at matched recall@10 >= 0.95",
+  "gate_met": false,
+  "primary_ab": {
+    "note": "same box, same session; symqg v3 FastScan (default on) vs hnsw",
+    "am_symqg_v3_fastscan": {"build_s": 883.3, "size_mb": 1383, "sweep": [
+      {"ef": 40, "recall": 0.8610, "qps": 208.2},
+      {"ef": 80, "recall": 0.9445, "qps": 204.5},
+      {"ef": 160, "recall": 0.9795, "qps": 166.0},
+      {"ef": 320, "recall": 0.9950, "qps": 129.7},
+      {"ef": 640, "recall": 0.9990, "qps": 90.3}
+    ]},
+    "am_hnsw": {"build_s": 298.2, "size_mb": 724, "sweep": [
+      {"ef": 40, "recall": 0.9495, "qps": 711.8},
+      {"ef": 80, "recall": 0.9855, "qps": 430.7},
+      {"ef": 160, "recall": 0.9945, "qps": 271.6},
+      {"ef": 320, "recall": 0.9985, "qps": 164.4},
+      {"ef": 640, "recall": 0.9990, "qps": 93.6}
+    ]}
+  },
+  "ablation_fastscan_vs_scalar": {
+    "note": "SAME index (built once), SAME box; only the estimate kernel differs (SET theodb.symqg_fastscan). Isolates the FastScan effect + proves recall-neutrality.",
+    "build_s": 873.9, "size_mb": 1383,
+    "fastscan": [
+      {"ef": 40, "recall": 0.8685, "qps": 206.9},
+      {"ef": 80, "recall": 0.9465, "qps": 194.5},
+      {"ef": 160, "recall": 0.9810, "qps": 160.7},
+      {"ef": 320, "recall": 0.9955, "qps": 126.7},
+      {"ef": 640, "recall": 0.9995, "qps": 88.6}
+    ],
+    "scalar": [
+      {"ef": 40, "recall": 0.8675, "qps": 193.0},
+      {"ef": 80, "recall": 0.9455, "qps": 168.5},
+      {"ef": 160, "recall": 0.9805, "qps": 136.7},
+      {"ef": 320, "recall": 0.9960, "qps": 104.8},
+      {"ef": 640, "recall": 0.9995, "qps": 72.5}
+    ],
+    "fastscan_speedup_by_ef": {"40": 1.07, "80": 1.15, "160": 1.18, "320": 1.21, "640": 1.22},
+    "recall_delta_max_pp": 0.1
+  },
+  "matched_recall_primary": [
+    {"recall": "~0.95", "symqg_qps": 204.5, "hnsw_qps": 711.8, "hnsw_faster_x": 3.5},
+    {"recall": "~0.98", "symqg_qps": 166.0, "hnsw_qps": 430.7, "hnsw_faster_x": 2.6},
+    {"recall": "~0.994", "symqg_qps": 129.7, "hnsw_qps": 271.6, "hnsw_faster_x": 2.1},
+    {"recall": "~0.999", "symqg_qps": 90.3, "hnsw_qps": 93.6, "hnsw_faster_x": 1.04}
+  ],
+  "verdict": "FastScan kernel is CORRECT and RECALL-NEUTRAL (fastscan vs scalar recall identical within 0.1 pp across the sweep; int8 requant preserves ranking — D3 gate passed). But the measured FastScan speedup is MODEST: 1.07-1.22x (grows with ef), NOT the 2.4-2.8x a naive v2-vs-v3 cross-box comparison suggested (that was almost entirely the steal→dedicated box change). The gate (symqg >= 1.5x hnsw @ recall>=0.95) is NOT met: theodb_hnsw is 2.1-3.5x faster at matched recall (0.95-0.994), converging to parity only at recall 0.999.",
+  "why_modest": "The per-hop estimate (32 scalar sign-dots) is NOT the sole bottleneck (Amdahl): row decode (rot 512B + ords + signs + nr/w), the beam-search heap ops, the HashSet visited-set, and the page reads together dominate more than the estimate. Accelerating only the estimate ~4-8x yields ~1.2x overall — the same 'assumed bottleneck != whole story' lesson as E1 (WARM Stage-2) and E2 (page tax). The mature theodb_hnsw AM (M35-M46: copy-free reads, SIMD distance, lean neighbour hop) remains faster.",
+  "honesty_note": "The v2-vs-v3 speedup MUST NOT be quoted from the two separate-box runs (v2 on a steal-heavy shared box, v3 on a dedicated c-8): hnsw itself went 287->712 QPS purely from the box change. The same-index ablation is the only honest FastScan measurement. No symqg QPS-win-over-hnsw claim is made (public-copy.md, rule 5).",
+  "correctness": "theodb_symqg v3 (block32-nibble layout, FastScan dispatch D5 with scalar fallback for dim>1032) is functionally correct: CREATE INDEX / scan / recall preserved on real SIFT1M; the D5 eligibility dispatch protects 1536-dim OpenAI embeddings from int16 overflow (scalar fallback). Only the QPS gate is unmet."
+}

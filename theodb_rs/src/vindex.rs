@@ -249,7 +249,7 @@ unsafe fn knn_columnar_impl(
                     .ok_or_else(|| format!("vindex: column '{name}' not found in the columnar index"))?,
             );
         }
-        let cols = crate::am::columnar::decode_columns(rel, Some(&proj))?;
+        let cols = crate::am::columnar::decode_columns(rel, Some(&proj), &[], false)?;
         // cols is in projection order: tid, part_id, label, vec
         let by = |i: usize| &cols[i].2;
         let n = by(0).len();
@@ -285,7 +285,7 @@ unsafe fn decode_bytes_impl(idx: pg_sys::Oid, names: &[String]) -> Result<i64, S
                     .ok_or_else(|| format!("vindex: column '{name}' not found"))?,
             );
         }
-        let cols = crate::am::columnar::decode_columns(rel, Some(&proj))?;
+        let cols = crate::am::columnar::decode_columns(rel, Some(&proj), &[], false)?;
         let total: i64 = cols
             .iter()
             .flat_map(|(_, _, vals)| vals.iter())
