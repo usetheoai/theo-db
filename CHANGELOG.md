@@ -23,6 +23,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - Roadmap amended: added M117 SIMD cosine/IP no hot path de embeddings (`/roadmap-feature simd-cosine-ip-kernels`)
 - Roadmap amended: added M118 Filtered ANN eficiente — resume-from-discarded (`/roadmap-feature filtered-ann-resume-discarded`)
 - Roadmap amended: added M119 AI-native depth — cross-encoder re-rank + chunking recursivo (`/roadmap-feature ai-native-depth-rerank-chunking`)
+- **Filtered ANN resume-from-discarded (M118, T1.1+T2.1)** — the iterative HNSW scan now RESUMES from the retained
+  beam frontier (pgvector 0.8.5 `ResumeScanItems` technique — the frontier IS the discarded set, never dropped)
+  instead of re-searching the whole graph with a doubled `ef`, on the V1 (exact-f32) path. Validated in-PG:
+  **recall@10 = 1.0** vs brute-force exact kNN under a selective filter (`Index Scan using theodb_hnsw`,
+  `max_scan_tuples` armed). SBQ/AQ indexes keep the M52 re-search (per-batch rerank is a tracked follow-up).
+  `ann/scan_core.rs::ResumableGround`, `am/hnsw_page.rs::{resumable_init,resumable_next}`, `am/scan.rs` wiring.
+  Milestone M118 in progress (memory-ceiling GUC + multi-seed droplet benchmark pending).
 
 ### Changed
 - Roadmap corrigido: **M116 / M117 / M119 marcados `[x]` (SUPERSEDED — já entregues)** por M56+M104 (VACUUM tombstone-in-place + fold memory-bound), M58 (SIMD AVX2 cosine/IP) e M65 (cross-encoder `ai.rerank`, medido honest-negative) + M54 (chunking recursivo). Foram criados sobre um gap-analysis desatualizado (deep-view 2026-07-07, anterior a M56–M115); reimplementá-los seria re-trabalho. Apenas **M118 (filtered ANN resume-from-discarded)** permanece `[ ]` como trabalho novo genuíno.

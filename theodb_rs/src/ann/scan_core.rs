@@ -175,6 +175,116 @@ pub(crate) fn ground_search_nodes<S: NeighborSource>(
     Ok((out, candidates_seen))
 }
 
+/// M118: resume-from-discarded state for the iterative filtered scan. Holds the ground-layer beam frontier
+/// (`cands` = pgvector 0.8.5's `so->discarded`) + `visited` (`so->v`) so the search can be RESUMED from the
+/// retained frontier across `amgettuple` batches instead of re-searching the whole graph with a doubled `ef`
+/// (the M52 cost measured at ~3× vs pgvector in `docs/benchmarks/m52-filtered-ann.md`). Each [`next_batch`]
+/// runs ONE bounded-`ef` beam pass seeded from the retained frontier and returns its emittable top-`ef`
+/// (ascending); the frontier + visited persist for the next call, mirroring pgvector `ResumeScanItems`.
+///
+/// The original one-shot [`ground_search_nodes`] is UNCHANGED (zero regression for `traverse` + the SBQ/AQ
+/// rerank paths); this is an additive path used ONLY by the iterative scan. Re-emission of a frontier head
+/// across batches is harmless: the scan dedups TIDs (`am/scan.rs` `state.emitted`). Generic only over the Node
+/// `N` (the scratch buffer is local per-batch, so no `S` lifetime entangles the caller's `ScanState`).
+///
+/// [`next_batch`]: ResumableGround::next_batch
+/// [`ground_search_nodes`]: ground_search_nodes
+pub(crate) struct ResumableGround<N> {
+    visited: HashSet<u64>,
+    cands: BinaryHeap<Reverse<Ranked<N>>>,
+    ef: usize,
+}
+
+impl<N: Copy> ResumableGround<N> {
+    /// Seed the resumable search at the (upper-layer-descended) `entry`. Mirrors the head of
+    /// [`ground_search_nodes`]: insert the entry into `visited` and push it onto the frontier. `presize`
+    /// pre-sizes the two persistent structures identically to the one-shot search.
+    pub(crate) fn init<S: NeighborSource<Node = N>>(
+        src: &S,
+        entry: S::Node,
+        ef: usize,
+        m0: usize,
+        presize: bool,
+    ) -> Self {
+        let ef = ef.max(1);
+        let (mut visited, mut cands): (HashSet<u64>, BinaryHeap<Reverse<Ranked<N>>>) = if presize {
+            let cap = ef.saturating_mul(m0.max(1)).max(1);
+            (HashSet::with_capacity(cap.saturating_mul(2)), BinaryHeap::with_capacity(cap))
+        } else {
+            (HashSet::new(), BinaryHeap::new())
+        };
+        let entry_d = src.dist(&entry);
+        visited.insert(src.node_key(&entry));
+        cands.push(Reverse(Ranked { d: entry_d, node: entry }));
+        Self { visited, cands, ef }
+    }
+
+    /// The frontier is empty ⇒ the reachable graph is exhausted; no further resume is possible (EC-1).
+    pub(crate) fn exhausted(&self) -> bool {
+        self.cands.is_empty()
+    }
+
+    /// Unique nodes navigated so far (the `visited` dedup set) — observability parity with `candidates_seen`.
+    pub(crate) fn candidates_seen(&self) -> usize {
+        self.visited.len()
+    }
+
+    /// Run ONE bounded-`ef` beam pass seeded from the retained frontier; return the emittable results
+    /// (ascending by distance, tid-tie-broken). The frontier (`cands`) + `visited` persist for the next call.
+    /// On the `ef`-worst early-break the triggering frontier head is re-pushed (it IS the discarded set the
+    /// next resume continues from). Returns `[]` when the frontier is already exhausted.
+    pub(crate) fn next_batch<S: NeighborSource<Node = N>>(
+        &mut self,
+        src: &S,
+    ) -> Result<Vec<(N, f64)>, String> {
+        let ef = self.ef;
+        let mut result: BinaryHeap<Ranked<N>> = BinaryHeap::with_capacity(ef + 1);
+        let mut scratch: Vec<S::Ref> = Vec::new();
+        while let Some(Reverse(Ranked { d: cd, node: c })) = self.cands.pop() {
+            let worst = result.peek().map(|w| w.d).unwrap_or(f64::INFINITY);
+            if cd > worst && result.len() >= ef {
+                self.cands.push(Reverse(Ranked { d: cd, node: c })); // re-push: the discarded frontier head
+                break;
+            }
+            // The popped node is a candidate result for THIS batch (it may have been emitted in a prior batch —
+            // the scan dedups TIDs, so re-emission is harmless and keeps recall a superset of the re-search).
+            if src.emittable(&c) {
+                result.push(Ranked { d: cd, node: c });
+                if result.len() > ef {
+                    result.pop();
+                }
+            }
+            src.neighbors_into(&c, &mut scratch)?;
+            for i in 0..scratch.len() {
+                let r = scratch[i];
+                if !self.visited.insert(src.ref_key(&r)) {
+                    continue; // dedup BEFORE load — recall-neutral page-read pattern
+                }
+                let cand = src.load(&r)?;
+                let nd = src.dist(&cand);
+                let worst = result.peek().map(|w| w.d).unwrap_or(f64::INFINITY);
+                // Always retain the discovered candidate in the persistent frontier (pgvector 0.8.5's `discarded`
+                // set) so a LATER resume can expand it — even when it is pruned from THIS batch's ef beam. Dropping
+                // pruned candidates (the single-shot HNSW beam behavior) causes premature frontier exhaustion and
+                // recall loss under a selective resume (measured 0.8 recall in the A/B before this fix). This is the
+                // essence of resume-from-discarded: the frontier is the discarded set, never thrown away.
+                self.cands.push(Reverse(Ranked { d: nd, node: cand }));
+                if (nd < worst || result.len() < ef) && src.emittable(&cand) {
+                    result.push(Ranked { d: nd, node: cand });
+                    if result.len() > ef {
+                        result.pop();
+                    }
+                }
+            }
+        }
+        let mut out: Vec<(N, f64)> = result.into_iter().map(|r| (r.node, r.d)).collect();
+        out.sort_by(|a, b| {
+            a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal).then(src.tid(&a.0).cmp(&src.tid(&b.0)))
+        });
+        Ok(out)
+    }
+}
+
 /// An in-memory [`NeighborSource`] over a built [`HnswIndex`] — used by the equivalence tests (the D3 guard:
 /// `ground_search` over the REAL graph == brute exact kNN). Node ids are the graph's node indices; distances are
 /// the metric score against the query. Gated to test/pg_test so the pure `ground_search` above can be
@@ -288,6 +398,74 @@ mod tests {
         a.sort_unstable();
         b.sort_unstable();
         assert_eq!(a, b, "ground_search top-10 must equal brute exact-kNN set at ef=200 (100% recall)");
+    }
+
+    /// M118 recall-neutral invariant: the union of resumed `next_batch` results (batch ef=50, accumulated) is a
+    /// SUPERSET of the single-shot ef=200 top-10. Resume-from-discarded finds at least as good as the re-search
+    /// it replaces (the frontier is retained, never discarded).
+    #[pgrx::pg_test]
+    fn resumed_batches_union_superset_of_single_ef() {
+        let corpus = seeded_corpus(2000, 16, 42);
+        let idx = HnswIndex::build(&corpus, 16, 64, Metric::L2, 42);
+        let (_metric, _m, m0, _ef) = idx.params();
+        let q = corpus[7].1.clone();
+        let src = MemNeighborSource::new(&idx, &q);
+        let single = ground_search(&src, src.entry_node().unwrap(), 200, m0, true).unwrap();
+        let single_ids: HashSet<i64> = single.iter().take(10).map(|(t, _)| *t).collect();
+
+        let mut rg = ResumableGround::init(&src, src.entry_node().unwrap(), 50, m0, true);
+        let mut union: HashSet<i64> = HashSet::new();
+        let mut passes = 0;
+        while !rg.exhausted() && passes < 40 {
+            for (node, _d) in rg.next_batch(&src).unwrap() {
+                union.insert(src.tid(&node));
+            }
+            passes += 1;
+            if union.len() >= 200 {
+                break;
+            }
+        }
+        assert!(
+            single_ids.is_subset(&union),
+            "resumed union (n={}) must contain the single-ef top-10 (missing: {:?})",
+            union.len(),
+            single_ids.difference(&union).collect::<Vec<_>>()
+        );
+    }
+
+    /// EC-1: a small graph exhausts the frontier in finite passes; once exhausted, `next_batch` yields `[]`
+    /// (no spin, no re-search fallback — the highly-selective case M118 targets).
+    #[pgrx::pg_test]
+    fn resume_exhausts_when_frontier_empty() {
+        let corpus = seeded_corpus(200, 16, 3);
+        let idx = HnswIndex::build(&corpus, 16, 64, Metric::L2, 3);
+        let (_metric, _m, m0, _ef) = idx.params();
+        let q = corpus[0].1.clone();
+        let src = MemNeighborSource::new(&idx, &q);
+        let mut rg = ResumableGround::init(&src, src.entry_node().unwrap(), 20, m0, true);
+        let mut passes = 0;
+        while !rg.exhausted() {
+            let _ = rg.next_batch(&src).unwrap();
+            passes += 1;
+            assert!(passes < 200, "resume must terminate on a finite graph");
+        }
+        assert!(rg.exhausted(), "frontier must empty on a small reachable graph");
+        assert!(rg.next_batch(&src).unwrap().is_empty(), "exhausted frontier yields an empty batch");
+    }
+
+    /// EC-3: a single-node index with ef=1 returns the node once, then exhausts (smallest-graph boundary).
+    #[pgrx::pg_test]
+    fn resume_single_node_index_ef1() {
+        let corpus = seeded_corpus(1, 16, 5);
+        let idx = HnswIndex::build(&corpus, 16, 64, Metric::L2, 5);
+        let (_metric, _m, m0, _ef) = idx.params();
+        let q = corpus[0].1.clone();
+        let src = MemNeighborSource::new(&idx, &q);
+        let mut rg = ResumableGround::init(&src, src.entry_node().unwrap(), 1, m0, true);
+        let first = rg.next_batch(&src).unwrap();
+        assert_eq!(first.len(), 1, "single-node index returns the node once");
+        assert!(rg.exhausted(), "single node exhausts after one batch");
+        assert!(rg.next_batch(&src).unwrap().is_empty(), "second batch is empty");
     }
 
     /// The bench's SOLE axis is result-neutral: presize=true and presize=false return byte-identical output.
