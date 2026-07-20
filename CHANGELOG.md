@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Hybrid retrieval significantly beats vector on a lexical-favoring set (M125).** Extended the significance harness to report three paired comparisons (hybrid-vs-vector, hybrid-vs-fts, fts-vs-vector) + the fts leg's mean nDCG@10, so a parity is attributable (fusion value vs ts_rank-leg quality). MEASURED on NFCorpus (323 queries): hybrid nDCG@10 0.3950 vs vector 0.3845 → Δ̄=+0.0105, 95%CI=[+0.0027,+0.0188], p=0.0099 → **SIGNIFICANT** — resolving the H6 risk (M123's SciFact parity was a dense-strong set + a dead lexical leg, not 'hybrid never helps'). Small, regime-dependent, honest (`docs/benchmarks/m125-hybrid-lexical.md`).
 - Roadmap amended: added M124 Dogfood real — capability theo-data sobre TheoDB self-hosted (gap-analysis Rec.1/H9)
 - Roadmap amended: added M125 Significância da híbrida em dataset lexical-heavy — resolve H6 (gap-analysis Rec.2)
 - Roadmap amended: added M126 Split do god-file hnsw_page.rs (3.456 LoC) — risco de manutenção (gap-analysis Rec.3)

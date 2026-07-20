@@ -71,21 +71,38 @@ def _aggregate_runs(run_results: list, names: list) -> dict:
     return agg
 
 
-def _paired_sig(per_query) -> dict:
-    """M123 — paired significance of hybrid vs vector over per-query nDCG@10, aligned by qid. Returns None when
-    per-query data is absent (e.g. an older harness path)."""
-    if not per_query or "hybrid" not in per_query or "vector" not in per_query:
-        return None
-    hy, ve = per_query["hybrid"], per_query["vector"]
-    ve_by_qid = dict(zip(ve["qids"], ve["ndcg10"]))
-    a, b = [], []  # a = hybrid, b = vector, aligned on the shared qids
-    for i, qid in enumerate(hy["qids"]):
-        if qid in ve_by_qid:
-            a.append(hy["ndcg10"][i])
-            b.append(ve_by_qid[qid])
+def _align(x, y):
+    """Align two per-query {qids, ndcg10} dicts by qid → (a, b) nDCG@10 lists over the shared qids (order of x)."""
+    y_by_qid = dict(zip(y["qids"], y["ndcg10"]))
+    a, b = [], []
+    for i, qid in enumerate(x["qids"]):
+        if qid in y_by_qid:
+            a.append(x["ndcg10"][i])
+            b.append(y_by_qid[qid])
+    return a, b
+
+
+def _one_sig(x, y, label) -> dict:
+    a, b = _align(x, y)
     if len(a) < 2:
-        return {"metric": "ndcg10", "systems": "hybrid_vs_vector", "status": "TOO_FEW_QUERIES", "n": len(a)}
-    return {"metric": "ndcg10", "systems": "hybrid_vs_vector", **paired_significance(a, b)}
+        return {"metric": "ndcg10", "systems": label, "status": "TOO_FEW_QUERIES", "n": len(a)}
+    return {"metric": "ndcg10", "systems": label, **paired_significance(a, b)}
+
+
+def _paired_sig(per_query) -> dict:
+    """M125 — three paired comparisons over per-query nDCG@10 so a parity result is attributable: hybrid vs vector
+    (the primary claim), hybrid vs fts (does fusion move the lexical leg?), fts vs vector (is the ts_rank lexical
+    leg even competitive?). Plus the fts leg's mean nDCG@10 (is the lexical leg alive on this set?). This separates
+    'fusion adds nothing' from 'our ts_rank leg is too weak' (M125, ADR M125-1). Returns None if data is absent."""
+    if not per_query or not all(k in per_query for k in ("hybrid", "vector", "fts")):
+        return None
+    fts_ndcg = per_query["fts"]["ndcg10"]
+    return {
+        "hybrid_vs_vector": _one_sig(per_query["hybrid"], per_query["vector"], "hybrid_vs_vector"),
+        "hybrid_vs_fts": _one_sig(per_query["hybrid"], per_query["fts"], "hybrid_vs_fts"),
+        "fts_vs_vector": _one_sig(per_query["fts"], per_query["vector"], "fts_vs_vector"),
+        "fts_mean_ndcg10": (sum(fts_ndcg) / len(fts_ndcg)) if fts_ndcg else 0.0,
+    }
 
 
 def run(args) -> dict:
@@ -202,13 +219,18 @@ def main():
         det = "det" if m["deterministic"] else f"VAR spread={m['spread_ndcg10']}/{m['spread_recall100']}"
         print(f"  {name:>7}: nDCG@10={m['ndcg10']:.4f}  Recall@100={m['recall100']:.4f}  ({det})")
     sig = data.get("significance")
-    if sig and "p_permutation" in sig:
-        # Honest verdict (ADR M123-2): a lift is only claimed when both p < 0.05 AND the 95% CI excludes 0.
-        verdict = "SIGNIFICANT lift" if (sig["p_permutation"] < 0.05 and sig["ci95_low"] > 0) else "PARITY (not significant)"
-        print(f"  significance hybrid vs vector (nDCG@10, n={sig['n']}): "
-              f"Δ̄={sig['mean_diff']:+.4f} 95%CI=[{sig['ci95_low']:+.4f},{sig['ci95_high']:+.4f}] "
-              f"p_perm={sig['p_permutation']:.4f} (t-test p={sig['p_ttest']:.4f} via {sig['p_ttest_method']}) "
-              f"wins/losses/ties={sig['wins']}/{sig['losses']}/{sig['ties']} → {verdict}")
+    if sig and "hybrid_vs_vector" in sig:
+        print(f"  fts leg mean nDCG@10 = {sig.get('fts_mean_ndcg10', 0.0):.4f}  (is the lexical leg alive on this set?)")
+        for key in ("hybrid_vs_vector", "hybrid_vs_fts", "fts_vs_vector"):
+            c = sig[key]
+            if "p_permutation" not in c:
+                print(f"  significance {key}: {c.get('status', 'N/A')} (n={c.get('n')})")
+                continue
+            # Honest verdict (ADR M123-2/M125-2): a lift is claimed only when p < 0.05 AND the 95% CI excludes 0.
+            verdict = "SIGNIFICANT" if (c["p_permutation"] < 0.05 and c["ci95_low"] > 0) else "not significant"
+            print(f"  significance {key} (nDCG@10, n={c['n']}): "
+                  f"Δ̄={c['mean_diff']:+.4f} 95%CI=[{c['ci95_low']:+.4f},{c['ci95_high']:+.4f}] "
+                  f"p_perm={c['p_permutation']:.4f} wins/losses/ties={c['wins']}/{c['losses']}/{c['ties']} → {verdict}")
 
 
 if __name__ == "__main__":

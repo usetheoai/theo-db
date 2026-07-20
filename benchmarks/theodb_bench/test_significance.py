@@ -58,22 +58,39 @@ def test_too_few_pairs_raises():
         paired_significance([0.5], [0.4])
 
 
-def test_paired_sig_wiring_aligns_by_qid():
-    """T2 — the harness helper aligns hybrid vs vector per-query nDCG@10 by qid and emits a significance block."""
+def test_paired_sig_aligns_by_qid():
+    """T2 (M123) — the helper aligns hybrid vs vector per-query nDCG@10 by qid inside the nested block."""
     from run_m53_hybrid_beir import _paired_sig
     pq = {
         "hybrid": {"qids": ["q1", "q2", "q3"], "ndcg10": [0.9, 0.5, 0.7], "recall100": [1, 1, 1]},
         "vector": {"qids": ["q2", "q3", "q1"], "ndcg10": [0.4, 0.6, 0.8], "recall100": [1, 1, 1]},  # different order
+        "fts":    {"qids": ["q1", "q2", "q3"], "ndcg10": [0.1, 0.1, 0.1], "recall100": [1, 1, 1]},
+    }
+    hv = _paired_sig(pq)["hybrid_vs_vector"]
+    assert hv["systems"] == "hybrid_vs_vector" and hv["n"] == 3
+    # aligned by qid: q1 0.9-0.8=+0.1, q2 0.5-0.4=+0.1, q3 0.7-0.6=+0.1 → mean +0.1, all wins
+    assert abs(hv["mean_diff"] - 0.1) < 1e-9
+    assert hv["wins"] == 3 and hv["losses"] == 0 and hv["ties"] == 0
+
+
+def test_paired_sig_three_comparisons_signs():
+    """T2 (M125) — three comparisons attribute a parity: hybrid>vector, fts<vector, hybrid>fts, + fts mean."""
+    from run_m53_hybrid_beir import _paired_sig
+    qids = ["q1", "q2", "q3", "q4"]
+    pq = {
+        "vector": {"qids": qids, "ndcg10": [0.5, 0.5, 0.5, 0.5], "recall100": [1] * 4},
+        "hybrid": {"qids": qids, "ndcg10": [0.6, 0.6, 0.6, 0.6], "recall100": [1] * 4},  # vector + 0.1
+        "fts":    {"qids": qids, "ndcg10": [0.3, 0.3, 0.3, 0.3], "recall100": [1] * 4},  # vector − 0.2
     }
     sig = _paired_sig(pq)
-    assert sig["systems"] == "hybrid_vs_vector" and sig["metric"] == "ndcg10"
-    assert sig["n"] == 3
-    # aligned by qid: q1 0.9-0.8=+0.1, q2 0.5-0.4=+0.1, q3 0.7-0.6=+0.1 → mean +0.1, all wins
-    assert abs(sig["mean_diff"] - 0.1) < 1e-9
-    assert sig["wins"] == 3 and sig["losses"] == 0 and sig["ties"] == 0
+    assert set(sig) >= {"hybrid_vs_vector", "hybrid_vs_fts", "fts_vs_vector", "fts_mean_ndcg10"}
+    assert sig["hybrid_vs_vector"]["mean_diff"] > 0 and sig["hybrid_vs_vector"]["wins"] == 4
+    assert sig["fts_vs_vector"]["mean_diff"] < 0 and sig["fts_vs_vector"]["losses"] == 4
+    assert sig["hybrid_vs_fts"]["mean_diff"] > 0
+    assert abs(sig["fts_mean_ndcg10"] - 0.3) < 1e-9
 
 
 def test_paired_sig_none_when_no_per_query():
     from run_m53_hybrid_beir import _paired_sig
     assert _paired_sig(None) is None
-    assert _paired_sig({"vector": {}}) is None
+    assert _paired_sig({"vector": {}, "hybrid": {}}) is None  # missing fts leg
