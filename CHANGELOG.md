@@ -19,6 +19,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   (não duplica) a due-diligence AGPL em `docs/packaging/license-audit.md`. Resultado de uma auditoria
   de proveniência/similaridade `loop-check-licence` (veredito **CLEAN**: 100% cobertura, zero cópia
   incompatível, zero lacuna de atribuição — `.claude/knowledge-base/audits/licence-compliance-2026-07-19.md`).
+- Roadmap amended: added M116 Operabilidade em escala — eliminar o muro do VACUUM (`/roadmap-feature vacuum-wall-operability`)
+- Roadmap amended: added M117 SIMD cosine/IP no hot path de embeddings (`/roadmap-feature simd-cosine-ip-kernels`)
+- Roadmap amended: added M118 Filtered ANN eficiente — resume-from-discarded (`/roadmap-feature filtered-ann-resume-discarded`)
+- Roadmap amended: added M119 AI-native depth — cross-encoder re-rank + chunking recursivo (`/roadmap-feature ai-native-depth-rerank-chunking`)
 
 ### Changed
 
