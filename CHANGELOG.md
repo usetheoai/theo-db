@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Official benchmark adapter for the vector pillar (M127, ADR-0050 pilot).** A TheoDB `BaseANN`-shaped ann-benchmarks adapter (`benchmarks/theodb_bench/ann_adapter.py`) + the reusable adopt-and-wrap layer (`regression.py` byte-identical A/B + the M123 `significance.py`) the official tools lack. MEASURED on real GloVe (D1-safe PDDL): recall@10×QPS Pareto (0.72→1.0 as ef 10→200) via `theodb_hnsw`, byte-identical A/B PASS, significance deterministic (`docs/benchmarks/m127-ann-benchmarks-vector.md`). Honest scope: self-hosted box + n=5000 subsample — canonical-box + full-corpus leaderboard PR is the operational follow-up (ADR M127-2).
 - ADR-0050: official benchmark harness = ADOPT-AND-WRAP (not pure replace) — adopt the official per-pillar driver + datasets + leaderboard entry, retain a thin TheoDB analysis layer (significance + byte-identical regression + correctness gating) the official tools do not provide (`docs/adr/0050-official-benchmark-adopt-and-wrap.md`).
 - Roadmap amended: added benchmark-official program M127 (vector) / M128 (columnar) / M129 (OLTP) / M130 (HTAP), vector-pilot-first, per the discovery blueprint (`knowledge-base/discoveries/blueprints/official-db-benchmark-harness-blueprint.md`, SHIPPABLE 97.5).
 
