@@ -1957,7 +1957,7 @@ Recomendação #1 e Risco dominante (H9): a trajetória de *engenharia* é sóli
 
 ---
 
-## M125 — [ ] Resolver H6: significância da híbrida num dataset lexical-heavy (ou travar posicionamento honesto)
+## M125 — [x] Resolver H6: significância da híbrida num dataset lexical-heavy (ou travar posicionamento honesto)
 
 > Added 2026-07-20 by gap-analysis (`knowledge-base/audits/2026-07-20-analysis.md` Recomendação 2 / Risco H6). Fonte: `docs/benchmarks/m123-hybrid-significance.md` (PARITY medido na SciFact). See CHANGELOG `[Unreleased] § Added`.
 
