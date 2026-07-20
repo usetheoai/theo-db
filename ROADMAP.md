@@ -2009,6 +2009,69 @@ Recomendação #3 / Risco de manutenção: com 19 arquivos >500 LoC e este a 3.4
 
 ---
 
+## Programa: benchmark oficial (adopt-and-wrap) — M127–M130
+
+> Added 2026-07-20. Fonte: discovery `knowledge-base/discoveries/blueprints/official-db-benchmark-harness-blueprint.md` (SHIPPABLE 97.5) + `docs/adr/0050-official-benchmark-adopt-and-wrap.md`. Decisão do owner ("o mais FAANG possível"): adotar o benchmark oficial por pilar (comparabilidade reproduzível por terceiros) **e** manter uma camada fina nossa (significância + A/B byte-idêntico + gate de corretude) por cima — os tools oficiais não a repõem. Rollout **vector-pilot-first**.
+
+## M127 — [ ] Benchmark oficial: pilar VETOR (VectorDBBench + ann-benchmarks) — piloto do padrão adopt-and-wrap
+
+**Objective:** entregar a **entrada oficial de TheoDB no benchmark vetorial** (um adapter `BaseANN`/`psycopg` para ann-benchmarks + o driver estilo VectorDBBench) rodando datasets reais, E estabelecer a **camada-wrap reutilizável** (significância pareada + A/B byte-idêntico sobre o output per-query) que os pilares seguintes reusam. Este é o slice vertical que de-risca o programa inteiro.
+
+**Definition of done:**
+
+- [ ] Adapter `BaseANN` (`fit`/`query`) para TheoDB rodando ann-benchmarks em ≥1 dataset D1-safe (GloVe/PDDL) + ≥1 eval-only (SIFT/GIST via CI-download) — recall×QPS MEDIDO, reprodutível.
+- [ ] Camada-wrap genérica extraída (`benchmarks/theodb_bench/significance.py` + A/B byte-idêntico) consumindo o output per-query do runner oficial — provada nesse pilar.
+- [ ] Posicionamento honesto: qualquer número vs ScaNN/AlloyDB cita `docs/benchmarks/m73-headtohead-verdict.md` (magnitude não-publicada em fonte neutra); direção pode citar o blog Google.
+- [ ] Os `run_m*.py` vetoriais comparativos redundantes aposentados (a camada-wrap + entrada oficial os substituem); significância/regressão preservadas.
+
+**Dependencies:** M126 `[x]` (ADR-0050).
+
+**Top risks:** (1) entrada no leaderboard público exige box canônico (c6a/AWS) — CI pode usar box próprio e marcar "self-hosted box"; (2) licença TEXMEX SIFT/GIST MUST-VERIFY antes de qualquer bundling.
+
+---
+
+## M128 — [ ] Benchmark oficial: pilar COLUNAR/OLAP (ClickBench + TPC-H-derived)
+
+**Objective:** entrada TheoDB no **ClickBench** (copiar o contrato `postgresql/`: `create.sql`/`queries.sql`/hooks + `results/*.json`) rodando o `hits` real (CI-download), reusando a camada-wrap de M127; adicionar cobertura join-heavy TPC-H-derived (tpch-kit/DBT3) rotulada "TPC-H-derived".
+
+**Definition of done:**
+
+- [ ] Diretório de entrada ClickBench para TheoDB; 43 queries rodando; protocolo cold=1º/hot=min-hot/geomean MEDIDO.
+- [ ] **A/B byte-idêntico de resultado** por cima (ClickBench é timing-only, `check`=`SELECT 1` — o oráculo de corretude é NOSSO).
+- [ ] `hits` (CC-BY-NC-SA) só CI-download, nunca empacotado (D1); TPC-H via kit da comunidade, rotulado "derived".
+
+**Dependencies:** M127 `[ ]` (reusa a camada-wrap provada).
+
+---
+
+## M129 — [ ] Benchmark oficial: pilar OLTP (HammerDB TPROC-C + pgbench)
+
+**Objective:** rodar **HammerDB TPROC-C** (NOPM, claim-grade) + **pgbench** (TPS, smoke) como drivers externos out-of-tree contra PG17, reusando a camada-wrap; manter o gate ACID/crash-safety (#46/#47) ao lado de todo número de throughput.
+
+**Definition of done:**
+
+- [ ] Recipe reprodutível TPROC-C (NOPM) + pgbench (TPS) MEDIDO; HammerDB (GPLv3) como driver externo, nunca forkado/linkado (D1).
+- [ ] Gate de corretude/durabilidade preservado (os tools OLTP não têm — postam NOPM com `fsync=off`); crash-harness `#46/#47` roda junto.
+- [ ] Significância pareada sobre runs repetidos (a camada-wrap).
+
+**Dependencies:** M127 `[ ]`.
+
+---
+
+## M130 — [ ] Benchmark oficial: pilar HTAP (CH-benCHmark / BenchBase)
+
+**Objective:** rodar **CH-benCHmark via BenchBase** (TPC-C + 22 TPC-H queries em um schema) contra PG17 (pin de SHA; Java 23), derivar a métrica dual tpmC/QphH, reusando a camada-wrap + validação de resultado OLAP (BenchBase valida só timing).
+
+**Definition of done:**
+
+- [ ] BenchBase CH-benCHmark rodando contra PG17 (SHA pinado); métrica dual derivada do `summary.json` MEDIDA.
+- [ ] Validação de resultado OLAP sob contenção + significância (a camada-wrap; BenchBase não valida resultado).
+- [ ] Toolchain Java 23 documentado como liability; determinismo de seed marcado honestamente (não confirmado no BenchBase).
+
+**Dependencies:** M127 `[ ]`, M129 `[ ]` (reusa o schema/driver TPC-C do pilar OLTP).
+
+---
+
 ## Sequência e paralelismo
 
 ```

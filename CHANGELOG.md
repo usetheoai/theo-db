@@ -13,6 +13,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- ADR-0050: official benchmark harness = ADOPT-AND-WRAP (not pure replace) — adopt the official per-pillar driver + datasets + leaderboard entry, retain a thin TheoDB analysis layer (significance + byte-identical regression + correctness gating) the official tools do not provide (`docs/adr/0050-official-benchmark-adopt-and-wrap.md`).
+- Roadmap amended: added benchmark-official program M127 (vector) / M128 (columnar) / M129 (OLTP) / M130 (HTAP), vector-pilot-first, per the discovery blueprint (`knowledge-base/discoveries/blueprints/official-db-benchmark-harness-blueprint.md`, SHIPPABLE 97.5).
 
 ### Changed
 
