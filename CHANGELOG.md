@@ -24,6 +24,36 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.107.0] - 2026-07-20
+
+### Added
+- **Fail-closed structured `filter` for `ai.hybrid_search` (M120)** — a `[{col, op, value}]` predicate composed with
+  `quote_identifier` + `quote_literal` + an operator allowlist (`= < > <= >= <> IN &&`); an un-allowlisted operator
+  or a `filter`+`filter_sql` combination raises SQLSTATE 22023 (fail-closed). Closes council-security F1: the raw
+  `filter_sql` (retained as an opt-in documented caller-privilege escape hatch) was a syntactic blacklist, not a
+  parser — the structured path is the only fail-closed option for untrusted/multi-tenant callers. Validated in-PG:
+  parity with `filter_sql`, bad-op → 22023, injection value (`DROP TABLE`) quoted-as-literal → table survives
+  (`docs/security/m120-fail-closed-filter.md`).
+- Roadmap amended: added M120 Filtro estruturado fail-closed para `ai.hybrid_search_rrf` (`/roadmap-feature hybrid-fail-closed-filter`)
+- Roadmap amended: added M121 IVF cosine/ip spherical k-means — recall quality (`/roadmap-feature ivf-spherical-kmeans`)
+
+### Changed
+- **M121 spherical k-means — HONEST-NEGATIVE (measured no-op, reverted).** Investigated normalizing the IVF Lloyd
+  centroid onto the unit sphere for cosine/ip recall. For cosine it is a **provable no-op**: both the k-means
+  assignment and the scan probe-selection use the scale-invariant `cosine_distance`, so normalizing the centroid
+  cannot change recall on any dataset. Measured A/B (same-binary GUC toggle + REINDEX) confirmed
+  `recall_mean == recall_spherical` for cosine and ip in every configuration. Per the M121 DoD (measurement-first
+  honest-negative gate) the implementation was reverted — shipping a default-off GUC that never lifts recall would
+  be an unjustified knob (YAGNI/KISS). Finding recorded in `docs/benchmarks/m121-spherical-kmeans-honest-negative.md`.
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
 ## [0.106.0] - 2026-07-20
 
 ### Added

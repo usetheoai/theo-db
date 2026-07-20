@@ -266,6 +266,67 @@ fn resolve_query_vector(query_text: Option<&str>, query_vector_text: Option<&str
     }
 }
 /// Parse the `ai.hybrid_search(jsonb)` config and delegate to `run_rrf` (one fusion source of truth).
+/// M120: the operator allowlist for the fail-closed structured filter. ANY operator outside this set is a typed
+/// 22023 (fail-closed) — never interpolated. Mirrors the `nl.rs` L2 denylist posture (reject-by-default).
+const FILTER_OP_ALLOWLIST: &[&str] = &["=", "<", ">", "<=", ">=", "<>", "IN", "&&"];
+
+/// M120: render a JSON scalar as an INJECTION-SAFE SQL literal — string → `quote_literal` (%L, escapes any
+/// break-out attempt into a harmless string literal), number → bare numeric (pure digits, injection-safe),
+/// bool → `true`/`false`. Object/array/null → Err (fail-closed). Runs in a PG memory context (called via SPI).
+fn render_filter_scalar(v: &Value) -> Result<String, String> {
+    match v {
+        Value::String(s) => Ok(pgrx::spi::quote_literal(s)),
+        Value::Number(n) => Ok(n.to_string()),
+        Value::Bool(b) => Ok(if *b { "true".to_string() } else { "false".to_string() }),
+        _ => Err("filter: value must be a string, number, or boolean (array only for IN/&&)".to_string()),
+    }
+}
+
+/// M120: compose an injection-safe relational predicate from a structured filter `[{col, op, value}]`, the
+/// FAIL-CLOSED alternative to the raw caller-privilege `filter_sql`. Identifiers are `quote_identifier`'d (%I),
+/// values `quote_literal`'d (%L) or emitted bare-numeric; the operator MUST be in `FILTER_OP_ALLOWLIST` else a
+/// typed Err (the caller maps to 22023). A subquery/SQL-fragment value is quoted as a literal → it matches
+/// nothing, it never executes. Empty ⇒ `"true"` (byte-identical to no filter). NEVER interpolates raw text.
+fn compose_structured_filter(conds: &[Value]) -> Result<String, String> {
+    if conds.is_empty() {
+        return Ok("true".to_string());
+    }
+    let mut parts = Vec::with_capacity(conds.len());
+    for c in conds {
+        let obj = c.as_object().ok_or("filter: each condition must be an object {col, op, value}")?;
+        let col = obj.get("col").and_then(|v| v.as_str()).ok_or("filter: condition missing string 'col'")?;
+        let op = obj.get("op").and_then(|v| v.as_str()).ok_or("filter: condition missing string 'op'")?;
+        // Fail-closed FIRST — reject an un-allowlisted operator BEFORE any quoting (so the reject path is pure).
+        if !FILTER_OP_ALLOWLIST.contains(&op) {
+            return Err(format!(
+                "filter: operator '{op}' is not allowed (allowed: = < > <= >= <> IN &&) — use filter_sql for raw predicates at caller privilege"
+            ));
+        }
+        let val = obj.get("value").ok_or("filter: condition missing 'value'")?;
+        let qcol = pgrx::spi::quote_identifier(col);
+        let rendered = match op {
+            "IN" | "&&" => {
+                let arr = val.as_array().ok_or("filter: 'IN'/'&&' require an array value")?;
+                if arr.is_empty() {
+                    // Fail-clear (review LOW): `IN ()` / `ARRAY[]` are SQL syntax/type errors — reject with a typed
+                    // message (22023) instead of letting a raw execution error surface.
+                    return Err(format!("filter: '{op}' requires a NON-EMPTY array value"));
+                }
+                let items: Result<Vec<String>, String> = arr.iter().map(render_filter_scalar).collect();
+                let items = items?;
+                if op == "IN" {
+                    format!("{qcol} IN ({})", items.join(", "))
+                } else {
+                    format!("{qcol} && ARRAY[{}]", items.join(", "))
+                }
+            }
+            _ => format!("{qcol} {op} {}", render_filter_scalar(val)?),
+        };
+        parts.push(format!("({rendered})"));
+    }
+    Ok(parts.join(" AND "))
+}
+
 /// Required keys missing → 22023. Returns the fused rows. Called by the `#[pg_extern]` in `lib.rs`.
 pub(crate) fn run_rrf_json(cfg: Value) -> Vec<(String, f32)> {
     let get_str = |k: &str| cfg.get(k).and_then(|v| v.as_str());
@@ -285,7 +346,32 @@ pub(crate) fn run_rrf_json(cfg: Value) -> Vec<(String, f32)> {
     // M53: optional `language` (FTS regconfig, default english) + `filter_sql` (relational WHERE predicate)
     // + `lexical_engine` (ts_rank_cd default | bm25) + `content_text_col` (bm25 TEXT column).
     let language = get_str("language").unwrap_or("english");
-    let filter_sql = get_str("filter_sql");
+    // M120: the fail-closed structured filter (`filter`: [{col, op, value}]) — mutually exclusive with the raw
+    // caller-privilege `filter_sql`. Structured → composed via quote_identifier + quote_literal + op allowlist
+    // (a bad op / shape is a typed 22023). Both set → 22023. `filter_owned` outlives the run_rrf call below.
+    let filter_sql_raw = get_str("filter_sql");
+    // FAIL-CLOSED on shape (review MEDIUM): a `filter` key present but NOT an array (e.g. a single object
+    // `{col,op,value}` instead of `[{…}]`) MUST be rejected — coercing it to None would run UNFILTERED (fail-open),
+    // defeating the whole point. Mirrors `nl.rs`'s reject-on-bad-shape. Absent key ⇒ None (no structured filter).
+    let structured: Option<&Vec<Value>> = match cfg.get("filter") {
+        None => None,
+        Some(v) => Some(v.as_array().unwrap_or_else(|| {
+            err_input(
+                "ai.hybrid_search_rrf: `filter` must be an ARRAY of {col, op, value} objects — a malformed filter is rejected (fail-closed), never ignored",
+            )
+        })),
+    };
+    let filter_owned: Option<String> = match (filter_sql_raw, structured) {
+        (Some(_), Some(_)) => err_input(
+            "ai.hybrid_search_rrf: pass EITHER `filter` (structured, fail-closed) OR `filter_sql` (raw caller-privilege), not both",
+        ),
+        (None, Some(conds)) => Some(match compose_structured_filter(conds) {
+            Ok(s) => s,
+            Err(e) => err_input(&format!("ai.hybrid_search_rrf: {e}")),
+        }),
+        (raw, None) => raw.map(|s| s.to_string()),
+    };
+    let filter_sql = filter_owned.as_deref();
     let lexical_engine = get_str("lexical_engine").unwrap_or("ts_rank_cd");
     let content_text_col = get_str("content_text_col");
     // M106 — per-leg RRF weights (default 1.0 = unweighted). Accepts int or float JSON; run_rrf validates

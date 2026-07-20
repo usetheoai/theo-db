@@ -1773,7 +1773,7 @@ Quick-win barato no eixo exato (latência cosine/IP) que o M50 aponta como teto,
 
 ---
 
-## M118 — [ ] Filtered ANN eficiente: resume-from-discarded (caso RAG)
+## M118 — [x] Filtered ANN eficiente: resume-from-discarded (caso RAG)
 
 > Added 2026-07-20 by `/roadmap-feature` (slug: `filtered-ann-resume-discarded`). Fonte: deep-view `§ P4` + `.claude/knowledge-base/backlog.md` ("M52 follow-up: iterative scan resume-from-discarded"). See CHANGELOG `[Unreleased] § Added`.
 
@@ -1825,6 +1825,57 @@ Quick-win barato no eixo exato (latência cosine/IP) que o M50 aponta como teto,
 **Why now (do gap analysis):**
 
 Pós-reposição (ADR-0033), AI-native / HTAP / abertura são os eixos diferenciadores; hoje igualamos pgai/Supabase mas não superamos — re-rank + chunking avançado é o delta medível que passa de paridade a superioridade nessa superfície.
+
+---
+
+## M120 — [ ] Filtro estruturado fail-closed para `ai.hybrid_search_rrf` (segurança multi-tenant)
+
+> Added 2026-07-20 by `/roadmap-feature` (slug: `hybrid-fail-closed-filter`). Fonte: `.claude/knowledge-base/backlog.md` ("[M53 review — council-security F1]") + código `theodb_rs/src` (`ai.hybrid_search_rrf`). See CHANGELOG `[Unreleased] § Added`.
+
+**Objective:** Substituir/complementar o `filter_sql` **cru** (SQL interpolado `%5$s` sob SECURITY INVOKER) por um **filtro estruturado fail-closed** (coluna/operador/valor com `quote_ident`/`%I` no identificador + **bind** do valor, nunca interpolação) — a única defesa realmente fail-closed para input não-confiável, pré-requisito para expor `ai.hybrid_search_rrf` no data-plane **multi-tenant** (o coração do theo-data).
+
+**Definition of done:**
+
+- [ ] API de filtro estruturado: aceita `(coluna, operador, valor)` de um **allowlist** de operadores (`= < > >= <= IN &&`), identificador via `quote_ident`, valor **bindado** ($n) — zero SQL cru no caminho estruturado.
+- [ ] **Fail-closed:** coluna/operador fora do allowlist → **erro tipado** (SQLSTATE 22023), não passa. Teste negativo (`hybrid_filter_structured_rejects_*`).
+- [ ] O payload que passava o guard cru (`filter_sql => '(SELECT count(*) FROM t) >= 0'`) é **rejeitado** pelo caminho estruturado.
+- [ ] O `filter_sql` cru permanece como opt-in explícito documentado como **caller-privilege** (COMMENT sem a garantia falsa "injection-safe") OU é deprecado — decisão no ADR.
+
+**Dependencies:** M53 (hybrid / RRF). `[x]`.
+
+**Top risks (novos):**
+
+1. O filtro estruturado limita expressividade vs SQL cru — precisa cobrir os casos comuns sem virar um mini-parser (KISS); o `filter_sql` opt-in cobre o resto.
+2. Mudança de assinatura de `ai.hybrid_search_rrf` pode quebrar callers → manter `filter_sql` como opt-in retrocompatível.
+
+**Why now (do gap analysis 2026-07-20):**
+
+**BLOCKER latente de segurança.** Hoje seguro sob INVOKER + read-only SPI + REVOKE FROM PUBLIC, MAS vira escalonamento sob qualquer wrapper SECURITY DEFINER ou GRANT a role isolado — colide com o modelo de tenant do theo-data. Pós-reposição (ADR-0033), segurança/AI-native é eixo diferenciador (não QPS vetorial). Maior alavancagem dos gaps abertos.
+
+---
+
+## M121 — [ ] IVF cosine/ip spherical k-means (recall quality)
+
+> Added 2026-07-20 by `/roadmap-feature` (slug: `ivf-spherical-kmeans`). Fonte: `.claude/knowledge-base/backlog.md` ("IVF cosine/ip spherical k-means, from M49 review council-index-storage HIGH-2") + código `theodb_rs/src/ann/ivf.rs`. See CHANGELOG `[Unreleased] § Added`.
+
+**Objective:** Usar **spherical k-means** (normalizar o centroide no update) para o IVF cosine/ip, em vez de centroides de média-aritmética que derivam da esfera unitária — fechando parte do gap de recall IVF cosine/ip (medido 0.83-0.89 vs HNSW 1.0), **gated por benchmark** provando o lift (measurement-first, não assumir).
+
+**Definition of done:**
+
+- [ ] O k-means do IVF, para métrica cosine/ip, **normaliza os centroides no update** (spherical); o path L2 fica **byte-idêntico** (inalterado).
+- [ ] MEDIDO: recall@10 IVF cosine/ip **sobe** vs o baseline arithmetic-mean, a QPS casado (documentar em `docs/benchmarks/`).
+- [ ] **Gate honesto:** se o lift não justificar (< limite acordado), **reverter** e registrar honest-negative — decisão measurement-first (como o slot-reuse M56).
+
+**Dependencies:** M49 (IVF cosine/ip opclasses). `[x]`.
+
+**Top risks (novos):**
+
+1. Spherical k-means pode convergir mais devagar → capar iterações (o cap de treino do M88 já existe; reusar).
+2. O lift pode ser marginal → gate por benchmark; aceitar honest-negative em vez de shipar complexidade sem ganho medido.
+
+**Why now (do gap analysis 2026-07-20):**
+
+Recall **quality** no eixo de **correção** (não QPS) — o IVF cosine é o path com o maior gap de recall conhecido (backlog M49 HIGH-2). É own-code, permissivo, e **não esbarra no teto estrutural de QPS** que o M118 mediu. Melhoria real de qualidade sem overclaim.
 
 ---
 

@@ -55,3 +55,7 @@ knowledge-base/references/*/
 # M99 isolation harness scratch output (expected/ is committed; results/ is generated)
 theodb_rs/isolation/results/
 theodb_rs/isolation/tmp_check/
+
+# loop-check-licence local artifacts
+.claude/check-licence-evidence.db
+.claude/check-licence-loop.local.md
