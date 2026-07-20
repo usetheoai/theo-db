@@ -229,6 +229,14 @@ impl<N: Copy> ResumableGround<N> {
         self.visited.len()
     }
 
+    /// M118 (T2.2): approximate retained-state size in bytes (frontier heap + visited set) — the caller enforces
+    /// the `theodb_hnsw.resume_max_mb` ceiling against this (fail-safe: stop resuming when the frontier grows too
+    /// large at scale, rather than risk an OOM). A heap element is `Reverse<Ranked<N>>`; a visited entry is a `u64`.
+    pub(crate) fn approx_bytes(&self) -> usize {
+        self.cands.len().saturating_mul(std::mem::size_of::<Reverse<Ranked<N>>>())
+            + self.visited.len().saturating_mul(std::mem::size_of::<u64>())
+    }
+
     /// Run ONE bounded-`ef` beam pass seeded from the retained frontier; return the emittable results
     /// (ascending by distance, tid-tie-broken). The frontier (`cands`) + `visited` persist for the next call.
     /// On the `ef`-worst early-break the triggering frontier head is re-pushed (it IS the discarded set the

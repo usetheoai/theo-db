@@ -45,6 +45,14 @@ pub(crate) static OVER_FETCH: GucSetting<i32> = GucSetting::<i32>::new(DEFAULT_O
 pub(crate) const DEFAULT_MAX_SCAN_TUPLES: i32 = 20000;
 pub(crate) static MAX_SCAN_TUPLES: GucSetting<i32> = GucSetting::<i32>::new(DEFAULT_MAX_SCAN_TUPLES);
 
+/// M118 — `SET theodb_hnsw.resume_max_mb = N`: memory ceiling (MB) for the resume-from-discarded scan's retained
+/// frontier + visited set. When the retained state exceeds this, the scan stops resuming and returns what it holds
+/// (fail-safe — correctness preserved: the executor's MVCC recheck + `max_scan_tuples` already bound emission).
+/// `0` = disabled (unbounded), consistent with `max_scan_tuples` / `vacuum_fold_max_mb`. Mirrors pgvector 0.8.5's
+/// `work_mem` guard on `so->discarded` (EC-2: the `0 = disabled` contract; EC-5: overflow returns, never panics).
+pub(crate) const DEFAULT_HNSW_RESUME_MAX_MB: i32 = 64;
+pub(crate) static HNSW_RESUME_MAX_MB: GucSetting<i32> = GucSetting::<i32>::new(DEFAULT_HNSW_RESUME_MAX_MB);
+
 /// M48 (T3.1) — `SET theodb.vacuum_pending_threshold = N`: a VACUUM folds the pending region into the main
 /// structure when it exceeds N pages, even with zero dead tuples, so an insert-only workload's scan returns to
 /// O(structure) instead of paying O(pending) forever. Operational knob (Userset), NOT a build reloption. Default
@@ -321,6 +329,16 @@ pub(crate) fn init() {
         GucContext::Userset,
         GucFlags::default(),
     );
+    GucRegistry::define_int_guc(
+        c"theodb_hnsw.resume_max_mb",
+        c"Memory ceiling (MB) for the resume-from-discarded scan's retained frontier (0 = disabled/unbounded)",
+        c"When the retained beam frontier + visited set exceed this, the scan stops resuming and returns what it holds (fail-safe; correctness preserved by the executor MVCC recheck + max_scan_tuples). 0 disables the cap.",
+        &HNSW_RESUME_MAX_MB,
+        0,
+        1_000_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
     // M104 bounded-memory / resilience knobs (review H1).
     GucRegistry::define_int_guc(
         c"theodb.vacuum_fold_max_mb",
@@ -393,4 +411,9 @@ pub(crate) fn over_fetch() -> usize {
 /// candidates are emitted, so a selective `WHERE` still finds its top-k (recall preserved).
 pub(crate) fn max_scan_tuples() -> usize {
     MAX_SCAN_TUPLES.get().max(0) as usize
+}
+
+/// M118: the resume frontier memory ceiling in bytes (`0` = disabled/unbounded).
+pub(crate) fn hnsw_resume_max_bytes() -> usize {
+    (HNSW_RESUME_MAX_MB.get().max(0) as usize).saturating_mul(1024 * 1024)
 }

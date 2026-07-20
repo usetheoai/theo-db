@@ -1256,8 +1256,18 @@ pub extern "C-unwind" fn amgettuple(
                         Ok(m) => m,
                         Err(e) => pg_sys::error!("theodb am scan: {e}"),
                     };
+                    let resume_ceiling = crate::am::guc::hnsw_resume_max_bytes();
                     loop {
                         if state.emitted.len() >= cap {
+                            state.exhausted = true;
+                            return false;
+                        }
+                        // M118 T2.2: memory-ceiling fail-safe — if the retained frontier grew past
+                        // `theodb_hnsw.resume_max_mb`, stop resuming and return what is already emitted (correctness
+                        // preserved by the executor MVCC recheck + max_scan_tuples; EC-5 — a clean stop, no panic).
+                        if resume_ceiling > 0
+                            && state.resume.as_ref().map(|rg| rg.approx_bytes()).unwrap_or(0) > resume_ceiling
+                        {
                             state.exhausted = true;
                             return false;
                         }
