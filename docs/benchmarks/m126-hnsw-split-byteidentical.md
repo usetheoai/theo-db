@@ -2,9 +2,13 @@
 
 **Date:** 2026-07-20 · **Box:** DO droplet (theo-e2e-runner), pgrx-managed PG17.10, pgrx 0.19.0.
 **Verdict:** the 3,456-LoC god-file `am/hnsw_page.rs` was split into a `am/hnsw_page/` directory module
-(layout/meta/codec/pack/store/search + co-located tests) with **zero behavior/format/API change**, proven by a
-**same-index A/B**: the pre- and post-refactor binaries read the SAME physical HNSW index and return
-**byte-identical** `(id, distance)` rankings.
+(layout/meta/codec/pack/store/search + co-located tests) with **zero behavior/format/API change**. The guarantee
+rests on TWO proofs: (1) **static byte-identity** of the production modules — the whole prod diff vs the original
+is 6 lines (one `#![allow(unused_imports)]` per module), so `encode_*`/`pack_*`/`write_structured`/`traverse` are
+textually identical (this covers the write/build/VACUUM/AQ-v4 paths); (2) a **same-index A/B** that
+runtime-corroborates the v1 read hot path — the pre- and post-refactor binaries read the SAME physical HNSW index
+and return **byte-identical** `(id, distance)` rankings. Both were independently confirmed by adversarial review
+(council-rust-pgrx + council-index-storage).
 
 ## The single metric — same-index byte-identical A/B (ADR M126-2)
 
@@ -54,8 +58,12 @@ produces exactly the same rankings and distances across 50 queries. Behavior is 
 - **Zero caller edits.** `am/scan.rs`, `am/build.rs`, `api.rs` are untouched — the flat re-exports keep every
   `crate::am::hnsw_page::{traverse, HnswResume, resumable_*, pack, …}` path resolving. `am/mod.rs` still says
   `mod hnsw_page;` (a directory module keeps the name).
-- **Zero on-disk-format change** — the same physical index built by the baseline binary is read identically by
-  the split binary (that is exactly what the A/B proves).
+- **Zero on-disk-format change.** Two independent proofs: (1) the same physical index built by the baseline
+  binary is read identically by the split binary (the A/B — this proves the **read** path); (2) the **write**
+  path's byte-layout is preserved because the split is a source-identical move — `encode_meta` / `decode_meta` /
+  `encode_element_v4` / `encode_neighbors` / `pack_*` / `write_structured` are byte-identical to the original (all
+  format constants + size formulae in `layout.rs`/`meta.rs` unchanged, only visibility widened). The A/B alone
+  does not exercise the split binary's write path / VACUUM-fold / crash-recovery — those rest on proof (2).
 
 ## What changed vs. a pure text-move (honest)
 
