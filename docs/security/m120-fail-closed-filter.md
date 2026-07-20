@@ -37,3 +37,18 @@ assertions). All four pass; no regression to the existing `filter_sql` path (par
   point. Advanced raw predicates remain available via `filter_sql` at caller privilege.
 - Operators covered: `= < > <= >= <> IN &&`. Extending the allowlist is a one-line change + a test.
 - This hardens the **relational filter composition** only; the embed/HTTP leg's SSRF guards are unchanged (M65).
+
+## Review (council-security) + fixes applied
+
+Verdict: injection fail-closed **complete** (no structured-path byte reaches raw `%5$s` without
+quote_identifier/quote_literal/allowlist). Found a **shape-level fail-open** the A/B had not tested — fixed here:
+
+- **[MEDIUM → FIXED] non-array `filter` was silently ignored → fail-OPEN.** A `filter` present but not an array
+  (e.g. a single `{col,op,value}` object) coerced to None and ran UNFILTERED. Fix: a present-but-non-array `filter`
+  → SQLSTATE 22023 (`hybrid.rs` `structured` match). Closes the mutual-exclusion bypass too (LOW).
+- **[LOW → FIXED] empty `IN`/`&&` array → raw syntax error.** Now a typed 22023 (fail-clear).
+- **[INFO] tenant isolation** is NOT closed by M120 (correctly out of scope): the structured filter is a
+  caller-chosen positive predicate, not a forced `workspace_id` boundary; isolation on a multi-tenant surface must
+  come from GRANT/RLS. `filter_sql` stays raw caller-privilege (safe only under its docstring contract).
+
+Post-fix A/B adds: (5) non-array `filter` → 22023 ✅, (6) empty IN → 22023 ✅ (both pass).

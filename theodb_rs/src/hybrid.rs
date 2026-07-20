@@ -307,6 +307,11 @@ fn compose_structured_filter(conds: &[Value]) -> Result<String, String> {
         let rendered = match op {
             "IN" | "&&" => {
                 let arr = val.as_array().ok_or("filter: 'IN'/'&&' require an array value")?;
+                if arr.is_empty() {
+                    // Fail-clear (review LOW): `IN ()` / `ARRAY[]` are SQL syntax/type errors — reject with a typed
+                    // message (22023) instead of letting a raw execution error surface.
+                    return Err(format!("filter: '{op}' requires a NON-EMPTY array value"));
+                }
                 let items: Result<Vec<String>, String> = arr.iter().map(render_filter_scalar).collect();
                 let items = items?;
                 if op == "IN" {
@@ -345,7 +350,17 @@ pub(crate) fn run_rrf_json(cfg: Value) -> Vec<(String, f32)> {
     // caller-privilege `filter_sql`. Structured → composed via quote_identifier + quote_literal + op allowlist
     // (a bad op / shape is a typed 22023). Both set → 22023. `filter_owned` outlives the run_rrf call below.
     let filter_sql_raw = get_str("filter_sql");
-    let structured = cfg.get("filter").and_then(|v| v.as_array());
+    // FAIL-CLOSED on shape (review MEDIUM): a `filter` key present but NOT an array (e.g. a single object
+    // `{col,op,value}` instead of `[{…}]`) MUST be rejected — coercing it to None would run UNFILTERED (fail-open),
+    // defeating the whole point. Mirrors `nl.rs`'s reject-on-bad-shape. Absent key ⇒ None (no structured filter).
+    let structured: Option<&Vec<Value>> = match cfg.get("filter") {
+        None => None,
+        Some(v) => Some(v.as_array().unwrap_or_else(|| {
+            err_input(
+                "ai.hybrid_search_rrf: `filter` must be an ARRAY of {col, op, value} objects — a malformed filter is rejected (fail-closed), never ignored",
+            )
+        })),
+    };
     let filter_owned: Option<String> = match (filter_sql_raw, structured) {
         (Some(_), Some(_)) => err_input(
             "ai.hybrid_search_rrf: pass EITHER `filter` (structured, fail-closed) OR `filter_sql` (raw caller-privilege), not both",
