@@ -1905,7 +1905,7 @@ Hardening pós-roadmap-completo no eixo **operabilidade + AI-native** (eixos viv
 
 ---
 
-## M123 — [ ] Significância estatística pareada do hybrid vs vector (BEIR)
+## M123 — [x] Significância estatística pareada do hybrid vs vector (BEIR)
 
 > Added 2026-07-20 by `/roadmap-feature` (slug: `hybrid-beir-significance`). Fonte: backlog "[M53 review — council-benchmark] Teste de significância pareado hybrid vs vector (BEIR)" + `docs/benchmarks/m53-hybrid-beir.md` (harness já existe). See CHANGELOG `[Unreleased] § Added`.
 
