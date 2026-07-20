@@ -13,6 +13,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Fail-closed structured `filter` for `ai.hybrid_search` (M120)** — a `[{col, op, value}]` predicate composed with
+  `quote_identifier` + `quote_literal` + an operator allowlist (`= < > <= >= <> IN &&`); an un-allowlisted operator
+  or a `filter`+`filter_sql` combination raises SQLSTATE 22023 (fail-closed). Closes council-security F1: the raw
+  `filter_sql` (retained as an opt-in documented caller-privilege escape hatch) was a syntactic blacklist, not a
+  parser — the structured path is the only fail-closed option for untrusted/multi-tenant callers. Validated in-PG:
+  parity with `filter_sql`, bad-op → 22023, injection value (`DROP TABLE`) quoted-as-literal → table survives
+  (`docs/security/m120-fail-closed-filter.md`).
 - Roadmap amended: added M120 Filtro estruturado fail-closed para `ai.hybrid_search_rrf` (`/roadmap-feature hybrid-fail-closed-filter`)
 - Roadmap amended: added M121 IVF cosine/ip spherical k-means — recall quality (`/roadmap-feature ivf-spherical-kmeans`)
 
