@@ -1931,6 +1931,84 @@ O hybrid é o coração do pilar **AI-native**, e o benchmark existe mas **não 
 
 ---
 
+## M124 — [ ] Dogfood real: capability theo-data sobre TheoDB self-hosted (prova de produção)
+
+> Added 2026-07-20 by gap-analysis (`knowledge-base/audits/2026-07-20-analysis.md` Recomendação 1 / Risco H9). Fonte: dogfood-golden-rule (`rules/dogfood-golden-rule.md § 1`, âncora `theo-data-capability-on-theodb`) + `knowledge-base/dogfood/manifest.md` (status `planned`). See CHANGELOG `[Unreleased] § Added`.
+
+**Objective:** Fechar o **maior gap de maturidade** — hoje toda evidência é benchmark sintético (109 artefatos), **zero uso sustentado real** → "production-ready" é inreivindicável. Entregar o **enabler theo-db-side** para o dogfood: um caminho reproduzível de self-host + uma capability theo-data com o retrieval real apontado para o TheoDB (vectorizer + `ai.hybrid_search_rrf`), e a **primeira evidência** registrada — abrindo o caminho para o status `running`.
+
+**Definition of done:**
+
+- [ ] **Quickstart reproduzível de self-host** documentado (`docs/ops/`): stand up de um TheoDB próprio (imagem/compose OU recipe pgrx-install) com `theodb_rs` + `shared_preload_libraries` + o worker do vectorizer ativo — um membro do time consegue subir do zero.
+- [ ] **Uma capability theo-data com retrieval real no TheoDB:** `theodb.create_vectorizer` mantém uma coluna de embedding fresca + as queries reais da capability passam por `ai.hybrid_search_rrf` (substituindo o store atual). Config versionada.
+- [ ] **Primeira evidência** em `knowledge-base/dogfood/evidence/*.md` (frontmatter § 5: scenario/date/operator/outcome/summary), **incluindo ≥1 história de falha** (um dogfood sem falhas é teatro — § 4).
+- [ ] O manifest documenta o caminho `planned → wired → running`; o flip para `running` (uso sustentado ≥30d) é operacional/cross-repo, **não** gated neste milestone de código.
+
+**Dependencies:** M122 (vectorizer async endurecido) `[x]`, M120 (filtro fail-closed p/ input não-confiável) `[x]`.
+
+**Top risks (novos):**
+
+1. **Escopo cross-repo** — HA/control-plane/deploy são fora deste repo (CLAUDE.md). Mitigar: este milestone entrega o *enabler* theo-db-side (quickstart + wiring + 1ª evidência); a operação sustentada vive no workspace/capability.
+2. **Sem tráfego real disponível** — se nenhuma capability puder migrar o retrieval agora, o milestone vira `wired` (invocado 1× em smoke) em vez de `running`; honesto, mas não fecha o claim de produção.
+
+**Why now (do /analysis 2026-07-20):**
+
+Recomendação #1 e Risco dominante (H9): a trajetória de *engenharia* é sólida (6 hipóteses-core validadas), mas a de *maturidade-de-produção* está travada em evidência que não existe. É o único passo que benchmark não substitui.
+
+---
+
+## M125 — [ ] Resolver H6: significância da híbrida num dataset lexical-heavy (ou travar posicionamento honesto)
+
+> Added 2026-07-20 by gap-analysis (`knowledge-base/audits/2026-07-20-analysis.md` Recomendação 2 / Risco H6). Fonte: `docs/benchmarks/m123-hybrid-significance.md` (PARITY medido na SciFact). See CHANGELOG `[Unreleased] § Added`.
+
+**Objective:** O M123 mediu **paridade** (hybrid vs vector não-significativo, p=0.25, 296/300 empates) numa SciFact dense-strong onde a perna FTS é fraca. Testar a híbrida onde ela *deveria* ajudar — um dataset **lexical-heavy** (keyword/termos raros) com o mesmo teste pareado — para converter o value-prop AI-native de **AT_RISK** em **medido**: ou a híbrida vence significativamente em algum regime, ou o posicionamento honesto é travado ("híbrida disponível; paridade em dense-strong").
+
+**Definition of done:**
+
+- [ ] O harness roda o teste pareado (reusa `theodb_bench.significance.paired_significance` do M123) num dataset BEIR **lexical-heavy** permissivo (ex.: um subset keyword-heavy; declarar licença) além da SciFact.
+- [ ] **MEDIDO:** p-value pareado + IC + wins/losses/ties reportados; se a híbrida vencer significativamente (p<0.05 E IC>0) num regime, o claim é registrado com evidência; se não, **posicionamento honesto travado** no doc (sem overclaim).
+- [ ] **Anti p-hack:** endpoint pré-declarado (nDCG@10), correção de comparação múltipla se >1 dataset, honest-negative aceito (como o M123). Sem dataset-shopping para achar significância.
+- [ ] Artefato em `docs/benchmarks/` atualizando o veredito AI-native.
+
+**Dependencies:** M123 (teste de significância) `[x]`.
+
+**Top risks (novos):**
+
+1. Pode dar paridade/perda em todos os regimes → honest-negative: o posicionamento vira "híbrida é opção, não superioridade medida"; aceitar (o valor é a prova).
+2. Dataset lexical-heavy permissivo pode ser escasso → declarar licença + usar CI-internal (como a SciFact CC BY-NC do M123).
+
+**Why now (do /analysis 2026-07-20):**
+
+Recomendação #2 / Risco H6: a superioridade da híbrida (coração do pilar AI-native) está **não-provada**. Fechar isso honestamente — medir onde deveria ajudar — é o que "performance é claim, não opinião" exige.
+
+---
+
+## M126 — [ ] Split do god-file `hnsw_page.rs` (3.456 LoC) — reduzir o risco de manutenção/segurança
+
+> Added 2026-07-20 by gap-analysis (`knowledge-base/audits/2026-07-20-analysis.md` Recomendação 3 / Risco). Fonte: métrica A2/A4 do /analysis (`theodb_rs/src/am/hnsw_page.rs` = maior arquivo, hot-path, concentração de `unsafe`). See CHANGELOG `[Unreleased] § Added`.
+
+**Objective:** `am/hnsw_page.rs` (3.456 LoC) é o maior arquivo, o hot-path de maior churn (M35/M118/M122-adjacente) e concentra superfície `unsafe` — o **maior risco de manutenção/segurança** medido. Split **preservando comportamento** ao longo das costuras naturais (page-format/codec ↔ traverse ↔ scan/resume), mantendo os testes byte-idênticos.
+
+**Definition of done:**
+
+- [ ] `hnsw_page.rs` decomposto em módulos coesos por responsabilidade (ex.: layout/codec de página, traverse/frontier, scan/resume) — nenhum arquivo resultante > ~1.500 LoC; sem `god module` genérico (`util`/`common`).
+- [ ] **Comportamento preservado (refactor puro):** toda a suíte de testes + os benchmarks de recall passam **byte-idênticos** (mesmos rankings, mesmo recall) — provado por A/B same-index antes/depois.
+- [ ] Fronteiras `unsafe` isoladas nos módulos de FFI/página (não espalhadas); cada `unsafe` mantém seu invariante documentado (o padrão do review council-rust-pgrx).
+- [ ] Zero mudança de API pública / zero mudança de formato on-disk (índices existentes continuam legíveis).
+
+**Dependencies:** M122 (último toque grande no path do vectorizer/scan) `[x]`.
+
+**Top risks (novos):**
+
+1. Refactor de hot-path com 357 `unsafe` no total → risco de introduzir bug sutil. Mitigar: refactor puro (sem mudança de lógica), A/B same-index byte-idêntico obrigatório, review council-rust-pgrx.
+2. `cargo pgrx test` não linka no droplet (gotcha conhecido) → validação via example standalone + A/B in-PG, como M118/M121/M122.
+
+**Why now (do /analysis 2026-07-20):**
+
+Recomendação #3 / Risco de manutenção: com 19 arquivos >500 LoC e este a 3.456, é o ponto de maior concentração de risco. Dívida estrutural, não feature — mas o /analysis a apontou como o maior lever de manutenibilidade.
+
+---
+
 ## Sequência e paralelismo
 
 ```

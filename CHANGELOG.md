@@ -13,6 +13,9 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Roadmap amended: added M124 Dogfood real — capability theo-data sobre TheoDB self-hosted (gap-analysis Rec.1/H9)
+- Roadmap amended: added M125 Significância da híbrida em dataset lexical-heavy — resolve H6 (gap-analysis Rec.2)
+- Roadmap amended: added M126 Split do god-file hnsw_page.rs (3.456 LoC) — risco de manutenção (gap-analysis Rec.3)
 - Dogfood production-readiness gate configured: anchor `theo-data-capability-on-theodb` (`rules/dogfood-golden-rule.md § 1` + `knowledge-base/dogfood/manifest.md`), honest status `planned` — no sustained real-use evidence yet, so no production-ready claim.
 
 ### Changed
