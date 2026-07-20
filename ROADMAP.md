@@ -1718,9 +1718,11 @@ LazyGraphRAG (MS Research), HippoRAG 2; baseline a bater = `theo-rag/packages/co
 
 ---
 
-## M116 — [ ] Operabilidade em escala: eliminar o muro do VACUUM (index-maintenance ADR-0017 fase 1)
+## M116 — [x] Operabilidade em escala: eliminar o muro do VACUUM (index-maintenance ADR-0017 fase 1)
 
 > Added 2026-07-20 by `/roadmap-feature` (slug: `vacuum-wall-operability`). Fonte: deep-view `.claude/knowledge-base/audits/deep-view-sota-ai-native-2026-07-07.md § P3` + `docs/adr/0017-m55-index-maintenance-at-scale.md`. See CHANGELOG `[Unreleased] § Added`.
+>
+> **[CORREÇÃO 2026-07-20 — SUPERSEDED / JÁ ENTREGUE]** O muro do caminho DELETE foi fechado por **M56** (`theodb_rs/src/am/build.rs::vacuum_delete_inplace` + `am/hnsw_page.rs::tombstone_sweep` — tombstone in-place per-page, GenericXLog, sem advisory EXCLUSIVE / sem O(N) / sem stall; compaction disparada por churn ratio, com recall medido no M56 fase-2 churn bench) e **M104** (`vacuum_fold_max_mb` — blast radius de memória do fold limitado). Milestone criado sobre gap-analysis desatualizado (deep-view 2026-07-07, anterior a M56/M104). Residual não-bloqueador (streaming BUILD `collect_corpus`, IVF in-place) não justifica milestone próprio. Marcado `[x]` como correção de ROADMAP — não reimplementar (Regra: sem re-trabalho).
 
 **Objective:** Remover a parada O(N) whole-index do fold de manutenção do índice vetorial sob EXCLUSIVE lock (hoje ~86s a 100k, ~14min projetado a 1M) implementando a fase 1 do ADR-0017 (tombstone-in-place + fold-para-compaction incremental/bounded), tornando o índice operável em escala.
 
@@ -1744,9 +1746,11 @@ LazyGraphRAG (MS Research), HippoRAG 2; baseline a bater = `theo-rag/packages/co
 
 ---
 
-## M117 — [ ] SIMD cosine/IP no hot path de embeddings
+## M117 — [x] SIMD cosine/IP no hot path de embeddings
 
 > Added 2026-07-20 by `/roadmap-feature` (slug: `simd-cosine-ip-kernels`). Fonte: deep-view `§ P2` + `.claude/knowledge-base/backlog.md` ("AVX2 kernels for IP/cosine"). See CHANGELOG `[Unreleased] § Added`.
+>
+> **[CORREÇÃO 2026-07-20 — SUPERSEDED / JÁ ENTREGUE]** Entregue por **M58**: `theodb_rs/src/vec.rs::cosine_dist_from_bytes` despacha para `simd_x86::cosine_terms` (AVX2+FMA) e `dot_from_bytes`→`simd_x86::dot`; `ip_dist_from_bytes` reusa `dot_from_bytes`. Comentário no código: *"M58: AVX2+FMA cosine kernel when available (the real-embedding scan hot path)"*. Testes: `cosine_and_ip_from_bytes_match_scalar_within_eps_across_dims`. Milestone criado sobre gap-analysis desatualizado (deep-view 2026-07-07, anterior a M58). Marcado `[x]` como correção de ROADMAP — não reimplementar.
 
 **Objective:** Adicionar caminho AVX2+FMA para as distâncias cosine e inner-product (hoje escalares em `vec.rs`; só L2 tem SIMD), colhendo o ganho de fator-constante no hot path dos embeddings reais (OpenAI/Cohere são cosine/IP).
 
@@ -1794,9 +1798,11 @@ Quick-win barato no eixo exato (latência cosine/IP) que o M50 aponta como teto,
 
 ---
 
-## M119 — [ ] AI-native depth: cross-encoder re-rank + chunking recursivo
+## M119 — [x] AI-native depth: cross-encoder re-rank + chunking recursivo
 
 > Added 2026-07-20 by `/roadmap-feature` (slug: `ai-native-depth-rerank-chunking`). Fonte: deep-view `§ P6` + `.claude/knowledge-base/backlog.md` ("M54: chunking recursivo separator-aware"). See CHANGELOG `[Unreleased] § Added`.
+>
+> **[CORREÇÃO 2026-07-20 — SUPERSEDED / JÁ ENTREGUE]** Entregue por **M65** (`theodb_rs/src/rerank.rs` = cross-encoder rerank real, contrato Cohere/Jina/Voyage/BGE-TEI, exposto como `ai.rerank`) + **M54** (chunking `recursive` separator-aware em `theodb_rs/src/chunk.rs`: `\n\n→\n→. →space`). Importante: o rerank **já foi medido** em BEIR e é **honest-negative** (commit `604184b`: rerank piora nDCG −3.8%) — reimplementar/forçar seria perseguir um dead-end já medido. Milestone criado sobre gap-analysis desatualizado. Marcado `[x]` como correção de ROADMAP — não reimplementar.
 
 **Objective:** Elevar a superfície AI-native acima de paridade com pgai/Supabase: adicionar um estágio opcional de re-rank cross-encoder ao hybrid e um chunking recursivo separator-aware ao `theodb.chunk_text`.
 

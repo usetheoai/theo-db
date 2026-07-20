@@ -25,6 +25,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - Roadmap amended: added M119 AI-native depth — cross-encoder re-rank + chunking recursivo (`/roadmap-feature ai-native-depth-rerank-chunking`)
 
 ### Changed
+- Roadmap corrigido: **M116 / M117 / M119 marcados `[x]` (SUPERSEDED — já entregues)** por M56+M104 (VACUUM tombstone-in-place + fold memory-bound), M58 (SIMD AVX2 cosine/IP) e M65 (cross-encoder `ai.rerank`, medido honest-negative) + M54 (chunking recursivo). Foram criados sobre um gap-analysis desatualizado (deep-view 2026-07-07, anterior a M56–M115); reimplementá-los seria re-trabalho. Apenas **M118 (filtered ANN resume-from-discarded)** permanece `[ ]` como trabalho novo genuíno.
 
 ### Deprecated
 
