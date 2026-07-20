@@ -1828,7 +1828,7 @@ Pós-reposição (ADR-0033), AI-native / HTAP / abertura são os eixos diferenci
 
 ---
 
-## M120 — [ ] Filtro estruturado fail-closed para `ai.hybrid_search_rrf` (segurança multi-tenant)
+## M120 — [x] Filtro estruturado fail-closed para `ai.hybrid_search_rrf` (segurança multi-tenant)
 
 > Added 2026-07-20 by `/roadmap-feature` (slug: `hybrid-fail-closed-filter`). Fonte: `.claude/knowledge-base/backlog.md` ("[M53 review — council-security F1]") + código `theodb_rs/src` (`ai.hybrid_search_rrf`). See CHANGELOG `[Unreleased] § Added`.
 
@@ -1854,7 +1854,7 @@ Pós-reposição (ADR-0033), AI-native / HTAP / abertura são os eixos diferenci
 
 ---
 
-## M121 — [ ] IVF cosine/ip spherical k-means (recall quality)
+## M121 — [x] IVF cosine/ip spherical k-means (recall quality)
 
 > Added 2026-07-20 by `/roadmap-feature` (slug: `ivf-spherical-kmeans`). Fonte: `.claude/knowledge-base/backlog.md` ("IVF cosine/ip spherical k-means, from M49 review council-index-storage HIGH-2") + código `theodb_rs/src/ann/ivf.rs`. See CHANGELOG `[Unreleased] § Added`.
 
