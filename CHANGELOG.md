@@ -13,6 +13,20 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.107.0] - 2026-07-20
+
+### Added
 - **Fail-closed structured `filter` for `ai.hybrid_search` (M120)** — a `[{col, op, value}]` predicate composed with
   `quote_identifier` + `quote_literal` + an operator allowlist (`= < > <= >= <> IN &&`); an un-allowlisted operator
   or a `filter`+`filter_sql` combination raises SQLSTATE 22023 (fail-closed). Closes council-security F1: the raw
