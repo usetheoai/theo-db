@@ -13,6 +13,20 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.106.0] - 2026-07-20
+
+### Added
 - **`NOTICE` file** na raiz agregando a atribuição das extensões permissivas (PostgreSQL License)
   redistribuídas na imagem — `pgvector` e `pgvectorscale` (refs pinadas) — para satisfazer a
   obrigação da PostgreSQL License de que o aviso de copyright apareça "in all copies". Complementa
