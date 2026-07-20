@@ -24,6 +24,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - Roadmap amended: added M121 IVF cosine/ip spherical k-means — recall quality (`/roadmap-feature ivf-spherical-kmeans`)
 
 ### Changed
+- **M121 spherical k-means — HONEST-NEGATIVE (measured no-op, reverted).** Investigated normalizing the IVF Lloyd
+  centroid onto the unit sphere for cosine/ip recall. For cosine it is a **provable no-op**: both the k-means
+  assignment and the scan probe-selection use the scale-invariant `cosine_distance`, so normalizing the centroid
+  cannot change recall on any dataset. Measured A/B (same-binary GUC toggle + REINDEX) confirmed
+  `recall_mean == recall_spherical` for cosine and ip in every configuration. Per the M121 DoD (measurement-first
+  honest-negative gate) the implementation was reverted — shipping a default-off GUC that never lifts recall would
+  be an unjustified knob (YAGNI/KISS). Finding recorded in `docs/benchmarks/m121-spherical-kmeans-honest-negative.md`.
 
 ### Deprecated
 
