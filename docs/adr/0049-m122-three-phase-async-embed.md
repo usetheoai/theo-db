@@ -51,3 +51,11 @@ one re-embed (double API cost for that batch) — the accepted SOTA trade-off.
   chunk vectorizers); the 1→1 in-place mode is fixed.
 - A `theodb.vectorizer_single_txn` GUC (default off) is retained as an operator kill-switch (revert to the
   pre-M122 single-txn path) and the same-worker A/B apparatus.
+- **Concurrent source UPDATE (not just crash) between phase A and phase C** — if the source row's content changes
+  during phase B, phase C writes the vector of the *stale* content. Under the shipped **single-worker-per-DB**
+  design this self-heals: the enqueue trigger creates a fresh pending job (the partial-unique dedup covers only
+  `state='pending'`, not `processing`) which the worker embeds next; a re-claim of a crashed job re-reads fresh
+  content. **Forward caveat:** the future multi-worker launcher (`vectorizer.rs` WORKER_DBNAME note) would let a
+  same-pk processing+pending pair be claimed concurrently, and phase C's separate later write widens the reorder
+  window in which the stale vector could land last — the multi-worker milestone must add processing-aware dedup
+  (council-index-storage / council-rust-pgrx review, M122). Not an issue for the current single-worker design.

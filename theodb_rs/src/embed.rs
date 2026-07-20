@@ -70,6 +70,13 @@ pub(crate) fn run_batch(items: &[Option<&str>], model: Option<&str>) -> Vec<Stri
 /// in phase A (inside a txn), so this does **NO GUC read and NO SPI** — pure HTTP+parse. Called with NO open
 /// `BackgroundWorker::transaction`, so `backend_xmin` is not pinned for the HTTP round-trip. Same N-in/N-out
 /// contract + error messages as [`run_batch`]; the two share [`embed_resolved`] (one HTTP+parse path, DRY).
+///
+/// LOAD-BEARING INVARIANT (do NOT break): everything reachable from here — `validate_inputs`, `embed_resolved`,
+/// `post_json`, `format_embedding`, `err_*` — MUST stay free of `Spi::`/`guc()`/`current_setting`/`palloc`-heavy
+/// PG work. The worker catches a longjmp out of this call with `PgTryBuilder` while holding **no open
+/// transaction**; that catch is safe ONLY because no PG resource (SPI conn, snapshot, buffer pin, subtxn) is
+/// held here. Adding SPI/txn work to this path without wrapping it in a transaction would make the off-txn catch
+/// unsafe (skipped cleanup) AND re-pin `backend_xmin` — defeating M122 (see ADR-0049, council-rust-pgrx LOW-2).
 pub(crate) fn run_batch_resolved(
     items: &[Option<&str>],
     endpoint: &str,
