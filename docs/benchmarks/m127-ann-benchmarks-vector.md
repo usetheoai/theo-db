@@ -1,7 +1,8 @@
 # M127 — Official benchmark VECTOR pilot: ann-benchmarks BaseANN adapter + wrap layer (measured)
 
-**Date:** 2026-07-20 · **Box:** DO droplet (theo-e2e-runner), pgrx-managed PG17.10, `theodb_rs` · **Dataset:** GloVe
-(ann-benchmarks `glove-100-angular`, **PDDL / D1-safe**). Implements ADR-0050 (adopt-and-wrap) for the vector pillar.
+**Date:** 2026-07-20 · **Box:** self-hosted DO droplet (theo-e2e-runner) — **NOT the canonical AWS `c6a.4xlarge`**,
+so QPS is not leaderboard-comparable · pgrx-managed PG17.10, `theodb_rs` · **Dataset:** GloVe (ann-benchmarks
+`glove-100-angular`, **PDDL / D1-safe**). Implements ADR-0050 (adopt-and-wrap) for the vector pillar.
 
 **Verdict:** TheoDB's ann-benchmarks-shaped `BaseANN` adapter drives a real **recall@10 × QPS Pareto** through the
 `theodb_hnsw` index, and the retained adopt-and-wrap layer (byte-identical regression + paired significance) — which
@@ -9,29 +10,32 @@ ann-benchmarks itself lacks (blueprint Q11) — works end-to-end.
 
 ## Measured recall@10 × QPS Pareto (single-thread, ann-benchmarks protocol)
 
-GloVe-100-angular, **subsampled to n_corpus = 5,000 / n_queries = 200**, exact brute-force ground-truth (cosine),
-build once (39.7 s), sweep `theodb_hnsw.ef_search`:
+GloVe-100-angular, **subsampled to n_corpus = 5,000 / n_queries = 200**, exact brute-force ground-truth (cosine,
+independent of the index under test), build once (37.9 s), sweep `theodb_hnsw.ef_search`:
 
 | ef_search | recall@10 | QPS (single-thread) |
 |---:|---:|---:|
-| 10 | 0.7155 | 202.1 |
-| 40 | 0.8365 | 186.8 |
-| 100 | 0.9315 | 99.1 |
-| 200 | **1.0000** | 31.3 |
-| 400 | 1.0000 | 32.7 |
+| 10 | 0.7295 | 186.1 |
+| 40 | 0.8465 | 142.1 |
+| 100 | 0.9405 | 89.1 |
+| 200 | **1.0000** | 29.3 |
+| 400 | 1.0000 | 29.7 |
 
 Recall rises monotonically with `ef_search` and reaches **1.0 at ef≥200** (the sanity gate: HNSW converges to exact
-NN as ef grows), trading QPS for recall — the canonical ann-benchmarks recall×QPS frontier. This is produced by
+NN as ef grows), trading QPS for recall — the canonical ann-benchmarks recall×QPS frontier. recall@10 = id-overlap
+of the index's returned ids vs the exact brute-force top-10 (the ann-benchmarks `k-nn` metric). This is produced by
 driving the `BaseANN` contract (`fit`/`set_query_arguments`/`query`), the exact interface a public ann-benchmarks
 entry uses (`benchmarks/theodb_bench/ann_adapter.py`).
 
 ## Wrap layer — the capabilities the official tools lack (blueprint Q11)
 
-Run on the SAME index at ef=400, twice:
+Run on the SAME index at **ef=10** (the LOW ef — recall 0.73 — deliberately, since it exercises more of the
+path-dependent HNSW traversal than ef=400 where recall is already 1.0, so it is a stronger regression probe), twice:
 
-- **Byte-identical regression A/B:** `identical=True, n=200, diverged=0` — re-querying the same index returns
-  byte-identical rankings (determinism / regression detection working). ann-benchmarks/VectorDBBench ship no such
-  check; this is the retained TheoDB capability (`benchmarks/theodb_bench/regression.py`).
+- **Byte-identical regression A/B:** `identical=True, n=200, diverged=0` — re-querying the same index at low ef
+  returns byte-identical rankings (determinism / regression detection working even on the path-dependent traversal).
+  ann-benchmarks/VectorDBBench ship no such check; this is the retained TheoDB capability
+  (`benchmarks/theodb_bench/regression.py`).
 - **Paired significance (run1 vs run2):** `mean_diff=0.0, p_permutation=1.0` → **deterministic (not significant)** —
   the M123 permutation test (`benchmarks/theodb_bench/significance.py`) wired over the per-query recall, confirming
   the two passes are statistically identical. The official tools ship no significance test.

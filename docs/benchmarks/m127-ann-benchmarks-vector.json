@@ -14,32 +14,32 @@
   "box": "self-hosted (NOT canonical c6a.4xlarge)",
   "seed": 20260720,
   "status": "OK",
-  "build_seconds": 39.71,
+  "build_seconds": 37.94,
   "pareto": [
     {
       "ef_search": 10,
-      "recall@10": 0.7155,
-      "qps": 202.1
+      "recall@10": 0.7295,
+      "qps": 186.1
     },
     {
       "ef_search": 40,
-      "recall@10": 0.8365,
-      "qps": 186.8
+      "recall@10": 0.8465,
+      "qps": 142.1
     },
     {
       "ef_search": 100,
-      "recall@10": 0.9315,
-      "qps": 99.1
+      "recall@10": 0.9405,
+      "qps": 89.1
     },
     {
       "ef_search": 200,
       "recall@10": 1.0,
-      "qps": 31.3
+      "qps": 29.3
     },
     {
       "ef_search": 400,
       "recall@10": 1.0,
-      "qps": 32.7
+      "qps": 29.7
     }
   ],
   "sanity": {
@@ -48,6 +48,7 @@
     "top_recall": 1.0
   },
   "wrap": {
+    "ab_ef_search": 10,
     "byte_identical_ab": {
       "identical": true,
       "n": 200,

@@ -65,7 +65,12 @@ def _query_pass(adapter, queries, k):
 
 
 def _recall_per_query(ids_by_q, gt_idx, k):
-    """id-overlap recall@k per query vs exact brute-force top-k ids (load_vectors ids == corpus positions)."""
+    """id-overlap recall@k per query vs exact brute-force top-k ids (load_vectors ids == corpus positions).
+
+    id-overlap (not the distance-thresholded `recall.recall_at_k`) is deliberate: it is the ann-benchmarks default
+    `k-nn` metric, so it is the field-faithful choice for an ann-benchmarks entry. On float32 GloVe the k-th
+    distance is effectively never tied, so it equals the distance-thresholded value anyway (council-benchmark LOW).
+    """
     out = []
     for qi in range(len(gt_idx)):
         truth = set(int(x) for x in gt_idx[qi][:k])
@@ -108,8 +113,10 @@ def run(args) -> dict:
     monotone_ok = all(recalls[i] <= recalls[i + 1] + 0.02 for i in range(len(recalls) - 1))
     top_recall_ok = recalls[-1] >= 0.90
 
-    # 4. Wrap layer at the top ef: byte-identical A/B (re-query SAME index) + significance (2 runs' per-query recall).
-    adapter.set_query_arguments(args.ef[-1])
+    # 4. Wrap layer at the LOWEST ef: byte-identical A/B + significance. Low ef (not the top ef where recall=1.0)
+    #    exercises more of the path-dependent HNSW traversal → a stronger regression probe (council-benchmark LOW).
+    ab_ef = args.ef[0]
+    adapter.set_query_arguments(ab_ef)
     ids_a, _ = _query_pass(adapter, queries, args.k)
     ids_b, _ = _query_pass(adapter, queries, args.k)
     ab = assert_byte_identical(ids_a, ids_b)  # SAME index re-query MUST be byte-identical
@@ -123,6 +130,7 @@ def run(args) -> dict:
         "sanity": {"recall_monotone_in_ef": monotone_ok, "top_recall_ge_0.90": top_recall_ok,
                    "top_recall": recalls[-1]},
         "wrap": {
+            "ab_ef_search": ab_ef,  # A/B run at the LOW ef → stronger path-dependent regression probe
             "byte_identical_ab": ab,  # {identical, n, first_divergence, diverged}
             "significance_run1_vs_run2": {"mean_diff": sig["mean_diff"], "p_permutation": sig["p_permutation"],
                                           "verdict": "deterministic (not significant)" if sig["p_permutation"] > 0.05 else "UNEXPECTED difference"},
