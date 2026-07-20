@@ -1,0 +1,106 @@
+{
+  "dataset": "nfcorpus",
+  "split": "test",
+  "model": "text-embedding-3-small",
+  "dim": 1536,
+  "k_rrf": 60,
+  "top": 100,
+  "runs": 1,
+  "limit_queries": null,
+  "timestamp": null,
+  "nproc": 8,
+  "load_pre": 10.75,
+  "status": "OK",
+  "n_docs": 3633,
+  "n_queries": 323,
+  "warm_s": 30.29,
+  "load_per_run": [
+    7.03
+  ],
+  "load_post": 12.68,
+  "per_retriever": {
+    "vector": {
+      "ndcg10": 0.38445,
+      "recall100": 0.361938,
+      "deterministic": true,
+      "spread_ndcg10": 0.0,
+      "spread_recall100": 0.0
+    },
+    "fts": {
+      "ndcg10": 0.207636,
+      "recall100": 0.10194,
+      "deterministic": true,
+      "spread_ndcg10": 0.0,
+      "spread_recall100": 0.0
+    },
+    "hybrid": {
+      "ndcg10": 0.394952,
+      "recall100": 0.367421,
+      "deterministic": true,
+      "spread_ndcg10": 0.0,
+      "spread_recall100": 0.0
+    }
+  },
+  "significance": {
+    "hybrid_vs_vector": {
+      "metric": "ndcg10",
+      "systems": "hybrid_vs_vector",
+      "n": 323,
+      "mean_diff": 0.010501774052301302,
+      "ci95_low": 0.0026697087889830957,
+      "ci95_high": 0.01878914249812119,
+      "p_permutation": 0.00988990110098899,
+      "p_ttest": 0.010490227253308745,
+      "p_ttest_method": "normal-approx",
+      "t_stat": 2.5592367516361265,
+      "wins": 55,
+      "losses": 49,
+      "ties": 219,
+      "cohens_dz": 0.14239974204812178,
+      "seed": 20260720,
+      "n_resamples": 100000
+    },
+    "hybrid_vs_fts": {
+      "metric": "ndcg10",
+      "systems": "hybrid_vs_fts",
+      "n": 323,
+      "mean_diff": 0.18731600784750133,
+      "ci95_low": 0.16009015395235018,
+      "ci95_high": 0.2156087611419451,
+      "p_permutation": 9.99990000099999e-06,
+      "p_ttest": 4.271028542878805e-40,
+      "p_ttest_method": "normal-approx",
+      "t_stat": 13.254119035445834,
+      "wins": 191,
+      "losses": 23,
+      "ties": 109,
+      "cohens_dz": 0.7374789106619302,
+      "seed": 20260720,
+      "n_resamples": 100000
+    },
+    "fts_vs_vector": {
+      "metric": "ndcg10",
+      "systems": "fts_vs_vector",
+      "n": 323,
+      "mean_diff": -0.1768142337952,
+      "ci95_low": -0.20751261769447021,
+      "ci95_high": -0.14689060100959814,
+      "p_permutation": 9.99990000099999e-06,
+      "p_ttest": 2.3034563615142036e-30,
+      "p_ttest_method": "normal-approx",
+      "t_stat": -11.451787613132167,
+      "wins": 46,
+      "losses": 183,
+      "ties": 94,
+      "cohens_dz": -0.6371945077208531,
+      "seed": 20260720,
+      "n_resamples": 100000
+    },
+    "fts_mean_ndcg10": 0.20763609728273605
+  },
+  "bm25_status": "SKIPPED: not requested (--include-bm25 not set)",
+  "caveats": [
+    "embeddings model=text-embedding-3-small dim=1536 (real API, pre-warmed + disk-cached)",
+    "RRF fusion is the in-DB ai.hybrid_search_rrf function (product path), not an offline twin"
+  ]
+}

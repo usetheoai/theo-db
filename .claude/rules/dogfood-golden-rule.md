@@ -8,11 +8,11 @@ Without this file, `/dogfood` emits `EVIDENCE_INSUFFICIENT` with flag `golden_ru
 
 The anchor scenario is the single use case that, if you cannot dogfood it, you cannot claim production-ready. Pick one. Be specific.
 
-**Slug:** `<anchor-slug>` (kebab-case identifier referenced in the manifest)
+**Slug:** `theo-data-capability-on-theodb` (kebab-case identifier referenced in the manifest)
 
-**Description:** Replace this paragraph with a concrete user-visible scenario in which your team — not synthetic load — exercises the product end-to-end on infrastructure you actually own. The scenario should be uncomfortable: the kind of thing that proves the product works when its creators depend on it, not just when synthetic benchmarks do.
+**Description:** A real theo-data capability (e.g. `theo-rag` or `theo-memory`) uses a **self-hosted TheoDB instance the team owns** — NOT pgvector, NOT a managed vector DB — as its live retrieval store, exercised by the team's own product traffic (not synthetic load) for a sustained window (≥ 30 days). Concretely: the capability declares a vectorizer (`theodb.create_vectorizer`) so the background worker keeps an embedding column fresh as content changes, and it serves the capability's real user queries through `ai.hybrid_search_rrf` (BM25 + own-vector + RRF), on infrastructure the team runs, with the team depending on the results being correct and fresh.
 
-**Why this scenario:** Why is THIS the scenario that, if it works, justifies the v1.0 claim? Tie it to the product's primary promise.
+**Why this scenario:** TheoDB's primary promise is an **open-source, PostgreSQL-compatible, AI-native** database — embeddings, a declarative vectorizer, and hybrid search **inside SQL**, on your own infra, model-agnostic. This scenario exercises that entire promise end-to-end under real load: the own `vector` type + `ai.hybrid_search_rrf` (the AI-native surface), the vectorizer bgworker (the operability surface M122 hardened), and the crash-safe job queue — all at once, with a team that depends on it. If TheoDB cannot back a theo-data capability's own retrieval on our own infra, the "AI-native OSS DB you can self-host" claim is unproven, no matter how many benchmarks pass. Synthetic recall/QPS numbers (the 109 benchmark artifacts) prove the algorithms; only this proves the product.
 
 ## § 2 — Status vocabulary (LOCKED — do not change without ADR)
 
