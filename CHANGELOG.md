@@ -23,6 +23,15 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Removed
 
 ### Fixed
+- **Vectorizer embed no longer pins the xmin horizon (M122).** The background worker now embeds each in-place
+  (1→1) batch in a 3-phase split — read+lease (txn) → **HTTP embed with no open transaction** → write+mark (txn)
+  — so a slow/hung embedding endpoint no longer holds a transaction snapshot (and thus `backend_xmin`) for the
+  whole round-trip, which previously delayed local autovacuum by up to the embed timeout (~90s). Source-proven
+  (pgrx `BackgroundWorker::transaction` holds an active snapshot for its whole closure) + measured (worker
+  `backend_xmin` 0/28 held during a real 8s embed): `docs/benchmarks/m122-async-embed-xmin.md`, ADR-0049.
+  Crash-safety unchanged (at-least-once re-embed via lease expiry; idempotent owner-guarded write). Chunk-mode
+  (M66) keeps the single-txn path (documented drawback). Adds `theodb.vectorizer_single_txn` GUC (default off) as
+  an operator kill-switch + A/B apparatus.
 
 ### Security
 

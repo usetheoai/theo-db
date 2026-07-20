@@ -317,14 +317,14 @@ fn _vectorizer_renew_lease(job_ids: Vec<i64>, owner: &str, lease_secs: i32) -> i
 /// Look up a vectorizer's config. Diverges (typed) if the id is unknown. `model` may be NULL.
 /// Resolved vectorizer config. `chunk_strategy == None` → the v1 in-place mode (1 doc → 1 vector);
 /// `Some(_)` → the M66 chunk-table mode (1 doc → N chunks → N rows in `{target_table}_chunks`).
-struct VecCfg {
+pub(crate) struct VecCfg {
     source_table: String,
     source_pk_col: String,
     content_col: String,
     target_table: String,
     target_col: String,
     model: Option<String>,
-    chunk_strategy: Option<String>,
+    pub(crate) chunk_strategy: Option<String>,
     chunk_size: i32,
     chunk_overlap: i32,
 }
@@ -488,6 +488,66 @@ fn _vectorizer_process_upsert_batch(
     // ONE HTTP round-trip for the whole batch (may diverge on failure — caught by the worker → per-job fallback).
     let items: Vec<Option<&str>> = contents.iter().map(|c| c.as_deref()).collect();
     let vecs = crate::embed::run_batch(&items, cfg.model.as_deref());
+    let upd_q = build_sql(
+        "UPDATE %2$s SET %1$I = $1::vector WHERE %3$I::text = $2",
+        &cfg.target_col,
+        &cfg.target_table,
+        &cfg.source_pk_col,
+    );
+    let mut done = 0i64;
+    for (i, pk) in source_pks.iter().enumerate() {
+        Spi::run_with_args(&upd_q, &[vecs[i].as_str().into(), pk.as_str().into()])
+            .unwrap_or_else(|e| crate::pg::err_input(&format!("vectorizer batch upsert failed: {e:?}")));
+        if _vectorizer_mark_done(job_ids[i], owner) {
+            done += 1;
+        }
+    }
+    done
+}
+
+// ── M122 — 3-phase split of the in-place (non-chunk) batch: phase A (read+resolve cfg, this txn) → phase B
+// (embed, NO txn — the worker calls `embed::run_batch_resolved` between the two transactions so `backend_xmin`
+// is released for the HTTP) → phase C (write+mark, a fresh txn). Chunk-mode (M66) keeps the single-txn
+// `_vectorizer_process_upsert_batch` above (documented drawback — it still pins xmin for chunk vectorizers). ──
+
+/// Phase-A result: everything phase B (the off-txn embed) and phase C (the write) need, as OWNED values so no
+/// PG pointer/Datum crosses the commit boundary (the embed then holds no snapshot).
+pub(crate) struct BatchRead {
+    pub(crate) endpoint: String,
+    pub(crate) model: String,
+    pub(crate) api_key: Option<String>,
+    pub(crate) contents: Vec<Option<String>>,
+    pub(crate) cfg: VecCfg,
+}
+
+/// M122 phase A — read the batch's content + resolve the network cfg, inside the caller's txn. Performs NO
+/// write to the target and NO embed. Returns owned values; the worker commits this txn before the embed.
+pub(crate) fn _vectorizer_read_batch(vectorizer_id: i32, source_pks: &[String]) -> BatchRead {
+    let cfg = lookup_config(vectorizer_id);
+    let (endpoint, model, api_key) = crate::embed::resolve_batch_cfg(cfg.model.as_deref());
+    let fetch_q = build_sql(
+        "SELECT %1$I::text FROM %2$s WHERE %3$I::text = $1",
+        &cfg.content_col,
+        &cfg.source_table,
+        &cfg.source_pk_col,
+    );
+    let contents: Vec<Option<String>> = source_pks
+        .iter()
+        .map(|pk| Spi::get_one_with_args::<String>(&fetch_q, &[pk.as_str().into()]).ok().flatten())
+        .collect();
+    BatchRead { endpoint, model, api_key, contents, cfg }
+}
+
+/// M122 phase C — write the already-embedded vectors + mark each job done, inside a fresh txn. Performs NO
+/// embed/HTTP. Idempotent (overwrite-by-pk); `mark_done` is owner-guarded so a stale worker whose lease
+/// expired cannot mark a re-claimed job. Returns the number of jobs marked done.
+pub(crate) fn _vectorizer_write_batch(
+    cfg: &VecCfg,
+    job_ids: &[i64],
+    source_pks: &[String],
+    vecs: &[String],
+    owner: &str,
+) -> i64 {
     let upd_q = build_sql(
         "UPDATE %2$s SET %1$I = $1::vector WHERE %3$I::text = $2",
         &cfg.target_col,
@@ -724,25 +784,74 @@ pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
             }
             let job_ids: Vec<i64> = group.iter().map(|(j, _)| *j).collect();
             let pks: Vec<String> = group.iter().map(|(_, p)| p.clone()).collect();
-            // Phase 2 (batch) — ONE embed_batch for the whole group, subtxn-isolated (H-1) so a batch failure
-            // rolls back cleanly; then the per-job fallback isolates the poison row.
-            let batch_done: Option<i64> = BackgroundWorker::transaction(|| {
-                in_subtxn(|| {
-                    Spi::connect_mut(|c| {
-                        c.update(
-                            "SELECT theodb_rs._vectorizer_process_upsert_batch($1, $2, $3, $4)",
-                            None,
-                            &[vid.into(), job_ids.clone().into(), pks.clone().into(), owner.clone().into()],
-                        )
-                        .expect("vectorizer batch failed")
-                        .first()
-                        .get::<i64>(1)
-                        .ok()
-                        .flatten()
-                        .unwrap_or(0)
+
+            // M122 — Phase A: READ content + resolve the network cfg in its own txn; the commit RELEASES the
+            // snapshot before the embed, so `backend_xmin` is not pinned for the HTTP round-trip. subtxn-isolated
+            // (H-1) so a bad-cfg/SPI error leaves clean state → `None` → per-job fallback.
+            let read = BackgroundWorker::transaction(|| in_subtxn(|| theodb_rs::_vectorizer_read_batch(vid, &pks)));
+
+            let batch_done: Option<i64> = match read {
+                None => None,
+                Some(r) if r.cfg.chunk_strategy.is_some() || crate::am::guc::vectorizer_single_txn() => {
+                    // Chunk-mode (M66) keeps the single-txn path — documented drawback (still pins xmin for chunk
+                    // vectorizers). The 3-phase split targets the 1→1 in-place mode (the common case). The
+                    // `vectorizer_single_txn` GUC (default off) also lands here — measurement A/B only, to show the
+                    // pre-M122 single-txn embed pins xmin on the same worker backend.
+                    BackgroundWorker::transaction(|| {
+                        in_subtxn(|| {
+                            Spi::connect_mut(|c| {
+                                c.update(
+                                    "SELECT theodb_rs._vectorizer_process_upsert_batch($1, $2, $3, $4)",
+                                    None,
+                                    &[vid.into(), job_ids.clone().into(), pks.clone().into(), owner.clone().into()],
+                                )
+                                .expect("vectorizer batch failed")
+                                .first()
+                                .get::<i64>(1)
+                                .ok()
+                                .flatten()
+                                .unwrap_or(0)
+                            })
+                        })
                     })
-                })
-            });
+                }
+                Some(r) => {
+                    // Renew the whole group's lease (one txn) right before the ≤~90s embed so a live worker never
+                    // loses a job it is actively processing.
+                    BackgroundWorker::transaction(|| {
+                        let _ = Spi::run_with_args(
+                            "SELECT theodb_rs._vectorizer_renew_lease($1, $2, $3)",
+                            &[job_ids.clone().into(), owner.clone().into(), WORKER_LEASE_SECS.into()],
+                        );
+                    });
+                    // Phase B — EMBED with NO open transaction and NO SPI: `backend_xmin` is released for the whole
+                    // HTTP. A typed err_* longjmps; with no txn to catch it here, PgTryBuilder traps it and routes
+                    // to the per-job fallback (which marks failed in its own txn).
+                    let items: Vec<Option<&str>> = r.contents.iter().map(|c| c.as_deref()).collect();
+                    let embedded: Option<Vec<String>> =
+                        PgTryBuilder::new(std::panic::AssertUnwindSafe(|| {
+                            Some(crate::embed::run_batch_resolved(
+                                &items,
+                                &r.endpoint,
+                                &r.model,
+                                r.api_key.as_deref(),
+                            ))
+                        }))
+                        .catch_others(|_| None)
+                        .execute();
+                    if BackgroundWorker::sigterm_received() {
+                        break;
+                    }
+                    match embedded {
+                        None => None, // embed failed (5xx/malformed/timeout) → per-job fallback
+                        // Phase C — WRITE the vectors + MARK done in a fresh txn (idempotent overwrite;
+                        // owner-guarded mark). A write error → None → per-job fallback (poison-row isolation).
+                        Some(vecs) => BackgroundWorker::transaction(|| {
+                            in_subtxn(|| theodb_rs::_vectorizer_write_batch(&r.cfg, &job_ids, &pks, &vecs, &owner))
+                        }),
+                    }
+                }
+            };
             match batch_done {
                 Some(n) => processed += n,
                 None => {
