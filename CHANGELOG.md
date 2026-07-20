@@ -33,8 +33,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   iterative scan; OFF reverts to the M52 re-search (operator escape hatch + own-path A/B baseline). V1 only.
 - **`theodb_hnsw.resume_max_mb` GUC (M118 T2.2)** — memory ceiling (default 64 MB; `0` = disabled) for the
   resume scan's retained frontier; on overflow the scan stops resuming and returns what it holds (fail-safe,
-  no panic — validated in-PG: `resume_max_mb=1` returns cleanly). Milestone M118 in progress (multi-seed
-  droplet benchmark vs pgvector 0.8.5 pending).
+  no panic — validated in-PG: `resume_max_mb=1` returns cleanly). Milestone M118 DoD **re-scoped** (owner-approved)
+  after the ≤1.2×-vs-pgvector target was FALSIFIED by measurement (structural page-native gap, ADR-0033) — shipped
+  on the measured own-path win (~1.95× vs the M52 re-search at matched recall). Review **READY_TO_MERGE**
+  (`council-rust-pgrx` + `council-index-storage` clean; 2 LOW review-fixes applied: resume-loop `if let` +
+  `resume_max_mb` doc caveat).
 
 ### Changed
 - Roadmap corrigido: **M116 / M117 / M119 marcados `[x]` (SUPERSEDED — já entregues)** por M56+M104 (VACUUM tombstone-in-place + fold memory-bound), M58 (SIMD AVX2 cosine/IP) e M65 (cross-encoder `ai.rerank`, medido honest-negative) + M54 (chunking recursivo). Foram criados sobre um gap-analysis desatualizado (deep-view 2026-07-07, anterior a M56–M115); reimplementá-los seria re-trabalho. Apenas **M118 (filtered ANN resume-from-discarded)** permanece `[ ]` como trabalho novo genuíno.

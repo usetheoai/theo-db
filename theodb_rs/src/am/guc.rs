@@ -50,6 +50,11 @@ pub(crate) static MAX_SCAN_TUPLES: GucSetting<i32> = GucSetting::<i32>::new(DEFA
 /// (fail-safe — correctness preserved: the executor's MVCC recheck + `max_scan_tuples` already bound emission).
 /// `0` = disabled (unbounded), consistent with `max_scan_tuples` / `vacuum_fold_max_mb`. Mirrors pgvector 0.8.5's
 /// `work_mem` guard on `so->discarded` (EC-2: the `0 = disabled` contract; EC-5: overflow returns, never panics).
+///
+/// NOTE (review LOW): the check uses `ResumableGround::approx_bytes()`, which counts heap/set *element* bytes and
+/// ignores `HashSet` control-byte + load-factor overhead and `BinaryHeap` spare capacity — so real RSS at the trip
+/// point is ~2-3× the nominal MB. The ceiling is therefore CONSERVATIVE-PERMISSIVE (uses more than declared); size
+/// it with headroom. It is a fail-safe soft guard, not a hard allocator limit — correctness never depends on it.
 pub(crate) const DEFAULT_HNSW_RESUME_MAX_MB: i32 = 64;
 pub(crate) static HNSW_RESUME_MAX_MB: GucSetting<i32> = GucSetting::<i32>::new(DEFAULT_HNSW_RESUME_MAX_MB);
 

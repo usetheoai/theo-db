@@ -1272,14 +1272,20 @@ pub extern "C-unwind" fn amgettuple(
                             return false;
                         }
                         // Disjoint field borrows: `&state.query` (immutable) + `&mut state.resume` (mutable).
+                        // `if let` (not `unwrap`) — structurally cannot panic across the C boundary if a future
+                        // edit ever clears `state.resume` mid-loop (review LOW: defense-in-depth). None today.
                         let (batch, frontier_empty) = {
                             let q = &state.query;
-                            let rg = state.resume.as_mut().unwrap();
-                            let b = match crate::am::hnsw_page::resumable_next(rel, &meta, q, rg) {
-                                Ok(b) => b,
-                                Err(e) => pg_sys::error!("theodb am scan: {e}"),
-                            };
-                            (b, rg.exhausted())
+                            match state.resume.as_mut() {
+                                Some(rg) => {
+                                    let b = match crate::am::hnsw_page::resumable_next(rel, &meta, q, rg) {
+                                        Ok(b) => b,
+                                        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+                                    };
+                                    (b, rg.exhausted())
+                                }
+                                None => (Vec::new(), true), // unreachable today (guarded by is_some) — treat as exhausted
+                            }
                         };
                         let fresh: Vec<(i64, f64)> =
                             batch.into_iter().filter(|(tid, _)| !state.emitted.contains(tid)).collect();
