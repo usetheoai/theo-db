@@ -1773,7 +1773,7 @@ Quick-win barato no eixo exato (latência cosine/IP) que o M50 aponta como teto,
 
 ---
 
-## M118 — [ ] Filtered ANN eficiente: resume-from-discarded (caso RAG)
+## M118 — [x] Filtered ANN eficiente: resume-from-discarded (caso RAG)
 
 > Added 2026-07-20 by `/roadmap-feature` (slug: `filtered-ann-resume-discarded`). Fonte: deep-view `§ P4` + `.claude/knowledge-base/backlog.md` ("M52 follow-up: iterative scan resume-from-discarded"). See CHANGELOG `[Unreleased] § Added`.
 
