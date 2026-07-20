@@ -45,6 +45,19 @@ pub(crate) static OVER_FETCH: GucSetting<i32> = GucSetting::<i32>::new(DEFAULT_O
 pub(crate) const DEFAULT_MAX_SCAN_TUPLES: i32 = 20000;
 pub(crate) static MAX_SCAN_TUPLES: GucSetting<i32> = GucSetting::<i32>::new(DEFAULT_MAX_SCAN_TUPLES);
 
+/// M118 — `SET theodb_hnsw.resume_max_mb = N`: memory ceiling (MB) for the resume-from-discarded scan's retained
+/// frontier + visited set. When the retained state exceeds this, the scan stops resuming and returns what it holds
+/// (fail-safe — correctness preserved: the executor's MVCC recheck + `max_scan_tuples` already bound emission).
+/// `0` = disabled (unbounded), consistent with `max_scan_tuples` / `vacuum_fold_max_mb`. Mirrors pgvector 0.8.5's
+/// `work_mem` guard on `so->discarded` (EC-2: the `0 = disabled` contract; EC-5: overflow returns, never panics).
+///
+/// NOTE (review LOW): the check uses `ResumableGround::approx_bytes()`, which counts heap/set *element* bytes and
+/// ignores `HashSet` control-byte + load-factor overhead and `BinaryHeap` spare capacity — so real RSS at the trip
+/// point is ~2-3× the nominal MB. The ceiling is therefore CONSERVATIVE-PERMISSIVE (uses more than declared); size
+/// it with headroom. It is a fail-safe soft guard, not a hard allocator limit — correctness never depends on it.
+pub(crate) const DEFAULT_HNSW_RESUME_MAX_MB: i32 = 64;
+pub(crate) static HNSW_RESUME_MAX_MB: GucSetting<i32> = GucSetting::<i32>::new(DEFAULT_HNSW_RESUME_MAX_MB);
+
 /// M48 (T3.1) — `SET theodb.vacuum_pending_threshold = N`: a VACUUM folds the pending region into the main
 /// structure when it exceeds N pages, even with zero dead tuples, so an insert-only workload's scan returns to
 /// O(structure) instead of paying O(pending) forever. Operational knob (Userset), NOT a build reloption. Default
@@ -85,6 +98,17 @@ pub(crate) static HNSW_SLOT_REUSE: GucSetting<bool> = GucSetting::<bool>::new(fa
 /// Whether `aminsert` should reuse tombstoned slots in place (M56 fase 2).
 pub(crate) fn hnsw_slot_reuse() -> bool {
     HNSW_SLOT_REUSE.get()
+}
+
+/// M118 — `SET theodb_hnsw.resume = on|off`: when ON (default), the filtered iterative scan RESUMES from the
+/// retained beam frontier (resume-from-discarded) instead of re-searching the graph with a doubled `ef`. OFF
+/// reverts to the M52 re-search (the pre-M118 path) — kept as an operator escape hatch and for the honest
+/// own-path A/B (`docs/benchmarks/m118-resume-discarded.md`). V1 (exact-f32) only; SBQ/AQ always re-search.
+pub(crate) static HNSW_RESUME: GucSetting<bool> = GucSetting::<bool>::new(true);
+
+/// Whether the filtered iterative scan uses resume-from-discarded (M118). Default ON.
+pub(crate) fn hnsw_resume() -> bool {
+    HNSW_RESUME.get()
 }
 
 /// E2 FastScan A/B kill-switch: when on (default), the `theodb_symqg` scan uses the batched FastScan 1-bit sign
@@ -250,6 +274,14 @@ pub(crate) fn init() {
         GucFlags::default(),
     );
     GucRegistry::define_bool_guc(
+        c"theodb_hnsw.resume",
+        c"When on (default), the filtered iterative scan resumes from the retained frontier (M118 resume-from-discarded)",
+        c"Off reverts to the M52 re-search-with-doubled-ef path (operator kill-switch + own-path A/B). V1 only; SBQ/AQ always re-search.",
+        &HNSW_RESUME,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+    GucRegistry::define_bool_guc(
         c"theodb.symqg_fastscan",
         c"When on (default), theodb_symqg scans with the batched FastScan 1-bit sign kernel; off forces scalar estimate_sign",
         c"E2 FastScan kill-switch / same-index A/B baseline (isolates the kernel's effect). No effect on non-symqg indexes.",
@@ -318,6 +350,16 @@ pub(crate) fn init() {
         &MAX_SCAN_TUPLES,
         0,
         10_000_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+    GucRegistry::define_int_guc(
+        c"theodb_hnsw.resume_max_mb",
+        c"Memory ceiling (MB) for the resume-from-discarded scan's retained frontier (0 = disabled/unbounded)",
+        c"When the retained beam frontier + visited set exceed this, the scan stops resuming and returns what it holds (fail-safe; correctness preserved by the executor MVCC recheck + max_scan_tuples). 0 disables the cap.",
+        &HNSW_RESUME_MAX_MB,
+        0,
+        1_000_000,
         GucContext::Userset,
         GucFlags::default(),
     );
@@ -393,4 +435,9 @@ pub(crate) fn over_fetch() -> usize {
 /// candidates are emitted, so a selective `WHERE` still finds its top-k (recall preserved).
 pub(crate) fn max_scan_tuples() -> usize {
     MAX_SCAN_TUPLES.get().max(0) as usize
+}
+
+/// M118: the resume frontier memory ceiling in bytes (`0` = disabled/unbounded).
+pub(crate) fn hnsw_resume_max_bytes() -> usize {
+    (HNSW_RESUME_MAX_MB.get().max(0) as usize).saturating_mul(1024 * 1024)
 }

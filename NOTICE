@@ -1,0 +1,85 @@
+TheoDB
+Copyright (c) 2026 TheoDB authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+TheoDB's own source code — including its vector data type, ANN index access
+methods, quantizers, and columnar engine under `theodb_rs/` — is ORIGINAL work.
+Where a technique was learned from a permissive third-party source, the specific
+`file:line` and its licence are attributed in the header of the corresponding
+source file (per Unbreakable Rule 9). No copyleft (GPL/AGPL) source is used.
+
+
+================================================================================
+THIRD-PARTY COMPONENTS REDISTRIBUTED IN THE TheoDB DISTRIBUTION IMAGE
+================================================================================
+
+The TheoDB distribution image bundles the following third-party PostgreSQL
+extensions, each under the permissive PostgreSQL License. Their copyright and
+permission notices are reproduced below to satisfy the PostgreSQL License
+requirement that the copyright notice appear in all copies. AGPL due-diligence
+for the shipped image is proven separately and reproducibly by
+`packaging/license-sweep.sh` and documented in `docs/packaging/license-audit.md`.
+
+--------------------------------------------------------------------------------
+pgvector — https://github.com/pgvector/pgvector
+Pinned ref: 586e7515bafe6912c425164d186d56550657c349
+Licence: PostgreSQL License
+--------------------------------------------------------------------------------
+
+Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
+
+Portions Copyright (c) 1994, The Regents of the University of California
+
+Permission to use, copy, modify, and distribute this software and its
+documentation for any purpose, without fee, and without a written agreement
+is hereby granted, provided that the above copyright notice and this
+paragraph and the following two paragraphs appear in all copies.
+
+IN NO EVENT SHALL THE UNIVERSITY OF CALIFORNIA BE LIABLE TO ANY PARTY FOR
+DIRECT, INDIRECT, SPECIAL, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, INCLUDING
+LOST PROFITS, ARISING OUT OF THE USE OF THIS SOFTWARE AND ITS
+DOCUMENTATION, EVEN IF THE UNIVERSITY OF CALIFORNIA HAS BEEN ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+
+THE UNIVERSITY OF CALIFORNIA SPECIFICALLY DISCLAIMS ANY WARRANTIES,
+INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS FOR A PARTICULAR PURPOSE.  THE SOFTWARE PROVIDED HEREUNDER IS
+ON AN "AS IS" BASIS, AND THE UNIVERSITY OF CALIFORNIA HAS NO OBLIGATIONS TO
+PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS.
+
+--------------------------------------------------------------------------------
+pgvectorscale — https://github.com/timescale/pgvectorscale
+Pinned ref: 57c88b7b4fe40a2afa20b195f60047a983279c19
+Licence: PostgreSQL License
+--------------------------------------------------------------------------------
+
+Copyright (c) 2023-2026  Timescale, Inc. d/b/a Tiger Data. All Rights Reserved.
+
+Permission to use, copy, modify, and distribute this software and its
+documentation for any purpose, without fee, and without a written agreement
+is hereby granted, provided that the above copyright notice and this paragraph
+and the following two paragraphs appear in all copies.
+
+IN NO EVENT SHALL TIGER DATA BE LIABLE TO ANY PARTY FOR DIRECT, INDIRECT,
+SPECIAL, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, INCLUDING LOST PROFITS, ARISING
+OUT OF THE USE OF THIS SOFTWARE AND ITS DOCUMENTATION, EVEN IF TIGER DATA HAS
+BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+TIGER DATA SPECIFICALLY DISCLAIMS ANY WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
+THE SOFTWARE PROVIDED HEREUNDER IS ON AN "AS IS" BASIS, AND TIGER DATA HAS NO
+OBLIGATIONS TO PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR
+MODIFICATIONS.
+
+--------------------------------------------------------------------------------
+PostgreSQL and bundled PL (e.g. plpython3u)
+--------------------------------------------------------------------------------
+
+TheoDB is built on the PostgreSQL engine (unforked) and its bundled procedural
+languages, distributed under the PostgreSQL License:
+
+    Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
+    Portions Copyright (c) 1994, The Regents of the University of California
+
+plpython3u embeds libpython (Python Software Foundation License, permissive).

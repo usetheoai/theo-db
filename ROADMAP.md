@@ -1718,6 +1718,116 @@ LazyGraphRAG (MS Research), HippoRAG 2; baseline a bater = `theo-rag/packages/co
 
 ---
 
+## M116 — [x] Operabilidade em escala: eliminar o muro do VACUUM (index-maintenance ADR-0017 fase 1)
+
+> Added 2026-07-20 by `/roadmap-feature` (slug: `vacuum-wall-operability`). Fonte: deep-view `.claude/knowledge-base/audits/deep-view-sota-ai-native-2026-07-07.md § P3` + `docs/adr/0017-m55-index-maintenance-at-scale.md`. See CHANGELOG `[Unreleased] § Added`.
+>
+> **[CORREÇÃO 2026-07-20 — SUPERSEDED / JÁ ENTREGUE]** O muro do caminho DELETE foi fechado por **M56** (`theodb_rs/src/am/build.rs::vacuum_delete_inplace` + `am/hnsw_page.rs::tombstone_sweep` — tombstone in-place per-page, GenericXLog, sem advisory EXCLUSIVE / sem O(N) / sem stall; compaction disparada por churn ratio, com recall medido no M56 fase-2 churn bench) e **M104** (`vacuum_fold_max_mb` — blast radius de memória do fold limitado). Milestone criado sobre gap-analysis desatualizado (deep-view 2026-07-07, anterior a M56/M104). Residual não-bloqueador (streaming BUILD `collect_corpus`, IVF in-place) não justifica milestone próprio. Marcado `[x]` como correção de ROADMAP — não reimplementar (Regra: sem re-trabalho).
+
+**Objective:** Remover a parada O(N) whole-index do fold de manutenção do índice vetorial sob EXCLUSIVE lock (hoje ~86s a 100k, ~14min projetado a 1M) implementando a fase 1 do ADR-0017 (tombstone-in-place + fold-para-compaction incremental/bounded), tornando o índice operável em escala.
+
+**Definition of done:**
+
+- [ ] Deletes marcam tombstone in-place (sem reescrever o índice inteiro); o VACUUM não segura EXCLUSIVE por um fold O(N).
+- [ ] Compaction incremental/bounded (não whole-index sob EXCLUSIVE) conforme ADR-0017, com política de trigger explícita.
+- [ ] Crash-safe provado por harness check-crash (padrão meta-pivot M48): pós-recovery o índice dá o top-k correto.
+- [ ] MEDIDO em box quieta: stall de manutenção a 1M dentro do limite acordado (documentar em `docs/benchmarks/`), sem regressão de recall.
+
+**Dependencies:** M48 (fold crash-safe / meta-pivot), M55 (decisão ADR-0017). Ambos `[x]`.
+
+**Top risks (novos — pré-existentes já documentados no roadmap):**
+
+1. Tombstones acumulados derivam recall até a compaction → exige política de trigger medida (não deixar drift silencioso).
+2. Crash-safety do fold incremental sob concorrência é sutil (meta-pivot + advisory lock).
+
+**Why now (do gap analysis):**
+
+É o gate honesto de v1.0 — o deep-view crava que não podemos claimar produção com 14min de stall a 1M (`public-copy.md` / `/dogfood`), e é pré-requisito da narrativa "billion-scale em hardware barato" do reposicionamento (ADR-0033). Paridade de recall, superfície AI-native e columnar já estão prontos para sustentar o claim — falta a operabilidade.
+
+---
+
+## M117 — [x] SIMD cosine/IP no hot path de embeddings
+
+> Added 2026-07-20 by `/roadmap-feature` (slug: `simd-cosine-ip-kernels`). Fonte: deep-view `§ P2` + `.claude/knowledge-base/backlog.md` ("AVX2 kernels for IP/cosine"). See CHANGELOG `[Unreleased] § Added`.
+>
+> **[CORREÇÃO 2026-07-20 — SUPERSEDED / JÁ ENTREGUE]** Entregue por **M58**: `theodb_rs/src/vec.rs::cosine_dist_from_bytes` despacha para `simd_x86::cosine_terms` (AVX2+FMA) e `dot_from_bytes`→`simd_x86::dot`; `ip_dist_from_bytes` reusa `dot_from_bytes`. Comentário no código: *"M58: AVX2+FMA cosine kernel when available (the real-embedding scan hot path)"*. Testes: `cosine_and_ip_from_bytes_match_scalar_within_eps_across_dims`. Milestone criado sobre gap-analysis desatualizado (deep-view 2026-07-07, anterior a M58). Marcado `[x]` como correção de ROADMAP — não reimplementar.
+
+**Objective:** Adicionar caminho AVX2+FMA para as distâncias cosine e inner-product (hoje escalares em `vec.rs`; só L2 tem SIMD), colhendo o ganho de fator-constante no hot path dos embeddings reais (OpenAI/Cohere são cosine/IP).
+
+**Definition of done:**
+
+- [ ] `cosine_dist_from_bytes` e `ip_dist_from_bytes` ganham caminho AVX2+FMA com dispatch por feature em runtime, espelhando o L2 existente, com fallback escalar correto.
+- [ ] Recall-neutro provado por ablação mesmo-índice (o kernel muda velocidade, não resultado).
+- [ ] MEDIDO: microbench same-graph mostra o lift de latência do kernel cosine/IP (documentar em `docs/benchmarks/`; nunca citar cross-box).
+
+**Dependencies:** M31b (distância SIMD L2). `[x]`.
+
+**Top risks (novos):**
+
+1. Dispatch runtime (AVX2/AVX512/NEON) precisa de fallback escalar testado em CPU sem a feature.
+2. Medir o kernel exige ablação mesmo-índice (lição registrada: troca de box confunde o número).
+
+**Why now (do gap analysis):**
+
+Quick-win barato no eixo exato (latência cosine/IP) que o M50 aponta como teto, e é o caso real dos embeddings — hoje o hot path deles roda escalar.
+
+---
+
+## M118 — [ ] Filtered ANN eficiente: resume-from-discarded (caso RAG)
+
+> Added 2026-07-20 by `/roadmap-feature` (slug: `filtered-ann-resume-discarded`). Fonte: deep-view `§ P4` + `.claude/knowledge-base/backlog.md` ("M52 follow-up: iterative scan resume-from-discarded"). See CHANGELOG `[Unreleased] § Added`.
+
+**Objective:** Tornar o iterative scan do filtered ANN resumível a partir do discarded set (em vez de re-buscar o grafo inteiro com ef dobrado a cada esgotamento), no caso RAG `WHERE tenant=X ORDER BY emb`.
+
+> **[RE-ESCOPO 2026-07-20 — owner-approved]** O DoD original (fechar o gap vs pgvector 0.8, ≤1.2×) foi **FALSIFICADO por medição**: theodb page-native é ~7–23× mais lento que o grafo in-memory do pgvector — gap estrutural de paradigma (ADR-0033/0035/0036), não de tuning. Nenhum claim de paridade pgvector é feito (Regra 5). O M118 é re-escopado para o resultado honesto **alcançável e medido**: correção + melhoria do PRÓPRIO path do theodb. Evidência: `docs/benchmarks/m118-resume-discarded.md`.
+
+**Definition of done (re-escopado):**
+
+- [x] `amgettuple` mantém estado de scan resumível entre chamadas (discarded set) — sem re-percorrer o grafo do zero a cada esgotamento (`ann/scan_core.rs::ResumableGround` + `am/scan.rs` wiring).
+- [x] Recall mantido em paridade no filtered path — **recall@10 = 1.0** vs brute-force exato sob filtro seletivo (A/B in-PG, `Index Scan using theodb_hnsw`).
+- [x] MEDIDO own-path A/B: `resume ON` **~1.95× mais rápido** que o re-search M52 (`resume OFF`) a recall casado (14.33 vs 27.94 ms @ 0.9967) — `docs/benchmarks/m118-resume-discarded.md`. **[Gate original ≤1.2× vs pgvector: FALSIFICADO — não alcançável, não claimado.]**
+- [x] Bounded + kill-switch: `theodb_hnsw.resume_max_mb` (fail-safe, EC-5 no-panic) + `theodb_hnsw.resume` (on/off).
+
+**Dependencies:** M52 (filtered ANN / iterative scan). `[x]`.
+
+**Top risks (novos):**
+
+1. Estado de scan resumível + MVCC/rescan sem skip/dup entre chamadas (self-join / nested-loop).
+2. O discarded set resumível precisa caber em memória bounded (não explodir por query seletiva).
+
+**Why now (do gap analysis):**
+
+É o caso RAG real (filtro por tenant + `ORDER BY` embedding); hoje temos recall em paridade mas pagamos QPS. O backlog M52 já rastreia a otimização.
+
+---
+
+## M119 — [x] AI-native depth: cross-encoder re-rank + chunking recursivo
+
+> Added 2026-07-20 by `/roadmap-feature` (slug: `ai-native-depth-rerank-chunking`). Fonte: deep-view `§ P6` + `.claude/knowledge-base/backlog.md` ("M54: chunking recursivo separator-aware"). See CHANGELOG `[Unreleased] § Added`.
+>
+> **[CORREÇÃO 2026-07-20 — SUPERSEDED / JÁ ENTREGUE]** Entregue por **M65** (`theodb_rs/src/rerank.rs` = cross-encoder rerank real, contrato Cohere/Jina/Voyage/BGE-TEI, exposto como `ai.rerank`) + **M54** (chunking `recursive` separator-aware em `theodb_rs/src/chunk.rs`: `\n\n→\n→. →space`). Importante: o rerank **já foi medido** em BEIR e é **honest-negative** (commit `604184b`: rerank piora nDCG −3.8%) — reimplementar/forçar seria perseguir um dead-end já medido. Milestone criado sobre gap-analysis desatualizado. Marcado `[x]` como correção de ROADMAP — não reimplementar.
+
+**Objective:** Elevar a superfície AI-native acima de paridade com pgai/Supabase: adicionar um estágio opcional de re-rank cross-encoder ao hybrid e um chunking recursivo separator-aware ao `theodb.chunk_text`.
+
+**Definition of done:**
+
+- [ ] `ai.rerank` / hybrid ganham estágio opcional de cross-encoder re-rank via endpoint HTTP OpenAI-compat existente (opt-in por GUC/param, bounded em latência/custo).
+- [ ] `theodb.chunk_text` ganha splitter recursivo separator-aware (parágrafo→frase→palavra→char) além da janela de caracteres v1.
+- [ ] MEDIDO: lift de nDCG@10 em BEIR (scifact / nfcorpus) com re-rank ligado vs desligado, com teste de significância (documentar em `docs/benchmarks/`).
+
+**Dependencies:** M53 (hybrid / RRF), M54 (vectorizer / chunking). Ambos `[x]`.
+
+**Top risks (novos):**
+
+1. Cross-encoder adiciona latência + I/O externo → precisa ser opt-in e bounded (não regride o hybrid default).
+2. Chunking recursivo muda os embeddings existentes → exige caminho de migração / reindex documentado.
+
+**Why now (do gap analysis):**
+
+Pós-reposição (ADR-0033), AI-native / HTAP / abertura são os eixos diferenciadores; hoje igualamos pgai/Supabase mas não superamos — re-rank + chunking avançado é o delta medível que passa de paridade a superioridade nessa superfície.
+
+---
+
 ## Sequência e paralelismo
 
 ```

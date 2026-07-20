@@ -24,6 +24,46 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.106.0] - 2026-07-20
+
+### Added
+- **`NOTICE` file** na raiz agregando a atribuição das extensões permissivas (PostgreSQL License)
+  redistribuídas na imagem — `pgvector` e `pgvectorscale` (refs pinadas) — para satisfazer a
+  obrigação da PostgreSQL License de que o aviso de copyright apareça "in all copies". Complementa
+  (não duplica) a due-diligence AGPL em `docs/packaging/license-audit.md`. Resultado de uma auditoria
+  de proveniência/similaridade `loop-check-licence` (veredito **CLEAN**: 100% cobertura, zero cópia
+  incompatível, zero lacuna de atribuição — `.claude/knowledge-base/audits/licence-compliance-2026-07-19.md`).
+- Roadmap amended: added M116 Operabilidade em escala — eliminar o muro do VACUUM (`/roadmap-feature vacuum-wall-operability`)
+- Roadmap amended: added M117 SIMD cosine/IP no hot path de embeddings (`/roadmap-feature simd-cosine-ip-kernels`)
+- Roadmap amended: added M118 Filtered ANN eficiente — resume-from-discarded (`/roadmap-feature filtered-ann-resume-discarded`)
+- Roadmap amended: added M119 AI-native depth — cross-encoder re-rank + chunking recursivo (`/roadmap-feature ai-native-depth-rerank-chunking`)
+- **Filtered ANN resume-from-discarded (M118, T1.1+T2.1)** — the iterative HNSW scan now RESUMES from the retained
+  beam frontier (pgvector 0.8.5 `ResumeScanItems` technique — the frontier IS the discarded set, never dropped)
+  instead of re-searching the whole graph with a doubled `ef`, on the V1 (exact-f32) path. Validated in-PG:
+  **recall@10 = 1.0** vs brute-force exact kNN under a selective filter (`Index Scan using theodb_hnsw`,
+  `max_scan_tuples` armed). SBQ/AQ indexes keep the M52 re-search (per-batch rerank is a tracked follow-up).
+  `ann/scan_core.rs::ResumableGround`, `am/hnsw_page.rs::{resumable_init,resumable_next}`, `am/scan.rs` wiring.
+- **`theodb_hnsw.resume` GUC (M118)** — on|off kill-switch (default ON) for the resume-from-discarded filtered
+  iterative scan; OFF reverts to the M52 re-search (operator escape hatch + own-path A/B baseline). V1 only.
+- **`theodb_hnsw.resume_max_mb` GUC (M118 T2.2)** — memory ceiling (default 64 MB; `0` = disabled) for the
+  resume scan's retained frontier; on overflow the scan stops resuming and returns what it holds (fail-safe,
+  no panic — validated in-PG: `resume_max_mb=1` returns cleanly). Milestone M118 DoD **re-scoped** (owner-approved)
+  after the ≤1.2×-vs-pgvector target was FALSIFIED by measurement (structural page-native gap, ADR-0033) — shipped
+  on the measured own-path win (~1.95× vs the M52 re-search at matched recall). Review **READY_TO_MERGE**
+  (`council-rust-pgrx` + `council-index-storage` clean; 2 LOW review-fixes applied: resume-loop `if let` +
+  `resume_max_mb` doc caveat).
+
+### Changed
+- Roadmap corrigido: **M116 / M117 / M119 marcados `[x]` (SUPERSEDED — já entregues)** por M56+M104 (VACUUM tombstone-in-place + fold memory-bound), M58 (SIMD AVX2 cosine/IP) e M65 (cross-encoder `ai.rerank`, medido honest-negative) + M54 (chunking recursivo). Foram criados sobre um gap-analysis desatualizado (deep-view 2026-07-07, anterior a M56–M115); reimplementá-los seria re-trabalho. Apenas **M118 (filtered ANN resume-from-discarded)** permanece `[ ]` como trabalho novo genuíno.
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
 ## [0.105.0] - 2026-07-19
 
 ### Added

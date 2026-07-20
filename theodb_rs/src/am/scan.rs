@@ -69,6 +69,11 @@ struct ScanState {
     // label → the inline skip cannot filter them; only the executor recheck can). Without this the pending row
     // would be a false positive (review blocker).
     filtering: bool,
+    // M118: resume-from-discarded state (V1 exact-f32 HNSW path only). `Some` after the first gather when the
+    // index is a plain HNSW; the iterative scan then pulls the next batch from the RETAINED frontier
+    // (`resumable_next`) instead of re-searching the graph with a doubled `ef` (the ~3× M52 cost). SBQ/AQ indexes
+    // keep `None` and fall back to the M52 re-search (their per-batch rerank is a tracked follow-up).
+    resume: Option<crate::am::hnsw_page::HnswResume>,
 }
 
 #[pg_guard]
@@ -92,6 +97,7 @@ pub extern "C-unwind" fn ambeginscan(
         exhausted: false,
         query_labels: Vec::new(),
         filtering: false,
+        resume: None,
     });
     unsafe { (*scandesc).opaque = Box::into_raw(state).cast::<std::os::raw::c_void>() };
     scandesc
@@ -120,6 +126,7 @@ pub extern "C-unwind" fn amrescan(
         state.emitted.clear();
         state.exhausted = false;
         state.iterative = false;
+        state.resume = None; // M118: drop any retained frontier — a rescan restarts the search from scratch
         // M90: parse the `labels && '{…}'` ScanKey (our only pushable search predicate — the label opclass's
         // `OPERATOR 1 &&`) into the query label set. A non-NULL key argument is the query `smallint[]`. `xs_recheck`
         // is set so the executor re-checks the predicate on the heap tuple (correctness even if the inline skip is
@@ -195,7 +202,42 @@ pub extern "C-unwind" fn amrescan(
             state.rel = rel;
             state.ef = ef;
             state.iterative = crate::am::guc::max_scan_tuples() > 0;
-            scan_hnsw_structured(rel, &query, ef)
+            // M118: try resume-from-discarded (V1 exact-f32). `resumable_init` returns None for SBQ/AQ/empty →
+            // fall back to the M52 gather (traverse + pending fold). On Some, keep the retained frontier in
+            // `state.resume` so `amgettuple` resumes from it instead of re-searching with a doubled `ef`.
+            let meta = match crate::am::hnsw_page::read_meta(rel) {
+                Ok(m) => m,
+                Err(e) => pg_sys::error!("theodb am scan: {e}"),
+            };
+            if meta.node_count > 0 && query.len() != meta.dim as usize {
+                pg_sys::error!("theodb hnsw: query dim {} != index dim {}", query.len(), meta.dim);
+            }
+            let init: Vec<(i64, f64)> = match crate::am::hnsw_page::resumable_init(rel, &meta, &query, ef) {
+                Ok(Some(mut rg)) => {
+                    let mut b = match crate::am::hnsw_page::resumable_next(rel, &meta, &query, &mut rg) {
+                        Ok(b) => b,
+                        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+                    };
+                    // Fold pending (post-build INSERTs) into the FIRST batch only; later resumed batches never
+                    // re-fold — the scan dedups tids. Mirrors `gather_hnsw_candidates`.
+                    let metric = match Metric::from_tag(meta.metric_tag) {
+                        Some(m) => m,
+                        None => pg_sys::error!("theodb am scan: unknown metric tag"),
+                    };
+                    let pending = match page::read_pending(rel) {
+                        Ok(p) => p,
+                        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+                    };
+                    for (tidv, v) in pending {
+                        b.push((tidv, metric.dist(&query, &v)));
+                    }
+                    state.resume = Some(rg);
+                    b
+                }
+                Ok(None) => gather_hnsw_candidates(rel, &query, ef),
+                Err(e) => pg_sys::error!("theodb am scan: {e}"),
+            };
+            heapify(init)
         } else if magic == crate::am::page::SYMQG_MAGIC {
             // E2: SymphonyQG co-located quantized graph — beam search reading rows per hop.
             let ef = crate::am::guc::ef_search();
@@ -1205,21 +1247,75 @@ pub extern "C-unwind" fn amgettuple(
             // a grow whose candidates were all already emitted) must NOT terminate — keep growing until fresh
             // candidates appear OR the scan saturates (all lists probed AND the returned total stops increasing).
             if state.probes == 0 {
-                let new_ef = state.ef.saturating_mul(2).min(cap);
-                if new_ef <= state.ef {
-                    state.exhausted = true; // ef already at the ceiling — no wider search possible
-                    return false;
+                // M118: V1 resume-from-discarded — pull the next batch(es) from the RETAINED frontier instead of
+                // re-searching the graph with a doubled `ef` (the ~3× M52 cost). SBQ/AQ indexes carry
+                // `state.resume == None` and fall through to the M52 ef-doubling re-search below.
+                if state.resume.is_some() {
+                    let rel = state.rel;
+                    let meta = match crate::am::hnsw_page::read_meta(rel) {
+                        Ok(m) => m,
+                        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+                    };
+                    let resume_ceiling = crate::am::guc::hnsw_resume_max_bytes();
+                    loop {
+                        if state.emitted.len() >= cap {
+                            state.exhausted = true;
+                            return false;
+                        }
+                        // M118 T2.2: memory-ceiling fail-safe — if the retained frontier grew past
+                        // `theodb_hnsw.resume_max_mb`, stop resuming and return what is already emitted (correctness
+                        // preserved by the executor MVCC recheck + max_scan_tuples; EC-5 — a clean stop, no panic).
+                        if resume_ceiling > 0
+                            && state.resume.as_ref().map(|rg| rg.approx_bytes()).unwrap_or(0) > resume_ceiling
+                        {
+                            state.exhausted = true;
+                            return false;
+                        }
+                        // Disjoint field borrows: `&state.query` (immutable) + `&mut state.resume` (mutable).
+                        // `if let` (not `unwrap`) — structurally cannot panic across the C boundary if a future
+                        // edit ever clears `state.resume` mid-loop (review LOW: defense-in-depth). None today.
+                        let (batch, frontier_empty) = {
+                            let q = &state.query;
+                            match state.resume.as_mut() {
+                                Some(rg) => {
+                                    let b = match crate::am::hnsw_page::resumable_next(rel, &meta, q, rg) {
+                                        Ok(b) => b,
+                                        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+                                    };
+                                    (b, rg.exhausted())
+                                }
+                                None => (Vec::new(), true), // unreachable today (guarded by is_some) — treat as exhausted
+                            }
+                        };
+                        let fresh: Vec<(i64, f64)> =
+                            batch.into_iter().filter(|(tid, _)| !state.emitted.contains(tid)).collect();
+                        if !fresh.is_empty() {
+                            state.heap = heapify(fresh);
+                            break;
+                        }
+                        if frontier_empty {
+                            state.exhausted = true; // frontier exhausted — the reachable graph is fully emitted
+                            return false;
+                        }
+                        // this batch's candidates were all already emitted, but the frontier continues → next batch
+                    }
+                } else {
+                    let new_ef = state.ef.saturating_mul(2).min(cap);
+                    if new_ef <= state.ef {
+                        state.exhausted = true; // ef already at the ceiling — no wider search possible
+                        return false;
+                    }
+                    state.ef = new_ef;
+                    let fresh: Vec<(i64, f64)> = gather_hnsw_candidates(state.rel, &state.query, new_ef)
+                        .into_iter()
+                        .filter(|(tid, _)| !state.emitted.contains(tid))
+                        .collect();
+                    if fresh.is_empty() {
+                        state.exhausted = true; // grew ef but found nothing new — the whole graph is emitted
+                        return false;
+                    }
+                    state.heap = heapify(fresh);
                 }
-                state.ef = new_ef;
-                let fresh: Vec<(i64, f64)> = gather_hnsw_candidates(state.rel, &state.query, new_ef)
-                    .into_iter()
-                    .filter(|(tid, _)| !state.emitted.contains(tid))
-                    .collect();
-                if fresh.is_empty() {
-                    state.exhausted = true; // grew ef but found nothing new — the whole graph is emitted (recall 1.0)
-                    return false;
-                }
-                state.heap = heapify(fresh);
             } else {
                 loop {
                     if state.emitted.len() >= cap {

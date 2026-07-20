@@ -1336,8 +1336,10 @@ pub(crate) unsafe fn insert_inplace(
 // rewrote block 0 first, so a crash mid-vacuum left the meta pointing at pages that still held old bytes (#47).
 
 /// A traversal candidate: its element address, neighbor-tuple address, level, heap tid, and distance to the query.
+/// `pub(crate)` only so the `HnswResume` type alias (M118) can name it across the `am` module — its FIELDS stay
+/// private (`am/scan.rs` holds a `ResumableGround<Cand>` opaquely and never touches a field).
 #[derive(Clone, Copy)]
-struct Cand {
+pub(crate) struct Cand {
     d: f64,
     blk: u32,
     off: u16,
@@ -1657,6 +1659,109 @@ pub(crate) unsafe fn traverse(
         pgrx::log!("theodb hnsw scan profile: pages_read={reads} ef={ef} m={m} m0={m0} results={}", out.len());
     }
     Ok(out)
+}
+
+/// M118: the resume-from-discarded state for an HNSW iterative scan, keyed on the on-disk `Cand` node. Held by
+/// `am/scan.rs::ScanState` across `amgettuple` calls so the search RESUMES from the retained frontier instead of
+/// re-searching with a doubled `ef` (the M52 cost). Opaque to `scan.rs` (the private `Cand` is hidden behind this
+/// alias); `scan.rs` only calls [`resumable_init`] / [`resumable_next`].
+pub(crate) type HnswResume = crate::ann::scan_core::ResumableGround<Cand>;
+
+/// M118: seed a resume-from-discarded ground search for the **V1 (exact-f32)** HNSW path. Does the upper-layer
+/// greedy descent (identical to [`traverse`]) then inits a [`ResumableGround`] at the ground entry point.
+/// Returns `Ok(None)` for SBQ (v2) / AQ (v3/v4) indexes — their per-batch exact-f32 rerank is a tracked
+/// follow-up, so the caller keeps the M52 re-search there. Also `None` on an empty/unbuilt index.
+///
+/// [`ResumableGround`]: crate::ann::scan_core::ResumableGround
+pub(crate) unsafe fn resumable_init(
+    rel: pg_sys::Relation,
+    meta: &HnswMeta,
+    q: &[f32],
+    ef_search: usize,
+) -> Result<Option<HnswResume>, String> {
+    unsafe {
+        if !crate::am::guc::hnsw_resume() {
+            return Ok(None); // M118 kill-switch OFF — caller uses the M52 re-search (own-path A/B baseline)
+        }
+        if meta.entry_level < 0 || meta.node_count == 0 {
+            return Ok(None); // empty/unbuilt — caller falls back (traverse also short-circuits to [])
+        }
+        if meta.sbq_bits > 0 || meta.aq_m > 0 {
+            return Ok(None); // SBQ/AQ rerank-per-batch is a follow-up — caller keeps the M52 re-search
+        }
+        let metric = Metric::from_tag(meta.metric_tag).ok_or("theodb hnsw: unknown metric tag")?;
+        let is_l2 = matches!(metric, Metric::L2);
+        let (m, m0) = (meta.m as usize, meta.m0 as usize);
+        let ef = ef_search.max(1);
+        let nblocks = page::main_fork_nblocks(rel);
+        let mut reads = 0usize;
+        // Greedy upper-layer descent — byte-identical to `traverse` (v1: qcode=None, lut=None).
+        let mut ep =
+            load(rel, meta.entry_blkno, meta.entry_offno, q, metric, is_l2, None, None, nblocks, &mut reads)?;
+        let mut lc = meta.entry_level as usize;
+        while lc >= 1 {
+            loop {
+                let nbrs = neighbors_of(rel, &ep, lc, m, m0, nblocks, &mut reads)?;
+                let mut improved = false;
+                for (nb, no) in nbrs {
+                    let cand = load(rel, nb, no, q, metric, is_l2, None, None, nblocks, &mut reads)?;
+                    if cand.d < ep.d {
+                        ep = cand;
+                        improved = true;
+                    }
+                }
+                if !improved {
+                    break;
+                }
+            }
+            lc -= 1;
+        }
+        let pg_src = PageNeighborSource {
+            rel,
+            nblocks,
+            q,
+            metric,
+            is_l2,
+            qcode: None,
+            lut: None,
+            m,
+            m0,
+            reads: std::cell::Cell::new(reads),
+        };
+        Ok(Some(crate::ann::scan_core::ResumableGround::init(&pg_src, ep, ef, m0, true)))
+    }
+}
+
+/// M118: pull the next resumed batch from the retained frontier (V1 path). Reconstructs the page source (cheap —
+/// only field refs) and maps the batch to `(tid, dist)`. An empty result ⇒ the reachable graph is exhausted
+/// (the caller marks the scan exhausted — EC-1). Pending rows are folded only on the FIRST gather, not here (the
+/// scan dedups tids, so a resumed batch never needs to re-fold pending).
+pub(crate) unsafe fn resumable_next(
+    rel: pg_sys::Relation,
+    meta: &HnswMeta,
+    q: &[f32],
+    rg: &mut HnswResume,
+) -> Result<Vec<(i64, f64)>, String> {
+    unsafe {
+        let metric = Metric::from_tag(meta.metric_tag).ok_or("theodb hnsw: unknown metric tag")?;
+        let is_l2 = matches!(metric, Metric::L2);
+        let (m, m0) = (meta.m as usize, meta.m0 as usize);
+        let nblocks = page::main_fork_nblocks(rel);
+        let pg_src = PageNeighborSource {
+            rel,
+            nblocks,
+            q,
+            metric,
+            is_l2,
+            qcode: None,
+            lut: None,
+            m,
+            m0,
+            reads: std::cell::Cell::new(0),
+        };
+        let batch = rg.next_batch(&pg_src)?;
+        Ok(batch.into_iter().map(|(cand, d)| (cand.tid, d)).collect())
+    }
 }
 
 /// The production [`scan_core::NeighborSource`]: drives the ground search over PostgreSQL pages by reusing the
