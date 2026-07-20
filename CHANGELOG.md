@@ -13,6 +13,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Paired significance test for hybrid vs vector retrieval on BEIR (M123).** `theodb_bench.significance.paired_significance`
+  — paired permutation p-value (Smucker CIKM2007) + paired-bootstrap 95% CI on the mean per-query nDCG@10 difference
+  + paired t-test cross-check + wins/losses/ties; wired into `run_m53_hybrid_beir.py` (pre-declared endpoint: nDCG@10,
+  hybrid vs vector). MEASURED on SciFact (300 queries): Δ̄=+0.0041, 95%CI=[−0.0010,+0.0108], p=0.25, 296/300 ties →
+  **PARITY (not significant)** — the +0.004 mean is within noise (`docs/benchmarks/m123-hybrid-significance.md`). Also
+  hardens the eval harness (OpenAI 429 backoff-retry; `theodb_rs` own-vector extension instead of stale pgvector).
 
 ### Changed
 

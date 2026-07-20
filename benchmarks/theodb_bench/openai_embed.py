@@ -98,13 +98,26 @@ class CachedOpenAIEmbedder:
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             method="POST",
         )
-        try:
-            with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310 — fixed https OpenAI host
-                body = json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as e:
-            # Surface the API's reason (never the key) so a 400 is diagnosable instead of opaque.
-            detail = e.read().decode("utf-8", "replace")[:500] if e.fp else ""
-            raise RuntimeError(f"OpenAI embeddings HTTP {e.code}: {detail}") from None
+        # Retry on transient rate-limit (429) / server (5xx) errors with exponential backoff; a 4xx other than
+        # 429 is a hard error (bad request/auth) and is not retried. The whole-corpus warm can brush the TPM
+        # ceiling, so a bounded backoff lets a large eval complete instead of aborting on a 16ms rate window.
+        import time as _time
+        last_detail = ""
+        for attempt in range(6):
+            try:
+                with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310 — fixed https OpenAI host
+                    body = json.loads(resp.read().decode("utf-8"))
+                break
+            except urllib.error.HTTPError as e:
+                # Surface the API's reason (never the key) so a 400 is diagnosable instead of opaque.
+                last_detail = e.read().decode("utf-8", "replace")[:500] if e.fp else ""
+                if e.code == 429 or 500 <= e.code < 600:
+                    if attempt < 5:
+                        _time.sleep(min(2.0 ** attempt, 30.0))
+                        continue
+                raise RuntimeError(f"OpenAI embeddings HTTP {e.code}: {last_detail}") from None
+        else:
+            raise RuntimeError(f"OpenAI embeddings: exhausted retries; last={last_detail}")
         # OpenAI returns objects carrying their input `index`; sort to guarantee input alignment.
         items = sorted(body["data"], key=lambda d: d["index"])
         return [it["embedding"] for it in items]
