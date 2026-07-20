@@ -15,6 +15,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 ### Changed
+- **Split the 3,456-LoC `am/hnsw_page.rs` god-file into a cohesive directory module (M126).** `am/hnsw_page/{layout,meta,codec,pack,store,search}` + co-located tests, each prod module ≤ ~500 LoC, with `unsafe` now isolated to the two Relation-facing modules (store+search) — the four pure format/build modules are `unsafe`-free. Behavior-preserving: proven **byte-identical** by a same-index A/B (build once, swap the `.so`, re-query the SAME physical index → zero-diff `(id,distance)` over 50 queries; `docs/benchmarks/m126-hnsw-split-byteidentical.md`). Zero caller edits, zero public-API change, zero on-disk format change. Addresses the top maintainability/safety risk from the 2026-07-20 trajectory analysis.
 
 ### Deprecated
 
