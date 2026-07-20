@@ -133,6 +133,17 @@ pub(crate) fn columnar_zonemap_skip() -> bool {
 /// hook that misbehaves breaks EVERY query, so the spike stays inert until explicitly enabled.
 pub(crate) static ENABLE_VECFILTER: GucSetting<bool> = GucSetting::<bool>::new(false);
 
+/// M122 — measurement A/B knob: when on, the vectorizer worker routes the in-place (1→1) batch through the OLD
+/// single-txn `_vectorizer_process_upsert_batch` (embed INSIDE the process txn) instead of the 3-phase split.
+/// Default OFF (the shipped 3-phase). Exists ONLY to A/B the xmin-pin on the same worker backend (the sampler
+/// reads the worker reliably) — off=3-phase→xmin free, on=single-txn→xmin pinned during the embed.
+pub(crate) static VECTORIZER_SINGLE_TXN: GucSetting<bool> = GucSetting::<bool>::new(false);
+
+/// Whether the vectorizer worker forces the pre-M122 single-txn embed path (measurement A/B only). Read per batch.
+pub(crate) fn vectorizer_single_txn() -> bool {
+    VECTORIZER_SINGLE_TXN.get()
+}
+
 /// Whether the M92 vecfilter Custom Scan Provider hook is enabled (spike kill-switch).
 pub(crate) fn vecfilter_enabled() -> bool {
     ENABLE_VECFILTER.get()
@@ -278,6 +289,14 @@ pub(crate) fn init() {
         c"When on (default), the filtered iterative scan resumes from the retained frontier (M118 resume-from-discarded)",
         c"Off reverts to the M52 re-search-with-doubled-ef path (operator kill-switch + own-path A/B). V1 only; SBQ/AQ always re-search.",
         &HNSW_RESUME,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+    GucRegistry::define_bool_guc(
+        c"theodb.vectorizer_single_txn",
+        c"When on, the vectorizer worker forces the pre-M122 single-txn embed path (measurement A/B for the xmin-pin)",
+        c"Default off = the shipped 3-phase split (embed off-txn). On = embed inside the process txn. Apparatus only.",
+        &VECTORIZER_SINGLE_TXN,
         GucContext::Userset,
         GucFlags::default(),
     );

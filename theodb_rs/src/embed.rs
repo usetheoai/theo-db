@@ -57,9 +57,41 @@ pub(crate) fn run_batch(items: &[Option<&str>], model: Option<&str>) -> Vec<Stri
     if items.is_empty() {
         return Vec::new();
     }
-
     // NULL element breaks the N-in/N-out alignment (mirror ai.generate_batch) -> fail-fast 22023,
     // BEFORE any GUC read or HTTP call.
+    let inputs = validate_inputs(items);
+    // GUC read (SPI) — this is why the standalone path needs an open txn; the vectorizer's phase B does
+    // NOT call this (it uses `run_batch_resolved` with cfg resolved earlier, so the embed pins no snapshot).
+    let (endpoint, mdl, api_key) = resolve_cfg("theodb.embed_batch", model);
+    embed_resolved(&inputs, &endpoint, &mdl, api_key.as_deref())
+}
+
+/// M122 — the phase-B embed entry for the vectorizer worker: the endpoint/model/api_key were already resolved
+/// in phase A (inside a txn), so this does **NO GUC read and NO SPI** — pure HTTP+parse. Called with NO open
+/// `BackgroundWorker::transaction`, so `backend_xmin` is not pinned for the HTTP round-trip. Same N-in/N-out
+/// contract + error messages as [`run_batch`]; the two share [`embed_resolved`] (one HTTP+parse path, DRY).
+///
+/// LOAD-BEARING INVARIANT (do NOT break): everything reachable from here — `validate_inputs`, `embed_resolved`,
+/// `post_json`, `format_embedding`, `err_*` — MUST stay free of `Spi::`/`guc()`/`current_setting`/`palloc`-heavy
+/// PG work. The worker catches a longjmp out of this call with `PgTryBuilder` while holding **no open
+/// transaction**; that catch is safe ONLY because no PG resource (SPI conn, snapshot, buffer pin, subtxn) is
+/// held here. Adding SPI/txn work to this path without wrapping it in a transaction would make the off-txn catch
+/// unsafe (skipped cleanup) AND re-pin `backend_xmin` — defeating M122 (see ADR-0049, council-rust-pgrx LOW-2).
+pub(crate) fn run_batch_resolved(
+    items: &[Option<&str>],
+    endpoint: &str,
+    model: &str,
+    api_key: Option<&str>,
+) -> Vec<String> {
+    if items.is_empty() {
+        return Vec::new();
+    }
+    let inputs = validate_inputs(items);
+    embed_resolved(&inputs, endpoint, model, api_key)
+}
+
+/// NULL-check the batch (fail-fast 22023 BEFORE any GUC/HTTP) → the non-null `&str` inputs.
+fn validate_inputs<'a>(items: &'a [Option<&'a str>]) -> Vec<&'a str> {
     let mut inputs: Vec<&str> = Vec::with_capacity(items.len());
     for it in items {
         match it {
@@ -67,10 +99,15 @@ pub(crate) fn run_batch(items: &[Option<&str>], model: Option<&str>) -> Vec<Stri
             None => err_input("theodb.embed_batch: array elements must not be NULL"),
         }
     }
+    inputs
+}
 
-    let (endpoint, mdl, api_key) = resolve_cfg("theodb.embed_batch", model);
+/// The pure HTTP+parse tail shared by [`run_batch`] and [`run_batch_resolved`]: build the payload, POST, and
+/// map each embedding back by its `index`. NO GUC/SPI — safe to call with no open transaction (M122 phase B).
+fn embed_resolved(inputs: &[&str], endpoint: &str, mdl: &str, api_key: Option<&str>) -> Vec<String> {
+    let n = inputs.len();
     let payload = serde_json::json!({ "input": inputs, "model": mdl }).to_string();
-    let body = post_json("theodb.embed_batch", &endpoint, payload, api_key.as_deref());
+    let body = post_json("theodb.embed_batch", endpoint, payload, api_key);
 
     let data = match body.get("data").and_then(|d| d.as_array()) {
         Some(a) => a,
@@ -80,10 +117,10 @@ pub(crate) fn run_batch(items: &[Option<&str>], model: Option<&str>) -> Vec<Stri
         )),
     };
     // N-in/N-out count invariant.
-    if data.len() != items.len() {
+    if data.len() != n {
         err_external(&format!(
             "theodb.embed_batch: batch size mismatch: requested {} embeddings, endpoint returned {}",
-            items.len(),
+            n,
             data.len()
         ));
     }
@@ -91,14 +128,14 @@ pub(crate) fn run_batch(items: &[Option<&str>], model: Option<&str>) -> Vec<Stri
     // Map each embedding back by its `index` (OpenAI guarantees it), NOT array position — so an
     // out-of-order response is still placed correctly. A missing/out-of-range/duplicate index is a
     // malformed response (38000), not a silent misalignment.
-    let mut out: Vec<Option<String>> = vec![None; items.len()];
+    let mut out: Vec<Option<String>> = vec![None; n];
     for (pos, item) in data.iter().enumerate() {
         let idx = item
             .get("index")
             .and_then(|v| v.as_u64())
             .map(|v| v as usize)
             .unwrap_or(pos);
-        if idx >= items.len() {
+        if idx >= n {
             err_external(
                 "theodb.embed_batch: unexpected embedding response shape: index out of range",
             );
@@ -121,6 +158,13 @@ pub(crate) fn run_batch(items: &[Option<&str>], model: Option<&str>) -> Vec<Stri
     out.into_iter()
         .map(|o| o.unwrap_or_else(|| err_external("theodb.embed_batch: missing embedding for an index")))
         .collect()
+}
+
+/// M122 — resolve the batch embed cfg (endpoint/model/api_key) from the session GUCs. Public so the vectorizer's
+/// phase A can resolve it INSIDE the read txn (this reads GUCs via SPI, so it needs an open txn); phase B then
+/// calls `run_batch_resolved` with the returned owned values and pins no snapshot during the HTTP.
+pub(crate) fn resolve_batch_cfg(model: Option<&str>) -> (String, String, Option<String>) {
+    resolve_cfg("theodb.embed_batch", model)
 }
 
 /// Resolve the endpoint (with SSRF http(s) guard), model, and optional api key from session GUCs.

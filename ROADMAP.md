@@ -1828,7 +1828,7 @@ Pós-reposição (ADR-0033), AI-native / HTAP / abertura são os eixos diferenci
 
 ---
 
-## M120 — [ ] Filtro estruturado fail-closed para `ai.hybrid_search_rrf` (segurança multi-tenant)
+## M120 — [x] Filtro estruturado fail-closed para `ai.hybrid_search_rrf` (segurança multi-tenant)
 
 > Added 2026-07-20 by `/roadmap-feature` (slug: `hybrid-fail-closed-filter`). Fonte: `.claude/knowledge-base/backlog.md` ("[M53 review — council-security F1]") + código `theodb_rs/src` (`ai.hybrid_search_rrf`). See CHANGELOG `[Unreleased] § Added`.
 
@@ -1854,7 +1854,7 @@ Pós-reposição (ADR-0033), AI-native / HTAP / abertura são os eixos diferenci
 
 ---
 
-## M121 — [ ] IVF cosine/ip spherical k-means (recall quality)
+## M121 — [x] IVF cosine/ip spherical k-means (recall quality)
 
 > Added 2026-07-20 by `/roadmap-feature` (slug: `ivf-spherical-kmeans`). Fonte: `.claude/knowledge-base/backlog.md` ("IVF cosine/ip spherical k-means, from M49 review council-index-storage HIGH-2") + código `theodb_rs/src/ann/ivf.rs`. See CHANGELOG `[Unreleased] § Added`.
 
@@ -1876,6 +1876,58 @@ Pós-reposição (ADR-0033), AI-native / HTAP / abertura são os eixos diferenci
 **Why now (do gap analysis 2026-07-20):**
 
 Recall **quality** no eixo de **correção** (não QPS) — o IVF cosine é o path com o maior gap de recall conhecido (backlog M49 HIGH-2). É own-code, permissivo, e **não esbarra no teto estrutural de QPS** que o M118 mediu. Melhoria real de qualidade sem overclaim.
+
+---
+
+## M122 — [ ] Embed totalmente assíncrono no vectorizer (fecha o xmin-pin sob endpoint pendurado)
+
+> Added 2026-07-20 by `/roadmap-feature` (slug: `async-embed-vectorizer`). Fonte: `theodb_rs/src/vectorizer.rs:15-16` (follow-up rastreado do M54/ADR-0016) + backlog "[M54 review — council-index HIGH-1]". See CHANGELOG `[Unreleased] § Added`.
+
+**Objective:** Tornar o worker do vectorizer **3-fases de verdade** — (A) txn lê `content`+cfg resolvido e **commita a lease** → (B) embed HTTP roda **sem txn aberta** → (C) txn nova escreve o vetor + marca o job — para que um endpoint de embedding pendurado **nunca prenda o xmin horizon** (hoje o HTTP roda dentro da txn de processamento do job, atrasando o VACUUM até o timeout ~90s).
+
+**Definition of done:**
+
+- [ ] O worker processa cada job em 3 fases explícitas: fase A (txn) lê content+cfg e commita o claim/lease; fase B faz o `run_batch` **sem txn** recebendo o cfg **já resolvido** (não relê GUC via SPI dentro do HTTP); fase C (txn nova) escreve o(s) vetor(es) e marca o job `done`.
+- [ ] **MEDIDO:** sob um endpoint mock lento/pendurado, o `backend_xmin` do worker **não permanece preso durante o HTTP** — teste que injeta um embed lento e verifica que o snapshot é liberado no commit da fase A (o xmin não segura o horizonte durante os N segundos do HTTP).
+- [ ] **Crash-safety:** crash entre fase B e fase C não perde nem duplica — o job volta a `claimed`/`pending` e é re-drenado **idempotente** (state machine do queue já garante; teste de crash reproduz e valida).
+- [ ] O caminho síncrono direto (`ai.embed` single-call fora do vectorizer) permanece **inalterado** (retrocompat — só o worker do vectorizer muda).
+
+**Dependencies:** M54 (vectorizer / job-queue, ADR-0016). `[x]`.
+
+**Top risks (novos):**
+
+1. **Config drift** entre a leitura do cfg (fase A) e a escrita (fase C) — mitigar passando o cfg **resolvido** pela fase B em vez de reler GUCs; a fase C não depende de estado que possa ter mudado.
+2. **Crash após HTTP-ok e antes do write (fase C)** — o vetor computado se perde e o job reprocessa: aceitável (idempotente; custo = 1 HTTP a mais), mas o teste de crash-safety deve provar que não há vetor órfão nem job preso.
+
+**Why now (roadmap V1 completo, 2026-07-20):**
+
+Hardening pós-roadmap-completo no eixo **operabilidade + AI-native** (eixos vivos pós-ADR-0033). É o único follow-up `HIGH`/`MEDIUM` verificado-real que sobrou (o próprio código o declara pendente em `vectorizer.rs:15-16`). Bounded pelo timeout hoje, mas o async é o correto — um endpoint de embedding degradado não deve atrasar o VACUUM do banco inteiro.
+
+---
+
+## M123 — [ ] Significância estatística pareada do hybrid vs vector (BEIR)
+
+> Added 2026-07-20 by `/roadmap-feature` (slug: `hybrid-beir-significance`). Fonte: backlog "[M53 review — council-benchmark] Teste de significância pareado hybrid vs vector (BEIR)" + `docs/benchmarks/m53-hybrid-beir.md` (harness já existe). See CHANGELOG `[Unreleased] § Added`.
+
+**Objective:** Elevar o benchmark hybrid-BEIR de "médias reportadas" para **prova estatística** — teste de significância **pareado** (per-query) do hybrid (BM25+vector+RRF) vs vector-only, com p-value + tamanho de efeito + IC, honrando "performance é claim, não opinião" (regra TheoDB 5) e a lente council-ai-in-db "isso melhora recall de verdade?".
+
+**Definition of done:**
+
+- [ ] O harness `benchmarks/run_m53_hybrid_beir.py` reporta, **por query**, a métrica de ranking (nDCG@10 ou recall@k) para hybrid **e** vector-only sobre ≥1 dataset BEIR **permissivo** (ex.: SciFact / NFCorpus — pequenos, licença aberta).
+- [ ] **MEDIDO:** teste de significância **pareado** sobre as diferenças per-query (bootstrap pareado OU Wilcoxon signed-rank), reportando **p-value + tamanho de efeito + IC 95%** — não apenas a média.
+- [ ] **Honestidade (anti cherry-pick):** reporta `n` total de queries, a fração onde o hybrid **perde**, e o veredito honesto — se **não-significativo**, dizer explicitamente (honest-negative aceito, como M121). Sem selecionar pontos de recall/k favoráveis.
+- [ ] Artefato reproduzível em `docs/benchmarks/` (comando exato, dataset+versão, seed).
+
+**Dependencies:** M53 (hybrid / RRF). `[x]`.
+
+**Top risks (novos):**
+
+1. **Dataset BEIR** pode ser grande / licença ambígua — usar subset permissivo e pequeno (SciFact/NFCorpus); registrar a licença do dataset no artefato.
+2. **Resultado pode ser NÃO-significativo** — aceitar honest-negative e reportar sem overclaim (o valor é a *prova*, seja qual for o sinal); nunca ajustar o dataset/k para "dar significativo".
+
+**Why now (roadmap V1 completo, 2026-07-20):**
+
+O hybrid é o coração do pilar **AI-native**, e o benchmark existe mas **não prova** que o ganho é real (não ruído). No eixo correção/recall-quality (o eixo vivo pós-ADR-0033), uma prova de significância pareada é o gate de honestidade que falta — barato (harness existe), on-axis, e alinhado a "sem afirmação de performance sem artefato".
 
 ---
 
