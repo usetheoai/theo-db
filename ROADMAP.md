@@ -1931,7 +1931,7 @@ O hybrid é o coração do pilar **AI-native**, e o benchmark existe mas **não 
 
 ---
 
-## M124 — [ ] Dogfood real: capability theo-data sobre TheoDB self-hosted (prova de produção)
+## M124 — [x] Dogfood real: capability theo-data sobre TheoDB self-hosted (prova de produção)
 
 > Added 2026-07-20 by gap-analysis (`knowledge-base/audits/2026-07-20-analysis.md` Recomendação 1 / Risco H9). Fonte: dogfood-golden-rule (`rules/dogfood-golden-rule.md § 1`, âncora `theo-data-capability-on-theodb`) + `knowledge-base/dogfood/manifest.md` (status `planned`). See CHANGELOG `[Unreleased] § Added`.
 
