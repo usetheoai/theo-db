@@ -13,6 +13,20 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.109.0] - 2026-07-20
+
+### Added
 - **Paired significance test for hybrid vs vector retrieval on BEIR (M123).** `theodb_bench.significance.paired_significance`
   — paired permutation p-value (Smucker CIKM2007) + paired-bootstrap 95% CI on the mean per-query nDCG@10 difference
   + paired t-test cross-check + wins/losses/ties; wired into `run_m53_hybrid_beir.py` (pre-declared endpoint: nDCG@10,
