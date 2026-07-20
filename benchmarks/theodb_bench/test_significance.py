@@ -94,3 +94,19 @@ def test_paired_sig_none_when_no_per_query():
     from run_m53_hybrid_beir import _paired_sig
     assert _paired_sig(None) is None
     assert _paired_sig({"vector": {}, "hybrid": {}}) is None  # missing fts leg
+
+
+def test_paired_sig_persists_per_query_for_offline_recompute():
+    """M125 review LOW — the aligned per-query nDCG@10 is persisted so p/CI is recomputable from the artifact."""
+    from run_m53_hybrid_beir import _paired_sig
+    qids = ["q1", "q2", "q3", "q4"]
+    pq = {
+        "vector": {"qids": qids, "ndcg10": [0.5, 0.5, 0.5, 0.5], "recall100": [1] * 4},
+        "hybrid": {"qids": qids, "ndcg10": [0.6, 0.6, 0.6, 0.6], "recall100": [1] * 4},
+        "fts":    {"qids": qids, "ndcg10": [0.3, 0.3, 0.3, 0.3], "recall100": [1] * 4},
+    }
+    pqd = _paired_sig(pq)["per_query_ndcg10"]
+    assert set(pqd) == {"hybrid", "vector", "fts"}
+    # arrays are persisted verbatim (qids + ndcg10) so a third party can re-align + re-run paired_significance
+    assert pqd["hybrid"]["qids"] == qids and pqd["hybrid"]["ndcg10"] == [0.6, 0.6, 0.6, 0.6]
+    assert pqd["fts"]["ndcg10"] == [0.3, 0.3, 0.3, 0.3]

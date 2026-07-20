@@ -3,7 +3,7 @@
 **Date:** 2026-07-20 · **Box:** DO droplet, pgrx-managed PG17, `theodb_rs` (own vector + `ai.hybrid_search_rrf`).
 **Dataset:** BEIR **NFCorpus** test split — 3,633 docs / 323 queries (medical, exact-term). **Embeddings:** OpenAI
 `text-embedding-3-small`, dim 1536. **Verdict:** on a lexical-favoring set where the shipped `ts_rank` lexical leg
-is alive, **hybrid (vector + FTS + RRF) SIGNIFICANTLY beats vector-only** — resolving the H6 risk left open by
+is alive, **hybrid (vector + FTS + RRF) SIGNIFICANTLY beats vector-only on nDCG@10 (ranking quality)** — resolving the H6 risk left open by
 M123's SciFact parity. Honest: the gain is small and regime-dependent.
 
 ## Result
@@ -19,12 +19,12 @@ M123's SciFact parity. Honest: the gain is small and regime-dependent.
 | Comparison | Δ̄ | 95% CI | p (permutation) | wins/losses/ties | verdict |
 |---|---|---|---|---|---|
 | **hybrid − vector** (the claim) | **+0.0105** | **[+0.0027, +0.0188]** | **0.0099** | 55 / 49 / 219 | **SIGNIFICANT** (p<0.05 AND CI excludes 0) |
-| hybrid − fts | +0.1873 | [+0.1601, +0.2156] | 0.0000 | 191 / 23 / 109 | SIGNIFICANT (fusion pulls far above the lexical leg alone) |
-| fts − vector | −0.1768 | [−0.2075, −0.1469] | 0.0000 | 46 / 183 / 94 | fts loses to vector (as expected — ts_rank ≪ dense) |
+| hybrid − fts | +0.1873 | [+0.1601, +0.2156] | <1e-4 | 191 / 23 / 109 | SIGNIFICANT (fusion pulls far above the lexical leg alone) |
+| fts − vector | −0.1768 | [−0.2075, −0.1469] | <1e-4 | 46 / 183 / 94 | fts loses to vector (as expected — ts_rank ≪ dense) |
 
 ## Interpretation — H6 resolved (and the M123 confound explained)
 
-- **Hybrid significantly improves recall on a lexical-favoring workload.** hybrid − vector is +0.0105 nDCG@10 with
+- **Hybrid significantly improves ranking quality (nDCG@10) on a lexical-favoring workload.** hybrid − vector is +0.0105 nDCG@10 with
   p=0.0099 and a CI that excludes 0 — a real, if small, lift. This is the regime the IR literature predicts hybrid
   wins (dense misses exact terms; BM25/FTS recovers them; RRF fuses the complementary rankings).
 - **The M123 SciFact parity is now explained, not a contradiction.** On SciFact the lexical leg was effectively
@@ -36,7 +36,7 @@ M123's SciFact parity. Honest: the gain is small and regime-dependent.
   it — that remains the tracked product follow-up, but the value-prop is already validated with what ships.
 
 **Honest positioning (defensible under public-copy.md):** *"Hybrid retrieval (vector + FTS, RRF-fused)
-significantly improves recall on lexical/exact-match workloads (measured on NFCorpus: Δ nDCG@10 = +0.0105,
+significantly improves ranking quality (nDCG@10) on lexical/exact-match workloads (measured on NFCorpus: Δ nDCG@10 = +0.0105,
 p=0.0099, paired permutation). On dense-strong workloads (SciFact, M123) it is at parity. Superiority is
 dataset-dependent."* Never claim "hybrid beats dense" unqualified — BEIR shows dense wins on FiQA/ArguAna.
 
@@ -59,6 +59,10 @@ python3 benchmarks/run_m53_hybrid_beir.py --dataset nfcorpus --runs 1 --out docs
 
 - **Small effect:** +0.0105 nDCG@10 is significant but small (219/323 ties). It is a measured lift, not a
   transformation. Cohen's dz is modest.
+- **Reproducibility (M125 review LOW):** p/CI reproduce on a full re-run (fixed seed 20260720, B=100,000). The
+  harness now also persists the aligned per-query nDCG@10 arrays under `significance.per_query_ndcg10` so a third
+  party can recompute p/CI **offline** without re-embedding — this JSON predates that field; the next run of the
+  harness carries it. The three diagnostic legs' Monte-Carlo p is floored at 1/(B+1) ≈ 1e-5 (never exactly 0).
 - **NFCorpus license:** the BEIR authors report no license; the HF `BeIR/nfcorpus` card tags `cc-by-sa-4.0` (an
   unverified uploader tag). Used **CI-internally only** (downloaded for eval, not redistributed) — the
   permissive-licence distribution gate covers distributed deps, not a CI-downloaded eval set. Do not redistribute

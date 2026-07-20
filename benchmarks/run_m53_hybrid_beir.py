@@ -102,6 +102,12 @@ def _paired_sig(per_query) -> dict:
         "hybrid_vs_fts": _one_sig(per_query["hybrid"], per_query["fts"], "hybrid_vs_fts"),
         "fts_vs_vector": _one_sig(per_query["fts"], per_query["vector"], "fts_vs_vector"),
         "fts_mean_ndcg10": (sum(fts_ndcg) / len(fts_ndcg)) if fts_ndcg else 0.0,
+        # M125 review LOW — persist the aligned per-query nDCG@10 so a third party can recompute p/CI offline
+        # from the artifact (the seed already makes a full re-run reproduce; this makes it recomputable without one).
+        "per_query_ndcg10": {
+            r: {"qids": list(per_query[r]["qids"]), "ndcg10": list(per_query[r]["ndcg10"])}
+            for r in ("hybrid", "vector", "fts")
+        },
     }
 
 
