@@ -7,3 +7,4 @@ pytest>=7
 h5py>=3.10  # read ANN-Benchmarks reference datasets (glove/sift HDF5); BSD-3, dev-only
 fastembed>=0.3  # real local embedding model for the theodb.embed test server (onnxruntime, no torch); Apache-2.0, dev-only
 scann>=1.4  # M33 head-to-head baseline: ScaNN OSS = the algorithm behind AlloyDB's vector index; Apache-2.0, dev-only, needs AVX2 (pulls numpy>=2.2 — verified compatible with the harness)
+# scipy>=1.11  # OPTIONAL — M123 uses it only for the exact t-test p-value cross-check; permutation+bootstrap are numpy-only (normal-approx t-test fallback if scipy absent). BSD-3, dev-only.

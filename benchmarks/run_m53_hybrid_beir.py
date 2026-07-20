@@ -26,6 +26,7 @@ import time
 from theodb_bench.beir import load_beir_dataset
 from theodb_bench.db import VectorDB
 from theodb_bench.hybrid import run_three_retrievers
+from theodb_bench.significance import paired_significance
 from theodb_bench.openai_embed import CachedOpenAIEmbedder
 
 PGHOST = os.environ.get("PGHOST", "localhost")
@@ -68,6 +69,23 @@ def _aggregate_runs(run_results: list, names: list) -> dict:
             "spread_recall100": spread_recall,
         }
     return agg
+
+
+def _paired_sig(per_query) -> dict:
+    """M123 — paired significance of hybrid vs vector over per-query nDCG@10, aligned by qid. Returns None when
+    per-query data is absent (e.g. an older harness path)."""
+    if not per_query or "hybrid" not in per_query or "vector" not in per_query:
+        return None
+    hy, ve = per_query["hybrid"], per_query["vector"]
+    ve_by_qid = dict(zip(ve["qids"], ve["ndcg10"]))
+    a, b = [], []  # a = hybrid, b = vector, aligned on the shared qids
+    for i, qid in enumerate(hy["qids"]):
+        if qid in ve_by_qid:
+            a.append(hy["ndcg10"][i])
+            b.append(ve_by_qid[qid])
+    if len(a) < 2:
+        return {"metric": "ndcg10", "systems": "hybrid_vs_vector", "status": "TOO_FEW_QUERIES", "n": len(a)}
+    return {"metric": "ndcg10", "systems": "hybrid_vs_vector", **paired_significance(a, b)}
 
 
 def run(args) -> dict:
@@ -124,10 +142,15 @@ def run(args) -> dict:
         run_results.append(run_three_retrievers(
             db, dataset, embed_fn, args.dim, table="m53_beir_eval",
             k_rrf=args.k_rrf, top=args.top, include_bm25=include_bm25,
+            return_per_query=True,
         ))
     db.close()
 
     per_retriever = _aggregate_runs(run_results, names)
+    # M123 — paired significance of hybrid vs vector over the LAST run's per-query nDCG@10 (all runs are
+    # identical by design — the harness already asserts determinism). Pre-declared endpoint: nDCG@10, hybrid vs
+    # vector (ADR M123-2); parity is reported honestly if not significant.
+    significance = _paired_sig(run_results[-1].get("_per_query"))
     non_det = [n for n, m in per_retriever.items() if not m["deterministic"]]
     if non_det:
         caveats.append(f"NON-DETERMINISTIC retrievers across runs: {non_det} — investigate before claiming")
@@ -141,6 +164,7 @@ def run(args) -> dict:
         "load_per_run": loads,
         "load_post": _load(),
         "per_retriever": per_retriever,
+        "significance": significance,
         "bm25_status": bm25_status,
         "caveats": caveats,
     }
@@ -177,6 +201,14 @@ def main():
     for name, m in data["per_retriever"].items():
         det = "det" if m["deterministic"] else f"VAR spread={m['spread_ndcg10']}/{m['spread_recall100']}"
         print(f"  {name:>7}: nDCG@10={m['ndcg10']:.4f}  Recall@100={m['recall100']:.4f}  ({det})")
+    sig = data.get("significance")
+    if sig and "p_permutation" in sig:
+        # Honest verdict (ADR M123-2): a lift is only claimed when both p < 0.05 AND the 95% CI excludes 0.
+        verdict = "SIGNIFICANT lift" if (sig["p_permutation"] < 0.05 and sig["ci95_low"] > 0) else "PARITY (not significant)"
+        print(f"  significance hybrid vs vector (nDCG@10, n={sig['n']}): "
+              f"Δ̄={sig['mean_diff']:+.4f} 95%CI=[{sig['ci95_low']:+.4f},{sig['ci95_high']:+.4f}] "
+              f"p_perm={sig['p_permutation']:.4f} (t-test p={sig['p_ttest']:.4f} via {sig['p_ttest_method']}) "
+              f"wins/losses/ties={sig['wins']}/{sig['losses']}/{sig['ties']} → {verdict}")
 
 
 if __name__ == "__main__":

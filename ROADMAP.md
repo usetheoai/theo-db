@@ -1879,7 +1879,7 @@ Recall **quality** no eixo de **correção** (não QPS) — o IVF cosine é o pa
 
 ---
 
-## M122 — [ ] Embed totalmente assíncrono no vectorizer (fecha o xmin-pin sob endpoint pendurado)
+## M122 — [x] Embed totalmente assíncrono no vectorizer (fecha o xmin-pin sob endpoint pendurado)
 
 > Added 2026-07-20 by `/roadmap-feature` (slug: `async-embed-vectorizer`). Fonte: `theodb_rs/src/vectorizer.rs:15-16` (follow-up rastreado do M54/ADR-0016) + backlog "[M54 review — council-index HIGH-1]". See CHANGELOG `[Unreleased] § Added`.
 

@@ -79,8 +79,12 @@ class VectorDB:
 
     # --- schema + load ----------------------------------------------------
     def ensure_extension(self) -> None:
+        # theodb_rs provides its OWN `vector` type + operators (own-code since M70) AND the `ai.*` surface
+        # (ai.hybrid_search_rrf). The pre-M70 harness created pgvector's `vector`; against the current own-vector
+        # theodb that both conflicts (duplicate `vector` type) and omits `ai.*`. Create theodb_rs so the benchmark
+        # measures theodb's OWN vector + hybrid retrieval consistently (M123).
         with self._cursor() as cur:
-            cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
+            cur.execute("CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE")
 
     def create_table(self, table: str, dim: int, embed_col: str = "embedding") -> None:
         with self._cursor() as cur:
