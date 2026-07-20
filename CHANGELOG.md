@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Dogfood enabler: the theo-data retrieval anchor exercised end-to-end on a self-hosted TheoDB (M124).** A reproducible self-host quickstart (`docs/ops/self-host-quickstart.md`) + a re-runnable anchor smoke (`benchmarks/dogfood_anchor_smoke.sh`) that drives `theodb.create_vectorizer` → the vectorizer worker → `ai.hybrid_search_rrf`, with the QUERY path proven using **real** OpenAI embeddings (fused FTS+vector top-5, vector leg semantically alive). Dogfood manifest advanced `planned → wired`; first evidence recorded (`.claude/knowledge-base/dogfood/evidence/`) including two real failure stories (async vectorizer worker dead-letters embeds on self-host → #132; `create_vectorizer` does not backfill pre-existing rows). Honest: this is `wired`, NOT `running` — the production-ready claim stays unmade until sustained real use (≥30d, cross-repo).
 
 ### Changed
 
