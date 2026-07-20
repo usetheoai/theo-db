@@ -1983,7 +1983,7 @@ Recomendação #2 / Risco H6: a superioridade da híbrida (coração do pilar AI
 
 ---
 
-## M126 — [ ] Split do god-file `hnsw_page.rs` (3.456 LoC) — reduzir o risco de manutenção/segurança
+## M126 — [x] Split do god-file `hnsw_page.rs` (3.456 LoC) — reduzir o risco de manutenção/segurança
 
 > Added 2026-07-20 by gap-analysis (`knowledge-base/audits/2026-07-20-analysis.md` Recomendação 3 / Risco). Fonte: métrica A2/A4 do /analysis (`theodb_rs/src/am/hnsw_page.rs` = maior arquivo, hot-path, concentração de `unsafe`). See CHANGELOG `[Unreleased] § Added`.
 
