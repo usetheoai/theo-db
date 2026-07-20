@@ -13,6 +13,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Roadmap amended: added M122 Embed totalmente assíncrono no vectorizer (`/roadmap-feature async-embed-vectorizer`)
+- Roadmap amended: added M123 Significância estatística pareada do hybrid vs vector — BEIR (`/roadmap-feature hybrid-beir-significance`)
 
 ### Changed
 
