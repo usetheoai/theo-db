@@ -1777,13 +1777,16 @@ Quick-win barato no eixo exato (latência cosine/IP) que o M50 aponta como teto,
 
 > Added 2026-07-20 by `/roadmap-feature` (slug: `filtered-ann-resume-discarded`). Fonte: deep-view `§ P4` + `.claude/knowledge-base/backlog.md` ("M52 follow-up: iterative scan resume-from-discarded"). See CHANGELOG `[Unreleased] § Added`.
 
-**Objective:** Tornar o iterative scan do filtered ANN resumível a partir do discarded set (em vez de re-buscar o grafo inteiro com ef dobrado a cada esgotamento), fechando o ~3× de déficit de QPS vs pgvector 0.8 no caso RAG `WHERE tenant=X ORDER BY emb`.
+**Objective:** Tornar o iterative scan do filtered ANN resumível a partir do discarded set (em vez de re-buscar o grafo inteiro com ef dobrado a cada esgotamento), no caso RAG `WHERE tenant=X ORDER BY emb`.
 
-**Definition of done:**
+> **[RE-ESCOPO 2026-07-20 — owner-approved]** O DoD original (fechar o gap vs pgvector 0.8, ≤1.2×) foi **FALSIFICADO por medição**: theodb page-native é ~7–23× mais lento que o grafo in-memory do pgvector — gap estrutural de paradigma (ADR-0033/0035/0036), não de tuning. Nenhum claim de paridade pgvector é feito (Regra 5). O M118 é re-escopado para o resultado honesto **alcançável e medido**: correção + melhoria do PRÓPRIO path do theodb. Evidência: `docs/benchmarks/m118-resume-discarded.md`.
 
-- [ ] `amgettuple` mantém estado de scan resumível entre chamadas (discarded set) — sem re-percorrer o grafo do zero a cada esgotamento.
-- [ ] Recall mantido em paridade (≥ o atual) no filtered path; terminação ainda provável pelos bounds.
-- [ ] MEDIDO multi-seed: seletividades 1% / 10% / 50% fecham o gap de QPS vs pgvector 0.8 a recall casado (documentar em `docs/benchmarks/`).
+**Definition of done (re-escopado):**
+
+- [x] `amgettuple` mantém estado de scan resumível entre chamadas (discarded set) — sem re-percorrer o grafo do zero a cada esgotamento (`ann/scan_core.rs::ResumableGround` + `am/scan.rs` wiring).
+- [x] Recall mantido em paridade no filtered path — **recall@10 = 1.0** vs brute-force exato sob filtro seletivo (A/B in-PG, `Index Scan using theodb_hnsw`).
+- [x] MEDIDO own-path A/B: `resume ON` **~1.95× mais rápido** que o re-search M52 (`resume OFF`) a recall casado (14.33 vs 27.94 ms @ 0.9967) — `docs/benchmarks/m118-resume-discarded.md`. **[Gate original ≤1.2× vs pgvector: FALSIFICADO — não alcançável, não claimado.]**
+- [x] Bounded + kill-switch: `theodb_hnsw.resume_max_mb` (fail-safe, EC-5 no-panic) + `theodb_hnsw.resume` (on/off).
 
 **Dependencies:** M52 (filtered ANN / iterative scan). `[x]`.
 

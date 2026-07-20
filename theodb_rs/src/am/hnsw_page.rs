@@ -1680,6 +1680,9 @@ pub(crate) unsafe fn resumable_init(
     ef_search: usize,
 ) -> Result<Option<HnswResume>, String> {
     unsafe {
+        if !crate::am::guc::hnsw_resume() {
+            return Ok(None); // M118 kill-switch OFF — caller uses the M52 re-search (own-path A/B baseline)
+        }
         if meta.entry_level < 0 || meta.node_count == 0 {
             return Ok(None); // empty/unbuilt — caller falls back (traverse also short-circuits to [])
         }

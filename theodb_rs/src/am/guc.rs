@@ -95,6 +95,17 @@ pub(crate) fn hnsw_slot_reuse() -> bool {
     HNSW_SLOT_REUSE.get()
 }
 
+/// M118 — `SET theodb_hnsw.resume = on|off`: when ON (default), the filtered iterative scan RESUMES from the
+/// retained beam frontier (resume-from-discarded) instead of re-searching the graph with a doubled `ef`. OFF
+/// reverts to the M52 re-search (the pre-M118 path) — kept as an operator escape hatch and for the honest
+/// own-path A/B (`docs/benchmarks/m118-resume-discarded.md`). V1 (exact-f32) only; SBQ/AQ always re-search.
+pub(crate) static HNSW_RESUME: GucSetting<bool> = GucSetting::<bool>::new(true);
+
+/// Whether the filtered iterative scan uses resume-from-discarded (M118). Default ON.
+pub(crate) fn hnsw_resume() -> bool {
+    HNSW_RESUME.get()
+}
+
 /// E2 FastScan A/B kill-switch: when on (default), the `theodb_symqg` scan uses the batched FastScan 1-bit sign
 /// kernel; off forces the scalar `estimate_sign` path (same index/box — isolates the kernel's measured effect).
 pub(crate) static SYMQG_FASTSCAN: GucSetting<bool> = GucSetting::<bool>::new(true);
@@ -254,6 +265,14 @@ pub(crate) fn init() {
         c"When on, theodb_hnsw aminsert reuses a tombstoned slot in place (search + link) before growing pending",
         c"Bounds relation growth under DELETE+INSERT churn (M56 fase 2). Off = legacy pending-append (kill-switch / A/B).",
         &HNSW_SLOT_REUSE,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+    GucRegistry::define_bool_guc(
+        c"theodb_hnsw.resume",
+        c"When on (default), the filtered iterative scan resumes from the retained frontier (M118 resume-from-discarded)",
+        c"Off reverts to the M52 re-search-with-doubled-ef path (operator kill-switch + own-path A/B). V1 only; SBQ/AQ always re-search.",
+        &HNSW_RESUME,
         GucContext::Userset,
         GucFlags::default(),
     );

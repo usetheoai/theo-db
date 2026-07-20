@@ -7,11 +7,18 @@ goal: Replace the iterative-scan re-search-with-doubled-ef by resume-from-discar
 
 # Plan: M118 — Filtered ANN resume-from-discarded
 
-## Goal
+## Goal (RE-SCOPED 2026-07-20 — owner-approved after the ≤1.2×-vs-pgvector DoD was FALSIFIED by measurement)
 
-Replace the iterative HNSW scan's **re-search-with-doubled-ef** (M52) with **resume-from-discarded** in the page-native `traverse`, so the selective (1%) filtered-ANN case runs at **≤ 1.2× the QPS latency of pgvector 0.8.5** (down from the measured ~3× / 42.8 vs 14.6 ms) **at matched recall** (theodb recall ≥ current, within the 0.01 parity gate), proven by a multi-seed droplet benchmark.
+> **Original DoD FALSIFIED:** the ≤ 1.2× vs pgvector 0.8 target is structurally unachievable (page-native
+> read-on-demand vs pgvector's in-memory buffer-cached graph — measured ~7–23× slower; the paradigm gap of
+> ADR-0033/0035/0036). No pgvector-parity claim is made (`docs/benchmarks/m118-resume-discarded.md`, Rule 5).
 
-Single metric: **selective-case latency ratio theodb/pgvector ≤ 1.2×** at matched recall (multi-seed mean, `run_m52_filtered_ann.py` on a quiet droplet).
+Replace the iterative HNSW scan's **re-search-with-doubled-ef** (M52) with **resume-from-discarded** in the
+page-native scan, so the selective filtered-ANN case is (a) **correct** — recall@10 = 1.0 vs brute-force exact kNN
+under a selective filter — and (b) **faster than the M52 re-search it replaces** on theodb's OWN path.
+
+Single metric: **own-path A/B — `resume ON` latency < `resume OFF` (M52 re-search) latency at matched recall**
+(measured: 14.33 ms vs 27.94 ms @ recall 0.9967 → **~1.95× faster**, `docs/benchmarks/m118-resume-discarded.md`).
 
 ## Context
 

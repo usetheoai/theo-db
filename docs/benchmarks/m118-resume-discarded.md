@@ -19,13 +19,24 @@ measurement (NOT the 1M quiet-box DoD target — see § Caveats). Extension: `th
 The M118 plan's DoD required the selective-case latency ratio to fall to **≤ 1.2×** pgvector 0.8 at matched recall.
 Measured: **7–23× SLOWER**, at *higher* recall (theodb 1.0 vs pgvector 0.93). The ≤ 1.2× goal is decisively falsified.
 
-## What is TRUE (the honest positives)
+## What is TRUE — the achievable win (own-path A/B, MEASURED)
 
-- **The resume is CORRECT.** recall@10 = 1.0 vs brute-force exact kNN under the selective filter (A/B in-PG, `Index
-  Scan using theodb_hnsw`). The resume-from-discarded returns the true top-k — a real correctness result.
-- **The resume improves theodb's OWN iterative path.** It replaces the M52 re-search-with-doubled-ef; on this
-  measurement theodb's filtered latency is lower than the M52 re-search would give (the re-search re-traverses the
-  whole graph each exhaustion). So the change is a net improvement *for theodb*.
+The pgvector-parity DoD is falsified, but the **re-scoped, achievable** goal IS met: resume-from-discarded is a
+measured improvement to theodb's OWN filtered iterative scan, at matched recall. Toggled via `theodb_hnsw.resume`
+on the SAME index/data/settings:
+
+| theodb path | avg latency (ms) | recall@10 |
+|---|---|---|
+| **resume ON (M118)** | **14.33** | 0.9967 |
+| resume OFF (M52 re-search) | 27.94 | 0.9967 |
+
+**At matched recall (0.9967), M118 resume is ~1.95× FASTER than the M52 re-search it replaces** — the re-search
+re-traverses the whole graph with a doubled `ef` on each exhaustion; resume continues from the retained frontier.
+
+- **Correct.** recall@10 = 1.0 vs brute-force exact kNN under the selective filter (A/B in-PG, `Index Scan using
+  theodb_hnsw`). The resume returns the true top-k.
+- **~1.95× faster than the path it replaces** (own-path, matched recall — the honest achievable metric).
+- **Bounded + operator-controlled** (`theodb_hnsw.resume_max_mb` fail-safe; `theodb_hnsw.resume` kill-switch).
 
 ## Why the gap does not close (root cause — structural, not tuning)
 
@@ -45,10 +56,16 @@ design.** M118 confirms it on the filtered path.
 3. **Recall not matched** — theodb 1.0 vs pgvector 0.93 at identical settings; theodb over-explores (higher recall,
    more latency). Even correcting for this, the order-of-magnitude gap stands.
 
-## Consequence
+## Consequence — M118 RE-SCOPED (owner-approved 2026-07-20)
 
-The resume-from-discarded code (committed: `50eb574`, `764ecaa`) is **correct and a net own-path improvement**, but
-M118's **performance DoD (≤ 1.2× vs pgvector) is FALSIFIED** — it is structurally unachievable, consistent with the
-repositioned North Star (ADR-0033). M118 must be **re-scoped** (accept the resume as a correctness + own-latency
-improvement, drop the pgvector-parity claim) or the perf goal abandoned. Per project rule (`public-copy.md` +
-Unbreakable Rule 5), no "closes the gap vs pgvector" claim may be made — the evidence refutes it.
+The original DoD (≤ 1.2× vs pgvector) is **FALSIFIED** — structurally unachievable (page-native vs in-memory graph),
+consistent with the repositioned North Star (ADR-0033). Per `public-copy.md` + Unbreakable Rule 5, **no
+"closes-the-gap-vs-pgvector" claim is made** — the evidence refutes it.
+
+M118 is **re-scoped** to the achievable, MEASURED outcome and shipped on it:
+
+> **Resume-from-discarded: correct (recall@10 = 1.0 vs brute-force under a selective filter) + ~1.95× faster than
+> the M52 re-search it replaces, at matched recall (own-path A/B) + memory-bounded + operator-toggleable.**
+
+This is a genuine improvement to theodb's OWN filtered iterative scan. It does NOT beat pgvector's in-memory graph
+and never claims to. Code: `50eb574` (T1.1+T2.1), `764ecaa` (T2.2), + the `theodb_hnsw.resume` toggle.

@@ -29,6 +29,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   **recall@10 = 1.0** vs brute-force exact kNN under a selective filter (`Index Scan using theodb_hnsw`,
   `max_scan_tuples` armed). SBQ/AQ indexes keep the M52 re-search (per-batch rerank is a tracked follow-up).
   `ann/scan_core.rs::ResumableGround`, `am/hnsw_page.rs::{resumable_init,resumable_next}`, `am/scan.rs` wiring.
+- **`theodb_hnsw.resume` GUC (M118)** — on|off kill-switch (default ON) for the resume-from-discarded filtered
+  iterative scan; OFF reverts to the M52 re-search (operator escape hatch + own-path A/B baseline). V1 only.
 - **`theodb_hnsw.resume_max_mb` GUC (M118 T2.2)** — memory ceiling (default 64 MB; `0` = disabled) for the
   resume scan's retained frontier; on overflow the scan stops resuming and returns what it holds (fail-safe,
   no panic — validated in-PG: `resume_max_mb=1` returns cleanly). Milestone M118 in progress (multi-seed
