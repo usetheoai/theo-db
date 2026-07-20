@@ -27,7 +27,10 @@ $PSQL -c "ALTER SYSTEM SET theodb.embedding_api_key  = '${OPENAI_API_KEY}';" >/d
 $PSQL -c "SELECT pg_reload_conf();" >/dev/null
 
 note "1. FAILURE MODE (SSRF fail-closed): a non-http(s) endpoint must be rejected with a typed error"
-if $PSQL -c "SET theodb.embedding_endpoint='file:///etc/passwd'; SELECT theodb.embed('x');" 2>&1 | grep -qiE 'must be http|input'; then
+# Capture first (psql exits non-zero under ON_ERROR_STOP when the guard fires; a piped grep under pipefail would
+# see that non-zero and mask the match). The guard firing IS the pass condition.
+SSRF_OUT=$($PSQL -c "SET theodb.embedding_endpoint='file:///etc/passwd'; SELECT theodb.embed('x');" 2>&1 || true)
+if echo "$SSRF_OUT" | grep -qiE 'must be http'; then
   note "   PASS — non-http(s) endpoint rejected fail-closed"
 else
   note "   WARN — SSRF guard did not fire as expected"; FAIL=1
@@ -65,9 +68,10 @@ while [ $SECONDS -lt $deadline ]; do
   sleep 4
 done
 if [ "$pending" != "0" ]; then
-  note "   FAILURE MODE observed — $pending rows still unembedded after 120s (endpoint slow/429/misconfig)."
+  # DIAGNOSTIC, not a gate: the async-worker embed failure is a documented failure mode (issue #132). The gate is
+  # the fused QUERY path (step 5), proven via the session backfill. Recorded in async_worker_embedded=no.
+  note "   FAILURE MODE observed (diagnostic, not a gate) — $pending rows unembedded after 120s; worker path, see #132."
   note "   queue diagnostics:"; $PSQL -c "SELECT state, count(*) FROM theodb.vectorizer_queue GROUP BY 1" || true
-  FAIL=1
 fi
 
 WORKER_OK=$([ "$pending" = "0" ] && echo yes || echo no)
@@ -81,14 +85,29 @@ fi
 EMB=$($PSQL -tAc "SELECT count(*) FROM df_docs WHERE embedding IS NOT NULL")
 note "   rows embedded: $EMB / 5"
 
-note "5. the anchor QUERY path — ai.hybrid_search_rrf (FTS + REAL vector fused)"
-RES=$($PSQL -tAc "SELECT count(*) FROM ai.hybrid_search_rrf(
-  'df_docs','id','body_tsv','embedding',
-  query_text => 'how does the index keep vector search fast',
-  k => 60, per_leg_limit => 10, result_limit => 5)")
-note "   hybrid_search_rrf returned $RES fused rows (top result should be the HNSW/ANN doc — vector leg alive)"
-[ "${RES:-0}" -ge 1 ] || { note "   FAIL — empty fused result"; FAIL=1; }
+note "5. the anchor QUERY path — ai.hybrid_search_rrf must fuse BOTH legs (not either-leg-alone)"
+# Query chosen so BOTH legs are demonstrably alive: 'vector search' — its lexemes (vector & search) match the
+# FTS plainto_tsquery AND-filter on the HNSW/ANN doc, AND it is semantically embeddable for the vector leg. The
+# earlier query 'how does the index keep vector search fast' had NO doc matching all its lexemes → FTS leg empty
+# (review HIGH). We now assert each leg is non-empty AND that fusion actually SUMS (a both-leg doc scores above the
+# single-leg rank-1 ceiling 1/(k+1) = 1/61 ≈ 0.016393).
+QTEXT='vector search'
+FTS_HITS=$($PSQL -tAc "SELECT count(*) FROM df_docs WHERE body_tsv @@ plainto_tsquery('english', '$QTEXT')")
+VEC_HITS=$($PSQL -tAc "SELECT count(*) FROM df_docs WHERE embedding IS NOT NULL")
+note "   leg liveness: FTS matches=$FTS_HITS  vector-embedded=$VEC_HITS  (both must be >= 1)"
+[ "${FTS_HITS:-0}" -ge 1 ] || { note "   FAIL — FTS leg empty for '$QTEXT'"; FAIL=1; }
+[ "${VEC_HITS:-0}" -ge 1 ] || { note "   FAIL — vector leg empty"; FAIL=1; }
+$PSQL -c "SELECT h.id, round(h.score::numeric,6) AS rrf_score, left(d.body,50) AS body
+          FROM ai.hybrid_search_rrf('df_docs','id','body_tsv','embedding',
+                 query_text => '$QTEXT', k => 60, per_leg_limit => 10, result_limit => 5) h
+          JOIN df_docs d ON d.id = h.id::int ORDER BY h.score DESC;"
+RES=$($PSQL -tAc "SELECT count(*) FROM ai.hybrid_search_rrf('df_docs','id','body_tsv','embedding', query_text => '$QTEXT', k=>60, per_leg_limit=>10, result_limit=>5)")
+MAXSCORE=$($PSQL -tAc "SELECT round(max(score)::numeric,6) FROM ai.hybrid_search_rrf('df_docs','id','body_tsv','embedding', query_text => '$QTEXT', k=>60, per_leg_limit=>10, result_limit=>5)")
+# Fusion proof: a doc present in BOTH legs sums two RRF terms → score > single-leg rank-1 ceiling (1/61 ≈ 0.016393).
+FUSED=$(awk -v s="$MAXSCORE" 'BEGIN{print (s>0.016393)?"yes":"no"}')
+note "   hybrid_search_rrf returned $RES rows; max_score=$MAXSCORE; two-leg fusion (max>1/61)=$FUSED"
+[ "$FUSED" = "yes" ] || { note "   FAIL — max score <= 1/61: no doc scored by both legs (not a real fusion)"; FAIL=1; }
 
-# The anchor's CORE (the query path) is the pass/fail gate; the async-worker outcome is recorded as a diagnostic.
-echo "SMOKE_RESULT: $([ "${RES:-0}" -ge 1 ] && echo PASS || echo FAIL)  (query_path_fused_rows=${RES:-0}, embedded=$EMB/5, async_worker_embedded=$WORKER_OK)"
-[ "${RES:-0}" -ge 1 ]
+# The anchor's CORE (the fused query path) is the pass/fail gate; the async-worker outcome is a recorded diagnostic.
+echo "SMOKE_RESULT: $([ $FAIL -eq 0 ] && echo PASS || echo FAIL)  (fused_rows=${RES:-0}, max_score=${MAXSCORE}, two_leg_fusion=$FUSED, fts_hits=$FTS_HITS, embedded=$EMB/5, async_worker_embedded=$WORKER_OK)"
+[ $FAIL -eq 0 ]
