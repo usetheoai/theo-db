@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Dogfood production-readiness gate configured: anchor `theo-data-capability-on-theodb` (`rules/dogfood-golden-rule.md § 1` + `knowledge-base/dogfood/manifest.md`), honest status `planned` — no sustained real-use evidence yet, so no production-ready claim.
 
 ### Changed
 
