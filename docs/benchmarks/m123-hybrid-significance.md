@@ -26,11 +26,18 @@ vector-only is **NOT statistically significant on SciFact — parity.** Honest-n
 | seed / n_resamples | 20260720 / 100,000 |
 
 **Interpretation (honest):** the +0.004 mean gain that M53 reported is **within noise** — the 95% CI includes 0
-and p ≈ 0.25. The reason is stark in the counts: **296 of 300 queries are ties** (hybrid == vector). On SciFact
-the lexical/FTS leg is very weak (nDCG@10 = 0.07), so RRF fusion is dominated by the strong vector leg and rarely
-changes the top-10. There is no signal to call significant. Per the pre-declared contract (ADR M123-2: nDCG@10 on
+and p ≈ 0.25. The reason is stark in the counts: **296 of 300 queries are ties** (equal nDCG@10 — not necessarily
+identical top-10 ordering, but equal at the metric). Only **4 queries are informative** (3 hybrid-wins, 1 loss);
+the exact combinatorial two-sided p over the 2⁴=16 sign patterns is 4/16 = 0.25, which the permutation MC estimate
+(0.253) converges to — there is simply no power with 4 informative pairs, so "not significant" is unavoidable, not
+a modelling artefact. On SciFact the lexical/FTS leg is very weak (nDCG@10 = 0.07), so RRF fusion is dominated by
+the strong vector leg and rarely changes the ranking. Per the pre-declared contract (ADR M123-2: nDCG@10 on
 SciFact, no k-sweep / dataset-shopping), the honest verdict is **parity** — we do NOT claim hybrid beats vector on
 this dataset.
+
+Note on the CI: with only 4 informative pairs the bootstrap distribution is coarse/discrete and this is a
+percentile (not BCa) interval — the CI is approximate, but the verdict rests on the permutation p, and any interval
+here straddles 0.
 
 ## Method
 
@@ -62,6 +69,8 @@ python3 benchmarks/run_m53_hybrid_beir.py --dataset scifact --runs 1 --out docs/
   significant result (ADR M123-2).
 - **Candidate-set parity:** the vector leg and the hybrid's vector component retrieve over the same corpus at the
   same top-100 before fusion (no `@@`-filter candidate loss), so the paired comparison is clean — the 296 ties are
-  real agreement, not an artifact of a shrunken candidate set.
+  real agreement, not an artifact of a shrunken candidate set. Hard corroboration: **vector Recall@100 == hybrid
+  Recall@100 == 0.9733 exactly** — the FTS leg added zero relevant docs to the top-100, so the fusion had the same
+  candidates to work with; the parity is genuine, not a candidate-set artefact.
 - The absolute nDCG@10 (~0.73) is high because SciFact is a strong dense-retrieval dataset with text-embedding-3;
   this report is about the hybrid-vs-vector DIFFERENCE, not the absolute level.
