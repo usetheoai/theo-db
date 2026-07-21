@@ -1361,11 +1361,11 @@ pub unsafe extern "C-unwind" fn columnar_scan_analyze_next_tuple(
 // Typed-error stubs (D4 — append-only; unsupported callbacks fail loud with a clean SQLSTATE, never panic)
 // ===========================================================================================================
 
-// NOTE: these stubs are intentionally NOT `#[pg_guard]`. They only call `pg_sys::error!` — a C `ereport`/siglongjmp
-// with a `&'static str` message (no allocation, no Rust code that can panic), so there is no Rust unwind to guard
-// against crossing the C boundary. (Combining a `macro_rules!`-generated signature with the `#[pg_guard]` proc-macro
-// also breaks hygiene — pg_guard cannot see the macro-generated parameter idents. The real callbacks above ARE
-// `#[pg_guard]` because they run real Rust that could panic.)
+// HISTORY (#143): a note used to sit here claiming these stubs were "intentionally NOT `#[pg_guard]`" because
+// `pg_sys::error!` was "a C ereport/siglongjmp ... so there is no Rust unwind to guard against". That belief was
+// FALSE and it cost us a postmaster abort on `CREATE INDEX` over a columnar table: in pgrx 0.19 a PG ERROR is
+// raised as `panic_any`, which unwinds. The accurate rationale — including why the `#[pg_guard]` attribute cannot
+// be used from inside a `macro_rules!` — now lives in the macro body itself, next to the guard it explains.
 macro_rules! columnar_unsupported {
     ($name:ident ( $($arg:ident : $ty:ty),* $(,)? ) $( -> $ret:ty )? , $msg:literal) => {
         // M135/#143 — `#[pg_guard]` is LOAD-BEARING here, not decoration. In pgrx 0.19 a PG `ERROR` is raised as

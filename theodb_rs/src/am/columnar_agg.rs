@@ -734,12 +734,19 @@ unsafe fn try_swap_agg(plan: *mut pg_sys::Plan, rtable: *mut pg_sys::List) -> Op
                 return None; // nulls-first ≠ our nulls-last
             }
             let opno = *(*s).sortOperators.add(i);
-            // M135: PG18 generalized btree strategy numbers into an AM-agnostic `CompareType`, so the last
-            // out-param changed type AND the constant to compare against changed — `COMPARE_LT`, not
-            // `BTLessStrategyNumber`. This is not a recast: comparing against the old constant would silently
-            // accept the wrong ordering (utils/lsyscache.h, PG18).
+            // M135: PG18 generalized the btree strategy number into an AM-agnostic `CompareType`, so the last
+            // out-param changed TYPE. The VALUE did not change — `access/cmptype.h:34` defines `COMPARE_LT = 1`,
+            // i.e. exactly `BTLessStrategyNumber` — so this is a type port, not a semantic one. (An earlier
+            // version of this comment claimed the old constant "would silently accept the wrong ordering";
+            // council-index-storage caught that as false, and a wrong rationale would mislead anyone auditing
+            // the project's other strategy-number sites into expecting value drift that does not exist.)
+            //
+            // Seeded with `COMPARE_INVALID`, not `COMPARE_LT`: `lsyscache.c:275` overwrites it unconditionally
+            // today, but seeding the ACCEPT value means a future PG that returns early without writing the
+            // out-param would flip this gate from fail-closed to fail-open — wrong ordering accepted, wrong
+            // results, no error. Seeding the reject value costs nothing.
             let (mut opfamily, mut opcintype, mut cmptype) =
-                (pg_sys::InvalidOid, pg_sys::InvalidOid, pg_sys::CompareType::COMPARE_LT);
+                (pg_sys::InvalidOid, pg_sys::InvalidOid, pg_sys::CompareType::COMPARE_INVALID);
             pg_sys::get_ordering_op_properties(opno, &mut opfamily, &mut opcintype, &mut cmptype);
             if cmptype != pg_sys::CompareType::COMPARE_LT {
                 return None; // DESC (or non-btree) ≠ our ascending
