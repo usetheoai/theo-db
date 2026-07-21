@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Roadmap amended: added M132 fix #132 — vectorizer bgworker embeda no self-host (destrava o anchor de dogfood) (`/roadmap-feature vectorizer-worker-embed-fix`)
 
 ### Changed
 

@@ -2095,6 +2095,30 @@ Recomendação #3 / Risco de manutenção: com 19 arquivos >500 LoC e este a 3.4
 
 ---
 
+## M132 — [ ] Fix #132 — vectorizer bgworker embeda no self-host (destrava o anchor de dogfood)
+
+> Added 2026-07-21 (`/roadmap-feature vectorizer-worker-embed-fix`). **Maior alavanca da lista de maturidade:** o anchor de dogfood está travado em `wired` (só `running` sustenta claim de production-ready) e a própria evidência registra `outcome: partial` por causa deste defeito. Grill: `knowledge-base/grills/vectorizer-worker-embed-fix-feature-grill.md`.
+
+**Objective:** corrigir o **#132** — no self-host, o background worker do vectorizer **dead-letra TODOS os jobs de embed** (`state='failed'`, `attempts=5`, `last_error='embed/upsert failed'`) e a coluna de embedding fica NULL. Fila, trigger e máquina de estados funcionam (5 pending → 5 failed); só o passo de embed **dentro do worker** falha. Discriminador decisivo: com as MESMAS GUCs de instância, `theodb.embed(...)` e `theodb.embed_batch(...)` **funcionam em sessão normal** e **falham sempre no bgworker** → o delta é o contexto de execução do worker, não a requisição. Isso quebra a metade **frescor** da promessa AI-native ("o vectorizer mantém os embeddings frescos") no deploy alvo.
+
+**Definition of done:**
+
+- [ ] `last_error` passa a registrar a causa **subjacente** (status HTTP, ou "embedding GUC não visível no worker") em vez do wrapper genérico `embed/upsert failed` — hoje a mensagem esconde a raiz e exige debugger.
+- [ ] Log de startup do worker registra presença de endpoint/model e o **comprimento** da api-key (**nunca** o valor), tornando um worker mal-configurado diagnosticável só pelo log.
+- [ ] Causa-raiz identificada e corrigida: `benchmarks/dogfood_anchor_smoke.sh` num self-host termina com `SELECT state, count(*) FROM theodb.vectorizer_queue GROUP BY 1` mostrando **0 linhas em `failed`** e a coluna de embedding **non-NULL para toda linha inserida**.
+- [ ] Teste de regressão cobrindo **o caminho do worker** (não só o de sessão — o de sessão já passa hoje e não pegaria este defeito).
+- [ ] Arquivo de evidência de dogfood registrando o anchor passando, tirando-o de `outcome: partial`.
+
+**Dependencies:** M131 `[x]`, M122 `[x]` (o split async de embed — área de código), M124 `[x]` (o anchor + `dogfood_anchor_smoke.sh`).
+
+**Risks:** (a) a causa pode ser **visibilidade de placeholder-GUC dentro de `BackgroundWorker::transaction`** → o fix passaria a exigir registrar `theodb.embedding_*` como GUCs custom reais (mudança de configuração visível ao operador, precisa doc); mitigação: confirmar a causa pelo `last_error`/log melhorado ANTES de escolher entre "registrar GUCs reais" e "documentar onde o worker lê". (b) diferença de init HTTP/TLS no worker pode **interagir com o split async do M122** e reabrir o pin de `backend_xmin` que o M122 fechou; mitigação: re-rodar a prova de xmin do M122 após o fix e tratar regressão ali como bloqueante.
+
+**Boundary honesto:** é **correção de defeito operacional**, não capacidade nova. O caminho de query (`ai.hybrid_search_rrf`) já está provado (evidência `2026-07-20-anchor-smoke.md`); o que falta é o frescor assíncrono.
+
+**Prior art:** issue #132, `knowledge-base/dogfood/evidence/2026-07-20-anchor-failure-modes.md`, `benchmarks/dogfood_anchor_smoke.sh`, `../.claude/rules/dogfood-golden-rule.md § 2` (contrato `wired` → `running`).
+
+---
+
 ## Sequência e paralelismo
 
 ```
