@@ -13,9 +13,11 @@ the **target is not caller-controlled**, and **internal addresses are refused**.
 
 | | Before M134 | After M134 (measured) |
 |---|---|---|
-| Who may set `theodb.embedding_endpoint` | **any role** (unregistered placeholder GUC) | superuser only — `ERROR: permission denied to set parameter` |
-| `http://169.254.169.254/` (cloud metadata) | request issued by the DB host | `ERROR: 22023 … refusing to call blocked internal address` |
-| `http://10.0.0.1/`, `127.0.0.1`, `192.168.x`, `172.16.x`, `::1`, `0.0.0.0` | request issued | refused, address named |
+| Who may set `theodb.embedding_endpoint` | **any role** (unregistered placeholder GUC) | superuser, or a role explicitly granted SET — `ERROR: permission denied to set parameter` |
+| `http://169.254.169.254/` (cloud metadata) | request issued by the DB host | `ERROR: 22023 … resolves to a blocked internal address` |
+| `http://10.0.0.1/`, `127.0.0.1`, `192.168.x`, `172.16.x`, `::1`, `0.0.0.0` | request issued | refused |
+| NAT64 `64:ff9b::a9fe:a9fe`, 6to4, CGNAT `100.64/10`, multicast | request issued | refused (added post-review, F2) |
+| `http://169.254.169.254:x@api.openai.com/v1` (userinfo confusion) | request issued to the metadata service | refused (the BLOCKER the review caught, F1) |
 | `http://localhost:9/` (name, not literal) | request issued | refused — resolution happens **before** the check |
 | Unresolvable host | connection attempted | refused (fail-closed) |
 | Legitimate on-prem endpoint on 10/8 | worked | works via `theodb.egress_allowlist` (superuser-only) |
@@ -67,18 +69,33 @@ rather than a bypass.
 The guard lives in `http::post_json`, the **one** outbound call shared by embed, chat and rerank. A per-caller
 check would have left whichever caller was added next unguarded; this cannot be bypassed by a future caller.
 
-All eight refusals below carry SQLSTATE **22023** (`invalid_parameter_value`) and name the resolved address:
+All refusals below carry SQLSTATE **22023** (`invalid_parameter_value`). The transcript is from the FINAL binary
+(post-review), so the message is the F5 wording — the caller is told which host it asked for, and the resolved
+address goes to the server log only:
 
 ```
-ERROR:  22023: theodb.embed: refusing to call blocked internal address 169.254.169.254 (host 169.254.169.254) — loopback/private/link-local targets are denied; an operator may permit a specific host via theodb.egress_allowlist
-        … 127.0.0.1 (host 127.0.0.1)
-        … 10.0.0.1 (host 10.0.0.1)
-        … 172.16.0.1 (host 172.16.0.1)
-        … 192.168.0.1 (host 192.168.0.1)
-        … ::1 (host ::1)
-        … ::1 (host localhost)          ← a NAME, resolved first, then judged
-        … 0.0.0.0 (host 0.0.0.0)
+ERROR:  22023: theodb.embed: refusing to call 169.254.169.254 — it resolves to a blocked internal address
+        (loopback/private/link-local/NAT64 targets are denied). The resolved address is in the server log; an
+        operator may permit a specific host via theodb.egress_allowlist
+        … refusing to call 127.0.0.1
+        … refusing to call 10.0.0.1
+        … refusing to call 172.16.0.1
+        … refusing to call 192.168.0.1
+        … refusing to call 0.0.0.0
+        … refusing to call localhost      ← a NAME, resolved first, then judged
 ```
+
+and the matching operator-side log lines (26 in the verification run):
+
+```
+LOG:  theodb egress guard: theodb.embed denied host localhost -> blocked address ::1
+LOG:  theodb egress guard: theodb.embed denied host 10.0.0.1 -> blocked address 10.0.0.1
+LOG:  theodb egress guard: theodb.embed denied host m134-internal.localhost -> blocked address ::1
+```
+
+`http://[::1]:9/v1` is refused one step earlier — `endpoint is not a usable http(s) URL` — because a bracketed
+IPv6 literal is an authority shape `minreq` cannot dial either (it parses the host as `"["`). Refusing beats
+pretending to check something the client will never reach.
 
 The `localhost` line is the one that matters most: a check that only pattern-matched IP literals in the URL would
 have let it through. The guard resolves first and judges the **resolved addresses**, so a DNS name pointing at an
@@ -87,7 +104,7 @@ internal host is refused exactly like the literal.
 The chat path is covered by the same code, with the caller's own function name in the message:
 
 ```
-ERROR:  ai._chat: refusing to call blocked internal address 169.254.169.254 (host 169.254.169.254) — …
+ERROR:  ai._chat: refusing to call 169.254.169.254 — it resolves to a blocked internal address …
 ```
 
 **Fail-closed on unknown**, because "we could not check it" is not "it is safe":
