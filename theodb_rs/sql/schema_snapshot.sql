@@ -24,3 +24,15 @@ WHERE d.refclassid = 'pg_extension'::regclass
   AND d.deptype = 'e'
   AND e.extname = 'theodb_rs'
 ORDER BY 1;
+
+-- M137 §ACL — o oráculo acima cobre MEMBRESIA (`pg_depend`), não PRIVILÉGIO. Um upgrade que faça `DROP`+`CREATE`
+-- numa função perde o `REVOKE ... FROM PUBLIC` (só `CREATE OR REPLACE` preserva ACL), e isso passaria batido.
+-- Este segundo bloco fecha o buraco: lista as ACLs explícitas da superfície da extensão, ordenadas.
+-- Rodar com:  psql -tA -f schema_snapshot.sql   (as duas queries saem em sequência e o diff cobre ambas)
+SELECT 'acl ' || n.nspname || '.' || p.proname || ' = ' || COALESCE(array_to_string(p.proacl, ','), '(default)')
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+JOIN pg_depend d ON d.objid = p.oid AND d.classid = 'pg_proc'::regclass AND d.deptype = 'e'
+JOIN pg_extension e ON e.oid = d.refobjid AND e.extname = 'theodb_rs'
+WHERE p.proacl IS NOT NULL
+ORDER BY 1;

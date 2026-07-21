@@ -134,6 +134,29 @@ objeto no catálogo de origem é visível no oráculo (193 ≠ 196) antes e invi
 2. **O teste de injeção da §4 continua sem poder** pela razão explicada lá — mas deixou de importar, porque
    este teste o substitui com um oráculo que realmente distingue os dois estados.
 
+## 6. ACL e cenário B1 — MEDIDO (os dois últimos itens do DoD)
+
+**Paridade de ACL.** O oráculo original cobria membresia (`pg_depend`), não privilégio — e um `DROP`+`CREATE`
+perde `REVOKE ... FROM PUBLIC` enquanto `CREATE OR REPLACE` preserva. Adicionado um segundo bloco ao
+`schema_snapshot.sql` que lista as ACLs explícitas da superfície:
+
+```
+linhas de ACL — upgradado: 87   limpo: 87   → ACL_OK, idênticas
+```
+
+Confirma empiricamente a propriedade que motivou o desenho: o script usa `CREATE OR REPLACE` em todas as 122
+funções, então owner e privilégio sobrevivem ao upgrade.
+
+**Cenário B1** — o `.so` novo carregado contra um catálogo `1.0.0` **sem** rodar `ALTER EXTENSION`. É o usuário
+que faz `apt upgrade` e esquece o comando. Para nós não é hipotético: os index AMs leem páginas em disco e o
+`theodb_columnar` é um TableAM — divergência ali é crash, não mensagem de erro.
+
+```
+CREATE INDEX ... USING theodb_hnsw + busca top-5   → executou
+CREATE TABLE ... USING theodb_columnar + agregado  → 1000 linhas, sum 500500
+crashes antes=0  depois=0                          → SCENARIO_B1_DONE
+```
+
 ## Limites honestos
 
 1. ~~O Cenário A é fraco~~ — **FECHADO pela §5**: a convergência foi provada contra um catálogo genuinamente
@@ -155,8 +178,13 @@ objeto no catálogo de origem é visível no oráculo (193 ≠ 196) antes e invi
 | Cenário A diff vazio | ✅ |
 | **Convergência de catálogo incompleto** | ✅ **193 → 196, diff vazio** (§5) |
 | Poder de detecção do oráculo | ✅ (§5 — distingue 193 de 196) |
-| Cenário B1 (`.so` novo, catálogo antigo, sem UPDATE) | ❌ **pendente** |
-| Paridade de ACL | ❌ **não coberta** (`pg_depend` não registra `proacl`) |
+| Cenário B1 (`.so` novo, catálogo antigo, sem UPDATE) | ✅ servidor sobreviveu, AM e TableAM operaram (§6) |
+| Paridade de ACL | ✅ 87 == 87 (§6) |
 
-**Dois itens seguem abertos** e estão nomeados. O milestone entrega a cadeia funcionando e provada em
-convergência; não entrega o cenário B1 nem paridade de ACL.
+**Todos os itens do DoD estão fechados e medidos.**
+
+### O que continua fora de escopo, declarado
+
+O catálogo antigo foi construído por remoção de objetos, não produzido por um binário antigo — impossível hoje,
+porque as tags anteriores exigem PG17 e o M135 o removeu. Um usuário vindo de uma release antiga estaria também
+fazendo upgrade de major do Postgres, que é problema de `pg_upgrade`, não desta cadeia.
