@@ -2143,7 +2143,7 @@ Recomendação #3 / Risco de manutenção: com 19 arquivos >500 LoC e este a 3.4
 
 ---
 
-## M134 — [ ] Fix #117 — SSRF cego via `theodb.llm_endpoint` setável pelo chamador
+## M134 — [x] Fix #117 — SSRF cego via `theodb.llm_endpoint` setável pelo chamador
 
 > Added 2026-07-21 (`/roadmap-feature llm-endpoint-ssrf-hardening`). Barreira de entrada para **qualquer** deploy multi-tenant ou com roles não-confiáveis. Grill: `knowledge-base/grills/llm-endpoint-ssrf-hardening-feature-grill.md`.
 
