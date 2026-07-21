@@ -2072,6 +2072,29 @@ Recomendação #3 / Risco de manutenção: com 19 arquivos >500 LoC e este a 3.4
 
 ---
 
+## M131 — [ ] Fix #135 — destravar o columnar-agg pushdown (planner hang em tabelas largas mixed-type)
+
+> Added 2026-07-21 (`/roadmap-feature columnar-agg-planner-hang-fix`). Pré-requisito para um **rank ClickBench colunar defensável**: hoje o run colunar do M128 só mede o storage-path (agg OFF = latência nível-heap); o pushdown vetorizado de agregado (a vantagem colunar de verdade) é inutilizável em `hits` real por causa do #135. Grill: `knowledge-base/grills/columnar-agg-planner-hang-fix-feature-grill.md`.
+
+**Objective:** corrigir o **#135** — o CustomScan `theodb_columnar_agg` **trava no PLANNER (uninterruptível, durante o planning, não a execução)** em tabelas largas mixed-type/TEXT-heavy como o `hits` real do ClickBench (105 colunas). Como está no planner, `statement_timeout` NÃO mata — só restart do servidor. Tabelas estreitas/uniformes NÃO reproduzem; o gatilho é a interação do schema largo+TEXT-heavy com um loop patológico no path/cost creation do CustomScan. Destravar isso converte "temos entrada ClickBench" em "temos aceleração colunar rankeável".
+
+**Definition of done:**
+
+- [ ] `EXPLAIN SELECT UserID, COUNT(*) FROM hits GROUP BY UserID` no `hits` real de 105 colunas com `theodb.enable_columnar_agg = on` planeja em **< 1s** (sem hang, sem restart) — measurement-first, o repro exato do #135.
+- [ ] **Guard de latência de planner**: quando o CustomScan não consegue custear o path barato (limiar de largura/tipo), faz fallback ao plano nativo em vez de travar — um plano patológico nunca mais trava o backend (defesa em profundidade).
+- [ ] Teste de regressão de **GROUP BY em tabela larga (100+ col, TEXT-heavy)** adicionado aos testes do planner colunar.
+- [ ] **ClickBench colunar-acelerado MEDIDO**: re-rodar o harness do M128 com `enable_columnar_agg = on`; as queries de agregação vencem o storage-path/heap no MESMO box, com resultado **byte-idêntico** A/B vs heap (oracle de corretude preservado). Honesto: self-hosted, não canônico; UNBENCHMARKED clean-exit se o path acelerado ainda não rodar. `customscan=1` provado (não fallback nativo silencioso).
+
+**Dependencies:** M128 `[x]` (a entrada ClickBench + o harness que revelou o #135), M100/M114/M115 `[x]` (o CustomScan `theodb_columnar_agg` cujo planner é corrigido).
+
+**Risks:** (a) o loop patológico pode estar fundo na interação DataFusion/planner (não um O(cols²) simples) → mitigação: **spike de profiling measurement-first** do `plan_custom_path`/cost hook em tabela larga mixed-type ANTES de comprometer a abordagem (discover-first). (b) o guard de latência pode super-disparar e desligar a aceleração em tabelas legitimamente largas → mitigação: limiar **medido/tunável** + assert de que a aceleração AINDA engata no `hits` real após o fix (`customscan=1`, não fallback nativo silencioso).
+
+**Boundary honesto:** é um fix de **correção de planner-integration** (destrava uma otimização existente), não capacidade nova. Habilita o rank ClickBench colunar; performance vira claim só com benchmark (`../.claude/rules/public-copy.md`).
+
+**Prior art:** `theodb_rs/src/am/columnar_agg.rs::plan_custom_path`, `benchmarks/run_m128_clickbench.py`, PostgreSQL `setrefs.c::set_customscan_references`, `docs/benchmarks/columnar-groupby-verdict.md`, issue #135.
+
+---
+
 ## Sequência e paralelismo
 
 ```

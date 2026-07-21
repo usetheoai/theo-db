@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Roadmap amended: added M131 fix #135 — destravar o columnar-agg pushdown (planner hang em tabelas largas mixed-type) (`/roadmap-feature columnar-agg-planner-hang-fix`)
 
 ### Changed
 
