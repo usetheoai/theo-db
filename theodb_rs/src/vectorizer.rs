@@ -274,6 +274,10 @@ fn _vectorizer_mark_done(job_id: i64, owner: &str) -> bool {
 /// recorded (Rule 8 — never swallow). Returns true iff the guarded row matched (false = lease lost, discard).
 #[pg_extern]
 fn _vectorizer_mark_failed(job_id: i64, owner: &str, err: &str, max_attempts: i32) -> bool {
+    // Sanitize AT THE SINK (council-security MEDIUM): redact credential-shaped runs and bound the length here, so
+    // no present or future caller can persist a secret (or an unbounded blob) into `last_error`.
+    // `super::` — this fn lives inside the `#[pg_schema] mod theodb_rs`; the helper is at file scope.
+    let err = &super::sanitize_error_text(err);
     Spi::connect_mut(|client| {
         client
             .update(
@@ -687,14 +691,63 @@ fn in_subtxn<T>(f: impl FnOnce() -> T) -> Option<T> {
     in_subtxn_msg(f).ok()
 }
 
-/// Bound the stored cause so one poison row cannot bloat the queue table. Char-boundary safe (a byte slice could
-/// split a multi-byte UTF-8 sequence and panic).
-pub(crate) fn truncate_cause(cause: &str) -> String {
+/// Sanitize an error message before it is PERSISTED in `last_error` (council-security MEDIUM).
+///
+/// The embed path echoes up to 200 chars of the endpoint's response body into its error
+/// (`embed.rs: "unexpected embedding response shape: {body}"`). That echo was previously log-only — logs rotate.
+/// M132 persists the cause in a table row that survives in the dead-letter, so an endpoint mistakenly pointed at an
+/// echo/debug service (which reflects request headers in its 200 body) would write `Authorization: Bearer <token>`
+/// into durable storage. Redact credential-shaped runs FIRST, then bound the length.
+///
+/// Applied at the SINK (`_vectorizer_mark_failed`), not at the call site, so a future caller cannot bypass it.
+/// No regex dependency (parsimony rung 2 — plain scanning is enough for these two shapes).
+pub(crate) fn sanitize_error_text(cause: &str) -> String {
     const MAX: usize = 400;
-    if cause.chars().count() <= MAX {
-        return cause.to_string();
+    const REDACTED: &str = "«redacted»";
+    // A credential run ends at whitespace or a JSON/quote delimiter.
+    fn is_token_char(c: char) -> bool {
+        !c.is_whitespace() && c != '"' && c != '\'' && c != ',' && c != '}' && c != ')'
     }
-    cause.chars().take(MAX).collect::<String>() + "…(truncated)"
+    let mut out = String::with_capacity(cause.len());
+    let lower = cause.to_lowercase();
+    let bytes: Vec<char> = cause.chars().collect();
+    let lower_chars: Vec<char> = lower.chars().collect();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        // `Bearer <token>` (case-insensitive) → keep the scheme, drop the credential.
+        let is_bearer = lower_chars[i..].starts_with(&['b', 'e', 'a', 'r', 'e', 'r', ' ']);
+        // `sk-…` style API keys (OpenAI and lookalikes) with a meaningful length.
+        let is_sk = lower_chars[i..].starts_with(&['s', 'k', '-']);
+        if is_bearer {
+            out.push_str("Bearer ");
+            i += 7;
+            while i < bytes.len() && is_token_char(bytes[i]) {
+                i += 1;
+            }
+            out.push_str(REDACTED);
+            continue;
+        }
+        if is_sk {
+            let start = i;
+            let mut j = i;
+            while j < bytes.len() && is_token_char(bytes[j]) {
+                j += 1;
+            }
+            if j - start >= 20 {
+                out.push_str(REDACTED);
+                i = j;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    // Bound the stored text so one poison row cannot bloat the queue table. Char-boundary safe (byte slicing could
+    // split a multi-byte UTF-8 sequence and panic).
+    if out.chars().count() <= MAX {
+        return out;
+    }
+    out.chars().take(MAX).collect::<String>() + "…(truncated)"
 }
 
 /// M132 (#132): the worker's view of the embedding config, as ONE log line at startup.
@@ -733,13 +786,20 @@ pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
     // M132 (#132): report the worker's OWN view of the embedding config once at startup. A worker that booted
     // without the `ALTER SYSTEM` GUCs (the probable cause of the original report) is identifiable from this single
     // line instead of a debugger. Key length only — never the value.
+    // Subtxn-isolated: a diagnostic must never be able to kill the thing it exists to diagnose
+    // (council-rust-pgrx LOW). `guc()` runs SPI; a genuine PG ERROR there would unwind out of
+    // `BackgroundWorker::transaction` (which registers no handler), exit the worker and put it in a 5 s
+    // crash-restart loop. Swallowing it here is the ONE place that is correct: losing the log line degrades
+    // diagnosis, losing the worker stops all embedding.
     BackgroundWorker::transaction(|| {
-        let line = startup_config_line(
-            crate::pg::guc("theodb.embedding_endpoint").as_deref(),
-            crate::pg::guc("theodb.embedding_model").as_deref(),
-            crate::pg::guc("theodb.embedding_api_key").as_deref(),
-        );
-        pgrx::log!("{line}");
+        let _ = in_subtxn(|| {
+            let line = startup_config_line(
+                crate::pg::guc("theodb.embedding_endpoint").as_deref(),
+                crate::pg::guc("theodb.embedding_model").as_deref(),
+                crate::pg::guc("theodb.embedding_api_key").as_deref(),
+            );
+            pgrx::log!("{line}");
+        });
     });
 
     while BackgroundWorker::wait_latch(Some(std::time::Duration::from_secs(WORKER_POLL_SECS))) {
@@ -812,30 +872,37 @@ pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
                         .expect("vectorizer process job failed");
                 })
             });
-            let ok = outcome.is_ok();
+            // Report the OWNER-GUARDED mark result, not merely "the work ran" (council-rust-pgrx MEDIUM). A `false`
+            // mark means the lease was lost and the row now belongs to another worker (the H1 fencing contract on
+            // `_vectorizer_mark_done`). Counting such a job as processed here would double-count it — the new owner
+            // counts it too — and would misreport work this worker no longer owns.
             BackgroundWorker::transaction(|| {
+                // Both arms use bound parameters. `owner`/`job_id` are not attacker-controlled today, but keeping
+                // one arm interpolated while its sibling binds is exactly the asymmetry a future refactor turns
+                // into a real injection (council-security LOW).
                 match &outcome {
-                    Ok(()) => {
-                        let _ = Spi::run(&format!(
-                            "SELECT theodb_rs._vectorizer_mark_done({job_id}, '{owner}')"
-                        ));
-                    }
-                    // Bound parameter, NOT string interpolation: the message is arbitrary text (it can contain
-                    // quotes) — interpolating it into the SQL literal would be an injection vector.
+                    Ok(()) => Spi::get_one_with_args::<bool>(
+                        "SELECT theodb_rs._vectorizer_mark_done($1, $2)",
+                        &[job_id.into(), owner.clone().into()],
+                    )
+                    .ok()
+                    .flatten()
+                    .unwrap_or(false),
+                    // The message is arbitrary text (it can contain quotes); the sink also redacts + truncates it.
                     Err(cause) => {
                         let _ = Spi::run_with_args(
                             "SELECT theodb_rs._vectorizer_mark_failed($1, $2, $3, $4)",
                             &[
                                 job_id.into(),
                                 owner.clone().into(),
-                                truncate_cause(cause).into(),
+                                cause.clone().into(),
                                 WORKER_MAX_ATTEMPTS.into(),
                             ],
                         );
+                        false
                     }
                 }
-            });
-            ok
+            })
         };
 
         // Deletes: per-job (no embed). Upserts: grouped by vectorizer for ONE embed_batch HTTP round-trip.
@@ -1376,11 +1443,30 @@ mod tests {
 
     /// M132 — the stored cause is bounded and never splits a multi-byte char.
     #[pg_test]
-    fn test_m132_truncate_cause_is_bounded_and_char_safe() {
-        assert_eq!(super::truncate_cause("short"), "short");
+    fn test_m132_sanitize_is_bounded_and_char_safe() {
+        assert_eq!(super::sanitize_error_text("short"), "short");
         let long = "é".repeat(1000); // multi-byte: a byte-slice truncation would panic
-        let out = super::truncate_cause(&long);
+        let out = super::sanitize_error_text(&long);
         assert!(out.ends_with("…(truncated)"), "must mark truncation");
         assert!(out.chars().count() < 1000, "must be bounded");
+    }
+
+    /// M132 (council-security MEDIUM) — a credential echoed back by a misconfigured endpoint must NEVER be
+    /// persisted in `last_error`. The embed path echoes up to 200 chars of the response body; an echo/debug
+    /// service reflects the request headers, so this is the realistic leak shape.
+    #[pg_test]
+    fn test_m132_sanitize_redacts_credentials_before_persisting() {
+        let echoed = r#"theodb.embed_batch: unexpected embedding response shape: {"headers": {"Authorization": "Bearer sk-proj-AAAABBBBCCCCDDDDEEEEFFFFGGGG"}}"#;
+        let safe = super::sanitize_error_text(echoed);
+        assert!(!safe.contains("sk-proj-AAAABBBBCCCCDDDDEEEEFFFFGGGG"), "token must be redacted: {safe}");
+        assert!(safe.contains("«redacted»"), "must mark the redaction: {safe}");
+        assert!(safe.contains("unexpected embedding response shape"), "the diagnostic must survive: {safe}");
+
+        // A bare `sk-…` run (no Bearer scheme) is redacted too.
+        let bare = super::sanitize_error_text("key was sk-abcdefghijklmnopqrstuvwxyz0123 rejected");
+        assert!(!bare.contains("sk-abcdefghijklmnopqrstuvwxyz0123"), "bare key must be redacted: {bare}");
+
+        // A short `sk-` fragment is NOT a credential — do not mangle ordinary text.
+        assert_eq!(super::sanitize_error_text("sk-short"), "sk-short");
     }
 }

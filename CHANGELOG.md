@@ -38,6 +38,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   on the current build — a clean end-to-end embeds 5/5 fresh rows with the queue draining to 0 failures
   (`knowledge-base/discoveries/blueprints/vectorizer-worker-embed-blueprint.md`). This milestone ships the
   diagnosability that made the original report cost a day, not a fix for an absent defect.
+  Hardened after review (council-security + council-rust-pgrx, both 0 BLOCKER/0 HIGH): the persisted cause is
+  **sanitized at the sink** — credential-shaped runs (`Bearer …`, `sk-…`) are redacted and the text bounded inside
+  `_vectorizer_mark_failed`, so a misconfigured echo endpoint reflecting `Authorization` headers into its 200 body
+  can no longer write a token into a durable table row (logs rotate, dead-letter rows do not); a job is now counted
+  as processed only when its **owner-guarded** `mark_done` succeeds, so a lease-lost job is never double-counted by
+  two workers (the H1 fencing contract); the new startup diagnostic is subtransaction-isolated so it can never crash
+  the worker it exists to diagnose; and both mark arms use bound parameters.
 
 ### Security
 
