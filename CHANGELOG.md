@@ -22,6 +22,16 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Removed
 
 ### Fixed
+- **Columnar-aggregate CustomScan: EXPLAIN no longer hangs on `ORDER BY <aggregate>` (M131, closes #135).** The
+  swapped `theodb_columnar_agg` CustomScan published a self-referential `custom_scan_tlist` (`Var(INDEX_VAR, i)`
+  entries), so PostgreSQL's `ruleutils.c::resolve_special_varno` recursed forever whenever a `Sort` above the node
+  had a key on the aggregate output — `EXPLAIN` never returned and was uninterruptible (`statement_timeout` does not
+  fire during plan printing). `custom_scan_tlist` now carries deparse-safe expressions (group keys → base-rel `Var`s;
+  aggregates → their `Aggref` with arguments rebuilt as base-rel `Var`s); the executed `plan.targetlist` is
+  unchanged, so query results are untouched. Root cause established by a live gdb backtrace — the issue's
+  "planner hang / O(cols²) / wide-table" diagnosis was **falsified**: the hang was in EXPLAIN deparse, not planning
+  or execution (the affected query always executed correctly in 0.5 s), and the trigger is `ORDER BY <aggregate>`,
+  not table width (`knowledge-base/discoveries/blueprints/columnar-agg-planner-hang-blueprint.md`).
 
 ### Security
 

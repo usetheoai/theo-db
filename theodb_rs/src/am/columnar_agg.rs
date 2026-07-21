@@ -531,6 +531,90 @@ unsafe fn plain_var_tlist(tlist: *mut pg_sys::List) -> *mut pg_sys::List {
     out
 }
 
+/// Build the DEPARSE-SAFE `custom_scan_tlist` (M131 — fix #135). For a `scanrelid = 0` CustomScan, ruleutils resolves
+/// an upper node's Var down through `custom_scan_tlist` (`resolve_special_varno`), which recurses while the resolved
+/// expr is itself a `Var`, and stops on any non-`Var` node. `plain_var_tlist` produced `Var(INDEX_VAR, i)` entries, so
+/// resolving pointed right back at the same entry — an INFINITE recursion that hung EXPLAIN whenever a `Sort` above
+/// this node had a key referencing the aggregate output (`ORDER BY count(*)`; ClickBench Q16/Q33). Live gdb backtrace
+/// in `knowledge-base/discoveries/blueprints/columnar-agg-planner-hang-blueprint.md`.
+///
+/// Every entry here is therefore a NON-special expression:
+/// - a group key → a base-rel `Var` (real `varno` = the scanned rel; its RTE survives dropping the child plan node),
+/// - an aggregate → its `Aggref` (a non-`Var` node, so resolution stops at it) with any argument `Var` rebuilt as a
+///   base-rel `Var` — the post-`set_plan_refs` argument is `OUTER_VAR` into the subtree we dropped, which would
+///   re-introduce the same hazard when ruleutils deparses the aggregate's arguments.
+///
+/// `plan.targetlist` is deliberately NOT changed (it stays `plain_var_tlist`): the executed output is untouched and
+/// the M115 invariant "no `Aggref` in the executed tlist" holds. This node is inserted post-`set_plan_refs`, so
+/// `set_customscan_references` never re-processes `custom_scan_tlist`; EXPLAIN deparse is its only consumer.
+unsafe fn deparse_safe_tlist(
+    tlist: *mut pg_sys::List,
+    adm: &Admitted,
+    scanrelid: u32,
+) -> *mut pg_sys::List {
+    let src = PgList::<pg_sys::TargetEntry>::from_pg(tlist);
+    let mut out: *mut pg_sys::List = std::ptr::null_mut();
+    for i in 0..src.len() {
+        let Some(te) = src.get_ptr(i) else { continue };
+        let e = (*te).expr as *mut pg_sys::Node;
+        // What does this output column represent? Grouped plans carry an explicit layout; the scalar path is
+        // one aggregate per output column, in order.
+        let (is_group, idx) = if adm.layout.is_empty() {
+            (false, i)
+        } else {
+            match adm.layout.get(i) {
+                Some(&(tag, k)) => (tag == 0, k),
+                None => (false, i),
+            }
+        };
+        let expr: *mut pg_sys::Expr = if is_group {
+            match adm.group_cols.get(idx) {
+                Some(&(attno, typoid)) => pg_sys::makeVar(
+                    scanrelid as i32,
+                    attno as pg_sys::AttrNumber,
+                    pg_sys::Oid::from(typoid),
+                    pg_sys::exprTypmod(e),
+                    pg_sys::exprCollation(e),
+                    0,
+                ) as *mut pg_sys::Expr,
+                None => continue,
+            }
+        } else {
+            // Copy the Aggref so the original (shared) plan nodes are never mutated, then rebuild its argument Var
+            // against the base rel so deparsing the arguments never follows OUTER_VAR into the dropped subtree.
+            let copied = pg_sys::copyObjectImpl(e as *const c_void) as *mut pg_sys::Node;
+            if !copied.is_null() && (*copied).type_ == pg_sys::NodeTag::T_Aggref {
+                let aggref = copied as *mut pg_sys::Aggref;
+                let attno = adm.aggs.get(idx).map(|a| a.attno).unwrap_or(0);
+                if attno > 0 {
+                    let args = PgList::<pg_sys::TargetEntry>::from_pg((*aggref).args);
+                    for j in 0..args.len() {
+                        let Some(ate) = args.get_ptr(j) else { continue };
+                        let av = (*ate).expr as *mut pg_sys::Node;
+                        if !av.is_null() && (*av).type_ == pg_sys::NodeTag::T_Var {
+                            let v = av as *mut pg_sys::Var;
+                            // makeVar sets the *syn fields consistently — safer than poking them field by field.
+                            (*ate).expr = pg_sys::makeVar(
+                                scanrelid as i32,
+                                attno as pg_sys::AttrNumber,
+                                (*v).vartype,
+                                (*v).vartypmod,
+                                (*v).varcollid,
+                                0,
+                            ) as *mut pg_sys::Expr;
+                        }
+                    }
+                }
+            }
+            copied as *mut pg_sys::Expr
+        };
+        let nte =
+            pg_sys::makeTargetEntry(expr, (i + 1) as pg_sys::AttrNumber, (*te).resname, (*te).resjunk);
+        out = pg_sys::lappend(out, nte as *mut c_void);
+    }
+    out
+}
+
 /// Encode a stashed admission as the CustomScan's `custom_private` IntList (M115 layout, table OID first):
 /// `[table_oid, mode, nagg, (kind,attno)×nagg, npred, (col,op,hi,lo)×npred, ngroup, (attno,typoid)×ngroup,
 ///  noutput, (kind,idx)×noutput]`.
@@ -655,7 +739,9 @@ unsafe fn try_swap_agg(plan: *mut pg_sys::Plan, rtable: *mut pg_sys::List) -> Op
     cscan.custom_plans = std::ptr::null_mut();
     cscan.custom_exprs = std::ptr::null_mut();
     cscan.custom_private = encode_private(&adm, table_oid);
-    cscan.custom_scan_tlist = plain_var_tlist(tlist);
+    // M131 (#135): NOT `plain_var_tlist` — a self-referential INDEX_VAR here makes ruleutils' `resolve_special_varno`
+    // recurse forever when a Sort above this node has a key on the aggregate output, hanging EXPLAIN.
+    cscan.custom_scan_tlist = deparse_safe_tlist(tlist, &adm, scanrelid);
     cscan.custom_relids = std::ptr::null_mut();
     cscan.methods = &SCAN_METHODS.0;
     Some(cscan.into_pg() as *mut pg_sys::Plan)
@@ -1196,5 +1282,55 @@ mod tests {
 
         Spi::run("DROP TABLE m115c").unwrap();
         Spi::run("DROP TABLE m115h").unwrap();
+    }
+
+    /// M131 regression for #135. Before the fix, `custom_scan_tlist` held self-referential `Var(INDEX_VAR, i)`
+    /// entries, so ruleutils' `resolve_special_varno` recursed forever whenever a `Sort` ABOVE this CustomScan had a
+    /// key on the aggregate output — EXPLAIN never returned (uninterruptible; ClickBench Q16/Q33). The trigger is
+    /// `ORDER BY <aggregate>` + EXPLAIN — NOT table width or column types (ADR M131-2), so this test asserts exactly
+    /// that shape. `FORMAT JSON` renders `Sort Key`, i.e. it exercises the same deparse path that hung.
+    #[pg_test]
+    fn test_m131_explain_orderby_aggregate_deparses() {
+        Spi::run("SET theodb.enable_columnar_agg = on").unwrap();
+        Spi::run("CREATE TABLE m131c (k int4, v int4) USING theodb_columnar").unwrap();
+        Spi::run("INSERT INTO m131c SELECT g % 50, g FROM generate_series(1,5000) g").unwrap();
+
+        // (a) single group key + ORDER BY the aggregate + LIMIT (the ClickBench Q16 shape).
+        let j = Spi::get_one::<pgrx::Json>(
+            "EXPLAIN (FORMAT JSON) SELECT k, count(*) FROM m131c GROUP BY k ORDER BY count(*) DESC LIMIT 10",
+        )
+        .unwrap()
+        .expect("EXPLAIN must return a plan — it hung forever before the #135 fix");
+        let s = serde_json::to_string(&j.0).unwrap();
+        assert!(
+            s.contains("theodb_columnar_agg"),
+            "the columnar-agg CustomScan must engage AND deparse under ORDER BY <aggregate>: {s}"
+        );
+
+        // (b) multi group key + ORDER BY an aliased aggregate (the ClickBench Q33 shape).
+        let j2 = Spi::get_one::<pgrx::Json>(
+            "EXPLAIN (FORMAT JSON) SELECT k, v, count(*) AS c FROM m131c GROUP BY k, v ORDER BY c DESC",
+        )
+        .unwrap()
+        .expect("multi-key EXPLAIN with ORDER BY aggregate must return a plan");
+        assert!(
+            !serde_json::to_string(&j2.0).unwrap().is_empty(),
+            "multi-key ORDER BY aggregate must deparse"
+        );
+
+        // (c) the results themselves stay correct with the pushdown engaged (deparse fix must not change execution).
+        Spi::run("CREATE TABLE m131h (k int4, v int4)").unwrap();
+        Spi::run("INSERT INTO m131h SELECT g % 50, g FROM generate_series(1,5000) g").unwrap();
+        let top = |t: &str| {
+            Spi::get_one::<i64>(&format!(
+                "SELECT count(*) FROM (SELECT k, count(*) c FROM {t} GROUP BY k ORDER BY c DESC LIMIT 10) q"
+            ))
+            .unwrap()
+            .unwrap()
+        };
+        assert_eq!(top("m131c"), top("m131h"), "ORDER BY aggregate result must match heap");
+
+        Spi::run("DROP TABLE m131c").unwrap();
+        Spi::run("DROP TABLE m131h").unwrap();
     }
 }
