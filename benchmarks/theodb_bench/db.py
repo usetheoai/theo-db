@@ -193,26 +193,6 @@ class VectorDB:
             )
             return [r[0] for r in cur.fetchall()]
 
-    def hybrid_rrf_bm25_docs(self, table: str, query_text: str, qvec, k: int, n: int) -> list:
-        """M138: the in-DB ai.hybrid_search_rrf FUSION with lexical_engine='bm25' (vector + BM25 leg).
-
-        Apples-to-apples with hybrid_rrf_docs (same k, same per-leg/result limits) except the lexical
-        leg is pg_textsearch BM25 over the raw TEXT column instead of ts_rank_cd over the tsvector. This
-        is the product path M138 measures against the ts_rank_cd fusion to decide the default (plan ADR-1).
-        Requires the bm25 index (create_bm25_index) + pg_textsearch loaded (pg_textsearch_available).
-        """
-        vec = "[" + ",".join(repr(float(x)) for x in qvec) + "]"
-        with self._cursor() as cur:
-            cur.execute(
-                "SELECT id FROM ai.hybrid_search_rrf("
-                "  tbl => %s::regclass, id_col => 'doc_id', content_tsv_col => 'text_tsv',"
-                "  vector_col => 'embedding', query_text => %s, query_vector => %s::vector,"
-                "  k => %s, per_leg_limit => %s, result_limit => %s,"
-                "  lexical_engine => 'bm25', content_text_col => 'content')",
-                (table, query_text, vec, int(k), int(n), int(n)),
-            )
-            return [r[0] for r in cur.fetchall()]
-
     # --- M7-S2: pg_textsearch BM25 leg (throwaway image only; requires shared_preload_libraries) ----
     def pg_textsearch_available(self) -> bool:
         """True iff the pg_textsearch control file is installed AND the lib is in shared_preload_libraries.
@@ -241,13 +221,18 @@ class VectorDB:
             )
 
     def bm25_query(self, table: str, query_text: str, n: int, text_col: str = "content") -> list:
-        # pg_textsearch: `col <@> 'query'` returns the negative BM25 score (lower = better match),
+        # pg_textsearch: `col <@> to_bm25query(q, idx)` returns the negative BM25 score (lower = better),
         # so ASC ordering yields best-first. LIMIT enables its top-k (Block-Max WAND) optimization.
+        # M138: the two-arg `to_bm25query(text, index_name)` form is REQUIRED with a bind parameter —
+        # the bare `col <@> $1` and the single-arg `to_bm25query($1)` both RAISE "operator requires index"
+        # on pg_textsearch 1.3.1 when the query is a bind (the planner cannot resolve the index without a
+        # literal). Measured on PG18.4, not presumed. The index name matches create_bm25_index: {table}_bm25.
+        idx = f"{table}_bm25"
         with self._cursor() as cur:
             cur.execute(
                 f"SELECT doc_id FROM {table} WHERE {text_col} IS NOT NULL "
-                f"ORDER BY {text_col} <@> %s LIMIT {int(n)}",
-                (query_text,),
+                f"ORDER BY {text_col} <@> to_bm25query(%s, %s) LIMIT {int(n)}",
+                (query_text, idx),
             )
             return [r[0] for r in cur.fetchall()]
 

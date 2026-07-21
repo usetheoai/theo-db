@@ -1,0 +1,43 @@
+{
+  "status": "MEASURED",
+  "dataset": "scifact",
+  "model": "text-embedding-3-small",
+  "dim": 1536,
+  "k_rrf": 60,
+  "top": 100,
+  "fusion_method": "rrf_fuse twin (byte-identical to in-DB ai.hybrid_search_rrf, ADR D2)",
+  "n_queries": 300,
+  "n_docs": 5183,
+  "loadavg": 35.03,
+  "elapsed_s": 194.74,
+  "vector": {
+    "ndcg10": 0.729644,
+    "recall100": 0.973333
+  },
+  "leg_tsrank": {
+    "ndcg10": 0.070275,
+    "recall100": 0.069444
+  },
+  "leg_bm25": {
+    "ndcg10": 0.688075,
+    "recall100": 0.918222
+  },
+  "hybrid_tsrank": {
+    "ndcg10": 0.733724,
+    "recall100": 0.973333
+  },
+  "hybrid_bm25": {
+    "ndcg10": 0.741846,
+    "recall100": 0.98
+  },
+  "decision": {
+    "flip": false,
+    "mean_diff": 0.008122504743582143,
+    "p": 0.5105748942510575,
+    "wins": 54,
+    "losses": 49,
+    "ties": 197,
+    "cohens_dz": 0.03816760406689071,
+    "alpha": 0.05
+  }
+}

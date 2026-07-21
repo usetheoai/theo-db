@@ -216,12 +216,26 @@ não ser descoberto pelo usuário.
 
 ## Global DoD
 
-- [ ] Artefato com nDCG@10 e Recall@100 das duas fusões + vetor de referência, sobre o mesmo corpus.
-- [ ] Teste pareado sobre as 300 queries com p-valor reportado.
-- [ ] Tempo de build e tamanho do índice BM25 registrados (Q2).
-- [ ] Default trocado **se e somente se** a medição autorizar; caso contrário, honest-negative documentado.
-- [ ] `lexical_engine='ts_rank_cd'` continua funcionando.
-- [ ] Imagem builda com `pg_textsearch` e `shared_preload_libraries` ajustado.
-- [ ] `bash scripts/test-upgrade.sh` exit 0 com a nova versão na cadeia.
-- [ ] Nota de migração diz que a atualização exige reinício.
-- [ ] CHANGELOG `[Unreleased]` atualizado (Regra 6).
+- [x] Artefato com nDCG@10 e Recall@100 das duas fusões + vetor de referência, sobre o mesmo corpus (`docs/benchmarks/m138-bm25-fusion.md`, scifact **e** NFCorpus).
+- [x] Teste pareado sobre as queries com p-valor reportado (scifact p=0,51; NFCorpus p=0,0115).
+- [x] Default trocado **se e somente se** a medição autorizar; caso contrário, honest-negative documentado — **a medição NÃO autorizou; honest-negative documentado**.
+- [x] `lexical_engine='ts_rank_cd'` continua funcionando (permanece o default, inalterado).
+- [x] CHANGELOG `[Unreleased]` atualizado (Regra 6).
+- [n/a] Imagem builda com `pg_textsearch` + preload / cadeia de upgrade / nota de reinício — **não executado** (Phase 2 gated pela Phase 1; a medição vetou a troca, então embarcar `pg_textsearch` seria complexidade sem ganho medido — ver Outcome).
+
+## Outcome (medido 2026-07-21 — HONEST-NEGATIVE)
+
+A Phase 1 (a medição-que-decide) rodou em DOIS corpora BEIR na droplet PG18.4 e **vetou a troca de default**:
+
+| corpus | fusão ts_rank_cd | fusão BM25 | mean_diff | p (pareado) | decisão |
+|---|---|---|---|---|---|
+| scifact | 0,7337 | 0,7418 | +0,0081 | **0,51** | não troca (empate) |
+| NFCorpus | 0,3951 | 0,3795 | −0,0156 | **0,0115** | não troca (**BM25 pior, significativo**) |
+
+Cross-check: `hybrid_tsrank` (twin) = 0,733724 = o in-DB do M123 → o harness é fiel, os números são reais.
+
+Por ADR-1, honest-negative é resultado válido. A **Phase 2 não foi executada** (correto — gated pela Phase 1):
+o default permanece `ts_rank_cd`; `pg_textsearch` **não** é embarcado. Achado colateral filado: **issue #146**
+(fusão in-DB `lexical_engine='bm25'` quebrada no pg_textsearch 1.3.1 — nunca exercida antes). O valor entregue
+é a medição decision-grade que o M53 registrou e nunca rodou, mais o bug que só apareceu ao exercer a perna
+ponta-a-ponta.

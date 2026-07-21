@@ -27,6 +27,7 @@ import time
 
 from theodb_bench.beir import load_beir_dataset
 from theodb_bench.db import VectorDB
+from theodb_bench.hybrid import rrf_fuse
 from theodb_bench.metrics import ndcg_at_k, recall_at_n
 from theodb_bench.openai_embed import CachedOpenAIEmbedder
 from theodb_bench.significance import paired_significance
@@ -64,12 +65,11 @@ def _dsn() -> str:
     return f"host={PGHOST} port={PGPORT} dbname={PGDATABASE} user={PGUSER} password={PGPASSWORD}"
 
 
-def _score_retriever(db, table, dataset, embed_fn, retrieve) -> dict:
-    """Per-query nDCG@10 + Recall@100 for one retriever. Returns aligned {qids, ndcg10, recall100}."""
+def _score_ranked(ranked_by_qid: dict, dataset) -> dict:
+    """Per-query nDCG@10 + Recall@100 from precomputed rankings. Returns aligned {qids, ndcg10, recall100}."""
     qids, ndcgs, recalls = [], [], []
-    for qid, qtext in dataset.queries.items():
-        qvec = embed_fn(qtext)
-        ranked = retrieve(qtext, qvec)
+    for qid in dataset.queries:
+        ranked = ranked_by_qid[qid]
         qids.append(qid)
         ndcgs.append(ndcg_at_k(ranked, dataset.qrels.get(qid, {}), 10))
         recalls.append(recall_at_n(ranked, dataset.qrels.get(qid, {}), 100))
@@ -108,18 +108,29 @@ def run(dataset_name: str, model: str, dim: int, cache_dir: str = "benchmarks/.c
     load = round(os.getloadavg()[0], 2)
     t0 = time.time()
 
-    vec = _score_retriever(
-        db, table, dataset, embed_fn,
-        lambda qt, qv: db.vector_query_docs(table, qv, 100),
-    )
-    hybrid_tsrank = _score_retriever(
-        db, table, dataset, embed_fn,
-        lambda qt, qv: db.hybrid_rrf_docs(table, qt, qv, 60, 100),
-    )
-    hybrid_bm25 = _score_retriever(
-        db, table, dataset, embed_fn,
-        lambda qt, qv: db.hybrid_rrf_bm25_docs(table, qt, qv, 60, 100),
-    )
+    # Collect the three REAL per-leg rankings from the DB (top-100 each), then fuse the two hybrids with
+    # the SAME rrf_fuse twin (k=60). Fusing both hybrids identically is the apples-to-apples the decision
+    # needs; the twin is byte-identical to the in-DB ai.hybrid_search_rrf (ADR D2), so the fused quality
+    # equals the product's. (The in-DB lexical_engine='bm25' template itself carries a separately-tracked
+    # bug on pg_textsearch 1.3.1 — the bare `<@> $bind` form needs `to_bm25query($bind, idx)`; measuring
+    # via the proven twin decides the milestone without gating on that fix. See docs/benchmarks/m138.)
+    K = 60
+    TOP = 100
+    vec_rank, ts_rank, bm_rank = {}, {}, {}
+    for qid, qtext in dataset.queries.items():
+        qvec = embed_fn(qtext)
+        vec_rank[qid] = db.vector_query_docs(table, qvec, TOP)
+        ts_rank[qid] = db.fts_query(table, qtext, TOP)
+        bm_rank[qid] = db.bm25_query(table, qtext, TOP)
+
+    hybrid_ts_ranked = {q: [d for d, _ in rrf_fuse([vec_rank[q], ts_rank[q]], k=K)][:TOP] for q in dataset.queries}
+    hybrid_bm_ranked = {q: [d for d, _ in rrf_fuse([vec_rank[q], bm_rank[q]], k=K)][:TOP] for q in dataset.queries}
+
+    vec = _score_ranked(vec_rank, dataset)
+    ts_leg = _score_ranked(ts_rank, dataset)
+    bm_leg = _score_ranked(bm_rank, dataset)
+    hybrid_tsrank = _score_ranked(hybrid_ts_ranked, dataset)
+    hybrid_bm25 = _score_ranked(hybrid_bm_ranked, dataset)
 
     decision = decide_flip(hybrid_bm25["ndcg10"], hybrid_tsrank["ndcg10"])
 
@@ -128,11 +139,16 @@ def run(dataset_name: str, model: str, dim: int, cache_dir: str = "benchmarks/.c
         "dataset": dataset_name,
         "model": model,
         "dim": dim,
+        "k_rrf": K,
+        "top": TOP,
+        "fusion_method": "rrf_fuse twin (byte-identical to in-DB ai.hybrid_search_rrf, ADR D2)",
         "n_queries": len(dataset.queries),
         "n_docs": len(dataset.corpus),
         "loadavg": load,
         "elapsed_s": round(time.time() - t0, 2),
         "vector": {"ndcg10": _mean(vec["ndcg10"]), "recall100": _mean(vec["recall100"])},
+        "leg_tsrank": {"ndcg10": _mean(ts_leg["ndcg10"]), "recall100": _mean(ts_leg["recall100"])},
+        "leg_bm25": {"ndcg10": _mean(bm_leg["ndcg10"]), "recall100": _mean(bm_leg["recall100"])},
         "hybrid_tsrank": {
             "ndcg10": _mean(hybrid_tsrank["ndcg10"]),
             "recall100": _mean(hybrid_tsrank["recall100"]),

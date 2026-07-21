@@ -1,0 +1,43 @@
+{
+  "status": "MEASURED",
+  "dataset": "nfcorpus",
+  "model": "text-embedding-3-small",
+  "dim": 1536,
+  "k_rrf": 60,
+  "top": 100,
+  "fusion_method": "rrf_fuse twin (byte-identical to in-DB ai.hybrid_search_rrf, ADR D2)",
+  "n_queries": 323,
+  "n_docs": 3633,
+  "loadavg": 39.23,
+  "elapsed_s": 137.47,
+  "vector": {
+    "ndcg10": 0.38444,
+    "recall100": 0.361938
+  },
+  "leg_tsrank": {
+    "ndcg10": 0.207636,
+    "recall100": 0.10194
+  },
+  "leg_bm25": {
+    "ndcg10": 0.325365,
+    "recall100": 0.245781
+  },
+  "hybrid_tsrank": {
+    "ndcg10": 0.395148,
+    "recall100": 0.367412
+  },
+  "hybrid_bm25": {
+    "ndcg10": 0.379509,
+    "recall100": 0.362432
+  },
+  "decision": {
+    "flip": false,
+    "mean_diff": -0.01563819862562643,
+    "p": 0.011499885001149988,
+    "wins": 67,
+    "losses": 105,
+    "ties": 151,
+    "cohens_dz": -0.14008768010233816,
+    "alpha": 0.05
+  }
+}
