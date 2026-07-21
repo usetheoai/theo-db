@@ -1,0 +1,50 @@
+{
+  "box": "self-hosted DO droplet 165.227.121.20 (NOT canonical hardware; co-tenants live: themory, theo-rag, pgvector, traefik, dashboard)",
+  "engine": "TheoDB (PostgreSQL-wire-compatible; OLTP = PG path)",
+  "retained_crash_gate": "theodb_rs/isolation/crash_fold.sh + crash_unlogged.sh (#46/#47) \u2014 throughput is meaningless without durability; the OLTP tools do NOT enforce ACID",
+  "durability_posture": {
+    "fsync": "on",
+    "synchronous_commit": "on",
+    "source": "server-reported (SHOW), not asserted"
+  },
+  "status": "OK",
+  "pgbench": {
+    "tool": "pgbench",
+    "metric": "TPS",
+    "scale": 10,
+    "clients": 8,
+    "duration_s": 10,
+    "runs": 10,
+    "tps_per_run": [
+      1094.9,
+      1270.7,
+      1359.0,
+      1392.2,
+      1410.9,
+      1345.0,
+      1216.3,
+      1261.4,
+      1245.9,
+      1377.5
+    ],
+    "tps_mean": 1297.4,
+    "tps_min": 1094.9,
+    "tps_max": 1410.9,
+    "tps_stdev": 98.1,
+    "cv_pct": 7.56,
+    "stability_note": "coefficient of variation (stdev/mean %); lower = more stable"
+  },
+  "hammerdb": {
+    "tool": "hammerdb-tproc-c",
+    "metric": "NOPM",
+    "warehouses": 4,
+    "vus": 4,
+    "nopm": 18269
+  },
+  "caveats": [
+    "self-hosted box, NOT canonical hardware \u2014 TPS/NOPM not comparable to published/audited TPC-C",
+    "HammerDB NOPM is NOT audited tpmC (TPROC-C is a TPC-C derivative); HammerDB (GPLv3) runs as an external Docker driver, never vendored/linked",
+    "durability posture is server-reported (SHOW fsync/synchronous_commit); throughput is paired with the retained crash-safety gate, not reported as 'valid' alone",
+    "run-to-run stability is a coefficient-of-variation dispersion metric, NOT a paired hypothesis test (paired significance is the A/B-comparison capability, used in M127 vector vs pgvector)"
+  ]
+}

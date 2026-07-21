@@ -24,6 +24,23 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.115.0] - 2026-07-21
+
+### Added
+- **Official OLTP benchmark: pgbench + HammerDB TPROC-C over self-hosted TheoDB (M129, ADR-0050).** OLTP driver
+  (`benchmarks/run_m129_oltp.py`) + HammerDB TPROC-C Tcl (`benchmarks/oltp/hammerdb_tproc_c.tcl`, our script driving
+  the GPLv3 tool via its CLI — no HammerDB source vendored/linked) + DB-free unit tests
+  (`benchmarks/theodb_bench/test_oltp.py`, 8 tests). MEASURED against self-hosted TheoDB PG17 across **3 sessions ×
+  10 runs**, each persisted to its own artifact: **pgbench TPS means 1247.3–1328.3** with run-to-run **coefficient
+  of variation 7.6–9.5%** (within-session) / **3.2%** (between-session) — the honest single-system dispersion metric
+  the OLTP tools lack — + **HammerDB TPROC-C NOPM = 18 269** (real TPC-C 45/43/4/4/4 mix; a functional smoke, not
+  claim-grade). Durability posture is **server-reported** (`SHOW fsync=on`, `synchronous_commit=on`), and every
+  throughput number is paired with the retained crash-safety gate (ADR M129-2 — throughput without durability is
+  meaningless; the OLTP tools do not enforce ACID). Proves the 100%-wire-compatible OLTP gate end-to-end. Honest:
+  self-hosted shared box (NOT canonical hardware) → functional baseline, not a competitive claim; NOPM is NOT
+  audited tpmC; pgbench is D1-clean (PostgreSQL License), HammerDB is an external out-of-tree Docker driver
+  (`docs/benchmarks/m129-oltp.md`).
+
 ## [0.114.0] - 2026-07-20
 
 ### Added
