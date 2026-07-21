@@ -32,6 +32,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   "planner hang / O(cols²) / wide-table" diagnosis was **falsified**: the hang was in EXPLAIN deparse, not planning
   or execution (the affected query always executed correctly in 0.5 s), and the trigger is `ORDER BY <aggregate>`,
   not table width (`knowledge-base/discoveries/blueprints/columnar-agg-planner-hang-blueprint.md`).
+  MEASURED after the fix: the 43-query ClickBench EXPLAIN sweep with the pushdown ON goes from **2 hangs to 0**
+  (max 54 ms; Q16 39 ms and Q33 34 ms, both now engaging the CustomScan), and the accelerated ClickBench run is
+  **byte-identical 43/43** vs heap while being **1.91× faster on the full-suite hot geomean** (0.889 s vs 1.700 s)
+  and **21.2× on the six queries the pushdown accelerates** — an internal same-box A/B (pushdown ON vs OFF) on a
+  self-hosted, NOT canonical, box with a 100 k-row subsample; not a competitive claim
+  (`docs/benchmarks/m131-columnar-agg-accelerated.md`).
 
 ### Security
 

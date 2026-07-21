@@ -219,7 +219,7 @@ def main():
     ap.add_argument("--n", type=int, default=1_000_000, help="hits subsample rows")
     ap.add_argument("--cache", default="benchmarks/.cache")
     ap.add_argument("--query-timeout-s", type=int, default=60, help="per-query ceiling; slow query -> ERRORED")
-    ap.add_argument("--agg", action="store_true", help="enable the vectorized columnar-agg CustomScan (has a planner-hang bug on real hits; default OFF)")
+    ap.add_argument("--agg", action="store_true", help="enable the vectorized columnar-agg CustomScan pushdown (the M131 fix for #135 removed the EXPLAIN deparse hang; default OFF = storage path)")
     ap.add_argument("--out", default="docs/benchmarks/m128-clickbench-columnar.json")
     args = ap.parse_args()
     data = run(args)
