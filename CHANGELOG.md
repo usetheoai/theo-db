@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Official ClickBench entry over theodb_columnar (M128, ADR-0050).** The ClickBench per-db contract (`benchmarks/clickbench/theodb/` — create/queries/glue + results) + a driver running the 43 ClickBench queries over a `theodb_columnar` table on real (subsampled) `hits`, reusing the wrap layer. MEASURED: 43/43 queries run, **byte-identical result A/B vs heap PASSES 43/43** (the correctness oracle ClickBench lacks — its `check` is a `SELECT 1`). Honest: self-hosted box + n=1000 subsample; `hits` is CC-BY-NC-SA (CI-only, never vendored). The vectorized-agg CustomScan pushdown hit a real planner-hang bug on the wide real hits table (filed #135) — the measured columnar-STORAGE path (agg off) is sound + complete; pushdown is tracked follow-up (`docs/benchmarks/m128-clickbench-columnar.md`).
 
 ### Changed
 

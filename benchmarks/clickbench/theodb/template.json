@@ -1,0 +1,11 @@
+{
+  "system": "TheoDB (theodb_columnar)",
+  "date": "2026-07-20",
+  "machine": "self-hosted DO droplet (NOT canonical c6a.4xlarge)",
+  "cluster_size": 1,
+  "comment": "M128 adopt-and-wrap: ClickBench entry over theodb_columnar; subsampled hits; byte-identical result A/B is the TheoDB-owned correctness oracle ClickBench lacks.",
+  "tags": ["PostgreSQL-compatible", "column-oriented", "self-hosted"],
+  "load_time": 0,
+  "data_size": 0,
+  "result": []
+}

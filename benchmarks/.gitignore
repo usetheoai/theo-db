@@ -1,0 +1,6 @@
+
+# ClickBench SQL is CC-BY-NC-SA — fetched at runtime, never vendored (D1 gate). results.json is a run artifact.
+clickbench/theodb/create.sql
+clickbench/theodb/queries.sql
+clickbench/theodb/results.json
+clickbench/theodb/*.tsv
