@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Roadmap ampliado com a fundação decidida em 2026-07-21 (`/roadmap-feature`, 6 milestones): **M136** gates mecânicos de qualidade + Postgres `cassert` no CI (torna o D1 gate de máquina via `deny.toml`); **M137** cadeia de upgrade do `theodb_rs` (94 funções `pg_extern` e zero scripts hoje — instalações não conseguem `ALTER EXTENSION UPDATE`); **M138** BM25 como perna lexical default, executando o gate de adoção já medido no M53 (`ts_rank_cd` 0,0703 vs BM25 0,6881 nDCG@10); **M139** spike-gate do `Directory` do Tantivy sobre block storage do Postgres; **M140** engine lexical própria sobre Tantivy (MIT) + crate núcleo sem pgrx, *gated* pelo M139; **M141** dogfood `running`, o que autoriza qualquer reivindicação de production-ready
 
 ### Changed
 
