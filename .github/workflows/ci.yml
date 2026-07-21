@@ -13,7 +13,7 @@ on:
 jobs:
   harness-unit:
     # Fast, container-free: the recall math, ground-truth, metrics and HDF5 loader (DoD-1 gate logic).
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, theodb-do]
     defaults:
       run:
         working-directory: benchmarks
@@ -34,7 +34,7 @@ jobs:
   image-and-bench:
     # Builds the TheoDB image, proves M0 (smoke) + M2 vectorscale, then runs the benchmark harness
     # in CI over the real glove-25-angular reference dataset (DoD-1) + the integration suite.
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, theodb-do]
     steps:
       - uses: actions/checkout@v4
 
@@ -132,7 +132,7 @@ jobs:
   migration-smoke:
     # M3 DoD-1/DoD-2: standard pg_dump/pg_restore migration from a vanilla pgvector source into TheoDB,
     # asserting data + indexes are preserved. Every step here has been run locally first.
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, theodb-do]
     steps:
       - uses: actions/checkout@v4
 
@@ -172,7 +172,7 @@ jobs:
     timeout-minutes: 25
     # M1 DoD-1: the upstream PostgreSQL 17 regression suite passes 100% on the TheoDB distribution.
     # Throwaway runner (FROM theo-db:dev) builds pg_regress from REL_17_10 and runs `make installcheck`.
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, theodb-do]
     steps:
       - uses: actions/checkout@v4
 
@@ -198,7 +198,7 @@ jobs:
     timeout-minutes: 20
     # M7-S1: hybrid search (FTS + vector + RRF) — contract tests + smoke + capped BEIR-style eval.
     # Every step here has been run locally first (deterministic lexical embedder; no external endpoint).
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, theodb-do]
     steps:
       - uses: actions/checkout@v4
 
@@ -258,7 +258,7 @@ jobs:
     timeout-minutes: 20
     # M7-S3: generative ai.* functions — offline deterministic contract suite (stub server; NO external API).
     # The real-OpenAI test is opt-in and runs out-of-CI (key from gitignored .env). Run locally first.
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, theodb-do]
     steps:
       - uses: actions/checkout@v4
 
@@ -316,7 +316,7 @@ jobs:
     # M7-S2: permissive BM25 (pg_textsearch) — build the throwaway image + MEASURE recall vs ts_rank_cd.
     # measurement-first (ADR 0002/0003): pg_textsearch is NOT in the shipped image; this job builds it only to
     # functionally prove + measure BM25. Deterministic synthetic fixture; no external API. Run locally first.
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, theodb-do]
     steps:
       - uses: actions/checkout@v4
 
@@ -375,7 +375,7 @@ jobs:
     # M7-S4: safe NL→SQL (anti-prompt-injection) — offline deterministic injection suite (stub; NO external API).
     # The stub "complies" with each injection so the test proves the GUARDS (L2 validation / L3 read-only
     # sandbox 25006) catch it. Run locally first.
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, theodb-do]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Docker Buildx
@@ -433,7 +433,7 @@ jobs:
     timeout-minutes: 20
     # M6: columnar/HTAP (pg_mooncake) — prove + measure the columnstore mirror vs row-store on the canonical
     # pg_mooncake distribution (MIT). Captures the DuckDBScan-vs-SeqScan plan choice (DoD-2). Run locally first.
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, theodb-do]
     steps:
       - uses: actions/checkout@v4
       - name: License sweep — columnar candidates permissive verdict (reproducible)
