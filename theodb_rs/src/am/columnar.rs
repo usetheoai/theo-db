@@ -1364,9 +1364,25 @@ pub unsafe extern "C-unwind" fn columnar_scan_analyze_next_tuple(
 // `#[pg_guard]` because they run real Rust that could panic.)
 macro_rules! columnar_unsupported {
     ($name:ident ( $($arg:ident : $ty:ty),* $(,)? ) $( -> $ret:ty )? , $msg:literal) => {
+        // M135/#143 — `#[pg_guard]` is LOAD-BEARING here, not decoration. In pgrx 0.19 a PG `ERROR` is raised as
+        // `panic_any` (pgrx-pg-sys panic.rs:155-160), so Rust frames unwind before `ereport` fires at a guard
+        // boundary. These stubs are called DIRECTLY by PostgreSQL C code (table-AM callbacks); without a guard
+        // frame the unwinder walks off the end of the stack — `_URC_END_OF_STACK`, reported as
+        // "failed to initiate panic, error 5" — and aborts the whole postmaster. `CREATE INDEX` on a columnar
+        // table was a 3-statement server crash. The macro generates 30 callbacks, so the omission was 30 latent
+        // crashes; the file's own header (line 17) already stated the rule this macro was the one place to skip.
         pub unsafe extern "C-unwind" fn $name( $( $arg : $ty ),* ) $( -> $ret )? {
             let _ = ( $( &$arg ),* );
-            pg_sys::error!(concat!("theodb_columnar: ", $msg, " is not supported (M99 is append-only analytical)"));
+            // The guard is applied HERE, as an explicit call, rather than via `#[pg_guard]`. The attribute is a
+            // proc macro that re-emits a call to an inner fn using the parameter names it parsed; those names come
+            // from THIS macro's `$arg` fragments, and the hygiene context does not survive, so `#[pg_guard]` on the
+            // generated fn fails to compile ("cannot find value `_s` in this scope"). `pgrx_extern_c_guard` is what
+            // the attribute expands to anyway (pgrx lib.rs:126 re-exports it), so calling it directly is the same
+            // boundary with none of the hygiene coupling. Nothing with a destructor is live in this frame, so the
+            // ereport longjmp that leaves the guard cannot skip a Drop.
+            pgrx::pgrx_extern_c_guard(|| {
+                pg_sys::error!(concat!("theodb_columnar: ", $msg, " is not supported (M99 is append-only analytical)"))
+            })
         }
     };
 }
