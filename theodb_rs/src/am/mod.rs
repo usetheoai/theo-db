@@ -94,6 +94,32 @@ fn theodb_symqg_amhandler(_fcinfo: pg_sys::FunctionCallInfo) -> PgBox<pg_sys::In
 }
 
 /// Fill an `IndexAmRoutine` with the shared hooks + the given per-algorithm build callbacks.
+/// M135 (ADR-1) — the i-th attribute of a `TupleDesc`, read in a way that survives a major upgrade.
+///
+/// PG18 removed the `attrs` flexible array: the descriptor now stores a 16-byte `CompactAttribute` array first,
+/// with the 104-byte `FormData_pg_attribute` array after it (`access/tupdesc.h:142`). The dangerous part is that
+/// the naive rename `attrs` → `compact_attrs` COMPILES — both are `__IncompleteArrayField` — and then reads
+/// `attname`/`atttypid`/`atttypmod` at offsets valid for the 104-byte struct out of a 16-byte one. Garbage column
+/// names and garbage type OIDs, with no diagnostic. `CompactAttribute` simply does not carry those three fields.
+///
+/// `PgTupleDesc::get` (pgrx `tupdesc.rs:226,285-313`) does the right address arithmetic per major and bounds-checks
+/// against `natts`, so this one helper compiles unchanged from PG13 to PG19 (Unbreakable Rule 9 — the library
+/// already solved it). `from_pg_unchecked` is the borrowing constructor: `need_release`/`need_pfree` are both
+/// false, so its `Drop` is a no-op and it is safe over a `TupleDesc` we do not own (verified in pgrx source).
+///
+/// Out of range is a programming error, not a runtime condition — every caller iterates `0..natts` — so it fails
+/// loud with a typed error rather than returning a null the caller would dereference (`rules/error-handling.md`).
+pub(crate) unsafe fn tupdesc_attr(
+    tupdesc: pg_sys::TupleDesc,
+    i: usize,
+) -> *const pg_sys::FormData_pg_attribute {
+    let td = pgrx::PgTupleDesc::from_pg_unchecked(tupdesc);
+    match td.get(i) {
+        Some(attr) => attr as *const pg_sys::FormData_pg_attribute,
+        None => pg_sys::error!("theodb: attribute {} out of range (natts = {})", i, (*tupdesc).natts),
+    }
+}
+
 fn make_amroutine(ambuild: AmBuildFn, ambuildempty: AmBuildEmptyFn) -> PgBox<pg_sys::IndexAmRoutine> {
     let mut amroutine =
         unsafe { PgBox::<pg_sys::IndexAmRoutine>::alloc_node(pg_sys::NodeTag::T_IndexAmRoutine) };

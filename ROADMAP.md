@@ -2143,7 +2143,7 @@ Recomendação #3 / Risco de manutenção: com 19 arquivos >500 LoC e este a 3.4
 
 ---
 
-## M134 — [ ] Fix #117 — SSRF cego via `theodb.llm_endpoint` setável pelo chamador
+## M134 — [x] Fix #117 — SSRF cego via `theodb.llm_endpoint` setável pelo chamador
 
 > Added 2026-07-21 (`/roadmap-feature llm-endpoint-ssrf-hardening`). Barreira de entrada para **qualquer** deploy multi-tenant ou com roles não-confiáveis. Grill: `knowledge-base/grills/llm-endpoint-ssrf-hardening-feature-grill.md`.
 
@@ -2164,6 +2164,43 @@ Recomendação #3 / Risco de manutenção: com 19 arquivos >500 LoC e este a 3.4
 **Boundary honesto:** é **hardening de segurança** de superfície pré-existente (M110 ampliou, não introduziu). Não adiciona capacidade; remove uma classe de abuso.
 
 **Prior art:** issue #117 (repro com `169.254.169.254`; ponteiros `chat.rs:258-268`, `pg.rs:50`, `http.rs:124`), `theodb_rs/src/am/guc.rs` (registrações `define_custom_*_guc` existentes), a postura NL→SQL (denylist + fail-closed + REVOKE) em `theodb_rs/src/nl.rs` como modelo.
+
+---
+
+## M135 — [ ] Suporte a PostgreSQL 18 (migração 17 → 18)
+
+> Added 2026-07-21 (`/roadmap-feature pg18-support`). Grill: `knowledge-base/grills/pg18-support-feature-grill.md`. Custo **medido**, não estimado: sondagem de compilação contra PG18.4 na droplet.
+
+**Objective:** migrar a extensão do PostgreSQL 17 para o **18** (release estável atual), fechando os **27 erros de compilação medidos** e re-provando o comportamento — não só a compilação. Decisão do owner (2026-07-21): **migrar**, não suportar as duas versões, porque **ainda não há base instalada** — é a janela em que a migração não custa nada a terceiros e evita dívida permanente de `#[cfg(feature)]`-branching nas 3 APIs divergentes. O PRD §338 já declarava a intenção ("adiciona PostgreSQL 18 em seguida") sem execução.
+
+**Custo medido (sondagem 2026-07-21, `cargo check --features pg18` contra PG18.4):** 27 erros, assim distribuídos —
+
+| Classe | Erros | Onde | Natureza |
+|---|---|---|---|
+| `TupleDescData.attrs` → `compact_attrs` + `populate_compact_attribute` | 9 | `columnar.rs`, `arrow_cache.rs`, `build.rs`, `df_executor.rs` | mecânica (acessor) |
+| `relopt_parse_elt` ganhou campo | 10 | `options.rs` | mecânica |
+| **Bitmap scan reformulado** — `tbm_begin_iterate` retorna valor (não ponteiro), `tbm_iterate(iter,&out)->bool`, `scan_bitmap_next_block` REMOVIDO do `TableAmRoutine` | 7 | `customscan.rs`, `columnar.rs` | **semântica** |
+| `vacuum_delay_point(bool is_analyze)` | 1 | `fold.rs` | mecânica |
+| `get_ordering_op_properties` último param virou `CompareType*` (era `int16`) | 1 | `columnar_agg.rs` | semântica (constante de comparação muda) |
+
+Falsificação registrada: a hipótese de que a dor viria do WAL estava **errada** — `GenericXLog` (54 refs) e `IndexAmRoutine` compilam **limpos** no 18. Quebrou só onde o PG18 mexeu de propósito.
+
+**Definition of done:**
+
+- [ ] `cargo build --features pg18` **limpo** (0 erros) e a extensão instala/carrega num PG18.4.
+- [ ] **Bitmap scan portado de verdade** para o contrato novo (decisão do owner: não declarar não-suportado) — incluindo teste que **força página lossy** (`ntuples < 0`) e assere que o recheck não perde nem duplica linha; um bug aqui não aparece em happy path, produz resultado errado.
+- [ ] **Suítes de crash e de MVCC/isolamento verdes contra o binário 18** — `test_am_crash.py` e as de isolamento do `theodb_rs/isolation/`. Compilar não prova comportamento, e o que quebrou foi justamente o caminho de varredura.
+- [ ] **Benchmark de sanidade no 18 vs baseline 17**, publicado em `docs/benchmarks/` — restabelece a linha de base, já que os 119 artefatos existentes foram medidos no 17 e passam a descrever configuração não distribuída.
+- [ ] **Flags `pg13`–`pg17` removidas do `Cargo.toml`** (consequência coerente do migrar-para-18): elas nunca foram compiladas por ninguém, e manter declaração não verificada é a mesma classe de defeito que esta sondagem expôs.
+- [ ] **Packaging publica o 18** — Dockerfiles e scripts hoje são pg17-only (4 referências); sem isso o suporte existe só para quem compila, não para quem consome a imagem.
+
+**Dependencies:** M134 `[x]`.
+
+**Risks:** (a) **Os 119 artefatos de benchmark foram medidos no PG17** — migrando, eles descrevem uma configuração que não distribuímos mais; mitigação: o benchmark de sanidade do DoD restabelece a base no 18, e os artefatos antigos ficam **rotulados como PG17** em vez de re-alegados. (b) **O rework do bitmap toca o caminho de recheck do MVCC** — erro ali não falha compilação nem happy path, produz resultado **errado** sob página lossy; mitigação: o teste de página lossy é item de DoD, não opcional. (c) **Sem CI (M133 aberto), toda prova é manual na droplet** — nenhuma regressão 17→18 é pega automaticamente; mitigação: registrar cada verificação com o gate anti-restart-silencioso, como nos M131/M132/M134.
+
+**Boundary honesto:** é **migração de plataforma**, não capacidade nova. Nenhuma feature de usuário é adicionada; o ganho é rodar no Postgres que as pessoas de fato instalam hoje. Não cobre PG19 (só existe como `beta1` no pgrx 0.19) — acompanhar o 19 é compromisso contínuo com upstream em desenvolvimento, decisão separada.
+
+**Prior art:** sondagem medida em 2026-07-21 (`cargo pgrx init --pg18 download` → PG18.4; `cargo check --features pg18` → 27 erros, lista completa com arquivo:linha); headers do PG18.4 em `/root/.pgrx/18.4/pgrx-install/include/postgresql/server` como fonte das assinaturas novas (`access/tupdesc.h`, `nodes/tidbitmap.h`, `commands/vacuum.h`, `utils/lsyscache.h`); PRD §338 (intenção declarada); pgvector/pgvectorscale como referência de política de versões.
 
 ---
 

@@ -9,12 +9,12 @@ license = "Apache-2.0"
 crate-type = ["cdylib"]
 
 [features]
-default = ["pg17"]
-pg13 = ["pgrx/pg13", "pgrx-tests/pg13"]
-pg14 = ["pgrx/pg14", "pgrx-tests/pg14"]
-pg15 = ["pgrx/pg15", "pgrx-tests/pg15"]
-pg16 = ["pgrx/pg16", "pgrx-tests/pg16"]
-pg17 = ["pgrx/pg17", "pgrx-tests/pg17"]
+# M135/ADR-3 — PG18 only. The pg13–pg17 features that used to sit here were never once compiled by anyone (the
+# probe that opened M135 was the first `cargo check` against any of them), and a declared-but-unverified version
+# claim is the same defect class this project rejects everywhere else. The owner chose to migrate rather than
+# carry `#[cfg]` branching for a user base that does not exist yet.
+default = ["pg18"]
+pg18 = ["pgrx/pg18", "pgrx-tests/pg18"]
 pg_test = []
 
 [dependencies]

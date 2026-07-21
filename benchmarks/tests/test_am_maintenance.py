@@ -256,7 +256,7 @@ def test_vacuum_cleanup_never_errors_across_states(conn):
     cur.execute(f"VACUUM {table}")  # pending above threshold → folds
     cur.execute(f"DELETE FROM {table}")
     cur.execute(f"VACUUM {table}")  # empty
-    cur.execute(f"SELECT 1")  # connection still healthy, no error was raised
+    cur.execute("SELECT 1")  # connection still healthy, no error was raised
     assert cur.fetchone()[0] == 1
     cur.execute(f"DROP TABLE {table}")
 
@@ -291,7 +291,8 @@ def test_cancel_interrupts_create_index():
     completion. Anti-flake (EC-8): measure a full build baseline first; skip if it is too fast to cancel
     reliably; otherwise cancel a second build after baseline/4 and assert it errors ('canceling statement')
     well before a full build would finish, leaves no index, and a re-CREATE works."""
-    su = _connect(); su.autocommit = True
+    su = _connect()
+    su.autocommit = True
     cur = su.cursor()
     cur.execute("DROP TABLE IF EXISTS m48_cancel")
     cur.execute("CREATE TABLE m48_cancel (id int, v vector(32))")
@@ -302,7 +303,8 @@ def test_cancel_interrupts_create_index():
     su.close()
 
     # Baseline: time one full CREATE INDEX (the parallel batched build).
-    b = _connect(); b.autocommit = True
+    b = _connect()
+    b.autocommit = True
     bc = b.cursor()
     t0 = time.time()
     bc.execute("CREATE INDEX m48_cancel_base ON m48_cancel USING theodb_hnsw (v theodb_hnsw_l2_ops)")
@@ -313,7 +315,8 @@ def test_cancel_interrupts_create_index():
         pytest.skip(f"parallel build too fast ({baseline:.1f}s) to cancel reliably on this box (EC-8)")
 
     # Cancel run: a worker thread builds; the main thread cancels its backend after baseline/4.
-    ca = _connect(); ca.autocommit = True
+    ca = _connect()
+    ca.autocommit = True
     acur = ca.cursor()
     acur.execute("SELECT pg_backend_pid()")
     pid = acur.fetchone()[0]
@@ -330,7 +333,8 @@ def test_cancel_interrupts_create_index():
     start = time.time()
     th.start()
     time.sleep(baseline / 4)
-    killer = _connect(); killer.autocommit = True
+    killer = _connect()
+    killer.autocommit = True
     killer.cursor().execute(f"SELECT pg_cancel_backend({pid})")
     killer.close()
     th.join(timeout=baseline)
@@ -342,7 +346,8 @@ def test_cancel_interrupts_create_index():
     assert elapsed < baseline * 0.9, f"cancel latency too high ({elapsed:.1f}s vs baseline {baseline:.1f}s)"
 
     # No orphan index, and a fresh CREATE INDEX still works.
-    chk = _connect(); chk.autocommit = True
+    chk = _connect()
+    chk.autocommit = True
     cc = chk.cursor()
     cc.execute("SELECT count(*) FROM pg_class WHERE relname = 'm48_cancel_x'")
     assert cc.fetchone()[0] == 0, "cancelled CREATE INDEX left an orphan index relation"

@@ -292,8 +292,12 @@ fn build_columnar_amroutine_in_top() -> *mut pg_sys::TableAmRoutine {
     amr.relation_estimate_size = Some(columnar_relation_estimate_size);
 
     // --- bitmap / sample scan (not supported in M99) ---
-    amr.scan_bitmap_next_block = Some(columnar_scan_bitmap_next_block);
-    amr.scan_bitmap_next_tuple = Some(columnar_scan_bitmap_next_tuple);
+    // M135/ADR-2: bitmap callbacks stay NULL — deliberately, not by omission. PG18 removed
+    // `scan_bitmap_next_block` from `TableAmRoutine` entirely, and registering an erroring stub for
+    // `scan_bitmap_next_tuple` would tell the planner we support bitmap scans, so it would plan one and fail at
+    // runtime. Citus reaches the same conclusion for its columnar AM (`columnar_tableam.c:2527` NULL, with the
+    // planner consequence documented at `columnar_customscan.c:435-443`). Leaving it NULL makes the planner route
+    // around us instead.
     amr.scan_sample_next_block = Some(columnar_scan_sample_next_block);
     amr.scan_sample_next_tuple = Some(columnar_scan_sample_next_tuple);
 
@@ -456,11 +460,11 @@ struct ColDesc {
     typid: u32,
 }
 
-/// Read the i-th column's descriptor from the flex-array `attrs` (council-rust-pgrx idiom: `attrs.as_ptr().add(i)`,
-/// always over `0..natts`). Builtin type OIDs (pg_type.dat, ABI-stable) map to a min/max domain; everything else
+/// Read the i-th column's descriptor via `super::tupdesc_attr` (M135/ADR-1 — never touch `attrs`/`compact_attrs`
+/// directly: PG18 moved the array and the naive access compiles while reading out of bounds). Builtin type OIDs (pg_type.dat, ABI-stable) map to a min/max domain; everything else
 /// gets `None` (the pruner then cannot skip that column — fail-safe).
 unsafe fn coldesc(tupdesc: pg_sys::TupleDesc, i: usize) -> Result<ColDesc, String> {
-    let attr = (*tupdesc).attrs.as_ptr().add(i);
+    let attr = super::tupdesc_attr(tupdesc, i);
     let attlen = (*attr).attlen;
     let byval = (*attr).attbyval;
     let typid = (*attr).atttypid.to_u32();
@@ -658,7 +662,7 @@ pub(crate) unsafe fn column_index(rel: pg_sys::Relation, name: &str) -> Option<u
     let tupdesc = (*rel).rd_att;
     let natts = (*tupdesc).natts as usize;
     (0..natts).find(|&i| {
-        std::ffi::CStr::from_ptr((*(*tupdesc).attrs.as_ptr().add(i)).attname.data.as_ptr())
+        std::ffi::CStr::from_ptr((*super::tupdesc_attr(tupdesc, i)).attname.data.as_ptr())
             .to_string_lossy()
             == name
     })
@@ -697,7 +701,7 @@ pub(crate) unsafe fn decode_columns(
         None => (0..natts).collect(),
     };
     let name_of = |i: usize| -> String {
-        std::ffi::CStr::from_ptr((*(*tupdesc).attrs.as_ptr().add(i)).attname.data.as_ptr())
+        std::ffi::CStr::from_ptr((*super::tupdesc_attr(tupdesc, i)).attname.data.as_ptr())
             .to_string_lossy()
             .into_owned()
     };
@@ -838,7 +842,7 @@ pub(crate) unsafe fn directory_minmax(
     let tupdesc = (*rel).rd_att;
     let natts = (*tupdesc).natts as usize;
     let col_idx = match (0..natts).find(|&i| {
-        std::ffi::CStr::from_ptr((*(*tupdesc).attrs.as_ptr().add(i)).attname.data.as_ptr()).to_string_lossy() == col_name
+        std::ffi::CStr::from_ptr((*super::tupdesc_attr(tupdesc, i)).attname.data.as_ptr()).to_string_lossy() == col_name
     }) {
         Some(x) => x,
         None => return Ok(None),
@@ -1357,16 +1361,32 @@ pub unsafe extern "C-unwind" fn columnar_scan_analyze_next_tuple(
 // Typed-error stubs (D4 — append-only; unsupported callbacks fail loud with a clean SQLSTATE, never panic)
 // ===========================================================================================================
 
-// NOTE: these stubs are intentionally NOT `#[pg_guard]`. They only call `pg_sys::error!` — a C `ereport`/siglongjmp
-// with a `&'static str` message (no allocation, no Rust code that can panic), so there is no Rust unwind to guard
-// against crossing the C boundary. (Combining a `macro_rules!`-generated signature with the `#[pg_guard]` proc-macro
-// also breaks hygiene — pg_guard cannot see the macro-generated parameter idents. The real callbacks above ARE
-// `#[pg_guard]` because they run real Rust that could panic.)
+// HISTORY (#143): a note used to sit here claiming these stubs were "intentionally NOT `#[pg_guard]`" because
+// `pg_sys::error!` was "a C ereport/siglongjmp ... so there is no Rust unwind to guard against". That belief was
+// FALSE and it cost us a postmaster abort on `CREATE INDEX` over a columnar table: in pgrx 0.19 a PG ERROR is
+// raised as `panic_any`, which unwinds. The accurate rationale — including why the `#[pg_guard]` attribute cannot
+// be used from inside a `macro_rules!` — now lives in the macro body itself, next to the guard it explains.
 macro_rules! columnar_unsupported {
     ($name:ident ( $($arg:ident : $ty:ty),* $(,)? ) $( -> $ret:ty )? , $msg:literal) => {
+        // M135/#143 — `#[pg_guard]` is LOAD-BEARING here, not decoration. In pgrx 0.19 a PG `ERROR` is raised as
+        // `panic_any` (pgrx-pg-sys panic.rs:155-160), so Rust frames unwind before `ereport` fires at a guard
+        // boundary. These stubs are called DIRECTLY by PostgreSQL C code (table-AM callbacks); without a guard
+        // frame the unwinder walks off the end of the stack — `_URC_END_OF_STACK`, reported as
+        // "failed to initiate panic, error 5" — and aborts the whole postmaster. `CREATE INDEX` on a columnar
+        // table was a 3-statement server crash. The macro generates 30 callbacks, so the omission was 30 latent
+        // crashes; the file's own header (line 17) already stated the rule this macro was the one place to skip.
         pub unsafe extern "C-unwind" fn $name( $( $arg : $ty ),* ) $( -> $ret )? {
             let _ = ( $( &$arg ),* );
-            pg_sys::error!(concat!("theodb_columnar: ", $msg, " is not supported (M99 is append-only analytical)"));
+            // The guard is applied HERE, as an explicit call, rather than via `#[pg_guard]`. The attribute is a
+            // proc macro that re-emits a call to an inner fn using the parameter names it parsed; those names come
+            // from THIS macro's `$arg` fragments, and the hygiene context does not survive, so `#[pg_guard]` on the
+            // generated fn fails to compile ("cannot find value `_s` in this scope"). `pgrx_extern_c_guard` is what
+            // the attribute expands to anyway (pgrx lib.rs:126 re-exports it), so calling it directly is the same
+            // boundary with none of the hygiene coupling. Nothing with a destructor is live in this frame, so the
+            // ereport longjmp that leaves the guard cannot skip a Drop.
+            pgrx::pgrx_extern_c_guard(|| {
+                pg_sys::error!(concat!("theodb_columnar: ", $msg, " is not supported (M99 is append-only analytical)"))
+            })
         }
     };
 }
@@ -1398,8 +1418,6 @@ columnar_unsupported!(columnar_index_build_range_scan(_tr: pg_sys::Relation, _ir
 columnar_unsupported!(columnar_index_validate_scan(_tr: pg_sys::Relation, _ir: pg_sys::Relation, _ii: *mut pg_sys::IndexInfo, _sn: pg_sys::Snapshot, _st: *mut pg_sys::ValidateIndexState), "concurrent index validate");
 columnar_unsupported!(columnar_relation_toast_am(_r: pg_sys::Relation) -> pg_sys::Oid, "TOAST (columnar stores inline)");
 columnar_unsupported!(columnar_relation_fetch_toast_slice(_tr: pg_sys::Relation, _v: pg_sys::Oid, _as: i32, _so: i32, _sl: i32, _res: *mut pg_sys::varlena), "TOAST slice fetch");
-columnar_unsupported!(columnar_scan_bitmap_next_block(_s: pg_sys::TableScanDesc, _t: *mut pg_sys::TBMIterateResult) -> bool, "bitmap heap scan");
-columnar_unsupported!(columnar_scan_bitmap_next_tuple(_s: pg_sys::TableScanDesc, _t: *mut pg_sys::TBMIterateResult, _sl: *mut pg_sys::TupleTableSlot) -> bool, "bitmap heap scan");
 columnar_unsupported!(columnar_scan_sample_next_block(_s: pg_sys::TableScanDesc, _ss: *mut pg_sys::SampleScanState) -> bool, "TABLESAMPLE");
 columnar_unsupported!(columnar_scan_sample_next_tuple(_s: pg_sys::TableScanDesc, _ss: *mut pg_sys::SampleScanState, _sl: *mut pg_sys::TupleTableSlot) -> bool, "TABLESAMPLE");
 

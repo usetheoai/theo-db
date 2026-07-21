@@ -27,7 +27,7 @@ def test_create_sql_uses_theodb_columnar_and_105_cols(entry_sql):
     ddl = open(os.path.join(ENTRY, "create.sql")).read()
     assert "USING theodb_columnar" in ddl
     assert "CREATE TABLE hits" in ddl
-    cols = [l for l in ddl.splitlines() if l.strip().endswith("NOT NULL,") or l.strip().endswith("NOT NULL")]
+    cols = [ln for ln in ddl.splitlines() if ln.strip().endswith("NOT NULL,") or ln.strip().endswith("NOT NULL")]
     assert len([c for c in cols if "TABLE" not in c]) >= 100
 
 
