@@ -13,6 +13,18 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Official HTAP benchmark: CH-benCHmark via BenchBase over self-hosted TheoDB (M130, ADR-0050).** HTAP driver
+  (`benchmarks/run_m130_htap.py`) + a container-entry script + BenchBase config (`benchmarks/htap/`, our `.sh` +
+  `.xml` driving the Apache-2.0 BenchBase tool from a pinned SHA inside a Java-23 Docker container — no BenchBase
+  source vendored/linked) + DB-free unit tests (`benchmarks/theodb_bench/test_htap.py`, 9 tests). MEASURED against
+  self-hosted TheoDB PG17 across **3 sessions**: CH-benCHmark (TPC-C 45/43/4/4/4 mix + all 22 TPC-H-style analytical
+  queries in one mixed phase) runs with **0% error** — mixed-workload throughput mean **116.46 req/s** (between-session
+  CV 3.08%), derived **dual metric proxy tpmC-proxy 2994.5 / QphH-proxy 5116.8** (CV 3.4%; labeled proxy, NOT audited
+  TPC). Proves the mixed **OLTP+OLAP wire-compatible gate** end-to-end. Honest finding recorded: the SERIALIZABLE
+  isolation exhausted SSI predicate-lock shared memory (a documented PostgreSQL SSI limitation, not a TheoDB defect)
+  → READ COMMITTED (the realistic HTAP isolation) runs clean. Self-hosted shared box (NOT canonical hardware) →
+  functional baseline, not a competitive claim; BenchBase is Apache-2.0 run as an external Java-23 Docker driver;
+  seed-determinism unconfirmed (`docs/benchmarks/m130-htap.md`).
 
 ### Changed
 
