@@ -2072,7 +2072,7 @@ Recomendação #3 / Risco de manutenção: com 19 arquivos >500 LoC e este a 3.4
 
 ---
 
-## M131 — [ ] Fix #135 — destravar o columnar-agg pushdown (planner hang em tabelas largas mixed-type)
+## M131 — [x] Fix #135 — destravar o columnar-agg pushdown (planner hang em tabelas largas mixed-type)
 
 > Added 2026-07-21 (`/roadmap-feature columnar-agg-planner-hang-fix`). Pré-requisito para um **rank ClickBench colunar defensável**: hoje o run colunar do M128 só mede o storage-path (agg OFF = latência nível-heap); o pushdown vetorizado de agregado (a vantagem colunar de verdade) é inutilizável em `hits` real por causa do #135. Grill: `knowledge-base/grills/columnar-agg-planner-hang-fix-feature-grill.md`.
 
