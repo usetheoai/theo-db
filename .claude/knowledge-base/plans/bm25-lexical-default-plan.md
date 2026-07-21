@@ -217,7 +217,7 @@ não ser descoberto pelo usuário.
 ## Global DoD
 
 - [x] Artefato com nDCG@10 e Recall@100 das duas fusões + vetor de referência, sobre o mesmo corpus (`docs/benchmarks/m138-bm25-fusion.md`, scifact **e** NFCorpus).
-- [x] Teste pareado sobre as queries com p-valor reportado (scifact p=0,51; NFCorpus p=0,0115).
+- [x] Teste pareado sobre as queries com p-valor reportado (scifact p=0,51; NFCorpus p=0,0168).
 - [x] Default trocado **se e somente se** a medição autorizar; caso contrário, honest-negative documentado — **a medição NÃO autorizou; honest-negative documentado**.
 - [x] `lexical_engine='ts_rank_cd'` continua funcionando (permanece o default, inalterado).
 - [x] CHANGELOG `[Unreleased]` atualizado (Regra 6).
@@ -230,7 +230,7 @@ A Phase 1 (a medição-que-decide) rodou em DOIS corpora BEIR na droplet PG18.4 
 | corpus | fusão ts_rank_cd | fusão BM25 | mean_diff | p (pareado) | decisão |
 |---|---|---|---|---|---|
 | scifact | 0,7337 | 0,7418 | +0,0081 | **0,51** | não troca (empate) |
-| NFCorpus | 0,3951 | 0,3795 | −0,0156 | **0,0115** | não troca (**BM25 pior, significativo**) |
+| NFCorpus | 0,3946 | 0,3797 | −0,0149 | **0,0168** | não troca (**BM25 pior, significativo**) |
 
 Cross-check: `hybrid_tsrank` (twin) = 0,733724 = o in-DB do M123 → o harness é fiel, os números são reais.
 

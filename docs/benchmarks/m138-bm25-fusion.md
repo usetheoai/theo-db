@@ -11,8 +11,8 @@
 **A medição em DOIS corpora NÃO autoriza trocar o default lexical para BM25 — e no corpus lexical-heavy a
 troca mede como significativamente PIOR.** Em BEIR scifact a fusão com BM25 (0,7418 nDCG@10) **não vence** com
 significância a fusão com `ts_rank_cd` (0,7337): **p = 0,51**, 54W/49L/197 empates. Em BEIR NFCorpus (lexical-
-heavy) a fusão com BM25 (0,3795) é **significativamente pior** que com `ts_rank_cd` (0,3951): **p = 0,0115**,
-67W/105L. A perna BM25 é **9,8× mais forte isolada** em scifact (0,688 vs 0,070), mas o
+heavy) a fusão com BM25 (0,3797) é **significativamente pior** que com `ts_rank_cd` (0,3946): **p = 0,0168**,
+69W/104L. A perna BM25 é **9,8× mais forte isolada** em scifact (0,688 vs 0,070), mas o
 **RRF funde por rank e lava essa diferença** — o vetor (0,730) domina a fusão, e as duas pernas lexicais
 contribuem marginalmente por cima. Por ADR-1 do plano, isto é um **honest-negative**, não um fracasso: a
 medição preveniu uma troca de default que quebraria resultados de query existentes, exigiria
@@ -65,18 +65,18 @@ mesma medição foi rodada em NFCorpus:
 
 | Retriever | nDCG@10 | Recall@100 |
 |---|---|---|
-| vetor puro | 0,384440 | 0,361938 |
-| leg `ts_rank_cd` (isolado) | 0,207636 | 0,101940 |
-| leg BM25 (isolado) | 0,325365 | 0,245781 |
-| **fusão vetor + `ts_rank_cd`** | **0,395148** | 0,367412 |
-| **fusão vetor + BM25** | **0,379509** | 0,362432 |
+| vetor puro | 0,384683 | 0,361938 |
+| leg `ts_rank_cd` (isolado) | 0,206117 | 0,101884 |
+| leg BM25 (isolado) | 0,325403 | 0,245781 |
+| **fusão vetor + `ts_rank_cd`** | **0,394565** | 0,367441 |
+| **fusão vetor + BM25** | **0,379688** | 0,362432 |
 
-**Decisão:** `flip = false`. mean_diff (BM25 − ts_rank_cd) = **−0,01564** (BM25 **pior**); **p = 0,0115**
-(significativo); wins/losses/ties = **67/105/151**; Cohen's dz = −0,14.
+**Decisão:** `flip = false`. mean_diff (BM25 − ts_rank_cd) = **−0,01488** (BM25 **pior**); **p = 0,0168**
+(significativo); wins/losses/ties = **69/104/150**; Cohen's dz = −0,13.
 
 Aqui a perna BM25 isolada (0,325) **vence** a `ts_rank_cd` isolada (0,208) — como se esperava num corpus
 lexical-heavy. Mas na **fusão** o resultado **inverte com significância**: a fusão com `ts_rank_cd` (0,395)
-vence a fusão com BM25 (0,380), p = 0,0115, perdendo 105 vs ganhando 67. O RRF premia **complementaridade com
+vence a fusão com BM25 (0,380), p = 0,0168, perdendo 104 vs ganhando 69. O RRF premia **complementaridade com
 o vetor**, não força bruta da perna: a `ts_rank_cd`, mais esparsa (recall 0,102 vs 0,246), aporta um sinal mais
 **diverso** ao vetor; a BM25, mais forte porém mais correlacionada com o ranqueamento do vetor, adiciona menos
 diversidade à fusão. **No corpus onde o lexical mais importa, trocar para BM25 mede como significativamente

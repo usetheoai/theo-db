@@ -157,6 +157,14 @@ def run(dataset_name: str, model: str, dim: int, cache_dir: str = "benchmarks/.c
             "ndcg10": _mean(hybrid_bm25["ndcg10"]),
             "recall100": _mean(hybrid_bm25["recall100"]),
         },
+        # Per-query nDCG@10 for BOTH hybrids (aligned by qid), so an auditor can RECOMPUTE the paired p from
+        # the artifact alone instead of re-running the pipeline (M138 review MEDIUM-1). The decision rests on
+        # this paired test; publishing the raw pairs makes it verifiable, not just reproducible.
+        "per_query": {
+            "qids": hybrid_tsrank["qids"],
+            "hybrid_tsrank_ndcg10": [round(x, 6) for x in hybrid_tsrank["ndcg10"]],
+            "hybrid_bm25_ndcg10": [round(x, 6) for x in hybrid_bm25["ndcg10"]],
+        },
         "decision": decision,
     }
 

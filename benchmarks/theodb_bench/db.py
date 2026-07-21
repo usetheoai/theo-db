@@ -166,16 +166,18 @@ class VectorDB:
         with self._cursor() as cur:
             cur.execute(
                 f"SELECT doc_id FROM {table} WHERE embedding IS NOT NULL "
-                f"ORDER BY embedding <=> %s::vector LIMIT {int(n)}",
+                f"ORDER BY embedding <=> %s::vector, doc_id LIMIT {int(n)}",
                 (vec,),
             )
             return [r[0] for r in cur.fetchall()]
 
     def fts_query(self, table: str, query_text: str, n: int) -> list:
+        # `, doc_id` is a deterministic secondary sort: without it, score-ties at the top-N boundary are
+        # broken by physical row order (non-deterministic across runs). M138 review LOW-1.
         with self._cursor() as cur:
             cur.execute(
                 f"SELECT doc_id FROM {table} WHERE text_tsv @@ plainto_tsquery('english', %s) "
-                f"ORDER BY ts_rank_cd(text_tsv, plainto_tsquery('english', %s)) DESC LIMIT {int(n)}",
+                f"ORDER BY ts_rank_cd(text_tsv, plainto_tsquery('english', %s)) DESC, doc_id LIMIT {int(n)}",
                 (query_text, query_text),
             )
             return [r[0] for r in cur.fetchall()]
@@ -228,10 +230,11 @@ class VectorDB:
         # on pg_textsearch 1.3.1 when the query is a bind (the planner cannot resolve the index without a
         # literal). Measured on PG18.4, not presumed. The index name matches create_bm25_index: {table}_bm25.
         idx = f"{table}_bm25"
+        # `, doc_id` secondary sort: deterministic tie-break at the top-N boundary (M138 review LOW-1).
         with self._cursor() as cur:
             cur.execute(
                 f"SELECT doc_id FROM {table} WHERE {text_col} IS NOT NULL "
-                f"ORDER BY {text_col} <@> to_bm25query(%s, %s) LIMIT {int(n)}",
+                f"ORDER BY {text_col} <@> to_bm25query(%s, %s), doc_id LIMIT {int(n)}",
                 (query_text, idx),
             )
             return [r[0] for r in cur.fetchall()]

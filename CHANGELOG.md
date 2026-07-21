@@ -14,7 +14,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 - Gate de CI `license-gate` + `theodb_rs/deny.toml`: a regra **D1** (nenhuma dependência AGPL na distribuição) passa de vigilância humana a gate de máquina, com allowlist fail-closed — licença desconhecida falha em vez de passar. Primeira execução: `licenses ok`, zero AGPL na árvore (M136)
-- Medição decision-grade da fusão híbrida-com-BM25 vs híbrida-com-`ts_rank_cd` em BEIR (`benchmarks/run_m138_bm25_fusion.py` + `docs/benchmarks/m138-bm25-fusion.md`) — a medição que o M53 registrou como follow-up e nunca rodou. **Resultado (M138, honest-negative):** a fusão com BM25 **não** justifica trocar o default lexical — em scifact empata (nDCG@10 0,7418 vs 0,7337, p=0,51) e em NFCorpus (lexical-heavy) mede **significativamente pior** (0,3795 vs 0,3951, p=0,0115). A perna BM25 é 9,8× mais forte isolada, mas o RRF premia complementaridade com o vetor, não força bruta da perna. **O default lexical permanece `ts_rank_cd`**; `pg_textsearch` não é embarcado (M138)
+- Medição decision-grade da fusão híbrida-com-BM25 vs híbrida-com-`ts_rank_cd` em BEIR (`benchmarks/run_m138_bm25_fusion.py` + `docs/benchmarks/m138-bm25-fusion.md`) — a medição que o M53 registrou como follow-up e nunca rodou. **Resultado (M138, honest-negative):** a fusão com BM25 **não** justifica trocar o default lexical — em scifact empata (nDCG@10 0,7418 vs 0,7337, p=0,51) e em NFCorpus (lexical-heavy) mede **significativamente pior** (0,3797 vs 0,3946, p=0,0168). A perna BM25 é 9,8× mais forte isolada, mas o RRF premia complementaridade com o vetor, não força bruta da perna. **O default lexical permanece `ts_rank_cd`**; `pg_textsearch` não é embarcado (M138)
 
 ### Changed
 
