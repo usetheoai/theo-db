@@ -13,12 +13,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- Denylist de egresso SSRF no único ponto de saída HTTP das chamadas de IA: endpoints que resolvem para endereços loopback/privados/link-local (incl. `169.254.169.254`) são recusados com erro tipado `22023` nomeando o endereço, cobrindo `theodb.embed`, `ai._chat` e `theodb.rerank` de uma vez (#117)
-- GUC `theodb.egress_allowlist` (superusuário) para permitir explicitamente um host on-prem que resolva para endereço privado, sem desabilitar a proteção inteira (#117)
 
 ### Changed
-- **BREAKING:** `theodb_ml.apply_model` passa a exigir superusuário (ou privilégio SET no parâmetro), pois define `theodb.llm_endpoint`. Mantida como SECURITY INVOKER de propósito: torná-la SECURITY DEFINER devolveria o controle do endpoint a quem tem EXECUTE em `create_model` e reabriria #117 (#117)
-- **BREAKING:** os GUCs de **endpoint** e **chave** de IA (`theodb.{llm,embedding,rerank}_{endpoint,api_key}`, mais `theodb.llm_test_model`) passam a ser superusuário-apenas; antes eram nomes-placeholder que qualquer role podia definir na própria sessão. Configure-os por `ALTER SYSTEM`; as chaves ficam ocultas para não-superusuários em `pg_settings`. Os GUCs de **modelo** (`*_model`) continuam definíveis pelo chamador — o nome do modelo não é vetor de rede, já que o endpoint para onde ele é enviado agora é do operador (#117)
 
 ### Deprecated
 
@@ -27,6 +23,17 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 ### Security
+
+## [0.119.0] - 2026-07-21
+
+### Added
+- Denylist de egresso SSRF no único ponto de saída HTTP das chamadas de IA: endpoints que resolvem para endereços loopback/privados/link-local (incl. `169.254.169.254`) são recusados com erro tipado `22023` nomeando o endereço, cobrindo `theodb.embed`, `ai._chat` e `theodb.rerank` de uma vez (#117)
+- GUC `theodb.egress_allowlist` (superusuário) para permitir explicitamente um host on-prem que resolva para endereço privado, sem desabilitar a proteção inteira (#117)
+
+
+### Changed
+- **BREAKING:** `theodb_ml.apply_model` passa a exigir superusuário (ou privilégio SET no parâmetro), pois define `theodb.llm_endpoint`. Mantida como SECURITY INVOKER de propósito: torná-la SECURITY DEFINER devolveria o controle do endpoint a quem tem EXECUTE em `create_model` e reabriria #117 (#117)
+- **BREAKING:** os GUCs de **endpoint** e **chave** de IA (`theodb.{llm,embedding,rerank}_{endpoint,api_key}`, mais `theodb.llm_test_model`) passam a ser superusuário-apenas; antes eram nomes-placeholder que qualquer role podia definir na própria sessão. Configure-os por `ALTER SYSTEM`; as chaves ficam ocultas para não-superusuários em `pg_settings`. Os GUCs de **modelo** (`*_model`) continuam definíveis pelo chamador — o nome do modelo não é vetor de rede, já que o endpoint para onde ele é enviado agora é do operador (#117)
 
 ## [0.118.0] - 2026-07-21
 
