@@ -201,11 +201,20 @@ efetivamente cometi (reportar `CONVERGENCIA_OK` comparando 196 com 196).
 **F5 (HIGH) — FECHADO.** `.github/workflows/schema-drift-gate.yml` falha um PR que altere `theodb_rs/src/` sem
 bumpar `default_version` nem adicionar script de upgrade, e falha a edição de migração já lançada.
 
-**Achados do review ainda ABERTOS:**
+**Achados do review — todos os HIGH fechados. Permanecem os MEDIUM latentes:**
 
-- **F1 (HIGH) — correção aplicada, prova empírica PENDENTE.** Os guards de TYPE agora diferem corretamente
-  (verificado no SQL emitido), mas a convergência de um catálogo **sem o tipo** não foi exercitada — construir
-  esse catálogo exige remover o tipo com CASCADE, que derruba metade da superfície. É o último item aberto.
+- **F1 (HIGH) — FECHADO, provado empiricamente.** Não era preciso `DROP TYPE CASCADE`: o defeito estava nos
+  **predicados**, e eles se testam direto. Criando um shell type real (`CREATE TYPE f1type;` → `typisdefined = f`)
+  e avaliando os dois guards sobre esse estado:
+
+  | Guard | Avalia | Consequência |
+  |---|---|---|
+  | antigo (predicado compartilhado) | **`f`** | a definição completa **nunca aplicaria** — tipo shell para sempre, sem erro |
+  | novo (`typisdefined` + `typnamespace`) | **`t`** | a definição **aplica**, convergindo o tipo |
+
+  Reproduzir: `CREATE TYPE f1type;` e então
+  `SELECT NOT EXISTS(SELECT 1 FROM pg_type WHERE typname='f1type');` (antigo, dá `f`) vs
+  `... AND typisdefined);` (novo, dá `t`).
 - **F2/F3 (MEDIUM, latentes e medidos)** — `CREATE TABLE IF NOT EXISTS` não converge drift de coluna, e o
   `EXCEPTION` engole "mesmo objeto, definição diferente" em opclass/cast. O revisor mediu: nenhum caso vivo hoje
   (tabelas nasceram inteiras, opclasses byte-idênticas desde v0.60.0), mas morde na primeira mudança de membro.
