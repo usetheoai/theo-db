@@ -25,6 +25,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Removed
 
 ### Fixed
+- Corrupção silenciosa no script de upgrade do `theodb_rs`: o shell type e a definição completa do tipo `vector` compartilhavam o mesmo predicado de guarda, então num catálogo sem o tipo o shell era criado e a definição real **nunca aplicava** — o tipo ficava shell para sempre, sem erro. Guards agora diferem (`typisdefined`) e qualificam o namespace, evitando também ligar em cima de um `vector` de outra extensão (M137)
 
 ### Security
 
