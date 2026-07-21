@@ -214,51 +214,91 @@ pub(crate) unsafe extern "C-unwind" fn amoptions(
             optname: "lists".as_pg_cstr(),
             opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
             offset: std::mem::offset_of!(TheodbIvfflatOptions, lists) as i32,
+            // M135: PG18 added `isset_offset` to relopt_parse_elt (tracks whether the option was explicitly
+            // set). We never consult that tracking, so 0 preserves PG17 semantics exactly. Rust struct literals are
+            // exhaustive, so this is required at every literal — same tax pgvectorscale pays (options.rs:113).
+            isset_offset: 0,
         },
         pg_sys::relopt_parse_elt {
             optname: "sbq_bits".as_pg_cstr(),
             opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
             offset: std::mem::offset_of!(TheodbIvfflatOptions, sbq_bits) as i32,
+            // M135: PG18 added `isset_offset` to relopt_parse_elt (tracks whether the option was explicitly
+            // set). We never consult that tracking, so 0 preserves PG17 semantics exactly. Rust struct literals are
+            // exhaustive, so this is required at every literal — same tax pgvectorscale pays (options.rs:113).
+            isset_offset: 0,
         },
         pg_sys::relopt_parse_elt {
             optname: "pq_subspaces".as_pg_cstr(),
             opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
             offset: std::mem::offset_of!(TheodbIvfflatOptions, pq_subspaces) as i32,
+            // M135: PG18 added `isset_offset` to relopt_parse_elt (tracks whether the option was explicitly
+            // set). We never consult that tracking, so 0 preserves PG17 semantics exactly. Rust struct literals are
+            // exhaustive, so this is required at every literal — same tax pgvectorscale pays (options.rs:113).
+            isset_offset: 0,
         },
         pg_sys::relopt_parse_elt {
             optname: "pq_bits".as_pg_cstr(),
             opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
             offset: std::mem::offset_of!(TheodbIvfflatOptions, pq_bits) as i32,
+            // M135: PG18 added `isset_offset` to relopt_parse_elt (tracks whether the option was explicitly
+            // set). We never consult that tracking, so 0 preserves PG17 semantics exactly. Rust struct literals are
+            // exhaustive, so this is required at every literal — same tax pgvectorscale pays (options.rs:113).
+            isset_offset: 0,
         },
         pg_sys::relopt_parse_elt {
             optname: "aq_threshold".as_pg_cstr(),
             opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
             offset: std::mem::offset_of!(TheodbIvfflatOptions, aq_threshold_milli) as i32,
+            // M135: PG18 added `isset_offset` to relopt_parse_elt (tracks whether the option was explicitly
+            // set). We never consult that tracking, so 0 preserves PG17 semantics exactly. Rust struct literals are
+            // exhaustive, so this is required at every literal — same tax pgvectorscale pays (options.rs:113).
+            isset_offset: 0,
         },
         pg_sys::relopt_parse_elt {
             optname: "separate_storage".as_pg_cstr(),
             opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
             offset: std::mem::offset_of!(TheodbIvfflatOptions, separate_storage) as i32,
+            // M135: PG18 added `isset_offset` to relopt_parse_elt (tracks whether the option was explicitly
+            // set). We never consult that tracking, so 0 preserves PG17 semantics exactly. Rust struct literals are
+            // exhaustive, so this is required at every literal — same tax pgvectorscale pays (options.rs:113).
+            isset_offset: 0,
         },
         pg_sys::relopt_parse_elt {
             optname: "refine".as_pg_cstr(),
             opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
             offset: std::mem::offset_of!(TheodbIvfflatOptions, refine) as i32,
+            // M135: PG18 added `isset_offset` to relopt_parse_elt (tracks whether the option was explicitly
+            // set). We never consult that tracking, so 0 preserves PG17 semantics exactly. Rust struct literals are
+            // exhaustive, so this is required at every literal — same tax pgvectorscale pays (options.rs:113).
+            isset_offset: 0,
         },
         pg_sys::relopt_parse_elt {
             optname: "soar_lambda".as_pg_cstr(),
             opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
             offset: std::mem::offset_of!(TheodbIvfflatOptions, soar_lambda_milli) as i32,
+            // M135: PG18 added `isset_offset` to relopt_parse_elt (tracks whether the option was explicitly
+            // set). We never consult that tracking, so 0 preserves PG17 semantics exactly. Rust struct literals are
+            // exhaustive, so this is required at every literal — same tax pgvectorscale pays (options.rs:113).
+            isset_offset: 0,
         },
         pg_sys::relopt_parse_elt {
             optname: "rabitq_bits".as_pg_cstr(),
             opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
             offset: std::mem::offset_of!(TheodbIvfflatOptions, rabitq_bits) as i32,
+            // M135: PG18 added `isset_offset` to relopt_parse_elt (tracks whether the option was explicitly
+            // set). We never consult that tracking, so 0 preserves PG17 semantics exactly. Rust struct literals are
+            // exhaustive, so this is required at every literal — same tax pgvectorscale pays (options.rs:113).
+            isset_offset: 0,
         },
         pg_sys::relopt_parse_elt {
             optname: "degree_bound".as_pg_cstr(),
             opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
             offset: std::mem::offset_of!(TheodbIvfflatOptions, degree_bound) as i32,
+            // M135: PG18 added `isset_offset` to relopt_parse_elt (tracks whether the option was explicitly
+            // set). We never consult that tracking, so 0 preserves PG17 semantics exactly. Rust struct literals are
+            // exhaustive, so this is required at every literal — same tax pgvectorscale pays (options.rs:113).
+            isset_offset: 0,
         },
     ];
     pg_sys::build_reloptions(

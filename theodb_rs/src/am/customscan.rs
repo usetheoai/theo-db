@@ -115,32 +115,64 @@ impl Drop for ActiveGuard {
     }
 }
 
+/// M135 — `MaxHeapTuplesPerPage` (`access/htup_details.h:629-631`). pgrx does not expose it: it is a computed C
+/// macro, so it never reaches the bindings. **Measured**, not assumed — compiled a probe against the real PG18.4
+/// headers and read the symbol size: `char probe[MaxHeapTuplesPerPage]` → 0x123 = 291, with `char blk[BLCKSZ]` →
+/// 0x2000 confirming the 8 kB block the value depends on. The assert below pins that dependency (plan Q2), so a
+/// build with a different `BLCKSZ` fails loudly instead of silently under-sizing the offset buffer.
+const MAX_TUPLES_PER_PAGE: usize = 291;
+const _: () = assert!(
+    pg_sys::BLCKSZ == 8192,
+    "MAX_TUPLES_PER_PAGE = 291 was measured for an 8 kB BLCKSZ; re-measure for this build"
+);
+
 /// M92 v1b — materialize a native `TIDBitmap` (produced by a bitmap sub-plan's `MultiExecProcNode`) into the
 /// membership representation the AM Stage-1 consumes: a set of EXACT encoded TIDs (`(block<<16)|offset`, matching
-/// `tid::encode`) plus a set of LOSSY block numbers. A page goes lossy under memory pressure (`ntuples < 0`,
-/// `tidbitmap.h`) — its individual offsets are forgotten, so only the block is known and every candidate on that
-/// block must be ADMITTED then rechecked on the heap (the executor / Custom Scan node re-runs the real qual). The
-/// exact set is authoritative; the lossy set over-admits (safe under recheck).
+/// `tid::encode`) plus a set of LOSSY block numbers. A page goes lossy under memory pressure — its individual
+/// offsets are forgotten, so only the block is known and every candidate on that block must be ADMITTED then
+/// rechecked on the heap (the executor / Custom Scan node re-runs the real qual). The exact set is authoritative;
+/// the lossy set over-admits (safe under recheck).
+///
+/// **M135 — ported to the PG18 iterator contract.** Four things changed at once, and only one of them is a
+/// compile error, which is why this is the risky half of the migration:
+///
+/// 1. `tbm_begin_iterate` returns a `TBMIterator` **by value** and takes 3 args. `dsp` is the discriminator:
+///    valid ⇒ shared (DSA) iterator, `0` ⇒ private. Ours is always private — the `TIDBitmap` comes from a local
+///    `MultiExecProcNode`, never from parallel workers. `InvalidDsaPointer` is a C macro (`utils/dsa.h:78`,
+///    `((dsa_pointer) 0)`) that pgrx does not bind, hence the literal `0`.
+/// 2. `tbm_iterate` returns `bool` and fills a **caller-owned** result. The old "returns NULL when exhausted"
+///    idiom inverts silently if ported carelessly.
+/// 3. The `ntuples < 0` sentinel is **gone**, replaced by an explicit `bool lossy`. Treating a lossy page as
+///    exact would drop rows with no error.
+/// 4. Offsets left the result struct: `tbm_extract_page_tuple` fills a caller buffer. It returns the page's TOTAL
+///    offset count **even when that exceeds the buffer**, so the return value MUST be clamped before slicing —
+///    otherwise we read uninitialised memory. And it must never be called on a lossy result, whose
+///    `internal_page` is NULL (heap guards this the same way, `heapam_handler.c:2506`).
 pub(crate) unsafe fn materialize_bitmap(tbm: *mut pg_sys::TIDBitmap) -> (HashSet<i64>, HashSet<u32>) {
     let mut exact: HashSet<i64> = HashSet::new();
     let mut lossy: HashSet<u32> = HashSet::new();
-    let iter = pg_sys::tbm_begin_iterate(tbm);
-    loop {
-        let res = pg_sys::tbm_iterate(iter);
-        if res.is_null() {
-            break;
-        }
-        let r = &*res;
-        if r.ntuples < 0 {
-            lossy.insert(r.blockno); // lossy page — offsets gone; admit-then-recheck by block
+
+    // `0` = InvalidDsaPointer ⇒ private iterator (see doc note 1).
+    let mut iter: pg_sys::TBMIterator = pg_sys::tbm_begin_iterate(tbm, std::ptr::null_mut(), 0);
+    let mut res = pg_sys::TBMIterateResult::default();
+    let mut offsets = [0u16; MAX_TUPLES_PER_PAGE];
+
+    while pg_sys::tbm_iterate(&mut iter, &mut res) {
+        if res.lossy {
+            lossy.insert(res.blockno); // offsets gone; admit-then-recheck by block
         } else {
-            let offs = r.offsets.as_slice(r.ntuples as usize);
-            for &off in offs {
-                exact.insert(((r.blockno as i64) << 16) | (off as i64));
+            let reported =
+                pg_sys::tbm_extract_page_tuple(&mut res, offsets.as_mut_ptr(), MAX_TUPLES_PER_PAGE as u32)
+                    as usize;
+            // Clamp: `reported` is the page total, which may exceed the buffer (doc note 4).
+            let n = reported.min(MAX_TUPLES_PER_PAGE);
+            for &off in &offsets[..n] {
+                exact.insert(((res.blockno as i64) << 16) | (off as i64));
             }
         }
     }
-    pg_sys::tbm_end_iterate(iter);
+
+    pg_sys::tbm_end_iterate(&mut iter); // exactly once, after the drain (double call trips an Assert)
     (exact, lossy)
 }
 

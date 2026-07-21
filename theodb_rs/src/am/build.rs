@@ -89,7 +89,7 @@ unsafe fn index_vector_dim(indexrel: pg_sys::Relation) -> i32 { unsafe {
     if tupdesc.is_null() || (*tupdesc).natts < 1 {
         return 0;
     }
-    let attr = (*tupdesc).attrs.as_ptr(); // first attribute (the vector column)
+    let attr = super::tupdesc_attr(tupdesc, 0); // first attribute (the vector column)
     let typmod = (*attr).atttypmod;
     if typmod > 0 {
         typmod

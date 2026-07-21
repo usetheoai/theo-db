@@ -244,7 +244,7 @@ unsafe fn build_filter_expr(rel: pg_sys::Relation, predicates: &[super::zonemap:
         if p.col >= natts {
             continue; // fail-safe (EC-2): unknown column → do not build a filter term on it
         }
-        let att = (*tupdesc).attrs.as_ptr().add(p.col);
+        let att = super::tupdesc_attr(tupdesc, p.col);
         let name = CStr::from_ptr((*att).attname.data.as_ptr()).to_string_lossy().into_owned();
         let c = col(name.as_str());
         let b = p.const_bits;

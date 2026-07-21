@@ -133,11 +133,11 @@ unsafe fn build_cache(rel_oid: pg_sys::Oid, cols: &[String]) -> Result<RecordBat
     for name in cols {
         let idx = (0..natts)
             .find(|&i| {
-                std::ffi::CStr::from_ptr((*(*tupdesc).attrs.as_ptr().add(i)).attname.data.as_ptr()).to_string_lossy()
+                std::ffi::CStr::from_ptr((*super::tupdesc_attr(tupdesc, i)).attname.data.as_ptr()).to_string_lossy()
                     == name.as_str()
             })
             .ok_or_else(|| format!("arrow_cache: column '{name}' not found"))?;
-        let typid = (*(*tupdesc).attrs.as_ptr().add(idx)).atttypid.to_u32();
+        let typid = (*super::tupdesc_attr(tupdesc, idx)).atttypid.to_u32();
         meta.push((name.clone(), typid));
     }
     let relname = std::ffi::CStr::from_ptr(pg_sys::get_rel_name(rel_oid)).to_string_lossy().into_owned();

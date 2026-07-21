@@ -16,6 +16,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - Roadmap ampliado: adicionado M135 — suporte a PostgreSQL 18 (migração 17 → 18), com custo medido por sondagem de compilação (27 erros mapeados por arquivo/linha), não estimado (`/roadmap-feature pg18-support`)
 
 ### Changed
+- **BREAKING:** o TheoDB passa a exigir **PostgreSQL 18**; o suporte a PG17 foi removido. As features `pg13`–`pg17` do `Cargo.toml` saíram — nunca haviam sido compiladas por ninguém, e declaração de compatibilidade não verificada é a mesma classe de defeito que o projeto rejeita em qualquer outro lugar (M135)
+- Callbacks de bitmap scan do `theodb_columnar` deixam de ser registrados (ficam `NULL`): registrar um stub que erra dizia ao planner que suportávamos, fazendo-o gerar um plano que falharia em runtime; agora o planner roteia ao redor (M135, padrão citus)
 
 ### Deprecated
 

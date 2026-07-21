@@ -734,10 +734,14 @@ unsafe fn try_swap_agg(plan: *mut pg_sys::Plan, rtable: *mut pg_sys::List) -> Op
                 return None; // nulls-first ≠ our nulls-last
             }
             let opno = *(*s).sortOperators.add(i);
-            let (mut opfamily, mut opcintype, mut strategy) =
-                (pg_sys::InvalidOid, pg_sys::InvalidOid, 0i16);
-            pg_sys::get_ordering_op_properties(opno, &mut opfamily, &mut opcintype, &mut strategy);
-            if strategy != pg_sys::BTLessStrategyNumber as i16 {
+            // M135: PG18 generalized btree strategy numbers into an AM-agnostic `CompareType`, so the last
+            // out-param changed type AND the constant to compare against changed — `COMPARE_LT`, not
+            // `BTLessStrategyNumber`. This is not a recast: comparing against the old constant would silently
+            // accept the wrong ordering (utils/lsyscache.h, PG18).
+            let (mut opfamily, mut opcintype, mut cmptype) =
+                (pg_sys::InvalidOid, pg_sys::InvalidOid, pg_sys::CompareType::COMPARE_LT);
+            pg_sys::get_ordering_op_properties(opno, &mut opfamily, &mut opcintype, &mut cmptype);
+            if cmptype != pg_sys::CompareType::COMPARE_LT {
                 return None; // DESC (or non-btree) ≠ our ascending
             }
         }

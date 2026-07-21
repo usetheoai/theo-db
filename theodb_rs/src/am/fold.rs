@@ -70,7 +70,8 @@ pub(crate) unsafe fn fold(rel: pg_sys::Relation, meta: &[u8], body: &[Vec<Vec<u8
         // stays intact (block 0 unchanged) so there is NO silent corruption, but the next scan's `read_pending`
         // fails LOUD (typed REINDEX error) and a re-VACUUM does not heal it (only REINDEX does). Closing this
         // window (cancel/crash without REINDEX) is M55's incremental fold (ADR 0014).
-        pg_sys::vacuum_delay_point();
+        // M135: PG18 added `is_analyze`; we are in VACUUM, not ANALYZE (commands/vacuum.h).
+        pg_sys::vacuum_delay_point(false);
         // T2.3 crash injection: after this body page's WAL record is committed (reinit/extend already ran
         // GenericXLogFinish), before the pivot. Default GUC 0 ⇒ no-op in production.
         crate::am::guc::maybe_crash_after_body_page(i as u32 + 1);
