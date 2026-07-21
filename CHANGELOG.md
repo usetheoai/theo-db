@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Gate de CI `license-gate` + `theodb_rs/deny.toml`: a regra **D1** (nenhuma dependência AGPL na distribuição) passa de vigilância humana a gate de máquina, com allowlist fail-closed — licença desconhecida falha em vez de passar. Primeira execução: `licenses ok`, zero AGPL na árvore (M136)
 
 ### Changed
 
