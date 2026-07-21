@@ -13,6 +13,20 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.115.0] - 2026-07-21
+
+### Added
 - **Official OLTP benchmark: pgbench + HammerDB TPROC-C over self-hosted TheoDB (M129, ADR-0050).** OLTP driver
   (`benchmarks/run_m129_oltp.py`) + HammerDB TPROC-C Tcl (`benchmarks/oltp/hammerdb_tproc_c.tcl`, our script driving
   the GPLv3 tool via its CLI — no HammerDB source vendored/linked) + DB-free unit tests
@@ -26,16 +40,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   self-hosted shared box (NOT canonical hardware) → functional baseline, not a competitive claim; NOPM is NOT
   audited tpmC; pgbench is D1-clean (PostgreSQL License), HammerDB is an external out-of-tree Docker driver
   (`docs/benchmarks/m129-oltp.md`).
-
-### Changed
-
-### Deprecated
-
-### Removed
-
-### Fixed
-
-### Security
 
 ## [0.114.0] - 2026-07-20
 
