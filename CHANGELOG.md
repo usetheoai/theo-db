@@ -13,6 +13,20 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.116.0] - 2026-07-21
+
+### Added
 - **Official HTAP benchmark: CH-benCHmark via BenchBase over self-hosted TheoDB (M130, ADR-0050).** HTAP driver
   (`benchmarks/run_m130_htap.py`) + a container-entry script + BenchBase config (`benchmarks/htap/`, our `.sh` +
   `.xml` driving the Apache-2.0 BenchBase tool from a pinned SHA inside a Java-23 Docker container — no BenchBase
@@ -27,16 +41,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   hardware) →
   functional baseline, not a competitive claim; BenchBase is Apache-2.0 run as an external Java-23 Docker driver;
   seed-determinism unconfirmed (`docs/benchmarks/m130-htap.md`).
-
-### Changed
-
-### Deprecated
-
-### Removed
-
-### Fixed
-
-### Security
 
 ## [0.115.0] - 2026-07-21
 
