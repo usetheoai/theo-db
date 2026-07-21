@@ -2119,6 +2119,30 @@ Recomendação #3 / Risco de manutenção: com 19 arquivos >500 LoC e este a 3.4
 
 ---
 
+## M133 — [ ] Fix #140 — restaurar o sinal de CI (todo job do Actions falha antes de qualquer step)
+
+> Added 2026-07-21 (`/roadmap-feature ci-restore-signal`). É a **rede de segurança** sob todos os outros milestones: hoje o CI não dá sinal nenhum. Grill: `knowledge-base/grills/ci-restore-signal-feature-grill.md`.
+
+**Objective:** corrigir o **#140** — **todo** job do GitHub Actions em `develop` falha há **30+ runs consecutivos**, cada um morrendo em **2–3s com ZERO steps executados** (`"steps": []`) e sem log (`BlobNotFound`). Afeta todos os jobs (`pg-regression`, `ai-sql`, `columnar-measure`, `hybrid-search`, `harness-unit`, `image-and-bench`, `bm25-measure`, `migration-smoke`). As releases v0.113.0–v0.117.0 foram **todas mergeadas vermelhas**, e a verificação do programa M127–M131 veio de runs medidos no droplet, não do CI — qualquer regressão real hoje é **invisível**.
+
+**Definition of done:**
+
+- [ ] Causa-raiz identificada **com evidência** e registrada no #140, distinguindo condição de conta/org do Actions (minutos esgotados / limite de gasto / Actions desabilitado) de defeito de workflow. A falha pré-step em `runs-on: ubuntu-latest` puro aponta para a primeira, mas o milestone **confirma, não assume**.
+- [ ] Pelo menos um run completo em `develop` onde os **steps de fato executam** (`gh api .../jobs/<id>` retorna `steps` não-vazio e o log é recuperável) — prova de sinal restaurado, independente de passar ou falhar.
+- [ ] A conclusão resultante é triada honestamente: verde fecha; vermelho **por motivo real de código** é registrado e cada falha vira seu próprio issue (ver risco (b)).
+- [ ] Notificação de falha (ex.: hook `workflow_run`) para que um CI morto apareça **imediatamente**, não depois de 30 runs silenciosos.
+- [ ] #140 fechado com comentário de evidência.
+
+**Dependencies:** M131 `[x]`. Sem dependência de código: `.github/workflows/ci.yml` não muda desde antes do M127 (`1b83632`) — não é regressão do trabalho recente.
+
+**Risks:** (a) a causa pode estar **fora do repositório** (billing/habilitação do Actions na org `usetheodev`) → exige **ação do owner** nas settings do GitHub que nenhuma mudança de código substitui; fronteira honesta: o milestone pode legitimamente terminar **BLOCKED-on-owner**, e isso deve ser reportado como BLOCKED em vez de maquiado (Regra 3 — BLOCKED honesto > PASS falso). (b) restaurar o CI pode **revelar falhas reais acumuladas** de 30+ runs não verificados → escopo pode crescer de "restaurar sinal" para "corrigir N quebras latentes"; mitigação: escopo deste milestone é **restaurar sinal + triar**, filando cada falha genuína como issue próprio.
+
+**Boundary honesto:** é **reparo de infraestrutura/CI**, não capacidade de produto. Não muda o gate de release — CI verde é pré-condição explicitamente **opcional (warn-not-block)** no `cycle-release`, e foi por isso que as releases procederam legitimamente; este milestone devolve a rede.
+
+**Prior art:** issue #140 (evidência `"steps": []`, `BlobNotFound`, histórico de 30 runs), `../.claude/rules/cycle-release.md` (CI verde como soft gate).
+
+---
+
 ## Sequência e paralelismo
 
 ```
