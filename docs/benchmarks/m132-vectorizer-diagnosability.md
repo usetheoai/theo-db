@@ -83,6 +83,33 @@ Endpoint restored to the real one, queue cleared, 5 fresh rows:
 - The 2026-07-20 root cause is **not provable** — the server log was rotated away. It is recorded as *probable*,
   never as established fact.
 
+## 6. Post-review hardening (verified on the shipped binary)
+
+Both council reviews returned **0 BLOCKER / 0 HIGH**. Two MEDIUMs were defects *introduced by this milestone* and
+were fixed at the root, then re-verified on the rebuilt binary:
+
+| Finding | Why it existed | Fix | Verified |
+|---|---|---|---|
+| The endpoint response body echoed into the error (200 chars) is now **persisted**, not just logged — an echo/debug endpoint reflecting `Authorization` headers would write a token into a durable dead-letter row | the persistence is M132's own delta (logs rotate; table rows do not) | `sanitize_error_text` redacts credential-shaped runs (`Bearer …`, `sk-…`) and bounds the text **at the sink** (`_vectorizer_mark_failed`), so no future caller can bypass it. No new dependency | injected `Bearer sk-proj-AAAABBBBCCCCDDDDEEEEFFFF` through the sink → **no row contains the token** |
+| Routing `Some(0)` into the per-job fallback lands on the lease-lost path, where the batch already committed and `mark_done` returned false; `process_one` returned "the work ran", counting a job this worker no longer owns — which the new owner also counts | the `Some(0)` routing is M132's own change | `process_one` now returns the **owner-guarded** `mark_done` result, honouring the H1 fencing contract | end-to-end unchanged: 5/5, queue drains |
+| The new startup diagnostic ran SPI in an unprotected `BackgroundWorker::transaction` — a PG ERROR there would crash-restart the worker | the transaction is M132's own addition | subtransaction-isolated: losing the log line degrades diagnosis, losing the worker stops all embedding | startup line still emitted |
+| `mark_done` interpolated while its sibling bound parameters | pre-existing asymmetry | both arms bound | — |
+
+**Final verification on the shipped `.so`** (postmaster start time asserted newer than the `.so` mtime — the
+anti-silent-restart gate):
+
+```
+GATE ok — binário novo carregado
+(1) credential redaction ....... redacted (no row contains the injected token)
+(2) startup line ............... theodb vectorizer worker: embedding_endpoint=set embedding_model=set api_key_len=164
+(3) end-to-end ................. queue empty (0 failed) · chunks/embeddings 5/5
+```
+
+One review note worth recording rather than burying: allocating a `String` inside `catch_others` is **sound** —
+pgrx 0.19 frees the C `ErrorData` and flushes the error state *before* raising the panic, so the handler only ever
+touches owned Rust data. That was an assumption when the code was written; it is now verified against the pgrx
+source.
+
 ## Verdict
 
 **#132 closed as non-reproducing, with the diagnosability gap it exposed fixed and measured.** A failing job now
