@@ -102,10 +102,110 @@ fn backoff(attempt: u32) {
     std::thread::sleep(std::time::Duration::from_millis(base_ms + jitter_ms));
 }
 
+/// M134 (#117) — is this address one a database host must never be steered at?
+///
+/// Blind SSRF: a role holding EXECUTE on an LLM-touching function could set the endpoint GUC and make the DB host
+/// probe cloud metadata (`169.254.169.254`), loopback services, or internal RFC1918 hosts — observable through
+/// timing and breaker state even when the reply is discarded. Pure function: every range is unit-testable with no
+/// network.
+pub(crate) fn is_blocked_addr(ip: std::net::IpAddr) -> bool {
+    use std::net::IpAddr;
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_loopback()            // 127.0.0.0/8
+                || v4.is_private()      // 10/8, 172.16/12, 192.168/16
+                || v4.is_link_local()   // 169.254.0.0/16 — cloud metadata
+                || v4.is_broadcast()
+                || v4.is_unspecified()  // 0.0.0.0
+                || v4.octets()[0] == 0  // 0.0.0.0/8
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback()            // ::1
+                || v6.is_unspecified()
+                || (v6.segments()[0] & 0xfe00) == 0xfc00  // fc00::/7 unique-local
+                || (v6.segments()[0] & 0xffc0) == 0xfe80  // fe80::/10 link-local
+                // IPv4-mapped (::ffff:a.b.c.d) must be judged by its IPv4 meaning, not treated as public.
+                || v6.to_ipv4_mapped().is_some_and(|m| is_blocked_addr(IpAddr::V4(m)))
+        }
+    }
+}
+
+/// Parse `host[:port]` out of an `http(s)://…` endpoint. Returns None when the shape is not usable — the caller
+/// treats that as blocked (fail-closed), never as "allow because we could not parse".
+pub(crate) fn endpoint_host(endpoint: &str) -> Option<String> {
+    let rest = endpoint.strip_prefix("http://").or_else(|| endpoint.strip_prefix("https://"))?;
+    let hostport = rest.split(['/', '?', '#']).next()?;
+    // Strip credentials if present (`user:pass@host`).
+    let hostport = hostport.rsplit('@').next()?;
+    if hostport.is_empty() {
+        return None;
+    }
+    // `[::1]:8080` → `::1`; `host:8080` → `host`.
+    if let Some(v6) = hostport.strip_prefix('[') {
+        return v6.split(']').next().map(|s| s.to_string());
+    }
+    Some(hostport.split(':').next()?.to_string())
+}
+
+/// Parse the operator allowlist GUC (comma-separated hosts). Pure so it is testable without a GUC.
+pub(crate) fn parse_allowlist(raw: &str) -> Vec<String> {
+    raw.split(',').map(|s| s.trim().to_lowercase()).filter(|s| !s.is_empty()).collect()
+}
+
+/// M134 (#117) — fail-closed SSRF egress guard.
+///
+/// Resolves the endpoint host and rejects if ANY resolved address is internal. Checking every resolved address (not
+/// just the first) closes the static multi-A-record case.
+///
+/// HONEST LIMIT (ADR M134-2): this is resolve-and-check, NOT resolve-then-connect. `minreq` exposes no custom
+/// resolver/connector, so the checked IP cannot be pinned through to the socket without replacing the HTTP client.
+/// A DNS-rebinding attacker who flips the record between this resolution and `minreq`'s retains a narrow window.
+/// That residual window is documented in `docs/benchmarks/m134-ssrf-hardening.md` rather than papered over.
+///
+/// Escape hatch: `theodb.egress_allowlist` is an operator-only (`Suset`) GUC — never caller-settable — so a
+/// deliberate on-prem endpoint on 10/8 or 192.168/16 can be re-permitted without opening the class.
+pub(crate) fn guard_egress(fn_name: &str, endpoint: &str) {
+    use std::net::ToSocketAddrs;
+    let Some(host) = endpoint_host(endpoint) else {
+        crate::pg::err_input(&format!(
+            "{fn_name}: endpoint is not a usable http(s) URL (blocked internal address check cannot run)"
+        ));
+    };
+    let allow = crate::am::guc::egress_allowlist();
+    if parse_allowlist(&allow).contains(&host.to_lowercase()) {
+        return; // operator explicitly permitted this host
+    }
+    // Port is irrelevant to the address classification; 80 is a placeholder for resolution only.
+    let addrs: Vec<std::net::SocketAddr> = match (host.as_str(), 80u16).to_socket_addrs() {
+        Ok(it) => it.collect(),
+        // Fail CLOSED: an unresolvable host is not proof of a safe target.
+        Err(e) => crate::pg::err_input(&format!(
+            "{fn_name}: could not resolve endpoint host {host}: {e} (blocked internal address check cannot run)"
+        )),
+    };
+    if addrs.is_empty() {
+        crate::pg::err_input(&format!(
+            "{fn_name}: endpoint host {host} resolved to no address (blocked internal address check cannot run)"
+        ));
+    }
+    if let Some(bad) = addrs.iter().find(|a| is_blocked_addr(a.ip())) {
+        crate::pg::err_input(&format!(
+            "{fn_name}: refusing to call blocked internal address {} (host {host}) — loopback/private/link-local \
+targets are denied; an operator may permit a specific host via theodb.egress_allowlist",
+            bad.ip()
+        ));
+    }
+}
+
 /// POST a JSON payload to `endpoint` and return the parsed response body. A bounded recoverable-class
 /// retry (connect/timeout + 429/502/503) wraps the send/status; non-recoverable status, exhausted retries,
 /// and non-JSON bodies fail fast with SQLSTATE 38000 ("call failed"). `fn_name` prefixes every message.
 pub(crate) fn post_json(fn_name: &str, endpoint: &str, payload: String, api_key: Option<&str>) -> Value {
+    // M134 (#117): SSRF egress guard at the SINGLE outbound call, so it covers chat AND embed and cannot be
+    // bypassed by a future caller. The pre-existing `http(s)://` check is NOT an SSRF control — it blocks
+    // `file://`, not `http://169.254.169.254/`. Runs BEFORE the breaker so a blocked target never even records
+    // breaker state (which would leak liveness by timing — the blind-SSRF signal).
+    guard_egress(fn_name, endpoint);
     // M104 (Q3): if this backend's breaker for `endpoint` is OPEN, fail FAST (no TCP, no retry budget) so a per-row
     // surface over a dead endpoint costs ~K probes, not N × (MAX_RETRIES+1) × timeout.
     if breaker_allow(endpoint).is_err() {
@@ -206,6 +306,10 @@ mod tests {
     #[pg_test]
     fn m104_breaker_opens_after_k_failures_then_fails_fast() {
         let ep = "http://127.0.0.1:1/dead"; // port 1: connection refused (fast) — a stand-in for a down endpoint
+        // M134: loopback is denied by default now, so this breaker test must go through the operator escape hatch.
+        // That is not a workaround — it is the escape hatch doing its job, and asserting the breaker still trips
+        // afterwards proves the guard runs BEFORE the breaker without disabling it.
+        Spi::run("SET theodb.egress_allowlist = '127.0.0.1'").unwrap();
         // K failing calls trip the breaker (each caught — post_json diverges via ereport on failure).
         for _ in 0..BREAKER_K {
             PgTryBuilder::new(|| post_json("breaker_test", ep, "{}".to_string(), None))
@@ -234,4 +338,133 @@ mod tests {
         breaker_record(ep, true); // a success (e.g. after open_ms half-open probe) closes + resets
         assert!(!breaker_is_open(ep), "a success closes the breaker (reset to Closed)");
     }
+
+    // ── M134 (#117) — SSRF egress guard ────────────────────────────────────────────────────────────────────────
+
+    // The classifier is the load-bearing half: if a range is missing here, the guard silently permits it. Pure, so
+    // every range is asserted without a socket.
+    #[pg_test]
+    fn test_m134_classifier_blocks_all_private_ranges() {
+        for s in [
+            "127.0.0.1",        // loopback
+            "10.0.0.1",         // RFC1918 /8
+            "172.16.0.1",       // RFC1918 /12
+            "192.168.0.1",      // RFC1918 /16
+            "169.254.169.254",  // link-local — the cloud metadata service, the whole point
+            "0.0.0.0",          // unspecified (aliases loopback on some stacks)
+            "::1",              // v6 loopback
+            "fd00::1",          // v6 unique-local
+            "fe80::1",          // v6 link-local
+            "::ffff:169.254.169.254", // v4-mapped metadata — must not slip through as "a v6 address"
+        ] {
+            let ip: std::net::IpAddr = s.parse().unwrap();
+            assert!(is_blocked_addr(ip), "{s} must be blocked");
+        }
+        for s in ["8.8.8.8", "1.1.1.1", "2606:4700:4700::1111"] {
+            let ip: std::net::IpAddr = s.parse().unwrap();
+            assert!(!is_blocked_addr(ip), "{s} is public and must be allowed");
+        }
+    }
+
+    // Host extraction must survive the shapes an attacker actually uses (port, credentials, bracketed v6, path,
+    // query). A parse miss that returned the whole URL would resolve to nothing and fail closed — but a parse miss
+    // that returned a WRONG host could resolve to something public while minreq connects somewhere else.
+    #[pg_test]
+    fn test_m134_endpoint_host_extraction() {
+        for (url, want) in [
+            ("http://169.254.169.254/latest/meta-data/", Some("169.254.169.254")),
+            ("https://api.openai.com/v1/embeddings", Some("api.openai.com")),
+            ("http://127.0.0.1:1/dead", Some("127.0.0.1")),
+            ("http://user:pass@10.0.0.1:8080/x", Some("10.0.0.1")),
+            ("http://[::1]:8080/v1", Some("::1")),
+            ("http://host?a=b", Some("host")),
+            ("file:///etc/passwd", None),
+            ("http://", None),
+        ] {
+            assert_eq!(endpoint_host(url).as_deref(), want, "host of {url}");
+        }
+    }
+
+    // The end-to-end negative case: a caller pointing the endpoint at the cloud metadata service is refused with a
+    // TYPED input error naming the blocked address — not a timeout, not a swallowed warning, and never a real HTTP
+    // request. Asserting the SQLSTATE (22023, invalid_parameter_value) is what distinguishes "we refused" from
+    // "the call happened to fail".
+    #[pg_test]
+    fn test_m134_metadata_endpoint_is_refused_with_typed_error() {
+        Spi::run("SET theodb.egress_allowlist = ''").unwrap();
+        let caught = PgTryBuilder::new(|| {
+            post_json("m134_test", "http://169.254.169.254/latest/meta-data/", "{}".to_string(), None);
+            None
+        })
+        .catch_others(|e| {
+            let r = match &e {
+                pgrx::pg_sys::panic::CaughtError::PostgresError(r)
+                | pgrx::pg_sys::panic::CaughtError::ErrorReport(r) => r,
+                pgrx::pg_sys::panic::CaughtError::RustPanic { ereport, .. } => ereport,
+            };
+            Some((format!("{:?}", r.sql_error_code()), r.message().to_string()))
+        })
+        .execute();
+        let (code, msg) = caught.expect("the metadata endpoint must be refused, not called");
+        assert!(code.contains("INVALID_PARAMETER_VALUE"), "typed input error, got {code}");
+        assert!(msg.contains("blocked internal address"), "message names the reason, got: {msg}");
+        assert!(msg.contains("169.254.169.254"), "message names the address, got: {msg}");
+        // And the refusal must NOT have recorded breaker state — breaker state is observable by timing, so writing
+        // it for a blocked target would leak whether the internal host is alive (the blind-SSRF signal).
+        assert!(
+            !breaker_is_open("http://169.254.169.254/latest/meta-data/"),
+            "a blocked target must not touch breaker state"
+        );
+    }
+
+    // The escape hatch must actually permit the host it names — otherwise an on-prem operator disables the guard
+    // wholesale, which is worse than the class we are closing.
+    #[pg_test]
+    fn test_m134_allowlisted_host_is_permitted() {
+        Spi::run("SET theodb.egress_allowlist = ' 127.0.0.1 , other.example '").unwrap();
+        assert_eq!(parse_allowlist(" 127.0.0.1 , other.example "), vec!["127.0.0.1", "other.example"]);
+        // Allowlisted → the guard lets it through, so the failure is the CONNECTION (38000), not the guard (22023).
+        let code = PgTryBuilder::new(|| {
+            post_json("m134_test", "http://127.0.0.1:1/dead", "{}".to_string(), None);
+            String::new()
+        })
+        .catch_others(|e| {
+            let r = match &e {
+                pgrx::pg_sys::panic::CaughtError::PostgresError(r)
+                | pgrx::pg_sys::panic::CaughtError::ErrorReport(r) => r,
+                pgrx::pg_sys::panic::CaughtError::RustPanic { ereport, .. } => ereport,
+            };
+            format!("{:?}", r.sql_error_code())
+        })
+        .execute();
+        assert!(
+            code.contains("EXTERNAL_ROUTINE_EXCEPTION"),
+            "allowlisted host reaches the network layer (38000), got {code}"
+        );
+        Spi::run("SET theodb.egress_allowlist = ''").unwrap();
+    }
+
+    // An unresolvable host must FAIL CLOSED. "We could not check it" is not "it is safe".
+    #[pg_test]
+    fn test_m134_unresolvable_host_fails_closed() {
+        Spi::run("SET theodb.egress_allowlist = ''").unwrap();
+        let msg = PgTryBuilder::new(|| {
+            post_json("m134_test", "http://m134-no-such-host.invalid/v1", "{}".to_string(), None);
+            String::new()
+        })
+        .catch_others(|e| {
+            let r = match &e {
+                pgrx::pg_sys::panic::CaughtError::PostgresError(r)
+                | pgrx::pg_sys::panic::CaughtError::ErrorReport(r) => r,
+                pgrx::pg_sys::panic::CaughtError::RustPanic { ereport, .. } => ereport,
+            };
+            r.message().to_string()
+        })
+        .execute();
+        assert!(
+            msg.contains("blocked internal address check cannot run"),
+            "unresolvable host is refused, not attempted; got: {msg}"
+        );
+    }
+
 }

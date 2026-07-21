@@ -13,8 +13,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Denylist de egresso SSRF no único ponto de saída HTTP das chamadas de IA: endpoints que resolvem para endereços loopback/privados/link-local (incl. `169.254.169.254`) são recusados com erro tipado `22023` nomeando o endereço, cobrindo `theodb.embed`, `ai._chat` e `theodb.rerank` de uma vez (#117)
+- GUC `theodb.egress_allowlist` (superusuário) para permitir explicitamente um host on-prem que resolva para endereço privado, sem desabilitar a proteção inteira (#117)
 
 ### Changed
+- **BREAKING:** os GUCs de endpoint/modelo/chave de IA (`theodb.llm_*`, `theodb.embedding_*`, `theodb.rerank_*`) passam a ser registrados como superusuário-apenas; antes eram nomes-placeholder que qualquer role podia definir na própria sessão. Configure-os por `ALTER SYSTEM` (o caminho já usado por operadores); as chaves ficam ocultas para não-superusuários em `pg_settings` (#117)
 
 ### Deprecated
 
