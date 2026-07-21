@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `scripts/test-upgrade.sh`: harness reproduzível da cadeia de upgrade (cenário A, convergência, idempotência, cenário B1). Substitui provas que eram digitadas à mão — e que já haviam produzido duas leituras falsas; o harness aborta se o envelhecimento do catálogo não remover nada, fechando justamente esse modo de pass vacuoso (M137/F4)
 - Gate de CI `schema-drift-gate`: falha um PR que altere a superfície da extensão (`theodb_rs/src/`) sem bumpar `default_version` nem adicionar script de upgrade — a mecânica que fez `1.0.0` rotular cinco catálogos diferentes ao longo de 120 releases continua ativa, e este gate a interrompe. Inclui a guarda que impede editar um script de upgrade cujo alvo já foi lançado (M137/F5)
 - Oráculo de schema cobre também **privilégios** (`proacl`), não só membresia — um upgrade que perdesse um `REVOKE ... FROM PUBLIC` passaria batido no `pg_depend` (M137)
 - Cadeia de upgrade do `theodb_rs`: `ALTER EXTENSION theodb_rs UPDATE TO '1.1.0'` passa a existir — pela primeira vez em 120 releases a extensão Rust é atualizável sem dropar e recriar. Inclui o script convergente `theodb_rs--1.0.0--1.1.0.sql` (gerado por `scripts/gen-upgrade-script.py`, idempotente) e o oráculo `schema_snapshot.sql` que compara o schema pós-upgrade com o de uma instalação limpa (M137)

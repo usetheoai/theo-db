@@ -184,14 +184,28 @@ Minha tentativa foi inválida (rodei o script solto num banco vazio, e o `\echo 
 na linha 1). A correção está certa por construção e verificada no SQL emitido; a prova empírica desse caso
 específico continua pendente. A regressão da cadeia normal passou (283 linhas = 196 objetos + 87 ACL).
 
+**F4 (HIGH) — FECHADO.** `scripts/test-upgrade.sh` existe e roda os quatro cenários de ponta a ponta:
+
+```
+SCENARIO_A_OK        pós-upgrade == instalação limpa (schema + ACL)  — 283 linhas
+CONVERGENCIA_OK      catálogo incompleto (277) convergiu para completo (283)
+IDEMPOTENTE_OK       script rodado 2x: 0 erros, snapshot inalterado
+SCENARIO_B1_DONE     .so novo sobre catálogo 1.0.0 sem UPDATE: servidor sobreviveu
+```
+
+Reproduzir: `PGINST=/root/.pgrx/18.4/pgrx-install PGPORT=28918 bash scripts/test-upgrade.sh`
+
+O harness aborta se o envelhecimento do catálogo não remover nada — a guarda contra o pass vacuoso que
+efetivamente cometi (reportar `CONVERGENCIA_OK` comparando 196 com 196).
+
+**F5 (HIGH) — FECHADO.** `.github/workflows/schema-drift-gate.yml` falha um PR que altere `theodb_rs/src/` sem
+bumpar `default_version` nem adicionar script de upgrade, e falha a edição de migração já lançada.
+
 **Achados do review ainda ABERTOS:**
 
-- **F5 (HIGH)** — nada impede `1.1.0` de rotular múltiplos catálogos: o pgrx regenera o script base a partir do
-  HEAD a cada build, enquanto o script de upgrade é um snapshot congelado. Adicionar um `#[pg_extern]` sem bumpar
-  a versão reproduz o defeito do M137 uma versão depois. Precisa do gate estilo `check_migration_diff.py`.
-- **F4 (HIGH)** — `scripts/test-upgrade.sh` não existe; as provas das §4/§5/§6 foram feitas à mão e não são
-  re-executáveis. Num documento que já registrou **duas leituras falsas minhas**, um harness irreproduzível é
-  exatamente o que não se deve aceitar como base para o próximo salto.
+- **F1 (HIGH) — correção aplicada, prova empírica PENDENTE.** Os guards de TYPE agora diferem corretamente
+  (verificado no SQL emitido), mas a convergência de um catálogo **sem o tipo** não foi exercitada — construir
+  esse catálogo exige remover o tipo com CASCADE, que derruba metade da superfície. É o último item aberto.
 - **F2/F3 (MEDIUM, latentes e medidos)** — `CREATE TABLE IF NOT EXISTS` não converge drift de coluna, e o
   `EXCEPTION` engole "mesmo objeto, definição diferente" em opclass/cast. O revisor mediu: nenhum caso vivo hoje
   (tabelas nasceram inteiras, opclasses byte-idênticas desde v0.60.0), mas morde na primeira mudança de membro.
