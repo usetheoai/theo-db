@@ -2167,7 +2167,7 @@ Recomendação #3 / Risco de manutenção: com 19 arquivos >500 LoC e este a 3.4
 
 ---
 
-## M135 — [ ] Suporte a PostgreSQL 18 (migração 17 → 18)
+## M135 — [x] Suporte a PostgreSQL 18 (migração 17 → 18)
 
 > Added 2026-07-21 (`/roadmap-feature pg18-support`). Grill: `knowledge-base/grills/pg18-support-feature-grill.md`. Custo **medido**, não estimado: sondagem de compilação contra PG18.4 na droplet.
 
