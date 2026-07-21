@@ -2252,7 +2252,7 @@ Falsificação registrada: a hipótese de que a dor viria do WAL estava **errada
 **Prior art:** paradedb `check-released-migrations.yml` + `test-pg_search-upgrade.yml` + SchemaBot (`check_migration_diff.py`); pg_durable `sql/` com cadeia explícita + `scripts/test-upgrade.sh` em CI.
 
 ---
-## M138 — [ ] BM25 como perna lexical default (executa o gate de adoção do ADR-0013)
+## M138 — [x] BM25 como perna lexical default (executa o gate de adoção do ADR-0013)
 
 > Added 2026-07-21 (`/roadmap-feature bm25-perna-lexical-default`). Grill: `knowledge-base/grills/bm25-perna-lexical-default-feature-grill.md`.
 
