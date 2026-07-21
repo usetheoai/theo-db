@@ -1,0 +1,82 @@
+# M137 / F5 — o gate que impede a versão de voltar a mentir.
+#
+# O DEFEITO QUE ISTO PREVINE, medido em 2026-07-21: o `theodb_rs` passou 120 releases com
+# `default_version = '1.0.0'` enquanto a superfície SQL ia de 18 → 48 → 60 → 78 funções `pg_extern`. Resultado:
+# `1.0.0` rotulava pelo menos CINCO catálogos diferentes, e não existia delta correto a partir dele — foi isso
+# que obrigou o primeiro salto da cadeia a ser convergente em vez de incremental.
+#
+# O M137 consertou o passado. Este gate impede o futuro, porque a mecânica que produziu o defeito continua ativa:
+# o pgrx **regenera** o script de instalação a partir do `default_version` a cada build, enquanto os scripts de
+# upgrade são snapshots congelados. Adicionar um `#[pg_extern]` sem bumpar a versão faz a instalação limpa ter a
+# função nova e a instalação atualizada não — as duas reportando a MESMA `extversion`. Exatamente o bug de novo,
+# uma versão adiante.
+#
+# Por que um gate barato em vez do SchemaBot completo do ParadeDB (que gera dois schemas com `cargo pgrx schema` e
+# os compara com um differ semântico): aquilo custa dois builds completos do pgrx por PR. Este aqui é uma
+# heurística estrutural — não prova que o delta está CORRETO, só que alguém foi obrigado a pensar nele. É o degrau
+# da parsimony ladder que resolve a necessidade presente; o differ semântico entra quando houver evidência de que
+# esta checagem deixou passar algo.
+name: schema-drift-gate
+
+on:
+  pull_request:
+    paths: ['theodb_rs/src/**', 'theodb_rs/theodb_rs.control', 'theodb_rs/sql/**']
+  push:
+    branches: [develop]
+    paths: ['theodb_rs/src/**', 'theodb_rs/theodb_rs.control', 'theodb_rs/sql/**']
+
+jobs:
+  drift:
+    runs-on: [self-hosted, theodb-do]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: A superfície mudou sem que a cadeia de upgrade acompanhasse?
+        run: |
+          set -euo pipefail
+          BASE="${{ github.event.pull_request.base.sha || github.event.before }}"
+          # Primeiro push de um branch novo tem `before` zerado — nada com que comparar, então não há drift a
+          # detectar. Sair verde é correto aqui; falhar seria ruído.
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+            echo "sem base de comparação (branch novo) — nada a checar"; exit 0
+          fi
+
+          CHANGED=$(git diff --name-only "$BASE" HEAD)
+          SRC=$(echo "$CHANGED" | grep -c '^theodb_rs/src/' || true)
+          CTL=$(echo "$CHANGED" | grep -c '^theodb_rs/theodb_rs.control$' || true)
+          MIG=$(echo "$CHANGED" | grep -cE '^theodb_rs/sql/theodb_rs--.*--.*\.sql$' || true)
+
+          echo "src=$SRC  control=$CTL  migração=$MIG"
+
+          if [ "$SRC" -gt 0 ] && [ "$CTL" -eq 0 ] && [ "$MIG" -eq 0 ]; then
+            echo "::error::A superfície da extensão mudou ($SRC arquivo(s) em theodb_rs/src/) sem bumpar"
+            echo "::error::default_version nem adicionar script de upgrade. É assim que '1.0.0' passou a rotular"
+            echo "::error::cinco catálogos diferentes ao longo de 120 releases (ver docs/benchmarks/m137-upgrade-chain.md)."
+            echo "::error::Se a mudança NÃO altera a superfície SQL (refactor interno, comentário, teste), toque"
+            echo "::error::o .control com um bump de versão ou registre a isenção no corpo do PR."
+            exit 1
+          fi
+          echo "ok — ou a superfície não mudou, ou a cadeia de upgrade acompanhou"
+
+      - name: Migração já lançada não pode ser editada
+        run: |
+          set -euo pipefail
+          BASE="${{ github.event.pull_request.base.sha || github.event.before }}"
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then exit 0; fi
+          # Editar um script de upgrade cujo alvo já foi lançado é irrecuperável: quem já atualizou nunca roda a
+          # correção, e passa a divergir de quem instalar depois. É o bug que o ParadeDB documentou no próprio
+          # 0.24.1--0.24.2. Aqui a tag do produto (vX.Y.Z) é o marcador de "já lançado".
+          fail=0
+          for f in $(git diff --name-only "$BASE" HEAD | grep -E '^theodb_rs/sql/theodb_rs--.*--.*\.sql$' || true); do
+            target=$(basename "$f" .sql | sed 's/.*--//')
+            if git rev-parse -q --verify "refs/tags/v${target}" >/dev/null 2>&1; then
+              echo "::error file=$f::Script de upgrade com alvo $target editado, mas a tag v$target já existe."
+              echo "::error file=$f::Quem já atualizou nunca receberá esta mudança. Mova-a para o próximo salto."
+              fail=1
+            fi
+          done
+          [ "$fail" -eq 0 ] && echo "ok — nenhuma migração já lançada foi editada"
+          exit $fail
