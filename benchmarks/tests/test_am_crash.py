@@ -115,7 +115,7 @@ def _assert_post_crash_contract(table, index_am, control):
         # pre-fix: 'truncated meta page' — the INIT fork never reached the WAL)
         cur.execute(f"INSERT INTO {table} VALUES (2, '[5,6,7,8]')")
         # index scan works and sees the new row
-        cur.execute(f"SET enable_seqscan = off")
+        cur.execute("SET enable_seqscan = off")
         cur.execute(f"SELECT id FROM {table} ORDER BY v <-> '[5,6,7,8]' LIMIT 1")
         assert cur.fetchone()[0] == 2, "index scan after recovery did not return the inserted row"
     finally:
@@ -207,9 +207,11 @@ def _run_expecting_crash(setup_sql, crash_sql):
 
 
 def _live_ids_via_seqscan(table, query, k):
-    c = connect(); c.autocommit = True
+    c = connect()
+    c.autocommit = True
     cur = c.cursor()
-    cur.execute("SET enable_indexscan = off"); cur.execute("SET enable_bitmapscan = off")
+    cur.execute("SET enable_indexscan = off")
+    cur.execute("SET enable_bitmapscan = off")
     cur.execute(f"SELECT id FROM {table} ORDER BY v <-> %s LIMIT {k}", (str(query),))
     out = [r[0] for r in cur.fetchall()]
     c.close()
@@ -225,14 +227,16 @@ def test_crash_mid_fold_pre_pivot_leaves_old_generation(am, opclass):
     window as the reclaim — ADR 0014.)"""
     wait_ready()
     table = f"m48_crash_pre_{am}"
-    c = connect(); c.autocommit = True
+    c = connect()
+    c.autocommit = True
     _seed_index(c.cursor(), table, am, opclass)
     c.cursor().execute(f"DELETE FROM {table} WHERE id % 10 < 3")
     c.close()
     _run_expecting_crash(["SET theodb.test_crash_after_pages = 2"], f"VACUUM {table}")
 
     query = [40.0 + j * 1000 for j in range(8)]
-    c = connect(); c.autocommit = True
+    c = connect()
+    c.autocommit = True
     cur = c.cursor()
     cur.execute("SET enable_seqscan = off")
     try:
@@ -247,7 +251,8 @@ def test_crash_mid_fold_pre_pivot_leaves_old_generation(am, opclass):
         msg = str(e).lower()
         assert "reindex" in msg or "orphan" in msg or "corrupt" in msg, f"{am}: non-fail-loud error: {e}"
     c.close()
-    c2 = connect(); c2.autocommit = True
+    c2 = connect()
+    c2.autocommit = True
     c2.cursor().execute(f"DROP TABLE {table}")
     c2.close()
 
@@ -262,14 +267,16 @@ def test_crash_post_pivot_new_generation_then_revacuum_converges(am, opclass):
     (ADR 0014 — the crash window may require REINDEX, but never corrupts)."""
     wait_ready()
     table = f"m48_crash_post_{am}"
-    c = connect(); c.autocommit = True
+    c = connect()
+    c.autocommit = True
     _seed_index(c.cursor(), table, am, opclass)
     c.cursor().execute(f"DELETE FROM {table} WHERE id % 10 < 3")
     c.close()
     _run_expecting_crash(["SET theodb.test_crash_phase = 1"], f"VACUUM {table}")
 
     query = [40.0 + j * 1000 for j in range(8)]
-    c = connect(); c.autocommit = True
+    c = connect()
+    c.autocommit = True
     cur = c.cursor()
     cur.execute("SET enable_seqscan = off")
     try:
@@ -296,7 +303,8 @@ def test_crash_mid_reclaim_is_fail_loud(am, opclass):
     boundary: the reclaim window may require REINDEX, but never corrupts."""
     wait_ready()
     table = f"m48_crash_reclaim_{am}"
-    c = connect(); c.autocommit = True
+    c = connect()
+    c.autocommit = True
     cur = c.cursor()
     _seed_index(cur, table, am, opclass)
     cur.execute(f"DELETE FROM {table} WHERE id % 10 < 3")
@@ -306,7 +314,8 @@ def test_crash_mid_reclaim_is_fail_loud(am, opclass):
     _run_expecting_crash(["SET theodb.test_crash_phase = 2"], f"VACUUM {table}")
 
     query = [40.0 + j * 1000 for j in range(8)]
-    c = connect(); c.autocommit = True
+    c = connect()
+    c.autocommit = True
     cur = c.cursor()
     cur.execute("SET enable_seqscan = off")
     try:
@@ -319,7 +328,8 @@ def test_crash_mid_reclaim_is_fail_loud(am, opclass):
         msg = str(e).lower()
         assert "reindex" in msg or "truncated" in msg or "corrupt" in msg, f"{am}: non-fail-loud error: {e}"
     c.close()
-    c2 = connect(); c2.autocommit = True
+    c2 = connect()
+    c2.autocommit = True
     c2.cursor().execute(f"DROP TABLE {table}")
     c2.close()
 
@@ -346,7 +356,8 @@ def test_crash_hook_is_superuser_gated():
     wait_ready()
 
     # (1) Positive control: as superuser, the hook fires and aborts the backend.
-    su = connect(); su.autocommit = True
+    su = connect()
+    su.autocommit = True
     cur = su.cursor()
     _suguard_setup(cur, "m48_suguard_pos")
     cur.execute("SET theodb.test_crash_after_pages = 1")
@@ -364,7 +375,8 @@ def test_crash_hook_is_superuser_gated():
     wait_ready()  # the instance crash-recovers after the abort
 
     # (2) The gate: a NON-superuser doing the exact DoS attempt must NOT crash the instance.
-    su2 = connect(); su2.autocommit = True
+    su2 = connect()
+    su2.autocommit = True
     c2 = su2.cursor()
     _suguard_setup(c2, "m48_suguard")
     c2.execute("DROP ROLE IF EXISTS m48_attacker")
@@ -380,7 +392,8 @@ def test_crash_hook_is_superuser_gated():
     atk.close()
 
     # The instance is still up (no crash recovery happened): a fresh connection works immediately, no wait.
-    check = connect(); check.autocommit = True
+    check = connect()
+    check.autocommit = True
     ccur = check.cursor()
     ccur.execute("SELECT 1")
     assert ccur.fetchone()[0] == 1
@@ -409,7 +422,8 @@ def test_cosine_crash_safe():
     format IDENTICAL to L2 (ADR-2), so M48's meta-pivot + INIT-fork WAL cover them; this proves it end-to-end
     for the cosine metric specifically (a corruption to L2 would change the `<=>` order)."""
     wait_ready()
-    su = connect(); su.autocommit = True
+    su = connect()
+    su.autocommit = True
     cur = su.cursor()
     cur.execute("DROP TABLE IF EXISTS m49_cosine_crash")
     cur.execute("CREATE TABLE m49_cosine_crash (id int, v vector(8))")
@@ -426,7 +440,8 @@ def test_cosine_crash_safe():
 
     crash_and_restart()  # SIGKILL + restart (power-loss analog)
 
-    chk = connect(); chk.autocommit = True
+    chk = connect()
+    chk.autocommit = True
     c2 = chk.cursor()
     c2.execute("SET enable_seqscan = off")
     c2.execute("SELECT id FROM m49_cosine_crash ORDER BY v <=> %s LIMIT 5", (q,))

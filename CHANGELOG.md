@@ -21,6 +21,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Removed
 
 ### Fixed
+- Lint do harness de benchmark limpo (24 erros do `ruff` + falso-positivo do `vulture`), removendo um dos dois bloqueios do sinal de CI; o `entry_sql` acusado pelo vulture é uma fixture do pytest e foi ignorada por nome, não deletada — apagá-la desativaria o guard de skip-offline (#140)
 
 ### Security
 

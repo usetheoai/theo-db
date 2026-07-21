@@ -248,7 +248,6 @@ def _hybrid_json(cur, cfg):
 def test_hybrid_search_json_weight_changes_ranking():
     # M106: per-leg weights (vector_weight/text_weight) skew the RRF fusion. Seed two docs where the vector
     # leg and the FTS leg each rank a DIFFERENT doc first; upweighting a leg must lift ITS top doc to #1.
-    import json as _json
     conn = _raw_conn()
     try:
         with conn.cursor() as cur:
