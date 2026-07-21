@@ -6,6 +6,8 @@
 //!
 //! Default preserves M26/M31 behavior: unset → `DEFAULT_PROBES` (10). The structured scan clamps the value to the
 //! actual list count, so an over-large `probes` is a safe no-op.
+use std::ffi::CString;
+
 use pgrx::{GucContext, GucFlags, GucRegistry, GucSetting};
 
 /// Default probes when the GUC is unset — identical to the pre-M34 fixed `SCAN_PROBES`, so an untuned scan behaves
@@ -235,6 +237,34 @@ pub(crate) fn ai_max_batch() -> usize {
     AI_MAX_BATCH.get().max(1) as usize
 }
 
+// ── M134 (#117) — the AI-endpoint GUC triples, registered so they are OPERATOR-ONLY (`Suset`). ──────────────────
+//
+// Before M134 these were *placeholder* GUCs: an unregistered dotted name that ANY role may `SET` in its own
+// session. That made the endpoint a caller-controlled input to an outbound HTTP request issued by the database
+// host — the textbook SSRF precondition. Registering them with `GucContext::Suset` means only a superuser (or a
+// role with SET privilege granted on the parameter) may change them; `ALTER SYSTEM` by the operator still works,
+// which is how they were always meant to be configured.
+//
+// The values may hold API keys, so every one carries `GUC_SUPERUSER_ONLY` — Postgres then hides the value from
+// non-superusers in `pg_settings` / `SHOW`, instead of leaking a credential to any role that can read a view.
+static LLM_ENDPOINT: GucSetting<Option<CString>> = GucSetting::<Option<CString>>::new(None);
+static LLM_MODEL: GucSetting<Option<CString>> = GucSetting::<Option<CString>>::new(None);
+static LLM_API_KEY: GucSetting<Option<CString>> = GucSetting::<Option<CString>>::new(None);
+static LLM_TEST_MODEL: GucSetting<Option<CString>> = GucSetting::<Option<CString>>::new(None);
+static EMBEDDING_ENDPOINT: GucSetting<Option<CString>> = GucSetting::<Option<CString>>::new(None);
+static EMBEDDING_MODEL: GucSetting<Option<CString>> = GucSetting::<Option<CString>>::new(None);
+static EMBEDDING_API_KEY: GucSetting<Option<CString>> = GucSetting::<Option<CString>>::new(None);
+static RERANK_ENDPOINT: GucSetting<Option<CString>> = GucSetting::<Option<CString>>::new(None);
+static RERANK_MODEL: GucSetting<Option<CString>> = GucSetting::<Option<CString>>::new(None);
+static RERANK_API_KEY: GucSetting<Option<CString>> = GucSetting::<Option<CString>>::new(None);
+
+/// M134 — operator escape hatch for the egress denylist: a comma-separated host list that MAY be called even
+/// though it resolves to a private/loopback address. Exists because a legitimate on-prem deployment runs its
+/// inference server on 10/8 — without this, hardening would break that deployment and the operator would disable
+/// the guard entirely. `Suset`, so a caller can never widen its own reach.
+static EGRESS_ALLOWLIST: GucSetting<Option<CString>> = GucSetting::<Option<CString>>::new(None);
+
+
 pub(crate) fn init() {
     GucRegistry::define_int_guc(
         c"theodb.test_crash_after_pages",
@@ -433,6 +463,58 @@ pub(crate) fn init() {
         GucContext::Userset,
         GucFlags::default(),
     );
+
+    // ── M134 (#117): AI-endpoint GUCs — operator-only, value hidden from non-superusers ──────────────────────
+    // Operator-only: the endpoint (the SSRF vector), the API keys (credentials), and the test short-circuit.
+    for (name, short, setting) in [
+        (c"theodb.llm_endpoint", c"Chat-completions endpoint URL used by theodb.chat / ai.* (operator-only)", &LLM_ENDPOINT),
+        (c"theodb.llm_api_key", c"Chat-completions API key (operator-only; hidden from non-superusers)", &LLM_API_KEY),
+        (c"theodb.llm_test_model", c"TEST ONLY: short-circuit the chat call with a canned model (operator-only)", &LLM_TEST_MODEL),
+        (c"theodb.embedding_endpoint", c"Embeddings endpoint URL used by theodb.embed and the vectorizer worker (operator-only)", &EMBEDDING_ENDPOINT),
+        (c"theodb.embedding_api_key", c"Embeddings API key (operator-only; hidden from non-superusers)", &EMBEDDING_API_KEY),
+        (c"theodb.rerank_endpoint", c"Rerank endpoint URL used by theodb.rerank (operator-only)", &RERANK_ENDPOINT),
+        (c"theodb.rerank_api_key", c"Rerank API key (operator-only; hidden from non-superusers)", &RERANK_API_KEY),
+    ] {
+        GucRegistry::define_string_guc(
+            name,
+            short,
+            c"Registered so only a superuser may SET it (GucContext::Suset). Before M134 these were unregistered placeholder names any role could set, which made the outbound endpoint a caller-controlled SSRF input.",
+            setting,
+            GucContext::Suset,
+            GucFlags::SUPERUSER_ONLY,
+        );
+    }
+    // The MODEL names stay caller-settable, honoring the decision recorded in the plan's Unresolved Questions:
+    // a model name is not a network vector (the endpoint it is sent to is now operator-only), and picking a model
+    // per session is ordinary application behaviour. A cross-validation pass caught that the first cut silently
+    // reversed this — and `SUPERUSER_ONLY` would additionally have hidden model NAMES, which are not secrets.
+    for (name, short, setting) in [
+        (c"theodb.llm_model", c"Chat-completions model name (caller-settable)", &LLM_MODEL),
+        (c"theodb.embedding_model", c"Embeddings model name (caller-settable)", &EMBEDDING_MODEL),
+        (c"theodb.rerank_model", c"Rerank model name (caller-settable)", &RERANK_MODEL),
+    ] {
+        GucRegistry::define_string_guc(
+            name,
+            short,
+            c"Caller-settable by design: the model is not an egress vector — the endpoint it is sent to is operator-only (M134 / #117).",
+            setting,
+            GucContext::Userset,
+            GucFlags::default(),
+        );
+    }
+    GucRegistry::define_string_guc(
+        c"theodb.egress_allowlist",
+        c"Comma-separated hosts permitted to be called even though they resolve to a private/loopback address",
+        c"Operator escape hatch for the M134 SSRF egress guard — e.g. an on-prem inference server on 10.0.0.5. Empty (default) = every private/loopback/link-local target is denied.",
+        &EGRESS_ALLOWLIST,
+        GucContext::Suset,
+        GucFlags::default(),
+    );
+}
+
+/// M134 — the operator-configured egress allowlist, raw. Empty when unset.
+pub(crate) fn egress_allowlist() -> String {
+    EGRESS_ALLOWLIST.get().map(|c| c.to_string_lossy().into_owned()).unwrap_or_default()
 }
 
 /// The effective probes for a scan: the GUC value (never below 1). The caller still clamps to the actual list count.

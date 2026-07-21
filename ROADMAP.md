@@ -2095,7 +2095,7 @@ Recomendação #3 / Risco de manutenção: com 19 arquivos >500 LoC e este a 3.4
 
 ---
 
-## M132 — [ ] Fix #132 — vectorizer bgworker embeda no self-host (destrava o anchor de dogfood)
+## M132 — [x] Fix #132 — vectorizer bgworker embeda no self-host (destrava o anchor de dogfood)
 
 > Added 2026-07-21 (`/roadmap-feature vectorizer-worker-embed-fix`). **Maior alavanca da lista de maturidade:** o anchor de dogfood está travado em `wired` (só `running` sustenta claim de production-ready) e a própria evidência registra `outcome: partial` por causa deste defeito. Grill: `knowledge-base/grills/vectorizer-worker-embed-fix-feature-grill.md`.
 
