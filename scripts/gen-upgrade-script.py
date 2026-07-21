@@ -80,9 +80,27 @@ def guard(stmt: str) -> str:
     # ancoragem no mesmo arquivo — por isso o `[ \t]*` está em TODOS os padrões, não só no que falhou.
     m = re.search(r"(?m)^[ \t]*CREATE\s+TYPE\s+(?:[\w.]+\.)?\"?(\w+)\"?", stmt, re.I)
     if m:
+        name = m.group(1)
+        # F1 (review council-index-storage, HIGH — corrupção silenciosa que este gerador introduziu):
+        # o pgrx emite DOIS statements para um tipo — primeiro o SHELL (`CREATE TYPE vector;`) e depois a
+        # definição completa (`CREATE TYPE vector (INPUT=..., ...)`). A primeira versão deste gerador dava aos
+        # dois o MESMO predicado `WHERE typname = 'vector'`. Resultado: num catálogo que não tem o tipo, o shell
+        # é criado, o guard da definição completa passa a ser FALSO, e o tipo fica shell para sempre — sem erro.
+        # Não é hipotético: v0.30.0 é uma tag LANÇADA rotulada `1.0.0` cujo catálogo não tem o nosso `vector`.
+        #
+        # Correção: o shell guarda por existência; a definição completa guarda por `typisdefined`, então ela
+        # aplica mesmo quando o shell já está lá.
+        #
+        # E QUALIFICAR O NAMESPACE: sem isso, um `vector` de outra extensão (o pgvector, que o v0.30.0 exigia)
+        # satisfaz os dois guards, e os casts/operadores/opclasses seguintes passam a ligar em cima do tipo
+        # ALHEIO — bind com layout de memória errado, não mensagem de erro.
+        is_shell = "(" not in stmt.split(name, 1)[1].split(";")[0]
+        pred = f"typname = '{name}' AND typnamespace = 'public'::regnamespace"
+        if not is_shell:
+            pred += " AND typisdefined"
         return (
             f"DO $theodb_up$ BEGIN\n"
-            f"  IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_type WHERE typname = '{m.group(1)}') THEN\n"
+            f"  IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_type WHERE {pred}) THEN\n"
             f"{stmt}\n"
             f"  END IF;\nEND $theodb_up$;"
         )

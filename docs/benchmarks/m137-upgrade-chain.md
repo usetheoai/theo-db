@@ -159,14 +159,42 @@ crashes antes=0  depois=0                          → SCENARIO_B1_DONE
 
 ## Limites honestos
 
-1. ~~O Cenário A é fraco~~ — **FECHADO pela §5**: a convergência foi provada contra um catálogo genuinamente
-   incompleto (193 → 196, diff vazio). O que permanece é que o catálogo foi envelhecido por remoção, não
-   produzido por um binário antigo — impossível hoje, porque as tags antigas exigem PG17 e o M135 o removeu.
-2. **O teste de injeção da §4 não tinha poder de detecção** — `CREATE OR REPLACE` faltante sobre objeto que já
-   existe é no-op. Substituído pelo teste da §5, que parte de um catálogo onde o objeto genuinamente falta.
-4. **ACL fora do oráculo** — `pg_depend` registra membresia, não `proacl`. Um upgrade que perca um
-   `REVOKE ... FROM PUBLIC` passa no Cenário A.
-5. **Cenário B1 (`.so` novo contra catálogo antigo, sem UPDATE) não foi executado.**
+1. O catálogo antigo foi construído por **remoção de objetos**, não produzido por um binário antigo — impossível
+   hoje, porque as tags anteriores exigem PG17 e o M135 o removeu. Um usuário vindo de release antiga estaria
+   também fazendo `pg_upgrade` de major, problema diferente desta cadeia.
+2. **`CREATE EXTENSION theodb_rs VERSION '1.0.0'` deixa de funcionar** — o pgrx gera o script base a partir do
+   `default_version`, então só existe `theodb_rs--1.1.0.sql`. O caminho de pin/downgrade some.
+3. O oráculo compara **identidade** de objeto, não definição. Não vê: corpo de função plpgsql (5 no script),
+   colunas/defaults de tabela, definição de índice, membros de opclass, comentários, e `proowner`.
+
+## Review (council-index-storage) — um defeito silencioso meu, corrigido
+
+**F1 (HIGH, corrupção silenciosa).** O pgrx emite **dois** statements para o tipo: o shell (`CREATE TYPE vector;`)
+e a definição completa. Minha primeira versão deu aos dois o **mesmo** predicado `WHERE typname = 'vector'`.
+Consequência: num catálogo que não tem o tipo, o shell é criado, o guard da definição completa vira **falso**, e o
+tipo fica shell **para sempre — sem erro**. Não é hipotético: **v0.30.0 é uma tag lançada rotulada `1.0.0` cujo
+catálogo não tem o nosso `vector`**. E o predicado não qualificava namespace, então um `vector` do pgvector
+satisfaria os dois guards e os casts/operadores seguintes ligariam no tipo alheio — bind com layout errado.
+
+Corrigido: shell guarda por existência, definição completa guarda por `typisdefined`, e ambos qualificam
+`typnamespace = 'public'::regnamespace`. Verificado no SQL gerado — os dois guards agora diferem.
+
+**Honestidade sobre o que NÃO foi provado:** a convergência end-to-end de um catálogo sem o tipo **não rodou**.
+Minha tentativa foi inválida (rodei o script solto num banco vazio, e o `\echo ... \quit` do topo faz o psql sair
+na linha 1). A correção está certa por construção e verificada no SQL emitido; a prova empírica desse caso
+específico continua pendente. A regressão da cadeia normal passou (283 linhas = 196 objetos + 87 ACL).
+
+**Achados do review ainda ABERTOS:**
+
+- **F5 (HIGH)** — nada impede `1.1.0` de rotular múltiplos catálogos: o pgrx regenera o script base a partir do
+  HEAD a cada build, enquanto o script de upgrade é um snapshot congelado. Adicionar um `#[pg_extern]` sem bumpar
+  a versão reproduz o defeito do M137 uma versão depois. Precisa do gate estilo `check_migration_diff.py`.
+- **F4 (HIGH)** — `scripts/test-upgrade.sh` não existe; as provas das §4/§5/§6 foram feitas à mão e não são
+  re-executáveis. Num documento que já registrou **duas leituras falsas minhas**, um harness irreproduzível é
+  exatamente o que não se deve aceitar como base para o próximo salto.
+- **F2/F3 (MEDIUM, latentes e medidos)** — `CREATE TABLE IF NOT EXISTS` não converge drift de coluna, e o
+  `EXCEPTION` engole "mesmo objeto, definição diferente" em opclass/cast. O revisor mediu: nenhum caso vivo hoje
+  (tabelas nasceram inteiras, opclasses byte-idênticas desde v0.60.0), mas morde na primeira mudança de membro.
 
 ## Estado do DoD
 
