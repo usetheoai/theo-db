@@ -2058,7 +2058,7 @@ Recomendação #3 / Risco de manutenção: com 19 arquivos >500 LoC e este a 3.4
 
 ---
 
-## M130 — [ ] Benchmark oficial: pilar HTAP (CH-benCHmark / BenchBase)
+## M130 — [x] Benchmark oficial: pilar HTAP (CH-benCHmark / BenchBase)
 
 **Objective:** rodar **CH-benCHmark via BenchBase** (TPC-C + 22 TPC-H queries em um schema) contra PG17 (pin de SHA; Java 23), derivar a métrica dual tpmC/QphH, reusando a camada-wrap + validação de resultado OLAP (BenchBase valida só timing).
 
