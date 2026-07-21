@@ -133,11 +133,13 @@ def run(args) -> dict:
     with open(sample) as fh:
         cur.copy_expert("COPY hits_heap FROM STDIN WITH (FORMAT text)", fh)
     cur.execute("INSERT INTO hits SELECT * FROM hits_heap")  # noqa: naive table-name replace is safe — no ClickBench query/col contains "hits" beyond the bare table ref (council-benchmark LOW)
-    # enable_columnar_agg=OFF: run over columnar STORAGE via PG's native executor. The vectorized-aggregate
-    # CustomScan (agg=on) has a PLANNER hang on the real 105-col hits table for at least one query
-    # (GROUP BY UserID) — uninterruptible by statement_timeout because it is during planning, not execution
-    # (filed as an issue). The columnar-storage path (agg off) is the sound, complete measurement; the pushdown is
-    # tracked follow-up. Honest scope, not a workaround: the CustomScan is an optional optimization on the pillar.
+    # enable_columnar_agg default OFF = run over columnar STORAGE via PG's native executor; --agg turns the
+    # vectorized-aggregate CustomScan pushdown ON. M131 fixed #135, which previously made `--agg` unusable on the
+    # real 105-col hits: EXPLAIN of a query with ORDER BY <aggregate> (Q16/Q33) recursed forever in ruleutils'
+    # `resolve_special_varno` deparse. NOTE the corrected diagnosis — it was NOT a planner hang, NOT O(cols^2), and
+    # NOT width/TEXT-related (the queries always EXECUTED fine); `statement_timeout` could not interrupt it because
+    # it happened during plan PRINTING. Both modes keep the byte-identical A/B oracle
+    # (`docs/benchmarks/m131-columnar-agg-accelerated.md`).
     cur.execute(f"SET theodb.enable_columnar_agg = {'on' if args.agg else 'off'}")
     cur.execute("SET max_parallel_workers_per_gather = 0")
     # Per-query ceiling: a query the columnar path cannot complete in time is recorded ERRORED (honest per-query
@@ -219,7 +221,7 @@ def main():
     ap.add_argument("--n", type=int, default=1_000_000, help="hits subsample rows")
     ap.add_argument("--cache", default="benchmarks/.cache")
     ap.add_argument("--query-timeout-s", type=int, default=60, help="per-query ceiling; slow query -> ERRORED")
-    ap.add_argument("--agg", action="store_true", help="enable the vectorized columnar-agg CustomScan (has a planner-hang bug on real hits; default OFF)")
+    ap.add_argument("--agg", action="store_true", help="enable the vectorized columnar-agg CustomScan pushdown (the M131 fix for #135 removed the EXPLAIN deparse hang; default OFF = storage path)")
     ap.add_argument("--out", default="docs/benchmarks/m128-clickbench-columnar.json")
     args = ap.parse_args()
     data = run(args)

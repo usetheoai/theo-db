@@ -1,0 +1,583 @@
+{
+  "dataset": "clickbench-hits",
+  "n_rows": 100000,
+  "box": "self-hosted (NOT canonical c6a.4xlarge)",
+  "protocol": "3 runs/query: cold=1st (cache-flushed), hot=min-of-2",
+  "status": "OK",
+  "n_queries": 43,
+  "queries_ok": 43,
+  "queries_errored": 0,
+  "columnar_customscan_count": 6,
+  "hot_geomean_s": 0.89618,
+  "result_ab": {
+    "pass": 43,
+    "diverged": 0,
+    "verdict": "byte-identical (columnar==heap)"
+  },
+  "queries": [
+    {
+      "q": 0,
+      "sql": "SELECT COUNT(*) FROM hits;",
+      "timings": [
+        0.2032,
+        0.0146,
+        0.0125
+      ],
+      "cold": 0.2032,
+      "hot": 0.0125,
+      "columnar_customscan": true,
+      "result_ab_identical": true
+    },
+    {
+      "q": 1,
+      "sql": "SELECT COUNT(*) FROM hits WHERE AdvEngineID <> 0;",
+      "timings": [
+        1.5567,
+        1.5401,
+        1.4269
+      ],
+      "cold": 1.5567,
+      "hot": 1.4269,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 2,
+      "sql": "SELECT SUM(AdvEngineID), COUNT(*), AVG(ResolutionWidth) FROM",
+      "timings": [
+        0.0324,
+        0.0232,
+        0.0214
+      ],
+      "cold": 0.0324,
+      "hot": 0.0214,
+      "columnar_customscan": true,
+      "result_ab_identical": true
+    },
+    {
+      "q": 3,
+      "sql": "SELECT AVG(UserID) FROM hits;",
+      "timings": [
+        0.0146,
+        0.0135,
+        0.013
+      ],
+      "cold": 0.0146,
+      "hot": 0.013,
+      "columnar_customscan": true,
+      "result_ab_identical": true
+    },
+    {
+      "q": 4,
+      "sql": "SELECT COUNT(DISTINCT UserID) FROM hits;",
+      "timings": [
+        1.5631,
+        1.5484,
+        1.7389
+      ],
+      "cold": 1.5631,
+      "hot": 1.5484,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 5,
+      "sql": "SELECT COUNT(DISTINCT SearchPhrase) FROM hits;",
+      "timings": [
+        1.6085,
+        1.4629,
+        1.5219
+      ],
+      "cold": 1.6085,
+      "hot": 1.4629,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 6,
+      "sql": "SELECT MIN(EventDate), MAX(EventDate) FROM hits;",
+      "timings": [
+        0.0029,
+        0.0015,
+        0.0016
+      ],
+      "cold": 0.0029,
+      "hot": 0.0015,
+      "columnar_customscan": true,
+      "result_ab_identical": true
+    },
+    {
+      "q": 7,
+      "sql": "SELECT AdvEngineID, COUNT(*) FROM hits WHERE AdvEngineID <> ",
+      "timings": [
+        1.5711,
+        1.5648,
+        1.5524
+      ],
+      "cold": 1.5711,
+      "hot": 1.5524,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 8,
+      "sql": "SELECT RegionID, COUNT(DISTINCT UserID) AS u FROM hits GROUP",
+      "timings": [
+        1.6678,
+        1.6571,
+        1.6106
+      ],
+      "cold": 1.6678,
+      "hot": 1.6106,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 9,
+      "sql": "SELECT RegionID, SUM(AdvEngineID), COUNT(*) AS c, AVG(Resolu",
+      "timings": [
+        2.0139,
+        1.8316,
+        1.6248
+      ],
+      "cold": 2.0139,
+      "hot": 1.6248,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 10,
+      "sql": "SELECT MobilePhoneModel, COUNT(DISTINCT UserID) AS u FROM hi",
+      "timings": [
+        1.6567,
+        1.4977,
+        1.4702
+      ],
+      "cold": 1.6567,
+      "hot": 1.4702,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 11,
+      "sql": "SELECT MobilePhone, MobilePhoneModel, COUNT(DISTINCT UserID)",
+      "timings": [
+        1.6207,
+        1.5598,
+        1.5647
+      ],
+      "cold": 1.6207,
+      "hot": 1.5598,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 12,
+      "sql": "SELECT SearchPhrase, COUNT(*) AS c FROM hits WHERE SearchPhr",
+      "timings": [
+        1.5827,
+        1.5177,
+        1.4685
+      ],
+      "cold": 1.5827,
+      "hot": 1.4685,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 13,
+      "sql": "SELECT SearchPhrase, COUNT(DISTINCT UserID) AS u FROM hits W",
+      "timings": [
+        1.625,
+        1.6221,
+        1.4679
+      ],
+      "cold": 1.625,
+      "hot": 1.4679,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 14,
+      "sql": "SELECT SearchEngineID, SearchPhrase, COUNT(*) AS c FROM hits",
+      "timings": [
+        1.4883,
+        1.6378,
+        1.5382
+      ],
+      "cold": 1.4883,
+      "hot": 1.5382,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 15,
+      "sql": "SELECT UserID, COUNT(*) FROM hits GROUP BY UserID ORDER BY C",
+      "timings": [
+        0.0244,
+        0.0144,
+        0.016
+      ],
+      "cold": 0.0244,
+      "hot": 0.0144,
+      "columnar_customscan": true,
+      "result_ab_identical": true
+    },
+    {
+      "q": 16,
+      "sql": "SELECT UserID, SearchPhrase, COUNT(*) FROM hits GROUP BY Use",
+      "timings": [
+        1.504,
+        1.5589,
+        1.6872
+      ],
+      "cold": 1.504,
+      "hot": 1.5589,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 17,
+      "sql": "SELECT UserID, SearchPhrase, COUNT(*) FROM hits GROUP BY Use",
+      "timings": [
+        2.0312,
+        1.9223,
+        1.543
+      ],
+      "cold": 2.0312,
+      "hot": 1.543,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 18,
+      "sql": "SELECT UserID, extract(minute FROM EventTime) AS m, SearchPh",
+      "timings": [
+        1.8868,
+        1.7022,
+        1.7496
+      ],
+      "cold": 1.8868,
+      "hot": 1.7022,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 19,
+      "sql": "SELECT UserID FROM hits WHERE UserID = 435090932899640449;",
+      "timings": [
+        1.7455,
+        1.4428,
+        1.4924
+      ],
+      "cold": 1.7455,
+      "hot": 1.4428,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 20,
+      "sql": "SELECT COUNT(*) FROM hits WHERE URL LIKE '%google%';",
+      "timings": [
+        1.676,
+        1.3694,
+        1.4725
+      ],
+      "cold": 1.676,
+      "hot": 1.3694,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 21,
+      "sql": "SELECT SearchPhrase, MIN(URL), COUNT(*) AS c FROM hits WHERE",
+      "timings": [
+        1.4613,
+        1.5458,
+        1.4237
+      ],
+      "cold": 1.4613,
+      "hot": 1.4237,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 22,
+      "sql": "SELECT SearchPhrase, MIN(URL), MIN(Title), COUNT(*) AS c, CO",
+      "timings": [
+        1.6003,
+        1.5823,
+        1.4953
+      ],
+      "cold": 1.6003,
+      "hot": 1.4953,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 23,
+      "sql": "SELECT * FROM hits WHERE URL LIKE '%google%' ORDER BY EventT",
+      "timings": [
+        1.4223,
+        1.4286,
+        1.5008
+      ],
+      "cold": 1.4223,
+      "hot": 1.4286,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 24,
+      "sql": "SELECT SearchPhrase FROM hits WHERE SearchPhrase <> '' ORDER",
+      "timings": [
+        1.5357,
+        1.411,
+        1.6828
+      ],
+      "cold": 1.5357,
+      "hot": 1.411,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 25,
+      "sql": "SELECT SearchPhrase FROM hits WHERE SearchPhrase <> '' ORDER",
+      "timings": [
+        1.4908,
+        1.5245,
+        1.3997
+      ],
+      "cold": 1.4908,
+      "hot": 1.3997,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 26,
+      "sql": "SELECT SearchPhrase FROM hits WHERE SearchPhrase <> '' ORDER",
+      "timings": [
+        1.5537,
+        1.7612,
+        2.0922
+      ],
+      "cold": 1.5537,
+      "hot": 1.7612,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 27,
+      "sql": "SELECT CounterID, AVG(length(URL)) AS l, COUNT(*) AS c FROM ",
+      "timings": [
+        2.0095,
+        1.9499,
+        1.8738
+      ],
+      "cold": 2.0095,
+      "hot": 1.8738,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 28,
+      "sql": "SELECT REGEXP_REPLACE(Referer, '^https?://(?:www\\.)?([^/]+)/",
+      "timings": [
+        19.8897,
+        17.8074,
+        19.4071
+      ],
+      "cold": 19.8897,
+      "hot": 17.8074,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 29,
+      "sql": "SELECT SUM(ResolutionWidth), SUM(ResolutionWidth + 1), SUM(R",
+      "timings": [
+        1.6598,
+        1.746,
+        1.6668
+      ],
+      "cold": 1.6598,
+      "hot": 1.6668,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 30,
+      "sql": "SELECT SearchEngineID, ClientIP, COUNT(*) AS c, SUM(IsRefres",
+      "timings": [
+        1.6668,
+        1.6303,
+        1.6166
+      ],
+      "cold": 1.6668,
+      "hot": 1.6166,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 31,
+      "sql": "SELECT WatchID, ClientIP, COUNT(*) AS c, SUM(IsRefresh), AVG",
+      "timings": [
+        1.8087,
+        1.6695,
+        1.5799
+      ],
+      "cold": 1.8087,
+      "hot": 1.5799,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 32,
+      "sql": "SELECT WatchID, ClientIP, COUNT(*) AS c, SUM(IsRefresh), AVG",
+      "timings": [
+        0.3958,
+        0.3512,
+        0.322
+      ],
+      "cold": 0.3958,
+      "hot": 0.322,
+      "columnar_customscan": true,
+      "result_ab_identical": true
+    },
+    {
+      "q": 33,
+      "sql": "SELECT URL, COUNT(*) AS c FROM hits GROUP BY URL ORDER BY c ",
+      "timings": [
+        2.7796,
+        2.8968,
+        2.6713
+      ],
+      "cold": 2.7796,
+      "hot": 2.6713,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 34,
+      "sql": "SELECT 1, URL, COUNT(*) AS c FROM hits GROUP BY 1, URL ORDER",
+      "timings": [
+        2.9378,
+        2.8918,
+        2.8865
+      ],
+      "cold": 2.9378,
+      "hot": 2.8865,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 35,
+      "sql": "SELECT ClientIP, ClientIP - 1, ClientIP - 2, ClientIP - 3, C",
+      "timings": [
+        1.7417,
+        1.757,
+        1.7008
+      ],
+      "cold": 1.7417,
+      "hot": 1.7008,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 36,
+      "sql": "SELECT URL, COUNT(*) AS PageViews FROM hits WHERE CounterID ",
+      "timings": [
+        1.5857,
+        1.6136,
+        1.7532
+      ],
+      "cold": 1.5857,
+      "hot": 1.6136,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 37,
+      "sql": "SELECT Title, COUNT(*) AS PageViews FROM hits WHERE CounterI",
+      "timings": [
+        1.6281,
+        1.5134,
+        1.5808
+      ],
+      "cold": 1.6281,
+      "hot": 1.5134,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 38,
+      "sql": "SELECT URL, COUNT(*) AS PageViews FROM hits WHERE CounterID ",
+      "timings": [
+        1.8085,
+        1.9219,
+        1.7177
+      ],
+      "cold": 1.8085,
+      "hot": 1.7177,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 39,
+      "sql": "SELECT TraficSourceID, SearchEngineID, AdvEngineID, CASE WHE",
+      "timings": [
+        1.5576,
+        1.616,
+        1.6835
+      ],
+      "cold": 1.5576,
+      "hot": 1.616,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 40,
+      "sql": "SELECT URLHash, EventDate, COUNT(*) AS PageViews FROM hits W",
+      "timings": [
+        1.7097,
+        1.8756,
+        1.4903
+      ],
+      "cold": 1.7097,
+      "hot": 1.4903,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 41,
+      "sql": "SELECT WindowClientWidth, WindowClientHeight, COUNT(*) AS Pa",
+      "timings": [
+        1.495,
+        1.5247,
+        1.5657
+      ],
+      "cold": 1.495,
+      "hot": 1.5247,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    },
+    {
+      "q": 42,
+      "sql": "SELECT DATE_TRUNC('minute', EventTime) AS M, COUNT(*) AS Pag",
+      "timings": [
+        1.5765,
+        1.7213,
+        1.5133
+      ],
+      "cold": 1.5765,
+      "hot": 1.5133,
+      "columnar_customscan": false,
+      "result_ab_identical": true
+    }
+  ],
+  "caveats": [
+    "self-hosted box, NOT canonical AWS c6a.4xlarge \u2014 QPS/timings not leaderboard-comparable (ADR M128-2)",
+    "hits subsampled to 100000 rows (full 99.9M is the operational follow-up); CC-BY-NC-SA, CI-only, never vendored",
+    "byte-identical result A/B (columnar vs heap) is the TheoDB-owned correctness oracle ClickBench lacks"
+  ]
+}

@@ -24,6 +24,42 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.117.0] - 2026-07-21
+
+
+### Added
+- Roadmap amended: added M131 fix #135 — destravar o columnar-agg pushdown (planner hang em tabelas largas mixed-type) (`/roadmap-feature columnar-agg-planner-hang-fix`)
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+- **Columnar-aggregate CustomScan: EXPLAIN no longer hangs on `ORDER BY <aggregate>` (M131, closes #135).** The
+  swapped `theodb_columnar_agg` CustomScan published a self-referential `custom_scan_tlist` (`Var(INDEX_VAR, i)`
+  entries), so PostgreSQL's `ruleutils.c::resolve_special_varno` recursed forever whenever a `Sort` above the node
+  had a key on the aggregate output — `EXPLAIN` never returned and was uninterruptible (`statement_timeout` does not
+  fire during plan printing). `custom_scan_tlist` now carries deparse-safe expressions (group keys → base-rel `Var`s;
+  aggregates → their `Aggref` with arguments rebuilt as base-rel `Var`s); the executed `plan.targetlist` is
+  unchanged, so query results are untouched. Root cause established by a live gdb backtrace — the issue's
+  "planner hang / O(cols²) / wide-table" diagnosis was **falsified**: the hang was in EXPLAIN deparse, not planning
+  or execution (the affected query always executed correctly in 0.5 s), and the trigger is `ORDER BY <aggregate>`,
+  not table width (`knowledge-base/discoveries/blueprints/columnar-agg-planner-hang-blueprint.md`).
+  MEASURED after the fix: the 43-query ClickBench EXPLAIN sweep with the pushdown ON goes from **2 hangs to 0**
+  (max 60 ms; Q16 31 ms and Q33 30 ms, both now engaging the CustomScan — gate script `scripts/m131_sweep.sh`), and
+  the accelerated ClickBench run is **byte-identical 43/43** vs heap while measuring **1.90× on the full-suite hot
+  geomean** (0.896 s vs 1.700 s) and **24.8× across the six queries the pushdown touches** (20.7× excluding q6,
+  which is served by the pre-existing zone-map directory fast-path, not the pushdown) — an internal same-box A/B
+  (pushdown ON vs OFF), single suite run per configuration, on a self-hosted NOT-canonical box with a 100 k-row
+  subsample, with the ±21 % noise floor of the 37 untouched queries disclosed; not a competitive claim
+  (`docs/benchmarks/m131-columnar-agg-accelerated.md`). `custom_scan_tlist` is also the node's runtime scan
+  TupleDesc, so the replacement list is descriptor-equal to the one it replaces and the construction is
+  fail-closed (an inconsistent list declines the swap to the native plan).
+
+### Security
+
 ## [0.116.0] - 2026-07-21
 
 ### Added
