@@ -1,0 +1,27 @@
+# M133 (#140) — CI canary.
+#
+# Purpose: distinguish "the repository's workflows are broken" from "Actions cannot run at all for this account".
+# This job has NO dependencies, NO secrets, NO services and a single trivial step. If even THIS reports 0 executed
+# steps, the failure is upstream of the repository (runner never provisioned — e.g. exhausted Actions minutes or a
+# spending limit on a private repo) and no repository change can fix it.
+#
+# It doubles as a permanent liveness signal: a green canary means CI is capable of running; a canary that dies
+# pre-step means the whole suite's red is infrastructural, not a code regression.
+name: ci-canary
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Prove a runner executed a step
+        run: |
+          echo "canary: runner provisioned and executing steps"
+          echo "runner_os=${RUNNER_OS} arch=$(uname -m)"
+          date -u +"%Y-%m-%dT%H:%M:%SZ"
