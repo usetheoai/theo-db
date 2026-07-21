@@ -1,0 +1,26 @@
+{
+  "box": "self-hosted DO droplet 165.227.121.20 (NOT canonical hardware)",
+  "engine": "TheoDB (PG-wire; HTAP)",
+  "benchbase_sha": "33c00473807ebd49304d114a6d769d2d2b2bbb34",
+  "status": "OK",
+  "note": "SERIALIZABLE run \u2014 recorded as the honest predicate-lock-exhaustion finding; NOT the baseline (see m130-htap.md)",
+  "benchbase": {
+    "tool": "benchbase-chbenchmark",
+    "status": "OK",
+    "summary": {
+      "benchmark": "tpcc,chbenchmark",
+      "throughput_rps": 221.71,
+      "goodput_rps": 82.94,
+      "measured_requests": 26826,
+      "isolation": "TRANSACTION_SERIALIZABLE"
+    },
+    "dual_metric": {
+      "tpmc_proxy": 5227.7,
+      "qphh_proxy": 69868.8,
+      "neworder_rps": 87.128,
+      "analytical_rps": 19.408,
+      "label": "PROXY \u2014 derived from BenchBase per-type throughput; NOT audited tpmC/QphH (ADR M130-2)"
+    },
+    "error_fraction": 0.626
+  }
+}

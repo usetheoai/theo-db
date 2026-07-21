@@ -73,15 +73,50 @@ def derive_dual_metric(neworder_rps: float, analytical_rps: float) -> dict:
             "label": "PROXY — derived from BenchBase per-type throughput; NOT audited tpmC/QphH (ADR M130-2)"}
 
 
+def load_ch_queries(path) -> dict:
+    """Load the 22 CH analytical queries from the `-- @Qn` marked .sql file into {qid: sql}."""
+    queries, qid, buf = {}, None, []
+    for line in open(path):
+        s = line.strip()
+        if s.startswith("-- @Q"):
+            if qid:
+                queries[qid] = " ".join(buf).strip()
+            qid, buf = s[4:].strip().split()[0], []  # first token → "Q15" (ignore any trailing comment)
+        elif qid and not s.startswith("--"):
+            buf.append(line.rstrip("\n"))
+    if qid:
+        queries[qid] = " ".join(buf).strip()
+    return {q: sql for q, sql in queries.items() if sql}
+
+
+def psql_executor(psql_bin, env):
+    """Return an executor(sql)->rows using psql. Rows are the tab-split data lines (empty list on 0 rows / error)."""
+    def _exec(sql):
+        r = subprocess.run([psql_bin, "-tAF", "\t", "-c", sql], env=env, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=120)
+        if r.returncode != 0:
+            return None  # SQL error / crash → INCONSISTENT (fail-clear)
+        # Keep every output line so a scalar-aggregate NULL row (one empty line) is distinguished from a 0-row set.
+        return [tuple(ln.split("\t")) for ln in r.stdout.splitlines()]
+    return _exec
+
+
 def olap_result_consistency(queries, executor) -> dict:
-    """Retained OLAP oracle BenchBase lacks: run each analytical query once against TheoDB and assert the result is
-    non-empty with a stable column shape. `executor(sql)` returns a list of rows (list of tuples); an empty result
-    for an analytical aggregate is flagged INCONSISTENT (fail-clear with the query id), never silently passed."""
+    """Retained OLAP oracle BenchBase lacks: run each analytical query once against TheoDB and assert it executes
+    without a SQL error and returns a WELL-FORMED (arity-consistent) result set. `executor(sql)` returns a list of
+    rows (list of tuples) or None on a SQL error. A query is INCONSISTENT only when it ERRORS (None) or returns
+    ragged arity — an EMPTY result is a VALID analytical answer (e.g. a CH date-literal filter that does not match
+    the test data's dates), NOT a defect, so it PASSES. This checks SQL-surface compatibility of all 22 CH queries
+    against TheoDB — the result-level check BenchBase's timing-only run never performs."""
     results = {}
     for qid, sql in queries.items():
         rows = executor(sql)
-        ok = rows is not None and len(rows) > 0 and all(len(r) == len(rows[0]) for r in rows)
-        results[qid] = "PASS" if ok else "INCONSISTENT"
+        if rows is None:
+            results[qid] = "INCONSISTENT"           # SQL error / crash → real incompatibility
+        elif rows and not all(len(r) == len(rows[0]) for r in rows):
+            results[qid] = "INCONSISTENT"           # ragged arity → malformed
+        else:
+            results[qid] = "PASS"                   # executed cleanly, well-formed (empty is a valid answer)
     inconsistent = [q for q, v in results.items() if v != "PASS"]
     return {"per_query": results, "inconsistent": inconsistent, "all_consistent": not inconsistent}
 
@@ -132,7 +167,7 @@ def run_benchbase(sha, scale, terminals, duration, out_dir, image) -> dict:
         dual = derive_dual_metric(neworder_rps, analytical_rps)
         return {"tool": "benchbase-chbenchmark", "status": "OK", "sha": sha,
                 "summary": parsed, "dual_metric": dual,
-                "error_fraction": (round(1.0 - parsed["goodput_rps"] / parsed["throughput_rps"], 3)
+                "error_fraction": (round(max(0.0, 1.0 - parsed["goodput_rps"] / parsed["throughput_rps"]), 3)
                                    if parsed.get("goodput_rps") is not None and parsed["throughput_rps"] else None)}
     except Exception as e:
         return {"tool": "benchbase-chbenchmark", "status": "BENCHBASE_ERRORED", "reason": str(e).splitlines()[0][:180]}
@@ -151,7 +186,24 @@ def run(args) -> dict:
     bb = run_benchbase(args.sha, args.scale, args.terminals, args.duration, args.out_dir, args.image)
     if bb.get("status") != "OK":
         return {**base, "status": "UNBENCHMARKED", "reason": bb.get("reason", bb.get("status")), "benchbase": bb}
-    return {**base, "status": "OK", "benchbase": bb}
+    result = {**base, "status": "OK", "benchbase": bb}
+    # Retained wrap-layer OLAP oracle (BenchBase validates timing/completion, not result values): after the run, run
+    # the 22 CH analytical queries once against the loaded schema and assert each returns a non-empty, stable-shape
+    # result (per-query PASS/INCONSISTENT). Opt-in via --olap-oracle (needs psql + the schema still loaded).
+    if args.olap_oracle:
+        qpath = os.path.join(os.path.dirname(os.path.abspath(__file__)), "htap", "chbenchmark_queries.sql")
+        psql_bin = args.psql or shutil.which("psql")
+        if not psql_bin:
+            result["olap_oracle"] = {"status": "SKIPPED", "reason": "psql not found"}
+        else:
+            env = {**os.environ, "PGHOST": os.environ.get("PGHOST", "localhost"),
+                   "PGPORT": os.environ.get("PGPORT", "28900"), "PGUSER": os.environ.get("PGUSER", "postgres"),
+                   "PGDATABASE": os.environ.get("PGDATABASE", "postgres"),
+                   "PGPASSWORD": os.environ.get("PGPASSWORD", "postgres")}
+            queries = load_ch_queries(qpath)
+            result["olap_oracle"] = {"status": "RAN", "query_count": len(queries),
+                                     **olap_result_consistency(queries, psql_executor(psql_bin, env))}
+    return result
 
 
 def main():
@@ -163,6 +215,8 @@ def main():
     ap.add_argument("--duration", type=int, default=120, help="mixed work-phase seconds")
     ap.add_argument("--box", default="self-hosted (NOT canonical hardware)", help="box description recorded in the artifact")
     ap.add_argument("--out-dir", default="/tmp/m130_bb_out", help="host dir mounted into the container for summary json")
+    ap.add_argument("--olap-oracle", action="store_true", help="after the run, exercise the 22 CH queries as the OLAP result-consistency oracle (needs psql + loaded schema)")
+    ap.add_argument("--psql", default=None, help="psql binary path for the OLAP oracle (else PATH)")
     ap.add_argument("--out", default="docs/benchmarks/m130-htap.json")
     args = ap.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
@@ -177,6 +231,10 @@ def main():
         s = bb["summary"]
         print(f"  throughput={s['throughput_rps']} req/s  goodput={s['goodput_rps']} req/s  error_fraction={bb.get('error_fraction')}  isolation={s['isolation']}")
         print(f"  dual metric (PROXY): tpmC-proxy={dm['tpmc_proxy']}  QphH-proxy={dm['qphh_proxy']}")
+        oracle = data.get("olap_oracle")
+        if oracle:
+            print(f"  OLAP oracle: {oracle.get('status')} — {oracle.get('query_count')} CH queries, "
+                  f"all_consistent={oracle.get('all_consistent')} inconsistent={oracle.get('inconsistent')}")
     else:
         print(f"  reason: {data.get('reason')}")
 

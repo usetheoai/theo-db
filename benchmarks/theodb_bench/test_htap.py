@@ -44,21 +44,49 @@ def test_derive_dual_metric_is_labeled_proxy():
 
 # --- OLAP result-consistency oracle (T3.1) -------------------------------
 
-def test_olap_consistency_flags_empty_result():
-    queries = {"Q1": "select 1", "Q6": "select 2"}
-    # Q6 returns empty → INCONSISTENT; Q1 returns a well-shaped result → PASS.
+def test_olap_consistency_flags_sql_error_as_inconsistent():
+    # a query that ERRORS (executor returns None) → INCONSISTENT (real SQL incompatibility)
+    queries = {"Q1": "select 1", "Q6": "bad sql"}
     def executor(sql):
-        return [(1, 2)] if "1" in sql else []
+        return [(1, 2)] if "select" in sql else None
     res = m.olap_result_consistency(queries, executor)
     assert res["per_query"]["Q1"] == "PASS"
     assert res["per_query"]["Q6"] == "INCONSISTENT"
     assert res["inconsistent"] == ["Q6"] and res["all_consistent"] is False
 
 
+def test_olap_consistency_empty_result_is_valid_pass():
+    # an EMPTY result (e.g. a date-literal filter that matches nothing) is a VALID analytical answer → PASS
+    res = m.olap_result_consistency({"Q6": "select ... where never"}, lambda sql: [])
+    assert res["per_query"]["Q6"] == "PASS" and res["all_consistent"] is True
+
+
+def test_olap_consistency_flags_ragged_arity():
+    res = m.olap_result_consistency({"Q1": "x"}, lambda sql: [(1, 2), (3,)])  # ragged rows
+    assert res["per_query"]["Q1"] == "INCONSISTENT"
+
+
 def test_olap_consistency_all_pass():
     queries = {"Q1": "a", "Q2": "b"}
     res = m.olap_result_consistency(queries, lambda sql: [(1,), (2,)])
     assert res["all_consistent"] is True and res["inconsistent"] == []
+
+
+# --- CH query loader (the OLAP oracle's query set) -----------------------
+
+def test_load_ch_queries_parses_marked_sql(tmp_path):
+    f = tmp_path / "q.sql"
+    f.write_text("-- header\n-- @Q1\nSELECT 1\nFROM t;\n\n-- @Q2\nSELECT 2;\n")
+    q = m.load_ch_queries(str(f))
+    assert set(q) == {"Q1", "Q2"}
+    assert "SELECT 1" in q["Q1"] and "FROM t" in q["Q1"] and q["Q2"].startswith("SELECT 2")
+
+
+def test_load_ch_queries_loads_all_22_real():
+    import os
+    p = os.path.join(os.path.dirname(os.path.abspath(m.__file__)), "htap", "chbenchmark_queries.sql")
+    q = m.load_ch_queries(p)
+    assert len(q) == 22 and set(q) == {f"Q{i}" for i in range(1, 23)}
 
 
 # --- run-to-run dispersion (CV) reused from M129 -------------------------
