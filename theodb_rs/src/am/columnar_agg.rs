@@ -546,7 +546,24 @@ unsafe fn plain_var_tlist(tlist: *mut pg_sys::List) -> *mut pg_sys::List {
 ///
 /// `plan.targetlist` is deliberately NOT changed (it stays `plain_var_tlist`): the executed output is untouched and
 /// the M115 invariant "no `Aggref` in the executed tlist" holds. This node is inserted post-`set_plan_refs`, so
-/// `set_customscan_references` never re-processes `custom_scan_tlist`; EXPLAIN deparse is its only consumer.
+/// `set_customscan_references` never re-processes `custom_scan_tlist`.
+///
+/// # DESCRIPTOR-EQUALITY INVARIANT (do not break — `custom_scan_tlist` is NOT just deparse metadata)
+///
+/// EXPLAIN deparse is NOT the only consumer: for `scanrelid = 0`, `ExecInitCustomScan` builds the node's RUNTIME
+/// scan `TupleDesc` from this list —
+/// `nodeCustom.c: if (cscan->custom_scan_tlist != NIL || scan_rel == NULL) scan_tupdesc = ExecTypeFromTL(cscan->custom_scan_tlist);`
+/// Execution therefore stays byte-identical ONLY because this list is descriptor-equal to the `plain_var_tlist` it
+/// replaces: same length, same per-entry `exprType`/`exprTypmod`/`exprCollation`, same `resname`, same `resjunk`.
+/// That holds by construction — `admit` accepts a group key only as a BARE base-rel `Var` (so
+/// `adm.group_cols[idx].1 == exprType(e)` and the typmod/collation taken from `e` are that same Var's), and an
+/// aggregate entry is a COPY of the very same `Aggref` (identical type triple). Any future edit that changes an
+/// entry's type, typmod, collation, or the list length silently changes the runtime tuple shape — with no test
+/// signal beyond a result diff. Keep the invariant, or change `plan.targetlist` in lockstep.
+///
+/// Fail-closed: any inconsistency between `tlist` and the admission returns NIL, and the caller then declines the
+/// swap (native plan) rather than emitting a SHORT tlist — a short descriptor would drop a column at runtime and let
+/// `plan.targetlist`'s `Var(INDEX_VAR, k)` read past the end of the scan slot (council-rust-pgrx MEDIUM-1).
 unsafe fn deparse_safe_tlist(
     tlist: *mut pg_sys::List,
     adm: &Admitted,
@@ -555,8 +572,12 @@ unsafe fn deparse_safe_tlist(
     let src = PgList::<pg_sys::TargetEntry>::from_pg(tlist);
     let mut out: *mut pg_sys::List = std::ptr::null_mut();
     for i in 0..src.len() {
-        let Some(te) = src.get_ptr(i) else { continue };
+        // Fail-closed on ANY inconsistency (see the descriptor-equality invariant above): NIL → caller declines.
+        let Some(te) = src.get_ptr(i) else { return std::ptr::null_mut() };
         let e = (*te).expr as *mut pg_sys::Node;
+        if e.is_null() {
+            return std::ptr::null_mut();
+        }
         // What does this output column represent? Grouped plans carry an explicit layout; the scalar path is
         // one aggregate per output column, in order.
         let (is_group, idx) = if adm.layout.is_empty() {
@@ -564,7 +585,7 @@ unsafe fn deparse_safe_tlist(
         } else {
             match adm.layout.get(i) {
                 Some(&(tag, k)) => (tag == 0, k),
-                None => (false, i),
+                None => return std::ptr::null_mut(),
             }
         };
         let expr: *mut pg_sys::Expr = if is_group {
@@ -577,19 +598,23 @@ unsafe fn deparse_safe_tlist(
                     pg_sys::exprCollation(e),
                     0,
                 ) as *mut pg_sys::Expr,
-                None => continue,
+                None => return std::ptr::null_mut(),
             }
         } else {
             // Copy the Aggref so the original (shared) plan nodes are never mutated, then rebuild its argument Var
             // against the base rel so deparsing the arguments never follows OUTER_VAR into the dropped subtree.
             let copied = pg_sys::copyObjectImpl(e as *const c_void) as *mut pg_sys::Node;
-            if !copied.is_null() && (*copied).type_ == pg_sys::NodeTag::T_Aggref {
+            if copied.is_null() {
+                return std::ptr::null_mut(); // never place a NULL expr — ExecTypeFromTL would deref it
+            }
+            if (*copied).type_ == pg_sys::NodeTag::T_Aggref {
                 let aggref = copied as *mut pg_sys::Aggref;
-                let attno = adm.aggs.get(idx).map(|a| a.attno).unwrap_or(0);
+                let Some(pa) = adm.aggs.get(idx) else { return std::ptr::null_mut() };
+                let attno = pa.attno;
                 if attno > 0 {
                     let args = PgList::<pg_sys::TargetEntry>::from_pg((*aggref).args);
                     for j in 0..args.len() {
-                        let Some(ate) = args.get_ptr(j) else { continue };
+                        let Some(ate) = args.get_ptr(j) else { return std::ptr::null_mut() };
                         let av = (*ate).expr as *mut pg_sys::Node;
                         if !av.is_null() && (*av).type_ == pg_sys::NodeTag::T_Var {
                             let v = av as *mut pg_sys::Var;
@@ -740,8 +765,15 @@ unsafe fn try_swap_agg(plan: *mut pg_sys::Plan, rtable: *mut pg_sys::List) -> Op
     cscan.custom_exprs = std::ptr::null_mut();
     cscan.custom_private = encode_private(&adm, table_oid);
     // M131 (#135): NOT `plain_var_tlist` — a self-referential INDEX_VAR here makes ruleutils' `resolve_special_varno`
-    // recurse forever when a Sort above this node has a key on the aggregate output, hanging EXPLAIN.
-    cscan.custom_scan_tlist = deparse_safe_tlist(tlist, &adm, scanrelid);
+    // recurse forever when a Sort above this node has a key on the aggregate output, hanging EXPLAIN. This list also
+    // becomes the node's RUNTIME scan TupleDesc (`ExecTypeFromTL`), so it must stay descriptor-equal to
+    // `plan.targetlist` — see `deparse_safe_tlist`. NIL means it could not be built consistently → decline the swap
+    // and let the native plan run (fail-closed; never ship a short descriptor).
+    let safe_tlist = deparse_safe_tlist(tlist, &adm, scanrelid);
+    if safe_tlist.is_null() || pg_sys::list_length(safe_tlist) as usize != out_arity {
+        return None;
+    }
+    cscan.custom_scan_tlist = safe_tlist;
     cscan.custom_relids = std::ptr::null_mut();
     cscan.methods = &SCAN_METHODS.0;
     Some(cscan.into_pg() as *mut pg_sys::Plan)

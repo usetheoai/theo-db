@@ -33,11 +33,15 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   or execution (the affected query always executed correctly in 0.5 s), and the trigger is `ORDER BY <aggregate>`,
   not table width (`knowledge-base/discoveries/blueprints/columnar-agg-planner-hang-blueprint.md`).
   MEASURED after the fix: the 43-query ClickBench EXPLAIN sweep with the pushdown ON goes from **2 hangs to 0**
-  (max 54 ms; Q16 39 ms and Q33 34 ms, both now engaging the CustomScan), and the accelerated ClickBench run is
-  **byte-identical 43/43** vs heap while being **1.91× faster on the full-suite hot geomean** (0.889 s vs 1.700 s)
-  and **21.2× on the six queries the pushdown accelerates** — an internal same-box A/B (pushdown ON vs OFF) on a
-  self-hosted, NOT canonical, box with a 100 k-row subsample; not a competitive claim
-  (`docs/benchmarks/m131-columnar-agg-accelerated.md`).
+  (max 60 ms; Q16 31 ms and Q33 30 ms, both now engaging the CustomScan — gate script `scripts/m131_sweep.sh`), and
+  the accelerated ClickBench run is **byte-identical 43/43** vs heap while measuring **1.90× on the full-suite hot
+  geomean** (0.896 s vs 1.700 s) and **24.8× across the six queries the pushdown touches** (20.7× excluding q6,
+  which is served by the pre-existing zone-map directory fast-path, not the pushdown) — an internal same-box A/B
+  (pushdown ON vs OFF), single suite run per configuration, on a self-hosted NOT-canonical box with a 100 k-row
+  subsample, with the ±21 % noise floor of the 37 untouched queries disclosed; not a competitive claim
+  (`docs/benchmarks/m131-columnar-agg-accelerated.md`). `custom_scan_tlist` is also the node's runtime scan
+  TupleDesc, so the replacement list is descriptor-equal to the one it replaces and the construction is
+  fail-closed (an inconsistent list declines the swap to the native plan).
 
 ### Security
 
