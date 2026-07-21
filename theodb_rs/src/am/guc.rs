@@ -465,16 +465,14 @@ pub(crate) fn init() {
     );
 
     // ── M134 (#117): AI-endpoint GUCs — operator-only, value hidden from non-superusers ──────────────────────
+    // Operator-only: the endpoint (the SSRF vector), the API keys (credentials), and the test short-circuit.
     for (name, short, setting) in [
         (c"theodb.llm_endpoint", c"Chat-completions endpoint URL used by theodb.chat / ai.* (operator-only)", &LLM_ENDPOINT),
-        (c"theodb.llm_model", c"Chat-completions model name (operator-only)", &LLM_MODEL),
         (c"theodb.llm_api_key", c"Chat-completions API key (operator-only; hidden from non-superusers)", &LLM_API_KEY),
         (c"theodb.llm_test_model", c"TEST ONLY: short-circuit the chat call with a canned model (operator-only)", &LLM_TEST_MODEL),
         (c"theodb.embedding_endpoint", c"Embeddings endpoint URL used by theodb.embed and the vectorizer worker (operator-only)", &EMBEDDING_ENDPOINT),
-        (c"theodb.embedding_model", c"Embeddings model name (operator-only)", &EMBEDDING_MODEL),
         (c"theodb.embedding_api_key", c"Embeddings API key (operator-only; hidden from non-superusers)", &EMBEDDING_API_KEY),
         (c"theodb.rerank_endpoint", c"Rerank endpoint URL used by theodb.rerank (operator-only)", &RERANK_ENDPOINT),
-        (c"theodb.rerank_model", c"Rerank model name (operator-only)", &RERANK_MODEL),
         (c"theodb.rerank_api_key", c"Rerank API key (operator-only; hidden from non-superusers)", &RERANK_API_KEY),
     ] {
         GucRegistry::define_string_guc(
@@ -484,6 +482,24 @@ pub(crate) fn init() {
             setting,
             GucContext::Suset,
             GucFlags::SUPERUSER_ONLY,
+        );
+    }
+    // The MODEL names stay caller-settable, honoring the decision recorded in the plan's Unresolved Questions:
+    // a model name is not a network vector (the endpoint it is sent to is now operator-only), and picking a model
+    // per session is ordinary application behaviour. A cross-validation pass caught that the first cut silently
+    // reversed this — and `SUPERUSER_ONLY` would additionally have hidden model NAMES, which are not secrets.
+    for (name, short, setting) in [
+        (c"theodb.llm_model", c"Chat-completions model name (caller-settable)", &LLM_MODEL),
+        (c"theodb.embedding_model", c"Embeddings model name (caller-settable)", &EMBEDDING_MODEL),
+        (c"theodb.rerank_model", c"Rerank model name (caller-settable)", &RERANK_MODEL),
+    ] {
+        GucRegistry::define_string_guc(
+            name,
+            short,
+            c"Caller-settable by design: the model is not an egress vector — the endpoint it is sent to is operator-only (M134 / #117).",
+            setting,
+            GucContext::Userset,
+            GucFlags::default(),
         );
     }
     GucRegistry::define_string_guc(

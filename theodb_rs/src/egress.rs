@@ -186,6 +186,17 @@ mod tests {
         }
     }
 
+    // T2.3's second half, which the first cut asserted only in prose: the allowlist must be a SCOPED permit, not
+    // a global off-switch. A sibling address in the same range as an allowlisted host stays blocked.
+    #[test]
+    fn test_m134_allowlist_is_scoped_not_a_global_off_switch() {
+        let allow = parse_allowlist("127.0.0.1");
+        assert!(allow.contains(&"127.0.0.1".to_string()), "the named host is permitted");
+        assert!(!allow.contains(&"127.0.0.2".to_string()), "a sibling in the same /8 is NOT permitted");
+        // and the sibling is still classified internal, so the guard refuses it
+        assert!(is_blocked_addr("127.0.0.2".parse().unwrap()));
+    }
+
     #[test]
     fn test_m134_allowlist_parsing_is_whitespace_and_case_insensitive() {
         assert_eq!(parse_allowlist(" 127.0.0.1 , Other.Example "), vec!["127.0.0.1", "other.example"]);

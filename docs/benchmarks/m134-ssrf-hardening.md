@@ -222,6 +222,83 @@ the in-PG SQL matrix physically cannot reach them — asserting them without an 
 faith. On its very first run this harness caught two *wrong test expectations* of mine (the `user:pass@` case
 parses to host `user`, because `:` wins before `@`), which is exactly the class of error that produced F1.
 
+## 7. Post-cross-validation: five proof gaps closed (measured)
+
+A cross-validation pass compared the plan's acceptance criteria **word by word** against the evidence and found
+that, while the code was right, five criteria had been weakened or dropped between plan and proof. That is the
+failure mode nobody catches by re-running a green suite, so each is closed here with a real measurement rather
+than an argument.
+
+**GAP-1 — T1.1 AC2 named `theodb.llm_endpoint` and SQLSTATE `42501`; the transcript had shown a different GUC and
+no SQLSTATE.** Re-run against the exact GUC, verbose:
+
+```
+SET ROLE m134_caller;
+SET theodb.llm_endpoint = 'http://169.254.169.254/v1/chat/completions';
+ERROR:  42501: permission denied to set parameter "theodb.llm_endpoint"
+ERROR:  42501: permission denied to set parameter "theodb.llm_api_key"
+ERROR:  42501: permission denied to set parameter "theodb.egress_allowlist"
+```
+
+**GAP-2 — the plan explicitly resolved that `*_model` STAYS caller-settable; the first cut silently reversed it.**
+Reverted, because a model name is not an egress vector once the endpoint is operator-only — and `SUPERUSER_ONLY`
+would also have hidden model *names*, which are not secrets. Same unprivileged role, same session:
+
+```
+SET theodb.llm_model = 'gpt-4o-mini';        -- succeeds
+SELECT current_setting('theodb.llm_model');  -- gpt-4o-mini
+```
+
+**GAP-3 — T2.3 AC1's second half ("…AND a non-listed internal host in the same range is still blocked") was
+asserted nowhere.** It is the half that proves the allowlist is a *scoped permit* rather than a global
+off-switch. Now covered both in the executable suite (`test_m134_allowlist_is_scoped_not_a_global_off_switch`) and
+in-PG:
+
+```
+SET theodb.egress_allowlist = '127.0.0.1';
+http://127.0.0.1:9/v1  → ERROR: 38000 … Connection refused        (permitted, reached the network)
+http://127.0.0.2:9/v1  → ERROR: 22023 … refusing to call 127.0.0.2 (sibling in the same /8, still refused)
+```
+
+**GAP-4 — "multi-A record, one internal address" was declared as a failure scenario but only ever supported by a
+reviewer's opinion.** Now demonstrated with a real name resolving to both a public and an internal address:
+
+```
+$ getent ahosts m134-multi.test   →  10.0.0.7   8.8.8.8
+SET theodb.embedding_endpoint = 'http://m134-multi.test:9/v1';
+ERROR:  theodb.embed: refusing to call m134-multi.test — it resolves to a blocked internal address
+```
+
+Checking every resolved address rather than the first is what makes this deterministic instead of a coin flip.
+
+**GAP-5 — the plan promised the resolution cost would be "measured rather than assumed"; the code instead
+*argued* it away.** Measured:
+
+| | Time |
+|---|---|
+| baseline `SELECT 1` | 0.297 ms |
+| guard denial on an IP literal (no DNS) | 0.554 ms → **guard cost ≈ 0.26 ms** |
+| isolated `getaddrinfo("api.openai.com")`, 5 runs | 12.08 / 7.59 / 8.39 / 6.80 / 7.59 ms (mean ≈ 8.5 ms) |
+| full warm real embed call end-to-end | 1536 ms |
+
+So on a real call the guard's resolution is **≈ 0.6 % of wall clock**. The honest caveat stands: against an
+*unhealthy* resolver that cost is a resolver timeout, and it is now paid even when the circuit breaker is open —
+documented at the call site rather than hidden.
+
+**GAP-6 — T3.1 AC2 named a REVOKE grep that never appeared in the evidence.** Run:
+
+```
+FROM PUBLIC in vectorizer.rs :  2 (pre-change d213f5a)  →  2 (HEAD)
+REVOKE ALL across sql/       : 27 (pre-change)          → 27 (HEAD)
+```
+
+Unchanged, as required — the least-privilege surface is untouched by this milestone.
+
+**Not closed, stated plainly:** the DoD line "the new tests pass on the droplet build" is **not** satisfied for the
+three `#[pg_test]` cases — `cargo pgrx test` does not link on this box (§ Honest limits 5). Five pure tests run
+standalone and the in-PG matrix covers the behaviour, but the DoD as written is unmet and is recorded as such
+rather than reworded to fit.
+
 ## Honest limits (documented, not hidden)
 
 1. **This is resolve-and-check, not resolve-then-connect.** `minreq` exposes no custom resolver or connector, so
