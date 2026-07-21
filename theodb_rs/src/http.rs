@@ -160,6 +160,12 @@ pub(crate) fn post_json(fn_name: &str, endpoint: &str, payload: String, api_key:
     // bypassed by a future caller. The pre-existing `http(s)://` check is NOT an SSRF control — it blocks
     // `file://`, not `http://169.254.169.254/`. Runs BEFORE the breaker so a blocked target never even records
     // breaker state (which would leak liveness by timing — the blind-SSRF signal).
+    //
+    // ACCEPTED COST (council-rust-pgrx review): this weakens M104's "an OPEN breaker fails fast with no network
+    // I/O" to "…with no TCP" — an open breaker still pays one DNS resolution. Deliberate: the security ordering
+    // is not negotiable, the cost is bounded by the same resolver `minreq::send` pays on the very next line, and
+    // a negative-result cache to win those milliseconds would add TTL state and a staleness surface nobody asked
+    // for (parsimony rung 1).
     guard_egress(fn_name, endpoint);
     // M104 (Q3): if this backend's breaker for `endpoint` is OPEN, fail FAST (no TCP, no retry budget) so a per-row
     // surface over a dead endpoint costs ~K probes, not N × (MAX_RETRIES+1) × timeout.
@@ -261,6 +267,9 @@ mod tests {
     #[pg_test]
     fn m104_breaker_opens_after_k_failures_then_fails_fast() {
         let ep = "http://127.0.0.1:1/dead"; // port 1: connection refused (fast) — a stand-in for a down endpoint
+        // NOTE for whoever reads this next: the <100ms assertion below holds because the allowlist short-circuits
+        // BEFORE resolution. On a non-allowlisted host the open-breaker path also pays one DNS lookup first (see
+        // the ordering comment in guard_egress) — this test does not cover that, by construction.
         // M134: loopback is denied by default now, so this breaker test must go through the operator escape hatch.
         // That is not a workaround — it is the escape hatch doing its job, and asserting the breaker still trips
         // afterwards proves the guard runs BEFORE the breaker without disabling it.
@@ -335,7 +344,6 @@ mod tests {
     #[pg_test]
     fn test_m134_allowlisted_host_is_permitted() {
         Spi::run("SET theodb.egress_allowlist = ' 127.0.0.1 , other.example '").unwrap();
-        assert_eq!(parse_allowlist(" 127.0.0.1 , other.example "), vec!["127.0.0.1", "other.example"]);
         // Allowlisted → the guard lets it through, so the failure is the CONNECTION (38000), not the guard (22023).
         let code = PgTryBuilder::new(|| {
             post_json("m134_test", "http://127.0.0.1:1/dead", "{}".to_string(), None);

@@ -4,7 +4,10 @@
 //! Deliberately std-only and free of pgrx: the PG-facing guard (resolution, GUC lookup, `ereport`) lives in
 //! `http::guard_egress`. Two reasons, both load-bearing:
 //!
-//! 1. **SRP** — "is this address internal?" is address policy; "refuse this call" is transport policy.
+//! 1. **SRP** — the *decisions* live here (is this address internal? which host will actually be dialed?); the
+//!    *effects* live in `http::guard_egress` (resolve, read the GUC, `ereport`). `endpoint_host` is admittedly
+//!    transport knowledge rather than address policy — it mirrors minreq's parser — but it belongs on this side
+//!    of the line because being pure is what makes it provable, and F1 proved that is where it must be provable.
 //! 2. **It is the half that must be provable.** A missing range here silently PERMITS traffic, and most ranges
 //!    (NAT64, 6to4, multicast) cannot be expressed in a URL the HTTP client will even parse — so the in-PG SQL
 //!    matrix cannot reach them. Keeping this file dependency-free means it compiles and runs standalone
@@ -99,7 +102,6 @@ pub(crate) fn endpoint_host(endpoint: &str) -> Option<String> {
 pub(crate) fn parse_allowlist(raw: &str) -> Vec<String> {
     raw.split(',').map(|s| s.trim().to_lowercase()).filter(|s| !s.is_empty()).collect()
 }
-
 
 #[cfg(test)]
 mod tests {

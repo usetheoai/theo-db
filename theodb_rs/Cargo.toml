@@ -47,6 +47,10 @@ criterion = "0.5.1"
 name = "scan_hot_path"
 harness = false
 
+# LOAD-BEARING, not a size/style choice: pgrx 0.19 turns a PG `ERROR` into `panic_any` so Rust frames UNWIND and
+# run their destructors before `ereport` is finally called at the guard boundary (pgrx-pg-sys panic.rs:155-160).
+# Switching either profile to `panic = "abort"` would turn every `pg::err_*` — including the M134 SSRF denial —
+# into an immediate process abort, i.e. a crashed backend instead of a typed error. Do not change.
 [profile.dev]
 panic = "unwind"
 
