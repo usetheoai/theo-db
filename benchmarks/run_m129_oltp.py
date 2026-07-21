@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""M129 — official-benchmark OLTP pillar: run the two field-standard tools against self-hosted TheoDB and prove the
-retained wrap layer (paired significance) the OLTP tools lack (blueprint Q11).
+"""M129 — official-benchmark OLTP pillar: run the two field-standard tools against self-hosted TheoDB and add the
+retained analysis the OLTP tools lack — run-to-run dispersion + a durability pairing (blueprint Q11).
 
-- pgbench (PostgreSQL-shipped, TPC-B-like, PostgreSQL License → D1-clean): N repeated timed runs → TPS, then
-  paired significance over the run-to-run TPS (the wrap-layer capability pgbench/HammerDB do not provide).
+- pgbench (PostgreSQL-shipped, TPC-B-like, PostgreSQL License → D1-clean): N repeated timed runs → TPS, then the
+  coefficient of variation over the runs (single-system run-to-run stability; the OLTP tools report a single TPS
+  with no dispersion). Paired significance (M123) is the A/B two-system capability (M127 vector vs pgvector), NOT
+  applicable to a single-system throughput series — see coefficient_of_variation() for why.
 - HammerDB TPROC-C (the real TPC-C 45/43/4/4/4 mix, NOPM) via the `tpcorg/hammerdb` Docker image (GPLv3 → external
   out-of-tree driver, NEVER vendored/linked): measured when Docker + `--hammerdb`; else HAMMERDB_SKIPPED (honest).
 
@@ -17,10 +19,9 @@ import json
 import os
 import re
 import shutil
+import statistics
 import subprocess
 import sys
-
-from theodb_bench.significance import paired_significance
 
 TPS_RE = re.compile(r"^tps\s*=\s*([0-9.]+)", re.MULTILINE)
 NOPM_RE = re.compile(r"([0-9]+)\s+NOPM", re.IGNORECASE)
@@ -32,6 +33,23 @@ def parse_pgbench_tps(output: str) -> float:
     if not m:
         raise ValueError(f"no 'tps =' line in pgbench output: {output[-200:]!r}")
     return float(m.group(1))
+
+
+def coefficient_of_variation(samples) -> float:
+    """Run-to-run dispersion of ONE system: stdev/mean * 100 (%). Lower = more stable.
+
+    This is the statistically honest run-to-run stability metric for a single-system throughput series — NOT a
+    paired hypothesis test. The wrap-layer `paired_significance` (M123) is for A/B comparisons of TWO systems over
+    the SAME queries (M127 vector vs pgvector); pairing runs of ONE system by index has no paired relationship, and
+    a split-half permutation test at n=2 is degenerate (min two-sided p ~= 0.5 regardless of true variance). CV is
+    the dispersion statistic the OLTP tools do NOT report (they emit a single TPS with no stability quantification).
+    """
+    if len(samples) < 2:
+        raise ValueError("coefficient_of_variation needs >= 2 samples")
+    mean = statistics.fmean(samples)
+    if mean == 0:
+        raise ValueError("coefficient_of_variation undefined for zero mean")
+    return round(statistics.stdev(samples) / mean * 100.0, 2)
 
 
 def parse_hammerdb_nopm(output: str) -> int:
@@ -48,6 +66,14 @@ def _pgbench_env():
             "PGDATABASE": os.environ.get("PGDATABASE", "postgres"), "PGPASSWORD": os.environ.get("PGPASSWORD", "postgres")}
 
 
+def show_guc(guc, psql_bin, env) -> str:
+    """Return the SERVER-REPORTED value of a GUC (e.g. fsync) via `psql -tAc 'SHOW <guc>'`, so the durability posture
+    is MEASURED from the live server, not asserted from an argparse default."""
+    r = subprocess.run([psql_bin, "-tAc", f"SHOW {guc}"], env=env, capture_output=True, text=True,
+                       timeout=30, check=True)
+    return r.stdout.strip()
+
+
 def run_pgbench(scale, clients, threads, duration, runs, pgbench_bin) -> dict:
     env = _pgbench_env()
     subprocess.run([pgbench_bin, "-i", "-q", "-s", str(scale)], env=env, check=True,
@@ -57,14 +83,14 @@ def run_pgbench(scale, clients, threads, duration, runs, pgbench_bin) -> dict:
         r = subprocess.run([pgbench_bin, "-c", str(clients), "-j", str(threads), "-T", str(duration), "-r"],
                            env=env, capture_output=True, text=True, timeout=duration + 120, check=True)
         tps.append(parse_pgbench_tps(r.stdout))
-    # Paired significance over first-half vs second-half of the repeated runs → run-to-run stability (the wrap-layer
-    # capability pgbench lacks). Needs >=4 runs (>=2 pairs per side); expected NOT significant (a stable engine).
-    half = len(tps) // 2
-    sig = paired_significance(tps[:half], tps[half:half * 2]) if len(tps) >= 4 else "need >=4 runs for split significance"
+    # Run-to-run stability via coefficient of variation over ALL runs (the honest single-system dispersion metric the
+    # OLTP tools do not report). NOT a paired hypothesis test — see coefficient_of_variation() docstring.
+    cv = coefficient_of_variation(tps) if len(tps) >= 2 else None
     return {"tool": "pgbench", "metric": "TPS", "scale": scale, "clients": clients, "duration_s": duration,
             "runs": runs, "tps_per_run": [round(t, 1) for t in tps],
-            "tps_mean": round(sum(tps) / len(tps), 1), "tps_min": round(min(tps), 1), "tps_max": round(max(tps), 1),
-            "significance": sig}
+            "tps_mean": round(statistics.fmean(tps), 1), "tps_min": round(min(tps), 1), "tps_max": round(max(tps), 1),
+            "tps_stdev": round(statistics.stdev(tps), 1) if len(tps) >= 2 else None,
+            "cv_pct": cv, "stability_note": "coefficient of variation (stdev/mean %); lower = more stable"}
 
 
 def run_hammerdb(warehouses, vus, rampup, duration) -> dict:
@@ -92,12 +118,20 @@ def run_hammerdb(warehouses, vus, rampup, duration) -> dict:
 
 
 def run(args) -> dict:
-    base = {"box": "self-hosted (NOT canonical hardware)", "engine": "TheoDB (PostgreSQL-wire-compatible; OLTP = PG path)",
-            "durability_posture": f"fsync={args.fsync}",
+    base = {"box": args.box, "engine": "TheoDB (PostgreSQL-wire-compatible; OLTP = PG path)",
             "retained_crash_gate": "theodb_rs/isolation/crash_fold.sh + crash_unlogged.sh (#46/#47) — throughput is meaningless without durability; the OLTP tools do NOT enforce ACID"}
     pgbench_bin = args.pgbench or shutil.which("pgbench")
     if not pgbench_bin:
         return {**base, "status": "UNBENCHMARKED", "reason": "pgbench binary not found", "pgbench": None}
+    # Durability posture MEASURED from the live server (M1 review fix), not asserted. psql sits beside pgbench.
+    psql_bin = args.psql or os.path.join(os.path.dirname(pgbench_bin), "psql")
+    env = _pgbench_env()
+    try:
+        base["durability_posture"] = {"fsync": show_guc("fsync", psql_bin, env),
+                                      "synchronous_commit": show_guc("synchronous_commit", psql_bin, env),
+                                      "source": "server-reported (SHOW), not asserted"}
+    except Exception as e:
+        base["durability_posture"] = {"error": f"could not read server GUCs: {str(e).splitlines()[0][:100]}"}
     try:
         pg = run_pgbench(args.scale, args.clients, args.threads, args.duration, args.runs, pgbench_bin)
     except Exception as e:
@@ -108,7 +142,8 @@ def run(args) -> dict:
             "caveats": [
                 "self-hosted box, NOT canonical hardware — TPS/NOPM not comparable to published/audited TPC-C",
                 "HammerDB NOPM is NOT audited tpmC (TPROC-C is a TPC-C derivative); HammerDB (GPLv3) runs as an external Docker driver, never vendored/linked",
-                f"durability posture recorded ({base['durability_posture']}); throughput is paired with the retained crash-safety gate, not reported as 'valid' alone",
+                "durability posture is server-reported (SHOW fsync/synchronous_commit); throughput is paired with the retained crash-safety gate, not reported as 'valid' alone",
+                "run-to-run stability is a coefficient-of-variation dispersion metric, NOT a paired hypothesis test (paired significance is the A/B-comparison capability, used in M127 vector vs pgvector)",
             ]}
 
 
@@ -118,8 +153,9 @@ def main():
     ap.add_argument("--clients", type=int, default=8)
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--duration", type=int, default=10, help="pgbench per-run seconds")
-    ap.add_argument("--runs", type=int, default=4, help="repeated pgbench runs (>=4 enables split significance)")
-    ap.add_argument("--fsync", default="on", help="durability posture recorded in the artifact")
+    ap.add_argument("--runs", type=int, default=10, help="repeated pgbench runs (>=2 for coefficient of variation)")
+    ap.add_argument("--box", default="self-hosted (NOT canonical hardware)", help="box description recorded in the artifact")
+    ap.add_argument("--psql", default=None, help="psql binary path (else derived from --pgbench dir)")
     ap.add_argument("--hammerdb", action="store_true", help="also run HammerDB TPROC-C via Docker (GPLv3 external)")
     ap.add_argument("--warehouses", type=int, default=4)
     ap.add_argument("--vus", type=int, default=4)
@@ -136,9 +172,9 @@ def main():
     if data["status"] == "OK":
         pg = data["pgbench"]
         print(f"  pgbench TPS: mean={pg['tps_mean']} min={pg['tps_min']} max={pg['tps_max']} over {pg['runs']} runs")
-        print(f"  significance (run-to-run): {pg['significance']}")
+        print(f"  run-to-run stability: CV={pg['cv_pct']}% (stdev={pg['tps_stdev']}); lower = more stable")
         print(f"  hammerdb: {data['hammerdb'].get('nopm', data['hammerdb'].get('status'))}")
-        print(f"  durability: {data['durability_posture']} (paired with the retained crash gate)")
+        print(f"  durability (server-reported): {data['durability_posture']} (paired with the retained crash gate)")
 
 
 if __name__ == "__main__":

@@ -39,10 +39,19 @@ def test_hammerdb_skips_cleanly_without_docker(monkeypatch):
     assert r["status"] == "HAMMERDB_SKIPPED" and "docker" in r["reason"].lower()
 
 
-# --- significance wiring: run-to-run stability is NOT significant ---------
+# --- run-to-run stability via coefficient of variation (single-system dispersion) ---
 
-def test_significance_over_stable_runs_not_significant():
-    from theodb_bench.significance import paired_significance
-    a, b = [1000.0, 1001.0], [1000.5, 999.5]  # stable → tiny diffs
-    sig = paired_significance(a, b)
-    assert sig["p_permutation"] > 0.05  # not significant → stable engine
+def test_cv_low_for_stable_runs():
+    # tight runs → low dispersion (a stable engine)
+    assert m.coefficient_of_variation([1000.0, 1001.0, 999.0, 1000.5]) < 1.0
+
+
+def test_cv_higher_for_noisy_runs():
+    stable = m.coefficient_of_variation([1000.0, 1001.0, 999.0, 1000.5])
+    noisy = m.coefficient_of_variation([1000.0, 1300.0, 800.0, 1100.0])
+    assert noisy > stable  # dispersion is monotone in run-to-run spread
+
+
+def test_cv_errors_on_single_sample():
+    with pytest.raises(ValueError):
+        m.coefficient_of_variation([1000.0])
