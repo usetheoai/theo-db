@@ -15,6 +15,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 - Roadmap amended: added M132 fix #132 — vectorizer bgworker embeda no self-host (destrava o anchor de dogfood) (`/roadmap-feature vectorizer-worker-embed-fix`)
 - Roadmap amended: added M133 fix #140 — restaurar o sinal de CI (todo job do Actions falha antes de qualquer step) (`/roadmap-feature ci-restore-signal`)
+- Roadmap amended: added M134 fix #117 — SSRF cego via `theodb.llm_endpoint` setável pelo chamador (`/roadmap-feature llm-endpoint-ssrf-hardening`)
 
 ### Changed
 

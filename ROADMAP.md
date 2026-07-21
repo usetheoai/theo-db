@@ -2143,6 +2143,30 @@ Recomendação #3 / Risco de manutenção: com 19 arquivos >500 LoC e este a 3.4
 
 ---
 
+## M134 — [ ] Fix #117 — SSRF cego via `theodb.llm_endpoint` setável pelo chamador
+
+> Added 2026-07-21 (`/roadmap-feature llm-endpoint-ssrf-hardening`). Barreira de entrada para **qualquer** deploy multi-tenant ou com roles não-confiáveis. Grill: `knowledge-base/grills/llm-endpoint-ssrf-hardening-feature-grill.md`.
+
+**Objective:** corrigir o **#117** — `theodb.llm_endpoint` **não é GUC registrada**: é lida via `current_setting('theodb.llm_endpoint', true)` (`pg.rs:50-56`), ou seja **placeholder GUC**, e no PostgreSQL **qualquer role** pode dar `SET` num nome pontuado para a própria sessão. Os únicos guards são o esquema (`chat.rs:266-267`, precisa ser `http(s)://`) e no-redirect (`http.rs:124-125`) — **não há bloqueio de IP privado/loopback/link-local**, e checar `http(s)` não é controle de SSRF. **Impacto:** um role com EXECUTE em qualquer função que toca LLM (`ai._chat`, `ai.extract_entities`, ou `theodb.graph_upsert(..., use_llm := true)`) aponta o **host do banco** para alvo interno arbitrário (metadata `169.254.169.254`, `127.0.0.1`, serviços internos) e dispara requisição server-side. SSRF **cego**: varredura de porta interna por timing/estado do circuit-breaker + hits em endpoints internos não autenticados.
+
+**Definition of done:**
+
+- [ ] `theodb.llm_endpoint` e `theodb.llm_api_key` **registradas como GUCs custom `GucContext::Suset`** (só operador/superuser) — sessão não-superuser **não consegue mais** dar `SET` (asserido por teste negativo que espera o erro).
+- [ ] **Denylist de privado/loopback/link-local** aplicada antes do POST para no mínimo: `169.254.0.0/16`, `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `::1`, `fc00::/7`.
+- [ ] **Resolve-then-connect no mesmo IP**, para que host com **DNS-rebinding** (registro A público que re-resolve para endereço interno) não contorne a denylist.
+- [ ] Testes negativos asserindo o **erro tipado específico** para cada faixa bloqueada **e** para tentativa de rebinding — per `../.claude/rules/testing.md § 4.1`, teste de caso negativo assere o erro e a mensagem, não apenas "lança".
+- [ ] Postura existente **não regride**: `REVOKE … FROM PUBLIC`, no-redirect e fail-fast continuam valendo (re-provados).
+
+**Dependencies:** M131 `[x]`, M110 `[x]` (que adicionou `graph_upsert` como segundo caminho chamável, também coberto aqui).
+
+**Risks:** (a) **resolve-then-connect exige fixar o IP resolvido no cliente HTTP** — o `http.rs` pode não expor pinning em nível de conexão, então o fix pode exigir mudança de cliente (resolver/connector custom) em vez de checagem no `resolve_chat_cfg`; mitigação: **spike da capacidade do cliente ANTES** de comprometer a abordagem — se pinning for inviável, **documentar honestamente a janela residual de rebinding** em vez de alegar cobertura total. (b) **denylist ampla demais quebra endpoint LLM interno legítimo** — muitos self-hosts rodam o model server em `10.x`/`192.168.x` por design, exatamente o operador que queremos servir; mitigação: denylist como default + **GUC de allowlist só-operador** (também `Suset`) para re-permitir hosts internos específicos — a escotilha é do operador, **nunca** do chamador.
+
+**Boundary honesto:** é **hardening de segurança** de superfície pré-existente (M110 ampliou, não introduziu). Não adiciona capacidade; remove uma classe de abuso.
+
+**Prior art:** issue #117 (repro com `169.254.169.254`; ponteiros `chat.rs:258-268`, `pg.rs:50`, `http.rs:124`), `theodb_rs/src/am/guc.rs` (registrações `define_custom_*_guc` existentes), a postura NL→SQL (denylist + fail-closed + REVOKE) em `theodb_rs/src/nl.rs` como modelo.
+
+---
+
 ## Sequência e paralelismo
 
 ```
