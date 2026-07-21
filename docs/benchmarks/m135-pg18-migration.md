@@ -155,6 +155,60 @@ bitmap colunar: planner não emite Bitmap Heap Scan
 lossy         : resultado idêntico sob 64 kB e 64 MB, e idêntico ao PG17
 ```
 
+
+## 7. Suítes de comportamento contra o binário 18 (T5.1 — medido)
+
+O que separa "compila no 18" de "suporta o 18". Rodadas como usuário não-privilegiado contra
+`PGINST=/root/.pgrx/18.4/pgrx-install`, com instância temporária por suíte.
+
+| Suíte | Resultado no PG18.4 |
+|---|---|
+| Isolamento MVCC (`run.sh`) | **3/3 ok** — `columnar_write_concurrency` 450 ms, `columnar_reader_vs_writer` 143 ms, `columnar_abort_vs_reader` 142 ms |
+| `crash.sh` (stripe colunar + WAL replay) | `CRASH_REPLAY_OK` — PRE/POST 10000 linhas, soma 50005000 idêntica, scan-identical |
+| `crash_fold.sh` (#47, pivot do VACUUM) | `CRASH_FOLD_OK` — **3 SIGABRT reais**, um por fase: antes do pivot ⇒ resposta correta; pós-pivot ⇒ REINDEX fail-loud; mid-reclaim ⇒ correto. Nunca silenciosamente errado |
+| `crash_unlogged.sh` (#46, promoção de standby) | `CRASH_UNLOGGED_OK` — índice UNLOGGED sobreviveu à promoção |
+
+Nenhum dos três peers do campo (pgvector, pgvectorscale, citus) roda suíte de crash por major — esta cobertura é
+nossa, e é justamente a que prova que o rework de varredura do PG18 não quebrou durabilidade.
+
+## 8. Benchmark de sanidade 18 vs 17 (T5.2 — medido, com leitura honesta)
+
+Mesmo script nas duas versões (50 000 vetores de 64d com índice HNSW; 500 000 linhas colunares), n=2 por versão.
+
+| Benchmark | PG17 (média) | PG18 (média) | Δ |
+|---|---|---|---|
+| vetor: 200 buscas top-10 (HNSW) | 2075 ms | 2096 ms | +1,0% |
+| colunar: GROUP BY + count/sum | 1730 ms | 1725 ms | −0,3% |
+| colunar: agregado filtrado (zone-map) | 1840 ms | 1589 ms | **−13,7%** |
+| colunar: min/max (fast-path do diretório) | 1694 ms | 1578 ms | −6,9% |
+
+**O DoD exige explicar todo |Δ| > 10%. A explicação honesta é que a medição não tem resolução para essa
+afirmação.** O spread DENTRO de cada versão é maior que a diferença ENTRE versões:
+
+```
+             spread intra-versão
+   B3        PG17 14,4%   PG18 14,8%     (delta entre versões: 13,7%)
+   B4        PG17  0,3%   PG18 19,5%     (delta entre versões:  6,9%)
+```
+
+Com n=2 e ruído dessa ordem, **nenhum destes deltas é distinguível de zero**. A leitura correta é "sem regressão
+detectável", **não** "o PG18 é 13,7% mais rápido no agregado filtrado" — essa segunda frase seria exatamente o tipo
+de alegação que a regra de performance deste projeto barra.
+
+Dois confundidores que reforçam a cautela e que registro em vez de omitir:
+
+1. **As instâncias não são pares.** A do PG17 é a instância de trabalho acumulada (base `m134`, com o worker do
+   vectorizer ativo e dados de milestones anteriores); a do PG18 é um `initdb` limpo. Isso sozinho pode explicar a
+   diferença inteira.
+2. **n=2 é abaixo do piso do próprio projeto** (`rules/analysis-golden-rule.md` exige ≥ 3 iterações com média ±
+   desvio). Este artefato é **sanity check de não-regressão**, não uma medição publicável — e não deve ser citado
+   como baseline de performance.
+
+**Consequência prática:** os 119 artefatos anteriores continuam sendo medições de PG17. Restabelecer uma linha de
+base publicável no PG18 (instâncias pares, n ≥ 3, hardware quieto) é trabalho de um milestone próprio, não deste.
+Até lá, **nenhuma alegação de performance nossa está apoiada na versão que distribuímos** — dito em voz alta
+porque é desconfortável e verdadeiro.
+
 ## Limites honestos
 
 1. **O A/B do bitmap não conseguiu forçar o sub-plano visível no `EXPLAIN`.** O `theodb_vecfilter` guarda o
@@ -182,8 +236,11 @@ lossy         : resultado idêntico sob 64 kB e 64 MB, e idêntico ao PG17
 | Planner não emite bitmap sobre colunar | ✅ medido |
 | Features `pg13`–`pg17` removidas | ✅ `default = ["pg18"]` |
 | #143 fechado | ✅ verificado no `.so` publicado |
-| Suítes de crash + isolamento no 18 | ❌ **pendente** |
-| Benchmark de sanidade 18 vs 17 | ❌ **pendente** |
-| Packaging publicando o 18 | ❌ **pendente** |
+| Suítes de crash + isolamento no 18 | ✅ isolamento 3/3; três provas de crash ok (§7) |
+| Benchmark de sanidade 18 vs 17 | ✅ sem regressão detectável — com o caveat de resolução (§8) |
+| Packaging repinado para o 18 | ✅ Dockerfile, run-regress, scripts de e2e |
 
-**Três itens do DoD estão abertos.** O milestone não está completo, e este artefato não afirma que está.
+**Um item continua aberto e não deve ser lido como fechado:** o `cargo pgrx test` não linka nesta droplet, então
+`m92_v1b_materialize_bitmap_exact` — o oráculo unitário direto do porte do bitmap — existe no código e **nunca
+executou**. A cobertura do bitmap vem do A/B in-PG (§3), que é consistente com a execução correta mas não prova
+por instrumentação que o caminho foi tomado. É a lacuna mais relevante deste milestone.
