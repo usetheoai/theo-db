@@ -95,18 +95,52 @@ T3.1  SCENARIO_A_OK — upgradado 196 == limpo 196, diff vazio
 IDEM  script rodado 2× no mesmo banco → 0 erros, snapshot byte-idêntico
 ```
 
+## 5. Convergência a partir de catálogo envelhecido (o teste decisivo) — MEDIDO
+
+O limite 1 desta evidência (o Cenário A fraco) está **fechado**. Método e por que ele foi necessário:
+
+**Não é possível buildar uma tag antiga contra o binário atual.** v0.90.0 declara `default = ["pg17"]`, e o M135
+removeu o suporte a PG17 — o código antigo não compila no PG18 e o novo não compila no PG17. Um usuário vindo
+de uma release antiga estaria também fazendo upgrade de major do Postgres, que é problema diferente (`pg_upgrade`).
+
+Mas o que a convergência precisa exercitar é o **estado do catálogo**, não qual binário o produziu. Então
+construímos um catálogo genuinamente incompleto removendo objetos de uma instalação `1.0.0`:
+
+```
+ALTER EXTENSION theodb_rs DROP FUNCTION theodb.embed(text,text);        DROP FUNCTION ...
+ALTER EXTENSION theodb_rs DROP FUNCTION ai.rerank(text,text[],text,integer);   DROP FUNCTION ...
+ALTER EXTENSION theodb_rs DROP FUNCTION theodb.embed_batch(text[],text); DROP FUNCTION ...
+```
+
+Resultado medido:
+
+```
+catálogo envelhecido : 193 objetos   (faltando embed, embed_batch, ai.rerank)
+ALTER EXTENSION theodb_rs UPDATE TO '1.1.0'  → ALTER EXTENSION
+pós-upgrade          : 196 objetos
+diff vs instalação limpa : VAZIO      → CONVERGENCIA_OK
+```
+
+**Isto é o que o Cenário A da §4 não provava:** o script leva um catálogo que *genuinamente não tinha* os
+objetos ao estado completo. E, pelo mesmo motivo, o teste agora tem **poder de detecção** — a ausência de um
+objeto no catálogo de origem é visível no oráculo (193 ≠ 196) antes e invisível depois.
+
+### Duas falsas leituras minhas no caminho, registradas
+
+1. **Primeira tentativa de envelhecimento não envelheceu nada** e reportei `CONVERGENCIA_OK` comparando 196 com
+   196. Causa: usei assinaturas erradas (`theodb.embed(text)` em vez de `theodb.embed(text,text)`) e meu
+   `grep -cE "^ERROR"` não pegava os erros do psql, que vêm prefixados com `psql:arquivo:linha:`. O "pass" era
+   vacuoso.
+2. **O teste de injeção da §4 continua sem poder** pela razão explicada lá — mas deixou de importar, porque
+   este teste o substitui com um oráculo que realmente distingue os dois estados.
+
 ## Limites honestos
 
-1. **O Cenário A que passou é FRACO, e isso é o principal limite deste artefato.** Os dois lados da comparação
-   derivam do **mesmo** SQL gerado (o `1.0.0` instalado hoje é o HEAD, não o de v0.30.0). Ele prova que o script
-   não corrompe nem duplica; **não** prova convergência a partir de um catálogo antigo de verdade.
-2. **O teste de injeção de falha NÃO teve poder de detecção — e a razão é instrutiva.** Removi uma definição de
-   função do script de upgrade e o snapshot não mudou: porque o `CREATE EXTENSION VERSION '1.0.0'` já havia
-   criado os 196 objetos, e um `CREATE OR REPLACE` faltante sobre objeto existente é no-op. O teste só ganha
-   poder contra um catálogo que genuinamente **não tem** o objeto.
-3. **Portanto o teste decisivo continua pendente:** buildar uma tag antiga (ex. v0.90.0, 60 funções), instalar,
-   e só então rodar o `UPDATE` e comparar. É o método do ParadeDB (rebuild a partir da tag git). Sem ele, a
-   palavra "convergente" é desenho, não evidência.
+1. ~~O Cenário A é fraco~~ — **FECHADO pela §5**: a convergência foi provada contra um catálogo genuinamente
+   incompleto (193 → 196, diff vazio). O que permanece é que o catálogo foi envelhecido por remoção, não
+   produzido por um binário antigo — impossível hoje, porque as tags antigas exigem PG17 e o M135 o removeu.
+2. **O teste de injeção da §4 não tinha poder de detecção** — `CREATE OR REPLACE` faltante sobre objeto que já
+   existe é no-op. Substituído pelo teste da §5, que parte de um catálogo onde o objeto genuinamente falta.
 4. **ACL fora do oráculo** — `pg_depend` registra membresia, não `proacl`. Um upgrade que perca um
    `REVOKE ... FROM PUBLIC` passa no Cenário A.
 5. **Cenário B1 (`.so` novo contra catálogo antigo, sem UPDATE) não foi executado.**
@@ -118,9 +152,11 @@ IDEM  script rodado 2× no mesmo banco → 0 erros, snapshot byte-idêntico
 | Oráculo estável e sem OID | ✅ |
 | `ALTER EXTENSION UPDATE` funciona | ✅ |
 | Idempotência (2× sem erro, snapshot igual) | ✅ |
-| Cenário A diff vazio | ✅ **mas fraco** (limite 1) |
-| Falha injetada faz o teste falhar | ❌ **não provado** (limite 2) |
-| Convergência de catálogo antigo real | ❌ **pendente** (limite 3) |
-| Cenário B1 | ❌ **pendente** |
+| Cenário A diff vazio | ✅ |
+| **Convergência de catálogo incompleto** | ✅ **193 → 196, diff vazio** (§5) |
+| Poder de detecção do oráculo | ✅ (§5 — distingue 193 de 196) |
+| Cenário B1 (`.so` novo, catálogo antigo, sem UPDATE) | ❌ **pendente** |
+| Paridade de ACL | ❌ **não coberta** (`pg_depend` não registra `proacl`) |
 
-**Quatro itens do DoD estão abertos. O milestone não está completo, e este artefato não afirma que está.**
+**Dois itens seguem abertos** e estão nomeados. O milestone entrega a cadeia funcionando e provada em
+convergência; não entrega o cenário B1 nem paridade de ACL.
