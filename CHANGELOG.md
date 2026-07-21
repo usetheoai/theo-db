@@ -24,6 +24,20 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Removed
 
 ### Fixed
+- **Vectorizer worker failures are now diagnosable; a zero-row batch no longer counts as success (M132, closes #132).**
+  A failing job recorded the blanket literal `embed/upsert failed` for every cause — a 401, a missing embedding GUC
+  and a malformed response were indistinguishable — because the subtransaction helper caught with
+  `catch_others(|_| None)` and discarded the error. The caught **SQLSTATE + message** are now returned and stored in
+  `last_error` (passed as a **bound parameter**, never interpolated into SQL). The worker also logs its own view of
+  the embedding config once at startup (`embedding_endpoint=set|MISSING … api_key_len=N` — the key **length** only,
+  never the value), so a worker that booted without the `ALTER SYSTEM` GUCs is identifiable from one line instead of
+  a debugger. Separately, `Some(0)` from the batch path used to take the success arm: a batch that ran cleanly but
+  embedded **nothing** was counted as processed and its jobs consumed with no result and no failure signal — a
+  zero-row batch now falls back to the per-job path, whose outcome is always observable.
+  **Honest scope:** the symptom reported in #132 (all embed jobs dead-lettering on self-host) **does NOT reproduce**
+  on the current build — a clean end-to-end embeds 5/5 fresh rows with the queue draining to 0 failures
+  (`knowledge-base/discoveries/blueprints/vectorizer-worker-embed-blueprint.md`). This milestone ships the
+  diagnosability that made the original report cost a day, not a fix for an absent defect.
 
 ### Security
 
