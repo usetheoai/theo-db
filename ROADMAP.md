@@ -2167,7 +2167,7 @@ Recomendação #3 / Risco de manutenção: com 19 arquivos >500 LoC e este a 3.4
 
 ---
 
-## M135 — [ ] Suporte a PostgreSQL 18 (migração 17 → 18)
+## M135 — [x] Suporte a PostgreSQL 18 (migração 17 → 18)
 
 > Added 2026-07-21 (`/roadmap-feature pg18-support`). Grill: `knowledge-base/grills/pg18-support-feature-grill.md`. Custo **medido**, não estimado: sondagem de compilação contra PG18.4 na droplet.
 
@@ -2204,6 +2204,162 @@ Falsificação registrada: a hipótese de que a dor viria do WAL estava **errada
 
 ---
 
+## M136 — [ ] Gates mecânicos de qualidade + Postgres `cassert` no CI
+
+> Added 2026-07-21 (`/roadmap-feature quality-gates-mecanicos`). Grill: `knowledge-base/grills/quality-gates-mecanicos-feature-grill.md`.
+
+**Objective:** equilibrar o portfólio de gates. Inventário medido em 2026-07-21: **28 regras, 40 skills, 8 hooks** (gates de PROCESSO, que dependem de alguém invocar) contra **zero** gates mecânicos de Rust — sem `clippy.toml`, `rustfmt.toml`, `deny.toml`, sem `-D warnings`, sem clippy/fmt no CI, e **840–967 warnings** no build. Pior: a regra **D1** (nenhuma AGPL na distribuição), a mais inegociável do projeto, é aplicada por **vigilância humana** — uma dependência AGPL transitiva passa reto até alguém notar, e descobri-la na v1.0 é rearquitetura, não patch.
+
+**Definition of done:**
+
+- [ ] `deny.toml` com `[licenses] allow = [...]` (Apache-2.0/MIT/BSD-*/ISC/PostgreSQL) + `cargo deny check` no CI — **D1 vira gate de máquina**. Um PR que puxe crate AGPL falha.
+- [ ] `clippy.toml` + args de lint num **arquivo único** consumido por CI e script local (padrão `.neon_clippy_args`, que impede drift CI↔local), com `-D warnings`. Decisão explícita e registrada sobre os 840–967 warnings atuais: baseline-allow com sunset **ou** mutirão de limpeza — não ficar no meio.
+- [ ] `rustfmt.toml` + `cargo fmt --check` no CI.
+- [ ] **Entrada de matriz com Postgres compilado `--enable-cassert`.** Em build de release `Assert()` é no-op; esta é a única forma de ter cobertura de asserção do engine — e é a classe exata do crash #143 e dos segfaults de `rd_tableam`. É o gate de maior valor/custo desta lista (lição #1 do paradedb).
+- [ ] `pgspot` sobre o SQL de instalação gerado pelo pgrx (957 LoC de superfície em `api.rs`, 94 `pg_extern`) — pega `SECURITY DEFINER`/`search_path` inseguros no DDL.
+- [ ] `cargo metadata --locked` (drift de lockfile) + `cargo doc -Dwarnings` (rot de doc) + `cargo machete` (deps não usadas).
+
+**Dependencies:** M133 `[ ]` — **sem CI vivo, todo gate aqui é documentação que ninguém executa.** Os arquivos de config podem aterrissar antes; o milestone só fecha quando eles efetivamente barram um PR ruim.
+
+**Risks:** (a) ligar `-D warnings` com 840–967 warnings trava o build no dia 1 — mitigação: a decisão baseline-vs-mutirão é item de DoD, não improviso. (b) o `deny.toml` pode barrar uma dependência transitiva **já embarcada**, revelando um problema D1 latente — é o objetivo, mas vira trabalho não previsto; mitigação: rodar `cargo deny check` em modo report ANTES de torná-lo bloqueante.
+
+**Boundary honesto:** não adiciona capacidade de produto. Compra a propriedade de que erros de classe conhecida param de chegar em `develop` sem intervenção humana.
+
+**Prior art:** neon `deny.toml` + `.neon_clippy_args` + `clippy.toml` (disallowed-methods como política-em-lint); paradedb `lint-rust.yml` (`-D warnings --no-deps`, `cargo machete`, `taplo`) e a entrada cassert de `test-pg_search.yml`; pg_durable `pgspot-gate.sh`.
+
+---
+## M137 — [ ] Cadeia de upgrade do `theodb_rs` (`ALTER EXTENSION UPDATE`)
+
+> Added 2026-07-21 (`/roadmap-feature theodb-rs-upgrade-chain`). Grill: `knowledge-base/grills/theodb-rs-upgrade-chain-feature-grill.md`.
+
+**Objective:** tornar o TheoDB atualizável. Medido em 2026-07-21: `theodb_rs` expõe **94 funções `pg_extern`** e tem **zero** scripts de upgrade, travado em `default_version = '1.0.0'` através de **120 releases** (v0.120.0). Quem instalou **não consegue** `ALTER EXTENSION theodb_rs UPDATE` — teria de dropar e recriar, perdendo todo objeto dependente. Esta é a classe de defeito **irrecuperável para quem já instalou**: não dá para consertar retroativamente, só para parar de piorar. (A extensão umbrella `theodb` tem cadeia 1.0→1.4 consistente — o buraco é só na extensão Rust.)
+
+**Definition of done:**
+
+- [ ] Baseline de versão declarado e **honesto** sobre o que ele cobre: instalações anteriores a este milestone não ganham caminho retroativo, e isso é dito em voz alta na doc de migração — não escondido.
+- [ ] `theodb_rs--<N>--<N+1>.sql` gerado e versionado a cada mudança de superfície SQL, com `default_version` acompanhando.
+- [ ] **Teste de upgrade em CI:** instala v(N-1), roda `ALTER EXTENSION theodb_rs UPDATE`, e assere que a superfície pós-upgrade é idêntica à de uma instalação limpa de vN.
+- [ ] **Gate de migração já lançada:** um PR que edite um script de upgrade cujo alvo já tem tag falha o CI (o script do paradedb tem ~12 linhas de bash). Editar migração lançada nunca chega a quem já atualizou.
+- [ ] Gate de drift install↔upgrade: o SQL que o pgrx regenera a cada build não pode divergir do que a cadeia de upgrade produz.
+- [ ] Regra de ordenação documentada: bumpar a versão de desenvolvimento **antes** de mesclar novo trabalho de schema (senão o script corrente aponta para a versão recém-lançada e congela).
+
+**Dependencies:** M135 `[x]`.
+
+**Risks:** (a) não há registro de qual era a superfície SQL em cada release passado — o baseline parte do estado atual, e instalações antigas ficam sem caminho; registrado como limite, não como resolvido. (b) o pgrx regenera o SQL inteiro a cada build, então é fácil o upgrade divergir do install — por isso o gate de drift é DoD, não opcional.
+
+**Boundary honesto:** não adiciona feature. Remove uma condição que impede qualquer uso sério em produção.
+
+**Prior art:** paradedb `check-released-migrations.yml` + `test-pg_search-upgrade.yml` + SchemaBot (`check_migration_diff.py`); pg_durable `sql/` com cadeia explícita + `scripts/test-upgrade.sh` em CI.
+
+---
+## M138 — [ ] BM25 como perna lexical default (executa o gate de adoção do ADR-0013)
+
+> Added 2026-07-21 (`/roadmap-feature bm25-perna-lexical-default`). Grill: `knowledge-base/grills/bm25-perna-lexical-default-feature-grill.md`.
+
+**Objective:** corrigir um defeito de produto que temos **evidência decision-grade** desde 2026-07-07 e nunca aplicamos. M53 (BEIR scifact, 5.183 docs, 300 queries, 3 runs byte-idênticos):
+
+| perna lexical | nDCG@10 | Recall@100 |
+|---|---|---|
+| `ts_rank_cd` — **o que shipamos** | **0,0703** | 0,0694 |
+| `pg_textsearch` BM25 — opt-in, não embarcado | **0,6881** | 0,9182 |
+| vetor (referência) | 0,7296 | 0,9733 |
+
+O próprio artefato declara *"o gate de medição está executado"*. **Caveat honesto herdado do M53:** o gap de ~9,8× conflaciona qualidade de ranker com tamanho do candidate-set (o `@@` do `ts_rank_cd` derruba ~93% dos relevantes); o sinal limpo é BM25 **0,688 ombro-a-ombro com o vetor 0,730** sobre o próprio top-k. Além de corrigir o produto, este milestone estabelece **a linha de base que a engine própria (M140) terá de bater** — sem ela, "nossa BM25 é boa" não tem contra o quê.
+
+**Definition of done:**
+
+- [ ] `pg_textsearch` embarcado na distribuição (due-diligence D1 re-executada: PostgreSQL License, permissiva).
+- [ ] `lexical_engine='bm25'` vira **default** de `ai.hybrid_search_rrf`, com `ts_rank_cd` selecionável para compatibilidade.
+- [ ] **Medição que faltava do M53 §4:** híbrida-com-BM25 vs híbrida-com-`ts_rank_cd`, com teste de significância pareado sobre as queries — o M53 nunca mediu a fusão com BM25, só o leg isolado.
+- [ ] Nota de migração: trocar o default **muda resultados de queries existentes**; documentado, não silencioso.
+- [ ] Artefato em `docs/benchmarks/` com metodologia e comando de reprodução.
+
+**Dependencies:** M137 `[ ]` — mudar o default da superfície SQL sem cadeia de upgrade entrega a melhoria só para instalações novas.
+
+**Risks:** (a) `pg_textsearch` passa de exceção *gated* a **dependência embarcada** — o roadmap § "Fora de escopo" a mantinha explicitamente "não embarcada ainda"; embarcar agora e substituir pelo motor próprio (M140) é churn real de packaging/docs, **aceito conscientemente** para não deixar o usuário com 0,07 por mais um trimestre. (b) mudança de default altera resultado de query — mitigação: os dois engines selecionáveis + nota de migração.
+
+**Boundary honesto:** é **adoção de peça de terceiro**, não código próprio. Fecha um gap medido de ~10× hoje e serve de baseline para o M140. Não nos torna donos da busca.
+
+**Prior art:** `docs/benchmarks/m53-hybrid-beir.md` (a medição), ADR-0013 (a exceção permissiva gated), ADR-0003 (identificação do `pg_textsearch`).
+
+---
+## M139 — [ ] SPIKE (o GATE): `Directory` do Tantivy sobre block storage do Postgres
+
+> Added 2026-07-21 (`/roadmap-feature tantivy-directory-spike`). Grill: `knowledge-base/grills/tantivy-directory-spike-feature-grill.md`.
+
+**Objective:** responder, com medição, a **única pergunta que decide** se o TheoDB pode ter engine lexical própria: conseguimos implementar o trait `Directory` do Tantivy sobre páginas do Postgres, com MVCC e WAL, sobrevivendo a crash real?
+
+O risco **não está no BM25** — está em fazer o Tantivy viver dentro do banco. A pesquisa no ParadeDB (2026-07-21, clone local, AGPL **study-only**) mostrou que `pg_search` tem **105.286 LoC** — 3,2× o TheoDB inteiro — e que a parte cara é: `MVCCDirectory` (trait `Directory` sobre block storage, importando `pg_sys`), `MvccSatisfies` de 5 modos com `xmin`/`xmax` por segmento, **WAL resource manager próprio** registrado em `_PG_init` sob `shared_preload_libraries`, `LayeredMergePolicy` com merges em background worker sob `MergeLock`+advisory lock, e `ambulkdelete` com barreira de cleanup-lock para uma corrida específica. Tantivy upstream é **MIT** (`quickwit-oss/tantivy` v0.26.0 — D1 verificado).
+
+**Definition of done:**
+
+- [ ] Protótipo mínimo: implementação do `Directory` sobre páginas PG que **indexa N documentos e responde uma busca** — sem tocar o filesystem.
+- [ ] **MVCC:** um segundo backend com snapshot anterior **não** enxerga documentos de uma transação não-commitada; após commit, enxerga.
+- [ ] **Crash real:** `SIGABRT` no meio da indexação, replay do WAL, e o índice responde consistente (o mesmo método das nossas suítes `crash*.sh`).
+- [ ] Medição do custo: tamanho do índice e latência de busca vs o `pg_textsearch` do M138 no **mesmo corpus** — o spike também mede se vale.
+- [ ] **ADR com veredito GO/NO-GO** e, se GO, o escopo real derivado do que o protótipo doeu (VACUUM, merge e paralelismo ficam declaradamente FORA do spike e entram no escopo do M140).
+- [ ] Verificar se o upstream basta ou se precisamos forkar (o ParadeDB forka o Tantivy com feature própria) — se precisar, o veredito aciona a **política D3** de fork.
+
+**Dependencies:** M136 `[ ]` — o Postgres `--enable-cassert` no CI é o que pega violação de invariante nesta classe de código; é a lição #1 do paradedb e a classe exata do #143.
+
+**Risks:** (a) o ParadeDB **forka** o Tantivy, o que sugere que o upstream não basta dentro de um banco — se confirmarmos, herdamos custo de manutenção de fork (D3: upstream-first, diff mínimo, CI de rebase, saída quando o upstream alcançar). (b) um spike pode passar no caminho feliz e esconder o custo real, que mora em VACUUM/merge/paralelismo — por isso o DoD exige **crash real com replay**, não "indexar e buscar".
+
+**Boundary honesto:** é **spike**, não entrega. Pode terminar em NO-GO, e nesse caso o valor entregue é ter descoberto em semanas em vez de trimestres — o mesmo método que poupou o M73 (gap do ScaNN não-alcançável) e o M74 (RaBitQ dá memória, não QPS).
+
+**Prior art:** ParadeDB `pg_search/src/index/directory/mvcc.rs`, `postgres/storage/{custom_rmgr,xlog}.rs`, `index/merge_policy.rs` (**AGPL — estudar, nunca copiar**, mesmo posicionamento do VectorChord); nossas próprias suítes `theodb_rs/isolation/crash*.sh` como molde do teste de crash; M83/M98/M107 como precedente de spike-como-gate.
+
+---
+## M140 — [ ] Engine lexical própria sobre Tantivy + crate núcleo sem pgrx *(gated M139)*
+
+> Added 2026-07-21 (`/roadmap-feature engine-lexical-propria`). Grill: `knowledge-base/grills/engine-lexical-propria-feature-grill.md`.
+
+**Objective:** assumir a perna lexical em vez de alugá-la. O North Star foi reposicionado (ADR-0033/0035) porque superioridade de QPS vetorial sobre o ScaNN foi **medida como não-alcançável** por extensão permissiva; o lugar onde podemos ser genuinamente superiores é a **superfície AI-native híbrida** — e isso exige as duas pernas nossas, não uma alugada.
+
+Inclui a extração do **crate núcleo sem pgrx** — e aqui a justificativa não é estética: hoje **98%** do código (30.892 de 31.516 LoC) está atrás do pgrx, e **54 testes** não rodam porque `cargo pgrx test` não linka na droplet. Uma integração Tantivy tem superfície pura grande (parser de query, scoring, tokenizers) que precisa ser testável sem banco. O ParadeDB provou o padrão: o único crate deles sem pgrx é `tokenizers` — e **81%** do `pg_search` toca pgrx, ou seja, extrair "a engine inteira" seria copiar uma forma que eles próprios não têm.
+
+**Definition of done:**
+
+- [ ] Índice BM25 próprio exposto como **index AM** (`CREATE INDEX ... USING <am>`), com `ambuild`/`aminsert`/`amgettuple`/`ambulkdelete`/`amvacuumcleanup`/`amcostestimate`.
+- [ ] **MVCC, VACUUM e crash-safety provados** pelas nossas suítes de isolamento e crash contra o binário shipado — o mesmo padrão do M99/M135, não uma versão mais fraca.
+- [ ] **Bate a linha de base do M138** (`pg_textsearch`) em nDCG@10 no mesmo corpus, ou o milestone reporta honestamente que não bateu.
+- [ ] Crate núcleo **sem dependência de pgrx** no `Cargo.toml` (esse é o teste), com os testes puros rodando em `cargo test` — incluindo os 54 hoje presos.
+- [ ] **ADR-1:** reconcilia com o **ADR-0009** (`theodb-rs-api-surface-single-module`), que escolheu módulo único deliberadamente. Sem isso, o split lê como reversão não registrada.
+- [ ] **ADR-2:** supersede a exceção permissiva do ADR-0013 para BM25 — a premissa *"não há peça own-code permissiva que resolva"* deixou de valer quando o Tantivy (MIT) entrou em cena. Inclui o plano de saída do `pg_textsearch` para quem adotou no M138.
+
+**Dependencies:** M139 `[ ]` (o gate — NO-GO fecha este milestone antes de abrir) e M138 `[ ]` (a baseline a bater).
+
+**Risks:** (a) **supersede decisão registrada** — a exceção do ADR-0013 e a escolha do ADR-0009; ambas exigem ADR explícito, nunca reversão silenciosa. (b) escopo: o `pg_search` tem 105k LoC; mesmo um subconjunto honesto (sem faceting/highlight/proximity) é o maior milestone já tentado aqui — mitigação: o escopo real é **derivado do M139**, não estimado agora.
+
+**Boundary honesto:** é a aposta estratégica desta rodada, e a mais cara. Só abre se o M139 disser GO.
+
+**Prior art:** M139 (o gate); ParadeDB como referência estrutural **AGPL study-only**; Tantivy MIT (`quickwit-oss/tantivy`); ADR-0009 e ADR-0013 (as decisões a reconciliar); M99/M100/M115 como precedente nosso de AM+CustomScan próprios.
+
+---
+## M141 — [ ] Dogfood `running`: theo-data em produção sobre TheoDB self-hosted *(continuação do M124)*
+
+> Added 2026-07-21 (`/roadmap-feature dogfood-running`). Grill: `knowledge-base/grills/dogfood-running-feature-grill.md`.
+
+**Objective:** mover o anchor de dogfood de **`wired`** para **`running`**. Pela nossa própria `dogfood-golden-rule.md`, `running` é o **único** valor que satisfaz o hard cap #2 — ou seja, **hoje não podemos reivindicar production-ready**, por mais benchmark que acumulemos (120 artefatos). Um banco de dados de verdade é aquele que seus criadores usam em produção, com dados que importam.
+
+Isto não é esforço de engenharia; é a decisão de colocar o `theo-rag` ou o `theo-memory` rodando em cima do TheoDB e sentir o que quebra.
+
+**Definition of done:**
+
+- [ ] Uma capability theo-data serve **tráfego real de produto** (não carga sintética) a partir de um TheoDB self-hosted, por **≥ 30 dias**.
+- [ ] O vectorizer declarativo mantém a coluna de embedding fresca sob mudança de conteúdo real.
+- [ ] As queries reais passam por `ai.hybrid_search_rrf`, e o time **depende** do resultado estar correto e fresco.
+- [ ] Evidência em `knowledge-base/dogfood/evidence/` com o frontmatter do golden rule, **≥ 3 arquivos**, **≥ 1 história de falha** (dogfood sem falha é teatro) e **≥ 2 operadores** distintos.
+- [ ] `Status: running` no manifesto, e `/dogfood` retornando `EVIDENCE_SUFFICIENT`.
+
+**Dependencies:** M124 `[x]` (entregou o `wired`; milestone concluído é imutável, então a extensão vem por novo milestone) e M138 `[ ]` — não faz sentido depender em produção de uma busca que mede 0,0703.
+
+**Risks:** (a) dogfood real expõe classes de bug que benchmark não pega — operação, upgrade, backup, observabilidade; é o ponto, mas gera trabalho não planejado (e é por isso que M136/M137 vêm antes). (b) o hard cap exige evidência **fresca** (≤ 30 dias) e ≥ 2 operadores: um dogfood de uma pessoa só reproduz a síndrome do "único que sabe rodar", que o próprio golden rule lista como falha a evitar.
+
+**Boundary honesto:** não adiciona capacidade. É o que **autoriza** dizer "banco de dados de verdade" — e sem ele, a frase é marketing.
+
+**Prior art:** `.claude/rules/dogfood-golden-rule.md` (anchor `theo-data-capability-on-theodb`), M124 (o `wired`), M132 (destravou o worker do vectorizer no self-host).
+
+---
 ## Sequência e paralelismo
 
 ```
