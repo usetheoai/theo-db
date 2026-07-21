@@ -1,0 +1,71 @@
+<?xml version="1.0"?>
+<!-- M130 — OUR BenchBase CH-benCHmark config for TheoDB (PostgreSQL-wire-compatible). Structure mirrors BenchBase's
+     own config/postgres/sample_chbenchmark_config.xml (per-benchmark weights + transactiontypes) at the pinned SHA;
+     placeholders (@PG_HOST@ etc.) are substituted by benchbase_chbenchmark.sh at run time from env. CH-benCHmark =
+     TPC-C transactional mix + 22 TPC-H-style analytical queries (Q1–Q22) on ONE schema, in a single mixed
+     work-phase. No BenchBase source is vendored — this is only our configuration for the external Apache-2.0 tool
+     (ADR M130-1). -->
+<parameters>
+    <type>POSTGRES</type>
+    <driver>org.postgresql.Driver</driver>
+    <url>jdbc:postgresql://@PG_HOST@:@PG_PORT@/@PG_DB@?sslmode=disable&amp;ApplicationName=chbenchmark&amp;reWriteBatchedInserts=true</url>
+    <username>@PG_USER@</username>
+    <password>@PG_PASSWORD@</password>
+    <reconnectOnConnectionFailure>true</reconnectOnConnectionFailure>
+    <!-- READ COMMITTED is PostgreSQL's default and the realistic HTAP isolation. SERIALIZABLE (the BenchBase sample
+         default) makes SSI predicate-locks (SIReadLocks) from the 22 concurrent analytical full-scans exhaust
+         shared memory ("out of shared memory") — a documented PostgreSQL SSI limitation, not a TheoDB defect. -->
+    <isolation>TRANSACTION_READ_COMMITTED</isolation>
+    <batchsize>128</batchsize>
+
+    <!-- TPC-C scale: number of warehouses -->
+    <scalefactor>@SCALE@</scalefactor>
+    <terminals>@TERMINALS@</terminals>
+
+    <!-- One mixed work-phase: TPC-C transactions AND the 22 analytical CH queries run concurrently. Per-benchmark
+         weights are REQUIRED so the field counts match each benchmark's transactiontypes (a single unscoped
+         <weights> makes the second benchmark's config null → NPE in DBWorkload). -->
+    <works>
+        <work>
+            <time>@DURATION@</time>
+            <rate>unlimited</rate>
+            <weights bench="tpcc">45,43,4,4,4</weights>
+            <weights bench="chbenchmark">3,2,3,2,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5</weights>
+        </work>
+    </works>
+
+    <!-- The 22 CH-benCHmark analytical queries (the OLAP half). -->
+    <transactiontypes bench="chbenchmark">
+        <transactiontype><name>Q1</name></transactiontype>
+        <transactiontype><name>Q2</name></transactiontype>
+        <transactiontype><name>Q3</name></transactiontype>
+        <transactiontype><name>Q4</name></transactiontype>
+        <transactiontype><name>Q5</name></transactiontype>
+        <transactiontype><name>Q6</name></transactiontype>
+        <transactiontype><name>Q7</name></transactiontype>
+        <transactiontype><name>Q8</name></transactiontype>
+        <transactiontype><name>Q9</name></transactiontype>
+        <transactiontype><name>Q10</name></transactiontype>
+        <transactiontype><name>Q11</name></transactiontype>
+        <transactiontype><name>Q12</name></transactiontype>
+        <transactiontype><name>Q13</name></transactiontype>
+        <transactiontype><name>Q14</name></transactiontype>
+        <transactiontype><name>Q15</name></transactiontype>
+        <transactiontype><name>Q16</name></transactiontype>
+        <transactiontype><name>Q17</name></transactiontype>
+        <transactiontype><name>Q18</name></transactiontype>
+        <transactiontype><name>Q19</name></transactiontype>
+        <transactiontype><name>Q20</name></transactiontype>
+        <transactiontype><name>Q21</name></transactiontype>
+        <transactiontype><name>Q22</name></transactiontype>
+    </transactiontypes>
+
+    <!-- The TPC-C transaction types (the transactional half of CH-benCHmark). -->
+    <transactiontypes bench="tpcc">
+        <transactiontype><name>NewOrder</name></transactiontype>
+        <transactiontype><name>Payment</name></transactiontype>
+        <transactiontype><name>OrderStatus</name></transactiontype>
+        <transactiontype><name>Delivery</name></transactiontype>
+        <transactiontype><name>StockLevel</name></transactiontype>
+    </transactiontypes>
+</parameters>

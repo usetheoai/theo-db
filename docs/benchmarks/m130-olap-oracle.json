@@ -1,0 +1,30 @@
+{
+ "status": "RAN",
+ "query_count": 22,
+ "all_consistent": true,
+ "inconsistent": [],
+ "per_query": {
+  "Q1": "PASS",
+  "Q2": "PASS",
+  "Q3": "PASS",
+  "Q4": "PASS",
+  "Q5": "PASS",
+  "Q6": "PASS",
+  "Q7": "PASS",
+  "Q8": "PASS",
+  "Q9": "PASS",
+  "Q10": "PASS",
+  "Q11": "PASS",
+  "Q12": "PASS",
+  "Q13": "PASS",
+  "Q14": "PASS",
+  "Q15": "PASS",
+  "Q16": "PASS",
+  "Q17": "PASS",
+  "Q18": "PASS",
+  "Q19": "PASS",
+  "Q20": "PASS",
+  "Q21": "PASS",
+  "Q22": "PASS"
+ }
+}

@@ -2044,7 +2044,7 @@ Recomendação #3 / Risco de manutenção: com 19 arquivos >500 LoC e este a 3.4
 
 ---
 
-## M129 — [ ] Benchmark oficial: pilar OLTP (HammerDB TPROC-C + pgbench)
+## M129 — [x] Benchmark oficial: pilar OLTP (HammerDB TPROC-C + pgbench)
 
 **Objective:** rodar **HammerDB TPROC-C** (NOPM, claim-grade) + **pgbench** (TPS, smoke) como drivers externos out-of-tree contra PG17, reusando a camada-wrap; manter o gate ACID/crash-safety (#46/#47) ao lado de todo número de throughput.
 
