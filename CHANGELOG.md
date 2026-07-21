@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Workflow `ci-failure-notify` (M133/#140): dispara em `workflow_run` e, quando um CI conclui `failure` em develop/main, abre ou atualiza um issue de rastreamento (dedup por título) com link do run + SHA — para um CI vermelho, ou um CI que volte a morrer pré-step, aparecer **na hora** em vez de ficar 30 runs invisível como no #140 (M133)
 
 ### Changed
 
