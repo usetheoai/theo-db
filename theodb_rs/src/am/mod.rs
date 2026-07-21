@@ -12,18 +12,17 @@
 //! functions needed, because `ambuild` uses `crate::ann::Metric` directly.
 use pgrx::*;
 
+mod arrow_cache; // M101 — heap-authoritative in-memory Arrow columnar cache (HTAP)
 pub(crate) mod autotune; // M67 — deterministic ef_search recommender + scan-stats collector
 mod build; // ambuild / ambuildempty (Phase 2) + shared datum/metric helpers
 mod build_stream; // M96 — tuplesort-streaming ambuild (bounded-memory build spool)
+pub(crate) mod columnar; // M99 — theodb_columnar append-only columnar Table Access Method (registration + column-major + MVCC)
+pub(crate) mod columnar_agg; // M100 Phase C — planner CustomScan integration for vectorized columnar aggregates
+mod columnar_codec; // M99 Phase C — pure column-major stripe codec (FFI-free, locally unit-tested)
+mod cost; // M48 T5.1 — honest amcostestimate visit-ratio (pgvector cost model)
+pub(crate) mod customscan; // M92 spike — arbitrary-WHERE Custom Scan Provider (pathlist hook + custom node)
 mod datafusion_probe; // M98 — DataFusion coexistence smoke (the pillar GATE)
 mod df_executor; // M100 — DataFusion vectorized executor over the theodb_columnar TAM
-pub(crate) mod columnar_agg; // M100 Phase C — planner CustomScan integration for vectorized columnar aggregates
-mod arrow_cache; // M101 — heap-authoritative in-memory Arrow columnar cache (HTAP)
-mod cost; // M48 T5.1 — honest amcostestimate visit-ratio (pgvector cost model)
-pub(crate) mod columnar; // M99 — theodb_columnar append-only columnar Table Access Method (registration + column-major + MVCC)
-mod columnar_codec; // M99 Phase C — pure column-major stripe codec (FFI-free, locally unit-tested)
-mod zonemap; // columnar zone-map skip-pruning: pure min/max exclusion test (predicate pushdown consumer)
-pub(crate) mod customscan; // M92 spike — arbitrary-WHERE Custom Scan Provider (pathlist hook + custom node)
 mod fold; // M48 — crash-safe VACUUM fold (meta-pivot, issue #47)
 pub(crate) mod guc; // M34 — theodb_ivfflat.probes scan GUC
 mod hnsw_page; // M35 — page-native structured persistence for theodb_hnsw
@@ -32,7 +31,8 @@ mod lock; // advisory index-fold lock (serialize VACUUM rewrite vs scan/insert)
 pub(crate) mod options; // M34 — theodb_ivfflat WITH (lists=N) reloption
 mod page; // page persistence (Phase 1)
 mod scan; // ambeginscan / amrescan / amgettuple / amendscan (Phase 3)
-mod tid; // heap TID ⇄ i64 codec
+mod tid;
+mod zonemap; // columnar zone-map skip-pruning: pure min/max exclusion test (predicate pushdown consumer) // heap TID ⇄ i64 codec
 
 /// Type of the two per-algorithm build callbacks (the only hooks that differ between the AMs).
 type AmBuildFn = unsafe extern "C-unwind" fn(
@@ -116,11 +116,16 @@ pub(crate) unsafe fn tupdesc_attr(
     let td = pgrx::PgTupleDesc::from_pg_unchecked(tupdesc);
     match td.get(i) {
         Some(attr) => attr as *const pg_sys::FormData_pg_attribute,
-        None => pg_sys::error!("theodb: attribute {} out of range (natts = {})", i, (*tupdesc).natts),
+        None => {
+            pg_sys::error!("theodb: attribute {} out of range (natts = {})", i, (*tupdesc).natts)
+        }
     }
 }
 
-fn make_amroutine(ambuild: AmBuildFn, ambuildempty: AmBuildEmptyFn) -> PgBox<pg_sys::IndexAmRoutine> {
+fn make_amroutine(
+    ambuild: AmBuildFn,
+    ambuildempty: AmBuildEmptyFn,
+) -> PgBox<pg_sys::IndexAmRoutine> {
     let mut amroutine =
         unsafe { PgBox::<pg_sys::IndexAmRoutine>::alloc_node(pg_sys::NodeTag::T_IndexAmRoutine) };
 
@@ -271,8 +276,10 @@ pub extern "C-unwind" fn amvacuumcleanup(
                 let out = PgBox::<pg_sys::IndexBulkDeleteResult>::alloc0().into_pg();
                 (*out).num_index_tuples = live as f64;
                 (*out).pages_deleted = pending; // the pending pages folded away
-                (*out).num_pages =
-                    pg_sys::RelationGetNumberOfBlocksInFork(indexrel, pg_sys::ForkNumber::MAIN_FORKNUM);
+                (*out).num_pages = pg_sys::RelationGetNumberOfBlocksInFork(
+                    indexrel,
+                    pg_sys::ForkNumber::MAIN_FORKNUM,
+                );
                 return out;
             }
             return stats; // NULL — below threshold, nothing to do
@@ -411,5 +418,6 @@ extension_sql!(
         OPERATOR 1 && (smallint[], smallint[]);
     "#,
     name = "theodb_ivfflat_label_opclass",
-    requires = [theodb_ivfflat_amhandler, theodb_smallint_array_overlap, "theodb_ivfflat_opclasses"],
+    requires =
+        [theodb_ivfflat_amhandler, theodb_smallint_array_overlap, "theodb_ivfflat_opclasses"],
 );

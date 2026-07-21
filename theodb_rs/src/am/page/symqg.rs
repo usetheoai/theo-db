@@ -69,7 +69,9 @@ impl SymqgMeta {
         }
         let version = u32::from_le_bytes(b[4..8].try_into().unwrap());
         if version != SYMQG_VERSION {
-            return Err(format!("theodb_symqg: unsupported version v{version} — REINDEX to v{SYMQG_VERSION}"));
+            return Err(format!(
+                "theodb_symqg: unsupported version v{version} — REINDEX to v{SYMQG_VERSION}"
+            ));
         }
         Ok(SymqgMeta {
             metric_tag: b[8],
@@ -86,9 +88,7 @@ impl SymqgMeta {
     /// First block of the contiguous rows region: right after the meta, rotation codebook, and tids regions.
     #[inline]
     pub(crate) fn rows_base(&self) -> u32 {
-        self.gen_base
-            .saturating_add(self.rot_codebook_npages)
-            .saturating_add(self.tids_npages)
+        self.gen_base.saturating_add(self.rot_codebook_npages).saturating_add(self.tids_npages)
     }
 
     /// First block of the tids region: right after the meta + rotation codebook.
@@ -170,7 +170,12 @@ fn decode_neighbour_u(signs: &[u8], j: usize, dim: usize, m: usize, pairs: usize
 /// Pack one vertex's rot vector + neighbours (padded to exactly `degree`; sentinel slots carry a zero SignCode)
 /// into the v3 row layout with block32-nibble signs. `degree` MUST be a multiple of 32 (from
 /// `degree_bound_from_relation`); a partial last dim-group is handled (`sign_nibble` ignores out-of-range dims).
-pub(crate) fn pack_row(rot: &[f32], neighbours: &[(u32, SignCode)], dim: usize, degree: usize) -> Vec<u8> {
+pub(crate) fn pack_row(
+    rot: &[f32],
+    neighbours: &[(u32, SignCode)],
+    dim: usize,
+    degree: usize,
+) -> Vec<u8> {
     debug_assert_eq!(rot.len(), dim);
     debug_assert_eq!(neighbours.len(), degree);
     let (m, pairs) = sign_groups(dim);
@@ -210,7 +215,8 @@ pub(crate) fn decode_row(b: &[u8], dim: usize, degree: usize) -> Result<SymqgRow
         return Err(format!("theodb_symqg: truncated row ({} < {} bytes)", b.len(), need));
     }
     let (m, pairs) = sign_groups(dim);
-    let rot: Vec<f32> = (0..dim).map(|d| f32::from_le_bytes(b[d * 4..d * 4 + 4].try_into().unwrap())).collect();
+    let rot: Vec<f32> =
+        (0..dim).map(|d| f32::from_le_bytes(b[d * 4..d * 4 + 4].try_into().unwrap())).collect();
     let ord_base = dim * 4;
     let signs_base = ord_base + degree * 4;
     let factors_base = signs_base + degree * dim.div_ceil(8);
@@ -237,7 +243,8 @@ pub(crate) fn decode_row_fast(b: &[u8], dim: usize, degree: usize) -> Result<Sym
     if b.len() < need {
         return Err(format!("theodb_symqg: truncated row ({} < {} bytes)", b.len(), need));
     }
-    let rot: Vec<f32> = (0..dim).map(|d| f32::from_le_bytes(b[d * 4..d * 4 + 4].try_into().unwrap())).collect();
+    let rot: Vec<f32> =
+        (0..dim).map(|d| f32::from_le_bytes(b[d * 4..d * 4 + 4].try_into().unwrap())).collect();
     let ord_base = dim * 4;
     let signs_base = ord_base + degree * 4;
     let factors_base = signs_base + degree * dim.div_ceil(8);
@@ -267,35 +274,37 @@ pub(crate) unsafe fn pack_symqg(
     rot_codebook: &[u8],
     tids: &[i64],
     rows: &[Vec<u8>],
-) { unsafe {
-    let base: u32 = 1;
-    let n = rows.len() as u32;
-    let rot_npages = npages_for(rot_codebook.len());
-    let tids_npages = npages_for(n as usize * 8); // n × i64
-    let mut tid_bytes = Vec::with_capacity(n as usize * 8);
-    for &t in tids {
-        tid_bytes.extend_from_slice(&t.to_le_bytes());
+) {
+    unsafe {
+        let base: u32 = 1;
+        let n = rows.len() as u32;
+        let rot_npages = npages_for(rot_codebook.len());
+        let tids_npages = npages_for(n as usize * 8); // n × i64
+        let mut tid_bytes = Vec::with_capacity(n as usize * 8);
+        for &t in tids {
+            tid_bytes.extend_from_slice(&t.to_le_bytes());
+        }
+        // Concatenate all fixed-size rows into ONE contiguous byte stream — the packing that folds the v1 page-waste.
+        let mut row_bytes_all = Vec::with_capacity(rows.iter().map(|r| r.len()).sum());
+        for row in rows {
+            row_bytes_all.extend_from_slice(row);
+        }
+        let meta = SymqgMeta {
+            metric_tag,
+            dim,
+            degree_bound,
+            n,
+            entry,
+            gen_base: base,
+            rot_codebook_npages: rot_npages,
+            tids_npages,
+        };
+        write_item(rel, &meta.encode());
+        write_chunks(rel, rot_codebook);
+        write_chunks(rel, &tid_bytes);
+        write_chunks(rel, &row_bytes_all);
     }
-    // Concatenate all fixed-size rows into ONE contiguous byte stream — the packing that folds the v1 page-waste.
-    let mut row_bytes_all = Vec::with_capacity(rows.iter().map(|r| r.len()).sum());
-    for row in rows {
-        row_bytes_all.extend_from_slice(row);
-    }
-    let meta = SymqgMeta {
-        metric_tag,
-        dim,
-        degree_bound,
-        n,
-        entry,
-        gen_base: base,
-        rot_codebook_npages: rot_npages,
-        tids_npages,
-    };
-    write_item(rel, &meta.encode());
-    write_chunks(rel, rot_codebook);
-    write_chunks(rel, &tid_bytes);
-    write_chunks(rel, &row_bytes_all);
-}}
+}
 
 /// Read + parse the meta page (block 0).
 pub(crate) unsafe fn read_symqg_meta(rel: pg_sys::Relation) -> Result<SymqgMeta, String> {
@@ -304,7 +313,10 @@ pub(crate) unsafe fn read_symqg_meta(rel: pg_sys::Relation) -> Result<SymqgMeta,
 }
 
 /// The ordinal → heap-tid table.
-pub(crate) unsafe fn read_symqg_tids(rel: pg_sys::Relation, meta: &SymqgMeta) -> Result<Vec<i64>, String> {
+pub(crate) unsafe fn read_symqg_tids(
+    rel: pg_sys::Relation,
+    meta: &SymqgMeta,
+) -> Result<Vec<i64>, String> {
     let bytes = unsafe { read_chunked(rel, meta.tids_base(), meta.tids_npages) }?;
     if bytes.len() < meta.n as usize * 8 {
         return Err("theodb_symqg: truncated tids region".into());
@@ -331,7 +343,9 @@ unsafe fn read_region_bytes(
     }
     let local = byte_offset - start_page * CHUNK;
     if buf.len() < local + len {
-        return Err(format!("theodb_symqg: truncated rows region at byte offset {byte_offset} (need {len})"));
+        return Err(format!(
+            "theodb_symqg: truncated rows region at byte offset {byte_offset} (need {len})"
+        ));
     }
     Ok(buf[local..local + len].to_vec())
 }
@@ -392,7 +406,17 @@ mod tests {
     #[test]
     fn symqg_page_meta_rejects_bad_magic_and_short() {
         assert!(SymqgMeta::decode(&[0u8; 10]).is_err());
-        let mut b = SymqgMeta { metric_tag: 0, dim: 4, degree_bound: 32, n: 1, entry: 0, gen_base: 1, rot_codebook_npages: 0, tids_npages: 0 }.encode();
+        let mut b = SymqgMeta {
+            metric_tag: 0,
+            dim: 4,
+            degree_bound: 32,
+            n: 1,
+            entry: 0,
+            gen_base: 1,
+            rot_codebook_npages: 0,
+            tids_npages: 0,
+        }
+        .encode();
         b[0] ^= 0xFF;
         assert!(SymqgMeta::decode(&b).is_err());
     }
@@ -416,14 +440,18 @@ mod tests {
         assert_eq!(got.neighbours[0].0, 7);
         assert_eq!(got.neighbours[1].0, 99);
         assert_eq!(got.neighbours[0].1.u, nbrs[0].1.u);
-        assert!((got.neighbours[0].1.nr - 3.5).abs() < 1e-6 && (got.neighbours[0].1.w - 2.1).abs() < 1e-6);
+        assert!(
+            (got.neighbours[0].1.nr - 3.5).abs() < 1e-6
+                && (got.neighbours[0].1.w - 2.1).abs() < 1e-6
+        );
     }
 
     #[test]
     fn symqg_page_pads_partial_degree() {
         let (dim, degree) = (8, 32);
         let rot = vec![0.0f32; dim];
-        let nbrs: Vec<(u32, SignCode)> = (0..degree).map(|_| (SENTINEL_ORD, code(vec![0i8; dim], 0.0, 0.0))).collect();
+        let nbrs: Vec<(u32, SignCode)> =
+            (0..degree).map(|_| (SENTINEL_ORD, code(vec![0i8; dim], 0.0, 0.0))).collect();
         let got = decode_row(&pack_row(&rot, &nbrs, dim, degree), dim, degree).unwrap();
         assert!(got.neighbours.is_empty());
     }
@@ -435,7 +463,16 @@ mod tests {
         assert!(row_bytes(dim, degree) > 8192, "row must exceed one page for this EC");
         let rot: Vec<f32> = (0..dim).map(|d| d as f32).collect();
         let nbrs: Vec<(u32, SignCode)> = (0..degree)
-            .map(|j| (j as u32, code((0..dim).map(|d| if (d + j) % 2 == 0 { 1 } else { -1 }).collect(), j as f32, 1.0)))
+            .map(|j| {
+                (
+                    j as u32,
+                    code(
+                        (0..dim).map(|d| if (d + j) % 2 == 0 { 1 } else { -1 }).collect(),
+                        j as f32,
+                        1.0,
+                    ),
+                )
+            })
             .collect();
         let got = decode_row(&pack_row(&rot, &nbrs, dim, degree), dim, degree).unwrap();
         assert_eq!(got.rot.len(), dim);
@@ -457,7 +494,16 @@ mod tests {
         let (dim, degree) = (128usize, 64usize);
         let rot = vec![0.5f32; dim];
         let nbrs: Vec<(u32, SignCode)> = (0..degree)
-            .map(|j| (j as u32, code((0..dim).map(|d| if (d + j) % 2 == 0 { 1 } else { -1 }).collect(), j as f32, 1.0)))
+            .map(|j| {
+                (
+                    j as u32,
+                    code(
+                        (0..dim).map(|d| if (d + j) % 2 == 0 { 1 } else { -1 }).collect(),
+                        j as f32,
+                        1.0,
+                    ),
+                )
+            })
             .collect();
         let packed = pack_row(&rot, &nbrs, dim, degree);
         assert_eq!(packed.len(), row_bytes(dim, degree));

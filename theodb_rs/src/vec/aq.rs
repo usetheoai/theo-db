@@ -57,7 +57,13 @@ impl AqQuantizer {
         let eta = aq_threshold.max(1.0); // η < 1 is meaningless (parallel penalty ≥ isotropic); clamp.
         if corpus.is_empty() {
             // Edge case: no data → empty codebook, sub_dim 0. Never panics.
-            return Ok(AqQuantizer { m, bits, aq_threshold: eta, sub_dim: 0, centroids: Vec::new() });
+            return Ok(AqQuantizer {
+                m,
+                bits,
+                aq_threshold: eta,
+                sub_dim: 0,
+                centroids: Vec::new(),
+            });
         }
         let dim = corpus[0].len();
         if dim == 0 {
@@ -73,10 +79,8 @@ impl AqQuantizer {
 
         let mut centroids = Vec::with_capacity(m);
         for i in 0..m {
-            let subvecs: Vec<Vec<f32>> = corpus
-                .iter()
-                .map(|v| v[i * sub_dim..(i + 1) * sub_dim].to_vec())
-                .collect();
+            let subvecs: Vec<Vec<f32>> =
+                corpus.iter().map(|v| v[i * sub_dim..(i + 1) * sub_dim].to_vec()).collect();
             // seed ^ i so each subspace's deterministic init differs but stays reproducible.
             centroids.push(anisotropic_kmeans(&subvecs, k_star, sub_dim, eta, seed ^ i as u64));
         }
@@ -185,7 +189,10 @@ impl AqQuantizer {
     pub(crate) fn from_meta_bytes(bytes: &[u8]) -> Result<Self, String> {
         const HDR: usize = 13; // bits(1) + m(4) + sub_dim(4) + aq_threshold(4)
         if bytes.len() < HDR {
-            return Err(format!("aq codebook: truncated header ({} bytes, need ≥ {HDR})", bytes.len()));
+            return Err(format!(
+                "aq codebook: truncated header ({} bytes, need ≥ {HDR})",
+                bytes.len()
+            ));
         }
         let bits = bytes[0];
         let m = u32::from_le_bytes(bytes[1..5].try_into().unwrap()) as usize;
@@ -220,11 +227,7 @@ impl AqQuantizer {
 /// The 4-bit code index of subspace `i` from the packed code bytes (even → low nibble, odd → high nibble).
 fn nibble(code: &[u8], i: usize) -> u8 {
     let byte = code[i / 2];
-    if i % 2 == 0 {
-        byte & 0x0F
-    } else {
-        (byte >> 4) & 0x0F
-    }
+    if i % 2 == 0 { byte & 0x0F } else { (byte >> 4) & 0x0F }
 }
 
 /// Index of the nearest centroid to `sub` under squared L2 (ties → lowest index, deterministic).
@@ -396,11 +399,7 @@ fn solve_spd(a: &mut [f64], b: &[f64], n: usize) -> Vec<f64> {
     (0..n)
         .map(|r| {
             let d = m[r * (n + 1) + r];
-            if d.abs() <= 1e-18 {
-                0.0
-            } else {
-                m[r * (n + 1) + n] / d
-            }
+            if d.abs() <= 1e-18 { 0.0 } else { m[r * (n + 1) + n] / d }
         })
         .collect()
 }
@@ -461,11 +460,17 @@ mod tests {
         let iso2 = AqQuantizer::train(&corpus, 2, 4, 1.0, 5).expect("iso2");
         assert_eq!(iso.to_meta_bytes(), iso2.to_meta_bytes(), "η=1 deterministic");
         // Every centroid coordinate must be a finite convex combination of member coords ⇒ within [min,max].
-        let (lo, hi) = corpus.iter().flat_map(|v| v.iter()).fold((f32::INFINITY, f32::NEG_INFINITY), |(l, h), &x| (l.min(x), h.max(x)));
+        let (lo, hi) = corpus
+            .iter()
+            .flat_map(|v| v.iter())
+            .fold((f32::INFINITY, f32::NEG_INFINITY), |(l, h), &x| (l.min(x), h.max(x)));
         for sub in iso.centroids() {
             for cent in sub {
                 for &x in cent {
-                    assert!(x.is_finite() && x >= lo - 1e-3 && x <= hi + 1e-3, "isotropic centroid {x} out of data hull [{lo},{hi}]");
+                    assert!(
+                        x.is_finite() && x >= lo - 1e-3 && x <= hi + 1e-3,
+                        "isotropic centroid {x} out of data hull [{lo},{hi}]"
+                    );
                 }
             }
         }
@@ -492,7 +497,11 @@ mod tests {
                         return 0.0;
                     }
                     // r∥ = (r·x̂) → scalar magnitude of residual projected on x̂.
-                    let dot: f64 = x.iter().zip(c).map(|(&xi, &ci)| (xi as f64 - ci as f64) * (xi as f64)).sum();
+                    let dot: f64 = x
+                        .iter()
+                        .zip(c)
+                        .map(|(&xi, &ci)| (xi as f64 - ci as f64) * (xi as f64))
+                        .sum();
                     let par = dot / norm2.sqrt();
                     par * par
                 })
@@ -518,14 +527,20 @@ mod tests {
     #[pg_test]
     fn aq_train_bad_bits_rejected() {
         // Negative (Rule 8): non-4 bits → typed Err, never a panic.
-        assert!(AqQuantizer::train(&[vec![0.0, 1.0]], 2, 8, 2.0, 1).is_err(), "8-bit must be rejected");
+        assert!(
+            AqQuantizer::train(&[vec![0.0, 1.0]], 2, 8, 2.0, 1).is_err(),
+            "8-bit must be rejected"
+        );
     }
 
     #[pg_test]
     fn aq_train_indivisible_dim_rejected() {
         // Negative: dim not divisible by m → typed Err.
         let corpus = vec![vec![1.0, 2.0, 3.0]]; // dim 3, m 2 → 3%2 != 0
-        assert!(AqQuantizer::train(&corpus, 2, 4, 1.0, 1).is_err(), "indivisible dim must be rejected");
+        assert!(
+            AqQuantizer::train(&corpus, 2, 4, 1.0, 1).is_err(),
+            "indivisible dim must be rejected"
+        );
     }
 
     // ---------- T1.2 ----------
@@ -560,7 +575,10 @@ mod tests {
         assert_eq!(bytes, q2.to_meta_bytes(), "round-trip is byte-exact");
         let probe = random_corpus(&mut r, 1, 8).remove(0);
         assert_eq!(q.encode(&probe), q2.encode(&probe), "decoded codebook encodes identically");
-        assert!((q.aq_threshold() - q2.aq_threshold()).abs() < 1e-6, "aq_threshold survives round-trip");
+        assert!(
+            (q.aq_threshold() - q2.aq_threshold()).abs() < 1e-6,
+            "aq_threshold survives round-trip"
+        );
     }
 
     #[pg_test]
@@ -570,7 +588,10 @@ mod tests {
         let q = AqQuantizer::train(&corpus, 2, 4, 1.0, 1).expect("train");
         let mut bytes = q.to_meta_bytes();
         bytes.truncate(bytes.len() - 1);
-        assert!(AqQuantizer::from_meta_bytes(&bytes).is_err(), "truncated codebook must be rejected");
+        assert!(
+            AqQuantizer::from_meta_bytes(&bytes).is_err(),
+            "truncated codebook must be rejected"
+        );
     }
 
     #[pg_test]
@@ -595,7 +616,11 @@ mod tests {
         });
         let half = corpus.len() / 2;
         let near: f64 = by_f32[..half].iter().map(|&i| scores[i]).sum::<f64>() / half as f64;
-        let far: f64 = by_f32[half..].iter().map(|&i| scores[i]).sum::<f64>() / (corpus.len() - half) as f64;
-        assert!(near < far, "AH-ADC carries no NN signal: near_mean={near:.4} not < far_mean={far:.4}");
+        let far: f64 =
+            by_f32[half..].iter().map(|&i| scores[i]).sum::<f64>() / (corpus.len() - half) as f64;
+        assert!(
+            near < far,
+            "AH-ADC carries no NN signal: near_mean={near:.4} not < far_mean={far:.4}"
+        );
     }
 }

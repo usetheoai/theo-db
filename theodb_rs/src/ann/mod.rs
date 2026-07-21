@@ -23,8 +23,8 @@ pub(crate) mod scan_core;
 pub(crate) mod symqg_spike; // E2 — SymphonyQG clean-room spike (co-located quantized graph traversal)
 mod wire;
 
-pub(crate) use hnsw::{HnswIndex, HNSW_MAGIC};
-pub(crate) use ivf::{IvfflatIndex, IVF_MAGIC};
+pub(crate) use hnsw::{HNSW_MAGIC, HnswIndex};
+pub(crate) use ivf::{IVF_MAGIC, IvfflatIndex};
 
 /// Distance family. `dist` returns the ORDER-BY key (smaller = nearer); for inner product pgvector orders by the
 /// NEGATIVE inner product (`<#>`), so the key is `-inner_product` (parity with pgvector's `<#>`).
@@ -110,11 +110,7 @@ impl Rng {
     /// Uniform in (0,1] — never 0, so `ln()` stays finite for the HNSW level formula.
     pub(super) fn next_f64(&mut self) -> f64 {
         let v = (self.next_u64() >> 11) as f64 / (1u64 << 53) as f64;
-        if v <= 0.0 {
-            f64::MIN_POSITIVE
-        } else {
-            v
-        }
+        if v <= 0.0 { f64::MIN_POSITIVE } else { v }
     }
 }
 
@@ -166,22 +162,14 @@ mod tests {
     fn rand_corpus(n: usize, dim: usize, seed: u64) -> Vec<(i64, Vec<f32>)> {
         let mut r = Rng::new(seed);
         (0..n)
-            .map(|i| {
-                (
-                    i as i64,
-                    (0..dim).map(|_| (r.next_f64() as f32) * 2.0 - 1.0).collect(),
-                )
-            })
+            .map(|i| (i as i64, (0..dim).map(|_| (r.next_f64() as f32) * 2.0 - 1.0).collect()))
             .collect()
     }
     fn brute(corpus: &[(i64, Vec<f32>)], q: &[f32], k: usize, metric: Metric) -> Vec<i64> {
         let mut v: Vec<Cand> = corpus
             .iter()
             .enumerate()
-            .map(|(idx, (_, x))| Cand {
-                d: metric.dist(q, x),
-                i: idx,
-            })
+            .map(|(idx, (_, x))| Cand { d: metric.dist(q, x), i: idx })
             .collect();
         v.sort();
         v.truncate(k);
@@ -276,8 +264,9 @@ mod tests {
         // M88: the parallel per-vector assignment (assign_all_parallel) must be BYTE-IDENTICAL across builds
         // (nearest_in is deterministic; lists built by ascending i, independent of thread count) AND partition all
         // N (no vector lost or duplicated). This guards the 100M-scalability refactor against a thread race.
-        let c: Vec<(i64, Vec<f32>)> =
-            (0..300i64).map(|i| (i, vec![(i % 17) as f32, (i % 13) as f32, (i % 7) as f32])).collect();
+        let c: Vec<(i64, Vec<f32>)> = (0..300i64)
+            .map(|i| (i, vec![(i % 17) as f32, (i % 13) as f32, (i % 7) as f32]))
+            .collect();
         let a = IvfflatIndex::build(&c, 16, Metric::L2, 42).list_entries();
         let b = IvfflatIndex::build(&c, 16, Metric::L2, 42).list_entries();
         assert_eq!(a, b, "parallel IVF assignment must be deterministic across builds");

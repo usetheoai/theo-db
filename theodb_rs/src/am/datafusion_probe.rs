@@ -58,7 +58,8 @@ fn theodb_df_probe() -> i64 {
     let result: Result<usize, datafusion::error::DataFusionError> = rt.block_on(async {
         let ctx = SessionContext::new();
         let schema = Arc::new(Schema::new(vec![Field::new("x", DataType::Int64, false)]));
-        let batch = RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(vec![1i64, 2, 3]))])?;
+        let batch =
+            RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(vec![1i64, 2, 3]))])?;
         let df = ctx.read_batch(batch)?;
         // `count()` plans + executes a vectorized aggregate over the batch → the row count.
         df.count().await
@@ -100,7 +101,8 @@ mod tests {
             let ctx = SessionContext::new();
             let schema = Arc::new(Schema::new(vec![Field::new("x", DataType::Int64, false)]));
             let batch =
-                RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(vec![1i64, 2, 3, 4]))]).unwrap();
+                RecordBatch::try_new(schema, vec![Arc::new(Int64Array::from(vec![1i64, 2, 3, 4]))])
+                    .unwrap();
             ctx.read_batch(batch).unwrap().count().await.unwrap()
         });
         assert_eq!(n, 4, "in-process DataFusion count must return 4");

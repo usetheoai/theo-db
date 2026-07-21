@@ -89,7 +89,8 @@ pub(crate) unsafe fn fold(rel: pg_sys::Relation, meta: &[u8], body: &[Vec<Vec<u8
     // corruption. Fully-atomic crash-safe reclaim (no REINDEX window) is deferred to M55 (fold incremental vs
     // in-place) — see ROADMAP § M55; this is the conservative, non-corrupting bound.
     let gen_end = base + body.len() as u32;
-    let nblocks_now = pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM);
+    let nblocks_now =
+        pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM);
     for (reclaimed, b) in (gen_end..nblocks_now).enumerate() {
         page::reinit_page_with_items(rel, b, &[]);
         // T2.3 crash injection: after the first leftover page is emptied — the moment that proves the
@@ -137,9 +138,16 @@ mod tests {
                     let reused = cur > 1 && cur - 1 >= need;
                     if reused {
                         assert_eq!(base, 1, "reuse returns base 1 (cur={cur} need={need})");
-                        assert!(1 + need <= cur, "reuse must fit strictly below the live gen (cur={cur} need={need})");
+                        assert!(
+                            1 + need <= cur,
+                            "reuse must fit strictly below the live gen (cur={cur} need={need})"
+                        );
                     } else {
-                        assert_eq!(base, nblocks.max(1), "extend goes to the tail (cur={cur} nblocks={nblocks})");
+                        assert_eq!(
+                            base,
+                            nblocks.max(1),
+                            "extend goes to the tail (cur={cur} nblocks={nblocks})"
+                        );
                     }
                 }
             }

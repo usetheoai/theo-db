@@ -212,31 +212,34 @@ pub extern "C-unwind" fn amrescan(
             if meta.node_count > 0 && query.len() != meta.dim as usize {
                 pg_sys::error!("theodb hnsw: query dim {} != index dim {}", query.len(), meta.dim);
             }
-            let init: Vec<(i64, f64)> = match crate::am::hnsw_page::resumable_init(rel, &meta, &query, ef) {
-                Ok(Some(mut rg)) => {
-                    let mut b = match crate::am::hnsw_page::resumable_next(rel, &meta, &query, &mut rg) {
-                        Ok(b) => b,
-                        Err(e) => pg_sys::error!("theodb am scan: {e}"),
-                    };
-                    // Fold pending (post-build INSERTs) into the FIRST batch only; later resumed batches never
-                    // re-fold — the scan dedups tids. Mirrors `gather_hnsw_candidates`.
-                    let metric = match Metric::from_tag(meta.metric_tag) {
-                        Some(m) => m,
-                        None => pg_sys::error!("theodb am scan: unknown metric tag"),
-                    };
-                    let pending = match page::read_pending(rel) {
-                        Ok(p) => p,
-                        Err(e) => pg_sys::error!("theodb am scan: {e}"),
-                    };
-                    for (tidv, v) in pending {
-                        b.push((tidv, metric.dist(&query, &v)));
+            let init: Vec<(i64, f64)> =
+                match crate::am::hnsw_page::resumable_init(rel, &meta, &query, ef) {
+                    Ok(Some(mut rg)) => {
+                        let mut b =
+                            match crate::am::hnsw_page::resumable_next(rel, &meta, &query, &mut rg)
+                            {
+                                Ok(b) => b,
+                                Err(e) => pg_sys::error!("theodb am scan: {e}"),
+                            };
+                        // Fold pending (post-build INSERTs) into the FIRST batch only; later resumed batches never
+                        // re-fold — the scan dedups tids. Mirrors `gather_hnsw_candidates`.
+                        let metric = match Metric::from_tag(meta.metric_tag) {
+                            Some(m) => m,
+                            None => pg_sys::error!("theodb am scan: unknown metric tag"),
+                        };
+                        let pending = match page::read_pending(rel) {
+                            Ok(p) => p,
+                            Err(e) => pg_sys::error!("theodb am scan: {e}"),
+                        };
+                        for (tidv, v) in pending {
+                            b.push((tidv, metric.dist(&query, &v)));
+                        }
+                        state.resume = Some(rg);
+                        b
                     }
-                    state.resume = Some(rg);
-                    b
-                }
-                Ok(None) => gather_hnsw_candidates(rel, &query, ef),
-                Err(e) => pg_sys::error!("theodb am scan: {e}"),
-            };
+                    Ok(None) => gather_hnsw_candidates(rel, &query, ef),
+                    Err(e) => pg_sys::error!("theodb am scan: {e}"),
+                };
             heapify(init)
         } else if magic == crate::am::page::SYMQG_MAGIC {
             // E2: SymphonyQG co-located quantized graph — beam search reading rows per hop.
@@ -255,14 +258,22 @@ pub extern "C-unwind" fn amrescan(
 /// M35 partial-read HNSW scan: read the meta (1 page), traverse the graph ON DEMAND reading only visited nodes'
 /// element/neighbor tuples (∝ ef·M, flat in N — never the whole graph), then fold the pending region. Ascending
 /// distance. Replaces the O(N) `scan_blob` path for structured `theodb_hnsw` indexes.
-unsafe fn scan_hnsw_structured(rel: pg_sys::Relation, query: &[f32], ef: usize) -> BinaryHeap<Reverse<Scored>> {
+unsafe fn scan_hnsw_structured(
+    rel: pg_sys::Relation,
+    query: &[f32],
+    ef: usize,
+) -> BinaryHeap<Reverse<Scored>> {
     heapify(gather_hnsw_candidates(rel, query, ef))
 }
 
 /// M52: gather the HNSW scan candidates (traverse at `ef` + pending fold) as a raw `(tid, dist)` Vec. Extracted
 /// so the iterative scan (`amgettuple`) can re-run it with a growing `ef` and dedup already-emitted tids, without
 /// re-heapifying inside. `ef` is a parameter (not the GUC) precisely so the iterative loop can grow it.
-unsafe fn gather_hnsw_candidates(rel: pg_sys::Relation, query: &[f32], ef: usize) -> Vec<(i64, f64)> {
+unsafe fn gather_hnsw_candidates(
+    rel: pg_sys::Relation,
+    query: &[f32],
+    ef: usize,
+) -> Vec<(i64, f64)> {
     let meta = match crate::am::hnsw_page::read_meta(rel) {
         Ok(m) => m,
         Err(e) => pg_sys::error!("theodb am scan: {e}"),
@@ -297,7 +308,11 @@ unsafe fn gather_hnsw_candidates(rel: pg_sys::Relation, query: &[f32], ef: usize
 /// `rot = P·x_p`, so `q_r = rot_q − rot_p` gives BOTH the exact distance (`‖q_r‖²`, rotation-invariant) and the
 /// per-neighbour estimate in one O(D) subtraction (no per-hop rotate — the spike's speed lever). Answer = the k
 /// smallest EXACT among popped vertices (no re-rank), mapped ordinal→tid; pending rows scored exact.
-unsafe fn scan_symqg_structured(rel: pg_sys::Relation, query: &[f32], ef: usize) -> BinaryHeap<Reverse<Scored>> {
+unsafe fn scan_symqg_structured(
+    rel: pg_sys::Relation,
+    query: &[f32],
+    ef: usize,
+) -> BinaryHeap<Reverse<Scored>> {
     heapify(gather_symqg_candidates(rel, query, ef))
 }
 
@@ -316,7 +331,11 @@ impl Ord for OrdF {
     }
 }
 
-unsafe fn gather_symqg_candidates(rel: pg_sys::Relation, query: &[f32], ef: usize) -> Vec<(i64, f64)> {
+unsafe fn gather_symqg_candidates(
+    rel: pg_sys::Relation,
+    query: &[f32],
+    ef: usize,
+) -> Vec<(i64, f64)> {
     use crate::am::page;
     let meta = match page::read_symqg_meta(rel) {
         Ok(m) => m,
@@ -415,7 +434,8 @@ unsafe fn gather_symqg_candidates(rel: pg_sys::Relation, query: &[f32], ef: usiz
                         continue;
                     }
                     let est = out_est[v].max(0.0);
-                    let admit = beamw.len() < ef || beamw.peek().map(|&OrdF(w)| est < w).unwrap_or(true);
+                    let admit =
+                        beamw.len() < ef || beamw.peek().map(|&OrdF(w)| est < w).unwrap_or(true);
                     if admit {
                         cand.push(Reverse((OrdF(est), ord)));
                         beamw.push(OrdF(est));
@@ -435,7 +455,8 @@ unsafe fn gather_symqg_candidates(rel: pg_sys::Relation, query: &[f32], ef: usiz
                     continue;
                 }
                 let est = crate::ann::symqg_spike::estimate_sign(code, &q_r, qc2).max(0.0);
-                let admit = beamw.len() < ef || beamw.peek().map(|&OrdF(w)| est < w).unwrap_or(true);
+                let admit =
+                    beamw.len() < ef || beamw.peek().map(|&OrdF(w)| est < w).unwrap_or(true);
                 if admit {
                     cand.push(Reverse((OrdF(est), *ord)));
                     beamw.push(OrdF(est));
@@ -579,7 +600,12 @@ unsafe fn scan_ivf_structured(
 /// ~5-7× QPS lever the M75 spike proved) → rerank the `over_fetch` best by exact f32. O(probes) page reads, like
 /// the f32 IVF path, but the per-candidate score is a near-free LUT lookup instead of 128 mults. Ports
 /// `ann::ivf_aqah::search` to read from the persisted v4 pages.
-unsafe fn scan_ivf_aq(rel: pg_sys::Relation, query: &[f32], probes: usize, rerank_pool: usize) -> Vec<(i64, f64)> {
+unsafe fn scan_ivf_aq(
+    rel: pg_sys::Relation,
+    query: &[f32],
+    probes: usize,
+    rerank_pool: usize,
+) -> Vec<(i64, f64)> {
     let meta = match page::read_ivf_aq_meta(rel) {
         Ok(m) => m,
         Err(e) => pg_sys::error!("theodb am scan: {e}"),
@@ -635,7 +661,12 @@ unsafe fn scan_ivf_aq(rel: pg_sys::Relation, query: &[f32], probes: usize, reran
             if bytes.len() < base + pairs * 32 {
                 break; // page shorter than the directory count claims — stop this list
             }
-            crate::vec::ah::ah_score_block(&lut, &bytes[base..base + pairs * 32], bn, &mut out[..bn]);
+            crate::vec::ah::ah_score_block(
+                &lut,
+                &bytes[base..base + pairs * 32],
+                bn,
+                &mut out[..bn],
+            );
             for (j, &score) in out.iter().enumerate().take(bn) {
                 cands.push((score, lbidx, b * 32 + j));
             }
@@ -753,10 +784,16 @@ unsafe fn scan_ivf_aq_split(
             if cbytes.len() < base + pairs * 32 {
                 break;
             }
-            crate::vec::ah::ah_score_block(&lut, &cbytes[base..base + pairs * 32], bn, &mut out[..bn]);
+            crate::vec::ah::ah_score_block(
+                &lut,
+                &cbytes[base..base + pairs * 32],
+                bn,
+                &mut out[..bn],
+            );
             for (j, &score) in out.iter().enumerate().take(bn) {
                 let ordinal = b * 32 + j;
-                let tid = i64::from_le_bytes(cbytes[ordinal * 8..ordinal * 8 + 8].try_into().unwrap());
+                let tid =
+                    i64::from_le_bytes(cbytes[ordinal * 8..ordinal * 8 + 8].try_into().unwrap());
                 // M92 arbitrary-WHERE inline skip — admit exact members OR lossy-bitmap blocks (recheck filters the
                 // over-admit); empty membership ⇒ unchanged v5 scan.
                 if let Some(m) = &membership {
@@ -881,14 +918,22 @@ unsafe fn scan_ivf_aq_split_v7(
             if cbytes.len() < base + pairs * 32 {
                 break;
             }
-            crate::vec::ah::ah_score_block(&lut, &cbytes[base..base + pairs * 32], bn, &mut out[..bn]);
+            crate::vec::ah::ah_score_block(
+                &lut,
+                &cbytes[base..base + pairs * 32],
+                bn,
+                &mut out[..bn],
+            );
             for (j, &score) in out.iter().enumerate().take(bn) {
                 let ordinal = b * 32 + j;
                 // INLINE FILTER: skip candidates whose stored label set does not overlap the query's.
-                if label_filtering && !v7_label_overlaps(&cbytes, labels_off, ordinal, label_bytes, query_labels) {
+                if label_filtering
+                    && !v7_label_overlaps(&cbytes, labels_off, ordinal, label_bytes, query_labels)
+                {
                     continue;
                 }
-                let tid = i64::from_le_bytes(cbytes[ordinal * 8..ordinal * 8 + 8].try_into().unwrap());
+                let tid =
+                    i64::from_le_bytes(cbytes[ordinal * 8..ordinal * 8 + 8].try_into().unwrap());
                 // M92 arbitrary-WHERE inline skip — admit a candidate whose exact TID is a member OR whose block is a
                 // lossy-bitmap block (over-admit → the node's ExecQual recheck filters it, ADR M93-2). Dropping the
                 // lossy case would under-admit (silently miss valid rows on lossy pages).
@@ -950,7 +995,13 @@ unsafe fn scan_ivf_aq_split_v7(
 /// label_bytes`) share any element with `query_labels`? Both label sets are tiny (≤ LABEL_K), so a nested scan is
 /// cheapest. A stored count of 0 (NULL label at build) never overlaps.
 #[inline]
-fn v7_label_overlaps(cbytes: &[u8], labels_off: usize, ordinal: usize, label_bytes: usize, query_labels: &[i16]) -> bool {
+fn v7_label_overlaps(
+    cbytes: &[u8],
+    labels_off: usize,
+    ordinal: usize,
+    label_bytes: usize,
+    query_labels: &[i16],
+) -> bool {
     let rec = labels_off + ordinal * label_bytes;
     if cbytes.len() < rec + label_bytes {
         return false;
@@ -1030,10 +1081,16 @@ unsafe fn scan_ivf_aq_split_sq8(
             if cbytes.len() < base + pairs * 32 {
                 break;
             }
-            crate::vec::ah::ah_score_block(&lut, &cbytes[base..base + pairs * 32], bn, &mut out[..bn]);
+            crate::vec::ah::ah_score_block(
+                &lut,
+                &cbytes[base..base + pairs * 32],
+                bn,
+                &mut out[..bn],
+            );
             for (j, &score) in out.iter().enumerate().take(bn) {
                 let ordinal = b * 32 + j;
-                let tid = i64::from_le_bytes(cbytes[ordinal * 8..ordinal * 8 + 8].try_into().unwrap());
+                let tid =
+                    i64::from_le_bytes(cbytes[ordinal * 8..ordinal * 8 + 8].try_into().unwrap());
                 cands.push((score, tid, ci, ordinal));
             }
         }
@@ -1129,10 +1186,16 @@ unsafe fn scan_ivf_aq_split_rabitq(
             if cbytes.len() < base + pairs * 32 {
                 break;
             }
-            crate::vec::ah::ah_score_block(&lut, &cbytes[base..base + pairs * 32], bn, &mut out[..bn]);
+            crate::vec::ah::ah_score_block(
+                &lut,
+                &cbytes[base..base + pairs * 32],
+                bn,
+                &mut out[..bn],
+            );
             for (j, &score) in out.iter().enumerate().take(bn) {
                 let ordinal = b * 32 + j;
-                let tid = i64::from_le_bytes(cbytes[ordinal * 8..ordinal * 8 + 8].try_into().unwrap());
+                let tid =
+                    i64::from_le_bytes(cbytes[ordinal * 8..ordinal * 8 + 8].try_into().unwrap());
                 cands.push((score, tid, ci, ordinal));
             }
         }
@@ -1266,7 +1329,8 @@ pub extern "C-unwind" fn amgettuple(
                         // `theodb_hnsw.resume_max_mb`, stop resuming and return what is already emitted (correctness
                         // preserved by the executor MVCC recheck + max_scan_tuples; EC-5 — a clean stop, no panic).
                         if resume_ceiling > 0
-                            && state.resume.as_ref().map(|rg| rg.approx_bytes()).unwrap_or(0) > resume_ceiling
+                            && state.resume.as_ref().map(|rg| rg.approx_bytes()).unwrap_or(0)
+                                > resume_ceiling
                         {
                             state.exhausted = true;
                             return false;
@@ -1278,7 +1342,9 @@ pub extern "C-unwind" fn amgettuple(
                             let q = &state.query;
                             match state.resume.as_mut() {
                                 Some(rg) => {
-                                    let b = match crate::am::hnsw_page::resumable_next(rel, &meta, q, rg) {
+                                    let b = match crate::am::hnsw_page::resumable_next(
+                                        rel, &meta, q, rg,
+                                    ) {
                                         Ok(b) => b,
                                         Err(e) => pg_sys::error!("theodb am scan: {e}"),
                                     };
@@ -1287,8 +1353,10 @@ pub extern "C-unwind" fn amgettuple(
                                 None => (Vec::new(), true), // unreachable today (guarded by is_some) — treat as exhausted
                             }
                         };
-                        let fresh: Vec<(i64, f64)> =
-                            batch.into_iter().filter(|(tid, _)| !state.emitted.contains(tid)).collect();
+                        let fresh: Vec<(i64, f64)> = batch
+                            .into_iter()
+                            .filter(|(tid, _)| !state.emitted.contains(tid))
+                            .collect();
                         if !fresh.is_empty() {
                             state.heap = heapify(fresh);
                             break;
@@ -1306,10 +1374,11 @@ pub extern "C-unwind" fn amgettuple(
                         return false;
                     }
                     state.ef = new_ef;
-                    let fresh: Vec<(i64, f64)> = gather_hnsw_candidates(state.rel, &state.query, new_ef)
-                        .into_iter()
-                        .filter(|(tid, _)| !state.emitted.contains(tid))
-                        .collect();
+                    let fresh: Vec<(i64, f64)> =
+                        gather_hnsw_candidates(state.rel, &state.query, new_ef)
+                            .into_iter()
+                            .filter(|(tid, _)| !state.emitted.contains(tid))
+                            .collect();
                     if fresh.is_empty() {
                         state.exhausted = true; // grew ef but found nothing new — the whole graph is emitted
                         return false;
@@ -1324,8 +1393,13 @@ pub extern "C-unwind" fn amgettuple(
                     }
                     state.probes = state.probes.saturating_mul(2);
                     state.rerank_pool = state.rerank_pool.saturating_mul(2);
-                    let all =
-                        scan_ivf_structured(state.rel, &state.query, state.probes, state.rerank_pool, &state.query_labels);
+                    let all = scan_ivf_structured(
+                        state.rel,
+                        &state.query,
+                        state.probes,
+                        state.rerank_pool,
+                        &state.query_labels,
+                    );
                     let total = all.len();
                     let fresh: Vec<(i64, f64)> =
                         all.into_iter().filter(|(tid, _)| !state.emitted.contains(tid)).collect();
@@ -1384,7 +1458,10 @@ mod tests {
             popped.push((s.tid, s.d));
         }
 
-        assert_eq!(popped, expected, "heap pop order must equal the old sort order (ties broken by tid)");
+        assert_eq!(
+            popped, expected,
+            "heap pop order must equal the old sort order (ties broken by tid)"
+        );
         // Spot-check the tie is broken by tid ascending: 20 (d=2.0) before 30 (d=2.0).
         let pos20 = popped.iter().position(|&(t, _)| t == 20).unwrap();
         let pos30 = popped.iter().position(|&(t, _)| t == 30).unwrap();

@@ -10,8 +10,8 @@
 //! before the next). No nested cross-node locking → no lock cycle.
 use super::{Cand, Metric};
 use std::collections::BinaryHeap;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::RwLock;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Corpora with at least this many nodes build in parallel; smaller ones build sequentially (deterministic,
 /// thread-overhead-free — the tiny AM test corpora stay on the unchanged sequential path).
@@ -32,7 +32,10 @@ pub(super) fn parallel_threshold() -> usize {
 /// closing the routing/navigability gap on clustered data (`docs/benchmarks/gap1-extend-candidates.md`). Opt-out via
 /// `THEODB_HNSW_EXTEND_CANDIDATES=0` for the ~2-3× faster build when recall-per-ef is not the priority.
 pub(super) fn extend_candidates() -> bool {
-    !matches!(std::env::var("THEODB_HNSW_EXTEND_CANDIDATES").ok().as_deref(), Some("0") | Some("false"))
+    !matches!(
+        std::env::var("THEODB_HNSW_EXTEND_CANDIDATES").ok().as_deref(),
+        Some("0") | Some("false")
+    )
 }
 
 /// Build the HNSW graph concurrently over `vectors` (all equal-dim) with pre-assigned `levels` (deterministic).
@@ -60,10 +63,7 @@ pub(super) fn build_parallel(
     // Shared (entry, max_level). Node 0 is the seed; it is placed before the parallel phase (empty neighbors).
     let state = RwLock::new((0usize, levels[0]));
 
-    let nthreads = std::thread::available_parallelism()
-        .map(|p| p.get())
-        .unwrap_or(1)
-        .min(n.max(1));
+    let nthreads = std::thread::available_parallelism().map(|p| p.get()).unwrap_or(1).min(n.max(1));
 
     // Batched worker pool: each batch `[start, end)` gets a fresh counter so a worker's final over-fetch never
     // leaks into the next batch. `scope` joins all workers (and re-raises any panic) before the batch returns —
@@ -74,12 +74,24 @@ pub(super) fn build_parallel(
         let counter = AtomicUsize::new(start);
         std::thread::scope(|s| {
             for _ in 0..nthreads {
-                s.spawn(|| loop {
-                    let node = counter.fetch_add(1, Ordering::Relaxed);
-                    if node >= end {
-                        break;
+                s.spawn(|| {
+                    loop {
+                        let node = counter.fetch_add(1, Ordering::Relaxed);
+                        if node >= end {
+                            break;
+                        }
+                        insert_node(
+                            node,
+                            vectors,
+                            levels,
+                            &neighbors,
+                            &state,
+                            m,
+                            m0,
+                            ef_construction,
+                            metric,
+                        );
                     }
-                    insert_node(node, vectors, levels, &neighbors, &state, m, m0, ef_construction, metric);
                 });
             }
         });
@@ -88,8 +100,10 @@ pub(super) fn build_parallel(
         start = end;
     }
 
-    let neighbors_plain: Vec<Vec<Vec<usize>>> =
-        neighbors.into_iter().map(|rw| rw.into_inner().unwrap_or_else(|e| e.into_inner())).collect();
+    let neighbors_plain: Vec<Vec<Vec<usize>>> = neighbors
+        .into_iter()
+        .map(|rw| rw.into_inner().unwrap_or_else(|e| e.into_inner()))
+        .collect();
     let (entry, max_level) = state.into_inner().unwrap_or_else(|e| e.into_inner());
     (neighbors_plain, entry, max_level)
 }
@@ -125,14 +139,16 @@ fn insert_node(
     let mut entries: Vec<usize> = vec![ep];
     while lc >= 0 {
         let layer = lc as usize;
-        let mut candidates = search_layer(q, &entries, ef_construction, layer, vectors, neighbors, metric);
+        let mut candidates =
+            search_layer(q, &entries, ef_construction, layer, vectors, neighbors, metric);
         let next_entries: Vec<usize> = candidates.iter().map(|c| c.i).collect();
         let m_layer = if layer == 0 { m0 } else { m };
         // Gap-1 fix (navigability): extendCandidates — see `hnsw.rs::insert` for the rationale (Malkov-Yashunin,
         // recommended for clustered data; white-box-proven to close the ef-insensitive routing gap). Read each
         // candidate's neighbor slice under a brief read lock (no write held here → no deadlock).
         if extend_candidates() {
-            let mut seen: std::collections::HashSet<usize> = candidates.iter().map(|c| c.i).collect();
+            let mut seen: std::collections::HashSet<usize> =
+                candidates.iter().map(|c| c.i).collect();
             let base: Vec<usize> = candidates.iter().map(|c| c.i).collect();
             for ci in base {
                 let nbs: Vec<usize> = {
@@ -283,7 +299,12 @@ fn search_layer(
 
 /// pgvector "closer" neighbor heuristic (free-fn form; reads only `vectors`, never a neighbor lock → safe to call
 /// while holding a node's write lock). Identical logic to the sequential `HnswIndex::select_from`.
-fn select_from(vectors: &[Vec<f32>], metric: Metric, mut candidates: Vec<Cand>, m: usize) -> Vec<usize> {
+fn select_from(
+    vectors: &[Vec<f32>],
+    metric: Metric,
+    mut candidates: Vec<Cand>,
+    m: usize,
+) -> Vec<usize> {
     candidates.sort();
     let mut kept: Vec<usize> = Vec::new();
     for c in &candidates {

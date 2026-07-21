@@ -11,13 +11,13 @@
 //! `customscan.rs` machinery idioms.
 #![allow(non_snake_case)]
 
-use super::df_executor::{run_columnar_aggs, run_columnar_grouped_aggs, AggSpec};
 use super::columnar_codec::MinMaxKind;
+use super::df_executor::{AggSpec, run_columnar_aggs, run_columnar_grouped_aggs};
 use super::zonemap::{ZoneOp, ZonePredicate};
 use pgrx::datum::FromDatum;
-use pgrx::{pg_guard, pg_sys, PgBox, PgList};
 use pgrx::{GucContext, GucFlags, GucRegistry, GucSetting};
-use std::ffi::{c_int, c_void, CStr};
+use pgrx::{PgBox, PgList, pg_guard, pg_sys};
+use std::ffi::{CStr, c_int, c_void};
 
 /// `theodb.enable_columnar_agg` — default OFF (the vectorized aggregate path is opt-in until benchmarked).
 pub(crate) static ENABLE_COLUMNAR_AGG: GucSetting<bool> = GucSetting::<bool>::new(false);
@@ -79,9 +79,8 @@ thread_local! {
 fn columnar_amoid() -> pg_sys::Oid {
     use std::sync::OnceLock;
     static AMOID: OnceLock<u32> = OnceLock::new();
-    let raw = *AMOID.get_or_init(|| unsafe {
-        pg_sys::get_am_oid(c"theodb_columnar".as_ptr(), true).to_u32()
-    });
+    let raw = *AMOID
+        .get_or_init(|| unsafe { pg_sys::get_am_oid(c"theodb_columnar".as_ptr(), true).to_u32() });
     unsafe { pg_sys::Oid::from_u32_unchecked(raw) }
 }
 
@@ -154,13 +153,14 @@ unsafe fn extract_zone_predicate(clause: *mut pg_sys::Node, relid: i32) -> Optio
         return None;
     }
     let (a0, a1) = (args.get_ptr(0)?, args.get_ptr(1)?);
-    let (var, konst, flipped) = if (*a0).type_ == pg_sys::NodeTag::T_Var && (*a1).type_ == pg_sys::NodeTag::T_Const {
-        (a0 as *mut pg_sys::Var, a1 as *mut pg_sys::Const, false)
-    } else if (*a0).type_ == pg_sys::NodeTag::T_Const && (*a1).type_ == pg_sys::NodeTag::T_Var {
-        (a1 as *mut pg_sys::Var, a0 as *mut pg_sys::Const, true)
-    } else {
-        return None; // two-Var / function / etc.
-    };
+    let (var, konst, flipped) =
+        if (*a0).type_ == pg_sys::NodeTag::T_Var && (*a1).type_ == pg_sys::NodeTag::T_Const {
+            (a0 as *mut pg_sys::Var, a1 as *mut pg_sys::Const, false)
+        } else if (*a0).type_ == pg_sys::NodeTag::T_Const && (*a1).type_ == pg_sys::NodeTag::T_Var {
+            (a1 as *mut pg_sys::Var, a0 as *mut pg_sys::Const, true)
+        } else {
+            return None; // two-Var / function / etc.
+        };
     if (*var).varno as i32 != relid || (*konst).constisnull {
         return None;
     }
@@ -183,7 +183,14 @@ unsafe fn extract_zone_predicate(clause: *mut pg_sys::Node, relid: i32) -> Optio
     }
     let (mut strategy, mut lt, mut rt): (c_int, pg_sys::Oid, pg_sys::Oid) =
         (0, pg_sys::InvalidOid, pg_sys::InvalidOid);
-    pg_sys::get_op_opfamily_properties((*op).opno, opfamily, false, &mut strategy, &mut lt, &mut rt);
+    pg_sys::get_op_opfamily_properties(
+        (*op).opno,
+        opfamily,
+        false,
+        &mut strategy,
+        &mut lt,
+        &mut rt,
+    );
     if lt != vartype || rt != vartype {
         return None; // not the same-type native comparison (D5)
     }
@@ -206,7 +213,10 @@ unsafe fn extract_zone_predicate(clause: *mut pg_sys::Node, relid: i32) -> Optio
 /// Extract ALL of the base rel's WHERE quals as pushable predicates. Returns `None` if ANY qual is NOT pushable —
 /// the DataFusion filter can only represent `col <op> const`, so an un-pushable qual means the CustomScan cannot
 /// apply the full WHERE and MUST decline (the native plan then applies it correctly).
-unsafe fn extract_all_predicates(input_rel: *mut pg_sys::RelOptInfo, relid: i32) -> Option<Vec<ZonePredicate>> {
+unsafe fn extract_all_predicates(
+    input_rel: *mut pg_sys::RelOptInfo,
+    relid: i32,
+) -> Option<Vec<ZonePredicate>> {
     let ris = PgList::<pg_sys::RestrictInfo>::from_pg((*input_rel).baserestrictinfo);
     let mut preds = Vec::with_capacity(ris.len());
     for i in 0..ris.len() {
@@ -299,7 +309,10 @@ unsafe fn admit(
             group_cols.push((attno, (*var).vartype.to_u32()));
         } else if (*node).type_ == pg_sys::NodeTag::T_Aggref {
             let agg = node as *mut pg_sys::Aggref;
-            if !(*agg).aggfilter.is_null() || !(*agg).aggorder.is_null() || !(*agg).aggdistinct.is_null() {
+            if !(*agg).aggfilter.is_null()
+                || !(*agg).aggorder.is_null()
+                || !(*agg).aggdistinct.is_null()
+            {
                 return None;
             }
             // Only a SIMPLE (non-split) aggregate has the FINAL result type (int8/float8). A partial/parallel split
@@ -349,7 +362,10 @@ unsafe fn admit(
                 } else if name == "avg" {
                     if vartype == pg_sys::FLOAT8OID {
                         3 // avg(float8)→float8
-                    } else if vartype == pg_sys::INT2OID || vartype == pg_sys::INT4OID || vartype == pg_sys::INT8OID {
+                    } else if vartype == pg_sys::INT2OID
+                        || vartype == pg_sys::INT4OID
+                        || vartype == pg_sys::INT8OID
+                    {
                         5 // avg(int2/4/8)→numeric (AnyNumeric division = PG numeric_div — ADR-N1)
                     } else {
                         return None; // avg(float4)→float8-ULP, avg(numeric): decline
@@ -359,11 +375,7 @@ unsafe fn admit(
                     if super::columnar::minmax_kind_of(vartype.to_u32()) == MinMaxKind::None {
                         return None; // unordered type (text/numeric/…) → native plan
                     }
-                    if name == "min" {
-                        6
-                    } else {
-                        7
-                    }
+                    if name == "min" { 6 } else { 7 }
                 };
                 layout.push((1, aggs.len()));
                 aggs.push(ParsedAgg { kind, attno: (*var).varattno as i32 });
@@ -392,7 +404,14 @@ unsafe fn admit(
         // Non-grouped: WHERE → zone-map predicates. ALL quals must be pushable (`col <op> const`), else decline so
         // the native plan applies the WHERE correctly.
         let preds = extract_all_predicates(input_rel, relid)?;
-        return Some(Admitted { mode: 0, relid, aggs, preds, group_cols: Vec::new(), layout: Vec::new() });
+        return Some(Admitted {
+            mode: 0,
+            relid,
+            aggs,
+            preds,
+            group_cols: Vec::new(),
+            layout: Vec::new(),
+        });
     }
     // Heap (M101 cache) path: non-grouped only in this slice, and does NOT filter → decline GROUP BY or any WHERE.
     if grouped || !(*input_rel).baserestrictinfo.is_null() {
@@ -408,17 +427,20 @@ unsafe fn admit(
         .iter()
         .filter_map(|a| {
             let n = pg_sys::get_attname((*rte).relid, a.attno as pg_sys::AttrNumber, true);
-            if n.is_null() {
-                None
-            } else {
-                Some(CStr::from_ptr(n).to_string_lossy().into_owned())
-            }
+            if n.is_null() { None } else { Some(CStr::from_ptr(n).to_string_lossy().into_owned()) }
         })
         .collect();
     if col_names.len() == col_aggs.len()
         && super::arrow_cache::has_cached_columns((*rte).relid.to_u32(), &col_names)
     {
-        return Some(Admitted { mode: 1, relid, aggs, preds: Vec::new(), group_cols: Vec::new(), layout: Vec::new() });
+        return Some(Admitted {
+            mode: 1,
+            relid,
+            aggs,
+            preds: Vec::new(),
+            group_cols: Vec::new(),
+            layout: Vec::new(),
+        });
     }
     None
 }
@@ -471,7 +493,8 @@ unsafe extern "C-unwind" fn planner_hook(
             ADMIT_STASH.with(|s| *s.borrow_mut() = std::mem::take(&mut self.0));
         }
     }
-    let _guard = StashGuard(ADMIT_STASH.with(|s| std::mem::replace(&mut *s.borrow_mut(), Vec::new())));
+    let _guard =
+        StashGuard(ADMIT_STASH.with(|s| std::mem::replace(&mut *s.borrow_mut(), Vec::new())));
     let stmt = match PREV_PLANNER_HOOK {
         Some(prev) => prev(parse, query_string, cursor_options, bound_params),
         None => pg_sys::standard_planner(parse, query_string, cursor_options, bound_params),
@@ -484,7 +507,10 @@ unsafe extern "C-unwind" fn planner_hook(
             let n = (*subplans).length;
             for i in 0..n {
                 let cell = (*subplans).elements.add(i as usize);
-                swap_walk(&mut (*cell).ptr_value as *mut _ as *mut *mut pg_sys::Plan, (*stmt).rtable);
+                swap_walk(
+                    &mut (*cell).ptr_value as *mut _ as *mut *mut pg_sys::Plan,
+                    (*stmt).rtable,
+                );
             }
         }
     }
@@ -525,7 +551,12 @@ unsafe fn plain_var_tlist(tlist: *mut pg_sys::List) -> *mut pg_sys::List {
             pg_sys::exprCollation(e),
             0,
         );
-        let nte = pg_sys::makeTargetEntry(var as *mut pg_sys::Expr, (i + 1) as pg_sys::AttrNumber, (*te).resname, (*te).resjunk);
+        let nte = pg_sys::makeTargetEntry(
+            var as *mut pg_sys::Expr,
+            (i + 1) as pg_sys::AttrNumber,
+            (*te).resname,
+            (*te).resjunk,
+        );
         out = pg_sys::lappend(out, nte as *mut c_void);
     }
     out
@@ -633,8 +664,12 @@ unsafe fn deparse_safe_tlist(
             }
             copied as *mut pg_sys::Expr
         };
-        let nte =
-            pg_sys::makeTargetEntry(expr, (i + 1) as pg_sys::AttrNumber, (*te).resname, (*te).resjunk);
+        let nte = pg_sys::makeTargetEntry(
+            expr,
+            (i + 1) as pg_sys::AttrNumber,
+            (*te).resname,
+            (*te).resjunk,
+        );
         out = pg_sys::lappend(out, nte as *mut c_void);
     }
     out
@@ -673,7 +708,10 @@ unsafe fn encode_private(adm: &Admitted, table_oid: u32) -> *mut pg_sys::List {
 
 /// If `plan` is an `Agg` over a columnar table matching an unconsumed stash entry, build the replacement `CustomScan`
 /// (plain-Var tlist, scanrelid=0, custom_private from the stash) with the same output shape; else `None`.
-unsafe fn try_swap_agg(plan: *mut pg_sys::Plan, rtable: *mut pg_sys::List) -> Option<*mut pg_sys::Plan> {
+unsafe fn try_swap_agg(
+    plan: *mut pg_sys::Plan,
+    rtable: *mut pg_sys::List,
+) -> Option<*mut pg_sys::Plan> {
     let agg = plan as *mut pg_sys::Agg;
     // B1 (review): only a SIMPLE (non-split) aggregate carries the FINAL result. A parallel plan splits into
     // Finalize(SIMPLE)→Gather→Partial(INITIAL_SERIAL)→ParallelSeqScan; swapping the Partial would emit the FINAL value
@@ -805,9 +843,15 @@ unsafe fn swap_walk(slot: *mut *mut pg_sys::Plan, rtable: *mut pg_sys::List) {
     swap_walk(&mut (*plan).lefttree, rtable);
     swap_walk(&mut (*plan).righttree, rtable);
     match (*plan).type_ {
-        pg_sys::NodeTag::T_Append => swap_walk_list((*(plan as *mut pg_sys::Append)).appendplans, rtable),
-        pg_sys::NodeTag::T_MergeAppend => swap_walk_list((*(plan as *mut pg_sys::MergeAppend)).mergeplans, rtable),
-        pg_sys::NodeTag::T_SubqueryScan => swap_walk(&mut (*(plan as *mut pg_sys::SubqueryScan)).subplan, rtable),
+        pg_sys::NodeTag::T_Append => {
+            swap_walk_list((*(plan as *mut pg_sys::Append)).appendplans, rtable)
+        }
+        pg_sys::NodeTag::T_MergeAppend => {
+            swap_walk_list((*(plan as *mut pg_sys::MergeAppend)).mergeplans, rtable)
+        }
+        pg_sys::NodeTag::T_SubqueryScan => {
+            swap_walk(&mut (*(plan as *mut pg_sys::SubqueryScan)).subplan, rtable)
+        }
         _ => {}
     }
 }
@@ -825,7 +869,9 @@ unsafe fn swap_walk_list(list: *mut pg_sys::List, rtable: *mut pg_sys::List) {
 }
 
 #[pg_guard]
-unsafe extern "C-unwind" fn create_custom_scan_state(_cscan: *mut pg_sys::CustomScan) -> *mut pg_sys::Node {
+unsafe extern "C-unwind" fn create_custom_scan_state(
+    _cscan: *mut pg_sys::CustomScan,
+) -> *mut pg_sys::Node {
     let ptr = pg_sys::palloc0(std::mem::size_of::<ColumnarAggState>()) as *mut ColumnarAggState;
     let st = &mut *ptr;
     st.css.ss.ps.type_ = pg_sys::NodeTag::T_CustomScanState;
@@ -873,7 +919,9 @@ unsafe extern "C-unwind" fn begin_custom_scan(
                 CStr::from_ptr(nm).to_string_lossy().into_owned()
             };
             // min/max output type = the input column type; recover its OID from the relation attribute (kinds 6/7).
-            let col_typoid = |ano: i32| -> u32 { pg_sys::get_atttype(relid, ano as pg_sys::AttrNumber).to_u32() };
+            let col_typoid = |ano: i32| -> u32 {
+                pg_sys::get_atttype(relid, ano as pg_sys::AttrNumber).to_u32()
+            };
             match kind {
                 0 => specs.push(AggSpec::CountStar),
                 1 => specs.push(AggSpec::SumFloat8(col_name(attno))),
@@ -929,8 +977,14 @@ unsafe extern "C-unwind" fn begin_custom_scan(
         if ngroup > 0 {
             // GROUP BY (columnar only — admit declined grouped heap / grouped+WHERE). Multi-row result.
             let rel = pg_sys::relation_open(relid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
-            let r =
-                run_columnar_grouped_aggs(rel, &group_cols, &specs, &layout, &preds, super::guc::columnar_zonemap_skip());
+            let r = run_columnar_grouped_aggs(
+                rel,
+                &group_cols,
+                &specs,
+                &layout,
+                &preds,
+                super::guc::columnar_zonemap_skip(),
+            );
             pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
             r
         } else if mode == 1 {
@@ -943,46 +997,51 @@ unsafe extern "C-unwind" fn begin_custom_scan(
             // zone-map directory (+ pending) WITHOUT decoding any column chunk. Try every agg; if all fold, emit that
             // row; if any gates out (unordered, max-float, has_minmax=false group, all-NaN pending), fall back to the
             // full Phase-A scan below. Byte-identical either way (blueprint ADR-MM1).
-            let all_minmax =
-                !specs.is_empty() && specs.iter().all(|s| matches!(s, AggSpec::MinCol(..) | AggSpec::MaxCol(..)));
-            let fast: Option<Result<Vec<Vec<(pg_sys::Datum, bool)>>, String>> = if preds.is_empty() && all_minmax {
-                let mut row = Vec::with_capacity(specs.len());
-                let mut ok = true;
-                let mut err = None;
-                for s in &specs {
-                    let (name, typoid, want_max) = match s {
-                        AggSpec::MinCol(n, t) => (n.as_str(), *t, false),
-                        AggSpec::MaxCol(n, t) => (n.as_str(), *t, true),
-                        _ => unreachable!(),
-                    };
-                    match super::columnar::directory_minmax(rel, name, typoid, want_max) {
-                        Ok(Some(cell)) => row.push(cell),
-                        Ok(None) => {
-                            ok = false;
-                            break;
-                        }
-                        Err(e) => {
-                            err = Some(e);
-                            break;
+            let all_minmax = !specs.is_empty()
+                && specs.iter().all(|s| matches!(s, AggSpec::MinCol(..) | AggSpec::MaxCol(..)));
+            let fast: Option<Result<Vec<Vec<(pg_sys::Datum, bool)>>, String>> =
+                if preds.is_empty() && all_minmax {
+                    let mut row = Vec::with_capacity(specs.len());
+                    let mut ok = true;
+                    let mut err = None;
+                    for s in &specs {
+                        let (name, typoid, want_max) = match s {
+                            AggSpec::MinCol(n, t) => (n.as_str(), *t, false),
+                            AggSpec::MaxCol(n, t) => (n.as_str(), *t, true),
+                            _ => unreachable!(),
+                        };
+                        match super::columnar::directory_minmax(rel, name, typoid, want_max) {
+                            Ok(Some(cell)) => row.push(cell),
+                            Ok(None) => {
+                                ok = false;
+                                break;
+                            }
+                            Err(e) => {
+                                err = Some(e);
+                                break;
+                            }
                         }
                     }
-                }
-                match (ok, err) {
-                    (_, Some(e)) => Some(Err(e)),
-                    (true, None) => Some(Ok(vec![row])),
-                    (false, None) => None, // gated out → Phase A
-                }
-            } else {
-                None
-            };
+                    match (ok, err) {
+                        (_, Some(e)) => Some(Err(e)),
+                        (true, None) => Some(Ok(vec![row])),
+                        (false, None) => None, // gated out → Phase A
+                    }
+                } else {
+                    None
+                };
             // Honest path signal for the A/B (opt-in): which path answered this scalar min/max.
             if all_minmax && std::env::var("THEODB_SCAN_PROFILE").is_ok_and(|v| v == "1") {
                 let taken = matches!(fast, Some(Ok(_)));
-                pgrx::notice!("theodb_columnar minmax path={}", if taken { "fastpath" } else { "scan" });
+                pgrx::notice!(
+                    "theodb_columnar minmax path={}",
+                    if taken { "fastpath" } else { "scan" }
+                );
             }
             let r = match fast {
                 Some(res) => res,
-                None => run_columnar_aggs(rel, &specs, &preds, super::guc::columnar_zonemap_skip()).map(|row| vec![row]),
+                None => run_columnar_aggs(rel, &specs, &preds, super::guc::columnar_zonemap_skip())
+                    .map(|row| vec![row]),
             };
             pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
             r
@@ -996,7 +1055,9 @@ unsafe extern "C-unwind" fn begin_custom_scan(
 }
 
 #[pg_guard]
-unsafe extern "C-unwind" fn exec_custom_scan(node: *mut pg_sys::CustomScanState) -> *mut pg_sys::TupleTableSlot {
+unsafe extern "C-unwind" fn exec_custom_scan(
+    node: *mut pg_sys::CustomScanState,
+) -> *mut pg_sys::TupleTableSlot {
     let st = &mut *(node as *mut ColumnarAggState);
     let slot = st.css.ss.ss_ScanTupleSlot;
     if st.result.is_null() {
@@ -1054,9 +1115,11 @@ mod tests {
         Spi::run(&format!("INSERT INTO m100_ha {gen_sql}")).unwrap();
 
         // EXPLAIN: the top node over the columnar table is our CustomScan.
-        let top = Spi::get_one::<String>("EXPLAIN (COSTS OFF) SELECT count(*), sum(measure) FROM m100_ca")
-            .unwrap()
-            .unwrap();
+        let top = Spi::get_one::<String>(
+            "EXPLAIN (COSTS OFF) SELECT count(*), sum(measure) FROM m100_ca",
+        )
+        .unwrap()
+        .unwrap();
         assert!(
             top.contains("Custom Scan") || top.contains("theodb_columnar_agg"),
             "the columnar aggregate must be a CustomScan node: {top}"
@@ -1089,8 +1152,14 @@ mod tests {
         Spi::run(&format!("INSERT INTO gb_h {gen_sql}")).unwrap();
 
         // CustomScan engaged for the grouped aggregate.
-        let plan = Spi::get_one::<String>("EXPLAIN (COSTS OFF) SELECT k, sum(x) FROM gb_c GROUP BY k").unwrap().unwrap();
-        assert!(plan.contains("Custom Scan") || plan.contains("theodb_columnar_agg"), "GROUP BY must be a CustomScan: {plan}");
+        let plan =
+            Spi::get_one::<String>("EXPLAIN (COSTS OFF) SELECT k, sum(x) FROM gb_c GROUP BY k")
+                .unwrap()
+                .unwrap();
+        assert!(
+            plan.contains("Custom Scan") || plan.contains("theodb_columnar_agg"),
+            "GROUP BY must be a CustomScan: {plan}"
+        );
 
         // Fetch a grouped result set at TOP LEVEL (only bare Var/Aggref in the target so the CustomScan is admitted)
         // and compare the row lists. `q` is `(int_key, sum, count)` sorted by key.
@@ -1098,7 +1167,11 @@ mod tests {
         let fetch = |t: &str| -> Vec<(i32, i64, i64)> {
             Spi::connect(|c| {
                 let rows = c
-                    .select(&format!("SELECT k, sum(x), count(*) FROM {t} GROUP BY k ORDER BY k"), None, &[])
+                    .select(
+                        &format!("SELECT k, sum(x), count(*) FROM {t} GROUP BY k ORDER BY k"),
+                        None,
+                        &[],
+                    )
                     .unwrap();
                 rows.map(|r| {
                     (
@@ -1110,7 +1183,11 @@ mod tests {
                 .collect::<Vec<_>>()
             })
         };
-        assert_eq!(fetch("gb_c"), fetch("gb_h"), "int GROUP BY (key, sum, count) result set must match the heap");
+        assert_eq!(
+            fetch("gb_c"),
+            fetch("gb_h"),
+            "int GROUP BY (key, sum, count) result set must match the heap"
+        );
 
         // ADR-2: agg-BEFORE-key column order maps correctly (sum first, key second).
         let fetch_ab = |t: &str| -> Vec<(i64, i32)> {
@@ -1118,21 +1195,42 @@ mod tests {
                 let rows = c
                     .select(&format!("SELECT sum(x), k FROM {t} GROUP BY k ORDER BY k"), None, &[])
                     .unwrap();
-                rows.map(|r| (r.get::<f64>(1).unwrap().unwrap().round() as i64, r.get::<i32>(2).unwrap().unwrap())).collect::<Vec<_>>()
+                rows.map(|r| {
+                    (
+                        r.get::<f64>(1).unwrap().unwrap().round() as i64,
+                        r.get::<i32>(2).unwrap().unwrap(),
+                    )
+                })
+                .collect::<Vec<_>>()
             })
         };
-        assert_eq!(fetch_ab("gb_c"), fetch_ab("gb_h"), "agg-before-key (ADR-2) result set must match the heap");
+        assert_eq!(
+            fetch_ab("gb_c"),
+            fetch_ab("gb_h"),
+            "agg-before-key (ADR-2) result set must match the heap"
+        );
 
         // ADR-3: a text key (palloc'd varlena) grouped over multiple emitted rows, incl. the NULL group.
         let fetch_txt = |t: &str| -> Vec<(Option<String>, i64)> {
             Spi::connect(|c| {
                 let rows = c
-                    .select(&format!("SELECT lbl, count(*) FROM {t} GROUP BY lbl ORDER BY lbl NULLS FIRST"), None, &[])
+                    .select(
+                        &format!(
+                            "SELECT lbl, count(*) FROM {t} GROUP BY lbl ORDER BY lbl NULLS FIRST"
+                        ),
+                        None,
+                        &[],
+                    )
                     .unwrap();
-                rows.map(|r| (r.get::<String>(1).unwrap(), r.get::<i64>(2).unwrap().unwrap())).collect::<Vec<_>>()
+                rows.map(|r| (r.get::<String>(1).unwrap(), r.get::<i64>(2).unwrap().unwrap()))
+                    .collect::<Vec<_>>()
             })
         };
-        assert_eq!(fetch_txt("gb_c"), fetch_txt("gb_h"), "text GROUP BY (incl NULL group) must match the heap");
+        assert_eq!(
+            fetch_txt("gb_c"),
+            fetch_txt("gb_h"),
+            "text GROUP BY (incl NULL group) must match the heap"
+        );
 
         Spi::run("DROP TABLE gb_c").unwrap();
         Spi::run("DROP TABLE gb_h").unwrap();
@@ -1150,23 +1248,41 @@ mod tests {
         Spi::run(&format!("INSERT INTO m114c {gen_sql}")).unwrap();
         Spi::run(&format!("INSERT INTO m114h {gen_sql}")).unwrap();
         let is_cs = |sql: &str| -> bool {
-            Spi::get_one::<String>(&format!("EXPLAIN (COSTS OFF) {sql}")).unwrap().unwrap().contains("theodb_columnar_agg")
+            Spi::get_one::<String>(&format!("EXPLAIN (COSTS OFF) {sql}"))
+                .unwrap()
+                .unwrap()
+                .contains("theodb_columnar_agg")
         };
 
         // ADMITTED (M114):
-        assert!(is_cs("SELECT k, sum(x) FROM m114c WHERE k>=0 GROUP BY k"), "GROUP BY + pushable WHERE must be a CustomScan");
+        assert!(
+            is_cs("SELECT k, sum(x) FROM m114c WHERE k>=0 GROUP BY k"),
+            "GROUP BY + pushable WHERE must be a CustomScan"
+        );
         assert!(is_cs("SELECT avg(x) FROM m114c"), "avg(float8) must be a CustomScan");
         assert!(is_cs("SELECT sum(i4) FROM m114c"), "sum(int4) must be a CustomScan");
         assert!(is_cs("SELECT sum(i2) FROM m114c"), "sum(int2) must be a CustomScan");
         // ADMITTED (numeric-output slice — byte-identical via AnyNumeric = PG numeric_div):
-        assert!(is_cs("SELECT avg(i4) FROM m114c"), "avg(int4)→numeric must be a CustomScan (numeric-output slice)");
-        assert!(is_cs("SELECT sum(b) FROM m114c"), "sum(int8)→numeric must be a CustomScan (numeric-output slice)");
+        assert!(
+            is_cs("SELECT avg(i4) FROM m114c"),
+            "avg(int4)→numeric must be a CustomScan (numeric-output slice)"
+        );
+        assert!(
+            is_cs("SELECT sum(b) FROM m114c"),
+            "sum(int8)→numeric must be a CustomScan (numeric-output slice)"
+        );
         // DECLINED (real output / numeric-column input still out of scope):
         assert!(!is_cs("SELECT sum(f4) FROM m114c"), "sum(real) must decline");
-        assert!(!is_cs("SELECT date_trunc('day',ts), sum(x) FROM m114c GROUP BY date_trunc('day',ts)"), "grouping expr must decline");
+        assert!(
+            !is_cs("SELECT date_trunc('day',ts), sum(x) FROM m114c GROUP BY date_trunc('day',ts)"),
+            "grouping expr must decline"
+        );
         // B1 regression (M114 heap M101-cache path): sum(int4) over a heap table with NO cache covering the column
         // must DECLINE — before the fix the empty kind==1 name-set made has_cached_columns([]) admit mode 1 wrongly.
-        assert!(!is_cs("SELECT sum(i4) FROM m114h"), "heap sum(int4) with no cache must decline (B1 regression)");
+        assert!(
+            !is_cs("SELECT sum(i4) FROM m114h"),
+            "heap sum(int4) with no cache must decline (B1 regression)"
+        );
 
         // Byte-identical scalar spot-check (top-level single-row → Spi::get_one works despite the M100 composability limit).
         let cavg = Spi::get_one::<f64>("SELECT avg(x) FROM m114c").unwrap().unwrap();
@@ -1186,7 +1302,10 @@ mod tests {
     #[pg_test]
     fn test_numeric_output_aggregates_byte_identical() {
         Spi::run("SET theodb.enable_columnar_agg = on").unwrap();
-        Spi::run("CREATE TABLE numc (g int, s2 int2, s4 int4, s8 int8, big int8) USING theodb_columnar").unwrap();
+        Spi::run(
+            "CREATE TABLE numc (g int, s2 int2, s4 int4, s8 int8, big int8) USING theodb_columnar",
+        )
+        .unwrap();
         Spi::run("CREATE TABLE numh (g int, s2 int2, s4 int4, s8 int8, big int8)").unwrap();
         // g%4 groups; small values (avg scale 16), ~1e9 in s8 (avg scale shrinks), and `big`=2e15 whose sum over 5000
         // rows (1e19) EXCEEDS i64 max (9.2e18) — a wrapping Int64 sum would go negative, so an identical numeric result
@@ -1197,13 +1316,23 @@ mod tests {
         Spi::run(&format!("INSERT INTO numh {gen_sql}")).unwrap();
 
         let is_cs = |sql: &str| -> bool {
-            Spi::get_one::<String>(&format!("EXPLAIN (COSTS OFF) {sql}")).unwrap().unwrap().contains("theodb_columnar_agg")
+            Spi::get_one::<String>(&format!("EXPLAIN (COSTS OFF) {sql}"))
+                .unwrap()
+                .unwrap()
+                .contains("theodb_columnar_agg")
         };
         // Compare scalar numeric aggregate output rendered as TEXT (captures scale exactly).
         let eq_text = |agg: &str| {
-            assert!(is_cs(&format!("SELECT {agg} FROM numc")), "{agg} over columnar must be a CustomScan");
-            let c = Spi::get_one::<String>(&format!("SELECT ({agg})::text FROM numc")).unwrap().unwrap();
-            let h = Spi::get_one::<String>(&format!("SELECT ({agg})::text FROM numh")).unwrap().unwrap();
+            assert!(
+                is_cs(&format!("SELECT {agg} FROM numc")),
+                "{agg} over columnar must be a CustomScan"
+            );
+            let c = Spi::get_one::<String>(&format!("SELECT ({agg})::text FROM numc"))
+                .unwrap()
+                .unwrap();
+            let h = Spi::get_one::<String>(&format!("SELECT ({agg})::text FROM numh"))
+                .unwrap()
+                .unwrap();
             assert_eq!(c, h, "{agg} must be byte-identical (as text) to the heap");
         };
 
@@ -1231,20 +1360,33 @@ mod tests {
     fn test_columnar_minmax_phase_a_byte_identical() {
         Spi::run("SET theodb.enable_columnar_agg = on").unwrap();
         Spi::run("CREATE TABLE mmc (i4 int4, i2 int2, i8 int8, f8 float8, b bool, ts timestamptz) USING theodb_columnar").unwrap();
-        Spi::run("CREATE TABLE mmh (i4 int4, i2 int2, i8 int8, f8 float8, b bool, ts timestamptz)").unwrap();
+        Spi::run("CREATE TABLE mmh (i4 int4, i2 int2, i8 int8, f8 float8, b bool, ts timestamptz)")
+            .unwrap();
         let g = "SELECT g-5000, (g%200-100)::int2, g::int8*1000, (g*1.5-7500)::float8, (g%2=0), timestamptz '2020-01-01'+(g*interval '1 min') FROM generate_series(1,10000) g";
         Spi::run(&format!("INSERT INTO mmc {g}")).unwrap();
         Spi::run(&format!("INSERT INTO mmh {g}")).unwrap();
-        let is_cs = |sql: &str| Spi::get_one::<String>(&format!("EXPLAIN (COSTS OFF) {sql}")).unwrap().unwrap().contains("theodb_columnar_agg");
+        let is_cs = |sql: &str| {
+            Spi::get_one::<String>(&format!("EXPLAIN (COSTS OFF) {sql}"))
+                .unwrap()
+                .unwrap()
+                .contains("theodb_columnar_agg")
+        };
         // WHERE forces Phase A (npred>0) — still byte-identical; assert every ordered type min+max.
         // NOTE: PG has no min/max aggregate for bool (only bool_and/bool_or), so `b` is not aggregated here.
-        for (c, w) in [("i4", "WHERE i4 > -999999"), ("i2", "WHERE i4 > -999999"), ("i8", "WHERE i4 > -999999"),
-                       ("f8", "WHERE i4 > -999999"), ("ts", "WHERE i4 > -999999")] {
+        for (c, w) in [
+            ("i4", "WHERE i4 > -999999"),
+            ("i2", "WHERE i4 > -999999"),
+            ("i8", "WHERE i4 > -999999"),
+            ("f8", "WHERE i4 > -999999"),
+            ("ts", "WHERE i4 > -999999"),
+        ] {
             for agg in ["min", "max"] {
                 let sql = format!("SELECT {agg}({c}) FROM mmc {w}");
                 assert!(is_cs(&sql), "{agg}({c}) with WHERE must be a CustomScan");
-                let vc = Spi::get_one::<String>(&format!("SELECT ({agg}({c}))::text FROM mmc {w}")).unwrap();
-                let vh = Spi::get_one::<String>(&format!("SELECT ({agg}({c}))::text FROM mmh {w}")).unwrap();
+                let vc = Spi::get_one::<String>(&format!("SELECT ({agg}({c}))::text FROM mmc {w}"))
+                    .unwrap();
+                let vh = Spi::get_one::<String>(&format!("SELECT ({agg}({c}))::text FROM mmh {w}"))
+                    .unwrap();
                 assert_eq!(vc, vh, "{agg}({c}) must be byte-identical to the heap");
             }
         }
@@ -1283,7 +1425,11 @@ mod tests {
         // (c) all-NULL column → NULL.
         Spi::run("CREATE TABLE fpn (v int4) USING theodb_columnar").unwrap();
         Spi::run("INSERT INTO fpn SELECT NULL FROM generate_series(1,1000)").unwrap();
-        assert_eq!(Spi::get_one::<i32>("SELECT max(v) FROM fpn").unwrap(), None, "all-NULL max → NULL");
+        assert_eq!(
+            Spi::get_one::<i32>("SELECT max(v) FROM fpn").unwrap(),
+            None,
+            "all-NULL max → NULL"
+        );
         // (d) max(float) with NaN falls back and returns NaN.
         Spi::run("CREATE TABLE fpf (v float8) USING theodb_columnar").unwrap();
         Spi::run("INSERT INTO fpf SELECT CASE WHEN g=1 THEN 'NaN'::float8 ELSE g::float8 END FROM generate_series(1,1000) g").unwrap();
@@ -1308,11 +1454,21 @@ mod tests {
         Spi::run(&format!("INSERT INTO m115h {gen_sql}")).unwrap();
 
         // Subquery over a grouped columnar aggregate (the shape that used to error). Byte-identical to the heap.
-        let sub = |t: &str| Spi::get_one::<f64>(&format!("SELECT sum(s) FROM (SELECT k, sum(x) s FROM {t} GROUP BY k) q")).unwrap().unwrap();
+        let sub = |t: &str| {
+            Spi::get_one::<f64>(&format!(
+                "SELECT sum(s) FROM (SELECT k, sum(x) s FROM {t} GROUP BY k) q"
+            ))
+            .unwrap()
+            .unwrap()
+        };
         assert_eq!(sub("m115c"), sub("m115h"), "subquery over grouped agg must be byte-identical");
 
         // Scalar aggregate consumed in an outer expression.
-        let scal = |t: &str| Spi::get_one::<f64>(&format!("SELECT s+1 FROM (SELECT sum(x) s FROM {t}) q")).unwrap().unwrap();
+        let scal = |t: &str| {
+            Spi::get_one::<f64>(&format!("SELECT s+1 FROM (SELECT sum(x) s FROM {t}) q"))
+                .unwrap()
+                .unwrap()
+        };
         assert_eq!(scal("m115c"), scal("m115h"), "scalar s+1 over subquery must be byte-identical");
 
         // JOIN on the grouped output — 10 matching groups.
@@ -1320,8 +1476,14 @@ mod tests {
         assert_eq!(jc, 10, "join on grouped output must match all 10 groups");
 
         // Top-level GROUP BY still a CustomScan (no regression).
-        let plan = Spi::get_one::<String>("EXPLAIN (COSTS OFF) SELECT k, sum(x) FROM m115c GROUP BY k").unwrap().unwrap();
-        assert!(plan.contains("Custom Scan") || plan.contains("theodb_columnar_agg"), "top-level GROUP BY must stay a CustomScan: {plan}");
+        let plan =
+            Spi::get_one::<String>("EXPLAIN (COSTS OFF) SELECT k, sum(x) FROM m115c GROUP BY k")
+                .unwrap()
+                .unwrap();
+        assert!(
+            plan.contains("Custom Scan") || plan.contains("theodb_columnar_agg"),
+            "top-level GROUP BY must stay a CustomScan: {plan}"
+        );
 
         Spi::run("DROP TABLE m115c").unwrap();
         Spi::run("DROP TABLE m115h").unwrap();

@@ -61,7 +61,9 @@ pub(crate) fn build_lut16(query: &[f32], q: &AqQuantizer) -> Result<Lut16, Strin
     let m = q.m();
     let sub_dim = if m == 0 { 0 } else { q.dim() / m };
     if q.dim() == 0 {
-        return Err("ah build_lut16: empty codebook (train on a non-empty corpus first)".to_string());
+        return Err(
+            "ah build_lut16: empty codebook (train on a non-empty corpus first)".to_string()
+        );
     }
     if query.len() != q.dim() {
         return Err(format!(
@@ -243,32 +245,34 @@ mod simd_ah {
     /// register shuffles. This scores a single code (per-node HNSW walk, ADR D4); a batched block variant is a
     /// Phase-4 follow-up if the walk under-feeds `pshufb`.
     #[target_feature(enable = "avx2")]
-    pub(super) unsafe fn ah_score(lut: &Lut16, code: &[u8]) -> i32 { unsafe {
-        let m = lut.m();
-        let tab = lut.tables_ptr();
-        let mut acc = 0i32;
-        let mut i = 0usize;
-        // Process subspaces in pairs via a broadcasted 16-byte LUT lane + a 1-byte nibble index. `pshufb`
-        // selects `tab[nibble]` for the low 4 bits of each index byte (the high bit selects zero, unused here).
-        while i < m {
-            let byte = *code.get_unchecked(i / 2);
-            // Low nibble → subspace i.
-            let lut_lo = _mm_loadu_si128(tab.add(i * 16) as *const __m128i);
-            let idx_lo = _mm_set1_epi8((byte & 0x0F) as i8);
-            let got_lo = _mm_shuffle_epi8(lut_lo, idx_lo);
-            acc += _mm_extract_epi8(got_lo, 0); // _mm_extract_epi8 already returns i32
-            i += 1;
-            if i < m {
-                // High nibble → subspace i (now the odd one).
-                let lut_hi = _mm_loadu_si128(tab.add(i * 16) as *const __m128i);
-                let idx_hi = _mm_set1_epi8(((byte >> 4) & 0x0F) as i8);
-                let got_hi = _mm_shuffle_epi8(lut_hi, idx_hi);
-                acc += _mm_extract_epi8(got_hi, 0);
+    pub(super) unsafe fn ah_score(lut: &Lut16, code: &[u8]) -> i32 {
+        unsafe {
+            let m = lut.m();
+            let tab = lut.tables_ptr();
+            let mut acc = 0i32;
+            let mut i = 0usize;
+            // Process subspaces in pairs via a broadcasted 16-byte LUT lane + a 1-byte nibble index. `pshufb`
+            // selects `tab[nibble]` for the low 4 bits of each index byte (the high bit selects zero, unused here).
+            while i < m {
+                let byte = *code.get_unchecked(i / 2);
+                // Low nibble → subspace i.
+                let lut_lo = _mm_loadu_si128(tab.add(i * 16) as *const __m128i);
+                let idx_lo = _mm_set1_epi8((byte & 0x0F) as i8);
+                let got_lo = _mm_shuffle_epi8(lut_lo, idx_lo);
+                acc += _mm_extract_epi8(got_lo, 0); // _mm_extract_epi8 already returns i32
                 i += 1;
+                if i < m {
+                    // High nibble → subspace i (now the odd one).
+                    let lut_hi = _mm_loadu_si128(tab.add(i * 16) as *const __m128i);
+                    let idx_hi = _mm_set1_epi8(((byte >> 4) & 0x0F) as i8);
+                    let got_hi = _mm_shuffle_epi8(lut_hi, idx_hi);
+                    acc += _mm_extract_epi8(got_hi, 0);
+                    i += 1;
+                }
             }
+            acc
         }
-        acc
-    }}
+    }
 
     /// Batched AH score of a block of `n` codes, subspace-major transposed layout (FAISS FastScan `bbs`): the
     /// caller lays `codes` out so `codes[s*n + v]` holds the packed nibble of subspace-pair `s` for vector `v`.
@@ -278,49 +282,53 @@ mod simd_ah {
     ///
     /// SAFETY: caller guarantees AVX2 available; `n <= 32`; `codes.len() == ceil(m/2) * n`; `out.len() == n`.
     #[target_feature(enable = "avx2")]
-    pub(super) unsafe fn ah_score_block32(lut: &Lut16, codes: &[u8], n: usize, out: &mut [i32]) { unsafe {
-        let m = lut.m();
-        let tab = lut.tables_ptr();
-        // Two i16 accumulators cover 32 lanes (16 per YMM half after widening).
-        let mut acc_lo = _mm256_setzero_si256(); // vectors 0..16 (i16)
-        let mut acc_hi = _mm256_setzero_si256(); // vectors 16..32 (i16)
-        let mask_lo = _mm256_set1_epi8(0x0F);
-        let mut s = 0usize;
-        let mut pair = 0usize;
-        while s < m {
-            // 32-byte block of packed nibbles for this subspace-pair, one byte per vector.
-            let block = _mm256_loadu_si256(codes.as_ptr().add(pair * 32) as *const __m256i);
-            // Low nibble = subspace s; high nibble = subspace s+1.
-            let idx_lo = _mm256_and_si256(block, mask_lo);
-            let lut_s = broadcast_lane(tab.add(s * 16));
-            let part_lo = _mm256_shuffle_epi8(lut_s, idx_lo); // 32 int8 partials for subspace s
-            widen_add(&mut acc_lo, &mut acc_hi, part_lo);
-            s += 1;
-            if s < m {
-                let idx_hi = _mm256_and_si256(_mm256_srli_epi16(block, 4), mask_lo);
-                let lut_s1 = broadcast_lane(tab.add(s * 16));
-                let part_hi = _mm256_shuffle_epi8(lut_s1, idx_hi);
-                widen_add(&mut acc_lo, &mut acc_hi, part_hi);
+    pub(super) unsafe fn ah_score_block32(lut: &Lut16, codes: &[u8], n: usize, out: &mut [i32]) {
+        unsafe {
+            let m = lut.m();
+            let tab = lut.tables_ptr();
+            // Two i16 accumulators cover 32 lanes (16 per YMM half after widening).
+            let mut acc_lo = _mm256_setzero_si256(); // vectors 0..16 (i16)
+            let mut acc_hi = _mm256_setzero_si256(); // vectors 16..32 (i16)
+            let mask_lo = _mm256_set1_epi8(0x0F);
+            let mut s = 0usize;
+            let mut pair = 0usize;
+            while s < m {
+                // 32-byte block of packed nibbles for this subspace-pair, one byte per vector.
+                let block = _mm256_loadu_si256(codes.as_ptr().add(pair * 32) as *const __m256i);
+                // Low nibble = subspace s; high nibble = subspace s+1.
+                let idx_lo = _mm256_and_si256(block, mask_lo);
+                let lut_s = broadcast_lane(tab.add(s * 16));
+                let part_lo = _mm256_shuffle_epi8(lut_s, idx_lo); // 32 int8 partials for subspace s
+                widen_add(&mut acc_lo, &mut acc_hi, part_lo);
                 s += 1;
+                if s < m {
+                    let idx_hi = _mm256_and_si256(_mm256_srli_epi16(block, 4), mask_lo);
+                    let lut_s1 = broadcast_lane(tab.add(s * 16));
+                    let part_hi = _mm256_shuffle_epi8(lut_s1, idx_hi);
+                    widen_add(&mut acc_lo, &mut acc_hi, part_hi);
+                    s += 1;
+                }
+                pair += 1;
             }
-            pair += 1;
+            // Store the two i16 accumulators and widen to the i32 output.
+            let mut buf = [0i16; 32];
+            _mm256_storeu_si256(buf.as_mut_ptr() as *mut __m256i, acc_lo);
+            _mm256_storeu_si256(buf.as_mut_ptr().add(16) as *mut __m256i, acc_hi);
+            for (v, o) in out.iter_mut().enumerate().take(n) {
+                *o = buf[v] as i32;
+            }
         }
-        // Store the two i16 accumulators and widen to the i32 output.
-        let mut buf = [0i16; 32];
-        _mm256_storeu_si256(buf.as_mut_ptr() as *mut __m256i, acc_lo);
-        _mm256_storeu_si256(buf.as_mut_ptr().add(16) as *mut __m256i, acc_hi);
-        for (v, o) in out.iter_mut().enumerate().take(n) {
-            *o = buf[v] as i32;
-        }
-    }}
+    }
 
     /// Broadcast a 16-byte LUT lane into both 128-bit halves of a YMM so `_mm256_shuffle_epi8` (which shuffles
     /// per-128-bit-lane) uses the same table in each half.
     #[target_feature(enable = "avx2")]
-    unsafe fn broadcast_lane(p: *const i8) -> __m256i { unsafe {
-        let lane = _mm_loadu_si128(p as *const __m128i);
-        _mm256_set_m128i(lane, lane)
-    }}
+    unsafe fn broadcast_lane(p: *const i8) -> __m256i {
+        unsafe {
+            let lane = _mm_loadu_si128(p as *const __m128i);
+            _mm256_set_m128i(lane, lane)
+        }
+    }
 
     /// Widen 32 int8 partials into the two i16 accumulators (avoids overflow across `m` subspaces, blueprint T2).
     /// Uses `_mm256_cvtepi8_epi16` on each 128-bit half so byte-lane `v` maps to i16-lane `v` IN ORDER — the

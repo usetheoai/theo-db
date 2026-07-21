@@ -38,7 +38,9 @@ mod theodb_rs {
                 )
                 .unwrap();
             for row in t {
-                if let (Some(id), Some(name)) = (row.get::<i64>(1).ok().flatten(), row.get::<String>(2).ok().flatten()) {
+                if let (Some(id), Some(name)) =
+                    (row.get::<i64>(1).ok().flatten(), row.get::<String>(2).ok().flatten())
+                {
                     ids.push(id);
                     names.push(name);
                 }
@@ -54,7 +56,9 @@ mod theodb_rs {
                 "UPDATE theodb.graph_nodes SET embedding = ($1)::vector WHERE id = $2",
                 &[v.as_str().into(), (*id).into()],
             )
-            .unwrap_or_else(|e| crate::pg::err_input(&format!("theodb.graph_embed_nodes: update failed: {e:?}")));
+            .unwrap_or_else(|e| {
+                crate::pg::err_input(&format!("theodb.graph_embed_nodes: update failed: {e:?}"))
+            });
         }
         ids.len() as i64
     }
@@ -94,7 +98,12 @@ REVOKE ALL ON FUNCTION theodb.graph_embed_nodes(text,text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION theodb.graph_rag_search(public.vector,text,text,int,int) FROM PUBLIC;
 "#,
     name = "theodb_graph_rag_wrappers",
-    requires = [_graph_embed_nodes, "theodb_graph_node_embedding", "theodb_graph_extract_schema", "vector_type"],
+    requires = [
+        _graph_embed_nodes,
+        "theodb_graph_node_embedding",
+        "theodb_graph_extract_schema",
+        "vector_type"
+    ],
 );
 
 #[cfg(any(test, feature = "pg_test"))]
@@ -106,7 +115,13 @@ mod tests {
     // the CSR. A: [1,0,0,0], B:[0,1,0,0], C:[0,0,1,0], D:[0,0,0,1], E:[1,1,0,0] (isolated). Chain edges
     // A-B('kab'), B-C('kbc'), C-D('kcd'). Returns nothing; nodes/edges are queried by normalized_name.
     fn seed_hermetic() {
-        for (name, emb) in [("A", "[1,0,0,0]"), ("B", "[0,1,0,0]"), ("C", "[0,0,1,0]"), ("D", "[0,0,0,1]"), ("E", "[1,1,0,0]")] {
+        for (name, emb) in [
+            ("A", "[1,0,0,0]"),
+            ("B", "[0,1,0,0]"),
+            ("C", "[0,0,1,0]"),
+            ("D", "[0,0,0,1]"),
+            ("E", "[1,1,0,0]"),
+        ] {
             Spi::run(&format!(
                 "INSERT INTO theodb.graph_nodes (workspace_id,collection_id,name,normalized_name,embedding) \
                  VALUES ('ws','c','{name}','{}','{emb}'::vector)",
@@ -124,7 +139,8 @@ mod tests {
                  VALUES ('ws','c',{lo},{hi},1,ARRAY['{chunk}']::text[])"
             )).unwrap();
         }
-        Spi::get_one::<i64>("SELECT theodb.graph_build('theodb.graph_edges','src_id','dst_id')").unwrap();
+        Spi::get_one::<i64>("SELECT theodb.graph_build('theodb.graph_edges','src_id','dst_id')")
+            .unwrap();
     }
 
     // M111 (T1.1): the flow — query closest to A, k_entry=1, max_hops=2 → entry {A}, reached {A,B,C}, chunks from
@@ -138,7 +154,11 @@ mod tests {
                 None, &[],
             ).unwrap().map(|r| r.get::<String>(1).unwrap().unwrap()).collect()
         });
-        assert_eq!(chunks, vec!["kab", "kbc", "kcd"], "entry A + ≤2-hop reaches all three chain chunks");
+        assert_eq!(
+            chunks,
+            vec!["kab", "kbc", "kcd"],
+            "entry A + ≤2-hop reaches all three chain chunks"
+        );
     }
 
     // M111 (T1.1): the traversal ADDS recall — the gold chunk 'kcd' belongs to a 2-hop neighbor (C-D), NOT the
@@ -150,7 +170,10 @@ mod tests {
         let has_kcd: bool = Spi::get_one(
             "SELECT EXISTS(SELECT 1 FROM theodb.graph_rag_search('[0.9,0.1,0,0]'::vector,'ws','c',1,3) WHERE chunk_id='kcd')"
         ).unwrap().unwrap();
-        assert!(has_kcd, "graph traversal surfaces a distant neighbor's chunk that entry-only vector would miss");
+        assert!(
+            has_kcd,
+            "graph traversal surfaces a distant neighbor's chunk that entry-only vector would miss"
+        );
     }
 
     // M111 (T1.1): max_hops bound. max_hops=0 → entry {A} only → chunks from edges touching A = {kab}.
@@ -163,14 +186,22 @@ mod tests {
                 None, &[],
             ).unwrap().map(|r| r.get::<String>(1).unwrap().unwrap()).collect()
         });
-        assert_eq!(chunks, vec!["kab"], "max_hops=0 returns only the entry entity's own edge chunks");
+        assert_eq!(
+            chunks,
+            vec!["kab"],
+            "max_hops=0 returns only the entry entity's own edge chunks"
+        );
     }
 
     // M111 (T1.1): empty / wrong workspace → no rows, no panic (tenant-scoped).
     #[pg_test]
     fn m111_flow_empty_and_isolation() {
         seed_hermetic();
-        let other: i64 = Spi::get_one("SELECT count(*) FROM theodb.graph_rag_search('[0.9,0.1,0,0]'::vector,'other','c',1,2)").unwrap().unwrap();
+        let other: i64 = Spi::get_one(
+            "SELECT count(*) FROM theodb.graph_rag_search('[0.9,0.1,0,0]'::vector,'other','c',1,2)",
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(other, 0, "a workspace with no nodes returns nothing");
     }
 
@@ -194,11 +225,14 @@ mod tests {
         let key = match std::env::var("THEODB_EVAL_OPENAI_KEY") {
             Ok(k) if !k.is_empty() => k,
             _ => {
-                pgrx::warning!("M111_EVAL SKIP: THEODB_EVAL_OPENAI_KEY not set (no paid embed calls in the normal suite)");
+                pgrx::warning!(
+                    "M111_EVAL SKIP: THEODB_EVAL_OPENAI_KEY not set (no paid embed calls in the normal suite)"
+                );
                 return;
             }
         };
-        let path = std::env::var("THEODB_EVAL_HOTPOT_PATH").unwrap_or_else(|_| "/tmp/hotpot_eval.json".to_string());
+        let path = std::env::var("THEODB_EVAL_HOTPOT_PATH")
+            .unwrap_or_else(|_| "/tmp/hotpot_eval.json".to_string());
         let data = match std::fs::read_to_string(&path) {
             Ok(d) => d,
             Err(_) => {
@@ -221,19 +255,42 @@ mod tests {
             Spi::run("TRUNCATE theodb.graph_nodes, theodb.graph_edges").unwrap();
             Spi::run("DELETE FROM theodb.chunks_eval").unwrap();
             let q = rec["q"].as_str().unwrap_or("");
-            let gold: Vec<String> = rec["gold"].as_array().map(|a| a.iter().filter_map(|t| t.as_str().map(|s| s.to_string())).collect()).unwrap_or_default();
-            let paras = match rec["paras"].as_array() { Some(p) => p, None => continue };
-            if gold.is_empty() || paras.is_empty() { continue; }
+            let gold: Vec<String> = rec["gold"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|t| t.as_str().map(|s| s.to_string())).collect())
+                .unwrap_or_default();
+            let paras = match rec["paras"].as_array() {
+                Some(p) => p,
+                None => continue,
+            };
+            if gold.is_empty() || paras.is_empty() {
+                continue;
+            }
             for p in paras {
                 let title = p[0].as_str().unwrap_or("");
                 let text = p[1].as_str().unwrap_or("");
-                Spi::run_with_args("INSERT INTO theodb.chunks_eval(id,ws,body) VALUES ($1,$2,$3)", &[title.into(), ws.as_str().into(), text.into()]).unwrap();
+                Spi::run_with_args(
+                    "INSERT INTO theodb.chunks_eval(id,ws,body) VALUES ($1,$2,$3)",
+                    &[title.into(), ws.as_str().into(), text.into()],
+                )
+                .unwrap();
                 let full = format!("{title}. {text}"); // prepend the paragraph's subject entity for the heuristic
-                Spi::get_one_with_args::<i64>("SELECT theodb.graph_upsert($1,'c',$2,$3)", &[ws.as_str().into(), title.into(), full.as_str().into()]).unwrap();
+                Spi::get_one_with_args::<i64>(
+                    "SELECT theodb.graph_upsert($1,'c',$2,$3)",
+                    &[ws.as_str().into(), title.into(), full.as_str().into()],
+                )
+                .unwrap();
             }
             let (ids, bodies): (Vec<String>, Vec<String>) = Spi::connect(|c| {
                 let (mut ids, mut bodies) = (Vec::new(), Vec::new());
-                for r in c.select("SELECT id, body FROM theodb.chunks_eval WHERE ws=$1", None, &[ws.as_str().into()]).unwrap() {
+                for r in c
+                    .select(
+                        "SELECT id, body FROM theodb.chunks_eval WHERE ws=$1",
+                        None,
+                        &[ws.as_str().into()],
+                    )
+                    .unwrap()
+                {
                     ids.push(r.get::<String>(1).unwrap().unwrap());
                     bodies.push(r.get::<String>(2).unwrap().unwrap());
                 }
@@ -242,10 +299,21 @@ mod tests {
             let refs: Vec<Option<&str>> = bodies.iter().map(|s| Some(s.as_str())).collect();
             let cvecs = crate::embed::run_batch(&refs, None);
             for (id, v) in ids.iter().zip(cvecs.iter()) {
-                Spi::run_with_args("UPDATE theodb.chunks_eval SET emb=($1)::vector WHERE id=$2 AND ws=$3", &[v.as_str().into(), id.as_str().into(), ws.as_str().into()]).unwrap();
+                Spi::run_with_args(
+                    "UPDATE theodb.chunks_eval SET emb=($1)::vector WHERE id=$2 AND ws=$3",
+                    &[v.as_str().into(), id.as_str().into(), ws.as_str().into()],
+                )
+                .unwrap();
             }
-            Spi::get_one_with_args::<i64>("SELECT theodb.graph_embed_nodes($1,'c')", &[ws.as_str().into()]).unwrap();
-            Spi::get_one::<i64>("SELECT theodb.graph_build('theodb.graph_edges','src_id','dst_id')").unwrap();
+            Spi::get_one_with_args::<i64>(
+                "SELECT theodb.graph_embed_nodes($1,'c')",
+                &[ws.as_str().into()],
+            )
+            .unwrap();
+            Spi::get_one::<i64>(
+                "SELECT theodb.graph_build('theodb.graph_edges','src_id','dst_id')",
+            )
+            .unwrap();
             let qv = crate::embed::run(Some(q), None);
             // Ranked candidate lists (top-10 each) for RRF fusion.
             let vrank: Vec<String> = Spi::connect(|c| {
@@ -258,14 +326,20 @@ mod tests {
             });
             // Reciprocal Rank Fusion (the honest SOTA-fair hybrid): graph AUGMENTS vector, does not replace it.
             let mut rrf: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
-            for (rank, c) in vrank.iter().enumerate() { *rrf.entry(c.clone()).or_insert(0.0) += 1.0 / (60.0 + rank as f64); }
-            for (rank, c) in grank.iter().enumerate() { *rrf.entry(c.clone()).or_insert(0.0) += 1.0 / (60.0 + rank as f64); }
+            for (rank, c) in vrank.iter().enumerate() {
+                *rrf.entry(c.clone()).or_insert(0.0) += 1.0 / (60.0 + rank as f64);
+            }
+            for (rank, c) in grank.iter().enumerate() {
+                *rrf.entry(c.clone()).or_insert(0.0) += 1.0 / (60.0 + rank as f64);
+            }
             let mut fused: Vec<(String, f64)> = rrf.into_iter().collect();
             fused.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap().then(a.0.cmp(&b.0)));
             let htop: Vec<String> = fused.iter().take(k as usize).map(|(c, _)| c.clone()).collect();
             let vtop: Vec<String> = vrank.iter().take(k as usize).cloned().collect();
             let gtop: Vec<String> = grank.iter().take(k as usize).cloned().collect();
-            let recall = |top: &[String]| gold.iter().filter(|g| top.contains(g)).count() as f64 / gold.len() as f64;
+            let recall = |top: &[String]| {
+                gold.iter().filter(|g| top.contains(g)).count() as f64 / gold.len() as f64
+            };
             vsum += recall(&vtop);
             gsum += recall(&gtop);
             hsum += recall(&htop);
@@ -278,7 +352,9 @@ mod tests {
              \"hybrid_rrf_recall\":{hrec:.4},\"note\":\"hybrid = RRF(vector, graph-expanded) — the SOTA-fair comparison where the graph AUGMENTS vector\"}}\n"
         );
         let _ = std::fs::write("/tmp/m111_eval.json", &json);
-        pgrx::warning!("M111_EVAL_HOTPOT n={n} recall@{k} vector={vrec:.4} graph_only={grec:.4} hybrid_rrf={hrec:.4}");
+        pgrx::warning!(
+            "M111_EVAL_HOTPOT n={n} recall@{k} vector={vrec:.4} graph_only={grec:.4} hybrid_rrf={hrec:.4}"
+        );
         assert!(n > 0, "eval ran over at least one HotpotQA question");
         // NOTE: no hard assert — vector / graph-only / hybrid numbers are reported honestly for the gate decision.
     }
@@ -292,10 +368,20 @@ mod tests {
     fn m112_eval_hotpot_llm_ppr() {
         let key = match std::env::var("THEODB_EVAL_OPENAI_KEY") {
             Ok(k) if !k.is_empty() => k,
-            _ => { pgrx::warning!("M112_EVAL SKIP: no THEODB_EVAL_OPENAI_KEY"); return; }
+            _ => {
+                pgrx::warning!("M112_EVAL SKIP: no THEODB_EVAL_OPENAI_KEY");
+                return;
+            }
         };
-        let path = std::env::var("THEODB_EVAL_HOTPOT_PATH").unwrap_or_else(|_| "/tmp/hotpot_eval.json".to_string());
-        let data = match std::fs::read_to_string(&path) { Ok(d) => d, Err(_) => { pgrx::warning!("M112_EVAL SKIP: no dataset"); return; } };
+        let path = std::env::var("THEODB_EVAL_HOTPOT_PATH")
+            .unwrap_or_else(|_| "/tmp/hotpot_eval.json".to_string());
+        let data = match std::fs::read_to_string(&path) {
+            Ok(d) => d,
+            Err(_) => {
+                pgrx::warning!("M112_EVAL SKIP: no dataset");
+                return;
+            }
+        };
         Spi::run("SET theodb.embedding_endpoint = 'https://api.openai.com/v1/embeddings'").unwrap();
         Spi::run("SET theodb.embedding_model = 'text-embedding-3-small'").unwrap();
         Spi::run(&format!("SET theodb.embedding_api_key = '{}'", key.replace('\'', "''"))).unwrap();
@@ -314,32 +400,67 @@ mod tests {
             Spi::run("TRUNCATE theodb.graph_nodes, theodb.graph_edges").unwrap();
             Spi::run("DELETE FROM theodb.chunks_eval").unwrap();
             let q = rec["q"].as_str().unwrap_or("");
-            let gold: Vec<String> = rec["gold"].as_array().map(|a| a.iter().filter_map(|t| t.as_str().map(|s| s.to_string())).collect()).unwrap_or_default();
-            let paras = match rec["paras"].as_array() { Some(p) => p, None => continue };
-            if gold.is_empty() || paras.is_empty() { continue; }
+            let gold: Vec<String> = rec["gold"]
+                .as_array()
+                .map(|a| a.iter().filter_map(|t| t.as_str().map(|s| s.to_string())).collect())
+                .unwrap_or_default();
+            let paras = match rec["paras"].as_array() {
+                Some(p) => p,
+                None => continue,
+            };
+            if gold.is_empty() || paras.is_empty() {
+                continue;
+            }
             for p in paras {
                 let title = p[0].as_str().unwrap_or("");
                 let text = p[1].as_str().unwrap_or("");
-                Spi::run_with_args("INSERT INTO theodb.chunks_eval(id,ws,body) VALUES ($1,$2,$3)", &[title.into(), ws.as_str().into(), text.into()]).unwrap();
+                Spi::run_with_args(
+                    "INSERT INTO theodb.chunks_eval(id,ws,body) VALUES ($1,$2,$3)",
+                    &[title.into(), ws.as_str().into(), text.into()],
+                )
+                .unwrap();
                 let full = format!("{title}. {text}");
                 // use_llm=true → LLM (OpenIE-style) extraction, richer than the heuristic
-                Spi::get_one_with_args::<i64>("SELECT theodb.graph_upsert($1,'c',$2,$3,true)", &[ws.as_str().into(), title.into(), full.as_str().into()]).unwrap();
+                Spi::get_one_with_args::<i64>(
+                    "SELECT theodb.graph_upsert($1,'c',$2,$3,true)",
+                    &[ws.as_str().into(), title.into(), full.as_str().into()],
+                )
+                .unwrap();
             }
             // embed passages (vector baseline) + nodes
             let (ids, bodies): (Vec<String>, Vec<String>) = Spi::connect(|c| {
                 let (mut i, mut b) = (Vec::new(), Vec::new());
-                for r in c.select("SELECT id, body FROM theodb.chunks_eval WHERE ws=$1", None, &[ws.as_str().into()]).unwrap() {
-                    i.push(r.get::<String>(1).unwrap().unwrap()); b.push(r.get::<String>(2).unwrap().unwrap());
+                for r in c
+                    .select(
+                        "SELECT id, body FROM theodb.chunks_eval WHERE ws=$1",
+                        None,
+                        &[ws.as_str().into()],
+                    )
+                    .unwrap()
+                {
+                    i.push(r.get::<String>(1).unwrap().unwrap());
+                    b.push(r.get::<String>(2).unwrap().unwrap());
                 }
                 (i, b)
             });
             let refs: Vec<Option<&str>> = bodies.iter().map(|s| Some(s.as_str())).collect();
             let cv = crate::embed::run_batch(&refs, None);
             for (id, v) in ids.iter().zip(cv.iter()) {
-                Spi::run_with_args("UPDATE theodb.chunks_eval SET emb=($1)::vector WHERE id=$2 AND ws=$3", &[v.as_str().into(), id.as_str().into(), ws.as_str().into()]).unwrap();
+                Spi::run_with_args(
+                    "UPDATE theodb.chunks_eval SET emb=($1)::vector WHERE id=$2 AND ws=$3",
+                    &[v.as_str().into(), id.as_str().into(), ws.as_str().into()],
+                )
+                .unwrap();
             }
-            Spi::get_one_with_args::<i64>("SELECT theodb.graph_embed_nodes($1,'c')", &[ws.as_str().into()]).unwrap();
-            Spi::get_one::<i64>("SELECT theodb.graph_build('theodb.graph_edges','src_id','dst_id')").unwrap();
+            Spi::get_one_with_args::<i64>(
+                "SELECT theodb.graph_embed_nodes($1,'c')",
+                &[ws.as_str().into()],
+            )
+            .unwrap();
+            Spi::get_one::<i64>(
+                "SELECT theodb.graph_build('theodb.graph_edges','src_id','dst_id')",
+            )
+            .unwrap();
             // query entities → seed node ids (heuristic extraction of the question, matched by normalized_name)
             let seeds: Vec<i64> = Spi::connect(|c| {
                 c.select(&format!(
@@ -353,8 +474,13 @@ mod tests {
                     .map(|r| r.get::<String>(1).unwrap().unwrap()).collect()
             });
             // PPR passage ranking: passage score = Σ PPR[node] over nodes appearing in that passage's edges.
-            let prank: Vec<String> = if seeds.is_empty() { Vec::new() } else {
-                let seed_arr = format!("ARRAY[{}]::bigint[]", seeds.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(","));
+            let prank: Vec<String> = if seeds.is_empty() {
+                Vec::new()
+            } else {
+                let seed_arr = format!(
+                    "ARRAY[{}]::bigint[]",
+                    seeds.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(",")
+                );
                 Spi::connect(|c| {
                     c.select(&format!(
                         "WITH ppr AS (SELECT node, score FROM theodb.graph_ppr('theodb.graph_edges', {seed_arr}, 0.5, 20)), \
@@ -366,14 +492,21 @@ mod tests {
             };
             // RRF fusion of vector + PPR
             let mut rrf: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
-            for (r, c) in vrank.iter().enumerate() { *rrf.entry(c.clone()).or_insert(0.0) += 1.0 / (60.0 + r as f64); }
-            for (r, c) in prank.iter().enumerate() { *rrf.entry(c.clone()).or_insert(0.0) += 1.0 / (60.0 + r as f64); }
+            for (r, c) in vrank.iter().enumerate() {
+                *rrf.entry(c.clone()).or_insert(0.0) += 1.0 / (60.0 + r as f64);
+            }
+            for (r, c) in prank.iter().enumerate() {
+                *rrf.entry(c.clone()).or_insert(0.0) += 1.0 / (60.0 + r as f64);
+            }
             let mut fused: Vec<(String, f64)> = rrf.into_iter().collect();
             fused.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap().then(a.0.cmp(&b.0)));
-            let recall = |top: &[String]| gold.iter().filter(|g| top.contains(g)).count() as f64 / gold.len() as f64;
+            let recall = |top: &[String]| {
+                gold.iter().filter(|g| top.contains(g)).count() as f64 / gold.len() as f64
+            };
             vsum += recall(&vrank.iter().take(k as usize).cloned().collect::<Vec<_>>());
             psum += recall(&prank.iter().take(k as usize).cloned().collect::<Vec<_>>());
-            fsum += recall(&fused.iter().take(k as usize).map(|(c, _)| c.clone()).collect::<Vec<_>>());
+            fsum +=
+                recall(&fused.iter().take(k as usize).map(|(c, _)| c.clone()).collect::<Vec<_>>());
             n += 1;
         }
         let (vrec, prec, frec) = (vsum / n as f64, psum / n as f64, fsum / n as f64);
@@ -383,7 +516,9 @@ mod tests {
              \"vector_recall\":{vrec:.4},\"ppr_recall\":{prec:.4},\"hybrid_rrf_recall\":{frec:.4}}}\n"
         );
         let _ = std::fs::write("/tmp/m112_eval.json", &json);
-        pgrx::warning!("M112_EVAL_LLM_PPR n={n} recall@{k} vector={vrec:.4} ppr={prec:.4} hybrid={frec:.4}");
+        pgrx::warning!(
+            "M112_EVAL_LLM_PPR n={n} recall@{k} vector={vrec:.4} ppr={prec:.4} hybrid={frec:.4}"
+        );
         assert!(n > 0, "eval ran");
     }
 }

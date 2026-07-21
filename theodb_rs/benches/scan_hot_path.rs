@@ -15,12 +15,12 @@
 //! degree, and visit count, all reproduced), NOT for recall (correctness is proven separately on a REAL
 //! `HnswIndex` by `ground_search_matches_brute_exact_knn` in `ann/scan_core.rs`).
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 
 #[path = "../src/ann/scan_core.rs"]
 mod scan_core;
 
-use scan_core::{ground_search, NeighborSource};
+use scan_core::{NeighborSource, ground_search};
 
 /// A fixed synthetic navigable graph: `n` nodes, `m0` neighbors each, `dim`-d vectors. Built once (seeded), then
 /// shared by the presized + unsized bench functions → same graph, the only variable is the allocation strategy.
@@ -90,9 +90,8 @@ fn build_graph(n: usize, dim: usize, m0: usize, seed: u64) -> BenchGraph {
         (0..n).map(|_| (0..dim).map(|_| r.f32() * 10.0).collect()).collect();
     // Random regular graph: each node gets m0 distinct-ish random neighbors (long-range connectivity → the
     // ef-search visits a realistic spread of nodes, exercising the visited/heap/scratch allocation).
-    let neighbors: Vec<Vec<u32>> = (0..n)
-        .map(|_| (0..m0).map(|_| r.below(n as u32)).collect())
-        .collect();
+    let neighbors: Vec<Vec<u32>> =
+        (0..n).map(|_| (0..m0).map(|_| r.below(n as u32)).collect()).collect();
     let query: Vec<f32> = (0..dim).map(|_| r.f32() * 10.0).collect();
     BenchGraph { neighbors, vectors, query, m0 }
 }

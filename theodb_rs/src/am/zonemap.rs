@@ -45,7 +45,11 @@ pub(crate) fn chunk_can_match(
     }
     match kind {
         MinMaxKind::F4 | MinMaxKind::F8 => {
-            let (min, max, c) = (f64::from_bits(min_bits), f64::from_bits(max_bits), f64::from_bits(pred.const_bits));
+            let (min, max, c) = (
+                f64::from_bits(min_bits),
+                f64::from_bits(max_bits),
+                f64::from_bits(pred.const_bits),
+            );
             if min.is_nan() || max.is_nan() || c.is_nan() {
                 return true; // unordered → cannot prove exclusion
             }
@@ -64,10 +68,10 @@ pub(crate) fn chunk_can_match(
 #[inline]
 fn excluded<T: PartialOrd>(min: T, max: T, c: T, op: ZoneOp) -> bool {
     match op {
-        ZoneOp::Lt => min >= c, // col < c   : excluded iff every value ≥ c
-        ZoneOp::Le => min > c,  // col <= c  : excluded iff every value > c
-        ZoneOp::Gt => max <= c, // col > c   : excluded iff every value ≤ c
-        ZoneOp::Ge => max < c,  // col >= c  : excluded iff every value < c
+        ZoneOp::Lt => min >= c,           // col < c   : excluded iff every value ≥ c
+        ZoneOp::Le => min > c,            // col <= c  : excluded iff every value > c
+        ZoneOp::Gt => max <= c,           // col > c   : excluded iff every value ≤ c
+        ZoneOp::Ge => max < c,            // col >= c  : excluded iff every value < c
         ZoneOp::Eq => c < min || c > max, // col = c : excluded iff c outside [min, max]
     }
 }
@@ -90,69 +94,145 @@ mod tests {
     fn test_zonemap_excludes_below_range() {
         // I4 chunk [100,200].
         let (h, lo, hi) = ichunk(100, 200);
-        assert!(!chunk_can_match(h, lo, hi, MinMaxKind::I4, &ipred(0, ZoneOp::Lt, 50)), "y<50 → skip");
-        assert!(!chunk_can_match(h, lo, hi, MinMaxKind::I4, &ipred(0, ZoneOp::Le, 99)), "y<=99 → skip");
-        assert!(chunk_can_match(h, lo, hi, MinMaxKind::I4, &ipred(0, ZoneOp::Lt, 101)), "y<101 → scan");
+        assert!(
+            !chunk_can_match(h, lo, hi, MinMaxKind::I4, &ipred(0, ZoneOp::Lt, 50)),
+            "y<50 → skip"
+        );
+        assert!(
+            !chunk_can_match(h, lo, hi, MinMaxKind::I4, &ipred(0, ZoneOp::Le, 99)),
+            "y<=99 → skip"
+        );
+        assert!(
+            chunk_can_match(h, lo, hi, MinMaxKind::I4, &ipred(0, ZoneOp::Lt, 101)),
+            "y<101 → scan"
+        );
     }
 
     #[test]
     fn test_zonemap_excludes_above_range() {
         let (h, lo, hi) = ichunk(100, 200);
-        assert!(!chunk_can_match(h, lo, hi, MinMaxKind::I4, &ipred(0, ZoneOp::Gt, 200)), "y>200 → skip");
-        assert!(!chunk_can_match(h, lo, hi, MinMaxKind::I4, &ipred(0, ZoneOp::Ge, 201)), "y>=201 → skip");
-        assert!(chunk_can_match(h, lo, hi, MinMaxKind::I4, &ipred(0, ZoneOp::Ge, 200)), "y>=200 → scan");
-        assert!(chunk_can_match(h, lo, hi, MinMaxKind::I4, &ipred(0, ZoneOp::Gt, 199)), "y>199 → scan");
+        assert!(
+            !chunk_can_match(h, lo, hi, MinMaxKind::I4, &ipred(0, ZoneOp::Gt, 200)),
+            "y>200 → skip"
+        );
+        assert!(
+            !chunk_can_match(h, lo, hi, MinMaxKind::I4, &ipred(0, ZoneOp::Ge, 201)),
+            "y>=201 → skip"
+        );
+        assert!(
+            chunk_can_match(h, lo, hi, MinMaxKind::I4, &ipred(0, ZoneOp::Ge, 200)),
+            "y>=200 → scan"
+        );
+        assert!(
+            chunk_can_match(h, lo, hi, MinMaxKind::I4, &ipred(0, ZoneOp::Gt, 199)),
+            "y>199 → scan"
+        );
     }
 
     #[test]
     fn test_zonemap_eq_in_and_out() {
         let (h, lo, hi) = ichunk(100, 200);
-        assert!(chunk_can_match(h, lo, hi, MinMaxKind::I4, &ipred(0, ZoneOp::Eq, 150)), "y=150 → scan");
-        assert!(!chunk_can_match(h, lo, hi, MinMaxKind::I4, &ipred(0, ZoneOp::Eq, 99)), "y=99 → skip");
-        assert!(!chunk_can_match(h, lo, hi, MinMaxKind::I4, &ipred(0, ZoneOp::Eq, 201)), "y=201 → skip");
+        assert!(
+            chunk_can_match(h, lo, hi, MinMaxKind::I4, &ipred(0, ZoneOp::Eq, 150)),
+            "y=150 → scan"
+        );
+        assert!(
+            !chunk_can_match(h, lo, hi, MinMaxKind::I4, &ipred(0, ZoneOp::Eq, 99)),
+            "y=99 → skip"
+        );
+        assert!(
+            !chunk_can_match(h, lo, hi, MinMaxKind::I4, &ipred(0, ZoneOp::Eq, 201)),
+            "y=201 → skip"
+        );
         // boundary: c == min and c == max must NOT be excluded.
-        assert!(chunk_can_match(h, lo, hi, MinMaxKind::I4, &ipred(0, ZoneOp::Eq, 100)), "y=100 (boundary) → scan");
-        assert!(chunk_can_match(h, lo, hi, MinMaxKind::I4, &ipred(0, ZoneOp::Eq, 200)), "y=200 (boundary) → scan");
+        assert!(
+            chunk_can_match(h, lo, hi, MinMaxKind::I4, &ipred(0, ZoneOp::Eq, 100)),
+            "y=100 (boundary) → scan"
+        );
+        assert!(
+            chunk_can_match(h, lo, hi, MinMaxKind::I4, &ipred(0, ZoneOp::Eq, 200)),
+            "y=200 (boundary) → scan"
+        );
     }
 
     #[test]
     fn test_zonemap_failsafe() {
         let (_h, lo, hi) = ichunk(100, 200);
-        assert!(chunk_can_match(false, lo, hi, MinMaxKind::I4, &ipred(0, ZoneOp::Lt, 50)), "has_minmax=false → scan");
-        assert!(chunk_can_match(true, lo, hi, MinMaxKind::None, &ipred(0, ZoneOp::Lt, 50)), "kind=None → scan");
+        assert!(
+            chunk_can_match(false, lo, hi, MinMaxKind::I4, &ipred(0, ZoneOp::Lt, 50)),
+            "has_minmax=false → scan"
+        );
+        assert!(
+            chunk_can_match(true, lo, hi, MinMaxKind::None, &ipred(0, ZoneOp::Lt, 50)),
+            "kind=None → scan"
+        );
         // NaN const (F8) → scan.
         let (h, flo, fhi) = (true, 10.0f64.to_bits(), 20.0f64.to_bits());
-        assert!(chunk_can_match(h, flo, fhi, MinMaxKind::F8, &fpred(ZoneOp::Gt, f64::NAN)), "NaN const → scan");
+        assert!(
+            chunk_can_match(h, flo, fhi, MinMaxKind::F8, &fpred(ZoneOp::Gt, f64::NAN)),
+            "NaN const → scan"
+        );
     }
 
     #[test]
     fn test_zonemap_signed_and_float() {
         // EC-3: negative I8 chunk [-50,-10]; a raw-u64 compare would order -1 as u64::MAX and decide WRONG.
         let (h, lo, hi) = ichunk(-50, -10);
-        assert!(!chunk_can_match(h, lo, hi, MinMaxKind::I8, &ipred(0, ZoneOp::Lt, -100)), "y<-100 → skip");
-        assert!(chunk_can_match(h, lo, hi, MinMaxKind::I8, &ipred(0, ZoneOp::Gt, -30)), "y>-30 → scan");
-        assert!(chunk_can_match(h, lo, hi, MinMaxKind::I8, &ipred(0, ZoneOp::Eq, -20)), "y=-20 → scan");
+        assert!(
+            !chunk_can_match(h, lo, hi, MinMaxKind::I8, &ipred(0, ZoneOp::Lt, -100)),
+            "y<-100 → skip"
+        );
+        assert!(
+            chunk_can_match(h, lo, hi, MinMaxKind::I8, &ipred(0, ZoneOp::Gt, -30)),
+            "y>-30 → scan"
+        );
+        assert!(
+            chunk_can_match(h, lo, hi, MinMaxKind::I8, &ipred(0, ZoneOp::Eq, -20)),
+            "y=-20 → scan"
+        );
         // sanity: the raw-u64 order would be (lo=-50→huge, hi=-10→huge) — the typed decode makes this correct.
         assert_eq!(lo as i64, -50);
         // F8 chunk [-0.0, 5.0] compared as f64 values.
         let (fh, flo, fhi) = (true, (-0.0f64).to_bits(), 5.0f64.to_bits());
-        assert!(!chunk_can_match(fh, flo, fhi, MinMaxKind::F8, &fpred(ZoneOp::Gt, 5.0)), "y>5 → skip");
-        assert!(chunk_can_match(fh, flo, fhi, MinMaxKind::F8, &fpred(ZoneOp::Lt, 1.0)), "y<1 → scan");
+        assert!(
+            !chunk_can_match(fh, flo, fhi, MinMaxKind::F8, &fpred(ZoneOp::Gt, 5.0)),
+            "y>5 → skip"
+        );
+        assert!(
+            chunk_can_match(fh, flo, fhi, MinMaxKind::F8, &fpred(ZoneOp::Lt, 1.0)),
+            "y<1 → scan"
+        );
     }
 
     #[test]
     fn test_zonemap_temporal_domain_i8_i4() {
         // Temporal types reuse the I8 (timestamp/timestamptz μs) / I4 (date days) path — the stored bytes ARE the
         // internal int. A chunk group over June 2024 timestamps (μs since 2000-01-01) must prune a Jan-2024 filter.
-        let (jan2024, jun2024_lo, jun2024_hi) = (757_382_400_000_000i64, 773_020_800_000_000i64, 775_612_800_000_000i64);
+        let (jan2024, jun2024_lo, jun2024_hi) =
+            (757_382_400_000_000i64, 773_020_800_000_000i64, 775_612_800_000_000i64);
         let (h, lo, hi) = ichunk(jun2024_lo, jun2024_hi);
-        assert!(!chunk_can_match(h, lo, hi, MinMaxKind::I8, &ipred(0, ZoneOp::Lt, jan2024)), "ts < Jan2024 → skip (chunk is Jun)");
-        assert!(!chunk_can_match(h, lo, hi, MinMaxKind::I8, &ipred(0, ZoneOp::Gt, jun2024_hi)), "ts > chunk-max → skip");
-        assert!(chunk_can_match(h, lo, hi, MinMaxKind::I8, &ipred(0, ZoneOp::Ge, jun2024_lo)), "ts >= chunk-min → scan");
+        assert!(
+            !chunk_can_match(h, lo, hi, MinMaxKind::I8, &ipred(0, ZoneOp::Lt, jan2024)),
+            "ts < Jan2024 → skip (chunk is Jun)"
+        );
+        assert!(
+            !chunk_can_match(h, lo, hi, MinMaxKind::I8, &ipred(0, ZoneOp::Gt, jun2024_hi)),
+            "ts > chunk-max → skip"
+        );
+        assert!(
+            chunk_can_match(h, lo, hi, MinMaxKind::I8, &ipred(0, ZoneOp::Ge, jun2024_lo)),
+            "ts >= chunk-min → scan"
+        );
         // date domain (I4): days since 2000-01-01. 2024-06-01 ≈ day 8918; a chunk [8918,8948] excludes day < 8918.
         let (dh, dlo, dhi) = ichunk(8918, 8948);
-        assert!(!chunk_can_match(dh, dlo, dhi, MinMaxKind::I4, &ipred(0, ZoneOp::Lt, 8000)), "date < 8000 → skip");
-        assert!(chunk_can_match(dh, dlo, dhi, MinMaxKind::I4, &ipred(0, ZoneOp::Eq, 8930)), "date = 8930 (in) → scan");
+        assert!(
+            !chunk_can_match(dh, dlo, dhi, MinMaxKind::I4, &ipred(0, ZoneOp::Lt, 8000)),
+            "date < 8000 → skip"
+        );
+        assert!(
+            chunk_can_match(dh, dlo, dhi, MinMaxKind::I4, &ipred(0, ZoneOp::Eq, 8930)),
+            "date = 8930 (in) → scan"
+        );
     }
 
     #[test]
@@ -160,9 +240,18 @@ mod tests {
         // EC-4: min/max is over PRESENT non-NaN values only (compute_minmax skips NaN). A chunk whose present
         // values are [10,20] (but that also has NULL/NaN rows): y>100 skip is SAFE (NULL/NaN never match y>100).
         let (h, lo, hi) = (true, 10.0f64.to_bits(), 20.0f64.to_bits());
-        assert!(!chunk_can_match(h, lo, hi, MinMaxKind::F8, &fpred(ZoneOp::Gt, 100.0)), "y>100 → skip (nulls/nan don't match)");
-        assert!(chunk_can_match(h, lo, hi, MinMaxKind::F8, &fpred(ZoneOp::Gt, 15.0)), "y>15 → scan");
+        assert!(
+            !chunk_can_match(h, lo, hi, MinMaxKind::F8, &fpred(ZoneOp::Gt, 100.0)),
+            "y>100 → skip (nulls/nan don't match)"
+        );
+        assert!(
+            chunk_can_match(h, lo, hi, MinMaxKind::F8, &fpred(ZoneOp::Gt, 15.0)),
+            "y>15 → scan"
+        );
         // all-NULL / all-NaN chunk → compute_minmax yields has_minmax=false → never skipped.
-        assert!(chunk_can_match(false, 0, 0, MinMaxKind::F8, &fpred(ZoneOp::Gt, 100.0)), "all-null/nan → scan");
+        assert!(
+            chunk_can_match(false, 0, 0, MinMaxKind::F8, &fpred(ZoneOp::Gt, 100.0)),
+            "all-null/nan → scan"
+        );
     }
 }

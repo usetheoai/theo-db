@@ -63,17 +63,16 @@ pub(crate) fn import(
             // (rec->'values')::text — the JSON array as text, re-parsed by the $2::vector cast.
             let values_text = rec.get("values").map(|v| v.to_string());
             // COALESCE(rec->'metadata', '{}') — absent key defaults to an empty object.
-            let meta = rec
-                .get("metadata")
-                .cloned()
-                .unwrap_or_else(|| serde_json::json!({}));
+            let meta = rec.get("metadata").cloned().unwrap_or_else(|| serde_json::json!({}));
             client
                 .update(
                     insert_sql.as_str(),
                     None,
                     &[id_text.into(), values_text.into(), pgrx::JsonB(meta).into()],
                 )
-                .unwrap_or_else(|e| err_input(&format!("theodb.import_vectors: insert failed: {e:?}")));
+                .unwrap_or_else(|e| {
+                    err_input(&format!("theodb.import_vectors: insert failed: {e:?}"))
+                });
             n += 1;
         }
         n

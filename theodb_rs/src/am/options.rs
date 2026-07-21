@@ -130,7 +130,8 @@ pub(crate) unsafe fn init() {
     pg_sys::add_int_reloption(
         RELOPT_KIND,
         "pq_subspaces".as_pg_cstr(),
-        "Number of anisotropic-PQ subspaces for the theodb_hnsw AQ codes (0 = AQ off, M59)".as_pg_cstr(),
+        "Number of anisotropic-PQ subspaces for the theodb_hnsw AQ codes (0 = AQ off, M59)"
+            .as_pg_cstr(),
         DEFAULT_PQ_SUBSPACES,
         MIN_PQ_SUBSPACES,
         MAX_PQ_SUBSPACES,
@@ -139,7 +140,8 @@ pub(crate) unsafe fn init() {
     pg_sys::add_int_reloption(
         RELOPT_KIND,
         "pq_bits".as_pg_cstr(),
-        "Bits per subquantizer for the theodb_hnsw AQ codes (only 4 is supported, M59)".as_pg_cstr(),
+        "Bits per subquantizer for the theodb_hnsw AQ codes (only 4 is supported, M59)"
+            .as_pg_cstr(),
         DEFAULT_PQ_BITS,
         MIN_PQ_BITS,
         MAX_PQ_BITS,
@@ -157,7 +159,8 @@ pub(crate) unsafe fn init() {
     pg_sys::add_int_reloption(
         RELOPT_KIND,
         "separate_storage".as_pg_cstr(),
-        "Persist the v5 storage-separated IVF-AQ layout (codes/f32 on distinct pages) when 1 (M83)".as_pg_cstr(),
+        "Persist the v5 storage-separated IVF-AQ layout (codes/f32 on distinct pages) when 1 (M83)"
+            .as_pg_cstr(),
         DEFAULT_SEPARATE_STORAGE,
         MIN_SEPARATE_STORAGE,
         MAX_SEPARATE_STORAGE,
@@ -175,7 +178,8 @@ pub(crate) unsafe fn init() {
     pg_sys::add_int_reloption(
         RELOPT_KIND,
         "soar_lambda".as_pg_cstr(),
-        "SOAR spill orthogonality-penalty λ × 1000 for the IVF-AQ build (0 = off, M86)".as_pg_cstr(),
+        "SOAR spill orthogonality-penalty λ × 1000 for the IVF-AQ build (0 = off, M86)"
+            .as_pg_cstr(),
         DEFAULT_SOAR_LAMBDA_MILLI,
         MIN_SOAR_LAMBDA_MILLI,
         MAX_SOAR_LAMBDA_MILLI,
@@ -324,11 +328,7 @@ pub(crate) unsafe fn lists_from_relation(indexrel: pg_sys::Relation) -> usize {
     }
     let opts = rd_options as *const TheodbIvfflatOptions;
     let lists = (*opts).lists;
-    if lists < MIN_LISTS {
-        DEFAULT_LISTS
-    } else {
-        lists as usize
-    }
+    if lists < MIN_LISTS { DEFAULT_LISTS } else { lists as usize }
 }
 
 /// Resolve the build-time `sbq_bits` for a `theodb_hnsw` index: the `WITH (sbq_bits=N)` value, or 0 (f32-only)
@@ -343,11 +343,7 @@ pub(crate) unsafe fn sbq_bits_from_relation(indexrel: pg_sys::Relation) -> u8 {
         return 0;
     }
     let bits = (*(rd_options as *const TheodbIvfflatOptions)).sbq_bits;
-    if (MIN_SBQ_BITS..=MAX_SBQ_BITS).contains(&bits) {
-        bits as u8
-    } else {
-        0
-    }
+    if (MIN_SBQ_BITS..=MAX_SBQ_BITS).contains(&bits) { bits as u8 } else { 0 }
 }
 
 /// M59 — resolve the build-time `pq_subspaces` (m) for a `theodb_hnsw` index: the `WITH (pq_subspaces=M)` value,
@@ -363,11 +359,7 @@ pub(crate) unsafe fn pq_subspaces_from_relation(indexrel: pg_sys::Relation) -> u
         return DEFAULT_PQ_SUBSPACES as usize;
     }
     let m = (*(rd_options as *const TheodbIvfflatOptions)).pq_subspaces;
-    if m < MIN_PQ_SUBSPACES {
-        DEFAULT_PQ_SUBSPACES as usize
-    } else {
-        m as usize
-    }
+    if m < MIN_PQ_SUBSPACES { DEFAULT_PQ_SUBSPACES as usize } else { m as usize }
 }
 
 /// M59 — resolve `pq_bits` for a `theodb_hnsw` index: the `WITH (pq_bits=N)` value, or the default 4. Only 4 is
@@ -383,11 +375,7 @@ pub(crate) unsafe fn pq_bits_from_relation(indexrel: pg_sys::Relation) -> u8 {
         return DEFAULT_PQ_BITS as u8;
     }
     let bits = (*(rd_options as *const TheodbIvfflatOptions)).pq_bits;
-    if (MIN_PQ_BITS..=MAX_PQ_BITS).contains(&bits) {
-        bits as u8
-    } else {
-        DEFAULT_PQ_BITS as u8
-    }
+    if (MIN_PQ_BITS..=MAX_PQ_BITS).contains(&bits) { bits as u8 } else { DEFAULT_PQ_BITS as u8 }
 }
 
 /// M59 — resolve `aq_threshold` (`η`) for a `theodb_hnsw` index: the milli-scaled `WITH (aq_threshold=N)` value

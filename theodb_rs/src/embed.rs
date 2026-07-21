@@ -104,7 +104,12 @@ fn validate_inputs<'a>(items: &'a [Option<&'a str>]) -> Vec<&'a str> {
 
 /// The pure HTTP+parse tail shared by [`run_batch`] and [`run_batch_resolved`]: build the payload, POST, and
 /// map each embedding back by its `index`. NO GUC/SPI — safe to call with no open transaction (M122 phase B).
-fn embed_resolved(inputs: &[&str], endpoint: &str, mdl: &str, api_key: Option<&str>) -> Vec<String> {
+fn embed_resolved(
+    inputs: &[&str],
+    endpoint: &str,
+    mdl: &str,
+    api_key: Option<&str>,
+) -> Vec<String> {
     let n = inputs.len();
     let payload = serde_json::json!({ "input": inputs, "model": mdl }).to_string();
     let body = post_json("theodb.embed_batch", endpoint, payload, api_key);
@@ -130,11 +135,7 @@ fn embed_resolved(inputs: &[&str], endpoint: &str, mdl: &str, api_key: Option<&s
     // malformed response (38000), not a silent misalignment.
     let mut out: Vec<Option<String>> = vec![None; n];
     for (pos, item) in data.iter().enumerate() {
-        let idx = item
-            .get("index")
-            .and_then(|v| v.as_u64())
-            .map(|v| v as usize)
-            .unwrap_or(pos);
+        let idx = item.get("index").and_then(|v| v.as_u64()).map(|v| v as usize).unwrap_or(pos);
         if idx >= n {
             err_external(
                 "theodb.embed_batch: unexpected embedding response shape: index out of range",
@@ -156,7 +157,9 @@ fn embed_resolved(inputs: &[&str], endpoint: &str, mdl: &str, api_key: Option<&s
 
     // Bijection guaranteed (N data items, N slots, in-range, no duplicate) — every slot is filled.
     out.into_iter()
-        .map(|o| o.unwrap_or_else(|| err_external("theodb.embed_batch: missing embedding for an index")))
+        .map(|o| {
+            o.unwrap_or_else(|| err_external("theodb.embed_batch: missing embedding for an index"))
+        })
         .collect()
 }
 

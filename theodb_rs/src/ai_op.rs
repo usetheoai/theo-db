@@ -192,8 +192,9 @@ mod tests {
 
         // element-for-element equal to the per-row ai.if on the same "{condition}: {value}" prompt
         for (i, v) in ["1", "2", "3", "4"].iter().enumerate() {
-            let per_row =
-                Spi::get_one::<bool>(&format!("SELECT ai.\"if\"('is even: {v}')")).unwrap().unwrap();
+            let per_row = Spi::get_one::<bool>(&format!("SELECT ai.\"if\"('is even: {v}')"))
+                .unwrap()
+                .unwrap();
             assert_eq!(Some(per_row), batched[i], "batched[{i}] == per-row ai.if('is even: {v}')");
         }
     }

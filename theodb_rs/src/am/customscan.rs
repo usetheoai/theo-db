@@ -148,7 +148,9 @@ const _: () = assert!(
 ///    offset count **even when that exceeds the buffer**, so the return value MUST be clamped before slicing —
 ///    otherwise we read uninitialised memory. And it must never be called on a lossy result, whose
 ///    `internal_page` is NULL (heap guards this the same way, `heapam_handler.c:2506`).
-pub(crate) unsafe fn materialize_bitmap(tbm: *mut pg_sys::TIDBitmap) -> (HashSet<i64>, HashSet<u32>) {
+pub(crate) unsafe fn materialize_bitmap(
+    tbm: *mut pg_sys::TIDBitmap,
+) -> (HashSet<i64>, HashSet<u32>) {
     let mut exact: HashSet<i64> = HashSet::new();
     let mut lossy: HashSet<u32> = HashSet::new();
 
@@ -161,9 +163,11 @@ pub(crate) unsafe fn materialize_bitmap(tbm: *mut pg_sys::TIDBitmap) -> (HashSet
         if res.lossy {
             lossy.insert(res.blockno); // offsets gone; admit-then-recheck by block
         } else {
-            let reported =
-                pg_sys::tbm_extract_page_tuple(&mut res, offsets.as_mut_ptr(), MAX_TUPLES_PER_PAGE as u32)
-                    as usize;
+            let reported = pg_sys::tbm_extract_page_tuple(
+                &mut res,
+                offsets.as_mut_ptr(),
+                MAX_TUPLES_PER_PAGE as u32,
+            ) as usize;
             // Clamp: `reported` is the page total, which may exceed the buffer (doc note 4).
             let n = reported.min(MAX_TUPLES_PER_PAGE);
             for &off in &offsets[..n] {
@@ -219,7 +223,10 @@ static mut PREV_HOOK: pg_sys::set_rel_pathlist_hook_type = None;
 /// one transaction. On ABORT this is also the correctness guard: a `pg_sys::error!` longjmp mid-pull skips the
 /// swap-restore, and this clear prevents the stale ACTIVE from filtering a later plain scan (council H1/MEDIUM-1).
 #[pg_guard]
-unsafe extern "C-unwind" fn xact_clear_membership(event: pg_sys::XactEvent::Type, _arg: *mut std::ffi::c_void) {
+unsafe extern "C-unwind" fn xact_clear_membership(
+    event: pg_sys::XactEvent::Type,
+    _arg: *mut std::ffi::c_void,
+) {
     use pg_sys::XactEvent as XE;
     if event == XE::XACT_EVENT_ABORT
         || event == XE::XACT_EVENT_PARALLEL_ABORT
@@ -368,7 +375,7 @@ unsafe extern "C-unwind" fn pathlist_hook(
     let mut children = PgList::<pg_sys::Path>::new();
     children.push(vector_path); // [0] — ordered + carries the scalar Filter (the recheck)
     children.push(bitmap_path); // [1] — the whole BitmapHeapPath; its planned BitmapHeapScan.lefttree is the
-                                //        bitmap-producing sub-plan (BitmapIndexScan/BitmapAnd) we MultiExec
+    //        bitmap-producing sub-plan (BitmapIndexScan/BitmapAnd) we MultiExec
     cpath.custom_paths = children.into_pg();
     cpath.custom_private = std::ptr::null_mut();
     cpath.methods = &PATH_METHODS.0;
@@ -496,7 +503,9 @@ unsafe extern "C-unwind" fn plan_custom_path(
 /// Plan -> ScanState: allocate the `VecFilterState` (embeds CustomScanState first) via `palloc0` and set the node
 /// tag + exec methods by hand (`PgBox::alloc_node` only knows the base struct).
 #[pg_guard]
-unsafe extern "C-unwind" fn create_custom_scan_state(_cscan: *mut pg_sys::CustomScan) -> *mut pg_sys::Node {
+unsafe extern "C-unwind" fn create_custom_scan_state(
+    _cscan: *mut pg_sys::CustomScan,
+) -> *mut pg_sys::Node {
     let ptr = pg_sys::palloc0(std::mem::size_of::<VecFilterState>()) as *mut VecFilterState;
     let st = &mut *ptr;
     st.css.ss.ps.type_ = pg_sys::NodeTag::T_CustomScanState;
@@ -569,7 +578,9 @@ unsafe extern "C-unwind" fn begin_custom_scan(
 /// previous value after (RAII — restored even if the pull errors/unwinds). The child's own qpqual Filter has already
 /// rechecked the scalar `WHERE` on the heap tuple (removing lossy/pending over-admits), so the node forwards the slot.
 #[pg_guard]
-unsafe extern "C-unwind" fn exec_custom_scan(node: *mut pg_sys::CustomScanState) -> *mut pg_sys::TupleTableSlot {
+unsafe extern "C-unwind" fn exec_custom_scan(
+    node: *mut pg_sys::CustomScanState,
+) -> *mut pg_sys::TupleTableSlot {
     let st = &mut *(node as *mut VecFilterState);
     if st.vector_child.is_null() {
         return std::ptr::null_mut();
@@ -655,9 +666,20 @@ mod tests {
         let filt = "cat = 7";
         // Exact ground truth via seqscan.
         let exact: HashSet<i32> = Spi::connect(|c| {
-            c.select("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on", None, &[]).ok();
-            c.select(&format!("SELECT id FROM cs92 WHERE {filt} ORDER BY e <-> '{q}'::vector LIMIT 5"), None, &[])
-                .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
+            c.select(
+                "SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on",
+                None,
+                &[],
+            )
+            .ok();
+            c.select(
+                &format!("SELECT id FROM cs92 WHERE {filt} ORDER BY e <-> '{q}'::vector LIMIT 5"),
+                None,
+                &[],
+            )
+            .unwrap()
+            .filter_map(|r| r.get::<i32>(1).unwrap())
+            .collect()
         });
         // Hook ON — reset every enable_* GUC the exact block flipped (they persist in-session), then force the
         // bitmap path (enable_seqscan off so the planner keeps the BitmapHeapPath the hook needs).
@@ -667,13 +689,25 @@ mod tests {
             c.select(&format!("EXPLAIN (COSTS OFF) SELECT id FROM cs92 WHERE {filt} ORDER BY e <-> '{q}'::vector LIMIT 5"), None, &[])
                 .unwrap().filter_map(|r| r.get::<String>(1).unwrap()).collect::<Vec<_>>().join("\n")
         });
-        assert!(plan.contains("Custom Scan (theodb_vecfilter)"), "hook ON must inject the Custom Scan node (plan:\n{plan})");
+        assert!(
+            plan.contains("Custom Scan (theodb_vecfilter)"),
+            "hook ON must inject the Custom Scan node (plan:\n{plan})"
+        );
         let hooked: HashSet<i32> = Spi::connect(|c| {
             c.select(hooked_setup, None, &[]).ok();
-            c.select(&format!("SELECT id FROM cs92 WHERE {filt} ORDER BY e <-> '{q}'::vector LIMIT 5"), None, &[])
-                .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
+            c.select(
+                &format!("SELECT id FROM cs92 WHERE {filt} ORDER BY e <-> '{q}'::vector LIMIT 5"),
+                None,
+                &[],
+            )
+            .unwrap()
+            .filter_map(|r| r.get::<i32>(1).unwrap())
+            .collect()
         });
-        assert_eq!(hooked, exact, "the 2-child Custom Scan filtered result must equal the exact seqscan-filtered top-5 (hooked={hooked:?} exact={exact:?})");
+        assert_eq!(
+            hooked, exact,
+            "the 2-child Custom Scan filtered result must equal the exact seqscan-filtered top-5 (hooked={hooked:?} exact={exact:?})"
+        );
     }
 
     /// M94 T1.1 — two vecfilter nodes in one plan (a UNION ALL of two filtered vector queries) each see their OWN
@@ -693,8 +727,16 @@ mod tests {
         let exact = |cat: i32| -> HashSet<i32> {
             Spi::connect(|c| {
                 c.select("SET theodb.enable_vecfilter=off; SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on", None, &[]).ok();
-                c.select(&format!("SELECT id FROM cs94u WHERE cat={cat} ORDER BY e <-> '{q}'::vector LIMIT 3"), None, &[])
-                    .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
+                c.select(
+                    &format!(
+                        "SELECT id FROM cs94u WHERE cat={cat} ORDER BY e <-> '{q}'::vector LIMIT 3"
+                    ),
+                    None,
+                    &[],
+                )
+                .unwrap()
+                .filter_map(|r| r.get::<i32>(1).unwrap())
+                .collect()
             })
         };
         let want: HashSet<i32> = exact(1).union(&exact(2)).copied().collect();
@@ -706,13 +748,19 @@ mod tests {
                 .unwrap().filter_map(|r| r.get::<String>(1).unwrap()).collect::<Vec<_>>().join("\n")
         });
         let nodes = plan.matches("Custom Scan (theodb_vecfilter)").count();
-        assert_eq!(nodes, 2, "both UNION branches must be intercepted (got {nodes} nodes; plan:\n{plan})");
+        assert_eq!(
+            nodes, 2,
+            "both UNION branches must be intercepted (got {nodes} nodes; plan:\n{plan})"
+        );
         let got: HashSet<i32> = Spi::connect(|c| {
             c.select(hooked_setup, None, &[]).ok();
             c.select(&format!("(SELECT id FROM cs94u WHERE cat=1 ORDER BY e <-> '{q}'::vector LIMIT 3) UNION ALL (SELECT id FROM cs94u WHERE cat=2 ORDER BY e <-> '{q}'::vector LIMIT 3)"), None, &[])
                 .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
         });
-        assert_eq!(got, want, "each UNION branch must be filtered by ITS OWN membership (got {got:?} want {want:?})");
+        assert_eq!(
+            got, want,
+            "each UNION branch must be filtered by ITS OWN membership (got {got:?} want {want:?})"
+        );
     }
 
     /// M94 T1.1 — a rescanned vecfilter node (nested-loop inner, materialization off) re-derives its membership and
@@ -728,8 +776,14 @@ mod tests {
         let q = "[0,0,0,0]";
         let exact: HashSet<i32> = Spi::connect(|c| {
             c.select("SET theodb.enable_vecfilter=off; SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on", None, &[]).ok();
-            c.select(&format!("SELECT id FROM cs94r WHERE cat=7 ORDER BY e <-> '{q}'::vector LIMIT 3"), None, &[])
-                .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
+            c.select(
+                &format!("SELECT id FROM cs94r WHERE cat=7 ORDER BY e <-> '{q}'::vector LIMIT 3"),
+                None,
+                &[],
+            )
+            .unwrap()
+            .filter_map(|r| r.get::<i32>(1).unwrap())
+            .collect()
         });
         // A 2-row outer CROSS JOIN LATERAL over a constant filtered inner + materialization off → the inner vecfilter
         // node is re-executed (rescan) per outer row; both inner results must equal the exact set.
@@ -741,8 +795,12 @@ mod tests {
                 .collect()
         });
         for o in [1, 2] {
-            let inner: HashSet<i32> = rows.iter().filter(|(oo, _)| *oo == o).map(|(_, id)| *id).collect();
-            assert_eq!(inner, exact, "outer row {o}: the rescanned inner must equal the exact filtered set (got {inner:?})");
+            let inner: HashSet<i32> =
+                rows.iter().filter(|(oo, _)| *oo == o).map(|(_, id)| *id).collect();
+            assert_eq!(
+                inner, exact,
+                "outer row {o}: the rescanned inner must equal the exact filtered set (got {inner:?})"
+            );
         }
     }
 
@@ -757,7 +815,8 @@ mod tests {
         }));
         assert!(super::has_membership(), "precondition: ACTIVE slot set");
         // A plpgsql EXCEPTION block aborts a SUBtransaction — the subxact callback must clear the ACTIVE slot.
-        Spi::run("DO $$ BEGIN RAISE EXCEPTION 'boom'; EXCEPTION WHEN OTHERS THEN NULL; END $$").unwrap();
+        Spi::run("DO $$ BEGIN RAISE EXCEPTION 'boom'; EXCEPTION WHEN OTHERS THEN NULL; END $$")
+            .unwrap();
         assert!(!super::has_membership(), "subxact abort must clear the stale ACTIVE membership");
     }
 
@@ -778,7 +837,10 @@ mod tests {
             c.select("EXPLAIN (COSTS OFF) SELECT id FROM cs95l WHERE cat=1 ORDER BY e <-> '[0,0,0,0]'::vector LIMIT 10", None, &[])
                 .unwrap().filter_map(|r| r.get::<String>(1).unwrap()).collect::<Vec<_>>().join("\n")
         });
-        assert!(!plan.contains("theodb_vecfilter"), "loose selectivity ⇒ honest cost must NOT pick the node (plan:\n{plan})");
+        assert!(
+            !plan.contains("theodb_vecfilter"),
+            "loose selectivity ⇒ honest cost must NOT pick the node (plan:\n{plan})"
+        );
     }
 
     /// M95 review HIGH-1 regression — a multi-predicate filter (two indexed columns) whose `bitmapqual` the planner
@@ -810,7 +872,10 @@ mod tests {
             c.select("SELECT id FROM cs95m WHERE cat=7 AND grp=7 ORDER BY e <-> '[0,0,0,0]'::vector LIMIT 5", None, &[])
                 .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
         });
-        assert_eq!(got, want, "multi-predicate forced node must match exact seqscan (got {got:?} want {want:?})");
+        assert_eq!(
+            got, want,
+            "multi-predicate forced node must match exact seqscan (got {got:?} want {want:?})"
+        );
     }
 
     // M95 auto-selection at TIGHT selectivity is measured on SIFT1M (T3.1 sweep, `docs/benchmarks/m95-cost-model`),
@@ -835,13 +900,25 @@ mod tests {
             c.select("EXPLAIN (COSTS OFF) SELECT id FROM cs92p WHERE cat=7 ORDER BY e <-> '[0,0,0,0]'::vector LIMIT 10", None, &[])
                 .unwrap().filter_map(|r| r.get::<String>(1).unwrap()).collect::<Vec<_>>().join("\n")
         });
-        assert!(plan.contains("Custom Scan (theodb_vecfilter)"), "the node must fire so its recheck is exercised (plan:\n{plan})");
+        assert!(
+            plan.contains("Custom Scan (theodb_vecfilter)"),
+            "the node must fire so its recheck is exercised (plan:\n{plan})"
+        );
         let ids: Vec<i32> = Spi::connect(|c| {
             c.select("SET theodb.enable_vecfilter=on; SET theodb.vecfilter_force=on; SET enable_seqscan=off; SET theodb_ivfflat.probes=8", None, &[]).ok();
-            c.select("SELECT id FROM cs92p WHERE cat=7 ORDER BY e <-> '[0,0,0,0]'::vector LIMIT 10", None, &[])
-                .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
+            c.select(
+                "SELECT id FROM cs92p WHERE cat=7 ORDER BY e <-> '[0,0,0,0]'::vector LIMIT 10",
+                None,
+                &[],
+            )
+            .unwrap()
+            .filter_map(|r| r.get::<i32>(1).unwrap())
+            .collect()
         });
-        assert!(!ids.contains(&9999), "the non-matching pending row (cat=99) must be rechecked out of a cat=7 filter (got {ids:?})");
+        assert!(
+            !ids.contains(&9999),
+            "the non-matching pending row (cat=99) must be rechecked out of a cat=7 filter (got {ids:?})"
+        );
     }
 
     /// The hook is inert when the GUC is off (default): no Custom Scan node appears — production queries untouched.
@@ -849,7 +926,8 @@ mod tests {
     fn m92_customscan_inert_when_disabled() {
         Spi::run("CREATE TABLE cs92b (id int PRIMARY KEY, cat int, e vector(4))").unwrap();
         for i in 1..=20i32 {
-            Spi::run(&format!("INSERT INTO cs92b VALUES ({i}, {}, '[{i},{},0,0]')", i % 3, i * 2)).unwrap();
+            Spi::run(&format!("INSERT INTO cs92b VALUES ({i}, {}, '[{i},{},0,0]')", i % 3, i * 2))
+                .unwrap();
         }
         Spi::run("CREATE INDEX cs92b_e ON cs92b USING theodb_ivfflat (e) WITH (lists=2, pq_subspaces=2, aq_threshold=2000, separate_storage=1)").unwrap();
         let plan: String = Spi::connect(|c| {
@@ -857,7 +935,10 @@ mod tests {
             c.select("EXPLAIN (COSTS OFF) SELECT id FROM cs92b WHERE cat=1 ORDER BY e <-> '[5,10,2,0]'::vector LIMIT 3", None, &[])
                 .unwrap().filter_map(|r| r.get::<String>(1).unwrap()).collect::<Vec<_>>().join("\n")
         });
-        assert!(!plan.contains("theodb_vecfilter"), "GUC off ⇒ no Custom Scan node (plan:\n{plan})");
+        assert!(
+            !plan.contains("theodb_vecfilter"),
+            "GUC off ⇒ no Custom Scan node (plan:\n{plan})"
+        );
     }
 
     /// M92 v1a — the AM-side TID membership primitive (the correctness core of unknown #2). A membership set is
@@ -869,7 +950,13 @@ mod tests {
         use std::collections::HashSet;
         Spi::run("CREATE TABLE m92m (id int PRIMARY KEY, lbl smallint[], e vector(4))").unwrap();
         for i in 1..=60i32 {
-            Spi::run(&format!("INSERT INTO m92m VALUES ({i}, '{{1}}', '[{i},{},{},{}]')", i * 2, i * 3, i % 7)).unwrap();
+            Spi::run(&format!(
+                "INSERT INTO m92m VALUES ({i}, '{{1}}', '[{i},{},{},{}]')",
+                i * 2,
+                i * 3,
+                i % 7
+            ))
+            .unwrap();
         }
         Spi::run("CREATE INDEX m92m_e ON m92m USING theodb_ivfflat (e, lbl) WITH (lists=4, pq_subspaces=2, aq_threshold=2000, separate_storage=1)").unwrap();
         // Encode the heap ctids of a chosen id subset into the membership i64s (tid::encode = (block<<16)|offset).
@@ -891,14 +978,26 @@ mod tests {
         super::set_membership(Some(super::Membership { exact: mset, lossy: HashSet::new() }));
         // Plain vector scan, NO WHERE → the membership is the ONLY filter. LIMIT high enough to pull all members.
         let got: Vec<i32> = Spi::connect(|c| {
-            c.select("SET enable_seqscan=off; SET enable_indexscan=on; SET theodb_ivfflat.probes=4", None, &[]).ok();
-            c.select("SELECT id FROM m92m ORDER BY e <-> '[10,20,30,3]'::vector LIMIT 20", None, &[])
-                .unwrap()
-                .filter_map(|r| r.get::<i32>(1).unwrap())
-                .collect()
+            c.select(
+                "SET enable_seqscan=off; SET enable_indexscan=on; SET theodb_ivfflat.probes=4",
+                None,
+                &[],
+            )
+            .ok();
+            c.select(
+                "SELECT id FROM m92m ORDER BY e <-> '[10,20,30,3]'::vector LIMIT 20",
+                None,
+                &[],
+            )
+            .unwrap()
+            .filter_map(|r| r.get::<i32>(1).unwrap())
+            .collect()
         });
         super::set_membership(None); // CRITICAL: clear so the filter does not leak to other queries in this backend.
-        assert!(!got.is_empty(), "membership scan returned nothing — the skip filtered everything (plumbing broken)");
+        assert!(
+            !got.is_empty(),
+            "membership scan returned nothing — the skip filtered everything (plumbing broken)"
+        );
         assert!(
             got.iter().all(|id| member_ids.contains(id)),
             "every returned id must be a member (got {got:?}, members {member_ids:?})"
@@ -911,7 +1010,8 @@ mod tests {
     fn m92_v1a_membership_cleared_is_inert() {
         Spi::run("CREATE TABLE m92c (id int PRIMARY KEY, lbl smallint[], e vector(4))").unwrap();
         for i in 1..=30i32 {
-            Spi::run(&format!("INSERT INTO m92c VALUES ({i}, '{{1}}', '[{i},{},0,0]')", i * 2)).unwrap();
+            Spi::run(&format!("INSERT INTO m92c VALUES ({i}, '{{1}}', '[{i},{},0,0]')", i * 2))
+                .unwrap();
         }
         Spi::run("CREATE INDEX m92c_e ON m92c USING theodb_ivfflat (e, lbl) WITH (lists=2, pq_subspaces=2, aq_threshold=2000, separate_storage=1)").unwrap();
         super::set_membership(Some(super::Membership {
@@ -920,13 +1020,21 @@ mod tests {
         }));
         super::set_membership(None);
         let got: Vec<i32> = Spi::connect(|c| {
-            c.select("SET enable_seqscan=off; SET enable_indexscan=on; SET theodb_ivfflat.probes=2", None, &[]).ok();
+            c.select(
+                "SET enable_seqscan=off; SET enable_indexscan=on; SET theodb_ivfflat.probes=2",
+                None,
+                &[],
+            )
+            .ok();
             c.select("SELECT id FROM m92c ORDER BY e <-> '[5,10,0,0]'::vector LIMIT 10", None, &[])
                 .unwrap()
                 .filter_map(|r| r.get::<i32>(1).unwrap())
                 .collect()
         });
-        assert!(got.len() >= 5, "cleared membership ⇒ a normal scan returns many rows (got {got:?})");
+        assert!(
+            got.len() >= 5,
+            "cleared membership ⇒ a normal scan returns many rows (got {got:?})"
+        );
     }
 
     /// M93 T1.1 — the membership admits a candidate on a LOSSY-bitmap block (over-admit → the node recheck filters),
@@ -937,7 +1045,8 @@ mod tests {
         use std::collections::HashSet;
         Spi::run("CREATE TABLE m92l (id int PRIMARY KEY, lbl smallint[], e vector(4))").unwrap();
         for i in 1..=40i32 {
-            Spi::run(&format!("INSERT INTO m92l VALUES ({i}, '{{1}}', '[{i},{},0,0]')", i * 2)).unwrap();
+            Spi::run(&format!("INSERT INTO m92l VALUES ({i}, '{{1}}', '[{i},{},0,0]')", i * 2))
+                .unwrap();
         }
         Spi::run("CREATE INDEX m92l_e ON m92l USING theodb_ivfflat (e, lbl) WITH (lists=2, pq_subspaces=2, aq_threshold=2000, separate_storage=1)").unwrap();
         let block0: u32 = Spi::connect(|c| {
@@ -953,20 +1062,41 @@ mod tests {
         });
         let run = || -> Vec<i32> {
             Spi::connect(|c| {
-                c.select("SET enable_seqscan=off; SET enable_indexscan=on; SET theodb_ivfflat.probes=2", None, &[]).ok();
-                c.select("SELECT id FROM m92l ORDER BY e <-> '[5,10,0,0]'::vector LIMIT 20", None, &[])
-                    .unwrap()
-                    .filter_map(|r| r.get::<i32>(1).unwrap())
-                    .collect()
+                c.select(
+                    "SET enable_seqscan=off; SET enable_indexscan=on; SET theodb_ivfflat.probes=2",
+                    None,
+                    &[],
+                )
+                .ok();
+                c.select(
+                    "SELECT id FROM m92l ORDER BY e <-> '[5,10,0,0]'::vector LIMIT 20",
+                    None,
+                    &[],
+                )
+                .unwrap()
+                .filter_map(|r| r.get::<i32>(1).unwrap())
+                .collect()
             })
         };
-        super::set_membership(Some(super::Membership { exact: HashSet::new(), lossy: HashSet::from([block0]) }));
+        super::set_membership(Some(super::Membership {
+            exact: HashSet::new(),
+            lossy: HashSet::from([block0]),
+        }));
         let via_lossy = run();
-        super::set_membership(Some(super::Membership { exact: HashSet::new(), lossy: HashSet::new() }));
+        super::set_membership(Some(super::Membership {
+            exact: HashSet::new(),
+            lossy: HashSet::new(),
+        }));
         let via_empty = run();
         super::set_membership(None);
-        assert!(!via_lossy.is_empty(), "a lossy-member block must admit its rows (got {via_lossy:?})");
-        assert!(via_empty.is_empty(), "empty membership (no exact, no lossy) admits nothing (got {via_empty:?})");
+        assert!(
+            !via_lossy.is_empty(),
+            "a lossy-member block must admit its rows (got {via_lossy:?})"
+        );
+        assert!(
+            via_empty.is_empty(),
+            "empty membership (no exact, no lossy) admits nothing (got {via_empty:?})"
+        );
     }
 
     /// M92 v1b — the bitmap-materialization step: iterate a native `TIDBitmap` into the exact-TID + lossy-block
@@ -978,7 +1108,10 @@ mod tests {
         unsafe {
             let tbm = pgrx::pg_sys::tbm_create(1024 * 1024, std::ptr::null_mut());
             let mk = |b: u32, o: u16| pgrx::pg_sys::ItemPointerData {
-                ip_blkid: pgrx::pg_sys::BlockIdData { bi_hi: (b >> 16) as u16, bi_lo: (b & 0xffff) as u16 },
+                ip_blkid: pgrx::pg_sys::BlockIdData {
+                    bi_hi: (b >> 16) as u16,
+                    bi_lo: (b & 0xffff) as u16,
+                },
                 ip_posid: o,
             };
             // sorted (block, offset): (0,5) (0,12) (2,3)
@@ -987,7 +1120,8 @@ mod tests {
             let (exact, lossy) = super::materialize_bitmap(tbm);
             pgrx::pg_sys::tbm_free(tbm);
             assert!(lossy.is_empty(), "a 3-tuple bitmap must not go lossy (got {lossy:?})");
-            let expect: HashSet<i64> = [(0i64 << 16) | 5, (0i64 << 16) | 12, (2i64 << 16) | 3].into_iter().collect();
+            let expect: HashSet<i64> =
+                [(0i64 << 16) | 5, (0i64 << 16) | 12, (2i64 << 16) | 3].into_iter().collect();
             assert_eq!(exact, expect, "materialized exact TIDs must match the added tuples");
         }
     }

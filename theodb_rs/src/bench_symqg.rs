@@ -3,7 +3,7 @@
 //! SIFT loaded from disk. Off-PG-equivalent measurement (pure in-RAM graph search; no heap/WAL/MVCC on the search
 //! path — it never touches a table), exposed as SQL only because that is the friction-free way to link the crate.
 //! Call: `SELECT theodb.symqg_spike_bench('/root', 1000000, 200, 1);` (returns the E2_RESULT lines as text).
-use crate::ann::symqg_spike::{exact_beam_search, SymqgSpike};
+use crate::ann::symqg_spike::{SymqgSpike, exact_beam_search};
 use crate::ann::{HnswIndex, Metric};
 use pgrx::prelude::*;
 use std::io::Write;
@@ -60,7 +60,8 @@ fn symqg_spike_bench(sift_dir: &str, n: i64, nq: i64, bits: i32) -> String {
     let queries = read_fvecs(&format!("{sift_dir}/sift_query.fvecs"), nq);
     let gt = read_ivecs(&format!("{sift_dir}/sift_groundtruth.ivecs"), nq);
     emit(&format!("E2_LOADED n={} nq={} bits={}", base.len(), queries.len(), bits));
-    let corpus: Vec<(i64, Vec<f32>)> = base.iter().enumerate().map(|(i, v)| (i as i64, v.clone())).collect();
+    let corpus: Vec<(i64, Vec<f32>)> =
+        base.iter().enumerate().map(|(i, v)| (i as i64, v.clone())).collect();
     let t0 = std::time::Instant::now();
     let g = HnswIndex::build(&corpus, 16, 200, Metric::L2, 42);
     emit(&format!("E2_BUILD hnsw_s={:.1}", t0.elapsed().as_secs_f64()));
@@ -93,7 +94,10 @@ fn symqg_spike_bench(sift_dir: &str, n: i64, nq: i64, bits: i32) -> String {
         let rec_e = hit_e as f64 / (nq * k) as f64;
         emit(&format!(
             "E2_RESULT beam={beam} symqg_recall={rec_s:.4} symqg_exdists={} symqg_ms={ms_s:.3} exact_recall={rec_e:.4} exact_exdists={} exact_ms={ms_e:.3} exdist_ratio={:.2} speedup={:.2}",
-            ex_s / nq, ex_e / nq, ex_e as f64 / ex_s.max(1) as f64, ms_e / ms_s.max(1e-9)
+            ex_s / nq,
+            ex_e / nq,
+            ex_e as f64 / ex_s.max(1) as f64,
+            ms_e / ms_s.max(1e-9)
         ));
     }
     emit("E2_DONE");

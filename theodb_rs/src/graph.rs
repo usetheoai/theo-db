@@ -72,7 +72,10 @@ impl Csr {
         let off_end = 16 + noff * 8;
         let adj_end = off_end + (total_adj as usize) * 4;
         if b.len() != adj_end {
-            return Err(format!("theodb graph: CSR length mismatch (got {}, want {adj_end})", b.len()));
+            return Err(format!(
+                "theodb graph: CSR length mismatch (got {}, want {adj_end})",
+                b.len()
+            ));
         }
         let mut offsets = Vec::with_capacity(noff);
         for i in 0..noff {
@@ -108,7 +111,10 @@ impl Csr {
         for _ in 0..hops {
             let mut next: Vec<u32> = Vec::new();
             for &node in &frontier {
-                let (a0, a1) = (self.offsets[node as usize] as usize, self.offsets[node as usize + 1] as usize);
+                let (a0, a1) = (
+                    self.offsets[node as usize] as usize,
+                    self.offsets[node as usize + 1] as usize,
+                );
                 for &nbr in &self.adj[a0..a1] {
                     let ni = nbr as usize;
                     if !is(&visited, ni) {
@@ -172,7 +178,8 @@ impl Csr {
                 let mut next_frontier: Vec<u32> = Vec::new();
                 for &v in &frontier {
                     let vv = visit[v as usize];
-                    let (a0, a1) = (self.offsets[v as usize] as usize, self.offsets[v as usize + 1] as usize);
+                    let (a0, a1) =
+                        (self.offsets[v as usize] as usize, self.offsets[v as usize + 1] as usize);
                     for &nbr in &self.adj[a0..a1] {
                         let ni = nbr as usize;
                         let new_bits = vv & !seen[ni]; // lanes that reach nbr and haven't seen it yet
@@ -212,10 +219,15 @@ impl Csr {
             return Vec::new();
         }
         let d = damping.clamp(0.0, 0.999);
-        let deg: Vec<f64> = (0..nn).map(|u| (self.offsets[u + 1] - self.offsets[u]) as f64).collect();
+        let deg: Vec<f64> =
+            (0..nn).map(|u| (self.offsets[u + 1] - self.offsets[u]) as f64).collect();
         // restart distribution: uniform over the valid seeds (sums to 1); if no valid seed, uniform over all.
         let mut s = vec![0.0f64; nn];
-        let valid: Vec<usize> = seeds.iter().filter(|&&x| x >= 0 && (x as u64) < self.nnodes).map(|&x| x as usize).collect();
+        let valid: Vec<usize> = seeds
+            .iter()
+            .filter(|&&x| x >= 0 && (x as u64) < self.nnodes)
+            .map(|&x| x as usize)
+            .collect();
         if valid.is_empty() {
             let u = 1.0 / nn as f64;
             s.iter_mut().for_each(|x| *x = u);
@@ -261,15 +273,17 @@ fn build_csr(edge_rel: &str, src_col: &str, dst_col: &str) -> Csr {
     let mut dst: Vec<i64> = Vec::new();
     let mut maxn: i64 = -1;
     Spi::connect(|client| {
-        let t = client
-            .select(&scan_sql, None, &[])
-            .unwrap_or_else(|e| crate::pg::err_input(&format!("theodb.graph_build: scan failed: {e:?}")));
+        let t = client.select(&scan_sql, None, &[]).unwrap_or_else(|e| {
+            crate::pg::err_input(&format!("theodb.graph_build: scan failed: {e:?}"))
+        });
         for row in t {
             let s = row.get::<i64>(1).ok().flatten();
             let d = row.get::<i64>(2).ok().flatten();
             if let (Some(s), Some(d)) = (s, d) {
                 if s < 0 || d < 0 {
-                    crate::pg::err_input("theodb.graph_build: node ids must be non-negative bigints");
+                    crate::pg::err_input(
+                        "theodb.graph_build: node ids must be non-negative bigints",
+                    );
                 }
                 maxn = maxn.max(s).max(d);
                 src.push(s);
@@ -310,7 +324,7 @@ fn build_csr(edge_rel: &str, src_col: &str, dst_col: &str) -> Csr {
 // call these `theodb_rs.graph_*` internals.
 #[pgrx::pg_schema]
 mod theodb_rs {
-    use super::{build_csr, Csr};
+    use super::{Csr, build_csr};
     use pgrx::prelude::*;
     use std::rc::Rc;
 
@@ -343,7 +357,9 @@ mod theodb_rs {
         .ok();
         match cols {
             Some((Some(s), Some(d))) => graph_build(edge_rel, &s, &d),
-            _ => crate::pg::err_input("theodb.graph_refold: no persisted CSR for this edge relation (run graph_build first)"),
+            _ => crate::pg::err_input(
+                "theodb.graph_refold: no persisted CSR for this edge relation (run graph_build first)",
+            ),
         }
     }
 
@@ -375,9 +391,12 @@ mod theodb_rs {
             )
             .ok()
             .flatten()
-            .unwrap_or_else(|| crate::pg::err_input("theodb graph: persisted CSR row vanished mid-query"));
+            .unwrap_or_else(|| {
+                crate::pg::err_input("theodb graph: persisted CSR row vanished mid-query")
+            });
             let rc = Rc::new(
-                Csr::from_bytes(&bytes).unwrap_or_else(|e| crate::pg::err_input(&format!("theodb graph: {e}"))),
+                Csr::from_bytes(&bytes)
+                    .unwrap_or_else(|e| crate::pg::err_input(&format!("theodb graph: {e}"))),
             );
             c.borrow_mut().insert(oid, (epoch, rc.clone()));
             rc
@@ -387,7 +406,11 @@ mod theodb_rs {
     /// `graph_expand(edge_rel text, seeds bigint[], max_hops int) -> SETOF bigint` — load the PERSISTED CSR (no
     /// rebuild) and return the reachable node set within `max_hops` from `seeds` (undirected frontier BFS).
     #[pg_extern]
-    fn graph_expand(edge_rel: &str, seeds: Vec<Option<i64>>, max_hops: i32) -> SetOfIterator<'static, i64> {
+    fn graph_expand(
+        edge_rel: &str,
+        seeds: Vec<Option<i64>>,
+        max_hops: i32,
+    ) -> SetOfIterator<'static, i64> {
         let csr = load_cached_csr(edge_rel);
         let seed_ids: Vec<i64> = seeds.into_iter().flatten().collect();
         SetOfIterator::new(csr.expand(&seed_ids, max_hops).into_iter())
@@ -416,7 +439,12 @@ mod theodb_rs {
         let csr = load_cached_csr(edge_rel);
         let seed_ids: Vec<i64> = seeds.into_iter().flatten().collect();
         let pi = csr.ppr(&seed_ids, damping, iters);
-        let mut rows: Vec<(i64, f64)> = pi.into_iter().enumerate().filter(|(_, s)| *s > 1e-12).map(|(i, s)| (i as i64, s)).collect();
+        let mut rows: Vec<(i64, f64)> = pi
+            .into_iter()
+            .enumerate()
+            .filter(|(_, s)| *s > 1e-12)
+            .map(|(i, s)| (i as i64, s))
+            .collect();
         rows.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap().then(a.0.cmp(&b.0)));
         TableIterator::new(rows.into_iter())
     }
@@ -468,9 +496,14 @@ mod theodb_rs {
 /// Group parallel `set_ids`/`seeds` arrays into contiguous lanes (lane `k` ↔ `lane_set_id[k]`), preserving
 /// first-appearance order. Fails fast (typed) on unequal lengths; skips NULL element pairs. Shared by the
 /// `graph_expand_multi{,_card}` entrypoints (DRY).
-fn group_seed_lanes(set_ids: Vec<Option<i32>>, seeds: Vec<Option<i64>>) -> (Vec<Vec<i64>>, Vec<i32>) {
+fn group_seed_lanes(
+    set_ids: Vec<Option<i32>>,
+    seeds: Vec<Option<i64>>,
+) -> (Vec<Vec<i64>>, Vec<i32>) {
     if set_ids.len() != seeds.len() {
-        crate::pg::err_input("theodb graph_expand_multi: set_ids and seeds must be parallel arrays of equal length");
+        crate::pg::err_input(
+            "theodb graph_expand_multi: set_ids and seeds must be parallel arrays of equal length",
+        );
     }
     let mut lane_of: HashMap<i32, usize> = HashMap::new();
     let mut lane_set_id: Vec<i32> = Vec::new();
@@ -503,7 +536,15 @@ BEGIN
 END $$;
 "#,
     name = "theodb_graph_revoke",
-    requires = [graph_build, graph_refold, graph_expand, graph_expand_card, graph_expand_multi, graph_expand_multi_card, graph_ppr],
+    requires = [
+        graph_build,
+        graph_refold,
+        graph_expand,
+        graph_expand_card,
+        graph_expand_multi,
+        graph_expand_multi_card,
+        graph_ppr
+    ],
 );
 
 // Public `theodb.graph_*` surface (the pg_extern lives in schema `theodb_rs`; expose curated wrappers in `theodb`).
@@ -535,7 +576,16 @@ CREATE FUNCTION theodb.graph_ppr(edge_rel text, seeds bigint[], damping float8 D
 REVOKE ALL ON FUNCTION theodb.graph_ppr(text,bigint[],float8,int) FROM PUBLIC;
 "#,
     name = "theodb_graph_wrappers",
-    requires = [graph_build, graph_refold, graph_expand, graph_expand_card, graph_expand_multi, graph_expand_multi_card, graph_ppr, "theodb_graph_schema"],
+    requires = [
+        graph_build,
+        graph_refold,
+        graph_expand,
+        graph_expand_card,
+        graph_expand_multi,
+        graph_expand_multi_card,
+        graph_ppr,
+        "theodb_graph_schema"
+    ],
 );
 
 // M108 (review HIGH-1): drop the persisted CSR row when its edge relation is DROPped, so a later relation that
@@ -574,16 +624,28 @@ mod tests {
         let ne: i64 = Spi::get_one("SELECT theodb.graph_build('g','src','dst')").unwrap().unwrap();
         assert_eq!(ne, 6, "6 edges built");
         // a persisted row exists
-        let cnt: i64 = Spi::get_one("SELECT count(*) FROM theodb.graph_csr WHERE edge_rel='g'::regclass::oid").unwrap().unwrap();
+        let cnt: i64 =
+            Spi::get_one("SELECT count(*) FROM theodb.graph_csr WHERE edge_rel='g'::regclass::oid")
+                .unwrap()
+                .unwrap();
         assert_eq!(cnt, 1, "CSR persisted as one bytea row");
         // 1 hop from node 4 → {4,3}
-        let r1: i64 = Spi::get_one("SELECT count(*) FROM theodb.graph_expand('g', ARRAY[4]::bigint[], 1)").unwrap().unwrap();
+        let r1: i64 =
+            Spi::get_one("SELECT count(*) FROM theodb.graph_expand('g', ARRAY[4]::bigint[], 1)")
+                .unwrap()
+                .unwrap();
         assert_eq!(r1, 2, "1-hop from 4 reaches {{4,3}}");
         // 2 hops from node 4 → {4,3,2,0}
-        let r2: i64 = Spi::get_one("SELECT count(*) FROM theodb.graph_expand('g', ARRAY[4]::bigint[], 2)").unwrap().unwrap();
+        let r2: i64 =
+            Spi::get_one("SELECT count(*) FROM theodb.graph_expand('g', ARRAY[4]::bigint[], 2)")
+                .unwrap()
+                .unwrap();
         assert_eq!(r2, 4, "2-hop from 4 reaches {{4,3,2,0}}");
         // 3 hops from node 4 → all 5 nodes
-        let r3: i64 = Spi::get_one("SELECT count(*) FROM theodb.graph_expand('g', ARRAY[4]::bigint[], 3)").unwrap().unwrap();
+        let r3: i64 =
+            Spi::get_one("SELECT count(*) FROM theodb.graph_expand('g', ARRAY[4]::bigint[], 3)")
+                .unwrap()
+                .unwrap();
         assert_eq!(r3, 5, "3-hop from 4 reaches all nodes");
     }
 
@@ -599,11 +661,20 @@ mod tests {
         // add a far node 9 connected to 4; NOT visible until refold (the persisted CSR was built with nnodes=5,
         // so seed 9 is out-of-range → reaches nothing — proving expand reads the SNAPSHOT, not a per-query rebuild).
         Spi::run("INSERT INTO g VALUES (4,9)").unwrap();
-        let before: i64 = Spi::get_one("SELECT count(*) FROM theodb.graph_expand('g', ARRAY[9]::bigint[], 1)").unwrap().unwrap();
-        assert_eq!(before, 0, "before refold, node 9 is not in the persisted CSR (expand reads the snapshot, no rebuild)");
+        let before: i64 =
+            Spi::get_one("SELECT count(*) FROM theodb.graph_expand('g', ARRAY[9]::bigint[], 1)")
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            before, 0,
+            "before refold, node 9 is not in the persisted CSR (expand reads the snapshot, no rebuild)"
+        );
         let ne: i64 = Spi::get_one("SELECT theodb.graph_refold('g')").unwrap().unwrap();
         assert_eq!(ne, 7, "refold rebuilt the CSR with the 7th edge");
-        let after: i64 = Spi::get_one("SELECT count(*) FROM theodb.graph_expand('g', ARRAY[9]::bigint[], 1)").unwrap().unwrap();
+        let after: i64 =
+            Spi::get_one("SELECT count(*) FROM theodb.graph_expand('g', ARRAY[9]::bigint[], 1)")
+                .unwrap()
+                .unwrap();
         assert_eq!(after, 2, "after refold, node 9 reaches {{9,4}}");
     }
 
@@ -625,17 +696,25 @@ mod tests {
         let seeds = "ARRAY[100,2000,15000,30000,7777]::bigint[]";
 
         let tb = Instant::now();
-        let built: i64 = Spi::get_one("SELECT theodb.graph_build('ge','src','dst')").unwrap().unwrap();
+        let built: i64 =
+            Spi::get_one("SELECT theodb.graph_build('ge','src','dst')").unwrap().unwrap();
         let build_ms = tb.elapsed().as_secs_f64() * 1000.0;
 
         // First query is COLD (load+deserialize+cache); queries 2..6 are WARM (cache hit → traverse only).
         let tc = Instant::now();
-        let mut exp_reached: i64 = Spi::get_one(&format!("SELECT count(*) FROM theodb.graph_expand('ge', {seeds}, 3)")).unwrap().unwrap();
+        let mut exp_reached: i64 =
+            Spi::get_one(&format!("SELECT count(*) FROM theodb.graph_expand('ge', {seeds}, 3)"))
+                .unwrap()
+                .unwrap();
         let cold_ms = tc.elapsed().as_secs_f64() * 1000.0;
         let mut exp_ms = Vec::new();
         for _ in 0..5 {
             let t = Instant::now();
-            exp_reached = Spi::get_one(&format!("SELECT count(*) FROM theodb.graph_expand('ge', {seeds}, 3)")).unwrap().unwrap();
+            exp_reached = Spi::get_one(&format!(
+                "SELECT count(*) FROM theodb.graph_expand('ge', {seeds}, 3)"
+            ))
+            .unwrap()
+            .unwrap();
             exp_ms.push(t.elapsed().as_secs_f64() * 1000.0);
         }
         let mut cte_ms = Vec::new();
@@ -647,7 +726,9 @@ mod tests {
                  SELECT CASE WHEN e.src=r.node THEN e.dst ELSE e.src END, r.hop+1 \
                  FROM reach r JOIN ge e ON (e.src=r.node OR e.dst=r.node) WHERE r.hop<3) \
                  SELECT count(DISTINCT node) FROM reach"
-            )).unwrap().unwrap();
+            ))
+            .unwrap()
+            .unwrap();
             cte_ms.push(t.elapsed().as_secs_f64() * 1000.0);
         }
         let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
@@ -664,8 +745,13 @@ mod tests {
              SELECT CASE WHEN e.src=r.node THEN e.dst ELSE e.src END, r.hop+1 \
              FROM reach r JOIN ge e ON (e.src=r.node OR e.dst=r.node) WHERE r.hop<3) \
              SELECT coalesce(bit_xor(hashint8(node)),0) FROM (SELECT DISTINCT node FROM reach) s"
-        )).unwrap().unwrap();
-        assert_eq!(exp_hash, cte_hash, "M108 set-hash oracle: persisted expand must yield the SAME reachable set as the CTE");
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            exp_hash, cte_hash,
+            "M108 set-hash oracle: persisted expand must yield the SAME reachable set as the CTE"
+        );
         let line = format!(
             "M108_BENCH edges={built} build_ms={build_ms:.3} cold_expand_ms={cold_ms:.3} warm_expand_mean_ms={em:.4} cte_mean_ms={cm:.3} warm_speedup={:.1} reached={exp_reached}\n",
             cm / em.max(1e-9)
@@ -674,7 +760,10 @@ mod tests {
         pgrx::warning!("{}", line.trim());
         // Gate: the WARM per-query persisted expand (cache hit → traverse only) is faster than the recursive CTE —
         // the M107 traverse-only win, now WITHOUT the per-query build (paid ONCE) and WITHOUT re-deserialize (cached).
-        assert!(em < cm, "M108 gate: warm persisted expand ({em:.3}ms) must beat the recursive CTE ({cm:.3}ms) per query");
+        assert!(
+            em < cm,
+            "M108 gate: warm persisted expand ({em:.3}ms) must beat the recursive CTE ({cm:.3}ms) per query"
+        );
     }
 
     // M108 (review HIGH-1): DROPping the edge relation removes its persisted CSR row (sql_drop event trigger),
@@ -684,13 +773,21 @@ mod tests {
         seed();
         Spi::get_one::<i64>("SELECT theodb.graph_build('g','src','dst')").unwrap();
         assert_eq!(
-            Spi::get_one::<i64>("SELECT count(*) FROM theodb.graph_csr WHERE edge_rel='g'::regclass::oid").unwrap().unwrap(),
-            1, "CSR row present before DROP"
+            Spi::get_one::<i64>(
+                "SELECT count(*) FROM theodb.graph_csr WHERE edge_rel='g'::regclass::oid"
+            )
+            .unwrap()
+            .unwrap(),
+            1,
+            "CSR row present before DROP"
         );
         Spi::run("DROP TABLE g").unwrap();
         // the sql_drop trigger deleted the row; nothing references the freed oid
         let orphans: i64 = Spi::get_one("SELECT count(*) FROM theodb.graph_csr WHERE edge_rel NOT IN (SELECT oid FROM pg_class)").unwrap().unwrap();
-        assert_eq!(orphans, 0, "sql_drop trigger removes the orphaned CSR row (no OID-reuse wrong answer)");
+        assert_eq!(
+            orphans, 0,
+            "sql_drop trigger removes the orphaned CSR row (no OID-reuse wrong answer)"
+        );
     }
 
     // M112: Personalized PageRank oracle — on a symmetric line 0-1-2-3-4 seeded at the CENTER (2), PPR must be
@@ -712,7 +809,10 @@ mod tests {
         let e = |n: i64| -> f64 {
             Spi::get_one(&format!("SELECT score FROM theodb.graph_ppr('gline', ARRAY[0]::bigint[], 0.5, 40) WHERE node={n}")).unwrap().unwrap_or(0.0)
         };
-        assert!(e(0) > e(1) && e(1) > e(2) && e(2) > e(3), "endpoint-seeded PPR decays along the line");
+        assert!(
+            e(0) > e(1) && e(1) > e(2) && e(2) > e(3),
+            "endpoint-seeded PPR decays along the line"
+        );
     }
 
     // M108: expand on an unbuilt relation fails fast (typed), not a silent empty.
@@ -741,7 +841,10 @@ mod tests {
                 let single: i64 = Spi::get_one(&format!(
                     "SELECT coalesce(bit_xor(hashint8(node)),0) FROM theodb.graph_expand('g', ARRAY[{s}]::bigint[], {h}) AS t(node)"
                 )).unwrap().unwrap();
-                assert_eq!(multi, single, "lane {sid} (seed {s}) H={h}: MS-BFS set-hash must equal single-source expand");
+                assert_eq!(
+                    multi, single,
+                    "lane {sid} (seed {s}) H={h}: MS-BFS set-hash must equal single-source expand"
+                );
             }
         }
     }
@@ -787,7 +890,10 @@ mod tests {
             let single: i64 = Spi::get_one(&format!(
                 "SELECT coalesce(bit_xor(hashint8(node)),0) FROM theodb.graph_expand('g', ARRAY[{s}]::bigint[], 2) AS t(node)"
             )).unwrap().unwrap();
-            assert_eq!(multi, single, "tiling lane {k} (seed {s}) crosses the 64-lane tile boundary correctly");
+            assert_eq!(
+                multi, single,
+                "tiling lane {k} (seed {s}) crosses the 64-lane tile boundary correctly"
+            );
         }
     }
 
@@ -796,7 +902,9 @@ mod tests {
     fn m109_expand_multi_without_build_errors() {
         Spi::run("CREATE TABLE g3(src bigint, dst bigint)").unwrap();
         let r = std::panic::catch_unwind(|| {
-            Spi::run("SELECT * FROM theodb.graph_expand_multi('g3', ARRAY[1]::int[], ARRAY[0]::bigint[], 1)")
+            Spi::run(
+                "SELECT * FROM theodb.graph_expand_multi('g3', ARRAY[1]::int[], ARRAY[0]::bigint[], 1)",
+            )
         });
         assert!(r.is_err(), "expand_multi without a prior build must raise, not return empty");
     }
@@ -807,7 +915,9 @@ mod tests {
         seed();
         Spi::get_one::<i64>("SELECT theodb.graph_build('g','src','dst')").unwrap();
         let r = std::panic::catch_unwind(|| {
-            Spi::run("SELECT * FROM theodb.graph_expand_multi('g', ARRAY[1,2]::int[], ARRAY[0]::bigint[], 1)")
+            Spi::run(
+                "SELECT * FROM theodb.graph_expand_multi('g', ARRAY[1,2]::int[], ARRAY[0]::bigint[], 1)",
+            )
         });
         assert!(r.is_err(), "unequal set_ids/seeds lengths must raise a typed error");
     }
@@ -828,9 +938,11 @@ mod tests {
                     (CASE WHEN abs(hashint8(g*7))%100 < 25 THEN abs(hashint8(g*3))%400 \
                           ELSE abs(hashint8(g*13))%40000 END)::bigint AS dst \
              FROM generate_series(1,200000) g",
-        ).unwrap();
+        )
+        .unwrap();
         Spi::run("CREATE INDEX ON ge(src); CREATE INDEX ON ge(dst); ANALYZE ge").unwrap();
-        let built: i64 = Spi::get_one("SELECT theodb.graph_build('ge','src','dst')").unwrap().unwrap();
+        let built: i64 =
+            Spi::get_one("SELECT theodb.graph_build('ge','src','dst')").unwrap().unwrap();
 
         let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
         let ns: [i64; 7] = [1, 4, 16, 64, 128, 256, 512];
@@ -839,8 +951,14 @@ mod tests {
         let mut max_pure_speedup: f64 = 0.0;
         for &n in &ns {
             let seeds_vec: Vec<i64> = (1..=n).map(|k| (k * 617) % 40000).collect();
-            let sids_arr = format!("ARRAY[{}]::int[]", (1..=n).map(|k| k.to_string()).collect::<Vec<_>>().join(","));
-            let sds_arr = format!("ARRAY[{}]::bigint[]", seeds_vec.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(","));
+            let sids_arr = format!(
+                "ARRAY[{}]::int[]",
+                (1..=n).map(|k| k.to_string()).collect::<Vec<_>>().join(",")
+            );
+            let sds_arr = format!(
+                "ARRAY[{}]::bigint[]",
+                seeds_vec.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(",")
+            );
 
             // Oracle FIRST (gates the number at THIS N): batched reachable sets == N sequential expands.
             let batched_hash: i64 = Spi::get_one(&format!(
@@ -854,7 +972,10 @@ mod tests {
                 )).unwrap().unwrap();
                 seq_hash ^= h;
             }
-            assert_eq!(batched_hash, seq_hash, "M109 oracle @ N={n}: batched reachable sets must equal N sequential expands");
+            assert_eq!(
+                batched_hash, seq_hash,
+                "M109 oracle @ N={n}: batched reachable sets must equal N sequential expands"
+            );
 
             // TRAVERSAL-ONLY timing. batched = graph_expand_multi_card (N cardinality rows out, count in Rust).
             // Two sequential baselines to DECOMPOSE the win honestly:
@@ -872,7 +993,10 @@ mod tests {
             for _ in 0..3 {
                 let t = Instant::now();
                 for &sk in &seeds_vec {
-                    let _ = Spi::get_one::<i64>(&format!("SELECT theodb.graph_expand_card('ge', ARRAY[{sk}]::bigint[], 3)")).unwrap();
+                    let _ = Spi::get_one::<i64>(&format!(
+                        "SELECT theodb.graph_expand_card('ge', ARRAY[{sk}]::bigint[], 3)"
+                    ))
+                    .unwrap();
                 }
                 seq_card_ms.push(t.elapsed().as_secs_f64() * 1000.0);
             }
@@ -880,11 +1004,16 @@ mod tests {
             for _ in 0..3 {
                 let t = Instant::now();
                 for &sk in &seeds_vec {
-                    let _ = Spi::get_one::<i64>(&format!("SELECT count(*) FROM theodb.graph_expand('ge', ARRAY[{sk}]::bigint[], 3)")).unwrap();
+                    let _ = Spi::get_one::<i64>(&format!(
+                        "SELECT count(*) FROM theodb.graph_expand('ge', ARRAY[{sk}]::bigint[], 3)"
+                    ))
+                    .unwrap();
                 }
                 seq_nodes_ms.push(t.elapsed().as_secs_f64() * 1000.0);
             }
-            let std = |v: &[f64], m: f64| (v.iter().map(|x| (x - m).powi(2)).sum::<f64>() / v.len() as f64).sqrt();
+            let std = |v: &[f64], m: f64| {
+                (v.iter().map(|x| (x - m).powi(2)).sum::<f64>() / v.len() as f64).sqrt()
+            };
             let (bm, scm, snm) = (mean(&batch_ms), mean(&seq_card_ms), mean(&seq_nodes_ms));
             let (bstd, scstd) = (std(&batch_ms, bm), std(&seq_card_ms, scm));
             let speedup_pure = scm / bm.max(1e-9); // isolates (a)+(b): both count in Rust
@@ -893,7 +1022,9 @@ mod tests {
                 crossover = n;
             }
             max_pure_speedup = max_pure_speedup.max(speedup_pure);
-            pgrx::warning!("M109_SWEEP n={n} batched_ms={bm:.3}±{bstd:.3} seq_card_ms={scm:.3}±{scstd:.3} pure_speedup={speedup_pure:.3} naive_speedup={speedup_naive:.3}");
+            pgrx::warning!(
+                "M109_SWEEP n={n} batched_ms={bm:.3}±{bstd:.3} seq_card_ms={scm:.3}±{scstd:.3} pure_speedup={speedup_pure:.3} naive_speedup={speedup_naive:.3}"
+            );
             points.push(format!(
                 "{{\"n\":{n},\"batched_ms\":{bm:.4},\"batched_std\":{bstd:.4},\"seq_card_ms\":{scm:.4},\"seq_card_std\":{scstd:.4},\"seq_nodes_ms\":{snm:.4},\"pure_speedup\":{speedup_pure:.3},\"naive_speedup\":{speedup_naive:.3}}}"
             ));
@@ -909,8 +1040,14 @@ mod tests {
         Spi::get_one::<i64>("SELECT theodb.graph_build('geu','src','dst')").unwrap();
         let fn64: i64 = 64;
         let fseeds: Vec<i64> = (1..=fn64).map(|k| (k * 617) % 40000).collect();
-        let fsids = format!("ARRAY[{}]::int[]", (1..=fn64).map(|k| k.to_string()).collect::<Vec<_>>().join(","));
-        let fsds = format!("ARRAY[{}]::bigint[]", fseeds.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(","));
+        let fsids = format!(
+            "ARRAY[{}]::int[]",
+            (1..=fn64).map(|k| k.to_string()).collect::<Vec<_>>().join(",")
+        );
+        let fsds = format!(
+            "ARRAY[{}]::bigint[]",
+            fseeds.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(",")
+        );
         let fbh: i64 = Spi::get_one(&format!("SELECT coalesce(bit_xor(hashint8(set_id::bigint*1000003 + node)),0) FROM theodb.graph_expand_multi('geu', {fsids}, {fsds}, 3)")).unwrap().unwrap();
         let mut fsh: i64 = 0;
         for (i, &sk) in fseeds.iter().enumerate() {
@@ -918,18 +1055,27 @@ mod tests {
             fsh ^= Spi::get_one::<i64>(&format!("SELECT coalesce(bit_xor(hashint8({k}::bigint*1000003 + node)),0) FROM theodb.graph_expand('geu', ARRAY[{sk}]::bigint[], 3) AS t(node)")).unwrap().unwrap();
         }
         assert_eq!(fbh, fsh, "M109 oracle @ uniform-floor N=64: batched == N sequential");
-        let _ = Spi::get_one::<i64>(&format!("SELECT count(*) FROM theodb.graph_expand_multi_card('geu', {fsids}, {fsds}, 3)")).unwrap();
+        let _ = Spi::get_one::<i64>(&format!(
+            "SELECT count(*) FROM theodb.graph_expand_multi_card('geu', {fsids}, {fsds}, 3)"
+        ))
+        .unwrap();
         let mut fb = Vec::new();
         for _ in 0..3 {
             let t = std::time::Instant::now();
-            let _ = Spi::get_one::<i64>(&format!("SELECT count(*) FROM theodb.graph_expand_multi_card('geu', {fsids}, {fsds}, 3)")).unwrap();
+            let _ = Spi::get_one::<i64>(&format!(
+                "SELECT count(*) FROM theodb.graph_expand_multi_card('geu', {fsids}, {fsds}, 3)"
+            ))
+            .unwrap();
             fb.push(t.elapsed().as_secs_f64() * 1000.0);
         }
         let mut fs = Vec::new();
         for _ in 0..3 {
             let t = std::time::Instant::now();
             for &sk in &fseeds {
-                let _ = Spi::get_one::<i64>(&format!("SELECT theodb.graph_expand_card('geu', ARRAY[{sk}]::bigint[], 3)")).unwrap();
+                let _ = Spi::get_one::<i64>(&format!(
+                    "SELECT theodb.graph_expand_card('geu', ARRAY[{sk}]::bigint[], 3)"
+                ))
+                .unwrap();
             }
             fs.push(t.elapsed().as_secs_f64() * 1000.0);
         }
@@ -943,10 +1089,15 @@ mod tests {
             points.join(",")
         );
         let _ = std::fs::write("/tmp/m109_crossover.json", &json);
-        pgrx::warning!("M109_CROSSOVER crossover_n={crossover} max_pure_speedup={max_pure_speedup:.2} (>=1.0x speedup first at this N; -1 = never within swept range)");
+        pgrx::warning!(
+            "M109_CROSSOVER crossover_n={crossover} max_pure_speedup={max_pure_speedup:.2} (>=1.0x speedup first at this N; -1 = never within swept range)"
+        );
         // GATE: the oracle (correctness at every N) already hard-gated each point. Regression gate: batched
         // MS-BFS traversal MUST beat the count-in-Rust sequential baseline by > 2× somewhere in the swept range
         // (measured ~7× at N=64; a conservative 2× floor guards against a regression that erases the win).
-        assert!(max_pure_speedup > 2.0, "M109 GATE: batched MS-BFS pure-traversal speedup must exceed 2× (got {max_pure_speedup:.2}×)");
+        assert!(
+            max_pure_speedup > 2.0,
+            "M109 GATE: batched MS-BFS pure-traversal speedup must exceed 2× (got {max_pure_speedup:.2}×)"
+        );
     }
 }

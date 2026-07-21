@@ -46,7 +46,14 @@ pub(crate) fn hnsw_visit_ratio(tuples: f64, m: usize, ef_search: usize) -> f64 {
 /// Pure dispatch — the fail-safe fallback matrix, unit-testable with forged inputs (no `Relation` needed).
 /// An unreadable meta (`magic == None` because `peek_magic` returned `Err`), an unknown magic (v1/blob/legacy),
 /// or `tuples <= 0` all degrade to 1.0 — the ratio a plain generic estimate would use (EC-3: NEVER error).
-pub(crate) fn ratio_for(magic: Option<u32>, tuples: f64, probes: usize, lists: usize, m: usize, ef: usize) -> f64 {
+pub(crate) fn ratio_for(
+    magic: Option<u32>,
+    tuples: f64,
+    probes: usize,
+    lists: usize,
+    m: usize,
+    ef: usize,
+) -> f64 {
     if tuples <= 0.0 {
         return 1.0;
     }

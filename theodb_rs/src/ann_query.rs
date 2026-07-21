@@ -54,7 +54,12 @@ pub(crate) fn valid_ident(name: &str) -> bool {
 /// MEMORY: reads the whole corpus into a `Vec<(i64, Vec<f32>)>` (row count × vector dim × 4 bytes). This is
 /// the measurement-first SQL-callable scope (ADR D1) — for very large tables the caller should pre-filter the
 /// `src_table` (e.g. a view); a persisted, streaming on-disk access method is the deferred M21b follow-up.
-pub(crate) fn read_corpus(src_table: &str, embed_col: &str, id_col: &str, qdim: usize) -> Vec<(i64, Vec<f32>)> {
+pub(crate) fn read_corpus(
+    src_table: &str,
+    embed_col: &str,
+    id_col: &str,
+    qdim: usize,
+) -> Vec<(i64, Vec<f32>)> {
     // id_col must be an integer-typed column (EC-6) — clean 22023 instead of a raw cast error deep in the read.
     let type_sql = format!(
         "SELECT format_type(a.atttypid, NULL) FROM pg_attribute a \
@@ -64,7 +69,9 @@ pub(crate) fn read_corpus(src_table: &str, embed_col: &str, id_col: &str, qdim: 
     );
     match Spi::get_one::<String>(&type_sql) {
         Ok(Some(t)) if matches!(t.as_str(), "smallint" | "integer" | "bigint") => {}
-        Ok(Some(t)) => err_input(&format!("theodb ann: id_col '{id_col}' must be an integer column, is '{t}'")),
+        Ok(Some(t)) => {
+            err_input(&format!("theodb ann: id_col '{id_col}' must be an integer column, is '{t}'"))
+        }
         _ => err_input(&format!("theodb ann: id_col '{id_col}' not found on {src_table}")),
     }
 
@@ -81,7 +88,7 @@ pub(crate) fn read_corpus(src_table: &str, embed_col: &str, id_col: &str, qdim: 
             };
             let v = match row.get::<Vec<f32>>(2) {
                 Ok(Some(v)) => v,
-                Ok(None) => continue,      // NULL vector — skip (EC-1, pgvector index semantics)
+                Ok(None) => continue, // NULL vector — skip (EC-1, pgvector index semantics)
                 Err(e) => err_input(&format!("theodb ann: bad vector in {embed_col}: {e}")),
             };
             if v.len() != qdim {
@@ -115,8 +122,9 @@ pub(crate) fn knn(
     p: Params,
 ) -> Vec<(i32, i64, f64)> {
     // --- boundary validation (Rule 8; typed 22023) ---
-    let metric = Metric::parse(metric_s)
-        .unwrap_or_else(|| err_input(&format!("theodb ann: unknown metric '{metric_s}' (use l2|cosine|ip)")));
+    let metric = Metric::parse(metric_s).unwrap_or_else(|| {
+        err_input(&format!("theodb ann: unknown metric '{metric_s}' (use l2|cosine|ip)"))
+    });
     require(valid_ident(embed_col), "theodb ann: embed_col is not a valid identifier");
     require(valid_ident(id_col), "theodb ann: id_col is not a valid identifier");
     require(qdim >= 1, "theodb ann: qdim must be >= 1");
@@ -130,11 +138,17 @@ pub(crate) fn knn(
                 p.ef_construction >= p.k && p.ef_construction <= EF_MAX,
                 "theodb ann: ef_construction must be in [k, 1000]",
             );
-            require(p.ef_search >= p.k && p.ef_search <= EF_MAX, "theodb ann: ef_search must be in [k, 1000]");
+            require(
+                p.ef_search >= p.k && p.ef_search <= EF_MAX,
+                "theodb ann: ef_search must be in [k, 1000]",
+            );
         }
         Algo::Ivfflat => {
             require(p.lists >= 1 && p.lists <= LIST_MAX, "theodb ann: lists must be in [1, 32768]");
-            require(p.probes >= 1 && p.probes <= LIST_MAX, "theodb ann: probes must be in [1, 32768]");
+            require(
+                p.probes >= 1 && p.probes <= LIST_MAX,
+                "theodb ann: probes must be in [1, 32768]",
+            );
         }
     }
 
@@ -156,7 +170,8 @@ pub(crate) fn knn(
     let mut out: Vec<(i32, i64, f64)> = Vec::new();
     match algo {
         Algo::Hnsw => {
-            let idx = HnswIndex::build(&corpus, p.m as usize, p.ef_construction as usize, metric, seed);
+            let idx =
+                HnswIndex::build(&corpus, p.m as usize, p.ef_construction as usize, metric, seed);
             for (qi, chunk) in queries.chunks(qd).enumerate() {
                 for (id, dist) in idx.search(chunk, k, p.ef_search as usize) {
                     out.push((qi as i32, id, dist));

@@ -12,19 +12,19 @@
 #![allow(non_snake_case)]
 
 use datafusion::arrow::array::{
-    Array, ArrayRef, BooleanArray, Date32Array, Decimal128Array, Float32Array, Float64Array, Int16Array, Int32Array,
-    Int64Array, StringArray, TimestampMicrosecondArray,
+    Array, ArrayRef, BooleanArray, Date32Array, Decimal128Array, Float32Array, Float64Array,
+    Int16Array, Int32Array, Int64Array, StringArray, TimestampMicrosecondArray,
 };
 use datafusion::arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::error::DataFusionError;
 use datafusion::functions_aggregate::expr_fn::{avg, count, max, min, sum};
-use datafusion::prelude::{col, lit, Expr, SessionContext};
+use datafusion::prelude::{Expr, SessionContext, col, lit};
 use datafusion::scalar::ScalarValue;
-use std::ffi::CStr;
-use pgrx::datum::FromDatum;
 use pgrx::AnyNumeric;
+use pgrx::datum::FromDatum;
 use pgrx::prelude::*;
+use std::ffi::CStr;
 use std::sync::Arc;
 
 /// RAII emulating C's `HOLD_INTERRUPTS()`/`RESUME_INTERRUPTS()` (macros over `InterruptHoldoffCount`). Holds
@@ -46,7 +46,9 @@ impl Drop for HeldInterrupts {
 /// Map the decoded columnar columns (name, atttypid, per-row stored bytes) to an Arrow schema + arrays. The stored
 /// bytes are the codec encoding (fixed: attlen LE bytes; varlena: logical payload). Builtin type OIDs (pg_type.dat,
 /// ABI-stable) drive the Arrow `DataType`.
-pub(super) fn build_arrow(cols: &[(String, u32, Vec<Option<Vec<u8>>>)]) -> Result<(Schema, Vec<ArrayRef>), String> {
+pub(super) fn build_arrow(
+    cols: &[(String, u32, Vec<Option<Vec<u8>>>)],
+) -> Result<(Schema, Vec<ArrayRef>), String> {
     let mut fields = Vec::with_capacity(cols.len());
     let mut arrays: Vec<ArrayRef> = Vec::with_capacity(cols.len());
     for (name, typid, values) in cols {
@@ -57,30 +59,38 @@ pub(super) fn build_arrow(cols: &[(String, u32, Vec<Option<Vec<u8>>>)]) -> Resul
                     values.iter().map(|v| v.as_ref().map(|b| i16::from_le_bytes([b[0], b[1]]))),
                 )),
             ),
-            23 => (
-                DataType::Int32,
-                Arc::new(Int32Array::from_iter(
-                    values.iter().map(|v| v.as_ref().map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]))),
-                )),
-            ),
-            20 => (
-                DataType::Int64,
-                Arc::new(Int64Array::from_iter(
-                    values.iter().map(|v| v.as_ref().map(|b| i64::from_le_bytes(b[..8].try_into().unwrap()))),
-                )),
-            ),
-            700 => (
-                DataType::Float32,
-                Arc::new(Float32Array::from_iter(
-                    values.iter().map(|v| v.as_ref().map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))),
-                )),
-            ),
-            701 => (
-                DataType::Float64,
-                Arc::new(Float64Array::from_iter(
-                    values.iter().map(|v| v.as_ref().map(|b| f64::from_le_bytes(b[..8].try_into().unwrap()))),
-                )),
-            ),
+            23 => {
+                (
+                    DataType::Int32,
+                    Arc::new(Int32Array::from_iter(values.iter().map(|v| {
+                        v.as_ref().map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+                    }))),
+                )
+            }
+            20 => {
+                (
+                    DataType::Int64,
+                    Arc::new(Int64Array::from_iter(values.iter().map(|v| {
+                        v.as_ref().map(|b| i64::from_le_bytes(b[..8].try_into().unwrap()))
+                    }))),
+                )
+            }
+            700 => {
+                (
+                    DataType::Float32,
+                    Arc::new(Float32Array::from_iter(values.iter().map(|v| {
+                        v.as_ref().map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+                    }))),
+                )
+            }
+            701 => {
+                (
+                    DataType::Float64,
+                    Arc::new(Float64Array::from_iter(values.iter().map(|v| {
+                        v.as_ref().map(|b| f64::from_le_bytes(b[..8].try_into().unwrap()))
+                    }))),
+                )
+            }
             16 => (
                 DataType::Boolean,
                 Arc::new(BooleanArray::from_iter(
@@ -90,24 +100,30 @@ pub(super) fn build_arrow(cols: &[(String, u32, Vec<Option<Vec<u8>>>)]) -> Resul
             25 | 1042 | 1043 => (
                 DataType::Utf8,
                 Arc::new(StringArray::from_iter(
-                    values.iter().map(|v| v.as_ref().map(|b| String::from_utf8_lossy(b).into_owned())),
+                    values
+                        .iter()
+                        .map(|v| v.as_ref().map(|b| String::from_utf8_lossy(b).into_owned())),
                 )),
             ),
             // Temporal: the stored bytes ARE the internal int (timestamp/timestamptz = int64 μs, date = int32 days).
             // Both mapped to a naive (tz=None) Arrow type — the comparison is on the raw int domain (tz is display
             // only), so `build_filter_expr`'s matching-typed literal compares correctly (D3).
-            1114 | 1184 => (
-                DataType::Timestamp(TimeUnit::Microsecond, None),
-                Arc::new(TimestampMicrosecondArray::from_iter(
-                    values.iter().map(|v| v.as_ref().map(|b| i64::from_le_bytes(b[..8].try_into().unwrap()))),
-                )),
-            ),
-            1082 => (
-                DataType::Date32,
-                Arc::new(Date32Array::from_iter(
-                    values.iter().map(|v| v.as_ref().map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]))),
-                )),
-            ),
+            1114 | 1184 => {
+                (
+                    DataType::Timestamp(TimeUnit::Microsecond, None),
+                    Arc::new(TimestampMicrosecondArray::from_iter(values.iter().map(|v| {
+                        v.as_ref().map(|b| i64::from_le_bytes(b[..8].try_into().unwrap()))
+                    }))),
+                )
+            }
+            1082 => {
+                (
+                    DataType::Date32,
+                    Arc::new(Date32Array::from_iter(values.iter().map(|v| {
+                        v.as_ref().map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+                    }))),
+                )
+            }
             other => {
                 return Err(format!(
                     "df_executor: unsupported column type oid {other} (Phase A: int2/4/8, float4/8, bool, text)"
@@ -181,7 +197,9 @@ fn push_agg_exprs(spec: &AggSpec, exprs: &mut Vec<Expr>) {
     let k = exprs.len();
     match spec {
         AggSpec::CountStar => exprs.push(count(lit(1i64)).alias(format!("a{k}"))),
-        AggSpec::SumFloat8(name) | AggSpec::SumInt(name) => exprs.push(sum(col(name.as_str())).alias(format!("a{k}"))),
+        AggSpec::SumFloat8(name) | AggSpec::SumInt(name) => {
+            exprs.push(sum(col(name.as_str())).alias(format!("a{k}")))
+        }
         AggSpec::AvgFloat8(name) => exprs.push(avg(col(name.as_str())).alias(format!("a{k}"))),
         AggSpec::SumInt8Numeric(name) => {
             exprs.push(sum(dec128_cast(name)).alias(format!("a{k}")));
@@ -228,13 +246,17 @@ unsafe fn decode_to_batch(
     }
     let cols = super::columnar::decode_columns(rel, Some(&proj), predicates, skip)?;
     let (schema, arrays) = build_arrow(&cols)?;
-    RecordBatch::try_new(Arc::new(schema), arrays).map_err(|e| format!("df_executor: arrow batch: {e}"))
+    RecordBatch::try_new(Arc::new(schema), arrays)
+        .map_err(|e| format!("df_executor: arrow batch: {e}"))
 }
 
 /// Build the DataFusion filter `Expr` for the pushed zone-map predicates (a conjunction of `col <op> const`), the
 /// FINAL authority over rows in surviving chunk groups (ADR D3 — the skip is only an admission filter). `col` is
 /// resolved to its name via the tupdesc; the literal is typed to the column's `MinMaxKind` (matching `build_arrow`).
-unsafe fn build_filter_expr(rel: pg_sys::Relation, predicates: &[super::zonemap::ZonePredicate]) -> Option<Expr> {
+unsafe fn build_filter_expr(
+    rel: pg_sys::Relation,
+    predicates: &[super::zonemap::ZonePredicate],
+) -> Option<Expr> {
     use super::columnar_codec::MinMaxKind;
     use super::zonemap::ZoneOp;
     let tupdesc = (*rel).rd_att;
@@ -290,7 +312,8 @@ pub(super) unsafe fn run_columnar_aggs(
     predicates: &[super::zonemap::ZonePredicate],
     skip: bool,
 ) -> Result<Vec<(pg_sys::Datum, bool)>, String> {
-    let agg_cols: Vec<String> = aggs.iter().filter_map(|a| a.col_name().map(str::to_string)).collect();
+    let agg_cols: Vec<String> =
+        aggs.iter().filter_map(|a| a.col_name().map(str::to_string)).collect();
     let batch = decode_to_batch(rel, &agg_cols, predicates, skip)?;
     let filter = build_filter_expr(rel, predicates);
     run_aggs_on_batch(batch, aggs, filter)
@@ -431,7 +454,9 @@ pub(super) unsafe fn run_columnar_grouped_aggs(
     let gk: Vec<(usize, u32)> = layout
         .iter()
         .enumerate()
-        .filter_map(|(slot, &(kind, idx))| if kind == 0 { Some((slot, group_cols[idx].1)) } else { None })
+        .filter_map(
+            |(slot, &(kind, idx))| if kind == 0 { Some((slot, group_cols[idx].1)) } else { None },
+        )
         .collect();
     if !gk.is_empty() && !gk.iter().any(|&(_, t)| matches!(t, 25 | 1042 | 1043)) {
         rows.sort_by(|a, b| {
@@ -449,7 +474,11 @@ pub(super) unsafe fn run_columnar_grouped_aggs(
 
 /// Compare two group-key `(Datum, is_null)` cells for the ASCending-nulls-last ordering of the swapped grouped result
 /// (numeric/temporal/bool types — text is declined upstream). NULL sorts last (PG default for ASC).
-fn cmp_group_datum(a: (pg_sys::Datum, bool), b: (pg_sys::Datum, bool), typoid: u32) -> std::cmp::Ordering {
+fn cmp_group_datum(
+    a: (pg_sys::Datum, bool),
+    b: (pg_sys::Datum, bool),
+    typoid: u32,
+) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     match (a.1, b.1) {
         (true, true) => return Ordering::Equal,
@@ -478,7 +507,12 @@ fn cmp_group_datum(a: (pg_sys::Datum, bool), b: (pg_sys::Datum, bool), typoid: u
 /// (`count(*)`→int8, `sum(int2/4)`→int8, `sum/avg(float8)`→float8, `sum(int8)`→numeric); TWO columns for `avg(int)`
 /// (sum + count → `AnyNumeric(sum)/AnyNumeric(count)` = PG `numeric_div`, ADR-N1/N2). Shared by the scalar (row 0) and
 /// grouped (per row) paths.
-fn agg_datum(b: &RecordBatch, col: usize, row: usize, spec: &AggSpec) -> Result<(pg_sys::Datum, bool), String> {
+fn agg_datum(
+    b: &RecordBatch,
+    col: usize,
+    row: usize,
+    spec: &AggSpec,
+) -> Result<(pg_sys::Datum, bool), String> {
     let arr = b.column(col);
     // NULL propagation: an empty/all-NULL group makes the (first) aggregate cell null → SQL NULL (ADR-N3).
     if arr.is_null(row) {
@@ -487,34 +521,56 @@ fn agg_datum(b: &RecordBatch, col: usize, row: usize, spec: &AggSpec) -> Result<
     let datum = match spec {
         // int8 output: count(*), sum(int2/int4) (DataFusion → Int64 = PG bigint).
         AggSpec::CountStar | AggSpec::SumInt(_) => {
-            let v = arr.as_any().downcast_ref::<Int64Array>().ok_or("df_executor: agg not Int64")?.value(row);
+            let v = arr
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .ok_or("df_executor: agg not Int64")?
+                .value(row);
             v.into_datum().ok_or("df_executor: int8 datum")?
         }
         // float8 output: sum(float8), avg(float8) (DataFusion → Float64 = PG double precision).
         AggSpec::SumFloat8(_) | AggSpec::AvgFloat8(_) => {
-            let v = arr.as_any().downcast_ref::<Float64Array>().ok_or("df_executor: agg not Float64")?.value(row);
+            let v = arr
+                .as_any()
+                .downcast_ref::<Float64Array>()
+                .ok_or("df_executor: agg not Float64")?
+                .value(row);
             v.into_datum().ok_or("df_executor: float8 datum")?
         }
         // numeric output: sum(int8) = exact Decimal128(38,0) i128 → AnyNumeric (scale 0). Int64 sum would wrap.
         // A Decimal128(38,0) overflow (>10^38, unreachable at realistic row counts) surfaces as a DataFusion error
         // at run_df_collect, never a panic across the C boundary.
         AggSpec::SumInt8Numeric(_) => {
-            let s = arr.as_any().downcast_ref::<Decimal128Array>().ok_or("df_executor: sum-int8 not Decimal128")?.value(row);
+            let s = arr
+                .as_any()
+                .downcast_ref::<Decimal128Array>()
+                .ok_or("df_executor: sum-int8 not Decimal128")?
+                .value(row);
             AnyNumeric::from(s).into_datum().ok_or("df_executor: numeric datum")?
         }
         // numeric output: avg(int) = AnyNumeric(sum) / AnyNumeric(count) = PG numeric_div (data-dependent scale).
         AggSpec::AvgIntNumeric(_) => {
-            let s = arr.as_any().downcast_ref::<Decimal128Array>().ok_or("df_executor: avg-int sum not Decimal128")?.value(row);
+            let s = arr
+                .as_any()
+                .downcast_ref::<Decimal128Array>()
+                .ok_or("df_executor: avg-int sum not Decimal128")?
+                .value(row);
             let cnt_arr = b.column(col + 1);
             // count(col) counts non-NULLs; a zero count (all-NULL group) → SQL NULL, never a divide-by-zero (ADR-N3).
             if cnt_arr.is_null(row) {
                 return Ok((pg_sys::Datum::from(0usize), true));
             }
-            let n = cnt_arr.as_any().downcast_ref::<Int64Array>().ok_or("df_executor: avg-int count not Int64")?.value(row);
+            let n = cnt_arr
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .ok_or("df_executor: avg-int count not Int64")?
+                .value(row);
             if n == 0 {
                 return Ok((pg_sys::Datum::from(0usize), true));
             }
-            (AnyNumeric::from(s) / AnyNumeric::from(n)).into_datum().ok_or("df_executor: numeric datum")?
+            (AnyNumeric::from(s) / AnyNumeric::from(n))
+                .into_datum()
+                .ok_or("df_executor: numeric datum")?
         }
         // min/max output = input column type. The DataFusion min()/max() result array has the source column's Arrow
         // type, so the build_arrow reverse emits the exact native datum against the carried output typoid (ADR-MM3).
@@ -531,17 +587,51 @@ fn agg_datum(b: &RecordBatch, col: usize, row: usize, spec: &AggSpec) -> Result<
 /// 1970 epoch but `build_arrow` stuffed the raw PG-epoch bytes in; GROUP BY only uses raw-value equality/hash (never
 /// Arrow's temporal semantics), and we pull the same raw int back out here → the PG value round-trips exactly.
 /// The CALLER must run in a durable memory context (ADR-3): a text/varlena datum is palloc'd here.
-fn arrow_value_to_datum(arr: &dyn Array, row: usize, typoid: u32) -> Result<(pg_sys::Datum, bool), String> {
+fn arrow_value_to_datum(
+    arr: &dyn Array,
+    row: usize,
+    typoid: u32,
+) -> Result<(pg_sys::Datum, bool), String> {
     if arr.is_null(row) {
         return Ok((pg_sys::Datum::from(0usize), true));
     }
     let d = match typoid {
-        21 => arr.as_any().downcast_ref::<Int16Array>().ok_or("df_executor: gk not i16")?.value(row).into_datum(),
-        23 => arr.as_any().downcast_ref::<Int32Array>().ok_or("df_executor: gk not i32")?.value(row).into_datum(),
-        20 => arr.as_any().downcast_ref::<Int64Array>().ok_or("df_executor: gk not i64")?.value(row).into_datum(),
-        700 => arr.as_any().downcast_ref::<Float32Array>().ok_or("df_executor: gk not f32")?.value(row).into_datum(),
-        701 => arr.as_any().downcast_ref::<Float64Array>().ok_or("df_executor: gk not f64")?.value(row).into_datum(),
-        16 => arr.as_any().downcast_ref::<BooleanArray>().ok_or("df_executor: gk not bool")?.value(row).into_datum(),
+        21 => arr
+            .as_any()
+            .downcast_ref::<Int16Array>()
+            .ok_or("df_executor: gk not i16")?
+            .value(row)
+            .into_datum(),
+        23 => arr
+            .as_any()
+            .downcast_ref::<Int32Array>()
+            .ok_or("df_executor: gk not i32")?
+            .value(row)
+            .into_datum(),
+        20 => arr
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .ok_or("df_executor: gk not i64")?
+            .value(row)
+            .into_datum(),
+        700 => arr
+            .as_any()
+            .downcast_ref::<Float32Array>()
+            .ok_or("df_executor: gk not f32")?
+            .value(row)
+            .into_datum(),
+        701 => arr
+            .as_any()
+            .downcast_ref::<Float64Array>()
+            .ok_or("df_executor: gk not f64")?
+            .value(row)
+            .into_datum(),
+        16 => arr
+            .as_any()
+            .downcast_ref::<BooleanArray>()
+            .ok_or("df_executor: gk not bool")?
+            .value(row)
+            .into_datum(),
         25 | 1042 | 1043 => arr
             .as_any()
             .downcast_ref::<StringArray>()
@@ -557,7 +647,12 @@ fn arrow_value_to_datum(arr: &dyn Array, row: usize, typoid: u32) -> Result<(pg_
             .ok_or("df_executor: gk not ts")?
             .value(row)
             .into_datum(),
-        1082 => arr.as_any().downcast_ref::<Date32Array>().ok_or("df_executor: gk not date")?.value(row).into_datum(),
+        1082 => arr
+            .as_any()
+            .downcast_ref::<Date32Array>()
+            .ok_or("df_executor: gk not date")?
+            .value(row)
+            .into_datum(),
         other => return Err(format!("df_executor: unsupported group key oid {other}")),
     };
     Ok((d.ok_or("df_executor: group key datum")?, false))
@@ -566,7 +661,12 @@ fn arrow_value_to_datum(arr: &dyn Array, row: usize, typoid: u32) -> Result<(pg_
 /// Run `count(*)`, `sum(<num_col>)` over the columnar table and format `count=N;sum=X` (Phase A/B test driver — the
 /// planner-integrated automatic path is Phase C `columnar_agg.rs`).
 unsafe fn run_columnar_agg(rel: pg_sys::Relation, num_col: &str) -> Result<String, String> {
-    let r = run_columnar_aggs(rel, &[AggSpec::CountStar, AggSpec::SumFloat8(num_col.to_string())], &[], false)?;
+    let r = run_columnar_aggs(
+        rel,
+        &[AggSpec::CountStar, AggSpec::SumFloat8(num_col.to_string())],
+        &[],
+        false,
+    )?;
     let c = i64::from_datum(r[0].0, r[0].1).unwrap_or(0);
     let s = f64::from_datum(r[1].0, r[1].1).unwrap_or(0.0);
     Ok(format!("count={c};sum={s:.4}"))
@@ -617,7 +717,10 @@ mod tests {
         let hc = Spi::get_one::<i64>("SELECT count(*) FROM m100_h").unwrap().unwrap();
         let hs = Spi::get_one::<f64>("SELECT sum(measure) FROM m100_h").unwrap().unwrap();
         let expected = format!("count={hc};sum={hs:.4}");
-        assert_eq!(df_result, expected, "DataFusion columnar aggregate must match the heap aggregate");
+        assert_eq!(
+            df_result, expected,
+            "DataFusion columnar aggregate must match the heap aggregate"
+        );
 
         Spi::run("DROP TABLE m100_c").unwrap();
         Spi::run("DROP TABLE m100_h").unwrap();
@@ -647,7 +750,11 @@ mod tests {
         .unwrap();
         let hc: i64 = 30000;
         let hs: f64 = (1..=30000i64).map(|g| g as f64 * 2.5).sum();
-        assert_eq!(df_result, format!("count={hc};sum={hs:.4}"), "projected aggregate over a wide table must be correct");
+        assert_eq!(
+            df_result,
+            format!("count={hc};sum={hs:.4}"),
+            "projected aggregate over a wide table must be correct"
+        );
         Spi::run("DROP TABLE m100_w").unwrap();
     }
 }

@@ -36,7 +36,12 @@ mod theodb_rs {
     /// (M66, the SQL `theodb.chunk`). Pure string logic in `crate::chunk` (fixed/sentence/recursive +
     /// overlap, Unicode-safe); NULL content → zero chunks. Replaces the dead plpgsql `theodb.chunk_text`.
     #[pg_extern]
-    fn _chunk_text(content: Option<&str>, strategy: &str, chunk_size: i32, overlap: i32) -> Vec<String> {
+    fn _chunk_text(
+        content: Option<&str>,
+        strategy: &str,
+        chunk_size: i32,
+        overlap: i32,
+    ) -> Vec<String> {
         let content = content.unwrap_or("");
         if chunk_size < 0 || overlap < 0 {
             crate::pg::err_input("theodb.chunk: chunk_size and overlap must be >= 0");
@@ -73,9 +78,15 @@ mod theodb_rs {
         k: i32,
     ) -> TableIterator<
         'static,
-        (name!(pages_read, i64), name!(candidates_seen, i64), name!(latency_us, i64), name!(results, i64)),
+        (
+            name!(pages_read, i64),
+            name!(candidates_seen, i64),
+            name!(latency_us, i64),
+            name!(results, i64),
+        ),
     > {
-        let (p, c, l, r) = crate::am::autotune::scan_stats(u32::from(relid) as i64, tbl, vec_col, query, ef, k);
+        let (p, c, l, r) =
+            crate::am::autotune::scan_stats(u32::from(relid) as i64, tbl, vec_col, query, ef, k);
         TableIterator::once((p, c, l, r))
     }
 
@@ -102,7 +113,8 @@ mod theodb_rs {
             name!(results, i64),
         ),
     > {
-        let (p, c, l, r) = crate::am::autotune::scan_stats(u32::from(relid) as i64, tbl, vec_col, query, ef, k);
+        let (p, c, l, r) =
+            crate::am::autotune::scan_stats(u32::from(relid) as i64, tbl, vec_col, query, ef, k);
         TableIterator::once((index_name.to_string(), ef, p, c, l, r))
     }
 
@@ -184,7 +196,11 @@ mod theodb_rs {
     /// `theodb_rs._nl_to_sql` — validate a question into ONE read-only SELECT over the allowlist (the SQL
     /// `ai.nl_to_sql`). Returns the validated SQL; raises 22023 on any violation. Does NOT execute.
     #[pg_extern]
-    fn _nl_to_sql(question: Option<&str>, allowed_relations: Vec<Option<String>>, model: Option<&str>) -> String {
+    fn _nl_to_sql(
+        question: Option<&str>,
+        allowed_relations: Vec<Option<String>>,
+        model: Option<&str>,
+    ) -> String {
         let refs: Vec<Option<&str>> = allowed_relations.iter().map(|o| o.as_deref()).collect();
         crate::nl::nl_to_sql(question, &refs, model)
     }
@@ -212,8 +228,21 @@ mod theodb_rs {
         // The positional entrypoint stays UNWEIGHTED (1.0/1.0) — its public signature is unchanged. Per-leg
         // weights (M106) are exposed via the JSON `ai.hybrid_search(vector_weight/text_weight)` surface.
         TableIterator::new(crate::hybrid::run_rrf(
-            tbl_text, id_col, content_tsv_col, vector_col, query_text, query_vector_text, k,
-            per_leg_limit, result_limit, language, filter_sql, lexical_engine, content_text_col, 1.0, 1.0,
+            tbl_text,
+            id_col,
+            content_tsv_col,
+            vector_col,
+            query_text,
+            query_vector_text,
+            k,
+            per_leg_limit,
+            result_limit,
+            language,
+            filter_sql,
+            lexical_engine,
+            content_text_col,
+            1.0,
+            1.0,
         ))
     }
 
@@ -292,7 +321,15 @@ mod theodb_rs {
             metric,
             &queries,
             qdim,
-            crate::ann_query::Params { k, m, ef_construction, ef_search, lists: 1, probes: 1, seed },
+            crate::ann_query::Params {
+                k,
+                m,
+                ef_construction,
+                ef_search,
+                lists: 1,
+                probes: 1,
+                seed,
+            },
         );
         TableIterator::new(rows)
     }
@@ -320,7 +357,15 @@ mod theodb_rs {
             metric,
             &queries,
             qdim,
-            crate::ann_query::Params { k, m: 16, ef_construction: 64, ef_search: 64, lists, probes, seed },
+            crate::ann_query::Params {
+                k,
+                m: 16,
+                ef_construction: 64,
+                ef_search: 64,
+                lists,
+                probes,
+                seed,
+            },
         );
         TableIterator::new(rows)
     }
@@ -364,7 +409,10 @@ mod theodb_rs {
     #[pg_extern(immutable, parallel_safe, strict)]
     fn _sbq_bytes_per_vector(dim: i32, bits: i32) -> i64 {
         // Upper-bound dim too (defensive: keeps dim*bits well within usize/i64, no overflow on any arch).
-        crate::ann_query::require((1..=1_000_000).contains(&dim), "theodb sbq: dim must be in [1, 1000000]");
+        crate::ann_query::require(
+            (1..=1_000_000).contains(&dim),
+            "theodb sbq: dim must be in [1, 1000000]",
+        );
         crate::ann_query::require((1..=8).contains(&bits), "theodb sbq: bits must be in [1, 8]");
         crate::sbq::SbqQuantizer::bytes_per_vector(dim as usize, bits as u8) as i64
     }
@@ -600,7 +648,8 @@ REVOKE ALL ON FUNCTION theodb_rs._ai_rank(text, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION theodb_rs._ai_generate_batch(text[], text) FROM PUBLIC;
 "#,
     name = "theodb_ai_wrappers",
-    requires = [_ai_chat, _ai_if, _ai_sentiment, _ai_rank, _ai_generate_batch, "theodb_schema_bootstrap"],
+    requires =
+        [_ai_chat, _ai_if, _ai_sentiment, _ai_rank, _ai_generate_batch, "theodb_schema_bootstrap"],
 );
 
 // SQL wrapper: the public cross-encoder rerank surface (M65 — `ai.rerank`). Created INTO the existing `ai`

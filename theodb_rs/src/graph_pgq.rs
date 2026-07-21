@@ -15,13 +15,22 @@ fn parse_hop_bounds(pattern: &str, default_max: i32) -> Result<(i32, i32), Strin
         Some(i) => i,
     };
     // read the quantifier token after '*' up to the first non-{digit,.} char
-    let rest: String = pattern[star + 1..].chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+    let rest: String =
+        pattern[star + 1..].chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
     if rest.is_empty() {
         return Ok((1, default_max)); // `*` unbounded → 1..default_max
     }
     if let Some((a, b)) = rest.split_once("..") {
-        let lo = if a.is_empty() { 1 } else { a.parse::<i32>().map_err(|_| "pgq_match: bad min hop".to_string())? };
-        let hi = if b.is_empty() { default_max } else { b.parse::<i32>().map_err(|_| "pgq_match: bad max hop".to_string())? };
+        let lo = if a.is_empty() {
+            1
+        } else {
+            a.parse::<i32>().map_err(|_| "pgq_match: bad min hop".to_string())?
+        };
+        let hi = if b.is_empty() {
+            default_max
+        } else {
+            b.parse::<i32>().map_err(|_| "pgq_match: bad max hop".to_string())?
+        };
         if lo < 0 || hi < lo {
             return Err(format!("pgq_match: invalid hop range {lo}..{hi}"));
         }
@@ -42,23 +51,50 @@ mod theodb_rs {
     /// `source_ids` within the pattern's hop bounds (dispatches to the M108/M109 traversal). Nodes reachable in
     /// `< min_hops` are excluded by re-deriving the `< min` reachable set and subtracting (bounded-path semantics).
     #[pg_extern]
-    fn _pgq_match(edge_rel: &str, source_ids: Vec<Option<i64>>, pattern: &str, default_max: i32) -> SetOfIterator<'static, i64> {
+    fn _pgq_match(
+        edge_rel: &str,
+        source_ids: Vec<Option<i64>>,
+        pattern: &str,
+        default_max: i32,
+    ) -> SetOfIterator<'static, i64> {
         let (lo, hi) = parse_hop_bounds(pattern, default_max)
             .unwrap_or_else(|e| crate::pg::err_input(&format!("theodb.pgq_match: {e}")));
         let seeds: Vec<i64> = source_ids.into_iter().flatten().collect();
-        let seed_arr = format!("ARRAY[{}]::bigint[]", seeds.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(","));
+        let seed_arr = format!(
+            "ARRAY[{}]::bigint[]",
+            seeds.iter().map(|s| s.to_string()).collect::<Vec<_>>().join(",")
+        );
         // reachable within hi hops
         let within_hi: std::collections::HashSet<i64> = Spi::connect(|c| {
-            c.select(&format!("SELECT node FROM theodb.graph_expand('{}', {seed_arr}, {hi}) AS t(node)", edge_rel.replace('\'', "''")), None, &[])
-                .unwrap().map(|r| r.get::<i64>(1).unwrap().unwrap()).collect()
+            c.select(
+                &format!(
+                    "SELECT node FROM theodb.graph_expand('{}', {seed_arr}, {hi}) AS t(node)",
+                    edge_rel.replace('\'', "''")
+                ),
+                None,
+                &[],
+            )
+            .unwrap()
+            .map(|r| r.get::<i64>(1).unwrap().unwrap())
+            .collect()
         });
         // bounded-path: exclude nodes reachable in < lo hops (so `*2..3` returns the 2- and 3-hop shell, not the seed)
         let excluded: std::collections::HashSet<i64> = if lo <= 0 {
             std::collections::HashSet::new()
         } else {
             Spi::connect(|c| {
-                c.select(&format!("SELECT node FROM theodb.graph_expand('{}', {seed_arr}, {}) AS t(node)", edge_rel.replace('\'', "''"), lo - 1), None, &[])
-                    .unwrap().map(|r| r.get::<i64>(1).unwrap().unwrap()).collect()
+                c.select(
+                    &format!(
+                        "SELECT node FROM theodb.graph_expand('{}', {seed_arr}, {}) AS t(node)",
+                        edge_rel.replace('\'', "''"),
+                        lo - 1
+                    ),
+                    None,
+                    &[],
+                )
+                .unwrap()
+                .map(|r| r.get::<i64>(1).unwrap().unwrap())
+                .collect()
             })
         };
         let mut out: Vec<i64> = within_hi.difference(&excluded).copied().collect();
@@ -95,7 +131,11 @@ mod tests {
         assert_eq!(super::parse_hop_bounds("-[e]-", 3).unwrap(), (1, 1), "bare edge = one hop");
         assert_eq!(super::parse_hop_bounds("-[e*1..3]-", 3).unwrap(), (1, 3));
         assert_eq!(super::parse_hop_bounds("-[*..2]-", 3).unwrap(), (1, 2));
-        assert_eq!(super::parse_hop_bounds("-[e*]-", 5).unwrap(), (1, 5), "unbounded = 1..default_max");
+        assert_eq!(
+            super::parse_hop_bounds("-[e*]-", 5).unwrap(),
+            (1, 5),
+            "unbounded = 1..default_max"
+        );
         assert_eq!(super::parse_hop_bounds("-[e*2]-", 3).unwrap(), (2, 2), "exact");
         assert!(super::parse_hop_bounds("-[e*3..1]-", 3).is_err(), "min>max rejected");
     }
@@ -108,7 +148,11 @@ mod tests {
             c.select("SELECT node FROM theodb.pgq_match('gpq', ARRAY[0]::bigint[], '-[e*1..2]-') AS t(node) ORDER BY node", None, &[])
                 .unwrap().map(|row| row.get::<i64>(1).unwrap().unwrap()).collect()
         });
-        assert_eq!(r, vec![1, 2], "*1..2 from 0 = the 1- and 2-hop shell {{1,2}} (seed excluded, ≥3 excluded)");
+        assert_eq!(
+            r,
+            vec![1, 2],
+            "*1..2 from 0 = the 1- and 2-hop shell {{1,2}} (seed excluded, ≥3 excluded)"
+        );
         // `*0..2` includes the seed (min 0); `*..2` (min defaults to 1) excludes it.
         let r0: Vec<i64> = Spi::connect(|c| {
             c.select("SELECT node FROM theodb.pgq_match('gpq', ARRAY[0]::bigint[], '-[e*0..2]-') AS t(node) ORDER BY node", None, &[])

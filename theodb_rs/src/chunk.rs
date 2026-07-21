@@ -195,7 +195,9 @@ mod tests {
         let _ = chunk("hello", "fixed", 4, 4);
     }
 
-    #[pg_test(error = "theodb.chunk: unknown chunk_strategy 'semantic' (valid: fixed, sentence, recursive)")]
+    #[pg_test(
+        error = "theodb.chunk: unknown chunk_strategy 'semantic' (valid: fixed, sentence, recursive)"
+    )]
     fn unknown_strategy_rejected() {
         let _ = chunk("hello", "semantic", 10, 0);
     }

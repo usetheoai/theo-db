@@ -19,16 +19,48 @@ use crate::pg::err_input;
 /// The banned-token denylist (verbatim from sql/60:74-78). A generated SQL token equal to any of these is
 /// rejected (file/exfil/DDL/DML family). `pg_ls_` is the bare-prefix sibling the first cut missed.
 const BANNED: &[&str] = &[
-    "drop", "insert", "update", "delete", "alter", "truncate", "grant", "revoke", "create", "copy",
-    "merge", "reindex", "vacuum", "pg_read_file", "pg_read_binary_file", "pg_stat_file", "pg_ls_dir",
-    "pg_ls_waldir", "pg_ls_logdir", "pg_ls_tmpdir", "pg_ls_archive_statusdir", "pg_ls_", "lo_import",
-    "lo_export", "lo_get", "lo_put", "dblink", "pg_sleep", "set_config", "current_setting",
-    "pg_terminate_backend", "pg_cancel_backend", "pg_read_server_files",
+    "drop",
+    "insert",
+    "update",
+    "delete",
+    "alter",
+    "truncate",
+    "grant",
+    "revoke",
+    "create",
+    "copy",
+    "merge",
+    "reindex",
+    "vacuum",
+    "pg_read_file",
+    "pg_read_binary_file",
+    "pg_stat_file",
+    "pg_ls_dir",
+    "pg_ls_waldir",
+    "pg_ls_logdir",
+    "pg_ls_tmpdir",
+    "pg_ls_archive_statusdir",
+    "pg_ls_",
+    "lo_import",
+    "lo_export",
+    "lo_get",
+    "lo_put",
+    "dblink",
+    "pg_sleep",
+    "set_config",
+    "current_setting",
+    "pg_terminate_backend",
+    "pg_cancel_backend",
+    "pg_read_server_files",
 ];
 
 /// Generate (via the configurable model) + statically validate the question into ONE read-only SELECT over
 /// `allowed`. Returns the validated SQL; raises 22023 on any violation. Does NOT execute the query.
-pub(crate) fn nl_to_sql(question: Option<&str>, allowed: &[Option<&str>], model: Option<&str>) -> String {
+pub(crate) fn nl_to_sql(
+    question: Option<&str>,
+    allowed: &[Option<&str>],
+    model: Option<&str>,
+) -> String {
     let question = match question {
         Some(q) if !q.trim().is_empty() => q,
         _ => err_input("ai.nl_to_sql: question must not be empty"),
@@ -88,9 +120,7 @@ fn l2_validate(sql: &str) -> Result<(), String> {
     // L2(b) — SELECT/WITH only.
     if !starts_with_keyword(&low, "select") && !starts_with_keyword(&low, "with") {
         let head: String = sql.chars().take(60).collect();
-        return Err(format!(
-            "ai.nl_to_sql: only SELECT/WITH queries are allowed (got: {head})"
-        ));
+        return Err(format!("ai.nl_to_sql: only SELECT/WITH queries are allowed (got: {head})"));
     }
     // L2(c) — banned tokens (leftmost word-token equal to a banned keyword).
     if let Some(tok) = first_banned_token(&low) {
@@ -111,9 +141,7 @@ fn relation_allowed(rels: &[(String, String)], allow: &[String]) -> Result<(), S
         let ok = allow.iter().any(|a| a == &qualified)
             || (schema == "public" && allow.iter().any(|a| a == name));
         if !ok {
-            return Err(format!(
-                "ai.nl_to_sql: relation '{qualified}' is not in the allowlist"
-            ));
+            return Err(format!("ai.nl_to_sql: relation '{qualified}' is not in the allowlist"));
         }
     }
     Ok(())
@@ -125,11 +153,10 @@ fn relation_allowed(rels: &[(String, String)], allow: &[String]) -> Result<(), S
 /// contracted 22023 "did not plan (rejected)" (parity with the plpython3u `try/except`). Fail-closed either way.
 fn l4_validate_relations(sql: &str, allow: &[String]) {
     let explain = format!("EXPLAIN (FORMAT JSON, VERBOSE false) {sql}");
-    let plan_opt: Option<Value> = PgTryBuilder::new(|| {
-        Spi::get_one::<pgrx::Json>(&explain).ok().flatten().map(|j| j.0)
-    })
-    .catch_others(|_| None)
-    .execute();
+    let plan_opt: Option<Value> =
+        PgTryBuilder::new(|| Spi::get_one::<pgrx::Json>(&explain).ok().flatten().map(|j| j.0))
+            .catch_others(|_| None)
+            .execute();
     let plan: Value = match plan_opt {
         Some(j) => j,
         None => err_input("ai.nl_to_sql: query did not plan (rejected)"),
@@ -280,11 +307,8 @@ fn collect_relations(node: &Value, acc: &mut Vec<(String, String)>) {
     match node {
         Value::Object(map) => {
             if let Some(Value::String(name)) = map.get("Relation Name") {
-                let schema = map
-                    .get("Schema")
-                    .and_then(|s| s.as_str())
-                    .unwrap_or("public")
-                    .to_lowercase();
+                let schema =
+                    map.get("Schema").and_then(|s| s.as_str()).unwrap_or("public").to_lowercase();
                 let pair = (schema, name.to_lowercase());
                 if !acc.contains(&pair) {
                     acc.push(pair);
@@ -425,7 +449,10 @@ mod tests {
         let allow = vec!["public.documents".to_string()];
         assert!(relation_allowed(&[("public".into(), "documents".into())], &allow).is_ok());
         // bare name under public matches an allowlisted bare entry
-        assert!(relation_allowed(&[("public".into(), "documents".into())], &["documents".to_string()]).is_ok());
+        assert!(
+            relation_allowed(&[("public".into(), "documents".into())], &["documents".to_string()])
+                .is_ok()
+        );
         // a relation outside the allowlist is rejected (e.g. a system catalog the model tried to reach)
         assert!(relation_allowed(&[("secret".into(), "pg_authid".into())], &allow).is_err());
     }
@@ -438,6 +465,12 @@ mod tests {
         let bare = vec!["documents".to_string()];
         assert!(relation_allowed(&[("secret".into(), "documents".into())], &bare).is_err());
         // …and the qualified form `secret.documents` is not implied by the bare `public` entry either.
-        assert!(relation_allowed(&[("secret".into(), "documents".into())], &["public.documents".to_string()]).is_err());
+        assert!(
+            relation_allowed(
+                &[("secret".into(), "documents".into())],
+                &["public.documents".to_string()]
+            )
+            .is_err()
+        );
     }
 }
