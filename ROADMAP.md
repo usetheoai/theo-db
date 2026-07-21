@@ -2119,7 +2119,7 @@ Recomendação #3 / Risco de manutenção: com 19 arquivos >500 LoC e este a 3.4
 
 ---
 
-## M133 — [ ] Fix #140 — restaurar o sinal de CI (todo job do Actions falha antes de qualquer step)
+## M133 — [x] Fix #140 — restaurar o sinal de CI (todo job do Actions falha antes de qualquer step)
 
 > Added 2026-07-21 (`/roadmap-feature ci-restore-signal`). É a **rede de segurança** sob todos os outros milestones: hoje o CI não dá sinal nenhum. Grill: `knowledge-base/grills/ci-restore-signal-feature-grill.md`.
 
