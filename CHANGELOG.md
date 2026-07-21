@@ -17,6 +17,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - GUC `theodb.egress_allowlist` (superusuário) para permitir explicitamente um host on-prem que resolva para endereço privado, sem desabilitar a proteção inteira (#117)
 
 ### Changed
+- **BREAKING:** `theodb_ml.apply_model` passa a exigir superusuário (ou privilégio SET no parâmetro), pois define `theodb.llm_endpoint`. Mantida como SECURITY INVOKER de propósito: torná-la SECURITY DEFINER devolveria o controle do endpoint a quem tem EXECUTE em `create_model` e reabriria #117 (#117)
 - **BREAKING:** os GUCs de endpoint/modelo/chave de IA (`theodb.llm_*`, `theodb.embedding_*`, `theodb.rerank_*`) passam a ser registrados como superusuário-apenas; antes eram nomes-placeholder que qualquer role podia definir na própria sessão. Configure-os por `ALTER SYSTEM` (o caminho já usado por operadores); as chaves ficam ocultas para não-superusuários em `pg_settings` (#117)
 
 ### Deprecated

@@ -36,6 +36,7 @@ pub unsafe extern "C-unwind" fn _PG_init() { unsafe {
     vectorizer::register_worker();
 }}
 
+mod egress;
 mod am;
 mod ai_op;
 mod ann;

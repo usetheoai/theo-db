@@ -62,6 +62,14 @@ AS $$
     SELECT model_id, endpoint, model_name FROM theodb_ml.models ORDER BY model_id;
 $$;
 
+-- M134 (#117) — WARNING, LOAD-BEARING: apply_model is SECURITY INVOKER **on purpose** and MUST STAY THAT WAY.
+-- theodb.llm_endpoint became a superuser-only GUC in M134, so a non-superuser calling apply_model now gets
+-- `permission denied to set parameter`. That is the intended posture, not a bug: the endpoint of an outbound
+-- HTTP call made by the database host is an operator decision. The tempting "fix" — marking this function
+-- SECURITY DEFINER — would hand endpoint control back to anyone with EXECUTE on create_model (the endpoint
+-- comes from the theodb_ml.models table), reopening #117 in full. If a non-superuser needs to switch models,
+-- the operator grants SET on the parameter deliberately, or pre-sets it per role/database.
+--
 -- theodb_ml.apply_model — select a registered model for THIS session by SETting the GUCs ai._chat reads
 -- (theodb.llm_endpoint / theodb.llm_model). Does NOT touch ai._chat. The API key is NOT set here — the caller
 -- supplies it separately (SET theodb.llm_api_key = ...), per session (keys are never persisted — ADR D2).
@@ -91,6 +99,8 @@ REVOKE ALL ON FUNCTION theodb_ml.list_models() FROM PUBLIC;
 REVOKE ALL ON FUNCTION theodb_ml.apply_model(text) FROM PUBLIC;
 
 COMMENT ON FUNCTION theodb_ml.apply_model(text) IS
+  'Requires superuser (or SET privilege on theodb.llm_endpoint) since M134 — see the SECURITY INVOKER warning '
+  'in 70-theodb-ml.sql; never make this SECURITY DEFINER. '
   'Select a registered model for this session: SETs theodb.llm_endpoint/llm_model (the GUCs ai._chat reads) '
   'from theodb_ml.models. Does NOT modify ai._chat and does NOT set the API key (keys are session GUCs, never '
   'persisted — ADR D2). Not granted to PUBLIC.';
