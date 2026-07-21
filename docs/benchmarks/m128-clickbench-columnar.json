@@ -1,6 +1,6 @@
 {
   "dataset": "clickbench-hits",
-  "n_rows": 1000,
+  "n_rows": 100000,
   "box": "self-hosted (NOT canonical c6a.4xlarge)",
   "protocol": "3 runs/query: cold=1st (cache-flushed), hot=min-of-2",
   "status": "OK",
@@ -8,7 +8,7 @@
   "queries_ok": 43,
   "queries_errored": 0,
   "columnar_customscan_count": 0,
-  "hot_geomean_s": 0.06684,
+  "hot_geomean_s": 5.56739,
   "result_ab": {
     "pass": 43,
     "diverged": 0,
@@ -19,12 +19,12 @@
       "q": 0,
       "sql": "SELECT COUNT(*) FROM hits;",
       "timings": [
-        0.0981,
-        0.0656,
-        0.0687
+        5.2339,
+        5.6579,
+        6.5438
       ],
-      "cold": 0.0981,
-      "hot": 0.0656,
+      "cold": 5.2339,
+      "hot": 5.6579,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -32,12 +32,12 @@
       "q": 1,
       "sql": "SELECT COUNT(*) FROM hits WHERE AdvEngineID <> 0;",
       "timings": [
-        0.0677,
-        0.0587,
-        0.0661
+        5.4307,
+        5.1165,
+        5.274
       ],
-      "cold": 0.0677,
-      "hot": 0.0587,
+      "cold": 5.4307,
+      "hot": 5.1165,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -45,12 +45,12 @@
       "q": 2,
       "sql": "SELECT SUM(AdvEngineID), COUNT(*), AVG(ResolutionWidth) FROM",
       "timings": [
-        0.0635,
-        0.0551,
-        0.0536
+        5.0908,
+        4.9448,
+        5.1225
       ],
-      "cold": 0.0635,
-      "hot": 0.0536,
+      "cold": 5.0908,
+      "hot": 4.9448,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -58,12 +58,12 @@
       "q": 3,
       "sql": "SELECT AVG(UserID) FROM hits;",
       "timings": [
-        0.06,
-        0.0672,
-        0.0555
+        5.1229,
+        5.957,
+        5.5434
       ],
-      "cold": 0.06,
-      "hot": 0.0555,
+      "cold": 5.1229,
+      "hot": 5.5434,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -71,12 +71,12 @@
       "q": 4,
       "sql": "SELECT COUNT(DISTINCT UserID) FROM hits;",
       "timings": [
-        0.0783,
-        0.0665,
-        0.0595
+        5.2264,
+        5.7205,
+        5.5259
       ],
-      "cold": 0.0783,
-      "hot": 0.0595,
+      "cold": 5.2264,
+      "hot": 5.5259,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -84,12 +84,12 @@
       "q": 5,
       "sql": "SELECT COUNT(DISTINCT SearchPhrase) FROM hits;",
       "timings": [
-        0.0704,
-        0.0524,
-        0.0538
+        5.2998,
+        5.2214,
+        5.4371
       ],
-      "cold": 0.0704,
-      "hot": 0.0524,
+      "cold": 5.2998,
+      "hot": 5.2214,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -97,12 +97,12 @@
       "q": 6,
       "sql": "SELECT MIN(EventDate), MAX(EventDate) FROM hits;",
       "timings": [
-        0.0611,
-        0.0584,
-        0.0548
+        5.5794,
+        5.6406,
+        5.2581
       ],
-      "cold": 0.0611,
-      "hot": 0.0548,
+      "cold": 5.5794,
+      "hot": 5.2581,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -110,12 +110,12 @@
       "q": 7,
       "sql": "SELECT AdvEngineID, COUNT(*) FROM hits WHERE AdvEngineID <> ",
       "timings": [
-        0.0595,
-        0.0562,
-        0.0543
+        5.6265,
+        5.4971,
+        5.0984
       ],
-      "cold": 0.0595,
-      "hot": 0.0543,
+      "cold": 5.6265,
+      "hot": 5.0984,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -123,12 +123,12 @@
       "q": 8,
       "sql": "SELECT RegionID, COUNT(DISTINCT UserID) AS u FROM hits GROUP",
       "timings": [
-        0.0621,
-        0.0689,
-        0.0658
+        6.0484,
+        6.2088,
+        5.6547
       ],
-      "cold": 0.0621,
-      "hot": 0.0658,
+      "cold": 6.0484,
+      "hot": 5.6547,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -136,12 +136,12 @@
       "q": 9,
       "sql": "SELECT RegionID, SUM(AdvEngineID), COUNT(*) AS c, AVG(Resolu",
       "timings": [
-        0.0794,
-        0.0772,
-        0.0584
+        5.6736,
+        5.4397,
+        5.6175
       ],
-      "cold": 0.0794,
-      "hot": 0.0584,
+      "cold": 5.6736,
+      "hot": 5.4397,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -149,12 +149,12 @@
       "q": 10,
       "sql": "SELECT MobilePhoneModel, COUNT(DISTINCT UserID) AS u FROM hi",
       "timings": [
-        0.0632,
-        0.0661,
-        0.0763
+        5.0114,
+        5.1294,
+        5.2991
       ],
-      "cold": 0.0632,
-      "hot": 0.0661,
+      "cold": 5.0114,
+      "hot": 5.1294,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -162,12 +162,12 @@
       "q": 11,
       "sql": "SELECT MobilePhone, MobilePhoneModel, COUNT(DISTINCT UserID)",
       "timings": [
-        0.0641,
-        0.0582,
-        0.0571
+        5.7584,
+        5.6218,
+        5.4315
       ],
-      "cold": 0.0641,
-      "hot": 0.0571,
+      "cold": 5.7584,
+      "hot": 5.4315,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -175,12 +175,12 @@
       "q": 12,
       "sql": "SELECT SearchPhrase, COUNT(*) AS c FROM hits WHERE SearchPhr",
       "timings": [
-        0.0566,
-        0.0589,
-        0.0604
+        5.3552,
+        5.0588,
+        5.1227
       ],
-      "cold": 0.0566,
-      "hot": 0.0589,
+      "cold": 5.3552,
+      "hot": 5.0588,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -188,12 +188,12 @@
       "q": 13,
       "sql": "SELECT SearchPhrase, COUNT(DISTINCT UserID) AS u FROM hits W",
       "timings": [
-        0.0831,
-        0.0755,
-        0.068
+        5.8648,
+        5.3254,
+        5.232
       ],
-      "cold": 0.0831,
-      "hot": 0.068,
+      "cold": 5.8648,
+      "hot": 5.232,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -201,12 +201,12 @@
       "q": 14,
       "sql": "SELECT SearchEngineID, SearchPhrase, COUNT(*) AS c FROM hits",
       "timings": [
-        0.0657,
-        0.0633,
-        0.0742
+        5.4728,
+        5.376,
+        5.4143
       ],
-      "cold": 0.0657,
-      "hot": 0.0633,
+      "cold": 5.4728,
+      "hot": 5.376,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -214,12 +214,12 @@
       "q": 15,
       "sql": "SELECT UserID, COUNT(*) FROM hits GROUP BY UserID ORDER BY C",
       "timings": [
-        0.0767,
-        0.0637,
-        0.067
+        5.6504,
+        5.3964,
+        5.284
       ],
-      "cold": 0.0767,
-      "hot": 0.0637,
+      "cold": 5.6504,
+      "hot": 5.284,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -227,12 +227,12 @@
       "q": 16,
       "sql": "SELECT UserID, SearchPhrase, COUNT(*) FROM hits GROUP BY Use",
       "timings": [
-        0.0598,
-        0.0624,
-        0.065
+        5.7542,
+        5.9771,
+        5.9001
       ],
-      "cold": 0.0598,
-      "hot": 0.0624,
+      "cold": 5.7542,
+      "hot": 5.9001,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -240,12 +240,12 @@
       "q": 17,
       "sql": "SELECT UserID, SearchPhrase, COUNT(*) FROM hits GROUP BY Use",
       "timings": [
-        0.0559,
-        0.0643,
-        0.0753
+        5.543,
+        5.3278,
+        5.5738
       ],
-      "cold": 0.0559,
-      "hot": 0.0643,
+      "cold": 5.543,
+      "hot": 5.3278,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -253,12 +253,12 @@
       "q": 18,
       "sql": "SELECT UserID, extract(minute FROM EventTime) AS m, SearchPh",
       "timings": [
-        0.0904,
-        0.079,
-        0.0763
+        5.6402,
+        5.679,
+        5.5547
       ],
-      "cold": 0.0904,
-      "hot": 0.0763,
+      "cold": 5.6402,
+      "hot": 5.5547,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -266,12 +266,12 @@
       "q": 19,
       "sql": "SELECT UserID FROM hits WHERE UserID = 435090932899640449;",
       "timings": [
-        0.0763,
-        0.073,
-        0.0681
+        5.8559,
+        5.8008,
+        5.2716
       ],
-      "cold": 0.0763,
-      "hot": 0.0681,
+      "cold": 5.8559,
+      "hot": 5.2716,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -279,12 +279,12 @@
       "q": 20,
       "sql": "SELECT COUNT(*) FROM hits WHERE URL LIKE '%google%';",
       "timings": [
-        0.0791,
-        0.0613,
-        0.0587
+        5.3781,
+        5.5297,
+        5.4619
       ],
-      "cold": 0.0791,
-      "hot": 0.0587,
+      "cold": 5.3781,
+      "hot": 5.4619,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -292,12 +292,12 @@
       "q": 21,
       "sql": "SELECT SearchPhrase, MIN(URL), COUNT(*) AS c FROM hits WHERE",
       "timings": [
-        0.0743,
-        0.0703,
-        0.0864
+        5.6059,
+        5.7885,
+        5.5097
       ],
-      "cold": 0.0743,
-      "hot": 0.0703,
+      "cold": 5.6059,
+      "hot": 5.5097,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -305,12 +305,12 @@
       "q": 22,
       "sql": "SELECT SearchPhrase, MIN(URL), MIN(Title), COUNT(*) AS c, CO",
       "timings": [
-        0.0789,
-        0.0736,
-        0.0733
+        5.8257,
+        5.442,
+        6.0862
       ],
-      "cold": 0.0789,
-      "hot": 0.0733,
+      "cold": 5.8257,
+      "hot": 5.442,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -318,12 +318,12 @@
       "q": 23,
       "sql": "SELECT * FROM hits WHERE URL LIKE '%google%' ORDER BY EventT",
       "timings": [
-        0.0799,
-        0.0612,
-        0.069
+        5.144,
+        5.3153,
+        5.5098
       ],
-      "cold": 0.0799,
-      "hot": 0.0612,
+      "cold": 5.144,
+      "hot": 5.3153,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -331,12 +331,12 @@
       "q": 24,
       "sql": "SELECT SearchPhrase FROM hits WHERE SearchPhrase <> '' ORDER",
       "timings": [
-        0.0668,
-        0.0607,
-        0.0578
+        5.7129,
+        5.7245,
+        5.4168
       ],
-      "cold": 0.0668,
-      "hot": 0.0578,
+      "cold": 5.7129,
+      "hot": 5.4168,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -344,12 +344,12 @@
       "q": 25,
       "sql": "SELECT SearchPhrase FROM hits WHERE SearchPhrase <> '' ORDER",
       "timings": [
-        0.057,
-        0.0536,
-        0.0583
+        5.4404,
+        5.569,
+        5.1831
       ],
-      "cold": 0.057,
-      "hot": 0.0536,
+      "cold": 5.4404,
+      "hot": 5.1831,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -357,12 +357,12 @@
       "q": 26,
       "sql": "SELECT SearchPhrase FROM hits WHERE SearchPhrase <> '' ORDER",
       "timings": [
-        0.0535,
-        0.0601,
-        0.0579
+        5.8648,
+        5.4004,
+        5.8055
       ],
-      "cold": 0.0535,
-      "hot": 0.0579,
+      "cold": 5.8648,
+      "hot": 5.4004,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -370,12 +370,12 @@
       "q": 27,
       "sql": "SELECT CounterID, AVG(length(URL)) AS l, COUNT(*) AS c FROM ",
       "timings": [
-        0.0629,
-        0.0763,
-        0.0625
+        5.8723,
+        5.6956,
+        5.2
       ],
-      "cold": 0.0629,
-      "hot": 0.0625,
+      "cold": 5.8723,
+      "hot": 5.2,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -383,12 +383,12 @@
       "q": 28,
       "sql": "SELECT REGEXP_REPLACE(Referer, '^https?://(?:www\\.)?([^/]+)/",
       "timings": [
-        0.2565,
-        0.2482,
-        0.303
+        22.3629,
+        23.0072,
+        22.3583
       ],
-      "cold": 0.2565,
-      "hot": 0.2482,
+      "cold": 22.3629,
+      "hot": 22.3583,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -396,12 +396,12 @@
       "q": 29,
       "sql": "SELECT SUM(ResolutionWidth), SUM(ResolutionWidth + 1), SUM(R",
       "timings": [
-        0.0752,
-        0.072,
-        0.0723
+        6.1659,
+        5.6815,
+        5.4195
       ],
-      "cold": 0.0752,
-      "hot": 0.072,
+      "cold": 6.1659,
+      "hot": 5.4195,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -409,12 +409,12 @@
       "q": 30,
       "sql": "SELECT SearchEngineID, ClientIP, COUNT(*) AS c, SUM(IsRefres",
       "timings": [
-        0.11,
-        0.0871,
-        0.0766
+        5.346,
+        5.1597,
+        6.0653
       ],
-      "cold": 0.11,
-      "hot": 0.0766,
+      "cold": 5.346,
+      "hot": 5.1597,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -422,12 +422,12 @@
       "q": 31,
       "sql": "SELECT WatchID, ClientIP, COUNT(*) AS c, SUM(IsRefresh), AVG",
       "timings": [
-        0.1005,
-        0.0974,
-        0.0931
+        5.7186,
+        5.4975,
+        5.6459
       ],
-      "cold": 0.1005,
-      "hot": 0.0931,
+      "cold": 5.7186,
+      "hot": 5.4975,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -435,12 +435,12 @@
       "q": 32,
       "sql": "SELECT WatchID, ClientIP, COUNT(*) AS c, SUM(IsRefresh), AVG",
       "timings": [
-        0.0579,
-        0.0857,
-        0.0853
+        5.3533,
+        5.3217,
+        5.4417
       ],
-      "cold": 0.0579,
-      "hot": 0.0853,
+      "cold": 5.3533,
+      "hot": 5.3217,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -448,12 +448,12 @@
       "q": 33,
       "sql": "SELECT URL, COUNT(*) AS c FROM hits GROUP BY URL ORDER BY c ",
       "timings": [
-        0.0836,
-        0.0788,
-        0.0884
+        6.6388,
+        6.5543,
+        6.4069
       ],
-      "cold": 0.0836,
-      "hot": 0.0788,
+      "cold": 6.6388,
+      "hot": 6.4069,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -461,12 +461,12 @@
       "q": 34,
       "sql": "SELECT 1, URL, COUNT(*) AS c FROM hits GROUP BY 1, URL ORDER",
       "timings": [
-        0.0772,
-        0.0766,
-        0.0707
+        6.0369,
+        6.4965,
+        6.1801
       ],
-      "cold": 0.0772,
-      "hot": 0.0707,
+      "cold": 6.0369,
+      "hot": 6.1801,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -474,12 +474,12 @@
       "q": 35,
       "sql": "SELECT ClientIP, ClientIP - 1, ClientIP - 2, ClientIP - 3, C",
       "timings": [
-        0.0695,
-        0.0632,
-        0.0845
+        5.5955,
+        6.3293,
+        5.8842
       ],
-      "cold": 0.0695,
-      "hot": 0.0632,
+      "cold": 5.5955,
+      "hot": 5.8842,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -487,12 +487,12 @@
       "q": 36,
       "sql": "SELECT URL, COUNT(*) AS PageViews FROM hits WHERE CounterID ",
       "timings": [
-        0.0812,
-        0.0727,
-        0.0682
+        5.6904,
+        5.6956,
+        5.091
       ],
-      "cold": 0.0812,
-      "hot": 0.0682,
+      "cold": 5.6904,
+      "hot": 5.091,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -500,12 +500,12 @@
       "q": 37,
       "sql": "SELECT Title, COUNT(*) AS PageViews FROM hits WHERE CounterI",
       "timings": [
-        0.0847,
-        0.0917,
-        0.0872
+        5.0226,
+        5.1304,
+        5.4567
       ],
-      "cold": 0.0847,
-      "hot": 0.0872,
+      "cold": 5.0226,
+      "hot": 5.1304,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -513,12 +513,12 @@
       "q": 38,
       "sql": "SELECT URL, COUNT(*) AS PageViews FROM hits WHERE CounterID ",
       "timings": [
-        0.0833,
-        0.0758,
-        0.0652
+        5.5017,
+        5.5402,
+        5.2521
       ],
-      "cold": 0.0833,
-      "hot": 0.0652,
+      "cold": 5.5017,
+      "hot": 5.2521,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -526,12 +526,12 @@
       "q": 39,
       "sql": "SELECT TraficSourceID, SearchEngineID, AdvEngineID, CASE WHE",
       "timings": [
-        0.0883,
-        0.0675,
-        0.0606
+        5.6158,
+        5.2266,
+        5.2952
       ],
-      "cold": 0.0883,
-      "hot": 0.0606,
+      "cold": 5.6158,
+      "hot": 5.2266,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -539,12 +539,12 @@
       "q": 40,
       "sql": "SELECT URLHash, EventDate, COUNT(*) AS PageViews FROM hits W",
       "timings": [
-        0.0709,
-        0.0619,
-        0.0601
+        5.3824,
+        5.4572,
+        5.7242
       ],
-      "cold": 0.0709,
-      "hot": 0.0601,
+      "cold": 5.3824,
+      "hot": 5.4572,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -552,12 +552,12 @@
       "q": 41,
       "sql": "SELECT WindowClientWidth, WindowClientHeight, COUNT(*) AS Pa",
       "timings": [
-        0.0768,
-        0.0637,
-        0.0683
+        5.5597,
+        5.487,
+        5.3469
       ],
-      "cold": 0.0768,
-      "hot": 0.0637,
+      "cold": 5.5597,
+      "hot": 5.3469,
       "columnar_customscan": false,
       "result_ab_identical": true
     },
@@ -565,19 +565,19 @@
       "q": 42,
       "sql": "SELECT DATE_TRUNC('minute', EventTime) AS M, COUNT(*) AS Pag",
       "timings": [
-        0.0786,
-        0.0808,
-        0.0813
+        5.139,
+        5.1908,
+        5.8319
       ],
-      "cold": 0.0786,
-      "hot": 0.0808,
+      "cold": 5.139,
+      "hot": 5.1908,
       "columnar_customscan": false,
       "result_ab_identical": true
     }
   ],
   "caveats": [
     "self-hosted box, NOT canonical AWS c6a.4xlarge \u2014 QPS/timings not leaderboard-comparable (ADR M128-2)",
-    "hits subsampled to 1000 rows (full 99.9M is the operational follow-up); CC-BY-NC-SA, CI-only, never vendored",
+    "hits subsampled to 100000 rows (full 99.9M is the operational follow-up); CC-BY-NC-SA, CI-only, never vendored",
     "byte-identical result A/B (columnar vs heap) is the TheoDB-owned correctness oracle ClickBench lacks"
   ]
 }

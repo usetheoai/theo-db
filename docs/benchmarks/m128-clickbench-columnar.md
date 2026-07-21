@@ -23,17 +23,18 @@ Real ClickBench `hits` (CC-BY-NC-SA, streamed + subsampled), loaded into `theodb
 bulk path the `columnar_*_ab.py` benchmarks use), `enable_columnar_agg=off` (native executor over columnar
 storage — see the pushdown note), each query 3× (cold + 2 hot, report min-hot), geomean combine:
 
-| Metric | Value |
-|---|---|
-| queries completed | **43 / 43** (0 errored) |
-| hot latency range | 0.052 s … 0.248 s |
-| **hot geomean** | **0.0668 s** |
-| **byte-identical result A/B (columnar vs heap)** | **PASS — 43/43, 0 diverged** |
-| corpus | 1,000-row real `hits` subsample (self-hosted box) |
+| Metric | Value (n=100,000 — committed `.json`) | Value (n=1,000) |
+|---|---|---|
+| queries completed | **43 / 43** (0 errored) | 43 / 43 (0 errored) |
+| hot latency range | 4.94 s … 22.36 s | 0.052 s … 0.248 s |
+| **hot geomean (storage-path latency, NOT columnar-accelerated — agg off, customscan=0)** | **5.567 s** | 0.0668 s |
+| **byte-identical result A/B (columnar vs heap)** | **PASS — 43/43, 0 diverged** | PASS — 43/43, 0 diverged |
+| corpus | 100,000-row real `hits` subsample (self-hosted box) | 1,000-row |
 
-A larger-scale run (n=100,000) corroborated the same **byte-identical correctness** on every query measured (each
-`ab=True`), at ~5.5 s/query — timing scales with rows as expected; the full-99.9M-row canonical-box run is the
-operational follow-up (ADR M128-2).
+Both scales confirm the same **byte-identical correctness** (0 diverged). The geomean is the **columnar-storage
+latency via PG's native row executor** (`columnar_customscan_count: 0`) — NOT vectorized-columnar acceleration
+(that is the pushdown, blocked on #135); it is not leaderboard-comparable (self-hosted box, subsample). The
+full-99.9M-row canonical-box run is the operational follow-up (ADR M128-2).
 
 ## The retained correctness oracle (what ClickBench lacks) — and what it caught
 

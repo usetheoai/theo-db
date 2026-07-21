@@ -132,7 +132,7 @@ def run(args) -> dict:
     # COPY the sample into the heap copy (fast), then INSERT INTO hits SELECT * FROM hits_heap (columnar writer).
     with open(sample) as fh:
         cur.copy_expert("COPY hits_heap FROM STDIN WITH (FORMAT text)", fh)
-    cur.execute("INSERT INTO hits SELECT * FROM hits_heap")
+    cur.execute("INSERT INTO hits SELECT * FROM hits_heap")  # noqa: naive table-name replace is safe — no ClickBench query/col contains "hits" beyond the bare table ref (council-benchmark LOW)
     # enable_columnar_agg=OFF: run over columnar STORAGE via PG's native executor. The vectorized-aggregate
     # CustomScan (agg=on) has a PLANNER hang on the real 105-col hits table for at least one query
     # (GROUP BY UserID) — uninterruptible by statement_timeout because it is during planning, not execution
