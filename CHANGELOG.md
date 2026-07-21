@@ -13,23 +13,33 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- `scripts/test-upgrade.sh`: harness reproduzível da cadeia de upgrade (cenário A, convergência, idempotência, cenário B1). Substitui provas que eram digitadas à mão — e que já haviam produzido duas leituras falsas; o harness aborta se o envelhecimento do catálogo não remover nada, fechando justamente esse modo de pass vacuoso (M137/F4)
-- Gate de CI `schema-drift-gate`: falha um PR que altere a superfície da extensão (`theodb_rs/src/`) sem bumpar `default_version` nem adicionar script de upgrade — a mecânica que fez `1.0.0` rotular cinco catálogos diferentes ao longo de 120 releases continua ativa, e este gate a interrompe. Inclui a guarda que impede editar um script de upgrade cujo alvo já foi lançado (M137/F5)
-- Oráculo de schema cobre também **privilégios** (`proacl`), não só membresia — um upgrade que perdesse um `REVOKE ... FROM PUBLIC` passaria batido no `pg_depend` (M137)
-- Cadeia de upgrade do `theodb_rs`: `ALTER EXTENSION theodb_rs UPDATE TO '1.1.0'` passa a existir — pela primeira vez em 120 releases a extensão Rust é atualizável sem dropar e recriar. Inclui o script convergente `theodb_rs--1.0.0--1.1.0.sql` (gerado por `scripts/gen-upgrade-script.py`, idempotente) e o oráculo `schema_snapshot.sql` que compara o schema pós-upgrade com o de uma instalação limpa (M137)
-- Roadmap ampliado com a fundação decidida em 2026-07-21 (`/roadmap-feature`, 6 milestones): **M136** gates mecânicos de qualidade + Postgres `cassert` no CI (torna o D1 gate de máquina via `deny.toml`); **M137** cadeia de upgrade do `theodb_rs` (94 funções `pg_extern` e zero scripts hoje — instalações não conseguem `ALTER EXTENSION UPDATE`); **M138** BM25 como perna lexical default, executando o gate de adoção já medido no M53 (`ts_rank_cd` 0,0703 vs BM25 0,6881 nDCG@10); **M139** spike-gate do `Directory` do Tantivy sobre block storage do Postgres; **M140** engine lexical própria sobre Tantivy (MIT) + crate núcleo sem pgrx, *gated* pelo M139; **M141** dogfood `running`, o que autoriza qualquer reivindicação de production-ready
 
 ### Changed
-- `theodb_rs.control`: `default_version` sai de `'1.0.0'` (congelado por 120 releases) para `'1.1.0'` (M137)
 
 ### Deprecated
 
 ### Removed
 
 ### Fixed
-- Corrupção silenciosa no script de upgrade (defeito e correção provados empiricamente sobre um shell type real: o guard antigo avalia `f` e nunca aplicaria a definição; o novo avalia `t`) do `theodb_rs`: o shell type e a definição completa do tipo `vector` compartilhavam o mesmo predicado de guarda, então num catálogo sem o tipo o shell era criado e a definição real **nunca aplicava** — o tipo ficava shell para sempre, sem erro. Guards agora diferem (`typisdefined`) e qualificam o namespace, evitando também ligar em cima de um `vector` de outra extensão (M137)
 
 ### Security
+
+## [0.121.0] - 2026-07-21
+
+### Added
+- `scripts/test-upgrade.sh`: harness reproduzível da cadeia de upgrade (cenário A, convergência, idempotência, cenário B1). Substitui provas que eram digitadas à mão — e que já haviam produzido duas leituras falsas; o harness aborta se o envelhecimento do catálogo não remover nada, fechando justamente esse modo de pass vacuoso (M137/F4)
+- Gate de CI `schema-drift-gate`: falha um PR que altere a superfície da extensão (`theodb_rs/src/`) sem bumpar `default_version` nem adicionar script de upgrade — a mecânica que fez `1.0.0` rotular cinco catálogos diferentes ao longo de 120 releases continua ativa, e este gate a interrompe. Inclui a guarda que impede editar um script de upgrade cujo alvo já foi lançado (M137/F5)
+- Oráculo de schema cobre também **privilégios** (`proacl`), não só membresia — um upgrade que perdesse um `REVOKE ... FROM PUBLIC` passaria batido no `pg_depend` (M137)
+- Cadeia de upgrade do `theodb_rs`: `ALTER EXTENSION theodb_rs UPDATE TO '1.1.0'` passa a existir — pela primeira vez em 120 releases a extensão Rust é atualizável sem dropar e recriar. Inclui o script convergente `theodb_rs--1.0.0--1.1.0.sql` (gerado por `scripts/gen-upgrade-script.py`, idempotente) e o oráculo `schema_snapshot.sql` que compara o schema pós-upgrade com o de uma instalação limpa (M137)
+- Roadmap ampliado com a fundação decidida em 2026-07-21 (`/roadmap-feature`, 6 milestones): **M136** gates mecânicos de qualidade + Postgres `cassert` no CI (torna o D1 gate de máquina via `deny.toml`); **M137** cadeia de upgrade do `theodb_rs` (94 funções `pg_extern` e zero scripts hoje — instalações não conseguem `ALTER EXTENSION UPDATE`); **M138** BM25 como perna lexical default, executando o gate de adoção já medido no M53 (`ts_rank_cd` 0,0703 vs BM25 0,6881 nDCG@10); **M139** spike-gate do `Directory` do Tantivy sobre block storage do Postgres; **M140** engine lexical própria sobre Tantivy (MIT) + crate núcleo sem pgrx, *gated* pelo M139; **M141** dogfood `running`, o que autoriza qualquer reivindicação de production-ready
+
+
+### Changed
+- `theodb_rs.control`: `default_version` sai de `'1.0.0'` (congelado por 120 releases) para `'1.1.0'` (M137)
+
+
+### Fixed
+- Corrupção silenciosa no script de upgrade (defeito e correção provados empiricamente sobre um shell type real: o guard antigo avalia `f` e nunca aplicaria a definição; o novo avalia `t`) do `theodb_rs`: o shell type e a definição completa do tipo `vector` compartilhavam o mesmo predicado de guarda, então num catálogo sem o tipo o shell era criado e a definição real **nunca aplicava** — o tipo ficava shell para sempre, sem erro. Guards agora diferem (`typisdefined`) e qualificam o namespace, evitando também ligar em cima de um `vector` de outra extensão (M137)
 
 ## [0.120.0] - 2026-07-21
 
