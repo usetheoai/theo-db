@@ -1,0 +1,30 @@
+# M136 — a regra D1 como gate de máquina.
+#
+# D1 (CLAUDE.md): a distribuição é Apache-2.0 e nenhuma dependência AGPL entra nela. Até este gate, a regra mais
+# inegociável do projeto era aplicada por vigilância humana — o `packaging/license-sweep.sh` varre pacotes apt e
+# uma árvore de crate pinada, mas nada impedia um `cargo add` de puxar AGPL transitiva. Descobrir isso na v1.0
+# não é patch, é rearquitetura.
+#
+# A allowlist do `theodb_rs/deny.toml` é fail-closed: licença desconhecida FALHA em vez de passar.
+name: license-gate
+
+on:
+  pull_request:
+    paths: ['theodb_rs/Cargo.toml', 'theodb_rs/Cargo.lock', 'theodb_rs/deny.toml']
+  push:
+    branches: [develop]
+    paths: ['theodb_rs/Cargo.toml', 'theodb_rs/Cargo.lock', 'theodb_rs/deny.toml']
+
+jobs:
+  d1:
+    runs-on: [self-hosted, theodb-do]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: cargo-deny — allowlist de licenças (D1)
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.cargo/bin:$PATH"
+          command -v cargo-deny >/dev/null || cargo install cargo-deny --locked
+          cd theodb_rs
+          cargo deny check licenses

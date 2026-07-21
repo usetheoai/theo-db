@@ -2228,7 +2228,7 @@ Falsificação registrada: a hipótese de que a dor viria do WAL estava **errada
 **Prior art:** neon `deny.toml` + `.neon_clippy_args` + `clippy.toml` (disallowed-methods como política-em-lint); paradedb `lint-rust.yml` (`-D warnings --no-deps`, `cargo machete`, `taplo`) e a entrada cassert de `test-pg_search.yml`; pg_durable `pgspot-gate.sh`.
 
 ---
-## M137 — [ ] Cadeia de upgrade do `theodb_rs` (`ALTER EXTENSION UPDATE`)
+## M137 — [x] Cadeia de upgrade do `theodb_rs` (`ALTER EXTENSION UPDATE`)
 
 > Added 2026-07-21 (`/roadmap-feature theodb-rs-upgrade-chain`). Grill: `knowledge-base/grills/theodb-rs-upgrade-chain-feature-grill.md`.
 

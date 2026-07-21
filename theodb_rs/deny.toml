@@ -1,0 +1,51 @@
+# M136 — torna a regra D1 um gate de máquina.
+#
+# D1 (CLAUDE.md): a distribuição é Apache-2.0 e **nenhuma dependência AGPL entra nela**. Hoje isso é aplicado por
+# vigilância humana: o `packaging/license-sweep.sh` varre pacotes apt e uma árvore de crate pinada, mas nada
+# impede um `cargo add` de puxar uma dependência transitiva AGPL. Descobrir isso na v1.0 não é patch — é
+# rearquitetura, porque a peça já estará entranhada.
+#
+# O precedente é o neon (`deny.toml` com allowlist explícita). O ParadeDB NÃO tem isto — e não precisa, porque é
+# AGPL; a restrição é nossa, não uma omissão deles a imitar.
+[graph]
+all-features = false
+
+[licenses]
+# Allowlist, não denylist: uma licença desconhecida FALHA em vez de passar. Fail-closed é o ponto.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "MIT-0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "CC0-1.0",
+    "PostgreSQL",       # a licença do próprio Postgres e do pg_textsearch (ADR 0003) — ainda não
+                        # encontrada na árvore, mas entra com a adoção do BM25 no M138; mantida deliberadamente
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "allow"   # pgrx + datafusion trazem duplicatas legítimas; não é o que este gate persegue
+
+# Bans com razão escrita — a mesma disciplina do ADR: a decisão e o porquê vivem juntos.
+deny = [
+    # Nenhum banimento específico hoje. Quando houver, o formato é:
+    #   { crate = "nome", reason = "por que este projeto não o quer" }
+]
+
+[advisories]
+version = 2
+# CVEs conhecidos são responsabilidade do /deps-audit (osv-scanner + cargo audit), que já roda no ciclo de plano.
+# Aqui o foco é licença — manter os dois separados evita que uma falha de CVE mascare uma falha de D1.
+yanked = "warn"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+# Forks pinados são permitidos por origem explícita (política D3: upstream-first, rev pinada, diff mínimo).
+# Um fork novo exige adicionar a org aqui — ou seja, passa por revisão em vez de entrar silenciosamente.
+allow-org = { github = ["pgcentralfoundation", "timescale"] }
