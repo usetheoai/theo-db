@@ -2072,7 +2072,7 @@ Recomendação #3 / Risco de manutenção: com 19 arquivos >500 LoC e este a 3.4
 
 ---
 
-## M131 — [ ] Fix #135 — destravar o columnar-agg pushdown (planner hang em tabelas largas mixed-type)
+## M131 — [x] Fix #135 — destravar o columnar-agg pushdown (planner hang em tabelas largas mixed-type)
 
 > Added 2026-07-21 (`/roadmap-feature columnar-agg-planner-hang-fix`). Pré-requisito para um **rank ClickBench colunar defensável**: hoje o run colunar do M128 só mede o storage-path (agg OFF = latência nível-heap); o pushdown vetorizado de agregado (a vantagem colunar de verdade) é inutilizável em `hits` real por causa do #135. Grill: `knowledge-base/grills/columnar-agg-planner-hang-fix-feature-grill.md`.
 
@@ -2092,6 +2092,78 @@ Recomendação #3 / Risco de manutenção: com 19 arquivos >500 LoC e este a 3.4
 **Boundary honesto:** é um fix de **correção de planner-integration** (destrava uma otimização existente), não capacidade nova. Habilita o rank ClickBench colunar; performance vira claim só com benchmark (`../.claude/rules/public-copy.md`).
 
 **Prior art:** `theodb_rs/src/am/columnar_agg.rs::plan_custom_path`, `benchmarks/run_m128_clickbench.py`, PostgreSQL `setrefs.c::set_customscan_references`, `docs/benchmarks/columnar-groupby-verdict.md`, issue #135.
+
+---
+
+## M132 — [ ] Fix #132 — vectorizer bgworker embeda no self-host (destrava o anchor de dogfood)
+
+> Added 2026-07-21 (`/roadmap-feature vectorizer-worker-embed-fix`). **Maior alavanca da lista de maturidade:** o anchor de dogfood está travado em `wired` (só `running` sustenta claim de production-ready) e a própria evidência registra `outcome: partial` por causa deste defeito. Grill: `knowledge-base/grills/vectorizer-worker-embed-fix-feature-grill.md`.
+
+**Objective:** corrigir o **#132** — no self-host, o background worker do vectorizer **dead-letra TODOS os jobs de embed** (`state='failed'`, `attempts=5`, `last_error='embed/upsert failed'`) e a coluna de embedding fica NULL. Fila, trigger e máquina de estados funcionam (5 pending → 5 failed); só o passo de embed **dentro do worker** falha. Discriminador decisivo: com as MESMAS GUCs de instância, `theodb.embed(...)` e `theodb.embed_batch(...)` **funcionam em sessão normal** e **falham sempre no bgworker** → o delta é o contexto de execução do worker, não a requisição. Isso quebra a metade **frescor** da promessa AI-native ("o vectorizer mantém os embeddings frescos") no deploy alvo.
+
+**Definition of done:**
+
+- [ ] `last_error` passa a registrar a causa **subjacente** (status HTTP, ou "embedding GUC não visível no worker") em vez do wrapper genérico `embed/upsert failed` — hoje a mensagem esconde a raiz e exige debugger.
+- [ ] Log de startup do worker registra presença de endpoint/model e o **comprimento** da api-key (**nunca** o valor), tornando um worker mal-configurado diagnosticável só pelo log.
+- [ ] Causa-raiz identificada e corrigida: `benchmarks/dogfood_anchor_smoke.sh` num self-host termina com `SELECT state, count(*) FROM theodb.vectorizer_queue GROUP BY 1` mostrando **0 linhas em `failed`** e a coluna de embedding **non-NULL para toda linha inserida**.
+- [ ] Teste de regressão cobrindo **o caminho do worker** (não só o de sessão — o de sessão já passa hoje e não pegaria este defeito).
+- [ ] Arquivo de evidência de dogfood registrando o anchor passando, tirando-o de `outcome: partial`.
+
+**Dependencies:** M131 `[x]`, M122 `[x]` (o split async de embed — área de código), M124 `[x]` (o anchor + `dogfood_anchor_smoke.sh`).
+
+**Risks:** (a) a causa pode ser **visibilidade de placeholder-GUC dentro de `BackgroundWorker::transaction`** → o fix passaria a exigir registrar `theodb.embedding_*` como GUCs custom reais (mudança de configuração visível ao operador, precisa doc); mitigação: confirmar a causa pelo `last_error`/log melhorado ANTES de escolher entre "registrar GUCs reais" e "documentar onde o worker lê". (b) diferença de init HTTP/TLS no worker pode **interagir com o split async do M122** e reabrir o pin de `backend_xmin` que o M122 fechou; mitigação: re-rodar a prova de xmin do M122 após o fix e tratar regressão ali como bloqueante.
+
+**Boundary honesto:** é **correção de defeito operacional**, não capacidade nova. O caminho de query (`ai.hybrid_search_rrf`) já está provado (evidência `2026-07-20-anchor-smoke.md`); o que falta é o frescor assíncrono.
+
+**Prior art:** issue #132, `knowledge-base/dogfood/evidence/2026-07-20-anchor-failure-modes.md`, `benchmarks/dogfood_anchor_smoke.sh`, `../.claude/rules/dogfood-golden-rule.md § 2` (contrato `wired` → `running`).
+
+---
+
+## M133 — [ ] Fix #140 — restaurar o sinal de CI (todo job do Actions falha antes de qualquer step)
+
+> Added 2026-07-21 (`/roadmap-feature ci-restore-signal`). É a **rede de segurança** sob todos os outros milestones: hoje o CI não dá sinal nenhum. Grill: `knowledge-base/grills/ci-restore-signal-feature-grill.md`.
+
+**Objective:** corrigir o **#140** — **todo** job do GitHub Actions em `develop` falha há **30+ runs consecutivos**, cada um morrendo em **2–3s com ZERO steps executados** (`"steps": []`) e sem log (`BlobNotFound`). Afeta todos os jobs (`pg-regression`, `ai-sql`, `columnar-measure`, `hybrid-search`, `harness-unit`, `image-and-bench`, `bm25-measure`, `migration-smoke`). As releases v0.113.0–v0.117.0 foram **todas mergeadas vermelhas**, e a verificação do programa M127–M131 veio de runs medidos no droplet, não do CI — qualquer regressão real hoje é **invisível**.
+
+**Definition of done:**
+
+- [ ] Causa-raiz identificada **com evidência** e registrada no #140, distinguindo condição de conta/org do Actions (minutos esgotados / limite de gasto / Actions desabilitado) de defeito de workflow. A falha pré-step em `runs-on: ubuntu-latest` puro aponta para a primeira, mas o milestone **confirma, não assume**.
+- [ ] Pelo menos um run completo em `develop` onde os **steps de fato executam** (`gh api .../jobs/<id>` retorna `steps` não-vazio e o log é recuperável) — prova de sinal restaurado, independente de passar ou falhar.
+- [ ] A conclusão resultante é triada honestamente: verde fecha; vermelho **por motivo real de código** é registrado e cada falha vira seu próprio issue (ver risco (b)).
+- [ ] Notificação de falha (ex.: hook `workflow_run`) para que um CI morto apareça **imediatamente**, não depois de 30 runs silenciosos.
+- [ ] #140 fechado com comentário de evidência.
+
+**Dependencies:** M131 `[x]`. Sem dependência de código: `.github/workflows/ci.yml` não muda desde antes do M127 (`1b83632`) — não é regressão do trabalho recente.
+
+**Risks:** (a) a causa pode estar **fora do repositório** (billing/habilitação do Actions na org `usetheodev`) → exige **ação do owner** nas settings do GitHub que nenhuma mudança de código substitui; fronteira honesta: o milestone pode legitimamente terminar **BLOCKED-on-owner**, e isso deve ser reportado como BLOCKED em vez de maquiado (Regra 3 — BLOCKED honesto > PASS falso). (b) restaurar o CI pode **revelar falhas reais acumuladas** de 30+ runs não verificados → escopo pode crescer de "restaurar sinal" para "corrigir N quebras latentes"; mitigação: escopo deste milestone é **restaurar sinal + triar**, filando cada falha genuína como issue próprio.
+
+**Boundary honesto:** é **reparo de infraestrutura/CI**, não capacidade de produto. Não muda o gate de release — CI verde é pré-condição explicitamente **opcional (warn-not-block)** no `cycle-release`, e foi por isso que as releases procederam legitimamente; este milestone devolve a rede.
+
+**Prior art:** issue #140 (evidência `"steps": []`, `BlobNotFound`, histórico de 30 runs), `../.claude/rules/cycle-release.md` (CI verde como soft gate).
+
+---
+
+## M134 — [ ] Fix #117 — SSRF cego via `theodb.llm_endpoint` setável pelo chamador
+
+> Added 2026-07-21 (`/roadmap-feature llm-endpoint-ssrf-hardening`). Barreira de entrada para **qualquer** deploy multi-tenant ou com roles não-confiáveis. Grill: `knowledge-base/grills/llm-endpoint-ssrf-hardening-feature-grill.md`.
+
+**Objective:** corrigir o **#117** — `theodb.llm_endpoint` **não é GUC registrada**: é lida via `current_setting('theodb.llm_endpoint', true)` (`pg.rs:50-56`), ou seja **placeholder GUC**, e no PostgreSQL **qualquer role** pode dar `SET` num nome pontuado para a própria sessão. Os únicos guards são o esquema (`chat.rs:266-267`, precisa ser `http(s)://`) e no-redirect (`http.rs:124-125`) — **não há bloqueio de IP privado/loopback/link-local**, e checar `http(s)` não é controle de SSRF. **Impacto:** um role com EXECUTE em qualquer função que toca LLM (`ai._chat`, `ai.extract_entities`, ou `theodb.graph_upsert(..., use_llm := true)`) aponta o **host do banco** para alvo interno arbitrário (metadata `169.254.169.254`, `127.0.0.1`, serviços internos) e dispara requisição server-side. SSRF **cego**: varredura de porta interna por timing/estado do circuit-breaker + hits em endpoints internos não autenticados.
+
+**Definition of done:**
+
+- [ ] `theodb.llm_endpoint` e `theodb.llm_api_key` **registradas como GUCs custom `GucContext::Suset`** (só operador/superuser) — sessão não-superuser **não consegue mais** dar `SET` (asserido por teste negativo que espera o erro).
+- [ ] **Denylist de privado/loopback/link-local** aplicada antes do POST para no mínimo: `169.254.0.0/16`, `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `::1`, `fc00::/7`.
+- [ ] **Resolve-then-connect no mesmo IP**, para que host com **DNS-rebinding** (registro A público que re-resolve para endereço interno) não contorne a denylist.
+- [ ] Testes negativos asserindo o **erro tipado específico** para cada faixa bloqueada **e** para tentativa de rebinding — per `../.claude/rules/testing.md § 4.1`, teste de caso negativo assere o erro e a mensagem, não apenas "lança".
+- [ ] Postura existente **não regride**: `REVOKE … FROM PUBLIC`, no-redirect e fail-fast continuam valendo (re-provados).
+
+**Dependencies:** M131 `[x]`, M110 `[x]` (que adicionou `graph_upsert` como segundo caminho chamável, também coberto aqui).
+
+**Risks:** (a) **resolve-then-connect exige fixar o IP resolvido no cliente HTTP** — o `http.rs` pode não expor pinning em nível de conexão, então o fix pode exigir mudança de cliente (resolver/connector custom) em vez de checagem no `resolve_chat_cfg`; mitigação: **spike da capacidade do cliente ANTES** de comprometer a abordagem — se pinning for inviável, **documentar honestamente a janela residual de rebinding** em vez de alegar cobertura total. (b) **denylist ampla demais quebra endpoint LLM interno legítimo** — muitos self-hosts rodam o model server em `10.x`/`192.168.x` por design, exatamente o operador que queremos servir; mitigação: denylist como default + **GUC de allowlist só-operador** (também `Suset`) para re-permitir hosts internos específicos — a escotilha é do operador, **nunca** do chamador.
+
+**Boundary honesto:** é **hardening de segurança** de superfície pré-existente (M110 ampliou, não introduziu). Não adiciona capacidade; remove uma classe de abuso.
+
+**Prior art:** issue #117 (repro com `169.254.169.254`; ponteiros `chat.rs:258-268`, `pg.rs:50`, `http.rs:124`), `theodb_rs/src/am/guc.rs` (registrações `define_custom_*_guc` existentes), a postura NL→SQL (denylist + fail-closed + REVOKE) em `theodb_rs/src/nl.rs` como modelo.
 
 ---
 

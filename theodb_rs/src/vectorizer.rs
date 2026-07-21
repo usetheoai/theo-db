@@ -274,6 +274,10 @@ fn _vectorizer_mark_done(job_id: i64, owner: &str) -> bool {
 /// recorded (Rule 8 — never swallow). Returns true iff the guarded row matched (false = lease lost, discard).
 #[pg_extern]
 fn _vectorizer_mark_failed(job_id: i64, owner: &str, err: &str, max_attempts: i32) -> bool {
+    // Sanitize AT THE SINK (council-security MEDIUM): redact credential-shaped runs and bound the length here, so
+    // no present or future caller can persist a secret (or an unbounded blob) into `last_error`.
+    // `super::` — this fn lives inside the `#[pg_schema] mod theodb_rs`; the helper is at file scope.
+    let err = &super::sanitize_error_text(err);
     Spi::connect_mut(|client| {
         client
             .update(
@@ -653,21 +657,115 @@ pub(crate) fn register_worker() {
 /// only `FlushErrorState`s — it does NOT abort the (sub)transaction; committing a dirty one warns/PANICs
 /// under `--enable-cassert`). Returns `Some(f())` when `f` succeeded (subtxn released into the parent),
 /// `None` when `f` raised (subtxn rolled back).
-fn in_subtxn<T>(f: impl FnOnce() -> T) -> Option<T> {
+/// M132 (#132): the caught error's SQLSTATE + message are RETURNED, not discarded. Before, `catch_others(|_| None)`
+/// threw the cause away and every failure was marked with the same eight-word literal, so a 401, a missing
+/// embedding GUC and a malformed response were indistinguishable in `last_error` — that blindness is what made
+/// #132 cost a day of debugging. `Err(msg)` keeps the identical rollback semantics; only the diagnosis is added.
+fn in_subtxn_msg<T>(f: impl FnOnce() -> T) -> Result<T, String> {
     unsafe {
         pgrx::pg_sys::BeginInternalSubTransaction(std::ptr::null());
     }
-    let res: Option<T> = PgTryBuilder::new(std::panic::AssertUnwindSafe(|| Some(f())))
-        .catch_others(|_| None)
+    let res: Result<T, String> = PgTryBuilder::new(std::panic::AssertUnwindSafe(|| Ok(f())))
+        .catch_others(|e| {
+            let report = match &e {
+                pgrx::pg_sys::panic::CaughtError::PostgresError(r)
+                | pgrx::pg_sys::panic::CaughtError::ErrorReport(r) => r,
+                pgrx::pg_sys::panic::CaughtError::RustPanic { ereport, .. } => ereport,
+            };
+            Err(format!("{:?}: {}", report.sql_error_code(), report.message()))
+        })
         .execute();
     unsafe {
-        if res.is_some() {
+        if res.is_ok() {
             pgrx::pg_sys::ReleaseCurrentSubTransaction();
         } else {
             pgrx::pg_sys::RollbackAndReleaseCurrentSubTransaction();
         }
     }
     res
+}
+
+/// The `Option` view for call sites that only branch on success/failure (the cause is surfaced by the caller that
+/// records `last_error`). Single source of subtransaction handling — no duplicated BEGIN/ROLLBACK logic.
+fn in_subtxn<T>(f: impl FnOnce() -> T) -> Option<T> {
+    in_subtxn_msg(f).ok()
+}
+
+/// Sanitize an error message before it is PERSISTED in `last_error` (council-security MEDIUM).
+///
+/// The embed path echoes up to 200 chars of the endpoint's response body into its error
+/// (`embed.rs: "unexpected embedding response shape: {body}"`). That echo was previously log-only — logs rotate.
+/// M132 persists the cause in a table row that survives in the dead-letter, so an endpoint mistakenly pointed at an
+/// echo/debug service (which reflects request headers in its 200 body) would write `Authorization: Bearer <token>`
+/// into durable storage. Redact credential-shaped runs FIRST, then bound the length.
+///
+/// Applied at the SINK (`_vectorizer_mark_failed`), not at the call site, so a future caller cannot bypass it.
+/// No regex dependency (parsimony rung 2 — plain scanning is enough for these two shapes).
+pub(crate) fn sanitize_error_text(cause: &str) -> String {
+    const MAX: usize = 400;
+    const REDACTED: &str = "«redacted»";
+    // A credential run ends at whitespace or a JSON/quote delimiter.
+    fn is_token_char(c: char) -> bool {
+        !c.is_whitespace() && c != '"' && c != '\'' && c != ',' && c != '}' && c != ')'
+    }
+    let mut out = String::with_capacity(cause.len());
+    let lower = cause.to_lowercase();
+    let bytes: Vec<char> = cause.chars().collect();
+    let lower_chars: Vec<char> = lower.chars().collect();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        // `Bearer <token>` (case-insensitive) → keep the scheme, drop the credential.
+        let is_bearer = lower_chars[i..].starts_with(&['b', 'e', 'a', 'r', 'e', 'r', ' ']);
+        // `sk-…` style API keys (OpenAI and lookalikes) with a meaningful length.
+        let is_sk = lower_chars[i..].starts_with(&['s', 'k', '-']);
+        if is_bearer {
+            out.push_str("Bearer ");
+            i += 7;
+            while i < bytes.len() && is_token_char(bytes[i]) {
+                i += 1;
+            }
+            out.push_str(REDACTED);
+            continue;
+        }
+        if is_sk {
+            let start = i;
+            let mut j = i;
+            while j < bytes.len() && is_token_char(bytes[j]) {
+                j += 1;
+            }
+            if j - start >= 20 {
+                out.push_str(REDACTED);
+                i = j;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    // Bound the stored text so one poison row cannot bloat the queue table. Char-boundary safe (byte slicing could
+    // split a multi-byte UTF-8 sequence and panic).
+    if out.chars().count() <= MAX {
+        return out;
+    }
+    out.chars().take(MAX).collect::<String>() + "…(truncated)"
+}
+
+/// M132 (#132): the worker's view of the embedding config, as ONE log line at startup.
+///
+/// The most probable cause of the original report is a worker that booted WITHOUT the `ALTER SYSTEM` embedding
+/// GUCs (a restart that silently did not take effect) — invisible today, and instantly obvious with this line.
+/// The api key is reported by LENGTH ONLY: a secret must never reach the server log.
+pub(crate) fn startup_config_line(
+    endpoint: Option<&str>,
+    model: Option<&str>,
+    api_key: Option<&str>,
+) -> String {
+    format!(
+        "theodb vectorizer worker: embedding_endpoint={} embedding_model={} api_key_len={}",
+        if endpoint.is_some() { "set" } else { "MISSING" },
+        if model.is_some() { "set" } else { "MISSING" },
+        api_key.map(|k| k.len()).unwrap_or(0),
+    )
 }
 
 #[pg_guard]
@@ -683,6 +781,25 @@ pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
             .ok()
             .flatten()
             .unwrap_or_else(|| format!("bgw-{}", unsafe { pgrx::pg_sys::MyProcPid }))
+    });
+
+    // M132 (#132): report the worker's OWN view of the embedding config once at startup. A worker that booted
+    // without the `ALTER SYSTEM` GUCs (the probable cause of the original report) is identifiable from this single
+    // line instead of a debugger. Key length only — never the value.
+    // Subtxn-isolated: a diagnostic must never be able to kill the thing it exists to diagnose
+    // (council-rust-pgrx LOW). `guc()` runs SPI; a genuine PG ERROR there would unwind out of
+    // `BackgroundWorker::transaction` (which registers no handler), exit the worker and put it in a 5 s
+    // crash-restart loop. Swallowing it here is the ONE place that is correct: losing the log line degrades
+    // diagnosis, losing the worker stops all embedding.
+    BackgroundWorker::transaction(|| {
+        let _ = in_subtxn(|| {
+            let line = startup_config_line(
+                crate::pg::guc("theodb.embedding_endpoint").as_deref(),
+                crate::pg::guc("theodb.embedding_model").as_deref(),
+                crate::pg::guc("theodb.embedding_api_key").as_deref(),
+            );
+            pgrx::log!("{line}");
+        });
     });
 
     while BackgroundWorker::wait_latch(Some(std::time::Duration::from_secs(WORKER_POLL_SECS))) {
@@ -743,8 +860,9 @@ pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
         // the delete path). A caught embed/write ERROR rolls the subtxn back to a clean state and marks failed.
         let process_one = |job_id: i64, vid: i32, pk: &str, is_delete: bool| -> bool {
             let pk = pk.to_string();
-            let ok = BackgroundWorker::transaction(|| {
-                in_subtxn(|| {
+            // M132: keep the REAL cause so `last_error` names it (was a blanket 'embed/upsert failed').
+            let outcome = BackgroundWorker::transaction(|| {
+                in_subtxn_msg(|| {
                     let call = if is_delete {
                         "SELECT theodb_rs._vectorizer_process_delete($1, $2)"
                     } else {
@@ -753,17 +871,38 @@ pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
                     Spi::run_with_args(call, &[vid.into(), pk.clone().into()])
                         .expect("vectorizer process job failed");
                 })
-                .is_some()
             });
+            // Report the OWNER-GUARDED mark result, not merely "the work ran" (council-rust-pgrx MEDIUM). A `false`
+            // mark means the lease was lost and the row now belongs to another worker (the H1 fencing contract on
+            // `_vectorizer_mark_done`). Counting such a job as processed here would double-count it — the new owner
+            // counts it too — and would misreport work this worker no longer owns.
             BackgroundWorker::transaction(|| {
-                let sql = if ok {
-                    format!("SELECT theodb_rs._vectorizer_mark_done({job_id}, '{owner}')")
-                } else {
-                    format!("SELECT theodb_rs._vectorizer_mark_failed({job_id}, '{owner}', 'embed/upsert failed', {WORKER_MAX_ATTEMPTS})")
-                };
-                let _ = Spi::run(&sql);
-            });
-            ok
+                // Both arms use bound parameters. `owner`/`job_id` are not attacker-controlled today, but keeping
+                // one arm interpolated while its sibling binds is exactly the asymmetry a future refactor turns
+                // into a real injection (council-security LOW).
+                match &outcome {
+                    Ok(()) => Spi::get_one_with_args::<bool>(
+                        "SELECT theodb_rs._vectorizer_mark_done($1, $2)",
+                        &[job_id.into(), owner.clone().into()],
+                    )
+                    .ok()
+                    .flatten()
+                    .unwrap_or(false),
+                    // The message is arbitrary text (it can contain quotes); the sink also redacts + truncates it.
+                    Err(cause) => {
+                        let _ = Spi::run_with_args(
+                            "SELECT theodb_rs._vectorizer_mark_failed($1, $2, $3, $4)",
+                            &[
+                                job_id.into(),
+                                owner.clone().into(),
+                                cause.clone().into(),
+                                WORKER_MAX_ATTEMPTS.into(),
+                            ],
+                        );
+                        false
+                    }
+                }
+            })
         };
 
         // Deletes: per-job (no embed). Upserts: grouped by vectorizer for ONE embed_batch HTTP round-trip.
@@ -853,8 +992,13 @@ pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
                 }
             };
             match batch_done {
-                Some(n) => processed += n,
-                None => {
+                // M132 (ADR M132-2): only a batch that actually processed rows counts as done. `Some(0)` used to
+                // take this arm — a batch that ran cleanly but embedded NOTHING was counted as processed and the
+                // jobs were consumed with no result and no failure signal (silent no-op). A zero-row batch now
+                // joins `None` on the per-job fallback, whose outcome is always observable: done, or a real cause
+                // in `last_error`.
+                Some(n) if n > 0 => processed += n,
+                _ => {
                     for (job_id, pk) in &group {
                         if BackgroundWorker::sigterm_received() {
                             break;
@@ -1258,5 +1402,71 @@ mod tests {
         .unwrap()
         .unwrap();
         assert!(!claim_public, "the whole _vectorizer_* family is revoked, not just the new function");
+    }
+
+    /// M132 (#132) — the startup line must name what the worker sees WITHOUT ever leaking the key value.
+    #[pg_test]
+    fn test_m132_startup_log_never_logs_key_value() {
+        let secret = "sk-verysecretkeyvalue-0123456789";
+        let line = super::startup_config_line(
+            Some("https://api.openai.com/v1/embeddings"),
+            Some("text-embedding-3-small"),
+            Some(secret),
+        );
+        assert!(line.contains(&format!("api_key_len={}", secret.len())), "must report the LENGTH: {line}");
+        assert!(!line.contains(secret), "the key value must NEVER reach the log: {line}");
+        assert!(line.contains("embedding_endpoint=set") && line.contains("embedding_model=set"), "{line}");
+
+        // A GUC-blind worker (the probable cause of #132) must be identifiable from this one line.
+        let blind = super::startup_config_line(None, None, None);
+        assert!(blind.contains("embedding_endpoint=MISSING"), "{blind}");
+        assert!(blind.contains("api_key_len=0"), "{blind}");
+    }
+
+    /// M132 — the caught cause is returned (was discarded), so `last_error` can name it.
+    #[pg_test]
+    fn test_m132_in_subtxn_returns_real_cause() {
+        let ok = super::in_subtxn_msg(|| 7);
+        assert_eq!(ok, Ok(7), "success path must be unchanged");
+
+        let err = super::in_subtxn_msg(|| {
+            Spi::run("SELECT 1/0").expect("division by zero");
+        });
+        let cause = err.expect_err("must surface the error");
+        assert!(!cause.is_empty(), "the cause must not be empty");
+        assert_ne!(cause, "embed/upsert failed", "must NOT be the old blanket literal");
+        assert!(
+            cause.to_lowercase().contains("divi") || cause.to_lowercase().contains("zero"),
+            "the cause must name the real error, got: {cause}"
+        );
+    }
+
+    /// M132 — the stored cause is bounded and never splits a multi-byte char.
+    #[pg_test]
+    fn test_m132_sanitize_is_bounded_and_char_safe() {
+        assert_eq!(super::sanitize_error_text("short"), "short");
+        let long = "é".repeat(1000); // multi-byte: a byte-slice truncation would panic
+        let out = super::sanitize_error_text(&long);
+        assert!(out.ends_with("…(truncated)"), "must mark truncation");
+        assert!(out.chars().count() < 1000, "must be bounded");
+    }
+
+    /// M132 (council-security MEDIUM) — a credential echoed back by a misconfigured endpoint must NEVER be
+    /// persisted in `last_error`. The embed path echoes up to 200 chars of the response body; an echo/debug
+    /// service reflects the request headers, so this is the realistic leak shape.
+    #[pg_test]
+    fn test_m132_sanitize_redacts_credentials_before_persisting() {
+        let echoed = r#"theodb.embed_batch: unexpected embedding response shape: {"headers": {"Authorization": "Bearer sk-proj-AAAABBBBCCCCDDDDEEEEFFFFGGGG"}}"#;
+        let safe = super::sanitize_error_text(echoed);
+        assert!(!safe.contains("sk-proj-AAAABBBBCCCCDDDDEEEEFFFFGGGG"), "token must be redacted: {safe}");
+        assert!(safe.contains("«redacted»"), "must mark the redaction: {safe}");
+        assert!(safe.contains("unexpected embedding response shape"), "the diagnostic must survive: {safe}");
+
+        // A bare `sk-…` run (no Bearer scheme) is redacted too.
+        let bare = super::sanitize_error_text("key was sk-abcdefghijklmnopqrstuvwxyz0123 rejected");
+        assert!(!bare.contains("sk-abcdefghijklmnopqrstuvwxyz0123"), "bare key must be redacted: {bare}");
+
+        // A short `sk-` fragment is NOT a credential — do not mangle ordinary text.
+        assert_eq!(super::sanitize_error_text("sk-short"), "sk-short");
     }
 }

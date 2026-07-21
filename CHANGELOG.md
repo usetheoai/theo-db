@@ -24,6 +24,45 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.118.0] - 2026-07-21
+
+
+### Added
+- Roadmap amended: added M132 fix #132 — vectorizer bgworker embeda no self-host (destrava o anchor de dogfood) (`/roadmap-feature vectorizer-worker-embed-fix`)
+- Roadmap amended: added M133 fix #140 — restaurar o sinal de CI (todo job do Actions falha antes de qualquer step) (`/roadmap-feature ci-restore-signal`)
+- Roadmap amended: added M134 fix #117 — SSRF cego via `theodb.llm_endpoint` setável pelo chamador (`/roadmap-feature llm-endpoint-ssrf-hardening`)
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+- **Vectorizer worker failures are now diagnosable; a zero-row batch no longer counts as success (M132, closes #132).**
+  A failing job recorded the blanket literal `embed/upsert failed` for every cause — a 401, a missing embedding GUC
+  and a malformed response were indistinguishable — because the subtransaction helper caught with
+  `catch_others(|_| None)` and discarded the error. The caught **SQLSTATE + message** are now returned and stored in
+  `last_error` (passed as a **bound parameter**, never interpolated into SQL). The worker also logs its own view of
+  the embedding config once at startup (`embedding_endpoint=set|MISSING … api_key_len=N` — the key **length** only,
+  never the value), so a worker that booted without the `ALTER SYSTEM` GUCs is identifiable from one line instead of
+  a debugger. Separately, `Some(0)` from the batch path used to take the success arm: a batch that ran cleanly but
+  embedded **nothing** was counted as processed and its jobs consumed with no result and no failure signal — a
+  zero-row batch now falls back to the per-job path, whose outcome is always observable.
+  **Honest scope:** the symptom reported in #132 (all embed jobs dead-lettering on self-host) **does NOT reproduce**
+  on the current build — a clean end-to-end embeds 5/5 fresh rows with the queue draining to 0 failures
+  (`knowledge-base/discoveries/blueprints/vectorizer-worker-embed-blueprint.md`). This milestone ships the
+  diagnosability that made the original report cost a day, not a fix for an absent defect.
+  Hardened after review (council-security + council-rust-pgrx, both 0 BLOCKER/0 HIGH): the persisted cause is
+  **sanitized at the sink** — credential-shaped runs (`Bearer …`, `sk-…`) are redacted and the text bounded inside
+  `_vectorizer_mark_failed`, so a misconfigured echo endpoint reflecting `Authorization` headers into its 200 body
+  can no longer write a token into a durable table row (logs rotate, dead-letter rows do not); a job is now counted
+  as processed only when its **owner-guarded** `mark_done` succeeds, so a lease-lost job is never double-counted by
+  two workers (the H1 fencing contract); the new startup diagnostic is subtransaction-isolated so it can never crash
+  the worker it exists to diagnose; and both mark arms use bound parameters.
+
+### Security
+
 ## [0.117.0] - 2026-07-21
 
 
