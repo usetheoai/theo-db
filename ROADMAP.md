@@ -2030,7 +2030,7 @@ Recomendação #3 / Risco de manutenção: com 19 arquivos >500 LoC e este a 3.4
 
 ---
 
-## M128 — [ ] Benchmark oficial: pilar COLUNAR/OLAP (ClickBench + TPC-H-derived)
+## M128 — [x] Benchmark oficial: pilar COLUNAR/OLAP (ClickBench + TPC-H-derived)
 
 **Objective:** entrada TheoDB no **ClickBench** (copiar o contrato `postgresql/`: `create.sql`/`queries.sql`/hooks + `results/*.json`) rodando o `hits` real (CI-download), reusando a camada-wrap de M127; adicionar cobertura join-heavy TPC-H-derived (tpch-kit/DBT3) rotulada "TPC-H-derived".
 
