@@ -7,10 +7,10 @@ BIN=/usr/lib/postgresql/17/bin
 REG=/src/src/test/regress
 OUT=/tmp/regress_out
 
-# Prove the engine-under-test IS the distribution (PGDG 17.10), matching the source tag REL_17_10.
+# Prove the engine-under-test IS the distribution (PGDG 18.4), matching the source tag REL_18_4.
 VER="$("$BIN/postgres" --version)"
 echo "engine under test: $VER"
-echo "$VER" | grep -q "17\.10" || { echo "ERROR: engine is not 17.10 (got: $VER) — source tag mismatch"; exit 2; }
+echo "$VER" | grep -q "18\.4" || { echo "ERROR: engine is not 18.4 (got: $VER) — source tag mismatch"; exit 2; }
 
 rm -rf "$PGDATA"; mkdir -p "$PGDATA" "$OUT"
 "$BIN/initdb" -D "$PGDATA" -U postgres -E UTF8 >/tmp/initdb.log 2>&1 || { tail -20 /tmp/initdb.log; exit 2; }
@@ -27,7 +27,7 @@ set -o pipefail
 rc=${PIPESTATUS[0]}
 
 echo "======================================================"
-echo "  UPSTREAM PG17.10 REGRESSION SUITE — TheoDB distro"
+echo "  UPSTREAM PG18.4 REGRESSION SUITE — TheoDB distro"
 echo "======================================================"
 grep -E "All [0-9]+ tests passed|[0-9]+ of [0-9]+ tests failed" /tmp/regress.log | tail -3
 if [ "$rc" -ne 0 ]; then

@@ -1,5 +1,5 @@
-# M1 DoD-1 — runs the upstream PostgreSQL 17.10 regression suite against the TheoDB distribution.
-# FROM theo-db:dev so the server-under-test IS the TheoDB engine (unmodified PGDG postgres 17.10 + our
+# M1 DoD-1 — runs the upstream PostgreSQL 18.4 regression suite against the TheoDB distribution.
+# FROM theo-db:dev so the server-under-test IS the TheoDB engine (unmodified PGDG postgres 18.4 + our
 # extensions; ADR 0001 — no engine fork). Builds pg_regress + regress.so from the matching source tag and
 # runs `make installcheck`. Throwaway image — never shipped.
 FROM theo-db:dev

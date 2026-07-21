@@ -3,7 +3,7 @@
 # (shared_preload_libraries=theodb_rs). Installs the CURRENT theodb_rs into a fresh pgdata, starts a
 # deterministic stub embedding endpoint, and asserts: INSERT → embedding appears; UPDATE → re-embed;
 # endpoint failure → bounded retry → typed `failed` state (never swallowed). Runs inside the builder image
-# (toolchain + pg17 + vector + theodb umbrella). Mirrors scripts/pgrx-test-in-builder.sh.
+# (toolchain + pg18 + vector + theodb umbrella). Mirrors scripts/pgrx-test-in-builder.sh.
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 
@@ -22,7 +22,7 @@ docker run --rm \
     chmod -R a+w "$PKGLIB" "$EXT" 2>/dev/null || true
     BINDIR=$(/usr/bin/pg_config --bindir)
 
-    # 1. Install the CURRENT theodb_rs into the system pg17 (overwrites the image-baked one).
+    # 1. Install the CURRENT theodb_rs into the system pg18 (overwrites the image-baked one).
     su builder -c "export PATH=/root/.cargo/bin:\$PATH PGRX_HOME=/home/builder/.pgrx CARGO_HOME=/root/.cargo; cd /build && cargo pgrx install --pg-config /usr/bin/pg_config --release 2>&1 | tail -3"
 
     # 2. Fresh pgdata with the worker preloaded.

@@ -6,7 +6,7 @@
 # there — a PG<17 host client cannot dump a PG17 server), so it behaves identically locally and in CI.
 # Prereq: docker + a source container (vanilla pgvector) and a target container (TheoDB) already up.
 # Bring them up locally with:
-#   docker run -d --name m3-src -e POSTGRES_PASSWORD=postgres pgvector/pgvector:pg17
+#   docker run -d --name m3-src -e POSTGRES_PASSWORD=postgres pgvector/pgvector:pg18
 #   docker run -d --name m3-dst -e POSTGRES_PASSWORD=postgres theo-db:dev
 #
 # Env (defaults): SRC_CONTAINER=m3-src  DST_CONTAINER=m3-dst  PW=postgres  DST_DB=migrate_smoke

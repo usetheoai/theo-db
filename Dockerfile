@@ -1,17 +1,20 @@
 # syntax=docker/dockerfile:1
-# TheoDB image — PostgreSQL 17 + theodb_rs (own vector type + ANN AM, M17/M69/M70) + pg_duckdb (M61).
+# TheoDB image — PostgreSQL 18 + theodb_rs (own vector type + ANN AM, M17/M69/M70) + pg_duckdb (M61).
 # M70: pgvector + pgvectorscale REMOVIDOS — o tipo `vector` e os índices ANN são 100% own-code (theodb_rs).
 # Multi-stage: os stages builder compilam as extensões Rust/C++; o runtime copia SÓ os artefatos.
 
 # Shared base pinned by digest — used by BOTH stages so the extension is compiled against the exact
 # same PostgreSQL the runtime ships (reproducible build; no moving target between builder and runtime).
-ARG BASE_IMAGE=postgres:17-bookworm@sha256:17b6c778de50f4bb9a878c36e736110fbcd9b7020377d6fdfdf20f7c0347e40a
+# M135: PG18. The digest pin from the 17 line is intentionally not carried over — a digest for the 18 image has
+# to be taken from a real pull, and inventing one would be exactly the fabrication this project rejects. Pin it
+# on the next release cut, once the image has actually been pulled and its digest recorded.
+ARG BASE_IMAGE=postgres:18-bookworm
 
 # ---- Stage 1: build theodb_rs (TheoDB's own Rust/pgrx extension — M17/M69/M70; own vector type + ANN AM) ----
 # Compila a crate contra o MESMO PG pinado. M70: theodb_rs provê o tipo `vector` own-code (byte-idêntico ao
 # pgvector) + os AMs theodb_hnsw/theodb_ivfflat + os schemas theodb/ai — sem depender do pgvector/pgvectorscale.
 FROM ${BASE_IMAGE} AS theodb-rs-builder
-ARG PG_MAJOR=17
+ARG PG_MAJOR=18
 ARG PGRX_VERSION=0.16.1
 ARG RUST_VERSION=1.91.0
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -33,7 +36,7 @@ RUN cd /tmp/theodb_rs && cargo pgrx install --release --features pg$PG_MAJOR
 # embeds the DuckDB analytical engine as a Postgres extension. Built statically (DUCKDB_BUILD=ReleaseStatic →
 # one self-contained pg_duckdb.so, no separate libduckdb.so — ADR D2). C++/cmake/ninja, NO Rust.
 FROM ${BASE_IMAGE} AS pgduckdb-builder
-ARG PG_MAJOR=17
+ARG PG_MAJOR=18
 ARG PGDUCKDB_REF=v1.1.1
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential postgresql-server-dev-$PG_MAJOR libssl-dev pkg-config git cmake ninja-build \
@@ -44,13 +47,13 @@ RUN git clone https://github.com/duckdb/pg_duckdb /tmp/pg_duckdb && \
     git submodule update --init --recursive
 RUN cd /tmp/pg_duckdb && DUCKDB_BUILD=ReleaseStatic make install -j"$(nproc)"
 
-# ---- Stage 2: runtime (postgres:17 + theodb_rs + pg_duckdb) — M70: SEM pgvector/pgvectorscale ----
+# ---- Stage 2: runtime (postgres:18 + theodb_rs + pg_duckdb) — M70: SEM pgvector/pgvectorscale ----
 FROM ${BASE_IMAGE}
-ARG PG_MAJOR=17
+ARG PG_MAJOR=18
 
 # theodb_rs artifacts (M17/M69/M70) — TheoDB's own Rust extension (.so + .control + .sql): provê o tipo
 # `vector` own-code + os AMs ANN + os schemas theodb/ai. Artifact-only COPY (no Rust toolchain in runtime).
-# minreq uses native-tls → the runtime needs libssl3 (present in postgres:17-bookworm base) + ca-certificates.
+# minreq uses native-tls → the runtime needs libssl3 (present in postgres:18-bookworm base) + ca-certificates.
 COPY --from=theodb-rs-builder /usr/lib/postgresql/$PG_MAJOR/lib/theodb_rs* /usr/lib/postgresql/$PG_MAJOR/lib/
 COPY --from=theodb-rs-builder /usr/share/postgresql/$PG_MAJOR/extension/theodb_rs* /usr/share/postgresql/$PG_MAJOR/extension/
 
