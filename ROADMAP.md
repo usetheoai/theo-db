@@ -2013,7 +2013,7 @@ Recomendação #3 / Risco de manutenção: com 19 arquivos >500 LoC e este a 3.4
 
 > Added 2026-07-20. Fonte: discovery `knowledge-base/discoveries/blueprints/official-db-benchmark-harness-blueprint.md` (SHIPPABLE 97.5) + `docs/adr/0050-official-benchmark-adopt-and-wrap.md`. Decisão do owner ("o mais FAANG possível"): adotar o benchmark oficial por pilar (comparabilidade reproduzível por terceiros) **e** manter uma camada fina nossa (significância + A/B byte-idêntico + gate de corretude) por cima — os tools oficiais não a repõem. Rollout **vector-pilot-first**.
 
-## M127 — [ ] Benchmark oficial: pilar VETOR (VectorDBBench + ann-benchmarks) — piloto do padrão adopt-and-wrap
+## M127 — [x] Benchmark oficial: pilar VETOR (VectorDBBench + ann-benchmarks) — piloto do padrão adopt-and-wrap
 
 **Objective:** entregar a **entrada oficial de TheoDB no benchmark vetorial** (um adapter `BaseANN`/`psycopg` para ann-benchmarks + o driver estilo VectorDBBench) rodando datasets reais, E estabelecer a **camada-wrap reutilizável** (significância pareada + A/B byte-idêntico sobre o output per-query) que os pilares seguintes reusam. Este é o slice vertical que de-risca o programa inteiro.
 
