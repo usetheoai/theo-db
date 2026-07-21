@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Roadmap ampliado: adicionado M135 — suporte a PostgreSQL 18 (migração 17 → 18), com custo medido por sondagem de compilação (27 erros mapeados por arquivo/linha), não estimado (`/roadmap-feature pg18-support`)
 
 ### Changed
 
