@@ -3586,6 +3586,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "theodb_lexical"
+version = "0.1.0"
+dependencies = [
+ "tantivy",
+]
+
+[[package]]
 name = "theodb_rs"
 version = "1.0.0"
 dependencies = [
@@ -3597,6 +3604,7 @@ dependencies = [
  "pgrx-tests",
  "serde_json",
  "tantivy",
+ "theodb_lexical",
  "tokio",
  "zstd",
 ]

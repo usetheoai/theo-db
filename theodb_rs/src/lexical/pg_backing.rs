@@ -10,7 +10,7 @@
 use pgrx::prelude::*;
 use std::path::Path;
 
-use crate::lexical::pg_directory::{MemStore, SegmentStore};
+use theodb_lexical::{MemStore, SegmentStore};
 
 /// Cria o catálogo heap se ausente. `bytea` TOASTa segmentos grandes automaticamente.
 fn ensure_table() {
@@ -69,10 +69,10 @@ fn lexical_spike_roundtrip(term: &str) -> i64 {
     use std::sync::Arc;
     use tantivy::collector::TopDocs;
     use tantivy::query::QueryParser;
-    use tantivy::schema::{Schema, STORED, TEXT};
-    use tantivy::{doc, Index};
+    use tantivy::schema::{STORED, Schema, TEXT};
+    use tantivy::{Index, doc};
 
-    use crate::lexical::pg_directory::PgDirectory;
+    use theodb_lexical::PgDirectory;
 
     let index_id: i64 = 424_242; // id fixo do spike
 
@@ -104,9 +104,7 @@ fn lexical_spike_roundtrip(term: &str) -> i64 {
     let searcher = reader.searcher();
     let qp = QueryParser::for_index(&index2, vec![body2]);
     let query = qp.parse_query(term).expect("parse");
-    let hits = searcher
-        .search(&query, &TopDocs::with_limit(10).order_by_score())
-        .expect("search");
+    let hits = searcher.search(&query, &TopDocs::with_limit(10).order_by_score()).expect("search");
     hits.len() as i64
 }
 
@@ -116,10 +114,10 @@ fn lexical_spike_roundtrip(term: &str) -> i64 {
 #[pg_extern]
 fn lexical_spike_flush_only(index_id: i64, term: &str) -> i64 {
     use std::sync::Arc;
-    use tantivy::schema::{Schema, STORED, TEXT};
-    use tantivy::{doc, Index};
+    use tantivy::schema::{STORED, Schema, TEXT};
+    use tantivy::{Index, doc};
 
-    use crate::lexical::pg_directory::PgDirectory;
+    use theodb_lexical::PgDirectory;
 
     let mut sb = Schema::builder();
     let body = sb.add_text_field("body", TEXT | STORED);
@@ -148,10 +146,10 @@ fn lexical_spike_flush_only(index_id: i64, term: &str) -> i64 {
 #[pg_extern]
 fn lexical_spike_bulk_index(index_id: i64, n: i32) -> i64 {
     use std::sync::Arc;
-    use tantivy::schema::{Schema, STORED, TEXT};
-    use tantivy::{doc, Index};
+    use tantivy::schema::{STORED, Schema, TEXT};
+    use tantivy::{Index, doc};
 
-    use crate::lexical::pg_directory::PgDirectory;
+    use theodb_lexical::PgDirectory;
 
     let mut sb = Schema::builder();
     let body = sb.add_text_field("body", TEXT | STORED);
@@ -167,7 +165,10 @@ fn lexical_spike_bulk_index(index_id: i64, n: i32) -> i64 {
         let mut w = index.writer_with_num_threads(1, 50_000_000).expect("writer");
         for i in 0..n {
             // Corpus determinístico — o mesmo texto que o smoke SQL insere no pg_textsearch (gate 4 justo).
-            let txt = format!("document number {i} about lazy quick fox jumping over sleeping dogs and vixens {}", i % 97);
+            let txt = format!(
+                "document number {i} about lazy quick fox jumping over sleeping dogs and vixens {}",
+                i % 97
+            );
             w.add_document(doc!(body => txt)).unwrap();
         }
         w.commit().expect("commit");
@@ -185,7 +186,7 @@ fn lexical_spike_search(index_id: i64, term: &str) -> i64 {
     use tantivy::query::QueryParser;
     use tantivy::{Index, TantivyDocument};
 
-    use crate::lexical::pg_directory::PgDirectory;
+    use theodb_lexical::PgDirectory;
 
     let store = Arc::new(load(index_id));
     if store.total_bytes() == 0 {
@@ -200,9 +201,7 @@ fn lexical_spike_search(index_id: i64, term: &str) -> i64 {
     let searcher = reader.searcher();
     let qp = QueryParser::for_index(&index, vec![body]);
     let query = qp.parse_query(term).expect("parse");
-    let hits = searcher
-        .search(&query, &TopDocs::with_limit(10).order_by_score())
-        .expect("search");
+    let hits = searcher.search(&query, &TopDocs::with_limit(10).order_by_score()).expect("search");
     // Toca o doc store p/ garantir que os segmentos vieram MESMO do PG (não um índice vazio que "abriu").
     if let Some((_s, addr)) = hits.first() {
         let _d: TantivyDocument = searcher.doc(*addr).expect("doc");

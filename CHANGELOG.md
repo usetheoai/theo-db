@@ -24,6 +24,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.127.0] - 2026-07-22
+
+### Added
+- **M140.2** (crate núcleo lexical pgrx-free): o núcleo do motor lexical (o `Directory`/`MemStore`/`SegmentStore` do spike M139) extraído para o crate próprio **`theodb_lexical`** (rlib, dep só `tantivy`, **sem pgrx**) — testável com `cargo test` stock, sem o link de símbolos PG que prendia os 6 testes (M139). `theodb_rs` vira workspace root e consome o núcleo atrás da feature `spike-lexical`; imports trocados (`crate::lexical::pg_directory::` → `theodb_lexical::`). Gate objetivo do pgrx-free: `cargo tree -p theodb_lexical | grep -c pgrx == 0`. CI (`lint-rust.yml`) agora roda o teste do núcleo + o gate zero-pgrx + `cargo check --features spike-lexical` (o cdylib consumindo o núcleo). ADR `docs/adr/0053` reconcilia com o ADR-0009 (superfície SQL única — outra camada, zero externs). 6 testes do núcleo verdes local
+
 ## [0.126.0] - 2026-07-22
 
 ### Added

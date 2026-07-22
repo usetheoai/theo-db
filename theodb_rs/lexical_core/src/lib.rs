@@ -15,12 +15,13 @@ use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
-use tantivy::directory::error::{DeleteError, OpenReadError, OpenWriteError};
-use tantivy::directory::OwnedBytes;
-use tantivy::directory::{
-    AntiCallToken, FileHandle, TerminatingWrite, WatchCallback, WatchCallbackList, WatchHandle, WritePtr,
-};
 use tantivy::Directory;
+use tantivy::directory::OwnedBytes;
+use tantivy::directory::error::{DeleteError, OpenReadError, OpenWriteError};
+use tantivy::directory::{
+    AntiCallToken, FileHandle, TerminatingWrite, WatchCallback, WatchCallbackList, WatchHandle,
+    WritePtr,
+};
 
 /// A FONTE dos bytes por trás do `Directory`. Um "arquivo" (segmento Tantivy, `meta.json`) é um blob endereçado
 /// por path. O seam permite trocar o backend (memória → páginas PG) sem tocar a lógica do trait. Contrato WORM:
@@ -66,12 +67,7 @@ impl MemStore {
     /// Snapshot de todos os arquivos `(path, bytes)` — usado pelo flush-to-PG (main thread) para persistir o
     /// buffer no heap `bytea` após `writer.commit()`. Retorna cópias (o backend PG serializa fora do lock).
     pub fn files(&self) -> Vec<(PathBuf, Vec<u8>)> {
-        self.files
-            .read()
-            .unwrap()
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect()
+        self.files.read().unwrap().iter().map(|(k, v)| (k.clone(), v.clone())).collect()
     }
 }
 
@@ -165,18 +161,13 @@ impl Directory for PgDirectory {
         if self.store.exists(path) {
             return Err(OpenWriteError::FileAlreadyExists(path.to_path_buf()));
         }
-        let writer = PgWriter {
-            path: path.to_path_buf(),
-            store: Arc::clone(&self.store),
-            buf: Vec::new(),
-        };
+        let writer =
+            PgWriter { path: path.to_path_buf(), store: Arc::clone(&self.store), buf: Vec::new() };
         Ok(BufWriter::new(Box::new(writer)))
     }
 
     fn atomic_read(&self, path: &Path) -> Result<Vec<u8>, OpenReadError> {
-        self.store
-            .read(path)
-            .ok_or_else(|| OpenReadError::FileDoesNotExist(path.to_path_buf()))
+        self.store.read(path).ok_or_else(|| OpenReadError::FileDoesNotExist(path.to_path_buf()))
     }
 
     fn atomic_write(&self, path: &Path, data: &[u8]) -> io::Result<()> {
@@ -203,8 +194,8 @@ mod tests {
     use super::*;
     use tantivy::collector::TopDocs;
     use tantivy::query::QueryParser;
-    use tantivy::schema::{Schema, Value, STORED, TEXT};
-    use tantivy::{doc, Index};
+    use tantivy::schema::{STORED, Schema, TEXT, Value};
+    use tantivy::{Index, doc};
 
     /// Gate 1 do spike M139: o Tantivy indexa 3 docs num `PgDirectory` NOSSO e recupera o certo por busca de
     /// termo — SEM tocar o filesystem. Prova o contrato do trait + a integração Tantivy↔Directory-custom.
@@ -230,9 +221,8 @@ mod tests {
         let searcher = reader.searcher();
         let qp = QueryParser::for_index(&index, vec![body]);
         let query = qp.parse_query("lazy").expect("parse");
-        let hits = searcher
-            .search(&query, &TopDocs::with_limit(3).order_by_score())
-            .expect("search");
+        let hits =
+            searcher.search(&query, &TopDocs::with_limit(3).order_by_score()).expect("search");
         assert_eq!(hits.len(), 1, "só um doc contém 'lazy'");
 
         let (_score, addr) = hits[0];
@@ -247,14 +237,20 @@ mod tests {
     fn test_get_file_handle_absent_is_file_does_not_exist() {
         let dir = PgDirectory::new();
         let err = dir.get_file_handle(Path::new("ausente.term")).unwrap_err();
-        assert!(matches!(err, OpenReadError::FileDoesNotExist(_)), "esperado FileDoesNotExist, got {err:?}");
+        assert!(
+            matches!(err, OpenReadError::FileDoesNotExist(_)),
+            "esperado FileDoesNotExist, got {err:?}"
+        );
     }
 
     #[test]
     fn test_delete_absent_is_file_does_not_exist() {
         let dir = PgDirectory::new();
         let err = dir.delete(Path::new("ausente.idx")).unwrap_err();
-        assert!(matches!(err, DeleteError::FileDoesNotExist(_)), "esperado FileDoesNotExist, got {err:?}");
+        assert!(
+            matches!(err, DeleteError::FileDoesNotExist(_)),
+            "esperado FileDoesNotExist, got {err:?}"
+        );
     }
 
     #[test]
@@ -264,7 +260,11 @@ mod tests {
         assert!(!dir.exists(p).unwrap(), "não deve existir antes da escrita");
         dir.atomic_write(p, b"{\"segments\":[]}").unwrap();
         assert!(dir.exists(p).unwrap(), "deve existir após atomic_write");
-        assert_eq!(dir.atomic_read(p).unwrap(), b"{\"segments\":[]}", "read deve devolver os bytes exatos");
+        assert_eq!(
+            dir.atomic_read(p).unwrap(),
+            b"{\"segments\":[]}",
+            "read deve devolver os bytes exatos"
+        );
         dir.atomic_write(p, b"{}").unwrap();
         assert_eq!(dir.atomic_read(p).unwrap(), b"{}", "atomic_write deve substituir, não anexar");
     }

@@ -1,0 +1,20 @@
+# theodb_lexical — the pgrx-FREE core of the lexical engine (M140.2).
+#
+# The M139 spike proved this surface (Tantivy `Directory` over an in-memory `MemStore`,
+# buffer-then-flush) imports only std + tantivy — zero pgrx/pg_sys/Spi/#[pg_extern]. Living
+# inside the `theodb_rs` cdylib meant `cargo test` tried to link Postgres symbols and failed
+# (M139: the in-crate test does not link; a standalone crate passes). Extracting it here makes
+# the core testable with stock `cargo test`. The ABSENCE of a pgrx dependency below is the
+# objective gate of "pgrx-free" — if a pgrx type leaks into the core, this crate stops compiling.
+[package]
+name = "theodb_lexical"
+version = "0.1.0"
+edition = "2024"
+description = "TheoDB's pgrx-free lexical engine core (Tantivy Directory over an in-memory SegmentStore)"
+license = "Apache-2.0"
+
+[lib]
+# Plain rlib (NOT cdylib) — this is pure logic linked into theodb_rs, and testable standalone.
+
+[dependencies]
+tantivy = "0.26"
