@@ -17,7 +17,9 @@ ARG BASE_IMAGE=postgres:18-bookworm
 # pgvector) + os AMs theodb_hnsw/theodb_ivfflat + os schemas theodb/ai — sem depender do pgvector/pgvectorscale.
 FROM ${BASE_IMAGE} AS theodb-rs-builder
 ARG PG_MAJOR=18
-ARG PGRX_VERSION=0.16.1
+# M142: repin de 0.16.1 → 0.19.0. cargo-pgrx e o crate pgrx são lockstep; theodb_rs foi para pgrx =0.19.0 no M98
+# (impl(m98)) mas o Dockerfile nunca acompanhou (o repin M135 não pegou) — a imagem default não buildava. Fix.
+ARG PGRX_VERSION=0.19.0
 ARG RUST_VERSION=1.91.0
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential postgresql-server-dev-$PG_MAJOR libssl-dev pkg-config clang curl ca-certificates && \
