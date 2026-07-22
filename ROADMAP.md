@@ -2204,7 +2204,7 @@ Falsificação registrada: a hipótese de que a dor viria do WAL estava **errada
 
 ---
 
-## M136 — [ ] Gates mecânicos de qualidade + Postgres `cassert` no CI
+## M136 — [x] Gates mecânicos de qualidade + Postgres `cassert` no CI
 
 > Added 2026-07-21 (`/roadmap-feature quality-gates-mecanicos`). Grill: `knowledge-base/grills/quality-gates-mecanicos-feature-grill.md`.
 

@@ -54,6 +54,8 @@ mod graph_pgq; // M113 — SQL/PGQ-subset surface (theodb.pgq_match bounded-path
 mod graph_rag; // M111 — vector-on-nodes + vector-entry→traversal→rerank GraphRAG flow (theodb.graph_rag_search)
 mod http;
 mod hybrid;
+#[cfg(feature = "spike-lexical")]
+mod lexical; // M139 SPIKE — Directory do Tantivy sobre storage do PG (gate-1: backend blob; gate-3: páginas PG)
 mod migrate;
 mod nl;
 mod pg;
