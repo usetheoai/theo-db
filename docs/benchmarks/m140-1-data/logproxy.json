@@ -1,0 +1,127 @@
+{
+  "schema_version": "m140.1-v1",
+  "k": 10,
+  "axes": [
+    {
+      "axis": "logproxy",
+      "dataset": "hdfs",
+      "seeds": [
+        0,
+        1,
+        2
+      ],
+      "caveat": "PUBLIC LOG PROXY (LogHub HDFS_2k) \u2014 NOT theo-lens production traffic; real-trace validation is M140.4/M141 (ADR D1)",
+      "methodology_note": "Known-item MRR@10. m = query length (distinctive terms). m=1 is the fairest RANKING test (single term neutralises the Tantivy-default-OR vs websearch-AND parser difference). Large m inflates the gap via query-semantics/tokenisation, NOT ranking \u2014 an ARTIFACT, not a headline.",
+      "primary_m": 2,
+      "primary": {
+        "mrr_bm25_mean": 0.692226631393298,
+        "mrr_bm25_std": 0.008216103095207322,
+        "mrr_base_mean": 0.6350723104056438,
+        "mrr_base_std": 0.017187442067409867,
+        "verdict": {
+          "mean_bm25": 0.6922266313932981,
+          "mean_base": 0.6350723104056437,
+          "mean_diff": 0.057154320987654314,
+          "p_permutation": 9.99990000099999e-06,
+          "wins": 60,
+          "losses": 6,
+          "ties": 834,
+          "cohens_dz": 0.23952895754916748,
+          "flip": true,
+          "n_queries": 900
+        }
+      },
+      "m_sweep": {
+        "1": {
+          "mrr_bm25_mean": 0.4126093474426808,
+          "mrr_bm25_std": 0.02900154693610865,
+          "mrr_base_mean": 0.36600925925925926,
+          "mrr_base_std": 0.016082834914130394,
+          "verdict": {
+            "mean_bm25": 0.41260934744268074,
+            "mean_base": 0.3660092592592593,
+            "mean_diff": 0.04660008818342151,
+            "p_permutation": 9.99990000099999e-06,
+            "wins": 53,
+            "losses": 12,
+            "ties": 835,
+            "cohens_dz": 0.20794869686516232,
+            "flip": true,
+            "n_queries": 900
+          }
+        },
+        "2": {
+          "mrr_bm25_mean": 0.692226631393298,
+          "mrr_bm25_std": 0.008216103095207322,
+          "mrr_base_mean": 0.6350723104056438,
+          "mrr_base_std": 0.017187442067409867,
+          "verdict": {
+            "mean_bm25": 0.6922266313932981,
+            "mean_base": 0.6350723104056437,
+            "mean_diff": 0.057154320987654314,
+            "p_permutation": 9.99990000099999e-06,
+            "wins": 60,
+            "losses": 6,
+            "ties": 834,
+            "cohens_dz": 0.23952895754916748,
+            "flip": true,
+            "n_queries": 900
+          }
+        },
+        "3": {
+          "mrr_bm25_mean": 0.9333880070546737,
+          "mrr_bm25_std": 0.004605184307248149,
+          "mrr_base_mean": 0.4577777777777778,
+          "mrr_base_std": 0.032470309324894336,
+          "verdict": {
+            "mean_bm25": 0.9333880070546737,
+            "mean_base": 0.4577777777777778,
+            "mean_diff": 0.4756102292768959,
+            "p_permutation": 9.99990000099999e-06,
+            "wins": 468,
+            "losses": 0,
+            "ties": 432,
+            "cohens_dz": 0.9762798905261489,
+            "flip": true,
+            "n_queries": 900
+          }
+        },
+        "5": {
+          "mrr_bm25_mean": 0.991111111111111,
+          "mrr_bm25_std": 0.004374448818895448,
+          "mrr_base_mean": 0.20222222222222222,
+          "mrr_base_std": 0.022825153982415705,
+          "verdict": {
+            "mean_bm25": 0.9911111111111112,
+            "mean_base": 0.20222222222222222,
+            "mean_diff": 0.7888888888888889,
+            "p_permutation": 9.99990000099999e-06,
+            "wins": 718,
+            "losses": 0,
+            "ties": 182,
+            "cohens_dz": 1.9583241372202829,
+            "flip": true,
+            "n_queries": 900
+          }
+        }
+      },
+      "storage": {
+        "tantivy_index_bytes": 626228,
+        "tantivy_ingest_ms": 41.379262002010364,
+        "pg_tsrank_total_bytes": 1564672
+      },
+      "verdict": {
+        "mean_bm25": 0.6922266313932981,
+        "mean_base": 0.6350723104056437,
+        "mean_diff": 0.057154320987654314,
+        "p_permutation": 9.99990000099999e-06,
+        "wins": 60,
+        "losses": 6,
+        "ties": 834,
+        "cohens_dz": 0.23952895754916748,
+        "flip": true,
+        "n_queries": 900
+      }
+    }
+  ]
+}

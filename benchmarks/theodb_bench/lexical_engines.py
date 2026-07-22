@@ -13,6 +13,7 @@ standalone, so retrieval QUALITY (nDCG/MRR) is measured off-PG here; storage cos
 """
 from __future__ import annotations
 
+import re
 import time
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -56,12 +57,20 @@ class TantivyBM25:
         idx.reload()
         self._index = idx
 
+    @staticmethod
+    def _sanitize(query: str) -> str:
+        """Free text -> bag of word tokens. Tantivy's query parser treats +, -, (), ", :
+        as operators; BEIR natural-language queries contain them, so we reduce the query
+        to alphanumeric/underscore tokens (the same lexical matching both engines do)."""
+        return " ".join(re.findall(r"[A-Za-z0-9_]+", query.lower()))
+
     def search(self, query: str, k: int) -> list[str]:
         if self._index is None:
             raise RuntimeError("index() must be called before search()")
-        if not query.strip():
+        clean = self._sanitize(query)
+        if not clean:
             return []
-        q = self._index.parse_query(query, ["body"])
+        q = self._index.parse_query(clean, ["body"])
         searcher = self._index.searcher()
         hits = searcher.search(q, k).hits
         out: list[str] = []
