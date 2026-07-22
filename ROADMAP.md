@@ -2461,7 +2461,7 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 ---
 
-## M143 — [ ] Remoção total do `pg_duckdb`: lakehouse Parquet own-code (DataFusion) no default
+## M143 — [x] Remoção total do `pg_duckdb`: lakehouse Parquet own-code (DataFusion) no default
 
 > Added 2026-07-22 (`/roadmap-feature pgduckdb-total-removal`). Grill: `knowledge-base/grills/pgduckdb-total-removal-feature-grill.md`.
 
