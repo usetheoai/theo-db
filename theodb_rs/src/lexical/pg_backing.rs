@@ -142,6 +142,40 @@ fn lexical_spike_flush_only(index_id: i64, term: &str) -> i64 {
     store.files().len() as i64
 }
 
+/// Gate 4 (custo): indexa `n` docs sintéticos determinísticos num `PgDirectory` bufferizado e faz flush ao
+/// heap. Retorna o total de bytes do índice (o "tamanho" para o head-to-head vs `pg_textsearch`). Corpus
+/// determinístico (mesmo texto por `i`) para o `pg_textsearch` indexar o MESMO corpus e a comparação ser justa.
+#[pg_extern]
+fn lexical_spike_bulk_index(index_id: i64, n: i32) -> i64 {
+    use std::sync::Arc;
+    use tantivy::schema::{Schema, STORED, TEXT};
+    use tantivy::{doc, Index};
+
+    use crate::lexical::pg_directory::PgDirectory;
+
+    let mut sb = Schema::builder();
+    let body = sb.add_text_field("body", TEXT | STORED);
+    let schema = sb.build();
+    let store = Arc::new(MemStore::default());
+    let index = Index::create(
+        PgDirectory::with_store(store.clone()),
+        schema,
+        tantivy::IndexSettings::default(),
+    )
+    .expect("create index");
+    {
+        let mut w = index.writer_with_num_threads(1, 50_000_000).expect("writer");
+        for i in 0..n {
+            // Corpus determinístico — o mesmo texto que o smoke SQL insere no pg_textsearch (gate 4 justo).
+            let txt = format!("document number {i} about lazy quick fox jumping over sleeping dogs and vixens {}", i % 97);
+            w.add_document(doc!(body => txt)).unwrap();
+        }
+        w.commit().expect("commit");
+    }
+    flush(index_id, &store);
+    store.total_bytes() as i64
+}
+
 /// Gate 2 (MVCC), passo 2: LÊ o índice do heap no snapshot da txn corrente e busca `term`. Retorna o nº de hits
 /// (0 se o `index_id` não tem arquivos VISÍVEIS ao snapshot — ex.: outra txn ainda não commitou o flush).
 #[pg_extern]

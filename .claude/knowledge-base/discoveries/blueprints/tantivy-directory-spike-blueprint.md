@@ -146,3 +146,32 @@ A pergunta central do spike — "o Tantivy pode viver no PG com MVCC + WAL + cra
 empiricamente**: gate 1 (indexa+busca sem fs), gate 2 (MVCC cross-session), gate 3 (crash-real+replay), todos
 medidos em PG18 real. Falta o gate 4 (custo: tamanho do índice + latência vs `pg_textsearch` do M138) para o
 veredito GO/NO-GO final e o escopo do M140.
+
+## Gate 4 (custo) — MEDIDO + VEREDITO GO (2026-07-22)
+
+Head-to-head no MESMO corpus (2000 docs determinísticos), `scripts/m139-gate4` no PG18:
+
+| | Tantivy-in-PG (buffer-then-flush) | pg_textsearch (BM25 nativo) |
+|---|---|---|
+| Índice | **68K** (69.405 B) | 192K (196.608 B) — 2,8× maior |
+| Busca 'lazy' (5×) | 33 ms/busca (inclui reload do heap por query) | 40 ms/busca |
+
+Tantivy-in-PG: **índice 2,8× menor**, latência **competitiva** mesmo com reload ingênuo do índice inteiro a
+cada busca (o cache do Directory, escopo M140, elimina isso). Caveats honestos: corpus pequeno (2000); o reload
+por-query é O(índice) e não escala — é spike, não produção. Sem bandeira vermelha de custo.
+
+## VEREDITO DO SPIKE: **GO** (todos os 4 gates medidos)
+
+| Gate | Resultado |
+|---|---|
+| 1 — index+search sem fs | PROVADO (5 testes, standalone) |
+| 2 — MVCC cross-session | PROVADO (medido, PG18 real) |
+| 3 — crash-real + WAL replay | PROVADO (SIGABRT + replay, PG18 real) |
+| 4 — custo vs pg_textsearch | MEDIDO — favorável (2,8× menor, latência competitiva) |
+| 5 — veredito | **GO** |
+| 6 — fork? | **NÃO** — Tantivy MIT stock + Directory custom resolveu; sem fork (ADR-2, anti-sunk-cost) |
+
+O Tantivy PODE viver no PG com MVCC+WAL+crash via **buffer-then-flush + heap** (que herda MVCC/WAL/TOAST do PG),
+sem código de página/WAL custom nem fork. A engine lexical própria é **viável** → M140 (produção: cache do
+Directory, merge, VACUUM, paralelismo — declaradamente fora do spike). O valor entregue: descobrir a viabilidade
+(e a arquitetura correta, forçada pelo probe de threads) em uma sessão, medido, em vez de trimestres.

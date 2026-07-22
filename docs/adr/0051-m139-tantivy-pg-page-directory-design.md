@@ -1,6 +1,6 @@
 # ADR 0051 — M139 gate 2/3: design do backend de páginas PG para o `Directory` do Tantivy
 
-- **Status:** Proposto (design; implementação é o esforço dedicado do M139 gate 2/3)
+- **Status:** Aceito — VEREDITO GO (todos os 4 gates medidos em PG18 real, 2026-07-22)
 - **Data:** 2026-07-21
 - **Contexto:** M139 spike. Gate 1 PROVADO (`PgDirectory` custom, backend blob em memória, indexa+busca sem
   filesystem — `src/lexical/pg_directory.rs`, 5/5 testes). Este ADR desenha os gates 2 (MVCC) e 3 (crash-real+WAL),
