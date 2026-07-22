@@ -30,9 +30,11 @@ distribuí-los exigiria N declarações do mesmo ident de schema, um padrão pgr
 **Este ADR NÃO contradiz o 0009.** O núcleo lexical tem **zero `#[pg_extern]`** — não é superfície SQL, é
 **lógica pura** (outra camada, `architecture.md §1`). A restrição do 0009 é sobre a camada de externs; separar
 uma camada de lógica pura por **testabilidade** (o problema de link pgrx do M139) é ortogonal. Os `#[pg_extern]`
-do spike (`lexical_spike_*` em `pg_backing.rs`) continuam no único `mod theodb_rs` de `api.rs`/`pg_backing`, sob
-o 0009. É DIP (`§2`): o núcleo define o trait `SegmentStore`; a camada pgrx (`pg_backing.rs`) o implementa
-sobre o heap.
+do spike (`lexical_spike_*` em `pg_backing.rs`) permanecem em `theodb_rs` (hoje como externs **bare top-level**,
+schema `public` — uma colocação herdada do spike M139, temporária até a promoção do M140.3; não estão sob o
+facade `api.rs`/`mod theodb_rs`). O que a reconciliação exige é que o **núcleo** extraído tenha zero externs —
+e tem. É DIP (`§2`): o núcleo define o trait `SegmentStore`; a camada pgrx (`pg_backing.rs`) o implementa sobre
+o heap.
 
 ## Alternativas consideradas
 
