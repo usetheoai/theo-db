@@ -2367,7 +2367,7 @@ hoje presos** (`cargo pgrx test` não linka na droplet).
 
 **Prior art:** M139 (`src/lexical/` já é pgrx-free por design), ParadeDB (o único crate sem pgrx deles é `tokenizers` — extrair "a engine inteira" seria copiar forma que eles não têm), ADR-0009.
 
-## M140.3 — [ ] Engine BM25 de produção own-code (cache + superfície) *(gated M140.2)*
+## M140.3 — [x] Engine BM25 de produção own-code (cache + superfície) *(gated M140.2)*
 
 **Objective:** a engine usável em produção: o cache do `Directory` que **mata o reload-do-índice-por-query** (o
 único "naive" do spike — o M139 recarregava o índice inteiro a cada busca), e a superfície own-code decidida na

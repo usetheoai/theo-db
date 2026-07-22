@@ -24,6 +24,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.129.0] - 2026-07-22
+
+### Added
+- **M140.4** (MVCC/VACUUM/crash + consumidor theo-lens — em progresso): probe de thread-safety **#153** — `theodb_lexical::probe::ThreadRecordingStore` (test-only, núcleo pgrx-free) registra as threads que chamam o `SegmentStore` num build real do Tantivy e prova a **separação estrutural**: como o store no caminho das threads vive no crate pgrx-free (não linka pgrx), é impossível por construção tocar o PG de qualquer worker thread — uma regressão que ponha SPI numa thread teria de sair do núcleo (pega no gate zero-pgrx + review). 2 testes, `cargo test -p theodb_lexical` verde. **Robustez provada contra o binário shipado** (`scripts/m140-4-lexical-robustness.sh`, `docs/benchmarks/m140-4-robustness-consumer.md`): **CRASH_OK** (bm25_build commitado sobrevive a SIGABRT+WAL replay), **VACUUM_OK** (n_dead_tup 24→0 após rebuilds, busca intacta), **MVCC RR+RC** (leitor snapshot antigo não vê build de outra sessão em RR; vê no próximo statement em RC — cache invalida correto). Fecha o M140.3 review LOW (straddle SPI): read_generation+load são read-only → mesmo snapshot da statement (ADR-0055 D3). **Consumidor theo-lens** (`scripts/m140-4-consumer-theolens.sh`, **CONSUMER_OK**): o shape real do theo-lens (input||output do span, hoje ts_rank) sobre `bm25_search` retorna o trace correto (termo distintivo, tool Claude Code, query natural) + wiring `theo-lens/.../trace-bm25-search.ts` testada (4/4 unit, mock db, roda no CI do theo-lens; ts_rank default intocado). O cutover de produção + 30 dias = M141 (dogfood). ADR-0055. Review council-rust-pgrx (NEEDS_FIXES→corrigido): **HIGH** — o claim de que `Spi::get_one` seria read-only era FALSO (em pgrx 0.19 é `connect_mut`/`update` → marca a txn mutável → snapshot fresco por statement, reabrindo o straddle, E quebra em read replica). Corrigido: `read_generation` usa `Spi::connect+c.select` (read-only genuíno) → fecha o straddle de verdade + `bm25_search` roda em replica sem burn de XID. + crash gate agora gateia crash-pegou+recovery (não só data-presente); VACUUM gate exige recuperação real; probe multi-thread assere >1 thread. **FECHA O M140** (M140.1→M140.4)
+
 ## [0.128.0] - 2026-07-22
 
 ### Added
