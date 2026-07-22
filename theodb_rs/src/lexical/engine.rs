@@ -83,7 +83,9 @@ fn read_generation(index_id: i64) -> u64 {
 /// Abre um `Index` do estado heap VISÍVEL ao snapshot (reusa `load`, que é MVCC — M139 gate 2).
 fn open_from_heap(index_id: i64) -> Index {
     let store = Arc::new(load(index_id));
-    Index::open(PgDirectory::with_store(store)).expect("lexical: open index from heap")
+    Index::open(PgDirectory::with_store(store)).unwrap_or_else(|e| {
+        error!("bm25: índice heap ilegível/corrompido para index_id={index_id}: {e}")
+    })
 }
 
 /// Indexa `SELECT id_col, text_col FROM table` no Tantivy, flush ao heap (drop+reinsere atômico),
@@ -154,7 +156,12 @@ fn bm25_search(
         return TableIterator::new(Vec::new().into_iter());
     }
 
-    let mut cache = CACHE.lock().expect("lexical: cache lock");
+    // Recupera o poison (review M140.3 HIGH): o closure de build roda com o guard tomado; um panic
+    // nele (ex.: `open_from_heap` sobre bytes de heap inconsistentes) envenenaria o `Mutex` static
+    // por-backend, quebrando TODA `bm25_search` futura da sessão. O dado é um `HashMap` sem invariante
+    // quebrado num panic pré-insert (`get_or_build` avalia `build()` ANTES do `insert`), então ignorar
+    // o poison restaura a disponibilidade com segurança.
+    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
     let index = cache.get_or_build(index_id, generation, || open_from_heap(index_id));
 
     let id_f = index.schema().get_field("id").expect("field id");
@@ -168,11 +175,13 @@ fn bm25_search(
     };
     let hits = searcher
         .search(&parsed, &TopDocs::with_limit(k as usize).order_by_score())
-        .expect("lexical: search");
+        .unwrap_or_else(|e| error!("bm25: busca falhou no index_id={index_id}: {e}"));
 
     let mut out: Vec<(i64, f64)> = Vec::with_capacity(hits.len());
     for (score, addr) in hits {
-        let doc: TantivyDocument = searcher.doc(addr).expect("lexical: doc");
+        let doc: TantivyDocument = searcher
+            .doc(addr)
+            .unwrap_or_else(|e| error!("bm25: doc ilegível no index_id={index_id}: {e}"));
         if let Some(id) = doc.get_first(id_f).and_then(|v| v.as_i64()) {
             out.push((id, score as f64));
         }
