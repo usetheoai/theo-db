@@ -4,3 +4,4 @@ clickbench/theodb/create.sql
 clickbench/theodb/queries.sql
 clickbench/theodb/results.json
 clickbench/theodb/*.tsv
+.cache140/
