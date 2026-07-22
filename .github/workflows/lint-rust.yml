@@ -1,0 +1,60 @@
+# M136 — gates mecânicos de Rust: fmt, clippy (-D warnings via baseline), deps não usadas, lockfile, doc.
+#
+# O DEFEITO QUE ISTO PREVINE (medido 2026-07-21): 1056 warnings clippy e o código NUNCA rustfmt-formatado —
+# zero gate mecânico de Rust contra 28 regras + 40 skills de PROCESSO. O mutirão fmt (c6025d3) tornou o código
+# fmt-clean; este workflow impede a regressão e barra warnings NOVOS.
+#
+# Roda no runner self-hosted (theodb-do), que já tem cargo + `cargo pgrx init --pg18` (o clippy sobre código
+# pgrx precisa de um pg_config). Precedente: paradedb `lint-rust.yml` (fmt --check, clippy -D warnings --no-deps,
+# machete, taplo) e neon (`.neon_clippy_args` — args num arquivo único, consumido por CI E local, sem drift).
+name: lint-rust
+
+on:
+  push:
+    branches: [develop, main]
+    paths: ['theodb_rs/**', '.github/workflows/lint-rust.yml']
+  pull_request:
+    branches: [develop, main]
+    paths: ['theodb_rs/**', '.github/workflows/lint-rust.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: [self-hosted, theodb-do]
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: theodb_rs
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lockfile drift (cargo metadata --locked)
+        run: |
+          source "$HOME/.cargo/env"
+          cargo metadata --format-version 1 --locked > /dev/null
+
+      - name: Rustfmt (cargo fmt --check)
+        run: |
+          source "$HOME/.cargo/env"
+          cargo fmt -- --check
+
+      - name: Clippy (-D warnings via .clippy_args baseline)
+        run: |
+          source "$HOME/.cargo/env"
+          # O arquivo único de args (padrão neon) — CI e local leem o MESMO baseline, sem drift.
+          ARGS=$(grep -v '^#' .clippy_args | grep -v '^[[:space:]]*$' | tr '\n' ' ')
+          echo "clippy args: $ARGS"
+          cargo clippy --features pg18 --no-deps -- $ARGS
+
+      - name: Unused dependencies (cargo machete)
+        run: |
+          source "$HOME/.cargo/env"
+          command -v cargo-machete >/dev/null || cargo install --locked cargo-machete
+          cargo machete
+
+      - name: Doc rot (cargo doc -D warnings)
+        run: |
+          source "$HOME/.cargo/env"
+          RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --features pg18 --document-private-items

@@ -1,0 +1,8 @@
+# M136 — configuração do clippy (thresholds), complementa os args de gate em `.clippy_args`.
+# pgrx: funções `#[pg_extern]` que espelham superfícies SQL têm legitimamente muitos parâmetros
+# (ex.: ai.hybrid_search_rrf tem 13). Subir o threshold reduz ruído sem esconder complexidade real
+# de lógica; a categoria too_many_arguments está em baseline-allow em .clippy_args até o burn-down.
+too-many-arguments-threshold = 12
+# Complexidade de tipo: FFI/pgrx produz tipos aninhados (PgBox<...>, Option<*mut ...>). Mantido no
+# default do clippy via baseline; documentado aqui para quando o burn-down remover o -A.
+type-complexity-threshold = 250
