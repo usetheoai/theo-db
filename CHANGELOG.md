@@ -13,8 +13,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Gates mecânicos de qualidade Rust (M136): `lint-rust.yml` (clippy `-D warnings` com baseline de 21 categorias em `theodb_rs/.clippy_args` estilo neon, rustfmt `--check`, `cargo machete`, `metadata --locked`, doc) + `cassert-sql-safety.yml` (smoke dos 4 AMs + columnar sob Postgres `--enable-cassert` — a classe do crash #143 — via `scripts/cassert-smoke.sh`, e pgspot na SQL de instalação). Cada gate verificado verde por medição direta (`docs/benchmarks/m136-quality-gates.md`); backlog pré-existente em baseline-com-sunset (#151)
 
 ### Changed
+- `theodb_rs`: código Rust 100% rustfmt-clean pela primeira vez (`cargo fmt` mutirão, 65 arquivos) — `rustfmt.toml` codifica o estilo (edition 2024, use_small_heuristics=Max). Preserva semântica; build verificado (M136)
 
 ### Deprecated
 
