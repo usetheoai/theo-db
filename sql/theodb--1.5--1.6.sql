@@ -20,9 +20,8 @@ VOLATILE
 AS $$
 DECLARE
     v_path text := theodb._htap_path(p_rel);
-    v_n    bigint;
 BEGIN
-    v_n := public.write_parquet(p_rel::regclass::text, v_path);
+    PERFORM public.write_parquet(p_rel::regclass::text, v_path);
     RETURN theodb.htap_register(p_rel, v_path);
 END;
 $$;

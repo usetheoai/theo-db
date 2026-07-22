@@ -1,28 +1,63 @@
 //! Lakehouse Parquet own-code (M143) — lê/escreve Parquet externo via DataFusion + Arrow (Apache-2.0, já no
-//! binário; **sem DuckDB**). Substitui a superfície M62 que dependia do `pg_duckdb` (read_parquet + duckdb.query).
-//! Ligado por default (a feature `spike-parquet` do spike Fase 4 foi promovida a permanente — veredito GO em
-//! `docs/benchmarks/parquet-reader-owncode-spike.md`).
+//! binário; **sem DuckDB**). Substitui a superfície M62 que dependia do `pg_duckdb`.
 //!
-//! Superfície:
-//! - `theodb.olap(path)` → `(category, c, a)` tipado — o agregado canônico do M62 (paridade byte-a-byte vs
-//!   pg_duckdb, provada no spike). É o que o `sql/85` (`theodb.olap`) chama.
-//! - `theodb.read_parquet(path)` → `SETOF jsonb` — leitor **geral** (schema arbitrário): cada linha Parquet vira
-//!   um `jsonb` via arrow-json, cobrindo TODOS os tipos (escalares → json; nested/list/struct → objeto/array)
-//!   sem a complexidade de `SETOF record` dinâmico no pgrx (ADR-M143-D1).
+//! Superfície (todas `#[pg_extern]` → schema `public`, e **REVOKE ALL FROM PUBLIC** no `extension_sql!` abaixo —
+//! escrita/leitura de arquivo server-side é privilégio superuser, como o `COPY … TO file`; least-privilege):
+//! - `public.olap(path)` → `(category, c, a)` tipado — agregado M62 (paridade byte-a-byte vs pg_duckdb).
+//! - `public.read_parquet(path)` → `SETOF jsonb` — leitor geral (schema arbitrário via arrow-json, todos os tipos).
+//! - `public.write_parquet(rel, path)` → bigint — materializa uma tabela em Parquet (SPI → Arrow → ArrowWriter).
+//! A superfície de usuário é `theodb.htap_refresh(rel)`/`theodb.olap(rel)` (sql/85), que chamam estas.
 //!
-//! Reusa (Regra 9) o padrão de execução DataFusion in-extension de `am/df_executor.rs` (tokio current-thread +
-//! `block_on`). Erros do DataFusion viram erro tipado (fail-closed, `error-handling.md` §2), nunca panic
-//! atravessando a fronteira C.
+//! Segurança/robustez (M143 review): (1) block_on sob `HeldInterrupts` (mesma invariante do `df_executor` — um
+//! longjmp do PG não pode saltar o runtime tokio sem Drop); (2) `GreedyMemoryPool(work_mem)` limita a memória do
+//! DataFusion (parquet grande → erro tipado, não OOM); (3) o `FROM` do write usa o nome CANÔNICO resolvido via
+//! `$1::regclass::text` (injection-safe, não interpolação crua); (4) temp de escrita único por-backend + cleanup.
+//! Erros do DataFusion/SPI/JSON viram erro tipado (`crate::pg::err_input` = ereport ERROR), nunca panic.
 
 use datafusion::arrow::array::{Array, Float64Array, Int64Array, StringArray, StringViewArray};
 use datafusion::arrow::json::writer::LineDelimitedWriter;
 use datafusion::arrow::record_batch::RecordBatch;
+use datafusion::execution::memory_pool::GreedyMemoryPool;
+use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::functions_aggregate::expr_fn::{avg, count};
-use datafusion::prelude::{ParquetReadOptions, SessionContext, col, lit};
+use datafusion::prelude::{ParquetReadOptions, SessionConfig, SessionContext, col, lit};
 use pgrx::prelude::*;
 
-/// Executa `f(ctx)` num runtime tokio current-thread (o padrão do df_executor — um backend por vez). `enable_all`
-/// liga o driver de I/O que o `object_store` (LocalFileSystem) usa para ler/escrever o arquivo.
+/// RAII sobre `InterruptHoldoffCount` (mesmo padrão de `am/df_executor.rs` e `am/datafusion_probe.rs` — replicado
+/// deliberadamente porque é um guard C-macro): segura interrupções através do `block_on` síncrono para que um
+/// cancel/`statement_timeout`/`proc_exit` do PG (siglongjmp C) não salte por cima do runtime tokio vivo + os
+/// frames Rust sem rodar `Drop`. A rede de panic do pgrx NÃO captura um longjmp C.
+struct HeldInterrupts;
+impl HeldInterrupts {
+    fn hold() -> Self {
+        unsafe { pg_sys::InterruptHoldoffCount += 1 };
+        HeldInterrupts
+    }
+}
+impl Drop for HeldInterrupts {
+    fn drop(&mut self) {
+        unsafe { pg_sys::InterruptHoldoffCount -= 1 };
+    }
+}
+
+/// `work_mem` (KB → bytes), piso de 64 KB — o teto de memória do DataFusion (mesmo do df_executor).
+fn work_mem_bytes() -> usize {
+    (unsafe { pg_sys::work_mem }.max(64) as usize) * 1024
+}
+
+/// `SessionContext` limitado por `work_mem` (GreedyMemoryPool) — um parquet maior que work_mem → erro tipado do
+/// DataFusion, não OOM do backend. Um único partition (backend single-thread).
+fn bounded_ctx() -> Result<SessionContext, String> {
+    let runtime = RuntimeEnvBuilder::new()
+        .with_memory_pool(std::sync::Arc::new(GreedyMemoryPool::new(work_mem_bytes())))
+        .build_arc()
+        .map_err(|e| format!("runtime env: {e}"))?;
+    let config = SessionConfig::new().with_target_partitions(1);
+    Ok(SessionContext::new_with_config_rt(config, runtime))
+}
+
+/// Roda `f` num runtime tokio current-thread SOB `HeldInterrupts`. `enable_all()` liga o driver de I/O que o
+/// `object_store` (LocalFileSystem) usa para ler/escrever o arquivo (o df_executor lê de memória e não precisa).
 fn with_runtime<T, F>(f: F) -> Result<T, String>
 where
     F: std::future::Future<Output = Result<T, String>>,
@@ -31,11 +66,12 @@ where
         .enable_all()
         .build()
         .map_err(|e| format!("tokio runtime: {e}"))?;
+    let _held = HeldInterrupts::hold();
     rt.block_on(f)
 }
 
-/// `theodb.olap(path)` — o agregado canônico do M62 (category, count(*), round(avg(amount),4)) sobre um Parquet,
-/// own-code. Retorna linhas tipadas. Erro do DataFusion → erro tipado.
+/// `theodb`/`public.olap(path)` — o agregado canônico do M62 (category, count(*), round(avg(amount),4)) sobre um
+/// Parquet, own-code. Retorna linhas tipadas.
 #[pg_extern]
 fn olap(
     path: String,
@@ -46,7 +82,7 @@ fn olap(
 }
 
 async fn olap_impl(path: String) -> Result<Vec<(String, i64, f64)>, String> {
-    let ctx = SessionContext::new();
+    let ctx = bounded_ctx()?;
     let df = ctx
         .read_parquet(&path, ParquetReadOptions::default())
         .await
@@ -80,8 +116,8 @@ async fn olap_impl(path: String) -> Result<Vec<(String, i64, f64)>, String> {
     Ok(out)
 }
 
-/// `theodb.read_parquet(path)` — leitor geral: cada linha Parquet → um `jsonb` (via arrow-json). Cobre todos os
-/// tipos (escalares e nested) sem `SETOF record` dinâmico. Erro do DataFusion / JSON → erro tipado.
+/// `theodb`/`public.read_parquet(path)` — leitor geral: cada linha Parquet → um `jsonb` (via arrow-json). Cobre
+/// todos os tipos (escalares e nested) sem `SETOF record` dinâmico. Limitado por work_mem (bounded_ctx).
 #[pg_extern]
 fn read_parquet(path: String) -> SetOfIterator<'static, pgrx::JsonB> {
     let rows = with_runtime(read_parquet_impl(path))
@@ -90,7 +126,7 @@ fn read_parquet(path: String) -> SetOfIterator<'static, pgrx::JsonB> {
 }
 
 async fn read_parquet_impl(path: String) -> Result<Vec<pgrx::JsonB>, String> {
-    let ctx = SessionContext::new();
+    let ctx = bounded_ctx()?;
     let df = ctx
         .read_parquet(&path, ParquetReadOptions::default())
         .await
@@ -100,7 +136,6 @@ async fn read_parquet_impl(path: String) -> Result<Vec<pgrx::JsonB>, String> {
 }
 
 /// Serializa os RecordBatches em NDJSON (uma linha por row) via arrow-json e converte cada linha num `pgrx::JsonB`.
-/// arrow-json cobre nested/list/struct nativamente — daí o shape `jsonb` do leitor geral.
 fn batches_to_jsonb(batches: &[RecordBatch]) -> Result<Vec<pgrx::JsonB>, String> {
     let mut out: Vec<pgrx::JsonB> = Vec::new();
     for b in batches {
@@ -125,13 +160,11 @@ fn batches_to_jsonb(batches: &[RecordBatch]) -> Result<Vec<pgrx::JsonB>, String>
     Ok(out)
 }
 
-/// `theodb.write_parquet(rel, path)` — materializa uma tabela PG num arquivo Parquet own-code (substitui o
-/// `COPY … (FORMAT parquet)` do pg_duckdb). Lê as linhas via SPI, constrói arrays Arrow por tipo, e escreve um
-/// arquivo único via `parquet::arrow::ArrowWriter` (síncrono — sem runtime async). Escrita atômica (temp+rename)
-/// para não deixar Parquet meio-escrito num crash. `rel` deve ser um nome de relação válido (`regclass::text`,
-/// já quotado/qualificado pelo PG — injection-safe). Retorna o nº de linhas escritas. Tipo não-suportado → erro
-/// tipado (fail-closed). Cobre os escalares comuns (int2/4/8, float4/8, bool, text); timestamp/date/decimal na
-/// escrita v1 declinam com erro tipado (legíveis via read_parquet→jsonb; write amplo é follow-on — grill R1).
+/// `theodb`/`public.write_parquet(rel, path)` — materializa uma tabela PG num arquivo Parquet own-code (substitui
+/// o `COPY … (FORMAT parquet)` do pg_duckdb). Lê as linhas via SPI, constrói arrays Arrow por tipo, escreve um
+/// arquivo único via `parquet::arrow::ArrowWriter` (síncrono; escrita atômica temp+rename, temp único por-backend).
+/// `rel` é resolvido/validado via `$1::regclass` e o `FROM` usa o nome CANÔNICO (injection-safe). Retorna o nº de
+/// linhas. Tipo não-suportado → erro tipado (fail-closed). Escalares (int2/4/8, float4/8, bool, text) na v1.
 #[pg_extern]
 fn write_parquet(rel: String, path: String) -> i64 {
     write_parquet_impl(&rel, &path)
@@ -147,21 +180,32 @@ fn write_parquet_impl(rel: &str, path: &str) -> Result<i64, String> {
     use datafusion::parquet::arrow::ArrowWriter;
     use std::sync::Arc;
 
-    // Colunas (nome, OID) da relação — via catálogo, na ordem de attnum. `rel` é regclass::text (validado pelo PG).
-    let cols: Vec<(String, u32)> = Spi::connect(|c| {
-        let sql = format!(
-            "SELECT attname::text, atttypid::oid FROM pg_attribute \
-             WHERE attrelid = '{}'::regclass AND attnum > 0 AND NOT attisdropped ORDER BY attnum",
-            rel.replace('\'', "''")
-        );
-        let t = c.select(&sql, None, &[]).map_err(|e| format!("catálogo: {e}"))?;
-        let mut v = Vec::new();
-        for row in t {
+    // Resolve o nome CANÔNICO (valida que `rel` é uma relação real via ::regclass — lança se não) + as colunas.
+    // Tudo via SPI PARAMETRIZADO ($1) — sem interpolação crua (injection-safe). O nome canônico é PG-quotado.
+    let (qname, cols): (String, Vec<(String, u32)>) = Spi::connect(|c| {
+        let qt = c
+            .select("SELECT $1::regclass::text", Some(1), &[rel.into()])
+            .map_err(|e| format!("resolve rel '{rel}': {e}"))?;
+        let qname: String = qt
+            .into_iter()
+            .next()
+            .and_then(|r| r.get::<String>(1).ok().flatten())
+            .ok_or_else(|| format!("relação '{rel}' inválida"))?;
+        let ct = c
+            .select(
+                "SELECT attname::text, atttypid::oid FROM pg_attribute \
+                 WHERE attrelid = $1::regclass AND attnum > 0 AND NOT attisdropped ORDER BY attnum",
+                None,
+                &[rel.into()],
+            )
+            .map_err(|e| format!("catálogo de '{rel}': {e}"))?;
+        let mut cols = Vec::new();
+        for row in ct {
             let name: String = row.get(1).map_err(|e| format!("attname: {e}"))?.unwrap_or_default();
             let oid: pg_sys::Oid = row.get(2).map_err(|e| format!("atttypid: {e}"))?.ok_or("atttypid nulo")?;
-            v.push((name, oid.to_u32()));
+            cols.push((name, oid.to_u32()));
         }
-        Ok::<_, String>(v)
+        Ok::<_, String>((qname, cols))
     })?;
     if cols.is_empty() {
         return Err(format!("relação '{rel}' sem colunas"));
@@ -199,11 +243,11 @@ fn write_parquet_impl(rel: &str, path: &str) -> Result<i64, String> {
         builders.push(col);
     }
 
-    // Lê as linhas e alimenta os builders (por OID). SPI select da relação inteira.
+    // Lê as linhas (via o nome CANÔNICO — injection-safe) e alimenta os builders por OID.
     let mut nrows: i64 = 0;
     Spi::connect(|c| {
-        let sql = format!("SELECT * FROM {rel}");
-        let t = c.select(&sql, None, &[]).map_err(|e| format!("select {rel}: {e}"))?;
+        let sql = format!("SELECT * FROM {qname}");
+        let t = c.select(&sql, None, &[]).map_err(|e| format!("select {qname}: {e}"))?;
         for row in t {
             for (i, b) in builders.iter_mut().enumerate() {
                 let ord = i + 1; // SPI é 1-indexed
@@ -238,15 +282,21 @@ fn write_parquet_impl(rel: &str, path: &str) -> Result<i64, String> {
     let batch = RecordBatch::try_new(schema.clone(), arrays)
         .map_err(|e| format!("record batch: {e}"))?;
 
-    // Escrita atômica: temp + rename (invariante — nunca um Parquet meio-escrito visível num crash).
-    let tmp = format!("{path}.tmp");
-    {
+    // Escrita atômica: temp ÚNICO por-backend (evita corrida de dois writes no mesmo path) + rename (commit) +
+    // cleanup do temp em qualquer erro (nunca temp órfão). O temp fica no mesmo dir do path (rename não cross-device).
+    let tmp = format!("{path}.{}.tmp", unsafe { pg_sys::MyProcPid });
+    let write_res = (|| -> Result<(), String> {
         let file = std::fs::File::create(&tmp).map_err(|e| format!("criar '{tmp}': {e}"))?;
         let mut w = ArrowWriter::try_new(file, schema, None).map_err(|e| format!("ArrowWriter: {e}"))?;
         w.write(&batch).map_err(|e| format!("write batch: {e}"))?;
         w.close().map_err(|e| format!("close: {e}"))?;
+        std::fs::rename(&tmp, path).map_err(|e| format!("rename '{tmp}'→'{path}': {e}"))?;
+        Ok(())
+    })();
+    if write_res.is_err() {
+        let _ = std::fs::remove_file(&tmp); // cleanup best-effort do temp órfão
     }
-    std::fs::rename(&tmp, path).map_err(|e| format!("rename '{tmp}'→'{path}': {e}"))?;
+    write_res?;
     Ok(nrows)
 }
 
@@ -263,3 +313,17 @@ fn extract_strings(arr: &dyn Array) -> Result<Vec<String>, String> {
         ))
     }
 }
+
+// Least-privilege (M143 review HIGH-1): escrita/leitura de arquivo server-side é privilégio superuser (como o
+// `COPY … TO file`, que exige superuser / pg_write_server_files). O default do pgrx é GRANT EXECUTE TO PUBLIC —
+// REVOKE explícito para que a superfície `theodb.htap_refresh`/`olap` (também REVOKEd no sql/85) não seja
+// contornável chamando as primitivas `public.*` direto. `requires` garante que o REVOKE roda após o CREATE.
+extension_sql!(
+    r#"
+REVOKE ALL ON FUNCTION public.write_parquet(text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.read_parquet(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.olap(text) FROM PUBLIC;
+"#,
+    name = "parquet_revoke_public",
+    requires = [write_parquet, read_parquet, olap],
+);

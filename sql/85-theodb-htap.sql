@@ -43,10 +43,10 @@ VOLATILE
 AS $$
 DECLARE
     v_path text := theodb._htap_path(p_rel);
-    v_n    bigint;
 BEGIN
-    -- escreve o Parquet own-code (DataFusion/Arrow, sem DuckDB); a função Rust é injection-safe (regclass::text).
-    v_n := public.write_parquet(p_rel::regclass::text, v_path);
+    -- escreve o Parquet own-code (DataFusion/Arrow, sem DuckDB); a função Rust resolve o nome canônico via
+    -- $1::regclass (injection-safe). PERFORM (descarta a contagem de linhas de retorno).
+    PERFORM public.write_parquet(p_rel::regclass::text, v_path);
     -- registra o snapshot (upsert). Reusa a validação/relógio de htap_register.
     RETURN theodb.htap_register(p_rel, v_path);
 END;

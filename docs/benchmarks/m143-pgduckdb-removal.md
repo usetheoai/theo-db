@@ -37,9 +37,14 @@ M143_REMOVAL_OK
 | M142 `theodb-htap` (aposentada) | 887 MB | ✅ (via pg_duckdb) | **+118 MB** |
 | **M143 default (esta)** | **724 MB** | ✅ **own-code** | **0** |
 
-O lakehouse deixou de exigir uma imagem separada de 887 MB (com 118 MB de C++/DuckDB) e passou a caber no build
-default a **+~12 MB** sobre a M142-default (o leitor Parquet Rust + arrow-json — medido +9 MB no `.so` no spike).
-**118 MB de C++/httpfs removidos; ~9–12 MB de Rust permissivo no lugar.**
+> Os três tamanhos vêm de `docker images` no mesmo e2e-runner (build-do-zero); 712/887 e o `pg_duckdb.so` = 118 MB
+> (124.213.040 bytes, `stat`) foram medidos no harness M142 — ver `docs/benchmarks/m142-pgduckdb-tiering.md`.
+
+**Número autoritativo (same-env):** o lakehouse own-code custa **+12 MB** no build default (M143 724 − M142
+default 712, **ambos `docker images`, mesmo ambiente**). O `+9 MB` do `.so` medido no spike é uma corroboração
+**cross-ambiente** (o `.so` da imagem docker vs o `.so` buildado no host pgrx — toolchains distintas; ver a nota de
+ablação no spike doc), por isso o número de imagem `+12 MB` é o que citamos. Conclusão medida: **118 MB de
+C++/httpfs removidos; +12 MB de Rust permissivo no build default no lugar.**
 
 ## O que a remoção envolveu (jornada M142→M143)
 

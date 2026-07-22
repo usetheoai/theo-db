@@ -18,13 +18,13 @@ por own-code, e dobra o lakehouse no build default (a imagem `theodb-htap` é ap
 
 ## Decisões
 
-**D1 — Superfície de leitura own-code: `read_parquet`→SETOF jsonb + `olap`→tipado.** `theodb.read_parquet(path)`
+**D1 — Superfície de leitura own-code: `read_parquet`→SETOF jsonb + `olap`→tipado.** `public.read_parquet(path)`
 retorna `SETOF jsonb` (cada linha Parquet → um jsonb via arrow-json — cobre **todos** os tipos, incl. nested,
-sem a complexidade de `SETOF record` dinâmico no pgrx). `theodb.olap(path)` retorna o agregado M62 tipado
+sem a complexidade de `SETOF record` dinâmico no pgrx). `public.olap(path)` retorna o agregado M62 tipado
 (category/count/avg — paridade byte-a-byte vs pg_duckdb, provada). Reusa a DataFrame API + o runtime tokio
 in-extension do `df_executor` (Regra 9).
 
-**D2 — Escrita own-code + colapso do codegen.** `theodb.write_parquet(rel, path)` lê a tabela (SPI) → Arrow →
+**D2 — Escrita own-code + colapso do codegen.** `public.write_parquet(rel, path)` lê a tabela (SPI) → Arrow →
 `parquet::arrow::ArrowWriter` (arquivo único, atômico temp+rename). E o design "codegen" do M62 (funções que
 RETORNAVAM texto para o cliente rodar) **colapsa**: existia só porque "pg_duckdb proíbe DuckDB dentro de função" —
 restrição que some com own-code. `theodb.htap_refresh(rel)` escreve+registra e `theodb.olap(rel)` lê+agrega,
@@ -39,6 +39,8 @@ vs os **118 MB** do bundle DuckDB removido — ganho líquido enorme, decisão d
 (escalares e nested, via arrow-json). A escrita v1 cobre os escalares comuns (int2/4/8, float4/8, bool, text);
 tipo não-suportado na escrita → **erro tipado fail-closed** (legível via read_parquet; a escrita ampla de
 nested/timestamp/decimal é follow-on — measurement-first, grill R1).
+
+> **Least-privilege (review M143):** as primitivas `public.read_parquet`/`write_parquet`/`olap` (escrita/leitura de arquivo server-side) têm `REVOKE ALL FROM PUBLIC` (superuser-only, como o `COPY … TO file`) via `extension_sql!` no `parquet.rs`; a superfície de usuário `theodb.htap_refresh`/`olap` também é REVOKEd (sql/85). Um role sem privilégio não contorna chamando as primitivas direto.
 
 ## Alternativas rejeitadas
 
@@ -71,4 +73,4 @@ jsonb multi-tipo; escrita fail-closed em tipo não-suportado; `pg_extension` sem
 
 - ADR-0020/0056 (adoção + tier-out — emendados), ADR-0021/0023/0042.
 - `theodb_rs/src/parquet.rs` (o own-code), `sql/85-theodb-htap.sql` (a superfície reescrita),
-  `sql/theodb--1.5--1.6.sql` (o upgrade), `scripts/spike-parquet-validate.sh`/`scripts/m143-removal-validate.sh`.
+  `sql/theodb--1.5--1.6.sql` (o upgrade), `scripts/m143-removal-validate.sh` (a suíte de validação).

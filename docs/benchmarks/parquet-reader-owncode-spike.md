@@ -16,8 +16,8 @@ O `theodb_rs` consegue ler um Parquet externo **own-code** (via DataFusion + Arr
 |---|---|
 | **Correção (ground truth)** | ✅ own-code retorna `a\|2\|15`, `b\|1\|5` (dados conhecidos: `(a,10),(a,20),(b,5)`) |
 | **Paridade vs pg_duckdb** | ✅ **byte-a-byte idêntico** ao `SELECT * FROM duckdb.query($$…read_parquet…GROUP BY…$$)` |
-| **Custo de tamanho** | ✅ **+9 MB** (`theodb_rs.so` 62 → 71 MB) — o leitor Parquet Rust puro (parquet + arrow-json/csv/ipc) |
-| **vs bundle DuckDB** | **118 MB** (`pg_duckdb.so`) → o own-code é **~13× menor** |
+| **Custo de tamanho** | ✅ **+9 MB** (`theodb_rs.so` 62 → 71 MB) — o leitor Parquet Rust puro (parquet + arrow-json/csv/ipc). ⚠️ **cross-ambiente** (o 62 é o `.so` da imagem docker; o 71 é o `.so` buildado no host pgrx — toolchains distintas). A medição same-env autoritativa é o **delta de imagem +12 MB** (M143 724 vs M142 default 712, ambos `docker images`) — ver `m143-pgduckdb-removal.md`. |
+| **vs bundle DuckDB** | **118 MB** (`pg_duckdb.so` = 124.213.040 bytes, `stat` — medido no harness M142, `m142-pgduckdb-tiering.md`) → o own-code é ordem-de-grandeza menor |
 | **Sem C++/httpfs** | ✅ Rust puro (DataFusion/Arrow), Apache-2.0 (D1-clean); nenhuma superfície SSRF |
 
 ```

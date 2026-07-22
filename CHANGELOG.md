@@ -35,6 +35,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+- Least-privilege nas primitivas de lakehouse (M143 review HIGH): `public.read_parquet`/`write_parquet`/`olap` têm `REVOKE ALL FROM PUBLIC` (escrita/leitura de arquivo server-side é superuser-only, como `COPY … TO file`) — um role sem privilégio não escreve/lê arquivo arbitrário. `block_on` sob `HeldInterrupts` (longjmp-safe) e leitura limitada por `work_mem` (GreedyMemoryPool, sem OOM); `write_parquet` usa nome canônico via `$1::regclass` (injection-safe) + temp único por-backend
+
 ## [0.130.0] - 2026-07-22
 
 ### Added

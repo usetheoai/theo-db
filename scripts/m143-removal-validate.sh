@@ -26,7 +26,9 @@ done
 
 echo "== gate: pg_duckdb REMOVIDO =="
 [ "$(psql_c "SELECT count(*) FROM pg_extension WHERE extname='pg_duckdb'")" = "0" ] || fail "pg_duckdb presente"
-psql_c "SHOW shared_preload_libraries" | grep -q pg_duckdb && fail "pg_duckdb no shared_preload" || true
+# captura-depois-assere (não mascarar falha do psql com `&& fail || true`)
+SP="$(psql_c "SHOW shared_preload_libraries")"
+if echo "$SP" | grep -q pg_duckdb; then fail "pg_duckdb no shared_preload (got: $SP)"; fi
 echo "NO_PGDUCKDB"
 
 echo "== gate: M62 own-code (htap_refresh → olap) =="
@@ -49,6 +51,14 @@ err="$(docker exec "$CTR" psql -U postgres -tAc "SELECT public.write_parquet('ba
 echo "$err" | grep -qi "não suportado" || fail "write_parquet não falhou-fechado em timestamp (got: $err)"
 [ "$(psql_c "SELECT 1")" = "1" ] || fail "backend morto após erro (deveria estar vivo)"
 echo "WRITE_FAILCLOSED"
+
+echo "== gate: REVOKE (least-privilege) — non-superuser NÃO escreve/lê arquivo arbitrário =="
+docker exec "$CTR" psql -U postgres -c "CREATE ROLE lowpriv LOGIN" >/dev/null 2>&1 || true
+perr="$(docker exec "$CTR" psql -U lowpriv -d postgres -tAc "SELECT public.write_parquet('pg_class'::regclass::text, '/tmp/evil.parquet')" 2>&1 || true)"
+echo "$perr" | grep -qiE "permission denied|permissão negada" || fail "REVOKE não bloqueou lowpriv em write_parquet (got: $perr)"
+rerr="$(docker exec "$CTR" psql -U lowpriv -d postgres -tAc "SELECT public.read_parquet('/etc/passwd')" 2>&1 || true)"
+echo "$rerr" | grep -qiE "permission denied|permissão negada" || fail "REVOKE não bloqueou lowpriv em read_parquet (got: $rerr)"
+echo "REVOKE_OK (lowpriv bloqueado em read/write_parquet)"
 
 echo "== tamanho da imagem (pg_duckdb 118 MB fora; lakehouse own-code dentro) =="
 SZ="$(docker images --filter=reference="$TAG" --format '{{.Size}}' | head -1)"
