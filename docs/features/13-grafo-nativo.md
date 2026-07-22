@@ -72,7 +72,7 @@ antes. Verificado em `theodb_rs/src/graph.rs:352` (wrapper `theodb_rs/src/graph.
 # 5. Expandir a vizinhança em ≤H hops (`graph_expand`)
 
 ```sql
-SELECT node FROM theodb.graph_expand('friendship', ARRAY[4]::bigint[], 1);
+SELECT t.node FROM theodb.graph_expand('friendship', ARRAY[4]::bigint[], 1) AS t(node);
 ```
 
 `graph_expand(edge_rel text, seeds bigint[], max_hops int) -> SETOF bigint` carrega o CSR persistido (sem
