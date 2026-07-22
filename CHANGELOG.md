@@ -13,11 +13,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- **M140.1** (medição lexical — gate de rigor do M140, **MEDIDO E CONCLUÍDO**): artefato reproduzível `docs/benchmarks/m140-1-lexical-measurement.md` + dados `docs/benchmarks/m140-1-data/` + ADR `docs/adr/0052`. Veredito: a **BM25 own-engine (Tantivy) bate o baseline `ts_rank_cd`** em retrieval lexical puro (o caso do theo-lens) em dois eixos — BEIR nDCG@10 (scifact 0,661 vs 0,072; nfcorpus 0,308 vs 0,206, reproduzindo o M138) e logs HDFS reais known-item (direção robusta em todo m; **magnitude honesta modesta** no regime justo m=1-2 ~9-13%, com o gap enorme de m≥3 declarado como **artefato de semântica de query**, não headline). Storage: índice Tantivy **~3,5× menor** no footprint enxuto (até 5× vs o baseline fiel theo-lens; apples-to-apples review H2) → **ADR 0052 decide heap buffer-then-flush** (AM custom rejeitado por over-engineering). Harness: `theodb_bench/{knownitem,logcorpus,lexical_engines}.py` + `run_m140_1_lexical.py` + gate offline `test_m140_1_decision.py`. 30 testes verdes, ruff limpo. Caveat declarado: corpus log-proxy público (LogHub), validação em traces reais é o boundary M140.4/M141
 
 ### Changed
-- README atualizado ao estado real (estava em v0.35.0, ~90 releases atrás): corrige erros factuais (**PostgreSQL 18**, não 17; tipo `vector` **own-code**, não pgvector/vectorscale no CASCADE), reescreve "Como funciona"/"Por que" com os pilares atuais (vetor own-code, híbrido AI-native, colunar próprio, grafo nativo, HTAP), atualiza o estado medido do pilar vetorial para o veredito FINAL (M73/M74), e substitui o roadmap M0–M9 genérico pelo status real (69/71) + o planejado (M140.x, M141)
-- Roadmap: **M140 decomposto em M140.1–M140.4** (medição+decisão de arquitetura → crate núcleo sem pgrx → engine BM25 de produção com cache → MVCC/VACUUM/crash provados + consumidor theo-lens). Motivação: M139 deu GO e o consumidor real (theo-lens, busca lexical-pura em traces) justifica a engine own-code; ganhos medidos: índice 2,8× menor que pg_textsearch, MVCC/crash herdados do heap. Cada fatia entrega valor com release próprio
 
 ### Deprecated
 
@@ -26,6 +23,16 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 ### Security
+
+## [0.126.0] - 2026-07-22
+
+### Added
+- **M140.1** (medição lexical — gate de rigor do M140, **MEDIDO E CONCLUÍDO**): artefato reproduzível `docs/benchmarks/m140-1-lexical-measurement.md` + dados `docs/benchmarks/m140-1-data/` + ADR `docs/adr/0052`. Veredito: a **BM25 own-engine (Tantivy) bate o baseline `ts_rank_cd`** em retrieval lexical puro (o caso do theo-lens) em dois eixos — BEIR nDCG@10 (scifact 0,661 vs 0,072; nfcorpus 0,308 vs 0,206, reproduzindo o M138) e logs HDFS reais known-item (direção robusta em todo m; **magnitude honesta modesta** no regime justo m=1-2 ~9-13%, com o gap enorme de m≥3 declarado como **artefato de semântica de query**, não headline). Storage: índice Tantivy **~3,5× menor** no footprint enxuto (até 5× vs o baseline fiel theo-lens; apples-to-apples review H2) → **ADR 0052 decide heap buffer-then-flush** (AM custom rejeitado por over-engineering). Harness: `theodb_bench/{knownitem,logcorpus,lexical_engines}.py` + `run_m140_1_lexical.py` + gate offline `test_m140_1_decision.py`. 30 testes verdes, ruff limpo. Caveat declarado: corpus log-proxy público (LogHub), validação em traces reais é o boundary M140.4/M141
+
+
+### Changed
+- README atualizado ao estado real (estava em v0.35.0, ~90 releases atrás): corrige erros factuais (**PostgreSQL 18**, não 17; tipo `vector` **own-code**, não pgvector/vectorscale no CASCADE), reescreve "Como funciona"/"Por que" com os pilares atuais (vetor own-code, híbrido AI-native, colunar próprio, grafo nativo, HTAP), atualiza o estado medido do pilar vetorial para o veredito FINAL (M73/M74), e substitui o roadmap M0–M9 genérico pelo status real (69/71) + o planejado (M140.x, M141)
+- Roadmap: **M140 decomposto em M140.1–M140.4** (medição+decisão de arquitetura → crate núcleo sem pgrx → engine BM25 de produção com cache → MVCC/VACUUM/crash provados + consumidor theo-lens). Motivação: M139 deu GO e o consumidor real (theo-lens, busca lexical-pura em traces) justifica a engine own-code; ganhos medidos: índice 2,8× menor que pg_textsearch, MVCC/crash herdados do heap. Cada fatia entrega valor com release próprio
 
 ## [0.125.0] - 2026-07-22
 
