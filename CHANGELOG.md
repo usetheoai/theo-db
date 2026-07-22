@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Spike M139 (gate 1, atrás da feature `spike-lexical` — não entra no build shipado): `tantivy = "0.26"` (MIT) integra limpo na árvore de deps do `theodb_rs` (arrow 58/datafusion), 0 erros de build, e `cargo deny check licenses` verde (zero AGPL transitiva) — o primeiro gate do spike do `Directory`-sobre-PG retira o risco de integração da dependência (M139)
 
 ### Changed
 

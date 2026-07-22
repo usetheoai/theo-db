@@ -16,6 +16,10 @@ crate-type = ["cdylib"]
 default = ["pg18"]
 pg18 = ["pgrx/pg18", "pgrx-tests/pg18"]
 pg_test = []
+# M139 SPIKE — engine lexical própria sobre Tantivy. Atrás de feature: um spike que pode dar NO-GO NÃO incha o
+# crate shipado (build/imagem) com uma dep pesada antes do veredito GO. O código vive em `src/lexical/` e só
+# compila com `--features spike-lexical`. Promove a dep permanente só se o spike der GO (M140).
+spike-lexical = ["dep:tantivy"]
 
 [dependencies]
 pgrx = "=0.19.0"
@@ -29,6 +33,9 @@ serde_json = "1"
 # by build (`cargo tree -i arrow` single major). default-features=false to keep the cdylib lean (parsimony).
 datafusion = { version = "54", default-features = false }
 arrow = { version = "58", default-features = false }
+# M139 spike (opcional — só com feature `spike-lexical`). Tantivy 0.26 é MIT (D1-limpo, verificado); o deny.toml
+# barra qualquer AGPL transitiva. Dep OPCIONAL para não entrar no build shipado até o veredito GO.
+tantivy = { version = "0.26", optional = true }
 tokio = { version = "1", features = ["rt"], default-features = false }
 # M99 — columnar stripe compression (zstd). Already in the tree transitively via datafusion/arrow (parsimony rung 4
 # — reuse before adding); MIT/BSD-licensed, D1-clean. default-features=false keeps it lean.
