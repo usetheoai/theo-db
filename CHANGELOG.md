@@ -14,6 +14,20 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.131.0] - 2026-07-22
+
+### Added
+
 - Lakehouse Parquet own-code no default (M143, Fase 1): `theodb.read_parquet(path)`→SETOF jsonb (arrow-json, todos os tipos) + `theodb.olap(path)` tipado (paridade M62), via DataFusion/Arrow **sem DuckDB**; feature `spike-parquet` promovida a permanente
 - `theodb.write_parquet(rel, path)` own-code (M143, Fase 2): materializa uma tabela PG em Parquet via `parquet::arrow::ArrowWriter` (escrita atômica temp+rename); round-trip write→read→olap validado sem DuckDB; tipo não-suportado na escrita → erro tipado fail-closed
 - Superfície M62 reescrita own-code (M143, Fase 3): `theodb.htap_refresh(rel)` (escreve snapshot own-code + registra) e `theodb.olap(rel)` (lê+agrega own-code) — colapsam o codegen do pg_duckdb (o motivo do codegen, "DuckDB não roda em função", some com own-code). Sem `duckdb.query`/`COPY parquet`/guard. Extensão `theodb` bumpada 1.6 (`theodb--1.5--1.6.sql`)
@@ -21,17 +35,16 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - Spike (Fase 4) do leitor Parquet own-code (`theodb.read_parquet_agg_spike`, atrás da feature `spike-parquet`, off no build default): lê Parquet externo via DataFusion/Arrow (Apache-2.0, sem DuckDB) — veredito **VIÁVEL**, paridade byte-a-byte vs `pg_duckdb.read_parquet` a +9 MB no `.so` vs 118 MB do bundle DuckDB (`docs/benchmarks/parquet-reader-owncode-spike.md`)
 - Roadmap amended: added M143 Remoção total do `pg_duckdb` (lakehouse Parquet own-code no default) (`/roadmap-feature pgduckdb-total-removal`)
 
+
 ### Changed
 
 - **BREAKING:** a imagem `theodb-htap` (M142) foi **aposentada** — o lakehouse é own-code no build default (uma imagem só). `packaging/Dockerfile.htap` e o job CI `htap-image` removidos (M143, ADR-0057)
 
-### Deprecated
 
 ### Removed
 
 - **BREAKING:** `pg_duckdb` removido por completo (M143) — o último componente C++/httpfs do projeto. O lakehouse (ler/escrever/agregar Parquet externo) é agora own-code (DataFusion/Arrow); +9 MB no binário vs os 118 MB do bundle DuckDB. As funções codegen `theodb.htap_refresh_sql`/`olap_sql` (retornavam texto pg_duckdb) foram substituídas por `theodb.htap_refresh(rel)`/`theodb.olap(rel)` own-code (ADR-0057)
 
-### Fixed
 
 ### Security
 
