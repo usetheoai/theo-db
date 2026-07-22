@@ -32,17 +32,17 @@ jobs:
 
       - name: Lockfile drift (cargo metadata --locked)
         run: |
-          source "$HOME/.cargo/env"
+          export PATH="$HOME/.cargo/bin:$PATH"
           cargo metadata --format-version 1 --locked > /dev/null
 
       - name: Rustfmt (cargo fmt --check)
         run: |
-          source "$HOME/.cargo/env"
+          export PATH="$HOME/.cargo/bin:$PATH"
           cargo fmt -- --check
 
       - name: Clippy (-D warnings via .clippy_args baseline)
         run: |
-          source "$HOME/.cargo/env"
+          export PATH="$HOME/.cargo/bin:$PATH"
           # O arquivo único de args (padrão neon) — CI e local leem o MESMO baseline, sem drift.
           ARGS=$(grep -v '^#' .clippy_args | grep -v '^[[:space:]]*$' | tr '\n' ' ')
           echo "clippy args: $ARGS"
@@ -50,13 +50,13 @@ jobs:
 
       - name: Unused dependencies (cargo machete)
         run: |
-          source "$HOME/.cargo/env"
+          export PATH="$HOME/.cargo/bin:$PATH"
           command -v cargo-machete >/dev/null || cargo install --locked cargo-machete
           cargo machete
 
       - name: Doc rot (cargo doc)
         run: |
-          source "$HOME/.cargo/env"
+          export PATH="$HOME/.cargo/bin:$PATH"
           # `-D warnings` no rustdoc entra no burn-down junto com os warnings do clippy (mesmo backlog de 1056):
           # ligá-lo hoje travaria o build com doc-warnings pré-existentes. Sem -D, ainda pega ERROS de doc
           # (links quebrados, código de exemplo que não compila). Promover a -D warnings quando o burn-down zerar.

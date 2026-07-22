@@ -55,10 +55,6 @@ jobs:
       - name: cassert-smoke — 4 AMs + columnar sob Assert() (classe #143)
         run: |
           set -euo pipefail
-          PGINST="$HOME/.pgrx/18.4/pgrx-install"
-          # initdb recusa root; o job roda como root, então dropar para pgtest (padrão M137). pgtest precisa ler
-          # o install do pgrx e o script.
-          chmod -R o+rX "$PGINST"; chmod o+x "$HOME"
-          cp scripts/cassert-smoke.sh /tmp/cassert-smoke.sh && chmod o+rx /tmp/cassert-smoke.sh
-          id pgtest >/dev/null 2>&1 || useradd -m pgtest
-          runuser -u pgtest -- env PGINST="$PGINST" PGPORT=28941 bash /tmp/cassert-smoke.sh
+          # O job roda como ghrunner (não-root), então `initdb` roda direto — sem o dança runuser/pgtest que só
+          # o teste-como-root exigia. PGINST é o pgrx do próprio ghrunner (compilado com --enable-cassert).
+          PGINST="$HOME/.pgrx/18.4/pgrx-install" PGPORT=28941 bash scripts/cassert-smoke.sh
