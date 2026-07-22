@@ -15,6 +15,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 ### Changed
+- Roadmap: **M140 decomposto em M140.1–M140.4** (medição+decisão de arquitetura → crate núcleo sem pgrx → engine BM25 de produção com cache → MVCC/VACUUM/crash provados + consumidor theo-lens). Motivação: M139 deu GO e o consumidor real (theo-lens, busca lexical-pura em traces) justifica a engine own-code; ganhos medidos: índice 2,8× menor que pg_textsearch, MVCC/crash herdados do heap. Cada fatia entrega valor com release próprio
 
 ### Deprecated
 

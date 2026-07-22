@@ -2309,30 +2309,105 @@ O risco **não está no BM25** — está em fazer o Tantivy viver dentro do banc
 **Prior art:** ParadeDB `pg_search/src/index/directory/mvcc.rs`, `postgres/storage/{custom_rmgr,xlog}.rs`, `index/merge_policy.rs` (**AGPL — estudar, nunca copiar**, mesmo posicionamento do VectorChord); nossas próprias suítes `theodb_rs/isolation/crash*.sh` como molde do teste de crash; M83/M98/M107 como precedente de spike-como-gate.
 
 ---
-## M140 — [ ] Engine lexical própria sobre Tantivy + crate núcleo sem pgrx *(gated M139)*
+## M140 — Engine lexical própria sobre Tantivy (decomposto em M140.1–M140.4 após o GO do M139)
 
-> Added 2026-07-21 (`/roadmap-feature engine-lexical-propria`). Grill: `knowledge-base/grills/engine-lexical-propria-feature-grill.md`.
+> Added 2026-07-21; **decomposto 2026-07-22** (`/roadmap-feature`, formato) após o M139 dar **GO** (v0.125.0) e o
+> dado do consumidor real chegar: **theo-lens** (observabilidade — busca em traces) é um workload **lexical-puro**
+> onde BM25 bate o `ts_rank` (M138, perna isolada, ~1,6× em NFCorpus) — diferente do híbrido, onde o M138 mediu
+> que BM25 **não** move a fusão. A aposta é a "vantagem injusta" do ecossistema theo: **BM25 + vetor + híbrido
+> numa única store transacional in-PG, permissiva** (o ParadeDB tem, mas é **AGPL** — inelegível). O spike (M139)
+> mediu os ganhos concretos: índice **2,8× menor** que pg_textsearch, MVCC/crash **herdados do heap do PG** (sem
+> rmgr/página custom → O(milhares de LoC), não os 105k do ParadeDB). O DoD original (índice como **index AM**) é
+> **anterior ao spike** e vira uma **decisão de arquitetura medida** (M140.1): heap buffer-then-flush vs index AM.
+>
+> **Objective (guarda-chuva):** assumir a perna lexical em vez de alugá-la, com own-code permissivo (Tantivy MIT
+> + Directory nosso, sem fork). Reconhecimento honesto (M138): o ganho **não** é o retrieval híbrido — é a busca
+> **lexical standalone** (theo-lens/RAG-keyword), o **moat de consolidação** in-PG, e **features** (phrase/fuzzy/
+> facet) que o PG-FTS não tem. As fatias abaixo entregam valor incremental; cada uma é um milestone com release.
 
-**Objective:** assumir a perna lexical em vez de alugá-la. O North Star foi reposicionado (ADR-0033/0035) porque superioridade de QPS vetorial sobre o ScaNN foi **medida como não-alcançável** por extensão permissiva; o lugar onde podemos ser genuinamente superiores é a **superfície AI-native híbrida** — e isso exige as duas pernas nossas, não uma alugada.
+## M140.1 — [ ] Medição + decisão de arquitetura de storage lexical *(gated M139 `[x]`)*
 
-Inclui a extração do **crate núcleo sem pgrx** — e aqui a justificativa não é estética: hoje **98%** do código (30.892 de 31.516 LoC) está atrás do pgrx, e **54 testes** não rodam porque `cargo pgrx test` não linka na droplet. Uma integração Tantivy tem superfície pura grande (parser de query, scoring, tokenizers) que precisa ser testável sem banco. O ParadeDB provou o padrão: o único crate deles sem pgrx é `tokenizers` — e **81%** do `pg_search` toca pgrx, ou seja, extrair "a engine inteira" seria copiar uma forma que eles próprios não têm.
+**Objective:** cravar, com número, (a) que a BM25 own-engine bate `ts_rank` **e** `pg_textsearch` em nDCG@10 num
+corpus de **traces/logs reais do theo-lens** (não só BEIR) — o consumidor real —, e (b) qual storage a engine
+usa: **heap buffer-then-flush** (o M139 provou: MVCC/WAL/crash de graça, ~milhares de LoC) vs **index AM custom**
+(o DoD original do M140, à la ParadeDB). O spike sugere heap; este milestone **decide medindo**, não presumindo.
 
 **Definition of done:**
 
-- [ ] Índice BM25 próprio exposto como **index AM** (`CREATE INDEX ... USING <am>`), com `ambuild`/`aminsert`/`amgettuple`/`ambulkdelete`/`amvacuumcleanup`/`amcostestimate`.
-- [ ] **MVCC, VACUUM e crash-safety provados** pelas nossas suítes de isolamento e crash contra o binário shipado — o mesmo padrão do M99/M135, não uma versão mais fraca.
-- [ ] **Bate a linha de base do M138** (`pg_textsearch`) em nDCG@10 no mesmo corpus, ou o milestone reporta honestamente que não bateu.
-- [ ] Crate núcleo **sem dependência de pgrx** no `Cargo.toml` (esse é o teste), com os testes puros rodando em `cargo test` — incluindo os 54 hoje presos.
-- [ ] **ADR-1:** reconcilia com o **ADR-0009** (`theodb-rs-api-surface-single-module`), que escolheu módulo único deliberadamente. Sem isso, o split lê como reversão não registrada.
-- [ ] **ADR-2:** supersede a exceção permissiva do ADR-0013 para BM25 — a premissa *"não há peça own-code permissiva que resolva"* deixou de valer quando o Tantivy (MIT) entrou em cena. Inclui o plano de saída do `pg_textsearch` para quem adotou no M138.
+- [ ] Artefato em `docs/benchmarks/` com BM25(Tantivy) vs `ts_rank` vs `pg_textsearch` no MESMO corpus de traces + BEIR, nDCG@10 + teste pareado. **Bate a baseline do M138 ou reporta honestamente que não** (DoD-3 do M140).
+- [ ] **ADR** decidindo o storage (heap vs index AM) com o custo/benefício medido — reconcilia o DoD "index AM" com o achado do M139 (heap). Se heap: registra por que o AM custom seria over-engineering (Rule 9/anti-YAGNI).
+- [ ] Tamanho do índice + latência de ingest medidos nos dois candidatos, no corpus de traces.
 
-**Dependencies:** M139 `[ ]` (o gate — NO-GO fecha este milestone antes de abrir) e M138 `[ ]` (a baseline a bater).
+**Dependencies:** M139 `[x]` (GO — a viabilidade e a arquitetura buffer-then-flush).
 
-**Risks:** (a) **supersede decisão registrada** — a exceção do ADR-0013 e a escolha do ADR-0009; ambas exigem ADR explícito, nunca reversão silenciosa. (b) escopo: o `pg_search` tem 105k LoC; mesmo um subconjunto honesto (sem faceting/highlight/proximity) é o maior milestone já tentado aqui — mitigação: o escopo real é **derivado do M139**, não estimado agora.
+**Risks:** (a) o corpus de traces pode favorecer o `ts_rank` mais do que BEIR sugere → é o ponto de medir nos dados reais antes de construir; honest-negative aqui **cancela** o M140 barato. (b) a decisão heap-vs-AM é irreversível de fato → por isso é ADR medido, não intuição.
 
-**Boundary honesto:** é a aposta estratégica desta rodada, e a mais cara. Só abre se o M139 disser GO.
+**Boundary honesto:** é o **gate de rigor** do M140. Se a BM25 não bater a baseline nos dados do theo-lens, o M140 não se justifica e para aqui — barato.
 
-**Prior art:** M139 (o gate); ParadeDB como referência estrutural **AGPL study-only**; Tantivy MIT (`quickwit-oss/tantivy`); ADR-0009 e ADR-0013 (as decisões a reconciliar); M99/M100/M115 como precedente nosso de AM+CustomScan próprios.
+**Prior art:** M139 (spike GO, `docs/adr/0051`), M138 (baseline pg_textsearch + o método de significância), theo-lens `packages/core/.../trace-read-repository.ts` (o `ts_rank`/`websearch_to_tsquery` atual a bater).
+
+## M140.2 — [ ] Crate núcleo lexical sem pgrx (superfície pura testável) *(gated M140.1)*
+
+**Objective:** extrair a superfície **pgrx-free** da engine (o `Directory`/`SegmentStore`, o wiring de query/
+scoring/tokenizer) para um crate próprio, testável com `cargo test` stock — o M139 já provou que o núcleo é
+pgrx-free (o teste in-crate falha no link de símbolos PG; o standalone passa). Destrava a classe dos **54 testes
+hoje presos** (`cargo pgrx test` não linka na droplet).
+
+**Definition of done:**
+
+- [ ] Crate núcleo **sem dependência de pgrx** no `Cargo.toml` (esse é o teste); os testes puros rodam em `cargo test`, incluindo os que hoje não linkam.
+- [ ] **ADR-1:** reconcilia com o **ADR-0009** (`theodb-rs-api-surface-single-module`) — por que o núcleo lexical merece crate separado sem reverter a escolha de módulo único do resto. Sem isso, o split lê como reversão não registrada.
+- [ ] `theodb_rs` consome o crate núcleo atrás da feature; o build shipado e os gates de CI (M136) seguem verdes.
+
+**Dependencies:** M140.1 (a decisão de arquitetura define o que entra no núcleo).
+
+**Risks:** (a) supersede parcialmente o ADR-0009 → exige o ADR-1 explícito, nunca reversão silenciosa. (b) o boundary núcleo↔pgrx pode vazar (ex.: um tipo pgrx no núcleo) → o teste do `Cargo.toml` sem pgrx é o gate objetivo.
+
+**Boundary honesto:** é fundação/testabilidade, não capacidade de produto. Mas destrava o desenvolvimento testável das fatias seguintes (o M139 mostrou a barreira de link pgrx).
+
+**Prior art:** M139 (`src/lexical/` já é pgrx-free por design), ParadeDB (o único crate sem pgrx deles é `tokenizers` — extrair "a engine inteira" seria copiar forma que eles não têm), ADR-0009.
+
+## M140.3 — [ ] Engine BM25 de produção own-code (cache + superfície) *(gated M140.2)*
+
+**Objective:** a engine usável em produção: o cache do `Directory` que **mata o reload-do-índice-por-query** (o
+único "naive" do spike — o M139 recarregava o índice inteiro a cada busca), e a superfície own-code decidida na
+M140.1 (index AM `USING <am>` **ou** função `bm25_search` sobre heap). Supersede a exceção permissiva do ADR-0013
+(o Tantivy MIT tornou own-code permissivo viável), com plano de saída do `pg_textsearch`.
+
+**Definition of done:**
+
+- [ ] Superfície de busca BM25 own-code operante (a forma da M140.1: AM ou `bm25_search`), com **cache do Directory** — a latência não paga mais o reload por-query (medir vs o spike).
+- [ ] **Bate a baseline do M138** (`pg_textsearch`) em nDCG@10 no mesmo corpus, agora com a engine de produção (confirma o número da M140.1 na forma final).
+- [ ] **ADR-2:** supersede a exceção do ADR-0013 para BM25 + plano de saída do `pg_textsearch` para quem o adotou.
+
+**Dependencies:** M140.2 (o núcleo pgrx-free onde a query/scoring vive).
+
+**Risks:** (a) a consistência do cache sob escrita concorrente (invalidação) → cobrir com teste; (b) escopo — sem faceting/highlight/proximity nesta fatia (declarado fora), senão vira o milestone-monstro que o M140 alertava.
+
+**Boundary honesto:** entrega a **capacidade**: BM25 own-code, usável, no banco. Merge/VACUUM/crash provados vêm na M140.4.
+
+**Prior art:** M139 (buffer-then-flush + heap), Tantivy MIT (IndexReader/QueryParser), ADR-0013, M99/M100/M115 (precedente de AM+CustomScan próprios se a M140.1 escolher AM).
+
+## M140.4 — [ ] MVCC/VACUUM/crash provados + primeiro consumidor (theo-lens) *(gated M140.3)*
+
+**Objective:** provar a robustez de produção da engine pelas **nossas suítes de isolamento+crash contra o binário
+shipado** (o mesmo padrão do M99/M135, não uma versão mais fraca), manter a **disciplina de thread-safety** do
+spike (#153: o probe-de-threads vira teste de regressão de CI; `panic=unwind` como pré-requisito), e ligar o
+**primeiro consumidor real**: a busca de traces do **theo-lens** sobre a engine, em TheoDB self-hosted.
+
+**Definition of done:**
+
+- [ ] MVCC, VACUUM e crash-safety **provados** pelas suítes de isolamento (`theodb_rs/isolation/`) + crash (`crash*.sh`) contra o binário shipado.
+- [ ] Disciplina de thread-safety (#153): o probe `probe_which_threads_call_directory` no CI; nenhum toque em `pg_sys`/SPI/`am/page` no caminho das threads do Tantivy; `panic=unwind` gateado.
+- [ ] **theo-lens** consome a busca BM25 do TheoDB (a busca de traces migra do `ts_rank` para a engine) — primeiro consumidor real, com evidência. Alimenta o anchor do **M141** (dogfood `running`).
+
+**Dependencies:** M140.3 (a engine de produção) e theo-lens (o consumidor).
+
+**Risks:** (a) consistência flush-sob-merge em escala (#153) — o risco de correção residual do spike; (b) a migração do theo-lens é churn de packaging/docs → aceito conscientemente, é o que transforma "engine" em "consumidor real".
+
+**Boundary honesto:** fecha o M140 com a engine **provada e consumida**. O `running` de 30 dias é o **M141** (calendário), não este milestone — mas este entrega o anchor.
+
+**Prior art:** M99/M135 (padrão isolamento+crash contra binário shipado), #153 (a disciplina), theo-lens (o consumidor), `dogfood-golden-rule.md` (o anchor do M141).
 
 ---
 ## M141 — [ ] Dogfood `running`: theo-data em produção sobre TheoDB self-hosted *(continuação do M124)*
