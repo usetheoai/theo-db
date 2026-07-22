@@ -21,6 +21,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Removed
 
 ### Fixed
+- Build: `Makefile` `PARTS` estava sem `sql/85-theodb-htap.sql`, divergindo do `Dockerfile` — o install base gerado por `make theodb-build`/`make install` ficava sem as funções `theodb.htap_refresh`/`theodb.olap` (a imagem Docker shipada nunca foi afetada; drift só no caminho de build local/regress)
 
 ### Security
 
