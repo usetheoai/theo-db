@@ -37,15 +37,15 @@ echo "$rows" | grep -q '^a|2|15' && echo "$rows" | grep -q '^b|1|5' || fail "ola
 echo "M62_OWNCODE"
 
 echo "== gate: read_parquet own-code multi-tipo (round-trip via write_parquet) =="
-psql_c "SELECT theodb.write_parquet('lh'::regclass::text, '/var/lib/postgresql/htap/lh_rt.parquet')" >/dev/null || fail "write_parquet falhou"
-jrow="$(psql_c "SELECT j FROM theodb.read_parquet('/var/lib/postgresql/htap/lh_rt.parquet') j ORDER BY (j->>'n')::int LIMIT 1")"
+psql_c "SELECT public.write_parquet('lh'::regclass::text, '/var/lib/postgresql/htap/lh_rt.parquet')" >/dev/null || fail "write_parquet falhou"
+jrow="$(psql_c "SELECT j FROM public.read_parquet('/var/lib/postgresql/htap/lh_rt.parquet') j ORDER BY (j->>'n')::int LIMIT 1")"
 echo "$jrow" | grep -q '"category": "a"' && echo "$jrow" | grep -q '"flag": true' && echo "$jrow" | grep -q '"n": 1' \
   || fail "read_parquet jsonb multi-tipo (got: $jrow)"
 echo "READ_MULTI ($jrow)"
 
 echo "== gate: write_parquet fail-closed (tipo não-suportado) =="
 docker exec "$CTR" psql -U postgres -c "CREATE TABLE bad(ts timestamp); INSERT INTO bad VALUES (now())" >/dev/null
-err="$(docker exec "$CTR" psql -U postgres -tAc "SELECT theodb.write_parquet('bad'::regclass::text, '/tmp/bad.parquet')" 2>&1 || true)"
+err="$(docker exec "$CTR" psql -U postgres -tAc "SELECT public.write_parquet('bad'::regclass::text, '/tmp/bad.parquet')" 2>&1 || true)"
 echo "$err" | grep -qi "não suportado" || fail "write_parquet não falhou-fechado em timestamp (got: $err)"
 [ "$(psql_c "SELECT 1")" = "1" ] || fail "backend morto após erro (deveria estar vivo)"
 echo "WRITE_FAILCLOSED"
