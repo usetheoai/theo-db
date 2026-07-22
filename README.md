@@ -5,8 +5,9 @@
 TheoDB é um banco de dados open-source e 100% compatível com PostgreSQL, empacotado como uma
 edição única para download que roda no seu laptop, on-premises, na borda, em qualquer nuvem,
 em Kubernetes ou bare metal. Num só pacote você tem busca vetorial + híbrida (BM25+vetor) para
-aplicações de IA, grafo para GraphRAG, e analytics colunar sobre dados transacionais vivos —
-tudo em SQL, com código próprio, sem licença por vCPU e sem lock-in.
+aplicações de IA, grafo para GraphRAG, analytics colunar sobre dados transacionais vivos e
+lakehouse Parquet own-code (sem DuckDB) — tudo em SQL, com código próprio, sem licença por vCPU
+e sem lock-in.
 
 > ⚠️ **Status:** em desenvolvimento ativo, ainda **pré-1.0** (releases 0.x — ver [`CHANGELOG.md`](./CHANGELOG.md)).
 > Sem afirmação de "production-ready" até haver evidência de uso sustentado (`public-copy.md`).
@@ -113,8 +114,15 @@ Passo a passo das 12 capacidades em [`docs/quickstart.md`](./docs/quickstart.md)
 ## Status & roadmap
 
 > Estado real, não promessa. A lista completa e viva de milestones está em [`ROADMAP.md`](./ROADMAP.md)
-> (**69 de 71 entregues** até a v0.125.0). Nada aqui é data ou promessa; performance é sempre medida em
-> [`docs/benchmarks/`](./docs/benchmarks/). Continua **pré-1.0** (ver o disclaimer de status acima).
+> (**75 de 76 entregues** até a v0.131.0 — só falta o M141, o dogfood de produção). Nada aqui é data ou
+> promessa; performance é sempre medida em [`docs/benchmarks/`](./docs/benchmarks/). Continua **pré-1.0**
+> (ver o disclaimer de status acima).
+>
+> **Nível de maturidade (honesto):** **Estágio 1 (Experimental) entrando no 2 (Preview)** — invariantes
+> documentados, regressão automatizada, 100+ benchmarks reproduzíveis, cadeia de upgrade e crash-safety
+> provadas no binário shipado. **Não é production-ready**: falta a única coisa que benchmark não dá — uso
+> sustentado em produção real (o M141, ≥30 dias + ≥2 operadores). Pela `dogfood-golden-rule`, esse dogfood é
+> o gate para sequer começar a alegar production-ready.
 
 **O que já existe e foi medido:**
 
@@ -125,10 +133,14 @@ Passo a passo das 12 capacidades em [`docs/quickstart.md`](./docs/quickstart.md)
 - **Grafo nativo** — engine de grafo persisted-CSR para GraphRAG (`theodb.graph_*`).
 - **Fundação de banco** — **PostgreSQL 18**, cadeia de upgrade própria (`ALTER EXTENSION ... UPDATE`), gates mecânicos de qualidade no CI (clippy `-D warnings`, rustfmt, Postgres `--enable-cassert`, license-gate D1, pgspot).
 
-**O que estamos construindo agora:**
+**Concluído recentemente (medido):**
 
-- **M140.1–M140.4 — engine lexical própria** sobre Tantivy (MIT), in-PG, transacional. Um spike (M139) já **provou a viabilidade** (MVCC + WAL + crash-real medidos; índice 2,8× menor que `pg_textsearch`) — a produção é sequenciada: medição+arquitetura → crate núcleo sem pgrx → engine BM25 com cache → MVCC/VACUUM/crash provados + primeiro consumidor (o [theo-lens](../theo-lens/), observabilidade). O ganho honesto é a **busca lexical standalone** e o **moat de consolidação** (BM25+vetor+híbrido numa store transacional aberta), **não** o retrieval híbrido (o M138 mediu que BM25 não move a fusão dominada pelo vetor).
-- **M141 — dogfood `running`** — mover uma capability theo-data (theo-rag/theo-memory/theo-lens) para produção sobre TheoDB self-hosted por ≥30 dias, com evidência. É o gate real para reivindicar production-ready (nenhum benchmark substitui uso real).
+- **Engine lexical própria (M140)** — BM25 own-code sobre Tantivy (MIT), in-PG e transacional (MVCC/WAL/crash provados no binário shipado); ganho honesto na busca lexical standalone + moat de consolidação, **não** no retrieval híbrido dominado pelo vetor (M138).
+- **Remoção total do `pg_duckdb` (M142→M143)** — o lakehouse (ler/escrever/agregar Parquet) virou **own-code** (DataFusion/Arrow, sem DuckDB) no build default; o **último componente C++/httpfs saiu** do projeto. 118 MB de C++ fora, +12 MB de Rust dentro.
+
+**O único que falta (não é engenharia):**
+
+- **M141 — dogfood `running`** — mover uma capability theo-data (theo-rag/theo-memory/theo-lens) para produção sobre TheoDB self-hosted por ≥30 dias, com ≥2 operadores e evidência. É o gate real para reivindicar production-ready (nenhum benchmark substitui uso real) — corre no calendário, não em código.
 
 Nota de escopo: HA/replicação/control-plane e deploy K8s **não fazem parte deste repositório** — o foco é o
 banco de dados (o engine + a extensão). Referências científicas de cada pilar abaixo.
