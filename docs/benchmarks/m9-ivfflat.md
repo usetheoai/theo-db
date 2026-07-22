@@ -1,6 +1,6 @@
 # M9 — IVFFlat / IVF vector index: measured recall × QPS (vs HNSW)
 
-**Date:** 2026-06-28 · **Milestone:** M9 (closes `docs/features/03-indice-ivfflat.md` + `04-indice-ivf.md`)
+**Date:** 2026-06-28 · **Milestone:** M9 (closes `docs/features/03-indice-ivfflat.md`)
 **Status:** measured (reproducible) · **Engine:** `theo-db:dev` (PostgreSQL + pgvector 0.8.x)
 
 > Honesty (CLAUDE.md Rule 5/7): every number below is a real harness run against a live container.

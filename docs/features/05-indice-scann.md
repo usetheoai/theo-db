@@ -1,21 +1,19 @@
 # Criar um índice ScaNN
 
-> **⚖️ Decisão (M14, 2026-06-28) — NO-FORK:** TheoDB **não** constrói o access method `theodb_scann` literal.
-> O índice ScaNN-quality **entregue** é o **StreamingDiskANN** (`pgvectorscale`, M2) — substituto permissivo
-> que atinge a barra ScaNN-quality (recall@10 medido **0.978** ≥ 0.90 em gaussiano sintético dim=32, runs=3;
-> decisão **provisional** até run em dataset real `--hdf5`; `docs/benchmarks/m14-scann-fork-decision.md`).
-> A decisão é gateada por evidência (measurement-first / anti-sunk-cost) — ver
+> **⚖️ Decisão (M14, 2026-06-28) — NO-FORK:** TheoDB **não** constrói o access method `theodb_scann` literal,
+> gated por benchmark (measurement-first / anti-sunk-cost) — ver
 > [`docs/adr/0004-scann-fork-decision.md`](../adr/0004-scann-fork-decision.md), que define o gatilho que
-> reabriria o fork. A superfície `theodb_scann` literal abaixo permanece como API-alvo (gated, não entregue);
-> use `USING diskann` (pgvectorscale) hoje.
+> reabriria o fork. A superfície `theodb_scann` / `USING scann (…)` desta página permanece como **API-alvo
+> condicional (gated, não entregue)**.
 
-> **Status:** ⚖️ **NO-FORK (decisão M14) — capacidade ScaNN-quality entregue via `USING diskann`.** O access method
-> literal `theodb_scann` **não é implementado por decisão explícita** (não "ainda não feito"), gated por benchmark —
-> ver [`docs/adr/0004-scann-fork-decision.md`](../adr/0004-scann-fork-decision.md) e
-> [`docs/benchmarks/m14-scann-fork-decision.md`](../benchmarks/m14-scann-fork-decision.md). A qualidade ScaNN está
-> disponível hoje via **StreamingDiskANN** (extensão `vectorscale`, `USING diskann`) — provado por
-> `benchmarks/tests/test_harness.py::test_build_config_diskann_only` + `benchmarks/tests/test_sbq_index.py`.
-> A superfície `USING scann (…)` desta página permanece como API-alvo condicional (reabre se um benchmark justificar).
+> **Status (atual, pós-M70):** a capacidade **ScaNN-quality entregue** é o **`theodb_ivfflat` own-code** —
+> `CREATE INDEX … USING theodb_ivfflat (col …_ops) WITH (lists = N, pq_subspaces = M)` — que combina listas
+> invertidas (IVF) com quantização Asymmetric-Hashing e scan batched (LUT16/`pshufb`), atingindo **paridade de
+> recall** classe-pgvector. O `pgvector`/`pgvectorscale` (`USING diskann`) foram **removidos no M70** — o tipo
+> `vector` e os AMs ANN são 100% own-code (`theodb_rs`); qualquer instrução para "usar `USING diskann` hoje" é
+> histórica e não se aplica mais. Veredito de performance **medido** (M73/M74, `docs/adr/0035`): superar o
+> ScaNN/AlloyDB em **QPS vetorial** é estruturalmente **não-alcançável** por extensão PG permissiva (gap de
+> paradigma ~25–44× @ 0.99) — a entrega é paridade de recall + memória, nunca "mais rápido que o ScaNN".
 
 Esta página cobre a criação de índices `ScaNN` no TheoDB, incluindo os modos automático e manual, os quantizadores suportados, parâmetros de árvore, manutenção do índice e exemplos de consulta vetorial.
 
@@ -29,7 +27,7 @@ Esta página cobre a criação de índices `ScaNN` no TheoDB, incluindo os modos
 Quantization habilitado via a reloption `pq_subspaces`:
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS theodb CASCADE;
 
 CREATE INDEX products_scann_like_idx
 ON products
@@ -39,8 +37,8 @@ USING theodb_ivfflat (
 WITH (
     lists = 1000,
     pq_subspaces = 16,
-    pq_bits = 8,
-    separate_storage = true
+    pq_bits = 4,
+    separate_storage = 1
 );
 
 SELECT *

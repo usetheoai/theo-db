@@ -5,20 +5,20 @@
 > Uso: `CREATE INDEX … USING theodb_hnsw (embedding theodb_hnsw_l2_ops)` + `SET theodb_hnsw.ef_search = N`. Desde o
 > M35 a persistência é page-native com travessia on-demand (grafo em `theodb_rs/src/ann/hnsw.rs`, páginas em
 > `theodb_rs/src/am/hnsw_page.rs`). Provado por `benchmarks/tests/test_hnsw_structured.py`. Benchmark medido:
-> `docs/benchmarks/m35-hnsw-structured-scan.{md,json}` (~100 QPS @ recall 0.98 a 1M; O(N)→O(ef·M)). Coexiste com o
-> HNSW do pgvector. Regra TheoDB 5: só há afirmação de desempenho com link para o artefato de benchmark.
+> `docs/benchmarks/m35-hnsw-structured-scan.{md,json}` (~100 QPS @ recall 0.98 a 1M; O(N)→O(ef·M)), com paridade
+> de recall vs o HNSW do pgvector (baseline). Regra TheoDB 5: só há afirmação de desempenho com link para o artefato de benchmark.
 
 Esta página cobre a criação de índices vetoriais HNSW no TheoDB — todas as consultas SQL, parâmetros e funcionalidades da indexação HNSW, das funções de distância aos parâmetros de construção do grafo.
 
 ---
 
-# 1. Instalar a extensão `vector`
+# 1. Instalar a extensão `theodb`
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS theodb CASCADE;
 ```
 
-Instala a extensão `pgvector` utilizada pelo TheoDB para armazenar vetores e criar índices HNSW.
+Instala a extensão `theodb` (own-code), que provê o tipo `vector` e o AM `theodb_hnsw`. O `pgvector` foi removido no M70.
 
 ---
 
@@ -29,10 +29,6 @@ CREATE INDEX my_hnsw_index
 ON products
 USING theodb_hnsw (
     description_embedding theodb_hnsw_cosine_ops
-)
-WITH (
-    m = 16,
-    ef_construction = 64
 );
 ```
 
@@ -41,9 +37,8 @@ usando o access method **próprio** do TheoDB (`theodb_hnsw`). Opclass default �
 `theodb_hnsw_l2_ops`; use `theodb_hnsw_cosine_ops` / `theodb_hnsw_ip_ops` para
 cosseno / produto interno.
 
-> **Coexistência:** o TheoDB também expõe o HNSW do pgvector (`USING hnsw (…
-> vector_cosine_ops)`). Essa superfície mira o AM do pgvector, **não** o AM próprio
-> `theodb_hnsw`.
+> **Nota (pós-M70):** o `pgvector` (a superfície `USING hnsw` nativa) foi **removido** — hoje só existe o
+> AM own-code `USING theodb_hnsw`. O tipo `vector` também é own-code (`theodb_rs`).
 
 ---
 
@@ -119,38 +114,28 @@ Cria índice baseado em similaridade cosseno.
 
 ---
 
-# 9. Configurar parâmetro `m`
+# 9. Parâmetros de construção do grafo (`m`, `ef_construction`)
 
-```sql
-WITH (
-    m = 16
-)
-```
+No `theodb_hnsw`, `m` (máximo de conexões por nó — **fixo em 16**) e `ef_construction`
+(lista de candidatos na construção — **fixo em 64**) **não** são opções de `WITH`: são
+constantes do build (o `ef_construction` só muda via variável de ambiente
+`THEODB_HNSW_EF_CONSTRUCTION`, para benchmarks). Passar `WITH (m = …)` ou
+`WITH (ef_construction = …)` faz o `CREATE INDEX` falhar com `unrecognized parameter`.
 
-Define o número máximo de conexões por nó no grafo.
-
-Quanto maior:
-
-* maior recall;
-* maior uso de memória;
-* maior tempo de construção.
+As opções de `WITH` que o `theodb_hnsw` realmente aceita são de **quantização/storage**
+(compartilhadas com os outros AMs): `sbq_bits`, `pq_subspaces`, `pq_bits` (só `4`),
+`aq_threshold`, `separate_storage`, `refine`. Sem elas, o índice guarda os vetores em f32.
 
 ---
 
-# 10. Configurar `ef_construction`
+# 10. Ajustar a qualidade da busca (`ef_search`)
+
+O knob que você ajusta é em **tempo de query**, não de build — quanto maior, maior o recall
+e a latência:
 
 ```sql
-WITH (
-    ef_construction = 64
-)
+SET theodb_hnsw.ef_search = 100;   -- suba para mais recall
 ```
-
-Define o tamanho da lista de candidatos durante a construção do grafo.
-
-Valores maiores:
-
-* aumentam qualidade do índice;
-* aumentam tempo de criação.
 
 ---
 
@@ -161,14 +146,13 @@ CREATE INDEX products_hnsw
 ON products
 USING theodb_hnsw (
     embedding theodb_hnsw_cosine_ops
-)
-WITH (
-    m = 32,
-    ef_construction = 128
 );
+
+-- mais recall na consulta:
+SET theodb_hnsw.ef_search = 100;
 ```
 
-Cria um índice HNSW otimizado para maior recall.
+Cria um índice HNSW e ajusta o recall pela busca (`ef_search`), não pelo build.
 
 ---
 
@@ -410,17 +394,15 @@ Os menores valores representam maior similaridade.
 # 30. Fluxo completo recomendado
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS theodb;
 
 CREATE INDEX products_hnsw
 ON products
 USING theodb_hnsw (
     embedding theodb_hnsw_cosine_ops
-)
-WITH (
-    m = 16,
-    ef_construction = 64
 );
+
+SET theodb_hnsw.ef_search = 100;
 
 SELECT *
 FROM products
@@ -431,7 +413,7 @@ LIMIT 10;
 
 Fluxo completo de uso do HNSW no TheoDB:
 
-1. instalar `pgvector`;
+1. instalar a extensão `theodb` (provê o tipo `vector` + os AMs own-code — sem pgvector, removido no M70);
 2. criar índice HNSW;
 3. gerar embedding da consulta;
 4. executar busca vetorial por similaridade.

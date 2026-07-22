@@ -15,6 +15,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 ### Changed
+- Docs (`docs/features/`): revisão completa de exatidão vs código (3 revisores + verificação). Corrige exemplos de SQL que quebravam se copiados — assinaturas reais de `ai.nl_*` (doc 12), reloptions do `theodb_hnsw` (removido `WITH (m/ef_construction)` inexistentes, doc 02), `pq_bits=4`/`separate_storage=1` (doc 05), `theodb.embed(content,model)` no lugar de `embedding()` + `lexical_engine=ts_rank_cd` (doc 06), `ai.if` (doc 07); e o drift do pgvector/pgvectorscale (removidos no M70): 13× `CREATE EXTENSION vector`→`theodb CASCADE` + todas as seções "coexiste/instala pgvector" atualizadas para o caminho own-code `theodb_hnsw`/`theodb_ivfflat`
 
 ### Deprecated
 

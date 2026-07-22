@@ -84,12 +84,18 @@ Gera, valida e executa a consulta num sandbox read-only, retornando o resultado 
 ### E. Registrar configuração / template / value-index
 
 ```sql
-SELECT ai.nl_add_config('my_app_cfg');
-SELECT ai.nl_add_template('my_app_cfg', 'top N countries by population', 'SELECT ...');
-SELECT ai.nl_set_value_index('my_app_cfg', 'public.countries.name');
-SELECT ai.nl_refresh_value_index('my_app_cfg');
-SELECT ai.nl_set_template_enabled('my_app_cfg', 1, TRUE);
-SELECT ai.nl_query_cfg('my_app_cfg', 'Which country has the most people?');
+-- config: id + relações permitidas (ARRAY é OBRIGATÓRIO)
+SELECT ai.nl_add_config('my_app_cfg', ARRAY['public.countries']);
+-- template: (id, system_prompt) — 2 args
+SELECT ai.nl_add_template('my_app_cfg', 'Você traduz perguntas sobre países em SQL.');
+-- habilitar o template: (id, enabled) — 2 args
+SELECT ai.nl_set_template_enabled('my_app_cfg', TRUE);
+-- value-index: (config, relation, column, values[]) — 4 args
+SELECT ai.nl_set_value_index('my_app_cfg', 'public.countries', 'name', ARRAY['Brazil','China']);
+-- refresh do value-index: (config, relation, column)
+SELECT ai.nl_refresh_value_index('my_app_cfg', 'public.countries', 'name');
+-- query com config: a PERGUNTA vem primeiro, depois o config_id
+SELECT ai.nl_query_cfg('Which country has the most people?', 'my_app_cfg');
 ```
 
 Configura a geração NL→SQL (contexto, templates, índice de valores) usando as funções `ai.nl_*`.
@@ -550,6 +556,11 @@ Executa a consulta respeitando parâmetros de segurança, como usuário autentic
 ---
 
 ## Exemplo end-to-end — montar e consultar um schema demo
+
+> ⚠️ **API-alvo / não-shipped (não use como código executável).** Esta seção ilustra a superfície-alvo
+> (estilo AlloyDB) com `CREATE EXTENSION theodb_ai_nl` e funções `theodb_ai_nl.*` que **não existem** na
+> distribuição atual. A superfície NL→SQL **entregue** é a seção "✅ Superfície entregue" acima
+> (`ai.nl_query`, `ai.nl_query_cfg`, `ai.nl_add_config`, …), via `CREATE EXTENSION theodb CASCADE`.
 
 O passo a passo abaixo monta um schema de demonstração (clientes, produtos, pedidos), popula dados,
 gera embeddings e configura o `theodb_ai_nl` sobre esse schema — fechando a referência acima com um
