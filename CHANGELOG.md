@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Docs (`docs/features/`): 7 novos docs de feature cobrindo os pilares que faltavam, todos verificados contra o código real (assinaturas/reloptions com file:line, banner em API-alvo/não-shipped, perf só com link a benchmark): grafo nativo/GraphRAG (13), analítico colunar `theodb_columnar` (14), lakehouse Parquet own-code (15), vectorizer declarativo (16), índice SymphonyQG (17), motor lexical BM25 (18), quantização vetorial (19). Documentação de features passa de 11 → 18
 
 ### Changed
 
