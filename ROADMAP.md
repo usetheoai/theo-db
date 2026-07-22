@@ -2435,7 +2435,7 @@ Isto não é esforço de engenharia; é a decisão de colocar o `theo-rag` ou o 
 **Prior art:** `.claude/rules/dogfood-golden-rule.md` (anchor `theo-data-capability-on-theodb`), M124 (o `wired`), M132 (destravou o worker do vectorizer no self-host).
 
 ---
-## M142 — [ ] Tier-out do `pg_duckdb`: imagem default enxuta + imagem opcional `theodb-htap`
+## M142 — [x] Tier-out do `pg_duckdb`: imagem default enxuta + imagem opcional `theodb-htap`
 
 > Added 2026-07-22 (`/roadmap-feature pgduckdb-htap-tiering`). Grill: `knowledge-base/grills/pgduckdb-htap-tiering-feature-grill.md`.
 
