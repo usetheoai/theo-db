@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Spike M139 (gate 2, passo A): seam `SegmentStore` no `PgDirectory` (feature `spike-lexical`) — separa o contrato do trait `Directory` (pgrx-free) da fonte dos bytes; `MemStore` (gate 1) e o backend de páginas PG (gate 2/3, ADR 0051) plugam pela MESMA porta. 6/6 testes verdes standalone (M139)
 - Spike M139 (gate 1 PROVADO): `theodb_rs/src/lexical/pg_directory.rs` — impl NOSSA do trait `Directory` do Tantivy (atrás de `spike-lexical`); teste `test_pg_directory_indexes_and_searches` verde (crate standalone pgrx-free) prova que o Tantivy indexa e busca sobre o `PgDirectory` **sem tocar o filesystem**; endurecido com 4 casos negativos/borda (erro tipado em arquivo/delete ausente, roundtrip+substituição de atomic_write, FileAlreadyExists em open_write duplicado — testing.md § 4.1). Achado: o núcleo lexical é pgrx-free → crate separado (direção M140). Gates 2–4 (MVCC/crash-real/custo) seguem (M139)
 - Spike M139 (gate 1, atrás da feature `spike-lexical` — não entra no build shipado): `tantivy = "0.26"` (MIT) integra limpo na árvore de deps do `theodb_rs` (arrow 58/datafusion), 0 erros de build, e `cargo deny check licenses` verde (zero AGPL transitiva) — o primeiro gate do spike do `Directory`-sobre-PG retira o risco de integração da dependência (M139)
 
