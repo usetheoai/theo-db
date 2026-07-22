@@ -15,8 +15,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 - Roadmap amended: added M142 Tier-out do `pg_duckdb` (imagem default enxuta + imagem opcional `theodb-htap`) (`/roadmap-feature pgduckdb-htap-tiering`)
+- Imagem opcional `theodb-htap` (`packaging/Dockerfile.htap`) = imagem default + `pg_duckdb`, para o lakehouse de arquivos externos (Parquet/Iceberg/CSV) (M142)
 
 ### Changed
+
+- **BREAKING:** a imagem **default** do TheoDB não inclui mais o `pg_duckdb` (tier-out M142) — a imagem ficou menor e sem o único componente C++/httpfs. O lakehouse de arquivos externos (Parquet/Iceberg/CSV) continua disponível via a **imagem opcional `theodb-htap`**; a superfície `theodb.htap_refresh_sql`/`olap_sql` permanece na extensão mas falha-claro (`0A000`, com dica para a imagem htap) sem `pg_duckdb`. Extensão `theodb` bumpada para `1.5` (`ALTER EXTENSION theodb UPDATE TO '1.5'`) (M142, ADR-0056)
 
 ### Deprecated
 
