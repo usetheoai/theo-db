@@ -2461,6 +2461,32 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 ---
 
+## M143 — [ ] Remoção total do `pg_duckdb`: lakehouse Parquet own-code (DataFusion) no default
+
+> Added 2026-07-22 (`/roadmap-feature pgduckdb-total-removal`). Grill: `knowledge-base/grills/pgduckdb-total-removal-feature-grill.md`.
+
+**Objective:** eliminar o `pg_duckdb` **inteiro** do TheoDB, substituindo o lakehouse de arquivos externos por um caminho **own-code** em Rust (DataFusion + Arrow, já no binário; Apache-2.0). O spike da Fase 4 (`docs/benchmarks/parquet-reader-owncode-spike.md`) **mediu** a viabilidade: leitor Parquet own-code com **paridade byte-a-byte** vs `pg_duckdb.read_parquet` a **+9 MB** vs os **118 MB** do bundle DuckDB (~13× menor), sem C++/httpfs. Este milestone executa a substituição e **remove o último componente C++/httpfs do projeto**, dobrando a capacidade lakehouse no build default (a imagem `theodb-htap` do M142 é aposentada).
+
+**Definition of done:**
+
+- [ ] `theodb.read_parquet` own-code (DataFusion, **sem DuckDB**) lê Parquet externo e produz o agregado do M62 — **paridade byte-a-byte** vs o baseline pg_duckdb (reusa/estende `scripts/spike-parquet-validate.sh`).
+- [ ] **Write Parquet own-code** (o `COPY→Parquet` do `htap_refresh_sql` → `DataFrame::write_parquet`) — round-trip escreve+lê+agrega correto.
+- [ ] `sql/85` reescrito: `olap_sql`/`htap_refresh_sql` usam o caminho próprio (`theodb.*`), **não** `duckdb.query`; a superfície M62 funciona **sem** pg_duckdb (guard M142 removido — não há mais o que guardar).
+- [ ] `Dockerfile.htap` **dropa** o pg_duckdb (estágio C++, COPY, `shared_preload`, `libcurl4`, `CREATE EXTENSION`); o lakehouse own-code **dobra no build default** → a imagem `theodb-htap` deixa de existir. Delta de tamanho medido em `docs/benchmarks/`.
+- [ ] Feature `spike-parquet` promovida a permanente (a superfície liga por default); smoke lê+escreve+agrega Parquet own-code, `pg_extension` **sem** pg_duckdb.
+- [ ] **Suporte amplo a tipos** Parquet/Arrow comuns (text, numéricos, timestamp/date, bool e — na medida do viável — nested/list/struct), com **erro tipado fail-closed** para o não-suportado.
+- [ ] ADR emendando 0056/0020 (remoção total) + README (lakehouse own-code no default) + CHANGELOG.
+
+**Dependencies:** M142 `[x]` (o tier-out — a imagem `theodb-htap` que este milestone aposenta) e M100 `[x]` (o DataFusion executor own-code que o read/write Parquet reusa — Regra 9). O spike (gate de viabilidade, GO) já satisfeito.
+
+**Risks:** (a) **escopo/tipos** — o spike provou correção num arquivo pequeno de shape fixo; o suporte **amplo** a tipos (nested/list/struct) é escopo grande e pode exceder um milestone. Mitigação: measurement-first (cobrir primeiro o que o M62/lakehouse usa, medir, expandir), erro tipado fail-closed para o não-suportado, e **dividir** (v1 escalares / v2 nested) se estourar — nunca inchar. (b) **SETOF dinâmico no pgrx** — `read_parquet` de schema arbitrário é mais complexo que o shape fixo do spike; começar pelo que o M62 precisa.
+
+**Boundary honesto:** a viabilidade do *read* own-code está **medida** (GO); o *write*, a reescrita do `sql/85`, o drop do pg_duckdb e o suporte amplo de tipos são o trabalho deste milestone. É a conclusão da jornada M142 (tier-out) → M143 (remoção total): 118 MB de C++ fora, ~9 MB de Rust permissivo dentro.
+
+**Prior art:** `docs/benchmarks/parquet-reader-owncode-spike.md` (o spike GO), `theodb_rs/src/parquet_spike.rs` (o código validado), ADR-0056/0020 (o pg_duckdb e o tier-out), ADR-0042/M100 (o DataFusion executor own-code reusado), `.claude/rules/parsimony-ladder.md` (rung 4 — reusar o instalado).
+
+---
+
 ## Sequência e paralelismo
 
 ```
