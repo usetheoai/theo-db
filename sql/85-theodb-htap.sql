@@ -71,10 +71,22 @@ $$;
 -- relation it returns the same statement (it reads only the catalog-independent path helper).
 CREATE OR REPLACE FUNCTION theodb.htap_refresh_sql(p_rel regclass)
 RETURNS text
-LANGUAGE sql
+LANGUAGE plpgsql
 STABLE
 AS $$
-    SELECT format('COPY (SELECT * FROM %s) TO %L (FORMAT parquet)', p_rel::regclass, theodb._htap_path(p_rel));
+BEGIN
+    -- M142 guard (fail-closed): the returned COPY writes Parquet via pg_duckdb's file writer. Without pg_duckdb
+    -- installed (the default TheoDB image after the M142 tier-out), that statement would fail with an obscure
+    -- error at the client. Fail-fast + typed (Rule 8) with the next step instead. Querying pg_extension is always
+    -- safe (a catalog); keying the guard on the INSTALLED EXTENSION (not the function name) is immune to a future
+    -- duckdb.query overload and safe to CREATE on an image WITHOUT pg_duckdb.
+    IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_duckdb') THEN
+        RAISE EXCEPTION 'theodb.htap_refresh_sql: pg_duckdb not installed'
+            USING HINT = 'The HTAP/lakehouse surface (Parquet snapshots) requires pg_duckdb — pull the theodb-htap image.',
+                  ERRCODE = '0A000';   -- feature_not_supported (typed, fail-closed)
+    END IF;
+    RETURN format('COPY (SELECT * FROM %s) TO %L (FORMAT parquet)', p_rel::regclass, theodb._htap_path(p_rel));
+END;
 $$;
 
 COMMENT ON FUNCTION theodb.htap_refresh_sql(regclass) IS
@@ -130,6 +142,17 @@ AS $$
 DECLARE
     snap_path text;
 BEGIN
+    -- M142 guard (fail-closed): the returned statement wraps duckdb.query (pg_duckdb). Without pg_duckdb (the
+    -- default TheoDB image after the M142 tier-out) the statement is unrunnable. Fail-fast + typed (Rule 8) with
+    -- the next step, BEFORE the snapshot lookup, instead of handing the client a broken statement. Keying on the
+    -- INSTALLED EXTENSION (pg_extension — a catalog, always safe to query) is immune to a future duckdb.query
+    -- overload and safe to CREATE on an image WITHOUT pg_duckdb.
+    IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_duckdb') THEN
+        RAISE EXCEPTION 'theodb.olap_sql: pg_duckdb not installed'
+            USING HINT = 'The HTAP/lakehouse surface (analytical query over Parquet) requires pg_duckdb — pull the theodb-htap image.',
+                  ERRCODE = '0A000';   -- feature_not_supported (typed, fail-closed)
+    END IF;
+
     SELECT s.parquet_path INTO snap_path
         FROM theodb._htap_snapshots s WHERE s.rel = p_rel;
 

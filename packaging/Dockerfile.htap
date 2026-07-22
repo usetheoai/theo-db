@@ -1,0 +1,67 @@
+# syntax=docker/dockerfile:1
+# TheoDB HTAP image (OPTIONAL) — a imagem default do TheoDB + pg_duckdb (columnar/HTAP lakehouse, aposta D2).
+# M142 (ADR-0056): o pg_duckdb foi tierado para fora do default; esta imagem o re-adiciona como CAMADA sobre a
+# imagem default (FROM ${THEODB_BASE}) — NÃO um fork. Assim o build do theodb_rs não é duplicado e a htap fica
+# em sync com a default por construção. Só puxe esta imagem se precisa do lakehouse de arquivos externos
+# (Parquet/Iceberg/CSV) via a superfície M62 (theodb.htap_refresh_sql / olap_sql).
+#
+# Build:
+#   docker build -t theodb:default .                                   # a imagem default (Dockerfile na raiz)
+#   docker build -f packaging/Dockerfile.htap \
+#     --build-arg THEODB_BASE=theodb:default -t theodb:htap .
+
+ARG BASE_IMAGE=postgres:18-bookworm
+# THEODB_BASE = a tag da imagem default do TheoDB (construída pelo Dockerfile na raiz). Esta imagem é uma camada
+# sobre ela — o theodb_rs + a extensão theodb já vêm da base; aqui só adicionamos o pg_duckdb.
+ARG THEODB_BASE=theodb:local
+
+# ---- Stage builder: build pg_duckdb (MIT, ADR 0013/0020) — idêntico ao estágio que saiu do Dockerfile default no M142 ----
+# Adoption, NOT own-code (Regra 9): pg_duckdb (github.com/duckdb/pg_duckdb, MIT, GA v1.1.1, PG14-18 native)
+# embeds the DuckDB analytical engine as a Postgres extension. Static build (DUCKDB_BUILD=ReleaseStatic →
+# one self-contained pg_duckdb.so, no separate libduckdb.so — ADR D2). C++/cmake/ninja, NO Rust.
+FROM ${BASE_IMAGE} AS pgduckdb-builder
+ARG PG_MAJOR=18
+ARG PGDUCKDB_REF=v1.1.1
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential postgresql-server-dev-$PG_MAJOR libssl-dev pkg-config git cmake ninja-build \
+      ca-certificates curl liblz4-dev libcurl4-openssl-dev zlib1g-dev && \
+    rm -rf /var/lib/apt/lists/*
+RUN git clone https://github.com/duckdb/pg_duckdb /tmp/pg_duckdb && \
+    cd /tmp/pg_duckdb && git checkout $PGDUCKDB_REF && \
+    git submodule update --init --recursive
+RUN cd /tmp/pg_duckdb && DUCKDB_BUILD=ReleaseStatic make install -j"$(nproc)"
+
+# ---- Runtime: a imagem default do TheoDB + a camada pg_duckdb ----
+FROM ${THEODB_BASE}
+ARG PG_MAJOR=18
+
+# pg_duckdb artifacts (MIT; static DuckDB engine linked into pg_duckdb.so). Artifact-only COPY (no C++ toolchain).
+COPY --from=pgduckdb-builder /usr/lib/postgresql/$PG_MAJOR/lib/pg_duckdb* /usr/lib/postgresql/$PG_MAJOR/lib/
+COPY --from=pgduckdb-builder /usr/share/postgresql/$PG_MAJOR/extension/pg_duckdb* /usr/share/postgresql/$PG_MAJOR/extension/
+
+# pg_duckdb REQUIRES shared_preload_libraries (loaded at boot). Append idempotente ao initdb template (ADR D3).
+RUN grep -q "shared_preload_libraries.*pg_duckdb" /usr/share/postgresql/$PG_MAJOR/postgresql.conf.sample || \
+    echo "shared_preload_libraries = 'pg_duckdb'" >> /usr/share/postgresql/$PG_MAJOR/postgresql.conf.sample
+
+# Segurança (defense-in-depth, M142 review): community extensions do DuckDB carregam código não-auditado
+# (vetor RCE/SSRF). `off` já é o default do pg_duckdb v1.1.1, mas fixamos explícito para não depender do default
+# do upstream num rebump futuro. O smoke/CI assere `off` (o gate que o m61-smoke tinha e ficou órfão no tier-out).
+RUN grep -q "duckdb.allow_community_extensions" /usr/share/postgresql/$PG_MAJOR/postgresql.conf.sample || \
+    echo "duckdb.allow_community_extensions = off" >> /usr/share/postgresql/$PG_MAJOR/postgresql.conf.sample
+
+# libcurl4 é requerido pelo pg_duckdb.so (DuckDB httpfs). ca-certificates já veio da base (theodb_rs AI surface).
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends libcurl4 && \
+    rm -rf /var/lib/apt/lists/*
+
+# CREATE EXTENSION pg_duckdb no init. Roda DEPOIS do 00-create-theodb.sql da base (ordem lexicográfica) — theodb
+# já existe quando pg_duckdb é criado. Requires shared_preload_libraries='pg_duckdb' (set acima).
+COPY <<'EOF' /docker-entrypoint-initdb.d/01-create-pgduckdb.sql
+-- M142/ADR-0056: pg_duckdb (columnar/HTAP lakehouse, MIT) — adjunto analítico, criado só na imagem theodb-htap.
+-- Com ele presente, o guard M142 em theodb.olap_sql/htap_refresh_sql passa e a superfície M62 funciona.
+CREATE EXTENSION IF NOT EXISTS pg_duckdb;
+EOF
+
+# M62 — o diretório de snapshots HTAP (theodb.htap_refresh_sql escreve row→Parquet aqui, server-side como o
+# usuário postgres). Criado + chowned no build para o COPY do cliente não falhar com "No such file or directory".
+RUN mkdir -p /var/lib/postgresql/htap && chown postgres:postgres /var/lib/postgresql/htap

@@ -2388,7 +2388,7 @@ M140.1 (index AM `USING <am>` **ou** função `bm25_search` sobre heap). Superse
 
 **Prior art:** M139 (buffer-then-flush + heap), Tantivy MIT (IndexReader/QueryParser), ADR-0013, M99/M100/M115 (precedente de AM+CustomScan próprios se a M140.1 escolher AM).
 
-## M140.4 — [ ] MVCC/VACUUM/crash provados + primeiro consumidor (theo-lens) *(gated M140.3)*
+## M140.4 — [x] MVCC/VACUUM/crash provados + primeiro consumidor (theo-lens) *(gated M140.3)*
 
 **Objective:** provar a robustez de produção da engine pelas **nossas suítes de isolamento+crash contra o binário
 shipado** (o mesmo padrão do M99/M135, não uma versão mais fraca), manter a **disciplina de thread-safety** do
@@ -2435,6 +2435,32 @@ Isto não é esforço de engenharia; é a decisão de colocar o `theo-rag` ou o 
 **Prior art:** `.claude/rules/dogfood-golden-rule.md` (anchor `theo-data-capability-on-theodb`), M124 (o `wired`), M132 (destravou o worker do vectorizer no self-host).
 
 ---
+## M142 — [ ] Tier-out do `pg_duckdb`: imagem default enxuta + imagem opcional `theodb-htap`
+
+> Added 2026-07-22 (`/roadmap-feature pgduckdb-htap-tiering`). Grill: `knowledge-base/grills/pgduckdb-htap-tiering-feature-grill.md`.
+
+**Objective:** tirar o `pg_duckdb` da imagem **default** e mantê-lo numa imagem opcional `theodb-htap`. Resolve o follow-up "Unresolved" que o próprio ADR-0020 deixou em aberto. A justificativa mudou desde o M61: o `theodb_columnar` **own-code** (M99–M115, entregue *depois* do M61) já cobre o colunar transparente **in-database** sobre tabelas PG vivas — exatamente o terreno onde o pg_duckdb mediu **honest-negative** (0,63–0,89× sobre o heap, ADR-0020). O valor **único** restante do pg_duckdb é lakehouse de **arquivos externos** (Parquet/Iceberg/CSV, aposta D2), fora do hot path AI-native (M64) e não dogfoodado. E ele é o **único componente C++** de uma stack Rust+PG: +170 MB, `shared_preload_libraries`, `libcurl4`/httpfs (superfície SSRF).
+
+Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti-sunk-cost: esforço no M61 não justifica manter no default.
+
+**Definition of done:**
+
+- [ ] Imagem **default** builda **sem** pg_duckdb (sem estágio `pgduckdb-builder`, sem COPY do `.so`, sem `shared_preload_libraries='pg_duckdb'`, sem `libcurl4`, sem `CREATE EXTENSION pg_duckdb`); queda de tamanho **≥ 150 MB** medida em `docs/benchmarks/`.
+- [ ] Smoke default: `pg_extension` sem `pg_duckdb`; `shared_preload_libraries` sem ele; `theodb_rs` + `theodb_columnar` own-code intactos (vetor/AM/columnar verdes).
+- [ ] `packaging/Dockerfile.htap` = base default + camada pg_duckdb; smoke htap: pg_duckdb presente + superfície M62 (`theodb.htap_refresh_sql`/`olap_sql`) funciona e2e.
+- [ ] `sql/85-theodb-htap.sql` + `CREATE EXTENSION pg_duckdb` carregam **condicionalmente** (só na imagem htap), provado pelos dois smokes.
+- [ ] ADR emendando o **0020** (decisão de tier-out) + `README` move pg_duckdb/HTAP de "default" para "opcional (imagem `theodb-htap`)" + `CHANGELOG` sob **Changed** com marca `BREAKING:`.
+
+**Dependencies:** M61 `[x]` (o pg_duckdb embarcado — a peça sendo tierada) e M99 `[x]` (o own-code columnar TableAM que a torna secundária no default). Sem o M99, tirar o pg_duckdb deixaria um buraco no colunar in-DB.
+
+**Risks:** (a) **compat** — quem puxa a imagem default e chama `duckdb.query`/a superfície M62 quebra; mitigação: a imagem htap mantém opt-in, erro/nota tipada clara, e o blast radius é baixo (pré-1.0, nenhum dogfood depende), mas documentado como mudança de compat (CHANGELOG Changed + `BREAKING:`). (b) **drift de 2 imagens** — a htap pode apodrecer / não buildar; mitigação: CI builda as duas + roda o smoke htap no mesmo job, e a htap é *camada sobre* a default (não fork) → fica em sync por construção.
+
+**Boundary honesto:** não é uma remoção de capacidade — o lakehouse D2 continua disponível via `theodb-htap`. É uma decisão de **superfície default** (enxugar a imagem que a maioria puxa, tirar o único C++/httpfs do caminho default) depois que o own-code columnar amadureceu.
+
+**Prior art:** ADR-0020 (embarcar pg_duckdb — a decisão sendo emendada; o tier-out já era seu follow-up Unresolved), ADR-0042 (own-code columnar TableAM M99), ADR-0021/0023 (superfície M62/M64 — pg_duckdb fora do hot path AI-native), `docs/benchmarks/m97-htap-viability.md` (DEFER a new columnar pillar), `.claude/rules/parsimony-ladder.md` (anti-sunk-cost), `.claude/rules/public-copy.md` (honestidade de posicionamento).
+
+---
+
 ## Sequência e paralelismo
 
 ```

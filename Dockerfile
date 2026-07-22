@@ -1,7 +1,9 @@
 # syntax=docker/dockerfile:1
-# TheoDB image — PostgreSQL 18 + theodb_rs (own vector type + ANN AM, M17/M69/M70) + pg_duckdb (M61).
+# TheoDB image (DEFAULT) — PostgreSQL 18 + theodb_rs (own vector type + ANN AM, M17/M69/M70).
 # M70: pgvector + pgvectorscale REMOVIDOS — o tipo `vector` e os índices ANN são 100% own-code (theodb_rs).
-# Multi-stage: os stages builder compilam as extensões Rust/C++; o runtime copia SÓ os artefatos.
+# M142: pg_duckdb REMOVIDO do default (tier-out) — o lakehouse de arquivos externos (Parquet/Iceberg/CSV, aposta
+#       D2) vive agora na imagem OPCIONAL `theodb-htap` (packaging/Dockerfile.htap, camada sobre esta). ADR-0056.
+# Multi-stage: o stage builder compila a extensão Rust; o runtime copia SÓ os artefatos.
 
 # Shared base pinned by digest — used by BOTH stages so the extension is compiled against the exact
 # same PostgreSQL the runtime ships (reproducible build; no moving target between builder and runtime).
@@ -15,8 +17,11 @@ ARG BASE_IMAGE=postgres:18-bookworm
 # pgvector) + os AMs theodb_hnsw/theodb_ivfflat + os schemas theodb/ai — sem depender do pgvector/pgvectorscale.
 FROM ${BASE_IMAGE} AS theodb-rs-builder
 ARG PG_MAJOR=18
-ARG PGRX_VERSION=0.16.1
-ARG RUST_VERSION=1.91.0
+# M142: repin de 0.16.1 → 0.19.0. cargo-pgrx e o crate pgrx são lockstep; theodb_rs foi para pgrx =0.19.0 no M98
+# (impl(m98)) mas o Dockerfile nunca acompanhou (o repin M135 não pegou) — a imagem default não buildava. Fix.
+ARG PGRX_VERSION=0.19.0
+# M142: repin de 1.91.0 → 1.97.1. cargo-pgrx 0.19.0 exige rustc ≥ 1.96; 1.97.1 é o toolchain provado no e2e-runner.
+ARG RUST_VERSION=1.97.1
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential postgresql-server-dev-$PG_MAJOR libssl-dev pkg-config clang curl ca-certificates && \
     rm -rf /var/lib/apt/lists/*
@@ -31,23 +36,9 @@ RUN cargo pgrx init --pg$PG_MAJOR "$(which pg_config)"
 COPY theodb_rs/ /tmp/theodb_rs/
 RUN cd /tmp/theodb_rs && cargo pgrx install --release --features pg$PG_MAJOR
 
-# ---- Stage 1c: build pg_duckdb (M61 — columnar/HTAP adoption; MIT, ADR 0013/0020) ----
-# Adoption, NOT own-code (Regra 9): pg_duckdb (github.com/duckdb/pg_duckdb, MIT, GA v1.1.1, PG14-18 native)
-# embeds the DuckDB analytical engine as a Postgres extension. Built statically (DUCKDB_BUILD=ReleaseStatic →
-# one self-contained pg_duckdb.so, no separate libduckdb.so — ADR D2). C++/cmake/ninja, NO Rust.
-FROM ${BASE_IMAGE} AS pgduckdb-builder
-ARG PG_MAJOR=18
-ARG PGDUCKDB_REF=v1.1.1
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential postgresql-server-dev-$PG_MAJOR libssl-dev pkg-config git cmake ninja-build \
-      ca-certificates curl liblz4-dev libcurl4-openssl-dev zlib1g-dev && \
-    rm -rf /var/lib/apt/lists/*
-RUN git clone https://github.com/duckdb/pg_duckdb /tmp/pg_duckdb && \
-    cd /tmp/pg_duckdb && git checkout $PGDUCKDB_REF && \
-    git submodule update --init --recursive
-RUN cd /tmp/pg_duckdb && DUCKDB_BUILD=ReleaseStatic make install -j"$(nproc)"
-
-# ---- Stage 2: runtime (postgres:18 + theodb_rs + pg_duckdb) — M70: SEM pgvector/pgvectorscale ----
+# ---- Stage 2: runtime (postgres:18 + theodb_rs) — M70: SEM pgvector/pgvectorscale; M142: SEM pg_duckdb ----
+# O pg_duckdb (columnar/HTAP lakehouse, aposta D2) foi tierado para a imagem opcional theodb-htap
+# (packaging/Dockerfile.htap = FROM esta imagem + a camada pg_duckdb). ADR-0056.
 FROM ${BASE_IMAGE}
 ARG PG_MAJOR=18
 
@@ -57,18 +48,10 @@ ARG PG_MAJOR=18
 COPY --from=theodb-rs-builder /usr/lib/postgresql/$PG_MAJOR/lib/theodb_rs* /usr/lib/postgresql/$PG_MAJOR/lib/
 COPY --from=theodb-rs-builder /usr/share/postgresql/$PG_MAJOR/extension/theodb_rs* /usr/share/postgresql/$PG_MAJOR/extension/
 
-# M61 — pg_duckdb artifacts (columnar/HTAP; MIT; static DuckDB engine linked into pg_duckdb.so). Artifact-only
-# COPY (no C++ toolchain in runtime). pg_duckdb REQUIRES shared_preload_libraries (loaded at boot) — appended below.
-COPY --from=pgduckdb-builder /usr/lib/postgresql/$PG_MAJOR/lib/pg_duckdb* /usr/lib/postgresql/$PG_MAJOR/lib/
-COPY --from=pgduckdb-builder /usr/share/postgresql/$PG_MAJOR/extension/pg_duckdb* /usr/share/postgresql/$PG_MAJOR/extension/
-# Append pg_duckdb to shared_preload_libraries in the initdb template (ADR D3 — append-to-sample). Idempotent.
-RUN grep -q "shared_preload_libraries.*pg_duckdb" /usr/share/postgresql/$PG_MAJOR/postgresql.conf.sample || \
-    echo "shared_preload_libraries = 'pg_duckdb'" >> /usr/share/postgresql/$PG_MAJOR/postgresql.conf.sample
-
 # ca-certificates IS required for TLS verification on HTTPS cloud endpoints — used by the Rust AI surface
-# (minreq/native-tls/OpenSSL) in theodb_rs. libcurl4 is required by pg_duckdb.so (DuckDB httpfs).
+# (minreq/native-tls/OpenSSL) in theodb_rs. (M142: libcurl4 removido — era dep do pg_duckdb httpfs, agora só na htap.)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates libcurl4 && \
+    apt-get install -y --no-install-recommends ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 # M15/M70 — TheoDB ships as an INSTALLABLE EXTENSION (CREATE EXTENSION theodb), not init-scripts.
@@ -83,7 +66,7 @@ RUN set -eux; \
         sql/60-theodb-nl.sql sql/61-theodb-nl-config.sql sql/70-theodb-ml.sql \
         sql/80-theodb-migrate.sql sql/85-theodb-htap.sql > sql/theodb--1.0.sql; \
     install -m 0644 theodb.control sql/theodb--1.0.sql sql/theodb--1.0--1.1.sql sql/theodb--1.1--1.2.sql \
-        sql/theodb--1.2--1.3.sql sql/theodb--1.3--1.4.sql \
+        sql/theodb--1.2--1.3.sql sql/theodb--1.3--1.4.sql sql/theodb--1.4--1.5.sql \
         "/usr/share/postgresql/$PG_MAJOR/extension/"; \
     rm -rf /tmp/theodb
 
@@ -95,14 +78,10 @@ COPY <<'EOF' /docker-entrypoint-initdb.d/00-create-theodb.sql
 CREATE EXTENSION IF NOT EXISTS theodb CASCADE;
 -- theodb_rs (M17/M69/M70): o tipo `vector` own-code + a superfície embed/ai/nl em Rust + os AMs. Sem deps externas.
 CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE;
--- M61: pg_duckdb (columnar/HTAP, MIT — ADR 0013/0020) NÃO é dependência do theodb.control (adjunto analítico),
--- então criar explicitamente. Requires shared_preload_libraries='pg_duckdb' (set no postgresql.conf.sample).
-CREATE EXTENSION IF NOT EXISTS pg_duckdb;
+-- M142: pg_duckdb NÃO é mais criado no default (tier-out). A superfície HTAP codegen (theodb.htap_refresh_sql/
+-- olap_sql) permanece na extensão theodb mas RAISE feature_not_supported (0A000) sem pg_duckdb (guard M142). Para
+-- o lakehouse de arquivos externos, use a imagem theodb-htap (packaging/Dockerfile.htap). ADR-0056.
 EOF
-
-# M62 — the HTAP snapshot directory (theodb.htap_refresh_sql writes row→Parquet snapshots here, server-side as
-# the postgres OS user). Created + chowned at build so the COPY does not fail with "No such file or directory".
-RUN mkdir -p /var/lib/postgresql/htap && chown postgres:postgres /var/lib/postgresql/htap
 
 HEALTHCHECK --interval=5s --timeout=5s --start-period=10s --retries=5 \
   CMD pg_isready -h localhost -p 5432 -U postgres -q
