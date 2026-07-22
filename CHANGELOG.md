@@ -13,7 +13,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- Docs (`docs/features/`): 7 novos docs de feature cobrindo os pilares que faltavam, todos verificados contra o código real (assinaturas/reloptions com file:line, banner em API-alvo/não-shipped, perf só com link a benchmark): grafo nativo/GraphRAG (13), analítico colunar `theodb_columnar` (14), lakehouse Parquet own-code (15), vectorizer declarativo (16), índice SymphonyQG (17), motor lexical BM25 (18), quantização vetorial (19). Documentação de features passa de 11 → 18
 
 ### Changed
 
@@ -22,11 +21,19 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Removed
 
 ### Fixed
+
+### Security
+
+## [0.132.0] - 2026-07-22
+
+### Added
+- Docs (`docs/features/`): 7 novos docs de feature cobrindo os pilares que faltavam, todos verificados contra o código real (assinaturas/reloptions com file:line, banner em API-alvo/não-shipped, perf só com link a benchmark): grafo nativo/GraphRAG (13), analítico colunar `theodb_columnar` (14), lakehouse Parquet own-code (15), vectorizer declarativo (16), índice SymphonyQG (17), motor lexical BM25 (18), quantização vetorial (19). Documentação de features passa de 11 → 18
+
+
+### Fixed
 - Docs (`docs/features/14-analitico-colunar.md`): seção do seqscan corrigida — um `SELECT` plano decodifica todas as colunas (sem projeção no TAM) e é medido paridade-ou-mais-lento que heap ([`m99-columnar-tam.md`](docs/benchmarks/m99-columnar-tam.md)); o ganho de projeção/vetorização é exclusivo do caminho `CustomScan` M100. A afirmação anterior ("decodifica apenas as colunas projetadas") era falsa
 - Docs (`docs/features/14-analitico-colunar.md`): bloco "Caveats honestos" agora divulga o contrato DML append-only — `UPDATE`/`DELETE`/tuple-lock/parallel/bitmap/sample/TID-range/`CREATE INDEX` falham com erro tipado em tabelas `theodb_columnar`; bitmap scan é desviado pelo planner (callbacks `NULL`) em vez de errar (caveat 4). Regressão coberta por `scripts/docs-features-lint.sh`
 - Docs (`docs/features/13-grafo-nativo.md`): exemplo de `graph_expand` quebrava copiado verbatim — a função `RETURNS SETOF bigint` e a coluna default chama-se `graph_expand`, não `node`; exemplo agora aliasa a SRF (`AS t(node)`). Regressão coberta por `scripts/docs-features-lint.sh`
-
-### Security
 
 ## [0.131.2] - 2026-07-22
 
