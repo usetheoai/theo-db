@@ -23,16 +23,20 @@ que o M140.1 mediu que **não** ocorre.
 
 ## Evidência medida (M140.1, T3.1 — `docs/benchmarks/m140-1-data/logproxy.json`)
 
-Corpus LogHub HDFS_2k (2000 linhas reais), PostgreSQL 18 em docker:
+Corpus LogHub HDFS_2k (2000 linhas reais), PostgreSQL 18 em docker. Índice Tantivy limpo de
+1 segmento (**313 KB** reproduzível; o número "626 KB" do draft era um artefato de dupla-indexação,
+corrigido — review H1). Três framings apples-to-apples (review H2):
 
-| Métrica | Tantivy (heap-candidate) | PostgreSQL `ts_rank_cd` (heap + GIN) |
-|---|---|---|
-| Tamanho do índice | **626 KB** | 1 564 KB (`pg_total_relation_size`) |
-| Fator | **2,5× menor** | baseline |
-| Ingest (2000 docs) | ~41 ms | — |
+| Framing | Tantivy | PostgreSQL | Fator |
+|---|---|---|---|
+| índice-vs-índice (Tantivy guarda o body; GIN não) | 313 KB | GIN 532 KB | **1,7× menor** |
+| footprint enxuto (heap+GIN+pkey+toast, sem coluna tsv) | 313 KB | 1 097 KB | **3,5× menor** |
+| footprint fiel (baseline theo-lens c/ `search_tsv` materializado) | 313 KB | 1 565 KB | **5,0× menor** |
 
-O 2,5× menor confirma no corpus de logs o **2,8× menor** que o M139 mediu vs `pg_textsearch`
-(ADR 0051). **Não há inversão de custo** que justifique o AM custom.
+Ingest Tantivy (2000 docs): ~41 ms. A **direção (Tantivy menor) é robusta em todos os framings** e
+consistente com o M139 (que mediu 2,8× menor vs `pg_textsearch`, ADR 0051). **Não há inversão de
+custo** que justifique o AM custom — o argumento decisório abaixo é, aliás, independente do fator
+exato (mesmo o mais conservador, 1,7×, favorece o heap).
 
 ## Rationale
 

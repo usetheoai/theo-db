@@ -68,12 +68,32 @@ def test_verdict_flip_is_derived_not_hardcoded():
         assert v["flip"] == expected, "flip must equal (p<0.05 and mean_diff>0)"
 
 
-def test_beir_axis_reproduces_m138_within_tolerance():
-    # Anti-fabrication anchor: BEIR nDCG must be in the plausible band M138 measured
-    # (scifact BM25 leg ~0.688, ts_rank_cd leg ~0.070). We assert the BM25 nDCG is a
-    # real number in [0,1] and the ts_rank baseline (if present) is far below BM25 on
-    # scifact — the M138 signature. Exact reproduction needs the same corpus/params.
+# M138 measured ts_rank_cd leg (docs/benchmarks/m138-bm25-fusion.md): the anti-fabrication
+# anchor. Our ts_rank_cd pipeline must reproduce these within tolerance — if it drifts, the
+# harness changed something silently and the numbers are no longer comparable to M138.
+M138_TSRANK_LEG = {"scifact": 0.070275, "nfcorpus": 0.206117}
+NDCG_TOL = 0.03
+
+
+def test_beir_ts_rank_reproduces_m138_within_tolerance():
+    checked = 0
     for a in _load_axis("beir", "beir.json"):
         assert 0.0 <= a["mean_ndcg_bm25"] <= 1.0
-        if a["dataset"] == "scifact" and "mean_ndcg_base" in a:
-            assert a["mean_ndcg_bm25"] > a["mean_ndcg_base"], "scifact: BM25 leg must beat ts_rank leg (M138 signature)"
+        anchor = M138_TSRANK_LEG.get(a["dataset"])
+        if anchor is not None and "mean_ndcg_base" in a:
+            drift = abs(a["mean_ndcg_base"] - anchor)
+            assert drift <= NDCG_TOL, (
+                f"{a['dataset']}: ts_rank nDCG {a['mean_ndcg_base']:.4f} drifted "
+                f"{drift:.4f} from M138 anchor {anchor:.4f} (tol {NDCG_TOL})"
+            )
+            checked += 1
+    if checked == 0:
+        pytest.skip("no ts_rank baseline present (PG absent at run time)")
+
+
+def test_beir_bm25_beats_ts_rank_on_both_datasets():
+    for a in _load_axis("beir", "beir.json"):
+        if "mean_ndcg_base" in a:
+            assert a["mean_ndcg_bm25"] > a["mean_ndcg_base"], (
+                f"{a['dataset']}: BM25 leg must beat ts_rank leg (M138 signature)"
+            )

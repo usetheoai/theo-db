@@ -14,6 +14,7 @@ standalone, so retrieval QUALITY (nDCG/MRR) is measured off-PG here; storage cos
 from __future__ import annotations
 
 import re
+import shutil
 import time
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -44,6 +45,11 @@ class TantivyBM25:
 
     def index(self, docs: dict[str, str]) -> None:
         if self._path is not None:
+            # Clean the path first: tantivy.Index(path=...) OPENS an existing index and
+            # would APPEND, producing duplicate segments and a doubled index_bytes on a
+            # stale dir (M140.1 review H1). A fresh dir guarantees a single-segment,
+            # reproducible on-disk size.
+            shutil.rmtree(self._path, ignore_errors=True)
             Path(self._path).mkdir(parents=True, exist_ok=True)
             idx = tantivy.Index(self._schema, path=self._path)
         else:
@@ -121,7 +127,7 @@ class PgTsRank:
                 [(k, v or "", v or "") for k, v in docs.items()],
                 template="(%s, %s, to_tsvector('english', %s))",
             )
-            cur.execute(f"CREATE INDEX ON {self.table} USING gin(tsv)")
+            cur.execute(f"CREATE INDEX {self.table}_gin ON {self.table} USING gin(tsv)")
             cur.execute("ANALYZE " + self.table)
 
     def search(self, query: str, k: int) -> list[str]:
@@ -138,9 +144,28 @@ class PgTsRank:
             return [r[0] for r in cur.fetchall()]
 
     def index_bytes(self) -> int:
-        """Total relation size (heap+gin) of the docs table in bytes."""
+        """Total relation size (heap + all indexes + toast) of the docs table in bytes.
+
+        NOTE (review H2): this is the FAITHFUL footprint of the baseline theo-lens ships
+        (a materialised `search_tsv` column + GIN, schema.ts:84) — it is NOT an
+        index-only figure. For apples-to-apples, also read gin_index_bytes() and
+        tsv_column_bytes() and compute the lean footprint in the report.
+        """
         with self._conn.cursor() as cur:
             cur.execute("SELECT pg_total_relation_size(%s)", (self.table,))
+            return int(cur.fetchone()[0])
+
+    def gin_index_bytes(self) -> int:
+        """Size of the GIN search index alone (the apples-to-apples peer of the Tantivy index)."""
+        with self._conn.cursor() as cur:
+            cur.execute("SELECT pg_relation_size(%s)", (f"{self.table}_gin",))
+            return int(cur.fetchone()[0])
+
+    def tsv_column_bytes(self) -> int:
+        """Bytes the materialised `tsv` column occupies (redundant with the GIN) — the
+        subtrahend for a lean footprint (heap without the materialised tsv)."""
+        with self._conn.cursor() as cur:
+            cur.execute(f"SELECT coalesce(sum(pg_column_size(tsv)), 0) FROM {self.table}")
             return int(cur.fetchone()[0])
 
     def close(self) -> None:

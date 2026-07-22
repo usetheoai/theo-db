@@ -114,8 +114,10 @@ def run_logproxy_axis(dataset: str, seeds: list[int], n: int, cache_dir: str, ds
 
     pg = _connect_pg(dsn)
     storage: dict = {}
-    # sweep[m] = {"bm25_per_seed": [...], "base_per_seed": [...], "bm25_all": [...], "base_all": [...]}
-    sweep = {m: {"bm25_per_seed": [], "base_per_seed": [], "bm25_all": [], "base_all": []} for m in QUERY_LENGTHS}
+    # sweep[m] = {"seed_bm25": [[per-query MRR for seed0], [seed1], ...], "seed_base": [...]}
+    # Per-seed paired arrays are kept SEPARATE (M140.1 review M1): the 3 seeds share the
+    # same corpus, so pooling their per-query obs into one paired test is pseudo-replication.
+    sweep = {m: {"seed_bm25": [], "seed_base": []} for m in QUERY_LENGTHS}
 
     for si, seed in enumerate(seeds):
         docs = load_logcorpus(dataset=dataset, n=n, cache_dir=cache_dir, seed=seed)
@@ -130,7 +132,12 @@ def run_logproxy_axis(dataset: str, seeds: list[int], n: int, cache_dir: str, ds
         if si == 0:
             storage = {"tantivy_index_bytes": tv.index_bytes(), "tantivy_ingest_ms": tv.ingest_ms}
             if pg is not None:
-                storage["pg_tsrank_total_bytes"] = pg.index_bytes()
+                total = pg.index_bytes()
+                tsv = pg.tsv_column_bytes()
+                storage["pg_total_relation_bytes"] = total  # faithful baseline (theo-lens materialises tsv)
+                storage["pg_gin_index_bytes"] = pg.gin_index_bytes()  # apples-to-apples peer of tantivy index
+                storage["pg_tsv_column_bytes"] = tsv
+                storage["pg_lean_footprint_bytes"] = total - tsv  # heap+gin+pkey+toast, no redundant tsv col
 
         for m in QUERY_LENGTHS:
             s_bm25, s_base = [], []
@@ -139,23 +146,42 @@ def run_logproxy_axis(dataset: str, seeds: list[int], n: int, cache_dir: str, ds
                 s_bm25.append(knownitem.mrr_at_k(tv.search(q, K), tid, K))
                 if pg is not None:
                     s_base.append(knownitem.mrr_at_k(pg.search(q, K), tid, K))
-            sweep[m]["bm25_per_seed"].append(statistics.fmean(s_bm25))
-            sweep[m]["bm25_all"].extend(s_bm25)
+            sweep[m]["seed_bm25"].append(s_bm25)
             if pg is not None:
-                sweep[m]["base_per_seed"].append(statistics.fmean(s_base))
-                sweep[m]["base_all"].extend(s_base)
+                sweep[m]["seed_base"].append(s_base)
 
     def _agg(rec: dict) -> dict:
+        per_seed_bm25_mean = [statistics.fmean(s) for s in rec["seed_bm25"]]
         e = {
-            "mrr_bm25_mean": statistics.fmean(rec["bm25_per_seed"]),
-            "mrr_bm25_std": statistics.pstdev(rec["bm25_per_seed"]) if len(rec["bm25_per_seed"]) > 1 else 0.0,
+            "mrr_bm25_mean": statistics.fmean(per_seed_bm25_mean),
+            "mrr_bm25_std": statistics.pstdev(per_seed_bm25_mean) if len(per_seed_bm25_mean) > 1 else 0.0,
         }
-        if pg is not None:
-            e["mrr_base_mean"] = statistics.fmean(rec["base_per_seed"])
-            e["mrr_base_std"] = statistics.pstdev(rec["base_per_seed"]) if len(rec["base_per_seed"]) > 1 else 0.0
-            e["verdict"] = _verdict(rec["bm25_all"], rec["base_all"])
-        else:
+        if pg is None or not rec["seed_base"]:
             e["verdict"] = {"skipped": True, "reason": "no PostgreSQL for ts_rank baseline"}
+            return e
+        per_seed_base_mean = [statistics.fmean(s) for s in rec["seed_base"]]
+        e["mrr_base_mean"] = statistics.fmean(per_seed_base_mean)
+        e["mrr_base_std"] = statistics.pstdev(per_seed_base_mean) if len(per_seed_base_mean) > 1 else 0.0
+        # One VALID paired permutation test per seed (300 obs each) — no cross-seed pooling.
+        per_seed = [_verdict(rec["seed_bm25"][i], rec["seed_base"][i]) for i in range(len(rec["seed_bm25"]))]
+        valid = [v for v in per_seed if not v.get("skipped")]
+        e["per_seed_verdict"] = per_seed
+        if not valid:
+            e["verdict"] = {"skipped": True, "reason": "no valid per-seed pairs"}
+            return e
+        max_p = max(v["p_permutation"] for v in valid)   # worst-case p across seeds
+        min_diff = min(v["mean_diff"] for v in valid)    # worst-case effect across seeds
+        e["verdict"] = {
+            "flip": bool(max_p < 0.05 and min_diff > 0),  # holds iff EVERY seed flips
+            "p_permutation": max_p,
+            "mean_diff": min_diff,
+            "wins": sum(v["wins"] for v in valid),
+            "losses": sum(v["losses"] for v in valid),
+            "ties": sum(v["ties"] for v in valid),
+            "n_queries_per_seed": len(rec["seed_bm25"][0]),
+            "n_seeds": len(valid),
+            "note": "per-seed paired permutation (same corpus, distinct target samples); flip=all seeds, p=worst-case — no pooled pseudo-replication (review M1)",
+        }
         return e
 
     m_sweep = {str(m): _agg(sweep[m]) for m in QUERY_LENGTHS}
