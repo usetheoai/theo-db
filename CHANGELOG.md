@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **M140.3** (engine BM25 de produção — em progresso): fundação do cache do Directory — `theodb_lexical::IndexCache` (lógica pura pgrx-free, testável `cargo test` stock) que invalida por **geração** (mata o reload-por-query do spike M139) de forma **MVCC-correta**: um leitor com snapshot antigo lê uma geração antiga e reconstrói do estado heap que seu snapshot enxerga — nunca serve um build mais novo. 5 testes (cache-hit/nova-geração/geração-decrescente/id-ausente/ids-independentes), zero-pgrx. Superfície pgrx (`bm25_build`/`bm25_search`) + benchmark + ADR-0054 nas fases seguintes
 
 ### Changed
 

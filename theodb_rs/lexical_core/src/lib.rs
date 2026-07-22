@@ -9,6 +9,11 @@
 //! - o backend de **páginas PG** (gate 2/3, ADR 0051) implementa o MESMO trait sobre `am/page` (WAL via
 //!   `GenericXLog`) + catálogo MVCC — vive em `pg_page_store.rs`, atrás de pgrx. O contrato do trait não muda.
 
+// M140.3 — o cache do Directory por-geração (mata o reload-por-query do spike). Lógica pura,
+// pgrx-free, testável com `cargo test` stock (a camada pgrx supre a geração + o build closure).
+pub mod cache;
+pub use cache::IndexCache;
+
 use std::collections::HashMap;
 use std::fmt;
 use std::io::{self, BufWriter, Write};
