@@ -75,8 +75,10 @@ buscar **superioridade de performance no pilar vetorial comprovada por benchmark
   HTAP/aberto"; **jamais** "mais rápido que o AlloyDB no vetor". Reposicionamento formal do North Star: `docs/adr/0033`
   (proposto, decisão do owner — o mandato LOCKED ADR-0002 permanece até assinatura).
 - **Fork é condicional** ao benchmark de gatilho (D3); não forkar antes de medir (anti-sunk-cost).
-- **Columnar (lakehouse, D2)** é uma aposta **diferente e competitiva**, não cópia do AlloyDB — forçado pela
-  licença permissiva (D1 barra AGPL). Paridade interna *literal* (Opção β) exigiria reabrir D1/D2/D7 — fora de
+- **Columnar / lakehouse (D2)** é uma aposta **diferente e competitiva**, não cópia do AlloyDB — forçado pela
+  licença permissiva (D1 barra AGPL). Desde o **M143 (v0.131.0) é 100% own-code** (colunar in-DB `theodb_columnar`
+  + lakehouse Parquet via DataFusion/Arrow) — o **`pg_duckdb` foi removido por completo**, o último componente
+  C++/httpfs do projeto (ADR-0056/0057). Paridade interna *literal* (Opção β) exigiria reabrir D1/D2/D7 — fora de
   escopo até novo ADR. **HA / replicação / control-plane são deploy/plataforma — fora do escopo deste
   repositório** (o `operator/` Go e o `ha/` Patroni foram removidos; este repo é o banco: engine + extensão).
 - **Esforço ≠ Complexidade:** esforço alto é bem-vindo (ScaNN-as-PG-AM, fork com CI de rebase, suíte de
@@ -102,8 +104,8 @@ buscar **superioridade de performance no pilar vetorial comprovada por benchmark
    Metas de design são marcadas como metas, não como fatos.
 6. **100% wire-compatible com PostgreSQL é gate**, não feature opcional.
 7. **Honestidade extrema (Regra 3).** Diga quando algo é incerto, quando um trade-off existe
-   (ex.: nosso columnar é lakehouse/DuckDB, não in-memory como o AlloyDB — D2), e quando uma
-   técnica ainda não foi validada.
+   (ex.: nosso columnar/lakehouse é own-code disk/Parquet — DataFusion/Arrow, sem DuckDB desde o M143 —, não
+   in-memory-auto como o AlloyDB — D2), e quando uma técnica ainda não foi validada.
 
 ---
 

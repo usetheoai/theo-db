@@ -24,6 +24,16 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.131.1] - 2026-07-22
+
+### Changed
+- Repo/tooling: consolida a `knowledge-base/` da raiz (leftover da migração) para dentro de `.claude/knowledge-base/` — 100 artefatos únicos (plans/reviews/grills/discoveries/blueprints/designs/audits/releases/roadmap-runs) movidos via `git mv` (zero conflito), references dupe descartadas (já no `.claude`, re-clonáveis), e `statusline.sh` ajustado para preferir o layout `.claude/` com fallback standalone. Um único knowledge-base a partir de agora
+- Benchmarks (harness interno): review de limpeza — remove método morto `pg_duckdb_available` do core `theodb_bench/db.py` (extensão removida no M143), `run_m59_aq.py` default `--runs` 1→3 (rigor ≥3 iterações), `ruff --fix` de imports/f-strings vazias, e arquiva 6 harness órfãos em `benchmarks/archive/` (audit-trail: arquivar, não deletar)
+
+
+### Fixed
+- Build: `Makefile` `PARTS` estava sem `sql/85-theodb-htap.sql`, divergindo do `Dockerfile` — o install base gerado por `make theodb-build`/`make install` ficava sem as funções `theodb.htap_refresh`/`theodb.olap` (a imagem Docker shipada nunca foi afetada; drift só no caminho de build local/regress)
+
 ## [0.131.0] - 2026-07-22
 
 ### Added

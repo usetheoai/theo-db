@@ -1,4 +1,4 @@
-import struct, time, os, io, json
+import struct, time, os, io
 import psycopg2
 SIFT=os.environ.get('SIFT','/root'); PORT=int(os.environ.get('PGPORT','28817'))
 DB=os.environ.get('PGDB','e1'); USER=os.environ.get('PGUSER','root')

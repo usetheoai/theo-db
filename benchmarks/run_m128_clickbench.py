@@ -13,7 +13,6 @@ NEVER vendored. Self-hosted box (labeled), NOT canonical c6a.4xlarge. No data �
 A query unsupported by theodb_columnar is recorded ERRORED with its typed message — never silently skipped.
 """
 import argparse
-import gzip
 import json
 import os
 import subprocess
@@ -132,7 +131,7 @@ def run(args) -> dict:
     # COPY the sample into the heap copy (fast), then INSERT INTO hits SELECT * FROM hits_heap (columnar writer).
     with open(sample) as fh:
         cur.copy_expert("COPY hits_heap FROM STDIN WITH (FORMAT text)", fh)
-    cur.execute("INSERT INTO hits SELECT * FROM hits_heap")  # noqa: naive table-name replace is safe — no ClickBench query/col contains "hits" beyond the bare table ref (council-benchmark LOW)
+    cur.execute("INSERT INTO hits SELECT * FROM hits_heap")  # SQL estático (sem interpolação) — sem regra ruff a suprimir
     # enable_columnar_agg default OFF = run over columnar STORAGE via PG's native executor; --agg turns the
     # vectorized-aggregate CustomScan pushdown ON. M131 fixed #135, which previously made `--agg` unusable on the
     # real 105-col hits: EXPLAIN of a query with ORDER BY <aggregate> (Q16/Q33) recursed forever in ruleutils'
