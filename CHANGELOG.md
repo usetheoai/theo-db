@@ -23,9 +23,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- **BREAKING:** a imagem `theodb-htap` (M142) foi **aposentada** — o lakehouse é own-code no build default (uma imagem só). `packaging/Dockerfile.htap` e o job CI `htap-image` removidos (M143, ADR-0057)
+
 ### Deprecated
 
 ### Removed
+
+- **BREAKING:** `pg_duckdb` removido por completo (M143) — o último componente C++/httpfs do projeto. O lakehouse (ler/escrever/agregar Parquet externo) é agora own-code (DataFusion/Arrow); +9 MB no binário vs os 118 MB do bundle DuckDB. As funções codegen `theodb.htap_refresh_sql`/`olap_sql` (retornavam texto pg_duckdb) foram substituídas por `theodb.htap_refresh(rel)`/`theodb.olap(rel)` own-code (ADR-0057)
 
 ### Fixed
 
