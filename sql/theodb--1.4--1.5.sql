@@ -10,8 +10,9 @@
 -- for an already-installed 1.4. CREATE OR REPLACE makes it a no-op where the greenfield base already applied the
 -- guarded bodies. Keep this body byte-identical in intent to sql/85-theodb-htap.sql (the objects are defined
 -- there; this delta re-applies them so a non-greenfield extension gains the guard without a reinstall).
--- to_regproc('duckdb.query') is NULL (never errors) when pg_duckdb is absent → this delta is safe to apply on an
--- image WITHOUT pg_duckdb. Idempotent + injection-safe (regclass + %L), fail-fast typed errors (Rule 8).
+-- The guard keys on the INSTALLED EXTENSION (pg_extension — a catalog, always safe to query; immune to a future
+-- duckdb.query overload), so this delta is safe to apply on an image WITHOUT pg_duckdb. Idempotent +
+-- injection-safe (regclass + %L), fail-fast typed errors (Rule 8).
 
 CREATE OR REPLACE FUNCTION theodb.htap_refresh_sql(p_rel regclass)
 RETURNS text
@@ -19,7 +20,7 @@ LANGUAGE plpgsql
 STABLE
 AS $$
 BEGIN
-    IF to_regproc('duckdb.query') IS NULL THEN
+    IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_duckdb') THEN
         RAISE EXCEPTION 'theodb.htap_refresh_sql: pg_duckdb not installed'
             USING HINT = 'The HTAP/lakehouse surface (Parquet snapshots) requires pg_duckdb — pull the theodb-htap image.',
                   ERRCODE = '0A000';   -- feature_not_supported (typed, fail-closed)
@@ -36,7 +37,7 @@ AS $$
 DECLARE
     snap_path text;
 BEGIN
-    IF to_regproc('duckdb.query') IS NULL THEN
+    IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_duckdb') THEN
         RAISE EXCEPTION 'theodb.olap_sql: pg_duckdb not installed'
             USING HINT = 'The HTAP/lakehouse surface (analytical query over Parquet) requires pg_duckdb — pull the theodb-htap image.',
                   ERRCODE = '0A000';   -- feature_not_supported (typed, fail-closed)

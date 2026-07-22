@@ -17,7 +17,7 @@ INSERT INTO _htap_guard_probe VALUES ('a', 10), ('b', 20);
 
 DO $$
 DECLARE
-    has_duck boolean := to_regproc('duckdb.query') IS NOT NULL;
+    has_duck boolean := EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_duckdb');
     txt      text;
     raised   boolean;
     probe    regclass := '_htap_guard_probe'::regclass;

@@ -43,6 +43,12 @@ COPY --from=pgduckdb-builder /usr/share/postgresql/$PG_MAJOR/extension/pg_duckdb
 RUN grep -q "shared_preload_libraries.*pg_duckdb" /usr/share/postgresql/$PG_MAJOR/postgresql.conf.sample || \
     echo "shared_preload_libraries = 'pg_duckdb'" >> /usr/share/postgresql/$PG_MAJOR/postgresql.conf.sample
 
+# Segurança (defense-in-depth, M142 review): community extensions do DuckDB carregam código não-auditado
+# (vetor RCE/SSRF). `off` já é o default do pg_duckdb v1.1.1, mas fixamos explícito para não depender do default
+# do upstream num rebump futuro. O smoke/CI assere `off` (o gate que o m61-smoke tinha e ficou órfão no tier-out).
+RUN grep -q "duckdb.allow_community_extensions" /usr/share/postgresql/$PG_MAJOR/postgresql.conf.sample || \
+    echo "duckdb.allow_community_extensions = off" >> /usr/share/postgresql/$PG_MAJOR/postgresql.conf.sample
+
 # libcurl4 é requerido pelo pg_duckdb.so (DuckDB httpfs). ca-certificates já veio da base (theodb_rs AI surface).
 RUN apt-get update && \
     apt-get install -y --no-install-recommends libcurl4 && \

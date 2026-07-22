@@ -51,8 +51,9 @@ wait_healthy "$CTR_D"
 echo "== DEFAULT smoke =="
 [ "$(psql_d "$CTR_D" "SELECT count(*) FROM pg_extension WHERE extname='pg_duckdb'")" = "0" ] \
   || fail "default NÃO deveria ter pg_duckdb"
-psql_d "$CTR_D" "SHOW shared_preload_libraries" | grep -q pg_duckdb \
-  && fail "default NÃO deveria ter pg_duckdb no shared_preload_libraries" || true
+# captura-depois-assere (não mascarar falha do psql com `&& fail || true`)
+SP_D="$(psql_d "$CTR_D" "SHOW shared_preload_libraries")"
+if echo "$SP_D" | grep -q pg_duckdb; then fail "default NÃO deveria ter pg_duckdb no shared_preload_libraries (got: $SP_D)"; fi
 # theodb_rs + tipo vector own-code
 [ "$(psql_d "$CTR_D" "SELECT count(*) FROM pg_extension WHERE extname IN ('theodb','theodb_rs')")" = "2" ] \
   || fail "default: theodb/theodb_rs ausentes"
@@ -86,6 +87,10 @@ echo "== HTAP smoke =="
 [ "$(psql_d "$CTR_H" "SELECT count(*) FROM pg_extension WHERE extname='pg_duckdb'")" = "1" ] \
   || fail "htap: pg_duckdb ausente"
 psql_d "$CTR_H" "SHOW shared_preload_libraries" | grep -q pg_duckdb || fail "htap: pg_duckdb não no preload"
+# segurança (defense-in-depth): community extensions do DuckDB DEVEM estar off (código não-auditado). Gate que o
+# m61-smoke tinha e ficou órfão no tier-out (M142 security review).
+psql_d "$CTR_H" "SHOW duckdb.allow_community_extensions" | grep -qi off \
+  || fail "htap: duckdb.allow_community_extensions não é off (segurança)"
 # M62 e2e: refresh (COPY parquet) → register → olap (duckdb.query) executado pelo cliente
 # amount = double precision (não numeric sem precisão): o COPY→Parquet do pg_duckdb rejeita NUMERIC sem precisão
 # ("DuckDB requires the precision of a NUMERIC to be set") — a mesma escolha do harness M61/M62. É limitação
@@ -100,7 +105,8 @@ psql_d "$CTR_H" "SELECT theodb.htap_register('m142h'::regclass, '$PARQUET_PATH')
 OLAP_SQL="$(psql_d "$CTR_H" "SELECT theodb.olap_sql('m142h'::regclass)")"
 echo "$OLAP_SQL" | grep -q "duckdb.query" || fail "htap: olap_sql não retornou duckdb.query"
 rows="$(docker exec "$CTR_H" psql -U postgres -tAc "$OLAP_SQL" 2>&1 || true)"
-echo "$rows" | grep -q "^a|2|15" || fail "htap: olap e2e resultado inesperado (got: $rows)"
+echo "$rows" | grep -q "^a|2|15" || fail "htap: olap e2e linha 'a' inesperada (got: $rows)"
+echo "$rows" | grep -q "^b|1|5"  || fail "htap: olap e2e linha 'b' inesperada (got: $rows)"
 # htap_guard_test.sql (caminho positivo). Gate no EXIT CODE (robusto); imprime output em caso de falha.
 docker cp sql/tests/htap_guard_test.sql "$CTR_H":/tmp/g.sql
 if ! docker exec "$CTR_H" psql -U postgres -v ON_ERROR_STOP=1 -f /tmp/g.sql > /tmp/m142_g_htap.out 2>&1; then
@@ -122,6 +128,10 @@ D_MB="$(size_mb "$DEFAULT_TAG")"; H_MB="$(size_mb "$HTAP_TAG")"; DELTA=$((H_MB -
 echo "== DELTA: default=${D_MB}MB htap=${H_MB}MB delta=${DELTA}MB (min=${MIN_DELTA_MB}) =="
 [ "$DELTA" -ge "$MIN_DELTA_MB" ] || fail "delta ${DELTA}MB < ${MIN_DELTA_MB}MB (o tier-out não enxugou o esperado)"
 
+# tamanho do pg_duckdb.so (medido no harness — proveniência reprodutível, M142 benchmark review M1)
+SO_BYTES="$(docker run --rm --entrypoint bash "$HTAP_TAG" -lc 'stat -c%s /usr/lib/postgresql/*/lib/pg_duckdb.so' 2>/dev/null | head -1 || echo 0)"
+SO_MB=$(( SO_BYTES / 1024 / 1024 ))
+
 # ── registra a evidência medida ─────────────────────────────────────────────────────────────────
 mkdir -p "$(dirname "$BENCH_DOC")"
 {
@@ -129,6 +139,7 @@ mkdir -p "$(dirname "$BENCH_DOC")"
   echo "- default (\`$DEFAULT_TAG\`): **${D_MB} MB**"
   echo "- theodb-htap (\`$HTAP_TAG\`): **${H_MB} MB**"
   echo "- **delta: ${DELTA} MB** (≥ ${MIN_DELTA_MB} MB — o bundle DuckDB estático + libcurl4)"
+  echo "- \`pg_duckdb.so\` (bundle DuckDB estático): **${SO_MB} MB** (${SO_BYTES} bytes, \`stat\` no harness)"
 } > /tmp/m142_measured.txt
 echo "medidas em /tmp/m142_measured.txt (colar em $BENCH_DOC)"
 

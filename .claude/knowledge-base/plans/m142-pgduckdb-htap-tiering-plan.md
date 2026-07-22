@@ -38,6 +38,8 @@ resolve esse follow-up: default enxuta, htap opt-in.
 |---|---|---|---|---|
 | `Dockerfile` | 108 | `68ae076` (2026-07-21) | Build multi-stage: theodb_rs + pg_duckdb → runtime | `CREATE EXTENSION theodb/theodb_rs CASCADE` no init NÃO pode quebrar sem pg_duckdb; theodb_rs+columnar intactos |
 | `sql/85-theodb-htap.sql` | 193 | `5caf3ed` (2026-07-09) | Codegen plpgsql da superfície M62 (build de statements, não executa DuckDB) | Funções continuam `CREATE`-áveis sem pg_duckdb; assinaturas inalteradas; extensão `theodb` idêntica nas 2 imagens |
+| `sql/theodb--1.4--1.5.sql` (NEW) | 0 | — | (a criar) delta de upgrade in-place que re-aplica as 2 funções guardadas (disciplina M137 — mudar o corpo exige caminho de upgrade p/ instalações não-greenfield) | byte-idêntico em intenção ao `sql/85`; `CREATE OR REPLACE` idempotente |
+| `theodb.control` | 5 | — | metadados da extensão umbrella | bump `default_version` 1.4→1.5 (o delta acima) |
 | `.github/workflows/ci.yml` | 465 | `24d89a3` (2026-07-21) | CI: builda a imagem default + smokes + bench | Jobs default existentes continuam verdes; sem regressão |
 | `README.md` | 205 | `d9fcd20` (2026-07-22) | Descrição de capacidades | Honestidade de posicionamento (public-copy.md) |
 | `packaging/Dockerfile.htap` (NEW) | 0 | — | (a criar) imagem htap = default + pg_duckdb | — |

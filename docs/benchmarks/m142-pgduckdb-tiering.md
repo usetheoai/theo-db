@@ -19,10 +19,12 @@ a superfície HTAP codegen falha-claro (`0A000`, com dica para a imagem htap).
 | `theodb:m142-default` (sem pg_duckdb) | **712 MB** |
 | `theodb:m142-htap` (default + pg_duckdb) | **887 MB** |
 | **Delta** | **175 MB** (≥ 150 MB — gate do DoD) |
+| `pg_duckdb.so` (dentro da htap, `stat` no harness) | **118 MB** (124.213.040 bytes) |
 
-O delta é o `pg_duckdb.so` (bundle DuckDB estático, `DUCKDB_BUILD=ReleaseStatic`) — **~118 MB** medido
-(`124.213.040 bytes`) — mais o `libcurl4` (httpfs) e o overhead de layer. Consistente com o "+170 MB" que o
-ADR-0020 estimou para a adoção do pg_duckdb.
+O delta é o `pg_duckdb.so` (bundle DuckDB estático, `DUCKDB_BUILD=ReleaseStatic`) — **~118 MB**
+(`124.213.040 bytes`, medido pelo harness via `stat -c%s` no `pg_duckdb.so` da imagem htap — o bloco medido em
+`scripts/m142-tiering-validate.sh` emite este número) — mais o `libcurl4` (httpfs) e o overhead de layer.
+Consistente com o "+170 MB" que o ADR-0020 **estimou** para a adoção do pg_duckdb.
 
 > Nota de honestidade (Rule 3): a primeira tentativa de medição usou `docker image inspect --format {{.Size}}`,
 > que reportou valores divergentes (168/214 MB) neste Docker; a medição correta é `docker images` (712/887 MB),
