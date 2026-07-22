@@ -46,6 +46,23 @@ caminhos exercitados não violam nenhuma asserção do engine. (`initdb` recusa 
 Prioridade de burn-down (#151): `unsafe_op_in_unsafe_fn` **antes do M139** (código unsafe novo), depois
 `dead_code`/`unused`, `deprecated`, `PS005` (search_path).
 
+## Verificação no CI (os gates barram um PR de verdade)
+
+Ao verificar no CI, descobri que o runner self-hosted **nunca tivera o toolchain Rust+pgrx** para o usuário
+`ghrunner` — só o Docker/shell fora provisionado (M133). Por isso **nenhum** job Rust rodava (o `license-gate`,
+que eu supunha verde, na verdade falhava com `/home/ghrunner/.cargo/env: No such file or directory`). Provisionei
+o ghrunner (rustc 1.97.1, cargo-pgrx **0.19.0** — casa o `Cargo.toml` —, cargo-deny/machete, e `cargo pgrx init
+--pg18` que compila um PG **com --enable-cassert**). Correção de infra load-bearing: **todo** job Rust do CI
+passa a funcionar, não só os do M136.
+
+Estado final no CI (self-hosted, ghrunner):
+
+| Workflow | Conclusão | O que roda |
+|---|---|---|
+| `license-gate` | **licenses ok** (exit 0) | `cargo deny check licenses` |
+| `lint-rust` | **success** | metadata --locked + fmt --check + clippy(baseline) + machete + doc |
+| `cassert-sql-safety` | **success** | `cargo pgrx install` + pgspot(baseline) + cassert-smoke(4 AMs + columnar) |
+
 ## Reprodução
 
 ```bash

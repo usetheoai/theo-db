@@ -23,6 +23,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Removed
 
 ### Fixed
+- Runner de CI self-hosted provisionado com o toolchain Rust+pgrx (rustc 1.97.1, cargo-pgrx 0.19.0, `cargo pgrx init --pg18` com `--enable-cassert`) para o usuário `ghrunner` — antes só Docker/shell estavam provisionados, então NENHUM job Rust rodava (o `license-gate` falhava silenciosamente). Agora os 3 gates Rust rodam verdes no CI (M136)
 
 ### Security
 
