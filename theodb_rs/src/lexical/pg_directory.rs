@@ -62,6 +62,19 @@ impl SegmentStore for MemStore {
     }
 }
 
+impl MemStore {
+    /// Snapshot de todos os arquivos `(path, bytes)` — usado pelo flush-to-PG (main thread) para persistir o
+    /// buffer no heap `bytea` após `writer.commit()`. Retorna cópias (o backend PG serializa fora do lock).
+    pub fn files(&self) -> Vec<(PathBuf, Vec<u8>)> {
+        self.files
+            .read()
+            .unwrap()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    }
+}
+
 /// Um `Directory` do Tantivy cujo storage é NOSSO (`SegmentStore`), não o filesystem. Clonável (Arc) — o Tantivy
 /// exige `Directory: Clone + Send + Sync + 'static`. `watch` é nível-Directory (notifica em `atomic_write` de
 /// `meta.json`); o storage fica no `SegmentStore`.

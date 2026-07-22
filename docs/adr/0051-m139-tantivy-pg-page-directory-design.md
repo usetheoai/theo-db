@@ -50,6 +50,25 @@ O gate 1 provou que o núcleo (`Directory` + trait de storage) é **pgrx-free** 
 de páginas é pgrx-bound (`pg_sys`), testável via `cargo pgrx test` OU um teste SQL de integração num PG real
 (padrão dos AMs). A separação núcleo-pgrx-free ↔ backend-pgrx é a semente do **crate núcleo do M140**.
 
+## Achado empírico (2026-07-21) que CORRIGE o design: buffer-then-flush é obrigatório
+
+Um experimento (`probe_which_threads_call_directory`, crate standalone) mediu de quais threads o Tantivy chama
+o `Directory`: **mesmo com `writer_with_num_threads(1)`, os `write` vêm de 4 threads distintas, não só a main.**
+O Tantivy usa threads (rayon/merge/background) que chamam os métodos do `Directory` diretamente.
+
+**Consequência dura:** SPI e o buffer manager do PG são **backend-thread-only** — chamá-los de uma thread do
+Tantivy **crasharia o backend** (a classe exata de bug que este spike existe para pegar). Logo, o `SegmentStore`
+de páginas PG **NÃO pode** tocar o PG no `write`. A arquitetura correta é **buffer-then-flush**:
+
+1. Durante a indexação, o `SegmentStore` bufferiza em memória (thread-safe, ZERO chamadas PG) — qualquer thread.
+2. Após `writer.commit()` RETORNAR (main thread), um `flush_to_pg(index_id)` persiste os arquivos bufferizados
+   na tabela heap `bytea` via SPI — operação de main thread, dentro da txn corrente.
+3. Ao abrir/reabrir, `load_from_pg(index_id)` (main thread) popula o buffer a partir do heap; o Tantivy lê do buffer.
+
+Isto é o que o ParadeDB resolve com arquitetura pesada; para o spike, o buffer-then-flush sobre uma tabela heap
+`bytea` reusa **toda** a máquina do PG (TOAST + MVCC + WAL) sem código de página/WAL custom — mais parsimonioso
+que a proposta original de `am/page` (que fica como otimização de gate 4 se o TOAST for lento demais).
+
 ## Alternativas rejeitadas
 
 - **Copiar o `MVCCDirectory` do ParadeDB** (105k LoC, AGPL) — D1 barra; estudamos, não copiamos.

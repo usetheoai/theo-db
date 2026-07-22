@@ -115,3 +115,19 @@ conflitos, `cargo deny` verde; (b) o núcleo é **pgrx-free** — o `cargo test`
 PG), então o núcleo lexical deve viver num **crate separado sem pgrx** (a direção do M140, "crate núcleo sem
 pgrx") e é testável standalone. Gates 2 (MVCC), 3 (crash-real+WAL sobre páginas PG) e 4 (custo vs pg_textsearch)
 seguem — são a continuação de semanas do spike.
+
+## Gate 2 (MVCC) — PROVADO (medido 2026-07-21, PG18 real)
+
+Arquitetura **buffer-then-flush** (forçada pelo probe de threads): o buffer é `MemStore` (pgrx-free, Tantivy
+escreve de qualquer thread); `pg_backing::flush(index_id, &store)` roda na main thread pós-commit e persiste no
+heap `theodb.lexical_files(index_id, path, data bytea)` — MVCC+WAL+TOAST do PG de graça (Rule 9).
+
+Medido (função `lexical_spike_*`, instalada via `cargo pgrx install --features spike-lexical`):
+- **Round-trip:** `roundtrip('lazy')=1`, `roundtrip('missing')=0` — bytes sobrevivem buffer→flush→heap→load→search.
+- **MVCC cross-session (DoD literal):** sessão A faz `BEGIN; flush_only(999); pg_sleep; COMMIT`; sessão B mede
+  `search(999,'lazy')` = **0 durante a txn A aberta** (snapshot de B não vê) e **1 após o COMMIT** (visível).
+  `GATE2_MVCC_OK`.
+
+**Consequência:** a integração transacional (a parte cara — 105k LoC no ParadeDB) FUNCIONA para o spike via
+buffer-then-flush + heap MVCC, sem código de página/WAL custom. Falta o gate 3 (crash-real com replay — o heap
+é WAL-logged, então PG recupera; o teste é `SIGABRT` mid-flush + replay) e o gate 4 (custo vs pg_textsearch).

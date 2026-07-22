@@ -6,6 +6,7 @@
 //! (ADR 0051):** o `SegmentStore` de páginas PG (WAL via `GenericXLog`, MVCC-via-catálogo) pluga pela mesma
 //! porta. Tudo atrás da feature `spike-lexical` para não inchar o crate shipado antes do veredito GO.
 
+pub mod pg_backing;
 pub mod pg_directory;
 
 pub use pg_directory::{MemStore, PgDirectory, SegmentStore};
