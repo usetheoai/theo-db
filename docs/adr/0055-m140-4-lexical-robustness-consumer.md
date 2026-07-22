@@ -31,11 +31,14 @@ construção tocar o PG (SPI/pg_sys) de qualquer worker thread (o crate não lin
 numa thread teria de mover código para fora do núcleo → pega no gate `cargo tree | grep -c pgrx == 0` + review. O
 outro item #153 (`panic="unwind"`) já é gateado (M140.2 review).
 
-**D3 — Fecha o straddle SPI do M140.3 review LOW (leituras read-only).** Tanto `read_generation` (`Spi::get_one`)
-quanto `load` (`Spi::connect(|c| c.select(...))`) usam SPI **read-only** → ambos observam o snapshot ativo da
-statement, não snapshots frescos independentes. Logo, dentro de uma `bm25_search`, a geração lida e os bytes
-carregados são consistentes (tag==conteúdo) sob RC e RR — um commit concorrente não intercala entre as duas
-leituras. Provado pelo eixo MVCC RC do script de robustez.
+**D3 — Fecha o straddle SPI do M140.3 review LOW (leituras read-only via `c.select`, NÃO `get_one`).** O review
+do M140.4 (council-rust-pgrx) provou que `Spi::get_one`/`get_one_with_args` em pgrx 0.19 são `connect_mut`/
+`update` → `mark_mutable` → `read_only=false`: abrem um snapshot **fresco por statement** (reabrindo o straddle)
+E marcam a txn mutável (quebra em read replica + queima um XID por busca). **A correção:** `read_generation` usa
+`Spi::connect(|c| c.select(...))` — SPI **read-only**, sem `mark_mutable`. Assim, `read_generation` E o `load`
+(também `c.select`, `pg_backing.rs`) reusam o **ActiveSnapshot da statement** sob RC e RR → geração lida e bytes
+carregados consistentes (tag do cache == conteúdo); nenhum snapshot fresco entre as duas leituras. Bônus:
+`bm25_search` roda em **read replica** sem burn de XID. Provado pelo eixo MVCC (RR+RC) do script de robustez.
 
 **D4 — Consumidor theo-lens: PROOF + wiring testada agora; CUTOVER de produção = M141.** M140.4 entrega:
 - **Proof e2e** (`scripts/m140-4-consumer-theolens.sh`, `docs/benchmarks/m140-4-data/consumer-evidence.txt`,
@@ -56,8 +59,9 @@ leituras. Provado pelo eixo MVCC RC do script de robustez.
   mesmo do CI cassert).
 - **Separação estrutural (D2):** materializa a convenção #153 numa garantia que o compilador+gate impõem, não em
   code-review manual.
-- **Read-only fecha o straddle (D3):** sem restruturar o cache; a invariante tag==conteúdo é airtight por semântica
-  de SPI read-only.
+- **Read-only fecha o straddle (D3):** sem restruturar o cache; a invariante tag==conteúdo é airtight porque
+  `read_generation` e `load` usam `c.select` (SPI read-only, sem `mark_mutable`) → reusam o ActiveSnapshot da
+  statement. (O M140.4 review corrigiu a premissa falsa de que `Spi::get_one` seria read-only — não é.)
 - **Proof-agora / cutover-M141 (D4):** o dogfood de 30 dias é explicitamente o M141 (`dogfood-golden-rule.md`);
   colapsar o cutover aqui violaria o boundary. A wiring testada + o proof e2e são a evidência que o M141 consome.
 
@@ -67,7 +71,9 @@ leituras. Provado pelo eixo MVCC RC do script de robustez.
 - **Cutover total do theo-lens agora** — rejeitado: é o escopo do M141 (30 dias de dogfood).
 - **Editar o `listTraces` do theo-lens agora com o caminho bm25** — rejeitado: adicionaria código não-exercido ao
   caminho quente antes do cutover (dead-code liability); a wiring self-contained + testada é a forma honesta.
-- **Restruturar o cache p/ ler geração+heap numa query só** — rejeitado: o read-only já garante a consistência (D3).
+- **Restruturar o cache p/ ler geração+heap numa query só** — desnecessário: o fix `c.select` read-only já garante
+  a consistência tag==conteúdo (ambas as leituras reusam o ActiveSnapshot da statement). Seria complexidade extra
+  sem benefício medido.
 
 ## Consequências
 

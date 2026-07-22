@@ -31,12 +31,18 @@ echo "antes do crash: bm25_search(300,'blk_crashzeta') top id = $BEFORE   [esper
 PM=$(head -1 "$DATA/postmaster.pid")
 echo "== SIGABRT no postmaster pid $PM =="
 kill -ABRT "$PM" 2>/dev/null; sleep 4
-$PSQL -c "SELECT 1" >/dev/null 2>&1 && echo "AVISO: servidor ainda responde" || echo "servidor caiu (esperado)"
+if $PSQL -c "SELECT 1" >/dev/null 2>&1; then DOWN=0; echo "AVISO: servidor ainda responde (crash NÃO pegou)"; else DOWN=1; echo "servidor caiu (esperado)"; fi
 start_pg; sleep 6
-grep -qE "redo|recovery|replay" "$LOG" 2>/dev/null && echo "WAL replay ocorreu no restart"
+if grep -qE "redo|recovery|replay|starting up" "$LOG" 2>/dev/null; then REPLAYED=1; echo "recovery/replay ocorreu no restart"; else REPLAYED=0; echo "AVISO: sem sinal de recovery no log"; fi
 AFTER=$($PSQL -c "SELECT id FROM bm25_search(300,'blk_crashzeta',10) ORDER BY score DESC LIMIT 1")
-echo "após crash+replay: top id = $AFTER   [esperado 2]"
-if [ "$BEFORE" = "2" ] && [ "$AFTER" = "2" ]; then echo "CRASH_OK"; else echo "CRASH_FAIL (BEFORE=$BEFORE AFTER=$AFTER)"; FAIL=1; fi
+echo "após crash+recovery: top id = $AFTER   [esperado 2]"
+# Gate honesto (review M2): CRASH_OK exige BEFORE==AFTER==2 E que o crash PEGOU (DOWN) E que houve recovery
+# no restart (REPLAYED) — não só "dado presente após um restart" (que um restart limpo satisfaria).
+if [ "$BEFORE" = "2" ] && [ "$AFTER" = "2" ] && [ "$DOWN" = "1" ] && [ "$REPLAYED" = "1" ]; then
+  echo "CRASH_OK — índice bm25 COMMITADO durável através de SIGABRT + recovery"
+else
+  echo "CRASH_FAIL (BEFORE=$BEFORE AFTER=$AFTER DOWN=$DOWN REPLAYED=$REPLAYED)"; FAIL=1
+fi
 
 # ================= 2. VACUUM (após rebuilds, sem corromper) =================
 $PSQL -c "CREATE TABLE big (id bigint, body text)" >/dev/null 2>&1
@@ -50,7 +56,13 @@ DEAD_AFTER=$($PSQL -c "SELECT coalesce(n_dead_tup,0) FROM pg_stat_user_tables WH
 # a busca segue correta após o VACUUM (sem corrupção do índice vivo)
 VAC_HIT=$($PSQL -c "SELECT count(*) FROM bm25_search(301,'vixenzz',10)")
 echo "VACUUM: n_dead_tup antes=$DEAD_BEFORE depois=$DEAD_AFTER ; busca pós-VACUUM hits=$VAC_HIT"
-if [ "${VAC_HIT:-0}" -gt "0" ] && [ "${DEAD_AFTER:-99}" -le "${DEAD_BEFORE:-0}" ]; then echo "VACUUM_OK"; else echo "VACUUM_FAIL"; FAIL=1; fi
+# Gate honesto (review L1): exige que HAVIA tuplas mortas (rebuilds deixaram lixo) E que o VACUUM
+# RECUPEROU de fato (DEAD_AFTER < DEAD_BEFORE, não só <=) E a busca segue funcional (sem corrupção).
+if [ "${VAC_HIT:-0}" -gt "0" ] && [ "${DEAD_BEFORE:-0}" -gt "0" ] && [ "${DEAD_AFTER:-99}" -lt "${DEAD_BEFORE:-0}" ]; then
+  echo "VACUUM_OK"
+else
+  echo "VACUUM_FAIL (dead $DEAD_BEFORE->$DEAD_AFTER, hits=$VAC_HIT)"; FAIL=1
+fi
 
 # ================= 3. MVCC — REPEATABLE READ e READ COMMITTED =================
 mvcc_test() { # $1 = isolation level; imprime "A_sees_new=<n>"

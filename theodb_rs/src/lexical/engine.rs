@@ -64,26 +64,36 @@ fn bump_generation(index_id: i64) {
 /// estados válidos, não erro. O `coalesce` garante exatamente uma linha (evita o `InvalidPosition` de
 /// `get_one` sobre result-set vazio); o guard `to_regclass` cobre a tabela ainda inexistente.
 ///
-/// M140.4 (D4, fecha o M140.3 review LOW de straddle): tanto `read_generation` (`Spi::get_one`) quanto
-/// `load` (`Spi::connect(|c| c.select(...))`) usam SPI **read-only** — ambos observam o snapshot ativo da
-/// statement, não snapshots frescos independentes. Logo, dentro de uma única `bm25_search`, a geração lida
-/// e os bytes carregados são consistentes (tag==conteúdo) sob RC e RR; um commit concorrente não intercala
-/// entre as duas leituras porque nenhuma delas re-abre snapshot. Provado por `m140-4-lexical-robustness.sh`.
+/// M140.4 (D3, fecha o M140.3 review LOW de straddle E o HIGH do M140.4 review): usa SPI **read-only**
+/// (`Spi::connect` + `c.select`), NUNCA `Spi::get_one` — que em pgrx 0.19 é `connect_mut`/`update` →
+/// `mark_mutable` → `read_only=false` → abre um snapshot FRESCO por statement (reabrindo o straddle) E marca
+/// a txn mutável (quebra em read replica: "cannot assign TransactionId during recovery" + queima um XID por
+/// busca). Com `c.select` (read-only), esta leitura E o `load` (também `c.select`, `pg_backing.rs`) reusam o
+/// ActiveSnapshot da statement → veem o MESMO snapshot: tag do cache == conteúdo, sob RC e RR; e `bm25_search`
+/// roda em read replica sem burn de XID. Retorna 0 quando o catálogo não existe (nenhum build) ou o índice
+/// não tem linha (índice vazio) — ambos estados válidos.
 fn read_generation(index_id: i64) -> u64 {
-    let table_exists: bool =
-        Spi::get_one("SELECT to_regclass('theodb.lexical_index_meta') IS NOT NULL")
+    Spi::connect(|c| {
+        let exists = c
+            .select("SELECT to_regclass('theodb.lexical_index_meta') IS NOT NULL", Some(1), &[])
             .ok()
-            .flatten()
+            .and_then(|t| t.into_iter().next())
+            .and_then(|r| r.get::<bool>(1).ok().flatten())
             .unwrap_or(false);
-    if !table_exists {
-        return 0;
-    }
-    let g: Option<i64> = Spi::get_one_with_args(
-        "SELECT coalesce((SELECT generation FROM theodb.lexical_index_meta WHERE index_id = $1), 0)",
-        &[index_id.into()],
-    )
-    .expect("lexical: read generation");
-    g.unwrap_or(0).max(0) as u64
+        if !exists {
+            return 0u64;
+        }
+        c.select(
+            "SELECT coalesce((SELECT generation FROM theodb.lexical_index_meta WHERE index_id = $1), 0)",
+            Some(1),
+            &[index_id.into()],
+        )
+        .ok()
+        .and_then(|t| t.into_iter().next())
+        .and_then(|r| r.get::<i64>(1).ok().flatten())
+        .unwrap_or(0)
+        .max(0) as u64
+    })
 }
 
 /// Abre um `Index` do estado heap VISÍVEL ao snapshot (reusa `load`, que é MVCC — M139 gate 2).

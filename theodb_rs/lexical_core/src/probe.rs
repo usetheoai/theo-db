@@ -79,7 +79,9 @@ mod tests {
             tantivy::IndexSettings::default(),
         )
         .expect("create");
-        let mut w = index.writer_with_num_threads(threads, 30_000_000).expect("writer");
+        // o Tantivy exige ≥15MB de arena POR thread; o heap total escala com o nº de threads.
+        let mut w =
+            index.writer_with_num_threads(threads, threads.max(1) * 15_000_000).expect("writer");
         for i in 0..n_docs {
             w.add_document(doc!(body => format!("documento numero {i} sobre raposas preguicosas rapidas {}", i % 13)))
                 .expect("add");
@@ -91,15 +93,19 @@ mod tests {
     }
 
     #[test]
-    fn test_directory_calls_recorded_and_store_is_pgrx_free() {
-        // O store vive no crate pgrx-free (`theodb_lexical`): compilar este teste JÁ prova que nenhum
-        // caminho do `SegmentStore` (chamado de qualquer thread do Tantivy) pode tocar o PG — o crate
-        // não linka pgrx. O record documenta que o Directory É exercido durante o build.
+    fn test_directory_called_from_multiple_threads_all_pgrx_free() {
+        // DEMONSTRA o hazard #153 real: um build multi-thread (4 threads + commits repetidos → merges)
+        // chama o `SegmentStore` de MÚLTIPLAS threads. A GARANTIA de segurança, porém, é ESTRUTURAL e
+        // imposta pelo CI, não por este record: o `ThreadRecordingStore` vive no crate pgrx-free
+        // (`theodb_lexical`), e `lint-rust.yml` falha o build se `cargo tree -p theodb_lexical | grep -c
+        // pgrx != 0`. Logo é impossível por construção um `SegmentStore` do núcleo tocar o PG (SPI/pg_sys)
+        // de QUALQUER thread — uma regressão teria de mover código para fora do núcleo (pega no gate + review).
         let store = Arc::new(ThreadRecordingStore::new());
-        build_index(store.clone(), 100, 1);
+        build_index(store.clone(), 2000, 4);
         assert!(
-            store.thread_count() >= 1,
-            "o Directory deve ser chamado ao menos uma vez durante o build"
+            store.thread_count() > 1,
+            "o Tantivy deve chamar o Directory de >1 thread num build multi-thread (registrado: {})",
+            store.thread_count()
         );
     }
 

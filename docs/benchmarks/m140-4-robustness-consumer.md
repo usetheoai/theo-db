@@ -34,8 +34,11 @@ M140_4_ROBUSTNESS_OK
 | **MVCC RR** | Leitor com snapshot antigo (REPEATABLE READ) **NÃO** vê o build de outra sessão (0) — o cache é keyed pela geração que o snapshot enxerga. |
 | **MVCC RC** | Sob READ COMMITTED, o próximo statement do leitor vê o build (1) — o cache invalida corretamente no snapshot novo (não serve stale). |
 
-O **straddle SPI** do M140.3 review (LOW) fica fechado: `read_generation` e `load` usam SPI **read-only** →
-observam o mesmo snapshot da statement → tag do cache == conteúdo carregado, sob RC e RR (ADR-0055 D3).
+O **straddle SPI** (M140.3 review LOW + M140.4 review HIGH) fica fechado: `read_generation` foi corrigido para
+usar `Spi::connect(|c| c.select(...))` — SPI **read-only** (o M140.4 review provou que `Spi::get_one` NÃO é
+read-only em pgrx 0.19: marca a txn mutável → snapshot fresco por statement + quebra em replica). Com `c.select`,
+`read_generation` e `load` reusam o ActiveSnapshot da statement → tag do cache == conteúdo carregado, sob RC e RR;
+e `bm25_search` roda em read replica sem burn de XID (ADR-0055 D3).
 
 ## Evidência 2 — probe de thread-safety #153 (`probe.rs`, `cargo test -p theodb_lexical`)
 
