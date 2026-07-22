@@ -17,4 +17,16 @@ else
   echo "PASS [573f6c402ab07757] graph_expand example is aliased (or renamed) — copy-safe"
 fi
 
+# --- finding d2d823232022541a (HIGH, system_design) -------------------------
+# The columnar TAM is INSERT-only: UPDATE/DELETE/tuple-lock/parallel/bitmap/sample/index
+# build are typed-error stubs (theodb_rs/src/am/columnar.rs:15). The doc's caveats block
+# must disclose this DML contract — a doc that never mentions UPDATE/DELETE hides the
+# largest operational caveat.
+if grep -qE 'UPDATE.*DELETE|DELETE.*UPDATE' docs/features/14-analitico-colunar.md; then
+  echo "PASS [d2d823232022541a] 14-analitico-colunar.md discloses the INSERT-only DML contract (UPDATE/DELETE caveat present)"
+else
+  echo "FAIL [d2d823232022541a] 14-analitico-colunar.md: no UPDATE/DELETE typed-error caveat — INSERT-only DML surface undisclosed (columnar.rs:15)"
+  FAIL=1
+fi
+
 exit $FAIL

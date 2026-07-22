@@ -22,6 +22,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Removed
 
 ### Fixed
+- Docs (`docs/features/14-analitico-colunar.md`): bloco "Caveats honestos" agora divulga o contrato DML append-only — `UPDATE`/`DELETE`/tuple-lock/parallel/bitmap/sample/TID-range/`CREATE INDEX` falham com erro tipado em tabelas `theodb_columnar` (caveat 4). Regressão coberta por `scripts/docs-features-lint.sh`
 - Docs (`docs/features/13-grafo-nativo.md`): exemplo de `graph_expand` quebrava copiado verbatim — a função `RETURNS SETOF bigint` e a coluna default chama-se `graph_expand`, não `node`; exemplo agora aliasa a SRF (`AS t(node)`). Regressão coberta por `scripts/docs-features-lint.sh`
 
 ### Security

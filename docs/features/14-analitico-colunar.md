@@ -20,7 +20,10 @@
 > tabela colunar funciona como storage e o agregado roda pelo plano nativo do PostgreSQL. (2) Nem toda
 > forma de agregado faz pushdown — o que não é admitido cai (fail-safe) para o plano nativo (ver seção 9).
 > (3) É armazenamento colunar **em disco** own-code (não in-memory automático); a paridade *literal* com o
-> AlloyDB columnar está fora de escopo (CLAUDE.md, D2).
+> AlloyDB columnar está fora de escopo (CLAUDE.md, D2). (4) A superfície DML é **append-only / INSERT-only**:
+> `UPDATE`, `DELETE`, tuple-lock, parallel scan, bitmap scan, sample scan, TID-range scan e `CREATE INDEX`
+> falham com **erro tipado** em tabelas `theodb_columnar` (stubs `error!` — `theodb_rs/src/am/columnar.rs:15`,
+> `:237`). Use tabelas heap para dados mutáveis; a colunar é para carga analítica append-only.
 
 Esta página cobre como criar tabelas colunares no TheoDB com o Table Access Method own-code `theodb_columnar`,
 ligar o pushdown vetorizado de agregados, e quais formas de `count`/`sum`/`avg`/`min`/`max`, `GROUP BY` e
