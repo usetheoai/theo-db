@@ -13,12 +13,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- Spike M139 (gate 4 MEDIDO + VEREDITO GO): head-to-head Tantivy-in-PG vs `pg_textsearch` no mesmo corpus (2000 docs) — índice **2,8× menor** (68K vs 192K), latência competitiva (33 vs 40 ms). **Todos os 4 gates do spike medidos em PG18 real (index+search, MVCC, crash-real, custo) → veredito GO, SEM fork** (Tantivy MIT stock + Directory custom via buffer-then-flush+heap resolveu). Engine lexical própria é viável → M140 (M139)
-- Spike M139 (gate 3 PROVADO — crash-real): `scripts/m139-lexical-crash-smoke.sh` — um índice lexical commitado sobrevive a `SIGABRT` no postmaster + replay do WAL (`search=1` antes e depois; "WAL replay ocorreu"). A crash-safety é herdada do heap WAL-logged do PG (buffer-then-flush), sem WAL/rmgr custom. **Gates 1–3 (viabilidade: index+search, MVCC, crash-real) todos provados em PG18 real** — a pergunta central do spike (Tantivy no PG com MVCC+WAL+crash?) é SIM (M139)
-- Spike M139 (gate 2 PROVADO — MVCC): `theodb_rs/src/lexical/pg_backing.rs` (feature `spike-lexical`) — arquitetura buffer-then-flush (o Tantivy indexa multi-thread num buffer em memória; a main thread faz flush ao heap `theodb.lexical_files` bytea). **Medido em PG18 real:** round-trip buffer→flush→PG→load→search (`roundtrip('lazy')=1`) e MVCC cross-session (sessão B mede 0 durante txn A não-commitada, 1 após COMMIT — o DoD literal do gate 2). A integração transacional (a parte cara) funciona via heap MVCC+WAL do PG, sem página/WAL custom (M139)
-- Spike M139 (gate 2, passo A): seam `SegmentStore` no `PgDirectory` (feature `spike-lexical`) — separa o contrato do trait `Directory` (pgrx-free) da fonte dos bytes; `MemStore` (gate 1) e o backend de páginas PG (gate 2/3, ADR 0051) plugam pela MESMA porta. 6/6 testes verdes standalone (M139)
-- Spike M139 (gate 1 PROVADO): `theodb_rs/src/lexical/pg_directory.rs` — impl NOSSA do trait `Directory` do Tantivy (atrás de `spike-lexical`); teste `test_pg_directory_indexes_and_searches` verde (crate standalone pgrx-free) prova que o Tantivy indexa e busca sobre o `PgDirectory` **sem tocar o filesystem**; endurecido com 4 casos negativos/borda (erro tipado em arquivo/delete ausente, roundtrip+substituição de atomic_write, FileAlreadyExists em open_write duplicado — testing.md § 4.1). Achado: o núcleo lexical é pgrx-free → crate separado (direção M140). Gates 2–4 (MVCC/crash-real/custo) seguem (M139)
-- Spike M139 (gate 1, atrás da feature `spike-lexical` — não entra no build shipado): `tantivy = "0.26"` (MIT) integra limpo na árvore de deps do `theodb_rs` (arrow 58/datafusion), 0 erros de build, e `cargo deny check licenses` verde (zero AGPL transitiva) — o primeiro gate do spike do `Directory`-sobre-PG retira o risco de integração da dependência (M139)
 
 ### Changed
 
@@ -29,6 +23,16 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 ### Security
+
+## [0.125.0] - 2026-07-22
+
+### Added
+- Spike M139 (gate 4 MEDIDO + VEREDITO GO): head-to-head Tantivy-in-PG vs `pg_textsearch` no mesmo corpus (2000 docs) — índice **2,8× menor** (68K vs 192K), latência competitiva (33 vs 40 ms). **Todos os 4 gates do spike medidos em PG18 real (index+search, MVCC, crash-real, custo) → veredito GO, SEM fork** (Tantivy MIT stock + Directory custom via buffer-then-flush+heap resolveu). Engine lexical própria é viável → M140 (M139)
+- Spike M139 (gate 3 PROVADO — crash-real): `scripts/m139-lexical-crash-smoke.sh` — um índice lexical commitado sobrevive a `SIGABRT` no postmaster + replay do WAL (`search=1` antes e depois; "WAL replay ocorreu"). A crash-safety é herdada do heap WAL-logged do PG (buffer-then-flush), sem WAL/rmgr custom. **Gates 1–3 (viabilidade: index+search, MVCC, crash-real) todos provados em PG18 real** — a pergunta central do spike (Tantivy no PG com MVCC+WAL+crash?) é SIM (M139)
+- Spike M139 (gate 2 PROVADO — MVCC): `theodb_rs/src/lexical/pg_backing.rs` (feature `spike-lexical`) — arquitetura buffer-then-flush (o Tantivy indexa multi-thread num buffer em memória; a main thread faz flush ao heap `theodb.lexical_files` bytea). **Medido em PG18 real:** round-trip buffer→flush→PG→load→search (`roundtrip('lazy')=1`) e MVCC cross-session (sessão B mede 0 durante txn A não-commitada, 1 após COMMIT — o DoD literal do gate 2). A integração transacional (a parte cara) funciona via heap MVCC+WAL do PG, sem página/WAL custom (M139)
+- Spike M139 (gate 2, passo A): seam `SegmentStore` no `PgDirectory` (feature `spike-lexical`) — separa o contrato do trait `Directory` (pgrx-free) da fonte dos bytes; `MemStore` (gate 1) e o backend de páginas PG (gate 2/3, ADR 0051) plugam pela MESMA porta. 6/6 testes verdes standalone (M139)
+- Spike M139 (gate 1 PROVADO): `theodb_rs/src/lexical/pg_directory.rs` — impl NOSSA do trait `Directory` do Tantivy (atrás de `spike-lexical`); teste `test_pg_directory_indexes_and_searches` verde (crate standalone pgrx-free) prova que o Tantivy indexa e busca sobre o `PgDirectory` **sem tocar o filesystem**; endurecido com 4 casos negativos/borda (erro tipado em arquivo/delete ausente, roundtrip+substituição de atomic_write, FileAlreadyExists em open_write duplicado — testing.md § 4.1). Achado: o núcleo lexical é pgrx-free → crate separado (direção M140). Gates 2–4 (MVCC/crash-real/custo) seguem (M139)
+- Spike M139 (gate 1, atrás da feature `spike-lexical` — não entra no build shipado): `tantivy = "0.26"` (MIT) integra limpo na árvore de deps do `theodb_rs` (arrow 58/datafusion), 0 erros de build, e `cargo deny check licenses` verde (zero AGPL transitiva) — o primeiro gate do spike do `Directory`-sobre-PG retira o risco de integração da dependência (M139)
 
 ## [0.124.0] - 2026-07-21
 
