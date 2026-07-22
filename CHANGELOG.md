@@ -14,6 +14,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Roadmap amended: added M142 Tier-out do `pg_duckdb` (imagem default enxuta + imagem opcional `theodb-htap`) (`/roadmap-feature pgduckdb-htap-tiering`)
+
 ### Changed
 
 ### Deprecated
