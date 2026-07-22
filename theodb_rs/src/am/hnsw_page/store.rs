@@ -2,10 +2,9 @@
 //! byte-identical same-index A/B). Sibling items resolve via `use super::*` (re-exported in `mod.rs`).
 #![allow(unused_imports)]
 use super::*;
-use crate::ann::{HnswIndex, Metric};
 use crate::am::page;
+use crate::ann::{HnswIndex, Metric};
 use pgrx::pg_sys;
-
 
 /// Write meta (block 0) + every page image to the (empty) fork, WAL-logged. Block ordering matches [`pack`]
 /// (element pages first at block 1, then neighbor pages) so the analytic/packed addresses resolve on read.
@@ -50,7 +49,8 @@ pub(crate) unsafe fn read_codebook_pages(
     // Bounds-check the descriptor's page range against the relation BEFORE reading (the descriptor is on-disk and
     // corruptible). u64 arithmetic avoids the u32 `first + npages` wrap. A range past the fork end is a typed
     // REINDEX Err — consistent with the codebook-length guard below — not a generic C `smgrread` ERROR.
-    let nblocks = pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM) as u64;
+    let nblocks =
+        pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM) as u64;
     if first as u64 + npages as u64 > nblocks {
         return Err(format!(
             "theodb hnsw: AQ codebook pages [{first}, {}) out of range (nblocks {nblocks}) — REINDEX (v3 corruption)",
@@ -109,7 +109,8 @@ pub(crate) unsafe fn enumerate_entries(
                 if vb.len() != ev.dim as usize * 4 {
                     return Err(format!(
                         "theodb hnsw: v4 raw tuple has {} f32 bytes, hot tuple dim says {} — REINDEX (v4 corruption)",
-                        vb.len(), ev.dim as usize * 4
+                        vb.len(),
+                        ev.dim as usize * 4
                     ));
                 }
                 out.push((ev.tid, bytes_to_vec(&vb)));
@@ -140,11 +141,7 @@ pub(crate) unsafe fn tombstone_sweep(
                 return false; // not an element tuple, or already a tombstone
             }
             let tid = i64::from_le_bytes(item[E_TID..E_TID + 8].try_into().unwrap());
-            if is_dead(tid) {
-                mark_tombstone_in_place(item)
-            } else {
-                false
-            }
+            if is_dead(tid) { mark_tombstone_in_place(item) } else { false }
         });
     }
     total
@@ -186,7 +183,11 @@ pub(crate) unsafe fn count_churned(rel: pg_sys::Relation, meta: &HnswMeta) -> u3
 /// the new node's fixed-per-level neighbor tuple (`level*m + m0` slots) fits where the old node's did (ADR-R1).
 /// Bounded scan of the element pages; returns the first match as its `(block, off)` address. `None` ⇒ no reusable
 /// slot (the caller falls back to `append_pending`). Read-only (SHARE-locked); never mutates.
-pub(crate) unsafe fn find_reusable_slot(rel: pg_sys::Relation, meta: &HnswMeta, need_level: usize) -> Option<Addr> {
+pub(crate) unsafe fn find_reusable_slot(
+    rel: pg_sys::Relation,
+    meta: &HnswMeta,
+    need_level: usize,
+) -> Option<Addr> {
     for blk in meta.elem_first..(meta.elem_first + meta.elem_npages) {
         let items = match page::read_all_page_items_with_off(rel, blk) {
             Ok(v) => v,
@@ -217,7 +218,12 @@ pub(crate) unsafe fn find_reusable_slot(rel: pg_sys::Relation, meta: &HnswMeta, 
 /// Hamming walk, so we refuse (the item is longer than `E_VEC + dim*4`) and the caller falls back to `append_pending`
 /// (recomputing Z's SBQ code in place is a tracked follow-up). Crash-safe via `page::modify_item_at` (GenericXLog).
 /// Returns `true` iff the slot was revived.
-pub(crate) unsafe fn write_reused_element(rel: pg_sys::Relation, elem_addr: Addr, tid: i64, vec: &[f32]) -> bool {
+pub(crate) unsafe fn write_reused_element(
+    rel: pg_sys::Relation,
+    elem_addr: Addr,
+    tid: i64,
+    vec: &[f32],
+) -> bool {
     let (blk, off) = elem_addr;
     page::modify_item_at(rel, blk, off, |item| {
         // Atomic claim: revive ONLY a still-tombstoned slot. `modify_item_at` holds the buffer EXCLUSIVE, so two
@@ -295,7 +301,18 @@ pub(crate) unsafe fn insert_search_ground(
     let qcode: Option<&[u8]> = None; // v1 only (the reused-slot insert gates to v1)
     let lut: Option<&crate::vec::ah::Lut16> = None; // build-time insert search is v1 f32 (no AH walk)
 
-    let mut ep = load(rel, meta.entry_blkno, meta.entry_offno, q, metric, is_l2, qcode, lut, nblocks, &mut reads)?;
+    let mut ep = load(
+        rel,
+        meta.entry_blkno,
+        meta.entry_offno,
+        q,
+        metric,
+        is_l2,
+        qcode,
+        lut,
+        nblocks,
+        &mut reads,
+    )?;
     let mut lc = meta.entry_level as usize;
     while lc >= 1 {
         loop {
@@ -327,7 +344,8 @@ pub(crate) unsafe fn insert_search_ground(
         m0,
         reads: std::cell::Cell::new(reads),
     };
-    let (nodes, _candidates) = crate::ann::scan_core::ground_search_nodes(&pg_src, ep, ef, m0, true)?;
+    let (nodes, _candidates) =
+        crate::ann::scan_core::ground_search_nodes(&pg_src, ep, ef, m0, true)?;
     let mut cands: Vec<(f64, Addr)> = nodes.iter().map(|(c, _)| (c.d, (c.blk, c.off))).collect();
     cands.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
     Ok(cands.into_iter().take(m0).map(|(_, a)| a).collect())

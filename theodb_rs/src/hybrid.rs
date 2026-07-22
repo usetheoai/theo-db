@@ -115,9 +115,7 @@ pub(crate) fn run_rrf(
     // Default 1.0 each ⇒ byte-identical to the pre-M106 unweighted fusion. 0.0 disables a leg (valid).
     for (name, w) in [("vector_weight", vec_weight), ("text_weight", text_weight)] {
         if !w.is_finite() || w < 0.0 {
-            err_input(&format!(
-                "ai.hybrid_search: {name} must be a finite number >= 0 (got {w})"
-            ));
+            err_input(&format!("ai.hybrid_search: {name} must be a finite number >= 0 (got {w})"));
         }
     }
     if per_leg_limit <= 0 {
@@ -126,9 +124,7 @@ pub(crate) fn run_rrf(
         ));
     }
     if result_limit <= 0 {
-        err_input(&format!(
-            "ai.hybrid_search_rrf: result_limit must be > 0 (got {result_limit})"
-        ));
+        err_input(&format!("ai.hybrid_search_rrf: result_limit must be > 0 (got {result_limit})"));
     }
     if query_text.is_none() && query_vector_text.is_none() {
         err_input("ai.hybrid_search_rrf: provide query_text and/or query_vector");
@@ -144,7 +140,11 @@ pub(crate) fn run_rrf(
     // to the pre-M53 legs). A structured filter API (column/op/value, %I + bind) is the fail-closed
     // follow-up (backlog).
     let filter = filter_sql.unwrap_or("true");
-    if filter.contains(';') || filter.contains("--") || filter.contains("/*") || filter.contains("*/") {
+    if filter.contains(';')
+        || filter.contains("--")
+        || filter.contains("/*")
+        || filter.contains("*/")
+    {
         err_input(
             "ai.hybrid_search_rrf: filter_sql must be a single boolean predicate (no ';', comment, or chaining) — it is raw caller-privilege SQL, never build it from untrusted input",
         );
@@ -199,8 +199,13 @@ pub(crate) fn run_rrf(
     let built = Spi::get_one_with_args::<String>(
         &build_q,
         &[
-            id_col.into(), vector_col.into(), tbl_text.into(), lexical_col.into(), filter.into(),
-            vec_w_lit.into(), text_w_lit.into(),
+            id_col.into(),
+            vector_col.into(),
+            tbl_text.into(),
+            lexical_col.into(),
+            filter.into(),
+            vec_w_lit.into(),
+            text_w_lit.into(),
         ],
     )
     .ok()
@@ -221,9 +226,9 @@ pub(crate) fn run_rrf(
         if binds_language {
             exec_args.push(language.into());
         }
-        let table = client
-            .select(built.as_str(), None, &exec_args)
-            .unwrap_or_else(|e| err_input(&format!("ai.hybrid_search_rrf: fusion query failed: {e:?}")));
+        let table = client.select(built.as_str(), None, &exec_args).unwrap_or_else(|e| {
+            err_input(&format!("ai.hybrid_search_rrf: fusion query failed: {e:?}"))
+        });
         let mut out: Vec<(String, f32)> = Vec::with_capacity(table.len());
         for row in table {
             let id = row.get::<String>(1).ok().flatten();
@@ -242,7 +247,10 @@ pub(crate) fn run_rrf(
 /// theodb_rs would surface as a cryptic 42883 mid-query; check the exact 2-arg signature and turn absence into
 /// a clear 0A000). Diverges (typed) on embed failure. Returns `None` only if both inputs are absent
 /// (unreachable — `run_rrf` rejects that upstream).
-fn resolve_query_vector(query_text: Option<&str>, query_vector_text: Option<&str>) -> Option<String> {
+fn resolve_query_vector(
+    query_text: Option<&str>,
+    query_vector_text: Option<&str>,
+) -> Option<String> {
     match query_vector_text {
         Some(v) => Some(v.to_string()),
         None => match query_text {
@@ -259,7 +267,9 @@ fn resolve_query_vector(query_text: Option<&str>, query_vector_text: Option<&str
                     );
                 }
                 Spi::get_one_with_args::<String>("SELECT theodb.embed($1)::text", &[qt.into()])
-                    .unwrap_or_else(|e| err_input(&format!("ai.hybrid_search_rrf: embed failed: {e:?}")))
+                    .unwrap_or_else(|e| {
+                        err_input(&format!("ai.hybrid_search_rrf: embed failed: {e:?}"))
+                    })
             }
             None => None,
         },
@@ -278,7 +288,10 @@ fn render_filter_scalar(v: &Value) -> Result<String, String> {
         Value::String(s) => Ok(pgrx::spi::quote_literal(s)),
         Value::Number(n) => Ok(n.to_string()),
         Value::Bool(b) => Ok(if *b { "true".to_string() } else { "false".to_string() }),
-        _ => Err("filter: value must be a string, number, or boolean (array only for IN/&&)".to_string()),
+        _ => {
+            Err("filter: value must be a string, number, or boolean (array only for IN/&&)"
+                .to_string())
+        }
     }
 }
 
@@ -293,9 +306,16 @@ fn compose_structured_filter(conds: &[Value]) -> Result<String, String> {
     }
     let mut parts = Vec::with_capacity(conds.len());
     for c in conds {
-        let obj = c.as_object().ok_or("filter: each condition must be an object {col, op, value}")?;
-        let col = obj.get("col").and_then(|v| v.as_str()).ok_or("filter: condition missing string 'col'")?;
-        let op = obj.get("op").and_then(|v| v.as_str()).ok_or("filter: condition missing string 'op'")?;
+        let obj =
+            c.as_object().ok_or("filter: each condition must be an object {col, op, value}")?;
+        let col = obj
+            .get("col")
+            .and_then(|v| v.as_str())
+            .ok_or("filter: condition missing string 'col'")?;
+        let op = obj
+            .get("op")
+            .and_then(|v| v.as_str())
+            .ok_or("filter: condition missing string 'op'")?;
         // Fail-closed FIRST — reject an un-allowlisted operator BEFORE any quoting (so the reject path is pure).
         if !FILTER_OP_ALLOWLIST.contains(&op) {
             return Err(format!(
@@ -312,7 +332,8 @@ fn compose_structured_filter(conds: &[Value]) -> Result<String, String> {
                     // message (22023) instead of letting a raw execution error surface.
                     return Err(format!("filter: '{op}' requires a NON-EMPTY array value"));
                 }
-                let items: Result<Vec<String>, String> = arr.iter().map(render_filter_scalar).collect();
+                let items: Result<Vec<String>, String> =
+                    arr.iter().map(render_filter_scalar).collect();
                 let items = items?;
                 if op == "IN" {
                     format!("{qcol} IN ({})", items.join(", "))
@@ -330,16 +351,21 @@ fn compose_structured_filter(conds: &[Value]) -> Result<String, String> {
 /// Required keys missing → 22023. Returns the fused rows. Called by the `#[pg_extern]` in `lib.rs`.
 pub(crate) fn run_rrf_json(cfg: Value) -> Vec<(String, f32)> {
     let get_str = |k: &str| cfg.get(k).and_then(|v| v.as_str());
-    let (table, id_col, content_tsv_col, vector_col) =
-        match (get_str("table"), get_str("id_col"), get_str("content_tsv_col"), get_str("vector_col")) {
-            (Some(t), Some(i), Some(c), Some(v)) => (t, i, c, v),
-            _ => err_input(
-                "ai.hybrid_search: config must include table, id_col, content_tsv_col, vector_col",
-            ),
-        };
+    let (table, id_col, content_tsv_col, vector_col) = match (
+        get_str("table"),
+        get_str("id_col"),
+        get_str("content_tsv_col"),
+        get_str("vector_col"),
+    ) {
+        (Some(t), Some(i), Some(c), Some(v)) => (t, i, c, v),
+        _ => err_input(
+            "ai.hybrid_search: config must include table, id_col, content_tsv_col, vector_col",
+        ),
+    };
     let query_text = get_str("query_text");
     let query_vector = get_str("query_vector");
-    let as_i32 = |k: &str, d: i32| cfg.get(k).and_then(|v| v.as_i64()).map(|n| n as i32).unwrap_or(d);
+    let as_i32 =
+        |k: &str, d: i32| cfg.get(k).and_then(|v| v.as_i64()).map(|n| n as i32).unwrap_or(d);
     let k = as_i32("k", 60);
     let per_leg_limit = as_i32("per_leg_limit", 20);
     let result_limit = as_i32("result_limit", 5);
@@ -388,8 +414,21 @@ pub(crate) fn run_rrf_json(cfg: Value) -> Vec<(String, f32)> {
         .unwrap_or_else(|| err_input("ai.hybrid_search: table does not resolve to a relation"));
 
     run_rrf(
-        &tbl_text, id_col, content_tsv_col, vector_col, query_text, query_vector, k, per_leg_limit,
-        result_limit, language, filter_sql, lexical_engine, content_text_col, vec_weight, text_weight,
+        &tbl_text,
+        id_col,
+        content_tsv_col,
+        vector_col,
+        query_text,
+        query_vector,
+        k,
+        per_leg_limit,
+        result_limit,
+        language,
+        filter_sql,
+        lexical_engine,
+        content_text_col,
+        vec_weight,
+        text_weight,
     )
 }
 
@@ -434,14 +473,22 @@ mod tests {
 
     #[pg_test]
     fn m106_text_weight_flips_ranking_to_fts_leg_top() {
-        assert_eq!(top("1", "3"), "df", "text_weight=3 must flip the ranking to the FTS-leg winner");
+        assert_eq!(
+            top("1", "3"),
+            "df",
+            "text_weight=3 must flip the ranking to the FTS-leg winner"
+        );
     }
 
     // M106 (review LOW): IEEE-754 `-0.0` passes the `>= 0` guard; it must be treated as `0.0` (disable the
     // leg) and MUST NOT emit a stray `-` into the SQL literal. `-0.0` on the vector leg ⇒ FTS-leg doc wins.
     #[pg_test]
     fn m106_negative_zero_weight_behaves_as_zero() {
-        assert_eq!(top("-0.0", "1"), "df", "vector_weight=-0.0 disables the vector leg (behaves as 0.0)");
+        assert_eq!(
+            top("-0.0", "1"),
+            "df",
+            "vector_weight=-0.0 disables the vector leg (behaves as 0.0)"
+        );
     }
 
     // M106: a negative weight is rejected with a typed 22023 (fail-fast).

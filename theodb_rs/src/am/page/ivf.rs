@@ -596,7 +596,8 @@ pub(crate) unsafe fn read_ivf_aq_meta_split(rel: pg_sys::Relation) -> Result<Ivf
         return Err("theodb ivf-aq: truncated v5 meta".into());
     }
     let ver = u32::from_le_bytes(m[4..8].try_into().unwrap());
-    if u32::from_le_bytes(m[0..4].try_into().unwrap()) != IVF_STRUCT_MAGIC || (ver != 5 && ver != 7) {
+    if u32::from_le_bytes(m[0..4].try_into().unwrap()) != IVF_STRUCT_MAGIC || (ver != 5 && ver != 7)
+    {
         return Err("theodb ivf-aq: not a v5/v7 structured index".into());
     }
     let metric_tag = m[8];
@@ -852,7 +853,9 @@ pub(crate) unsafe fn write_ivf_aq_split_streaming(
                 // Fail-loud (review LOW): the histogram and the stream must agree by construction; a shortfall is a
                 // build bug — a typed error over a bare panic across the build (Rule 8). Runs after the C scan
                 // returned, so this unwinds only to the guarded `ambuild`.
-                None => pg_sys::error!("theodb streaming writer: stream shorter than the count histogram"),
+                None => pg_sys::error!(
+                    "theodb streaming writer: stream shorter than the count histogram"
+                ),
             };
             list_ids.push(id);
             list_vecs.push(v);
@@ -963,7 +966,9 @@ pub(crate) unsafe fn write_ivf_aq_split_sq8(
     }
 }
 /// Read the v6 meta + both codebooks + centroid + dir regions. Typed `Err` on corruption.
-pub(crate) unsafe fn read_ivf_aq_meta_split_sq8(rel: pg_sys::Relation) -> Result<IvfAqMetaV6, String> {
+pub(crate) unsafe fn read_ivf_aq_meta_split_sq8(
+    rel: pg_sys::Relation,
+) -> Result<IvfAqMetaV6, String> {
     let m = read_page_item(rel, 0)?;
     if m.len() < 41 {
         return Err("theodb ivf-aq: truncated v6 meta".into());
@@ -999,7 +1004,8 @@ pub(crate) unsafe fn read_ivf_aq_meta_split_sq8(rel: pg_sys::Relation) -> Result
         ));
     }
     let aq_codebook = read_chunked(rel, gen_base + dir_npages, aq_codebook_npages)?;
-    let sq8_codebook = read_chunked(rel, gen_base + dir_npages + aq_codebook_npages, sq8_codebook_npages)?;
+    let sq8_codebook =
+        read_chunked(rel, gen_base + dir_npages + aq_codebook_npages, sq8_codebook_npages)?;
     let cbytes = read_chunked(
         rel,
         gen_base + dir_npages + aq_codebook_npages + sq8_codebook_npages,
@@ -1049,7 +1055,8 @@ pub(crate) unsafe fn write_ivf_aq_split_rabitq(
     let aq_codebook_npages = npages_for(aq_codebook.len());
     let rabitq_codebook_npages = npages_for(rabitq_codebook.len());
     let centroid_npages = npages_for(cbytes.len());
-    let mut cursor = base + dir_npages + aq_codebook_npages + rabitq_codebook_npages + centroid_npages;
+    let mut cursor =
+        base + dir_npages + aq_codebook_npages + rabitq_codebook_npages + centroid_npages;
     let mut dir: Vec<(u32, u32, u32, u32, u32)> = Vec::with_capacity(positions.len());
     for i in 0..positions.len() {
         let code_len = positions[i].len() * 8 + codes[i].len();
@@ -1100,7 +1107,9 @@ pub(crate) unsafe fn write_ivf_aq_split_rabitq(
     }
 }
 /// E1 — read the v8 meta + AQ codebook + RaBitQ codebook + centroid + dir regions. Typed `Err` on corruption.
-pub(crate) unsafe fn read_ivf_aq_meta_split_rabitq(rel: pg_sys::Relation) -> Result<IvfAqMetaV8, String> {
+pub(crate) unsafe fn read_ivf_aq_meta_split_rabitq(
+    rel: pg_sys::Relation,
+) -> Result<IvfAqMetaV8, String> {
     let m = read_page_item(rel, 0)?;
     if m.len() < 41 {
         return Err("theodb ivf-aq: truncated v8 meta".into());
@@ -1136,7 +1145,8 @@ pub(crate) unsafe fn read_ivf_aq_meta_split_rabitq(rel: pg_sys::Relation) -> Res
         ));
     }
     let aq_codebook = read_chunked(rel, gen_base + dir_npages, aq_codebook_npages)?;
-    let rabitq_codebook = read_chunked(rel, gen_base + dir_npages + aq_codebook_npages, rabitq_codebook_npages)?;
+    let rabitq_codebook =
+        read_chunked(rel, gen_base + dir_npages + aq_codebook_npages, rabitq_codebook_npages)?;
     let cbytes = read_chunked(
         rel,
         gen_base + dir_npages + aq_codebook_npages + rabitq_codebook_npages,

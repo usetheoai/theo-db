@@ -1,0 +1,5 @@
+# M136 — rustfmt.toml: codifica o estilo do crate para `cargo fmt --check` no CI ser determinístico.
+# `use_small_heuristics = "Max"` mantém construções pequenas (tuplas, structs, chamadas) em uma linha,
+# respeitando o estilo compacto com que o código foi escrito — minimiza churn e casa a intenção do autor.
+edition = "2024"
+use_small_heuristics = "Max"

@@ -75,7 +75,12 @@ fn breaker_record(endpoint: &str, success: bool) {
             let fails = entry.1 + 1;
             let open = matches!(entry.0, BreakerState::HalfOpen) || fails >= BREAKER_K;
             if open {
-                *entry = (BreakerState::Open { until: Instant::now() + Duration::from_millis(breaker_open_ms()) }, fails);
+                *entry = (
+                    BreakerState::Open {
+                        until: Instant::now() + Duration::from_millis(breaker_open_ms()),
+                    },
+                    fails,
+                );
             } else {
                 *entry = (BreakerState::Closed, fails);
             }
@@ -143,7 +148,10 @@ pub(crate) fn guard_egress(fn_name: &str, endpoint: &str) {
         // M134 review (F5): the resolved address goes to the SERVER LOG, not to the caller. Returning
         // `host inference.corp -> 10.1.2.3` would hand any caller who can trigger the error a working
         // internal name→address oracle. The operator debugging a false denial reads the log.
-        pgrx::log!("theodb egress guard: {fn_name} denied host {host} -> blocked address {}", bad.ip());
+        pgrx::log!(
+            "theodb egress guard: {fn_name} denied host {host} -> blocked address {}",
+            bad.ip()
+        );
         crate::pg::err_input(&format!(
             "{fn_name}: refusing to call {host} — it resolves to a blocked internal address \
 (loopback/private/link-local/NAT64 targets are denied). The resolved address is in the server log; an operator \
@@ -155,7 +163,12 @@ may permit a specific host via theodb.egress_allowlist"
 /// POST a JSON payload to `endpoint` and return the parsed response body. A bounded recoverable-class
 /// retry (connect/timeout + 429/502/503) wraps the send/status; non-recoverable status, exhausted retries,
 /// and non-JSON bodies fail fast with SQLSTATE 38000 ("call failed"). `fn_name` prefixes every message.
-pub(crate) fn post_json(fn_name: &str, endpoint: &str, payload: String, api_key: Option<&str>) -> Value {
+pub(crate) fn post_json(
+    fn_name: &str,
+    endpoint: &str,
+    payload: String,
+    api_key: Option<&str>,
+) -> Value {
     // M134 (#117): SSRF egress guard at the SINGLE outbound call, so it covers chat AND embed and cannot be
     // bypassed by a future caller. The pre-existing `http(s)://` check is NOT an SSRF control — it blocks
     // `file://`, not `http://169.254.169.254/`. Runs BEFORE the breaker so a blocked target never even records
@@ -253,7 +266,8 @@ pub(crate) fn truncate(s: &str, n: usize) -> String {
 /// Test-only: is this backend's breaker OPEN for `endpoint`? (observes the state machine deterministically).
 #[cfg(any(test, feature = "pg_test"))]
 pub(crate) fn breaker_is_open(endpoint: &str) -> bool {
-    BREAKERS.with(|b| matches!(b.borrow().get(endpoint).map(|e| e.0), Some(BreakerState::Open { .. })))
+    BREAKERS
+        .with(|b| matches!(b.borrow().get(endpoint).map(|e| e.0), Some(BreakerState::Open { .. })))
 }
 
 #[cfg(any(test, feature = "pg_test"))]
@@ -277,17 +291,20 @@ mod tests {
         // K failing calls trip the breaker (each caught — post_json diverges via ereport on failure).
         for _ in 0..BREAKER_K {
             PgTryBuilder::new(|| post_json("breaker_test", ep, "{}".to_string(), None))
-            .catch_others(|_| Value::Null)
-            .execute();
+                .catch_others(|_| Value::Null)
+                .execute();
         }
         assert!(breaker_is_open(ep), "breaker OPEN after {BREAKER_K} consecutive failures");
         // when OPEN, the call fails FAST (<100ms — no TCP attempt, no ~500ms retry+backoff of a real refused call).
         let t = std::time::Instant::now();
         PgTryBuilder::new(|| post_json("breaker_test", ep, "{}".to_string(), None))
-        .catch_others(|_| Value::Null)
-        .execute();
+            .catch_others(|_| Value::Null)
+            .execute();
         let ms = t.elapsed().as_millis();
-        assert!(ms < 100, "open breaker fails FAST ({ms}ms < 100), short-circuiting the send/retry budget");
+        assert!(
+            ms < 100,
+            "open breaker fails FAST ({ms}ms < 100), short-circuiting the send/retry budget"
+        );
     }
 
     // M104 — a 4xx (our bad request) does NOT trip the breaker (endpoint reachable); only 5xx/timeout do. We can't
@@ -296,7 +313,9 @@ mod tests {
     fn m104_breaker_success_closes() {
         let ep = "http://127.0.0.1:1/close";
         for _ in 0..BREAKER_K {
-            PgTryBuilder::new(|| post_json("bt", ep, "{}".to_string(), None)).catch_others(|_| Value::Null).execute();
+            PgTryBuilder::new(|| post_json("bt", ep, "{}".to_string(), None))
+                .catch_others(|_| Value::Null)
+                .execute();
         }
         assert!(breaker_is_open(ep), "open after K failures");
         breaker_record(ep, true); // a success (e.g. after open_ms half-open probe) closes + resets
@@ -313,7 +332,12 @@ mod tests {
     fn test_m134_metadata_endpoint_is_refused_with_typed_error() {
         Spi::run("SET theodb.egress_allowlist = ''").unwrap();
         let caught = PgTryBuilder::new(|| {
-            post_json("m134_test", "http://169.254.169.254/latest/meta-data/", "{}".to_string(), None);
+            post_json(
+                "m134_test",
+                "http://169.254.169.254/latest/meta-data/",
+                "{}".to_string(),
+                None,
+            );
             None
         })
         .catch_others(|e| {
@@ -387,5 +411,4 @@ mod tests {
             "unresolvable host is refused, not attempted; got: {msg}"
         );
     }
-
 }

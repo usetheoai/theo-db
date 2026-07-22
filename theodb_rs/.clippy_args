@@ -1,0 +1,33 @@
+# M136 — argumentos de lint do clippy, consumidos por CI E pelo script local (padrão neon .neon_clippy_args).
+# Um arquivo único impede drift CI↔local. Uso: cargo clippy --features pg18 --no-deps -- $(grep -v '^#' .clippy_args | tr '\n' ' ')
+#
+# CONTRATO: -D warnings promove TODO warning a erro. As linhas -A abaixo fazem BASELINE das 21 categorias que já
+# existem no código (1056 warnings, medidos 2026-07-21) — corrigi-las 1 a 1, muitas em código unsafe/pgrx, é
+# inviável num único passo (decisão de DoD, não improviso: baseline-allow com SUNSET, não mutirão). O valor do
+# gate: nenhuma categoria NOVA de warning entra em develop sem alguém decidir. Burn-down rastreado em issue #151
+# próprio; SUNSET 2026-10-21 (90 dias) para remover cada -A conforme a categoria é zerada.
+#
+# PRIORIDADE de burn-down (as que mais importam, remover -A primeiro): unsafe_op_in_unsafe_fn (segurança FFI),
+# dead_code / unused / unused_mut (sobrepõem o detector de code-quality), deprecated (pgrx desatualizado).
+-D warnings
+-A unsafe_op_in_unsafe_fn
+-A dead_code
+-A unused
+-A unused_mut
+-A deprecated
+-A clippy::collapsible_if
+-A clippy::doc_lazy_continuation
+-A clippy::duplicated_attributes
+-A clippy::explicit_counter_loop
+-A clippy::int_plus_one
+-A clippy::manual_checked_ops
+-A clippy::manual_is_multiple_of
+-A clippy::manual_split_once
+-A clippy::map_clone
+-A clippy::mem_replace_with_default
+-A clippy::needless_range_loop
+-A clippy::too_many_arguments
+-A clippy::type_complexity
+-A clippy::unnecessary_cast
+-A clippy::useless_conversion
+-A clippy::wrong_self_convention

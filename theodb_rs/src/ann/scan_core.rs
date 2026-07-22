@@ -405,7 +405,10 @@ mod tests {
         let (mut a, mut b) = (got_ids.clone(), want.clone());
         a.sort_unstable();
         b.sort_unstable();
-        assert_eq!(a, b, "ground_search top-10 must equal brute exact-kNN set at ef=200 (100% recall)");
+        assert_eq!(
+            a, b,
+            "ground_search top-10 must equal brute exact-kNN set at ef=200 (100% recall)"
+        );
     }
 
     /// M118 recall-neutral invariant: the union of resumed `next_batch` results (batch ef=50, accumulated) is a
@@ -458,7 +461,10 @@ mod tests {
             assert!(passes < 200, "resume must terminate on a finite graph");
         }
         assert!(rg.exhausted(), "frontier must empty on a small reachable graph");
-        assert!(rg.next_batch(&src).unwrap().is_empty(), "exhausted frontier yields an empty batch");
+        assert!(
+            rg.next_batch(&src).unwrap().is_empty(),
+            "exhausted frontier yields an empty batch"
+        );
     }
 
     /// EC-3: a single-node index with ef=1 returns the node once, then exhausts (smallest-graph boundary).

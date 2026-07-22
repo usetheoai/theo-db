@@ -7,7 +7,7 @@
 #[path = "../src/ann/scan_core.rs"]
 mod scan_core;
 
-use scan_core::{ground_search, NeighborSource, ResumableGround};
+use scan_core::{NeighborSource, ResumableGround, ground_search};
 use std::collections::HashSet;
 
 #[derive(Clone, Copy)]
@@ -109,7 +109,10 @@ fn main() {
             passes,
             single_ids.difference(&union).collect::<Vec<_>>()
         );
-        println!("INV1 ok — resumed union (n={union_len}) ⊇ single-ef top-10", union_len = union.len());
+        println!(
+            "INV1 ok — resumed union (n={union_len}) ⊇ single-ef top-10",
+            union_len = union.len()
+        );
     }
 
     // --- Invariant 2 (EC-1): frontier exhausts in finite passes, then next_batch is empty ---
@@ -134,7 +137,12 @@ fn main() {
         let m0 = 32;
         let mut rg = ResumableGround::init(&g, entry(&g), 1, m0, true);
         let first = rg.next_batch(&g).unwrap();
-        assert_eq!(first.len(), 1, "INV3 FAIL: single-node returns the node once, got {}", first.len());
+        assert_eq!(
+            first.len(),
+            1,
+            "INV3 FAIL: single-node returns the node once, got {}",
+            first.len()
+        );
         assert!(rg.exhausted(), "INV3 FAIL: single node exhausts after one batch");
         assert!(rg.next_batch(&g).unwrap().is_empty(), "INV3 FAIL: second batch empty");
         println!("INV3 ok — single-node ef=1 returns once then exhausts");

@@ -75,11 +75,16 @@ impl StripeHeader {
 
     pub fn from_bytes(b: &[u8]) -> Result<Self, String> {
         if b.len() < STRIPE_HEADER_LEN {
-            return Err(format!("columnar stripe header too short ({} < {STRIPE_HEADER_LEN})", b.len()));
+            return Err(format!(
+                "columnar stripe header too short ({} < {STRIPE_HEADER_LEN})",
+                b.len()
+            ));
         }
         let magic = u32::from_le_bytes(b[0..4].try_into().unwrap());
         if magic != STRIPE_MAGIC {
-            return Err(format!("columnar stripe bad magic {magic:#x} (expected {STRIPE_MAGIC:#x})"));
+            return Err(format!(
+                "columnar stripe bad magic {magic:#x} (expected {STRIPE_MAGIC:#x})"
+            ));
         }
         let version = u32::from_le_bytes(b[4..8].try_into().unwrap());
         if version != STRIPE_VERSION {
@@ -202,7 +207,11 @@ pub(crate) struct EncodedColumn {
 /// For a fixed-width column every `Some` is exactly `attlen_fixed` bytes; for varlena each `Some` is the value's full
 /// VARSIZE bytes (header + data). Layout: `[null_bitmap?][value_stream]` where the bitmap (1 = present) is emitted
 /// only when there is ≥1 null, and the value stream packs only present values (NULLs take no stream bytes).
-pub(crate) fn encode_column(values: &[Option<Vec<u8>>], attlen_fixed: Option<usize>, mm: MinMaxKind) -> EncodedColumn {
+pub(crate) fn encode_column(
+    values: &[Option<Vec<u8>>],
+    attlen_fixed: Option<usize>,
+    mm: MinMaxKind,
+) -> EncodedColumn {
     let n = values.len();
     let null_count = values.iter().filter(|v| v.is_none()).count() as u32;
     let has_nulls = null_count > 0;
@@ -231,7 +240,15 @@ pub(crate) fn encode_column(values: &[Option<Vec<u8>>], attlen_fixed: Option<usi
     }
 
     let (has_minmax, min_bits, max_bits) = compute_minmax(values, mm);
-    EncodedColumn { raw, null_count, has_nulls, has_minmax: has_minmax && !all_null, all_null, min_bits, max_bits }
+    EncodedColumn {
+        raw,
+        null_count,
+        has_nulls,
+        has_minmax: has_minmax && !all_null,
+        all_null,
+        min_bits,
+        max_bits,
+    }
 }
 
 /// Decode a column chunk's uncompressed `raw` bytes back into `row_count` `Option<Vec<u8>>` values. `attlen_fixed`
@@ -247,7 +264,10 @@ pub(crate) fn decode_column(
     let present: Vec<bool> = if has_nulls {
         let bitmap_len = row_count.div_ceil(8);
         if raw.len() < bitmap_len {
-            return Err(format!("columnar chunk null-bitmap truncated ({} < {bitmap_len})", raw.len()));
+            return Err(format!(
+                "columnar chunk null-bitmap truncated ({} < {bitmap_len})",
+                raw.len()
+            ));
         }
         let bitmap = &raw[..bitmap_len];
         off = bitmap_len;
@@ -265,7 +285,10 @@ pub(crate) fn decode_column(
         match attlen_fixed {
             Some(len) => {
                 if off + len > raw.len() {
-                    return Err(format!("columnar fixed value truncated (off {off} + {len} > {})", raw.len()));
+                    return Err(format!(
+                        "columnar fixed value truncated (off {off} + {len} > {})",
+                        raw.len()
+                    ));
                 }
                 out.push(Some(raw[off..off + len].to_vec()));
                 off += len;
@@ -277,7 +300,10 @@ pub(crate) fn decode_column(
                 let len = u32::from_le_bytes(raw[off..off + 4].try_into().unwrap()) as usize;
                 off += 4;
                 if off + len > raw.len() {
-                    return Err(format!("columnar varlena body truncated (off {off} + {len} > {})", raw.len()));
+                    return Err(format!(
+                        "columnar varlena body truncated (off {off} + {len} > {})",
+                        raw.len()
+                    ));
                 }
                 out.push(Some(raw[off..off + len].to_vec()));
                 off += len;
@@ -300,7 +326,9 @@ pub(crate) fn compute_minmax(values: &[Option<Vec<u8>>], mm: MinMaxKind) -> (boo
                 let x = match mm {
                     MinMaxKind::Bool => *v.first().unwrap_or(&0) as i64,
                     MinMaxKind::I2 if v.len() >= 2 => i16::from_le_bytes([v[0], v[1]]) as i64,
-                    MinMaxKind::I4 if v.len() >= 4 => i32::from_le_bytes([v[0], v[1], v[2], v[3]]) as i64,
+                    MinMaxKind::I4 if v.len() >= 4 => {
+                        i32::from_le_bytes([v[0], v[1], v[2], v[3]]) as i64
+                    }
                     MinMaxKind::I8 if v.len() >= 8 => {
                         i64::from_le_bytes(v[..8].try_into().unwrap())
                     }
@@ -322,7 +350,9 @@ pub(crate) fn compute_minmax(values: &[Option<Vec<u8>>], mm: MinMaxKind) -> (boo
                     MinMaxKind::F4 if v.len() >= 4 => {
                         f32::from_le_bytes([v[0], v[1], v[2], v[3]]) as f64
                     }
-                    MinMaxKind::F8 if v.len() >= 8 => f64::from_le_bytes(v[..8].try_into().unwrap()),
+                    MinMaxKind::F8 if v.len() >= 8 => {
+                        f64::from_le_bytes(v[..8].try_into().unwrap())
+                    }
                     _ => continue,
                 };
                 if x.is_nan() {
@@ -359,8 +389,7 @@ mod tests {
 
     #[test]
     fn fixed_column_roundtrips_with_nulls() {
-        let vals: Vec<Option<Vec<u8>>> =
-            vec![i32v(10), None, i32v(30), None, None, i32v(60)];
+        let vals: Vec<Option<Vec<u8>>> = vec![i32v(10), None, i32v(30), None, None, i32v(60)];
         let enc = encode_column(&vals, Some(4), MinMaxKind::I4);
         assert!(enc.has_nulls);
         assert_eq!(enc.null_count, 3);

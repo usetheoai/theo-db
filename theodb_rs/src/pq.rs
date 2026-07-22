@@ -51,10 +51,8 @@ impl PqQuantizer {
         let mut codebooks = Vec::with_capacity(m);
         for i in 0..m {
             // Gather subspace i's sub-vectors.
-            let subvecs: Vec<Vec<f32>> = corpus
-                .iter()
-                .map(|v| v[i * sub_dim..(i + 1) * sub_dim].to_vec())
-                .collect();
+            let subvecs: Vec<Vec<f32>> =
+                corpus.iter().map(|v| v[i * sub_dim..(i + 1) * sub_dim].to_vec()).collect();
             codebooks.push(lloyd_kmeans(&subvecs, k_star, sub_dim, seed));
         }
         PqQuantizer { m, sub_dim, codebooks }
@@ -76,10 +74,8 @@ impl PqQuantizer {
         let mut lut = Vec::with_capacity(self.m);
         for i in 0..self.m {
             let sub = &query[i * self.sub_dim..(i + 1) * self.sub_dim];
-            let row: Vec<f32> = self.codebooks[i]
-                .iter()
-                .map(|c| crate::vec::l2_distance(sub, c) as f32)
-                .collect();
+            let row: Vec<f32> =
+                self.codebooks[i].iter().map(|c| crate::vec::l2_distance(sub, c) as f32).collect();
             lut.push(row);
         }
         lut
@@ -88,10 +84,7 @@ impl PqQuantizer {
 
 /// Asymmetric distance from a precomputed LUT and a code: `Σ_i LUT[i][code[i]]`. `m` lookups + adds, no decode.
 pub(crate) fn adc_distance(lut: &[Vec<f32>], code: &[u8]) -> f64 {
-    lut.iter()
-        .zip(code)
-        .map(|(row, &c)| row[c as usize] as f64)
-        .sum()
+    lut.iter().zip(code).map(|(row, &c)| row[c as usize] as f64).sum()
 }
 
 /// Index of the nearest centroid to `sub` under squared L2 (ties → lowest index, deterministic).
@@ -177,14 +170,18 @@ pub(crate) fn knn(
     p: PqParams,
 ) -> Vec<(i32, i64, f64)> {
     // --- boundary validation (Rule 8; typed 22023) ---
-    let metric = Metric::parse(metric_s)
-        .unwrap_or_else(|| err_input(&format!("theodb pq: unknown metric '{metric_s}' (use l2|cosine|ip)")));
+    let metric = Metric::parse(metric_s).unwrap_or_else(|| {
+        err_input(&format!("theodb pq: unknown metric '{metric_s}' (use l2|cosine|ip)"))
+    });
     require(valid_ident(embed_col), "theodb pq: embed_col is not a valid identifier");
     require(valid_ident(id_col), "theodb pq: id_col is not a valid identifier");
     require(p.qdim >= 1, "theodb pq: qdim must be >= 1");
     require(p.k >= 1, "theodb pq: k must be >= 1");
     require((1..=PQ_M_MAX).contains(&p.m), "theodb pq: m must be in [1, 64]");
-    require((1..=PQ_OVER_FETCH_MAX).contains(&p.over_fetch), "theodb pq: over_fetch must be in [1, 64]");
+    require(
+        (1..=PQ_OVER_FETCH_MAX).contains(&p.over_fetch),
+        "theodb pq: over_fetch must be in [1, 64]",
+    );
     require((1..=PQ_LIST_MAX).contains(&p.lists), "theodb pq: lists must be in [1, 32768]");
     require((1..=PQ_LIST_MAX).contains(&p.probes), "theodb pq: probes must be in [1, 32768]");
     if p.qdim % p.m != 0 {
@@ -253,9 +250,7 @@ mod tests {
 
     fn rand_corpus(n: usize, dim: usize, seed: u64) -> Vec<Vec<f32>> {
         let mut r = Rng::new(seed);
-        (0..n)
-            .map(|_| (0..dim).map(|_| (r.next_f64() as f32) * 2.0 - 1.0).collect())
-            .collect()
+        (0..n).map(|_| (0..dim).map(|_| (r.next_f64() as f32) * 2.0 - 1.0).collect()).collect()
     }
 
     #[pg_test]
@@ -287,7 +282,9 @@ mod tests {
         }
     }
 
-    #[pg_test(error = "theodb pq: vector dim 8 is not divisible by m 3 (subspaces must be equal-sized)")]
+    #[pg_test(
+        error = "theodb pq: vector dim 8 is not divisible by m 3 (subspaces must be equal-sized)"
+    )]
     fn pq_train_rejects_indivisible_dim() {
         // D=8, m=3 → 8 % 3 != 0 → typed error 22023 (pgrx ereport; asserted via the pg_test error attr).
         let corpus = rand_corpus(8, 8, 1);
@@ -357,7 +354,11 @@ mod tests {
     #[pg_test(error = "theodb pq: m must be in [1, 64]")]
     fn pq_knn_bad_m_rejected() {
         let _ = knn(
-            "t", "e", "id", "l2", &[0.0],
+            "t",
+            "e",
+            "id",
+            "l2",
+            &[0.0],
             PqParams { qdim: 1, k: 5, m: 0, lists: 4, probes: 4, over_fetch: 8, seed: 42 },
         );
     }
@@ -365,7 +366,11 @@ mod tests {
     #[pg_test(error = "theodb pq: qdim 7 is not divisible by m 2 (subspaces must be equal-sized)")]
     fn pq_knn_qdim_not_multiple_of_m_rejected() {
         let _ = knn(
-            "t", "e", "id", "l2", &[0.0],
+            "t",
+            "e",
+            "id",
+            "l2",
+            &[0.0],
             PqParams { qdim: 7, k: 5, m: 2, lists: 4, probes: 4, over_fetch: 8, seed: 42 },
         );
     }
@@ -374,7 +379,11 @@ mod tests {
     fn pq_knn_empty_queries_no_read() {
         // Empty queries → 0 rows, no Spi read (the table does not exist → would error if read).
         let rows = knn(
-            "nonexistent_table", "e", "id", "l2", &[],
+            "nonexistent_table",
+            "e",
+            "id",
+            "l2",
+            &[],
             PqParams { qdim: 4, k: 2, m: 2, lists: 2, probes: 2, over_fetch: 4, seed: 42 },
         );
         assert!(rows.is_empty());

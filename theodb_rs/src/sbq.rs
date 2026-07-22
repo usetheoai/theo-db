@@ -116,14 +116,20 @@ impl SbqQuantizer {
     /// truncation/corruption, never a panic crossing the C boundary).
     pub(crate) fn from_meta_bytes(bytes: &[u8]) -> Result<Self, String> {
         if bytes.len() < 5 {
-            return Err(format!("sbq codebook: truncated header ({} bytes, need ≥ 5)", bytes.len()));
+            return Err(format!(
+                "sbq codebook: truncated header ({} bytes, need ≥ 5)",
+                bytes.len()
+            ));
         }
         let bits = bytes[0];
         let dim = u32::from_le_bytes(bytes[1..5].try_into().unwrap()) as usize;
         let has_std = bits > 1;
         let expected = 5 + dim * 4 + if has_std { dim * 4 } else { 0 };
         if bytes.len() != expected {
-            return Err(format!("sbq codebook: expected {expected} bytes for dim {dim} bits {bits}, got {}", bytes.len()));
+            return Err(format!(
+                "sbq codebook: expected {expected} bytes for dim {dim} bits {bits}, got {}",
+                bytes.len()
+            ));
         }
         let mut off = 5;
         let read_f32 = |o: usize| f32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
@@ -181,14 +187,18 @@ pub(crate) fn knn(
     p: SbqParams,
 ) -> Vec<(i32, i64, f64)> {
     // --- boundary validation (Rule 8; typed 22023) ---
-    let metric = Metric::parse(metric_s)
-        .unwrap_or_else(|| err_input(&format!("theodb sbq: unknown metric '{metric_s}' (use l2|cosine|ip)")));
+    let metric = Metric::parse(metric_s).unwrap_or_else(|| {
+        err_input(&format!("theodb sbq: unknown metric '{metric_s}' (use l2|cosine|ip)"))
+    });
     require(valid_ident(embed_col), "theodb sbq: embed_col is not a valid identifier");
     require(valid_ident(id_col), "theodb sbq: id_col is not a valid identifier");
     require(p.qdim >= 1, "theodb sbq: qdim must be >= 1");
     require(p.k >= 1, "theodb sbq: k must be >= 1");
     require((1..=BITS_MAX).contains(&p.bits), "theodb sbq: bits must be in [1, 8]");
-    require((1..=OVER_FETCH_MAX).contains(&p.over_fetch), "theodb sbq: over_fetch must be in [1, 64]");
+    require(
+        (1..=OVER_FETCH_MAX).contains(&p.over_fetch),
+        "theodb sbq: over_fetch must be in [1, 64]",
+    );
     require((1..=LIST_MAX).contains(&p.lists), "theodb sbq: lists must be in [1, 32768]");
     require((1..=LIST_MAX).contains(&p.probes), "theodb sbq: probes must be in [1, 32768]");
 
@@ -299,8 +309,12 @@ mod tests {
                 .unwrap()
         });
         let half = corpus.len() / 2;
-        let near_ham: f64 = by_f32[..half].iter().map(|&i| hamming(&qcode, &codes[i]) as f64).sum::<f64>() / half as f64;
-        let far_ham: f64 = by_f32[half..].iter().map(|&i| hamming(&qcode, &codes[i]) as f64).sum::<f64>() / (corpus.len() - half) as f64;
+        let near_ham: f64 =
+            by_f32[..half].iter().map(|&i| hamming(&qcode, &codes[i]) as f64).sum::<f64>()
+                / half as f64;
+        let far_ham: f64 =
+            by_f32[half..].iter().map(|&i| hamming(&qcode, &codes[i]) as f64).sum::<f64>()
+                / (corpus.len() - half) as f64;
         assert!(
             near_ham < far_ham - 0.5,
             "Hamming carries no NN signal: near_mean={near_ham:.2} not < far_mean={far_ham:.2}"
@@ -310,7 +324,10 @@ mod tests {
     fn sbq_codebook_roundtrips_through_meta_bytes() {
         // T1.1 (M51): o codebook (means/std/bits) serializa para bytes e volta byte-exato — é o que a meta
         // page do layout v3 persiste para o scan reproduzir a quantização do build (means fixados no build).
-        let q = SbqQuantizer::train(&[vec![1.0, -2.0, 3.0], vec![3.0, 0.0, 1.0], vec![-1.0, 2.0, 0.0]], 2);
+        let q = SbqQuantizer::train(
+            &[vec![1.0, -2.0, 3.0], vec![3.0, 0.0, 1.0], vec![-1.0, 2.0, 0.0]],
+            2,
+        );
         let bytes = q.to_meta_bytes();
         let q2 = SbqQuantizer::from_meta_bytes(&bytes).expect("codebook decodes");
         assert_eq!(q.bits, q2.bits, "bits mismatch");
@@ -325,7 +342,10 @@ mod tests {
         let q = SbqQuantizer::train(&[vec![1.0, 2.0]], 1);
         let mut bytes = q.to_meta_bytes();
         bytes.truncate(bytes.len() - 1);
-        assert!(SbqQuantizer::from_meta_bytes(&bytes).is_err(), "truncated codebook must be rejected");
+        assert!(
+            SbqQuantizer::from_meta_bytes(&bytes).is_err(),
+            "truncated codebook must be rejected"
+        );
     }
     #[pg_test]
     fn sbq_deterministic_train() {
@@ -340,7 +360,11 @@ mod tests {
         Spi::run("CREATE TEMP TABLE sbq_t (id int PRIMARY KEY, e vector(2))").unwrap();
         Spi::run("INSERT INTO sbq_t VALUES (0,'[0,0]'),(1,'[1,0]'),(2,'[5,5]')").unwrap();
         let r = knn(
-            "sbq_t", "e", "id", "l2", &[0.0, 0.0],
+            "sbq_t",
+            "e",
+            "id",
+            "l2",
+            &[0.0, 0.0],
             SbqParams { qdim: 2, k: 2, bits: 1, lists: 4, probes: 4, over_fetch: 8, seed: 42 },
         );
         assert_eq!(r.len(), 2);
@@ -352,7 +376,11 @@ mod tests {
         Spi::run("INSERT INTO sbq_of VALUES (0,'[0]'),(1,'[1]'),(2,'[2]')").unwrap();
         // over_fetch huge + tiny corpus → returns min(k, available), no panic (EC-2).
         let r = knn(
-            "sbq_of", "e", "id", "l2", &[0.0],
+            "sbq_of",
+            "e",
+            "id",
+            "l2",
+            &[0.0],
             SbqParams { qdim: 1, k: 10, bits: 1, lists: 2, probes: 2, over_fetch: 64, seed: 42 },
         );
         assert_eq!(r.len(), 3);
@@ -360,14 +388,22 @@ mod tests {
     #[pg_test(error = "theodb sbq: bits must be in [1, 8]")]
     fn sbq_knn_bad_bits_rejected() {
         let _ = knn(
-            "t", "e", "id", "l2", &[0.0],
+            "t",
+            "e",
+            "id",
+            "l2",
+            &[0.0],
             SbqParams { qdim: 1, k: 5, bits: 9, lists: 4, probes: 4, over_fetch: 8, seed: 42 },
         );
     }
     #[pg_test(error = "theodb sbq: unknown metric 'nope' (use l2|cosine|ip)")]
     fn sbq_knn_bad_metric_rejected() {
         let _ = knn(
-            "t", "e", "id", "nope", &[0.0],
+            "t",
+            "e",
+            "id",
+            "nope",
+            &[0.0],
             SbqParams { qdim: 1, k: 5, bits: 1, lists: 4, probes: 4, over_fetch: 8, seed: 42 },
         );
     }

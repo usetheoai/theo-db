@@ -2,10 +2,9 @@
 //! byte-identical same-index A/B). Sibling items resolve via `use super::*` (re-exported in `mod.rs`).
 #![allow(unused_imports)]
 use super::*;
-use crate::ann::{HnswIndex, Metric};
 use crate::am::page;
+use crate::ann::{HnswIndex, Metric};
 use pgrx::pg_sys;
-
 
 /// A traversal candidate: its element address, neighbor-tuple address, level, heap tid, and distance to the query.
 /// `pub(crate)` only so the `HnswResume` type alias (M118) can name it across the `am` module — its FIELDS stay
@@ -234,7 +233,18 @@ pub(crate) unsafe fn traverse(
     let lut: Option<&crate::vec::ah::Lut16> = lut_owned.as_ref();
 
     // Entry point (from meta), then greedy-descend the upper layers keeping a single best candidate.
-    let mut ep = load(rel, meta.entry_blkno, meta.entry_offno, q, metric, is_l2, qcode, lut, nblocks, &mut reads)?;
+    let mut ep = load(
+        rel,
+        meta.entry_blkno,
+        meta.entry_offno,
+        q,
+        metric,
+        is_l2,
+        qcode,
+        lut,
+        nblocks,
+        &mut reads,
+    )?;
     let mut lc = meta.entry_level as usize;
     while lc >= 1 {
         loop {
@@ -284,7 +294,8 @@ pub(crate) unsafe fn traverse(
         // the walk itself paid only the cheap surrogate cost.
         let over_fetch = crate::am::guc::over_fetch().max(1);
         let walk_ef = ef.saturating_mul(over_fetch);
-        let (nodes, cand) = crate::ann::scan_core::ground_search_nodes(&pg_src, ep, walk_ef, m0, true)?;
+        let (nodes, cand) =
+            crate::ann::scan_core::ground_search_nodes(&pg_src, ep, walk_ef, m0, true)?;
         candidates_seen = cand; // the walk pool is `walk_ef = ef·over_fetch` here (honest — what it navigated)
         reads = pg_src.reads.get();
         let mut reranked: Vec<(i64, f64)> = Vec::with_capacity(nodes.len());
@@ -328,7 +339,10 @@ pub(crate) unsafe fn traverse(
 
     if std::env::var("THEODB_SCAN_PROFILE").is_ok_and(|v| v == "1") {
         // The wiring-triad runtime metric: pages read must be O(ef·M), flat in N (server LOG, not client WARNING).
-        pgrx::log!("theodb hnsw scan profile: pages_read={reads} ef={ef} m={m} m0={m0} results={}", out.len());
+        pgrx::log!(
+            "theodb hnsw scan profile: pages_read={reads} ef={ef} m={m} m0={m0} results={}",
+            out.len()
+        );
     }
     Ok(out)
 }
@@ -368,15 +382,26 @@ pub(crate) unsafe fn resumable_init(
         let nblocks = page::main_fork_nblocks(rel);
         let mut reads = 0usize;
         // Greedy upper-layer descent — byte-identical to `traverse` (v1: qcode=None, lut=None).
-        let mut ep =
-            load(rel, meta.entry_blkno, meta.entry_offno, q, metric, is_l2, None, None, nblocks, &mut reads)?;
+        let mut ep = load(
+            rel,
+            meta.entry_blkno,
+            meta.entry_offno,
+            q,
+            metric,
+            is_l2,
+            None,
+            None,
+            nblocks,
+            &mut reads,
+        )?;
         let mut lc = meta.entry_level as usize;
         while lc >= 1 {
             loop {
                 let nbrs = neighbors_of(rel, &ep, lc, m, m0, nblocks, &mut reads)?;
                 let mut improved = false;
                 for (nb, no) in nbrs {
-                    let cand = load(rel, nb, no, q, metric, is_l2, None, None, nblocks, &mut reads)?;
+                    let cand =
+                        load(rel, nb, no, q, metric, is_l2, None, None, nblocks, &mut reads)?;
                     if cand.d < ep.d {
                         ep = cand;
                         improved = true;
@@ -479,17 +504,29 @@ impl<'a> crate::ann::scan_core::NeighborSource for PageNeighborSource<'a> {
     fn neighbors_into(&self, node: &Cand, out: &mut Vec<Addr>) -> Result<(), String> {
         let mut reads = 0usize;
         // bare `neighbors_into(..)` = the free page reader below; `self`-less → no recursion into this method.
-        let r = unsafe { neighbors_into(self.rel, node, 0, self.m, self.m0, self.nblocks, &mut reads, out) };
+        let r = unsafe {
+            neighbors_into(self.rel, node, 0, self.m, self.m0, self.nblocks, &mut reads, out)
+        };
         self.reads.set(self.reads.get() + reads);
         r
     }
     fn load(&self, r: &Addr) -> Result<Cand, String> {
         let mut reads = 0usize;
         let cand = unsafe {
-            load(self.rel, r.0, r.1, self.q, self.metric, self.is_l2, self.qcode, self.lut, self.nblocks, &mut reads)
+            load(
+                self.rel,
+                r.0,
+                r.1,
+                self.q,
+                self.metric,
+                self.is_l2,
+                self.qcode,
+                self.lut,
+                self.nblocks,
+                &mut reads,
+            )
         };
         self.reads.set(self.reads.get() + reads);
         cand
     }
 }
-

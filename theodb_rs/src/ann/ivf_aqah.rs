@@ -4,10 +4,10 @@
 //! scan → rerank full-precision. Domínio puro (sem `pg_sys`, `rules/architecture.md §1`) — testável sem banco.
 //! NÃO é o AM pgrx (page format/WAL): isso é M76+. Aqui mede-se o ALGORITMO (a hipótese IVF-AQ+AH do M59/ADR-0019).
 
-use crate::vec::aq::AqQuantizer;
-use crate::ann::ivf::IvfflatIndex;
 use crate::ann::Metric;
+use crate::ann::ivf::IvfflatIndex;
 use crate::vec::ah::{ah_score_block, build_lut16};
+use crate::vec::aq::AqQuantizer;
 
 /// FastScan block width (FAISS bbs=32) — o `ah_score_block` scoreia até 32 códigos por chamada.
 const BLOCK: usize = 32;
@@ -45,7 +45,9 @@ impl IvfAqahIndex {
         }
         let dim = corpus[0].1.len();
         if dim == 0 || dim % m != 0 {
-            return Err(format!("ivf_aqah build: dim {dim} not divisible by m {m} (fail-fast, Rule 8)"));
+            return Err(format!(
+                "ivf_aqah build: dim {dim} not divisible by m {m} (fail-fast, Rule 8)"
+            ));
         }
         let ivf = IvfflatIndex::build(corpus, lists, Metric::L2, seed);
         let centroids: Vec<Vec<f32>> = ivf.centroids().to_vec();
@@ -79,7 +81,13 @@ impl IvfAqahIndex {
     /// Busca 2-estágios: probe os `nprobe` centroides mais próximos → batched AH scan das listas (lower-bound
     /// approx via LUT) → rerank exato (L2 full-precision) dos `rerank_n` melhores → top-k ids. `nprobe`/`rerank_n`
     /// são o trade-off recall×QPS.
-    pub(crate) fn search(&self, q: &[f32], k: usize, nprobe: usize, rerank_n: usize) -> Result<Vec<i64>, String> {
+    pub(crate) fn search(
+        &self,
+        q: &[f32],
+        k: usize,
+        nprobe: usize,
+        rerank_n: usize,
+    ) -> Result<Vec<i64>, String> {
         let lut = build_lut16(q, &self.aq)?;
         // Stage 0 — probe: nprobe centroides mais próximos (exato, barato: nlists distâncias).
         let mut cdist: Vec<(f64, usize)> = self
@@ -194,7 +202,10 @@ mod tests {
         let truth = exact_topk(&corpus, &q, k);
         let r1 = recall_at(&idx.search(&q, k, 1, 200).expect("s1"), &truth);
         let rall = recall_at(&idx.search(&q, k, lists, 200).expect("sall"), &truth);
-        assert!(rall >= r1, "recall@nprobe=all {rall:.3} < recall@nprobe=1 {r1:.3} (não-monotônico)");
+        assert!(
+            rall >= r1,
+            "recall@nprobe=all {rall:.3} < recall@nprobe=1 {r1:.3} (não-monotônico)"
+        );
     }
 
     /// Negative (Rule 8): dim não divisível por m → typed Err, não panic.
@@ -202,7 +213,10 @@ mod tests {
     fn ivf_aqah_build_rejects_bad_dim() {
         let mut rng = TestRng::new(1);
         let corpus = corpus(&mut rng, 50, 7); // dim=7 não divisível por m=4
-        assert!(IvfAqahIndex::build(&corpus, 4, 4, 4, 2.0, 1).is_err(), "dim%m!=0 deve retornar Err");
+        assert!(
+            IvfAqahIndex::build(&corpus, 4, 4, 4, 2.0, 1).is_err(),
+            "dim%m!=0 deve retornar Err"
+        );
     }
 
     // ---------- M75 T3.1/T3.2 — medição SIFT1M real (gated por env `M75_SIFT_DIR`) ----------
@@ -219,14 +233,15 @@ mod tests {
                 return Err(format!("truncated fvecs at vec {} (Rule 8)", out.len()));
             }
             let v: Vec<f32> = (0..d)
-                .map(|i| f32::from_le_bytes(bytes[off + i * 4..off + i * 4 + 4].try_into().unwrap()))
+                .map(|i| {
+                    f32::from_le_bytes(bytes[off + i * 4..off + i * 4 + 4].try_into().unwrap())
+                })
                 .collect();
             off += d * 4;
             out.push(v);
         }
         Ok(out)
     }
-
 
     fn now_s() -> f64 {
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64()
@@ -245,17 +260,21 @@ mod tests {
             }
         };
         let m: usize = std::env::var("M75_M").ok().and_then(|s| s.parse().ok()).unwrap_or(32);
-        let lists: usize = std::env::var("M75_LISTS").ok().and_then(|s| s.parse().ok()).unwrap_or(1000);
+        let lists: usize =
+            std::env::var("M75_LISTS").ok().and_then(|s| s.parse().ok()).unwrap_or(1000);
         let nq: usize = std::env::var("M75_NQ").ok().and_then(|s| s.parse().ok()).unwrap_or(1000);
-        let out_path = std::env::var("M75_OUT").unwrap_or_else(|_| "/home/theo/m75_out.txt".to_string());
+        let out_path =
+            std::env::var("M75_OUT").unwrap_or_else(|_| "/home/theo/m75_out.txt".to_string());
         let emit = |line: String| {
             use std::io::Write;
-            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&out_path) {
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&out_path)
+            {
                 let _ = writeln!(f, "{line}");
             }
             pgrx::log!("{}", line);
         };
-        let base_n: usize = std::env::var("M75_N").ok().and_then(|s| s.parse().ok()).unwrap_or(1_000_000);
+        let base_n: usize =
+            std::env::var("M75_N").ok().and_then(|s| s.parse().ok()).unwrap_or(1_000_000);
         let base = read_fvecs(&format!("{dir}/sift_base.fvecs"), base_n).expect("base");
         let queries = read_fvecs(&format!("{dir}/sift_query.fvecs"), nq).expect("query");
         // GT EXATO sobre o base CARREGADO (brute-force top-10) — válido em qualquer escala (o `sift_groundtruth.ivecs`
@@ -263,8 +282,11 @@ mod tests {
         let gt: Vec<Vec<i64>> = queries
             .iter()
             .map(|q| {
-                let mut d: Vec<(f64, i64)> =
-                    base.iter().enumerate().map(|(i, v)| (crate::vec::l2_distance(q, v), i as i64)).collect();
+                let mut d: Vec<(f64, i64)> = base
+                    .iter()
+                    .enumerate()
+                    .map(|(i, v)| (crate::vec::l2_distance(q, v), i as i64))
+                    .collect();
                 let nth = 9.min(d.len().saturating_sub(1));
                 d.select_nth_unstable_by(nth, |a, b| a.0.partial_cmp(&b.0).unwrap());
                 d.truncate(10);
@@ -272,9 +294,15 @@ mod tests {
                 d.into_iter().map(|(_, id)| id).collect()
             })
             .collect();
-        emit(format!("M75_LOADED base={} query={} gt={} m={m} lists={lists}", base.len(), queries.len(), gt.len()));
+        emit(format!(
+            "M75_LOADED base={} query={} gt={} m={m} lists={lists}",
+            base.len(),
+            queries.len(),
+            gt.len()
+        ));
 
-        let corpus: Vec<(i64, Vec<f32>)> = base.iter().enumerate().map(|(i, v)| (i as i64, v.clone())).collect();
+        let corpus: Vec<(i64, Vec<f32>)> =
+            base.iter().enumerate().map(|(i, v)| (i as i64, v.clone())).collect();
         let t0 = now_s();
         let idx = IvfAqahIndex::build(&corpus, lists, m, 4, 2.0, 42).expect("build aqah");
         let build_aqah = now_s() - t0;
@@ -306,7 +334,9 @@ mod tests {
                 rec = r / queries.len() as f64;
             }
             let qps = queries.len() as f64 / best;
-            emit(format!("M75_RESULT engine=ivfaqah nprobe={nprobe} rerank={rerank} recall={rec:.4} qps={qps:.1}"));
+            emit(format!(
+                "M75_RESULT engine=ivfaqah nprobe={nprobe} rerank={rerank} recall={rec:.4} qps={qps:.1}"
+            ));
 
             // full-precision IVF baseline
             let mut recf = 0.0;
@@ -315,7 +345,8 @@ mod tests {
                 let ts = now_s();
                 let mut r = 0.0;
                 for (qi, q) in queries.iter().enumerate() {
-                    let got: Vec<i64> = f32idx.search(q, k, nprobe).into_iter().map(|(id, _)| id).collect();
+                    let got: Vec<i64> =
+                        f32idx.search(q, k, nprobe).into_iter().map(|(id, _)| id).collect();
                     r += recall10(&got, &gt[qi]);
                 }
                 let el = now_s() - ts;
@@ -323,7 +354,9 @@ mod tests {
                 recf = r / queries.len() as f64;
             }
             let qpsf = queries.len() as f64 / bestf;
-            emit(format!("M75_RESULT engine=f32ivf nprobe={nprobe} recall={recf:.4} qps={qpsf:.1}"));
+            emit(format!(
+                "M75_RESULT engine=f32ivf nprobe={nprobe} recall={recf:.4} qps={qpsf:.1}"
+            ));
         }
         emit("M75_DONE".to_string());
     }

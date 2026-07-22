@@ -96,9 +96,8 @@ fn record_scan_stat(relid: i64, pages_read: i64, candidates: i64, latency_us: i6
 fn exact_topk(tbl: &str, col: &str, qvec: &str, k: i32) -> HashSet<String> {
     pgrx::Spi::run("SET LOCAL enable_indexscan=off; SET LOCAL enable_bitmapscan=off; SET LOCAL enable_seqscan=on")
         .unwrap_or_else(|e| err_input(&format!("recommend_ef: GT setup failed: {e:?}")));
-    let sql = format!(
-        "SELECT ctid::text FROM {tbl} ORDER BY \"{col}\" <=> '{qvec}'::vector LIMIT {k}"
-    );
+    let sql =
+        format!("SELECT ctid::text FROM {tbl} ORDER BY \"{col}\" <=> '{qvec}'::vector LIMIT {k}");
     pgrx::Spi::connect(|c| {
         c.select(&sql, None, &[])
             .unwrap_or_else(|e| err_input(&format!("recommend_ef: exact scan failed: {e:?}")))
@@ -108,7 +107,14 @@ fn exact_topk(tbl: &str, col: &str, qvec: &str, k: i32) -> HashSet<String> {
 }
 
 /// Mean recall@k of the index scan at `ef` over the sample, against the precomputed exact GT sets.
-fn recall_at_ef(tbl: &str, col: &str, samples: &[&str], gts: &[HashSet<String>], k: i32, ef: i32) -> f64 {
+fn recall_at_ef(
+    tbl: &str,
+    col: &str,
+    samples: &[&str],
+    gts: &[HashSet<String>],
+    k: i32,
+    ef: i32,
+) -> f64 {
     pgrx::Spi::run(&format!(
         "SET LOCAL enable_seqscan=off; SET LOCAL enable_bitmapscan=off; SET LOCAL enable_indexscan=on; \
          SET LOCAL theodb_hnsw.ef_search = {ef}"
@@ -120,7 +126,8 @@ fn recall_at_ef(tbl: &str, col: &str, samples: &[&str], gts: &[HashSet<String>],
         if gt.is_empty() {
             continue; // a query with no neighbours is not a recall data point
         }
-        let sql = format!("SELECT ctid::text FROM {tbl} ORDER BY \"{col}\" <=> '{q}'::vector LIMIT {k}");
+        let sql =
+            format!("SELECT ctid::text FROM {tbl} ORDER BY \"{col}\" <=> '{q}'::vector LIMIT {k}");
         let ann: HashSet<String> = pgrx::Spi::connect(|c| {
             c.select(&sql, None, &[])
                 .unwrap_or_else(|e| err_input(&format!("recommend_ef: ann scan failed: {e:?}")))
@@ -140,7 +147,14 @@ fn recall_at_ef(tbl: &str, col: &str, samples: &[&str], gts: &[HashSet<String>],
 /// Measure one index scan: run `SELECT ctid FROM tbl ORDER BY col <=> q LIMIT k` at `ef` and return the
 /// observed `(pages_read, latency_us, results)`. `pages_read` comes from the backend-local accumulator the
 /// HNSW `traverse` feeds — the real per-scan cost, not an estimate (M67 collector, DoD bullet 1). Read-only.
-pub(crate) fn scan_stats(relid: i64, tbl: &str, col: &str, qvec: &str, ef: i32, k: i32) -> (i64, i64, i64, i64) {
+pub(crate) fn scan_stats(
+    relid: i64,
+    tbl: &str,
+    col: &str,
+    qvec: &str,
+    ef: i32,
+    k: i32,
+) -> (i64, i64, i64, i64) {
     if ef <= 0 || k <= 0 {
         err_input("theodb.scan_stats: ef and k must be > 0");
     }
@@ -214,14 +228,23 @@ mod tests {
         for i in 0..n {
             let center = (i % 5) as f32;
             let v: Vec<String> = (0..8)
-                .map(|j| format!("{:.3}", 1.0 + center + 0.02 * (((i * 7 + j * 3) % 11) as f32 - 5.0)))
+                .map(|j| {
+                    format!("{:.3}", 1.0 + center + 0.02 * (((i * 7 + j * 3) % 11) as f32 - 5.0))
+                })
                 .collect();
             Spi::run(&format!("INSERT INTO {tbl} VALUES ({i}, '[{}]')", v.join(","))).unwrap();
         }
-        Spi::run(&format!("CREATE INDEX {tbl}_idx ON {tbl} USING theodb_hnsw (e theodb_hnsw_cosine_ops)")).unwrap();
+        Spi::run(&format!(
+            "CREATE INDEX {tbl}_idx ON {tbl} USING theodb_hnsw (e theodb_hnsw_cosine_ops)"
+        ))
+        .unwrap();
         // 3 probes = the emb of rows 0,1,2.
         (0..3)
-            .map(|i| Spi::get_one::<String>(&format!("SELECT e::text FROM {tbl} WHERE id={i}")).unwrap().unwrap())
+            .map(|i| {
+                Spi::get_one::<String>(&format!("SELECT e::text FROM {tbl} WHERE id={i}"))
+                    .unwrap()
+                    .unwrap()
+            })
             .collect()
     }
 
@@ -233,7 +256,10 @@ mod tests {
         let ef_low = recommend_ef("rec1", "e", &refs, 0.5, 5);
         let ef_high = recommend_ef("rec1", "e", &refs, 1.0, 5);
         assert!(ef_low >= 5 && ef_low <= MAX_EF, "ef_low {ef_low} in range");
-        assert!(ef_high >= ef_low, "a higher recall target needs at least as much ef ({ef_high} >= {ef_low})");
+        assert!(
+            ef_high >= ef_low,
+            "a higher recall target needs at least as much ef ({ef_high} >= {ef_low})"
+        );
         assert!(ef_high <= MAX_EF, "ef bounded by the ceiling");
     }
 
@@ -256,12 +282,21 @@ mod tests {
         // Measure one scan → real pages_read + candidates > 0 (the HNSW traverse fed the backend-local counters).
         let (pages, candidates, _latency, results) = scan_stats(0, "sst1", "e", &probes[0], 40, 5);
         assert!(pages > 0, "the collector observes real pages_read from the scan (got {pages})");
-        assert!(candidates > 0, "the collector observes real candidates_seen from the scan (got {candidates})");
+        assert!(
+            candidates > 0,
+            "the collector observes real candidates_seen from the scan (got {candidates})"
+        );
         assert!(results > 0, "the scan returned rows (got {results})");
         // The observation was persisted into the catalog keyed by relid 0 (this test's synthetic key).
         let (n, cand): (i64, i64) = Spi::connect(|c| {
-            let r = c.select("SELECT n_scans, sum_candidates FROM theodb._index_scan_stats WHERE relid = 0", None, &[])
-                .unwrap().first();
+            let r = c
+                .select(
+                    "SELECT n_scans, sum_candidates FROM theodb._index_scan_stats WHERE relid = 0",
+                    None,
+                    &[],
+                )
+                .unwrap()
+                .first();
             (r.get::<i64>(1).unwrap().unwrap_or(0), r.get::<i64>(2).unwrap().unwrap_or(0))
         });
         assert_eq!(n, 1, "the collector persisted one observation into theodb._index_scan_stats");
@@ -290,7 +325,10 @@ mod tests {
                 r.get::<i64>(3).unwrap().unwrap_or(0),
             )
         });
-        assert!(idx.contains("esc1"), "explain_scan shows the theodb_hnsw index name (got '{idx}')");
+        assert!(
+            idx.contains("esc1"),
+            "explain_scan shows the theodb_hnsw index name (got '{idx}')"
+        );
         assert!(pages > 0, "explain_scan shows real pages_read (got {pages})");
         assert!(cand > 0, "explain_scan shows candidates_seen (got {cand})");
     }

@@ -23,7 +23,11 @@ use crate::pg::{err_external, err_input, guc};
 ///
 /// N-in/N-out is enforced by count AND by `results[].index`: a size mismatch, an out-of-range index,
 /// or a duplicate index is a typed 38000, never a silent misalignment (mirror `embed::run_batch`).
-pub(crate) fn run(query: Option<&str>, documents: &[Option<&str>], model: Option<&str>) -> Vec<f32> {
+pub(crate) fn run(
+    query: Option<&str>,
+    documents: &[Option<&str>],
+    model: Option<&str>,
+) -> Vec<f32> {
     let query = match query {
         Some(q) => q,
         None => err_input("ai.rerank: query must not be NULL"),
@@ -45,7 +49,8 @@ pub(crate) fn run(query: Option<&str>, documents: &[Option<&str>], model: Option
     }
 
     let (endpoint, mdl, api_key) = resolve_cfg("ai.rerank", model);
-    let payload = serde_json::json!({ "query": query, "documents": docs, "model": mdl }).to_string();
+    let payload =
+        serde_json::json!({ "query": query, "documents": docs, "model": mdl }).to_string();
     let body = post_json("ai.rerank", &endpoint, payload, api_key.as_deref());
 
     parse_rerank_results(&body, documents.len())
@@ -74,11 +79,7 @@ fn parse_rerank_results(body: &Value, n: usize) -> Vec<f32> {
     // correctly. Missing/out-of-range/duplicate index or non-numeric score is a malformed response (38000).
     let mut out: Vec<Option<f32>> = vec![None; n];
     for (pos, item) in results.iter().enumerate() {
-        let idx = item
-            .get("index")
-            .and_then(|v| v.as_u64())
-            .map(|v| v as usize)
-            .unwrap_or(pos);
+        let idx = item.get("index").and_then(|v| v.as_u64()).map(|v| v as usize).unwrap_or(pos);
         if idx >= n {
             err_external("ai.rerank: unexpected rerank response shape: index out of range");
         }
@@ -144,7 +145,9 @@ mod tests {
         assert_eq!(parse_rerank_results(&body, 2), vec![0.9_f32, 0.2_f32]);
     }
 
-    #[pg_test(error = "ai.rerank: rerank size mismatch: requested 3 documents, endpoint returned 2 results")]
+    #[pg_test(
+        error = "ai.rerank: rerank size mismatch: requested 3 documents, endpoint returned 2 results"
+    )]
     fn parse_size_mismatch_fails_typed() {
         let body = json!({"results": [
             {"index": 0, "relevance_score": 0.1},
@@ -168,7 +171,9 @@ mod tests {
         let _ = parse_rerank_results(&body, 2);
     }
 
-    #[pg_test(error = "ai.rerank: unexpected rerank response shape: missing or non-numeric relevance_score")]
+    #[pg_test(
+        error = "ai.rerank: unexpected rerank response shape: missing or non-numeric relevance_score"
+    )]
     fn parse_non_numeric_score_fails_typed() {
         let body = json!({"results": [{"index": 0, "relevance_score": "high"}]});
         let _ = parse_rerank_results(&body, 1);

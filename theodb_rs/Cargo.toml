@@ -59,3 +59,10 @@ panic = "unwind"
 opt-level = 3
 lto = "thin"
 codegen-units = 1
+
+# M136 — baseline do cargo-machete. `arrow` é flagado como dep direta não-usada: todo uso de Arrow no crate
+# passa por `datafusion::arrow` (re-export), não `use arrow::`. Mantido em baseline (não removido) porque a
+# declaração pode alinhar a versão de `arrow` (58) à esperada pelo `datafusion`, e removê-la às cegas arrisca
+# drift de resolução. Burn-down: confirmar que o datafusion re-exporta a mesma versão e então remover a dep.
+[package.metadata.cargo-machete]
+ignored = ["arrow"]

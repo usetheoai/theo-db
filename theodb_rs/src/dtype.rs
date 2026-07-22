@@ -27,9 +27,9 @@ const MAX_DIM: usize = 16000;
 /// On-disk layout — byte-idêntico ao `Vector` do pgvector (`vector.h:11-17`).
 #[repr(C)]
 struct VecHeader {
-    varlena: u32,      // varlena header (SET_VARSIZE little-endian: size << 2)
-    dim: u16,          // == pgvector int16 dim
-    unused: u16,       // == pgvector int16 unused (SEMPRE 0)
+    varlena: u32, // varlena header (SET_VARSIZE little-endian: size << 2)
+    dim: u16,     // == pgvector int16 dim
+    unused: u16,  // == pgvector int16 unused (SEMPRE 0)
     elements: [f32; 0],
 }
 
@@ -70,19 +70,21 @@ impl Vector {
         }
     }
 
-    unsafe fn from_datum_ptr(datum: Datum) -> Self { unsafe {
-        let raw = pgrx::pg_sys::pg_detoast_datum_copy(datum.cast_mut_ptr());
-        let q = NonNull::new(raw.cast::<VecHeader>()).unwrap();
-        let dim = (&raw const (*q.as_ptr()).dim).read() as usize;
-        let sz = ((&raw const (*q.as_ptr()).varlena).read() as usize) >> 2;
-        if sz != VecHeader::size_of(dim) {
-            pg::err_input("vector: corrupt varlena (size mismatch)");
+    unsafe fn from_datum_ptr(datum: Datum) -> Self {
+        unsafe {
+            let raw = pgrx::pg_sys::pg_detoast_datum_copy(datum.cast_mut_ptr());
+            let q = NonNull::new(raw.cast::<VecHeader>()).unwrap();
+            let dim = (&raw const (*q.as_ptr()).dim).read() as usize;
+            let sz = ((&raw const (*q.as_ptr()).varlena).read() as usize) >> 2;
+            if sz != VecHeader::size_of(dim) {
+                pg::err_input("vector: corrupt varlena (size mismatch)");
+            }
+            if (&raw const (*q.as_ptr()).unused).read() != 0 {
+                pg::err_input("vector: expected unused to be 0");
+            }
+            Vector(q)
         }
-        if (&raw const (*q.as_ptr()).unused).read() != 0 {
-            pg::err_input("vector: expected unused to be 0");
-        }
-        Vector(q)
-    }}
+    }
 
     fn as_slice(&self) -> &[f32] {
         unsafe {
@@ -147,15 +149,17 @@ unsafe impl SqlTranslatable for Vector {
     const TYPE_IDENT: &'static str = pgrx::pgrx_resolved_type!(Vector);
     const TYPE_ORIGIN: TypeOrigin = TypeOrigin::External;
     const ARGUMENT_SQL: Result<SqlMappingRef, ArgumentError> = Ok(SqlMappingRef::literal("vector"));
-    const RETURN_SQL: Result<ReturnsRef, ReturnsError> = Ok(ReturnsRef::One(SqlMappingRef::literal("vector")));
+    const RETURN_SQL: Result<ReturnsRef, ReturnsError> =
+        Ok(ReturnsRef::One(SqlMappingRef::literal("vector")));
 }
 
 unsafe impl<'fcx> ArgAbi<'fcx> for Vector {
     unsafe fn unbox_arg_unchecked(arg: Arg<'_, 'fcx>) -> Self {
         let idx = arg.index();
         unsafe {
-            arg.unbox_arg_using_from_datum()
-                .unwrap_or_else(|| crate::pg::err_input(&format!("argument {idx} must not be null")))
+            arg.unbox_arg_using_from_datum().unwrap_or_else(|| {
+                crate::pg::err_input(&format!("argument {idx} must not be null"))
+            })
         }
     }
 }
@@ -190,9 +194,7 @@ fn parse(text: &str) -> Vec<f32> {
         let t = tok.trim();
         let v: f32 = match t.parse() {
             Ok(v) => v,
-            Err(_) => pg::err_input(&format!(
-                "invalid input syntax for type vector: \"{t}\""
-            )),
+            Err(_) => pg::err_input(&format!("invalid input syntax for type vector: \"{t}\"")),
         };
         if v.is_nan() {
             pg::err_input("NaN not allowed in vector");
@@ -382,11 +384,7 @@ fn theodb_vector_from_float8_array(arr: Vec<f64>) -> Vector {
 // REQUIRED (M98 review M2): `SqlTranslatable for Vector` is `TypeOrigin::External`, so pgrx does NOT emit a
 // `CREATE TYPE` — THIS bootstrap is the SOLE creator of the `vector` type. Removing it silently breaks the
 // extension (the type never gets created). The External⇄bootstrap coupling is load-bearing.
-extension_sql!(
-    "CREATE TYPE vector;",
-    name = "vector_shell",
-    bootstrap,
-);
+extension_sql!("CREATE TYPE vector;", name = "vector_shell", bootstrap,);
 
 // M70 (flip ADR-D1): o theodb_rs provê o schema `theodb` (antes vinha do umbrella). Bloco nomeado que
 // os catálogos `theodb.*` (autotune, vectorizer) declaram em `requires` p/ garantir a ordem de criação.
@@ -476,10 +474,7 @@ mod tests {
     #[pg_test]
     fn dim_boundary() {
         // dim=1 (mínimo) e um vetor grande round-trip
-        assert_eq!(
-            Spi::get_one::<String>("SELECT '[1]'::vector::text").unwrap().unwrap(),
-            "[1]"
-        );
+        assert_eq!(Spi::get_one::<String>("SELECT '[1]'::vector::text").unwrap().unwrap(), "[1]");
         let big = format!("[{}]", (0..128).map(|i| i.to_string()).collect::<Vec<_>>().join(","));
         let n = Spi::get_one::<i64>(&format!("SELECT array_length(('{big}'::vector)::real[],1)"))
             .unwrap()
@@ -517,17 +512,14 @@ mod tests {
 
     #[pg_test]
     fn operators_match_kernels() {
-        let l2 = Spi::get_one::<f64>("SELECT '[0,0]'::vector <-> '[3,4]'::vector")
-            .unwrap()
-            .unwrap();
+        let l2 =
+            Spi::get_one::<f64>("SELECT '[0,0]'::vector <-> '[3,4]'::vector").unwrap().unwrap();
         assert!((l2 - 5.0).abs() < 1e-6, "L2=5, got {l2}");
-        let ip = Spi::get_one::<f64>("SELECT '[1,2]'::vector <#> '[3,4]'::vector")
-            .unwrap()
-            .unwrap();
+        let ip =
+            Spi::get_one::<f64>("SELECT '[1,2]'::vector <#> '[3,4]'::vector").unwrap().unwrap();
         assert!((ip - (-11.0)).abs() < 1e-6, "neg-ip=-(1*3+2*4)=-11, got {ip}");
-        let cos = Spi::get_one::<f64>("SELECT '[1,0]'::vector <=> '[0,1]'::vector")
-            .unwrap()
-            .unwrap();
+        let cos =
+            Spi::get_one::<f64>("SELECT '[1,0]'::vector <=> '[0,1]'::vector").unwrap().unwrap();
         assert!((cos - 1.0).abs() < 1e-6, "cosine([1,0],[0,1])=1, got {cos}");
     }
 
@@ -547,11 +539,10 @@ mod tests {
     fn table_column_and_order_by() {
         Spi::run("CREATE TEMP TABLE tv (id int, e vector(2))").unwrap();
         Spi::run("INSERT INTO tv VALUES (1,'[0,0]'),(2,'[1,1]'),(3,'[5,5]')").unwrap();
-        let nearest = Spi::get_one::<i32>(
-            "SELECT id FROM tv ORDER BY e <-> '[0,0]'::vector LIMIT 1",
-        )
-        .unwrap()
-        .unwrap();
+        let nearest =
+            Spi::get_one::<i32>("SELECT id FROM tv ORDER BY e <-> '[0,0]'::vector LIMIT 1")
+                .unwrap()
+                .unwrap();
         assert_eq!(nearest, 1);
     }
 
@@ -581,9 +572,14 @@ mod tests {
         Spi::run("CREATE TEMP TABLE cb2 (e vector(3))").unwrap();
         Spi::run("COPY cb TO '/tmp/theodb_cb.bin' WITH (FORMAT binary)").unwrap();
         Spi::run("COPY cb2 FROM '/tmp/theodb_cb.bin' WITH (FORMAT binary)").unwrap();
-        let n = Spi::get_one::<i64>("SELECT count(*) FROM cb2 WHERE e IS NOT NULL").unwrap().unwrap();
+        let n =
+            Spi::get_one::<i64>("SELECT count(*) FROM cb2 WHERE e IS NOT NULL").unwrap().unwrap();
         assert_eq!(n, 2, "COPY BINARY preservou 2 não-nulos");
-        let first = Spi::get_one::<String>("SELECT e::text FROM cb2 WHERE e IS NOT NULL ORDER BY e <-> '[0,0,0]'::vector LIMIT 1").unwrap().unwrap();
+        let first = Spi::get_one::<String>(
+            "SELECT e::text FROM cb2 WHERE e IS NOT NULL ORDER BY e <-> '[0,0,0]'::vector LIMIT 1",
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(first, "[1,2,3]");
     }
 }

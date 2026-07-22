@@ -7,7 +7,7 @@
 //! `CustomScan` wiring is Phase C. Own-code glue (Rule 9); Apache-2.0 `arrow`/`datafusion` the adopted engine.
 #![allow(non_snake_case)]
 
-use super::df_executor::{build_arrow, run_aggs_on_batch, AggSpec};
+use super::df_executor::{AggSpec, build_arrow, run_aggs_on_batch};
 use datafusion::arrow::record_batch::RecordBatch;
 use pgrx::prelude::*;
 use std::cell::RefCell;
@@ -115,10 +115,16 @@ fn encode_cell(
         21 => row.get::<i16>(col1).map_err(|e| format!("{e:?}"))?.map(|v| v.to_le_bytes().to_vec()),
         23 => row.get::<i32>(col1).map_err(|e| format!("{e:?}"))?.map(|v| v.to_le_bytes().to_vec()),
         20 => row.get::<i64>(col1).map_err(|e| format!("{e:?}"))?.map(|v| v.to_le_bytes().to_vec()),
-        700 => row.get::<f32>(col1).map_err(|e| format!("{e:?}"))?.map(|v| v.to_le_bytes().to_vec()),
-        701 => row.get::<f64>(col1).map_err(|e| format!("{e:?}"))?.map(|v| v.to_le_bytes().to_vec()),
+        700 => {
+            row.get::<f32>(col1).map_err(|e| format!("{e:?}"))?.map(|v| v.to_le_bytes().to_vec())
+        }
+        701 => {
+            row.get::<f64>(col1).map_err(|e| format!("{e:?}"))?.map(|v| v.to_le_bytes().to_vec())
+        }
         16 => row.get::<bool>(col1).map_err(|e| format!("{e:?}"))?.map(|v| vec![v as u8]),
-        25 | 1042 | 1043 => row.get::<String>(col1).map_err(|e| format!("{e:?}"))?.map(|v| v.into_bytes()),
+        25 | 1042 | 1043 => {
+            row.get::<String>(col1).map_err(|e| format!("{e:?}"))?.map(|v| v.into_bytes())
+        }
         other => return Err(format!("arrow_cache: unsupported column type oid {other}")),
     })
 }
@@ -133,14 +139,16 @@ unsafe fn build_cache(rel_oid: pg_sys::Oid, cols: &[String]) -> Result<RecordBat
     for name in cols {
         let idx = (0..natts)
             .find(|&i| {
-                std::ffi::CStr::from_ptr((*super::tupdesc_attr(tupdesc, i)).attname.data.as_ptr()).to_string_lossy()
+                std::ffi::CStr::from_ptr((*super::tupdesc_attr(tupdesc, i)).attname.data.as_ptr())
+                    .to_string_lossy()
                     == name.as_str()
             })
             .ok_or_else(|| format!("arrow_cache: column '{name}' not found"))?;
         let typid = (*super::tupdesc_attr(tupdesc, idx)).atttypid.to_u32();
         meta.push((name.clone(), typid));
     }
-    let relname = std::ffi::CStr::from_ptr(pg_sys::get_rel_name(rel_oid)).to_string_lossy().into_owned();
+    let relname =
+        std::ffi::CStr::from_ptr(pg_sys::get_rel_name(rel_oid)).to_string_lossy().into_owned();
     let nsp = pg_sys::get_namespace_name(pg_sys::get_rel_namespace(rel_oid));
     let nspname = std::ffi::CStr::from_ptr(nsp).to_string_lossy().into_owned();
     pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
@@ -148,7 +156,9 @@ unsafe fn build_cache(rel_oid: pg_sys::Oid, cols: &[String]) -> Result<RecordBat
     let collist = cols.iter().map(|c| format!("\"{c}\"")).collect::<Vec<_>>().join(", ");
     let sql = format!("SELECT {collist} FROM \"{nspname}\".\"{relname}\"");
     Spi::connect(|c| {
-        let t = c.select(&sql, None, &[]).map_err(|e| format!("arrow_cache: cache build select: {e:?}"))?;
+        let t = c
+            .select(&sql, None, &[])
+            .map_err(|e| format!("arrow_cache: cache build select: {e:?}"))?;
         let ncol = meta.len();
         let mut columns: Vec<Vec<Option<Vec<u8>>>> = vec![Vec::new(); ncol];
         for row in t {
@@ -162,7 +172,8 @@ unsafe fn build_cache(rel_oid: pg_sys::Oid, cols: &[String]) -> Result<RecordBat
             .map(|(i, (name, typid))| (name.clone(), *typid, std::mem::take(&mut columns[i])))
             .collect();
         let (schema, arrays) = build_arrow(&arrow_cols)?;
-        RecordBatch::try_new(Arc::new(schema), arrays).map_err(|e| format!("arrow_cache: batch: {e}"))
+        RecordBatch::try_new(Arc::new(schema), arrays)
+            .map_err(|e| format!("arrow_cache: batch: {e}"))
     })
 }
 
@@ -203,10 +214,14 @@ fn theodb_columnarize(table: pg_sys::Oid, cols: Vec<String>) -> bool {
             )
             .map_err(|e| format!("arrow_cache: cache_state upsert: {e:?}"))?;
             // Install the invalidate-on-write statement trigger on the heap table (idempotent).
-            let relname = std::ffi::CStr::from_ptr(pg_sys::get_rel_name(table)).to_string_lossy().into_owned();
-            let nspname = std::ffi::CStr::from_ptr(pg_sys::get_namespace_name(pg_sys::get_rel_namespace(table)))
+            let relname = std::ffi::CStr::from_ptr(pg_sys::get_rel_name(table))
                 .to_string_lossy()
                 .into_owned();
+            let nspname = std::ffi::CStr::from_ptr(pg_sys::get_namespace_name(
+                pg_sys::get_rel_namespace(table),
+            ))
+            .to_string_lossy()
+            .into_owned();
             let qual = format!("\"{nspname}\".\"{relname}\"");
             Spi::run(&format!("DROP TRIGGER IF EXISTS columnar_invalidate ON {qual}"))
                 .map_err(|e| format!("arrow_cache: drop trigger: {e:?}"))?;
@@ -246,7 +261,8 @@ fn theodb_cache_agg(table: pg_sys::Oid, num_col: String) -> String {
             Ok(b) => b,
             Err(e) => error!("{e}"),
         };
-        let res = run_aggs_on_batch(batch, &[AggSpec::CountStar, AggSpec::SumFloat8(num_col)], None);
+        let res =
+            run_aggs_on_batch(batch, &[AggSpec::CountStar, AggSpec::SumFloat8(num_col)], None);
         match res {
             Ok(r) => {
                 let cnt = i64::from_datum(r[0].0, r[0].1).unwrap_or(0);
@@ -269,7 +285,8 @@ mod tests {
     #[pg_test]
     fn m101_cache_agg_matches_heap() {
         Spi::run("CREATE TABLE m101_h (id int, measure float8)").unwrap();
-        Spi::run("INSERT INTO m101_h SELECT g, (g * 1.5)::float8 FROM generate_series(1, 50000) g").unwrap();
+        Spi::run("INSERT INTO m101_h SELECT g, (g * 1.5)::float8 FROM generate_series(1, 50000) g")
+            .unwrap();
         let oid = Spi::get_one::<pg_sys::Oid>("SELECT 'm101_h'::regclass::oid").unwrap().unwrap();
         let built = Spi::get_one_with_args::<bool>(
             "SELECT theodb_columnarize($1, ARRAY['measure'])",
@@ -279,12 +296,19 @@ mod tests {
         .unwrap();
         assert!(built, "the cache must build");
 
-        let cache = Spi::get_one_with_args::<String>("SELECT theodb_cache_agg($1, 'measure')", &[oid.into()])
-            .unwrap()
-            .unwrap();
+        let cache = Spi::get_one_with_args::<String>(
+            "SELECT theodb_cache_agg($1, 'measure')",
+            &[oid.into()],
+        )
+        .unwrap()
+        .unwrap();
         let hc = Spi::get_one::<i64>("SELECT count(*) FROM m101_h").unwrap().unwrap();
         let hs = Spi::get_one::<f64>("SELECT sum(measure) FROM m101_h").unwrap().unwrap();
-        assert_eq!(cache, format!("count={hc};sum={hs:.4}"), "the cache aggregate must match the heap");
+        assert_eq!(
+            cache,
+            format!("count={hc};sum={hs:.4}"),
+            "the cache aggregate must match the heap"
+        );
         Spi::run("DROP TABLE m101_h").unwrap();
     }
 
@@ -295,27 +319,43 @@ mod tests {
     #[pg_test]
     fn m101_write_invalidates_cache() {
         Spi::run("CREATE TABLE m101_iv (id int, measure float8)").unwrap();
-        Spi::run("INSERT INTO m101_iv SELECT g, (g * 2.0)::float8 FROM generate_series(1, 10000) g").unwrap();
+        Spi::run(
+            "INSERT INTO m101_iv SELECT g, (g * 2.0)::float8 FROM generate_series(1, 10000) g",
+        )
+        .unwrap();
         let oid = Spi::get_one::<pg_sys::Oid>("SELECT 'm101_iv'::regclass::oid").unwrap().unwrap();
-        Spi::get_one_with_args::<bool>("SELECT theodb_columnarize($1, ARRAY['measure'])", &[oid.into()])
-            .unwrap()
-            .unwrap();
+        Spi::get_one_with_args::<bool>(
+            "SELECT theodb_columnarize($1, ARRAY['measure'])",
+            &[oid.into()],
+        )
+        .unwrap()
+        .unwrap();
 
         // Cache reflects the 10000 rows.
-        let before = Spi::get_one_with_args::<String>("SELECT theodb_cache_agg($1, 'measure')", &[oid.into()])
-            .unwrap()
-            .unwrap();
+        let before = Spi::get_one_with_args::<String>(
+            "SELECT theodb_cache_agg($1, 'measure')",
+            &[oid.into()],
+        )
+        .unwrap()
+        .unwrap();
         assert!(before.starts_with("count=10000;"), "cache before write: {before}");
 
         // A write bumps the generation via the trigger → the next cache read must rebuild and see 10001 rows.
         Spi::run("INSERT INTO m101_iv VALUES (10001, 5.0)").unwrap();
-        let after = Spi::get_one_with_args::<String>("SELECT theodb_cache_agg($1, 'measure')", &[oid.into()])
-            .unwrap()
-            .unwrap();
+        let after = Spi::get_one_with_args::<String>(
+            "SELECT theodb_cache_agg($1, 'measure')",
+            &[oid.into()],
+        )
+        .unwrap()
+        .unwrap();
         let hc = Spi::get_one::<i64>("SELECT count(*) FROM m101_iv").unwrap().unwrap();
         let hs = Spi::get_one::<f64>("SELECT sum(measure) FROM m101_iv").unwrap().unwrap();
         assert_eq!(hc, 10001, "the heap now has 10001 rows");
-        assert_eq!(after, format!("count={hc};sum={hs:.4}"), "the cache must rebuild and match the heap after the write");
+        assert_eq!(
+            after,
+            format!("count={hc};sum={hs:.4}"),
+            "the cache must rebuild and match the heap after the write"
+        );
         assert_ne!(before, after, "the cache result must change after the write (not stale)");
         Spi::run("DROP TABLE m101_iv").unwrap();
     }
@@ -327,17 +367,28 @@ mod tests {
     fn m101_heap_cache_customscan_matches_heap() {
         Spi::run("SET theodb.enable_columnar_agg = on").unwrap();
         Spi::run("CREATE TABLE m101_hc (id int, measure float8)").unwrap();
-        Spi::run("INSERT INTO m101_hc SELECT g, (g * 1.5)::float8 FROM generate_series(1, 20000) g").unwrap();
+        Spi::run(
+            "INSERT INTO m101_hc SELECT g, (g * 1.5)::float8 FROM generate_series(1, 20000) g",
+        )
+        .unwrap();
         let oid = Spi::get_one::<pg_sys::Oid>("SELECT 'm101_hc'::regclass::oid").unwrap().unwrap();
-        Spi::get_one_with_args::<bool>("SELECT theodb_columnarize($1, ARRAY['measure'])", &[oid.into()])
-            .unwrap()
-            .unwrap();
+        Spi::get_one_with_args::<bool>(
+            "SELECT theodb_columnarize($1, ARRAY['measure'])",
+            &[oid.into()],
+        )
+        .unwrap()
+        .unwrap();
 
         // EXPLAIN: the heap aggregate with a cache is our CustomScan.
-        let top = Spi::get_one::<String>("EXPLAIN (COSTS OFF) SELECT count(*), sum(measure) FROM m101_hc")
-            .unwrap()
-            .unwrap();
-        assert!(top.contains("Custom Scan"), "heap-with-cache aggregate must be a CustomScan: {top}");
+        let top = Spi::get_one::<String>(
+            "EXPLAIN (COSTS OFF) SELECT count(*), sum(measure) FROM m101_hc",
+        )
+        .unwrap()
+        .unwrap();
+        assert!(
+            top.contains("Custom Scan"),
+            "heap-with-cache aggregate must be a CustomScan: {top}"
+        );
 
         // Result-equivalence (the aggregate runs over the Arrow cache).
         let cc = Spi::get_one::<i64>("SELECT count(*) FROM m101_hc").unwrap().unwrap();

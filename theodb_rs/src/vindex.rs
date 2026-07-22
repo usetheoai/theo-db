@@ -91,7 +91,8 @@ impl ColumnarVIndex {
             centroids,
         };
         for (t, lab, v) in rows {
-            let pid = if cv.centroids.is_empty() { 0 } else { nearest_centroid(&cv.centroids, v) as i32 };
+            let pid =
+                if cv.centroids.is_empty() { 0 } else { nearest_centroid(&cv.centroids, v) as i32 };
             cv.tid.push(*t);
             cv.part_id.push(pid);
             cv.label.push(*lab);
@@ -126,7 +127,8 @@ impl ColumnarVIndex {
             // no centroid sidecar (reconstructed from columnar columns) → full masked scan (= full probe).
             (0..self.tid.len()).filter(|&i| self.label[i] == label).collect()
         } else {
-            let probed = probed_partitions(&self.centroids, query, probes.min(self.centroids.len()));
+            let probed =
+                probed_partitions(&self.centroids, query, probes.min(self.centroids.len()));
             (0..self.tid.len())
                 .filter(|&i| self.label[i] == label && probed.contains(&self.part_id[i]))
                 .collect()
@@ -179,7 +181,11 @@ mod theodb_rs {
     fn _f32vec_to_bytea(v: Vec<Option<f32>>) -> Vec<u8> {
         let flat: Vec<f32> = v
             .into_iter()
-            .map(|x| x.unwrap_or_else(|| crate::pg::err_input("vindex: vector must not contain NULL elements")))
+            .map(|x| {
+                x.unwrap_or_else(|| {
+                    crate::pg::err_input("vindex: vector must not contain NULL elements")
+                })
+            })
             .collect();
         super::f32_to_le_bytes(&flat)
     }
@@ -206,7 +212,8 @@ mod theodb_rs {
     #[pg_extern]
     fn _vindex_decode_bytes(idx: pg_sys::Oid, cols: pgrx::Array<'_, &str>) -> i64 {
         let names: Vec<String> = cols.iter().flatten().map(|s| s.to_string()).collect();
-        unsafe { super::decode_bytes_impl(idx, &names) }.unwrap_or_else(|e| crate::pg::err_input(&e))
+        unsafe { super::decode_bytes_impl(idx, &names) }
+            .unwrap_or_else(|e| crate::pg::err_input(&e))
     }
 
     /// `theodb_rs._vindex_knn_columnar` — the co-resident filtered top-k over a `theodb_columnar` table. Reads
@@ -223,7 +230,11 @@ mod theodb_rs {
     ) -> TableIterator<'static, (name!(tid, i64), name!(dist, f64))> {
         let q: Vec<f32> = query
             .into_iter()
-            .map(|x| x.unwrap_or_else(|| crate::pg::err_input("vindex: query must not contain NULL elements")))
+            .map(|x| {
+                x.unwrap_or_else(|| {
+                    crate::pg::err_input("vindex: query must not contain NULL elements")
+                })
+            })
             .collect();
         let results = unsafe { super::knn_columnar_impl(idx, &q, k.max(0) as usize, label) }
             .unwrap_or_else(|e| crate::pg::err_input(&e));
@@ -244,17 +255,20 @@ unsafe fn knn_columnar_impl(
         let want = ["tid", "part_id", "label", "vec"];
         let mut proj = Vec::with_capacity(4);
         for name in want {
-            proj.push(
-                crate::am::columnar::column_index(rel, name)
-                    .ok_or_else(|| format!("vindex: column '{name}' not found in the columnar index"))?,
-            );
+            proj.push(crate::am::columnar::column_index(rel, name).ok_or_else(|| {
+                format!("vindex: column '{name}' not found in the columnar index")
+            })?);
         }
         let cols = crate::am::columnar::decode_columns(rel, Some(&proj), &[], false)?;
         // cols is in projection order: tid, part_id, label, vec
         let by = |i: usize| &cols[i].2;
         let n = by(0).len();
-        let (mut tid, mut part_id, mut lbl, mut vec_raw) =
-            (Vec::with_capacity(n), Vec::with_capacity(n), Vec::with_capacity(n), Vec::with_capacity(n));
+        let (mut tid, mut part_id, mut lbl, mut vec_raw) = (
+            Vec::with_capacity(n),
+            Vec::with_capacity(n),
+            Vec::with_capacity(n),
+            Vec::with_capacity(n),
+        );
         for r in 0..n {
             let t = by(0)[r].as_ref().ok_or("vindex: NULL tid")?;
             let p = by(1)[r].as_ref().ok_or("vindex: NULL part_id")?;
@@ -298,10 +312,14 @@ unsafe fn decode_bytes_impl(idx: pg_sys::Oid, names: &[String]) -> Result<i64, S
 }
 
 fn v8(b: &[u8]) -> Result<[u8; 8], String> {
-    b.get(..8).and_then(|s| s.try_into().ok()).ok_or_else(|| "vindex: int8 column < 8 bytes".to_string())
+    b.get(..8)
+        .and_then(|s| s.try_into().ok())
+        .ok_or_else(|| "vindex: int8 column < 8 bytes".to_string())
 }
 fn v4(b: &[u8]) -> Result<[u8; 4], String> {
-    b.get(..4).and_then(|s| s.try_into().ok()).ok_or_else(|| "vindex: int4 column < 4 bytes".to_string())
+    b.get(..4)
+        .and_then(|s| s.try_into().ok())
+        .ok_or_else(|| "vindex: int4 column < 4 bytes".to_string())
 }
 
 // SQL wrappers: the public `theodb.vindex_*`. REVOKEd from PUBLIC (parity with the other theodb.* compute funcs
@@ -335,7 +353,13 @@ REVOKE ALL ON FUNCTION theodb_rs._vindex_assign(bytea[], int) FROM PUBLIC;
 REVOKE ALL ON FUNCTION theodb_rs._vindex_decode_bytes(oid, text[]) FROM PUBLIC;
 "#,
     name = "theodb_vindex",
-    requires = [_f32vec_to_bytea, _vindex_assign, _vindex_knn_columnar, _vindex_decode_bytes, "theodb_schema_bootstrap"],
+    requires = [
+        _f32vec_to_bytea,
+        _vindex_assign,
+        _vindex_knn_columnar,
+        _vindex_decode_bytes,
+        "theodb_schema_bootstrap"
+    ],
 );
 
 #[cfg(any(test, feature = "pg_test"))]
@@ -472,6 +496,9 @@ mod tests {
              JOIN m103_idx i ON i.tid = knn.tid"
         ))
         .unwrap();
-        assert!(avg.is_some(), "the filtered top-k composes with an analytical aggregation in one plan");
+        assert!(
+            avg.is_some(),
+            "the filtered top-k composes with an analytical aggregation in one plan"
+        );
     }
 }

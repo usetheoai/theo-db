@@ -19,11 +19,11 @@ use crate::pg::err_input;
 // M59 Phase 2 — the Asymmetric-Hashing LUT16 `pshufb` scoring kernel lives in a sibling file so neither this
 // module nor `ah.rs` exceeds the 500-LoC budget (`rules/architecture.md`). `#[path]` keeps `vec.rs` a plain
 // file (not a `vec/mod.rs` dir) — minimal diff, no reshuffle of the M20/M58 code above.
+#[path = "vec/ah.rs"]
+pub(crate) mod ah;
 #[path = "vec/aq.rs"]
 pub(crate) mod aq; // M104 — relocated from am/ (pure domain quantizer; fixes the vec->am layering inversion)
 pub(crate) mod rabitq; // vector E1 — extended multi-bit RaBitQ (f32-free rerank codec; own-code, arXiv:2409.09913)
-#[path = "vec/ah.rs"]
-pub(crate) mod ah;
 
 /// Reject mismatched dimensions, fail-fast at the boundary (Unbreakable Rule 8). Both TheoDB and pgvector's
 /// `CheckDims` reject `a->dim != b->dim`; pgvector raises SQLSTATE 22000 (data_exception) while TheoDB uses
@@ -140,33 +140,40 @@ mod simd_x86 {
     /// candidate vector byte-slice has exactly `dim` f32. `_mm256_loadu_ps` handles unaligned addresses, so reading
     /// `&[u8]` page bytes as `*const f32` is sound; only the LENGTH invariant is the caller's obligation.
     #[target_feature(enable = "avx2,fma")]
-    pub(super) unsafe fn l2_sq(query: &[f32], raw: &[u8]) -> f32 { unsafe {
-        let dim = query.len();
-        let qp = query.as_ptr();
-        let rp = raw.as_ptr();
-        let mut acc = _mm256_setzero_ps();
-        let mut i = 0usize;
-        while i + 8 <= dim {
-            let q = _mm256_loadu_ps(qp.add(i));
-            let r = _mm256_loadu_ps(rp.add(i * 4) as *const f32); // unaligned f32 straight from page bytes
-            let d = _mm256_sub_ps(q, r);
-            acc = _mm256_fmadd_ps(d, d, acc);
-            i += 8;
+    pub(super) unsafe fn l2_sq(query: &[f32], raw: &[u8]) -> f32 {
+        unsafe {
+            let dim = query.len();
+            let qp = query.as_ptr();
+            let rp = raw.as_ptr();
+            let mut acc = _mm256_setzero_ps();
+            let mut i = 0usize;
+            while i + 8 <= dim {
+                let q = _mm256_loadu_ps(qp.add(i));
+                let r = _mm256_loadu_ps(rp.add(i * 4) as *const f32); // unaligned f32 straight from page bytes
+                let d = _mm256_sub_ps(q, r);
+                acc = _mm256_fmadd_ps(d, d, acc);
+                i += 8;
+            }
+            // Horizontal sum of the 8 lanes.
+            let mut lanes = [0f32; 8];
+            _mm256_storeu_ps(lanes.as_mut_ptr(), acc);
+            let mut s: f32 = lanes.iter().sum();
+            // Scalar tail for dim % 8.
+            while i < dim {
+                let o = i * 4;
+                let r = f32::from_le_bytes([
+                    *rp.add(o),
+                    *rp.add(o + 1),
+                    *rp.add(o + 2),
+                    *rp.add(o + 3),
+                ]);
+                let d = *qp.add(i) - r;
+                s += d * d;
+                i += 1;
+            }
+            s
         }
-        // Horizontal sum of the 8 lanes.
-        let mut lanes = [0f32; 8];
-        _mm256_storeu_ps(lanes.as_mut_ptr(), acc);
-        let mut s: f32 = lanes.iter().sum();
-        // Scalar tail for dim % 8.
-        while i < dim {
-            let o = i * 4;
-            let r = f32::from_le_bytes([*rp.add(o), *rp.add(o + 1), *rp.add(o + 2), *rp.add(o + 3)]);
-            let d = *qp.add(i) - r;
-            s += d * d;
-            i += 1;
-        }
-        s
-    }}
+    }
 
     /// M58: the cosine kernel — `(Σq·r, Σq², Σr²)` with AVX2+FMA over unaligned LE-f32 `raw`, three lane
     /// accumulators reduced once. Same SAFETY contract as [`l2_sq`] (caller ensures AVX2+FMA available AND
@@ -174,64 +181,80 @@ mod simd_x86 {
     /// real (OpenAI/Cohere) cosine/IP embeddings, which until now ran scalar (the M58 P2 gap). Approximate (SIMD FMA
     /// rounds differently than the scalar sum) — same parity-not-identity rule as L2's SIMD (operators stay scalar).
     #[target_feature(enable = "avx2,fma")]
-    pub(super) unsafe fn cosine_terms(query: &[f32], raw: &[u8]) -> (f32, f32, f32) { unsafe {
-        let dim = query.len();
-        let qp = query.as_ptr();
-        let rp = raw.as_ptr();
-        let (mut adot, mut anq, mut anr) = (_mm256_setzero_ps(), _mm256_setzero_ps(), _mm256_setzero_ps());
-        let mut i = 0usize;
-        while i + 8 <= dim {
-            let q = _mm256_loadu_ps(qp.add(i));
-            let r = _mm256_loadu_ps(rp.add(i * 4) as *const f32);
-            adot = _mm256_fmadd_ps(q, r, adot);
-            anq = _mm256_fmadd_ps(q, q, anq);
-            anr = _mm256_fmadd_ps(r, r, anr);
-            i += 8;
+    pub(super) unsafe fn cosine_terms(query: &[f32], raw: &[u8]) -> (f32, f32, f32) {
+        unsafe {
+            let dim = query.len();
+            let qp = query.as_ptr();
+            let rp = raw.as_ptr();
+            let (mut adot, mut anq, mut anr) =
+                (_mm256_setzero_ps(), _mm256_setzero_ps(), _mm256_setzero_ps());
+            let mut i = 0usize;
+            while i + 8 <= dim {
+                let q = _mm256_loadu_ps(qp.add(i));
+                let r = _mm256_loadu_ps(rp.add(i * 4) as *const f32);
+                adot = _mm256_fmadd_ps(q, r, adot);
+                anq = _mm256_fmadd_ps(q, q, anq);
+                anr = _mm256_fmadd_ps(r, r, anr);
+                i += 8;
+            }
+            let mut ld = [0f32; 8];
+            let mut lq = [0f32; 8];
+            let mut lr = [0f32; 8];
+            _mm256_storeu_ps(ld.as_mut_ptr(), adot);
+            _mm256_storeu_ps(lq.as_mut_ptr(), anq);
+            _mm256_storeu_ps(lr.as_mut_ptr(), anr);
+            let (mut dot, mut nq, mut nr) =
+                (ld.iter().sum::<f32>(), lq.iter().sum::<f32>(), lr.iter().sum::<f32>());
+            while i < dim {
+                let o = i * 4;
+                let r = f32::from_le_bytes([
+                    *rp.add(o),
+                    *rp.add(o + 1),
+                    *rp.add(o + 2),
+                    *rp.add(o + 3),
+                ]);
+                let q = *qp.add(i);
+                dot += q * r;
+                nq += q * q;
+                nr += r * r;
+                i += 1;
+            }
+            (dot, nq, nr)
         }
-        let mut ld = [0f32; 8];
-        let mut lq = [0f32; 8];
-        let mut lr = [0f32; 8];
-        _mm256_storeu_ps(ld.as_mut_ptr(), adot);
-        _mm256_storeu_ps(lq.as_mut_ptr(), anq);
-        _mm256_storeu_ps(lr.as_mut_ptr(), anr);
-        let (mut dot, mut nq, mut nr) = (ld.iter().sum::<f32>(), lq.iter().sum::<f32>(), lr.iter().sum::<f32>());
-        while i < dim {
-            let o = i * 4;
-            let r = f32::from_le_bytes([*rp.add(o), *rp.add(o + 1), *rp.add(o + 2), *rp.add(o + 3)]);
-            let q = *qp.add(i);
-            dot += q * r;
-            nq += q * q;
-            nr += r * r;
-            i += 1;
-        }
-        (dot, nq, nr)
-    }}
+    }
 
     /// M58: fused dot `Σq·r` with AVX2+FMA (the inner-product kernel). Same SAFETY contract as [`l2_sq`].
     #[target_feature(enable = "avx2,fma")]
-    pub(super) unsafe fn dot(query: &[f32], raw: &[u8]) -> f32 { unsafe {
-        let dim = query.len();
-        let qp = query.as_ptr();
-        let rp = raw.as_ptr();
-        let mut acc = _mm256_setzero_ps();
-        let mut i = 0usize;
-        while i + 8 <= dim {
-            let q = _mm256_loadu_ps(qp.add(i));
-            let r = _mm256_loadu_ps(rp.add(i * 4) as *const f32);
-            acc = _mm256_fmadd_ps(q, r, acc);
-            i += 8;
+    pub(super) unsafe fn dot(query: &[f32], raw: &[u8]) -> f32 {
+        unsafe {
+            let dim = query.len();
+            let qp = query.as_ptr();
+            let rp = raw.as_ptr();
+            let mut acc = _mm256_setzero_ps();
+            let mut i = 0usize;
+            while i + 8 <= dim {
+                let q = _mm256_loadu_ps(qp.add(i));
+                let r = _mm256_loadu_ps(rp.add(i * 4) as *const f32);
+                acc = _mm256_fmadd_ps(q, r, acc);
+                i += 8;
+            }
+            let mut lanes = [0f32; 8];
+            _mm256_storeu_ps(lanes.as_mut_ptr(), acc);
+            let mut s: f32 = lanes.iter().sum();
+            while i < dim {
+                let o = i * 4;
+                let r = f32::from_le_bytes([
+                    *rp.add(o),
+                    *rp.add(o + 1),
+                    *rp.add(o + 2),
+                    *rp.add(o + 3),
+                ]);
+                s += *qp.add(i) * r;
+                i += 1;
+            }
+            s
         }
-        let mut lanes = [0f32; 8];
-        _mm256_storeu_ps(lanes.as_mut_ptr(), acc);
-        let mut s: f32 = lanes.iter().sum();
-        while i < dim {
-            let o = i * 4;
-            let r = f32::from_le_bytes([*rp.add(o), *rp.add(o + 1), *rp.add(o + 2), *rp.add(o + 3)]);
-            s += *qp.add(i) * r;
-            i += 1;
-        }
-        s
-    }}
+    }
 }
 
 /// L2 distance between two f32 slices, using the SAME AVX2+FMA kernel as the scan (M43). Reuses `l2_dist_from_bytes`
@@ -323,7 +346,11 @@ fn cosine_terms_scalar(query: &[f32], raw: &[u8]) -> (f32, f32, f32) {
 }
 
 pub(crate) fn cosine_dist_from_bytes(query: &[f32], raw: &[u8]) -> f64 {
-    assert_eq!(raw.len(), query.len() * 4, "cosine_dist_from_bytes: raw must be exactly dim*4 bytes");
+    assert_eq!(
+        raw.len(),
+        query.len() * 4,
+        "cosine_dist_from_bytes: raw must be exactly dim*4 bytes"
+    );
     // M58: AVX2+FMA cosine kernel when available (the real-embedding scan hot path); scalar fallback otherwise.
     #[cfg(target_arch = "x86_64")]
     let (dot, nq, nr) = if simd_x86::available() {
@@ -482,7 +509,11 @@ mod tests {
                 );
                 let ip = ip_dist_from_bytes(&q, &raw);
                 let eps = 1e-4 * (dim as f64).sqrt() * dot_oracle.abs().max(1.0);
-                assert!((ip - (-dot_oracle)).abs() <= eps, "ip dim={dim} avx={avx}: {ip} vs {}", -dot_oracle);
+                assert!(
+                    (ip - (-dot_oracle)).abs() <= eps,
+                    "ip dim={dim} avx={avx}: {ip} vs {}",
+                    -dot_oracle
+                );
             }
             simd_x86::reset_for_test();
         }
@@ -519,6 +550,9 @@ mod tests {
         // Also drop the measured ratio to the (mounted) build dir so the benchmark doc can quote it (server LOG is
         // swallowed on a passing pg_test). Best-effort — a write failure never fails the micro-bench.
         let _ = std::fs::write("/build/target/m58-speedup.txt", &line);
-        assert!(t_avx <= t_scalar * 1.2, "SIMD cosine must not be slower than scalar (avx={t_avx} scalar={t_scalar})");
+        assert!(
+            t_avx <= t_scalar * 1.2,
+            "SIMD cosine must not be slower than scalar (avx={t_avx} scalar={t_scalar})"
+        );
     }
 }

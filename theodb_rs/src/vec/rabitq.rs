@@ -140,9 +140,15 @@ impl RabitqQuantizer {
         let bits = bytes[4];
         let need = 5 + dim * dim * 4;
         if bytes.len() != need {
-            return Err(format!("theodb rabitq: meta length mismatch (got {}, want {need})", bytes.len()));
+            return Err(format!(
+                "theodb rabitq: meta length mismatch (got {}, want {need})",
+                bytes.len()
+            ));
         }
-        let rotation: Vec<f32> = bytes[5..].chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
+        let rotation: Vec<f32> = bytes[5..]
+            .chunks_exact(4)
+            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect();
         Ok(RabitqQuantizer { dim, bits, rotation })
     }
 
@@ -166,7 +172,10 @@ impl RabitqQuantizer {
     pub(crate) fn record_to_code(rec: &[u8], dim: usize) -> Result<RabitqCode, String> {
         let need = dim + 8;
         if rec.len() < need {
-            return Err(format!("theodb rabitq: truncated record (got {}, want {need})", rec.len()));
+            return Err(format!(
+                "theodb rabitq: truncated record (got {}, want {need})",
+                rec.len()
+            ));
         }
         let code: Vec<i8> = rec[..dim].iter().map(|&b| b as i8).collect();
         let nr = f32::from_le_bytes(rec[dim..dim + 4].try_into().unwrap());
@@ -275,7 +284,9 @@ mod tests {
         let n = 200usize; // data vectors
         let nq = 40usize; // queries
         let mut rng = SplitMix64::new(7);
-        let sample_vec = |rng: &mut SplitMix64| -> Vec<f32> { (0..d).map(|_| rng.next_gaussian() as f32).collect() };
+        let sample_vec = |rng: &mut SplitMix64| -> Vec<f32> {
+            (0..d).map(|_| rng.next_gaussian() as f32).collect()
+        };
         let data: Vec<Vec<f32>> = (0..n).map(|_| sample_vec(&mut rng)).collect();
         let queries: Vec<Vec<f32>> = (0..nq).map(|_| sample_vec(&mut rng)).collect();
 
@@ -305,13 +316,22 @@ mod tests {
             let mean_abs_rel = sum_abs_rel / cnt;
             let mean_signed = sum_signed / cnt;
             // (c) low bias — the ratio estimator over a random rotation is near-unbiased
-            assert!(mean_signed.abs() < 0.05, "bits={bits}: bias {mean_signed:.4} too high (estimator should be ~unbiased)");
+            assert!(
+                mean_signed.abs() < 0.05,
+                "bits={bits}: bias {mean_signed:.4} too high (estimator should be ~unbiased)"
+            );
             // (b) monotone tightening with bits
-            assert!(mean_abs_rel < prev_err + 1e-9, "bits={bits}: error {mean_abs_rel:.4} did not tighten vs prev {prev_err:.4}");
+            assert!(
+                mean_abs_rel < prev_err + 1e-9,
+                "bits={bits}: error {mean_abs_rel:.4} did not tighten vs prev {prev_err:.4}"
+            );
             prev_err = mean_abs_rel;
             // (a) 7-bit is accurate enough to be the FINAL ranking (f32-free) — the load-bearing claim
             if bits == 7 {
-                assert!(mean_abs_rel < 0.02, "bits=7: mean rel err {mean_abs_rel:.4} must be small enough for f32-free rerank");
+                assert!(
+                    mean_abs_rel < 0.02,
+                    "bits=7: mean rel err {mean_abs_rel:.4} must be small enough for f32-free rerank"
+                );
             }
         }
     }
@@ -351,7 +371,10 @@ mod tests {
         let q_rot = quant.rotate(&q);
         let qc2 = dot(&q, &q);
         let est = quant.estimate_l2_sq(&code, &q_rot, qc2);
-        assert!((est - qc2).abs() < 1e-6, "zero-residual distance must equal ‖q−c‖²={qc2}, got {est}");
+        assert!(
+            (est - qc2).abs() < 1e-6,
+            "zero-residual distance must equal ‖q−c‖²={qc2}, got {est}"
+        );
     }
 
     // Regression (E1 in-PG scan bug): `qc2` MUST be the SQUARED residual norm ‖q−c‖², not the sqrt L2 distance.
@@ -371,14 +394,27 @@ mod tests {
         let code = quant.encode(&residual);
         let qmc: Vec<f32> = q.iter().zip(&c).map(|(&qi, &ci)| qi - ci).collect();
         let q_rot = quant.rotate(&qmc);
-        let true_d2: f64 = q.iter().zip(&x).map(|(&qi, &xi)| { let e = (qi - xi) as f64; e * e }).sum();
+        let true_d2: f64 = q
+            .iter()
+            .zip(&x)
+            .map(|(&qi, &xi)| {
+                let e = (qi - xi) as f64;
+                e * e
+            })
+            .sum();
         let qc2_sq: f64 = qmc.iter().map(|&e| (e as f64) * (e as f64)).sum(); // ‖q−c‖² (CORRECT)
         let qc2_sqrt = qc2_sq.sqrt(); // the wrong value the scan bug passed
         let est_ok = quant.estimate_l2_sq(&code, &q_rot, qc2_sq);
         let est_bad = quant.estimate_l2_sq(&code, &q_rot, qc2_sqrt);
         let err_ok = (est_ok - true_d2).abs() / true_d2;
         let err_bad = (est_bad - true_d2).abs() / true_d2;
-        assert!(err_ok < 0.05, "squared qc2 must estimate the true ‖q−x‖²={true_d2:.1} (got {est_ok:.1}, err {err_ok:.3})");
-        assert!(err_bad > 0.3, "sqrt(qc2) must be grossly wrong — the guard against reintroducing the scan bug (err {err_bad:.3})");
+        assert!(
+            err_ok < 0.05,
+            "squared qc2 must estimate the true ‖q−x‖²={true_d2:.1} (got {est_ok:.1}, err {err_ok:.3})"
+        );
+        assert!(
+            err_bad > 0.3,
+            "sqrt(qc2) must be grossly wrong — the guard against reintroducing the scan bug (err {err_bad:.3})"
+        );
     }
 }

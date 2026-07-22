@@ -20,38 +20,38 @@
 /// `theodb_ivfflat.probes` scan GUC. Runs once in the postmaster before any DDL (pgrx honors a user `_PG_init`).
 #[allow(non_snake_case)]
 #[::pgrx::pg_guard]
-pub unsafe extern "C-unwind" fn _PG_init() { unsafe {
-    am::options::init();
-    am::guc::init();
-    // M92 spike — register the arbitrary-WHERE Custom Scan Provider methods + install the pathlist hook
-    // (inert unless `theodb.enable_vecfilter` is on).
-    am::customscan::init();
-    // M99 Phase C2: register the columnar pre-commit flush callback (persists pending INSERT rows into durable
-    // stripes + their MVCC catalog rows before commit).
-    am::columnar::init();
-    // M100 Phase C: register the columnar-aggregate CustomScan (upper-paths hook + methods + GUC, default OFF).
-    am::columnar_agg::init();
-    // M54: register the vectorizer background worker (only when preloaded — guarded internally, no-op in a
-    // backend CREATE EXTENSION so it stays silent there).
-    vectorizer::register_worker();
-}}
+pub unsafe extern "C-unwind" fn _PG_init() {
+    unsafe {
+        am::options::init();
+        am::guc::init();
+        // M92 spike — register the arbitrary-WHERE Custom Scan Provider methods + install the pathlist hook
+        // (inert unless `theodb.enable_vecfilter` is on).
+        am::customscan::init();
+        // M99 Phase C2: register the columnar pre-commit flush callback (persists pending INSERT rows into durable
+        // stripes + their MVCC catalog rows before commit).
+        am::columnar::init();
+        // M100 Phase C: register the columnar-aggregate CustomScan (upper-paths hook + methods + GUC, default OFF).
+        am::columnar_agg::init();
+        // M54: register the vectorizer background worker (only when preloaded — guarded internally, no-op in a
+        // backend CREATE EXTENSION so it stays silent there).
+        vectorizer::register_worker();
+    }
+}
 
-mod egress;
-mod am;
 mod ai_op;
+mod am;
 mod ann;
-mod bench_symqg; // E2 — SymphonyQG spike in-PG benchmark entrypoint (symqg_spike_bench)
 mod ann_query;
+mod bench_symqg; // E2 — SymphonyQG spike in-PG benchmark entrypoint (symqg_spike_bench)
 mod chat;
 mod chunk;
 mod dtype;
-mod sbq;
-mod sq8;
+mod egress;
 mod embed;
 mod graph; // M108 — persisted-CSR graph structure (build 1× + traverse without rebuild, crash-safe via PG bytea)
 mod graph_extract; // M110 — in-DB graph extraction surface (ai.extract_graph + theodb.graph_upsert, theo-rag parity)
-mod graph_rag; // M111 — vector-on-nodes + vector-entry→traversal→rerank GraphRAG flow (theodb.graph_rag_search)
 mod graph_pgq; // M113 — SQL/PGQ-subset surface (theodb.pgq_match bounded-path MATCH, DuckPGQ UDF-minimal)
+mod graph_rag; // M111 — vector-on-nodes + vector-entry→traversal→rerank GraphRAG flow (theodb.graph_rag_search)
 mod http;
 mod hybrid;
 mod migrate;
@@ -59,6 +59,8 @@ mod nl;
 mod pg;
 mod pq;
 mod rerank;
+mod sbq;
+mod sq8;
 mod vec;
 mod vectorizer;
 mod vindex;
@@ -79,7 +81,9 @@ mod tests {
         let _ = Spi::get_one::<String>("SELECT theodb_rs._embed_text(NULL, NULL)");
     }
 
-    #[pg_test(error = "theodb.embed: theodb.embedding_endpoint is not set — SET theodb.embedding_endpoint = 'http://host:port/v1/embeddings'")]
+    #[pg_test(
+        error = "theodb.embed: theodb.embedding_endpoint is not set — SET theodb.embedding_endpoint = 'http://host:port/v1/embeddings'"
+    )]
     fn embed_unset_endpoint_rejected() {
         // Ensure the GUC is unset for this test (ignore error if it was never set).
         Spi::run("RESET theodb.embedding_endpoint").ok();
@@ -124,7 +128,8 @@ mod tests {
     #[pg_test(error = "ai.rerank: query must not be NULL")]
     fn rerank_null_query_rejected() {
         Spi::run("SET theodb.rerank_endpoint = 'http://127.0.0.1:1/rerank'").unwrap();
-        Spi::run("SELECT * FROM theodb_rs._ai_rerank(NULL, ARRAY['d']::text[], NULL, NULL)").unwrap();
+        Spi::run("SELECT * FROM theodb_rs._ai_rerank(NULL, ARRAY['d']::text[], NULL, NULL)")
+            .unwrap();
     }
 
     #[pg_test(error = "ai.rerank: documents must not be NULL")]
@@ -137,7 +142,8 @@ mod tests {
     fn rerank_null_element_rejected() {
         // A NULL element breaks N-in/N-out alignment -> 22023, BEFORE any GUC/HTTP (endpoint set but unused).
         Spi::run("SET theodb.rerank_endpoint = 'http://127.0.0.1:1/rerank'").unwrap();
-        Spi::run("SELECT * FROM theodb_rs._ai_rerank('q', ARRAY['d', NULL]::text[], NULL, NULL)").unwrap();
+        Spi::run("SELECT * FROM theodb_rs._ai_rerank('q', ARRAY['d', NULL]::text[], NULL, NULL)")
+            .unwrap();
     }
 
     #[pg_test]
@@ -151,16 +157,20 @@ mod tests {
         assert_eq!(n, Some(0));
     }
 
-    #[pg_test(error = "ai.rerank: theodb.rerank_endpoint is not set — SET theodb.rerank_endpoint = 'http://host:port/rerank'")]
+    #[pg_test(
+        error = "ai.rerank: theodb.rerank_endpoint is not set — SET theodb.rerank_endpoint = 'http://host:port/rerank'"
+    )]
     fn rerank_unset_endpoint_rejected() {
         Spi::run("RESET theodb.rerank_endpoint").ok();
-        Spi::run("SELECT * FROM theodb_rs._ai_rerank('q', ARRAY['d']::text[], NULL, NULL)").unwrap();
+        Spi::run("SELECT * FROM theodb_rs._ai_rerank('q', ARRAY['d']::text[], NULL, NULL)")
+            .unwrap();
     }
 
     #[pg_test(error = "ai.rerank: endpoint must be http(s)://")]
     fn rerank_non_http_scheme_rejected() {
         Spi::run("SET theodb.rerank_endpoint = 'file:///etc/passwd'").unwrap();
-        Spi::run("SELECT * FROM theodb_rs._ai_rerank('q', ARRAY['d']::text[], NULL, NULL)").unwrap();
+        Spi::run("SELECT * FROM theodb_rs._ai_rerank('q', ARRAY['d']::text[], NULL, NULL)")
+            .unwrap();
     }
 
     #[pg_test(error = "ai.rerank: endpoint call failed: Connection refused (os error 111)")]
@@ -168,7 +178,8 @@ mod tests {
         // Port 1 unreachable -> connect error -> "call failed" (38000). The OS error string is part of the
         // exact match pgrx-tests 0.16.1 requires (the suite runs in the Linux builder).
         Spi::run("SET theodb.rerank_endpoint = 'http://127.0.0.1:1/rerank'").unwrap();
-        Spi::run("SELECT * FROM theodb_rs._ai_rerank('q', ARRAY['d']::text[], NULL, NULL)").unwrap();
+        Spi::run("SELECT * FROM theodb_rs._ai_rerank('q', ARRAY['d']::text[], NULL, NULL)")
+            .unwrap();
     }
 }
 

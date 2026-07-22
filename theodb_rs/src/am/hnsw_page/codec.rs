@@ -2,8 +2,8 @@
 //! byte-identical same-index A/B). Sibling items resolve via `use super::*` (re-exported in `mod.rs`).
 #![allow(unused_imports)]
 use super::*;
-use crate::ann::{HnswIndex, Metric};
 use crate::am::page;
+use crate::ann::{HnswIndex, Metric};
 use pgrx::pg_sys;
 
 /// A decoded element tuple: its level, heap tid, neighbor-tuple address, and the raw vector byte slice (scored
@@ -98,7 +98,14 @@ pub(crate) fn decode_raw_vec(b: &[u8]) -> Result<&[u8], String> {
 }
 
 /// Encode a v4 HOT element tuple: header (level/tid/nbr_addr/raw_addr/dim/version=4) + the `code` bytes. NO f32.
-pub(crate) fn encode_element_v4(idx: &HnswIndex, node: usize, nbr_addr: Addr, raw_addr: Addr, dim: usize, code: &[u8]) -> Vec<u8> {
+pub(crate) fn encode_element_v4(
+    idx: &HnswIndex,
+    node: usize,
+    nbr_addr: Addr,
+    raw_addr: Addr,
+    dim: usize,
+    code: &[u8],
+) -> Vec<u8> {
     let mut b = vec![0u8; elem_size_v4(code.len())];
     b[E4_TAG] = ELEM_TAG;
     b[E4_LEVEL] = idx.node_level(node) as u8;
@@ -188,7 +195,13 @@ pub(crate) fn decode_neighbors_into(
 
 /// Encode an element tuple. `code` is the node's SBQ code (empty ⇒ v1 f32-only, byte-identical to before);
 /// when non-empty it is written immediately after the f32 vector (layout v2).
-pub(crate) fn encode_element(idx: &HnswIndex, node: usize, nbr_addr: Addr, dim: usize, code: &[u8]) -> Vec<u8> {
+pub(crate) fn encode_element(
+    idx: &HnswIndex,
+    node: usize,
+    nbr_addr: Addr,
+    dim: usize,
+    code: &[u8],
+) -> Vec<u8> {
     let mut b = vec![0u8; elem_size(dim, code.len())];
     b[E_TAG] = ELEM_TAG;
     b[E_LEVEL] = idx.node_level(node) as u8;
@@ -205,7 +218,13 @@ pub(crate) fn encode_element(idx: &HnswIndex, node: usize, nbr_addr: Addr, dim: 
     b
 }
 
-pub(crate) fn encode_neighbors(idx: &HnswIndex, node: usize, elem_addr: &[Addr], m: usize, m0: usize) -> Vec<u8> {
+pub(crate) fn encode_neighbors(
+    idx: &HnswIndex,
+    node: usize,
+    elem_addr: &[Addr],
+    m: usize,
+    m0: usize,
+) -> Vec<u8> {
     let level = idx.node_level(node);
     let slots = nbr_slots(level, m, m0);
     let mut b = vec![0u8; nbr_size(level, m, m0)];
@@ -226,4 +245,3 @@ pub(crate) fn encode_neighbors(idx: &HnswIndex, node: usize, elem_addr: &[Addr],
     write_layer(&mut b, 0, level * m, m0);
     b
 }
-

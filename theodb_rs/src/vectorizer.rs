@@ -190,31 +190,31 @@ $fn$;
 mod theodb_rs {
     use pgrx::prelude::*;
 
-/// Atomically claim up to `batch` jobs for `owner`. A job is claimable when `pending` OR when `processing`
-/// with an expired lease (its previous owner is presumed dead — visibility timeout). `FOR UPDATE SKIP LOCKED`
-/// makes concurrent workers claim disjoint rows without blocking. `attempts` is incremented here (on claim);
-/// jobs already at `attempts >= max_attempts` are NOT reclaimed (they are dead-lettered by `mark_failed`).
-/// Returns the claimed jobs; the worker embeds them, then calls `mark_done`/`mark_failed` with the same
-/// `owner`. `lease_secs` MUST exceed the worst-case embed time ((MAX_RETRIES+1)×HTTP_TIMEOUT ≈ 90s) so a
-/// live-but-slow worker's lease does not expire mid-embed.
-#[pg_extern]
-fn _vectorizer_claim_batch(
-    owner: &str,
-    batch: i32,
-    lease_secs: i32,
-    max_attempts: i32,
-) -> TableIterator<
-    'static,
-    (
-        name!(job_id, i64),
-        name!(vectorizer_id, i32),
-        name!(source_pk, String),
-        name!(op, String),
-        name!(attempts, i32),
-    ),
-> {
-    let rows = Spi::connect_mut(|client| {
-        let tbl = client
+    /// Atomically claim up to `batch` jobs for `owner`. A job is claimable when `pending` OR when `processing`
+    /// with an expired lease (its previous owner is presumed dead — visibility timeout). `FOR UPDATE SKIP LOCKED`
+    /// makes concurrent workers claim disjoint rows without blocking. `attempts` is incremented here (on claim);
+    /// jobs already at `attempts >= max_attempts` are NOT reclaimed (they are dead-lettered by `mark_failed`).
+    /// Returns the claimed jobs; the worker embeds them, then calls `mark_done`/`mark_failed` with the same
+    /// `owner`. `lease_secs` MUST exceed the worst-case embed time ((MAX_RETRIES+1)×HTTP_TIMEOUT ≈ 90s) so a
+    /// live-but-slow worker's lease does not expire mid-embed.
+    #[pg_extern]
+    fn _vectorizer_claim_batch(
+        owner: &str,
+        batch: i32,
+        lease_secs: i32,
+        max_attempts: i32,
+    ) -> TableIterator<
+        'static,
+        (
+            name!(job_id, i64),
+            name!(vectorizer_id, i32),
+            name!(source_pk, String),
+            name!(op, String),
+            name!(attempts, i32),
+        ),
+    > {
+        let rows = Spi::connect_mut(|client| {
+            let tbl = client
             .update(
                 "UPDATE theodb.vectorizer_queue \
                  SET state='processing', owner=$1, lease_deadline=now() + make_interval(secs => $3), \
@@ -233,109 +233,109 @@ fn _vectorizer_claim_batch(
             .unwrap_or_else(|e| {
                 crate::pg::err_input(&format!("vectorizer claim failed: {e:?}"))
             });
-        let mut out = Vec::with_capacity(tbl.len());
-        for row in tbl {
-            let job_id = row.get::<i64>(1).ok().flatten().unwrap_or_default();
-            let vid = row.get::<i32>(2).ok().flatten().unwrap_or_default();
-            let pk = row.get::<String>(3).ok().flatten().unwrap_or_default();
-            let op = row.get::<String>(4).ok().flatten().unwrap_or_default();
-            let att = row.get::<i32>(5).ok().flatten().unwrap_or_default();
-            out.push((job_id, vid, pk, op, att));
-        }
-        out
-    });
-    TableIterator::new(rows)
-}
+            let mut out = Vec::with_capacity(tbl.len());
+            for row in tbl {
+                let job_id = row.get::<i64>(1).ok().flatten().unwrap_or_default();
+                let vid = row.get::<i32>(2).ok().flatten().unwrap_or_default();
+                let pk = row.get::<String>(3).ok().flatten().unwrap_or_default();
+                let op = row.get::<String>(4).ok().flatten().unwrap_or_default();
+                let att = row.get::<i32>(5).ok().flatten().unwrap_or_default();
+                out.push((job_id, vid, pk, op, att));
+            }
+            out
+        });
+        TableIterator::new(rows)
+    }
 
-/// Owner-guarded completion: delete the job iff it is still `processing` AND still owned by `owner`. Returns
-/// true iff the row was removed. A false return means the lease was lost (reclaimed by another worker) — the
-/// caller MUST discard its result and NOT write, else it would clobber the new owner (H1 fencing).
-#[pg_extern]
-fn _vectorizer_mark_done(job_id: i64, owner: &str) -> bool {
-    Spi::connect_mut(|client| {
-        client
-            .update(
-                "WITH d AS (DELETE FROM theodb.vectorizer_queue \
+    /// Owner-guarded completion: delete the job iff it is still `processing` AND still owned by `owner`. Returns
+    /// true iff the row was removed. A false return means the lease was lost (reclaimed by another worker) — the
+    /// caller MUST discard its result and NOT write, else it would clobber the new owner (H1 fencing).
+    #[pg_extern]
+    fn _vectorizer_mark_done(job_id: i64, owner: &str) -> bool {
+        Spi::connect_mut(|client| {
+            client
+                .update(
+                    "WITH d AS (DELETE FROM theodb.vectorizer_queue \
                  WHERE job_id=$1 AND owner=$2 AND state='processing' RETURNING 1) \
                  SELECT count(*) FROM d",
-                None,
-                &[job_id.into(), owner.into()],
-            )
-            .ok()
-            .and_then(|t| t.first().get::<i64>(1).ok().flatten())
-            .map(|n| n > 0)
-            .unwrap_or(false)
-    })
-}
+                    None,
+                    &[job_id.into(), owner.into()],
+                )
+                .ok()
+                .and_then(|t| t.first().get::<i64>(1).ok().flatten())
+                .map(|n| n > 0)
+                .unwrap_or(false)
+        })
+    }
 
-/// Owner-guarded failure. Recoverable vs terminal is decided IN SQL by `attempts` (burned on claim): below
-/// `max_attempts` the job returns to `pending` (owner/lease cleared → immediately re-claimable, a bounded
-/// retry); at/over the cap it becomes `failed` (dead-letter — never an infinite loop, H3). `last_error` is
-/// recorded (Rule 8 — never swallow). Returns true iff the guarded row matched (false = lease lost, discard).
-#[pg_extern]
-fn _vectorizer_mark_failed(job_id: i64, owner: &str, err: &str, max_attempts: i32) -> bool {
-    // Sanitize AT THE SINK (council-security MEDIUM): redact credential-shaped runs and bound the length here, so
-    // no present or future caller can persist a secret (or an unbounded blob) into `last_error`.
-    // `super::` — this fn lives inside the `#[pg_schema] mod theodb_rs`; the helper is at file scope.
-    let err = &super::sanitize_error_text(err);
-    Spi::connect_mut(|client| {
-        client
-            .update(
-                "WITH u AS (UPDATE theodb.vectorizer_queue \
+    /// Owner-guarded failure. Recoverable vs terminal is decided IN SQL by `attempts` (burned on claim): below
+    /// `max_attempts` the job returns to `pending` (owner/lease cleared → immediately re-claimable, a bounded
+    /// retry); at/over the cap it becomes `failed` (dead-letter — never an infinite loop, H3). `last_error` is
+    /// recorded (Rule 8 — never swallow). Returns true iff the guarded row matched (false = lease lost, discard).
+    #[pg_extern]
+    fn _vectorizer_mark_failed(job_id: i64, owner: &str, err: &str, max_attempts: i32) -> bool {
+        // Sanitize AT THE SINK (council-security MEDIUM): redact credential-shaped runs and bound the length here, so
+        // no present or future caller can persist a secret (or an unbounded blob) into `last_error`.
+        // `super::` — this fn lives inside the `#[pg_schema] mod theodb_rs`; the helper is at file scope.
+        let err = &super::sanitize_error_text(err);
+        Spi::connect_mut(|client| {
+            client
+                .update(
+                    "WITH u AS (UPDATE theodb.vectorizer_queue \
                  SET state = CASE WHEN attempts >= $4 THEN 'failed' ELSE 'pending' END, \
                      owner = NULL, lease_deadline = NULL, last_error = $3 \
                  WHERE job_id=$1 AND owner=$2 AND state='processing' RETURNING 1) \
                  SELECT count(*) FROM u",
-                None,
-                &[job_id.into(), owner.into(), err.into(), max_attempts.into()],
-            )
-            .ok()
-            .and_then(|t| t.first().get::<i64>(1).ok().flatten())
-            .map(|n| n > 0)
-            .unwrap_or(false)
-    })
-}
+                    None,
+                    &[job_id.into(), owner.into(), err.into(), max_attempts.into()],
+                )
+                .ok()
+                .and_then(|t| t.first().get::<i64>(1).ok().flatten())
+                .map(|n| n > 0)
+                .unwrap_or(false)
+        })
+    }
 
-/// Owner-guarded lease renewal for long batches: extend `lease_deadline` for jobs still owned by `owner`.
-/// The worker calls this at ~⅓ of the lease interval while `embed_batch` runs, so a live worker never loses
-/// jobs it is actively processing. Returns the count of jobs renewed (jobs whose lease was already lost are
-/// silently skipped — they belong to another owner now). `job_ids` is a bigint[].
-#[pg_extern]
-fn _vectorizer_renew_lease(job_ids: Vec<i64>, owner: &str, lease_secs: i32) -> i64 {
-    Spi::connect_mut(|client| {
-        client
-            .update(
-                "WITH u AS (UPDATE theodb.vectorizer_queue \
+    /// Owner-guarded lease renewal for long batches: extend `lease_deadline` for jobs still owned by `owner`.
+    /// The worker calls this at ~⅓ of the lease interval while `embed_batch` runs, so a live worker never loses
+    /// jobs it is actively processing. Returns the count of jobs renewed (jobs whose lease was already lost are
+    /// silently skipped — they belong to another owner now). `job_ids` is a bigint[].
+    #[pg_extern]
+    fn _vectorizer_renew_lease(job_ids: Vec<i64>, owner: &str, lease_secs: i32) -> i64 {
+        Spi::connect_mut(|client| {
+            client
+                .update(
+                    "WITH u AS (UPDATE theodb.vectorizer_queue \
                  SET lease_deadline = now() + make_interval(secs => $3) \
                  WHERE job_id = ANY($1) AND owner=$2 AND state='processing' RETURNING 1) \
                  SELECT count(*) FROM u",
-                None,
-                &[job_ids.into(), owner.into(), lease_secs.into()],
-            )
-            .ok()
-            .and_then(|t| t.first().get::<i64>(1).ok().flatten())
-            .unwrap_or(0)
-    })
-}
+                    None,
+                    &[job_ids.into(), owner.into(), lease_secs.into()],
+                )
+                .ok()
+                .and_then(|t| t.first().get::<i64>(1).ok().flatten())
+                .unwrap_or(0)
+        })
+    }
 
-/// Look up a vectorizer's config. Diverges (typed) if the id is unknown. `model` may be NULL.
-/// Resolved vectorizer config. `chunk_strategy == None` → the v1 in-place mode (1 doc → 1 vector);
-/// `Some(_)` → the M66 chunk-table mode (1 doc → N chunks → N rows in `{target_table}_chunks`).
-pub(crate) struct VecCfg {
-    source_table: String,
-    source_pk_col: String,
-    content_col: String,
-    target_table: String,
-    target_col: String,
-    model: Option<String>,
-    pub(crate) chunk_strategy: Option<String>,
-    chunk_size: i32,
-    chunk_overlap: i32,
-}
+    /// Look up a vectorizer's config. Diverges (typed) if the id is unknown. `model` may be NULL.
+    /// Resolved vectorizer config. `chunk_strategy == None` → the v1 in-place mode (1 doc → 1 vector);
+    /// `Some(_)` → the M66 chunk-table mode (1 doc → N chunks → N rows in `{target_table}_chunks`).
+    pub(crate) struct VecCfg {
+        source_table: String,
+        source_pk_col: String,
+        content_col: String,
+        target_table: String,
+        target_col: String,
+        model: Option<String>,
+        pub(crate) chunk_strategy: Option<String>,
+        chunk_size: i32,
+        chunk_overlap: i32,
+    }
 
-fn lookup_config(vectorizer_id: i32) -> VecCfg {
-    Spi::connect(|c| {
-        let t = c
+    fn lookup_config(vectorizer_id: i32) -> VecCfg {
+        Spi::connect(|c| {
+            let t = c
             .select(
                 "SELECT source_table, source_pk_col, content_col, target_table, target_col, model, \
                  chunk_strategy, chunk_size, chunk_overlap FROM theodb.vectorizer WHERE id=$1",
@@ -343,251 +343,275 @@ fn lookup_config(vectorizer_id: i32) -> VecCfg {
                 &[vectorizer_id.into()],
             )
             .unwrap_or_else(|e| crate::pg::err_input(&format!("vectorizer config lookup failed: {e:?}")));
-        if t.is_empty() {
-            crate::pg::err_input(&format!("vectorizer {vectorizer_id} not found"));
-        }
-        let r = t.first();
-        VecCfg {
-            source_table: r.get::<String>(1).ok().flatten().unwrap_or_default(),
-            source_pk_col: r.get::<String>(2).ok().flatten().unwrap_or_default(),
-            content_col: r.get::<String>(3).ok().flatten().unwrap_or_default(),
-            target_table: r.get::<String>(4).ok().flatten().unwrap_or_default(),
-            target_col: r.get::<String>(5).ok().flatten().unwrap_or_default(),
-            model: r.get::<String>(6).ok().flatten(),
-            chunk_strategy: r.get::<String>(7).ok().flatten(),
-            chunk_size: r.get::<i32>(8).ok().flatten().unwrap_or(512),
-            chunk_overlap: r.get::<i32>(9).ok().flatten().unwrap_or(64),
-        }
-    })
-}
-
-/// M66 chunk-table upsert: chunk `content` → embed each chunk in ONE round-trip → replace the doc's chunk
-/// rows atomically (DELETE the PK's old chunks, then INSERT the new ones — no orphans on re-embed).
-fn upsert_chunks(cfg: &VecCfg, source_pk: &str, content: &str) {
-    let strategy = cfg.chunk_strategy.as_deref().unwrap_or("recursive");
-    let chunks = crate::chunk::chunk(content, strategy, cfg.chunk_size as usize, cfg.chunk_overlap as usize);
-    let chunk_tbl = format!("{}_chunks", cfg.target_table);
-    // Always clear the doc's existing chunks first (re-embed must not leave orphans).
-    let del = format!("DELETE FROM {chunk_tbl} WHERE source_pk = $1");
-    Spi::run_with_args(&del, &[source_pk.into()])
-        .unwrap_or_else(|e| crate::pg::err_input(&format!("vectorizer chunk delete failed: {e:?}")));
-    if chunks.is_empty() {
-        return; // empty/whitespace doc → no chunks, no embed call
+            if t.is_empty() {
+                crate::pg::err_input(&format!("vectorizer {vectorizer_id} not found"));
+            }
+            let r = t.first();
+            VecCfg {
+                source_table: r.get::<String>(1).ok().flatten().unwrap_or_default(),
+                source_pk_col: r.get::<String>(2).ok().flatten().unwrap_or_default(),
+                content_col: r.get::<String>(3).ok().flatten().unwrap_or_default(),
+                target_table: r.get::<String>(4).ok().flatten().unwrap_or_default(),
+                target_col: r.get::<String>(5).ok().flatten().unwrap_or_default(),
+                model: r.get::<String>(6).ok().flatten(),
+                chunk_strategy: r.get::<String>(7).ok().flatten(),
+                chunk_size: r.get::<i32>(8).ok().flatten().unwrap_or(512),
+                chunk_overlap: r.get::<i32>(9).ok().flatten().unwrap_or(64),
+            }
+        })
     }
-    let items: Vec<Option<&str>> = chunks.iter().map(|s| Some(s.as_str())).collect();
-    let vecs = crate::embed::run_batch(&items, cfg.model.as_deref()); // ONE HTTP round-trip for N chunks
-    let ins = format!("INSERT INTO {chunk_tbl} (source_pk, chunk_index, chunk_text, embedding) VALUES ($1, $2, $3, $4::vector)");
-    for (i, (chunk_text, vec_text)) in chunks.iter().zip(vecs.iter()).enumerate() {
-        Spi::run_with_args(
-            &ins,
-            &[source_pk.into(), (i as i32).into(), chunk_text.as_str().into(), vec_text.as_str().into()],
+
+    /// M66 chunk-table upsert: chunk `content` → embed each chunk in ONE round-trip → replace the doc's chunk
+    /// rows atomically (DELETE the PK's old chunks, then INSERT the new ones — no orphans on re-embed).
+    fn upsert_chunks(cfg: &VecCfg, source_pk: &str, content: &str) {
+        let strategy = cfg.chunk_strategy.as_deref().unwrap_or("recursive");
+        let chunks = crate::chunk::chunk(
+            content,
+            strategy,
+            cfg.chunk_size as usize,
+            cfg.chunk_overlap as usize,
+        );
+        let chunk_tbl = format!("{}_chunks", cfg.target_table);
+        // Always clear the doc's existing chunks first (re-embed must not leave orphans).
+        let del = format!("DELETE FROM {chunk_tbl} WHERE source_pk = $1");
+        Spi::run_with_args(&del, &[source_pk.into()]).unwrap_or_else(|e| {
+            crate::pg::err_input(&format!("vectorizer chunk delete failed: {e:?}"))
+        });
+        if chunks.is_empty() {
+            return; // empty/whitespace doc → no chunks, no embed call
+        }
+        let items: Vec<Option<&str>> = chunks.iter().map(|s| Some(s.as_str())).collect();
+        let vecs = crate::embed::run_batch(&items, cfg.model.as_deref()); // ONE HTTP round-trip for N chunks
+        let ins = format!(
+            "INSERT INTO {chunk_tbl} (source_pk, chunk_index, chunk_text, embedding) VALUES ($1, $2, $3, $4::vector)"
+        );
+        for (i, (chunk_text, vec_text)) in chunks.iter().zip(vecs.iter()).enumerate() {
+            Spi::run_with_args(
+                &ins,
+                &[
+                    source_pk.into(),
+                    (i as i32).into(),
+                    chunk_text.as_str().into(),
+                    vec_text.as_str().into(),
+                ],
+            )
+            .unwrap_or_else(|e| {
+                crate::pg::err_input(&format!("vectorizer chunk insert failed: {e:?}"))
+            });
+        }
+    }
+
+    /// Build one dynamic SQL string with Postgres-native `format()` over SPI. COLUMN identifiers use `%I`
+    /// (quoted). TABLE names use `%s` — but they come from `create_vectorizer`'s `regclass` params stored as
+    /// `regclass::text`, which Postgres already renders as a safely-quoted, schema-qualified identifier (not raw
+    /// user text), so `%s` on them is injection-safe. Config is owner-controlled server-side, not request input.
+    fn build_sql(template: &str, a: &str, b: &str, c: &str) -> String {
+        Spi::get_one_with_args::<String>(
+            &format!("SELECT format($fmt${template}$fmt$, $1, $2, $3)"),
+            &[a.into(), b.into(), c.into()],
         )
-        .unwrap_or_else(|e| crate::pg::err_input(&format!("vectorizer chunk insert failed: {e:?}")));
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| crate::pg::err_input("vectorizer: could not build dynamic query"))
     }
-}
 
-/// Build one dynamic SQL string with Postgres-native `format()` over SPI. COLUMN identifiers use `%I`
-/// (quoted). TABLE names use `%s` — but they come from `create_vectorizer`'s `regclass` params stored as
-/// `regclass::text`, which Postgres already renders as a safely-quoted, schema-qualified identifier (not raw
-/// user text), so `%s` on them is injection-safe. Config is owner-controlled server-side, not request input.
-fn build_sql(template: &str, a: &str, b: &str, c: &str) -> String {
-    Spi::get_one_with_args::<String>(
-        &format!("SELECT format($fmt${template}$fmt$, $1, $2, $3)"),
-        &[a.into(), b.into(), c.into()],
-    )
-    .ok()
-    .flatten()
-    .unwrap_or_else(|| crate::pg::err_input("vectorizer: could not build dynamic query"))
-}
-
-/// Process one `upsert` job: fetch the source content, embed it (may longjmp on endpoint failure — the
-/// worker traps that with PgTryBuilder and marks the job failed), and write the embedding into the target
-/// column. v1 contract: the target row is keyed by the SAME PK value under `source_pk_col` (in-place: target
-/// == source; or a sibling table carrying that PK column). Chunking is a follow-up (1 row → 1 embedding).
-#[pg_extern]
-fn _vectorizer_process_upsert(vectorizer_id: i32, source_pk: &str) {
-    let cfg = lookup_config(vectorizer_id);
-    let fetch_q = build_sql(
-        "SELECT %1$I::text FROM %2$s WHERE %3$I::text = $1",
-        &cfg.content_col,
-        &cfg.source_table,
-        &cfg.source_pk_col,
-    );
-    let content = Spi::get_one_with_args::<String>(&fetch_q, &[source_pk.into()]).ok().flatten();
-    // M66: chunk-table mode (opt-in) writes N chunk rows; the default in-place mode writes 1 vector.
-    if cfg.chunk_strategy.is_some() {
-        upsert_chunks(&cfg, source_pk, content.as_deref().unwrap_or(""));
-        return;
+    /// Process one `upsert` job: fetch the source content, embed it (may longjmp on endpoint failure — the
+    /// worker traps that with PgTryBuilder and marks the job failed), and write the embedding into the target
+    /// column. v1 contract: the target row is keyed by the SAME PK value under `source_pk_col` (in-place: target
+    /// == source; or a sibling table carrying that PK column). Chunking is a follow-up (1 row → 1 embedding).
+    #[pg_extern]
+    fn _vectorizer_process_upsert(vectorizer_id: i32, source_pk: &str) {
+        let cfg = lookup_config(vectorizer_id);
+        let fetch_q = build_sql(
+            "SELECT %1$I::text FROM %2$s WHERE %3$I::text = $1",
+            &cfg.content_col,
+            &cfg.source_table,
+            &cfg.source_pk_col,
+        );
+        let content =
+            Spi::get_one_with_args::<String>(&fetch_q, &[source_pk.into()]).ok().flatten();
+        // M66: chunk-table mode (opt-in) writes N chunk rows; the default in-place mode writes 1 vector.
+        if cfg.chunk_strategy.is_some() {
+            upsert_chunks(&cfg, source_pk, content.as_deref().unwrap_or(""));
+            return;
+        }
+        // May diverge (ereport) on any embed failure — intentional: the worker's PgTryBuilder converts it to a
+        // typed `failed` transition (Rule 8 — never swallow). embed reads GUCs via SPI, so this runs in a txn.
+        let vec_text = crate::embed::run(content.as_deref(), cfg.model.as_deref());
+        let upd_q = build_sql(
+            "UPDATE %2$s SET %1$I = $1::vector WHERE %3$I::text = $2",
+            &cfg.target_col,
+            &cfg.target_table,
+            &cfg.source_pk_col,
+        );
+        Spi::run_with_args(&upd_q, &[vec_text.into(), source_pk.into()])
+            .unwrap_or_else(|e| crate::pg::err_input(&format!("vectorizer upsert failed: {e:?}")));
     }
-    // May diverge (ereport) on any embed failure — intentional: the worker's PgTryBuilder converts it to a
-    // typed `failed` transition (Rule 8 — never swallow). embed reads GUCs via SPI, so this runs in a txn.
-    let vec_text = crate::embed::run(content.as_deref(), cfg.model.as_deref());
-    let upd_q = build_sql(
-        "UPDATE %2$s SET %1$I = $1::vector WHERE %3$I::text = $2",
-        &cfg.target_col,
-        &cfg.target_table,
-        &cfg.source_pk_col,
-    );
-    Spi::run_with_args(&upd_q, &[vec_text.into(), source_pk.into()])
-        .unwrap_or_else(|e| crate::pg::err_input(&format!("vectorizer upsert failed: {e:?}")));
-}
 
-/// Process one `delete` job: clear the target embedding for the removed source row. v1 is idempotent and
-/// safe for the in-place case (target == source: the source row is already gone, so 0 rows) and the sibling
-/// case (nulls the orphan embedding).
-#[pg_extern]
-fn _vectorizer_process_delete(vectorizer_id: i32, source_pk: &str) {
-    let cfg = lookup_config(vectorizer_id);
-    // M66 chunk-table mode: delete all N chunk rows of the removed doc.
-    if cfg.chunk_strategy.is_some() {
-        let del = format!("DELETE FROM {}_chunks WHERE source_pk = $1", cfg.target_table);
-        let _ = Spi::run_with_args(&del, &[source_pk.into()]);
-        return;
+    /// Process one `delete` job: clear the target embedding for the removed source row. v1 is idempotent and
+    /// safe for the in-place case (target == source: the source row is already gone, so 0 rows) and the sibling
+    /// case (nulls the orphan embedding).
+    #[pg_extern]
+    fn _vectorizer_process_delete(vectorizer_id: i32, source_pk: &str) {
+        let cfg = lookup_config(vectorizer_id);
+        // M66 chunk-table mode: delete all N chunk rows of the removed doc.
+        if cfg.chunk_strategy.is_some() {
+            let del = format!("DELETE FROM {}_chunks WHERE source_pk = $1", cfg.target_table);
+            let _ = Spi::run_with_args(&del, &[source_pk.into()]);
+            return;
+        }
+        let del_q = build_sql(
+            "UPDATE %2$s SET %1$I = NULL WHERE %3$I::text = $1",
+            &cfg.target_col,
+            &cfg.target_table,
+            &cfg.source_pk_col,
+        );
+        let _ = Spi::run_with_args(&del_q, &[source_pk.into()]);
     }
-    let del_q = build_sql(
-        "UPDATE %2$s SET %1$I = NULL WHERE %3$I::text = $1",
-        &cfg.target_col,
-        &cfg.target_table,
-        &cfg.source_pk_col,
-    );
-    let _ = Spi::run_with_args(&del_q, &[source_pk.into()]);
-}
 
-/// Process a BATCH of `upsert` jobs from the SAME vectorizer in ONE `embed_batch` HTTP round-trip (DoD:
-/// "worker consome em batch via embed_batch" — the N→1 fix reused from `embed.rs:55`). Fetches all contents,
-/// embeds them in a single call, and upserts + marks each done. On ANY endpoint failure the whole call
-/// diverges (embed_batch longjmps) — the worker traps it and falls back to per-job `_vectorizer_process_upsert`
-/// so a single poison row cannot fail the batch. `job_ids[i]` aligns with `source_pks[i]`. Returns the count
-/// marked done (fencing-guarded: a lost lease contributes 0).
-#[pg_extern]
-fn _vectorizer_process_upsert_batch(
-    vectorizer_id: i32,
-    job_ids: Vec<i64>,
-    source_pks: Vec<String>,
-    owner: &str,
-) -> i64 {
-    let cfg = lookup_config(vectorizer_id);
-    let fetch_q = build_sql(
-        "SELECT %1$I::text FROM %2$s WHERE %3$I::text = $1",
-        &cfg.content_col,
-        &cfg.source_table,
-        &cfg.source_pk_col,
-    );
-    let contents: Vec<Option<String>> = source_pks
-        .iter()
-        .map(|pk| Spi::get_one_with_args::<String>(&fetch_q, &[pk.as_str().into()]).ok().flatten())
-        .collect();
-    // M66 chunk-table mode: each doc fans out to N chunks (already 1 embed_batch round-trip per doc via
-    // upsert_chunks). The cross-doc batch optimization is for the 1→1 in-place mode.
-    if cfg.chunk_strategy.is_some() {
+    /// Process a BATCH of `upsert` jobs from the SAME vectorizer in ONE `embed_batch` HTTP round-trip (DoD:
+    /// "worker consome em batch via embed_batch" — the N→1 fix reused from `embed.rs:55`). Fetches all contents,
+    /// embeds them in a single call, and upserts + marks each done. On ANY endpoint failure the whole call
+    /// diverges (embed_batch longjmps) — the worker traps it and falls back to per-job `_vectorizer_process_upsert`
+    /// so a single poison row cannot fail the batch. `job_ids[i]` aligns with `source_pks[i]`. Returns the count
+    /// marked done (fencing-guarded: a lost lease contributes 0).
+    #[pg_extern]
+    fn _vectorizer_process_upsert_batch(
+        vectorizer_id: i32,
+        job_ids: Vec<i64>,
+        source_pks: Vec<String>,
+        owner: &str,
+    ) -> i64 {
+        let cfg = lookup_config(vectorizer_id);
+        let fetch_q = build_sql(
+            "SELECT %1$I::text FROM %2$s WHERE %3$I::text = $1",
+            &cfg.content_col,
+            &cfg.source_table,
+            &cfg.source_pk_col,
+        );
+        let contents: Vec<Option<String>> = source_pks
+            .iter()
+            .map(|pk| {
+                Spi::get_one_with_args::<String>(&fetch_q, &[pk.as_str().into()]).ok().flatten()
+            })
+            .collect();
+        // M66 chunk-table mode: each doc fans out to N chunks (already 1 embed_batch round-trip per doc via
+        // upsert_chunks). The cross-doc batch optimization is for the 1→1 in-place mode.
+        if cfg.chunk_strategy.is_some() {
+            let mut done = 0i64;
+            for (i, pk) in source_pks.iter().enumerate() {
+                upsert_chunks(&cfg, pk, contents[i].as_deref().unwrap_or(""));
+                if _vectorizer_mark_done(job_ids[i], owner) {
+                    done += 1;
+                }
+            }
+            return done;
+        }
+        // ONE HTTP round-trip for the whole batch (may diverge on failure — caught by the worker → per-job fallback).
+        let items: Vec<Option<&str>> = contents.iter().map(|c| c.as_deref()).collect();
+        let vecs = crate::embed::run_batch(&items, cfg.model.as_deref());
+        let upd_q = build_sql(
+            "UPDATE %2$s SET %1$I = $1::vector WHERE %3$I::text = $2",
+            &cfg.target_col,
+            &cfg.target_table,
+            &cfg.source_pk_col,
+        );
         let mut done = 0i64;
         for (i, pk) in source_pks.iter().enumerate() {
-            upsert_chunks(&cfg, pk, contents[i].as_deref().unwrap_or(""));
+            Spi::run_with_args(&upd_q, &[vecs[i].as_str().into(), pk.as_str().into()])
+                .unwrap_or_else(|e| {
+                    crate::pg::err_input(&format!("vectorizer batch upsert failed: {e:?}"))
+                });
             if _vectorizer_mark_done(job_ids[i], owner) {
                 done += 1;
             }
         }
-        return done;
+        done
     }
-    // ONE HTTP round-trip for the whole batch (may diverge on failure — caught by the worker → per-job fallback).
-    let items: Vec<Option<&str>> = contents.iter().map(|c| c.as_deref()).collect();
-    let vecs = crate::embed::run_batch(&items, cfg.model.as_deref());
-    let upd_q = build_sql(
-        "UPDATE %2$s SET %1$I = $1::vector WHERE %3$I::text = $2",
-        &cfg.target_col,
-        &cfg.target_table,
-        &cfg.source_pk_col,
-    );
-    let mut done = 0i64;
-    for (i, pk) in source_pks.iter().enumerate() {
-        Spi::run_with_args(&upd_q, &[vecs[i].as_str().into(), pk.as_str().into()])
-            .unwrap_or_else(|e| crate::pg::err_input(&format!("vectorizer batch upsert failed: {e:?}")));
-        if _vectorizer_mark_done(job_ids[i], owner) {
-            done += 1;
+
+    // ── M122 — 3-phase split of the in-place (non-chunk) batch: phase A (read+resolve cfg, this txn) → phase B
+    // (embed, NO txn — the worker calls `embed::run_batch_resolved` between the two transactions so `backend_xmin`
+    // is released for the HTTP) → phase C (write+mark, a fresh txn). Chunk-mode (M66) keeps the single-txn
+    // `_vectorizer_process_upsert_batch` above (documented drawback — it still pins xmin for chunk vectorizers). ──
+
+    /// Phase-A result: everything phase B (the off-txn embed) and phase C (the write) need, as OWNED values so no
+    /// PG pointer/Datum crosses the commit boundary (the embed then holds no snapshot).
+    pub(crate) struct BatchRead {
+        pub(crate) endpoint: String,
+        pub(crate) model: String,
+        pub(crate) api_key: Option<String>,
+        pub(crate) contents: Vec<Option<String>>,
+        pub(crate) cfg: VecCfg,
+    }
+
+    /// M122 phase A — read the batch's content + resolve the network cfg, inside the caller's txn. Performs NO
+    /// write to the target and NO embed. Returns owned values; the worker commits this txn before the embed.
+    pub(crate) fn _vectorizer_read_batch(vectorizer_id: i32, source_pks: &[String]) -> BatchRead {
+        let cfg = lookup_config(vectorizer_id);
+        let (endpoint, model, api_key) = crate::embed::resolve_batch_cfg(cfg.model.as_deref());
+        let fetch_q = build_sql(
+            "SELECT %1$I::text FROM %2$s WHERE %3$I::text = $1",
+            &cfg.content_col,
+            &cfg.source_table,
+            &cfg.source_pk_col,
+        );
+        let contents: Vec<Option<String>> = source_pks
+            .iter()
+            .map(|pk| {
+                Spi::get_one_with_args::<String>(&fetch_q, &[pk.as_str().into()]).ok().flatten()
+            })
+            .collect();
+        BatchRead { endpoint, model, api_key, contents, cfg }
+    }
+
+    /// M122 phase C — write the already-embedded vectors + mark each job done, inside a fresh txn. Performs NO
+    /// embed/HTTP. Idempotent (overwrite-by-pk); `mark_done` is owner-guarded so a stale worker whose lease
+    /// expired cannot mark a re-claimed job. Returns the number of jobs marked done.
+    pub(crate) fn _vectorizer_write_batch(
+        cfg: &VecCfg,
+        job_ids: &[i64],
+        source_pks: &[String],
+        vecs: &[String],
+        owner: &str,
+    ) -> i64 {
+        let upd_q = build_sql(
+            "UPDATE %2$s SET %1$I = $1::vector WHERE %3$I::text = $2",
+            &cfg.target_col,
+            &cfg.target_table,
+            &cfg.source_pk_col,
+        );
+        let mut done = 0i64;
+        for (i, pk) in source_pks.iter().enumerate() {
+            Spi::run_with_args(&upd_q, &[vecs[i].as_str().into(), pk.as_str().into()])
+                .unwrap_or_else(|e| {
+                    crate::pg::err_input(&format!("vectorizer batch upsert failed: {e:?}"))
+                });
+            if _vectorizer_mark_done(job_ids[i], owner) {
+                done += 1;
+            }
         }
+        done
     }
-    done
-}
 
-// ── M122 — 3-phase split of the in-place (non-chunk) batch: phase A (read+resolve cfg, this txn) → phase B
-// (embed, NO txn — the worker calls `embed::run_batch_resolved` between the two transactions so `backend_xmin`
-// is released for the HTTP) → phase C (write+mark, a fresh txn). Chunk-mode (M66) keeps the single-txn
-// `_vectorizer_process_upsert_batch` above (documented drawback — it still pins xmin for chunk vectorizers). ──
-
-/// Phase-A result: everything phase B (the off-txn embed) and phase C (the write) need, as OWNED values so no
-/// PG pointer/Datum crosses the commit boundary (the embed then holds no snapshot).
-pub(crate) struct BatchRead {
-    pub(crate) endpoint: String,
-    pub(crate) model: String,
-    pub(crate) api_key: Option<String>,
-    pub(crate) contents: Vec<Option<String>>,
-    pub(crate) cfg: VecCfg,
-}
-
-/// M122 phase A — read the batch's content + resolve the network cfg, inside the caller's txn. Performs NO
-/// write to the target and NO embed. Returns owned values; the worker commits this txn before the embed.
-pub(crate) fn _vectorizer_read_batch(vectorizer_id: i32, source_pks: &[String]) -> BatchRead {
-    let cfg = lookup_config(vectorizer_id);
-    let (endpoint, model, api_key) = crate::embed::resolve_batch_cfg(cfg.model.as_deref());
-    let fetch_q = build_sql(
-        "SELECT %1$I::text FROM %2$s WHERE %3$I::text = $1",
-        &cfg.content_col,
-        &cfg.source_table,
-        &cfg.source_pk_col,
-    );
-    let contents: Vec<Option<String>> = source_pks
-        .iter()
-        .map(|pk| Spi::get_one_with_args::<String>(&fetch_q, &[pk.as_str().into()]).ok().flatten())
-        .collect();
-    BatchRead { endpoint, model, api_key, contents, cfg }
-}
-
-/// M122 phase C — write the already-embedded vectors + mark each job done, inside a fresh txn. Performs NO
-/// embed/HTTP. Idempotent (overwrite-by-pk); `mark_done` is owner-guarded so a stale worker whose lease
-/// expired cannot mark a re-claimed job. Returns the number of jobs marked done.
-pub(crate) fn _vectorizer_write_batch(
-    cfg: &VecCfg,
-    job_ids: &[i64],
-    source_pks: &[String],
-    vecs: &[String],
-    owner: &str,
-) -> i64 {
-    let upd_q = build_sql(
-        "UPDATE %2$s SET %1$I = $1::vector WHERE %3$I::text = $2",
-        &cfg.target_col,
-        &cfg.target_table,
-        &cfg.source_pk_col,
-    );
-    let mut done = 0i64;
-    for (i, pk) in source_pks.iter().enumerate() {
-        Spi::run_with_args(&upd_q, &[vecs[i].as_str().into(), pk.as_str().into()])
-            .unwrap_or_else(|e| crate::pg::err_input(&format!("vectorizer batch upsert failed: {e:?}")));
-        if _vectorizer_mark_done(job_ids[i], owner) {
-            done += 1;
-        }
-    }
-    done
-}
-
-/// Bump the worker throughput counter (wiring triad pillar c — queryable via theodb.vectorizer_stats()).
-#[pg_extern]
-fn _vectorizer_bump_stats(processed: i64, failed: i64) {
-    Spi::run_with_args(
-        "UPDATE theodb.vectorizer_worker_stats \
+    /// Bump the worker throughput counter (wiring triad pillar c — queryable via theodb.vectorizer_stats()).
+    #[pg_extern]
+    fn _vectorizer_bump_stats(processed: i64, failed: i64) {
+        Spi::run_with_args(
+            "UPDATE theodb.vectorizer_worker_stats \
          SET processed = processed + $1, failed = failed + $2, last_run = now() WHERE only_row",
-        &[processed.into(), failed.into()],
-    )
-    .unwrap_or_else(|e| crate::pg::err_input(&format!("vectorizer stats bump failed: {e:?}")));
-}
+            &[processed.into(), failed.into()],
+        )
+        .unwrap_or_else(|e| crate::pg::err_input(&format!("vectorizer stats bump failed: {e:?}")));
+    }
 
-/// Dead-letter orphans stuck in `processing` at the attempt cap. A worker that crashed AFTER burning the
-/// last attempt (on claim) but BEFORE reporting leaves a job `processing` that the claim can never reclaim
-/// (`attempts < max` is false) — without this reaper it would leak in `processing` forever, inflating the
-/// metric and never reaching the `failed` dead-letter (council-index-storage HIGH-2). Returns the count reaped.
-#[pg_extern]
-fn _vectorizer_reap_orphans(max_attempts: i32) -> i64 {
-    Spi::connect_mut(|client| {
-        client
+    /// Dead-letter orphans stuck in `processing` at the attempt cap. A worker that crashed AFTER burning the
+    /// last attempt (on claim) but BEFORE reporting leaves a job `processing` that the claim can never reclaim
+    /// (`attempts < max` is false) — without this reaper it would leak in `processing` forever, inflating the
+    /// metric and never reaching the `failed` dead-letter (council-index-storage HIGH-2). Returns the count reaped.
+    #[pg_extern]
+    fn _vectorizer_reap_orphans(max_attempts: i32) -> i64 {
+        Spi::connect_mut(|client| {
+            client
             .update(
                 "WITH r AS (UPDATE theodb.vectorizer_queue \
                  SET state='failed', last_error='lease expired at attempt cap (worker crashed before reporting)' \
@@ -599,18 +623,18 @@ fn _vectorizer_reap_orphans(max_attempts: i32) -> i64 {
             .ok()
             .and_then(|t| t.first().get::<i64>(1).ok().flatten())
             .unwrap_or(0)
-    })
-}
+        })
+    }
 
-/// M104 — bound the dead-letter: keep the most recent `keep` `failed` rows (highest job_id), delete older ones.
-/// Without this, a persistent poison row or a mis-set endpoint accumulates `failed` tombstones on-disk forever
-/// (the audit's unbounded on-disk dead-letter finding) — the partial claim index hides the growth from the hot
-/// path, so it is silent. `done` jobs are already DELETEd; this bounds the retained `failed` history. Returns the
-/// count purged. Called by the worker's periodic maintenance (`theodb.vectorizer_dead_letter_max`, default 1000).
-#[pg_extern]
-fn _vectorizer_purge_dead_letters(keep: i32) -> i64 {
-    Spi::connect_mut(|client| {
-        client
+    /// M104 — bound the dead-letter: keep the most recent `keep` `failed` rows (highest job_id), delete older ones.
+    /// Without this, a persistent poison row or a mis-set endpoint accumulates `failed` tombstones on-disk forever
+    /// (the audit's unbounded on-disk dead-letter finding) — the partial claim index hides the growth from the hot
+    /// path, so it is silent. `done` jobs are already DELETEd; this bounds the retained `failed` history. Returns the
+    /// count purged. Called by the worker's periodic maintenance (`theodb.vectorizer_dead_letter_max`, default 1000).
+    #[pg_extern]
+    fn _vectorizer_purge_dead_letters(keep: i32) -> i64 {
+        Spi::connect_mut(|client| {
+            client
             .update(
                 "WITH d AS (DELETE FROM theodb.vectorizer_queue WHERE state='failed' AND job_id NOT IN \
                  (SELECT job_id FROM theodb.vectorizer_queue WHERE state='failed' ORDER BY job_id DESC LIMIT $1) \
@@ -621,8 +645,8 @@ fn _vectorizer_purge_dead_letters(keep: i32) -> i64 {
             .ok()
             .and_then(|t| t.first().get::<i64>(1).ok().flatten())
             .unwrap_or(0)
-    })
-}
+        })
+    }
 } // mod theodb_rs
 
 // ── The background worker (ADR 0016) — the ONLY non-CI-testable piece (needs shared_preload_libraries). It
@@ -812,7 +836,10 @@ pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
             );
             // M104 — bound the on-disk dead-letter (purge old `failed` rows beyond the retained cap).
             let keep = crate::am::guc::vectorizer_dead_letter_max();
-            let _ = Spi::run_with_args("SELECT theodb_rs._vectorizer_purge_dead_letters($1)", &[keep.into()]);
+            let _ = Spi::run_with_args(
+                "SELECT theodb_rs._vectorizer_purge_dead_letters($1)",
+                &[keep.into()],
+            );
         });
 
         // Phase 1 — claim a batch (its own txn; the committed lease protects the jobs across phases).
@@ -822,7 +849,12 @@ pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
                     "SELECT job_id, vectorizer_id, source_pk, op \
                      FROM theodb_rs._vectorizer_claim_batch($1, $2, $3, $4)",
                     None,
-                    &[owner.clone().into(), WORKER_BATCH.into(), WORKER_LEASE_SECS.into(), WORKER_MAX_ATTEMPTS.into()],
+                    &[
+                        owner.clone().into(),
+                        WORKER_BATCH.into(),
+                        WORKER_LEASE_SECS.into(),
+                        WORKER_MAX_ATTEMPTS.into(),
+                    ],
                 ) {
                     Ok(t) => t,
                     Err(_) => return Vec::new(),
@@ -906,7 +938,8 @@ pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
         };
 
         // Deletes: per-job (no embed). Upserts: grouped by vectorizer for ONE embed_batch HTTP round-trip.
-        let mut groups: std::collections::HashMap<i32, Vec<(i64, String)>> = std::collections::HashMap::new();
+        let mut groups: std::collections::HashMap<i32, Vec<(i64, String)>> =
+            std::collections::HashMap::new();
         for (job_id, vid, pk, op) in jobs {
             if BackgroundWorker::sigterm_received() {
                 break;
@@ -927,11 +960,16 @@ pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
             // M122 — Phase A: READ content + resolve the network cfg in its own txn; the commit RELEASES the
             // snapshot before the embed, so `backend_xmin` is not pinned for the HTTP round-trip. subtxn-isolated
             // (H-1) so a bad-cfg/SPI error leaves clean state → `None` → per-job fallback.
-            let read = BackgroundWorker::transaction(|| in_subtxn(|| theodb_rs::_vectorizer_read_batch(vid, &pks)));
+            let read = BackgroundWorker::transaction(|| {
+                in_subtxn(|| theodb_rs::_vectorizer_read_batch(vid, &pks))
+            });
 
             let batch_done: Option<i64> = match read {
                 None => None,
-                Some(r) if r.cfg.chunk_strategy.is_some() || crate::am::guc::vectorizer_single_txn() => {
+                Some(r)
+                    if r.cfg.chunk_strategy.is_some()
+                        || crate::am::guc::vectorizer_single_txn() =>
+                {
                     // Chunk-mode (M66) keeps the single-txn path — documented drawback (still pins xmin for chunk
                     // vectorizers). The 3-phase split targets the 1→1 in-place mode (the common case). The
                     // `vectorizer_single_txn` GUC (default off) also lands here — measurement A/B only, to show the
@@ -960,13 +998,18 @@ pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
                     BackgroundWorker::transaction(|| {
                         let _ = Spi::run_with_args(
                             "SELECT theodb_rs._vectorizer_renew_lease($1, $2, $3)",
-                            &[job_ids.clone().into(), owner.clone().into(), WORKER_LEASE_SECS.into()],
+                            &[
+                                job_ids.clone().into(),
+                                owner.clone().into(),
+                                WORKER_LEASE_SECS.into(),
+                            ],
                         );
                     });
                     // Phase B — EMBED with NO open transaction and NO SPI: `backend_xmin` is released for the whole
                     // HTTP. A typed err_* longjmps; with no txn to catch it here, PgTryBuilder traps it and routes
                     // to the per-job fallback (which marks failed in its own txn).
-                    let items: Vec<Option<&str>> = r.contents.iter().map(|c| c.as_deref()).collect();
+                    let items: Vec<Option<&str>> =
+                        r.contents.iter().map(|c| c.as_deref()).collect();
                     let embedded: Option<Vec<String>> =
                         PgTryBuilder::new(std::panic::AssertUnwindSafe(|| {
                             Some(crate::embed::run_batch_resolved(
@@ -986,7 +1029,11 @@ pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
                         // Phase C — WRITE the vectors + MARK done in a fresh txn (idempotent overwrite;
                         // owner-guarded mark). A write error → None → per-job fallback (poison-row isolation).
                         Some(vecs) => BackgroundWorker::transaction(|| {
-                            in_subtxn(|| theodb_rs::_vectorizer_write_batch(&r.cfg, &job_ids, &pks, &vecs, &owner))
+                            in_subtxn(|| {
+                                theodb_rs::_vectorizer_write_batch(
+                                    &r.cfg, &job_ids, &pks, &vecs, &owner,
+                                )
+                            })
                         }),
                     }
                 }
@@ -1004,7 +1051,11 @@ pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
                             break;
                         }
                         renew(*job_id);
-                        if process_one(*job_id, vid, pk, false) { processed += 1 } else { failed += 1 }
+                        if process_one(*job_id, vid, pk, false) {
+                            processed += 1
+                        } else {
+                            failed += 1
+                        }
                     }
                 }
             }
@@ -1040,9 +1091,16 @@ END $$;
 "#,
     name = "theodb_vectorizer_revoke",
     requires = [
-        _vectorizer_claim_batch, _vectorizer_mark_done, _vectorizer_mark_failed, _vectorizer_renew_lease,
-        _vectorizer_process_upsert, _vectorizer_process_delete, _vectorizer_process_upsert_batch,
-        _vectorizer_bump_stats, _vectorizer_reap_orphans, _vectorizer_purge_dead_letters,
+        _vectorizer_claim_batch,
+        _vectorizer_mark_done,
+        _vectorizer_mark_failed,
+        _vectorizer_renew_lease,
+        _vectorizer_process_upsert,
+        _vectorizer_process_delete,
+        _vectorizer_process_upsert_batch,
+        _vectorizer_bump_stats,
+        _vectorizer_reap_orphans,
+        _vectorizer_purge_dead_letters,
     ],
 );
 
@@ -1071,11 +1129,10 @@ mod tests {
     #[pg_test]
     fn claim_moves_pending_to_processing_with_lease() {
         seed(3);
-        let claimed: i64 = Spi::get_one(
-            "SELECT count(*) FROM theodb_rs._vectorizer_claim_batch('w1', 10, 60, 5)",
-        )
-        .unwrap()
-        .unwrap();
+        let claimed: i64 =
+            Spi::get_one("SELECT count(*) FROM theodb_rs._vectorizer_claim_batch('w1', 10, 60, 5)")
+                .unwrap()
+                .unwrap();
         assert_eq!(claimed, 3, "all 3 pending jobs claimed");
         let processing: i64 = Spi::get_one(
             "SELECT count(*) FROM theodb.vectorizer_queue WHERE state='processing' AND owner='w1' AND lease_deadline > now()",
@@ -1089,11 +1146,17 @@ mod tests {
     fn dead_owner_job_is_reclaimed_after_lease_expiry() {
         seed(1);
         // w1 claims, then we simulate w1 dying by back-dating its lease into the past.
-        Spi::get_one::<i64>("SELECT count(*) FROM theodb_rs._vectorizer_claim_batch('w1', 10, 60, 5)").unwrap();
-        Spi::run("UPDATE theodb.vectorizer_queue SET lease_deadline = now() - interval '1 second'").unwrap();
+        Spi::get_one::<i64>(
+            "SELECT count(*) FROM theodb_rs._vectorizer_claim_batch('w1', 10, 60, 5)",
+        )
+        .unwrap();
+        Spi::run("UPDATE theodb.vectorizer_queue SET lease_deadline = now() - interval '1 second'")
+            .unwrap();
         // w2 must be able to reclaim the expired job (visibility timeout).
         let reclaimed: i64 =
-            Spi::get_one("SELECT count(*) FROM theodb_rs._vectorizer_claim_batch('w2', 10, 60, 5)").unwrap().unwrap();
+            Spi::get_one("SELECT count(*) FROM theodb_rs._vectorizer_claim_batch('w2', 10, 60, 5)")
+                .unwrap()
+                .unwrap();
         assert_eq!(reclaimed, 1, "expired-lease job is reclaimable by a new owner");
         let owner: String =
             Spi::get_one("SELECT owner FROM theodb.vectorizer_queue").unwrap().unwrap();
@@ -1104,21 +1167,36 @@ mod tests {
     fn stale_owner_mark_done_affects_zero_rows() {
         seed(1);
         // w1 claims; lease expires; w2 reclaims. w1's late mark_done MUST NOT delete w2's job (H1 fencing).
-        Spi::get_one::<i64>("SELECT count(*) FROM theodb_rs._vectorizer_claim_batch('w1', 10, 60, 5)").unwrap();
-        Spi::run("UPDATE theodb.vectorizer_queue SET lease_deadline = now() - interval '1 second'").unwrap();
-        Spi::get_one::<i64>("SELECT count(*) FROM theodb_rs._vectorizer_claim_batch('w2', 10, 60, 5)").unwrap();
-        let job_id: i64 = Spi::get_one("SELECT job_id FROM theodb.vectorizer_queue").unwrap().unwrap();
+        Spi::get_one::<i64>(
+            "SELECT count(*) FROM theodb_rs._vectorizer_claim_batch('w1', 10, 60, 5)",
+        )
+        .unwrap();
+        Spi::run("UPDATE theodb.vectorizer_queue SET lease_deadline = now() - interval '1 second'")
+            .unwrap();
+        Spi::get_one::<i64>(
+            "SELECT count(*) FROM theodb_rs._vectorizer_claim_batch('w2', 10, 60, 5)",
+        )
+        .unwrap();
+        let job_id: i64 =
+            Spi::get_one("SELECT job_id FROM theodb.vectorizer_queue").unwrap().unwrap();
         let w1_done: bool =
-            Spi::get_one(&format!("SELECT theodb_rs._vectorizer_mark_done({job_id}, 'w1')")).unwrap().unwrap();
+            Spi::get_one(&format!("SELECT theodb_rs._vectorizer_mark_done({job_id}, 'w1')"))
+                .unwrap()
+                .unwrap();
         assert!(!w1_done, "stale owner w1 must NOT complete the reclaimed job");
         let still_there: i64 =
-            Spi::get_one("SELECT count(*) FROM theodb.vectorizer_queue WHERE owner='w2'").unwrap().unwrap();
+            Spi::get_one("SELECT count(*) FROM theodb.vectorizer_queue WHERE owner='w2'")
+                .unwrap()
+                .unwrap();
         assert_eq!(still_there, 1, "w2's job survives w1's stale mark_done");
         // The real owner w2 completes it → row removed.
         let w2_done: bool =
-            Spi::get_one(&format!("SELECT theodb_rs._vectorizer_mark_done({job_id}, 'w2')")).unwrap().unwrap();
+            Spi::get_one(&format!("SELECT theodb_rs._vectorizer_mark_done({job_id}, 'w2')"))
+                .unwrap()
+                .unwrap();
         assert!(w2_done, "true owner w2 completes the job");
-        let remaining: i64 = Spi::get_one("SELECT count(*) FROM theodb.vectorizer_queue").unwrap().unwrap();
+        let remaining: i64 =
+            Spi::get_one("SELECT count(*) FROM theodb.vectorizer_queue").unwrap().unwrap();
         assert_eq!(remaining, 0, "job removed after w2 completes");
     }
 
@@ -1126,8 +1204,12 @@ mod tests {
     fn mark_failed_dead_letters_at_attempt_cap() {
         seed(1);
         // max_attempts=1: the first claim burns attempts→1; a recoverable failure at the cap dead-letters.
-        Spi::get_one::<i64>("SELECT count(*) FROM theodb_rs._vectorizer_claim_batch('w1', 10, 60, 1)").unwrap();
-        let job_id: i64 = Spi::get_one("SELECT job_id FROM theodb.vectorizer_queue").unwrap().unwrap();
+        Spi::get_one::<i64>(
+            "SELECT count(*) FROM theodb_rs._vectorizer_claim_batch('w1', 10, 60, 1)",
+        )
+        .unwrap();
+        let job_id: i64 =
+            Spi::get_one("SELECT job_id FROM theodb.vectorizer_queue").unwrap().unwrap();
         let ok: bool = Spi::get_one(&format!(
             "SELECT theodb_rs._vectorizer_mark_failed({job_id}, 'w1', 'endpoint 500', 1)"
         ))
@@ -1141,7 +1223,10 @@ mod tests {
                 .first();
             (r.get::<String>(1).unwrap().unwrap(), r.get::<String>(2).unwrap().unwrap())
         });
-        assert_eq!(state, "failed", "at the attempt cap the job is dead-lettered, not retried forever");
+        assert_eq!(
+            state, "failed",
+            "at the attempt cap the job is dead-lettered, not retried forever"
+        );
         assert_eq!(err, "endpoint 500", "the typed error is recorded (Rule 8 — never swallow)");
     }
 
@@ -1149,8 +1234,12 @@ mod tests {
     fn mark_failed_below_cap_returns_to_pending() {
         seed(1);
         // max_attempts=3: first claim burns attempts→1; a recoverable failure returns the job to pending.
-        Spi::get_one::<i64>("SELECT count(*) FROM theodb_rs._vectorizer_claim_batch('w1', 10, 60, 3)").unwrap();
-        let job_id: i64 = Spi::get_one("SELECT job_id FROM theodb.vectorizer_queue").unwrap().unwrap();
+        Spi::get_one::<i64>(
+            "SELECT count(*) FROM theodb_rs._vectorizer_claim_batch('w1', 10, 60, 3)",
+        )
+        .unwrap();
+        let job_id: i64 =
+            Spi::get_one("SELECT job_id FROM theodb.vectorizer_queue").unwrap().unwrap();
         Spi::get_one::<bool>(&format!(
             "SELECT theodb_rs._vectorizer_mark_failed({job_id}, 'w1', 'transient', 3)"
         ))
@@ -1169,18 +1258,30 @@ mod tests {
     #[pg_test]
     fn renew_lease_extends_only_owned_jobs() {
         seed(2);
-        Spi::get_one::<i64>("SELECT count(*) FROM theodb_rs._vectorizer_claim_batch('w1', 10, 30, 5)").unwrap();
+        Spi::get_one::<i64>(
+            "SELECT count(*) FROM theodb_rs._vectorizer_claim_batch('w1', 10, 30, 5)",
+        )
+        .unwrap();
         let ids: Vec<i64> = Spi::connect(|c| {
             c.select("SELECT job_id FROM theodb.vectorizer_queue ORDER BY job_id", None, &[])
                 .unwrap()
                 .filter_map(|r| r.get::<i64>(1).unwrap())
                 .collect()
         });
-        let arr = format!("ARRAY[{}]::bigint[]", ids.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(","));
+        let arr = format!(
+            "ARRAY[{}]::bigint[]",
+            ids.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",")
+        );
         // w2 (not the owner) renews nothing; w1 renews both.
-        let w2n: i64 = Spi::get_one(&format!("SELECT theodb_rs._vectorizer_renew_lease({arr}, 'w2', 120)")).unwrap().unwrap();
+        let w2n: i64 =
+            Spi::get_one(&format!("SELECT theodb_rs._vectorizer_renew_lease({arr}, 'w2', 120)"))
+                .unwrap()
+                .unwrap();
         assert_eq!(w2n, 0, "a non-owner renews nothing (fencing)");
-        let w1n: i64 = Spi::get_one(&format!("SELECT theodb_rs._vectorizer_renew_lease({arr}, 'w1', 120)")).unwrap().unwrap();
+        let w1n: i64 =
+            Spi::get_one(&format!("SELECT theodb_rs._vectorizer_renew_lease({arr}, 'w1', 120)"))
+                .unwrap()
+                .unwrap();
         assert_eq!(w1n, 2, "the owner renews all its jobs");
     }
 
@@ -1206,8 +1307,11 @@ mod tests {
                 r.get::<String>(3).unwrap().unwrap(),
             )
         });
-        assert_eq!((pk.as_str(), op.as_str(), state.as_str()), ("42", "upsert", "pending"),
-            "INSERT enqueues a pending upsert for the row PK");
+        assert_eq!(
+            (pk.as_str(), op.as_str(), state.as_str()),
+            ("42", "upsert", "pending"),
+            "INSERT enqueues a pending upsert for the row PK"
+        );
         // M104 coalescing: UPDATE then DELETE on the SAME never-processed PK collapse into the SINGLE pending
         // job, and the LAST op wins — the net state of insert+update+delete is "delete", so the worker does one
         // delete, not three redundant jobs (producer backpressure without losing the final intent).
@@ -1219,7 +1323,11 @@ mod tests {
                 .filter_map(|r| r.get::<String>(1).unwrap())
                 .collect()
         });
-        assert_eq!(ops, vec!["delete"], "INSERT+UPDATE+DELETE on one unprocessed PK coalesce to a single 'delete'");
+        assert_eq!(
+            ops,
+            vec!["delete"],
+            "INSERT+UPDATE+DELETE on one unprocessed PK coalesce to a single 'delete'"
+        );
     }
 
     // (M66) the `chunk_text_*` SPI tests were removed with the dead plpgsql `theodb.chunk_text`; the
@@ -1258,7 +1366,11 @@ mod tests {
             let r = c
                 .select("SELECT chunk_strategy, chunk_size, chunk_overlap FROM theodb.vectorizer WHERE id=$1",
                         None, &[vid.into()]).unwrap().first();
-            (r.get::<String>(1).unwrap().unwrap(), r.get::<i32>(2).unwrap().unwrap(), r.get::<i32>(3).unwrap().unwrap())
+            (
+                r.get::<String>(1).unwrap().unwrap(),
+                r.get::<i32>(2).unwrap().unwrap(),
+                r.get::<i32>(3).unwrap().unwrap(),
+            )
         });
         assert_eq!((strat.as_str(), size, ov), ("recursive", 100, 20));
         // The sibling chunk table `cdocs_chunks` was provisioned (source_pk, chunk_index, chunk_text, embedding).
@@ -1281,10 +1393,11 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        let is_null: bool =
-            Spi::get_one(&format!("SELECT chunk_strategy IS NULL FROM theodb.vectorizer WHERE id={vid}"))
-                .unwrap()
-                .unwrap();
+        let is_null: bool = Spi::get_one(&format!(
+            "SELECT chunk_strategy IS NULL FROM theodb.vectorizer WHERE id={vid}"
+        ))
+        .unwrap()
+        .unwrap();
         assert!(is_null, "default (no chunk_strategy) → NULL → in-place mode preserved");
     }
 
@@ -1299,7 +1412,8 @@ mod tests {
         // Seed 3 chunk rows for pk '9' directly (simulating a prior upsert without needing the embed HTTP).
         Spi::run("INSERT INTO edocs_chunks VALUES ('9',0,'a','[1,2,3]'),('9',1,'b','[4,5,6]'),('9',2,'c','[7,8,9]')").unwrap();
         Spi::run(&format!("SELECT theodb_rs._vectorizer_process_delete({vid}, '9')")).unwrap();
-        let n: i64 = Spi::get_one("SELECT count(*) FROM edocs_chunks WHERE source_pk='9'").unwrap().unwrap();
+        let n: i64 =
+            Spi::get_one("SELECT count(*) FROM edocs_chunks WHERE source_pk='9'").unwrap().unwrap();
         assert_eq!(n, 0, "chunk-mode process_delete removes all N chunk rows of the doc");
         Spi::run("DROP TABLE IF EXISTS edocs_chunks; DROP TABLE edocs").unwrap();
     }
@@ -1309,10 +1423,17 @@ mod tests {
         Spi::run("SELECT theodb_rs._vectorizer_bump_stats(3, 1)").unwrap();
         Spi::run("SELECT theodb_rs._vectorizer_bump_stats(2, 0)").unwrap();
         let (processed, failed): (i64, i64) = Spi::connect(|c| {
-            let r = c.select("SELECT processed, failed FROM theodb.vectorizer_stats()", None, &[]).unwrap().first();
+            let r = c
+                .select("SELECT processed, failed FROM theodb.vectorizer_stats()", None, &[])
+                .unwrap()
+                .first();
             (r.get::<i64>(1).unwrap().unwrap(), r.get::<i64>(2).unwrap().unwrap())
         });
-        assert_eq!((processed, failed), (5, 1), "vectorizer_stats() sums the worker's processed/failed bumps");
+        assert_eq!(
+            (processed, failed),
+            (5, 1),
+            "vectorizer_stats() sums the worker's processed/failed bumps"
+        );
     }
 
     #[pg_test]
@@ -1321,14 +1442,25 @@ mod tests {
         // Claim with max=1 → attempts becomes 1 (== cap). Simulate the worker crashing before it could report:
         // back-date the lease. The claim can NEVER reclaim it (attempts<max is false), so without the reaper it
         // would leak in `processing` forever. The reaper must dead-letter it.
-        Spi::get_one::<i64>("SELECT count(*) FROM theodb_rs._vectorizer_claim_batch('w1', 10, 60, 1)").unwrap();
-        Spi::run("UPDATE theodb.vectorizer_queue SET lease_deadline = now() - interval '1 second'").unwrap();
+        Spi::get_one::<i64>(
+            "SELECT count(*) FROM theodb_rs._vectorizer_claim_batch('w1', 10, 60, 1)",
+        )
+        .unwrap();
+        Spi::run("UPDATE theodb.vectorizer_queue SET lease_deadline = now() - interval '1 second'")
+            .unwrap();
         let stuck: i64 =
-            Spi::get_one("SELECT count(*) FROM theodb_rs._vectorizer_claim_batch('w2', 10, 60, 1)").unwrap().unwrap();
-        assert_eq!(stuck, 0, "an orphan at the attempt cap is NOT reclaimable (attempts<max false)");
-        let reaped: i64 = Spi::get_one("SELECT theodb_rs._vectorizer_reap_orphans(1)").unwrap().unwrap();
+            Spi::get_one("SELECT count(*) FROM theodb_rs._vectorizer_claim_batch('w2', 10, 60, 1)")
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            stuck, 0,
+            "an orphan at the attempt cap is NOT reclaimable (attempts<max false)"
+        );
+        let reaped: i64 =
+            Spi::get_one("SELECT theodb_rs._vectorizer_reap_orphans(1)").unwrap().unwrap();
         assert_eq!(reaped, 1, "the reaper dead-letters the stuck orphan");
-        let state: String = Spi::get_one("SELECT state FROM theodb.vectorizer_queue").unwrap().unwrap();
+        let state: String =
+            Spi::get_one("SELECT state FROM theodb.vectorizer_queue").unwrap().unwrap();
         assert_eq!(state, "failed", "reaped orphan is failed, not stuck in processing forever");
     }
 
@@ -1337,11 +1469,18 @@ mod tests {
     fn m104_dead_letter_purge_bounds_failed_rows() {
         seed(10);
         Spi::run("UPDATE theodb.vectorizer_queue SET state='failed'").unwrap();
-        let before: i64 = Spi::get_one("SELECT count(*) FROM theodb.vectorizer_queue WHERE state='failed'").unwrap().unwrap();
+        let before: i64 =
+            Spi::get_one("SELECT count(*) FROM theodb.vectorizer_queue WHERE state='failed'")
+                .unwrap()
+                .unwrap();
         assert_eq!(before, 10, "10 dead-letter rows before purge");
-        let purged: i64 = Spi::get_one("SELECT theodb_rs._vectorizer_purge_dead_letters(3)").unwrap().unwrap();
+        let purged: i64 =
+            Spi::get_one("SELECT theodb_rs._vectorizer_purge_dead_letters(3)").unwrap().unwrap();
         assert_eq!(purged, 7, "purge removed all but the most recent 3");
-        let after: i64 = Spi::get_one("SELECT count(*) FROM theodb.vectorizer_queue WHERE state='failed'").unwrap().unwrap();
+        let after: i64 =
+            Spi::get_one("SELECT count(*) FROM theodb.vectorizer_queue WHERE state='failed'")
+                .unwrap()
+                .unwrap();
         assert_eq!(after, 3, "dead-letter bounded to the retained cap");
     }
 
@@ -1351,11 +1490,10 @@ mod tests {
     fn m104_enqueue_coalesces_repeated_writes_to_one_pending() {
         Spi::run("CREATE TABLE csrc(id int PRIMARY KEY, body text)").unwrap();
         Spi::run("CREATE TABLE cdst(id int PRIMARY KEY, emb text)").unwrap();
-        let vid: i32 = Spi::get_one(
-            "SELECT theodb.create_vectorizer('csrc','id','body','cdst','emb','m',3)",
-        )
-        .unwrap()
-        .unwrap();
+        let vid: i32 =
+            Spi::get_one("SELECT theodb.create_vectorizer('csrc','id','body','cdst','emb','m',3)")
+                .unwrap()
+                .unwrap();
         // One INSERT + three UPDATEs to the SAME row: naive enqueue would create 4 pending jobs.
         Spi::run("INSERT INTO csrc VALUES (1,'a')").unwrap();
         Spi::run("UPDATE csrc SET body='b' WHERE id=1").unwrap();
@@ -1366,7 +1504,10 @@ mod tests {
         ))
         .unwrap()
         .unwrap();
-        assert_eq!(pending, 1, "4 writes to the same row coalesce into a single pending job (backpressure)");
+        assert_eq!(
+            pending, 1,
+            "4 writes to the same row coalesce into a single pending job (backpressure)"
+        );
 
         // A DISTINCT row still enqueues independently — coalescing is per-(vectorizer,pk), not global.
         Spi::run("INSERT INTO csrc VALUES (2,'x')").unwrap();
@@ -1383,7 +1524,9 @@ mod tests {
     #[pg_test]
     fn m104_dead_letter_max_guc_is_registered_and_settable() {
         Spi::run("SET theodb.vectorizer_dead_letter_max = 42").unwrap();
-        let v: String = Spi::get_one("SELECT current_setting('theodb.vectorizer_dead_letter_max')").unwrap().unwrap();
+        let v: String = Spi::get_one("SELECT current_setting('theodb.vectorizer_dead_letter_max')")
+            .unwrap()
+            .unwrap();
         assert_eq!(v, "42", "a registered GUC round-trips through SET/current_setting");
     }
 
@@ -1401,7 +1544,10 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        assert!(!claim_public, "the whole _vectorizer_* family is revoked, not just the new function");
+        assert!(
+            !claim_public,
+            "the whole _vectorizer_* family is revoked, not just the new function"
+        );
     }
 
     /// M132 (#132) — the startup line must name what the worker sees WITHOUT ever leaking the key value.
@@ -1413,9 +1559,15 @@ mod tests {
             Some("text-embedding-3-small"),
             Some(secret),
         );
-        assert!(line.contains(&format!("api_key_len={}", secret.len())), "must report the LENGTH: {line}");
+        assert!(
+            line.contains(&format!("api_key_len={}", secret.len())),
+            "must report the LENGTH: {line}"
+        );
         assert!(!line.contains(secret), "the key value must NEVER reach the log: {line}");
-        assert!(line.contains("embedding_endpoint=set") && line.contains("embedding_model=set"), "{line}");
+        assert!(
+            line.contains("embedding_endpoint=set") && line.contains("embedding_model=set"),
+            "{line}"
+        );
 
         // A GUC-blind worker (the probable cause of #132) must be identifiable from this one line.
         let blind = super::startup_config_line(None, None, None);
@@ -1458,13 +1610,22 @@ mod tests {
     fn test_m132_sanitize_redacts_credentials_before_persisting() {
         let echoed = r#"theodb.embed_batch: unexpected embedding response shape: {"headers": {"Authorization": "Bearer sk-proj-AAAABBBBCCCCDDDDEEEEFFFFGGGG"}}"#;
         let safe = super::sanitize_error_text(echoed);
-        assert!(!safe.contains("sk-proj-AAAABBBBCCCCDDDDEEEEFFFFGGGG"), "token must be redacted: {safe}");
+        assert!(
+            !safe.contains("sk-proj-AAAABBBBCCCCDDDDEEEEFFFFGGGG"),
+            "token must be redacted: {safe}"
+        );
         assert!(safe.contains("«redacted»"), "must mark the redaction: {safe}");
-        assert!(safe.contains("unexpected embedding response shape"), "the diagnostic must survive: {safe}");
+        assert!(
+            safe.contains("unexpected embedding response shape"),
+            "the diagnostic must survive: {safe}"
+        );
 
         // A bare `sk-…` run (no Bearer scheme) is redacted too.
         let bare = super::sanitize_error_text("key was sk-abcdefghijklmnopqrstuvwxyz0123 rejected");
-        assert!(!bare.contains("sk-abcdefghijklmnopqrstuvwxyz0123"), "bare key must be redacted: {bare}");
+        assert!(
+            !bare.contains("sk-abcdefghijklmnopqrstuvwxyz0123"),
+            "bare key must be redacted: {bare}"
+        );
 
         // A short `sk-` fragment is NOT a credential — do not mangle ordinary text.
         assert_eq!(super::sanitize_error_text("sk-short"), "sk-short");

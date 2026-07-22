@@ -2,8 +2,8 @@
 //! byte-identical same-index A/B). Sibling items resolve via `use super::*` (re-exported in `mod.rs`).
 #![allow(unused_imports)]
 use super::*;
-use crate::ann::{HnswIndex, Metric};
 use crate::am::page;
+use crate::ann::{HnswIndex, Metric};
 use pgrx::pg_sys;
 
 /// Resolve the whole in-memory graph into meta + page images (ADR-2 — no I/O, unit-testable). Returns `Err` if a
@@ -39,8 +39,12 @@ pub(crate) fn train_codes(idx: &HnswIndex, kind: &CodeKind) -> Result<CodeSpec, 
     let dim = idx.dim();
     match kind {
         CodeKind::None => Ok(CodeSpec {
-            code_len: 0, codes: Vec::new(), sbq_bits: 0, codebook: Vec::new(),
-            aq_m: 0, aq_codebook: Vec::new(),
+            code_len: 0,
+            codes: Vec::new(),
+            sbq_bits: 0,
+            codebook: Vec::new(),
+            aq_m: 0,
+            aq_codebook: Vec::new(),
         }),
         // M51 T1.1/T2.1: train SBQ, emit packed-u64 → LE codes + the codebook.
         CodeKind::Sbq { bits } => {
@@ -52,20 +56,27 @@ pub(crate) fn train_codes(idx: &HnswIndex, kind: &CodeKind) -> Result<CodeSpec, 
                 .collect();
             Ok(CodeSpec {
                 code_len: crate::sbq::SbqQuantizer::bytes_per_vector(dim, *bits),
-                codes, sbq_bits: *bits, codebook: q.to_meta_bytes(),
-                aq_m: 0, aq_codebook: Vec::new(),
+                codes,
+                sbq_bits: *bits,
+                codebook: q.to_meta_bytes(),
+                aq_m: 0,
+                aq_codebook: Vec::new(),
             })
         }
         // M59 T3.1: train the anisotropic PQ, emit each node's ⌈m/2⌉-byte 4-bit code + the codebook. The seed is
         // fixed (deterministic build, mirrors SBQ's parameter-free train — the fold re-trains identically).
         CodeKind::Aq { m, bits, aq_threshold } => {
             let vecs: Vec<Vec<f32>> = (0..n).map(|i| idx.node_vector(i).to_vec()).collect();
-            let q = crate::vec::aq::AqQuantizer::train(&vecs, *m, *bits, *aq_threshold, AQ_BUILD_SEED)?;
+            let q =
+                crate::vec::aq::AqQuantizer::train(&vecs, *m, *bits, *aq_threshold, AQ_BUILD_SEED)?;
             let codes: Vec<Vec<u8>> = vecs.iter().map(|v| q.encode(v)).collect();
             Ok(CodeSpec {
                 code_len: crate::vec::aq::AqQuantizer::bytes_per_vector(dim, *m),
-                codes, sbq_bits: 0, codebook: Vec::new(),
-                aq_m: *m as u8, aq_codebook: q.to_meta_bytes(),
+                codes,
+                sbq_bits: 0,
+                codebook: Vec::new(),
+                aq_m: *m as u8,
+                aq_codebook: q.to_meta_bytes(),
             })
         }
     }
@@ -93,7 +104,13 @@ pub(crate) fn pack_sbq(idx: &HnswIndex, sbq_bits: u8) -> Result<Packed, String> 
 /// M59 T3.3: wired into production — `ambuild_hnsw` (`pack_hnsw_for_build`, initial build reads the reloption)
 /// and the VACUUM compaction fold (`pack_fold_layout`, reads the AQ params off the persisted meta so a fold
 /// re-quantizes identically).
-pub(crate) fn pack_aq(idx: &HnswIndex, base: usize, m: usize, bits: u8, aq_threshold: f32) -> Result<Packed, String> {
+pub(crate) fn pack_aq(
+    idx: &HnswIndex,
+    base: usize,
+    m: usize,
+    bits: u8,
+    aq_threshold: f32,
+) -> Result<Packed, String> {
     if m == 0 {
         // Empty-corpus / AQ-off fallback: identical to the v1 f32-only pack (no code, no raw region, no trailer).
         return pack_kind(idx, base, &CodeKind::None);
@@ -118,7 +135,8 @@ pub(crate) fn pack_v4(idx: &HnswIndex, base: usize, kind: &CodeKind) -> Result<P
     // 1. Analytic HOT element addresses (fixed size = header + code, dim-independent ⇒ hundreds per page).
     let ipp = elems_per_page_v4(code_len);
     let elem_npages = n.div_ceil(ipp);
-    let elem_addr: Vec<Addr> = (0..n).map(|i| ((base + i / ipp) as u32, (1 + i % ipp) as u16)).collect();
+    let elem_addr: Vec<Addr> =
+        (0..n).map(|i| ((base + i / ipp) as u32, (1 + i % ipp) as u16)).collect();
     let nbr_first = base + elem_npages;
 
     // 2. Neighbor tuples by free space (identical to pack_kind — the graph is unchanged; only the f32 moved).
@@ -130,8 +148,10 @@ pub(crate) fn pack_v4(idx: &HnswIndex, base: usize, kind: &CodeKind) -> Result<P
         let size = nbr_size(level, m, m0);
         let cost = ITEMID + maxalign(size);
         if cost > USABLE {
-            return Err(format!("theodb hnsw: neighbor tuple for a level-{level} node exceeds one page \
-                                ({size} B) — build must cap max level"));
+            return Err(format!(
+                "theodb hnsw: neighbor tuple for a level-{level} node exceeds one page \
+                                ({size} B) — build must cap max level"
+            ));
         }
         if used + cost > USABLE && !nbr_pages.last().unwrap().is_empty() {
             nbr_pages.push(Vec::new());
@@ -157,7 +177,8 @@ pub(crate) fn pack_v4(idx: &HnswIndex, base: usize, kind: &CodeKind) -> Result<P
     let raw_first = cb_first + aq_cb_npages;
     let rpp = raws_per_page(dim);
     let raw_npages = n.div_ceil(rpp);
-    let raw_addr: Vec<Addr> = (0..n).map(|i| ((raw_first + i / rpp) as u32, (1 + i % rpp) as u16)).collect();
+    let raw_addr: Vec<Addr> =
+        (0..n).map(|i| ((raw_first + i / rpp) as u32, (1 + i % rpp) as u16)).collect();
     let mut raw_pages: Vec<Vec<Vec<u8>>> = Vec::with_capacity(raw_npages);
     for chunk in (0..n).collect::<Vec<_>>().chunks(rpp) {
         raw_pages.push(chunk.iter().map(|&node| encode_raw_vec(idx.node_vector(node))).collect());
@@ -169,7 +190,9 @@ pub(crate) fn pack_v4(idx: &HnswIndex, base: usize, kind: &CodeKind) -> Result<P
         elem_pages.push(
             chunk
                 .iter()
-                .map(|&node| encode_element_v4(idx, node, nbr_addr[node], raw_addr[node], dim, &codes[node]))
+                .map(|&node| {
+                    encode_element_v4(idx, node, nbr_addr[node], raw_addr[node], dim, &codes[node])
+                })
                 .collect(),
         );
     }
@@ -178,14 +201,26 @@ pub(crate) fn pack_v4(idx: &HnswIndex, base: usize, kind: &CodeKind) -> Result<P
     let entry_node = idx.entry().ok_or("theodb hnsw: non-empty graph without an entry point")?;
     let (eb, eo) = elem_addr[entry_node];
     let meta = encode_meta(&HnswMeta {
-        metric_tag: metric.tag(), dim: dim as u32, m: m as u16, m0: m0 as u16,
-        entry_blkno: eb, entry_offno: eo, entry_level: idx.node_level(entry_node) as i16,
-        node_count: n as u32, elem_first: base as u32, elem_npages: elem_npages as u32,
-        nbr_first: nbr_first as u32, nbr_npages: nbr_npages as u32,
-        sbq_bits: 0, codebook: Vec::new(),
-        aq_m, aq_codebook,
-        aq_cb_first: cb_first as u32, aq_cb_npages: aq_cb_npages as u32,
-        raw_first: raw_first as u32, raw_npages: raw_npages as u32,
+        metric_tag: metric.tag(),
+        dim: dim as u32,
+        m: m as u16,
+        m0: m0 as u16,
+        entry_blkno: eb,
+        entry_offno: eo,
+        entry_level: idx.node_level(entry_node) as i16,
+        node_count: n as u32,
+        elem_first: base as u32,
+        elem_npages: elem_npages as u32,
+        nbr_first: nbr_first as u32,
+        nbr_npages: nbr_npages as u32,
+        sbq_bits: 0,
+        codebook: Vec::new(),
+        aq_m,
+        aq_codebook,
+        aq_cb_first: cb_first as u32,
+        aq_cb_npages: aq_cb_npages as u32,
+        raw_first: raw_first as u32,
+        raw_npages: raw_npages as u32,
     });
 
     // Body order MUST match the analytic/tail addresses above: hot elems, neighbors, codebook, raw f32.
@@ -219,11 +254,26 @@ pub(crate) fn pack_kind(idx: &HnswIndex, base: usize, kind: &CodeKind) -> Result
     // after data lands — REINDEX/VACUUM).
     if n == 0 {
         let meta = encode_meta(&HnswMeta {
-            metric_tag: metric.tag(), dim: dim as u32, m: m as u16, m0: m0 as u16,
-            entry_blkno: 0, entry_offno: 0, entry_level: -1, node_count: 0,
-            elem_first: base as u32, elem_npages: 0, nbr_first: base as u32, nbr_npages: 0,
-            sbq_bits: 0, codebook: Vec::new(), aq_m: 0, aq_codebook: Vec::new(),
-            aq_cb_first: 0, aq_cb_npages: 0, raw_first: 0, raw_npages: 0,
+            metric_tag: metric.tag(),
+            dim: dim as u32,
+            m: m as u16,
+            m0: m0 as u16,
+            entry_blkno: 0,
+            entry_offno: 0,
+            entry_level: -1,
+            node_count: 0,
+            elem_first: base as u32,
+            elem_npages: 0,
+            nbr_first: base as u32,
+            nbr_npages: 0,
+            sbq_bits: 0,
+            codebook: Vec::new(),
+            aq_m: 0,
+            aq_codebook: Vec::new(),
+            aq_cb_first: 0,
+            aq_cb_npages: 0,
+            raw_first: 0,
+            raw_npages: 0,
         });
         return Ok(Packed { meta, pages: Vec::new() });
     }
@@ -234,7 +284,8 @@ pub(crate) fn pack_kind(idx: &HnswIndex, base: usize, kind: &CodeKind) -> Result
     if matches!(kind, CodeKind::Aq { .. }) {
         return Err("theodb hnsw: internal — AQ must be packed via pack_v4 (v4 code/vector split), not pack_kind".into());
     }
-    let CodeSpec { code_len, codes, sbq_bits, codebook, aq_m, aq_codebook } = train_codes(idx, kind)?;
+    let CodeSpec { code_len, codes, sbq_bits, codebook, aq_m, aq_codebook } =
+        train_codes(idx, kind)?;
 
     // 1. Analytic element addresses (fixed size ⇒ node i is at block base+i/ipp, offset 1+i%ipp).
     let ipp = elems_per_page(dim, code_len);
@@ -252,8 +303,10 @@ pub(crate) fn pack_kind(idx: &HnswIndex, base: usize, kind: &CodeKind) -> Result
         let size = nbr_size(level, m, m0);
         let cost = ITEMID + maxalign(size);
         if cost > USABLE {
-            return Err(format!("theodb hnsw: neighbor tuple for a level-{level} node exceeds one page \
-                                ({size} B) — build must cap max level"));
+            return Err(format!(
+                "theodb hnsw: neighbor tuple for a level-{level} node exceeds one page \
+                                ({size} B) — build must cap max level"
+            ));
         }
         if used + cost > USABLE && !nbr_pages.last().unwrap().is_empty() {
             nbr_pages.push(Vec::new());
@@ -294,20 +347,30 @@ pub(crate) fn pack_kind(idx: &HnswIndex, base: usize, kind: &CodeKind) -> Result
     let entry_node = idx.entry().ok_or("theodb hnsw: non-empty graph without an entry point")?;
     let (eb, eo) = elem_addr[entry_node];
     let meta = encode_meta(&HnswMeta {
-        metric_tag: metric.tag(), dim: dim as u32, m: m as u16, m0: m0 as u16,
-        entry_blkno: eb, entry_offno: eo, entry_level: idx.node_level(entry_node) as i16,
-        node_count: n as u32, elem_first: base as u32, elem_npages: elem_npages as u32,
-        nbr_first: nbr_first as u32, nbr_npages: nbr_npages as u32,
+        metric_tag: metric.tag(),
+        dim: dim as u32,
+        m: m as u16,
+        m0: m0 as u16,
+        entry_blkno: eb,
+        entry_offno: eo,
+        entry_level: idx.node_level(entry_node) as i16,
+        node_count: n as u32,
+        elem_first: base as u32,
+        elem_npages: elem_npages as u32,
+        nbr_first: nbr_first as u32,
+        nbr_npages: nbr_npages as u32,
         // `train_codes` already zeroes the code kind for v1; pass the spec through unchanged (D1: at most one
         // of sbq_bits / aq_m is non-zero, so `encode_meta` emits exactly one trailer).
-        sbq_bits, codebook,
+        sbq_bits,
+        codebook,
         aq_m,
         aq_codebook,
         aq_cb_first: if aq_m != 0 { cb_first as u32 } else { 0 },
         aq_cb_npages: if aq_m != 0 { aq_cb_npages as u32 } else { 0 },
         // v1/v2 have no separate raw-f32 region (the f32 lives inline in the element tuple); v4 (AQ) is packed by
         // `pack_v4`, never here.
-        raw_first: 0, raw_npages: 0,
+        raw_first: 0,
+        raw_npages: 0,
     });
 
     let mut pages = elem_pages;

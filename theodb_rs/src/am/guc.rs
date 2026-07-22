@@ -45,7 +45,8 @@ pub(crate) static OVER_FETCH: GucSetting<i32> = GucSetting::<i32>::new(DEFAULT_O
 /// unfiltered `LIMIT k` (k ≤ ef_search) never triggers the grow, so there is no unfiltered regression. Set 0 to
 /// reproduce pgvector's default-OFF semantics.
 pub(crate) const DEFAULT_MAX_SCAN_TUPLES: i32 = 20000;
-pub(crate) static MAX_SCAN_TUPLES: GucSetting<i32> = GucSetting::<i32>::new(DEFAULT_MAX_SCAN_TUPLES);
+pub(crate) static MAX_SCAN_TUPLES: GucSetting<i32> =
+    GucSetting::<i32>::new(DEFAULT_MAX_SCAN_TUPLES);
 
 /// M118 — `SET theodb_hnsw.resume_max_mb = N`: memory ceiling (MB) for the resume-from-discarded scan's retained
 /// frontier + visited set. When the retained state exceeds this, the scan stops resuming and returns what it holds
@@ -58,14 +59,16 @@ pub(crate) static MAX_SCAN_TUPLES: GucSetting<i32> = GucSetting::<i32>::new(DEFA
 /// point is ~2-3× the nominal MB. The ceiling is therefore CONSERVATIVE-PERMISSIVE (uses more than declared); size
 /// it with headroom. It is a fail-safe soft guard, not a hard allocator limit — correctness never depends on it.
 pub(crate) const DEFAULT_HNSW_RESUME_MAX_MB: i32 = 64;
-pub(crate) static HNSW_RESUME_MAX_MB: GucSetting<i32> = GucSetting::<i32>::new(DEFAULT_HNSW_RESUME_MAX_MB);
+pub(crate) static HNSW_RESUME_MAX_MB: GucSetting<i32> =
+    GucSetting::<i32>::new(DEFAULT_HNSW_RESUME_MAX_MB);
 
 /// M48 (T3.1) — `SET theodb.vacuum_pending_threshold = N`: a VACUUM folds the pending region into the main
 /// structure when it exceeds N pages, even with zero dead tuples, so an insert-only workload's scan returns to
 /// O(structure) instead of paying O(pending) forever. Operational knob (Userset), NOT a build reloption. Default
 /// 16 is an educated guess; the M48 benchmark (T6.1) measures the scan degradation per pending page.
 pub(crate) const DEFAULT_VACUUM_PENDING_THRESHOLD: i32 = 16;
-pub(crate) static VACUUM_PENDING_THRESHOLD: GucSetting<i32> = GucSetting::<i32>::new(DEFAULT_VACUUM_PENDING_THRESHOLD);
+pub(crate) static VACUUM_PENDING_THRESHOLD: GucSetting<i32> =
+    GucSetting::<i32>::new(DEFAULT_VACUUM_PENDING_THRESHOLD);
 
 /// The effective pending-fold threshold in pages (never below 1).
 pub(crate) fn vacuum_pending_threshold() -> u32 {
@@ -263,7 +266,6 @@ static RERANK_API_KEY: GucSetting<Option<CString>> = GucSetting::<Option<CString
 /// inference server on 10/8 — without this, hardening would break that deployment and the operator would disable
 /// the guard entirely. `Suset`, so a caller can never widen its own reach.
 static EGRESS_ALLOWLIST: GucSetting<Option<CString>> = GucSetting::<Option<CString>>::new(None);
-
 
 pub(crate) fn init() {
     GucRegistry::define_int_guc(

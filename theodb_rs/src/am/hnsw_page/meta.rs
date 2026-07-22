@@ -2,8 +2,8 @@
 //! byte-identical same-index A/B). Sibling items resolve via `use super::*` (re-exported in `mod.rs`).
 #![allow(unused_imports)]
 use super::*;
-use crate::ann::{HnswIndex, Metric};
 use crate::am::page;
+use crate::ann::{HnswIndex, Metric};
 use pgrx::pg_sys;
 
 /// Fully-resolved page images ready for a dumb WAL writer to flush. `pages[0]` is block 1, `pages[1]` block 2, …
@@ -209,7 +209,8 @@ pub(crate) fn decode_aq_descriptor(b: &[u8], is_v4: bool) -> Result<AqDescriptor
         ));
     }
     let u32a = |o: usize| u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
-    let (raw_first, raw_npages) = if is_v4 { (u32a(META_LEN + 13), u32a(META_LEN + 17)) } else { (0, 0) };
+    let (raw_first, raw_npages) =
+        if is_v4 { (u32a(META_LEN + 13), u32a(META_LEN + 17)) } else { (0, 0) };
     Ok(AqDescriptor {
         aq_m: b[META_LEN],
         cb_len: u32a(META_LEN + 1) as usize,
@@ -229,8 +230,11 @@ pub(crate) fn decode_meta(b: &[u8]) -> Result<HnswMeta, String> {
     }
     let magic = u32::from_le_bytes(b[0..4].try_into().unwrap());
     if magic != HNSW_STRUCT_MAGIC {
-        return Err("theodb hnsw: bad structured meta magic (REINDEX to upgrade the M26 blob to the M35 \
-                    page-native format)".into());
+        return Err(
+            "theodb hnsw: bad structured meta magic (REINDEX to upgrade the M26 blob to the M35 \
+                    page-native format)"
+                .into(),
+        );
     }
     let version = u32::from_le_bytes(b[4..8].try_into().unwrap());
     if version != HNSW_STRUCT_VERSION
@@ -283,4 +287,3 @@ pub(crate) fn decode_meta(b: &[u8]) -> Result<HnswMeta, String> {
         raw_npages,
     })
 }
-

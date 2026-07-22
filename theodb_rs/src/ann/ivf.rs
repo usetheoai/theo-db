@@ -23,7 +23,12 @@ pub(crate) struct IvfflatIndex {
 }
 
 impl IvfflatIndex {
-    pub(crate) fn build(corpus: &[(i64, Vec<f32>)], lists: usize, metric: Metric, seed: u64) -> Self {
+    pub(crate) fn build(
+        corpus: &[(i64, Vec<f32>)],
+        lists: usize,
+        metric: Metric,
+        seed: u64,
+    ) -> Self {
         // Borrow-taking entry point (small "carrier" builds: sbq/pq/ivf_aqah). Delegates to `build_owned` by
         // cloning once — negligible for the tiny corpora these callers pass.
         Self::build_owned(corpus.to_vec(), lists, metric, seed)
@@ -35,7 +40,12 @@ impl IvfflatIndex {
     /// and no longer holds a second copy; the AQ/SQ8 encode reads the vectors back from `self.vectors()` (no
     /// `corpus_vecs` clone). BYTE-IDENTICAL to the pre-M89 build (same vectors, same order, same kmeans) — the only
     /// change is who owns the bytes.
-    pub(crate) fn build_owned(corpus: Vec<(i64, Vec<f32>)>, lists: usize, metric: Metric, seed: u64) -> Self {
+    pub(crate) fn build_owned(
+        corpus: Vec<(i64, Vec<f32>)>,
+        lists: usize,
+        metric: Metric,
+        seed: u64,
+    ) -> Self {
         let n = corpus.len();
         let mut ids: Vec<i64> = Vec::with_capacity(n);
         let mut vectors: Vec<Vec<f32>> = Vec::with_capacity(n);
@@ -43,13 +53,8 @@ impl IvfflatIndex {
             ids.push(id);
             vectors.push(v); // MOVE — no clone
         }
-        let mut idx = IvfflatIndex {
-            metric,
-            centroids: Vec::new(),
-            lists: Vec::new(),
-            vectors,
-            ids,
-        };
+        let mut idx =
+            IvfflatIndex { metric, centroids: Vec::new(), lists: Vec::new(), vectors, ids };
         if n == 0 {
             return idx;
         }
@@ -236,19 +241,13 @@ impl IvfflatIndex {
             .centroids
             .iter()
             .enumerate()
-            .map(|(i, c)| Cand {
-                d: self.metric.dist(q, c),
-                i,
-            })
+            .map(|(i, c)| Cand { d: self.metric.dist(q, c), i })
             .collect();
         cdist.sort();
         let mut results: Vec<Cand> = Vec::new();
         for c in cdist.iter().take(p) {
             for &node in &self.lists[c.i] {
-                results.push(Cand {
-                    d: self.metric.dist(q, &self.vectors[node]),
-                    i: node,
-                });
+                results.push(Cand { d: self.metric.dist(q, &self.vectors[node]), i: node });
             }
         }
         results.sort();
@@ -315,7 +314,9 @@ impl IvfflatIndex {
     pub(crate) fn list_entries(&self) -> Vec<Vec<(i64, Vec<f32>)>> {
         self.lists
             .iter()
-            .map(|list| list.iter().map(|&pos| (self.ids[pos], self.vectors[pos].clone())).collect())
+            .map(|list| {
+                list.iter().map(|&pos| (self.ids[pos], self.vectors[pos].clone())).collect()
+            })
             .collect()
     }
 
@@ -340,7 +341,9 @@ impl IvfflatIndex {
             for (id, v) in pending {
                 out.push((*id, self.metric.dist(q, v)));
             }
-            out.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(&b.0)));
+            out.sort_by(|a, b| {
+                a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(&b.0))
+            });
             out.truncate(k);
         }
         out
@@ -358,10 +361,7 @@ impl IvfflatIndex {
             .centroids
             .iter()
             .enumerate()
-            .map(|(i, c)| Cand {
-                d: self.metric.dist(q, c),
-                i,
-            })
+            .map(|(i, c)| Cand { d: self.metric.dist(q, c), i })
             .collect();
         cdist.sort();
         let mut out: Vec<usize> = Vec::new();

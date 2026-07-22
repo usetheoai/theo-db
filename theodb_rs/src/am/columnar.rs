@@ -26,7 +26,10 @@ use pgrx::prelude::*;
 // The column-major byval encoding (`Datum::value().to_le_bytes()[..attlen]`) and the SET_VARSIZE_4B reconstruction
 // assume a little-endian target (x86-64). Make the assumption a compile-time failure on a big-endian build rather
 // than a silent wrong-answer at runtime (council-rust-pgrx review).
-const _: () = assert!(cfg!(target_endian = "little"), "theodb_columnar column-major encoding requires a little-endian target");
+const _: () = assert!(
+    cfg!(target_endian = "little"),
+    "theodb_columnar column-major encoding requires a little-endian target"
+);
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::mem::size_of;
@@ -115,24 +118,26 @@ unsafe fn with_active_snapshot<T>(f: impl FnOnce() -> Result<T, String>) -> Resu
 /// snapshot, so an uncommitted/aborted/committed-after stripe is filtered out by MVCC for free — no visibility code
 /// here. Ordered by `first_row_number` for a deterministic, heap-matching scan order.
 unsafe fn read_visible_stripes(rel_oid: pg_sys::Oid) -> Result<Vec<StripeMeta>, String> {
-    with_active_snapshot(|| Spi::connect(|c| {
-        let t = c
+    with_active_snapshot(|| {
+        Spi::connect(|c| {
+            let t = c
             .select(
                 "SELECT header_block FROM columnar.stripe WHERE relid = $1 ORDER BY first_row_number, stripe_id",
                 None,
                 &[rel_oid.into()],
             )
             .map_err(|e| format!("theodb_columnar: stripe catalog read failed: {e:?}"))?;
-        let mut out = Vec::new();
-        for row in t {
-            let hb = row
-                .get::<i32>(1)
-                .map_err(|e| format!("theodb_columnar: header_block read: {e:?}"))?
-                .ok_or("theodb_columnar: null header_block in catalog")?;
-            out.push(StripeMeta { header_block: hb as u32 });
-        }
-        Ok(out)
-    }))
+            let mut out = Vec::new();
+            for row in t {
+                let hb = row
+                    .get::<i32>(1)
+                    .map_err(|e| format!("theodb_columnar: header_block read: {e:?}"))?
+                    .ok_or("theodb_columnar: null header_block in catalog")?;
+                out.push(StripeMeta { header_block: hb as u32 });
+            }
+            Ok(out)
+        })
+    })
 }
 
 /// Insert the visibility-granting catalog row for a just-written stripe. Runs inside the current xact via SPI, so the
@@ -171,14 +176,18 @@ unsafe fn insert_stripe_row(
 /// never existed). An `ereport(ERROR)` here safely converts the commit to an abort (pre-commit is before the commit
 /// record) — never a panic (council-index-storage + council-rust-pgrx).
 #[pg_guard]
-unsafe extern "C-unwind" fn columnar_xact_flush(event: pg_sys::XactEvent::Type, _arg: *mut std::ffi::c_void) {
+unsafe extern "C-unwind" fn columnar_xact_flush(
+    event: pg_sys::XactEvent::Type,
+    _arg: *mut std::ffi::c_void,
+) {
     use pg_sys::XactEvent as XE;
     if event == XE::XACT_EVENT_PRE_COMMIT
         || event == XE::XACT_EVENT_PARALLEL_PRE_COMMIT
         || event == XE::XACT_EVENT_PREPARE
     {
-        let oids: Vec<u32> = WRITE_STATES
-            .with(|w| w.borrow().iter().filter(|(_, v)| !v.rows.is_empty()).map(|(k, _)| *k).collect());
+        let oids: Vec<u32> = WRITE_STATES.with(|w| {
+            w.borrow().iter().filter(|(_, v)| !v.rows.is_empty()).map(|(k, _)| *k).collect()
+        });
         for oid in oids {
             let relid = pg_sys::Oid::from_u32_unchecked(oid);
             let rel = pg_sys::relation_open(relid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
@@ -228,7 +237,8 @@ fn theodb_columnar_tam_handler(_fcinfo: pg_sys::FunctionCallInfo) -> PgBox<pg_sy
 /// write/read path is stubbed (real in Phase B/C); UPDATE/DELETE/parallel/bitmap/sample are typed-`error!` (D4).
 fn build_columnar_amroutine_in_top() -> *mut pg_sys::TableAmRoutine {
     let old = unsafe { pg_sys::MemoryContextSwitchTo(pg_sys::TopMemoryContext) };
-    let mut amr = unsafe { PgBox::<pg_sys::TableAmRoutine>::alloc_node(pg_sys::NodeTag::T_TableAmRoutine) };
+    let mut amr =
+        unsafe { PgBox::<pg_sys::TableAmRoutine>::alloc_node(pg_sys::NodeTag::T_TableAmRoutine) };
 
     // --- slot / scan lifecycle (real; empty scan for Phase A) ---
     amr.slot_callbacks = Some(columnar_slot_callbacks);
@@ -346,7 +356,9 @@ impl ColumnarMeta {
         }
         let magic = u32::from_le_bytes(b[0..4].try_into().unwrap());
         if magic != META_MAGIC {
-            return Err(format!("theodb_columnar: bad metapage magic {magic:#x} (expected {META_MAGIC:#x})"));
+            return Err(format!(
+                "theodb_columnar: bad metapage magic {magic:#x} (expected {META_MAGIC:#x})"
+            ));
         }
         let version = u32::from_le_bytes(b[4..8].try_into().unwrap());
         if version != META_VERSION {
@@ -364,7 +376,9 @@ impl ColumnarMeta {
 /// (WAL-logged extend under the relation-extension lock).
 unsafe fn init_metapage(rel: pg_sys::Relation) {
     let meta = ColumnarMeta { reserved_row_number: 0, reserved_stripe_id: 0 };
-    unsafe { super::page::extend_page_with_item(rel, pg_sys::ForkNumber::MAIN_FORKNUM, &meta.to_bytes()) };
+    unsafe {
+        super::page::extend_page_with_item(rel, pg_sys::ForkNumber::MAIN_FORKNUM, &meta.to_bytes())
+    };
 }
 
 /// Which counter a reservation bumps.
@@ -387,7 +401,8 @@ unsafe fn reserve(rel: pg_sys::Relation, counter: Counter, n: u64) -> Result<u64
     );
     pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_EXCLUSIVE as i32);
     let state = pg_sys::GenericXLogStart(rel);
-    let page = pg_sys::GenericXLogRegisterBuffer(state, buf, pg_sys::GENERIC_XLOG_FULL_IMAGE as i32);
+    let page =
+        pg_sys::GenericXLogRegisterBuffer(state, buf, pg_sys::GENERIC_XLOG_FULL_IMAGE as i32);
 
     // The metapage is the single item at FirstOffsetNumber.
     let itemid = pg_sys::PageGetItemId(page, pg_sys::FirstOffsetNumber);
@@ -473,7 +488,9 @@ unsafe fn coldesc(tupdesc: pg_sys::TupleDesc, i: usize) -> Result<ColDesc, Strin
     } else if attlen == -1 {
         None // varlena
     } else {
-        return Err(format!("theodb_columnar: unsupported attlen {attlen} at column {i} (cstring/expanded)"));
+        return Err(format!(
+            "theodb_columnar: unsupported attlen {attlen} at column {i} (cstring/expanded)"
+        ));
     };
     let mm = minmax_kind_of(typid);
     Ok(ColDesc { attlen_fixed, byval, mm, typid })
@@ -554,7 +571,10 @@ unsafe fn rebuild_datum(
     match col.attlen_fixed {
         Some(len) => {
             if bytes.len() < len {
-                return Err(format!("theodb_columnar: fixed value {} bytes < attlen {len}", bytes.len()));
+                return Err(format!(
+                    "theodb_columnar: fixed value {} bytes < attlen {len}",
+                    bytes.len()
+                ));
             }
             if col.byval {
                 let mut buf = [0u8; 8];
@@ -621,10 +641,14 @@ unsafe fn decode_stripe(
     out: &mut Vec<Vec<u8>>,
 ) -> Result<(), String> {
     let hdr_items = super::page::read_all_page_items(rel, header_block)?;
-    let hdr_bytes = hdr_items.into_iter().next().ok_or("theodb_columnar: stripe header page empty")?;
+    let hdr_bytes =
+        hdr_items.into_iter().next().ok_or("theodb_columnar: stripe header page empty")?;
     let header = StripeHeader::from_bytes(&hdr_bytes)?;
     if header.ncols as usize != natts {
-        return Err(format!("theodb_columnar: stripe ncols {} != relation natts {natts}", header.ncols));
+        return Err(format!(
+            "theodb_columnar: stripe ncols {} != relation natts {natts}",
+            header.ncols
+        ));
     }
     let dir_bytes = super::page::read_chunked(rel, header.dir_first_block, header.dir_n_pages)?;
     if dir_bytes.len() < header.dir_len as usize {
@@ -693,7 +717,9 @@ pub(crate) unsafe fn decode_columns(
         Some(p) => {
             for &i in p {
                 if i >= natts {
-                    return Err(format!("theodb_columnar: projection column {i} out of range (natts {natts})"));
+                    return Err(format!(
+                        "theodb_columnar: projection column {i} out of range (natts {natts})"
+                    ));
                 }
             }
             p.to_vec()
@@ -711,13 +737,15 @@ pub(crate) unsafe fn decode_columns(
     let (mut skipped_cg, mut total_cg) = (0usize, 0usize); // zone-map skip-ratio metric (wiring pillar c)
     for sm in read_visible_stripes((*rel).rd_id)? {
         let hdr_items = super::page::read_all_page_items(rel, sm.header_block)?;
-        let hdr_bytes = hdr_items.into_iter().next().ok_or("theodb_columnar: stripe header page empty")?;
+        let hdr_bytes =
+            hdr_items.into_iter().next().ok_or("theodb_columnar: stripe header page empty")?;
         let header = StripeHeader::from_bytes(&hdr_bytes)?;
         if header.ncols as usize != natts {
             return Err(format!("theodb_columnar: stripe ncols {} != natts {natts}", header.ncols));
         }
         let dir_bytes = super::page::read_chunked(rel, header.dir_first_block, header.dir_n_pages)?;
-        let entries = codec::deserialize_directory(&dir_bytes, header.n_chunk_groups as usize * natts)?;
+        let entries =
+            codec::deserialize_directory(&dir_bytes, header.n_chunk_groups as usize * natts)?;
         for cg in 0..header.n_chunk_groups as usize {
             let cg_rows = entries[cg * natts].row_count as usize;
             total_cg += 1;
@@ -730,7 +758,13 @@ pub(crate) unsafe fn decode_columns(
                 && predicates.iter().any(|p| {
                     p.col < natts && {
                         let e = &entries[cg * natts + p.col];
-                        !super::zonemap::chunk_can_match(e.has_minmax, e.min_bits, e.max_bits, cols[p.col].mm, p)
+                        !super::zonemap::chunk_can_match(
+                            e.has_minmax,
+                            e.min_bits,
+                            e.max_bits,
+                            cols[p.col].mm,
+                            p,
+                        )
                     }
                 })
             {
@@ -742,20 +776,25 @@ pub(crate) unsafe fn decode_columns(
                 let comp = super::page::read_chunked(rel, e.first_block, e.n_pages)?;
                 let raw = zstd::decode_all(&comp[..e.comp_len as usize])
                     .map_err(|x| format!("theodb_columnar: zstd decode failed: {x}"))?;
-                let mut vals = codec::decode_column(&raw, cols[col].attlen_fixed, cg_rows, e.has_nulls)?;
+                let mut vals =
+                    codec::decode_column(&raw, cols[col].attlen_fixed, cg_rows, e.has_nulls)?;
                 columns[wi].append(&mut vals);
             }
         }
     }
     // Zone-map skip-ratio (wiring pillar c, opt-in THEODB_SCAN_PROFILE=1): how many chunk groups the predicate
     // pruned. `skipped/total` is the A/B evidence that the min/max directory is being consumed (0 when skip off).
-    if skip && !predicates.is_empty() && std::env::var("THEODB_SCAN_PROFILE").is_ok_and(|v| v == "1") {
+    if skip
+        && !predicates.is_empty()
+        && std::env::var("THEODB_SCAN_PROFILE").is_ok_and(|v| v == "1")
+    {
         pgrx::log!("theodb_columnar zonemap: skipped {skipped_cg}/{total_cg} chunk groups");
     }
 
     // Same-xact pending rows (heap-tuple bytes) → deform ALL atts (heap_deform is all-or-nothing), keep the wanted.
     let oid = (*rel).rd_id.to_u32();
-    let pending: Option<Vec<Vec<u8>>> = WRITE_STATES.with(|w| w.borrow().get(&oid).map(|p| p.rows.clone()));
+    let pending: Option<Vec<Vec<u8>>> =
+        WRITE_STATES.with(|w| w.borrow().get(&oid).map(|p| p.rows.clone()));
     if let Some(rows) = pending {
         let mut values = vec![pg_sys::Datum::from(0usize); natts];
         let mut isnull = vec![false; natts];
@@ -842,7 +881,9 @@ pub(crate) unsafe fn directory_minmax(
     let tupdesc = (*rel).rd_att;
     let natts = (*tupdesc).natts as usize;
     let col_idx = match (0..natts).find(|&i| {
-        std::ffi::CStr::from_ptr((*super::tupdesc_attr(tupdesc, i)).attname.data.as_ptr()).to_string_lossy() == col_name
+        std::ffi::CStr::from_ptr((*super::tupdesc_attr(tupdesc, i)).attname.data.as_ptr())
+            .to_string_lossy()
+            == col_name
     }) {
         Some(x) => x,
         None => return Ok(None),
@@ -852,13 +893,15 @@ pub(crate) unsafe fn directory_minmax(
     let mut acc: Option<u64> = None;
     for sm in read_visible_stripes((*rel).rd_id)? {
         let hdr_items = super::page::read_all_page_items(rel, sm.header_block)?;
-        let hdr_bytes = hdr_items.into_iter().next().ok_or("theodb_columnar: stripe header page empty")?;
+        let hdr_bytes =
+            hdr_items.into_iter().next().ok_or("theodb_columnar: stripe header page empty")?;
         let header = StripeHeader::from_bytes(&hdr_bytes)?;
         if header.ncols as usize != natts {
             return Err(format!("theodb_columnar: stripe ncols {} != natts {natts}", header.ncols));
         }
         let dir_bytes = super::page::read_chunked(rel, header.dir_first_block, header.dir_n_pages)?;
-        let entries = codec::deserialize_directory(&dir_bytes, header.n_chunk_groups as usize * natts)?;
+        let entries =
+            codec::deserialize_directory(&dir_bytes, header.n_chunk_groups as usize * natts)?;
         for cg in 0..header.n_chunk_groups as usize {
             let e = &entries[cg * natts + col_idx];
             if e.row_count == 0 {
@@ -877,7 +920,8 @@ pub(crate) unsafe fn directory_minmax(
 
     // Fold the same-xact pending rows (no directory entry) via compute_minmax — the identical bit domain.
     let oid = (*rel).rd_id.to_u32();
-    let pending: Option<Vec<Vec<u8>>> = WRITE_STATES.with(|w| w.borrow().get(&oid).map(|p| p.rows.clone()));
+    let pending: Option<Vec<Vec<u8>>> =
+        WRITE_STATES.with(|w| w.borrow().get(&oid).map(|p| p.rows.clone()));
     if let Some(rows) = pending {
         if !rows.is_empty() {
             let cols = (0..natts).map(|i| coldesc(tupdesc, i)).collect::<Result<Vec<_>, _>>()?;
@@ -888,7 +932,12 @@ pub(crate) unsafe fn directory_minmax(
                 let mut htup: pg_sys::HeapTupleData = std::mem::zeroed();
                 htup.t_len = rbytes.len() as u32;
                 htup.t_data = rbytes.as_ptr() as pg_sys::HeapTupleHeader;
-                pg_sys::heap_deform_tuple(&mut htup, tupdesc, values.as_mut_ptr(), isnull.as_mut_ptr());
+                pg_sys::heap_deform_tuple(
+                    &mut htup,
+                    tupdesc,
+                    values.as_mut_ptr(),
+                    isnull.as_mut_ptr(),
+                );
                 if isnull[col_idx] {
                     colvals.push(None);
                 } else {
@@ -963,7 +1012,8 @@ unsafe fn load_next_batch(st: *mut ColumnarScanState) -> bool {
         if (*st).stripe_idx < stripes.len() {
             let hb = stripes[(*st).stripe_idx].header_block;
             (*st).stripe_idx += 1;
-            let cols = match (0..natts).map(|i| coldesc(tupdesc, i)).collect::<Result<Vec<_>, _>>() {
+            let cols = match (0..natts).map(|i| coldesc(tupdesc, i)).collect::<Result<Vec<_>, _>>()
+            {
                 Ok(c) => c,
                 Err(e) => pg_sys::error!("{e}"),
             };
@@ -1204,7 +1254,11 @@ unsafe fn flush_pending(rel: pg_sys::Relation) -> Result<(), String> {
             let lo = cg * codec::CHUNK_GROUP_ROWS;
             let hi = (lo + codec::CHUNK_GROUP_ROWS).min(row_count);
             for col in 0..natts {
-                let enc = codec::encode_column(&columns[col][lo..hi], cols[col].attlen_fixed, cols[col].mm);
+                let enc = codec::encode_column(
+                    &columns[col][lo..hi],
+                    cols[col].attlen_fixed,
+                    cols[col].mm,
+                );
                 let compressed = zstd::encode_all(&enc.raw[..], 3)
                     .map_err(|e| format!("theodb_columnar: zstd compress failed: {e}"))?;
                 let (first_block, n_pages) = write_chunk(rel, &compressed);
@@ -1240,12 +1294,22 @@ unsafe fn flush_pending(rel: pg_sys::Relation) -> Result<(), String> {
             dir_n_pages,
             dir_len: dir_bytes.len() as u32,
         };
-        let header_block =
-            super::page::extend_page_with_item(rel, pg_sys::ForkNumber::MAIN_FORKNUM, &header.to_bytes());
+        let header_block = super::page::extend_page_with_item(
+            rel,
+            pg_sys::ForkNumber::MAIN_FORKNUM,
+            &header.to_bytes(),
+        );
 
         // Publish the stripe LAST via its heap-catalog row (the MVCC visibility root) — after every referenced data
         // page is durable and every buffer lock is released. Its xmin ties visibility to this xact's commit.
-        insert_stripe_row((*rel).rd_id, stripe_id, header_block, row_count as u32, base as i64, natts as i16)?;
+        insert_stripe_row(
+            (*rel).rd_id,
+            stripe_id,
+            header_block,
+            row_count as u32,
+            base as i64,
+            natts as i16,
+        )?;
     }
     Ok(())
 }
@@ -1310,7 +1374,9 @@ pub unsafe extern "C-unwind" fn columnar_relation_size(
 }
 
 #[pg_guard]
-pub unsafe extern "C-unwind" fn columnar_relation_needs_toast_table(_rel: pg_sys::Relation) -> bool {
+pub unsafe extern "C-unwind" fn columnar_relation_needs_toast_table(
+    _rel: pg_sys::Relation,
+) -> bool {
     // M99: values are stored inline in column chunks (no out-of-line TOAST). Matches the Citus base surface.
     false
 }
@@ -1456,8 +1522,10 @@ fn theodb_columnar_test_stripe_info(rel_oid: pg_sys::Oid) -> String {
             let hdr_items = super::page::read_all_page_items(rel, st.header_block)?;
             let hdr_bytes = hdr_items.into_iter().next().ok_or("no header item")?;
             let header = StripeHeader::from_bytes(&hdr_bytes)?; // validates the real "TCS1" magic
-            let dir_bytes = super::page::read_chunked(rel, header.dir_first_block, header.dir_n_pages)?;
-            let entries = codec::deserialize_directory(&dir_bytes, header.n_chunk_groups as usize * natts)?;
+            let dir_bytes =
+                super::page::read_chunked(rel, header.dir_first_block, header.dir_n_pages)?;
+            let entries =
+                codec::deserialize_directory(&dir_bytes, header.n_chunk_groups as usize * natts)?;
             let e0 = &entries[0]; // chunk group 0, column 0
             let (minr, maxr) = if e0.has_minmax {
                 match coldesc(tupdesc, 0)?.mm {
@@ -1537,7 +1605,8 @@ mod tests {
         Spi::run("SET maintenance_work_mem = '1MB'").unwrap();
         Spi::run("CREATE TABLE m104_inc (a int, b text) USING theodb_columnar").unwrap();
         // ~50k rows of ~40-byte tuples ≈ 2MB > 1MB mwm → at least 2 incremental stripes.
-        Spi::run("INSERT INTO m104_inc SELECT g, repeat('x', 30) FROM generate_series(1, 50000) g").unwrap();
+        Spi::run("INSERT INTO m104_inc SELECT g, repeat('x', 30) FROM generate_series(1, 50000) g")
+            .unwrap();
         let cnt = Spi::get_one::<i64>("SELECT count(*) FROM m104_inc").unwrap().unwrap();
         assert_eq!(cnt, 50000, "all rows committed and readable");
         let sum = Spi::get_one::<i64>("SELECT sum(a) FROM m104_inc").unwrap().unwrap();
@@ -1547,7 +1616,10 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        assert!(stripes > 1, "incremental flush produced MULTIPLE stripes (got {stripes}) — write memory is bounded, not O(N)");
+        assert!(
+            stripes > 1,
+            "incremental flush produced MULTIPLE stripes (got {stripes}) — write memory is bounded, not O(N)"
+        );
         Spi::run("DROP TABLE m104_inc").unwrap();
     }
 
@@ -1559,13 +1631,15 @@ mod tests {
         Spi::run("SET maintenance_work_mem = '1MB'").unwrap();
         Spi::run("CREATE TABLE m104_scan (a int, b text) USING theodb_columnar").unwrap();
         // committed rows across multiple stripes
-        Spi::run("INSERT INTO m104_scan SELECT g, 'r'||g FROM generate_series(1, 60000) g").unwrap();
+        Spi::run("INSERT INTO m104_scan SELECT g, 'r'||g FROM generate_series(1, 60000) g")
+            .unwrap();
         let cnt = Spi::get_one::<i64>("SELECT count(*) FROM m104_scan").unwrap().unwrap();
         assert_eq!(cnt, 60000, "streaming scan over multiple stripes returns every row");
         let sum = Spi::get_one::<i64>("SELECT sum(a) FROM m104_scan").unwrap().unwrap();
         assert_eq!(sum, 60000i64 * 60001 / 2, "values intact across lazily-decoded stripes");
         // a specific row (order + content) and the last row
-        let mid = Spi::get_one::<String>("SELECT b FROM m104_scan WHERE a = 30000").unwrap().unwrap();
+        let mid =
+            Spi::get_one::<String>("SELECT b FROM m104_scan WHERE a = 30000").unwrap().unwrap();
         assert_eq!(mid, "r30000");
         // ordered read still monotonic (streaming preserves stripe/catalog order → row order)
         let ordered = Spi::get_one::<i64>(
@@ -1584,14 +1658,20 @@ mod tests {
     fn m104_self_referential_insert_snapshot_safe() {
         Spi::run("SET maintenance_work_mem = '1MB'").unwrap();
         Spi::run("CREATE TABLE m104_self (a int, b text) USING theodb_columnar").unwrap();
-        Spi::run("INSERT INTO m104_self SELECT g, repeat('y', 30) FROM generate_series(1, 40000) g").unwrap();
+        Spi::run(
+            "INSERT INTO m104_self SELECT g, repeat('y', 30) FROM generate_series(1, 40000) g",
+        )
+        .unwrap();
         let before = Spi::get_one::<i64>("SELECT count(*) FROM m104_self").unwrap().unwrap();
         assert_eq!(before, 40000);
         // self-referential: even though this INSERT incrementally flushes stripes mid-statement, its SELECT reads the
         // pre-statement snapshot (40000), so the table ends at exactly 80000 — not more (mid-flush stripes not re-read).
         Spi::run("INSERT INTO m104_self SELECT a, b FROM m104_self").unwrap();
         let after = Spi::get_one::<i64>("SELECT count(*) FROM m104_self").unwrap().unwrap();
-        assert_eq!(after, 80000, "self-referential INSERT honors its snapshot (2x), not its own mid-flush stripes");
+        assert_eq!(
+            after, 80000,
+            "self-referential INSERT honors its snapshot (2x), not its own mid-flush stripes"
+        );
         Spi::run("DROP TABLE m104_self").unwrap();
     }
 
@@ -1618,7 +1698,8 @@ mod tests {
         let expect_c: f64 = (1..=5000i64).map(|g| g as f64 * 1.5).sum();
         assert!((sumc - expect_c).abs() < 1e-6, "sum(c) must match ({sumc} vs {expect_c})");
 
-        let nulls = Spi::get_one::<i64>("SELECT count(*) FROM m99_rt2 WHERE b IS NULL").unwrap().unwrap();
+        let nulls =
+            Spi::get_one::<i64>("SELECT count(*) FROM m99_rt2 WHERE b IS NULL").unwrap().unwrap();
         assert_eq!(nulls, 1, "the one NULL-text row must read back as NULL");
 
         let sample = Spi::get_one::<String>("SELECT b FROM m99_rt2 WHERE a = 42").unwrap().unwrap();
@@ -1642,9 +1723,12 @@ mod tests {
         // Force the columnar flush (the introspection helper flushes pending → durable stripe) then measure on-disk
         // size — the pending rows live in memory until flush, so we must materialize the stripe before pg_relation_size.
         let oid = Spi::get_one::<pg_sys::Oid>("SELECT 'm99_cz'::regclass::oid").unwrap().unwrap();
-        Spi::get_one_with_args::<String>("SELECT theodb_columnar_test_stripe_info($1)", &[oid.into()])
-            .unwrap()
-            .unwrap();
+        Spi::get_one_with_args::<String>(
+            "SELECT theodb_columnar_test_stripe_info($1)",
+            &[oid.into()],
+        )
+        .unwrap()
+        .unwrap();
         let cnt = Spi::get_one::<i64>("SELECT count(*) FROM m99_cz").unwrap().unwrap();
         assert_eq!(cnt, 20000, "round-trip through compression must return all rows");
 
@@ -1667,7 +1751,10 @@ mod tests {
     #[pg_test]
     fn m99_stripe_is_column_major() {
         Spi::run("CREATE TABLE m99_cm (a int, b text, c float8) USING theodb_columnar").unwrap();
-        Spi::run("INSERT INTO m99_cm SELECT g, 'row-' || g, g::float8 FROM generate_series(1, 25000) g").unwrap();
+        Spi::run(
+            "INSERT INTO m99_cm SELECT g, 'row-' || g, g::float8 FROM generate_series(1, 25000) g",
+        )
+        .unwrap();
         Spi::run("INSERT INTO m99_cm VALUES (25001, NULL, NULL)").unwrap(); // NULL text + NULL float
         let oid = Spi::get_one::<pg_sys::Oid>("SELECT 'm99_cm'::regclass::oid").unwrap().unwrap();
         // The introspection helper flushes the 25001 pending rows into ONE durable column-major stripe + its MVCC
@@ -1692,11 +1779,22 @@ mod tests {
         let suma = Spi::get_one::<i64>("SELECT sum(a)::bigint FROM m99_cm").unwrap().unwrap();
         assert_eq!(suma, (1..=25001i64).sum::<i64>(), "sum(a) matches");
         let sumc = Spi::get_one::<f64>("SELECT sum(c) FROM m99_cm").unwrap().unwrap();
-        assert!((sumc - (1..=25000i64).map(|g| g as f64).sum::<f64>()).abs() < 1e-3, "sum(c) matches: {sumc}");
-        let sample = Spi::get_one::<String>("SELECT b FROM m99_cm WHERE a = 12345").unwrap().unwrap();
-        assert_eq!(sample, "row-12345", "text round-trips across a chunk-group boundary via disk decode");
-        let nulls = Spi::get_one::<i64>("SELECT count(*) FROM m99_cm WHERE b IS NULL").unwrap().unwrap();
-        assert_eq!(nulls, 1, "the NULL-text row round-trips through the column null-bitmap on disk");
+        assert!(
+            (sumc - (1..=25000i64).map(|g| g as f64).sum::<f64>()).abs() < 1e-3,
+            "sum(c) matches: {sumc}"
+        );
+        let sample =
+            Spi::get_one::<String>("SELECT b FROM m99_cm WHERE a = 12345").unwrap().unwrap();
+        assert_eq!(
+            sample, "row-12345",
+            "text round-trips across a chunk-group boundary via disk decode"
+        );
+        let nulls =
+            Spi::get_one::<i64>("SELECT count(*) FROM m99_cm WHERE b IS NULL").unwrap().unwrap();
+        assert_eq!(
+            nulls, 1,
+            "the NULL-text row round-trips through the column null-bitmap on disk"
+        );
         Spi::run("DROP TABLE m99_cm").unwrap();
     }
 
@@ -1711,19 +1809,26 @@ mod tests {
         Spi::run("INSERT INTO m99_mv SELECT g FROM generate_series(1, 100) g").unwrap();
         let oid = Spi::get_one::<pg_sys::Oid>("SELECT 'm99_mv'::regclass::oid").unwrap().unwrap();
         // Before flush: nothing in the catalog, rows visible only via the same-xact pending buffer.
-        let pre = Spi::get_one::<i64>("SELECT count(*) FROM columnar.stripe WHERE relid = 'm99_mv'::regclass")
-            .unwrap()
-            .unwrap();
+        let pre = Spi::get_one::<i64>(
+            "SELECT count(*) FROM columnar.stripe WHERE relid = 'm99_mv'::regclass",
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(pre, 0, "no catalog row before flush");
         let cnt_pending = Spi::get_one::<i64>("SELECT count(*) FROM m99_mv").unwrap().unwrap();
         assert_eq!(cnt_pending, 100, "pending rows visible to same xact before flush");
         // Flush → exactly one catalog stripe row appears (the visibility root).
-        Spi::get_one_with_args::<String>("SELECT theodb_columnar_test_stripe_info($1)", &[oid.into()])
-            .unwrap()
-            .unwrap();
-        let post = Spi::get_one::<i64>("SELECT count(*) FROM columnar.stripe WHERE relid = 'm99_mv'::regclass")
-            .unwrap()
-            .unwrap();
+        Spi::get_one_with_args::<String>(
+            "SELECT theodb_columnar_test_stripe_info($1)",
+            &[oid.into()],
+        )
+        .unwrap()
+        .unwrap();
+        let post = Spi::get_one::<i64>(
+            "SELECT count(*) FROM columnar.stripe WHERE relid = 'm99_mv'::regclass",
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(post, 1, "exactly one catalog stripe row after flush");
         let cnt_disk = Spi::get_one::<i64>("SELECT count(*) FROM m99_mv").unwrap().unwrap();
         assert_eq!(cnt_disk, 100, "rows visible via the catalog stripe after flush");
@@ -1738,9 +1843,12 @@ mod tests {
         Spi::run("CREATE TABLE m99_dc (a int) USING theodb_columnar").unwrap();
         Spi::run("INSERT INTO m99_dc SELECT g FROM generate_series(1, 50) g").unwrap();
         let oid = Spi::get_one::<pg_sys::Oid>("SELECT 'm99_dc'::regclass::oid").unwrap().unwrap();
-        Spi::get_one_with_args::<String>("SELECT theodb_columnar_test_stripe_info($1)", &[oid.into()])
-            .unwrap()
-            .unwrap(); // flush → one catalog row
+        Spi::get_one_with_args::<String>(
+            "SELECT theodb_columnar_test_stripe_info($1)",
+            &[oid.into()],
+        )
+        .unwrap()
+        .unwrap(); // flush → one catalog row
         let before = Spi::get_one_with_args::<i64>(
             "SELECT count(*) FROM columnar.stripe WHERE relid = $1",
             &[oid.into()],

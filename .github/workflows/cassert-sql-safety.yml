@@ -1,0 +1,60 @@
+# M136 — os DOIS gates de maior valor/custo num só build: Postgres cassert (item 4) + pgspot na SQL (item 5).
+#
+# Um `cargo pgrx install` serve os dois (o runner serializa; compilar duas vezes seria desperdício):
+#   - cassert: exercita os 4 index/table AMs + columnar sob um PG `--enable-cassert` (a classe do crash #143;
+#     em release Assert() é no-op, então esta é a ÚNICA cobertura de asserção do engine — lição #1 do paradedb).
+#   - pgspot: varre a SQL de instalação gerada pelo pgrx (94 pg_extern) por DDL inseguro (SECURITY DEFINER com
+#     search_path mutável, etc.). Baseline dos 6 códigos atuais (PS001/002/005/010/016/017 — handlers de AM em
+#     C, CREATE SCHEMA, e search_path das funções SQL SECURITY INVOKER); burn-down rastreado em issue própria.
+#
+# Verificado direto no droplet (2026-07-21): cassert-smoke exit 0 (0 asserts/crashes); pgspot com baseline 0/0.
+# initdb recusa rodar como root, então o smoke roda via `runuser -u pgtest` (padrão M137). Roda no runner
+# self-hosted, cujo PG18 do pgrx foi compilado com --enable-cassert (pg_config --configure confirma).
+name: cassert-sql-safety
+
+on:
+  push:
+    branches: [develop, main]
+    paths: ['theodb_rs/src/**', 'theodb_rs/Cargo.*', 'scripts/cassert-smoke.sh', '.github/workflows/cassert-sql-safety.yml']
+  pull_request:
+    branches: [develop, main]
+    paths: ['theodb_rs/src/**', 'theodb_rs/Cargo.*', 'scripts/cassert-smoke.sh', '.github/workflows/cassert-sql-safety.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  cassert-and-pgspot:
+    runs-on: [self-hosted, theodb-do]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar a extensão no PG cassert do pgrx
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.cargo/bin:$PATH"
+          PGINST="$HOME/.pgrx/18.4/pgrx-install"
+          "$PGINST/bin/pg_config" --configure | grep -q -- '--enable-cassert' \
+            || { echo "::error::PG do pgrx não é cassert — o smoke seria vacuoso"; exit 1; }
+          cd theodb_rs
+          cargo pgrx install --features pg18 --pg-config "$PGINST/bin/pg_config"
+
+      - name: pgspot — DDL inseguro na SQL de instalação (baseline dos 6 códigos atuais)
+        run: |
+          set -euo pipefail
+          PGINST="$HOME/.pgrx/18.4/pgrx-install"
+          SQL=$(ls "$PGINST"/share/postgresql/extension/theodb_rs--*[0-9].sql | sort -V | tail -1)
+          echo "pgspot sobre: $SQL"
+          command -v pgspot >/dev/null || pip install --break-system-packages -q pgspot
+          # Baseline (SUNSET 2026-10-21, burn-down em #151): PS002=handlers de AM em C (tomam `internal`,
+          # não invocáveis por usuário), PS010=CREATE SCHEMA de extensão, PS001/016/017=refs não-qualificadas em
+          # corpos SECURITY INVOKER, PS005=search_path das funções SQL. Gate ainda pega códigos NOVOS (PS003 etc.).
+          pgspot --ignore PS001 --ignore PS002 --ignore PS005 --ignore PS010 --ignore PS016 --ignore PS017 "$SQL"
+
+      - name: cassert-smoke — 4 AMs + columnar sob Assert() (classe #143)
+        run: |
+          set -euo pipefail
+          # O job roda como ghrunner (não-root), então `initdb` roda direto — sem o dança runuser/pgtest que só
+          # o teste-como-root exigia. PGINST é o pgrx do próprio ghrunner (compilado com --enable-cassert).
+          PGINST="$HOME/.pgrx/18.4/pgrx-install" PGPORT=28941 bash scripts/cassert-smoke.sh

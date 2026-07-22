@@ -5,14 +5,19 @@
 #[pgrx::pg_schema]
 mod tests {
     use crate::am::hnsw_page::*;
-    use crate::ann::Metric;
     use crate::am::page;
-    use pgrx::pg_sys;
     use crate::ann::HnswIndex;
+    use crate::ann::Metric;
+    use pgrx::pg_sys;
 
     fn corpus() -> Vec<(i64, Vec<f32>)> {
         (0..40)
-            .map(|i| (i as i64 + 100, vec![(i % 7) as f32, (i % 5) as f32, (i % 3) as f32, i as f32 / 40.0]))
+            .map(|i| {
+                (
+                    i as i64 + 100,
+                    vec![(i % 7) as f32, (i % 5) as f32, (i % 3) as f32, i as f32 / 40.0],
+                )
+            })
             .collect()
     }
 
@@ -69,7 +74,10 @@ mod tests {
                     .collect();
                 let want: std::collections::HashSet<usize> =
                     idx.node_neighbors(node, lc).iter().copied().collect();
-                assert_eq!(got, want, "node {node} layer {lc}: decoded neighbors must equal in-memory");
+                assert_eq!(
+                    got, want,
+                    "node {node} layer {lc}: decoded neighbors must equal in-memory"
+                );
             }
         }
     }
@@ -106,7 +114,10 @@ mod tests {
                 // pre-dirty the scratch to prove `_into` clears it before writing.
                 let mut scratch: Vec<Addr> = vec![(9999, 9999), (8888, 8888)];
                 decode_neighbors_into(np, level, lc, m, m0, &mut scratch).unwrap();
-                assert_eq!(scratch, orig, "node {node} layer {lc}: _into must equal original AND clear prior");
+                assert_eq!(
+                    scratch, orig,
+                    "node {node} layer {lc}: _into must equal original AND clear prior"
+                );
             }
         }
     }
@@ -124,32 +135,78 @@ mod tests {
     // --- M51 T1.1: layout v2 meta carries the SBQ codebook; v1 (f32-only) stays byte-identical. ---
     fn meta_fixture(sbq_bits: u8, codebook: Vec<u8>) -> HnswMeta {
         HnswMeta {
-            metric_tag: Metric::L2.tag(), dim: 3, m: 16, m0: 32,
-            entry_blkno: 1, entry_offno: 1, entry_level: 2, node_count: 5,
-            elem_first: 1, elem_npages: 1, nbr_first: 2, nbr_npages: 1, sbq_bits, codebook,
-            aq_m: 0, aq_codebook: Vec::new(), aq_cb_first: 0, aq_cb_npages: 0, raw_first: 0, raw_npages: 0,
+            metric_tag: Metric::L2.tag(),
+            dim: 3,
+            m: 16,
+            m0: 32,
+            entry_blkno: 1,
+            entry_offno: 1,
+            entry_level: 2,
+            node_count: 5,
+            elem_first: 1,
+            elem_npages: 1,
+            nbr_first: 2,
+            nbr_npages: 1,
+            sbq_bits,
+            codebook,
+            aq_m: 0,
+            aq_codebook: Vec::new(),
+            aq_cb_first: 0,
+            aq_cb_npages: 0,
+            raw_first: 0,
+            raw_npages: 0,
         }
     }
 
     // --- M59 T3.1: layout v3 meta carries the AQ codebook; SBQ off (AQ ⟂ SBQ per index, D1). ---
     fn aq_meta_fixture(aq_m: u8, aq_codebook: Vec<u8>) -> HnswMeta {
         HnswMeta {
-            metric_tag: Metric::L2.tag(), dim: 8, m: 16, m0: 32,
-            entry_blkno: 1, entry_offno: 1, entry_level: 2, node_count: 5,
-            elem_first: 1, elem_npages: 1, nbr_first: 2, nbr_npages: 1,
-            sbq_bits: 0, codebook: Vec::new(), aq_m, aq_codebook, aq_cb_first: 3, aq_cb_npages: 1,
-            raw_first: 0, raw_npages: 0,
+            metric_tag: Metric::L2.tag(),
+            dim: 8,
+            m: 16,
+            m0: 32,
+            entry_blkno: 1,
+            entry_offno: 1,
+            entry_level: 2,
+            node_count: 5,
+            elem_first: 1,
+            elem_npages: 1,
+            nbr_first: 2,
+            nbr_npages: 1,
+            sbq_bits: 0,
+            codebook: Vec::new(),
+            aq_m,
+            aq_codebook,
+            aq_cb_first: 3,
+            aq_cb_npages: 1,
+            raw_first: 0,
+            raw_npages: 0,
         }
     }
 
     // --- M59 v4: layout v4 meta carries the AQ codebook descriptor + the raw-f32 region pointer. ---
     fn v4_meta_fixture(aq_m: u8, aq_codebook: Vec<u8>) -> HnswMeta {
         HnswMeta {
-            metric_tag: Metric::L2.tag(), dim: 8, m: 16, m0: 32,
-            entry_blkno: 1, entry_offno: 1, entry_level: 2, node_count: 5,
-            elem_first: 1, elem_npages: 1, nbr_first: 2, nbr_npages: 1,
-            sbq_bits: 0, codebook: Vec::new(), aq_m, aq_codebook, aq_cb_first: 3, aq_cb_npages: 1,
-            raw_first: 4, raw_npages: 2,
+            metric_tag: Metric::L2.tag(),
+            dim: 8,
+            m: 16,
+            m0: 32,
+            entry_blkno: 1,
+            entry_offno: 1,
+            entry_level: 2,
+            node_count: 5,
+            elem_first: 1,
+            elem_npages: 1,
+            nbr_first: 2,
+            nbr_npages: 1,
+            sbq_bits: 0,
+            codebook: Vec::new(),
+            aq_m,
+            aq_codebook,
+            aq_cb_first: 3,
+            aq_cb_npages: 1,
+            raw_first: 4,
+            raw_npages: 2,
         }
     }
 
@@ -157,7 +214,11 @@ mod tests {
     fn hnsw_meta_v2_roundtrips_codebook() {
         let cb = vec![4u8, 3, 0, 0, 0, 1, 2, 3, 4]; // arbitrary codebook bytes (e.g. to_meta_bytes output)
         let bytes = encode_meta(&meta_fixture(4, cb.clone()));
-        assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), HNSW_STRUCT_VERSION_SBQ, "must be v2");
+        assert_eq!(
+            u32::from_le_bytes(bytes[4..8].try_into().unwrap()),
+            HNSW_STRUCT_VERSION_SBQ,
+            "must be v2"
+        );
         let d = decode_meta(&bytes).expect("v2 decodes");
         assert_eq!(d.sbq_bits, 4);
         assert_eq!(d.codebook, cb, "codebook roundtrips byte-exact");
@@ -169,7 +230,11 @@ mod tests {
     fn hnsw_meta_v1_byte_identical_when_no_sbq() {
         let bytes = encode_meta(&meta_fixture(0, Vec::new()));
         assert_eq!(bytes.len(), META_LEN, "f32-only meta must be exactly the 45-byte v1 layout");
-        assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), HNSW_STRUCT_VERSION, "must stay v1");
+        assert_eq!(
+            u32::from_le_bytes(bytes[4..8].try_into().unwrap()),
+            HNSW_STRUCT_VERSION,
+            "must stay v1"
+        );
         let d = decode_meta(&bytes).unwrap();
         assert_eq!(d.sbq_bits, 0);
         assert!(d.codebook.is_empty());
@@ -193,7 +258,8 @@ mod tests {
         assert_eq!(meta.sbq_bits, bits, "meta records SBQ bits");
         assert!(!meta.codebook.is_empty(), "codebook persisted in meta");
         // reconstruct the quantizer from the persisted codebook and verify each element's code matches.
-        let q = crate::sbq::SbqQuantizer::from_meta_bytes(&meta.codebook).expect("codebook decodes");
+        let q =
+            crate::sbq::SbqQuantizer::from_meta_bytes(&meta.codebook).expect("codebook decodes");
         let dim = idx.dim();
         let ipp = elems_per_page(dim, crate::sbq::SbqQuantizer::bytes_per_vector(dim, bits));
         for node in 0..idx.node_count() {
@@ -201,7 +267,11 @@ mod tests {
             let ev = decode_element(ep).unwrap();
             let expect: Vec<u8> =
                 q.quantize(idx.node_vector(node)).iter().flat_map(|w| w.to_le_bytes()).collect();
-            assert_eq!(ev.code_bytes, expect.as_slice(), "node {node}: inline code == quantize(vec)");
+            assert_eq!(
+                ev.code_bytes,
+                expect.as_slice(),
+                "node {node}: inline code == quantize(vec)"
+            );
         }
     }
 
@@ -215,10 +285,18 @@ mod tests {
         let full = crate::sbq::SbqQuantizer::bytes_per_vector(dim, 2);
         let code = vec![0xAAu8; full];
         let e = encode_element(&idx, 0, (1, 1), dim, &code);
-        assert_eq!(decode_element(&e).unwrap().code_bytes.len(), full, "full code exposes its exact length");
+        assert_eq!(
+            decode_element(&e).unwrap().code_bytes.len(),
+            full,
+            "full code exposes its exact length"
+        );
         // a shorter (truncated) code decodes to a SHORTER code_bytes → the load guard (len != qcode.len()) fires.
         let e_short = encode_element(&idx, 0, (1, 1), dim, &code[..full - 1]);
-        assert_eq!(decode_element(&e_short).unwrap().code_bytes.len(), full - 1, "truncation is observable");
+        assert_eq!(
+            decode_element(&e_short).unwrap().code_bytes.len(),
+            full - 1,
+            "truncation is observable"
+        );
     }
 
     #[pgrx::pg_test]
@@ -237,7 +315,10 @@ mod tests {
         assert_eq!(e2.len(), elem_size(dim, code.len()), "v2 tuple grows by the code length");
         let v2 = decode_element(&e2).unwrap();
         assert_eq!(v2.code_bytes, code.as_slice(), "SBQ code roundtrips inline after the vec");
-        assert_eq!(v2.vec_bytes, v1.vec_bytes, "appending a code must not change the f32 vec bytes");
+        assert_eq!(
+            v2.vec_bytes, v1.vec_bytes,
+            "appending a code must not change the f32 vec bytes"
+        );
     }
 
     // ============================ M59 T3.1 — meta v3 codec + AQ pack path ============================
@@ -250,7 +331,16 @@ mod tests {
                 let f = i as f32;
                 (
                     i as i64 + 200,
-                    vec![f, (i % 7) as f32, (i % 5) as f32, (i % 3) as f32, f * 0.1, (i % 11) as f32, (i % 2) as f32, f * 0.5],
+                    vec![
+                        f,
+                        (i % 7) as f32,
+                        (i % 5) as f32,
+                        (i % 3) as f32,
+                        f * 0.1,
+                        (i % 11) as f32,
+                        (i % 2) as f32,
+                        f * 0.5,
+                    ],
                 )
             })
             .collect()
@@ -264,12 +354,23 @@ mod tests {
         // an EMPTY `aq_codebook` (the FFI `read_meta` reassembles it from pages); the descriptor round-trips here.
         let cb = vec![4u8, 2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 128, 63, 9, 8, 7, 6]; // arbitrary AqQuantizer::to_meta_bytes-shaped bytes
         let bytes = encode_meta(&aq_meta_fixture(2, cb.clone()));
-        assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), HNSW_STRUCT_VERSION_AQ, "must be v3");
+        assert_eq!(
+            u32::from_le_bytes(bytes[4..8].try_into().unwrap()),
+            HNSW_STRUCT_VERSION_AQ,
+            "must be v3"
+        );
         // The v3 meta ITEM is tiny (core + 13-byte descriptor) — it can NEVER overflow a page, regardless of dim.
-        assert_eq!(bytes.len(), META_LEN + AQ_DESC_LEN, "v3 meta item is core + fixed 13-byte descriptor only");
+        assert_eq!(
+            bytes.len(),
+            META_LEN + AQ_DESC_LEN,
+            "v3 meta item is core + fixed 13-byte descriptor only"
+        );
         let d = decode_meta(&bytes).expect("v3 decodes");
         assert_eq!(d.aq_m, 2, "aq_m roundtrips");
-        assert!(d.aq_codebook.is_empty(), "codebook is NOT inline — it lives on pages (read_meta reassembles it)");
+        assert!(
+            d.aq_codebook.is_empty(),
+            "codebook is NOT inline — it lives on pages (read_meta reassembles it)"
+        );
         assert_eq!(d.aq_cb_first, 3, "codebook first-page pointer roundtrips");
         assert_eq!(d.aq_cb_npages, 1, "codebook page-count roundtrips");
         assert_eq!(d.sbq_bits, 0, "AQ index carries no SBQ (mutually exclusive, D1)");
@@ -286,7 +387,11 @@ mod tests {
         // -- v1 (f32-only) --
         let v1 = encode_meta(&meta_fixture(0, Vec::new()));
         assert_eq!(v1.len(), META_LEN, "v1 stays the byte-identical 45-byte core");
-        assert_eq!(u32::from_le_bytes(v1[4..8].try_into().unwrap()), HNSW_STRUCT_VERSION, "v1 version unchanged");
+        assert_eq!(
+            u32::from_le_bytes(v1[4..8].try_into().unwrap()),
+            HNSW_STRUCT_VERSION,
+            "v1 version unchanged"
+        );
         let d1 = decode_meta(&v1).expect("v1 still decodes");
         assert_eq!(d1.sbq_bits, 0);
         assert!(d1.codebook.is_empty());
@@ -295,7 +400,11 @@ mod tests {
         // -- v2 (SBQ) --
         let cb = vec![4u8, 3, 0, 0, 0, 1, 2, 3, 4];
         let v2 = encode_meta(&meta_fixture(4, cb.clone()));
-        assert_eq!(u32::from_le_bytes(v2[4..8].try_into().unwrap()), HNSW_STRUCT_VERSION_SBQ, "v2 version unchanged");
+        assert_eq!(
+            u32::from_le_bytes(v2[4..8].try_into().unwrap()),
+            HNSW_STRUCT_VERSION_SBQ,
+            "v2 version unchanged"
+        );
         let d2 = decode_meta(&v2).expect("v2 still decodes");
         assert_eq!(d2.sbq_bits, 4, "v2 SBQ bits unchanged");
         assert_eq!(d2.codebook, cb, "v2 codebook unchanged");
@@ -314,9 +423,16 @@ mod tests {
         let meta = decode_meta(&packed.meta).unwrap();
         assert_eq!(meta.aq_m as usize, m_sub, "meta records AQ subspace count");
         assert_eq!(meta.sbq_bits, 0, "v4 index has no SBQ");
-        assert_eq!(u32::from_le_bytes(packed.meta[4..8].try_into().unwrap()), HNSW_STRUCT_VERSION_V4, "meta is v4");
+        assert_eq!(
+            u32::from_le_bytes(packed.meta[4..8].try_into().unwrap()),
+            HNSW_STRUCT_VERSION_V4,
+            "meta is v4"
+        );
         assert!(meta.raw_npages > 0, "v4 records a non-empty raw-f32 region");
-        assert!(meta.raw_first >= meta.aq_cb_first + meta.aq_cb_npages, "raw region follows the codebook pages");
+        assert!(
+            meta.raw_first >= meta.aq_cb_first + meta.aq_cb_npages,
+            "raw region follows the codebook pages"
+        );
         // Codebook on the dedicated pages (reassembled — the in-memory dual of the FFI read_meta).
         let cb = codebook_from_packed(&packed, meta.aq_cb_first, meta.aq_cb_npages);
         let q = crate::vec::aq::AqQuantizer::from_meta_bytes(&cb).expect("AQ codebook decodes");
@@ -328,19 +444,37 @@ mod tests {
             // HOT tuple: code matches encode(vec); the hot tuple size is header+code (dim-independent, NO f32).
             let ep = packed.pages[node / ipp][node % ipp].as_slice();
             let ev = decode_element_v4(ep).unwrap();
-            assert_eq!(ev.code_bytes, q.encode(idx.node_vector(node)).as_slice(), "node {node}: hot code == encode(vec)");
+            assert_eq!(
+                ev.code_bytes,
+                q.encode(idx.node_vector(node)).as_slice(),
+                "node {node}: hot code == encode(vec)"
+            );
             assert_eq!(ev.code_bytes.len(), m_sub.div_ceil(2), "code is ⌈m/2⌉ bytes");
-            assert_eq!(ep.len(), elem_size_v4(code_len), "hot tuple = header + code, NO f32 (dim-independent)");
+            assert_eq!(
+                ep.len(),
+                elem_size_v4(code_len),
+                "hot tuple = header + code, NO f32 (dim-independent)"
+            );
             // The raw_addr the hot tuple links must point into the raw region and round-trip the exact f32 vector.
             assert!(ev.raw_addr.0 >= meta.raw_first, "raw_addr points into the cold raw region");
-            let rp = packed.pages[(ev.raw_addr.0 - 1) as usize][(ev.raw_addr.1 - 1) as usize].as_slice();
+            let rp =
+                packed.pages[(ev.raw_addr.0 - 1) as usize][(ev.raw_addr.1 - 1) as usize].as_slice();
             let vb = decode_raw_vec(rp).expect("raw tuple decodes");
-            let got: Vec<f32> = vb.chunks(4).map(|c| f32::from_le_bytes(c.try_into().unwrap())).collect();
-            assert_eq!(got.as_slice(), idx.node_vector(node), "node {node}: raw tuple round-trips the exact f32");
+            let got: Vec<f32> =
+                vb.chunks(4).map(|c| f32::from_le_bytes(c.try_into().unwrap())).collect();
+            assert_eq!(
+                got.as_slice(),
+                idx.node_vector(node),
+                "node {node}: raw tuple round-trips the exact f32"
+            );
         }
         // The analytic raw addr matches the linked raw_addr (node i → raw_first + i/rpp, off 1 + i%rpp).
         let ev0 = decode_element_v4(packed.pages[0][0].as_slice()).unwrap();
-        assert_eq!(ev0.raw_addr, (meta.raw_first, 1), "node 0's raw tuple is the first item of the raw region");
+        assert_eq!(
+            ev0.raw_addr,
+            (meta.raw_first, 1),
+            "node 0's raw tuple is the first item of the raw region"
+        );
         let _ = rpp;
     }
 
@@ -376,7 +510,11 @@ mod tests {
         // decodes back byte-for-byte. v1/v2/v3 stay discriminated by their own versions (backward-compat).
         let cb = vec![4u8, 2, 0, 0, 0, 2, 0, 0, 0, 0, 0, 128, 63, 9, 8, 7, 6];
         let bytes = encode_meta(&v4_meta_fixture(2, cb.clone()));
-        assert_eq!(u32::from_le_bytes(bytes[4..8].try_into().unwrap()), HNSW_STRUCT_VERSION_V4, "must be v4");
+        assert_eq!(
+            u32::from_le_bytes(bytes[4..8].try_into().unwrap()),
+            HNSW_STRUCT_VERSION_V4,
+            "must be v4"
+        );
         let d = decode_meta(&bytes).expect("v4 decodes");
         assert_eq!(d.aq_m, 2, "v4 AQ subspace count round-trips");
         assert_eq!((d.raw_first, d.raw_npages), (4, 2), "v4 raw-f32 region pointer round-trips");
@@ -397,16 +535,27 @@ mod tests {
         let (m_sub, dim) = (4usize, idx.dim());
         let q = crate::vec::aq::AqQuantizer::train(
             &(0..idx.node_count()).map(|i| idx.node_vector(i).to_vec()).collect::<Vec<_>>(),
-            m_sub, 4, 2.0, AQ_BUILD_SEED,
-        ).expect("train");
+            m_sub,
+            4,
+            2.0,
+            AQ_BUILD_SEED,
+        )
+        .expect("train");
         let code = q.encode(idx.node_vector(0));
         // Build a hot tuple whose linked raw_addr is a DELIBERATELY POISONED sentinel (u32::MAX, u16::MAX): if the
         // walk/score path read the f32, it would have to dereference this address and fail. It must NOT.
         let poison = (u32::MAX, u16::MAX);
         let hot = encode_element_v4(&idx, 0, (7, 3), poison, dim, &code);
         // (1) The hot tuple size is header+code — it does NOT contain dim*4 f32 bytes.
-        assert_eq!(hot.len(), elem_size_v4(code.len()), "hot tuple carries no f32 (size = header + code only)");
-        assert!(hot.len() < ELEM_HEADER_V4 + dim * 4, "hot tuple is far smaller than a co-located f32 tuple");
+        assert_eq!(
+            hot.len(),
+            elem_size_v4(code.len()),
+            "hot tuple carries no f32 (size = header + code only)"
+        );
+        assert!(
+            hot.len() < ELEM_HEADER_V4 + dim * 4,
+            "hot tuple is far smaller than a co-located f32 tuple"
+        );
         // (2) The decoded HOT view exposes NO vector — only code + addresses. Scoring uses just the code.
         let ev = decode_element_v4(&hot).unwrap();
         assert_eq!(ev.code_bytes, code.as_slice(), "hot view exposes the code");
@@ -429,7 +578,11 @@ mod tests {
         let code = vec![0x21u8, 0x43, 0x05];
         let (nbr, raw) = ((7u32, 3u16), (99u32, 5u16));
         let e = encode_element_v4(&idx, 0, nbr, raw, dim, &code);
-        assert_eq!(e.len(), elem_size_v4(code.len()), "v4 hot tuple size = header + ⌈m/2⌉ code (NO f32)");
+        assert_eq!(
+            e.len(),
+            elem_size_v4(code.len()),
+            "v4 hot tuple size = header + ⌈m/2⌉ code (NO f32)"
+        );
         let ev = decode_element_v4(&e).unwrap();
         assert_eq!(ev.code_bytes, code.as_slice(), "AQ code roundtrips in the hot tuple");
         assert_eq!(ev.nbr_addr, nbr, "neighbor addr roundtrips");
@@ -440,8 +593,13 @@ mod tests {
         let r = encode_raw_vec(idx.node_vector(0));
         assert_eq!(r.len(), raw_size(dim), "raw tuple size = header + dim*4");
         let vb = decode_raw_vec(&r).unwrap();
-        let got: Vec<f32> = vb.chunks(4).map(|c| f32::from_le_bytes(c.try_into().unwrap())).collect();
-        assert_eq!(got.as_slice(), idx.node_vector(0), "raw tuple round-trips the exact f32 vector");
+        let got: Vec<f32> =
+            vb.chunks(4).map(|c| f32::from_le_bytes(c.try_into().unwrap())).collect();
+        assert_eq!(
+            got.as_slice(),
+            idx.node_vector(0),
+            "raw tuple round-trips the exact f32 vector"
+        );
         // Negative (Rule 8): a raw tuple read as a hot element (wrong tag) fails fast, and vice-versa.
         assert!(decode_element_v4(&r).is_err(), "a raw tuple is not a hot element (tag guard)");
         assert!(decode_raw_vec(&e).is_err(), "a hot element is not a raw tuple (tag guard)");
@@ -486,26 +644,38 @@ mod tests {
 
         let probe = "[3.3,1.1,2.2,0.4]";
         // Exact oracle: force a seqscan (bypass the AM entirely).
-        pgrx::Spi::run("SET enable_indexscan = off; SET enable_bitmapscan = off; SET enable_seqscan = on")
-            .unwrap();
+        pgrx::Spi::run(
+            "SET enable_indexscan = off; SET enable_bitmapscan = off; SET enable_seqscan = on",
+        )
+        .unwrap();
         let exact = topk_ids(probe, 5);
         // Index path: force the theodb_hnsw index scan → exercises `traverse` with the pre-sized structures.
-        pgrx::Spi::run("SET enable_seqscan = off; SET enable_bitmapscan = off; SET enable_indexscan = on")
-            .unwrap();
+        pgrx::Spi::run(
+            "SET enable_seqscan = off; SET enable_bitmapscan = off; SET enable_indexscan = on",
+        )
+        .unwrap();
         let via_index_1 = topk_ids(probe, 5);
         let via_index_2 = topk_ids(probe, 5);
 
-        assert_eq!(via_index_1, via_index_2, "traverse must be deterministic (pre-size adds no nondeterminism)");
+        assert_eq!(
+            via_index_1, via_index_2,
+            "traverse must be deterministic (pre-size adds no nondeterminism)"
+        );
         let (mut si, mut se) = (via_index_1.clone(), exact.clone());
         si.sort_unstable();
         se.sort_unstable();
-        assert_eq!(si, se, "recall-neutral: index top-5 set must equal exact top-5 set (100% recall at ef=200)");
+        assert_eq!(
+            si, se,
+            "recall-neutral: index top-5 set must equal exact top-5 set (100% recall at ef=200)"
+        );
     }
 
     /// Negative case (testing.md §4.1): `ef_search = 0` is rejected at the GUC boundary (MIN_EF_SEARCH=1) with a
     /// typed error — it can never reach `traverse`, so the internal `ef_search.max(1)` clamp is defense-in-depth.
     /// This fail-fast-at-the-boundary is the honest form of the plan's "ef=0 → clamp, no crash" acceptance.
-    #[pgrx::pg_test(error = "0 is outside the valid range for parameter \"theodb_hnsw.ef_search\" (1 .. 1000)")]
+    #[pgrx::pg_test(
+        error = "0 is outside the valid range for parameter \"theodb_hnsw.ef_search\" (1 .. 1000)"
+    )]
     fn ef_search_zero_rejected_at_guc_boundary() {
         pgrx::Spi::run("SET theodb_hnsw.ef_search = 0").unwrap();
     }
@@ -520,19 +690,29 @@ mod tests {
             let (a, b, c, d) = (i as f32, (i % 7) as f32, (i % 5) as f32, i as f32 * 0.1);
             pgrx::Spi::run(&format!("INSERT INTO rs VALUES ({i}, '[{a},{b},{c},{d}]')")).unwrap();
         }
-        pgrx::Spi::run("CREATE INDEX rs_idx ON rs USING theodb_hnsw (e) WITH (sbq_bits = 4)").unwrap();
+        pgrx::Spi::run("CREATE INDEX rs_idx ON rs USING theodb_hnsw (e) WITH (sbq_bits = 4)")
+            .unwrap();
         pgrx::Spi::run("SET theodb_hnsw.ef_search = 200").unwrap();
         let probe = "[3.3,1.1,2.2,0.4]";
-        pgrx::Spi::run("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on").unwrap();
+        pgrx::Spi::run(
+            "SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on",
+        )
+        .unwrap();
         let exact = topk_ids_tbl("rs", probe, 5);
-        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        pgrx::Spi::run(
+            "SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on",
+        )
+        .unwrap();
         let mut via_index = topk_ids_tbl("rs", probe, 5);
         assert!(!via_index.is_empty(), "the SBQ-built index must be scannable (reloption wired)");
         let (mut si, mut se) = (via_index.clone(), exact.clone());
         si.sort_unstable();
         se.sort_unstable();
         via_index.sort_unstable();
-        assert_eq!(si, se, "SBQ v2 index top-5 must equal exact top-5 (codes present don't corrupt f32 scoring)");
+        assert_eq!(
+            si, se,
+            "SBQ v2 index top-5 must equal exact top-5 (codes present don't corrupt f32 scoring)"
+        );
     }
 
     /// M51 T3.1 recall gate: on a corpus where the Hamming walk does NOT cover everything (walk_ef < node_count),
@@ -551,13 +731,20 @@ mod tests {
                 .collect();
             pgrx::Spi::run(&format!("INSERT INTO rq VALUES ({i}, '[{}]')", v.join(","))).unwrap();
         }
-        pgrx::Spi::run("CREATE INDEX rq_idx ON rq USING theodb_hnsw (e) WITH (sbq_bits = 2)").unwrap();
+        pgrx::Spi::run("CREATE INDEX rq_idx ON rq USING theodb_hnsw (e) WITH (sbq_bits = 2)")
+            .unwrap();
         // walk_ef = ef_search * over_fetch = 50 * 6 = 300 < 400 → navigation + rerank genuinely tested.
         pgrx::Spi::run("SET theodb_hnsw.ef_search = 50; SET theodb_hnsw.over_fetch = 6").unwrap();
         let probe = "[40,41,42,40,41,42,40,41,42,40,41,42,40,41,42,40]";
-        pgrx::Spi::run("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on").unwrap();
+        pgrx::Spi::run(
+            "SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on",
+        )
+        .unwrap();
         let exact = topk_ids_tbl("rq", probe, 10);
-        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        pgrx::Spi::run(
+            "SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on",
+        )
+        .unwrap();
         let via_index = topk_ids_tbl("rq", probe, 10);
         let hits = via_index.iter().filter(|id| exact.contains(id)).count();
         let recall = hits as f64 / exact.len().max(1) as f64;
@@ -570,9 +757,13 @@ mod tests {
 
     #[cfg(any(test, feature = "pg_test"))]
     fn filtered_topk(tbl: &str, filter: &str, q: &str, k: i64) -> Vec<i32> {
-        let sql = format!("SELECT id FROM {tbl} WHERE {filter} ORDER BY e <-> '{q}'::vector LIMIT {k}");
+        let sql =
+            format!("SELECT id FROM {tbl} WHERE {filter} ORDER BY e <-> '{q}'::vector LIMIT {k}");
         pgrx::Spi::connect(|c| {
-            c.select(&sql, None, &[]).unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect::<Vec<i32>>()
+            c.select(&sql, None, &[])
+                .unwrap()
+                .filter_map(|r| r.get::<i32>(1).unwrap())
+                .collect::<Vec<i32>>()
         })
     }
 
@@ -585,19 +776,32 @@ mod tests {
         for i in 0..500i32 {
             let cat = i % 100; // `WHERE cat = 7` selects ~5 rows (~1% selectivity)
             let v: Vec<String> = (0..8)
-                .map(|j| format!("{:.3}", i as f32 * 0.1 + j as f32 + ((i * 7 + j) % 13) as f32 * 0.2))
+                .map(|j| {
+                    format!("{:.3}", i as f32 * 0.1 + j as f32 + ((i * 7 + j) % 13) as f32 * 0.2)
+                })
                 .collect();
-            pgrx::Spi::run(&format!("INSERT INTO ft VALUES ({i}, {cat}, '[{}]')", v.join(","))).unwrap();
+            pgrx::Spi::run(&format!("INSERT INTO ft VALUES ({i}, {cat}, '[{}]')", v.join(",")))
+                .unwrap();
         }
         pgrx::Spi::run("CREATE INDEX ft_idx ON ft USING theodb_hnsw (e)").unwrap();
-        pgrx::Spi::run("SET theodb_hnsw.ef_search = 40; SET theodb_hnsw.max_scan_tuples = 20000").unwrap();
+        pgrx::Spi::run("SET theodb_hnsw.ef_search = 40; SET theodb_hnsw.max_scan_tuples = 20000")
+            .unwrap();
         let probe = "[20,21,22,23,24,25,26,27]";
-        pgrx::Spi::run("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on").unwrap();
+        pgrx::Spi::run(
+            "SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on",
+        )
+        .unwrap();
         let exact = filtered_topk("ft", "cat = 7", probe, 3);
-        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        pgrx::Spi::run(
+            "SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on",
+        )
+        .unwrap();
         let via_index = filtered_topk("ft", "cat = 7", probe, 3);
         assert!(!exact.is_empty(), "the filtered oracle must return rows (test setup)");
-        assert!(!via_index.is_empty(), "the filtered index scan must return results (iterative scan)");
+        assert!(
+            !via_index.is_empty(),
+            "the filtered index scan must return results (iterative scan)"
+        );
         let hits = via_index.iter().filter(|id| exact.contains(id)).count();
         assert_eq!(
             hits,
@@ -624,8 +828,12 @@ mod tests {
             .unwrap();
         }
         pgrx::Spi::run("CREATE INDEX fo_idx ON fo USING theodb_hnsw (e)").unwrap();
-        pgrx::Spi::run("SET theodb_hnsw.ef_search = 10; SET theodb_hnsw.max_scan_tuples = 0").unwrap();
-        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        pgrx::Spi::run("SET theodb_hnsw.ef_search = 10; SET theodb_hnsw.max_scan_tuples = 0")
+            .unwrap();
+        pgrx::Spi::run(
+            "SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on",
+        )
+        .unwrap();
         let got = filtered_topk("fo", "cat = 3", "[5,1,2,0.5]", 3);
         assert!(got.len() <= 3, "OFF path returns at most k, no infinite loop (got {})", got.len());
     }
@@ -635,10 +843,8 @@ mod tests {
     /// (every returned id satisfies `cat = 1`) and the language param is honored (no error with 'simple').
     #[pgrx::pg_test]
     fn hybrid_search_accepts_filter_and_language() {
-        pgrx::Spi::run(
-            "CREATE TEMP TABLE hy (id int, cat int, tsv tsvector, emb vector(3))",
-        )
-        .unwrap();
+        pgrx::Spi::run("CREATE TEMP TABLE hy (id int, cat int, tsv tsvector, emb vector(3))")
+            .unwrap();
         for i in 0..20i32 {
             let cat = i % 2; // half cat=0, half cat=1
             pgrx::Spi::run(&format!(
@@ -661,7 +867,10 @@ mod tests {
             .collect()
         });
         assert!(!ids.is_empty(), "filtered hybrid search must return the cat=1 rows");
-        assert!(ids.iter().all(|id| id % 2 == 1), "every fused id must satisfy filter_sql cat=1, got {ids:?}");
+        assert!(
+            ids.iter().all(|id| id % 2 == 1),
+            "every fused id must satisfy filter_sql cat=1, got {ids:?}"
+        );
         // language => 'simple' : must not error (item 4 — parametrizable regconfig).
         let n: Option<i64> = pgrx::Spi::get_one(
             "SELECT count(*) FROM ai.hybrid_search_rrf(tbl => 'hy', id_col => 'id', \
@@ -675,7 +884,9 @@ mod tests {
     /// M53 item 1 negative case (Rule 8): a filter_sql containing a statement terminator is rejected. The
     /// guard is syntactic confinement (blacklist), NOT injection-proofing — a read-only subquery still
     /// composes with the caller's own privileges by design (see the hybrid.rs module docstring).
-    #[pgrx::pg_test(error = "ai.hybrid_search_rrf: filter_sql must be a single boolean predicate (no ';', comment, or chaining) — it is raw caller-privilege SQL, never build it from untrusted input")]
+    #[pgrx::pg_test(
+        error = "ai.hybrid_search_rrf: filter_sql must be a single boolean predicate (no ';', comment, or chaining) — it is raw caller-privilege SQL, never build it from untrusted input"
+    )]
     fn hybrid_filter_rejects_statement_terminator() {
         pgrx::Spi::run("CREATE TEMP TABLE hz (id int, tsv tsvector, emb vector(2))").unwrap();
         pgrx::Spi::run("INSERT INTO hz VALUES (1, to_tsvector('a'), '[1,2]')").unwrap();
@@ -689,7 +900,9 @@ mod tests {
     /// M53 security hardening (council-security F1): the confinement guard also rejects SQL comment
     /// sequences (`--`), so the predicate cannot comment out the closing paren / trailing clauses to break
     /// out of `( ... )`. Defense-in-depth on the SECURITY INVOKER path (does not claim full parse safety).
-    #[pgrx::pg_test(error = "ai.hybrid_search_rrf: filter_sql must be a single boolean predicate (no ';', comment, or chaining) — it is raw caller-privilege SQL, never build it from untrusted input")]
+    #[pgrx::pg_test(
+        error = "ai.hybrid_search_rrf: filter_sql must be a single boolean predicate (no ';', comment, or chaining) — it is raw caller-privilege SQL, never build it from untrusted input"
+    )]
     fn hybrid_filter_rejects_sql_comment() {
         pgrx::Spi::run("CREATE TEMP TABLE hz (id int, tsv tsvector, emb vector(2))").unwrap();
         pgrx::Spi::run("INSERT INTO hz VALUES (1, to_tsvector('a'), '[1,2]')").unwrap();
@@ -702,7 +915,9 @@ mod tests {
 
     /// M53 item 2 negative case (Rule 8): lexical_engine='bm25' without content_text_col fails fast (typed
     /// 22023) — the BM25 leg operates on a raw TEXT column, not the tsvector, so the column is required.
-    #[pgrx::pg_test(error = "ai.hybrid_search_rrf: lexical_engine='bm25' requires content_text_col (the TEXT column indexed USING bm25)")]
+    #[pgrx::pg_test(
+        error = "ai.hybrid_search_rrf: lexical_engine='bm25' requires content_text_col (the TEXT column indexed USING bm25)"
+    )]
     fn hybrid_bm25_without_text_col_errors() {
         pgrx::Spi::run("CREATE TEMP TABLE hz (id int, tsv tsvector, emb vector(2))").unwrap();
         pgrx::Spi::run(
@@ -714,7 +929,9 @@ mod tests {
 
     /// M53 item 2 negative case (Rule 8): an invalid lexical_engine value fails fast (typed 22023) naming the
     /// valid values — NO silent fallback to ts_rank_cd (that would let a caller measure the wrong engine).
-    #[pgrx::pg_test(error = "ai.hybrid_search_rrf: lexical_engine must be 'ts_rank_cd' or 'bm25' (got 'okapi')")]
+    #[pgrx::pg_test(
+        error = "ai.hybrid_search_rrf: lexical_engine must be 'ts_rank_cd' or 'bm25' (got 'okapi')"
+    )]
     fn hybrid_invalid_lexical_engine_errors() {
         pgrx::Spi::run("CREATE TEMP TABLE hz (id int, tsv tsvector, emb vector(2))").unwrap();
         pgrx::Spi::run(
@@ -727,7 +944,9 @@ mod tests {
     /// M53 item 2 packaging gate: on the shipped image (no pg_textsearch), lexical_engine='bm25' surfaces a
     /// clear 0A000 (feature_not_supported) rather than a cryptic 42883 mid-query. The pgrx test instance has
     /// no pg_textsearch, so this exercises the gate directly (mirrors the embed-seam guard).
-    #[pgrx::pg_test(error = "ai.hybrid_search_rrf: lexical_engine='bm25' requires the pg_textsearch extension (CREATE EXTENSION pg_textsearch, shared_preload_libraries=pg_textsearch) — not present on the shipped image; use lexical_engine='ts_rank_cd' (default)")]
+    #[pgrx::pg_test(
+        error = "ai.hybrid_search_rrf: lexical_engine='bm25' requires the pg_textsearch extension (CREATE EXTENSION pg_textsearch, shared_preload_libraries=pg_textsearch) — not present on the shipped image; use lexical_engine='ts_rank_cd' (default)"
+    )]
     fn hybrid_bm25_without_extension_raises_unsupported() {
         pgrx::Spi::run("CREATE TEMP TABLE hz (id int, body text, emb vector(2))").unwrap();
         pgrx::Spi::run(
@@ -741,9 +960,10 @@ mod tests {
     /// M56: decode the heap `ctid` of a row into the i64 the index packs (`(block << 16) | offset`, per
     /// `crate::am::tid::encode`), so a test can name specific on-disk nodes for the tombstone sweep.
     fn heap_tid_i64(tbl: &str, id: i32) -> i64 {
-        let txt: String = pgrx::Spi::get_one(&format!("SELECT ctid::text FROM {tbl} WHERE id = {id}"))
-            .unwrap()
-            .expect("row exists");
+        let txt: String =
+            pgrx::Spi::get_one(&format!("SELECT ctid::text FROM {tbl} WHERE id = {id}"))
+                .unwrap()
+                .expect("row exists");
         // ctid text form is "(block,offset)".
         let inner = txt.trim_start_matches('(').trim_end_matches(')');
         let (b, o) = inner.split_once(',').expect("ctid has block,offset");
@@ -776,9 +996,15 @@ mod tests {
 
         let probe = "[3.3,1.1,2.2,0.4]";
         // Exact oracle over the full live set (seqscan): top-7 tells us the 2 victims AND the post-sweep truth.
-        pgrx::Spi::run("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on").unwrap();
+        pgrx::Spi::run(
+            "SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on",
+        )
+        .unwrap();
         let exact_full = topk_ids_tbl("tz", probe, 7);
-        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        pgrx::Spi::run(
+            "SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on",
+        )
+        .unwrap();
         let before = topk_ids_tbl("tz", probe, 5);
         assert_eq!(before.len(), 5, "index returns 5 results before any tombstone");
 
@@ -794,7 +1020,10 @@ mod tests {
             let swept = tombstone_sweep(rel, &meta, &mut is_dead);
             let counted = count_tombstones(rel, &meta);
             pg_sys::index_close(rel, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
-            assert_eq!(swept, 2, "sweep tombstones exactly the 2 dead nodes in place (per-page WAL, no rebuild)");
+            assert_eq!(
+                swept, 2,
+                "sweep tombstones exactly the 2 dead nodes in place (per-page WAL, no rebuild)"
+            );
             assert_eq!(counted, 2, "count_tombstones sees exactly the 2 on-page marks");
         }
 
@@ -802,16 +1031,27 @@ mod tests {
         // navigated THROUGH the 2 tombstones (their arcs preserved connectivity, so the graph is not severed).
         let after = topk_ids_tbl("tz", probe, 5);
         for v in &victims {
-            assert!(!after.contains(v), "tombstoned node {v} is filtered (heap row still live → only the emittable filter can drop it)");
+            assert!(
+                !after.contains(v),
+                "tombstoned node {v} is filtered (heap row still live → only the emittable filter can drop it)"
+            );
         }
-        assert_eq!(after.len(), 5, "scan navigates through tombstones and still returns 5 live results (graph not disconnected)");
+        assert_eq!(
+            after.len(),
+            5,
+            "scan navigates through tombstones and still returns 5 live results (graph not disconnected)"
+        );
 
         // Recall preserved: post-sweep index top-5 == exact top-5 of (live set minus the 2 victims).
-        let mut oracle: Vec<i32> = exact_full.into_iter().filter(|id| !victims.contains(id)).take(5).collect();
+        let mut oracle: Vec<i32> =
+            exact_full.into_iter().filter(|id| !victims.contains(id)).take(5).collect();
         let mut got = after.clone();
         oracle.sort_unstable();
         got.sort_unstable();
-        assert_eq!(got, oracle, "navigate-through-don't-emit preserves recall: top-5 == exact top-5 of the survivors");
+        assert_eq!(
+            got, oracle,
+            "navigate-through-don't-emit preserves recall: top-5 == exact top-5 of the survivors"
+        );
     }
 
     /// M56: the compaction ratio path — when tombstones exceed `theodb.hnsw_tombstone_compact_pct` of the graph,
@@ -850,21 +1090,33 @@ mod tests {
             let mut dead = |tid: i64| !surviving.contains(&tid);
             let live = crate::am::build::vacuum_delete_inplace(rel, &mut dead);
             pg_sys::index_close(rel, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
-            assert_eq!(live, 20, "vacuum_delete_inplace reports 20 live nodes after compacting away 10");
+            assert_eq!(
+                live, 20,
+                "vacuum_delete_inplace reports 20 live nodes after compacting away 10"
+            );
             // After compaction the tombstones are physically GONE (reclaimed), not merely flagged.
             let rel2 = pg_sys::index_open(oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
             let meta2 = read_meta(rel2).expect("read_meta after compaction");
             let remaining = count_tombstones(rel2, &meta2);
             assert_eq!(meta2.node_count, 20, "compacted graph has exactly the 20 surviving nodes");
-            assert_eq!(remaining, 0, "compaction reclaimed the tombstones (0 left in the physical layout)");
+            assert_eq!(
+                remaining, 0,
+                "compaction reclaimed the tombstones (0 left in the physical layout)"
+            );
             pg_sys::index_close(rel2, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
         }
 
         // The compacted index still scans correctly against the surviving live set.
         let probe = "[13.3,1.1,2.2,1.4]"; // near ids in the surviving 10..30 range
-        pgrx::Spi::run("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on").unwrap();
+        pgrx::Spi::run(
+            "SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on",
+        )
+        .unwrap();
         let exact = topk_ids_tbl("tc", probe, 5);
-        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        pgrx::Spi::run(
+            "SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on",
+        )
+        .unwrap();
         let mut via_index = topk_ids_tbl("tc", probe, 5);
         assert!(via_index.iter().all(|id| *id >= 10), "no compacted-away node leaks into results");
         let (mut si, mut se) = (via_index.clone(), exact.clone());
@@ -897,7 +1149,8 @@ mod tests {
         let dead_tids: Vec<i64> = (0..80i32).map(|id| heap_tid_i64("rc2", id)).collect();
         pgrx::Spi::run("DELETE FROM rc2 WHERE id < 80").unwrap();
         unsafe {
-            let oid: pg_sys::Oid = pgrx::Spi::get_one("SELECT 'rc2_idx'::regclass::oid").unwrap().expect("oid");
+            let oid: pg_sys::Oid =
+                pgrx::Spi::get_one("SELECT 'rc2_idx'::regclass::oid").unwrap().expect("oid");
             let rel = pg_sys::index_open(oid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
             let meta = read_meta(rel).expect("read_meta");
             let mut is_dead = |tid: i64| dead_tids.contains(&tid);
@@ -910,11 +1163,19 @@ mod tests {
         let probe_ids = [100, 150, 200, 250, 300, 350];
         let mut total_recall = 0.0f64;
         for &pid in &probe_ids {
-            let probe: String = pgrx::Spi::get_one(&format!("SELECT e::text FROM rc2 WHERE id = {pid}"))
-                .unwrap().expect("survivor vector");
-            pgrx::Spi::run("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on").unwrap();
+            let probe: String =
+                pgrx::Spi::get_one(&format!("SELECT e::text FROM rc2 WHERE id = {pid}"))
+                    .unwrap()
+                    .expect("survivor vector");
+            pgrx::Spi::run(
+                "SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on",
+            )
+            .unwrap();
             let exact = topk_ids_tbl("rc2", &probe, 10);
-            pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+            pgrx::Spi::run(
+                "SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on",
+            )
+            .unwrap();
             let via_index = topk_ids_tbl("rc2", &probe, 10);
             let hits = via_index.iter().filter(|id| exact.contains(id)).count();
             total_recall += hits as f64 / exact.len().max(1) as f64;
@@ -941,16 +1202,26 @@ mod tests {
         // level EXACTLY and skips the entry).
         let dead: Vec<i64> = (0..12i32).map(|id| heap_tid_i64("fr", id)).collect();
         unsafe {
-            let oid: pg_sys::Oid = pgrx::Spi::get_one("SELECT 'fr_idx'::regclass::oid").unwrap().expect("oid");
+            let oid: pg_sys::Oid =
+                pgrx::Spi::get_one("SELECT 'fr_idx'::regclass::oid").unwrap().expect("oid");
             let rel = pg_sys::index_open(oid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
             let meta = read_meta(rel).expect("read_meta");
-            assert!(find_reusable_slot(rel, &meta, 0).is_none(), "no tombstones ⇒ no reusable slot");
+            assert!(
+                find_reusable_slot(rel, &meta, 0).is_none(),
+                "no tombstones ⇒ no reusable slot"
+            );
             let mut is_dead = |tid: i64| dead.contains(&tid);
             assert_eq!(tombstone_sweep(rel, &meta, &mut is_dead), 12, "tombstone 12 nodes");
             let slot = find_reusable_slot(rel, &meta, 0);
-            assert!(slot.is_some(), "a level-0 non-entry reusable slot exists among the 12 tombstones");
+            assert!(
+                slot.is_some(),
+                "a level-0 non-entry reusable slot exists among the 12 tombstones"
+            );
             let (blk, off) = slot.unwrap();
-            assert!((blk, off) != (meta.entry_blkno, meta.entry_offno), "never returns the entry slot");
+            assert!(
+                (blk, off) != (meta.entry_blkno, meta.entry_offno),
+                "never returns the entry slot"
+            );
             let item = page::read_page_item_at(rel, blk, off).expect("read slot");
             let ev = decode_element(&item).unwrap();
             assert!(ev.deleted && ev.level == 0, "the found slot is a level-0 tombstone");
@@ -971,7 +1242,8 @@ mod tests {
         pgrx::Spi::run("CREATE INDEX wr_idx ON wr USING theodb_hnsw (e)").unwrap();
         let dead_tid = heap_tid_i64("wr", 7);
         unsafe {
-            let oid: pg_sys::Oid = pgrx::Spi::get_one("SELECT 'wr_idx'::regclass::oid").unwrap().expect("oid");
+            let oid: pg_sys::Oid =
+                pgrx::Spi::get_one("SELECT 'wr_idx'::regclass::oid").unwrap().expect("oid");
             let rel = pg_sys::index_open(oid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
             let meta = read_meta(rel).expect("read_meta");
             let mut is_dead = |t: i64| t == dead_tid;
@@ -989,8 +1261,16 @@ mod tests {
             assert!(!after.deleted, "revived slot is live");
             assert_eq!(after.tid, 424242, "new tid written");
             assert_eq!(after.version, ver.wrapping_add(1), "version bumped");
-            assert_eq!((after.level, after.nbr_addr), (lvl, nbr), "graph position (level + nbr slot) preserved");
-            assert_eq!(f32::from_le_bytes(after.vec_bytes[0..4].try_into().unwrap()), 9.0, "new vector written");
+            assert_eq!(
+                (after.level, after.nbr_addr),
+                (lvl, nbr),
+                "graph position (level + nbr slot) preserved"
+            );
+            assert_eq!(
+                f32::from_le_bytes(after.vec_bytes[0..4].try_into().unwrap()),
+                9.0,
+                "new vector written"
+            );
             pg_sys::index_close(rel, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
         }
     }
@@ -1006,7 +1286,8 @@ mod tests {
         }
         pgrx::Spi::run("CREATE INDEX sg_idx ON sg USING theodb_hnsw (e)").unwrap();
         unsafe {
-            let oid: pg_sys::Oid = pgrx::Spi::get_one("SELECT 'sg_idx'::regclass::oid").unwrap().expect("oid");
+            let oid: pg_sys::Oid =
+                pgrx::Spi::get_one("SELECT 'sg_idx'::regclass::oid").unwrap().expect("oid");
             let rel = pg_sys::index_open(oid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
             let meta = read_meta(rel).expect("read_meta");
             let (m, m0) = (meta.m as usize, meta.m0 as usize);
@@ -1015,10 +1296,16 @@ mod tests {
             let ev = decode_element(&ebytes).unwrap();
             let (lvl, nbr) = (ev.level as usize, ev.nbr_addr);
             let wanted: Vec<Addr> = vec![(meta.elem_first, 3), (meta.elem_first, 5)];
-            assert!(set_ground_neighbors_inplace(rel, nbr, lvl, m, m0, &wanted), "write ground slots");
+            assert!(
+                set_ground_neighbors_inplace(rel, nbr, lvl, m, m0, &wanted),
+                "write ground slots"
+            );
             let nbytes = page::read_page_item_at(rel, nbr.0, nbr.1).unwrap();
             let got = decode_neighbors(&nbytes, lvl, 0, m, m0).unwrap();
-            assert_eq!(got, wanted, "ground slots round-trip through decode_neighbors (empties padded, dropped)");
+            assert_eq!(
+                got, wanted,
+                "ground slots round-trip through decode_neighbors (empties padded, dropped)"
+            );
             pg_sys::index_close(rel, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
         }
     }
@@ -1033,11 +1320,16 @@ mod tests {
             pgrx::Spi::run(&format!("INSERT INTO ins VALUES ({i}, '[{a},{b},{c},{d}]')")).unwrap();
         }
         pgrx::Spi::run("CREATE INDEX ins_idx ON ins USING theodb_hnsw (e)").unwrap();
-        let qtext: String = pgrx::Spi::get_one("SELECT e::text FROM ins WHERE id = 12").unwrap().expect("vec");
-        let qv: Vec<f32> = qtext.trim_matches(|c| c == '[' || c == ']')
-            .split(',').map(|s| s.trim().parse().unwrap()).collect();
+        let qtext: String =
+            pgrx::Spi::get_one("SELECT e::text FROM ins WHERE id = 12").unwrap().expect("vec");
+        let qv: Vec<f32> = qtext
+            .trim_matches(|c| c == '[' || c == ']')
+            .split(',')
+            .map(|s| s.trim().parse().unwrap())
+            .collect();
         unsafe {
-            let oid: pg_sys::Oid = pgrx::Spi::get_one("SELECT 'ins_idx'::regclass::oid").unwrap().expect("oid");
+            let oid: pg_sys::Oid =
+                pgrx::Spi::get_one("SELECT 'ins_idx'::regclass::oid").unwrap().expect("oid");
             let rel = pg_sys::index_open(oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
             let meta = read_meta(rel).expect("read_meta");
             let cands = insert_search_ground(rel, &meta, &qv, 100).expect("insert search");
@@ -1078,7 +1370,8 @@ mod tests {
         // Tombstone 12 index slots (ids 0..12) via the FFI sweep — the post-DELETE/VACUUM state.
         let dead: Vec<i64> = (0..12i32).map(|id| heap_tid_i64("re", id)).collect();
         let before = unsafe {
-            let oid: pg_sys::Oid = pgrx::Spi::get_one("SELECT 're_idx'::regclass::oid").unwrap().expect("oid");
+            let oid: pg_sys::Oid =
+                pgrx::Spi::get_one("SELECT 're_idx'::regclass::oid").unwrap().expect("oid");
             let rel = pg_sys::index_open(oid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
             let meta = read_meta(rel).expect("read_meta");
             let mut is_dead = |t: i64| dead.contains(&t);
@@ -1093,27 +1386,40 @@ mod tests {
         // to pending). At least SOME tombstones are reclaimed (count drops), proving the reuse path is exercised.
         for i in 0..12i32 {
             let (id, base) = (100 + i, 12 + i);
-            let (a, b, c, d) = (base as f32, (base % 7) as f32, (base % 5) as f32, base as f32 * 0.1 + 0.01);
+            let (a, b, c, d) =
+                (base as f32, (base % 7) as f32, (base % 5) as f32, base as f32 * 0.1 + 0.01);
             pgrx::Spi::run(&format!("INSERT INTO re VALUES ({id}, '[{a},{b},{c},{d}]')")).unwrap();
         }
         let after = unsafe {
-            let oid: pg_sys::Oid = pgrx::Spi::get_one("SELECT 're_idx'::regclass::oid").unwrap().expect("oid");
+            let oid: pg_sys::Oid =
+                pgrx::Spi::get_one("SELECT 're_idx'::regclass::oid").unwrap().expect("oid");
             let rel = pg_sys::index_open(oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
             let meta = read_meta(rel).expect("read_meta");
             let c = count_tombstones(rel, &meta);
             pg_sys::index_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
             c
         };
-        assert!(after < before, "some tombstones were REUSED by the inserts (count {after} < {before})");
+        assert!(
+            after < before,
+            "some tombstones were REUSED by the inserts (count {after} < {before})"
+        );
 
         // Each new row is found by an index scan on its own vector (reused → linked in the graph; non-reused →
         // pending, scanned brute-force). Either way the in-place insert (or pending fallback) keeps it findable.
-        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        pgrx::Spi::run(
+            "SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on",
+        )
+        .unwrap();
         for i in 0..12i32 {
             let id = 100 + i;
-            let q: String = pgrx::Spi::get_one(&format!("SELECT e::text FROM re WHERE id = {id}")).unwrap().unwrap();
+            let q: String = pgrx::Spi::get_one(&format!("SELECT e::text FROM re WHERE id = {id}"))
+                .unwrap()
+                .unwrap();
             let got = topk_ids_tbl("re", &q, 1);
-            assert!(got.contains(&id), "new row {id} is found by the index scan on its own vector (got {got:?})");
+            assert!(
+                got.contains(&id),
+                "new row {id} is found by the index scan on its own vector (got {got:?})"
+            );
         }
     }
 
@@ -1123,14 +1429,16 @@ mod tests {
     /// genuinely exercised (walk_ef < n at moderate ef), divisible by the AQ subspace counts used (m ∈ {2,4}).
     #[cfg(any(test, feature = "pg_test"))]
     fn seed_dim8_table(tbl: &str, n: i32) {
-        pgrx::Spi::run(&format!("CREATE TEMP TABLE {tbl} (id int PRIMARY KEY, e vector(8))")).unwrap();
+        pgrx::Spi::run(&format!("CREATE TEMP TABLE {tbl} (id int PRIMARY KEY, e vector(8))"))
+            .unwrap();
         for i in 0..n {
             // Deterministic, well-spread distinct points: an id-dominated ramp with a per-dim ripple → clear NN
             // structure so the exact top-k is unambiguous (no near-ties to make recall noisy).
             let v: Vec<String> = (0..8)
                 .map(|j| format!("{:.3}", i as f32 * 0.5 + ((i * 7 + j * 13) % 29) as f32 * 0.3))
                 .collect();
-            pgrx::Spi::run(&format!("INSERT INTO {tbl} VALUES ({}, '[{}]')", i + 1, v.join(","))).unwrap();
+            pgrx::Spi::run(&format!("INSERT INTO {tbl} VALUES ({}, '[{}]')", i + 1, v.join(",")))
+                .unwrap();
         }
     }
 
@@ -1147,9 +1455,15 @@ mod tests {
         // walk_ef = ef_search * over_fetch = 50 * 6 = 300 = n → the AH walk + rerank is genuinely tested.
         pgrx::Spi::run("SET theodb_hnsw.ef_search = 50; SET theodb_hnsw.over_fetch = 6").unwrap();
         let probe = "[40,41,42,40,41,42,40,41]";
-        pgrx::Spi::run("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on").unwrap();
+        pgrx::Spi::run(
+            "SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on",
+        )
+        .unwrap();
         let exact = topk_ids_tbl("aqs", probe, 10);
-        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        pgrx::Spi::run(
+            "SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on",
+        )
+        .unwrap();
         let via_index = topk_ids_tbl("aqs", probe, 10);
         let hits = via_index.iter().filter(|id| exact.contains(id)).count();
         let recall = hits as f64 / exact.len().max(1) as f64;
@@ -1170,7 +1484,16 @@ mod tests {
         let corpus: Vec<Vec<f32>> = (0..16)
             .map(|i| {
                 let f = i as f32;
-                vec![f, (i % 7) as f32, (i % 5) as f32, (i % 3) as f32, f * 0.1, (i % 11) as f32, (i % 2) as f32, f * 0.5]
+                vec![
+                    f,
+                    (i % 7) as f32,
+                    (i % 5) as f32,
+                    (i % 3) as f32,
+                    f * 0.1,
+                    (i % 11) as f32,
+                    (i % 2) as f32,
+                    f * 0.5,
+                ]
             })
             .collect();
         let quant = crate::vec::aq::AqQuantizer::train(&corpus, 4, 4, 2.0, 7).expect("train");
@@ -1186,7 +1509,10 @@ mod tests {
         // Reproduce the load-branch length check the scan enforces.
         let want = lut.m().div_ceil(2);
         assert_eq!(want, 2, "m=4 wants 2 code bytes");
-        assert!(ev.code_bytes.len() != want, "the truncated code is rejected before ah_score (typed Err path)");
+        assert!(
+            ev.code_bytes.len() != want,
+            "the truncated code is rejected before ah_score (typed Err path)"
+        );
     }
 
     /// T4.1 wiring-triad runtime metric: a v3 scan's `pages_read` stays O(ef·M) — flat in N (it does NOT read
@@ -1197,13 +1523,21 @@ mod tests {
     #[pgrx::pg_test]
     fn aq_scan_reads_flat_in_n() {
         seed_dim8_table("aqn", 400);
-        pgrx::Spi::run("CREATE INDEX aqn_idx ON aqn USING theodb_hnsw (e) WITH (pq_subspaces = 4)").unwrap();
+        pgrx::Spi::run("CREATE INDEX aqn_idx ON aqn USING theodb_hnsw (e) WITH (pq_subspaces = 4)")
+            .unwrap();
         pgrx::Spi::run("SET theodb_hnsw.ef_search = 40; SET theodb_hnsw.over_fetch = 4").unwrap();
-        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        pgrx::Spi::run(
+            "SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on",
+        )
+        .unwrap();
         let probe = "[10,11,12,10,11,12,10,11]";
         // The v3 index scan returns a bounded top-k — the AH walk visits O(ef·M) nodes, NOT all 400 rows.
         let got = topk_ids_tbl("aqn", probe, 10);
-        assert_eq!(got.len(), 10, "v3 scan returns exactly the requested top-10 (bounded ef·M work, flat in N)");
+        assert_eq!(
+            got.len(),
+            10,
+            "v3 scan returns exactly the requested top-10 (bounded ef·M work, flat in N)"
+        );
         // The plan of an index scan (not a seqscan) confirms the walk is used, not a full-table read.
         let plan: Vec<String> = pgrx::Spi::connect(|c| {
             c.select("EXPLAIN SELECT id FROM aqn ORDER BY e <-> '[10,11,12,10,11,12,10,11]'::vector LIMIT 10", None, &[])
@@ -1212,7 +1546,9 @@ mod tests {
                 .collect()
         });
         assert!(
-            plan.iter().any(|l| l.contains("Index Scan") || l.contains("theodb_hnsw") || l.contains("aqn_idx")),
+            plan.iter().any(|l| l.contains("Index Scan")
+                || l.contains("theodb_hnsw")
+                || l.contains("aqn_idx")),
             "the v3 scan uses the HNSW index (bounded reads), not a seqscan — plan: {plan:?}"
         );
     }
@@ -1244,14 +1580,18 @@ mod tests {
     /// cosine index. Small n so the exact O(n·m) GT is cheap. Mirrors `seed_dim8_table` but with the `emb`
     /// column name + an explicit cosine opclass (the `<=>` operator is what the M63 join uses).
     fn seed_vjoin_table(tbl: &str, n: i32) {
-        pgrx::Spi::run(&format!("CREATE TEMP TABLE {tbl} (id int PRIMARY KEY, emb vector(8))")).unwrap();
+        pgrx::Spi::run(&format!("CREATE TEMP TABLE {tbl} (id int PRIMARY KEY, emb vector(8))"))
+            .unwrap();
         for i in 0..n {
             // 5 tight clusters → real NN structure (avoids ANN-degenerate uniform data, ADR 0012 lesson).
             let center = (i % 5) as f32;
             let v: Vec<String> = (0..8)
-                .map(|j| format!("{:.3}", 1.0 + center + 0.02 * (((i * 7 + j * 3) % 11) as f32 - 5.0)))
+                .map(|j| {
+                    format!("{:.3}", 1.0 + center + 0.02 * (((i * 7 + j * 3) % 11) as f32 - 5.0))
+                })
                 .collect();
-            pgrx::Spi::run(&format!("INSERT INTO {tbl} VALUES ({i}, '[{}]')", v.join(","))).unwrap();
+            pgrx::Spi::run(&format!("INSERT INTO {tbl} VALUES ({i}, '[{}]')", v.join(",")))
+                .unwrap();
         }
         pgrx::Spi::run(&format!(
             "CREATE INDEX {tbl}_idx ON {tbl} USING theodb_hnsw (emb theodb_hnsw_cosine_ops)"
@@ -1261,10 +1601,16 @@ mod tests {
 
     /// Exact per-row top-k of `b` for a single outer probe vector (seqscan brute force = the recall oracle).
     fn vjoin_exact_topk(tbl: &str, probe: &str, k: i64) -> Vec<i32> {
-        pgrx::Spi::run("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on").unwrap();
+        pgrx::Spi::run(
+            "SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on",
+        )
+        .unwrap();
         let sql = format!("SELECT id FROM {tbl} ORDER BY emb <=> '{probe}'::vector LIMIT {k}");
         pgrx::Spi::connect(|c| {
-            c.select(&sql, None, &[]).unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect::<Vec<i32>>()
+            c.select(&sql, None, &[])
+                .unwrap()
+                .filter_map(|r| r.get::<i32>(1).unwrap())
+                .collect::<Vec<i32>>()
         })
     }
 
@@ -1278,7 +1624,10 @@ mod tests {
         seed_vjoin_table("vjb", 50);
         // Force the planner toward the index (parity with the M52 tests) so the assertion measures the
         // AM's capability, not a cost-model tie-break on a tiny table.
-        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        pgrx::Spi::run(
+            "SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on",
+        )
+        .unwrap();
         pgrx::Spi::run("SET theodb_hnsw.ef_search = 40").unwrap();
 
         // Oracle: the inner branch of the LATERAL must be `Index Scan using <idx> on ... vjb` — the
@@ -1338,11 +1687,17 @@ mod tests {
         let mut recalls: Vec<f64> = Vec::new();
         for probe in &probes {
             let exact = vjoin_exact_topk("vrb", probe, K);
-            pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on")
-                .unwrap();
-            let ann_sql = format!("SELECT id FROM vrb ORDER BY emb <=> '{probe}'::vector LIMIT {K}");
+            pgrx::Spi::run(
+                "SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on",
+            )
+            .unwrap();
+            let ann_sql =
+                format!("SELECT id FROM vrb ORDER BY emb <=> '{probe}'::vector LIMIT {K}");
             let ann: Vec<i32> = pgrx::Spi::connect(|c| {
-                c.select(&ann_sql, None, &[]).unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
+                c.select(&ann_sql, None, &[])
+                    .unwrap()
+                    .filter_map(|r| r.get::<i32>(1).unwrap())
+                    .collect()
             });
             let hits = ann.iter().filter(|id| exact.contains(id)).count();
             recalls.push(hits as f64 / exact.len().max(1) as f64);
@@ -1358,18 +1713,28 @@ mod tests {
         // Edge k=1 (nearest-neighbour join): the single nearest neighbour must match the exact NN.
         let probe0 = &probes[0];
         let exact1 = vjoin_exact_topk("vrb", probe0, 1);
-        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        pgrx::Spi::run(
+            "SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on",
+        )
+        .unwrap();
         let ann1: Vec<i32> = pgrx::Spi::connect(|c| {
-            c.select(&format!("SELECT id FROM vrb ORDER BY emb <=> '{probe0}'::vector LIMIT 1"), None, &[])
-                .unwrap()
-                .filter_map(|r| r.get::<i32>(1).unwrap())
-                .collect()
+            c.select(
+                &format!("SELECT id FROM vrb ORDER BY emb <=> '{probe0}'::vector LIMIT 1"),
+                None,
+                &[],
+            )
+            .unwrap()
+            .filter_map(|r| r.get::<i32>(1).unwrap())
+            .collect()
         });
         assert_eq!(ann1, exact1, "k=1 nearest-neighbour join must equal the exact NN");
 
         // Edge k ≥ |b|: asking for more than the table returns all of b → recall is trivially 1.0.
         let all_n: i64 = pgrx::Spi::get_one("SELECT count(*) FROM vrb").unwrap().unwrap();
-        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        pgrx::Spi::run(
+            "SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on",
+        )
+        .unwrap();
         let ann_all: i64 = pgrx::Spi::get_one(&format!(
             "SELECT count(*) FROM (SELECT id FROM vrb ORDER BY emb <=> '{probe0}'::vector LIMIT {}) s",
             all_n + 10
@@ -1388,7 +1753,10 @@ mod tests {
         seed_vjoin_table("vta", 5);
         seed_vjoin_table("vtb", 40);
         pgrx::Spi::run("SET theodb_hnsw.ef_search = 40").unwrap();
-        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        pgrx::Spi::run(
+            "SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on",
+        )
+        .unwrap();
 
         // Count pairs below τ via the index-served idiom: LATERAL top-k (wide), then outer `WHERE d < τ`.
         let pairs_below = |tau: f64| -> i64 {
@@ -1401,12 +1769,16 @@ mod tests {
         };
         // Same, computed by the exact seqscan oracle (index off) — the ground-truth pair count.
         let exact_below = |tau: f64| -> i64 {
-            pgrx::Spi::run("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on")
-                .unwrap();
+            pgrx::Spi::run(
+                "SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on",
+            )
+            .unwrap();
             let sql = format!("SELECT count(*) FROM vta, vtb WHERE (vtb.emb <=> vta.emb) < {tau}");
             let n = pgrx::Spi::get_one::<i64>(&sql).unwrap().unwrap();
-            pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on")
-                .unwrap();
+            pgrx::Spi::run(
+                "SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on",
+            )
+            .unwrap();
             n
         };
 
@@ -1437,7 +1809,10 @@ mod tests {
     fn vector_join_negative_threshold_returns_empty() {
         seed_vjoin_table("vna", 3);
         seed_vjoin_table("vnb", 20);
-        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        pgrx::Spi::run(
+            "SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on",
+        )
+        .unwrap();
         let n: i64 = pgrx::Spi::get_one(
             "SELECT count(*) FROM vna CROSS JOIN LATERAL \
              (SELECT vnb.id, vnb.emb <=> vna.emb AS d FROM vnb \
@@ -1445,7 +1820,10 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        assert_eq!(n, 0, "negative τ → empty set (vacuous range), the documented raw-SQL contract; no crash");
+        assert_eq!(
+            n, 0,
+            "negative τ → empty set (vacuous range), the documented raw-SQL contract; no crash"
+        );
     }
 
     // ── M64 — RAG-over-SQL unified: the composed reference query preserves recall + read-your-writes ──
@@ -1462,7 +1840,9 @@ mod tests {
             let center = (i % 5) as f32;
             let cat = i % 3; // the relational filter dimension
             let v: Vec<String> = (0..8)
-                .map(|j| format!("{:.3}", 1.0 + center + 0.02 * (((i * 7 + j * 3) % 11) as f32 - 5.0)))
+                .map(|j| {
+                    format!("{:.3}", 1.0 + center + 0.02 * (((i * 7 + j * 3) % 11) as f32 - 5.0))
+                })
                 .collect();
             pgrx::Spi::run(&format!(
                 "INSERT INTO {tbl} VALUES ({i}, {cat}, 'doc-{i}', '[{}]')",
@@ -1485,9 +1865,13 @@ mod tests {
     fn rag_unified_query_preserves_recall() {
         seed_rag_table("rag1", 60);
         pgrx::Spi::run("SET theodb_hnsw.ef_search = 60").unwrap();
-        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        pgrx::Spi::run(
+            "SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on",
+        )
+        .unwrap();
         // The query probe = the emb of row 0 (a real point → a real NN structure to retrieve against).
-        let probe: String = pgrx::Spi::get_one("SELECT emb::text FROM rag1 WHERE id = 0").unwrap().unwrap();
+        let probe: String =
+            pgrx::Spi::get_one("SELECT emb::text FROM rag1 WHERE id = 0").unwrap().unwrap();
         let cat0: i32 = pgrx::Spi::get_one("SELECT cat FROM rag1 WHERE id = 0").unwrap().unwrap();
         const K: i64 = 5;
 
@@ -1510,7 +1894,10 @@ mod tests {
         });
 
         // The exact filtered oracle (seqscan brute force) — the recall ground truth.
-        pgrx::Spi::run("SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on").unwrap();
+        pgrx::Spi::run(
+            "SET enable_indexscan=off; SET enable_bitmapscan=off; SET enable_seqscan=on",
+        )
+        .unwrap();
         let mut oracle_ids: Vec<i32> = pgrx::Spi::connect(|c| {
             c.select(
                 &format!(
@@ -1533,7 +1920,10 @@ mod tests {
 
         // And the context-assembly itself works: string_agg over the retrieved top-k concatenates exactly
         // K docs (the assembly does not lose or duplicate rows).
-        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        pgrx::Spi::run(
+            "SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on",
+        )
+        .unwrap();
         let ctx_count: i64 = pgrx::Spi::get_one(&format!(
             "WITH retrieved AS (SELECT content FROM rag1 WHERE cat = {cat0} \
              ORDER BY emb <=> '{probe}'::vector LIMIT {K}) \
@@ -1555,14 +1945,18 @@ mod tests {
         pgrx::Spi::run("SET theodb_hnsw.ef_search = 60").unwrap();
         // Insert a NEW row whose embedding is an exact copy of an existing cluster centre → it is guaranteed
         // to be among the nearest neighbours of a probe at that centre. cat = 0 (matches the filter below).
-        let probe: String = pgrx::Spi::get_one("SELECT emb::text FROM rag2 WHERE id = 0").unwrap().unwrap();
+        let probe: String =
+            pgrx::Spi::get_one("SELECT emb::text FROM rag2 WHERE id = 0").unwrap().unwrap();
         pgrx::Spi::run(&format!(
             "INSERT INTO rag2 VALUES (99999, 0, 'fresh-doc', '{probe}'::vector)"
         ))
         .unwrap();
 
         // The RAG query in the SAME txn must surface the freshly-inserted row (id 99999) in its top-k.
-        pgrx::Spi::run("SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on").unwrap();
+        pgrx::Spi::run(
+            "SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on",
+        )
+        .unwrap();
         let ids: Vec<i32> = pgrx::Spi::connect(|c| {
             c.select(
                 &format!(
@@ -1588,8 +1982,8 @@ mod tests {
 #[cfg(test)]
 mod m56_tombstone_layout {
     use crate::am::hnsw_page::*;
-    use crate::ann::Metric;
     use crate::am::page;
+    use crate::ann::Metric;
     use pgrx::pg_sys;
 
     /// A minimal live element tuple: ELEM_TAG, pad(deleted/version)=0, dim=2, zero vector, no SBQ code.
@@ -1636,7 +2030,11 @@ mod m56_tombstone_layout {
         mark_tombstone_in_place(&mut b);
         let ev = decode_element(&b).expect("decode");
         assert_eq!((ev.tid, ev.level, ev.nbr_addr), (42, 3, (7, 9)), "tid/level/neighbor intact");
-        assert_eq!(f32::from_le_bytes(ev.vec_bytes[0..4].try_into().unwrap()), 1.5, "vector intact (navigation needs it)");
+        assert_eq!(
+            f32::from_le_bytes(ev.vec_bytes[0..4].try_into().unwrap()),
+            1.5,
+            "vector intact (navigation needs it)"
+        );
         assert!(ev.deleted);
     }
 }

@@ -119,8 +119,10 @@ impl SymqgSpike {
         let rq = RabitqQuantizer::train(dim, bits, seed);
         let sign_mode = bits == 1; // true 1-bit sign path (multi-bit rq is degenerate at bits=1)
         let n = g.spike_len();
-        let mut codes: Vec<Vec<(usize, RabitqCode)>> = Vec::with_capacity(if sign_mode { 0 } else { n });
-        let mut sign_codes: Vec<Vec<(usize, SignCode)>> = Vec::with_capacity(if sign_mode { n } else { 0 });
+        let mut codes: Vec<Vec<(usize, RabitqCode)>> =
+            Vec::with_capacity(if sign_mode { 0 } else { n });
+        let mut sign_codes: Vec<Vec<(usize, SignCode)>> =
+            Vec::with_capacity(if sign_mode { n } else { 0 });
         let mut rot_vec: Vec<Vec<f32>> = Vec::with_capacity(n);
         for p in 0..n {
             if p % 4096 == 0 {
@@ -132,14 +134,16 @@ impl SymqgSpike {
             if sign_mode {
                 let mut row = Vec::with_capacity(nbrs.len());
                 for &nb in nbrs {
-                    let resid: Vec<f32> = g.spike_vector(nb).iter().zip(pv).map(|(&x, &c)| x - c).collect();
+                    let resid: Vec<f32> =
+                        g.spike_vector(nb).iter().zip(pv).map(|(&x, &c)| x - c).collect();
                     row.push((nb, encode_sign(&rq, &resid)));
                 }
                 sign_codes.push(row);
             } else {
                 let mut row = Vec::with_capacity(nbrs.len());
                 for &nb in nbrs {
-                    let resid: Vec<f32> = g.spike_vector(nb).iter().zip(pv).map(|(&x, &c)| x - c).collect();
+                    let resid: Vec<f32> =
+                        g.spike_vector(nb).iter().zip(pv).map(|(&x, &c)| x - c).collect();
                     row.push((nb, rq.encode(&resid)));
                 }
                 codes.push(row);
@@ -196,10 +200,12 @@ impl SymqgSpike {
             let rp = &self.rot_vec[p];
             let q_r: Vec<f32> = rot_q.iter().zip(rp).map(|(&a, &b)| a - b).collect();
             let qc2: f64 = q_r.iter().map(|&d| (d as f64) * (d as f64)).sum(); // ‖q−c‖²=‖q_r‖² (rotation preserves norm)
-            let admit_neighbor = |nb: usize, est: f64,
-                                      cand: &mut BinaryHeap<Reverse<(OrdF, usize)>>,
-                                      beamw: &mut BinaryHeap<OrdF>| {
-                let admit = beamw.len() < beam || beamw.peek().map(|&OrdF(w)| est < w).unwrap_or(true);
+            let admit_neighbor = |nb: usize,
+                                  est: f64,
+                                  cand: &mut BinaryHeap<Reverse<(OrdF, usize)>>,
+                                  beamw: &mut BinaryHeap<OrdF>| {
+                let admit =
+                    beamw.len() < beam || beamw.peek().map(|&OrdF(w)| est < w).unwrap_or(true);
                 if admit {
                     cand.push(Reverse((OrdF(est), nb)));
                     beamw.push(OrdF(est));
@@ -280,7 +286,7 @@ pub(crate) fn exact_beam_search(g: &HnswIndex, query: &[f32], k: usize, beam: us
 
 #[cfg(test)]
 mod tests {
-    use super::{encode_sign, estimate_sign, exact_beam_search, SymqgSpike};
+    use super::{SymqgSpike, encode_sign, estimate_sign, exact_beam_search};
     use crate::vec::rabitq::RabitqQuantizer;
 
     // EC-6: a neighbour identical to its parent → residual 0 → nr=0, w=0; estimate_sign returns exactly qc2
@@ -348,18 +354,22 @@ mod tests {
             s ^= s << 17;
             ((s >> 11) as f64 / (1u64 << 53) as f64) as f32
         };
-        let data: Vec<Vec<f32>> = (0..n).map(|_| (0..dim).map(|_| next() - 0.5).collect()).collect();
-        let corpus: Vec<(i64, Vec<f32>)> = data.iter().enumerate().map(|(i, v)| (i as i64, v.clone())).collect();
+        let data: Vec<Vec<f32>> =
+            (0..n).map(|_| (0..dim).map(|_| next() - 0.5).collect()).collect();
+        let corpus: Vec<(i64, Vec<f32>)> =
+            data.iter().enumerate().map(|(i, v)| (i as i64, v.clone())).collect();
         let g = HnswIndex::build(&corpus, 12, 100, Metric::L2, 7);
         let spike = SymqgSpike::build(&g, 7, 7); // 7-bit: estimator is near-exact, so recall must track the baseline
-        let queries: Vec<Vec<f32>> = (0..40).map(|_| (0..dim).map(|_| next() - 0.5).collect()).collect();
+        let queries: Vec<Vec<f32>> =
+            (0..40).map(|_| (0..dim).map(|_| next() - 0.5).collect()).collect();
         let (mut hs, mut he) = (0usize, 0usize);
         for q in &queries {
             // brute-force truth
             let mut all: Vec<(f64, usize)> =
                 (0..n).map(|i| (Metric::L2.dist(q, &data[i]), i)).collect();
             all.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-            let truth: std::collections::HashSet<usize> = all.iter().take(10).map(|&(_, i)| i).collect();
+            let truth: std::collections::HashSet<usize> =
+                all.iter().take(10).map(|&(_, i)| i).collect();
             let rs = spike.search(&g, q, 10, 80);
             let re = exact_beam_search(&g, q, 10, 80);
             hs += rs.topk.iter().filter(|&&nn| truth.contains(&nn)).count();
@@ -371,7 +381,10 @@ mod tests {
             rec_s >= rec_e - 0.15,
             "symqg estimated recall {rec_s:.3} collapsed vs exact {rec_e:.3} — estimator/plumbing bug"
         );
-        assert!(rec_s > 0.5, "symqg recall {rec_s:.3} implausibly low — traversal is not finding neighbors");
+        assert!(
+            rec_s > 0.5,
+            "symqg recall {rec_s:.3} implausibly low — traversal is not finding neighbors"
+        );
     }
 
     // E2 gate harness. Runs off-PG on SIFT1M via env paths. Prints `E2_RESULT` lines:
@@ -388,7 +401,8 @@ mod tests {
         let queries = read_fvecs(&format!("{sift}/sift_query.fvecs"), nq);
         let gt = read_ivecs(&format!("{sift}/sift_groundtruth.ivecs"), nq);
         println!("E2_LOADED n={} nq={} bits={}", base.len(), queries.len(), bits);
-        let corpus: Vec<(i64, Vec<f32>)> = base.iter().enumerate().map(|(i, v)| (i as i64, v.clone())).collect();
+        let corpus: Vec<(i64, Vec<f32>)> =
+            base.iter().enumerate().map(|(i, v)| (i as i64, v.clone())).collect();
         let t = Instant::now();
         let g = HnswIndex::build(&corpus, 16, 200, Metric::L2, 42);
         println!("E2_BUILD hnsw_s={:.1}", t.elapsed().as_secs_f64());

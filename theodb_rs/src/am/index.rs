@@ -1,7 +1,7 @@
 //! Polymorphic persisted index (M26 Phase 6): the page/scan/vacuum plumbing is algorithm-agnostic — it stores
 //! and dispatches an `IvfflatIndex` OR an `HnswIndex` by the magic in the serialized blob. This lets the two AMs
 //! (`theodb_ivfflat`, `theodb_hnsw`) share the identical persistence + scan + maintenance layer.
-use crate::ann::{HnswIndex, IvfflatIndex, HNSW_MAGIC, IVF_MAGIC};
+use crate::ann::{HNSW_MAGIC, HnswIndex, IVF_MAGIC, IvfflatIndex};
 
 /// Lists probed per IVFFlat scan (bounds the candidate set; higher = more recall, slower).
 const SCAN_PROBES: usize = 10;

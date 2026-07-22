@@ -92,7 +92,9 @@ fn embedded_v4(v6: std::net::Ipv6Addr) -> Option<std::net::Ipv4Addr> {
 pub(crate) fn endpoint_host(endpoint: &str) -> Option<String> {
     let rest = endpoint.strip_prefix("http://").or_else(|| endpoint.strip_prefix("https://"))?;
     let host = &rest[..rest.find([':', '/', '?']).unwrap_or(rest.len())];
-    if host.is_empty() || host.bytes().any(|b| b == b'@' || b == b'[' || b == b']' || !b.is_ascii_graphic()) {
+    if host.is_empty()
+        || host.bytes().any(|b| b == b'@' || b == b'[' || b == b']' || !b.is_ascii_graphic())
+    {
         return None;
     }
     Some(host.to_string())
@@ -112,15 +114,15 @@ mod tests {
     #[test]
     fn test_m134_classifier_blocks_all_private_ranges() {
         for s in [
-            "127.0.0.1",        // loopback
-            "10.0.0.1",         // RFC1918 /8
-            "172.16.0.1",       // RFC1918 /12
-            "192.168.0.1",      // RFC1918 /16
-            "169.254.169.254",  // link-local — the cloud metadata service, the whole point
-            "0.0.0.0",          // unspecified (aliases loopback on some stacks)
-            "::1",              // v6 loopback
-            "fd00::1",          // v6 unique-local
-            "fe80::1",          // v6 link-local
+            "127.0.0.1",              // loopback
+            "10.0.0.1",               // RFC1918 /8
+            "172.16.0.1",             // RFC1918 /12
+            "192.168.0.1",            // RFC1918 /16
+            "169.254.169.254",        // link-local — the cloud metadata service, the whole point
+            "0.0.0.0",                // unspecified (aliases loopback on some stacks)
+            "::1",                    // v6 loopback
+            "fd00::1",                // v6 unique-local
+            "fe80::1",                // v6 link-local
             "::ffff:169.254.169.254", // v4-mapped metadata — must not slip through as "a v6 address"
             // M134 review (F2) — v6 forms that EMBED a v4 address, plus internally-routed v4 ranges.
             "64:ff9b::a9fe:a9fe", // NAT64 (RFC 6052) → 169.254.169.254 on an IPv6-only cloud host
@@ -159,7 +161,7 @@ mod tests {
             ("http://user:pass@10.0.0.1:8080/x", Some("user")),
             // No `:` before the `@`, so the whole thing lands in the host — a shape we refuse outright.
             ("http://user@10.0.0.1/x", None),
-            ("http://[::1]:8080/v1", None),   // minreq parses the host as "[" — unreachable either way
+            ("http://[::1]:8080/v1", None), // minreq parses the host as "[" — unreachable either way
             ("file:///etc/passwd", None),
             ("http://", None),
             ("http://host\r\nX: y/v1", None),
@@ -180,7 +182,10 @@ mod tests {
             ("http://10.0.0.5:1@1.1.1.1/x", "10.0.0.5"),
         ] {
             let host = endpoint_host(url).expect("minreq parses a host here, so we must too");
-            assert_eq!(host, smuggled, "we must read the host minreq dials, not the RFC authority: {url}");
+            assert_eq!(
+                host, smuggled,
+                "we must read the host minreq dials, not the RFC authority: {url}"
+            );
             let ip: std::net::IpAddr = host.parse().expect("these payloads dial a literal");
             assert!(is_blocked_addr(ip), "{url} must be refused");
         }
@@ -192,14 +197,20 @@ mod tests {
     fn test_m134_allowlist_is_scoped_not_a_global_off_switch() {
         let allow = parse_allowlist("127.0.0.1");
         assert!(allow.contains(&"127.0.0.1".to_string()), "the named host is permitted");
-        assert!(!allow.contains(&"127.0.0.2".to_string()), "a sibling in the same /8 is NOT permitted");
+        assert!(
+            !allow.contains(&"127.0.0.2".to_string()),
+            "a sibling in the same /8 is NOT permitted"
+        );
         // and the sibling is still classified internal, so the guard refuses it
         assert!(is_blocked_addr("127.0.0.2".parse().unwrap()));
     }
 
     #[test]
     fn test_m134_allowlist_parsing_is_whitespace_and_case_insensitive() {
-        assert_eq!(parse_allowlist(" 127.0.0.1 , Other.Example "), vec!["127.0.0.1", "other.example"]);
+        assert_eq!(
+            parse_allowlist(" 127.0.0.1 , Other.Example "),
+            vec!["127.0.0.1", "other.example"]
+        );
         assert!(parse_allowlist("").is_empty());
         assert!(parse_allowlist(" , , ").is_empty());
     }

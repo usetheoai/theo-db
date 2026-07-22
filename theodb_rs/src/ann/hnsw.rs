@@ -74,9 +74,8 @@ impl HnswIndex {
         // Cap the layer so a node's neighbor tuple always fits ONE page in the M35 structured layout
         // (`nbr_size(level)` ≤ BLCKSZ). Real levels are ~ln(n)/ln(m) (≤ ~5 at 1M, m=16); the cap only clamps the
         // astronomically-rare tail (pgvector caps the same way — `HnswGetMaxLevel`). NOT an algorithm change.
-        let levels: Vec<usize> = (0..n)
-            .map(|_| ((-(rng.next_f64().ln()) * ml) as usize).min(HNSW_MAX_LEVEL))
-            .collect();
+        let levels: Vec<usize> =
+            (0..n).map(|_| ((-(rng.next_f64().ln()) * ml) as usize).min(HNSW_MAX_LEVEL)).collect();
 
         // Small corpora: the unchanged sequential build (deterministic, no thread overhead — the tiny AM test
         // corpora take this path). Large corpora: the M44 parallel build.
@@ -94,8 +93,15 @@ impl HnswIndex {
         }
         let m0 = m * 2;
         let efc = ef_construction.max(m);
-        let (neighbors, entry, max_level) =
-            crate::ann::hnsw_parallel::build_parallel(&vectors, &levels, m, m0, efc, metric, check_interrupt);
+        let (neighbors, entry, max_level) = crate::ann::hnsw_parallel::build_parallel(
+            &vectors,
+            &levels,
+            m,
+            m0,
+            efc,
+            metric,
+            check_interrupt,
+        );
         HnswIndex {
             metric,
             m,
@@ -198,12 +204,16 @@ impl HnswIndex {
             // 80k×768d and holds across scale (meanHop entry→trueNN → 0). Without it, the graph lacks long-range
             // "highways" → high hop-distance → the beam needs a wide ef → the iso-recall latency gap vs pgvector.
             if crate::ann::hnsw_parallel::extend_candidates() {
-                let mut seen: std::collections::HashSet<usize> = candidates.iter().map(|c| c.i).collect();
+                let mut seen: std::collections::HashSet<usize> =
+                    candidates.iter().map(|c| c.i).collect();
                 let base: Vec<usize> = candidates.iter().map(|c| c.i).collect();
                 for ci in base {
                     for &nb in self.neighbors[ci].get(layer).map(|v| v.as_slice()).unwrap_or(&[]) {
                         if seen.insert(nb) {
-                            candidates.push(Cand { d: self.metric.dist_simd(&q, &self.vectors[nb]), i: nb });
+                            candidates.push(Cand {
+                                d: self.metric.dist_simd(&q, &self.vectors[nb]),
+                                i: nb,
+                            });
                         }
                     }
                 }
@@ -216,10 +226,7 @@ impl HnswIndex {
                     let nbvec = self.vectors[nb].clone();
                     let cand: Vec<Cand> = self.neighbors[nb][layer]
                         .iter()
-                        .map(|&x| Cand {
-                            d: self.metric.dist_simd(&nbvec, &self.vectors[x]),
-                            i: x,
-                        })
+                        .map(|&x| Cand { d: self.metric.dist_simd(&nbvec, &self.vectors[x]), i: x })
                         .collect();
                     self.neighbors[nb][layer] = self.select_from(cand, m_layer);
                 }
@@ -308,9 +315,8 @@ impl HnswIndex {
                 break;
             }
             let cv = &self.vectors[c.i];
-            let closer_to_kept = kept
-                .iter()
-                .any(|&k| self.metric.dist_simd(cv, &self.vectors[k]) < c.d);
+            let closer_to_kept =
+                kept.iter().any(|&k| self.metric.dist_simd(cv, &self.vectors[k]) < c.d);
             if !closer_to_kept {
                 kept.push(c.i);
             }
@@ -398,7 +404,9 @@ impl HnswIndex {
             for (id, v) in pending {
                 out.push((*id, self.metric.dist_simd(q, v)));
             }
-            out.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(&b.0)));
+            out.sort_by(|a, b| {
+                a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(&b.0))
+            });
             out.truncate(k);
         }
         out
@@ -460,10 +468,23 @@ impl HnswIndex {
         }
         match entry {
             Some(e) if e >= n => return Err("theodb hnsw: entry index out of bounds".into()),
-            None if n > 0 => return Err("theodb hnsw: non-empty index without an entry point".into()),
+            None if n > 0 => {
+                return Err("theodb hnsw: non-empty index without an entry point".into());
+            }
             _ => {}
         }
-        Ok(HnswIndex { metric, m, m0, ef_construction, vectors, ids, levels, neighbors, entry, max_level })
+        Ok(HnswIndex {
+            metric,
+            m,
+            m0,
+            ef_construction,
+            vectors,
+            ids,
+            levels,
+            neighbors,
+            entry,
+            max_level,
+        })
     }
 }
 
@@ -531,7 +552,10 @@ mod tests {
         // link / deadlock / corruption would fail this or hang).
         let n = 5000;
         let c = big_corpus(n, 16, 2026);
-        assert!(n >= crate::ann::hnsw_parallel::PARALLEL_BUILD_THRESHOLD, "corpus must trigger the parallel path");
+        assert!(
+            n >= crate::ann::hnsw_parallel::PARALLEL_BUILD_THRESHOLD,
+            "corpus must trigger the parallel path"
+        );
         let idx = HnswIndex::build(&c, 16, 64, Metric::L2, 2026);
         assert_eq!(idx.node_count(), n, "all nodes present");
         // Sample 20 corpus points; each must be its own top-1 (self-recall).
@@ -560,11 +584,16 @@ mod tests {
         for _ in 0..nq {
             let q: Vec<f32> = (0..dim).map(|_| (r.next_f64() as f32) * 2.0 - 1.0).collect();
             // exact top-10 by brute force
-            let mut exact: Vec<(usize, f64)> =
-                c.iter().enumerate().map(|(j, (_, v))| (j, crate::vec::l2_distance(&q, v))).collect();
+            let mut exact: Vec<(usize, f64)> = c
+                .iter()
+                .enumerate()
+                .map(|(j, (_, v))| (j, crate::vec::l2_distance(&q, v)))
+                .collect();
             exact.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-            let gt: std::collections::HashSet<i64> = exact[..10].iter().map(|(j, _)| *j as i64).collect();
-            let got: std::collections::HashSet<i64> = idx.search(&q, 10, 100).iter().map(|(id, _)| *id).collect();
+            let gt: std::collections::HashSet<i64> =
+                exact[..10].iter().map(|(j, _)| *j as i64).collect();
+            let got: std::collections::HashSet<i64> =
+                idx.search(&q, 10, 100).iter().map(|(id, _)| *id).collect();
             total += (gt.intersection(&got).count() as f64) / 10.0;
         }
         let recall = total / nq as f64;

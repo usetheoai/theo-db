@@ -26,7 +26,11 @@ pub(crate) const CHUNK: usize = 8000;
 /// Write `blob` across freshly-extended, WAL-logged pages of the (empty) index relation `rel`, in fork `fork`
 /// (`MAIN_FORKNUM` for `ambuild`; `INIT_FORKNUM` for `ambuildempty` on unlogged indexes). The fork is assumed to
 /// have 0 blocks (a fresh index).
-pub(crate) unsafe fn write_blob(rel: pg_sys::Relation, fork: pg_sys::ForkNumber::Type, blob: &[u8]) {
+pub(crate) unsafe fn write_blob(
+    rel: pg_sys::Relation,
+    fork: pg_sys::ForkNumber::Type,
+    blob: &[u8],
+) {
     let nchunks = blob.len().div_ceil(CHUNK).max(1);
     // Meta item first (block 0).
     let mut meta = Vec::with_capacity(20);
@@ -142,7 +146,9 @@ pub(crate) unsafe fn pending_page_count(rel: pg_sys::Relation) -> u32 {
         Ok((pstart, nblocks)) if pstart > 0 && nblocks > pstart => nblocks - pstart,
         Ok(_) => 0,
         Err(e) => {
-            pgrx::log!("theodb am: pending-fold skipped (meta unreadable, REINDEX to upgrade): {e}");
+            pgrx::log!(
+                "theodb am: pending-fold skipped (meta unreadable, REINDEX to upgrade): {e}"
+            );
             0
         }
     }
@@ -161,7 +167,11 @@ fn encode_pending(tid: i64, vec: &[f32]) -> Vec<u8> {
 
 /// Append one `(tid, vector)` to the pending region — O(1) amortized, NO index rebuild (M26 Phase 5, ADR-2).
 /// Adds to the last pending page if the item fits, else extends a new page. Requires a built index (meta page).
-pub(crate) unsafe fn append_pending(rel: pg_sys::Relation, tid: i64, vec: &[f32]) -> Result<(), String> {
+pub(crate) unsafe fn append_pending(
+    rel: pg_sys::Relation,
+    tid: i64,
+    vec: &[f32],
+) -> Result<(), String> {
     let (pstart, nblocks) = pending_layout(rel)?;
     if pstart == 0 {
         return Err("theodb am: aminsert before build".into());
@@ -236,7 +246,9 @@ pub(crate) unsafe fn read_pending(rel: pg_sys::Relation) -> Result<Vec<(i64, Vec
             // LOUD (typed REINDEX error) rather than feed a garbage vector to the scan — the fail-loud crash
             // window closed fully (no REINDEX) only by M55 (ADR 0014); never silent corruption.
             if item.len() < 12 {
-                return Err("theodb am: corrupt pending item (too short for header) — REINDEX".into());
+                return Err(
+                    "theodb am: corrupt pending item (too short for header) — REINDEX".into()
+                );
             }
             let tid = i64::from_le_bytes(item[0..8].try_into().unwrap());
             let dim = u32::from_le_bytes(item[8..12].try_into().unwrap()) as usize;
@@ -255,7 +267,10 @@ pub(crate) unsafe fn read_pending(rel: pg_sys::Relation) -> Result<Vec<(i64, Vec
 }
 
 /// Read ALL items on a page (share-locked). Used for the multi-item pending pages.
-pub(crate) unsafe fn read_all_page_items(rel: pg_sys::Relation, block: pg_sys::BlockNumber) -> Result<Vec<Vec<u8>>, String> {
+pub(crate) unsafe fn read_all_page_items(
+    rel: pg_sys::Relation,
+    block: pg_sys::BlockNumber,
+) -> Result<Vec<Vec<u8>>, String> {
     let buf = pg_sys::ReadBufferExtended(
         rel,
         pg_sys::ForkNumber::MAIN_FORKNUM,
@@ -478,7 +493,8 @@ pub(crate) unsafe fn pivot_meta_page(rel: pg_sys::Relation, meta: &[u8]) {
     );
     pg_sys::LockBuffer(buf, pg_sys::BUFFER_LOCK_EXCLUSIVE as i32);
     let state = pg_sys::GenericXLogStart(rel);
-    let page = pg_sys::GenericXLogRegisterBuffer(state, buf, pg_sys::GENERIC_XLOG_FULL_IMAGE as i32);
+    let page =
+        pg_sys::GenericXLogRegisterBuffer(state, buf, pg_sys::GENERIC_XLOG_FULL_IMAGE as i32);
     pg_sys::PageInit(page, pg_sys::BLCKSZ as usize, 0);
     let off = pg_sys::PageAddItemExtended(
         page,
@@ -526,7 +542,6 @@ unsafe fn reinit_page_with_item(rel: pg_sys::Relation, block: pg_sys::BlockNumbe
 // per-list pages. A scan reads the meta + centroids (small, ∝ nlists) then ONLY the probed lists' pages (∝ probes),
 // never the whole index. One item per page (chunked at CHUNK), reusing `extend_page_with_item`/`read_page_item`.
 // ---------------------------------------------------------------------------------------------------------------
-
 
 /// Peek block 0's leading magic to dispatch the scan/maintenance path (structured IVF vs M26 blob). Returns 0
 /// for an unbuilt index (0 blocks).
@@ -579,7 +594,8 @@ unsafe fn main_index_pages(rel: pg_sys::Relation) -> Result<u32, String> {
                 .saturating_add(centroid_npages4);
             for i in 0..nlists4 {
                 let o = i * 12 + 4; // np field within the 12-byte dir entry
-                total4 = total4.saturating_add(u32::from_le_bytes(dbytes4[o..o + 4].try_into().unwrap()));
+                total4 = total4
+                    .saturating_add(u32::from_le_bytes(dbytes4[o..o + 4].try_into().unwrap()));
             }
             return Ok(total4);
         }
@@ -605,8 +621,11 @@ unsafe fn main_index_pages(rel: pg_sys::Relation) -> Result<u32, String> {
                 .saturating_add(centroid_npages5);
             for i in 0..nlists5 {
                 let o = i * 20;
-                total5 = total5.saturating_add(u32::from_le_bytes(dbytes5[o + 4..o + 8].try_into().unwrap()));
-                total5 = total5.saturating_add(u32::from_le_bytes(dbytes5[o + 12..o + 16].try_into().unwrap()));
+                total5 = total5
+                    .saturating_add(u32::from_le_bytes(dbytes5[o + 4..o + 8].try_into().unwrap()));
+                total5 = total5.saturating_add(u32::from_le_bytes(
+                    dbytes5[o + 12..o + 16].try_into().unwrap(),
+                ));
             }
             return Ok(total5);
         }
@@ -635,8 +654,11 @@ unsafe fn main_index_pages(rel: pg_sys::Relation) -> Result<u32, String> {
                 .saturating_add(centroid_npages6);
             for i in 0..nlists6 {
                 let o = i * 20;
-                total6 = total6.saturating_add(u32::from_le_bytes(dbytes6[o + 4..o + 8].try_into().unwrap()));
-                total6 = total6.saturating_add(u32::from_le_bytes(dbytes6[o + 12..o + 16].try_into().unwrap()));
+                total6 = total6
+                    .saturating_add(u32::from_le_bytes(dbytes6[o + 4..o + 8].try_into().unwrap()));
+                total6 = total6.saturating_add(u32::from_le_bytes(
+                    dbytes6[o + 12..o + 16].try_into().unwrap(),
+                ));
             }
             return Ok(total6);
         }
@@ -687,7 +709,6 @@ unsafe fn main_index_pages(rel: pg_sys::Relation) -> Result<u32, String> {
     }
 }
 
-
 /// Number of CHUNK-sized pages needed to store `nbytes` (min 1 — an empty list still gets one page so the
 /// directory's `first_block` always points at a real page).
 pub(crate) fn npages_for(nbytes: usize) -> u32 {
@@ -695,7 +716,11 @@ pub(crate) fn npages_for(nbytes: usize) -> u32 {
 }
 
 /// Read `npages` chunk-items starting at `first_block` and concatenate them.
-pub(crate) unsafe fn read_chunked(rel: pg_sys::Relation, first_block: u32, npages: u32) -> Result<Vec<u8>, String> {
+pub(crate) unsafe fn read_chunked(
+    rel: pg_sys::Relation,
+    first_block: u32,
+    npages: u32,
+) -> Result<Vec<u8>, String> {
     let mut out = Vec::new();
     for b in first_block..first_block + npages {
         // M38: append each chunk's bytes DIRECTLY into `out` (one copy) — was `extend_from_slice(&read_page_item(...))`
@@ -705,14 +730,8 @@ pub(crate) unsafe fn read_chunked(rel: pg_sys::Relation, first_block: u32, npage
     Ok(out)
 }
 
-
-
-
 // (M48) The old in-place `rewrite_ivf_structured` was replaced by the crash-safe `fold::fold` (meta-pivot) via
 // `ivf_structured_items` — the in-place rewrite wrote block 0 first, corrupting the index on a mid-vacuum crash (#47).
-
-
-
 
 // ============================================================================================================
 // M77 — IVF-AQ v4 structured layout (pg_scann): per-list AQ codes (block32) + f32 (rerank) + persisted codebook.
@@ -721,10 +740,6 @@ pub(crate) unsafe fn read_chunked(rel: pg_sys::Relation, first_block: u32, npage
 //   [block 0 meta v4] · dir pages · codebook pages · centroid pages · per-list pages
 // per-list bytes = [ids i64×n][f32 (dim×4)×n][AQ codes: ceil(n/32)·pairs·32 block32-transposed].
 // ============================================================================================================
-
-
-
-
 
 // ============================================================================================================
 // M83 — IVF-AQ v5 STORAGE-SEPARATED layout (Roadmap v7 D3 spike): per-list codes and f32 live on DISTINCT page
@@ -735,13 +750,6 @@ pub(crate) unsafe fn read_chunked(rel: pg_sys::Relation, first_block: u32, npage
 // CODE bytes = [ids i64×n][AQ codes ceil(n/32)·pairs·32 block32]; VECTOR bytes = [f32 (dim×4)×n].
 // dir entry = (code_fb u32, code_np u32, vec_fb u32, vec_np u32, cnt u32).
 // ============================================================================================================
-
-
-
-
-
-
-
 
 /// M89 — write one page item (mirrors the pre-M89 `extend_page_with_item` call site).
 #[inline]
@@ -762,10 +770,6 @@ unsafe fn write_chunks(rel: pg_sys::Relation, data: &[u8]) {
     }
 }
 
-
-
-
-
 // ============================================================================================================
 // M85 — IVF-AQ v6 SQ8-REFINE layout (Roadmap v7): like v5 (storage-separated) but the per-list rerank region is
 // SQ8 codes (`dim` B/vec) instead of raw f32 (`dim·4` B/vec) — Stage-2 survivor reads shrink 4× (ADR-0037 lever
@@ -776,16 +780,11 @@ unsafe fn write_chunks(rel: pg_sys::Relation, data: &[u8]) {
 // Meta v6 header adds sq8_codebook_npages at [37..41] (41 bytes vs v4/v5's 37).
 // ============================================================================================================
 
-
-
-
-
-
-
-
-
 /// Read the single item stored on `block` (share-locked, no WAL). Copies the bytes out into an owned Vec.
-unsafe fn read_page_item(rel: pg_sys::Relation, block: pg_sys::BlockNumber) -> Result<Vec<u8>, String> {
+unsafe fn read_page_item(
+    rel: pg_sys::Relation,
+    block: pg_sys::BlockNumber,
+) -> Result<Vec<u8>, String> {
     let mut out = Vec::new();
     read_page_item_into(rel, block, &mut out)?;
     Ok(out)
@@ -855,7 +854,9 @@ pub(crate) unsafe fn read_page_item_at(
     let max_off = page_get_max_offset(page);
     if (offno as usize) < 1 || (offno as usize) > max_off {
         pg_sys::UnlockReleaseBuffer(buf);
-        return Err(format!("theodb am: offset {offno} out of range (max={max_off}) on page {block}"));
+        return Err(format!(
+            "theodb am: offset {offno} out of range (max={max_off}) on page {block}"
+        ));
     }
     let item_id = page_get_item_id(page, offno);
     let len = (*item_id).lp_len() as usize;
@@ -896,7 +897,9 @@ pub(crate) unsafe fn with_page_item<T>(
     let page = pg_sys::BufferGetPage(buf);
     let max_off = page_get_max_offset(page);
     if (offno as usize) < 1 || (offno as usize) > max_off {
-        return Err(format!("theodb am: offset {offno} out of range (max={max_off}) on page {block}"));
+        return Err(format!(
+            "theodb am: offset {offno} out of range (max={max_off}) on page {block}"
+        ));
     }
     let item_id = page_get_item_id(page, offno);
     let len = (*item_id).lp_len() as usize;
@@ -949,7 +952,10 @@ pub(crate) unsafe fn extend_page_with_items(
             pg_sys::InvalidOffsetNumber,
             0,
         );
-        assert!(off != pg_sys::InvalidOffsetNumber, "theodb am: PageAddItem failed (item too large / page full?)");
+        assert!(
+            off != pg_sys::InvalidOffsetNumber,
+            "theodb am: PageAddItem failed (item too large / page full?)"
+        );
     }
     pg_sys::MarkBufferDirty(buf);
     pg_sys::GenericXLogFinish(state);

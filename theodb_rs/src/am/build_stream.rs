@@ -90,7 +90,8 @@ pub(crate) unsafe fn tuplesort_roundtrip(
     loop {
         // copy=false: the minimal tuple points into the sorter's memory; we decode into owned Vecs before the next
         // `gettupleslot` (pgvector pattern, :252).
-        let got = pg_sys::tuplesort_gettupleslot(state, true, false, get_slot, std::ptr::null_mut());
+        let got =
+            pg_sys::tuplesort_gettupleslot(state, true, false, get_slot, std::ptr::null_mut());
         if !got {
             break;
         }
@@ -111,8 +112,8 @@ pub(crate) unsafe fn tuplesort_roundtrip(
 
 // ---- Phase 2 — the streaming build pipeline (v5 plain-f32 AQ-split layout) ----
 
-use crate::vec::aq::AqQuantizer;
 use crate::ann::{IvfflatIndex, Metric};
+use crate::vec::aq::AqQuantizer;
 
 /// Reservoir/prefix sample cap for training the streaming build's centroids + AQ codebook (bounded, independent of
 /// N). The in-RAM kmeans already trains on a capped sample internally, so a bounded sample here is the same class of
@@ -288,7 +289,13 @@ pub(crate) unsafe fn ambuild_streaming(
         0,
     );
     let put_slot = pg_sys::MakeSingleTupleTableSlot(tupdesc, &raw const pg_sys::TTSOpsVirtual);
-    let mut ast = AssignState { centroids: &centroids, metric, counts: vec![0u32; centroids.len()], sorter, put_slot };
+    let mut ast = AssignState {
+        centroids: &centroids,
+        metric,
+        counts: vec![0u32; centroids.len()],
+        sorter,
+        put_slot,
+    };
     let ntuples = pg_sys::table_index_build_scan(
         heaprel,
         indexrel,
@@ -305,7 +312,8 @@ pub(crate) unsafe fn ambuild_streaming(
     // Read back sorted-by-list#; the streaming writer pulls each list's members and writes its pages, one in flight.
     let get_slot = pg_sys::MakeSingleTupleTableSlot(tupdesc, &raw const pg_sys::TTSOpsMinimalTuple);
     let mut next_member = || -> Option<(i64, Vec<f32>)> {
-        let got = pg_sys::tuplesort_gettupleslot(sorter, true, false, get_slot, std::ptr::null_mut());
+        let got =
+            pg_sys::tuplesort_gettupleslot(sorter, true, false, get_slot, std::ptr::null_mut());
         if !got {
             return None;
         }
@@ -380,15 +388,22 @@ mod tests {
         let exact: std::collections::HashSet<i32> = Spi::connect(|c| {
             c.select("SET enable_indexscan=off; SET enable_seqscan=on", None, &[]).ok();
             c.select(&format!("SELECT id FROM s96 ORDER BY e <-> {q} LIMIT 10"), None, &[])
-                .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
+                .unwrap()
+                .filter_map(|r| r.get::<i32>(1).unwrap())
+                .collect()
         });
         let got: std::collections::HashSet<i32> = Spi::connect(|c| {
             c.select("SET enable_seqscan=off; SET theodb_ivfflat.probes=16", None, &[]).ok();
             c.select(&format!("SELECT id FROM s96 ORDER BY e <-> {q} LIMIT 10"), None, &[])
-                .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
+                .unwrap()
+                .filter_map(|r| r.get::<i32>(1).unwrap())
+                .collect()
         });
         let recall = got.intersection(&exact).count() as f64 / exact.len().max(1) as f64;
-        assert!(recall >= 0.5, "streamed build recall must be in the ANN band (got {recall}, got_set={got:?})");
+        assert!(
+            recall >= 0.5,
+            "streamed build recall must be in the ANN band (got {recall}, got_set={got:?})"
+        );
     }
 
     /// M96 T2.1 — a streamed build survives a scan re-run (crash-safety via GenericXLog unchanged): two scans of
@@ -409,18 +424,25 @@ mod tests {
             Spi::connect(|c| {
                 c.select("SET enable_seqscan=off; SET theodb_ivfflat.probes=16", None, &[]).ok();
                 c.select(&format!("SELECT id FROM s96b ORDER BY e <-> {q} LIMIT 10"), None, &[])
-                    .unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
+                    .unwrap()
+                    .filter_map(|r| r.get::<i32>(1).unwrap())
+                    .collect()
             })
         };
-        assert_eq!(run(), run(), "two scans of the streamed index must return the identical top-k (durable pages)");
+        assert_eq!(
+            run(),
+            run(),
+            "two scans of the streamed index must return the identical top-k (durable pages)"
+        );
     }
 
     /// M96 T1.1 — a forced external spill (tiny workMem, many rows) returns every row correctly sorted.
     #[pg_test]
     fn m96_tuplesort_spills_under_low_workmem() {
         let n = 50_000i64;
-        let rows: Vec<(i32, i64, Vec<f32>)> =
-            (0..n).map(|i| ((n - 1 - i) as i32 % 1000, i, vec![i as f32, (i * 2) as f32])).collect();
+        let rows: Vec<(i32, i64, Vec<f32>)> = (0..n)
+            .map(|i| ((n - 1 - i) as i32 % 1000, i, vec![i as f32, (i * 2) as f32]))
+            .collect();
         let out = unsafe { tuplesort_roundtrip(&rows, 64) }; // 64 KB workMem → external merge spill
         assert_eq!(out.len() as i64, n, "all rows must survive the spill");
         for w in out.windows(2) {

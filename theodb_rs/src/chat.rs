@@ -10,7 +10,7 @@
 //!     markdown-fence-strip + JSON-array batch with JSON-null -> SQL NULL).
 use std::cell::Cell;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::http::{post_json, truncate};
 use crate::pg::{err_external, err_input, guc};
@@ -142,10 +142,9 @@ pub(crate) fn ai_if(prompt: Option<&str>, model: Option<&str>) -> bool {
     let out = chat(prompt, Some("Answer with exactly one word: yes or no."), model);
     match parse_bool(&out) {
         Some(b) => b,
-        None => err_input(&format!(
-            "ai.if: unparseable boolean from model: {}",
-            truncate(&out, 50)
-        )),
+        None => {
+            err_input(&format!("ai.if: unparseable boolean from model: {}", truncate(&out, 50)))
+        }
     }
 }
 
@@ -153,7 +152,9 @@ pub(crate) fn ai_if(prompt: Option<&str>, model: Option<&str>) -> bool {
 pub(crate) fn ai_sentiment(content: Option<&str>, model: Option<&str>) -> String {
     let out = chat(
         content,
-        Some("Classify the sentiment of the text. Reply with exactly one of: positive, negative, neutral."),
+        Some(
+            "Classify the sentiment of the text. Reply with exactly one of: positive, negative, neutral.",
+        ),
         model,
     );
     let first = first_token(&out, |c| c.is_ascii_alphabetic()); // re.split(r"[^a-z]+", ...)[0]
@@ -168,23 +169,22 @@ pub(crate) fn ai_sentiment(content: Option<&str>, model: Option<&str>) -> String
 
 /// `ai.rank` — natural-language scoring -> real. Parses the FIRST number anywhere (no clamp); none -> 22023.
 pub(crate) fn ai_rank(prompt: Option<&str>, model: Option<&str>) -> f32 {
-    let out = chat(
-        prompt,
-        Some("Reply with a single number between 0 and 1 and nothing else."),
-        model,
-    );
+    let out =
+        chat(prompt, Some("Reply with a single number between 0 and 1 and nothing else."), model);
     match first_number(&out) {
         Some(v) => v as f32,
-        None => err_input(&format!(
-            "ai.rank: model did not return a number: {}",
-            truncate(&out, 50)
-        )),
+        None => {
+            err_input(&format!("ai.rank: model did not return a number: {}", truncate(&out, 50)))
+        }
     }
 }
 
 /// `ai.generate_batch` — answer N prompts in ONE round-trip. Empty -> [] (no call); NULL element -> 22023;
 /// the model must return a JSON array of exactly N (string|null) items (markdown fence tolerated).
-pub(crate) fn ai_generate_batch(prompts: &[Option<&str>], model: Option<&str>) -> Vec<Option<String>> {
+pub(crate) fn ai_generate_batch(
+    prompts: &[Option<&str>],
+    model: Option<&str>,
+) -> Vec<Option<String>> {
     let n = prompts.len();
     if n == 0 {
         return Vec::new();
@@ -195,25 +195,34 @@ pub(crate) fn ai_generate_batch(prompts: &[Option<&str>], model: Option<&str>) -
         );
     }
 
-    run_batch_chat(prompts, |k| {
-        format!(
-            "You are given {k} numbered items. Respond with ONLY a JSON array of exactly {k} strings — the \
+    run_batch_chat(
+        prompts,
+        |k| {
+            format!(
+                "You are given {k} numbered items. Respond with ONLY a JSON array of exactly {k} strings — the \
              answer to each item, in order. No prose, no markdown."
-        )
-    }, model)
+            )
+        },
+        model,
+    )
 }
 
 /// M102 — batched BOOLEAN inference: N yes/no questions answered in ONE round-trip, each parsed to a bool. The
 /// system prompt instructs yes/no (the SAME framing the per-row `ai.if` uses), so the batched answers are
 /// directly comparable to the per-row path on a live model — not just under the deterministic test model
 /// (closes the council-ai-in-db "no boolean shaping" finding). An unparseable item -> `None` (SQL NULL).
-pub(crate) fn ai_if_batch_answers(prompts: &[Option<&str>], model: Option<&str>) -> Vec<Option<bool>> {
+pub(crate) fn ai_if_batch_answers(
+    prompts: &[Option<&str>],
+    model: Option<&str>,
+) -> Vec<Option<bool>> {
     let n = prompts.len();
     if n == 0 {
         return Vec::new();
     }
     if prompts.iter().any(|p| p.is_none()) {
-        err_input("ai.if_batch: prompts must not contain NULL elements (breaks the N-in/N-out alignment)");
+        err_input(
+            "ai.if_batch: prompts must not contain NULL elements (breaks the N-in/N-out alignment)",
+        );
     }
     run_batch_chat(prompts, |k| {
         format!(
@@ -281,11 +290,7 @@ fn resolve_chat_cfg(model: Option<&str>) -> (String, String, Option<String>) {
 /// `re.split(r"[^<class>]+", s.strip().lower(), 1)[0]`: the leading run of allowed chars (empty if `s`
 /// starts with a disallowed char after trim).
 fn first_token(s: &str, allowed: fn(char) -> bool) -> String {
-    s.trim()
-        .chars()
-        .map(|c| c.to_ascii_lowercase())
-        .take_while(|c| allowed(*c))
-        .collect()
+    s.trim().chars().map(|c| c.to_ascii_lowercase()).take_while(|c| allowed(*c)).collect()
 }
 
 /// The first number matching `-?\d+(?:\.\d+)?` anywhere in `s` (re.search parity), parsed as f64.
@@ -322,7 +327,8 @@ fn first_number(s: &str) -> Option<f64> {
 fn strip_fence(s: &str) -> String {
     let mut t = s.trim();
     if let Some(rest) = t.strip_prefix("```") {
-        let rest = rest.trim_start_matches(|c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+        let rest =
+            rest.trim_start_matches(|c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-');
         t = rest.trim_start();
     }
     if let Some(stripped) = t.strip_suffix("```") {

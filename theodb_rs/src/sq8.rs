@@ -105,7 +105,10 @@ impl Sq8Quantizer {
         let dim = u32::from_le_bytes(bytes[0..4].try_into().unwrap()) as usize;
         let need = 4 + dim * 8;
         if bytes.len() < need {
-            return Err(format!("theodb sq8: truncated codebook (need {need}, got {})", bytes.len()));
+            return Err(format!(
+                "theodb sq8: truncated codebook (need {need}, got {})",
+                bytes.len()
+            ));
         }
         let mut vmin = Vec::with_capacity(dim);
         let mut vdiff = Vec::with_capacity(dim);
@@ -130,9 +133,7 @@ mod tests {
     use pgrx::prelude::*;
 
     fn corpus() -> Vec<Vec<f32>> {
-        (0..64)
-            .map(|i| (0..8).map(|j| ((i * 7 + j * 13) % 97) as f32 * 0.1).collect())
-            .collect()
+        (0..64).map(|i| (0..8).map(|j| ((i * 7 + j * 13) % 97) as f32 * 0.1).collect()).collect()
     }
 
     #[pgrx::pg_test]
@@ -158,7 +159,10 @@ mod tests {
     fn sq8_from_bytes_rejects_truncated() {
         let mut bytes = Sq8Quantizer::train(&corpus()).to_meta_bytes();
         bytes.truncate(bytes.len() - 4);
-        assert!(Sq8Quantizer::from_meta_bytes(&bytes).is_err(), "truncated codebook must be rejected");
+        assert!(
+            Sq8Quantizer::from_meta_bytes(&bytes).is_err(),
+            "truncated codebook must be rejected"
+        );
     }
 
     #[pgrx::pg_test]
@@ -177,7 +181,12 @@ mod tests {
         let d = q.decode(&q.encode(v));
         for i in 0..v.len() {
             let step = q.vdiff[i] / 255.0;
-            assert!((d[i] - v[i]).abs() <= step + 1e-4, "dim {i}: |{}-{}| > step {step}", d[i], v[i]);
+            assert!(
+                (d[i] - v[i]).abs() <= step + 1e-4,
+                "dim {i}: |{}-{}| > step {step}",
+                d[i],
+                v[i]
+            );
         }
     }
 
