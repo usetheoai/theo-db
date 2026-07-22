@@ -113,7 +113,7 @@ def main():
     ap.add_argument("--dim", type=int, default=768)
     ap.add_argument("--nq", type=int, default=50)
     ap.add_argument("--k", type=int, default=10)
-    ap.add_argument("--runs", type=int, default=1)
+    ap.add_argument("--runs", type=int, default=3)  # ≥3 iterações: mean±std (regra measurement-first)
     ap.add_argument("--out", default="/root/m59_aq.json")
     args = ap.parse_args()
     if args.dim % PQ_SUBSPACES != 0:

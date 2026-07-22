@@ -5,7 +5,7 @@
 #
 # Peak RSS is read from the backend's /proc/<pid>/status VmHWM during the build (sampled in a thread), since the
 # build runs inside the PG backend, not this python process.
-import os, sys, time, struct, threading
+import os, time, threading
 import psycopg2
 
 PORT = int(os.environ.get('PORT', '28817')); N = int(os.environ.get('N', '30000000')); DIM = 128

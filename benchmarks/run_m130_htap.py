@@ -25,7 +25,6 @@ import subprocess
 import sys
 
 # Reuse the M129 single-system run-to-run dispersion metric (parsimony rung 4 — no re-implementation).
-from run_m129_oltp import coefficient_of_variation
 
 # CH-benCHmark analytical query transaction-type names (the OLAP half); the rest of the per-type CSVs are TPC-C.
 _CH_QUERIES = tuple(f"Q{i}" for i in range(1, 23))

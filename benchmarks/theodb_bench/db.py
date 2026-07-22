@@ -257,16 +257,6 @@ class VectorDB:
         with self._cursor() as cur:
             cur.execute("CREATE EXTENSION IF NOT EXISTS pg_mooncake CASCADE")
 
-    # --- M62: pg_duckdb columnar/HTAP (shipped in the TheoDB image — ADR-0020) --------------------------
-    def pg_duckdb_available(self) -> bool:
-        """True iff pg_duckdb is CREATEd in this database (the M62 HTAP surface needs the DuckDB engine to
-        COPY→Parquet and read_parquet). Mirrors pg_mooncake_available (honesty: skip cleanly, never silent
-        green) but checks pg_extension — pg_duckdb is CREATE EXTENSIONed at image init (Dockerfile), unlike
-        pg_mooncake which was a throwaway substrate. A gate for the HTAP tests to skip on a plain image."""
-        with self._cursor() as cur:
-            cur.execute("SELECT count(*) FROM pg_extension WHERE extname = 'pg_duckdb'")
-            return int(cur.fetchone()[0]) > 0
-
     def create_columnstore_mirror(self, mirror: str, base: str) -> None:
         with self._cursor() as cur:
             cur.execute("CALL mooncake.create_table(%s, %s)", (mirror, base))

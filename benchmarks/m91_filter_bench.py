@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # M91 DEFINITIVE sweep on SIFT1M (real neighbor structure → meaningful recall across the WHOLE selectivity range).
 # Synthetic smallint[] labels at controlled selectivity. Compare INLINE(v7) vs POST(v5). GT = exact seqscan-filtered top-10.
-import struct, os, time, io, random
+import struct, os, time, io
 import psycopg2, numpy as np
 SIFT="/home/theo/sift"; PORT=int(os.environ.get('PORT','28817'))
 N=int(os.environ.get('N','1000000')); NQ=int(os.environ.get('NQ','100')); LISTS=int(os.environ.get('LISTS','1000')); PROBES=int(os.environ.get('PROBES','64')); K=10

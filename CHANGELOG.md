@@ -15,6 +15,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 ### Changed
+- Benchmarks (harness interno): review de limpeza — remove método morto `pg_duckdb_available` do core `theodb_bench/db.py` (extensão removida no M143), `run_m59_aq.py` default `--runs` 1→3 (rigor ≥3 iterações), `ruff --fix` de imports/f-strings vazias, e arquiva 6 harness órfãos em `benchmarks/archive/` (audit-trail: arquivar, não deletar)
 
 ### Deprecated
 

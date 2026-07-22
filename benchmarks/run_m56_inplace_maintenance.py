@@ -317,7 +317,7 @@ def _write_md(data, path):
         lines += ["## Warnings do run", ""] + [f"- {w}" for w in data["warnings"]] + [""]
 
     lines += ["## Metodologia (reprodução)", "", "```bash",
-              f"PGHOST=localhost PGPORT=55492 PGUSER=postgres PGPASSWORD=postgres \\",
+              "PGHOST=localhost PGPORT=55492 PGUSER=postgres PGPASSWORD=postgres \\",
               f"  THEODB_BENCH_CONTAINER={data['env'].get('container', 'theodb-bench')} \\",
               f"  python3 benchmarks/run_m56_inplace_maintenance.py "
               f"--scales {','.join(map(str, data['scales_requested']))} --dim {data['dim']} "
