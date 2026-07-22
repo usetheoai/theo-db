@@ -23,7 +23,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 - Docs (`docs/features/14-analitico-colunar.md`): seção do seqscan corrigida — um `SELECT` plano decodifica todas as colunas (sem projeção no TAM) e é medido paridade-ou-mais-lento que heap ([`m99-columnar-tam.md`](docs/benchmarks/m99-columnar-tam.md)); o ganho de projeção/vetorização é exclusivo do caminho `CustomScan` M100. A afirmação anterior ("decodifica apenas as colunas projetadas") era falsa
-- Docs (`docs/features/14-analitico-colunar.md`): bloco "Caveats honestos" agora divulga o contrato DML append-only — `UPDATE`/`DELETE`/tuple-lock/parallel/bitmap/sample/TID-range/`CREATE INDEX` falham com erro tipado em tabelas `theodb_columnar` (caveat 4). Regressão coberta por `scripts/docs-features-lint.sh`
+- Docs (`docs/features/14-analitico-colunar.md`): bloco "Caveats honestos" agora divulga o contrato DML append-only — `UPDATE`/`DELETE`/tuple-lock/parallel/bitmap/sample/TID-range/`CREATE INDEX` falham com erro tipado em tabelas `theodb_columnar`; bitmap scan é desviado pelo planner (callbacks `NULL`) em vez de errar (caveat 4). Regressão coberta por `scripts/docs-features-lint.sh`
 - Docs (`docs/features/13-grafo-nativo.md`): exemplo de `graph_expand` quebrava copiado verbatim — a função `RETURNS SETOF bigint` e a coluna default chama-se `graph_expand`, não `node`; exemplo agora aliasa a SRF (`AS t(node)`). Regressão coberta por `scripts/docs-features-lint.sh`
 
 ### Security
