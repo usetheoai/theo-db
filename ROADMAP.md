@@ -2346,7 +2346,7 @@ usa: **heap buffer-then-flush** (o M139 provou: MVCC/WAL/crash de graça, ~milha
 
 **Prior art:** M139 (spike GO, `docs/adr/0051`), M138 (baseline pg_textsearch + o método de significância), theo-lens `packages/core/.../trace-read-repository.ts` (o `ts_rank`/`websearch_to_tsquery` atual a bater).
 
-## M140.2 — [ ] Crate núcleo lexical sem pgrx (superfície pura testável) *(gated M140.1)*
+## M140.2 — [x] Crate núcleo lexical sem pgrx (superfície pura testável) *(gated M140.1)*
 
 **Objective:** extrair a superfície **pgrx-free** da engine (o `Directory`/`SegmentStore`, o wiring de query/
 scoring/tokenizer) para um crate próprio, testável com `cargo test` stock — o M139 já provou que o núcleo é
