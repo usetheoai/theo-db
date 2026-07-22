@@ -102,3 +102,16 @@ o object-store análogo NÃO cobre. Este blueprint de-risca e define o gate; a i
 - Tantivy Cargo.toml (MIT, 0.26.0): https://github.com/quickwit-oss/tantivy
 - ParadeDB `pg_search` (AGPL — study-only): `.claude/knowledge-base/references/paradedb/`
 - Precedente próprio: `theodb_rs/src/am/hnsw_page.rs` (M35), `theodb_rs/isolation/crash*.sh` (#46/#47), `am/columnar.rs` (M99)
+
+## Gate 1 — PROVADO (medido 2026-07-21)
+
+`test_pg_directory_indexes_and_searches ... ok` (`cargo test`, crate standalone pgrx-free): o Tantivy 0.26
+indexa 3 docs no `PgDirectory` NOSSO (não `MmapDirectory`) e recupera o doc com 'lazy' por busca de termo,
+com `total_bytes() > 0` provando que o storage é o `PgDirectory`, **sem tocar o filesystem**. A impl do trait
+`Directory` (`src/lexical/pg_directory.rs`, atrás da feature `spike-lexical`) compila API-correta para o 0.26.
+
+**Achados:** (a) tantivy 0.26 integra **D1-limpo** na árvore de deps do `theodb_rs` (arrow 58/datafusion), 0
+conflitos, `cargo deny` verde; (b) o núcleo é **pgrx-free** — o `cargo test` in-crate falha no LINK (símbolos
+PG), então o núcleo lexical deve viver num **crate separado sem pgrx** (a direção do M140, "crate núcleo sem
+pgrx") e é testável standalone. Gates 2 (MVCC), 3 (crash-real+WAL sobre páginas PG) e 4 (custo vs pg_textsearch)
+seguem — são a continuação de semanas do spike.
