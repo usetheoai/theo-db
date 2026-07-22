@@ -2388,7 +2388,7 @@ M140.1 (index AM `USING <am>` **ou** função `bm25_search` sobre heap). Superse
 
 **Prior art:** M139 (buffer-then-flush + heap), Tantivy MIT (IndexReader/QueryParser), ADR-0013, M99/M100/M115 (precedente de AM+CustomScan próprios se a M140.1 escolher AM).
 
-## M140.4 — [ ] MVCC/VACUUM/crash provados + primeiro consumidor (theo-lens) *(gated M140.3)*
+## M140.4 — [x] MVCC/VACUUM/crash provados + primeiro consumidor (theo-lens) *(gated M140.3)*
 
 **Objective:** provar a robustez de produção da engine pelas **nossas suítes de isolamento+crash contra o binário
 shipado** (o mesmo padrão do M99/M135, não uma versão mais fraca), manter a **disciplina de thread-safety** do
