@@ -197,4 +197,58 @@ mod tests {
             .unwrap_or("");
         assert!(got.contains("lazy"), "o doc recuperado deve conter 'lazy', got: {got:?}");
     }
+
+    // --- Casos NEGATIVOS e de BORDA do contrato do trait (testing.md § 4.1) ---
+    // O gate 1 não é só o caminho feliz: um Directory que não falha-tipado nas bordas corrompe o Tantivy em
+    // silêncio. Estes provam que o PgDirectory honra os erros tipados que o Tantivy espera.
+
+    #[test]
+    fn test_get_file_handle_absent_is_file_does_not_exist() {
+        let dir = PgDirectory::new();
+        // NEGATIVO: ler um arquivo que não existe → erro tipado FileDoesNotExist (não panic, não None mudo).
+        let err = dir.get_file_handle(Path::new("ausente.term")).unwrap_err();
+        assert!(matches!(err, OpenReadError::FileDoesNotExist(_)), "esperado FileDoesNotExist, got {err:?}");
+    }
+
+    #[test]
+    fn test_delete_absent_is_file_does_not_exist() {
+        let dir = PgDirectory::new();
+        // NEGATIVO: deletar inexistente → DeleteError::FileDoesNotExist.
+        let err = dir.delete(Path::new("ausente.idx")).unwrap_err();
+        assert!(matches!(err, DeleteError::FileDoesNotExist(_)), "esperado FileDoesNotExist, got {err:?}");
+    }
+
+    #[test]
+    fn test_atomic_write_read_roundtrip_and_exists() {
+        let dir = PgDirectory::new();
+        let p = Path::new("meta.json");
+        // BORDA: exists é falso antes; atomic_write; read devolve os bytes exatos; exists vira verdadeiro.
+        assert!(!dir.exists(p).unwrap(), "não deve existir antes da escrita");
+        dir.atomic_write(p, b"{\"segments\":[]}").unwrap();
+        assert!(dir.exists(p).unwrap(), "deve existir após atomic_write");
+        assert_eq!(dir.atomic_read(p).unwrap(), b"{\"segments\":[]}", "read deve devolver os bytes exatos");
+        // BORDA: atomic_write SUBSTITUI (não anexa) — reads nunca veem meia escrita.
+        dir.atomic_write(p, b"{}").unwrap();
+        assert_eq!(dir.atomic_read(p).unwrap(), b"{}", "atomic_write deve substituir, não anexar");
+    }
+
+    #[test]
+    fn test_open_write_twice_is_file_already_exists() {
+        let dir = PgDirectory::new();
+        let p = Path::new("seg.store");
+        // Primeiro open_write + terminate persiste o arquivo.
+        {
+            use tantivy::directory::TerminatingWrite;
+            let mut w = dir.open_write(p).unwrap();
+            w.write_all(b"payload").unwrap();
+            w.terminate().unwrap();
+        }
+        // NEGATIVO: abrir o MESMO path de novo → FileAlreadyExists (o Tantivy conta com isso p/ não sobrescrever
+        // segmentos). `matches!` em vez de `unwrap_err` porque o tipo OK (WritePtr = BufWriter<Box<dyn
+        // TerminatingWrite>>) não é Debug, o que `unwrap_err` exigiria.
+        assert!(
+            matches!(dir.open_write(p), Err(OpenWriteError::FileAlreadyExists(_))),
+            "esperado FileAlreadyExists ao reabrir um path já persistido"
+        );
+    }
 }
