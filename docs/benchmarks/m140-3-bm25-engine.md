@@ -11,11 +11,14 @@
 MVCC-correto) mata o reload-por-query do spike M139 — e o ganho ESCALA com o tamanho do índice.** O nDCG@10
 in-PG reproduz o M140.1 byte-a-byte (0,6611 scifact), confirmando a qualidade na forma final.
 
-- **Latência (o Goal):** o cache elimina o custo de reload (load do heap + rebuild do índice), que escala linear
-  com N; a busca com cache é ~flat. O gate `cache < 50% reload` é **atingido em N ≥ ~5k** (o regime realista do
-  theo-lens): em N=50k o cache é **4,5× mais rápido** (ratio 0,22).
-- **nDCG@10 (DoD-2):** a engine de produção in-PG reproduz o M140.1 (0,6611 scifact) — paridade com
-  `pg_textsearch` (~0,688, ~4% de diferença de impl BM25) e vitória sobre o `ts_rank` shipado (0,072).
+- **Latência (o Goal):** o cache elimina o custo de reload (load do heap + rebuild do índice); nos 3 pontos o
+  **reload cresce mais rápido** que a busca cacheada (a razão cache/reload cai 0,62→0,36→0,22). O gate
+  `cache < 50% reload` é **atingido em N ≥ ~5k** (estimado; a fronteira em 2k é ruidosa): em N=50k o cache é
+  **4,5× mais rápido** (ratio 0,22). Atribuição mecanística (o reload é a única diferença de custo estrutural),
+  não A/B controlado — ver caveats.
+- **nDCG@10 (DoD-2):** a engine de produção in-PG reproduz o M140.1 (0,6611 scifact) — **~4% abaixo do**
+  `pg_textsearch` (0,688; não significance-tested, atribuído a impl/tokenização BM25) e vitória dramática sobre o
+  `ts_rank` shipado (0,072, o baseline real do theo-lens).
 - **MVCC:** provado no smoke — uma sessão com snapshot antigo NÃO vê o build de outra sessão (o cache é
   invalidado pela geração lida sob o snapshot).
 
@@ -27,13 +30,29 @@ in-PG reproduz o M140.1 byte-a-byte (0,6611 scifact), confirmando a qualidade na
 | 10 000 | 5,16 ms | 14,22 ms | **0,36** | 2,8× |
 | 50 000 | 11,76 ms | 54,00 ms | **0,22** | **4,5×** |
 
-**Interpretação honesta:** o cache não muda o custo da BUSCA — ele elimina o **reload** (o `load` do heap +
-rebuild do `MemStore`/índice que o spike fazia a CADA query). Esse reload cresce linear com o tamanho do índice.
-Em N=2000 o reload é barato (~1,6ms do total), então o cache economiza só 38% (o gate `<50%` não é atingido nesse
-tamanho pequeno). A partir de ~5k docs o reload domina e o cache cruza o `<50%`; em 50k já é 4,5×. **Para o
-consumidor real (theo-lens — corpora de traces de milhares a milhões de spans), o reload-por-query seria
-proibitivo e o cache é uma vitória decisiva.** É o `council-benchmark` na prática: mostrar o scaling, não
-cherry-pickar um N.
+**Interpretação honesta (com os caveats de rigor do council-benchmark):**
+
+- **O que o cache elimina:** o **reload** (o `load` do heap + rebuild do `MemStore`/índice que o spike fazia a
+  CADA query). Nos 3 pontos, o **reload cresce mais rápido** que a busca cacheada (não "linear"/"flat" — é
+  sub-linear em ambos: reload 4,25→14,22→54,0 = 12,7× para 25×N; cache 2,65→5,16→11,76 = 4,4×), então a **razão
+  cache/reload cai** (0,62→0,36→0,22). O gate `<50%` é atingido em N≥~5k (interpolado; a fronteira em 2k é
+  ruidosa — ver variância abaixo).
+- **A comparação é confundida (atribuição mecanística, não A/B limpo):** o braço "reload" usa o motor do spike
+  (`lexical_spike_search`, schema body-only, toca 1 doc) e o braço "cache" usa a engine de produção
+  (`bm25_search`, schema id+body, materializa 10 docs). São motores/schemas distintos. **Os confounders são
+  conservadores** — o motor com cache faz MAIS trabalho por query e ainda é mais rápido; a variável realmente
+  isolada é o `load`+`Index::open` a cada query vs o `cache.get_or_build`. A atribuição do ganho ao cache é
+  **mecanística** (o reload é a única diferença de custo estrutural), não um isolamento controlado.
+- **Selectividade máxima (pior caso):** a query `'lazy'` aparece em TODOS os docs → casa 100% do corpus (custo de
+  scan máximo). Uma query seletiva (1 hit) teria reload menor e o ganho do cache seria menos pronunciado. A
+  latência medida é o **pior caso de selectividade**.
+- **Variância (rigor):** k=30 buscas, `mean` reportado (o `p50` nos JSON ≈ mean). Execuções independentes de N=2k
+  deram ratio **0,55–0,66** — variância real bem na fronteira do gate 0,5, por isso o `~5k` é uma estimativa, não
+  um crossover cravado.
+
+**Para o consumidor real (theo-lens — corpora de traces de milhares a milhões de spans), o reload-por-query
+seria proibitivo e o cache é uma vitória clara** — a conclusão (o ganho do cache **cresce** com N) é medida e
+reproduzida (council-benchmark re-rodou a direção). Mostrar o scaling honesto, não cherry-pickar um N.
 
 ## Qualidade — nDCG@10 in-PG (forma final, `ndcg-and-latency-n2000.json`)
 
@@ -42,9 +61,11 @@ cherry-pickar um N.
 | BEIR scifact | 5 183 | 300 | **0,6611** | 0,6611 | 0,688 | 0,072 |
 
 A engine de produção in-PG reproduz o M140.1 **byte-a-byte** (0,6611) — o cache não muda o ranking (D3: ranking é
-independente do storage), e a superfície SQL entrega a mesma qualidade que o harness off-PG. **Paridade com
-`pg_textsearch`** (~4% de diferença, impls BM25 distintas) e **vitória dramática sobre `ts_rank`** (o baseline que
-o theo-lens ships). Honestidade (Regra 7): o argumento do M140 **não** é bater `pg_textsearch` (é paridade); é
+independente do storage), e a superfície SQL entrega a mesma qualidade que o harness off-PG. **~4% ABAIXO do
+`pg_textsearch`** (0,6611 vs 0,688; não significance-tested, impls BM25 distintas — NÃO é superioridade) e
+**vitória dramática sobre `ts_rank`** (o baseline que
+o theo-lens ships). Honestidade (Regra 7): o argumento do M140 **não** é bater `pg_textsearch` (a engine mede
+~4% ABAIXO dele, não significance-tested — não superioridade); é
 own-code permissivo + cache + índice ~3,5× menor (M140.1) + o moat de consolidação in-PG.
 
 ## Correção MVCC (smoke, `scripts/m140-3-bm25-smoke.sh` — 9/9 OK)
