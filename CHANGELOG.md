@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **M140.4** (MVCC/VACUUM/crash + consumidor theo-lens — em progresso): probe de thread-safety **#153** — `theodb_lexical::probe::ThreadRecordingStore` (test-only, núcleo pgrx-free) registra as threads que chamam o `SegmentStore` num build real do Tantivy e prova a **separação estrutural**: como o store no caminho das threads vive no crate pgrx-free (não linka pgrx), é impossível por construção tocar o PG de qualquer worker thread — uma regressão que ponha SPI numa thread teria de sair do núcleo (pega no gate zero-pgrx + review). 2 testes, `cargo test -p theodb_lexical` verde. Suíte de robustez (crash+VACUUM+MVCC contra o binário shipado) + consumidor theo-lens nas fases seguintes
 
 ### Changed
 

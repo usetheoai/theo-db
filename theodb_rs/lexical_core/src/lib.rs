@@ -14,6 +14,12 @@
 pub mod cache;
 pub use cache::IndexCache;
 
+// M140.4 — probe de thread-safety #153 (regressão): registra as threads que chamam o `SegmentStore`
+// num build real do Tantivy e prova a separação estrutural (o caminho das threads é pgrx-free).
+// test-only: é artefato de regressão, não código de produção.
+#[cfg(test)]
+mod probe;
+
 use std::collections::HashMap;
 use std::fmt;
 use std::io::{self, BufWriter, Write};
