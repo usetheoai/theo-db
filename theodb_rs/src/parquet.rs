@@ -1,0 +1,329 @@
+//! Lakehouse Parquet own-code (M143) — lê/escreve Parquet externo via DataFusion + Arrow (Apache-2.0, já no
+//! binário; **sem DuckDB**). Substitui a superfície M62 que dependia do `pg_duckdb`.
+//!
+//! Superfície (todas `#[pg_extern]` → schema `public`, e **REVOKE ALL FROM PUBLIC** no `extension_sql!` abaixo —
+//! escrita/leitura de arquivo server-side é privilégio superuser, como o `COPY … TO file`; least-privilege):
+//! - `public.olap(path)` → `(category, c, a)` tipado — agregado M62 (paridade byte-a-byte vs pg_duckdb).
+//! - `public.read_parquet(path)` → `SETOF jsonb` — leitor geral (schema arbitrário via arrow-json, todos os tipos).
+//! - `public.write_parquet(rel, path)` → bigint — materializa uma tabela em Parquet (SPI → Arrow → ArrowWriter).
+//! A superfície de usuário é `theodb.htap_refresh(rel)`/`theodb.olap(rel)` (sql/85), que chamam estas.
+//!
+//! Segurança/robustez (M143 review): (1) block_on sob `HeldInterrupts` (mesma invariante do `df_executor` — um
+//! longjmp do PG não pode saltar o runtime tokio sem Drop); (2) `GreedyMemoryPool(work_mem)` limita a memória do
+//! DataFusion (parquet grande → erro tipado, não OOM); (3) o `FROM` do write usa o nome CANÔNICO resolvido via
+//! `$1::regclass::text` (injection-safe, não interpolação crua); (4) temp de escrita único por-backend + cleanup.
+//! Erros do DataFusion/SPI/JSON viram erro tipado (`crate::pg::err_input` = ereport ERROR), nunca panic.
+
+use datafusion::arrow::array::{Array, Float64Array, Int64Array, StringArray, StringViewArray};
+use datafusion::arrow::json::writer::LineDelimitedWriter;
+use datafusion::arrow::record_batch::RecordBatch;
+use datafusion::execution::memory_pool::GreedyMemoryPool;
+use datafusion::execution::runtime_env::RuntimeEnvBuilder;
+use datafusion::functions_aggregate::expr_fn::{avg, count};
+use datafusion::prelude::{ParquetReadOptions, SessionConfig, SessionContext, col, lit};
+use pgrx::prelude::*;
+
+/// RAII sobre `InterruptHoldoffCount` (mesmo padrão de `am/df_executor.rs` e `am/datafusion_probe.rs` — replicado
+/// deliberadamente porque é um guard C-macro): segura interrupções através do `block_on` síncrono para que um
+/// cancel/`statement_timeout`/`proc_exit` do PG (siglongjmp C) não salte por cima do runtime tokio vivo + os
+/// frames Rust sem rodar `Drop`. A rede de panic do pgrx NÃO captura um longjmp C.
+struct HeldInterrupts;
+impl HeldInterrupts {
+    fn hold() -> Self {
+        unsafe { pg_sys::InterruptHoldoffCount += 1 };
+        HeldInterrupts
+    }
+}
+impl Drop for HeldInterrupts {
+    fn drop(&mut self) {
+        unsafe { pg_sys::InterruptHoldoffCount -= 1 };
+    }
+}
+
+/// `work_mem` (KB → bytes), piso de 64 KB — o teto de memória do DataFusion (mesmo do df_executor).
+fn work_mem_bytes() -> usize {
+    (unsafe { pg_sys::work_mem }.max(64) as usize) * 1024
+}
+
+/// `SessionContext` limitado por `work_mem` (GreedyMemoryPool) — um parquet maior que work_mem → erro tipado do
+/// DataFusion, não OOM do backend. Um único partition (backend single-thread).
+fn bounded_ctx() -> Result<SessionContext, String> {
+    let runtime = RuntimeEnvBuilder::new()
+        .with_memory_pool(std::sync::Arc::new(GreedyMemoryPool::new(work_mem_bytes())))
+        .build_arc()
+        .map_err(|e| format!("runtime env: {e}"))?;
+    let config = SessionConfig::new().with_target_partitions(1);
+    Ok(SessionContext::new_with_config_rt(config, runtime))
+}
+
+/// Roda `f` num runtime tokio current-thread SOB `HeldInterrupts`. `enable_all()` liga o driver de I/O que o
+/// `object_store` (LocalFileSystem) usa para ler/escrever o arquivo (o df_executor lê de memória e não precisa).
+fn with_runtime<T, F>(f: F) -> Result<T, String>
+where
+    F: std::future::Future<Output = Result<T, String>>,
+{
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| format!("tokio runtime: {e}"))?;
+    let _held = HeldInterrupts::hold();
+    rt.block_on(f)
+}
+
+/// `theodb`/`public.olap(path)` — o agregado canônico do M62 (category, count(*), round(avg(amount),4)) sobre um
+/// Parquet, own-code. Retorna linhas tipadas.
+#[pg_extern]
+fn olap(
+    path: String,
+) -> TableIterator<'static, (name!(category, String), name!(c, i64), name!(a, f64))> {
+    let rows = with_runtime(olap_impl(path))
+        .unwrap_or_else(|e| crate::pg::err_input(&format!("theodb.olap: {e}")));
+    TableIterator::new(rows.into_iter())
+}
+
+async fn olap_impl(path: String) -> Result<Vec<(String, i64, f64)>, String> {
+    let ctx = bounded_ctx()?;
+    let df = ctx
+        .read_parquet(&path, ParquetReadOptions::default())
+        .await
+        .map_err(|e| format!("read_parquet('{path}'): {e}"))?
+        .aggregate(
+            vec![col("category")],
+            vec![count(lit(1i64)).alias("c"), avg(col("amount")).alias("a")],
+        )
+        .map_err(|e| format!("aggregate: {e}"))?;
+    let batches = df.collect().await.map_err(|e| format!("collect: {e}"))?;
+
+    let mut out: Vec<(String, i64, f64)> = Vec::new();
+    for b in &batches {
+        let cats = extract_strings(b.column(0).as_ref())?;
+        let c = b
+            .column(1)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .ok_or("col c (count) não é Int64")?;
+        let a = b
+            .column(2)
+            .as_any()
+            .downcast_ref::<Float64Array>()
+            .ok_or("col a (avg) não é Float64")?;
+        for r in 0..b.num_rows() {
+            let av = (a.value(r) * 10000.0).round() / 10000.0; // round(...,4) — paridade M62/pg_duckdb
+            out.push((cats[r].clone(), c.value(r), av));
+        }
+    }
+    out.sort_by(|x, y| x.0.cmp(&y.0));
+    Ok(out)
+}
+
+/// `theodb`/`public.read_parquet(path)` — leitor geral: cada linha Parquet → um `jsonb` (via arrow-json). Cobre
+/// todos os tipos (escalares e nested) sem `SETOF record` dinâmico. Limitado por work_mem (bounded_ctx).
+#[pg_extern]
+fn read_parquet(path: String) -> SetOfIterator<'static, pgrx::JsonB> {
+    let rows = with_runtime(read_parquet_impl(path))
+        .unwrap_or_else(|e| crate::pg::err_input(&format!("theodb.read_parquet: {e}")));
+    SetOfIterator::new(rows.into_iter())
+}
+
+async fn read_parquet_impl(path: String) -> Result<Vec<pgrx::JsonB>, String> {
+    let ctx = bounded_ctx()?;
+    let df = ctx
+        .read_parquet(&path, ParquetReadOptions::default())
+        .await
+        .map_err(|e| format!("read_parquet('{path}'): {e}"))?;
+    let batches = df.collect().await.map_err(|e| format!("collect: {e}"))?;
+    batches_to_jsonb(&batches)
+}
+
+/// Serializa os RecordBatches em NDJSON (uma linha por row) via arrow-json e converte cada linha num `pgrx::JsonB`.
+fn batches_to_jsonb(batches: &[RecordBatch]) -> Result<Vec<pgrx::JsonB>, String> {
+    let mut out: Vec<pgrx::JsonB> = Vec::new();
+    for b in batches {
+        if b.num_rows() == 0 {
+            continue;
+        }
+        let mut buf: Vec<u8> = Vec::new();
+        {
+            let mut w = LineDelimitedWriter::new(&mut buf);
+            w.write(b).map_err(|e| format!("json write: {e}"))?;
+            w.finish().map_err(|e| format!("json finish: {e}"))?;
+        }
+        for line in buf.split(|&c| c == b'\n') {
+            if line.is_empty() {
+                continue;
+            }
+            let v: serde_json::Value =
+                serde_json::from_slice(line).map_err(|e| format!("json parse: {e}"))?;
+            out.push(pgrx::JsonB(v));
+        }
+    }
+    Ok(out)
+}
+
+/// `theodb`/`public.write_parquet(rel, path)` — materializa uma tabela PG num arquivo Parquet own-code (substitui
+/// o `COPY … (FORMAT parquet)` do pg_duckdb). Lê as linhas via SPI, constrói arrays Arrow por tipo, escreve um
+/// arquivo único via `parquet::arrow::ArrowWriter` (síncrono; escrita atômica temp+rename, temp único por-backend).
+/// `rel` é resolvido/validado via `$1::regclass` e o `FROM` usa o nome CANÔNICO (injection-safe). Retorna o nº de
+/// linhas. Tipo não-suportado → erro tipado (fail-closed). Escalares (int2/4/8, float4/8, bool, text) na v1.
+#[pg_extern]
+fn write_parquet(rel: String, path: String) -> i64 {
+    write_parquet_impl(&rel, &path)
+        .unwrap_or_else(|e| crate::pg::err_input(&format!("theodb.write_parquet: {e}")))
+}
+
+fn write_parquet_impl(rel: &str, path: &str) -> Result<i64, String> {
+    use datafusion::arrow::array::{
+        ArrayRef, BooleanBuilder, Float32Builder, Float64Builder, Int16Builder, Int32Builder,
+        Int64Builder, StringBuilder,
+    };
+    use datafusion::arrow::datatypes::{DataType, Field, Schema};
+    use datafusion::parquet::arrow::ArrowWriter;
+    use std::sync::Arc;
+
+    // Resolve o nome CANÔNICO (valida que `rel` é uma relação real via ::regclass — lança se não) + as colunas.
+    // Tudo via SPI PARAMETRIZADO ($1) — sem interpolação crua (injection-safe). O nome canônico é PG-quotado.
+    let (qname, cols): (String, Vec<(String, u32)>) = Spi::connect(|c| {
+        let qt = c
+            .select("SELECT $1::regclass::text", Some(1), &[rel.into()])
+            .map_err(|e| format!("resolve rel '{rel}': {e}"))?;
+        let qname: String = qt
+            .into_iter()
+            .next()
+            .and_then(|r| r.get::<String>(1).ok().flatten())
+            .ok_or_else(|| format!("relação '{rel}' inválida"))?;
+        let ct = c
+            .select(
+                "SELECT attname::text, atttypid::oid FROM pg_attribute \
+                 WHERE attrelid = $1::regclass AND attnum > 0 AND NOT attisdropped ORDER BY attnum",
+                None,
+                &[rel.into()],
+            )
+            .map_err(|e| format!("catálogo de '{rel}': {e}"))?;
+        let mut cols = Vec::new();
+        for row in ct {
+            let name: String = row.get(1).map_err(|e| format!("attname: {e}"))?.unwrap_or_default();
+            let oid: pg_sys::Oid = row.get(2).map_err(|e| format!("atttypid: {e}"))?.ok_or("atttypid nulo")?;
+            cols.push((name, oid.to_u32()));
+        }
+        Ok::<_, String>((qname, cols))
+    })?;
+    if cols.is_empty() {
+        return Err(format!("relação '{rel}' sem colunas"));
+    }
+
+    // Um builder Arrow por coluna, escolhido pelo OID. Tipo não-suportado na ESCRITA → erro tipado (fail-closed).
+    enum Col {
+        I16(Int16Builder),
+        I32(Int32Builder),
+        I64(Int64Builder),
+        F32(Float32Builder),
+        F64(Float64Builder),
+        Bool(BooleanBuilder),
+        Str(StringBuilder),
+    }
+    let mut builders: Vec<Col> = Vec::with_capacity(cols.len());
+    let mut fields: Vec<Field> = Vec::with_capacity(cols.len());
+    for (name, oid) in &cols {
+        let (dt, col) = match oid {
+            21 => (DataType::Int16, Col::I16(Int16Builder::new())),
+            23 => (DataType::Int32, Col::I32(Int32Builder::new())),
+            20 => (DataType::Int64, Col::I64(Int64Builder::new())),
+            700 => (DataType::Float32, Col::F32(Float32Builder::new())),
+            701 => (DataType::Float64, Col::F64(Float64Builder::new())),
+            16 => (DataType::Boolean, Col::Bool(BooleanBuilder::new())),
+            25 | 1042 | 1043 => (DataType::Utf8, Col::Str(StringBuilder::new())),
+            other => {
+                return Err(format!(
+                    "coluna '{name}': tipo OID {other} não suportado na escrita Parquet own-code (v1: int2/4/8, \
+                     float4/8, bool, text). Legível via read_parquet; escrita ampla é follow-on."
+                ));
+            }
+        };
+        fields.push(Field::new(name, dt, true));
+        builders.push(col);
+    }
+
+    // Lê as linhas (via o nome CANÔNICO — injection-safe) e alimenta os builders por OID.
+    let mut nrows: i64 = 0;
+    Spi::connect(|c| {
+        let sql = format!("SELECT * FROM {qname}");
+        let t = c.select(&sql, None, &[]).map_err(|e| format!("select {qname}: {e}"))?;
+        for row in t {
+            for (i, b) in builders.iter_mut().enumerate() {
+                let ord = i + 1; // SPI é 1-indexed
+                match b {
+                    Col::I16(x) => x.append_option(row.get::<i16>(ord).map_err(|e| format!("col {ord}: {e}"))?),
+                    Col::I32(x) => x.append_option(row.get::<i32>(ord).map_err(|e| format!("col {ord}: {e}"))?),
+                    Col::I64(x) => x.append_option(row.get::<i64>(ord).map_err(|e| format!("col {ord}: {e}"))?),
+                    Col::F32(x) => x.append_option(row.get::<f32>(ord).map_err(|e| format!("col {ord}: {e}"))?),
+                    Col::F64(x) => x.append_option(row.get::<f64>(ord).map_err(|e| format!("col {ord}: {e}"))?),
+                    Col::Bool(x) => x.append_option(row.get::<bool>(ord).map_err(|e| format!("col {ord}: {e}"))?),
+                    Col::Str(x) => x.append_option(row.get::<String>(ord).map_err(|e| format!("col {ord}: {e}"))?),
+                }
+            }
+            nrows += 1;
+        }
+        Ok::<_, String>(())
+    })?;
+
+    let arrays: Vec<ArrayRef> = builders
+        .into_iter()
+        .map(|b| match b {
+            Col::I16(mut x) => Arc::new(x.finish()) as ArrayRef,
+            Col::I32(mut x) => Arc::new(x.finish()) as ArrayRef,
+            Col::I64(mut x) => Arc::new(x.finish()) as ArrayRef,
+            Col::F32(mut x) => Arc::new(x.finish()) as ArrayRef,
+            Col::F64(mut x) => Arc::new(x.finish()) as ArrayRef,
+            Col::Bool(mut x) => Arc::new(x.finish()) as ArrayRef,
+            Col::Str(mut x) => Arc::new(x.finish()) as ArrayRef,
+        })
+        .collect();
+    let schema = Arc::new(Schema::new(fields));
+    let batch = RecordBatch::try_new(schema.clone(), arrays)
+        .map_err(|e| format!("record batch: {e}"))?;
+
+    // Escrita atômica: temp ÚNICO por-backend (evita corrida de dois writes no mesmo path) + rename (commit) +
+    // cleanup do temp em qualquer erro (nunca temp órfão). O temp fica no mesmo dir do path (rename não cross-device).
+    let tmp = format!("{path}.{}.tmp", unsafe { pg_sys::MyProcPid });
+    let write_res = (|| -> Result<(), String> {
+        let file = std::fs::File::create(&tmp).map_err(|e| format!("criar '{tmp}': {e}"))?;
+        let mut w = ArrowWriter::try_new(file, schema, None).map_err(|e| format!("ArrowWriter: {e}"))?;
+        w.write(&batch).map_err(|e| format!("write batch: {e}"))?;
+        w.close().map_err(|e| format!("close: {e}"))?;
+        std::fs::rename(&tmp, path).map_err(|e| format!("rename '{tmp}'→'{path}': {e}"))?;
+        Ok(())
+    })();
+    if write_res.is_err() {
+        let _ = std::fs::remove_file(&tmp); // cleanup best-effort do temp órfão
+    }
+    write_res?;
+    Ok(nrows)
+}
+
+/// O reader Parquet do DataFusion 54 pode emitir Utf8 (`StringArray`) OU Utf8View (`StringViewArray`).
+fn extract_strings(arr: &dyn Array) -> Result<Vec<String>, String> {
+    if let Some(a) = arr.as_any().downcast_ref::<StringArray>() {
+        Ok((0..a.len()).map(|i| a.value(i).to_string()).collect())
+    } else if let Some(a) = arr.as_any().downcast_ref::<StringViewArray>() {
+        Ok((0..a.len()).map(|i| a.value(i).to_string()).collect())
+    } else {
+        Err(format!(
+            "coluna category é {:?}, não uma string array",
+            arr.data_type()
+        ))
+    }
+}
+
+// Least-privilege (M143 review HIGH-1): escrita/leitura de arquivo server-side é privilégio superuser (como o
+// `COPY … TO file`, que exige superuser / pg_write_server_files). O default do pgrx é GRANT EXECUTE TO PUBLIC —
+// REVOKE explícito para que a superfície `theodb.htap_refresh`/`olap` (também REVOKEd no sql/85) não seja
+// contornável chamando as primitivas `public.*` direto. `requires` garante que o REVOKE roda após o CREATE.
+extension_sql!(
+    r#"
+REVOKE ALL ON FUNCTION public.write_parquet(text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.read_parquet(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.olap(text) FROM PUBLIC;
+"#,
+    name = "parquet_revoke_public",
+    requires = [write_parquet, read_parquet, olap],
+);

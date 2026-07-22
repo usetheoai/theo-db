@@ -30,6 +30,8 @@ pg_test = []
 # both the core crate (the Directory/MemStore/SegmentStore) AND tantivy directly (pg_backing.rs
 # builds tantivy schemas in its flush-roundtrip tests). Same tantivy 0.26 → one in the tree.
 spike-lexical = ["dep:theodb_lexical", "dep:tantivy"]
+# M143 — a feature `spike-parquet` foi promovida a permanente (parquet + arrow/json nas deps acima); o leitor
+# own-code vive em `src/parquet.rs`, ligado por default. O spike deu GO (docs/benchmarks/parquet-reader-owncode-spike.md).
 
 [dependencies]
 pgrx = "=0.19.0"
@@ -41,8 +43,11 @@ serde_json = "1"
 # M98 — the single-planner columnar+AI pillar's vectorized executor (upstream apache/datafusion, NOT paradedb's
 # fork — Rule 9). Pinned to pg_search's proven datafusion-54/arrow-58 set; the coexistence with pgrx 0.19 is proven
 # by build (`cargo tree -i arrow` single major). default-features=false to keep the cdylib lean (parsimony).
-datafusion = { version = "54", default-features = false }
-arrow = { version = "58", default-features = false }
+# M143 — lakehouse Parquet own-code no default: `parquet` (leitura/escrita de arquivos) + `arrow/json` (o leitor
+# geral `theodb.read_parquet` serializa cada linha em jsonb via arrow-json). Promovidos de `spike-parquet` (spike
+# GO — docs/benchmarks/parquet-reader-owncode-spike.md) a permanentes: +9 MB no .so vs 118 MB do bundle DuckDB.
+datafusion = { version = "54", default-features = false, features = ["parquet"] }
+arrow = { version = "58", default-features = false, features = ["json"] }
 # M139 spike (opcional — só com feature `spike-lexical`). Tantivy 0.26 é MIT (D1-limpo, verificado); o deny.toml
 # barra qualquer AGPL transitiva. Dep OPCIONAL para não entrar no build shipado até o veredito GO.
 tantivy = { version = "0.26", optional = true }

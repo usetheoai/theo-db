@@ -69,20 +69,18 @@ jobs:
       - name: CA bundle present (theodb.embed HTTPS cloud providers — regression guard)
         run: docker exec theo-db-ci test -f /etc/ssl/certs/ca-certificates.crt
 
-      - name: pg_duckdb ABSENT from default image (M142 tier-out regression guard)
+      - name: Lakehouse own-code + pg_duckdb REMOVIDO (M143 regression guard)
         run: |
-          # M142/ADR-0056: pg_duckdb foi tierado para a imagem opcional theodb-htap. A imagem default NÃO pode
-          # tê-lo (nem a extensão, nem no shared_preload). Falha o job se reaparecer.
+          # M143/ADR-0057: pg_duckdb removido por completo; o lakehouse é own-code (theodb_rs, DataFusion/Arrow).
+          # Falha se pg_duckdb reaparecer, E prova o fluxo M62 own-code (htap_refresh→olap) sem DuckDB.
           n="$(docker exec theo-db-ci psql -U postgres -tAc "SELECT count(*) FROM pg_extension WHERE extname='pg_duckdb'")"
-          [ "$n" = "0" ] || { echo "FAIL: pg_duckdb presente na imagem default (esperado 0, got $n)"; exit 1; }
-          if docker exec theo-db-ci psql -U postgres -tAc "SHOW shared_preload_libraries" | grep -q pg_duckdb; then
-            echo "FAIL: pg_duckdb no shared_preload_libraries da imagem default"; exit 1
-          fi
-          # guard M142: theodb.olap_sql RAISE 0A000 sem pg_duckdb
-          docker exec theo-db-ci psql -U postgres -c "CREATE TABLE _m142guard(category text, amount numeric)" >/dev/null
-          out="$(docker exec theo-db-ci psql -U postgres -tAc "DO \$\$ BEGIN PERFORM theodb.olap_sql('_m142guard'::regclass); RAISE EXCEPTION 'NO_GUARD'; EXCEPTION WHEN sqlstate '0A000' THEN RAISE NOTICE 'GUARD_OK'; END \$\$" 2>&1 || true)"
-          echo "$out" | grep -q GUARD_OK || { echo "FAIL: guard M142 não disparou 0A000 (got: $out)"; exit 1; }
-          echo "M142 default-image tier-out guard OK"
+          [ "$n" = "0" ] || { echo "FAIL: pg_duckdb presente (esperado 0, got $n)"; exit 1; }
+          docker exec theo-db-ci psql -U postgres -c "CREATE TABLE lh(category text, amount float8); INSERT INTO lh VALUES ('a',10),('a',20),('b',5)" >/dev/null
+          docker exec theo-db-ci psql -U postgres -tAc "SELECT theodb.htap_refresh('lh'::regclass)" >/dev/null
+          rows="$(docker exec theo-db-ci psql -U postgres -tAc "SELECT category||'|'||c||'|'||a FROM theodb.olap('lh'::regclass) ORDER BY category")"
+          echo "$rows" | grep -q "^a|2|15" && echo "$rows" | grep -q "^b|1|5" \
+            || { echo "FAIL: lakehouse own-code M62 (got: $rows)"; exit 1; }
+          echo "M143 lakehouse own-code OK (sem pg_duckdb)"
 
       - uses: actions/setup-python@v5
         with:
@@ -478,45 +476,3 @@ jobs:
       - name: Teardown
         if: always()
         run: docker rm -f theo-db-col || true
-
-  htap-image:
-    # M142/ADR-0056: builda a imagem OPCIONAL theodb-htap (= imagem default + pg_duckdb, camada não fork) e
-    # prova pg_duckdb presente + a superfície M62 e2e. Roda no mesmo self-hosted runner (a imagem theo-db:ci
-    # buildada em image-and-bench persiste no daemon docker local → THEODB_BASE=theo-db:ci).
-    needs: image-and-bench
-    runs-on: [self-hosted, theodb-do]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Build theodb-htap (FROM theo-db:ci + camada pg_duckdb)
-        run: docker build -f packaging/Dockerfile.htap --build-arg THEODB_BASE=theo-db:ci -t theo-db-htap:ci .
-      - name: Start theodb-htap
-        run: |
-          docker run -d --name theo-db-htap -e POSTGRES_PASSWORD=postgres theo-db-htap:ci
-          for i in $(seq 1 40); do
-            [ "$(docker inspect -f '{{.State.Health.Status}}' theo-db-htap)" = healthy ] && break
-            sleep 2
-          done
-          docker inspect -f '{{.State.Health.Status}}' theo-db-htap | grep -q healthy
-      - name: HTAP smoke (pg_duckdb presente + M62 e2e + guard positivo)
-        run: |
-          n="$(docker exec theo-db-htap psql -U postgres -tAc "SELECT count(*) FROM pg_extension WHERE extname='pg_duckdb'")"
-          [ "$n" = "1" ] || { echo "FAIL: pg_duckdb ausente na imagem htap (got $n)"; exit 1; }
-          # segurança (defense-in-depth, M142): community extensions do DuckDB DEVEM estar off (código não-auditado)
-          docker exec theo-db-htap psql -U postgres -tAc "SHOW duckdb.allow_community_extensions" | grep -qi off \
-            || { echo "FAIL: duckdb.allow_community_extensions não é off (segurança)"; exit 1; }
-          docker exec theo-db-htap psql -U postgres -c "CREATE TABLE h(category text, amount double precision); INSERT INTO h VALUES ('a',10),('a',20),('b',5)" >/dev/null
-          COPY_SQL="$(docker exec theo-db-htap psql -U postgres -tAc "SELECT theodb.htap_refresh_sql('h'::regclass)")"
-          docker exec theo-db-htap psql -U postgres -c "$COPY_SQL" >/dev/null
-          P="$(docker exec theo-db-htap psql -U postgres -tAc "SELECT theodb._htap_path('h'::regclass)")"
-          docker exec theo-db-htap psql -U postgres -tAc "SELECT theodb.htap_register('h'::regclass, '$P')" >/dev/null
-          OLAP="$(docker exec theo-db-htap psql -U postgres -tAc "SELECT theodb.olap_sql('h'::regclass)")"
-          rows="$(docker exec theo-db-htap psql -U postgres -tAc "$OLAP")"
-          echo "$rows" | grep -q "^a|2|15" || { echo "FAIL: olap e2e inesperado (got: $rows)"; exit 1; }
-          docker cp sql/tests/htap_guard_test.sql theo-db-htap:/tmp/g.sql
-          docker exec theo-db-htap psql -U postgres -v ON_ERROR_STOP=1 -f /tmp/g.sql 2>&1 | grep -q HTAP_GUARD_TEST_OK || { echo "FAIL: htap_guard_test"; exit 1; }
-          echo "HTAP image smoke OK"
-      - name: Teardown
-        if: always()
-        run: docker rm -f theo-db-htap || true

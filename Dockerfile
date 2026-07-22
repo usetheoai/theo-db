@@ -1,8 +1,9 @@
 # syntax=docker/dockerfile:1
-# TheoDB image (DEFAULT) — PostgreSQL 18 + theodb_rs (own vector type + ANN AM, M17/M69/M70).
+# TheoDB image — PostgreSQL 18 + theodb_rs (own vector type + ANN AM + lakehouse Parquet own-code).
 # M70: pgvector + pgvectorscale REMOVIDOS — o tipo `vector` e os índices ANN são 100% own-code (theodb_rs).
-# M142: pg_duckdb REMOVIDO do default (tier-out) — o lakehouse de arquivos externos (Parquet/Iceberg/CSV, aposta
-#       D2) vive agora na imagem OPCIONAL `theodb-htap` (packaging/Dockerfile.htap, camada sobre esta). ADR-0056.
+# M143: pg_duckdb REMOVIDO por completo — o lakehouse de arquivos externos (ler/escrever/agregar Parquet) é agora
+#       own-code no theodb_rs (DataFusion/Arrow, sem DuckDB). Uma imagem só (a theodb-htap do M142 foi aposentada).
+#       ADR-0057. Este é o ÚNICO artefato de imagem — sem componente C++/httpfs.
 # Multi-stage: o stage builder compila a extensão Rust; o runtime copia SÓ os artefatos.
 
 # Shared base pinned by digest — used by BOTH stages so the extension is compiled against the exact
@@ -36,9 +37,8 @@ RUN cargo pgrx init --pg$PG_MAJOR "$(which pg_config)"
 COPY theodb_rs/ /tmp/theodb_rs/
 RUN cd /tmp/theodb_rs && cargo pgrx install --release --features pg$PG_MAJOR
 
-# ---- Stage 2: runtime (postgres:18 + theodb_rs) — M70: SEM pgvector/pgvectorscale; M142: SEM pg_duckdb ----
-# O pg_duckdb (columnar/HTAP lakehouse, aposta D2) foi tierado para a imagem opcional theodb-htap
-# (packaging/Dockerfile.htap = FROM esta imagem + a camada pg_duckdb). ADR-0056.
+# ---- Stage 2: runtime (postgres:18 + theodb_rs) — SEM pgvector/pgvectorscale (M70); SEM pg_duckdb (M143) ----
+# O lakehouse é own-code no theodb_rs (DataFusion/Arrow) — nenhum componente C++/httpfs. ADR-0057.
 FROM ${BASE_IMAGE}
 ARG PG_MAJOR=18
 
@@ -66,7 +66,7 @@ RUN set -eux; \
         sql/60-theodb-nl.sql sql/61-theodb-nl-config.sql sql/70-theodb-ml.sql \
         sql/80-theodb-migrate.sql sql/85-theodb-htap.sql > sql/theodb--1.0.sql; \
     install -m 0644 theodb.control sql/theodb--1.0.sql sql/theodb--1.0--1.1.sql sql/theodb--1.1--1.2.sql \
-        sql/theodb--1.2--1.3.sql sql/theodb--1.3--1.4.sql sql/theodb--1.4--1.5.sql \
+        sql/theodb--1.2--1.3.sql sql/theodb--1.3--1.4.sql sql/theodb--1.4--1.5.sql sql/theodb--1.5--1.6.sql \
         "/usr/share/postgresql/$PG_MAJOR/extension/"; \
     rm -rf /tmp/theodb
 
@@ -78,10 +78,13 @@ COPY <<'EOF' /docker-entrypoint-initdb.d/00-create-theodb.sql
 CREATE EXTENSION IF NOT EXISTS theodb CASCADE;
 -- theodb_rs (M17/M69/M70): o tipo `vector` own-code + a superfície embed/ai/nl em Rust + os AMs. Sem deps externas.
 CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE;
--- M142: pg_duckdb NÃO é mais criado no default (tier-out). A superfície HTAP codegen (theodb.htap_refresh_sql/
--- olap_sql) permanece na extensão theodb mas RAISE feature_not_supported (0A000) sem pg_duckdb (guard M142). Para
--- o lakehouse de arquivos externos, use a imagem theodb-htap (packaging/Dockerfile.htap). ADR-0056.
+-- M143: o lakehouse é own-code no theodb_rs (theodb.htap_refresh/olap + read_parquet/write_parquet own-code, sem
+-- DuckDB). Nada de pg_duckdb. ADR-0057.
 EOF
+
+# M62/M143 — o diretório de snapshots HTAP: theodb.htap_refresh escreve os Parquet own-code (public.write_parquet)
+# aqui, server-side como o usuário postgres. Criado + chowned no build (o writer own-code não cria o dir base).
+RUN mkdir -p /var/lib/postgresql/htap && chown postgres:postgres /var/lib/postgresql/htap
 
 HEALTHCHECK --interval=5s --timeout=5s --start-period=10s --retries=5 \
   CMD pg_isready -h localhost -p 5432 -U postgres -q
