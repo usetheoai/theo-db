@@ -27,7 +27,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- Imagem default voltou a buildar: `PGRX_VERSION` do Dockerfile repinado de `0.16.1` para `0.19.0` (o crate `theodb_rs` foi para pgrx `=0.19.0` no M98 mas o Dockerfile não acompanhou; cargo-pgrx e pgrx são lockstep) (M142)
+- Imagem default voltou a buildar: `PGRX_VERSION` `0.16.1`→`0.19.0` e `RUST_VERSION` `1.91.0`→`1.97.1` no Dockerfile (o crate `theodb_rs` foi para pgrx `=0.19.0` no M98, que exige cargo-pgrx 0.19 + rustc ≥ 1.96; o Dockerfile nunca acompanhou) (M142)
 
 ### Security
 

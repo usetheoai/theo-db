@@ -20,7 +20,8 @@ ARG PG_MAJOR=18
 # M142: repin de 0.16.1 → 0.19.0. cargo-pgrx e o crate pgrx são lockstep; theodb_rs foi para pgrx =0.19.0 no M98
 # (impl(m98)) mas o Dockerfile nunca acompanhou (o repin M135 não pegou) — a imagem default não buildava. Fix.
 ARG PGRX_VERSION=0.19.0
-ARG RUST_VERSION=1.91.0
+# M142: repin de 1.91.0 → 1.97.1. cargo-pgrx 0.19.0 exige rustc ≥ 1.96; 1.97.1 é o toolchain provado no e2e-runner.
+ARG RUST_VERSION=1.97.1
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential postgresql-server-dev-$PG_MAJOR libssl-dev pkg-config clang curl ca-certificates && \
     rm -rf /var/lib/apt/lists/*
