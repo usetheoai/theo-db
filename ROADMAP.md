@@ -2325,7 +2325,7 @@ O risco **não está no BM25** — está em fazer o Tantivy viver dentro do banc
 > **lexical standalone** (theo-lens/RAG-keyword), o **moat de consolidação** in-PG, e **features** (phrase/fuzzy/
 > facet) que o PG-FTS não tem. As fatias abaixo entregam valor incremental; cada uma é um milestone com release.
 
-## M140.1 — [ ] Medição + decisão de arquitetura de storage lexical *(gated M139 `[x]`)*
+## M140.1 — [x] Medição + decisão de arquitetura de storage lexical *(gated M139 `[x]`)*
 
 **Objective:** cravar, com número, (a) que a BM25 own-engine bate `ts_rank` **e** `pg_textsearch` em nDCG@10 num
 corpus de **traces/logs reais do theo-lens** (não só BEIR) — o consumidor real —, e (b) qual storage a engine
