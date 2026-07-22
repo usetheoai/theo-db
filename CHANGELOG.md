@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **M140.1** (medição lexical): fundação do harness de benchmark lexical — `theodb_bench/knownitem.py` (métricas known-item MRR@k / Success@1 / Recall@k + gerador determinístico de query, metodologia TREC named-page finding para corpus sem qrels humanos) e `theodb_bench/logcorpus.py` (loader do corpus público LogHub como proxy lexical trace-like, com fixture real-shaped embutido e cache determinístico). Reusa `metrics.recall_at_n` (Rule 9). 14 testes (T0.1/T0.2), ruff limpo
 
 ### Changed
 - README atualizado ao estado real (estava em v0.35.0, ~90 releases atrás): corrige erros factuais (**PostgreSQL 18**, não 17; tipo `vector` **own-code**, não pgvector/vectorscale no CASCADE), reescreve "Como funciona"/"Por que" com os pilares atuais (vetor own-code, híbrido AI-native, colunar próprio, grafo nativo, HTAP), atualiza o estado medido do pilar vetorial para o veredito FINAL (M73/M74), e substitui o roadmap M0–M9 genérico pelo status real (69/71) + o planejado (M140.x, M141)
