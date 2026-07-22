@@ -4,8 +4,9 @@
 
 TheoDB é um banco de dados open-source e 100% compatível com PostgreSQL, empacotado como uma
 edição única para download que roda no seu laptop, on-premises, na borda, em qualquer nuvem,
-em Kubernetes ou bare metal. Num só pacote você tem busca vetorial para aplicações de IA
-e analytics colunar sobre dados transacionais vivos — sem licença por vCPU e sem lock-in.
+em Kubernetes ou bare metal. Num só pacote você tem busca vetorial + híbrida (BM25+vetor) para
+aplicações de IA, grafo para GraphRAG, e analytics colunar sobre dados transacionais vivos —
+tudo em SQL, com código próprio, sem licença por vCPU e sem lock-in.
 
 > ⚠️ **Status:** em desenvolvimento ativo, ainda **pré-1.0** (releases 0.x — ver [`CHANGELOG.md`](./CHANGELOG.md)).
 > Sem afirmação de "production-ready" até haver evidência de uso sustentado (`public-copy.md`).
@@ -21,30 +22,31 @@ em abertura, custo, portabilidade e **independência de modelo** (qualquer model
 lock-in). Metas de performance são **metas comprovadas por benchmark reproduzível** em `docs/benchmarks/` —
 nunca afirmações sem evidência. Estratégia completa: [`docs/adr/0002-north-star-equal-or-superior-to-alloydb.md`](./docs/adr/0002-north-star-equal-or-superior-to-alloydb.md).
 
-> **Estado medido do pilar vetorial (honesto, M33).** Head-to-head reproduzível vs **ScaNN OSS** — o
-> algoritmo do índice vetorial do AlloyDB — no SIFT1M (1M×128):
-> [`docs/benchmarks/m33-scann-headtohead.md`](./docs/benchmarks/m33-scann-headtohead.md). Resultado: **paridade
-> de recall@10** (ambos alcançam ≥0,99), mas **GAP de throughput** — no ponto recall≥0,99 o ScaNN é ~25× mais
-> rápido em QPS e ~26× menor em p50 (quantização anisotrópica + AH SIMD) que o `theodb_ivfflat` (IVFFlat
-> full-precision). A
-> superioridade vetorial em **velocidade ANN pura ainda NÃO está cumprida**; o diferencial atual do TheoDB é
-> busca vetorial **dentro de um banco transacional** (não uma biblioteca in-memory). Fechar o gap de latência
-> (quantização no índice) é trabalho de milestone futuro. Ver também o GOTO P0 do CTO.
+> **Estado medido FINAL do pilar vetorial (honesto — M73/M74, `docs/adr/0035`, `docs/adr/0036`).** Depois de
+> medir head-to-head reproduzível vs **ScaNN OSS** (o algoritmo do AlloyDB) e vs **pgvector** no SIFT1M:
+> - **Paridade de recall own-code classe-pgvector: ALCANÇADA** (M60/M69/M70) — o tipo `vector` e os índices ANN
+>   são 100% próprios, sem pgvector/pgvectorscale.
+> - **Throughput multi-cliente competitivo-a-superior** vs pgvector no regime 128d clusterizado (M72, +11% QPS
+>   a recall casado) — [`docs/benchmarks/`](./docs/benchmarks/).
+> - **Superioridade de QPS vetorial sobre o ScaNN/AlloyDB: MEDIDA como NÃO-ALCANÇÁVEL** por uma extensão
+>   PostgreSQL permissiva ([`docs/benchmarks/m73-headtohead-verdict.md`](./docs/benchmarks/m73-headtohead-verdict.md)) —
+>   o gap (~25–44× @ 0,99) é de **paradigma** (AH-LUT anisotrópico + não pagar o imposto MVCC/WAL), não de
+>   engenharia. Posicionamento honesto: **paridade de recall + memória billion-scale + AI-native/HTAP/aberto** —
+>   **nunca** "mais rápido que o AlloyDB no vetor".
 >
-> **Atualização (M45).** Sob medição rigorosa mean±std no SIFT1M, o índice-AM próprio `theodb_hnsw` fica em
-> **paridade** (não superioridade) com o `pgvector hnsw` na fronteira recall×QPS —
-> [`docs/benchmarks/m45-pareto-sift1m.md`](./docs/benchmarks/m45-pareto-sift1m.md). Nenhum claim de "mais
-> rápido que o pgvector" é permitido: é paridade competitiva.
+> Onde o TheoDB pode ser genuinamente superior é a **superfície AI-native híbrida** (as duas pernas próprias,
+> vetor + lexical, no mesmo banco transacional) — o reposicionamento do North Star está em
+> [`docs/adr/0033`](./docs/adr/) (proposto, decisão do owner; o mandato LOCKED do ADR-0002 permanece até assinatura).
 
 ---
 
 ## Por que TheoDB
 
 - **Open-source de verdade.** Sem licença por vCPU, sem open-core escondendo os recursos centrais. Auditável, customizável, contribuível.
-- **Bateria inclusa.** PostgreSQL + extensões maduras (incluindo um pgvector customizado) pré-instaladas e tunadas em conjunto — você não monta as peças.
+- **Bateria inclusa, código próprio.** PostgreSQL 18 + a extensão `theodb_rs` (tipo `vector` own-code, índices ANN, busca híbrida, grafo, colunar) pré-instalada e tunada — você não monta as peças nem aluga o vetor.
 - **Roda em qualquer lugar.** A mesma imagem vai do laptop ao bare metal regulado.
 - **100% compatível com PostgreSQL.** Seus drivers, ferramentas e aplicações funcionam sem mudança.
-- **IA no banco onde seus dados já estão.** Embeddings e busca vetorial via SQL, sem ETL para um sistema separado.
+- **IA no banco onde seus dados já estão.** Embeddings, busca vetorial + híbrida (BM25+vetor+RRF), rerank, NL→SQL e GraphRAG via SQL — sem ETL para um sistema separado.
 
 ---
 
@@ -59,20 +61,25 @@ nunca afirmações sem evidência. Estratégia completa: [`docs/adr/0002-north-s
 
 ## Como funciona
 
-TheoDB **não é um fork** do PostgreSQL nem um engine novo. É uma distribuição que compõe o
-PostgreSQL upstream com um conjunto curado de extensões e ferramentas, empacotados e tunados
-em conjunto:
+TheoDB **não é um fork** do PostgreSQL. É o **PostgreSQL 18 upstream** + uma extensão Rust própria
+(`theodb_rs`) que traz os pilares de IA, vetorial, grafo e colunar **como código próprio** (não peças
+alugadas), empacotados e tunados numa imagem única:
 
 ```
-TheoDB = PostgreSQL (upstream) + pgvector customizado + camada columnar
-         + integração de IA/ML + tooling de migração
+TheoDB = PostgreSQL 18 (upstream, sem fork)
+       + theodb_rs (extensão Rust própria):
+           · tipo `vector` own-code + AMs ANN próprios (theodb_hnsw / theodb_ivfflat / theodb_symqg)
+           · superfície AI-native SQL: embed, hybrid_search_rrf (BM25+vetor+RRF), rerank, NL→SQL, grafo
+           · TableAM colunar próprio (theodb_columnar) para analytics sobre dados transacionais vivos
+           · engine de grafo nativo (persisted-CSR) para GraphRAG
+       + pg_duckdb (MIT) para HTAP
          empacotado como uma imagem única que roda em qualquer lugar
 ```
 
-A diferenciação técnica está no **pgvector customizado** (índice ANN próprio integrado ao planner do
-Postgres — desempenho medido em `docs/benchmarks/`, sem claim sem evidência) e no **empacotamento
-integrado** dos pilares de IA, analytics e operação.
-Detalhes de arquitetura, pilares de capacidade e o recorte de MVP estão no [`PRD.md`](./PRD.md).
+A diferenciação técnica é ter as **duas pernas próprias** (vetorial + lexical + grafo) **dentro de um banco
+transacional**, numa superfície SQL AI-native — não uma biblioteca in-memory nem um bolt-on de busca externa.
+Toda afirmação de performance é medida em [`docs/benchmarks/`](./docs/benchmarks/), nunca sem evidência.
+Detalhes de arquitetura, pilares e decisões travadas (D1–D7) estão no [`PRD.md`](./PRD.md) e nos [`docs/adr/`](./docs/adr/).
 
 ---
 
@@ -86,10 +93,12 @@ docker pull ghcr.io/usetheodev/theo-db:latest
 docker run -d --name theodb -e POSTGRES_PASSWORD=postgres -p 5432:5432 ghcr.io/usetheodev/theo-db:latest
 ```
 
-A imagem cria a extensão automaticamente no primeiro init. Em **qualquer PostgreSQL 17**, instale-a com:
+A imagem cria a extensão automaticamente no primeiro init. Roda em **PostgreSQL 18** (a distribuição migrou
+do 17 para o 18 no M135; o tipo `vector` e os índices ANN são **own-code**, sem depender de pgvector/pgvectorscale):
 
 ```sql
-CREATE EXTENSION theodb CASCADE;   -- CASCADE instala as dependências (vector, vectorscale)
+CREATE EXTENSION theodb CASCADE;   -- CASCADE puxa theodb_rs (o tipo `vector` own-code + a superfície ai.*)
+ALTER EXTENSION theodb_rs UPDATE;  -- upgrade in-place da extensão (cadeia de upgrade própria, M137)
 ```
 
 Passo a passo das 12 capacidades em [`docs/quickstart.md`](./docs/quickstart.md).
@@ -101,25 +110,27 @@ Passo a passo das 12 capacidades em [`docs/quickstart.md`](./docs/quickstart.md)
 
 ---
 
-## Roadmap macro (inicial)
+## Status & roadmap
 
-> Visão macro de alto nível. Os marcos serão refinados em planos detalhados antes de cada
-> implementação. Nada aqui é uma data ou promessa de entrega.
+> Estado real, não promessa. A lista completa e viva de milestones está em [`ROADMAP.md`](./ROADMAP.md)
+> (**69 de 71 entregues** até a v0.125.0). Nada aqui é data ou promessa; performance é sempre medida em
+> [`docs/benchmarks/`](./docs/benchmarks/). Continua **pré-1.0** (ver o disclaimer de status acima).
 
-- [ ] **M0 — Fundação & decisões.** Licença do projeto, due-diligence de licença das dependências, escolha dos majors do PostgreSQL suportados, ADRs de arquitetura ("sem fork").
-- [ ] **M1 — Core + empacotamento.** Distribuição PostgreSQL-compatível em imagem container, extensões pré-instaladas, suíte de compatibilidade passando.
-- [ ] **M2 — Vetorial / IA (pilar killer).** pgvector customizado com índice ANN avançado + geração de embeddings via SQL. *(MVP candidato)*
-- [ ] **M3 — Migração mínima.** Import/export e caminho de entrada a partir do PostgreSQL vanilla.
-- [ ] **M6 — Analytics colunar / HTAP.** Camada de armazenamento colunar com escolha de plano row vs colunar.
-- [ ] **M7 — IA avançada.** Filtered vector search, hybrid search + reranking, NL → SQL com views seguras.
-- [ ] **M8 — Escala & auto-tuning (no engine).** Index advisor + autovacuum adaptativo como capacidade da
-  extensão. *(Read pools / observabilidade OTel / control-plane são deploy/plataforma — fora do escopo deste
-  repositório, que é o banco.)*
-- [ ] **M9 — Ecossistema & DX.** Integrações LangChain/LlamaIndex, migração a partir de AlloyDB.
+**O que já existe e foi medido:**
 
-O recorte exato do MVP (provavelmente **M0 → M2**) será fechado no próximo passo de planejamento.
-Nota: control-plane, deploy K8s e a superfície de plataforma **não fazem parte deste repositório** —
-o foco é o banco de dados (o engine + a extensão).
+- **Pilar vetorial** — tipo `vector` e índices ANN (`theodb_hnsw`, `theodb_ivfflat`, `theodb_symqg`) **own-code**, com paridade de recall classe-pgvector (ver o estado medido na Missão). Sem pgvector/pgvectorscale.
+- **Superfície AI-native (SQL)** — embeddings (`theodb.embed`), busca **híbrida** `ai.hybrid_search_rrf` (BM25/`ts_rank_cd` + vetor via RRF), rerank, NL→SQL com defesa a injeção, extração de grafo. Servida 100% pela extensão Rust — **sem `plpython3u`**.
+- **Colunar / HTAP** — TableAM colunar próprio (`theodb_columnar`) com pushdown de agregação/GROUP-BY/zone-map + `pg_duckdb` (MIT) para analytics vetorizado sobre dados vivos.
+- **Grafo nativo** — engine de grafo persisted-CSR para GraphRAG (`theodb.graph_*`).
+- **Fundação de banco** — **PostgreSQL 18**, cadeia de upgrade própria (`ALTER EXTENSION ... UPDATE`), gates mecânicos de qualidade no CI (clippy `-D warnings`, rustfmt, Postgres `--enable-cassert`, license-gate D1, pgspot).
+
+**O que estamos construindo agora:**
+
+- **M140.1–M140.4 — engine lexical própria** sobre Tantivy (MIT), in-PG, transacional. Um spike (M139) já **provou a viabilidade** (MVCC + WAL + crash-real medidos; índice 2,8× menor que `pg_textsearch`) — a produção é sequenciada: medição+arquitetura → crate núcleo sem pgrx → engine BM25 com cache → MVCC/VACUUM/crash provados + primeiro consumidor (o [theo-lens](../theo-lens/), observabilidade). O ganho honesto é a **busca lexical standalone** e o **moat de consolidação** (BM25+vetor+híbrido numa store transacional aberta), **não** o retrieval híbrido (o M138 mediu que BM25 não move a fusão dominada pelo vetor).
+- **M141 — dogfood `running`** — mover uma capability theo-data (theo-rag/theo-memory/theo-lens) para produção sobre TheoDB self-hosted por ≥30 dias, com evidência. É o gate real para reivindicar production-ready (nenhum benchmark substitui uso real).
+
+Nota de escopo: HA/replicação/control-plane e deploy K8s **não fazem parte deste repositório** — o foco é o
+banco de dados (o engine + a extensão). Referências científicas de cada pilar abaixo.
 
 ---
 

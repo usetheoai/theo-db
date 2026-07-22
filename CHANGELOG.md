@@ -15,6 +15,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 ### Changed
+- README atualizado ao estado real (estava em v0.35.0, ~90 releases atrás): corrige erros factuais (**PostgreSQL 18**, não 17; tipo `vector` **own-code**, não pgvector/vectorscale no CASCADE), reescreve "Como funciona"/"Por que" com os pilares atuais (vetor own-code, híbrido AI-native, colunar próprio, grafo nativo, HTAP), atualiza o estado medido do pilar vetorial para o veredito FINAL (M73/M74), e substitui o roadmap M0–M9 genérico pelo status real (69/71) + o planejado (M140.x, M141)
 - Roadmap: **M140 decomposto em M140.1–M140.4** (medição+decisão de arquitetura → crate núcleo sem pgrx → engine BM25 de produção com cache → MVCC/VACUUM/crash provados + consumidor theo-lens). Motivação: M139 deu GO e o consumidor real (theo-lens, busca lexical-pura em traces) justifica a engine own-code; ganhos medidos: índice 2,8× menor que pg_textsearch, MVCC/crash herdados do heap. Cada fatia entrega valor com release próprio
 
 ### Deprecated
