@@ -15,6 +15,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 - Lakehouse Parquet own-code no default (M143, Fase 1): `theodb.read_parquet(path)`→SETOF jsonb (arrow-json, todos os tipos) + `theodb.olap(path)` tipado (paridade M62), via DataFusion/Arrow **sem DuckDB**; feature `spike-parquet` promovida a permanente
+- `theodb.write_parquet(rel, path)` own-code (M143, Fase 2): materializa uma tabela PG em Parquet via `parquet::arrow::ArrowWriter` (escrita atômica temp+rename); round-trip write→read→olap validado sem DuckDB; tipo não-suportado na escrita → erro tipado fail-closed
 
 - Spike (Fase 4) do leitor Parquet own-code (`theodb.read_parquet_agg_spike`, atrás da feature `spike-parquet`, off no build default): lê Parquet externo via DataFusion/Arrow (Apache-2.0, sem DuckDB) — veredito **VIÁVEL**, paridade byte-a-byte vs `pg_duckdb.read_parquet` a +9 MB no `.so` vs 118 MB do bundle DuckDB (`docs/benchmarks/parquet-reader-owncode-spike.md`)
 - Roadmap amended: added M143 Remoção total do `pg_duckdb` (lakehouse Parquet own-code no default) (`/roadmap-feature pgduckdb-total-removal`)

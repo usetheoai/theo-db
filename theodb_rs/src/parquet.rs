@@ -125,6 +125,131 @@ fn batches_to_jsonb(batches: &[RecordBatch]) -> Result<Vec<pgrx::JsonB>, String>
     Ok(out)
 }
 
+/// `theodb.write_parquet(rel, path)` — materializa uma tabela PG num arquivo Parquet own-code (substitui o
+/// `COPY … (FORMAT parquet)` do pg_duckdb). Lê as linhas via SPI, constrói arrays Arrow por tipo, e escreve um
+/// arquivo único via `parquet::arrow::ArrowWriter` (síncrono — sem runtime async). Escrita atômica (temp+rename)
+/// para não deixar Parquet meio-escrito num crash. `rel` deve ser um nome de relação válido (`regclass::text`,
+/// já quotado/qualificado pelo PG — injection-safe). Retorna o nº de linhas escritas. Tipo não-suportado → erro
+/// tipado (fail-closed). Cobre os escalares comuns (int2/4/8, float4/8, bool, text); timestamp/date/decimal na
+/// escrita v1 declinam com erro tipado (legíveis via read_parquet→jsonb; write amplo é follow-on — grill R1).
+#[pg_extern]
+fn write_parquet(rel: String, path: String) -> i64 {
+    write_parquet_impl(&rel, &path)
+        .unwrap_or_else(|e| crate::pg::err_input(&format!("theodb.write_parquet: {e}")))
+}
+
+fn write_parquet_impl(rel: &str, path: &str) -> Result<i64, String> {
+    use datafusion::arrow::array::{
+        ArrayRef, BooleanBuilder, Float32Builder, Float64Builder, Int16Builder, Int32Builder,
+        Int64Builder, StringBuilder,
+    };
+    use datafusion::arrow::datatypes::{DataType, Field, Schema};
+    use datafusion::parquet::arrow::ArrowWriter;
+    use std::sync::Arc;
+
+    // Colunas (nome, OID) da relação — via catálogo, na ordem de attnum. `rel` é regclass::text (validado pelo PG).
+    let cols: Vec<(String, u32)> = Spi::connect(|c| {
+        let sql = format!(
+            "SELECT attname::text, atttypid::oid FROM pg_attribute \
+             WHERE attrelid = '{}'::regclass AND attnum > 0 AND NOT attisdropped ORDER BY attnum",
+            rel.replace('\'', "''")
+        );
+        let t = c.select(&sql, None, &[]).map_err(|e| format!("catálogo: {e}"))?;
+        let mut v = Vec::new();
+        for row in t {
+            let name: String = row.get(1).map_err(|e| format!("attname: {e}"))?.unwrap_or_default();
+            let oid: pg_sys::Oid = row.get(2).map_err(|e| format!("atttypid: {e}"))?.ok_or("atttypid nulo")?;
+            v.push((name, oid.to_u32()));
+        }
+        Ok::<_, String>(v)
+    })?;
+    if cols.is_empty() {
+        return Err(format!("relação '{rel}' sem colunas"));
+    }
+
+    // Um builder Arrow por coluna, escolhido pelo OID. Tipo não-suportado na ESCRITA → erro tipado (fail-closed).
+    enum Col {
+        I16(Int16Builder),
+        I32(Int32Builder),
+        I64(Int64Builder),
+        F32(Float32Builder),
+        F64(Float64Builder),
+        Bool(BooleanBuilder),
+        Str(StringBuilder),
+    }
+    let mut builders: Vec<Col> = Vec::with_capacity(cols.len());
+    let mut fields: Vec<Field> = Vec::with_capacity(cols.len());
+    for (name, oid) in &cols {
+        let (dt, col) = match oid {
+            21 => (DataType::Int16, Col::I16(Int16Builder::new())),
+            23 => (DataType::Int32, Col::I32(Int32Builder::new())),
+            20 => (DataType::Int64, Col::I64(Int64Builder::new())),
+            700 => (DataType::Float32, Col::F32(Float32Builder::new())),
+            701 => (DataType::Float64, Col::F64(Float64Builder::new())),
+            16 => (DataType::Boolean, Col::Bool(BooleanBuilder::new())),
+            25 | 1042 | 1043 => (DataType::Utf8, Col::Str(StringBuilder::new())),
+            other => {
+                return Err(format!(
+                    "coluna '{name}': tipo OID {other} não suportado na escrita Parquet own-code (v1: int2/4/8, \
+                     float4/8, bool, text). Legível via read_parquet; escrita ampla é follow-on."
+                ));
+            }
+        };
+        fields.push(Field::new(name, dt, true));
+        builders.push(col);
+    }
+
+    // Lê as linhas e alimenta os builders (por OID). SPI select da relação inteira.
+    let mut nrows: i64 = 0;
+    Spi::connect(|c| {
+        let sql = format!("SELECT * FROM {rel}");
+        let t = c.select(&sql, None, &[]).map_err(|e| format!("select {rel}: {e}"))?;
+        for row in t {
+            for (i, b) in builders.iter_mut().enumerate() {
+                let ord = i + 1; // SPI é 1-indexed
+                match b {
+                    Col::I16(x) => x.append_option(row.get::<i16>(ord).map_err(|e| format!("col {ord}: {e}"))?),
+                    Col::I32(x) => x.append_option(row.get::<i32>(ord).map_err(|e| format!("col {ord}: {e}"))?),
+                    Col::I64(x) => x.append_option(row.get::<i64>(ord).map_err(|e| format!("col {ord}: {e}"))?),
+                    Col::F32(x) => x.append_option(row.get::<f32>(ord).map_err(|e| format!("col {ord}: {e}"))?),
+                    Col::F64(x) => x.append_option(row.get::<f64>(ord).map_err(|e| format!("col {ord}: {e}"))?),
+                    Col::Bool(x) => x.append_option(row.get::<bool>(ord).map_err(|e| format!("col {ord}: {e}"))?),
+                    Col::Str(x) => x.append_option(row.get::<String>(ord).map_err(|e| format!("col {ord}: {e}"))?),
+                }
+            }
+            nrows += 1;
+        }
+        Ok::<_, String>(())
+    })?;
+
+    let arrays: Vec<ArrayRef> = builders
+        .into_iter()
+        .map(|b| match b {
+            Col::I16(mut x) => Arc::new(x.finish()) as ArrayRef,
+            Col::I32(mut x) => Arc::new(x.finish()) as ArrayRef,
+            Col::I64(mut x) => Arc::new(x.finish()) as ArrayRef,
+            Col::F32(mut x) => Arc::new(x.finish()) as ArrayRef,
+            Col::F64(mut x) => Arc::new(x.finish()) as ArrayRef,
+            Col::Bool(mut x) => Arc::new(x.finish()) as ArrayRef,
+            Col::Str(mut x) => Arc::new(x.finish()) as ArrayRef,
+        })
+        .collect();
+    let schema = Arc::new(Schema::new(fields));
+    let batch = RecordBatch::try_new(schema.clone(), arrays)
+        .map_err(|e| format!("record batch: {e}"))?;
+
+    // Escrita atômica: temp + rename (invariante — nunca um Parquet meio-escrito visível num crash).
+    let tmp = format!("{path}.tmp");
+    {
+        let file = std::fs::File::create(&tmp).map_err(|e| format!("criar '{tmp}': {e}"))?;
+        let mut w = ArrowWriter::try_new(file, schema, None).map_err(|e| format!("ArrowWriter: {e}"))?;
+        w.write(&batch).map_err(|e| format!("write batch: {e}"))?;
+        w.close().map_err(|e| format!("close: {e}"))?;
+    }
+    std::fs::rename(&tmp, path).map_err(|e| format!("rename '{tmp}'→'{path}': {e}"))?;
+    Ok(nrows)
+}
+
 /// O reader Parquet do DataFusion 54 pode emitir Utf8 (`StringArray`) OU Utf8View (`StringViewArray`).
 fn extract_strings(arr: &dyn Array) -> Result<Vec<String>, String> {
     if let Some(a) = arr.as_any().downcast_ref::<StringArray>() {
