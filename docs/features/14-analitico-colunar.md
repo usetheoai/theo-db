@@ -81,8 +81,12 @@ WHERE regiao = 7
 LIMIT 20;
 ```
 
-Um `SELECT` normal decodifica apenas os chunks das colunas projetadas. Sem a GUC de agregado ligada, esta é a
-forma de uso padrão (storage colunar puro).
+Um `SELECT` normal (seqscan plano) decodifica **todas as colunas** de cada stripe — o TAM não recebe a lista
+de projeção do planner (`theodb_rs/src/am/columnar.rs:1015-1021`), então o seqscan puro é medido
+**paridade-ou-mais-lento que heap, por design** (~16–26× no agregado full-scan —
+[`m99-columnar-tam.md`](../benchmarks/m99-columnar-tam.md)). O ganho de projeção/vetorização existe **apenas**
+no caminho `CustomScan` do M100 (GUC da seção 5 ligada + forma admitida — seção 9); sem ele, a vitória do
+storage colunar é o tamanho em disco (compressão), não a latência de leitura.
 
 ---
 

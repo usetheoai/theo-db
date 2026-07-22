@@ -29,4 +29,20 @@ else
   FAIL=1
 fi
 
+# --- finding 52f0c1037a2d1133 (HIGH, system_design) -------------------------
+# The plain seqscan path decodes ALL columns of every stripe (columnar.rs:1015-1021 —
+# coldesc for 0..natts); projection pushdown exists only in the M100 CustomScan path.
+# m99-columnar-tam.md records plain seqscan as parity-or-slower than heap (~16-26x).
+# The doc must not claim projected-only decode for a plain SELECT, and §4 must link the
+# measured m99 limit (2+ mentions: header list + §4).
+if grep -q 'decodifica apenas os chunks das colunas projetadas' docs/features/14-analitico-colunar.md; then
+  echo "FAIL [52f0c1037a2d1133] 14-analitico-colunar.md: claims projected-only decode for plain seqscan — false (columnar.rs:1015-1021 decodes 0..natts)"
+  FAIL=1
+elif [ "$(grep -c 'm99-columnar-tam.md' docs/features/14-analitico-colunar.md)" -lt 2 ]; then
+  echo "FAIL [52f0c1037a2d1133] 14-analitico-colunar.md: seqscan section does not cite the measured m99 parity-or-slower limit"
+  FAIL=1
+else
+  echo "PASS [52f0c1037a2d1133] 14-analitico-colunar.md: seqscan decode-all + m99 measured limit disclosed"
+fi
+
 exit $FAIL
