@@ -56,6 +56,8 @@ mod http;
 mod hybrid;
 #[cfg(feature = "spike-lexical")]
 mod lexical; // M139 SPIKE — Directory do Tantivy sobre storage do PG (gate-1: backend blob; gate-3: páginas PG)
+#[cfg(feature = "spike-parquet")]
+mod parquet_spike; // SPIKE — leitor Parquet own-code via DataFusion (candidato a substituir o read_parquet do pg_duckdb)
 mod migrate;
 mod nl;
 mod pg;

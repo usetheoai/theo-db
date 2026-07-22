@@ -30,6 +30,12 @@ pg_test = []
 # both the core crate (the Directory/MemStore/SegmentStore) AND tantivy directly (pg_backing.rs
 # builds tantivy schemas in its flush-roundtrip tests). Same tantivy 0.26 → one in the tree.
 spike-lexical = ["dep:theodb_lexical", "dep:tantivy"]
+# SPIKE (Fase 4 — theodb-evolution) — leitor Parquet own-code via DataFusion/Arrow (Apache-2.0, JÁ no binário),
+# candidato a substituir o `read_parquet` do pg_duckdb (o único uso que resta do DuckDB na superfície M62) e
+# destravar a remoção do bundle DuckDB de 118 MB. Atrás de feature: liga só o feature `parquet` do datafusion
+# (default-features=false o mantém off), então o build/imagem default NÃO paga o custo antes do veredito medido.
+# Código em `src/parquet_spike.rs`, só compila com `--features spike-parquet`.
+spike-parquet = ["datafusion/parquet"]
 
 [dependencies]
 pgrx = "=0.19.0"
