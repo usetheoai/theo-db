@@ -5,6 +5,13 @@ edition = "2024"
 description = "TheoDB's own PostgreSQL extension in Rust (pgrx) — theodb.embed (M17, ROADMAP-v2 / ADR 0006)"
 license = "Apache-2.0"
 
+# M140.2 — theodb_rs is the workspace root; `lexical_core` (theodb_lexical) is the pgrx-FREE
+# lexical engine core, testable with stock `cargo test -p theodb_lexical`. cargo-pgrx operates on
+# the `theodb_rs` member as before (ADR 0053 / D2). Keeping the workspace INSIDE theodb_rs (not at
+# the repo root) avoids dragging benchmarks/docs into a cargo workspace (KISS).
+[workspace]
+members = [".", "lexical_core"]
+
 [lib]
 crate-type = ["cdylib"]
 
@@ -19,7 +26,10 @@ pg_test = []
 # M139 SPIKE — engine lexical própria sobre Tantivy. Atrás de feature: um spike que pode dar NO-GO NÃO incha o
 # crate shipado (build/imagem) com uma dep pesada antes do veredito GO. O código vive em `src/lexical/` e só
 # compila com `--features spike-lexical`. Promove a dep permanente só se o spike der GO (M140).
-spike-lexical = ["dep:tantivy"]
+# M140.2 — the lexical core moved to its own pgrx-free crate `theodb_lexical`. The feature enables
+# both the core crate (the Directory/MemStore/SegmentStore) AND tantivy directly (pg_backing.rs
+# builds tantivy schemas in its flush-roundtrip tests). Same tantivy 0.26 → one in the tree.
+spike-lexical = ["dep:theodb_lexical", "dep:tantivy"]
 
 [dependencies]
 pgrx = "=0.19.0"
@@ -36,6 +46,9 @@ arrow = { version = "58", default-features = false }
 # M139 spike (opcional — só com feature `spike-lexical`). Tantivy 0.26 é MIT (D1-limpo, verificado); o deny.toml
 # barra qualquer AGPL transitiva. Dep OPCIONAL para não entrar no build shipado até o veredito GO.
 tantivy = { version = "0.26", optional = true }
+# M140.2 — the pgrx-free lexical core (path dep, opcional sob spike-lexical). O tantivy vem
+# transitivo daqui também; a versão casa (0.26) → uma única no tree.
+theodb_lexical = { path = "lexical_core", optional = true }
 tokio = { version = "1", features = ["rt"], default-features = false }
 # M99 — columnar stripe compression (zstd). Already in the tree transitively via datafusion/arrow (parsimony rung 4
 # — reuse before adding); MIT/BSD-licensed, D1-clean. default-features=false keeps it lean.

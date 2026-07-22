@@ -7,6 +7,8 @@
 //! porta. Tudo atrás da feature `spike-lexical` para não inchar o crate shipado antes do veredito GO.
 
 pub mod pg_backing;
-pub mod pg_directory;
 
-pub use pg_directory::{MemStore, PgDirectory, SegmentStore};
+// M140.2 — o núcleo pgrx-free (`MemStore`/`PgDirectory`/`SegmentStore`) mudou para o crate
+// `theodb_lexical` (testável com `cargo test` stock, sem link pgrx). Re-exportado aqui para
+// preservar os caminhos `crate::lexical::{MemStore,...}` de eventuais consumidores.
+pub use theodb_lexical::{MemStore, PgDirectory, SegmentStore};

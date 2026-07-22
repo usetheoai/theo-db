@@ -48,6 +48,22 @@ jobs:
           echo "clippy args: $ARGS"
           cargo clippy --features pg18 --no-deps -- $ARGS
 
+      # M140.2 — o núcleo lexical vive num crate pgrx-free (`theodb_lexical`), testável com `cargo test` stock.
+      # O clippy default (--features pg18) NÃO compila o path `spike-lexical` (o cdylib consumindo o núcleo).
+      # Estes dois passos fecham essa lacuna: (1) o núcleo isolado testa sem pgrx; (2) o cdylib compila
+      # consumindo o núcleo. Sem isto, uma regressão no consumo do núcleo só apareceria no M140.3.
+      - name: Lexical core — stock cargo test (pgrx-free)
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cargo test -p theodb_lexical
+          # gate objetivo do "pgrx-free": zero pgrx no tree do núcleo
+          test "$(cargo tree -p theodb_lexical | grep -c pgrx)" = "0"
+
+      - name: Lexical spike — cdylib consumes the core (check --features spike-lexical)
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cargo check --features "pg18 spike-lexical"
+
       - name: Unused dependencies (cargo machete)
         run: |
           export PATH="$HOME/.cargo/bin:$PATH"
