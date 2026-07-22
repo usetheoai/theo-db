@@ -503,7 +503,7 @@ jobs:
         run: |
           n="$(docker exec theo-db-htap psql -U postgres -tAc "SELECT count(*) FROM pg_extension WHERE extname='pg_duckdb'")"
           [ "$n" = "1" ] || { echo "FAIL: pg_duckdb ausente na imagem htap (got $n)"; exit 1; }
-          docker exec theo-db-htap psql -U postgres -c "CREATE TABLE h(category text, amount numeric); INSERT INTO h VALUES ('a',10),('a',20),('b',5)" >/dev/null
+          docker exec theo-db-htap psql -U postgres -c "CREATE TABLE h(category text, amount double precision); INSERT INTO h VALUES ('a',10),('a',20),('b',5)" >/dev/null
           COPY_SQL="$(docker exec theo-db-htap psql -U postgres -tAc "SELECT theodb.htap_refresh_sql('h'::regclass)")"
           docker exec theo-db-htap psql -U postgres -c "$COPY_SQL" >/dev/null
           P="$(docker exec theo-db-htap psql -U postgres -tAc "SELECT theodb._htap_path('h'::regclass)")"

@@ -68,10 +68,12 @@ docker exec "$CTR_D" psql -U postgres -c "CREATE TABLE m142g(category text, amou
 guard_state="$(docker exec "$CTR_D" psql -U postgres -tAc \
   "DO \$\$ BEGIN PERFORM theodb.olap_sql('m142g'::regclass); RAISE EXCEPTION 'NO_GUARD'; EXCEPTION WHEN sqlstate '0A000' THEN RAISE NOTICE 'GUARD_OK'; END \$\$" 2>&1 || true)"
 echo "$guard_state" | grep -q "GUARD_OK" || fail "default: guard M142 não disparou 0A000 (got: $guard_state)"
-# htap_guard_test.sql (caminho guard)
+# htap_guard_test.sql (caminho guard). Gate no EXIT CODE do psql (ON_ERROR_STOP=1 → assert falho = exit≠0),
+# robusto a supressão de NOTICE; imprime o output em caso de falha.
 docker cp sql/tests/htap_guard_test.sql "$CTR_D":/tmp/g.sql
-docker exec "$CTR_D" psql -U postgres -v ON_ERROR_STOP=1 -f /tmp/g.sql 2>&1 | grep -q "HTAP_GUARD_TEST_OK" \
-  || fail "default: htap_guard_test.sql falhou (caminho guard)"
+if ! docker exec "$CTR_D" psql -U postgres -v ON_ERROR_STOP=1 -f /tmp/g.sql > /tmp/m142_g_default.out 2>&1; then
+  echo "--- guard test output (default) ---"; cat /tmp/m142_g_default.out; fail "default: htap_guard_test.sql falhou (caminho guard)"
+fi
 echo "DEFAULT_OK"
 
 # ── HTAP smoke ─────────────────────────────────────────────────────────────────────────────────
@@ -85,8 +87,11 @@ echo "== HTAP smoke =="
   || fail "htap: pg_duckdb ausente"
 psql_d "$CTR_H" "SHOW shared_preload_libraries" | grep -q pg_duckdb || fail "htap: pg_duckdb não no preload"
 # M62 e2e: refresh (COPY parquet) → register → olap (duckdb.query) executado pelo cliente
+# amount = double precision (não numeric sem precisão): o COPY→Parquet do pg_duckdb rejeita NUMERIC sem precisão
+# ("DuckDB requires the precision of a NUMERIC to be set") — a mesma escolha do harness M61/M62. É limitação
+# pré-existente da superfície M62, não do tier-out.
 docker exec "$CTR_H" psql -U postgres -c \
-  "CREATE TABLE m142h(category text, amount numeric); INSERT INTO m142h VALUES ('a',10),('a',20),('b',5)" >/dev/null
+  "CREATE TABLE m142h(category text, amount double precision); INSERT INTO m142h VALUES ('a',10),('a',20),('b',5)" >/dev/null
 COPY_SQL="$(psql_d "$CTR_H" "SELECT theodb.htap_refresh_sql('m142h'::regclass)")"
 echo "$COPY_SQL" | grep -q "FORMAT parquet" || fail "htap: htap_refresh_sql não retornou COPY parquet"
 docker exec "$CTR_H" psql -U postgres -c "$COPY_SQL" >/dev/null || fail "htap: COPY parquet (cliente) falhou"
@@ -96,14 +101,23 @@ OLAP_SQL="$(psql_d "$CTR_H" "SELECT theodb.olap_sql('m142h'::regclass)")"
 echo "$OLAP_SQL" | grep -q "duckdb.query" || fail "htap: olap_sql não retornou duckdb.query"
 rows="$(docker exec "$CTR_H" psql -U postgres -tAc "$OLAP_SQL" 2>&1 || true)"
 echo "$rows" | grep -q "^a|2|15" || fail "htap: olap e2e resultado inesperado (got: $rows)"
-# htap_guard_test.sql (caminho positivo)
+# htap_guard_test.sql (caminho positivo). Gate no EXIT CODE (robusto); imprime output em caso de falha.
 docker cp sql/tests/htap_guard_test.sql "$CTR_H":/tmp/g.sql
-docker exec "$CTR_H" psql -U postgres -v ON_ERROR_STOP=1 -f /tmp/g.sql 2>&1 | grep -q "HTAP_GUARD_TEST_OK" \
-  || fail "htap: htap_guard_test.sql falhou (caminho positivo)"
+if ! docker exec "$CTR_H" psql -U postgres -v ON_ERROR_STOP=1 -f /tmp/g.sql > /tmp/m142_g_htap.out 2>&1; then
+  echo "--- guard test output (htap) ---"; cat /tmp/m142_g_htap.out; fail "htap: htap_guard_test.sql falhou (caminho positivo)"
+fi
 echo "HTAP_OK"
 
 # ── DELTA de tamanho ───────────────────────────────────────────────────────────────────────────
-size_mb() { docker image inspect "$1" --format '{{.Size}}' | awk '{printf "%d", $1/1024/1024}'; }
+# size_mb: usa `docker images` (ground truth "712MB"/"1.2GB") — o `docker image inspect .Size` reporta valor
+# divergente neste Docker. Converte GB/MB/kB para MB.
+size_mb() {
+  docker images --filter=reference="$1" --format '{{.Size}}' | head -1 | awk '
+    /GB/{printf "%d", $1*1024; next}
+    /MB/{printf "%d", $1; next}
+    /kB|KB/{printf "%d", $1/1024; next}
+    {printf "%d", $1/1024/1024}'
+}
 D_MB="$(size_mb "$DEFAULT_TAG")"; H_MB="$(size_mb "$HTAP_TAG")"; DELTA=$((H_MB - D_MB))
 echo "== DELTA: default=${D_MB}MB htap=${H_MB}MB delta=${DELTA}MB (min=${MIN_DELTA_MB}) =="
 [ "$DELTA" -ge "$MIN_DELTA_MB" ] || fail "delta ${DELTA}MB < ${MIN_DELTA_MB}MB (o tier-out não enxugou o esperado)"
