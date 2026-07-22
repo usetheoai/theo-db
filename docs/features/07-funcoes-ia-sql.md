@@ -98,8 +98,9 @@ FUNCTION ai.if_costly(
 RETURNS BOOLEAN;
 ```
 
-Avalia uma condição em linguagem natural sobre um valor e retorna `TRUE` ou `FALSE`. (Não existe um `ai.if`
-escalar de argumento único — a forma escalar é `ai.if_costly`; para lote use `ai.if_batch`.)
+Avalia uma condição em linguagem natural sobre um valor e retorna `TRUE` ou `FALSE`. (Formas disponíveis:
+`ai.if(prompt)` — escalar de 1 argumento; `ai.if_costly(condition, value)` — escalar com COST alto para
+push-down; `ai.if_batch(condition, values[])` — lote.)
 
 ---
 

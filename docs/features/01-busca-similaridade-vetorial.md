@@ -2,8 +2,9 @@
 
 > **Status:** ✅ **Entregue (M20).** A busca por similaridade vetorial está disponível: kernels de distância
 > próprios do TheoDB — `theodb.l2_distance` / `theodb.inner_product` / `theodb.cosine_distance`
-> (`theodb_rs/src/api.rs:483,487,491`, implementados em `theodb_rs/src/vec.rs` com paridade f32 vs pgvector) —
-> operando sobre o tipo `vector`. Coexiste com os operadores `<->` / `<#>` / `<=>` do pgvector. Provado por
+> (`theodb_rs/src/api.rs`, implementados em `theodb_rs/src/vec.rs` com paridade f32 vs pgvector como baseline
+> de comparação) — operando sobre o tipo `vector` own-code, com os operadores `<->` / `<#>` / `<=>` (own-code,
+> mesma sintaxe do pgvector, que foi removido no M70). Provado por
 > `benchmarks/tests/test_vector_ops.py`. Números de desempenho reproduzíveis (recall/QPS) vivem em
 > `docs/benchmarks/` (M31b/M32/M34/M35); nenhuma afirmação de desempenho nesta página sem link para esse artefato
 > (CLAUDE.md, regra TheoDB 5).
@@ -88,10 +89,10 @@ Retorna somente o item mais similar.
 10. **Criar extensão `vector`**
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS theodb CASCADE;
 ```
 
-Habilita o `pgvector`, chamado de `vector` no TheoDB.
+Habilita a extensão `theodb`, que provê o tipo `vector` **own-code** (`theodb_rs`) + os AMs ANN. O `pgvector` foi removido no M70.
 
 11. **Busca vetorial com entrada textual**
 
@@ -112,7 +113,7 @@ Converte texto em embedding e compara com embeddings armazenados. A função é
 EMBEDDING_COLUMN::vector
 ```
 
-Garante compatibilidade com operadores do `pgvector`.
+Garante compatibilidade de sintaxe com os operadores `<->` / `<#>` / `<=>` (own-code, mesma grafia do pgvector).
 
 13. **Gerar embedding a partir de texto**
 

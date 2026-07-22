@@ -22,7 +22,7 @@ Esta página cobre a busca híbrida no TheoDB — combinação de busca vetorial
 
 > **Superfície implementada (M7-S1):** a primeira fatia entregue é a função SQL **`ai.hybrid_search_rrf(...)`**
 > (`sql/40-theodb-hybrid.sql`) — o MVP manual-SQL da RRF (`score = Σ 1/(k+rank)`, k=60 default exposto como
-> parâmetro; perna FTS `ts_rank_cd`/GIN + perna vetorial `pgvector` `<=>`; empty-leg via `FULL OUTER JOIN`+`COALESCE`).
+> parâmetro; perna FTS `ts_rank_cd`/GIN + perna vetorial own-code `<=>`; empty-leg via `FULL OUTER JOIN`+`COALESCE`).
 > A API nativa `ai.hybrid_search()` com `search_inputs` JSON (abaixo) é um wrapper fino futuro sobre essa mesma
 > função (uma única fonte de verdade da fusão). Recall medido (BEIR-style) em `docs/benchmarks/m7-hybrid-recall.md`.
 > BM25 permissivo (`pg_search` é AGPL → barrado por D1) é a slice M7-S2.
@@ -38,11 +38,20 @@ CREATE TABLE documents (
     text_tsv tsvector GENERATED ALWAYS AS (
         to_tsvector('english', content)
     ) STORED,
-    text_embedding vector(3072) GENERATED ALWAYS AS (
-        embedding('theodb-embedding-001', content)
-    ) STORED
+    text_embedding vector(3072)   -- preenchido por UPDATE (ver abaixo), NÃO GENERATED
 );
 ```
+
+> `theodb.embed(content, model)` faz uma chamada HTTP por linha (é VOLATILE) e por isso
+> **não pode** aparecer numa coluna `GENERATED ALWAYS AS ... STORED` (o Postgres exige expressão
+> IMMUTABLE). Preencha o embedding explicitamente — o conteúdo vem **primeiro**, o modelo depois:
+>
+> ```sql
+> UPDATE documents SET text_embedding = theodb.embed(content, 'theodb-embedding-001')
+> WHERE text_embedding IS NULL;
+> ```
+>
+> Para manter atualizado automaticamente, use o vectorizer declarativo (`theodb.create_vectorizer`).
 
 Cria uma tabela contendo:
 
@@ -67,11 +76,11 @@ Insere os documentos que participarão da busca híbrida.
 # 4. Instalar extensão de vetores
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS theodb CASCADE;
 ```
 
-Habilita o mecanismo de busca vetorial (`pgvector`). O índice ANN entregue é
-DiskANN/HNSW (specs 02/05), não ScaNN.
+Habilita a extensão `theodb` (tipo `vector` + busca vetorial own-code — sem pgvector, removido no M70).
+O índice ANN entregue é o `theodb_hnsw`/`theodb_ivfflat` (specs 02/03), não ScaNN.
 
 ---
 
@@ -225,7 +234,7 @@ Aponta a tabela e as colunas usadas por cada perna da fusão.
 
 ```json
 {
-  "lexical_engine": "postgres"
+  "lexical_engine": "ts_rank_cd"
 }
 ```
 
@@ -408,7 +417,7 @@ FROM ai.hybrid_search(
         'per_leg_limit',    50,
         'result_limit',     5,
         'language',         'english',
-        'lexical_engine',   'postgres'
+        'lexical_engine',   'ts_rank_cd'
     )
 );
 ```
@@ -479,8 +488,8 @@ LIMIT 5;
 
 Fluxo completo da implementação manual de busca híbrida utilizando:
 
-1. busca vetorial (`pgvector`: HNSW, DiskANN, IVF ou IVFFlat);
-2. Full Text Search (`GIN` ou `RUM`);
+1. busca vetorial (own-code: `theodb_hnsw` ou `theodb_ivfflat`);
+2. Full Text Search (`GIN`);
 3. cálculo do **Reciprocal Rank Fusion (RRF)**;
 4. reranqueamento final dos documentos mais relevantes.
 

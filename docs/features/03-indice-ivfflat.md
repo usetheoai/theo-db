@@ -1,30 +1,31 @@
 # Criar um índice IVFFlat
 
-> **✅ Validado (M9, 2026-06-28):** o índice IVFFlat do `pgvector` está disponível na imagem e foi
-> **validado + benchmarkado** no harness recall@k (`--index ivfflat`). Evidência medida (recall × QPS
-> vs HNSW, build-time, tamanho) em [`docs/benchmarks/m9-ivfflat.md`](../benchmarks/m9-ivfflat.md).
-> A capacidade IVFFlat está disponível via `CREATE INDEX … USING ivfflat (…) WITH (lists = N)` +
-> `SET ivfflat.probes`. A superfície literal abaixo permanece como API-alvo do TheoDB.
+> **✅ Validado (M9, 2026-06-28):** o índice IVFFlat foi **validado + benchmarkado** no harness recall@k
+> (`--index ivfflat`). Evidência medida (recall × QPS vs HNSW, build-time, tamanho) em
+> [`docs/benchmarks/m9-ivfflat.md`](../benchmarks/m9-ivfflat.md). A capacidade é entregue pelo AM **own-code**
+> via `CREATE INDEX … USING theodb_ivfflat (col theodb_ivfflat_l2_ops) WITH (lists = N)` +
+> `SET theodb_ivfflat.probes`. O `pgvector` (a superfície `USING ivfflat` nativa) foi removido no M70.
 
-> **Status:** ✅ **Entregue (M9 + M21 + M34).** Duas superfícies: (a) `USING ivfflat` do pgvector nativo na imagem
-> (benchmark em [`docs/benchmarks/m9-ivfflat.md`](../benchmarks/m9-ivfflat.md)); e (b) o **access method próprio**
-> `theodb_ivfflat` em Rust (`theodb_rs/src/am/mod.rs:35`, opclass `theodb_ivfflat_l2_ops` `theodb_rs/src/am/mod.rs:164`,
-> reloption `WITH (lists=N)` `theodb_rs/src/am/options.rs`, GUC `theodb_ivfflat.probes` `theodb_rs/src/am/guc.rs:30`).
-> Provado por `benchmarks/tests/test_index_am.py` (criação/persistência/scan) + `benchmarks/tests/test_ann_index.py`
+> **Status:** ✅ **Entregue (M9 + M21 + M34).** O **access method próprio** `theodb_ivfflat` em Rust
+> (`theodb_rs/src/am/mod.rs`, opclasses `theodb_ivfflat_{l2,cosine,ip}_ops`, reloption `WITH (lists=N)`
+> `theodb_rs/src/am/options.rs`, GUC `theodb_ivfflat.probes` `theodb_rs/src/am/guc.rs`) — benchmark em
+> [`docs/benchmarks/m9-ivfflat.md`](../benchmarks/m9-ivfflat.md). Provado por `benchmarks/tests/test_index_am.py`
+> (criação/persistência/scan) + `benchmarks/tests/test_ann_index.py`
 > (`test_ivfflat_knn_recall_high_vs_bruteforce`, `test_recall_parity_gate`) + `benchmarks/tests/test_reloption.py`.
-> A sintaxe literal `WITH (lists)` do pgvector e o AM próprio coexistem.
+> **Nota (pós-M70):** o `pgvector` (a superfície `USING ivfflat` nativa) foi **removido** — hoje só existe o AM
+> own-code `USING theodb_ivfflat`; o tipo `vector` também é own-code (`theodb_rs`).
 
 Esta página cobre a criação de índices `IVFFlat` no TheoDB para busca aproximada de vizinhos mais próximos sobre colunas vetoriais, incluindo as métricas de distância suportadas, o parâmetro `lists` e exemplos de consulta.
 
 ---
 
-# 1. Instalar extensão `vector`
+# 1. Instalar a extensão `theodb`
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS theodb CASCADE;
 ```
 
-Instala a extensão `pgvector`, necessária para criar índices `ivfflat` e executar consultas vetoriais.
+Instala a extensão `theodb` (own-code), que provê o tipo `vector` e o AM `theodb_ivfflat`. O `pgvector` foi removido no M70.
 
 ---
 
@@ -46,9 +47,8 @@ access method **próprio** do TheoDB (`theodb_ivfflat`). Opclass default é
 `theodb_ivfflat_l2_ops`; use `theodb_ivfflat_cosine_ops` / `theodb_ivfflat_ip_ops`
 para cosseno / produto interno.
 
-> **Coexistência:** o TheoDB também expõe o IVFFlat do pgvector (`USING ivfflat (…
-> vector_cosine_ops)`). Essa superfície mira o AM do pgvector, **não** o AM próprio
-> `theodb_ivfflat`.
+> **Nota (pós-M70):** o `pgvector` (a superfície `USING ivfflat` nativa) foi **removido** — hoje só existe o
+> AM own-code `USING theodb_ivfflat`. O tipo `vector` também é own-code (`theodb_rs`).
 
 ---
 
@@ -370,7 +370,7 @@ Menor distância representa maior similaridade.
 # 27. Fluxo completo recomendado
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS theodb CASCADE;
 
 CREATE INDEX products_ivfflat_idx
 ON products
@@ -393,8 +393,28 @@ LIMIT 10;
 
 Fluxo completo:
 
-1. habilita `vector`;
-2. cria índice `IVFFlat`;
+1. instala a extensão `theodb` (provê o tipo `vector` own-code + o AM `theodb_ivfflat` — sem pgvector, removido no M70);
+2. cria índice `theodb_ivfflat`;
 3. gera embedding textual;
 4. executa busca por distância;
 5. retorna os itens mais semelhantes.
+
+---
+
+# Quantização opcional (menos memória)
+
+Além de `lists`, o `theodb_ivfflat` aceita quantização opcional no `WITH (...)` para reduzir memória
+(paridade de recall via Asymmetric Hashing + refine). O knob é `pq_subspaces = M` (e `pq_bits`, que só
+aceita `4`) — **não** existe uma opção `quantizer = 'SQ8'/'FLAT'`:
+
+```sql
+CREATE INDEX products_ivf_aq
+ON products
+USING theodb_ivfflat (
+    description_embedding theodb_ivfflat_cosine_ops
+)
+WITH (
+    lists = 100,
+    pq_subspaces = 16   -- ativa quantização AQ; pq_bits default = 4
+);
+```

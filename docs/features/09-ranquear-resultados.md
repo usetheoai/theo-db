@@ -9,7 +9,7 @@
 > ADR `docs/adr/0007-synchronous-per-row-model-http.md`); não há benchmark de qualidade de ranking publicado.
 
 Esta página cobre duas funções **distintas** entregues no TheoDB, incluindo o pipeline
-híbrido que combina busca vetorial (`pgvector`) com reranking semântico para aplicações RAG:
+híbrido que combina busca vetorial (own-code: `theodb_hnsw`/`theodb_ivfflat`) com reranking semântico para aplicações RAG:
 
 - **`ai.rank(prompt text, model text DEFAULT NULL) RETURNS real`** — um scorer **escalar**:
   recebe **um** prompt e devolve **um** score de relevância (float). Um prompt → um score.
@@ -440,7 +440,7 @@ ORDER BY reranked_results.score DESC;
 Fluxo completo recomendado para aplicações RAG (Retrieval-Augmented Generation):
 
 1. gera o embedding da consulta;
-2. executa busca vetorial (`pgvector`);
+2. executa busca vetorial (own-code);
 3. recupera os candidatos mais próximos;
 4. envia os candidatos ao reranker em lote `ai.rerank`;
 5. reranqueia semanticamente (`idx` **0-based** casa com `ROW_NUMBER() OVER () - 1`);
