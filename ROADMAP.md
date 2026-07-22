@@ -2283,7 +2283,7 @@ O próprio artefato declara *"o gate de medição está executado"*. **Caveat ho
 **Prior art:** `docs/benchmarks/m53-hybrid-beir.md` (a medição), ADR-0013 (a exceção permissiva gated), ADR-0003 (identificação do `pg_textsearch`).
 
 ---
-## M139 — [ ] SPIKE (o GATE): `Directory` do Tantivy sobre block storage do Postgres
+## M139 — [x] SPIKE (o GATE): `Directory` do Tantivy sobre block storage do Postgres
 
 > Added 2026-07-21 (`/roadmap-feature tantivy-directory-spike`). Grill: `knowledge-base/grills/tantivy-directory-spike-feature-grill.md`.
 
