@@ -13,19 +13,29 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- Gates mecânicos de qualidade Rust (M136): `lint-rust.yml` (clippy `-D warnings` com baseline de 21 categorias em `theodb_rs/.clippy_args` estilo neon, rustfmt `--check`, `cargo machete`, `metadata --locked`, doc) + `cassert-sql-safety.yml` (smoke dos 4 AMs + columnar sob Postgres `--enable-cassert` — a classe do crash #143 — via `scripts/cassert-smoke.sh`, e pgspot na SQL de instalação). Cada gate verificado verde por medição direta (`docs/benchmarks/m136-quality-gates.md`); backlog pré-existente em baseline-com-sunset (#151)
 
 ### Changed
-- `theodb_rs`: código Rust 100% rustfmt-clean pela primeira vez (`cargo fmt` mutirão, 65 arquivos) — `rustfmt.toml` codifica o estilo (edition 2024, use_small_heuristics=Max). Preserva semântica; build verificado (M136)
 
 ### Deprecated
 
 ### Removed
 
 ### Fixed
-- Runner de CI self-hosted provisionado com o toolchain Rust+pgrx (rustc 1.97.1, cargo-pgrx 0.19.0, `cargo pgrx init --pg18` com `--enable-cassert`) para o usuário `ghrunner` — antes só Docker/shell estavam provisionados, então NENHUM job Rust rodava (o `license-gate` falhava silenciosamente). Agora os 3 gates Rust rodam verdes no CI (M136)
 
 ### Security
+
+## [0.124.0] - 2026-07-21
+
+### Added
+- Gates mecânicos de qualidade Rust (M136): `lint-rust.yml` (clippy `-D warnings` com baseline de 21 categorias em `theodb_rs/.clippy_args` estilo neon, rustfmt `--check`, `cargo machete`, `metadata --locked`, doc) + `cassert-sql-safety.yml` (smoke dos 4 AMs + columnar sob Postgres `--enable-cassert` — a classe do crash #143 — via `scripts/cassert-smoke.sh`, e pgspot na SQL de instalação). Cada gate verificado verde por medição direta (`docs/benchmarks/m136-quality-gates.md`); backlog pré-existente em baseline-com-sunset (#151)
+
+
+### Changed
+- `theodb_rs`: código Rust 100% rustfmt-clean pela primeira vez (`cargo fmt` mutirão, 65 arquivos) — `rustfmt.toml` codifica o estilo (edition 2024, use_small_heuristics=Max). Preserva semântica; build verificado (M136)
+
+
+### Fixed
+- Runner de CI self-hosted provisionado com o toolchain Rust+pgrx (rustc 1.97.1, cargo-pgrx 0.19.0, `cargo pgrx init --pg18` com `--enable-cassert`) para o usuário `ghrunner` — antes só Docker/shell estavam provisionados, então NENHUM job Rust rodava (o `license-gate` falhava silenciosamente). Agora os 3 gates Rust rodam verdes no CI (M136)
 
 ## [0.123.0] - 2026-07-21
 
