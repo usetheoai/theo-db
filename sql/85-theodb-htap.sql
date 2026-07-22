@@ -1,47 +1,17 @@
--- TheoDB M62 — HTAP unified surface (lakehouse-materialized row↔columnar flow) — CODEGEN edition.
--- Ships as own-code SQL/plpgsql (ADR-0021 D2 — plpgsql over Rust: these functions only build/validate SQL and
--- touch a small catalog, no low-level hot path — parsimony ladder rung 5/6, `.claude/rules/parsimony-ladder.md`).
+-- TheoDB M62/M143 — HTAP unified surface (lakehouse row↔columnar) — OWN-CODE edition (sem pg_duckdb).
 --
--- ── ARCHITECTURAL CONSTRAINT (measured, reproducible on theodb:m62) — WHY THIS SURFACE IS STATEMENT-LEVEL ──
--- pg_duckdb PROHIBITS DuckDB execution INSIDE a function. Any `SELECT … FROM duckdb.query(…)`, `COPY … TO …
--- (FORMAT parquet)` (the parquet writer is the DuckDB engine), or `read_parquet(…)` evaluated from within a
--- plpgsql/SQL function body raises: `ERROR: DuckDB execution is not supported inside functions`. There is NO GUC
--- to relax it. This INVALIDATES a "single transparent call" surface where `theodb.htap_refresh`/`theodb.olap`
--- run DuckDB internally (they would always error). At the STATEMENT level (a connection, outside any function)
--- the same `COPY (…) TO '<path>' (FORMAT parquet)` and `SELECT * FROM duckdb.query($$ … read_parquet('<path>')
--- … $$)` WORK — M61 proved it end-to-end (docs/benchmarks/m61-columnar-adoption.md; the confirmed syntax lives
--- at benchmarks/run_m61_columnar_adoption.py). So the honest, architecturally-correct surface here is CODEGEN:
---   • the theodb.* functions BUILD (never run) the DuckDB statements as text, and do the catalog work in pure SQL;
---   • the CLIENT runs the returned statement at the connection level (where DuckDB is allowed).
--- This is NOT a workaround — it is the correct design given the pg_duckdb restriction. The trade-off is honest
--- (ADR-0021, Rule 3 / `public-copy.md`): the surface is a codegen statement-level flow, not a single opaque
--- transparent call. It remains the lakehouse/D2 bet, assisted by a tiny catalog + freshness clock.
+-- M143 (remoção total do pg_duckdb): o lakehouse agora é 100% own-code (DataFusion + Arrow, no theodb_rs). O
+-- design "codegen" do M62 (funções que RETORNAVAM texto para o cliente rodar) existia SÓ porque o pg_duckdb
+-- proibia executar DuckDB dentro de uma função. Com own-code essa restrição DESAPARECE — o DataFusion roda dentro
+-- da função (`theodb_rs`: `public.read_parquet`/`public.olap`/`public.write_parquet`). Então a superfície colapsa
+-- em funções DIRETAS: `theodb.htap_refresh` escreve o snapshot own-code + registra; `theodb.olap` lê+agrega
+-- own-code. Sem `duckdb.query`, sem `COPY … (FORMAT parquet)`, sem guard de pg_duckdb. Ver ADR-0057.
 --
--- The functions:
---   theodb.htap_refresh_sql(regclass)        → TEXT: the `COPY (SELECT * FROM tbl) TO '<path>' (FORMAT parquet)`
---                                              statement (pure string build; client runs it at connection level)
---   theodb.htap_register(regclass, text)     → timestamptz: upsert the snapshot catalog AFTER the client ran the
---                                              COPY (pure SQL, no DuckDB — runs fine in a function). Returns now().
---   theodb.olap_sql(regclass)                → TEXT: the `SELECT * FROM duckdb.query($$ …read_parquet('<path>')…$$)`
---                                              analytical statement over the registered snapshot (client runs it)
---   theodb.htap_freshness(regclass)          → interval: now() - refreshed_at from the catalog (pure SQL)
---
--- The M61 finding (docs/adr/0020-m61-embed-pgduckdb.md, docs/benchmarks/m61-columnar-adoption.md) makes the
--- design honest: pg_duckdb does NOT speed up analytics over the row heap (force_execution = 0.63–0.89×,
--- honest-negative) and WINS ~9× at 5M only over already-COLUMNAR data (Parquet). So the surface is a row↔columnar
--- materialized flow with DATED freshness (a snapshot is a point-in-time, never magic HTAP transparency).
---
--- Safe SQL codegen: regclass-validated relation + %I (identifier) / %L (literal) quoting via format() — the
--- relation identifier is never interpolated raw and the path is bound as a literal (injection-safe; same
--- discipline as sql/80-theodb-migrate.sql). Error handling (`.claude/rules/error-handling.md` §2 — fail fast,
--- typed): olap_sql / htap_freshness with no snapshot RAISE a typed error with a clear next step, never a silent
--- NULL. NO function calls duckdb.query internally — that is the whole point of this pivot.
--- Idempotent: safe to re-run / load from the extension install script (CREATE OR REPLACE / IF NOT EXISTS).
+-- O catálogo de snapshots (`_htap_snapshots`, `_htap_path`, `htap_register`, `htap_freshness`) é SQL puro e
+-- permanece. `htap_register` continua público para quem materializa fora do fluxo `htap_refresh`.
+-- Injection-safe (regclass); erro tipado fail-closed (`error-handling.md` §2). Idempotente (CREATE OR REPLACE).
 
-
--- Snapshot catalog — one row per materialized relation. The refreshed_at is the freshness clock the whole
--- surface reads: theodb.olap_sql resolves the path from it, theodb.htap_freshness derives the lag from it.
--- rel is a regclass PK (upsert on register — the latest snapshot wins).
+-- Snapshot catalog — one row per materialized relation. refreshed_at é o relógio de freshness.
 CREATE TABLE IF NOT EXISTS theodb._htap_snapshots (
     rel          regclass PRIMARY KEY,
     parquet_path text        NOT NULL,
@@ -50,12 +20,11 @@ CREATE TABLE IF NOT EXISTS theodb._htap_snapshots (
 
 COMMENT ON TABLE theodb._htap_snapshots IS
     'M62 HTAP snapshot catalog: (rel, parquet_path, refreshed_at) — one row per materialized relation. '
-    'refreshed_at is the freshness clock (theodb.htap_freshness derives the lag; theodb.olap_sql resolves the '
-    'path). Upserted by theodb.htap_register AFTER the client runs the COPY (latest snapshot wins).';
+    'refreshed_at is the freshness clock (theodb.htap_freshness derives the lag; theodb.olap resolves the path). '
+    'Upserted by theodb.htap_register (M143: written own-code by theodb.htap_refresh, no DuckDB).';
 
--- theodb._htap_path — the default snapshot path for a relation, derived from its oid (unique per table). A
--- dedicated helper so htap_refresh_sql builds the path in ONE place (DRY). The base dir
--- /var/lib/postgresql/htap is created lazily by the COPY (run by the client) via pg_duckdb's file writer.
+-- theodb._htap_path — o path default do snapshot, derivado do oid (único por tabela). O dir base é criado no build
+-- da imagem (chown postgres). M143: escrito pelo writer Parquet own-code (public.write_parquet), não pelo DuckDB.
 CREATE OR REPLACE FUNCTION theodb._htap_path(rel regclass)
 RETURNS text
 LANGUAGE sql
@@ -64,40 +33,32 @@ AS $$
     SELECT '/var/lib/postgresql/htap/theodb_htap_' || rel::oid || '.parquet';
 $$;
 
--- theodb.htap_refresh_sql — RETURN (do NOT run) the COPY statement that materializes the row table to a dated
--- Parquet snapshot. Pure string building via format() — NO DuckDB execution here (the parquet writer is the
--- DuckDB engine, prohibited inside a function). The CLIENT executes the returned text at the connection level.
--- %I quotes the relation identifier, %L the path literal (injection-safe). IMMUTABLE-shaped: given the same
--- relation it returns the same statement (it reads only the catalog-independent path helper).
-CREATE OR REPLACE FUNCTION theodb.htap_refresh_sql(p_rel regclass)
-RETURNS text
+-- theodb.htap_refresh — M143 OWN-CODE: materializa a tabela num snapshot Parquet (public.write_parquet, in-function)
+-- E registra o snapshot, numa chamada só. Substitui o par codegen (htap_refresh_sql RETORNA COPY → cliente roda →
+-- htap_register). Sem DuckDB. Retorna o refreshed_at registrado.
+CREATE OR REPLACE FUNCTION theodb.htap_refresh(p_rel regclass)
+RETURNS timestamptz
 LANGUAGE plpgsql
-STABLE
+VOLATILE
 AS $$
+DECLARE
+    v_path text := theodb._htap_path(p_rel);
+    v_n    bigint;
 BEGIN
-    -- M142 guard (fail-closed): the returned COPY writes Parquet via pg_duckdb's file writer. Without pg_duckdb
-    -- installed (the default TheoDB image after the M142 tier-out), that statement would fail with an obscure
-    -- error at the client. Fail-fast + typed (Rule 8) with the next step instead. Querying pg_extension is always
-    -- safe (a catalog); keying the guard on the INSTALLED EXTENSION (not the function name) is immune to a future
-    -- duckdb.query overload and safe to CREATE on an image WITHOUT pg_duckdb.
-    IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_duckdb') THEN
-        RAISE EXCEPTION 'theodb.htap_refresh_sql: pg_duckdb not installed'
-            USING HINT = 'The HTAP/lakehouse surface (Parquet snapshots) requires pg_duckdb — pull the theodb-htap image.',
-                  ERRCODE = '0A000';   -- feature_not_supported (typed, fail-closed)
-    END IF;
-    RETURN format('COPY (SELECT * FROM %s) TO %L (FORMAT parquet)', p_rel::regclass, theodb._htap_path(p_rel));
+    -- escreve o Parquet own-code (DataFusion/Arrow, sem DuckDB); a função Rust é injection-safe (regclass::text).
+    v_n := public.write_parquet(p_rel::regclass::text, v_path);
+    -- registra o snapshot (upsert). Reusa a validação/relógio de htap_register.
+    RETURN theodb.htap_register(p_rel, v_path);
 END;
 $$;
 
-COMMENT ON FUNCTION theodb.htap_refresh_sql(regclass) IS
-    'M62 HTAP codegen: RETURN the COPY statement that materializes a row table to a dated Parquet snapshot '
-    '(COPY (SELECT * FROM tbl) TO ''<path>'' (FORMAT parquet)). Does NOT execute — pg_duckdb prohibits DuckDB '
-    'execution inside functions, so the CLIENT runs the returned text at the connection level, then calls '
-    'theodb.htap_register(tbl, path). Injection-safe (regclass + %I/%L). STABLE (no side effects).';
+COMMENT ON FUNCTION theodb.htap_refresh(regclass) IS
+    'M62/M143 HTAP: materializa a relação num snapshot Parquet OWN-CODE (public.write_parquet — DataFusion/Arrow, '
+    'sem DuckDB) e registra o snapshot, numa chamada. Retorna o refreshed_at. VOLATILE (escreve arquivo + catálogo). '
+    'Substitui o antigo par codegen htap_refresh_sql (COPY) + client-run + htap_register.';
 
--- theodb.htap_register — upsert the snapshot catalog AFTER the client has run the COPY. Pure SQL/plpgsql, NO
--- DuckDB — this runs fine inside a function. The client passes the parquet_path it wrote (typically the one from
--- theodb.htap_refresh_sql / theodb._htap_path). Returns now() as the registered refreshed_at.
+-- theodb.htap_register — upsert do catálogo. SQL puro, sem DuckDB — sempre rodou dentro de função. Público para
+-- quem materializa fora do htap_refresh. Retorna o refreshed_at. Erro tipado em path vazio.
 CREATE OR REPLACE FUNCTION theodb.htap_register(p_rel regclass, p_parquet_path text)
 RETURNS timestamptz
 LANGUAGE plpgsql
@@ -106,8 +67,6 @@ AS $$
 DECLARE
     snap_at timestamptz := now();
 BEGIN
-    -- Validate the client-supplied path is non-empty (fail-fast, typed — Rule 8). A blank path would register a
-    -- snapshot theodb.olap_sql could never read; refuse it loudly instead of storing a broken row.
     IF p_parquet_path IS NULL OR btrim(p_parquet_path) = '' THEN
         RAISE EXCEPTION 'theodb.htap_register: parquet_path must be a non-empty path for %', p_rel
             USING ERRCODE = '22023';   -- invalid_parameter_value (typed, fail-closed)
@@ -124,64 +83,40 @@ END;
 $$;
 
 COMMENT ON FUNCTION theodb.htap_register(regclass, text) IS
-    'M62 HTAP: register (rel, parquet_path, now()) in theodb._htap_snapshots AFTER the client ran the COPY from '
-    'theodb.htap_refresh_sql. Pure SQL (no DuckDB) — runs inside a function. Upsert (latest snapshot wins). '
-    'Returns the registered refreshed_at. Raises invalid_parameter_value on a blank path. VOLATILE (catalog write).';
+    'M62 HTAP: register (rel, parquet_path, now()) in theodb._htap_snapshots. Pure SQL (no DuckDB). Upsert (latest '
+    'snapshot wins). Returns refreshed_at. Raises invalid_parameter_value on a blank path. VOLATILE (catalog write).';
 
--- theodb.olap_sql — RESOLVE the snapshot path from the catalog and RETURN (do NOT run) the analytical statement
--- that aggregates the columnar Parquet snapshot. Typed error if there is no snapshot (fail-closed, never a silent
--- NULL). The returned statement is the canonical _AGG (category/count/avg) over read_parquet, wrapped in
--- duckdb.query — the M61-confirmed syntax. IMPORTANT: `SELECT *` (not named columns) — duckdb.query returns a
--- record whose columns are defined by the inner query; naming them in the outer SELECT breaks (measured on the
--- image). The CLIENT executes the returned text at the connection level (where DuckDB is allowed).
-CREATE OR REPLACE FUNCTION theodb.olap_sql(p_rel regclass)
-RETURNS text
+-- theodb.olap — M143 OWN-CODE: resolve o snapshot do catálogo e RETORNA as linhas do agregado canônico
+-- (category, count(*), round(avg(amount),4)) lidas+agregadas own-code (public.olap — DataFusion, sem DuckDB).
+-- Substitui olap_sql (que RETORNAVA um SELECT * FROM duckdb.query(...) para o cliente rodar). Erro tipado se não há
+-- snapshot (fail-closed, nunca NULL silencioso).
+CREATE OR REPLACE FUNCTION theodb.olap(p_rel regclass)
+RETURNS TABLE(category text, c bigint, a float8)
 LANGUAGE plpgsql
 STABLE
 AS $$
 DECLARE
     snap_path text;
 BEGIN
-    -- M142 guard (fail-closed): the returned statement wraps duckdb.query (pg_duckdb). Without pg_duckdb (the
-    -- default TheoDB image after the M142 tier-out) the statement is unrunnable. Fail-fast + typed (Rule 8) with
-    -- the next step, BEFORE the snapshot lookup, instead of handing the client a broken statement. Keying on the
-    -- INSTALLED EXTENSION (pg_extension — a catalog, always safe to query) is immune to a future duckdb.query
-    -- overload and safe to CREATE on an image WITHOUT pg_duckdb.
-    IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_duckdb') THEN
-        RAISE EXCEPTION 'theodb.olap_sql: pg_duckdb not installed'
-            USING HINT = 'The HTAP/lakehouse surface (analytical query over Parquet) requires pg_duckdb — pull the theodb-htap image.',
-                  ERRCODE = '0A000';   -- feature_not_supported (typed, fail-closed)
-    END IF;
-
     SELECT s.parquet_path INTO snap_path
         FROM theodb._htap_snapshots s WHERE s.rel = p_rel;
 
     IF NOT FOUND THEN
-        RAISE EXCEPTION 'theodb.olap_sql: no snapshot for %; call theodb.htap_refresh_sql(%) + run it + '
-            'theodb.htap_register(%, path) first', p_rel, p_rel, p_rel USING ERRCODE = 'P0002';  -- no_data_found
+        RAISE EXCEPTION 'theodb.olap: no snapshot for %; call theodb.htap_refresh(%) first', p_rel, p_rel
+            USING ERRCODE = 'P0002';  -- no_data_found
     END IF;
 
-    -- Build the analytical statement. read_parquet lives INSIDE duckdb.query (the M61-confirmed syntax); the
-    -- path is %L-quoted (injection-safe). `SELECT *` over duckdb.query(...) — the record columns come from the
-    -- inner query (category, c, a); naming them outside would fail (measured). The client runs this text.
-    RETURN format(
-        'SELECT * FROM duckdb.query($DUCK$ '
-        'SELECT category, count(*) AS c, round(avg(amount), 4) AS a '
-        'FROM read_parquet(%L) GROUP BY category ORDER BY category $DUCK$)',
-        snap_path);
+    -- lê+agrega o Parquet own-code (public.olap do theodb_rs — DataFusion, in-function). Sem DuckDB.
+    RETURN QUERY SELECT * FROM public.olap(snap_path);
 END;
 $$;
 
-COMMENT ON FUNCTION theodb.olap_sql(regclass) IS
-    'M62 HTAP codegen: RETURN the analytical statement (SELECT * FROM duckdb.query($$ …read_parquet(snapshot)… '
-    '$$)) over the registered columnar snapshot (~9× at 5M per M61). Does NOT execute — pg_duckdb prohibits '
-    'DuckDB inside functions, so the CLIENT runs the returned text at the connection level. Uses SELECT * (the '
-    'duckdb.query record columns come from the inner query; naming them breaks). Raises no_data_found (P0002) if '
-    'no snapshot exists — call theodb.htap_refresh_sql, run it, then theodb.htap_register first. STABLE.';
+COMMENT ON FUNCTION theodb.olap(regclass) IS
+    'M62/M143 HTAP: retorna o agregado canônico (category, count, round(avg,4)) do snapshot Parquet registrado, '
+    'lido+agregado OWN-CODE (public.olap — DataFusion/Arrow, sem DuckDB). Substitui o antigo olap_sql (codegen '
+    'duckdb.query). Raises no_data_found (P0002) se não há snapshot — chame theodb.htap_refresh antes. STABLE.';
 
--- theodb.htap_freshness — the snapshot lag (now() - refreshed_at). Freshness is a DATED contract, not a bug: the
--- OLAP path reads a point-in-time and this is how stale it is. Typed error if there is no snapshot (never a
--- silent NULL that could be mistaken for "fresh"). Pure SQL/plpgsql (no DuckDB) — runs fine in a function.
+-- theodb.htap_freshness — o lag do snapshot (now() - refreshed_at). SQL puro, sem DuckDB.
 CREATE OR REPLACE FUNCTION theodb.htap_freshness(p_rel regclass)
 RETURNS interval
 LANGUAGE plpgsql
@@ -193,8 +128,8 @@ BEGIN
     SELECT s.refreshed_at INTO snap_at FROM theodb._htap_snapshots s WHERE s.rel = p_rel;
 
     IF NOT FOUND THEN
-        RAISE EXCEPTION 'theodb.htap_freshness: no snapshot for %; call theodb.htap_refresh_sql(%) + run it + '
-            'theodb.htap_register(%, path) first', p_rel, p_rel, p_rel USING ERRCODE = 'P0002';
+        RAISE EXCEPTION 'theodb.htap_freshness: no snapshot for %; call theodb.htap_refresh(%) first', p_rel, p_rel
+            USING ERRCODE = 'P0002';
     END IF;
 
     RETURN now() - snap_at;
@@ -202,15 +137,12 @@ END;
 $$;
 
 COMMENT ON FUNCTION theodb.htap_freshness(regclass) IS
-    'M62 HTAP: the snapshot lag (now() - refreshed_at) for a relation — how far the columnar snapshot trails the '
-    'live heap. Freshness is a dated contract (grows between refreshes, resets on theodb.htap_register), not a '
-    'bug. Pure SQL (no DuckDB). Raises no_data_found (P0002) if no snapshot exists.';
+    'M62 HTAP: the snapshot lag (now() - refreshed_at) for a relation. Freshness is a dated contract (grows between '
+    'refreshes, resets on theodb.htap_refresh/register). Pure SQL (no DuckDB). Raises no_data_found (P0002) if none.';
 
--- Least-privilege: the codegen functions only build text + touch a small catalog, but htap_register writes the
--- catalog and the returned statements run file/DuckDB work. Not granted to PUBLIC (same posture as theodb.embed /
--- ai.* — the surface orchestrates server-side file + engine side effects when the client runs the statements).
-REVOKE ALL ON FUNCTION theodb.htap_refresh_sql(regclass) FROM PUBLIC;
+-- Least-privilege: a superfície orquestra escrita de arquivo server-side + leitura own-code. Não concedida a PUBLIC.
+REVOKE ALL ON FUNCTION theodb.htap_refresh(regclass) FROM PUBLIC;
 REVOKE ALL ON FUNCTION theodb.htap_register(regclass, text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION theodb.olap_sql(regclass) FROM PUBLIC;
+REVOKE ALL ON FUNCTION theodb.olap(regclass) FROM PUBLIC;
 REVOKE ALL ON FUNCTION theodb.htap_freshness(regclass) FROM PUBLIC;
 REVOKE ALL ON FUNCTION theodb._htap_path(regclass) FROM PUBLIC;
