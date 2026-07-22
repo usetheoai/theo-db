@@ -13,7 +13,7 @@ use std::path::Path;
 use theodb_lexical::{MemStore, SegmentStore};
 
 /// Cria o catálogo heap se ausente. `bytea` TOASTa segmentos grandes automaticamente.
-fn ensure_table() {
+pub(crate) fn ensure_table() {
     Spi::run("CREATE SCHEMA IF NOT EXISTS theodb").expect("lexical: create schema");
     Spi::run(
         "CREATE TABLE IF NOT EXISTS theodb.lexical_files (\

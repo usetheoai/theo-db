@@ -24,6 +24,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.128.0] - 2026-07-22
+
+### Added
+- **M140.3** (engine BM25 de produção own-code — em progresso): a superfície de produção sobre heap (ADR-0052): (1) `theodb_lexical::IndexCache` (lógica pura pgrx-free, `cargo test` stock) que invalida por **geração** — mata o reload-por-query do spike M139 — MVCC-correto (leitor com snapshot antigo lê geração antiga e reconstrói do estado que enxerga); 5 testes. (2) `bm25_build(index_id, table, id_col, text_col)` (indexa tabela real id+body no heap, geração bumpada) + `bm25_search(index_id, query, k)→(id, score)` (lê geração sob snapshot, usa o cache). **Validado em PG18 real** (`scripts/m140-3-bm25-smoke.sh`, via `cargo pgrx install`): 9/9 asserções incl. o **crux MVCC** (sessão A com snapshot antigo NÃO vê o build de B). **nDCG@10 in-PG scifact = 0,6611** (reproduz o M140.1 byte-a-byte; paridade com pg_textsearch, bate ts_rank). **Latência cache-vs-reload MEDIDA** (`docs/benchmarks/m140-3-bm25-engine.md`, sweep): o cache elimina o reload-por-query, ganho escala com N — ratio cache/reload 0,62 (N=2k) → **0,36 (N=10k)** → **0,22 (N=50k, 4,5× mais rápido)**; o gate `<50%` é atingido em N≥~5k (o regime realista do theo-lens). ADR-0054 supersede a exceção `pg_textsearch` do ADR-0013 (own-code é a superfície BM25; paridade medida + índice menor + moat, não superioridade de ranking). Review council-rust-pgrx (NEEDS_FIXES→corrigido): recuperação de poison do `Mutex` do cache (`unwrap_or_else(e.into_inner())` — evitava que um panic transitório envenenasse `bm25_search` para toda a sessão do backend) + typed errors nos caminhos de heap; MVCC-core/thread-safety-#153/SQL-injection aprovados
+
 ## [0.127.0] - 2026-07-22
 
 ### Added

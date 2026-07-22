@@ -8,6 +8,9 @@
 
 pub mod pg_backing;
 
+// M140.3 — a superfície BM25 de produção (bm25_build + bm25_search) com o cache do Directory.
+pub mod engine;
+
 // M140.2 — o núcleo pgrx-free (`MemStore`/`PgDirectory`/`SegmentStore`) mudou para o crate
 // `theodb_lexical` (testável com `cargo test` stock, sem link pgrx). Re-exportado aqui para
 // preservar os caminhos `crate::lexical::{MemStore,...}` de eventuais consumidores.
