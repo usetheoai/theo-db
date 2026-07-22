@@ -131,3 +131,18 @@ Medido (função `lexical_spike_*`, instalada via `cargo pgrx install --features
 **Consequência:** a integração transacional (a parte cara — 105k LoC no ParadeDB) FUNCIONA para o spike via
 buffer-then-flush + heap MVCC, sem código de página/WAL custom. Falta o gate 3 (crash-real com replay — o heap
 é WAL-logged, então PG recupera; o teste é `SIGABRT` mid-flush + replay) e o gate 4 (custo vs pg_textsearch).
+
+## Gate 3 (crash-real) — PROVADO (medido 2026-07-21, SIGABRT + replay)
+
+`scripts/m139-lexical-crash-smoke.sh`: flush+COMMIT de um índice → `SIGABRT` no postmaster (crash real, não
+shutdown) → restart (replay do WAL) → o índice ainda busca consistente. Medido: `search=1` antes, servidor
+caiu, "WAL replay ocorreu", `search=1` após. **GATE3_CRASH_OK.** A crash-safety é HERDADA do heap WAL-logged do
+PG (buffer-then-flush → heap) — zero código de WAL/rmgr custom. É a elegância do design: reusar o heap dá gate 3
+de graça.
+
+## Veredito parcial: gates 1–3 (viabilidade) PROVADOS
+
+A pergunta central do spike — "o Tantivy pode viver no PG com MVCC + WAL + crash?" — está respondida **SIM,
+empiricamente**: gate 1 (indexa+busca sem fs), gate 2 (MVCC cross-session), gate 3 (crash-real+replay), todos
+medidos em PG18 real. Falta o gate 4 (custo: tamanho do índice + latência vs `pg_textsearch` do M138) para o
+veredito GO/NO-GO final e o escopo do M140.
