@@ -18,6 +18,7 @@
 == gate: M62 own-code (htap_refresh→olap) M62_OWNCODE     (a|2|15, b|1|5)
 == gate: read_parquet multi-tipo         READ_MULTI      ({"n":1,"flag":true,"amount":10.0,"category":"a"})
 == gate: write_parquet fail-closed       WRITE_FAILCLOSED (timestamp → erro tipado, backend vivo)
+== gate: REVOKE least-privilege          REVOKE_OK (lowpriv bloqueado em read/write_parquet)
 == tamanho da imagem                     theodb:m143 = 724 MB
 M143_REMOVAL_OK
 ```
@@ -28,6 +29,7 @@ M143_REMOVAL_OK
 | **M62_OWNCODE** | `theodb.htap_refresh(rel)` (escreve snapshot own-code) + `theodb.olap(rel)` (lê+agrega own-code) = `a\|2\|15`/`b\|1\|5`, **sem DuckDB** |
 | **READ_MULTI** | `public.read_parquet(path)` → jsonb com todos os tipos (int/float/text/bool) via arrow-json |
 | **WRITE_FAILCLOSED** | `public.write_parquet` de coluna timestamp (não-suportado v1) → erro tipado; backend vivo (`SELECT 1`=1) |
+| **REVOKE_OK** | um role **sem privilégio** (`lowpriv`) é **bloqueado** (`permission denied`) em `public.write_parquet`/`read_parquet` — escrita/leitura de arquivo server-side é superuser-only (least-privilege, review HIGH-1) |
 
 ## Tamanho — o ganho medido
 
