@@ -1,0 +1,9 @@
+antes do crash: bm25_search(300,'blk_crashzeta') top id = 2   [esperado 2]
+WAL replay ocorreu no restart
+após crash+replay: top id = 2   [esperado 2]
+CRASH_OK
+VACUUM: n_dead_tup antes=24 depois=0 ; busca pós-VACUUM hits=10
+VACUUM_OK
+OK   MVCC RR: A (snapshot antigo) NÃO vê o build de B = 0
+OK   MVCC RC: A vê o build de B no próximo statement (cache invalida no snapshot novo) = 1
+M140_4_ROBUSTNESS_OK

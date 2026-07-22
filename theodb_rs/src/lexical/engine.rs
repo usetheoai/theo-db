@@ -63,6 +63,12 @@ fn bump_generation(index_id: i64) {
 /// catálogo ainda não existe (nenhum build) OU o índice não tem linha (índice vazio) — ambos são
 /// estados válidos, não erro. O `coalesce` garante exatamente uma linha (evita o `InvalidPosition` de
 /// `get_one` sobre result-set vazio); o guard `to_regclass` cobre a tabela ainda inexistente.
+///
+/// M140.4 (D4, fecha o M140.3 review LOW de straddle): tanto `read_generation` (`Spi::get_one`) quanto
+/// `load` (`Spi::connect(|c| c.select(...))`) usam SPI **read-only** — ambos observam o snapshot ativo da
+/// statement, não snapshots frescos independentes. Logo, dentro de uma única `bm25_search`, a geração lida
+/// e os bytes carregados são consistentes (tag==conteúdo) sob RC e RR; um commit concorrente não intercala
+/// entre as duas leituras porque nenhuma delas re-abre snapshot. Provado por `m140-4-lexical-robustness.sh`.
 fn read_generation(index_id: i64) -> u64 {
     let table_exists: bool =
         Spi::get_one("SELECT to_regclass('theodb.lexical_index_meta') IS NOT NULL")
