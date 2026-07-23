@@ -70,7 +70,13 @@ q() { psql -X -q -p "$PORT" -U theo -d "$DB" -tAc "$1" 2>&1; }
 q "CREATE EXTENSION theodb_rs CASCADE;" >/dev/null
 q "CREATE TABLE v (id int, e vector(8)) WITH (autovacuum_enabled=false);" >/dev/null
 q "INSERT INTO v SELECT g, ('[' || g || ',' || (g+1) || ',' || (g+2) || ',' || (g+3) || ',' || (g+4) || ',' || (g+5) || ',' || (g+6) || ',' || (g+7) || ']')::vector(8) FROM generate_series(1,400) g;" >/dev/null
-q "CREATE INDEX vi ON v USING theodb_hnsw (e);" >/dev/null
+# M146 — the SAME property must hold for both AMs, so the harness is parameterized instead of duplicated.
+# AM=theodb_hnsw (default) exercises `ann/hnsw.rs::from_bytes`; AM=theodb_ivfflat exercises the IVF/AQ page
+# codec in `am/page/ivf.rs` (structured lists, split storage, per-record spans) — a different decoder with its
+# own typed-error paths. `AM_OPTS` carries the WITH(...) clause the IVF build needs.
+AM=${AM:-theodb_hnsw}
+AM_OPTS=${AM_OPTS:-}
+q "CREATE INDEX vi ON v USING $AM (e) $AM_OPTS;" >/dev/null
 
 PRE=$(q "SET enable_seqscan=off; SELECT count(*) FROM (SELECT id FROM v ORDER BY e <-> '[1,2,3,4,5,6,7,8]'::vector LIMIT 5) t;")
 if [ "$PRE" != "5" ]; then echo "CORRUPT_HARNESS_FAIL baseline query returned '$PRE' (expected 5)"; exit 1; fi

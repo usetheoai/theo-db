@@ -16,7 +16,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 - Roadmap amended: added M146 Remediação do review-cycle theodb_rs (hardening + tests + cleanup) (`/roadmap-feature theodb-review-remediation`) (#168, #169)
 - Roadmap amended: added M147 Refactor scan.rs version-dispatch IVF/AQ (`/roadmap-feature theodb-review-remediation`) (#170)
-- Harness de injeção de corrupção `theodb_rs/isolation/corrupt_index.sh`: corrompe bytes de um arquivo de índice real e verifica que nenhuma corrupção derruba o backend — a única prova possível dessa propriedade, já que teste unitário não toca página real (M146)
+- Harness de injeção de corrupção `theodb_rs/isolation/corrupt_index.sh`: corrompe bytes de um arquivo de índice real e verifica que nenhuma corrupção derruba o backend — a única prova possível dessa propriedade, já que teste unitário não toca página real. Parametrizado por AM (`AM=theodb_hnsw` default, `AM=theodb_ivfflat`), então a mesma propriedade é medida nos dois decodificadores (M146)
+- `theodb_rs/examples/ivf_codec_check.rs`: cobre a aritmética pura do formato IVF (codificação de labels de largura fixa e cálculo de span com straddle de chunk), que não tinha teste algum. Executa de verdade — `cargo test`/`cargo pgrx test` não linkam neste crate, então o binário de example é o teste, seguindo a convenção que `examples/resumable_check.rs` já estabelecia (M146)
 
 ### Changed
 

@@ -14,6 +14,9 @@ use pgrx::pg_sys;
 // descendant module — it can call the private page primitives in this file directly). Re-exported
 // flat so every existing `page::write_ivf_*` / `page::read_ivf_*` call site is unchanged.
 mod ivf;
+// M146 — pure (PG-free) arithmetic of the IVF format, split out so `examples/ivf_codec_check.rs` can link and
+// exercise it (`cargo test` does not link in this crate). `ivf` re-exports its items.
+mod ivf_codec;
 pub(crate) use ivf::*;
 mod symqg; // E2 — theodb_symqg co-located page layout (reaches the private helpers via `use super::*`)
 pub(crate) use symqg::*;
