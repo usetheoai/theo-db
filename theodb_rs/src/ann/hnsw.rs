@@ -473,6 +473,20 @@ impl HnswIndex {
             }
             _ => {}
         }
+        // M146 T1.1 — the block above guards `entry`, but `search_layer` (`visited[nb]`, `self.vectors[nb]`)
+        // and `greedy_descend` (`self.vectors[nb]`) index by NEIGHBOUR without a bounds check, so an
+        // out-of-range neighbour is the same FFI-crossing panic the comment above says we refuse to allow.
+        // Mirrors the sibling `ann/ivf.rs` check verbatim; O(1) per neighbour over bytes the loop above already
+        // touched, once per scan (the whole blob is deserialized once, not per hop).
+        //
+        // MEASURED REACHABILITY (isolation/corrupt_index.sh, 44 corruption trials): disk corruption does NOT
+        // reach here — PostgreSQL's page verification catches it first with checksums ON (the PG18 default),
+        // and our own blob page-chain validation catches it with checksums OFF. This check is therefore
+        // defense-in-depth against a defect in our own writer or in-memory corruption, not a fix for a
+        // reproducible crash. Kept because the invariant is cheap, local, and already claimed above.
+        if neighbors.iter().flatten().flatten().any(|&nb| nb >= n) {
+            return Err("theodb hnsw: neighbour references an out-of-bounds node".into());
+        }
         Ok(HnswIndex {
             metric,
             m,
@@ -523,6 +537,36 @@ mod tests {
         let idx = HnswIndex::build(&[], 16, 64, Metric::Cosine, 1);
         let back = HnswIndex::from_bytes(&idx.to_bytes()).expect("empty round-trip");
         assert!(back.search(&[1.0, 0.0], 3, 40).is_empty());
+    }
+
+    // M146 T1.1 — a blob that is STRUCTURALLY complete (right counts, valid entry) but SEMANTICALLY corrupt:
+    // one neighbour references node `n`, which does not exist. Without the referential-integrity check this
+    // deserializes fine and the corruption only surfaces inside `search_layer` as `visited[nb]` / `vectors[nb]`
+    // — an index-out-of-bounds panic unwinding across the C FFI boundary, tearing down the backend. The blob is
+    // disk-fed (`am/index.rs` → `am/scan.rs`), so this is reachable from a corrupt index page, not just a
+    // round-trip. Pure `#[test]`: `build`/`to_bytes`/`from_bytes` are PG-free, so it needs no cluster.
+    #[test]
+    fn hnsw_from_bytes_rejects_out_of_bounds_neighbor() {
+        let mut idx = HnswIndex::build(&corpus(), 16, 64, Metric::L2, 11);
+        let n = idx.vectors.len();
+        assert!(n > 0, "fixture must be non-empty");
+        // Point the first neighbour we find at `n` (one past the last valid node).
+        let injected = idx.neighbors.iter_mut().flatten().find_map(|layer| {
+            layer.first_mut().map(|slot| {
+                *slot = n;
+            })
+        });
+        assert!(injected.is_some(), "fixture must have at least one neighbour to corrupt");
+
+        // `match` rather than `expect_err`: the latter needs `HnswIndex: Debug`, and deriving Debug on a
+        // production struct merely to satisfy a test assertion is a change in the wrong direction.
+        match HnswIndex::from_bytes(&idx.to_bytes()) {
+            Ok(_) => panic!("a neighbour referencing a non-existent node must be rejected"),
+            Err(msg) => assert!(
+                msg.contains("out-of-bounds"),
+                "the error must name the violated invariant, got: {msg}"
+            ),
+        }
     }
 
     #[pgrx::pg_test]

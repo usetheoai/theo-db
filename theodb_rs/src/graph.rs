@@ -259,10 +259,24 @@ impl Csr {
 }
 
 /// Scan the edge relation and build the undirected CSR. `edge_rel` is a table name; `src_col`/`dst_col` are the
-/// integer endpoint columns. Injection-safe: identifiers quoted via Postgres `format('%I')` over SPI.
+/// integer endpoint columns.
+///
+/// Injection-safe on BOTH axes (M146 T1.2): the columns are quoted with `format('%I')`, and the RELATION goes
+/// through `($3)::regclass::text`. The relation axis used to be a raw `%s` splice, which was a real, MEASURED
+/// second-order SQL injection: `graph_build('(SELECT src, dst FROM other WHERE 1/0 = 1) x', 'src','dst')`
+/// raised `division by zero`, proving the caller's SQL executed inside our scan. The `($1)::regclass::oid` in
+/// the persist step below does NOT protect this — it runs only AFTER the injected scan has already executed.
+///
+/// `regclass` (not `%I`) is the right tool here: it validates that the name parses AND resolves through
+/// `search_path`, raising 42P01 BEFORE any SQL is assembled, and `regclassout` re-renders the identifier from
+/// `pg_class` — so the text spliced into the query comes from the catalog, never from the caller. `%I` would be
+/// wrong: it treats the whole input as ONE identifier, mangling `schema.table` into `"schema.table"`.
+/// Note: `regclass` performs no privilege check; authorization is still enforced when the scan executes, which
+/// is correct while this function is SECURITY INVOKER. Making it SECURITY DEFINER would require an explicit
+/// `has_table_privilege` gate.
 fn build_csr(edge_rel: &str, src_col: &str, dst_col: &str) -> Csr {
     let scan_sql = Spi::get_one_with_args::<String>(
-        "SELECT format('SELECT (%I)::bigint AS s, (%I)::bigint AS d FROM %s WHERE %I IS NOT NULL AND %I IS NOT NULL', $1,$2,$3,$1,$2)",
+        "SELECT format('SELECT (%I)::bigint AS s, (%I)::bigint AS d FROM %s WHERE %I IS NOT NULL AND %I IS NOT NULL', $1,$2,($3)::regclass::text,$1,$2)",
         &[src_col.into(), dst_col.into(), edge_rel.into()],
     )
     .ok()

@@ -257,10 +257,43 @@ fn atomic_write_parquet(
     let tmp = format!("{path}.{}.tmp", unsafe { pg_sys::MyProcPid });
     let write_res = (|| -> Result<(), String> {
         let file = std::fs::File::create(&tmp).map_err(|e| format!("criar '{tmp}': {e}"))?;
+        // M146 T1.3 — durabilidade, seguindo o protocolo do `durable_rename` do PostgreSQL
+        // (`src/backend/storage/file/fd.c:782` + os helpers `fsync_fname`/`fsync_parent_path`): o rename é
+        // atômico apenas para a ENTRADA DE DIRETÓRIO; sem fsync o conteúdo pode não estar em disco, e sem
+        // fsync do DIRETÓRIO-PAI o próprio rename pode se perder num crash. Antes daqui o export era atômico
+        // porém NÃO durável (o crate não tinha um único `sync_all`).
+        //
+        // O fd é CLONADO antes de o `File` ser movido para o writer: `try_clone` devolve um descritor
+        // independente para o MESMO inode, então o `sync_all` abaixo sincroniza o arquivo escrito pelo writer.
+        // Foi a via escolhida depois que `finish()` + `into_inner()` falhou na prática com
+        // "SerializedFileWriter already finished" — e ela tem a vantagem de manter o `close()` original
+        // intocado, que é quem escreve o footer do Parquet (trocá-lo por `into_inner()` produziria um arquivo
+        // sem footer, ilegível).
+        let fsync_handle = file.try_clone().map_err(|e| format!("try_clone '{tmp}': {e}"))?;
         let mut w = ArrowWriter::try_new(file, schema, None).map_err(|e| format!("ArrowWriter: {e}"))?;
         w.write(batch).map_err(|e| format!("write batch: {e}"))?;
         w.close().map_err(|e| format!("close: {e}"))?;
+        fsync_handle.sync_all().map_err(|e| format!("fsync '{tmp}': {e}"))?;
         std::fs::rename(&tmp, path).map_err(|e| format!("rename '{tmp}'→'{path}': {e}"))?;
+        // fsync do diretório-pai. Parent vazio (path relativo simples) → ".", como o upstream faz em
+        // `fd.c:3885-3886`. Falha de fsync EM DIRETÓRIO é tolerada para EBADF/EINVAL (há filesystems que não
+        // suportam), espelhando `fd.c:3822-3825`; qualquer outro erro propaga como `Err` — nunca PANIC, pois
+        // o export é refazível e a fonte da verdade continua disponível (`durable_rename` também repassa o
+        // elevel do caller em vez de forçar PANIC).
+        let parent = std::path::Path::new(path).parent();
+        let dir = match parent {
+            Some(p) if !p.as_os_str().is_empty() => p,
+            _ => std::path::Path::new("."),
+        };
+        // errno definidos localmente (Linux) para NÃO adicionar a dep `libc` — o crate não a declara e o D2
+        // deste milestone é "zero dependência nova"; a stdlib já expõe o errno cru via `raw_os_error()`.
+        const EBADF: i32 = 9;
+        const EINVAL: i32 = 22;
+        match std::fs::File::open(dir).and_then(|d| d.sync_all()) {
+            Ok(()) => {}
+            Err(e) if matches!(e.raw_os_error(), Some(EBADF) | Some(EINVAL)) => {}
+            Err(e) => return Err(format!("fsync dir '{}': {e}", dir.display())),
+        }
         Ok(())
     })();
     if write_res.is_err() {

@@ -16,6 +16,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 - Roadmap amended: added M146 Remediação do review-cycle theodb_rs (hardening + tests + cleanup) (`/roadmap-feature theodb-review-remediation`) (#168, #169)
 - Roadmap amended: added M147 Refactor scan.rs version-dispatch IVF/AQ (`/roadmap-feature theodb-review-remediation`) (#170)
+- Harness de injeção de corrupção `theodb_rs/isolation/corrupt_index.sh`: corrompe bytes de um arquivo de índice real e verifica que nenhuma corrupção derruba o backend — a única prova possível dessa propriedade, já que teste unitário não toca página real (M146)
 
 ### Changed
 
@@ -25,7 +26,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `theodb.write_parquet` agora grava de forma **durável**, não apenas atômica: o arquivo temporário recebe `fsync` antes do rename e o diretório-pai recebe `fsync` depois, seguindo o protocolo `durable_rename` do PostgreSQL. Antes, um crash logo após o rename podia deixar um arquivo publicado porém truncado (M146)
+- Desserialização do índice HNSW persistido passa a validar que todo índice de vizinho aponta para um nó existente, fechando a invariante que o próprio código declarava mas não cumpria (defense-in-depth — a análise de alcançabilidade medida está no comentário da função) (M146)
+
 ### Security
+
+- **`theodb.graph_build` executava SQL arbitrário fornecido pelo usuário.** O nome da relação era interpolado cru (`%s`) na query de varredura, então um valor como `(SELECT ... WHERE 1/0 = 1) x` tinha seu SQL executado — comprovado por `ERROR: division by zero`. A relação passa a ser resolvida via `::regclass`, que valida e falha com 42P01 **antes** de qualquer SQL ser montado. Impacto limitado: a função é SECURITY INVOKER e tem `REVOKE ALL ... FROM PUBLIC`, executando com os privilégios de quem chama (M146, #168)
 
 ## [0.134.1] - 2026-07-23
 
