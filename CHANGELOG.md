@@ -13,16 +13,33 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.134.0] - 2026-07-23
+
+### Added
 - Cadeia de upgrade `1.1.0→1.2.0` (`theodb_rs--1.1.0--1.2.0.sql`, full-schema self-healing conforme a convenção M137/oráculo CONV) que expõe a superfície lakehouse M143 (`public.read_parquet`/`write_parquet`/`olap` + REVOKEs least-privilege) a quem faz `ALTER EXTENSION theodb_rs UPDATE` — antes só o fresh-install a tinha; `default_version` → `1.2.0` (M144 T1.1, review HIGH)
+
 
 ### Changed
 - `theodb.vectorizer` retry agora usa backoff exponencial (2^attempts s, cap 300s) ao re-enfileirar um job falho, em vez de reclamá-lo instantaneamente — uma queda transitória do endpoint não re-dispara o backlog inteiro em loop apertado (M144 T2.3, review MEDIUM)
+
 
 ### Fixed
 - `theodb.vectorizer`: hardening do caminho de delete de embedding — os dois braços de `_vectorizer_process_delete` deixam de descartar o `Result` do SPI (`let _ =`) e passam a propagar a falha (o worker já a converte em dead-letter via M132), garantindo que um delete falho nunca seja marcado `done`. Defense-in-depth: no pgrx 0.19 um erro de DML já fazia longjmp (a falha já abortava o job), mas o Result descartado deixava aberto o caminho raro de `SpiError`-code; agora fechado e consistente com o braço de upsert (M144 T1.3, review HIGH)
 - Tabela `theodb_columnar`: `INSERT` seguido de `DROP TABLE` na mesma transação agora faz COMMIT limpo — o flush de PRE_COMMIT usa `try_relation_open` e pula OIDs já dropados, em vez de abortar o COMMIT inteiro do usuário (M144 T2.1, review MEDIUM)
 - Grafo nativo: node-ids acima de `u32::MAX` na construção do CSR agora falham com erro tipado, em vez de truncar silenciosamente e corromper a adjacência (M144 T2.4, review MEDIUM)
 - Test-infra: `cargo pgrx test` volta a rodar (estava quebrado — a compilação do criterion bench `scan_hot_path` sob a feature `pg_test` falhava no link contra símbolos do PostgreSQL, bloqueando TODOS os `#[pg_test]` do crate). Fix: `test = false` no `[[bench]]` (o bench é para `cargo bench` standalone, não para o harness de teste) + extração do código `crate::ann`-dependente de `ann/scan_core.rs` para `ann/scan_core_mem.rs`, deixando `scan_core.rs` puro como o próprio módulo documenta (M144 fix de infra pré-existente)
+
 
 ### Security
 - `symqg_spike_bench` (função de spike/benchmark que lia path arbitrário do filesystem via `std::fs::read`) agora é superuser-only (`REVOKE ALL FROM PUBLIC`, aplicado no fresh-install e via o script de upgrade para installs existentes) — antes era executável por qualquer role. Least-privilege canônico do PostgreSQL core (`pg_read_file`/`lo_import`); mantém a função no `.so` para não quebrar a cadeia de upgrade (M144 T1.2, review HIGH)
