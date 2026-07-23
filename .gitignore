@@ -62,3 +62,4 @@ theodb_rs/isolation/tmp_check/
 # loop-check-licence local artifacts
 .claude/check-licence-evidence.db
 .claude/check-licence-loop.local.md
+code-review-output/

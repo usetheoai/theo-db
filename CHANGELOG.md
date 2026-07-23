@@ -13,6 +13,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Roadmap amended: added M144 Remediação P0+P1 do code-review (upgrade chain 1.1.0→1.2.0, REVOKE do `symqg_spike_bench`, delete engolido do vectorizer + MEDIUMs P1 sob TDD) (`/roadmap-feature review-findings-remediation`)
+- Roadmap amended: added M145 Refactor dos 4 hotspots de CC refactor-worthy com prova A/B e válvula honest-negative (`/roadmap-feature cc-hotspots-refactor`)
 
 ### Changed
 
