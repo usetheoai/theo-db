@@ -97,11 +97,8 @@ async fn olap_impl(path: String) -> Result<Vec<(String, i64, f64)>, String> {
     let mut out: Vec<(String, i64, f64)> = Vec::new();
     for b in &batches {
         let cats = extract_strings(b.column(0).as_ref())?;
-        let c = b
-            .column(1)
-            .as_any()
-            .downcast_ref::<Int64Array>()
-            .ok_or("col c (count) não é Int64")?;
+        let c =
+            b.column(1).as_any().downcast_ref::<Int64Array>().ok_or("col c (count) não é Int64")?;
         let a = b
             .column(2)
             .as_any()
@@ -186,7 +183,10 @@ enum Col {
 
 /// OID Postgres → `(Field, builder)`. Tipo não-suportado na escrita → erro tipado (fail-closed) — NUNCA
 /// silenciosamente pulado (a coluna não pode sumir do Parquet).
-fn col_builder_for(name: &str, oid: u32) -> Result<(datafusion::arrow::datatypes::Field, Col), String> {
+fn col_builder_for(
+    name: &str,
+    oid: u32,
+) -> Result<(datafusion::arrow::datatypes::Field, Col), String> {
     use datafusion::arrow::array::{
         BooleanBuilder, Float32Builder, Float64Builder, Int16Builder, Int32Builder, Int64Builder,
         StringBuilder,
@@ -215,13 +215,27 @@ fn append_row(builders: &mut [Col], row: &pgrx::spi::SpiHeapTupleData) -> Result
     for (i, b) in builders.iter_mut().enumerate() {
         let ord = i + 1; // SPI é 1-indexed
         match b {
-            Col::I16(x) => x.append_option(row.get::<i16>(ord).map_err(|e| format!("col {ord}: {e}"))?),
-            Col::I32(x) => x.append_option(row.get::<i32>(ord).map_err(|e| format!("col {ord}: {e}"))?),
-            Col::I64(x) => x.append_option(row.get::<i64>(ord).map_err(|e| format!("col {ord}: {e}"))?),
-            Col::F32(x) => x.append_option(row.get::<f32>(ord).map_err(|e| format!("col {ord}: {e}"))?),
-            Col::F64(x) => x.append_option(row.get::<f64>(ord).map_err(|e| format!("col {ord}: {e}"))?),
-            Col::Bool(x) => x.append_option(row.get::<bool>(ord).map_err(|e| format!("col {ord}: {e}"))?),
-            Col::Str(x) => x.append_option(row.get::<String>(ord).map_err(|e| format!("col {ord}: {e}"))?),
+            Col::I16(x) => {
+                x.append_option(row.get::<i16>(ord).map_err(|e| format!("col {ord}: {e}"))?)
+            }
+            Col::I32(x) => {
+                x.append_option(row.get::<i32>(ord).map_err(|e| format!("col {ord}: {e}"))?)
+            }
+            Col::I64(x) => {
+                x.append_option(row.get::<i64>(ord).map_err(|e| format!("col {ord}: {e}"))?)
+            }
+            Col::F32(x) => {
+                x.append_option(row.get::<f32>(ord).map_err(|e| format!("col {ord}: {e}"))?)
+            }
+            Col::F64(x) => {
+                x.append_option(row.get::<f64>(ord).map_err(|e| format!("col {ord}: {e}"))?)
+            }
+            Col::Bool(x) => {
+                x.append_option(row.get::<bool>(ord).map_err(|e| format!("col {ord}: {e}"))?)
+            }
+            Col::Str(x) => {
+                x.append_option(row.get::<String>(ord).map_err(|e| format!("col {ord}: {e}"))?)
+            }
         }
     }
     Ok(())
@@ -270,7 +284,8 @@ fn atomic_write_parquet(
         // intocado, que é quem escreve o footer do Parquet (trocá-lo por `into_inner()` produziria um arquivo
         // sem footer, ilegível).
         let fsync_handle = file.try_clone().map_err(|e| format!("try_clone '{tmp}': {e}"))?;
-        let mut w = ArrowWriter::try_new(file, schema, None).map_err(|e| format!("ArrowWriter: {e}"))?;
+        let mut w =
+            ArrowWriter::try_new(file, schema, None).map_err(|e| format!("ArrowWriter: {e}"))?;
         w.write(batch).map_err(|e| format!("write batch: {e}"))?;
         w.close().map_err(|e| format!("close: {e}"))?;
         fsync_handle.sync_all().map_err(|e| format!("fsync '{tmp}': {e}"))?;
@@ -328,7 +343,8 @@ fn write_parquet_impl(rel: &str, path: &str) -> Result<i64, String> {
         let mut cols = Vec::new();
         for row in ct {
             let name: String = row.get(1).map_err(|e| format!("attname: {e}"))?.unwrap_or_default();
-            let oid: pg_sys::Oid = row.get(2).map_err(|e| format!("atttypid: {e}"))?.ok_or("atttypid nulo")?;
+            let oid: pg_sys::Oid =
+                row.get(2).map_err(|e| format!("atttypid: {e}"))?.ok_or("atttypid nulo")?;
             cols.push((name, oid.to_u32()));
         }
         Ok::<_, String>((qname, cols))
@@ -373,10 +389,7 @@ fn extract_strings(arr: &dyn Array) -> Result<Vec<String>, String> {
     } else if let Some(a) = arr.as_any().downcast_ref::<StringViewArray>() {
         Ok((0..a.len()).map(|i| a.value(i).to_string()).collect())
     } else {
-        Err(format!(
-            "coluna category é {:?}, não uma string array",
-            arr.data_type()
-        ))
+        Err(format!("coluna category é {:?}, não uma string array", arr.data_type()))
     }
 }
 

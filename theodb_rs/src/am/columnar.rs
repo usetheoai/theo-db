@@ -195,7 +195,8 @@ unsafe extern "C-unwind" fn columnar_xact_flush(
             // COMMIT. `try_relation_open` returns NULL instead — skip the flush for a dropped relation
             // (its columnar data is being removed anyway) and drop its pending WRITE_STATES entry so a
             // future txn that reuses the OID does not inherit a stale buffer.
-            let rel = pg_sys::try_relation_open(relid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
+            let rel =
+                pg_sys::try_relation_open(relid, pg_sys::RowExclusiveLock as pg_sys::LOCKMODE);
             if rel.is_null() {
                 WRITE_STATES.with(|w| {
                     w.borrow_mut().remove(&oid);

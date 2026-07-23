@@ -292,4 +292,3 @@ impl<N: Copy> ResumableGround<N> {
         Ok(out)
     }
 }
-

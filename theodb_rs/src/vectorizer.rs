@@ -473,8 +473,9 @@ mod theodb_rs {
             // this closes the rare `Err(SpiError(code))` path and drops the Result-discarding smell. Had a
             // failed delete been swallowed AND returned Ok, the removed doc's embedding would stay searchable
             // (PII). 0 rows affected is `Ok` and still marks done — only a real SPI error propagates.
-            Spi::run_with_args(&del, &[source_pk.into()])
-                .unwrap_or_else(|e| crate::pg::err_input(&format!("vectorizer chunk delete failed: {e:?}")));
+            Spi::run_with_args(&del, &[source_pk.into()]).unwrap_or_else(|e| {
+                crate::pg::err_input(&format!("vectorizer chunk delete failed: {e:?}"))
+            });
             return;
         }
         let del_q = build_sql(
@@ -944,7 +945,9 @@ fn process_group(owner: &str, vid: i32, group: Vec<(i64, String)>) -> (i64, i64)
 
     // Phase A — READ content + resolve cfg no txn próprio; o commit LIBERA o snapshot antes do embed
     // (backend_xmin não fica pinado no HTTP). subtxn-isolado (H-1) → bad-cfg/SPI error → `None` → fallback.
-    let read = BackgroundWorker::transaction(|| in_subtxn(|| theodb_rs::_vectorizer_read_batch(vid, &pks)));
+    let read = BackgroundWorker::transaction(|| {
+        in_subtxn(|| theodb_rs::_vectorizer_read_batch(vid, &pks))
+    });
 
     let batch_done: Option<i64> = match read {
         None => None,
@@ -956,7 +959,12 @@ fn process_group(owner: &str, vid: i32, group: Vec<(i64, String)>) -> (i64, i64)
                         c.update(
                             "SELECT theodb_rs._vectorizer_process_upsert_batch($1, $2, $3, $4)",
                             None,
-                            &[vid.into(), job_ids.clone().into(), pks.clone().into(), owner.to_string().into()],
+                            &[
+                                vid.into(),
+                                job_ids.clone().into(),
+                                pks.clone().into(),
+                                owner.to_string().into(),
+                            ],
                         )
                         .expect("vectorizer batch failed")
                         .first()
@@ -979,11 +987,17 @@ fn process_group(owner: &str, vid: i32, group: Vec<(i64, String)>) -> (i64, i64)
             // Phase B — EMBED sem txn aberto e sem SPI: backend_xmin liberado no HTTP inteiro. Um err_* tipado
             // longjmpa; sem txn para capturar aqui, o PgTryBuilder trapa e roteia ao per-job fallback.
             let items: Vec<Option<&str>> = r.contents.iter().map(|c| c.as_deref()).collect();
-            let embedded: Option<Vec<String>> = PgTryBuilder::new(std::panic::AssertUnwindSafe(|| {
-                Some(crate::embed::run_batch_resolved(&items, &r.endpoint, &r.model, r.api_key.as_deref()))
-            }))
-            .catch_others(|_| None)
-            .execute();
+            let embedded: Option<Vec<String>> =
+                PgTryBuilder::new(std::panic::AssertUnwindSafe(|| {
+                    Some(crate::embed::run_batch_resolved(
+                        &items,
+                        &r.endpoint,
+                        &r.model,
+                        r.api_key.as_deref(),
+                    ))
+                }))
+                .catch_others(|_| None)
+                .execute();
             if BackgroundWorker::sigterm_received() {
                 return (processed, failed); // ver a nuance de sigterm no doc-comment (equivalente ao break externo)
             }
@@ -991,7 +1005,9 @@ fn process_group(owner: &str, vid: i32, group: Vec<(i64, String)>) -> (i64, i64)
                 None => None, // embed falhou (5xx/malformed/timeout) → per-job fallback
                 // Phase C — WRITE os vetores + MARK done num txn fresco (overwrite idempotente; mark owner-guarded).
                 Some(vecs) => BackgroundWorker::transaction(|| {
-                    in_subtxn(|| theodb_rs::_vectorizer_write_batch(&r.cfg, &job_ids, &pks, &vecs, owner))
+                    in_subtxn(|| {
+                        theodb_rs::_vectorizer_write_batch(&r.cfg, &job_ids, &pks, &vecs, owner)
+                    })
                 }),
             }
         }
@@ -1062,7 +1078,11 @@ pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
                 break;
             }
             if op == "delete" {
-                if process_one(&owner, job_id, vid, &pk, true) { processed += 1 } else { failed += 1 }
+                if process_one(&owner, job_id, vid, &pk, true) {
+                    processed += 1
+                } else {
+                    failed += 1
+                }
             } else {
                 groups.entry(vid).or_default().push((job_id, pk));
             }

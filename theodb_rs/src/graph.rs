@@ -1138,9 +1138,8 @@ mod tests {
         // 1_000_000 is well within u32 and builds a ~8 MB offset array — feasible, and enough to prove the
         // guard does not misfire on a legitimately large id.
         Spi::run("INSERT INTO gmax VALUES (0, 1000000)").unwrap();
-        let ne: i64 = Spi::get_one("SELECT theodb.graph_build('gmax','src','dst')")
-            .unwrap()
-            .unwrap();
+        let ne: i64 =
+            Spi::get_one("SELECT theodb.graph_build('gmax','src','dst')").unwrap().unwrap();
         assert_eq!(ne, 1, "one edge built for a large valid u32 id");
     }
 

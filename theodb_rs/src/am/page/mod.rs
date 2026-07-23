@@ -620,8 +620,8 @@ unsafe fn pending_start_v5_v7(rel: pg_sys::Relation, m: &[u8]) -> Result<u32, St
         let o = i * 20;
         total5 =
             total5.saturating_add(u32::from_le_bytes(dbytes5[o + 4..o + 8].try_into().unwrap()));
-        total5 = total5
-            .saturating_add(u32::from_le_bytes(dbytes5[o + 12..o + 16].try_into().unwrap()));
+        total5 =
+            total5.saturating_add(u32::from_le_bytes(dbytes5[o + 12..o + 16].try_into().unwrap()));
     }
     Ok(total5)
 }
@@ -653,8 +653,8 @@ unsafe fn pending_start_v6_v8(rel: pg_sys::Relation, m: &[u8]) -> Result<u32, St
         let o = i * 20;
         total6 =
             total6.saturating_add(u32::from_le_bytes(dbytes6[o + 4..o + 8].try_into().unwrap()));
-        total6 = total6
-            .saturating_add(u32::from_le_bytes(dbytes6[o + 12..o + 16].try_into().unwrap()));
+        total6 =
+            total6.saturating_add(u32::from_le_bytes(dbytes6[o + 12..o + 16].try_into().unwrap()));
     }
     Ok(total6)
 }
