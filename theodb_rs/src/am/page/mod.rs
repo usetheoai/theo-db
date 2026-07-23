@@ -557,8 +557,14 @@ pub(crate) unsafe fn peek_magic(rel: pg_sys::Relation) -> Result<u32, String> {
     Ok(u32::from_le_bytes(m[0..4].try_into().unwrap()))
 }
 
-/// Number of pages the MAIN index occupies before the pending region — format-aware (blob: `1 + nchunks`;
-/// structured: `1 + centroid_npages + Σ list npages`). Used to locate the pending region for either layout.
+// Number of pages the MAIN index occupies before the pending region — format-aware (blob: `1 + nchunks`;
+// structured: `1 + centroid_npages + Σ list npages`). Used to locate the pending region for either layout.
+//
+// (M146: este bloco era `///` e ficou ÓRFÃO no refactor do M145 — não documenta o item seguinte, que tem doc
+// própria. Um doc comment seguido de linha vazia é erro sob o baseline `-D warnings` do projeto
+// (`clippy::empty_line_after_doc_comments`), deixando o gate de lint vermelho no develop. Convertido para
+// comentário normal, que é o que ele de fato é.)
+//
 // M145 T1.3: os 4 blocos por-versão do IVF extraídos VERBATIM (cut-and-move; offsets/strides/guards
 // byte-a-byte idênticos — ADR-2). NÃO unificar num parser parametrizado: os offsets/strides diferem
 // genuinamente por versão de formato (12B vs 20B stride, campos em posições distintas) — unificar seria

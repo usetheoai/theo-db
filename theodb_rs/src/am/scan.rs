@@ -1339,7 +1339,9 @@ pub extern "C-unwind" fn amgettuple(
                                         rel, &meta, q, rg,
                                     ) {
                                         Ok(b) => b,
-                                        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
+                                        Err(e) => {
+                                            crate::pg::err_corrupt(&format!("theodb am scan: {e}"))
+                                        }
                                     };
                                     (b, rg.exhausted())
                                 }
