@@ -69,3 +69,6 @@ code-review-output/
 .review-runs/
 .review-loop/
 .compaction-snapshots/
+
+# locks de exclusao mutua do review-cycle (nao sao conteudo)
+*.json.lock
