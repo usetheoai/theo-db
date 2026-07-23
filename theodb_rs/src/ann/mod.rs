@@ -20,6 +20,12 @@ mod hnsw_parallel;
 mod ivf;
 mod ivf_aqah; // M75 — IVF-AQ+AH spike index (ROADMAP v6, pg_scann Fase 0)
 pub(crate) mod scan_core;
+// M144 (test-infra fix): the pg_test-only MemNeighborSource + `ground_search` equivalence tests live here, NOT
+// in scan_core.rs — that file is `#[path]`-included standalone by the criterion bench, which has no `crate::ann`.
+// Keeping the `crate::ann`-referencing code in scan_core.rs made the bench fail to compile under `cargo pgrx test`
+// (which turns `pg_test` on for all targets), blocking every #[pg_test] in the crate.
+#[cfg(feature = "pg_test")]
+pub(crate) mod scan_core_mem;
 pub(crate) mod symqg_spike; // E2 — SymphonyQG clean-room spike (co-located quantized graph traversal)
 mod wire;
 

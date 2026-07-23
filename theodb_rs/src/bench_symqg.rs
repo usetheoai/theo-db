@@ -103,3 +103,15 @@ fn symqg_spike_bench(sift_dir: &str, n: i64, nq: i64, bits: i32) -> String {
     emit("E2_DONE");
     report
 }
+
+// M144 T1.2: `symqg_spike_bench` reads an arbitrary server-filesystem path (`std::fs::read` above). It is a
+// spike/benchmark entrypoint that must NOT be callable by a non-superuser. REVOKE EXECUTE FROM PUBLIC on the
+// fresh-install surface — the same least-privilege pattern the PostgreSQL core applies to `pg_read_file` /
+// `lo_import` (`system_functions.sql`) and this crate already applies to the Parquet primitives (`parquet.rs`).
+// `requires` guarantees the REVOKE runs AFTER the CREATE. Existing 1.1.0 installs get the same REVOKE via the
+// `theodb_rs--1.1.0--1.2.0.sql` upgrade script (the .so keeps the wrapper, so the upgrade chain stays intact).
+extension_sql!(
+    "REVOKE ALL ON FUNCTION symqg_spike_bench(text, bigint, bigint, int) FROM PUBLIC;",
+    name = "symqg_spike_bench_revoke",
+    requires = [symqg_spike_bench],
+);

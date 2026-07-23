@@ -285,6 +285,14 @@ fn build_csr(edge_rel: &str, src_col: &str, dst_col: &str) -> Csr {
                         "theodb.graph_build: node ids must be non-negative bigints",
                     );
                 }
+                // M144 T2.4: the CSR adjacency stores node ids as u32 (`v as u32` below); a bigint
+                // node id above u32::MAX would truncate silently and corrupt the graph. Fail-closed at
+                // the trust boundary (fresh-read from SPI) instead of at the cast.
+                if s > u32::MAX as i64 || d > u32::MAX as i64 {
+                    crate::pg::err_input(
+                        "theodb.graph_build: node ids must fit in u32 (max 4294967295)",
+                    );
+                }
                 maxn = maxn.max(s).max(d);
                 src.push(s);
                 dst.push(d);
@@ -1099,5 +1107,37 @@ mod tests {
             max_pure_speedup > 2.0,
             "M109 GATE: batched MS-BFS pure-traversal speedup must exceed 2× (got {max_pure_speedup:.2}×)"
         );
+    }
+
+    // M144 T2.4 (EC-4 EDGE): a large id that fits in u32 must NOT trip the guard — the CSR builds.
+    //
+    // HONEST NOTE (proven on the droplet, 2026-07-23): the CSR offset array is DENSE, indexed by the raw
+    // node id (`vec![0u64; nn + 1]`, `offsets[node as usize]`), so `nn == max_id + 1`. Building at the
+    // literal u32::MAX (4294967295) allocates a ~34 GB offset array → OOM, unrelated to the guard. So the
+    // ACCEPT side is exercised with a large-but-feasible id (1_000_000): it proves the guard fires ONLY on
+    // ids strictly PAST u32::MAX (the guard is `>`, not `>=`) and never false-positives on a valid id. The
+    // exact-boundary REJECT (u32::MAX + 1) is proven feasibly by the sibling NEGATIVE test — the guard
+    // aborts BEFORE the allocation, so it needs no memory.
+    #[pg_test]
+    fn csr_build_accepts_large_valid_u32_id() {
+        Spi::run("CREATE TABLE gmax(src bigint, dst bigint)").unwrap();
+        // 1_000_000 is well within u32 and builds a ~8 MB offset array — feasible, and enough to prove the
+        // guard does not misfire on a legitimately large id.
+        Spi::run("INSERT INTO gmax VALUES (0, 1000000)").unwrap();
+        let ne: i64 = Spi::get_one("SELECT theodb.graph_build('gmax','src','dst')")
+            .unwrap()
+            .unwrap();
+        assert_eq!(ne, 1, "one edge built for a large valid u32 id");
+    }
+
+    // M144 T2.4 (EC-4 NEGATIVE): a node id past u32::MAX must fail-closed with a typed error,
+    // never truncate silently into the u32 adjacency slot.
+    #[pg_test(error = "must fit in u32")]
+    fn csr_build_guards_u32_boundary() {
+        Spi::run("CREATE TABLE gover(src bigint, dst bigint)").unwrap();
+        // 4294967296 == u32::MAX + 1 — the first id past the boundary.
+        Spi::run("INSERT INTO gover VALUES (0, 4294967296)").unwrap();
+        // Must ereport "must fit in u32" — the #[pg_test(error=...)] attribute asserts it.
+        let _ = Spi::get_one::<i64>("SELECT theodb.graph_build('gover','src','dst')");
     }
 }
