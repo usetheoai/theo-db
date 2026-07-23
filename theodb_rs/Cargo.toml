@@ -71,6 +71,12 @@ criterion = "0.5.1"
 [[bench]]
 name = "scan_hot_path"
 harness = false
+# M144 (test-infra fix): `test = false` so `cargo test` / `cargo pgrx test` do NOT compile this bench. Under the
+# `pg_test` feature the crate's PG-symbol-dependent code cannot link into a standalone bench binary (the extension
+# is a cdylib loaded into Postgres, where those symbols resolve) — building the bench under `cargo pgrx test`
+# failed at link time and blocked EVERY #[pg_test] in the crate. The bench is for `cargo bench` (no pg_test), not
+# for the test harness.
+test = false
 
 # LOAD-BEARING, not a size/style choice: pgrx 0.19 turns a PG `ERROR` into `panic_any` so Rust frames UNWIND and
 # run their destructors before `ereport` is finally called at the guard boundary (pgrx-pg-sys panic.rs:155-160).
