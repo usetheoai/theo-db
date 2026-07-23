@@ -559,6 +559,134 @@ pub(crate) unsafe fn peek_magic(rel: pg_sys::Relation) -> Result<u32, String> {
 
 /// Number of pages the MAIN index occupies before the pending region — format-aware (blob: `1 + nchunks`;
 /// structured: `1 + centroid_npages + Σ list npages`). Used to locate the pending region for either layout.
+// M145 T1.3: os 4 blocos por-versão do IVF extraídos VERBATIM (cut-and-move; offsets/strides/guards
+// byte-a-byte idênticos — ADR-2). NÃO unificar num parser parametrizado: os offsets/strides diferem
+// genuinamente por versão de formato (12B vs 20B stride, campos em posições distintas) — unificar seria
+// complexidade acidental onde um bug de conflação de stride/offset se esconderia (invariante crítico:
+// misparse → linhas INSERTed silenciosamente perdidas). O ganho é naming + CC do `main_index_pages`.
+
+/// v4 (M77 AQ): pending starts after meta(gen_base) + dir + codebook + centroids + Σ list pages.
+unsafe fn pending_start_v4(rel: pg_sys::Relation, m: &[u8]) -> Result<u32, String> {
+    if m.len() < 37 {
+        return Err("theodb am: truncated v4 meta".into());
+    }
+    let nlists4 = u32::from_le_bytes(m[13..17].try_into().unwrap()) as usize;
+    let codebook_npages = u32::from_le_bytes(m[21..25].try_into().unwrap());
+    let dir_npages4 = u32::from_le_bytes(m[25..29].try_into().unwrap());
+    let centroid_npages4 = u32::from_le_bytes(m[29..33].try_into().unwrap());
+    let gen_base4 = u32::from_le_bytes(m[33..37].try_into().unwrap());
+    let dbytes4 = read_chunked(rel, gen_base4, dir_npages4)?;
+    if dbytes4.len() < nlists4 * 12 {
+        return Err("theodb am: truncated v4 directory".into());
+    }
+    let mut total4 = gen_base4
+        .saturating_add(dir_npages4)
+        .saturating_add(codebook_npages)
+        .saturating_add(centroid_npages4);
+    for i in 0..nlists4 {
+        let o = i * 12 + 4; // np field within the 12-byte dir entry
+        total4 = total4.saturating_add(u32::from_le_bytes(dbytes4[o..o + 4].try_into().unwrap()));
+    }
+    Ok(total4)
+}
+
+/// v5 (M83 storage-separated) AND v7 (M90 label-aware): identical page accounting — the label region lives
+/// INSIDE the per-list code pages (already counted in code_np), and the meta/dir shape is the same. pending
+/// starts after meta(gen_base) + dir(20B) + codebook + centroids + Σ(code pages + vec pages).
+unsafe fn pending_start_v5_v7(rel: pg_sys::Relation, m: &[u8]) -> Result<u32, String> {
+    if m.len() < 37 {
+        return Err("theodb am: truncated v5/v7 meta".into());
+    }
+    let nlists5 = u32::from_le_bytes(m[13..17].try_into().unwrap()) as usize;
+    let codebook_npages5 = u32::from_le_bytes(m[21..25].try_into().unwrap());
+    let dir_npages5 = u32::from_le_bytes(m[25..29].try_into().unwrap());
+    let centroid_npages5 = u32::from_le_bytes(m[29..33].try_into().unwrap());
+    let gen_base5 = u32::from_le_bytes(m[33..37].try_into().unwrap());
+    let dbytes5 = read_chunked(rel, gen_base5, dir_npages5)?;
+    if dbytes5.len() < nlists5 * 20 {
+        return Err("theodb am: truncated v5 directory".into());
+    }
+    let mut total5 = gen_base5
+        .saturating_add(dir_npages5)
+        .saturating_add(codebook_npages5)
+        .saturating_add(centroid_npages5);
+    for i in 0..nlists5 {
+        let o = i * 20;
+        total5 =
+            total5.saturating_add(u32::from_le_bytes(dbytes5[o + 4..o + 8].try_into().unwrap()));
+        total5 = total5
+            .saturating_add(u32::from_le_bytes(dbytes5[o + 12..o + 16].try_into().unwrap()));
+    }
+    Ok(total5)
+}
+
+/// v6 (M85 SQ8-refine) AND v8 (E1 RaBitQ-refine): byte-identical page accounting — the refine codebook npages
+/// sits at m[37..41] (SQ8 for v6, RaBitQ for v8) and the dir-entry shape is the same 20B (code_fb, code_np,
+/// refine_fb, refine_np, cnt). pending starts after meta(gen_base) + dir(20B) + AQ codebook + refine codebook +
+/// centroids + Σ(code pages + refine pages).
+unsafe fn pending_start_v6_v8(rel: pg_sys::Relation, m: &[u8]) -> Result<u32, String> {
+    if m.len() < 41 {
+        return Err("theodb am: truncated v6/v8 meta".into());
+    }
+    let nlists6 = u32::from_le_bytes(m[13..17].try_into().unwrap()) as usize;
+    let aq_codebook_npages6 = u32::from_le_bytes(m[21..25].try_into().unwrap());
+    let dir_npages6 = u32::from_le_bytes(m[25..29].try_into().unwrap());
+    let centroid_npages6 = u32::from_le_bytes(m[29..33].try_into().unwrap());
+    let gen_base6 = u32::from_le_bytes(m[33..37].try_into().unwrap());
+    let sq8_codebook_npages6 = u32::from_le_bytes(m[37..41].try_into().unwrap());
+    let dbytes6 = read_chunked(rel, gen_base6, dir_npages6)?;
+    if dbytes6.len() < nlists6 * 20 {
+        return Err("theodb am: truncated v6 directory".into());
+    }
+    let mut total6 = gen_base6
+        .saturating_add(dir_npages6)
+        .saturating_add(aq_codebook_npages6)
+        .saturating_add(sq8_codebook_npages6)
+        .saturating_add(centroid_npages6);
+    for i in 0..nlists6 {
+        let o = i * 20;
+        total6 =
+            total6.saturating_add(u32::from_le_bytes(dbytes6[o + 4..o + 8].try_into().unwrap()));
+        total6 = total6
+            .saturating_add(u32::from_le_bytes(dbytes6[o + 12..o + 16].try_into().unwrap()));
+    }
+    Ok(total6)
+}
+
+/// v2 (M34, implicit gen_base=1) AND v3 (M48, explicit gen_base). Owns the REINDEX reject for any other
+/// structured version — a v1 index (M31/M31b, magic identical) has a different header layout, so reading
+/// `dir_npages`/`centroid_npages` at the v2/v3 offsets would misparse and yield a bogus pending offset.
+unsafe fn pending_start_v2_v3(rel: pg_sys::Relation, m: &[u8], ver: u32) -> Result<u32, String> {
+    if ver != 2 && ver != 3 {
+        return Err(format!(
+            "theodb am: unsupported structured format v{ver} — REINDEX to upgrade to the M48 relocatable generation (v3)"
+        ));
+    }
+    let nlists = u32::from_le_bytes(m[13..17].try_into().unwrap()) as usize;
+    let dir_npages = u32::from_le_bytes(m[17..21].try_into().unwrap());
+    let centroid_npages = u32::from_le_bytes(m[21..25].try_into().unwrap());
+    let gen_base = if ver == 3 {
+        if m.len() < 29 {
+            return Err("theodb am: truncated v3 meta (missing gen_base)".into());
+        }
+        u32::from_le_bytes(m[25..29].try_into().unwrap())
+    } else {
+        1
+    };
+    // The directory is on its own pages — read it to sum the per-list npages. Pending starts right after the
+    // generation body (gen_base + dir + centroids + Σ list pages), which is the true tail for an append fold.
+    let dbytes = read_chunked(rel, gen_base, dir_npages)?;
+    if dbytes.len() < nlists * 12 {
+        return Err("theodb am: truncated directory".into());
+    }
+    let mut total = gen_base.saturating_add(dir_npages).saturating_add(centroid_npages);
+    for i in 0..nlists {
+        let o = i * 12 + 4; // np field within the 12-byte dir entry
+        total = total.saturating_add(u32::from_le_bytes(dbytes[o..o + 4].try_into().unwrap()));
+    }
+    Ok(total)
+}
+
 unsafe fn main_index_pages(rel: pg_sys::Relation) -> Result<u32, String> {
     let m = read_page_item(rel, 0)?;
     if m.len() < 4 {
@@ -569,127 +697,15 @@ unsafe fn main_index_pages(rel: pg_sys::Relation) -> Result<u32, String> {
         if m.len() < 25 {
             return Err("theodb am: truncated structured meta".into());
         }
-        // Version-gate BEFORE parsing offsets — a v1 index (M31/M31b, magic identical) has a different header
-        // layout, so reading `dir_npages`/`centroid_npages` at the v2/v3 offsets would misparse and yield a bogus
-        // pending offset (silently dropping INSERTed rows). v2 (M34) has an implicit gen_base of 1; v3 (M48)
-        // carries it explicitly. Reject anything else with the REINDEX error.
+        // Version-gate BEFORE parsing offsets (a v1 index has a different header layout that would misparse).
+        // Cada versão tem seu helper verbatim — NÃO unificar (ADR-2 T1.3).
         let ver = u32::from_le_bytes(m[4..8].try_into().unwrap());
-        if ver == 4 {
-            // v4 (M77 AQ): pending starts after meta(gen_base) + dir + codebook + centroids + Σ list pages.
-            if m.len() < 37 {
-                return Err("theodb am: truncated v4 meta".into());
-            }
-            let nlists4 = u32::from_le_bytes(m[13..17].try_into().unwrap()) as usize;
-            let codebook_npages = u32::from_le_bytes(m[21..25].try_into().unwrap());
-            let dir_npages4 = u32::from_le_bytes(m[25..29].try_into().unwrap());
-            let centroid_npages4 = u32::from_le_bytes(m[29..33].try_into().unwrap());
-            let gen_base4 = u32::from_le_bytes(m[33..37].try_into().unwrap());
-            let dbytes4 = read_chunked(rel, gen_base4, dir_npages4)?;
-            if dbytes4.len() < nlists4 * 12 {
-                return Err("theodb am: truncated v4 directory".into());
-            }
-            let mut total4 = gen_base4
-                .saturating_add(dir_npages4)
-                .saturating_add(codebook_npages)
-                .saturating_add(centroid_npages4);
-            for i in 0..nlists4 {
-                let o = i * 12 + 4; // np field within the 12-byte dir entry
-                total4 = total4
-                    .saturating_add(u32::from_le_bytes(dbytes4[o..o + 4].try_into().unwrap()));
-            }
-            return Ok(total4);
+        match ver {
+            4 => pending_start_v4(rel, &m),
+            5 | 7 => pending_start_v5_v7(rel, &m),
+            6 | 8 => pending_start_v6_v8(rel, &m),
+            _ => pending_start_v2_v3(rel, &m, ver),
         }
-        if ver == 5 || ver == 7 {
-            // v5 (M83 storage-separated) AND v7 (M90 label-aware): identical page accounting — the label region
-            // lives INSIDE the per-list code pages (already counted in code_np), and the meta/dir shape is the same.
-            // pending starts after meta(gen_base) + dir(20B) + codebook + centroids + Σ(code pages + vec pages).
-            if m.len() < 37 {
-                return Err("theodb am: truncated v5/v7 meta".into());
-            }
-            let nlists5 = u32::from_le_bytes(m[13..17].try_into().unwrap()) as usize;
-            let codebook_npages5 = u32::from_le_bytes(m[21..25].try_into().unwrap());
-            let dir_npages5 = u32::from_le_bytes(m[25..29].try_into().unwrap());
-            let centroid_npages5 = u32::from_le_bytes(m[29..33].try_into().unwrap());
-            let gen_base5 = u32::from_le_bytes(m[33..37].try_into().unwrap());
-            let dbytes5 = read_chunked(rel, gen_base5, dir_npages5)?;
-            if dbytes5.len() < nlists5 * 20 {
-                return Err("theodb am: truncated v5 directory".into());
-            }
-            let mut total5 = gen_base5
-                .saturating_add(dir_npages5)
-                .saturating_add(codebook_npages5)
-                .saturating_add(centroid_npages5);
-            for i in 0..nlists5 {
-                let o = i * 20;
-                total5 = total5
-                    .saturating_add(u32::from_le_bytes(dbytes5[o + 4..o + 8].try_into().unwrap()));
-                total5 = total5.saturating_add(u32::from_le_bytes(
-                    dbytes5[o + 12..o + 16].try_into().unwrap(),
-                ));
-            }
-            return Ok(total5);
-        }
-        if ver == 6 || ver == 8 {
-            // v6 (M85 SQ8-refine) AND v8 (E1 RaBitQ-refine): byte-identical page accounting — the refine codebook
-            // npages sits at m[37..41] (SQ8 for v6, RaBitQ for v8) and the dir-entry shape is the same 20B
-            // (code_fb, code_np, refine_fb, refine_np, cnt). pending starts after meta(gen_base) + dir(20B) +
-            // AQ codebook + refine codebook + centroids + Σ(code pages + refine pages).
-            if m.len() < 41 {
-                return Err("theodb am: truncated v6/v8 meta".into());
-            }
-            let nlists6 = u32::from_le_bytes(m[13..17].try_into().unwrap()) as usize;
-            let aq_codebook_npages6 = u32::from_le_bytes(m[21..25].try_into().unwrap());
-            let dir_npages6 = u32::from_le_bytes(m[25..29].try_into().unwrap());
-            let centroid_npages6 = u32::from_le_bytes(m[29..33].try_into().unwrap());
-            let gen_base6 = u32::from_le_bytes(m[33..37].try_into().unwrap());
-            let sq8_codebook_npages6 = u32::from_le_bytes(m[37..41].try_into().unwrap());
-            let dbytes6 = read_chunked(rel, gen_base6, dir_npages6)?;
-            if dbytes6.len() < nlists6 * 20 {
-                return Err("theodb am: truncated v6 directory".into());
-            }
-            let mut total6 = gen_base6
-                .saturating_add(dir_npages6)
-                .saturating_add(aq_codebook_npages6)
-                .saturating_add(sq8_codebook_npages6)
-                .saturating_add(centroid_npages6);
-            for i in 0..nlists6 {
-                let o = i * 20;
-                total6 = total6
-                    .saturating_add(u32::from_le_bytes(dbytes6[o + 4..o + 8].try_into().unwrap()));
-                total6 = total6.saturating_add(u32::from_le_bytes(
-                    dbytes6[o + 12..o + 16].try_into().unwrap(),
-                ));
-            }
-            return Ok(total6);
-        }
-        if ver != 2 && ver != 3 {
-            return Err(format!(
-                "theodb am: unsupported structured format v{ver} — REINDEX to upgrade to the M48 relocatable generation (v3)"
-            ));
-        }
-        let nlists = u32::from_le_bytes(m[13..17].try_into().unwrap()) as usize;
-        let dir_npages = u32::from_le_bytes(m[17..21].try_into().unwrap());
-        let centroid_npages = u32::from_le_bytes(m[21..25].try_into().unwrap());
-        let gen_base = if ver == 3 {
-            if m.len() < 29 {
-                return Err("theodb am: truncated v3 meta (missing gen_base)".into());
-            }
-            u32::from_le_bytes(m[25..29].try_into().unwrap())
-        } else {
-            1
-        };
-        // The directory is on its own pages — read it to sum the per-list npages. Pending starts right after the
-        // generation body (gen_base + dir + centroids + Σ list pages), which is the true tail for an append fold.
-        let dbytes = read_chunked(rel, gen_base, dir_npages)?;
-        if dbytes.len() < nlists * 12 {
-            return Err("theodb am: truncated directory".into());
-        }
-        let mut total = gen_base.saturating_add(dir_npages).saturating_add(centroid_npages);
-        for i in 0..nlists {
-            let o = i * 12 + 4; // np field within the 12-byte dir entry
-            total = total.saturating_add(u32::from_le_bytes(dbytes[o..o + 4].try_into().unwrap()));
-        }
-        Ok(total)
     } else if magic == crate::am::hnsw_page::HNSW_STRUCT_MAGIC {
         // M35 structured HNSW: pending starts right after the neighbor page range (nbr_first + nbr_npages).
         Ok(crate::am::hnsw_page::decode_meta(&m)?.pending_start())
