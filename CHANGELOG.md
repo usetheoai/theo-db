@@ -21,6 +21,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - Erros de leitura de índice corrompido agora retornam **SQLSTATE XX002 (`index_corrupted`)** em vez de XX000 (`internal_error`). O operador passa a distinguir "o índice está corrompido, reindexe" de "encontrei um bug interno, reporte" — o mesmo código que o `contrib/amcheck` do PostgreSQL usa para corrupção (M146)
+- Os gates de lint do repositório voltaram a passar: `cargo clippy` (baseline `-D warnings`) e `cargo fmt --check` estavam **vermelhos no `develop`** desde o M145 — o primeiro por um doc comment órfão deixado pelo refactor, o segundo por drift acumulado em 8 arquivos. Ambos agora saem com exit 0. Mudança mecânica, sem alteração de comportamento (M146)
 
 ### Deprecated
 
