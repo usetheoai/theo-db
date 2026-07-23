@@ -13,7 +13,7 @@ Fechar os 3 HIGH + 4 MEDIUMs P1 do audit loop-code-review de `theodb_rs` (2026-0
 
 ## Context
 
-Origem: `.claude/knowledge-base/audits/theodb-rs-code-review-2026-07-23.md` (100 findings, 0 CRITICAL, 90/90 arquivos). Blueprint de discovery (SHIPPABLE_WITH_CAVEATS 89): `.claude/knowledge-base/discoveries/blueprints/m144-remediation-blueprint.md` — resolveu, com citação a peers PG maduros, o padrão de cada fix: upgrade **delta-only** (pgvector/pg_trgm), **gate-out** de spike da superfície shipada (Cargo feature — padrão do repo com `spike-lexical`), **propagação de erro** para o dead-letter M122. Grill: `.claude/knowledge-base/grills/review-findings-remediation-feature-grill.md`. Edge-case review: `.claude/knowledge-base/reviews/m144-remediation-edge-cases-2026-07-23.md`. Milestone: ROADMAP M144 (gated M143 `[x]`). Cumpre `rules/error-handling.md` (fail-fast typed — o fix C é a materialização exata), `rules/parsimony-ladder.md` rung 4 (reusar M122, zero dep), `rules/testing.md` § 4.1 (edge + negative), `rules/git-safety.md` (develop).
+Origem: `.claude/knowledge-base/audits/theodb-rs-code-review-2026-07-23.md` (100 findings, 0 CRITICAL, 90/90 arquivos). Blueprint de discovery (SHIPPABLE_WITH_CAVEATS 89): `.claude/knowledge-base/discoveries/blueprints/m144-remediation-blueprint.md` — resolveu, com citação a peers PG maduros, o padrão de cada fix: upgrade **delta-only** (pgvector/pg_trgm), **REVOKE ALL FROM PUBLIC** do spike fs-reading (least-privilege canônico do PG core; upgrade-safe), **propagação de erro** para o dead-letter M122. Grill: `.claude/knowledge-base/grills/review-findings-remediation-feature-grill.md`. Edge-case review: `.claude/knowledge-base/reviews/m144-remediation-edge-cases-2026-07-23.md`. Milestone: ROADMAP M144 (gated M143 `[x]`). Cumpre `rules/error-handling.md` (fail-fast typed — o fix C é a materialização exata), `rules/parsimony-ladder.md` rung 4 (reusar M122, zero dep), `rules/testing.md` § 4.1 (edge + negative), `rules/git-safety.md` (develop).
 
 ## Baseline Context
 
@@ -41,7 +41,7 @@ Origem: `.claude/knowledge-base/audits/theodb-rs-code-review-2026-07-23.md` (100
 
 - **delta-only upgrade script** — `theodb_rs--X--Y.sql` que emite só objetos novos/alterados (padrão pgvector/pg_trgm), não o schema inteiro.
 - **dead-letter (M122)** — job com `attempts >= max_attempts` vira `state='failed'` (`vectorizer.rs:276`) e é purgado (`:633`); não é reclamado.
-- **gate-out** — remover um símbolo do binário/SQL shipado via `#[cfg(feature=...)]`, não só revogar EXECUTE.
+- **REVOKE ALL FROM PUBLIC** — least-privilege canônico do PG (revoga EXECUTE de PUBLIC; a função fica no `.so`, upgrade-safe). O `gate-out` (remover o símbolo via `#[cfg]`) foi rejeitado por quebrar a cadeia de upgrade (ADR-1).
 - **CONV/IDEM oracle** (`scripts/test-upgrade.sh`) — CONV: catálogo incompleto converge para o completo; IDEM: rodar o script 2× não erra nem muda o schema.
 
 ### Architecture boundaries affected
@@ -58,21 +58,25 @@ Origem: `.claude/knowledge-base/audits/theodb-rs-code-review-2026-07-23.md` (100
 
 ## ADRs
 
-### ADR-1 — `symqg_spike_bench`: gate-out via Cargo feature (não apenas REVOKE)
+### ADR-1 — `symqg_spike_bench`: REVOKE ALL FROM PUBLIC (least-privilege upgrade-safe)
 
-**Decisão.** `#[cfg(feature = "spike-symqg")]` (não-default) no `#[pg_extern]`, removendo-o do `.so` e da superfície SQL shipada.
+**Decisão (revisada na implementação — ver nota).** `REVOKE ALL ON FUNCTION symqg_spike_bench(...) FROM PUBLIC` via `extension_sql!` (fresh install) + no script de upgrade `1.1.0→1.2.0` (installs existentes). A função permanece no `.so`.
 
-**Rationale.** `rules/parsimony-ladder.md` rung 1 (spike não precisa existir na superfície prod) + CLAUDE.md "Esforço≠Complexidade". Padrão vivo no repo (`spike-lexical`).
+**Rationale.** Least-privilege canônico do PostgreSQL core — `system_functions.sql:688,704` faz exatamente isto para `pg_read_file`/`lo_import` (blueprint Q2), e o próprio crate já o faz para as primitivas Parquet (`parquet.rs:320-329`). Fecha o achado de segurança (sem fs-read por PUBLIC) **sem quebrar a cadeia de upgrade**.
 
-**Alternativa rejeitada.** *REVOKE-only* (padrão `parquet.rs:320-329`): correto para segurança, mas mantém uma primitiva de leitura de filesystem onde um `GRANT` futuro reabre o buraco. Mitigação documentada se a função precisar ficar shipada.
+**Nota de implementação (2026-07-23, honestidade Regra 3).** O plano original escolheu *gate-out* (remover o símbolo do `.so` via Cargo feature). A validação real do harness (`scripts/test-upgrade.sh`) provou que o gate-out **quebra a cadeia de upgrade**: o script fresh `theodb_rs--1.1.0.sql` (já shipado) referencia `symqg_spike_bench_wrapper`, que o `.so` novo removeria → `CREATE EXTENSION VERSION '1.1.0'` falha com símbolo dangling, e installs 1.1.0 existentes ficam com a função quebrada. Extension-upgrade é UM subsistema (theodb-evolution): remover um símbolo exige o DROP no script de upgrade E deixa versões antigas ininstaláveis com o `.so` novo. REVOKE é o alternativo já documentado no ADR e é upgrade-safe (o `.so` mantém o wrapper; o catálogo antigo continua válido).
 
-### ADR-2 — Upgrade delta-only `1.1.0→1.2.0` + bump `default_version`
+**Alternativa rejeitada.** *Gate-out via Cargo feature*: menor superfície shipada, mas quebra a cadeia de upgrade (símbolo dangling nos scripts de versão antigos) e não é validável pelo harness — provado na implementação. Descartado.
 
-**Decisão.** `theodb_rs--1.1.0--1.2.0.sql` delta-only (`CREATE OR REPLACE`) com os 3 CREATEs lakehouse + 3 REVOKEs; `default_version='1.2.0'`.
+### ADR-2 — Upgrade full-schema self-healing `1.1.0→1.2.0` + bump `default_version`
 
-**Rationale.** SOTA de 2 peers (pgvector, pg_trgm) — Rule 9. Oráculo = `scripts/test-upgrade.sh` (M137).
+**Decisão (revisada na implementação — ver nota).** `theodb_rs--1.1.0--1.2.0.sql` **full-schema self-healing**: re-emite o schema 1.1.0 inteiro de forma idempotente (corpo do `1.0.0→1.1.0`, `CREATE OR REPLACE`/`IF NOT EXISTS`/guards) + ACRESCENTA a superfície lakehouse (3 `CREATE OR REPLACE` parquet + REVOKEs + symqg REVOKE); `default_version='1.2.0'`.
 
-**Alternativa rejeitada.** Re-emitir full-schema (estilo 1.0.0→1.1.0): diff maior, risco de drift, contra o SOTA.
+**Rationale.** Convenção IN-REPO do projeto (M137 + o oráculo **CONV** de `scripts/test-upgrade.sh`) — Rule 9 (o padrão local vence o externo). Provado: `SCENARIO_A_OK` + `CONVERGENCIA_OK` (280→290) + `IDEMPOTENTE_OK` no droplet.
+
+**Nota de implementação (2026-07-23, honestidade Regra 3).** O plano/blueprint original escolheu *delta-only* (do SOTA pgvector/pg_trgm). A validação real do harness provou que o oráculo **CONV** do projeto EXIGE full-schema self-healing: ele dropa `embed`/`embed_batch`/`rerank` e verifica que o UPDATE os RESTAURA (catálogo incompleto converge para o completo). Um delta-only não restaura objetos dropados → CONV falha. O projeto (M137) usa scripts full-schema idempotentes exatamente por essa propriedade self-healing. Segui a convenção do projeto, não o SOTA externo.
+
+**Alternativa rejeitada.** *Delta-only* (só os 3 objetos novos): menor diff, mas falha o oráculo CONV do projeto (não é self-healing) — provado na implementação. Descartado.
 
 ### ADR-3 — Fix delete propaga para o dead-letter existente (zero dep nova)
 
@@ -82,11 +86,15 @@ Origem: `.claude/knowledge-base/audits/theodb-rs-code-review-2026-07-23.md` (100
 
 **Alternativa rejeitada.** Novo mecanismo de retry dedicado ao delete — YAGNI; o dead-letter M122 já cobre falha permanente.
 
+**Nota de implementação (2026-07-23, honestidade Regra 3 — provado no droplet).** A validação real revelou que, no pgrx 0.19, `Spi::run_with_args` faz **longjmp** de um `elog(ERROR)` de DML (`pgrx-0.19.0/src/spi.rs:400-427` — "Postgres will do that for us automatically"); só retorna `Err(SpiError(code))` para status-code negativo (uso malformado do SPI), que um template `UPDATE … WHERE …` com args ligados nunca produz. Consequência: (a) o `.unwrap_or_else(err_input)` só dispara no caminho raro do SpiError-code — é defensivo e consistente com o braço upsert, **não** o caminho primário; (b) para erros SQL o `let _ =` antigo **também** já propagava (o longjmp o pula), então o finding #76 é **defense-in-depth** (o audit o marcou `heuristic`), não bug explorável no pgrx atual — a propriedade de segurança (delete falho nunca vira `done` → o `in_subtxn_msg`/M132 do worker registra `last_error`) já valia. O smoke T1.3b prova a propriedade: `process_delete` **diverge** (`column "emb" does not exist`) num delete quebrado, nunca retorna `Ok`. O unit test foi corrigido para asseverar o substring real (`does not exist`), não o prefixo inalcançável.
+
+**Nota de implementação T2.4 (2026-07-23, honestidade Regra 3 — provado no droplet).** O CSR é **denso, indexado pelo node id cru** (`graph.rs:311` `vec![0u64; nn+1]`, `offsets[node as usize]`), então `nn == max_id+1`. Construir com o id literal u32::MAX (4294967295) aloca ~34 GB → OOM (não relacionado ao guard). Por isso o teste EDGE de ACEITE usa um id grande-mas-factível (1_000_000): prova que o guard (`>`, não `>=`) não dá falso-positivo em id válido; o REJECT no limite exato (u32::MAX+1) é provado factível pelo teste NEGATIVE (o guard aborta **antes** da alocação). Smokes: EDGE 1M constrói; NEGATIVE u32::MAX+1 → `node ids must fit in u32`.
+
 ## Dependency Graph
 
 ```
 T1.1 (upgrade) ─┐
-T1.2 (gate-out) ┼─▶ T3.1 (Integration Validation)
+T1.2 (REVOKE)   ┼─▶ T3.1 (Integration Validation)
 T1.3 (delete)  ─┤
 T2.1 T2.2 T2.3 T2.4 (MEDIUMs) ─┘
 ```
@@ -124,38 +132,37 @@ Assinaturas de `parquet.rs:76,122,169`; REVOKEs de `parquet.rs:320-329`. Nenhum 
 #### DoD
 `FROM_VER=1.1.0 TO_VER=1.2.0 scripts/test-upgrade.sh` returns exit 0 no droplet; log salvo em `docs/benchmarks/m144-upgrade-1.2.0.md`.
 
-### T1.2 — Gate-out do symqg_spike_bench
+### T1.2 — REVOKE do symqg_spike_bench (least-privilege)
 
 #### Files to edit
-- `theodb_rs/Cargo.toml` — feature `spike-symqg` (não-default), análoga a `spike-lexical`.
-- `theodb_rs/src/bench_symqg.rs` — `#[cfg(feature = "spike-symqg")]` no `#[pg_extern]` (`:47`).
-- `theodb_rs/src/lib.rs` — `#[cfg(feature="spike-symqg")] mod bench_symqg;`.
+- `theodb_rs/src/bench_symqg.rs` — `extension_sql!` com `REVOKE ALL ON FUNCTION symqg_spike_bench(text, bigint, bigint, int) FROM PUBLIC`, `requires = [symqg_spike_bench]` (mirror de `parquet.rs:320-329`).
+- `theodb_rs/sql/theodb_rs--1.1.0--1.2.0.sql` — mesmo REVOKE (installs 1.1.0 existentes ao dar UPDATE).
 
 #### Deep file dependency analysis
-`bench_symqg.rs:47-48` é o único `#[pg_extern]` do módulo; faz `std::fs::read` (`:12,:28`). Nenhum caller de produção; não afeta a superfície `ai.*`/`theodb.*`.
+`bench_symqg.rs:47-48` é o único `#[pg_extern]` do módulo; faz `std::fs::read` (`:12,:28`). Nenhum caller de produção. A função permanece no `.so` (o wrapper `symqg_spike_bench_wrapper` continua exportado) — crítico para a cadeia de upgrade (o script fresh `theodb_rs--1.1.0.sql` referencia esse wrapper; removê-lo quebraria `CREATE EXTENSION VERSION '1.1.0'`).
 
 #### Why this step
-**Ação:** tirar a função de spike do binário/SQL default. **Raciocínio:** hoje é PUBLIC-executável e lê path arbitrário do servidor (Baseline: loop de REVOKE não a cobre). ADR-1: gate-out > REVOKE.
+**Ação:** revogar EXECUTE de PUBLIC na função (superuser-only). **Raciocínio:** hoje é PUBLIC-executável e lê path arbitrário do servidor (Baseline: loop de REVOKE em `:1105-1112` cobre só `^_vectorizer_`). ADR-1: REVOKE é o least-privilege canônico do PG core (`system_functions.sql:704`) e é upgrade-safe (mantém o wrapper no `.so`).
 
 #### TDD
-- RED shape: `test_symqg_absent_from_default()` -> assert proc_count == 0
-- **RED:** `symqg_spike_bench_absent_from_default_surface` asserta `SELECT count(*) FROM pg_proc WHERE proname='symqg_spike_bench'` = 0. Falha hoje (returns 1).
-- **GREEN:** aplicar o cfg-gate; recompilar default; teste retorna 0.
-- **REFACTOR:** confirmar que `cargo pgrx schema` default não emite a função.
+- RED shape: `test_symqg_revoked_from_public()` -> assert public_has_execute == false
+- **RED:** `symqg_spike_bench_revoked_from_public` asserta `has_function_privilege('public','symqg_spike_bench(text,bigint,bigint,int)','EXECUTE')` = false. Falha hoje (returns true — PUBLIC tem EXECUTE).
+- **GREEN:** adicionar o `extension_sql!` REVOKE (fresh) + o REVOKE no script de upgrade; teste retorna false.
+- **REFACTOR:** confirmar que o REVOKE roda APÓS o CREATE (`requires`).
 
 #### Concurrency tests
 (none — single-threaded)
 
 #### Failure scenarios
-- Feature ligada por engano em prod: mitigação = default explícito não a inclui; CI builda só default.
+- Role comum tenta executar a função: mitigação = REVOKE fecha o EXECUTE; só superuser chama.
 
 #### Acceptance criteria
-- `cargo build` (default) outputs a binary sem `symqg_spike_bench` em `pg_proc`.
-- `cargo check --features spike-symqg` returns exit 0 (não quebramos a função, só gateamos).
-- `grep symqg_spike_bench theodb_rs/sql/schema_snapshot.sql` outputs nada.
+- `SELECT has_function_privilege('public','symqg_spike_bench(text,bigint,bigint,int)','EXECUTE')` returns `false` (fresh install 1.2.0).
+- Pós-upgrade de um install 1.1.0: mesmo REVOKE aplicado (o script de upgrade).
+- O wrapper permanece no `.so` (cadeia de upgrade intacta) — `CREATE EXTENSION VERSION '1.1.0'` continua funcionando.
 
 #### DoD
-`cargo pgrx test` (default) returns 0 com o teste de ausência; `cargo check --features spike-symqg` returns 0.
+Smoke SQL: `has_function_privilege(...)` = false na extensão 1.2.0 instalada; harness de upgrade passa (o wrapper presente não quebra a cadeia).
 
 ### T1.3 — Delete propaga erro para o dead-letter
 
@@ -339,7 +346,7 @@ Todos os 7 DoDs de tarefa + este gate verdes, com evidência (log do test-upgrad
 | # | Requisito (finding) | Severidade | Task | Teste RED |
 |---|---|---|---|---|
 | 1 | Upgrade chain congelada (superfície M143) | HIGH | T1.1 | `test_upgrade_1_1_0_to_1_2_0_exposes_parquet_surface` |
-| 2 | symqg_spike_bench PUBLIC fs-read | HIGH | T1.2 | `symqg_spike_bench_absent_from_default_surface` |
+| 2 | symqg_spike_bench PUBLIC fs-read (REVOKE) | HIGH | T1.2 | `symqg_spike_bench_revoked_from_public` |
 | 3 | Delete engolido (PII) | HIGH | T1.3 | `process_delete_failure_does_not_mark_done` |
 | 4 | PRE_COMMIT flush vs DROP mesma-txn | MEDIUM | T2.1 | `columnar_insert_then_drop_same_txn_commits` |
 | 5 | sanitize Unicode length-changing | MEDIUM | T2.2 | `sanitize_redacts_bearer_after_length_changing_unicode` |
@@ -362,7 +369,7 @@ Todos os 7 DoDs de tarefa + este gate verdes, com evidência (log do test-upgrad
 
 | Package | Version | Ecosystem | Rule 9 rationale | Why this one |
 |---|---|---|---|---|
-| (none) | — | — | M144 não adiciona crate; a única mudança em `Cargo.toml` é uma **feature** (`spike-symqg`) que gateia código existente | Parsimony rung 4: fix T1.3 reusa dead-letter M122; zero dep |
+| (none) | — | — | M144 não adiciona crate. Cargo.toml: só `test = false` no `[[bench]]` (fix de test-infra pré-existente) | Parsimony rung 4: fix T1.3 reusa dead-letter M122; zero dep |
 
 ### Removed
 
