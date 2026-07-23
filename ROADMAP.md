@@ -2531,7 +2531,7 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 ---
 
-## M146 — [ ] Remediação do review-cycle theodb_rs: hardening + tests + cleanup *(gated M145)*
+## M146 — [x] Remediação do review-cycle theodb_rs: hardening + tests + cleanup *(gated M145)*
 
 > Added 2026-07-23 (`/roadmap-feature theodb-review-remediation`). Grill: `.claude/knowledge-base/grills/theodb-review-remediation-feature-grill.md`. Fonte: review-cycle full-tree do theodb_rs (núcleo 12 arquivos × 10/10 pilares) — `knowledge-base/review-archive/theodb-full-core-complete-2026-07-23/review-2026-07-23.md`; issues #168, #169.
 
@@ -2539,12 +2539,19 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 **Definition of done:**
 
-- [ ] #168 `graph.rs:265`: `build_csr` usa `($3::regclass)::text` (rejeita `edge_rel` inexistente/malicioso com erro tipado); `#[pg_test]` provando que payload de injection NÃO executa (tabela-vítima sobrevive), validado no droplet (A/B smoke — `cargo pgrx test` inexecutável local).
-- [ ] `from_bytes` valida índices de vizinho onde o irmão já valida (`ann/hnsw.rs:466`, `ann/ivf.rs:413` — `node >= n` → erro tipado, não OOB/panic); teste de corrupção por-arquivo.
-- [ ] #169 dead code `scan_hnsw_structured` (`am/scan.rs:261`) removido (superseded pelo refactor amrescan); `cargo check --features pg18` verde + grep zero-ocorrência.
-- [ ] Test-gaps fechados: `am/page/ivf.rs` ganha `mod tests` in-file (LABEL_K truncation, `read_record_at` chunk-straddle, paths de corrupção typed-error); `with_soar_spill` (`ann/ivf.rs:109`) coberto; doc-drift `ivf.rs:780` (v5/f32 vs texto v6/SQ8) corrigido.
-- [ ] `parquet.rs:263` `atomic_write_parquet`: `fsync` antes do rename (crash-durável) OU ADR aceitando o risco (export re-executável via `htab_refresh`).
-- [ ] Suíte verde + CHANGELOG `[Unreleased]`.
+- [x] #168 `graph.rs:265`: `build_csr` usa `($3::regclass)::text` (rejeita `edge_rel` inexistente/malicioso com erro tipado); `#[pg_test]` provando que payload de injection NÃO executa (tabela-vítima sobrevive), validado no droplet (A/B smoke — `cargo pgrx test` inexecutável local).
+- [x] `from_bytes` valida índices de vizinho onde o irmão já valida (`ann/hnsw.rs:466`, `ann/ivf.rs:413` — `node >= n` → erro tipado, não OOB/panic); teste de corrupção por-arquivo.
+- [x] #169 dead code `scan_hnsw_structured` (`am/scan.rs:261`) removido (superseded pelo refactor amrescan); `cargo check --features pg18` verde + grep zero-ocorrência.
+- [x] Test-gaps fechados: `am/page/ivf.rs` ganha `mod tests` in-file (LABEL_K truncation, `read_record_at` chunk-straddle, paths de corrupção typed-error); `with_soar_spill` (`ann/ivf.rs:109`) coberto; doc-drift `ivf.rs:780` (v5/f32 vs texto v6/SQ8) corrigido.
+- [x] `parquet.rs:263` `atomic_write_parquet`: `fsync` antes do rename (crash-durável) OU ADR aceitando o risco (export re-executável via `htab_refresh`).
+- [x] Suíte verde + CHANGELOG `[Unreleased]`.
+
+**Desvios do DoD, declarados (Regra 3 — nenhum bullet marcado sem isto):**
+
+- Bullet 4 pedia `mod tests` **in-file** em `am/page/ivf.rs`. Entregue de outra forma, deliberadamente: um `mod tests` ali **nunca executaria** — `cargo test` e `cargo pgrx test` não linkam neste crate (símbolos PG indefinidos), o que é exatamente por que o crate acumula 69 `#[test]` + 326 `#[pg_test]` jamais executados. A lógica pura foi extraída para `am/page/ivf_codec.rs` e é exercitada por `examples/ivf_codec_check.rs`, que **roda** (convenção já estabelecida por `examples/resumable_check.rs`). Teste que executa > teste que existe. Não-vacuidade provada por mutação (2 mutações → 2 falhas; restaurado → OK).
+- Bullet 1 pedia um `#[pg_test]` provando que o payload de injeção não executa. O próprio bullet já previa a mitigação (A/B no droplet) porque `cargo pgrx test` não linka; foi por A/B medido: `ERROR: division by zero` → `ERROR: invalid name syntax`.
+- Bullet 4 (b) `with_soar_spill`: o ramo `lambda < 0` do guard é **inalcançável do SQL** (a reloption `soar_lambda` tem mínimo 0 e rejeita −5 com "out of bounds"). Cobertos os ramos alcançáveis (λ=0, tabela vazia, λ>0). Não afirmo ter testado λ<0.
+- "Suíte verde" = os gates mecânicos do CI (`cargo clippy --features pg18 --no-deps -- $(.clippy_args)` exit 0; `cargo fmt --check` exit 0; `cargo test -p theodb_lexical`), **não** as suítes `#[test]`/`#[pg_test]` do `theodb_rs`, que continuam inexecutáveis neste ambiente — limitação pré-existente ao M146, não introduzida por ele.
 
 **Dependencies:** M145 (o refactor de CC já estabilizou `vectorizer.rs`/`parquet.rs`/`scan.rs`, que este milestone toca).
 
