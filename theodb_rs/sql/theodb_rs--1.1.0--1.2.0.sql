@@ -8,7 +8,7 @@
  * + os REVOKEs least-privilege. `default_version` -> 1.2.0 no .control.
  */
 
-\echo Use "ALTER EXTENSION theodb_rs UPDATE TO '1.1.0'" to load this file. \quit
+\echo Use "ALTER EXTENSION theodb_rs UPDATE TO '1.2.0'" to load this file. \quit
 
 -- M137 — salto CONVERGENTE 1.0.0 → 1.1.0.
 -- GERADO por scripts/gen-upgrade-script.py a partir do SQL de instalação do pgrx. NÃO editar à mão:

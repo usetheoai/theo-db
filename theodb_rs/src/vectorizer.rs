@@ -468,9 +468,11 @@ mod theodb_rs {
             let del = format!("DELETE FROM {}_chunks WHERE source_pk = $1", cfg.target_table);
             // M144 T1.3: propagate the SPI error instead of `let _ =`-swallowing it. A failed delete
             // must NOT be marked `done` by the worker (:918) — an ereport here is trapped by the worker
-            // subtxn (:903-913) and routed to `_vectorizer_mark_failed` → M122 dead-letter. Swallowing it
-            // left the removed doc's embedding permanently searchable (PII). 0 rows affected is `Ok` and
-            // still marks done — only a real SPI error propagates.
+            // subtxn (:903-913) and routed to `_vectorizer_mark_failed` → M122 dead-letter. Defense-in-depth
+            // (audit #76 was marked heuristic): in pgrx 0.19 a DML error already longjmps past `let _ =`, so
+            // this closes the rare `Err(SpiError(code))` path and drops the Result-discarding smell. Had a
+            // failed delete been swallowed AND returned Ok, the removed doc's embedding would stay searchable
+            // (PII). 0 rows affected is `Ok` and still marks done — only a real SPI error propagates.
             Spi::run_with_args(&del, &[source_pk.into()])
                 .unwrap_or_else(|e| crate::pg::err_input(&format!("vectorizer chunk delete failed: {e:?}")));
             return;
@@ -761,17 +763,17 @@ pub(crate) fn sanitize_error_text(cause: &str) -> String {
             .all(|(k, &pc)| chars.get(at + k).is_some_and(|&c| c.to_ascii_lowercase() == pc))
     }
     let mut out = String::with_capacity(cause.len());
-    let bytes: Vec<char> = cause.chars().collect();
+    let chars: Vec<char> = cause.chars().collect();
     let mut i = 0usize;
-    while i < bytes.len() {
+    while i < chars.len() {
         // `Bearer <token>` (case-insensitive) → keep the scheme, drop the credential.
-        let is_bearer = ascii_ci_prefix(&bytes, i, &['b', 'e', 'a', 'r', 'e', 'r', ' ']);
+        let is_bearer = ascii_ci_prefix(&chars, i, &['b', 'e', 'a', 'r', 'e', 'r', ' ']);
         // `sk-…` style API keys (OpenAI and lookalikes) with a meaningful length.
-        let is_sk = ascii_ci_prefix(&bytes, i, &['s', 'k', '-']);
+        let is_sk = ascii_ci_prefix(&chars, i, &['s', 'k', '-']);
         if is_bearer {
             out.push_str("Bearer ");
             i += 7;
-            while i < bytes.len() && is_token_char(bytes[i]) {
+            while i < chars.len() && is_token_char(chars[i]) {
                 i += 1;
             }
             out.push_str(REDACTED);
@@ -780,7 +782,7 @@ pub(crate) fn sanitize_error_text(cause: &str) -> String {
         if is_sk {
             let start = i;
             let mut j = i;
-            while j < bytes.len() && is_token_char(bytes[j]) {
+            while j < chars.len() && is_token_char(chars[j]) {
                 j += 1;
             }
             if j - start >= 20 {
@@ -789,7 +791,7 @@ pub(crate) fn sanitize_error_text(cause: &str) -> String {
                 continue;
             }
         }
-        out.push(bytes[i]);
+        out.push(chars[i]);
         i += 1;
     }
     // Bound the stored text so one poison row cannot bloat the queue table. Char-boundary safe (byte slicing could
@@ -1755,9 +1757,35 @@ mod tests {
     // expression used in `_vectorizer_mark_failed`.
     #[pg_test]
     fn backoff_saturates_for_large_attempts() {
-        let secs: i32 = Spi::get_one("SELECT least(power(2, least(60, 12))::int, 300)")
-            .unwrap()
-            .unwrap();
-        assert_eq!(secs, 300, "backoff saturates at the 300s cap for large attempts, no overflow");
+        // Exercise the REAL `_vectorizer_mark_failed` path (not a re-computed formula): a job with a large
+        // `attempts` must saturate the backoff at the 300s cap without overflowing `power(2, …)`.
+        let _vid = seed(1);
+        let _ = Spi::get_one::<i64>(
+            "SELECT count(*) FROM theodb_rs._vectorizer_claim_batch('w1', 10, 60, 1000)",
+        );
+        let job_id: i64 =
+            Spi::get_one("SELECT job_id FROM theodb.vectorizer_queue ORDER BY job_id LIMIT 1")
+                .unwrap()
+                .unwrap();
+        // Force a large attempts count while the job stays owned+processing, then fail it below max(=1000).
+        Spi::run(&format!(
+            "UPDATE theodb.vectorizer_queue SET attempts = 60 WHERE job_id = {job_id}"
+        ))
+        .unwrap();
+        let ok: bool = Spi::get_one(&format!(
+            "SELECT theodb_rs._vectorizer_mark_failed({job_id}, 'w1', 'transient', 1000)"
+        ))
+        .unwrap()
+        .unwrap();
+        assert!(ok, "mark_failed matched the owned processing row");
+        // 2^least(60,12) = 4096 → least(4096, 300) = 300. Deadline is ~300s ahead, never more.
+        let capped: bool = Spi::get_one(&format!(
+            "SELECT state='pending' AND lease_deadline > now() + interval '298 seconds' \
+                AND lease_deadline <= now() + interval '301 seconds' \
+             FROM theodb.vectorizer_queue WHERE job_id = {job_id}"
+        ))
+        .unwrap()
+        .unwrap();
+        assert!(capped, "backoff saturates at the 300s cap for large attempts, no overflow");
     }
 }
