@@ -15,6 +15,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 ### Changed
+- Refactor interno (M145): `write_parquet_impl` (`parquet.rs`) decomposto por Extract Function — CC 35 → 19 medido por lizard (helpers `col_builder_for`/`append_row`/`finish_arrays`/`atomic_write_parquet`); comportamento preservado (fail-closed no OID + atomicidade de escrita idênticos), zero mudança de superfície SQL
 
 ### Deprecated
 
