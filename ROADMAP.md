@@ -2487,6 +2487,50 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 ---
 
+## M144 — [ ] Remediação P0+P1 do code-review: upgrade chain, REVOKE, delete engolido *(gated M143)*
+
+> Added 2026-07-23 (`/roadmap-feature review-findings-remediation`). Grill: `.claude/knowledge-base/grills/review-findings-remediation-feature-grill.md`. Fonte: loop-code-review full (`.claude/knowledge-base/audits/theodb-rs-code-review-2026-07-23.md`, 100 findings, 0 CRITICAL, 90/90 arquivos).
+
+**Objective:** fechar os 3 HIGH + 4 MEDIUMs P1 de correção/segurança achados pelo review de 2026-07-23, cada fix nascendo com seu teste de regressão (TDD — absorve os 6 test gaps da fase 4 por construção): a cadeia de upgrade congelada em 1.1.0 (superfície lakehouse M143 inalcançável via `ALTER EXTENSION`), o `symqg_spike_bench` executável por PUBLIC lendo path arbitrário do servidor, e o delete engolido do vectorizer que mantém embedding de dado apagado pesquisável (PII).
+
+**Definition of done:**
+
+- [ ] Upgrade 1.1.0→1.2.0 expõe `public.read_parquet`/`write_parquet`/`olap` via `ALTER EXTENSION theodb_rs UPDATE`, provado instalando 1.1.0 num PG limpo e fazendo upgrade (harness no droplet).
+- [ ] `symqg_spike_bench` com `REVOKE FROM PUBLIC` + teste negativo de role comum (`src/bench_symqg.rs:48`, `sql:340`).
+- [ ] `_vectorizer_process_delete` propaga erro do SPI (fim do `let _ =`, `vectorizer.rs:460`) — teste RED primeiro provando que delete falho NÃO é marcado `done`.
+- [ ] MEDIUMs P1 fechados com teste cada: PRE_COMMIT flush vs `DROP TABLE` mesma-txn (`columnar.rs:193`), `sanitize_error_text` Unicode length-changing (`vectorizer.rs:742`), retry com backoff (`vectorizer.rs:285`), guard no cast u32 do CSR (`graph.rs:314`).
+- [ ] CHANGELOG `[Unreleased]` + suíte verde.
+
+**Dependencies:** M143 `[x]` (a superfície lakehouse que a cadeia de upgrade precisa expor já existe no binário). M141 (dogfood) não bloqueia.
+
+**Risks:** (a) **upgrade script sobre catálogos existentes** — lição M137: pgrx não gera upgrade script, regex-anchoring, corrupção silenciosa de shell type; mitigação: harness de upgrade real no droplet. (b) **propagar o erro do delete** pode reter jobs em retry infinito se o erro for permanente; mitigação: dead-letter após N tentativas (mecanismo já existe na fila M122).
+
+**Prior art:** `.claude/knowledge-base/audits/theodb-rs-code-review-2026-07-23.md` §2/§6 (findings + plano de remediação), memória M137 (cadeia de upgrade — 4 armadilhas), M122 (fila crash-safe/dead-letter), `.claude/rules/testing.md` § 4.1 (casos negativos), Regra 7 (teste de regressão antes do fix).
+
+---
+
+## M145 — [ ] Refactor dos hotspots de CC refactor-worthy (admit, worker_main, write_parquet_impl, main_index_pages) *(gated M144)*
+
+> Added 2026-07-23 (`/roadmap-feature cc-hotspots-refactor`). Grill: `.claude/knowledge-base/grills/cc-hotspots-refactor-feature-grill.md`. Fonte: lizard 1.23.0 (`code-review-output/audit/lizard_rust.csv (local, gitignored)`, 1359 fns medidas).
+
+**Objective:** decompor os 4 hotspots de complexidade ciclomática julgados refactor-worthy pelo review — `admit` CC=59 (`columnar_agg.rs:250`), `theodb_embed_worker_main` CC=41 (`vectorizer.rs:797`), `write_parquet_impl` CC=35 (`parquet.rs:174`), `main_index_pages` CC=34 (`page/mod.rs:562`) — com comportamento preservado e prova A/B. Os demais 11 com CC>25 são complexidade essencial de engine (aceita, Esforço≠Complexidade).
+
+**Definition of done:**
+
+- [ ] Os 4 alvos decompostos com CC ≤ 25 medido por re-run do lizard (mesmo comando do audit).
+- [ ] Comportamento preservado: suíte verde + A/B byte-idêntico in-PG para o caminho Agg-swap do `admit` (como M115).
+- [ ] Zero mudança de superfície SQL (mesmas assinaturas `pg_extern`).
+- [ ] Válvula honest-negative: alvo que não ganhar legibilidade real ao decompor é aceito com justificativa no implementation log (anti-sunk-cost) — nunca decomposição forçada.
+- [ ] CHANGELOG `[Unreleased]`.
+
+**Dependencies:** M144 (os fixes e seus testes de regressão no lugar antes do refactor tocar os mesmos arquivos — vectorizer.rs, parquet.rs).
+
+**Risks:** (a) **regressão do Agg-swap byte-idêntico do M115** ao refatorar o `admit`; mitigação: A/B in-PG obrigatório no DoD. (b) **churn sem valor** se a CC for essencial; mitigação: válvula honest-negative no DoD.
+
+**Prior art:** `.claude/knowledge-base/audits/theodb-rs-code-review-2026-07-23.md` §6-P2 (quais hotspots merecem vs são essenciais), M115 (metodologia A/B byte-idêntico do Agg-swap), `.claude/rules/parsimony-ladder.md` (anti-sunk-cost).
+
+---
+
 ## Sequência e paralelismo
 
 ```

@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="420" viewBox="0 0 640 420" font-family="sans-serif">
+  <style>
+    .t { font-size: 13px; fill: #222; }
+    .h { font-size: 15px; font-weight: bold; fill: #111; }
+    .n { font-size: 26px; font-weight: bold; fill: #111; text-anchor: middle; }
+    .lbl { font-size: 11px; fill: #333; text-anchor: middle; }
+    .ax { font-size: 13px; font-weight: bold; fill: #444; text-anchor: middle; }
+  </style>
+  <text x="20" y="28" class="h">Matriz de risco — findings &#8805; MEDIUM (severidade &#215; probabilidade)</text>
+  <text x="20" y="46" class="t">53 findings (18 HIGH + 35 MEDIUM); probabilidade estimada pelo analista (fase 5)</text>
+
+  <!-- axis labels -->
+  <text x="200" y="405" class="ax">baixa</text>
+  <text x="370" y="405" class="ax">m&#233;dia</text>
+  <text x="540" y="405" class="ax">alta</text>
+  <text x="320" y="392" class="ax" font-size="11">probabilidade de disparo em opera&#231;&#227;o &#8594;</text>
+  <text x="30" y="150" class="ax" transform="rotate(-90 30 150)">HIGH</text>
+  <text x="30" y="300" class="ax" transform="rotate(-90 30 300)">MEDIUM</text>
+
+  <!-- HIGH row -->
+  <rect x="120" y="80" width="160" height="140" fill="#f9d976" stroke="#999"/>
+  <rect x="290" y="80" width="160" height="140" fill="#f2a65a" stroke="#999"/>
+  <rect x="460" y="80" width="160" height="140" fill="#e05d5d" stroke="#999"/>
+  <text x="200" y="145" class="n">15</text>
+  <text x="200" y="168" class="lbl">CC &gt; 20/25 (latente)</text>
+  <text x="200" y="182" class="lbl">scan.rs, columnar_agg.rs:250,</text>
+  <text x="200" y="196" class="lbl">vectorizer.rs:797, parquet.rs:174</text>
+  <text x="370" y="145" class="n">2</text>
+  <text x="370" y="168" class="lbl">symqg_spike_bench PUBLIC (sql:340)</text>
+  <text x="370" y="182" class="lbl">delete engolido vectorizer.rs:460</text>
+  <text x="540" y="145" class="n">1</text>
+  <text x="540" y="168" class="lbl">cadeia de upgrade congelada</text>
+  <text x="540" y="182" class="lbl">em 1.1.0 (M143 inalcan&#231;&#225;vel)</text>
+
+  <!-- MEDIUM row -->
+  <rect x="120" y="230" width="160" height="140" fill="#d8e6c3" stroke="#999"/>
+  <rect x="290" y="230" width="160" height="140" fill="#f9d976" stroke="#999"/>
+  <rect x="460" y="230" width="160" height="140" fill="#f2a65a" stroke="#999"/>
+  <text x="200" y="295" class="n">23</text>
+  <text x="200" y="318" class="lbl">22 CC 16&#8211;24 + duplicata</text>
+  <text x="200" y="332" class="lbl">nearest_centroid (pq.rs:90)</text>
+  <text x="370" y="295" class="n">10</text>
+  <text x="370" y="318" class="lbl">PRE_COMMIT&#215;DROP columnar.rs:193,</text>
+  <text x="370" y="332" class="lbl">redaction Unicode :742, retry :285,</text>
+  <text x="370" y="346" class="lbl">u32-cast graph.rs:314, gaps de teste</text>
+  <text x="540" y="295" class="n">2</text>
+  <text x="540" y="318" class="lbl">IndexCache sem evic&#231;&#227;o (engine.rs:27)</text>
+  <text x="540" y="332" class="lbl">write_parquet RAM total (:247)</text>
+</svg>
