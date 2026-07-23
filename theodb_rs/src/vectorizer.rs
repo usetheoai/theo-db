@@ -820,6 +820,202 @@ pub(crate) fn startup_config_line(
     )
 }
 
+// M145 T1.2: helpers extraídos de `theodb_embed_worker_main` (CC 41 → ≤ 25 por lizard). As duas closures
+// (`renew`/`process_one`) viram fns livres com `owner: &str` explícito; o 3-phase embed vira `process_group`.
+// Os LIMITES DE TRANSAÇÃO (M122 xmin / H-1 poison-isolation / H1 fencing) são movidos INTACTOS — nunca fundidos
+// nem partidos. Comportamento preservado; a única nuance é a semântica do sigterm-break do embed (ver `process_group`).
+
+/// Reaper (council HIGH-2) — dead-letter de órfãos no attempt-cap + purge M104 do dead-letter em disco. Um txn.
+fn reap_and_purge() {
+    use pgrx::bgworkers::BackgroundWorker;
+    BackgroundWorker::transaction(|| {
+        let _ = Spi::run_with_args(
+            "SELECT theodb_rs._vectorizer_reap_orphans($1)",
+            &[WORKER_MAX_ATTEMPTS.into()],
+        );
+        let keep = crate::am::guc::vectorizer_dead_letter_max();
+        let _ = Spi::run_with_args(
+            "SELECT theodb_rs._vectorizer_purge_dead_letters($1)",
+            &[keep.into()],
+        );
+    });
+}
+
+/// Phase 1 — claim a batch no seu próprio txn (o lease committado protege os jobs através das fases).
+fn claim_batch(owner: &str) -> Vec<(i64, i32, String, String)> {
+    use pgrx::bgworkers::BackgroundWorker;
+    BackgroundWorker::transaction(|| {
+        Spi::connect_mut(|c| {
+            let t = match c.update(
+                "SELECT job_id, vectorizer_id, source_pk, op \
+                 FROM theodb_rs._vectorizer_claim_batch($1, $2, $3, $4)",
+                None,
+                &[
+                    owner.to_string().into(),
+                    WORKER_BATCH.into(),
+                    WORKER_LEASE_SECS.into(),
+                    WORKER_MAX_ATTEMPTS.into(),
+                ],
+            ) {
+                Ok(t) => t,
+                Err(_) => return Vec::new(),
+            };
+            t.map(|r| {
+                (
+                    r.get::<i64>(1).ok().flatten().unwrap_or_default(),
+                    r.get::<i32>(2).ok().flatten().unwrap_or_default(),
+                    r.get::<String>(3).ok().flatten().unwrap_or_default(),
+                    r.get::<String>(4).ok().flatten().unwrap_or_default(),
+                )
+            })
+            .collect()
+        })
+    })
+}
+
+/// Renova o lease de um job para o intervalo cheio antes do seu embed (council H-3 / M-2). Um txn.
+fn renew_lease(owner: &str, job_id: i64) {
+    use pgrx::bgworkers::BackgroundWorker;
+    BackgroundWorker::transaction(|| {
+        let _ = Spi::run_with_args(
+            "SELECT theodb_rs._vectorizer_renew_lease($1, $2, $3)",
+            &[vec![job_id].into(), owner.to_string().into(), WORKER_LEASE_SECS.into()],
+        );
+    });
+}
+
+/// Processa UM job (subtxn-isolado por H-1) + mark owner-guarded, cada um no seu txn (fallback + delete).
+/// Um ERROR de embed/write capturado rola o subtxn de volta a um estado limpo e marca failed. Retorna o
+/// resultado do mark OWNER-GUARDED (`false` = lease perdido → o job pertence a outro worker; não conta).
+fn process_one(owner: &str, job_id: i64, vid: i32, pk: &str, is_delete: bool) -> bool {
+    use pgrx::bgworkers::BackgroundWorker;
+    let pk = pk.to_string();
+    // M132: mantém a causa REAL para o `last_error` nomeá-la.
+    let outcome = BackgroundWorker::transaction(|| {
+        in_subtxn_msg(|| {
+            let call = if is_delete {
+                "SELECT theodb_rs._vectorizer_process_delete($1, $2)"
+            } else {
+                "SELECT theodb_rs._vectorizer_process_upsert($1, $2)"
+            };
+            Spi::run_with_args(call, &[vid.into(), pk.clone().into()])
+                .expect("vectorizer process job failed");
+        })
+    });
+    BackgroundWorker::transaction(|| {
+        // Ambos os braços usam parâmetros ligados (council-security LOW: sem interpolação assimétrica).
+        match &outcome {
+            Ok(()) => Spi::get_one_with_args::<bool>(
+                "SELECT theodb_rs._vectorizer_mark_done($1, $2)",
+                &[job_id.into(), owner.to_string().into()],
+            )
+            .ok()
+            .flatten()
+            .unwrap_or(false),
+            Err(cause) => {
+                let _ = Spi::run_with_args(
+                    "SELECT theodb_rs._vectorizer_mark_failed($1, $2, $3, $4)",
+                    &[
+                        job_id.into(),
+                        owner.to_string().into(),
+                        cause.clone().into(),
+                        WORKER_MAX_ATTEMPTS.into(),
+                    ],
+                );
+                false
+            }
+        }
+    })
+}
+
+/// Processa UM grupo (mesmo vectorizer) via o 3-phase embed (M122): Phase A read (txn próprio, libera o snapshot
+/// antes do embed) → Phase B embed SEM txn aberto (backend_xmin liberado no HTTP; PgTryBuilder trapa o longjmp) →
+/// Phase C write+mark (txn fresco). Chunk-mode / single-txn GUC caem no caminho single-txn. Zero-row ou embed-fail
+/// → per-job fallback (poison-row isolation). Retorna `(processed, failed)` do grupo.
+///
+/// Nuance de sigterm (preservada, não é mudança de comportamento): um sigterm no meio do embed (pós-Phase-B) faz
+/// `return` deste grupo em vez de `break` do loop externo; o re-check `sigterm_received()` no topo do loop de
+/// grupos do `main` quebra na próxima iteração — terminação equivalente (um re-check a mais, nenhum grupo extra).
+fn process_group(owner: &str, vid: i32, group: Vec<(i64, String)>) -> (i64, i64) {
+    use pgrx::bgworkers::BackgroundWorker;
+    let (mut processed, mut failed) = (0i64, 0i64);
+    let job_ids: Vec<i64> = group.iter().map(|(j, _)| *j).collect();
+    let pks: Vec<String> = group.iter().map(|(_, p)| p.clone()).collect();
+
+    // Phase A — READ content + resolve cfg no txn próprio; o commit LIBERA o snapshot antes do embed
+    // (backend_xmin não fica pinado no HTTP). subtxn-isolado (H-1) → bad-cfg/SPI error → `None` → fallback.
+    let read = BackgroundWorker::transaction(|| in_subtxn(|| theodb_rs::_vectorizer_read_batch(vid, &pks)));
+
+    let batch_done: Option<i64> = match read {
+        None => None,
+        Some(r) if r.cfg.chunk_strategy.is_some() || crate::am::guc::vectorizer_single_txn() => {
+            // Chunk-mode (M66) / GUC single-txn (default off, A/B de medição) mantêm o caminho single-txn.
+            BackgroundWorker::transaction(|| {
+                in_subtxn(|| {
+                    Spi::connect_mut(|c| {
+                        c.update(
+                            "SELECT theodb_rs._vectorizer_process_upsert_batch($1, $2, $3, $4)",
+                            None,
+                            &[vid.into(), job_ids.clone().into(), pks.clone().into(), owner.to_string().into()],
+                        )
+                        .expect("vectorizer batch failed")
+                        .first()
+                        .get::<i64>(1)
+                        .ok()
+                        .flatten()
+                        .unwrap_or(0)
+                    })
+                })
+            })
+        }
+        Some(r) => {
+            // Renova o lease do grupo inteiro (um txn) antes do embed ≤~90s.
+            BackgroundWorker::transaction(|| {
+                let _ = Spi::run_with_args(
+                    "SELECT theodb_rs._vectorizer_renew_lease($1, $2, $3)",
+                    &[job_ids.clone().into(), owner.to_string().into(), WORKER_LEASE_SECS.into()],
+                );
+            });
+            // Phase B — EMBED sem txn aberto e sem SPI: backend_xmin liberado no HTTP inteiro. Um err_* tipado
+            // longjmpa; sem txn para capturar aqui, o PgTryBuilder trapa e roteia ao per-job fallback.
+            let items: Vec<Option<&str>> = r.contents.iter().map(|c| c.as_deref()).collect();
+            let embedded: Option<Vec<String>> = PgTryBuilder::new(std::panic::AssertUnwindSafe(|| {
+                Some(crate::embed::run_batch_resolved(&items, &r.endpoint, &r.model, r.api_key.as_deref()))
+            }))
+            .catch_others(|_| None)
+            .execute();
+            if BackgroundWorker::sigterm_received() {
+                return (processed, failed); // ver a nuance de sigterm no doc-comment (equivalente ao break externo)
+            }
+            match embedded {
+                None => None, // embed falhou (5xx/malformed/timeout) → per-job fallback
+                // Phase C — WRITE os vetores + MARK done num txn fresco (overwrite idempotente; mark owner-guarded).
+                Some(vecs) => BackgroundWorker::transaction(|| {
+                    in_subtxn(|| theodb_rs::_vectorizer_write_batch(&r.cfg, &job_ids, &pks, &vecs, owner))
+                }),
+            }
+        }
+    };
+    match batch_done {
+        // M132 (ADR M132-2): só um batch que processou linhas conta como done; `Some(0)` cai no fallback observável.
+        Some(n) if n > 0 => processed += n,
+        _ => {
+            for (job_id, pk) in &group {
+                if BackgroundWorker::sigterm_received() {
+                    break;
+                }
+                renew_lease(owner, *job_id);
+                if process_one(owner, *job_id, vid, pk, false) {
+                    processed += 1
+                } else {
+                    failed += 1
+                }
+            }
+        }
+    }
+    (processed, failed)
+}
+
 #[pg_guard]
 #[unsafe(no_mangle)]
 pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
@@ -835,14 +1031,8 @@ pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
             .unwrap_or_else(|| format!("bgw-{}", unsafe { pgrx::pg_sys::MyProcPid }))
     });
 
-    // M132 (#132): report the worker's OWN view of the embedding config once at startup. A worker that booted
-    // without the `ALTER SYSTEM` GUCs (the probable cause of the original report) is identifiable from this single
-    // line instead of a debugger. Key length only — never the value.
-    // Subtxn-isolated: a diagnostic must never be able to kill the thing it exists to diagnose
-    // (council-rust-pgrx LOW). `guc()` runs SPI; a genuine PG ERROR there would unwind out of
-    // `BackgroundWorker::transaction` (which registers no handler), exit the worker and put it in a 5 s
-    // crash-restart loop. Swallowing it here is the ONE place that is correct: losing the log line degrades
-    // diagnosis, losing the worker stops all embedding.
+    // M132 (#132): report the worker's OWN view of the embedding config once at startup, subtxn-isolated (a
+    // diagnostic must never kill the thing it exists to diagnose — council-rust-pgrx LOW).
     BackgroundWorker::transaction(|| {
         let _ = in_subtxn(|| {
             let line = startup_config_line(
@@ -855,115 +1045,14 @@ pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
     });
 
     while BackgroundWorker::wait_latch(Some(std::time::Duration::from_secs(WORKER_POLL_SECS))) {
-        // Reaper — dead-letter orphans stuck at the attempt cap whose lease expired (a worker crashed AFTER
-        // burning the last attempt; claim can never reclaim them since attempts<max is false) — council HIGH-2.
-        BackgroundWorker::transaction(|| {
-            let _ = Spi::run_with_args(
-                "SELECT theodb_rs._vectorizer_reap_orphans($1)",
-                &[WORKER_MAX_ATTEMPTS.into()],
-            );
-            // M104 — bound the on-disk dead-letter (purge old `failed` rows beyond the retained cap).
-            let keep = crate::am::guc::vectorizer_dead_letter_max();
-            let _ = Spi::run_with_args(
-                "SELECT theodb_rs._vectorizer_purge_dead_letters($1)",
-                &[keep.into()],
-            );
-        });
+        reap_and_purge();
 
-        // Phase 1 — claim a batch (its own txn; the committed lease protects the jobs across phases).
-        let jobs: Vec<(i64, i32, String, String)> = BackgroundWorker::transaction(|| {
-            Spi::connect_mut(|c| {
-                let t = match c.update(
-                    "SELECT job_id, vectorizer_id, source_pk, op \
-                     FROM theodb_rs._vectorizer_claim_batch($1, $2, $3, $4)",
-                    None,
-                    &[
-                        owner.clone().into(),
-                        WORKER_BATCH.into(),
-                        WORKER_LEASE_SECS.into(),
-                        WORKER_MAX_ATTEMPTS.into(),
-                    ],
-                ) {
-                    Ok(t) => t,
-                    Err(_) => return Vec::new(),
-                };
-                t.map(|r| {
-                    (
-                        r.get::<i64>(1).ok().flatten().unwrap_or_default(),
-                        r.get::<i32>(2).ok().flatten().unwrap_or_default(),
-                        r.get::<String>(3).ok().flatten().unwrap_or_default(),
-                        r.get::<String>(4).ok().flatten().unwrap_or_default(),
-                    )
-                })
-                .collect()
-            })
-        });
+        let jobs = claim_batch(&owner);
         if jobs.is_empty() {
             continue;
         }
 
         let (mut processed, mut failed) = (0i64, 0i64);
-
-        // Renew a job's lease to the full interval right before its (≤ ~90s) embed, so a live worker never
-        // loses a job it is actively processing — matters in the per-job fallback where up to WORKER_BATCH
-        // jobs run sequentially under one claim (council H-3 / M-2).
-        let renew = |job_id: i64| {
-            BackgroundWorker::transaction(|| {
-                let _ = Spi::run_with_args(
-                    "SELECT theodb_rs._vectorizer_renew_lease($1, $2, $3)",
-                    &[vec![job_id].into(), owner.clone().into(), WORKER_LEASE_SECS.into()],
-                );
-            });
-        };
-
-        // Per-job process (subtxn-isolated per H-1) + owner-guarded mark, each in its own txn (the fallback +
-        // the delete path). A caught embed/write ERROR rolls the subtxn back to a clean state and marks failed.
-        let process_one = |job_id: i64, vid: i32, pk: &str, is_delete: bool| -> bool {
-            let pk = pk.to_string();
-            // M132: keep the REAL cause so `last_error` names it (was a blanket 'embed/upsert failed').
-            let outcome = BackgroundWorker::transaction(|| {
-                in_subtxn_msg(|| {
-                    let call = if is_delete {
-                        "SELECT theodb_rs._vectorizer_process_delete($1, $2)"
-                    } else {
-                        "SELECT theodb_rs._vectorizer_process_upsert($1, $2)"
-                    };
-                    Spi::run_with_args(call, &[vid.into(), pk.clone().into()])
-                        .expect("vectorizer process job failed");
-                })
-            });
-            // Report the OWNER-GUARDED mark result, not merely "the work ran" (council-rust-pgrx MEDIUM). A `false`
-            // mark means the lease was lost and the row now belongs to another worker (the H1 fencing contract on
-            // `_vectorizer_mark_done`). Counting such a job as processed here would double-count it — the new owner
-            // counts it too — and would misreport work this worker no longer owns.
-            BackgroundWorker::transaction(|| {
-                // Both arms use bound parameters. `owner`/`job_id` are not attacker-controlled today, but keeping
-                // one arm interpolated while its sibling binds is exactly the asymmetry a future refactor turns
-                // into a real injection (council-security LOW).
-                match &outcome {
-                    Ok(()) => Spi::get_one_with_args::<bool>(
-                        "SELECT theodb_rs._vectorizer_mark_done($1, $2)",
-                        &[job_id.into(), owner.clone().into()],
-                    )
-                    .ok()
-                    .flatten()
-                    .unwrap_or(false),
-                    // The message is arbitrary text (it can contain quotes); the sink also redacts + truncates it.
-                    Err(cause) => {
-                        let _ = Spi::run_with_args(
-                            "SELECT theodb_rs._vectorizer_mark_failed($1, $2, $3, $4)",
-                            &[
-                                job_id.into(),
-                                owner.clone().into(),
-                                cause.clone().into(),
-                                WORKER_MAX_ATTEMPTS.into(),
-                            ],
-                        );
-                        false
-                    }
-                }
-            })
-        };
 
         // Deletes: per-job (no embed). Upserts: grouped by vectorizer for ONE embed_batch HTTP round-trip.
         let mut groups: std::collections::HashMap<i32, Vec<(i64, String)>> =
@@ -973,7 +1062,7 @@ pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
                 break;
             }
             if op == "delete" {
-                if process_one(job_id, vid, &pk, true) { processed += 1 } else { failed += 1 }
+                if process_one(&owner, job_id, vid, &pk, true) { processed += 1 } else { failed += 1 }
             } else {
                 groups.entry(vid).or_default().push((job_id, pk));
             }
@@ -982,111 +1071,9 @@ pub extern "C-unwind" fn theodb_embed_worker_main(_arg: pgrx::pg_sys::Datum) {
             if BackgroundWorker::sigterm_received() {
                 break;
             }
-            let job_ids: Vec<i64> = group.iter().map(|(j, _)| *j).collect();
-            let pks: Vec<String> = group.iter().map(|(_, p)| p.clone()).collect();
-
-            // M122 — Phase A: READ content + resolve the network cfg in its own txn; the commit RELEASES the
-            // snapshot before the embed, so `backend_xmin` is not pinned for the HTTP round-trip. subtxn-isolated
-            // (H-1) so a bad-cfg/SPI error leaves clean state → `None` → per-job fallback.
-            let read = BackgroundWorker::transaction(|| {
-                in_subtxn(|| theodb_rs::_vectorizer_read_batch(vid, &pks))
-            });
-
-            let batch_done: Option<i64> = match read {
-                None => None,
-                Some(r)
-                    if r.cfg.chunk_strategy.is_some()
-                        || crate::am::guc::vectorizer_single_txn() =>
-                {
-                    // Chunk-mode (M66) keeps the single-txn path — documented drawback (still pins xmin for chunk
-                    // vectorizers). The 3-phase split targets the 1→1 in-place mode (the common case). The
-                    // `vectorizer_single_txn` GUC (default off) also lands here — measurement A/B only, to show the
-                    // pre-M122 single-txn embed pins xmin on the same worker backend.
-                    BackgroundWorker::transaction(|| {
-                        in_subtxn(|| {
-                            Spi::connect_mut(|c| {
-                                c.update(
-                                    "SELECT theodb_rs._vectorizer_process_upsert_batch($1, $2, $3, $4)",
-                                    None,
-                                    &[vid.into(), job_ids.clone().into(), pks.clone().into(), owner.clone().into()],
-                                )
-                                .expect("vectorizer batch failed")
-                                .first()
-                                .get::<i64>(1)
-                                .ok()
-                                .flatten()
-                                .unwrap_or(0)
-                            })
-                        })
-                    })
-                }
-                Some(r) => {
-                    // Renew the whole group's lease (one txn) right before the ≤~90s embed so a live worker never
-                    // loses a job it is actively processing.
-                    BackgroundWorker::transaction(|| {
-                        let _ = Spi::run_with_args(
-                            "SELECT theodb_rs._vectorizer_renew_lease($1, $2, $3)",
-                            &[
-                                job_ids.clone().into(),
-                                owner.clone().into(),
-                                WORKER_LEASE_SECS.into(),
-                            ],
-                        );
-                    });
-                    // Phase B — EMBED with NO open transaction and NO SPI: `backend_xmin` is released for the whole
-                    // HTTP. A typed err_* longjmps; with no txn to catch it here, PgTryBuilder traps it and routes
-                    // to the per-job fallback (which marks failed in its own txn).
-                    let items: Vec<Option<&str>> =
-                        r.contents.iter().map(|c| c.as_deref()).collect();
-                    let embedded: Option<Vec<String>> =
-                        PgTryBuilder::new(std::panic::AssertUnwindSafe(|| {
-                            Some(crate::embed::run_batch_resolved(
-                                &items,
-                                &r.endpoint,
-                                &r.model,
-                                r.api_key.as_deref(),
-                            ))
-                        }))
-                        .catch_others(|_| None)
-                        .execute();
-                    if BackgroundWorker::sigterm_received() {
-                        break;
-                    }
-                    match embedded {
-                        None => None, // embed failed (5xx/malformed/timeout) → per-job fallback
-                        // Phase C — WRITE the vectors + MARK done in a fresh txn (idempotent overwrite;
-                        // owner-guarded mark). A write error → None → per-job fallback (poison-row isolation).
-                        Some(vecs) => BackgroundWorker::transaction(|| {
-                            in_subtxn(|| {
-                                theodb_rs::_vectorizer_write_batch(
-                                    &r.cfg, &job_ids, &pks, &vecs, &owner,
-                                )
-                            })
-                        }),
-                    }
-                }
-            };
-            match batch_done {
-                // M132 (ADR M132-2): only a batch that actually processed rows counts as done. `Some(0)` used to
-                // take this arm — a batch that ran cleanly but embedded NOTHING was counted as processed and the
-                // jobs were consumed with no result and no failure signal (silent no-op). A zero-row batch now
-                // joins `None` on the per-job fallback, whose outcome is always observable: done, or a real cause
-                // in `last_error`.
-                Some(n) if n > 0 => processed += n,
-                _ => {
-                    for (job_id, pk) in &group {
-                        if BackgroundWorker::sigterm_received() {
-                            break;
-                        }
-                        renew(*job_id);
-                        if process_one(*job_id, vid, pk, false) {
-                            processed += 1
-                        } else {
-                            failed += 1
-                        }
-                    }
-                }
-            }
+            let (p, f) = process_group(&owner, vid, group);
+            processed += p;
+            failed += f;
         }
 
         BackgroundWorker::transaction(|| {

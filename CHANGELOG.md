@@ -15,6 +15,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 ### Changed
+- Refactor interno (M145): `theodb_embed_worker_main` (`vectorizer.rs`) decomposto — CC 41 → 14 medido por lizard (helpers `reap_and_purge`/`claim_batch`/`renew_lease`/`process_one`/`process_group`); limites de transação M122/H-1/H1 movidos intactos, semântica de sigterm-break preservada (equivalente), zero mudança de superfície SQL
 - Refactor interno (M145): `write_parquet_impl` (`parquet.rs`) decomposto por Extract Function — CC 35 → 19 medido por lizard (helpers `col_builder_for`/`append_row`/`finish_arrays`/`atomic_write_parquet`); comportamento preservado (fail-closed no OID + atomicidade de escrita idênticos), zero mudança de superfície SQL
 
 ### Deprecated
