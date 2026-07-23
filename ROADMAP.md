@@ -2509,7 +2509,7 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 ---
 
-## M145 — [ ] Refactor dos hotspots de CC refactor-worthy (admit, worker_main, write_parquet_impl, main_index_pages) *(gated M144)*
+## M145 — [x] Refactor dos hotspots de CC refactor-worthy (admit, worker_main, write_parquet_impl, main_index_pages) *(gated M144)*
 
 > Added 2026-07-23 (`/roadmap-feature cc-hotspots-refactor`). Grill: `.claude/knowledge-base/grills/cc-hotspots-refactor-feature-grill.md`. Fonte: lizard 1.23.0 (`code-review-output/audit/lizard_rust.csv (local, gitignored)`, 1359 fns medidas).
 
