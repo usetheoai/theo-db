@@ -14,6 +14,9 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Roadmap amended: added M146 Remediação do review-cycle theodb_rs (hardening + tests + cleanup) (`/roadmap-feature theodb-review-remediation`) (#168, #169)
+- Roadmap amended: added M147 Refactor scan.rs version-dispatch IVF/AQ (`/roadmap-feature theodb-review-remediation`) (#170)
+
 ### Changed
 
 ### Deprecated

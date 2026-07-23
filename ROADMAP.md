@@ -2531,6 +2531,51 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 ---
 
+## M146 — [ ] Remediação do review-cycle theodb_rs: hardening + tests + cleanup *(gated M145)*
+
+> Added 2026-07-23 (`/roadmap-feature theodb-review-remediation`). Grill: `.claude/knowledge-base/grills/theodb-review-remediation-feature-grill.md`. Fonte: review-cycle full-tree do theodb_rs (núcleo 12 arquivos × 10/10 pilares) — `knowledge-base/review-archive/theodb-full-core-complete-2026-07-23/review-2026-07-23.md`; issues #168, #169.
+
+**Objective:** corrigir os pontos non-refactor do review — hardening defense-in-depth, test-gaps e cleanup — com TDD e prova medida, sem tocar o dispatch por-versão (esse é o M147).
+
+**Definition of done:**
+
+- [ ] #168 `graph.rs:265`: `build_csr` usa `($3::regclass)::text` (rejeita `edge_rel` inexistente/malicioso com erro tipado); `#[pg_test]` provando que payload de injection NÃO executa (tabela-vítima sobrevive), validado no droplet (A/B smoke — `cargo pgrx test` inexecutável local).
+- [ ] `from_bytes` valida índices de vizinho onde o irmão já valida (`ann/hnsw.rs:466`, `ann/ivf.rs:413` — `node >= n` → erro tipado, não OOB/panic); teste de corrupção por-arquivo.
+- [ ] #169 dead code `scan_hnsw_structured` (`am/scan.rs:261`) removido (superseded pelo refactor amrescan); `cargo check --features pg18` verde + grep zero-ocorrência.
+- [ ] Test-gaps fechados: `am/page/ivf.rs` ganha `mod tests` in-file (LABEL_K truncation, `read_record_at` chunk-straddle, paths de corrupção typed-error); `with_soar_spill` (`ann/ivf.rs:109`) coberto; doc-drift `ivf.rs:780` (v5/f32 vs texto v6/SQ8) corrigido.
+- [ ] `parquet.rs:263` `atomic_write_parquet`: `fsync` antes do rename (crash-durável) OU ADR aceitando o risco (export re-executável via `htab_refresh`).
+- [ ] Suíte verde + CHANGELOG `[Unreleased]`.
+
+**Dependencies:** M145 (o refactor de CC já estabilizou `vectorizer.rs`/`parquet.rs`/`scan.rs`, que este milestone toca).
+
+**Risks:** (a) o teste de injection do #168 exige o droplet (`cargo pgrx test` não linka local) — mitigação: A/B smoke no e2e-runner (165.227.121.20). (b) validar índices em `from_bytes` pode rejeitar blobs M26 deprecados legítimos — mitigação: gate só no path de leitura estruturado, preservar compat do blob.
+
+**Prior art:** `knowledge-base/review-archive/theodb-full-core-complete-2026-07-23/review-2026-07-23.md`, issues #168/#169, M144 (metodologia de remediação sob TDD), `.claude/rules/error-handling.md` (typed errors), `.claude/rules/testing.md` (edge vs negative cases).
+
+---
+
+## M147 — [ ] Refactor scan.rs version-dispatch IVF/AQ: dispatch-table + Vec→Result + Stage-1 compartilhado *(gated M146)*
+
+> Added 2026-07-23 (`/roadmap-feature theodb-review-remediation`). Grill: `.claude/knowledge-base/grills/theodb-review-remediation-feature-grill.md`. Fonte: issue #170 (consenso de 5 pilares — code, architecture, idiomaticity, design_patterns, maintainability).
+
+**Objective:** fechar o hotspot de consenso 5-pilares (#170) em `am/scan.rs` com comportamento preservado, **sem violar a ADR-2 do M145** (corpos de formato on-disk permanecem separados — offsets/strides por-versão são complexidade essencial).
+
+**Definition of done:**
+
+- [ ] if-ladder `ivf_is_v4/v5/v6/v7/v8` (`scan.rs:497`) substituído por dispatch-table/enum: adicionar versão nova = adicionar entrada, não editar switch (OCP).
+- [ ] 8 gather helpers (`scan.rs:272`) retornam `Result` + `?` com UM boundary de erro (idioma do crate — `columnar_agg.rs:939`), eliminando os ~56 `match { Ok=>v, Err=>error! }` C-style.
+- [ ] Stage-1 `ah_score_block` compartilhado pelos 5 corpos `scan_ivf_aq_*` **in-memory** (não tocam byte persistido, ≠ formatos on-disk de `page/ivf.rs` que continuam duplicados — ADR-2 preservada).
+- [ ] Comportamento preservado: suíte verde + A/B byte-idêntico recall×QPS in-PG (metodologia M145) para os 5 caminhos (v4/v5/v6/v7/v8).
+- [ ] Zero mudança de superfície SQL; CHANGELOG `[Unreleased]`.
+
+**Dependencies:** M146 (o #169 remove `scan_hnsw_structured` de `scan.rs` ANTES deste refactor tocar o mesmo arquivo — evita conflito de merge/escopo).
+
+**Risks:** (a) regressão de recall/QPS ao unificar o Stage-1 — mitigação: A/B byte-idêntico por-versão obrigatório no DoD. (b) tentação de unificar os CORPOS por-versão (viola ADR-2, risco de misparse→data-loss) — mitigação: escopo trava em dispatch + helpers + Stage-1-in-memory; corpos on-disk intocados.
+
+**Prior art:** issue #170, M145 (metodologia A/B byte-idêntico + válvula honest-negative), `.claude/rules/parsimony-ladder.md` (anti-sunk-cost; per-version = essencial), `knowledge-base/review-archive/theodb-full-core-complete-2026-07-23/review-2026-07-23.md`.
+
+---
+
 ## Sequência e paralelismo
 
 ```
