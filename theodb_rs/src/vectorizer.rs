@@ -221,7 +221,8 @@ mod theodb_rs {
                      attempts = attempts + 1 \
                  WHERE job_id IN ( \
                    SELECT job_id FROM theodb.vectorizer_queue \
-                   WHERE (state='pending' OR (state='processing' AND lease_deadline < now())) \
+                   WHERE ((state='pending' AND (lease_deadline IS NULL OR lease_deadline < now())) \
+                          OR (state='processing' AND lease_deadline < now())) \
                      AND attempts < $4 \
                    ORDER BY enqueued_at \
                    FOR UPDATE SKIP LOCKED \
@@ -278,12 +279,20 @@ mod theodb_rs {
         // no present or future caller can persist a secret (or an unbounded blob) into `last_error`.
         // `super::` — this fn lives inside the `#[pg_schema] mod theodb_rs`; the helper is at file scope.
         let err = &super::sanitize_error_text(err);
+        // M144 T2.3: exponential backoff. A failed-but-recoverable job returns to `pending` with a FUTURE
+        // `lease_deadline` (not NULL) so `_vectorizer_claim_batch` skips it until the backoff elapses — a
+        // transient endpoint outage no longer re-fires the whole backlog in a tight loop. Backoff =
+        // 2^attempts seconds capped at 300; the exponent is capped at 12 BEFORE `power()` so a large
+        // `attempts` (e.g. 60) saturates the cap instead of overflowing (EC-3). Dead-lettered jobs
+        // (attempts >= max) keep `lease_deadline = NULL` — they are terminal, never reclaimed.
         Spi::connect_mut(|client| {
             client
                 .update(
                     "WITH u AS (UPDATE theodb.vectorizer_queue \
                  SET state = CASE WHEN attempts >= $4 THEN 'failed' ELSE 'pending' END, \
-                     owner = NULL, lease_deadline = NULL, last_error = $3 \
+                     owner = NULL, last_error = $3, \
+                     lease_deadline = CASE WHEN attempts >= $4 THEN NULL \
+                         ELSE now() + make_interval(secs => least(power(2, least(attempts, 12))::int, 300)) END \
                  WHERE job_id=$1 AND owner=$2 AND state='processing' RETURNING 1) \
                  SELECT count(*) FROM u",
                     None,
@@ -457,7 +466,13 @@ mod theodb_rs {
         // M66 chunk-table mode: delete all N chunk rows of the removed doc.
         if cfg.chunk_strategy.is_some() {
             let del = format!("DELETE FROM {}_chunks WHERE source_pk = $1", cfg.target_table);
-            let _ = Spi::run_with_args(&del, &[source_pk.into()]);
+            // M144 T1.3: propagate the SPI error instead of `let _ =`-swallowing it. A failed delete
+            // must NOT be marked `done` by the worker (:918) — an ereport here is trapped by the worker
+            // subtxn (:903-913) and routed to `_vectorizer_mark_failed` → M122 dead-letter. Swallowing it
+            // left the removed doc's embedding permanently searchable (PII). 0 rows affected is `Ok` and
+            // still marks done — only a real SPI error propagates.
+            Spi::run_with_args(&del, &[source_pk.into()])
+                .unwrap_or_else(|e| crate::pg::err_input(&format!("vectorizer chunk delete failed: {e:?}")));
             return;
         }
         let del_q = build_sql(
@@ -466,7 +481,9 @@ mod theodb_rs {
             &cfg.target_table,
             &cfg.source_pk_col,
         );
-        let _ = Spi::run_with_args(&del_q, &[source_pk.into()]);
+        // M144 T1.3: same propagation for the null-out arm (see chunk-arm comment above).
+        Spi::run_with_args(&del_q, &[source_pk.into()])
+            .unwrap_or_else(|e| crate::pg::err_input(&format!("vectorizer delete failed: {e:?}")));
     }
 
     /// Process a BATCH of `upsert` jobs from the SAME vectorizer in ONE `embed_batch` HTTP round-trip (DoD:
@@ -732,16 +749,25 @@ pub(crate) fn sanitize_error_text(cause: &str) -> String {
     fn is_token_char(c: char) -> bool {
         !c.is_whitespace() && c != '"' && c != '\'' && c != ',' && c != '}' && c != ')'
     }
+    // M144 T2.2: the patterns we match (`bearer `, `sk-`) are pure ASCII. Compare each ORIGINAL char
+    // case-insensitively via `to_ascii_lowercase` (which never changes the char count) instead of
+    // indexing a separately-built `to_lowercase()` vector with the SAME index — Unicode length-changing
+    // lowercasing (e.g. 'İ' → "i̇") desyncs the two vectors and MISALIGNS the redaction, leaving stray
+    // credential characters in the sanitized output (proven on the droplet — no full-secret leak found,
+    // but the `sk`/scheme prefix survived). One index space removes the desync entirely.
+    fn ascii_ci_prefix(chars: &[char], at: usize, pat: &[char]) -> bool {
+        pat.iter()
+            .enumerate()
+            .all(|(k, &pc)| chars.get(at + k).is_some_and(|&c| c.to_ascii_lowercase() == pc))
+    }
     let mut out = String::with_capacity(cause.len());
-    let lower = cause.to_lowercase();
     let bytes: Vec<char> = cause.chars().collect();
-    let lower_chars: Vec<char> = lower.chars().collect();
     let mut i = 0usize;
     while i < bytes.len() {
         // `Bearer <token>` (case-insensitive) → keep the scheme, drop the credential.
-        let is_bearer = lower_chars[i..].starts_with(&['b', 'e', 'a', 'r', 'e', 'r', ' ']);
+        let is_bearer = ascii_ci_prefix(&bytes, i, &['b', 'e', 'a', 'r', 'e', 'r', ' ']);
         // `sk-…` style API keys (OpenAI and lookalikes) with a meaningful length.
-        let is_sk = lower_chars[i..].starts_with(&['s', 'k', '-']);
+        let is_sk = ascii_ci_prefix(&bytes, i, &['s', 'k', '-']);
         if is_bearer {
             out.push_str("Bearer ");
             i += 7;
@@ -1629,5 +1655,109 @@ mod tests {
 
         // A short `sk-` fragment is NOT a credential — do not mangle ordinary text.
         assert_eq!(super::sanitize_error_text("sk-short"), "sk-short");
+    }
+
+    // M144 T2.2 (EC): a Unicode char whose lowercase changes length (İ → "i̇") used to desync the
+    // original vs lowercase index vectors, MISALIGNING the redaction — it left stray credential
+    // characters in the output (proven on the droplet: `"İİ sk-…"` → old `"İİ sk«redacted»"`, i.e. the
+    // `sk` prefix survives; `"…İ Bearer sk-…"` → old `"…İ BBearer «redacted»"`, a corrupted scheme). It
+    // did NOT fully leak the secret token in any of the 48+ inputs brute-forced, so this is a redaction-
+    // correctness fix, not a proven full-secret leak. The fix compares each ORIGINAL char via
+    // `to_ascii_lowercase` (one index space) → clean, aligned redaction. This is a true RED→GREEN: the
+    // exact-output assertion FAILS on the old desynced code and PASSES on the fix.
+    #[pg_test]
+    fn sanitize_redacts_credential_cleanly_after_length_changing_unicode() {
+        // 'İ' (U+0130) lowercases to TWO chars. Two of them maximize the desync before the credential.
+        let input = "İİ sk-verysecrettoken1234567890abcdefghij";
+        let out = super::sanitize_error_text(input);
+        // Exact clean output — old code produced "İİ sk«redacted»" (stray "sk"); the fix produces this.
+        assert_eq!(
+            out, "İİ «redacted»",
+            "redaction must be aligned — no stray credential chars after length-changing unicode: {out}"
+        );
+        // Belt-and-suspenders: no fragment of the credential (not even the `sk` scheme) survives.
+        assert!(!out.contains("sk"), "no credential fragment may leak: {out}");
+    }
+
+    // M144 T1.3: a delete whose SPI UPDATE fails must DIVERGE (never return `Ok`) so the worker's
+    // `in_subtxn_msg` (M132) records `last_error` and the job goes to M122 dead-letter, never `done` —
+    // otherwise the removed doc's embedding stays searchable (PII, finding #76).
+    //
+    // HONEST NOTE (proven on the droplet, 2026-07-23): pgrx 0.19 `Spi::run_with_args` LONGJMPs an
+    // elog(ERROR) from the DML (`spi.rs:400-427` — "Postgres will do that for us automatically"); it only
+    // returns `Err(SpiError(code))` for a NEGATIVE SPI status (malformed SPI usage), which a fixed
+    // `UPDATE … WHERE …` template with bound args never produces. So the raw PG message ("column … does
+    // not exist") propagates — the `.unwrap_or_else` prefix fires ONLY on the rare SpiError-code path
+    // (defensive, and consistent with the sibling upsert arm at :447). This test therefore locks the
+    // SAFETY PROPERTY — process_delete raises (does not silently succeed) on a failed delete — asserting
+    // the real propagated substring. Finding #76 is defense-in-depth (audit marked it `heuristic`): with
+    // the `let _ =`, the longjmp already bypassed it, so this trigger cannot black-box-distinguish old vs
+    // new; the fix hardens the SpiError-code path and removes the Result-discarding smell. See ADR-3.
+    #[pg_test(error = "does not exist")]
+    fn process_delete_failure_does_not_mark_done() {
+        Spi::run("CREATE TABLE dst_bad(id int)").unwrap(); // valid relation, NO 'emb' column
+        Spi::run(
+            "INSERT INTO theodb.vectorizer (source_table, source_pk_col, content_col, target_table, target_col, model, dims) \
+             VALUES ('src','id','body','dst_bad','emb','m',3)",
+        )
+        .unwrap(); // chunk_size/chunk_overlap use their column DEFAULTs (512/64)
+        let vid: i32 = Spi::get_one("SELECT max(id) FROM theodb.vectorizer").unwrap().unwrap();
+        // UPDATE dst_bad SET emb = NULL WHERE id::text = '1' → ereport 'column "emb" … does not exist'.
+        // Reaching `.unwrap()` would mean process_delete returned Ok (the swallow bug); it must diverge.
+        Spi::run(&format!("SELECT theodb_rs._vectorizer_process_delete({vid}, '1')")).unwrap();
+    }
+
+    // M144 T1.3 (EC-2 EDGE): deleting an ABSENT doc affects 0 rows — that is `Ok`, not a failure. The
+    // fix must propagate only real SPI errors, never treat an empty result as a failure.
+    #[pg_test]
+    fn process_delete_of_absent_doc_marks_done() {
+        Spi::run("CREATE TABLE dst_ok(id int, emb vector)").unwrap(); // valid target
+        Spi::run(
+            "INSERT INTO theodb.vectorizer (source_table, source_pk_col, content_col, target_table, target_col, model, dims) \
+             VALUES ('src','id','body','dst_ok','emb','m',3)",
+        )
+        .unwrap();
+        let vid: i32 = Spi::get_one("SELECT max(id) FROM theodb.vectorizer").unwrap().unwrap();
+        // pk '999' does not exist → UPDATE affects 0 rows → Ok. Reaching the end (no ereport) proves it.
+        Spi::run(&format!("SELECT theodb_rs._vectorizer_process_delete({vid}, '999')")).unwrap();
+    }
+
+    // M144 T2.3: a failed-but-recoverable job returns to `pending` with a FUTURE backoff deadline (not
+    // NULL) so the claim skips it until the backoff elapses — no tight re-fire loop on a transient outage.
+    #[pg_test]
+    fn retry_sets_backoff_deadline() {
+        let _vid = seed(1); // 1 pending upsert job
+        // claim it: attempts → 1, processing, owned by w1
+        let _ = Spi::get_one::<i64>(
+            "SELECT count(*) FROM theodb_rs._vectorizer_claim_batch('w1', 10, 60, 5)",
+        );
+        let job_id: i64 =
+            Spi::get_one("SELECT job_id FROM theodb.vectorizer_queue ORDER BY job_id LIMIT 1")
+                .unwrap()
+                .unwrap();
+        // mark it failed with attempts(=1) < max(=5) → pending + backoff deadline
+        let ok: bool = Spi::get_one(&format!(
+            "SELECT theodb_rs._vectorizer_mark_failed({job_id}, 'w1', 'transient 503', 5)"
+        ))
+        .unwrap()
+        .unwrap();
+        assert!(ok, "mark_failed matched the owned processing row");
+        let future: bool = Spi::get_one(&format!(
+            "SELECT state='pending' AND lease_deadline > now() FROM theodb.vectorizer_queue WHERE job_id={job_id}"
+        ))
+        .unwrap()
+        .unwrap();
+        assert!(future, "failed job re-queued to pending with a FUTURE backoff deadline, not NULL");
+    }
+
+    // M144 T2.3 (EC-3 EDGE): the backoff exponent is capped at 12 before power() and the result capped at
+    // 300s — a large `attempts` (60) must saturate at 300s, never overflow. This asserts the exact SQL
+    // expression used in `_vectorizer_mark_failed`.
+    #[pg_test]
+    fn backoff_saturates_for_large_attempts() {
+        let secs: i32 = Spi::get_one("SELECT least(power(2, least(60, 12))::int, 300)")
+            .unwrap()
+            .unwrap();
+        assert_eq!(secs, 300, "backoff saturates at the 300s cap for large attempts, no overflow");
     }
 }
