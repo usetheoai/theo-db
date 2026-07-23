@@ -164,8 +164,17 @@ fn batches_to_jsonb(batches: &[RecordBatch]) -> Result<Vec<pgrx::JsonB>, String>
 /// linhas. Tipo não-suportado → erro tipado (fail-closed). Escalares (int2/4/8, float4/8, bool, text) na v1.
 #[pg_extern]
 fn write_parquet(rel: String, path: String) -> i64 {
-    write_parquet_impl(&rel, &path)
-        .unwrap_or_else(|e| crate::pg::err_input(&format!("theodb.write_parquet: {e}")))
+    write_parquet_impl(&rel, &path).unwrap_or_else(|e| {
+        // M146 (review F2): falha de durabilidade (fsync/rename) NÃO é erro de parâmetro. As mensagens de
+        // durabilidade carregam o prefixo da operação (`fsync `, `rename `, `fsync dir `) — nelas o SQLSTATE
+        // é 58030 (io_error); o resto (relação inexistente, tipo de coluna não suportado, path inválido)
+        // continua 22023.
+        if e.starts_with("fsync ") || e.starts_with("rename ") || e.starts_with("try_clone ") {
+            crate::pg::err_io(&format!("theodb.write_parquet: {e}"))
+        } else {
+            crate::pg::err_input(&format!("theodb.write_parquet: {e}"))
+        }
+    })
 }
 
 // M145 T1.1: `enum Col` + 4 helpers extraídos de `write_parquet_impl` (CC 35 → ≤ 25 por lizard),
@@ -259,9 +268,18 @@ fn finish_arrays(builders: Vec<Col>) -> Vec<datafusion::arrow::array::ArrayRef> 
         .collect()
 }
 
-/// Escrita atômica: temp ÚNICO por-backend (evita corrida de dois writes no mesmo path) + rename (commit) +
-/// cleanup do temp em QUALQUER erro (nunca temp órfão, nunca arquivo parcial publicado). O temp fica no mesmo
-/// dir do path (rename não cross-device).
+/// Escrita atômica E DURÁVEL: temp ÚNICO por-backend (evita corrida de dois writes no mesmo path) →
+/// `fsync` do arquivo → `rename` (commit) → `fsync` do diretório-pai; cleanup do temp em qualquer erro
+/// (nunca temp órfão, nunca arquivo parcial publicado). O temp fica no mesmo dir do path (rename não
+/// cross-device).
+///
+/// CONTRATO EXATO em erro (M146, review F5 — o texto anterior prometia mais do que o mecanismo entrega):
+/// se o `rename` tem sucesso e só o `fsync` do DIRETÓRIO falha, a função retorna `Err` com o arquivo **já
+/// publicado** em `path` — íntegro (o conteúdo foi fsyncado antes do rename), porém com a durabilidade da
+/// entrada de diretório incerta até o próximo fsync/checkpoint do FS. O chamador não consegue distinguir
+/// "nada publicado" de "publicado, entrada de diretório não confirmada"; em ambos os casos a ação correta é
+/// re-executar o export, que é idempotente. O `durable_rename` do PostgreSQL tem exatamente a mesma
+/// propriedade (retorna −1 depois do rename), então a divergência é consciente, não acidental.
 fn atomic_write_parquet(
     batch: &RecordBatch,
     schema: std::sync::Arc<datafusion::arrow::datatypes::Schema>,
@@ -277,12 +295,17 @@ fn atomic_write_parquet(
         // fsync do DIRETÓRIO-PAI o próprio rename pode se perder num crash. Antes daqui o export era atômico
         // porém NÃO durável (o crate não tinha um único `sync_all`).
         //
-        // O fd é CLONADO antes de o `File` ser movido para o writer: `try_clone` devolve um descritor
-        // independente para o MESMO inode, então o `sync_all` abaixo sincroniza o arquivo escrito pelo writer.
-        // Foi a via escolhida depois que `finish()` + `into_inner()` falhou na prática com
-        // "SerializedFileWriter already finished" — e ela tem a vantagem de manter o `close()` original
-        // intocado, que é quem escreve o footer do Parquet (trocá-lo por `into_inner()` produziria um arquivo
-        // sem footer, ilegível).
+        // O fd é CLONADO antes de o `File` ser movido para o writer: `try_clone` é `dup(2)` — descritor novo,
+        // MESMA open file description, MESMO inode — e `fsync` é por-inode, então o `sync_all` abaixo sincroniza
+        // exatamente o que o writer escreveu. Não há janela de dados presos em buffer: `close()` faz
+        // `finish()` → `flush()` do `TrackedWrite`, e `std::fs::File` não tem buffer próprio.
+        //
+        // Escolhido depois que `finish()` SEGUIDO de `into_inner()` falhou em runtime com
+        // "SerializedFileWriter already finished" (`assert_previous_writer_closed`, pois `finished` já era true).
+        // CORREÇÃO de uma afirmação anterior deste comentário (achado do review do M146): `into_inner()` sozinho
+        // NÃO produziria arquivo sem footer — ele chama `write_metadata()` internamente. O erro estava em
+        // encadear os dois, não no `into_inner`. Mantemos o `try_clone` porque preserva o `close()` original
+        // intocado e é o caminho já medido em produção.
         let fsync_handle = file.try_clone().map_err(|e| format!("try_clone '{tmp}': {e}"))?;
         let mut w =
             ArrowWriter::try_new(file, schema, None).map_err(|e| format!("ArrowWriter: {e}"))?;

@@ -96,8 +96,12 @@ fn record_scan_stat(relid: i64, pages_read: i64, candidates: i64, latency_us: i6
 fn exact_topk(tbl: &str, col: &str, qvec: &str, k: i32) -> HashSet<String> {
     pgrx::Spi::run("SET LOCAL enable_indexscan=off; SET LOCAL enable_bitmapscan=off; SET LOCAL enable_seqscan=on")
         .unwrap_or_else(|e| err_input(&format!("recommend_ef: GT setup failed: {e:?}")));
-    let sql =
-        format!("SELECT ctid::text FROM {tbl} ORDER BY \"{col}\" <=> '{qvec}'::vector LIMIT {k}");
+    // #172: `qvec` é texto livre do chamador — `quote_literal` escapa aspas/backslashes, então o payload não
+    // consegue fechar o literal e emendar SQL. `col` já foi validado por `valid_ident` na fronteira pública.
+    let sql = format!(
+        "SELECT ctid::text FROM {tbl} ORDER BY \"{col}\" <=> {lit}::vector LIMIT {k}",
+        lit = pgrx::spi::quote_literal(qvec)
+    );
     pgrx::Spi::connect(|c| {
         c.select(&sql, None, &[])
             .unwrap_or_else(|e| err_input(&format!("recommend_ef: exact scan failed: {e:?}")))
@@ -126,8 +130,11 @@ fn recall_at_ef(
         if gt.is_empty() {
             continue; // a query with no neighbours is not a recall data point
         }
-        let sql =
-            format!("SELECT ctid::text FROM {tbl} ORDER BY \"{col}\" <=> '{q}'::vector LIMIT {k}");
+        // #172: idem `exact_topk` — o vetor de amostra é texto livre e vai por `quote_literal`.
+        let sql = format!(
+            "SELECT ctid::text FROM {tbl} ORDER BY \"{col}\" <=> {lit}::vector LIMIT {k}",
+            lit = pgrx::spi::quote_literal(q)
+        );
         let ann: HashSet<String> = pgrx::Spi::connect(|c| {
             c.select(&sql, None, &[])
                 .unwrap_or_else(|e| err_input(&format!("recommend_ef: ann scan failed: {e:?}")))
@@ -158,13 +165,25 @@ pub(crate) fn scan_stats(
     if ef <= 0 || k <= 0 {
         err_input("theodb.scan_stats: ef and k must be > 0");
     }
+    // #172 — fail-closed na fronteira (rules/error-handling.md): `col` era interpolado com aspas manuais
+    // (`\"{col}\"`), então um `"` no valor quebrava a citação e emendava SQL arbitrário — MEDIDO com o oráculo
+    // `1/0`. Allowlist ASCII estrita, o mesmo `valid_ident` já usado em ann_query/pq/sbq (Rule 9).
+    if !crate::ann_query::valid_ident(col) {
+        err_input(
+            "theodb.scan_stats: vector_col must be a plain identifier ([A-Za-z_][A-Za-z0-9_]*, ≤63)",
+        );
+    }
     Spi::run(&format!(
         "SET LOCAL enable_seqscan=off; SET LOCAL enable_bitmapscan=off; SET LOCAL enable_indexscan=on; \
          SET LOCAL theodb_hnsw.ef_search = {ef}"
     ))
     .unwrap_or_else(|e| err_input(&format!("theodb.scan_stats: setup failed: {e:?}")));
     reset_scan_counters();
-    let sql = format!("SELECT ctid FROM {tbl} ORDER BY \"{col}\" <=> '{qvec}'::vector LIMIT {k}");
+    // #172: `qvec` é texto livre do chamador → `quote_literal`; `col` validado por `valid_ident` acima.
+    let sql = format!(
+        "SELECT ctid FROM {tbl} ORDER BY \"{col}\" <=> {lit}::vector LIMIT {k}",
+        lit = pgrx::spi::quote_literal(qvec)
+    );
     let t0 = std::time::Instant::now();
     let results: i64 = Spi::get_one(&format!("SELECT count(*) FROM ({sql}) s"))
         .unwrap_or_else(|e| err_input(&format!("theodb.scan_stats: scan failed: {e:?}")))
@@ -181,6 +200,14 @@ pub(crate) fn scan_stats(
 pub(crate) fn recommend_ef(tbl: &str, col: &str, samples: &[&str], target: f64, k: i32) -> i32 {
     if !(target > 0.0 && target <= 1.0) {
         err_input("theodb.recommend_ef: recall_target must be in (0, 1]");
+    }
+    // #172 — mesmo gate fail-closed do `scan_stats`: `col` chega como texto livre e era interpolado com aspas
+    // manuais. MEDIDO: `recommend_ef('t','e" <=> ''[1,2]''::vector LIMIT (SELECT 1/0) --', …)` executava a
+    // subquery injetada (ERROR: division by zero).
+    if !crate::ann_query::valid_ident(col) {
+        err_input(
+            "theodb.recommend_ef: vector_col must be a plain identifier ([A-Za-z_][A-Za-z0-9_]*, ≤63)",
+        );
     }
     if k <= 0 {
         err_input("theodb.recommend_ef: k must be > 0");

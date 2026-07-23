@@ -31,9 +31,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 - `theodb.write_parquet` agora grava de forma **durável**, não apenas atômica: o arquivo temporário recebe `fsync` antes do rename e o diretório-pai recebe `fsync` depois, seguindo o protocolo `durable_rename` do PostgreSQL. Antes, um crash logo após o rename podia deixar um arquivo publicado porém truncado (M146)
 - Desserialização do índice HNSW persistido passa a validar que todo índice de vizinho aponta para um nó existente, fechando a invariante que o próprio código declarava mas não cumpria (defense-in-depth — a análise de alcançabilidade medida está no comentário da função) (M146)
+- Desserialização do índice HNSW também valida `max_level`: um valor corrompido fazia a busca varrer bilhões de níveis vazios sem `CHECK_FOR_INTERRUPTS`, ou seja, uma query impossível de cancelar com Ctrl-C (M146)
+- Falha de `fsync`/`rename` no export Parquet agora retorna **SQLSTATE 58030 (`io_error`)** em vez de 22023 (`invalid_parameter_value`). Um `fsync` que falha é o sinal mais forte de perda de dados que o kernel emite; rotulá-lo como erro de parâmetro convidava ao retry errado (M146)
 
 ### Security
 
+- **`theodb.scan_stats` e `theodb.recommend_ef` executavam SQL arbitrário fornecido pelo usuário**, por dois eixos independentes, ambos comprovados por `ERROR: division by zero`: o vetor de consulta era interpolado entre aspas simples cruas (`'{qvec}'`) e o nome da coluna entre aspas duplas cruas (`"{col}"`). O vetor passa a ser escapado por `quote_literal` e o nome da coluna passa por validação fail-closed de identificador na fronteira, retornando 22023 (M146, #172)
 - **`theodb.graph_build` executava SQL arbitrário fornecido pelo usuário.** O nome da relação era interpolado cru (`%s`) na query de varredura, então um valor como `(SELECT ... WHERE 1/0 = 1) x` tinha seu SQL executado — comprovado por `ERROR: division by zero`. A relação passa a ser resolvida via `::regclass`, que valida e falha com 42P01 **antes** de qualquer SQL ser montado. Impacto limitado: a função é SECURITY INVOKER e tem `REVOKE ALL ... FROM PUBLIC`, executando com os privilégios de quem chama (M146, #168)
 
 ## [0.134.1] - 2026-07-23

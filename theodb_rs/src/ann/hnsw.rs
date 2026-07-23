@@ -487,6 +487,15 @@ impl HnswIndex {
         if neighbors.iter().flatten().flatten().any(|&nb| nb >= n) {
             return Err("theodb hnsw: neighbour references an out-of-bounds node".into());
         }
+        // M146 (review F1) — `max_level` também vinha do blob sem limite, e `search` faz
+        // `let mut lc = self.max_level; while lc >= 1 { greedy_descend(...); lc -= 1; }`. `greedy_descend`
+        // clampa a camada, então NÃO há OOB — mas com `max_level = u32::MAX` são ~4,3e9 iterações, cada uma
+        // com uma distância SIMD, num caminho Rust puro SEM `CHECK_FOR_INTERRUPTS`: `pg_cancel_backend`,
+        // SIGTERM e `statement_timeout` ficam inertes por horas, com locks retidos. Disponibilidade, não
+        // memória. Por definição do HNSW o topo é o maior nível existente, então isto é a invariante exata.
+        if n > 0 && max_level > levels.iter().copied().max().unwrap_or(0) {
+            return Err("theodb hnsw: max_level exceeds the highest node level".into());
+        }
         Ok(HnswIndex {
             metric,
             m,
