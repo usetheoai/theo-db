@@ -2487,7 +2487,7 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 ---
 
-## M144 — [ ] Remediação P0+P1 do code-review: upgrade chain, REVOKE, delete engolido *(gated M143)*
+## M144 — [x] Remediação P0+P1 do code-review: upgrade chain, REVOKE, delete engolido *(gated M143)*
 
 > Added 2026-07-23 (`/roadmap-feature review-findings-remediation`). Grill: `.claude/knowledge-base/grills/review-findings-remediation-feature-grill.md`. Fonte: loop-code-review full (`.claude/knowledge-base/audits/theodb-rs-code-review-2026-07-23.md`, 100 findings, 0 CRITICAL, 90/90 arquivos).
 

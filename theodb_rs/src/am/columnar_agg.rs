@@ -247,6 +247,178 @@ impl Admitted {
     }
 }
 
+// M145 T1.4: `admit` (CC 59 → ≤ 25 por lizard) decomposto por Extract Function preservando o BYTE-IDÊNTICO do
+// Agg-swap M115 — a ORDEM de decisão (preamble → walk → grouped-empty → mode) e TODO ponto de `None`/`?` são
+// idênticos. `classify_target_node` retorna `None` exatamente para os mesmos nós que os ramos inline rejeitavam;
+// os `layout.push((_, len()))` ficam no `main` (ordem/índices preservados). O check `grouped && group_cols.is_empty()`
+// permanece no `main`, DEPOIS do walk. Nenhuma decisão cruza a fronteira do loop/modo.
+
+/// Um slot de output classificado: uma group key (attno, vartype) ou um agregado parseado. `main` empurra em
+/// `layout`/`group_cols`/`aggs` na ORDEM do target (índices dependem do comprimento no push — preservados).
+enum TargetSlot {
+    Group(i32, u32),
+    Agg(ParsedAgg),
+}
+
+/// sum/avg/min/max × tipo de input → código `kind` (M114 blueprint E1/E2/E3 + numeric-output ADR-N1 + minmax
+/// ADR-MM1), ou `None` para declinar (→ native plan). sum(float8)→1, sum(int2/4)→2, avg(float8)→3, sum(int8)→4,
+/// avg(int2/4/8)→5, min→6, max→7. DECLINADO: sum(float4), avg(float4), min/max em tipo não-ordenado.
+fn parse_agg_kind(name: &str, vartype: pg_sys::Oid) -> Option<i32> {
+    let kind = if name == "sum" {
+        if vartype == pg_sys::FLOAT8OID {
+            1 // sum(float8)→float8
+        } else if vartype == pg_sys::INT2OID || vartype == pg_sys::INT4OID {
+            2 // sum(int2/4)→int8 (Arrow Int64, no overflow)
+        } else if vartype == pg_sys::INT8OID {
+            4 // sum(int8)→numeric (exact Decimal128 → AnyNumeric — numeric-output blueprint ADR-N1)
+        } else {
+            return None; // sum(float4)→real, sum(numeric): decline
+        }
+    } else if name == "avg" {
+        if vartype == pg_sys::FLOAT8OID {
+            3 // avg(float8)→float8
+        } else if vartype == pg_sys::INT2OID || vartype == pg_sys::INT4OID || vartype == pg_sys::INT8OID {
+            5 // avg(int2/4/8)→numeric (AnyNumeric division = PG numeric_div — ADR-N1)
+        } else {
+            return None; // avg(float4)→float8-ULP, avg(numeric): decline
+        }
+    } else {
+        // min/max: any ordered native type (same set the zone-map supports) → output = input type.
+        if super::columnar::minmax_kind_of(vartype.to_u32()) == MinMaxKind::None {
+            return None; // unordered type (text/numeric/…) → native plan
+        }
+        if name == "min" { 6 } else { 7 }
+    };
+    Some(kind)
+}
+
+/// Classifica UM nó do output target: uma group `Var` (só quando há GROUP BY) ou um `Aggref` suportado. Retorna
+/// `None` (→ decline) exatamente para os mesmos nós que os ramos inline do `admit` original rejeitavam — o
+/// fail-safe `aggsplit != AGGSPLIT_SIMPLE` incluso (council-rust-pgrx HIGH).
+unsafe fn classify_target_node(
+    node: *mut pg_sys::Node,
+    relid: i32,
+    grouped: bool,
+) -> Option<TargetSlot> {
+    if (*node).type_ == pg_sys::NodeTag::T_Var {
+        // A bare column reference in the target of a GROUP BY query is a grouping key. Only when GROUP BY is
+        // present, and only for a base-rel column of a `build_arrow`-supported type.
+        if !grouped {
+            return None;
+        }
+        let var = node as *mut pg_sys::Var;
+        if (*var).varno as i32 != relid {
+            return None; // a Var from another rel → not a bare base-rel key
+        }
+        let attno = (*var).varattno as i32;
+        if attno <= 0 {
+            return None; // system / whole-row column → decline
+        }
+        if !super::df_executor::arrow_supported_group_type((*var).vartype.to_u32()) {
+            return None; // unsupported key type (numeric, etc.) → native plan
+        }
+        Some(TargetSlot::Group(attno, (*var).vartype.to_u32()))
+    } else if (*node).type_ == pg_sys::NodeTag::T_Aggref {
+        let agg = node as *mut pg_sys::Aggref;
+        if !(*agg).aggfilter.is_null() || !(*agg).aggorder.is_null() || !(*agg).aggdistinct.is_null() {
+            return None;
+        }
+        // Only a SIMPLE (non-split) aggregate has the FINAL result type. A partial/parallel split produces the
+        // transtype (internal/bytea) → fail-safe to the native plan (council-rust-pgrx HIGH).
+        if (*agg).aggsplit != pg_sys::AggSplit::AGGSPLIT_SIMPLE {
+            return None;
+        }
+        let fname = pg_sys::get_func_name((*agg).aggfnoid);
+        if fname.is_null() {
+            return None;
+        }
+        let name = CStr::from_ptr(fname).to_string_lossy();
+        if name == "count" && (*agg).aggstar {
+            Some(TargetSlot::Agg(ParsedAgg { kind: 0, attno: 0 }))
+        } else if name == "sum" || name == "avg" || name == "min" || name == "max" {
+            let args = PgList::<pg_sys::TargetEntry>::from_pg((*agg).args);
+            if args.len() != 1 {
+                return None;
+            }
+            let te = args.get_ptr(0)?;
+            let e = (*te).expr as *mut pg_sys::Node;
+            if e.is_null() || (*e).type_ != pg_sys::NodeTag::T_Var {
+                return None; // bare column Var only — reject min(col+1) / cast (directory is pre-projection)
+            }
+            let var = e as *mut pg_sys::Var;
+            if (*var).varno as i32 != relid {
+                return None;
+            }
+            let kind = parse_agg_kind(&name, (*var).vartype)?;
+            Some(TargetSlot::Agg(ParsedAgg { kind, attno: (*var).varattno as i32 }))
+        } else {
+            None
+        }
+    } else {
+        None // grouping expression (date_trunc(...)) / anything else → decline
+    }
+}
+
+/// Decide o MODO (columnar-decode vs heap-cache M101) e monta o `Admitted` a partir de um walk já validado.
+/// Consome `aggs`/`group_cols`/`layout`. columnar-antes-de-heap e todo `?`/`None` na ordem do `admit` original.
+unsafe fn build_admission(
+    rte: *mut pg_sys::RangeTblEntry,
+    input_rel: *mut pg_sys::RelOptInfo,
+    relid: i32,
+    grouped: bool,
+    aggs: Vec<ParsedAgg>,
+    group_cols: Vec<(i32, u32)>,
+    layout: Vec<(u8, usize)>,
+) -> Option<Admitted> {
+    // Mode: a columnar table (decode stripes) vs a heap table with a usable Arrow cache (M101 HTAP).
+    let amoid = columnar_amoid();
+    let is_columnar = amoid != pg_sys::InvalidOid && pg_sys::get_rel_relam((*rte).relid) == amoid;
+    if is_columnar {
+        if grouped {
+            // GROUP BY + WHERE combined (M114): un-pushable qual → `extract_all_predicates` None → decline.
+            let preds = extract_all_predicates(input_rel, relid)?;
+            return Some(Admitted { mode: 0, relid, aggs, preds, group_cols, layout });
+        }
+        // Non-grouped: ALL quals must be pushable (`col <op> const`), else decline.
+        let preds = extract_all_predicates(input_rel, relid)?;
+        return Some(Admitted {
+            mode: 0,
+            relid,
+            aggs,
+            preds,
+            group_cols: Vec::new(),
+            layout: Vec::new(),
+        });
+    }
+    // Heap (M101 cache): non-grouped only in this slice, and does NOT filter → decline GROUP BY or any WHERE.
+    if grouped || !(*input_rel).baserestrictinfo.is_null() {
+        return None;
+    }
+    // Admissible IFF this backend has a cache covering the source column of EVERY column-bearing aggregate
+    // (kind != 0). If ANY attno is unresolved OR uncached, decline so the native plan runs (M114 regression fix).
+    let col_aggs: Vec<&ParsedAgg> = aggs.iter().filter(|a| a.kind != 0).collect();
+    let col_names: Vec<String> = col_aggs
+        .iter()
+        .filter_map(|a| {
+            let n = pg_sys::get_attname((*rte).relid, a.attno as pg_sys::AttrNumber, true);
+            if n.is_null() { None } else { Some(CStr::from_ptr(n).to_string_lossy().into_owned()) }
+        })
+        .collect();
+    if col_names.len() == col_aggs.len()
+        && super::arrow_cache::has_cached_columns((*rte).relid.to_u32(), &col_names)
+    {
+        return Some(Admitted {
+            mode: 1,
+            relid,
+            aggs,
+            preds: Vec::new(),
+            group_cols: Vec::new(),
+            layout: Vec::new(),
+        });
+    }
+    None
+}
+
 unsafe fn admit(
     root: *mut pg_sys::PlannerInfo,
     input_rel: *mut pg_sys::RelOptInfo,
@@ -288,161 +460,21 @@ unsafe fn admit(
     let mut layout: Vec<(u8, usize)> = Vec::with_capacity(exprs.len());
     for i in 0..exprs.len() {
         let node = exprs.get_ptr(i)?;
-        if (*node).type_ == pg_sys::NodeTag::T_Var {
-            // A bare column reference in the target of a GROUP BY query is a grouping key (PG guarantees this). Only
-            // when GROUP BY is present, and only for a base-rel column of a `build_arrow`-supported type.
-            if !grouped {
-                return None;
+        match classify_target_node(node, relid, grouped)? {
+            TargetSlot::Group(attno, vartype) => {
+                layout.push((0, group_cols.len()));
+                group_cols.push((attno, vartype));
             }
-            let var = node as *mut pg_sys::Var;
-            if (*var).varno as i32 != relid {
-                return None; // a Var from another rel → not a bare base-rel key
-            }
-            let attno = (*var).varattno as i32;
-            if attno <= 0 {
-                return None; // system / whole-row column → decline
-            }
-            if !super::df_executor::arrow_supported_group_type((*var).vartype.to_u32()) {
-                return None; // unsupported key type (numeric, etc.) → native plan
-            }
-            layout.push((0, group_cols.len()));
-            group_cols.push((attno, (*var).vartype.to_u32()));
-        } else if (*node).type_ == pg_sys::NodeTag::T_Aggref {
-            let agg = node as *mut pg_sys::Aggref;
-            if !(*agg).aggfilter.is_null()
-                || !(*agg).aggorder.is_null()
-                || !(*agg).aggdistinct.is_null()
-            {
-                return None;
-            }
-            // Only a SIMPLE (non-split) aggregate has the FINAL result type (int8/float8). A partial/parallel split
-            // produces the transtype (internal/bytea) → fail-safe to the native plan (council-rust-pgrx HIGH).
-            if (*agg).aggsplit != pg_sys::AggSplit::AGGSPLIT_SIMPLE {
-                return None;
-            }
-            let fname = pg_sys::get_func_name((*agg).aggfnoid);
-            if fname.is_null() {
-                return None;
-            }
-            let name = CStr::from_ptr(fname).to_string_lossy();
-            if name == "count" && (*agg).aggstar {
+            TargetSlot::Agg(parsed) => {
                 layout.push((1, aggs.len()));
-                aggs.push(ParsedAgg { kind: 0, attno: 0 });
-            } else if name == "sum" || name == "avg" || name == "min" || name == "max" {
-                // sum/avg/min/max of a bare base-rel Var. sum/avg admit only the shapes whose output maps to the EXACT
-                // PG output type (M114 blueprint E1/E2/E3 + numeric-output ADR-N1): sum(float8)→float8 (kind 1),
-                // sum(int2/4)→int8 (kind 2), avg(float8)→float8 (kind 3), sum(int8)→numeric (kind 4), avg(int2/4/8)→
-                // numeric (kind 5). min/max (columnar-minmax ADR-MM1) admit any ORDERED native type (int2/4/8, float4/8,
-                // bool, timestamp/date) → kind 6 (min) / 7 (max); output type = the input column type, emitted by
-                // arrow_value_to_datum. DECLINED (→ native plan): sum(float4), avg(float4), min/max on unordered types.
-                let args = PgList::<pg_sys::TargetEntry>::from_pg((*agg).args);
-                if args.len() != 1 {
-                    return None;
-                }
-                let te = args.get_ptr(0)?;
-                let e = (*te).expr as *mut pg_sys::Node;
-                if e.is_null() || (*e).type_ != pg_sys::NodeTag::T_Var {
-                    return None; // bare column Var only — reject min(col+1) / cast (directory is pre-projection)
-                }
-                let var = e as *mut pg_sys::Var;
-                if (*var).varno as i32 != relid {
-                    return None;
-                }
-                let vartype = (*var).vartype;
-                let kind = if name == "sum" {
-                    if vartype == pg_sys::FLOAT8OID {
-                        1 // sum(float8)→float8
-                    } else if vartype == pg_sys::INT2OID || vartype == pg_sys::INT4OID {
-                        2 // sum(int2/4)→int8 (Arrow Int64, no overflow)
-                    } else if vartype == pg_sys::INT8OID {
-                        4 // sum(int8)→numeric (exact Decimal128 → AnyNumeric — numeric-output blueprint ADR-N1)
-                    } else {
-                        return None; // sum(float4)→real, sum(numeric): decline
-                    }
-                } else if name == "avg" {
-                    if vartype == pg_sys::FLOAT8OID {
-                        3 // avg(float8)→float8
-                    } else if vartype == pg_sys::INT2OID
-                        || vartype == pg_sys::INT4OID
-                        || vartype == pg_sys::INT8OID
-                    {
-                        5 // avg(int2/4/8)→numeric (AnyNumeric division = PG numeric_div — ADR-N1)
-                    } else {
-                        return None; // avg(float4)→float8-ULP, avg(numeric): decline
-                    }
-                } else {
-                    // min/max: any ordered native type (same set the zone-map supports) → output = input type.
-                    if super::columnar::minmax_kind_of(vartype.to_u32()) == MinMaxKind::None {
-                        return None; // unordered type (text/numeric/…) → native plan
-                    }
-                    if name == "min" { 6 } else { 7 }
-                };
-                layout.push((1, aggs.len()));
-                aggs.push(ParsedAgg { kind, attno: (*var).varattno as i32 });
-            } else {
-                return None;
+                aggs.push(parsed);
             }
-        } else {
-            return None; // grouping expression (date_trunc(...)) / anything else → decline
         }
     }
     if grouped && group_cols.is_empty() {
         return None; // GROUP BY with no bare-column key (e.g. GROUP BY on an expression only) → native plan
     }
-
-    // Mode: a columnar table (decode stripes) vs a heap table with a usable Arrow cache (M101 HTAP).
-    let amoid = columnar_amoid();
-    let is_columnar = amoid != pg_sys::InvalidOid && pg_sys::get_rel_relam((*rte).relid) == amoid;
-    if is_columnar {
-        if grouped {
-            // GROUP BY + WHERE combined (M114): extract the zone-map predicates like the scalar path. If ANY qual is
-            // un-pushable, `extract_all_predicates` returns None → decline so the native plan applies the WHERE (the
-            // DataFusion Filter can only represent pushable clauses); the skip + Filter compose with the grouping.
-            let preds = extract_all_predicates(input_rel, relid)?;
-            return Some(Admitted { mode: 0, relid, aggs, preds, group_cols, layout });
-        }
-        // Non-grouped: WHERE → zone-map predicates. ALL quals must be pushable (`col <op> const`), else decline so
-        // the native plan applies the WHERE correctly.
-        let preds = extract_all_predicates(input_rel, relid)?;
-        return Some(Admitted {
-            mode: 0,
-            relid,
-            aggs,
-            preds,
-            group_cols: Vec::new(),
-            layout: Vec::new(),
-        });
-    }
-    // Heap (M101 cache) path: non-grouped only in this slice, and does NOT filter → decline GROUP BY or any WHERE.
-    if grouped || !(*input_rel).baserestrictinfo.is_null() {
-        return None;
-    }
-    // Heap (M101 cache): admissible IFF this backend has a cache covering the source column of EVERY column-bearing
-    // aggregate (kinds 1/2/3 = SumFloat8/SumInt/AvgFloat8; count(*)=kind 0 needs no column). Resolve the attnos via
-    // the syscache; if ANY is unresolved OR uncached, decline so the native plan runs. (M114 regression fix: filtering
-    // only kind==1 left sum(int)/avg(float8) with an EMPTY name set → has_cached_columns([])==true → mode-1 admitted
-    // with the column NOT cached → a runtime error on a query the native plan runs correctly.)
-    let col_aggs: Vec<&ParsedAgg> = aggs.iter().filter(|a| a.kind != 0).collect();
-    let col_names: Vec<String> = col_aggs
-        .iter()
-        .filter_map(|a| {
-            let n = pg_sys::get_attname((*rte).relid, a.attno as pg_sys::AttrNumber, true);
-            if n.is_null() { None } else { Some(CStr::from_ptr(n).to_string_lossy().into_owned()) }
-        })
-        .collect();
-    if col_names.len() == col_aggs.len()
-        && super::arrow_cache::has_cached_columns((*rte).relid.to_u32(), &col_names)
-    {
-        return Some(Admitted {
-            mode: 1,
-            relid,
-            aggs,
-            preds: Vec::new(),
-            group_cols: Vec::new(),
-            layout: Vec::new(),
-        });
-    }
-    None
+    build_admission(rte, input_rel, relid, grouped, aggs, group_cols, layout)
 }
 
 /// `create_upper_paths_hook` — run `admit` and STASH the result keyed by the base table's OID (M115). Does NOT add a

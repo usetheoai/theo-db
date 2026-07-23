@@ -171,13 +171,106 @@ fn write_parquet(rel: String, path: String) -> i64 {
         .unwrap_or_else(|e| crate::pg::err_input(&format!("theodb.write_parquet: {e}")))
 }
 
-fn write_parquet_impl(rel: &str, path: &str) -> Result<i64, String> {
+// M145 T1.1: `enum Col` + 4 helpers extraídos de `write_parquet_impl` (CC 35 → ≤ 25 por lizard),
+// comportamento preservado (fail-closed no OID + atomicidade de escrita idênticos). Um builder Arrow por
+// coluna, escolhido pelo OID; tipo não-suportado na ESCRITA → erro tipado (fail-closed).
+enum Col {
+    I16(datafusion::arrow::array::Int16Builder),
+    I32(datafusion::arrow::array::Int32Builder),
+    I64(datafusion::arrow::array::Int64Builder),
+    F32(datafusion::arrow::array::Float32Builder),
+    F64(datafusion::arrow::array::Float64Builder),
+    Bool(datafusion::arrow::array::BooleanBuilder),
+    Str(datafusion::arrow::array::StringBuilder),
+}
+
+/// OID Postgres → `(Field, builder)`. Tipo não-suportado na escrita → erro tipado (fail-closed) — NUNCA
+/// silenciosamente pulado (a coluna não pode sumir do Parquet).
+fn col_builder_for(name: &str, oid: u32) -> Result<(datafusion::arrow::datatypes::Field, Col), String> {
     use datafusion::arrow::array::{
-        ArrayRef, BooleanBuilder, Float32Builder, Float64Builder, Int16Builder, Int32Builder,
-        Int64Builder, StringBuilder,
+        BooleanBuilder, Float32Builder, Float64Builder, Int16Builder, Int32Builder, Int64Builder,
+        StringBuilder,
     };
-    use datafusion::arrow::datatypes::{DataType, Field, Schema};
+    use datafusion::arrow::datatypes::{DataType, Field};
+    let (dt, col) = match oid {
+        21 => (DataType::Int16, Col::I16(Int16Builder::new())),
+        23 => (DataType::Int32, Col::I32(Int32Builder::new())),
+        20 => (DataType::Int64, Col::I64(Int64Builder::new())),
+        700 => (DataType::Float32, Col::F32(Float32Builder::new())),
+        701 => (DataType::Float64, Col::F64(Float64Builder::new())),
+        16 => (DataType::Boolean, Col::Bool(BooleanBuilder::new())),
+        25 | 1042 | 1043 => (DataType::Utf8, Col::Str(StringBuilder::new())),
+        other => {
+            return Err(format!(
+                "coluna '{name}': tipo OID {other} não suportado na escrita Parquet own-code (v1: int2/4/8, \
+                 float4/8, bool, text). Legível via read_parquet; escrita ampla é follow-on."
+            ));
+        }
+    };
+    Ok((Field::new(name, dt, true), col))
+}
+
+/// Alimenta cada builder com os valores de UMA linha SPI (1-indexed). Erro de leitura de coluna → erro tipado.
+fn append_row(builders: &mut [Col], row: &pgrx::spi::SpiHeapTupleData) -> Result<(), String> {
+    for (i, b) in builders.iter_mut().enumerate() {
+        let ord = i + 1; // SPI é 1-indexed
+        match b {
+            Col::I16(x) => x.append_option(row.get::<i16>(ord).map_err(|e| format!("col {ord}: {e}"))?),
+            Col::I32(x) => x.append_option(row.get::<i32>(ord).map_err(|e| format!("col {ord}: {e}"))?),
+            Col::I64(x) => x.append_option(row.get::<i64>(ord).map_err(|e| format!("col {ord}: {e}"))?),
+            Col::F32(x) => x.append_option(row.get::<f32>(ord).map_err(|e| format!("col {ord}: {e}"))?),
+            Col::F64(x) => x.append_option(row.get::<f64>(ord).map_err(|e| format!("col {ord}: {e}"))?),
+            Col::Bool(x) => x.append_option(row.get::<bool>(ord).map_err(|e| format!("col {ord}: {e}"))?),
+            Col::Str(x) => x.append_option(row.get::<String>(ord).map_err(|e| format!("col {ord}: {e}"))?),
+        }
+    }
+    Ok(())
+}
+
+/// Finaliza cada builder num `ArrayRef` Arrow (mesma ORDEM das colunas).
+fn finish_arrays(builders: Vec<Col>) -> Vec<datafusion::arrow::array::ArrayRef> {
+    use datafusion::arrow::array::ArrayRef;
+    use std::sync::Arc;
+    builders
+        .into_iter()
+        .map(|b| match b {
+            Col::I16(mut x) => Arc::new(x.finish()) as ArrayRef,
+            Col::I32(mut x) => Arc::new(x.finish()) as ArrayRef,
+            Col::I64(mut x) => Arc::new(x.finish()) as ArrayRef,
+            Col::F32(mut x) => Arc::new(x.finish()) as ArrayRef,
+            Col::F64(mut x) => Arc::new(x.finish()) as ArrayRef,
+            Col::Bool(mut x) => Arc::new(x.finish()) as ArrayRef,
+            Col::Str(mut x) => Arc::new(x.finish()) as ArrayRef,
+        })
+        .collect()
+}
+
+/// Escrita atômica: temp ÚNICO por-backend (evita corrida de dois writes no mesmo path) + rename (commit) +
+/// cleanup do temp em QUALQUER erro (nunca temp órfão, nunca arquivo parcial publicado). O temp fica no mesmo
+/// dir do path (rename não cross-device).
+fn atomic_write_parquet(
+    batch: &RecordBatch,
+    schema: std::sync::Arc<datafusion::arrow::datatypes::Schema>,
+    path: &str,
+) -> Result<(), String> {
     use datafusion::parquet::arrow::ArrowWriter;
+    let tmp = format!("{path}.{}.tmp", unsafe { pg_sys::MyProcPid });
+    let write_res = (|| -> Result<(), String> {
+        let file = std::fs::File::create(&tmp).map_err(|e| format!("criar '{tmp}': {e}"))?;
+        let mut w = ArrowWriter::try_new(file, schema, None).map_err(|e| format!("ArrowWriter: {e}"))?;
+        w.write(batch).map_err(|e| format!("write batch: {e}"))?;
+        w.close().map_err(|e| format!("close: {e}"))?;
+        std::fs::rename(&tmp, path).map_err(|e| format!("rename '{tmp}'→'{path}': {e}"))?;
+        Ok(())
+    })();
+    if write_res.is_err() {
+        let _ = std::fs::remove_file(&tmp); // cleanup best-effort do temp órfão
+    }
+    write_res
+}
+
+fn write_parquet_impl(rel: &str, path: &str) -> Result<i64, String> {
+    use datafusion::arrow::datatypes::{Field, Schema};
     use std::sync::Arc;
 
     // Resolve o nome CANÔNICO (valida que `rel` é uma relação real via ::regclass — lança se não) + as colunas.
@@ -211,35 +304,12 @@ fn write_parquet_impl(rel: &str, path: &str) -> Result<i64, String> {
         return Err(format!("relação '{rel}' sem colunas"));
     }
 
-    // Um builder Arrow por coluna, escolhido pelo OID. Tipo não-suportado na ESCRITA → erro tipado (fail-closed).
-    enum Col {
-        I16(Int16Builder),
-        I32(Int32Builder),
-        I64(Int64Builder),
-        F32(Float32Builder),
-        F64(Float64Builder),
-        Bool(BooleanBuilder),
-        Str(StringBuilder),
-    }
+    // Um builder Arrow por coluna (fail-closed no OID não-suportado, via `col_builder_for`).
     let mut builders: Vec<Col> = Vec::with_capacity(cols.len());
     let mut fields: Vec<Field> = Vec::with_capacity(cols.len());
     for (name, oid) in &cols {
-        let (dt, col) = match oid {
-            21 => (DataType::Int16, Col::I16(Int16Builder::new())),
-            23 => (DataType::Int32, Col::I32(Int32Builder::new())),
-            20 => (DataType::Int64, Col::I64(Int64Builder::new())),
-            700 => (DataType::Float32, Col::F32(Float32Builder::new())),
-            701 => (DataType::Float64, Col::F64(Float64Builder::new())),
-            16 => (DataType::Boolean, Col::Bool(BooleanBuilder::new())),
-            25 | 1042 | 1043 => (DataType::Utf8, Col::Str(StringBuilder::new())),
-            other => {
-                return Err(format!(
-                    "coluna '{name}': tipo OID {other} não suportado na escrita Parquet own-code (v1: int2/4/8, \
-                     float4/8, bool, text). Legível via read_parquet; escrita ampla é follow-on."
-                ));
-            }
-        };
-        fields.push(Field::new(name, dt, true));
+        let (field, col) = col_builder_for(name, *oid)?;
+        fields.push(field);
         builders.push(col);
     }
 
@@ -249,54 +319,17 @@ fn write_parquet_impl(rel: &str, path: &str) -> Result<i64, String> {
         let sql = format!("SELECT * FROM {qname}");
         let t = c.select(&sql, None, &[]).map_err(|e| format!("select {qname}: {e}"))?;
         for row in t {
-            for (i, b) in builders.iter_mut().enumerate() {
-                let ord = i + 1; // SPI é 1-indexed
-                match b {
-                    Col::I16(x) => x.append_option(row.get::<i16>(ord).map_err(|e| format!("col {ord}: {e}"))?),
-                    Col::I32(x) => x.append_option(row.get::<i32>(ord).map_err(|e| format!("col {ord}: {e}"))?),
-                    Col::I64(x) => x.append_option(row.get::<i64>(ord).map_err(|e| format!("col {ord}: {e}"))?),
-                    Col::F32(x) => x.append_option(row.get::<f32>(ord).map_err(|e| format!("col {ord}: {e}"))?),
-                    Col::F64(x) => x.append_option(row.get::<f64>(ord).map_err(|e| format!("col {ord}: {e}"))?),
-                    Col::Bool(x) => x.append_option(row.get::<bool>(ord).map_err(|e| format!("col {ord}: {e}"))?),
-                    Col::Str(x) => x.append_option(row.get::<String>(ord).map_err(|e| format!("col {ord}: {e}"))?),
-                }
-            }
+            append_row(&mut builders, &row)?;
             nrows += 1;
         }
         Ok::<_, String>(())
     })?;
 
-    let arrays: Vec<ArrayRef> = builders
-        .into_iter()
-        .map(|b| match b {
-            Col::I16(mut x) => Arc::new(x.finish()) as ArrayRef,
-            Col::I32(mut x) => Arc::new(x.finish()) as ArrayRef,
-            Col::I64(mut x) => Arc::new(x.finish()) as ArrayRef,
-            Col::F32(mut x) => Arc::new(x.finish()) as ArrayRef,
-            Col::F64(mut x) => Arc::new(x.finish()) as ArrayRef,
-            Col::Bool(mut x) => Arc::new(x.finish()) as ArrayRef,
-            Col::Str(mut x) => Arc::new(x.finish()) as ArrayRef,
-        })
-        .collect();
+    let arrays = finish_arrays(builders);
     let schema = Arc::new(Schema::new(fields));
-    let batch = RecordBatch::try_new(schema.clone(), arrays)
-        .map_err(|e| format!("record batch: {e}"))?;
-
-    // Escrita atômica: temp ÚNICO por-backend (evita corrida de dois writes no mesmo path) + rename (commit) +
-    // cleanup do temp em qualquer erro (nunca temp órfão). O temp fica no mesmo dir do path (rename não cross-device).
-    let tmp = format!("{path}.{}.tmp", unsafe { pg_sys::MyProcPid });
-    let write_res = (|| -> Result<(), String> {
-        let file = std::fs::File::create(&tmp).map_err(|e| format!("criar '{tmp}': {e}"))?;
-        let mut w = ArrowWriter::try_new(file, schema, None).map_err(|e| format!("ArrowWriter: {e}"))?;
-        w.write(&batch).map_err(|e| format!("write batch: {e}"))?;
-        w.close().map_err(|e| format!("close: {e}"))?;
-        std::fs::rename(&tmp, path).map_err(|e| format!("rename '{tmp}'→'{path}': {e}"))?;
-        Ok(())
-    })();
-    if write_res.is_err() {
-        let _ = std::fs::remove_file(&tmp); // cleanup best-effort do temp órfão
-    }
-    write_res?;
+    let batch =
+        RecordBatch::try_new(schema.clone(), arrays).map_err(|e| format!("record batch: {e}"))?;
+    atomic_write_parquet(&batch, schema, path)?;
     Ok(nrows)
 }
 

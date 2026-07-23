@@ -24,6 +24,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.134.1] - 2026-07-23
+
+### Changed
+- Refactor interno (M145): `admit` (`am/columnar_agg.rs`) decomposto — CC 59 → 17 medido por lizard (helpers `parse_agg_kind`/`classify_target_node`/`build_admission` + enum `TargetSlot`); byte-idêntico do Agg-swap M115 preservado (ordem de decisão e todo `None`/`?` idênticos; `layout.push` na mesma ordem), zero mudança de superfície SQL
+- Refactor interno (M145): `main_index_pages` (`am/page/mod.rs`) decomposto — CC 34 → 11 medido por lizard (4 helpers verbatim por-versão `pending_start_v4`/`_v5_v7`/`_v6_v8`/`_v2_v3`); offsets/strides/guards byte-a-byte idênticos (ADR-2: blocos NÃO unificados), zero mudança de comportamento
+- Refactor interno (M145): `theodb_embed_worker_main` (`vectorizer.rs`) decomposto — CC 41 → 14 medido por lizard (helpers `reap_and_purge`/`claim_batch`/`renew_lease`/`process_one`/`process_group`); limites de transação M122/H-1/H1 movidos intactos, semântica de sigterm-break preservada (equivalente), zero mudança de superfície SQL
+- Refactor interno (M145): `write_parquet_impl` (`parquet.rs`) decomposto por Extract Function — CC 35 → 19 medido por lizard (helpers `col_builder_for`/`append_row`/`finish_arrays`/`atomic_write_parquet`); comportamento preservado (fail-closed no OID + atomicidade de escrita idênticos), zero mudança de superfície SQL
+
 ## [0.134.0] - 2026-07-23
 
 ### Added
