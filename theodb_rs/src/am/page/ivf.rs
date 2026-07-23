@@ -765,10 +765,6 @@ pub(crate) unsafe fn ivf_is_v6(rel: pg_sys::Relation) -> bool {
 /// is list `i`'s SQ8 code bytes (`dim`×n, ordinal order matching `lists[i]`). `aq_codebook`/`sq8_codebook` are the
 /// two quantizers' `to_meta_bytes()`.
 #[allow(clippy::too_many_arguments)]
-/// M89 (ambuild streaming Increment 2) — v6 (SQ8) streaming writer. Same contract as `write_ivf_aq_split` but the
-/// per-list VECTOR region is the SQ8 code (`sq8_codes[i]`, already ¼ the f32 bytes) instead of f32. Reads TIDs from
-/// `ids` by position (no `list_entries()` clone) and streams each list's [ids][codes] + sq8 blob to pages without
-/// the `items` full-buffer. Byte-identical page image to the pre-M89 buffering writer.
 /// M96 — the STREAMING v5 writer: byte-identical on-disk output to [`write_ivf_aq_split`] but the per-list `(id,
 /// vector)` members are pulled from a callback (the sorted tuplesort read-back) ONE LIST AT A TIME instead of from
 /// full `positions`/`ids`/`vectors` arrays held in RAM. `counts[i]` is list i's member count (known from the
@@ -890,6 +886,13 @@ pub(crate) unsafe fn write_ivf_aq_split_streaming(
         // list_ids / list_vecs freed here — only one list's worth held at a time (O(N/lists)).
     }
 }
+/// M89 (ambuild streaming Increment 2) — v6 (SQ8) streaming writer. Same contract as `write_ivf_aq_split` but the
+/// per-list VECTOR region is the SQ8 code (`sq8_codes[i]`, already ¼ the f32 bytes) instead of f32. Reads TIDs from
+/// `ids` by position (no `list_entries()` clone) and streams each list's [ids][codes] + sq8 blob to pages without
+/// the `items` full-buffer. Byte-identical page image to the pre-M89 buffering writer.
+///
+/// (M146 T2.4: este bloco estava pendurado por engano na `write_ivf_aq_split_streaming`, que é o writer **v5/f32**
+/// — descrever um writer v6/SQ8 sobre a função v5 induz a erro quem for mexer no codec. Movido para cá.)
 pub(crate) unsafe fn write_ivf_aq_split_sq8(
     rel: pg_sys::Relation,
     dim: u32,

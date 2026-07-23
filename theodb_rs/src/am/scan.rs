@@ -255,16 +255,9 @@ pub extern "C-unwind" fn amrescan(
     }
 }
 
-/// M35 partial-read HNSW scan: read the meta (1 page), traverse the graph ON DEMAND reading only visited nodes'
-/// element/neighbor tuples (∝ ef·M, flat in N — never the whole graph), then fold the pending region. Ascending
-/// distance. Replaces the O(N) `scan_blob` path for structured `theodb_hnsw` indexes.
-unsafe fn scan_hnsw_structured(
-    rel: pg_sys::Relation,
-    query: &[f32],
-    ef: usize,
-) -> BinaryHeap<Reverse<Scored>> {
-    heapify(gather_hnsw_candidates(rel, query, ef))
-}
+// M146 T2.4: `scan_hnsw_structured` foi removida aqui — era dead code (zero callers no repo inteiro),
+// superseded pelo refactor do amrescan, que chama `gather_hnsw_candidates` direto para poder crescer o `ef`
+// entre iterações. Os helpers que ela usava seguem vivos e usados por outros caminhos (#169).
 
 /// M52: gather the HNSW scan candidates (traverse at `ef` + pending fold) as a raw `(tid, dist)` Vec. Extracted
 /// so the iterative scan (`amgettuple`) can re-run it with a growing `ef` and dedup already-emitted tids, without
