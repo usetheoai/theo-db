@@ -108,6 +108,7 @@ Assinaturas de `parquet.rs:76,122,169`; REVOKEs de `parquet.rs:320-329`. Nenhum 
 **Ação:** criar o script que expõe a superfície M143 a quem faz `ALTER EXTENSION UPDATE`, e avançar `default_version`. **Raciocínio:** README:102/132 promete o upgrade in-place e a superfície least-privilege; hoje só o fresh-install a tem (Baseline: callers de parquet). Delta-only é o SOTA de 2 peers (ADR-2, blueprint Q1).
 
 #### TDD
+- RED shape: `test_upgrade_1_1_0_to_1_2_0_exposes_parquet_surface()` -> assert proc_count == 3 AND has_function_privilege == false
 - **RED:** `scripts/test-upgrade.sh` com `FROM_VER=1.1.0 TO_VER=1.2.0` retorna exit≠0 (versão 1.2.0 inexistente). Teste literal `test_upgrade_1_1_0_to_1_2_0_exposes_parquet_surface` asserta `SELECT count(*) FROM pg_proc WHERE proname IN ('read_parquet','write_parquet','olap')` = 3 pós-upgrade.
 - **GREEN:** criar o script + bump; `scripts/test-upgrade.sh` sai 0.
 - **REFACTOR:** garantir o CREATE idêntico ao fresh (oráculo CONV cobre drift).
@@ -137,6 +138,7 @@ Assinaturas de `parquet.rs:76,122,169`; REVOKEs de `parquet.rs:320-329`. Nenhum 
 **Ação:** tirar a função de spike do binário/SQL default. **Raciocínio:** hoje é PUBLIC-executável e lê path arbitrário do servidor (Baseline: loop de REVOKE não a cobre). ADR-1: gate-out > REVOKE.
 
 #### TDD
+- RED shape: `test_symqg_absent_from_default()` -> assert proc_count == 0
 - **RED:** `symqg_spike_bench_absent_from_default_surface` asserta `SELECT count(*) FROM pg_proc WHERE proname='symqg_spike_bench'` = 0. Falha hoje (returns 1).
 - **GREEN:** aplicar o cfg-gate; recompilar default; teste retorna 0.
 - **REFACTOR:** confirmar que `cargo pgrx schema` default não emite a função.
@@ -164,6 +166,7 @@ Assinaturas de `parquet.rs:76,122,169`; REVOKEs de `parquet.rs:320-329`. Nenhum 
 O worker chama o delete via SPI em `:899` dentro de um subtxn (`:896-905`) que converte `Err`→`_vectorizer_mark_failed` (`:276`)→dead-letter. Hoje o `let _ =` engole o erro, o delete "sucede" vazio, o job vira `mark_done` (`:917`), e o embedding permanece. Testes happy-path `:1337,:1405` continuam válidos.
 
 #### TDD
+- RED shape: `test_process_delete_failure_does_not_mark_done()` -> assert state != done
 - **RED:** `process_delete_failure_does_not_mark_done` cria vectorizer com target inválida (coluna inexistente força o `UPDATE ... SET %I` a falhar), enfileira um delete, roda o worker 1×, asserta `SELECT state FROM theodb.vectorizer_queue WHERE job_id=$1` returns `pending` ou `failed` (não `done`). Falha hoje (returns `done`).
 - **GREEN:** substituir os 2 `let _ =` por `.unwrap_or_else(|e| crate::pg::err_input(...))`.
 - **REFACTOR:** extrair helper `run_or_fail` se os 3 sites (447,460,469) compartilharem o shape (Regra de 3).
@@ -198,6 +201,7 @@ Sinal presente (worker + lease). Posture: reusa a invariante **atomic** owner-gu
 **Ação:** guard de existência do OID antes do flush. **Raciocínio:** review MEDIUM `columnar.rs:193` — INSERT+DROP na mesma txn deve commitar limpo (caso negativo de invariante transacional).
 
 #### TDD
+- RED shape: `test_columnar_insert_then_drop_same_txn_commits()` -> assert commit_ok == true
 - **RED:** `columnar_insert_then_drop_same_txn_commits` roda `BEGIN; INSERT INTO col_tbl ...; DROP TABLE col_tbl; COMMIT;` e asserta que o COMMIT returns sucesso. Falha hoje (aborta).
 - **GREEN:** pular OIDs dropados no loop de flush.
 - **REFACTOR:** limpar a entrada de `WRITE_STATES` do OID dropado.
@@ -224,6 +228,7 @@ Sinal presente (worker + lease). Posture: reusa a invariante **atomic** owner-gu
 **Ação:** alinhar o match sobre uma única representação. **Raciocínio:** review MEDIUM `vectorizer.rs:742` — vazamento de credencial em `last_error` (caso negativo de segurança).
 
 #### TDD
+- RED shape: `test_sanitize_redacts_bearer_after_length_changing_unicode()` -> assert output_contains_secret == false
 - **RED:** `sanitize_redacts_bearer_after_length_changing_unicode` (unit): input com char length-changing no lowercase seguido de `Bearer sk-secret`; asserta que o output `contains` `Bearer <redacted>` e NÃO `contains` `sk-secret`. Falha hoje.
 - **GREEN:** corrigir o alinhamento (match char-a-char no original com `char::to_lowercase`).
 - **REFACTOR:** cobrir `sk-` no mesmo teste.
@@ -250,6 +255,7 @@ Hoje `mark_failed` seta `lease_deadline=NULL` → job imediatamente reclamável 
 **Ação:** backoff exponencial no re-enqueue. **Raciocínio:** review MEDIUM `vectorizer.rs:285` — retry sem backoff martela o endpoint. `rules/error-handling.md` § recuperáveis: retry COM backoff.
 
 #### TDD
+- RED shape: `test_retry_sets_backoff_deadline()` -> assert lease_deadline > now
 - **RED:** `retry_sets_backoff_deadline` força `mark_failed` com `attempts=1`, asserta `SELECT lease_deadline > now() FROM theodb.vectorizer_queue WHERE job_id=$1` returns `true` (não NULL). Falha hoje.
 - **GREEN:** computar `lease_deadline = now() + least(2^attempts, cap) segundos`.
 - **REFACTOR:** cap configurável via GUC existente se houver.
@@ -281,6 +287,7 @@ Sinal presente (fila/lease). Posture: `lease_deadline` é o mecanismo **atomic**
 **Ação:** checagem de faixa fail-closed antes do cast. **Raciocínio:** review `graph.rs:314` — truncamento silencioso é corrupção de dado. `rules/error-handling.md`: falha explícita, não valor mágico.
 
 #### TDD
+- RED shape: `test_csr_build_guards_u32_boundary()` -> assert result is Err for over_max AND is Ok for exactly_max
 - **RED+EDGE (EC-4):** `csr_build_guards_u32_boundary` (unit): (NEGATIVE) node-id `= u32::MAX as i64 + 1` → asserta que a função returns `Err` tipado (não truncamento); (EDGE) node-id `= u32::MAX` → asserta que a CSR builds OK. Falha hoje (trunca).
 - **GREEN:** `u32::try_from(v).map_err(...)?` / `error!` antes do cast.
 - **REFACTOR:** helper de guard se `src` e `dst` repetirem (2 sites).
@@ -309,6 +316,7 @@ Gate final que exercita os 7 fixes juntos: a suíte `pg_test`, os gates de lint,
 **Ação:** provar a milestone inteira end-to-end. **Raciocínio:** theodb-evolution § "code merged ≠ capability exists" — a evidência é o gate, não o merge.
 
 #### TDD
+- RED shape: `test_full_suite_and_upgrade_harness()` -> assert exit_code == 0
 - **RED:** antes dos fixes, `cargo pgrx test` returns ≠0 (7 REDs falhando).
 - **GREEN:** com todos os fixes, `cargo pgrx test --features pg_test` returns 0.
 - **REFACTOR:** rodar `cargo clippy -- -D warnings` e `cargo fmt --check`.
