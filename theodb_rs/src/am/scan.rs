@@ -172,7 +172,7 @@ pub extern "C-unwind" fn amrescan(
         // Dispatch on the persisted layout: structured IVFFlat (M31 — partial-page read) vs the M26 blob (HNSW).
         let magic = match page::peek_magic(rel) {
             Ok(m) => m,
-            Err(e) => pg_sys::error!("theodb am scan: {e}"),
+            Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
         };
         if magic == 0 {
             return; // empty / unbuilt index
@@ -207,7 +207,7 @@ pub extern "C-unwind" fn amrescan(
             // `state.resume` so `amgettuple` resumes from it instead of re-searching with a doubled `ef`.
             let meta = match crate::am::hnsw_page::read_meta(rel) {
                 Ok(m) => m,
-                Err(e) => pg_sys::error!("theodb am scan: {e}"),
+                Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
             };
             if meta.node_count > 0 && query.len() != meta.dim as usize {
                 pg_sys::error!("theodb hnsw: query dim {} != index dim {}", query.len(), meta.dim);
@@ -219,7 +219,7 @@ pub extern "C-unwind" fn amrescan(
                             match crate::am::hnsw_page::resumable_next(rel, &meta, &query, &mut rg)
                             {
                                 Ok(b) => b,
-                                Err(e) => pg_sys::error!("theodb am scan: {e}"),
+                                Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
                             };
                         // Fold pending (post-build INSERTs) into the FIRST batch only; later resumed batches never
                         // re-fold — the scan dedups tids. Mirrors `gather_hnsw_candidates`.
@@ -229,7 +229,7 @@ pub extern "C-unwind" fn amrescan(
                         };
                         let pending = match page::read_pending(rel) {
                             Ok(p) => p,
-                            Err(e) => pg_sys::error!("theodb am scan: {e}"),
+                            Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
                         };
                         for (tidv, v) in pending {
                             b.push((tidv, metric.dist(&query, &v)));
@@ -238,7 +238,7 @@ pub extern "C-unwind" fn amrescan(
                         b
                     }
                     Ok(None) => gather_hnsw_candidates(rel, &query, ef),
-                    Err(e) => pg_sys::error!("theodb am scan: {e}"),
+                    Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
                 };
             heapify(init)
         } else if magic == crate::am::page::SYMQG_MAGIC {
@@ -269,7 +269,7 @@ unsafe fn gather_hnsw_candidates(
 ) -> Vec<(i64, f64)> {
     let meta = match crate::am::hnsw_page::read_meta(rel) {
         Ok(m) => m,
-        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     };
     let metric = match Metric::from_tag(meta.metric_tag) {
         Some(m) => m,
@@ -283,12 +283,12 @@ unsafe fn gather_hnsw_candidates(
     }
     let mut results = match crate::am::hnsw_page::traverse(rel, &meta, query, ef) {
         Ok(r) => r,
-        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     };
     // Fold in pending (INSERTed after build) — no rebuild (mirror the IVF path).
     let pending = match page::read_pending(rel) {
         Ok(p) => p,
-        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     };
     for (tidv, v) in pending {
         results.push((tidv, metric.dist(query, &v)));
@@ -332,7 +332,7 @@ unsafe fn gather_symqg_candidates(
     use crate::am::page;
     let meta = match page::read_symqg_meta(rel) {
         Ok(m) => m,
-        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     };
     let metric = match Metric::from_tag(meta.metric_tag) {
         Some(m) => m,
@@ -510,7 +510,7 @@ unsafe fn scan_ivf_structured(
     let _ = rerank_pool;
     let meta = match page::read_ivf_meta(rel) {
         Ok(m) => m,
-        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     };
     let metric = match Metric::from_tag(meta.metric_tag) {
         Some(m) => m,
@@ -541,7 +541,7 @@ unsafe fn scan_ivf_structured(
         let t_read = std::time::Instant::now();
         let bytes = match page::read_ivf_list_bytes(rel, fb, np) {
             Ok(b) => b,
-            Err(e) => pg_sys::error!("theodb am scan: {e}"),
+            Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
         };
         if profile {
             read_us += t_read.elapsed().as_micros();
@@ -570,7 +570,7 @@ unsafe fn scan_ivf_structured(
     // Fold in pending (INSERTed after build) — no rebuild.
     let pending = match page::read_pending(rel) {
         Ok(p) => p,
-        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     };
     for (tidv, v) in pending {
         results.push((tidv, metric.dist(query, &v)));
@@ -601,7 +601,7 @@ unsafe fn scan_ivf_aq(
 ) -> Vec<(i64, f64)> {
     let meta = match page::read_ivf_aq_meta(rel) {
         Ok(m) => m,
-        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     };
     let quant = match crate::vec::aq::AqQuantizer::from_meta_bytes(&meta.codebook) {
         Ok(q) => q,
@@ -642,7 +642,7 @@ unsafe fn scan_ivf_aq(
         }
         let bytes = match page::read_ivf_list_bytes(rel, fb, np) {
             Ok(b) => b,
-            Err(e) => pg_sys::error!("theodb am scan: {e}"),
+            Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
         };
         let codes_off = 8 * n + entry_f32 * n;
         let nblocks = n.div_ceil(32);
@@ -712,7 +712,7 @@ unsafe fn scan_ivf_aq_split(
 ) -> Vec<(i64, f64)> {
     let meta = match page::read_ivf_aq_meta_split(rel) {
         Ok(m) => m,
-        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     };
     let quant = match crate::vec::aq::AqQuantizer::from_meta_bytes(&meta.codebook) {
         Ok(q) => q,
@@ -766,7 +766,7 @@ unsafe fn scan_ivf_aq_split(
         }
         let cbytes = match page::read_ivf_list_bytes(rel, cfb, cnp) {
             Ok(b) => b,
-            Err(e) => pg_sys::error!("theodb am scan: {e}"),
+            Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
         };
         let codes_off = 8 * n; // codes start right after the n ids
         let nblocks = n.div_ceil(32);
@@ -846,7 +846,7 @@ unsafe fn scan_ivf_aq_split_v7(
 ) -> Vec<(i64, f64)> {
     let meta = match page::read_ivf_aq_meta_split(rel) {
         Ok(m) => m,
-        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     };
     let quant = match crate::vec::aq::AqQuantizer::from_meta_bytes(&meta.codebook) {
         Ok(q) => q,
@@ -899,7 +899,7 @@ unsafe fn scan_ivf_aq_split_v7(
         }
         let cbytes = match page::read_ivf_list_bytes(rel, cfb, cnp) {
             Ok(b) => b,
-            Err(e) => pg_sys::error!("theodb am scan: {e}"),
+            Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
         };
         let labels_off = 8 * n; // labels start right after the n ids
         let codes_off = 8 * n + n * label_bytes; // codes start after ids + the fixed label region
@@ -1024,7 +1024,7 @@ unsafe fn scan_ivf_aq_split_sq8(
 ) -> Vec<(i64, f64)> {
     let meta = match page::read_ivf_aq_meta_split_sq8(rel) {
         Ok(m) => m,
-        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     };
     let quant = match crate::vec::aq::AqQuantizer::from_meta_bytes(&meta.aq_codebook) {
         Ok(q) => q,
@@ -1063,7 +1063,7 @@ unsafe fn scan_ivf_aq_split_sq8(
         }
         let cbytes = match page::read_ivf_list_bytes(rel, cfb, cnp) {
             Ok(b) => b,
-            Err(e) => pg_sys::error!("theodb am scan: {e}"),
+            Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
         };
         let codes_off = 8 * n;
         let nblocks = n.div_ceil(32);
@@ -1131,7 +1131,7 @@ unsafe fn scan_ivf_aq_split_rabitq(
 ) -> Vec<(i64, f64)> {
     let meta = match page::read_ivf_aq_meta_split_rabitq(rel) {
         Ok(m) => m,
-        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     };
     let quant = match crate::vec::aq::AqQuantizer::from_meta_bytes(&meta.aq_codebook) {
         Ok(q) => q,
@@ -1168,7 +1168,7 @@ unsafe fn scan_ivf_aq_split_rabitq(
         }
         let cbytes = match page::read_ivf_list_bytes(rel, cfb, cnp) {
             Ok(b) => b,
-            Err(e) => pg_sys::error!("theodb am scan: {e}"),
+            Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
         };
         let codes_off = 8 * n;
         let nblocks = n.div_ceil(32);
@@ -1244,18 +1244,18 @@ unsafe fn scan_ivf_aq_split_rabitq(
 unsafe fn scan_blob(rel: pg_sys::Relation, query: &[f32]) -> BinaryHeap<Reverse<Scored>> {
     let blob = match page::read_blob(rel) {
         Ok(b) => b,
-        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     };
     if blob.is_empty() {
         return BinaryHeap::new();
     }
     let idx = match Persisted::from_bytes(&blob) {
         Ok(i) => i,
-        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     };
     let pending = match page::read_pending(rel) {
         Ok(p) => p,
-        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     };
     // `search_merged` already returns ascending-sorted; heapify is O(C) and keeps the uniform pop path (M36).
     heapify(idx.search_merged(query, &pending))
@@ -1310,7 +1310,7 @@ pub extern "C-unwind" fn amgettuple(
                     let rel = state.rel;
                     let meta = match crate::am::hnsw_page::read_meta(rel) {
                         Ok(m) => m,
-                        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+                        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
                     };
                     let resume_ceiling = crate::am::guc::hnsw_resume_max_bytes();
                     loop {
@@ -1339,7 +1339,7 @@ pub extern "C-unwind" fn amgettuple(
                                         rel, &meta, q, rg,
                                     ) {
                                         Ok(b) => b,
-                                        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+                                        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
                                     };
                                     (b, rg.exhausted())
                                 }
