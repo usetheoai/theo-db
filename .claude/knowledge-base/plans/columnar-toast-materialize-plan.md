@@ -165,7 +165,11 @@ PostgreSQL real gravando na toast table.
 
 ## Unresolved Questions
 
-- Q1 — **O estado ilegível pós-abort (R3) é o mesmo defeito ou outro?** Observado uma vez, com `TRUNCATE` +
+- Q1 — **[RESOLVIDA na T2.1]** O estado ilegível pós-abort é um **defeito INDEPENDENTE** (#191), não o #190.
+  O repro mínimo (`TRUNCATE` + re-INSERT, SEM TOAST, 5.000 linhas) reproduz `bad metapage magic 0x​fd2fb528`
+  + `could not read blocks` **também no binário pré-#190** (`9940da0`, build A/B) — logo não é regressão do
+  fix. É um bug de TRUNCATE do TableAM colunar, mascarado pelo #190 (a carga abortava antes). Aberto como
+  #191. Original:</p>**O estado ilegível pós-abort (R3) é o mesmo defeito ou outro?** Observado uma vez, com `TRUNCATE` +
    INSERT repetidos. T2.1 existe para responder com repro determinístico. Se for independente, vira issue
    separada — não será encoberto pelo fix.
 - Q2 — **O call-site `:1199` está em qual contexto de snapshot?** Não foi classificado no levantamento; T1.1
