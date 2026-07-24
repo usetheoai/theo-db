@@ -14,6 +14,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Plano de implementação do M147 (`m147-scan-version-dispatch`, SHIPPABLE_WITH_CAVEATS 89): 4 tasks TDD para o refactor de `am/scan.rs` em 3 eixos (enum de versão lido uma vez, gathers→Result+?, kernel Stage-1 compartilhado recebendo codes_off) + A/B byte-idêntico nos 6 caminhos v3..v8; 3 MUST-FIX do edge-case-plan absorvidos (v3 no A/B, ivf_version estrito+gate de len, baseline capturado) (#170)
+
 - Blueprint de discovery do M147 (`m147-scan-version-dispatch`, SHIPPABLE_WITH_CAVEATS 89): padrão comprovado de version-dispatch de formato on-disk extraído de pgvectorscale (dispatch OCP por enum, tipo lido uma vez, decode isolado por-impl), lance (isolamento de corpos em módulo `previous/` + recusa fail-closed = a ADR-2 na prática) e pgvector (o contraste single-version) — decide a forma do refactor de `scan.rs` sem violar a ADR-2 do M145 (#170)
 
 - Discovery plan do M147 (`m147-scan-version-dispatch`): investigação focada de como pgvectorscale (par pgrx), lance (formato versionado Rust) e pgvector (C) fazem dispatch de versão de formato on-disk OCP e isolam corpos de decode por-versão — insumo para o refactor de `scan.rs` sem violar a ADR-2 do M145 (#170)
