@@ -14,70 +14,54 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- M148 — flamegraph do scan colunar mede o gargalo real e prioriza os M149/M150/M151 por evidência (`docs/benchmarks/m148-flamegraph-scan.md` + harness `benchmarks/profile_columnar_scan.sh`): sobre o ClickBench `hits` real (105 colunas), o scan colunar é 100% CPU-bound e ~80% do tempo é a materialização de cada linha como heap-tuple (`palloc`+`heap_form_tuple` por linha) — a descompressão das colunas é só ~7%. Isso **corrige** a hipótese inicial (que supunha o decode dominante) e define a sequência M149 (projection pushdown, reduz a materialização) → M151 (execução vetorizada, elimina o heap-tuple por-linha) → M150 (chunk-filter, condicional a workload seletivo). Medição com piso de 500 amostras (o gate que impede um flamegraph vácuo) e confound de `cassert` descontado honestamente (M148)
-- Roadmap ampliado: M148 (spike/flamegraph do scan colunar), M149 (projection pushdown), M150 (chunk-group filtering), M151 (ampliar CustomScan vetorizado) — o programa para tornar o pilar colunar competitivo em ClickBench, derivado da análise SOTA (Citus + DuckDB/DataFusion) do gargalo revelado pelo gate 1M pós-#190 (`/roadmap-feature columnar-scan-optimization`)
 
 ### Changed
 
-- Roadmap "Fora de escopo" ajustado: removido "Columnar próprio (substituir DuckDB/pg_mooncake)" — a restrição foi superada pelos M99–M143 (theodb_columnar 100% own-code entregue, pg_duckdb removido; ADR-0042/0057), então otimizar o scan é continuação, não reabertura
-
-### Added
-
-- Primeiro benchmark do pilar colunar em dados representativos após o fix do #190 (`docs/benchmarks/clickbench-1m-postfix-2026-07-24.md`): as 43 queries do ClickBench sobre 1M linhas reais carregam e rodam (42 completam byte-idênticas, 1 timeout, 0 erros), mas o resultado honesto mostra que só 6 das 43 engajam a aceleração vetorizada — as demais são lentas, revelando que os números anteriores vinham de uma amostra enviesada. Relatório consolidado da sessão em `docs/benchmarks/RELATORIO-clickbench-sessao-2026-07-24.md` (#190)
-
-### Fixed
-
-- Corrigido o defeito que impedia carregar dados reais no armazenamento colunar: inserções sucessivas falhavam quando os dados continham textos grandes (acima de ~2 KB). Os valores passam a ser materializados no momento da inserção — onde o banco garante o contexto necessário para lê-los — em vez de mais tarde, durante a gravação, quando esse contexto já não existe. Isso também elimina o risco de o dado referenciado ser removido pela limpeza automática antes da gravação (#190)
-
-### Added
-
-- Plano de correção do defeito que impede carregar dados reais no armazenamento colunar (`columnar-toast-materialize`): a solução escolhida materializa os valores grandes no momento da inserção, em vez de contornar o problema no momento da gravação — remove a causa em vez de mascará-la, e protege contra uma segunda falha possível (dado removido por limpeza automática antes da gravação) (#190)
-
-### Fixed
-
-- Descoberto e registrado um defeito que impede carregar dados reais no armazenamento colunar: inserções sucessivas falham quando os dados contêm valores de texto grandes (acima de ~2 KB), com a tabela podendo ficar ilegível após o erro. O problema passou despercebido até agora porque a amostragem de benchmark usava uma fatia estreita do dataset, sem valores desse tamanho. Documentado em `docs/benchmarks/clickbench-scale-gate-2026-07-24.md`, com o impacto sobre a leitura dos números anteriores declarado honestamente (#190)
-
-### Added
-
-- Previsão de budget do programa de benchmark oficial (`docs/benchmarks/clickbench-official-budget.md`): custo atual da infraestrutura medido via API de faturamento, custo por etapa com preços reais consultados na AWS, e os guardrails adotados para que nenhuma máquina temporária fique ligada por esquecimento (#187)
-
-### Fixed
-
-- Corrigido um viés na amostragem do benchmark ClickBench que favorecia os nossos próprios números: a amostra usava as primeiras N linhas do dataset, que é ordenado por tempo — uma fatia temporal estreita, com menos valores distintos do que a realidade, justamente o cenário em que a aceleração colunar mais se destaca. A amostragem passa a percorrer o arquivo inteiro pegando 1 linha a cada K, cobrindo todo o período. A estratégia usada fica registrada no artefato de resultado, e a antiga continua disponível apenas para testes rápidos (#187)
-
-### Fixed
-
-- O filtro que impede mudanças só-de-documentação de rodar a esteira completa passa a valer também para pull requests, não apenas para pushes diretos. Sem isso, um PR cujo diff era apenas o CHANGELOG reabria os ~14 jobs do runner único (observado no PR #189) (#187)
-
-### Added
-
-### Changed
 
 ### Deprecated
 
+
 ### Removed
+
 
 ### Fixed
 
+
 ### Security
+
 
 ## [0.140.0] - 2026-07-24
 
 ### Added
 
+- M148 — flamegraph do scan colunar mede o gargalo real e prioriza os M149/M150/M151 por evidência (`docs/benchmarks/m148-flamegraph-scan.md` + harness `benchmarks/profile_columnar_scan.sh`): sobre o ClickBench `hits` real (105 colunas), o scan colunar é 100% CPU-bound e ~80% do tempo é a materialização de cada linha como heap-tuple (`palloc`+`heap_form_tuple` por linha) — a descompressão das colunas é só ~7%. Isso **corrige** a hipótese inicial (que supunha o decode dominante) e define a sequência M149 (projection pushdown, reduz a materialização) → M151 (execução vetorizada, elimina o heap-tuple por-linha) → M150 (chunk-filter, condicional a workload seletivo). Medição com piso de 500 amostras (o gate que impede um flamegraph vácuo) e confound de `cassert` descontado honestamente (M148)
+- Roadmap ampliado: M148 (spike/flamegraph do scan colunar), M149 (projection pushdown), M150 (chunk-group filtering), M151 (ampliar CustomScan vetorizado) — o programa para tornar o pilar colunar competitivo em ClickBench, derivado da análise SOTA (Citus + DuckDB/DataFusion) do gargalo revelado pelo gate 1M pós-#190 (`/roadmap-feature columnar-scan-optimization`)
+- Primeiro benchmark do pilar colunar em dados representativos após o fix do #190 (`docs/benchmarks/clickbench-1m-postfix-2026-07-24.md`): as 43 queries do ClickBench sobre 1M linhas reais carregam e rodam (42 completam byte-idênticas, 1 timeout, 0 erros), mas o resultado honesto mostra que só 6 das 43 engajam a aceleração vetorizada — as demais são lentas, revelando que os números anteriores vinham de uma amostra enviesada. Relatório consolidado da sessão em `docs/benchmarks/RELATORIO-clickbench-sessao-2026-07-24.md` (#190)
+- Plano de correção do defeito que impede carregar dados reais no armazenamento colunar (`columnar-toast-materialize`): a solução escolhida materializa os valores grandes no momento da inserção, em vez de contornar o problema no momento da gravação — remove a causa em vez de mascará-la, e protege contra uma segunda falha possível (dado removido por limpeza automática antes da gravação) (#190)
+- Previsão de budget do programa de benchmark oficial (`docs/benchmarks/clickbench-official-budget.md`): custo atual da infraestrutura medido via API de faturamento, custo por etapa com preços reais consultados na AWS, e os guardrails adotados para que nenhuma máquina temporária fique ligada por esquecimento (#187)
 - Gate de compatibilidade pgvector no CI: a cada mudança de código, a esteira sobe a **imagem** publicável e executa o fluxo que uma aplicação real faz — `CREATE EXTENSION vector` sem `CASCADE`, tabela com coluna `vector`, e os três índices `USING hnsw (... vector_cosine_ops/l2/ip)` — verificando resultado correto, não apenas ausência de erro. Era a lacuna que deixou passar os dois bugs que impediam qualquer aplicação de subir contra o TheoDB (#181, #182)
-
-
 
 ### Changed
 
+- Roadmap "Fora de escopo" ajustado: removido "Columnar próprio (substituir DuckDB/pg_mooncake)" — a restrição foi superada pelos M99–M143 (theodb_columnar 100% own-code entregue, pg_duckdb removido; ADR-0042/0057), então otimizar o scan é continuação, não reabertura
 - A publicação da imagem passa a usar o workflow reutilizável do ecossistema (o mesmo do theo-memory e do theo-rag) em vez de uma implementação própria: além de publicar no GHCR, a imagem agora passa por varredura de vulnerabilidades (Trivy, bloqueando CRITICAL/HIGH antes do push) e, nas releases, sai com SBOM, proveniência SLSA e assinatura — garantias que a versão caseira não tinha (#187)
 
+### Deprecated
+
+
+### Removed
 
 
 ### Fixed
 
+- Corrigido o defeito que impedia carregar dados reais no armazenamento colunar: inserções sucessivas falhavam quando os dados continham textos grandes (acima de ~2 KB). Os valores passam a ser materializados no momento da inserção — onde o banco garante o contexto necessário para lê-los — em vez de mais tarde, durante a gravação, quando esse contexto já não existe. Isso também elimina o risco de o dado referenciado ser removido pela limpeza automática antes da gravação (#190)
+- Descoberto e registrado um defeito que impede carregar dados reais no armazenamento colunar: inserções sucessivas falham quando os dados contêm valores de texto grandes (acima de ~2 KB), com a tabela podendo ficar ilegível após o erro. O problema passou despercebido até agora porque a amostragem de benchmark usava uma fatia estreita do dataset, sem valores desse tamanho. Documentado em `docs/benchmarks/clickbench-scale-gate-2026-07-24.md`, com o impacto sobre a leitura dos números anteriores declarado honestamente (#190)
+- Corrigido um viés na amostragem do benchmark ClickBench que favorecia os nossos próprios números: a amostra usava as primeiras N linhas do dataset, que é ordenado por tempo — uma fatia temporal estreita, com menos valores distintos do que a realidade, justamente o cenário em que a aceleração colunar mais se destaca. A amostragem passa a percorrer o arquivo inteiro pegando 1 linha a cada K, cobrindo todo o período. A estratégia usada fica registrada no artefato de resultado, e a antiga continua disponível apenas para testes rápidos (#187)
+- O filtro que impede mudanças só-de-documentação de rodar a esteira completa passa a valer também para pull requests, não apenas para pushes diretos. Sem isso, um PR cujo diff era apenas o CHANGELOG reabria os ~14 jobs do runner único (observado no PR #189) (#187)
 - Mudanças apenas de documentação deixam de disparar a esteira completa de CI. O runner é único e serial — cada push acionava ~14 jobs de ~45min (cerca de 10h de fila) mesmo quando nada de código mudava, o que travava as publicações e validações reais atrás de trabalho inútil (#187)
+
+### Security
+
 
 ## [0.139.0] - 2026-07-24
 
