@@ -6,7 +6,7 @@ goal: Eliminar a dependência de snapshot no flush do theodb_columnar materializ
 
 # Plan: Materializar TOAST na ingestão do `theodb_columnar` (#190)
 
-**Versão:** v1.0 · **Issue:** [#190](https://github.com/usetheodev/theo-db/issues/190) · **Data:** 2026-07-24
+**Versão:** v1.1 (MUST FIX do edge-case review absorvidos) · **Issue:** [#190](https://github.com/usetheodev/theo-db/issues/190) · **Data:** 2026-07-24
 
 ## Goal
 
@@ -165,12 +165,16 @@ PostgreSQL real gravando na toast table.
 
 ## Unresolved Questions
 
-1. **O estado ilegível pós-abort (R3) é o mesmo defeito ou outro?** Observado uma vez, com `TRUNCATE` +
+- Q1 — **O estado ilegível pós-abort (R3) é o mesmo defeito ou outro?** Observado uma vez, com `TRUNCATE` +
    INSERT repetidos. T2.1 existe para responder com repro determinístico. Se for independente, vira issue
    separada — não será encoberto pelo fix.
-2. **O call-site `:1199` está em qual contexto de snapshot?** Não foi classificado no levantamento; T1.1
+- Q2 — **O call-site `:1199` está em qual contexto de snapshot?** Não foi classificado no levantamento; T1.1
    deve determiná-lo antes de qualquer alteração, porque muda o alcance da correção.
-3. **Qual o teto real de RAM aceitável para o pending state?** Hoje `maintenance_work_mem`. Se a
+- Q3 — **TOAST aninhado dentro de tipo composite (EC-7).** Um `ROW(text, text)` pode ter campos internos
+   toastados que `pg_detoast_datum_copy` no valor externo não resolve. É raro (exige coluna composite numa
+   tabela colunar) e o ClickBench não usa. **Decisão:** declarado como limitação conhecida, fora do escopo
+   do #190; se aparecer em uso real, vira issue própria. Fixá-lo aqui seria scope creep.
+- Q4 — **Qual o teto real de RAM aceitável para o pending state?** Hoje `maintenance_work_mem`. Se a
    materialização estourar esse orçamento em cargas reais, pode ser necessário reduzir o gatilho de flush —
    decisão que depende da medição de T3.1.
 
@@ -224,8 +228,20 @@ O novo alvo segue o mesmo padrão; nenhum outro arquivo depende dele.
 - O harness cria tabela colunar com coluna `text`, insere dois lotes de 5.000 com valores > 2 KB.
 - Asserta `count(*) = 10000` — não apenas "não deu erro".
 - Asserta que os **valores** sobrevivem (comparação de `md5(string_agg(...))` contra a origem heap), não só
-  a contagem: um fix que grave lixo passaria num teste de contagem.
-- Exit 1 com mensagem clara em qualquer violação.
+  a contagem: um fix que grave lixo passaria num teste de contagem. **Esta asserção é a defesa principal
+  contra EC-2/EC-3** (corrupção silenciosa), não um detalhe do teste.
+- **EC-6 (SHOULD TEST) — os dois lotes em transações DIFERENTES.** O repro do #190 usa dois INSERTs na
+  mesma transação, mas o caminho sem snapshot é o **pré-commit** (`columnar.rs:206`), que só roda no COMMIT.
+  Um teste sem commit entre os lotes pode passar sem exercitar o caminho que originou o defeito. O harness
+  cobre os dois arranjos: (a) dois INSERTs na mesma txn, (b) INSERT+COMMIT × 2.
+- **EC-4 (SHOULD TEST) — limiar de TOAST.** Valores de 1.900, 2.000 e 2.100 bytes na mesma tabela,
+  assertando count e md5. O limiar depende do tamanho total da tupla, não só da coluna; testar só com 3 KB
+  não distingue "materializou tudo" de "materializou só o externo" — os três estados (inline, comprimido
+  inline, externo) precisam passar.
+- **EC-5 (SHOULD TEST) — tipos de tamanho fixo intactos.** Tabela com `int`, `bigint`, `uuid`, `char(10)` e
+  `text`, assertando que os quatro primeiros trafegam sem alteração. A materialização de T1.3 usa o mesmo
+  critério `attlen == -1` de `extract_value_bytes:535`; divergir aí quebra o que o flush espera.
+- Qualquer violação produz exit **1** com uma linha `TOAST_CHECK_FAIL <motivo>` no stdout.
 
 #### DoD
 `make -C theodb_rs/isolation check-toast` sai 1 hoje (RED) e 0 após o fix, com não-vacuidade demonstrada.
@@ -263,10 +279,9 @@ Os três sítios diferem no conjunto de colunas (`wanted` em `:822`, coluna úni
 `(none — single-threaded)`.
 
 #### Acceptance Criteria
-- `grep -c "heap_deform_tuple" columnar.rs` cai de 5 para no máximo 3 (dois sítios fora do escopo: `:612`
-  comentário e `:1118` ingestão).
-- A/B de leitura byte-idêntico numa tabela colunar pré-existente.
-- Nenhuma mudança de comportamento observável.
+- `grep -c "heap_deform_tuple" theodb_rs/src/am/columnar.rs` retorna **≤ 3** (era 5).
+- `md5` do `string_agg` de um `SELECT *` sobre tabela colunar pré-existente é **idêntico** antes e depois da extração (0 bytes de diferença).
+- `make -C theodb_rs/isolation check-isolation check-crash` sai **0** (sem regressão nos gates existentes).
 
 #### DoD
 Build limpo, A/B de leitura byte-idêntico, `columnar.rs` com menos linhas do que antes.
@@ -301,13 +316,31 @@ caminhos de leitura.
 ```
 accumulate_row(rel, slot):
     slot_getallattrs(slot)
-    para cada atributo i não-nulo e de tamanho variável:
-        se o datum for TOAST externo:
-            materializar (detoast) — AQUI o snapshot do executor é garantido
-    heap_form_tuple(tupdesc, valores_materializados, isnull)
-    bufferizar bytes
-    liberar as cópias materializadas (evitar vazamento no contexto de memória do executor)
+    para cada atributo i:
+        se isnull[i]                 -> pular (detoast de NULL é segfault, columnar.rs:1246)
+        se attlen != -1              -> pular (mesmo critério de extract_value_bytes:535; um
+                                        datum by-value tratado como ponteiro é segfault)
+        senão (varlena):
+            materializar SEMPRE com pg_detoast_datum_copy — EC-2
+    // ORDEM OBRIGATÓRIA (EC-3): formar a tupla ANTES de liberar as cópias
+    heap_form_tuple(tupdesc, valores_materializados, isnull)   // copia os valores
+    bytes = copiar t_data                                       // copia de novo, para o Vec
+    pfree(cada cópia materializada); heap_freetuple(htup)       // só agora é seguro liberar
 ```
+
+**EC-2 (MUST FIX do edge-case review) — materializar TODO varlena, sem pré-teste de
+`VARATT_IS_EXTERNAL`.** Arrays chegam do executor em *expanded form*
+(`VARATT_IS_EXTERNAL_EXPANDED`): um ponteiro para estrutura em memória, não um varlena serializado.
+`grep -rn "EXPANDED\|flatten" theodb_rs/src/` retorna **zero** ocorrências — o crate nunca tratou o caso.
+Hoje funciona por acidente porque `pg_detoast_datum_copy` achata expanded. Se filtrarmos por
+`VARATT_IS_EXTERNAL`, o expanded escapa da materialização e o buffer guarda ponteiro para memória do
+contexto per-tuple já resetado: **use-after-free, pior que o bug original**. `pg_detoast_datum_copy`
+cobre external, compressed e expanded — usar sempre.
+
+**EC-3 (MUST FIX) — ordem de liberação.** `pg_detoast_datum_copy` aloca no `CurrentMemoryContext`, que em
+`accumulate_row` é o per-tuple do executor. Liberar antes do `heap_form_tuple` copiar produz bytes a partir
+de memória liberada — **corrupção silenciosa**, sem erro algum. A ordem acima é obrigatória, e a asserção
+de md5 em T1.1 é o oráculo que a protege.
 
 #### TDD
 - **RED:** `check-toast` de T1.1 falhando.
@@ -318,11 +351,10 @@ accumulate_row(rel, slot):
 `(none — single-threaded)`. `WRITE_STATES` é por-backend; a materialização não introduz estado compartilhado.
 
 #### Acceptance Criteria
-- `check-toast` passa; não-vacuidade demonstrada (reverter → falha).
-- **Valores preservados**: md5 do conteúdo colunar == md5 da origem heap.
-- Nenhum vazamento de memória evidente num INSERT de 100.000 linhas (observar RSS do backend).
-- O comentário enganoso de `:1153-1155` ("snapshot-safe because…") é corrigido ou removido — hoje ele
-  documenta uma garantia que não existe no pré-commit.
+- `make -C theodb_rs/isolation check-toast` sai **0**; revertendo o diff de T1.3 o mesmo comando sai **1** (não-vacuidade).
+- `md5(string_agg(col ORDER BY id))` da tabela colunar é **igual** ao da origem heap (comparação exata, não amostrada).
+- Após INSERT de 100.000 linhas, o RSS do backend fica **abaixo de 2× `maintenance_work_mem`** (medido com `ps -o rss= -p <backend>` antes e depois).
+- `grep -c "snapshot-safe because" theodb_rs/src/am/columnar.rs` retorna **0** (o comentário afirma uma garantia inexistente no pré-commit).
 
 #### DoD
 `make -C theodb_rs/isolation check-toast` sai 0; suíte `check-isolation` e `check-crash` continuam verdes.
@@ -344,14 +376,28 @@ trocaríamos um bug de correção por um de esgotamento de memória.
 `:1147-1150` — `p.bytes += bytes.len()`. Com a mudança de T1.3, `bytes` já será maior; a tarefa é
 **verificar** e cobrir com teste, não presumir.
 
+**EC-1 (MUST FIX do edge-case review) — a verificação de teto está na ordem errada.** `columnar.rs:1145-1152`
+empurra a linha no buffer **e só então** compara `pending_bytes > mwm`. Hoje isso é inofensivo porque um
+valor grande entra como ponteiro de 18 bytes. Depois de T1.3 ele entra **materializado**: um `text` de
+512 MB (varlena aceita até 1 GB) é copiado inteiro antes de qualquer verificação, e o flush só ocorreria na
+linha seguinte. Trocaríamos um erro de INSERT por **OOM do backend** — piora, não correção.
+
 #### Files to edit
 - `theodb_rs/src/am/columnar.rs` (`:1144-1151`)
 - `theodb_rs/isolation/columnar_toast_check.sh` — asserção adicional
+
+#### Tasks
+1. Inverter a ordem: se `p.bytes + bytes.len() > mwm` **e** `!p.rows.is_empty()`, fazer flush **antes** de
+   empurrar a linha nova. Uma linha isoladamente maior que o teto ainda passa (não há como parti-la), mas
+   nunca soma com as anteriores.
+2. Garantir que `p.bytes` some o tamanho materializado (consequência natural de T1.3 — verificar).
 
 #### TDD
 - **RED:** com `maintenance_work_mem` baixo (1 MB) e valores de 3 KB, contar stripes gerados; se a
   contabilidade estiver errada, sai **1 stripe** (buffer estourou o teto sem flush).
 - **GREEN:** múltiplos stripes, cada um respeitando o teto.
+- **RED (EC-1):** uma única linha com valor de ~64 MB e `maintenance_work_mem = '1MB'`; com a ordem antiga o
+  RSS do backend salta para dezenas de MB antes de qualquer flush.
 
 #### Concurrency tests
 `(none — single-threaded)`.
@@ -359,6 +405,8 @@ trocaríamos um bug de correção por um de esgotamento de memória.
 #### Acceptance Criteria
 - Com `maintenance_work_mem = '1MB'` e 5.000 linhas de ~3 KB, o número de stripes é > 1.
 - RSS do backend permanece na ordem de `maintenance_work_mem`, não de linhas × 3 KB.
+- **EC-1:** inserir 10 linhas de ~8 MB com `maintenance_work_mem = '1MB'` gera ≥ 10 stripes e o RSS não
+  acumula as 10 linhas simultaneamente.
 
 #### DoD
 Asserção de contagem de stripes verde no harness.
@@ -395,8 +443,8 @@ observado e não investigado é dívida oculta.
 `(none — single-threaded)`.
 
 #### Acceptance Criteria
-- 10 ciclos de abort + leitura, com resultado registrado.
-- Veredito explícito: independente (com issue) ou consequência (com evidência).
+- 10 ciclos de `abort` + `SELECT count(*)` executados; a contagem de ciclos que falharam na leitura é **registrada no relatório** (0 = não reproduz).
+- O relatório declara **um** dos dois: `INDEPENDENTE` (com número de issue aberta) ou `CONSEQUÊNCIA` (com o log do abort que o explica).
 
 #### DoD
 Conclusão documentada com evidência; nenhuma afirmação sem repro.
@@ -421,9 +469,13 @@ O gate anterior carregou 1M linhas no heap com sucesso, então há baseline de c
 #### Files to edit
 - `docs/benchmarks/columnar-toast-materialize.md` **(NEW)**
 
+#### Concurrency tests
+`(none — single-threaded)`. A medição roda um INSERT por vez num box dedicado; concorrência introduziria
+ruído na comparação antes/depois, que é justamente o que a tarefa mede.
+
 #### Acceptance Criteria
 - Tempo de INSERT de 1M linhas medido antes e depois, mesmo box, ≥ 3 repetições.
-- Regressão > 20% aciona reavaliação da ADR-1 (registrada, não silenciada).
+- Se `tempo_depois / tempo_antes > 1.20`, o artefato registra `REAVALIAR_ADR1` explicitamente (a regressão não pode ser omitida).
 
 #### DoD
 Artefato de benchmark commitado com metodologia e comando de reprodução.
@@ -434,7 +486,7 @@ Artefato de benchmark commitado com metodologia e comando de reprodução.
 O run de 1M linhas com `--sample systematic --agg` completa as 43 queries.
 
 #### Why this step (action + reasoning)
-**Ação:** repetir o gate bloqueado em `clickbench-scale-gate-2026-07-24.md` num droplet efêmero.
+**Ação:** repetir o gate bloqueado em `docs/benchmarks/clickbench-scale-gate-2026-07-24.md` num droplet efêmero.
 
 **Raciocínio:** é a validação de que o fix resolve o problema **real** que o originou, não apenas o repro
 sintético. Fecha o ciclo aberto pelo goal do usuário.
@@ -442,9 +494,13 @@ sintético. Fecha o ciclo aberto pelo goal do usuário.
 #### Files to edit
 - `docs/benchmarks/clickbench-scale-gate-2026-07-24.md` — atualizar com o resultado
 
+#### Concurrency tests
+`(none — single-threaded)`. O protocolo do ClickBench é serial por definição (cada query 3×, cold + 2 hot);
+executar em paralelo invalidaria a comparação com o leaderboard.
+
 #### Acceptance Criteria
 - 43/43 queries executam; A/B byte-idêntico vs heap preservado.
-- Droplet efêmero **destruído** ao fim (registro do ID antes de iniciar).
+- `doctl compute droplet list --tag-name ephemeral-bench` retorna **0 linhas** ao fim da tarefa.
 
 #### DoD
 Gate verde e documentado; `doctl compute droplet list` sem instâncias efêmeras.
@@ -459,10 +515,18 @@ Gate verde e documentado; `doctl compute droplet list` sem instâncias efêmeras
 | Não trocar bug de correção por esgotamento de RAM | R1 | T1.4 |
 | Estado ilegível pós-abort investigado, não encoberto | R3 / #190 `[NEEDS-REPRO]` | T2.1 |
 | Custo de ingestão medido, não presumido | R2 | T3.1 |
-| Gate do ClickBench destravado | `clickbench-scale-gate-2026-07-24.md` | T3.2 |
+| Gate do ClickBench destravado | `docs/benchmarks/clickbench-scale-gate-2026-07-24.md` | T3.2 |
 | Comentário enganoso sobre snapshot-safety corrigido | `columnar.rs:1153-1155` | T1.3 |
+| Linha isolada > `maintenance_work_mem` não pode causar OOM | EC-1 (edge-case review) | T1.4 |
+| Datum EXPANDED materializado (senão use-after-free) | EC-2 (edge-case review) | T1.3 |
+| Ordem de liberação de memória (senão corrupção silenciosa) | EC-3 (edge-case review) | T1.3 |
+| Limiar de TOAST (inline / comprimido / externo) coberto | EC-4 (edge-case review) | T1.1 |
+| Tipos de tamanho fixo trafegam intactos | EC-5 (edge-case review) | T1.1 |
+| Caminho de pré-commit exercitado (lotes em txns distintas) | EC-6 (edge-case review) | T1.1 |
+| TOAST aninhado em composite — limitação declarada | EC-7 (edge-case review) | Unresolved Q4 |
+| `maintenance_work_mem` fixado no harness (determinismo) | EC-8 (edge-case review) | T1.4 |
 
-Cobertura: **8/8 = 100%**.
+Cobertura: **16/16 = 100%**.
 
 ## Global Definition of Done
 
