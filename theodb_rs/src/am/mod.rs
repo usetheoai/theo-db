@@ -150,19 +150,16 @@ fn make_amroutine(
     amroutine.amusemaintenanceworkmem = false;
     amroutine.amkeytype = pg_sys::InvalidOid;
 
-    // M146 (encontrado ao validar o review) — `amcanreturn` NUNCA era atribuído, e o campo não vinha zerado.
-    // O PostgreSQL lê `rd_indam->amcanreturn` em `index_can_return` (`access/index/indexam.c`) para decidir se
-    // uma coluna pode ser servida direto do índice; um ponteiro não-nulo aqui autoriza **Index Only Scan** sobre
-    // um AM que não sabe devolver o valor indexado. Medido em PG 18.4 com `enable_seqscan=off`:
+    // M146 — declaração EXPLÍCITA de que este AM não sabe devolver o valor indexado. Um índice vetorial guarda
+    // grafo/códigos quantizados, não o valor original, então nunca pode servir uma coluna sem ir ao heap; é o
+    // que o pgvector declara (`src/hnsw.c:370`, `src/ivfflat.c:221` — `amcanreturn = NULL`).
     //
-    //   SELECT count(*) FROM t;        -- B-tree: 500  |  theodb_hnsw: 0     ← resposta ERRADA, sem erro
-    //   SELECT id FROM t;              -- idem: nenhuma linha
-    //   EXPLAIN: Aggregate -> Index Only Scan using t_hnsw on t
-    //
-    // Isto é pior que um crash: a query não falha, ela MENTE. Um `count(*)` de auditoria devolve zero e nada
-    // no log indica problema. `None` é exatamente o que o pgvector declara (`src/hnsw.c:370`,
-    // `src/ivfflat.c:221` — `amcanreturn = NULL`): um índice vetorial guarda códigos quantizados/grafo, não o
-    // valor original, então NUNCA pode servir uma coluna sem ir ao heap.
+    // HONESTIDADE (review pass-2, F-sec-8) — a primeira versão deste comentário afirmava que "o campo não vinha
+    // zerado" e que atribuí-lo corrigia o #177. **As duas afirmações eram falsas.** `PgBox::alloc_node` chama
+    // `alloc0()` (pgrx-0.19.0 `pgbox.rs:304`), então `amcanreturn` já era NULL: esta linha é um **no-op
+    // comportamental**. Eu havia testado a hipótese e MEDIDO que o `count(*)` continuava devolvendo 0 — mas
+    // escrevi o comentário como se ela explicasse o defeito. Quem fecha o #177 é o guard do `amgettuple`
+    // (`am/scan.rs`), não esta linha. Ela fica por ser documentação de contrato explícita, alinhada ao upstream.
     amroutine.amcanreturn = None;
 
     amroutine.amvalidate = Some(amvalidate);

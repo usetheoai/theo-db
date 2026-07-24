@@ -14,4 +14,17 @@ check-crash:
 	bash crash_fold.sh     # #47  — VACUUM meta-pivot crash-safe across all fold phases (never silently wrong)
 	bash crash_unlogged.sh # #46  — UNLOGGED index survives standby promotion (INIT fork WAL-logged)
 
-.PHONY: check-isolation check-crash
+# M146 (#168/#177) — prova de injeção de corrupção: nenhuma corrupção do índice pode derrubar o backend; toda
+# corrupção detectada tem de sair como erro SQL tipado. O review pass-2 (F2-test-4) apontou que o script não
+# tinha CHAMADOR nenhum — a prova existia e ninguém a executava. `CHECKSUMS=off` é obrigatório aqui: com o
+# default do PG 18 (checksums ligados) a página é rejeitada pela verificação do PostgreSQL ANTES do nosso
+# decodificador, e o script sai 2 (INCONCLUSIVE) justamente para não fingir cobertura.
+# Varredura ampla o bastante para alcançar o decodificador nos dois AMs (medido: ours=8 no HNSW).
+CORRUPT_OFFSETS := $(shell for p in 3 4 5 6 7 8 9 10; do for d in 2000 3000 4000 5000 5500 6200 7000 7600; do echo $$(($$p*8192+$$d)); done; done)
+
+check-corrupt:
+	CHECKSUMS=off OFFSETS="$(CORRUPT_OFFSETS)" bash corrupt_index.sh
+	AM=theodb_ivfflat AM_OPTS="WITH (lists=8, pq_subspaces=4, aq_threshold=2000, separate_storage=1)" \
+	  CHECKSUMS=off OFFSETS="$(CORRUPT_OFFSETS)" bash corrupt_index.sh
+
+.PHONY: check-isolation check-crash check-corrupt

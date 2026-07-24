@@ -28,14 +28,16 @@ use std::collections::BinaryHeap;
 /// information. The five `scan_ivf_aq*` bodies never validate the query width (unlike HNSW at `:289` and
 /// SymQG at `:358`), so `build_lut16` is where that check actually lands.
 ///
-/// Classifying by the message is not elegant, but the alternative — a typed error enum in `vec::ah` — would
-/// ripple through every caller for one call site (YAGNI, `rules/parsimony-ladder.md` rung 5). The literal is
-/// asserted by `vec/ah.rs` and both branches are exercised in `ah_tests.rs`.
-fn lut_error(e: &str) -> ! {
-    if e.contains("query dim") {
-        crate::pg::err_input(&format!("theodb am scan (aq lut): {e}"))
-    } else {
+/// The discriminator is the quantizer's STATE (`codebook_dim == 0`), not the text of the message. The first
+/// version matched the substring `"query dim"` and its doc claimed `ah_tests.rs` pinned that literal —
+/// **false**, caught by the review's second pass: `ah_tests.rs:94,104` assert only `is_err()`. Rewording
+/// `vec/ah.rs:70` to "query dimension" would have re-inverted the taxonomy with the whole suite green. The
+/// caller already holds the quantizer, so the structural check costs nothing and cannot rot.
+fn lut_error(codebook_dim: usize, e: &str) -> ! {
+    if codebook_dim == 0 {
         crate::pg::err_corrupt(&format!("theodb am scan (aq lut): {e}"))
+    } else {
+        crate::pg::err_input(&format!("theodb am scan (aq lut): {e}"))
     }
 }
 
@@ -664,7 +666,7 @@ unsafe fn scan_ivf_aq(
     };
     let lut = match crate::vec::ah::build_lut16(query, &quant) {
         Ok(l) => l,
-        Err(e) => lut_error(&e),
+        Err(e) => lut_error(quant.dim(), &e),
     };
     let metric = match Metric::from_tag(meta.metric_tag) {
         Some(m) => m,
@@ -777,7 +779,7 @@ unsafe fn scan_ivf_aq_split(
     };
     let lut = match crate::vec::ah::build_lut16(query, &quant) {
         Ok(l) => l,
-        Err(e) => lut_error(&e),
+        Err(e) => lut_error(quant.dim(), &e),
     };
     let metric = match Metric::from_tag(meta.metric_tag) {
         Some(m) => m,
@@ -913,7 +915,7 @@ unsafe fn scan_ivf_aq_split_v7(
     };
     let lut = match crate::vec::ah::build_lut16(query, &quant) {
         Ok(l) => l,
-        Err(e) => lut_error(&e),
+        Err(e) => lut_error(quant.dim(), &e),
     };
     let metric = match Metric::from_tag(meta.metric_tag) {
         Some(m) => m,
@@ -1097,7 +1099,7 @@ unsafe fn scan_ivf_aq_split_sq8(
     };
     let lut = match crate::vec::ah::build_lut16(query, &quant) {
         Ok(l) => l,
-        Err(e) => lut_error(&e),
+        Err(e) => lut_error(quant.dim(), &e),
     };
     let metric = match Metric::from_tag(meta.metric_tag) {
         Some(m) => m,
@@ -1206,7 +1208,7 @@ unsafe fn scan_ivf_aq_split_rabitq(
     };
     let lut = match crate::vec::ah::build_lut16(query, &quant) {
         Ok(l) => l,
-        Err(e) => lut_error(&e),
+        Err(e) => lut_error(quant.dim(), &e),
     };
     let metric = match Metric::from_tag(meta.metric_tag) {
         Some(m) => m,
@@ -1350,7 +1352,12 @@ pub extern "C-unwind" fn amgettuple(
         // `amrescan` pode ser chamado em caminhos que nunca puxam tupla. É onde o pgvector o coloca
         // (`src/hnswscan.c:214`: `if (scan->orderByData == NULL) elog(ERROR, "cannot scan hnsw index
         // without order")`), e seguir o upstream aqui é mais seguro que inovar.
-        if state.unordered {
+        // Lê a FONTE PRIMÁRIA (`numberOfOrderBys` do próprio descritor), não o flag derivado do argumento do
+        // rescan — review pass-2 (F2-db-4). O pgvector faz o mesmo (`hnswscan.c:214` consulta
+        // `scan->orderByData`, não um campo do opaque). O flag continua sendo mantido no rescan para leitura
+        // humana, mas a decisão não depende de o rescan ter rodado antes: se `amgettuple` for alcançado por
+        // um caminho que não passou pelo rescan, o guard ainda vale.
+        if scan_ref.numberOfOrderBys < 1 || scan_ref.orderByData.is_null() || state.unordered {
             crate::pg::err_input(
                 "theodb am: cannot scan a vector index without ORDER BY <distance operator> — \
                  a vector index has no total order of its own. Add the ORDER BY, or let the planner \

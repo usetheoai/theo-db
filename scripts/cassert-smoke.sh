@@ -65,6 +65,47 @@ else
   exit 1
 fi
 
+# 2.2 REGRESSÃO #172 / #168 — os gates de injeção de SQL. O `/review` pass-2 apontou que NENHUM dos dois
+# tinha teste automatizado: os fixes existiam só como medição numa mensagem de commit, então apagar
+# `resolve_relation` deixaria todos os gates verdes. Este bloco usa o mesmo oráculo do repro original — se o
+# SQL injetado executar, o PostgreSQL emite `division by zero`, e é isso que asseveramos NÃO acontecer.
+INJ_FAIL=0
+# O predicado tem de ser "a chamada foi REJEITADA", não apenas "não vi `division by zero`". Medido durante a
+# prova de não-vacuidade: com o gate removido, o payload do `_scan_stats` retornou `(0,0,6916,1)` — executou
+# com sucesso e o probe fraco disse "ok". Um payload de injeção NUNCA pode ter caminho feliz; ausência do
+# oráculo não é prova de rejeição.
+inject_probe() {  # $1 = rótulo, $2 = SQL
+    local out
+    out=$("$PGINST/bin/psql" -p "$PORT" -U postgres -d postgres -tAc "$2" 2>&1 || true)
+    if echo "$out" | grep -qi "division by zero"; then
+        echo "FALHA (injeção $1): o SQL injetado EXECUTOU (oráculo 1/0) — $(echo "$out" | head -1)"
+        INJ_FAIL=1
+    elif ! echo "$out" | grep -qi "^ERROR"; then
+        echo "FALHA (injeção $1): a chamada com payload NÃO foi rejeitada — retornou: $(echo "$out" | head -1)"
+        INJ_FAIL=1
+    else
+        echo "   ok: injeção $1 rejeitada — $(echo "$out" | head -1 | cut -c1-70)"
+    fi
+}
+$PSQL >/dev/null 2>&1 <<'SQL'
+CREATE TABLE g (src int, dst int);
+INSERT INTO g VALUES (1,2),(2,3),(3,1);
+CREATE TABLE vic (id int);
+SQL
+# #168 — eixo `edge_rel` do graph_build (relação interpolada crua antes do fix `($3)::regclass::text`).
+inject_probe "graph_build/edge_rel" \
+  "SELECT theodb.graph_build('(SELECT src, dst FROM g WHERE 1/0 = 1) x', 'src', 'dst');"
+# #172 — os três eixos de autotune, nas DUAS superfícies SQL.
+inject_probe "recommend_ef/qvec" \
+  "SELECT theodb_rs._recommend_ef('v', 'e', ARRAY['[1,2,3,4]''::vector LIMIT (SELECT 1/0) --'], 0.9, 5);"
+inject_probe "recommend_ef/col" \
+  "SELECT theodb_rs._recommend_ef('v', 'e\" <=> ''[1,2,3,4]''::vector LIMIT (SELECT 1/0) --', ARRAY['[1,2,3,4]'], 0.9, 5);"
+inject_probe "recommend_ef/tbl" \
+  "SELECT theodb_rs._recommend_ef('(SELECT 1/0 AS ctid, NULL::vector AS e) s', 'e', ARRAY['[1,2,3,4]'], 0.9, 5);"
+inject_probe "_scan_stats/tbl" \
+  "SELECT theodb_rs._scan_stats(0::oid, '(SELECT 1/0 AS ctid, NULL::vector AS e) s', 'e', '[1,2,3,4]', 10, 5);"
+[ "$INJ_FAIL" -eq 0 ] || { echo "FALHA: ao menos um gate de injeção regrediu"; exit 1; }
+
 # 3. Veredito: nenhum Assert falhou e o servidor responde.
 if grep -qE "TRAP: failed Assert|terminated by signal|PANIC" "$LOG" 2>/dev/null; then
   echo "FALHA: Assert/crash no log (classe #143):"; grep -E "TRAP|signal|PANIC" "$LOG" | head -5; exit 1

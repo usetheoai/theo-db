@@ -54,10 +54,15 @@ pub(crate) fn record_span(
     if reclen == 0 || chunk_len == 0 {
         return Err("theodb ivf-aq: zero-length record or chunk".into());
     }
-    let off = ordinal * reclen;
+    // `checked_mul` + o teto de `u32` (review pass-2, F-sec-11): a doc desta função promete falha tipada, e
+    // `ordinal * reclen` em debug entra em pânico / em release dá wrap — os dois contradizem a promessa.
+    // Idem `chunk as u32`, que estreita: um `chunk` grande passaria a caber sob `npages` depois do truncamento
+    // e a comparação seguinte aprovaria um ordinal fora de faixa. Não é alcançável hoje (`ordinal` é interno),
+    // mas a função declara que valida — então valida.
+    let off = ordinal.checked_mul(reclen).ok_or("theodb ivf-aq: record offset overflows usize")?;
     let chunk = off / chunk_len;
     let lo = off % chunk_len;
-    if chunk as u32 >= npages {
+    if chunk > u32::MAX as usize || chunk as u32 >= npages {
         return Err("theodb ivf-aq: record ordinal out of range".into());
     }
     // A record longer than a whole chunk would span 3+ items; the reader stitches at most 2, so reject it here

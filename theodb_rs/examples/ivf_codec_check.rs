@@ -136,6 +136,30 @@ fn check_record_span() {
     let e = record_span(0, CH + 1, CH, 8).expect_err("record longer than a chunk must fail");
     assert!(e.contains("longer than one chunk"), "unexpected error: {e}");
 
+    // BOUNDARY do guard "longer than one chunk" (review pass-2, F2-test-2): `reclen == chunk_len` é VÁLIDO —
+    // um registro que ocupa o chunk inteiro cabe num item só. Sem este caso, mutar `>` para `>=` passaria
+    // despercebido e rejeitaria um layout legítimo.
+    let s = record_span(0, CH, CH, 2).expect("um registro do tamanho exato do chunk é válido");
+    assert_eq!((s.chunk, s.lo), (0, 0));
+    let s = record_span(1, CH, CH, 2)
+        .expect("o segundo registro de mesmo tamanho começa no chunk seguinte");
+    assert_eq!((s.chunk, s.lo), (1, 0));
+
+    // BOUNDARY do guard de straddle: `lo + reclen == chunk_len` NÃO é straddle — o registro termina exatamente
+    // no fim do chunk. Mutar `>` para `>=` faria o último registro exato de um índice ÍNTEGRO falhar como
+    // "truncated straddled record": precisamente a classe de erro-tipado-errado que o M146 existe para
+    // eliminar. `npages=1` garante que, se o guard disparasse, não haveria próxima página para salvá-lo.
+    let s = record_span(249, 32, CH, 1)
+        .expect("registro que termina no limite do chunk não é straddle");
+    assert_eq!((s.chunk, s.lo), (0, 7968));
+    assert_eq!(s.lo + 32, CH, "o caso testado é exatamente o de término no limite");
+
+    // NEGATIVE — overflow do produto `ordinal * reclen` (review pass-2, F-sec-11): erro tipado, nunca wrap.
+    assert!(
+        record_span(usize::MAX, 2, CH, 4).is_err(),
+        "ordinal * reclen que estoura usize deve falhar de forma tipada"
+    );
+
     // NEGATIVE — degenerate inputs.
     assert!(record_span(0, 0, CH, 4).is_err(), "zero-length record must fail");
     assert!(record_span(0, 32, 0, 4).is_err(), "zero-length chunk must fail");
