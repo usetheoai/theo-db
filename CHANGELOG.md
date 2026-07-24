@@ -14,6 +14,20 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.135.0] - 2026-07-24
+
+### Added
+
 - Roadmap amended: added M146 Remediação do review-cycle theodb_rs (hardening + tests + cleanup) (`/roadmap-feature theodb-review-remediation`) (#168, #169)
 - Roadmap amended: added M147 Refactor scan.rs version-dispatch IVF/AQ (`/roadmap-feature theodb-review-remediation`) (#170)
 - Teste de regressão dos **gates de injeção de SQL** no `cassert-sql-safety`: 5 sondas (um eixo do `graph_build` + os três do `recommend_ef` + a superfície `_scan_stats`) usando o mesmo oráculo `1/0` do repro original. O `/review` apontou que nenhum dos dois fixes tinha teste — existiam só como medição numa mensagem de commit, então apagar o gate deixaria tudo verde. Não-vacuidade provada removendo o gate e reconstruindo: exit 1, com os dois eixos `tbl` acusados (M146, #172, #168)
@@ -23,15 +37,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - Harness de injeção de corrupção `theodb_rs/isolation/corrupt_index.sh`: corrompe bytes de um arquivo de índice real e verifica que nenhuma corrupção derruba o backend — a única prova possível dessa propriedade, já que teste unitário não toca página real. Parametrizado por AM (`AM=theodb_hnsw` default, `AM=theodb_ivfflat`), então a mesma propriedade é medida nos dois decodificadores (M146)
 - `theodb_rs/examples/ivf_codec_check.rs`: cobre a aritmética pura do formato IVF (codificação de labels de largura fixa e cálculo de span com straddle de chunk), que não tinha teste algum. Executa de verdade — `cargo test`/`cargo pgrx test` não linkam neste crate, então o binário de example é o teste, seguindo a convenção que `examples/resumable_check.rs` já estabelecia (M146)
 
+
 ### Changed
 
 - Erros de leitura de índice corrompido agora retornam **SQLSTATE XX002 (`index_corrupted`)** em vez de XX000 (`internal_error`). O operador passa a distinguir "o índice está corrompido, reindexe" de "encontrei um bug interno, reporte" — o mesmo código que o `contrib/amcheck` do PostgreSQL usa para corrupção (M146)
 - **`/code-quality` deste repositório nunca auditou nada.** `code-quality-languages.txt` estava vazio, e o loader trata arquivo vazio como "nenhuma linguagem habilitada" — então todo `PASS` registrado até aqui saiu com "Languages audited: none" e zero findings, inclusive os que serviram de gate para `/implement` e `/review`. Rust habilitado apontando para `theodb_rs/Cargo.toml` (o workspace não fica na raiz, e o detector procurava lá). Ao rodar de verdade, o detector D2 acusou 117 falso-positivos — `use std::collections::HashMap` era reportado como "crate fabricado não encontrado no crates.io" — o que dava `FAIL_HARD` e bloquearia o `/review`; corrigido para reconhecer a biblioteca padrão, módulos locais do arquivo, crates do próprio workspace e caminhos já em escopo, e para rebaixar a `SOFT_FLOOR` ("não verificável") quando o arquivo tem glob import, em vez de afirmar fabricação. Dois outros falso-verdes do mesmo gate foram medidos e corrigidos junto: o detector de dead code (`cargo +nightly udeps`) rodava na raiz do repo, onde não existe `Cargo.toml`, e reportava a ferramenta como indisponível; e o extractor de símbolos degradava para lista vazia **em silêncio** quando o tree-sitter não estava presente — "nenhum símbolo extraído" era lido como "nenhum problema", então um ambiente sem o parser produzia `PASS` sem auditar uma linha (agora vira `auditor_unavailable_tree-sitter-rust`) (M146, #175)
 - Os gates de lint do repositório voltaram a passar: `cargo clippy` (baseline `-D warnings`) e `cargo fmt --check` estavam **vermelhos no `develop`** desde o M145 — o primeiro por um doc comment órfão deixado pelo refactor, o segundo por drift acumulado em 8 arquivos. Ambos agora saem com exit 0. Mudança mecânica, sem alteração de comportamento (M146)
 
-### Deprecated
-
-### Removed
 
 ### Fixed
 
@@ -41,6 +53,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - Uma consulta com dimensão errada contra um índice IVF-AQ **íntegro** era reportada como `XX002 index_corrupted` — o SQLSTATE que o operador usa para decidir "REINDEX agora", e o REINDEX não ajudaria. `build_lut16` falha por duas causas distintas (codebook vazio = armazenamento; dimensão divergente = entrada do chamador) e a primeira versão da taxonomia colapsou as duas. Agora a dimensão errada sai como 22023, como já saía no HNSW (M146)
 - Uma página truncada podia fazer `read_record_at` panicar (`XX000 internal_error`) em vez de emitir o erro tipado de corrupção — exatamente o que a passagem de taxonomia deste milestone existia para eliminar (M146)
 - Falha de `fsync`/`rename` no export Parquet agora retorna **SQLSTATE 58030 (`io_error`)** em vez de 22023 (`invalid_parameter_value`). Um `fsync` que falha é o sinal mais forte de perda de dados que o kernel emite; rotulá-lo como erro de parâmetro convidava ao retry errado (M146)
+
 
 ### Security
 
