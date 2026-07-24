@@ -14,6 +14,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Harness A/B do M147 (`theodb_rs/isolation/ab_scan_versions.sh`) + baseline capturado (`docs/benchmarks/m147-ab-baseline.txt`): constrói um índice IVF em cada versão v3..v8 com dataset determinístico e diffa o top-k (id:dist) do binário contra o baseline pré-refactor — a prova de comportamento byte-idêntico do refactor. Determinismo provado (compare contra si mesmo → OK) (#170)
+
 - Plano de implementação do M147 (`m147-scan-version-dispatch`, SHIPPABLE_WITH_CAVEATS 89): 4 tasks TDD para o refactor de `am/scan.rs` em 3 eixos (enum de versão lido uma vez, gathers→Result+?, kernel Stage-1 compartilhado recebendo codes_off) + A/B byte-idêntico nos 6 caminhos v3..v8; 3 MUST-FIX do edge-case-plan absorvidos (v3 no A/B, ivf_version estrito+gate de len, baseline capturado) (#170)
 
 - Blueprint de discovery do M147 (`m147-scan-version-dispatch`, SHIPPABLE_WITH_CAVEATS 89): padrão comprovado de version-dispatch de formato on-disk extraído de pgvectorscale (dispatch OCP por enum, tipo lido uma vez, decode isolado por-impl), lance (isolamento de corpos em módulo `previous/` + recusa fail-closed = a ADR-2 na prática) e pgvector (o contraste single-version) — decide a forma do refactor de `scan.rs` sem violar a ADR-2 do M145 (#170)
