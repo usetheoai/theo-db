@@ -12,6 +12,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Previsão de budget do programa de benchmark oficial (`docs/benchmarks/clickbench-official-budget.md`): custo atual da infraestrutura medido via API de faturamento, custo por etapa com preços reais consultados na AWS, e os guardrails adotados para que nenhuma máquina temporária fique ligada por esquecimento (#187)
+
 ### Fixed
 
 - Corrigido um viés na amostragem do benchmark ClickBench que favorecia os nossos próprios números: a amostra usava as primeiras N linhas do dataset, que é ordenado por tempo — uma fatia temporal estreita, com menos valores distintos do que a realidade, justamente o cenário em que a aceleração colunar mais se destaca. A amostragem passa a percorrer o arquivo inteiro pegando 1 linha a cada K, cobrindo todo o período. A estratégia usada fica registrada no artefato de resultado, e a antiga continua disponível apenas para testes rápidos (#187)
