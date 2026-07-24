@@ -16,6 +16,13 @@ on:
       - 'docs/**'
   pull_request:
     branches: [develop, main]
+    # Mesma razão do `push` acima: um PR cujo diff é só documentação não pode consumir ~14 jobs de
+    # ~45min do runner único. Sem isto, o gate de `pull_request` reabria toda a esteira para um commit
+    # de CHANGELOG (observado no PR #189).
+    paths-ignore:
+      - '.claude/**'
+      - '**/*.md'
+      - 'docs/**'
 
 # Fila do runner self-hosted (2026-07-24): sem `concurrency`, cada push empilhava um run novo por
 # workflow e NENHUM era cancelado — o runner processa um de cada vez, então a fila entupiu (32 runs

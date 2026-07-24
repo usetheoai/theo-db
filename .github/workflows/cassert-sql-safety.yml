@@ -25,6 +25,13 @@ on:
     paths: ['theodb_rs/src/**', 'theodb_rs/Cargo.*', 'scripts/cassert-smoke.sh', '.github/workflows/cassert-sql-safety.yml']
   pull_request:
     branches: [develop, main]
+    # Mesma razão do `push` acima: um PR cujo diff é só documentação não pode consumir ~14 jobs de
+    # ~45min do runner único. Sem isto, o gate de `pull_request` reabria toda a esteira para um commit
+    # de CHANGELOG (observado no PR #189).
+    paths-ignore:
+      - '.claude/**'
+      - '**/*.md'
+      - 'docs/**'
     paths: ['theodb_rs/src/**', 'theodb_rs/Cargo.*', 'scripts/cassert-smoke.sh', '.github/workflows/cassert-sql-safety.yml']
 
 permissions:

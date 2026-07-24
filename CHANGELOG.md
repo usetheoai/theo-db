@@ -12,6 +12,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- O filtro que impede mudanças só-de-documentação de rodar a esteira completa passa a valer também para pull requests, não apenas para pushes diretos. Sem isso, um PR cujo diff era apenas o CHANGELOG reabria os ~14 jobs do runner único (observado no PR #189) (#187)
+
 ### Added
 
 ### Changed
