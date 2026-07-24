@@ -2600,7 +2600,7 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 ---
 
-## M148 — [ ] Spike: flamegraph do scan colunar — mede o gargalo real (gate measurement-first)
+## M148 — [x] Spike: flamegraph do scan colunar — mede o gargalo real (gate measurement-first)
 
 > Added 2026-07-24 (`/roadmap-feature columnar-scan-optimization`). Grill: `.claude/knowledge-base/grills/columnar-scan-optimization-feature-grill.md`. Fonte: gate ClickBench 1M pós-#190 (só 6/43 queries usam pushdown; 36 a ~47s).
 
