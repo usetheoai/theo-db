@@ -14,6 +14,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Discovery plan do M147 (`m147-scan-version-dispatch`): investigação focada de como pgvectorscale (par pgrx), lance (formato versionado Rust) e pgvector (C) fazem dispatch de versão de formato on-disk OCP e isolam corpos de decode por-versão — insumo para o refactor de `scan.rs` sem violar a ADR-2 do M145 (#170)
+
 ### Changed
 
 ### Deprecated
