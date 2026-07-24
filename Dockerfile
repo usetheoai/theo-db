@@ -59,6 +59,11 @@ RUN apt-get update && \
 # into the PG extension dir. SQL-only install is a plain copy. M70: `theodb.control` requires `theodb_rs` (o flip —
 # theodb_rs provê o tipo `vector` + os schemas theodb/ai); NÃO há mais dep de vector/vectorscale.
 COPY theodb.control /tmp/theodb/theodb.control
+# M148 (#181) — o shim de compatibilidade `vector`: toda app pgvector roda `CREATE EXTENSION IF NOT
+# EXISTS vector` no bootstrap (drizzle/alembic/prisma/scripts). Sem um objeto de extensão com esse nome
+# a app NÃO sobe — nem chega a emitir uma query. O shim não implementa nada (o tipo/operadores/opclasses
+# são own-code do theodb_rs); ele completa o drop-in declarado na ADR-0029 § D2 no nível tooling.
+COPY vector.control /tmp/theodb/vector.control
 COPY sql/ /tmp/theodb/sql/
 RUN set -eux; \
     cd /tmp/theodb; \
@@ -67,6 +72,8 @@ RUN set -eux; \
         sql/80-theodb-migrate.sql sql/85-theodb-htap.sql > sql/theodb--1.0.sql; \
     install -m 0644 theodb.control sql/theodb--1.0.sql sql/theodb--1.0--1.1.sql sql/theodb--1.1--1.2.sql \
         sql/theodb--1.2--1.3.sql sql/theodb--1.3--1.4.sql sql/theodb--1.4--1.5.sql sql/theodb--1.5--1.6.sql \
+        "/usr/share/postgresql/$PG_MAJOR/extension/"; \
+    install -m 0644 vector.control sql/vector--0.5.1.sql \
         "/usr/share/postgresql/$PG_MAJOR/extension/"; \
     rm -rf /tmp/theodb
 
@@ -80,6 +87,17 @@ CREATE EXTENSION IF NOT EXISTS theodb CASCADE;
 CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE;
 -- M143: o lakehouse é own-code no theodb_rs (theodb.htap_refresh/olap + read_parquet/write_parquet own-code, sem
 -- DuckDB). Nada de pg_duckdb. ADR-0057.
+
+-- M148 (#181, ADR-0058) — o shim `vector` declara `requires = theodb_rs`, e o tooling real das apps
+-- (drizzle, alembic, prisma, pg_restore) emite `CREATE EXTENSION IF NOT EXISTS vector` **SEM** CASCADE.
+-- Num banco que não tenha o theodb_rs isso falha com `required extension "theodb_rs" is not installed`,
+-- e a app não sobe — o bloqueio que o #181 existe para remover. Instalar em `template1` faz TODO banco
+-- criado depois (`CREATE DATABASE app`, multi-tenant, os DBs de teste do CI) herdar a dependência já
+-- satisfeita, então o comando sem CASCADE funciona. `\c template1` é a única forma de alcançar bancos
+-- que ainda não existem no momento do initdb.
+\c template1
+CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE;
+CREATE EXTENSION IF NOT EXISTS vector;
 EOF
 
 # M62/M143 — o diretório de snapshots HTAP: theodb.htap_refresh escreve os Parquet own-code (public.write_parquet)
