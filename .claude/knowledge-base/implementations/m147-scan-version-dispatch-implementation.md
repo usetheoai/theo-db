@@ -57,3 +57,16 @@ erro de índices inválidos, só top-k de índices válidos, então a byte-ident
 ## Resumo: as 3 fases + validação
 - Bullet 1 (enum): byte-idêntico. Bullet 2 (Result+?): byte-idêntico + taxonomia XX002/22023 preservada.
   Bullet 3 (kernel): byte-idêntico + ADR-2 provada. `scan.rs` reduziu ~375 linhas líquidas nos 3 commits.
+
+### Fase 4 — Integration Validation — ✅ todos os gates verdes
+
+- **A/B byte-idêntico nos 6 caminhos v3..v8** (as 3 fases, cada uma medida) — `AB_COMPARE_OK`.
+- **Não-vacuidade:** mutar `codes_off` → `AB_COMPARE_FAIL`; restaurado → OK.
+- **Taxonomia (bullet 2):** dim-errada → 22023 (pg.rs:44); corrupção → XX002 (pg.rs:15), backend ALIVE 400.
+- **QPS (DoD ≤5%):** baseline pré-refactor ~381 ms vs novo ~377 ms (200q×5runs) — Δ ≈ **−1%** (ligeiramente
+  mais rápido; o dispatch lê o bloco 0 1× em vez de 5×). Zero regressão. Relatório: `docs/benchmarks/m147-ab-byte-identical.md`.
+- **cassert-smoke:** verde (4 AMs + guard #177 + 5 probes de injeção do M146).
+- **Superfície SQL:** zero `#[pg_extern]` tocado. **ADR-2:** corpos de decode on-disk de `page/ivf.rs` intocados.
+- **scan.rs: 1567 → 1400 linhas** (−167). Build exit 0; clippy/fmt exit 0.
+
+**Goal atingido:** A/B in-PG prova top-k byte-idêntico nos 6 caminhos IVF, com QPS neutro e taxonomia preservada.
