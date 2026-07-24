@@ -7,6 +7,13 @@ name: CI
 on:
   push:
     branches: [develop, main]
+    # #187 — o runner é ÚNICO e serial: cada push dispara ~14 jobs de ~45min (≈10h de fila).
+    # Mudanças só de documentação/artefatos de agente não exercitam código e não podem consumir
+    # essa capacidade. Mesmo padrão do theo-memory/theo-rag.
+    paths-ignore:
+      - '.claude/**'
+      - '**/*.md'
+      - 'docs/**'
   pull_request:
     branches: [develop, main]
 

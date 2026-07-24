@@ -12,6 +12,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Mudanças apenas de documentação deixam de disparar a esteira completa de CI. O runner é único e serial — cada push acionava ~14 jobs de ~45min (cerca de 10h de fila) mesmo quando nada de código mudava, o que travava as publicações e validações reais atrás de trabalho inútil (#187)
+
 ### Changed
 
 - A publicação da imagem passa a usar o workflow reutilizável do ecossistema (o mesmo do theo-memory e do theo-rag) em vez de uma implementação própria: além de publicar no GHCR, a imagem agora passa por varredura de vulnerabilidades (Trivy, bloqueando CRITICAL/HIGH antes do push) e, nas releases, sai com SBOM, proveniência SLSA e assinatura — garantias que a versão caseira não tinha (#187)
