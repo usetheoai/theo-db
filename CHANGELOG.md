@@ -12,6 +12,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Benchmark do M147 (`docs/benchmarks/m147-ab-byte-identical.md`) + harness de QPS (`theodb_rs/isolation/qps_bench.sh`): prova que o refactor de dispatch de `scan.rs` é byte-idêntico nos 6 caminhos IVF (v3..v8) e neutro em QPS (~−1%, o dispatch lê o bloco 0 uma vez em vez de 5×) (#170)
+
 ### Changed
 
 - M147 Fase 3: o kernel Stage-1 (`ah_score_block` + loop de blocos) copiado byte-a-byte em 5 corpos `scan_ivf_aq*` virou um `stage1_score_blocks` compartilhado que recebe `codes_off` do chamador — o decode on-disk por-versão permanece separado (ADR-2 do M145), só o scoring in-memory é compartilhado. Byte-idêntico nos 6 caminhos; não-vacuidade provada (mutar codes_off → A/B falha) (#170)
