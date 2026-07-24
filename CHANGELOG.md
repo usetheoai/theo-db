@@ -12,6 +12,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Corrigido o defeito que impedia carregar dados reais no armazenamento colunar: inserções sucessivas falhavam quando os dados continham textos grandes (acima de ~2 KB). Os valores passam a ser materializados no momento da inserção — onde o banco garante o contexto necessário para lê-los — em vez de mais tarde, durante a gravação, quando esse contexto já não existe. Isso também elimina o risco de o dado referenciado ser removido pela limpeza automática antes da gravação (#190)
+
 ### Added
 
 - Plano de correção do defeito que impede carregar dados reais no armazenamento colunar (`columnar-toast-materialize`): a solução escolhida materializa os valores grandes no momento da inserção, em vez de contornar o problema no momento da gravação — remove a causa em vez de mascará-la, e protege contra uma segunda falha possível (dado removido por limpeza automática antes da gravação) (#190)

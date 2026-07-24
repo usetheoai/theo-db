@@ -553,6 +553,43 @@ unsafe fn extract_value_bytes(col: &ColDesc, datum: pg_sys::Datum) -> Result<Vec
     }
 }
 
+/// Deform buffered rows (heap-tuple bytes) into per-column byte streams, for the columns in `wanted`.
+///
+/// #190 (ADR-2): the three call-sites that did this inline — the pending-aware scan, the min/max fast path and
+/// `flush_pending` — differed ONLY in which columns they wanted (a subset, exactly one, all of them). Keeping three
+/// copies of the same rule meant a change to the conversion had to be applied three times; the TOAST materialisation
+/// of #190 is exactly such a change, and two stale copies would have silently kept the old semantics.
+///
+/// Returns `out[i]` for `wanted[i]`, one entry per row (`None` = SQL NULL).
+unsafe fn deform_rows_into_columns(
+    rows: &[Vec<u8>],
+    tupdesc: pg_sys::TupleDesc,
+    natts: usize,
+    cols: &[ColDesc],
+    wanted: &[usize],
+) -> Result<Vec<Vec<Option<Vec<u8>>>>, String> {
+    unsafe {
+        let mut out: Vec<Vec<Option<Vec<u8>>>> = vec![Vec::with_capacity(rows.len()); wanted.len()];
+        let mut values = vec![pg_sys::Datum::from(0usize); natts];
+        let mut isnull = vec![false; natts];
+        for rbytes in rows {
+            let mut htup: pg_sys::HeapTupleData = std::mem::zeroed();
+            htup.t_len = rbytes.len() as u32;
+            htup.t_data = rbytes.as_ptr() as pg_sys::HeapTupleHeader;
+            pg_sys::heap_deform_tuple(&mut htup, tupdesc, values.as_mut_ptr(), isnull.as_mut_ptr());
+            for (wi, &col) in wanted.iter().enumerate() {
+                // `isnull` is checked before touching the datum — detoasting a NULL is a segfault.
+                if isnull[col] {
+                    out[wi].push(None);
+                } else {
+                    out[wi].push(Some(extract_value_bytes(&cols[col], values[col])?));
+                }
+            }
+        }
+        Ok(out)
+    }
+}
+
 /// The logical bytes (no varlena header) of a detoasted varlena, handling both the 1-byte (short) and 4-byte header
 /// formats — `pg_detoast_datum_copy` leaves short values short. Length comes from the self-describing header only.
 unsafe fn varlena_payload(p: *const u8) -> Result<Vec<u8>, String> {
@@ -808,20 +845,9 @@ pub(crate) unsafe fn decode_columns(
     let pending: Option<Vec<Vec<u8>>> =
         WRITE_STATES.with(|w| w.borrow().get(&oid).map(|p| p.rows.clone()));
     if let Some(rows) = pending {
-        let mut values = vec![pg_sys::Datum::from(0usize); natts];
-        let mut isnull = vec![false; natts];
-        for rbytes in &rows {
-            let mut htup: pg_sys::HeapTupleData = std::mem::zeroed();
-            htup.t_len = rbytes.len() as u32;
-            htup.t_data = rbytes.as_ptr() as pg_sys::HeapTupleHeader;
-            pg_sys::heap_deform_tuple(&mut htup, tupdesc, values.as_mut_ptr(), isnull.as_mut_ptr());
-            for (wi, &col) in wanted.iter().enumerate() {
-                if isnull[col] {
-                    columns[wi].push(None);
-                } else {
-                    columns[wi].push(Some(extract_value_bytes(&cols[col], values[col])?));
-                }
-            }
+        let pend = deform_rows_into_columns(&rows, tupdesc, natts, &cols, &wanted)?;
+        for (wi, col_rows) in pend.into_iter().enumerate() {
+            columns[wi].extend(col_rows);
         }
     }
 
@@ -937,25 +963,11 @@ pub(crate) unsafe fn directory_minmax(
     if let Some(rows) = pending {
         if !rows.is_empty() {
             let cols = (0..natts).map(|i| coldesc(tupdesc, i)).collect::<Result<Vec<_>, _>>()?;
-            let mut values = vec![pg_sys::Datum::from(0usize); natts];
-            let mut isnull = vec![false; natts];
-            let mut colvals: Vec<Option<Vec<u8>>> = Vec::with_capacity(rows.len());
-            for rbytes in &rows {
-                let mut htup: pg_sys::HeapTupleData = std::mem::zeroed();
-                htup.t_len = rbytes.len() as u32;
-                htup.t_data = rbytes.as_ptr() as pg_sys::HeapTupleHeader;
-                pg_sys::heap_deform_tuple(
-                    &mut htup,
-                    tupdesc,
-                    values.as_mut_ptr(),
-                    isnull.as_mut_ptr(),
-                );
-                if isnull[col_idx] {
-                    colvals.push(None);
-                } else {
-                    colvals.push(Some(extract_value_bytes(&cols[col_idx], values[col_idx])?));
-                }
-            }
+            let colvals: Vec<Option<Vec<u8>>> =
+                deform_rows_into_columns(&rows, tupdesc, natts, &cols, &[col_idx])?
+                    .into_iter()
+                    .next()
+                    .unwrap_or_default();
             let (has, pmin, pmax) = codec::compute_minmax(&colvals, mm);
             if has {
                 let cand = if want_max { pmax } else { pmin };
@@ -1136,12 +1148,80 @@ unsafe fn accumulate_row(rel: pg_sys::Relation, slot: *mut pg_sys::TupleTableSlo
     unsafe {
         pg_sys::slot_getallattrs(slot);
         let tupdesc = (*rel).rd_att;
+        let natts = (*tupdesc).natts as usize;
+
+        // #190 (ADR-1) — MATERIALISE every varlena HERE, where the executor's snapshot is guaranteed.
+        //
+        // `heap_form_tuple` keeps an out-of-line TOAST value as an 18-byte pointer. That pointer used to be
+        // resolved much later, inside `flush_pending`, which also runs from the pre-commit XACT callback —
+        // where there is NO active snapshot. Result: `cannot fetch toast data without an active snapshot`,
+        // and no real workload could be loaded at all. Detoasting at ingestion removes the dependency rather
+        // than borrowing a snapshot at flush time: it also closes the window where a long transaction's
+        // buffered pointer outlives the toast chunk it references (VACUUM), and immunises every future
+        // flush call-site by construction.
+        //
+        // Materialise EVERY non-null varlena, with no `VARATT_IS_EXTERNAL` pre-test: arrays reach the
+        // executor in *expanded* form (`VARATT_IS_EXTERNAL_EXPANDED`) — a pointer into per-tuple memory that
+        // is reset each row. Skipping those would leave a dangling pointer in the buffer (use-after-free),
+        // strictly worse than the bug being fixed. `pg_detoast_datum_copy` flattens external, compressed and
+        // expanded alike, and always returns a fresh palloc we own.
+        //
+        // The `attlen != -1` guard mirrors `extract_value_bytes` (fixed-length types are read by length, and
+        // a by-value datum treated as a pointer is a segfault); `tts_isnull` is checked first because
+        // detoasting a NULL is likewise a segfault.
+        let values = std::slice::from_raw_parts_mut((*slot).tts_values, natts);
+        let isnull = std::slice::from_raw_parts((*slot).tts_isnull, natts);
+        let mut owned: Vec<*mut pg_sys::varlena> = Vec::new();
+        for (i, value) in values.iter_mut().enumerate().take(natts) {
+            if isnull[i] {
+                continue;
+            }
+            // `attlen == -1` is the varlena marker — the SAME criterion `coldesc` uses to build
+            // `attlen_fixed`, so ingestion and flush agree on what is a varlena.
+            if (*super::tupdesc_attr(tupdesc, i)).attlen != -1 {
+                continue; // fixed-length: nothing to detoast
+            }
+            let flat = pg_sys::pg_detoast_datum_copy(value.cast_mut_ptr::<pg_sys::varlena>());
+            owned.push(flat);
+            *value = pg_sys::Datum::from(flat);
+        }
+
+        // ORDER IS LOAD-BEARING (#190): form the tuple and copy its bytes BEFORE freeing the flattened
+        // copies. `heap_form_tuple` copies the values into the new tuple, and `bytes` copies again into the
+        // buffer; freeing earlier would build the row from freed memory — silent corruption, no error.
         let htup = pg_sys::heap_form_tuple(tupdesc, (*slot).tts_values, (*slot).tts_isnull);
         let len = (*htup).t_len as usize;
         let bytes = std::slice::from_raw_parts((*htup).t_data as *const u8, len).to_vec();
         pg_sys::heap_freetuple(htup);
+        for flat in owned {
+            pg_sys::pfree(flat as *mut std::os::raw::c_void);
+        }
         let oid = (*rel).rd_id.to_u32();
-        // Accumulate the row + its bytes; report the pending byte total for the incremental-flush decision.
+
+        // M104 (#99): flush a stripe once the pending set exceeds `maintenance_work_mem`, so a big
+        // INSERT...SELECT holds O(maintenance_work_mem) — not O(rows-in-xact) — in RAM. `flush_pending` is
+        // the SAME atomic pages→catalog-row-LAST unit used at pre-commit. Every stripe carries this xact's
+        // xid, so a crash/abort mid-multi-stripe INSERT leaves ALL stripes invisible (H3, by construction).
+        //
+        // #190: the budget check happens BEFORE the row is pushed. It used to run after, which was harmless
+        // while an out-of-line value occupied 18 bytes in the buffer — but rows are materialised now, so a
+        // single wide value (varlena allows up to 1 GB) would be copied in whole before any check, and the
+        // flush would only fire on the NEXT row. That would trade a loud INSERT error for a backend OOM.
+        // A row that is bigger than the budget on its own still goes through (it cannot be split), but it
+        // never piles on top of the rows already buffered.
+        let mwm = (pg_sys::maintenance_work_mem as usize).saturating_mul(1024).max(1);
+        let needs_flush_first = WRITE_STATES.with(|w| {
+            let m = w.borrow();
+            m.get(&oid)
+                .is_some_and(|p| !p.rows.is_empty() && p.bytes.saturating_add(bytes.len()) > mwm)
+        });
+        if needs_flush_first {
+            if let Err(e) = flush_pending(rel) {
+                pg_sys::error!("{e}");
+            }
+        }
+
+        // Accumulate the row + its (materialised) bytes; report the pending total for the next decision.
         let pending_bytes = WRITE_STATES.with(|w| {
             let mut m = w.borrow_mut();
             let p = m.entry(oid).or_default();
@@ -1149,12 +1229,7 @@ unsafe fn accumulate_row(rel: pg_sys::Relation, slot: *mut pg_sys::TupleTableSlo
             p.rows.push(bytes);
             p.bytes
         });
-        // M104 (#99): flush a stripe once the pending set exceeds `maintenance_work_mem`, so a big INSERT...SELECT
-        // holds O(maintenance_work_mem) — not O(rows-in-xact) — in RAM. `flush_pending` is the SAME atomic
-        // pages→catalog-row-LAST unit used at pre-commit; calling it mid-executor is snapshot-safe because
-        // `with_active_snapshot` is a no-op under the INSERT's active snapshot (H1). Every stripe carries this
-        // xact's xid, so a crash/abort mid-multi-stripe INSERT leaves ALL stripes invisible (H3, by construction).
-        let mwm = (pg_sys::maintenance_work_mem as usize).saturating_mul(1024).max(1);
+        // A single row above the budget: flush it right away so the buffer returns to empty.
         if pending_bytes > mwm {
             if let Err(e) = flush_pending(rel) {
                 pg_sys::error!("{e}");
@@ -1242,22 +1317,8 @@ unsafe fn flush_pending(rel: pg_sys::Relation) -> Result<(), String> {
         // `Some(raw bytes)` or `None` for SQL NULL. `isnull` is checked before touching a datum (detoast of a null
         // is a segfault).
         let row_count = rows.len();
-        let mut columns: Vec<Vec<Option<Vec<u8>>>> = vec![Vec::with_capacity(row_count); natts];
-        let mut values = vec![pg_sys::Datum::from(0usize); natts];
-        let mut isnull = vec![false; natts];
-        for rbytes in &rows {
-            let mut htup: pg_sys::HeapTupleData = std::mem::zeroed();
-            htup.t_len = rbytes.len() as u32;
-            htup.t_data = rbytes.as_ptr() as pg_sys::HeapTupleHeader;
-            pg_sys::heap_deform_tuple(&mut htup, tupdesc, values.as_mut_ptr(), isnull.as_mut_ptr());
-            for i in 0..natts {
-                if isnull[i] {
-                    columns[i].push(None);
-                } else {
-                    columns[i].push(Some(extract_value_bytes(&cols[i], values[i])?));
-                }
-            }
-        }
+        let all: Vec<usize> = (0..natts).collect();
+        let columns = deform_rows_into_columns(&rows, tupdesc, natts, &cols, &all)?;
 
         // Encode + write each (chunk_group, column) chunk; build the directory in grid order [cg][col].
         let n_cg = row_count.div_ceil(codec::CHUNK_GROUP_ROWS);
