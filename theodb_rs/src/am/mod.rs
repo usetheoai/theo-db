@@ -150,6 +150,21 @@ fn make_amroutine(
     amroutine.amusemaintenanceworkmem = false;
     amroutine.amkeytype = pg_sys::InvalidOid;
 
+    // M146 (encontrado ao validar o review) — `amcanreturn` NUNCA era atribuído, e o campo não vinha zerado.
+    // O PostgreSQL lê `rd_indam->amcanreturn` em `index_can_return` (`access/index/indexam.c`) para decidir se
+    // uma coluna pode ser servida direto do índice; um ponteiro não-nulo aqui autoriza **Index Only Scan** sobre
+    // um AM que não sabe devolver o valor indexado. Medido em PG 18.4 com `enable_seqscan=off`:
+    //
+    //   SELECT count(*) FROM t;        -- B-tree: 500  |  theodb_hnsw: 0     ← resposta ERRADA, sem erro
+    //   SELECT id FROM t;              -- idem: nenhuma linha
+    //   EXPLAIN: Aggregate -> Index Only Scan using t_hnsw on t
+    //
+    // Isto é pior que um crash: a query não falha, ela MENTE. Um `count(*)` de auditoria devolve zero e nada
+    // no log indica problema. `None` é exatamente o que o pgvector declara (`src/hnsw.c:370`,
+    // `src/ivfflat.c:221` — `amcanreturn = NULL`): um índice vetorial guarda códigos quantizados/grafo, não o
+    // valor original, então NUNCA pode servir uma coluna sem ir ao heap.
+    amroutine.amcanreturn = None;
+
     amroutine.amvalidate = Some(amvalidate);
     amroutine.ambuild = Some(ambuild);
     amroutine.ambuildempty = Some(ambuildempty);

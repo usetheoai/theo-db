@@ -40,6 +40,15 @@ impl Drop for HeldInterrupts {
     }
 }
 
+/// Marcador de classe que um erro carrega desde a origem: mensagem prefixada com isto vira **58030
+/// (io_error)**; sem o prefixo, **22023 (invalid_parameter_value)**.
+///
+/// M146 (review F-arch-1). A primeira versão adivinhava a classe pelo prefixo humano da mensagem
+/// (`"fsync "`, `"rename "`), o que rotulava `criar`/`write batch`/`close` — justamente onde ENOSPC e EIO
+/// aparecem — como erro de parâmetro do usuário. Marcar na origem custa um literal e elimina a adivinhação:
+/// quem SABE que a operação é de I/O é quem a executou, não quem lê a string depois.
+const IO_PREFIX: &str = "io:";
+
 /// `work_mem` (KB → bytes), piso de 64 KB — o teto de memória do DataFusion (mesmo do df_executor).
 fn work_mem_bytes() -> usize {
     (unsafe { pg_sys::work_mem }.max(64) as usize) * 1024
@@ -165,14 +174,13 @@ fn batches_to_jsonb(batches: &[RecordBatch]) -> Result<Vec<pgrx::JsonB>, String>
 #[pg_extern]
 fn write_parquet(rel: String, path: String) -> i64 {
     write_parquet_impl(&rel, &path).unwrap_or_else(|e| {
-        // M146 (review F2): falha de durabilidade (fsync/rename) NÃO é erro de parâmetro. As mensagens de
-        // durabilidade carregam o prefixo da operação (`fsync `, `rename `, `fsync dir `) — nelas o SQLSTATE
-        // é 58030 (io_error); o resto (relação inexistente, tipo de coluna não suportado, path inválido)
-        // continua 22023.
-        if e.starts_with("fsync ") || e.starts_with("rename ") || e.starts_with("try_clone ") {
-            crate::pg::err_io(&format!("theodb.write_parquet: {e}"))
-        } else {
-            crate::pg::err_input(&format!("theodb.write_parquet: {e}"))
+        // M146 (review F2 + F-arch-1): falha de I/O NÃO é erro de parâmetro. A primeira versão adivinhava a
+        // classe pelo PREFIXO da mensagem, o que deixava `criar`/`write batch`/`close` — justamente as falhas
+        // de disco mais prováveis (ENOSPC, EIO) — rotuladas 22023 "você passou um parâmetro ruim". Agora o
+        // erro CARREGA sua classe desde a origem (`IO_PREFIX`), então a rota não depende de adivinhação.
+        match e.strip_prefix(IO_PREFIX) {
+            Some(io) => crate::pg::err_io(&format!("theodb.write_parquet: {io}")),
+            None => crate::pg::err_input(&format!("theodb.write_parquet: {e}")),
         }
     })
 }
@@ -288,7 +296,21 @@ fn atomic_write_parquet(
     use datafusion::parquet::arrow::ArrowWriter;
     let tmp = format!("{path}.{}.tmp", unsafe { pg_sys::MyProcPid });
     let write_res = (|| -> Result<(), String> {
-        let file = std::fs::File::create(&tmp).map_err(|e| format!("criar '{tmp}': {e}"))?;
+        // `criar` é o único passo AMBÍGUO: ENOENT/EACCES/ENOTDIR/ENAMETOOLONG dizem "o path que você passou
+        // não serve" (22023); ENOSPC/EIO/EROFS dizem "o disco falhou" (58030). Classificar os dois como a
+        // mesma coisa manda o operador para o lado errado, então a decisão é pelo errno, não pelo passo.
+        let file = std::fs::File::create(&tmp).map_err(|e| {
+            const PATH_ERRNOS: [i32; 5] = [
+                2,  /*ENOENT*/
+                13, /*EACCES*/
+                20, /*ENOTDIR*/
+                22, /*EINVAL*/
+                36, /*ENAMETOOLONG*/
+            ];
+            let is_path = e.raw_os_error().is_some_and(|n| PATH_ERRNOS.contains(&n));
+            let mark = if is_path { "" } else { IO_PREFIX };
+            format!("{mark}criar '{tmp}': {e}")
+        })?;
         // M146 T1.3 — durabilidade, seguindo o protocolo do `durable_rename` do PostgreSQL
         // (`src/backend/storage/file/fd.c:782` + os helpers `fsync_fname`/`fsync_parent_path`): o rename é
         // atômico apenas para a ENTRADA DE DIRETÓRIO; sem fsync o conteúdo pode não estar em disco, e sem
@@ -306,13 +328,15 @@ fn atomic_write_parquet(
         // NÃO produziria arquivo sem footer — ele chama `write_metadata()` internamente. O erro estava em
         // encadear os dois, não no `into_inner`. Mantemos o `try_clone` porque preserva o `close()` original
         // intocado e é o caminho já medido em produção.
-        let fsync_handle = file.try_clone().map_err(|e| format!("try_clone '{tmp}': {e}"))?;
+        let fsync_handle =
+            file.try_clone().map_err(|e| format!("{IO_PREFIX}try_clone '{tmp}': {e}"))?;
         let mut w =
             ArrowWriter::try_new(file, schema, None).map_err(|e| format!("ArrowWriter: {e}"))?;
-        w.write(batch).map_err(|e| format!("write batch: {e}"))?;
-        w.close().map_err(|e| format!("close: {e}"))?;
-        fsync_handle.sync_all().map_err(|e| format!("fsync '{tmp}': {e}"))?;
-        std::fs::rename(&tmp, path).map_err(|e| format!("rename '{tmp}'→'{path}': {e}"))?;
+        w.write(batch).map_err(|e| format!("{IO_PREFIX}write batch: {e}"))?;
+        w.close().map_err(|e| format!("{IO_PREFIX}close: {e}"))?;
+        fsync_handle.sync_all().map_err(|e| format!("{IO_PREFIX}fsync '{tmp}': {e}"))?;
+        std::fs::rename(&tmp, path)
+            .map_err(|e| format!("{IO_PREFIX}rename '{tmp}'→'{path}': {e}"))?;
         // fsync do diretório-pai. Parent vazio (path relativo simples) → ".", como o upstream faz em
         // `fd.c:3885-3886`. Falha de fsync EM DIRETÓRIO é tolerada para EBADF/EINVAL (há filesystems que não
         // suportam), espelhando `fd.c:3822-3825`; qualquer outro erro propaga como `Err` — nunca PANIC, pois
@@ -330,7 +354,7 @@ fn atomic_write_parquet(
         match std::fs::File::open(dir).and_then(|d| d.sync_all()) {
             Ok(()) => {}
             Err(e) if matches!(e.raw_os_error(), Some(EBADF) | Some(EINVAL)) => {}
-            Err(e) => return Err(format!("fsync dir '{}': {e}", dir.display())),
+            Err(e) => return Err(format!("{IO_PREFIX}fsync dir '{}': {e}", dir.display())),
         }
         Ok(())
     })();

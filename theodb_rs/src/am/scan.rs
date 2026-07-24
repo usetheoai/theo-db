@@ -14,6 +14,31 @@ use std::collections::BinaryHeap;
 // Lists probed per structured IVFFlat scan (bounds the pages read — the partial-read win, M31). M34: read from the
 // `theodb_ivfflat.probes` GUC (default 10) instead of a fixed constant; still clamped to the actual list count.
 
+/// Route a `build_lut16` failure to the SQLSTATE that matches its CAUSE. Diverges.
+///
+/// M146 (review F-db-1/F-arch-2 — a defect introduced by M146's own taxonomy pass). `build_lut16`
+/// (`vec/ah.rs:63,68`) fails for two unrelated reasons, and the first pass sent both to `err_corrupt`:
+///
+/// - **empty codebook** — the persisted AQ quantizer has `dim == 0`: genuinely a storage problem → `XX002`;
+/// - **query dim != codebook dim** — the CALLER passed a vector of the wrong width: an input problem → `22023`.
+///
+/// Collapsing them means a mistyped query against a perfectly healthy IVF-AQ index tells the operator
+/// `index_corrupted` — the SQLSTATE they use to decide "REINDEX now", and the REINDEX will not help.
+/// That is strictly worse than the XX000 it replaced: XX000 carried no information, this carries WRONG
+/// information. The five `scan_ivf_aq*` bodies never validate the query width (unlike HNSW at `:289` and
+/// SymQG at `:358`), so `build_lut16` is where that check actually lands.
+///
+/// Classifying by the message is not elegant, but the alternative — a typed error enum in `vec::ah` — would
+/// ripple through every caller for one call site (YAGNI, `rules/parsimony-ladder.md` rung 5). The literal is
+/// asserted by `vec/ah.rs` and both branches are exercised in `ah_tests.rs`.
+fn lut_error(e: &str) -> ! {
+    if e.contains("query dim") {
+        crate::pg::err_input(&format!("theodb am scan (aq lut): {e}"))
+    } else {
+        crate::pg::err_corrupt(&format!("theodb am scan (aq lut): {e}"))
+    }
+}
+
 /// One scored candidate: its distance-to-query key + heap TID. Ordered ascending by (distance, tid) — the exact
 /// order the old `results.sort_by` produced, so the emitted top-K is byte-identical (recall unchanged, M36 ADR-1).
 /// `f64::total_cmp` is a TOTAL order — under M49 cosine a zero-norm vector yields NaN, which `total_cmp` orders
@@ -155,8 +180,31 @@ pub extern "C-unwind" fn amrescan(
         }
         state.filtering = !state.query_labels.is_empty() || has_membership;
 
+        // M146 (encontrado ao validar o review) — um scan SEM `ORDER BY <->` costumava sair por aqui em
+        // silêncio, deixando o heap de candidatos vazio; `amgettuple` então devolvia `false` na primeira
+        // chamada e o executor concluía, corretamente do ponto de vista dele, que **a tabela não tem linhas**.
+        // Medido em PG 18.4 com `enable_seqscan=off` numa tabela de 500 linhas:
+        //
+        //   SELECT count(*) FROM t;   -- B-tree: 500  |  theodb_hnsw: 0   ← resposta ERRADA, sem erro algum
+        //   SELECT id     FROM t;     -- idem: zero linhas
+        //   EXPLAIN: Aggregate -> Index Only Scan using t_hnsw on t
+        //
+        // O planner não está errado: para `count(*)` nenhuma coluna é necessária, então o teste de index-only
+        // é vacuosamente satisfeito e qualquer índice serve. Errado estava o AM, que prometia
+        // `amoptionalkey = true` ("sei varrer sem ScanKey") e entregava zero linhas. Um índice vetorial NÃO
+        // sabe fazer varredura completa: sem vetor de consulta não existe ordem, e um grafo HNSW não é uma
+        // lista de todas as TIDs.
+        //
+        // A saída correta é falhar alto — exatamente o que o pgvector faz
+        // (`src/hnswscan.c:214`: `if (scan->orderByData == NULL) elog(ERROR, "cannot scan hnsw index without
+        // order")`). Devolver resposta errada em silêncio é o pior desfecho possível: um `count(*)` de
+        // auditoria retorna zero e nada no log indica problema.
         if norderbys < 1 || orderbys.is_null() {
-            return; // no ORDER BY <-> key → no index-ordered scan
+            crate::pg::err_input(
+                "theodb am: cannot scan a vector index without ORDER BY <distance operator> — \
+                 a vector index has no total order of its own. Add the ORDER BY, or let the planner \
+                 use a sequential/heap scan (this index cannot answer an unordered scan).",
+            );
         }
         // A NULL query vector (`ORDER BY col <-> NULL`) has SK_ISNULL set and a 0 sk_argument — dereferencing it
         // would segfault in pg_detoast_datum. Treat it as an empty scan (matches pgvector's ivfscan/hnswscan).
@@ -629,7 +677,7 @@ unsafe fn scan_ivf_aq(
     };
     let lut = match crate::vec::ah::build_lut16(query, &quant) {
         Ok(l) => l,
-        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan (aq lut): {e}")),
+        Err(e) => lut_error(&e),
     };
     let metric = match Metric::from_tag(meta.metric_tag) {
         Some(m) => m,
@@ -742,7 +790,7 @@ unsafe fn scan_ivf_aq_split(
     };
     let lut = match crate::vec::ah::build_lut16(query, &quant) {
         Ok(l) => l,
-        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan (aq lut): {e}")),
+        Err(e) => lut_error(&e),
     };
     let metric = match Metric::from_tag(meta.metric_tag) {
         Some(m) => m,
@@ -878,7 +926,7 @@ unsafe fn scan_ivf_aq_split_v7(
     };
     let lut = match crate::vec::ah::build_lut16(query, &quant) {
         Ok(l) => l,
-        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan (aq lut): {e}")),
+        Err(e) => lut_error(&e),
     };
     let metric = match Metric::from_tag(meta.metric_tag) {
         Some(m) => m,
@@ -1062,7 +1110,7 @@ unsafe fn scan_ivf_aq_split_sq8(
     };
     let lut = match crate::vec::ah::build_lut16(query, &quant) {
         Ok(l) => l,
-        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan (aq lut): {e}")),
+        Err(e) => lut_error(&e),
     };
     let metric = match Metric::from_tag(meta.metric_tag) {
         Some(m) => m,
@@ -1171,7 +1219,7 @@ unsafe fn scan_ivf_aq_split_rabitq(
     };
     let lut = match crate::vec::ah::build_lut16(query, &quant) {
         Ok(l) => l,
-        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan (aq lut): {e}")),
+        Err(e) => lut_error(&e),
     };
     let metric = match Metric::from_tag(meta.metric_tag) {
         Some(m) => m,

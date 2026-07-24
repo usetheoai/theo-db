@@ -380,9 +380,19 @@ def _write_markdown_report(findings: list[Finding], summary: dict, audit_path: P
 {_table(by_detector['d2_symbol_fab'])}
 
 ### D3 — Cross-package orphan exports
+
+**NÃO EXECUTADO.** Este detector é contratado pelo golden rule § 5, mas não tem ponto de invocação neste
+orquestrador (`detect_orphan_exports` levanta `NotImplementedError` em todos os detectores). A tabela vazia
+abaixo significa "não medido", **não** "nada encontrado" — M146, review F-arch-4.
+
 {_table(by_detector['d3_orphan_export'])}
 
 ### D4 — Mutation testing
+
+**NÃO EXECUTADO.** Idem D3: contratado pelo golden rule § 5, sem ponto de invocação. Para Rust e Go o próprio
+golden rule declara o detector DEFERIDO (ADR T4.3); para Python e TypeScript ele deveria rodar e não roda.
+Tabela vazia = não medido — M146, review F-arch-4.
+
 {_table(by_detector['d4_mutation'])}
 
 ## Related

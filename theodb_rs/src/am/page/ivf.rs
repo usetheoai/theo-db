@@ -658,6 +658,17 @@ unsafe fn read_record_at(
     if (p0 + 1) as u32 >= npages {
         return Err("theodb ivf-aq: truncated straddled record".into());
     }
+    // M146 (review F-sec-4) — `buf[lo..]` panics when the chunk item came back SHORTER than `lo`, which is
+    // exactly what a truncated page looks like. A panic here surfaces as XX000 `internal_error`, defeating the
+    // very goal of this milestone's taxonomy pass (XX002 for corruption): the operator would be told "internal
+    // bug, file a report" for a corrupt index. `record_span` cannot catch it — it validates the arithmetic
+    // against `npages`, not against how many bytes the page actually yielded.
+    if buf.len() < lo {
+        return Err(format!(
+            "theodb ivf-aq: chunk item shorter than the record offset ({} < {lo}) — truncated page",
+            buf.len()
+        ));
+    }
     let mut out = buf[lo..].to_vec();
     let need = reclen - out.len();
     let mut buf2 = Vec::new();

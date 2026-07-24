@@ -18,6 +18,32 @@ use crate::pg::err_input;
 
 const MAX_EF: i32 = 1000; // matches guc.rs MAX_EF_SEARCH (pgvector's hnsw.ef_search ceiling)
 
+/// Resolve a caller-supplied relation name through `regclass`, returning the catalog's own rendering.
+///
+/// #172, THIRD axis — found by the `/review` of the very milestone that fixed the other two. The first pass
+/// closed `qvec` (`quote_literal`) and `col` (`valid_ident`) and I stated the function was safe. It was not:
+/// `tbl` stayed a raw `{tbl}` splice in all three query builders, and the SAME `1/0` oracle proves it executes:
+///
+/// ```text
+/// SELECT theodb_rs._scan_stats(0::oid, '(SELECT 1/0 AS ctid, NULL::vector AS e) s', 'e', '[1,2]', 10, 5);
+/// -- assembled: SELECT ctid FROM (SELECT 1/0 AS ctid, …) s ORDER BY "e" <=> …  =>  ERROR: division by zero
+/// ```
+///
+/// Fixing two of three axes and declaring victory is worse than fixing none, because it retires the suspicion.
+/// The lesson is mechanical, not moral: patch the *shape* (every interpolation in the builder), never the
+/// *payload* that happened to be probed.
+///
+/// `regclass` — not `%I` — for the same reason as `graph.rs::build_csr`: it validates that the name parses AND
+/// resolves through `search_path`, raising 42P01 before any SQL is assembled, and `regclassout` re-renders the
+/// identifier from `pg_class`, so what reaches the query comes from the catalog rather than from the caller.
+/// `%I` is lexical only and would mangle a schema-qualified `s1.t` into one quoted identifier.
+fn resolve_relation(tbl: &str, ctx: &str) -> String {
+    Spi::get_one_with_args::<String>("SELECT ($1)::regclass::text", &[tbl.into()])
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| err_input(&format!("{ctx}: relation {tbl:?} does not resolve")))
+}
+
 // Backend-local observation counter: the HNSW `traverse` adds its already-computed `pages_read` here every
 // scan (a cheap in-memory add — does NOT touch the scan's correctness or crash-safety, no page write). The
 // recommender/collector resets it, runs a scan, and reads the accumulated pages to persist real `pages_read`.
@@ -165,6 +191,7 @@ pub(crate) fn scan_stats(
     if ef <= 0 || k <= 0 {
         err_input("theodb.scan_stats: ef and k must be > 0");
     }
+    let tbl = resolve_relation(tbl, "theodb.scan_stats");
     // #172 — fail-closed na fronteira (rules/error-handling.md): `col` era interpolado com aspas manuais
     // (`\"{col}\"`), então um `"` no valor quebrava a citação e emendava SQL arbitrário — MEDIDO com o oráculo
     // `1/0`. Allowlist ASCII estrita, o mesmo `valid_ident` já usado em ann_query/pq/sbq (Rule 9).
@@ -201,6 +228,7 @@ pub(crate) fn recommend_ef(tbl: &str, col: &str, samples: &[&str], target: f64, 
     if !(target > 0.0 && target <= 1.0) {
         err_input("theodb.recommend_ef: recall_target must be in (0, 1]");
     }
+    let tbl = resolve_relation(tbl, "theodb.recommend_ef");
     // #172 — mesmo gate fail-closed do `scan_stats`: `col` chega como texto livre e era interpolado com aspas
     // manuais. MEDIDO: `recommend_ef('t','e" <=> ''[1,2]''::vector LIMIT (SELECT 1/0) --', …)` executava a
     // subquery injetada (ERROR: division by zero).
@@ -215,13 +243,13 @@ pub(crate) fn recommend_ef(tbl: &str, col: &str, samples: &[&str], target: f64, 
     if samples.is_empty() {
         err_input("theodb.recommend_ef: sample must not be empty");
     }
-    let gts: Vec<HashSet<String>> = samples.iter().map(|q| exact_topk(tbl, col, q, k)).collect();
+    let gts: Vec<HashSet<String>> = samples.iter().map(|q| exact_topk(&tbl, col, q, k)).collect();
 
     // Doubling: grow ef until recall(ef) >= target, tracking the previous ef for the bracket.
     let mut prev = k.max(1);
     let mut ef = prev;
     loop {
-        if recall_at_ef(tbl, col, samples, &gts, k, ef) >= target {
+        if recall_at_ef(&tbl, col, samples, &gts, k, ef) >= target {
             break;
         }
         if ef >= MAX_EF {
@@ -234,7 +262,7 @@ pub(crate) fn recommend_ef(tbl: &str, col: &str, samples: &[&str], target: f64, 
     let (mut lo, mut hi) = (prev, ef);
     while hi - lo > 1 {
         let mid = lo + (hi - lo) / 2;
-        if recall_at_ef(tbl, col, samples, &gts, k, mid) >= target {
+        if recall_at_ef(&tbl, col, samples, &gts, k, mid) >= target {
             hi = mid;
         } else {
             lo = mid;

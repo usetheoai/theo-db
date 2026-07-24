@@ -68,6 +68,30 @@ fn check_labels() {
     let (n, slots) = decode(&b);
     assert_eq!(n, 3);
     assert_eq!(&slots[..3], &[-1, i16::MIN, i16::MAX]);
+
+    // APPEND contract — the function must only ever grow `out`, never touch what is already there.
+    // Caught by the /review of M146: every call site here passed a FRESH `Vec`, so a mutation inserting
+    // `out.clear()` at the top of the function survived the whole suite. The sole production caller
+    // (`am/page/ivf.rs:565`) appends AFTER the `[ids]` region of the v7 blob, so that mutation would zero
+    // the id region of every v7 IVF index — silently, at write time. A test that only ever passes an empty
+    // buffer cannot see the difference between "append" and "overwrite".
+    let mut b = vec![0xAA, 0xBB, 0xCC];
+    encode_labels_fixed(&[7, 8], &mut b);
+    assert_eq!(&b[..3], &[0xAA, 0xBB, 0xCC], "pre-existing bytes must survive untouched");
+    assert_eq!(b.len(), 3 + 2 + LABEL_K * 2, "exactly one record appended after the prefix");
+    let (n, slots) = decode(&b[3..]);
+    assert_eq!(n, 2, "the appended record decodes independently of the prefix");
+    assert_eq!(&slots[..2], &[7, 8]);
+
+    // Appending TWICE (what the v7 writer does for a list with several vectors) yields two independent
+    // records back to back — no shared state between calls.
+    let mut b = Vec::new();
+    encode_labels_fixed(&[1], &mut b);
+    encode_labels_fixed(&[2, 3], &mut b);
+    assert_eq!(b.len(), 2 * (2 + LABEL_K * 2), "two records, fixed width each");
+    let rec = 2 + LABEL_K * 2;
+    assert_eq!(decode(&b[..rec]).1[0], 1);
+    assert_eq!(&decode(&b[rec..]).1[..2], &[2, 3]);
 }
 
 fn check_record_span() {

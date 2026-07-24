@@ -23,7 +23,9 @@
 # Run on a machine with a pgrx PG install (the droplet). Regenerate the extension first:
 #   cargo pgrx install --release --features pg18 --pg-config $PGINST/bin/pg_config
 #
-# Exit 0 = property holds (0 backend deaths). Exit 1 = at least one corruption killed the backend.
+# Exit 0 = property holds AND our decoder was actually exercised. Exit 1 = a corruption killed the backend.
+# Exit 2 = INCONCLUSIVE: the sweep never reached the code under test (all inert/skipped, or every detection
+# came from PostgreSQL's page gate). Exit 2 is NOT a pass — see the gate at the foot of this file.
 set -uo pipefail
 
 PGINST="${PGINST:-$HOME/.pgrx/18.4/pgrx-install}"
@@ -76,7 +78,19 @@ q "INSERT INTO v SELECT g, ('[' || g || ',' || (g+1) || ',' || (g+2) || ',' || (
 # own typed-error paths. `AM_OPTS` carries the WITH(...) clause the IVF build needs.
 AM=${AM:-theodb_hnsw}
 AM_OPTS=${AM_OPTS:-}
-q "CREATE INDEX vi ON v USING $AM (e) $AM_OPTS;" >/dev/null
+IDX_OUT=$(q "CREATE INDEX vi ON v USING $AM (e) $AM_OPTS;")
+# The CREATE INDEX status used to be discarded (`>/dev/null`). With a wrong AM/opclass it failed silently, and
+# the baseline check below still passed — a seq scan answers 5 rows just as happily — so the whole sweep ran
+# against an index that did not exist and reported OK (review F-test-3, case b).
+if ! q "SELECT to_regclass('vi') IS NOT NULL;" | grep -q "^t$"; then
+    echo "CORRUPT_HARNESS_FAIL CREATE INDEX did not produce 'vi': $IDX_OUT"; exit 1
+fi
+
+# `enable_seqscan=off` is a HINT, not a guarantee — the planner may still pick a seq scan. Assert the plan
+# really uses the index, otherwise the baseline (and every round after it) measures the heap, not the index.
+if ! q "SET enable_seqscan=off; EXPLAIN (COSTS OFF) SELECT id FROM v ORDER BY e <-> '[1,2,3,4,5,6,7,8]'::vector LIMIT 5;" | grep -qi "Index Scan"; then
+    echo "CORRUPT_HARNESS_FAIL baseline query does not use the index (planner chose another path)"; exit 1
+fi
 
 PRE=$(q "SET enable_seqscan=off; SELECT count(*) FROM (SELECT id FROM v ORDER BY e <-> '[1,2,3,4,5,6,7,8]'::vector LIMIT 5) t;")
 if [ "$PRE" != "5" ]; then echo "CORRUPT_HARNESS_FAIL baseline query returned '$PRE' (expected 5)"; exit 1; fi
@@ -117,10 +131,28 @@ for OFF in $OFFSETS; do
 done
 
 echo "RESULT deaths=$DEATHS clean_errors=$CLEAN (ours=$OURS pg_page_gate=$PGGATE) inert=$INERT skipped=$SKIPPED"
-if [ "$DEATHS" -eq 0 ]; then
-    echo "CORRUPT_INDEX_OK — no corruption killed the backend; every detected case surfaced as a clean SQL error"
-    exit 0
-else
+
+# M146 (review F-test-3) — the exit used to be keyed on `deaths == 0` ALONE, which is green in three cases
+# where the harness proved NOTHING:
+#   (a) every offset skipped (file smaller than the sweep) — nothing was ever corrupted;
+#   (b) every offset inert — the bytes hit padding, so the decoder under test never ran;
+#   (c) with `CHECKSUMS=on` (the script's own DEFAULT) PostgreSQL's page verification rejects the page before
+#       our code deserializes it, so `ours=0` — the default invocation never reaches the code under test.
+# A harness that cannot fail is not evidence. It now demands that the sweep actually EXERCISED something, and
+# says which knob to turn when it did not.
+if [ "$DEATHS" -ne 0 ]; then
     echo "CORRUPT_INDEX_FAIL — $DEATHS corruption(s) tore down the backend (panic across the FFI boundary)"
     exit 1
 fi
+if [ "$CLEAN" -eq 0 ]; then
+    echo "CORRUPT_INDEX_INCONCLUSIVE — 0 corruptions were DETECTED (inert=$INERT skipped=$SKIPPED)."
+    echo "  The sweep never reached a decoder. Widen OFFSETS, or raise CORRUPT_LEN."
+    exit 2
+fi
+if [ "$OURS" -eq 0 ]; then
+    echo "CORRUPT_INDEX_INCONCLUSIVE — every detection came from PostgreSQL's page gate (pg_page_gate=$PGGATE),"
+    echo "  so OUR deserializer was never exercised. Re-run with CHECKSUMS=off to let corrupt pages reach it."
+    exit 2
+fi
+echo "CORRUPT_INDEX_OK — no corruption killed the backend; $OURS case(s) reached OUR decoder and surfaced as a typed SQL error"
+exit 0
