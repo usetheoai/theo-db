@@ -539,27 +539,24 @@ unsafe fn scan_ivf_structured(
     rerank_pool: usize,
     query_labels: &[i16],
 ) -> Vec<(i64, f64)> {
-    // M90 (inline label filter): an IVF-AQ v7 index (built WITH a label column) reads the co-located label per
-    // candidate and skips non-overlapping ones in Stage-1 before the rerank. Empty `query_labels` ⇒ no filter (the
-    // v7 scan behaves like v5). Checked first (distinct magic 7).
-    if page::ivf_is_v7(rel) {
-        return scan_ivf_aq_split_v7(rel, query, probes, rerank_pool, query_labels);
-    }
-    // M77 (pg_scann): an IVF-AQ v4 index (built WITH pq_subspaces) takes the batched-AH + rerank path.
-    if page::ivf_is_v4(rel) {
-        return scan_ivf_aq(rel, query, probes, rerank_pool);
-    }
-    // M83 (Roadmap v7): an IVF-AQ v5 index (built WITH separate_storage=1) takes the storage-separated path.
-    if page::ivf_is_v5(rel) {
-        return scan_ivf_aq_split(rel, query, probes, rerank_pool);
-    }
-    // M85 (Roadmap v7): an IVF-AQ v6 index (built WITH separate_storage=1, refine=sq8) reranks on SQ8 codes.
-    if page::ivf_is_v6(rel) {
-        return scan_ivf_aq_split_sq8(rel, query, probes, rerank_pool);
-    }
-    // E1: an IVF-AQ v8 index (built WITH separate_storage=1, refine=2) reranks on f32-FREE RaBitQ residual codes.
-    if page::ivf_is_v8(rel) {
-        return scan_ivf_aq_split_rabitq(rel, query, probes, rerank_pool);
+    // M147 — the version discriminant is read ONCE (`ivf_version` reads block 0 a single time) and matched,
+    // replacing the M31..E1 if-ladder that re-read block 0 up to 5×. Each arm dispatches to the per-version
+    // body whose ON-DISK decode stays separate (ADR-2). A `V3` falls through to the f32 body below; an
+    // unknown discriminant on a TIVS-magic index is corruption → XX002 (the operator REINDEXes), never
+    // silently read as v3. The comment history of each path: v7=M90 inline label filter, v4=M77 pg_scann,
+    // v5=M83 storage-separated, v6=M85 SQ8 refine, v8=E1 f32-free RaBitQ.
+    match page::ivf_version(rel) {
+        Ok(page::IvfVersion::V7) => {
+            return scan_ivf_aq_split_v7(rel, query, probes, rerank_pool, query_labels);
+        }
+        Ok(page::IvfVersion::V4) => return scan_ivf_aq(rel, query, probes, rerank_pool),
+        Ok(page::IvfVersion::V5) => return scan_ivf_aq_split(rel, query, probes, rerank_pool),
+        Ok(page::IvfVersion::V6) => return scan_ivf_aq_split_sq8(rel, query, probes, rerank_pool),
+        Ok(page::IvfVersion::V8) => {
+            return scan_ivf_aq_split_rabitq(rel, query, probes, rerank_pool);
+        }
+        Ok(page::IvfVersion::V3) => {} // f32 structured — falls through to the body below
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     }
     // v3 f32 IVF reranks ALL probed candidates exactly (no AH prune pool) — `rerank_pool` unused here.
     let _ = rerank_pool;

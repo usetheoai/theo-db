@@ -12,6 +12,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- M147 Fase 1: if-ladder de dispatch IVF → enum lido uma vez (OCP); byte-idêntico nos 6 caminhos (#170)
+
 ### Added
 
 - Harness A/B do M147 (`theodb_rs/isolation/ab_scan_versions.sh`) + baseline capturado (`docs/benchmarks/m147-ab-baseline.txt`): constrói um índice IVF em cada versão v3..v8 com dataset determinístico e diffa o top-k (id:dist) do binário contra o baseline pré-refactor — a prova de comportamento byte-idêntico do refactor. Determinismo provado (compare contra si mesmo → OK) (#170)

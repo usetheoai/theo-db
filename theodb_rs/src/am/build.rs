@@ -723,12 +723,11 @@ pub(crate) unsafe fn vacuum_rebuild(
             // reason as v4: the f32 v3 rebuild (`read_ivf_meta`, v2/v3-only) would REJECT them (typed Err → error!) —
             // correctness holds via the scan's pending fold + MVCC heap re-check. M90: without v7 here, VACUUM on a
             // labeled index errored every time (the un-vacuumable-index blocker caught in review).
-            if page::ivf_is_v4(indexrel)
-                || page::ivf_is_v5(indexrel)
-                || page::ivf_is_v6(indexrel)
-                || page::ivf_is_v7(indexrel)
-                || page::ivf_is_v8(indexrel)
-            {
+            // M147 — "é qualquer versão AQ?" (v4..v8) via o enum lido uma vez, no lugar do OR de 5 predicados.
+            // Um `Err` (versão desconhecida) ou `V3` (f32) não casa → false, preservando o comportamento (só
+            // as versões AQ retornam 0 aqui).
+            use page::IvfVersion::{V4, V5, V6, V7, V8};
+            if matches!(page::ivf_version(indexrel), Ok(V4 | V5 | V6 | V7 | V8)) {
                 return 0;
             }
             return vacuum_rebuild_structured(indexrel, dead);
@@ -1134,7 +1133,7 @@ mod tests {
             let oid: pg_sys::Oid =
                 pgrx::Spi::get_one("SELECT 'ivfaq_idx'::regclass::oid").unwrap().expect("oid");
             let rel = pg_sys::index_open(oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
-            let v = crate::am::page::ivf_is_v4(rel);
+            let v = (crate::am::page::ivf_version(rel) == Ok(crate::am::page::IvfVersion::V4));
             pg_sys::index_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
             v
         };
@@ -1219,8 +1218,8 @@ mod tests {
             let oid: pg_sys::Oid =
                 pgrx::Spi::get_one("SELECT 'ivfaq5_idx'::regclass::oid").unwrap().expect("oid");
             let rel = pg_sys::index_open(oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
-            let v5 = crate::am::page::ivf_is_v5(rel);
-            let v4 = crate::am::page::ivf_is_v4(rel);
+            let v5 = (crate::am::page::ivf_version(rel) == Ok(crate::am::page::IvfVersion::V5));
+            let v4 = (crate::am::page::ivf_version(rel) == Ok(crate::am::page::IvfVersion::V4));
             pg_sys::index_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
             (v5, v4)
         };
@@ -1303,8 +1302,8 @@ mod tests {
             let oid: pg_sys::Oid =
                 pgrx::Spi::get_one("SELECT 'ivfaq6_idx'::regclass::oid").unwrap().expect("oid");
             let rel = pg_sys::index_open(oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
-            let v6 = crate::am::page::ivf_is_v6(rel);
-            let v5 = crate::am::page::ivf_is_v5(rel);
+            let v6 = (crate::am::page::ivf_version(rel) == Ok(crate::am::page::IvfVersion::V6));
+            let v5 = (crate::am::page::ivf_version(rel) == Ok(crate::am::page::IvfVersion::V5));
             pg_sys::index_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
             (v6, v5)
         };
@@ -1507,8 +1506,8 @@ mod tests {
             let oid: pg_sys::Oid =
                 pgrx::Spi::get_one("SELECT 'ivfv7_idx'::regclass::oid").unwrap().expect("oid");
             let rel = pg_sys::index_open(oid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
-            let v7 = crate::am::page::ivf_is_v7(rel);
-            let v5 = crate::am::page::ivf_is_v5(rel);
+            let v7 = (crate::am::page::ivf_version(rel) == Ok(crate::am::page::IvfVersion::V7));
+            let v5 = (crate::am::page::ivf_version(rel) == Ok(crate::am::page::IvfVersion::V5));
             pg_sys::index_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
             (v7, v5)
         };
