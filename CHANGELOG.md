@@ -12,6 +12,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Gate de compatibilidade pgvector no CI: a cada mudança de código, a esteira sobe a **imagem** publicável e executa o fluxo que uma aplicação real faz — `CREATE EXTENSION vector` sem `CASCADE`, tabela com coluna `vector`, e os três índices `USING hnsw (... vector_cosine_ops/l2/ip)` — verificando resultado correto, não apenas ausência de erro. Era a lacuna que deixou passar os dois bugs que impediam qualquer aplicação de subir contra o TheoDB (#181, #182)
+
 ### Fixed
 
 - Mudanças apenas de documentação deixam de disparar a esteira completa de CI. O runner é único e serial — cada push acionava ~14 jobs de ~45min (cerca de 10h de fila) mesmo quando nada de código mudava, o que travava as publicações e validações reais atrás de trabalho inútil (#187)

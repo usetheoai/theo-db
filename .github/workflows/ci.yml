@@ -28,6 +28,78 @@ concurrency:
   cancel-in-progress: ${{ github.ref_name != 'main' }}
 
 jobs:
+  # #181/#182 — GATE de compatibilidade pgvector. Roda contra a IMAGEM (o artefato que o usuário
+  # realmente baixa), não contra um cluster montado à mão: é o caminho do README, e foi justamente a
+  # ausência desse caminho no CI que deixou passar (a) `CREATE EXTENSION vector` inexistente e (b) o AM
+  # `hnsw` / opclasses `vector_*_ops` ausentes — dois bugs que só apareceram ao apontar uma app real.
+  pgvector-compat:
+    runs-on: [self-hosted, theodb-do]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build TheoDB image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          tags: theo-db:dev
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Bootstrap de uma app pgvector contra a imagem (o fluxo do README)
+        run: |
+          set -euo pipefail
+          docker rm -f theodb_compat 2>/dev/null || true
+          docker run -d --name theodb_compat -e POSTGRES_PASSWORD=postgres theo-db:dev
+          for i in $(seq 1 60); do
+            docker exec theodb_compat pg_isready -U postgres >/dev/null 2>&1 && break
+            sleep 2
+          done
+
+          q() { docker exec theodb_compat psql -U postgres -v ON_ERROR_STOP=1 -tAc "$1"; }
+
+          # (1) o comando que TODA app pgvector emite no bootstrap — SEM cascade, como drizzle/alembic.
+          #     Um banco novo precisa herdar a dependência de template1 (o fix do #181).
+          docker exec theodb_compat psql -U postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE app_compat"
+          docker exec theodb_compat psql -U postgres -d app_compat -v ON_ERROR_STOP=1 \
+            -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
+          # (2) a app cria tabela e ÍNDICES com a sintaxe pgvector (o fix do #182).
+          docker exec theodb_compat psql -U postgres -d app_compat -v ON_ERROR_STOP=1 -c "
+            CREATE TABLE items (id int, embedding vector(3));
+            INSERT INTO items VALUES (1,'[1,1,1]'), (2,'[5,5,5]');
+            CREATE INDEX i_cos ON items USING hnsw (embedding vector_cosine_ops);
+            CREATE INDEX i_l2  ON items USING hnsw (embedding vector_l2_ops);
+            CREATE INDEX i_ip  ON items USING hnsw (embedding vector_ip_ops);"
+
+          # (3) asserções — resultado CORRETO, não apenas "não deu erro".
+          DIST=$(docker exec theodb_compat psql -U postgres -d app_compat -tAc \
+            "SELECT round((embedding <-> '[2,2,2]'::vector)::numeric,4) FROM items WHERE id=1;")
+          [ "$DIST" = "1.7321" ] || { echo "::error::distancia $DIST != 1.7321 (raiz de 3)"; exit 1; }
+
+          IDX=$(docker exec theodb_compat psql -U postgres -d app_compat -tAc \
+            "SELECT count(*) FROM pg_indexes WHERE tablename='items' AND indexdef LIKE '%USING hnsw%';")
+          [ "$IDX" = "3" ] || { echo "::error::indices USING hnsw = $IDX (esperado 3)"; exit 1; }
+
+          # (4) o AM alias compartilha o MESMO handler own-code — nao e uma 2a implementacao.
+          AMH=$(docker exec theodb_compat psql -U postgres -d app_compat -tAc \
+            "SELECT count(*) FROM pg_am a JOIN pg_am b ON a.amhandler=b.amhandler WHERE a.amname='hnsw' AND b.amname='theodb_hnsw';")
+          [ "$AMH" = "1" ] || { echo "::error::AM hnsw nao compartilha o handler do theodb_hnsw"; exit 1; }
+
+          # (5) honestidade — o \dx declara que a implementacao NAO e o pgvector.
+          docker exec theodb_compat psql -U postgres -d app_compat -tAc \
+            "SELECT obj_description(oid,'pg_extension') FROM pg_extension WHERE extname='vector';" \
+            | grep -q "NOT by pgvector" || { echo "::error::comment nao declara own-code"; exit 1; }
+
+          echo "PGVECTOR_COMPAT_OK — bootstrap sem cascade, 3 indices USING hnsw, dist=$DIST, handler compartilhado"
+
+      - name: Cleanup
+        if: always()
+        run: docker rm -f theodb_compat 2>/dev/null || true
+
   harness-unit:
     # Fast, container-free: the recall math, ground-truth, metrics and HDF5 loader (DoD-1 gate logic).
     runs-on: [self-hosted, theodb-do]
