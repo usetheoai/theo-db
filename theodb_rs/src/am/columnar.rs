@@ -1169,10 +1169,18 @@ unsafe fn accumulate_row(rel: pg_sys::Relation, slot: *mut pg_sys::TupleTableSlo
         // The `attlen != -1` guard mirrors `extract_value_bytes` (fixed-length types are read by length, and
         // a by-value datum treated as a pointer is a segfault); `tts_isnull` is checked first because
         // detoasting a NULL is likewise a segfault.
-        let values = std::slice::from_raw_parts_mut((*slot).tts_values, natts);
         let isnull = std::slice::from_raw_parts((*slot).tts_isnull, natts);
+        // NEVER mutate `(*slot).tts_values` (#190 v2 — use-after-free fix). The executor reads the SAME
+        // slot AFTER `table_tuple_insert` returns — `ExecInsertIndexTuples`, `ExecARInsertTriggers`, and
+        // `ExecProcessReturning` all project from it (PG18 `nodeModifyTable.c`). Because we called
+        // `slot_getallattrs` above (`tts_nvalid == natts`), `slot_getattr` hands those readers the cached
+        // `tts_values[i]` WITHOUT re-deforming — so if we point the slot at a flat we `pfree` below, an
+        // `INSERT ... RETURNING <varlena col>` (or an AFTER-ROW trigger) dereferences freed memory. Detoast
+        // into a LOCAL copy of the datum array and form the tuple from that; the slot stays pristine.
+        let mut form_values: Vec<pg_sys::Datum> =
+            std::slice::from_raw_parts((*slot).tts_values, natts).to_vec();
         let mut owned: Vec<*mut pg_sys::varlena> = Vec::new();
-        for (i, value) in values.iter_mut().enumerate().take(natts) {
+        for i in 0..natts {
             if isnull[i] {
                 continue;
             }
@@ -1181,15 +1189,15 @@ unsafe fn accumulate_row(rel: pg_sys::Relation, slot: *mut pg_sys::TupleTableSlo
             if (*super::tupdesc_attr(tupdesc, i)).attlen != -1 {
                 continue; // fixed-length: nothing to detoast
             }
-            let flat = pg_sys::pg_detoast_datum_copy(value.cast_mut_ptr::<pg_sys::varlena>());
+            let flat = pg_sys::pg_detoast_datum_copy(form_values[i].cast_mut_ptr::<pg_sys::varlena>());
             owned.push(flat);
-            *value = pg_sys::Datum::from(flat);
+            form_values[i] = pg_sys::Datum::from(flat);
         }
 
         // ORDER IS LOAD-BEARING (#190): form the tuple and copy its bytes BEFORE freeing the flattened
         // copies. `heap_form_tuple` copies the values into the new tuple, and `bytes` copies again into the
         // buffer; freeing earlier would build the row from freed memory — silent corruption, no error.
-        let htup = pg_sys::heap_form_tuple(tupdesc, (*slot).tts_values, (*slot).tts_isnull);
+        let htup = pg_sys::heap_form_tuple(tupdesc, form_values.as_mut_ptr(), (*slot).tts_isnull);
         let len = (*htup).t_len as usize;
         let bytes = std::slice::from_raw_parts((*htup).t_data as *const u8, len).to_vec();
         pg_sys::heap_freetuple(htup);

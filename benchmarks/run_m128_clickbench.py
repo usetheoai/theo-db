@@ -14,7 +14,10 @@ A query unsupported by theodb_columnar is recorded ERRORED with its typed messag
 """
 import argparse
 import json
+import math
 import os
+import re
+import shlex
 import subprocess
 import sys
 import time
@@ -106,7 +109,9 @@ def _ensure_sample(path: str, n_rows: int, strategy: str = "systematic") -> bool
             # (a divisão inteira pode render 1 linha a mais).
             inner = f"awk 'NR % {k} == 0' | head -n {n}"
             timeout = 21600  # varrer ~100 GB comprimidos leva horas em rede comum
-        cmd = f"curl -sL -A '{_UA}' '{HITS_TSV_GZ}' | zcat | {inner} > {path}"
+        # `path` vem do CLI (--cache) → shlex.quote contra injeção de shell (CWE-78). `inner` só contém
+        # inteiros (n, k) e literais fixos; `_UA`/`HITS_TSV_GZ` são constantes.
+        cmd = f"curl -sL -A '{_UA}' '{HITS_TSV_GZ}' | zcat | {inner} > {shlex.quote(path)}"
         subprocess.run(["bash", "-c", cmd], check=True, timeout=timeout)
         return os.path.isfile(path) and os.path.getsize(path) > 0
     except Exception as e:
@@ -137,6 +142,48 @@ def _canonical(rows):
     """Order-insensitive canonical form of a result set for the byte-identical A/B (ClickBench queries with an
     ORDER BY are deterministic; aggregates are single-row; sorting makes the compare order-independent)."""
     return sorted([tuple(str(c) for c in r) for r in (rows or [])])
+
+
+def _bench_query(cur, conn, i, sql, assert_byte_identical) -> dict:
+    """Mede UMA query do ClickBench: timing 3× (cold+hot), plano (CustomScan?) e o oráculo A/B
+    byte-idêntico (columnar vs heap). Retorna o entry; os contadores são derivados dos entries em `run`."""
+    entry = {"q": i, "sql": sql[:60]}
+    # timing 3× (cold flush before run 1)
+    try:
+        triple = []
+        for run_i in range(3):
+            if run_i == 0:
+                _flush_caches()
+            dt, _rows = _run_once(cur, sql)
+            triple.append(round(dt, 4))
+        entry["timings"] = triple
+        entry["cold"], entry["hot"] = triple[0], min(triple[1], triple[2])
+    except Exception as e:
+        conn.rollback() if not conn.autocommit else None
+        entry["error"] = str(e).splitlines()[0][:120]
+        return entry
+    # plan: columnar CustomScan vs native
+    try:
+        cur.execute("EXPLAIN (FORMAT TEXT) " + sql)
+        plan = "\n".join(r[0] for r in cur.fetchall())
+        entry["columnar_customscan"] = "theodb_columnar_agg" in plan or "Custom Scan" in plan
+    except Exception:
+        entry["columnar_customscan"] = None
+    # byte-identical result A/B: columnar vs heap. Strip the trailing `LIMIT N` first: ClickBench's
+    # `... ORDER BY count DESC LIMIT 10` has many tied counts on a subsample, so the LIMIT cut picks an
+    # ARBITRARY-but-valid 10 among the ties — a legitimate scan-order difference, NOT a storage bug. Comparing
+    # the FULL (unlimited) deterministic aggregation is the real columnar-storage correctness oracle.
+    ab_sql = re.sub(r"\s+LIMIT\s+\d+\s*;?\s*$", "", sql.rstrip().rstrip(";"))
+    try:
+        cur.execute(ab_sql); rc = _canonical(cur.fetchall())
+        cur.execute(ab_sql.replace("hits", "hits_heap")); rh = _canonical(cur.fetchall())
+        r = assert_byte_identical({j: rc[j] for j in range(len(rc))}, {j: rh[j] for j in range(len(rh))}) \
+            if len(rc) == len(rh) else {"identical": False, "diverged": abs(len(rc) - len(rh))}
+        entry["result_ab_identical"] = r["identical"]
+    except Exception as e:
+        entry["result_ab_identical"] = None
+        entry["result_ab_note"] = str(e).splitlines()[0][:80]
+    return entry
 
 
 def run(args) -> dict:
@@ -179,60 +226,24 @@ def run(args) -> dict:
     cur.execute(f"SET statement_timeout = '{int(args.query_timeout_s) * 1000}'")
 
     queries = _load_queries()
-    results, ab_pass, ab_diverged, errored, customscan = [], 0, 0, 0, 0
     from theodb_bench.regression import assert_byte_identical  # reuse the M127 byte-identical comparator
 
+    results = []
     for i, sql in enumerate(queries):
-        entry = {"q": i, "sql": sql[:60]}
-        # timing 3× (cold flush before run 1)
-        try:
-            triple = []
-            for run_i in range(3):
-                if run_i == 0:
-                    _flush_caches()
-                dt, _rows = _run_once(cur, sql)
-                triple.append(round(dt, 4))
-            entry["timings"] = triple
-            entry["cold"], entry["hot"] = triple[0], min(triple[1], triple[2])
-        except Exception as e:
-            conn.rollback() if not conn.autocommit else None
-            entry["error"] = str(e).splitlines()[0][:120]
-            errored += 1
-            results.append(entry); continue
-        # plan: columnar CustomScan vs native
-        try:
-            cur.execute("EXPLAIN (FORMAT TEXT) " + sql)
-            plan = "\n".join(r[0] for r in cur.fetchall())
-            entry["columnar_customscan"] = "theodb_columnar_agg" in plan or "Custom Scan" in plan
-            customscan += 1 if entry["columnar_customscan"] else 0
-        except Exception:
-            entry["columnar_customscan"] = None
-        # byte-identical result A/B: columnar vs heap. Strip the trailing `LIMIT N` first: ClickBench's
-        # `... ORDER BY count DESC LIMIT 10` has many tied counts on a subsample, so the LIMIT cut picks an
-        # ARBITRARY-but-valid 10 among the ties — a legitimate scan-order difference, NOT a storage bug. Comparing
-        # the FULL (unlimited) deterministic aggregation is the real columnar-storage correctness oracle.
-        import re as _re
-        ab_sql = _re.sub(r"\s+LIMIT\s+\d+\s*;?\s*$", "", sql.rstrip().rstrip(";"))
-        try:
-            cur.execute(ab_sql); rc = _canonical(cur.fetchall())
-            cur.execute(ab_sql.replace("hits", "hits_heap")); rh = _canonical(cur.fetchall())
-            r = assert_byte_identical({j: rc[j] for j in range(len(rc))}, {j: rh[j] for j in range(len(rh))}) \
-                if len(rc) == len(rh) else {"identical": False, "diverged": abs(len(rc) - len(rh))}
-            entry["result_ab_identical"] = r["identical"]
-            ab_pass += 1 if r["identical"] else 0
-            ab_diverged += 0 if r["identical"] else 1
-        except Exception as e:
-            entry["result_ab_identical"] = None
-            entry["result_ab_note"] = str(e).splitlines()[0][:80]
+        entry = _bench_query(cur, conn, i, sql, assert_byte_identical)
         results.append(entry)
         print(f"  q{i:>2} cold={entry.get('cold','ERR')} hot={entry.get('hot','ERR')} "
               f"cs={entry.get('columnar_customscan')} ab={entry.get('result_ab_identical')}", flush=True)
     cur.close(); conn.close()
 
+    # Contadores derivados dos entries (uma passada — mais simples que contar dentro do loop).
     ok = [e for e in results if "timings" in e]
+    errored = sum(1 for e in results if "error" in e)
+    customscan = sum(1 for e in results if e.get("columnar_customscan"))
+    ab_pass = sum(1 for e in results if e.get("result_ab_identical") is True)
+    ab_diverged = sum(1 for e in results if e.get("result_ab_identical") is False)
     geomean = None
     if ok:
-        import math
         geomean = round(math.exp(sum(math.log(max(e["hot"], 1e-6)) for e in ok) / len(ok)), 5)
     return {
         **base, "status": "OK", "n_queries": len(queries), "queries_ok": len(ok), "queries_errored": errored,
@@ -277,6 +288,14 @@ def main():
         print(f"  queries ok={data['queries_ok']}/{data['n_queries']} errored={data['queries_errored']} "
               f"columnar_customscan={data['columnar_customscan_count']} hot_geomean={data['hot_geomean_s']}s")
         print(f"  result A/B: {data['result_ab']['verdict']} (pass={data['result_ab']['pass']}, diverged={data['result_ab']['diverged']})")
+    # Fail-loud (rules/error-handling.md): o processo tem de sair != 0 quando o run não completou OU o
+    # oráculo A/B byte-idêntico detectou divergência — senão um CI encadeado no exit status prosseguiria
+    # sobre um bug de correção do pushdown.
+    if data["status"] != "OK":
+        return 2
+    if data["result_ab"]["diverged"] != 0:
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

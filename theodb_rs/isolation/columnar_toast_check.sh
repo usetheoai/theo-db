@@ -7,10 +7,15 @@
 # acima de ~2 KB) entra no colunar.
 #
 # Este harness é o RED do plano `columnar-toast-materialize`. Cobre, além do repro:
-#   EC-4  o limiar de TOAST (inline / comprimido inline / externo) — 1.900, 2.000 e 2.100 bytes
+#   EC-4  valores próximos ao limiar de TOAST (1.900/2.000/2.100 bytes). Com `repeat()` esses valores
+#         COMPRIMEM e ficam inline/comprimidos-inline — o estado EXTERNO (o que o #190 quebrava) é
+#         coberto pelo `src` fixture (STORAGE EXTERNAL + non-vacuity gate), não por esta seção.
 #   EC-5  tipos de tamanho fixo trafegam intactos (int, bigint, uuid, char)
 #   EC-6  os dois lotes em transações DIFERENTES — o caminho de pré-commit só roda no COMMIT,
 #         e é justamente ele que não tem snapshot; um teste sem commit entre lotes não o exercita
+#   RET   INSERT ... RETURNING de coluna TOAST (#190 v2): prova que `accumulate_row` NÃO deixa o slot
+#         do executor apontando para memória liberada — o use-after-free que o /review pegou. O md5 dos
+#         valores RETORNADOS pelo INSERT tem de bater com a origem; com o slot corrompido, difere/crasha.
 #
 # A asserção de md5 é a defesa principal contra EC-2/EC-3 (corrupção silenciosa): um fix que grave
 # lixo passaria num teste que só conta linhas.
@@ -112,9 +117,11 @@ GOT_MD5=$(q "SELECT md5(string_agg(big, '|' ORDER BY id)) FROM t_diff;")
 GOT_FIXED=$(q "SELECT md5(string_agg(n_int::text||n_big::text||u::text||c10, '|' ORDER BY id)) FROM t_diff;")
 [ "$GOT_FIXED" = "$SRC_FIXED" ] || fail "EC-5: tipos de tamanho fixo alterados (int/bigint/uuid/char)"
 
-# ---------------------------------------------------------------- (5) EC-4: limiar de TOAST
-# O limiar depende do tamanho TOTAL da tupla, não só da coluna. 1.900/2.000/2.100 cobrem os três
-# estados (inline, comprimido inline, externo) — testar só com 3 KB não os distingue.
+# ---------------------------------------------------------------- (5) EC-4: valores no limiar de TOAST
+# 1.900/2.000/2.100 bytes com `repeat()` são altamente compressíveis → ficam inline/comprimidos-inline
+# (NÃO externalizam). Esta seção valida que valores de tamanhos variados ao redor do limiar de ~2 KB
+# entram sem erro; o caminho EXTERNO (o que o #190 quebrava) é coberto pelo `src` fixture acima, com o
+# gate de não-vacuidade que garante que houve TOAST externo de fato.
 cat > "$DATA/threshold.sql" <<'SQL'
 CREATE TABLE t_thr (id int, v text) USING theodb_columnar;
 BEGIN;
@@ -128,4 +135,30 @@ echo "$OUT" | grep -qi "cannot fetch toast data" && fail "EC-4 limiar: $(echo "$
 THR=$(q "SELECT count(*)||':'||sum(length(v)) FROM t_thr;")
 [ "$THR" = "600:1200000" ] || fail "EC-4 limiar: $THR (esperado 600:1200000)"
 
-echo "TOAST_CHECK_OK — 2 lotes mesma-txn + txns-distintas (EC-6), md5 do conteudo TOAST identico a origem, tipos fixos intactos (EC-5), limiar 1900/2000/2100 (EC-4)"
+# ---------------------------------------------------------------- (6) RET: INSERT ... RETURNING de TOAST
+# Regressão do use-after-free que o /review pegou (#190 v2): `accumulate_row` costumava sobrescrever
+# `(*slot).tts_values[i]` com um `pg_detoast_datum_copy` e dar `pfree` antes de retornar. O executor lê o
+# MESMO slot depois do insert — `ExecProcessReturning` projeta dele via `slot_getattr` sem re-deform
+# (PG18) — então RETURNING de uma coluna varlena dereferenciava memória liberada. Processar 10.000 linhas
+# recicla o chunk liberado no próximo palloc da projeção, tornando a corrupção observável no md5 agregado.
+# Com o slot preservado (fix v2), o md5 dos valores RETORNADOS bate com a origem.
+cat > "$DATA/returning.sql" <<'SQL'
+CREATE TABLE t_ret (LIKE src) USING theodb_columnar;
+WITH ins AS (
+    INSERT INTO t_ret SELECT * FROM src RETURNING id, big
+)
+SELECT md5(string_agg(big, '|' ORDER BY id)) FROM ins;
+SQL
+# -tA => saída sem bordas/header, o md5 sai como linha pura (o -q suprime as tags CREATE/INSERT). Sem isso
+# o md5 vem indentado pela formatação de tabela e o grep ancorado não casaria (bug de parsing, não do fix).
+RET_OUT=$(psql -X -q -tA -p "$PORT" -U theo -d postgres -f "$DATA/returning.sql" 2>&1)
+echo "$RET_OUT" | grep -qiE "cannot fetch toast data|server closed|terminated|segmentation|connection to server" \
+  && fail "RET (RETURNING #190v2): $(echo "$RET_OUT" | grep -iE 'cannot fetch|closed|terminated|segmentation|connection to' | head -1)"
+RET_MD5=$(echo "$RET_OUT" | grep -oE '[0-9a-f]{32}' | head -1)
+[ -n "$RET_MD5" ] || fail "RET (RETURNING #190v2): sem md5 na saida (crash/erro) — $RET_OUT"
+[ "$RET_MD5" = "$SRC_MD5" ] || fail "RET (RETURNING #190v2): md5 dos valores RETURNING difere da origem (use-after-free no slot)"
+# além do RETURNING, os valores persistidos também têm de bater (o slot preservado não pode ter alterado a gravação)
+RET_STORED=$(q "SELECT md5(string_agg(big, '|' ORDER BY id)) FROM t_ret;")
+[ "$RET_STORED" = "$SRC_MD5" ] || fail "RET: md5 persistido difere da origem"
+
+echo "TOAST_CHECK_OK — 2 lotes mesma-txn + txns-distintas (EC-6), md5 do conteudo TOAST identico a origem, tipos fixos intactos (EC-5), limiar 1900/2000/2100 (EC-4), INSERT...RETURNING de TOAST sem use-after-free (RET/#190v2)"

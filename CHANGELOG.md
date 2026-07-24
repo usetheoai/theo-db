@@ -14,8 +14,21 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Acervo de referências primárias local: 25 papers/livros de acesso livre em
+  `.claude/knowledge-base/references/papers/` (HNSW, ScaNN/AQ, RaBitQ, DiskANN, Faiss, IIR, RRF,
+  BEIR, C-Store, MonetDB/X100, Morsel, ARIES, SSI/MVCC, rigor estatístico de medição, GraphRAG,
+  prompt injection) e 8 repositórios de referência (`pgrx`, `tantivy`, `FlameGraph`,
+  `parquet-format`, `graphrag`, `beir`, `faiss`, `hnswlib`) — fecham as lacunas de segurança
+  Rust/FFI, metodologia de profiling e spec colunar
 
 ### Changed
+
+- `CLAUDE.md` ganha a regra 8 ("fundamente em referência primária — acervo local primeiro") e a
+  seção "Acervo de referências", tornando o acervo visível em toda sessão do agente
+- `rules/discover-phd-rigor.md` ganha o requisito R0.1 (consultar o acervo local antes da busca
+  web; R0 continua obrigatório para o que o acervo não cobre)
+- `references-catalog.md` passa a registrar os 8 peers novos, o índice de papers, os 2 documentos
+  não obtidos (403/404) e os 12 clones que estavam no disco sem entrada no catálogo
 
 
 ### Deprecated
@@ -55,6 +68,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - Corrigido o defeito que impedia carregar dados reais no armazenamento colunar: inserções sucessivas falhavam quando os dados continham textos grandes (acima de ~2 KB). Os valores passam a ser materializados no momento da inserção — onde o banco garante o contexto necessário para lê-los — em vez de mais tarde, durante a gravação, quando esse contexto já não existe. Isso também elimina o risco de o dado referenciado ser removido pela limpeza automática antes da gravação (#190)
+- Corrigido um use-after-free introduzido pela primeira versão do fix acima, detectado pelo `/review` (2 análises independentes convergiram, com prova contra o source do PostgreSQL 18): a materialização gravava o valor de volta na estrutura de linha do executor e depois liberava a memória, deixando `INSERT ... RETURNING <coluna grande>` (e gatilhos AFTER-ROW) lendo memória já liberada. Agora a materialização usa uma cópia local e a estrutura do executor permanece intacta; regressão coberta por um novo caso `INSERT ... RETURNING` de TOAST no harness (#190)
+- Corrigido o harness de benchmark ClickBench para falhar alto quando o oráculo de correção A/B (colunar vs heap) detecta divergência — antes o processo sempre saía com código 0, mascarando um bug de correção de um CI encadeado; e uma passagem de caminho de arquivo (`--cache`) para o shell passa a ser escapada (defesa contra injeção) (#187)
 - Descoberto e registrado um defeito que impede carregar dados reais no armazenamento colunar: inserções sucessivas falham quando os dados contêm valores de texto grandes (acima de ~2 KB), com a tabela podendo ficar ilegível após o erro. O problema passou despercebido até agora porque a amostragem de benchmark usava uma fatia estreita do dataset, sem valores desse tamanho. Documentado em `docs/benchmarks/clickbench-scale-gate-2026-07-24.md`, com o impacto sobre a leitura dos números anteriores declarado honestamente (#190)
 - Corrigido um viés na amostragem do benchmark ClickBench que favorecia os nossos próprios números: a amostra usava as primeiras N linhas do dataset, que é ordenado por tempo — uma fatia temporal estreita, com menos valores distintos do que a realidade, justamente o cenário em que a aceleração colunar mais se destaca. A amostragem passa a percorrer o arquivo inteiro pegando 1 linha a cada K, cobrindo todo o período. A estratégia usada fica registrada no artefato de resultado, e a antiga continua disponível apenas para testes rápidos (#187)
 - O filtro que impede mudanças só-de-documentação de rodar a esteira completa passa a valer também para pull requests, não apenas para pushes diretos. Sem isso, um PR cujo diff era apenas o CHANGELOG reabria os ~14 jobs do runner único (observado no PR #189) (#187)

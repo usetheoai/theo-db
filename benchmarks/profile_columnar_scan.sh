@@ -13,8 +13,9 @@
 # e uma de scan puro — para o veredito não tomar uma query atípica como representativa.
 #
 # Uso: profile_columnar_scan.sh <N_ROWS>   (default 1000000)
-# Saídas em OUT_DIR (default docs/benchmarks/): m148-scan-flamegraph.svg (query lenta),
-#   m148-scanpuro-flamegraph.svg (scan puro), m148-perfstat.txt, m148-folded-*.txt
+# Saídas em OUT_DIR (default /root/m148-out): m148-slow-flamegraph.svg (query lenta) + m148-slow-folded.txt,
+#   m148-scanpuro-flamegraph.svg (scan puro) + m148-scanpuro-folded.txt. O eixo CPU-vs-I/O é derivado dos
+#   folded no fim (não há mais perf-stat anexado — era frágil).
 set -uo pipefail
 N="${1:-1000000}"
 PGINST="${PGINST:-/root/.pgrx/18.4/pgrx-install}"
@@ -87,9 +88,11 @@ SQL
   # anexa o perf ao backend durante a query (a query roda apos o pg_sleep de 1.5s)
   perf record --call-graph dwarf -F 111 -p "$bpid" -o "$DATA/$label.perf" -- sleep 60 >/dev/null 2>&1 || true
   wait $psql_pid 2>/dev/null
-  # EC-1: piso de amostras
+  # EC-1: piso de amostras. `grep -c` já imprime "0" quando não casa (e sai 1); `|| true` evita que o
+  # pipefail propague o exit, sem o `|| echo 0` que duplicava a saída em "0\n0" e quebrava o `-ge` abaixo.
   local nsamples
-  nsamples=$(perf script -i "$DATA/$label.perf" 2>/dev/null | grep -c "^[a-z]" || echo 0)
+  nsamples=$(perf script -i "$DATA/$label.perf" 2>/dev/null | grep -c "^[a-z]" || true)
+  nsamples=${nsamples:-0}
   echo "  amostras: $nsamples"
   [ "$nsamples" -ge 500 ] || fail "$label: perf capturou $nsamples amostras (< 500) — flamegraph seria vacuo (EC-1)"
   # folded + SVG
@@ -97,7 +100,8 @@ SQL
   "$FLAME/flamegraph.pl" --title "M148 $label ($N rows)" "$OUT_DIR/m148-$label-folded.txt" > "$OUT_DIR/m148-$label-flamegraph.svg" 2>/dev/null
   # EC-3: os frames tem simbolos nossos?
   local sym
-  sym=$(grep -c -E "theodb|columnar|decode|zstd" "$OUT_DIR/m148-$label-folded.txt" || echo 0)
+  sym=$(grep -cE "theodb|columnar|decode|zstd" "$OUT_DIR/m148-$label-folded.txt" || true)
+  sym=${sym:-0}
   echo "  frames com simbolo relevante: $sym"
   # top-5 frames por tempo proprio (folded: cada linha "stack count"; o ultimo frame da stack e o self)
   echo "  --- top-5 frames por tempo proprio [$label] ---"

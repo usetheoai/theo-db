@@ -114,5 +114,8 @@ claims de latência comparável** — só para o flamegraph. As latências hones
 PGINST=/root/.pgrx/18.4/pgrx-install FLAME=/root/FlameGraph OUT_DIR=./m148-out \
   bash benchmarks/profile_columnar_scan.sh 500000
 # -> m148-slow-flamegraph.svg, m148-scanpuro-flamegraph.svg, *-folded.txt
-# análise de self-time por alavanca: ver o bloco Python em docs/benchmarks/m148-flamegraph-scan.md (histórico do commit)
+
+# a tabela de self-time por alavanca (acima) é reproduzível dos folded committados, sem rede:
+python3 benchmarks/m148_selftime.py docs/benchmarks/m148-artifacts
+# -> 57.4% alocação + 22.5% materializa-row (M151), 7.2% decode (M149), I/O=0% (scanpuro), cassert descontado
 ```
