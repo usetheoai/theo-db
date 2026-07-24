@@ -14,18 +14,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- A imagem Docker do TheoDB passa a ser publicada no GitHub Container Registry a cada release: `docker pull ghcr.io/usetheodev/theo-db:latest` — o comando que o README e o quickstart já documentavam — agora funciona. Antes nenhum workflow publicava (o CI construía a imagem só para rodar os testes e a descartava), então o primeiro comando da documentação falhava com `manifest unknown`. A publicação valida a própria imagem antes de concluir: baixa, sobe o banco e executa o fluxo do README (extensão, tipo vector, índice ANN) (#187)
-
-### Fixed
-
-- Esteira de CI: cada push empilhava um run novo por workflow e nenhum era cancelado, entupindo a fila do runner (32 runs ativos, processados um a um). Os workflows passam a declarar `concurrency` por workflow+ref, cancelando runs superados da mesma branch — em `main` nunca se cancela, para não abortar um release em andamento
-
-### Changed
-
-- Documentada no `Dockerfile` a razão de a imagem iniciar como root: o entrypoint oficial do PostgreSQL precisa disso para ajustar as permissões do diretório de dados antes de rebaixar privilégio (`gosu postgres`) — o servidor nunca roda como root. Supressão explícita e justificada do aviso de análise estática, em vez de uma mudança que quebraria a inicialização em volumes novos (#182)
-
-### Added
-
 ### Changed
 
 ### Deprecated
@@ -35,6 +23,24 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 ### Security
+
+## [0.139.0] - 2026-07-24
+
+### Added
+
+- A imagem Docker do TheoDB passa a ser publicada no GitHub Container Registry a cada release: `docker pull ghcr.io/usetheodev/theo-db:latest` — o comando que o README e o quickstart já documentavam — agora funciona. Antes nenhum workflow publicava (o CI construía a imagem só para rodar os testes e a descartava), então o primeiro comando da documentação falhava com `manifest unknown`. A publicação valida a própria imagem antes de concluir: baixa, sobe o banco e executa o fluxo do README (extensão, tipo vector, índice ANN) (#187)
+
+
+
+### Changed
+
+- Documentada no `Dockerfile` a razão de a imagem iniciar como root: o entrypoint oficial do PostgreSQL precisa disso para ajustar as permissões do diretório de dados antes de rebaixar privilégio (`gosu postgres`) — o servidor nunca roda como root. Supressão explícita e justificada do aviso de análise estática, em vez de uma mudança que quebraria a inicialização em volumes novos (#182)
+
+
+
+### Fixed
+
+- Esteira de CI: cada push empilhava um run novo por workflow e nenhum era cancelado, entupindo a fila do runner (32 runs ativos, processados um a um). Os workflows passam a declarar `concurrency` por workflow+ref, cancelando runs superados da mesma branch — em `main` nunca se cancela, para não abortar um release em andamento
 
 ## [0.138.0] - 2026-07-24
 
