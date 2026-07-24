@@ -14,6 +14,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Roadmap ampliado: M148 (spike/flamegraph do scan colunar), M149 (projection pushdown), M150 (chunk-group filtering), M151 (ampliar CustomScan vetorizado) — o programa para tornar o pilar colunar competitivo em ClickBench, derivado da análise SOTA (Citus + DuckDB/DataFusion) do gargalo revelado pelo gate 1M pós-#190 (`/roadmap-feature columnar-scan-optimization`)
+
+### Changed
+
+- Roadmap "Fora de escopo" ajustado: removido "Columnar próprio (substituir DuckDB/pg_mooncake)" — a restrição foi superada pelos M99–M143 (theodb_columnar 100% own-code entregue, pg_duckdb removido; ADR-0042/0057), então otimizar o scan é continuação, não reabertura
+
+### Added
+
 - Primeiro benchmark do pilar colunar em dados representativos após o fix do #190 (`docs/benchmarks/clickbench-1m-postfix-2026-07-24.md`): as 43 queries do ClickBench sobre 1M linhas reais carregam e rodam (42 completam byte-idênticas, 1 timeout, 0 erros), mas o resultado honesto mostra que só 6 das 43 engajam a aceleração vetorizada — as demais são lentas, revelando que os números anteriores vinham de uma amostra enviesada. Relatório consolidado da sessão em `docs/benchmarks/RELATORIO-clickbench-sessao-2026-07-24.md` (#190)
 
 ### Fixed

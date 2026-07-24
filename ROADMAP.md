@@ -47,16 +47,14 @@ capacidades-killer são **nossas**, não uma colagem de extensões de terceiros.
 ## Fora de escopo do v2 (honesto)
 
 - **Reescrever o engine PostgreSQL** (ADR 0001 A3 — multi-anos, perde wire-compat/maturidade).
-- **Columnar próprio (substituir DuckDB/`pg_mooncake`)** — reescrever um motor colunar vetorizado é PhD-level
-  e anos (Regra 9). HTAP colunar permanece via a peça permissiva atual **ou** é deferido; não é candidato a
-  "código próprio" no v2 inicial. Reabrir exige ADR.
-  > **Exceção permissiva (Regra 9), decidida no M30 / ADR 0013 (2026-07-03):** `pg_mooncake`/`pg_duckdb` (MIT)
-  > para columnar/HTAP e `pg_textsearch` (permissivo) para BM25 são **mantidos como exceções explícitas** ao
-  > mandato own-code — justificadas por evidência medida (columnar ~14× a 5M (mean±std); BM25 nDCG 0.95 vs 0.51) e por não
-  > haver peça own-code permissiva que resolva (Citus/Hydra columnar são AGPL — barrados por D1). Gated para
-  > adoção; não embarcados ainda.
 - **Reescrever HTTP/serde/crypto/parser genérico** — isso é reinventar a roda (Regra 9). Usamos crates
   auditados mínimos.
+
+> Nota: "Columnar próprio (substituir DuckDB/pg_mooncake)" foi removido de Fora de escopo em 2026-07-24
+> quando M148–M151 foram adicionados (ver CHANGELOG). A restrição — escrita quando o plano era usar
+> pg_duckdb — foi **superada pelos fatos**: M99–M143 já entregaram o `theodb_columnar` 100% own-code e
+> removeram o `pg_duckdb` por completo (ADR-0042/0057). Otimizar o scan desse own-code é continuação do que
+> já foi entregue, não a "reescrita de motor do zero" que a nota barrava.
 
 ---
 
@@ -2599,6 +2597,93 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 **Risks:** (a) regressão de recall/QPS ao unificar o Stage-1 — mitigação: A/B byte-idêntico por-versão obrigatório no DoD. (b) tentação de unificar os CORPOS por-versão (viola ADR-2, risco de misparse→data-loss) — mitigação: escopo trava em dispatch + helpers + Stage-1-in-memory; corpos on-disk intocados.
 
 **Prior art:** issue #170, M145 (metodologia A/B byte-idêntico + válvula honest-negative), `.claude/rules/parsimony-ladder.md` (anti-sunk-cost; per-version = essencial), `knowledge-base/review-archive/theodb-full-core-complete-2026-07-23/review-2026-07-23.md`.
+
+---
+
+## M148 — [ ] Spike: flamegraph do scan colunar — mede o gargalo real (gate measurement-first)
+
+> Added 2026-07-24 (`/roadmap-feature columnar-scan-optimization`). Grill: `.claude/knowledge-base/grills/columnar-scan-optimization-feature-grill.md`. Fonte: gate ClickBench 1M pós-#190 (só 6/43 queries usam pushdown; 36 a ~47s).
+
+**Objective:** identificar, com um flamegraph medido (não hipótese de código), onde vai o tempo de uma query lenta do ClickBench (`columnar_customscan=False`, ~47s) — descompressão zstd vs `heap_deform_tuple` vs I/O — para priorizar M149/M150/M151 com evidência.
+
+**Definition of done:**
+
+- [ ] `perf record -g` num backend durante ≥1 query lenta (q7/q8) sobre 1M linhas reais, num droplet efêmero dedicado (padrão M57), destruído ao fim.
+- [ ] Flamegraph (`cargo flamegraph` ou `perf script | stackcollapse | flamegraph.pl`) commitado em `docs/benchmarks/`, com o top-3 de frames por tempo próprio.
+- [ ] Veredito explícito: qual das 3 técnicas (projection pushdown / chunk-filter / vetorização) ataca o frame dominante — com o % do tempo que cada uma endereçaria.
+- [ ] CHANGELOG `[Unreleased]`.
+
+**Dependencies:** M147 `[x]` (o scan já refatorado) e o fix do #190 (materialização de TOAST, mergeado — a carga só funciona com ele).
+
+**Risks:** (a) o gargalo pode ser I/O e não CPU — mitigação: o flamegraph inclui `wait`/`read` frames, e a medição reporta CPU-bound vs I/O-bound honestamente. (b) profiling de release-build perde símbolos — mitigação: build com `debug=1` no profile de bench.
+
+**Prior art:** `memory/columnar-scan-bottleneck-hypothesis.md`, `docs/benchmarks/clickbench-1m-postfix-2026-07-24.md`, padrão de spike measurement-first M75/M83.
+
+---
+
+## M149 — [ ] Projection pushdown no scan colunar — decodificar só as colunas referenciadas
+
+> Added 2026-07-24 (`/roadmap-feature columnar-scan-optimization`). Grill: `.claude/knowledge-base/grills/columnar-scan-optimization-feature-grill.md`.
+
+**Objective:** fazer `decode_stripe` decodificar apenas as colunas que a query referencia (hoje decodifica as 105 de cada stripe — `columnar.rs:1044`), reduzindo o trabalho de scan em proporção `colunas_usadas / colunas_totais`. Padrão SOTA: Citus columnar projection pushdown.
+
+**Definition of done:**
+
+- [ ] O scan obtém a lista de colunas referenciadas pelo plano (via `scan_begin`/`rs_rd`) e passa a `decode_stripe`; colunas não-referenciadas não são descomprimidas.
+- [ ] A/B byte-idêntico vs heap preservado em TODAS as 43 queries do ClickBench (a projeção não pode mudar resultado).
+- [ ] Benchmark medido: geomean das queries que tocam poucas colunas (ex.: `SELECT col FROM hits`) melhora ≥ 3× vs baseline pós-#190 (`docs/benchmarks/clickbench-1m-postfix-2026-07-24.md`), com o número real (não meta).
+- [ ] Fallback seguro: query que toca todas as colunas ou sem lista disponível decodifica tudo (sem regressão).
+- [ ] CHANGELOG `[Unreleased]`.
+
+**Dependencies:** M148 `[x]` (o flamegraph confirma que decode-de-colunas é frame dominante; se não for, re-priorizar).
+
+**Risks:** (a) a lista de colunas do TableAM pode não refletir colunas usadas em filtros vs projeção — mitigação: unir projeção + qual-columns do `ScanState`. (b) quebrar queries que dependem de todas as colunas — mitigação: A/B nas 43 queries + fallback decode-tudo.
+
+**Prior art:** Citus columnar (README + blog 2021, projection pushdown), `columnar.rs:1026-1044`, M105 (zone-map, infra de directory).
+
+---
+
+## M150 — [ ] Chunk-group filtering no scan — pular chunks por min/max sem descomprimir
+
+> Added 2026-07-24 (`/roadmap-feature columnar-scan-optimization`). Grill: `.claude/knowledge-base/grills/columnar-scan-optimization-feature-grill.md`.
+
+**Objective:** no scan geral (não só no CustomScan de agregação), usar o zone-map min/max já existente (`directory_minmax`, M105 — `columnar.rs:906`) para pular chunks inteiros cujo min/max não satisfaz o predicado da query, sem descomprimi-los. Padrão SOTA: Citus chunk-group filtering (no exemplo deles, 5,9M linhas puladas, 20k lidas).
+
+**Definition of done:**
+
+- [ ] Predicados de igualdade/range da query são empurrados ao scan e comparados contra o min/max por-chunk; chunk que não pode conter match é pulado antes de descomprimir.
+- [ ] Contador de runtime: `chunks_skipped` / `chunks_scanned` observável (métrica da wiring triad).
+- [ ] Benchmark medido: uma query seletiva (ex.: `WHERE EventDate = X`) sobre 1M linhas pula ≥ 80% dos chunks e melhora ≥ 5× vs baseline, com número real.
+- [ ] A/B byte-idêntico vs heap preservado (o skip não pode perder linhas).
+- [ ] CHANGELOG `[Unreleased]`.
+
+**Dependencies:** M149 `[ ]` (projection pushdown primeiro — o maior ganho; e o caminho de decode já terá a estrutura de colunas seletivas). O zone-map `directory_minmax` (M105) já existe — reuso, não reescrita (Regra 9).
+
+**Risks:** (a) min/max por-chunk pode não existir para todos os tipos — mitigação: fallback scan-completo por-tipo (o zone-map já declara tipos suportados). (b) predicados complexos (OR, funções) não são empurráveis — mitigação: empurrar só os simples, resto passa reto.
+
+**Prior art:** Citus chunk-group filtering (blog 2021: 594 chunk-groups pulados, 5,9M linhas), M105 (`columnar-minmax-zonemap`, `directory_minmax`), `columnar.rs:906`.
+
+---
+
+## M151 — [ ] Ampliar a cobertura do CustomScan vetorizado (DataFusion)
+
+> Added 2026-07-24 (`/roadmap-feature columnar-scan-optimization`). Grill: `.claude/knowledge-base/grills/columnar-scan-optimization-feature-grill.md`.
+
+**Objective:** rotear mais classes de query pelo CustomScan DataFusion vetorizado (hoje só 6/43 — agregação simples) em vez do executor row-based tuple-a-tuple, ganhando batches ~2048 + SIMD (padrão DuckDB/DataFusion). O engine Arrow/DataFusion já está no crate (M100 — `datafusion_probe.rs`, `arrow_cache.rs`); o gap é a cobertura do planner.
+
+**Definition of done:**
+
+- [ ] O `CustomScan` passa a cobrir ≥ N classes adicionais de query além de agregação simples (N definido pelo flamegraph do M148 + análise das 36 queries lentas — ex.: filtros, GROUP BY multi-coluna, projeções).
+- [ ] Cobertura medida: das 43 queries do ClickBench, a fração com `columnar_customscan=True` sobe de 6 para ≥ (meta definida no plano, com número real no benchmark).
+- [ ] A/B byte-idêntico vs heap em TODA query roteada ao DataFusion (correção do resultado vetorizado).
+- [ ] Geomean geral do ClickBench 1M melhora vs o baseline pós-#190 (24,5s), com o número real.
+- [ ] CHANGELOG `[Unreleased]`.
+
+**Dependencies:** M149 `[ ]` + M150 `[ ]` (projection + chunk-filter alimentam o scan que o DataFusion consome; e o flamegraph do M148 diz quais queries valem o roteamento). É o mais estruturante — vem por último.
+
+**Risks:** (a) divergência de semântica entre DataFusion e o executor PG (NULLs, collation, overflow) — mitigação: A/B byte-idêntico obrigatório, honest-negative se divergir (não roteia essa classe). (b) custo de conversão heap→Arrow pode comer o ganho em queries pequenas — mitigação: gate por tamanho estimado (só vetoriza acima de um limiar medido).
+
+**Prior art:** DuckDB (execução vetorizada, batches ~2048, MotherDuck 2024), Apache DataFusion (columnar scan), M100 (`datafusion_probe.rs`, `arrow_cache.rs`, ADR do CustomScan), `columnar_customscan`.
 
 ---
 
