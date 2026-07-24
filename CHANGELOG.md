@@ -14,6 +14,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- M148 — flamegraph do scan colunar mede o gargalo real e prioriza os M149/M150/M151 por evidência (`docs/benchmarks/m148-flamegraph-scan.md` + harness `benchmarks/profile_columnar_scan.sh`): sobre o ClickBench `hits` real (105 colunas), o scan colunar é 100% CPU-bound e ~80% do tempo é a materialização de cada linha como heap-tuple (`palloc`+`heap_form_tuple` por linha) — a descompressão das colunas é só ~7%. Isso **corrige** a hipótese inicial (que supunha o decode dominante) e define a sequência M149 (projection pushdown, reduz a materialização) → M151 (execução vetorizada, elimina o heap-tuple por-linha) → M150 (chunk-filter, condicional a workload seletivo). Medição com piso de 500 amostras (o gate que impede um flamegraph vácuo) e confound de `cassert` descontado honestamente (M148)
 - Roadmap ampliado: M148 (spike/flamegraph do scan colunar), M149 (projection pushdown), M150 (chunk-group filtering), M151 (ampliar CustomScan vetorizado) — o programa para tornar o pilar colunar competitivo em ClickBench, derivado da análise SOTA (Citus + DuckDB/DataFusion) do gargalo revelado pelo gate 1M pós-#190 (`/roadmap-feature columnar-scan-optimization`)
 
 ### Changed

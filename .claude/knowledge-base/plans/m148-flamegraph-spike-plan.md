@@ -7,7 +7,7 @@ goal: Produzir um flamegraph medido de uma query lenta do ClickBench sobre o the
 
 # Plan: M148 — Flamegraph do scan colunar (spike measurement-first)
 
-**Versão:** v1.0 · **Milestone:** M148 · **Tipo:** SPIKE (Phase 4 do `/theodb-evolution` — falsifiable spike,
+**Versão:** v1.1 (edge-case MUST FIX absorvido) · **Milestone:** M148 · **Tipo:** SPIKE (Phase 4 do `/theodb-evolution` — falsifiable spike,
 termina com veredito) · **Data:** 2026-07-24
 
 ## Goal
@@ -130,8 +130,15 @@ evidência (Regra 5, `public-copy.md`). O padrão vem do SOTA (Jan Nidzwetzki).
 - `grep -c 'theodb\|columnar\|decode' docs/benchmarks/m148-scan-flamegraph.svg` retorna **> 0** (símbolos resolvidos, não endereços crus).
 - `perf stat -e cycles,instructions,cache-misses` da query alvo é capturado em `docs/benchmarks/m148-perfstat.txt`.
 
+#### Edge cases absorvidos (do review 2026-07-24)
+- **EC-1 (MUST FIX):** o harness ABORTA se `perf script -i data.perf | wc -l` < 500 amostras — evita
+  veredito sobre um flamegraph vazio (o análogo do harness vácuo do #190). Query alvo de ≥40s garante janela.
+- **EC-3:** se um frame dominante vier sem símbolo (zstd dinâmico), o doc o nomeia honestamente
+  ("descompressão (zstd, símbolo ausente)"), não omite o maior frame.
+
 #### DoD
-SVG gerado com símbolos + `perf stat` capturado, ambos reproduzíveis pelo script.
+SVG gerado com símbolos + `perf stat` capturado + **≥ 500 amostras** no `perf.data`, tudo reproduzível pelo
+script.
 
 ### T1.2 — Veredito priorizando M149/M150/M151
 
@@ -154,8 +161,16 @@ SVG gerado com símbolos + `perf stat` capturado, ambos reproduzíveis pelo scri
 - O doc declara `CPU_BOUND` ou `IO_BOUND` citando o `ipc` e `cache-misses` do `perf stat` (ex.: ipc<0.5 + cache-miss alto = memory-bound).
 - Se o frame dominante for `nao-coberto` (ex.: alloc/memcpy/WAL), o doc diz isso explicitamente e recomenda re-scoping de M149-M151 — honest-negative, não força um mapeamento.
 
+#### Edge cases absorvidos (do review 2026-07-24)
+- **EC-2 (SHOULD TEST):** profilar DUAS queries — a mais lenta (q33/q34) E uma de scan puro (q1/projeção
+  simples). Se o frame dominante da q33 for `regexp_replace` (função do PG, não nosso scan), o veredito
+  declara que essa query não é representativa e usa a de scan puro para priorizar. Obrigatório, não opcional.
+- **EC-4 (DOCUMENT):** o % é do box de medição (c-8 DO); a ORDEM relativa dos frames é o entregável, não o
+  valor absoluto.
+
 #### DoD
-Doc commitado; a ordem de M149/M150/M151 no ROADMAP é confirmada ou reajustada com base nele.
+Doc commitado com o veredito das DUAS queries; a ordem de M149/M150/M151 no ROADMAP é confirmada ou
+reajustada com base nele.
 
 ## Coverage Matrix
 
@@ -165,6 +180,8 @@ Doc commitado; a ordem de M149/M150/M151 no ROADMAP é confirmada ou reajustada 
 | Flamegraph commitado com top-3 de frames por tempo próprio | T1.1, T1.2 |
 | Veredito: qual técnica ataca o frame dominante + % | T1.2 |
 | CPU-bound vs I/O-bound (R1) | T1.1, T1.2 |
+| Harness aborta em medição vazia (EC-1) | T1.1 |
+| Duas queries profiladas (EC-2) | T1.2 |
 | CHANGELOG `[Unreleased]` | T1.2 |
 
 Cobertura: **5/5 = 100%**.
