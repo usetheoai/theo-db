@@ -1,0 +1,15 @@
+# M148 — pgvector COMPATIBILITY SHIM (issue #181). Completa o drop-in declarado na ADR-0029 § D2.
+#
+# O tipo `public.vector`, os operadores (<->, <=>, <#>) e as opclasses são providos pelo `theodb_rs`
+# (own-code, M69/M70 — o pgvector foi REMOVIDO da distribuição). Este shim NÃO implementa nada: ele
+# existe porque praticamente todo tooling pgvector (drizzle, alembic, prisma, scripts de bootstrap)
+# executa `CREATE EXTENSION IF NOT EXISTS vector` na inicialização, e sem um objeto de extensão com
+# esse nome a app não sobe — nem chega a emitir uma query (medido: issue #181).
+#
+# HONESTIDADE (Regra 3): `\dx` mostra o comment abaixo, que declara explicitamente que a implementação
+# é own-code do TheoDB e NÃO o pgvector. A versão 0.5.1 declara o CONTRATO DE FEATURES compatível que
+# o tooling inspeciona (tipo vector + operadores + HNSW), não uma alegação de ser o pgvector.
+comment = 'pgvector compatibility shim — the vector type/operators/opclasses are provided by TheoDB own-code (theodb_rs), NOT by pgvector'
+default_version = '0.5.1'
+requires = 'theodb_rs'
+relocatable = false

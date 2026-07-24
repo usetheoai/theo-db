@@ -59,6 +59,11 @@ RUN apt-get update && \
 # into the PG extension dir. SQL-only install is a plain copy. M70: `theodb.control` requires `theodb_rs` (o flip —
 # theodb_rs provê o tipo `vector` + os schemas theodb/ai); NÃO há mais dep de vector/vectorscale.
 COPY theodb.control /tmp/theodb/theodb.control
+# M148 (#181) — o shim de compatibilidade `vector`: toda app pgvector roda `CREATE EXTENSION IF NOT
+# EXISTS vector` no bootstrap (drizzle/alembic/prisma/scripts). Sem um objeto de extensão com esse nome
+# a app NÃO sobe — nem chega a emitir uma query. O shim não implementa nada (o tipo/operadores/opclasses
+# são own-code do theodb_rs); ele completa o drop-in declarado na ADR-0029 § D2 no nível tooling.
+COPY vector.control /tmp/theodb/vector.control
 COPY sql/ /tmp/theodb/sql/
 RUN set -eux; \
     cd /tmp/theodb; \
@@ -67,6 +72,8 @@ RUN set -eux; \
         sql/80-theodb-migrate.sql sql/85-theodb-htap.sql > sql/theodb--1.0.sql; \
     install -m 0644 theodb.control sql/theodb--1.0.sql sql/theodb--1.0--1.1.sql sql/theodb--1.1--1.2.sql \
         sql/theodb--1.2--1.3.sql sql/theodb--1.3--1.4.sql sql/theodb--1.4--1.5.sql sql/theodb--1.5--1.6.sql \
+        "/usr/share/postgresql/$PG_MAJOR/extension/"; \
+    install -m 0644 vector.control sql/vector--0.5.1.sql \
         "/usr/share/postgresql/$PG_MAJOR/extension/"; \
     rm -rf /tmp/theodb
 
