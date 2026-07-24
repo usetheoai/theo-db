@@ -12,6 +12,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Descoberto e registrado um defeito que impede carregar dados reais no armazenamento colunar: inserções sucessivas falham quando os dados contêm valores de texto grandes (acima de ~2 KB), com a tabela podendo ficar ilegível após o erro. O problema passou despercebido até agora porque a amostragem de benchmark usava uma fatia estreita do dataset, sem valores desse tamanho. Documentado em `docs/benchmarks/clickbench-scale-gate-2026-07-24.md`, com o impacto sobre a leitura dos números anteriores declarado honestamente (#190)
+
 ### Added
 
 - Previsão de budget do programa de benchmark oficial (`docs/benchmarks/clickbench-official-budget.md`): custo atual da infraestrutura medido via API de faturamento, custo por etapa com preços reais consultados na AWS, e os guardrails adotados para que nenhuma máquina temporária fique ligada por esquecimento (#187)
