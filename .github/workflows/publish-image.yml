@@ -1,0 +1,106 @@
+name: publish-image
+
+# #187 — a imagem do TheoDB nunca foi publicada: o README e o quickstart mandam
+# `docker pull ghcr.io/usetheodev/theo-db:latest`, que falhava com `manifest unknown`. O `ci.yml`
+# constrói a imagem seis vezes, mas sempre com `load: true` + tag local (`theo-db:dev`) — para rodar os
+# testes e descartar. Este workflow é o único que PUBLICA.
+#
+# Disparo por TAG semver: o projeto já corta `vX.Y.Z` a cada release (cycle-release), então a tag é o
+# sinal natural de "este commit é uma versão". Publicar em todo push de develop encheria o registry de
+# artefatos efêmeros; publicar por tag amarra 1 imagem = 1 release, rastreável ao PR e ao GitHub release.
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag semver a publicar (ex.: v0.138.0). Deve existir no repo.'
+        required: true
+
+# `main` nunca cancela e uma publicação em andamento também não: abortar um push de imagem pela metade
+# deixa manifesto parcial no registry. Grupo por tag, sem cancelamento.
+concurrency:
+  group: publish-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: [self-hosted, theodb-do]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # workflow_dispatch passa a tag explicitamente; o disparo por push já vem no ref.
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Derivar a versão da tag
+        id: meta
+        run: |
+          set -euo pipefail
+          RAW="${{ github.event.inputs.tag || github.ref_name }}"
+          # aceita apenas semver com prefixo v — evita publicar de um ref inesperado
+          if ! printf '%s' "$RAW" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::ref '$RAW' não é uma tag semver vX.Y.Z — recusando publicar"
+            exit 1
+          fi
+          echo "version=${RAW#v}" >> "$GITHUB_OUTPUT"
+          echo "tag=$RAW" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login no GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Mesmo build do ci.yml (mesmo contexto, mesmo cache) — a imagem publicada é bit-a-bit a que os
+      # testes exercitaram. amd64 apenas: o runner é amd64 e emular arm64 via QEMU multiplicaria o tempo
+      # de build numa fila já disputada. Multi-arch quando houver demanda real (YAGNI).
+      - name: Build e push para o GHCR
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ steps.meta.outputs.version }}
+            ghcr.io/${{ github.repository }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Gate de verdade: puxar a imagem recém-publicada e provar que ela SOBE e responde — não basta o
+      # push retornar 0. É o mesmo princípio do #181/#182: exercitar o caminho do usuário, não o do build.
+      - name: Verificar a imagem publicada (pull + boot + query)
+        run: |
+          set -euo pipefail
+          IMG="ghcr.io/${{ github.repository }}:${{ steps.meta.outputs.version }}"
+          docker image rm -f "$IMG" 2>/dev/null || true
+          docker pull "$IMG"
+          docker run -d --name theodb_verify -e POSTGRES_PASSWORD=postgres "$IMG"
+          for i in $(seq 1 60); do
+            if docker exec theodb_verify pg_isready -U postgres >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          # o caminho do README: extensão presente, tipo próprio, índice ANN e o shim pgvector (#181/#182)
+          docker exec theodb_verify psql -U postgres -v ON_ERROR_STOP=1 -c "
+            CREATE EXTENSION IF NOT EXISTS vector;
+            CREATE TABLE t(id int, e vector(3));
+            INSERT INTO t VALUES (1,'[1,1,1]');
+            CREATE INDEX ON t USING hnsw (e vector_cosine_ops);
+            SELECT round((e <-> '[2,2,2]'::vector)::numeric,4) AS dist FROM t;"
+          docker rm -f theodb_verify
+
+      - name: Resumo
+        run: |
+          echo "### Imagem publicada" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "docker pull ghcr.io/${{ github.repository }}:${{ steps.meta.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "docker pull ghcr.io/${{ github.repository }}:latest" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
