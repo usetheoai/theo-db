@@ -6,6 +6,7 @@ Other methods still stubs (T3.1) — T4.3 ADR DEFER for mutation.
 """
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -16,6 +17,96 @@ from scripts.check_symbol_fab import extract_imports_and_calls
 from . import BaseDetector
 
 _RUST_MODULE_LOCAL_PREFIXES = ("crate::", "self::", "super::", "crate", "self", "super")
+
+# Crates that ship WITH the toolchain and are therefore never published on crates.io. Looking them up
+# there answers "not found", which the D2 rubric would read as symbol fabrication — so a file containing
+# `use std::collections::HashMap` scored FAIL_HARD. Measured on theo-db 2026-07-23: 117/117 D2 findings
+# were false positives of exactly this shape (mostly `std`, plus `core` and same-crate modules).
+_RUST_BUILTIN_CRATES = frozenset(
+    {"std", "core", "alloc", "proc_macro", "test", "Self", "_"}
+)
+
+
+def _local_module_names(src_text: str) -> set[str]:
+    """Names declared as modules IN THIS FILE (`mod foo;` / `mod foo {` / `pub mod foo`).
+
+    A `use foo::Bar` whose first segment is one of these resolves inside the crate, not on crates.io —
+    the same reason `crate::`/`self::`/`super::` are skipped. Without this, an `examples/` binary that
+    `#[path]`-includes a module (the project's convention for testing PG-free logic) is reported as
+    importing a fabricated crate.
+    """
+    return set(re.findall(r"^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+([A-Za-z_][A-Za-z0-9_]*)", src_text, re.M))
+
+
+def _workspace_crate_names(start: Path) -> set[str]:
+    """`[package] name` of every Cargo.toml at or above `start` and in its workspace siblings.
+
+    A path/workspace dependency (e.g. `theodb_lexical`) is a crate of THIS repo and is not published on
+    crates.io — looking it up there answers "not found", which the rubric would read as fabrication.
+    Walks up to the workspace root, then scans its subtree (bounded to Cargo.toml files, skipping
+    `target/`), so members declared by glob are covered without parsing the manifest's TOML.
+    """
+    names: set[str] = set()
+    root: Path | None = None
+    for parent in [start, *start.parents]:
+        manifest = parent / "Cargo.toml"
+        if manifest.is_file():
+            root = parent
+            try:
+                if "[workspace]" in manifest.read_text(encoding="utf-8", errors="replace"):
+                    break
+            except OSError:
+                break
+    if root is None:
+        return names
+    for manifest in root.rglob("Cargo.toml"):
+        if "target" in manifest.parts:
+            continue
+        try:
+            text = manifest.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        m = re.search(r'^\s*name\s*=\s*"([^"]+)"', text, re.M)
+        if m:
+            names.add(m.group(1).replace("-", "_"))
+            names.add(m.group(1))
+    return names
+
+
+def _in_scope_names(src_text: str) -> set[str]:
+    """Last segments of the other `use` statements in this file — names already brought into scope.
+
+    `use pgrx::pg_sys;` followed by `use pg_sys::XactEvent as XE;` is a re-scoped module path, not a
+    second crate. Treating the first segment as a crate name reports `pg_sys` as fabricated.
+    """
+    names: set[str] = set()
+    for stmt in re.findall(r"^\s*(?:pub(?:\([^)]*\))?\s+)?use\s+([^;{]+)", src_text, re.M):
+        tail = stmt.strip().rstrip(":").split("::")[-1].strip()
+        tail = tail.split(" as ")[0].strip()
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", tail):
+            names.add(tail)
+    return names
+
+
+def _has_glob_import(src_text: str) -> bool:
+    """Does this file contain a glob import (`use x::*;`)?
+
+    A glob brings names into scope that no static scan can enumerate — `use pgrx::prelude::*;` is what
+    makes `use pg_sys::XactEvent as XE;` legal three lines later. In such a file the detector CANNOT
+    prove a first segment is a crate rather than a glob-imported module, so the honest severity is
+    SOFT_FLOOR ("could not verify"), never HARD ("fabricated"). Claiming fabrication here would be the
+    detector asserting something it did not establish.
+    """
+    return re.search(r"^\s*(?:pub(?:\([^)]*\))?\s+)?use\s+[^;]*::\*\s*;", src_text, re.M) is not None
+
+
+def _normalize_use_module(module: str) -> str:
+    """Strip visibility/keyword noise the extractor can leave on a re-export (`pub use cache::X`)."""
+    m = module.strip()
+    for prefix in ("pub(crate) use ", "pub(super) use ", "pub use ", "use "):
+        if m.startswith(prefix):
+            m = m[len(prefix) :].strip()
+    return m
 
 _CARGO_UDEPS_TIMEOUT_SEC = 180
 
@@ -75,10 +166,17 @@ class RustDetector(BaseDetector):
             if not src_file.exists():
                 continue
             rel = to_rel_path(src_file)
+            try:
+                src_text = src_file.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                src_text = ""
+            local_mods = _local_module_names(src_text) | _in_scope_names(src_text)
+            local_mods |= _workspace_crate_names(src_file.parent)
+            undecidable = _has_glob_import(src_text)
             for sym in extract_imports_and_calls(src_file, "rust"):
                 if sym.kind != "import":
                     continue
-                module = sym.module
+                module = _normalize_use_module(sym.module or "")
                 if not module:
                     continue
                 # EC-17 analog — module-local
@@ -88,11 +186,30 @@ class RustDetector(BaseDetector):
                 crate = module.split("::", 1)[0].strip()
                 if not crate:
                     continue
+                # Toolchain crates are not on crates.io, and a module declared in THIS file resolves
+                # inside the crate — neither is a fabricated symbol.
+                if crate in _RUST_BUILTIN_CRATES or crate in local_mods:
+                    continue
                 exists = _registry.crate_exists_on_crates_io(crate)
                 if exists is True:
                     continue
                 sanitized = sanitize_symbol(crate)
-                if exists is False:
+                if exists is False and undecidable:
+                    findings.append(
+                        Finding(
+                            detector="d2_symbol_fab",
+                            language="rust",
+                            severity="SOFT_FLOOR",
+                            file_path=rel,
+                            symbol_or_line=f"use {module}",
+                            message=(
+                                f"Could not verify '{crate}': not on crates.io, but this file has a "
+                                "glob import, so it may be a glob-imported module"
+                            ),
+                            allowlist_key=f"rust|{rel}|symbol_fab|symbol_fab_unverifiable_{sanitized}",
+                        )
+                    )
+                elif exists is False:
                     findings.append(
                         Finding(
                             detector="d2_symbol_fab",
