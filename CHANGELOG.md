@@ -12,6 +12,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Documentada no `Dockerfile` a razão de a imagem iniciar como root: o entrypoint oficial do PostgreSQL precisa disso para ajustar as permissões do diretório de dados antes de rebaixar privilégio (`gosu postgres`) — o servidor nunca roda como root. Supressão explícita e justificada do aviso de análise estática, em vez de uma mudança que quebraria a inicialização em volumes novos (#182)
+
 ### Added
 
 ### Changed

@@ -39,6 +39,13 @@ RUN cd /tmp/theodb_rs && cargo pgrx install --release --features pg$PG_MAJOR
 
 # ---- Stage 2: runtime (postgres:18 + theodb_rs) — SEM pgvector/pgvectorscale (M70); SEM pg_duckdb (M143) ----
 # O lakehouse é own-code no theodb_rs (DataFusion/Arrow) — nenhum componente C++/httpfs. ADR-0057.
+#
+# NOSONAR (docker:S6471 — "the postgres image runs with root as the default user"): supressão DELIBERADA e
+# justificada, não um gate ignorado. O entrypoint oficial da imagem `postgres` PRECISA iniciar como root
+# para ajustar as permissões do PGDATA (chown do volume no primeiro boot) e só então rebaixar o privilégio
+# via `gosu postgres` — o servidor NUNCA roda como root. Declarar `USER postgres` aqui quebraria o initdb
+# em volumes novos, trocando um falso-positivo de análise estática por uma falha real de produto. Quem
+# quiser fixar o usuário no deploy pode passar `--user` no `docker run` sobre um volume já provisionado.
 FROM ${BASE_IMAGE}
 ARG PG_MAJOR=18
 
