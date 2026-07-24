@@ -13,6 +13,13 @@ on:
     paths: ['theodb_rs/Cargo.toml', 'theodb_rs/Cargo.lock', 'theodb_rs/deny.toml']
   push:
     branches: [develop]
+    # #187 — o runner é ÚNICO e serial: cada push dispara ~14 jobs de ~45min (≈10h de fila).
+    # Mudanças só de documentação/artefatos de agente não exercitam código e não podem consumir
+    # essa capacidade. Mesmo padrão do theo-memory/theo-rag.
+    paths-ignore:
+      - '.claude/**'
+      - '**/*.md'
+      - 'docs/**'
     paths: ['theodb_rs/Cargo.toml', 'theodb_rs/Cargo.lock', 'theodb_rs/deny.toml']
 
 # Fila do runner self-hosted (2026-07-24): sem `concurrency`, cada push empilhava um run novo por

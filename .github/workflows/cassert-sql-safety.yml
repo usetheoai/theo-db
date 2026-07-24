@@ -15,9 +15,23 @@ name: cassert-sql-safety
 on:
   push:
     branches: [develop, main]
+    # #187 — o runner é ÚNICO e serial: cada push dispara ~14 jobs de ~45min (≈10h de fila).
+    # Mudanças só de documentação/artefatos de agente não exercitam código e não podem consumir
+    # essa capacidade. Mesmo padrão do theo-memory/theo-rag.
+    paths-ignore:
+      - '.claude/**'
+      - '**/*.md'
+      - 'docs/**'
     paths: ['theodb_rs/src/**', 'theodb_rs/Cargo.*', 'scripts/cassert-smoke.sh', '.github/workflows/cassert-sql-safety.yml']
   pull_request:
     branches: [develop, main]
+    # Mesma razão do `push` acima: um PR cujo diff é só documentação não pode consumir ~14 jobs de
+    # ~45min do runner único. Sem isto, o gate de `pull_request` reabria toda a esteira para um commit
+    # de CHANGELOG (observado no PR #189).
+    paths-ignore:
+      - '.claude/**'
+      - '**/*.md'
+      - 'docs/**'
     paths: ['theodb_rs/src/**', 'theodb_rs/Cargo.*', 'scripts/cassert-smoke.sh', '.github/workflows/cassert-sql-safety.yml']
 
 permissions:

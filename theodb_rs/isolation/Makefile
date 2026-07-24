@@ -33,4 +33,8 @@ check-corrupt:
 check-compat:
 	bash pgvector_compat_check.sh
 
-.PHONY: check-isolation check-crash check-corrupt check-compat
+# #190 — INSERT no colunar com valores TOAST. RED enquanto o defeito existir.
+check-toast:
+	bash columnar_toast_check.sh
+
+.PHONY: check-isolation check-crash check-corrupt check-compat check-toast

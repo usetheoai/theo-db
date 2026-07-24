@@ -14,7 +14,10 @@ A query unsupported by theodb_columnar is recorded ERRORED with its typed messag
 """
 import argparse
 import json
+import math
 import os
+import re
+import shlex
 import subprocess
 import sys
 import time
@@ -68,14 +71,48 @@ def _load_queries():
         return [q.strip() for q in fh.read().split("\n") if q.strip() and not q.strip().startswith("--")]
 
 
-def _ensure_sample(path: str, n_rows: int) -> bool:
-    """Stream hits.tsv.gz and keep the first n_rows (curl | zcat | head — never downloads the full ~100 GB)."""
+# ClickBench `hits` tem 99.997.497 linhas (número publicado pelo próprio ClickBench). Usado só para
+# derivar o passo da amostragem sistemática — nunca para afirmar que rodamos a escala completa.
+HITS_TOTAL_ROWS = 99_997_497
+
+
+def _ensure_sample(path: str, n_rows: int, strategy: str = "systematic") -> bool:
+    """Stream hits.tsv.gz e materializa n_rows — nunca baixa os ~100 GB para disco.
+
+    DUAS estratégias, com um viés real separando-as:
+
+    - `head` (rápido): mantém as PRIMEIRAS n linhas. O `hits` está ordenado por EventTime, então isto é
+      uma fatia temporal estreita, NÃO uma amostra. As cardinalidades de GROUP BY (UserID, WatchID…)
+      ficam artificialmente baixas, o que **favorece** os nossos números — agregação sobre poucos grupos
+      distintos é justamente o regime em que o pushdown vetorizado brilha. Serve para smoke-test, não
+      para uma medição que se queira honesta.
+    - `systematic` (default): mantém 1 linha a cada `k = HITS_TOTAL_ROWS / n_rows`, varrendo o arquivo
+      inteiro. Cobre todo o intervalo temporal, então as cardinalidades se aproximam das reais. CUSTO
+      HONESTO: precisa descomprimir o stream completo (~100 GB) mesmo para amostras pequenas — o `head`
+      encerra cedo, este não. É o preço de não enviesar o resultado a nosso favor.
+    """
     if os.path.isfile(path) and os.path.getsize(path) > 0:
         return True
+    if strategy not in ("head", "systematic"):
+        raise ValueError(f"estratégia de amostragem desconhecida: {strategy!r}")
     try:
-        print(f"  streaming {n_rows} hits rows → {path} (CC-BY-NC-SA, CI-only) …", flush=True)
-        cmd = f"curl -sL -A '{_UA}' '{HITS_TSV_GZ}' | zcat | head -n {int(n_rows)} > {path}"
-        subprocess.run(["bash", "-c", cmd], check=True, timeout=1800)
+        n = int(n_rows)
+        if strategy == "head":
+            print(f"  streaming {n} hits rows (HEAD — fatia temporal enviesada) → {path}", flush=True)
+            inner = f"head -n {n}"
+            timeout = 1800
+        else:
+            k = max(1, HITS_TOTAL_ROWS // n)
+            print(f"  streaming {n} hits rows (SISTEMÁTICA 1-em-{k}, varre o arquivo inteiro) → {path}",
+                  flush=True)
+            # NR % k para espalhar ao longo do arquivo; head no fim é apenas a trava de contagem exata
+            # (a divisão inteira pode render 1 linha a mais).
+            inner = f"awk 'NR % {k} == 0' | head -n {n}"
+            timeout = 21600  # varrer ~100 GB comprimidos leva horas em rede comum
+        # `path` vem do CLI (--cache) → shlex.quote contra injeção de shell (CWE-78). `inner` só contém
+        # inteiros (n, k) e literais fixos; `_UA`/`HITS_TSV_GZ` são constantes.
+        cmd = f"curl -sL -A '{_UA}' '{HITS_TSV_GZ}' | zcat | {inner} > {shlex.quote(path)}"
+        subprocess.run(["bash", "-c", cmd], check=True, timeout=timeout)
         return os.path.isfile(path) and os.path.getsize(path) > 0
     except Exception as e:
         print(f"  hits stream failed: {e}")
@@ -107,14 +144,57 @@ def _canonical(rows):
     return sorted([tuple(str(c) for c in r) for r in (rows or [])])
 
 
+def _bench_query(cur, conn, i, sql, assert_byte_identical) -> dict:
+    """Mede UMA query do ClickBench: timing 3× (cold+hot), plano (CustomScan?) e o oráculo A/B
+    byte-idêntico (columnar vs heap). Retorna o entry; os contadores são derivados dos entries em `run`."""
+    entry = {"q": i, "sql": sql[:60]}
+    # timing 3× (cold flush before run 1)
+    try:
+        triple = []
+        for run_i in range(3):
+            if run_i == 0:
+                _flush_caches()
+            dt, _rows = _run_once(cur, sql)
+            triple.append(round(dt, 4))
+        entry["timings"] = triple
+        entry["cold"], entry["hot"] = triple[0], min(triple[1], triple[2])
+    except Exception as e:
+        conn.rollback() if not conn.autocommit else None
+        entry["error"] = str(e).splitlines()[0][:120]
+        return entry
+    # plan: columnar CustomScan vs native
+    try:
+        cur.execute("EXPLAIN (FORMAT TEXT) " + sql)
+        plan = "\n".join(r[0] for r in cur.fetchall())
+        entry["columnar_customscan"] = "theodb_columnar_agg" in plan or "Custom Scan" in plan
+    except Exception:
+        entry["columnar_customscan"] = None
+    # byte-identical result A/B: columnar vs heap. Strip the trailing `LIMIT N` first: ClickBench's
+    # `... ORDER BY count DESC LIMIT 10` has many tied counts on a subsample, so the LIMIT cut picks an
+    # ARBITRARY-but-valid 10 among the ties — a legitimate scan-order difference, NOT a storage bug. Comparing
+    # the FULL (unlimited) deterministic aggregation is the real columnar-storage correctness oracle.
+    ab_sql = re.sub(r"\s+LIMIT\s+\d+\s*;?\s*$", "", sql.rstrip().rstrip(";"))
+    try:
+        cur.execute(ab_sql); rc = _canonical(cur.fetchall())
+        cur.execute(ab_sql.replace("hits", "hits_heap")); rh = _canonical(cur.fetchall())
+        r = assert_byte_identical({j: rc[j] for j in range(len(rc))}, {j: rh[j] for j in range(len(rh))}) \
+            if len(rc) == len(rh) else {"identical": False, "diverged": abs(len(rc) - len(rh))}
+        entry["result_ab_identical"] = r["identical"]
+    except Exception as e:
+        entry["result_ab_identical"] = None
+        entry["result_ab_note"] = str(e).splitlines()[0][:80]
+    return entry
+
+
 def run(args) -> dict:
-    base = {"dataset": "clickbench-hits", "n_rows": args.n, "box": "self-hosted (NOT canonical c6a.4xlarge)",
+    base = {"dataset": "clickbench-hits", "n_rows": args.n, "sample_strategy": args.sample,
+            "box": "self-hosted (NOT canonical c6a.4xlarge)",
             "protocol": "3 runs/query: cold=1st (cache-flushed), hot=min-of-2"}
     if not ensure_entry_sql():
         return {**base, "status": "UNBENCHMARKED", "reason": "ClickBench create/queries SQL unavailable", "queries": None}
     sample = os.path.join(args.cache, "hits_sample.tsv")
     os.makedirs(args.cache, exist_ok=True)
-    if not _ensure_sample(sample, args.n):
+    if not _ensure_sample(sample, args.n, args.sample):
         return {**base, "status": "UNBENCHMARKED", "reason": "hits dataset unavailable", "queries": None}
 
     conn = _conn(); conn.autocommit = True
@@ -146,60 +226,24 @@ def run(args) -> dict:
     cur.execute(f"SET statement_timeout = '{int(args.query_timeout_s) * 1000}'")
 
     queries = _load_queries()
-    results, ab_pass, ab_diverged, errored, customscan = [], 0, 0, 0, 0
     from theodb_bench.regression import assert_byte_identical  # reuse the M127 byte-identical comparator
 
+    results = []
     for i, sql in enumerate(queries):
-        entry = {"q": i, "sql": sql[:60]}
-        # timing 3× (cold flush before run 1)
-        try:
-            triple = []
-            for run_i in range(3):
-                if run_i == 0:
-                    _flush_caches()
-                dt, _rows = _run_once(cur, sql)
-                triple.append(round(dt, 4))
-            entry["timings"] = triple
-            entry["cold"], entry["hot"] = triple[0], min(triple[1], triple[2])
-        except Exception as e:
-            conn.rollback() if not conn.autocommit else None
-            entry["error"] = str(e).splitlines()[0][:120]
-            errored += 1
-            results.append(entry); continue
-        # plan: columnar CustomScan vs native
-        try:
-            cur.execute("EXPLAIN (FORMAT TEXT) " + sql)
-            plan = "\n".join(r[0] for r in cur.fetchall())
-            entry["columnar_customscan"] = "theodb_columnar_agg" in plan or "Custom Scan" in plan
-            customscan += 1 if entry["columnar_customscan"] else 0
-        except Exception:
-            entry["columnar_customscan"] = None
-        # byte-identical result A/B: columnar vs heap. Strip the trailing `LIMIT N` first: ClickBench's
-        # `... ORDER BY count DESC LIMIT 10` has many tied counts on a subsample, so the LIMIT cut picks an
-        # ARBITRARY-but-valid 10 among the ties — a legitimate scan-order difference, NOT a storage bug. Comparing
-        # the FULL (unlimited) deterministic aggregation is the real columnar-storage correctness oracle.
-        import re as _re
-        ab_sql = _re.sub(r"\s+LIMIT\s+\d+\s*;?\s*$", "", sql.rstrip().rstrip(";"))
-        try:
-            cur.execute(ab_sql); rc = _canonical(cur.fetchall())
-            cur.execute(ab_sql.replace("hits", "hits_heap")); rh = _canonical(cur.fetchall())
-            r = assert_byte_identical({j: rc[j] for j in range(len(rc))}, {j: rh[j] for j in range(len(rh))}) \
-                if len(rc) == len(rh) else {"identical": False, "diverged": abs(len(rc) - len(rh))}
-            entry["result_ab_identical"] = r["identical"]
-            ab_pass += 1 if r["identical"] else 0
-            ab_diverged += 0 if r["identical"] else 1
-        except Exception as e:
-            entry["result_ab_identical"] = None
-            entry["result_ab_note"] = str(e).splitlines()[0][:80]
+        entry = _bench_query(cur, conn, i, sql, assert_byte_identical)
         results.append(entry)
         print(f"  q{i:>2} cold={entry.get('cold','ERR')} hot={entry.get('hot','ERR')} "
               f"cs={entry.get('columnar_customscan')} ab={entry.get('result_ab_identical')}", flush=True)
     cur.close(); conn.close()
 
+    # Contadores derivados dos entries (uma passada — mais simples que contar dentro do loop).
     ok = [e for e in results if "timings" in e]
+    errored = sum(1 for e in results if "error" in e)
+    customscan = sum(1 for e in results if e.get("columnar_customscan"))
+    ab_pass = sum(1 for e in results if e.get("result_ab_identical") is True)
+    ab_diverged = sum(1 for e in results if e.get("result_ab_identical") is False)
     geomean = None
     if ok:
-        import math
         geomean = round(math.exp(sum(math.log(max(e["hot"], 1e-6)) for e in ok) / len(ok)), 5)
     return {
         **base, "status": "OK", "n_queries": len(queries), "queries_ok": len(ok), "queries_errored": errored,
@@ -218,6 +262,11 @@ def run(args) -> dict:
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--n", type=int, default=1_000_000, help="hits subsample rows")
+    ap.add_argument("--sample", choices=["systematic", "head"], default="systematic",
+                    help="systematic (default): 1-em-k varrendo o arquivo inteiro — cobre todo o intervalo "
+                         "temporal, cardinalidades realistas, custa o stream completo (~100 GB). "
+                         "head: as primeiras n linhas — rapido, mas fatia temporal ENVIESADA que infla o "
+                         "ganho do pushdown (poucos grupos distintos). Use head so para smoke-test.")
     ap.add_argument("--cache", default="benchmarks/.cache")
     ap.add_argument("--query-timeout-s", type=int, default=60, help="per-query ceiling; slow query -> ERRORED")
     ap.add_argument("--agg", action="store_true", help="enable the vectorized columnar-agg CustomScan pushdown (the M131 fix for #135 removed the EXPLAIN deparse hang; default OFF = storage path)")
@@ -239,6 +288,14 @@ def main():
         print(f"  queries ok={data['queries_ok']}/{data['n_queries']} errored={data['queries_errored']} "
               f"columnar_customscan={data['columnar_customscan_count']} hot_geomean={data['hot_geomean_s']}s")
         print(f"  result A/B: {data['result_ab']['verdict']} (pass={data['result_ab']['pass']}, diverged={data['result_ab']['diverged']})")
+    # Fail-loud (rules/error-handling.md): o processo tem de sair != 0 quando o run não completou OU o
+    # oráculo A/B byte-idêntico detectou divergência — senão um CI encadeado no exit status prosseguiria
+    # sobre um bug de correção do pushdown.
+    if data["status"] != "OK":
+        return 2
+    if data["result_ab"]["diverged"] != 0:
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
