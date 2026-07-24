@@ -2563,7 +2563,7 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 ---
 
-## M147 — [ ] Refactor scan.rs version-dispatch IVF/AQ: dispatch-table + Vec→Result + Stage-1 compartilhado *(gated M146)*
+## M147 — [x] Refactor scan.rs version-dispatch IVF/AQ: dispatch-table + Vec→Result + Stage-1 compartilhado *(gated M146)*
 
 > Added 2026-07-23 (`/roadmap-feature theodb-review-remediation`). Grill: `.claude/knowledge-base/grills/theodb-review-remediation-feature-grill.md`. Fonte: issue #170 (consenso de 5 pilares — code, architecture, idiomaticity, design_patterns, maintainability).
 
