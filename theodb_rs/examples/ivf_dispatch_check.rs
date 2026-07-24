@@ -36,7 +36,9 @@ fn map_ivf_version(m: &[u8]) -> Result<IvfVersion, String> {
         6 => Ok(IvfVersion::V6),
         7 => Ok(IvfVersion::V7),
         8 => Ok(IvfVersion::V8),
-        other => Err(format!("theodb ivf: unknown format version {other}")),
+        other => Err(format!(
+            "theodb ivf: unsupported structured format v{other} — REINDEX to upgrade to a supported generation"
+        )),
     }
 }
 
