@@ -44,8 +44,12 @@ jobs:
       trivy: true
       sign: ${{ startsWith(github.ref, 'refs/tags/v') }}
       verify: ${{ startsWith(github.ref, 'refs/tags/v') }}
-      # GitHub-hosted está bloqueado por billing neste org — mesmo runner que os demais workflows.
-      runner: '["self-hosted","linux","x64"]'
+      # GitHub-hosted está bloqueado por billing neste org. Usa o label ESPECÍFICO `theodb-do` (mesmo
+      # de todos os outros workflows deste repo, `runs-on: [self-hosted, theodb-do]`) e NÃO o genérico
+      # `["self-hosted","linux","x64"]` do playbook: os runners da máquina theo-ci-runner (2 GB / 2 vCPU,
+      # que serve theo-cloud/theo-lens/theo-memory) carregam exatamente esses labels genéricos, e um job
+      # que compila Rust + PostgreSQL não cabe lá. O label específico prende o build na máquina de 8 vCPU.
+      runner: '["self-hosted","theodb-do"]'
     # Explícito (não `secrets: inherit`) — evita o finding semgrep de secrets-inherit. O TheoDB não
     # consome módulo Go privado nem publica no Docker Hub hoje; o GHCR publica com o GITHUB_TOKEN do run.
     secrets: {}
