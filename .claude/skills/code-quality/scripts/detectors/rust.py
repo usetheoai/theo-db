@@ -162,6 +162,15 @@ class RustDetector(BaseDetector):
     def detect_symbol_fabrication(self, changed_files: list[Path]) -> list[Finding]:
         """T2.4 — Validate `use` statements against crates.io. Skip module-local (EC-17 analog)."""
         findings: list[Finding] = []
+        # Vacuity guard (M146, #175). `extract_imports_and_calls` degrades to an empty list when the
+        # tree-sitter grammar is missing or fails to load, and it says so to nobody. D2 then reports
+        # "no findings", which the rubric reads as CLEAN — a silent false-green. Measured: on the build
+        # droplet the extractor yielded 0 symbols for a 1600-line file that has 10 `use` statements,
+        # and the audit still emitted PASS. A Rust file containing a `use` line MUST yield at least one
+        # import when the parser works, so "some file had a `use`, yet nothing was extracted anywhere"
+        # is proof the auditor did not run — reported as unavailable, never as clean.
+        saw_use_line = False
+        extracted_any = False
         for src_file in changed_files:
             if not src_file.exists():
                 continue
@@ -170,10 +179,13 @@ class RustDetector(BaseDetector):
                 src_text = src_file.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 src_text = ""
+            if re.search(r"^\s*(?:pub(?:\([^)]*\))?\s+)?use\s+\S", src_text, re.M):
+                saw_use_line = True
             local_mods = _local_module_names(src_text) | _in_scope_names(src_text)
             local_mods |= _workspace_crate_names(src_file.parent)
             undecidable = _has_glob_import(src_text)
             for sym in extract_imports_and_calls(src_file, "rust"):
+                extracted_any = True
                 if sym.kind != "import":
                     continue
                 module = _normalize_use_module(sym.module or "")
@@ -233,6 +245,22 @@ class RustDetector(BaseDetector):
                             allowlist_key=f"rust|{rel}|symbol_fab|symbol_fab_unverifiable_{sanitized}",
                         )
                     )
+        if saw_use_line and not extracted_any:
+            return [
+                Finding(
+                    detector="d2_symbol_fab",
+                    language="rust",
+                    severity="SOFT_CAP",
+                    file_path=".",
+                    symbol_or_line="tree-sitter",
+                    message=(
+                        "D2 extracted 0 symbols from Rust sources that DO contain `use` statements — "
+                        "the tree-sitter Rust grammar is unavailable or failed to load. The audit did "
+                        "not run; this is NOT evidence that no symbol is fabricated."
+                    ),
+                    allowlist_key="rust|.|symbol_fab|auditor_unavailable_tree-sitter-rust",
+                )
+            ]
         return findings
 
     def detect_orphan_exports(self, repo_root: Path) -> list[Finding]:

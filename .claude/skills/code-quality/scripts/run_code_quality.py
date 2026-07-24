@@ -221,9 +221,15 @@ def main(argv: list[str] | None = None) -> int:
             continue
         languages_audited.append(language)
 
-        # D1 — dead code
+        # D1 — dead code. Run from the manifest's OWN directory, not the repo root: the config's
+        # `manifest` column may point into a subdirectory (a Rust workspace at `theodb_rs/Cargo.toml`,
+        # a package.json under `web/`), and the dead-code CLIs resolve their project from the cwd.
+        # Passing repo_root made cargo-udeps exit with "could not find `Cargo.toml`", which the detector
+        # honestly reported as `auditor_unavailable_cargo-udeps` — a soft cap that blocks `/review`
+        # because of a path assumption, not because of the code (measured on theo-db 2026-07-23, #175).
+        manifest_dir = (repo_root / manifest_marker).parent
         d1_findings, d1_crash = _safe_call(
-            "d1", detector.detect_dead_code, repo_root, language=language
+            "d1", detector.detect_dead_code, manifest_dir, language=language
         )
         if d1_crash:
             findings.append(d1_crash)
