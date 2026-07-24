@@ -47,6 +47,24 @@ INSERT INTO c SELECT g, 'x'||g FROM generate_series(1,1000) g;
 SELECT count(*), sum(a) FROM c;
 SQL
 
+# 2.1 REGRESSÃO #177 — um scan SEM `ORDER BY <->` tem de FALHAR ALTO, nunca devolver linha vazia.
+# O defeito era silencioso: `count(*)` sob `enable_seqscan=off` devolvia 0 numa tabela de 300 linhas, com
+# plano `Index Only Scan`, sem erro e sem nada no log — resposta ERRADA, que nenhum gate existente via.
+# Nenhum teste do repo exercitava esse caminho (todos usam ORDER BY <->), então o bug sobreviveu ~120
+# milestones. Este bloco é o teste de duas linhas que o teria pego a qualquer momento.
+NOORDER_OUT=$("$PGINST/bin/psql" -p "$PORT" -U postgres -d postgres -tAc \
+  "SET enable_seqscan=off; SELECT count(*) FROM v;" 2>&1 || true)
+if echo "$NOORDER_OUT" | grep -q "cannot scan a vector index without ORDER BY"; then
+  echo "   ok: scan sem ORDER BY falha alto (guard #177 ativo)"
+elif [ "$(echo "$NOORDER_OUT" | tail -1)" = "300" ]; then
+  # O planner escolheu heap/seq scan mesmo com o hint — resposta correta, guard não exercitado. Aceitável.
+  echo "   ok: planner não usou o índice; count correto (300) — guard não exercitado nesta run"
+else
+  echo "FALHA (#177): scan sem ORDER BY devolveu resposta ERRADA em vez de erro tipado:"
+  echo "$NOORDER_OUT" | tail -3
+  exit 1
+fi
+
 # 3. Veredito: nenhum Assert falhou e o servidor responde.
 if grep -qE "TRAP: failed Assert|terminated by signal|PANIC" "$LOG" 2>/dev/null; then
   echo "FALHA: Assert/crash no log (classe #143):"; grep -E "TRAP|signal|PANIC" "$LOG" | head -5; exit 1
