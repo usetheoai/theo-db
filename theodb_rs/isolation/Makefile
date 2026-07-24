@@ -13,6 +13,7 @@ check-crash:
 	bash crash.sh          # #M99 — committed columnar stripe survives crash + WAL replay
 	bash crash_fold.sh     # #47  — VACUUM meta-pivot crash-safe across all fold phases (never silently wrong)
 	bash crash_unlogged.sh # #46  — UNLOGGED index survives standby promotion (INIT fork WAL-logged)
+	bash crash_parquet.sh  # M146 — export Parquet publicado sobrevive a crash imediato integro e legivel
 
 # M146 (#168/#177) — prova de injeção de corrupção: nenhuma corrupção do índice pode derrubar o backend; toda
 # corrupção detectada tem de sair como erro SQL tipado. O review pass-2 (F2-test-4) apontou que o script não
