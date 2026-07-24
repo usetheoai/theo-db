@@ -12,6 +12,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- A imagem Docker do TheoDB passa a ser publicada no GitHub Container Registry a cada release: `docker pull ghcr.io/usetheodev/theo-db:latest` — o comando que o README e o quickstart já documentavam — agora funciona. Antes nenhum workflow publicava (o CI construía a imagem só para rodar os testes e a descartava), então o primeiro comando da documentação falhava com `manifest unknown`. A publicação valida a própria imagem antes de concluir: baixa, sobe o banco e executa o fluxo do README (extensão, tipo vector, índice ANN) (#187)
+
 ### Fixed
 
 - Esteira de CI: cada push empilhava um run novo por workflow e nenhum era cancelado, entupindo a fila do runner (32 runs ativos, processados um a um). Os workflows passam a declarar `concurrency` por workflow+ref, cancelando runs superados da mesma branch — em `main` nunca se cancela, para não abortar um release em andamento
