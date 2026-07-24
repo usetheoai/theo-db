@@ -24,6 +24,16 @@ permissions:
   issues: write
   actions: read
 
+# Fila do runner self-hosted (2026-07-24): sem `concurrency`, cada push empilhava um run novo por
+# workflow e NENHUM era cancelado — o runner processa um de cada vez, então a fila entupiu (32 runs
+# ativos). Este grupo cancela runs superados do MESMO workflow no MESMO ref: só o commit mais recente
+# de uma branch importa. `head_ref || ref_name` faz o evento `push` e o `pull_request` do MESMO commit
+# caírem no MESMO grupo — sem isso cada commit disparava DOIS runs por workflow enquanto houvesse PR
+# aberto da branch, dobrando a fila. Em `main` NUNCA cancela (um release em andamento não é abortado).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: ${{ github.ref_name != 'main' }}
+
 jobs:
   notify-on-failure:
     # Só age quando o run observado FALHOU num branch protegido. Sucesso é o caso comum e não gera ruído.

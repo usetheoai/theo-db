@@ -120,3 +120,45 @@ Harness de regressão: `theodb_rs/isolation/pgvector_compat_check.sh` — exit 0
   contrato com o tooling das apps.
 - O shim NÃO torna o TheoDB compatível com o pgvector em tudo — apenas com o que o `theodb_rs` de fato
   provê. Recursos do pgvector fora dessa superfície continuam ausentes, e o `comment` do `\dx` é o aviso.
+
+---
+
+## Adendo (2026-07-24) — v0.6.0: aliases de AM e opclasse (#182)
+
+A limitação nº 1 acima ("o drop-in continua INCOMPLETO") foi **fechada**. O shim sobe para `0.6.0` com
+`sql/vector--0.5.1--0.6.0.sql` (script de upgrade obrigatório — disciplina do M137, conforme a limitação
+nº 3 previa) adicionando:
+
+- `CREATE ACCESS METHOD hnsw TYPE INDEX HANDLER theodb_hnsw_amhandler` — o **mesmo** handler own-code.
+- `vector_l2_ops` (DEFAULT), `vector_cosine_ops`, `vector_ip_ops` — reusando os mesmos operadores
+  (`<->`, `<=>`, `<#>`, strategy 1, `FOR ORDER BY float_ops`) e funções de suporte (`theodb_metric_cosine`,
+  `theodb_metric_ip`) que as opclasses `theodb_hnsw_*_ops` já declaram.
+
+**Nada foi reimplementado** (Regra 9): é rotulagem de catálogo sobre a implementação existente. O harness
+asserta que `hnsw` e `theodb_hnsw` compartilham o mesmo `amhandler`, para que uma segunda implementação
+divergente não passe despercebida.
+
+### Evidência decisiva
+
+A migration versionada real do `theo-memory` (`0000_crazy_mimic.sql`), aplicada sem alterar uma linha da
+aplicação:
+
+| Momento | Resultado |
+|---|---|
+| antes de #181 | falha na **linha 6** (`CREATE EXTENSION IF NOT EXISTS vector`) |
+| depois de #181 | falha na **linha 44** (`CREATE INDEX ... USING hnsw`) |
+| depois de #182 | **`MIGRATION_EXIT=0`** — 3 tabelas, 2 índices `USING hnsw` criados |
+
+Não-vacuidade: instalando `vector VERSION '0.5.1'` (sem os aliases), a mesma migration volta a falhar na
+linha 44 com `access method "hnsw" does not exist`.
+
+O harness `pgvector_compat_check.sh` passou a usar a sintaxe da **aplicação** (`USING hnsw (col
+vector_cosine_ops)`) em vez da nomenclatura própria — corrigindo o falso-verde que o review do #181
+apontou — e cobre agora: bootstrap com e sem `CASCADE`, handler compartilhado, as 3 opclasses,
+`extversion = 0.6.0` e o upgrade `0.5.1 → 0.6.0`.
+
+### Limitação que permanece
+
+O AM `ivfflat` do pgvector **não** recebeu alias (apps que escrevem `USING ivfflat (col vector_l2_ops)
+WITH (lists=…)` continuam falhando). O `hnsw` foi priorizado por ser o que as capabilities theo-data
+declaram; estender para `ivfflat` é trabalho subsequente, com o mesmo padrão.

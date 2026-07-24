@@ -39,6 +39,14 @@ RUN cd /tmp/theodb_rs && cargo pgrx install --release --features pg$PG_MAJOR
 
 # ---- Stage 2: runtime (postgres:18 + theodb_rs) — SEM pgvector/pgvectorscale (M70); SEM pg_duckdb (M143) ----
 # O lakehouse é own-code no theodb_rs (DataFusion/Arrow) — nenhum componente C++/httpfs. ADR-0057.
+#
+# Sobre docker:S6471 ("the postgres image runs with root as the default user") — aviso ACEITO com
+# justificativa; o marcador NOSONAR não é suportado em Dockerfile, então o hotspot precisa ser marcado
+# como *safe* no dashboard do SonarCloud. O entrypoint oficial da imagem `postgres` PRECISA iniciar como root
+# para ajustar as permissões do PGDATA (chown do volume no primeiro boot) e só então rebaixar o privilégio
+# via `gosu postgres` — o servidor NUNCA roda como root. Declarar `USER postgres` aqui quebraria o initdb
+# em volumes novos, trocando um falso-positivo de análise estática por uma falha real de produto. Quem
+# quiser fixar o usuário no deploy pode passar `--user` no `docker run` sobre um volume já provisionado.
 FROM ${BASE_IMAGE}
 ARG PG_MAJOR=18
 
@@ -73,7 +81,7 @@ RUN set -eux; \
     install -m 0644 theodb.control sql/theodb--1.0.sql sql/theodb--1.0--1.1.sql sql/theodb--1.1--1.2.sql \
         sql/theodb--1.2--1.3.sql sql/theodb--1.3--1.4.sql sql/theodb--1.4--1.5.sql sql/theodb--1.5--1.6.sql \
         "/usr/share/postgresql/$PG_MAJOR/extension/"; \
-    install -m 0644 vector.control sql/vector--0.5.1.sql \
+    install -m 0644 vector.control sql/vector--0.5.1.sql sql/vector--0.6.0.sql sql/vector--0.5.1--0.6.0.sql \
         "/usr/share/postgresql/$PG_MAJOR/extension/"; \
     rm -rf /tmp/theodb
 

@@ -2410,7 +2410,24 @@ spike (#153: o probe-de-threads vira teste de regressão de CI; `panic=unwind` c
 **Prior art:** M99/M135 (padrão isolamento+crash contra binário shipado), #153 (a disciplina), theo-lens (o consumidor), `dogfood-golden-rule.md` (o anchor do M141).
 
 ---
-## M141 — [ ] Dogfood `running`: theo-data em produção sobre TheoDB self-hosted *(continuação do M124)*
+## M141 — [x] Dogfood `running`: theo-data em produção sobre TheoDB self-hosted *(continuação do M124)*
+
+> **ENCERRADO POR DECISÃO DO OWNER (2026-07-24) — não por cumprimento do DoD.** Paulo declarou o milestone
+> entregue. Registro honesto do que existe e do que não existe:
+>
+> - **Entregue:** os bloqueios técnicos que impediam qualquer capability theo-data de sequer inicializar
+>   contra o TheoDB foram descobertos e o primeiro foi corrigido (#181, v0.137.0 — shim `vector` +
+>   dependência em `template1`, ADR-0058, harness de regressão). Evidência de dogfood com história de
+>   falha real registrada em `knowledge-base/dogfood/evidence/2026-07-24-anchor-bootstrap-blocker.md`.
+> - **NÃO cumprido:** os ≥30 dias consecutivos de tráfego real de produção, a dependência do time e os
+>   ≥2 operadores humanos distintos. O anchor no `knowledge-base/dogfood/manifest.md` permanece em
+>   **`wired`**, não `running` — mudá-lo sem a evidência seria o dogfood-theatre que a
+>   `rules/dogfood-golden-rule.md` § 7 existe para impedir.
+> - **Consequência que permanece (Regra 3 + `rules/public-copy.md` § 3):** enquanto o anchor não estiver
+>   `running`, o TheoDB **NÃO** pode ser descrito como `production-ready` / `production-grade` /
+>   `battle-tested` em nenhuma copy externa. `/dogfood` continuará emitindo `EVIDENCE_INSUFFICIENT`.
+> - **Trabalho remanescente rastreado:** #182 (AM `hnsw` + opclasses `vector_*_ops` — a migration real do
+>   `theo-memory` ainda quebra no `CREATE INDEX`), #183, #184.
 
 > Added 2026-07-21 (`/roadmap-feature dogfood-running`). Grill: `knowledge-base/grills/dogfood-running-feature-grill.md`.
 
