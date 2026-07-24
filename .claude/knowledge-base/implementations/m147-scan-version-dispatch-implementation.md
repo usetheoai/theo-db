@@ -41,3 +41,19 @@ erro de índices inválidos, só top-k de índices válidos, então a byte-ident
 - **Medido no droplet:** build exit 0; **A/B: AB_COMPARE_OK, 6 caminhos byte-idênticos**; taxonomia dim-errada
   → `ERROR: 22023 ... aq lut: query dim 3 != codebook dim 8` (pg.rs:44); corrupção → `ERROR: XX002 ... offset
   out of range` (pg.rs:15), backend ALIVE 400; cassert-smoke verde (4 AMs + guard #177 + 5 probes de injeção).
+
+### Fase 3 — kernel Stage-1 compartilhado (bullet 3) — ✅ byte-idêntico, ADR-2 preservada
+
+- `fn stage1_score_blocks<F: FnMut(usize, i32)>(lut, bytes, codes_off, n, pairs, on_candidate)` — o loop de
+  blocos + `ah_score_block`, RECEBENDO `codes_off` do chamador. Os 5 corpos passam seu `codes_off` (fórmula
+  on-disk por-versão MANTIDA idêntica: v4 `8n+entry_f32·n`; v5/v6/v8 `8n`; v7 `8n+n·label_bytes`) + uma closure
+  com a política do corpo (v4 3-tupla sem tid; v5 tid+membership; v6/v8 tid; v7 tid+label+membership).
+- **ADR-2 protegida por construção:** o kernel NUNCA recomputa `codes_off` (recebe como param); o decode
+  on-disk fica no chamador. `grep for b in 0..nblocks`: 5→1; `ah_score_block` real: 5→1.
+- **Medido no droplet:** build exit 0; **A/B: AB_COMPARE_OK, 6 caminhos byte-idênticos**; **não-vacuidade:
+  mutar `codes_off` (`8n`→`8n+1`) → AB_COMPARE_FAIL** (o gate detecta o vazamento de layout que a ADR-2 barra),
+  restaurado → OK.
+
+## Resumo: as 3 fases + validação
+- Bullet 1 (enum): byte-idêntico. Bullet 2 (Result+?): byte-idêntico + taxonomia XX002/22023 preservada.
+  Bullet 3 (kernel): byte-idêntico + ADR-2 provada. `scan.rs` reduziu ~375 linhas líquidas nos 3 commits.

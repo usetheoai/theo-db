@@ -72,6 +72,36 @@ fn lut_scan_error(codebook_dim: usize, e: String) -> ScanError {
     }
 }
 
+/// M147 (bullet 3) — o kernel Stage-1 compartilhado pelos 5 corpos `scan_ivf_aq*`. Itera os blocos de 32 da
+/// lista, chama `ah_score_block` (o scorer SIMD), e invoca `on_candidate(ordinal, score)` por candidato.
+/// RECEBE `codes_off` do chamador — NUNCA o recomputa: `codes_off` é conhecimento ON-DISK por-versão (v4
+/// `8n+entry_f32·n`; v5/v6/v8 `8n`; v7 `8n+n·label_bytes`), e recomputá-lo aqui vazaria o layout on-disk para o
+/// kernel domain, reintroduzindo o risco misparse→data-loss que a ADR-2 do M145 barra. A divergência por-versão
+/// (decode de tid inline, membership, label) vive na closure `on_candidate`, não em branches de versão aqui.
+#[inline]
+fn stage1_score_blocks<F: FnMut(usize, i32)>(
+    lut: &crate::vec::ah::Lut16,
+    bytes: &[u8],
+    codes_off: usize,
+    n: usize,
+    pairs: usize,
+    mut on_candidate: F,
+) {
+    let nblocks = n.div_ceil(32);
+    let mut out = [0i32; 32];
+    for b in 0..nblocks {
+        let bn = (n - b * 32).min(32);
+        let base = codes_off + b * pairs * 32;
+        if bytes.len() < base + pairs * 32 {
+            break; // página mais curta que a contagem do diretório declara — para esta lista
+        }
+        crate::vec::ah::ah_score_block(lut, &bytes[base..base + pairs * 32], bn, &mut out[..bn]);
+        for (j, &score) in out.iter().enumerate().take(bn) {
+            on_candidate(b * 32 + j, score);
+        }
+    }
+}
+
 /// One scored candidate: its distance-to-query key + heap TID. Ordered ascending by (distance, tid) — the exact
 /// order the old `results.sort_by` produced, so the emitted top-K is byte-identical (recall unchanged, M36 ADR-1).
 /// `f64::total_cmp` is a TOTAL order — under M49 cosine a zero-norm vector yields NaN, which `total_cmp` orders
@@ -673,25 +703,10 @@ unsafe fn scan_ivf_aq(
         }
         let bytes = page::read_ivf_list_bytes(rel, fb, np)?;
         let codes_off = 8 * n + entry_f32 * n;
-        let nblocks = n.div_ceil(32);
         let lbidx = listbytes.len();
-        let mut out = [0i32; 32];
-        for b in 0..nblocks {
-            let bn = (n - b * 32).min(32);
-            let base = codes_off + b * pairs * 32;
-            if bytes.len() < base + pairs * 32 {
-                break; // page shorter than the directory count claims — stop this list
-            }
-            crate::vec::ah::ah_score_block(
-                &lut,
-                &bytes[base..base + pairs * 32],
-                bn,
-                &mut out[..bn],
-            );
-            for (j, &score) in out.iter().enumerate().take(bn) {
-                cands.push((score, lbidx, b * 32 + j));
-            }
-        }
+        stage1_score_blocks(&lut, &bytes, codes_off, n, pairs, |ordinal, score| {
+            cands.push((score, lbidx, ordinal));
+        });
         listbytes.push((n, bytes));
     }
 
@@ -782,35 +797,18 @@ unsafe fn scan_ivf_aq_split(
         }
         let cbytes = page::read_ivf_list_bytes(rel, cfb, cnp)?;
         let codes_off = 8 * n; // codes start right after the n ids
-        let nblocks = n.div_ceil(32);
-        let mut out = [0i32; 32];
-        for b in 0..nblocks {
-            let bn = (n - b * 32).min(32);
-            let base = codes_off + b * pairs * 32;
-            if cbytes.len() < base + pairs * 32 {
-                break;
-            }
-            crate::vec::ah::ah_score_block(
-                &lut,
-                &cbytes[base..base + pairs * 32],
-                bn,
-                &mut out[..bn],
-            );
-            for (j, &score) in out.iter().enumerate().take(bn) {
-                let ordinal = b * 32 + j;
-                let tid =
-                    i64::from_le_bytes(cbytes[ordinal * 8..ordinal * 8 + 8].try_into().unwrap());
-                // M92 arbitrary-WHERE inline skip — admit exact members OR lossy-bitmap blocks (recheck filters the
-                // over-admit); empty membership ⇒ unchanged v5 scan.
-                if let Some(m) = &membership {
-                    let block = (tid >> 16) as u32;
-                    if !m.exact.contains(&tid) && !m.lossy.contains(&block) {
-                        continue;
-                    }
+        stage1_score_blocks(&lut, &cbytes, codes_off, n, pairs, |ordinal, score| {
+            let tid = i64::from_le_bytes(cbytes[ordinal * 8..ordinal * 8 + 8].try_into().unwrap());
+            // M92 arbitrary-WHERE inline skip — admit exact members OR lossy-bitmap blocks (recheck filters the
+            // over-admit); empty membership ⇒ unchanged v5 scan.
+            if let Some(m) = &membership {
+                let block = (tid >> 16) as u32;
+                if !m.exact.contains(&tid) && !m.lossy.contains(&block) {
+                    return;
                 }
-                cands.push((score, tid, ci, ordinal));
             }
-        }
+            cands.push((score, tid, ci, ordinal));
+        });
     }
 
     // Stage 2 — rerank the `rerank_pool` best (smaller AH score = closer); random-read f32 for survivors ONLY.
@@ -899,42 +897,25 @@ unsafe fn scan_ivf_aq_split_v7(
         let cbytes = page::read_ivf_list_bytes(rel, cfb, cnp)?;
         let labels_off = 8 * n; // labels start right after the n ids
         let codes_off = 8 * n + n * label_bytes; // codes start after ids + the fixed label region
-        let nblocks = n.div_ceil(32);
-        let mut out = [0i32; 32];
-        for b in 0..nblocks {
-            let bn = (n - b * 32).min(32);
-            let base = codes_off + b * pairs * 32;
-            if cbytes.len() < base + pairs * 32 {
-                break;
+        stage1_score_blocks(&lut, &cbytes, codes_off, n, pairs, |ordinal, score| {
+            // INLINE FILTER: skip candidates whose stored label set does not overlap the query's.
+            if label_filtering
+                && !v7_label_overlaps(&cbytes, labels_off, ordinal, label_bytes, query_labels)
+            {
+                return;
             }
-            crate::vec::ah::ah_score_block(
-                &lut,
-                &cbytes[base..base + pairs * 32],
-                bn,
-                &mut out[..bn],
-            );
-            for (j, &score) in out.iter().enumerate().take(bn) {
-                let ordinal = b * 32 + j;
-                // INLINE FILTER: skip candidates whose stored label set does not overlap the query's.
-                if label_filtering
-                    && !v7_label_overlaps(&cbytes, labels_off, ordinal, label_bytes, query_labels)
-                {
-                    continue;
+            let tid = i64::from_le_bytes(cbytes[ordinal * 8..ordinal * 8 + 8].try_into().unwrap());
+            // M92 arbitrary-WHERE inline skip — admit a candidate whose exact TID is a member OR whose block is a
+            // lossy-bitmap block (over-admit → the node's ExecQual recheck filters it, ADR M93-2). Dropping the
+            // lossy case would under-admit (silently miss valid rows on lossy pages).
+            if let Some(m) = &membership {
+                let block = (tid >> 16) as u32;
+                if !m.exact.contains(&tid) && !m.lossy.contains(&block) {
+                    return;
                 }
-                let tid =
-                    i64::from_le_bytes(cbytes[ordinal * 8..ordinal * 8 + 8].try_into().unwrap());
-                // M92 arbitrary-WHERE inline skip — admit a candidate whose exact TID is a member OR whose block is a
-                // lossy-bitmap block (over-admit → the node's ExecQual recheck filters it, ADR M93-2). Dropping the
-                // lossy case would under-admit (silently miss valid rows on lossy pages).
-                if let Some(m) = &membership {
-                    let block = (tid >> 16) as u32;
-                    if !m.exact.contains(&tid) && !m.lossy.contains(&block) {
-                        continue;
-                    }
-                }
-                cands.push((score, tid, ci, ordinal));
             }
-        }
+            cands.push((score, tid, ci, ordinal));
+        });
     }
     // M91 — wiring-triad runtime metric (opt-in via THEODB_SCAN_PROFILE=1): the adaptive loop grew the probe count
     // past the default ONLY when the filter was selective, so `probes_effective > probes_default` is the observable
@@ -1043,27 +1024,10 @@ unsafe fn scan_ivf_aq_split_sq8(
         }
         let cbytes = page::read_ivf_list_bytes(rel, cfb, cnp)?;
         let codes_off = 8 * n;
-        let nblocks = n.div_ceil(32);
-        let mut out = [0i32; 32];
-        for b in 0..nblocks {
-            let bn = (n - b * 32).min(32);
-            let base = codes_off + b * pairs * 32;
-            if cbytes.len() < base + pairs * 32 {
-                break;
-            }
-            crate::vec::ah::ah_score_block(
-                &lut,
-                &cbytes[base..base + pairs * 32],
-                bn,
-                &mut out[..bn],
-            );
-            for (j, &score) in out.iter().enumerate().take(bn) {
-                let ordinal = b * 32 + j;
-                let tid =
-                    i64::from_le_bytes(cbytes[ordinal * 8..ordinal * 8 + 8].try_into().unwrap());
-                cands.push((score, tid, ci, ordinal));
-            }
-        }
+        stage1_score_blocks(&lut, &cbytes, codes_off, n, pairs, |ordinal, score| {
+            let tid = i64::from_le_bytes(cbytes[ordinal * 8..ordinal * 8 + 8].try_into().unwrap());
+            cands.push((score, tid, ci, ordinal));
+        });
     }
 
     // Stage 2 — rerank the `rerank_pool` best; random-read the SQ8 code for those survivors ONLY, decode, and
@@ -1129,27 +1093,10 @@ unsafe fn scan_ivf_aq_split_rabitq(
         }
         let cbytes = page::read_ivf_list_bytes(rel, cfb, cnp)?;
         let codes_off = 8 * n;
-        let nblocks = n.div_ceil(32);
-        let mut out = [0i32; 32];
-        for b in 0..nblocks {
-            let bn = (n - b * 32).min(32);
-            let base = codes_off + b * pairs * 32;
-            if cbytes.len() < base + pairs * 32 {
-                break;
-            }
-            crate::vec::ah::ah_score_block(
-                &lut,
-                &cbytes[base..base + pairs * 32],
-                bn,
-                &mut out[..bn],
-            );
-            for (j, &score) in out.iter().enumerate().take(bn) {
-                let ordinal = b * 32 + j;
-                let tid =
-                    i64::from_le_bytes(cbytes[ordinal * 8..ordinal * 8 + 8].try_into().unwrap());
-                cands.push((score, tid, ci, ordinal));
-            }
-        }
+        stage1_score_blocks(&lut, &cbytes, codes_off, n, pairs, |ordinal, score| {
+            let tid = i64::from_le_bytes(cbytes[ordinal * 8..ordinal * 8 + 8].try_into().unwrap());
+            cands.push((score, tid, ci, ordinal));
+        });
     }
 
     // Stage 2 — rerank the best `rerank_pool` survivors on f32-FREE RaBitQ residual codes. Per distinct probed list
