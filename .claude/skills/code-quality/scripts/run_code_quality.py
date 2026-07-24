@@ -221,9 +221,15 @@ def main(argv: list[str] | None = None) -> int:
             continue
         languages_audited.append(language)
 
-        # D1 — dead code
+        # D1 — dead code. Run from the manifest's OWN directory, not the repo root: the config's
+        # `manifest` column may point into a subdirectory (a Rust workspace at `theodb_rs/Cargo.toml`,
+        # a package.json under `web/`), and the dead-code CLIs resolve their project from the cwd.
+        # Passing repo_root made cargo-udeps exit with "could not find `Cargo.toml`", which the detector
+        # honestly reported as `auditor_unavailable_cargo-udeps` — a soft cap that blocks `/review`
+        # because of a path assumption, not because of the code (measured on theo-db 2026-07-23, #175).
+        manifest_dir = (repo_root / manifest_marker).parent
         d1_findings, d1_crash = _safe_call(
-            "d1", detector.detect_dead_code, repo_root, language=language
+            "d1", detector.detect_dead_code, manifest_dir, language=language
         )
         if d1_crash:
             findings.append(d1_crash)
@@ -374,9 +380,19 @@ def _write_markdown_report(findings: list[Finding], summary: dict, audit_path: P
 {_table(by_detector['d2_symbol_fab'])}
 
 ### D3 — Cross-package orphan exports
+
+**NÃO EXECUTADO.** Este detector é contratado pelo golden rule § 5, mas não tem ponto de invocação neste
+orquestrador (`detect_orphan_exports` levanta `NotImplementedError` em todos os detectores). A tabela vazia
+abaixo significa "não medido", **não** "nada encontrado" — M146, review F-arch-4.
+
 {_table(by_detector['d3_orphan_export'])}
 
 ### D4 — Mutation testing
+
+**NÃO EXECUTADO.** Idem D3: contratado pelo golden rule § 5, sem ponto de invocação. Para Rust e Go o próprio
+golden rule declara o detector DEFERIDO (ADR T4.3); para Python e TypeScript ele deveria rodar e não roda.
+Tabela vazia = não medido — M146, review F-arch-4.
+
 {_table(by_detector['d4_mutation'])}
 
 ## Related

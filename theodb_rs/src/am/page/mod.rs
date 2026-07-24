@@ -14,6 +14,9 @@ use pgrx::pg_sys;
 // descendant module — it can call the private page primitives in this file directly). Re-exported
 // flat so every existing `page::write_ivf_*` / `page::read_ivf_*` call site is unchanged.
 mod ivf;
+// M146 — pure (PG-free) arithmetic of the IVF format, split out so `examples/ivf_codec_check.rs` can link and
+// exercise it (`cargo test` does not link in this crate). `ivf` re-exports its items.
+mod ivf_codec;
 pub(crate) use ivf::*;
 mod symqg; // E2 — theodb_symqg co-located page layout (reaches the private helpers via `use super::*`)
 pub(crate) use symqg::*;
@@ -557,8 +560,14 @@ pub(crate) unsafe fn peek_magic(rel: pg_sys::Relation) -> Result<u32, String> {
     Ok(u32::from_le_bytes(m[0..4].try_into().unwrap()))
 }
 
-/// Number of pages the MAIN index occupies before the pending region — format-aware (blob: `1 + nchunks`;
-/// structured: `1 + centroid_npages + Σ list npages`). Used to locate the pending region for either layout.
+// Number of pages the MAIN index occupies before the pending region — format-aware (blob: `1 + nchunks`;
+// structured: `1 + centroid_npages + Σ list npages`). Used to locate the pending region for either layout.
+//
+// (M146: este bloco era `///` e ficou ÓRFÃO no refactor do M145 — não documenta o item seguinte, que tem doc
+// própria. Um doc comment seguido de linha vazia é erro sob o baseline `-D warnings` do projeto
+// (`clippy::empty_line_after_doc_comments`), deixando o gate de lint vermelho no develop. Convertido para
+// comentário normal, que é o que ele de fato é.)
+//
 // M145 T1.3: os 4 blocos por-versão do IVF extraídos VERBATIM (cut-and-move; offsets/strides/guards
 // byte-a-byte idênticos — ADR-2). NÃO unificar num parser parametrizado: os offsets/strides diferem
 // genuinamente por versão de formato (12B vs 20B stride, campos em posições distintas) — unificar seria
@@ -614,8 +623,8 @@ unsafe fn pending_start_v5_v7(rel: pg_sys::Relation, m: &[u8]) -> Result<u32, St
         let o = i * 20;
         total5 =
             total5.saturating_add(u32::from_le_bytes(dbytes5[o + 4..o + 8].try_into().unwrap()));
-        total5 = total5
-            .saturating_add(u32::from_le_bytes(dbytes5[o + 12..o + 16].try_into().unwrap()));
+        total5 =
+            total5.saturating_add(u32::from_le_bytes(dbytes5[o + 12..o + 16].try_into().unwrap()));
     }
     Ok(total5)
 }
@@ -647,8 +656,8 @@ unsafe fn pending_start_v6_v8(rel: pg_sys::Relation, m: &[u8]) -> Result<u32, St
         let o = i * 20;
         total6 =
             total6.saturating_add(u32::from_le_bytes(dbytes6[o + 4..o + 8].try_into().unwrap()));
-        total6 = total6
-            .saturating_add(u32::from_le_bytes(dbytes6[o + 12..o + 16].try_into().unwrap()));
+        total6 =
+            total6.saturating_add(u32::from_le_bytes(dbytes6[o + 12..o + 16].try_into().unwrap()));
     }
     Ok(total6)
 }

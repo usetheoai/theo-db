@@ -18,6 +18,32 @@ use crate::pg::err_input;
 
 const MAX_EF: i32 = 1000; // matches guc.rs MAX_EF_SEARCH (pgvector's hnsw.ef_search ceiling)
 
+/// Resolve a caller-supplied relation name through `regclass`, returning the catalog's own rendering.
+///
+/// #172, THIRD axis — found by the `/review` of the very milestone that fixed the other two. The first pass
+/// closed `qvec` (`quote_literal`) and `col` (`valid_ident`) and I stated the function was safe. It was not:
+/// `tbl` stayed a raw `{tbl}` splice in all three query builders, and the SAME `1/0` oracle proves it executes:
+///
+/// ```text
+/// SELECT theodb_rs._scan_stats(0::oid, '(SELECT 1/0 AS ctid, NULL::vector AS e) s', 'e', '[1,2]', 10, 5);
+/// -- assembled: SELECT ctid FROM (SELECT 1/0 AS ctid, …) s ORDER BY "e" <=> …  =>  ERROR: division by zero
+/// ```
+///
+/// Fixing two of three axes and declaring victory is worse than fixing none, because it retires the suspicion.
+/// The lesson is mechanical, not moral: patch the *shape* (every interpolation in the builder), never the
+/// *payload* that happened to be probed.
+///
+/// `regclass` — not `%I` — for the same reason as `graph.rs::build_csr`: it validates that the name parses AND
+/// resolves through `search_path`, raising 42P01 before any SQL is assembled, and `regclassout` re-renders the
+/// identifier from `pg_class`, so what reaches the query comes from the catalog rather than from the caller.
+/// `%I` is lexical only and would mangle a schema-qualified `s1.t` into one quoted identifier.
+fn resolve_relation(tbl: &str, ctx: &str) -> String {
+    Spi::get_one_with_args::<String>("SELECT ($1)::regclass::text", &[tbl.into()])
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| err_input(&format!("{ctx}: relation {tbl:?} does not resolve")))
+}
+
 // Backend-local observation counter: the HNSW `traverse` adds its already-computed `pages_read` here every
 // scan (a cheap in-memory add — does NOT touch the scan's correctness or crash-safety, no page write). The
 // recommender/collector resets it, runs a scan, and reads the accumulated pages to persist real `pages_read`.
@@ -96,8 +122,12 @@ fn record_scan_stat(relid: i64, pages_read: i64, candidates: i64, latency_us: i6
 fn exact_topk(tbl: &str, col: &str, qvec: &str, k: i32) -> HashSet<String> {
     pgrx::Spi::run("SET LOCAL enable_indexscan=off; SET LOCAL enable_bitmapscan=off; SET LOCAL enable_seqscan=on")
         .unwrap_or_else(|e| err_input(&format!("recommend_ef: GT setup failed: {e:?}")));
-    let sql =
-        format!("SELECT ctid::text FROM {tbl} ORDER BY \"{col}\" <=> '{qvec}'::vector LIMIT {k}");
+    // #172: `qvec` é texto livre do chamador — `quote_literal` escapa aspas/backslashes, então o payload não
+    // consegue fechar o literal e emendar SQL. `col` já foi validado por `valid_ident` na fronteira pública.
+    let sql = format!(
+        "SELECT ctid::text FROM {tbl} ORDER BY \"{col}\" <=> {lit}::vector LIMIT {k}",
+        lit = pgrx::spi::quote_literal(qvec)
+    );
     pgrx::Spi::connect(|c| {
         c.select(&sql, None, &[])
             .unwrap_or_else(|e| err_input(&format!("recommend_ef: exact scan failed: {e:?}")))
@@ -126,8 +156,11 @@ fn recall_at_ef(
         if gt.is_empty() {
             continue; // a query with no neighbours is not a recall data point
         }
-        let sql =
-            format!("SELECT ctid::text FROM {tbl} ORDER BY \"{col}\" <=> '{q}'::vector LIMIT {k}");
+        // #172: idem `exact_topk` — o vetor de amostra é texto livre e vai por `quote_literal`.
+        let sql = format!(
+            "SELECT ctid::text FROM {tbl} ORDER BY \"{col}\" <=> {lit}::vector LIMIT {k}",
+            lit = pgrx::spi::quote_literal(q)
+        );
         let ann: HashSet<String> = pgrx::Spi::connect(|c| {
             c.select(&sql, None, &[])
                 .unwrap_or_else(|e| err_input(&format!("recommend_ef: ann scan failed: {e:?}")))
@@ -158,13 +191,26 @@ pub(crate) fn scan_stats(
     if ef <= 0 || k <= 0 {
         err_input("theodb.scan_stats: ef and k must be > 0");
     }
+    let tbl = resolve_relation(tbl, "theodb.scan_stats");
+    // #172 — fail-closed na fronteira (rules/error-handling.md): `col` era interpolado com aspas manuais
+    // (`\"{col}\"`), então um `"` no valor quebrava a citação e emendava SQL arbitrário — MEDIDO com o oráculo
+    // `1/0`. Allowlist ASCII estrita, o mesmo `valid_ident` já usado em ann_query/pq/sbq (Rule 9).
+    if !crate::ann_query::valid_ident(col) {
+        err_input(
+            "theodb.scan_stats: vector_col must be a plain identifier ([A-Za-z_][A-Za-z0-9_]*, ≤63)",
+        );
+    }
     Spi::run(&format!(
         "SET LOCAL enable_seqscan=off; SET LOCAL enable_bitmapscan=off; SET LOCAL enable_indexscan=on; \
          SET LOCAL theodb_hnsw.ef_search = {ef}"
     ))
     .unwrap_or_else(|e| err_input(&format!("theodb.scan_stats: setup failed: {e:?}")));
     reset_scan_counters();
-    let sql = format!("SELECT ctid FROM {tbl} ORDER BY \"{col}\" <=> '{qvec}'::vector LIMIT {k}");
+    // #172: `qvec` é texto livre do chamador → `quote_literal`; `col` validado por `valid_ident` acima.
+    let sql = format!(
+        "SELECT ctid FROM {tbl} ORDER BY \"{col}\" <=> {lit}::vector LIMIT {k}",
+        lit = pgrx::spi::quote_literal(qvec)
+    );
     let t0 = std::time::Instant::now();
     let results: i64 = Spi::get_one(&format!("SELECT count(*) FROM ({sql}) s"))
         .unwrap_or_else(|e| err_input(&format!("theodb.scan_stats: scan failed: {e:?}")))
@@ -182,19 +228,28 @@ pub(crate) fn recommend_ef(tbl: &str, col: &str, samples: &[&str], target: f64, 
     if !(target > 0.0 && target <= 1.0) {
         err_input("theodb.recommend_ef: recall_target must be in (0, 1]");
     }
+    let tbl = resolve_relation(tbl, "theodb.recommend_ef");
+    // #172 — mesmo gate fail-closed do `scan_stats`: `col` chega como texto livre e era interpolado com aspas
+    // manuais. MEDIDO: `recommend_ef('t','e" <=> ''[1,2]''::vector LIMIT (SELECT 1/0) --', …)` executava a
+    // subquery injetada (ERROR: division by zero).
+    if !crate::ann_query::valid_ident(col) {
+        err_input(
+            "theodb.recommend_ef: vector_col must be a plain identifier ([A-Za-z_][A-Za-z0-9_]*, ≤63)",
+        );
+    }
     if k <= 0 {
         err_input("theodb.recommend_ef: k must be > 0");
     }
     if samples.is_empty() {
         err_input("theodb.recommend_ef: sample must not be empty");
     }
-    let gts: Vec<HashSet<String>> = samples.iter().map(|q| exact_topk(tbl, col, q, k)).collect();
+    let gts: Vec<HashSet<String>> = samples.iter().map(|q| exact_topk(&tbl, col, q, k)).collect();
 
     // Doubling: grow ef until recall(ef) >= target, tracking the previous ef for the bracket.
     let mut prev = k.max(1);
     let mut ef = prev;
     loop {
-        if recall_at_ef(tbl, col, samples, &gts, k, ef) >= target {
+        if recall_at_ef(&tbl, col, samples, &gts, k, ef) >= target {
             break;
         }
         if ef >= MAX_EF {
@@ -207,7 +262,7 @@ pub(crate) fn recommend_ef(tbl: &str, col: &str, samples: &[&str], target: f64, 
     let (mut lo, mut hi) = (prev, ef);
     while hi - lo > 1 {
         let mid = lo + (hi - lo) / 2;
-        if recall_at_ef(tbl, col, samples, &gts, k, mid) >= target {
+        if recall_at_ef(&tbl, col, samples, &gts, k, mid) >= target {
             hi = mid;
         } else {
             lo = mid;

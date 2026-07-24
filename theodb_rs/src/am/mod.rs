@@ -150,6 +150,18 @@ fn make_amroutine(
     amroutine.amusemaintenanceworkmem = false;
     amroutine.amkeytype = pg_sys::InvalidOid;
 
+    // M146 — declaração EXPLÍCITA de que este AM não sabe devolver o valor indexado. Um índice vetorial guarda
+    // grafo/códigos quantizados, não o valor original, então nunca pode servir uma coluna sem ir ao heap; é o
+    // que o pgvector declara (`src/hnsw.c:370`, `src/ivfflat.c:221` — `amcanreturn = NULL`).
+    //
+    // HONESTIDADE (review pass-2, F-sec-8) — a primeira versão deste comentário afirmava que "o campo não vinha
+    // zerado" e que atribuí-lo corrigia o #177. **As duas afirmações eram falsas.** `PgBox::alloc_node` chama
+    // `alloc0()` (pgrx-0.19.0 `pgbox.rs:304`), então `amcanreturn` já era NULL: esta linha é um **no-op
+    // comportamental**. Eu havia testado a hipótese e MEDIDO que o `count(*)` continuava devolvendo 0 — mas
+    // escrevi o comentário como se ela explicasse o defeito. Quem fecha o #177 é o guard do `amgettuple`
+    // (`am/scan.rs`), não esta linha. Ela fica por ser documentação de contrato explícita, alinhada ao upstream.
+    amroutine.amcanreturn = None;
+
     amroutine.amvalidate = Some(amvalidate);
     amroutine.ambuild = Some(ambuild);
     amroutine.ambuildempty = Some(ambuildempty);

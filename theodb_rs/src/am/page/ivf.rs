@@ -481,19 +481,10 @@ pub(crate) unsafe fn write_ivf_aq_split(
 /// with fewer labels are padded with `LABEL_PAD` (a sentinel outside valid `i16` label use is impossible since any
 /// i16 is a valid label, so we store the COUNT per vector and pad the rest — see `encode_labels_fixed`). 8 covers
 /// the overwhelming majority of tag/category filters; variable-length labels are a documented follow-up.
-pub(crate) const LABEL_K: usize = 8;
-/// M90 — encode one vector's label set into `2 + LABEL_K*2` bytes: a u16 count, then LABEL_K i16 slots (unused
-/// slots are 0). The count disambiguates padding from a real 0 label. Overflow (> LABEL_K labels) is truncated to
-/// the first LABEL_K (deterministic; documented boundary).
-#[inline]
-fn encode_labels_fixed(labels: &[i16], out: &mut Vec<u8>) {
-    let n = labels.len().min(LABEL_K) as u16;
-    out.extend_from_slice(&n.to_le_bytes());
-    for i in 0..LABEL_K {
-        let v = if i < labels.len() { labels[i] } else { 0 };
-        out.extend_from_slice(&v.to_le_bytes());
-    }
-}
+// M146 — `LABEL_K` / `encode_labels_fixed` / `record_span` moved to the PURE sibling `ivf_codec`, so an
+// `examples/` binary can link and exercise them without a backend (`cargo test` does not link in this crate).
+// Re-exported here so every existing `super::ivf::LABEL_K` caller keeps working — one definition, no twin.
+pub(crate) use super::ivf_codec::{LABEL_K, encode_labels_fixed, record_span};
 /// M90 — the v7 layout: identical to v5 (`write_ivf_aq_split`) except the per-list CODE blob is
 /// `[ids][labels_fixed][codes]` (each vector carries `2 + LABEL_K*2` label bytes right after its id), so the Stage-1
 /// scan can skip non-overlapping candidates before the Stage-2 f32 rerank. Magic `7`; the label bytes per vector
@@ -654,12 +645,10 @@ unsafe fn read_record_at(
     ordinal: usize,
     reclen: usize,
 ) -> Result<Vec<u8>, String> {
-    let off = ordinal * reclen;
-    let p0 = off / CHUNK;
-    let lo = off % CHUNK;
-    if p0 as u32 >= npages {
-        return Err("theodb ivf-aq: record ordinal out of range".into());
-    }
+    // M146 — the span arithmetic (and its typed failures) lives in the pure `ivf_codec`, where it is actually
+    // exercised (`examples/ivf_codec_check.rs`); this function keeps only the I/O.
+    let span = record_span(ordinal, reclen, CHUNK, npages)?;
+    let (p0, lo) = (span.chunk, span.lo);
     let mut buf = Vec::new();
     read_page_item_into(rel, first_block + p0 as u32, &mut buf)?;
     if lo + reclen <= buf.len() {
@@ -668,6 +657,17 @@ unsafe fn read_record_at(
     // Straddles into the next chunk item — read it and stitch tail+head.
     if (p0 + 1) as u32 >= npages {
         return Err("theodb ivf-aq: truncated straddled record".into());
+    }
+    // M146 (review F-sec-4) — `buf[lo..]` panics when the chunk item came back SHORTER than `lo`, which is
+    // exactly what a truncated page looks like. A panic here surfaces as XX000 `internal_error`, defeating the
+    // very goal of this milestone's taxonomy pass (XX002 for corruption): the operator would be told "internal
+    // bug, file a report" for a corrupt index. `record_span` cannot catch it — it validates the arithmetic
+    // against `npages`, not against how many bytes the page actually yielded.
+    if buf.len() < lo {
+        return Err(format!(
+            "theodb ivf-aq: chunk item shorter than the record offset ({} < {lo}) — truncated page",
+            buf.len()
+        ));
     }
     let mut out = buf[lo..].to_vec();
     let need = reclen - out.len();
@@ -765,10 +765,6 @@ pub(crate) unsafe fn ivf_is_v6(rel: pg_sys::Relation) -> bool {
 /// is list `i`'s SQ8 code bytes (`dim`×n, ordinal order matching `lists[i]`). `aq_codebook`/`sq8_codebook` are the
 /// two quantizers' `to_meta_bytes()`.
 #[allow(clippy::too_many_arguments)]
-/// M89 (ambuild streaming Increment 2) — v6 (SQ8) streaming writer. Same contract as `write_ivf_aq_split` but the
-/// per-list VECTOR region is the SQ8 code (`sq8_codes[i]`, already ¼ the f32 bytes) instead of f32. Reads TIDs from
-/// `ids` by position (no `list_entries()` clone) and streams each list's [ids][codes] + sq8 blob to pages without
-/// the `items` full-buffer. Byte-identical page image to the pre-M89 buffering writer.
 /// M96 — the STREAMING v5 writer: byte-identical on-disk output to [`write_ivf_aq_split`] but the per-list `(id,
 /// vector)` members are pulled from a callback (the sorted tuplesort read-back) ONE LIST AT A TIME instead of from
 /// full `positions`/`ids`/`vectors` arrays held in RAM. `counts[i]` is list i's member count (known from the
@@ -890,6 +886,13 @@ pub(crate) unsafe fn write_ivf_aq_split_streaming(
         // list_ids / list_vecs freed here — only one list's worth held at a time (O(N/lists)).
     }
 }
+/// M89 (ambuild streaming Increment 2) — v6 (SQ8) streaming writer. Same contract as `write_ivf_aq_split` but the
+/// per-list VECTOR region is the SQ8 code (`sq8_codes[i]`, already ¼ the f32 bytes) instead of f32. Reads TIDs from
+/// `ids` by position (no `list_entries()` clone) and streams each list's [ids][codes] + sq8 blob to pages without
+/// the `items` full-buffer. Byte-identical page image to the pre-M89 buffering writer.
+///
+/// (M146 T2.4: este bloco estava pendurado por engano na `write_ivf_aq_split_streaming`, que é o writer **v5/f32**
+/// — descrever um writer v6/SQ8 sobre a função v5 induz a erro quem for mexer no codec. Movido para cá.)
 pub(crate) unsafe fn write_ivf_aq_split_sq8(
     rel: pg_sys::Relation,
     dim: u32,

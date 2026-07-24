@@ -200,7 +200,11 @@ vez de percorrer ponteiros de memória:
 A pontuação usa `l2_dist_from_bytes` (`vec.rs:167`), que calcula a distância L2 **direto sobre os bytes da página**
 com AVX2+FMA (Cap. 24) — zero alocação de `Vec<f32>` por nó (o padrão hot-path do M31b). O contrato de erro é
 rígido (Cap. 8): toda decodificação retorna `Result`; uma página corrompida vira um erro tipado, **nunca um panic
-atravessando a fronteira C** (`am/scan.rs:81` `scan_hnsw_structured` converte via `pg_sys::error!`).
+atravessando a fronteira C** — os pontos de entrada do AM em `am/scan.rs` convertem esse `Result` via
+`crate::pg::err_corrupt`, que emite **SQLSTATE XX002 (`index_corrupted`)**, o mesmo código que o `contrib/amcheck`
+do PostgreSQL usa para corrupção. (Até o M146 a conversão saía por `pg_sys::error!`, isto é, XX000
+`internal_error` — indistinguível de um bug interno; e a função `scan_hnsw_structured` antes citada aqui foi
+removida no mesmo milestone por ser dead code.)
 
 **A decisão KISS que cortou metade do milestone** (ADR-1 do blueprint M35): o grafo é **imutável entre rebuilds**.
 INSERT vai para uma região *pending* (append), DELETE dispara um rebuild no VACUUM. Como o grafo construído nunca

@@ -277,7 +277,10 @@ fn parse_agg_kind(name: &str, vartype: pg_sys::Oid) -> Option<i32> {
     } else if name == "avg" {
         if vartype == pg_sys::FLOAT8OID {
             3 // avg(float8)→float8
-        } else if vartype == pg_sys::INT2OID || vartype == pg_sys::INT4OID || vartype == pg_sys::INT8OID {
+        } else if vartype == pg_sys::INT2OID
+            || vartype == pg_sys::INT4OID
+            || vartype == pg_sys::INT8OID
+        {
             5 // avg(int2/4/8)→numeric (AnyNumeric division = PG numeric_div — ADR-N1)
         } else {
             return None; // avg(float4)→float8-ULP, avg(numeric): decline
@@ -320,7 +323,10 @@ unsafe fn classify_target_node(
         Some(TargetSlot::Group(attno, (*var).vartype.to_u32()))
     } else if (*node).type_ == pg_sys::NodeTag::T_Aggref {
         let agg = node as *mut pg_sys::Aggref;
-        if !(*agg).aggfilter.is_null() || !(*agg).aggorder.is_null() || !(*agg).aggdistinct.is_null() {
+        if !(*agg).aggfilter.is_null()
+            || !(*agg).aggorder.is_null()
+            || !(*agg).aggdistinct.is_null()
+        {
             return None;
         }
         // Only a SIMPLE (non-split) aggregate has the FINAL result type. A partial/parallel split produces the

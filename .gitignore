@@ -63,3 +63,12 @@ theodb_rs/isolation/tmp_check/
 .claude/check-licence-evidence.db
 .claude/check-licence-loop.local.md
 code-review-output/
+
+# review-cycle plugin — estado de loop e artefatos por-execução (regenerados a cada run).
+# O relatório consolidado e o arquivo de review são versionados em knowledge-base/; estes NÃO.
+.review-runs/
+.review-loop/
+.compaction-snapshots/
+
+# locks de exclusao mutua do review-cycle (nao sao conteudo)
+*.json.lock

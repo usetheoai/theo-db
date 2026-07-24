@@ -14,6 +14,33 @@ use std::collections::BinaryHeap;
 // Lists probed per structured IVFFlat scan (bounds the pages read — the partial-read win, M31). M34: read from the
 // `theodb_ivfflat.probes` GUC (default 10) instead of a fixed constant; still clamped to the actual list count.
 
+/// Route a `build_lut16` failure to the SQLSTATE that matches its CAUSE. Diverges.
+///
+/// M146 (review F-db-1/F-arch-2 — a defect introduced by M146's own taxonomy pass). `build_lut16`
+/// (`vec/ah.rs:63,68`) fails for two unrelated reasons, and the first pass sent both to `err_corrupt`:
+///
+/// - **empty codebook** — the persisted AQ quantizer has `dim == 0`: genuinely a storage problem → `XX002`;
+/// - **query dim != codebook dim** — the CALLER passed a vector of the wrong width: an input problem → `22023`.
+///
+/// Collapsing them means a mistyped query against a perfectly healthy IVF-AQ index tells the operator
+/// `index_corrupted` — the SQLSTATE they use to decide "REINDEX now", and the REINDEX will not help.
+/// That is strictly worse than the XX000 it replaced: XX000 carried no information, this carries WRONG
+/// information. The five `scan_ivf_aq*` bodies never validate the query width (unlike HNSW at `:289` and
+/// SymQG at `:358`), so `build_lut16` is where that check actually lands.
+///
+/// The discriminator is the quantizer's STATE (`codebook_dim == 0`), not the text of the message. The first
+/// version matched the substring `"query dim"` and its doc claimed `ah_tests.rs` pinned that literal —
+/// **false**, caught by the review's second pass: `ah_tests.rs:94,104` assert only `is_err()`. Rewording
+/// `vec/ah.rs:70` to "query dimension" would have re-inverted the taxonomy with the whole suite green. The
+/// caller already holds the quantizer, so the structural check costs nothing and cannot rot.
+fn lut_error(codebook_dim: usize, e: &str) -> ! {
+    if codebook_dim == 0 {
+        crate::pg::err_corrupt(&format!("theodb am scan (aq lut): {e}"))
+    } else {
+        crate::pg::err_input(&format!("theodb am scan (aq lut): {e}"))
+    }
+}
+
 /// One scored candidate: its distance-to-query key + heap TID. Ordered ascending by (distance, tid) — the exact
 /// order the old `results.sort_by` produced, so the emitted top-K is byte-identical (recall unchanged, M36 ADR-1).
 /// `f64::total_cmp` is a TOTAL order — under M49 cosine a zero-norm vector yields NaN, which `total_cmp` orders
@@ -74,6 +101,9 @@ struct ScanState {
     // (`resumable_next`) instead of re-searching the graph with a doubled `ef` (the ~3× M52 cost). SBQ/AQ indexes
     // keep `None` and fall back to the M52 re-search (their per-batch rerank is a tracked follow-up).
     resume: Option<crate::am::hnsw_page::HnswResume>,
+    // M146 (#177): o `amrescan` recebeu zero ScanKeys de ORDER BY. Um índice vetorial não tem ordem própria,
+    // então este scan é irrespondível — `amgettuple` levanta erro tipado em vez de fingir "zero linhas".
+    unordered: bool,
 }
 
 #[pg_guard]
@@ -84,6 +114,7 @@ pub extern "C-unwind" fn ambeginscan(
 ) -> pg_sys::IndexScanDesc {
     let scandesc = unsafe { pg_sys::RelationGetIndexScan(index_relation, nkeys, norderbys) };
     let state = Box::new(ScanState {
+        unordered: false,
         heap: BinaryHeap::new(),
         query: Vec::new(),
         rel: index_relation,
@@ -155,8 +186,14 @@ pub extern "C-unwind" fn amrescan(
         }
         state.filtering = !state.query_labels.is_empty() || has_membership;
 
-        if norderbys < 1 || orderbys.is_null() {
-            return; // no ORDER BY <-> key → no index-ordered scan
+        // M146 (#177) — um scan SEM `ORDER BY <->` NÃO pode ser respondido por este AM: sem vetor de consulta
+        // não existe ordem, e um grafo HNSW não é uma lista de todas as TIDs. O erro é levantado em
+        // `amgettuple`, não aqui — ver o comentário longo lá. Marcar o estado e retornar mantém o `amrescan`
+        // livre de `ereport`, exatamente como o `hnswrescan` do pgvector (`src/hnswscan.c:167`), que só copia
+        // as ScanKeys; o guard equivalente do upstream vive no `hnswgettuple` (`:214`).
+        state.unordered = norderbys < 1 || orderbys.is_null();
+        if state.unordered {
+            return;
         }
         // A NULL query vector (`ORDER BY col <-> NULL`) has SK_ISNULL set and a 0 sk_argument — dereferencing it
         // would segfault in pg_detoast_datum. Treat it as an empty scan (matches pgvector's ivfscan/hnswscan).
@@ -172,7 +209,7 @@ pub extern "C-unwind" fn amrescan(
         // Dispatch on the persisted layout: structured IVFFlat (M31 — partial-page read) vs the M26 blob (HNSW).
         let magic = match page::peek_magic(rel) {
             Ok(m) => m,
-            Err(e) => pg_sys::error!("theodb am scan: {e}"),
+            Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
         };
         if magic == 0 {
             return; // empty / unbuilt index
@@ -207,10 +244,14 @@ pub extern "C-unwind" fn amrescan(
             // `state.resume` so `amgettuple` resumes from it instead of re-searching with a doubled `ef`.
             let meta = match crate::am::hnsw_page::read_meta(rel) {
                 Ok(m) => m,
-                Err(e) => pg_sys::error!("theodb am scan: {e}"),
+                Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
             };
             if meta.node_count > 0 && query.len() != meta.dim as usize {
-                pg_sys::error!("theodb hnsw: query dim {} != index dim {}", query.len(), meta.dim);
+                crate::pg::err_input(&format!(
+                    "theodb hnsw: query dim {} != index dim {}",
+                    query.len(),
+                    meta.dim
+                ));
             }
             let init: Vec<(i64, f64)> =
                 match crate::am::hnsw_page::resumable_init(rel, &meta, &query, ef) {
@@ -219,17 +260,19 @@ pub extern "C-unwind" fn amrescan(
                             match crate::am::hnsw_page::resumable_next(rel, &meta, &query, &mut rg)
                             {
                                 Ok(b) => b,
-                                Err(e) => pg_sys::error!("theodb am scan: {e}"),
+                                Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
                             };
                         // Fold pending (post-build INSERTs) into the FIRST batch only; later resumed batches never
                         // re-fold — the scan dedups tids. Mirrors `gather_hnsw_candidates`.
                         let metric = match Metric::from_tag(meta.metric_tag) {
                             Some(m) => m,
-                            None => pg_sys::error!("theodb am scan: unknown metric tag"),
+                            None => crate::pg::err_corrupt(
+                                "theodb am scan: unknown metric tag in persisted index meta",
+                            ),
                         };
                         let pending = match page::read_pending(rel) {
                             Ok(p) => p,
-                            Err(e) => pg_sys::error!("theodb am scan: {e}"),
+                            Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
                         };
                         for (tidv, v) in pending {
                             b.push((tidv, metric.dist(&query, &v)));
@@ -238,7 +281,7 @@ pub extern "C-unwind" fn amrescan(
                         b
                     }
                     Ok(None) => gather_hnsw_candidates(rel, &query, ef),
-                    Err(e) => pg_sys::error!("theodb am scan: {e}"),
+                    Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
                 };
             heapify(init)
         } else if magic == crate::am::page::SYMQG_MAGIC {
@@ -255,16 +298,9 @@ pub extern "C-unwind" fn amrescan(
     }
 }
 
-/// M35 partial-read HNSW scan: read the meta (1 page), traverse the graph ON DEMAND reading only visited nodes'
-/// element/neighbor tuples (∝ ef·M, flat in N — never the whole graph), then fold the pending region. Ascending
-/// distance. Replaces the O(N) `scan_blob` path for structured `theodb_hnsw` indexes.
-unsafe fn scan_hnsw_structured(
-    rel: pg_sys::Relation,
-    query: &[f32],
-    ef: usize,
-) -> BinaryHeap<Reverse<Scored>> {
-    heapify(gather_hnsw_candidates(rel, query, ef))
-}
+// M146 T2.4: `scan_hnsw_structured` foi removida aqui — era dead code (zero callers no repo inteiro),
+// superseded pelo refactor do amrescan, que chama `gather_hnsw_candidates` direto para poder crescer o `ef`
+// entre iterações. Os helpers que ela usava seguem vivos e usados por outros caminhos (#169).
 
 /// M52: gather the HNSW scan candidates (traverse at `ef` + pending fold) as a raw `(tid, dist)` Vec. Extracted
 /// so the iterative scan (`amgettuple`) can re-run it with a growing `ef` and dedup already-emitted tids, without
@@ -276,26 +312,32 @@ unsafe fn gather_hnsw_candidates(
 ) -> Vec<(i64, f64)> {
     let meta = match crate::am::hnsw_page::read_meta(rel) {
         Ok(m) => m,
-        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     };
     let metric = match Metric::from_tag(meta.metric_tag) {
         Some(m) => m,
-        None => pg_sys::error!("theodb am scan: unknown metric tag"),
+        None => {
+            crate::pg::err_corrupt("theodb am scan: unknown metric tag in persisted index meta")
+        }
     };
     // Fail-fast with a typed error (mirrors pgvector's "different vector dimensions") instead of letting a
     // cross-dim query reach the SIMD scorer's length assertion as a bare panic across the C boundary. Only when
     // the index has nodes: an empty index carries dim=0 and traverse short-circuits to [] regardless of the query.
     if meta.node_count > 0 && query.len() != meta.dim as usize {
-        pg_sys::error!("theodb hnsw: query dim {} != index dim {}", query.len(), meta.dim);
+        crate::pg::err_input(&format!(
+            "theodb hnsw: query dim {} != index dim {}",
+            query.len(),
+            meta.dim
+        ));
     }
     let mut results = match crate::am::hnsw_page::traverse(rel, &meta, query, ef) {
         Ok(r) => r,
-        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     };
     // Fold in pending (INSERTed after build) — no rebuild (mirror the IVF path).
     let pending = match page::read_pending(rel) {
         Ok(p) => p,
-        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     };
     for (tidv, v) in pending {
         results.push((tidv, metric.dist(query, &v)));
@@ -339,32 +381,38 @@ unsafe fn gather_symqg_candidates(
     use crate::am::page;
     let meta = match page::read_symqg_meta(rel) {
         Ok(m) => m,
-        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     };
     let metric = match Metric::from_tag(meta.metric_tag) {
         Some(m) => m,
-        None => pg_sys::error!("theodb am scan: unknown metric tag"),
+        None => {
+            crate::pg::err_corrupt("theodb am scan: unknown metric tag in persisted index meta")
+        }
     };
     if meta.n == 0 {
         return Vec::new(); // empty index (EC-4)
     }
     if query.len() != meta.dim as usize {
-        pg_sys::error!("theodb_symqg: query dim {} != index dim {}", query.len(), meta.dim); // EC-3
+        crate::pg::err_input(&format!(
+            "theodb_symqg: query dim {} != index dim {}",
+            query.len(),
+            meta.dim
+        )); // EC-3
     }
     let dim = meta.dim as usize;
     let degree = meta.degree_bound as usize;
     let rot_bytes = match page::read_chunked(rel, meta.gen_base, meta.rot_codebook_npages) {
         Ok(b) => b,
-        Err(e) => pg_sys::error!("theodb am scan (rotation): {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan (rotation): {e}")),
     };
     let rq = match crate::vec::rabitq::RabitqQuantizer::from_meta_bytes(&rot_bytes) {
         Ok(q) => q,
-        Err(e) => pg_sys::error!("theodb am scan (rabitq): {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan (rabitq): {e}")),
     };
     let rot_q = rq.rotate(query);
     let tids = match page::read_symqg_tids(rel, &meta) {
         Ok(t) => t,
-        Err(e) => pg_sys::error!("theodb am scan (tids): {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan (tids): {e}")),
     };
     let rows_base = meta.rows_base();
     let ef = ef.max(1);
@@ -375,13 +423,13 @@ unsafe fn gather_symqg_candidates(
     let read_fast = |ord: u32| -> page::SymqgRowFast {
         match page::read_symqg_row_fast(rel, rows_base, ord, dim, degree) {
             Ok(r) => r,
-            Err(e) => pg_sys::error!("theodb am scan (row {ord}): {e}"),
+            Err(e) => crate::pg::err_corrupt(&format!("theodb am scan (row {ord}): {e}")),
         }
     };
     let read_scalar = |ord: u32| -> page::SymqgRow {
         match page::read_symqg_row(rel, rows_base, ord, dim, degree) {
             Ok(r) => r,
-            Err(e) => pg_sys::error!("theodb am scan (row {ord}): {e}"),
+            Err(e) => crate::pg::err_corrupt(&format!("theodb am scan (row {ord}): {e}")),
         }
     };
     let mut visited: std::collections::HashSet<u32> = std::collections::HashSet::new();
@@ -415,7 +463,7 @@ unsafe fn gather_symqg_candidates(
             results.push((tids[p as usize], qc2.max(0.0).sqrt()));
             let lut = match crate::vec::ah::build_sign_lut16(&q_r) {
                 Ok(l) => l,
-                Err(e) => pg_sys::error!("theodb am scan (sign lut): {e}"),
+                Err(e) => crate::pg::err_corrupt(&format!("theodb am scan (sign lut): {e}")),
             };
             for c in 0..row.nblocks() {
                 let base = c * 32;
@@ -474,7 +522,7 @@ unsafe fn gather_symqg_candidates(
                 results.push((tidv, metric.dist(query, &v)));
             }
         }
-        Err(e) => pg_sys::error!("theodb am scan (pending): {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan (pending): {e}")),
     }
     results
 }
@@ -517,11 +565,13 @@ unsafe fn scan_ivf_structured(
     let _ = rerank_pool;
     let meta = match page::read_ivf_meta(rel) {
         Ok(m) => m,
-        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     };
     let metric = match Metric::from_tag(meta.metric_tag) {
         Some(m) => m,
-        None => pg_sys::error!("theodb am scan: unknown metric tag"),
+        None => {
+            crate::pg::err_corrupt("theodb am scan: unknown metric tag in persisted index meta")
+        }
     };
     // NOTE: do NOT early-return on empty centroids — an index built (or vacuumed) empty still has a pending
     // region with INSERTed rows that must be folded in (else those rows are silently dropped). The probe loop
@@ -548,7 +598,7 @@ unsafe fn scan_ivf_structured(
         let t_read = std::time::Instant::now();
         let bytes = match page::read_ivf_list_bytes(rel, fb, np) {
             Ok(b) => b,
-            Err(e) => pg_sys::error!("theodb am scan: {e}"),
+            Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
         };
         if profile {
             read_us += t_read.elapsed().as_micros();
@@ -577,7 +627,7 @@ unsafe fn scan_ivf_structured(
     // Fold in pending (INSERTed after build) — no rebuild.
     let pending = match page::read_pending(rel) {
         Ok(p) => p,
-        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     };
     for (tidv, v) in pending {
         results.push((tidv, metric.dist(query, &v)));
@@ -608,19 +658,21 @@ unsafe fn scan_ivf_aq(
 ) -> Vec<(i64, f64)> {
     let meta = match page::read_ivf_aq_meta(rel) {
         Ok(m) => m,
-        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     };
     let quant = match crate::vec::aq::AqQuantizer::from_meta_bytes(&meta.codebook) {
         Ok(q) => q,
-        Err(e) => pg_sys::error!("theodb am scan (aq codebook): {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan (aq codebook): {e}")),
     };
     let lut = match crate::vec::ah::build_lut16(query, &quant) {
         Ok(l) => l,
-        Err(e) => pg_sys::error!("theodb am scan (aq lut): {e}"),
+        Err(e) => lut_error(quant.dim(), &e),
     };
     let metric = match Metric::from_tag(meta.metric_tag) {
         Some(m) => m,
-        None => pg_sys::error!("theodb am scan: unknown metric tag"),
+        None => {
+            crate::pg::err_corrupt("theodb am scan: unknown metric tag in persisted index meta")
+        }
     };
     let dim = meta.dim as usize;
     let entry_f32 = dim * 4;
@@ -649,7 +701,7 @@ unsafe fn scan_ivf_aq(
         }
         let bytes = match page::read_ivf_list_bytes(rel, fb, np) {
             Ok(b) => b,
-            Err(e) => pg_sys::error!("theodb am scan: {e}"),
+            Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
         };
         let codes_off = 8 * n + entry_f32 * n;
         let nblocks = n.div_ceil(32);
@@ -701,7 +753,7 @@ unsafe fn scan_ivf_aq(
                 results.push((tidv, metric.dist(query, &v)));
             }
         }
-        Err(e) => pg_sys::error!("theodb am scan (pending): {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan (pending): {e}")),
     }
     results
 }
@@ -719,19 +771,21 @@ unsafe fn scan_ivf_aq_split(
 ) -> Vec<(i64, f64)> {
     let meta = match page::read_ivf_aq_meta_split(rel) {
         Ok(m) => m,
-        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     };
     let quant = match crate::vec::aq::AqQuantizer::from_meta_bytes(&meta.codebook) {
         Ok(q) => q,
-        Err(e) => pg_sys::error!("theodb am scan (aq codebook): {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan (aq codebook): {e}")),
     };
     let lut = match crate::vec::ah::build_lut16(query, &quant) {
         Ok(l) => l,
-        Err(e) => pg_sys::error!("theodb am scan (aq lut): {e}"),
+        Err(e) => lut_error(quant.dim(), &e),
     };
     let metric = match Metric::from_tag(meta.metric_tag) {
         Some(m) => m,
-        None => pg_sys::error!("theodb am scan: unknown metric tag"),
+        None => {
+            crate::pg::err_corrupt("theodb am scan: unknown metric tag in persisted index meta")
+        }
     };
     let dim = meta.dim as usize;
     let pairs = (meta.m as usize).div_ceil(2);
@@ -773,7 +827,7 @@ unsafe fn scan_ivf_aq_split(
         }
         let cbytes = match page::read_ivf_list_bytes(rel, cfb, cnp) {
             Ok(b) => b,
-            Err(e) => pg_sys::error!("theodb am scan: {e}"),
+            Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
         };
         let codes_off = 8 * n; // codes start right after the n ids
         let nblocks = n.div_ceil(32);
@@ -818,7 +872,7 @@ unsafe fn scan_ivf_aq_split(
         let (_cfb, _cnp, vfb, vnp, _cnt) = meta.dir[*ci];
         let raw = match page::read_vec_at(rel, vfb, vnp, *ordinal, dim) {
             Ok(b) => b,
-            Err(e) => pg_sys::error!("theodb am scan (v5 rerank): {e}"),
+            Err(e) => crate::pg::err_corrupt(&format!("theodb am scan (v5 rerank): {e}")),
         };
         let d = match metric {
             Metric::L2 => crate::vec::l2_dist_from_bytes(query, &raw),
@@ -834,7 +888,7 @@ unsafe fn scan_ivf_aq_split(
                 results.push((tidv, metric.dist(query, &v)));
             }
         }
-        Err(e) => pg_sys::error!("theodb am scan (pending): {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan (pending): {e}")),
     }
     results
 }
@@ -853,19 +907,21 @@ unsafe fn scan_ivf_aq_split_v7(
 ) -> Vec<(i64, f64)> {
     let meta = match page::read_ivf_aq_meta_split(rel) {
         Ok(m) => m,
-        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     };
     let quant = match crate::vec::aq::AqQuantizer::from_meta_bytes(&meta.codebook) {
         Ok(q) => q,
-        Err(e) => pg_sys::error!("theodb am scan (aq codebook): {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan (aq codebook): {e}")),
     };
     let lut = match crate::vec::ah::build_lut16(query, &quant) {
         Ok(l) => l,
-        Err(e) => pg_sys::error!("theodb am scan (aq lut): {e}"),
+        Err(e) => lut_error(quant.dim(), &e),
     };
     let metric = match Metric::from_tag(meta.metric_tag) {
         Some(m) => m,
-        None => pg_sys::error!("theodb am scan: unknown metric tag"),
+        None => {
+            crate::pg::err_corrupt("theodb am scan: unknown metric tag in persisted index meta")
+        }
     };
     let dim = meta.dim as usize;
     let pairs = (meta.m as usize).div_ceil(2);
@@ -906,7 +962,7 @@ unsafe fn scan_ivf_aq_split_v7(
         }
         let cbytes = match page::read_ivf_list_bytes(rel, cfb, cnp) {
             Ok(b) => b,
-            Err(e) => pg_sys::error!("theodb am scan: {e}"),
+            Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
         };
         let labels_off = 8 * n; // labels start right after the n ids
         let codes_off = 8 * n + n * label_bytes; // codes start after ids + the fixed label region
@@ -970,7 +1026,7 @@ unsafe fn scan_ivf_aq_split_v7(
         let (_cfb, _cnp, vfb, vnp, _cnt) = meta.dir[*ci];
         let raw = match page::read_vec_at(rel, vfb, vnp, *ordinal, dim) {
             Ok(b) => b,
-            Err(e) => pg_sys::error!("theodb am scan (v7 rerank): {e}"),
+            Err(e) => crate::pg::err_corrupt(&format!("theodb am scan (v7 rerank): {e}")),
         };
         let d = match metric {
             Metric::L2 => crate::vec::l2_dist_from_bytes(query, &raw),
@@ -986,7 +1042,7 @@ unsafe fn scan_ivf_aq_split_v7(
                 results.push((tidv, metric.dist(query, &v)));
             }
         }
-        Err(e) => pg_sys::error!("theodb am scan (pending): {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan (pending): {e}")),
     }
     results
 }
@@ -1031,23 +1087,25 @@ unsafe fn scan_ivf_aq_split_sq8(
 ) -> Vec<(i64, f64)> {
     let meta = match page::read_ivf_aq_meta_split_sq8(rel) {
         Ok(m) => m,
-        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     };
     let quant = match crate::vec::aq::AqQuantizer::from_meta_bytes(&meta.aq_codebook) {
         Ok(q) => q,
-        Err(e) => pg_sys::error!("theodb am scan (aq codebook): {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan (aq codebook): {e}")),
     };
     let sq8 = match crate::sq8::Sq8Quantizer::from_meta_bytes(&meta.sq8_codebook) {
         Ok(q) => q,
-        Err(e) => pg_sys::error!("theodb am scan (sq8 codebook): {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan (sq8 codebook): {e}")),
     };
     let lut = match crate::vec::ah::build_lut16(query, &quant) {
         Ok(l) => l,
-        Err(e) => pg_sys::error!("theodb am scan (aq lut): {e}"),
+        Err(e) => lut_error(quant.dim(), &e),
     };
     let metric = match Metric::from_tag(meta.metric_tag) {
         Some(m) => m,
-        None => pg_sys::error!("theodb am scan: unknown metric tag"),
+        None => {
+            crate::pg::err_corrupt("theodb am scan: unknown metric tag in persisted index meta")
+        }
     };
     let dim = meta.dim as usize;
     let pairs = (meta.m as usize).div_ceil(2);
@@ -1070,7 +1128,7 @@ unsafe fn scan_ivf_aq_split_sq8(
         }
         let cbytes = match page::read_ivf_list_bytes(rel, cfb, cnp) {
             Ok(b) => b,
-            Err(e) => pg_sys::error!("theodb am scan: {e}"),
+            Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
         };
         let codes_off = 8 * n;
         let nblocks = n.div_ceil(32);
@@ -1108,7 +1166,7 @@ unsafe fn scan_ivf_aq_split_sq8(
         let (_cfb, _cnp, sfb, snp, _cnt) = meta.dir[*ci];
         let code = match page::read_sq8_at(rel, sfb, snp, *ordinal, dim) {
             Ok(b) => b,
-            Err(e) => pg_sys::error!("theodb am scan (v6 sq8 rerank): {e}"),
+            Err(e) => crate::pg::err_corrupt(&format!("theodb am scan (v6 sq8 rerank): {e}")),
         };
         let approx = sq8.decode(&code);
         results.push((*tid, metric.dist(query, &approx)));
@@ -1120,7 +1178,7 @@ unsafe fn scan_ivf_aq_split_sq8(
                 results.push((tidv, metric.dist(query, &v)));
             }
         }
-        Err(e) => pg_sys::error!("theodb am scan (pending): {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan (pending): {e}")),
     }
     results
 }
@@ -1138,23 +1196,25 @@ unsafe fn scan_ivf_aq_split_rabitq(
 ) -> Vec<(i64, f64)> {
     let meta = match page::read_ivf_aq_meta_split_rabitq(rel) {
         Ok(m) => m,
-        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     };
     let quant = match crate::vec::aq::AqQuantizer::from_meta_bytes(&meta.aq_codebook) {
         Ok(q) => q,
-        Err(e) => pg_sys::error!("theodb am scan (aq codebook): {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan (aq codebook): {e}")),
     };
     let rq = match crate::vec::rabitq::RabitqQuantizer::from_meta_bytes(&meta.rabitq_codebook) {
         Ok(q) => q,
-        Err(e) => pg_sys::error!("theodb am scan (rabitq codebook): {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan (rabitq codebook): {e}")),
     };
     let lut = match crate::vec::ah::build_lut16(query, &quant) {
         Ok(l) => l,
-        Err(e) => pg_sys::error!("theodb am scan (aq lut): {e}"),
+        Err(e) => lut_error(quant.dim(), &e),
     };
     let metric = match Metric::from_tag(meta.metric_tag) {
         Some(m) => m,
-        None => pg_sys::error!("theodb am scan: unknown metric tag"),
+        None => {
+            crate::pg::err_corrupt("theodb am scan: unknown metric tag in persisted index meta")
+        }
     };
     let dim = meta.dim as usize;
     let pairs = (meta.m as usize).div_ceil(2);
@@ -1175,7 +1235,7 @@ unsafe fn scan_ivf_aq_split_rabitq(
         }
         let cbytes = match page::read_ivf_list_bytes(rel, cfb, cnp) {
             Ok(b) => b,
-            Err(e) => pg_sys::error!("theodb am scan: {e}"),
+            Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
         };
         let codes_off = 8 * n;
         let nblocks = n.div_ceil(32);
@@ -1224,11 +1284,11 @@ unsafe fn scan_ivf_aq_split_rabitq(
         let (q_r, qc2) = qcache[*ci].as_ref().unwrap();
         let rec = match page::read_rabitq_at(rel, rfb, rnp, *ordinal, dim) {
             Ok(b) => b,
-            Err(e) => pg_sys::error!("theodb am scan (v8 rabitq rerank): {e}"),
+            Err(e) => crate::pg::err_corrupt(&format!("theodb am scan (v8 rabitq rerank): {e}")),
         };
         let code = match crate::vec::rabitq::RabitqQuantizer::record_to_code(&rec, dim) {
             Ok(c) => c,
-            Err(e) => pg_sys::error!("theodb am scan (v8 rabitq record): {e}"),
+            Err(e) => crate::pg::err_corrupt(&format!("theodb am scan (v8 rabitq record): {e}")),
         };
         // estimate_l2_sq returns SQUARED L2; sqrt it so v8 distances share the sqrt-L2 scale of the pending rows
         // (metric.dist) and of v5/v6 — the ORDER BY comparison must not mix squared and sqrt scales. Clamp the
@@ -1242,7 +1302,7 @@ unsafe fn scan_ivf_aq_split_rabitq(
                 results.push((tidv, metric.dist(query, &v)));
             }
         }
-        Err(e) => pg_sys::error!("theodb am scan (pending): {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan (pending): {e}")),
     }
     results
 }
@@ -1251,18 +1311,18 @@ unsafe fn scan_ivf_aq_split_rabitq(
 unsafe fn scan_blob(rel: pg_sys::Relation, query: &[f32]) -> BinaryHeap<Reverse<Scored>> {
     let blob = match page::read_blob(rel) {
         Ok(b) => b,
-        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     };
     if blob.is_empty() {
         return BinaryHeap::new();
     }
     let idx = match Persisted::from_bytes(&blob) {
         Ok(i) => i,
-        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     };
     let pending = match page::read_pending(rel) {
         Ok(p) => p,
-        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
     };
     // `search_merged` already returns ascending-sorted; heapify is O(C) and keeps the uniform pop path (M36).
     heapify(idx.search_merged(query, &pending))
@@ -1276,6 +1336,34 @@ pub extern "C-unwind" fn amgettuple(
     unsafe {
         let scan_ref = &mut *scan;
         let state = &mut *scan_ref.opaque.cast::<ScanState>();
+        // M146 (#177) — o executor está pedindo tuplas de um scan sem `ORDER BY <->`. Antes disto o AM
+        // devolvia `false` na primeira chamada e o executor concluía, corretamente do ponto de vista dele,
+        // que **a relação não tem linhas**. Medido em PG 18.4, `enable_seqscan=off`, tabela de 500 linhas:
+        //
+        //   SELECT count(*) FROM t;   -- B-tree: 500  |  theodb_hnsw: 0   ← resposta ERRADA, sem erro algum
+        //   SELECT id     FROM t;     -- idem: zero linhas
+        //   EXPLAIN: Aggregate -> Index Only Scan using t_hnsw on t
+        //
+        // O planner não está errado: para `count(*)` nenhuma coluna é necessária, então o teste de index-only
+        // é vacuosamente satisfeito e qualquer índice serve. Errado estava o AM, que promete
+        // `amoptionalkey = true` ("sei varrer sem ScanKey") e entregava zero linhas.
+        //
+        // O guard vive AQUI, e não no `amrescan`, porque é aqui que o executor de fato pede linhas — o
+        // `amrescan` pode ser chamado em caminhos que nunca puxam tupla. É onde o pgvector o coloca
+        // (`src/hnswscan.c:214`: `if (scan->orderByData == NULL) elog(ERROR, "cannot scan hnsw index
+        // without order")`), e seguir o upstream aqui é mais seguro que inovar.
+        // Lê a FONTE PRIMÁRIA (`numberOfOrderBys` do próprio descritor), não o flag derivado do argumento do
+        // rescan — review pass-2 (F2-db-4). O pgvector faz o mesmo (`hnswscan.c:214` consulta
+        // `scan->orderByData`, não um campo do opaque). O flag continua sendo mantido no rescan para leitura
+        // humana, mas a decisão não depende de o rescan ter rodado antes: se `amgettuple` for alcançado por
+        // um caminho que não passou pelo rescan, o guard ainda vale.
+        if scan_ref.numberOfOrderBys < 1 || scan_ref.orderByData.is_null() || state.unordered {
+            crate::pg::err_input(
+                "theodb am: cannot scan a vector index without ORDER BY <distance operator> — \
+                 a vector index has no total order of its own. Add the ORDER BY, or let the planner \
+                 use a sequential/heap scan (this index cannot answer an unordered scan).",
+            );
+        }
         loop {
             // M36: pop the next-nearest candidate from the lazy min-heap — O(log C) per call, and the executor
             // only pulls ~k times for a `LIMIT k`, so the scan never pays the full O(C·log C) sort.
@@ -1317,7 +1405,7 @@ pub extern "C-unwind" fn amgettuple(
                     let rel = state.rel;
                     let meta = match crate::am::hnsw_page::read_meta(rel) {
                         Ok(m) => m,
-                        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+                        Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
                     };
                     let resume_ceiling = crate::am::guc::hnsw_resume_max_bytes();
                     loop {
@@ -1346,7 +1434,9 @@ pub extern "C-unwind" fn amgettuple(
                                         rel, &meta, q, rg,
                                     ) {
                                         Ok(b) => b,
-                                        Err(e) => pg_sys::error!("theodb am scan: {e}"),
+                                        Err(e) => {
+                                            crate::pg::err_corrupt(&format!("theodb am scan: {e}"))
+                                        }
                                     };
                                     (b, rg.exhausted())
                                 }

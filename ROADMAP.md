@@ -2509,7 +2509,7 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 ---
 
-## M145 — [ ] Refactor dos hotspots de CC refactor-worthy (admit, worker_main, write_parquet_impl, main_index_pages) *(gated M144)*
+## M145 — [x] Refactor dos hotspots de CC refactor-worthy (admit, worker_main, write_parquet_impl, main_index_pages) *(gated M144)*
 
 > Added 2026-07-23 (`/roadmap-feature cc-hotspots-refactor`). Grill: `.claude/knowledge-base/grills/cc-hotspots-refactor-feature-grill.md`. Fonte: lizard 1.23.0 (`code-review-output/audit/lizard_rust.csv (local, gitignored)`, 1359 fns medidas).
 
@@ -2528,6 +2528,60 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 **Risks:** (a) **regressão do Agg-swap byte-idêntico do M115** ao refatorar o `admit`; mitigação: A/B in-PG obrigatório no DoD. (b) **churn sem valor** se a CC for essencial; mitigação: válvula honest-negative no DoD.
 
 **Prior art:** `.claude/knowledge-base/audits/theodb-rs-code-review-2026-07-23.md` §6-P2 (quais hotspots merecem vs são essenciais), M115 (metodologia A/B byte-idêntico do Agg-swap), `.claude/rules/parsimony-ladder.md` (anti-sunk-cost).
+
+---
+
+## M146 — [x] Remediação do review-cycle theodb_rs: hardening + tests + cleanup *(gated M145)*
+
+> Added 2026-07-23 (`/roadmap-feature theodb-review-remediation`). Grill: `.claude/knowledge-base/grills/theodb-review-remediation-feature-grill.md`. Fonte: review-cycle full-tree do theodb_rs (núcleo 12 arquivos × 10/10 pilares) — `knowledge-base/review-archive/theodb-full-core-complete-2026-07-23/review-2026-07-23.md`; issues #168, #169.
+
+**Objective:** corrigir os pontos non-refactor do review — hardening defense-in-depth, test-gaps e cleanup — com TDD e prova medida, sem tocar o dispatch por-versão (esse é o M147).
+
+**Definition of done:**
+
+- [x] #168 `graph.rs:265`: `build_csr` usa `($3::regclass)::text` (rejeita `edge_rel` inexistente/malicioso com erro tipado); `#[pg_test]` provando que payload de injection NÃO executa (tabela-vítima sobrevive), validado no droplet (A/B smoke — `cargo pgrx test` inexecutável local).
+- [x] `from_bytes` valida índices de vizinho onde o irmão já valida (`ann/hnsw.rs:466`, `ann/ivf.rs:413` — `node >= n` → erro tipado, não OOB/panic); teste de corrupção por-arquivo.
+- [x] #169 dead code `scan_hnsw_structured` (`am/scan.rs:261`) removido (superseded pelo refactor amrescan); `cargo check --features pg18` verde + grep zero-ocorrência.
+- [x] Test-gaps fechados: `am/page/ivf.rs` ganha `mod tests` in-file (LABEL_K truncation, `read_record_at` chunk-straddle, paths de corrupção typed-error); `with_soar_spill` (`ann/ivf.rs:109`) coberto; doc-drift `ivf.rs:780` (v5/f32 vs texto v6/SQ8) corrigido.
+- [x] `parquet.rs:263` `atomic_write_parquet`: `fsync` antes do rename (crash-durável) OU ADR aceitando o risco (export re-executável via `htab_refresh`).
+- [x] Suíte verde + CHANGELOG `[Unreleased]`.
+
+**Desvios do DoD, declarados (Regra 3 — nenhum bullet marcado sem isto):**
+
+- Bullet 4 pedia `mod tests` **in-file** em `am/page/ivf.rs`. Entregue de outra forma, deliberadamente: um `mod tests` ali **nunca executaria** — `cargo test` e `cargo pgrx test` não linkam neste crate (símbolos PG indefinidos), o que é exatamente por que o crate acumula 69 `#[test]` + 326 `#[pg_test]` jamais executados. A lógica pura foi extraída para `am/page/ivf_codec.rs` e é exercitada por `examples/ivf_codec_check.rs`, que **roda** (convenção já estabelecida por `examples/resumable_check.rs`). Teste que executa > teste que existe. Não-vacuidade provada por mutação (2 mutações → 2 falhas; restaurado → OK).
+- **A métrica do Goal do plano NÃO foi atingida: é 1/3, não 3/3.** O plano define como métrica observável "3/3 defeitos com teste RED→GREEN efetivamente executado". A realidade medida: **T1.2 (injeção no `graph_build`) tem RED→GREEN discriminante** (`division by zero` → `invalid name syntax`); **T1.1 (bounds de vizinho no HNSW) não tem** — a medição de alcançabilidade mostrou `deaths=0` nas duas configurações de checksum, ou seja o RED nunca falhou, então o fix é defense-in-depth e não correção de um panic alcançável; **T1.3 (durabilidade do Parquet)**: a prova sob crash foi apontada como ausente pelo `/review` e **passou a existir** (`theodb_rs/isolation/crash_parquet.sh`, ligado ao alvo `check-crash`): crash imediato logo após o `write_parquet` retornar → arquivo publicado íntegro (90920 B, magic `PAR1` no início E no fim), zero temp órfão, e `read_parquet` relê as 5000 linhas. Não-vacuidade provada truncando o arquivo publicado → exit 1. **Limite honesto declarado no próprio harness:** um `pg_ctl -m immediate` mata o processo, não a máquina, então o page cache do Linux sobrevive — o teste prova que o arquivo publicado é consistente e que o protocolo não corrompe nada, mas **não** distingue "o fsync salvou" de "o kernel teria escrito de qualquer jeito". Provar isso exigiria corte de energia real. Assim, o RED→GREEN discriminante do Goal permanece em **2/3** (T1.2 e T1.3), não 3/3: o T1.1 segue sem RED que falhe, por a alcançabilidade ter sido medida como inexistente.
+- **Escopo não planejado entrou no milestone:** a correção do próprio gate `/code-quality` (#175 — três falso-verdes: linguagem vazia, D1 no diretório errado, D2 vacuoso sem tree-sitter) e a reabertura do #172 (terceiro eixo de injeção, `tbl`, encontrado pelo `/review` deste milestone). Ambos estão no CHANGELOG e nos issues, mas não estavam no plano.
+- Bullet 1 pedia um `#[pg_test]` provando que o payload de injeção não executa. O próprio bullet já previa a mitigação (A/B no droplet) porque `cargo pgrx test` não linka; foi por A/B medido: `ERROR: division by zero` → `ERROR: invalid name syntax`.
+- Bullet 4 (b) `with_soar_spill`: o ramo `lambda < 0` do guard é **inalcançável do SQL** (a reloption `soar_lambda` tem mínimo 0 e rejeita −5 com "out of bounds"). Cobertos os ramos alcançáveis (λ=0, tabela vazia, λ>0). Não afirmo ter testado λ<0.
+- "Suíte verde" = os gates mecânicos do CI (`cargo clippy --features pg18 --no-deps -- $(.clippy_args)` exit 0; `cargo fmt --check` exit 0; `cargo test -p theodb_lexical`), **não** as suítes `#[test]`/`#[pg_test]` do `theodb_rs`, que continuam inexecutáveis neste ambiente — limitação pré-existente ao M146, não introduzida por ele.
+
+**Dependencies:** M145 (o refactor de CC já estabilizou `vectorizer.rs`/`parquet.rs`/`scan.rs`, que este milestone toca).
+
+**Risks:** (a) o teste de injection do #168 exige o droplet (`cargo pgrx test` não linka local) — mitigação: A/B smoke no e2e-runner (165.227.121.20). (b) validar índices em `from_bytes` pode rejeitar blobs M26 deprecados legítimos — mitigação: gate só no path de leitura estruturado, preservar compat do blob.
+
+**Prior art:** `knowledge-base/review-archive/theodb-full-core-complete-2026-07-23/review-2026-07-23.md`, issues #168/#169, M144 (metodologia de remediação sob TDD), `.claude/rules/error-handling.md` (typed errors), `.claude/rules/testing.md` (edge vs negative cases).
+
+---
+
+## M147 — [ ] Refactor scan.rs version-dispatch IVF/AQ: dispatch-table + Vec→Result + Stage-1 compartilhado *(gated M146)*
+
+> Added 2026-07-23 (`/roadmap-feature theodb-review-remediation`). Grill: `.claude/knowledge-base/grills/theodb-review-remediation-feature-grill.md`. Fonte: issue #170 (consenso de 5 pilares — code, architecture, idiomaticity, design_patterns, maintainability).
+
+**Objective:** fechar o hotspot de consenso 5-pilares (#170) em `am/scan.rs` com comportamento preservado, **sem violar a ADR-2 do M145** (corpos de formato on-disk permanecem separados — offsets/strides por-versão são complexidade essencial).
+
+**Definition of done:**
+
+- [ ] if-ladder `ivf_is_v4/v5/v6/v7/v8` (`scan.rs:497`) substituído por dispatch-table/enum: adicionar versão nova = adicionar entrada, não editar switch (OCP).
+- [ ] 8 gather helpers (`scan.rs:272`) retornam `Result` + `?` com UM boundary de erro (idioma do crate — `columnar_agg.rs:939`), eliminando os ~56 `match { Ok=>v, Err=>error! }` C-style.
+- [ ] Stage-1 `ah_score_block` compartilhado pelos 5 corpos `scan_ivf_aq_*` **in-memory** (não tocam byte persistido, ≠ formatos on-disk de `page/ivf.rs` que continuam duplicados — ADR-2 preservada).
+- [ ] Comportamento preservado: suíte verde + A/B byte-idêntico recall×QPS in-PG (metodologia M145) para os 5 caminhos (v4/v5/v6/v7/v8).
+- [ ] Zero mudança de superfície SQL; CHANGELOG `[Unreleased]`.
+
+**Dependencies:** M146 (o #169 remove `scan_hnsw_structured` de `scan.rs` ANTES deste refactor tocar o mesmo arquivo — evita conflito de merge/escopo).
+
+**Risks:** (a) regressão de recall/QPS ao unificar o Stage-1 — mitigação: A/B byte-idêntico por-versão obrigatório no DoD. (b) tentação de unificar os CORPOS por-versão (viola ADR-2, risco de misparse→data-loss) — mitigação: escopo trava em dispatch + helpers + Stage-1-in-memory; corpos on-disk intocados.
+
+**Prior art:** issue #170, M145 (metodologia A/B byte-idêntico + válvula honest-negative), `.claude/rules/parsimony-ladder.md` (anti-sunk-cost; per-version = essencial), `knowledge-base/review-archive/theodb-full-core-complete-2026-07-23/review-2026-07-23.md`.
 
 ---
 

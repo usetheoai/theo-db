@@ -40,6 +40,15 @@ impl Drop for HeldInterrupts {
     }
 }
 
+/// Marcador de classe que um erro carrega desde a origem: mensagem prefixada com isto vira **58030
+/// (io_error)**; sem o prefixo, **22023 (invalid_parameter_value)**.
+///
+/// M146 (review F-arch-1). A primeira versão adivinhava a classe pelo prefixo humano da mensagem
+/// (`"fsync "`, `"rename "`), o que rotulava `criar`/`write batch`/`close` — justamente onde ENOSPC e EIO
+/// aparecem — como erro de parâmetro do usuário. Marcar na origem custa um literal e elimina a adivinhação:
+/// quem SABE que a operação é de I/O é quem a executou, não quem lê a string depois.
+const IO_PREFIX: &str = "io:";
+
 /// `work_mem` (KB → bytes), piso de 64 KB — o teto de memória do DataFusion (mesmo do df_executor).
 fn work_mem_bytes() -> usize {
     (unsafe { pg_sys::work_mem }.max(64) as usize) * 1024
@@ -97,11 +106,8 @@ async fn olap_impl(path: String) -> Result<Vec<(String, i64, f64)>, String> {
     let mut out: Vec<(String, i64, f64)> = Vec::new();
     for b in &batches {
         let cats = extract_strings(b.column(0).as_ref())?;
-        let c = b
-            .column(1)
-            .as_any()
-            .downcast_ref::<Int64Array>()
-            .ok_or("col c (count) não é Int64")?;
+        let c =
+            b.column(1).as_any().downcast_ref::<Int64Array>().ok_or("col c (count) não é Int64")?;
         let a = b
             .column(2)
             .as_any()
@@ -167,8 +173,16 @@ fn batches_to_jsonb(batches: &[RecordBatch]) -> Result<Vec<pgrx::JsonB>, String>
 /// linhas. Tipo não-suportado → erro tipado (fail-closed). Escalares (int2/4/8, float4/8, bool, text) na v1.
 #[pg_extern]
 fn write_parquet(rel: String, path: String) -> i64 {
-    write_parquet_impl(&rel, &path)
-        .unwrap_or_else(|e| crate::pg::err_input(&format!("theodb.write_parquet: {e}")))
+    write_parquet_impl(&rel, &path).unwrap_or_else(|e| {
+        // M146 (review F2 + F-arch-1): falha de I/O NÃO é erro de parâmetro. A primeira versão adivinhava a
+        // classe pelo PREFIXO da mensagem, o que deixava `criar`/`write batch`/`close` — justamente as falhas
+        // de disco mais prováveis (ENOSPC, EIO) — rotuladas 22023 "você passou um parâmetro ruim". Agora o
+        // erro CARREGA sua classe desde a origem (`IO_PREFIX`), então a rota não depende de adivinhação.
+        match e.strip_prefix(IO_PREFIX) {
+            Some(io) => crate::pg::err_io(&format!("theodb.write_parquet: {io}")),
+            None => crate::pg::err_input(&format!("theodb.write_parquet: {e}")),
+        }
+    })
 }
 
 // M145 T1.1: `enum Col` + 4 helpers extraídos de `write_parquet_impl` (CC 35 → ≤ 25 por lizard),
@@ -186,7 +200,10 @@ enum Col {
 
 /// OID Postgres → `(Field, builder)`. Tipo não-suportado na escrita → erro tipado (fail-closed) — NUNCA
 /// silenciosamente pulado (a coluna não pode sumir do Parquet).
-fn col_builder_for(name: &str, oid: u32) -> Result<(datafusion::arrow::datatypes::Field, Col), String> {
+fn col_builder_for(
+    name: &str,
+    oid: u32,
+) -> Result<(datafusion::arrow::datatypes::Field, Col), String> {
     use datafusion::arrow::array::{
         BooleanBuilder, Float32Builder, Float64Builder, Int16Builder, Int32Builder, Int64Builder,
         StringBuilder,
@@ -215,13 +232,27 @@ fn append_row(builders: &mut [Col], row: &pgrx::spi::SpiHeapTupleData) -> Result
     for (i, b) in builders.iter_mut().enumerate() {
         let ord = i + 1; // SPI é 1-indexed
         match b {
-            Col::I16(x) => x.append_option(row.get::<i16>(ord).map_err(|e| format!("col {ord}: {e}"))?),
-            Col::I32(x) => x.append_option(row.get::<i32>(ord).map_err(|e| format!("col {ord}: {e}"))?),
-            Col::I64(x) => x.append_option(row.get::<i64>(ord).map_err(|e| format!("col {ord}: {e}"))?),
-            Col::F32(x) => x.append_option(row.get::<f32>(ord).map_err(|e| format!("col {ord}: {e}"))?),
-            Col::F64(x) => x.append_option(row.get::<f64>(ord).map_err(|e| format!("col {ord}: {e}"))?),
-            Col::Bool(x) => x.append_option(row.get::<bool>(ord).map_err(|e| format!("col {ord}: {e}"))?),
-            Col::Str(x) => x.append_option(row.get::<String>(ord).map_err(|e| format!("col {ord}: {e}"))?),
+            Col::I16(x) => {
+                x.append_option(row.get::<i16>(ord).map_err(|e| format!("col {ord}: {e}"))?)
+            }
+            Col::I32(x) => {
+                x.append_option(row.get::<i32>(ord).map_err(|e| format!("col {ord}: {e}"))?)
+            }
+            Col::I64(x) => {
+                x.append_option(row.get::<i64>(ord).map_err(|e| format!("col {ord}: {e}"))?)
+            }
+            Col::F32(x) => {
+                x.append_option(row.get::<f32>(ord).map_err(|e| format!("col {ord}: {e}"))?)
+            }
+            Col::F64(x) => {
+                x.append_option(row.get::<f64>(ord).map_err(|e| format!("col {ord}: {e}"))?)
+            }
+            Col::Bool(x) => {
+                x.append_option(row.get::<bool>(ord).map_err(|e| format!("col {ord}: {e}"))?)
+            }
+            Col::Str(x) => {
+                x.append_option(row.get::<String>(ord).map_err(|e| format!("col {ord}: {e}"))?)
+            }
         }
     }
     Ok(())
@@ -245,9 +276,18 @@ fn finish_arrays(builders: Vec<Col>) -> Vec<datafusion::arrow::array::ArrayRef> 
         .collect()
 }
 
-/// Escrita atômica: temp ÚNICO por-backend (evita corrida de dois writes no mesmo path) + rename (commit) +
-/// cleanup do temp em QUALQUER erro (nunca temp órfão, nunca arquivo parcial publicado). O temp fica no mesmo
-/// dir do path (rename não cross-device).
+/// Escrita atômica E DURÁVEL: temp ÚNICO por-backend (evita corrida de dois writes no mesmo path) →
+/// `fsync` do arquivo → `rename` (commit) → `fsync` do diretório-pai; cleanup do temp em qualquer erro
+/// (nunca temp órfão, nunca arquivo parcial publicado). O temp fica no mesmo dir do path (rename não
+/// cross-device).
+///
+/// CONTRATO EXATO em erro (M146, review F5 — o texto anterior prometia mais do que o mecanismo entrega):
+/// se o `rename` tem sucesso e só o `fsync` do DIRETÓRIO falha, a função retorna `Err` com o arquivo **já
+/// publicado** em `path` — íntegro (o conteúdo foi fsyncado antes do rename), porém com a durabilidade da
+/// entrada de diretório incerta até o próximo fsync/checkpoint do FS. O chamador não consegue distinguir
+/// "nada publicado" de "publicado, entrada de diretório não confirmada"; em ambos os casos a ação correta é
+/// re-executar o export, que é idempotente. O `durable_rename` do PostgreSQL tem exatamente a mesma
+/// propriedade (retorna −1 depois do rename), então a divergência é consciente, não acidental.
 fn atomic_write_parquet(
     batch: &RecordBatch,
     schema: std::sync::Arc<datafusion::arrow::datatypes::Schema>,
@@ -256,11 +296,66 @@ fn atomic_write_parquet(
     use datafusion::parquet::arrow::ArrowWriter;
     let tmp = format!("{path}.{}.tmp", unsafe { pg_sys::MyProcPid });
     let write_res = (|| -> Result<(), String> {
-        let file = std::fs::File::create(&tmp).map_err(|e| format!("criar '{tmp}': {e}"))?;
-        let mut w = ArrowWriter::try_new(file, schema, None).map_err(|e| format!("ArrowWriter: {e}"))?;
-        w.write(batch).map_err(|e| format!("write batch: {e}"))?;
-        w.close().map_err(|e| format!("close: {e}"))?;
-        std::fs::rename(&tmp, path).map_err(|e| format!("rename '{tmp}'→'{path}': {e}"))?;
+        // `criar` é o único passo AMBÍGUO: ENOENT/EACCES/ENOTDIR/ENAMETOOLONG dizem "o path que você passou
+        // não serve" (22023); ENOSPC/EIO/EROFS dizem "o disco falhou" (58030). Classificar os dois como a
+        // mesma coisa manda o operador para o lado errado, então a decisão é pelo errno, não pelo passo.
+        let file = std::fs::File::create(&tmp).map_err(|e| {
+            const PATH_ERRNOS: [i32; 5] = [
+                2,  /*ENOENT*/
+                13, /*EACCES*/
+                20, /*ENOTDIR*/
+                22, /*EINVAL*/
+                36, /*ENAMETOOLONG*/
+            ];
+            let is_path = e.raw_os_error().is_some_and(|n| PATH_ERRNOS.contains(&n));
+            let mark = if is_path { "" } else { IO_PREFIX };
+            format!("{mark}criar '{tmp}': {e}")
+        })?;
+        // M146 T1.3 — durabilidade, seguindo o protocolo do `durable_rename` do PostgreSQL
+        // (`src/backend/storage/file/fd.c:782` + os helpers `fsync_fname`/`fsync_parent_path`): o rename é
+        // atômico apenas para a ENTRADA DE DIRETÓRIO; sem fsync o conteúdo pode não estar em disco, e sem
+        // fsync do DIRETÓRIO-PAI o próprio rename pode se perder num crash. Antes daqui o export era atômico
+        // porém NÃO durável (o crate não tinha um único `sync_all`).
+        //
+        // O fd é CLONADO antes de o `File` ser movido para o writer: `try_clone` é `dup(2)` — descritor novo,
+        // MESMA open file description, MESMO inode — e `fsync` é por-inode, então o `sync_all` abaixo sincroniza
+        // exatamente o que o writer escreveu. Não há janela de dados presos em buffer: `close()` faz
+        // `finish()` → `flush()` do `TrackedWrite`, e `std::fs::File` não tem buffer próprio.
+        //
+        // Escolhido depois que `finish()` SEGUIDO de `into_inner()` falhou em runtime com
+        // "SerializedFileWriter already finished" (`assert_previous_writer_closed`, pois `finished` já era true).
+        // CORREÇÃO de uma afirmação anterior deste comentário (achado do review do M146): `into_inner()` sozinho
+        // NÃO produziria arquivo sem footer — ele chama `write_metadata()` internamente. O erro estava em
+        // encadear os dois, não no `into_inner`. Mantemos o `try_clone` porque preserva o `close()` original
+        // intocado e é o caminho já medido em produção.
+        let fsync_handle =
+            file.try_clone().map_err(|e| format!("{IO_PREFIX}try_clone '{tmp}': {e}"))?;
+        let mut w =
+            ArrowWriter::try_new(file, schema, None).map_err(|e| format!("ArrowWriter: {e}"))?;
+        w.write(batch).map_err(|e| format!("{IO_PREFIX}write batch: {e}"))?;
+        w.close().map_err(|e| format!("{IO_PREFIX}close: {e}"))?;
+        fsync_handle.sync_all().map_err(|e| format!("{IO_PREFIX}fsync '{tmp}': {e}"))?;
+        std::fs::rename(&tmp, path)
+            .map_err(|e| format!("{IO_PREFIX}rename '{tmp}'→'{path}': {e}"))?;
+        // fsync do diretório-pai. Parent vazio (path relativo simples) → ".", como o upstream faz em
+        // `fd.c:3885-3886`. Falha de fsync EM DIRETÓRIO é tolerada para EBADF/EINVAL (há filesystems que não
+        // suportam), espelhando `fd.c:3822-3825`; qualquer outro erro propaga como `Err` — nunca PANIC, pois
+        // o export é refazível e a fonte da verdade continua disponível (`durable_rename` também repassa o
+        // elevel do caller em vez de forçar PANIC).
+        let parent = std::path::Path::new(path).parent();
+        let dir = match parent {
+            Some(p) if !p.as_os_str().is_empty() => p,
+            _ => std::path::Path::new("."),
+        };
+        // errno definidos localmente (Linux) para NÃO adicionar a dep `libc` — o crate não a declara e o D2
+        // deste milestone é "zero dependência nova"; a stdlib já expõe o errno cru via `raw_os_error()`.
+        const EBADF: i32 = 9;
+        const EINVAL: i32 = 22;
+        match std::fs::File::open(dir).and_then(|d| d.sync_all()) {
+            Ok(()) => {}
+            Err(e) if matches!(e.raw_os_error(), Some(EBADF) | Some(EINVAL)) => {}
+            Err(e) => return Err(format!("{IO_PREFIX}fsync dir '{}': {e}", dir.display())),
+        }
         Ok(())
     })();
     if write_res.is_err() {
@@ -295,7 +390,8 @@ fn write_parquet_impl(rel: &str, path: &str) -> Result<i64, String> {
         let mut cols = Vec::new();
         for row in ct {
             let name: String = row.get(1).map_err(|e| format!("attname: {e}"))?.unwrap_or_default();
-            let oid: pg_sys::Oid = row.get(2).map_err(|e| format!("atttypid: {e}"))?.ok_or("atttypid nulo")?;
+            let oid: pg_sys::Oid =
+                row.get(2).map_err(|e| format!("atttypid: {e}"))?.ok_or("atttypid nulo")?;
             cols.push((name, oid.to_u32()));
         }
         Ok::<_, String>((qname, cols))
@@ -340,10 +436,7 @@ fn extract_strings(arr: &dyn Array) -> Result<Vec<String>, String> {
     } else if let Some(a) = arr.as_any().downcast_ref::<StringViewArray>() {
         Ok((0..a.len()).map(|i| a.value(i).to_string()).collect())
     } else {
-        Err(format!(
-            "coluna category é {:?}, não uma string array",
-            arr.data_type()
-        ))
+        Err(format!("coluna category é {:?}, não uma string array", arr.data_type()))
     }
 }
 
