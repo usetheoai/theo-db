@@ -65,6 +65,34 @@ plain) — o caminho B (df_executor) usa `decode_columns` direto, não é tocado
 - **Rationale:** DRY + o seam de leitura único (ADR do `columnar.rs:751`). As primitivas já são exercitadas pelo caminho B (M100), então reusá-las herda a correção medida.
 - **Alternativa rejeitada:** um decode-por-projeção novo — duplicaria conhecimento; rejeitada (DRY).
 
+## Nota de design (do template vecfilter `customscan.rs`)
+
+O M149 é um **scan-replacing CustomScan** (estilo Citus `ColumnarScan`), NÃO um wrapper de children como
+o vecfilter. O nó **É** o scan da tabela colunar (`scanrelid = rel.relid`):
+
+- **Registro:** reusar `RegisterCustomScanMethods` + o `set_rel_pathlist_hook`/`PREV_HOOK` já vivos
+  (`customscan.rs:263-265`); adicionar um `CustomPath` que vence o SeqScan quando a rel usa `theodb_columnar`
+  e não é agg. Método tables próprias (`Methods<CustomPathMethods/CustomScanMethods/CustomExecMethods>` — o
+  padrão `unsafe impl Sync` do vecfilter).
+- **`wanted` via side-channel thread_local** (espelhar `SCAN_MEMBERSHIP`/`swap_active`/`ActiveGuard` — o
+  RAII guard unwind-safe é obrigatório): `SCAN_PROJECTION: RefCell<Option<Rc<Vec<usize>>>>`. Derivado no
+  begin de `pull_var_clause(plan.targetlist) ∪ pull_var_clause(plan.qual)`; `varattno==0`→None(todas),
+  `varattno<0`→None(fallback).
+- **begin:** `table_beginscan(rel, snapshot, 0, null)` (sem child); guardar o `TableScanDesc` no state
+  (`#[repr(C)]` com `CustomScanState` primeiro). Respeitar `EXEC_FLAG_EXPLAIN_ONLY` (não abrir scan).
+- **exec:** instalar `wanted` (ActiveGuard), `table_scan_getnextslot(scandesc, ForwardScanDirection, slot)`;
+  o `columnar_scan_getnextslot` lê o thread_local e materializa só `wanted` (resto `isnull=true`).
+- **end:** `table_endscan(scandesc)`. **rescan:** `table_rescan`. **xact/subxact cleanup:** limpar o
+  thread_local (mesmo padrão do vecfilter — longjmp mid-pull).
+- **columnar.rs:** `columnar_scan_getnextslot`/`load_next_batch`/`decode_stripe`/`form_row` leem o
+  thread_local `SCAN_PROJECTION` (via um getter em customscan/columnar_project); `None`→todas (fallback,
+  caminho plain intacto). Reusar `deform_rows_into_columns`(:564) p/ materializar o subconjunto.
+
+**Riscos de lifecycle a cobrir (o vecfilter os documenta):** EXPLAIN_ONLY (não abrir scan), rescan
+(nested-loop inner re-instala wanted), unwind-safety (ActiveGuard restaura o thread_local mesmo em
+longjmp), múltiplos nós num plano (UNION — cada um instala o seu na janela de pull). O A/B nas 43 queries
+é o gate de correção final.
+
 ## Phase 1 — CustomScan de projeção (skeleton + wanted)
 
 ### T1.1 — Registrar o CustomScan de projeção no path hook
