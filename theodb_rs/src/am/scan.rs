@@ -99,6 +99,9 @@ struct ScanState {
     // (`resumable_next`) instead of re-searching the graph with a doubled `ef` (the ~3× M52 cost). SBQ/AQ indexes
     // keep `None` and fall back to the M52 re-search (their per-batch rerank is a tracked follow-up).
     resume: Option<crate::am::hnsw_page::HnswResume>,
+    // M146 (#177): o `amrescan` recebeu zero ScanKeys de ORDER BY. Um índice vetorial não tem ordem própria,
+    // então este scan é irrespondível — `amgettuple` levanta erro tipado em vez de fingir "zero linhas".
+    unordered: bool,
 }
 
 #[pg_guard]
@@ -109,6 +112,7 @@ pub extern "C-unwind" fn ambeginscan(
 ) -> pg_sys::IndexScanDesc {
     let scandesc = unsafe { pg_sys::RelationGetIndexScan(index_relation, nkeys, norderbys) };
     let state = Box::new(ScanState {
+        unordered: false,
         heap: BinaryHeap::new(),
         query: Vec::new(),
         rel: index_relation,
@@ -180,31 +184,14 @@ pub extern "C-unwind" fn amrescan(
         }
         state.filtering = !state.query_labels.is_empty() || has_membership;
 
-        // M146 (encontrado ao validar o review) — um scan SEM `ORDER BY <->` costumava sair por aqui em
-        // silêncio, deixando o heap de candidatos vazio; `amgettuple` então devolvia `false` na primeira
-        // chamada e o executor concluía, corretamente do ponto de vista dele, que **a tabela não tem linhas**.
-        // Medido em PG 18.4 com `enable_seqscan=off` numa tabela de 500 linhas:
-        //
-        //   SELECT count(*) FROM t;   -- B-tree: 500  |  theodb_hnsw: 0   ← resposta ERRADA, sem erro algum
-        //   SELECT id     FROM t;     -- idem: zero linhas
-        //   EXPLAIN: Aggregate -> Index Only Scan using t_hnsw on t
-        //
-        // O planner não está errado: para `count(*)` nenhuma coluna é necessária, então o teste de index-only
-        // é vacuosamente satisfeito e qualquer índice serve. Errado estava o AM, que prometia
-        // `amoptionalkey = true` ("sei varrer sem ScanKey") e entregava zero linhas. Um índice vetorial NÃO
-        // sabe fazer varredura completa: sem vetor de consulta não existe ordem, e um grafo HNSW não é uma
-        // lista de todas as TIDs.
-        //
-        // A saída correta é falhar alto — exatamente o que o pgvector faz
-        // (`src/hnswscan.c:214`: `if (scan->orderByData == NULL) elog(ERROR, "cannot scan hnsw index without
-        // order")`). Devolver resposta errada em silêncio é o pior desfecho possível: um `count(*)` de
-        // auditoria retorna zero e nada no log indica problema.
-        if norderbys < 1 || orderbys.is_null() {
-            crate::pg::err_input(
-                "theodb am: cannot scan a vector index without ORDER BY <distance operator> — \
-                 a vector index has no total order of its own. Add the ORDER BY, or let the planner \
-                 use a sequential/heap scan (this index cannot answer an unordered scan).",
-            );
+        // M146 (#177) — um scan SEM `ORDER BY <->` NÃO pode ser respondido por este AM: sem vetor de consulta
+        // não existe ordem, e um grafo HNSW não é uma lista de todas as TIDs. O erro é levantado em
+        // `amgettuple`, não aqui — ver o comentário longo lá. Marcar o estado e retornar mantém o `amrescan`
+        // livre de `ereport`, exatamente como o `hnswrescan` do pgvector (`src/hnswscan.c:167`), que só copia
+        // as ScanKeys; o guard equivalente do upstream vive no `hnswgettuple` (`:214`).
+        state.unordered = norderbys < 1 || orderbys.is_null();
+        if state.unordered {
+            return;
         }
         // A NULL query vector (`ORDER BY col <-> NULL`) has SK_ISNULL set and a 0 sk_argument — dereferencing it
         // would segfault in pg_detoast_datum. Treat it as an empty scan (matches pgvector's ivfscan/hnswscan).
@@ -1347,6 +1334,29 @@ pub extern "C-unwind" fn amgettuple(
     unsafe {
         let scan_ref = &mut *scan;
         let state = &mut *scan_ref.opaque.cast::<ScanState>();
+        // M146 (#177) — o executor está pedindo tuplas de um scan sem `ORDER BY <->`. Antes disto o AM
+        // devolvia `false` na primeira chamada e o executor concluía, corretamente do ponto de vista dele,
+        // que **a relação não tem linhas**. Medido em PG 18.4, `enable_seqscan=off`, tabela de 500 linhas:
+        //
+        //   SELECT count(*) FROM t;   -- B-tree: 500  |  theodb_hnsw: 0   ← resposta ERRADA, sem erro algum
+        //   SELECT id     FROM t;     -- idem: zero linhas
+        //   EXPLAIN: Aggregate -> Index Only Scan using t_hnsw on t
+        //
+        // O planner não está errado: para `count(*)` nenhuma coluna é necessária, então o teste de index-only
+        // é vacuosamente satisfeito e qualquer índice serve. Errado estava o AM, que promete
+        // `amoptionalkey = true` ("sei varrer sem ScanKey") e entregava zero linhas.
+        //
+        // O guard vive AQUI, e não no `amrescan`, porque é aqui que o executor de fato pede linhas — o
+        // `amrescan` pode ser chamado em caminhos que nunca puxam tupla. É onde o pgvector o coloca
+        // (`src/hnswscan.c:214`: `if (scan->orderByData == NULL) elog(ERROR, "cannot scan hnsw index
+        // without order")`), e seguir o upstream aqui é mais seguro que inovar.
+        if state.unordered {
+            crate::pg::err_input(
+                "theodb am: cannot scan a vector index without ORDER BY <distance operator> — \
+                 a vector index has no total order of its own. Add the ORDER BY, or let the planner \
+                 use a sequential/heap scan (this index cannot answer an unordered scan).",
+            );
+        }
         loop {
             // M36: pop the next-nearest candidate from the lazy min-heap — O(log C) per call, and the executor
             // only pulls ~k times for a `LIMIT k`, so the scan never pays the full O(C·log C) sort.
