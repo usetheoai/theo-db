@@ -70,3 +70,12 @@ erro de índices inválidos, só top-k de índices válidos, então a byte-ident
 - **scan.rs: 1567 → 1400 linhas** (−167). Build exit 0; clippy/fmt exit 0.
 
 **Goal atingido:** A/B in-PG prova top-k byte-idêntico nos 6 caminhos IVF, com QPS neutro e taxonomia preservada.
+
+### Nota de cobertura honesta (disc. 2 vs 3)
+
+O A/B in-PG cobre o v3-path com discriminante **3** (o `WITH (lists=16)` grava disc. 3 via `ivf.rs:66`). O
+discriminante **2** (v2 legado, M34) mapeia para `V3` mas **não é coberto pelo A/B** — o build atual só grava
+v3+, então não há como criar um índice v2 in-PG hoje. O `2 => V3` é coberto pelo example unitário
+(`map_ivf_version(&block0(2,0)) == Ok(V3)`, que EXECUTA) + o fato de o corpo de scan ser idêntico (o mesmo
+`read_ivf_meta` que já aceitava 2 e 3 no pré-refactor, intocado pelo refactor). Cobertura adequada: o path é
+provado com disc. 3 in-PG; o disc. 2 é provado por unit + a invariância do corpo de decode.
