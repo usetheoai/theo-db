@@ -12,6 +12,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Esteira de CI: cada push empilhava um run novo por workflow e nenhum era cancelado, entupindo a fila do runner (32 runs ativos, processados um a um). Os workflows passam a declarar `concurrency` por workflow+ref, cancelando runs superados da mesma branch — em `main` nunca se cancela, para não abortar um release em andamento
+
 ### Changed
 
 - Documentada no `Dockerfile` a razão de a imagem iniciar como root: o entrypoint oficial do PostgreSQL precisa disso para ajustar as permissões do diretório de dados antes de rebaixar privilégio (`gosu postgres`) — o servidor nunca roda como root. Supressão explícita e justificada do aviso de análise estática, em vez de uma mudança que quebraria a inicialização em volumes novos (#182)

@@ -15,6 +15,14 @@ on:
     branches: [develop]
     paths: ['theodb_rs/Cargo.toml', 'theodb_rs/Cargo.lock', 'theodb_rs/deny.toml']
 
+# Fila do runner self-hosted (2026-07-24): sem `concurrency`, cada push empilhava um run novo por
+# workflow e NENHUM era cancelado — o runner processa um de cada vez, então a fila entupiu (32 runs
+# ativos). Este grupo cancela runs superados do MESMO workflow no MESMO ref: só o commit mais recente
+# de uma branch importa. Em `main` NUNCA cancela (um run de release em andamento não pode ser abortado).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   d1:
     runs-on: [self-hosted, theodb-do]
