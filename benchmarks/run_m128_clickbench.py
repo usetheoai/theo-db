@@ -68,14 +68,46 @@ def _load_queries():
         return [q.strip() for q in fh.read().split("\n") if q.strip() and not q.strip().startswith("--")]
 
 
-def _ensure_sample(path: str, n_rows: int) -> bool:
-    """Stream hits.tsv.gz and keep the first n_rows (curl | zcat | head — never downloads the full ~100 GB)."""
+# ClickBench `hits` tem 99.997.497 linhas (número publicado pelo próprio ClickBench). Usado só para
+# derivar o passo da amostragem sistemática — nunca para afirmar que rodamos a escala completa.
+HITS_TOTAL_ROWS = 99_997_497
+
+
+def _ensure_sample(path: str, n_rows: int, strategy: str = "systematic") -> bool:
+    """Stream hits.tsv.gz e materializa n_rows — nunca baixa os ~100 GB para disco.
+
+    DUAS estratégias, com um viés real separando-as:
+
+    - `head` (rápido): mantém as PRIMEIRAS n linhas. O `hits` está ordenado por EventTime, então isto é
+      uma fatia temporal estreita, NÃO uma amostra. As cardinalidades de GROUP BY (UserID, WatchID…)
+      ficam artificialmente baixas, o que **favorece** os nossos números — agregação sobre poucos grupos
+      distintos é justamente o regime em que o pushdown vetorizado brilha. Serve para smoke-test, não
+      para uma medição que se queira honesta.
+    - `systematic` (default): mantém 1 linha a cada `k = HITS_TOTAL_ROWS / n_rows`, varrendo o arquivo
+      inteiro. Cobre todo o intervalo temporal, então as cardinalidades se aproximam das reais. CUSTO
+      HONESTO: precisa descomprimir o stream completo (~100 GB) mesmo para amostras pequenas — o `head`
+      encerra cedo, este não. É o preço de não enviesar o resultado a nosso favor.
+    """
     if os.path.isfile(path) and os.path.getsize(path) > 0:
         return True
+    if strategy not in ("head", "systematic"):
+        raise ValueError(f"estratégia de amostragem desconhecida: {strategy!r}")
     try:
-        print(f"  streaming {n_rows} hits rows → {path} (CC-BY-NC-SA, CI-only) …", flush=True)
-        cmd = f"curl -sL -A '{_UA}' '{HITS_TSV_GZ}' | zcat | head -n {int(n_rows)} > {path}"
-        subprocess.run(["bash", "-c", cmd], check=True, timeout=1800)
+        n = int(n_rows)
+        if strategy == "head":
+            print(f"  streaming {n} hits rows (HEAD — fatia temporal enviesada) → {path}", flush=True)
+            inner = f"head -n {n}"
+            timeout = 1800
+        else:
+            k = max(1, HITS_TOTAL_ROWS // n)
+            print(f"  streaming {n} hits rows (SISTEMÁTICA 1-em-{k}, varre o arquivo inteiro) → {path}",
+                  flush=True)
+            # NR % k para espalhar ao longo do arquivo; head no fim é apenas a trava de contagem exata
+            # (a divisão inteira pode render 1 linha a mais).
+            inner = f"awk 'NR % {k} == 0' | head -n {n}"
+            timeout = 21600  # varrer ~100 GB comprimidos leva horas em rede comum
+        cmd = f"curl -sL -A '{_UA}' '{HITS_TSV_GZ}' | zcat | {inner} > {path}"
+        subprocess.run(["bash", "-c", cmd], check=True, timeout=timeout)
         return os.path.isfile(path) and os.path.getsize(path) > 0
     except Exception as e:
         print(f"  hits stream failed: {e}")
@@ -108,13 +140,14 @@ def _canonical(rows):
 
 
 def run(args) -> dict:
-    base = {"dataset": "clickbench-hits", "n_rows": args.n, "box": "self-hosted (NOT canonical c6a.4xlarge)",
+    base = {"dataset": "clickbench-hits", "n_rows": args.n, "sample_strategy": args.sample,
+            "box": "self-hosted (NOT canonical c6a.4xlarge)",
             "protocol": "3 runs/query: cold=1st (cache-flushed), hot=min-of-2"}
     if not ensure_entry_sql():
         return {**base, "status": "UNBENCHMARKED", "reason": "ClickBench create/queries SQL unavailable", "queries": None}
     sample = os.path.join(args.cache, "hits_sample.tsv")
     os.makedirs(args.cache, exist_ok=True)
-    if not _ensure_sample(sample, args.n):
+    if not _ensure_sample(sample, args.n, args.sample):
         return {**base, "status": "UNBENCHMARKED", "reason": "hits dataset unavailable", "queries": None}
 
     conn = _conn(); conn.autocommit = True
@@ -218,6 +251,11 @@ def run(args) -> dict:
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--n", type=int, default=1_000_000, help="hits subsample rows")
+    ap.add_argument("--sample", choices=["systematic", "head"], default="systematic",
+                    help="systematic (default): 1-em-k varrendo o arquivo inteiro — cobre todo o intervalo "
+                         "temporal, cardinalidades realistas, custa o stream completo (~100 GB). "
+                         "head: as primeiras n linhas — rapido, mas fatia temporal ENVIESADA que infla o "
+                         "ganho do pushdown (poucos grupos distintos). Use head so para smoke-test.")
     ap.add_argument("--cache", default="benchmarks/.cache")
     ap.add_argument("--query-timeout-s", type=int, default=60, help="per-query ceiling; slow query -> ERRORED")
     ap.add_argument("--agg", action="store_true", help="enable the vectorized columnar-agg CustomScan pushdown (the M131 fix for #135 removed the EXPLAIN deparse hang; default OFF = storage path)")

@@ -14,6 +14,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Corrigido um viés na amostragem do benchmark ClickBench que favorecia os nossos próprios números: a amostra usava as primeiras N linhas do dataset, que é ordenado por tempo — uma fatia temporal estreita, com menos valores distintos do que a realidade, justamente o cenário em que a aceleração colunar mais se destaca. A amostragem passa a percorrer o arquivo inteiro pegando 1 linha a cada K, cobrindo todo o período. A estratégia usada fica registrada no artefato de resultado, e a antiga continua disponível apenas para testes rápidos (#187)
+
+### Fixed
+
 - O filtro que impede mudanças só-de-documentação de rodar a esteira completa passa a valer também para pull requests, não apenas para pushes diretos. Sem isso, um PR cujo diff era apenas o CHANGELOG reabria os ~14 jobs do runner único (observado no PR #189) (#187)
 
 ### Added
