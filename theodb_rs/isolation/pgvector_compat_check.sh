@@ -23,10 +23,25 @@ initdb -D "$DATA" -U theo >/dev/null 2>&1 || { echo "PGVECTOR_COMPAT_FAIL initdb
 { echo "port=$PORT"; echo "shared_preload_libraries='theodb_rs'"; } >> "$DATA/postgresql.conf"
 pg_ctl -D "$DATA" -l "$DATA/log" start -w >/dev/null 2>&1 || { echo "PGVECTOR_COMPAT_FAIL start"; exit 2; }
 
-psql -X -q -p "$PORT" -U theo -d postgres -c "CREATE DATABASE app_fresh" >/dev/null 2>&1 \
+# Reproduz o initdb da imagem (Dockerfile /docker-entrypoint-initdb.d): a dependência vai em `template1`
+# para que TODO banco criado depois a herde já satisfeita — sem isso o `CREATE EXTENSION vector` sem
+# CASCADE (o que o tooling real emite) falha em qualquer banco novo. É o fix da finding HIGH do review.
+psql -X -q -v ON_ERROR_STOP=1 -p "$PORT" -U theo -d template1 \
+  -c "CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE;" \
+  -c "CREATE EXTENSION IF NOT EXISTS vector;" >/dev/null 2>&1 \
+  || { echo "PGVECTOR_COMPAT_FAIL template1_bootstrap"; exit 1; }
+
+# TEMPLATE template0: banco VERDADEIRAMENTE limpo (não herda o template1 acima), para que o teste do
+# CASCADE abaixo exercite a instalação de fato, e não um no-op sobre extensão já herdada.
+psql -X -q -p "$PORT" -U theo -d postgres -c "CREATE DATABASE app_fresh TEMPLATE template0" >/dev/null 2>&1 \
   || { echo "PGVECTOR_COMPAT_FAIL createdb"; exit 2; }
 
-# O bootstrap REAL de uma app pgvector, num DB limpo — SQL em arquivo (zero quoting shell).
+# ESCOPO HONESTO (#181, não #182): este harness cobre o BOOTSTRAP + o tipo, NÃO o drop-in completo.
+# A criação de índice abaixo usa `USING theodb_hnsw` — a nomenclatura do TheoDB, NÃO a que uma app
+# pgvector escreve (`USING hnsw (embedding vector_cosine_ops)`, que ainda falha: #182). Não confunda o
+# verde daqui com "app pgvector roda inteira": a migration real do theo-memory ainda quebra no CREATE
+# INDEX. Quando #182 fechar, a asserção 4 DEVE virar `USING hnsw (embedding vector_cosine_ops)` — senão
+# este teste continua verde sobre um drop-in quebrado.
 cat > "$DATA/compat.sql" <<'SQL'
 -- 1. o primeiro comando do bootstrap de toda app pgvector (o que falhava — #181)
 CREATE EXTENSION IF NOT EXISTS vector CASCADE;
@@ -67,4 +82,18 @@ case "$COMMENT" in
   *) echo "PGVECTOR_COMPAT_FAIL comment nao declara own-code: $COMMENT"; exit 1 ;;
 esac
 
-echo "PGVECTOR_COMPAT_OK — bootstrap pgvector sobe em DB limpo (CASCADE), tipo own-code public.vector, dist=$DIST, indice ANN, comment honesto"
+# Asserção 6 — a versão declarada é o contrato que o tooling inspeciona (ADR-0058 § Decisão). Bumpar sem
+# script de upgrade quebra toda instalação existente (a classe de defeito do M137) — travar aqui.
+VER=$(q "SELECT extversion FROM pg_extension WHERE extname='vector';")
+[ "$VER" = "0.5.1" ] || { echo "PGVECTOR_COMPAT_FAIL extversion=$VER (esperado 0.5.1; bumpar exige sql/vector--0.5.1--X.sql)"; exit 1; }
+
+# Asserção 7 — o caminho que o tooling REAL emite: `CREATE EXTENSION IF NOT EXISTS vector` SEM CASCADE,
+# num banco criado DEPOIS do bootstrap da imagem. É o caso que o review pegou como falso-verde: com
+# `requires` e sem a dependência pré-instalada em template1, isto falha com
+# `required extension "theodb_rs" is not installed` e a app não sobe.
+psql -X -q -p "$PORT" -U theo -d postgres -c "CREATE DATABASE app_sem_cascade TEMPLATE template1" >/dev/null 2>&1
+NOCASC=$(psql -X -q -v ON_ERROR_STOP=1 -p "$PORT" -U theo -d app_sem_cascade \
+  -c "CREATE EXTENSION IF NOT EXISTS vector;" 2>&1) || {
+  echo "PGVECTOR_COMPAT_FAIL sem_cascade: $NOCASC"; exit 1; }
+
+echo "PGVECTOR_COMPAT_OK — bootstrap pgvector (com e SEM cascade), tipo own-code public.vector, dist=$DIST, extversion=$VER, comment honesto. ESCOPO: #181 (bootstrap+tipo); indices USING hnsw/vector_*_ops ainda falham (#182)"

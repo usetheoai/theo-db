@@ -86,6 +86,31 @@ no repo por `theodb.control`.
 Harness de regressão: `theodb_rs/isolation/pgvector_compat_check.sh` — exit 0 com o shim,
 **exit 1 sem o shim** (não-vacuidade provada, reproduz o RED exato).
 
+## Limitações conhecidas (achadas no review — declaradas, não escondidas)
+
+1. **O drop-in continua INCOMPLETO.** O shim resolve o bootstrap e o tipo, mas o `CREATE INDEX ... USING
+   hnsw (col vector_cosine_ops)` que as apps escrevem **ainda falha** — o AM `hnsw` e as opclasses
+   `vector_*_ops` não existem (#182). Efeito honesto: o shim **move** a falha da linha 6 para a linha 44 da
+   migration real do `theo-memory`. É progresso mensurável (as tabelas `vector(N)` passam a ser criadas),
+   não é "app pgvector roda inteira". O harness declara esse escopo no seu texto de saída.
+2. **`requires` + tooling sem `CASCADE`.** O tooling real (drizzle/alembic/prisma/`pg_restore`) emite
+   `CREATE EXTENSION IF NOT EXISTS vector` **sem** `CASCADE`; com `requires`, isso falha em qualquer banco
+   sem `theodb_rs` (medido: `required extension "theodb_rs" is not installed`). Mitigado instalando a
+   dependência em **`template1`** no initdb da imagem, de modo que todo banco criado depois a herde
+   satisfeita. Instalações fora da imagem (droplet, pacote futuro) precisam fazer o mesmo.
+3. **Bumpar `default_version` exige script de upgrade.** Não há `sql/vector--0.5.1--X.sql` hoje (YAGNI
+   legítimo: não há de-onde-migrar). Mas subir a versão sem shipar o script quebra toda instalação
+   existente no `ALTER EXTENSION ... UPDATE` — exatamente a classe de defeito do M137. O harness asserta
+   `extversion = '0.5.1'` para travar isso.
+4. **Nunca instalar sobre um PostgreSQL que já tenha o pgvector.** Os nomes de arquivo colidem
+   (`vector.control`, `vector--0.5.1.sql`), e uma instalação por cima sobrescreve silenciosamente o control
+   do upstream. O layout on-disk é byte-idêntico (ADR-0028 § D1), então o pior caso é confusão de
+   identidade/estado, não corrupção de memória — mas o cenário não é suportado.
+5. **Privilégio.** O control não declara `superuser`/`trusted`, herdando o default do PostgreSQL
+   (`superuser = true`, `trusted = false`) — fail-closed e igual ao pgvector upstream. `trusted = true`
+   **NÃO** deve ser adicionado: com `requires`, tornaria instalável por não-superuser uma cadeia que puxa
+   o `theodb_rs` (privilegiado, com saída HTTP). Ver #183.
+
 ## Consequências
 
 - Uma app pgvector existente passa a apontar para o TheoDB **sem alterar código**, removendo o bloqueio

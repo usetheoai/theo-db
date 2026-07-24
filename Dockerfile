@@ -87,6 +87,17 @@ CREATE EXTENSION IF NOT EXISTS theodb CASCADE;
 CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE;
 -- M143: o lakehouse é own-code no theodb_rs (theodb.htap_refresh/olap + read_parquet/write_parquet own-code, sem
 -- DuckDB). Nada de pg_duckdb. ADR-0057.
+
+-- M148 (#181, ADR-0058) — o shim `vector` declara `requires = theodb_rs`, e o tooling real das apps
+-- (drizzle, alembic, prisma, pg_restore) emite `CREATE EXTENSION IF NOT EXISTS vector` **SEM** CASCADE.
+-- Num banco que não tenha o theodb_rs isso falha com `required extension "theodb_rs" is not installed`,
+-- e a app não sobe — o bloqueio que o #181 existe para remover. Instalar em `template1` faz TODO banco
+-- criado depois (`CREATE DATABASE app`, multi-tenant, os DBs de teste do CI) herdar a dependência já
+-- satisfeita, então o comando sem CASCADE funciona. `\c template1` é a única forma de alcançar bancos
+-- que ainda não existem no momento do initdb.
+\c template1
+CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE;
+CREATE EXTENSION IF NOT EXISTS vector;
 EOF
 
 # M62/M143 — o diretório de snapshots HTAP: theodb.htap_refresh escreve os Parquet own-code (public.write_parquet)

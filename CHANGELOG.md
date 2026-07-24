@@ -14,7 +14,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- Extensão `vector` de compatibilidade: aplicações pgvector existentes (drizzle, alembic, prisma, scripts de bootstrap) agora sobem contra o TheoDB **sem alterar código** — `CREATE EXTENSION IF NOT EXISTS vector` passa a funcionar, e `CREATE EXTENSION vector CASCADE` num banco limpo instala tudo sozinho. O tipo, os operadores e os índices continuam sendo implementação própria do TheoDB (não é o pgvector — o `\dx` declara isso explicitamente). Descoberto pelo dogfood, que revelou que nenhuma aplicação conseguia sequer inicializar (#181)
+- Extensão `vector` de compatibilidade: o `CREATE EXTENSION IF NOT EXISTS vector` que aplicações pgvector executam no bootstrap (drizzle, alembic, prisma) passa a funcionar contra o TheoDB, e a imagem instala a dependência em `template1` para que bancos criados depois também o aceitem sem `CASCADE`. Tabelas com colunas `vector(N)` são criadas normalmente. O tipo e os operadores continuam sendo implementação própria do TheoDB (não é o pgvector — o `\dx` declara isso explicitamente). **Compatibilidade ainda parcial:** índices declarados como `USING hnsw (... vector_cosine_ops)` continuam falhando, porque esses nomes de método/opclasse ainda não existem — migrations com índices ANN exigem os nomes do TheoDB até o #182 ser resolvido. Descoberto pelo dogfood, que revelou que nenhuma aplicação conseguia sequer inicializar (#181)
 
 ### Changed
 

@@ -28,4 +28,9 @@ check-corrupt:
 	AM=theodb_ivfflat AM_OPTS="WITH (lists=8, pq_subspaces=4, aq_threshold=2000, separate_storage=1)" \
 	  CHECKSUMS=off OFFSETS="$(CORRUPT_OFFSETS)" bash corrupt_index.sh
 
-.PHONY: check-isolation check-crash check-corrupt
+# M148 (#181) — compatibilidade de bootstrap pgvector. Um harness sem chamador é uma prova que ninguém
+# executa (a lição registrada acima sobre o corrupt_index.sh); este alvo existe para não repetir isso.
+check-compat:
+	bash pgvector_compat_check.sh
+
+.PHONY: check-isolation check-crash check-corrupt check-compat
