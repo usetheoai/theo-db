@@ -14,6 +14,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- M147 Fase 2: os 8 gather helpers do scan IVF/HNSW/SymQG passam a retornar `Result` e propagar o erro com `?` até um único boundary (`enum ScanError` carregando a classe Corrupt/Input), no lugar de ~56 `match { Ok=>v, Err=>ereport }` C-style — idioma do crate. A taxonomia do M146 (corrupção→XX002, dim-errada→22023) é preservada por construção; comportamento byte-idêntico provado por A/B nos 6 caminhos (#170)
+
 - M147 Fase 1: if-ladder de dispatch IVF → enum lido uma vez (OCP); byte-idêntico nos 6 caminhos (#170)
 
 ### Added

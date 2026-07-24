@@ -27,3 +27,17 @@ erro de índices inválidos, só top-k de índices válidos, então a byte-ident
   o enum (`matches!(ivf_version, Ok(V4|V5|V6|V7|V8))` no VACUUM; `== Ok(V{n})` nos testes).
 - **Medido:** example `ivf_dispatch_check` OK; não-vacuidade por mutação (gate `<8`→`<4` e `2|3`→`3` ambos
   pegos); **A/B in-PG: `AB_COMPARE_OK`, 6 caminhos v3..v8 byte-idênticos ao baseline**. Build exit 0.
+
+### Fase 2 — gathers Vec → Result + ? (bullet 2) — ✅ comportamento + taxonomia preservados
+
+- `enum ScanError { Corrupt(String), Input(String) }` + `From<String>`→Corrupt + `raise()` (boundary) +
+  `lut_scan_error(codebook_dim, e)`. As 8 gather → `Result<Vec<(i64,f64)>, ScanError>`; ~47 arms C-style → `?`;
+  8 `Metric::from_tag` Option → `.ok_or_else(...)?`; 5 `build_lut16` → `.map_err(|e| lut_scan_error(quant.dim(),
+  e))?` (a taxonomia dim-errada→22023 do M146 preservada exatamente); boundary no `amrescan`/re-search via
+  `.unwrap_or_else(|e| e.raise())`.
+- **Preservação da CLASSE por construção:** os 51 err_corrupt → Corrupt (via From) → XX002; os 5 lut →
+  codebook_dim-condicional. A mensagem muda cosmeticamente (`(aq lut)` → `aq lut:`), o SQLSTATE é idêntico.
+- **grep C-style arms: 56 → 9** (os 9 restantes fora das 8: amrescan body + scan_blob + amgettuple resume).
+- **Medido no droplet:** build exit 0; **A/B: AB_COMPARE_OK, 6 caminhos byte-idênticos**; taxonomia dim-errada
+  → `ERROR: 22023 ... aq lut: query dim 3 != codebook dim 8` (pg.rs:44); corrupção → `ERROR: XX002 ... offset
+  out of range` (pg.rs:15), backend ALIVE 400; cassert-smoke verde (4 AMs + guard #177 + 5 probes de injeção).
