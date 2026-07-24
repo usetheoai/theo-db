@@ -12,6 +12,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Primeiro benchmark do pilar colunar em dados representativos após o fix do #190 (`docs/benchmarks/clickbench-1m-postfix-2026-07-24.md`): as 43 queries do ClickBench sobre 1M linhas reais carregam e rodam (42 completam byte-idênticas, 1 timeout, 0 erros), mas o resultado honesto mostra que só 6 das 43 engajam a aceleração vetorizada — as demais são lentas, revelando que os números anteriores vinham de uma amostra enviesada. Relatório consolidado da sessão em `docs/benchmarks/RELATORIO-clickbench-sessao-2026-07-24.md` (#190)
+
 ### Fixed
 
 - Corrigido o defeito que impedia carregar dados reais no armazenamento colunar: inserções sucessivas falhavam quando os dados continham textos grandes (acima de ~2 KB). Os valores passam a ser materializados no momento da inserção — onde o banco garante o contexto necessário para lê-los — em vez de mais tarde, durante a gravação, quando esse contexto já não existe. Isso também elimina o risco de o dado referenciado ser removido pela limpeza automática antes da gravação (#190)
