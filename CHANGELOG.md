@@ -24,6 +24,32 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.136.0] - 2026-07-24
+
+### Added
+
+- Benchmark do M147 (`docs/benchmarks/m147-ab-byte-identical.md`) + harness de QPS (`theodb_rs/isolation/qps_bench.sh`): prova que o refactor de dispatch de `scan.rs` é byte-idêntico nos 6 caminhos IVF (v3..v8) e neutro em QPS (~−1%, o dispatch lê o bloco 0 uma vez em vez de 5×) (#170)
+
+
+- Harness A/B do M147 (`theodb_rs/isolation/ab_scan_versions.sh`) + baseline capturado (`docs/benchmarks/m147-ab-baseline.txt`): constrói um índice IVF em cada versão v3..v8 com dataset determinístico e diffa o top-k (id:dist) do binário contra o baseline pré-refactor — a prova de comportamento byte-idêntico do refactor. Determinismo provado (compare contra si mesmo → OK) (#170)
+
+- Plano de implementação do M147 (`m147-scan-version-dispatch`, SHIPPABLE_WITH_CAVEATS 89): 4 tasks TDD para o refactor de `am/scan.rs` em 3 eixos (enum de versão lido uma vez, gathers→Result+?, kernel Stage-1 compartilhado recebendo codes_off) + A/B byte-idêntico nos 6 caminhos v3..v8; 3 MUST-FIX do edge-case-plan absorvidos (v3 no A/B, ivf_version estrito+gate de len, baseline capturado) (#170)
+
+- Blueprint de discovery do M147 (`m147-scan-version-dispatch`, SHIPPABLE_WITH_CAVEATS 89): padrão comprovado de version-dispatch de formato on-disk extraído de pgvectorscale (dispatch OCP por enum, tipo lido uma vez, decode isolado por-impl), lance (isolamento de corpos em módulo `previous/` + recusa fail-closed = a ADR-2 na prática) e pgvector (o contraste single-version) — decide a forma do refactor de `scan.rs` sem violar a ADR-2 do M145 (#170)
+
+- Discovery plan do M147 (`m147-scan-version-dispatch`): investigação focada de como pgvectorscale (par pgrx), lance (formato versionado Rust) e pgvector (C) fazem dispatch de versão de formato on-disk OCP e isolam corpos de decode por-versão — insumo para o refactor de `scan.rs` sem violar a ADR-2 do M145 (#170)
+
+
+### Changed
+
+- M147 Fase 3: o kernel Stage-1 (`ah_score_block` + loop de blocos) copiado byte-a-byte em 5 corpos `scan_ivf_aq*` virou um `stage1_score_blocks` compartilhado que recebe `codes_off` do chamador — o decode on-disk por-versão permanece separado (ADR-2 do M145), só o scoring in-memory é compartilhado. Byte-idêntico nos 6 caminhos; não-vacuidade provada (mutar codes_off → A/B falha) (#170)
+
+- M147 Fase 2: os 8 gather helpers do scan IVF/HNSW/SymQG passam a retornar `Result` e propagar o erro com `?` até um único boundary (`enum ScanError` carregando a classe Corrupt/Input), no lugar de ~56 `match { Ok=>v, Err=>ereport }` C-style — idioma do crate. A taxonomia do M146 (corrupção→XX002, dim-errada→22023) é preservada por construção; comportamento byte-idêntico provado por A/B nos 6 caminhos (#170)
+
+- M147 Fase 1: if-ladder de dispatch IVF → enum lido uma vez (OCP); byte-idêntico nos 6 caminhos (#170)
+
+- M147 (review): a mensagem de erro para um discriminante de formato IVF desconhecido volta a carregar a pista de remediação "REINDEX to upgrade" (regressão de diagnosticabilidade pega no review — a classe SQLSTATE XX002 já era preservada) (#170)
+
 ## [0.135.0] - 2026-07-24
 
 ### Added

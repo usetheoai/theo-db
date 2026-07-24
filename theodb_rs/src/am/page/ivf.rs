@@ -7,6 +7,57 @@ use super::*;
 use pgrx::pg_sys;
 
 pub(crate) const IVF_STRUCT_MAGIC: u32 = 0x5449_5653; // "TIVS" — structured IVFFlat (M31)
+
+/// M147 — the IVF-AQ on-disk format version, read ONCE from block 0 and matched, replacing the M31..E1
+/// if-ladder of 5 `ivf_is_v*` predicates (each of which re-read block 0). Every version shares the magic
+/// `IVF_STRUCT_MAGIC` ("TIVS"); the discriminant is the `u32` at bytes [4..8]. The enum is the scan-path
+/// identity, NOT the raw discriminant: `V3` covers BOTH on-disk discriminants 2 (M34, implicit gen_base) and
+/// 3 (M48, explicit gen_base) because `read_ivf_meta` reads them through the same body (a v2 index is
+/// auto-migrated to v3 on the first VACUUM fold). Adding a future version is "add a variant + a match arm"
+/// (OCP) — the pattern from lance `LanceFileVersion` (`rust/lance-encoding/src/version.rs:62`) and
+/// pgvectorscale `StorageType`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IvfVersion {
+    V3, // f32 structured (M31/M34/M48) — covers on-disk discriminants 2 and 3
+    V4, // AQ interleaved (M77 pg_scann)
+    V5, // AQ storage-separated (M83)
+    V6, // AQ split + SQ8 refine (M85)
+    V7, // AQ split + inline label filter (M90)
+    V8, // AQ split + f32-free RaBitQ refine (E1)
+}
+
+/// PURE (no `pg_sys`) — map the first 8 bytes of block 0 to an `IvfVersion`. Extracted so `examples/
+/// ivf_dispatch_check.rs` can exercise it without a backend (the crate does not link under `cargo test`).
+/// Fail-fast + typed (no panic across C — the M146 lesson): a header shorter than 8 bytes is `Err` (not a
+/// `try_into().unwrap()` panic → XX000), a wrong magic is `Err`, and an unknown discriminant is `Err` (a
+/// strict match — an index with magic TIVS but an unexpected version is corruption, routed to XX002 by the
+/// caller, not silently read as v3).
+pub(crate) fn map_ivf_version(m: &[u8]) -> Result<IvfVersion, String> {
+    if m.len() < 8 {
+        return Err("theodb ivf: truncated header (< 8 bytes)".into());
+    }
+    if u32::from_le_bytes(m[0..4].try_into().unwrap()) != IVF_STRUCT_MAGIC {
+        return Err("theodb ivf: block 0 is not an IVF-structured index".into());
+    }
+    match u32::from_le_bytes(m[4..8].try_into().unwrap()) {
+        2 | 3 => Ok(IvfVersion::V3), // v2 legado (M34) + v3 (M48) — mesmo corpo de scan (EC-2)
+        4 => Ok(IvfVersion::V4),
+        5 => Ok(IvfVersion::V5),
+        6 => Ok(IvfVersion::V6),
+        7 => Ok(IvfVersion::V7),
+        8 => Ok(IvfVersion::V8),
+        other => Err(format!(
+            "theodb ivf: unsupported structured format v{other} — REINDEX to upgrade to a supported generation"
+        )),
+    }
+}
+
+/// Read block 0 once and resolve the IVF scan-path version. Replaces the 5 `ivf_is_v*` predicates (each of
+/// which re-read block 0) — the OCP dispatch of the M147 refactor.
+pub(crate) unsafe fn ivf_version(rel: pg_sys::Relation) -> Result<IvfVersion, String> {
+    map_ivf_version(&read_page_item(rel, 0)?)
+}
+
 /// One list's entries encoded as `[tid i64, vector f32×dim]×count`.
 fn encode_list(entries: &[(i64, Vec<f32>)]) -> Vec<u8> {
     let mut b = Vec::new();
@@ -210,15 +261,6 @@ pub(crate) struct IvfAqMeta {
     pub dir: Vec<(u32, u32, u32)>,
 }
 /// True iff the index's structured meta is v4 (AQ) — cheap 8-byte read of block 0.
-pub(crate) unsafe fn ivf_is_v4(rel: pg_sys::Relation) -> bool {
-    match read_page_item(rel, 0) {
-        Ok(m) if m.len() >= 8 => {
-            u32::from_le_bytes(m[0..4].try_into().unwrap()) == IVF_STRUCT_MAGIC
-                && u32::from_le_bytes(m[4..8].try_into().unwrap()) == 4
-        }
-        _ => false,
-    }
-}
 /// Persist an IVF-AQ index in the v4 structured layout. `codes[i]` is list `i`'s block32-transposed AQ code bytes.
 /// `codebook` is `AqQuantizer::to_meta_bytes()`.
 pub(crate) unsafe fn write_ivf_aq(
@@ -366,25 +408,7 @@ pub(crate) struct IvfAqMetaV5 {
     pub dir: Vec<(u32, u32, u32, u32, u32)>, // code_fb, code_np, vec_fb, vec_np, cnt
 }
 /// True iff the index's structured meta is v5 (AQ storage-separated) — cheap 8-byte read of block 0.
-pub(crate) unsafe fn ivf_is_v5(rel: pg_sys::Relation) -> bool {
-    match read_page_item(rel, 0) {
-        Ok(m) if m.len() >= 8 => {
-            u32::from_le_bytes(m[0..4].try_into().unwrap()) == IVF_STRUCT_MAGIC
-                && u32::from_le_bytes(m[4..8].try_into().unwrap()) == 5
-        }
-        _ => false,
-    }
-}
 /// M90 — the v7 (label-aware) layout: same meta shape as v5 (magic `7`), code blob widened to `[ids][labels][codes]`.
-pub(crate) unsafe fn ivf_is_v7(rel: pg_sys::Relation) -> bool {
-    match read_page_item(rel, 0) {
-        Ok(m) if m.len() >= 8 => {
-            u32::from_le_bytes(m[0..4].try_into().unwrap()) == IVF_STRUCT_MAGIC
-                && u32::from_le_bytes(m[4..8].try_into().unwrap()) == 7
-        }
-        _ => false,
-    }
-}
 /// Persist an IVF-AQ index in the v5 storage-separated layout: each list's `[ids][codes]` and `[f32]` go on
 /// distinct page ranges. `codes[i]` is list `i`'s block32-transposed AQ code bytes; `codebook` is
 /// `AqQuantizer::to_meta_bytes()`.
@@ -580,7 +604,7 @@ pub(crate) unsafe fn write_ivf_aq_split_v7(
 }
 /// Read the v5 meta + codebook + centroid + dir regions (∝ nlists/codebook, NOT ∝ N). Typed `Err` on corruption.
 /// M90: also accepts the v7 (label-aware) meta — identical shape (magic 7); the label region lives inside the per-
-/// list CODE blob, so the meta/dir are byte-identical to v5. The scan branches on `ivf_is_v7` for the code offsets.
+/// list CODE blob, so the meta/dir are byte-identical to v5. The scan branches on `IvfVersion::V7` for the code offsets (M147).
 pub(crate) unsafe fn read_ivf_aq_meta_split(rel: pg_sys::Relation) -> Result<IvfAqMetaV5, String> {
     let m = read_page_item(rel, 0)?;
     if m.len() < 37 {
@@ -742,25 +766,7 @@ pub(crate) unsafe fn ivf_list_count(rel: pg_sys::Relation) -> usize {
         .unwrap_or(0)
 }
 /// True iff the index's structured meta is v8 (AQ + RaBitQ residual refine, storage-separated).
-pub(crate) unsafe fn ivf_is_v8(rel: pg_sys::Relation) -> bool {
-    match read_page_item(rel, 0) {
-        Ok(m) if m.len() >= 8 => {
-            u32::from_le_bytes(m[0..4].try_into().unwrap()) == IVF_STRUCT_MAGIC
-                && u32::from_le_bytes(m[4..8].try_into().unwrap()) == 8
-        }
-        _ => false,
-    }
-}
 /// True iff the index's structured meta is v6 (AQ + SQ8-refine, storage-separated) — cheap 8-byte read of block 0.
-pub(crate) unsafe fn ivf_is_v6(rel: pg_sys::Relation) -> bool {
-    match read_page_item(rel, 0) {
-        Ok(m) if m.len() >= 8 => {
-            u32::from_le_bytes(m[0..4].try_into().unwrap()) == IVF_STRUCT_MAGIC
-                && u32::from_le_bytes(m[4..8].try_into().unwrap()) == 6
-        }
-        _ => false,
-    }
-}
 /// Persist an IVF-AQ index in the v6 SQ8-refine layout. `codes[i]` is list `i`'s block32 AH bytes; `sq8_codes[i]`
 /// is list `i`'s SQ8 code bytes (`dim`×n, ordinal order matching `lists[i]`). `aq_codebook`/`sq8_codebook` are the
 /// two quantizers' `to_meta_bytes()`.
