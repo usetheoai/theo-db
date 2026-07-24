@@ -12,6 +12,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- A publicação da imagem passa a usar o workflow reutilizável do ecossistema (o mesmo do theo-memory e do theo-rag) em vez de uma implementação própria: além de publicar no GHCR, a imagem agora passa por varredura de vulnerabilidades (Trivy, bloqueando CRITICAL/HIGH antes do push) e, nas releases, sai com SBOM, proveniência SLSA e assinatura — garantias que a versão caseira não tinha (#187)
+
 ### Added
 
 ### Changed
