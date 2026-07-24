@@ -12,6 +12,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Plano de correção do defeito que impede carregar dados reais no armazenamento colunar (`columnar-toast-materialize`): a solução escolhida materializa os valores grandes no momento da inserção, em vez de contornar o problema no momento da gravação — remove a causa em vez de mascará-la, e protege contra uma segunda falha possível (dado removido por limpeza automática antes da gravação) (#190)
+
 ### Fixed
 
 - Descoberto e registrado um defeito que impede carregar dados reais no armazenamento colunar: inserções sucessivas falham quando os dados contêm valores de texto grandes (acima de ~2 KB), com a tabela podendo ficar ilegível após o erro. O problema passou despercebido até agora porque a amostragem de benchmark usava uma fatia estreita do dataset, sem valores desse tamanho. Documentado em `docs/benchmarks/clickbench-scale-gate-2026-07-24.md`, com o impacto sobre a leitura dos números anteriores declarado honestamente (#190)
