@@ -73,7 +73,7 @@ RUN set -eux; \
     install -m 0644 theodb.control sql/theodb--1.0.sql sql/theodb--1.0--1.1.sql sql/theodb--1.1--1.2.sql \
         sql/theodb--1.2--1.3.sql sql/theodb--1.3--1.4.sql sql/theodb--1.4--1.5.sql sql/theodb--1.5--1.6.sql \
         "/usr/share/postgresql/$PG_MAJOR/extension/"; \
-    install -m 0644 vector.control sql/vector--0.5.1.sql \
+    install -m 0644 vector.control sql/vector--0.5.1.sql sql/vector--0.6.0.sql sql/vector--0.5.1--0.6.0.sql \
         "/usr/share/postgresql/$PG_MAJOR/extension/"; \
     rm -rf /tmp/theodb
 

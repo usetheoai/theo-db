@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# M148 (#181) — teste de regressão do SHIM de compatibilidade pgvector.
+# M148/M149 (#181 + #182) — teste de regressão do SHIM de compatibilidade pgvector.
 #
 # O bug: `CREATE EXTENSION IF NOT EXISTS vector` — o primeiro comando do bootstrap de toda app pgvector
 # (theo-memory `db:push`, theo-rag, drizzle/alembic/prisma) — falhava com "extension vector is not
@@ -36,21 +36,21 @@ psql -X -q -v ON_ERROR_STOP=1 -p "$PORT" -U theo -d template1 \
 psql -X -q -p "$PORT" -U theo -d postgres -c "CREATE DATABASE app_fresh TEMPLATE template0" >/dev/null 2>&1 \
   || { echo "PGVECTOR_COMPAT_FAIL createdb"; exit 2; }
 
-# ESCOPO HONESTO (#181, não #182): este harness cobre o BOOTSTRAP + o tipo, NÃO o drop-in completo.
-# A criação de índice abaixo usa `USING theodb_hnsw` — a nomenclatura do TheoDB, NÃO a que uma app
-# pgvector escreve (`USING hnsw (embedding vector_cosine_ops)`, que ainda falha: #182). Não confunda o
-# verde daqui com "app pgvector roda inteira": a migration real do theo-memory ainda quebra no CREATE
-# INDEX. Quando #182 fechar, a asserção 4 DEVE virar `USING hnsw (embedding vector_cosine_ops)` — senão
-# este teste continua verde sobre um drop-in quebrado.
+# ESCOPO (#181 bootstrap + #182 índices): o SQL abaixo usa EXATAMENTE a sintaxe que uma app pgvector
+# escreve — `USING hnsw (embedding vector_cosine_ops)`, não a nomenclatura própria do TheoDB. Se este
+# harness voltar a usar `USING theodb_hnsw`, ele passa a ser verde sobre um drop-in quebrado (foi
+# exatamente o que o review do #181 pegou). Manter a sintaxe da APP é o que torna o teste não-vacuoso.
 cat > "$DATA/compat.sql" <<'SQL'
 -- 1. o primeiro comando do bootstrap de toda app pgvector (o que falhava — #181)
 CREATE EXTENSION IF NOT EXISTS vector CASCADE;
 -- 2. idempotência: o bootstrap roda de novo em todo deploy
 CREATE EXTENSION IF NOT EXISTS vector;
--- 3. a app cria sua tabela e consulta, como faria de verdade
+-- 3. a app cria sua tabela e seus índices, com a sintaxe pgvector (o que falhava — #182)
 CREATE TABLE items (id int, embedding vector(3));
 INSERT INTO items VALUES (1,'[1,1,1]'), (2,'[5,5,5]');
-CREATE INDEX items_emb_idx ON items USING theodb_hnsw (embedding);
+CREATE INDEX items_emb_idx ON items USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX items_emb_l2_idx ON items USING hnsw (embedding vector_l2_ops);
+CREATE INDEX items_emb_ip_idx ON items USING hnsw (embedding vector_ip_ops);
 SQL
 # ON_ERROR_STOP=1 é obrigatório: sem ele o psql -f segue após um erro SQL e sai 0 — o harness
 # reportaria "bootstrap ok" sobre um CREATE EXTENSION que falhou (falso verde).
@@ -72,8 +72,15 @@ DIST=$(q "SELECT round((embedding <-> '[2,2,2]'::vector)::numeric,4) FROM items 
 [ "$DIST" = "1.7321" ] || { echo "PGVECTOR_COMPAT_FAIL dist=$DIST (esperado 1.7321)"; exit 1; }
 
 # Asserção 4 — o índice ANN existe (a app indexa sua coluna).
-IDX=$(q "SELECT count(*) FROM pg_indexes WHERE tablename='items' AND indexname='items_emb_idx';")
-[ "$IDX" = "1" ] || { echo "PGVECTOR_COMPAT_FAIL index_count=$IDX"; exit 1; }
+IDX=$(q "SELECT count(*) FROM pg_indexes WHERE tablename='items' AND indexname LIKE 'items_emb%';")
+[ "$IDX" = "3" ] || { echo "PGVECTOR_COMPAT_FAIL index_count=$IDX (esperado 3: cosine/l2/ip com sintaxe pgvector)"; exit 1; }
+
+# Asserção 4b (#182) — o AM alias e as 3 opclasses existem sob o nome que a app escreve, e o AM alias
+# compartilha o MESMO handler own-code do theodb_hnsw (é rotulagem de catálogo, não 2ª implementação).
+AMH=$(q "SELECT count(*) FROM pg_am a JOIN pg_am b ON a.amhandler=b.amhandler WHERE a.amname='hnsw' AND b.amname='theodb_hnsw';")
+[ "$AMH" = "1" ] || { echo "PGVECTOR_COMPAT_FAIL am_hnsw_handler_shared=$AMH"; exit 1; }
+OPC=$(q "SELECT string_agg(oc.opcname, ',' ORDER BY oc.opcname) FROM pg_opclass oc JOIN pg_am a ON a.oid=oc.opcmethod WHERE a.amname='hnsw';")
+[ "$OPC" = "vector_cosine_ops,vector_ip_ops,vector_l2_ops" ] || { echo "PGVECTOR_COMPAT_FAIL opclasses=$OPC"; exit 1; }
 
 # Asserção 5 (HONESTIDADE) — o comment declara que a implementação é own-code, não pgvector.
 COMMENT=$(q "SELECT obj_description(oid,'pg_extension') FROM pg_extension WHERE extname='vector';")
@@ -85,7 +92,7 @@ esac
 # Asserção 6 — a versão declarada é o contrato que o tooling inspeciona (ADR-0058 § Decisão). Bumpar sem
 # script de upgrade quebra toda instalação existente (a classe de defeito do M137) — travar aqui.
 VER=$(q "SELECT extversion FROM pg_extension WHERE extname='vector';")
-[ "$VER" = "0.5.1" ] || { echo "PGVECTOR_COMPAT_FAIL extversion=$VER (esperado 0.5.1; bumpar exige sql/vector--0.5.1--X.sql)"; exit 1; }
+[ "$VER" = "0.6.0" ] || { echo "PGVECTOR_COMPAT_FAIL extversion=$VER (esperado 0.6.0; bumpar exige sql/vector--<atual>--<nova>.sql)"; exit 1; }
 
 # Asserção 7 — o caminho que o tooling REAL emite: `CREATE EXTENSION IF NOT EXISTS vector` SEM CASCADE,
 # num banco criado DEPOIS do bootstrap da imagem. É o caso que o review pegou como falso-verde: com
@@ -96,4 +103,16 @@ NOCASC=$(psql -X -q -v ON_ERROR_STOP=1 -p "$PORT" -U theo -d app_sem_cascade \
   -c "CREATE EXTENSION IF NOT EXISTS vector;" 2>&1) || {
   echo "PGVECTOR_COMPAT_FAIL sem_cascade: $NOCASC"; exit 1; }
 
-echo "PGVECTOR_COMPAT_OK — bootstrap pgvector (com e SEM cascade), tipo own-code public.vector, dist=$DIST, extversion=$VER, comment honesto. ESCOPO: #181 (bootstrap+tipo); indices USING hnsw/vector_*_ops ainda falham (#182)"
+# Asserção 8 (#182) — o UPGRADE 0.5.1 -> 0.6.0 funciona: uma instalação da v0.137.0 (que só tem o shim
+# de bootstrap) precisa conseguir migrar para os aliases sem reinstalar. Sem isto, bumpar a versão
+# quebraria toda instalação existente — a classe de defeito do M137.
+psql -X -q -p "$PORT" -U theo -d postgres -c "CREATE DATABASE app_upg TEMPLATE template0" >/dev/null 2>&1
+UPG=$(psql -X -q -v ON_ERROR_STOP=1 -p "$PORT" -U theo -d app_upg \
+  -c "CREATE EXTENSION theodb_rs CASCADE;" \
+  -c "CREATE EXTENSION vector VERSION '0.5.1';" \
+  -c "ALTER EXTENSION vector UPDATE TO '0.6.0';" \
+  -c "CREATE TABLE u(e vector(3));" \
+  -c "CREATE INDEX ON u USING hnsw (e vector_cosine_ops);" 2>&1) || {
+  echo "PGVECTOR_COMPAT_FAIL upgrade_0.5.1_to_0.6.0: $UPG"; exit 1; }
+
+echo "PGVECTOR_COMPAT_OK — bootstrap (com e SEM cascade), tipo own-code public.vector, dist=$DIST, extversion=$VER, 3 indices com sintaxe pgvector (USING hnsw + vector_{cosine,l2,ip}_ops sobre o MESMO handler own-code), upgrade 0.5.1->0.6.0, comment honesto"

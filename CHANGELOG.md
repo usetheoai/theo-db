@@ -14,6 +14,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Aliases de compatibilidade pgvector para índices: `CREATE INDEX ... USING hnsw (col vector_cosine_ops)` — a sintaxe que toda aplicação pgvector escreve — passa a funcionar, junto com `vector_l2_ops` e `vector_ip_ops`. Com isso a migration versionada real do `theo-memory` aplica **inteira** contra o TheoDB sem alterar uma linha da aplicação (antes quebrava na criação do primeiro índice). Os aliases apontam para o mesmo índice ANN own-code do TheoDB — nenhuma implementação nova (#182)
+
 ### Changed
 
 ### Deprecated
