@@ -526,8 +526,10 @@ pub(super) unsafe fn run_columnar_grouped_aggs(
         .iter()
         .enumerate()
         .filter_map(|(slot, &(kind, idx))| match kind {
-            0 => Some((slot, group_cols[idx].1)),
-            2 => Some((slot, group_key_exprs_spec[idx].2)), // M157 — date_trunc key (out_typoid, e.g. 1114 timestamp)
+            // fail-safe (council-rust-pgrx LOW): `.get()` not `[idx]` — a corrupt layout drops the sort key rather
+            // than panicking across the C boundary (matches the materialization loop's `.get(idx).ok_or()?` pattern).
+            0 => group_cols.get(idx).map(|g| (slot, g.1)),
+            2 => group_key_exprs_spec.get(idx).map(|g| (slot, g.2)), // M157 — date_trunc key out_typoid (1114)
             _ => None,
         })
         .collect();

@@ -1126,11 +1126,14 @@ unsafe fn encode_text_preds(tpreds: &[TextPredicate]) -> Option<*mut pg_sys::Lis
 /// M157 — encode the expression group keys as the 3rd `custom_private` channel (ADR-1, natural extension of the M156
 /// text channel): a `List` whose members are each `[Integer(base_attno), Integer(func), String(unit), Integer(out_typoid)]`
 /// — all leaf `Value` nodes (copy/out/read-safe). `NIL` when there are no group exprs (decode treats NIL as zero).
-unsafe fn encode_group_exprs(gexprs: &[GroupExprSpec]) -> *mut pg_sys::List {
+unsafe fn encode_group_exprs(gexprs: &[GroupExprSpec]) -> Option<*mut pg_sys::List> {
     let mut outer: *mut pg_sys::List = std::ptr::null_mut();
     for g in gexprs {
-        // `unit` is a lowercase ASCII granularity from a validated whitelist — never contains an interior NUL.
-        let pgstr = pg_sys::pstrdup(std::ffi::CString::new(g.unit.as_str()).unwrap_or_default().as_ptr());
+        // `unit` is a lowercase ASCII granularity from a validated whitelist — never contains an interior NUL. Still,
+        // decline fail-closed on one (council-rust-pgrx LOW: symmetry with `encode_text_preds`) rather than shipping
+        // an empty unit that would silently mis-group.
+        let cs = std::ffi::CString::new(g.unit.as_str()).ok()?;
+        let pgstr = pg_sys::pstrdup(cs.as_ptr());
         let mut entry: *mut pg_sys::List = std::ptr::null_mut();
         entry = pg_sys::lappend(entry, pg_sys::makeInteger(g.base_attno) as *mut c_void);
         entry = pg_sys::lappend(entry, pg_sys::makeInteger(g.func as i32) as *mut c_void);
@@ -1138,7 +1141,7 @@ unsafe fn encode_group_exprs(gexprs: &[GroupExprSpec]) -> *mut pg_sys::List {
         entry = pg_sys::lappend(entry, pg_sys::makeInteger(g.out_typoid as i32) as *mut c_void);
         outer = pg_sys::lappend(outer, entry as *mut c_void);
     }
-    outer
+    Some(outer)
 }
 
 /// If `plan` is an `Agg` over a columnar table matching an unconsumed stash entry, build the replacement `CustomScan`
@@ -1272,7 +1275,7 @@ unsafe fn try_swap_agg(
     // decline the swap rather than ship an incomplete filter.
     let int_channel = encode_private(&adm, table_oid);
     let text_channel = encode_text_preds(&adm.text_preds)?;
-    let group_expr_channel = encode_group_exprs(&adm.group_exprs);
+    let group_expr_channel = encode_group_exprs(&adm.group_exprs)?;
     let mut outer = pg_sys::lappend(std::ptr::null_mut(), int_channel as *mut c_void);
     outer = pg_sys::lappend(outer, text_channel as *mut c_void);
     outer = pg_sys::lappend(outer, group_expr_channel as *mut c_void);
