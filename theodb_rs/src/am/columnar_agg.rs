@@ -407,13 +407,13 @@ unsafe fn classify_target_node(
         Some(TargetSlot::Group(attno, (*var).vartype.to_u32()))
     } else if (*node).type_ == pg_sys::NodeTag::T_Aggref {
         let agg = node as *mut pg_sys::Aggref;
-        if !(*agg).aggfilter.is_null()
-            || !(*agg).aggorder.is_null()
-            || !(*agg).aggdistinct.is_null()
-        {
+        // aggfilter / aggorder are always declined; aggdistinct is declined here EXCEPT for the
+        // `count(DISTINCT single-var)` shape handled below (M154 — exact `count_distinct` via DataFusion).
+        if !(*agg).aggfilter.is_null() || !(*agg).aggorder.is_null() {
             admit_trace("agg_distinct_filter_order"); // M152
             return None;
         }
+        let has_distinct = !(*agg).aggdistinct.is_null();
         // Only a SIMPLE (non-split) aggregate has the FINAL result type. A partial/parallel split produces the
         // transtype (internal/bytea) → fail-safe to the native plan (council-rust-pgrx HIGH).
         if (*agg).aggsplit != pg_sys::AggSplit::AGGSPLIT_SIMPLE {
@@ -425,8 +425,53 @@ unsafe fn classify_target_node(
         }
         let name = CStr::from_ptr(fname).to_string_lossy();
         if name == "count" && (*agg).aggstar {
+            // count(*) is never DISTINCT — kind 0.
             Some(TargetSlot::Agg(ParsedAgg { kind: 0, attno: 0 }))
-        } else if name == "sum" || name == "avg" || name == "min" || name == "max" {
+        } else if name == "count" && has_distinct {
+            // count(DISTINCT col) — M154 (kind 8). Exactly 1 base-rel Var of an Arrow-decodable type, and — for
+            // collatable (text) columns — a DETERMINISTIC collation (ADR-M154-3 / edge EC-1): DataFusion's
+            // count_distinct uses byte-wise equality, which matches PG only under deterministic collations.
+            let args = PgList::<pg_sys::TargetEntry>::from_pg((*agg).args);
+            if args.len() != 1 {
+                admit_trace("count_distinct_multiarg"); // count(DISTINCT a,b) → decline (ADR-M154-2)
+                return None;
+            }
+            let te = args.get_ptr(0)?;
+            let e = (*te).expr as *mut pg_sys::Node;
+            if e.is_null() || (*e).type_ != pg_sys::NodeTag::T_Var {
+                admit_trace("agg_over_expression"); // count(DISTINCT col+1) → decline
+                return None;
+            }
+            let var = e as *mut pg_sys::Var;
+            if (*var).varno as i32 != relid {
+                return None; // Var from another rel → decline
+            }
+            let attno = (*var).varattno as i32;
+            if attno <= 0 {
+                return None; // system / whole-row column → decline
+            }
+            if !super::df_executor::arrow_supported_group_type((*var).vartype.to_u32()) {
+                admit_trace("count_distinct_unsupported_type"); // type not decodable to Arrow → decline
+                return None;
+            }
+            // Float DISTINCT diverges (ADR-M154-4 / review HIGH): DataFusion's FloatDistinctCountAccumulator dedups
+            // by IEEE total-order (-0.0 != +0.0; distinct NaN bit-patterns count separately), but PG's float8eq
+            // treats 0.0 == -0.0 and all NaN as equal. Decline float to the native plan (provably-safe class only).
+            let vt = (*var).vartype;
+            if vt == pg_sys::FLOAT4OID || vt == pg_sys::FLOAT8OID {
+                admit_trace("count_distinct_float_ieee_semantics");
+                return None;
+            }
+            // Collation equality (ADR-M154-3 / EC-1): DataFusion count_distinct is byte-wise; PG uses the input
+            // collation for the DISTINCT equality. Only deterministic collations coincide. Use `inputcollid` — the
+            // exact collation PG drives the DISTINCT with (nodeAgg.c) — for precision + defense-in-depth.
+            let coll = (*agg).inputcollid;
+            if coll != pg_sys::InvalidOid && !pg_sys::get_collation_isdeterministic(coll) {
+                admit_trace("count_distinct_nondeterministic_collation");
+                return None;
+            }
+            Some(TargetSlot::Agg(ParsedAgg { kind: 8, attno }))
+        } else if !has_distinct && (name == "sum" || name == "avg" || name == "min" || name == "max") {
             let args = PgList::<pg_sys::TargetEntry>::from_pg((*agg).args);
             if args.len() != 1 {
                 return None;
@@ -444,7 +489,9 @@ unsafe fn classify_target_node(
             let kind = parse_agg_kind(&name, (*var).vartype)?;
             Some(TargetSlot::Agg(ParsedAgg { kind, attno: (*var).varattno as i32 }))
         } else {
-            { admit_trace("unsupported_agg_func"); None }
+            // Includes sum/avg/min/max(DISTINCT ...) → declined (ADR-M154-2).
+            admit_trace("unsupported_agg_func");
+            None
         }
     } else {
         admit_trace("target_grouping_expression_or_other"); // M152
@@ -1070,6 +1117,7 @@ unsafe extern "C-unwind" fn begin_custom_scan(
                 5 => specs.push(AggSpec::AvgIntNumeric(col_name(attno))),
                 6 => specs.push(AggSpec::MinCol(col_name(attno), col_typoid(attno))),
                 7 => specs.push(AggSpec::MaxCol(col_name(attno), col_typoid(attno))),
+                8 => specs.push(AggSpec::CountDistinct(col_name(attno))), // M154
                 _ => return Err(format!("columnar_agg: bad agg kind {kind}")),
             }
         }

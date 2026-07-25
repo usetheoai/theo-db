@@ -18,7 +18,7 @@ use datafusion::arrow::array::{
 use datafusion::arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::error::DataFusionError;
-use datafusion::functions_aggregate::expr_fn::{avg, count, max, min, sum};
+use datafusion::functions_aggregate::expr_fn::{avg, count, count_distinct, max, min, sum};
 use datafusion::prelude::{Expr, SessionContext, col, lit};
 use datafusion::scalar::ScalarValue;
 use pgrx::AnyNumeric;
@@ -165,6 +165,10 @@ pub(super) enum AggSpec {
     /// actual values — unlike the Phase-B directory fold which gates `max(float)` out.
     MinCol(String, u32),
     MaxCol(String, u32),
+    /// `count(DISTINCT col)` → PG int8. DataFusion `count_distinct(col)` = exact `DistinctCountAccumulator`
+    /// (`distinct: true` over the exact `count_udaf`) → Int64; the datum is int8 (M154, same path as CountStar).
+    /// NEVER approx/HLL (ADR-M154-1) — the A/B gate demands byte-identity with PG COUNT(DISTINCT).
+    CountDistinct(String),
 }
 
 impl AggSpec {
@@ -178,7 +182,8 @@ impl AggSpec {
             | AggSpec::SumInt8Numeric(n)
             | AggSpec::AvgIntNumeric(n)
             | AggSpec::MinCol(n, _)
-            | AggSpec::MaxCol(n, _) => Some(n.as_str()),
+            | AggSpec::MaxCol(n, _)
+            | AggSpec::CountDistinct(n) => Some(n.as_str()),
         }
     }
 
@@ -210,6 +215,9 @@ fn push_agg_exprs(spec: &AggSpec, exprs: &mut Vec<Expr>) {
         }
         AggSpec::MinCol(name, _) => exprs.push(min(col(name.as_str())).alias(format!("a{k}"))),
         AggSpec::MaxCol(name, _) => exprs.push(max(col(name.as_str())).alias(format!("a{k}"))),
+        AggSpec::CountDistinct(name) => {
+            exprs.push(count_distinct(col(name.as_str())).alias(format!("a{k}")))
+        }
     }
 }
 
@@ -520,8 +528,8 @@ fn agg_datum(
         return Ok((pg_sys::Datum::from(0usize), true));
     }
     let datum = match spec {
-        // int8 output: count(*), sum(int2/int4) (DataFusion → Int64 = PG bigint).
-        AggSpec::CountStar | AggSpec::SumInt(_) => {
+        // int8 output: count(*), count(DISTINCT col), sum(int2/int4) (DataFusion → Int64 = PG bigint).
+        AggSpec::CountStar | AggSpec::SumInt(_) | AggSpec::CountDistinct(_) => {
             let v = arr
                 .as_any()
                 .downcast_ref::<Int64Array>()
