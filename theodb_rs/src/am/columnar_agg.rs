@@ -122,6 +122,7 @@ pub(crate) fn flip_op(op: ZoneOp) -> ZoneOp {
         ZoneOp::Eq => ZoneOp::Eq,
         ZoneOp::Ge => ZoneOp::Le,
         ZoneOp::Gt => ZoneOp::Lt,
+        ZoneOp::Ne => ZoneOp::Ne, // M151 — `<>` is symmetric: `c <> col` ≡ `col <> c`
     }
 }
 
@@ -139,10 +140,12 @@ pub(crate) unsafe fn encode_const_bits(datum: pg_sys::Datum, kind: MinMaxKind) -
     })
 }
 
-/// Extract a pushable zone-map predicate from a base-rel qual (ADR D2/D5): `Var(col) <op> Const` where the operator
-/// is the column-type-NATIVE btree comparison (strategy 1-5, both input types == the column type) and the const is
-/// the same type. Returns `None` for ANY other shape (function, OR, cross-type, two-Var, NULL const, non-min/max-able
-/// column) → the caller MUST fall back to the native plan so the WHERE is applied correctly.
+/// Extract a pushable zone-map predicate from a base-rel qual: `Var(col) <op> Const`. The operator is a btree
+/// comparison of `col`'s type (strategy 1-5) OR its negator for `<>` (M151 — `<>` is not a btree strategy). The
+/// const may be a DIFFERENT type within the INTEGER class {int2,int4,int8} (M151 cross-type, coerced with a range
+/// check by `encode_const_coerced`); cross-type outside the integer class (temporal/float) is declined because raw
+/// min/max coercion is not order-isomorphic there. Returns `None` for ANY other shape (function, OR, two-Var, NULL
+/// const, non-min/max-able column, unsafe cross-type) → the caller MUST fall back to the native plan.
 pub(crate) unsafe fn extract_zone_predicate(clause: *mut pg_sys::Node, relid: i32) -> Option<ZonePredicate> {
     if clause.is_null() || (*clause).type_ != pg_sys::NodeTag::T_OpExpr {
         return None;
@@ -165,11 +168,26 @@ pub(crate) unsafe fn extract_zone_predicate(clause: *mut pg_sys::Node, relid: i3
         return None;
     }
     let vartype = (*var).vartype;
-    if (*konst).consttype != vartype {
-        return None; // cross-type (D5): the const must be the column type
-    }
     let kind = super::columnar::minmax_kind_of(vartype.to_u32());
     if kind == MinMaxKind::None {
+        return None;
+    }
+    // M151 — the const need NOT be the exact column type. The ClickBench `<>`/`=` predicates are CROSS-TYPE
+    // (`AdvEngineID int2 <> 0 int4`): the literal is int4, the column int2. `encode_const_coerced` (below) reads
+    // the const in ITS type and casts to the column's min/max domain with a RANGE CHECK (out-of-range → None →
+    // clause not pushed).
+    let consttype = (*konst).consttype.to_u32();
+    // M151 review HIGH — cross-type coercion is order-isomorphic in the RAW min/max domain ONLY within the integer
+    // class {int2,int4,int8}. Two other cross-type classes live in a SINGLE btree opfamily and would be admitted by
+    // `var_side == vartype`, but coercing their const by raw bits is WRONG (the zone prune AND `build_filter_expr`
+    // compare raw bits, and PG promotes differently):
+    //   • temporal (date=days I4 vs timestamp/timestamptz=μs I8; + timezone rotation under a non-UTC `TimeZone`)
+    //   • float (`f4col = x::float8` — PG promotes the COLUMN to f8; rounding the const to f32 flips edge rows)
+    // Decline cross-type outside the integer class → the native plan applies the real (promoted) comparison. Same
+    // type (`consttype == vt`) always passes (temporal/float SAME-type is unaffected).
+    let vt = vartype.to_u32();
+    const INT_CLASS: [u32; 3] = [21, 23, 20]; // int2, int4, int8
+    if consttype != vt && !(INT_CLASS.contains(&consttype) && INT_CLASS.contains(&vt)) {
         return None;
     }
     // The operator's btree strategy in the column type's default opfamily (D5 — no hardcoded OIDs).
@@ -178,35 +196,88 @@ pub(crate) unsafe fn extract_zone_predicate(clause: *mut pg_sys::Node, relid: i3
         return None;
     }
     let opfamily = pg_sys::get_opclass_family(opclass);
-    if !pg_sys::op_in_opfamily((*op).opno, opfamily) {
-        return None;
-    }
+    // M151 — `<>` is NOT a btree strategy (btree defines only 1-5: `<,<=,=,>=,>`). It is detected as the NEGATOR
+    // of the btree `=` (strategy 3): if the op is not itself in the family but its negator is the family's `=`,
+    // this is `col <> const`. `<>` never prunes (`chunk_can_match(Ne)=true`) — it rides the predicate list only to
+    // reach the DataFusion `Filter` (`build_filter_expr → not_eq`, the final authority). A/B gate proves it.
+    let (probe_op, forced_ne) = if pg_sys::op_in_opfamily((*op).opno, opfamily) {
+        ((*op).opno, false)
+    } else {
+        let neg = pg_sys::get_negator((*op).opno);
+        if neg == pg_sys::InvalidOid || !pg_sys::op_in_opfamily(neg, opfamily) {
+            return None; // neither a native btree op nor the negator of one
+        }
+        (neg, true) // probe the `=` negator for its strategy/types; force op to Ne below
+    };
     let (mut strategy, mut lt, mut rt): (c_int, pg_sys::Oid, pg_sys::Oid) =
         (0, pg_sys::InvalidOid, pg_sys::InvalidOid);
-    pg_sys::get_op_opfamily_properties(
-        (*op).opno,
-        opfamily,
-        false,
-        &mut strategy,
-        &mut lt,
-        &mut rt,
-    );
-    if lt != vartype || rt != vartype {
-        return None; // not the same-type native comparison (D5)
+    pg_sys::get_op_opfamily_properties(probe_op, opfamily, false, &mut strategy, &mut lt, &mut rt);
+    // M151 — only the VAR's side of the operator must equal the column type; the CONST side may differ (cross-type,
+    // coerced below). `flipped` means the Var is the RIGHT operand (`const <op> col`), so its type is `rt`.
+    let var_side = if flipped { rt } else { lt };
+    if var_side != vartype {
+        return None; // the operator does not apply to this column type
     }
-    let base = match strategy {
-        1 => ZoneOp::Lt,
-        2 => ZoneOp::Le,
-        3 => ZoneOp::Eq,
-        4 => ZoneOp::Ge,
-        5 => ZoneOp::Gt,
-        _ => return None,
+    if forced_ne && strategy != 3 {
+        return None; // the negator must be exactly `=` (strategy 3) for this to be `<>`
+    }
+    let base = if forced_ne {
+        ZoneOp::Ne
+    } else {
+        match strategy {
+            1 => ZoneOp::Lt,
+            2 => ZoneOp::Le,
+            3 => ZoneOp::Eq,
+            4 => ZoneOp::Ge,
+            5 => ZoneOp::Gt,
+            _ => return None,
+        }
     };
     let col = ((*var).varattno as i32).checked_sub(1)?; // 1-based AttrNumber → 0-based col; system cols (≤0) rejected
     Some(ZonePredicate {
         col: col as usize,
         op: if flipped { flip_op(base) } else { base },
-        const_bits: encode_const_bits((*konst).constvalue, kind)?,
+        const_bits: encode_const_coerced((*konst).constvalue, consttype, kind)?,
+    })
+}
+
+/// M151 — coerce a `Const` (in `consttype`) into `const_bits` in the COLUMN's `target` MinMaxKind domain, for the
+/// cross-type ClickBench pattern (`col int2 <> 0 int4`). Reads the const in ITS own type, then numerically casts
+/// to the column domain with a RANGE CHECK: an out-of-range cast (e.g. `int2col = 40000`) returns `None` → the
+/// clause is not pushed and the native plan handles it (ALWAYS SAFE — for `=`/`<>` the out-of-range value can
+/// never match/exclude a real int2 row; for `<`/`>` an out-of-range bound makes the predicate trivially
+/// true/false, which the native plan evaluates correctly). Same-type consts fall through to `encode_const_bits`.
+/// The result MUST agree with `compute_minmax` (ints as `i64 as u64`, floats as `f64::to_bits`).
+unsafe fn encode_const_coerced(datum: pg_sys::Datum, consttype: u32, target: MinMaxKind) -> Option<u64> {
+    // Read the const value in its OWN type. Integers/temporal → i128 (wide enough for any range check); floats → f64.
+    enum V {
+        I(i128),
+        F(f64),
+        B(bool),
+    }
+    let v = match consttype {
+        21 => V::I(i16::from_datum(datum, false)? as i128),
+        23 => V::I(i32::from_datum(datum, false)? as i128),
+        20 => V::I(i64::from_datum(datum, false)? as i128),
+        16 => V::B(bool::from_datum(datum, false)?),
+        700 => V::F(f32::from_datum(datum, false)? as f64),
+        701 => V::F(f64::from_datum(datum, false)?),
+        1114 | 1184 => V::I(i64::from_datum(datum, false)? as i128), // timestamp/tz μs
+        1082 => V::I(i32::from_datum(datum, false)? as i128),        // date days
+        _ => return None,                                            // non-numeric const → cannot coerce
+    };
+    // Cast into the column's min/max domain, RANGE-CHECKED (i128 → i16/i32/i64 via try_from).
+    Some(match (target, v) {
+        (MinMaxKind::I2, V::I(x)) => (i16::try_from(x).ok()? as i64) as u64,
+        (MinMaxKind::I4, V::I(x)) => (i32::try_from(x).ok()? as i64) as u64,
+        (MinMaxKind::I8, V::I(x)) => (i64::try_from(x).ok()? as i64) as u64,
+        (MinMaxKind::Bool, V::B(b)) => (b as i64) as u64,
+        (MinMaxKind::F4, V::F(f)) => (f as f32 as f64).to_bits(),
+        (MinMaxKind::F8, V::F(f)) => f.to_bits(),
+        // an integer literal compared against a float column (`col float8 <> 5`) — widen to float.
+        (MinMaxKind::F4, V::I(x)) => (x as f32 as f64).to_bits(),
+        (MinMaxKind::F8, V::I(x)) => (x as f64).to_bits(),
+        _ => return None, // incompatible (e.g. a float literal into an int column — narrowing loses info; decline)
     })
 }
 
@@ -987,6 +1058,7 @@ unsafe extern "C-unwind" fn begin_custom_scan(
                 2 => ZoneOp::Eq,
                 3 => ZoneOp::Ge,
                 4 => ZoneOp::Gt,
+                5 => ZoneOp::Ne, // M151 — `<>` round-trips through custom_private (encode writes `p.op as i32` = 5)
                 _ => return Err(format!("columnar_agg: bad zone op {opn}")),
             };
             preds.push(ZonePredicate { col, op, const_bits: (hi << 32) | lo });

@@ -24,6 +24,22 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.143.0] - 2026-07-25
+
+### Added
+
+- Cobertura do CustomScan vetorizado DataFusion (M151): agregados (`COUNT`/`SUM`/`AVG`, com ou sem `GROUP BY`) que filtram por `WHERE col <> const` em coluna numérica/temporal sobre `theodb_columnar` passam a rotear pelo caminho vetorizado (batch Arrow), não mais tuple-a-tuple. `<>` é detectado como o negador do `=` btree (não é estratégia btree) e aplicado só pelo `Filter` DataFusion (nunca poda chunk — a poda por min/max continua só nos ops ordenados). Const **cross-type na classe inteira** (`int2`/`int4`/`int8`) é coercido ao domínio da coluna com range-check (o padrão real do ClickBench: coluna `int2`, literal `int4` — ex. `AdvEngineID <> 0`), ampliando também `=`/`<`/`>` cross-type inteiro. Cross-type temporal/float é declinado ao plano nativo (a coerção por bits crus não é isomórfica de ordem lá — pegue pelo review). Escopo honesto: predicados numéricos/temporais/bool; `<>` em texto (`SearchPhrase <> ''`) é follow-up (const-texto não cabe na serialização `custom_private` atual — ADR-4). (#M151)
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
 ## [0.142.0] - 2026-07-25
 
 ### Added
