@@ -49,6 +49,23 @@ struct PendingWrite {
 }
 thread_local! {
     static WRITE_STATES: RefCell<HashMap<u32, PendingWrite>> = RefCell::new(HashMap::new());
+    // M150 — last-scan chunk-group skip counters `(skipped, scanned)`, reset at `columnar_scan_begin`. Wiring
+    // metric (pillar c): the A/B evidence that the min/max directory is being consumed. Best-effort under nested
+    // scans (a shared thread_local, same as the agg-path `THEODB_SCAN_PROFILE` log) — a single top-level query
+    // reads its own counts; SQL accessors `theodb_columnar_chunks_{skipped,scanned}()` expose them for tests.
+    static SKIP_STATS: std::cell::Cell<(u64, u64)> = const { std::cell::Cell::new((0, 0)) };
+}
+
+/// M150 — chunk groups the zone-map pruned in the most recent `theodb_columnar` general scan (wiring metric).
+#[pg_extern]
+fn theodb_columnar_chunks_skipped() -> i64 {
+    SKIP_STATS.with(|s| s.get().0 as i64)
+}
+
+/// M150 — chunk groups the most recent `theodb_columnar` general scan examined (skipped + decoded).
+#[pg_extern]
+fn theodb_columnar_chunks_scanned() -> i64 {
+    SKIP_STATS.with(|s| s.get().1 as i64)
 }
 
 // ===========================================================================================================
@@ -703,6 +720,8 @@ unsafe fn decode_stripe(
     natts: usize,
     out: &mut Vec<Vec<u8>>,
     want_mask: &[bool],
+    predicates: &[super::zonemap::ZonePredicate],
+    skip: bool,
 ) -> Result<(), String> {
     let hdr_items = super::page::read_all_page_items(rel, header_block)?;
     let hdr_bytes =
@@ -722,6 +741,36 @@ unsafe fn decode_stripe(
     let entries = codec::deserialize_directory(&dir_bytes, n_entries)?;
     for cg in 0..header.n_chunk_groups as usize {
         let cg_rows = entries[cg * natts].row_count as usize;
+        // M150 — zone-map chunk-group skip in the GENERAL scan path (mirror of `decode_columns`'s agg-path skip,
+        // ADR D3). Skip the WHOLE chunk group (never a single column — the row cursor advances per chunk group, so
+        // a partial skip would misalign) when any pushed `col op const` predicate's min/max PROVES no row can
+        // match. Fail-safe: `p.col < natts` guards OOB, `chunk_can_match` returns "must scan" on `has_minmax=false`
+        // / `MinMaxKind::None` / NaN. The skip is an ADMISSION filter — `ExecScan` re-checks the full qual over the
+        // surviving rows (the final authority), so the result is byte-identical to skip-off (A/B gate, Rule 5).
+        SKIP_STATS.with(|s| {
+            let (sk, sc) = s.get();
+            s.set((sk, sc + 1));
+        });
+        if skip
+            && predicates.iter().any(|p| {
+                p.col < natts && {
+                    let e = &entries[cg * natts + p.col];
+                    !super::zonemap::chunk_can_match(
+                        e.has_minmax,
+                        e.min_bits,
+                        e.max_bits,
+                        cols[p.col].mm,
+                        p,
+                    )
+                }
+            })
+        {
+            SKIP_STATS.with(|s| {
+                let (sk, sc) = s.get();
+                s.set((sk + 1, sc));
+            });
+            continue;
+        }
         let mut cgcols: Vec<Vec<Option<Vec<u8>>>> = Vec::with_capacity(natts);
         for col in 0..natts {
             if !want_mask[col] {
@@ -1035,6 +1084,7 @@ pub unsafe extern "C-unwind" fn columnar_scan_begin(
         (*scan).current = Box::into_raw(Box::new(Vec::new()));
         (*scan).cursor = 0;
         (*scan).pending_loaded = false;
+        SKIP_STATS.with(|s| s.set((0, 0))); // M150 — fresh skip counters for this scan
         scan as pg_sys::TableScanDesc
     }
 }
@@ -1076,7 +1126,19 @@ unsafe fn load_next_batch(st: *mut ColumnarScanState) -> bool {
                     }
                     None => vec![true; natts],
                 };
-            if let Err(e) = decode_stripe(rel, hb, tupdesc, &cols, natts, &mut batch, &want_mask) {
+            // M150 — the zone-map predicates pushed for THIS scan (keyed by the scandesc pointer == `st`, the same
+            // side-channel discipline as the projection above). `None` (no projection node, no pushable qual, or a
+            // nested/unrelated scan) ⇒ empty slice ⇒ no chunk-group is skipped (the exact pre-M150 path). Gated by
+            // `theodb.enable_chunk_skip` so the A/B OFF-vs-ON ablation isolates the skip on the SAME binary.
+            let preds: Vec<super::zonemap::ZonePredicate> =
+                match crate::am::columnar_project::scan_predicates(st as usize) {
+                    Some(p) => (*p).clone(),
+                    None => Vec::new(),
+                };
+            let skip = crate::am::columnar_project::ENABLE_CHUNK_SKIP.get() && !preds.is_empty();
+            if let Err(e) =
+                decode_stripe(rel, hb, tupdesc, &cols, natts, &mut batch, &want_mask, &preds, skip)
+            {
                 pg_sys::error!("{e}");
             }
             loaded_a_source = true;

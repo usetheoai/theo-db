@@ -2450,7 +2450,7 @@
           "blocking": true,
           "created_at": null,
           "end_line": 409,
-          "evidence": "ABA stale-registry: begin sincroniza o registry em ambos os ramos (None=>registry_remove). Provado no droplet (build cassert): test regression subxact-abort passa (pos-abort o fallback nao herda mask stale). commit ab8a5f4",
+          "evidence": "ABA stale-registry: begin sincroniza o registry em ambos os ramos (None=>registry_remove). Provado no droplet (build cassert): test regression subxact-abort passa (pos-abort o fallback nao herda mask stale). commit ab8a5f4; tool no longer reports (re-validated)",
           "id": "21c3ac0b9ed948b7",
           "iteration": 0,
           "kind": "defect",
@@ -3694,7 +3694,7 @@
     }
   ],
   "generated_at": "2026-07-25T00:01:02Z",
-  "iteration": 0,
+  "iteration": 1,
   "pillars": {
     "architecture": {
       "blocker_count": 0,
@@ -3767,7 +3767,7 @@
       "status": "COMPLETED"
     }
   },
-  "revision": 7,
+  "revision": 8,
   "schema_version": "2.0",
   "target": {
     "branch": "develop",

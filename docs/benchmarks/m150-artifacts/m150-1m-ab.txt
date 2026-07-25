@@ -1,0 +1,20 @@
+M150 chunk-group filtering — 1M rows clustered by `a`, droplet DO c-8 (8 vCPU/16GB), PG18.4 release, theodb_rs
+Correctness (DO-block harness, 50k): AB_OK diverged=0; T3.1 skip=4/5 A/B=1; never_loses_row (6 preds);
+  T4.1 GUC gate off=0 on=4; T2.2 best-effort OR-noskip=0 AND-skip=4; T2.1 subxact-abort no stale predicate.
+1M skip%: AB_OK diverged=0 | SKIP_PCT=99.0 (skipped=99/scanned=100)
+
+EXPLAIN ANALYZE SELECT a FROM b_col WHERE a=500000:
+  OFF: Rows Removed by Filter: 999999 | Buffers: shared hit=397 | Execution: 561.260 ms
+  ON : Rows Removed by Filter:   9999 | Buffers: shared hit=7   | Execution:   5.606 ms
+
+\timing (5 runs, OFFSET 1000000 forces full materialization):
+Q1 SELECT a WHERE a=500000 (point, skip 99%):
+  OFF: 539.593 540.519 546.071 550.278 519.928  (median 540.5 ms)
+  ON :   6.044   9.947   5.998   5.973   5.884  (median   6.0 ms)   -> ~90x
+Q2 SELECT a,b WHERE a BETWEEN 400000 AND 400050 (range, skip ~99%):
+  OFF: 630.476 633.394 629.922 629.493 625.167  (median 629.9 ms)
+  ON :  16.996  12.418  12.115  12.160  12.179  (median  12.2 ms)   -> ~52x
+
+Note: bare `count(*) WHERE a=X` does NOT skip (count_skipped=0) — the filter lands above the projection scan,
+so the scan sees no pushable qual. The skip benefits row-materializing queries (SELECT cols WHERE col op const).
+Gain requires clustering by the predicate column (else per-chunk min/max overlap and nothing is pruned).

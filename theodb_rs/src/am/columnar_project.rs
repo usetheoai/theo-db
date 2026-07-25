@@ -34,9 +34,17 @@ use std::collections::{BTreeSet, HashMap};
 use std::os::raw::c_int;
 use std::rc::Rc;
 
+use super::columnar_agg::extract_zone_predicate;
+use super::zonemap::ZonePredicate;
+
 /// `theodb.enable_projection` — default ON. When off, the pathlist hook adds no projection path and every
 /// columnar scan falls back to the plain all-columns TableAM seqscan (the exact pre-M149 behavior).
 pub(crate) static ENABLE_PROJECTION: GucSetting<bool> = GucSetting::<bool>::new(true);
+
+/// `theodb.enable_chunk_skip` (M150) — default ON. When off, `load_next_batch` passes `skip=false` so no
+/// chunk group is pruned by the zone-map (the exact pre-M150 path), giving the A/B OFF-vs-ON ablation on the
+/// SAME binary. Correctness never depends on it (skip is an admission filter; `ExecScan` re-checks the qual).
+pub(crate) static ENABLE_CHUNK_SKIP: GucSetting<bool> = GucSetting::<bool>::new(true);
 
 // ---- side channel: the wanted-columns set the columnar getnextslot materializes ----
 //
@@ -56,6 +64,60 @@ thread_local! {
     // `Rc<Vec<usize>>` must NEVER live inside the palloc0'd `ProjScanState`, which Postgres frees without
     // running Drop (would leak the Vec per query). Inserted at `begin`, removed at `end`, cleared on abort.
     static NODE_PROJECTIONS: RefCell<HashMap<usize, Rc<Vec<usize>>>> = RefCell::new(HashMap::new());
+    // M150 — the PARALLEL zone-map predicate channel (ADR-3). Same scandesc keying + same registry discipline as
+    // the projection above, but a SEPARATE slot so the released M149 projection tuple stays byte-identical. The
+    // two channels SHARE the cleanup path (`clear_all`, `subxact_clear`, `end_custom_scan`) — one function clears
+    // both, so the correctness discipline (nested-scan isolation, ABA-after-subxact-abort) can never drift apart.
+    static SCAN_PREDICATES: RefCell<Option<(usize, Rc<Vec<ZonePredicate>>)>> = const { RefCell::new(None) };
+    static NODE_PREDICATES: RefCell<HashMap<usize, Rc<Vec<ZonePredicate>>>> = RefCell::new(HashMap::new());
+}
+
+/// Swap the ACTIVE predicate slot, returning the previous value (mirror of `swap_active`, for `PredGuard`).
+fn swap_active_preds(
+    v: Option<(usize, Rc<Vec<ZonePredicate>>)>,
+) -> Option<(usize, Rc<Vec<ZonePredicate>>)> {
+    SCAN_PREDICATES.with(|c| std::mem::replace(&mut *c.borrow_mut(), v))
+}
+
+/// The zone-map predicates pushed for the columnar scan identified by `scandesc`, or `None` (⇒ no chunk skip).
+/// Read by `columnar::load_next_batch`. Returns `Some` ONLY when the active slot's scandesc equals the caller's —
+/// the exact nested-scan isolation the projection channel uses (a nested/unrelated columnar scan sees `None`).
+pub(crate) fn scan_predicates(scandesc: usize) -> Option<Rc<Vec<ZonePredicate>>> {
+    SCAN_PREDICATES.with(|c| {
+        c.borrow()
+            .as_ref()
+            .and_then(|(sd, p)| if *sd == scandesc { Some(Rc::clone(p)) } else { None })
+    })
+}
+
+/// RAII guard restoring the ACTIVE predicate slot even on a mid-pull longjmp (mirror of `ActiveGuard`).
+struct PredGuard(Option<(usize, Rc<Vec<ZonePredicate>>)>);
+impl PredGuard {
+    fn install(v: Option<(usize, Rc<Vec<ZonePredicate>>)>) -> Self {
+        PredGuard(swap_active_preds(v))
+    }
+}
+impl Drop for PredGuard {
+    fn drop(&mut self) {
+        let _ = swap_active_preds(self.0.take());
+    }
+}
+
+/// Register a node's pushed predicates. UNCONDITIONAL insert (even an empty Vec) — unlike the projection registry
+/// (which uses remove-on-None as its decode-all signal), the predicate channel's "no skip" signal is an empty
+/// Vec, so overwriting on every `begin` makes a reused address ABA-proof by construction (the vecfilter idiom).
+fn preds_registry_insert(node: usize, preds: Vec<ZonePredicate>) {
+    NODE_PREDICATES.with(|r| {
+        r.borrow_mut().insert(node, Rc::new(preds));
+    });
+}
+fn preds_registry_get(node: usize) -> Option<Rc<Vec<ZonePredicate>>> {
+    NODE_PREDICATES.with(|r| r.borrow().get(&node).cloned())
+}
+fn preds_registry_remove(node: usize) {
+    NODE_PREDICATES.with(|r| {
+        r.borrow_mut().remove(&node);
+    });
 }
 
 /// Swap the ACTIVE slot, returning the previous value (re-entrant save/restore discipline around each pull).
@@ -108,6 +170,9 @@ fn registry_remove(node: usize) {
 fn clear_all() {
     let _ = swap_active(None);
     NODE_PROJECTIONS.with(|r| r.borrow_mut().clear());
+    // M150 — the predicate channel shares this cleanup so both channels are freed together (no drift).
+    let _ = swap_active_preds(None);
+    NODE_PREDICATES.with(|r| r.borrow_mut().clear());
 }
 
 // ---- static method tables (registered once; addresses stable for the postmaster lifetime) ----
@@ -167,6 +232,14 @@ pub(crate) fn init() {
         GucContext::Userset,
         GucFlags::default(),
     );
+    GucRegistry::define_bool_guc(
+        c"theodb.enable_chunk_skip",
+        c"Skip theodb_columnar chunk groups whose zone-map min/max proves no row matches the query predicate",
+        c"When on (M150), a SELECT with a simple `col op const` WHERE over a theodb_columnar table skips whole chunk groups the min/max directory proves cannot match, without decompressing them; off decodes every chunk group (the pre-M150 path). Never affects correctness — the executor re-checks the full qual. Requires theodb.enable_projection = on (the skip rides the projection CustomScan that pushes the predicate); with projection off, this GUC is a silent no-op.",
+        &ENABLE_CHUNK_SKIP,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
     unsafe {
         pg_sys::RegisterCustomScanMethods(&SCAN_METHODS.0);
         PREV_HOOK = pg_sys::set_rel_pathlist_hook;
@@ -201,6 +274,7 @@ unsafe extern "C-unwind" fn subxact_clear(
         // the next statement (mirrors the vecfilter subxact guard). Registry entries of unrelated live scans
         // are freed at xact end.
         let _ = swap_active(None);
+        let _ = swap_active_preds(None); // M150 — same discipline for the predicate channel
     }
 }
 
@@ -417,9 +491,34 @@ unsafe extern "C-unwind" fn begin_custom_scan(
         Some(wanted) => registry_insert(node as usize, wanted),
         None => registry_remove(node as usize),
     }
+    // M150 — extract the pushable zone-map predicates from this node's qual, BEST-EFFORT (Citus
+    // `ExtractPushdownClause`): keep the `col op const` clauses `extract_zone_predicate` accepts and DROP the rest
+    // (function / OR / cross-type / two-Var) — the `ExecScan` re-checks the FULL qual, so an incomplete push is
+    // still correct (ADR-2). UNCONDITIONAL insert (even empty) makes a reused address ABA-proof for this channel.
+    let preds: Vec<ZonePredicate> = predicates_needed(st.css.ss.ps.plan, scanrelid);
+    preds_registry_insert(node as usize, preds);
     // Open a real table scan over the columnar rel under the query snapshot (routes to columnar_scan_begin).
     st.scandesc = pg_sys::table_beginscan(rel, (*estate).es_snapshot, 0, std::ptr::null_mut());
     st.css.ss.ss_currentScanDesc = st.scandesc;
+}
+
+/// M150 — the pushable `col op const` predicates from this node's `plan.qual`, best-effort (un-pushable clauses
+/// dropped; `ExecScan` re-checks the full qual). Empty ⇒ no chunk-group skip. Mirrors `columns_needed`'s walk of
+/// `(*plan).qual` but keeps the whole clause (not its leaf Vars). Vars in the qual carry `varno == scanrelid`.
+unsafe fn predicates_needed(plan: *mut pg_sys::Plan, scanrelid: u32) -> Vec<ZonePredicate> {
+    if (*plan).qual.is_null() {
+        return Vec::new();
+    }
+    let quals = PgList::<pg_sys::Node>::from_pg((*plan).qual);
+    let mut preds = Vec::with_capacity(quals.len());
+    for i in 0..quals.len() {
+        if let Some(clause) = quals.get_ptr(i) {
+            if let Some(p) = extract_zone_predicate(clause, scanrelid as i32) {
+                preds.push(p);
+            }
+        }
+    }
+    preds
 }
 
 /// Access method for `ExecScan`: fetch the next tuple into the scan slot. `columnar_scan_getnextslot` reads the
@@ -468,6 +567,12 @@ unsafe extern "C-unwind" fn exec_custom_scan(
     // `mine` absent ⇒ fallback (decode all): install no active slot for this scandesc.
     let active = registry_get(node as usize).map(|w| (st.scandesc as usize, w));
     let _guard = ActiveGuard::install(active);
+    // M150 — install this scan's predicates for the same pull window (empty ⇒ no active slot ⇒ no skip). Same
+    // scandesc keying as the projection guard; `PredGuard` restores the previous slot on return or longjmp.
+    let pactive = preds_registry_get(node as usize)
+        .filter(|p| !p.is_empty())
+        .map(|p| (st.scandesc as usize, p));
+    let _pguard = PredGuard::install(pactive);
     pg_sys::ExecScan(&mut st.css.ss, Some(proj_access), Some(proj_recheck))
 }
 
@@ -476,6 +581,7 @@ unsafe extern "C-unwind" fn exec_custom_scan(
 unsafe extern "C-unwind" fn end_custom_scan(node: *mut pg_sys::CustomScanState) {
     let st = &mut *(node as *mut ProjScanState);
     registry_remove(node as usize);
+    preds_registry_remove(node as usize); // M150 — free this node's predicate entry too
     if !st.scandesc.is_null() {
         pg_sys::table_endscan(st.scandesc);
         st.scandesc = std::ptr::null_mut();
@@ -707,5 +813,166 @@ mod tests {
                 .collect()
         });
         assert_eq!(col, heap, "post-subxact-abort fallback query must not inherit a stale projection mask");
+    }
+
+    // ---- M150 — chunk-group skip (zone-map) tests ----
+
+    /// Build a columnar table + heap twin with `n` rows where `a = g` is MONOTONE (so each 10k-row chunk group
+    /// has a tight, non-overlapping min/max — the regime where zone-map skip actually prunes). `b = (g%7)-3`.
+    fn seed_clustered(n: i32) {
+        Spi::run("SET theodb.enable_projection = on").unwrap();
+        Spi::run("SET theodb.enable_chunk_skip = on").unwrap();
+        Spi::run("SET theodb.enable_columnar_agg = off").unwrap();
+        Spi::run("SET max_parallel_workers_per_gather = 0").unwrap();
+        Spi::run("DROP TABLE IF EXISTS t_col").unwrap();
+        Spi::run("DROP TABLE IF EXISTS t_heap").unwrap();
+        Spi::run("CREATE TABLE t_col (a int, b int, c text) USING theodb_columnar").unwrap();
+        Spi::run("CREATE TABLE t_heap (a int, b int, c text)").unwrap();
+        let ins =
+            format!("INSERT INTO {{tbl}} SELECT g, (g % 7) - 3, 'row-'||g FROM generate_series(1,{n}) g");
+        Spi::run(&ins.replace("{tbl}", "t_col")).unwrap();
+        Spi::run(&ins.replace("{tbl}", "t_heap")).unwrap();
+    }
+
+    fn col_ints(sql: &str) -> Vec<i32> {
+        Spi::connect(|c| {
+            c.select(sql, None, &[]).unwrap().filter_map(|r| r.get::<i32>(1).unwrap()).collect()
+        })
+    }
+    fn chunks_skipped() -> i64 {
+        Spi::get_one::<i64>("SELECT theodb_columnar_chunks_skipped()").unwrap().unwrap()
+    }
+    fn chunks_scanned() -> i64 {
+        Spi::get_one::<i64>("SELECT theodb_columnar_chunks_scanned()").unwrap().unwrap()
+    }
+
+    /// T3.1 — a highly selective `a = const` over a clustered columnar table PRUNES chunk groups (the min/max of
+    /// every non-matching group excludes the const) AND the result is byte-identical to the heap twin. RED before
+    /// the skip wiring: `chunks_skipped == 0` (decode_stripe decoded every group). GREEN: > 0 with the SAME rows.
+    #[pgrx::pg_test]
+    fn test_chunk_skip_prunes_and_ab_identical() {
+        seed_clustered(50_000); // 5 chunk groups of 10k
+        let col = col_ints("SELECT a FROM t_col WHERE a = 25000 ORDER BY a");
+        let sk = chunks_skipped();
+        let sc = chunks_scanned();
+        let heap = col_ints("SELECT a FROM t_heap WHERE a = 25000 ORDER BY a");
+        assert_eq!(col, heap, "chunk-skip result must equal the heap twin (skip is admission-only)");
+        assert_eq!(col, vec![25000], "the one matching row must be present");
+        assert!(sc >= 2, "the table must span >= 2 chunk groups to prove pruning (scanned {sc})");
+        assert!(sk > 0, "a selective `a = 25000` must prune >= 1 chunk group (skipped {sk}/{sc})");
+    }
+
+    /// T3.1 (correctness fail-safe) — the skip NEVER loses a row: a value that EXISTS lands inside its chunk's
+    /// [min,max], so that chunk is NOT skipped and the row is returned; ranges spanning a boundary keep every
+    /// matching row. A/B vs heap over several predicate shapes (Eq present, range, `>` tail, `<` head).
+    #[pgrx::pg_test]
+    fn test_skip_never_loses_row() {
+        seed_clustered(50_000);
+        for pred in [
+            "a = 24999",
+            "a BETWEEN 19998 AND 20003",
+            "a > 49995",
+            "a < 4",
+            "a = 1",
+            "a = 50000",
+        ] {
+            let q = format!("SELECT a FROM {{tbl}} WHERE {pred} ORDER BY a");
+            let col = col_ints(&q.replace("{tbl}", "t_col"));
+            let heap = col_ints(&q.replace("{tbl}", "t_heap"));
+            assert_eq!(col, heap, "predicate `{pred}` must not lose or gain a row vs the heap twin");
+        }
+    }
+
+    /// T4.1 — the `theodb.enable_chunk_skip` GUC gates the skip: OFF ⇒ `chunks_skipped == 0` (the pre-M150 path),
+    /// ON ⇒ `> 0`, and the RESULT is identical either way (the A/B OFF-vs-ON ablation on the same binary).
+    #[pgrx::pg_test]
+    fn test_enable_chunk_skip_guc_off_disables_skip() {
+        seed_clustered(50_000);
+        Spi::run("SET theodb.enable_chunk_skip = off").unwrap();
+        let col_off = col_ints("SELECT a FROM t_col WHERE a = 25000 ORDER BY a");
+        let sk_off = chunks_skipped();
+        Spi::run("SET theodb.enable_chunk_skip = on").unwrap();
+        let col_on = col_ints("SELECT a FROM t_col WHERE a = 25000 ORDER BY a");
+        let sk_on = chunks_skipped();
+        assert_eq!(sk_off, 0, "with the GUC off no chunk group may be skipped (got {sk_off})");
+        assert!(sk_on > 0, "with the GUC on the selective predicate must prune (got {sk_on})");
+        assert_eq!(col_off, col_on, "the result must be identical with skip off vs on");
+    }
+
+    /// T2.2 — best-effort pushdown: an un-pushable qual (`OR`) pushes NOTHING (`chunks_skipped == 0`) but stays
+    /// correct (ExecScan re-checks); a mixed `AND` still pushes the simple conjunct and prunes. A/B in both.
+    #[pgrx::pg_test]
+    fn test_predicate_pushdown_best_effort() {
+        seed_clustered(50_000);
+        // OR → not pushable → no skip, but the executor still applies it correctly.
+        let col_or = col_ints("SELECT a FROM t_col WHERE a = 25000 OR a = 40000 ORDER BY a");
+        let sk_or = chunks_skipped();
+        let heap_or = col_ints("SELECT a FROM t_heap WHERE a = 25000 OR a = 40000 ORDER BY a");
+        assert_eq!(col_or, heap_or, "un-pushable OR must still return the correct rows");
+        assert_eq!(sk_or, 0, "an OR qual pushes no predicate → no chunk skip (got {sk_or})");
+        // Mixed AND with a non-pushable function conjunct → the simple `a = 25000` still pushes and prunes.
+        let col_and =
+            col_ints("SELECT a FROM t_col WHERE a = 25000 AND lower(c) = 'row-25000' ORDER BY a");
+        let sk_and = chunks_skipped();
+        let heap_and =
+            col_ints("SELECT a FROM t_heap WHERE a = 25000 AND lower(c) = 'row-25000' ORDER BY a");
+        assert_eq!(col_and, heap_and, "mixed AND must return the correct rows");
+        assert!(sk_and > 0, "the pushable `a = 25000` conjunct must prune despite the function (got {sk_and})");
+    }
+
+    /// Review LOW/MEDIUM (rust-pgrx council) — predicate-channel isolation across TWO DIFFERENT columnar tables
+    /// scanned in the same query, each with its OWN pushable predicate. If the scandesc keying leaked, one scan
+    /// would skip by the OTHER's predicate and lose rows. A cross join `c1.a=K1 × c2.a=K2` (each selective) must
+    /// equal the heap twin — proving `scan_predicates(scandesc)` returns each scan ONLY its own predicates.
+    #[pgrx::pg_test]
+    fn test_two_table_predicate_isolation() {
+        seed_clustered(50_000); // t_col / t_heap
+        Spi::run("DROP TABLE IF EXISTS t_col2").unwrap();
+        Spi::run("DROP TABLE IF EXISTS t_heap2").unwrap();
+        Spi::run("CREATE TABLE t_col2 (a int, b int, c text) USING theodb_columnar").unwrap();
+        Spi::run("CREATE TABLE t_heap2 (a int, b int, c text)").unwrap();
+        let ins = "INSERT INTO {tbl} SELECT g,(g%7)-3,'r2-'||g FROM generate_series(1,50000) g";
+        Spi::run(&ins.replace("{tbl}", "t_col2")).unwrap();
+        Spi::run(&ins.replace("{tbl}", "t_heap2")).unwrap();
+        // Each side selective on a DIFFERENT value → each scan pushes a distinct predicate.
+        let q = "SELECT x.a, y.a FROM {t1} x, {t2} y WHERE x.a = 25000 AND y.a = 35000 ORDER BY 1,2";
+        let col: Vec<(i32, i32)> = Spi::connect(|c| {
+            c.select(&q.replace("{t1}", "t_col").replace("{t2}", "t_col2"), None, &[])
+                .unwrap()
+                .filter_map(|r| Some((r.get::<i32>(1).unwrap()?, r.get::<i32>(2).unwrap()?)))
+                .collect()
+        });
+        let heap: Vec<(i32, i32)> = Spi::connect(|c| {
+            c.select(&q.replace("{t1}", "t_heap").replace("{t2}", "t_heap2"), None, &[])
+                .unwrap()
+                .filter_map(|r| Some((r.get::<i32>(1).unwrap()?, r.get::<i32>(2).unwrap()?)))
+                .collect()
+        });
+        assert_eq!(col, vec![(25000, 35000)], "the one cross-join pair must survive both predicates");
+        assert_eq!(col, heap, "two-table cross join must equal the heap twin (predicate channels isolated)");
+    }
+
+    /// T2.1 — ABA regression for the PREDICATE channel (mirror of `test_subxact_abort_no_stale_projection`). A
+    /// PL/pgSQL block runs a selective query (installing predicates), raises inside a subxact (aborting it and
+    /// skipping `end_custom_scan`), then a DIFFERENT-shape query reuses the address. The fallback must NOT inherit
+    /// stale predicates and skip rows that its own (absent) predicate would keep — A/B vs the heap twin.
+    #[pgrx::pg_test]
+    fn test_subxact_abort_no_stale_predicate() {
+        seed_clustered(50_000);
+        Spi::run(
+            "DO $$ BEGIN
+                 BEGIN
+                     PERFORM a FROM t_col WHERE a = 25000 AND (1.0/(a-a)) > 0;
+                 EXCEPTION WHEN division_by_zero THEN NULL;
+                 END;
+             END $$",
+        )
+        .unwrap();
+        // A whole-table query (no pushable predicate ⇒ preds empty ⇒ zero skip) must return ALL rows — if it
+        // inherited the aborted subxact's `a = 25000` predicate it would prune chunk groups and lose rows.
+        let col = col_ints("SELECT a FROM t_col ORDER BY a");
+        let heap = col_ints("SELECT a FROM t_heap ORDER BY a");
+        assert_eq!(col.len(), 50_000, "the fallback full scan must return every row");
+        assert_eq!(col, heap, "post-subxact-abort full scan must not inherit a stale skip predicate");
     }
 }
