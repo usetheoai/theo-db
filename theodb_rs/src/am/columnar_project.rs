@@ -278,6 +278,10 @@ unsafe extern "C-unwind" fn pathlist_hook(
     path.rows = rows;
     path.startup_cost = startup;
     path.total_cost = total;
+    // Inherit the seqscan's `disabled_nodes` (PG17+ planner-preference fidelity, review LOW): with
+    // `enable_seqscan = off` the seqscan is marked disabled_nodes=1; without copying it our derived path would
+    // stay 0 and dominate the very scan the user disabled. Correct results either way — this respects the GUC.
+    path.disabled_nodes = (*seq).disabled_nodes;
     cpath.flags = 0; // scan-type projection is handled by ExecScan's ps_ProjInfo — no PROJECTION flag needed
     cpath.custom_paths = std::ptr::null_mut(); // no children — this node IS the scan
     cpath.custom_private = std::ptr::null_mut(); // wanted is derived at begin from the plan
@@ -402,10 +406,16 @@ unsafe extern "C-unwind" fn begin_custom_scan(
     let natts = (*(*rel).rd_att).natts as usize;
     let cscan = st.css.ss.ps.plan as *mut pg_sys::CustomScan;
     let scanrelid = (*cscan).scan.scanrelid;
-    // Derive wanted from targetlist ∪ qual. `None` ⇒ fallback: do NOT register, so exec installs no active slot
-    // and the columnar getnextslot decodes all columns (the exact plain-seqscan path).
-    if let Some(wanted) = columns_needed(st.css.ss.ps.plan, scanrelid, natts) {
-        registry_insert(node as usize, wanted);
+    // Derive wanted from targetlist ∪ qual, and SYNCHRONIZE the registry on BOTH branches (review HIGH — ABA
+    // hazard). A `ProjScanState` can be palloc'd at the address of a PRIOR node whose `end_custom_scan` was
+    // longjmp'd over by a caught subxact abort (its `{addr → wanted}` entry stays orphaned — `subxact_clear`
+    // evicts only the ACTIVE slot, not the registry, and `clear_all` runs only at top-xact end). If this node
+    // takes the `None` fallback and did NOT evict, `exec` would `registry_get(addr)` the STALE mask and decode
+    // only the dead node's columns — a silent wrong answer (the rest come back NULL). Removing on `None` makes
+    // a reused address deterministic, mirroring the vecfilter's unconditional insert (`customscan.rs:572`).
+    match columns_needed(st.css.ss.ps.plan, scanrelid, natts) {
+        Some(wanted) => registry_insert(node as usize, wanted),
+        None => registry_remove(node as usize),
     }
     // Open a real table scan over the columnar rel under the query snapshot (routes to columnar_scan_begin).
     st.scandesc = pg_sys::table_beginscan(rel, (*estate).es_snapshot, 0, std::ptr::null_mut());
@@ -572,8 +582,10 @@ mod tests {
         assert_eq!(col, heap, "projected (a,b) must equal the heap twin");
     }
 
-    /// T2.2 — fallback decode-ALL on a whole-row projection (`SELECT *`): `wanted` = all columns, every column
-    /// materialized, result byte-identical to the heap twin. This is the correctness floor (ADR-2).
+    /// T2.2 — every explicit column projected (`SELECT a, b, c`): `wanted = {0,1,2}` (all), result
+    /// byte-identical to the heap twin. NOTE: this exercises the all-columns `Some` case (PG expands the list
+    /// to per-column Vars), NOT the `None` decode-all fallback — that floor is covered by
+    /// `test_fallback_system_column` below (review: this test was mislabeled "whole-row/SELECT *").
     #[pgrx::pg_test]
     fn test_fallback_whole_row() {
         seed(200);
@@ -603,5 +615,97 @@ mod tests {
                 .collect()
         });
         assert_eq!(col, heap, "SELECT * (all columns) must equal the heap twin");
+    }
+
+    /// T2.2b — the REAL decode-all `None` fallback (ADR-2 correctness floor): a system column (`ctid`,
+    /// `varattno < 0`) makes `columns_needed` return `None`, so `want_mask` is all-true and every column is
+    /// materialized. The user columns projected alongside must still be byte-identical to the heap twin.
+    /// This is the case `test_fallback_whole_row` claimed but never reached (review HIGH — tests).
+    #[pgrx::pg_test]
+    fn test_fallback_system_column() {
+        seed(200);
+        let q = "SELECT a, b FROM {tbl} WHERE ctid IS NOT NULL ORDER BY a";
+        let col: Vec<(i32, i32)> = Spi::connect(|c| {
+            c.select(&q.replace("{tbl}", "t_col"), None, &[])
+                .unwrap()
+                .filter_map(|r| Some((r.get::<i32>(1).unwrap()?, r.get::<i32>(2).unwrap()?)))
+                .collect()
+        });
+        let heap: Vec<(i32, i32)> = Spi::connect(|c| {
+            c.select(&q.replace("{tbl}", "t_heap"), None, &[])
+                .unwrap()
+                .filter_map(|r| Some((r.get::<i32>(1).unwrap()?, r.get::<i32>(2).unwrap()?)))
+                .collect()
+        });
+        assert_eq!(col, heap, "system-column ctid forces None fallback (decode-all); result must equal heap");
+    }
+
+    /// T2.3 — nested/self-join correctness: the scandesc-keyed side channel exists solely to stop a nested
+    /// columnar scan from being projected by an outer scan's column indices. A self-join with DIFFERENT
+    /// projections on each side (`x.a` vs `y.b`) drives two live columnar scans in one plan; drop the scandesc
+    /// key and one side would materialize the wrong column → wrong join result. Must equal the heap twin.
+    #[pgrx::pg_test]
+    fn test_nested_self_join_projection() {
+        seed(300);
+        let q = "SELECT x.a, y.b FROM {tbl} x JOIN {tbl} y ON x.a = y.a WHERE x.b <> 0 ORDER BY x.a LIMIT 50";
+        let col: Vec<(i32, i32)> = Spi::connect(|c| {
+            c.select(&q.replace("{tbl}", "t_col"), None, &[])
+                .unwrap()
+                .filter_map(|r| Some((r.get::<i32>(1).unwrap()?, r.get::<i32>(2).unwrap()?)))
+                .collect()
+        });
+        let heap: Vec<(i32, i32)> = Spi::connect(|c| {
+            c.select(&q.replace("{tbl}", "t_heap"), None, &[])
+                .unwrap()
+                .filter_map(|r| Some((r.get::<i32>(1).unwrap()?, r.get::<i32>(2).unwrap()?)))
+                .collect()
+        });
+        assert_eq!(col, heap, "self-join with per-side projections must equal the heap twin (scandesc keying)");
+    }
+
+    /// T2.4 — regression for the ABA HIGH (stale registry after a caught subxact abort). A PL/pgSQL block
+    /// runs a narrow-projection query, raises inside a subxact (aborting it and skipping `end_custom_scan`),
+    /// the exception is caught, then a `None`-fallback query (`ctid`) runs in the SAME transaction. Before the
+    /// fix (`registry_remove` on the `None` branch), a `ProjScanState` reusing the aborted node's address
+    /// would inherit its stale mask and return NULLs; after the fix the fallback decodes all columns. Assert
+    /// the post-abort query equals the heap twin (RED with the bug, GREEN with the fix).
+    #[pgrx::pg_test]
+    fn test_subxact_abort_no_stale_projection() {
+        seed(200);
+        // Q1 (narrow projection) inside a caught subxact that aborts mid-scan; then Q2 (None fallback) same txn.
+        Spi::run(
+            "DO $$ BEGIN \
+               BEGIN \
+                 PERFORM b FROM t_col WHERE b <> 0 AND (1.0/(a-a)) > 0; \
+               EXCEPTION WHEN division_by_zero THEN NULL; END; \
+             END $$",
+        )
+        .unwrap();
+        // Q2: None fallback (ctid) — with the bug a reused node address would inherit Q1's mask.
+        let col: Vec<(i32, i32, String)> = Spi::connect(|c| {
+            c.select("SELECT a, b, c FROM t_col WHERE ctid IS NOT NULL ORDER BY a", None, &[])
+                .unwrap()
+                .filter_map(|r| {
+                    Some((
+                        r.get::<i32>(1).unwrap()?,
+                        r.get::<i32>(2).unwrap()?,
+                        r.get::<String>(3).unwrap()?,
+                    ))
+                })
+                .collect()
+        });
+        let heap: Vec<(i32, i32, String)> = Spi::connect(|c| {
+            c.select("SELECT a, b, c FROM t_heap WHERE ctid IS NOT NULL ORDER BY a", None, &[])
+                .unwrap()
+                .filter_map(|r| {
+                    Some((
+                        r.get::<i32>(1).unwrap()?,
+                        r.get::<i32>(2).unwrap()?,
+                        r.get::<String>(3).unwrap()?,
+                    ))
+                })
+                .collect()
+        });
+        assert_eq!(col, heap, "post-subxact-abort fallback query must not inherit a stale projection mask");
     }
 }

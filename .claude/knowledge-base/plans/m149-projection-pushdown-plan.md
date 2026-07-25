@@ -65,6 +65,21 @@ plain) — o caminho B (df_executor) usa `decode_columns` direto, não é tocado
 - **Rationale:** DRY + o seam de leitura único (ADR do `columnar.rs:751`). As primitivas já são exercitadas pelo caminho B (M100), então reusá-las herda a correção medida.
 - **Alternativa rejeitada:** um decode-por-projeção novo — duplicaria conhecimento; rejeitada (DRY).
 
+### ADR-3.1 — Correção do ADR-3 na implementação: `want_mask` no caminho row-based (revisão pós-review)
+- **Contexto:** o review (pilar architecture, MEDIUM) apontou que o M149 implementou `want_mask: &[bool]` em
+  `decode_stripe`/`form_row` em vez de consumir literalmente o `decode_columns(projection: Option<&[usize]>)`
+  do ADR-3, resultando em dois seams de projeção que compartilham o loop `read_chunked → zstd → decode_column`.
+- **Decisão medida:** a divergência é **justificada e mantida**. O `decode_columns` (caminho B, M100) produz
+  Arrow **column-major** para o executor vetorizado do DataFusion; o caminho de scan `getnextslot` (o que o
+  M148 mediu como o gargalo) precisa de **heap-tuples row-major** via `form_row`. Reusar `decode_columns`
+  diretamente forçaria uma conversão colunar→row que reintroduz a materialização que o M149 existe para
+  cortar (o caminho (b) rejeitado no blueprint § Design). O `want_mask` é a projeção correta PARA o caminho
+  row; ele decode-skip nas mesmas colunas + materializa só as pedidas, herdando o `deform`/`varlena_payload`
+  compartilhado. A duplicação residual é o loop de decode (não a lógica de projeção), aceitável (KISS sobre
+  uma abstração que uniria dois formatos de saída incompatíveis).
+- **Débito honesto:** unificar o loop `read_chunked+zstd` das duas rotas num helper comum é um refactor de
+  DRY sem mudança de comportamento — fora do escopo do M149 (não é correção); rastreado para follow-up.
+
 ## Nota de design (do template vecfilter `customscan.rs`)
 
 O M149 é um **scan-replacing CustomScan** (estilo Citus `ColumnarScan`), NÃO um wrapper de children como

@@ -51,10 +51,20 @@ rende o ~3-4.5× medido. O ganho escala com quão estreita é a projeção (1 co
 
 ## Fallback e não-regressão
 
-- `SELECT *` (whole-row) → `columns_needed` retorna `None` → decode-tudo (fallback ADR-2). A/B byte-idêntico.
+- `SELECT *` → o PG expande para Vars per-coluna → `columns_needed` retorna `Some(todas)` → materializa todas (mesmo trabalho do decode-tudo, resultado byte-idêntico). O fallback `None` real é acionado por **coluna de sistema** (`ctid`, `varattno<0`), **whole-row Var** (`varattno==0`, ex. `row_to_json(t)`), ou Var de outra rel — aí `want_mask` all-true (fallback ADR-2). A/B byte-idêntico nos dois caminhos.
 - Queries de agregação (`GROUP BY`, `COUNT(DISTINCT)`) → o path hook declina (`hasAggs`) → SeqScan/agg path
   intacto. Nenhuma das 38 queries de agg do ClickBench mudou de resultado nem de plano.
 - System column (`ctid`) / whole-row Var → fallback decode-tudo.
+
+## Limitação honesta — regime serial (não parallel-safe)
+
+O CustomScan de projeção **não é `parallel_safe`** (o side-channel `thread_local` não cruza para processos
+worker por construção). Sob `max_parallel_workers_per_gather > 0`, o planner pode preferir um **parallel
+seqscan** sobre o `theodb_columnar`, e aí a projeção **não engaja** — o resultado permanece correto
+(fallback decode-tudo), mas o ganho de 3.73× não se materializa. O benchmark acima roda no regime **serial**
+(`max_parallel_workers_per_gather = 0`), onde o node vence. Tornar o node parallel-safe (empurrar `wanted`
+via DSM em vez do thread_local, como o `columnar_agg` faz) é um follow-up — não é correção, é ampliar o
+alcance do ganho. Rastreado honestamente; o ganho medido vale para o regime serial declarado.
 
 ## Metodologia / reprodução
 
