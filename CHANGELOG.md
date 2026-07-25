@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Instrumentação de medição M152 (spike): `THEODB_ADMIT_TRACE=1` emite a razão pela qual o CustomScan de agregação declina cada query (`agg_distinct_filter_order`, `unpushable_where_qual`, `swap_agg_sorted_*`, etc.) — behavior-neutral quando off (roteamento idêntico). Usado para o mapa de roteamento que prioriza M153-M155. (#M152)
 - Roadmap ampliado: M152 (spike measurement-first — mapear o roteamento das 29 queries não-vetorizadas), M153 (rotear GROUP BY texto), M154 (rotear COUNT(DISTINCT) exato), M155 (rotear Top-N/TopK) — o programa para fechar o gap colunar vs ClickBench (29/43 queries ainda row-based, ~80% materialização heap-tuple), derivado do deep research `columnar-gap-closing-strategy-blueprint` (padrão: ampliar o CustomScan DataFusion vetorizado que já temos, não trocar de paradigma nem re-embed engine). (`/roadmap-feature columnar-gap-closing`)
 
 ### Changed
