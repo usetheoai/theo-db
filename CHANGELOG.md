@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- M156: predicados de TEXTO no WHERE (`col = 'x'`, `col <> ''`, `col LIKE '%p%'`, `col NOT LIKE 'a%'`) agora roteiam ao CustomScan colunar vetorizado (DataFusion), subindo a cobertura de agregação do ClickBench. O predicado de texto é serializado num 2º canal de `custom_private` (nós `Const`/`String`) e reconstruído como filtro DataFusion sobre a coluna Utf8; byte-idêntico ao PostgreSQL nativo. Guards de correção: só sob collation determinística e operador `=`/`<>`/`~~`(LIKE)/`!~~`(NOT LIKE) — ILIKE (`~~*`), regex (`~`/`!~`/`~*`/`!~*`), `bpchar` e collation não-determinística declinam ao plano nativo (fail-closed).
 
 ### Changed
 

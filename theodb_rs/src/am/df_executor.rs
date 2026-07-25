@@ -239,6 +239,7 @@ unsafe fn decode_to_batch(
     rel: pg_sys::Relation,
     sum_cols: &[String],
     predicates: &[super::zonemap::ZonePredicate],
+    text_predicates: &[super::zonemap::TextPredicate],
     skip: bool,
 ) -> Result<RecordBatch, String> {
     let mut proj: Vec<usize> = Vec::new();
@@ -252,6 +253,13 @@ unsafe fn decode_to_batch(
     for p in predicates {
         if !proj.contains(&p.col) {
             proj.push(p.col); // the filter column MUST be decoded so the DataFusion Filter can re-check it (D3)
+        }
+    }
+    // M156 — the text-predicate column MUST be decoded (as a Utf8 array) so the DataFusion Filter can re-check it.
+    // Text predicates never drive zone-map skipping (only `predicates` is passed to `decode_columns` below).
+    for t in text_predicates {
+        if !proj.contains(&t.col) {
+            proj.push(t.col);
         }
     }
     if proj.is_empty() {
@@ -269,9 +277,10 @@ unsafe fn decode_to_batch(
 unsafe fn build_filter_expr(
     rel: pg_sys::Relation,
     predicates: &[super::zonemap::ZonePredicate],
+    text_predicates: &[super::zonemap::TextPredicate],
 ) -> Option<Expr> {
     use super::columnar_codec::MinMaxKind;
-    use super::zonemap::ZoneOp;
+    use super::zonemap::{TextOp, ZoneOp};
     let tupdesc = (*rel).rd_att;
     let natts = (*tupdesc).natts as usize;
     let mut acc: Option<Expr> = None;
@@ -312,6 +321,28 @@ unsafe fn build_filter_expr(
             None => e,
         });
     }
+    // M156 — text predicates: `col <op> 'needle'` over the decoded Utf8 column. LIKE/NOT LIKE use DataFusion's
+    // default `\` escape (planner rejects any other; None == backslash, matching PG's default) — proven byte-identical
+    // by the A/B `LIKE 'a\%b'`. `<>`/NOT LIKE against NULL yield NULL → row excluded, same 3-valued logic as PG.
+    for t in text_predicates {
+        if t.col >= natts {
+            continue; // fail-safe: unknown column → do not build a filter term on it
+        }
+        let att = super::tupdesc_attr(tupdesc, t.col);
+        let name = CStr::from_ptr((*att).attname.data.as_ptr()).to_string_lossy().into_owned();
+        let c = col(name.as_str());
+        let val = lit(ScalarValue::Utf8(Some(t.needle.clone())));
+        let e = match t.op {
+            TextOp::Eq => c.eq(val),
+            TextOp::Ne => c.not_eq(val),
+            TextOp::Like => c.like(val),
+            TextOp::NotLike => c.not_like(val),
+        };
+        acc = Some(match acc {
+            Some(prev) => prev.and(e),
+            None => e,
+        });
+    }
     acc
 }
 
@@ -324,12 +355,13 @@ pub(super) unsafe fn run_columnar_aggs(
     rel: pg_sys::Relation,
     aggs: &[AggSpec],
     predicates: &[super::zonemap::ZonePredicate],
+    text_predicates: &[super::zonemap::TextPredicate],
     skip: bool,
 ) -> Result<Vec<(pg_sys::Datum, bool)>, String> {
     let agg_cols: Vec<String> =
         aggs.iter().filter_map(|a| a.col_name().map(str::to_string)).collect();
-    let batch = decode_to_batch(rel, &agg_cols, predicates, skip)?;
-    let filter = build_filter_expr(rel, predicates);
+    let batch = decode_to_batch(rel, &agg_cols, predicates, text_predicates, skip)?;
+    let filter = build_filter_expr(rel, predicates, text_predicates);
     run_aggs_on_batch(batch, aggs, filter)
 }
 
@@ -409,6 +441,7 @@ pub(super) unsafe fn run_columnar_grouped_aggs(
     aggs: &[AggSpec],
     layout: &[(u8, usize)],
     predicates: &[super::zonemap::ZonePredicate],
+    text_predicates: &[super::zonemap::TextPredicate],
     skip: bool,
 ) -> Result<Vec<Vec<(pg_sys::Datum, bool)>>, String> {
     // Project group columns ∪ agg columns (count(*) needs no column; decode_to_batch also projects predicate cols
@@ -421,8 +454,8 @@ pub(super) unsafe fn run_columnar_grouped_aggs(
             }
         }
     }
-    let batch = decode_to_batch(rel, &proj_cols, predicates, skip)?;
-    let filter = build_filter_expr(rel, predicates);
+    let batch = decode_to_batch(rel, &proj_cols, predicates, text_predicates, skip)?;
+    let filter = build_filter_expr(rel, predicates, text_predicates);
 
     let group_exprs: Vec<Expr> = group_cols.iter().map(|(n, _)| col(n.as_str())).collect();
     let mut agg_exprs = Vec::with_capacity(aggs.len());
@@ -678,6 +711,7 @@ unsafe fn run_columnar_agg(rel: pg_sys::Relation, num_col: &str) -> Result<Strin
     let r = run_columnar_aggs(
         rel,
         &[AggSpec::CountStar, AggSpec::SumFloat8(num_col.to_string())],
+        &[],
         &[],
         false,
     )?;
