@@ -447,6 +447,7 @@ unsafe fn classify_target_node(
             { admit_trace("unsupported_agg_func"); None }
         }
     } else {
+        admit_trace("target_grouping_expression_or_other"); // M152
         None // grouping expression (date_trunc(...)) / anything else → decline
     }
 }
@@ -954,6 +955,7 @@ unsafe fn try_swap_agg(
     // and let the native plan run (fail-closed; never ship a short descriptor).
     let safe_tlist = deparse_safe_tlist(tlist, &adm, scanrelid);
     if safe_tlist.is_null() || pg_sys::list_length(safe_tlist) as usize != out_arity {
+        admit_trace("swap_deparse_safe_tlist_sort_on_agg"); // M152 — Sort/ORDER-BY on the agg output (M131 #135)
         return None;
     }
     cscan.custom_scan_tlist = safe_tlist;
