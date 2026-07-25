@@ -849,6 +849,7 @@ unsafe fn try_swap_agg(
     // Finalize(SIMPLE)→Gather→Partial(INITIAL_SERIAL)→ParallelSeqScan; swapping the Partial would emit the FINAL value
     // where a partial transvalue is expected → wrong result. Decline any non-SIMPLE split.
     if (*agg).aggsplit != pg_sys::AggSplit::AGGSPLIT_SIMPLE {
+        admit_trace("swap_agg_split_nonsimple"); // M152
         return None;
     }
     // MIXED (grouping sets) is out of scope. PLAIN (scalar) and HASHED (unordered — any ORDER BY has an explicit Sort
@@ -866,6 +867,7 @@ unsafe fn try_swap_agg(
     let scanrelid = find_scan_relid((*agg).plan.lefttree)?;
     let scan_rte = pg_sys::list_nth(rtable, (scanrelid - 1) as i32) as *mut pg_sys::RangeTblEntry;
     if scan_rte.is_null() {
+        admit_trace("swap_scan_rte_null"); // M152
         return None;
     }
     let table_oid = (*scan_rte).relid.to_u32();
@@ -892,6 +894,7 @@ unsafe fn try_swap_agg(
     if strat == pg_sys::AggStrategy::AGG_SORTED {
         // Text keys: PG collation order ≠ byte-wise sort → decline.
         if adm.group_cols.iter().any(|&(_, t)| matches!(t, 25 | 1042 | 1043)) {
+            admit_trace("swap_sorted_text_group_collation"); // M152 — the real M153 blocker
             return None;
         }
         // The input Sort must be exactly ASC nulls-last (else the plan's output order isn't our ASC order).
