@@ -22,6 +22,17 @@ use std::ffi::{CStr, c_int, c_void};
 /// `theodb.enable_columnar_agg` — default OFF (the vectorized aggregate path is opt-in until benchmarked).
 pub(crate) static ENABLE_COLUMNAR_AGG: GucSetting<bool> = GucSetting::<bool>::new(false);
 
+/// M152 (spike) — behavior-NEUTRAL decline trace. When `THEODB_ADMIT_TRACE=1`, emit the reason the columnar-agg
+/// path declined a candidate (the ground-truth the static SQL analysis can't give — plan-shape declines in
+/// `try_swap_agg` are only visible at runtime). Off by default → zero emission, routing IDENTICAL to M151. Used
+/// ONLY to build the M152 routing-map; carries no functional effect (mirrors `THEODB_SCAN_PROFILE` of M150).
+#[inline]
+fn admit_trace(reason: &str) {
+    if std::env::var("THEODB_ADMIT_TRACE").as_deref() == Ok("1") {
+        pgrx::warning!("theodb_admit_decline: {reason}");
+    }
+}
+
 struct Methods<T>(T);
 unsafe impl<T> Sync for Methods<T> {}
 
@@ -343,7 +354,7 @@ fn parse_agg_kind(name: &str, vartype: pg_sys::Oid) -> Option<i32> {
         } else if vartype == pg_sys::INT8OID {
             4 // sum(int8)→numeric (exact Decimal128 → AnyNumeric — numeric-output blueprint ADR-N1)
         } else {
-            return None; // sum(float4)→real, sum(numeric): decline
+            admit_trace("agg_output_type_numeric"); return None; // sum(float4)→real, sum(numeric): decline
         }
     } else if name == "avg" {
         if vartype == pg_sys::FLOAT8OID {
@@ -354,11 +365,12 @@ fn parse_agg_kind(name: &str, vartype: pg_sys::Oid) -> Option<i32> {
         {
             5 // avg(int2/4/8)→numeric (AnyNumeric division = PG numeric_div — ADR-N1)
         } else {
-            return None; // avg(float4)→float8-ULP, avg(numeric): decline
+            admit_trace("agg_output_type_numeric"); return None; // avg(float4)→float8-ULP, avg(numeric): decline
         }
     } else {
         // min/max: any ordered native type (same set the zone-map supports) → output = input type.
         if super::columnar::minmax_kind_of(vartype.to_u32()) == MinMaxKind::None {
+            admit_trace("minmax_over_unordered_text"); // M152
             return None; // unordered type (text/numeric/…) → native plan
         }
         if name == "min" { 6 } else { 7 }
@@ -389,6 +401,7 @@ unsafe fn classify_target_node(
             return None; // system / whole-row column → decline
         }
         if !super::df_executor::arrow_supported_group_type((*var).vartype.to_u32()) {
+            admit_trace("group_key_type_unsupported"); // M152
             return None; // unsupported key type (numeric, etc.) → native plan
         }
         Some(TargetSlot::Group(attno, (*var).vartype.to_u32()))
@@ -398,6 +411,7 @@ unsafe fn classify_target_node(
             || !(*agg).aggorder.is_null()
             || !(*agg).aggdistinct.is_null()
         {
+            admit_trace("agg_distinct_filter_order"); // M152
             return None;
         }
         // Only a SIMPLE (non-split) aggregate has the FINAL result type. A partial/parallel split produces the
@@ -420,6 +434,7 @@ unsafe fn classify_target_node(
             let te = args.get_ptr(0)?;
             let e = (*te).expr as *mut pg_sys::Node;
             if e.is_null() || (*e).type_ != pg_sys::NodeTag::T_Var {
+                admit_trace("agg_over_expression"); // M152
                 return None; // bare column Var only — reject min(col+1) / cast (directory is pre-projection)
             }
             let var = e as *mut pg_sys::Var;
@@ -429,9 +444,10 @@ unsafe fn classify_target_node(
             let kind = parse_agg_kind(&name, (*var).vartype)?;
             Some(TargetSlot::Agg(ParsedAgg { kind, attno: (*var).varattno as i32 }))
         } else {
-            None
+            { admit_trace("unsupported_agg_func"); None }
         }
     } else {
+        admit_trace("target_grouping_expression_or_other"); // M152
         None // grouping expression (date_trunc(...)) / anything else → decline
     }
 }
@@ -453,11 +469,17 @@ unsafe fn build_admission(
     if is_columnar {
         if grouped {
             // GROUP BY + WHERE combined (M114): un-pushable qual → `extract_all_predicates` None → decline.
-            let preds = extract_all_predicates(input_rel, relid)?;
+            let preds = match extract_all_predicates(input_rel, relid) {
+                Some(p) => p,
+                None => { admit_trace("unpushable_where_qual"); return None; } // M152
+            };
             return Some(Admitted { mode: 0, relid, aggs, preds, group_cols, layout });
         }
         // Non-grouped: ALL quals must be pushable (`col <op> const`), else decline.
-        let preds = extract_all_predicates(input_rel, relid)?;
+        let preds = match extract_all_predicates(input_rel, relid) {
+            Some(p) => p,
+            None => { admit_trace("unpushable_where_qual"); return None; } // M152
+        };
         return Some(Admitted {
             mode: 0,
             relid,
@@ -508,6 +530,7 @@ unsafe fn admit(
         || !(*parse).distinctClause.is_null()
         || (*parse).hasWindowFuncs
     {
+        admit_trace("grouping_sets_having_distinct_window"); // M152
         return None;
     }
     let grouped = !(*parse).groupClause.is_null();
@@ -826,6 +849,7 @@ unsafe fn try_swap_agg(
     // Finalize(SIMPLE)→Gather→Partial(INITIAL_SERIAL)→ParallelSeqScan; swapping the Partial would emit the FINAL value
     // where a partial transvalue is expected → wrong result. Decline any non-SIMPLE split.
     if (*agg).aggsplit != pg_sys::AggSplit::AGGSPLIT_SIMPLE {
+        admit_trace("swap_agg_split_nonsimple"); // M152
         return None;
     }
     // MIXED (grouping sets) is out of scope. PLAIN (scalar) and HASHED (unordered — any ORDER BY has an explicit Sort
@@ -837,11 +861,13 @@ unsafe fn try_swap_agg(
         && strat != pg_sys::AggStrategy::AGG_HASHED
         && strat != pg_sys::AggStrategy::AGG_SORTED
     {
+        admit_trace("swap_unsupported_agg_strategy"); // M152
         return None;
     }
     let scanrelid = find_scan_relid((*agg).plan.lefttree)?;
     let scan_rte = pg_sys::list_nth(rtable, (scanrelid - 1) as i32) as *mut pg_sys::RangeTblEntry;
     if scan_rte.is_null() {
+        admit_trace("swap_scan_rte_null"); // M152
         return None;
     }
     let table_oid = (*scan_rte).relid.to_u32();
@@ -868,6 +894,7 @@ unsafe fn try_swap_agg(
     if strat == pg_sys::AggStrategy::AGG_SORTED {
         // Text keys: PG collation order ≠ byte-wise sort → decline.
         if adm.group_cols.iter().any(|&(_, t)| matches!(t, 25 | 1042 | 1043)) {
+            admit_trace("swap_sorted_text_group_collation"); // M152 — the real M153 blocker
             return None;
         }
         // The input Sort must be exactly ASC nulls-last (else the plan's output order isn't our ASC order).
@@ -878,6 +905,7 @@ unsafe fn try_swap_agg(
         let s = child as *mut pg_sys::Sort;
         for i in 0..(*s).numCols as usize {
             if *(*s).nullsFirst.add(i) {
+                admit_trace("swap_agg_sorted_nulls_first"); // M152
                 return None; // nulls-first ≠ our nulls-last
             }
             let opno = *(*s).sortOperators.add(i);
@@ -896,6 +924,7 @@ unsafe fn try_swap_agg(
                 (pg_sys::InvalidOid, pg_sys::InvalidOid, pg_sys::CompareType::COMPARE_INVALID);
             pg_sys::get_ordering_op_properties(opno, &mut opfamily, &mut opcintype, &mut cmptype);
             if cmptype != pg_sys::CompareType::COMPARE_LT {
+                admit_trace("swap_agg_sorted_desc_or_nonbtree"); // M152
                 return None; // DESC (or non-btree) ≠ our ascending
             }
         }
@@ -929,6 +958,7 @@ unsafe fn try_swap_agg(
     // and let the native plan run (fail-closed; never ship a short descriptor).
     let safe_tlist = deparse_safe_tlist(tlist, &adm, scanrelid);
     if safe_tlist.is_null() || pg_sys::list_length(safe_tlist) as usize != out_arity {
+        admit_trace("swap_deparse_safe_tlist_sort_on_agg"); // M152 — Sort/ORDER-BY on the agg output (M131 #135)
         return None;
     }
     cscan.custom_scan_tlist = safe_tlist;

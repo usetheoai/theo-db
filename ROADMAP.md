@@ -2665,7 +2665,7 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 ---
 
-## M151 — [ ] Ampliar a cobertura do CustomScan vetorizado (DataFusion)
+## M151 — [x] Ampliar a cobertura do CustomScan vetorizado (DataFusion)
 
 > Added 2026-07-24 (`/roadmap-feature columnar-scan-optimization`). Grill: `.claude/knowledge-base/grills/columnar-scan-optimization-feature-grill.md`.
 
@@ -2686,6 +2686,95 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 **Prior art:** DuckDB (execução vetorizada, batches ~2048, MotherDuck 2024), Apache DataFusion (columnar scan), M100 (`datafusion_probe.rs`, `arrow_cache.rs`, ADR do CustomScan), `columnar_customscan`.
 
 ---
+
+## M152 — [ ] Spike: mapear e medir o estado de roteamento das 29 queries não-vetorizadas (gate measurement-first)
+
+> Added 2026-07-25 (`/roadmap-feature columnar-gap-closing`). Blueprint: `.claude/knowledge-base/discoveries/blueprints/columnar-gap-closing-strategy-blueprint.md` (deep research M148-M151, R0 web + acervo).
+
+**Objective:** antes de comprometer qualquer fatia, MEDIR (não supor) quais das 29 queries row-based do ClickBench já roteiam ao DataFusion e quais não, classificando cada uma (GROUP BY texto, COUNT(DISTINCT), Top-N, LIKE/regex, projeção-larga) e apontando a razão exata do declínio no código. É o equivalente do M148 (flamegraph) para o roteamento: define o ALVO REAL de cobertura por fatia antes de construir. O blueprint alerta que GROUP BY texto PODE já rotear via HashAgg — o spike resolve isso.
+
+**Definition of done:**
+
+- [ ] Relatório em `docs/benchmarks/m152-routing-map.md`: cada uma das ~29 queries não-vetorizadas mapeada → classe → roteia hoje (S/N, via `columnar_customscan` do `run_m128 --agg`) → razão do declínio (`arquivo:linha` em `columnar_agg.rs`/`df_executor.rs`).
+- [ ] Alvo de cobertura estimado por fatia: quantas queries CADA classe (GROUP BY texto, COUNT DISTINCT, Top-N) adicionaria se roteada — número medido, não prometido.
+- [ ] Veredito honesto: qual fatia tem o MAIOR ganho de cobertura ainda-não-coberto (pode contradizer o ranking do blueprint se GROUP BY texto já rotear — aceito).
+- [ ] Sem alteração de código de produção (é spike de medição); artefato JSON do run em `docs/benchmarks/m152-artifacts/`.
+- [ ] CHANGELOG `[Unreleased]`.
+
+**Dependencies:** M151 `[x]` (o CustomScan DataFusion + a cobertura 14/43 medida são o ponto de partida).
+
+**Risks:** (a) o spike pode revelar que GROUP BY texto JÁ roteia (as queries têm `ORDER BY count DESC LIMIT` → HashAgg) → o alvo pivota para COUNT(DISTINCT) — é exatamente o propósito do gate, não um risco de falha. (b) a subamostra 100k pode esconder efeitos de escala → registrar honestamente e medir a 1M onde a query terminar em tempo hábil.
+
+**Prior art:** M148 (flamegraph — o precedente de spike-mede-antes-de-construir), blueprint `columnar-gap-closing-strategy`, `benchmarks/run_m128_clickbench.py` (`columnar_customscan_count`).
+
+---
+
+## M153 — [ ] Rotear GROUP BY por chave de TEXTO ao CustomScan DataFusion (hash, guardado por collation determinística)
+
+> Added 2026-07-25 (`/roadmap-feature columnar-gap-closing`). Blueprint: `.claude/knowledge-base/discoveries/blueprints/columnar-gap-closing-strategy-blueprint.md` (deep research M148-M151, R0 web + acervo).
+
+**Objective:** rotear os agregados `GROUP BY <coluna texto>` (ex. `GROUP BY URL`, `GROUP BY SearchPhrase` — o padrão dominante do ClickBench não-coberto) pelo hash-group byte-keyed do DataFusion (`GroupValuesBytes`/`ArrowBytesMap`), removendo o declínio estreito remanescente no path `AGG_SORTED` (`columnar_agg.rs:868-871`). O caminho está quase pronto: `df_executor.rs:141-142` já aceita texto como group key. Único risco A/B real: collation.
+
+**Definition of done:**
+
+- [ ] Cobertura medida: `columnar_customscan_count` sobe de 14 para 14+K das 43 (K = queries GROUP-BY-texto que o M152 mediu como não-roteadas hoje; número real no benchmark).
+- [ ] A/B byte-idêntico vs heap (`result_ab.diverged == 0`) em TODA query GROUP-BY-texto roteada.
+- [ ] Guard de collation: coluna com collation NÃO-determinística (ICU case/accent-insensitive) DECLINA ao plano nativo — provado por harness de regressão (uma tabela `COLLATE "und-x-icu"` case-insensitive DEVE cair em Seq Scan, A/B correto), espelhando o fix HIGH temporal/float do M151.
+- [ ] Ganho de latência medido pela ablação OFF-vs-ON no mesmo binário (oráculo M149/M150), não claim de leaderboard.
+- [ ] CHANGELOG `[Unreleased]`.
+
+**Dependencies:** M152 `[ ]` (o spike confirma que ainda vale + o alvo real).
+
+**Risks:** (a) collation não-determinística agrupa strings byte-diferentes no PG mas não no DataFusion → resultado divergente → guard `varcollid` determinística é obrigatório (fechável deterministicamente). (b) se o M152 mostrar que já roteia, o ganho é menor que o esperado → re-priorizar para M154 (aceito, measurement-first).
+
+**Prior art:** DataFusion `physical-plan/src/aggregates/group_values/multi_group_by/bytes.rs` (group key Utf8 byte-map), PG collation determinística (docs), blueprint § Classe 2, M114/M115 (Agg-swap), M151 (o guard-declina-ao-nativo).
+
+---
+
+## M154 — [ ] Rotear COUNT(DISTINCT) exato ao CustomScan DataFusion
+
+> Added 2026-07-25 (`/roadmap-feature columnar-gap-closing`). Blueprint: `.claude/knowledge-base/discoveries/blueprints/columnar-gap-closing-strategy-blueprint.md` (deep research M148-M151, R0 web + acervo).
+
+**Objective:** rotear os agregados `COUNT(DISTINCT col)` pelo `DistinctCountAccumulator` EXATO do DataFusion (HashSet, não HLL), removendo o declínio explícito de `aggdistinct` (`columnar_agg.rs:399`). Agregado retorna poucas linhas → escapa do imposto de re-materialização (Classe 4/M148). Semanticamente parity-clean (NULL excluído, grupo vazio → 0 nos dois).
+
+**Definition of done:**
+
+- [ ] Cobertura medida: `columnar_customscan_count` sobe (número real das queries COUNT(DISTINCT) do ClickBench que o M152 mediu como não-roteadas).
+- [ ] A/B byte-idêntico vs heap (`result_ab.diverged == 0`) — o COUNT(DISTINCT) é EXATO, jamais aproximado.
+- [ ] Guard: o roteamento NUNCA substitui por `approx_distinct`/HLL (que dá ±~2%, não byte-idêntico) — teste que prova o valor exato vs o nativo.
+- [ ] Custo de memória medido (COUNT DISTINCT de alta cardinalidade estressa o HashSet) — honest-negative (declina) se pior que o executor nativo do PG num regime medido.
+- [ ] CHANGELOG `[Unreleased]`.
+
+**Dependencies:** M152 `[ ]`.
+
+**Risks:** (a) tentação de usar approx para performance → perde a byte-identidade → guard explícito, nunca approx. (b) alta cardinalidade (ex. `COUNT(DISTINCT UserID)` ~1M distintos) pode não ganhar vs o hash do PG → medir e declinar se não ganha.
+
+**Prior art:** DataFusion `functions-aggregate/src/count.rs` (`DistinctCountAccumulator` exato) + `approx_distinct`/`hyperloglog` (o que NÃO usar), blueprint § Classe 1.
+
+---
+
+## M155 — [ ] Rotear Top-N (ORDER BY … LIMIT k) ao operador TopK vetorizado do DataFusion
+
+> Added 2026-07-25 (`/roadmap-feature columnar-gap-closing`). Blueprint: `.claude/knowledge-base/discoveries/blueprints/columnar-gap-closing-strategy-blueprint.md` (deep research M148-M151, R0 web + acervo).
+
+**Objective:** rotear as queries com `ORDER BY … LIMIT k` pelo operador `TopK` dedicado do DataFusion (heap O(K) sobre batches, filtro dinâmico), evitando o sort completo + materialização row-by-row do executor PG. Tie-breaker total + guard de collation obrigatórios (o corte pelo LIMIT torna empates na chave observáveis).
+
+**Definition of done:**
+
+- [ ] Cobertura medida: `columnar_customscan_count` sobe (número real das queries Top-N do ClickBench mapeadas pelo M152).
+- [ ] A/B byte-idêntico vs heap (`result_ab.diverged == 0`), INCLUINDO o conjunto/ordem exatos sob empates na chave cortados pelo LIMIT (tie-breaker determinístico total) e o NULL ordering casando o default do PG (ASC→NULLS LAST, DESC→NULLS FIRST).
+- [ ] Guard de collation determinística na chave de ordenação texto (declina ao nativo se não-determinística).
+- [ ] Ganho medido pela ablação OFF-vs-ON no mesmo binário.
+- [ ] CHANGELOG `[Unreleased]`.
+
+**Dependencies:** M153 `[ ]` (muitos Top-N do ClickBench ordenam agregados de texto — dependem do GROUP BY texto rotear primeiro).
+
+**Risks:** (a) o heap do TopK não é sort estável → empates na chave cortados pelo LIMIT podem divergir do PG → tie-breaker total (por colunas adicionais/ctid) obrigatório, provado por A/B. (b) collation na chave texto → guard determinístico.
+
+**Prior art:** DataFusion `physical-plan/src/topk/mod.rs` (TopK O(K) + `nulls_first` configurável), PG ORDER BY NULL defaults (docs), blueprint § Classe 3.
+
+---
+
 
 ## Sequência e paralelismo
 
