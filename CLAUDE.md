@@ -106,6 +106,41 @@ buscar **superioridade de performance no pilar vetorial comprovada por benchmark
 7. **Honestidade extrema (Regra 3).** Diga quando algo é incerto, quando um trade-off existe
    (ex.: nosso columnar/lakehouse é own-code disk/Parquet — DataFusion/Arrow, sem DuckDB desde o M143 —, não
    in-memory-auto como o AlloyDB — D2), e quando uma técnica ainda não foi validada.
+8. **Fundamente em referência primária — e o acervo local vem PRIMEIRO.** Nenhuma decisão técnica,
+   design ou análise se apoia em memória do modelo quando existe fonte no disco. Antes de opinar
+   sobre ANN, colunar, WAL/MVCC, BM25, quantização, grafo ou metodologia de benchmark: **leia o
+   paper/código correspondente no acervo** (§ abaixo) e **cite `arquivo:linha` ou o PDF**. Ordem
+   obrigatória: **acervo local → web (R0) → conhecimento interno (último recurso, declarado como tal)**.
+
+---
+
+## Acervo de referências (fonte primária — consultar SEMPRE antes de responder)
+
+Catálogo versionado: [`.claude/knowledge-base/references-catalog.md`](./.claude/knowledge-base/references-catalog.md)
+— é o contrato; toda referência nova entra lá. Os arquivos são gitignored (2,3 GB) e reprodutíveis
+pelos comandos de clone do catálogo.
+
+| Onde | O que tem | Use para |
+|---|---|---|
+| `.claude/knowledge-base/references/papers/` | **25 PDFs** — HNSW, ScaNN/AQ, RaBitQ, DiskANN, Faiss, IIR (livro), RRF, BEIR, C-Store, MonetDB/X100, Morsel, ARIES, SSI/MVCC, rigor estatístico, GraphRAG, prompt injection | teoria, matemática, e o SOTA contra o qual medimos |
+| `.claude/knowledge-base/references/{pgrx,tantivy,faiss,hnswlib,datafusion,arrow-rs,postgres,…}` | **33 repos** de peers, `--depth 1`, grep-áveis | como o SOTA implementa de verdade |
+| `.claude/knowledge-base/references/FlameGraph/` | ferramental de profiling | **M148** (spike ativo) e o trabalho de perf do colunar |
+
+**Atalhos por assunto** (o mínimo a abrir antes de tocar no tema):
+
+- **`unsafe` / FFI / pgrx** → `references/pgrx/` (há **384 `unsafe`** no `theodb_rs`; é a classe de
+  defeito mais cara já encontrada em review — panic atravessando C, `TopMemoryContext`, MVCC do SPI).
+- **Colunar / M148–M151** → `papers/morsel-parallelism-leis-2014.pdf`, `papers/monetdb-x100-boncz-2005.pdf`,
+  `references/parquet-format/`, `references/datafusion/` + o survey de Abadi (403 no download — ler online).
+- **Vetorial** → `papers/hnsw-*.pdf`, `papers/scann-*.pdf` (**âncora do North Star**, regra 1), `references/hnswlib/`.
+- **Lexical / BM25** → `papers/iir-manning-2008-BOOK.pdf` (teoria) + `references/tantivy/` (segmentos, `Directory`).
+- **Qualquer afirmação de performance** → `papers/rigorous-perf-eval-georges-2007.pdf` antes de medir
+  (regra 5; lições M123/M130/M131: CV ≠ significância pareada, viés de amostragem, ablação mesmo-índice).
+
+**Invioláveis do acervo:** é **read-only** (hook `boundary-check.sh` bloqueia escrita — achados vão para
+`knowledge-base/discoveries/blueprints/`); citação que não resolve no disco **não entra** (Regra 3);
+peers com licença copyleft (`paradedb`, `citus`, `hydra`, `vectorchord` = AGPL; `FlameGraph` = CDDL) são
+**study-only** — copiar código deles para a distribuição é proibido por D1.
 
 ---
 
