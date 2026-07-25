@@ -2621,7 +2621,7 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 ---
 
-## M149 — [ ] Projection pushdown no scan colunar — decodificar só as colunas referenciadas
+## M149 — [x] Projection pushdown no scan colunar — decodificar só as colunas referenciadas
 
 > Added 2026-07-24 (`/roadmap-feature columnar-scan-optimization`). Grill: `.claude/knowledge-base/grills/columnar-scan-optimization-feature-grill.md`.
 
