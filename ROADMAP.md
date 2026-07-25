@@ -2814,7 +2814,7 @@ bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan s�
 
 ---
 
-## M157 — [ ] Cobertura de agrupamento/agregação por EXPRESSÃO (GROUP BY expr + HAVING) ao CustomScan colunar
+## M157 — [x] Cobertura de agrupamento/agregação por EXPRESSÃO (GROUP BY expr + HAVING) ao CustomScan colunar
 
 > **Candidato A** (evidência M152 routing-map + M156). Added 2026-07-25 (`/roadmap-feature coverage-expr-group-having`). Continuação incremental da cobertura ClickBench: as queries restantes cujo bloqueio é uma EXPRESSÃO no GROUP BY (`date_trunc`/`EXTRACT`/`CASE` como chave) ou um predicado pós-agregação no HAVING — o CustomScan hoje só aceita chaves de grupo `Var` e não tem HAVING. Teto honesto ~35-39/43 (regex/ILIKE e min/max-texto-por-collation permanecem honest-negatives estruturais — **jamais** prometer 43/43).
 
