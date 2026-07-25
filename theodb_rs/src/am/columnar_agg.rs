@@ -566,9 +566,17 @@ unsafe fn classify_target_node(
         }
         let unit_cstr = pg_sys::text_to_cstring((*unit_const).constvalue.cast_mut_ptr::<pg_sys::text>());
         let unit = CStr::from_ptr(unit_cstr).to_str().ok()?.to_ascii_lowercase();
-        const UNITS: [&str; 7] = ["second", "minute", "hour", "day", "month", "quarter", "year"];
+        // EPOCH GUARD (council-index-storage CRITICAL): the columnar timestamp is stored as µs-since-2000 (PG epoch)
+        // but decoded into an Arrow `Timestamp` that DataFusion reads as µs-since-1970. The PG↔Arrow offset is exactly
+        // 10957 days — a whole multiple of day/hour/minute/second, so those granularities are epoch-INVARIANT (the
+        // truncation commutes with adding a whole-unit offset) and match PG byte-for-byte. But 10957 days is NOT a
+        // whole number of months/quarters/years, and the leap-day count differs between the [1970..] and [2000..]
+        // windows, so date_trunc's CALENDAR truncation for month/quarter/year lands on the wrong absolute date
+        // (±1 day, crossing the bucket boundary → wrong key AND wrong partition). `week` is ISO-week (PG≠Arrow).
+        // Restrict to the epoch-invariant granularities; everything coarser declines to the native plan (fail-closed).
+        const UNITS: [&str; 4] = ["second", "minute", "hour", "day"];
         if !UNITS.contains(&unit.as_str()) {
-            admit_trace("group_expr_granularity_unsupported"); // week (ISO) / microseconds / etc. → native
+            admit_trace("group_expr_granularity_unsupported"); // week / month / quarter / year → native (epoch/ISO)
             return None;
         }
         // arg1 = a base-rel Var of type `timestamp` (1114). `timestamptz` (1184) DIVERGES under `TimeZone≠UTC`

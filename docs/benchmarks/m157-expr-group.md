@@ -49,18 +49,33 @@ time-bucketing query. All 31 M156 queries still route (no regression, diverged=0
 
 ## Correctness guards (proven on-box by `benchmarks/m157_ec_harness.sql`)
 
-Routing only happens for a `date_trunc('unit', ts::timestamp)` key with `unit ∈ {second,minute,hour,day,month,quarter,
-year}`; everything else declines to the native plan (fail-closed). Each verified on-box:
+Routing only happens for a `date_trunc('unit', ts::timestamp)` key with `unit ∈ {second,minute,hour,day}` — the
+**epoch-invariant** granularities; everything else declines to the native plan (fail-closed). Each verified on-box
+with a **symmetric-EXCEPT KEY-exact** A/B (both the date_trunc key AND the count compared, not just count/sum):
 
 | Case | Behavior | Evidence |
 |---|---|---|
-| `GROUP BY date_trunc('day'/'month'/'minute', ts)` | routes | Custom Scan; grouped A/B `mismatches=0` (col_groups=40=heap, col_total=3000=heap) |
+| `GROUP BY date_trunc('day'/'hour'/'minute', ts)` | routes | Custom Scan; symmetric-EXCEPT `mismatches=0` (KEY + count byte-identical) |
 | bare-Var `GROUP BY v` | routes (backward-compat) | Custom Scan |
+| `date_trunc('month'/'quarter'/'year', ts)` | **declines** (calendar epoch mismatch — see below) | Seq Scan |
 | `date_trunc('week', ts)` (ISO week ≠ Arrow) | **declines** | Seq Scan |
 | `date_trunc(..., timestamptz)` under `TimeZone='America/Sao_Paulo'` | **declines** | Seq Scan |
 | `EXTRACT(hour FROM ts)` (numeric group-key) | **declines** | Seq Scan |
 | `CASE WHEN … END` group-key | **declines** | Seq Scan |
 | arithmetic `v+1` group-key | **declines** | Seq Scan |
+
+### Why month/quarter/year decline (calendar epoch mismatch — council-index-storage CRITICAL, fixed pre-release)
+
+The columnar TAM stores a `timestamp` as `int64 µs since 2000-01-01` (PostgreSQL's internal epoch), but the Arrow
+decode reads those bytes into a `Timestamp(Microsecond)` that DataFusion interprets as `µs since 1970-01-01`. The
+offset is exactly **10957 days** — a whole multiple of day/hour/minute/second, so those granularities are
+**epoch-invariant** (the truncation commutes with adding a whole-unit offset) and match PG byte-for-byte. But
+10957 days is **not** a whole number of months/quarters/years, and the leap-day count differs between the two epoch
+windows, so `date_trunc`'s CALENDAR truncation for month/quarter/year lands on the wrong absolute date (±1 day,
+crossing the bucket boundary → wrong key AND wrong partition). This was caught by review, not by the first A/B —
+which had only compared count/sum (both survive the collapse) rather than the key column. Restricting the whitelist
+to the epoch-invariant units is the fail-closed fix; enabling month/quarter/year via a 10957-day epoch shift is a
+possible follow-up. **q42 uses `minute` → routes correctly (coverage +1 preserved).**
 
 ### Why the timezone guard (ADR-2), proven by primary source
 
