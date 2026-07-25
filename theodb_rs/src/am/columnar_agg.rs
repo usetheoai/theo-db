@@ -22,6 +22,11 @@ use std::ffi::{CStr, c_int, c_void};
 /// `theodb.enable_columnar_agg` — default OFF (the vectorized aggregate path is opt-in until benchmarked).
 pub(crate) static ENABLE_COLUMNAR_AGG: GucSetting<bool> = GucSetting::<bool>::new(false);
 
+/// `theodb.enable_columnar_late_mat` (M158) — default OFF. When on, `Limit(k) → Sort([key]) → columnar-project` is
+/// swapped for a late-materialization top-k CustomScan (decode {key∪filter} for all rows, DataFusion filter+sort+limit,
+/// materialize the full projection only for the k survivors — avoiding `form_row`/`palloc` for N−k rows, the M148 cost).
+pub(crate) static ENABLE_COLUMNAR_LATE_MAT: GucSetting<bool> = GucSetting::<bool>::new(false);
+
 /// M152 (spike) — behavior-NEUTRAL decline trace. When `THEODB_ADMIT_TRACE=1`, emit the reason the columnar-agg
 /// path declined a candidate (the ground-truth the static SQL analysis can't give — plan-shape declines in
 /// `try_swap_agg` are only visible at runtime). Off by default → zero emission, routing IDENTICAL to M151. Used
@@ -102,6 +107,14 @@ pub(crate) fn init() {
         c"Route simple columnar aggregates through the DataFusion vectorized executor",
         c"When on, count(*)/sum(float8) over a theodb_columnar table (no GROUP BY/WHERE) runs via a CustomScan.",
         &ENABLE_COLUMNAR_AGG,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+    GucRegistry::define_bool_guc(
+        c"theodb.enable_columnar_late_mat",
+        c"Late-materialization top-k for columnar SELECT … ORDER BY key LIMIT k (M158)",
+        c"When on, swap Limit→Sort→columnar-project for a top-k CustomScan that materializes only the k survivors.",
+        &ENABLE_COLUMNAR_LATE_MAT,
         GucContext::Userset,
         GucFlags::default(),
     );
@@ -887,7 +900,11 @@ unsafe extern "C-unwind" fn planner_hook(
         None => pg_sys::standard_planner(parse, query_string, cursor_options, bound_params),
     };
     let have_stash = ADMIT_STASH.with(|s| !s.borrow().is_empty());
-    if ENABLE_COLUMNAR_AGG.get() && !stmt.is_null() && have_stash {
+    // Run the walk when EITHER an admitted aggregate awaits its Agg-swap (M115 — needs the stash + agg GUC), OR the
+    // M158 late-materialization GUC is on (a pure top-k query has no aggregate/stash). `try_swap_agg` declines
+    // fail-closed without a matching stash entry; `try_swap_topk` carries its own GUC + shape guards — so running the
+    // walk under the disjunction never mis-swaps.
+    if !stmt.is_null() && ((ENABLE_COLUMNAR_AGG.get() && have_stash) || ENABLE_COLUMNAR_LATE_MAT.get()) {
         swap_walk(&mut (*stmt).planTree, (*stmt).rtable, std::ptr::null_mut());
         let subplans = (*stmt).subplans;
         if !subplans.is_null() {
@@ -1304,6 +1321,247 @@ unsafe fn try_swap_agg(
     Some(cscan.into_pg() as *mut pg_sys::Plan)
 }
 
+/// M158 — a projected output column: base attno + type OID. Both the columnar decoder (`build_arrow`) and the
+/// materializer (`arrow_value_to_datum`) must support the type, else the top-k run would `error!` at runtime instead
+/// of declining — so this guard is a swap-time fail-closed gate (the intersection of both supported sets).
+fn topk_type_supported(typoid: u32) -> bool {
+    matches!(typoid, 21 | 23 | 20 | 700 | 701 | 16 | 25 | 1042 | 1043 | 1114 | 1184 | 1082)
+}
+
+/// M158 — encode the top-k `custom_private` int channel (mode == 2, distinct from the agg layouts):
+/// `[relid, 2, k, sort_attno, asc, nulls_first, nproj, (attno,typoid)×nproj, npred, (col,op,hi,lo)×npred]`.
+/// Text predicates ride the shared 2nd channel (`encode_text_preds`); the 3rd channel is empty (NIL) for top-k.
+unsafe fn encode_topk_private(
+    table_oid: u32,
+    k: usize,
+    sort_attno: i32,
+    ascending: bool,
+    nulls_first: bool,
+    proj_cols: &[(i32, u32)],
+    preds: &[ZonePredicate],
+) -> *mut pg_sys::List {
+    let mut pl = pg_sys::lappend_int(std::ptr::null_mut(), table_oid as i32);
+    pl = pg_sys::lappend_int(pl, 2); // mode = 2 (top-k)
+    pl = pg_sys::lappend_int(pl, k as i32);
+    pl = pg_sys::lappend_int(pl, sort_attno);
+    pl = pg_sys::lappend_int(pl, ascending as i32);
+    pl = pg_sys::lappend_int(pl, nulls_first as i32);
+    pl = pg_sys::lappend_int(pl, proj_cols.len() as i32);
+    for &(attno, typoid) in proj_cols {
+        pl = pg_sys::lappend_int(pl, attno);
+        pl = pg_sys::lappend_int(pl, typoid as i32);
+    }
+    pl = pg_sys::lappend_int(pl, preds.len() as i32);
+    for p in preds {
+        pl = pg_sys::lappend_int(pl, p.col as i32);
+        pl = pg_sys::lappend_int(pl, p.op as i32);
+        pl = pg_sys::lappend_int(pl, (p.const_bits >> 32) as i32);
+        pl = pg_sys::lappend_int(pl, (p.const_bits & 0xFFFF_FFFF) as i32);
+    }
+    pl
+}
+
+/// M158 — detect `Limit(k) → Sort([single key]) → CustomScan(theodb_columnar_project over a columnar rel)` and swap
+/// the **Sort** for a late-materialization top-k CustomScan (the Limit above is preserved and re-applies k). The node
+/// reuses the agg CustomScan framework (`SCAN_METHODS`, exec/end/rescan) via `mode == 2`: `begin_custom_scan` decodes
+/// {key ∪ filter} for all rows, runs DataFusion `filter → sort → limit(k)`, and materializes the full projection only
+/// for the k survivors — paying the M148 `form_row`/`palloc` cost for k rows, not N. Returns `None` (keep the native
+/// plan) for ANY unsupported shape (fail-closed). Gated by `theodb.enable_columnar_late_mat` (default OFF).
+unsafe fn try_swap_topk(
+    plan: *mut pg_sys::Plan,
+    rtable: *mut pg_sys::List,
+    parent: *mut pg_sys::Plan,
+) -> Option<*mut pg_sys::Plan> {
+    if !ENABLE_COLUMNAR_LATE_MAT.get() {
+        return None;
+    }
+    admit_trace("topk_entered_sort"); // M158 diag — reached a Sort under the late-mat GUC
+    // Parent must be a plain LIMIT k with no OFFSET (OFFSET would need the top k+offset — out of scope).
+    if parent.is_null() || (*parent).type_ != pg_sys::NodeTag::T_Limit {
+        admit_trace("topk_parent_not_limit");
+        return None;
+    }
+    let limit = parent as *mut pg_sys::Limit;
+    if !(*limit).limitOffset.is_null() {
+        return None;
+    }
+    let lc = (*limit).limitCount;
+    if lc.is_null() || (*lc).type_ != pg_sys::NodeTag::T_Const {
+        return None; // non-constant LIMIT (param/expr) → decline
+    }
+    let lc_const = lc as *mut pg_sys::Const;
+    if (*lc_const).constisnull || (*lc_const).consttype.to_u32() != 20 {
+        return None; // LIMIT ALL (NULL) or non-int8 → decline
+    }
+    let Some(k_i64) = i64::from_datum((*lc_const).constvalue, false) else {
+        return None;
+    };
+    // k must be positive AND fit i32: it is serialized into the int-only `custom_private` channel as one i32
+    // (`lappend_int`), so a LIMIT ≥ 2^31 would truncate to a wrong/negative k → too-few rows the parent Limit cannot
+    // add back (council-index-storage + council-rust-pgrx LOW). Such a limit is absurd (O(N) memory would OOM first);
+    // decline to the native plan (correct for any k) rather than risk a silent short result.
+    if k_i64 <= 0 || k_i64 > i32::MAX as i64 {
+        return None;
+    }
+    let k = k_i64 as usize;
+
+    // This node is the Sort; exactly one sort column.
+    let sort = plan as *mut pg_sys::Sort;
+    if (*sort).numCols != 1 {
+        return None;
+    }
+    // Grandchild must be a theodb_columnar_project CustomScan (M149) over a columnar rel.
+    let child = (*sort).plan.lefttree;
+    if child.is_null() || (*child).type_ != pg_sys::NodeTag::T_CustomScan {
+        return None;
+    }
+    let proj = child as *mut pg_sys::CustomScan;
+    let mname = (*(*proj).methods).CustomName;
+    if mname.is_null() || CStr::from_ptr(mname) != c"theodb_columnar_project" {
+        return None;
+    }
+    let scanrelid = (*proj).scan.scanrelid;
+    if scanrelid == 0 {
+        return None;
+    }
+    // The projection = the project node's own targetlist (base-rel Vars). The top-k node (replacing the Sort) emits the
+    // SAME columns in the SAME order (Sort only re-orders rows), so this is descriptor-equal to the Sort's output.
+    let src = PgList::<pg_sys::TargetEntry>::from_pg((*proj).scan.plan.targetlist);
+    if src.is_empty() {
+        return None;
+    }
+    let mut proj_meta: Vec<(i32, u32)> = Vec::with_capacity(src.len());
+    let mut cst: *mut pg_sys::List = std::ptr::null_mut(); // custom_scan_tlist (fresh base Vars)
+    for i in 0..src.len() {
+        let te = src.get_ptr(i)?;
+        let e = (*te).expr as *mut pg_sys::Node;
+        if e.is_null() || (*e).type_ != pg_sys::NodeTag::T_Var {
+            return None; // a computed target expr → cannot materialize as a column (fail-closed)
+        }
+        let v = e as *mut pg_sys::Var;
+        if (*v).varno as u32 != scanrelid {
+            return None; // not a base column of the scanned rel
+        }
+        let attno = (*v).varattno as i32;
+        if attno <= 0 {
+            return None; // system / whole-row col → decline
+        }
+        let typoid = (*v).vartype.to_u32();
+        if !topk_type_supported(typoid) {
+            return None; // build_arrow / arrow_value_to_datum cannot handle it → decline
+        }
+        proj_meta.push((attno, typoid));
+        let nv = pg_sys::makeVar(
+            scanrelid as i32,
+            attno as pg_sys::AttrNumber,
+            (*v).vartype,
+            (*v).vartypmod,
+            (*v).varcollid,
+            0,
+        );
+        let nte = pg_sys::makeTargetEntry(
+            nv as *mut pg_sys::Expr,
+            (i + 1) as pg_sys::AttrNumber,
+            (*te).resname,
+            (*te).resjunk,
+        );
+        cst = pg_sys::lappend(cst, nte as *mut c_void);
+    }
+    // Sort key: sortColIdx[0] is a 1-based resno into the Sort's tlist, positionally aligned with the project's tlist
+    // (Sort passes columns through unchanged). Resolve to the base column + direction + nulls placement.
+    let key_pos = *(*sort).sortColIdx.add(0) as usize;
+    if key_pos == 0 || key_pos > proj_meta.len() {
+        return None;
+    }
+    let (sort_attno, key_type) = proj_meta[key_pos - 1];
+    // Text sort key: DataFusion byte-sorts Utf8, which matches PG ORDER BY only under a BYTE-order collation — i.e.
+    // C / POSIX. A merely DETERMINISTIC collation (e.g. en_US.UTF-8) is NOT enough: determinism fixes equality
+    // (byte-equal ⟺ string-equal, the M153/M154 grouping/LIKE guarantee) but NOT sort order — en_US sorts
+    // linguistically ('a' < 'Z') while bytes sort 'Z'(0x5A) < 'a'(0x61) → a silently WRONG top-k row
+    // (council-index-storage HIGH). So a text SORT key is admitted ONLY under C (950) or POSIX (951); DEFAULT and
+    // every other collation decline to the native plan. (Text FILTER predicates keep the determinism guard — filter
+    // equality, not order — unchanged.) bpchar (1042) also declines (PG trims trailing blanks; DataFusion does not).
+    if matches!(key_type, 25 | 1043) {
+        // Use the SORT's effective collation for this key (`sort.collations[0]`), NOT the column's varcollid — an
+        // `ORDER BY s COLLATE "C"` overrides the column collation, and the override lives on the Sort node. C (950) and
+        // POSIX (951) are the only byte-order collations (memcmp); pgrx exports C_COLLATION_OID but not the POSIX one,
+        // so compare the raw OID values (both stable PG catalog OIDs).
+        let sort_coll = (*(*sort).collations.add(0)).to_u32();
+        if sort_coll != 950 && sort_coll != 951 {
+            admit_trace("topk_text_key_non_byte_collation");
+            return None;
+        }
+    } else if key_type == 1042 {
+        return None; // bpchar sort key → PG trims trailing blanks; DataFusion does not → decline
+    }
+    // Direction from the sort operator (M135: PG18 CompareType port; COMPARE_LT == ascending).
+    let opno = *(*sort).sortOperators.add(0);
+    let (mut opfamily, mut opcintype, mut cmptype) =
+        (pg_sys::InvalidOid, pg_sys::InvalidOid, pg_sys::CompareType::COMPARE_INVALID);
+    pg_sys::get_ordering_op_properties(opno, &mut opfamily, &mut opcintype, &mut cmptype);
+    let ascending = match cmptype {
+        pg_sys::CompareType::COMPARE_LT => true,
+        pg_sys::CompareType::COMPARE_GT => false,
+        _ => return None, // non-btree ordering operator → decline
+    };
+    let nulls_first = *(*sort).nullsFirst.add(0);
+
+    // Predicates: the project node applies the WHERE via its own qual (a List of final clauses whose Vars are base
+    // Vars with varno == scanrelid). Every clause MUST be pushable (zone or text) — else decline, because the top-k
+    // node OWNS the filter (the project subtree is dropped).
+    let qual = PgList::<pg_sys::Node>::from_pg((*proj).scan.plan.qual);
+    let mut zpreds: Vec<ZonePredicate> = Vec::new();
+    let mut tpreds: Vec<TextPredicate> = Vec::new();
+    for i in 0..qual.len() {
+        let clause = qual.get_ptr(i)?;
+        if let Some(z) = extract_zone_predicate(clause, scanrelid as i32) {
+            zpreds.push(z);
+        } else if let Some(t) = extract_text_predicate(clause, scanrelid as i32) {
+            tpreds.push(t);
+        } else {
+            return None; // un-pushable qual → decline (native plan applies the full WHERE)
+        }
+    }
+    // Resolve the table OID from the RTE (the project's scanrelid indexes the flat range table).
+    let scan_rte = pg_sys::rt_fetch(scanrelid, rtable);
+    if scan_rte.is_null() {
+        return None;
+    }
+    let table_oid = (*scan_rte).relid.to_u32();
+
+    // Build the replacement CustomScan (scanrelid = 0 — it scans the columnar rel by OID, like the agg node).
+    let mut cscan = PgBox::<pg_sys::CustomScan>::alloc_node(pg_sys::NodeTag::T_CustomScan);
+    {
+        let plan_out = &mut cscan.scan.plan;
+        plan_out.targetlist = plain_var_tlist((*proj).scan.plan.targetlist);
+        plan_out.qual = std::ptr::null_mut();
+        plan_out.lefttree = std::ptr::null_mut(); // drop the project subtree — the CustomScan scans itself
+        plan_out.righttree = std::ptr::null_mut();
+        plan_out.plan_node_id = (*sort).plan.plan_node_id;
+        plan_out.startup_cost = (*sort).plan.startup_cost;
+        plan_out.total_cost = (*sort).plan.total_cost;
+        plan_out.plan_rows = k_i64 as f64;
+        plan_out.plan_width = (*sort).plan.plan_width;
+        plan_out.parallel_aware = false;
+        plan_out.parallel_safe = (*sort).plan.parallel_safe;
+    }
+    cscan.scan.scanrelid = 0;
+    cscan.flags = 0;
+    cscan.custom_plans = std::ptr::null_mut();
+    cscan.custom_exprs = std::ptr::null_mut();
+    let int_channel = encode_topk_private(table_oid, k, sort_attno, ascending, nulls_first, &proj_meta, &zpreds);
+    let text_channel = encode_text_preds(&tpreds)?;
+    let mut outer = pg_sys::lappend(std::ptr::null_mut(), int_channel as *mut c_void);
+    outer = pg_sys::lappend(outer, text_channel as *mut c_void);
+    outer = pg_sys::lappend(outer, std::ptr::null_mut()); // 3rd channel unused for top-k
+    cscan.custom_private = outer;
+    cscan.custom_scan_tlist = cst;
+    cscan.custom_relids = std::ptr::null_mut();
+    cscan.methods = &SCAN_METHODS.0;
+    admit_trace("swap_topk_admitted"); // M158
+    Some(cscan.into_pg() as *mut pg_sys::Plan)
+}
+
 /// Walk the plan tree via a mutable node slot, swapping matching `Agg` nodes → our `CustomScan` in place.
 /// `parent` is the enclosing plan node (NULL at the root) — `try_swap_agg` uses it to check, for an AGG_SORTED
 /// text GROUP BY, whether the output is re-sorted by a `Sort` above (M153).
@@ -1320,6 +1578,13 @@ unsafe fn swap_walk(
         if let Some(newnode) = try_swap_agg(plan, rtable, parent) {
             *slot = newnode;
             return; // replaced — the Agg's child subtree is dropped
+        }
+    }
+    // M158 — a `Sort` under a `Limit(k)` over the columnar-project scan → late-materialization top-k CustomScan.
+    if (*plan).type_ == pg_sys::NodeTag::T_Sort {
+        if let Some(newnode) = try_swap_topk(plan, rtable, parent) {
+            *slot = newnode;
+            return; // replaced — the Sort's project subtree is dropped; the Limit above re-applies k
         }
     }
     swap_walk(&mut (*plan).lefttree, rtable, plan);
@@ -1416,6 +1681,83 @@ unsafe extern "C-unwind" fn begin_custom_scan(
     // exec() calls (ADR-3). By-value datums (int8/float8/date/timestamptz) are context-independent.
     let oldcxt = pg_sys::MemoryContextSwitchTo((*estate).es_query_cxt);
     let res = (|| -> Result<Vec<Vec<(pg_sys::Datum, bool)>>, String> {
+        // M158 — top-k late materialization (mode == 2). Distinct IntList layout keyed by mode:
+        // [relid, 2, k, sort_attno, asc, nulls_first, nproj, (attno,typoid)×nproj, npred, (col,op,hi,lo)×npred].
+        if mode == 2 {
+            let k = pg_sys::list_nth_int(priv_list, 2) as usize;
+            let sort_attno = pg_sys::list_nth_int(priv_list, 3);
+            let ascending = pg_sys::list_nth_int(priv_list, 4) != 0;
+            let nulls_first = pg_sys::list_nth_int(priv_list, 5) != 0;
+            let nproj = pg_sys::list_nth_int(priv_list, 6) as usize;
+            let mut proj_cols: Vec<(String, u32)> = Vec::with_capacity(nproj);
+            let mut j = 7;
+            for _ in 0..nproj {
+                let attno = pg_sys::list_nth_int(priv_list, j);
+                let typoid = pg_sys::list_nth_int(priv_list, j + 1) as u32;
+                j += 2;
+                let nm = pg_sys::get_attname(relid, attno as pg_sys::AttrNumber, false);
+                proj_cols.push((CStr::from_ptr(nm).to_string_lossy().into_owned(), typoid));
+            }
+            let np = if j < n { pg_sys::list_nth_int(priv_list, j) as usize } else { 0 };
+            j += 1;
+            let mut tk_preds = Vec::with_capacity(np);
+            for _ in 0..np {
+                let col = pg_sys::list_nth_int(priv_list, j) as usize;
+                let opn = pg_sys::list_nth_int(priv_list, j + 1);
+                let hi = pg_sys::list_nth_int(priv_list, j + 2) as u32 as u64;
+                let lo = pg_sys::list_nth_int(priv_list, j + 3) as u32 as u64;
+                j += 4;
+                let op = match opn {
+                    0 => ZoneOp::Lt,
+                    1 => ZoneOp::Le,
+                    2 => ZoneOp::Eq,
+                    3 => ZoneOp::Ge,
+                    4 => ZoneOp::Gt,
+                    5 => ZoneOp::Ne,
+                    _ => return Err(format!("columnar_topk: bad zone op {opn}")),
+                };
+                tk_preds.push(ZonePredicate { col, op, const_bits: (hi << 32) | lo });
+            }
+            // Text predicates from the shared 2nd channel (same leaf-Value layout as the agg path).
+            let mut tk_text: Vec<TextPredicate> = Vec::new();
+            let tn = pg_sys::list_length(text_list);
+            for kk in 0..tn {
+                let entry = pg_sys::list_nth(text_list, kk) as *mut pg_sys::List;
+                let col = (*(pg_sys::list_nth(entry, 0) as *mut pg_sys::Integer)).ival as usize;
+                let opn = (*(pg_sys::list_nth(entry, 1) as *mut pg_sys::Integer)).ival;
+                let sval = (*(pg_sys::list_nth(entry, 2) as *mut pg_sys::String)).sval;
+                let op = match opn {
+                    0 => TextOp::Eq,
+                    1 => TextOp::Ne,
+                    2 => TextOp::Like,
+                    3 => TextOp::NotLike,
+                    _ => return Err(format!("columnar_topk: bad text op {opn}")),
+                };
+                tk_text.push(TextPredicate {
+                    col,
+                    op,
+                    needle: CStr::from_ptr(sval).to_string_lossy().into_owned(),
+                });
+            }
+            let sort_nm = {
+                let nm = pg_sys::get_attname(relid, sort_attno as pg_sys::AttrNumber, false);
+                CStr::from_ptr(nm).to_string_lossy().into_owned()
+            };
+            let rel = pg_sys::relation_open(relid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            let r = super::df_executor::run_columnar_topk(
+                rel,
+                &proj_cols,
+                &sort_nm,
+                ascending,
+                nulls_first,
+                k,
+                &tk_preds,
+                &tk_text,
+                super::guc::columnar_zonemap_skip(),
+            );
+            pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+            return r;
+        }
         // IntList: [mode, relid, nagg, (kind,attno)×nagg, npred, (col,op,hi,lo)×npred,
         //           ngroup, (attno,typoid)×ngroup, noutput, (kind,idx)×noutput].
         let nagg = pg_sys::list_nth_int(priv_list, 2) as usize;
