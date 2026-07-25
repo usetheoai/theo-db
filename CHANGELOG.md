@@ -14,6 +14,20 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.141.0] - 2026-07-25
+
+### Added
+
 - Projection pushdown no scan colunar (M149): um `CustomScan` (`theodb_columnar_project`) vence o
   SeqScan sobre tabelas `theodb_columnar` em queries não-agregadas e materializa apenas as colunas
   referenciadas (`targetlist ∪ qual`, estilo Citus `ColumnarAttrNeeded`) — atacando o custo dominante
@@ -44,18 +58,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - `references-catalog.md` passa a registrar os 8 peers novos, o índice de papers, os 2 documentos
   não obtidos (403/404) e os 12 clones que estavam no disco sem entrada no catálogo
 
-
 ### Deprecated
-
 
 ### Removed
 
-
 ### Fixed
 
-
 ### Security
-
 
 ## [0.140.0] - 2026-07-24
 
