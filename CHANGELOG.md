@@ -23,7 +23,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   Var whole-row/coluna-de-sistema. **Medido** (`docs/benchmarks/m149-projection-pushdown.md`): geomean
   **3,73×** em queries de projeção estreita sobre o ClickBench `hits` real (105 colunas) — `SELECT url`
   4,18×, projeção+filtro 3,12-3,24× — e A/B byte-idêntico ao heap nas 43 queries do ClickBench (0
-  divergências)
+  divergências). O `/review` (10 pilares + 2 councils) endureceu o nó antes do merge: corrigido um
+  use-after-stale-projection (ABA) em que um `abort` de subtransação capturado deixava a máscara de
+  colunas de um nó órfã no registry e um nó reusando o mesmo endereço a herdava — o registry passa a ser
+  sincronizado na inicialização de todo scan (ambos os ramos), com testes de regressão para o fallback de
+  coluna-de-sistema, self-join aninhado e o próprio cenário de subxact-abort
 - Acervo de referências primárias local: 25 papers/livros de acesso livre em
   `.claude/knowledge-base/references/papers/` (HNSW, ScaNN/AQ, RaBitQ, DiskANN, Faiss, IIR, RRF,
   BEIR, C-Store, MonetDB/X100, Morsel, ARIES, SSI/MVCC, rigor estatístico de medição, GraphRAG,
