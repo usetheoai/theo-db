@@ -2643,7 +2643,7 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 ---
 
-## M150 — [ ] Chunk-group filtering no scan — pular chunks por min/max sem descomprimir
+## M150 — [x] Chunk-group filtering no scan — pular chunks por min/max sem descomprimir
 
 > Added 2026-07-24 (`/roadmap-feature columnar-scan-optimization`). Grill: `.claude/knowledge-base/grills/columnar-scan-optimization-feature-grill.md`.
 
