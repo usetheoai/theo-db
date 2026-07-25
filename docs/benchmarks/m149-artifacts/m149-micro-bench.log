@@ -1,0 +1,11 @@
+== carregando 300000 linhas do hits real (105 colunas) ==
+  carregado: 300000 x 105 colunas
+== ganho projection OFF vs ON + A/B por query ==
+query                |    off_s |     on_s |  ganho | A/B
+url_1col             | 5600.272 | 1340.715 |  4.18x | OK
+title_url_2col       | 5557.317 | 1783.199 |  3.12x | OK
+searchphrase_filt    | 5591.164 | 1224.136 |  4.57x | OK
+three_col            | 5595.640 | 1726.332 |  3.24x | OK
+geomean do ganho (queries de projeção estreita):
+  3.73x
+M149_MICRO_OK

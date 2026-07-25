@@ -19,6 +19,7 @@ mod build_stream; // M96 — tuplesort-streaming ambuild (bounded-memory build s
 pub(crate) mod columnar; // M99 — theodb_columnar append-only columnar Table Access Method (registration + column-major + MVCC)
 pub(crate) mod columnar_agg; // M100 Phase C — planner CustomScan integration for vectorized columnar aggregates
 mod columnar_codec; // M99 Phase C — pure column-major stripe codec (FFI-free, locally unit-tested)
+pub(crate) mod columnar_project; // M149 — projection-pushdown CustomScan over theodb_columnar (materialize wanted cols only)
 mod cost; // M48 T5.1 — honest amcostestimate visit-ratio (pgvector cost model)
 pub(crate) mod customscan; // M92 spike — arbitrary-WHERE Custom Scan Provider (pathlist hook + custom node)
 mod datafusion_probe; // M98 — DataFusion coexistence smoke (the pillar GATE)
