@@ -9,9 +9,13 @@ goal: Rotear os agregados do ClickBench bloqueados só por `<>` pelo CustomScan 
 
 ## Goal
 
-Aceitar o operador `<>` (not-equal) no filtro do CustomScan de agregação DataFusion, roteando os agregados
-hoje bloqueados só por `<>` — **medido:** a fração de queries do ClickBench com `columnar_customscan=True` sobe
-de **6** para **≥ 12** das 43, com A/B byte-idêntico ao heap (`result_ab.diverged == 0`).
+Aceitar o operador `<>` (not-equal) **em colunas numéricas/temporais** no filtro do CustomScan de agregação
+DataFusion, roteando os agregados hoje bloqueados por `<>` numérico — **medido:** a fração de queries com
+`columnar_customscan=True` sobe acima de 6 (número real no benchmark), com A/B byte-idêntico ao heap
+(`result_ab.diverged == 0`). **Escopo revisado (measurement-first):** `<>` em TEXTO (`SearchPhrase <> ''`, a
+maioria das queries `<>` do ClickBench) é honest-negative neste milestone — ver ADR-4 (requer serialização de
+const-texto pelo caminho agg released, uma fatia própria). Este milestone entrega o `<>` numérico correto +
+mede o ganho real.
 
 ## Context
 
@@ -67,6 +71,11 @@ adicioná-lo leva a cobertura de 6→15 (meta conservadora ≥12, a validar no b
 - **Decisão:** manter a lista única `Admitted.preds` (o blueprint sugeriu desacoplar em poda-list + filter-list). `chunk_can_match(Ne)=true` já isola o comportamento: Ne está na lista mas nunca poda.
 - **Rationale:** KISS (Rule 10) / parsimony-ladder rung 5 — a mesma correção com menos código; `chunk_can_match` fail-safe para Ne evita a bifurcação de listas. Override honesto do ADR-2 do blueprint `m151-datafusion-coverage-blueprint.md`.
 - **Alternativa rejeitada:** duas listas (blueprint ADR-2) — mais código, mais superfície de bug, sem ganho de correção sobre `chunk_can_match(Ne)=true`.
+
+### ADR-4 — `<>` numérico agora; `<>` em texto é honest-negative (follow-up)
+- **Decisão:** este milestone aceita `<>` só em colunas com `MinMaxKind` (int/float/temporal/bool). `<>` em texto (`SearchPhrase <> ''`) fica fora.
+- **Rationale (2 descobertas do implement, corrigindo o blueprint):** (1) **`<>` não é uma estratégia btree** (btree só define 1-5); é detectado como o **negador de `=`** — implementado corretamente em `extract_zone_predicate`. (2) O const de texto **não cabe** no `ZonePredicate` (`const_bits: u64`) nem na serialização `custom_private` (`encode_private` usa `lappend_int` — só ints). Text `<>` exige serializar os bytes do const pelo caminho agg **released** (M114/M115) + um decode pareado — uma fatia própria com risco ao caminho released, não uma adição rushed (viola "sem workarounds" fazer sob build de 25min/iteração). Measurement-first: entregar o `<>` numérico correto + medir; text `<>` (sempre `<> ''`) é o próximo slice bem-especificado.
+- **Alternativa rejeitada:** special-case `<> ''` (empty string) — gambiarra que não generaliza a `<> 'foo'`; ou rushar a serialização de texto no caminho released sob build lento — risco desproporcional.
 
 ### ADR-3 — Escopo = só `<>` (LIKE opcional) vs rotear as 36 lentas
 - **Decisão:** só `<>` neste milestone; COUNT(DISTINCT)/plain-scan/regex/HAVING ficam fora (cada um é milestone próprio).

@@ -122,6 +122,7 @@ pub(crate) fn flip_op(op: ZoneOp) -> ZoneOp {
         ZoneOp::Eq => ZoneOp::Eq,
         ZoneOp::Ge => ZoneOp::Le,
         ZoneOp::Gt => ZoneOp::Lt,
+        ZoneOp::Ne => ZoneOp::Ne, // M151 — `<>` is symmetric: `c <> col` ≡ `col <> c`
     }
 }
 
@@ -178,29 +179,39 @@ pub(crate) unsafe fn extract_zone_predicate(clause: *mut pg_sys::Node, relid: i3
         return None;
     }
     let opfamily = pg_sys::get_opclass_family(opclass);
-    if !pg_sys::op_in_opfamily((*op).opno, opfamily) {
-        return None;
-    }
+    // M151 — `<>` is NOT a btree strategy (btree defines only 1-5: `<,<=,=,>=,>`). It is detected as the NEGATOR
+    // of the btree `=` (strategy 3): if the op is not itself in the family but its negator is the family's `=`,
+    // this is `col <> const`. `<>` never prunes (`chunk_can_match(Ne)=true`) — it rides the predicate list only to
+    // reach the DataFusion `Filter` (`build_filter_expr → not_eq`, the final authority). A/B gate proves it.
+    let (probe_op, forced_ne) = if pg_sys::op_in_opfamily((*op).opno, opfamily) {
+        ((*op).opno, false)
+    } else {
+        let neg = pg_sys::get_negator((*op).opno);
+        if neg == pg_sys::InvalidOid || !pg_sys::op_in_opfamily(neg, opfamily) {
+            return None; // neither a native btree op nor the negator of one
+        }
+        (neg, true) // probe the `=` negator for its strategy/types; force op to Ne below
+    };
     let (mut strategy, mut lt, mut rt): (c_int, pg_sys::Oid, pg_sys::Oid) =
         (0, pg_sys::InvalidOid, pg_sys::InvalidOid);
-    pg_sys::get_op_opfamily_properties(
-        (*op).opno,
-        opfamily,
-        false,
-        &mut strategy,
-        &mut lt,
-        &mut rt,
-    );
+    pg_sys::get_op_opfamily_properties(probe_op, opfamily, false, &mut strategy, &mut lt, &mut rt);
     if lt != vartype || rt != vartype {
         return None; // not the same-type native comparison (D5)
     }
-    let base = match strategy {
-        1 => ZoneOp::Lt,
-        2 => ZoneOp::Le,
-        3 => ZoneOp::Eq,
-        4 => ZoneOp::Ge,
-        5 => ZoneOp::Gt,
-        _ => return None,
+    if forced_ne && strategy != 3 {
+        return None; // the negator must be exactly `=` (strategy 3) for this to be `<>`
+    }
+    let base = if forced_ne {
+        ZoneOp::Ne
+    } else {
+        match strategy {
+            1 => ZoneOp::Lt,
+            2 => ZoneOp::Le,
+            3 => ZoneOp::Eq,
+            4 => ZoneOp::Ge,
+            5 => ZoneOp::Gt,
+            _ => return None,
+        }
     };
     let col = ((*var).varattno as i32).checked_sub(1)?; // 1-based AttrNumber → 0-based col; system cols (≤0) rejected
     Some(ZonePredicate {

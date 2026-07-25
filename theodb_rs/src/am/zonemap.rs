@@ -19,6 +19,10 @@ pub(crate) enum ZoneOp {
     Eq,
     Ge,
     Gt,
+    /// `<>` (btree strategy 6). M151 — NEVER used for zone-map pruning (a chunk `[min,max]` with min≠max almost
+    /// always contains a value ≠ const). It rides the predicate list ONLY to reach the DataFusion `Filter`
+    /// (`build_filter_expr` → `not_eq`); `chunk_can_match` treats it as "must scan" (`excluded(Ne) = false`).
+    Ne,
 }
 
 /// A single pushable predicate: `column[col] <op> const` where `const_bits` is in the column's `MinMaxKind` domain.
@@ -73,6 +77,9 @@ fn excluded<T: PartialOrd>(min: T, max: T, c: T, op: ZoneOp) -> bool {
         ZoneOp::Gt => max <= c,           // col > c   : excluded iff every value ≤ c
         ZoneOp::Ge => max < c,            // col >= c  : excluded iff every value < c
         ZoneOp::Eq => c < min || c > max, // col = c : excluded iff c outside [min, max]
+        // col <> c : NEVER provably empty from min/max alone (a chunk with min≠max holds values ≠ c). M151 —
+        // `<>` is a filter-only op (applied by DataFusion), not a pruning op. Fail-safe: never skip.
+        ZoneOp::Ne => false,
     }
 }
 
@@ -152,6 +159,27 @@ mod tests {
         assert!(
             chunk_can_match(h, lo, hi, MinMaxKind::I4, &ipred(0, ZoneOp::Eq, 200)),
             "y=200 (boundary) → scan"
+        );
+    }
+
+    #[test]
+    fn test_chunk_can_match_ne_never_prunes() {
+        // M151 — `<>` is filter-only: a chunk [0,100] must be SCANNED for `col <> 50` even though 50 ∈ [0,100],
+        // and equally for a const OUTSIDE the range. `Ne` never proves the chunk empty (fail-safe).
+        let (h, lo, hi) = ichunk(0, 100);
+        assert!(
+            chunk_can_match(h, lo, hi, MinMaxKind::I4, &ipred(0, ZoneOp::Ne, 50)),
+            "col<>50 with 50 inside [0,100] → must scan (Ne never prunes)"
+        );
+        assert!(
+            chunk_can_match(h, lo, hi, MinMaxKind::I4, &ipred(0, ZoneOp::Ne, 999)),
+            "col<>999 with 999 outside [0,100] → must scan (Ne never prunes)"
+        );
+        // even a degenerate all-const chunk [7,7] is NOT pruned by `<> 7` (YAGNI micro-opt not taken).
+        let (h2, lo2, hi2) = ichunk(7, 7);
+        assert!(
+            chunk_can_match(h2, lo2, hi2, MinMaxKind::I4, &ipred(0, ZoneOp::Ne, 7)),
+            "col<>7 on all-7 chunk → must scan (conservative; the executor filters it out)"
         );
     }
 

@@ -292,6 +292,7 @@ unsafe fn build_filter_expr(
             ZoneOp::Eq => c.eq(val),
             ZoneOp::Ge => c.gt_eq(val),
             ZoneOp::Gt => c.gt(val),
+            ZoneOp::Ne => c.not_eq(val), // M151 — `<>` filter-only (never pruned); the executor's final authority
         };
         acc = Some(match acc {
             Some(prev) => prev.and(e),
