@@ -2789,7 +2789,7 @@ bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan s�
 
 ---
 
-## M156 — [ ] Rotear predicados de texto no WHERE (=, <>, LIKE, NOT LIKE) ao CustomScan colunar
+## M156 — [x] Rotear predicados de texto no WHERE (=, <>, LIKE, NOT LIKE) ao CustomScan colunar
 
 > **M152 measured (2026-07-25, `docs/benchmarks/m152-routing-map.md`):** `unpushable_where_qual` é o MAIOR first-blocker das não-roteadas (8 queries: q12,14,20,27,30,31,36,37) — predicados de TEXTO no WHERE. Hoje `extract_zone_predicate` (`columnar_agg.rs:160`) só serializa numérico (`u64` zone-bits); texto (varlena) não cabe.
 
