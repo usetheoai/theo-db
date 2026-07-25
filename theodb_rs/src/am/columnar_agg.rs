@@ -419,6 +419,7 @@ struct Admitted {
     preds: Vec<ZonePredicate>,
     text_preds: Vec<TextPredicate>, // M156 — text WHERE predicates (filter-only, never prune)
     group_cols: Vec<(i32, u32)>,
+    group_exprs: Vec<GroupExprSpec>, // M157 — expression group keys (date_trunc), layout kind=2
     layout: Vec<(u8, usize)>,
 }
 
@@ -436,10 +437,31 @@ impl Admitted {
 // os `layout.push((_, len()))` ficam no `main` (ordem/índices preservados). O check `grouped && group_cols.is_empty()`
 // permanece no `main`, DEPOIS do walk. Nenhuma decisão cruza a fronteira do loop/modo.
 
-/// Um slot de output classificado: uma group key (attno, vartype) ou um agregado parseado. `main` empurra em
-/// `layout`/`group_cols`/`aggs` na ORDEM do target (índices dependem do comprimento no push — preservados).
+/// M157 — a função de uma chave de grupo por EXPRESSÃO. Só `date_trunc` no escopo (o único lever medido — blueprint
+/// ADR-3). Discriminante explícito: serializado como `func as i32` no 3º canal `custom_private` e decodificado por
+/// literal (o compilador não checa esse mapeamento — mesmo contrato do `ZoneOp`/`TextOp`).
+#[derive(Clone, Copy, PartialEq, Debug)]
+#[repr(i32)]
+enum GroupFunc {
+    DateTrunc = 0,
+}
+
+/// M157 — uma chave de grupo que é `func('unit', col[base_attno])`, saída tipo `out_typoid`. Hoje só
+/// `date_trunc('unit', ts::timestamp)` → `out_typoid == 1114` (timestamp). `unit` é a granularidade (server-encoded).
+#[derive(Clone, Debug)]
+struct GroupExprSpec {
+    base_attno: i32,
+    func: GroupFunc,
+    unit: String,
+    out_typoid: u32,
+}
+
+/// Um slot de output classificado: uma group key `Var` (attno, vartype), uma group key por EXPRESSÃO (M157) ou um
+/// agregado parseado. `main` empurra em `layout`/`group_cols`/`group_exprs`/`aggs` na ORDEM do target (índices
+/// dependem do comprimento no push — preservados).
 enum TargetSlot {
     Group(i32, u32),
+    GroupExpr(GroupExprSpec), // M157 — layout kind=2
     Agg(ParsedAgg),
 }
 
@@ -516,6 +538,71 @@ unsafe fn classify_target_node(
             return None;
         }
         Some(TargetSlot::Group(attno, (*var).vartype.to_u32()))
+    } else if (*node).type_ == pg_sys::NodeTag::T_FuncExpr {
+        // M157 — a group key that is `date_trunc('unit', ts::timestamp)`. Only when GROUP BY is present.
+        if !grouped {
+            return None;
+        }
+        let fe = node as *mut pg_sys::FuncExpr;
+        // Function name via the catalog (no hardcoded OID — ADR-1 / D5). Must be exactly `date_trunc`.
+        let fnamep = pg_sys::get_func_name((*fe).funcid);
+        if fnamep.is_null() || CStr::from_ptr(fnamep).to_string_lossy() != "date_trunc" {
+            admit_trace("group_expr_func_unsupported"); // EXTRACT / other function → native
+            return None;
+        }
+        let args = PgList::<pg_sys::Node>::from_pg((*fe).args);
+        if args.len() != 2 {
+            return None; // the 2-arg `date_trunc(unit, ts)` only (the 3-arg tz form is out of scope)
+        }
+        let (a0, a1) = (args.get_ptr(0)?, args.get_ptr(1)?);
+        // arg0 = a text Const granularity in the whitelist (the units where PG and Arrow agree — blueprint Corner 3).
+        if (*a0).type_ != pg_sys::NodeTag::T_Const {
+            return None;
+        }
+        let unit_const = a0 as *mut pg_sys::Const;
+        let ut = (*unit_const).consttype.to_u32();
+        if (*unit_const).constisnull || (ut != 25 && ut != 1043) {
+            return None;
+        }
+        let unit_cstr = pg_sys::text_to_cstring((*unit_const).constvalue.cast_mut_ptr::<pg_sys::text>());
+        let unit = CStr::from_ptr(unit_cstr).to_str().ok()?.to_ascii_lowercase();
+        // EPOCH GUARD (council-index-storage CRITICAL): the columnar timestamp is stored as µs-since-2000 (PG epoch)
+        // but decoded into an Arrow `Timestamp` that DataFusion reads as µs-since-1970. The PG↔Arrow offset is exactly
+        // 10957 days — a whole multiple of day/hour/minute/second, so those granularities are epoch-INVARIANT (the
+        // truncation commutes with adding a whole-unit offset) and match PG byte-for-byte. But 10957 days is NOT a
+        // whole number of months/quarters/years, and the leap-day count differs between the [1970..] and [2000..]
+        // windows, so date_trunc's CALENDAR truncation for month/quarter/year lands on the wrong absolute date
+        // (±1 day, crossing the bucket boundary → wrong key AND wrong partition). `week` is ISO-week (PG≠Arrow).
+        // Restrict to the epoch-invariant granularities; everything coarser declines to the native plan (fail-closed).
+        const UNITS: [&str; 4] = ["second", "minute", "hour", "day"];
+        if !UNITS.contains(&unit.as_str()) {
+            admit_trace("group_expr_granularity_unsupported"); // week / month / quarter / year → native (epoch/ISO)
+            return None;
+        }
+        // arg1 = a base-rel Var of type `timestamp` (1114). `timestamptz` (1184) DIVERGES under `TimeZone≠UTC`
+        // (PG uses session_timezone; DataFusion truncates in UTC) → decline unconditionally (ADR-2; same class the
+        // M151 temporal cross-type review caught).
+        if (*a1).type_ != pg_sys::NodeTag::T_Var {
+            return None;
+        }
+        let var = a1 as *mut pg_sys::Var;
+        if (*var).varno as i32 != relid {
+            return None;
+        }
+        let base_attno = (*var).varattno as i32;
+        if base_attno <= 0 {
+            return None;
+        }
+        if (*var).vartype.to_u32() != 1114 {
+            admit_trace("group_expr_date_trunc_timestamptz"); // 1184 timestamptz / non-timestamp → native
+            return None;
+        }
+        Some(TargetSlot::GroupExpr(GroupExprSpec {
+            base_attno,
+            func: GroupFunc::DateTrunc,
+            unit,
+            out_typoid: 1114, // date_trunc(timestamp) → timestamp
+        }))
     } else if (*node).type_ == pg_sys::NodeTag::T_Aggref {
         let agg = node as *mut pg_sys::Aggref;
         // aggfilter / aggorder are always declined; aggdistinct is declined here EXCEPT for the
@@ -619,6 +706,7 @@ unsafe fn build_admission(
     grouped: bool,
     aggs: Vec<ParsedAgg>,
     group_cols: Vec<(i32, u32)>,
+    group_exprs: Vec<GroupExprSpec>, // M157
     layout: Vec<(u8, usize)>,
 ) -> Option<Admitted> {
     // Mode: a columnar table (decode stripes) vs a heap table with a usable Arrow cache (M101 HTAP).
@@ -631,7 +719,7 @@ unsafe fn build_admission(
                 Some(p) => p,
                 None => { admit_trace("unpushable_where_qual"); return None; } // M152
             };
-            return Some(Admitted { mode: 0, relid, aggs, preds, text_preds, group_cols, layout });
+            return Some(Admitted { mode: 0, relid, aggs, preds, text_preds, group_cols, group_exprs, layout });
         }
         // Non-grouped: ALL quals must be pushable (`col <op> const`), else decline.
         let (preds, text_preds) = match extract_all_predicates(input_rel, relid) {
@@ -645,6 +733,7 @@ unsafe fn build_admission(
             preds,
             text_preds,
             group_cols: Vec::new(),
+            group_exprs: Vec::new(),
             layout: Vec::new(),
         });
     }
@@ -672,6 +761,7 @@ unsafe fn build_admission(
             preds: Vec::new(),
             text_preds: Vec::new(), // M156 — heap-cache path declines any WHERE (guarded above), so never text preds
             group_cols: Vec::new(),
+            group_exprs: Vec::new(), // M157 — heap-cache path is non-grouped, so never group exprs
             layout: Vec::new(),
         });
     }
@@ -717,6 +807,7 @@ unsafe fn admit(
     // Build the aggs, the group keys, and the output layout (ADR-2) in one pass, in target order.
     let mut aggs: Vec<ParsedAgg> = Vec::with_capacity(exprs.len());
     let mut group_cols: Vec<(i32, u32)> = Vec::new();
+    let mut group_exprs: Vec<GroupExprSpec> = Vec::new(); // M157
     let mut layout: Vec<(u8, usize)> = Vec::with_capacity(exprs.len());
     for i in 0..exprs.len() {
         let node = exprs.get_ptr(i)?;
@@ -725,16 +816,20 @@ unsafe fn admit(
                 layout.push((0, group_cols.len()));
                 group_cols.push((attno, vartype));
             }
+            TargetSlot::GroupExpr(spec) => {
+                layout.push((2, group_exprs.len())); // M157 — kind=2 group-expr slot
+                group_exprs.push(spec);
+            }
             TargetSlot::Agg(parsed) => {
                 layout.push((1, aggs.len()));
                 aggs.push(parsed);
             }
         }
     }
-    if grouped && group_cols.is_empty() {
-        return None; // GROUP BY with no bare-column key (e.g. GROUP BY on an expression only) → native plan
+    if grouped && group_cols.is_empty() && group_exprs.is_empty() {
+        return None; // GROUP BY with NO key at all (neither bare-column nor a supported expr) → native plan
     }
-    build_admission(rte, input_rel, relid, grouped, aggs, group_cols, layout)
+    build_admission(rte, input_rel, relid, grouped, aggs, group_cols, group_exprs, layout)
 }
 
 /// `create_upper_paths_hook` — run `admit` and STASH the result keyed by the base table's OID (M115). Does NOT add a
@@ -903,21 +998,39 @@ unsafe fn deparse_safe_tlist(
             return std::ptr::null_mut();
         }
         // What does this output column represent? Grouped plans carry an explicit layout; the scalar path is
-        // one aggregate per output column, in order.
-        let (is_group, idx) = if adm.layout.is_empty() {
-            (false, i)
+        // one aggregate per output column, in order. Layout tags: 0=group col, 1=agg, 2=group-expr (M157).
+        let (tag, idx) = if adm.layout.is_empty() {
+            (1u8, i)
         } else {
             match adm.layout.get(i) {
-                Some(&(tag, k)) => (tag == 0, k),
+                Some(&(t, k)) => (t, k),
                 None => return std::ptr::null_mut(),
             }
         };
-        let expr: *mut pg_sys::Expr = if is_group {
+        let expr: *mut pg_sys::Expr = if tag == 0 {
             match adm.group_cols.get(idx) {
                 Some(&(attno, typoid)) => pg_sys::makeVar(
                     scanrelid as i32,
                     attno as pg_sys::AttrNumber,
                     pg_sys::Oid::from(typoid),
+                    pg_sys::exprTypmod(e),
+                    pg_sys::exprCollation(e),
+                    0,
+                ) as *mut pg_sys::Expr,
+                None => return std::ptr::null_mut(),
+            }
+        } else if tag == 2 {
+            // M157 — a group-expr (date_trunc) output column. POST-PLANNING the Agg's tlist entry for this slot is a
+            // bare `Var` (the child Sort/scan pre-computed the date_trunc; the GroupAggregate reads it) — NOT the raw
+            // FuncExpr. Build a plain `Var(scanrelid, base_attno, out_typoid)` exactly like the bare-group branch: it
+            // is descriptor-equal (out_typoid == exprType(e) == 1114) and is ONLY descriptor + deparse metadata — the
+            // runtime tuples come from the materialized `run_columnar_grouped_aggs` result (scanrelid=0, never a real
+            // scan). Deparse shows the base `timestamp` column for this slot (cosmetic; the value is byte-identical).
+            match adm.group_exprs.get(idx) {
+                Some(g) => pg_sys::makeVar(
+                    scanrelid as i32,
+                    g.base_attno as pg_sys::AttrNumber,
+                    pg_sys::Oid::from(g.out_typoid),
                     pg_sys::exprTypmod(e),
                     pg_sys::exprCollation(e),
                     0,
@@ -1018,6 +1131,27 @@ unsafe fn encode_text_preds(tpreds: &[TextPredicate]) -> Option<*mut pg_sys::Lis
     Some(outer)
 }
 
+/// M157 — encode the expression group keys as the 3rd `custom_private` channel (ADR-1, natural extension of the M156
+/// text channel): a `List` whose members are each `[Integer(base_attno), Integer(func), String(unit), Integer(out_typoid)]`
+/// — all leaf `Value` nodes (copy/out/read-safe). `NIL` when there are no group exprs (decode treats NIL as zero).
+unsafe fn encode_group_exprs(gexprs: &[GroupExprSpec]) -> Option<*mut pg_sys::List> {
+    let mut outer: *mut pg_sys::List = std::ptr::null_mut();
+    for g in gexprs {
+        // `unit` is a lowercase ASCII granularity from a validated whitelist — never contains an interior NUL. Still,
+        // decline fail-closed on one (council-rust-pgrx LOW: symmetry with `encode_text_preds`) rather than shipping
+        // an empty unit that would silently mis-group.
+        let cs = std::ffi::CString::new(g.unit.as_str()).ok()?;
+        let pgstr = pg_sys::pstrdup(cs.as_ptr());
+        let mut entry: *mut pg_sys::List = std::ptr::null_mut();
+        entry = pg_sys::lappend(entry, pg_sys::makeInteger(g.base_attno) as *mut c_void);
+        entry = pg_sys::lappend(entry, pg_sys::makeInteger(g.func as i32) as *mut c_void);
+        entry = pg_sys::lappend(entry, pg_sys::makeString(pgstr) as *mut c_void);
+        entry = pg_sys::lappend(entry, pg_sys::makeInteger(g.out_typoid as i32) as *mut c_void);
+        outer = pg_sys::lappend(outer, entry as *mut c_void);
+    }
+    Some(outer)
+}
+
 /// If `plan` is an `Agg` over a columnar table matching an unconsumed stash entry, build the replacement `CustomScan`
 /// (plain-Var tlist, scanrelid=0, custom_private from the stash) with the same output shape; else `None`.
 unsafe fn try_swap_agg(
@@ -1063,7 +1197,8 @@ unsafe fn try_swap_agg(
             .find(|e| {
                 !e.consumed
                     && e.table_oid == table_oid
-                    && e.adm.group_cols.len() == numcols
+                    // M157 — total grouping keys = bare columns + expression keys (date_trunc) must match numCols.
+                    && e.adm.group_cols.len() + e.adm.group_exprs.len() == numcols
                     && e.adm.expected_arity() == out_arity
             })
             .map(|e| {
@@ -1142,13 +1277,16 @@ unsafe fn try_swap_agg(
     cscan.flags = 0;
     cscan.custom_plans = std::ptr::null_mut();
     cscan.custom_exprs = std::ptr::null_mut();
-    // M156 — custom_private is a 2-channel outer List: [<numeric IntList>, <text-preds List>]. The int-only channel
-    // (M115 layout) cannot carry a varlena, so text predicates ride a parallel node channel (ADR-1). A needle with
-    // an interior NUL (impossible for a text value) → decline the swap rather than ship an incomplete filter.
+    // M156/M157 — custom_private is a 3-channel outer List: [<numeric IntList>, <text-preds List>, <group-exprs List>].
+    // The int-only channel (M115 layout) cannot carry a varlena, so text predicates (M156) and expression group keys
+    // (M157) ride parallel node channels (ADR-1). A text needle with an interior NUL (impossible for a text value) →
+    // decline the swap rather than ship an incomplete filter.
     let int_channel = encode_private(&adm, table_oid);
     let text_channel = encode_text_preds(&adm.text_preds)?;
+    let group_expr_channel = encode_group_exprs(&adm.group_exprs)?;
     let mut outer = pg_sys::lappend(std::ptr::null_mut(), int_channel as *mut c_void);
     outer = pg_sys::lappend(outer, text_channel as *mut c_void);
+    outer = pg_sys::lappend(outer, group_expr_channel as *mut c_void);
     cscan.custom_private = outer;
     // M131 (#135): NOT `plain_var_tlist` — a self-referential INDEX_VAR here makes ruleutils' `resolve_special_varno`
     // recurse forever when a Sort above this node has a key on the aggregate output, hanging EXPLAIN. This list also
@@ -1246,18 +1384,27 @@ unsafe extern "C-unwind" fn begin_custom_scan(
         return; // EXPLAIN without ANALYZE: show the node, do not execute
     }
     let cscan = st.css.ss.ps.plan as *mut pg_sys::CustomScan;
-    // M156 — custom_private is the 2-channel outer List `[int_channel, text_channel]` (a T_List). A flat IntList
-    // (T_IntList) — a legacy/channel-less encode — is read directly with zero text predicates (backward compatible).
+    // M156/M157 — custom_private is the 3-channel outer List `[int_channel, text_channel, group_expr_channel]` (a
+    // T_List). A flat IntList (T_IntList) — a legacy/channel-less encode — is read directly with zero text preds /
+    // group exprs (backward compatible). The 3rd channel is read via list_length (absent → NIL → zero group exprs).
     let raw_priv = (*cscan).custom_private;
-    let (priv_list, text_list): (*mut pg_sys::List, *mut pg_sys::List) = if !raw_priv.is_null()
-        && (*(raw_priv as *mut pg_sys::Node)).type_ == pg_sys::NodeTag::T_List
-    {
+    let (priv_list, text_list, group_expr_list): (
+        *mut pg_sys::List,
+        *mut pg_sys::List,
+        *mut pg_sys::List,
+    ) = if !raw_priv.is_null() && (*(raw_priv as *mut pg_sys::Node)).type_ == pg_sys::NodeTag::T_List {
+        let outer_len = pg_sys::list_length(raw_priv);
         (
             pg_sys::list_nth(raw_priv, 0) as *mut pg_sys::List,
             pg_sys::list_nth(raw_priv, 1) as *mut pg_sys::List,
+            if outer_len >= 3 {
+                pg_sys::list_nth(raw_priv, 2) as *mut pg_sys::List
+            } else {
+                std::ptr::null_mut()
+            },
         )
     } else {
-        (raw_priv, std::ptr::null_mut())
+        (raw_priv, std::ptr::null_mut(), std::ptr::null_mut())
     };
     let n = pg_sys::list_length(priv_list);
     // M115 layout: [table_oid, mode, nagg, ...]. The base table is resolved by its stable pg_class OID (the Agg-swap
@@ -1358,13 +1505,31 @@ unsafe extern "C-unwind" fn begin_custom_scan(
             i += 2;
             layout.push((kind, idx));
         }
+        // M157 — decode the expression group keys from the 3rd channel; each entry is
+        // [Integer(base_attno), Integer(func), String(unit), Integer(out_typoid)]. Resolve base_attno → column name.
+        // `(base_name, unit, out_typoid)` — func is DateTrunc (the only one in scope). NIL → empty.
+        let mut group_exprs: Vec<(String, String, u32)> = Vec::new();
+        let gn = pg_sys::list_length(group_expr_list);
+        for k in 0..gn {
+            let entry = pg_sys::list_nth(group_expr_list, k) as *mut pg_sys::List;
+            let base_attno = (*(pg_sys::list_nth(entry, 0) as *mut pg_sys::Integer)).ival;
+            let _func = (*(pg_sys::list_nth(entry, 1) as *mut pg_sys::Integer)).ival; // 0 = DateTrunc
+            let unit = CStr::from_ptr((*(pg_sys::list_nth(entry, 2) as *mut pg_sys::String)).sval)
+                .to_string_lossy()
+                .into_owned();
+            let out_typoid = (*(pg_sys::list_nth(entry, 3) as *mut pg_sys::Integer)).ival as u32;
+            let nm = pg_sys::get_attname(relid, base_attno as pg_sys::AttrNumber, false);
+            group_exprs.push((CStr::from_ptr(nm).to_string_lossy().into_owned(), unit, out_typoid));
+        }
 
-        if ngroup > 0 {
-            // GROUP BY (columnar only — admit declined grouped heap / grouped+WHERE). Multi-row result.
+        if ngroup > 0 || !group_exprs.is_empty() {
+            // GROUP BY (columnar only — admit declined grouped heap / grouped+WHERE). Multi-row result. M157: a
+            // grouped query may have ONLY expression keys (bare group_cols empty) — still the grouped path.
             let rel = pg_sys::relation_open(relid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
             let r = run_columnar_grouped_aggs(
                 rel,
                 &group_cols,
+                &group_exprs,
                 &specs,
                 &layout,
                 &preds,

@@ -438,15 +438,22 @@ where
 pub(super) unsafe fn run_columnar_grouped_aggs(
     rel: pg_sys::Relation,
     group_cols: &[(String, u32)],
+    group_key_exprs_spec: &[(String, String, u32)], // M157 — (base_col_name, unit, out_typoid) for date_trunc keys
     aggs: &[AggSpec],
     layout: &[(u8, usize)],
     predicates: &[super::zonemap::ZonePredicate],
     text_predicates: &[super::zonemap::TextPredicate],
     skip: bool,
 ) -> Result<Vec<Vec<(pg_sys::Datum, bool)>>, String> {
-    // Project group columns ∪ agg columns (count(*) needs no column; decode_to_batch also projects predicate cols
-    // and guarantees ≥1).
+    use datafusion::functions::datetime::expr_fn::date_trunc;
+    // Project bare group columns ∪ group-expr base columns ∪ agg columns (count(*) needs no column; decode_to_batch
+    // also projects predicate cols and guarantees ≥1).
     let mut proj_cols: Vec<String> = group_cols.iter().map(|(n, _)| n.clone()).collect();
+    for (base, _, _) in group_key_exprs_spec {
+        if !proj_cols.iter().any(|p| p == base) {
+            proj_cols.push(base.clone());
+        }
+    }
     for a in aggs {
         if let Some(n) = a.col_name() {
             if !proj_cols.iter().any(|p| p == n) {
@@ -457,7 +464,15 @@ pub(super) unsafe fn run_columnar_grouped_aggs(
     let batch = decode_to_batch(rel, &proj_cols, predicates, text_predicates, skip)?;
     let filter = build_filter_expr(rel, predicates, text_predicates);
 
-    let group_exprs: Vec<Expr> = group_cols.iter().map(|(n, _)| col(n.as_str())).collect();
+    // Grouping keys: bare columns FIRST, then the date_trunc exprs (M157). The output batch columns follow this
+    // order: [bare_0..bare_{ncols-1}, expr_0..expr_{nexpr-1}, agg columns…]. `date_trunc(part, ts)` matches PG for a
+    // `timestamp` (tz-independent) input; timestamptz is declined at admission (ADR-2).
+    let ncols = group_cols.len();
+    let ngroup = ncols + group_key_exprs_spec.len();
+    let mut group_exprs: Vec<Expr> = group_cols.iter().map(|(n, _)| col(n.as_str())).collect();
+    for (base, unit, _) in group_key_exprs_spec {
+        group_exprs.push(date_trunc(lit(ScalarValue::Utf8(Some(unit.clone()))), col(base.as_str())));
+    }
     let mut agg_exprs = Vec::with_capacity(aggs.len());
     // Per-agg batch-column offset (relative to the first agg column) — a multi-column spec (avg-int) shifts the rest.
     let mut agg_off: Vec<usize> = Vec::with_capacity(aggs.len());
@@ -465,7 +480,6 @@ pub(super) unsafe fn run_columnar_grouped_aggs(
         agg_off.push(agg_exprs.len());
         push_agg_exprs(a, &mut agg_exprs);
     }
-    let ngroup = group_cols.len();
     // Filter BEFORE aggregating (SQL WHERE … GROUP BY — M114 blueprint E4); the zone-map skip above is only an
     // admission filter, the DataFusion Filter is the final row authority.
     let batches = run_df_collect(batch, move |df| {
@@ -483,12 +497,22 @@ pub(super) unsafe fn run_columnar_grouped_aggs(
         for r in 0..b.num_rows() {
             let mut row_out = Vec::with_capacity(layout.len());
             for &(kind, idx) in layout {
-                let cell = if kind == 0 {
-                    let typoid = group_cols.get(idx).ok_or("df_executor: layout group idx oob")?.1;
-                    arrow_value_to_datum(b.column(idx), r, typoid)?
-                } else {
-                    let a = aggs.get(idx).ok_or("df_executor: layout agg idx oob")?;
-                    agg_datum(b, ngroup + agg_off[idx], r, a)?
+                let cell = match kind {
+                    0 => {
+                        // bare group column — batch col `idx`.
+                        let typoid = group_cols.get(idx).ok_or("df_executor: layout group idx oob")?.1;
+                        arrow_value_to_datum(b.column(idx), r, typoid)?
+                    }
+                    2 => {
+                        // M157 — date_trunc group-expr — batch col `ncols + idx`, materialized as its out_typoid.
+                        let (_, _, out_typoid) =
+                            group_key_exprs_spec.get(idx).ok_or("df_executor: layout group-expr idx oob")?;
+                        arrow_value_to_datum(b.column(ncols + idx), r, *out_typoid)?
+                    }
+                    _ => {
+                        let a = aggs.get(idx).ok_or("df_executor: layout agg idx oob")?;
+                        agg_datum(b, ngroup + agg_off[idx], r, a)?
+                    }
                 };
                 row_out.push(cell);
             }
@@ -501,9 +525,13 @@ pub(super) unsafe fn run_columnar_grouped_aggs(
     let gk: Vec<(usize, u32)> = layout
         .iter()
         .enumerate()
-        .filter_map(
-            |(slot, &(kind, idx))| if kind == 0 { Some((slot, group_cols[idx].1)) } else { None },
-        )
+        .filter_map(|(slot, &(kind, idx))| match kind {
+            // fail-safe (council-rust-pgrx LOW): `.get()` not `[idx]` — a corrupt layout drops the sort key rather
+            // than panicking across the C boundary (matches the materialization loop's `.get(idx).ok_or()?` pattern).
+            0 => group_cols.get(idx).map(|g| (slot, g.1)),
+            2 => group_key_exprs_spec.get(idx).map(|g| (slot, g.2)), // M157 — date_trunc key out_typoid (1114)
+            _ => None,
+        })
         .collect();
     if !gk.is_empty() && !gk.iter().any(|&(_, t)| matches!(t, 25 | 1042 | 1043)) {
         rows.sort_by(|a, b| {

@@ -24,6 +24,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.148.0] - 2026-07-25
+
+### Added
+- M157: `GROUP BY date_trunc('unit', ts)` sobre uma coluna `timestamp` agora roteia ao CustomScan colunar vetorizado (DataFusion), com a chave-expressão serializada num 3º canal de `custom_private` e reconstruída como `date_trunc` no `.aggregate` (o Agg-swap reconhece a chave-expressão além das chaves `Var`, tanto na admissão quanto na construção do `custom_scan_tlist`); byte-idêntico ao PostgreSQL, validado por A/B + EC harness; serialização fail-closed (declina em unit com NUL, sem panic em layout corrompido). Guards fail-closed (declinam ao plano nativo): granularidade só `{second,minute,hour,day}` (epoch-invariantes); `month`/`quarter`/`year`/`week` declinam (o storage colunar usa epoch µs-desde-2000 lido pelo Arrow como µs-desde-1970 → truncagem de calendário divergiria); `timestamptz` (diverge sob `TimeZone≠UTC`), `EXTRACT`, `CASE` e aritmética também declinam. Honest-negative medido: HAVING não é roteado (as queries HAVING do ClickBench têm bloqueios independentes — cobertura 0 isolada).
+- Roadmap amended: added M157 cobertura expr-group/HAVING (`/roadmap-feature coverage-expr-group-having`), M158 late materialization (`/roadmap-feature late-materialization`), M159 medir gap vs ClickHouse (`/roadmap-feature measure-gap-vs-clickhouse`).
+
 ## [0.147.0] - 2026-07-25
 
 ### Added
