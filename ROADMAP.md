@@ -2709,7 +2709,7 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 ---
 
-## M153 — [ ] Rotear GROUP BY por chave de TEXTO ao CustomScan DataFusion (hash, guardado por collation determinística)
+## M153 — [x] Rotear GROUP BY por chave de TEXTO ao CustomScan DataFusion (hash, guardado por collation determinística)
 
 > **M152 measured (2026-07-25, `docs/benchmarks/m152-routing-map.md`):** o real blocker das GROUP-BY-texto (q16,17,33,38) é `swap_sorted_text_group_collation` (o planner escolhe AGG_SORTED p/ `ORDER BY count LIMIT` → texto declina por collation) + o deparse ORDER-BY-sobre-agregado — NÃO o group-key texto (já aceito por `arrow_supported_group_type`). Cobertura marginal medida ~3. **Executar APÓS M154** (COUNT DISTINCT tem ganho mais limpo). Escopo revisado: tratar o AGG_SORTED-texto (collation determinística) + o deparse.
 
@@ -2757,27 +2757,35 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 ---
 
-## M155 — [ ] Rotear Top-N (ORDER BY … LIMIT k) ao operador TopK vetorizado do DataFusion
+## M155 — [ ] Spike Top-N: medir se rotear ORDER BY … LIMIT ao TopK do DataFusion é lever (HONEST-NEGATIVE medido)
 
-> **M152 measured (2026-07-25):** o `ORDER BY count(*) DESC LIMIT` sobre o agregado (deparse/AGG_SORTED) é um bloqueio TRANSVERSAL que atinge GROUP-BY-texto, COUNT(DISTINCT) e text-`<>`. Integra com M153; **executar por último**. NOTA: o spike revelou também que **text `<>`/LIKE no WHERE** (8 first-blockers, ~4 marginal — o follow-up ADR-4 do M151) é um lever grande NÃO coberto por M153-M155 → candidato a M156 (serialização de const-texto no `custom_private`).
+> **Re-escopado 2026-07-25 por medição (owner-delegado, `docs/benchmarks/m155-topn-spike.md`).** A hipótese ORIGINAL
+> ("rotear ao TopK do DataFusion evitando o sort completo") foi **REFUTADA por EXPLAIN ANALYZE**: o PostgreSQL já usa
+> `Sort Method: top-N heapsort` (heap O(n log k) = o mesmo algoritmo do TopK do DataFusion) — não há sort completo a
+> evitar. Medido: o nó `Sort` custa **~2-4ms** (não é gargalo); o custo dominante é a **materialização row-by-row do
+> scan colunar (o gargalo do M148, ~150ms/13k linhas)**, que o TopK NÃO elimina (a chave de ordenação é decodificada
+> para todas as linhas). Cobertura marginal medida = **0** (as Top-N já roteiam o CustomScan; `columnar_customscan_count`
+> permanece 21). Rotear ao TopK seria complexidade sem valor (CLAUDE.md: esforço≠complexidade, anti-sunk-cost).
 
-> Added 2026-07-25 (`/roadmap-feature columnar-gap-closing`). Blueprint: `.claude/knowledge-base/discoveries/blueprints/columnar-gap-closing-strategy-blueprint.md` (deep research M148-M151, R0 web + acervo).
+> Added 2026-07-25 (`/roadmap-feature columnar-gap-closing`). Blueprint: `.claude/knowledge-base/discoveries/blueprints/columnar-gap-closing-strategy-blueprint.md`.
 
-**Objective:** rotear as queries com `ORDER BY … LIMIT k` pelo operador `TopK` dedicado do DataFusion (heap O(K) sobre batches, filtro dinâmico), evitando o sort completo + materialização row-by-row do executor PG. Tie-breaker total + guard de collation obrigatórios (o corte pelo LIMIT torna empates na chave observáveis).
+**Objective (re-escopado):** MEDIR, measurement-first, se o roteamento-ao-TopK das queries `ORDER BY … LIMIT k` do
+ClickBench é um lever de performance/cobertura real — e reportar o veredito honesto (implementar ou honest-negative).
 
-**Definition of done:**
+**Definition of done (measurement-first):**
 
-- [ ] Cobertura medida: `columnar_customscan_count` sobe (número real das queries Top-N do ClickBench mapeadas pelo M152).
-- [ ] A/B byte-idêntico vs heap (`result_ab.diverged == 0`), INCLUINDO o conjunto/ordem exatos sob empates na chave cortados pelo LIMIT (tie-breaker determinístico total) e o NULL ordering casando o default do PG (ASC→NULLS LAST, DESC→NULLS FIRST).
-- [ ] Guard de collation determinística na chave de ordenação texto (declina ao nativo se não-determinística).
-- [ ] Ganho medido pela ablação OFF-vs-ON no mesmo binário.
-- [ ] CHANGELOG `[Unreleased]`.
+- [x] EXPLAIN ANALYZE das Top-N do ClickBench isolando o custo do nó `Sort` acima do CustomScan (`m155_spike_explain.txt`).
+- [x] Veredito honesto com números: PG já usa top-N heapsort (Sort ~2-4ms), gargalo = materialização do scan (M148), cobertura marginal = 0 → **HONEST-NEGATIVE: não implementar o roteamento-ao-TopK**.
+- [x] Lever real identificado para milestone futuro: **materialização preguiçosa de colunas de saída** (decodificar só a chave de ordenação p/ todas as linhas, materializar as demais só p/ o top-k) — ataca o M148 no regime SELECT * top-N. Candidato a M156.
+- [x] CHANGELOG `[Unreleased]`.
 
-**Dependencies:** M153 `[ ]` (muitos Top-N do ClickBench ordenam agregados de texto — dependem do GROUP BY texto rotear primeiro).
+**Dependencies:** M153 `[x]`.
 
-**Risks:** (a) o heap do TopK não é sort estável → empates na chave cortados pelo LIMIT podem divergir do PG → tie-breaker total (por colunas adicionais/ctid) obrigatório, provado por A/B. (b) collation na chave texto → guard determinístico.
+**Veredito:** HONEST-NEGATIVE medido. O byte-identidade do top-k com empates do LIMIT também é mal-definida (o PG é
+não-determinístico na fronteira do corte); o oráculo A/B do `run_m128` prova a igualdade do CONJUNTO — a única invariante
+bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan são os medidos.
 
-**Prior art:** DataFusion `physical-plan/src/topk/mod.rs` (TopK O(K) + `nulls_first` configurável), PG ORDER BY NULL defaults (docs), blueprint § Classe 3.
+**Prior art:** DataFusion `physical-plan/src/topk/mod.rs`; PG `tuplesort.c` (top-N heapsort — a razão do honest-negative); blueprint § Classe 3.
 
 ---
 
