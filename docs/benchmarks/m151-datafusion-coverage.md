@@ -74,3 +74,16 @@ PGPORT=<p> PGUSER=pgtest python3 benchmarks/run_m128_clickbench.py --agg --n 100
 Nota de honestidade: box self-hosted (não o `c6a.4xlarge` canônico) → o `columnar_customscan_count` (a cobertura)
 é o resultado; os timings absolutos não são leaderboard-comparáveis. A cobertura é determinística (independe do
 box/tamanho), então o 6→14 é reprodutível; o `diverged=0` é o gate de correção.
+
+
+## Correção de review (HIGH temporal/float cross-type)
+
+O `/review` (council-rust-pgrx) pegou um HIGH que o A/B `diverged=0` NÃO pegou: o relaxamento cross-type inicial
+admitia também **temporal** (`date`=dias vs `timestamp`=μs; + rotação de timezone) e **float** (`f4col = x::float8`
+— o PG promove a COLUNA a f8, não rebaixa o const) cross-type, cuja coerção por bits crus dá resultado errado (a
+poda E o `build_filter_expr` comparam bits crus). O `diverged=0` não pegou porque o ClickBench-agg não usa esses
+shapes. **Fix:** cross-type restrito à **classe inteira** `{int2,int4,int8}` (onde o widening é isomórfico de
+ordem); temporal/float cross-type declina ao plano nativo. Provado: harness de regressão mostra `ts < DATE` e
+`f4 = 1.1::float8` caem em `Seq Scan` (nativo) com A/B byte-idêntico (incluindo sob `TimeZone='America/Sao_Paulo'`),
+e a cobertura 6→14 é **preservada** (q1/q7/q41 são int cross-type). Lição: o A/B prova o espaço testado; o review
+prova o espaço de shapes não-exercitado pelo benchmark.
