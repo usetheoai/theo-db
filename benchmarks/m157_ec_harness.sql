@@ -33,8 +33,10 @@ SELECT date_trunc('day', ts) k, count(*) c FROM t_heap GROUP BY 1 ORDER BY 1 LIM
 
 \echo '### R2: GROUP BY date_trunc(''month'', ts) , count(*), sum(v)'
 EXPLAIN (COSTS OFF) SELECT date_trunc('month', ts) k, count(*), sum(v) FROM t_col GROUP BY 1 ORDER BY 1;
-SELECT 'month_col' q, date_trunc('month', ts) k, count(*) c, sum(v) s FROM t_col  GROUP BY 1 ORDER BY 1;
-SELECT 'month_heap' q, date_trunc('month', ts) k, count(*) c, sum(v) s FROM t_heap GROUP BY 1 ORDER BY 1;
+\echo '-- columnar:'
+SELECT date_trunc('month', ts) k, count(*) c, sum(v) s FROM t_col  GROUP BY 1 ORDER BY 1;
+\echo '-- heap:'
+SELECT date_trunc('month', ts) k, count(*) c, sum(v) s FROM t_heap GROUP BY 1 ORDER BY 1;
 
 \echo '### R3: GROUP BY date_trunc(''minute'', ts) — the q42 shape — counts equal'
 SELECT 'minute_ndistinct' q,

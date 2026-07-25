@@ -990,16 +990,16 @@ unsafe fn deparse_safe_tlist(
             return std::ptr::null_mut();
         }
         // What does this output column represent? Grouped plans carry an explicit layout; the scalar path is
-        // one aggregate per output column, in order.
-        let (is_group, idx) = if adm.layout.is_empty() {
-            (false, i)
+        // one aggregate per output column, in order. Layout tags: 0=group col, 1=agg, 2=group-expr (M157).
+        let (tag, idx) = if adm.layout.is_empty() {
+            (1u8, i)
         } else {
             match adm.layout.get(i) {
-                Some(&(tag, k)) => (tag == 0, k),
+                Some(&(t, k)) => (t, k),
                 None => return std::ptr::null_mut(),
             }
         };
-        let expr: *mut pg_sys::Expr = if is_group {
+        let expr: *mut pg_sys::Expr = if tag == 0 {
             match adm.group_cols.get(idx) {
                 Some(&(attno, typoid)) => pg_sys::makeVar(
                     scanrelid as i32,
@@ -1011,6 +1011,37 @@ unsafe fn deparse_safe_tlist(
                 ) as *mut pg_sys::Expr,
                 None => return std::ptr::null_mut(),
             }
+        } else if tag == 2 {
+            // M157 — a group-expr (date_trunc) output column. Copy the FuncExpr and rebuild its inner base-rel Var
+            // (post-planning it is OUTER_VAR into the dropped child scan) against `scanrelid` + the true base attno,
+            // so deparse shows `date_trunc('unit', <rel>.col)` and never follows OUTER_VAR. Descriptor-equal: the
+            // FuncExpr's exprType is the group-expr's out_typoid (1114), matching plain_var_tlist's entry.
+            let Some(g) = adm.group_exprs.get(idx) else { return std::ptr::null_mut() };
+            let copied = pg_sys::copyObjectImpl(e as *const c_void) as *mut pg_sys::Node;
+            if copied.is_null() || (*copied).type_ != pg_sys::NodeTag::T_FuncExpr {
+                return std::ptr::null_mut();
+            }
+            let fe = copied as *mut pg_sys::FuncExpr;
+            let arglist = (*fe).args;
+            if !arglist.is_null() {
+                let alen = (*arglist).length;
+                for j in 0..alen {
+                    let cell = (*arglist).elements.add(j as usize);
+                    let node = (*cell).ptr_value as *mut pg_sys::Node;
+                    if !node.is_null() && (*node).type_ == pg_sys::NodeTag::T_Var {
+                        let v = node as *mut pg_sys::Var;
+                        (*cell).ptr_value = pg_sys::makeVar(
+                            scanrelid as i32,
+                            g.base_attno as pg_sys::AttrNumber,
+                            (*v).vartype,
+                            (*v).vartypmod,
+                            (*v).varcollid,
+                            0,
+                        ) as *mut c_void;
+                    }
+                }
+            }
+            copied as *mut pg_sys::Expr
         } else {
             // Copy the Aggref so the original (shared) plan nodes are never mutated, then rebuild its argument Var
             // against the base rel so deparsing the arguments never follows OUTER_VAR into the dropped subtree.
@@ -1168,7 +1199,8 @@ unsafe fn try_swap_agg(
             .find(|e| {
                 !e.consumed
                     && e.table_oid == table_oid
-                    && e.adm.group_cols.len() == numcols
+                    // M157 — total grouping keys = bare columns + expression keys (date_trunc) must match numCols.
+                    && e.adm.group_cols.len() + e.adm.group_exprs.len() == numcols
                     && e.adm.expected_arity() == out_arity
             })
             .map(|e| {
