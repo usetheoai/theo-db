@@ -20,6 +20,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   no admit, cobrindo também o path AGG_HASHED. `GROUP BY texto ORDER BY texto` (ordem de grupo consumida direta, sem
   re-sort) declina. Resultado byte-idêntico ao heap (A/B).
 
+### Fixed
+- Colunas `char(n)`/`bpchar` deixam de ser roteadas ao agregado colunar vetorizado em `GROUP BY` e `COUNT(DISTINCT)`:
+  a igualdade `bpchareq` do PostgreSQL ignora espaços à direita (`'ab'` = `'ab '`), o que o agrupamento byte-wise do
+  DataFusion não reproduziria — poderia contar grupos/distintos a mais. Agora declinam ao plano nativo (correto).
+
 ### Changed
 
 ### Deprecated

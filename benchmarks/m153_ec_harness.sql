@@ -54,6 +54,25 @@ SELECT 'ci_groups' AS q,
   (SELECT count(*) FROM (SELECT s FROM gci_col  GROUP BY s) z) AS col_grps,
   (SELECT count(*) FROM (SELECT s FROM gci_heap GROUP BY s) z) AS heap_grps;
 
+\echo '### EC-6 (review MEDIUM): bpchar GROUP BY + COUNT(DISTINCT) must DECLINE (bpchareq trims trailing blanks)'
+DROP TABLE IF EXISTS bp_col CASCADE;
+DROP TABLE IF EXISTS bp_heap CASCADE;
+CREATE TABLE bp_col (c bpchar) USING theodb_columnar;
+CREATE TABLE bp_heap (c bpchar);
+-- 'ab' and 'ab ' are EQUAL under bpchareq (PG -> 1 group) but byte-different in storage (byte-hash would give 2)
+INSERT INTO bp_heap VALUES ('ab'),('ab '),('ab  '),('xy');
+INSERT INTO bp_col SELECT * FROM bp_heap;
+\echo '-- GROUP BY bpchar: EXPLAIN must NOT show theodb_columnar_agg (declined at admit):'
+EXPLAIN (COSTS OFF) SELECT c, COUNT(*) FROM bp_col GROUP BY c ORDER BY COUNT(*) DESC;
+\echo '-- A/B: PG groups ab==ab ==ab  -> 2 groups {ab*, xy}; both sides must give 2 (declined):'
+SELECT 'bpchar_groups' AS q,
+  (SELECT count(*) FROM (SELECT c FROM bp_col  GROUP BY c) z) AS col_grps,
+  (SELECT count(*) FROM (SELECT c FROM bp_heap GROUP BY c) z) AS heap_grps;
+\echo '-- COUNT(DISTINCT bpchar) (M154 path): EXPLAIN must NOT show theodb_columnar_agg; A/B = 2:'
+EXPLAIN (COSTS OFF) SELECT COUNT(DISTINCT c) FROM bp_col;
+SELECT 'bpchar_distinct' AS q, (SELECT COUNT(DISTINCT c) FROM bp_col) AS col_val,
+                               (SELECT COUNT(DISTINCT c) FROM bp_heap) AS heap_val;
+
 \echo '### EC-5 (regression): numeric GROUP BY (AGG_SORTED) unchanged — still routes'
 EXPLAIN (COSTS OFF) SELECT region, COUNT(*) FROM g_col GROUP BY region ORDER BY region;
 SELECT count(*) AS divergent FROM (

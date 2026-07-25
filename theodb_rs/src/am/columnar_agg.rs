@@ -956,8 +956,9 @@ unsafe fn try_swap_agg(
         // `Sort` above re-sorts the whole output (then our emit order is irrelevant). Grouping-equality correctness is
         // already guaranteed at admit time (deterministic-collation guard). So: text AGG_SORTED is swappable iff the
         // parent is a plain `Sort` (NOT IncrementalSort, which relies on input pre-sortedness). Else decline.
-        if adm.group_cols.iter().any(|&(_, t)| matches!(t, 25 | 1042 | 1043)) {
-            // Text: safe ONLY when a full `Sort` above re-sorts the output (group order then irrelevant). Fall
+        if adm.group_cols.iter().any(|&(_, t)| matches!(t, 25 | 1043)) {
+            // Text (text/varchar; bpchar excluded at admit — review MEDIUM). Safe ONLY when a full `Sort` above
+            // re-sorts the output (group order then irrelevant). Fall
             // through to the swap WITHOUT the numeric ASC-nulls-last input-Sort check (we don't reproduce key order).
             if parent.is_null() || (*parent).type_ != pg_sys::NodeTag::T_Sort {
                 admit_trace("swap_sorted_text_group_not_resorted"); // M153 — direct group-order consumption

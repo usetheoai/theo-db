@@ -74,6 +74,39 @@
  ci_groups |        2 |         2
 (1 row)
 
+### EC-6 (review MEDIUM): bpchar GROUP BY + COUNT(DISTINCT) must DECLINE (bpchareq trims trailing blanks)
+-- GROUP BY bpchar: EXPLAIN must NOT show theodb_columnar_agg (declined at admit):
+              QUERY PLAN              
+--------------------------------------
+ Sort
+   Sort Key: (count(*)) DESC
+   ->  GroupAggregate
+         Group Key: c
+         ->  Sort
+               Sort Key: c
+               ->  Seq Scan on bp_col
+(7 rows)
+
+-- A/B: PG groups ab==ab ==ab  -> 2 groups {ab*, xy}; both sides must give 2 (declined):
+       q       | col_grps | heap_grps 
+---------------+----------+-----------
+ bpchar_groups |        2 |         2
+(1 row)
+
+-- COUNT(DISTINCT bpchar) (M154 path): EXPLAIN must NOT show theodb_columnar_agg; A/B = 2:
+           QUERY PLAN           
+--------------------------------
+ Aggregate
+   ->  Sort
+         Sort Key: c
+         ->  Seq Scan on bp_col
+(4 rows)
+
+        q        | col_val | heap_val 
+-----------------+---------+----------
+ bpchar_distinct |       2 |        2
+(1 row)
+
 ### EC-5 (regression): numeric GROUP BY (AGG_SORTED) unchanged — still routes
             QUERY PLAN             
 -----------------------------------

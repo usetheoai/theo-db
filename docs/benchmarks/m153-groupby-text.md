@@ -20,9 +20,17 @@ admit + re-sort acima (ordem) no swap. `run_m128_clickbench.py --agg` (head 100k
 | q33 | `URL, COUNT(*) GROUP BY URL ORDER BY c DESC LIMIT` | declina idem | **roteia** | byte-idêntico |
 | q38 | `URL, COUNT(*) GROUP BY URL WHERE CounterID=… ORDER BY c DESC LIMIT` | declina idem | **roteia** | byte-idêntico |
 
-**q17 permanece não-roteada** (honest): é `SearchPhrase, COUNT(*) WHERE SearchPhrase <> '' GROUP BY SearchPhrase` — tem
-o bloqueio COMPOSTO text-`<>` no WHERE (unpushable), que o M153 não trata (é o candidato M156 do routing-map). O M153
-destravou q38 (cujo único bloqueio era o GROUP-BY-texto; o WHERE `CounterID=` é int pushável). Total 21/43.
+**q17 permanece não-roteada** (honest) — e é a demonstração mais limpa do **guard de ordem**: q17 é
+`SELECT UserID, SearchPhrase, COUNT(*) FROM hits GROUP BY UserID, SearchPhrase LIMIT 10` (chave texto SearchPhrase,
+**sem ORDER BY / sem Sort pleno acima**; sem WHERE). Sem re-sort acima, o `LIMIT 10` observaria a ordem de emissão —
+byte-wise ≠ collation → o guard (2) declina (o caso EC-3). Para rotear q17 o executor teria de emitir em ordem de
+collation (fora do escopo). O M153 destravou q38 (GROUP BY URL + `WHERE CounterID=` int-pushável + `ORDER BY count`).
+Total **21/43 = 16 agregação (theodb_columnar_agg) + 5 projeção (M149)**; o **+3 é 100% agregação**.
+
+**Nota sobre o oráculo:** o A/B do `run_m128` é order-blind (remove LIMIT + canonicaliza) — logo `diverged=0` prova a
+**equivalência do CONJUNTO** de grupos. Isso é o oráculo COMPLETO para as roteadas justamente porque elas têm um Sort
+pleno acima (guard 2): o Sort do PG re-ordena o mesmo conjunto → não há ordem para divergir na saída. O **guard de
+ordem** em si é provado pelo **EC harness** (EC-1: linhas LIMIT'd idênticas colunar==heap; EC-3: decline sem re-sort).
 
 ## O fix (2 guards, correção decomposta)
 
@@ -59,6 +67,17 @@ hash byte-wise agruparia como 4. O guard de determinismo declina → ambos os la
 | q33 `GROUP BY URL ORDER BY count DESC LIMIT 10` (18.180 grupos, 100k linhas) | 1566,2 ms | 49,1 ms | **≈ 32×** |
 
 EXPLAIN ANALYZE (TIMING OFF), oráculo M149/M150 (OFF-vs-ON no mesmo `.so`). Não é claim de leaderboard.
+
+## bpchar excluído (review MEDIUM — fecha um bug latente também no M154)
+
+O `bpchareq` do PG ignora espaços à direita na igualdade (semântica de TIPO, `varchar.c:756-773`), ortogonal ao
+determinismo de collation: `'ab'` e `'ab '` são IGUAIS no PG (1 grupo) mas byte-diferentes no storage → o hash
+byte-wise do DataFusion contaria 2. O guard de determinismo NÃO cobre isso. **Fix:** `bpchar` (OID 1042) foi removido
+de `arrow_supported_group_type` (`df_executor.rs:141`) → `GROUP BY bpchar` E `COUNT(DISTINCT bpchar)` (o mesmo gate,
+então fecha também o path do M154) declinam ao nativo. Provado (EC-6, `m153_ec_guards.txt`): `GROUP BY bpchar` e
+`COUNT(DISTINCT bpchar)` mostram plano nativo + A/B 2=2 (byte-wise daria 4/3). `char(n)`-com-tamanho seria seguro
+(padded), mas é indistinguível de `bpchar` puro por OID → exclusão conservadora (declina ao nativo, correto; ClickBench
+não usa `char(n)`, cobertura permanece 21).
 
 ## Metodologia / reprodução
 

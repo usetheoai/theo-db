@@ -136,10 +136,15 @@ pub(super) fn build_arrow(
     Ok((Schema::new(fields), arrays))
 }
 
-/// Whether `build_arrow` / `arrow_value_to_datum` support this OID as a GROUP BY key column (the same set
-/// `build_arrow` maps: int2/4/8, float4/8, bool, text/varchar/bpchar, timestamp/timestamptz, date).
+/// Whether this OID is safe as a GROUP BY key / `COUNT(DISTINCT)` column for the vectorized path. DataFusion groups
+/// by byte-equality; PG groups by the type's + collation's equality. `bpchar`/`char(n)` (OID 1042) is EXCLUDED
+/// (review MEDIUM): `bpchareq` ignores trailing blanks (a TYPE semantic, `varchar.c:756-773`), so `'ab'` and `'ab '`
+/// are equal in PG but byte-different in storage → the byte-keyed hash would over-count. text (25) / varchar (1043)
+/// have no such trailing-blank rule, and their deterministic-collation equality IS byte-equality (`varlena.c` memcmp
+/// tiebreak). char(n)-with-length is padded uniformly and would be safe, but is indistinguishable from bare bpchar by
+/// OID alone → excluded conservatively (char(n) GROUP BY declines to native; rare, ClickBench uses none).
 pub(super) fn arrow_supported_group_type(typoid: u32) -> bool {
-    matches!(typoid, 21 | 23 | 20 | 700 | 701 | 16 | 25 | 1042 | 1043 | 1114 | 1184 | 1082)
+    matches!(typoid, 21 | 23 | 20 | 700 | 701 | 16 | 25 | 1043 | 1114 | 1184 | 1082)
 }
 
 /// A supported aggregate for the vectorized columnar path — ONLY shapes whose Arrow result type maps to the exact
