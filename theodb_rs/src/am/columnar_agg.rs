@@ -1012,36 +1012,23 @@ unsafe fn deparse_safe_tlist(
                 None => return std::ptr::null_mut(),
             }
         } else if tag == 2 {
-            // M157 — a group-expr (date_trunc) output column. Copy the FuncExpr and rebuild its inner base-rel Var
-            // (post-planning it is OUTER_VAR into the dropped child scan) against `scanrelid` + the true base attno,
-            // so deparse shows `date_trunc('unit', <rel>.col)` and never follows OUTER_VAR. Descriptor-equal: the
-            // FuncExpr's exprType is the group-expr's out_typoid (1114), matching plain_var_tlist's entry.
-            let Some(g) = adm.group_exprs.get(idx) else { return std::ptr::null_mut() };
-            let copied = pg_sys::copyObjectImpl(e as *const c_void) as *mut pg_sys::Node;
-            if copied.is_null() || (*copied).type_ != pg_sys::NodeTag::T_FuncExpr {
-                return std::ptr::null_mut();
+            // M157 — a group-expr (date_trunc) output column. POST-PLANNING the Agg's tlist entry for this slot is a
+            // bare `Var` (the child Sort/scan pre-computed the date_trunc; the GroupAggregate reads it) — NOT the raw
+            // FuncExpr. Build a plain `Var(scanrelid, base_attno, out_typoid)` exactly like the bare-group branch: it
+            // is descriptor-equal (out_typoid == exprType(e) == 1114) and is ONLY descriptor + deparse metadata — the
+            // runtime tuples come from the materialized `run_columnar_grouped_aggs` result (scanrelid=0, never a real
+            // scan). Deparse shows the base `timestamp` column for this slot (cosmetic; the value is byte-identical).
+            match adm.group_exprs.get(idx) {
+                Some(g) => pg_sys::makeVar(
+                    scanrelid as i32,
+                    g.base_attno as pg_sys::AttrNumber,
+                    pg_sys::Oid::from(g.out_typoid),
+                    pg_sys::exprTypmod(e),
+                    pg_sys::exprCollation(e),
+                    0,
+                ) as *mut pg_sys::Expr,
+                None => return std::ptr::null_mut(),
             }
-            let fe = copied as *mut pg_sys::FuncExpr;
-            let arglist = (*fe).args;
-            if !arglist.is_null() {
-                let alen = (*arglist).length;
-                for j in 0..alen {
-                    let cell = (*arglist).elements.add(j as usize);
-                    let node = (*cell).ptr_value as *mut pg_sys::Node;
-                    if !node.is_null() && (*node).type_ == pg_sys::NodeTag::T_Var {
-                        let v = node as *mut pg_sys::Var;
-                        (*cell).ptr_value = pg_sys::makeVar(
-                            scanrelid as i32,
-                            g.base_attno as pg_sys::AttrNumber,
-                            (*v).vartype,
-                            (*v).vartypmod,
-                            (*v).varcollid,
-                            0,
-                        ) as *mut c_void;
-                    }
-                }
-            }
-            copied as *mut pg_sys::Expr
         } else {
             // Copy the Aggref so the original (shared) plan nodes are never mutated, then rebuild its argument Var
             // against the base rel so deparsing the arguments never follows OUTER_VAR into the dropped subtree.
