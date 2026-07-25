@@ -454,10 +454,20 @@ unsafe fn classify_target_node(
                 admit_trace("count_distinct_unsupported_type"); // type not decodable to Arrow → decline
                 return None;
             }
-            if (*var).varcollid != pg_sys::InvalidOid
-                && !pg_sys::get_collation_isdeterministic((*var).varcollid)
-            {
-                admit_trace("count_distinct_nondeterministic_collation"); // ADR-M154-3 / EC-1 → decline
+            // Float DISTINCT diverges (ADR-M154-4 / review HIGH): DataFusion's FloatDistinctCountAccumulator dedups
+            // by IEEE total-order (-0.0 != +0.0; distinct NaN bit-patterns count separately), but PG's float8eq
+            // treats 0.0 == -0.0 and all NaN as equal. Decline float to the native plan (provably-safe class only).
+            let vt = (*var).vartype;
+            if vt == pg_sys::FLOAT4OID || vt == pg_sys::FLOAT8OID {
+                admit_trace("count_distinct_float_ieee_semantics");
+                return None;
+            }
+            // Collation equality (ADR-M154-3 / EC-1): DataFusion count_distinct is byte-wise; PG uses the input
+            // collation for the DISTINCT equality. Only deterministic collations coincide. Use `inputcollid` — the
+            // exact collation PG drives the DISTINCT with (nodeAgg.c) — for precision + defense-in-depth.
+            let coll = (*agg).inputcollid;
+            if coll != pg_sys::InvalidOid && !pg_sys::get_collation_isdeterministic(coll) {
+                admit_trace("count_distinct_nondeterministic_collation");
                 return None;
             }
             Some(TargetSlot::Agg(ParsedAgg { kind: 8, attno }))

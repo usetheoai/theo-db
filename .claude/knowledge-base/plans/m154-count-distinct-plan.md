@@ -64,6 +64,11 @@ Nenhuma nova. O COUNT(DISTINCT) entra pela mesma fronteira do admit→AggSpec→
 - **Rationale:** o count_distinct exato só é trivialmente correto para uma coluna base; DISTINCT em sum/avg tem semântica extra; expr/multi-arg re-materializa. KISS/YAGNI — escopo do que o M152 mediu (q4/q5 são count(DISTINCT col)).
 - **Alternativa rejeitada:** aceitar todo DISTINCT — amplia a superfície A/B sem ganho medido.
 
+### ADR-4 — Declinar COUNT(DISTINCT float4/float8) (review rust-pgrx HIGH)
+- **Decisão:** no branch kind-8, declinar (`admit_trace("count_distinct_float_ieee_semantics")`) quando o tipo da coluna for `FLOAT4OID`/`FLOAT8OID`.
+- **Rationale:** o `FloatDistinctCountAccumulator` do DataFusion dedup por total-order IEEE (`-0.0 ≠ +0.0`; NaN bit-patterns distintos contam separado); o `float8eq` do PG trata `0.0 == -0.0` e todo NaN como igual → `count(DISTINCT float)` diverge silenciosamente (ex.: `{0.0, -0.0}` → DataFusion 2, PG 1). O A/B do ClickBench não tem coluna com `-0.0` → não pega; o review prova o shape que o benchmark não exercita (lição M151). Restringir à classe provadamente-segura (int/text-determinístico) é o mesmo padrão do M151.
+- **Alternativa rejeitada:** normalizar `-0.0→+0.0` + canonicalizar NaN antes do dedup — mais complexo, mais superfície, sem ganho de cobertura medido (nenhuma query ClickBench é `count(DISTINCT float)`).
+
 ### ADR-3 — Guard de collation determinística no COUNT(DISTINCT text) (edge review EC-1)
 - **Decisão:** ao aceitar `count(DISTINCT var)` de coluna colacionável (texto), declinar (`admit_trace("count_distinct_nondeterministic_collation")`) quando a collation da `Var` NÃO for determinística (`!get_collation_isdeterministic(varcollid)`).
 - **Rationale:** o `count_distinct` do DataFusion usa igualdade **byte-wise**; PG COUNT(DISTINCT text) usa a igualdade da collation. Para collation determinística (C/POSIX/default) coincidem (deterministic ⇒ igual = bytes idênticos); para NÃO-determinística (ICU `deterministic=false`) divergem silenciosamente → viola diverged=0. É o análogo, para igualdade, do guard de collation-order do M152. Fail-closed: declina, o nativo resolve correto.

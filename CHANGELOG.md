@@ -16,8 +16,9 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - M154: `COUNT(DISTINCT coluna)` agora roteia ao CustomScan colunar vetorizado (DataFusion `count_distinct` EXATO —
   nunca approx/HLL), subindo a cobertura de agregação do ClickBench. Guard de correção: colunas de texto sob
   collation não-determinística declinam ao plano nativo (a igualdade byte-wise do DataFusion só coincide com a do
-  PostgreSQL sob collation determinística); `count(DISTINCT expr)`, `count(DISTINCT a,b)` e `sum/avg(DISTINCT ...)`
-  continuam no plano nativo. Resultado byte-idêntico ao heap (A/B).
+  PostgreSQL sob collation determinística); `count(DISTINCT expr)`, `count(DISTINCT a,b)`, `sum/avg(DISTINCT ...)` e
+  `count(DISTINCT float4/float8)` (a igualdade IEEE do DataFusion trata `-0.0 ≠ +0.0`/NaN-bits distintos, o
+  PostgreSQL trata `0.0 = -0.0`/NaN igual) continuam no plano nativo. Resultado byte-idêntico ao heap (A/B).
 
 ### Changed
 
