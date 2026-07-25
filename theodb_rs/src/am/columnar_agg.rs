@@ -115,7 +115,7 @@ struct ParsedAgg {
 /// over a single base relation that is EITHER a columnar table (mode 0 — decode stripes) OR a heap table with a
 /// usable Arrow cache (mode 1 — M101 HTAP)? Returns (mode, base RTE index, parsed aggs), or None (→ native plan).
 /// Commute a `ZoneOp` for a `Const OP Var` clause normalised to `Var OP' Const`.
-fn flip_op(op: ZoneOp) -> ZoneOp {
+pub(crate) fn flip_op(op: ZoneOp) -> ZoneOp {
     match op {
         ZoneOp::Lt => ZoneOp::Gt,
         ZoneOp::Le => ZoneOp::Ge,
@@ -127,7 +127,7 @@ fn flip_op(op: ZoneOp) -> ZoneOp {
 
 /// Encode a `Const`'s Datum to `const_bits` in the column's `MinMaxKind` domain — MUST match `compute_minmax`
 /// (ints as `i64 as u64`, floats as `f64::to_bits`). `None` on a domain mismatch (fail-safe → clause not pushed).
-unsafe fn encode_const_bits(datum: pg_sys::Datum, kind: MinMaxKind) -> Option<u64> {
+pub(crate) unsafe fn encode_const_bits(datum: pg_sys::Datum, kind: MinMaxKind) -> Option<u64> {
     Some(match kind {
         MinMaxKind::I2 => (i16::from_datum(datum, false)? as i64) as u64,
         MinMaxKind::I4 => (i32::from_datum(datum, false)? as i64) as u64,
@@ -143,7 +143,7 @@ unsafe fn encode_const_bits(datum: pg_sys::Datum, kind: MinMaxKind) -> Option<u6
 /// is the column-type-NATIVE btree comparison (strategy 1-5, both input types == the column type) and the const is
 /// the same type. Returns `None` for ANY other shape (function, OR, cross-type, two-Var, NULL const, non-min/max-able
 /// column) → the caller MUST fall back to the native plan so the WHERE is applied correctly.
-unsafe fn extract_zone_predicate(clause: *mut pg_sys::Node, relid: i32) -> Option<ZonePredicate> {
+pub(crate) unsafe fn extract_zone_predicate(clause: *mut pg_sys::Node, relid: i32) -> Option<ZonePredicate> {
     if clause.is_null() || (*clause).type_ != pg_sys::NodeTag::T_OpExpr {
         return None;
     }

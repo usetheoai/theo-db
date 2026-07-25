@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Chunk-group filtering no scan colunar (M150): um `WHERE col op const` sobre `theodb_columnar` pula chunk-groups inteiros cujo zone-map min/max prova não conter match, sem descomprimi-los (estilo Citus chunk-group filtering). Reusa o `chunk_can_match`/`directory` do M105 e o CustomScan do M149. Métricas SQL `theodb_columnar_chunks_skipped()`/`_scanned()`; GUC `theodb.enable_chunk_skip` (default on). (#M150)
 
 ### Changed
 
