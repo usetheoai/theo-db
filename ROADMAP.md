@@ -2665,7 +2665,7 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 ---
 
-## M151 — [ ] Ampliar a cobertura do CustomScan vetorizado (DataFusion)
+## M151 — [x] Ampliar a cobertura do CustomScan vetorizado (DataFusion)
 
 > Added 2026-07-24 (`/roadmap-feature columnar-scan-optimization`). Grill: `.claude/knowledge-base/grills/columnar-scan-optimization-feature-grill.md`.
 
