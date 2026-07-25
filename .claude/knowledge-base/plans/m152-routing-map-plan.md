@@ -92,9 +92,9 @@ não resolve (q33). Raciocínio: ADR-1, measurement-first.
 - **REFACTOR:** garantir zero mudança de roteamento (o admit ainda declina/aceita as mesmas queries — o trace só reporta).
 
 #### Acceptance criteria
-- [ ] Com `THEODB_ADMIT_TRACE=1`, cada query declinada emite `decline: <razão>` no log do backend (verificado por: grep no log após rodar as 43).
-- [ ] Com o flag off, zero emissão e roteamento IDÊNTICO ao M151 (verificado por: `columnar_customscan_count` == 14, `diverged` == 0 — behavior-neutral).
-- [ ] `cargo build` verde; `cargo clippy` limpo.
+- [ ] Com `THEODB_ADMIT_TRACE=1`, uma query `COUNT(DISTINCT UserID)` emite exatamente 1 linha `decline: aggdistinct` no log (verificado por: `grep -c 'decline: aggdistinct' pglog` == 1).
+- [ ] Com o flag off, `run_m128 --agg` reporta `columnar_customscan_count == 14` e `result_ab.diverged == 0` (verificado por: o JSON do run — behavior-neutral vs M151).
+- [ ] `cargo build` sai exit 0 e `cargo clippy 2>&1 | grep -c warning` == 0 (verificado por: os exit codes).
 
 #### DoD
 - Teste passa (RED→GREEN no droplet); build verde; behavior-neutral confirmado (cobertura 14 inalterada).
@@ -122,9 +122,9 @@ de declínio emitida — o ground-truth. Raciocínio: resolve a ambiguidade (q33
 - **REFACTOR:** validar consistência — TODA query não-roteada tem ≥1 razão; TODA roteada (14) tem ZERO trace de declínio (cross-check com o JSON).
 
 #### Acceptance criteria
-- [ ] Cada uma das ~29 não-roteadas tem a razão primária de declínio capturada do trace (verificado por: o log tem uma linha `decline:` por query não-roteada).
-- [ ] As 14 roteadas não emitem trace de declínio (verificado por: cross-check log vs JSON — consistência).
-- [ ] O droplet é destruído ao fim (0 efêmeros).
+- [ ] Cada uma das 29 queries não-roteadas tem ≥1 linha `decline:` no trace (verificado por: 29 queries com razão mapeada, 0 sem razão).
+- [ ] As 14 queries roteadas emitem 0 linhas `decline:` (verificado por: cross-check log×JSON — nenhuma routed com trace de declínio).
+- [ ] `doctl compute droplet list` não lista o droplet efêmero ao fim (verificado por: 0 efêmeros).
 
 #### DoD
 - Log de trace + JSON salvos; razão primária por query extraída; consistência com o JSON confirmada.
@@ -154,9 +154,9 @@ Consolidar em um mapa acionável: cada query → classe → razão (`file:line`)
 - **REFACTOR:** veredito honesto — se GROUP BY texto adiciona menos que COUNT DISTINCT (por bloqueios-múltiplos), re-priorizar M153↔M154 e anotar no ROADMAP.
 
 #### Acceptance criteria
-- [ ] `docs/benchmarks/m152-routing-map.md`: tabela das ~29 → classe → razão (`file:line`) → bloqueios (pode ser >1).
-- [ ] Cobertura marginal por fatia: M153 (GROUP BY texto) = +X queries; M154 (COUNT DISTINCT) = +Y; M155 (Top-N) = +Z — número medido (queries cujo ÚNICO bloqueio remanescente é o da fatia).
-- [ ] Veredito: a ordem de M153-M155 é confirmada OU corrigida com base no ganho marginal medido.
+- [ ] `docs/benchmarks/m152-routing-map.md` tem uma linha de tabela para cada uma das 29 queries com colunas classe/razão(`file:line`)/bloqueios (verificado por: 29 linhas de dados na tabela).
+- [ ] O report declara os inteiros +X (M153), +Y (M154), +Z (M155) — queries cujo conjunto de bloqueios é fechado pela fatia (verificado por: 3 números explícitos + a lista de query-ids de cada).
+- [ ] O report tem uma linha de veredito que ou confirma a ordem M153<M154<M155 ou a reordena, citando os +X/+Y/+Z medidos (verificado por: a frase de veredito referencia os números).
 - [ ] CHANGELOG `[Unreleased]`.
 
 #### DoD
