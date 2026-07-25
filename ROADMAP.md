@@ -2836,7 +2836,7 @@ bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan s�
 
 ---
 
-## M158 — [ ] Materialização preguiçosa de colunas de saída (late materialization) — perf do scan colunar
+## M158 — [x] Materialização preguiçosa de colunas de saída (late materialization) — perf do scan colunar
 
 > **Candidato B — o MAIOR lever de performance** (apontado por M148 + M155 com evidência). Added 2026-07-25 (`/roadmap-feature late-materialization`). O M148 mediu que o gargalo dominante do scan colunar é a **materialização row-by-row (~80% do custo, `heap_form_tuple`/`palloc` por tupla)**, que NENHUM milestone de cobertura resolve. Este é o único caminho que muda o *tempo* do path já-colunar. Se a meta é "2-3× mais lento que ClickHouse", é aqui que se ataca o teto estrutural (measurement-first; aceita honest-negative se o ganho medido não materializar).
 
