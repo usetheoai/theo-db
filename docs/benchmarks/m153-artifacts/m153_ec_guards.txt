@@ -1,0 +1,87 @@
+### EC: GROUP BY text ORDER BY count DESC LIMIT (re-sorted above) — expect ROUTED + A/B equal
+                  QUERY PLAN                   
+-----------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: (count(*)) DESC
+         ->  Custom Scan (theodb_columnar_agg)
+(4 rows)
+
+-- columnar:
+ phrase |  c  
+--------+-----
+        | 286
+ p1     | 144
+ p8     | 144
+ p2     | 143
+ p3     | 143
+(5 rows)
+
+-- heap:
+ phrase |  c  
+--------+-----
+        | 286
+ p1     | 144
+ p8     | 144
+ p2     | 143
+ p3     | 143
+(5 rows)
+
+### EC full A/B: full grouped set order-insensitive (columnar vs heap) — expect 0 divergent rows
+ divergent_rows 
+----------------
+              0
+(1 row)
+
+### EC-2: NULL text group key present — A/B on the NULL group
+     q      | col_nullcount | heap_nullcount 
+------------+---------------+----------------
+ null_group |           286 |            286
+(1 row)
+
+### EC-3: GROUP BY text ORDER BY text (direct group order, no re-sort by non-key) — routed-if-resorted OR declined, A/B correct
+             QUERY PLAN              
+-------------------------------------
+ Limit
+   ->  GroupAggregate
+         Group Key: phrase
+         ->  Sort
+               Sort Key: phrase
+               ->  Seq Scan on g_col
+(6 rows)
+
+ divergent 
+-----------
+         0
+(1 row)
+
+### EC-4 (grouping correctness): GROUP BY text under NON-deterministic collation must DECLINE
+-- EXPLAIN must NOT show theodb_columnar_agg (non-det collation declines at admit):
+              QUERY PLAN               
+---------------------------------------
+ Sort
+   Sort Key: (count(*)) DESC
+   ->  GroupAggregate
+         Group Key: s
+         ->  Sort
+               Sort Key: s COLLATE ci2
+               ->  Seq Scan on gci_col
+(7 rows)
+
+-- A/B: PG groups abc==ABC (ci2) -> 2 groups; a byte-wise router would give 4 groups. Both must match (declined):
+     q     | col_grps | heap_grps 
+-----------+----------+-----------
+ ci_groups |        2 |         2
+(1 row)
+
+### EC-5 (regression): numeric GROUP BY (AGG_SORTED) unchanged — still routes
+            QUERY PLAN             
+-----------------------------------
+ Custom Scan (theodb_columnar_agg)
+(1 row)
+
+ divergent 
+-----------
+         0
+(1 row)
+
