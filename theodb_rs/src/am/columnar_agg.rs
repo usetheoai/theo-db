@@ -998,6 +998,7 @@ unsafe extern "C-unwind" fn begin_custom_scan(
                 2 => ZoneOp::Eq,
                 3 => ZoneOp::Ge,
                 4 => ZoneOp::Gt,
+                5 => ZoneOp::Ne, // M151 — `<>` round-trips through custom_private (encode writes `p.op as i32` = 5)
                 _ => return Err(format!("columnar_agg: bad zone op {opn}")),
             };
             preds.push(ZonePredicate { col, op, const_bits: (hi << 32) | lo });
