@@ -236,6 +236,15 @@ classe de tipo (ex.: `<>` em text com collation) → honest-negative (não rotei
 - [ ] CHANGELOG `[Unreleased]` atualizado.
 - [ ] Droplet efêmero destruído.
 
+## Plan-confidence note
+
+Structural verdict SHIPPABLE_WITH_CAVEATS: coverage matrix 100%, baseline context completo, AC executáveis
+(acceptable_ratio 0.9), concurrency posture declarada, drawbacks (3) + unresolved (none) completos, ADRs com
+alternativas, zero citação fabricada. Os 2 caps residuais (`auditor_unavailable_cargo-udeps`,
+`symbol_fab_unverifiable_rust`) são ambientais — a verificação de símbolos rust via pgrx não linka localmente
+(mesma situação do M149/M150 que shipparam). O gate REAL de code-quality rust roda no droplet durante o
+`/implement`. Não são defeitos do plano.
+
 ## Final Phase — Integration Validation
 
 Após as 4 fases: build no droplet, rodar a suíte de testes + `run_m128 --agg` (diverged=0, count≥12) + o geomean.
