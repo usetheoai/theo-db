@@ -2687,7 +2687,7 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 ---
 
-## M152 — [ ] Spike: mapear e medir o estado de roteamento das 29 queries não-vetorizadas (gate measurement-first)
+## M152 — [x] Spike: mapear e medir o estado de roteamento das 29 queries não-vetorizadas (gate measurement-first)
 
 > Added 2026-07-25 (`/roadmap-feature columnar-gap-closing`). Blueprint: `.claude/knowledge-base/discoveries/blueprints/columnar-gap-closing-strategy-blueprint.md` (deep research M148-M151, R0 web + acervo).
 
@@ -2711,6 +2711,8 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 ## M153 — [ ] Rotear GROUP BY por chave de TEXTO ao CustomScan DataFusion (hash, guardado por collation determinística)
 
+> **M152 measured (2026-07-25, `docs/benchmarks/m152-routing-map.md`):** o real blocker das GROUP-BY-texto (q16,17,33,38) é `swap_sorted_text_group_collation` (o planner escolhe AGG_SORTED p/ `ORDER BY count LIMIT` → texto declina por collation) + o deparse ORDER-BY-sobre-agregado — NÃO o group-key texto (já aceito por `arrow_supported_group_type`). Cobertura marginal medida ~3. **Executar APÓS M154** (COUNT DISTINCT tem ganho mais limpo). Escopo revisado: tratar o AGG_SORTED-texto (collation determinística) + o deparse.
+
 > Added 2026-07-25 (`/roadmap-feature columnar-gap-closing`). Blueprint: `.claude/knowledge-base/discoveries/blueprints/columnar-gap-closing-strategy-blueprint.md` (deep research M148-M151, R0 web + acervo).
 
 **Objective:** rotear os agregados `GROUP BY <coluna texto>` (ex. `GROUP BY URL`, `GROUP BY SearchPhrase` — o padrão dominante do ClickBench não-coberto) pelo hash-group byte-keyed do DataFusion (`GroupValuesBytes`/`ArrowBytesMap`), removendo o declínio estreito remanescente no path `AGG_SORTED` (`columnar_agg.rs:868-871`). O caminho está quase pronto: `df_executor.rs:141-142` já aceita texto como group key. Único risco A/B real: collation.
@@ -2733,6 +2735,8 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 ## M154 — [ ] Rotear COUNT(DISTINCT) exato ao CustomScan DataFusion
 
+> **M152 measured (2026-07-25):** 7 first-blockers `agg_distinct_filter_order`; cobertura marginal ~2 puras (q4,q5) + destrava parte dos compostos. É a fatia mais LIMPA (parity-clean, menor risco A/B) → **executar PRIMEIRO das 3**.
+
 > Added 2026-07-25 (`/roadmap-feature columnar-gap-closing`). Blueprint: `.claude/knowledge-base/discoveries/blueprints/columnar-gap-closing-strategy-blueprint.md` (deep research M148-M151, R0 web + acervo).
 
 **Objective:** rotear os agregados `COUNT(DISTINCT col)` pelo `DistinctCountAccumulator` EXATO do DataFusion (HashSet, não HLL), removendo o declínio explícito de `aggdistinct` (`columnar_agg.rs:399`). Agregado retorna poucas linhas → escapa do imposto de re-materialização (Classe 4/M148). Semanticamente parity-clean (NULL excluído, grupo vazio → 0 nos dois).
@@ -2754,6 +2758,8 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 ---
 
 ## M155 — [ ] Rotear Top-N (ORDER BY … LIMIT k) ao operador TopK vetorizado do DataFusion
+
+> **M152 measured (2026-07-25):** o `ORDER BY count(*) DESC LIMIT` sobre o agregado (deparse/AGG_SORTED) é um bloqueio TRANSVERSAL que atinge GROUP-BY-texto, COUNT(DISTINCT) e text-`<>`. Integra com M153; **executar por último**. NOTA: o spike revelou também que **text `<>`/LIKE no WHERE** (8 first-blockers, ~4 marginal — o follow-up ADR-4 do M151) é um lever grande NÃO coberto por M153-M155 → candidato a M156 (serialização de const-texto no `custom_private`).
 
 > Added 2026-07-25 (`/roadmap-feature columnar-gap-closing`). Blueprint: `.claude/knowledge-base/discoveries/blueprints/columnar-gap-closing-strategy-blueprint.md` (deep research M148-M151, R0 web + acervo).
 
