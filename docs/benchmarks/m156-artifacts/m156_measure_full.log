@@ -1,0 +1,269 @@
+########## EC HARNESS (guards + round-trip) ##########
+SET
+SET
+psql:benchmarks/m156_ec_harness.sql:9: NOTICE:  collation "ci_nd" does not exist, skipping
+DROP COLLATION
+CREATE COLLATION
+psql:benchmarks/m156_ec_harness.sql:12: NOTICE:  table "t_col" does not exist, skipping
+DROP TABLE
+psql:benchmarks/m156_ec_harness.sql:13: NOTICE:  table "t_heap" does not exist, skipping
+DROP TABLE
+CREATE TABLE
+INSERT 0 2000
+UPDATE 40
+UPDATE 40
+CREATE TABLE
+INSERT 0 2000
+========== ROUTED (expect Custom Scan + A/B equal) ==========
+### R1: count(*) WHERE phrase = 'p1'
+            QUERY PLAN             
+-----------------------------------
+ Custom Scan (theodb_columnar_agg)
+(1 row)
+
+ q  | col_val | heap_val 
+----+---------+----------
+ eq |     200 |      200
+(1 row)
+
+### R2: count(*) WHERE phrase <> '' (NULL excluded)
+            QUERY PLAN             
+-----------------------------------
+ Custom Scan (theodb_columnar_agg)
+(1 row)
+
+    q     | col_val | heap_val 
+----------+---------+----------
+ ne_empty |    1960 |     1960
+(1 row)
+
+### R3: count(*) WHERE url LIKE '%x%'
+            QUERY PLAN             
+-----------------------------------
+ Custom Scan (theodb_columnar_agg)
+(1 row)
+
+  q   | col_val | heap_val 
+------+---------+----------
+ like |    1681 |     1681
+(1 row)
+
+### R4: count(*) WHERE url NOT LIKE 'http%'
+            QUERY PLAN             
+-----------------------------------
+ Custom Scan (theodb_columnar_agg)
+(1 row)
+
+    q     | col_val | heap_val 
+----------+---------+----------
+ not_like |     319 |      319
+(1 row)
+
+### EC-1: LIKE escape — WHERE url LIKE 'a%b' matches literal a%b (default \ escape)
+            QUERY PLAN             
+-----------------------------------
+ Custom Scan (theodb_columnar_agg)
+(1 row)
+
+      q      | col_val | heap_val 
+-------------+---------+----------
+ like_escape |     279 |      279
+(1 row)
+
+### EC-5: mixed text + numeric WHERE — phrase = 'p1' AND uid > 5
+            QUERY PLAN             
+-----------------------------------
+ Custom Scan (theodb_columnar_agg)
+(1 row)
+
+   q   | col_val | heap_val 
+-------+---------+----------
+ mixed |     160 |      160
+(1 row)
+
+### EC-2: round-trip of special needles (empty / % / _ / backslash / multibyte)
+      q       | col_val | heap_val 
+--------------+---------+----------
+ rt_empty     |      40 |       40
+ rt_pct       |     279 |      279
+ rt_uscore    |       0 |        0
+ rt_multibyte |       0 |        0
+(4 rows)
+
+========== DECLINED (expect Seq Scan / native, NO Custom Scan; A/B still equal) ==========
+### EC-3a: ILIKE declines
+              QUERY PLAN               
+---------------------------------------
+ Aggregate
+   ->  Seq Scan on t_col
+         Filter: (url ~~* '%X%'::text)
+(3 rows)
+
+   q   | col_val | heap_val 
+-------+---------+----------
+ ilike |    1681 |     1681
+(1 row)
+
+### EC-3b: regex (~) declines
+            QUERY PLAN             
+-----------------------------------
+ Aggregate
+   ->  Seq Scan on t_col
+         Filter: (url ~ 'x'::text)
+(3 rows)
+
+   q   | col_val | heap_val 
+-------+---------+----------
+ regex |    1681 |     1681
+(1 row)
+
+### EC-3c: bpchar (char(4)) predicate declines
+              QUERY PLAN              
+--------------------------------------
+ Aggregate
+   ->  Seq Scan on t_col
+         Filter: (bp = 'ab0'::bpchar)
+(3 rows)
+
+   q    | col_val | heap_val 
+--------+---------+----------
+ bpchar |    1000 |     1000
+(1 row)
+
+### EC-3d: non-deterministic collation declines
+              QUERY PLAN               
+---------------------------------------
+ Aggregate
+   ->  Seq Scan on t_col
+         Filter: (citext = 'c1'::text)
+(3 rows)
+
+    q    | col_val | heap_val 
+---------+---------+----------
+ nd_coll |     667 |      667
+(1 row)
+
+### EC-4: NULL const (phrase = NULL) declines; both sides 0 (3-valued)
+           QUERY PLAN           
+--------------------------------
+ Aggregate
+   ->  Result
+         One-Time Filter: false
+(3 rows)
+
+     q      | col_val | heap_val 
+------------+---------+----------
+ null_const |       0 |        0
+(1 row)
+
+### EC-7 (council MEDIUM): LIKE trailing backslash declines -> native ERROR 22025 (never silent rows)
+              QUERY PLAN              
+--------------------------------------
+ Aggregate
+   ->  Seq Scan on t_col
+         Filter: (url ~~ 'ab\'::text)
+(3 rows)
+
+-- expect ERROR 22025 (native semantics), NOT a count:
+ count 
+-------
+     0
+(1 row)
+
+========== EC-6 (council HIGH): non-UTF-8 server encoding must NOT panic — decline to native ==========
+psql:benchmarks/m156_ec_harness.sql:115: NOTICE:  database "lat1_m156" does not exist, skipping
+DROP DATABASE
+CREATE DATABASE
+You are now connected to database "lat1_m156" as user "pgtest".
+SET
+SET
+CREATE EXTENSION
+CREATE TABLE
+INSERT 0 300
+CREATE TABLE
+INSERT 0 300
+### EC-6: WHERE txt = chr(233) [non-UTF-8 byte] — must NOT error; declines; A/B equal
+            QUERY PLAN             
+-----------------------------------
+ Aggregate
+   ->  Seq Scan on l_col
+         Filter: (txt = '�'::text)
+(3 rows)
+
+        q        | col_val | heap_val 
+-----------------+---------+----------
+ latin1_nonascii |     100 |      100
+(1 row)
+
+### EC-6b: WHERE txt = 'ascii' [ASCII needle in LATIN1 db] — routes fine, A/B equal
+            QUERY PLAN             
+-----------------------------------
+ Custom Scan (theodb_columnar_agg)
+(1 row)
+
+      q       | col_val | heap_val 
+--------------+---------+----------
+ latin1_ascii |     200 |      200
+(1 row)
+
+You are now connected to database "postgres" as user "pgtest".
+DROP DATABASE
+========== DONE — every col_val MUST equal its heap_val ==========
+########## run_m128 --agg HEAD 100k ##########
+  q21 cold=1.3159 hot=1.3002 cs=False ab=True
+  q22 cold=1.3504 hot=1.3447 cs=False ab=True
+  q23 cold=1.2978 hot=1.2992 cs=True ab=True
+  q24 cold=0.1528 hot=0.1513 cs=True ab=True
+  q25 cold=0.1427 hot=0.1421 cs=True ab=True
+  q26 cold=0.1517 hot=0.1509 cs=True ab=True
+  q27 cold=1.3217 hot=1.3161 cs=False ab=True
+  q28 cold=1.9988 hot=2.0042 cs=False ab=True
+  q29 cold=1.4102 hot=1.3889 cs=False ab=True
+  q30 cold=0.048 hot=0.0457 cs=True ab=True
+  q31 cold=0.0577 hot=0.0563 cs=True ab=True
+  q32 cold=0.1967 hot=0.1935 cs=True ab=True
+  q33 cold=0.0449 hot=0.0435 cs=True ab=True
+  q34 cold=2.0112 hot=2.0007 cs=False ab=True
+  q35 cold=1.3245 hot=1.3293 cs=False ab=True
+  q36 cold=0.0041 hot=0.0019 cs=True ab=True
+  q37 cold=0.0025 hot=0.0016 cs=True ab=True
+  q38 cold=0.0024 hot=0.0016 cs=True ab=True
+  q39 cold=1.2819 hot=1.2813 cs=False ab=True
+  q40 cold=1.2957 hot=1.294 cs=False ab=True
+  q41 cold=0.0035 hot=0.0021 cs=True ab=True
+  q42 cold=1.2966 hot=1.2905 cs=False ab=True
+wrote /root/m156_head.json  status=OK
+  queries ok=43/43 errored=0 columnar_customscan=31 hot_geomean=0.06219s
+  result A/B: byte-identical (columnar==heap) (pass=43, diverged=0)
+########## run_m128 --agg SYSTEMATIC 300k ##########
+  q21 cold=1.318 hot=1.2977 cs=False ab=True
+  q22 cold=1.3472 hot=1.3404 cs=False ab=True
+  q23 cold=1.3044 hot=1.3093 cs=True ab=True
+  q24 cold=0.1519 hot=0.1502 cs=True ab=True
+  q25 cold=0.1424 hot=0.1415 cs=True ab=True
+  q26 cold=0.1527 hot=0.1522 cs=True ab=True
+  q27 cold=1.3391 hot=1.3361 cs=False ab=True
+  q28 cold=2.0006 hot=2.0207 cs=False ab=True
+  q29 cold=1.4263 hot=1.4125 cs=False ab=True
+  q30 cold=0.0479 hot=0.0458 cs=True ab=True
+  q31 cold=0.0563 hot=0.0562 cs=True ab=True
+  q32 cold=0.1956 hot=0.1937 cs=True ab=True
+  q33 cold=0.044 hot=0.042 cs=True ab=True
+  q34 cold=2.0116 hot=2.0119 cs=False ab=True
+  q35 cold=1.3356 hot=1.3254 cs=False ab=True
+  q36 cold=0.004 hot=0.0016 cs=True ab=True
+  q37 cold=0.0025 hot=0.002 cs=True ab=True
+  q38 cold=0.0025 hot=0.0017 cs=True ab=True
+  q39 cold=1.3071 hot=1.3035 cs=False ab=True
+  q40 cold=1.3032 hot=1.3001 cs=False ab=True
+  q41 cold=0.0034 hot=0.002 cs=True ab=True
+  q42 cold=1.3239 hot=1.3118 cs=False ab=True
+wrote /root/m156_systematic.json  status=OK
+  queries ok=43/43 errored=0 columnar_customscan=31 hot_geomean=0.06216s
+  result A/B: byte-identical (columnar==heap) (pass=43, diverged=0)
+########## SUMMARY ##########
+== /root/m156_head.json ==
+customscan_count= 31 ab= {'pass': 43, 'diverged': 0, 'verdict': 'byte-identical (columnar==heap)'}
+== /root/m156_systematic.json ==
+customscan_count= 31 ab= {'pass': 43, 'diverged': 0, 'verdict': 'byte-identical (columnar==heap)'}
+MEASURE_DONE
