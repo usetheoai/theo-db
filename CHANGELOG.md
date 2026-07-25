@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Cobertura do CustomScan vetorizado DataFusion (M151): o agregado com `WHERE col <> const` sobre `theodb_columnar` passa a rotear pelo caminho vetorizado (batch Arrow), não mais tuple-a-tuple. `<>` é detectado como o negador do `=` btree (não é estratégia btree) e aplicado só pelo `Filter` DataFusion (nunca poda chunk). Escopo: `<>` numérico/temporal; `<>` em texto é follow-up (const-texto não cabe na serialização atual — ADR-4). (#M151)
 
 ### Changed
 
