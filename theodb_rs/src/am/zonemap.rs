@@ -13,16 +13,22 @@ use super::columnar_codec::MinMaxKind;
 
 /// A pushed btree comparison, reduced to the column's min/max domain (ADR D2/D5). `Var(col) <op> const`.
 #[derive(Clone, Copy, PartialEq, Debug)]
+// `#[repr(i32)]` with EXPLICIT discriminants (review MEDIUM): the agg path serializes `op as i32` into the
+// CustomScan `custom_private` (`columnar_agg::encode_private`) and decodes it by literal integer
+// (`decode_private`). That is the ONE op↔int mapping the compiler does NOT check — reordering the variants would
+// silently corrupt the pushed predicate. Pinning the discriminants makes the encode/decode round-trip stable.
+#[repr(i32)]
 pub(crate) enum ZoneOp {
-    Lt,
-    Le,
-    Eq,
-    Ge,
-    Gt,
-    /// `<>` (btree strategy 6). M151 — NEVER used for zone-map pruning (a chunk `[min,max]` with min≠max almost
-    /// always contains a value ≠ const). It rides the predicate list ONLY to reach the DataFusion `Filter`
+    Lt = 0,
+    Le = 1,
+    Eq = 2,
+    Ge = 3,
+    Gt = 4,
+    /// `<>` — M151. `<>` is NOT a btree strategy of its own (btree defines only 1-5); it is detected as the
+    /// NEGATOR of the btree `=` (strategy 3). NEVER used for zone-map pruning (a chunk `[min,max]` with min≠max
+    /// almost always contains a value ≠ const). It rides the predicate list ONLY to reach the DataFusion `Filter`
     /// (`build_filter_expr` → `not_eq`); `chunk_can_match` treats it as "must scan" (`excluded(Ne) = false`).
-    Ne,
+    Ne = 5,
 }
 
 /// A single pushable predicate: `column[col] <op> const` where `const_bits` is in the column's `MinMaxKind` domain.
