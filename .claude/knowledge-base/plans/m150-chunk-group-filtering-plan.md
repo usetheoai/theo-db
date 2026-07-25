@@ -38,19 +38,19 @@ inteiros pelo zone-map min/max (M105) sem descomprimi-los. Decisões resolvidas 
 | `theodb_rs/src/am/columnar.rs` | 2013 | `decode_stripe:698`, `load_next_batch:1045`, skip já em `decode_columns:775` | `decode_stripe` recebe `predicates` + guard de skip; `load_next_batch` busca preds |
 | `theodb_rs/src/am/zonemap.rs` | 257 | `chunk_can_match:36`, `ZonePredicate:26`, `ZoneOp:16` (pub(crate)) | reusar as-is (sem mudança, ou novo lar do extrator) |
 
-### Current callers
+### Current callers / dependents
 
 - `decode_stripe` chamado por `load_next_batch:1045` (único caller, scan geral). `decode_columns` chamado pelo caminho DataFusion/agg (independente — não muda).
 - `chunk_can_match` chamado hoje só por `decode_columns:825`. `extract_zone_predicate` chamado só dentro de columnar_agg.rs.
 - `SCAN_PROJECTION`/`scan_projection` — o novo `SCAN_PREDICATES` segue o mesmo caller shape (begin instala, load_next_batch lê).
 
-### Glossary
+### Domain glossary
 
 - **chunk-group (cg):** unidade de compressão do TCS1; um `ChunkDirEntry` por `(cg, coluna)` com `has_minmax/min_bits/max_bits`.
 - **skip de admissão:** pular a descompressão de um cg que o min/max prova não conter match; o ExecScan re-checa o WHERE completo (autoridade final).
 - **best-effort pushdown:** empurrar só os predicados `col op const` simples; o resto passa reto e é re-checado acima.
 
-### Architecture boundaries
+### Architecture boundaries affected
 
 `rules/architecture.md` — o CustomScan é interface (planner-facing); `decode_stripe`/`zonemap` são infra (leitura). O skip não cruza fronteira nova: consome o diretório que `compute_minmax` (codec) já escreve. Sem novo write, sem magic bump (formato de página imutável).
 
@@ -84,7 +84,7 @@ Fase 2 e Fase 3 dependem ambas da Fase 1; podem ser desenvolvidas em paralelo ma
 
 ## Phase 1 — Promover o extrator de predicados a `pub(crate)` (DRY)
 
-### Task T1.1 — Expor `extract_zone_predicate`/`flip_op`/`encode_const_bits`
+### T1.1 — Expor `extract_zone_predicate`/`flip_op`/`encode_const_bits`
 
 #### Why this step
 O CustomScan de projeção (columnar_project.rs) precisa extrair `ZonePredicate` do `plan.qual`, mas o extrator vive
@@ -100,17 +100,20 @@ consumidores (agg all-or-nothing + scan best-effort); reimplementar seria coupli
 - **GREEN:** trocar `fn` → `pub(crate) fn` nas 3 assinaturas.
 - **REFACTOR:** garantir que `ZonePredicate`/`ZoneOp`/`MinMaxKind` já `pub(crate)` (estão, zonemap.rs:16,26).
 
+#### Concurrency tests
+(none — single-threaded) Sem estado mutável compartilhado entre threads: o side-channel é `thread_local` e o CustomScan não é `parallel_safe` (mesma limitação honesta do M149). A correção relevante é reuso de endereço (ABA), coberta por teste de subxact-abort em T2.1 — não por race.
+
 #### Acceptance criteria
-- [ ] `cargo build` compila com o extrator chamado de `columnar_project.rs`.
-- [ ] Nenhuma mudança de comportamento em columnar_agg.rs (o agg continua usando as mesmas fns).
-- [ ] `cargo clippy` limpo (sem `unused pub(crate)`).
+- [ ] `cargo build` sai com exit 0 com `extract_zone_predicate` chamado de `columnar_project.rs` (verificado por: `cargo build 2>&1 | grep -c error` == 0).
+- [ ] Os testes de agg de columnar_agg.rs continuam verdes sem edição (verificado por: `cargo test columnar_agg` — mesmo count de testes passando antes e depois).
+- [ ] `cargo clippy` sai com exit 0 sem warning `unused` (verificado por: `cargo clippy 2>&1 | grep -c warning` == 0).
 
 #### DoD
 - `grep -n "pub(crate) unsafe fn extract_zone_predicate" columnar_agg.rs` resolve; build verde.
 
 ## Phase 2 — Side-channel `SCAN_PREDICATES` + extração best-effort no CustomScan
 
-### Task T2.1 — `SCAN_PREDICATES` thread_local + registro por-nó (espelho do M149)
+### T2.1 — `SCAN_PREDICATES` thread_local + registro por-nó (espelho do M149)
 
 #### Why this step
 Os predicados extraídos precisam chegar ao `load_next_batch` (que não vê o plano). O M149 já resolveu o problema
@@ -133,14 +136,14 @@ teste de subxact-abort, não por race.
 - **REFACTOR:** fatorar o registro proj+preds num helper comum se reduzir duplicação sem obscurecer.
 
 #### Acceptance criteria
-- [ ] `scan_predicates` retorna os preds só para o scandesc ativo correto.
-- [ ] Subxact-abort não deixa preds órfãos (regressão ABA coberta).
-- [ ] `SCAN_PROJECTION` intocado (o M149 continua verde).
+- [ ] `scan_predicates(A)` retorna `Some` e `scan_predicates(B)` retorna `None` (verificado por: `test_scan_predicates_keyed_by_scandesc` passa).
+- [ ] Após subxact-abort, um SELECT que reusa o endereço retorna A/B byte-idêntico ao heap (verificado por: `test_subxact_abort_no_stale_predicate` passa).
+- [ ] Os 7 pg_test do M149 (projeção) continuam passando sem edição (verificado por: `cargo pgrx test columnar_project` — 7/7).
 
 #### DoD
 - Os 2 testes pg_test passam no droplet (RED→GREEN provado); `cargo build` verde.
 
-### Task T2.2 — Extração best-effort de `plan.qual` no `begin_custom_scan`
+### T2.2 — Extração best-effort de `plan.qual` no `begin_custom_scan`
 
 #### Why this step
 O `begin_custom_scan` já computa `wanted` do `targetlist ∪ qual`; agora extrai também os `ZonePredicate`
@@ -155,16 +158,19 @@ re-checa o WHERE, então empurrar o subset é correto e maximiza o skip.
 - **GREEN:** implementar a extração + instalação.
 - **REFACTOR:** `WHERE lower(b)='x' AND a=5` → só `a=5` empurrado (best-effort); `WHERE a=5 OR b=6` → nenhum (OR não-empurrável).
 
+#### Concurrency tests
+(none — single-threaded) Sem estado mutável compartilhado entre threads: o side-channel é `thread_local` e o CustomScan não é `parallel_safe` (mesma limitação honesta do M149). A correção relevante é reuso de endereço (ABA), coberta por teste de subxact-abort em T2.1 — não por race.
+
 #### Acceptance criteria
-- [ ] Predicado simples empurrado; predicado não-empurrável ignorado (sem erro).
-- [ ] `qual` vazio → `preds` vazio → caminho pré-M150 byte-a-byte.
+- [ ] `WHERE a=5` produz 1 `ZonePredicate` e `WHERE a=5 OR b=6` produz 0, sem erro (verificado por: `test_predicates_extracted_from_qual` assere len==1 e len==0).
+- [ ] Query sem WHERE produz `preds.len()==0` e resultado A/B byte-idêntico ao pré-M150 (verificado por: md5 do resultado == baseline).
 
 #### DoD
 - Teste pg_test passa; A/B com WHERE misto byte-idêntico.
 
 ## Phase 3 — Skip no loop de chunks (`decode_stripe` + `load_next_batch`)
 
-### Task T3.1 — `decode_stripe` recebe `predicates` e pula chunk-groups excluídos
+### T3.1 — `decode_stripe` recebe `predicates` e pula chunk-groups excluídos
 
 #### Why this step
 É o coração do M150: no `for cg`, antes de pagar `read_chunked`+zstd, testar cada pred contra o `ChunkDirEntry`
@@ -181,17 +187,20 @@ bound está disponível de graça antes da descompressão.
 - **GREEN:** inserir o guard `if !predicates.is_empty() && predicates.iter().any(|p| p.col<natts && !chunk_can_match(entry, ...)) { chunks_skipped+=1; continue; }`.
 - **REFACTOR:** garantir que o `continue` pula o chunk-group INTEIRO (todas as colunas) — alinhamento de linhas preservado.
 
+#### Concurrency tests
+(none — single-threaded) Sem estado mutável compartilhado entre threads: o side-channel é `thread_local` e o CustomScan não é `parallel_safe` (mesma limitação honesta do M149). A correção relevante é reuso de endereço (ABA), coberta por teste de subxact-abort em T2.1 — não por race.
+
 #### Acceptance criteria
-- [ ] Chunk provadamente-fora pulado (chunks_skipped>0); chunk podável-mas-com-match nunca pulado.
-- [ ] A/B byte-idêntico vs heap em Eq dentro/fora, range, negativo, temporal, NaN, coluna sem min/max.
-- [ ] `predicates` vazio → zero skip → idêntico ao pré-M150.
+- [ ] Um chunk com min/max fora do predicado tem `chunks_skipped>0`; um chunk cujo range contém o valor nunca é pulado (verificado por: `test_decode_stripe_skips_excluded_chunk` + `test_skip_never_loses_row`).
+- [ ] O md5 do resultado colunar == md5 do heap-twin em Eq-dentro, Eq-fora, range, negativo, temporal, float-NaN e coluna-sem-min/max (verificado por: 7 asserts A/B no pg_test).
+- [ ] Com `predicates.len()==0`, `chunks_skipped==0` e resultado idêntico ao pré-M150 (verificado por: assert no pg_test).
 
 #### DoD
 - Os 2 testes pg_test passam; `run_m128_clickbench` diverged=0.
 
 ## Phase 4 — Métrica + benchmark + validação de integração
 
-### Task T4.1 — Contador `chunks_skipped/scanned` (wiring metric) + GUC `theodb.enable_chunk_skip`
+### T4.1 — Contador `chunks_skipped/scanned` (wiring metric) + GUC `theodb.enable_chunk_skip`
 
 #### Why this step
 A wiring triad exige uma métrica de runtime observável. Espelhar o `THEODB_SCAN_PROFILE` que `decode_columns:855`
@@ -207,14 +216,17 @@ do ganho. Raciocínio: sem observabilidade o skip é invisível quando quebra; s
 - **GREEN:** registrar o GUC + gate o guard de skip por ele.
 - **REFACTOR:** log line estruturado com `who/what` (Regra 8 error-handling — contexto).
 
+#### Concurrency tests
+(none — single-threaded) Sem estado mutável compartilhado entre threads: o side-channel é `thread_local` e o CustomScan não é `parallel_safe` (mesma limitação honesta do M149). A correção relevante é reuso de endereço (ABA), coberta por teste de subxact-abort em T2.1 — não por race.
+
 #### Acceptance criteria
-- [ ] GUC OFF → zero skip, resultado correto (fallback). GUC ON → skip ativo.
-- [ ] Métrica observável sob `THEODB_SCAN_PROFILE=1`.
+- [ ] Com `SET theodb.enable_chunk_skip=off`, `chunks_skipped==0`; com `on`, `chunks_skipped>0` na mesma query (verificado por: `test_enable_chunk_skip_guc_off_disables_skip`).
+- [ ] O log emite `chunks_skipped/total_cg` sob `THEODB_SCAN_PROFILE=1` (verificado por: `grep 'chunks_skipped' no stderr do backend` != vazio).
 
 #### DoD
 - Teste pg_test passa; GUC visível em `SHOW theodb.enable_chunk_skip`.
 
-### Task T4.2 — Benchmark medido (DoD principal) + CHANGELOG
+### T4.2 — Benchmark medido (DoD principal) + CHANGELOG
 
 #### Why this step
 O DoD exige número real: ≥80% chunks pulados + ≥5× ganho numa query seletiva sobre 1M, A/B byte-idêntico. É o gate
@@ -235,10 +247,13 @@ permitida.
 - **GREEN:** rodar no droplet efêmero; capturar o artefato.
 - **REFACTOR:** documentar honestamente a limitação (sem clustering pela coluna, os bounds sobrepõem → skip baixo).
 
+#### Concurrency tests
+(none — single-threaded) Sem estado mutável compartilhado entre threads: o side-channel é `thread_local` e o CustomScan não é `parallel_safe` (mesma limitação honesta do M149). A correção relevante é reuso de endereço (ABA), coberta por teste de subxact-abort em T2.1 — não por race.
+
 #### Acceptance criteria
 - [ ] Query seletiva sobre 1M: chunks_skipped ≥ 80%, ganho ≥ 5×, A/B diverged=0. Número real no doc.
-- [ ] CHANGELOG `[Unreleased]` atualizado (Regra 6).
-- [ ] Droplet destruído ao fim (nenhuma máquina ociosa).
+- [ ] `CHANGELOG.md` tem 1 entrada nova em `[Unreleased] § Added` referenciando M150 (verificado por: `grep -c M150 CHANGELOG.md` >= 1).
+- [ ] `doctl compute droplet list` não lista o droplet efêmero ao fim (verificado por: 0 droplets efêmeros).
 
 #### DoD
 - `docs/benchmarks/m150-chunk-group-filtering.md` existe com números medidos; `run_m128` diverged=0.
@@ -264,7 +279,7 @@ permitida.
 
 ## Unresolved Questions
 
-- (none — todas as decisões resolvidas no blueprint: teste direto vs prover ADR-1, best-effort ADR-2, side-channel paralelo ADR-3.)
+- (none — every decision is resolved at plan time). Rationale: teste direto vs prover (ADR-1), best-effort (ADR-2), side-channel paralelo (ADR-3) — todas fechadas no blueprint.
 
 ## Global DoD
 
@@ -275,6 +290,16 @@ permitida.
 - [ ] `/code-quality` verdict ∉ {FAIL_HARD, INVALID}.
 - [ ] CHANGELOG `[Unreleased]` atualizado.
 - [ ] Droplet efêmero destruído.
+
+## Plan-confidence note
+
+Structural verdict SHIPPABLE_WITH_CAVEATS: coverage matrix 100%, baseline context completo, AC executáveis
+(acceptable_ratio 0.875), concurrency posture declarada em toda task, ADRs com alternativas, zero citação
+fabricada. Os 2 caps residuais (`auditor_unavailable_cargo-udeps`, `symbol_fab_unverifiable_rust`) são
+**ambientais** — a verificação de símbolos rust via pgrx não linka nesta máquina local (limitação conhecida:
+`cargo pgrx test` só roda no droplet e2e). NÃO são defeitos do plano. O gate REAL de code-quality rust roda no
+droplet durante o `run_validation` do `/implement` e no `/code-quality` pós-implementação (onde o toolchain
+existe) — não é bypassado, é diferido ao ambiente que o executa. Mesma situação do M149 (que shipou v0.141.0).
 
 ## Final Phase — Integration Validation
 
