@@ -2814,6 +2814,71 @@ bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan s�
 
 ---
 
+## M157 — [ ] Cobertura de agrupamento/agregação por EXPRESSÃO (GROUP BY expr + HAVING) ao CustomScan colunar
+
+> **Candidato A** (evidência M152 routing-map + M156). Added 2026-07-25 (`/roadmap-feature coverage-expr-group-having`). Continuação incremental da cobertura ClickBench: as queries restantes cujo bloqueio é uma EXPRESSÃO no GROUP BY (`date_trunc`/`EXTRACT`/`CASE` como chave) ou um predicado pós-agregação no HAVING — o CustomScan hoje só aceita chaves de grupo `Var` e não tem HAVING. Teto honesto ~35-39/43 (regex/ILIKE e min/max-texto-por-collation permanecem honest-negatives estruturais — **jamais** prometer 43/43).
+
+**Objective:** rotear as ~5-8 queries ClickBench restantes cujo GROUP BY usa uma expressão (`date_trunc`/`EXTRACT`/`CASE`) como chave, e/ou um `HAVING` sobre agregado, ao CustomScan colunar vetorizado (DataFusion), subindo a cobertura acima de 31 — byte-idêntico ao PostgreSQL nativo, com guards fail-closed para expressões não suportadas.
+
+**Definition of done (measurement-first):**
+
+- [ ] Cobertura medida: `columnar_customscan_count` sobe acima de 31 (as queries expr-group/HAVING que o M152 mediu como não-roteadas).
+- [ ] A/B byte-idêntico vs heap (`result_ab.diverged == 0`) nos dois regimes (head + systematic).
+- [ ] Guards fail-closed: expressão de grupo não suportada (função não-imutável, tipo não mapeável a Arrow, timezone-dependente em `date_trunc`) DECLINA ao nativo; HAVING não representável no DataFusion DECLINA.
+- [ ] Semântica temporal do `date_trunc` casa o PG (timezone/`TimeZone` GUC) OU declina — provado por A/B.
+- [ ] CHANGELOG `[Unreleased]`.
+
+**Dependencies:** M156 `[x]`.
+
+**Risks:** (a) `date_trunc('month', ts)` é timezone-dependente sob `TimeZone` não-UTC → divergência byte-wise vs o Arrow → guard de timezone ou decline (a mesma classe do cross-type temporal que o review M151 pegou). (b) `CASE` com unificação de tipos (int/float/text) → resultado divergente → restringir à classe provadamente-segura. (c) scope creep na variedade de expressões suportadas → escopar às que o M152 mediu, não generalizar.
+
+**Prior art:** M156 (2º canal custom_private + guards), M153 (group-key texto + collation), DataFusion `functions/src/datetime/` (`date_trunc`) + `logical_expr` HAVING; PG `timestamp.c` (`date_trunc` timezone).
+
+---
+
+## M158 — [ ] Materialização preguiçosa de colunas de saída (late materialization) — perf do scan colunar
+
+> **Candidato B — o MAIOR lever de performance** (apontado por M148 + M155 com evidência). Added 2026-07-25 (`/roadmap-feature late-materialization`). O M148 mediu que o gargalo dominante do scan colunar é a **materialização row-by-row (~80% do custo, `heap_form_tuple`/`palloc` por tupla)**, que NENHUM milestone de cobertura resolve. Este é o único caminho que muda o *tempo* do path já-colunar. Se a meta é "2-3× mais lento que ClickHouse", é aqui que se ataca o teto estrutural (measurement-first; aceita honest-negative se o ganho medido não materializar).
+
+**Objective:** decodificar apenas as colunas necessárias ao filtro/chave/input-de-agregado para TODAS as linhas, e materializar as colunas de saída restantes SÓ para as linhas sobreviventes (late materialization à C-Store/MonetDB), reduzindo o custo de materialização medido pelo M148 no regime `SELECT … WHERE/ORDER BY … LIMIT`.
+
+**Definition of done (measurement-first):**
+
+- [ ] Ganho MEDIDO com flamegraph antes/depois provando que a fatia de materialização (`heap_form_tuple`/`palloc`) cai (não estimado — medido, regra 5 CLAUDE.md).
+- [ ] A/B byte-idêntico vs heap (`result_ab.diverged == 0`) — a materialização preguiçosa NÃO pode mudar o resultado.
+- [ ] MVCC/visibilidade preservada: materializar tardiamente respeita o snapshot (a linha sobrevivente é a mesma que o scan eager materializaria).
+- [ ] Honest-negative aceito e documentado se o ganho medido for marginal/nulo num regime medido (anti-sunk-cost).
+- [ ] CHANGELOG `[Unreleased]`.
+
+**Dependencies:** M156 `[x]`.
+
+**Risks:** (a) correção da materialização tardia sob MVCC/NULL — a linha materializada tarde deve ser byte-idêntica à eager (gate A/B). (b) o ganho medido pode não materializar (o custo pode migrar em vez de sumir) → honest-negative medido, como o M155. (c) complexidade essencial (reindexação das colunas diferidas) vs acidental — caminhar a parsimony-ladder.
+
+**Prior art:** M148 (flamegraph que identificou o gargalo), M155 (apontou este lever), papers `c-store-abadi-2005.pdf`/`monetdb-x100-boncz-2005.pdf` (late materialization), DataFusion projection/`RecordBatch` slicing.
+
+---
+
+## M159 — [ ] Medir o gap REAL vs ClickHouse (Passo 0 — ancorar a meta "2-3×" em número)
+
+> **Candidato C — measurement-first, ancora a decisão** (a meta do owner "2-3× mais lento que ClickHouse"). Added 2026-07-25 (`/roadmap-feature measure-gap-vs-clickhouse`). Hoje NÃO existe baseline ClickHouse no repo; qualquer razão seria inventada (regra 5 CLAUDE.md + public-copy.md). Este milestone produz o número honesto: o gap por-query vs os números publicados do ClickHouse, para dizer se "2-3×" é alcançável e em quais classes de query.
+
+**Objective:** medir o gap de performance por-query do TheoDB (path colunar) vs os números publicados do ClickHouse no ClickBench, rodando o benchmark canônico (ou documentando o desvio da box canônica c6a.4xlarge), e emitir o veredito honesto sobre a viabilidade da meta "2-3×" por classe de query.
+
+**Definition of done (measurement-first):**
+
+- [ ] Run ClickBench canônico (ou desvio documentado: box, subsample, o que difere do c6a.4xlarge) com metodologia reproduzível.
+- [ ] Comparação por-query vs os números PUBLICADOS do ClickHouse (fonte citada) — NENHUMA razão inventada; queries sem baseline comparável marcadas explicitamente.
+- [ ] Veredito honesto: em quais classes de query o "2-3×" é alcançável e em quais o teto estrutural (imposto MVCC/WAL + materialização, ADR-0033/0035) o impede — sem mascarar números (mandato do owner).
+- [ ] Artefato em `docs/benchmarks/` + CHANGELOG `[Unreleased]`.
+
+**Dependencies:** M157 `[ ]`, M158 `[ ]` (medir o estado APÓS cobertura + perf maximizadas). Nota: um baseline do estado atual pode ser medido a qualquer momento; este milestone é a medição culminante.
+
+**Risks:** (a) tentação de inventar/estimar uma razão vs ClickHouse sem baseline reproduzível → PROIBIDO (regra 5); marcar `[NO-BASELINE]` honestamente. (b) comparar baselines incomparáveis (box, dataset, config) sem notar a diferença → dishonest science; documentar todo desvio. (c) ler um honest-negative (gap > 3× no benchmark inteiro) como fracasso — é o teto estrutural já conhecido (ADR-0033/0035); o "2-3×" é por-classe-de-query-vetorizada, não no benchmark inteiro.
+
+**Prior art:** M148/M155 (o teto de materialização), ADR-0033/0035 (o gap de paradigma medido no pilar vetorial), `docs/benchmarks/` (harness `run_m128_clickbench.py`), `papers/rigorous-perf-eval-georges-2007.pdf` (rigor estatístico).
+
+---
+
 
 ## Sequência e paralelismo
 

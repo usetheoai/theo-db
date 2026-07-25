@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Roadmap amended: added M157 cobertura expr-group/HAVING (`/roadmap-feature coverage-expr-group-having`), M158 late materialization (`/roadmap-feature late-materialization`), M159 medir gap vs ClickHouse (`/roadmap-feature measure-gap-vs-clickhouse`).
 
 ### Changed
 
