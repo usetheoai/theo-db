@@ -409,14 +409,22 @@ where
     let rt = tokio::runtime::Builder::new_current_thread()
         .build()
         .map_err(|e| format!("df_executor: tokio runtime: {e}"))?;
+    // The pool must fit the decoded input batch: the aggregate path decodes a FEW columns (small batch, work_mem is
+    // plenty), but the M158 top-k path decodes the FULL projection for all rows into one Arrow batch — which can be
+    // hundreds of MB for a wide `SELECT *`. Size the pool to the batch's actual memory + headroom so a legitimate large
+    // input is not rejected as "Resources exhausted"; the batch already lives in RAM regardless. (Honest caveat: the
+    // top-k path is therefore O(N) memory in the decoded batch — unlike the native top-N heapsort's O(k) — documented
+    // as an M158 trade-off; gated behind `theodb.enable_columnar_late_mat`, default OFF.)
     let work_mem_bytes = (pg_sys::work_mem.max(64) as usize) * 1024;
+    let batch_bytes = batch.get_array_memory_size();
+    let pool_bytes = work_mem_bytes.max(batch_bytes.saturating_mul(2)) + 64 * 1024 * 1024;
     let held = HeldInterrupts::hold();
     let out: Result<Vec<RecordBatch>, DataFusionError> = rt.block_on(async move {
         use datafusion::execution::memory_pool::GreedyMemoryPool;
         use datafusion::execution::runtime_env::RuntimeEnvBuilder;
         use datafusion::prelude::SessionConfig;
         let runtime = RuntimeEnvBuilder::new()
-            .with_memory_pool(std::sync::Arc::new(GreedyMemoryPool::new(work_mem_bytes)))
+            .with_memory_pool(std::sync::Arc::new(GreedyMemoryPool::new(pool_bytes)))
             .build_arc()?;
         let config = SessionConfig::new().with_target_partitions(1);
         let ctx = SessionContext::new_with_config_rt(config, runtime);
@@ -543,6 +551,61 @@ pub(super) unsafe fn run_columnar_grouped_aggs(
             }
             std::cmp::Ordering::Equal
         });
+    }
+    Ok(rows)
+}
+
+/// M158 — late-materialization top-k over a columnar table: `SELECT <proj> [WHERE <pushable>] ORDER BY <key> LIMIT k`.
+/// Decodes {proj ∪ key ∪ filter} columns ONCE into an Arrow batch, then runs `filter → sort([key]) → limit(k)` in
+/// DataFusion (vectorized TopK, O(N log k)) and materializes ONLY the k surviving rows back to PG Datums via
+/// `arrow_value_to_datum` — so the per-row `form_row`/`palloc` cost (M148: ~80% of the eager scan) is paid for k rows,
+/// not N. `proj_cols` = (name, typoid) in output-target order; `sort_key` must resolve in the decoded batch. Returns
+/// one inner Vec per surviving row, in sort order (the CALLER runs this in a durable memory context for varlena datums).
+pub(super) unsafe fn run_columnar_topk(
+    rel: pg_sys::Relation,
+    proj_cols: &[(String, u32)],
+    sort_key: &str,
+    ascending: bool,
+    nulls_first: bool,
+    k: usize,
+    predicates: &[super::zonemap::ZonePredicate],
+    text_predicates: &[super::zonemap::TextPredicate],
+    skip: bool,
+) -> Result<Vec<Vec<(pg_sys::Datum, bool)>>, String> {
+    // Project all output columns ∪ the sort key (decode_to_batch also folds in the predicate columns + guarantees ≥1).
+    let mut proj_names: Vec<String> = proj_cols.iter().map(|(n, _)| n.clone()).collect();
+    if !proj_names.iter().any(|n| n == sort_key) {
+        proj_names.push(sort_key.to_string());
+    }
+    let batch = decode_to_batch(rel, &proj_names, predicates, text_predicates, skip)?;
+    let filter = build_filter_expr(rel, predicates, text_predicates);
+    let key = sort_key.to_string();
+    // filter (WHERE, the final authority — D3) → sort by the key (PG order for numeric/temporal/det-collation text) →
+    // limit k (DataFusion's TopK: a bounded heap, never materializing all N as tuples).
+    let batches = run_df_collect(batch, move |df| {
+        let df = match filter {
+            Some(f) => df.filter(f)?,
+            None => df,
+        };
+        df.sort(vec![col(key.as_str()).sort(ascending, nulls_first)])?.limit(0, Some(k))
+    })?;
+
+    // Emit the surviving rows: one Datum per output column (in target order), located in the result batch by NAME
+    // (the schema carries the decoded projection; filter/sort/limit preserve it). Only ≤ k rows are materialized.
+    let mut rows: Vec<Vec<(pg_sys::Datum, bool)>> = Vec::new();
+    for b in &batches {
+        let schema = b.schema();
+        let idxs: Vec<usize> = proj_cols
+            .iter()
+            .map(|(n, _)| schema.index_of(n).map_err(|e| format!("df_executor: topk output col '{n}': {e}")))
+            .collect::<Result<Vec<_>, _>>()?;
+        for r in 0..b.num_rows() {
+            let mut row_out = Vec::with_capacity(proj_cols.len());
+            for (oc, &bi) in proj_cols.iter().zip(idxs.iter()) {
+                row_out.push(arrow_value_to_datum(b.column(bi), r, oc.1)?);
+            }
+            rows.push(row_out);
+        }
     }
     Ok(rows)
 }
