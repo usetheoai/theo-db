@@ -24,6 +24,22 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.146.0] - 2026-07-25
+
+### Added
+- M153: `GROUP BY <coluna texto>` no path AGG_SORTED (GroupAgg) agora roteia ao CustomScan colunar vetorizado quando
+  a saída é re-ordenada por um `Sort` acima (a ordem de grupo byte-wise do executor fica irrelevante) e a collation
+  da chave é determinística. Guard de correção de contagem: chave texto com collation NÃO-determinística declina ao
+  plano nativo (o hash byte-wise do DataFusion só agrupa como o PostgreSQL sob collation determinística) — aplicado
+  no admit, cobrindo também o path AGG_HASHED. `GROUP BY texto ORDER BY texto` (ordem de grupo consumida direta, sem
+  re-sort) declina. Resultado byte-idêntico ao heap (A/B).
+
+
+### Fixed
+- Colunas `char(n)`/`bpchar` deixam de ser roteadas ao agregado colunar vetorizado em `GROUP BY` e `COUNT(DISTINCT)`:
+  a igualdade `bpchareq` do PostgreSQL ignora espaços à direita (`'ab'` = `'ab '`), o que o agrupamento byte-wise do
+  DataFusion não reproduziria — poderia contar grupos/distintos a mais. Agora declinam ao plano nativo (correto).
+
 ## [0.145.0] - 2026-07-25
 
 ### Added

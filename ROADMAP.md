@@ -2733,7 +2733,7 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 ---
 
-## M154 — [ ] Rotear COUNT(DISTINCT) exato ao CustomScan DataFusion
+## M154 — [x] Rotear COUNT(DISTINCT) exato ao CustomScan DataFusion
 
 > **M152 measured (2026-07-25):** 7 first-blockers `agg_distinct_filter_order`; cobertura marginal ~2 puras (q4,q5) + destrava parte dos compostos. É a fatia mais LIMPA (parity-clean, menor risco A/B) → **executar PRIMEIRO das 3**.
 

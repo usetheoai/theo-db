@@ -404,6 +404,16 @@ unsafe fn classify_target_node(
             admit_trace("group_key_type_unsupported"); // M152
             return None; // unsupported key type (numeric, etc.) → native plan
         }
+        // M153: DataFusion's byte-keyed hash groups by byte-equality; PG groups by the key's collation equality.
+        // They coincide only under a DETERMINISTIC collation (deterministic ⟺ equality is byte-wise). A
+        // non-deterministic collation (ICU case/accent-insensitive) would group byte-different-but-collation-equal
+        // strings SEPARATELY here but TOGETHER in PG → wrong group counts. Decline (covers BOTH HASHED and SORTED).
+        if (*var).varcollid != pg_sys::InvalidOid
+            && !pg_sys::get_collation_isdeterministic((*var).varcollid)
+        {
+            admit_trace("group_key_nondeterministic_collation"); // M153
+            return None;
+        }
         Some(TargetSlot::Group(attno, (*var).vartype.to_u32()))
     } else if (*node).type_ == pg_sys::NodeTag::T_Aggref {
         let agg = node as *mut pg_sys::Aggref;
@@ -680,7 +690,7 @@ unsafe extern "C-unwind" fn planner_hook(
     };
     let have_stash = ADMIT_STASH.with(|s| !s.borrow().is_empty());
     if ENABLE_COLUMNAR_AGG.get() && !stmt.is_null() && have_stash {
-        swap_walk(&mut (*stmt).planTree, (*stmt).rtable);
+        swap_walk(&mut (*stmt).planTree, (*stmt).rtable, std::ptr::null_mut());
         let subplans = (*stmt).subplans;
         if !subplans.is_null() {
             let n = (*subplans).length;
@@ -689,6 +699,7 @@ unsafe extern "C-unwind" fn planner_hook(
                 swap_walk(
                     &mut (*cell).ptr_value as *mut _ as *mut *mut pg_sys::Plan,
                     (*stmt).rtable,
+                    std::ptr::null_mut(),
                 );
             }
         }
@@ -890,6 +901,7 @@ unsafe fn encode_private(adm: &Admitted, table_oid: u32) -> *mut pg_sys::List {
 unsafe fn try_swap_agg(
     plan: *mut pg_sys::Plan,
     rtable: *mut pg_sys::List,
+    parent: *mut pg_sys::Plan,
 ) -> Option<*mut pg_sys::Plan> {
     let agg = plan as *mut pg_sys::Agg;
     // B1 (review): only a SIMPLE (non-split) aggregate carries the FINAL result. A parallel plan splits into
@@ -939,23 +951,33 @@ unsafe fn try_swap_agg(
     })?;
     // B2 (review): a SORTED GroupAgg is only swappable when our ASC-nulls-last group sort reproduces its output order.
     if strat == pg_sys::AggStrategy::AGG_SORTED {
-        // Text keys: PG collation order ≠ byte-wise sort → decline.
-        if adm.group_cols.iter().any(|&(_, t)| matches!(t, 25 | 1042 | 1043)) {
-            admit_trace("swap_sorted_text_group_collation"); // M152 — the real M153 blocker
-            return None;
-        }
-        // The input Sort must be exactly ASC nulls-last (else the plan's output order isn't our ASC order).
-        let child = (*agg).plan.lefttree;
-        if child.is_null() || (*child).type_ != pg_sys::NodeTag::T_Sort {
-            return None;
-        }
-        let s = child as *mut pg_sys::Sort;
-        for i in 0..(*s).numCols as usize {
-            if *(*s).nullsFirst.add(i) {
-                admit_trace("swap_agg_sorted_nulls_first"); // M152
-                return None; // nulls-first ≠ our nulls-last
+        // Text keys (M153): our executor emits groups in byte-wise ASC order, which ≠ PG's collation order — so we
+        // CANNOT reproduce the AGG_SORTED promised (collation) output order for text. It is correct ONLY when a full
+        // `Sort` above re-sorts the whole output (then our emit order is irrelevant). Grouping-equality correctness is
+        // already guaranteed at admit time (deterministic-collation guard). So: text AGG_SORTED is swappable iff the
+        // parent is a plain `Sort` (NOT IncrementalSort, which relies on input pre-sortedness). Else decline.
+        if adm.group_cols.iter().any(|&(_, t)| matches!(t, 25 | 1043)) {
+            // Text (text/varchar; bpchar excluded at admit — review MEDIUM). Safe ONLY when a full `Sort` above
+            // re-sorts the output (group order then irrelevant). Fall
+            // through to the swap WITHOUT the numeric ASC-nulls-last input-Sort check (we don't reproduce key order).
+            if parent.is_null() || (*parent).type_ != pg_sys::NodeTag::T_Sort {
+                admit_trace("swap_sorted_text_group_not_resorted"); // M153 — direct group-order consumption
+                return None;
             }
-            let opno = *(*s).sortOperators.add(i);
+        } else {
+            // Numeric/temporal: reproduce the promised order exactly. The input Sort must be ASC nulls-last (else the
+            // plan's output order isn't our ASC order).
+            let child = (*agg).plan.lefttree;
+            if child.is_null() || (*child).type_ != pg_sys::NodeTag::T_Sort {
+                return None;
+            }
+            let s = child as *mut pg_sys::Sort;
+            for i in 0..(*s).numCols as usize {
+                if *(*s).nullsFirst.add(i) {
+                    admit_trace("swap_agg_sorted_nulls_first"); // M152
+                    return None; // nulls-first ≠ our nulls-last
+                }
+                let opno = *(*s).sortOperators.add(i);
             // M135: PG18 generalized the btree strategy number into an AM-agnostic `CompareType`, so the last
             // out-param changed TYPE. The VALUE did not change — `access/cmptype.h:34` defines `COMPARE_LT = 1`,
             // i.e. exactly `BTLessStrategyNumber` — so this is a type port, not a semantic one. (An earlier
@@ -970,9 +992,10 @@ unsafe fn try_swap_agg(
             let (mut opfamily, mut opcintype, mut cmptype) =
                 (pg_sys::InvalidOid, pg_sys::InvalidOid, pg_sys::CompareType::COMPARE_INVALID);
             pg_sys::get_ordering_op_properties(opno, &mut opfamily, &mut opcintype, &mut cmptype);
-            if cmptype != pg_sys::CompareType::COMPARE_LT {
-                admit_trace("swap_agg_sorted_desc_or_nonbtree"); // M152
-                return None; // DESC (or non-btree) ≠ our ascending
+                if cmptype != pg_sys::CompareType::COMPARE_LT {
+                    admit_trace("swap_agg_sorted_desc_or_nonbtree"); // M152
+                    return None; // DESC (or non-btree) ≠ our ascending
+                }
             }
         }
     }
@@ -1015,42 +1038,56 @@ unsafe fn try_swap_agg(
 }
 
 /// Walk the plan tree via a mutable node slot, swapping matching `Agg` nodes → our `CustomScan` in place.
-unsafe fn swap_walk(slot: *mut *mut pg_sys::Plan, rtable: *mut pg_sys::List) {
+/// `parent` is the enclosing plan node (NULL at the root) — `try_swap_agg` uses it to check, for an AGG_SORTED
+/// text GROUP BY, whether the output is re-sorted by a `Sort` above (M153).
+unsafe fn swap_walk(
+    slot: *mut *mut pg_sys::Plan,
+    rtable: *mut pg_sys::List,
+    parent: *mut pg_sys::Plan,
+) {
     let plan = *slot;
     if plan.is_null() {
         return;
     }
     if (*plan).type_ == pg_sys::NodeTag::T_Agg {
-        if let Some(newnode) = try_swap_agg(plan, rtable) {
+        if let Some(newnode) = try_swap_agg(plan, rtable, parent) {
             *slot = newnode;
             return; // replaced — the Agg's child subtree is dropped
         }
     }
-    swap_walk(&mut (*plan).lefttree, rtable);
-    swap_walk(&mut (*plan).righttree, rtable);
+    swap_walk(&mut (*plan).lefttree, rtable, plan);
+    swap_walk(&mut (*plan).righttree, rtable, plan);
     match (*plan).type_ {
         pg_sys::NodeTag::T_Append => {
-            swap_walk_list((*(plan as *mut pg_sys::Append)).appendplans, rtable)
+            swap_walk_list((*(plan as *mut pg_sys::Append)).appendplans, rtable, plan)
         }
         pg_sys::NodeTag::T_MergeAppend => {
-            swap_walk_list((*(plan as *mut pg_sys::MergeAppend)).mergeplans, rtable)
+            swap_walk_list((*(plan as *mut pg_sys::MergeAppend)).mergeplans, rtable, plan)
         }
         pg_sys::NodeTag::T_SubqueryScan => {
-            swap_walk(&mut (*(plan as *mut pg_sys::SubqueryScan)).subplan, rtable)
+            swap_walk(&mut (*(plan as *mut pg_sys::SubqueryScan)).subplan, rtable, plan)
         }
         _ => {}
     }
 }
 
 /// Walk a List of child plans with mutable slots (Append/MergeAppend members).
-unsafe fn swap_walk_list(list: *mut pg_sys::List, rtable: *mut pg_sys::List) {
+unsafe fn swap_walk_list(
+    list: *mut pg_sys::List,
+    rtable: *mut pg_sys::List,
+    parent: *mut pg_sys::Plan,
+) {
     if list.is_null() {
         return;
     }
     let n = (*list).length;
     for i in 0..n {
         let cell = (*list).elements.add(i as usize);
-        swap_walk(&mut (*cell).ptr_value as *mut _ as *mut *mut pg_sys::Plan, rtable);
+        swap_walk(
+            &mut (*cell).ptr_value as *mut _ as *mut *mut pg_sys::Plan,
+            rtable,
+            parent,
+        );
     }
 }
 
