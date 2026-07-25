@@ -1,0 +1,128 @@
+SET
+SET
+DROP TABLE
+DROP TABLE
+CREATE TABLE
+CREATE TABLE
+INSERT 0 1000
+UPDATE 20
+UPDATE 100
+INSERT 0 1000
+### EC: COUNT(DISTINCT int) — expect routed + A/B equal
+            QUERY PLAN             
+-----------------------------------
+ Custom Scan (theodb_columnar_agg)
+(1 row)
+
+    q    | col_val | heap_val 
+---------+---------+----------
+ int_col |      45 |       45
+(1 row)
+
+### EC: COUNT(DISTINCT text, default collation) — expect routed + A/B equal
+            QUERY PLAN             
+-----------------------------------
+ Custom Scan (theodb_columnar_agg)
+(1 row)
+
+    q     | col_val | heap_val 
+----------+---------+----------
+ text_col |      10 |       10
+(1 row)
+
+### EC-2: COUNT(DISTINCT all-NULL) -> 0
+    q    | col_val | heap_val 
+---------+---------+----------
+ allnull |       0 |        0
+(1 row)
+
+### EC-2b: COUNT(DISTINCT) on empty table -> 0
+CREATE TABLE
+   q   | col_val | heap_val 
+-------+---------+----------
+ empty |       0 |        0
+(1 row)
+
+### EC-3: count(DISTINCT col+1) must DECLINE (no theodb_columnar_agg)
+          QUERY PLAN           
+-------------------------------
+ Aggregate
+   ->  Sort
+         Sort Key: ((uid + 1))
+         ->  Seq Scan on t_col
+(4 rows)
+
+       q       | col_val | heap_val 
+---------------+---------+----------
+ distinct_expr |      45 |       45
+(1 row)
+
+### EC-3b: sum(DISTINCT uid) must DECLINE + A/B equal
+          QUERY PLAN           
+-------------------------------
+ Aggregate
+   ->  Sort
+         Sort Key: uid
+         ->  Seq Scan on t_col
+(4 rows)
+
+      q       | col_val | heap_val 
+--------------+---------+----------
+ sum_distinct |    1110 |     1110
+(1 row)
+
+### EC-4: COUNT(DISTINCT) with GROUP BY — routed OR declined, A/B must match
+              QUERY PLAN               
+---------------------------------------
+ GroupAggregate
+   Group Key: ((uid % 5))
+   ->  Sort
+         Sort Key: ((uid % 5)), phrase
+         ->  Seq Scan on t_col
+(5 rows)
+
+-- columnar:
+ k | v 
+---+---
+ 0 | 2
+ 1 | 2
+ 2 | 2
+ 3 | 1
+ 4 | 2
+   | 1
+(6 rows)
+
+-- heap:
+ k | v 
+---+---
+ 0 | 2
+ 1 | 2
+ 2 | 2
+ 3 | 1
+ 4 | 2
+   | 1
+(6 rows)
+
+### EC-1: COUNT(DISTINCT text) under NON-deterministic collation must DECLINE
+psql:/tmp/ec_harness.sql:58: NOTICE:  collation "ci" already exists, skipping
+CREATE COLLATION
+DROP TABLE
+DROP TABLE
+CREATE TABLE
+CREATE TABLE
+INSERT 0 5
+INSERT 0 5
+-- EXPLAIN must NOT show theodb_columnar_agg (declines under non-det collation):
+            QUERY PLAN            
+----------------------------------
+ Aggregate
+   ->  Sort
+         Sort Key: s COLLATE ci
+         ->  Seq Scan on t_col_ci
+(4 rows)
+
+      q       | col_val | heap_val 
+--------------+---------+----------
+ ci_collation |       2 |        2
+(1 row)
+
