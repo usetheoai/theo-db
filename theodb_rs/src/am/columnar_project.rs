@@ -235,7 +235,7 @@ pub(crate) fn init() {
     GucRegistry::define_bool_guc(
         c"theodb.enable_chunk_skip",
         c"Skip theodb_columnar chunk groups whose zone-map min/max proves no row matches the query predicate",
-        c"When on (M150), a SELECT with a simple `col op const` WHERE over a theodb_columnar table skips whole chunk groups the min/max directory proves cannot match, without decompressing them; off decodes every chunk group (the pre-M150 path). Never affects correctness — the executor re-checks the full qual.",
+        c"When on (M150), a SELECT with a simple `col op const` WHERE over a theodb_columnar table skips whole chunk groups the min/max directory proves cannot match, without decompressing them; off decodes every chunk group (the pre-M150 path). Never affects correctness — the executor re-checks the full qual. Requires theodb.enable_projection = on (the skip rides the projection CustomScan that pushes the predicate); with projection off, this GUC is a silent no-op.",
         &ENABLE_CHUNK_SKIP,
         GucContext::Userset,
         GucFlags::default(),
@@ -918,6 +918,38 @@ mod tests {
             col_ints("SELECT a FROM t_heap WHERE a = 25000 AND lower(c) = 'row-25000' ORDER BY a");
         assert_eq!(col_and, heap_and, "mixed AND must return the correct rows");
         assert!(sk_and > 0, "the pushable `a = 25000` conjunct must prune despite the function (got {sk_and})");
+    }
+
+    /// Review LOW/MEDIUM (rust-pgrx council) — predicate-channel isolation across TWO DIFFERENT columnar tables
+    /// scanned in the same query, each with its OWN pushable predicate. If the scandesc keying leaked, one scan
+    /// would skip by the OTHER's predicate and lose rows. A cross join `c1.a=K1 × c2.a=K2` (each selective) must
+    /// equal the heap twin — proving `scan_predicates(scandesc)` returns each scan ONLY its own predicates.
+    #[pgrx::pg_test]
+    fn test_two_table_predicate_isolation() {
+        seed_clustered(50_000); // t_col / t_heap
+        Spi::run("DROP TABLE IF EXISTS t_col2").unwrap();
+        Spi::run("DROP TABLE IF EXISTS t_heap2").unwrap();
+        Spi::run("CREATE TABLE t_col2 (a int, b int, c text) USING theodb_columnar").unwrap();
+        Spi::run("CREATE TABLE t_heap2 (a int, b int, c text)").unwrap();
+        let ins = "INSERT INTO {tbl} SELECT g,(g%7)-3,'r2-'||g FROM generate_series(1,50000) g";
+        Spi::run(&ins.replace("{tbl}", "t_col2")).unwrap();
+        Spi::run(&ins.replace("{tbl}", "t_heap2")).unwrap();
+        // Each side selective on a DIFFERENT value → each scan pushes a distinct predicate.
+        let q = "SELECT x.a, y.a FROM {t1} x, {t2} y WHERE x.a = 25000 AND y.a = 35000 ORDER BY 1,2";
+        let col: Vec<(i32, i32)> = Spi::connect(|c| {
+            c.select(&q.replace("{t1}", "t_col").replace("{t2}", "t_col2"), None, &[])
+                .unwrap()
+                .filter_map(|r| Some((r.get::<i32>(1).unwrap()?, r.get::<i32>(2).unwrap()?)))
+                .collect()
+        });
+        let heap: Vec<(i32, i32)> = Spi::connect(|c| {
+            c.select(&q.replace("{t1}", "t_heap").replace("{t2}", "t_heap2"), None, &[])
+                .unwrap()
+                .filter_map(|r| Some((r.get::<i32>(1).unwrap()?, r.get::<i32>(2).unwrap()?)))
+                .collect()
+        });
+        assert_eq!(col, vec![(25000, 35000)], "the one cross-join pair must survive both predicates");
+        assert_eq!(col, heap, "two-table cross join must equal the heap twin (predicate channels isolated)");
     }
 
     /// T2.1 — ABA regression for the PREDICATE channel (mirror of `test_subxact_abort_no_stale_projection`). A
