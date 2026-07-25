@@ -99,4 +99,38 @@ EXPLAIN (COSTS OFF) SELECT count(*) FROM t_col WHERE phrase = NULL;
 SELECT 'null_const' AS q, (SELECT count(*) FROM t_col WHERE phrase = NULL) AS col_val,
                           (SELECT count(*) FROM t_heap WHERE phrase = NULL) AS heap_val;
 
+\echo '### EC-7 (council MEDIUM): LIKE trailing backslash declines -> native ERROR 22025 (never silent rows)'
+-- Pattern ''ab\'' (built via chr(92) so the file-level quoting is unambiguous) ends in a dangling escape. PG errors
+-- 22025; arrow would treat it as a literal and return rows. The plan-time guard declines -> native ERROR (consistent).
+EXPLAIN (COSTS OFF) SELECT count(*) FROM t_col WHERE url LIKE ('ab' || chr(92));
+\set ON_ERROR_STOP off
+\echo '-- expect ERROR 22025 (native semantics), NOT a count:'
+SELECT count(*) FROM t_col WHERE url LIKE ('ab' || chr(92));
+\set ON_ERROR_STOP on
+
+\echo '========== EC-6 (council HIGH): non-UTF-8 server encoding must NOT panic — decline to native =========='
+-- A LATIN1-encoded database: a text literal with a non-ASCII byte (chr(233)='é'=0xE9 in LATIN1) is NOT valid UTF-8.
+-- The old `String::from_datum` would PANIC in the planner (→ query ERROR). The fix reads raw bytes + declines
+-- fail-closed → native plan handles it, no error, A/B equal.
+DROP DATABASE IF EXISTS lat1_m156;
+CREATE DATABASE lat1_m156 ENCODING 'LATIN1' TEMPLATE template0 LC_COLLATE 'C' LC_CTYPE 'C';
+\c lat1_m156
+SET max_parallel_workers_per_gather = 0;
+SET theodb.enable_columnar_agg = on;
+CREATE EXTENSION theodb_rs;
+CREATE TABLE l_heap (id int, txt text);
+INSERT INTO l_heap SELECT g, CASE WHEN g % 3 = 0 THEN chr(233) ELSE 'ascii' END FROM generate_series(1, 300) g;
+CREATE TABLE l_col (LIKE l_heap) USING theodb_columnar;
+INSERT INTO l_col SELECT * FROM l_heap;
+\echo '### EC-6: WHERE txt = chr(233) [non-UTF-8 byte] — must NOT error; declines; A/B equal'
+EXPLAIN (COSTS OFF) SELECT count(*) FROM l_col WHERE txt = chr(233);
+SELECT 'latin1_nonascii' AS q, (SELECT count(*) FROM l_col WHERE txt = chr(233)) AS col_val,
+                               (SELECT count(*) FROM l_heap WHERE txt = chr(233)) AS heap_val;
+\echo '### EC-6b: WHERE txt = ''ascii'' [ASCII needle in LATIN1 db] — routes fine, A/B equal'
+EXPLAIN (COSTS OFF) SELECT count(*) FROM l_col WHERE txt = 'ascii';
+SELECT 'latin1_ascii' AS q, (SELECT count(*) FROM l_col WHERE txt = 'ascii') AS col_val,
+                            (SELECT count(*) FROM l_heap WHERE txt = 'ascii') AS heap_val;
+\c postgres
+DROP DATABASE IF EXISTS lat1_m156;
+
 \echo '========== DONE — every col_val MUST equal its heap_val =========='

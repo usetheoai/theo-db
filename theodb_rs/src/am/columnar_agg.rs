@@ -358,10 +358,28 @@ unsafe fn extract_text_predicate(clause: *mut pg_sys::Node, relid: i32) -> Optio
         return None;
     }
     let text_op = classify_text_op((*op).opno)?;
-    // Extract the constant's server-encoded (UTF-8) payload at plan time (a constant-folded literal). Text values
-    // never contain an interior NUL, so this round-trips through a String node losslessly.
-    let needle = String::from_datum((*konst).constvalue, false)?;
-    let col = ((*var).varattno as i32).checked_sub(1)?; // 1-based AttrNumber → 0-based; system cols (≤0) rejected
+    if (*var).varattno < 1 {
+        return None; // system column / whole-row Var — never a real text column to push (explicit, not implied)
+    }
+    // Read the literal's payload WITHOUT pgrx's UTF-8-asserting conversion (council-rust-pgrx HIGH): `String::from_datum`
+    // / `<&str>::from_datum` PANIC on a non-ASCII byte under a non-UTF-8 server encoding (LATIN1/WIN1252 → Ascii policy;
+    // SQL_ASCII → strict UTF-8), turning a valid query into a planner ERROR inside the upper-paths hook. Go through
+    // `text_to_cstring` (raw payload copy, no assertion) and DECLINE fail-closed when the bytes are not valid UTF-8 —
+    // the DataFusion `Utf8` filter cannot represent non-UTF-8 bytes anyway, so the native plan must handle that case.
+    let cstr = pg_sys::text_to_cstring((*konst).constvalue.cast_mut_ptr::<pg_sys::text>());
+    let needle = CStr::from_ptr(cstr).to_str().ok()?.to_owned();
+    // M156 (council-index-storage MEDIUM): a LIKE/NOT LIKE pattern ending in an ODD number of `\` has a dangling
+    // escape → PG raises ERROR 22025 ("LIKE pattern must not end with escape character", like_match.c) while arrow's
+    // kernel treats the trailing `\` as a literal and returns rows. Decline so the native plan applies the real
+    // (error) semantics. `=`/`<>` (texteq/textne) have no escape rule and are unaffected.
+    if matches!(text_op, TextOp::Like | TextOp::NotLike) {
+        let trailing_backslashes = needle.bytes().rev().take_while(|&b| b == b'\\').count();
+        if trailing_backslashes % 2 == 1 {
+            admit_trace("text_where_like_dangling_escape");
+            return None;
+        }
+    }
+    let col = ((*var).varattno as i32) - 1; // 1-based AttrNumber → 0-based (varattno ≥ 1 checked above)
     Some(TextPredicate { col: col as usize, op: text_op, needle })
 }
 
