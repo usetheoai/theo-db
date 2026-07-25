@@ -1,16 +1,25 @@
 ---
 generated_by: roadmap-init
 generated_on: 2026-06-26
+last_updated: 2026-07-24
 slug: theodb
-peer_count_cloned: 13
+peer_count_cloned: 33
+peer_count_registered_below: 21
 peer_count_skipped: 0
 landscape_catalogued: 6
+papers_local: 25
 ---
 
 # References catalog
 
 State-of-the-art peer projects gathered at project inception by `/roadmap-init`.
 This file is the contract `/discover-plan` reads when investigating a peer.
+
+> **⚠️ Fonte primária local — leia ANTES de buscar na web.** Este acervo (código de peers +
+> `papers/` com 25 PDFs) está no disco e é grep-ável. A ordem correta de investigação é
+> **local → web**, nunca o contrário: `rules/discover-phd-rigor.md` R0 exige evidência web,
+> R0.1 exige que o acervo local seja consultado primeiro (é mais barato, mais rápido e já
+> foi curado). Ver `../../CLAUDE.md § Acervo de referências`.
 
 > **Location note:** the skill template places this catalog at
 > `knowledge-base/references/_catalog.md`, but this project's `boundary-check.sh` hook makes
@@ -417,6 +426,91 @@ Licenças confirmadas por busca 2026 (fontes no histórico da sessão).
 | Peer | Repo | License | Reason for skip |
 |---|---|---|---|
 | — | — | — | (nenhum) |
+
+---
+
+## Lote 2026-07-24 — trilha técnica (8 repos)
+
+Clonados `--depth 1` para fechar as lacunas apontadas na análise da trilha de leitura: segurança de
+memória Rust/FFI, metodologia de profiling, spec colunar, e as âncoras do SOTA que faltavam.
+
+| Peer | Folder | Licença | Gate | Por que está aqui | Serve |
+|---|---|---|---|---|---|
+| **pgrx** | `references/pgrx/` | MIT | auto-approved-permissive | O framework que o `theodb_rs` inteiro usa. **384 ocorrências de `unsafe`** no nosso código atravessam esta fronteira. Fonte-de-verdade para memory contexts, `pg_guard`, SPI, `#[pg_extern]`, panics-através-de-C. | transversal (todo `theodb_rs`); reviews do `council-rust-pgrx` |
+| **tantivy** | `references/tantivy/` | MIT | auto-approved-permissive | O motor lexical que shipamos (M139/M140). Arquitetura de segmentos, `Directory`, merge policy — o que o IIR (teoria BM25) não cobre. | pilar lexical; ADR-0051..0055 |
+| **FlameGraph** | `references/FlameGraph/` | CDDL-1.0 | ⚠️ **study/tooling-only** — CDDL não está na lista permitida (D1: Apache/MIT/BSD/PostgreSQL). Usar como ferramenta externa; **nunca** vendorizar no pacote. | Ferramental de profiling do Brendan Gregg. | **M148** (spike ativo), M149–M151 |
+| **parquet-format** | `references/parquet-format/` | Apache-2.0 | auto-approved-permissive | Spec do formato, não a lib. Organização física, row groups, encodings, estatísticas de página (a base do nosso zone-map skip-pruning). | M148–M151; lakehouse |
+| **graphrag** | `references/graphrag/` | MIT | auto-approved-permissive | Implementação completa de referência de GraphRAG (extração de grafo → recuperação local/global). Estudo comparativo, **não** arquitetura obrigatória. | pilar grafo (M108–M113) |
+| **beir** | `references/beir/` | Apache-2.0 | auto-approved-permissive | Harness de avaliação de recuperação — usamos os datasets nos M123/M138/M140.1. Ter o código local evita reimplementar a métrica. | benchmark de recuperação |
+| **faiss** | `references/faiss/` | MIT | auto-approved-permissive | Referência de implementação de IVF/PQ em escala. Permissivo → legalmente reutilizável (≠ VectorChord). | pilar vetorial; quantização |
+| **hnswlib** | `references/hnswlib/` | Apache-2.0 | auto-approved-permissive | A implementação de referência do próprio paper do HNSW (Malkov). Baseline de leitura do nosso `ann/hnsw.rs`. | pilar vetorial |
+
+---
+
+## Papers e livros de acesso livre — `references/papers/`
+
+**25 PDFs, 74 MB, gitignored.** Só material distribuído livremente (arXiv, cópias de autor, venues
+abertos). Nenhum livro pago foi baixado — ver § *Livros pagos* abaixo.
+
+| Arquivo | Trabalho | Aterrissa em |
+|---|---|---|
+| `hnsw-malkov-2018.pdf` | HNSW (TPAMI 2018) | `ann/hnsw.rs`, `am/hnsw_page.rs` |
+| `scann-anisotropic-vq-guo-2020.pdf` | Quantização anisotrópica / ScaNN (ICML 2020) | **âncora do North Star** (CLAUDE.md regra 1); ADR-0035 |
+| `rabitq-gao-2024.pdf` | RaBitQ | ADR-0036 (lever condicional, veredito medido) |
+| `symphonyqg-gou-2024.pdf` | SymphonyQG | spike E2 (gate não atingido) |
+| `diskann-subramanya-2019.pdf` | DiskANN (NeurIPS 2019) | pgvectorscale; regime out-of-RAM |
+| `faiss-gpu-johnson-2017.pdf` · `faiss-library-douze-2024.pdf` | Faiss | IVF/PQ |
+| `iir-manning-2008-BOOK.pdf` | *Introduction to Information Retrieval* (livro completo) | BM25 own-code, avaliação |
+| `rrf-cormack-2009.pdf` | Reciprocal Rank Fusion | `ai.hybrid_search_rrf` |
+| `beir-thakur-2021.pdf` | BEIR | M123/M138/M140.1 |
+| `sentence-bert-reimers-2019.pdf` · `dpr-karpukhin-2020.pdf` · `colbert-khattab-2020.pdf` | Embeddings densos / late interaction | superfície AI-native |
+| `columnar-survey-abadi-2013.pdf` | *(não baixado — 403)* | ver § *Não obtidos* |
+| `cstore-stonebraker-2005.pdf` | C-Store | origem do colunar |
+| `monetdb-x100-boncz-2005.pdf` | MonetDB/X100 | execução vetorizada |
+| `morsel-parallelism-leis-2014.pdf` | Morsel-driven parallelism | paralelismo do scan colunar |
+| `database-cracking-idreos-2007.pdf` | Database Cracking | indexação adaptativa |
+| `aries-mohan-1992.pdf` | ARIES | WAL/recovery — base do `GenericXLog` |
+| `mvcc-serializable-ports-2012.pdf` | SSI no PostgreSQL | MVCC do TableAM colunar |
+| `rigorous-perf-eval-georges-2007.pdf` | Rigor estatístico em medição | **disciplina de benchmark** (lição M123/M130/M131) |
+| `tail-at-scale-dean-2013.pdf` | The Tail at Scale | p95/p99 |
+| `graphrag-edge-2024.pdf` · `graphrag-survey-han-2025.pdf` | GraphRAG + survey | pilar grafo |
+| `indirect-prompt-injection-greshake-2023.pdf` | Prompt injection indireto | `nl.rs`, NL→SQL seguro |
+| `bird-nl2sql-li-2023.pdf` | BIRD | benchmark NL→SQL |
+
+### Não obtidos (403/paywall — ler online, não versionar)
+
+- **Abadi, Boncz, Harizopoulos et al., *The Design and Implementation of Modern Column-Oriented
+  Database Systems*** (FnT in Databases, 2013) — host bloqueia download automatizado (403).
+  Ler em `https://stratos.seas.harvard.edu/publications/design-and-implementation-modern-column-oriented-database-systems`.
+  **É a leitura nº 1 do M149/M150** (projection pushdown, late materialization).
+- **Kemper & Neumann, *HyPer*** (ICDE 2011) — URLs testadas retornaram 404.
+
+### Livros pagos — comprar, não baixar
+
+Não estão no acervo e **não devem** ser obtidos por download. Registro só para a trilha:
+
+| Livro | Uso |
+|---|---|
+| Kleppmann & Riccomini, *Designing Data-Intensive Applications*, 2ª ed. | vocabulário comum |
+| Petrov, *Database Internals* | storage engines, B-trees, WAL |
+| Campbell & Majors, *Database Reliability Engineering* | operação — **fora do escopo deste repo** (HA/plataforma) |
+
+Gratuitos online, não espelhados aqui (ler no site): *The Internals of PostgreSQL* (Suzuki,
+`interdb.jp`) e os livros de SRE do Google (`sre.google/books`).
+
+---
+
+## Clones não registrados (dívida honesta)
+
+O catálogo listava 13 peers enquanto o disco tinha 25 pastas. Os 12 abaixo foram clonados em
+sessões posteriores sem entrada no catálogo — ficam registrados aqui como inventário mínimo até
+alguém escrever a entrada completa (`Why / What to study / Milestones`):
+
+`arrow-rs` · `cstore_fdw` · `datafusion` · `lance` · `lotus` · `mcp-go-sdk` · `palimpzest` ·
+`postgres` · `postgresml` · `RaBitQ-Library` · `rabitq-rs` · `SymphonyQG`
+
+> `datafusion` + `arrow-rs` são hoje o **motor de execução do colunar in-DB** (não só lakehouse) —
+> desde o M143/ADR-0057, com o `pg_duckdb` removido. Merecem entrada completa na próxima passada.
 
 ---
 

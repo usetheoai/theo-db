@@ -647,17 +647,26 @@ unsafe fn rebuild_datum(
 
 /// Reconstruct the heap-tuple bytes of row `r` from the decoded per-column values of a chunk group, so the existing
 /// `scan_getnextslot` (which `heap_deform_tuple`s a stored blob) needs no change.
+///
+/// M149 — `want_mask[col] == false` marks a column projected AWAY: it is written NULL (its `cgcols[col]` was never
+/// decoded, so it MUST NOT be indexed). When every entry is true (the plain all-columns path) the behavior is
+/// byte-identical to pre-M149. The row COUNT is unaffected, so scan order stays byte-identical.
 unsafe fn form_row(
     tupdesc: pg_sys::TupleDesc,
     cols: &[ColDesc],
     cgcols: &[Vec<Option<Vec<u8>>>],
     r: usize,
+    want_mask: &[bool],
 ) -> Result<Vec<u8>, String> {
     let natts = cols.len();
     let mut values = vec![pg_sys::Datum::from(0usize); natts];
     let mut isnull = vec![false; natts];
     let mut to_free: Vec<*mut std::os::raw::c_void> = Vec::new();
     for col in 0..natts {
+        if !want_mask[col] {
+            isnull[col] = true; // projected away — never materialized, never read by any upper node
+            continue;
+        }
         match &cgcols[col][r] {
             None => isnull[col] = true,
             Some(bytes) => {
@@ -681,6 +690,11 @@ unsafe fn form_row(
 
 /// Decode one column-major stripe into heap-tuple byte blobs: read its TCS1 header (at `header_block`, from the
 /// catalog row), its directory, then for each chunk group decode every column and transpose back to rows.
+///
+/// M149 — `want_mask` (length `natts`) selects which columns to materialize. For a masked-out column the
+/// per-chunk `read_chunked` + zstd decode is SKIPPED (the ~7% decode win) and its `cgcols` slot is left empty
+/// (a placeholder never indexed — `form_row` writes NULL for it). `want_mask` all-true reproduces the exact
+/// pre-M149 all-columns decode.
 unsafe fn decode_stripe(
     rel: pg_sys::Relation,
     header_block: u32,
@@ -688,6 +702,7 @@ unsafe fn decode_stripe(
     cols: &[ColDesc],
     natts: usize,
     out: &mut Vec<Vec<u8>>,
+    want_mask: &[bool],
 ) -> Result<(), String> {
     let hdr_items = super::page::read_all_page_items(rel, header_block)?;
     let hdr_bytes =
@@ -709,6 +724,10 @@ unsafe fn decode_stripe(
         let cg_rows = entries[cg * natts].row_count as usize;
         let mut cgcols: Vec<Vec<Option<Vec<u8>>>> = Vec::with_capacity(natts);
         for col in 0..natts {
+            if !want_mask[col] {
+                cgcols.push(Vec::new()); // projected away — skip read_chunked/zstd; placeholder never indexed
+                continue;
+            }
             let e = &entries[cg * natts + col];
             let comp = super::page::read_chunked(rel, e.first_block, e.n_pages)?;
             if comp.len() < e.comp_len as usize {
@@ -719,7 +738,7 @@ unsafe fn decode_stripe(
             cgcols.push(codec::decode_column(&raw, cols[col].attlen_fixed, cg_rows, e.has_nulls)?);
         }
         for r in 0..cg_rows {
-            out.push(form_row(tupdesc, cols, &cgcols, r)?);
+            out.push(form_row(tupdesc, cols, &cgcols, r, want_mask)?);
         }
     }
     Ok(())
@@ -1041,7 +1060,23 @@ unsafe fn load_next_batch(st: *mut ColumnarScanState) -> bool {
                 Ok(c) => c,
                 Err(e) => pg_sys::error!("{e}"),
             };
-            if let Err(e) = decode_stripe(rel, hb, tupdesc, &cols, natts, &mut batch) {
+            // M149 — the projection for THIS scan (keyed by the scandesc pointer == `st`). `None` (no projection
+            // node, or fallback whole-row/system-col) ⇒ decode ALL columns (the exact pre-M149 plain path). A
+            // nested/unrelated columnar scan sees `None` here because the key is this scan's descriptor.
+            let want_mask: Vec<bool> =
+                match crate::am::columnar_project::scan_projection(st as usize) {
+                    Some(w) => {
+                        let mut m = vec![false; natts];
+                        for &c in w.iter() {
+                            if c < natts {
+                                m[c] = true;
+                            }
+                        }
+                        m
+                    }
+                    None => vec![true; natts],
+                };
+            if let Err(e) = decode_stripe(rel, hb, tupdesc, &cols, natts, &mut batch, &want_mask) {
                 pg_sys::error!("{e}");
             }
             loaded_a_source = true;

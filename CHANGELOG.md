@@ -14,6 +14,34 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.141.0] - 2026-07-25
+
+### Added
+
+- Projection pushdown no scan colunar (M149): um `CustomScan` (`theodb_columnar_project`) vence o
+  SeqScan sobre tabelas `theodb_columnar` em queries não-agregadas e materializa apenas as colunas
+  referenciadas (`targetlist ∪ qual`, estilo Citus `ColumnarAttrNeeded`) — atacando o custo dominante
+  do M148 (heap-tuple de 105 colunas por linha). Colunas fora do conjunto pulam o decode zstd e saem
+  NULL; o resultado é byte-idêntico ao heap. Gated por `theodb.enable_projection` (default ON);
+  fallback seguro para decode-tudo quando o nó não é escolhido, a query é agregada, ou aparece um
+  Var whole-row/coluna-de-sistema. **Medido** (`docs/benchmarks/m149-projection-pushdown.md`): geomean
+  **3,73×** em queries de projeção estreita sobre o ClickBench `hits` real (105 colunas) — `SELECT url`
+  4,18×, projeção+filtro 3,12-3,24× — e A/B byte-idêntico ao heap nas 43 queries do ClickBench (0
+  divergências). O `/review` (10 pilares + 2 councils) endureceu o nó antes do merge: corrigido um
+  use-after-stale-projection (ABA) em que um `abort` de subtransação capturado deixava a máscara de
+  colunas de um nó órfã no registry e um nó reusando o mesmo endereço a herdava — o registry passa a ser
+  sincronizado na inicialização de todo scan (ambos os ramos), com testes de regressão para o fallback de
+  coluna-de-sistema, self-join aninhado e o próprio cenário de subxact-abort
 - Acervo de referências primárias local: 25 papers/livros de acesso livre em
   `.claude/knowledge-base/references/papers/` (HNSW, ScaNN/AQ, RaBitQ, DiskANN, Faiss, IIR, RRF,
   BEIR, C-Store, MonetDB/X100, Morsel, ARIES, SSI/MVCC, rigor estatístico de medição, GraphRAG,
@@ -30,18 +58,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - `references-catalog.md` passa a registrar os 8 peers novos, o índice de papers, os 2 documentos
   não obtidos (403/404) e os 12 clones que estavam no disco sem entrada no catálogo
 
-
 ### Deprecated
-
 
 ### Removed
 
-
 ### Fixed
 
-
 ### Security
-
 
 ## [0.140.0] - 2026-07-24
 

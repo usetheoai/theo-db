@@ -32,6 +32,9 @@ pub unsafe extern "C-unwind" fn _PG_init() {
         am::columnar::init();
         // M100 Phase C: register the columnar-aggregate CustomScan (upper-paths hook + methods + GUC, default OFF).
         am::columnar_agg::init();
+        // M149: register the columnar projection-pushdown CustomScan (chained pathlist hook AFTER customscan::init
+        // so it wraps — never breaks — the vecfilter hook; methods + GUC theodb.enable_projection, default ON).
+        am::columnar_project::init();
         // M54: register the vectorizer background worker (only when preloaded — guarded internally, no-op in a
         // backend CREATE EXTENSION so it stays silent there).
         vectorizer::register_worker();
