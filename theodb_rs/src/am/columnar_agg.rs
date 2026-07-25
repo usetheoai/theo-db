@@ -166,13 +166,15 @@ pub(crate) unsafe fn extract_zone_predicate(clause: *mut pg_sys::Node, relid: i3
         return None;
     }
     let vartype = (*var).vartype;
-    if (*konst).consttype != vartype {
-        return None; // cross-type (D5): the const must be the column type
-    }
     let kind = super::columnar::minmax_kind_of(vartype.to_u32());
     if kind == MinMaxKind::None {
         return None;
     }
+    // M151 — the const need NOT be the exact column type. The ClickBench `<>`/`=` predicates are CROSS-TYPE
+    // (`AdvEngineID int2 <> 0 int4`): the literal is int4, the column int2. `encode_const_coerced` (below) reads
+    // the const in ITS type and casts to the column's min/max domain with a RANGE CHECK (out-of-range → None →
+    // clause not pushed, always safe). The A/B gate (diverged=0) proves correctness.
+    let consttype = (*konst).consttype.to_u32();
     // The operator's btree strategy in the column type's default opfamily (D5 — no hardcoded OIDs).
     let opclass = pg_sys::GetDefaultOpClass(vartype, pg_sys::BTREE_AM_OID);
     if opclass == pg_sys::InvalidOid {
@@ -195,8 +197,11 @@ pub(crate) unsafe fn extract_zone_predicate(clause: *mut pg_sys::Node, relid: i3
     let (mut strategy, mut lt, mut rt): (c_int, pg_sys::Oid, pg_sys::Oid) =
         (0, pg_sys::InvalidOid, pg_sys::InvalidOid);
     pg_sys::get_op_opfamily_properties(probe_op, opfamily, false, &mut strategy, &mut lt, &mut rt);
-    if lt != vartype || rt != vartype {
-        return None; // not the same-type native comparison (D5)
+    // M151 — only the VAR's side of the operator must equal the column type; the CONST side may differ (cross-type,
+    // coerced below). `flipped` means the Var is the RIGHT operand (`const <op> col`), so its type is `rt`.
+    let var_side = if flipped { rt } else { lt };
+    if var_side != vartype {
+        return None; // the operator does not apply to this column type
     }
     if forced_ne && strategy != 3 {
         return None; // the negator must be exactly `=` (strategy 3) for this to be `<>`
@@ -217,7 +222,47 @@ pub(crate) unsafe fn extract_zone_predicate(clause: *mut pg_sys::Node, relid: i3
     Some(ZonePredicate {
         col: col as usize,
         op: if flipped { flip_op(base) } else { base },
-        const_bits: encode_const_bits((*konst).constvalue, kind)?,
+        const_bits: encode_const_coerced((*konst).constvalue, consttype, kind)?,
+    })
+}
+
+/// M151 — coerce a `Const` (in `consttype`) into `const_bits` in the COLUMN's `target` MinMaxKind domain, for the
+/// cross-type ClickBench pattern (`col int2 <> 0 int4`). Reads the const in ITS own type, then numerically casts
+/// to the column domain with a RANGE CHECK: an out-of-range cast (e.g. `int2col = 40000`) returns `None` → the
+/// clause is not pushed and the native plan handles it (ALWAYS SAFE — for `=`/`<>` the out-of-range value can
+/// never match/exclude a real int2 row; for `<`/`>` an out-of-range bound makes the predicate trivially
+/// true/false, which the native plan evaluates correctly). Same-type consts fall through to `encode_const_bits`.
+/// The result MUST agree with `compute_minmax` (ints as `i64 as u64`, floats as `f64::to_bits`).
+unsafe fn encode_const_coerced(datum: pg_sys::Datum, consttype: u32, target: MinMaxKind) -> Option<u64> {
+    // Read the const value in its OWN type. Integers/temporal → i128 (wide enough for any range check); floats → f64.
+    enum V {
+        I(i128),
+        F(f64),
+        B(bool),
+    }
+    let v = match consttype {
+        21 => V::I(i16::from_datum(datum, false)? as i128),
+        23 => V::I(i32::from_datum(datum, false)? as i128),
+        20 => V::I(i64::from_datum(datum, false)? as i128),
+        16 => V::B(bool::from_datum(datum, false)?),
+        700 => V::F(f32::from_datum(datum, false)? as f64),
+        701 => V::F(f64::from_datum(datum, false)?),
+        1114 | 1184 => V::I(i64::from_datum(datum, false)? as i128), // timestamp/tz μs
+        1082 => V::I(i32::from_datum(datum, false)? as i128),        // date days
+        _ => return None,                                            // non-numeric const → cannot coerce
+    };
+    // Cast into the column's min/max domain, RANGE-CHECKED (i128 → i16/i32/i64 via try_from).
+    Some(match (target, v) {
+        (MinMaxKind::I2, V::I(x)) => (i16::try_from(x).ok()? as i64) as u64,
+        (MinMaxKind::I4, V::I(x)) => (i32::try_from(x).ok()? as i64) as u64,
+        (MinMaxKind::I8, V::I(x)) => (i64::try_from(x).ok()? as i64) as u64,
+        (MinMaxKind::Bool, V::B(b)) => (b as i64) as u64,
+        (MinMaxKind::F4, V::F(f)) => (f as f32 as f64).to_bits(),
+        (MinMaxKind::F8, V::F(f)) => f.to_bits(),
+        // an integer literal compared against a float column (`col float8 <> 5`) — widen to float.
+        (MinMaxKind::F4, V::I(x)) => (x as f32 as f64).to_bits(),
+        (MinMaxKind::F8, V::I(x)) => (x as f64).to_bits(),
+        _ => return None, // incompatible (e.g. a float literal into an int column — narrowing loses info; decline)
     })
 }
 
