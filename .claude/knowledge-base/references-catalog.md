@@ -519,3 +519,5 @@ alguém escrever a entrada completa (`Why / What to study / Milestones`):
 - **Remove a peer:** delete its folder under `.claude/knowledge-base/references/` AND remove its entry from this catalog in the same commit.
 - **Update a peer (refresh clone):** `cd .claude/knowledge-base/references/{peer}/ && git pull` — record the new commit SHA in this catalog.
 - **Replace a peer with a better one:** treat as remove + add. Do NOT rename folders; symbolic continuity is meaningless when the underlying repo changed.
+
+- `references/pg_clickhouse/` — ClickHouse/pg_clickhouse (Apache-2.0, FDW). Clone: `git clone --depth 1 --filter=blob:none https://github.com/ClickHouse/pg_clickhouse`. Study-for: shippability + collation-safety de predicados (`src/shipable.c`, `src/deparse.c`), oráculo de pushdown (`test/`). Adicionado M156-discover (2026-07-25).

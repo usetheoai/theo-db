@@ -39,6 +39,31 @@ pub(crate) struct ZonePredicate {
     pub const_bits: u64,
 }
 
+/// A pushable TEXT operator (M156). NEVER prunes chunk groups (text has no numeric zone domain here) — it rides
+/// only to the DataFusion `Filter` (`build_filter_expr` → `eq`/`not_eq`/`like`/`not_like`). Only PROVABLY-safe
+/// shapes reach here: deterministic collation + type text/varchar (bpchar excluded — `bpchareq` trims trailing
+/// blanks, M153) + operator in this set. ILIKE (`~~*`) and regex (`~`/`!~`/`~*`/`!~*`) DECLINE upstream
+/// (DataFusion's regex is Rust/RE2, ≠ PG POSIX ERE — confirmed M152). Explicit discriminants: the agg path
+/// serializes `op as i32` (`columnar_agg::encode_text_preds`) and decodes it by literal integer — reordering the
+/// variants would silently corrupt the pushed predicate (same contract as `ZoneOp`).
+#[derive(Clone, Copy, PartialEq, Debug)]
+#[repr(i32)]
+pub(crate) enum TextOp {
+    Eq = 0,
+    Ne = 1,
+    Like = 2,
+    NotLike = 3,
+}
+
+/// A single pushable text predicate: `column[col] <op> 'needle'` on a text/varchar column under a deterministic
+/// collation. `needle` is the constant's server-encoded (UTF-8) payload, extracted at plan time from the `Const`.
+#[derive(Clone, Debug)]
+pub(crate) struct TextPredicate {
+    pub col: usize,
+    pub op: TextOp,
+    pub needle: String,
+}
+
 /// Can a chunk group whose zone-map is `(has_minmax, min_bits, max_bits, kind)` possibly contain a row matching
 /// `pred`? Returns `true` = "must scan" UNLESS the zone-map PROVES no row can match (then `false` = safe to skip).
 /// FAIL-SAFE (never fail-wrong): `has_minmax == false`, `kind == None`, or a NaN in the compared floats → `true`.

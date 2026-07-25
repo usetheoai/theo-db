@@ -13,7 +13,7 @@
 
 use super::columnar_codec::MinMaxKind;
 use super::df_executor::{AggSpec, run_columnar_aggs, run_columnar_grouped_aggs};
-use super::zonemap::{ZoneOp, ZonePredicate};
+use super::zonemap::{TextOp, TextPredicate, ZoneOp, ZonePredicate};
 use pgrx::datum::FromDatum;
 use pgrx::{GucContext, GucFlags, GucRegistry, GucSetting};
 use pgrx::{PgBox, PgList, pg_guard, pg_sys};
@@ -292,20 +292,120 @@ unsafe fn encode_const_coerced(datum: pg_sys::Datum, consttype: u32, target: Min
     })
 }
 
-/// Extract ALL of the base rel's WHERE quals as pushable predicates. Returns `None` if ANY qual is NOT pushable —
-/// the DataFusion filter can only represent `col <op> const`, so an un-pushable qual means the CustomScan cannot
-/// apply the full WHERE and MUST decline (the native plan then applies it correctly).
+/// M156 — classify a built-in text operator to its pushable `TextOp`, or `None` (decline). Only BUILT-IN operators
+/// (OID < `FirstNormalObjectId`, the boundary postgres_fdw's `is_builtin` uses) are trusted — a user-defined
+/// operator named `=` could carry arbitrary semantics. `=`/`<>`/`~~`(LIKE)/`!~~`(NOT LIKE) push; ILIKE (`~~*`,
+/// `!~~*`, locale-aware) and regex (`~`/`!~`/`~*`/`!~*`, RE2/Rust ≠ PG POSIX ERE) DECLINE fail-closed (M152).
+unsafe fn classify_text_op(opno: pg_sys::Oid) -> Option<TextOp> {
+    if opno.to_u32() >= pg_sys::FirstNormalObjectId {
+        return None; // user-defined operator — untrusted semantics
+    }
+    let namep = pg_sys::get_opname(opno);
+    if namep.is_null() {
+        return None;
+    }
+    match CStr::from_ptr(namep).to_str().ok()? {
+        "=" => Some(TextOp::Eq),
+        "<>" => Some(TextOp::Ne),
+        "~~" => Some(TextOp::Like),
+        "!~~" => Some(TextOp::NotLike),
+        _ => {
+            admit_trace("text_where_unsupported_operator"); // ILIKE / regex / other → native plan
+            None
+        }
+    }
+}
+
+/// M156 — extract a pushable TEXT predicate `Var(col) <op> Const('needle')` from a base-rel qual. Guards (ADR-2 +
+/// blueprint Corner 3/4): the Var is a text/varchar column (25/1043; bpchar 1042 EXCLUDED — `bpchareq` trims
+/// trailing blanks, a TYPE semantic the byte-wise DataFusion compare would diverge on, M153); the Const is a
+/// non-NULL text/varchar literal; the operator's `inputcollid` is a DETERMINISTIC collation (DataFusion matches
+/// byte-wise — the `varlena.c` memcmp guarantee only under a deterministic collation, M153/M154); the operator is
+/// one of `=`/`<>`/LIKE/NOT LIKE (`classify_text_op`). NOT symmetric — only `col <op> 'const'` (LIKE has no
+/// commutator). Returns `None` for ANY other shape → the caller declines to the native plan.
+unsafe fn extract_text_predicate(clause: *mut pg_sys::Node, relid: i32) -> Option<TextPredicate> {
+    if clause.is_null() || (*clause).type_ != pg_sys::NodeTag::T_OpExpr {
+        return None;
+    }
+    let op = clause as *mut pg_sys::OpExpr;
+    let args = PgList::<pg_sys::Node>::from_pg((*op).args);
+    if args.len() != 2 {
+        return None;
+    }
+    let (a0, a1) = (args.get_ptr(0)?, args.get_ptr(1)?);
+    // Only `Var <op> Const` (LIKE is not commutable, so a flipped `'const' <op> col` is never admitted).
+    if (*a0).type_ != pg_sys::NodeTag::T_Var || (*a1).type_ != pg_sys::NodeTag::T_Const {
+        return None;
+    }
+    let var = a0 as *mut pg_sys::Var;
+    let konst = a1 as *mut pg_sys::Const;
+    if (*var).varno as i32 != relid || (*konst).constisnull {
+        return None; // wrong rel or NULL const (`col = NULL` → native plan evaluates the 3-valued logic)
+    }
+    let vartype = (*var).vartype.to_u32();
+    if vartype != 25 && vartype != 1043 {
+        return None; // text (25) / varchar (1043) only — bpchar (1042) excluded (M153)
+    }
+    let consttype = (*konst).consttype.to_u32();
+    if consttype != 25 && consttype != 1043 {
+        return None; // the literal must itself be a text-class value we can read as a UTF-8 string
+    }
+    // Collation guard (M153/M154): the operator compares under `inputcollid`; a byte-wise DataFusion compare only
+    // matches PG under a DETERMINISTIC collation. `InvalidOid` = no collation (byte compare) → allowed.
+    let collid = (*op).inputcollid;
+    if collid != pg_sys::InvalidOid && !pg_sys::get_collation_isdeterministic(collid) {
+        admit_trace("text_where_nondeterministic_collation");
+        return None;
+    }
+    let text_op = classify_text_op((*op).opno)?;
+    if (*var).varattno < 1 {
+        return None; // system column / whole-row Var — never a real text column to push (explicit, not implied)
+    }
+    // Read the literal's payload WITHOUT pgrx's UTF-8-asserting conversion (council-rust-pgrx HIGH): `String::from_datum`
+    // / `<&str>::from_datum` PANIC on a non-ASCII byte under a non-UTF-8 server encoding (LATIN1/WIN1252 → Ascii policy;
+    // SQL_ASCII → strict UTF-8), turning a valid query into a planner ERROR inside the upper-paths hook. Go through
+    // `text_to_cstring` (raw payload copy, no assertion) and DECLINE fail-closed when the bytes are not valid UTF-8 —
+    // the DataFusion `Utf8` filter cannot represent non-UTF-8 bytes anyway, so the native plan must handle that case.
+    let cstr = pg_sys::text_to_cstring((*konst).constvalue.cast_mut_ptr::<pg_sys::text>());
+    let needle = CStr::from_ptr(cstr).to_str().ok()?.to_owned();
+    // M156 (council-index-storage MEDIUM): a LIKE/NOT LIKE pattern ending in an ODD number of `\` has a dangling
+    // escape → PG raises ERROR 22025 ("LIKE pattern must not end with escape character", like_match.c) while arrow's
+    // kernel treats the trailing `\` as a literal and returns rows. Decline so the native plan applies the real
+    // (error) semantics. `=`/`<>` (texteq/textne) have no escape rule and are unaffected.
+    if matches!(text_op, TextOp::Like | TextOp::NotLike) {
+        let trailing_backslashes = needle.bytes().rev().take_while(|&b| b == b'\\').count();
+        if trailing_backslashes % 2 == 1 {
+            admit_trace("text_where_like_dangling_escape");
+            return None;
+        }
+    }
+    let col = ((*var).varattno as i32) - 1; // 1-based AttrNumber → 0-based (varattno ≥ 1 checked above)
+    Some(TextPredicate { col: col as usize, op: text_op, needle })
+}
+
+/// Extract ALL of the base rel's WHERE quals as pushable predicates. Returns `None` if ANY qual is NOT pushable
+/// (neither a numeric zone predicate nor a text predicate) — the DataFusion filter can only represent
+/// `col <op> const`, so an un-pushable qual means the CustomScan cannot apply the full WHERE and MUST decline (the
+/// native plan then applies it correctly). M156 — a qual is pushable as a numeric zone predicate OR a text predicate.
 unsafe fn extract_all_predicates(
     input_rel: *mut pg_sys::RelOptInfo,
     relid: i32,
-) -> Option<Vec<ZonePredicate>> {
+) -> Option<(Vec<ZonePredicate>, Vec<TextPredicate>)> {
     let ris = PgList::<pg_sys::RestrictInfo>::from_pg((*input_rel).baserestrictinfo);
-    let mut preds = Vec::with_capacity(ris.len());
+    let mut zpreds = Vec::with_capacity(ris.len());
+    let mut tpreds: Vec<TextPredicate> = Vec::new();
     for i in 0..ris.len() {
         let ri = ris.get_ptr(i)?;
-        preds.push(extract_zone_predicate((*ri).clause as *mut pg_sys::Node, relid)?);
+        let clause = (*ri).clause as *mut pg_sys::Node;
+        if let Some(z) = extract_zone_predicate(clause, relid) {
+            zpreds.push(z);
+        } else if let Some(t) = extract_text_predicate(clause, relid) {
+            tpreds.push(t);
+        } else {
+            return None; // un-pushable qual → decline (native plan applies the full WHERE)
+        }
     }
-    Some(preds)
+    Some((zpreds, tpreds))
 }
 
 /// Admission result. `group_cols` = (attno, typoid) per GROUP BY key; `layout` maps each output-target slot to its
@@ -317,6 +417,7 @@ struct Admitted {
     relid: i32,
     aggs: Vec<ParsedAgg>,
     preds: Vec<ZonePredicate>,
+    text_preds: Vec<TextPredicate>, // M156 — text WHERE predicates (filter-only, never prune)
     group_cols: Vec<(i32, u32)>,
     layout: Vec<(u8, usize)>,
 }
@@ -526,14 +627,14 @@ unsafe fn build_admission(
     if is_columnar {
         if grouped {
             // GROUP BY + WHERE combined (M114): un-pushable qual → `extract_all_predicates` None → decline.
-            let preds = match extract_all_predicates(input_rel, relid) {
+            let (preds, text_preds) = match extract_all_predicates(input_rel, relid) {
                 Some(p) => p,
                 None => { admit_trace("unpushable_where_qual"); return None; } // M152
             };
-            return Some(Admitted { mode: 0, relid, aggs, preds, group_cols, layout });
+            return Some(Admitted { mode: 0, relid, aggs, preds, text_preds, group_cols, layout });
         }
         // Non-grouped: ALL quals must be pushable (`col <op> const`), else decline.
-        let preds = match extract_all_predicates(input_rel, relid) {
+        let (preds, text_preds) = match extract_all_predicates(input_rel, relid) {
             Some(p) => p,
             None => { admit_trace("unpushable_where_qual"); return None; } // M152
         };
@@ -542,6 +643,7 @@ unsafe fn build_admission(
             relid,
             aggs,
             preds,
+            text_preds,
             group_cols: Vec::new(),
             layout: Vec::new(),
         });
@@ -568,6 +670,7 @@ unsafe fn build_admission(
             relid,
             aggs,
             preds: Vec::new(),
+            text_preds: Vec::new(), // M156 — heap-cache path declines any WHERE (guarded above), so never text preds
             group_cols: Vec::new(),
             layout: Vec::new(),
         });
@@ -896,6 +999,25 @@ unsafe fn encode_private(adm: &Admitted, table_oid: u32) -> *mut pg_sys::List {
     pl
 }
 
+/// M156 — encode the text predicates as the 2nd `custom_private` channel (ADR-1): a `List` whose members are each
+/// `[Integer(col), Integer(op), String(needle)]` — all leaf `Value` nodes, so `copyObject`/out/read round-trip the
+/// varlena-free way (the int-only channel cannot carry a string). Returns `NIL` when there are no text predicates
+/// (decode treats NIL as zero). Returns `None` only if a needle carries an interior NUL (impossible for text values)
+/// — the caller then declines the swap rather than shipping a filter that silently drops a predicate.
+unsafe fn encode_text_preds(tpreds: &[TextPredicate]) -> Option<*mut pg_sys::List> {
+    let mut outer: *mut pg_sys::List = std::ptr::null_mut();
+    for t in tpreds {
+        let cneedle = std::ffi::CString::new(t.needle.as_str()).ok()?; // interior NUL → decline (never for text)
+        let pgstr = pg_sys::pstrdup(cneedle.as_ptr()); // copy into the current (planner) memory context
+        let mut entry: *mut pg_sys::List = std::ptr::null_mut();
+        entry = pg_sys::lappend(entry, pg_sys::makeInteger(t.col as i32) as *mut c_void);
+        entry = pg_sys::lappend(entry, pg_sys::makeInteger(t.op as i32) as *mut c_void);
+        entry = pg_sys::lappend(entry, pg_sys::makeString(pgstr) as *mut c_void);
+        outer = pg_sys::lappend(outer, entry as *mut c_void);
+    }
+    Some(outer)
+}
+
 /// If `plan` is an `Agg` over a columnar table matching an unconsumed stash entry, build the replacement `CustomScan`
 /// (plain-Var tlist, scanrelid=0, custom_private from the stash) with the same output shape; else `None`.
 unsafe fn try_swap_agg(
@@ -1020,7 +1142,14 @@ unsafe fn try_swap_agg(
     cscan.flags = 0;
     cscan.custom_plans = std::ptr::null_mut();
     cscan.custom_exprs = std::ptr::null_mut();
-    cscan.custom_private = encode_private(&adm, table_oid);
+    // M156 — custom_private is a 2-channel outer List: [<numeric IntList>, <text-preds List>]. The int-only channel
+    // (M115 layout) cannot carry a varlena, so text predicates ride a parallel node channel (ADR-1). A needle with
+    // an interior NUL (impossible for a text value) → decline the swap rather than ship an incomplete filter.
+    let int_channel = encode_private(&adm, table_oid);
+    let text_channel = encode_text_preds(&adm.text_preds)?;
+    let mut outer = pg_sys::lappend(std::ptr::null_mut(), int_channel as *mut c_void);
+    outer = pg_sys::lappend(outer, text_channel as *mut c_void);
+    cscan.custom_private = outer;
     // M131 (#135): NOT `plain_var_tlist` — a self-referential INDEX_VAR here makes ruleutils' `resolve_special_varno`
     // recurse forever when a Sort above this node has a key on the aggregate output, hanging EXPLAIN. This list also
     // becomes the node's RUNTIME scan TupleDesc (`ExecTypeFromTL`), so it must stay descriptor-equal to
@@ -1117,7 +1246,19 @@ unsafe extern "C-unwind" fn begin_custom_scan(
         return; // EXPLAIN without ANALYZE: show the node, do not execute
     }
     let cscan = st.css.ss.ps.plan as *mut pg_sys::CustomScan;
-    let priv_list = (*cscan).custom_private;
+    // M156 — custom_private is the 2-channel outer List `[int_channel, text_channel]` (a T_List). A flat IntList
+    // (T_IntList) — a legacy/channel-less encode — is read directly with zero text predicates (backward compatible).
+    let raw_priv = (*cscan).custom_private;
+    let (priv_list, text_list): (*mut pg_sys::List, *mut pg_sys::List) = if !raw_priv.is_null()
+        && (*(raw_priv as *mut pg_sys::Node)).type_ == pg_sys::NodeTag::T_List
+    {
+        (
+            pg_sys::list_nth(raw_priv, 0) as *mut pg_sys::List,
+            pg_sys::list_nth(raw_priv, 1) as *mut pg_sys::List,
+        )
+    } else {
+        (raw_priv, std::ptr::null_mut())
+    };
     let n = pg_sys::list_length(priv_list);
     // M115 layout: [table_oid, mode, nagg, ...]. The base table is resolved by its stable pg_class OID (the Agg-swap
     // dropped the child scan, so there is no scanrelid to index es_range_table).
@@ -1178,6 +1319,25 @@ unsafe extern "C-unwind" fn begin_custom_scan(
             };
             preds.push(ZonePredicate { col, op, const_bits: (hi << 32) | lo });
         }
+        // M156 — decode the text predicates from the 2nd channel (`text_list`; NIL → none). Each entry is a
+        // `[Integer(col), Integer(op), String(needle)]` list of leaf Value nodes.
+        let mut text_preds: Vec<TextPredicate> = Vec::new();
+        let tn = pg_sys::list_length(text_list);
+        for k in 0..tn {
+            let entry = pg_sys::list_nth(text_list, k) as *mut pg_sys::List;
+            let col = (*(pg_sys::list_nth(entry, 0) as *mut pg_sys::Integer)).ival as usize;
+            let opn = (*(pg_sys::list_nth(entry, 1) as *mut pg_sys::Integer)).ival;
+            let sval = (*(pg_sys::list_nth(entry, 2) as *mut pg_sys::String)).sval;
+            let op = match opn {
+                0 => TextOp::Eq,
+                1 => TextOp::Ne,
+                2 => TextOp::Like,
+                3 => TextOp::NotLike,
+                _ => return Err(format!("columnar_agg: bad text op {opn}")),
+            };
+            let needle = CStr::from_ptr(sval).to_string_lossy().into_owned();
+            text_preds.push(TextPredicate { col, op, needle });
+        }
         // Group block (appended last; absent → ngroup 0 → scalar path, backward compatible).
         let ngroup = if i < n { pg_sys::list_nth_int(priv_list, i) as usize } else { 0 };
         i += 1;
@@ -1208,6 +1368,7 @@ unsafe extern "C-unwind" fn begin_custom_scan(
                 &specs,
                 &layout,
                 &preds,
+                &text_preds,
                 super::guc::columnar_zonemap_skip(),
             );
             pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
@@ -1225,7 +1386,9 @@ unsafe extern "C-unwind" fn begin_custom_scan(
             let all_minmax = !specs.is_empty()
                 && specs.iter().all(|s| matches!(s, AggSpec::MinCol(..) | AggSpec::MaxCol(..)));
             let fast: Option<Result<Vec<Vec<(pg_sys::Datum, bool)>>, String>> =
-                if preds.is_empty() && all_minmax {
+                // M156 — a text predicate (like a numeric one) forbids the directory fast-path: the min/max answer
+                // must be filtered, and the zone directory holds no text filter. Fall through to the full scan.
+                if preds.is_empty() && text_preds.is_empty() && all_minmax {
                     let mut row = Vec::with_capacity(specs.len());
                     let mut ok = true;
                     let mut err = None;
@@ -1265,8 +1428,10 @@ unsafe extern "C-unwind" fn begin_custom_scan(
             }
             let r = match fast {
                 Some(res) => res,
-                None => run_columnar_aggs(rel, &specs, &preds, super::guc::columnar_zonemap_skip())
-                    .map(|row| vec![row]),
+                None => {
+                    run_columnar_aggs(rel, &specs, &preds, &text_preds, super::guc::columnar_zonemap_skip())
+                        .map(|row| vec![row])
+                }
             };
             pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
             r

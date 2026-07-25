@@ -2757,7 +2757,7 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 ---
 
-## M155 — [ ] Spike Top-N: medir se rotear ORDER BY … LIMIT ao TopK do DataFusion é lever (HONEST-NEGATIVE medido)
+## M155 — [x] Spike Top-N: medir se rotear ORDER BY … LIMIT ao TopK do DataFusion é lever (HONEST-NEGATIVE medido)
 
 > **Re-escopado 2026-07-25 por medição (owner-delegado, `docs/benchmarks/m155-topn-spike.md`).** A hipótese ORIGINAL
 > ("rotear ao TopK do DataFusion evitando o sort completo") foi **REFUTADA por EXPLAIN ANALYZE**: o PostgreSQL já usa
@@ -2786,6 +2786,31 @@ não-determinístico na fronteira do corte); o oráculo A/B do `run_m128` prova 
 bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan são os medidos.
 
 **Prior art:** DataFusion `physical-plan/src/topk/mod.rs`; PG `tuplesort.c` (top-N heapsort — a razão do honest-negative); blueprint § Classe 3.
+
+---
+
+## M156 — [ ] Rotear predicados de texto no WHERE (=, <>, LIKE, NOT LIKE) ao CustomScan colunar
+
+> **M152 measured (2026-07-25, `docs/benchmarks/m152-routing-map.md`):** `unpushable_where_qual` é o MAIOR first-blocker das não-roteadas (8 queries: q12,14,20,27,30,31,36,37) — predicados de TEXTO no WHERE. Hoje `extract_zone_predicate` (`columnar_agg.rs:160`) só serializa numérico (`u64` zone-bits); texto (varlena) não cabe.
+
+> Added 2026-07-25. Blueprint: `.claude/knowledge-base/discoveries/blueprints/columnar-text-where-pushdown-blueprint.md` (discover pg_clickhouse + DataFusion, SHIPPABLE_WITH_CAVEATS). Plan: `.claude/knowledge-base/plans/m156-text-where-plan.md`.
+
+**Objective:** serializar um predicado de texto (`col = 'x'`, `col <> ''`, `col LIKE '%p%'`, `col NOT LIKE 'a%'`) no `custom_private` (2º canal de `Const` nodes) e construir o filtro DataFusion equivalente sobre a coluna Utf8 — rotear as ~4-8 queries text-WHERE do ClickBench que o M152 mediu como não-roteadas.
+
+**Definition of done (measurement-first):**
+
+- [ ] Cobertura medida: `columnar_customscan_count` sobe acima de 21 (as queries text-WHERE do ClickBench).
+- [ ] A/B byte-idêntico vs heap (`result_ab.diverged == 0`) nos dois regimes (head + systematic).
+- [ ] Guard collation determinística + whitelist de operador: ILIKE (`~~*`), regex (`~`/`!~`/`~*`/`!~*`), bpchar (1042), collation não-determinística DECLINAM ao nativo (fail-closed; A/B provando o decline).
+- [ ] Escape do LIKE casa o default do PG (`\`) — A/B com `LIKE 'a\%b'`.
+- [ ] Round-trip do Const de texto correto (`%`/`_`/`\`/vazia/UTF-8 multibyte).
+- [ ] CHANGELOG `[Unreleased]`.
+
+**Dependencies:** M155 `[x]`.
+
+**Risks:** (a) escape do LIKE do DataFusion ≠ default do PG (`\`) → divergência → `escape_char='\'` + A/B com `LIKE 'a\%b'`. (b) copyObject/decode do Const varlena → round-trip provado (`%`/`_`/`\`/vazia/multibyte). (c) ILIKE/regex acidentalmente empurrado → whitelist fail-closed (o mesmo erro que os reviews M151/M154 pegaram).
+
+**Prior art:** pg_clickhouse `src/shipable.c`/`deparse.c` (shippability + collation-safety, Apache-2.0), DataFusion `physical-expr/.../like.rs` (`Expr::Like`); M151 (extract_zone_predicate + A/B), M153/M154 (`get_collation_isdeterministic`).
 
 ---
 
