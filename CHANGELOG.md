@@ -15,6 +15,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 ### Changed
+- M155 (spike Top-N) re-escopado por medição a um HONEST-NEGATIVE: EXPLAIN ANALYZE mostrou que o PostgreSQL já usa
+  `top-N heapsort` (heap O(n log k) = o algoritmo do TopK do DataFusion) para `ORDER BY … LIMIT` — o nó Sort custa
+  ~2-4ms (não é gargalo) e o custo dominante é a materialização row-by-row do scan colunar (M148, ~150ms), que rotear
+  ao TopK não elimina; a cobertura marginal é 0 (as Top-N já roteiam). Veredito: não implementar o roteamento-ao-TopK
+  (esforço≠complexidade). Lever real apontado (materialização preguiçosa de colunas de saída) como candidato futuro.
+  Evidência: `docs/benchmarks/m155-topn-spike.md`.
 
 ### Deprecated
 
