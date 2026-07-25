@@ -62,7 +62,7 @@ was A/B-verified byte-identical on the box:
 | `bpchar` column predicate | **declines** | 1000=1000 |
 | non-deterministic collation | **declines** | 667=667 |
 | `col = NULL` (null const) | **declines** | 0=0 |
-| LIKE pattern ending in `\` (dangling escape) | **declines** → native ERROR 22025 (never silent rows) | — |
+| LIKE pattern ending in `\` (dangling escape) | **declines** (Seq Scan, `Filter: url ~~ 'ab\'`) | 0=0 |
 | non-UTF-8 literal in a LATIN1 database (`= chr(233)`) | **declines** (no planner panic) | 100=100 |
 | ASCII literal in a LATIN1 database | routes | 200=200 |
 
@@ -75,9 +75,14 @@ recurring lesson (M151/M154): the review proves the shape space the benchmark do
    a non-UTF-8 server encoding (LATIN1/WIN1252 → Ascii policy; SQL_ASCII → strict UTF-8), turning a valid query into a
    planner ERROR. **Fix:** read via `text_to_cstring` (no assertion) + decline fail-closed on invalid UTF-8. Proven by
    EC-6 (LATIN1, no panic).
-2. **council-index-storage (MEDIUM)** — a LIKE/NOT LIKE pattern ending in an odd number of `\` → PostgreSQL errors
-   22025 (`like_match.c`) while arrow's kernel treats the trailing `\` as a literal and returns rows. **Fix:** decline
-   such patterns at plan time. Proven by EC-7.
+2. **council-index-storage (MEDIUM)** — a LIKE/NOT LIKE pattern ending in an odd number of `\` diverges: PostgreSQL
+   rejects a dangling escape with ERROR 22025 (`like_match.c:105-108`, fired when a row's text matches up to the escape
+   char) while arrow's kernel treats the trailing `\` as a literal and returns rows. Either way the columnar path can
+   never replicate PG. **Fix:** decline such patterns at plan time. **Proven by EC-7:** the plan is `Seq Scan …
+   Filter: url ~~ 'ab\'::text` (declined, not routed). NOTE: PG's 22025 is *data-dependent* — it fires only when a row
+   matches the pattern prefix up to the `\`; the EC-7 dataset has no `ab`-prefixed row, so native returns `count 0`
+   (no error) in the artifact. What EC-7 proves is the decline (the mechanism that prevents arrow's divergent answer);
+   the PG-error consequence is by `like_match.c` citation, not shown in this run's log.
 
 All other guards (collation, bpchar exclusion, operator whitelist via `FirstNormalObjectId`, default `\` escape,
 NULL 3-valued, min/max fast-path disable) were verified correct against PostgreSQL primary source.
