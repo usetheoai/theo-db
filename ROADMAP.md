@@ -2709,7 +2709,7 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 ---
 
-## M153 — [ ] Rotear GROUP BY por chave de TEXTO ao CustomScan DataFusion (hash, guardado por collation determinística)
+## M153 — [x] Rotear GROUP BY por chave de TEXTO ao CustomScan DataFusion (hash, guardado por collation determinística)
 
 > **M152 measured (2026-07-25, `docs/benchmarks/m152-routing-map.md`):** o real blocker das GROUP-BY-texto (q16,17,33,38) é `swap_sorted_text_group_collation` (o planner escolhe AGG_SORTED p/ `ORDER BY count LIMIT` → texto declina por collation) + o deparse ORDER-BY-sobre-agregado — NÃO o group-key texto (já aceito por `arrow_supported_group_type`). Cobertura marginal medida ~3. **Executar APÓS M154** (COUNT DISTINCT tem ganho mais limpo). Escopo revisado: tratar o AGG_SORTED-texto (collation determinística) + o deparse.
 
