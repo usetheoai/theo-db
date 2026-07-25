@@ -140,10 +140,12 @@ pub(crate) unsafe fn encode_const_bits(datum: pg_sys::Datum, kind: MinMaxKind) -
     })
 }
 
-/// Extract a pushable zone-map predicate from a base-rel qual (ADR D2/D5): `Var(col) <op> Const` where the operator
-/// is the column-type-NATIVE btree comparison (strategy 1-5, both input types == the column type) and the const is
-/// the same type. Returns `None` for ANY other shape (function, OR, cross-type, two-Var, NULL const, non-min/max-able
-/// column) → the caller MUST fall back to the native plan so the WHERE is applied correctly.
+/// Extract a pushable zone-map predicate from a base-rel qual: `Var(col) <op> Const`. The operator is a btree
+/// comparison of `col`'s type (strategy 1-5) OR its negator for `<>` (M151 — `<>` is not a btree strategy). The
+/// const may be a DIFFERENT type within the INTEGER class {int2,int4,int8} (M151 cross-type, coerced with a range
+/// check by `encode_const_coerced`); cross-type outside the integer class (temporal/float) is declined because raw
+/// min/max coercion is not order-isomorphic there. Returns `None` for ANY other shape (function, OR, two-Var, NULL
+/// const, non-min/max-able column, unsafe cross-type) → the caller MUST fall back to the native plan.
 pub(crate) unsafe fn extract_zone_predicate(clause: *mut pg_sys::Node, relid: i32) -> Option<ZonePredicate> {
     if clause.is_null() || (*clause).type_ != pg_sys::NodeTag::T_OpExpr {
         return None;
@@ -173,8 +175,21 @@ pub(crate) unsafe fn extract_zone_predicate(clause: *mut pg_sys::Node, relid: i3
     // M151 — the const need NOT be the exact column type. The ClickBench `<>`/`=` predicates are CROSS-TYPE
     // (`AdvEngineID int2 <> 0 int4`): the literal is int4, the column int2. `encode_const_coerced` (below) reads
     // the const in ITS type and casts to the column's min/max domain with a RANGE CHECK (out-of-range → None →
-    // clause not pushed, always safe). The A/B gate (diverged=0) proves correctness.
+    // clause not pushed).
     let consttype = (*konst).consttype.to_u32();
+    // M151 review HIGH — cross-type coercion is order-isomorphic in the RAW min/max domain ONLY within the integer
+    // class {int2,int4,int8}. Two other cross-type classes live in a SINGLE btree opfamily and would be admitted by
+    // `var_side == vartype`, but coercing their const by raw bits is WRONG (the zone prune AND `build_filter_expr`
+    // compare raw bits, and PG promotes differently):
+    //   • temporal (date=days I4 vs timestamp/timestamptz=μs I8; + timezone rotation under a non-UTC `TimeZone`)
+    //   • float (`f4col = x::float8` — PG promotes the COLUMN to f8; rounding the const to f32 flips edge rows)
+    // Decline cross-type outside the integer class → the native plan applies the real (promoted) comparison. Same
+    // type (`consttype == vt`) always passes (temporal/float SAME-type is unaffected).
+    let vt = vartype.to_u32();
+    const INT_CLASS: [u32; 3] = [21, 23, 20]; // int2, int4, int8
+    if consttype != vt && !(INT_CLASS.contains(&consttype) && INT_CLASS.contains(&vt)) {
+        return None;
+    }
     // The operator's btree strategy in the column type's default opfamily (D5 — no hardcoded OIDs).
     let opclass = pg_sys::GetDefaultOpClass(vartype, pg_sys::BTREE_AM_OID);
     if opclass == pg_sys::InvalidOid {
