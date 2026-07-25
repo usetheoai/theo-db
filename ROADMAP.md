@@ -2757,7 +2757,7 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 ---
 
-## M155 — [ ] Spike Top-N: medir se rotear ORDER BY … LIMIT ao TopK do DataFusion é lever (HONEST-NEGATIVE medido)
+## M155 — [x] Spike Top-N: medir se rotear ORDER BY … LIMIT ao TopK do DataFusion é lever (HONEST-NEGATIVE medido)
 
 > **Re-escopado 2026-07-25 por medição (owner-delegado, `docs/benchmarks/m155-topn-spike.md`).** A hipótese ORIGINAL
 > ("rotear ao TopK do DataFusion evitando o sort completo") foi **REFUTADA por EXPLAIN ANALYZE**: o PostgreSQL já usa
