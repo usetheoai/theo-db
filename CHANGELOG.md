@@ -13,7 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- Cobertura do CustomScan vetorizado DataFusion (M151): agregados (`COUNT`/`SUM`/`AVG`, com ou sem `GROUP BY`) que filtram por `WHERE col <> const` em coluna numérica/temporal sobre `theodb_columnar` passam a rotear pelo caminho vetorizado (batch Arrow), não mais tuple-a-tuple. `<>` é detectado como o negador do `=` btree (não é estratégia btree) e aplicado só pelo `Filter` DataFusion (nunca poda chunk — a poda por min/max continua só nos ops ordenados). Escopo honesto: `<>` numérico/temporal/bool; `<>` em texto (`SearchPhrase <> ''`) é follow-up (const-texto não cabe na serialização `custom_private` atual — ADR-4). (#M151)
+- Cobertura do CustomScan vetorizado DataFusion (M151): agregados (`COUNT`/`SUM`/`AVG`, com ou sem `GROUP BY`) que filtram por `WHERE col <> const` em coluna numérica/temporal sobre `theodb_columnar` passam a rotear pelo caminho vetorizado (batch Arrow), não mais tuple-a-tuple. `<>` é detectado como o negador do `=` btree (não é estratégia btree) e aplicado só pelo `Filter` DataFusion (nunca poda chunk — a poda por min/max continua só nos ops ordenados). Const **cross-type** é coercido ao domínio da coluna com range-check (o padrão real do ClickBench: coluna `int2`, literal `int4` — ex. `AdvEngineID <> 0`), o que também amplia `=`/`<`/`>` cross-type. Escopo honesto: predicados numéricos/temporais/bool; `<>` em texto (`SearchPhrase <> ''`) é follow-up (const-texto não cabe na serialização `custom_private` atual — ADR-4). (#M151)
 
 ### Changed
 
