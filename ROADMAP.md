@@ -2880,7 +2880,7 @@ bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan s�
 ---
 
 
-## M160 — [ ] Decode zero-copy fixed-width → Arrow (elimina a ponte `Vec<Option<Vec<u8>>>`) — perf da classe COBERTA
+## M160 — [x] Decode zero-copy fixed-width → Arrow (elimina a ponte `Vec<Option<Vec<u8>>>`) — perf da classe COBERTA
 
 > **Layer A — o MAIOR ROI do deep-dive pós-M159** (`knowledge-base/discoveries/blueprints/columnar-improvement-deepdive-blueprint.md`). Added 2026-07-26 (`/roadmap-feature columnar-improvement-layers`). Descoberta não-óbvia: a classe COBERTA (32/43 queries de pushdown) **não** roda `form_row` (o gargalo M148), mas paga um gêmeo nunca perfilado — a ponte de decode: `decode_column` (`columnar_codec.rs:293,308`) aloca CADA célula num `Vec<u8>` (`.to_vec()`) e `build_arrow` (`df_executor.rs:49-137`) RE-LÊ e copia p/ Arrow (dupla-passada + tempestade de malloc/page-fault). Flamegraph do path de pushdown CONFIRMOU (direcional, 318 amostras: `build_arrow`+`decode_column`+`malloc`+`clear_page_erms` dominam; compute do DataFusion ausente). Um fix estrutural melhora as 32 queries de uma vez.
 
