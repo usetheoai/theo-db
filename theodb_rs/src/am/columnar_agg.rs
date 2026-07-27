@@ -565,6 +565,7 @@ struct Admitted {
     in_preds: Vec<super::zonemap::InListPredicate>, // M161 — integer IN-list WHERE (filter-only, never prune)
     group_cols: Vec<(i32, u32)>,
     group_exprs: Vec<GroupExprSpec>, // M157 — expression group keys (date_trunc), layout kind=2
+    const_outs: Vec<(i64, u32)>,     // M165 — projected integer constant output cells (SELECT 1, …), layout kind=3
     layout: Vec<(u8, usize)>,
 }
 
@@ -616,6 +617,7 @@ struct GroupExprSpec {
 enum TargetSlot {
     Group(i32, u32),
     GroupExpr(GroupExprSpec), // M157 — layout kind=2
+    ConstOut(i64, u32),       // M165 — projected integer constant (SELECT 1, …), layout kind=3; (value, typoid)
     Agg(ParsedAgg),
 }
 
@@ -944,6 +946,34 @@ unsafe fn classify_target_node(
             admit_trace("unsupported_agg_func");
             None
         }
+    } else if (*node).type_ == pg_sys::NodeTag::T_Const {
+        // M165 — a bare integer literal projected in the output target (`SELECT 1, url, count(*) …`). PG's planner
+        // ELIMINATES a constant group key from groupClause/numCols, so the effective grouping is single-key
+        // (`GROUP BY url`) and only the projected constant column blocks routing (the M161 q34 honest-negative). Admit
+        // it as a FIXED OUTPUT CELL — NOT a grouping key (it never counts toward numCols). FAIL-CLOSED to the integer
+        // class {int2,int4,int8} + non-NULL: a float const would carry IEEE −0.0/NaN, a text const a collation, a
+        // numeric const a scale — none can reach the output byte-identically (the same class the M163 float group-key
+        // and M154 count(DISTINCT float) declines protect). Only when GROUP BY is present (a scalar `SELECT 1, count(*)`
+        // keeps the layout-empty scalar-path invariant → decline).
+        if !grouped {
+            return None;
+        }
+        let konst = node as *mut pg_sys::Const;
+        if (*konst).constisnull {
+            admit_trace("const_out_null"); // NULL const → native plan (fail-closed)
+            return None;
+        }
+        let ctype = (*konst).consttype.to_u32();
+        let val: i64 = match ctype {
+            21 => i16::from_datum((*konst).constvalue, false)? as i64,
+            23 => i32::from_datum((*konst).constvalue, false)? as i64,
+            20 => i64::from_datum((*konst).constvalue, false)?,
+            _ => {
+                admit_trace("const_out_type_unsupported"); // float/text/numeric/bool/other const → native plan
+                return None;
+            }
+        };
+        Some(TargetSlot::ConstOut(val, ctype))
     } else {
         admit_trace("target_grouping_expression_or_other"); // M152
         None // grouping expression (date_trunc(...)) / anything else → decline
@@ -960,6 +990,7 @@ unsafe fn build_admission(
     aggs: Vec<ParsedAgg>,
     group_cols: Vec<(i32, u32)>,
     group_exprs: Vec<GroupExprSpec>, // M157
+    const_outs: Vec<(i64, u32)>,     // M165 — projected integer constant output cells (layout kind=3)
     layout: Vec<(u8, usize)>,
 ) -> Option<Admitted> {
     // Mode: a columnar table (decode stripes) vs a heap table with a usable Arrow cache (M101 HTAP).
@@ -972,7 +1003,7 @@ unsafe fn build_admission(
                 Some(p) => p,
                 None => { admit_trace("unpushable_where_qual"); return None; } // M152
             };
-            return Some(Admitted { mode: 0, relid, aggs, preds, text_preds, in_preds, group_cols, group_exprs, layout });
+            return Some(Admitted { mode: 0, relid, aggs, preds, text_preds, in_preds, group_cols, group_exprs, const_outs, layout });
         }
         // Non-grouped: ALL quals must be pushable (`col <op> const`), else decline.
         let (preds, text_preds, in_preds) = match extract_all_predicates(input_rel, relid) {
@@ -988,6 +1019,7 @@ unsafe fn build_admission(
             in_preds,
             group_cols: Vec::new(),
             group_exprs: Vec::new(),
+            const_outs: Vec::new(), // M165 — non-grouped path never admits a const-out (grouped-only)
             layout: Vec::new(),
         });
     }
@@ -1017,6 +1049,7 @@ unsafe fn build_admission(
             in_preds: Vec::new(),   // M161 — heap-cache path declines any WHERE, so never IN-list preds
             group_cols: Vec::new(),
             group_exprs: Vec::new(), // M157 — heap-cache path is non-grouped, so never group exprs
+            const_outs: Vec::new(),  // M165 — heap-cache path is non-grouped, so never const-outs
             layout: Vec::new(),
         });
     }
@@ -1063,6 +1096,7 @@ unsafe fn admit(
     let mut aggs: Vec<ParsedAgg> = Vec::with_capacity(exprs.len());
     let mut group_cols: Vec<(i32, u32)> = Vec::new();
     let mut group_exprs: Vec<GroupExprSpec> = Vec::new(); // M157
+    let mut const_outs: Vec<(i64, u32)> = Vec::new(); // M165 — projected integer constant output cells (kind=3)
     let mut layout: Vec<(u8, usize)> = Vec::with_capacity(exprs.len());
     for i in 0..exprs.len() {
         let node = exprs.get_ptr(i)?;
@@ -1075,6 +1109,10 @@ unsafe fn admit(
                 layout.push((2, group_exprs.len())); // M157 — kind=2 group-expr slot
                 group_exprs.push(spec);
             }
+            TargetSlot::ConstOut(val, typoid) => {
+                layout.push((3, const_outs.len())); // M165 — kind=3 const-out slot (NOT a grouping key)
+                const_outs.push((val, typoid));
+            }
             TargetSlot::Agg(parsed) => {
                 layout.push((1, aggs.len()));
                 aggs.push(parsed);
@@ -1082,9 +1120,9 @@ unsafe fn admit(
         }
     }
     if grouped && group_cols.is_empty() && group_exprs.is_empty() {
-        return None; // GROUP BY with NO key at all (neither bare-column nor a supported expr) → native plan
+        return None; // GROUP BY with NO grouping key at all (a const-out alone is not a key) → native plan
     }
-    build_admission(rte, input_rel, relid, grouped, aggs, group_cols, group_exprs, layout)
+    build_admission(rte, input_rel, relid, grouped, aggs, group_cols, group_exprs, const_outs, layout)
 }
 
 /// `create_upper_paths_hook` — run `admit` and STASH the result keyed by the base table's OID (M115). Does NOT add a
@@ -1257,7 +1295,7 @@ unsafe fn deparse_safe_tlist(
             return std::ptr::null_mut();
         }
         // What does this output column represent? Grouped plans carry an explicit layout; the scalar path is
-        // one aggregate per output column, in order. Layout tags: 0=group col, 1=agg, 2=group-expr (M157).
+        // one aggregate per output column, in order. Layout tags: 0=group col, 1=agg, 2=group-expr (M157), 3=const-out (M165).
         let (tag, idx) = if adm.layout.is_empty() {
             (1u8, i)
         } else {
@@ -1297,6 +1335,17 @@ unsafe fn deparse_safe_tlist(
                 ) as *mut pg_sys::Expr,
                 None => return std::ptr::null_mut(),
             }
+        } else if tag == 3 {
+            // M165 — a const-out output column (`SELECT 1, …`). Copy the Const literal itself: it is descriptor-equal
+            // (exprType/typmod/collation are the const's own) and deparse-safe — a Const is a non-Var leaf, so
+            // ruleutils' resolve_special_varno stops at it (no INDEX_VAR self-recursion, the M131 #135 hang) and a
+            // literal carries no OUTER_VAR into the dropped subtree. Runtime tuples come from the materialized
+            // const_outs (scanrelid=0, never a real scan); this entry is descriptor + deparse metadata only.
+            let copied = pg_sys::copyObjectImpl(e as *const c_void) as *mut pg_sys::Node;
+            if copied.is_null() {
+                return std::ptr::null_mut(); // never place a NULL expr — ExecTypeFromTL would deref it
+            }
+            copied as *mut pg_sys::Expr
         } else {
             // Copy the Aggref so the original (shared) plan nodes are never mutated, then rebuild its argument Var
             // against the base rel so deparsing the arguments never follows OUTER_VAR into the dropped subtree.
@@ -1368,6 +1417,16 @@ unsafe fn encode_private(adm: &Admitted, table_oid: u32) -> *mut pg_sys::List {
     for &(kind, idx) in &adm.layout {
         pl = pg_sys::lappend_int(pl, kind as i32);
         pl = pg_sys::lappend_int(pl, idx as i32);
+    }
+    // M165 — const-out block (layout kind=3): [nconst, (val_hi, val_lo, typoid)×nconst]. Rides the int channel (a
+    // projected integer literal is varlena-free); the i64 value is split hi/lo i32 exactly like the IN-list/delta
+    // encodings (a `List` Integer is i32). Appended LAST so a pre-M165 decoder that stops after the layout block
+    // round-trips as zero const-outs (the exec-side `if i < n` guard treats absence as nconst 0).
+    pl = pg_sys::lappend_int(pl, adm.const_outs.len() as i32);
+    for &(val, typoid) in &adm.const_outs {
+        pl = pg_sys::lappend_int(pl, (val >> 32) as i32);
+        pl = pg_sys::lappend_int(pl, (val & 0xFFFF_FFFF) as i32);
+        pl = pg_sys::lappend_int(pl, typoid as i32);
     }
     pl
 }
@@ -2140,6 +2199,20 @@ unsafe extern "C-unwind" fn begin_custom_scan(
             i += 2;
             layout.push((kind, idx));
         }
+        // M165 — const-out block (layout kind=3): [nconst, (val_hi, val_lo, typoid)×nconst], appended after the layout
+        // by encode_private. Absent in a pre-M165 IntList (i == n → nconst 0), so backward compatible. Each i64 value
+        // is reconstructed from its hi/lo i32 pair (lappend_int is i32).
+        let nconst = if i < n { pg_sys::list_nth_int(priv_list, i) as usize } else { 0 };
+        i += 1;
+        let mut const_outs: Vec<(i64, u32)> = Vec::with_capacity(nconst);
+        for _ in 0..nconst {
+            let hi = pg_sys::list_nth_int(priv_list, i);
+            let lo = pg_sys::list_nth_int(priv_list, i + 1);
+            let typoid = pg_sys::list_nth_int(priv_list, i + 2) as u32;
+            i += 3;
+            let val = ((hi as i64) << 32) | (lo as u32 as i64);
+            const_outs.push((val, typoid));
+        }
         // M157/M161 — decode the expression group keys from the 3rd channel; each entry is
         // [Integer(base_attno), Integer(func), String(unit), Integer(out_typoid), Integer(delta_hi), Integer(delta_lo)].
         // Resolve base_attno → column name. NIL → empty.
@@ -2177,6 +2250,7 @@ unsafe extern "C-unwind" fn begin_custom_scan(
                 &group_exprs,
                 &specs,
                 &layout,
+                &const_outs,
                 &preds,
                 &text_preds,
                 &in_preds,

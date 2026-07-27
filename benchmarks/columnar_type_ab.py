@@ -237,6 +237,15 @@ def build_cases() -> list[tuple[str, str, str, str | None]]:
         ("group_i2", "SELECT c2, count(*) FROM hits GROUP BY c2", "route", AGG),
         ("group_bool", "SELECT b, count(*) FROM hits GROUP BY b", "route", AGG),
         ("group_text", "SELECT t, count(*) FROM hits GROUP BY t", "route", AGG),             # text key (M153/M158)
+        # M165 const-out: a projected integer literal (SELECT <const>, col, count(*) GROUP BY 1, col). The GROUP BY 1
+        # ordinal points at the constant, which PG eliminates as a redundant group key → real grouping is single-key on
+        # the named column. Fail-closed to the integer class: int const routes byte-identical; float/text/NULL const declines.
+        ("const_out_i4", "SELECT 1, c2, count(*) FROM hits GROUP BY 1, c2", "route", AGG),
+        ("const_out_i2", "SELECT 32767::int2, c4, count(*) FROM hits GROUP BY 1, c4", "route", AGG),
+        ("const_out_i8", "SELECT 9223372036854775807::int8, c2, count(*) FROM hits GROUP BY 1, c2", "route", AGG),
+        ("const_out_float", "SELECT 1.5::float8, c4, count(*) FROM hits GROUP BY 1, c4", "decline", None),   # float const → decline
+        ("const_out_text", "SELECT 'x'::text, c4, count(*) FROM hits GROUP BY 1, c4", "decline", None),      # text const → decline
+        ("const_out_null", "SELECT NULL::int4, c4, count(*) FROM hits GROUP BY 1, c4", "decline", None),     # NULL const → decline
         # SCOPE: this harness covers the AGG/group/in-list/zone-pred/expr admit-paths — where every historical type-class
         # bug lived (M151/M154/M157/M161/M163). The late-materialization *projection* path (M158) is query-shape, not
         # type-class, and is cost-gated on table size + enable_sort — it belongs to M158's own A/B, not here.
