@@ -1,0 +1,118 @@
+Pager usage is off.
+SET
+=== column types (context) ===
+    attname     |          atttypid           
+----------------+-----------------------------
+ advengineid    | smallint
+ counterid      | integer
+ eventdate      | date
+ eventtime      | timestamp without time zone
+ traficsourceid | smallint
+ userid         | bigint
+(6 rows)
+
+
+=== FIX rust-pgrx HIGH: temporal IN-list must DECLINE (native, no Custom Scan) ===
+                                                     QUERY PLAN                                                     
+--------------------------------------------------------------------------------------------------------------------
+ Aggregate
+   ->  Seq Scan on hits
+         Filter: (eventtime = ANY ('{"2013-07-15 10:00:00","2013-07-15 11:00:00"}'::timestamp without time zone[]))
+(3 rows)
+
+--- date IN-list must DECLINE ---
+                              QUERY PLAN                               
+-----------------------------------------------------------------------
+ Aggregate
+   ->  Seq Scan on hits
+         Filter: (eventdate = ANY ('{2013-07-15,2013-07-16}'::date[]))
+(3 rows)
+
+
+=== FIX rust-pgrx HIGH: date +/- int GROUP BY must DECLINE ===
+             QUERY PLAN              
+-------------------------------------
+ GroupAggregate
+   Group Key: ((eventdate + 1))
+   ->  Sort
+         Sort Key: ((eventdate + 1))
+         ->  Seq Scan on hits
+(5 rows)
+
+
+=== FIX index-storage BLOCKER/MEDIUM: int8-result col+/-k must DECLINE (fail-closed) ===
+--- UserID(int8) + 5 -> int8 result -> decline ---
+            QUERY PLAN            
+----------------------------------
+ GroupAggregate
+   Group Key: ((userid + 5))
+   ->  Sort
+         Sort Key: ((userid + 5))
+         ->  Seq Scan on hits
+(5 rows)
+
+--- CounterID(int4) + 3000000000 -> int8 result -> decline ---
+                       QUERY PLAN                       
+--------------------------------------------------------
+ GroupAggregate
+   Group Key: ((counterid + '3000000000'::bigint))
+   ->  Sort
+         Sort Key: ((counterid + '3000000000'::bigint))
+         ->  Seq Scan on hits
+(5 rows)
+
+
+=== FIX index-storage BLOCKER: int2 col + int4 literal -> result TYPE must be integer(int4), NOT smallint ===
+--- PG native result type ---
+ native_type 
+-------------
+ integer
+(1 row)
+
+--- routed (columnar) result type (must equal integer) + routing proof ---
+            QUERY PLAN             
+-----------------------------------
+ Custom Scan (theodb_columnar_agg)
+(1 row)
+
+ routed_type 
+-------------
+ integer
+(1 row)
+
+--- A/B AdvEngineID+5 byte-identical ---
+SET
+psql:/tmp/m161_fixes.sql:33: NOTICE:  table "a2" does not exist, skipping
+DROP TABLE
+SELECT 13
+SET
+psql:/tmp/m161_fixes.sql:34: NOTICE:  table "b2" does not exist, skipping
+DROP TABLE
+SELECT 13
+           k            | count 
+------------------------+-------
+ advengineid+5_diverged |     0
+(1 row)
+
+
+=== REGRESSION: q35 (int4-int4->int4) must still ROUTE + byte-identical ===
+SET
+SET
+            QUERY PLAN             
+-----------------------------------
+ Custom Scan (theodb_columnar_agg)
+(1 row)
+
+SET
+psql:/tmp/m161_fixes.sql:42: NOTICE:  table "a35" does not exist, skipping
+DROP TABLE
+SELECT 687281
+SET
+psql:/tmp/m161_fixes.sql:43: NOTICE:  table "b35" does not exist, skipping
+DROP TABLE
+SELECT 687281
+      k       | count 
+--------------+-------
+ q35_diverged |     0
+(1 row)
+

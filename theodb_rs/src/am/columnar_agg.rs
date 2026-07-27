@@ -278,6 +278,121 @@ pub(crate) unsafe fn extract_zone_predicate(clause: *mut pg_sys::Node, relid: i3
     })
 }
 
+/// M161 — extract a pushable INTEGER `IN`-list predicate `Var(int col) IN (int-const, …)` from a base-rel qual.
+/// SAFE-ONLY (fail-closed to native plan): `ScalarArrayOpExpr` with `useOr=true` (an `IN`, not `ALL`/`NOT IN`), the
+/// scalar operator is `=` (btree strategy 3) in the column's default opfamily, the column is int2/int4/int8, and every
+/// array element is a non-NULL integer `Const` coercible into the column type (range-checked). Any NULL element, a
+/// non-`Const` element, `NOT IN`/`<> ALL`, a non-integer column, or an empty list → `None` (decline). Rides only to
+/// the DataFusion `Filter` (`build_filter_expr` → `col.in_list(lits)`, the D3 authority); never prunes chunk groups.
+pub(crate) unsafe fn extract_inlist_predicate(
+    clause: *mut pg_sys::Node,
+    relid: i32,
+) -> Option<super::zonemap::InListPredicate> {
+    if clause.is_null() || (*clause).type_ != pg_sys::NodeTag::T_ScalarArrayOpExpr {
+        return None;
+    }
+    let sa = clause as *mut pg_sys::ScalarArrayOpExpr;
+    if !(*sa).useOr {
+        return None; // `= ANY` (IN); `<> ALL` (NOT IN) is useOr=false → decline
+    }
+    let args = PgList::<pg_sys::Node>::from_pg((*sa).args);
+    if args.len() != 2 {
+        return None;
+    }
+    let (a0, a1) = (args.get_ptr(0)?, args.get_ptr(1)?);
+    if (*a0).type_ != pg_sys::NodeTag::T_Var {
+        return None; // only `col IN (...)`, not `expr IN (...)`
+    }
+    let var = a0 as *mut pg_sys::Var;
+    if (*var).varno as i32 != relid {
+        return None;
+    }
+    let vartype = (*var).vartype;
+    let kind = super::columnar::minmax_kind_of(vartype.to_u32());
+    // TRUE integer OIDs only (int2/int4/int8) — NOT `minmax_kind_of`, which folds temporal types into the integer
+    // domain (timestamp/timestamptz→I8, date→I4). A temporal column would pass an I2/I4/I8 check yet the IN-list
+    // filter emits bare `lit(i64)` (never a Timestamp/Date Arrow literal) → type-mismatch / wrong result. Gate on the
+    // OID so temporal declines to the native plan (fail-closed; the M151 temporal cross-type class the A/B never exercises).
+    if !matches!(vartype.to_u32(), 20 | 21 | 23) {
+        return None;
+    }
+    let col = ((*var).varattno as i32).checked_sub(1)?; // 1-based → 0-based; system cols rejected
+    // The scalar operator must be `=` (btree strategy 3) in the column type's default opfamily (no hardcoded OIDs).
+    let opclass = pg_sys::GetDefaultOpClass(vartype, pg_sys::BTREE_AM_OID);
+    if opclass == pg_sys::InvalidOid {
+        return None;
+    }
+    let opfamily = pg_sys::get_opclass_family(opclass);
+    if !pg_sys::op_in_opfamily((*sa).opno, opfamily) {
+        return None;
+    }
+    let (mut strategy, mut lt, mut rt) = (0 as c_int, pg_sys::InvalidOid, pg_sys::InvalidOid);
+    pg_sys::get_op_opfamily_properties((*sa).opno, opfamily, false, &mut strategy, &mut lt, &mut rt);
+    if strategy != 3 || lt != vartype {
+        return None; // must be `=` and apply to the column type on the Var (left) side
+    }
+    // Collect the array's integer elements, each coerced+range-checked into the column type (→ i64 for the filter).
+    let coerce = |datum: pg_sys::Datum, ctype: u32| -> Option<i64> {
+        let bits = encode_const_coerced(datum, ctype, kind)?;
+        Some(match kind {
+            MinMaxKind::I2 => bits as i64 as i16 as i64,
+            MinMaxKind::I4 => bits as i64 as i32 as i64,
+            _ => bits as i64,
+        })
+    };
+    let mut consts: Vec<i64> = Vec::new();
+    let arr = a1;
+    if (*arr).type_ == pg_sys::NodeTag::T_ArrayExpr {
+        // `IN (a, b, c)` before const-folding: an ArrayExpr of Const elements.
+        let elems = PgList::<pg_sys::Node>::from_pg((*(arr as *mut pg_sys::ArrayExpr)).elements);
+        let elemtype = (*(arr as *mut pg_sys::ArrayExpr)).element_typeid.to_u32();
+        for i in 0..elems.len() {
+            let e = elems.get_ptr(i)?;
+            if (*e).type_ != pg_sys::NodeTag::T_Const {
+                return None; // a non-literal element → decline
+            }
+            let k = e as *mut pg_sys::Const;
+            if (*k).constisnull {
+                return None; // IN (NULL, …) → 3-valued logic, decline
+            }
+            consts.push(coerce((*k).constvalue, elemtype)?);
+        }
+    } else if (*arr).type_ == pg_sys::NodeTag::T_Const {
+        // Const-folded array literal: deconstruct the array datum.
+        let k = arr as *mut pg_sys::Const;
+        if (*k).constisnull {
+            return None;
+        }
+        let arrtype = (*k).consttype;
+        let elemtype = pg_sys::get_element_type(arrtype);
+        if elemtype == pg_sys::InvalidOid {
+            return None;
+        }
+        let (mut elemlen, mut elembyval, mut elemalign) = (0i16, false, 0i8);
+        pg_sys::get_typlenbyvalalign(elemtype, &mut elemlen, &mut elembyval, &mut elemalign);
+        let arrp = (*k).constvalue.cast_mut_ptr::<pg_sys::ArrayType>();
+        let (mut elems_ptr, mut nulls_ptr, mut nelems) =
+            (std::ptr::null_mut(), std::ptr::null_mut(), 0i32);
+        pg_sys::deconstruct_array(
+            arrp, elemtype, elemlen as c_int, elembyval, elemalign, &mut elems_ptr, &mut nulls_ptr,
+            &mut nelems,
+        );
+        let et = elemtype.to_u32();
+        for i in 0..nelems as usize {
+            if !nulls_ptr.is_null() && *nulls_ptr.add(i) {
+                return None; // a NULL element → decline
+            }
+            consts.push(coerce(*elems_ptr.add(i), et)?);
+        }
+    } else {
+        return None; // an array subquery / expr → decline
+    }
+    if consts.is_empty() {
+        return None; // empty IN () — decline (native plan handles the degenerate case)
+    }
+    Some(super::zonemap::InListPredicate { col: col as usize, consts })
+}
+
 /// M151 — coerce a `Const` (in `consttype`) into `const_bits` in the COLUMN's `target` MinMaxKind domain, for the
 /// cross-type ClickBench pattern (`col int2 <> 0 int4`). Reads the const in ITS own type, then numerically casts
 /// to the column domain with a RANGE CHECK: an out-of-range cast (e.g. `int2col = 40000`) returns `None` → the
@@ -416,10 +531,11 @@ unsafe fn extract_text_predicate(clause: *mut pg_sys::Node, relid: i32) -> Optio
 unsafe fn extract_all_predicates(
     input_rel: *mut pg_sys::RelOptInfo,
     relid: i32,
-) -> Option<(Vec<ZonePredicate>, Vec<TextPredicate>)> {
+) -> Option<(Vec<ZonePredicate>, Vec<TextPredicate>, Vec<super::zonemap::InListPredicate>)> {
     let ris = PgList::<pg_sys::RestrictInfo>::from_pg((*input_rel).baserestrictinfo);
     let mut zpreds = Vec::with_capacity(ris.len());
     let mut tpreds: Vec<TextPredicate> = Vec::new();
+    let mut inpreds: Vec<super::zonemap::InListPredicate> = Vec::new();
     for i in 0..ris.len() {
         let ri = ris.get_ptr(i)?;
         let clause = (*ri).clause as *mut pg_sys::Node;
@@ -427,11 +543,13 @@ unsafe fn extract_all_predicates(
             zpreds.push(z);
         } else if let Some(t) = extract_text_predicate(clause, relid) {
             tpreds.push(t);
+        } else if let Some(inp) = extract_inlist_predicate(clause, relid) {
+            inpreds.push(inp); // M161 — integer IN-list
         } else {
             return None; // un-pushable qual → decline (native plan applies the full WHERE)
         }
     }
-    Some((zpreds, tpreds))
+    Some((zpreds, tpreds, inpreds))
 }
 
 /// Admission result. `group_cols` = (attno, typoid) per GROUP BY key; `layout` maps each output-target slot to its
@@ -444,6 +562,7 @@ struct Admitted {
     aggs: Vec<ParsedAgg>,
     preds: Vec<ZonePredicate>,
     text_preds: Vec<TextPredicate>, // M156 — text WHERE predicates (filter-only, never prune)
+    in_preds: Vec<super::zonemap::InListPredicate>, // M161 — integer IN-list WHERE (filter-only, never prune)
     group_cols: Vec<(i32, u32)>,
     group_exprs: Vec<GroupExprSpec>, // M157 — expression group keys (date_trunc), layout kind=2
     layout: Vec<(u8, usize)>,
@@ -463,23 +582,32 @@ impl Admitted {
 // os `layout.push((_, len()))` ficam no `main` (ordem/índices preservados). O check `grouped && group_cols.is_empty()`
 // permanece no `main`, DEPOIS do walk. Nenhuma decisão cruza a fronteira do loop/modo.
 
-/// M157 — a função de uma chave de grupo por EXPRESSÃO. Só `date_trunc` no escopo (o único lever medido — blueprint
-/// ADR-3). Discriminante explícito: serializado como `func as i32` no 3º canal `custom_private` e decodificado por
-/// literal (o compilador não checa esse mapeamento — mesmo contrato do `ZoneOp`/`TextOp`).
+/// M157/M161 — a função de uma chave de grupo por EXPRESSÃO. Discriminante explícito: serializado como `func as i32`
+/// no 4º canal `custom_private` e decodificado por literal (o compilador não checa esse mapeamento — mesmo contrato do
+/// `ZoneOp`/`TextOp`). M157 shipou `DateTrunc`; M161 adiciona a subclasse SEGURA de expressões: `ExtractField`
+/// (epoch-invariante minute/hour), `IntAddConst` (`col ± k` int, com range-check no materialize) e `Const` (literal int).
 #[derive(Clone, Copy, PartialEq, Debug)]
 #[repr(i32)]
 enum GroupFunc {
-    DateTrunc = 0,
+    DateTrunc = 0,    // date_trunc('unit', ts::timestamp) → timestamp
+    ExtractField = 1, // M161 — date_part('unit', ts::timestamp) → numeric (só minute/hour: epoch-invariante + inteiro)
+    IntAddConst = 2,  // M161 — col ± k (int2/4/8) → mesmo tipo int (compute widened + range-check no materialize)
+    // NB: um GROUP BY por constante literal (`GROUP BY 1`) NÃO é uma variante aqui — o planner do PG ELIMINA chaves de
+    // grupo constantes antes do plano final (grouping por constante é redundante), então o admit contaria a chave mas o
+    // Agg do plano não a teria → mismatch no swap → declina. Medido no ClickBench q34 (M161 honest-negative).
 }
 
-/// M157 — uma chave de grupo que é `func('unit', col[base_attno])`, saída tipo `out_typoid`. Hoje só
-/// `date_trunc('unit', ts::timestamp)` → `out_typoid == 1114` (timestamp). `unit` é a granularidade (server-encoded).
+/// M157/M161 — uma chave de grupo por EXPRESSÃO. `func` seleciona a computação:
+/// - `DateTrunc` — `date_trunc(unit, col[base_attno]::timestamp)` → `out_typoid==1114`.
+/// - `ExtractField` — `date_part(unit, col[base_attno]::timestamp)` → `out_typoid==1700` (numeric); `unit` ∈ {minute,hour}.
+/// - `IntAddConst` — `col[base_attno] <op> delta` (op embutido no sinal de `delta`) → `out_typoid` = tipo int da coluna.
 #[derive(Clone, Debug)]
 struct GroupExprSpec {
     base_attno: i32,
     func: GroupFunc,
-    unit: String,
-    out_typoid: u32,
+    unit: String,    // date_trunc/extract unit; "" no int±k
+    delta: i64,      // IntAddConst: delta já com sinal aplicado; 0 nos demais
+    out_typoid: u32, // tipo PG de saída (1114 date_trunc, 1700 extract, tipo int da coluna no int±k)
 }
 
 /// Um slot de output classificado: uma group key `Var` (attno, vartype), uma group key por EXPRESSÃO (M157) ou um
@@ -570,15 +698,20 @@ unsafe fn classify_target_node(
             return None;
         }
         let fe = node as *mut pg_sys::FuncExpr;
-        // Function name via the catalog (no hardcoded OID — ADR-1 / D5). Must be exactly `date_trunc`.
+        // Function name via the catalog (no hardcoded OID — ADR-1 / D5). `date_trunc` (M157) OR `extract` (M161).
         let fnamep = pg_sys::get_func_name((*fe).funcid);
-        if fnamep.is_null() || CStr::from_ptr(fnamep).to_string_lossy() != "date_trunc" {
-            admit_trace("group_expr_func_unsupported"); // EXTRACT / other function → native
+        if fnamep.is_null() {
+            return None;
+        }
+        let fname = CStr::from_ptr(fnamep).to_string_lossy().into_owned();
+        let is_extract = fname == "extract"; // M161 — EXTRACT(field FROM ts) → func `extract`, returns numeric (PG14+)
+        if fname != "date_trunc" && !is_extract {
+            admit_trace("group_expr_func_unsupported"); // other function → native
             return None;
         }
         let args = PgList::<pg_sys::Node>::from_pg((*fe).args);
         if args.len() != 2 {
-            return None; // the 2-arg `date_trunc(unit, ts)` only (the 3-arg tz form is out of scope)
+            return None; // the 2-arg `date_trunc(unit, ts)` / `extract(unit, ts)` only (3-arg tz form out of scope)
         }
         let (a0, a1) = (args.get_ptr(0)?, args.get_ptr(1)?);
         // arg0 = a text Const granularity in the whitelist (the units where PG and Arrow agree — blueprint Corner 3).
@@ -600,9 +733,16 @@ unsafe fn classify_target_node(
         // windows, so date_trunc's CALENDAR truncation for month/quarter/year lands on the wrong absolute date
         // (±1 day, crossing the bucket boundary → wrong key AND wrong partition). `week` is ISO-week (PG≠Arrow).
         // Restrict to the epoch-invariant granularities; everything coarser declines to the native plan (fail-closed).
-        const UNITS: [&str; 4] = ["second", "minute", "hour", "day"];
-        if !UNITS.contains(&unit.as_str()) {
-            admit_trace("group_expr_granularity_unsupported"); // week / month / quarter / year → native (epoch/ISO)
+        // M161 EXTRACT epoch/value guard (STRICTER than date_trunc): `extract(u FROM ts)` reads the Arrow value
+        // (= PG value + 10957 days). `minute`/`hour` are epoch-invariant (10957 days is a whole multiple of both) AND
+        // integer-valued. `day` (day-of-month) shifts with the calendar offset → WRONG. `second` returns FRACTIONAL
+        // seconds (numeric with µs) that DataFusion's integer date_part truncates → diverges. So extract is restricted
+        // to {minute, hour}; date_trunc keeps its epoch-invariant {second, minute, hour, day} (truncation, not field).
+        const DT_UNITS: [&str; 4] = ["second", "minute", "hour", "day"];
+        const EX_UNITS: [&str; 2] = ["minute", "hour"];
+        let unit_ok = if is_extract { EX_UNITS.contains(&unit.as_str()) } else { DT_UNITS.contains(&unit.as_str()) };
+        if !unit_ok {
+            admit_trace("group_expr_granularity_unsupported"); // week / month / quarter / year / day-extract / second-extract → native
             return None;
         }
         // arg1 = a base-rel Var of type `timestamp` (1114). `timestamptz` (1184) DIVERGES under `TimeZone≠UTC`
@@ -625,9 +765,87 @@ unsafe fn classify_target_node(
         }
         Some(TargetSlot::GroupExpr(GroupExprSpec {
             base_attno,
-            func: GroupFunc::DateTrunc,
+            func: if is_extract { GroupFunc::ExtractField } else { GroupFunc::DateTrunc },
             unit,
-            out_typoid: 1114, // date_trunc(timestamp) → timestamp
+            delta: 0,
+            // date_trunc(timestamp) → timestamp (1114); extract(minute|hour FROM timestamp) → numeric (1700, PG14+).
+            out_typoid: if is_extract { 1700 } else { 1114 },
+        }))
+    } else if (*node).type_ == pg_sys::NodeTag::T_OpExpr && grouped {
+        // M161 — a group key `col ± const` (int2/4/8). PG evaluates in the column's int type and RAISES 22003 on
+        // overflow; DataFusion (Int32/Int64) would wrap. We compute WIDENED to Int64 (never overflows for int2/4/8 ±
+        // int const) so the grouping is exact, and RANGE-CHECK back to the base type at materialize — reproducing PG's
+        // 22003 byte-for-byte when a value is out of range, and the exact value otherwise (ADR-2). Only `+`/`-` with a
+        // `Var(int) <op> Const(int)` shape (constant on the right — canonical form after const-folding).
+        let op = node as *mut pg_sys::OpExpr;
+        let opname_ptr = pg_sys::get_opname((*op).opno);
+        if opname_ptr.is_null() {
+            admit_trace("group_expr_op_unsupported");
+            return None;
+        }
+        let opname = CStr::from_ptr(opname_ptr).to_string_lossy().into_owned();
+        if opname != "+" && opname != "-" {
+            admit_trace("group_expr_op_unsupported"); // only additive int arithmetic
+            return None;
+        }
+        let args = PgList::<pg_sys::Node>::from_pg((*op).args);
+        if args.len() != 2 {
+            return None;
+        }
+        let (a0, a1) = (args.get_ptr(0)?, args.get_ptr(1)?);
+        // Canonical `Var <op> Const` only (a flipped `k - col` is NOT `col - k`; decline the non-canonical form).
+        if (*a0).type_ != pg_sys::NodeTag::T_Var || (*a1).type_ != pg_sys::NodeTag::T_Const {
+            admit_trace("group_expr_int_arith_shape"); // k - col / col - col / etc → native
+            return None;
+        }
+        let var = a0 as *mut pg_sys::Var;
+        let konst = a1 as *mut pg_sys::Const;
+        if (*var).varno as i32 != relid || (*konst).constisnull {
+            return None;
+        }
+        let base_attno = (*var).varattno as i32;
+        if base_attno <= 0 {
+            return None;
+        }
+        let base_typoid = (*var).vartype.to_u32();
+        // TRUE integer OIDs only — NOT `minmax_kind_of` (which folds date→I4, timestamp→I8): `date + int` (date_pli)
+        // would pass an I2/I4/I8 check yet materialize with out_typoid=1082, hitting `group_expr_cell`'s int-only
+        // range-check → admitted-then-errored instead of declining. Gate on the OID so temporal ± int → native plan.
+        if !matches!(base_typoid, 20 | 21 | 23) {
+            admit_trace("group_expr_int_arith_nonint"); // float/text/numeric/temporal arithmetic → native
+            return None;
+        }
+        // Read the const in its own int type → i64 (int2/4/8 all fit). A non-integer const type → decline.
+        let ct = (*konst).consttype.to_u32();
+        let k: i64 = match ct {
+            21 => i16::from_datum((*konst).constvalue, false)? as i64,
+            23 => i32::from_datum((*konst).constvalue, false)? as i64,
+            20 => i64::from_datum((*konst).constvalue, false)?,
+            _ => {
+                admit_trace("group_expr_int_arith_nonint_const");
+                return None;
+            }
+        };
+        // Fold the operator sign into `delta`: `col - k` == `col + (-k)`. `-i64::MIN` would overflow → decline (never a
+        // real ClickBench constant; fail-closed keeps the widened-add correctness argument sound).
+        let delta = if opname == "-" { k.checked_neg()? } else { k };
+        // OUTPUT type = the OPERATOR's result type, NOT the column type. PG integer +/- are cross-type and WIDEN:
+        // `int2±int4→int4`, `int4±int8→int8` (an undecorated literal is int4). Using the column type would fail
+        // `i16::try_from` on a valid int4 result (`int2col+5` at 32767 → PG=int4 32772, ours would error). Decline any
+        // int8 result (opresulttype==20): the widened Int64 compute itself can overflow for an int8 result → not
+        // PG-22003-equivalent (fail-closed, avoids a wrong answer). int2/int4 results keep the exact i64 compute
+        // (int2/int4 column ± int const fits i64 with huge margin) + range-check to the result type at materialize.
+        let out_typoid = (*op).opresulttype.to_u32();
+        if !matches!(out_typoid, 21 | 23) {
+            admit_trace("group_expr_int_arith_wide_result"); // int8 (or wider) result → native plan
+            return None;
+        }
+        Some(TargetSlot::GroupExpr(GroupExprSpec {
+            base_attno,
+            func: GroupFunc::IntAddConst,
+            unit: String::new(),
+            delta,
+            out_typoid, // = (*op).opresulttype (int2/int4); int8 result declined above
         }))
     } else if (*node).type_ == pg_sys::NodeTag::T_Aggref {
         let agg = node as *mut pg_sys::Aggref;
@@ -741,14 +959,14 @@ unsafe fn build_admission(
     if is_columnar {
         if grouped {
             // GROUP BY + WHERE combined (M114): un-pushable qual → `extract_all_predicates` None → decline.
-            let (preds, text_preds) = match extract_all_predicates(input_rel, relid) {
+            let (preds, text_preds, in_preds) = match extract_all_predicates(input_rel, relid) {
                 Some(p) => p,
                 None => { admit_trace("unpushable_where_qual"); return None; } // M152
             };
-            return Some(Admitted { mode: 0, relid, aggs, preds, text_preds, group_cols, group_exprs, layout });
+            return Some(Admitted { mode: 0, relid, aggs, preds, text_preds, in_preds, group_cols, group_exprs, layout });
         }
         // Non-grouped: ALL quals must be pushable (`col <op> const`), else decline.
-        let (preds, text_preds) = match extract_all_predicates(input_rel, relid) {
+        let (preds, text_preds, in_preds) = match extract_all_predicates(input_rel, relid) {
             Some(p) => p,
             None => { admit_trace("unpushable_where_qual"); return None; } // M152
         };
@@ -758,6 +976,7 @@ unsafe fn build_admission(
             aggs,
             preds,
             text_preds,
+            in_preds,
             group_cols: Vec::new(),
             group_exprs: Vec::new(),
             layout: Vec::new(),
@@ -786,6 +1005,7 @@ unsafe fn build_admission(
             aggs,
             preds: Vec::new(),
             text_preds: Vec::new(), // M156 — heap-cache path declines any WHERE (guarded above), so never text preds
+            in_preds: Vec::new(),   // M161 — heap-cache path declines any WHERE, so never IN-list preds
             group_cols: Vec::new(),
             group_exprs: Vec::new(), // M157 — heap-cache path is non-grouped, so never group exprs
             layout: Vec::new(),
@@ -1050,12 +1270,13 @@ unsafe fn deparse_safe_tlist(
                 None => return std::ptr::null_mut(),
             }
         } else if tag == 2 {
-            // M157 — a group-expr (date_trunc) output column. POST-PLANNING the Agg's tlist entry for this slot is a
-            // bare `Var` (the child Sort/scan pre-computed the date_trunc; the GroupAggregate reads it) — NOT the raw
-            // FuncExpr. Build a plain `Var(scanrelid, base_attno, out_typoid)` exactly like the bare-group branch: it
-            // is descriptor-equal (out_typoid == exprType(e) == 1114) and is ONLY descriptor + deparse metadata — the
-            // runtime tuples come from the materialized `run_columnar_grouped_aggs` result (scanrelid=0, never a real
-            // scan). Deparse shows the base `timestamp` column for this slot (cosmetic; the value is byte-identical).
+            // M157/M161 — a group-expr output column (date_trunc / extract / int±k). POST-PLANNING the Agg tlist entry
+            // `e` for this slot references the child-computed group column (OUTER_VAR) or is the raw expression —
+            // copying it would deparse into the dropped subtree (M131 #135). So build a FRESH plain
+            // `Var(scanrelid, base_attno, out_typoid)` that is descriptor-equal (out_typoid == exprType(e)) and is ONLY
+            // descriptor + deparse metadata (runtime tuples come from the materialized `run_columnar_grouped_aggs`
+            // result; scanrelid=0, never a real scan). Deparse shows the base column for this slot — cosmetic; the value
+            // is byte-identical.
             match adm.group_exprs.get(idx) {
                 Some(g) => pg_sys::makeVar(
                     scanrelid as i32,
@@ -1161,15 +1382,16 @@ unsafe fn encode_text_preds(tpreds: &[TextPredicate]) -> Option<*mut pg_sys::Lis
     Some(outer)
 }
 
-/// M157 — encode the expression group keys as the 3rd `custom_private` channel (ADR-1, natural extension of the M156
-/// text channel): a `List` whose members are each `[Integer(base_attno), Integer(func), String(unit), Integer(out_typoid)]`
-/// — all leaf `Value` nodes (copy/out/read-safe). `NIL` when there are no group exprs (decode treats NIL as zero).
+/// M157/M161 — encode the expression group keys as the 3rd `custom_private` channel (ADR-1, natural extension of the
+/// M156 text channel): a `List` whose members are each
+/// `[Integer(base_attno), Integer(func), String(unit), Integer(out_typoid), Integer(delta_hi), Integer(delta_lo)]`
+/// — all leaf `Value` nodes (copy/out/read-safe). `delta` (IntAddConst offset) is split hi/lo i32 (a `Value` Integer is
+/// i32) exactly like the IN-list channel. `NIL` when there are no group exprs (decode → zero).
 unsafe fn encode_group_exprs(gexprs: &[GroupExprSpec]) -> Option<*mut pg_sys::List> {
     let mut outer: *mut pg_sys::List = std::ptr::null_mut();
     for g in gexprs {
-        // `unit` is a lowercase ASCII granularity from a validated whitelist — never contains an interior NUL. Still,
-        // decline fail-closed on one (council-rust-pgrx LOW: symmetry with `encode_text_preds`) rather than shipping
-        // an empty unit that would silently mis-group.
+        // `unit` is a lowercase ASCII granularity from a validated whitelist (or "" for int±k/const) — never contains
+        // an interior NUL. Still, decline fail-closed on one (council-rust-pgrx LOW: symmetry with `encode_text_preds`).
         let cs = std::ffi::CString::new(g.unit.as_str()).ok()?;
         let pgstr = pg_sys::pstrdup(cs.as_ptr());
         let mut entry: *mut pg_sys::List = std::ptr::null_mut();
@@ -1177,9 +1399,30 @@ unsafe fn encode_group_exprs(gexprs: &[GroupExprSpec]) -> Option<*mut pg_sys::Li
         entry = pg_sys::lappend(entry, pg_sys::makeInteger(g.func as i32) as *mut c_void);
         entry = pg_sys::lappend(entry, pg_sys::makeString(pgstr) as *mut c_void);
         entry = pg_sys::lappend(entry, pg_sys::makeInteger(g.out_typoid as i32) as *mut c_void);
+        entry = pg_sys::lappend(entry, pg_sys::makeInteger((g.delta >> 32) as i32) as *mut c_void);
+        entry = pg_sys::lappend(entry, pg_sys::makeInteger((g.delta & 0xFFFF_FFFF) as i32) as *mut c_void);
         outer = pg_sys::lappend(outer, entry as *mut c_void);
     }
     Some(outer)
+}
+
+/// M161 — encode the integer IN-list predicates as the 4th `custom_private` channel: a `List` whose members are each
+/// `[Integer(col), Integer(n), Integer(c0_hi), Integer(c0_lo), …]` — the consts as hi/lo i32 halves (a `Value` Integer
+/// is i32, so an int8 const needs two words, exactly like `encode_private`'s `const_bits`). All leaf `Value` nodes →
+/// copy/out/read-safe (varlena-free), same contract as `encode_text_preds`. `NIL` when there are no IN-list predicates.
+unsafe fn encode_in_preds(inpreds: &[super::zonemap::InListPredicate]) -> *mut pg_sys::List {
+    let mut outer: *mut pg_sys::List = std::ptr::null_mut();
+    for p in inpreds {
+        let mut entry: *mut pg_sys::List = std::ptr::null_mut();
+        entry = pg_sys::lappend(entry, pg_sys::makeInteger(p.col as i32) as *mut c_void);
+        entry = pg_sys::lappend(entry, pg_sys::makeInteger(p.consts.len() as i32) as *mut c_void);
+        for &c in &p.consts {
+            entry = pg_sys::lappend(entry, pg_sys::makeInteger((c >> 32) as i32) as *mut c_void);
+            entry = pg_sys::lappend(entry, pg_sys::makeInteger((c & 0xFFFF_FFFF) as i32) as *mut c_void);
+        }
+        outer = pg_sys::lappend(outer, entry as *mut c_void);
+    }
+    outer
 }
 
 /// If `plan` is an `Agg` over a columnar table matching an unconsumed stash entry, build the replacement `CustomScan`
@@ -1307,16 +1550,19 @@ unsafe fn try_swap_agg(
     cscan.flags = 0;
     cscan.custom_plans = std::ptr::null_mut();
     cscan.custom_exprs = std::ptr::null_mut();
-    // M156/M157 — custom_private is a 3-channel outer List: [<numeric IntList>, <text-preds List>, <group-exprs List>].
-    // The int-only channel (M115 layout) cannot carry a varlena, so text predicates (M156) and expression group keys
-    // (M157) ride parallel node channels (ADR-1). A text needle with an interior NUL (impossible for a text value) →
-    // decline the swap rather than ship an incomplete filter.
+    // M156/M157/M161 — custom_private is a 4-channel outer List:
+    //   [<numeric IntList>, <text-preds List>, <group-exprs List>, <in-list List>].
+    // The int-only channel (M115 layout) cannot carry a varlena, so text predicates (M156), expression group keys
+    // (M157), and integer IN-list predicates (M161, hi/lo i32 halves) ride parallel node channels (ADR-1). A text
+    // needle with an interior NUL (impossible for a text value) → decline the swap rather than ship an incomplete filter.
     let int_channel = encode_private(&adm, table_oid);
     let text_channel = encode_text_preds(&adm.text_preds)?;
     let group_expr_channel = encode_group_exprs(&adm.group_exprs)?;
+    let in_channel = encode_in_preds(&adm.in_preds); // M161 — 4th channel (integer IN-list)
     let mut outer = pg_sys::lappend(std::ptr::null_mut(), int_channel as *mut c_void);
     outer = pg_sys::lappend(outer, text_channel as *mut c_void);
     outer = pg_sys::lappend(outer, group_expr_channel as *mut c_void);
+    outer = pg_sys::lappend(outer, in_channel as *mut c_void);
     cscan.custom_private = outer;
     // M131 (#135): NOT `plain_var_tlist` — a self-referential INDEX_VAR here makes ruleutils' `resolve_special_varno`
     // recurse forever when a Sort above this node has a key on the aggregate output, hanging EXPLAIN. This list also
@@ -1567,6 +1813,7 @@ unsafe fn try_swap_topk(
     let mut outer = pg_sys::lappend(std::ptr::null_mut(), int_channel as *mut c_void);
     outer = pg_sys::lappend(outer, text_channel as *mut c_void);
     outer = pg_sys::lappend(outer, std::ptr::null_mut()); // 3rd channel unused for top-k
+    outer = pg_sys::lappend(outer, std::ptr::null_mut()); // 4th channel (IN-list) unused for top-k (M161)
     cscan.custom_private = outer;
     cscan.custom_scan_tlist = cst;
     cscan.custom_relids = std::ptr::null_mut();
@@ -1666,7 +1913,8 @@ unsafe extern "C-unwind" fn begin_custom_scan(
     // T_List). A flat IntList (T_IntList) — a legacy/channel-less encode — is read directly with zero text preds /
     // group exprs (backward compatible). The 3rd channel is read via list_length (absent → NIL → zero group exprs).
     let raw_priv = (*cscan).custom_private;
-    let (priv_list, text_list, group_expr_list): (
+    let (priv_list, text_list, group_expr_list, in_list): (
+        *mut pg_sys::List,
         *mut pg_sys::List,
         *mut pg_sys::List,
         *mut pg_sys::List,
@@ -1680,9 +1928,14 @@ unsafe extern "C-unwind" fn begin_custom_scan(
             } else {
                 std::ptr::null_mut()
             },
+            if outer_len >= 4 {
+                pg_sys::list_nth(raw_priv, 3) as *mut pg_sys::List // M161 — 4th channel (integer IN-list)
+            } else {
+                std::ptr::null_mut()
+            },
         )
     } else {
-        (raw_priv, std::ptr::null_mut(), std::ptr::null_mut())
+        (raw_priv, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut())
     };
     let n = pg_sys::list_length(priv_list);
     // M115 layout: [table_oid, mode, nagg, ...]. The base table is resolved by its stable pg_class OID (the Agg-swap
@@ -1766,6 +2019,7 @@ unsafe extern "C-unwind" fn begin_custom_scan(
                 k,
                 &tk_preds,
                 &tk_text,
+                &[], // M161 — top-k routing does not admit IN-list predicates
                 super::guc::columnar_zonemap_skip(),
             );
             pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
@@ -1840,6 +2094,23 @@ unsafe extern "C-unwind" fn begin_custom_scan(
             let needle = CStr::from_ptr(sval).to_string_lossy().into_owned();
             text_preds.push(TextPredicate { col, op, needle });
         }
+        // M161 — decode the integer IN-list predicates from the 4th channel (`in_list`; NIL → none). Each entry is a
+        // `[Integer(col), Integer(n), Integer(c0_hi), Integer(c0_lo), …]` list of leaf Value nodes; each i64 const is
+        // reconstructed from its hi/lo i32 pair (makeInteger is i32, so encode_in_preds split every const in two).
+        let mut in_preds: Vec<super::zonemap::InListPredicate> = Vec::new();
+        let inn = pg_sys::list_length(in_list);
+        for k in 0..inn {
+            let entry = pg_sys::list_nth(in_list, k) as *mut pg_sys::List;
+            let col = (*(pg_sys::list_nth(entry, 0) as *mut pg_sys::Integer)).ival as usize;
+            let n = (*(pg_sys::list_nth(entry, 1) as *mut pg_sys::Integer)).ival as usize;
+            let mut consts = Vec::with_capacity(n);
+            for j in 0..n {
+                let hi = (*(pg_sys::list_nth(entry, (2 + j * 2) as i32) as *mut pg_sys::Integer)).ival;
+                let lo = (*(pg_sys::list_nth(entry, (2 + j * 2 + 1) as i32) as *mut pg_sys::Integer)).ival;
+                consts.push(((hi as i64) << 32) | (lo as u32 as i64));
+            }
+            in_preds.push(super::zonemap::InListPredicate { col, consts });
+        }
         // Group block (appended last; absent → ngroup 0 → scalar path, backward compatible).
         let ngroup = if i < n { pg_sys::list_nth_int(priv_list, i) as usize } else { 0 };
         i += 1;
@@ -1860,21 +2131,31 @@ unsafe extern "C-unwind" fn begin_custom_scan(
             i += 2;
             layout.push((kind, idx));
         }
-        // M157 — decode the expression group keys from the 3rd channel; each entry is
-        // [Integer(base_attno), Integer(func), String(unit), Integer(out_typoid)]. Resolve base_attno → column name.
-        // `(base_name, unit, out_typoid)` — func is DateTrunc (the only one in scope). NIL → empty.
-        let mut group_exprs: Vec<(String, String, u32)> = Vec::new();
+        // M157/M161 — decode the expression group keys from the 3rd channel; each entry is
+        // [Integer(base_attno), Integer(func), String(unit), Integer(out_typoid), Integer(delta_hi), Integer(delta_lo)].
+        // Resolve base_attno → column name. NIL → empty.
+        let mut group_exprs: Vec<super::df_executor::GroupExprExec> = Vec::new();
         let gn = pg_sys::list_length(group_expr_list);
         for k in 0..gn {
             let entry = pg_sys::list_nth(group_expr_list, k) as *mut pg_sys::List;
             let base_attno = (*(pg_sys::list_nth(entry, 0) as *mut pg_sys::Integer)).ival;
-            let _func = (*(pg_sys::list_nth(entry, 1) as *mut pg_sys::Integer)).ival; // 0 = DateTrunc
+            let func = (*(pg_sys::list_nth(entry, 1) as *mut pg_sys::Integer)).ival;
             let unit = CStr::from_ptr((*(pg_sys::list_nth(entry, 2) as *mut pg_sys::String)).sval)
                 .to_string_lossy()
                 .into_owned();
             let out_typoid = (*(pg_sys::list_nth(entry, 3) as *mut pg_sys::Integer)).ival as u32;
+            let dhi = (*(pg_sys::list_nth(entry, 4) as *mut pg_sys::Integer)).ival;
+            let dlo = (*(pg_sys::list_nth(entry, 5) as *mut pg_sys::Integer)).ival;
+            let delta = ((dhi as i64) << 32) | (dlo as u32 as i64);
             let nm = pg_sys::get_attname(relid, base_attno as pg_sys::AttrNumber, false);
-            group_exprs.push((CStr::from_ptr(nm).to_string_lossy().into_owned(), unit, out_typoid));
+            let base_name = CStr::from_ptr(nm).to_string_lossy().into_owned();
+            group_exprs.push(super::df_executor::GroupExprExec {
+                base_name,
+                func,
+                unit,
+                delta,
+                out_typoid,
+            });
         }
 
         if ngroup > 0 || !group_exprs.is_empty() {
@@ -1889,6 +2170,7 @@ unsafe extern "C-unwind" fn begin_custom_scan(
                 &layout,
                 &preds,
                 &text_preds,
+                &in_preds,
                 super::guc::columnar_zonemap_skip(),
             );
             pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
@@ -1908,7 +2190,7 @@ unsafe extern "C-unwind" fn begin_custom_scan(
             let fast: Option<Result<Vec<Vec<(pg_sys::Datum, bool)>>, String>> =
                 // M156 — a text predicate (like a numeric one) forbids the directory fast-path: the min/max answer
                 // must be filtered, and the zone directory holds no text filter. Fall through to the full scan.
-                if preds.is_empty() && text_preds.is_empty() && all_minmax {
+                if preds.is_empty() && text_preds.is_empty() && in_preds.is_empty() && all_minmax {
                     let mut row = Vec::with_capacity(specs.len());
                     let mut ok = true;
                     let mut err = None;
@@ -1949,7 +2231,7 @@ unsafe extern "C-unwind" fn begin_custom_scan(
             let r = match fast {
                 Some(res) => res,
                 None => {
-                    run_columnar_aggs(rel, &specs, &preds, &text_preds, super::guc::columnar_zonemap_skip())
+                    run_columnar_aggs(rel, &specs, &preds, &text_preds, &in_preds, super::guc::columnar_zonemap_skip())
                         .map(|row| vec![row])
                 }
             };
