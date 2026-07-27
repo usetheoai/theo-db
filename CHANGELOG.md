@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Roadmap amended: added M165 (GROUP BY multi-chave — q17, q34), M166 (agregados de string + wide SUM(expr) — q21, q22, q27, q29), M167 (top-k de projeção — q23–q26) — cobertura de pushdown para as queries que seguram o geomean geral vs ClickHouse, decompostas por shape a partir da medição fresca de 2026-07-27 (`/roadmap-feature`).
 
 - **CI: gate `actionlint` sobre os próprios workflows (#211).** Nenhum gate do repo olhava para o `.github/` — foi por isso que 4 workflows quebrados passaram 3 dias despercebidos. O `actionlint` reproduz o defeito exato (`both "paths" and "paths-ignore" filters cannot be used for the same event "push". note: use '!' to negate patterns`) e ainda sugere a correção aplicada. Traz shellcheck embutido nos blocos `run:`. Imagem fixada por digest; `.github/actionlint.yaml` declara o label self-hosted `theodb-do` para que 17 achados de ruído não afoguem o sinal.
 
