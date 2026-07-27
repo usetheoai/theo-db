@@ -13,12 +13,27 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.156.0] - 2026-07-27
+
+### Added
 - Roadmap amended: added M165 (GROUP BY multi-chave — q17, q34), M166 (agregados de string + wide SUM(expr) — q21, q22, q27, q29), M167 (top-k de projeção — q23–q26) — cobertura de pushdown para as queries que seguram o geomean geral vs ClickHouse, decompostas por shape a partir da medição fresca de 2026-07-27 (`/roadmap-feature`).
 - M165: **projected-constant output column** in the columnar-agg CustomScan — `SELECT <int literal>, col, count(*) … GROUP BY 1, col` (ClickBench q34) now routes. The `SELECT 1` puts a bare `T_Const` in the output target that `classify_target_node` had no arm for; PG eliminates the constant *group key* so the effective grouping is single-key. The new `TargetSlot::ConstOut` admits it as a fixed output cell (layout kind=3, threaded through encode/decode/materialize on the int channel), **fail-closed to the integer class** {int2,int4,int8} + non-NULL — a float const (IEEE), text const (collation) or NULL declines to the native plan (traces `const_out_type_unsupported`/`const_out_null`). The const slot never counts toward `numCols`, so the Agg-swap arity match is preserved. Measured (1M ClickBench, same-box vs ClickHouse 26.8.1): q34 flips non-pushdown → pushdown — **152× → 10.19× vs ClickHouse** (same-engine hot **28.5 s → 1.22 s**, ~23×), 43/43 A/B byte-identical (no regression), type-coverage A/B **26/26** (`docs/benchmarks/m165-const-out-verdict.md`). Discovery finding (blueprint): multi-key GROUP BY already routed (q16 proof); q34 was the only real blocker. Type-coverage A/B (`columnar_type_ab.py`) gains const-out cases (int routes byte-identical; float/text/NULL decline). **q17 stays an honest-negative** — routing an AGG_SORTED text GROUP BY under an unordered `Limit` (no parent `Sort`) would let the GroupAgg's collation-order pathkeys be consumed upstream (merge join / DISTINCT / setop) without a re-sort, a wrong result the LIMIT-stripped A/B is blind to (council-rust-pgrx); the correct fix (collation-ordered executor emission) is a separate deferred capability.
 
 - **CI: gate `actionlint` sobre os próprios workflows (#211).** Nenhum gate do repo olhava para o `.github/` — foi por isso que 4 workflows quebrados passaram 3 dias despercebidos. O `actionlint` reproduz o defeito exato (`both "paths" and "paths-ignore" filters cannot be used for the same event "push". note: use '!' to negate patterns`) e ainda sugere a correção aplicada. Traz shellcheck embutido nos blocos `run:`. Imagem fixada por digest; `.github/actionlint.yaml` declara o label self-hosted `theodb-do` para que 17 achados de ruído não afoguem o sinal.
 
 - **CI: `timeout-minutes` em todo job próprio.** `pgvector-compat` (20), `harness-unit` (15), `image-and-bench` (45), `migration-smoke` (25) e `notify-on-failure` (10) rodavam com o default do GitHub de **360 min**. Num runner serial compartilhado por 5 repositórios, um job pendurado sequestra a fila de todos por 6 horas — e o próprio repo já registrou `harness-unit` levando 999s só para falhar. Os valores são folga sobre a duração observada, alinhados aos jobs que já declaravam timeout.
+
 
 ### Changed
 
@@ -28,17 +43,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 - **CI: `permissions: contents: read` no topo do `ci.yml`.** O workflow não declarava permissão nenhuma, então cada job recebia o default do repositório para o `GITHUB_TOKEN`. Nada na esteira escreve — só checkout, build local (`load: true`) e teste.
 
-### Deprecated
-
-### Removed
 
 ### Fixed
 
 - **CI: quatro gates não executavam nada desde 24/07 — incluindo o `license-gate` da regra D1 (#211).** `license-gate`, `lint-rust`, `cassert-sql-safety` e `schema-drift-gate` declaravam `paths` **e** `paths-ignore` no mesmo evento, combinação que o GitHub rejeita no parse: os runs eram criados e morriam em `startup_failure`, com zero jobs e 0s de duração. Medido: 95 de 100 runs falhos nos três primeiros e 100 de 100 no `schema-drift-gate`. Na prática, por três dias nada barrou uma dependência AGPL de entrar na distribuição — a regra que o próprio arquivo chama de "a mais inegociável do projeto". A economia de fila que motivou o `paths-ignore` (#187) foi preservada, agora expressa **dentro** do `paths:` via padrão negado (`!**/*.md`), que é um filtro só e não conflita. Os gates voltam a rodar após três dias sem enforcement, então é esperado que algum acuse achado real acumulado.
 
 - **CI: sete exportações redundantes de cache de imagem por run.** Os oito jobs que constroem a imagem declaravam `cache-to: type=gha,mode=max` — cada um exportando **todas** as camadas para o cache do GitHub pela rede, embora ninguém lesse as sete cópias extras. Só o build de `image-and-bench` (tag `theo-db:ci`) publica agora; os demais seguem lendo com `cache-from`, sem qualquer mudança no que constroem. Os builds em si foram **mantidos de propósito**: cada job reconstruir a imagem é o que garante que ele testa o commit atual — trocar por um atalho do tipo "pular se já existe" economizaria ~2 min e reintroduziria risco de falso-verde. Ganho esperado mas ainda **não medido** (o runner está ocupado; a próxima execução completa confirma).
-
-### Security
 
 ## [0.155.0] - 2026-07-27
 
