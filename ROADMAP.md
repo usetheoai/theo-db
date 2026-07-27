@@ -2963,7 +2963,7 @@ bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan s�
 
 ---
 
-## M163 — [ ] Harness A/B por-tipo (fecha o gap recorrente "A/B passa, review acha o bug de classe-de-tipo") — qualidade
+## M163 — [x] Harness A/B por-tipo (fecha o gap recorrente "A/B passa, review acha o bug de classe-de-tipo") — qualidade
 
 > **Item A da retro M160-M162** (`/roadmap-feature`, 2026-07-27). Evidência dura: o oráculo A/B roda sobre o dado do ClickBench, que NÃO cobre o espaço de tipos — então o council review pega o defeito DEPOIS do rebuild de 14min. Recorre em M151 (temporal/float cross-type), M154 (float IEEE −0.0/NaN), M157 (epoch), M158 (colação), e no M161 pegou **1 BLOCKER + 2 HIGH** (int±k `opresulttype`, gate temporal via `minmax_kind_of`) que o A/B em `int4-int4` nunca exercitou. É o defeito mais caro e mais repetido do pilar colunar.
 
