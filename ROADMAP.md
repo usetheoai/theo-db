@@ -2858,7 +2858,7 @@ bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan s�
 
 ---
 
-## M159 — [ ] Medir o gap REAL vs ClickHouse (Passo 0 — ancorar a meta "2-3×" em número)
+## M159 — [x] Medir o gap REAL vs ClickHouse (Passo 0 — ancorar a meta "2-3×" em número)
 
 > **Candidato C — measurement-first, ancora a decisão** (a meta do owner "2-3× mais lento que ClickHouse"). Added 2026-07-25 (`/roadmap-feature measure-gap-vs-clickhouse`). Hoje NÃO existe baseline ClickHouse no repo; qualquer razão seria inventada (regra 5 CLAUDE.md + public-copy.md). Este milestone produz o número honesto: o gap por-query vs os números publicados do ClickHouse, para dizer se "2-3×" é alcançável e em quais classes de query.
 

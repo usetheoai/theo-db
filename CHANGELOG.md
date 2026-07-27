@@ -24,6 +24,22 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.151.0] - 2026-07-27
+
+### Added
+- M160 hardening (council-rust-pgrx LOW-1): `decode_columns_v2` + `decode_columns` guardam `comp.len() >= comp_len` antes do slice do zstd (diretório corrompido → `Err` tipado, não panic atravessando C) — espelha o guard já presente no scan geral.
+- M160: decode zero-copy fixed-width→Arrow no path de pushdown colunar. `decode_columns_v2` decodifica colunas fixed-width NÃO-nulas (int2/4/8, float4/8, timestamp/tz, date) como um stream contíguo little-endian (`DecodedColumn::FixedRaw`), e `build_arrow_from_decoded` as constrói via UM `Vec<T>` tipado por coluna (`PrimitiveArray::from`, handoff zero-copy) — eliminando a tempestade de alocação `.to_vec()` por-célula + a re-cópia do `build_arrow` (o gargalo gêmeo do M148 que o deep-dive/flamegraph mediu na classe coberta). Colunas nullable/varlena/texto/bool e queries com linhas pending same-xact mantêm o caminho de células (fail-safe, byte-idêntico). Byte-idêntico por construção (mesmo `from_le_bytes` plano, sem transform de epoch) — validado por A/B symmetric-EXCEPT colunar vs heap **diverged=0** (GROUP BY sum, count-distinct, multi-agg, min/max) + teste unitário. Endian-safe (`from_le_bytes` explícito). Só o hot path pushdown (vindex/arrow_cache seguem `decode_columns`). **Ganho medido same-binário (GUC `theodb.enable_columnar_fast_decode` off vs on, agg pushdown ON em ambos, EXPLAIN ANALYZE median-of-3, 1M ClickBench): 5.7× (RegionID GROUP BY sum), 7.4× (SearchEngineID GROUP BY sum), 8.3× (sum+count), 1.8× (count-distinct)** — ~2-8× na classe coberta de agregações fixed-width (`docs/benchmarks/m160-decode-zerocopy-verdict.md`), consistente com o flamegraph do deep-dive (a ponte de decode era ~80% do custo).
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
 ## [0.150.0] - 2026-07-26
 
 ### Added
