@@ -13,7 +13,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- M164: **three false-green/infra guards** on the ClickBench harness (`benchmarks/run_m128_clickbench.py`), closing retro items B+C of the M160-M162 session (the mechanizable noise that cost hours). (B1) `_ensure_sample` now counts the cached sample's rows (`wc -l`) and **re-materializes on a stale count** — a 1M cache can no longer be served as "100M" (the exact M162 false-`DONE`); the freshness target is clamped to `HITS_TOTAL_ROWS` so a legit `--n 100000000` (the corpus holds only 99,997,497 rows) is NOT re-streamed ~74 GB every run. (B2) the A/B verdict now classifies each query by whether the **agg pushdown specifically** routed — keyed on `theodb_columnar_agg` in the plan, NOT a broad `Custom Scan` (the always-on `theodb_columnar_project` scan renders a `Custom Scan` under every columnar query, which would mask a declined agg): a `--agg` run where the agg pushdown routes nothing is flagged `no_pushdown_exercised`, and a real `DIVERGENCE` outranks that flag so a pushdown bug is never hidden behind "nothing exercised". (C) a **pre-flight sizing** guard `preflight_sizing` **refuses** a load whose full on-disk footprint (sample TSV + heap copy + columnar table) would not fit a safe fraction of free disk, and **warns (never blocks)** when the in-DB working set exceeds RAM headroom — larger-than-RAM is an intentional TheoDB regime (the M162 100M run was deliberately larger-than-RAM; the 15 GB box OOMed 2× with no guard). All are pure, env-injected helpers unit-tested with no DB (`benchmarks/test_m164_harness_guards.py`, 20 tests green — including the projection-vs-agg routing proof and the DIVERGENCE-outranks-TRIVIAL precedence).
 
 ### Changed
 
@@ -24,6 +23,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 ### Security
+
+## [0.155.0] - 2026-07-27
+
+### Added
+- M164: **three false-green/infra guards** on the ClickBench harness (`benchmarks/run_m128_clickbench.py`), closing retro items B+C of the M160-M162 session (the mechanizable noise that cost hours). (B1) `_ensure_sample` now counts the cached sample's rows (`wc -l`) and **re-materializes on a stale count** — a 1M cache can no longer be served as "100M" (the exact M162 false-`DONE`); the freshness target is clamped to `HITS_TOTAL_ROWS` so a legit `--n 100000000` (the corpus holds only 99,997,497 rows) is NOT re-streamed ~74 GB every run. (B2) the A/B verdict now classifies each query by whether the **agg pushdown specifically** routed — keyed on `theodb_columnar_agg` in the plan, NOT a broad `Custom Scan` (the always-on `theodb_columnar_project` scan renders a `Custom Scan` under every columnar query, which would mask a declined agg): a `--agg` run where the agg pushdown routes nothing is flagged `no_pushdown_exercised`, and a real `DIVERGENCE` outranks that flag so a pushdown bug is never hidden behind "nothing exercised". (C) a **pre-flight sizing** guard `preflight_sizing` **refuses** a load whose full on-disk footprint (sample TSV + heap copy + columnar table) would not fit a safe fraction of free disk, and **warns (never blocks)** when the in-DB working set exceeds RAM headroom — larger-than-RAM is an intentional TheoDB regime (the M162 100M run was deliberately larger-than-RAM; the 15 GB box OOMed 2× with no guard). All are pure, env-injected helpers unit-tested with no DB (`benchmarks/test_m164_harness_guards.py`, 20 tests green — including the projection-vs-agg routing proof and the DIVERGENCE-outranks-TRIVIAL precedence).
 
 ## [0.154.0] - 2026-07-27
 
