@@ -613,6 +613,7 @@ pub(super) unsafe fn run_columnar_grouped_aggs(
     group_key_exprs_spec: &[GroupExprExec], // M157/M161 — expression group keys (date_trunc / extract / int±k / const)
     aggs: &[AggSpec],
     layout: &[(u8, usize)],
+    const_outs: &[(i64, u32)], // M165 — projected integer constant output cells (layout kind=3)
     predicates: &[super::zonemap::ZonePredicate],
     text_predicates: &[super::zonemap::TextPredicate],
     in_predicates: &[super::zonemap::InListPredicate],
@@ -695,6 +696,14 @@ pub(super) unsafe fn run_columnar_grouped_aggs(
                         let g =
                             group_key_exprs_spec.get(idx).ok_or("df_executor: layout group-expr idx oob")?;
                         group_expr_cell(b.column(ncols + idx), r, g)?
+                    }
+                    3 => {
+                        // M165 — const-out cell: a projected integer literal, the SAME value in every row (no batch
+                        // column — the const is neither grouped nor aggregated). Rebuild the by-value int Datum from
+                        // its stored (i64, typoid). NOT a grouping key → excluded from the `gk` sort below.
+                        let &(val, typoid) =
+                            const_outs.get(idx).ok_or("df_executor: layout const idx oob")?;
+                        const_out_datum(val, typoid)?
                     }
                     _ => {
                         let a = aggs.get(idx).ok_or("df_executor: layout agg idx oob")?;
@@ -1018,6 +1027,19 @@ fn group_expr_cell(
         // DateTrunc (func 0) — the Timestamp arrow array already IS the native output type.
         _ => arrow_value_to_datum(arr, row, g.out_typoid),
     }
+}
+
+/// M165 — materialize one const-out cell (layout kind=3): a projected integer literal. `admit` admitted ONLY the
+/// integer class {int2,int4,int8} + non-NULL, so the stored i64 rebuilds the exact by-value PG Datum (int2/4/8 are
+/// pass-through — the Datum IS the integer, same as `arrow_value_to_datum`'s int arms). Fail-closed on any other typoid.
+fn const_out_datum(val: i64, typoid: u32) -> Result<(pg_sys::Datum, bool), String> {
+    let d = match typoid {
+        21 => (val as i16).into_datum(),
+        23 => (val as i32).into_datum(),
+        20 => val.into_datum(),
+        other => return Err(format!("df_executor: const-out bad typoid {other}")),
+    };
+    Ok((d.ok_or("df_executor: const-out datum")?, false))
 }
 
 /// Run `count(*)`, `sum(<num_col>)` over the columnar table and format `count=N;sum=X` (Phase A/B test driver — the

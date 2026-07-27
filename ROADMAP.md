@@ -2983,7 +2983,7 @@ bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan s�
 
 ---
 
-## M164 — [ ] Endurecer o harness de benchmark (guards de falso-verde + pre-flight de infra) — rigor
+## M164 — [x] Endurecer o harness de benchmark (guards de falso-verde + pre-flight de infra) — rigor
 
 > **Itens B+C da retro M160-M162** (`/roadmap-feature`, 2026-07-27). Evidência dura desta sessão: (B) `_ensure_sample` (`run_m128_clickbench.py:96`) reusou um cache de **1M como "100M"** sem checar contagem → um `DONE` falso que só peguei na mão; e um A/B com `ORDER BY` removido virou SORTED → `diverged=0` **trivial** (ON declinava). (C) escolhi o box de 15GB (reuso do M160) para 100M e ele **OOMou 2×** — subdimensionado; além de `unattended-upgrades` reiniciar o PG no meio do COPY. Horas perdidas em ruído mecanizável.
 
@@ -3000,6 +3000,66 @@ bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan s�
 **Risks:** (a) pre-flight estrito demais bloqueando um run larger-than-RAM legítimo → o caso RAM é WARN, nunca BLOCK. (b) o assert de contagem tem de honrar a amostragem sistemática (a divisão inteira pode render 1 linha a mais — comparar com tolerância).
 
 **Prior art / referências:** memory `m162-100m-load-gotchas` (as 3 armadilhas medidas); memory `infra-nao-usar-maquina-do-ci`; `docs/benchmarks/m162-100m-gap-verdict.md`; `benchmarks/run_m128_clickbench.py:79-122` (`_ensure_sample`).
+
+---
+
+## M165 — [ ] GROUP BY multi-chave ao CustomScan colunar (fecha q17, q34) — cobertura
+
+> **Da medição fresca 2026-07-27** (`docs/benchmarks/clickbench-fresh-vs-clickhouse-2026-07-27.md`): o gap vs ClickHouse caiu ~pela metade desde o M159 (19,4×→9,95× geral; 7,54×→4,53× na classe pushdown), mas **8 queries non-pushdown seguram o geomean geral** (~25-35 s cada, 312×). A classe dominante entre elas é o **GROUP BY de múltiplas chaves**, que o pushdown atual (single-key, M153/M157) ainda declina: **q17** (`GROUP BY UserID, SearchPhrase`, 115×) e **q34** (`GROUP BY 1, URL`, 152×).
+
+**Objective:** rotear GROUP BY de 2+ chaves (`GROUP BY a, b [, c]`) ao CustomScan vetorizado do DataFusion, incluindo a mistura inteiro+texto — hoje só a chave única roteia. A meta é medida, não afirmada: q17 e q34 saem de non-pushdown para pushdown com ratio caindo de >100× para a faixa da classe coberta.
+
+**Definition of done:**
+
+- [ ] q17 (`GROUP BY UserID, SearchPhrase`) e q34 (`GROUP BY 1, URL`) mostram `Custom Scan (theodb_columnar_agg)` no EXPLAIN e A/B byte-idêntico vs heap (`diverged=0`), medido pelo harness M164-endurecido (não o `diverged=0` trivial).
+- [ ] A chave-texto num GROUP BY multi-chave só roteia com colação **determinística** (lição M153/M157) — colação não-determinística declina fail-closed; chave-constante (`GROUP BY 1, ...`) é normalizada/tratada (lição M161 q34: PG pode dobrar a constante).
+- [ ] O harness de type-coverage A/B (M163) ganha um caso multi-chave (int+texto) — o guard não deixa a regressão de classe-de-tipo passar. CHANGELOG `[Unreleased]`.
+
+**Dependencies:** M161 `[x]` (roteamento de expressão), M163 `[x]` (harness type-coverage), M164 `[x]` (harness endurecido).
+
+**Risks:** (a) chave-texto em GROUP BY multi-chave — colação não-determinística DEVE declinar (byte-order ≠ ordem determinística; M153/M157), senão o A/B diverge; (b) a chave-constante pode ser eliminada pelo planner antes do admit (M161 q34 honest-negative) — confirmar via `THEODB_ADMIT_TRACE` que a chave real chega ao classificador.
+
+**Prior art / referências:** `docs/benchmarks/clickbench-fresh-vs-clickhouse-2026-07-27.md` (q17=115×, q34=152× medidos); memory `m153-groupby-text-released` (texto só HASHED), `m161-expr-routing` (const-key honest-negative); `theodb_rs/src/am/columnar_agg.rs` (`classify_target_node`).
+
+---
+
+## M166 — [ ] Agregados de string (MIN/MAX texto) + lista larga de SUM(expr) ao CustomScan colunar (q21, q22, q27, q29) — cobertura
+
+> **Da mesma medição fresca**: além do GROUP BY multi-chave, o vocabulário de **agregados** do pushdown ainda não cobre agregados sobre texto nem listas largas de SUM(expr): **q21** (`MIN(URL) ... GROUP BY SearchPhrase`, 300×), **q22** (`MIN(URL), MIN(Title), COUNT(DISTINCT UserID)`, 260×), **q27** (`AVG(length(URL)) ... HAVING`, 817×), **q29** (muitos `SUM(ResolutionWidth + k)`, 567×). Juntas são 4 dos 8 termos non-pushdown que seguram o geomean.
+
+**Objective:** estender o vocabulário de agregados do CustomScan colunar para (a) `MIN`/`MAX` sobre texto/varlena, (b) `AVG` sobre um escalar computado (`length()`), e (c) uma lista larga de `SUM(expr)` com aritmética — reusando a viúva de widening+range-check do M161 e a colação-determinística do M156/M157.
+
+**Definition of done:**
+
+- [ ] q21, q22, q27 e q29 roteiam (EXPLAIN `theodb_columnar_agg`) com A/B byte-idêntico (`diverged=0`) no harness M164; q22 mantém o `COUNT(DISTINCT)` do M154 coexistindo com os `MIN(texto)`.
+- [ ] `MIN`/`MAX(texto)` respeita a colação — colação não-determinística declina fail-closed (a ordem de bytes ≠ ordem de colação; M156/M157); `SUM(expr)` com aritmética reusa o widening+range-check inteiro (M161) e declina float IEEE/overflow onde o M154/M163 mandam.
+- [ ] Type-coverage A/B (M163) ganha um caso de `MIN(texto)` e um de `SUM(int+k)`. CHANGELOG `[Unreleased]`.
+
+**Dependencies:** M165 `[x]` (a cobertura de GROUP BY que ele estende), M161 `[x]` (aritmética em expressão), M154 `[x]` (count-distinct).
+
+**Risks:** (a) ordenação de `MIN/MAX(texto)` vs colação do PG — declarar não-determinística deve declinar, senão o resultado diverge silenciosamente (M156/M157); (b) `SUM` sobre float/numeric precisa honrar IEEE/overflow (lições M154/M163) — declinar onde não é byte-idêntico.
+
+**Prior art / referências:** `docs/benchmarks/clickbench-fresh-vs-clickhouse-2026-07-27.md` (q21=300×, q22=260×, q27=817×, q29=567× medidos); memory `m154-count-distinct-released`, `m156-text-where-released` (colação), `m161-expr-routing` (widening); `theodb_rs/src/am/df_executor.rs` (`parse_agg_kind`).
+
+---
+
+## M167 — [ ] Top-k de projeção (SELECT cols WHERE … ORDER BY … LIMIT k) ao caminho late-mat colunar (q23–q26) — cobertura
+
+> **Da mesma medição fresca**: as queries **routed-mas-lentas** de top-k de *projeção* ainda passam pelo caminho lento: **q23** (`SELECT * … WHERE URL LIKE … ORDER BY EventTime LIMIT 10`, 110×), **q24/q25/q26** (`SELECT SearchPhrase … WHERE … ORDER BY <col> LIMIT 10`, 73-132×). O M158 fez late-mat top-k para `ORDER BY <agg>`; falta o top-k de *projeção* (ORDER BY coluna).
+
+**Objective:** estender a materialização preguiçosa do M158 do top-k-de-agregado para o **top-k de projeção** — `SELECT [colunas] WHERE <pred> ORDER BY <coluna> LIMIT k` — materializando só as k linhas do topo em vez de reconstruir a linha inteira (o gargalo M148). A meta é medida: q23–q26 saem de row-based lento para o caminho late-mat colunar.
+
+**Definition of done:**
+
+- [ ] q23, q24, q25, q26 mostram o Custom Scan de projeção/late-mat no EXPLAIN e A/B byte-idêntico vs heap (`diverged=0`), com o filtro (`WHERE URL LIKE …`) também roteado (composto com M156).
+- [ ] `ORDER BY` de texto só roteia com colação determinística (lição M158: texto só C/POSIX via `Sort.collations`); o heapsort do LIMIT-k é O(k), não um batch O(N) (lição M158 timer/EXPLAIN ANALYZE).
+- [ ] GUC de late-mat honrado; type-coverage/A/B do M163/M164 exercita o caso de projeção-top-k. CHANGELOG `[Unreleased]`.
+
+**Dependencies:** M158 `[x]` (late-mat top-k de agregado), M160 `[x]` (decode zero-copy), M164 `[x]` (harness endurecido).
+
+**Risks:** (a) `ORDER BY <texto>` — colação não-C/não-determinística DEVE declinar (M158 HIGH: determinístico ≠ byte-order); (b) o predicado do WHERE (`LIKE`) tem de rotear junto (M156) — se declinar, o top-k não é comparável; medir com o harness M164 que exige o Custom Scan de fato (não `diverged=0` trivial).
+
+**Prior art / referências:** `docs/benchmarks/clickbench-fresh-vs-clickhouse-2026-07-27.md` (q23=110×, q24=73×, q25=113×, q26=132× medidos); memory `m158-late-mat-released` (colação/timer), `m156-text-where-released` (LIKE); `theodb_rs/src/am/columnar_project.rs`.
 
 ---
 

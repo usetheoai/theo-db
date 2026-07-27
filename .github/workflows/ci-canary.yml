@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   canary:
-    runs-on: [self-hosted, theodb-do]
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
     timeout-minutes: 5
     steps:
       - name: Prove a runner executed a step

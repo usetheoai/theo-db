@@ -40,7 +40,11 @@ jobs:
     if: >
       github.event.workflow_run.conclusion == 'failure' &&
       (github.event.workflow_run.head_branch == 'develop' || github.event.workflow_run.head_branch == 'main')
-    runs-on: [self-hosted, theodb-do]
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
+    # Duas chamadas de API via `gh`. 10 min é folga larga; sem isto o default é 360 min, e um
+    # `gh` pendurado numa rede ruim seguraria o runner serial de 5 repos por 6 horas — para
+    # abrir um issue.
+    timeout-minutes: 10
     steps:
       - name: Abrir ou atualizar o issue de CI vermelho
         env:

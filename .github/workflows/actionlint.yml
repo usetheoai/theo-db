@@ -1,0 +1,56 @@
+# Gate de sintaxe/semântica dos próprios workflows (#211).
+#
+# O DEFEITO QUE ISTO PREVINE, medido em 2026-07-27: `license-gate` (a regra D1/AGPL), `lint-rust`,
+# `cassert-sql-safety` e `schema-drift-gate` passaram TRÊS DIAS sem executar um único step. Cada um
+# declarava `paths` e `paths-ignore` no mesmo evento — combinação que o GitHub rejeita no parse —,
+# então os runs morriam em `startup_failure` com zero jobs. Na lista de runs isso aparece apenas
+# como `failure`, indistinguível de um teste quebrado: 95 de 100 runs, e ninguém procurou a causa.
+#
+# Nenhum gate do repo olhava para os workflows em si. Este olha.
+#
+# Verificado, não presumido — o repro exato do bug contra esta mesma imagem:
+#
+#   .github/workflows/bug.yml:7:5: both "paths" and "paths-ignore" filters cannot be used for the
+#   same event "push". note: use '!' to negate patterns [events]
+#
+# O linter inclusive sugere a correção que foi aplicada (padrão negado dentro do `paths:`).
+#
+# Regra 9 (não reinvente): actionlint é o linter de-facto de GitHub Actions, e traz shellcheck
+# embutido para os blocos `run:` — que é como o resto dos achados aqui aparece.
+name: actionlint
+
+on:
+  push:
+    branches: [develop, main]
+    paths:
+      - '.github/workflows/**'
+      - '.github/actionlint.yaml'
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - '.github/actionlint.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: ${{ github.ref_name != 'main' }}
+
+jobs:
+  actionlint:
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
+    # Medido: o scan dos 10 workflows leva segundos. 10 min é folga para o pull da imagem num
+    # runner frio, não uma estimativa do trabalho.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: actionlint (workflows + shellcheck dos blocos run:)
+        # Imagem fixada por digest, consistente com a política de supply-chain do repo (mesmo
+        # padrão do pgvector em `migration-smoke`). `-color` força cor mesmo sem TTY.
+        run: |
+          docker run --rm -v "$PWD:/repo" --workdir /repo \
+            rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 \
+            -color

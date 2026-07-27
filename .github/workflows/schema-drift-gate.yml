@@ -20,17 +20,23 @@ name: schema-drift-gate
 
 on:
   pull_request:
-    paths: ['theodb_rs/src/**', 'theodb_rs/theodb_rs.control', 'theodb_rs/sql/**']
+    paths:
+      - 'theodb_rs/src/**'
+      - 'theodb_rs/theodb_rs.control'
+      - 'theodb_rs/sql/**'
+      - '!**/*.md'
   push:
     branches: [develop]
-    # #187 — o runner é ÚNICO e serial: cada push dispara ~14 jobs de ~45min (≈10h de fila).
-    # Mudanças só de documentação/artefatos de agente não exercitam código e não podem consumir
-    # essa capacidade. Mesmo padrão do theo-memory/theo-rag.
-    paths-ignore:
-      - '.claude/**'
-      - '**/*.md'
-      - 'docs/**'
-    paths: ['theodb_rs/src/**', 'theodb_rs/theodb_rs.control', 'theodb_rs/sql/**']
+    # #211 — NÃO adicione `paths-ignore:` aqui. O GitHub proíbe `paths` e `paths-ignore` no MESMO
+    # evento e rejeita o arquivo no parse (`startup_failure`, zero jobs): este gate marcou 100 de
+    # 100 runs falhos até 27/07. A economia de fila que #187 buscava se expressa DENTRO do `paths:`,
+    # via padrão negado — um filtro só, sem conflito. `.claude/**` e `docs/**` já estão fora por
+    # construção; o `!**/*.md` é guarda de futuro (hoje não há `.md` sob `theodb_rs/src|sql/`).
+    paths:
+      - 'theodb_rs/src/**'
+      - 'theodb_rs/theodb_rs.control'
+      - 'theodb_rs/sql/**'
+      - '!**/*.md'
 
 # Fila do runner self-hosted (2026-07-24): sem `concurrency`, cada push empilhava um run novo por
 # workflow e NENHUM era cancelado — o runner processa um de cada vez, então a fila entupiu (32 runs
@@ -44,7 +50,7 @@ concurrency:
 
 jobs:
   drift:
-    runs-on: [self-hosted, theodb-do]
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4

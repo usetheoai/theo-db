@@ -4,31 +4,66 @@ name: CI
 # real ANN-Benchmarks reference dataset (glove-25-angular), alongside the M0 smoke (pgvector) and
 # the M2 vectorscale/diskann integration. Every step here is one that has been run locally first.
 
+# FILTRO POSITIVO (não `paths-ignore`) — o runner é ÚNICO e serial, e o `paths-ignore` anterior
+# (`.claude/**`, `**/*.md`, `docs/**`) não excluía quase nada: qualquer commit em `.github/`,
+# `knowledge-base/`, `agents/` ou num arquivo de raiz reabria os 10 jobs. Medido em 2026-07-27, o
+# commit `3313226` — que tocou SÓ 4 YAMLs de workflow e o CHANGELOG, zero linha de código —
+# disparou CI + publish + ci-canary + lint-rust + cassert, cinco runs numa fila serial.
+#
+# A lista abaixo é derivada do que a esteira de fato lê, não de memória:
+#   - `Dockerfile` / `.dockerignore` / `*.control` / `sql/` / `theodb_rs/` — entram na imagem
+#     (conferido nos `COPY` do Dockerfile)
+#   - `scripts/`   — smoke.sh, migrate-*.sh
+#   - `benchmarks/`— o harness pytest + requirements.txt
+#   - `packaging/` — Dockerfile.regress / .bm25 / .columnar + license-sweep.sh
+#   - `Makefile`   — hoje a esteira não o invoca; incluído como seguro barato, porque um gate de
+#     correção erra para o lado de rodar demais, nunca de menos
+#
+# TRADE-OFF ACEITO EXPLICITAMENTE: filtro positivo cria risco de FALSO-VERDE — um diretório novo
+# que não entre nesta lista deixa de ser testado em silêncio. Quem adicionar um caminho que a suíte
+# passe a exercitar TEM de adicioná-lo aqui. Foi decisão consciente (alternativa conservadora era
+# só estender o `paths-ignore`).
+#
+# Seguro aqui porque este workflow NÃO escuta `tags:` — filtro de path também se aplica a push de
+# tag, e um `chore(release)` que só toca CHANGELOG seria filtrado. Ver `publish-image.yml`, que
+# escuta tags e por isso NÃO recebeu filtro positivo.
 on:
   push:
     branches: [develop, main]
-    # O runner é ÚNICO e serial, então mudanças só de documentação/artefatos de agente — que não
-    # exercitam código — não devem consumir a fila. Mesmo padrão do theo-memory/theo-rag.
-    #
-    # NÚMERO CORRIGIDO (medido 2026-07-27): a redação anterior dizia "~14 jobs de ~45min (≈10h de
-    # fila)". Isso media a esteira QUEBRADA — jobs pendurados em timeout (o `harness-unit` sozinho
-    # levava 999s para FALHAR) e runs empilhados. Com os defeitos corrigidos, o run mede
-    # 5,9 min de tempo de job somado e 6,9 min de wall-clock (8 jobs; ~14% de despacho ocioso).
-    # A política de paths-ignore continua certa; a justificativa é economia de fila, não 10 horas.
-    paths-ignore:
-      - '.claude/**'
-      - '**/*.md'
-      - 'docs/**'
+    paths:
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'Makefile'
+      - 'theodb.control'
+      - 'vector.control'
+      - 'theodb_rs/**'
+      - 'sql/**'
+      - 'scripts/**'
+      - 'benchmarks/**'
+      - 'packaging/**'
+      - '.github/workflows/ci.yml'
+      # Um README dentro de qualquer um dos diretórios acima não muda resultado de teste.
+      - '!**/*.md'
   pull_request:
     branches: [develop, main]
-    # Mesma razão do `push` acima: um PR cujo diff é só documentação não deve consumir a esteira
-    # inteira do runner único (ver o número medido acima). Sem isto, o gate de `pull_request`
-    # reabria toda a esteira para um commit
-    # de CHANGELOG (observado no PR #189).
-    paths-ignore:
-      - '.claude/**'
-      - '**/*.md'
-      - 'docs/**'
+    # DUPLICAÇÃO DELIBERADA da lista do `push` acima — MANTENHA AS DUAS EM SINCRONIA.
+    # Âncora YAML (`&x` / `*x`) resolveria, e o GitHub passou a suportá-la em set/2025, mas o
+    # modo de falha de uma âncora mal interpretada é `startup_failure` — o mesmo silêncio que
+    # deixou 4 gates deste repo mortos por 3 dias (#211). Doze linhas duplicadas e adjacentes
+    # custam menos que reintroduzir essa classe de falha.
+    paths:
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'Makefile'
+      - 'theodb.control'
+      - 'vector.control'
+      - 'theodb_rs/**'
+      - 'sql/**'
+      - 'scripts/**'
+      - 'benchmarks/**'
+      - 'packaging/**'
+      - '.github/workflows/ci.yml'
+      - '!**/*.md'
 
 # Fila do runner self-hosted (2026-07-24): sem `concurrency`, cada push empilhava um run novo por
 # workflow e NENHUM era cancelado — o runner processa um de cada vez, então a fila entupiu (32 runs
@@ -40,13 +75,26 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: ${{ github.ref_name != 'main' }}
 
+# Menor privilégio. Este workflow não declarava `permissions:` nenhum, então cada job recebia o
+# default do repositório para o GITHUB_TOKEN — que numa org configurada como permissiva é
+# read/write em conteúdo, issues, packages e deployments. Nada aqui escreve: a esteira só faz
+# checkout, builda imagem local (`load: true`) e roda teste. Os workflows que de fato publicam
+# (`publish-image.yml`) declaram seus próprios `packages: write` / `id-token: write`.
+permissions:
+  contents: read
+
 jobs:
   # #181/#182 — GATE de compatibilidade pgvector. Roda contra a IMAGEM (o artefato que o usuário
   # realmente baixa), não contra um cluster montado à mão: é o caminho do README, e foi justamente a
   # ausência desse caminho no CI que deixou passar (a) `CREATE EXTENSION vector` inexistente e (b) o AM
   # `hnsw` / opclasses `vector_*_ops` ausentes — dois bugs que só apareceram ao apontar uma app real.
   pgvector-compat:
-    runs-on: [self-hosted, theodb-do]
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
+    # Sem timeout, o default do GitHub é 360 min — num runner SERIAL compartilhado por 5 repos,
+    # um job pendurado sequestra a fila de todos por 6 horas. Os valores aqui são folga sobre a
+    # duração observada (build de imagem + asserções), na mesma faixa dos jobs vizinhos que já
+    # declaravam timeout (pg-regression 25, hybrid-search 20).
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -60,14 +108,16 @@ jobs:
           tags: theo-db:dev
           load: true
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # SEM `cache-to`: só o build de `image-and-bench` (tag theo-db:ci) publica o cache. Os oito
+          # jobs escreviam `mode=max`, isto é, exportavam TODAS as camadas para o cache do GitHub pela
+          # rede — sete vezes por run, sem que ninguém lesse as sete cópias extras. Ler continua igual.
 
       - name: Bootstrap de uma app pgvector contra a imagem (o fluxo do README)
         run: |
           set -euo pipefail
           docker rm -f theodb_compat 2>/dev/null || true
           docker run -d --name theodb_compat -e POSTGRES_PASSWORD=postgres theo-db:dev
-          for i in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             docker exec theodb_compat pg_isready -U postgres >/dev/null 2>&1 && break
             sleep 2
           done
@@ -115,7 +165,11 @@ jobs:
 
   harness-unit:
     # Fast, container-free: the recall math, ground-truth, metrics and HDF5 loader (DoD-1 gate logic).
-    runs-on: [self-hosted, theodb-do]
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
+    # O mais barato da esteira (pip + pytest, sem container). Já teve regressão de tempo: o
+    # comentário do `on:` registra que este job sozinho levava 999s para FALHAR quando a esteira
+    # estava quebrada — exatamente o cenário que um timeout existe para cortar.
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: benchmarks
@@ -136,7 +190,11 @@ jobs:
   image-and-bench:
     # Builds the TheoDB image, proves M0 (smoke) + M2 vectorscale, then runs the benchmark harness
     # in CI over the real glove-25-angular reference dataset (DoD-1) + the integration suite.
-    runs-on: [self-hosted, theodb-do]
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
+    # O job mais caro por larga margem: o step `pytest -m integration` mede 22,2 min e responde por
+    # ~80% do wall-clock da esteira (27,9 min medidos em 2026-07-27, ver comentário no step). 45 min
+    # é ~2x o observado — folga para variação de download do dataset sem virar refém de um hang.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -173,7 +231,7 @@ jobs:
           docker run -d --name theo-db-ci --add-host=host.docker.internal:host-gateway \
             -e POSTGRES_PASSWORD=postgres -p 5432 theo-db:ci \
             -c theodb.egress_allowlist=host.docker.internal,127.0.0.1
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             [ "$(docker inspect -f '{{.State.Health.Status}}' theo-db-ci)" = healthy ] && break
             sleep 2
           done
@@ -200,8 +258,12 @@ jobs:
           docker exec theo-db-ci psql -U postgres -c "CREATE TABLE lh(category text, amount float8); INSERT INTO lh VALUES ('a',10),('a',20),('b',5)" >/dev/null
           docker exec theo-db-ci psql -U postgres -tAc "SELECT theodb.htap_refresh('lh'::regclass)" >/dev/null
           rows="$(docker exec theo-db-ci psql -U postgres -tAc "SELECT category||'|'||c||'|'||a FROM theodb.olap('lh'::regclass) ORDER BY category")"
-          echo "$rows" | grep -q "^a|2|15" && echo "$rows" | grep -q "^b|1|5" \
-            || { echo "FAIL: lakehouse own-code M62 (got: $rows)"; exit 1; }
+          # `if !` explícito em vez de `A && B || C`: naquela forma, se A falhasse o shell ainda
+          # avaliava C, e um `exit` dentro de C mascarava qual das duas asserções quebrou (SC2015).
+          if ! echo "$rows" | grep -q "^a|2|15" || ! echo "$rows" | grep -q "^b|1|5"; then
+            echo "FAIL: lakehouse own-code M62 (got: $rows)"
+            exit 1
+          fi
           echo "M143 lakehouse own-code OK (sem pg_duckdb)"
 
       - uses: actions/setup-python@v5
@@ -274,7 +336,10 @@ jobs:
   migration-smoke:
     # M3 DoD-1/DoD-2: standard pg_dump/pg_restore migration from a vanilla pgvector source into TheoDB,
     # asserting data + indexes are preserved. Every step here has been run locally first.
-    runs-on: [self-hosted, theodb-do]
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
+    # Build + dois containers (pgvector origem, TheoDB destino) + pg_dump/pg_restore. Mesma faixa
+    # do `pg-regression` (25), que também sobe container e roda suíte externa.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
@@ -288,7 +353,9 @@ jobs:
           tags: theo-db:dev
           load: true
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # SEM `cache-to`: só o build de `image-and-bench` (tag theo-db:ci) publica o cache. Os oito
+          # jobs escreviam `mode=max`, isto é, exportavam TODAS as camadas para o cache do GitHub pela
+          # rede — sete vezes por run, sem que ninguém lesse as sete cópias extras. Ler continua igual.
 
       - name: Start source (vanilla pgvector, pinned by digest) + target (TheoDB)
         run: |
@@ -314,7 +381,7 @@ jobs:
     timeout-minutes: 25
     # M1 DoD-1: the upstream PostgreSQL 17 regression suite passes 100% on the TheoDB distribution.
     # Throwaway runner (FROM theo-db:dev) builds pg_regress from REL_17_10 and runs `make installcheck`.
-    runs-on: [self-hosted, theodb-do]
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
     steps:
       - uses: actions/checkout@v4
 
@@ -328,7 +395,9 @@ jobs:
           tags: theo-db:dev
           load: true
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # SEM `cache-to`: só o build de `image-and-bench` (tag theo-db:ci) publica o cache. Os oito
+          # jobs escreviam `mode=max`, isto é, exportavam TODAS as camadas para o cache do GitHub pela
+          # rede — sete vezes por run, sem que ninguém lesse as sete cópias extras. Ler continua igual.
 
       - name: Build regression runner (pg_regress + regress.so from REL_17_10)
         run: docker build -f packaging/Dockerfile.regress -t theo-db-regress .
@@ -340,7 +409,7 @@ jobs:
     timeout-minutes: 20
     # M7-S1: hybrid search (FTS + vector + RRF) — contract tests + smoke + capped BEIR-style eval.
     # Every step here has been run locally first (deterministic lexical embedder; no external endpoint).
-    runs-on: [self-hosted, theodb-do]
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
     steps:
       - uses: actions/checkout@v4
 
@@ -354,14 +423,16 @@ jobs:
           tags: theo-db:dev
           load: true
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # SEM `cache-to`: só o build de `image-and-bench` (tag theo-db:ci) publica o cache. Os oito
+          # jobs escreviam `mode=max`, isto é, exportavam TODAS as camadas para o cache do GitHub pela
+          # rede — sete vezes por run, sem que ninguém lesse as sete cópias extras. Ler continua igual.
 
       - name: Start TheoDB
         run: |
           # Ephemeral host port — rationale in the image-and-bench "Start TheoDB" step.
           docker rm -f theo-db-hyb 2>/dev/null || true
           docker run -d --name theo-db-hyb -e POSTGRES_PASSWORD=postgres -p 5432 theo-db:dev
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             [ "$(docker inspect -f '{{.State.Health.Status}}' theo-db-hyb)" = healthy ] && break
             sleep 2
           done
@@ -405,7 +476,7 @@ jobs:
     timeout-minutes: 20
     # M7-S3: generative ai.* functions — offline deterministic contract suite (stub server; NO external API).
     # The real-OpenAI test is opt-in and runs out-of-CI (key from gitignored .env). Run locally first.
-    runs-on: [self-hosted, theodb-do]
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
     steps:
       - uses: actions/checkout@v4
 
@@ -419,7 +490,9 @@ jobs:
           tags: theo-db:dev
           load: true
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # SEM `cache-to`: só o build de `image-and-bench` (tag theo-db:ci) publica o cache. Os oito
+          # jobs escreviam `mode=max`, isto é, exportavam TODAS as camadas para o cache do GitHub pela
+          # rede — sete vezes por run, sem que ninguém lesse as sete cópias extras. Ler continua igual.
 
       - name: Start TheoDB (host-gateway so the in-DB function reaches the host stub)
         run: |
@@ -435,7 +508,7 @@ jobs:
           docker run -d --name theo-db-ai --add-host=host.docker.internal:host-gateway \
             -e POSTGRES_PASSWORD=postgres -p 5432 theo-db:dev \
             -c theodb.egress_allowlist=host.docker.internal,127.0.0.1
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             [ "$(docker inspect -f '{{.State.Health.Status}}' theo-db-ai)" = healthy ] && break
             sleep 2
           done
@@ -476,7 +549,7 @@ jobs:
     # M7-S2: permissive BM25 (pg_textsearch) — build the throwaway image + MEASURE recall vs ts_rank_cd.
     # measurement-first (ADR 0002/0003): pg_textsearch is NOT in the shipped image; this job builds it only to
     # functionally prove + measure BM25. Deterministic synthetic fixture; no external API. Run locally first.
-    runs-on: [self-hosted, theodb-do]
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
     steps:
       - uses: actions/checkout@v4
 
@@ -490,7 +563,9 @@ jobs:
           tags: theo-db:dev
           load: true
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # SEM `cache-to`: só o build de `image-and-bench` (tag theo-db:ci) publica o cache. Os oito
+          # jobs escreviam `mode=max`, isto é, exportavam TODAS as camadas para o cache do GitHub pela
+          # rede — sete vezes por run, sem que ninguém lesse as sete cópias extras. Ler continua igual.
 
       - name: License sweep — BM25 candidates permissive/barred verdict (reproducible, ADR 0003)
         run: bash packaging/license-sweep.sh
@@ -504,7 +579,7 @@ jobs:
           docker rm -f theo-db-bm25c 2>/dev/null || true
           docker run -d --name theo-db-bm25c -e POSTGRES_PASSWORD=postgres -p 5432 \
             theo-db-bm25 -c shared_preload_libraries=pg_textsearch
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             [ "$(docker inspect -f '{{.State.Health.Status}}' theo-db-bm25c)" = healthy ] && break
             sleep 2
           done
@@ -542,7 +617,7 @@ jobs:
     # M7-S4: safe NL→SQL (anti-prompt-injection) — offline deterministic injection suite (stub; NO external API).
     # The stub "complies" with each injection so the test proves the GUARDS (L2 validation / L3 read-only
     # sandbox 25006) catch it. Run locally first.
-    runs-on: [self-hosted, theodb-do]
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
     steps:
       - uses: actions/checkout@v4
       - name: Set up Docker Buildx
@@ -554,7 +629,9 @@ jobs:
           tags: theo-db:dev
           load: true
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # SEM `cache-to`: só o build de `image-and-bench` (tag theo-db:ci) publica o cache. Os oito
+          # jobs escreviam `mode=max`, isto é, exportavam TODAS as camadas para o cache do GitHub pela
+          # rede — sete vezes por run, sem que ninguém lesse as sete cópias extras. Ler continua igual.
       - name: Start TheoDB (host-gateway so the in-DB function reaches the host stub)
         run: |
           # Ephemeral host port — rationale in the image-and-bench "Start TheoDB" step.
@@ -569,7 +646,7 @@ jobs:
           docker run -d --name theo-db-nl --add-host=host.docker.internal:host-gateway \
             -e POSTGRES_PASSWORD=postgres -p 5432 theo-db:dev \
             -c theodb.egress_allowlist=host.docker.internal,127.0.0.1
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             [ "$(docker inspect -f '{{.State.Health.Status}}' theo-db-nl)" = healthy ] && break
             sleep 2
           done
@@ -612,7 +689,7 @@ jobs:
     timeout-minutes: 20
     # M6: columnar/HTAP (pg_mooncake) — prove + measure the columnstore mirror vs row-store on the canonical
     # pg_mooncake distribution (MIT). Captures the DuckDBScan-vs-SeqScan plan choice (DoD-2). Run locally first.
-    runs-on: [self-hosted, theodb-do]
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
     steps:
       - uses: actions/checkout@v4
       - name: License sweep — columnar candidates permissive verdict (reproducible)
@@ -624,7 +701,7 @@ jobs:
           # Ephemeral host port — rationale in the image-and-bench "Start TheoDB" step.
           docker rm -f theo-db-col 2>/dev/null || true
           docker run -d --name theo-db-col -e POSTGRES_PASSWORD=postgres -p 5432 theo-db-columnar
-          for i in $(seq 1 40); do docker exec theo-db-col pg_isready -U postgres -q && break; sleep 2; done
+          for _ in $(seq 1 40); do docker exec theo-db-col pg_isready -U postgres -q && break; sleep 2; done
           docker exec theo-db-col pg_isready -U postgres -q
           # Validated, never assumed: consumers read `${PGPORT:-5432}`, so an EMPTY value does not
           # fail — it silently falls back to 5432, where nothing listens once the port is ephemeral.

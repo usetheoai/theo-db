@@ -15,11 +15,36 @@ on:
   push:
     branches: [develop]
     tags: ["v*"]
-    # Pushes só-de-documentação em develop não gastam a fila do runner. Builds de TAG apontam para
-    # merge commits (sempre com código), então um release nunca é filtrado por docs.
+    # Pushes só-de-documentação em develop não gastam a fila do runner.
+    #
+    # DELIBERADAMENTE `paths-ignore` (lista de exclusão), NÃO o filtro positivo que o `ci.yml`
+    # adotou: este workflow escuta `tags: ["v*"]`, e filtro de path se aplica TAMBÉM a push de tag.
+    # Um filtro positivo faria um release cujo commit não casasse a lista ser silenciosamente
+    # ignorado — nenhuma imagem publicada, nenhum erro. Lista de exclusão erra para o lado seguro
+    # (publica a mais), que aqui é o lado certo.
+    #
+    # Isso posto, a premissa que sustenta o `**/*.md` abaixo é que builds de TAG apontam para merge
+    # commits, sempre com código junto. É uma premissa do FLUXO, não uma garantia do mecanismo —
+    # registrada como risco latente numa issue própria.
     paths-ignore:
       - '.claude/**'
       - '**/*.md'
+      # Adicionados em 2026-07-27: nada aqui entra na imagem (conferido nos `COPY` do Dockerfile —
+      # só `theodb_rs/`, `sql/`, `*.control`). O commit `3313226`, que tocou só workflows e o
+      # CHANGELOG, disparou um build+push completo de imagem idêntica.
+      - 'docs/**'
+      - 'knowledge-base/**'
+      - 'agents/**'
+      - '.review-runs/**'
+      - '.review-loop/**'
+      # Nada em `.github/` entra na imagem. Para exercitar uma alteração NESTE arquivo, use o
+      # `workflow_dispatch` declarado abaixo — é o escape hatch previsto.
+      #
+      # `.github/**`, não `.github/workflows/**`: `paths-ignore` só suprime o run quando TODO
+      # arquivo do commit casa algum padrão. Verificado no commit `6fcf218` — ele tocou workflows
+      # + CHANGELOG (ambos ignorados) e `.github/actionlint.yaml`, que ficava de fora do padrão
+      # mais estreito e sozinho bastou para disparar um build+push completo.
+      - '.github/**'
   workflow_dispatch:
 
 # Runner self-hosted único: pushes sucessivos em develop devem SUPERSEDER o run anterior em vez de
@@ -44,12 +69,16 @@ jobs:
       trivy: true
       sign: ${{ startsWith(github.ref, 'refs/tags/v') }}
       verify: ${{ startsWith(github.ref, 'refs/tags/v') }}
-      # GitHub-hosted está bloqueado por billing neste org. Usa o label ESPECÍFICO `theodb-do` (mesmo
-      # de todos os outros workflows deste repo, `runs-on: [self-hosted, theodb-do]`) e NÃO o genérico
-      # `["self-hosted","linux","x64"]` do playbook: os runners da máquina theo-ci-runner (2 GB / 2 vCPU,
-      # que serve theo-cloud/theo-lens/theo-memory) carregam exatamente esses labels genéricos, e um job
-      # que compila Rust + PostgreSQL não cabe lá. O label específico prende o build na máquina de 8 vCPU.
-      runner: '["self-hosted","theodb-do"]'
-    # Explícito (não `secrets: inherit`) — evita o finding semgrep de secrets-inherit. O TheoDB não
-    # consome módulo Go privado nem publica no Docker Hub hoje; o GHCR publica com o GITHUB_TOKEN do run.
-    secrets: {}
+      # Mesma variável que todo job próprio deste repo consome — um só lugar governa a frota.
+      # O reusable recebe a STRING JSON (ele faz o `fromJSON` do lado dele), então aqui NÃO se
+      # envolve em `fromJSON`; o `||` continua sendo o fallback contra variável ausente.
+      #
+      # Por que o default é `theodb-do` e não o genérico `["self-hosted","linux","x64"]` do playbook:
+      # os runners da máquina theo-ci-runner (2 vCPU / 2 GB, que serve theo-cloud/theo-lens/
+      # theo-memory) carregam exatamente esses labels genéricos, e um build que compila Rust +
+      # PostgreSQL não cabe lá. O label específico prende o build na máquina de 8 vCPU.
+      runner: ${{ vars.CI_RUNNER || '["self-hosted","theodb-do"]' }}
+    # SEM bloco `secrets:` — e sem `secrets: inherit`, que é o que o semgrep barra. O `secrets: {}`
+    # anterior expressava a mesma intenção (não repassar nada) mas o actionlint o rejeita como seção
+    # vazia; omitir tem efeito idêntico e satisfaz os dois linters. O TheoDB não consome módulo Go
+    # privado nem publica no Docker Hub hoje; o GHCR publica com o GITHUB_TOKEN do próprio run.
