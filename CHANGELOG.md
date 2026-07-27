@@ -13,15 +13,27 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- Roadmap amended: added M163 Harness A/B por-tipo (retro item A) + M164 Endurecer o harness de benchmark (retro items B+C) (`/roadmap-feature`).
-- M163: **type-coverage A/B harness** (`benchmarks/columnar_type_ab.py` + tests) — closes the project's most recurring defect (the ClickBench A/B doesn't exercise the type space, so type-class routing bugs survive it and are only caught by council review after a 14-min rebuild; M151/M154/M157/M161). For each routed admit-path × each per-type edge value (int2 `32767`, int4/int8 max, float `-0.0`/`NaN`/`inf`, timestamp/date/timestamptz, non-C text, NULL) it asserts the M161 fail-closed contract — **byte-identical if it routes, OR correct-decline** — over a synthetic `theodb_columnar` table. A **positive control** (a seeded-divergent twin run *through* the same `ab_check` oracle path the real cases use) proves the oracle catches a wrong result (the M161 `out_typoid` BLOCKER shape). Validated live on a fresh TheoDB build: Tier-1 `pytest` 8 passed, Tier-2 **20/20 cases as-expected**, positive-control diverged=2. Bespoke pytest reusing the shipped symmetric-EXCEPT oracle (no new dep, Rule 9); routing evidence and the byte-identity comparison come from the **same execution** (`EXPLAIN ANALYZE CREATE TEMP TABLE _ab_on AS <sql>`), so a `route` case whose pushdown silently didn't fire in the comparison query can't pass as a false `diverged=0` (council-benchmark HIGH); wired as a pre-`/review` gate in `rules/testing.md § 5.1`. Evidence: `docs/benchmarks/m163-type-coverage-verdict.md`.
 
 ### Changed
-- `rules/discover-phd-rigor.md`: added R3.1 (instrument-validates-against-architecture — retro item D; a measurement DoD must verify its instrument actually observes the thing measured, e.g. `shared_blks_read` cannot see `theodb_columnar`'s TAM-level I/O).
 
 ### Deprecated
 
 ### Removed
+
+### Fixed
+
+### Security
+
+## [0.154.0] - 2026-07-27
+
+### Added
+- Roadmap amended: added M163 Harness A/B por-tipo (retro item A) + M164 Endurecer o harness de benchmark (retro items B+C) (`/roadmap-feature`).
+- M163: **type-coverage A/B harness** (`benchmarks/columnar_type_ab.py` + tests) — closes the project's most recurring defect (the ClickBench A/B doesn't exercise the type space, so type-class routing bugs survive it and are only caught by council review after a 14-min rebuild; M151/M154/M157/M161). For each routed admit-path × each per-type edge value (int2 `32767`, int4/int8 max, float `-0.0`/`NaN`/`inf`, timestamp/date/timestamptz, non-C text, NULL) it asserts the M161 fail-closed contract — **byte-identical if it routes, OR correct-decline** — over a synthetic `theodb_columnar` table. A **positive control** (a seeded-divergent twin run *through* the same `ab_check` oracle path the real cases use) proves the oracle catches a wrong result (the M161 `out_typoid` BLOCKER shape). Validated live on a fresh TheoDB build: Tier-1 `pytest` 8 passed, Tier-2 **20/20 cases as-expected**, positive-control diverged=2. Bespoke pytest reusing the shipped symmetric-EXCEPT oracle (no new dep, Rule 9); routing evidence and the byte-identity comparison come from the **same execution** (`EXPLAIN ANALYZE CREATE TEMP TABLE _ab_on AS <sql>`), so a `route` case whose pushdown silently didn't fire in the comparison query can't pass as a false `diverged=0` (council-benchmark HIGH); wired as a pre-`/review` gate in `rules/testing.md § 5.1`. Evidence: `docs/benchmarks/m163-type-coverage-verdict.md`.
+
+
+### Changed
+- `rules/discover-phd-rigor.md`: added R3.1 (instrument-validates-against-architecture — retro item D; a measurement DoD must verify its instrument actually observes the thing measured, e.g. `shared_blks_read` cannot see `theodb_columnar`'s TAM-level I/O).
+
 
 ### Fixed
 - **CI: colisão de porta 5432 derrubava 6 dos 10 jobs, de forma autoperpetuante.** Todos os containers do `ci.yml` faziam bind fixo `-p 5432:5432` no host. Um run cancelado por `concurrency.cancel-in-progress` pula o `Teardown`, vaza o container, e a partir daí **todo run seguinte** morre com `Bind for 0.0.0.0:5432 failed: port is already allocated` — até alguém limpar o host à mão. Atingia `image-and-bench`, `ai-sql`, `hybrid-search`, `columnar-measure`, `bm25-measure` e `nl-sql`. Agora cada container usa porta **efêmera** (`-p 5432`), com o `PGPORT` resolvido via `docker port` e exportado por `$GITHUB_ENV`, mais uma pré-limpeza defensiva por nome. Além de corrigir, remove o impedimento estrutural a rodar esses jobs em paralelo (porta fixa é incompatível com concorrência). Mesmo padrão já adotado em `theo-memory/integration.yml`.
@@ -37,8 +49,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - **Ressalva honesta sobre as correções de CI acima: a esteira NÃO fica 100% verde, e isso é deliberado.** O job `migration-smoke` permanece vermelho porque um `pg_dump` de pgvector vanilla contendo `USING ivfflat` não restaura — o TheoDB expõe `theodb_ivfflat` mas não o alias de compatibilidade `ivfflat` (o #182 criou apenas o de `hnsw`). O gate está **certo** ao falhar: detectou uma lacuna real de drop-in, não um defeito de pipeline. Torná-lo verde exigiria remover o índice do seed do smoke — enfraquecer o gate para esconder o achado, anti-padrão explícito de `rules/cycle-implement.md`. Rastreado em #206. Da mesma forma, o `publish` segue bloqueado por 15 CVEs reais em `gosu` (#207), agora que o gate Trivy de fato escaneia. Quem for cortar release a partir deste estado precisa saber disso.
 
 - **CI: instrumentado o step que concentra 80% do wall-clock da esteira.** Medido em 2026-07-27, com a esteira já corrigida: o run inteiro leva 27,9 min e o step `Integration tests` do `image-and-bench` leva **22,2 min** sozinho (os 34 steps de build de imagem + buildx somam 2,9 min = 10%; a suíte de regressão PG18.4, 1,0 min). O step agora roda com `--durations=25` porque ~305 testes a 4,3s de média não revelam se o custo está concentrado ou espalhado — e a resposta decide a estratégia: atacar testes específicos, ou paralelizar. Paralelizar hoje está **bloqueado**: não há `conftest.py` e os testes criam tabelas de nome fixo repetido (`CREATE TABLE m` em 12 pontos) no mesmo banco, então `pytest -n auto` trocaria tempo por flakiness. Parte dos 22 min é trabalho legítimo novo: os 5 módulos remarcados como `integration` (incl. `test_am_crash`, que reinicia o Postgres) nunca haviam rodado contra um container.
-
-### Security
 
 ## [0.153.0] - 2026-07-27
 
