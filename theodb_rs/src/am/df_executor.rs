@@ -19,7 +19,7 @@ use datafusion::arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::error::DataFusionError;
 use datafusion::functions_aggregate::expr_fn::{avg, count, count_distinct, max, min, sum};
-use datafusion::prelude::{Expr, SessionContext, col, lit};
+use datafusion::prelude::{Expr, SessionContext, cast, col, lit};
 use datafusion::scalar::ScalarValue;
 use pgrx::AnyNumeric;
 use pgrx::datum::FromDatum;
@@ -352,6 +352,7 @@ unsafe fn decode_to_batch(
     sum_cols: &[String],
     predicates: &[super::zonemap::ZonePredicate],
     text_predicates: &[super::zonemap::TextPredicate],
+    in_predicates: &[super::zonemap::InListPredicate],
     skip: bool,
 ) -> Result<RecordBatch, String> {
     let mut proj: Vec<usize> = Vec::new();
@@ -374,6 +375,13 @@ unsafe fn decode_to_batch(
             proj.push(t.col);
         }
     }
+    // M161 — the IN-list column MUST be decoded so the DataFusion Filter can re-check `col IN (…)` (D3 final authority).
+    // IN-list never drives zone-map skipping (only `predicates` is passed to `decode_columns` below).
+    for ip in in_predicates {
+        if !proj.contains(&ip.col) {
+            proj.push(ip.col);
+        }
+    }
     if proj.is_empty() {
         proj.push(0); // count(*) needs a column to establish the row count
     }
@@ -393,6 +401,7 @@ unsafe fn build_filter_expr(
     rel: pg_sys::Relation,
     predicates: &[super::zonemap::ZonePredicate],
     text_predicates: &[super::zonemap::TextPredicate],
+    in_predicates: &[super::zonemap::InListPredicate],
 ) -> Option<Expr> {
     use super::columnar_codec::MinMaxKind;
     use super::zonemap::{TextOp, ZoneOp};
@@ -458,6 +467,34 @@ unsafe fn build_filter_expr(
             None => e,
         });
     }
+    // M161 — integer IN-list: `col IN (c0, c1, …)` over the decoded integer column. The extractor admitted ONLY the
+    // integer class (I2/I4/I8) with no NULL element and `=`/useOr semantics, so `col.in_list(lits, false)` is exactly
+    // an OR of `=` — DataFusion's final authority, byte-identical to PG's ScalarArrayOpExpr. Literals are typed to the
+    // column's MinMaxKind so the Filter matches the Arrow column type built in `build_arrow` (a bare Int64 lit would
+    // type-mismatch an Int32 column).
+    for ip in in_predicates {
+        if ip.col >= natts || ip.consts.is_empty() {
+            continue; // fail-safe: unknown column / empty list → do not build a filter term on it
+        }
+        let att = super::tupdesc_attr(tupdesc, ip.col);
+        let name = CStr::from_ptr((*att).attname.data.as_ptr()).to_string_lossy().into_owned();
+        let c = col(name.as_str());
+        let kind = super::columnar::minmax_kind_of((*att).atttypid.to_u32());
+        let lits: Vec<Expr> = ip
+            .consts
+            .iter()
+            .map(|&v| match kind {
+                MinMaxKind::I2 => lit(v as i16),
+                MinMaxKind::I4 => lit(v as i32),
+                _ => lit(v), // I8 (extractor admits only the integer class)
+            })
+            .collect();
+        let e = c.in_list(lits, false);
+        acc = Some(match acc {
+            Some(prev) => prev.and(e),
+            None => e,
+        });
+    }
     acc
 }
 
@@ -471,12 +508,13 @@ pub(super) unsafe fn run_columnar_aggs(
     aggs: &[AggSpec],
     predicates: &[super::zonemap::ZonePredicate],
     text_predicates: &[super::zonemap::TextPredicate],
+    in_predicates: &[super::zonemap::InListPredicate],
     skip: bool,
 ) -> Result<Vec<(pg_sys::Datum, bool)>, String> {
     let agg_cols: Vec<String> =
         aggs.iter().filter_map(|a| a.col_name().map(str::to_string)).collect();
-    let batch = decode_to_batch(rel, &agg_cols, predicates, text_predicates, skip)?;
-    let filter = build_filter_expr(rel, predicates, text_predicates);
+    let batch = decode_to_batch(rel, &agg_cols, predicates, text_predicates, in_predicates, skip)?;
+    let filter = build_filter_expr(rel, predicates, text_predicates, in_predicates);
     run_aggs_on_batch(batch, aggs, filter)
 }
 
@@ -551,6 +589,17 @@ where
     out.map_err(|e| format!("df_executor: DataFusion: {e}"))
 }
 
+/// M157/M161 — exec-side decoding of one expression group key (from the 3rd `custom_private` channel). `func`:
+/// 0=DateTrunc (out timestamp), 1=ExtractField (out numeric — minute/hour), 2=IntAddConst (`base ± delta`, out int).
+/// `base_name` is the base column.
+pub(super) struct GroupExprExec {
+    pub base_name: String,
+    pub func: i32,
+    pub unit: String,
+    pub delta: i64,
+    pub out_typoid: u32,
+}
+
 /// Grouped columnar aggregate (M100 GROUP BY pushdown). Decode the group + sum columns, run
 /// `.aggregate(group_exprs, agg_exprs)`, and materialize the multi-row result in the PG output-target order given by
 /// `layout` (ADR-2): each output slot is either group key `idx` (batch col `idx`) or agg `idx` (batch col
@@ -561,20 +610,21 @@ where
 pub(super) unsafe fn run_columnar_grouped_aggs(
     rel: pg_sys::Relation,
     group_cols: &[(String, u32)],
-    group_key_exprs_spec: &[(String, String, u32)], // M157 — (base_col_name, unit, out_typoid) for date_trunc keys
+    group_key_exprs_spec: &[GroupExprExec], // M157/M161 — expression group keys (date_trunc / extract / int±k / const)
     aggs: &[AggSpec],
     layout: &[(u8, usize)],
     predicates: &[super::zonemap::ZonePredicate],
     text_predicates: &[super::zonemap::TextPredicate],
+    in_predicates: &[super::zonemap::InListPredicate],
     skip: bool,
 ) -> Result<Vec<Vec<(pg_sys::Datum, bool)>>, String> {
-    use datafusion::functions::datetime::expr_fn::date_trunc;
+    use datafusion::functions::datetime::expr_fn::{date_part, date_trunc};
     // Project bare group columns ∪ group-expr base columns ∪ agg columns (count(*) needs no column; decode_to_batch
     // also projects predicate cols and guarantees ≥1).
     let mut proj_cols: Vec<String> = group_cols.iter().map(|(n, _)| n.clone()).collect();
-    for (base, _, _) in group_key_exprs_spec {
-        if !proj_cols.iter().any(|p| p == base) {
-            proj_cols.push(base.clone());
+    for g in group_key_exprs_spec {
+        if !g.base_name.is_empty() && !proj_cols.iter().any(|p| p == &g.base_name) {
+            proj_cols.push(g.base_name.clone());
         }
     }
     for a in aggs {
@@ -584,17 +634,31 @@ pub(super) unsafe fn run_columnar_grouped_aggs(
             }
         }
     }
-    let batch = decode_to_batch(rel, &proj_cols, predicates, text_predicates, skip)?;
-    let filter = build_filter_expr(rel, predicates, text_predicates);
+    let batch = decode_to_batch(rel, &proj_cols, predicates, text_predicates, in_predicates, skip)?;
+    let filter = build_filter_expr(rel, predicates, text_predicates, in_predicates);
 
-    // Grouping keys: bare columns FIRST, then the date_trunc exprs (M157). The output batch columns follow this
-    // order: [bare_0..bare_{ncols-1}, expr_0..expr_{nexpr-1}, agg columns…]. `date_trunc(part, ts)` matches PG for a
-    // `timestamp` (tz-independent) input; timestamptz is declined at admission (ADR-2).
+    // Grouping keys: bare columns FIRST, then the expression exprs (M157/M161). The output batch columns follow this
+    // order: [bare_0..bare_{ncols-1}, expr_0..expr_{nexpr-1}, agg columns…].
+    //   func 0 DateTrunc    — date_trunc(unit, ts) (tz-independent timestamp; timestamptz declined at admit, ADR-2).
+    //   func 1 ExtractField — cast(date_part(unit, ts) → Int64): minute/hour are epoch-invariant + integer-valued;
+    //                          grouped as Int64, materialized as PG numeric (AnyNumeric) so it equals extract()'s type.
+    //   func 2 IntAddConst  — cast(col → Int64) + delta: the i64 compute is exact (int2/int4 column ± int const; an
+    //                          int8 result is declined at admit), so grouping is exact; the result-type range-check
+    //                          happens at materialize (out_typoid = opresulttype, int2/int4 → reproduces PG 22003).
     let ncols = group_cols.len();
     let ngroup = ncols + group_key_exprs_spec.len();
     let mut group_exprs: Vec<Expr> = group_cols.iter().map(|(n, _)| col(n.as_str())).collect();
-    for (base, unit, _) in group_key_exprs_spec {
-        group_exprs.push(date_trunc(lit(ScalarValue::Utf8(Some(unit.clone()))), col(base.as_str())));
+    for g in group_key_exprs_spec {
+        let e = match g.func {
+            0 => date_trunc(lit(ScalarValue::Utf8(Some(g.unit.clone()))), col(g.base_name.as_str())),
+            1 => cast(
+                date_part(lit(ScalarValue::Utf8(Some(g.unit.clone()))), col(g.base_name.as_str())),
+                DataType::Int64,
+            ),
+            2 => cast(col(g.base_name.as_str()), DataType::Int64) + lit(g.delta),
+            other => return Err(format!("df_executor: bad group-expr func {other}")),
+        };
+        group_exprs.push(e);
     }
     let mut agg_exprs = Vec::with_capacity(aggs.len());
     // Per-agg batch-column offset (relative to the first agg column) — a multi-column spec (avg-int) shifts the rest.
@@ -627,10 +691,10 @@ pub(super) unsafe fn run_columnar_grouped_aggs(
                         arrow_value_to_datum(b.column(idx), r, typoid)?
                     }
                     2 => {
-                        // M157 — date_trunc group-expr — batch col `ncols + idx`, materialized as its out_typoid.
-                        let (_, _, out_typoid) =
+                        // M157/M161 — expression group-expr — batch col `ncols + idx`, materialized per variant.
+                        let g =
                             group_key_exprs_spec.get(idx).ok_or("df_executor: layout group-expr idx oob")?;
-                        arrow_value_to_datum(b.column(ncols + idx), r, *out_typoid)?
+                        group_expr_cell(b.column(ncols + idx), r, g)?
                     }
                     _ => {
                         let a = aggs.get(idx).ok_or("df_executor: layout agg idx oob")?;
@@ -652,7 +716,7 @@ pub(super) unsafe fn run_columnar_grouped_aggs(
             // fail-safe (council-rust-pgrx LOW): `.get()` not `[idx]` — a corrupt layout drops the sort key rather
             // than panicking across the C boundary (matches the materialization loop's `.get(idx).ok_or()?` pattern).
             0 => group_cols.get(idx).map(|g| (slot, g.1)),
-            2 => group_key_exprs_spec.get(idx).map(|g| (slot, g.2)), // M157 — date_trunc key out_typoid (1114)
+            2 => group_key_exprs_spec.get(idx).map(|g| (slot, g.out_typoid)), // M157/M161 — expr key out_typoid
             _ => None,
         })
         .collect();
@@ -685,6 +749,7 @@ pub(super) unsafe fn run_columnar_topk(
     k: usize,
     predicates: &[super::zonemap::ZonePredicate],
     text_predicates: &[super::zonemap::TextPredicate],
+    in_predicates: &[super::zonemap::InListPredicate],
     skip: bool,
 ) -> Result<Vec<Vec<(pg_sys::Datum, bool)>>, String> {
     // Project all output columns ∪ the sort key (decode_to_batch also folds in the predicate columns + guarantees ≥1).
@@ -692,8 +757,8 @@ pub(super) unsafe fn run_columnar_topk(
     if !proj_names.iter().any(|n| n == sort_key) {
         proj_names.push(sort_key.to_string());
     }
-    let batch = decode_to_batch(rel, &proj_names, predicates, text_predicates, skip)?;
-    let filter = build_filter_expr(rel, predicates, text_predicates);
+    let batch = decode_to_batch(rel, &proj_names, predicates, text_predicates, in_predicates, skip)?;
+    let filter = build_filter_expr(rel, predicates, text_predicates, in_predicates);
     let key = sort_key.to_string();
     // filter (WHERE, the final authority — D3) → sort by the key (PG order for numeric/temporal/det-collation text) →
     // limit k (DataFusion's TopK: a bounded heap, never materializing all N as tuples).
@@ -911,12 +976,57 @@ fn arrow_value_to_datum(
     Ok((d.ok_or("df_executor: group key datum")?, false))
 }
 
+/// M161 — materialize one EXPRESSION group-key cell (`GroupExprExec`). A DateTrunc array is already the native output
+/// type → delegate to `arrow_value_to_datum`. ExtractField/IntAddConst compute WIDENED to Int64 in DataFusion,
+/// so their arrow column is `Int64` and needs a variant-specific reverse: extract → PG `numeric` (AnyNumeric, scale 0 —
+/// minute/hour are integer-valued); int±k → the base int type with a RANGE CHECK that fails when PG would raise 22003.
+fn group_expr_cell(
+    arr: &dyn Array,
+    row: usize,
+    g: &GroupExprExec,
+) -> Result<(pg_sys::Datum, bool), String> {
+    if arr.is_null(row) {
+        return Ok((pg_sys::Datum::from(0usize), true));
+    }
+    match g.func {
+        1 => {
+            // ExtractField → numeric: the Int64 field value → AnyNumeric (exact, scale 0) = PG extract()'s numeric.
+            let v = arr
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .ok_or("df_executor: extract group key not Int64")?
+                .value(row);
+            Ok((AnyNumeric::from(v).into_datum().ok_or("df_executor: extract numeric datum")?, false))
+        }
+        2 => {
+            // IntAddConst → the operator RESULT type (int2/int4 only; int8 result declined at admit) with a range
+            // check: PG raises 22003 when the result overflows the result type, and our widened i64 value that does not
+            // fit reproduces that failure (both plans error on the same overflowing datum). The i64 compute itself is
+            // always exact here (int2/int4 column ± int const), so a value in range is byte-identical to PG's.
+            let v = arr
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .ok_or("df_executor: int-arith group key not Int64")?
+                .value(row);
+            let d = match g.out_typoid {
+                21 => i16::try_from(v).map_err(|_| "smallint out of range".to_string())?.into_datum(),
+                23 => i32::try_from(v).map_err(|_| "integer out of range".to_string())?.into_datum(),
+                other => return Err(format!("df_executor: int-arith bad out typoid {other}")),
+            };
+            Ok((d.ok_or("df_executor: int-arith datum")?, false))
+        }
+        // DateTrunc (func 0) — the Timestamp arrow array already IS the native output type.
+        _ => arrow_value_to_datum(arr, row, g.out_typoid),
+    }
+}
+
 /// Run `count(*)`, `sum(<num_col>)` over the columnar table and format `count=N;sum=X` (Phase A/B test driver — the
 /// planner-integrated automatic path is Phase C `columnar_agg.rs`).
 unsafe fn run_columnar_agg(rel: pg_sys::Relation, num_col: &str) -> Result<String, String> {
     let r = run_columnar_aggs(
         rel,
         &[AggSpec::CountStar, AggSpec::SumFloat8(num_col.to_string())],
+        &[],
         &[],
         &[],
         false,

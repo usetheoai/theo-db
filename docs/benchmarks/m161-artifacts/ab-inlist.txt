@@ -1,0 +1,64 @@
+Timing is off.
+Pager usage is off.
+SET
+SET
+=== EXPLAIN q40 (IN-list) with columnar ON — expect Custom Scan (theodb_columnar_agg) ===
+            QUERY PLAN             
+-----------------------------------
+ Custom Scan (theodb_columnar_agg)
+(1 row)
+
+=== A/B q40 grouped result set (symmetric EXCEPT; expect diverged=0) ===
+SET
+psql:/tmp/m161_ab.sql:17: NOTICE:  table "a40" does not exist, skipping
+DROP TABLE
+SELECT 785
+SET
+psql:/tmp/m161_ab.sql:24: NOTICE:  table "b40" does not exist, skipping
+DROP TABLE
+SELECT 785
+         k         | count 
+-------------------+-------
+ q40_rows_columnar |   785
+ q40_rows_heap     |   785
+ q40_diverged      |     0
+(3 rows)
+
+=== EXPLAIN q40 with IN (NULL, 6) — expect NO Custom Scan (declines to native plan) ===
+SET
+                                                                                                                  QUERY PLAN                                                                                                                   
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ GroupAggregate
+   Group Key: urlhash, eventdate
+   ->  Sort
+         Sort Key: urlhash, eventdate
+         ->  Seq Scan on hits
+               Filter: ((eventdate >= '2013-07-01'::date) AND (eventdate <= '2013-07-31'::date) AND (traficsourceid = ANY ('{NULL,6}'::integer[])) AND (counterid = 62) AND (isrefresh = 0) AND (refererhash = '3594120000172545465'::bigint))
+(6 rows)
+
+=== A/B scalar count with IN-list (expect diverged=0) ===
+SET
+  c_on  
+--------
+ 700944
+(1 row)
+
+SET
+ c_off  
+--------
+ 700944
+(1 row)
+
+=== A/B count AdvEngineID IN (2,13,40) (expect diverged=0) ===
+SET
+ c_on 
+------
+ 4562
+(1 row)
+
+SET
+ c_off 
+-------
+  4562
+(1 row)
+

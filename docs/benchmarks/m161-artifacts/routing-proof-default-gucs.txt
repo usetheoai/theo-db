@@ -1,0 +1,31 @@
+# Routing proof — real ClickBench queries as-written, DEFAULT GUCs (only enable_columnar_agg=on)
+
+## q40
+                  QUERY PLAN                   
+-----------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: (count(*)) DESC
+         ->  Custom Scan (theodb_columnar_agg)
+(4 rows)
+
+
+## q35
+                  QUERY PLAN                   
+-----------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: (count(*)) DESC
+         ->  Custom Scan (theodb_columnar_agg)
+(4 rows)
+
+
+## q18
+                  QUERY PLAN                   
+-----------------------------------------------
+ Limit
+   ->  Sort
+         Sort Key: (count(*)) DESC
+         ->  Custom Scan (theodb_columnar_agg)
+(4 rows)
+

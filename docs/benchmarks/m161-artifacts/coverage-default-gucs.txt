@@ -1,0 +1,45 @@
+1	PUSHDOWN	Custom Scan (theodb_columnar_agg)
+2	PUSHDOWN	Custom Scan (theodb_columnar_agg)
+3	PUSHDOWN	Custom Scan (theodb_columnar_agg)
+4	PUSHDOWN	Custom Scan (theodb_columnar_agg)
+5	PUSHDOWN	Custom Scan (theodb_columnar_agg)
+6	PUSHDOWN	Custom Scan (theodb_columnar_agg)
+7	PUSHDOWN	Custom Scan (theodb_columnar_agg)
+8	PUSHDOWN	Sort
+9	PUSHDOWN	Limit
+10	PUSHDOWN	Limit
+11	PUSHDOWN	Limit
+12	PUSHDOWN	Limit
+13	PUSHDOWN	Limit
+14	PUSHDOWN	Limit
+15	PUSHDOWN	Limit
+16	PUSHDOWN	Limit
+17	PUSHDOWN	Limit
+18	native	Limit
+19	PUSHDOWN	Limit
+20	PUSHDOWN	Custom Scan (theodb_columnar_project) on hits
+21	PUSHDOWN	Custom Scan (theodb_columnar_agg)
+22	native	Limit
+23	native	Limit
+24	PUSHDOWN	Limit
+25	PUSHDOWN	Limit
+26	PUSHDOWN	Limit
+27	PUSHDOWN	Limit
+28	native	Limit
+29	native	Limit
+30	native	Aggregate
+31	PUSHDOWN	Limit
+32	PUSHDOWN	Limit
+33	PUSHDOWN	Limit
+34	PUSHDOWN	Limit
+35	native	Limit
+36	PUSHDOWN	Limit
+37	PUSHDOWN	Limit
+38	PUSHDOWN	Limit
+39	PUSHDOWN	Limit
+40	native	Limit
+41	PUSHDOWN	Limit
+42	PUSHDOWN	Limit
+43	PUSHDOWN	Limit
+==============================
+PUSHDOWN=35 / 43

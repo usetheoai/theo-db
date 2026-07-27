@@ -64,6 +64,19 @@ pub(crate) struct TextPredicate {
     pub needle: String,
 }
 
+/// A pushable INTEGER `IN`-list predicate (M161): `column[col] IN (c0, c1, …)` where every element is a `Const`
+/// of the INTEGER class (int2/int4/int8) — the safest routable shape (a disjunction of exact equalities; the same
+/// safety class as the shipped `=` zone predicate). Rides ONLY to the DataFusion `Filter` (`build_filter_expr` →
+/// `col.in_list(lits)`); it never prunes chunk groups (a value-set skip is out of scope — the executor filter is the
+/// authority, D3). Fail-closed upstream: `IN (NULL, …)` (3-valued logic), a non-`Const` element, `NOT IN`, or a
+/// non-integer element all DECLINE the swap. The typed literal is derived from the column's `MinMaxKind` at
+/// `build_filter_expr` time (same as `ZonePredicate`), so only `(col, consts)` need to be carried/serialized.
+#[derive(Clone, Debug)]
+pub(crate) struct InListPredicate {
+    pub col: usize,
+    pub consts: Vec<i64>,
+}
+
 /// Can a chunk group whose zone-map is `(has_minmax, min_bits, max_bits, kind)` possibly contain a row matching
 /// `pred`? Returns `true` = "must scan" UNLESS the zone-map PROVES no row can match (then `false` = safe to skip).
 /// FAIL-SAFE (never fail-wrong): `has_minmax == false`, `kind == None`, or a NaN in the compared floats → `true`.
