@@ -681,6 +681,15 @@ unsafe fn classify_target_node(
             admit_trace("group_key_type_unsupported"); // M152
             return None; // unsupported key type (numeric, etc.) → native plan
         }
+        // M163 (found by the type-coverage A/B harness): a FLOAT group key diverges. DataFusion groups by IEEE
+        // byte-value (−0.0 ≠ +0.0; distinct NaN bit-patterns) while PG's `float8eq` groups −0.0 WITH +0.0 and treats
+        // all NaN as equal — so `GROUP BY float` splits the −0.0/+0.0 rows into separate groups where PG merges them
+        // (measured diverged=2 on the −0.0 edge). Decline float group keys to the native plan — mirrors the M154
+        // count(DISTINCT float) decline (same IEEE-vs-float8eq root cause), now for grouping.
+        if matches!((*var).vartype, pg_sys::FLOAT4OID | pg_sys::FLOAT8OID) {
+            admit_trace("group_key_float_ieee_semantics"); // M163
+            return None;
+        }
         // M153: DataFusion's byte-keyed hash groups by byte-equality; PG groups by the key's collation equality.
         // They coincide only under a DETERMINISTIC collation (deterministic ⟺ equality is byte-wise). A
         // non-deterministic collation (ICU case/accent-insensitive) would group byte-different-but-collation-equal

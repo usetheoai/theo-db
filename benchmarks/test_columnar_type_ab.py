@@ -20,7 +20,7 @@ def test_edge_catalog_has_all_routed_types():
     present = {v["pg"] for v in h.EDGE_CATALOG.values()}
     assert h.ROUTED_TYPES.issubset(present)
     assert 32767 in h.EDGE_CATALOG["c2"]["edges"]          # the M161 BLOCKER trigger
-    assert "-0.0" in h.EDGE_CATALOG["f8"]["edges"]          # M154 IEEE
+    assert "'-0.0'" in h.EDGE_CATALOG["f8"]["edges"]          # M154 IEEE
     assert "'NaN'" in h.EDGE_CATALOG["f8"]["edges"]
 
 
@@ -36,6 +36,14 @@ def test_plan_routes_detects_custom_scan():
     assert h.plan_routes(["GroupAggregate", "  Group Key: c2", "  ->  Seq Scan on hits"]) is False
 
 
+def test_plan_routes_node_specific_rejects_wrong_node():
+    # a columnar PROJECT child under a query expecting the AGG node must NOT count as routed-to-agg
+    plan = ["GroupAggregate", "  ->  Custom Scan (theodb_columnar_project) on hits"]
+    assert h.plan_routes(plan, "theodb_columnar_agg") is False   # not the agg node
+    assert h.plan_routes(plan, "theodb_columnar_project") is True
+    assert h.plan_routes(["Custom Scan (theodb_columnar_agg)"], "theodb_columnar_agg") is True
+
+
 def test_off_sql_substitutes_hits_word_boundary():
     assert h._off_sql("SELECT count(*) FROM hits") == "SELECT count(*) FROM hits_heap"
     # must not double-substitute an already-heap reference
@@ -46,13 +54,34 @@ def test_off_sql_substitutes_hits_word_boundary():
 
 def test_case_matrix_has_route_and_decline_expectations():
     cases = h.build_cases()
-    kinds = {expect for _, _, expect in cases}
+    kinds = {expect for _, _, expect, _ in cases}
     assert "route" in kinds and "decline" in kinds
-    names = {n for n, _, _ in cases}
+    names = {n for n, _, _, _ in cases}
     # the M161 BLOCKER edge + the temporal-gate-leak decline must both be exercised
     assert "intpk_i2" in names          # int2+5 @ 32767 -> int4 (the BLOCKER shape)
     assert "date_plus" in names         # date+1 must decline (the HIGH gate leak)
     assert "intpk_i8_result" in names   # int8 result must decline (fail-closed)
+    assert "group_f8" in names          # M163 found: float GROUP BY diverges -> must decline
+
+
+def test_every_routed_type_appears_in_a_case():
+    # case-matrix rot-guard (council-benchmark MEDIUM): the catalog guard checks the dict; this checks the actual case
+    # matrix touches every routed type via a column of that type, so a type cannot be 'covered' with zero cases.
+    cases = h.build_cases()
+    all_sql = " ".join(sql for _, sql, _, _ in cases)
+    col_by_type = {spec["pg"]: name for name, spec in h.EDGE_CATALOG.items()}
+    for pg_type in h.ROUTED_TYPES:
+        col = col_by_type[pg_type]
+        # the column (or an expression on it) must appear in at least one case
+        assert col in all_sql or f"extract(" in all_sql and pg_type in ("timestamp",), \
+            f"routed type {pg_type} (col {col}) has no case in build_cases()"
+
+
+def test_route_cases_pin_a_specific_node():
+    # every route case must name the specific columnar node (not None), so 'routed' means the tested path ran
+    for name, _sql, expect, node in h.build_cases():
+        if expect == "route":
+            assert node and node.startswith("theodb_columnar"), f"route case {name} lacks a specific expect_node"
 
 
 # ---------------- Tier 2: live (needs theodb_columnar) ----------------------------------------------------------------
@@ -87,8 +116,9 @@ def test_setup_loads_equal_nonzero_rowcount(live):
 
 
 def test_positive_control_catches_seeded_divergence(live):
-    # the oracle self-test: a deliberately-divergent pair MUST report diverged>0
-    assert h.positive_control(live) > 0
+    # the oracle self-test, THROUGH ab_check: a seeded divergence MUST come back status='diverged' (diverged>0)
+    pc = h.positive_control(live)
+    assert pc["status"] == "diverged" and pc["diverged"] > 0
 
 
 def test_identical_query_is_diverged_zero(live):
@@ -107,8 +137,8 @@ def test_declined_query_is_not_a_false_divergence(live):
 def test_full_matrix_holds_the_m161_contract(live):
     # every routed case diverged=0, every decline case declined — the harness would catch the M161 out_typoid bug
     failures = []
-    for name, sql, expect in h.build_cases():
-        r = h.ab_check(live, sql)
+    for name, sql, expect, node in h.build_cases():
+        r = h.ab_check(live, sql, expect_node=node)
         ok = (expect == "route" and r["status"] == "ok") or (expect == "decline" and r["status"] == "declined")
         if not ok:
             failures.append((name, expect, r["status"], r.get("diverged")))
