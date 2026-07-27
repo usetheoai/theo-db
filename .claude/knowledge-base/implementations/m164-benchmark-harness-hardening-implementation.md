@@ -29,7 +29,7 @@ unit-test with no DB and no real box:
 
 ## Tests
 
-`benchmarks/test_m164_harness_guards.py` — **13 tests green** (12 pure-logic + 1 integration). TDD RED→GREEN honored:
+`benchmarks/test_m164_harness_guards.py` — **20 tests green** (18 pure-logic + 2 integration; started at 13, +7 added in the review-fix pass for the HIGH/MEDIUM regressions). TDD RED→GREEN honored:
 the 12 pure tests were written first and failed with AttributeError (helpers absent) before the GREEN implementation.
 
 ## Honest notes
@@ -37,7 +37,7 @@ the 12 pure tests were written first and failed with AttributeError (helpers abs
 - **Ruff:** my delta introduces **zero** new violations. The file carries 4 pre-existing `E702` (the harness's
   established `cur.execute(...); rc = ...` compact idiom); `benchmarks/` is **outside the CI ruff scope** (CI runs
   `ruff check theodb_bench tests`), so these were never gated and are left untouched (out of M164 scope, no restyle churn).
-- **Sizing constants** (`EST_TSV_BYTES_PER_ROW=745`, `EST_INDB_BYTES_PER_ROW=800`) are advisory estimates derived from
+- **Sizing constants** (`EST_SAMPLE=800` + `EST_HEAP=1000` + `EST_COLUMNAR=150` → `EST_DISK_BYTES_PER_ROW=1950` disk; `EST_RAM_BYTES_PER_ROW=1150`) are advisory estimates derived from
   the published ClickBench `hits` size ÷ row count, documented inline — the guard is a coarse safety net, not exact.
 
 ## Review fixes (council-benchmark + cross-validation → NEEDS_FIXES → addressed)
