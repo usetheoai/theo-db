@@ -157,8 +157,16 @@ jobs:
           # PGPORT is resolved below and exported for every later step via $GITHUB_ENV.
           docker rm -f theo-db-ci 2>/dev/null || true
           # host-gateway lets the in-container theodb.embed() reach the host embedding server (DoD-3 test)
+          # M134/#117 fecharam a classe de SSRF em ai._chat: o guard recusa endpoints que resolvem
+          # para loopback/privado/link-local. Estas suites usam um STUB OFFLINE no host
+          # (host.docker.internal / 127.0.0.1) justamente para serem deterministicas e nao chamar API
+          # externa — entao o guard as bloqueia, com 20 de 33 testes falhando. A saida e o escape hatch
+          # que o proprio erro instrui: `theodb.egress_allowlist`, um GUC Suset (operator-only, nunca
+          # settable pelo caller). A CI e o operador deste cluster de teste. O guard permanece ativo para
+          # todo o resto, e a distribuicao continua com allowlist VAZIO — isto nao afrouxa producao.
           docker run -d --name theo-db-ci --add-host=host.docker.internal:host-gateway \
-            -e POSTGRES_PASSWORD=postgres -p 5432 theo-db:ci
+            -e POSTGRES_PASSWORD=postgres -p 5432 theo-db:ci \
+            -c theodb.egress_allowlist=host.docker.internal,127.0.0.1
           for i in $(seq 1 30); do
             [ "$(docker inspect -f '{{.State.Health.Status}}' theo-db-ci)" = healthy ] && break
             sleep 2
@@ -402,8 +410,16 @@ jobs:
         run: |
           # Ephemeral host port — rationale in the image-and-bench "Start TheoDB" step.
           docker rm -f theo-db-ai 2>/dev/null || true
+          # M134/#117 fecharam a classe de SSRF em ai._chat: o guard recusa endpoints que resolvem
+          # para loopback/privado/link-local. Estas suites usam um STUB OFFLINE no host
+          # (host.docker.internal / 127.0.0.1) justamente para serem deterministicas e nao chamar API
+          # externa — entao o guard as bloqueia, com 20 de 33 testes falhando. A saida e o escape hatch
+          # que o proprio erro instrui: `theodb.egress_allowlist`, um GUC Suset (operator-only, nunca
+          # settable pelo caller). A CI e o operador deste cluster de teste. O guard permanece ativo para
+          # todo o resto, e a distribuicao continua com allowlist VAZIO — isto nao afrouxa producao.
           docker run -d --name theo-db-ai --add-host=host.docker.internal:host-gateway \
-            -e POSTGRES_PASSWORD=postgres -p 5432 theo-db:dev
+            -e POSTGRES_PASSWORD=postgres -p 5432 theo-db:dev \
+            -c theodb.egress_allowlist=host.docker.internal,127.0.0.1
           for i in $(seq 1 30); do
             [ "$(docker inspect -f '{{.State.Health.Status}}' theo-db-ai)" = healthy ] && break
             sleep 2
@@ -528,8 +544,16 @@ jobs:
         run: |
           # Ephemeral host port — rationale in the image-and-bench "Start TheoDB" step.
           docker rm -f theo-db-nl 2>/dev/null || true
+          # M134/#117 fecharam a classe de SSRF em ai._chat: o guard recusa endpoints que resolvem
+          # para loopback/privado/link-local. Estas suites usam um STUB OFFLINE no host
+          # (host.docker.internal / 127.0.0.1) justamente para serem deterministicas e nao chamar API
+          # externa — entao o guard as bloqueia, com 20 de 33 testes falhando. A saida e o escape hatch
+          # que o proprio erro instrui: `theodb.egress_allowlist`, um GUC Suset (operator-only, nunca
+          # settable pelo caller). A CI e o operador deste cluster de teste. O guard permanece ativo para
+          # todo o resto, e a distribuicao continua com allowlist VAZIO — isto nao afrouxa producao.
           docker run -d --name theo-db-nl --add-host=host.docker.internal:host-gateway \
-            -e POSTGRES_PASSWORD=postgres -p 5432 theo-db:dev
+            -e POSTGRES_PASSWORD=postgres -p 5432 theo-db:dev \
+            -c theodb.egress_allowlist=host.docker.internal,127.0.0.1
           for i in $(seq 1 30); do
             [ "$(docker inspect -f '{{.State.Health.Status}}' theo-db-nl)" = healthy ] && break
             sleep 2
