@@ -205,7 +205,7 @@ def run(args) -> dict:
     cur.execute("DROP TABLE IF EXISTS hits CASCADE")
     cur.execute("DROP TABLE IF EXISTS hits_heap CASCADE")
     cur.execute(create_sql)
-    cur.execute(create_sql.replace("USING theodb_columnar", "").replace("hits", "hits_heap"))
+    cur.execute(create_sql.replace("USING theodb_columnar", "").replace("CREATE TABLE hits", "CREATE UNLOGGED TABLE hits").replace("hits", "hits_heap"))
     # theodb_columnar bulk-load path is INSERT-SELECT (as the columnar_*_ab.py benchmarks do), NOT direct COPY —
     # COPY FROM STDIN into the columnar TAM hangs on the 105-col wide row (recorded honestly; see the doc). So:
     # COPY the sample into the heap copy (fast), then INSERT INTO hits SELECT * FROM hits_heap (columnar writer).

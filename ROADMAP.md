@@ -2908,7 +2908,7 @@ bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan s�
 
 ---
 
-## M161 — [ ] Cobertura de roteamento de expressão ao DataFusion (as queries não-cobertas do ClickBench) — cobertura
+## M161 — [x] Cobertura de roteamento de expressão ao DataFusion (as queries não-cobertas do ClickBench) — cobertura
 
 > **Layer B — o lever de COBERTURA das 11 não-cobertas** (deep-dive pós-M159, council-research-adr). Added 2026-07-26 (`/roadmap-feature columnar-improvement-layers`). A limitação é o NOSSO admit/serialização, não o DataFusion (que já computa tudo — `run_columnar_grouped_aggs` já passa `Vec<Expr>` ao `.aggregate()`). HONESTIDADE OBRIGATÓRIA: os blockers COMPÕEM (lição M152) → rotear uma classe destrava **~+3-5 queries, NÃO +11**; multi-key GROUP BY **já roteia** (REFUTADO); regexp é honest-negative (RE2≠POSIX).
 
