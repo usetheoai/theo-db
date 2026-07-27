@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- M164: **three false-green/infra guards** on the ClickBench harness (`benchmarks/run_m128_clickbench.py`), closing retro items B+C of the M160-M162 session (the mechanizable noise that cost hours). (B1) `_ensure_sample` now counts the cached sample's rows (`wc -l`) and **re-materializes on a stale count** — a 1M cache can no longer be served as "100M" (the exact M162 false-`DONE`), tolerating the systematic-sampling off-by-one. (B2) the A/B verdict now **classifies each query by whether the ON arm actually routed** (`classify_ab` → `routed_identical` / `declined_trivial` / `diverged` / `n/a`): a `--agg` run whose queries all decline is flagged `no_pushdown_exercised` instead of passing as a trivial `diverged=0` (the M162 SORTED/declined false-green — byte-identity over native-on-columnar proves the storage round-trip, not the pushdown). (C) a **pre-flight sizing** guard `preflight_sizing` **refuses** a load whose on-disk sample would not fit a safe fraction of free disk, and **warns (never blocks)** when the in-DB working set exceeds RAM headroom — larger-than-RAM is an intentional TheoDB regime (the M162 100M run was deliberately larger-than-RAM; the 15 GB box OOMed 2× with no guard). All three are pure, env-injected helpers unit-tested with no DB (`benchmarks/test_m164_harness_guards.py`, 12 tests green).
 
 ### Changed
 

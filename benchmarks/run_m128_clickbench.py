@@ -18,6 +18,7 @@ import math
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -75,6 +76,60 @@ def _load_queries():
 # derivar o passo da amostragem sistemática — nunca para afirmar que rodamos a escala completa.
 HITS_TOTAL_ROWS = 99_997_497
 
+# --- M164 harness guards (pure, env-injected → unit-testable with no DB and no real box; plan ADR-1) ------------------
+
+def sample_is_fresh(rows_in_file: int, n_rows: int, tol: int = 1) -> bool:
+    """B1 guard: True iff the cached sample's row count matches the requested `n_rows` within the systematic
+    off-by-one tolerance. The systematic sampler (`awk 'NR % k == 0' | head -n {n}`) can admit up to `tol` extra rows
+    before the head cap, so `rows_in_file ∈ [n_rows, n_rows+tol]` is fresh. Anything smaller (the M162 false-100M: a
+    1M cache served as 100M) or materially larger is stale and MUST be re-materialized."""
+    if rows_in_file <= 0 or n_rows <= 0:
+        return False
+    return n_rows <= rows_in_file <= n_rows + tol
+
+
+def classify_ab(columnar_customscan, result_ab_identical) -> str:
+    """B2 guard: classify one query's A/B outcome by whether the ON arm actually routed —
+    - 'diverged'         : results differ → a real correctness bug (routed or not);
+    - 'routed_identical' : ON routed AND byte-identical → a MEANINGFUL pushdown-correctness pass;
+    - 'declined_trivial' : byte-identical but the ON arm DECLINED (ran native over columnar storage) → proves the
+                           storage round-trip, NOT the pushdown (the M162 SORTED/`diverged=0` false-green);
+    - 'n/a'              : routing or identity unknown (query errored / not measured)."""
+    if result_ab_identical is False:
+        return "diverged"
+    if columnar_customscan is None or result_ab_identical is None:
+        return "n/a"
+    return "routed_identical" if columnar_customscan else "declined_trivial"
+
+
+# Sizing estimates for the pre-flight (C). Derived from the published ClickBench `hits`: ~74.5 GiB uncompressed TSV
+# ÷ 99,997,497 rows ≈ 745 B/row on disk. In-DB we load BOTH a heap copy (`hits_heap`, ≈ TSV size) and the columnar
+# `hits` (compresses, but co-resident), so a conservative working-set estimate is ~800 B/row. Advisory precision.
+EST_TSV_BYTES_PER_ROW = 745
+EST_INDB_BYTES_PER_ROW = 800
+SAFE_DISK_FRACTION = 0.8      # BLOCK if the on-disk sample would exceed this fraction of free disk
+RAM_HEADROOM_FRACTION = 0.7   # WARN (never block) if the in-DB working set exceeds this fraction of RAM
+
+
+def preflight_sizing(n_rows: int, disk_free_bytes: int, ram_bytes: int) -> dict:
+    """C guard: BLOCK a load whose on-disk sample cannot fit a safe fraction of free disk (pure waste), but only
+    WARN when the in-DB working set exceeds RAM headroom — larger-than-RAM is an INTENTIONAL TheoDB regime (plan
+    ADR-2; the M162 100M run was deliberately larger-than-RAM). Returns {block, warn, reasons, est_disk_bytes,
+    est_indb_bytes}. Env (disk/RAM) is injected so the guard is deterministically unit-testable."""
+    est_disk = int(n_rows) * EST_TSV_BYTES_PER_ROW
+    est_indb = int(n_rows) * EST_INDB_BYTES_PER_ROW
+    reasons: list[str] = []
+    block = est_disk > SAFE_DISK_FRACTION * disk_free_bytes
+    if block:
+        reasons.append(f"disk: est sample {est_disk / 2**30:.1f} GiB > {SAFE_DISK_FRACTION:.0%} of free "
+                       f"{disk_free_bytes / 2**30:.1f} GiB — refusing (would not fit)")
+    warn = est_indb > RAM_HEADROOM_FRACTION * ram_bytes
+    if warn:
+        reasons.append(f"ram: est in-DB working set {est_indb / 2**30:.1f} GiB > {RAM_HEADROOM_FRACTION:.0%} of RAM "
+                       f"{ram_bytes / 2**30:.1f} GiB — larger-than-RAM run (intentional; WARN, not blocked)")
+    return {"block": block, "warn": warn, "reasons": reasons,
+            "est_disk_bytes": est_disk, "est_indb_bytes": est_indb}
+
 
 def _ensure_sample(path: str, n_rows: int, strategy: str = "systematic") -> bool:
     """Stream hits.tsv.gz e materializa n_rows — nunca baixa os ~100 GB para disco.
@@ -92,7 +147,17 @@ def _ensure_sample(path: str, n_rows: int, strategy: str = "systematic") -> bool
       encerra cedo, este não. É o preço de não enviesar o resultado a nosso favor.
     """
     if os.path.isfile(path) and os.path.getsize(path) > 0:
-        return True
+        # M164 (B1): a non-empty cache is NOT proof it is the RIGHT size — the M162 false-100M was a 1M cache served
+        # as 100M. Count its rows and re-materialize on a stale count (systematic off-by-one tolerated).
+        try:
+            wc = subprocess.run(["wc", "-l", path], capture_output=True, text=True, timeout=600, check=True)
+            rows_in_file = int(wc.stdout.split()[0])
+        except Exception:
+            rows_in_file = -1
+        if sample_is_fresh(rows_in_file, int(n_rows)):
+            return True
+        print(f"  cache {path} has {rows_in_file} rows, need {n_rows} — re-materializing (stale-count guard, M164)",
+              flush=True)
     if strategy not in ("head", "systematic"):
         raise ValueError(f"estratégia de amostragem desconhecida: {strategy!r}")
     try:
@@ -194,6 +259,15 @@ def run(args) -> dict:
         return {**base, "status": "UNBENCHMARKED", "reason": "ClickBench create/queries SQL unavailable", "queries": None}
     sample = os.path.join(args.cache, "hits_sample.tsv")
     os.makedirs(args.cache, exist_ok=True)
+    # M164 (C): pre-flight sizing — refuse a load that cannot fit disk; warn (never block) on larger-than-RAM.
+    disk_free = shutil.disk_usage(args.cache).free
+    ram_bytes = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    sizing = preflight_sizing(args.n, disk_free, ram_bytes)
+    if sizing["block"]:
+        return {**base, "status": "UNBENCHMARKED", "reason": "pre-flight sizing refused: " + "; ".join(sizing["reasons"]),
+                "sizing": sizing, "queries": None}
+    for w in sizing["reasons"]:
+        print(f"  WARN sizing: {w}", flush=True)
     if not _ensure_sample(sample, args.n, args.sample):
         return {**base, "status": "UNBENCHMARKED", "reason": "hits dataset unavailable", "queries": None}
 
@@ -242,14 +316,25 @@ def run(args) -> dict:
     customscan = sum(1 for e in results if e.get("columnar_customscan"))
     ab_pass = sum(1 for e in results if e.get("result_ab_identical") is True)
     ab_diverged = sum(1 for e in results if e.get("result_ab_identical") is False)
+    # M164 (B2): split the A/B pass by whether the ON arm actually routed. A `--agg` run whose queries all decline is a
+    # false-green — the byte-identical verdict is trivial (native-over-columnar vs heap), proving nothing about the
+    # pushdown. `ab_routed_identical` is the MEANINGFUL count; `no_pushdown_exercised` flags the trivial run loudly.
+    ab_class = [classify_ab(e.get("columnar_customscan"), e.get("result_ab_identical")) for e in results]
+    ab_routed_identical = sum(1 for c in ab_class if c == "routed_identical")
+    ab_declined_trivial = sum(1 for c in ab_class if c == "declined_trivial")
+    no_pushdown_exercised = bool(args.agg) and ab_routed_identical == 0
     geomean = None
     if ok:
         geomean = round(math.exp(sum(math.log(max(e["hot"], 1e-6)) for e in ok) / len(ok)), 5)
+    ab_verdict = ("byte-identical (columnar==heap)" if ab_diverged == 0 else "DIVERGENCE — pushdown bug")
+    if no_pushdown_exercised:
+        ab_verdict = "TRIVIAL — --agg set but 0 queries routed (ON declined; A/B proves storage round-trip, not pushdown)"
     return {
         **base, "status": "OK", "n_queries": len(queries), "queries_ok": len(ok), "queries_errored": errored,
         "columnar_customscan_count": customscan, "hot_geomean_s": geomean,
         "result_ab": {"pass": ab_pass, "diverged": ab_diverged,
-                      "verdict": "byte-identical (columnar==heap)" if ab_diverged == 0 else "DIVERGENCE — pushdown bug"},
+                      "routed_identical": ab_routed_identical, "declined_trivial": ab_declined_trivial,
+                      "no_pushdown_exercised": no_pushdown_exercised, "verdict": ab_verdict},
         "queries": results,
         "caveats": [
             "self-hosted box, NOT canonical AWS c6a.4xlarge — QPS/timings not leaderboard-comparable (ADR M128-2)",
