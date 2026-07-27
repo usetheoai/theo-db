@@ -21,6 +21,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Removed
 
 ### Fixed
+- Release tooling: `flip_milestone_checkbox.py` matched milestone headers with `###` (three hashes) but `ROADMAP.md` uses `##` (two) — the M166 flip warned "not found" (M165 had been flipped by hand). The header regex now accepts `##`/`###` so the checkbox flip is deterministic for every milestone.
 
 ### Security
 
