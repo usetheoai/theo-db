@@ -22,6 +22,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **CI: sete exportações redundantes de cache de imagem por run.** Os oito jobs que constroem a imagem declaravam `cache-to: type=gha,mode=max` — cada um exportando **todas** as camadas para o cache do GitHub pela rede, embora ninguém lesse as sete cópias extras. Só o build de `image-and-bench` (tag `theo-db:ci`) publica agora; os demais seguem lendo com `cache-from`, sem qualquer mudança no que constroem. Os builds em si foram **mantidos de propósito**: cada job reconstruir a imagem é o que garante que ele testa o commit atual — trocar por um atalho do tipo "pular se já existe" economizaria ~2 min e reintroduziria risco de falso-verde. Ganho esperado mas ainda **não medido** (o runner está ocupado; a próxima execução completa confirma).
+
 ### Security
 
 ## [0.155.0] - 2026-07-27

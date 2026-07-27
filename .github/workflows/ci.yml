@@ -60,7 +60,9 @@ jobs:
           tags: theo-db:dev
           load: true
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # SEM `cache-to`: só o build de `image-and-bench` (tag theo-db:ci) publica o cache. Os oito
+          # jobs escreviam `mode=max`, isto é, exportavam TODAS as camadas para o cache do GitHub pela
+          # rede — sete vezes por run, sem que ninguém lesse as sete cópias extras. Ler continua igual.
 
       - name: Bootstrap de uma app pgvector contra a imagem (o fluxo do README)
         run: |
@@ -288,7 +290,9 @@ jobs:
           tags: theo-db:dev
           load: true
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # SEM `cache-to`: só o build de `image-and-bench` (tag theo-db:ci) publica o cache. Os oito
+          # jobs escreviam `mode=max`, isto é, exportavam TODAS as camadas para o cache do GitHub pela
+          # rede — sete vezes por run, sem que ninguém lesse as sete cópias extras. Ler continua igual.
 
       - name: Start source (vanilla pgvector, pinned by digest) + target (TheoDB)
         run: |
@@ -328,7 +332,9 @@ jobs:
           tags: theo-db:dev
           load: true
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # SEM `cache-to`: só o build de `image-and-bench` (tag theo-db:ci) publica o cache. Os oito
+          # jobs escreviam `mode=max`, isto é, exportavam TODAS as camadas para o cache do GitHub pela
+          # rede — sete vezes por run, sem que ninguém lesse as sete cópias extras. Ler continua igual.
 
       - name: Build regression runner (pg_regress + regress.so from REL_17_10)
         run: docker build -f packaging/Dockerfile.regress -t theo-db-regress .
@@ -354,7 +360,9 @@ jobs:
           tags: theo-db:dev
           load: true
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # SEM `cache-to`: só o build de `image-and-bench` (tag theo-db:ci) publica o cache. Os oito
+          # jobs escreviam `mode=max`, isto é, exportavam TODAS as camadas para o cache do GitHub pela
+          # rede — sete vezes por run, sem que ninguém lesse as sete cópias extras. Ler continua igual.
 
       - name: Start TheoDB
         run: |
@@ -419,7 +427,9 @@ jobs:
           tags: theo-db:dev
           load: true
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # SEM `cache-to`: só o build de `image-and-bench` (tag theo-db:ci) publica o cache. Os oito
+          # jobs escreviam `mode=max`, isto é, exportavam TODAS as camadas para o cache do GitHub pela
+          # rede — sete vezes por run, sem que ninguém lesse as sete cópias extras. Ler continua igual.
 
       - name: Start TheoDB (host-gateway so the in-DB function reaches the host stub)
         run: |
@@ -490,7 +500,9 @@ jobs:
           tags: theo-db:dev
           load: true
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # SEM `cache-to`: só o build de `image-and-bench` (tag theo-db:ci) publica o cache. Os oito
+          # jobs escreviam `mode=max`, isto é, exportavam TODAS as camadas para o cache do GitHub pela
+          # rede — sete vezes por run, sem que ninguém lesse as sete cópias extras. Ler continua igual.
 
       - name: License sweep — BM25 candidates permissive/barred verdict (reproducible, ADR 0003)
         run: bash packaging/license-sweep.sh
@@ -554,7 +566,9 @@ jobs:
           tags: theo-db:dev
           load: true
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # SEM `cache-to`: só o build de `image-and-bench` (tag theo-db:ci) publica o cache. Os oito
+          # jobs escreviam `mode=max`, isto é, exportavam TODAS as camadas para o cache do GitHub pela
+          # rede — sete vezes por run, sem que ninguém lesse as sete cópias extras. Ler continua igual.
       - name: Start TheoDB (host-gateway so the in-DB function reaches the host stub)
         run: |
           # Ephemeral host port — rationale in the image-and-bench "Start TheoDB" step.
