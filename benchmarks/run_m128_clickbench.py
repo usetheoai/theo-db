@@ -79,56 +79,93 @@ HITS_TOTAL_ROWS = 99_997_497
 # --- M164 harness guards (pure, env-injected → unit-testable with no DB and no real box; plan ADR-1) ------------------
 
 def sample_is_fresh(rows_in_file: int, n_rows: int, tol: int = 1) -> bool:
-    """B1 guard: True iff the cached sample's row count matches the requested `n_rows` within the systematic
-    off-by-one tolerance. The systematic sampler (`awk 'NR % k == 0' | head -n {n}`) can admit up to `tol` extra rows
-    before the head cap, so `rows_in_file ∈ [n_rows, n_rows+tol]` is fresh. Anything smaller (the M162 false-100M: a
-    1M cache served as 100M) or materially larger is stale and MUST be re-materialized."""
+    """B1 guard: True iff the cached sample's row count matches the requested size. Both samplers head-cap at `n`, and
+    the dataset has only `HITS_TOTAL_ROWS` rows, so a request materializes exactly `min(n_rows, HITS_TOTAL_ROWS)` rows —
+    the freshness target is CLAMPED to that, otherwise a legit `--n 100000000` (n > dataset ⇒ file has 99,997,497 rows)
+    would be judged permanently stale and re-stream ~100 GB every invocation (M162 pain #2, cross-validation HIGH). A
+    smaller count (the M162 false-100M: a 1M cache served as 100M) or a materially larger one is stale and MUST be
+    re-materialized. `tol` is defensive slack (a trailing-newline miscount); the head cap already pins the exact count."""
     if rows_in_file <= 0 or n_rows <= 0:
         return False
-    return n_rows <= rows_in_file <= n_rows + tol
+    target = min(n_rows, HITS_TOTAL_ROWS)
+    return target <= rows_in_file <= target + tol
 
 
-def classify_ab(columnar_customscan, result_ab_identical) -> str:
-    """B2 guard: classify one query's A/B outcome by whether the ON arm actually routed —
+def plan_shows_agg_pushdown(plan_text: str) -> bool:
+    """True iff the plan used the AGG pushdown specifically. MUST key on `theodb_columnar_agg`, NOT a generic
+    `Custom Scan`: the projection provider `theodb_columnar_project` defaults ON and renders a `Custom Scan` under
+    EVERY columnar scan, so a broad `"Custom Scan" in plan` reports True even when the agg pushdown DECLINED — the very
+    false-green B2 exists to catch (council-benchmark HIGH-2)."""
+    return "theodb_columnar_agg" in plan_text
+
+
+def classify_ab(agg_routed, result_ab_identical) -> str:
+    """B2 guard: classify one query's A/B outcome by whether the AGG pushdown actually routed (`agg_routed`, from
+    `plan_shows_agg_pushdown` — NOT the broad columnar-customscan boolean, which the always-on projection scan makes
+    ~always True) —
     - 'diverged'         : results differ → a real correctness bug (routed or not);
-    - 'routed_identical' : ON routed AND byte-identical → a MEANINGFUL pushdown-correctness pass;
-    - 'declined_trivial' : byte-identical but the ON arm DECLINED (ran native over columnar storage) → proves the
+    - 'routed_identical' : agg pushdown routed AND byte-identical → a MEANINGFUL pushdown-correctness pass;
+    - 'declined_trivial' : byte-identical but the agg pushdown DECLINED (ran native over columnar storage) → proves the
                            storage round-trip, NOT the pushdown (the M162 SORTED/`diverged=0` false-green);
     - 'n/a'              : routing or identity unknown (query errored / not measured)."""
     if result_ab_identical is False:
         return "diverged"
-    if columnar_customscan is None or result_ab_identical is None:
+    if agg_routed is None or result_ab_identical is None:
         return "n/a"
-    return "routed_identical" if columnar_customscan else "declined_trivial"
+    return "routed_identical" if agg_routed else "declined_trivial"
 
 
-# Sizing estimates for the pre-flight (C). Derived from the published ClickBench `hits`: ~74.5 GiB uncompressed TSV
-# ÷ 99,997,497 rows ≈ 745 B/row on disk. In-DB we load BOTH a heap copy (`hits_heap`, ≈ TSV size) and the columnar
-# `hits` (compresses, but co-resident), so a conservative working-set estimate is ~800 B/row. Advisory precision.
-EST_TSV_BYTES_PER_ROW = 745
-EST_INDB_BYTES_PER_ROW = 800
-SAFE_DISK_FRACTION = 0.8      # BLOCK if the on-disk sample would exceed this fraction of free disk
+def decide_ab_verdict(agg: bool, ab_routed_identical: int, ab_diverged: int) -> tuple:
+    """B2 verdict: pick the A/B headline + the `no_pushdown_exercised` flag. A DIVERGENCE OUTRANKS a trivial run so a
+    real pushdown correctness bug is never masked behind a "nothing was exercised" message (council-benchmark/cross-val
+    MEDIUM). `no_pushdown_exercised` fires ONLY when `--agg` routed nothing AND there is no divergence to report."""
+    no_pushdown_exercised = bool(agg) and ab_routed_identical == 0 and ab_diverged == 0
+    if ab_diverged != 0:
+        return "DIVERGENCE — pushdown bug", False
+    if no_pushdown_exercised:
+        return ("TRIVIAL — --agg set but 0 queries routed the agg pushdown (ON declined; A/B proves storage "
+                "round-trip, not pushdown)"), True
+    return "byte-identical (columnar==heap)", False
+
+
+# Sizing estimates for the pre-flight (C). Published ClickBench `hits`: ~74.5 GiB uncompressed TSV ÷ 99,997,497 rows ≈
+# **800 B/row** (GiB, not the 745 the decimal-GB gave — council-benchmark LOW). A load writes THREE things to disk, not
+# just the sample file: the TSV sample on the cache FS, the `hits_heap` heap copy, and the columnar `hits`. Estimating
+# only the sample (the prior bug) under-counts the real footprint the tables actually exhaust (council-benchmark MEDIUM),
+# so the disk estimate sums all three. Heap tuple of 105 cols ≈ 1000 B/row w/ headers/alignment; columnar compresses ~8×
+# (~150 B/row). Conservative on purpose: a false-BLOCK is safe (operator frees space), a false-PASS OOMs the box.
+EST_SAMPLE_BYTES_PER_ROW = 800     # TSV sample on the cache filesystem
+EST_HEAP_BYTES_PER_ROW = 1000      # hits_heap (105-col heap tuple, headers+alignment)
+EST_COLUMNAR_BYTES_PER_ROW = 150   # hits (columnar, ~8× compressed)
+EST_DISK_BYTES_PER_ROW = EST_SAMPLE_BYTES_PER_ROW + EST_HEAP_BYTES_PER_ROW + EST_COLUMNAR_BYTES_PER_ROW  # full footprint
+EST_RAM_BYTES_PER_ROW = EST_HEAP_BYTES_PER_ROW + EST_COLUMNAR_BYTES_PER_ROW  # the in-DB working set queried under load
+SAFE_DISK_FRACTION = 0.8      # BLOCK if the full on-disk footprint would exceed this fraction of free disk
 RAM_HEADROOM_FRACTION = 0.7   # WARN (never block) if the in-DB working set exceeds this fraction of RAM
 
 
 def preflight_sizing(n_rows: int, disk_free_bytes: int, ram_bytes: int) -> dict:
-    """C guard: BLOCK a load whose on-disk sample cannot fit a safe fraction of free disk (pure waste), but only
-    WARN when the in-DB working set exceeds RAM headroom — larger-than-RAM is an INTENTIONAL TheoDB regime (plan
-    ADR-2; the M162 100M run was deliberately larger-than-RAM). Returns {block, warn, reasons, est_disk_bytes,
-    est_indb_bytes}. Env (disk/RAM) is injected so the guard is deterministically unit-testable."""
-    est_disk = int(n_rows) * EST_TSV_BYTES_PER_ROW
-    est_indb = int(n_rows) * EST_INDB_BYTES_PER_ROW
+    """C guard: BLOCK a load whose full on-disk footprint (sample TSV + heap copy + columnar table) cannot fit a safe
+    fraction of free disk (pure waste), but only WARN when the in-DB working set exceeds RAM headroom — larger-than-RAM
+    is an INTENTIONAL TheoDB regime (plan ADR-2; the M162 100M run was deliberately larger-than-RAM). `n_rows` is
+    CLAMPED to `HITS_TOTAL_ROWS` (the corpus can't yield more — council-benchmark HIGH-1) so a `--n 100M` request is
+    sized against the real 99,997,497-row load, not an impossible 100M. Returns {block, warn, reasons, est_disk_bytes,
+    est_ram_bytes}. Env (disk/RAM) is injected so the guard is deterministically unit-testable. NOTE (coarse net): it
+    assumes the cache FS and PGDATA share the disk (the single-box benchmark case) and gives no credit for an
+    already-materialized cache — both bias toward a (safe) false-BLOCK, never a (dangerous) false-PASS."""
+    n = min(int(n_rows), HITS_TOTAL_ROWS)
+    est_disk = n * EST_DISK_BYTES_PER_ROW
+    est_ram = n * EST_RAM_BYTES_PER_ROW
     reasons: list[str] = []
     block = est_disk > SAFE_DISK_FRACTION * disk_free_bytes
     if block:
-        reasons.append(f"disk: est sample {est_disk / 2**30:.1f} GiB > {SAFE_DISK_FRACTION:.0%} of free "
-                       f"{disk_free_bytes / 2**30:.1f} GiB — refusing (would not fit)")
-    warn = est_indb > RAM_HEADROOM_FRACTION * ram_bytes
+        reasons.append(f"disk: est full footprint {est_disk / 2**30:.1f} GiB (sample+heap+columnar) > "
+                       f"{SAFE_DISK_FRACTION:.0%} of free {disk_free_bytes / 2**30:.1f} GiB — refusing (would not fit)")
+    warn = est_ram > RAM_HEADROOM_FRACTION * ram_bytes
     if warn:
-        reasons.append(f"ram: est in-DB working set {est_indb / 2**30:.1f} GiB > {RAM_HEADROOM_FRACTION:.0%} of RAM "
+        reasons.append(f"ram: est in-DB working set {est_ram / 2**30:.1f} GiB > {RAM_HEADROOM_FRACTION:.0%} of RAM "
                        f"{ram_bytes / 2**30:.1f} GiB — larger-than-RAM run (intentional; WARN, not blocked)")
     return {"block": block, "warn": warn, "reasons": reasons,
-            "est_disk_bytes": est_disk, "est_indb_bytes": est_indb}
+            "est_disk_bytes": est_disk, "est_ram_bytes": est_ram}
 
 
 def _ensure_sample(path: str, n_rows: int, strategy: str = "systematic") -> bool:
@@ -232,16 +269,23 @@ def _bench_query(cur, conn, i, sql, assert_byte_identical) -> dict:
         cur.execute("EXPLAIN (FORMAT TEXT) " + sql)
         plan = "\n".join(r[0] for r in cur.fetchall())
         entry["columnar_customscan"] = "theodb_columnar_agg" in plan or "Custom Scan" in plan
+        # M164 (B2/HIGH-2): a SEPARATE, agg-SPECIFIC routing signal. `columnar_customscan` above is broad and ~always
+        # True (the always-on projection scan renders a `Custom Scan` under every columnar query), so it CANNOT tell an
+        # agg pushdown from a declined agg over a projection scan. `classify_ab` MUST consume THIS one.
+        entry["columnar_agg_routed"] = plan_shows_agg_pushdown(plan)
     except Exception:
         entry["columnar_customscan"] = None
+        entry["columnar_agg_routed"] = None
     # byte-identical result A/B: columnar vs heap. Strip the trailing `LIMIT N` first: ClickBench's
     # `... ORDER BY count DESC LIMIT 10` has many tied counts on a subsample, so the LIMIT cut picks an
     # ARBITRARY-but-valid 10 among the ties — a legitimate scan-order difference, NOT a storage bug. Comparing
     # the FULL (unlimited) deterministic aggregation is the real columnar-storage correctness oracle.
     ab_sql = re.sub(r"\s+LIMIT\s+\d+\s*;?\s*$", "", sql.rstrip().rstrip(";"))
     try:
-        cur.execute(ab_sql); rc = _canonical(cur.fetchall())
-        cur.execute(ab_sql.replace("hits", "hits_heap")); rh = _canonical(cur.fetchall())
+        cur.execute(ab_sql)
+        rc = _canonical(cur.fetchall())
+        cur.execute(ab_sql.replace("hits", "hits_heap"))
+        rh = _canonical(cur.fetchall())
         r = assert_byte_identical({j: rc[j] for j in range(len(rc))}, {j: rh[j] for j in range(len(rh))}) \
             if len(rc) == len(rh) else {"identical": False, "diverged": abs(len(rc) - len(rh))}
         entry["result_ab_identical"] = r["identical"]
@@ -271,7 +315,8 @@ def run(args) -> dict:
     if not _ensure_sample(sample, args.n, args.sample):
         return {**base, "status": "UNBENCHMARKED", "reason": "hits dataset unavailable", "queries": None}
 
-    conn = _conn(); conn.autocommit = True
+    conn = _conn()
+    conn.autocommit = True
     cur = conn.cursor()
     # Build the columnar `hits` (create.sql) + a heap copy `hits_heap` for the result A/B.
     with open(os.path.join(ENTRY, "create.sql")) as fh:
@@ -308,7 +353,8 @@ def run(args) -> dict:
         results.append(entry)
         print(f"  q{i:>2} cold={entry.get('cold','ERR')} hot={entry.get('hot','ERR')} "
               f"cs={entry.get('columnar_customscan')} ab={entry.get('result_ab_identical')}", flush=True)
-    cur.close(); conn.close()
+    cur.close()
+    conn.close()
 
     # Contadores derivados dos entries (uma passada — mais simples que contar dentro do loop).
     ok = [e for e in results if "timings" in e]
@@ -319,16 +365,14 @@ def run(args) -> dict:
     # M164 (B2): split the A/B pass by whether the ON arm actually routed. A `--agg` run whose queries all decline is a
     # false-green — the byte-identical verdict is trivial (native-over-columnar vs heap), proving nothing about the
     # pushdown. `ab_routed_identical` is the MEANINGFUL count; `no_pushdown_exercised` flags the trivial run loudly.
-    ab_class = [classify_ab(e.get("columnar_customscan"), e.get("result_ab_identical")) for e in results]
+    # keyed on the agg-SPECIFIC signal (HIGH-2): a query with only the always-on projection scan is `declined_trivial`.
+    ab_class = [classify_ab(e.get("columnar_agg_routed"), e.get("result_ab_identical")) for e in results]
     ab_routed_identical = sum(1 for c in ab_class if c == "routed_identical")
     ab_declined_trivial = sum(1 for c in ab_class if c == "declined_trivial")
-    no_pushdown_exercised = bool(args.agg) and ab_routed_identical == 0
+    ab_verdict, no_pushdown_exercised = decide_ab_verdict(args.agg, ab_routed_identical, ab_diverged)
     geomean = None
     if ok:
         geomean = round(math.exp(sum(math.log(max(e["hot"], 1e-6)) for e in ok) / len(ok)), 5)
-    ab_verdict = ("byte-identical (columnar==heap)" if ab_diverged == 0 else "DIVERGENCE — pushdown bug")
-    if no_pushdown_exercised:
-        ab_verdict = "TRIVIAL — --agg set but 0 queries routed (ON declined; A/B proves storage round-trip, not pushdown)"
     return {
         **base, "status": "OK", "n_queries": len(queries), "queries_ok": len(ok), "queries_errored": errored,
         "columnar_customscan_count": customscan, "hot_geomean_s": geomean,

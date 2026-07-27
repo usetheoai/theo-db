@@ -40,7 +40,32 @@ the 12 pure tests were written first and failed with AttributeError (helpers abs
 - **Sizing constants** (`EST_TSV_BYTES_PER_ROW=745`, `EST_INDB_BYTES_PER_ROW=800`) are advisory estimates derived from
   the published ClickBench `hits` size ÷ row count, documented inline — the guard is a coarse safety net, not exact.
 
+## Review fixes (council-benchmark + cross-validation → NEEDS_FIXES → addressed)
+
+Two independent reviewers found real defects; all fixed and re-validated (20 tests green, ruff-clean):
+
+- **HIGH-1 (both):** `sample_is_fresh` was permanently stale for `--n > HITS_TOTAL_ROWS` — the canonical `--n 100000000`
+  materializes 99,997,497 rows (the corpus max), so `100M <= 99997497` was False → re-streamed ~74 GB every run (the M162
+  pain #2 the guard exists to prevent). **Fix:** clamp the freshness target to `min(n_rows, HITS_TOTAL_ROWS)`; test
+  `test_sample_is_fresh_accepts_full_corpus_for_over_dataset_request`. Same clamp added to `preflight_sizing`.
+- **HIGH-2 (council-benchmark):** `classify_ab` was fed `columnar_customscan` (`"theodb_columnar_agg" in plan OR "Custom
+  Scan" in plan`) — but `theodb.enable_projection` defaults ON, so every columnar query renders a `Custom Scan
+  (theodb_columnar_project)`; the broad signal was ~always True and a declined agg still classified as `routed_identical`
+  → `no_pushdown_exercised` was effectively dead. **Fix:** new `plan_shows_agg_pushdown` keys on `theodb_columnar_agg`
+  specifically; `_bench_query` sets `columnar_agg_routed`; `classify_ab` consumes THAT. Proof:
+  `test_plan_shows_agg_pushdown_distinguishes_projection_from_agg`.
+- **MEDIUM (cross-val):** a `TRIVIAL` verdict overwrote `DIVERGENCE` when `--agg` + all-declined + a real divergence.
+  **Fix:** extracted `decide_ab_verdict` — DIVERGENCE outranks TRIVIAL; `no_pushdown_exercised` requires `ab_diverged==0`.
+  Tests `test_decide_ab_verdict_*`.
+- **MEDIUM (council):** disk-BLOCK sized only the sample file, not the heap+columnar tables the load writes. **Fix:**
+  `EST_DISK_BYTES_PER_ROW` sums sample + heap + columnar; documented as a coarse net biased toward a (safe) false-BLOCK.
+- **LOW/INFO:** unit label 745→800 B/row (GiB); re-stream branch now has an integration test
+  (`test_ensure_sample_restreams_stale_cache`, monkeypatched — no network); 4 pre-existing `E702` split so the file is
+  now **fully ruff-clean** (DoD literally satisfied).
+
 ## Gates
 
 - `/plan-confidence`: SHIPPABLE 98 (intrinsic).
-- `/code-quality`, `/review`, `/release`: next.
+- `/code-quality`: FAIL_SOFT HARD=0 (env-only; M164 touches no Rust).
+- `/review`: council-benchmark + cross-validation, NEEDS_FIXES → all findings addressed + re-validated (20 tests green).
+- Tests: `benchmarks/test_m164_harness_guards.py` — **20 green** (was 13; +7 for the HIGH/MEDIUM regressions).
