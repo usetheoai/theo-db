@@ -669,6 +669,12 @@ fn parse_agg_kind(name: &str, vartype: pg_sys::Oid) -> Option<i32> {
 /// base column, an int2 or int8 result, a non-additive op, a float/numeric const, or an out-of-range delta all decline.
 unsafe fn classify_sum_int_add_const(node: *mut pg_sys::Node, relid: i32) -> Option<TargetSlot> {
     let op = node as *mut pg_sys::OpExpr;
+    // Only a builtin operator has trusted semantics — a user-defined `OPERATOR +(int2,int4)` placed ahead of pg_catalog
+    // in search_path could run arbitrary code while DataFusion computes `col+delta` (silent divergence). Decline it, as
+    // classify_text_op does (council-rust-pgrx MEDIUM; parity with the builtin-only gate at line ~443).
+    if (*op).opno.to_u32() >= pg_sys::FirstNormalObjectId {
+        return None;
+    }
     let opname_ptr = pg_sys::get_opname((*op).opno);
     if opname_ptr.is_null() {
         return None;
@@ -854,6 +860,13 @@ unsafe fn classify_target_node(
         // 22003 byte-for-byte when a value is out of range, and the exact value otherwise (ADR-2). Only `+`/`-` with a
         // `Var(int) <op> Const(int)` shape (constant on the right — canonical form after const-folding).
         let op = node as *mut pg_sys::OpExpr;
+        // Builtin operator only — a user-defined `OPERATOR +` ahead of pg_catalog in search_path could run arbitrary
+        // semantics while DataFusion computes `col+delta` (silent divergence). Parity with classify_text_op (~:443) and
+        // the SUM(int2±const) gate (council-rust-pgrx MEDIUM — close the class, not just the instance).
+        if (*op).opno.to_u32() >= pg_sys::FirstNormalObjectId {
+            admit_trace("group_expr_op_unsupported");
+            return None;
+        }
         let opname_ptr = pg_sys::get_opname((*op).opno);
         if opname_ptr.is_null() {
             admit_trace("group_expr_op_unsupported");

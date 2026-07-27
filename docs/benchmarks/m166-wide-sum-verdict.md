@@ -47,9 +47,24 @@ Artifacts: `docs/benchmarks/m166-clickbench-agg.json` (43-query run), `docs/benc
 - Same-engine: **27.79 s → 0.1027 s (≈ 270× faster)**; the gap vs ClickHouse collapses from 567× to ≈ 2.1× — inside the
   covered class (fresh-benchmark pushdown-class geomean 4.53×).
 - **No regression:** all 43 queries report `result_ab_identical == True` (0 `ab=False`); `columnar_agg_routed == True`
-  for q29 and the previously-routed queries, unchanged.
-- q28 (the REGEXP + `AVG(length)` + `MIN(text)` query) stays `columnar_agg_routed == False` — declines, as the q27/q21/q22
-  honest-negatives predict.
+  for q29 and every query already routed at this run's baseline. (Routed count is 32 here vs 30 in the pre-M165 fresh
+  baseline — the +2 is M165's q34 const-out landing between the two runs, not an M166 change.)
+- q28 (`REGEXP_REPLACE(Referer …) GROUP BY … MIN(Referer)`) stays `columnar_agg_routed == False` — declines, as the
+  `MIN(text)` collation honest-negative (q21/q22) predicts. (In ClickBench naming `AVG(length(URL))` is q27 and `MIN(text)`
+  is q21/q22 — three distinct queries; all decline, all correctly.)
+
+### Provenance + measurement caveats (council-benchmark)
+
+- **Same-box provenance.** The M166 `--agg` run executed on the **same droplet** as the `clickbench-fresh-vs-clickhouse-2026-07-27.md`
+  baseline (138.197.19.163, 8 vCPU / 15 GB, the `/root/clickhouse` binary of that baseline still resident). Only the q29
+  patch changed between the two TheoDB runs; **ClickHouse was not re-measured** — its 0.049 s is reused unchanged (same
+  code, data, box). Reusing it is legitimate precisely because nothing on the ClickHouse side moved; re-running a 49 ms
+  query would be wasted effort, not added rigor.
+- **Timing asymmetry (conservative).** TheoDB is timed end-to-end via the psycopg2 round-trip; ClickHouse via server-side
+  `--time`. The 2.10× therefore *over*-states TheoDB's disadvantage (the true engine gap is ≤ 2.10×) — the direction is
+  honest, not flattering.
+- **Variance.** q29's three runs span [0.0987, 0.1136] s; `hot` is the min of runs 2–3 (0.1027 s) per the harness
+  protocol. The ratio band is ≈ 2.01–2.32×; "≈ 2.10×" is inside it and robust to the spread.
 
 ## Cost / trade-off
 
@@ -69,6 +84,16 @@ Artifacts: `docs/benchmarks/m166-clickbench-agg.json` (43-query run), `docs/benc
 - **q27 (`AVG(length(URL))`)** — the agg arg is a `T_FuncExpr`; routable only under a UTF-8 encoding gate plus a new
   scalar-func-in-agg mechanism. Deferred as a separate capability (higher leverage, but new mechanism + encoding
   correctness — not shipped without proof).
+
+## Review sign-off
+
+- **council-rust-pgrx:** no BLOCKER, no HIGH. The gate is sound and fail-closed — panic-across-C, the deparse `makeVar`
+  hunk, the wire stride 2→4, and the overflow proof (declining int4-base / int8-result is genuinely required) all verified
+  SOUND. One MEDIUM (defense-in-depth): the int-arith gates matched the operator by name without the builtin-only guard
+  that `classify_text_op` carries — **fixed** in both the new `SUM(int2±const)` gate and the pre-existing GROUP BY
+  `IntAddConst` gate (`opno >= FirstNormalObjectId` → decline).
+- **council-benchmark:** core claims measured and honest, not spin; arithmetic reproduces; 43/43 byte-identical is
+  genuinely backed by the JSON. Provenance + caveats folded in above (same-box, psycopg2 asymmetry, variance band).
 
 ## Reproduction
 

@@ -1,4 +1,4 @@
-# M163 — type-coverage A/B run
+# M166 — type-coverage A/B run (harness introduced in M163)
 
 **Rows loaded:** 2000 (equal in `hits` columnar + `hits_heap`).  
 **Positive control:** seeded divergence detected (diverged=2) — the oracle catches a wrong result.  
