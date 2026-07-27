@@ -2937,7 +2937,7 @@ bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan s�
 
 ---
 
-## M162 — [ ] Medir o gap a 100M (larger-than-RAM) + encodings type-specific (se a medição justificar) — escala
+## M162 — [x] Medir o gap a 100M (larger-than-RAM) + encodings type-specific (se a medição justificar) — escala
 
 > **Layer C — a fronteira NÃO-MEDIDA** (deep-dive pós-M159). Added 2026-07-26 (`/roadmap-feature columnar-improvement-layers`). O M159 é 1M (cabe em RAM → `shared_blks_read≈0`, I/O não é o sinal). A 100M o precipício das não-cobertas provavelmente alarga e I/O/decode vira o lever. MEDIR PRIMEIRO — construir encoding sobre um palpite viola a regra 5. cstore_fdw é referência MORTA aqui (pglz, sem encodings); Parquet/ORC/ClickHouse são as referências.
 
