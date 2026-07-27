@@ -2983,7 +2983,7 @@ bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan s�
 
 ---
 
-## M164 — [ ] Endurecer o harness de benchmark (guards de falso-verde + pre-flight de infra) — rigor
+## M164 — [x] Endurecer o harness de benchmark (guards de falso-verde + pre-flight de infra) — rigor
 
 > **Itens B+C da retro M160-M162** (`/roadmap-feature`, 2026-07-27). Evidência dura desta sessão: (B) `_ensure_sample` (`run_m128_clickbench.py:96`) reusou um cache de **1M como "100M"** sem checar contagem → um `DONE` falso que só peguei na mão; e um A/B com `ORDER BY` removido virou SORTED → `diverged=0` **trivial** (ON declinava). (C) escolhi o box de 15GB (reuso do M160) para 100M e ele **OOMou 2×** — subdimensionado; além de `unattended-upgrades` reiniciar o PG no meio do COPY. Horas perdidas em ruído mecanizável.
 
