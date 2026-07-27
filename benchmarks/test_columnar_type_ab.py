@@ -64,6 +64,20 @@ def test_case_matrix_has_route_and_decline_expectations():
     assert "group_f8" in names          # M163 found: float GROUP BY diverges -> must decline
 
 
+def test_m166_sum_expr_cases_present_and_fail_closed():
+    # M166 (ClickBench q29): SUM(int2 ± const) must be declared as a ROUTE case, and the three unsafe shapes must be
+    # declared as DECLINE cases. This pins the fail-closed contract at the harness level with no DB — a future edit that
+    # accidentally admits int4-base / int8-result / an out-of-range delta (the wrong-result class) breaks this test.
+    cases = {n: (sql, expect) for n, sql, expect, _ in h.build_cases()}
+    # the provably-overflow-free class routes (positive + negative delta)
+    assert cases.get("sum_i2_add") == ("SELECT sum(c2 + 1) FROM hits", "route")
+    assert cases["sum_i2_sub"][1] == "route"
+    # the three unsafe shapes decline (fail-closed)
+    assert cases["sum_i4_add_decline"][1] == "decline"      # int4 base -> per-row 22003 reachable
+    assert cases["sum_i8_add_decline"][1] == "decline"      # int8 result -> widened sum can overflow
+    assert cases["sum_i2_wide_decline"][1] == "decline"     # 32767+delta leaves int4 -> decline
+
+
 def test_every_routed_type_appears_in_a_case():
     # case-matrix rot-guard (council-benchmark MEDIUM): the catalog guard checks the dict; this checks the actual case
     # matrix touches every routed type via a STANDALONE column of that type, so a type cannot be 'covered' with zero

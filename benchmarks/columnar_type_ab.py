@@ -246,6 +246,15 @@ def build_cases() -> list[tuple[str, str, str, str | None]]:
         ("const_out_float", "SELECT 1.5::float8, c4, count(*) FROM hits GROUP BY 1, c4", "decline", None),   # float const → decline
         ("const_out_text", "SELECT 'x'::text, c4, count(*) FROM hits GROUP BY 1, c4", "decline", None),      # text const → decline
         ("const_out_null", "SELECT NULL::int4, c4, count(*) FROM hits GROUP BY 1, c4", "decline", None),     # NULL const → decline
+        # M166 SUM(int2 ± const) (ClickBench q29): the agg arg is an OpExpr, not a bare Var. Fail-closed to the
+        # provably-overflow-free class — int2 base + int4 result, whole int2 domain ± delta stays inside int4 → the
+        # widened Int64 sum is exact and byte-identical. Everything else declines (per-row 22003 or a wider-sum overflow
+        # the native plan would have raised): int4/int8 base, int8 result, or a delta so large 32767±delta leaves int4.
+        ("sum_i2_add", "SELECT sum(c2 + 1) FROM hits", "route", AGG),
+        ("sum_i2_sub", "SELECT sum(c2 - 2) FROM hits", "route", AGG),                              # negative delta round-trip
+        ("sum_i4_add_decline", "SELECT sum(c4 + 1) FROM hits", "decline", None),                   # int4 base → per-row 22003 reachable
+        ("sum_i8_add_decline", "SELECT sum(c8 + 1) FROM hits", "decline", None),                   # int8 result → widened sum can overflow
+        ("sum_i2_wide_decline", "SELECT sum(c2 + 2147483647) FROM hits", "decline", None),         # 32767+2147483647 leaves int4 → decline
         # SCOPE: this harness covers the AGG/group/in-list/zone-pred/expr admit-paths — where every historical type-class
         # bug lived (M151/M154/M157/M161/M163). The late-materialization *projection* path (M158) is query-shape, not
         # type-class, and is cost-gated on table size + enable_sort — it belongs to M158's own A/B, not here.

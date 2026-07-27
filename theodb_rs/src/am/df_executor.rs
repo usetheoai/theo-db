@@ -268,6 +268,10 @@ pub(super) enum AggSpec {
     SumFloat8(String),
     /// `sum(int2/int4)` → PG int8. DataFusion coerces int2/int4 → Int64; the datum is int8 (no overflow).
     SumInt(String),
+    /// M166 — `sum(int2_col ± const)` → PG int8 (ClickBench q29). Admitted ONLY for an int2 base column with an int4
+    /// operator result whose per-row `col ± delta` provably stays in int4 (so PG raises no 22003 and the Int64 sum is
+    /// exact). `delta` folds the operator sign (`col - k` = `col + (-k)`). Output kind = SumInt (Arrow Int64 → PG int8).
+    SumIntAddConst { col: String, delta: i64 },
     /// `avg(float8)` → PG float8. DataFusion `avg` → Float64.
     AvgFloat8(String),
     /// `sum(int8)` → PG `numeric` (exact). DataFusion `sum(cast(col AS Decimal128(38,0)))` → i128; the datum is a PG
@@ -295,6 +299,7 @@ impl AggSpec {
             AggSpec::CountStar => None,
             AggSpec::SumFloat8(n)
             | AggSpec::SumInt(n)
+            | AggSpec::SumIntAddConst { col: n, .. }
             | AggSpec::AvgFloat8(n)
             | AggSpec::SumInt8Numeric(n)
             | AggSpec::AvgIntNumeric(n)
@@ -322,6 +327,12 @@ fn push_agg_exprs(spec: &AggSpec, exprs: &mut Vec<Expr>) {
         AggSpec::SumFloat8(name) | AggSpec::SumInt(name) => {
             exprs.push(sum(col(name.as_str())).alias(format!("a{k}")))
         }
+        // M166 — sum over `int2_col ± const`: widen the base column to Int64 and add the (signed) delta before summing,
+        // mirroring the group IntAddConst `cast(col, Int64) + lit(delta)` idiom. The per-row value is in int4 range by
+        // the admit gate, so the Int64 sum is byte-identical to PG's `sum(int4) → int8`. Output kind = SumInt.
+        AggSpec::SumIntAddConst { col: name, delta } => exprs.push(
+            sum(cast(col(name.as_str()), DataType::Int64) + lit(*delta)).alias(format!("a{k}")),
+        ),
         AggSpec::AvgFloat8(name) => exprs.push(avg(col(name.as_str())).alias(format!("a{k}"))),
         AggSpec::SumInt8Numeric(name) => {
             exprs.push(sum(dec128_cast(name)).alias(format!("a{k}")));
@@ -846,8 +857,11 @@ fn agg_datum(
         return Ok((pg_sys::Datum::from(0usize), true));
     }
     let datum = match spec {
-        // int8 output: count(*), count(DISTINCT col), sum(int2/int4) (DataFusion → Int64 = PG bigint).
-        AggSpec::CountStar | AggSpec::SumInt(_) | AggSpec::CountDistinct(_) => {
+        // int8 output: count(*), count(DISTINCT col), sum(int2/int4), sum(int2_col ± const) (DataFusion → Int64 = PG bigint).
+        AggSpec::CountStar
+        | AggSpec::SumInt(_)
+        | AggSpec::SumIntAddConst { .. }
+        | AggSpec::CountDistinct(_) => {
             let v = arr
                 .as_any()
                 .downcast_ref::<Int64Array>()

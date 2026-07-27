@@ -140,12 +140,14 @@ pub(crate) fn init() {
     }
 }
 
-/// The parsed, admissible aggregate: (kind, attno). kind 0 = count(*), 1 = sum(float8), 2 = sum(int)→int8,
-/// 3 = avg(float8). attno is the 1-based column (0 for count).
+/// The parsed, admissible aggregate: (kind, attno, delta). kind 0 = count(*), 1 = sum(float8), 2 = sum(int)→int8,
+/// 3 = avg(float8), … 9 = sum(int2 ± const)→int8 (M166). attno is the 1-based column (0 for count). `delta` carries the
+/// SumIntAddConst offset (kind 9, sign already folded); 0 for every other kind.
 #[derive(Clone)]
 struct ParsedAgg {
     kind: i32,
     attno: i32,
+    delta: i64,
 }
 
 /// Admission guard: is this a simple `count(*)` / `sum(float8)` aggregate (no GROUP BY/HAVING/WHERE/DISTINCT/window)
@@ -657,6 +659,69 @@ fn parse_agg_kind(name: &str, vartype: pg_sys::Oid) -> Option<i32> {
     Some(kind)
 }
 
+/// M166 — classify a `SUM(int2_col ± const)` aggregate argument (ClickBench q29) into the SAFE `SumIntAddConst` slot
+/// (kind 9), or `None` (→ the caller declines fail-closed). The provably-byte-identical class is NARROWER than the
+/// GROUP BY `IntAddConst` gate (line ~785): that path materializes each per-row value and reproduces PG's 22003 with a
+/// range check, but a SUM only sums — it never forms the per-row int4 — so we admit ONLY inputs where the whole int2
+/// domain ± delta provably stays inside int4 (then PG raises no 22003 and the Int64 sum is exact). Requirements, all
+/// fail-closed: `Var(int2 base-rel col) <+/-> Const(int)` canonical shape (const on the right; sign folded into
+/// `delta`), an int4 operator RESULT type (`int2 ± int4-const → int4`), and `±32768 + delta` both fit int4. An int4/int8
+/// base column, an int2 or int8 result, a non-additive op, a float/numeric const, or an out-of-range delta all decline.
+unsafe fn classify_sum_int_add_const(node: *mut pg_sys::Node, relid: i32) -> Option<TargetSlot> {
+    let op = node as *mut pg_sys::OpExpr;
+    let opname_ptr = pg_sys::get_opname((*op).opno);
+    if opname_ptr.is_null() {
+        return None;
+    }
+    let opname = CStr::from_ptr(opname_ptr).to_string_lossy().into_owned();
+    if opname != "+" && opname != "-" {
+        return None; // additive int arithmetic only
+    }
+    let args = PgList::<pg_sys::Node>::from_pg((*op).args);
+    if args.len() != 2 {
+        return None;
+    }
+    let (a0, a1) = (args.get_ptr(0)?, args.get_ptr(1)?);
+    // Canonical `Var <op> Const` only (`k - col` is not `col - k`; decline the non-canonical form).
+    if (*a0).type_ != pg_sys::NodeTag::T_Var || (*a1).type_ != pg_sys::NodeTag::T_Const {
+        return None;
+    }
+    let var = a0 as *mut pg_sys::Var;
+    let konst = a1 as *mut pg_sys::Const;
+    if (*var).varno as i32 != relid || (*konst).constisnull {
+        return None;
+    }
+    let attno = (*var).varattno as i32;
+    if attno <= 0 {
+        return None; // system / whole-row column
+    }
+    // int2 base column ONLY: `int4col ± k` can overflow int4 per row (PG raises 22003) and the widened Int64 sum would
+    // silently succeed instead — not byte-identical. int8/float/temporal base also decline.
+    if (*var).vartype.to_u32() != 21 {
+        return None;
+    }
+    // Result type MUST be int4 (`int2 ± int4-const → int4`). An int2 result (`int2 ± int2-const`) declines — per-row
+    // int2 overflow is reachable and un-reproduced by a widened sum; an int8 result declines likewise.
+    if (*op).opresulttype.to_u32() != 23 {
+        return None;
+    }
+    // Read the const in its own int type → i64. A non-integer const → decline.
+    let k: i64 = match (*konst).consttype.to_u32() {
+        21 => i16::from_datum((*konst).constvalue, false)? as i64,
+        23 => i32::from_datum((*konst).constvalue, false)? as i64,
+        20 => i64::from_datum((*konst).constvalue, false)?,
+        _ => return None,
+    };
+    // Fold the operator sign into `delta`: `col - k` == `col + (-k)`. `-i64::MIN` overflow → decline.
+    let delta = if opname == "-" { k.checked_neg()? } else { k };
+    // PROVE no per-row int4 overflow over the WHOLE int2 domain ± delta: both extremes must fit int4. (`int2 ± huge
+    // int4-const` CAN overflow int4 — e.g. 32767 + 2147483647; declining it keeps the "sum is exact" argument sound and
+    // lets the native plan reproduce PG's 22003.) This is the check the GROUP BY IntAddConst gate does not need.
+    i32::try_from(32767i64.checked_add(delta)?).ok()?;
+    i32::try_from((-32768i64).checked_add(delta)?).ok()?;
+    Some(TargetSlot::Agg(ParsedAgg { kind: 9, attno, delta }))
+}
+
 /// Classifica UM nó do output target: uma group `Var` (só quando há GROUP BY) ou um `Aggref` suportado. Retorna
 /// `None` (→ decline) exatamente para os mesmos nós que os ramos inline do `admit` original rejeitavam — o
 /// fail-safe `aggsplit != AGGSPLIT_SIMPLE` incluso (council-rust-pgrx HIGH).
@@ -879,7 +944,7 @@ unsafe fn classify_target_node(
         let name = CStr::from_ptr(fname).to_string_lossy();
         if name == "count" && (*agg).aggstar {
             // count(*) is never DISTINCT — kind 0.
-            Some(TargetSlot::Agg(ParsedAgg { kind: 0, attno: 0 }))
+            Some(TargetSlot::Agg(ParsedAgg { kind: 0, attno: 0, delta: 0 }))
         } else if name == "count" && has_distinct {
             // count(DISTINCT col) — M154 (kind 8). Exactly 1 base-rel Var of an Arrow-decodable type, and — for
             // collatable (text) columns — a DETERMINISTIC collation (ADR-M154-3 / edge EC-1): DataFusion's
@@ -923,7 +988,7 @@ unsafe fn classify_target_node(
                 admit_trace("count_distinct_nondeterministic_collation");
                 return None;
             }
-            Some(TargetSlot::Agg(ParsedAgg { kind: 8, attno }))
+            Some(TargetSlot::Agg(ParsedAgg { kind: 8, attno, delta: 0 }))
         } else if !has_distinct && (name == "sum" || name == "avg" || name == "min" || name == "max") {
             let args = PgList::<pg_sys::TargetEntry>::from_pg((*agg).args);
             if args.len() != 1 {
@@ -931,7 +996,20 @@ unsafe fn classify_target_node(
             }
             let te = args.get_ptr(0)?;
             let e = (*te).expr as *mut pg_sys::Node;
-            if e.is_null() || (*e).type_ != pg_sys::NodeTag::T_Var {
+            if e.is_null() {
+                return None;
+            }
+            // M166 — SUM(int2_col ± const) (ClickBench q29): the argument is an OpExpr, not a bare Var. Admit the
+            // provably-byte-identical `int2 base + int4 result` class here; every other expr shape (min/avg/max of an
+            // expression, or a SUM that fails the safe-class gate) declines to the native plan below (fail-closed).
+            if name == "sum" && (*e).type_ == pg_sys::NodeTag::T_OpExpr {
+                if let Some(slot) = classify_sum_int_add_const(e, relid) {
+                    return Some(slot);
+                }
+                admit_trace("agg_sum_expr_unsupported"); // int4-col / int8 result / non-additive / out-of-range → native
+                return None;
+            }
+            if (*e).type_ != pg_sys::NodeTag::T_Var {
                 admit_trace("agg_over_expression"); // M152
                 return None; // bare column Var only — reject min(col+1) / cast (directory is pre-projection)
             }
@@ -940,7 +1018,7 @@ unsafe fn classify_target_node(
                 return None;
             }
             let kind = parse_agg_kind(&name, (*var).vartype)?;
-            Some(TargetSlot::Agg(ParsedAgg { kind, attno: (*var).varattno as i32 }))
+            Some(TargetSlot::Agg(ParsedAgg { kind, attno: (*var).varattno as i32, delta: 0 }))
         } else {
             // Includes sum/avg/min/max(DISTINCT ...) → declined (ADR-M154-2).
             admit_trace("unsupported_agg_func");
@@ -1373,6 +1451,28 @@ unsafe fn deparse_safe_tlist(
                                 (*v).varcollid,
                                 0,
                             ) as *mut pg_sys::Expr;
+                        } else if pa.kind == 9 && !av.is_null() && (*av).type_ == pg_sys::NodeTag::T_OpExpr {
+                            // M166 — the SumIntAddConst argument is `OpExpr(Var(base int2), Const)`. Its nested Var is
+                            // OUTER_VAR post-set_plan_refs (into the subtree we dropped); leaving it would make
+                            // ruleutils' deparse of the aggregate argument follow OUTER_VAR through this scanrelid=0
+                            // node (the M131 #135 EXPLAIN hazard). Replace the whole argument with a fresh base-rel Var
+                            // of the base column's type — resolvable and descriptor-equal (exprType(Aggref)=int8 is
+                            // unchanged); EXPLAIN then shows `sum(<col>)` (cosmetic — the `+ k` is folded into the
+                            // executed sum, byte-identical, same convention as the group-expr slot's base-column deparse).
+                            let inner = PgList::<pg_sys::Node>::from_pg((*(av as *mut pg_sys::OpExpr)).args);
+                            let Some(iv) = inner.get_ptr(0) else { return std::ptr::null_mut() };
+                            if (*iv).type_ != pg_sys::NodeTag::T_Var {
+                                return std::ptr::null_mut(); // admit guaranteed a Var arg; otherwise decline the swap
+                            }
+                            let v = iv as *mut pg_sys::Var;
+                            (*ate).expr = pg_sys::makeVar(
+                                scanrelid as i32,
+                                attno as pg_sys::AttrNumber,
+                                (*v).vartype,
+                                (*v).vartypmod,
+                                (*v).varcollid,
+                                0,
+                            ) as *mut pg_sys::Expr;
                         }
                     }
                 }
@@ -1391,8 +1491,8 @@ unsafe fn deparse_safe_tlist(
 }
 
 /// Encode a stashed admission as the CustomScan's `custom_private` IntList (M115 layout, table OID first):
-/// `[table_oid, mode, nagg, (kind,attno)×nagg, npred, (col,op,hi,lo)×npred, ngroup, (attno,typoid)×ngroup,
-///  noutput, (kind,idx)×noutput]`.
+/// `[table_oid, mode, nagg, (kind,attno,delta_hi,delta_lo)×nagg, npred, (col,op,hi,lo)×npred, ngroup,
+///  (attno,typoid)×ngroup, noutput, (kind,idx)×noutput]`. (M166 — `delta` is the SumIntAddConst offset, 0 otherwise.)
 unsafe fn encode_private(adm: &Admitted, table_oid: u32) -> *mut pg_sys::List {
     let mut pl = pg_sys::lappend_int(std::ptr::null_mut(), table_oid as i32);
     pl = pg_sys::lappend_int(pl, adm.mode);
@@ -1400,6 +1500,9 @@ unsafe fn encode_private(adm: &Admitted, table_oid: u32) -> *mut pg_sys::List {
     for a in &adm.aggs {
         pl = pg_sys::lappend_int(pl, a.kind);
         pl = pg_sys::lappend_int(pl, a.attno);
+        // M166 — delta (SumIntAddConst offset, kind 9; 0 otherwise) split hi/lo i32 like the IN-list/const-out words.
+        pl = pg_sys::lappend_int(pl, (a.delta >> 32) as i32);
+        pl = pg_sys::lappend_int(pl, (a.delta & 0xFFFF_FFFF) as i32);
     }
     pl = pg_sys::lappend_int(pl, adm.preds.len() as i32);
     for p in &adm.preds {
@@ -2093,7 +2196,7 @@ unsafe extern "C-unwind" fn begin_custom_scan(
             pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
             return r;
         }
-        // IntList: [mode, relid, nagg, (kind,attno)×nagg, npred, (col,op,hi,lo)×npred,
+        // IntList: [mode, relid, nagg, (kind,attno,delta_hi,delta_lo)×nagg, npred, (col,op,hi,lo)×npred,
         //           ngroup, (attno,typoid)×ngroup, noutput, (kind,idx)×noutput].
         let nagg = pg_sys::list_nth_int(priv_list, 2) as usize;
         let mut specs = Vec::with_capacity(nagg);
@@ -2101,7 +2204,12 @@ unsafe extern "C-unwind" fn begin_custom_scan(
         for _ in 0..nagg {
             let kind = pg_sys::list_nth_int(priv_list, i);
             let attno = pg_sys::list_nth_int(priv_list, i + 1);
-            i += 2;
+            // M166 — delta (SumIntAddConst offset, kind 9; 0 for every other kind), reconstructed from its hi/lo i32
+            // pair (a `List` Integer is i32, so an i64 rides two words — same split as the IN-list/const-out channels).
+            let dhi = pg_sys::list_nth_int(priv_list, i + 2);
+            let dlo = pg_sys::list_nth_int(priv_list, i + 3);
+            let delta = ((dhi as i64) << 32) | (dlo as u32 as i64);
+            i += 4;
             let col_name = |ano: i32| -> String {
                 let nm = pg_sys::get_attname(relid, ano as pg_sys::AttrNumber, false);
                 CStr::from_ptr(nm).to_string_lossy().into_owned()
@@ -2120,6 +2228,7 @@ unsafe extern "C-unwind" fn begin_custom_scan(
                 6 => specs.push(AggSpec::MinCol(col_name(attno), col_typoid(attno))),
                 7 => specs.push(AggSpec::MaxCol(col_name(attno), col_typoid(attno))),
                 8 => specs.push(AggSpec::CountDistinct(col_name(attno))), // M154
+                9 => specs.push(AggSpec::SumIntAddConst { col: col_name(attno), delta }), // M166
                 _ => return Err(format!("columnar_agg: bad agg kind {kind}")),
             }
         }
