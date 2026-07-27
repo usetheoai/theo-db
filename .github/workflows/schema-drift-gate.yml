@@ -50,7 +50,7 @@ concurrency:
 
 jobs:
   drift:
-    runs-on: [self-hosted, theodb-do]
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4

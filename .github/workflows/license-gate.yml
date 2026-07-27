@@ -33,7 +33,7 @@ concurrency:
 
 jobs:
   d1:
-    runs-on: [self-hosted, theodb-do]
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4

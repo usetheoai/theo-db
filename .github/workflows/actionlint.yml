@@ -40,7 +40,7 @@ concurrency:
 
 jobs:
   actionlint:
-    runs-on: [self-hosted, theodb-do]
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
     # Medido: o scan dos 10 workflows leva segundos. 10 min é folga para o pull da imagem num
     # runner frio, não uma estimativa do trabalho.
     timeout-minutes: 10

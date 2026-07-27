@@ -48,7 +48,7 @@ concurrency:
 
 jobs:
   lint:
-    runs-on: [self-hosted, theodb-do]
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
     timeout-minutes: 30
     defaults:
       run:

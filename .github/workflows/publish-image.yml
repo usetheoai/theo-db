@@ -69,12 +69,15 @@ jobs:
       trivy: true
       sign: ${{ startsWith(github.ref, 'refs/tags/v') }}
       verify: ${{ startsWith(github.ref, 'refs/tags/v') }}
-      # GitHub-hosted está bloqueado por billing neste org. Usa o label ESPECÍFICO `theodb-do` (mesmo
-      # de todos os outros workflows deste repo, `runs-on: [self-hosted, theodb-do]`) e NÃO o genérico
-      # `["self-hosted","linux","x64"]` do playbook: os runners da máquina theo-ci-runner (2 GB / 2 vCPU,
-      # que serve theo-cloud/theo-lens/theo-memory) carregam exatamente esses labels genéricos, e um job
-      # que compila Rust + PostgreSQL não cabe lá. O label específico prende o build na máquina de 8 vCPU.
-      runner: '["self-hosted","theodb-do"]'
+      # Mesma variável que todo job próprio deste repo consome — um só lugar governa a frota.
+      # O reusable recebe a STRING JSON (ele faz o `fromJSON` do lado dele), então aqui NÃO se
+      # envolve em `fromJSON`; o `||` continua sendo o fallback contra variável ausente.
+      #
+      # Por que o default é `theodb-do` e não o genérico `["self-hosted","linux","x64"]` do playbook:
+      # os runners da máquina theo-ci-runner (2 vCPU / 2 GB, que serve theo-cloud/theo-lens/
+      # theo-memory) carregam exatamente esses labels genéricos, e um build que compila Rust +
+      # PostgreSQL não cabe lá. O label específico prende o build na máquina de 8 vCPU.
+      runner: ${{ vars.CI_RUNNER || '["self-hosted","theodb-do"]' }}
     # SEM bloco `secrets:` — e sem `secrets: inherit`, que é o que o semgrep barra. O `secrets: {}`
     # anterior expressava a mesma intenção (não repassar nada) mas o actionlint o rejeita como seção
     # vazia; omitir tem efeito idêntico e satisfaz os dois linters. O TheoDB não consome módulo Go
