@@ -1,6 +1,8 @@
 # M166 review — wide `SUM(int2 ± const)` pushdown (ClickBench q29)
 
-**Date:** 2026-07-27 · **Verdict:** READY_TO_MERGE · **Commits:** db7040c (feat) + 4016d98 (review fix)
+**Verdict:** READY_TO_MERGE
+
+**Date:** 2026-07-27 · **Commits:** db7040c (feat) + 4016d98 (review fix)
 **Reviewers:** council-rust-pgrx (code safety), council-benchmark (measurement honesty)
 
 ## Severity matrix
