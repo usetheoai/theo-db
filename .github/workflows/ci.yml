@@ -164,11 +164,14 @@ jobs:
             sleep 2
           done
           docker inspect -f '{{.State.Health.Status}}' theo-db-ci | grep -q healthy
-          echo "PGPORT=$(docker port theo-db-ci 5432/tcp | head -1 | sed 's/.*://')" >> "$GITHUB_ENV"
+          # Validated, never assumed: consumers read `${PGPORT:-5432}`, so an EMPTY value does not
+          # fail — it silently falls back to 5432, where nothing listens once the port is ephemeral.
+          # That turns a resolution bug into a baffling "connection refused" three steps later.
+          port="$(docker port theo-db-ci 5432/tcp | head -1 | sed 's/.*://')"
+          case "$port" in ''|*[!0-9]*) echo "::error::PGPORT resolution failed for theo-db-ci (got: '$port')"; exit 1;; esac
+          echo "PGPORT=$port" >> "$GITHUB_ENV"
 
       - name: Smoke (M0 — pgvector)
-        env:
-          PGPORT: ${{ env.PGPORT }}
         run: bash scripts/smoke.sh
 
       - name: CA bundle present (theodb.embed HTTPS cloud providers — regression guard)
@@ -214,7 +217,6 @@ jobs:
         working-directory: benchmarks
         env:
           PGHOST: localhost
-          PGPORT: ${{ env.PGPORT }}
           PGUSER: postgres
           PGPASSWORD: postgres
           PGDATABASE: postgres
@@ -237,7 +239,6 @@ jobs:
         working-directory: benchmarks
         env:
           PGHOST: localhost
-          PGPORT: ${{ env.PGPORT }}
           PGUSER: postgres
           PGPASSWORD: postgres
           PGDATABASE: postgres
@@ -342,11 +343,14 @@ jobs:
             sleep 2
           done
           docker inspect -f '{{.State.Health.Status}}' theo-db-hyb | grep -q healthy
-          echo "PGPORT=$(docker port theo-db-hyb 5432/tcp | head -1 | sed 's/.*://')" >> "$GITHUB_ENV"
+          # Validated, never assumed: consumers read `${PGPORT:-5432}`, so an EMPTY value does not
+          # fail — it silently falls back to 5432, where nothing listens once the port is ephemeral.
+          # That turns a resolution bug into a baffling "connection refused" three steps later.
+          port="$(docker port theo-db-hyb 5432/tcp | head -1 | sed 's/.*://')"
+          case "$port" in ''|*[!0-9]*) echo "::error::PGPORT resolution failed for theo-db-hyb (got: '$port')"; exit 1;; esac
+          echo "PGPORT=$port" >> "$GITHUB_ENV"
 
       - name: Hybrid smoke (ai.hybrid_search_rrf golden top-k assertion)
-        env:
-          PGPORT: ${{ env.PGPORT }}
         run: bash scripts/smoke.sh
 
       - uses: actions/setup-python@v5
@@ -365,7 +369,6 @@ jobs:
         working-directory: benchmarks
         env:
           PGHOST: localhost
-          PGPORT: ${{ env.PGPORT }}
           PGUSER: postgres
           PGPASSWORD: postgres
           PGDATABASE: postgres
@@ -406,11 +409,14 @@ jobs:
             sleep 2
           done
           docker inspect -f '{{.State.Health.Status}}' theo-db-ai | grep -q healthy
-          echo "PGPORT=$(docker port theo-db-ai 5432/tcp | head -1 | sed 's/.*://')" >> "$GITHUB_ENV"
+          # Validated, never assumed: consumers read `${PGPORT:-5432}`, so an EMPTY value does not
+          # fail — it silently falls back to 5432, where nothing listens once the port is ephemeral.
+          # That turns a resolution bug into a baffling "connection refused" three steps later.
+          port="$(docker port theo-db-ai 5432/tcp | head -1 | sed 's/.*://')"
+          case "$port" in ''|*[!0-9]*) echo "::error::PGPORT resolution failed for theo-db-ai (got: '$port')"; exit 1;; esac
+          echo "PGPORT=$port" >> "$GITHUB_ENV"
 
       - name: AI presence smoke (functions present + non-PUBLIC, no network)
-        env:
-          PGPORT: ${{ env.PGPORT }}
         run: bash scripts/smoke.sh
 
       - uses: actions/setup-python@v5
@@ -425,7 +431,6 @@ jobs:
         working-directory: benchmarks
         env:
           PGHOST: localhost
-          PGPORT: ${{ env.PGPORT }}
           PGUSER: postgres
           PGPASSWORD: postgres
           PGDATABASE: postgres
@@ -473,7 +478,12 @@ jobs:
             sleep 2
           done
           docker inspect -f '{{.State.Health.Status}}' theo-db-bm25c | grep -q healthy
-          echo "PGPORT=$(docker port theo-db-bm25c 5432/tcp | head -1 | sed 's/.*://')" >> "$GITHUB_ENV"
+          # Validated, never assumed: consumers read `${PGPORT:-5432}`, so an EMPTY value does not
+          # fail — it silently falls back to 5432, where nothing listens once the port is ephemeral.
+          # That turns a resolution bug into a baffling "connection refused" three steps later.
+          port="$(docker port theo-db-bm25c 5432/tcp | head -1 | sed 's/.*://')"
+          case "$port" in ''|*[!0-9]*) echo "::error::PGPORT resolution failed for theo-db-bm25c (got: '$port')"; exit 1;; esac
+          echo "PGPORT=$port" >> "$GITHUB_ENV"
 
       - uses: actions/setup-python@v5
         with:
@@ -487,7 +497,6 @@ jobs:
         working-directory: benchmarks
         env:
           PGHOST: localhost
-          PGPORT: ${{ env.PGPORT }}
           PGUSER: postgres
           PGPASSWORD: postgres
           PGDATABASE: postgres
@@ -526,10 +535,13 @@ jobs:
             sleep 2
           done
           docker inspect -f '{{.State.Health.Status}}' theo-db-nl | grep -q healthy
-          echo "PGPORT=$(docker port theo-db-nl 5432/tcp | head -1 | sed 's/.*://')" >> "$GITHUB_ENV"
+          # Validated, never assumed: consumers read `${PGPORT:-5432}`, so an EMPTY value does not
+          # fail — it silently falls back to 5432, where nothing listens once the port is ephemeral.
+          # That turns a resolution bug into a baffling "connection refused" three steps later.
+          port="$(docker port theo-db-nl 5432/tcp | head -1 | sed 's/.*://')"
+          case "$port" in ''|*[!0-9]*) echo "::error::PGPORT resolution failed for theo-db-nl (got: '$port')"; exit 1;; esac
+          echo "PGPORT=$port" >> "$GITHUB_ENV"
       - name: NL→SQL presence smoke (functions present + non-PUBLIC, no network)
-        env:
-          PGPORT: ${{ env.PGPORT }}
         run: bash scripts/smoke.sh
       - uses: actions/setup-python@v5
         with:
@@ -541,7 +553,6 @@ jobs:
         working-directory: benchmarks
         env:
           PGHOST: localhost
-          PGPORT: ${{ env.PGPORT }}
           PGUSER: postgres
           PGPASSWORD: postgres
           PGDATABASE: postgres
@@ -550,7 +561,6 @@ jobs:
         working-directory: benchmarks
         env:
           PGHOST: localhost
-          PGPORT: ${{ env.PGPORT }}
           PGUSER: postgres
           PGPASSWORD: postgres
           PGDATABASE: postgres
@@ -577,7 +587,12 @@ jobs:
           docker run -d --name theo-db-col -e POSTGRES_PASSWORD=postgres -p 5432 theo-db-columnar
           for i in $(seq 1 40); do docker exec theo-db-col pg_isready -U postgres -q && break; sleep 2; done
           docker exec theo-db-col pg_isready -U postgres -q
-          echo "PGPORT=$(docker port theo-db-col 5432/tcp | head -1 | sed 's/.*://')" >> "$GITHUB_ENV"
+          # Validated, never assumed: consumers read `${PGPORT:-5432}`, so an EMPTY value does not
+          # fail — it silently falls back to 5432, where nothing listens once the port is ephemeral.
+          # That turns a resolution bug into a baffling "connection refused" three steps later.
+          port="$(docker port theo-db-col 5432/tcp | head -1 | sed 's/.*://')"
+          case "$port" in ''|*[!0-9]*) echo "::error::PGPORT resolution failed for theo-db-col (got: '$port')"; exit 1;; esac
+          echo "PGPORT=$port" >> "$GITHUB_ENV"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -588,7 +603,6 @@ jobs:
         working-directory: benchmarks
         env:
           PGHOST: localhost
-          PGPORT: ${{ env.PGPORT }}
           PGUSER: postgres
           PGPASSWORD: postgres
           PGDATABASE: postgres
