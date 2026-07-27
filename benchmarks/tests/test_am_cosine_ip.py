@@ -7,6 +7,11 @@ import os
 import psycopg2
 import pytest
 
+# Requires a live Postgres (see tests/test_marker_hygiene.py): without this marker the
+# module is pulled into the container-free `-m "not integration"` tier, where it can only
+# burn its connect_timeout and error.
+pytestmark = pytest.mark.integration
+
 PGHOST = os.environ.get("PGHOST", "localhost")
 PGPORT = os.environ.get("PGPORT", "55448")
 PGUSER = os.environ.get("PGUSER", "postgres")

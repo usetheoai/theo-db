@@ -10,9 +10,9 @@ ADD https://github.com/pgvector/pgvector.git#586e7515bafe6912c425164d186d5655065
 RUN cd /tmp/pgvector && make OPTFLAGS="" && make install && rm -rf /tmp/pgvector
 
 # pgvectorscale — copia os artefatos já compilados da imagem runtime (o umbrella `theodb` os requer via CASCADE)
-COPY --from=theodb:m49-p3 /usr/lib/postgresql/17/lib/vectorscale-0.9.0.so /usr/lib/postgresql/17/lib/
-COPY --from=theodb:m49-p3 /usr/share/postgresql/17/extension/vectorscale.control /usr/share/postgresql/17/extension/
-COPY --from=theodb:m49-p3 /usr/share/postgresql/17/extension/vectorscale--0.9.0.sql /usr/share/postgresql/17/extension/
+COPY --from=theodb:m49-p3 /usr/lib/postgresql/$PG_MAJOR/lib/vectorscale-0.9.0.so /usr/lib/postgresql/$PG_MAJOR/lib/
+COPY --from=theodb:m49-p3 /usr/share/postgresql/$PG_MAJOR/extension/vectorscale.control /usr/share/postgresql/$PG_MAJOR/extension/
+COPY --from=theodb:m49-p3 /usr/share/postgresql/$PG_MAJOR/extension/vectorscale--0.9.0.sql /usr/share/postgresql/$PG_MAJOR/extension/
 
 # umbrella `theodb` (SQL-only, PGXS) — control + sql do repo
 COPY theodb.control /tmp/theodb-umbrella/

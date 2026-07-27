@@ -7,6 +7,33 @@ USER="${PGUSER:-postgres}"
 PGPASSWORD="${PGPASSWORD:-postgres}"
 export PGPASSWORD
 
+# --- PostgreSQL client resolution -------------------------------------------------------------
+# This smoke deliberately connects from OUTSIDE the database container, over the PUBLISHED port —
+# that is the path a real user takes, and precisely what a `docker exec` test would never exercise.
+# So it needs psql/pg_isready on the caller, and the CI runner does not ship them.
+#
+# That gap stayed invisible for as long as these jobs died earlier, on the fixed-port collision:
+# the script was never reached. Fixing the port surfaced it as `pg_isready: command not found`
+# (exit 127) across all four jobs that call this script.
+#
+# Installing a host package is not an option (no root on the runner), and switching to `docker exec`
+# would silently change WHAT is asserted. Instead, fall back to a containerized client sharing the
+# host network namespace: `localhost:$PORT` there resolves to the very same published port, so every
+# assertion below keeps its exact meaning. Costs ~1s per invocation, and only when the host lacks
+# the client — a developer with psql installed pays nothing.
+if ! command -v pg_isready >/dev/null 2>&1 || ! command -v psql >/dev/null 2>&1; then
+  SMOKE_CLIENT_IMAGE="${SMOKE_CLIENT_IMAGE:-postgres:18-bookworm}"
+  command -v docker >/dev/null 2>&1 || {
+    echo "ERROR: this smoke needs either the PostgreSQL client (psql/pg_isready) or docker to run a" >&2
+    echo "       containerized one; neither is available. Install postgresql-client and retry." >&2
+    exit 2
+  }
+  echo "note: no host PostgreSQL client — using $SMOKE_CLIENT_IMAGE over the host network namespace"
+  # `-i` keeps stdin open for the heredocs below; `-e PGPASSWORD` forwards the exported value.
+  pg_isready() { docker run --rm --network host -e PGPASSWORD "$SMOKE_CLIENT_IMAGE" pg_isready "$@"; }
+  psql()       { docker run --rm -i --network host -e PGPASSWORD "$SMOKE_CLIENT_IMAGE" psql "$@"; }
+fi
+
 for i in $(seq 1 10); do
   pg_isready -h "$HOST" -p "$PORT" -U "$USER" -q && break
   sleep 1

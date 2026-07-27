@@ -20,6 +20,11 @@ import urllib.request
 import psycopg2
 import pytest
 
+# Requires a live Postgres (see tests/test_marker_hygiene.py): without this marker the
+# module is pulled into the container-free `-m "not integration"` tier, where it can only
+# burn its connect_timeout and error.
+pytestmark = pytest.mark.integration
+
 _REPO = pathlib.Path(__file__).resolve().parents[2]
 
 

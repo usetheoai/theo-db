@@ -21,6 +21,11 @@ import time
 import psycopg2
 import pytest
 
+# Requires a live Postgres (see tests/test_marker_hygiene.py): without this marker the
+# module is pulled into the container-free `-m "not integration"` tier, where it can only
+# burn its connect_timeout and error.
+pytestmark = pytest.mark.integration
+
 CONTAINER = os.environ.get("THEODB_CRASH_CONTAINER", "theodb-m48-verify")
 PGHOST = os.environ.get("PGHOST", "localhost")
 PGPORT = os.environ.get("PGPORT", "55448")

@@ -1,0 +1,30 @@
+# Trivy CVE allowlist for the shipped TheoDB image (ghcr.io/usetheodev/theo-db).
+#
+# WHY THIS FILE MUST EXIST AT ALL:
+# The reusable publish workflow (usetheodev/theo/.github/workflows/build-publish.yml) passes
+# `trivyignores: .trivyignore` to aquasecurity/trivy-action. When the file is ABSENT, Trivy does not
+# fall back to "no ignores" — it aborts before scanning:
+#
+#     ERROR: cannot find ignorefile '.trivyignore'.
+#     ##[error]Process completed with exit code 1.
+#
+# The job then fails in ~2 seconds, which looks like a CVE gate doing its job but is the exact
+# opposite: nothing was ever scanned. Every `publish` run died there, so the image was never pushed —
+# the root cause of #187 (`docker pull ghcr.io/usetheodev/theo-db:latest` -> `manifest unknown`, the
+# first command in the README). An EMPTY-but-present file is what makes the gate actually run.
+#
+# Format (mirrors .claude/rules/deps-audit-allowlist.txt):
+#   CVE-ID   # sunset: YYYY-MM-DD — reason
+#
+# Sunset discipline per .claude/rules/deps-audit-golden-rule.md § 4:
+#   - CRITICAL CVEs: sunset <= 30 days
+#   - HIGH CVEs:     sunset <= 60 days
+#   - MEDIUM CVEs:   sunset <= 90 days
+# An expired entry is NOT honored — the finding re-fires at full severity.
+#
+# Lines beginning with `#` are comments. Each non-comment line is a bare CVE ID.
+#
+# INTENTIONALLY EMPTY: no CVE is allowlisted. Adding an entry requires a CHANGELOG note under
+# `[Unreleased] § Changed` and — for HIGH/CRITICAL — an ADR, per the deps-audit golden rule.
+# If the gate now fails with real CRITICAL/HIGH findings, that is a genuine security result on an
+# image that has never been scanned; triage the CVEs, do not pad this file.

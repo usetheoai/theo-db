@@ -15,6 +15,11 @@ import re
 import psycopg2
 import pytest
 
+# Requires a live Postgres (see tests/test_marker_hygiene.py): without this marker the
+# module is pulled into the container-free `-m "not integration"` tier, where it can only
+# burn its connect_timeout and error.
+pytestmark = pytest.mark.integration
+
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 CONTROL = ROOT / "theodb.control"
 INSTALL_SQL = ROOT / "sql" / "theodb--1.0.sql"          # generated (gitignored); built by `make theodb-build`
