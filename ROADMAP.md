@@ -2880,6 +2880,89 @@ bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan s�
 ---
 
 
+## M160 — [ ] Decode zero-copy fixed-width → Arrow (elimina a ponte `Vec<Option<Vec<u8>>>`) — perf da classe COBERTA
+
+> **Layer A — o MAIOR ROI do deep-dive pós-M159** (`knowledge-base/discoveries/blueprints/columnar-improvement-deepdive-blueprint.md`). Added 2026-07-26 (`/roadmap-feature columnar-improvement-layers`). Descoberta não-óbvia: a classe COBERTA (32/43 queries de pushdown) **não** roda `form_row` (o gargalo M148), mas paga um gêmeo nunca perfilado — a ponte de decode: `decode_column` (`columnar_codec.rs:293,308`) aloca CADA célula num `Vec<u8>` (`.to_vec()`) e `build_arrow` (`df_executor.rs:49-137`) RE-LÊ e copia p/ Arrow (dupla-passada + tempestade de malloc/page-fault). Flamegraph do path de pushdown CONFIRMOU (direcional, 318 amostras: `build_arrow`+`decode_column`+`malloc`+`clear_page_erms` dominam; compute do DataFusion ausente). Um fix estrutural melhora as 32 queries de uma vez.
+
+**Objective:** decodificar colunas fixed-width não-nulas direto num buffer Arrow via `arrow::buffer::Buffer::from_vec(raw)` (o buffer zstd-descomprimido JÁ é `[val0_LE][val1_LE]…` = o layout de `Int32Array`/`Int64Array`/`TimestampMicrosecondArray`), eliminando o `.to_vec()` por-célula + a re-cópia de `build_arrow` no path de pushdown colunar — pure-Rust, main-thread, sem `pg_sys`.
+
+**Efficiency target (medido, regra 5):**
+
+- Baseline M159: classe coberta **geomean 7.54× vs ClickHouse** (mesma-box, 1M ClickBench); DuckDB 1.8×, pg_mooncake 6.2× são o landscape (`docs/benchmarks/m159-clickhouse-gap-verdict.md`).
+- Meta: **reduzir o geomean da classe coberta** (rumo a 2-3×) com o flamegraph do path de pushdown provando que `build_arrow`+`decode_column`+`malloc` caem — não estimado, MEDIDO.
+
+**Definition of done (measurement-first):**
+
+- [ ] **Gate Fase 1:** flamegraph do path de pushdown numa query pure-int coberta com **≥500 amostras** confirmando o self-time de `decode_column`/`build_arrow` ANTES de construir (o flamegraph do deep-dive foi 318 amostras, text-heavy — direcional).
+- [ ] `Buffer::from_vec` zero-copy p/ colunas fixed-width; texto/varlena/nullable mantêm o caminho de cópia (fail-safe).
+- [ ] A/B byte-idêntico vs heap (`result_ab.diverged == 0`) — o layout Arrow deve ser idêntico ao decode atual.
+- [ ] Re-run do harness M159 mostrando a queda MEDIDA do geomean da classe coberta (flamegraph antes/depois + número).
+- [ ] Honest-negative aceito se o ganho medido for marginal (anti-sunk-cost).
+- [ ] CHANGELOG `[Unreleased]`.
+
+**Dependencies:** M159 `[ ]` (o baseline medido que este milestone melhora).
+
+**Risks:** (a) endianness/alinhamento — `Buffer::from_vec` assume little-endian nativo (x86/ARM ok); guard explícito. (b) colunas nullable/varlena não são zero-copy — não regredir o caminho de cópia delas. (c) o ganho pode migrar em vez de sumir (ex.: p/ o zstd decode) → honest-negative medido.
+
+**Prior art / referências:** deep-dive blueprint (`columnar-improvement-deepdive-blueprint.md`, council-performance-simd); `references/papers/monetdb-x100-boncz-2005.pdf` (vetores L2-residentes) + `morsel-parallelism-leis-2014.pdf`; `references/arrow-rs/` (`Buffer::from_vec`, zero-copy); `references/datafusion/`; `docs/benchmarks/m148-flamegraph-scan.md` (o gargalo Volcano gêmeo) + `m159-clickhouse-gap-verdict.md`. Secundário (fast-follow, fora deste milestone): batches ~L2 (X100) + multi-core (tokio `rt-multi-thread`, hoje nem compilado — `Cargo.toml:57`; Amdahl-capado ~2× pelo decode serial PG-bound).
+
+---
+
+## M161 — [ ] Cobertura de roteamento de expressão ao DataFusion (as queries não-cobertas do ClickBench) — cobertura
+
+> **Layer B — o lever de COBERTURA das 11 não-cobertas** (deep-dive pós-M159, council-research-adr). Added 2026-07-26 (`/roadmap-feature columnar-improvement-layers`). A limitação é o NOSSO admit/serialização, não o DataFusion (que já computa tudo — `run_columnar_grouped_aggs` já passa `Vec<Expr>` ao `.aggregate()`). HONESTIDADE OBRIGATÓRIA: os blockers COMPÕEM (lição M152) → rotear uma classe destrava **~+3-5 queries, NÃO +11**; multi-key GROUP BY **já roteia** (REFUTADO); regexp é honest-negative (RE2≠POSIX).
+
+**Objective:** estender o admit/serialização colunar (generalização BOUNDED do canal group-expr do M157, NÃO um walker completo) para rotear as classes de expressão SEGURAS ao DataFusion: GROUP BY por `const`/`int±k`/`extract(unit epoch-invariante)`, e WHERE `IN`-list inteiro (`ScalarArrayOpExpr`, hoje nunca inspecionado) — cada classe passando pelo gauntlet de corretude (A/B byte-idêntico + guards).
+
+**Efficiency target (medido, honesto):**
+
+- Baseline M159: **11 queries não-cobertas em geomean 303×** (executor row-based do PG) arrastam o geral de 7.54× → **19.4×**.
+- Meta REALISTA: rotear **~+3-5** das 11 (as de blocker-único SEGURAS), derrubando o geomean geral rumo aos 7.54× da classe coberta — **NÃO "+11"** (blockers compostos; texto MIN/MAX é trap M158, regexp é honest-negative, HAVING-empilhado precisa de múltiplos slices).
+
+**Definition of done (measurement-first):**
+
+- [ ] Re-run `THEODB_ADMIT_TRACE=1` p/ confirmar a atribuição de blocker ANTES de cada slice (a taxonomia é ground-truth mas evolui com cada slice).
+- [ ] Slice #1 (maior cobertura, seguro): GROUP BY `const` + `int±k` + `extract(minute/hour/second/day)` reusando o canal `GroupExprSpec`/`GroupFunc` do M157, com guard de overflow int (PG erra 22003, Arrow wrap) e o whitelist epoch-invariante do M157.
+- [ ] Slice #2 (mais barato/seguro): `IN`-list inteiro sobre `ScalarArrayOpExpr` = OR de `=` já shipados; declinar `IN (NULL,…)` (precedente `pg_clickhouse/src/deparse.c:1096`).
+- [ ] A/B byte-idêntico por-query (`result_ab.diverged == 0`) + re-run do harness M159 mostrando as queries que flipam de non-pushdown → pushdown e a queda MEDIDA do geomean geral.
+- [ ] ADR com alternativas (bespoke-por-shape vs allowlist-bounded vs `foreign_expr_walker` completo) + os guards de colação/overflow registrados (precedente M151/M153/M157/M158).
+- [ ] Honest-negatives documentados (texto MIN/MAX só sob C/POSIX; regexp declinado; o que NÃO flipou).
+- [ ] CHANGELOG `[Unreleased]`.
+
+**Dependencies:** M159 `[ ]` (o baseline de cobertura). M160 recomendado antes (a ponte de decode acelera as queries recém-roteadas), mas não bloqueante.
+
+**Risks:** (a) gauntlet de corretude por classe — overflow int, colação de texto (M158), epoch de `extract` (M157) → cada slice é um mini-M157 com A/B. (b) tentação de contar "+11" — os blockers compõem; medir o ganho real, não o SQL-count (regra 5). (c) tax de serialização — o `custom_private` 3-canal só carrega leaves `Integer|String`; a generalização bounded evita reescrever isso (YAGNI).
+
+**Prior art / referências:** deep-dive blueprint (council-research-adr); `references/pg_clickhouse/src/deparse.c` (`foreign_expr_walker` — allowlist + colação-como-estado-de-primeira-classe, o modelo canônico); `references/datafusion/` (capacidade nativa de `.aggregate(Vec<Expr>)`, `case()`, `in_list`); `docs/benchmarks/m152-routing-map.md` (blockers-compõem) + `m159-artifacts/per-query-comparison.md`; precedentes M151/M153/M156/M157/M158.
+
+---
+
+## M162 — [ ] Medir o gap a 100M (larger-than-RAM) + encodings type-specific (se a medição justificar) — escala
+
+> **Layer C — a fronteira NÃO-MEDIDA** (deep-dive pós-M159). Added 2026-07-26 (`/roadmap-feature columnar-improvement-layers`). O M159 é 1M (cabe em RAM → `shared_blks_read≈0`, I/O não é o sinal). A 100M o precipício das não-cobertas provavelmente alarga e I/O/decode vira o lever. MEDIR PRIMEIRO — construir encoding sobre um palpite viola a regra 5. cstore_fdw é referência MORTA aqui (pglz, sem encodings); Parquet/ORC/ClickHouse são as referências.
+
+**Objective:** rodar o ClickBench a 100M numa box canônica (c6a.4xlarge, o `[NEEDS-100M]` do M159) para medir o gap real em escala larger-than-RAM, e — SÓ SE a medição justificar — adicionar encodings lightweight type-specific (delta p/ temporal/ordenado, dictionary/RLE p/ baixa-cardinalidade, frame-of-reference p/ inteiros) ANTES do zstd geral.
+
+**Efficiency target (medido, honesto):**
+
+- Baseline: `[NEEDS-100M]` — hoje sem número a 100M (o M159 marcou explicitamente que a razão 1M é um LOWER-bound do gap; a 100M provavelmente alarga).
+- Meta: **produzir o número honesto a 100M** (por-query + geral vs ClickHouse) e, se o decode/IO for o gargalo medido, encodings que reduzam bytes-decodificados sem quebrar A/B byte-idêntico.
+
+**Definition of done (measurement-first):**
+
+- [ ] Run ClickBench **100M** reproduzível (box documentada; usar o harness `run_m128_clickbench.py` + `m159_clickhouse_run.sh` mesma-box) — o número que o M159 deixou como `[NEEDS-100M]`.
+- [ ] Veredito honesto: a 100M, quais classes alargam vs 1M, e se I/O/decode virou o gargalo (aí sim encodings; senão, honest-negative — encoding não ajuda se CPU-bound).
+- [ ] SÓ SE justificado: encoding type-specific com A/B byte-idêntico + benchmark antes/depois + história de upgrade de formato (bump de magic + REINDEX, subsistema M137).
+- [ ] Artefato em `docs/benchmarks/` + CHANGELOG `[Unreleased]`.
+
+**Dependencies:** M159 `[ ]` (o baseline 1M). M160/M161 recomendados antes (medir a 100M o estado maximizado).
+
+**Risks:** (a) construir encoding sem medir a 100M primeiro → complexidade acidental sobre palpite (regra 5). (b) custo de infra da box 100M canônica — orçar, destruir ao fim, nunca deixar ociosa. (c) encoding é mudança de FORMATO PERSISTENTE → subsistema de upgrade (M137), não script SQL lateral; crash-safety + rollback obrigatórios.
+
+**Prior art / referências:** deep-dive blueprint (council-index-storage); `references/parquet-format/` (encodings delta/dict/RLE/FOR — a referência, NÃO cstore); `references/papers/cstore-stonebraker-2005.pdf` + `monetdb-x100-boncz-2005.pdf`; `references/duckdb/`; `references/papers/rigorous-perf-eval-georges-2007.pdf` (rigor a 100M); `docs/benchmarks/m159-clickhouse-gap-verdict.md` (o `[NEEDS-100M]`).
+
+---
+
 ## Sequência e paralelismo
 
 ```
