@@ -13,8 +13,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Roadmap amended: added M163 Harness A/B por-tipo (retro item A) + M164 Endurecer o harness de benchmark (retro items B+C) (`/roadmap-feature`).
 
 ### Changed
+- `rules/discover-phd-rigor.md`: added R3.1 (instrument-validates-against-architecture — retro item D; a measurement DoD must verify its instrument actually observes the thing measured, e.g. `shared_blks_read` cannot see `theodb_columnar`'s TAM-level I/O).
 
 ### Deprecated
 

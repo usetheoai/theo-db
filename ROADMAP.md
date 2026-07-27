@@ -2963,6 +2963,46 @@ bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan s�
 
 ---
 
+## M163 — [ ] Harness A/B por-tipo (fecha o gap recorrente "A/B passa, review acha o bug de classe-de-tipo") — qualidade
+
+> **Item A da retro M160-M162** (`/roadmap-feature`, 2026-07-27). Evidência dura: o oráculo A/B roda sobre o dado do ClickBench, que NÃO cobre o espaço de tipos — então o council review pega o defeito DEPOIS do rebuild de 14min. Recorre em M151 (temporal/float cross-type), M154 (float IEEE −0.0/NaN), M157 (epoch), M158 (colação), e no M161 pegou **1 BLOCKER + 2 HIGH** (int±k `opresulttype`, gate temporal via `minmax_kind_of`) que o A/B em `int4-int4` nunca exercitou. É o defeito mais caro e mais repetido do pilar colunar.
+
+**Objective:** um harness de A/B sobre uma tabela colunar SINTÉTICA com valores de BORDA por tipo — que qualquer mudança de roteamento colunar roda ANTES do sync/review — cobrindo o que o dado do benchmark não cobre: int2 em 32767/−32768, int4/int8 perto do max (widening cross-type `int2±int4→int4`), timestamp/date/timestamptz, float `−0.0`/`NaN`, texto não-UTF8 e colação não-C, e `NULL`. Para cada admit-path (zone-pred, IN-list, group-expr, agg): afirma byte-identidade vs heap OU decline correto por borda de tipo.
+
+**Definition of done:**
+
+- [ ] Harness existe (`benchmarks/columnar_type_ab.py` ou similar) + roda contra uma tabela `theodb_columnar` sintética populada com as bordas por tipo acima.
+- [ ] Para cada classe de rota, afirma `diverged=0` (roteado) OU decline-para-nativo (por EXPLAIN), por tipo — e **pega uma regressão semeada**: um `out_typoid` de int±k deliberadamente errado (o BLOCKER do M161) DEVE falhar o harness.
+- [ ] Wired como gate ANTES do `/review` no fluxo de mudança de roteamento (documentado em `rules/testing.md` ou no skill de review). CHANGELOG `[Unreleased]`.
+
+**Dependencies:** M161 `[x]` (o roteamento que ele protege), M162 `[x]`.
+
+**Risks:** (a) falsa confiança se a tabela sintética não casa o type-mix de produção → documentar que é complementar ao A/B do ClickBench, não substituto. (b) manutenção — toda classe de rota nova DEVE adicionar suas bordas de tipo (checklist no harness).
+
+**Prior art / referências:** memory `m161-expr-routing` (o padrão M151/M154/M157/M158/M161); `docs/benchmarks/m161-expr-routing-verdict.md` (o gauntlet por-classe); `rules/testing.md § 4.1` (edge vs negative cases).
+
+---
+
+## M164 — [ ] Endurecer o harness de benchmark (guards de falso-verde + pre-flight de infra) — rigor
+
+> **Itens B+C da retro M160-M162** (`/roadmap-feature`, 2026-07-27). Evidência dura desta sessão: (B) `_ensure_sample` (`run_m128_clickbench.py:96`) reusou um cache de **1M como "100M"** sem checar contagem → um `DONE` falso que só peguei na mão; e um A/B com `ORDER BY` removido virou SORTED → `diverged=0` **trivial** (ON declinava). (C) escolhi o box de 15GB (reuso do M160) para 100M e ele **OOMou 2×** — subdimensionado; além de `unattended-upgrades` reiniciar o PG no meio do COPY. Horas perdidas em ruído mecanizável.
+
+**Objective:** tornar o harness de medição auto-guardado contra os falso-verdes e a inadequação de infra que custaram horas: (B) `_ensure_sample` afirma `linhas_carregadas == n` (nada de cache de 1M como 100M); o A/B afirma que o braço ON mostra de fato `Custom Scan` por EXPLAIN, não só `diverged=0`; (C) um pre-flight que RECUSA/avisa um load de benchmark quando RAM/disco do box é inadequado para a contagem declarada.
+
+**Definition of done:**
+
+- [ ] `_ensure_sample` re-materializa quando `wc -l cache ≠ n` (teste: cache stale de 1M + `--n 100M` força re-stream; tolera o off-by-one da divisão `k` sistemática).
+- [ ] A/B afirma roteamento: um braço ON que declina FALHA o A/B em vez do `diverged=0` trivial (teste: query text-key sem `enable_sort=off` → o guard acusa "ON não roteou").
+- [ ] Pre-flight de sizing: recusa se `linhas × bytes/linha estimado > fração segura do disco`; **AVISA (não bloqueia)** quando `> headroom de RAM` — larger-than-RAM é intencional. CHANGELOG `[Unreleased]`.
+
+**Dependencies:** M162 `[x]` (o harness que ele endurece).
+
+**Risks:** (a) pre-flight estrito demais bloqueando um run larger-than-RAM legítimo → o caso RAM é WARN, nunca BLOCK. (b) o assert de contagem tem de honrar a amostragem sistemática (a divisão inteira pode render 1 linha a mais — comparar com tolerância).
+
+**Prior art / referências:** memory `m162-100m-load-gotchas` (as 3 armadilhas medidas); memory `infra-nao-usar-maquina-do-ci`; `docs/benchmarks/m162-100m-gap-verdict.md`; `benchmarks/run_m128_clickbench.py:79-122` (`_ensure_sample`).
+
+---
+
 ## Sequência e paralelismo
 
 ```
