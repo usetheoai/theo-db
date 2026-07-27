@@ -3003,7 +3003,7 @@ bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan s�
 
 ---
 
-## M165 — [ ] GROUP BY multi-chave ao CustomScan colunar (fecha q17, q34) — cobertura
+## M165 — [x] GROUP BY multi-chave ao CustomScan colunar (fecha q17, q34) — cobertura
 
 > **Da medição fresca 2026-07-27** (`docs/benchmarks/clickbench-fresh-vs-clickhouse-2026-07-27.md`): o gap vs ClickHouse caiu ~pela metade desde o M159 (19,4×→9,95× geral; 7,54×→4,53× na classe pushdown), mas **8 queries non-pushdown seguram o geomean geral** (~25-35 s cada, 312×). A classe dominante entre elas é o **GROUP BY de múltiplas chaves**, que o pushdown atual (single-key, M153/M157) ainda declina: **q17** (`GROUP BY UserID, SearchPhrase`, 115×) e **q34** (`GROUP BY 1, URL`, 152×).
 
