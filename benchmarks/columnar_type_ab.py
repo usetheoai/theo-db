@@ -53,11 +53,11 @@ def session_setup(cur) -> None:
 EDGE_CATALOG: dict[str, dict] = {
     "c2":  {"pg": "int2",       "edges": [-32768, -1, 0, 1, 32767]},                    # M161 BLOCKER: c2+5 @ 32767 -> int4
     "c4":  {"pg": "int4",       "edges": [-2147483647, -1, 0, 1, 2147483647]},           # int4±int8 widening (fail-closed)
-    "c8":  {"pg": "int8",       "edges": [-9223372036854775807, 0, 9223372036854775807]},
+    "c8":  {"pg": "int8",       "edges": ["'-9223372036854775808'::int8", 0, 9223372036854775807]},  # INT_MIN (quoted-cast: bare literal parses as unary-minus-over-out-of-range)
     "f4":  {"pg": "float4",     "edges": [0.0, "'-0.0'", 1.5, "'NaN'", "'Infinity'", "'-Infinity'"]},  # M154 IEEE
     "f8":  {"pg": "float8",     "edges": [0.0, "'-0.0'", 1.5, "'NaN'", "'Infinity'", "'-Infinity'"]},
     "ts":  {"pg": "timestamp",  "edges": ["'2000-01-01 00:00:00'", "'2013-07-15 10:37:30.123456'"]},  # M157 epoch
-    "tz":  {"pg": "timestamptz","edges": ["'2013-07-15 10:37:30+00'"]},                 # M157 must DECLINE
+    "tz":  {"pg": "timestamptz","edges": ["'2000-01-01 00:00:00+00'", "'2013-07-15 10:37:30+00'"]},  # ≥2 distinct instants: tz_group proves distinct-instant discrimination, not just a single-group round-trip
     "d":   {"pg": "date",       "edges": ["'2000-01-01'", "'2013-07-15'"]},              # M161 temporal gate leak
     "t":   {"pg": "text",       "edges": ["'a'", "'A'", "'b'", "''", None]},             # M153/M158 collation
     "b":   {"pg": "bool",       "edges": [True, False, None]},
@@ -121,7 +121,10 @@ def setup_tables(cur) -> int:
 def plan_routes(plan_lines: list[str], node: str | None = None) -> bool:
     """Pure (unit-testable, no DB): does the ON arm route to the columnar CustomScan? When `node` is given, require THAT
     specific columnar node (e.g. 'theodb_columnar_agg') — not just any columnar substring — so a non-load-bearing
-    columnar child under a native Agg cannot masquerade as 'the tested path ran in columnar' (council-benchmark HIGH)."""
+    columnar child under a native Agg cannot masquerade as 'the tested path ran in columnar' (council-benchmark HIGH).
+    Caveat (accepted): this is presence-anywhere, not top-of-plan — a columnar node feeding a native re-aggregation would
+    still count as routed. Byte-identity still holds via the full-row EXCEPT ALL, so it is a coverage-attribution caveat,
+    not a false-green; the routed cases here are single-node plans where it does not arise."""
     needle = f"Custom Scan ({node}" if node else "Custom Scan (theodb_columnar"
     return any(needle in ln for ln in plan_lines)
 
@@ -136,32 +139,64 @@ def _off_sql(sql: str) -> str:
     return _sub_table(sql, "hits_heap")
 
 
-def _symmetric_except(cur, on_sql: str, off_sql: str) -> int:
-    """The oracle: symmetric EXCEPT ALL (multiset byte-identity — a duplicated row on one side is caught, unlike plain
-    EXCEPT/DISTINCT). Returns the diverged row count; 0 ⇒ byte-identical result multisets."""
-    ex = (f"WITH a AS ({on_sql}), b AS ({off_sql}) "
-          f"SELECT (SELECT count(*) FROM ((SELECT * FROM a EXCEPT ALL SELECT * FROM b) "
-          f"UNION ALL (SELECT * FROM b EXCEPT ALL SELECT * FROM a)) d)")
-    cur.execute(ex)
+def _drop_arms(cur) -> None:
+    for name in ("_ab_on", "_ab_off"):
+        cur.execute(f"DROP TABLE IF EXISTS {name}")
+
+
+def _symmetric_except_materialized(cur) -> int:
+    """The oracle over the two MATERIALIZED arm tables: symmetric EXCEPT ALL (multiset byte-identity — a duplicated row
+    on one side is caught, unlike plain EXCEPT/DISTINCT). Returns the diverged row count; 0 ⇒ byte-identical multisets."""
+    cur.execute("SELECT count(*) FROM ((SELECT * FROM _ab_on EXCEPT ALL SELECT * FROM _ab_off) "
+                "UNION ALL (SELECT * FROM _ab_off EXCEPT ALL SELECT * FROM _ab_on)) d")
     return cur.fetchone()[0]
 
 
 def ab_check(cur, sql: str, off_table: str = "hits_heap", expect_node: str | None = None) -> dict:
-    """EXPLAIN the ON arm; if it routes (to `expect_node` when given) → symmetric-EXCEPT-ALL vs `off_table` → diverged;
-    else → 'declined'. Returns {status, routed, diverged}. status ∈ {ok, declined, diverged, error}."""
+    """Type-coverage differential with routing evidence taken from the SAME EXECUTION that produces the compared data.
+
+    council-benchmark HIGH fix: the earlier version EXPLAIN-ed the *bare* `sql` for routing but measured divergence on the
+    same `sql` wrapped in a CTE/set-op — a wrapper can impose a barrier that stops the columnar pushdown from firing
+    inside it, silently comparing native-on-columnar vs native-on-heap (blind to the DataFusion-pushdown bug class the
+    gate exists for). Here `EXPLAIN (ANALYZE) CREATE TEMP TABLE _ab_on AS <sql>` EXECUTES the routed query at statement
+    top level, materializes its result, AND returns the REAL executed plan — so `routed` and `diverged` come from one
+    and the same execution. A `route` case whose pushdown silently didn't fire shows no Custom Scan here → 'declined' →
+    scored FAIL for a route expectation, never a false diverged=0. Returns {status, routed, diverged};
+    status ∈ {ok, declined, diverged, error}."""
+    off_sql = _sub_table(sql, off_table)
+    _drop_arms(cur)
+    # Step 1 — cheap routing pre-check WITHOUT executing. A `decline` case whose query would raise on execution (e.g.
+    # `c8+5` overflowing int8 at the INT_MAX edge) must be reported 'declined', not 'error': EXPLAIN sans ANALYZE plans
+    # but never runs the query, so the overflow is never triggered for a query we're only proving stays off the columnar
+    # path.
     try:
         cur.execute("EXPLAIN (COSTS OFF) " + sql)
-        plan = [r[0] for r in cur.fetchall()]
+        pre_plan = [r[0] for r in cur.fetchall()]
     except Exception as e:  # noqa: BLE001
         return {"status": "error", "routed": None, "diverged": None, "err": str(e).splitlines()[0][:80]}
-    routed = plan_routes(plan, expect_node)
-    if not routed:
+    if not plan_routes(pre_plan, expect_node):
         return {"status": "declined", "routed": False, "diverged": None}
-    off = _sub_table(sql, off_table)
+    # Step 2 — it pre-routes → take the AUTHORITATIVE routing evidence from the REAL EXECUTION that materializes the
+    # compared data: EXPLAIN ANALYZE the CREATE-TABLE-AS runs the routed query at statement top level and returns its
+    # actual plan, so `routed` and `diverged` come from one execution (the council-benchmark HIGH: a CTE/set-op wrapper
+    # could plan differently). If the real execution did NOT route (pre-check disagreed), surface it as 'declined' — a
+    # route expectation then FAILs loudly rather than silently comparing native-on-columnar vs native-on-heap.
     try:
-        diverged = _symmetric_except(cur, sql, off)
+        cur.execute("EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF, SUMMARY OFF) CREATE TEMP TABLE _ab_on AS " + sql)
+        plan = [r[0] for r in cur.fetchall()]
     except Exception as e:  # noqa: BLE001
+        _drop_arms(cur)
+        return {"status": "error", "routed": None, "diverged": None, "err": str(e).splitlines()[0][:80]}
+    if not plan_routes(plan, expect_node):
+        _drop_arms(cur)
+        return {"status": "declined", "routed": False, "diverged": None}
+    try:
+        cur.execute("CREATE TEMP TABLE _ab_off AS " + off_sql)
+        diverged = _symmetric_except_materialized(cur)
+    except Exception as e:  # noqa: BLE001
+        _drop_arms(cur)
         return {"status": "error", "routed": True, "diverged": None, "err": str(e).splitlines()[0][:80]}
+    _drop_arms(cur)
     return {"status": "ok" if diverged == 0 else "diverged", "routed": True, "diverged": diverged}
 
 

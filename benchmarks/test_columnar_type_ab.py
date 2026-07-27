@@ -66,15 +66,18 @@ def test_case_matrix_has_route_and_decline_expectations():
 
 def test_every_routed_type_appears_in_a_case():
     # case-matrix rot-guard (council-benchmark MEDIUM): the catalog guard checks the dict; this checks the actual case
-    # matrix touches every routed type via a column of that type, so a type cannot be 'covered' with zero cases.
+    # matrix touches every routed type via a STANDALONE column of that type, so a type cannot be 'covered' with zero
+    # cases. Word-boundary (\bcol\b), NOT substring: substring `col in all_sql` is trivially true for the 1-char columns
+    # d/t/b and for `ts` (a substring of `hits`), so deleting e.g. the only `date` case would still pass via `day`/`GROUP`
+    # — false confidence exactly for the temporal/text/bool types where M153/M157/M161 bugs lived.
+    import re
     cases = h.build_cases()
     all_sql = " ".join(sql for _, sql, _, _ in cases)
     col_by_type = {spec["pg"]: name for name, spec in h.EDGE_CATALOG.items()}
     for pg_type in h.ROUTED_TYPES:
         col = col_by_type[pg_type]
-        # the column (or an expression on it) must appear in at least one case
-        assert col in all_sql or f"extract(" in all_sql and pg_type in ("timestamp",), \
-            f"routed type {pg_type} (col {col}) has no case in build_cases()"
+        assert re.search(rf"\b{re.escape(col)}\b", all_sql), \
+            f"routed type {pg_type} (col {col}) has no standalone case in build_cases()"
 
 
 def test_route_cases_pin_a_specific_node():
