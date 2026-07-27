@@ -24,6 +24,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+## [0.150.0] - 2026-07-26
+
+### Added
+- Roadmap amended: added M160 (decode zero-copy fixed-width→Arrow — perf da classe coberta), M161 (roteamento de expressão ao DataFusion — cobertura das não-cobertas), M162 (gap a 100M + encodings type-specific — escala), as 3 layers do deep-dive columnar-improvement (`/roadmap-feature columnar-improvement-layers`; blueprint `knowledge-base/discoveries/blueprints/columnar-improvement-deepdive-blueprint.md`), com referências do acervo + metas de eficiência medidas.
+- M159: baseline honesto do gap vs ClickHouse no ClickBench (`docs/benchmarks/m159-clickhouse-gap-verdict.md` + `docs/benchmarks/m159-artifacts/`). Comparação **mesma-box, mesmo subsample 1M sistemático, mesmo TSV** para ambos engines (TheoDB `theodb_columnar` PG18+v0.149.0 vs `clickhouse local` MergeTree, 8 vCPU) — elimina a incomparabilidade de escala vs os números publicados full-100M. Resultado medido (razão TheoDB/ClickHouse, hot min-of-2, 3 runs): **geomean 19.4× no benchmark inteiro**, **7.54× nas 32 queries com pushdown vetorizado**, **303× nas 11 sem pushdown** (executor row-based do PG sobre storage colunar, 12-21s vs 0.01-0.15s do CH); **6/43 já ≤3×** (q6 MIN/MAX **mais rápido** que o CH, 0.17×, via directory fast-path M105; q4/q8/q12/q13/q42 agregações simples em 2.2-3.0×). 43/43 queries OK, A/B byte-idêntico 43/43. **Veredito honesto:** o "2-3×" é alcançável **por classe** (agregações vetorizadas cobertas por M151-M157), NÃO no benchmark inteiro hoje; o maior lever é expandir cobertura de pushdown para as 11 queries restantes (GROUP BY multi-chave, agregados de texto/expressão), que sozinhas puxam o geomean de 7.54× para 19.4×. Caveats documentados: subsample 1M≠100M (razão é lower-bound do gap; `[NEEDS-100M]` p/ o canônico), números publicados c6a.4xlarge marcados `[NO-BASELINE-COMPARABLE]` (escala/box). Cobertura de pushdown cresceu 6→32/43 (M148-M158). Regra 5 honrada: número medido, nenhuma razão inventada.
+
 ## [0.149.0] - 2026-07-25
 
 ### Added
