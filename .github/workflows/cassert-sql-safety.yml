@@ -71,7 +71,9 @@ jobs:
         run: |
           set -euo pipefail
           PGINST="$HOME/.pgrx/18.4/pgrx-install"
-          SQL=$(ls "$PGINST"/share/postgresql/extension/theodb_rs--*[0-9].sql | sort -V | tail -1)
+          # `find` em vez de `ls`: o glob do `ls` quebra em nome com espaço/newline (SC2012), e este
+          # caminho vem do layout do pgrx, que não controlamos.
+          SQL=$(find "$PGINST/share/postgresql/extension" -maxdepth 1 -name 'theodb_rs--*[0-9].sql' | sort -V | tail -1)
           echo "pgspot sobre: $SQL"
           command -v pgspot >/dev/null || pip install --break-system-packages -q pgspot
           # Baseline (SUNSET 2026-10-21, burn-down em #151): PS002=handlers de AM em C (tomam `internal`,

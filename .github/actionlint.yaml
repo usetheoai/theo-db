@@ -1,0 +1,10 @@
+# Configuração do actionlint (#211).
+#
+# Sem isto, TODO job deste repo emite `label "theodb-do" is unknown` — 17 achados de ruído que
+# afogam o sinal real e treinam o time a ignorar a saída do linter. Declarar os labels custom é
+# o que o próprio actionlint instrui na mensagem de erro.
+self-hosted-runner:
+  labels:
+    # Máquina dedicada de 8 vCPU: os jobs que compilam Rust + PostgreSQL (pgrx) não cabem no
+    # droplet compartilhado de 2 vCPU / 2 GB que serve os outros repos.
+    - theodb-do

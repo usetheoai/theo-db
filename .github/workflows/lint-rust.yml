@@ -70,9 +70,13 @@ jobs:
         run: |
           export PATH="$HOME/.cargo/bin:$PATH"
           # O arquivo único de args (padrão neon) — CI e local leem o MESMO baseline, sem drift.
-          ARGS=$(grep -v '^#' .clippy_args | grep -v '^[[:space:]]*$' | tr '\n' ' ')
-          echo "clippy args: $ARGS"
-          cargo clippy --features pg18 --no-deps -- $ARGS
+          # Array em vez de string: `-- $ARGS` sem aspas depende de word-splitting (SC2086), que
+          # engasga em qualquer arg com espaço. `read -a` divide UMA vez, de forma explícita, e o
+          # `"${ARGS[@]}"` passa cada flag como um argumento — o mesmo efeito pretendido, sem a
+          # armadilha.
+          read -r -a ARGS < <(grep -v '^#' .clippy_args | grep -v '^[[:space:]]*$' | tr '\n' ' ')
+          echo "clippy args: ${ARGS[*]}"
+          cargo clippy --features pg18 --no-deps -- "${ARGS[@]}"
 
       # M140.2 — o núcleo lexical vive num crate pgrx-free (`theodb_lexical`), testável com `cargo test` stock.
       # O clippy default (--features pg18) NÃO compila o path `spike-lexical` (o cdylib consumindo o núcleo).

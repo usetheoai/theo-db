@@ -15,11 +15,31 @@ on:
   push:
     branches: [develop]
     tags: ["v*"]
-    # Pushes só-de-documentação em develop não gastam a fila do runner. Builds de TAG apontam para
-    # merge commits (sempre com código), então um release nunca é filtrado por docs.
+    # Pushes só-de-documentação em develop não gastam a fila do runner.
+    #
+    # DELIBERADAMENTE `paths-ignore` (lista de exclusão), NÃO o filtro positivo que o `ci.yml`
+    # adotou: este workflow escuta `tags: ["v*"]`, e filtro de path se aplica TAMBÉM a push de tag.
+    # Um filtro positivo faria um release cujo commit não casasse a lista ser silenciosamente
+    # ignorado — nenhuma imagem publicada, nenhum erro. Lista de exclusão erra para o lado seguro
+    # (publica a mais), que aqui é o lado certo.
+    #
+    # Isso posto, a premissa que sustenta o `**/*.md` abaixo é que builds de TAG apontam para merge
+    # commits, sempre com código junto. É uma premissa do FLUXO, não uma garantia do mecanismo —
+    # registrada como risco latente numa issue própria.
     paths-ignore:
       - '.claude/**'
       - '**/*.md'
+      # Adicionados em 2026-07-27: nada aqui entra na imagem (conferido nos `COPY` do Dockerfile —
+      # só `theodb_rs/`, `sql/`, `*.control`). O commit `3313226`, que tocou só workflows e o
+      # CHANGELOG, disparou um build+push completo de imagem idêntica.
+      - 'docs/**'
+      - 'knowledge-base/**'
+      - 'agents/**'
+      - '.review-runs/**'
+      - '.review-loop/**'
+      # Mudar um workflow não muda a imagem. Para exercitar uma alteração NESTE arquivo, use o
+      # `workflow_dispatch` declarado abaixo — é o escape hatch previsto.
+      - '.github/workflows/**'
   workflow_dispatch:
 
 # Runner self-hosted único: pushes sucessivos em develop devem SUPERSEDER o run anterior em vez de
@@ -50,6 +70,7 @@ jobs:
       # que serve theo-cloud/theo-lens/theo-memory) carregam exatamente esses labels genéricos, e um job
       # que compila Rust + PostgreSQL não cabe lá. O label específico prende o build na máquina de 8 vCPU.
       runner: '["self-hosted","theodb-do"]'
-    # Explícito (não `secrets: inherit`) — evita o finding semgrep de secrets-inherit. O TheoDB não
-    # consome módulo Go privado nem publica no Docker Hub hoje; o GHCR publica com o GITHUB_TOKEN do run.
-    secrets: {}
+    # SEM bloco `secrets:` — e sem `secrets: inherit`, que é o que o semgrep barra. O `secrets: {}`
+    # anterior expressava a mesma intenção (não repassar nada) mas o actionlint o rejeita como seção
+    # vazia; omitir tem efeito idêntico e satisfaz os dois linters. O TheoDB não consome módulo Go
+    # privado nem publica no Docker Hub hoje; o GHCR publica com o GITHUB_TOKEN do próprio run.

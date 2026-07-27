@@ -14,7 +14,15 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **CI: gate `actionlint` sobre os próprios workflows (#211).** Nenhum gate do repo olhava para o `.github/` — foi por isso que 4 workflows quebrados passaram 3 dias despercebidos. O `actionlint` reproduz o defeito exato (`both "paths" and "paths-ignore" filters cannot be used for the same event "push". note: use '!' to negate patterns`) e ainda sugere a correção aplicada. Traz shellcheck embutido nos blocos `run:`. Imagem fixada por digest; `.github/actionlint.yaml` declara o label self-hosted `theodb-do` para que 17 achados de ruído não afoguem o sinal.
+
+- **CI: `timeout-minutes` em todo job próprio.** `pgvector-compat` (20), `harness-unit` (15), `image-and-bench` (45), `migration-smoke` (25) e `notify-on-failure` (10) rodavam com o default do GitHub de **360 min**. Num runner serial compartilhado por 5 repositórios, um job pendurado sequestra a fila de todos por 6 horas — e o próprio repo já registrou `harness-unit` levando 999s só para falhar. Os valores são folga sobre a duração observada, alinhados aos jobs que já declaravam timeout.
+
 ### Changed
+
+- **CI: `ci.yml` passou a filtro POSITIVO; `publish-image.yml` deixou de publicar imagem por commit de documentação.** O `paths-ignore` anterior (`.claude/**`, `**/*.md`, `docs/**`) não excluía quase nada: medido em 2026-07-27, o commit `3313226` — que tocou só 4 YAMLs de workflow e o CHANGELOG, zero linha de código — disparou CI + publish + ci-canary + lint-rust + cassert, cinco runs numa fila serial. O `ci.yml` agora lista o que a esteira de fato lê (`Dockerfile`, `theodb_rs/`, `sql/`, `scripts/`, `benchmarks/`, `packaging/`, `*.control`), derivado dos `COPY` do Dockerfile e dos steps. **Trade-off explícito:** filtro positivo cria risco de falso-verde — quem adicionar um diretório que a suíte exercite precisa listá-lo ali. O `publish-image.yml` NÃO recebeu filtro positivo de propósito: ele escuta `tags: ["v*"]`, e filtro de path também se aplica a push de tag, então um release poderia ser silenciosamente ignorado; ganhou apenas exclusões de caminhos que comprovadamente não entram na imagem.
+
+- **CI: `permissions: contents: read` no topo do `ci.yml`.** O workflow não declarava permissão nenhuma, então cada job recebia o default do repositório para o `GITHUB_TOKEN`. Nada na esteira escreve — só checkout, build local (`load: true`) e teste.
 
 ### Deprecated
 
