@@ -13,7 +13,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- M162: the honest **100M** larger-than-RAM ClickBench gap measurement (the M159 `[NEEDS-100M]`). Full 99,997,497-row `hits` loaded into `theodb_columnar` on a 15 GB box (working set > RAM) and benchmarked vs ClickHouse MergeTree same-box. Measured verdict — **the scale-limit failure, not the ratio, is the finding**: TheoDB completes only **19/43** queries on this box (5 hard-fail — 3 timeouts >300 s, a `byte array offset overflow` i32 scale bug on a pushdown query, one backend OOM — and the run OOM-killed at 24/43) while ClickHouse serves all 43 in 0.008–10 s. The typical per-class gap stays in the 1M ballpark (aggregate-pushdown 8–26×, native 16×); the 24.3× geomean over survivors is outlier-carried (q0 `COUNT(*)` 1495× = missing count fast-path, q19 `SELECT *` 837× = M148 materialization) and cross-population, so not a matched widening. The measured ratio **overstates** the gap (both timing asymmetries favor ClickHouse → true gap ≤ measured). The deciding I/O-vs-CPU counter (`shared_blks_read`) was **not** isolated — the top levers point at materialization + the i32 bug, which no decode-byte encoding fixes. So encoding is deferred to a follow-up (M163, format subsystem, ADR-2) on grounds independent of the un-isolated I/O question; no encoding shipped on a guess (Rule 5). Council-benchmark reviewed; framing overreaches corrected. Verdict + artifacts: `docs/benchmarks/m162-100m-gap-verdict.md`.
 
 ### Changed
 
@@ -24,6 +23,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 ### Security
+
+## [0.153.0] - 2026-07-27
+
+### Added
+- M162: the honest **100M** larger-than-RAM ClickBench gap measurement (the M159 `[NEEDS-100M]`). Full 99,997,497-row `hits` loaded into `theodb_columnar` on a 15 GB box (working set > RAM) and benchmarked vs ClickHouse MergeTree same-box. Measured verdict — **the scale-limit failure, not the ratio, is the finding**: TheoDB completes only **19/43** queries on this box (5 hard-fail — 3 timeouts >300 s, a `byte array offset overflow` i32 scale bug on a pushdown query, one backend OOM — and the run OOM-killed at 24/43) while ClickHouse serves all 43 in 0.008–10 s. The typical per-class gap stays in the 1M ballpark (aggregate-pushdown 8–26×, native 16×); the 24.3× geomean over survivors is outlier-carried (q0 `COUNT(*)` 1495× = missing count fast-path, q19 `SELECT *` 837× = M148 materialization) and cross-population, so not a matched widening. The measured ratio **overstates** the gap (both timing asymmetries favor ClickHouse → true gap ≤ measured). The deciding I/O-vs-CPU counter (`shared_blks_read`) was **not** isolated — the top levers point at materialization + the i32 bug, which no decode-byte encoding fixes. So encoding is deferred to a follow-up (M163, format subsystem, ADR-2) on grounds independent of the un-isolated I/O question; no encoding shipped on a guess (Rule 5). Council-benchmark reviewed; framing overreaches corrected. Verdict + artifacts: `docs/benchmarks/m162-100m-gap-verdict.md`.
 
 ## [0.152.0] - 2026-07-27
 
