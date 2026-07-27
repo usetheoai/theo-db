@@ -958,6 +958,9 @@ pub(crate) unsafe fn decode_columns_v2(
             for (wi, &col) in wanted.iter().enumerate() {
                 let e = &pl.entries[cg * natts + col];
                 let comp = super::page::read_chunked(rel, e.first_block, e.n_pages)?;
+                if comp.len() < e.comp_len as usize {
+                    return Err("theodb_columnar: column chunk truncated on disk".into());
+                }
                 let raw = zstd::decode_all(&comp[..e.comp_len as usize])
                     .map_err(|x| format!("theodb_columnar: zstd decode failed: {x}"))?;
                 match mode_fixed[wi] {
@@ -1076,6 +1079,9 @@ pub(crate) unsafe fn decode_columns(
             for (wi, &col) in wanted.iter().enumerate() {
                 let e = &entries[cg * natts + col];
                 let comp = super::page::read_chunked(rel, e.first_block, e.n_pages)?;
+                if comp.len() < e.comp_len as usize {
+                    return Err("theodb_columnar: column chunk truncated on disk".into());
+                }
                 let raw = zstd::decode_all(&comp[..e.comp_len as usize])
                     .map_err(|x| format!("theodb_columnar: zstd decode failed: {x}"))?;
                 let mut vals =
