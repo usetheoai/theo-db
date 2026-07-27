@@ -22,6 +22,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **CI: quatro gates não executavam nada desde 24/07 — incluindo o `license-gate` da regra D1 (#211).** `license-gate`, `lint-rust`, `cassert-sql-safety` e `schema-drift-gate` declaravam `paths` **e** `paths-ignore` no mesmo evento, combinação que o GitHub rejeita no parse: os runs eram criados e morriam em `startup_failure`, com zero jobs e 0s de duração. Medido: 95 de 100 runs falhos nos três primeiros e 100 de 100 no `schema-drift-gate`. Na prática, por três dias nada barrou uma dependência AGPL de entrar na distribuição — a regra que o próprio arquivo chama de "a mais inegociável do projeto". A economia de fila que motivou o `paths-ignore` (#187) foi preservada, agora expressa **dentro** do `paths:` via padrão negado (`!**/*.md`), que é um filtro só e não conflita. Os gates voltam a rodar após três dias sem enforcement, então é esperado que algum acuse achado real acumulado.
+
 - **CI: sete exportações redundantes de cache de imagem por run.** Os oito jobs que constroem a imagem declaravam `cache-to: type=gha,mode=max` — cada um exportando **todas** as camadas para o cache do GitHub pela rede, embora ninguém lesse as sete cópias extras. Só o build de `image-and-bench` (tag `theo-db:ci`) publica agora; os demais seguem lendo com `cache-from`, sem qualquer mudança no que constroem. Os builds em si foram **mantidos de propósito**: cada job reconstruir a imagem é o que garante que ele testa o commit atual — trocar por um atalho do tipo "pular se já existe" economizaria ~2 min e reintroduziria risco de falso-verde. Ganho esperado mas ainda **não medido** (o runner está ocupado; a próxima execução completa confirma).
 
 ### Security

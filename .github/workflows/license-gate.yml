@@ -13,13 +13,12 @@ on:
     paths: ['theodb_rs/Cargo.toml', 'theodb_rs/Cargo.lock', 'theodb_rs/deny.toml']
   push:
     branches: [develop]
-    # #187 — o runner é ÚNICO e serial: cada push dispara ~14 jobs de ~45min (≈10h de fila).
-    # Mudanças só de documentação/artefatos de agente não exercitam código e não podem consumir
-    # essa capacidade. Mesmo padrão do theo-memory/theo-rag.
-    paths-ignore:
-      - '.claude/**'
-      - '**/*.md'
-      - 'docs/**'
+    # #211 — este `paths:` É a economia de fila que #187 buscava, e sozinho. NÃO adicione
+    # `paths-ignore:` aqui: o GitHub proíbe os dois filtros no mesmo evento e rejeita o arquivo
+    # no parse (`startup_failure`, zero jobs). Foi exatamente o que matou este gate entre
+    # 2026-07-24 e 2026-07-27 — 95 de 100 runs. Um `paths:` que só lista `theodb_rs/*` jamais
+    # casaria com `.claude/**`, `**/*.md` ou `docs/**`, então o `paths-ignore` não economizava
+    # nada: só desligava a regra D1.
     paths: ['theodb_rs/Cargo.toml', 'theodb_rs/Cargo.lock', 'theodb_rs/deny.toml']
 
 # Fila do runner self-hosted (2026-07-24): sem `concurrency`, cada push empilhava um run novo por
