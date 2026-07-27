@@ -14,6 +14,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 - Roadmap amended: added M163 Harness A/B por-tipo (retro item A) + M164 Endurecer o harness de benchmark (retro items B+C) (`/roadmap-feature`).
+- M163: **type-coverage A/B harness** (`benchmarks/columnar_type_ab.py` + tests) — closes the project's most recurring defect (the ClickBench A/B doesn't exercise the type space, so type-class routing bugs survive it and are only caught by council review after a 14-min rebuild; M151/M154/M157/M161). For each routed admit-path × each per-type edge value (int2 `32767`, int4/int8 max, float `-0.0`/`NaN`/`inf`, timestamp/date/timestamptz, non-C text, NULL) it asserts the M161 fail-closed contract — **byte-identical if it routes, OR correct-decline** — over a synthetic `theodb_columnar` table. A **positive control** (a seeded-divergent pair) proves the oracle catches a wrong result (the M161 `out_typoid` BLOCKER shape). Validated live on a fresh TheoDB build: `pytest` 10 passed, 16/16 cases as-expected, positive-control diverged=4. Bespoke pytest reusing the shipped symmetric-EXCEPT oracle (no new dep, Rule 9); wired as a pre-`/review` gate in `rules/testing.md § 5.1`. Evidence: `docs/benchmarks/m163-type-coverage-verdict.md`.
 
 ### Changed
 - `rules/discover-phd-rigor.md`: added R3.1 (instrument-validates-against-architecture — retro item D; a measurement DoD must verify its instrument actually observes the thing measured, e.g. `shared_blks_read` cannot see `theodb_columnar`'s TAM-level I/O).
