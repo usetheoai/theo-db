@@ -256,7 +256,16 @@ jobs:
           PGUSER: postgres
           PGPASSWORD: postgres
           PGDATABASE: postgres
-        run: pytest -m integration -q
+        # `--durations` é instrumentação, não decoração: este step mede 22,2 min e responde por 80%
+        # do wall-clock da esteira inteira (27,9 min medidos em 2026-07-27) — é O alvo de otimização.
+        # Mas ~305 testes a 4,3s de média não dizem se o custo está espalhado ou concentrado em uma
+        # dezena de testes, e a resposta muda completamente o que fazer:
+        #   concentrado  -> atacar os testes específicos (maior retorno, menor risco)
+        #   espalhado    -> exige paralelismo, que HOJE está bloqueado: não há conftest.py e os testes
+        #                   criam tabelas de nome FIXO repetido (`CREATE TABLE m` em 12 pontos) no MESMO
+        #                   banco, então `pytest -n auto` trocaria 22 min por flakiness.
+        # Reestruturar antes de saber qual dos dois casos é o nosso seria adivinhar (Regra 5).
+        run: pytest -m integration -q --durations=25
 
       - name: Teardown
         if: always()
