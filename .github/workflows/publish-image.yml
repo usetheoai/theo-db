@@ -37,9 +37,14 @@ on:
       - 'agents/**'
       - '.review-runs/**'
       - '.review-loop/**'
-      # Mudar um workflow não muda a imagem. Para exercitar uma alteração NESTE arquivo, use o
+      # Nada em `.github/` entra na imagem. Para exercitar uma alteração NESTE arquivo, use o
       # `workflow_dispatch` declarado abaixo — é o escape hatch previsto.
-      - '.github/workflows/**'
+      #
+      # `.github/**`, não `.github/workflows/**`: `paths-ignore` só suprime o run quando TODO
+      # arquivo do commit casa algum padrão. Verificado no commit `6fcf218` — ele tocou workflows
+      # + CHANGELOG (ambos ignorados) e `.github/actionlint.yaml`, que ficava de fora do padrão
+      # mais estreito e sozinho bastou para disparar um build+push completo.
+      - '.github/**'
   workflow_dispatch:
 
 # Runner self-hosted único: pushes sucessivos em develop devem SUPERSEDER o run anterior em vez de
