@@ -9,7 +9,7 @@ FROM theodb:m52
 ARG PGTS_TAG=v1.3.1
 USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential git ca-certificates postgresql-server-dev-17 \
+      build-essential git ca-certificates postgresql-server-dev-18 \
  && git clone --depth 1 --branch "$PGTS_TAG" https://github.com/timescale/pg_textsearch /tmp/pgts \
  && cd /tmp/pgts && make && make install \
  && rm -rf /tmp/pgts /var/lib/apt/lists/*

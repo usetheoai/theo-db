@@ -14,7 +14,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       tcl-dev perl libperl-dev python3-dev && \
     rm -rf /var/lib/apt/lists/*
 
-ARG PG_TAG=REL_17_10
+# MUST track the engine major (Dockerfile ARG PG_MAJOR). pg_regress expected-outputs differ
+# across majors, so a PG17 harness against a PG18 server produces meaningless diffs.
+# Guarded by benchmarks/tests/test_packaging_pg_major.py.
+ARG PG_TAG=REL_18_4
 RUN git clone --depth 1 --branch $PG_TAG https://github.com/postgres/postgres /src
 WORKDIR /src
 RUN ./configure --with-tcl --with-perl --with-python --with-pam --with-openssl \

@@ -1,9 +1,19 @@
 #!/usr/bin/env bash
-# Start a throwaway TheoDB cluster and run the upstream PG17 regression suite against it (pg_regress
+# Start a throwaway TheoDB cluster and run the upstream PG18 regression suite against it (pg_regress
 # directly, so we control bindir/outputdir/dlpath). Runs as the postgres user. Exits 0 only if ALL pass.
 set -uo pipefail
 export PGDATA=/tmp/pgdata PGHOST=/tmp PGPORT=5432
-BIN=/usr/lib/postgresql/17/bin
+# Derived from pg_config, never pinned. A hardcoded major is what broke this gate: when the engine
+# moved 17 -> 18 the path /usr/lib/postgresql/17/bin simply stopped existing, so the command
+# substitution below yielded the EMPTY string and the version guard reported the baffling
+# "engine is not 18.4 (got: )" — a missing binary disguised as a version mismatch. Fail loud and
+# specific instead (Unbreakable Rule 8). Drift is also guarded statically by
+# benchmarks/tests/test_packaging_pg_major.py.
+BIN="$(pg_config --bindir 2>/dev/null || true)"
+if [ -z "$BIN" ] || [ ! -x "$BIN/postgres" ]; then
+  echo "ERROR: no postgres binary via 'pg_config --bindir' (got: '${BIN:-<empty>}')" >&2
+  exit 2
+fi
 REG=/src/src/test/regress
 OUT=/tmp/regress_out
 
