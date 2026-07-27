@@ -821,6 +821,191 @@ pub(crate) unsafe fn column_index(rel: pg_sys::Relation, name: &str) -> Option<u
 /// is deliberate: the caller (Arrow/vector layer) owns the type interpretation, keeping the codec (`columnar_codec`)
 /// free of Arrow/vector dependencies. A narrower typed accessor would re-encode the same bytes for each consumer;
 /// this single read seam is the DRY boundary. Consumers MUST go through here (never `read_chunked` directly).
+/// M160 — a decoded column in one of two shapes. `Cells` is the legacy per-cell boxed representation (nullable /
+/// varlena / text / pending-present). `FixedRaw` is the M160 fast path: the contiguous little-endian value stream of a
+/// NON-NULL fixed-width column (the whole zstd-decompressed buffer concatenated across chunk-groups), which `build_arrow`
+/// turns into an Arrow `PrimitiveArray` via ONE typed `Vec<T>` (no per-cell `Vec<u8>` alloc storm — the M148-twin cost
+/// the deep-dive flamegraph measured on the pushdown path). `width` is the fixed byte width (matches the Arrow native
+/// buffer layout); `row_count` is the number of values (`bytes.len() == width * row_count`, asserted by build_arrow).
+pub(crate) enum DecodedColumn {
+    Cells(Vec<Option<Vec<u8>>>),
+    FixedRaw { bytes: Vec<u8>, width: usize, row_count: usize },
+}
+
+/// M160 — is `typid` a fixed-width type whose stored little-endian bytes are byte-identical to the Arrow native
+/// primitive buffer, so it can take the zero-copy `FixedRaw` fast path? Excludes bool (Arrow bit-packs it) and all
+/// varlena/text. Widths match `decode_column`'s `attlen_fixed` and `build_arrow`'s per-type readers.
+pub(crate) fn fixed_arrow_width(typid: u32) -> Option<usize> {
+    match typid {
+        21 => Some(2),                 // int2
+        23 | 700 | 1082 => Some(4),    // int4 / float4 / date (Date32)
+        20 | 701 | 1114 | 1184 => Some(8), // int8 / float8 / timestamp / timestamptz (all i64/f64)
+        _ => None,                     // bool (bit-packed), varlena/text → cell path
+    }
+}
+
+/// M160 fast decode for the pushdown path (`decode_to_batch`). Same stripe-walk + zone-map skip + directory contract as
+/// `decode_columns`, but a wanted column whose type is `fixed_arrow_width` AND has NO nulls in ANY visible chunk-group
+/// (decided from the directory in a cheap first pass) AND has no same-xact pending rows accumulates as `FixedRaw` (one
+/// bulk `extend_from_slice` per chunk-group — O(bytes), not O(cells)); every other column stays `Cells` (fail-safe,
+/// byte-identical to `decode_columns`). Returns `(name, typid, DecodedColumn)` per wanted column, in `wanted` order.
+pub(crate) unsafe fn decode_columns_v2(
+    rel: pg_sys::Relation,
+    projection: Option<&[usize]>,
+    predicates: &[super::zonemap::ZonePredicate],
+    skip: bool,
+) -> Result<Vec<(String, u32, DecodedColumn)>, String> {
+    let tupdesc = (*rel).rd_att;
+    let natts = (*tupdesc).natts as usize;
+    let cols = (0..natts).map(|i| coldesc(tupdesc, i)).collect::<Result<Vec<_>, _>>()?;
+    let wanted: Vec<usize> = match projection {
+        Some(p) => {
+            for &i in p {
+                if i >= natts {
+                    return Err(format!(
+                        "theodb_columnar: projection column {i} out of range (natts {natts})"
+                    ));
+                }
+            }
+            p.to_vec()
+        }
+        None => (0..natts).collect(),
+    };
+    let name_of = |i: usize| -> String {
+        std::ffi::CStr::from_ptr((*super::tupdesc_attr(tupdesc, i)).attname.data.as_ptr())
+            .to_string_lossy()
+            .into_owned()
+    };
+
+    // Same-xact pending rows force the whole result onto the legacy cell path (fail-safe: merging FixedRaw bytes with
+    // pending cell rows is out of M160 scope — pending is empty for a read-only benchmark query, the measured regime).
+    let oid = (*rel).rd_id.to_u32();
+    let has_pending = WRITE_STATES.with(|w| w.borrow().get(&oid).is_some_and(|p| !p.rows.is_empty()));
+    if has_pending {
+        return Ok(decode_columns(rel, projection, predicates, skip)?
+            .into_iter()
+            .map(|(n, t, v)| (n, t, DecodedColumn::Cells(v)))
+            .collect());
+    }
+
+    // Pass 1 — read every visible stripe's header + directory (cheap; no value chunks) so we can (a) decide per-wanted
+    // column whether it can take the FixedRaw fast path (fixed-width type AND no nulls anywhere) and (b) reuse the
+    // directories in pass 2 without re-reading. Also carries the zone-map skip decision per chunk-group.
+    struct StripePlan {
+        entries: Vec<codec::ChunkDirEntry>,
+        n_chunk_groups: usize,
+    }
+    let mut plans: Vec<StripePlan> = Vec::new();
+    for sm in read_visible_stripes((*rel).rd_id)? {
+        let hdr_items = super::page::read_all_page_items(rel, sm.header_block)?;
+        let hdr_bytes =
+            hdr_items.into_iter().next().ok_or("theodb_columnar: stripe header page empty")?;
+        let header = StripeHeader::from_bytes(&hdr_bytes)?;
+        if header.ncols as usize != natts {
+            return Err(format!("theodb_columnar: stripe ncols {} != natts {natts}", header.ncols));
+        }
+        let dir_bytes = super::page::read_chunked(rel, header.dir_first_block, header.dir_n_pages)?;
+        let entries =
+            codec::deserialize_directory(&dir_bytes, header.n_chunk_groups as usize * natts)?;
+        plans.push(StripePlan { entries, n_chunk_groups: header.n_chunk_groups as usize });
+    }
+
+    // Per-wanted-column mode: FixedRaw-eligible iff the M160 GUC is on AND the type is fixed-width AND no visible
+    // chunk-group has nulls for it. GUC off ⇒ every column takes the legacy cell path (the A/B "before").
+    let fast_decode = super::columnar_agg::ENABLE_FAST_DECODE.get();
+    let mode_fixed: Vec<Option<usize>> = wanted
+        .iter()
+        .map(|&col| {
+            if !fast_decode {
+                return None;
+            }
+            let w = fixed_arrow_width(cols[col].typid)?;
+            let any_null = plans.iter().any(|pl| {
+                (0..pl.n_chunk_groups).any(|cg| pl.entries[cg * natts + col].has_nulls)
+            });
+            if any_null { None } else { Some(w) }
+        })
+        .collect();
+
+    // Accumulators: FixedRaw columns get a byte buffer + a running row count; cell columns get the boxed vec.
+    let mut fixed_bytes: Vec<Vec<u8>> = vec![Vec::new(); wanted.len()];
+    let mut fixed_rows: Vec<usize> = vec![0; wanted.len()];
+    let mut cell_cols: Vec<Vec<Option<Vec<u8>>>> = vec![Vec::new(); wanted.len()];
+    let (mut skipped_cg, mut total_cg) = (0usize, 0usize);
+
+    // Pass 2 — decode value chunks (the expensive part, done once), routing per column mode.
+    for pl in &plans {
+        for cg in 0..pl.n_chunk_groups {
+            let cg_rows = pl.entries[cg * natts].row_count as usize;
+            total_cg += 1;
+            if skip
+                && predicates.iter().any(|p| {
+                    p.col < natts && {
+                        let e = &pl.entries[cg * natts + p.col];
+                        !super::zonemap::chunk_can_match(
+                            e.has_minmax,
+                            e.min_bits,
+                            e.max_bits,
+                            cols[p.col].mm,
+                            p,
+                        )
+                    }
+                })
+            {
+                skipped_cg += 1;
+                continue;
+            }
+            for (wi, &col) in wanted.iter().enumerate() {
+                let e = &pl.entries[cg * natts + col];
+                let comp = super::page::read_chunked(rel, e.first_block, e.n_pages)?;
+                let raw = zstd::decode_all(&comp[..e.comp_len as usize])
+                    .map_err(|x| format!("theodb_columnar: zstd decode failed: {x}"))?;
+                match mode_fixed[wi] {
+                    Some(w) => {
+                        // FixedRaw: has_nulls=false ⇒ the whole `raw` is the dense contiguous LE value stream.
+                        let expect = w * cg_rows;
+                        if raw.len() != expect {
+                            return Err(format!(
+                                "theodb_columnar: fixed chunk size {} != {w}*{cg_rows} (col {col})",
+                                raw.len()
+                            ));
+                        }
+                        fixed_bytes[wi].extend_from_slice(&raw); // one bulk copy per chunk-group (O(bytes))
+                        fixed_rows[wi] += cg_rows;
+                    }
+                    None => {
+                        let mut vals =
+                            codec::decode_column(&raw, cols[col].attlen_fixed, cg_rows, e.has_nulls)?;
+                        cell_cols[wi].append(&mut vals);
+                    }
+                }
+            }
+        }
+    }
+    if skip
+        && !predicates.is_empty()
+        && std::env::var("THEODB_SCAN_PROFILE").is_ok_and(|v| v == "1")
+    {
+        pgrx::log!("theodb_columnar zonemap: skipped {skipped_cg}/{total_cg} chunk groups");
+    }
+
+    Ok(wanted
+        .iter()
+        .enumerate()
+        .map(|(wi, &col)| {
+            let dc = match mode_fixed[wi] {
+                Some(w) => DecodedColumn::FixedRaw {
+                    bytes: std::mem::take(&mut fixed_bytes[wi]),
+                    width: w,
+                    row_count: fixed_rows[wi],
+                },
+                None => DecodedColumn::Cells(std::mem::take(&mut cell_cols[wi])),
+            };
+            (name_of(col), cols[col].typid, dc)
+        })
+        .collect())
+}
+
 pub(crate) unsafe fn decode_columns(
     rel: pg_sys::Relation,
     projection: Option<&[usize]>,

@@ -13,6 +13,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- M160: decode zero-copy fixed-width→Arrow no path de pushdown colunar. `decode_columns_v2` decodifica colunas fixed-width NÃO-nulas (int2/4/8, float4/8, timestamp/tz, date) como um stream contíguo little-endian (`DecodedColumn::FixedRaw`), e `build_arrow_from_decoded` as constrói via UM `Vec<T>` tipado por coluna (`PrimitiveArray::from`, handoff zero-copy) — eliminando a tempestade de alocação `.to_vec()` por-célula + a re-cópia do `build_arrow` (o gargalo gêmeo do M148 que o deep-dive/flamegraph mediu na classe coberta). Colunas nullable/varlena/texto/bool e queries com linhas pending same-xact mantêm o caminho de células (fail-safe, byte-idêntico). Byte-idêntico por construção (mesmo `from_le_bytes` plano, sem transform de epoch) — validado por A/B symmetric-EXCEPT colunar vs heap **diverged=0** (GROUP BY sum, count-distinct, multi-agg, min/max) + teste unitário. Endian-safe (`from_le_bytes` explícito). Só o hot path pushdown (vindex/arrow_cache seguem `decode_columns`). **Ganho medido same-binário (GUC `theodb.enable_columnar_fast_decode` off vs on, agg pushdown ON em ambos, EXPLAIN ANALYZE median-of-3, 1M ClickBench): 5.7× (RegionID GROUP BY sum), 7.4× (SearchEngineID GROUP BY sum), 8.3× (sum+count), 1.8× (count-distinct)** — ~2-8× na classe coberta de agregações fixed-width (`docs/benchmarks/m160-decode-zerocopy-verdict.md`), consistente com o flamegraph do deep-dive (a ponte de decode era ~80% do custo).
 
 ### Changed
 

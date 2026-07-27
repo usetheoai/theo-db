@@ -52,7 +52,123 @@ pub(super) fn build_arrow(
     let mut fields = Vec::with_capacity(cols.len());
     let mut arrays: Vec<ArrayRef> = Vec::with_capacity(cols.len());
     for (name, typid, values) in cols {
-        let (dt, arr): (DataType, ArrayRef) = match typid {
+        let (dt, arr) = cells_to_array(*typid, values)?;
+        fields.push(Field::new(name, dt, true));
+        arrays.push(arr);
+    }
+    Ok((Schema::new(fields), arrays))
+}
+
+/// M160 — build the Arrow schema + arrays from `DecodedColumn`s (the pushdown fast path). `FixedRaw` columns (non-null
+/// fixed-width) go through `fixed_raw_array` (one typed `Vec<T>` per column, no per-cell alloc); `Cells` columns reuse
+/// `cells_to_array` (byte-identical to the legacy `build_arrow`). This is the M160 win applied only to the hot path.
+pub(super) fn build_arrow_from_decoded(
+    cols: &[(String, u32, super::columnar::DecodedColumn)],
+) -> Result<(Schema, Vec<ArrayRef>), String> {
+    use super::columnar::DecodedColumn;
+    let mut fields = Vec::with_capacity(cols.len());
+    let mut arrays: Vec<ArrayRef> = Vec::with_capacity(cols.len());
+    for (name, typid, dc) in cols {
+        let (dt, arr) = match dc {
+            DecodedColumn::FixedRaw { bytes, width, row_count } => {
+                fixed_raw_array(*typid, bytes, *width, *row_count)?
+            }
+            DecodedColumn::Cells(values) => cells_to_array(*typid, values)?,
+        };
+        fields.push(Field::new(name, dt, true));
+        arrays.push(arr);
+    }
+    Ok((Schema::new(fields), arrays))
+}
+
+/// M160 — build an Arrow `PrimitiveArray` for a non-null fixed-width column directly from the contiguous little-endian
+/// value stream: one pre-sized typed `Vec<T>` (endian-safe `from_le_bytes` fill) handed zero-copy to Arrow via
+/// `PrimitiveArray::from(Vec<T>)`. No per-cell `Vec<u8>` boxing (the deep-dive flamegraph's dominant cost). BYTE-IDENTICAL
+/// to `cells_to_array` for these types because that path also does a plain `from_le_bytes` with no epoch/other transform
+/// (df_executor build_arrow comment: "the stored bytes ARE the internal int"). Only types in `fixed_arrow_width` reach here.
+fn fixed_raw_array(
+    typid: u32,
+    bytes: &[u8],
+    width: usize,
+    row_count: usize,
+) -> Result<(DataType, ArrayRef), String> {
+    if bytes.len() != width * row_count {
+        return Err(format!(
+            "df_executor: fixed-raw size {} != {width}*{row_count} (typid {typid})",
+            bytes.len()
+        ));
+    }
+    Ok(match typid {
+        21 => (
+            DataType::Int16,
+            Arc::new(Int16Array::from(
+                bytes.chunks_exact(2).map(|c| i16::from_le_bytes([c[0], c[1]])).collect::<Vec<_>>(),
+            )),
+        ),
+        23 => (
+            DataType::Int32,
+            Arc::new(Int32Array::from(
+                bytes
+                    .chunks_exact(4)
+                    .map(|c| i32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                    .collect::<Vec<_>>(),
+            )),
+        ),
+        20 => (
+            DataType::Int64,
+            Arc::new(Int64Array::from(
+                bytes
+                    .chunks_exact(8)
+                    .map(|c| i64::from_le_bytes(c.try_into().unwrap()))
+                    .collect::<Vec<_>>(),
+            )),
+        ),
+        700 => (
+            DataType::Float32,
+            Arc::new(Float32Array::from(
+                bytes
+                    .chunks_exact(4)
+                    .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                    .collect::<Vec<_>>(),
+            )),
+        ),
+        701 => (
+            DataType::Float64,
+            Arc::new(Float64Array::from(
+                bytes
+                    .chunks_exact(8)
+                    .map(|c| f64::from_le_bytes(c.try_into().unwrap()))
+                    .collect::<Vec<_>>(),
+            )),
+        ),
+        1082 => (
+            DataType::Date32,
+            Arc::new(Date32Array::from(
+                bytes
+                    .chunks_exact(4)
+                    .map(|c| i32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                    .collect::<Vec<_>>(),
+            )),
+        ),
+        1114 | 1184 => (
+            DataType::Timestamp(TimeUnit::Microsecond, None),
+            Arc::new(TimestampMicrosecondArray::from(
+                bytes
+                    .chunks_exact(8)
+                    .map(|c| i64::from_le_bytes(c.try_into().unwrap()))
+                    .collect::<Vec<_>>(),
+            )),
+        ),
+        other => {
+            return Err(format!("df_executor: fixed_raw_array unexpected typid {other}"));
+        }
+    })
+}
+
+/// The legacy per-cell → Arrow conversion (extracted from `build_arrow` unchanged) — used by the cell path (nullable /
+/// varlena / text) and by `arrow_cache`. Kept byte-identical: every arm is a plain `from_le_bytes`/`from_utf8_lossy`.
+fn cells_to_array(typid: u32, values: &[Option<Vec<u8>>]) -> Result<(DataType, ArrayRef), String> {
+    Ok(match typid {
             21 => (
                 DataType::Int16,
                 Arc::new(Int16Array::from_iter(
@@ -129,11 +245,7 @@ pub(super) fn build_arrow(
                     "df_executor: unsupported column type oid {other} (Phase A: int2/4/8, float4/8, bool, text)"
                 ));
             }
-        };
-        fields.push(Field::new(name, dt, true));
-        arrays.push(arr);
-    }
-    Ok((Schema::new(fields), arrays))
+    })
 }
 
 /// Whether this OID is safe as a GROUP BY key / `COUNT(DISTINCT)` column for the vectorized path. DataFusion groups
@@ -265,8 +377,11 @@ unsafe fn decode_to_batch(
     if proj.is_empty() {
         proj.push(0); // count(*) needs a column to establish the row count
     }
-    let cols = super::columnar::decode_columns(rel, Some(&proj), predicates, skip)?;
-    let (schema, arrays) = build_arrow(&cols)?;
+    // M160 — decode_columns_v2 returns fixed-width non-null columns as `FixedRaw` (contiguous LE bytes, no per-cell
+    // alloc); build_arrow_from_decoded turns those into Arrow via one typed Vec<T> per column. Cell columns are
+    // byte-identical to the legacy path. This is the hot pushdown path only (vindex/arrow_cache keep decode_columns).
+    let cols = super::columnar::decode_columns_v2(rel, Some(&proj), predicates, skip)?;
+    let (schema, arrays) = build_arrow_from_decoded(&cols)?;
     RecordBatch::try_new(Arc::new(schema), arrays)
         .map_err(|e| format!("df_executor: arrow batch: {e}"))
 }
@@ -895,5 +1010,57 @@ mod tests {
             "projected aggregate over a wide table must be correct"
         );
         Spi::run("DROP TABLE m100_w").unwrap();
+    }
+}
+
+#[cfg(test)]
+mod m160_fixed_raw_tests {
+    //! M160 — the zero-copy `fixed_raw_array` fast path MUST produce byte-identical Arrow to the legacy per-cell
+    //! `cells_to_array` for every fast-eligible fixed-width type. Pure-Arrow (no pg_sys); compares `ArrayData`.
+    use super::{cells_to_array, fixed_raw_array};
+
+    fn cells_of<const W: usize>(vals: &[[u8; W]]) -> Vec<Option<Vec<u8>>> {
+        vals.iter().map(|b| Some(b.to_vec())).collect()
+    }
+    fn contiguous<const W: usize>(vals: &[[u8; W]]) -> Vec<u8> {
+        vals.iter().flat_map(|b| b.iter().copied()).collect()
+    }
+
+    #[test]
+    fn fixed_raw_matches_cells_across_fast_types() {
+        // (typid, width, sample little-endian value bytes)
+        // int4 (23): 1, -2, 1_000_000
+        let i32v = [1i32.to_le_bytes(), (-2i32).to_le_bytes(), 1_000_000i32.to_le_bytes()];
+        // int8 (20): 0, i64::MIN, 42
+        let i64v = [0i64.to_le_bytes(), i64::MIN.to_le_bytes(), 42i64.to_le_bytes()];
+        // float8 (701): 1.5, -0.0, 3.25
+        let f64v = [1.5f64.to_le_bytes(), (-0.0f64).to_le_bytes(), 3.25f64.to_le_bytes()];
+        // int2 (21): 7, -1, 30000
+        let i16v = [7i16.to_le_bytes(), (-1i16).to_le_bytes(), 30000i16.to_le_bytes()];
+        // date (1082) int32 days: 100, 0, 20000
+        let datev = [100i32.to_le_bytes(), 0i32.to_le_bytes(), 20000i32.to_le_bytes()];
+        // timestamp (1114) int64 μs: 123, -456, 999_999_999
+        let tsv = [123i64.to_le_bytes(), (-456i64).to_le_bytes(), 999_999_999i64.to_le_bytes()];
+
+        macro_rules! check {
+            ($typid:expr, $w:expr, $arr:expr) => {{
+                let (dt_f, af) = fixed_raw_array($typid, &contiguous(&$arr), $w, $arr.len()).unwrap();
+                let (dt_c, ac) = cells_to_array($typid, &cells_of(&$arr)).unwrap();
+                assert_eq!(dt_f, dt_c, "DataType mismatch for typid {}", $typid);
+                assert_eq!(af.to_data(), ac.to_data(), "Arrow data mismatch for typid {}", $typid);
+            }};
+        }
+        check!(23, 4, i32v);
+        check!(20, 8, i64v);
+        check!(701, 8, f64v);
+        check!(21, 2, i16v);
+        check!(1082, 4, datev);
+        check!(1114, 8, tsv);
+    }
+
+    #[test]
+    fn fixed_raw_rejects_wrong_size() {
+        // 5 bytes for a width-4 / 1-row column must be a typed error, never a panic across C.
+        assert!(fixed_raw_array(23, &[0u8; 5], 4, 1).is_err());
     }
 }

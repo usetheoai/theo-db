@@ -22,6 +22,11 @@ use std::ffi::{CStr, c_int, c_void};
 /// `theodb.enable_columnar_agg` — default OFF (the vectorized aggregate path is opt-in until benchmarked).
 pub(crate) static ENABLE_COLUMNAR_AGG: GucSetting<bool> = GucSetting::<bool>::new(false);
 
+/// `theodb.enable_columnar_fast_decode` (M160) — default ON. When on, the pushdown decode path (`decode_columns_v2`)
+/// decodes non-null fixed-width columns as one contiguous typed buffer (zero-copy into Arrow); when off, every column
+/// falls back to the legacy per-cell path — the toggle exists so a same-binary/same-box A/B can MEASURE the M160 win.
+pub(crate) static ENABLE_FAST_DECODE: GucSetting<bool> = GucSetting::<bool>::new(true);
+
 /// `theodb.enable_columnar_late_mat` (M158) — default OFF. When on, `Limit(k) → Sort([key]) → columnar-project` is
 /// swapped for a late-materialization top-k CustomScan (decode {key∪filter} for all rows, DataFusion filter+sort+limit,
 /// materialize the full projection only for the k survivors — avoiding `form_row`/`palloc` for N−k rows, the M148 cost).
@@ -107,6 +112,14 @@ pub(crate) fn init() {
         c"Route simple columnar aggregates through the DataFusion vectorized executor",
         c"When on, count(*)/sum(float8) over a theodb_columnar table (no GROUP BY/WHERE) runs via a CustomScan.",
         &ENABLE_COLUMNAR_AGG,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+    GucRegistry::define_bool_guc(
+        c"theodb.enable_columnar_fast_decode",
+        c"Zero-copy fixed-width columnar decode into Arrow (M160)",
+        c"When on, non-null fixed-width columns decode as one contiguous typed buffer (no per-cell alloc). Toggle for A/B.",
+        &ENABLE_FAST_DECODE,
         GucContext::Userset,
         GucFlags::default(),
     );
