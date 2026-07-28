@@ -765,9 +765,7 @@ pub(super) unsafe fn run_columnar_grouped_aggs(
 pub(super) unsafe fn run_columnar_topk(
     rel: pg_sys::Relation,
     proj_cols: &[(String, u32)],
-    sort_key: &str,
-    ascending: bool,
-    nulls_first: bool,
+    sort_keys: &[(String, bool, bool)], // M167 — (name, ascending, nulls_first) in ORDER BY position
     k: usize,
     predicates: &[super::zonemap::ZonePredicate],
     text_predicates: &[super::zonemap::TextPredicate],
@@ -776,12 +774,17 @@ pub(super) unsafe fn run_columnar_topk(
 ) -> Result<Vec<Vec<(pg_sys::Datum, bool)>>, String> {
     // Project all output columns ∪ the sort key (decode_to_batch also folds in the predicate columns + guarantees ≥1).
     let mut proj_names: Vec<String> = proj_cols.iter().map(|(n, _)| n.clone()).collect();
-    if !proj_names.iter().any(|n| n == sort_key) {
-        proj_names.push(sort_key.to_string());
+    for (key, _, _) in sort_keys {
+        if !proj_names.iter().any(|n| n == key) {
+            proj_names.push(key.clone());
+        }
     }
     let batch = decode_to_batch(rel, &proj_names, predicates, text_predicates, in_predicates, skip)?;
     let filter = build_filter_expr(rel, predicates, text_predicates, in_predicates);
-    let key = sort_key.to_string();
+    let order_by: Vec<_> = sort_keys
+        .iter()
+        .map(|(name, asc, nf)| col(name.as_str()).sort(*asc, *nf))
+        .collect();
     // filter (WHERE, the final authority — D3) → sort by the key (PG order for numeric/temporal/det-collation text) →
     // limit k (DataFusion's TopK: a bounded heap, never materializing all N as tuples).
     let batches = run_df_collect(batch, move |df| {
@@ -789,7 +792,7 @@ pub(super) unsafe fn run_columnar_topk(
             Some(f) => df.filter(f)?,
             None => df,
         };
-        df.sort(vec![col(key.as_str()).sort(ascending, nulls_first)])?.limit(0, Some(k))
+        df.sort(order_by)?.limit(0, Some(k))
     })?;
 
     // Emit the surviving rows: one Datum per output column (in target order), located in the result batch by NAME

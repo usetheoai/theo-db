@@ -46,6 +46,10 @@ pub(crate) static ENABLE_COLUMNAR_LATE_MAT: GucSetting<bool> = GucSetting::<bool
 /// columnar TableAM leaves at the planner's rows=1 default.
 const TOPK_DECODE_WORK_MEM_FACTOR: f64 = 8.0;
 
+/// M167 ADR-3 — ceiling on ORDER BY keys the top-k node will carry. The int wire format grows 3 slots per key, and
+/// a sort with more keys than this is not a shape this path was measured on; declining is free and correct.
+const TOPK_MAX_SORT_KEYS: usize = 8;
+
 /// M167 ADR-4 — the physical size of `rel_oid` in bytes, from `pg_class.relpages`.
 ///
 /// The obvious signal — the planner's `plan_rows × plan_width` — is INERT on a columnar table: the TableAM reports
@@ -1889,24 +1893,26 @@ fn topk_type_supported(typoid: u32) -> bool {
     matches!(typoid, 21 | 23 | 20 | 700 | 701 | 16 | 25 | 1042 | 1043 | 1114 | 1184 | 1082)
 }
 
-/// M158 — encode the top-k `custom_private` int channel (mode == 2, distinct from the agg layouts):
-/// `[relid, 2, k, sort_attno, asc, nulls_first, nproj, (attno,typoid)×nproj, npred, (col,op,hi,lo)×npred]`.
+/// M158 — encode the top-k `custom_private` int channel (mode == 2, distinct from the agg layouts).
+/// M167 generalized the single sort key to N keys:
+/// `[relid, 2, k, nkeys, (attno,asc,nulls_first)×nkeys, nproj, (attno,typoid)×nproj, npred, (col,op,hi,lo)×npred]`.
 /// Text predicates ride the shared 2nd channel (`encode_text_preds`); the 3rd channel is empty (NIL) for top-k.
 unsafe fn encode_topk_private(
     table_oid: u32,
     k: usize,
-    sort_attno: i32,
-    ascending: bool,
-    nulls_first: bool,
+    sort_keys: &[(i32, bool, bool)], // (attno, ascending, nulls_first) — in ORDER BY position
     proj_cols: &[(i32, u32)],
     preds: &[ZonePredicate],
 ) -> *mut pg_sys::List {
     let mut pl = pg_sys::lappend_int(std::ptr::null_mut(), table_oid as i32);
     pl = pg_sys::lappend_int(pl, 2); // mode = 2 (top-k)
     pl = pg_sys::lappend_int(pl, k as i32);
-    pl = pg_sys::lappend_int(pl, sort_attno);
-    pl = pg_sys::lappend_int(pl, ascending as i32);
-    pl = pg_sys::lappend_int(pl, nulls_first as i32);
+    pl = pg_sys::lappend_int(pl, sort_keys.len() as i32);
+    for &(attno, asc, nf) in sort_keys {
+        pl = pg_sys::lappend_int(pl, attno);
+        pl = pg_sys::lappend_int(pl, asc as i32);
+        pl = pg_sys::lappend_int(pl, nf as i32);
+    }
     pl = pg_sys::lappend_int(pl, proj_cols.len() as i32);
     for &(attno, typoid) in proj_cols {
         pl = pg_sys::lappend_int(pl, attno);
@@ -1966,11 +1972,9 @@ unsafe fn try_swap_topk(
     }
     let k = k_i64 as usize;
 
-    // This node is the Sort; exactly one sort column.
+    // This node is the Sort. M167: the key count is validated per-key below (ADR-3) — M158's `numCols != 1` was a
+    // scope limit, not a safety property.
     let sort = plan as *mut pg_sys::Sort;
-    if (*sort).numCols != 1 {
-        return None;
-    }
     // Grandchild must be a theodb_columnar_project CustomScan (M149) over a columnar rel.
     let child = (*sort).plan.lefttree;
     if child.is_null() || (*child).type_ != pg_sys::NodeTag::T_CustomScan {
@@ -2028,44 +2032,50 @@ unsafe fn try_swap_topk(
         );
         cst = pg_sys::lappend(cst, nte as *mut c_void);
     }
-    // Sort key: sortColIdx[0] is a 1-based resno into the Sort's tlist, positionally aligned with the project's tlist
-    // (Sort passes columns through unchanged). Resolve to the base column + direction + nulls placement.
-    let key_pos = *(*sort).sortColIdx.add(0) as usize;
-    if key_pos == 0 || key_pos > proj_meta.len() {
+    // Sort keys (M167 ADR-3 — generalized from M158's single key). `sortColIdx[i]` is a 1-based resno into the
+    // Sort's tlist, positionally aligned with the project's tlist (Sort passes columns through unchanged). EVERY key
+    // must pass EVERY guard: the checks below are per-key properties, not a scope limit, so a multi-key sort is
+    // admissible exactly when each of its keys is. Fail-closed — one bad key declines the whole swap.
+    let nkeys = (*sort).numCols as usize;
+    if nkeys == 0 || nkeys > TOPK_MAX_SORT_KEYS {
+        admit_trace("topk_sort_key_count_out_of_range");
         return None;
     }
-    let (sort_attno, key_type) = proj_meta[key_pos - 1];
-    // Text sort key: DataFusion byte-sorts Utf8, which matches PG ORDER BY only under a BYTE-order collation — i.e.
-    // C / POSIX. A merely DETERMINISTIC collation (e.g. en_US.UTF-8) is NOT enough: determinism fixes equality
-    // (byte-equal ⟺ string-equal, the M153/M154 grouping/LIKE guarantee) but NOT sort order — en_US sorts
-    // linguistically ('a' < 'Z') while bytes sort 'Z'(0x5A) < 'a'(0x61) → a silently WRONG top-k row
-    // (council-index-storage HIGH). So a text SORT key is admitted ONLY under C (950) or POSIX (951); DEFAULT and
-    // every other collation decline to the native plan. (Text FILTER predicates keep the determinism guard — filter
-    // equality, not order — unchanged.) bpchar (1042) also declines (PG trims trailing blanks; DataFusion does not).
-    if matches!(key_type, 25 | 1043) {
-        // Use the SORT's effective collation for this key (`sort.collations[0]`), NOT the column's varcollid — an
-        // `ORDER BY s COLLATE "C"` overrides the column collation, and the override lives on the Sort node.
-        // M167: byte-order is PROVEN (see `sort_collation_is_byte_order`), not allowlisted by OID.
-        let sort_coll = (*(*sort).collations.add(0)).to_u32();
-        if !sort_collation_is_byte_order(sort_coll) {
-            admit_trace("topk_text_key_non_byte_collation");
+    let mut sort_keys: Vec<(i32, bool, bool)> = Vec::with_capacity(nkeys);
+    for ki in 0..nkeys {
+        let key_pos = *(*sort).sortColIdx.add(ki) as usize;
+        if key_pos == 0 || key_pos > proj_meta.len() {
             return None;
         }
-    } else if key_type == 1042 {
-        return None; // bpchar sort key → PG trims trailing blanks; DataFusion does not → decline
+        let (attno, key_type) = proj_meta[key_pos - 1];
+        // Text sort key: DataFusion byte-sorts Utf8, which matches PG ORDER BY only under a BYTE-order collation.
+        // A merely DETERMINISTIC collation (e.g. en_US.UTF-8) is NOT enough: determinism fixes equality (byte-equal
+        // ⟺ string-equal, the M153/M154 grouping/LIKE guarantee) but NOT sort order — en_US sorts linguistically
+        // ('a' < 'Z') while bytes sort 'Z'(0x5A) < 'a'(0x61) → a silently WRONG top-k row (council-index-storage
+        // HIGH). Use the SORT's effective collation for THIS key (`sort.collations[ki]`), not the column's
+        // varcollid — `ORDER BY s COLLATE "C"` overrides the column collation and the override lives on the Sort.
+        // (Text FILTER predicates keep the determinism guard — filter equality, not order — unchanged.)
+        if matches!(key_type, 25 | 1043) {
+            let sort_coll = (*(*sort).collations.add(ki)).to_u32();
+            if !sort_collation_is_byte_order(sort_coll) {
+                admit_trace("topk_text_key_non_byte_collation");
+                return None;
+            }
+        } else if key_type == 1042 {
+            return None; // bpchar sort key → PG trims trailing blanks; DataFusion does not → decline
+        }
+        // Direction from this key's sort operator (M135: PG18 CompareType port; COMPARE_LT == ascending).
+        let opno = *(*sort).sortOperators.add(ki);
+        let (mut opfamily, mut opcintype, mut cmptype) =
+            (pg_sys::InvalidOid, pg_sys::InvalidOid, pg_sys::CompareType::COMPARE_INVALID);
+        pg_sys::get_ordering_op_properties(opno, &mut opfamily, &mut opcintype, &mut cmptype);
+        let ascending = match cmptype {
+            pg_sys::CompareType::COMPARE_LT => true,
+            pg_sys::CompareType::COMPARE_GT => false,
+            _ => return None, // non-btree ordering operator → decline
+        };
+        sort_keys.push((attno, ascending, *(*sort).nullsFirst.add(ki)));
     }
-    // Direction from the sort operator (M135: PG18 CompareType port; COMPARE_LT == ascending).
-    let opno = *(*sort).sortOperators.add(0);
-    let (mut opfamily, mut opcintype, mut cmptype) =
-        (pg_sys::InvalidOid, pg_sys::InvalidOid, pg_sys::CompareType::COMPARE_INVALID);
-    pg_sys::get_ordering_op_properties(opno, &mut opfamily, &mut opcintype, &mut cmptype);
-    let ascending = match cmptype {
-        pg_sys::CompareType::COMPARE_LT => true,
-        pg_sys::CompareType::COMPARE_GT => false,
-        _ => return None, // non-btree ordering operator → decline
-    };
-    let nulls_first = *(*sort).nullsFirst.add(0);
-
     // Predicates: the project node applies the WHERE via its own qual (a List of final clauses whose Vars are base
     // Vars with varno == scanrelid). Every clause MUST be pushable (zone or text) — else decline, because the top-k
     // node OWNS the filter (the project subtree is dropped).
@@ -2122,7 +2132,7 @@ unsafe fn try_swap_topk(
     cscan.flags = 0;
     cscan.custom_plans = std::ptr::null_mut();
     cscan.custom_exprs = std::ptr::null_mut();
-    let int_channel = encode_topk_private(table_oid, k, sort_attno, ascending, nulls_first, &proj_meta, &zpreds);
+    let int_channel = encode_topk_private(table_oid, k, &sort_keys, &proj_meta, &zpreds);
     let text_channel = encode_text_preds(&tpreds)?;
     let mut outer = pg_sys::lappend(std::ptr::null_mut(), int_channel as *mut c_void);
     outer = pg_sys::lappend(outer, text_channel as *mut c_void);
@@ -2262,15 +2272,23 @@ unsafe extern "C-unwind" fn begin_custom_scan(
     let oldcxt = pg_sys::MemoryContextSwitchTo((*estate).es_query_cxt);
     let res = (|| -> Result<Vec<Vec<(pg_sys::Datum, bool)>>, String> {
         // M158 — top-k late materialization (mode == 2). Distinct IntList layout keyed by mode:
-        // [relid, 2, k, sort_attno, asc, nulls_first, nproj, (attno,typoid)×nproj, npred, (col,op,hi,lo)×npred].
+        // [relid, 2, k, nkeys, (attno,asc,nf)×nkeys, nproj, (attno,typoid)×nproj, npred, (col,op,hi,lo)×npred].
         if mode == 2 {
             let k = pg_sys::list_nth_int(priv_list, 2) as usize;
-            let sort_attno = pg_sys::list_nth_int(priv_list, 3);
-            let ascending = pg_sys::list_nth_int(priv_list, 4) != 0;
-            let nulls_first = pg_sys::list_nth_int(priv_list, 5) != 0;
-            let nproj = pg_sys::list_nth_int(priv_list, 6) as usize;
+            let nkeys = pg_sys::list_nth_int(priv_list, 3) as usize;
+            let mut j = 4;
+            let mut sort_keys: Vec<(String, bool, bool)> = Vec::with_capacity(nkeys);
+            for _ in 0..nkeys {
+                let attno = pg_sys::list_nth_int(priv_list, j);
+                let asc = pg_sys::list_nth_int(priv_list, j + 1) != 0;
+                let nf = pg_sys::list_nth_int(priv_list, j + 2) != 0;
+                j += 3;
+                let nm = pg_sys::get_attname(relid, attno as pg_sys::AttrNumber, false);
+                sort_keys.push((CStr::from_ptr(nm).to_string_lossy().into_owned(), asc, nf));
+            }
+            let nproj = pg_sys::list_nth_int(priv_list, j) as usize;
+            j += 1;
             let mut proj_cols: Vec<(String, u32)> = Vec::with_capacity(nproj);
-            let mut j = 7;
             for _ in 0..nproj {
                 let attno = pg_sys::list_nth_int(priv_list, j);
                 let typoid = pg_sys::list_nth_int(priv_list, j + 1) as u32;
@@ -2319,17 +2337,11 @@ unsafe extern "C-unwind" fn begin_custom_scan(
                     needle: CStr::from_ptr(sval).to_string_lossy().into_owned(),
                 });
             }
-            let sort_nm = {
-                let nm = pg_sys::get_attname(relid, sort_attno as pg_sys::AttrNumber, false);
-                CStr::from_ptr(nm).to_string_lossy().into_owned()
-            };
             let rel = pg_sys::relation_open(relid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
             let r = super::df_executor::run_columnar_topk(
                 rel,
                 &proj_cols,
-                &sort_nm,
-                ascending,
-                nulls_first,
+                &sort_keys,
                 k,
                 &tk_preds,
                 &tk_text,
