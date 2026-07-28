@@ -18,6 +18,7 @@ use pgrx::datum::FromDatum;
 use pgrx::{GucContext, GucFlags, GucRegistry, GucSetting};
 use pgrx::{PgBox, PgList, pg_guard, pg_sys};
 use std::ffi::{CStr, c_int, c_void};
+use std::sync::atomic::{AtomicU8, Ordering};
 
 /// `theodb.enable_columnar_agg` — default OFF (the vectorized aggregate path is opt-in until benchmarked).
 pub(crate) static ENABLE_COLUMNAR_AGG: GucSetting<bool> = GucSetting::<bool>::new(false);
@@ -35,6 +36,119 @@ pub(crate) static ENABLE_FAST_DECODE: GucSetting<bool> = GucSetting::<bool>::new
 /// here). The O(N) decode this path pays is bounded by the plan-time guard in `try_swap_topk` (M167 ADR-4), which is
 /// what replaced "default OFF" as the mitigation.
 pub(crate) static ENABLE_COLUMNAR_LATE_MAT: GucSetting<bool> = GucSetting::<bool>::new(true);
+
+/// M167 ADR-4 — safety factor for the top-k decode bound. `run_columnar_topk` decodes {projection ∪ keys ∪ filter}
+/// for ALL rows into one Arrow batch BEFORE the bounded-heap TopK runs, so the path costs O(N) memory where the
+/// native top-N heapsort costs O(k). With the GUC defaulting ON (M167), an unfiltered wide `SELECT * … ORDER BY k
+/// LIMIT 10` would otherwise decode the whole relation and OOM the backend. HEURISTIC, not a measured optimum: it
+/// says "a relation an order of magnitude beyond what this session already budgeted for a sort is not ours to
+/// decode whole". Applied to `pg_class.relpages` (see `relation_physical_bytes`), NOT to `plan_rows`, which the
+/// columnar TableAM leaves at the planner's rows=1 default.
+const TOPK_DECODE_WORK_MEM_FACTOR: f64 = 8.0;
+
+/// M167 ADR-4 — the physical size of `rel_oid` in bytes, from `pg_class.relpages`.
+///
+/// The obvious signal — the planner's `plan_rows × plan_width` — is INERT on a columnar table: the TableAM reports
+/// no tuple count, so `reltuples` stays 0 and the planner estimates `rows=1` even for a 1M-row relation (measured:
+/// `EXPLAIN` of `SELECT * FROM hits ORDER BY EventTime LIMIT 10` shows `rows=1 width=1604`). A bound built on that
+/// never fires. `relpages` IS maintained (measured: 27863 pages for the same relation) and is the honest proxy for
+/// how much this path has to decode.
+///
+/// Two directions of imprecision, both stated rather than hidden: `relpages` is a STATISTIC (ANALYZE/VACUUM), so it
+/// lags a relation that just grew; and the on-disk bytes are COMPRESSED, so the decoded Arrow batch is LARGER than
+/// this. The second dominates, which is the safe direction for a ceiling — the guard under-estimates the decode and
+/// therefore only ever declines cases that are at least this big.
+fn relation_physical_bytes(rel_oid: u32) -> f64 {
+    unsafe {
+        // The syscache key is an OID datum — build it through `Oid` rather than from a bare u32.
+        let tup = pg_sys::SearchSysCache1(
+            pg_sys::SysCacheIdentifier::RELOID as i32,
+            pg_sys::Datum::from(pg_sys::Oid::from(rel_oid)),
+        );
+        if tup.is_null() {
+            return 0.0; // unknown size → the guard cannot judge; other guards still apply
+        }
+        // `SysCacheGetAttr` rather than the GETSTRUCT macro (a C macro, absent from the pgrx bindings) — same
+        // pattern as `database_collate_is_byte_order`. `relpages` is a fixed-width int4, so no detoasting.
+        let mut isnull = false;
+        let d = pg_sys::SysCacheGetAttr(
+            pg_sys::SysCacheIdentifier::RELOID as i32,
+            tup,
+            pg_sys::Anum_pg_class_relpages as pg_sys::AttrNumber,
+            &mut isnull,
+        );
+        pg_sys::ReleaseSysCache(tup);
+        if isnull {
+            return 0.0;
+        }
+        let pages = d.value() as i32;
+        f64::from(pages.max(0)) * f64::from(pg_sys::BLCKSZ)
+    }
+}
+
+/// M167 ADR-2 — is `coll` a BYTE-ORDER (memcmp) collation, i.e. does DataFusion's Utf8 sort agree with PG's
+/// `ORDER BY`? C (950) and POSIX (951) always are. The DEFAULT collation (100) delegates to the database, so it is
+/// byte-order iff `pg_database.datcollate` is `C`/`POSIX` — which the M158 OID allowlist could not see, declining a
+/// provably safe case on a C cluster (measured: ClickBench q25 on a `datcollate=C` database).
+///
+/// Determinism is NOT the property we need: it fixes equality (byte-equal ⟺ string-equal), not order — `en_US`
+/// sorts 'a' < 'Z' while bytes sort 'Z'(0x5A) < 'a'(0x61).
+///
+/// Why the catalog and not a GUC: PG 18 has **no** `lc_collate` GUC (removed once per-database collation became
+/// authoritative; `pg_settings` exposes only `lc_messages`/`monetary`/`numeric`/`time`). Why not
+/// `pg_newlocale_from_collation()->collate_is_c`, which is PG's own predicate: pgrx 0.19 generates no binding for
+/// it, so using it would mean a hand-written `extern "C"` plus an assumption about `pg_locale_struct`'s layout.
+/// Fail-closed: any unreadable catalog answer returns false (decline to the native plan, correct for any input).
+fn database_collate_is_byte_order() -> bool {
+    // datcollate cannot change for a live database, so resolve once per backend.
+    static CACHED: AtomicU8 = AtomicU8::new(0); // 0 = unknown, 1 = yes, 2 = no
+    match CACHED.load(Ordering::Relaxed) {
+        1 => return true,
+        2 => return false,
+        _ => {}
+    }
+    let is_c = unsafe {
+        let tup = pg_sys::SearchSysCache1(
+            pg_sys::SysCacheIdentifier::DATABASEOID as i32,
+            pg_sys::Datum::from(pg_sys::MyDatabaseId),
+        );
+        if tup.is_null() {
+            false
+        } else {
+            let mut isnull = false;
+            let d = pg_sys::SysCacheGetAttr(
+                pg_sys::SysCacheIdentifier::DATABASEOID as i32,
+                tup,
+                pg_sys::Anum_pg_database_datcollate as pg_sys::AttrNumber,
+                &mut isnull,
+            );
+            let verdict = if isnull {
+                false
+            } else {
+                let cs = pg_sys::text_to_cstring(d.cast_mut_ptr());
+                let s = CStr::from_ptr(cs).to_string_lossy().into_owned();
+                pg_sys::pfree(cs.cast());
+                s == "C" || s == "POSIX"
+            };
+            pg_sys::ReleaseSysCache(tup);
+            verdict
+        }
+    };
+    CACHED.store(if is_c { 1 } else { 2 }, Ordering::Relaxed);
+    is_c
+}
+
+/// M167 ADR-2 — the guard a TEXT sort key must pass. Only ever ADDS provably-safe cases to the M158 allowlist.
+fn sort_collation_is_byte_order(coll: u32) -> bool {
+    const C_COLL: u32 = 950;
+    const POSIX_COLL: u32 = 951; // pgrx exports C_COLLATION_OID but not the POSIX one; both are stable catalog OIDs
+    const DEFAULT_COLL: u32 = 100;
+    match coll {
+        C_COLL | POSIX_COLL => true,
+        DEFAULT_COLL => database_collate_is_byte_order(),
+        _ => false,
+    }
+}
 
 /// M152 (spike) — behavior-NEUTRAL decline trace. When `THEODB_ADMIT_TRACE=1`, emit the reason the columnar-agg
 /// path declined a candidate (the ground-truth the static SQL analysis can't give — plan-shape declines in
@@ -1930,11 +2044,10 @@ unsafe fn try_swap_topk(
     // equality, not order — unchanged.) bpchar (1042) also declines (PG trims trailing blanks; DataFusion does not).
     if matches!(key_type, 25 | 1043) {
         // Use the SORT's effective collation for this key (`sort.collations[0]`), NOT the column's varcollid — an
-        // `ORDER BY s COLLATE "C"` overrides the column collation, and the override lives on the Sort node. C (950) and
-        // POSIX (951) are the only byte-order collations (memcmp); pgrx exports C_COLLATION_OID but not the POSIX one,
-        // so compare the raw OID values (both stable PG catalog OIDs).
+        // `ORDER BY s COLLATE "C"` overrides the column collation, and the override lives on the Sort node.
+        // M167: byte-order is PROVEN (see `sort_collation_is_byte_order`), not allowlisted by OID.
         let sort_coll = (*(*sort).collations.add(0)).to_u32();
-        if sort_coll != 950 && sort_coll != 951 {
+        if !sort_collation_is_byte_order(sort_coll) {
             admit_trace("topk_text_key_non_byte_collation");
             return None;
         }
@@ -1975,6 +2088,19 @@ unsafe fn try_swap_topk(
         return None;
     }
     let table_oid = (*scan_rte).relid.to_u32();
+    // M167 ADR-4 / EC-1 — bound the O(N) decode. `run_columnar_topk` decodes {projection ∪ keys ∪ filter} for ALL
+    // rows into one Arrow batch BEFORE the bounded-heap TopK, so this path costs O(N) memory where the native top-N
+    // heapsort costs O(k). M158 mitigated that by defaulting the GUC OFF; M167 flipped it ON, so the bound lives
+    // here. Fail-closed: declining falls back to the native plan, correct for any input.
+    let est_decode_bytes = relation_physical_bytes(table_oid);
+    let work_mem_bytes = f64::from(pg_sys::work_mem.max(64)) * 1024.0;
+    if est_decode_bytes > work_mem_bytes * TOPK_DECODE_WORK_MEM_FACTOR {
+        admit_trace(&format!(
+            "topk_decode_estimate_too_large est_bytes={est_decode_bytes:.0} budget={:.0}",
+            work_mem_bytes * TOPK_DECODE_WORK_MEM_FACTOR
+        ));
+        return None;
+    }
 
     // Build the replacement CustomScan (scanrelid = 0 — it scans the columnar rel by OID, like the agg node).
     let mut cscan = PgBox::<pg_sys::CustomScan>::alloc_node(pg_sys::NodeTag::T_CustomScan);

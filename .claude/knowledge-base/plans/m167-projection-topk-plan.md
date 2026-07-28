@@ -156,7 +156,7 @@ any guard declines the whole swap; a key count above a small bound (`TOPK_MAX_SO
 growing the int wire format unboundedly.
 
 ### ADR-4 — bound the O(N) decode with a plan-time size guard
-`plan_rows × plan_width > work_mem × TOPK_DECODE_WORK_MEM_FACTOR` → decline. **Rationale:** `run_columnar_topk`
+`relpages × BLCKSZ > work_mem × TOPK_DECODE_WORK_MEM_FACTOR` → decline. **Rationale:** `run_columnar_topk`
 decodes {projection ∪ keys ∪ filter} for all rows *before* the bounded-heap TopK (`df_executor.rs:775`), so the path
 is O(N) memory where native's top-N heapsort is O(k). `df_executor.rs:576–581` cites "gated behind …, default OFF"
 as the mitigation — ADR-1 removes exactly that. An unfiltered `SELECT * FROM hits ORDER BY EventTime LIMIT 10` is
@@ -165,10 +165,17 @@ failure is a backend OOM, not a typed error. **Alternative rejected:** a GUC for
 rung 1/5); a constant plus an `admit_trace` decline reason is observable enough. **Alternative rejected:** stream the
 decode to make the path O(k) — real new executor mechanism, out of scope for this milestone; recorded as the honest
 long-term fix. **Alternative rejected:** document the risk without a bound — it is an availability incident on an
-ordinary query. **Honest limitation:** `plan_rows` is the *post-qual* estimate and `plan_width` an average, while the
-decode covers every row surviving zone-map chunk skipping and Arrow adds validity/offset buffers — so the guard is a
-**lower bound** on the true decode. It reliably catches the unfiltered case (where `plan_rows ≈ N`, the dangerous
-one) and can under-fire on a highly selective predicate over poorly-clustered data.
+ordinary query. **Mechanism FALSIFIED and corrected during Phase 2:** the first implementation used the planner's
+`plan_rows × plan_width`. It never fired, and the measurement says why — the columnar TableAM reports no tuple count,
+so `reltuples` stays **0** and the planner estimates **`rows=1 width=1604`** for a 1M-row relation (`EXPLAIN` of the
+unfiltered wide top-k). A bound built on that is inert by construction. `pg_class.relpages` IS maintained (measured:
+**27863** pages ≈ 228 MB for the same relation) and is the honest size signal; the guard now reads it via the syscache
+(`Anum_pg_class_relpages = 10`), the same pattern as ADR-2's `datcollate` read.
+**Honest limitation:** `relpages` is a STATISTIC (ANALYZE/VACUUM), so it lags a relation that just grew; and the
+on-disk bytes are COMPRESSED, so the decoded Arrow batch is LARGER than the estimate. The second dominates, which is
+the safe direction for a ceiling — the guard under-estimates the decode and therefore only ever declines relations
+that are at least that big. It does NOT account for a selective predicate reducing what is decoded, so a highly
+selective query over a large relation can be declined even though its decode would have been small.
 
 ### ADR-5 — the top-k oracle is `m158_ec_harness.sql`, not `columnar_type_ab.py`
 Extend the existing M158 harness (`t_col`, 20 000 rows, `wid` **UNIQUE** so the top-k boundary has no ties) with the
