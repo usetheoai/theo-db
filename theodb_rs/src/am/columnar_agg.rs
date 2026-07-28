@@ -188,7 +188,11 @@ fn sort_collation_is_byte_order(coll: u32) -> bool {
 /// ONLY to build the M152 routing-map; carries no functional effect (mirrors `THEODB_SCAN_PROFILE` of M150).
 #[inline]
 fn admit_trace(reason: &str) {
-    if std::env::var("THEODB_ADMIT_TRACE").as_deref() == Ok("1") {
+    // Resolve the env var ONCE per backend. With M167 flipping the late-mat default ON, `swap_walk` now runs on
+    // every planned statement, so this is called per Sort node per plan on the default path — a `std::env::var`
+    // there is a syscall-free but still allocating lookup on the hot planning path (review finding F13).
+    static TRACE_ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *TRACE_ON.get_or_init(|| std::env::var("THEODB_ADMIT_TRACE").as_deref() == Ok("1")) {
         pgrx::warning!("theodb_admit_decline: {reason}");
     }
 }

@@ -77,6 +77,22 @@ collation and forgot key 1's would pass every other test and fail exactly there.
 `benchmarks/columnar_type_ab.py` (the M163/M164 type-coverage gate, required by the ROADMAP DoD) carries four
 projection-top-k routing cases: **35/35 as-expected, positive control `diverged = 2`**.
 
+### At the measured scale — `benchmarks/m167_hits_topk_ab.sql`
+
+The two oracles above run on fixtures (20k / 2k rows). This one runs on the **relation the numbers came from** —
+1M rows, 105 columns — comparing columnar `hits` (late-mat ON) against the heap twin with the LIMIT preserved:
+
+| Assertion | Measured |
+|---|---|
+| sort-key multiset, q23 / q24 / q25 / q26 | **0 / 0 / 0 / 0** |
+| full rows under a total order (key↔payload alignment) | **0** |
+| distinct values of the first sort key in those 20 rows | **1** — a total tie, so the tie-break decided every row |
+| negative control (seeded divergence) | **40** |
+
+The non-vacuity line is there because it caught a draft of this very block: the first version tie-broke on
+`EventTime`, which turned out to be *unique* in its top-20 — the block passed while exercising no tie-break at all.
+`CounterID` ties completely, so the second and third keys do the work.
+
 ## 4. What changed
 
 **q23/q24 — the boot default.** Both were already routable; `enable_columnar_late_mat` booted `off` and the harness

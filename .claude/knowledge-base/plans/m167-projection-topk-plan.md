@@ -265,8 +265,8 @@ the shipped agg node has since M110.
 
 ### T2.2 — bound the decode with a plan-time size guard
 #### Why this step
-The action: inside `try_swap_topk`, after the project node is identified, decline when
-`plan_rows × plan_width > work_mem × TOPK_DECODE_WORK_MEM_FACTOR`, emitting `admit_trace("topk_decode_estimate_too_large")`.
+The action: inside `try_swap_topk`, after the table OID is resolved, decline when the relation's size exceeds
+`work_mem × TOPK_DECODE_WORK_MEM_FACTOR`, emitting `admit_trace("topk_decode_estimate_too_large")`.
 The reasoning: ADR-1 removes the mitigation `df_executor.rs:576–581` relies on; the bound has to come from somewhere.
 Declining falls back to the native plan, correct for any input — fail-closed like every other guard here.
 #### Files to edit
@@ -275,10 +275,13 @@ Declining falls back to the native plan, correct for any input — fail-closed l
 - RED: test_topk_declines_unfiltered_wide_projection — with a small `work_mem`,
   `assert 'Custom Scan' not in explain('SELECT * FROM hits ORDER BY EventTime LIMIT 10')` and `assert 'Sort' in explain`.
   Fails before the guard (the query routes and decodes the whole relation).
-- GREEN: test_topk_still_routes_within_budget — at the same `work_mem`,
-  `assert 'Custom Scan (theodb_columnar_agg)' in explain(q23)` and the same for q24.
-- REFACTOR: the factor is one named constant whose comment states it is a heuristic safety factor and that
-  `plan_rows` is post-qual (a lower bound), not a measured optimum.
+- GREEN: test_topk_still_routes_within_budget — at a `work_mem` whose budget exceeds the relation size (measured:
+  64MB → 512MB budget vs 228MB relation), `assert 'Custom Scan (theodb_columnar_agg)' in explain(q23)` and the same
+  for q24. NOTE the guard is per-RELATION, not per-query: at `work_mem = 4MB` every top-k on `hits` declines,
+  including q23/q24 — so the budget must be stated for this assertion to be satisfiable at all.
+- REFACTOR: the factor is one named constant whose comment states it is a heuristic safety factor, that the
+  estimate reads `pg_class.relpages` and falls back to the true physical size when that statistic is absent, and
+  that under-estimation is the DANGEROUS direction for an OOM bound (false admits), not the safe one.
 #### Concurrency tests
 (none — single-threaded)
 #### Acceptance criteria
