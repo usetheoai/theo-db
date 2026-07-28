@@ -21,7 +21,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Removed
 
 ### Fixed
-- Release tooling: `flip_milestone_checkbox.py` matched milestone headers with `###` (three hashes) but `ROADMAP.md` uses `##` (two) — the M166 flip warned "not found" (M165 had been flipped by hand). The header regex now accepts `##`/`###` so the checkbox flip is deterministic for every milestone.
+- Implementation tooling: the `/implement` halt-loop driver hardcoded a Node/TypeScript stack — it instructed the loop to write `.test.ts` files and run `npm test`, in a repository that is Rust + Python. Any `/implement` run here would have driven an autonomous, commit-making loop against a test runner that does not exist. The RED/GREEN phases now derive the runner from the plan's own TDD command, then the build manifest (`Cargo.toml` / `pyproject.toml` / `package.json` / `go.mod` / `Makefile`), and refuse to fabricate a RED when the test cannot run on the current machine.
+- Implementation tooling: `check_wiring.py` searched pillar (a) callers in `.rs`/`.py`/`.ts` but pillar (b) integration tests only in `.ts`/`.py` — so a Rust symbol could never satisfy the integration-test pillar with a Rust test, silently forcing every Rust task down the ADR-DEFER path. Both pillars now share one glob set (`.rs`/`.go`/`.sql` added), and the remediation message no longer names a `.test.ts` path.
 
 ### Security
 

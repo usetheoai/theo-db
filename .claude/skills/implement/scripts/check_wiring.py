@@ -217,8 +217,12 @@ def check_pillar_b_integration_test(project_root: Path, symbol: str, deferral_pa
         test_matches.extend(_grep_symbol(
             idir,
             symbol,
-            include_globs=["*.ts", "*.tsx", "*.js", "*.mjs", "*.py"],
-            exclude_dirs=["node_modules", ".git"],
+            # Must mirror pillar (a)'s glob set (see check_pillar_a): a project whose callers are found in
+            # `.rs`/`.go` but whose integration tests are searched only in `.ts`/`.py` can NEVER satisfy this
+            # pillar with a test written in its own language — the asymmetry silently forces every Rust/Go task
+            # down the ADR-DEFER path. Keep the two lists in sync.
+            include_globs=["*.ts", "*.tsx", "*.js", "*.mjs", "*.py", "*.rs", "*.go", "*.sql"],
+            exclude_dirs=["node_modules", ".git", "target"],
         ))
 
     if test_matches:
@@ -233,7 +237,7 @@ def check_pillar_b_integration_test(project_root: Path, symbol: str, deferral_pa
         "status": "FAIL",
         "tests_count": 0,
         "reason": f"Symbol '{symbol}' is not exercised in any integration test",
-        "recommended_action": "Add tests/integration/*.test.ts that exercises the symbol via a real boundary scenario, OR add ADR-DEFER-WIRING-B marker",
+        "recommended_action": "Add an integration test that exercises the symbol via a real boundary scenario, in one of the searched dirs and in this project's own language (naming per rules/testing.md § 5), OR add an ADR-DEFER-WIRING-B marker",
     }
 
 
