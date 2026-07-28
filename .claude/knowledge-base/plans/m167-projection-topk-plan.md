@@ -3,7 +3,7 @@ slug: m167-projection-topk
 milestone_id: M167
 target_project: theo-db
 created_at: 2026-07-27
-revision: 1.1 — absorbed the edge-case review of 2026-07-28 (EC-1..EC-6); phases 1↔2 reordered so the top-k oracle precedes the flip
+revision: 1.2 — TDD sections rewritten to executable shape (assertions, not prose) after `check_tdd_shape.py` blocked all 4 tasks at /implement Step 2.1; rev 1.1 absorbed the edge-case review of 2026-07-28 (EC-1..EC-6) and reordered phases 1↔2 so the top-k oracle precedes the flip
 goal: Flip the `theodb.enable_columnar_late_mat` GUC default to ON — behind a decode-size guard that keeps the path's O(N) memory bounded — so ClickBench q23/q24 (`SELECT cols WHERE pred ORDER BY <non-text col> LIMIT k`) route to the M158 late-mat top-k by default, measured 2.4–12.8× faster and proven byte-identical by a LIMIT-preserving top-k oracle at 1M; q25/q26 documented as correct collation / multi-key honest-negatives.
 ---
 
@@ -220,13 +220,22 @@ flip so the flip is a change made against an existing gate.
 - `benchmarks/columnar_type_ab.py` (`topk_ab_check` fn + the four case rows)
 - `benchmarks/test_columnar_type_ab.py` (pure-logic: cases declared with correct expectations; the `k < nrows` invariant)
 #### TDD
-- RED (pure-logic): `pytest benchmarks/test_columnar_type_ab.py -k m167` fails before the cases exist —
-  `test_m167_topk_cases_declared` asserts all four case names are present with expectations
-  `{topk_int_order: route, topk_unique_key_full_row: route, topk_text_order: decline, topk_multikey: decline}`.
-- RED (pure-logic, EC-5): `test_topk_k_is_strictly_less_than_fixture_rows` asserts the declared k for the routing cases is
-  `< nrows` — without it a fixture that grows past k makes the LIMIT never cut and the case passes vacuously.
-- GREEN (droplet): `columnar_type_ab.py` exit 0 — `topk_int_order` routes multiset-identical; `topk_unique_key_full_row` routes
-  full-row-identical; `topk_text_order` + `topk_multikey` decline; the top-k positive control reports `diverged > 0`.
+Run with `pytest benchmarks/test_columnar_type_ab.py -k m167` (pure-logic tier, local) and `columnar_type_ab.py` (droplet).
+
+- RED: test_m167_topk_cases_declared —
+  `assert {c["name"] for c in build_cases()} >= {"topk_int_order", "topk_unique_key_full_row", "topk_text_order", "topk_multikey"}`
+- RED: test_m167_topk_expectations_are_correct —
+  `assert expectations == {"topk_int_order": "route", "topk_unique_key_full_row": "route", "topk_text_order": "decline", "topk_multikey": "decline"}`
+- RED: test_topk_k_is_strictly_less_than_fixture_rows (EC-5) — for every routing case, `assert case["k"] < nrows`.
+  Without it a fixture grown past k makes the LIMIT never cut and the case passes vacuously.
+- GREEN: test_topk_ab_routes_and_matches (droplet) —
+  `assert topk_ab_check(cur, sql_int_order)["status"] == "ok"` (sort-key multiset identical) and
+  `assert topk_ab_check(cur, sql_unique_key)["rows_identical"] is True` (full rows — EC-4 key↔payload alignment).
+- GREEN: test_topk_declines_text_and_multikey (droplet) —
+  `assert topk_ab_check(cur, sql_text_order)["status"] == "declined"` and
+  `assert topk_ab_check(cur, sql_multikey)["status"] == "declined"`.
+- GREEN: test_topk_positive_control_diverges (droplet) — seed a wrong-key top-k, then
+  `assert control["diverged"] > 0` (an oracle that cannot fail is not an oracle — `rules/testing.md` § 5.1).
 #### Concurrency tests
 (none — single-threaded)
 #### Acceptance criteria
@@ -249,9 +258,17 @@ every fail-closed guard (numCols, text collation, LIMIT shape) still runs inside
 - `theodb_rs/src/am/columnar_agg.rs` (`:33` default + `:30`/`:1812` comments)
 - `theodb_rs/src/am/df_executor.rs` (`:581` comment — re-point the O(N) mitigation at ADR-4)
 #### TDD
-- RED (droplet): with the rebuilt `.so` (default ON, NO session `SET`), `EXPLAIN (VERBOSE, COSTS OFF)` of q24 shows
-  `Custom Scan (theodb_columnar_agg)` and NO `Sort` — i.e. it routes with the GUC at its new default.
-- GREEN: `SET theodb.enable_columnar_late_mat = off` still declines (the GUC is honored both ways).
+Run on the droplet against the 1M `hits`/`hits_heap` pair, with the `.so` rebuilt from the edited source.
+
+- RED: test_q23_q24_route_at_default — with NO session `SET`, for each of q23 and q24 capture
+  `plan = EXPLAIN (VERBOSE, COSTS OFF) <query>`, then
+  `assert "Custom Scan (theodb_columnar_agg)" in plan` and `assert "Sort" not in plan`.
+  Fails before the flip (today the GUC boots `off`, so `try_swap_topk` returns at `columnar_agg.rs:1818`).
+- RED: test_explain_verbose_returns_on_wide_hits (EC-3) — `EXPLAIN (VERBOSE, COSTS OFF)` of q23 and q24 on the real
+  105-column `hits` `assert elapsed_s < 30` (i.e. it RETURNS). Guards the M131/#135 deparse recursion, which
+  `statement_timeout` cannot interrupt because it happens during plan printing.
+- GREEN: test_guc_off_restores_native_sort — after `SET theodb.enable_columnar_late_mat = off`,
+  `assert "Sort" in plan_q24` and `assert "Custom Scan (theodb_columnar_agg)" not in plan_q24` (GUC honored both ways).
 #### Concurrency tests
 (none — single-threaded)
 #### Acceptance criteria
@@ -288,12 +305,17 @@ consistent with every other guard in this function. `admit_trace` reuses the M15
 #### Files to edit
 - `theodb_rs/src/am/columnar_agg.rs` (the guard + the `TOPK_DECODE_WORK_MEM_FACTOR` constant with its rationale comment)
 #### TDD
-- RED (droplet): `test_topk_declines_unfiltered_wide_projection` — with default-ON and a small `work_mem`,
-  `EXPLAIN (COSTS OFF) SELECT * FROM hits ORDER BY EventTime LIMIT 10` (no WHERE → empty qual → today admitted, `:1958`) shows
-  **no** `Custom Scan` and falls back to the native `Sort`; `THEODB_ADMIT_TRACE=1` reports `topk_decode_estimate_too_large`.
+Run on the droplet with the GUC at its new default (ON), so the guard is the only thing that can decline.
+
+- RED: test_topk_declines_unfiltered_wide_projection — with a small `work_mem`, capture
+  `plan = EXPLAIN (COSTS OFF) SELECT * FROM hits ORDER BY EventTime LIMIT 10` (no WHERE → empty qual → admitted today at
+  `columnar_agg.rs:1958`), then `assert "Custom Scan" not in plan` and `assert "Sort" in plan`; with
+  `THEODB_ADMIT_TRACE=1`, `assert "topk_decode_estimate_too_large" in trace`.
   Fails before the guard exists (the query routes and decodes the whole relation).
-- GREEN: `test_topk_still_routes_within_budget` — q23 and q24 (narrow projection + selective WHERE) still show
-  `Custom Scan (theodb_columnar_agg)` at the same `work_mem`, i.e. the guard does not un-route the milestone's own target shape.
+- GREEN: test_topk_still_routes_within_budget — at the same `work_mem`, for q23 and q24 (selective WHERE),
+  `assert "Custom Scan (theodb_columnar_agg)" in plan` — the guard must not un-route the milestone's own target shape.
+- GREEN: test_topk_guard_is_lower_bound_documented — `assert "post-qual" in guard_comment` — the code comment states the
+  ADR-4 limitation rather than implying the bound is exact.
 - REFACTOR: the factor is one named constant with a comment stating it is a heuristic safety factor, not a measured optimum.
 #### Concurrency tests
 (none — single-threaded)
@@ -312,7 +334,14 @@ conflation the edge-case review found.
 #### Files to edit
 - `docs/benchmarks/m167-projection-topk-verdict.md` (new), `CHANGELOG.md` (`[Unreleased]`)
 #### TDD
-(not a code task — validated by the artifact assertions below)
+Documentation task — its RED is the absence of the artifacts, checked mechanically rather than by eye.
+
+- RED: test_m167_verdict_artifact_exists —
+  `assert Path("docs/benchmarks/m167-projection-topk-verdict.md").exists()` and
+  `assert "M167" in Path("CHANGELOG.md").read_text()`.
+- GREEN: test_m167_verdict_attributes_each_claim_to_its_oracle (ADR-5) — in the verdict text,
+  `assert "LIMIT-stripped" in text` (the 43/43 storage A/B) and `assert "top-k A/B" in text` (the 1M correctness gate),
+  so the two oracles are never conflated.
 #### Concurrency tests
 (none — single-threaded)
 #### Validation
