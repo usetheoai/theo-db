@@ -58,16 +58,18 @@ const TOPK_MAX_SORT_KEYS: usize = 8;
 /// never fires. `relpages` IS maintained (measured: 27863 pages for the same relation) and is the honest proxy for
 /// how much this path has to decode.
 ///
-/// Two directions of imprecision, both stated rather than hidden: `relpages` is a STATISTIC (ANALYZE/VACUUM), so it
-/// lags a relation that just grew; and the on-disk bytes are COMPRESSED, so the decoded Arrow batch is LARGER than
-/// this. The second dominates, which is the safe direction for a ceiling — the guard under-estimates the decode and
-/// therefore only ever declines cases that are at least this big.
+/// Imprecision, stated rather than hidden — and note the direction is the DANGEROUS one: the on-disk bytes are
+/// COMPRESSED, so the decoded Arrow batch is LARGER than this estimate. For an OOM bound, under-estimating causes
+/// false ADMITS (the failure this guard exists to prevent), not merely false declines. Consequence to be explicit
+/// about: at the shipped `work_mem` default this bound does NOT stop a 1M-row wide `SELECT *`; it stops the
+/// tens-of-GB scale. It is a ceiling on catastrophe, not a tight bound.
 fn relation_physical_bytes(rel_oid: u32) -> f64 {
     unsafe {
+        let rel_oid_t = pg_sys::Oid::from(rel_oid);
         // The syscache key is an OID datum — build it through `Oid` rather than from a bare u32.
         let tup = pg_sys::SearchSysCache1(
             pg_sys::SysCacheIdentifier::RELOID as i32,
-            pg_sys::Datum::from(pg_sys::Oid::from(rel_oid)),
+            pg_sys::Datum::from(rel_oid_t),
         );
         if tup.is_null() {
             return 0.0; // unknown size → the guard cannot judge; other guards still apply
@@ -81,12 +83,23 @@ fn relation_physical_bytes(rel_oid: u32) -> f64 {
             pg_sys::Anum_pg_class_relpages as pg_sys::AttrNumber,
             &mut isnull,
         );
+        // Read the datum BEFORE releasing the tuple. Safe today only because `relpages` is int4/attbyval (the datum
+        // is a copied value, not a pointer into the tuple) — reading after the release would become a use-after-free
+        // the moment this is repointed at a by-reference attribute. Order it correctly rather than rely on the type.
+        let pages = if isnull { 0 } else { d.value() as i32 };
         pg_sys::ReleaseSysCache(tup);
-        if isnull {
-            return 0.0;
+        if pages > 0 {
+            return f64::from(pages) * f64::from(pg_sys::BLCKSZ);
         }
-        let pages = d.value() as i32;
-        f64::from(pages.max(0)) * f64::from(pg_sys::BLCKSZ)
+        // `relpages` is 0 until ANALYZE/VACUUM runs — and a big columnar relation is typically CREATE + bulk INSERT
+        // with no ANALYZE yet, which is exactly when the bound matters most. Falling back to 0.0 here would make the
+        // guard INERT in that window (measured: a 200k-row columnar table reports relpages=0 right after load and
+        // routes even at work_mem=64kB). Ask the storage manager for the CURRENT physical size instead — it is always
+        // right and never stale.
+        let rel = pg_sys::relation_open(rel_oid_t, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+        let blocks = pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM as pg_sys::ForkNumber::Type);
+        pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+        f64::from(blocks) * f64::from(pg_sys::BLCKSZ)
     }
 }
 
@@ -126,7 +139,22 @@ fn database_collate_is_byte_order() -> bool {
                 pg_sys::Anum_pg_database_datcollate as pg_sys::AttrNumber,
                 &mut isnull,
             );
-            let verdict = if isnull {
+            // `datcollate` alone does NOT determine how the DEFAULT collation orders — `datlocprovider` does.
+            // `CREATE DATABASE d LOCALE_PROVIDER icu ICU_LOCALE 'en-US' LOCALE 'C'` stores datcollate='C' while the
+            // default collation orders by ICU en-US (pg_locale.c dispatches on datlocprovider, and dbcommands.c
+            // writes the two fields independently). Trusting datcollate there would admit a text sort key whose
+            // DataFusion byte order disagrees with PG — the exact wrong-rows class this guard exists to prevent.
+            // So: require the libc provider ('c'). Anything else (ICU 'i', builtin 'b') declines — fail-closed.
+            let mut prov_isnull = false;
+            let prov = pg_sys::SysCacheGetAttr(
+                pg_sys::SysCacheIdentifier::DATABASEOID as i32,
+                tup,
+                pg_sys::Anum_pg_database_datlocprovider as pg_sys::AttrNumber,
+                &mut prov_isnull,
+            );
+            const COLLPROVIDER_LIBC: i8 = b'c' as i8;
+            let provider_is_libc = !prov_isnull && (prov.value() as i8) == COLLPROVIDER_LIBC;
+            let verdict = if isnull || !provider_is_libc {
                 false
             } else {
                 let cs = pg_sys::text_to_cstring(d.cast_mut_ptr());
