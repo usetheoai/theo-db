@@ -18,6 +18,16 @@ SET max_parallel_workers_per_gather = 0;
 SET theodb.enable_columnar_agg = on;
 SET theodb.enable_columnar_late_mat = on;   -- the path under test, on the columnar arm
 
+-- ROUTING ASSERTION (review finding: without it every block below passes vacuously when the swap declines —
+-- e.g. at stock `work_mem` the ADR-4 decode guard refuses and both arms would run the native plan, giving 0
+-- differences that prove nothing). `theodb_columnar_agg` in the plan of a query with NO aggregate can only come
+-- from the top-k swap, so its presence is a positive proof that the path under test actually ran.
+\echo '### M167-H0: routing precondition — the four shapes MUST show the top-k node'
+EXPLAIN (COSTS OFF) SELECT * FROM hits WHERE URL LIKE '%google%' ORDER BY EventTime LIMIT 10;
+EXPLAIN (COSTS OFF) SELECT SearchPhrase FROM hits WHERE SearchPhrase <> '' ORDER BY EventTime LIMIT 10;
+EXPLAIN (COSTS OFF) SELECT SearchPhrase FROM hits WHERE SearchPhrase <> '' ORDER BY SearchPhrase LIMIT 10;
+EXPLAIN (COSTS OFF) SELECT SearchPhrase FROM hits WHERE SearchPhrase <> '' ORDER BY EventTime, SearchPhrase LIMIT 10;
+
 \echo '### M167-H1 (q23): SELECT * WHERE URL LIKE ... ORDER BY EventTime LIMIT 10 — sort-key multiset'
 DROP TABLE IF EXISTS h1_col; DROP TABLE IF EXISTS h1_heap;
 CREATE TEMP TABLE h1_col  AS SELECT EventTime FROM hits      WHERE URL LIKE '%google%' ORDER BY EventTime LIMIT 10;
@@ -62,6 +72,16 @@ SELECT 'h5_fullrow_mism' q, count(*) n FROM (
 -- non-vacuity: the FIRST key must tie, or the tie-break was never exercised and this block proves less than it claims
 SELECT 'h5_distinct_firstkey' q, count(DISTINCT CounterID) n FROM h5_col;
 SELECT 'h5_rows' q, count(*) n FROM h5_col;
+
+\echo '### M167-H5b: WIDE projection (all 105 columns), tie-broken -> FULL ROWS compared'
+-- H1 compares only the sort key for q23; the 105-column payload it actually projects was compared by nothing.
+DROP TABLE IF EXISTS h5b_col; DROP TABLE IF EXISTS h5b_heap;
+CREATE TEMP TABLE h5b_col  AS SELECT * FROM hits      WHERE URL LIKE '%google%' ORDER BY CounterID, WatchID, UserID LIMIT 10;
+CREATE TEMP TABLE h5b_heap AS SELECT * FROM hits_heap WHERE URL LIKE '%google%' ORDER BY CounterID, WatchID, UserID LIMIT 10;
+SELECT 'h5b_wide_fullrow_mism' q, count(*) n FROM (
+  (SELECT * FROM h5b_col EXCEPT ALL SELECT * FROM h5b_heap)
+  UNION ALL (SELECT * FROM h5b_heap EXCEPT ALL SELECT * FROM h5b_col)) d;
+SELECT 'h5b_cols' q, count(*) n FROM information_schema.columns WHERE table_name = 'h5b_col';
 
 \echo '### M167-H6: NEGATIVE CONTROL — the same comparison must FAIL on seeded data'
 DROP TABLE IF EXISTS h6_bad;

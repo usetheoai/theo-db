@@ -85,7 +85,21 @@ def _lit(v) -> str:
     return str(v)
 
 
+# GUARD (M167): this harness DROPs and recreates `hits` with its own 2000-row synthetic schema. Run against a
+# database that holds a ClickBench `hits` and it destroys it — which happened twice during M167, the second time
+# after the hazard had already been written down. Refuse rather than rely on the operator remembering.
+def _refuse_if_clickbench(cur) -> None:
+    cur.execute("""SELECT count(*) FROM information_schema.columns
+                   WHERE table_name = 'hits' AND column_name IN ('watchid','searchphrase','eventtime')""")
+    if cur.fetchone()[0] >= 2:
+        raise SystemExit(
+            "REFUSING: this database's `hits` looks like ClickBench (has WatchID/SearchPhrase/EventTime).\n"
+            "This harness recreates `hits` from scratch and would destroy it. Point PGDATABASE at a scratch\n"
+            "database instead, e.g.  createdb typeab && PGDATABASE=typeab python3 benchmarks/columnar_type_ab.py")
+
+
 def setup_tables(cur) -> int:
+    _refuse_if_clickbench(cur)
     """CREATE the columnar `hits` + heap twin `hits_heap`, load the catalog cross-product (one row per (col-index)).
     Returns the loaded row count (equal in both). Fails fast if theodb_columnar is unavailable (no silent heap fallback)."""
     cur.execute("SELECT 1 FROM pg_am WHERE amname = 'theodb_columnar'")

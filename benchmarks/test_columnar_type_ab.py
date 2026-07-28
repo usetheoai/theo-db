@@ -160,3 +160,54 @@ def test_full_matrix_holds_the_m161_contract(live):
         if not ok:
             failures.append((name, expect, r["status"], r.get("diverged")))
     assert not failures, f"type-coverage A/B failures: {failures}"
+
+
+# --- M167: guard that refuses to run against a ClickBench database -------------------------------
+# This harness DROPs and recreates `hits`. Twice during M167 it was pointed at the ClickBench database
+# and destroyed 1M rows — the second time AFTER the hazard was written down in the verdict. A comment
+# does not prevent that; a refusal does. These tests pin the refusal.
+
+class _FakeCursor:
+    """Minimal cursor stub: returns a configured count for the information_schema probe."""
+
+    def __init__(self, matching_columns: int):
+        self._n = matching_columns
+        self.executed: list[str] = []
+
+    def execute(self, sql, *_a, **_kw):
+        self.executed.append(sql)
+
+    def fetchone(self):
+        return (self._n,)
+
+
+def test_refuses_when_hits_looks_like_clickbench():
+    """2+ of {watchid, searchphrase, eventtime} present -> refuse, do not touch the table."""
+    cur = _FakeCursor(matching_columns=3)
+    with pytest.raises(SystemExit) as excinfo:
+        h._refuse_if_clickbench(cur)
+    msg = str(excinfo.value)
+    assert "REFUSING" in msg
+    assert "PGDATABASE" in msg, "the refusal must tell the operator how to proceed, not just say no"
+
+
+def test_refuses_at_the_two_column_boundary():
+    """Exactly 2 matches is already ClickBench-shaped — the boundary must refuse, not admit."""
+    cur = _FakeCursor(matching_columns=2)
+    with pytest.raises(SystemExit):
+        h._refuse_if_clickbench(cur)
+
+
+def test_allows_a_scratch_database():
+    """0 or 1 matching column -> not ClickBench -> proceed silently."""
+    for n in (0, 1):
+        h._refuse_if_clickbench(_FakeCursor(matching_columns=n))
+
+
+def test_guard_runs_before_any_ddl():
+    """setup_tables must probe BEFORE it drops anything — a refusal after the DROP is worthless."""
+    import inspect
+    src = inspect.getsource(h.setup_tables)
+    guard_at = src.index("_refuse_if_clickbench")
+    ddl_at = min((src.index(t) for t in ("DROP TABLE", "CREATE TABLE") if t in src), default=len(src))
+    assert guard_at < ddl_at, "the ClickBench guard must run before the first DDL statement"

@@ -61,8 +61,10 @@ const TOPK_MAX_SORT_KEYS: usize = 8;
 /// Imprecision, stated rather than hidden — and note the direction is the DANGEROUS one: the on-disk bytes are
 /// COMPRESSED, so the decoded Arrow batch is LARGER than this estimate. For an OOM bound, under-estimating causes
 /// false ADMITS (the failure this guard exists to prevent), not merely false declines. Consequence to be explicit
-/// about: at the shipped `work_mem` default this bound does NOT stop a 1M-row wide `SELECT *`; it stops the
-/// tens-of-GB scale. It is a ceiling on catastrophe, not a tight bound.
+/// about: with PostgreSQL's stock `work_mem` of 4 MB the budget is 32 MB, so a 1M-row ClickBench `hits`
+/// (measured: 27863 pages = 228 MB) DECLINES — the routing win of this milestone needs a larger `work_mem`
+/// (measured at 64 MB → 512 MB budget). The guard bills the whole relation, ignoring projection width and filter
+/// selectivity, so it is a ceiling on catastrophe rather than a tight bound.
 fn relation_physical_bytes(rel_oid: u32) -> f64 {
     unsafe {
         let rel_oid_t = pg_sys::Oid::from(rel_oid);
@@ -72,7 +74,9 @@ fn relation_physical_bytes(rel_oid: u32) -> f64 {
             pg_sys::Datum::from(rel_oid_t),
         );
         if tup.is_null() {
-            return 0.0; // unknown size → the guard cannot judge; other guards still apply
+            // Fail CLOSED: an unknown size must not be read as "small". Returning 0.0 here would admit, which is
+            // the same direction as the original fail-open defect this function was written to fix.
+            return f64::INFINITY;
         }
         // `SysCacheGetAttr` rather than the GETSTRUCT macro (a C macro, absent from the pgrx bindings) — same
         // pattern as `database_collate_is_byte_order`. `relpages` is a fixed-width int4, so no detoasting.
@@ -97,7 +101,7 @@ fn relation_physical_bytes(rel_oid: u32) -> f64 {
         // routes even at work_mem=64kB). Ask the storage manager for the CURRENT physical size instead — it is always
         // right and never stale.
         let rel = pg_sys::relation_open(rel_oid_t, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
-        let blocks = pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM as pg_sys::ForkNumber::Type);
+        let blocks = pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM);
         pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
         f64::from(blocks) * f64::from(pg_sys::BLCKSZ)
     }
@@ -152,8 +156,9 @@ fn database_collate_is_byte_order() -> bool {
                 pg_sys::Anum_pg_database_datlocprovider as pg_sys::AttrNumber,
                 &mut prov_isnull,
             );
-            const COLLPROVIDER_LIBC: i8 = b'c' as i8;
-            let provider_is_libc = !prov_isnull && (prov.value() as i8) == COLLPROVIDER_LIBC;
+            // pgrx exports the catalog constant; a local copy could drift from it silently (Rule 9).
+            let provider_is_libc =
+                !prov_isnull && (prov.value() as u8) == pg_sys::COLLPROVIDER_LIBC;
             let verdict = if isnull || !provider_is_libc {
                 false
             } else {
@@ -187,12 +192,19 @@ fn sort_collation_is_byte_order(coll: u32) -> bool {
 /// `try_swap_agg` are only visible at runtime). Off by default → zero emission, routing IDENTICAL to M151. Used
 /// ONLY to build the M152 routing-map; carries no functional effect (mirrors `THEODB_SCAN_PROFILE` of M150).
 #[inline]
+/// Is the decline trace on? Exposed so callers can skip building an expensive message when it is off — the
+/// `format!` would otherwise allocate on every decline even with tracing disabled (review finding L4).
+#[inline]
+fn admit_trace_enabled() -> bool {
+    static TRACE_ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *TRACE_ON.get_or_init(|| std::env::var("THEODB_ADMIT_TRACE").as_deref() == Ok("1"))
+}
+
 fn admit_trace(reason: &str) {
     // Resolve the env var ONCE per backend. With M167 flipping the late-mat default ON, `swap_walk` now runs on
     // every planned statement, so this is called per Sort node per plan on the default path — a `std::env::var`
     // there is a syscall-free but still allocating lookup on the hot planning path (review finding F13).
-    static TRACE_ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    if *TRACE_ON.get_or_init(|| std::env::var("THEODB_ADMIT_TRACE").as_deref() == Ok("1")) {
+    if admit_trace_enabled() {
         pgrx::warning!("theodb_admit_decline: {reason}");
     }
 }
@@ -2137,10 +2149,12 @@ unsafe fn try_swap_topk(
     let est_decode_bytes = relation_physical_bytes(table_oid);
     let work_mem_bytes = f64::from(pg_sys::work_mem.max(64)) * 1024.0;
     if est_decode_bytes > work_mem_bytes * TOPK_DECODE_WORK_MEM_FACTOR {
-        admit_trace(&format!(
-            "topk_decode_estimate_too_large est_bytes={est_decode_bytes:.0} budget={:.0}",
-            work_mem_bytes * TOPK_DECODE_WORK_MEM_FACTOR
-        ));
+        if admit_trace_enabled() {
+            admit_trace(&format!(
+                "topk_decode_estimate_too_large est_bytes={est_decode_bytes:.0} budget={:.0}",
+                work_mem_bytes * TOPK_DECODE_WORK_MEM_FACTOR
+            ));
+        }
         return None;
     }
 
