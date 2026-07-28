@@ -15,6 +15,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 ### Changed
+- **Columnar top-k de projeção (M167):** consultas do tipo "as N primeiras linhas por uma coluna" sobre tabelas colunares ficaram substancialmente mais rápidas — medido no ClickBench a 1 milhão de linhas, na mesma máquina, antes e depois: 6,5× (`SELECT *` com filtro), 42,5×, 62,1× e 41,9× nas quatro formas cobertas, com resultado idêntico ao plano anterior em todas. Detalhes e método em `docs/benchmarks/m167-projection-topk-verdict.md`.
 - **Columnar top-k de projeção (M167):** `ORDER BY` com **mais de uma coluna** (por exemplo `ORDER BY data, nome`) passa a usar o caminho rápido em tabelas colunares — antes qualquer ordenação composta caía no plano lento. Cada coluna da ordenação é verificada individualmente, e basta uma que não sirva para a consulta inteira voltar ao plano nativo.
 - **Columnar top-k de projeção (M167):** `theodb.enable_columnar_late_mat` passa a ter **default ON**. As consultas de top-k de projeção sobre tabelas colunares (`SELECT colunas WHERE pred ORDER BY coluna LIMIT k`) passam a usar a materialização preguiçosa por padrão, em vez de exigir um `SET` de sessão. Medido no ClickBench 1M: q23 e q24 roteiam com resultado byte-idêntico ao plano nativo. O custo de memória O(N) que justificava o default OFF passou a ser contido por um limite de plano (ver a entrada seguinte), não pelo default.
 
