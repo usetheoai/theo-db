@@ -3,7 +3,7 @@ slug: m167-projection-topk
 milestone_id: M167
 target_project: theo-db
 created_at: 2026-07-27
-revision: 1.2 — TDD sections rewritten to executable shape (assertions, not prose) after `check_tdd_shape.py` blocked all 4 tasks at /implement Step 2.1; rev 1.1 absorbed the edge-case review of 2026-07-28 (EC-1..EC-6) and reordered phases 1↔2 so the top-k oracle precedes the flip
+revision: 1.3 — Phase 1 re-scoped onto the EXISTING `benchmarks/m158_ec_harness.sql` after the SEPA initial brief and source verification showed the planned host (`columnar_type_ab.py`) declares this path out of scope, suppresses the Sort node it needs, and has no unique key; ADR-3/ADR-5 corrected accordingly. rev 1.2 rewrote the TDD sections to executable shape; rev 1.1 absorbed the edge-case review (EC-1..EC-6) and ordered the oracle before the flip
 goal: Flip the `theodb.enable_columnar_late_mat` GUC default to ON — behind a decode-size guard that keeps the path's O(N) memory bounded — so ClickBench q23/q24 (`SELECT cols WHERE pred ORDER BY <non-text col> LIMIT k`) route to the M158 late-mat top-k by default, measured 2.4–12.8× faster and proven byte-identical by a LIMIT-preserving top-k oracle at 1M; q25/q26 documented as correct collation / multi-key honest-negatives.
 ---
 
@@ -15,7 +15,8 @@ Flip `theodb.enable_columnar_late_mat` to default ON so the projection top-k `Li
 shape (ClickBench q23/q24) routes to the M158 late-mat CustomScan by default, **bounded by a decode-size guard** (ADR-4) so the
 path's O(N) decode cannot OOM a backend; success metric: `run_m128_clickbench.py --agg` reports q23/q24 with
 `columnar_customscan==true`, both faster (measured 2.4–12.8× across 10k–1M), 43/43 storage A/B byte-identical (no regression),
-**and the new LIMIT-preserving top-k A/B identical at 1M** (ADR-5); q25/q26 stay declined (honest-negatives).
+**and the existing LIMIT-preserving top-k oracle (`m158_ec_harness.sql`, now automated + self-testing) green** (ADR-5);
+q25/q26 stay declined (honest-negatives).
 
 ## Context
 
@@ -44,9 +45,11 @@ whose only stated mitigation was the default-OFF this milestone removes) and **w
 |---|---|---|---|
 | `theodb_rs/src/am/columnar_agg.rs` | ~2810 | M166 | `try_swap_topk` (M158) + the `ENABLE_COLUMNAR_LATE_MAT` GUC default (`:33`); gains the decode-size guard (ADR-4) |
 | `theodb_rs/src/am/df_executor.rs` | ~1050 | M166 | `run_columnar_topk` + the GUC-default doc comment (`:581`, which today cites default-OFF as the mitigation for the O(N) decode) |
-| `benchmarks/columnar_type_ab.py` | ~320 | M166 | type-coverage A/B — gains `topk_ab_check` (LIMIT-preserving, multiset) + the M167 case group |
-| `benchmarks/test_columnar_type_ab.py` | ~200 | M166 | pure-logic tier — gains the M167 case-presence + `k < nrows` tests |
-| `benchmarks/run_m128_clickbench.py` | ~380 | M166 | ClickBench harness — its A/B is LIMIT-stripped (`:283`) + order-normalized (`:243`); gains the top-k A/B for the routed top-k queries (ADR-5) |
+| `benchmarks/m158_ec_harness.sql` | ~145 | M158 | THE top-k oracle (LIMIT-preserving, unique key `wid`, order-identical via `row_number()`); gains a positive control + Q9 multi-key decline |
+| `benchmarks/run_m158_ec.py` | NEW | — | runner that gives the harness an exit code so it can actually gate (today it asks a human to eyeball "MUST be 0") |
+| `benchmarks/test_run_m158_ec.py` | NEW | — | pure-logic tier for the runner's output parser |
+| `benchmarks/run_m128_clickbench.py` | ~380 | M166 | ClickBench harness — read-only here; its A/B is LIMIT-stripped (`:283`) + order-normalized (`:243`), which is why it is the *storage* gate and not the top-k gate (ADR-5) |
+| `docs/benchmarks/m158-late-mat-verdict.md` | ~60 | M158 | states `default OFF` as the shipped decision (`:50`) — must be superseded by T2.1 or `docs/` contradicts the new default |
 
 ### Current callers / dependents (real file:line)
 
@@ -73,7 +76,8 @@ whose only stated mitigation was the default-OFF this milestone removes) and **w
   survivors only (the M148 per-row cost paid for k, not N).
 - **tie-row nondeterminism**: with a LIMIT over a key that has equal values, the *set of key values* returned is deterministic,
   but *which rows* among equal keys is unspecified — columnar and heap may pick different tie-rows. The A/B must compare the
-  sort-key **multiset**, not full rows — except when the key is unique, where full rows ARE deterministic (ADR-3).
+  sort-key multiset OR use a **unique** sort key so no boundary tie can arise. `m158_ec_harness.sql` takes the second route
+  (`wid` unique by construction), which is stronger: it keeps FULL-ROW comparison, so a key↔payload mismatch is visible (ADR-3).
 - **collation honest-negative**: `ORDER BY <text>` — DataFusion memcmp ≠ PG collation order; only C/POSIX-OID collations route.
 - **storage oracle vs top-k oracle**: a LIMIT-stripped, order-normalized comparison proves the *columnar storage* returns the
   same rows as the heap; it says nothing about *which k* and *in what order* the top-k node picked. They are different gates.
@@ -82,13 +86,14 @@ whose only stated mitigation was the default-OFF this milestone removes) and **w
 
 Read-path planner swap only (`planner_hook` → `try_swap_topk`) plus one plan-time size estimate. NO page-format / WAL / VACUUM /
 crash / upgrade surface. Two correctness surfaces: the top-k-aware A/B (a wrong top-k is A/B-visible only when the oracle keeps
-LIMIT+ORDER — this plan adds that, at both the type-fixture and the 1M scale) and the decode-size guard, governed by the existing
+LIMIT+ORDER — that oracle already exists; this plan makes it able to gate) and the decode-size guard, governed by the existing
 fail-closed guards + `.claude/rules/testing.md` § 5.1.
 
 ## Prior Art & Related Work
 
 - `.claude/knowledge-base/discoveries/blueprints/m167-projection-topk-blueprint.md` (this cycle).
 - `.claude/knowledge-base/reviews/m167-projection-topk-edge-cases-2026-07-28.md` (edge-case review absorbed in rev 1.1).
+- `benchmarks/m158_ec_harness.sql` — the M158 correctness oracle this milestone REUSES rather than rebuilds (ADR-3).
 - M158 (late-mat top-k of aggregate — the reused `try_swap_topk` + `run_columnar_topk`), M156 (text-where `LIKE`/`<>`), M149
   (columnar-project scan), M131 (the `resolve_special_varno` deparse recursion on the 105-col `hits`, #135 — the EC-3 precedent).
 - SOTA: DataFusion `TopK` (`references/datafusion/.../topk/mod.rs` — bounded heap, payload interleave for kept rows only),
@@ -154,15 +159,28 @@ with it (a resource bound is not a cost model).
 locale-name dependent, changes routing by cluster locale, and multi-key is new mechanism; deferred to a later ADR-gated slice
 (blueprint §5). No wrong top-k shipped (mandate).
 
-### ADR-3 — the top-k A/B compares the sort-key multiset, plus full rows on a unique key
-The existing `ab_check` symmetric-EXCEPT over full rows would false-positive on tie-rows. The top-k A/B therefore keeps
-`ORDER BY … LIMIT` and compares the **sort-key value multiset** (deterministic under ties). **Amended in rev 1.1 (EC-4):** a
-key-multiset comparison is blind to the signature defect of late materialization — the payload materialized for the k survivors
-being associated with the wrong key (`run_columnar_topk` re-locates output columns *by name* in the post-sort batch,
-`df_executor.rs:790–800`). So the case group ALSO carries one case whose sort key is **unique** in the fixture, where ties cannot
-arise and **full rows** are compared. **Alternative rejected:** strip LIMIT (the old oracle) — blind to top-k ordering, the exact
-trap § 5.1 warns against. **Alternative rejected:** full-row comparison on every case — false-positives on tie-rows, which is the
-problem the multiset form exists to solve.
+### ADR-3 — reuse `m158_ec_harness.sql`; ties are neutralized by a UNIQUE key, not by a multiset compare
+**Superseded in rev 1.3 — the previous text was written without reading the existing harness, and was wrong on two counts.**
+
+`benchmarks/m158_ec_harness.sql` already is the LIMIT-preserving top-k oracle for exactly this node (its own header:
+*"LIMIT-preserving symmetric-EXCEPT — the CORRECT oracle"*). It toggles `theodb.enable_columnar_late_mat` off↔on over the same
+columnar table `t_col` and takes the symmetric difference of the **full** result sets. Ties are not a problem there because the
+sort key `wid` is **unique by construction** (`:13`, `:21` — 20 000 rows, `wid = g`), which is a strictly better tie fix than
+comparing a key multiset: it keeps full-row comparison, so the EC-4 key↔payload defect class is covered. It also already carries
+an **emission-order** oracle (`row_number() OVER ()` position-by-position on the raw output, `:49–55`), so order is proven too.
+
+Corrections this ADR makes to rev 1.1/1.2:
+- "the top-k A/B compares the sort-key multiset" — **wrong**; full rows are compared, tie-safety comes from the unique key.
+- "the case group ALSO carries one case whose sort key is unique" — **already true** of Q1; nothing to add.
+- ADR-5's implication that a LIMIT-preserving oracle had to be built — **false**; it exists and predates this milestone.
+
+**Alternative rejected:** add the cases to `benchmarks/columnar_type_ab.py` (what rev 1.1/1.2 said). Three independent blockers,
+each verified in source: that harness's own scope comment excludes this path (*"The late-materialization projection path (M158)
+… belongs to M158's own A/B, not here"*, `:258–260`); its `session_setup` does `SET enable_sort = off` (`:44`, added for the agg
+path per the M161 false-green lesson), and without a `Sort` node `try_swap_topk` cannot fire at all (`columnar_agg.rs:1852`), so
+the decline cases would pass **vacuously**; and its fixture cycles `spec["edges"][i % len(edges)]` (`:100–103`), so **no column is
+unique** and the EC-4 full-row case is not constructible there. **Alternative rejected:** build a third harness — parsimony rung 4
+(reuse what is installed); two oracles for one node is how they drift apart.
 
 ### ADR-4 — bound the O(N) decode with a plan-time size guard (EC-1)
 Decline the swap when the estimated decoded batch grossly exceeds the session's own sort budget:
@@ -188,14 +206,22 @@ Unresolved Question below, not a claim made here.
 `run_m128_clickbench.py` strips the trailing LIMIT before comparing (`:283`) and sorts both sides (`_canonical`, `:243–246`).
 With the LIMIT gone there is no `T_Limit` parent, so `try_swap_topk` declines (`:1822–1825`) and the A/B compares
 native-on-columnar vs native-on-heap. **`result_ab_identical == true` for q23/q24 is therefore true of a query that never
-routes** — the 43/43 figure is a *storage* oracle and is structurally incapable of detecting a wrong top-k. **Decision:** keep
-the 43/43 run as the no-regression gate it actually is (and say so), and add a LIMIT-preserving top-k A/B over the 1M
-`hits`/`hits_heap` pair as the correctness gate for the newly-default path, reusing `topk_ab_check` from `columnar_type_ab.py`
-rather than writing a second oracle. **Alternative rejected:** keep citing 43/43 as the correctness evidence — the claim would
-not be supported by the cited measurement (Rule 5 / `public-copy.md`). **Alternative rejected:** stop stripping the LIMIT in the
-existing oracle — the strip exists for a good reason (`:280–282`: tied aggregate counts make the LIMIT cut arbitrary-but-valid);
-removing it would false-positive across the other 41 queries. **Consequence:** the oracle must exist before the flip can be
-validated, which is why Phase 1 and Phase 2 are ordered as they are.
+routes** — the 43/43 figure is a *storage* oracle and is structurally incapable of detecting a wrong top-k.
+
+**Decision (corrected in rev 1.3):** keep the 43/43 run as the no-regression gate it actually is (and say so), and make
+`benchmarks/m158_ec_harness.sql` the correctness gate. The gap is NOT that a LIMIT-preserving oracle is missing — that was rev
+1.1's error, written before reading the file. It exists, it predates this milestone, and it already proves this node
+byte-identical AND order-identical. The real gap is that **it cannot gate anything today**: it is a manual `psql` script with no
+exit code (its last line asks a human to check "ALL … MUST be 0"), nothing in the repo invokes it (only `docs/` and the M158 plan
+reference it), and it carries **no positive control** — so a broken oracle reporting all-zeros is indistinguishable from a
+correct one (`rules/testing.md` § 5.1: an oracle that cannot fail is not an oracle). Phase 1 closes those three gaps and adds the
+one query shape the harness never covered (multi-key decline).
+
+**Alternative rejected:** keep citing 43/43 as the correctness evidence — unsupported by the cited measurement
+(Rule 5 / `public-copy.md`). **Alternative rejected:** stop stripping the LIMIT in the ClickBench oracle — the strip exists for a
+good reason (`:280–282`: tied aggregate counts make the LIMIT cut arbitrary-but-valid); removing it would false-positive across
+the other 41 queries. **Consequence:** Phase 1 still precedes Phase 2, but for a narrower reason than rev 1.1 gave — the gate
+must be *runnable and self-testing* before the default it protects is flipped.
 
 ## Dependency Graph
 
@@ -204,46 +230,57 @@ CHANGELOG, depends on both). **Changed in rev 1.1:** phases 1 and 2 are swapped 
 because it is the test that would catch a wrong top-k, and the flip is the change under test — RED before GREEN
 (`rules/cycle-implement.md`). In v1.0 the two phases were declared parallel-capable; ADR-5 makes that false.
 
-## Phase 1 — the top-k-aware oracle (build the gate first)
+## Phase 1 — make the EXISTING top-k oracle able to gate
 
-### T1.1 — add a LIMIT-preserving, multiset+unique-key top-k A/B to columnar_type_ab.py
+### T1.1 — automate `m158_ec_harness.sql`, give it a positive control, and cover multi-key decline
 #### Why this step
-The action: add `topk_ab_check` — run `SELECT <cols> FROM <table> WHERE <pred> ORDER BY <sortkey> LIMIT k` on columnar `hits`
-vs heap `hits_heap` **with the LIMIT preserved**, comparing the sort-key multiset (ties-safe); plus the case rows
-`topk_int_order` (ORDER BY non-text col LIMIT k → route, multiset-identical), `topk_unique_key_full_row` (ORDER BY a column with
-no duplicate values → route, **full rows** compared — EC-4), `topk_text_order` (ORDER BY text col → decline), `topk_multikey`
-(ORDER BY col1,col2 → decline). The reasoning: the ordinary `ab_check` strips/ignores ordering and would be blind to a wrong
-top-k (§ 5.1 + ADR-3); the unique-key case additionally covers key↔payload misalignment, the defect class late materialization
-actually produces. This is the gate that would catch a future regression that admits a text sort key. It is built **before** the
-flip so the flip is a change made against an existing gate.
-#### Files to edit
-- `benchmarks/columnar_type_ab.py` (`topk_ab_check` fn + the four case rows)
-- `benchmarks/test_columnar_type_ab.py` (pure-logic: cases declared with correct expectations; the `k < nrows` invariant)
-#### TDD
-Run with `pytest benchmarks/test_columnar_type_ab.py -k m167` (pure-logic tier, local) and `columnar_type_ab.py` (droplet).
+The action: keep `benchmarks/m158_ec_harness.sql` as the oracle (it already proves this exact node byte-identical AND
+order-identical over a unique key — ADR-3) and close the three gaps that stop it from gating the M167 flip:
 
-- RED: test_m167_topk_cases_declared —
-  `assert {c["name"] for c in build_cases()} >= {"topk_int_order", "topk_unique_key_full_row", "topk_text_order", "topk_multikey"}`
-- RED: test_m167_topk_expectations_are_correct —
-  `assert expectations == {"topk_int_order": "route", "topk_unique_key_full_row": "route", "topk_text_order": "decline", "topk_multikey": "decline"}`
-- RED: test_topk_k_is_strictly_less_than_fixture_rows (EC-5) — for every routing case, `assert case["k"] < nrows`.
-  Without it a fixture grown past k makes the LIMIT never cut and the case passes vacuously.
-- GREEN: test_topk_ab_routes_and_matches (droplet) —
-  `assert topk_ab_check(cur, sql_int_order)["status"] == "ok"` (sort-key multiset identical) and
-  `assert topk_ab_check(cur, sql_unique_key)["rows_identical"] is True` (full rows — EC-4 key↔payload alignment).
-- GREEN: test_topk_declines_text_and_multikey (droplet) —
-  `assert topk_ab_check(cur, sql_text_order)["status"] == "declined"` and
-  `assert topk_ab_check(cur, sql_multikey)["status"] == "declined"`.
-- GREEN: test_topk_positive_control_diverges (droplet) — seed a wrong-key top-k, then
-  `assert control["diverged"] > 0` (an oracle that cannot fail is not an oracle — `rules/testing.md` § 5.1).
+1. **Automation** — add `benchmarks/run_m158_ec.py`, a thin runner that executes the `.sql` via psql, parses every
+   `*_mism` / `*_order_mism` row, and exits non-zero when any is `> 0`. Today the script ends with a `\echo` asking a
+   HUMAN to check "ALL … MUST be 0", nothing in the repo invokes it, and therefore it protects nothing.
+2. **Positive control** — a deliberately divergent pair that the oracle MUST flag, so all-zeros means "verified", not
+   "the oracle is broken" (`rules/testing.md` § 5.1). The unique `wid` key makes this deterministic: seed a twin table
+   with one row's `wid` altered so it deterministically enters/leaves the top k.
+3. **Multi-key decline (Q9)** — `ORDER BY wid, cid LIMIT 10` MUST show a native `Sort` (the `numCols != 1` guard,
+   `columnar_agg.rs:1853`). This is the one shape in the plan's scope the harness never covered; q26 is its ClickBench
+   analogue and ADR-2 declares it an honest-negative, so the guard needs a test that would notice if it stopped holding.
+
+The reasoning: parsimony rung 4 — reuse what is installed. Q1 already covers full-row + emission-order over a unique key
+(the EC-4 key↔payload class), Q7 covers the text-collation decline, Q2/Q3/Q4/Q5/Q6 cover predicates, direction, projected
+subset and bpchar output. Building a parallel oracle would duplicate all of that and let the two drift apart.
+
+#### Files to edit
+- `benchmarks/m158_ec_harness.sql` (positive control + Q9 multi-key decline)
+- `benchmarks/run_m158_ec.py` (NEW — runner with exit code; no new dependency: `psycopg2` is already declared)
+- `benchmarks/test_run_m158_ec.py` (NEW — pure-logic tier for the output parser)
+
+#### TDD
+Parser tier runs locally (`python3 -m pytest benchmarks/test_run_m158_ec.py -k m158`); the harness itself runs on the droplet.
+
+- RED: test_parser_fails_run_on_nonzero_mismatch —
+  `assert parse_verdict("q1_ab_mism | 3") == "FAIL"` and `assert parse_verdict("q1_ab_mism | 0") == "PASS"`.
+  Fails before `run_m158_ec.py` exists (ImportError is not acceptable as the RED — the module must exist with the
+  function stubbed so the assertion itself is what fails).
+- RED: test_parser_requires_positive_control_to_have_diverged —
+  `assert overall(rows_with_control_diverged=0) == "ORACLE_BROKEN"` — an all-zeros run whose control did NOT diverge is
+  a FAIL, not a pass.
+- RED: test_q9_multikey_case_declared — `assert "q9_multikey" in harness_sql` and
+  `assert "ORDER BY wid, cid" in harness_sql`.
+- GREEN (droplet): `python3 benchmarks/run_m158_ec.py` exits `0`; every `*_mism` and `q1_order_mism` is `0`; the
+  positive control reports a non-zero mismatch; Q9's `EXPLAIN` contains `Sort` and does NOT contain `Custom Scan`.
+- GREEN (droplet, seeded failure): temporarily point the control at a NON-divergent pair and
+  `assert runner_exit_code != 0` — proves the runner fails loudly rather than reporting a green from a dead oracle.
+
 #### Concurrency tests
 (none — single-threaded)
+
 #### Acceptance criteria
-- `columnar_type_ab.py` gains the four top-k cases and `topk_ab_check`; harness exit 0.
-- A seeded wrong-key top-k makes the positive control report `diverged > 0`, and the multiset comparison is ties-safe
-  (the self-test contract of `rules/testing.md` § 5.1 — an oracle that cannot fail is not an oracle).
-- `topk_unique_key_full_row` compares whole rows and would fail on a key↔payload misalignment.
-- Pure-logic tier green, including `k < nrows`.
+- `python3 benchmarks/run_m158_ec.py` exits `0` on the droplet and non-zero when any mismatch or a dead control is present.
+- The harness gains a positive control whose seeded divergence IS caught, and Q9 (multi-key) declining to native `Sort`.
+- Parser tier green locally.
+- The harness's own `\echo` closing line no longer asks a human to eyeball the result — the exit code is the verdict.
 
 ## Phase 2 — flip the GUC default, bounded
 
@@ -257,6 +294,9 @@ every fail-closed guard (numCols, text collation, LIMIT shape) still runs inside
 #### Files to edit
 - `theodb_rs/src/am/columnar_agg.rs` (`:33` default + `:30`/`:1812` comments)
 - `theodb_rs/src/am/df_executor.rs` (`:581` comment — re-point the O(N) mitigation at ADR-4)
+- `docs/benchmarks/m158-late-mat-verdict.md` (`:50` states "`default OFF` — the conservative honest default given the O(N)
+  memory cost"; supersede it, or `docs/benchmarks/` contradicts the shipped default. The CHANGELOG's released M158 entry is
+  NOT edited — Unbreakable Rule 6; it is superseded by the new `[Unreleased]` entry instead.)
 #### TDD
 Run on the droplet against the 1M `hits`/`hits_heap` pair, with the `.so` rebuilt from the edited source.
 
@@ -358,11 +398,11 @@ Documentation task — its RED is the absence of the artifacts, checked mechanic
 | q23/q24 route to late-mat by default (GUC flipped ON) | T2.1 |
 | Measured faster byte-identical (2.4–12.8×) | T2.1, T3.1 |
 | No storage/aggregate regression (43/43 LIMIT-stripped A/B) | T2.1 |
-| Top-k correctness proven at 1M (LIMIT-preserving oracle) | T1.1 (oracle), T2.1 (applied at 1M) |
+| Top-k correctness proven by a LIMIT-preserving, order-identical oracle | T1.1 (automated + self-tested), T2.1 (run after the flip) |
 | GUC honored (off still declines) | T2.1 |
 | `EXPLAIN VERBOSE` returns on the 105-col `hits` (M131 class) | T2.1 |
-| Top-k-aware A/B (LIMIT-preserving, multiset + unique-key full-row) | T1.1 |
-| Oracle self-test (positive control diverges) | T1.1 |
+| Oracle can actually gate (exit code) + cannot silently die (positive control) | T1.1 |
+| Multi-key decline covered (the `numCols != 1` guard, q26's analogue) | T1.1 |
 | O(N) decode bounded — no unfiltered-wide OOM | T2.2 |
 | q25/q26 collation/multi-key honest-negatives | T1.1 (decline cases), T3.1 (doc) |
 | Benchmark evidence + CHANGELOG, per-oracle attribution | T3.1 |
