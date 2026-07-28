@@ -182,6 +182,11 @@ SELECT 'm167c_datcollate' q, datcollate v FROM pg_database WHERE datname = curre
 DROP TABLE IF EXISTS t_dc CASCADE;
 CREATE TABLE t_dc (wid bigint, sd text) USING theodb_columnar;   -- sd carries the DATABASE DEFAULT collation (OID 100)
 INSERT INTO t_dc SELECT g, 'd'||lpad(g::text, 7, '0') FROM generate_series(1, 5000) g;  -- sd UNIQUE (tie-free)
+-- Multi-key fixture: `v` ties on purpose (g % 11) so the SECOND key decides; `sd` unique keeps it tie-free;
+-- `bc` is bpchar, a type the sort-key guard must reject in ANY key position.
+DROP TABLE IF EXISTS t_dc2 CASCADE;
+CREATE TABLE t_dc2 (wid bigint, v int, sd text, bc char(8)) USING theodb_columnar;
+INSERT INTO t_dc2 SELECT g, g % 11, 'd'||lpad(g::text, 7, '0'), lpad(g::text, 8, '0') FROM generate_series(1, 5000) g;
 SET theodb.enable_columnar_late_mat = on;
 EXPLAIN (COSTS OFF) SELECT wid, sd FROM t_dc ORDER BY sd LIMIT 10;
 SET theodb.enable_columnar_late_mat = off;
@@ -208,6 +213,30 @@ CREATE TEMP TABLE m167d_off AS SELECT row_number() OVER () ord, wid, v FROM (SEL
 SET theodb.enable_columnar_late_mat = on;
 CREATE TEMP TABLE m167d_on  AS SELECT row_number() OVER () ord, wid, v FROM (SELECT wid, v FROM t_col ORDER BY v, wid LIMIT 10) x;
 SELECT 'm167d_order_mism' q, count(*) n FROM m167d_off o JOIN m167d_on n USING (ord) WHERE o.wid <> n.wid OR o.v <> n.v;
+
+-- ---- M167-D2: multi-key where the SECOND key is TEXT (q26's real shape: timestamp + text) ----
+-- The two mechanisms M167 added (multi-key wire format; byte-order collation predicate) intersect ONLY here.
+-- M167-D is int+int and M167-C is single-key text, so neither covers a per-key loop that checks key 0's collation
+-- and forgets key 1's. `sd` is unique, so the comparison stays tie-free.
+\echo '### M167-D2: ORDER BY v, sd LIMIT 10 (multi-key with a TEXT second key)'
+SET theodb.enable_columnar_late_mat = on;
+EXPLAIN (COSTS OFF) SELECT wid, sd FROM t_dc2 ORDER BY v, sd LIMIT 10;
+SET theodb.enable_columnar_late_mat = off;
+CREATE TEMP TABLE m167d2_off AS SELECT row_number() OVER () ord, wid, sd FROM (SELECT wid, sd FROM t_dc2 ORDER BY v, sd LIMIT 10) x;
+SET theodb.enable_columnar_late_mat = on;
+CREATE TEMP TABLE m167d2_on  AS SELECT row_number() OVER () ord, wid, sd FROM (SELECT wid, sd FROM t_dc2 ORDER BY v, sd LIMIT 10) x;
+SELECT 'm167d2_order_mism' q, count(*) n FROM m167d2_off o JOIN m167d2_on n USING (ord) WHERE o.wid <> n.wid OR o.sd IS DISTINCT FROM n.sd;
+
+-- ---- M167-D3: a guard-failing key ANYWHERE in the list must decline the WHOLE swap (fail-closed per key) ----
+\echo '### M167-D3: ORDER BY v, sd COLLATE "en_US.utf8" MUST decline (second key not byte-order)'
+SET theodb.enable_columnar_late_mat = on;
+EXPLAIN (COSTS OFF) SELECT wid, sd FROM t_dc2 ORDER BY v, sd COLLATE "en_US.utf8" LIMIT 10;
+\echo '### M167-D3b: bpchar as a NON-FIRST sort key MUST decline (PG trims trailing blanks, DataFusion does not)'
+EXPLAIN (COSTS OFF) SELECT wid, sd FROM t_dc2 ORDER BY v, bc LIMIT 10;
+
+-- ---- M167-D4: more sort keys than TOPK_MAX_SORT_KEYS (8) must decline ----
+\echo '### M167-D4: 9 sort keys MUST decline (over TOPK_MAX_SORT_KEYS)'
+EXPLAIN (COSTS OFF) SELECT wid FROM t_dc2 ORDER BY v, wid, sd, bc, v, wid, sd, bc, v LIMIT 10;
 
 -- ---- M167-E: NEGATIVE CONTROL — the oracle MUST be able to fail ----
 -- Seed a real divergence (a twin table with one row moved into the top-k) and prove the SAME comparison
