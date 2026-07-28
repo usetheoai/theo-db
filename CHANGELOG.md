@@ -15,12 +15,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 ### Changed
+- **Columnar top-k de projeção (M167):** `theodb.enable_columnar_late_mat` passa a ter **default ON**. As consultas de top-k de projeção sobre tabelas colunares (`SELECT colunas WHERE pred ORDER BY coluna LIMIT k`) passam a usar a materialização preguiçosa por padrão, em vez de exigir um `SET` de sessão. Medido no ClickBench 1M: q23 e q24 roteiam com resultado byte-idêntico ao plano nativo. O custo de memória O(N) que justificava o default OFF passou a ser contido por um limite de plano (ver a entrada seguinte), não pelo default.
 
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+- **Columnar top-k de projeção (M167):** um `SELECT *` sem `WHERE` com `ORDER BY … LIMIT k` sobre uma tabela colunar larga podia decodificar a relação inteira em memória antes de aplicar o limite — com o default ON isso deixaria de ser um caminho opcional e passaria a atingir consultas comuns. O planejador agora recusa a rota quando o volume estimado de decodificação supera de forma desproporcional o `work_mem` da sessão, caindo no plano nativo (que é correto para qualquer entrada). A estimativa é conservadora e declaradamente um limite inferior: ela cobre o caso sem filtro, que é o perigoso, e pode não disparar sob um filtro muito seletivo.
 - Implementation tooling: the `/implement` halt-loop driver hardcoded a Node/TypeScript stack — it instructed the loop to write `.test.ts` files and run `npm test`, in a repository that is Rust + Python. Any `/implement` run here would have driven an autonomous, commit-making loop against a test runner that does not exist. The RED/GREEN phases now derive the runner from the plan's own TDD command, then the build manifest (`Cargo.toml` / `pyproject.toml` / `package.json` / `go.mod` / `Makefile`), and refuse to fabricate a RED when the test cannot run on the current machine.
 - Implementation tooling: `check_wiring.py` searched pillar (a) callers in `.rs`/`.py`/`.ts` but pillar (b) integration tests only in `.ts`/`.py` — so a Rust symbol could never satisfy the integration-test pillar with a Rust test, silently forcing every Rust task down the ADR-DEFER path. Both pillars now share one glob set (`.rs`/`.go`/`.sql` added), and the remediation message no longer names a `.test.ts` path.
 

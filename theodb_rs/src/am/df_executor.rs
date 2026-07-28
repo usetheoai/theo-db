@@ -577,8 +577,10 @@ where
     // plenty), but the M158 top-k path decodes the FULL projection for all rows into one Arrow batch — which can be
     // hundreds of MB for a wide `SELECT *`. Size the pool to the batch's actual memory + headroom so a legitimate large
     // input is not rejected as "Resources exhausted"; the batch already lives in RAM regardless. (Honest caveat: the
-    // top-k path is therefore O(N) memory in the decoded batch — unlike the native top-N heapsort's O(k) — documented
-    // as an M158 trade-off; gated behind `theodb.enable_columnar_late_mat`, default OFF.)
+    // top-k path is therefore O(N) memory in the decoded batch — unlike the native top-N heapsort's O(k). M158
+    // mitigated this by defaulting the GUC OFF; M167 flipped the default ON, so the mitigation is now the plan-time
+    // decode-size guard in `try_swap_topk` (M167 ADR-4): a candidate whose estimated decode dwarfs `work_mem`
+    // declines to the native plan instead of being admitted here.)
     let work_mem_bytes = (pg_sys::work_mem.max(64) as usize) * 1024;
     let batch_bytes = batch.get_array_memory_size();
     let pool_bytes = work_mem_bytes.max(batch_bytes.saturating_mul(2)) + 64 * 1024 * 1024;

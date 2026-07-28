@@ -27,10 +27,14 @@ pub(crate) static ENABLE_COLUMNAR_AGG: GucSetting<bool> = GucSetting::<bool>::ne
 /// falls back to the legacy per-cell path — the toggle exists so a same-binary/same-box A/B can MEASURE the M160 win.
 pub(crate) static ENABLE_FAST_DECODE: GucSetting<bool> = GucSetting::<bool>::new(true);
 
-/// `theodb.enable_columnar_late_mat` (M158) — default OFF. When on, `Limit(k) → Sort([key]) → columnar-project` is
+/// `theodb.enable_columnar_late_mat` (M158; default flipped ON in M167) — default ON. When on, `Limit(k) → Sort([key]) → columnar-project` is
 /// swapped for a late-materialization top-k CustomScan (decode {key∪filter} for all rows, DataFusion filter+sort+limit,
 /// materialize the full projection only for the k survivors — avoiding `form_row`/`palloc` for N−k rows, the M148 cost).
-pub(crate) static ENABLE_COLUMNAR_LATE_MAT: GucSetting<bool> = GucSetting::<bool>::new(false);
+/// M167 — the default is ON: measured on ClickBench 1M, q23/q24 route byte-identically and a columnar table has no
+/// btree on the sort column, so native's only plan is Sort-over-projected-rows (late-mat is structurally >= native
+/// here). The O(N) decode this path pays is bounded by the plan-time guard in `try_swap_topk` (M167 ADR-4), which is
+/// what replaced "default OFF" as the mitigation.
+pub(crate) static ENABLE_COLUMNAR_LATE_MAT: GucSetting<bool> = GucSetting::<bool>::new(true);
 
 /// M152 (spike) — behavior-NEUTRAL decline trace. When `THEODB_ADMIT_TRACE=1`, emit the reason the columnar-agg
 /// path declined a candidate (the ground-truth the static SQL analysis can't give — plan-shape declines in
@@ -1809,7 +1813,7 @@ unsafe fn encode_topk_private(
 /// reuses the agg CustomScan framework (`SCAN_METHODS`, exec/end/rescan) via `mode == 2`: `begin_custom_scan` decodes
 /// {key ∪ filter} for all rows, runs DataFusion `filter → sort → limit(k)`, and materializes the full projection only
 /// for the k survivors — paying the M148 `form_row`/`palloc` cost for k rows, not N. Returns `None` (keep the native
-/// plan) for ANY unsupported shape (fail-closed). Gated by `theodb.enable_columnar_late_mat` (default OFF).
+/// plan) for ANY unsupported shape (fail-closed). Gated by `theodb.enable_columnar_late_mat` (default ON since M167).
 unsafe fn try_swap_topk(
     plan: *mut pg_sys::Plan,
     rtable: *mut pg_sys::List,
