@@ -141,4 +141,89 @@ SELECT 'q8_ab_mism' q, count(*) n FROM (
   UNION ALL
   (SELECT * FROM q8_on  EXCEPT SELECT * FROM q8_off)) d;
 
-\echo '========== ALL *_ab_mism AND q1_order_mism above MUST be 0 (byte-identical + order-identical top-k vs eager) =========='
+
+-- ============================================================================
+-- M167 — projection top-k: the four ClickBench shapes (q23-q26) + a negative control.
+-- Mirrors ClickBench q23/q24/q25/q26 onto t_col/t_cc. Each block: EXPLAIN (is it routed?) + full-row
+-- symmetric-EXCEPT (tie-free via a unique key) + emission-order oracle where the projection has ties.
+-- ============================================================================
+
+-- ---- M167-A: q23 analog — WIDE SELECT * + text filter + unique non-text key ----
+\echo '### M167-A (q23): SELECT * WHERE s LIKE ''%foo%'' ORDER BY wid LIMIT 10'
+SET theodb.enable_columnar_late_mat = on;
+EXPLAIN (COSTS OFF) SELECT * FROM t_col WHERE s LIKE '%foo%' ORDER BY wid LIMIT 10;
+SET theodb.enable_columnar_late_mat = off;
+CREATE TEMP TABLE m167a_off AS SELECT * FROM t_col WHERE s LIKE '%foo%' ORDER BY wid LIMIT 10;
+SET theodb.enable_columnar_late_mat = on;
+CREATE TEMP TABLE m167a_on  AS SELECT * FROM t_col WHERE s LIKE '%foo%' ORDER BY wid LIMIT 10;
+SELECT 'm167a_ab_mism' q, count(*) n FROM (
+  (SELECT * FROM m167a_off EXCEPT SELECT * FROM m167a_on)
+  UNION ALL
+  (SELECT * FROM m167a_on  EXCEPT SELECT * FROM m167a_off)) d;
+
+-- ---- M167-B: q24 analog — NARROW projection + filter + non-text key; output has ties -> order oracle ----
+\echo '### M167-B (q24): SELECT s WHERE s <> '''' ORDER BY wid LIMIT 10 (emission-order oracle)'
+SET theodb.enable_columnar_late_mat = on;
+EXPLAIN (COSTS OFF) SELECT s FROM t_col WHERE s <> '' ORDER BY wid LIMIT 10;
+SET theodb.enable_columnar_late_mat = off;
+CREATE TEMP TABLE m167b_off AS SELECT row_number() OVER () ord, s FROM (SELECT s FROM t_col WHERE s <> '' ORDER BY wid LIMIT 10) x;
+SET theodb.enable_columnar_late_mat = on;
+CREATE TEMP TABLE m167b_on  AS SELECT row_number() OVER () ord, s FROM (SELECT s FROM t_col WHERE s <> '' ORDER BY wid LIMIT 10) x;
+SELECT 'm167b_order_mism' q, count(*) n FROM m167b_off o JOIN m167b_on n USING (ord) WHERE o.s IS DISTINCT FROM n.s;
+
+-- ---- M167-C: q25 analog — TEXT sort key carrying the DATABASE DEFAULT collation (OID 100) ----
+-- The expectation is CLUSTER-DEPENDENT by design: byte-order is a property of the collation, so this block
+-- prints pg_database.datcollate alongside the plan. Under datcollate=C/POSIX the key IS byte-order and MUST route (M167 T3.1);
+-- under a linguistic locale it MUST decline. `sd` is unique so the comparison is tie-free either way.
+\echo '### M167-C (q25): text sort key with DEFAULT collation — routes iff datcollate is byte-order'
+SELECT 'm167c_datcollate' q, datcollate v FROM pg_database WHERE datname = current_database();
+-- NOTE: a fresh table, not ALTER TABLE t_cc ADD COLUMN — theodb_columnar rejects adding a column to a relation
+-- that already has stripes ("stripe ncols N != relation natts N+1"). Out of M167 scope; recorded, not worked around.
+DROP TABLE IF EXISTS t_dc CASCADE;
+CREATE TABLE t_dc (wid bigint, sd text) USING theodb_columnar;   -- sd carries the DATABASE DEFAULT collation (OID 100)
+INSERT INTO t_dc SELECT g, 'd'||lpad(g::text, 7, '0') FROM generate_series(1, 5000) g;  -- sd UNIQUE (tie-free)
+SET theodb.enable_columnar_late_mat = on;
+EXPLAIN (COSTS OFF) SELECT wid, sd FROM t_dc ORDER BY sd LIMIT 10;
+SET theodb.enable_columnar_late_mat = off;
+CREATE TEMP TABLE m167c_off AS SELECT wid, sd FROM t_dc ORDER BY sd LIMIT 10;
+SET theodb.enable_columnar_late_mat = on;
+CREATE TEMP TABLE m167c_on  AS SELECT wid, sd FROM t_dc ORDER BY sd LIMIT 10;
+SELECT 'm167c_ab_mism' q, count(*) n FROM (
+  (SELECT * FROM m167c_off EXCEPT SELECT * FROM m167c_on)
+  UNION ALL
+  (SELECT * FROM m167c_on  EXCEPT SELECT * FROM m167c_off)) d;
+
+-- ---- M167-C2: a NAMED linguistic collation MUST decline regardless of cluster locale ----
+-- Replaces the environment-dependent premise of Q7 ("this DB is en_US.UTF-8"), which is FALSE on a C cluster.
+\echo '### M167-C2: ORDER BY sd COLLATE "en_US.utf8" MUST decline (linguistic != byte order)'
+SET theodb.enable_columnar_late_mat = on;
+EXPLAIN (COSTS OFF) SELECT wid, sd FROM t_dc ORDER BY sd COLLATE "en_US.utf8" LIMIT 10;
+
+-- ---- M167-D: q26 analog — MULTI-KEY, first key ties so the second key decides the order ----
+\echo '### M167-D (q26): ORDER BY v, wid LIMIT 10 (v ties on purpose; wid breaks them)'
+SET theodb.enable_columnar_late_mat = on;
+EXPLAIN (COSTS OFF) SELECT * FROM t_col ORDER BY v, wid LIMIT 10;
+SET theodb.enable_columnar_late_mat = off;
+CREATE TEMP TABLE m167d_off AS SELECT row_number() OVER () ord, wid, v FROM (SELECT wid, v FROM t_col ORDER BY v, wid LIMIT 10) x;
+SET theodb.enable_columnar_late_mat = on;
+CREATE TEMP TABLE m167d_on  AS SELECT row_number() OVER () ord, wid, v FROM (SELECT wid, v FROM t_col ORDER BY v, wid LIMIT 10) x;
+SELECT 'm167d_order_mism' q, count(*) n FROM m167d_off o JOIN m167d_on n USING (ord) WHERE o.wid <> n.wid OR o.v <> n.v;
+
+-- ---- M167-E: NEGATIVE CONTROL — the oracle MUST be able to fail ----
+-- Seed a real divergence (a twin table with one row moved into the top-k) and prove the SAME comparison
+-- machinery reports it. n = 0 here would mean every 0 above is meaningless.
+\echo '### M167-E: negative control — seeded divergence MUST report n > 0'
+DROP TABLE IF EXISTS t_seed CASCADE;
+-- NOTE: the divergence is seeded at INSERT time, not by UPDATE — theodb_columnar is append-only (M99:
+-- "tuple fetch by TID is not supported"). Recorded, not worked around.
+CREATE TABLE t_seed (LIKE t_col) USING theodb_columnar;
+INSERT INTO t_seed SELECT CASE WHEN wid = 19999 THEN -1 ELSE wid END, cid, v, s, f, ts FROM t_col;
+SET theodb.enable_columnar_late_mat = on;
+CREATE TEMP TABLE m167e_a AS SELECT * FROM t_col  ORDER BY wid LIMIT 10;
+CREATE TEMP TABLE m167e_b AS SELECT * FROM t_seed ORDER BY wid LIMIT 10;
+SELECT 'm167e_control_diff' q, count(*) n FROM (
+  (SELECT * FROM m167e_a EXCEPT SELECT * FROM m167e_b)
+  UNION ALL
+  (SELECT * FROM m167e_b EXCEPT SELECT * FROM m167e_a)) d;
+
+\echo '========== ALL *_ab_mism / *_order_mism above MUST be 0, AND m167e_control_diff MUST be > 0 (an oracle that cannot fail is not an oracle) =========='

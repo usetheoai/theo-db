@@ -3,8 +3,8 @@ slug: m167-projection-topk
 milestone_id: M167
 target_project: theo-db
 created_at: 2026-07-27
-revision: 2.0 — re-scoped against the ROADMAP DoD after measuring reality on the droplet (q23/q24 already route; q25 declines on collation OID; q26 on numCols). Supersedes rev 1.2, whose Phase 1 targeted the wrong harness (SEPA C1–C4) and whose ADR-2 deferred q25/q26 that the DoD requires.
-goal: Make ClickBench q23–q26 (projection top-k) route to the columnar late-materialization path with byte-identical results — by flipping the boot default (q23/q24, already routable), replacing the text-collation OID allowlist with a byte-order predicate proven from PG's own `lc_collate` (q25), and generalizing the single-key guard to multi-key (q26) — with the O(N) decode bounded and a LIMIT-preserving, order-checked oracle proving each.
+revision: 2.1 — ADR-2's mechanism corrected mid-Phase-1: PG18 has no `lc_collate` GUC (falsified by the harness), so byte-order is read from `pg_database.datcollate` via the syscache. 2.0 — re-scoped against the ROADMAP DoD after measuring reality on the droplet (q23/q24 already route; q25 declines on collation OID; q26 on numCols). Supersedes rev 1.2, whose Phase 1 targeted the wrong harness (SEPA C1–C4) and whose ADR-2 deferred q25/q26 that the DoD requires.
+goal: Make ClickBench q23–q26 (projection top-k) route to the columnar late-materialization path with byte-identical results — by flipping the boot default (q23/q24, already routable), replacing the text-collation OID allowlist with a byte-order predicate proven from PG's own `pg_database.datcollate` (q25), and generalizing the single-key guard to multi-key (q26) — with the O(N) decode bounded and a LIMIT-preserving, order-checked oracle proving each.
 ---
 
 # M167 — projection top-k (q23–q26)
@@ -55,14 +55,16 @@ q23 21.5151 s · q24 5.9088 s · q25 6.0517 s · q26 5.9517 s; suite 42/43 ok, `
 - Wire: `encode_topk_private(table_oid, k, sort_attno, ascending, nulls_first, &proj_meta, &zpreds)` (`:2000`).
 - Executor: `df.sort(vec![col(key).sort(asc, nulls_first)])?.limit(0, Some(k))` (`df_executor.rs:786`) — already a `Vec`.
 - Decode: `decode_to_batch(...)` for ALL rows BEFORE the TopK (`df_executor.rs:775`); pool sized to fit (`:583`).
-- `GetConfigOption` is bound (`pg18.rs:44730`); `pg_newlocale_from_collation` / `collate_is_c` are **not**.
+- `SearchSysCache1` / `SysCacheGetAttr` / `SysCacheGetAttrNotNull` / `ReleaseSysCache` / `text_to_cstring` are bound;
+  `Anum_pg_database_datcollate = 13` (`pg18.rs:1707`). `pg_newlocale_from_collation` / `collate_is_c` are **not** bound,
+  and PG18 has **no** `lc_collate` GUC (measured).
 
 ### Domain glossary
 
 - **projection top-k** — `SELECT cols WHERE pred ORDER BY <column(s)> LIMIT k` (order by stored columns, not an aggregate).
 - **late materialization** — decode {keys ∪ filter} for all N, TopK, materialize the payload for the k survivors only.
 - **byte-order collation** — one whose sort equals `memcmp`. C (950), POSIX (951) always; `default` (100) iff the
-  database's `lc_collate` is C/POSIX. Determinism is NOT sufficient: it constrains equality, not order.
+  database's `datcollate` is C/POSIX. Determinism is NOT sufficient: it constrains equality, not order.
 - **storage oracle vs top-k oracle** — a LIMIT-stripped, order-normalized compare proves the columnar storage
   returns the same rows; it says nothing about *which k* and *in what order*. Different gates.
 
@@ -125,17 +127,22 @@ structurally ≥ native for columnar top-k. **Alternative rejected:** a `plan_ro
 no measured N where late-mat loses. **Alternative rejected:** keep OFF + a harness flag — leaves the user-facing win
 behind a non-default flag, understating the product (TheoDB rule 5). Memory is a different axis → ADR-4.
 
-### ADR-2 — prove byte-order from `lc_collate`; do not allowlist collation OIDs
+### ADR-2 — prove byte-order from `pg_database.datcollate`; do not allowlist collation OIDs
 Replace `sort_coll != 950 && sort_coll != 951` with a predicate: `950`/`951` → byte-order; `100` (`default`) →
-byte-order **iff** `GetConfigOption("lc_collate")` is `C` or `POSIX`; anything else (named ICU/libc collation) →
-decline; null/unreadable GUC → decline (fail-closed). **Rationale:** the OID allowlist declines a *provably safe*
+byte-order **iff** the database's `datcollate` is `C` or `POSIX`, read from `pg_database` via the syscache
+(`SearchSysCache1(DATABASEOID, MyDatabaseId)` + `SysCacheGetAttr(Anum_pg_database_datcollate = 13)` +
+`text_to_cstring`, all bound in `pg18.rs`) and cached per backend; anything else (named ICU/libc collation) →
+decline; unreadable catalog → decline (fail-closed). **Rationale:** the OID allowlist declines a *provably safe*
 case — measured: a `C|C` database whose column carries OID 100. The ROADMAP DoD asks precisely for "text routes only
 with a deterministic [byte-order] collation". **Alternative rejected:** `pg_newlocale_from_collation()` +
 `pg_locale_struct.collate_is_c` — semantically the ideal predicate (PG's own), but pgrx 0.19 generates **no binding**
 for either (verified in `pg18.rs`); using it means a hand-written `extern "C"` plus a struct-layout assumption across
-the C boundary — new unsafe surface for no additional correctness. **Alternative rejected:** keep declining q25 (rev
+the C boundary — new unsafe surface for no additional correctness. **Alternative FALSIFIED during Phase 1:** reading a
+`lc_collate` GUC — **PG 18 has no such GUC** (`pg_settings` exposes only `lc_messages`/`monetary`/`numeric`/`time`;
+it was removed when per-database collation became authoritative). The harness block errored with `unrecognized
+configuration parameter "lc_collate"` before any Rust was written — the catalog read replaced it. **Alternative rejected:** keep declining q25 (rev
 1.2's ADR-2) — fails the ROADMAP DoD, and "we cannot tell" is false: PG tells us.
-**Honest limitation:** `lc_collate` reports the *database* collation. A column or `ORDER BY … COLLATE "xx"` carrying
+**Honest limitation:** `datcollate` reports the *database* collation. A column or `ORDER BY … COLLATE "xx"` carrying
 a named non-C collation still declines (correctly — the predicate only ever *adds* provable cases).
 
 ### ADR-3 — generalize the single-key guard to multi-key
@@ -276,13 +283,13 @@ Declining falls back to the native plan, correct for any input — fail-closed l
 ### T3.1 — replace the collation OID allowlist with a proven byte-order predicate
 #### Why this step
 The action: extract `sort_collation_is_byte_order(coll: u32) -> bool` — `950`/`951` true; `100` true iff
-`GetConfigOption("lc_collate")` is `C`/`POSIX`; else false; null GUC → false. Use it at `:1935`.
+the database `datcollate` (syscache, cached per backend) is `C`/`POSIX`; else false; unreadable → false. Use it at `:1935`.
 The reasoning: measured — a `C|C` cluster declines q25 only because the column carries OID 100. PG reports the
 database collation; we stop guessing (ADR-2).
 #### Files to edit
 - `theodb_rs/src/am/columnar_agg.rs`, `benchmarks/columnar_type_ab.py` (collation cases + the `:258–260` scope note)
 #### TDD
-- RED: test_q25_routes_under_c_locale — on the `lc_collate = C` cluster, with no session `SET`,
+- RED: test_q25_routes_under_c_locale — on the `datcollate = C` cluster, with no session `SET`,
   `assert 'Custom Scan (theodb_columnar_agg)' in explain(q25)` and `assert 'Sort' not in explain(q25)`.
   Fails today (measured: `Sort` present, guard rejects OID 100).
 - RED: test_named_non_c_collation_still_declines — `ORDER BY SearchPhrase COLLATE "en_US.utf8"`
@@ -291,7 +298,7 @@ database collation; we stop guessing (ADR-2).
 #### Concurrency tests
 (none — single-threaded)
 #### Acceptance criteria
-- On the `lc_collate = C` cluster `assert 'Custom Scan' in explain(q25)`, its harness block reports `symmetric_diff_count == 0`, and `ORDER BY … COLLATE "en_US.utf8"` reports `assert 'Custom Scan' not in explain`.
+- On the `datcollate = C` cluster `assert 'Custom Scan' in explain(q25)`, its harness block reports `symmetric_diff_count == 0`, and `ORDER BY … COLLATE "en_US.utf8"` reports `assert 'Custom Scan' not in explain`.
 - `columnar_type_ab.py` gains the collation cases and its scope note no longer excludes this path.
 
 ## Phase 4 — multi-key top-k (q26)
@@ -387,7 +394,7 @@ No external I/O (in-process planner/executor over local columnar state). The res
 |---|---|
 | Estimated decode exceeds the work_mem-derived bound | `try_swap_topk` returns `None` → native plan → correct result, O(k) memory; reason visible under `THEODB_ADMIT_TRACE=1` |
 | Decode fits the bound but still exhausts backend memory (estimate under-fired) | Backend allocation failure — the pre-existing M158 behavior, narrowed but not eliminated; stated in ADR-4, not claimed fixed |
-| `lc_collate` GUC unreadable | predicate returns false → text key declines (fail-closed) |
+| `pg_database.datcollate` unreadable via syscache | predicate returns false → text key declines (fail-closed) |
 
 ## Global Definition of Done
 
