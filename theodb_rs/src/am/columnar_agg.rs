@@ -37,6 +37,15 @@ pub(crate) static ENABLE_FAST_DECODE: GucSetting<bool> = GucSetting::<bool>::new
 /// what replaced "default OFF" as the mitigation.
 pub(crate) static ENABLE_COLUMNAR_LATE_MAT: GucSetting<bool> = GucSetting::<bool>::new(true);
 
+/// M168 — stream the top-k's input one chunk-group at a time instead of decoding the whole relation into one
+/// Arrow batch. Default ON: measured peak for ClickBench q23 drops 772.2 MiB → 17.9 MiB (43.2x).
+///
+/// The switch exists for two reasons, both load-bearing. It makes the throughput comparison PAIRED inside one
+/// session and one binary — the alternative is a cross-run comparison, and this box drifts up to 1.88x between
+/// runs (M167 § 6), which would swamp the signal. And it is the escape hatch if streaming ever misbehaves in a
+/// shape the oracles do not cover.
+pub(crate) static ENABLE_COLUMNAR_TOPK_STREAM: GucSetting<bool> = GucSetting::<bool>::new(true);
+
 /// M167 ADR-4 — safety factor for the top-k decode bound. `run_columnar_topk` decodes {projection ∪ keys ∪ filter}
 /// for ALL rows into one Arrow batch BEFORE the bounded-heap TopK runs, so the path costs O(N) memory where the
 /// native top-N heapsort costs O(k). With the GUC defaulting ON (M167), an unfiltered wide `SELECT * … ORDER BY k
@@ -297,6 +306,14 @@ pub(crate) fn init() {
         c"Late-materialization top-k for columnar SELECT … ORDER BY key LIMIT k (M158)",
         c"When on, swap Limit→Sort→columnar-project for a top-k CustomScan that materializes only the k survivors.",
         &ENABLE_COLUMNAR_LATE_MAT,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+    GucRegistry::define_bool_guc(
+        c"theodb.enable_columnar_topk_stream",
+        c"Stream the columnar top-k input per chunk-group instead of one whole-relation batch (M168)",
+        c"When on, the top-k decodes one chunk-group at a time so peak memory is a chunk-group + k, not O(N).",
+        &ENABLE_COLUMNAR_TOPK_STREAM,
         GucContext::Userset,
         GucFlags::default(),
     );

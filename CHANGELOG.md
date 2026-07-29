@@ -14,10 +14,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- **Base para o top-k colunar com memória limitada:** o motor colunar ganhou a capacidade de decodificar uma
-  tabela **em partes** (um grupo de linhas por vez) em vez de sempre carregar tudo de uma vez. Nenhuma consulta
-  usa esse caminho ainda — é a fundação para que consultas "as N primeiras linhas" deixem de precisar de memória
-  proporcional ao tamanho da tabela (#215). O caminho atual continua idêntico, com o mesmo resultado byte a byte.
+- **Top-k colunar com memória limitada:** consultas "as N primeiras linhas por uma coluna" sobre tabelas colunares
+  deixaram de precisar de memória proporcional ao tamanho da tabela. Medido a 1 milhão de linhas × 105 colunas, o
+  pico de um `SELECT *` caiu de **772 MiB para 17,9 MiB (43×)** — abaixo do `work_mem` da sessão, e não mais acima
+  dele (#215, #218). A tabela passa a ser decodificada em partes, uma de cada vez, em vez de inteira de uma vez.
+  Resultado byte a byte idêntico ao anterior, e sem custo de tempo: no A/B pareado o `SELECT *` largo ficou 15%
+  mais **rápido**, e as consultas estreitas ficaram dentro do ruído de medição. Método e ressalvas em
+  `docs/benchmarks/m168-streaming-topk-verdict.md`. Reversível com `theodb.enable_columnar_topk_stream = off`.
 - **Diagnóstico de memória do top-k colunar:** com `THEODB_ADMIT_TRACE=1` no ambiente do servidor, o log passa a
   registrar quantos bytes o caminho colunar decodificou para responder à consulta
   (`theodb_decode_batch: rows=… bytes=… work_mem_bytes=…`). Quem opera consegue ver o consumo real em vez de

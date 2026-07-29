@@ -15,7 +15,7 @@ use datafusion::arrow::array::{
     Array, ArrayRef, BooleanArray, Date32Array, Decimal128Array, Float32Array, Float64Array,
     Int16Array, Int32Array, Int64Array, StringArray, TimestampMicrosecondArray,
 };
-use datafusion::arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef, TimeUnit};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::error::DataFusionError;
 use datafusion::functions_aggregate::expr_fn::{avg, count, count_distinct, max, min, sum};
@@ -768,6 +768,192 @@ pub(super) unsafe fn run_columnar_grouped_aggs(
     Ok(rows)
 }
 
+// ---------------------------------------------------------------------------------------------------------------
+// M168 — streaming source: one Arrow batch per columnar chunk-group, so the top-k's peak is a chunk-group + k
+// instead of the whole relation (measured at 809,738,352 bytes for ClickBench q23 before this existed).
+// ---------------------------------------------------------------------------------------------------------------
+
+/// A `RecordBatchStream` that decodes one chunk-group per poll.
+///
+/// SAFETY (M168 ADR-2): holds a `pg_sys::Relation`, which is only valid on its backend thread. DataFusion demands
+/// `Send` here. That is sound ONLY because `run_df_collect` drives this on a `new_current_thread` runtime via
+/// `block_on` with `target_partitions(1)` — the stream is polled on the backend thread and nowhere else. The
+/// `ThreadAffinity` inside `ColumnarChunkStream` asserts exactly that on every `next()`, so a future switch to a
+/// multi-threaded runtime panics instead of corrupting memory.
+struct ChunkGroupBatchStream {
+    schema: SchemaRef,
+    inner: super::columnar::ColumnarChunkStream,
+    predicates: Vec<super::zonemap::ZonePredicate>,
+    skip: bool,
+    pending: Option<RecordBatch>, // the probe batch decoded to learn the schema; served first
+    done: bool,
+}
+
+unsafe impl Send for ChunkGroupBatchStream {}
+
+impl futures::Stream for ChunkGroupBatchStream {
+    type Item = Result<RecordBatch, DataFusionError>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        use std::task::Poll;
+        if let Some(b) = self.pending.take() {
+            return Poll::Ready(Some(Ok(b)));
+        }
+        if self.done {
+            return Poll::Ready(None);
+        }
+        let preds = std::mem::take(&mut self.predicates);
+        let skip = self.skip;
+        let stepped = unsafe { self.inner.next(&preds, skip) };
+        self.predicates = preds;
+        match stepped {
+            Ok(None) => {
+                self.done = true;
+                Poll::Ready(None)
+            }
+            Ok(Some(cols)) => match build_arrow_from_decoded(&cols)
+                .and_then(|(sc, arrays)| {
+                    RecordBatch::try_new(Arc::new(sc), arrays)
+                        .map_err(|e| format!("df_executor: arrow batch: {e}"))
+                }) {
+                Ok(b) => {
+                    // Same instrument as the eager path's `theodb_decode_batch`, so before/after are comparable
+                    // by construction. It also PROVES which path ran: `_stream` lines can only come from here,
+                    // and their count is the number of chunk-groups actually streamed. Without this, an oracle
+                    // that passes says nothing about whether the streaming path was exercised at all.
+                    if super::columnar_agg::admit_trace_enabled() {
+                        pgrx::warning!(
+                            "theodb_decode_batch_stream: rows={} bytes={}",
+                            b.num_rows(),
+                            b.get_array_memory_size()
+                        );
+                    }
+                    Poll::Ready(Some(Ok(b)))
+                }
+                Err(e) => {
+                    self.done = true;
+                    Poll::Ready(Some(Err(DataFusionError::Execution(e))))
+                }
+            },
+            Err(e) => {
+                self.done = true;
+                Poll::Ready(Some(Err(DataFusionError::Execution(e))))
+            }
+        }
+    }
+}
+
+impl datafusion::physical_plan::RecordBatchStream for ChunkGroupBatchStream {
+    fn schema(&self) -> SchemaRef {
+        self.schema.clone()
+    }
+}
+
+/// The `PartitionStream` DataFusion registers as a table. Holds the planned scan until `execute` turns it into a
+/// live stream; only ever executed once (a top-k reads its input exactly once).
+///
+/// SAFETY: see `ChunkGroupBatchStream` — same ADR-2 justification, same runtime constraint, same assertion.
+struct ColumnarPartition {
+    schema: SchemaRef,
+    state: std::sync::Mutex<Option<ChunkGroupBatchStream>>,
+}
+
+impl std::fmt::Debug for ColumnarPartition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ColumnarPartition({} fields)", self.schema.fields().len())
+    }
+}
+
+unsafe impl Send for ColumnarPartition {}
+unsafe impl Sync for ColumnarPartition {}
+
+impl datafusion::physical_plan::streaming::PartitionStream for ColumnarPartition {
+    fn schema(&self) -> &SchemaRef {
+        &self.schema
+    }
+
+    fn execute(
+        &self,
+        _ctx: Arc<datafusion::execution::TaskContext>,
+    ) -> datafusion::physical_plan::SendableRecordBatchStream {
+        match self.state.lock().ok().and_then(|mut g| g.take()) {
+            Some(st) => Box::pin(st),
+            // Executing twice would silently return nothing, which is the kind of empty-but-green result this
+            // milestone's oracles exist to catch. Fail loudly instead.
+            None => Box::pin(datafusion::physical_plan::stream::RecordBatchStreamAdapter::new(
+                self.schema.clone(),
+                futures::stream::once(async {
+                    Err(DataFusionError::Execution(
+                        "df_executor: columnar partition executed twice (top-k reads its input once)".into(),
+                    ))
+                }),
+            )),
+        }
+    }
+}
+
+/// Build the streaming source for a top-k: plan the scan, decode ONE chunk-group eagerly to learn the exact Arrow
+/// schema (DataFusion asks for the schema before executing), and hand the rest back as a lazy stream.
+///
+/// The probe costs one chunk-group, which is the same order as the streaming peak — it does not reintroduce O(N).
+unsafe fn open_streaming_source(
+    rel: pg_sys::Relation,
+    proj_names: &[String],
+    predicates: &[super::zonemap::ZonePredicate],
+    text_predicates: &[super::zonemap::TextPredicate],
+    in_predicates: &[super::zonemap::InListPredicate],
+    skip: bool,
+) -> Result<Option<Arc<ColumnarPartition>>, String> {
+    let mut proj: Vec<usize> = Vec::new();
+    let mut want = |idx: usize, proj: &mut Vec<usize>| {
+        if !proj.contains(&idx) {
+            proj.push(idx);
+        }
+    };
+    for name in proj_names {
+        let idx = super::columnar::column_index(rel, name)
+            .ok_or_else(|| format!("df_executor: column '{name}' not found"))?;
+        want(idx, &mut proj);
+    }
+    for pr in predicates {
+        want(pr.col, &mut proj);
+    }
+    for t in text_predicates {
+        want(t.col, &mut proj);
+    }
+    for ip in in_predicates {
+        want(ip.col, &mut proj);
+    }
+    if proj.is_empty() {
+        proj.push(0);
+    }
+    let plan = super::columnar::plan_columnar_scan(rel, Some(&proj))?;
+    let mut inner = super::columnar::ColumnarChunkStream::new(rel, plan);
+    // Probe: the schema has to be exact before DataFusion executes, and only decoded data reveals it.
+    let first = inner.next(predicates, skip)?;
+    let Some(cols) = first else {
+        return Ok(None); // nothing visible — caller falls back to the batch path, which handles empty correctly
+    };
+    let (sc, arrays) = build_arrow_from_decoded(&cols)?;
+    let schema: SchemaRef = Arc::new(sc);
+    let probe = RecordBatch::try_new(schema.clone(), arrays)
+        .map_err(|e| format!("df_executor: arrow batch: {e}"))?;
+    Ok(Some(Arc::new(ColumnarPartition {
+        schema: schema.clone(),
+        state: std::sync::Mutex::new(Some(ChunkGroupBatchStream {
+            schema,
+            inner,
+            predicates: predicates.to_vec(),
+            skip,
+            pending: Some(probe),
+            done: false,
+        })),
+    })))
+}
+
 /// M158 — late-materialization top-k over a columnar table: `SELECT <proj> [WHERE <pushable>] ORDER BY <key> LIMIT k`.
 /// Decodes {proj ∪ key ∪ filter} columns ONCE into an Arrow batch, then runs `filter → sort([key]) → limit(k)` in
 /// DataFusion (vectorized TopK, O(N log k)) and materializes ONLY the k surviving rows back to PG Datums via
@@ -791,11 +977,31 @@ pub(super) unsafe fn run_columnar_topk(
             proj_names.push(key.clone());
         }
     }
-    let batch =
-        decode_to_batch(rel, &proj_names, predicates, text_predicates, in_predicates, skip)?;
     let filter = build_filter_expr(rel, predicates, text_predicates, in_predicates);
     let order_by: Vec<_> =
         sort_keys.iter().map(|(name, asc, nf)| col(name.as_str()).sort(*asc, *nf)).collect();
+
+    // M168 — stream one chunk-group at a time so the peak is a chunk-group + k, not the whole relation. The
+    // eager path below stays as the fallback for the one case the stream cannot serve (nothing visible), and
+    // because a source that yields zero batches is exactly the empty-but-green result the oracles guard against.
+    if super::columnar_agg::ENABLE_COLUMNAR_TOPK_STREAM.get()
+        && let Some(part) =
+            open_streaming_source(rel, &proj_names, predicates, text_predicates, in_predicates, skip)?
+    {
+        let order_stream = order_by.clone();
+        let filter_stream = filter.clone();
+        let batches = run_df_collect_streaming(part, move |df| {
+            let df = match filter_stream {
+                Some(f) => df.filter(f)?,
+                None => df,
+            };
+            df.sort(order_stream)?.limit(0, Some(k))
+        })?;
+        return rows_from_batches(&batches, proj_cols, k);
+    }
+
+    let batch =
+        decode_to_batch(rel, &proj_names, predicates, text_predicates, in_predicates, skip)?;
     // filter (WHERE, the final authority — D3) → sort by the key (PG order for numeric/temporal/det-collation text) →
     // limit k (DataFusion's TopK: a bounded heap, never materializing all N as tuples).
     let batches = run_df_collect(batch, move |df| {
@@ -806,10 +1012,67 @@ pub(super) unsafe fn run_columnar_topk(
         df.sort(order_by)?.limit(0, Some(k))
     })?;
 
-    // Emit the surviving rows: one Datum per output column (in target order), located in the result batch by NAME
-    // (the schema carries the decoded projection; filter/sort/limit preserve it). Only ≤ k rows are materialized.
+    rows_from_batches(&batches, proj_cols, k)
+}
+
+/// Emit the surviving rows: one Datum per output column (in target order), located in the result batch by NAME
+/// (the schema carries the decoded projection; filter/sort/limit preserve it). Only ≤ k rows are materialized.
+///
+/// Shared by the eager and the M168 streaming path so both produce byte-identical output by construction rather
+/// than by two copies staying in agreement.
+/// M168 — the streaming twin of `run_df_collect`: registers a lazy `PartitionStream` instead of one materialized
+/// batch, so `SortExec: TopK(fetch=k)` pulls chunk-groups and keeps only k rows.
+///
+/// The memory pool is sized to `work_mem` alone here — there is no giant input batch to accommodate, which is the
+/// whole point. If the pool were still sized to the full decode, the O(k) claim would be theatre.
+unsafe fn run_df_collect_streaming<F>(
+    part: Arc<ColumnarPartition>,
+    build: F,
+) -> Result<Vec<RecordBatch>, String>
+where
+    F: FnOnce(
+            datafusion::dataframe::DataFrame,
+        ) -> Result<datafusion::dataframe::DataFrame, DataFusionError>
+        + Send
+        + 'static,
+{
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .map_err(|e| format!("df_executor: tokio runtime: {e}"))?;
+    let work_mem_bytes = (pg_sys::work_mem.max(64) as usize) * 1024;
+    let pool_bytes = work_mem_bytes + 64 * 1024 * 1024;
+    let schema = datafusion::physical_plan::streaming::PartitionStream::schema(part.as_ref()).clone();
+    let held = HeldInterrupts::hold();
+    let out: Result<Vec<RecordBatch>, DataFusionError> = rt.block_on(async move {
+        use datafusion::execution::memory_pool::GreedyMemoryPool;
+        use datafusion::execution::runtime_env::RuntimeEnvBuilder;
+        use datafusion::prelude::SessionConfig;
+        let runtime = RuntimeEnvBuilder::new()
+            .with_memory_pool(std::sync::Arc::new(GreedyMemoryPool::new(pool_bytes)))
+            .build_arc()?;
+        // target_partitions(1) is load-bearing, not tuning: it is what keeps the single `PartitionStream` on the
+        // calling (backend) thread, which is what makes the `unsafe impl Send` on it sound (M168 ADR-2).
+        let config = SessionConfig::new().with_target_partitions(1);
+        let ctx = SessionContext::new_with_config_rt(config, runtime);
+        let table = datafusion::catalog::streaming::StreamingTable::try_new(
+            schema,
+            vec![part as Arc<dyn datafusion::physical_plan::streaming::PartitionStream>],
+        )?;
+        ctx.register_table("cg", Arc::new(table))?;
+        let df = ctx.table("cg").await?;
+        build(df)?.collect().await
+    });
+    drop(held);
+    out.map_err(|e| format!("df_executor: datafusion: {e}"))
+}
+
+unsafe fn rows_from_batches(
+    batches: &[RecordBatch],
+    proj_cols: &[(String, u32)],
+    _k: usize,
+) -> Result<Vec<Vec<(pg_sys::Datum, bool)>>, String> {
     let mut rows: Vec<Vec<(pg_sys::Datum, bool)>> = Vec::new();
-    for b in &batches {
+    for b in batches {
         let schema = b.schema();
         let idxs: Vec<usize> = proj_cols
             .iter()
