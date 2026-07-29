@@ -1,0 +1,95 @@
+=== 1/2 recarrega ClickBench 1M (late-mat ON, o binário atual) 2026-07-28T23:37:29+00:00 ===
+  q 0 cold=0.1604 hot=0.0199 cs=True ab=True
+  q 1 cold=0.0385 hot=0.0087 cs=True ab=True
+  q 2 cold=0.0515 hot=0.0321 cs=True ab=True
+  q 3 cold=0.0387 hot=0.032 cs=True ab=True
+  q 4 cold=0.087 hot=0.0669 cs=True ab=True
+  q 5 cold=0.1537 hot=0.1452 cs=True ab=True
+  q 6 cold=0.0054 hot=0.0033 cs=True ab=True
+  q 7 cold=0.0214 hot=0.0087 cs=True ab=True
+  q 8 cold=0.1119 hot=0.0953 cs=True ab=True
+  q 9 cold=0.184 hot=0.15 cs=True ab=True
+  q10 cold=0.091 hot=0.0728 cs=True ab=True
+  q11 cold=0.0937 hot=0.079 cs=True ab=True
+  q12 cold=0.2173 hot=0.2084 cs=True ab=True
+  q13 cold=0.2442 hot=0.2258 cs=True ab=True
+  q14 cold=0.2567 hot=0.223 cs=True ab=True
+  q15 cold=0.9399 hot=1.0223 cs=True ab=True
+  q16 cold=1.0402 hot=1.111 cs=True ab=True
+  q17 cold=22.8773 hot=22.6206 cs=False ab=True
+  q18 cold=2.6876 hot=2.375 cs=True ab=True
+  q19 cold=6.0345 hot=5.8938 cs=True ab=True
+  q20 cold=0.5687 hot=0.4889 cs=True ab=True
+  q21 cold=23.6802 hot=22.4567 cs=False ab=True
+  q22 cold=22.5015 hot=22.8327 cs=False ab=True
+  q23 cold=3.5853 hot=3.3788 cs=True ab=True
+  q24 cold=0.1542 hot=0.139 cs=True ab=True
+  q25 cold=0.0989 hot=0.0965 cs=True ab=True
+  q26 cold=0.1821 hot=0.1676 cs=True ab=True
+  q27 cold=24.141 hot=23.7833 cs=False ab=True
+  q28 cold=ERR hot=ERR cs=None ab=None
+  q29 cold=0.0755 hot=0.0661 cs=True ab=True
+  q30 cold=0.4712 hot=0.5085 cs=True ab=True
+  q31 cold=0.633 hot=0.6018 cs=True ab=True
+  q32 cold=3.0728 hot=2.8983 cs=True ab=True
+  q33 cold=1.1802 hot=1.1503 cs=True ab=True
+  q34 cold=1.4203 hot=1.4496 cs=True ab=True
+  q35 cold=1.5202 hot=1.4868 cs=True ab=True
+  q36 cold=0.0545 hot=0.0435 cs=True ab=True
+  q37 cold=0.0355 hot=0.0377 cs=True ab=True
+  q38 cold=0.0472 hot=0.0466 cs=True ab=True
+  q39 cold=23.1657 hot=21.906 cs=False ab=True
+  q40 cold=0.0136 hot=0.0126 cs=True ab=True
+  q41 cold=0.0134 hot=0.0138 cs=True ab=True
+  q42 cold=0.0113 hot=0.0091 cs=True ab=True
+wrote /root/m167-after-v3.json  status=OK
+  queries ok=42/43 errored=1 columnar_customscan=37 hot_geomean=0.26s
+  result A/B: byte-identical (columnar==heap) (pass=42, diverged=0)
+=== 2/2 mesma suíte com late_mat=OFF no MESMO binário 2026-07-28T23:53:25+00:00 ===
+  q 0 cold=0.167 hot=0.0204 cs=True ab=True
+  q 1 cold=0.0379 hot=0.0078 cs=True ab=True
+  q 2 cold=0.0541 hot=0.0264 cs=True ab=True
+  q 3 cold=0.0426 hot=0.0343 cs=True ab=True
+  q 4 cold=0.0731 hot=0.07 cs=True ab=True
+  q 5 cold=0.1201 hot=0.1229 cs=True ab=True
+  q 6 cold=0.0044 hot=0.0025 cs=True ab=True
+  q 7 cold=0.0608 hot=0.0103 cs=True ab=True
+  q 8 cold=0.1688 hot=0.1593 cs=True ab=True
+  q 9 cold=0.1898 hot=0.1556 cs=True ab=True
+  q10 cold=0.0851 hot=0.0674 cs=True ab=True
+  q11 cold=0.0778 hot=0.0824 cs=True ab=True
+  q12 cold=0.2523 hot=0.2227 cs=True ab=True
+  q13 cold=0.2675 hot=0.2522 cs=True ab=True
+  q14 cold=0.232 hot=0.2231 cs=True ab=True
+  q15 cold=0.9692 hot=0.9534 cs=True ab=True
+  q16 cold=1.1411 hot=0.9785 cs=True ab=True
+  q17 cold=22.4527 hot=22.6725 cs=False ab=True
+  q18 cold=2.3745 hot=2.3708 cs=True ab=True
+  q19 cold=5.6803 hot=5.5908 cs=True ab=True
+  q20 cold=0.458 hot=0.4819 cs=True ab=True
+  q21 cold=23.2367 hot=21.8574 cs=False ab=True
+  q22 cold=25.0057 hot=24.4769 cs=False ab=True
+  q23 cold=25.0912 hot=24.0039 cs=True ab=True
+  q24 cold=6.5949 hot=6.7435 cs=True ab=True
+  q25 cold=6.4035 hot=6.0978 cs=True ab=True
+  q26 cold=6.715 hot=6.8404 cs=True ab=True
+  q27 cold=24.6245 hot=24.5442 cs=False ab=True
+  q28 cold=ERR hot=ERR cs=None ab=None
+  q29 cold=0.1309 hot=0.1243 cs=True ab=True
+  q30 cold=0.6568 hot=0.5975 cs=True ab=True
+  q31 cold=0.6316 hot=0.5638 cs=True ab=True
+  q32 cold=2.8506 hot=2.8662 cs=True ab=True
+  q33 cold=1.2891 hot=1.3363 cs=True ab=True
+  q34 cold=1.634 hot=1.4162 cs=True ab=True
+  q35 cold=1.6725 hot=1.4996 cs=True ab=True
+  q36 cold=0.051 hot=0.0393 cs=True ab=True
+  q37 cold=0.0426 hot=0.0369 cs=True ab=True
+  q38 cold=0.0411 hot=0.0382 cs=True ab=True
+  q39 cold=26.0834 hot=24.5328 cs=False ab=True
+  q40 cold=0.0138 hot=0.0107 cs=True ab=True
+  q41 cold=0.0124 hot=0.0101 cs=True ab=True
+  q42 cold=0.0107 hot=0.0101 cs=True ab=True
+wrote /root/m167-suite-latemat-off.json  status=OK
+  queries ok=42/43 errored=1 columnar_customscan=37 hot_geomean=0.36313s
+  result A/B: byte-identical (columnar==heap) (pass=42, diverged=0)
+=== rc=0 end 2026-07-29T00:11:50+00:00 ===

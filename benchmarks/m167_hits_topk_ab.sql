@@ -23,10 +23,36 @@ SET theodb.enable_columnar_late_mat = on;   -- the path under test, on the colum
 -- differences that prove nothing). `theodb_columnar_agg` in the plan of a query with NO aggregate can only come
 -- from the top-k swap, so its presence is a positive proof that the path under test actually ran.
 \echo '### M167-H0: routing precondition — the four shapes MUST show the top-k node'
-EXPLAIN (COSTS OFF) SELECT * FROM hits WHERE URL LIKE '%google%' ORDER BY EventTime LIMIT 10;
-EXPLAIN (COSTS OFF) SELECT SearchPhrase FROM hits WHERE SearchPhrase <> '' ORDER BY EventTime LIMIT 10;
-EXPLAIN (COSTS OFF) SELECT SearchPhrase FROM hits WHERE SearchPhrase <> '' ORDER BY SearchPhrase LIMIT 10;
-EXPLAIN (COSTS OFF) SELECT SearchPhrase FROM hits WHERE SearchPhrase <> '' ORDER BY EventTime, SearchPhrase LIMIT 10;
+-- Machine-checked, not printed-and-hoped: an EXPLAIN a human has to read is not a gate. This RAISES, and with
+-- ON_ERROR_STOP the whole oracle aborts, so a vacuous pass is impossible rather than merely visible.
+DO $h0$
+DECLARE
+  shapes text[] := ARRAY[
+    'SELECT * FROM hits WHERE URL LIKE ''%google%'' ORDER BY EventTime LIMIT 10',
+    'SELECT SearchPhrase FROM hits WHERE SearchPhrase <> '''' ORDER BY EventTime LIMIT 10',
+    'SELECT SearchPhrase FROM hits WHERE SearchPhrase <> '''' ORDER BY SearchPhrase LIMIT 10',
+    'SELECT SearchPhrase FROM hits WHERE SearchPhrase <> '''' ORDER BY EventTime, SearchPhrase LIMIT 10'
+  ];
+  shape text;
+  plan  text;
+  i     int := 0;
+BEGIN
+  FOREACH shape IN ARRAY shapes LOOP
+    i := i + 1;
+    EXECUTE 'EXPLAIN (COSTS OFF, FORMAT JSON) ' || shape INTO plan;
+    IF position('theodb_columnar_agg' IN plan) = 0 THEN
+      RAISE EXCEPTION
+        'M167-H0 FAILED: shape % did not route to the top-k node; every block below would pass vacuously. Plan: %',
+        i, plan;
+    END IF;
+    -- A surviving Sort means the swap did not replace the native path, only sat beside it.
+    IF position('"Node Type": "Sort"' IN plan) > 0 THEN
+      RAISE EXCEPTION 'M167-H0 FAILED: shape % still carries a Sort node — the swap did not take. Plan: %', i, plan;
+    END IF;
+  END LOOP;
+  RAISE NOTICE 'M167-H0 ok: all % shapes route to theodb_columnar_agg with no surviving Sort', i;
+END
+$h0$;
 
 \echo '### M167-H1 (q23): SELECT * WHERE URL LIKE ... ORDER BY EventTime LIMIT 10 — sort-key multiset'
 DROP TABLE IF EXISTS h1_col; DROP TABLE IF EXISTS h1_heap;

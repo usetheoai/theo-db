@@ -1,11 +1,12 @@
 # M167 — projection top-k (q23–q26): measured verdict
 
-**Date:** 2026-07-28 (rev 2 — supersedes the first draft; see § 7)
+**Date:** 2026-07-28 (rev 3 — supersedes drafts 1 and 2; see § 7)
 **Box:** `theo-e2e-runner` (DigitalOcean, 32 GB / 8 vCPU) — NOT the canonical ClickBench c6a.4xlarge.
 **Build:** `cargo pgrx install --release`, PG 18.4 (pgrx), `datcollate = C`, `work_mem = 64MB`, `shared_buffers = 4GB`.
 **Data:** ClickBench `hits` / `hits_heap`, 1,000,000 rows each — verified by `count(*)`.
 **Raw artifacts:** `docs/benchmarks/m167-artifacts/` (`after-1m.json`, `paired-ab-ctas.log`,
-`before-1m-SUPERSEDED.json`).
+`before-1m-SUPERSEDED.json`, `b1-latemat-off.json`, `hits-topk-ab.log`, `ec-harness.log`) and `docs/benchmarks/m167-type-coverage.md`
+(the `rules/testing.md` § 5.1 gate artifact for a change to the columnar routing admit-paths).
 
 ## 1. Result — paired same-binary A/B
 
@@ -23,9 +24,11 @@ formed. Raw log: `m167-artifacts/paired-ab-ctas.log`; harness: `benchmarks/m167_
 **20 of 20 pairs favour the new path.** Per-arm spread is tight (q23 off 21.33–22.31, on 4.15–4.79; the narrow three
 have `on` between 0.094 and 0.177 s against `off` between 5.60 and 6.71 s).
 
-Why paired-in-one-binary and not before-run vs after-run: the first draft of this verdict compared two separate suite
-runs and inflated three of the four ratios ~2× (§ 7). A GUC toggle inside one session removes build, cluster, session
-and thermal drift by construction; the toggle is the only asymmetry left.
+Why paired-in-one-binary and not before-run vs after-run: **this box drifts up to ~2× between runs on sub-200 ms
+queries**, measured on three queries the GUC cannot affect (§ 6, last bullet). A cross-run comparison therefore cannot
+license a ratio on its own, whatever it reports. A GUC toggle inside one session removes build, cluster, session and
+thermal drift by construction; the toggle is the only asymmetry left. A same-binary control corroborates these
+numbers independently (§ 7.2).
 
 ## 2. Routing — the metric that actually discriminates
 
@@ -42,9 +45,17 @@ Suite total: `columnar_agg_routed` **36/43**.
 
 **`columnar_customscan` is deliberately NOT cited here.** That field is `"theodb_columnar_agg" in plan or "Custom
 Scan" in plan` (`run_m128_clickbench.py:271`) and its own docstring calls it "broad and ~always True … CANNOT tell an
-agg pushdown from a declined agg over a projection scan". Proof it is vacuous for this claim: `m166-clickbench-agg.json`
-(late-mat **off**) also reports `columnar_customscan = true` for q23–q26 while `columnar_agg_routed = false`. The first
-draft of this verdict cited the broad field; that was a false-green.
+agg pushdown from a declined agg over a projection scan".
+
+The § 7.2 control proves it vacuous under the tightest possible conditions — same binary, same data, same session
+parameters, **only the GUC differing**:
+
+| | q23 | q24 | q25 | q26 |
+|---|---|---|---|---|
+| `columnar_customscan`, late-mat **on** / **off** | true / true | true / true | true / true | true / true |
+| `columnar_agg_routed`, late-mat **on** / **off** | true / **false** | true / **false** | true / **false** | true / **false** |
+
+The broad field does not move when the routing does. The first draft of this verdict cited it; that was a false-green.
 
 ## 3. Correctness — which oracle proves what
 
@@ -84,14 +95,33 @@ The two oracles above run on fixtures (20k / 2k rows). This one runs on the **re
 
 | Assertion | Measured |
 |---|---|
+| **H0 — routing precondition** (all four shapes reach `theodb_columnar_agg`, no surviving `Sort`) | **ok, 4/4** |
 | sort-key multiset, q23 / q24 / q25 / q26 | **0 / 0 / 0 / 0** |
 | full rows under a total order (key↔payload alignment) | **0** |
+| wide variant — full rows over all **105** columns | **0** |
 | distinct values of the first sort key in those 20 rows | **1** — a total tie, so the tie-break decided every row |
 | negative control (seeded divergence) | **40** |
+| script exit code | **0** |
 
-The non-vacuity line is there because it caught a draft of this very block: the first version tie-broke on
-`EventTime`, which turned out to be *unique* in its top-20 — the block passed while exercising no tie-break at all.
-`CounterID` ties completely, so the second and third keys do the work.
+Two of those rows exist because a draft of this block failed them:
+
+- **H0 is machine-checked, not printed.** It was first written as four bare `EXPLAIN`s for a human to eyeball. That
+  is not a gate: if the swap declines — which it does at stock `work_mem`, by design (§ 6) — both arms run the same
+  native plan and every block below reports 0 differences while proving nothing. H0 now `RAISE`s and, under
+  `ON_ERROR_STOP`, aborts the whole oracle. **Positive control for the gate itself:** re-run at `work_mem = 64kB` and
+  it stops at shape 1 with `M167-H0 FAILED … would pass vacuously`, executing no comparison block.
+- **The tie-break must actually tie.** The first version tie-broke on `EventTime`, which turned out *unique* in its
+  top-20 — the block passed while exercising no tie-break at all. `CounterID` ties completely (1 distinct value in
+  20 rows), so the second and third keys decide every row.
+
+**Binary provenance.** Both oracles above and the § 2 routing table were re-run **after** the final commit, against a
+postmaster restarted at `00:17:54Z` so the shipped `.so` was the one loaded. This matters: the § 7.2 control ran on
+the immediately-preceding binary (postmaster up since `23:26:20Z`, `.so` rewritten at `23:44:58Z` — PostgreSQL loads
+`shared_preload_libraries` at startup, so the rebuild did not reach those two suites). That leaves the control
+internally valid — **both** of its arms used one identical binary, which is the only property it needed — while the
+correctness evidence is pinned to the code being merged. The one behavioural difference between the two binaries is
+the `COLLPROVIDER_LIBC` requirement added to the collation predicate; this cluster reports
+`datcollate = C, datlocprovider = c`, and q25 was re-verified to still route on the final binary rather than assumed to.
 
 ## 4. What changed
 
@@ -146,18 +176,64 @@ true current size; verified: a `relpages = 0` table now declines at 64kB and rou
 - **q28 exceeds the 60 s query ceiling on this cluster** and is ERRORED in both arms, so it is the one query with no
   A/B verification. It completed in 33.64 s in `m166-clickbench-agg.json`, so calling it "pre-existing" (as the first
   draft did) is not supported; the cause on this cluster is unexplained.
+- **This box has between-run drift up to ~2× on sub-200 ms queries, measured.** The § 7.2 control exposed it: three
+  queries moved between the two arms that the GUC **cannot** touch, because none has a `Sort` node for
+  `try_swap_topk` to swap —
 
-## 7. What the first draft of this verdict got wrong
+  | Query | shape | late-mat on | late-mat off | delta |
+  |---|---|---|---|---|
+  | q29 | `SUM(ResolutionWidth), SUM(+1), …` | 0.0661 s | 0.1243 s | −46.8% |
+  | q8 | `RegionID, COUNT(DISTINCT UserID) GROUP BY` | 0.0953 s | 0.1593 s | −40.2% |
+  | q5 | `COUNT(DISTINCT SearchPhrase)` | 0.1452 s | 0.1229 s | +18.1% |
 
-Recorded because the error is more instructive than the result.
+  Within each run the three repetitions are tight and non-overlapping (q29: 0.066/0.069/0.075 vs 0.124/0.126/0.131),
+  so intra-run CV reports high confidence in a number that does not reproduce across runs — the classic
+  underestimation Georges et al. (OOPSLA'07, `papers/rigorous-perf-eval-georges-2007.pdf`) describe. **Consequence:
+  no claim below ~2× is supportable on this box from a cross-run comparison**, and the § 1 ratios (4.98×–56.18×) are
+  cited precisely because they are an order of magnitude clear of that floor. Nothing here explains *why* the box
+  drifts; it is characterized, not diagnosed.
+
+## 7. What the first two drafts of this verdict got wrong
+
+Recorded because the errors are more instructive than the result.
+
+### 7.1 — draft 1: a cross-run comparison, withdrawn for the right reason
 
 The first draft compared a "before" suite run against an "after" suite run and published **6.51× / 42.51× / 62.07× /
-41.88×**. The repo's own `docs/benchmarks/m166-clickbench-agg.json` — same box, same parameters, one day earlier,
-late-mat off — records q24 **3.0751 s**, q25 **2.7126 s**, q26 **2.9036 s** against that draft's baseline of 5.9088 /
-6.0517 / 5.9517. Geomeans were equivalent (0.40934 vs 0.36917), so it was not a slower box; only the three narrow
-Sort-bound shapes doubled. The baselines were not comparable and the ratios were not defensible.
+41.88×**. It was withdrawn because a cross-run comparison cannot, on its own, exclude build/cluster/thermal drift —
+the instrument does not license the claim. That reason still holds and the withdrawal was correct.
 
-Two further method errors, both self-caught while fixing the first:
+### 7.2 — draft 2: the right withdrawal, the wrong diagnosis
+
+Draft 2 went further and asserted *why*: that the `before` baseline was inflated, citing
+`docs/benchmarks/m166-clickbench-agg.json` (same box, same parameters, one day earlier, late-mat off) which records
+q24 **3.0751 s** / q25 **2.7126 s** / q26 **2.9036 s** against the baseline's 5.9088 / 6.0517 / 5.9517. **That
+diagnosis is falsified.**
+
+The control that settles it (`m167-artifacts/b1-latemat-off.json`): the **same binary**, the **same suite**, run
+twice back-to-back, changing only `enable_columnar_late_mat`.
+
+| | q23 | q24 | q25 | q26 | geomean (43q) |
+|---|---|---|---|---|---|
+| baseline `before-1m` (27 Jul, late-mat off) | 21.5151 | 5.9088 | 6.0517 | 5.9517 | 0.36917 |
+| control arm (28 Jul, **same binary**, late-mat **off**) | 24.0039 | 6.7435 | 6.0978 | 6.8404 | 0.36313 |
+| delta | +11.6% | +14.1% | +0.8% | +14.9% | **−1.6%** |
+
+The withdrawn baseline **reproduces**. It was never inflated. `m166` is the outlier, and this verdict does not have
+an explanation for it — stating one would repeat the same mistake at one more level of confidence.
+
+With the drift hypothesis dead, three independent instruments now agree on the effect:
+
+| Instrument | q23 | q24 | q25 | q26 |
+|---|---|---|---|---|
+| cross-run (draft 1, withdrawn as method) | 6.51× | 42.51× | 62.07× | 41.88× |
+| paired CTAS in one session (§ 1 — headline) | 4.98× | 44.78× | 56.18× | 41.67× |
+| same-binary GUC control (§ 7.2) | 7.10× | 48.51× | 63.19× | 40.81× |
+
+The headline stays the paired CTAS row: it is the only one where the toggle is the sole asymmetry *and* the k rows
+are actually materialized. The other two are corroboration, not evidence to average.
+
+### 7.3 — two method errors, both self-caught
 
 1. **A `count(*)` wrapper erased the effect.** The first paired attempt wrapped each query in
    `SELECT count(*) FROM (…)`, which lets PostgreSQL skip materializing the projected columns — exactly the cost late
