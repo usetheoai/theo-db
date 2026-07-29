@@ -1,3 +1,7 @@
+=== large-k (execução 1/1) start 2026-07-29T14:24:33+00:00 ===
+so_md5=e010375381ae7ad9069e4a38a5d6c9c6
+so_path=/root/.pgrx/18.4/pgrx-install/lib/postgresql/theodb_rs.so
+postmaster=2026-07-29 14:19:07.697502+00
 SET
 SET
 SET
@@ -267,3 +271,4 @@ INSERT 0 1
 psql:/root/theo-db/benchmarks/m168_large_k.sql:142: WARNING:  theodb_admit_decline: target_grouping_expression_or_other
 psql:/root/theo-db/benchmarks/m168_large_k.sql:142: NOTICE:  M168 LARGE-K GATE ok: a consulta ROTEIA (K0), e o streaming concorda com o plano NATIVO em k grande — seja servindo, seja caindo no fail-open. Uma linha theodb_topk_stream_fallback no log diz qual.
 DO
+=== large-k (execução 1/1) rc=0 end 2026-07-29T14:24:50+00:00 ===

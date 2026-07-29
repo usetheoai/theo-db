@@ -19,18 +19,19 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   **maior bloco decodificado de uma vez** num `SELECT *` caiu de **772 MiB para 17,9 MiB (43×)** — abaixo do `work_mem` da sessão, e não mais acima
   dele (#215, #218). O consumo total do processo é maior que esse bloco e foi medido em parte: a retenção interna
   do ordenador ficou entre 0,8 e 2,4 MB. A tabela passa a ser decodificada em partes, uma de cada vez, em vez de inteira de uma vez.
-  Resultado byte a byte idêntico ao anterior. No tempo, o `SELECT *` largo ficou **~18% mais rápido** (razão 0,817
-  em duas execuções pareadas de 6 pares, que concordam na terceira casa decimal); nas consultas de projeção
-  estreita **não há efeito detectável** — as medianas ficam entre 0,998 e 1,022, dentro da própria dispersão da
-  medição. Reversível com `theodb.enable_columnar_topk_stream = off`. Método, números por consulta e ressalvas
+  Resultado byte a byte idêntico ao anterior. **Sobre tempo de execução, esta versão não faz alegação**: a
+  máquina usada para medir compartilha CPU com outros serviços, e o efeito observado ficou da mesma ordem que a
+  variação da própria medição — quatro tentativas de medir deram respostas diferentes, e a mais recente não
+  sustenta nenhuma delas. O ganho aqui é de memória, que é contagem de bytes e não depende de cronômetro.
+  Reversível com `theodb.enable_columnar_topk_stream = off`. Método, números por consulta e ressalvas
   em `docs/benchmarks/m168-streaming-topk-verdict.md`.
 
 ### Changed
 - **Recuo automático quando o caminho novo não cabe na memória:** se o top-k colunar por partes não couber no
-  orçamento de memória da sessão, a consulta volta sozinha ao caminho anterior em vez de falhar. Medido: num
-  `SELECT *` largo com `LIMIT 200000` o recuo dispara corretamente — embora naquele caso o caminho anterior
-  também não dê conta, então a consulta falha de qualquer forma. O oposto foi medido e é mais comum: há formas
-  (projeção estreita com `LIMIT 400000`) em que o caminho **novo serve e o anterior falha**. Detalhes em
+  orçamento de memória da sessão, a consulta volta sozinha ao caminho anterior em vez de falhar. Quatro cenários foram medidos
+  procurando um caso em que o caminho novo falhe e o anterior sirva, e **nenhum foi encontrado**; o oposto sim —
+  numa projeção estreita com `LIMIT 400000` o caminho **novo serve e o anterior falha**. O recuo fica como defesa
+  contra um caso não observado, e passa a ser registrado no log do servidor sempre que acontecer. Detalhes em
   `docs/benchmarks/m168-streaming-topk-verdict.md` § 3.5.
 - **Diagnóstico:** a auditoria automática de código morto não detecta métodos Rust sem chamador dentro do próprio
   crate, então "nenhum achado" no relatório dela significa "o detector não achou", não "não há". Quatro métodos e

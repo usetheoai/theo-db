@@ -884,6 +884,13 @@ impl datafusion::execution::memory_pool::MemoryPool for PeakTrackingPool {
     fn reserved(&self) -> usize {
         datafusion::execution::memory_pool::MemoryPool::reserved(&self.inner)
     }
+    /// Encaminhado porque o default do trait devolve `Unknown` enquanto o `inner` é `Finite`. Hoje o único
+    /// consumidor em DF 54 é a listagem de config, mas o método existe para quem precisa do teto — um upgrade
+    /// que passe a usá-lo em decisão de spill faria a pool mentir em silêncio. É o que o `TrackConsumersPool`
+    /// do upstream faz (achado de review).
+    fn memory_limit(&self) -> datafusion::execution::memory_pool::MemoryLimit {
+        datafusion::execution::memory_pool::MemoryPool::memory_limit(&self.inner)
+    }
 }
 
 /// A `RecordBatchStream` that decodes one chunk-group per poll.
@@ -1150,9 +1157,12 @@ pub(super) unsafe fn run_columnar_topk(
         }) {
             Ok(batches) => return rows_from_batches(&batches, proj_cols),
             Err(e) => {
-                if super::columnar_agg::admit_trace_enabled() {
-                    pgrx::warning!("theodb_topk_stream_fallback: {e}");
-                }
+                // INCONDICIONAL. Um reviewer notou que esconder isto atrás do flag de trace neutraliza, a
+                // jusante, um guard escrito para falhar alto (`columnar partition executed twice`), e deixa o
+                // usuário sem sinal de que a consulta acabou de trocar de perfil de memória e de latência. É
+                // evento raro (uma vez por consulta, só quando a pool estoura), então o custo é zero no caminho
+                // feliz. Vai para o log do servidor, não para o cliente.
+                pgrx::log!("theodb_topk_stream_fallback: {e}");
                 // cai para o caminho eager abaixo, que é o comportamento pré-M168
             }
         }

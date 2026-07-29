@@ -3,7 +3,7 @@
 **Data:** 2026-07-29 · **Fecha:** item 2b do DoD do M167 (#215) e o falso-admit medido em #218
 **Box:** `theo-e2e-runner` (DigitalOcean, 32 GB / 8 vCPU) — NÃO a c6a.4xlarge canônica do ClickBench
 **Dados:** ClickBench `hits` / `hits_heap`, 1.000.000 linhas, 105 colunas — verificados por `count(*)`
-**Binário:** `so_md5=f98b5b4cb2fd (ver o cabeçalho de cada artefato)`
+**Binário:** `so_md5=e010375381ae… (ver o cabeçalho de cada artefato)`
 **Artefatos:** `docs/benchmarks/m168-artifacts/`
 
 ## 1. Memória — os dois braços, na mesma sessão
@@ -12,7 +12,7 @@
 dentro de uma sessão, e `benchmarks/m168_peak_summarize.py` produz a tabela a partir do log commitado. A primeira
 versão deste verdict comparava um "antes" medido num binário anterior cujo log nunca foi commitado — a razão
 principal tinha numerador não-verificável (achado de review). Agora o par é um artefato só, mesmo processo,
-mesmo binário (`peak-both-arms.log`, `so_md5=f98b5b4cb2fd9d8e1b1bf66e85f2bff5`).
+mesmo binário (`peak-both-arms.log`, `so_md5=e010375381ae…`).
 
 | Consulta | eager: batches / bytes | streaming: batches / maior batch | razão |
 |---|---|---|---|
@@ -55,65 +55,40 @@ Agora há uma `PeakTrackingPool` que delega ao `GreedyMemoryPool` e registra a *
 `grow`/`try_grow`. Medido nas quatro consultas: **`peak_reserved` entre 825.920 e 2.411.803 B** (0,8–2,4 MiB)
 contra teto de 201.326.592 B. A retenção do TopK existe, é real, e é pequena para estas formas (k=10).
 
-Somada ao maior batch (17,9 MiB), a ocupação instantânea fica em ~21 MiB — duas ordens de grandeza abaixo do
-orçamento de 512 MiB do guard. **Agora isso é medição, não aritmética.**
+Somar os dois (17,9 + 2,4 ≈ 21 MiB) seria juntar instrumentos que **nunca amostram o mesmo instante**, então esse
+total continua sendo o item não medido do § 6, não um resultado. E `peak_reserved` é amostrado nos pontos de
+reserva, **depois** da compactação do `TopK` — é limite inferior da retenção visível à pool, não o pico contínuo.
 
 Consequência para a #218, na forma que o instrumento sustenta: o falso-admit era o decode (772 MiB) superar o
 orçamento do guard (512 MiB). O maior batch instrumentado caiu para 17,9 MiB, e nada fica reservado ao fim. O
 **footprint total instantâneo** do caminho streaming não foi medido, e é o termo que falta para fechar a #218 com
 todo o rigor.
 
-## 2. Throughput — e as DUAS conclusões minhas que o harness produziu, ambas erradas
+## 2. Throughput — RETIRADO. Esta seção mudou de resposta quatro vezes e a última a retirou
 
-Esta seção mudou de resposta duas vezes, e o registro das duas é mais útil que o número final.
+O registro das quatro é mais útil que qualquer número que eu publicasse aqui.
 
-**Primeira versão:** "as quatro consultas ficaram mais rápidas". Falso — o harness declarava alternar os braços e
-não alternava; rodava eager-depois-stream nas 20 iterações, e o drift monotônico era sempre pago pelo braço que ia
-primeiro, que era sempre o eager (achado de review).
+| # | O que eu afirmei | Por que caiu |
+|---|---|---|
+| 1 | "as quatro consultas ficaram mais rápidas" | o harness declarava alternar os braços e **não alternava** — o drift monotônico era sempre pago pelo braço que ia primeiro, que era sempre o eager |
+| 2 | "o q24 regride ~8%" | a alternância foi implementada, mas com **5 pares**: com ordem alternada, número ímpar não contrabalanceia — um braço come uma posição-primeira a mais, incluindo o par 1, o mais frio |
+| 3 | "o q23 é ~18% mais rápido; as estreitas sem efeito" | com 6 pares deu 0,817 e 0,818, faixas sem sobreposição. Parecia sólido |
+| 4 | **retirado** | re-executado no binário final: **0,808 e 0,866, faixas se sobrepondo**. O summarizer classifica como "dentro da dispersão" |
 
-**Segunda versão:** "o q24 regride ~8%". Também falso — a alternância foi implementada, mas com **5 pares**, e com
-ordem alternada um número ímpar não contrabalanceia: um braço come uma posição-primeira a mais, incluindo o par 1,
-o mais frio (achado de review).
+A dispersão intra-braço do eager subiu de 1,30× para 1,39× entre as duas coletas. **O efeito que eu media é da
+mesma ordem que a dispersão da box**, e ela não é estável ao longo de uma sessão de trabalho — esta box hospeda o
+runner de CI e três serviços, e eu mesmo a carreguei ao longo deste milestone.
 
-**Terceira, com 6 pares** (`benchmarks/m168_stream_ab.sql`, tabela produzida por
-`benchmarks/m168_ab_summarize.py` a partir de `paired-ab-stream.log`, nunca transcrita à mão):
+**Conclusão honesta: este ambiente não sustenta uma alegação de throughput para o M168.** A direção observada foi
+consistentemente favorável ao streaming no q23 (0,808–0,866 em quatro execuções), mas "consistentemente
+favorável" com faixas que se sobrepõem não é um número publicável, e três das quatro versões anteriores desta
+seção foram artefato de desenho ou de ambiente.
 
-| Consulta | razões (2 execuções) | mediana | dispersão eager | leitura |
-|---|---|---|---|---|
-| q23 | 0,817 · 0,818 | **0,817** | 1,30× | **efeito real** — 12/12 pares sem sobreposição nas duas sessões. Mas veja a ressalva de regime abaixo: a mediana sobre 6 pares mistura aquecimento e regime |
-| q24 | 1,001 · 1,036 | 1,018 | 1,35× | dentro da dispersão |
-| q25 | 1,025 · 0,971 | 0,998 | 1,21× | dentro da dispersão |
-| q26 | 1,000 · 1,045 | 1,022 | 1,20× | dentro da dispersão |
+O que **não** é afetado: a alegação de memória (§ 1) é contagem determinística de bytes, não cronometragem — ela
+reproduz idêntica em todas as coletas. E os gates de correção (§ 3) são comparações de resultado, não de tempo.
 
-**A regressão que a segunda versão entregou não se estabelece com o desenho corrigido.**
-
-**E a magnitude do q23 depende do regime — a mediana sobre 6 pares cai na ponta otimista.** As razões por par
-sobem monotonicamente nas duas sessões (run 1: 0,686 · 0,742 · 0,785 · 0,860 · 0,828 · 0,832), porque o braço
-eager continua aquecendo ao longo da execução (cai 21%, de 5147 para 4087 ms) enquanto o stream já está estável
-(cai 4%). Em **regime** (pares 4–6) a mediana é 0,835 e 0,876 nas duas sessões.
-
-O honesto: **o q23 é 12–18% mais rápido conforme o aquecimento, ~15% em regime.** A *existência* e a *direção* do
-ganho não estão em dúvida — 12 de 12 pares sem sobreposição, em duas sessões independentes; só a magnitude de um
-número único é que seria enganosa.
-
-Nas três consultas estreitas **não há efeito detectável**. Com a ressalva que um nulo deve declarar: este desenho
-descarta efeitos da ordem da dispersão intra-braço (1,20–1,35×), **não** de poucos pontos percentuais. As seis
-razões medianas dão 1,013 — uma inclinação fraca para o streaming ser ~1% mais lento, fisicamente plausível (100
-batches contra 1 tem overhead por batch). O dado diz "não há efeito maior que a dispersão", não "não há efeito".
-
-**Duas sessões bastam para o q23 e não para os nulos.** Cada execução é uma sessão `psql` separada, com seu próprio
-arranque frio — a run 2 começa mais lenta do que a run 1 terminou. Para 12/12 sem sobreposição isso é irrelevante;
-para afirmar um nulo, `n = 2` não separa variância entre-sessões do tratamento.
-
-O summarizer **recusa** publicar tabela de execução malformada: exige as 4 consultas, contagem de pares igual e
-**par**, um único `so_md5` entre execuções, e o bloco per-pair presente (é ele que sustenta qualquer alegação de
-faixa — a primeira versão citava faixas de um bloco que fora filtrado do log commitado).
-
-### O piso de 1,88× do M167 NÃO se aplica aqui
-
-Uma versão anterior citava-o como gatilho de honest-negative. Errado, e generoso na direção errada: aquele piso é
-**entre execuções**, e o próprio verdict do M167 chama comparação cross-run de erro de categoria. O piso certo é a
-dispersão pareada por consulta, que a tabela acima traz — é contra ela que o q23 se destaca e as outras três não.
+Medir throughput deste milestone com rigor exige uma box dedicada e ociosa. Fica como trabalho declarado, não
+como número arredondado.
 
 ## 3. Correção — e o defeito que só a revisão pegou
 
@@ -156,7 +131,7 @@ qualquer um pode reintroduzir o defeito removendo a guarda de `open_streaming_so
 A guarda virou `has_unflushed_pending`, chamável em vez de copiável, e o streaming declina para o eager quando ela
 é verdadeira — fail-closed.
 
-### Estado dos gates no binário final (`so_md5=f98b5b4cb2fd9d8e1b1bf66e85f2bff5`)
+### Estado dos gates no binário final (`so_md5=e010375381ae…`)
 
 | Gate | Resultado |
 |---|---|
@@ -166,41 +141,47 @@ A guarda virou `has_unflushed_pending`, chamável em vez de copiável, e o strea
 | 4 controles positivos (H0, gate final, gate EC, gate de pendentes) | todos abortam |
 | Memória, dois braços | eager 1 batch / streaming 100, sonda instrumentada |
 
-## 3.5. O fail-open, e a janela que não existe (mas a inversa existe)
+## 3.5. A busca pela janela do fail-open
 
-O caminho streaming tem uma pool de `2×work_mem + 64MB`, **constante em `k`**, enquanto a retenção do `TopK` do
-DataFusion cresce com ele. Uma revisão apontou que, propagando o erro com `?`, uma consulta que o caminho eager
-servia passaria a **errar por default**, com saída só por uma GUC que o usuário não sabe existir.
-`run_columnar_topk` passou a cair no eager em vez de propagar.
+O caminho streaming tem pool de `2×work_mem + 64MB`, **constante em `k` e na largura**, enquanto o eager usa
+`max(work_mem, 2×batch) + 64MB`, que **escala com o dado**. Uma revisão apontou que, propagando o erro com `?`,
+uma consulta que o eager servia passaria a errar por default. `run_columnar_topk` passou a cair no eager.
 
-Fui medir a janela. Ela **não foi encontrada** — e o que encontrei foi o contrário.
+A pergunta empírica: **existe um `k` em que o eager serve e o streaming não?** Driver commitado
+(`benchmarks/m168_window_probe.sql`, `m168_inversion.sql`, `m168_inversion_narrow.sql`), artefatos em
+`m168-artifacts/`, todos com `so_md5=e010375381ae…`.
 
-| Medição (`work_mem`, forma, `k`) | streaming | eager |
+| Cenário | streaming | eager |
 |---|---|---|
-| 32MB · `SELECT *` 105 col · k=200000 | estoura (`TopK[0] 121,7 MB / pool 128,0 MB`), fail-open dispara | **também estoura** (`1545,4 MB / 1608,5 MB`) |
-| 32MB · idem · k=100000 | serve | estoura **com o mesmo número**, 1545,4 MB — independente de `k` |
-| 32MB · 2 col · **k=400000** | **serve** (400.000 linhas, batches de ~250 KB) | **falha** (`TopK[0] 100,3 MB`) |
-| 64MB · 5 col · k=50000 | serve | falha (`117,2 MB`) |
+| 32MB · `SELECT *` 105 col · k=200000 | estoura | **também estoura** |
+| 32MB · `SELECT *` 105 col · k=100000 | serve | **estoura** |
+| 32MB · 2 col · k=400000 | **serve** (`peak_reserved` **43.240.056 B**, pool 134.217.728 B) | **falha** (`TopK[0] with 100.3 MB already allocated`, `pool_size: 102.9 MB`) |
+| **32MB · `SELECT *` 105 col · k=1000** (a banda que um reviewer previu) | **serve** (`peak_reserved` **9.293.548 B**) | **serve** (1000 linhas) |
 
-**Três conclusões, todas medidas:**
+**A janela não foi encontrada — inclusive na banda prevista.** Um revisor derivou dos números da § 1 que
+`SELECT *` com `k` pequeno deveria quebrar o streaming: pool fixa de 128 MB contra até 100 × 18,75 MB retidos. A
+predição foi testada e **falhou**: o `peak_reserved` medido é **9,3 MB**, não 1875 MB, porque o `TopK` do
+DataFusion **compacta** (`maybe_compact`) e retém as k linhas sobreviventes, não os batches inteiros. A aritmética
+de "× número de batches" não vale — e só se soube disso medindo.
 
-1. **Um top-k de `SELECT *` sem filtro sobre 1M×105 colunas não é servível pelo caminho eager, com `k` algum** — o
-   `TopK` dele segura o batch inteiro de 772 MiB e precisa de outro tanto. Limitação **pré-existente**, não
-   introduzida pelo M168. E o guard do ADR-4 **admite** essa consulta assim mesmo (est. 228 MiB contra orçamento de
-   256 MiB), o que é mais uma instância da subestimação de #218.
-2. **A janela que o fail-open cobre não foi encontrada.** Não achei nenhum `k` em que o eager sirva e o streaming
-   não. Ele fica como defesa contra um caso não medido — e isto é dito assim, em vez de vendido como validação.
-3. **A janela inversa existe e é larga.** Com projeção estreita e `k = 400000`, o streaming serve e o eager falha.
-   O `TopK` do streaming retém batches de ~250 KB; o do eager segura um batch de 40 MB inteiro.
+**A janela inversa existe.** Com projeção estreita e `k = 400000`, o streaming serve e o eager falha. Mas a
+comparação tem uma ressalva que uma versão anterior omitia: **os dois braços correm sob orçamentos diferentes**
+(128 MB contra 102,9 MB), porque as fórmulas das pools diferem. A conclusão qualitativa sobrevive — 43,2 MB
+caberiam nos dois orçamentos, e 119,8 MB não caberiam em nenhum — mas atribuir todo o delta à retenção
+confundiria duas variáveis.
 
-`benchmarks/m168_large_k.sql` roda no regime em que ambos servem, com duas disciplinas que a primeira versão não
-tinha: **asserção de roteamento** (K0 — sem ela, os dois braços rodavam o plano nativo e `mism = 0` comparava
-nativo com nativo, que foi exatamente o que aconteceu e o artefato provava) e **ordem total** na chave (uma versão
-intermediária comparou linhas inteiras sob chave com empates e acusou 2 divergências que eram indefinição de
-desempate, não defeito — a armadilha que o oráculo do M167 já documentava).
+E os números da retenção passaram a ser **os medidos**, não estimativas de tamanho de batch. Uma versão anterior
+dizia "o streaming retém ~250 KB e o eager segura 40 MB" (≈160×) — os 250 KB eram o tamanho de *um batch*, não a
+retenção, e os 40 MB não estavam em artefato algum. Medido: **43,2 MB contra ≥119,8 MB, ou ~2,8×**. Foi a
+`PeakTrackingPool` que produziu esse número, e a conclusão que mais dependia dele era justamente a que não o usava.
 
-O braço de referência é o **plano nativo do PostgreSQL**, não o eager: pela conclusão 1, o eager não pode ser
-oráculo destas formas.
+**A folga não é constante.** Em k=10 é ~21 MiB contra 512 MiB; em k=400000 é 43,2 MB contra 128 MB — 34% da pool.
+Dizer "duas ordens de grandeza" vale para o primeiro regime, não para o segundo.
+
+**O fail-open fica**, e o que ele é fica dito: defesa contra um caso que quatro cenários não encontraram, não
+resposta a uma janela medida. Ele agora registra no log do servidor **incondicionalmente** — escondê-lo atrás do
+flag de trace neutralizava, a jusante, um guard escrito para falhar alto, e deixava o usuário sem sinal de que a
+consulta trocou de perfil de memória.
 
 ## 4. O `unsafe impl Send` — e por que ele não é um comentário
 

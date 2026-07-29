@@ -52,7 +52,9 @@ def _reject_fallback(path, problems):
     """Um braço 'streaming' que degradou para o eager em silêncio alimentaria a tabela publicada como se fosse
     streaming. Agora que o fail-open existe, o log tem de ser rejeitado se ele disparou."""
     for line in open(path, errors="replace"):
-        if "theodb_topk_stream_fallback" in line:
+        # Ancorado no prefixo do servidor: um match por substring casaria com a própria prosa dos
+        # gates, que menciona o nome do evento (achado de review).
+        if "LOG:  theodb_topk_stream_fallback" in line or "WARNING:  theodb_topk_stream_fallback" in line:
             problems.append("log contém theodb_topk_stream_fallback: um braço degradou para o eager em silêncio")
             return
 

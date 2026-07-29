@@ -1,0 +1,367 @@
+=== window-probe (execução 1/1) start 2026-07-29T14:24:50+00:00 ===
+so_md5=e010375381ae7ad9069e4a38a5d6c9c6
+so_path=/root/.pgrx/18.4/pgrx-install/lib/postgresql/theodb_rs.so
+postmaster=2026-07-29 14:19:07.697502+00
+SET
+SET
+SET
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:20: NOTICE:  table "win_res" does not exist, skipping
+DROP TABLE
+CREATE TABLE
+################ CENÁRIO 1: work_mem=32MB · SELECT * (105 col) · k=200000 ################
+SET
+SET
+--- braço STREAMING ---
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:27: NOTICE:  table "w1a" does not exist, skipping
+DROP TABLE
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:28: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:28: WARNING:  theodb_admit_decline: swap_topk_admitted
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:28: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:28: WARNING:  theodb_admit_decline: topk_parent_not_limit
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:28: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8953072 probe=1
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:28: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8331504
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:28: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8606960
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:28: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=9520368
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:28: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8605936
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:28: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7796976
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:28: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7798000
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:28: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7540976
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:28: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7803120
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:28: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7595248
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:28: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7365872
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:28: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8596720
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:28: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8703216
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:28: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8504560
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:28: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8534256
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:28: WARNING:  theodb_topk_pool: peak_reserved=129738560 reserved_at_end=0 pool_limit=134217728
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:28: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:28: WARNING:  theodb_admit_decline: topk_parent_not_limit
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:28: WARNING:  theodb_decode_batch: rows=1000000 bytes=809738352 work_mem_bytes=33554432
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:28: ERROR:  df_executor: DataFusion: Resources exhausted: Failed to allocate additional 773.0 MB for TopK[0] with 1545.8 MB already allocated for this reservation - 62.7 MB remain available for the total memory pool: greedy(used: 1545.8 MB, pool_size: 1608.5 MB)
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:29: ERROR:  relation "w1a" does not exist
+LINE 1: ...s SELECT 'c1_wide_k200k', 'stream', count(*), NULL FROM w1a;
+                                                                   ^
+SET
+--- braço EAGER ---
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:32: NOTICE:  table "w1b" does not exist, skipping
+DROP TABLE
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:33: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:33: WARNING:  theodb_admit_decline: swap_topk_admitted
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:33: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:33: WARNING:  theodb_admit_decline: topk_parent_not_limit
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:33: WARNING:  theodb_decode_batch: rows=1000000 bytes=809738352 work_mem_bytes=33554432
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:33: ERROR:  df_executor: DataFusion: Resources exhausted: Failed to allocate additional 773.0 MB for TopK[0] with 1545.8 MB already allocated for this reservation - 62.7 MB remain available for the total memory pool: greedy(used: 1545.8 MB, pool_size: 1608.5 MB)
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:34: ERROR:  relation "w1b" does not exist
+LINE 1: ...es SELECT 'c1_wide_k200k', 'eager', count(*), NULL FROM w1b;
+                                                                   ^
+################ CENÁRIO 2: work_mem=32MB · SELECT * (105 col) · k=100000 ################
+SET
+--- braço STREAMING ---
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:39: NOTICE:  table "w2a" does not exist, skipping
+DROP TABLE
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:40: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:40: WARNING:  theodb_admit_decline: swap_topk_admitted
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:40: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:40: WARNING:  theodb_admit_decline: topk_parent_not_limit
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:40: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8953072 probe=1
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:40: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8331504
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:40: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8606960
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:40: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=9520368
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:40: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8605936
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:40: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7796976
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:40: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7798000
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:40: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7540976
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:40: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7803120
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:40: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7595248
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:40: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7365872
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:40: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8596720
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:40: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8703216
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:40: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8504560
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:40: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8534256
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:40: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7548144
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:40: WARNING:  theodb_topk_pool: peak_reserved=132100024 reserved_at_end=0 pool_limit=134217728
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:40: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:40: WARNING:  theodb_admit_decline: topk_parent_not_limit
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:40: WARNING:  theodb_decode_batch: rows=1000000 bytes=809738352 work_mem_bytes=33554432
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:40: ERROR:  df_executor: DataFusion: Resources exhausted: Failed to allocate additional 773.0 MB for TopK[0] with 1545.8 MB already allocated for this reservation - 62.7 MB remain available for the total memory pool: greedy(used: 1545.8 MB, pool_size: 1608.5 MB)
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:41: ERROR:  relation "w2a" does not exist
+LINE 1: ...s SELECT 'c2_wide_k100k', 'stream', count(*), NULL FROM w2a;
+                                                                   ^
+SET
+--- braço EAGER ---
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:44: NOTICE:  table "w2b" does not exist, skipping
+DROP TABLE
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:45: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:45: WARNING:  theodb_admit_decline: swap_topk_admitted
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:45: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:45: WARNING:  theodb_admit_decline: topk_parent_not_limit
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:45: WARNING:  theodb_decode_batch: rows=1000000 bytes=809738352 work_mem_bytes=33554432
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:45: ERROR:  df_executor: DataFusion: Resources exhausted: Failed to allocate additional 773.0 MB for TopK[0] with 1545.8 MB already allocated for this reservation - 62.7 MB remain available for the total memory pool: greedy(used: 1545.8 MB, pool_size: 1608.5 MB)
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:46: ERROR:  relation "w2b" does not exist
+LINE 1: ...es SELECT 'c2_wide_k100k', 'eager', count(*), NULL FROM w2b;
+                                                                   ^
+################ CENÁRIO 3: work_mem=32MB · 2 colunas · k=400000 (a janela INVERSA) ################
+SET
+--- braço STREAMING ---
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:51: NOTICE:  table "w3a" does not exist, skipping
+DROP TABLE
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_admit_decline: swap_topk_admitted
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_admit_decline: topk_parent_not_limit
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756 probe=1
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=136604
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=136604
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=136604
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=136604
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=136604
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=136604
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=644508
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=644508
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=644508
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=128412
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=136604
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:52: WARNING:  theodb_topk_pool: peak_reserved=50064565 reserved_at_end=0 pool_limit=134217728
+SELECT 400000
+INSERT 0 1
+SET
+--- braço EAGER ---
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:56: NOTICE:  table "w3b" does not exist, skipping
+DROP TABLE
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:57: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:57: WARNING:  theodb_admit_decline: swap_topk_admitted
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:57: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:57: WARNING:  theodb_admit_decline: topk_parent_not_limit
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:57: WARNING:  theodb_decode_batch: rows=1000000 bytes=20388828 work_mem_bytes=33554432
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:57: ERROR:  df_executor: DataFusion: Resources exhausted: Failed to allocate additional 19.6 MB for TopK[0] with 101.1 MB already allocated for this reservation - 1861.2 KB remain available for the total memory pool: greedy(used: 101.1 MB, pool_size: 102.9 MB)
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:58: ERROR:  relation "w3b" does not exist
+LINE 1: ... SELECT 'c3_narrow_k400k', 'eager', count(*), NULL FROM w3b;
+                                                                   ^
+################ CENÁRIO 4: work_mem=64MB · 5 colunas · k=50000 ################
+SET
+SET
+--- braço STREAMING ---
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:64: NOTICE:  table "w4a" does not exist, skipping
+DROP TABLE
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_admit_decline: swap_topk_admitted
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_admit_decline: topk_parent_not_limit
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044 probe=1
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=844796
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=844796
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=844796
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=328700
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:66: WARNING:  theodb_topk_pool: peak_reserved=9800260 reserved_at_end=0 pool_limit=201326592
+SELECT 50000
+INSERT 0 1
+SET
+--- braço EAGER ---
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:70: NOTICE:  table "w4b" does not exist, skipping
+DROP TABLE
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:72: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:72: WARNING:  theodb_admit_decline: swap_topk_admitted
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:72: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:72: WARNING:  theodb_admit_decline: topk_parent_not_limit
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:72: WARNING:  theodb_decode_batch: rows=1000000 bytes=40389116 work_mem_bytes=67108864
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:72: ERROR:  df_executor: DataFusion: Resources exhausted: Failed to allocate additional 38.7 MB for TopK[0] with 117.7 MB already allocated for this reservation - 23.3 MB remain available for the total memory pool: greedy(used: 117.7 MB, pool_size: 141.0 MB)
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:73: ERROR:  relation "w4b" does not exist
+LINE 1: ..._res SELECT 'c4_med_k50k', 'eager', count(*), NULL FROM w4b;
+                                                                   ^
+################ RESUMO — uma linha ausente significa que aquele braço ESTOUROU ################
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:76: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_window_probe.sql:76: WARNING:  theodb_admit_decline: topk_parent_not_limit
+     cenario     | braco  | linhas 
+-----------------+--------+--------
+ c3_narrow_k400k | stream | 400000
+ c4_med_k50k     | stream |  50000
+(2 rows)
+
+
+A janela do fail-open existiria num cenário com linha para "eager" e SEM linha para "stream".
+A janela inversa é um cenário com linha para "stream" e SEM linha para "eager".
+DROP TABLE
+=== window-probe (execução 1/1) rc=0 end 2026-07-29T14:25:15+00:00 ===
