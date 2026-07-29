@@ -43,6 +43,24 @@ impl Drop for HeldInterrupts {
     }
 }
 
+/// Abre uma janela de interrupção no meio de um `HeldInterrupts` e a fecha de novo.
+///
+/// O hold existe para que uma interrupção não caia dentro do executor do DataFusion, que não tem nada a ver com a
+/// máquina de erro do PostgreSQL. Mas com o M168 ele passou a cobrir a leitura de TODAS as páginas — antes o
+/// decode acontecia fora dele. Sem um safe-point, um scan de 100M linhas ignora Ctrl-C, `statement_timeout` e
+/// `pg_terminate_backend` do começo ao fim (achado de review).
+///
+/// A fronteira de chunk-group é o lugar certo: nenhum estado do DataFusion está a meio caminho, e um longjmp
+/// daqui vira panic pelo caminho que a revisão de pgrx traçou e verificou limpo (o `HeldInterrupts` é RAII e é
+/// liberado no unwind).
+///
+/// SAFETY: só pode ser chamada de dentro de um `HeldInterrupts` vivo, na thread do backend.
+unsafe fn interrupt_safepoint() {
+    pg_sys::InterruptHoldoffCount -= 1;
+    pgrx::check_for_interrupts!();
+    pg_sys::InterruptHoldoffCount += 1;
+}
+
 /// Map the decoded columnar columns (name, atttypid, per-row stored bytes) to an Arrow schema + arrays. The stored
 /// bytes are the codec encoding (fixed: attlen LE bytes; varlena: logical payload). Builtin type OIDs (pg_type.dat,
 /// ABI-stable) drive the Arrow `DataType`.
@@ -805,6 +823,13 @@ impl futures::Stream for ChunkGroupBatchStream {
         if self.done {
             return Poll::Ready(None);
         }
+        // O hold de interrupções agora envolve TODA a execução do plano, então sem isto um scan de 100M linhas
+        // ignora Ctrl-C, `statement_timeout` e `pg_terminate_backend` do início ao fim. A fronteira de
+        // chunk-group é exatamente o "per-batch interrupt safe-point" que o cabeçalho deste módulo promete —
+        // antes do M168 ela não existia porque não havia batches. Achado de review.
+        unsafe {
+            interrupt_safepoint();
+        }
         let preds = std::mem::take(&mut self.predicates);
         let skip = self.skip;
         let stepped = unsafe { self.inner.next(&preds, skip) };
@@ -867,8 +892,10 @@ impl std::fmt::Debug for ColumnarPartition {
     }
 }
 
-unsafe impl Send for ColumnarPartition {}
-unsafe impl Sync for ColumnarPartition {}
+// Sem `unsafe impl` aqui de propósito: `SchemaRef` é Send+Sync e `Mutex<T>` é Send+Sync sempre que `T: Send`, o
+// que o impl de `ChunkGroupBatchStream` já fornece. Um `unsafe impl` nesta struct não compraria nada hoje e
+// abençoaria em silêncio qualquer campo não-Send acrescentado depois — trocando um erro de compilação por UB
+// (achado de review). A única bênção manual do módulo fica onde o ponteiro cru de fato está.
 
 impl datafusion::physical_plan::streaming::PartitionStream for ColumnarPartition {
     fn schema(&self) -> &SchemaRef {
@@ -930,6 +957,15 @@ unsafe fn open_streaming_source(
     if proj.is_empty() {
         proj.push(0);
     }
+    // FAIL-CLOSED: a scan planned from `read_visible_stripes` alone cannot see rows this transaction wrote but has
+    // not flushed into a stripe. `decode_columns_v2` guards on exactly this and falls back to the cell path; the
+    // streaming planner was extracted from BELOW that guard and inherited none of it, so a mixed state
+    // (`BEGIN; INSERT; SELECT … ORDER BY … LIMIT` over a table that already has stripes) silently lost the new
+    // rows. Declining here hands the query to the eager path, which handles it correctly. Found in review — the
+    // ClickBench oracles cannot reach this shape, because they bulk-load and then only read.
+    if super::columnar::has_unflushed_pending(rel) {
+        return Ok(None);
+    }
     let plan = super::columnar::plan_columnar_scan(rel, Some(&proj))?;
     let mut inner = super::columnar::ColumnarChunkStream::new(rel, plan);
     // Probe: the schema has to be exact before DataFusion executes, and only decoded data reveals it.
@@ -941,6 +977,16 @@ unsafe fn open_streaming_source(
     let schema: SchemaRef = Arc::new(sc);
     let probe = RecordBatch::try_new(schema.clone(), arrays)
         .map_err(|e| format!("df_executor: arrow batch: {e}"))?;
+    // The probe IS a chunk-group, so it must be traced like every other one. Without this the instrumented count
+    // was 99 of 100 (CHUNK_GROUP_ROWS = 10_000, so 1M rows = 100 groups) and the reported maximum was a maximum
+    // over 99 — the probe could have been the largest and nobody would know. Review finding, M168.
+    if super::columnar_agg::admit_trace_enabled() {
+        pgrx::warning!(
+            "theodb_decode_batch_stream: rows={} bytes={} probe=1",
+            probe.num_rows(),
+            probe.get_array_memory_size()
+        );
+    }
     Ok(Some(Arc::new(ColumnarPartition {
         schema: schema.clone(),
         state: std::sync::Mutex::new(Some(ChunkGroupBatchStream {
@@ -997,7 +1043,7 @@ pub(super) unsafe fn run_columnar_topk(
             };
             df.sort(order_stream)?.limit(0, Some(k))
         })?;
-        return rows_from_batches(&batches, proj_cols, k);
+        return rows_from_batches(&batches, proj_cols);
     }
 
     let batch =
@@ -1012,7 +1058,7 @@ pub(super) unsafe fn run_columnar_topk(
         df.sort(order_by)?.limit(0, Some(k))
     })?;
 
-    rows_from_batches(&batches, proj_cols, k)
+    rows_from_batches(&batches, proj_cols)
 }
 
 /// Emit the surviving rows: one Datum per output column (in target order), located in the result batch by NAME
@@ -1040,7 +1086,11 @@ where
         .build()
         .map_err(|e| format!("df_executor: tokio runtime: {e}"))?;
     let work_mem_bytes = (pg_sys::work_mem.max(64) as usize) * 1024;
-    let pool_bytes = work_mem_bytes + 64 * 1024 * 1024;
+    // O caminho eager dimensionava `max(work_mem, 2*batch) + 64MB`. Aqui não há batch gigante — esse é o ponto —
+    // mas o TopK ainda retém k linhas, e o guard do M167 limita bytes FÍSICOS (comprimidos), não a pegada Arrow.
+    // Dimensionar só por `work_mem` fazia um top-k largo com k grande, que o caminho eager servia, falhar com
+    // "Resources exhausted" (achado de review). O múltiplo cobre a retenção do TopK sem reintroduzir O(N).
+    let pool_bytes = work_mem_bytes.saturating_mul(2) + 64 * 1024 * 1024;
     let schema = datafusion::physical_plan::streaming::PartitionStream::schema(part.as_ref()).clone();
     let held = HeldInterrupts::hold();
     let out: Result<Vec<RecordBatch>, DataFusionError> = rt.block_on(async move {
@@ -1069,7 +1119,6 @@ where
 unsafe fn rows_from_batches(
     batches: &[RecordBatch],
     proj_cols: &[(String, u32)],
-    _k: usize,
 ) -> Result<Vec<Vec<(pg_sys::Datum, bool)>>, String> {
     let mut rows: Vec<Vec<(pg_sys::Datum, bool)>> = Vec::new();
     for b in batches {

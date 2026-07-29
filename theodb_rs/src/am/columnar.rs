@@ -951,6 +951,18 @@ pub(crate) struct ScanPlan {
     natts: usize,
 }
 
+/// Does this relation have rows written by the current transaction that are not yet flushed into a stripe?
+///
+/// `decode_columns_v2` checks this FIRST and falls back to the legacy cell path when true, because a scan built
+/// only from `read_visible_stripes` cannot see them. Any OTHER caller that plans a scan from stripes alone owes
+/// the same check — M168 extracted `plan_columnar_scan` from the middle of that function and left the guard
+/// behind at the top, which made a streamed `BEGIN; INSERT; SELECT … ORDER BY … LIMIT` silently miss its own
+/// transaction's writes. Exposed here so the guard is callable instead of copyable.
+pub(crate) unsafe fn has_unflushed_pending(rel: pg_sys::Relation) -> bool {
+    let oid = (*rel).rd_id.to_u32();
+    WRITE_STATES.with(|w| w.borrow().get(&oid).is_some_and(|p| !p.rows.is_empty()))
+}
+
 /// Pass 1: plan the scan without decoding a single value chunk.
 pub(crate) unsafe fn plan_columnar_scan(
     rel: pg_sys::Relation,
@@ -1165,9 +1177,7 @@ pub(crate) unsafe fn decode_columns_v2(
 
     // Same-xact pending rows force the whole result onto the legacy cell path (fail-safe: merging FixedRaw bytes with
     // pending cell rows is out of M160 scope — pending is empty for a read-only benchmark query, the measured regime).
-    let oid = (*rel).rd_id.to_u32();
-    let has_pending = WRITE_STATES.with(|w| w.borrow().get(&oid).is_some_and(|p| !p.rows.is_empty()));
-    if has_pending {
+    if has_unflushed_pending(rel) {
         return Ok(decode_columns(rel, projection, predicates, skip)?
             .into_iter()
             .map(|(n, t, v)| (n, t, DecodedColumn::Cells(v)))

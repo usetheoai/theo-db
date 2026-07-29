@@ -5,7 +5,10 @@
 -- a throughput claim, whatever it reports — so `theodb.enable_columnar_topk_stream` exists precisely to make the
 -- toggle the only asymmetry, exactly as `enable_columnar_late_mat` did for the M167 headline.
 --
--- The arms alternate within each pair so any monotonic drift (cache warming, thermal) hits both sides equally.
+-- OS BRAÇOS ALTERNAM DE VERDADE. A primeira versão deste arquivo trazia esta mesma frase enquanto o código rodava
+-- SEMPRE eager-depois-stream nas 20 iterações (achado de review). O drift é grande e monotônico — o q23 eager caiu
+-- 6008 -> 3977 ms ao longo dos 5 pares, 1,51x — e sempre era pago pelo braço que ia primeiro. Agora a ordem
+-- inverte a cada par, então o efeito de ordem cancela em vez de se somar a um dos lados.
 -- CTAS materializes the k surviving rows: a `count(*)` wrapper lets PostgreSQL skip forming them, which erased the
 -- effect entirely in a M167 draft (verdict § 7.3).
 \set ON_ERROR_STOP on
@@ -29,20 +32,24 @@ DECLARE
     $q$SELECT SearchPhrase FROM hits WHERE SearchPhrase <> '' ORDER BY EventTime, SearchPhrase LIMIT 10$q$
   ];
   qn text[] := ARRAY['q23','q24','q25','q26'];
+  modes text[];
+  m text;
 BEGIN
   FOR i IN 1..5 LOOP
     FOR j IN 1..4 LOOP
-      SET theodb.enable_columnar_topk_stream = off;
-      t0 := clock_timestamp();
-      EXECUTE 'CREATE TEMP TABLE _ab_t AS ' || qs[j];
-      INSERT INTO ab_res VALUES (i, qn[j], 'eager', extract(epoch from clock_timestamp()-t0)*1000);
-      EXECUTE 'DROP TABLE _ab_t';
-
-      SET theodb.enable_columnar_topk_stream = on;
-      t0 := clock_timestamp();
-      EXECUTE 'CREATE TEMP TABLE _ab_t AS ' || qs[j];
-      INSERT INTO ab_res VALUES (i, qn[j], 'stream', extract(epoch from clock_timestamp()-t0)*1000);
-      EXECUTE 'DROP TABLE _ab_t';
+      -- Ordem invertida em pares alternados: nos ímpares eager vai primeiro, nos pares stream vai primeiro.
+      IF i % 2 = 1 THEN
+        modes := ARRAY['eager','stream'];
+      ELSE
+        modes := ARRAY['stream','eager'];
+      END IF;
+      FOREACH m IN ARRAY modes LOOP
+        EXECUTE format('SET theodb.enable_columnar_topk_stream = %s', CASE WHEN m='stream' THEN 'on' ELSE 'off' END);
+        t0 := clock_timestamp();
+        EXECUTE 'CREATE TEMP TABLE _ab_t AS ' || qs[j];
+        INSERT INTO ab_res VALUES (i, qn[j], m, extract(epoch from clock_timestamp()-t0)*1000);
+        EXECUTE 'DROP TABLE _ab_t';
+      END LOOP;
     END LOOP;
   END LOOP;
 END

@@ -1,27 +1,20 @@
-so_md5=facf2881fd8ebbbf3c486cf9333b444e
-SET
-SET
-SET
-SET
-psql:/root/theo-db/benchmarks/m168_stream_ab.sql:17: NOTICE:  table "ab_res" does not exist, skipping
-DROP TABLE
-CREATE TABLE
-DO
+########## execução 1 ##########
+so_md5=0c90ef7d6ef385df81d798cc070b9daa
 ### M168 paired A/B — median of 5 pairs per query (ratio > 1 = streaming is SLOWER)
+psql:/root/theo-db/benchmarks/m168_stream_ab.sql:65: WARNING:  theodb_admit_decline: group_expr_func_unsupported
+psql:/root/theo-db/benchmarks/m168_stream_ab.sql:65: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_stream_ab.sql:65: WARNING:  theodb_admit_decline: topk_parent_not_limit
   q  | eager_ms | stream_ms | ratio | pairs 
 -----+----------+-----------+-------+-------
- q23 |   4082.2 |    3469.5 | 0.850 |     5
- q24 |    136.0 |     135.3 | 0.995 |     5
- q25 |    103.6 |      92.4 | 0.892 |     5
- q26 |    134.3 |     120.2 | 0.895 |     5
-(4 rows)
-
-### per-pair detail (so a single outlier cannot hide behind a median)
-  q  |              eager_ms              |             stream_ms              
------+------------------------------------+------------------------------------
- q23 | 6008.0 4843.6 4082.2 4063.7 3977.2 | 3638.7 3469.5 3374.7 3488.8 3352.8
- q24 | 156.8 136.4 128.9 136.0 134.5      | 143.1 135.3 123.7 118.6 143.8
- q25 | 139.6 107.0 103.6 99.7 102.6       | 123.4 92.2 92.4 90.8 93.8
- q26 | 145.0 135.5 134.3 126.6 128.9      | 131.8 117.9 120.2 112.6 125.8
-(4 rows)
-
+ q23 |   4053.9 |    3377.3 | 0.833 |     5
+ q24 |    128.4 |     140.3 | 1.093 |     5
+########## execução 2 ##########
+so_md5=0c90ef7d6ef385df81d798cc070b9daa
+### M168 paired A/B — median of 5 pairs per query (ratio > 1 = streaming is SLOWER)
+psql:/root/theo-db/benchmarks/m168_stream_ab.sql:65: WARNING:  theodb_admit_decline: group_expr_func_unsupported
+psql:/root/theo-db/benchmarks/m168_stream_ab.sql:65: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_stream_ab.sql:65: WARNING:  theodb_admit_decline: topk_parent_not_limit
+  q  | eager_ms | stream_ms | ratio | pairs 
+-----+----------+-----------+-------+-------
+ q23 |   4081.2 |    3380.5 | 0.828 |     5
+ q24 |    134.6 |     161.8 | 1.202 |     5

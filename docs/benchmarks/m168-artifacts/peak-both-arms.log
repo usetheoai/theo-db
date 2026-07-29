@@ -1,0 +1,455 @@
+so_md5=0c90ef7d6ef385df81d798cc070b9daa
+postmaster=2026-07-29 13:01:54.533343+00
+SET
+SET
+SET
+SET
+########## ARM=eager (theodb.enable_columnar_topk_stream = off) ##########
+SET
+===q23===
+psql:/root/theo-db/benchmarks/m168_peak.sql:24: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_peak.sql:24: WARNING:  theodb_admit_decline: swap_topk_admitted
+psql:/root/theo-db/benchmarks/m168_peak.sql:24: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_peak.sql:24: WARNING:  theodb_admit_decline: topk_parent_not_limit
+psql:/root/theo-db/benchmarks/m168_peak.sql:24: WARNING:  theodb_decode_batch: rows=1000000 bytes=809738352 work_mem_bytes=67108864
+===q24===
+psql:/root/theo-db/benchmarks/m168_peak.sql:26: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_peak.sql:26: WARNING:  theodb_admit_decline: swap_topk_admitted
+psql:/root/theo-db/benchmarks/m168_peak.sql:26: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_peak.sql:26: WARNING:  theodb_admit_decline: topk_parent_not_limit
+psql:/root/theo-db/benchmarks/m168_peak.sql:26: WARNING:  theodb_decode_batch: rows=1000000 bytes=20388828 work_mem_bytes=67108864
+===q25===
+psql:/root/theo-db/benchmarks/m168_peak.sql:28: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_peak.sql:28: WARNING:  theodb_admit_decline: swap_topk_admitted
+psql:/root/theo-db/benchmarks/m168_peak.sql:28: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_peak.sql:28: WARNING:  theodb_admit_decline: topk_parent_not_limit
+psql:/root/theo-db/benchmarks/m168_peak.sql:28: WARNING:  theodb_decode_batch: rows=1000000 bytes=12388732 work_mem_bytes=67108864
+===q26===
+psql:/root/theo-db/benchmarks/m168_peak.sql:30: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_peak.sql:30: WARNING:  theodb_admit_decline: swap_topk_admitted
+psql:/root/theo-db/benchmarks/m168_peak.sql:30: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_peak.sql:30: WARNING:  theodb_admit_decline: topk_parent_not_limit
+psql:/root/theo-db/benchmarks/m168_peak.sql:30: WARNING:  theodb_decode_batch: rows=1000000 bytes=20388828 work_mem_bytes=67108864
+########## ARM=stream (theodb.enable_columnar_topk_stream = on) ##########
+SET
+===q23===
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_admit_decline: swap_topk_admitted
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_admit_decline: topk_parent_not_limit
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8953072 probe=1
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8331504
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8606960
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=9520368
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8605936
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7796976
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7798000
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7540976
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7803120
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7595248
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7365872
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8596720
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8703216
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8504560
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8534256
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7548144
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7292144
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7386352
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8725744
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7266544
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=6332656
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=6346992
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=6428912
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=6150384
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=6151408
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=6724848
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7812336
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=11492592
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=11503920
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=9479408
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8464624
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7480560
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=6268144
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7451888
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7256304
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7546096
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8398064
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=6126832
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8534256
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7583984
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=6822128
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=9510128
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=10853616
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=10853616
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=10820848
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=9515248
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7553264
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7315696
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=6469872
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=6789360
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=6169840
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=18754800
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=14563568
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7447792
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7939312
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=14135536
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=9512176
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=10526960
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8865008
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7552240
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8505584
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8483056
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7257328
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8463600
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7257328
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7316720
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=9510128
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7281904
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=14163184
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=9446640
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7681264
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7421168
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8550640
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=6971632
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7816432
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=9381104
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7185648
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8367344
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=9510128
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=14556400
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=10497264
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7414000
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7557360
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8589552
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7594224
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7321840
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8268016
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7233776
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=9526512
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8331504
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=15144176
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=9318640
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7492848
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=10439920
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8547568
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=10438896
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8543472
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=9392368
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8859888
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7756016
+===q24===
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_admit_decline: swap_topk_admitted
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_admit_decline: topk_parent_not_limit
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756 probe=1
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=136604
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=136604
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=136604
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=136604
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=136604
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=136604
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=644508
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=644508
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=644508
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=128412
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=136604
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+===q25===
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_admit_decline: swap_topk_admitted
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_admit_decline: topk_parent_not_limit
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660 probe=1
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=171196
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=302268
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=171196
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=171196
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=171196
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=171196
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=72892
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=56508
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=171196
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=72892
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=171196
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=72892
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=56508
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=56508
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=302268
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=56508
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=56508
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=72892
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=72892
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=171196
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=171196
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=56508
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=171196
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=72892
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=72892
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=302268
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=564412
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=564412
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=564412
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=302268
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=171196
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=48316
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=72892
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=171196
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=171196
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=72892
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=171196
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=302268
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=171196
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=171196
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=171196
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=72892
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=72892
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=302268
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=302268
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=171196
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=171196
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=56508
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=171196
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=302268
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=72892
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=171196
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=171196
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=171196
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=72892
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=72892
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=302268
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=171196
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=72892
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=171196
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=171196
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=171196
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=171196
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
+===q26===
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_admit_decline: swap_topk_admitted
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_admit_decline: topk_parent_not_limit
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756 probe=1
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=136604
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=136604
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=136604
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=136604
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=136604
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=136604
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=644508
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=644508
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=644508
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=128412
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=136604
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+########## fim — some as linhas por braço com benchmarks/m168_peak_summarize.py ##########
