@@ -189,21 +189,31 @@ bounded-heap TopK. The guard declines when the relation's size exceeds `work_mem
 
 ## 5. Two correctness holes found in review and closed
 
-Both were found by independent reviewers, re-verified here, and fixed before release.
+Both were found by independent reviewers, re-verified here, and fixed before release. **Both demonstrations are
+committed** as `m167-artifacts/guard-proofs.log` (`postmaster=00:17:54Z`, `rc=0`) — an earlier revision asserted
+these two as measured while shipping no artifact for either, which is the same defect the reviewers had just made
+me fix elsewhere.
 
 **ICU provider (`datlocprovider`).** `CREATE DATABASE d LOCALE_PROVIDER icu ICU_LOCALE 'en-US' LOCALE 'C'` stores
 `datcollate = 'C'` while the DEFAULT collation orders by ICU (`pg_locale.c` dispatches on `datlocprovider`;
 `dbcommands.c` writes the two fields independently). Reading `datcollate` alone admitted a text sort key whose
 DataFusion byte order disagrees with PG — **the exact wrong-rows class the M158 guard existed to prevent**, made
-reachable without a session `SET` by the default flip. Verified by creating that database: the text sort key now
-declines.
+reachable without a session `SET` by the default flip.
+
+Proof A in `guard-proofs.log`: a database created exactly that way reports `provider=i datcollate=C` — it *says* C
+— and the text sort key declines (`Sort Key: s` survives over `Custom Scan (theodb_columnar_project)`). Without the
+`datlocprovider` clause the predicate would read `C` and admit.
 
 **The guard was inert without ANALYZE.** `pg_class.relpages` is written only by ANALYZE/VACUUM, and a columnar table
 never triggers either on its own — there is no `pgstat` counting anywhere in `theodb_rs/src/`, so autoanalyze never
 fires, and `relation_vacuum` (`columnar.rs:1851`) is an error stub. Measured on a fresh 200k-row columnar table:
 `relpages = 0` and **the guard did not fire even at `work_mem = 64kB`**. The first draft's guard demonstration only
 worked because ANALYZE had been run by hand during investigation, unrecorded. Fixed by falling back to the relation's
-true current size; verified: a `relpages = 0` table now declines at 64kB and routes at 1GB.
+true current size.
+
+Proof B in `guard-proofs.log`: a fresh 200k-row columnar table reports `relpages = 0`, and on that same table the
+guard declines at `work_mem = 64kB` (`Sort Key: v` survives) and routes at `1GB` (`Custom Scan
+(theodb_columnar_agg)`). The fallback is what makes the guard bite at all on a table PostgreSQL never analyses.
 
 ## 5.5. ROADMAP M167 Definition of done — item by item
 

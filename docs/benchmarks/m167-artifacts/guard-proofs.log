@@ -1,0 +1,26 @@
+=== § 5 guard proofs start 2026-07-29T01:01:48+00:00 (postmaster: 2026-07-29 00:17:54.370517+00)  ===
+
+--- PROOF A: ICU database with datcollate=C must DECLINE a text sort key ---
+DROP DATABASE
+CREATE DATABASE
+CREATE EXTENSION
+provider=i datcollate=C
+ Limit
+   ->  Sort
+         Sort Key: s
+         ->  Custom Scan (theodb_columnar_project) on ticu
+
+--- PROOF B: relpages=0 table -> guard DECLINES at 64kB, ROUTES at 1GB ---
+INSERT 0 200000
+relpages (deve ser 0 — nenhum ANALYZE/VACUUM roda em tabela colunar):
+0
+  work_mem=64kB:
+     Limit
+       ->  Sort
+             Sort Key: v
+             ->  Custom Scan (theodb_columnar_project) on m167_guard
+  work_mem=1GB:
+     Limit
+       ->  Custom Scan (theodb_columnar_agg)
+
+=== § 5 guard proofs rc=0 end 2026-07-29T01:01:49+00:00 ===
