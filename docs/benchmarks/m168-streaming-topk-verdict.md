@@ -3,7 +3,7 @@
 **Data:** 2026-07-29 · **Fecha:** item 2b do DoD do M167 (#215) e o falso-admit medido em #218
 **Box:** `theo-e2e-runner` (DigitalOcean, 32 GB / 8 vCPU) — NÃO a c6a.4xlarge canônica do ClickBench
 **Dados:** ClickBench `hits` / `hits_heap`, 1.000.000 linhas, 105 colunas — verificados por `count(*)`
-**Binário:** `so_md5=facf2881fd8ebbbf3c486cf9333b444e`
+**Binário:** `so_md5=f98b5b4cb2fd (ver o cabeçalho de cada artefato)`
 **Artefatos:** `docs/benchmarks/m168-artifacts/`
 
 ## 1. Memória — os dois braços, na mesma sessão
@@ -41,48 +41,59 @@ real do processo é maior, por três vias que o instrumento não conta:
 3. **A pool.** `GreedyMemoryPool` contabiliza só reservas registradas no DataFusion; os buffers de decode e o
    `RecordBatch` são alocados fora dela.
 
-O que **sobrevive** a isso: o mesmo instrumento subconta o item 1 nos **dois** braços (o caminho eager também
-segura os buffers enquanto monta seu batch), então a **razão ~43×** se preserva mesmo com os absolutos
-subestimados. É a razão que este documento afirma; o absoluto é um piso.
+**A simetria vale para o item 1, e SÓ para ele** (correção de review — a versão anterior estendia o argumento aos
+três). Os dois braços usam o mesmo instrumento no mesmo ponto, decodificam as mesmas colunas com a mesma
+codificação, então a razão buffer:array se cancela na razão. Os itens 2 e 3 **não** são simétricos: o braço eager
+tem 1 batch e o streaming tem 100, e o TopK retém os que ainda têm linha sobrevivente.
 
-Consequência para a #218: o falso-admit era o decode (772 MiB) superar o orçamento do guard (512 MiB). Com o
-maior batch em 17,9 MiB, o excesso deixa de existir por ordem de grandeza — mesmo com os três subcontos acima,
-não há caminho de 17,9 MiB a 512 MiB.
+O item 2 deixou de ser argumento e passou a ser medido: `run_df_collect_streaming` agora lê
+`MemoryPool::reserved()` ao fim do `block_on`. Medido nas quatro consultas: **`reserved_at_end=0`** contra um teto
+de 201.326.592 B. A retenção do TopK, para estas formas (k=10), não deixa nada reservado ao fim.
 
-## 2. Throughput — e a regressão que o próprio harness escondia
+Isso **não** prova que o pico intermediário foi zero — `reserved()` é o estado final, não o máximo — então o item
+2 continua parcialmente aberto e assim declarado. O que ele fecha é a preocupação concreta que motivou a
+pergunta: não há reserva pendurada ao término.
 
-**Este é o achado mais importante desta seção, e ele contradiz a primeira versão deste verdict.**
+Consequência para a #218, na forma que o instrumento sustenta: o falso-admit era o decode (772 MiB) superar o
+orçamento do guard (512 MiB). O maior batch instrumentado caiu para 17,9 MiB, e nada fica reservado ao fim. O
+**footprint total instantâneo** do caminho streaming não foi medido, e é o termo que falta para fechar a #218 com
+todo o rigor.
 
-O harness declarava alternar os braços a cada par. Não alternava: rodava eager-depois-stream nas 20 iterações
-(achado de review). O drift é grande e monotônico — o q23 eager caiu 5742 → 4036 ms ao longo dos 5 pares — e era
-sempre pago pelo braço que ia primeiro, que era sempre o eager. Isso dava ao streaming uma vantagem sistemática.
+## 2. Throughput — e as DUAS conclusões minhas que o harness produziu, ambas erradas
 
-Com a alternância implementada, em **três execuções** (`paired-ab-stream.log`):
+Esta seção mudou de resposta duas vezes, e o registro das duas é mais útil que o número final.
 
-| Consulta | eager | stream | razão | as três execuções | leitura |
-|---|---|---|---|---|---|
-| q23 | 4213,6 ms | **3431,9 ms** | **0,814** | 0,833 · 0,828 · 0,814 | **ganho real** — faixas não se sobrepõem (3284–3703 vs 3966–5742) |
-| q24 | 129,1 ms | 139,1 ms | **1,077** | 1,093 · 1,202 · 1,077 | **regressão real de ~8–20%**, consistente em direção |
-| q25 | 99,3 ms | 102,1 ms | 1,029 | — | dentro do ruído (faixas se sobrepõem) |
-| q26 | 140,5 ms | 147,2 ms | 1,048 | — | dentro do ruído |
+**Primeira versão:** "as quatro consultas ficaram mais rápidas". Falso — o harness declarava alternar os braços e
+não alternava; rodava eager-depois-stream nas 20 iterações, e o drift monotônico era sempre pago pelo braço que ia
+primeiro, que era sempre o eager (achado de review).
 
-**O q24 regride, e isso é entregue como regressão, não como ruído.** A explicação é a que o plano previu no
-§ Riscos antes de existir código: atravessar o DataFusion 100 vezes em vez de 1 tem overhead fixo por batch, e
-numa projeção estreita há pouca memória a economizar para pagá-lo.
+**Segunda versão:** "o q24 regride ~8%". Também falso — a alternância foi implementada, mas com **5 pares**, e com
+ordem alternada um número ímpar não contrabalanceia: um braço come uma posição-primeira a mais, incluindo o par 1,
+o mais frio (achado de review).
 
-**O trade-off, declarado em vez de escondido:** 31× de memória por ~8% de latência numa consulta que já roda em
-130 ms. O default fica ON porque memória é o recurso que causa OOM e derruba o backend, enquanto 10 ms numa
-consulta de 130 ms não derruba nada — mas quem discordar tem
-`theodb.enable_columnar_topk_stream = off` e o número acima para decidir.
+**Terceira, com 6 pares** (`benchmarks/m168_stream_ab.sql`, tabela produzida por
+`benchmarks/m168_ab_summarize.py` a partir de `paired-ab-stream.log`, nunca transcrita à mão):
+
+| Consulta | razões (2 execuções) | mediana | dispersão eager | leitura |
+|---|---|---|---|---|
+| q23 | 0,817 · 0,818 | **0,817** | 1,30× | **efeito real** — as faixas por par nunca se sobrepõem, e as duas execuções concordam na 3ª casa |
+| q24 | 1,001 · 1,036 | 1,018 | 1,35× | dentro da dispersão |
+| q25 | 1,025 · 0,971 | 0,998 | 1,21× | dentro da dispersão |
+| q26 | 1,000 · 1,045 | 1,022 | 1,20× | dentro da dispersão |
+
+**A regressão que a segunda versão entregou não se estabelece com o desenho corrigido.** O honesto agora é: o q23
+é ~18% mais rápido, e nas três consultas estreitas **não há efeito detectável** — as medianas (0,998–1,022) ficam
+dentro de uma dispersão intra-braço de 1,20–1,35×.
+
+O summarizer **recusa** publicar tabela de execução malformada: exige as 4 consultas, contagem de pares igual e
+**par**, um único `so_md5` entre execuções, e o bloco per-pair presente (é ele que sustenta qualquer alegação de
+faixa — a primeira versão citava faixas de um bloco que fora filtrado do log commitado).
 
 ### O piso de 1,88× do M167 NÃO se aplica aqui
 
-Uma versão anterior citava-o como gatilho de honest-negative. Está errado, e generoso na direção errada: aquele
-piso é **entre execuções**, e o próprio verdict do M167 chama comparação cross-run de erro de categoria. O desenho
-pareado existe para escapar dele. Com 1,88× como limiar, uma regressão de 1,8× passaria como "sem regressão".
-
-O piso certo é a dispersão pareada dentro de cada consulta: q23 1,45× · q25 1,20× · q26 1,23× · q24 1,04×. É
-contra ela que o q23 (ganho) e o q24 (regressão) se destacam, e as outras duas não.
+Uma versão anterior citava-o como gatilho de honest-negative. Errado, e generoso na direção errada: aquele piso é
+**entre execuções**, e o próprio verdict do M167 chama comparação cross-run de erro de categoria. O piso certo é a
+dispersão pareada por consulta, que a tabela acima traz — é contra ela que o q23 se destaca e as outras três não.
 
 ## 3. Correção — e o defeito que só a revisão pegou
 
@@ -149,7 +160,7 @@ violação da rung 1 da parsimony ladder. Removidos, e com eles os campos `skipp
 write-only. O D1 do Rust não detecta método `pub(crate)` sem chamador; o relatório dizer "No findings" para D1
 significa "o detector não achou", não "não há".
 
-Revalidado após a remoção: oráculos verdes, 396 batches de stream (o caminho continua ativo).
+Revalidado após a remoção: oráculos verdes, 400 batches de stream (o caminho continua ativo).
 
 ## 6. O que NÃO está provado
 

@@ -1,0 +1,68 @@
+SET
+SET
+SET
+SET
+psql:/root/theo-db/benchmarks/m168_large_k.sql:18: NOTICE:  table "lk_res" does not exist, skipping
+DROP TABLE
+CREATE TABLE
+### M168-K1: k = 200000 sobre projeção estreita, work_mem = 4MB
+SET
+psql:/root/theo-db/benchmarks/m168_large_k.sql:23: NOTICE:  table "k1_on" does not exist, skipping
+DROP TABLE
+psql:/root/theo-db/benchmarks/m168_large_k.sql:25: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_large_k.sql:25: WARNING:  theodb_admit_decline: topk_decode_estimate_too_large est_bytes=228253696 budget=33554432
+psql:/root/theo-db/benchmarks/m168_large_k.sql:25: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_large_k.sql:25: WARNING:  theodb_admit_decline: topk_parent_not_limit
+SELECT 131772
+SET
+psql:/root/theo-db/benchmarks/m168_large_k.sql:27: NOTICE:  table "k1_off" does not exist, skipping
+DROP TABLE
+psql:/root/theo-db/benchmarks/m168_large_k.sql:29: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_large_k.sql:29: WARNING:  theodb_admit_decline: topk_decode_estimate_too_large est_bytes=228253696 budget=33554432
+psql:/root/theo-db/benchmarks/m168_large_k.sql:29: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_large_k.sql:29: WARNING:  theodb_admit_decline: topk_parent_not_limit
+SELECT 131772
+INSERT 0 1
+INSERT 0 1
+### M168-K2: SELECT * (105 colunas) com k = 50000 — o caso mais pesado por linha
+SET
+psql:/root/theo-db/benchmarks/m168_large_k.sql:37: NOTICE:  table "k2_on" does not exist, skipping
+DROP TABLE
+psql:/root/theo-db/benchmarks/m168_large_k.sql:39: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_large_k.sql:39: WARNING:  theodb_admit_decline: topk_decode_estimate_too_large est_bytes=228253696 budget=33554432
+psql:/root/theo-db/benchmarks/m168_large_k.sql:39: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_large_k.sql:39: WARNING:  theodb_admit_decline: topk_parent_not_limit
+SELECT 148
+SET
+psql:/root/theo-db/benchmarks/m168_large_k.sql:41: NOTICE:  table "k2_off" does not exist, skipping
+DROP TABLE
+psql:/root/theo-db/benchmarks/m168_large_k.sql:43: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_large_k.sql:43: WARNING:  theodb_admit_decline: topk_decode_estimate_too_large est_bytes=228253696 budget=33554432
+psql:/root/theo-db/benchmarks/m168_large_k.sql:43: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_large_k.sql:43: WARNING:  theodb_admit_decline: topk_parent_not_limit
+SELECT 148
+INSERT 0 1
+INSERT 0 1
+### M168-K3: CONTROLE POSITIVO — a maquinaria tem de acusar divergência semeada
+psql:/root/theo-db/benchmarks/m168_large_k.sql:50: NOTICE:  table "k3_bad" does not exist, skipping
+DROP TABLE
+SELECT 100
+psql:/root/theo-db/benchmarks/m168_large_k.sql:52: NOTICE:  table "k3_ref" does not exist, skipping
+DROP TABLE
+SELECT 100
+INSERT 0 1
+### GATE FINAL
+psql:/root/theo-db/benchmarks/m168_large_k.sql:59: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_large_k.sql:59: WARNING:  theodb_admit_decline: topk_parent_not_limit
+        q        |   n    
+-----------------+--------
+ k1_mism         |      0
+ k1_rows         | 131772
+ k2_mism         |      0
+ k2_rows         |    148
+ k3_control_diff |    200
+(5 rows)
+
+psql:/root/theo-db/benchmarks/m168_large_k.sql:85: WARNING:  theodb_admit_decline: target_grouping_expression_or_other
+psql:/root/theo-db/benchmarks/m168_large_k.sql:85: NOTICE:  M168 LARGE-K GATE ok: streaming e eager concordam com k grande sob work_mem=4MB (seja servindo, seja caindo no fallback), e o controle negativo dispara
+DO

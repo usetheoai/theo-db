@@ -9,6 +9,10 @@
 -- SEMPRE eager-depois-stream nas 20 iterações (achado de review). O drift é grande e monotônico — o q23 eager caiu
 -- 6008 -> 3977 ms ao longo dos 5 pares, 1,51x — e sempre era pago pelo braço que ia primeiro. Agora a ordem
 -- inverte a cada par, então o efeito de ordem cancela em vez de se somar a um dos lados.
+--
+-- O NÚMERO DE PARES É PAR (6), e isso não é estética. Com 5 pares e ordem alternada, o eager vai primeiro em
+-- 3 deles — incluindo o par 1, o mais frio, onde o drift é maior. O contrabalanceamento fica incompleto e o viés
+-- residual empurra o ganho para cima e a regressão para baixo (achado de review).
 -- CTAS materializes the k surviving rows: a `count(*)` wrapper lets PostgreSQL skip forming them, which erased the
 -- effect entirely in a M167 draft (verdict § 7.3).
 \set ON_ERROR_STOP on
@@ -35,7 +39,7 @@ DECLARE
   modes text[];
   m text;
 BEGIN
-  FOR i IN 1..5 LOOP
+  FOR i IN 1..6 LOOP
     FOR j IN 1..4 LOOP
       -- Ordem invertida em pares alternados: nos ímpares eager vai primeiro, nos pares stream vai primeiro.
       IF i % 2 = 1 THEN
@@ -55,7 +59,7 @@ BEGIN
 END
 $ab$;
 
-\echo '### M168 paired A/B — median of 5 pairs per query (ratio > 1 = streaming is SLOWER)'
+\echo '### M168 paired A/B — median of 6 pairs per query (ratio > 1 = streaming is SLOWER)'
 SELECT q,
        round(percentile_cont(0.5) WITHIN GROUP (ORDER BY ms) FILTER (WHERE mode='eager')::numeric, 1)  AS eager_ms,
        round(percentile_cont(0.5) WITHIN GROUP (ORDER BY ms) FILTER (WHERE mode='stream')::numeric, 1) AS stream_ms,

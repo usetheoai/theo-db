@@ -18,12 +18,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   deixaram de precisar de memória proporcional ao tamanho da tabela. Medido a 1 milhão de linhas × 105 colunas, o
   pico de um `SELECT *` caiu de **772 MiB para 17,9 MiB (43×)** — abaixo do `work_mem` da sessão, e não mais acima
   dele (#215, #218). A tabela passa a ser decodificada em partes, uma de cada vez, em vez de inteira de uma vez.
-  Resultado byte a byte idêntico ao anterior. O efeito no tempo **depende da forma da consulta**: o `SELECT *`
-  largo ficou ~19% mais rápido (medido em três execuções pareadas), mas uma projeção estreita ficou **~8% mais
-  lenta** — ler a tabela em 100 partes tem custo fixo por parte, e quando há pouca memória a economizar esse custo
-  não se paga. O padrão é ligado porque memória é o recurso que derruba o servidor e 10 ms numa consulta de 130 ms
-  não derruba nada; quem preferir o contrário desliga com `theodb.enable_columnar_topk_stream = off`. Método,
-  números por consulta e ressalvas em `docs/benchmarks/m168-streaming-topk-verdict.md`.
+  Resultado byte a byte idêntico ao anterior. No tempo, o `SELECT *` largo ficou **~18% mais rápido** (razão 0,817
+  em duas execuções pareadas de 6 pares, que concordam na terceira casa decimal); nas consultas de projeção
+  estreita **não há efeito detectável** — as medianas ficam entre 0,998 e 1,022, dentro da própria dispersão da
+  medição. Reversível com `theodb.enable_columnar_topk_stream = off`. Método, números por consulta e ressalvas
+  em `docs/benchmarks/m168-streaming-topk-verdict.md`.
 
 ### Changed
 - **Diagnóstico:** a auditoria automática de código morto não detecta métodos Rust sem chamador dentro do próprio

@@ -39,7 +39,17 @@ impl HeldInterrupts {
 }
 impl Drop for HeldInterrupts {
     fn drop(&mut self) {
-        unsafe { pg_sys::InterruptHoldoffCount -= 1 };
+        // `InterruptHoldoffCount` é `uint32`, e `errfinish` o ZERA antes do longjmp (postgres `elog.c:531`,
+        // deliberadamente, para permitir `ereport` de dentro de um holdoff). No unwind ele já vale 0, então um
+        // `-= 1` incondicional dá wrap para u32::MAX e desliga o processamento de interrupções pelo resto da vida
+        // do backend. Só se cura porque o pgrx re-lança o erro e outro `errfinish` zera de novo — o que depende do
+        // panic nunca ser capturado. Guardar é grátis e não depende dessa invariante (achado de review; é o mesmo
+        // idioma do `lwlock.rs` do pgrx).
+        unsafe {
+            if pg_sys::InterruptHoldoffCount > 0 {
+                pg_sys::InterruptHoldoffCount -= 1;
+            }
+        }
     }
 }
 
@@ -56,9 +66,22 @@ impl Drop for HeldInterrupts {
 ///
 /// SAFETY: só pode ser chamada de dentro de um `HeldInterrupts` vivo, na thread do backend.
 unsafe fn interrupt_safepoint() {
-    pg_sys::InterruptHoldoffCount -= 1;
+    // O re-incremento é RAII, não a linha seguinte. Se `check_for_interrupts!` disparar (ele existe para isso),
+    // um `InterruptHoldoffCount += 1` posicional seria PULADO pelo unwind, enquanto o `Drop` do `HeldInterrupts`
+    // externo ainda decrementaria — o contador cairia 2 tendo subido 1, e um `InterruptHoldoffCount` com
+    // underflow desabilita o processamento de interrupções pelo resto da vida do backend. Com o guard, a janela
+    // fecha em qualquer caminho de saída.
+    struct Rehold;
+    impl Drop for Rehold {
+        fn drop(&mut self) {
+            unsafe { pg_sys::InterruptHoldoffCount += 1 };
+        }
+    }
+    if pg_sys::InterruptHoldoffCount > 0 {
+        pg_sys::InterruptHoldoffCount -= 1;
+    }
+    let _rehold = Rehold;
     pgrx::check_for_interrupts!();
-    pg_sys::InterruptHoldoffCount += 1;
 }
 
 /// Map the decoded columnar columns (name, atttypid, per-row stored bytes) to an Arrow schema + arrays. The stored
@@ -827,7 +850,12 @@ impl futures::Stream for ChunkGroupBatchStream {
         // ignora Ctrl-C, `statement_timeout` e `pg_terminate_backend` do início ao fim. A fronteira de
         // chunk-group é exatamente o "per-batch interrupt safe-point" que o cabeçalho deste módulo promete —
         // antes do M168 ela não existia porque não havia batches. Achado de review.
+        //
+        // A afirmação de afinidade vem PRIMEIRO: o safepoint escreve num global do PostgreSQL sem sincronização, e
+        // numa thread estranha essa escrita aconteceria antes de a asserção do ADR-2 poder disparar. A filosofia
+        // deste módulo é assever a invariante, não confiar nela — então ela é asseverada antes de tocar o global.
         unsafe {
+            self.inner.assert_owning_thread("ChunkGroupBatchStream::poll_next");
             interrupt_safepoint();
         }
         let preds = std::mem::take(&mut self.predicates);
@@ -1036,14 +1064,26 @@ pub(super) unsafe fn run_columnar_topk(
     {
         let order_stream = order_by.clone();
         let filter_stream = filter.clone();
-        let batches = run_df_collect_streaming(part, move |df| {
+        // FAIL-OPEN, não `?`. A pool do streaming é constante em `k` enquanto a retenção do TopK cresce com ele
+        // (`topk/mod.rs` faz `reservation.try_resize(self.size())`), e a admissão não limita `k`. Sem isto, um
+        // `ORDER BY … LIMIT 500000` largo que o caminho eager servia passa a ERRAR por default, e a única saída
+        // seria uma GUC que o usuário não sabe que existe (achado de review). Cair no eager custa uma re-execução
+        // no caminho de falha e nada no caminho feliz — mesma forma do decline de linhas pendentes acima.
+        match run_df_collect_streaming(part, move |df| {
             let df = match filter_stream {
                 Some(f) => df.filter(f)?,
                 None => df,
             };
             df.sort(order_stream)?.limit(0, Some(k))
-        })?;
-        return rows_from_batches(&batches, proj_cols);
+        }) {
+            Ok(batches) => return rows_from_batches(&batches, proj_cols),
+            Err(e) => {
+                if super::columnar_agg::admit_trace_enabled() {
+                    pgrx::warning!("theodb_topk_stream_fallback: {e}");
+                }
+                // cai para o caminho eager abaixo, que é o comportamento pré-M168
+            }
+        }
     }
 
     let batch =
@@ -1093,13 +1133,18 @@ where
     let pool_bytes = work_mem_bytes.saturating_mul(2) + 64 * 1024 * 1024;
     let schema = datafusion::physical_plan::streaming::PartitionStream::schema(part.as_ref()).clone();
     let held = HeldInterrupts::hold();
+    // A pool é criada FORA do bloco async e clonada para dentro, para que o pico reservado possa ser lido depois.
+    // Sem isso, o único número instrumentado é o maior batch individual — e a retenção do TopK (que segura cada
+    // batch com linha sobrevivente) fica não medida. Um reviewer apontou que essa omissão é o que sustentava, sem
+    // prova, a alegação de que o footprint total não chega perto do orçamento do guard; e o comentário logo acima
+    // sobre `Resources exhausted` é evidência in-repo de que ela chega a ~128 MB. Agora é medida, não argumentada.
+    use datafusion::execution::memory_pool::{GreedyMemoryPool, MemoryPool};
+    let pool: std::sync::Arc<dyn MemoryPool> = std::sync::Arc::new(GreedyMemoryPool::new(pool_bytes));
+    let pool_probe = std::sync::Arc::clone(&pool);
     let out: Result<Vec<RecordBatch>, DataFusionError> = rt.block_on(async move {
-        use datafusion::execution::memory_pool::GreedyMemoryPool;
         use datafusion::execution::runtime_env::RuntimeEnvBuilder;
         use datafusion::prelude::SessionConfig;
-        let runtime = RuntimeEnvBuilder::new()
-            .with_memory_pool(std::sync::Arc::new(GreedyMemoryPool::new(pool_bytes)))
-            .build_arc()?;
+        let runtime = RuntimeEnvBuilder::new().with_memory_pool(pool).build_arc()?;
         // target_partitions(1) is load-bearing, not tuning: it is what keeps the single `PartitionStream` on the
         // calling (backend) thread, which is what makes the `unsafe impl Send` on it sound (M168 ADR-2).
         let config = SessionConfig::new().with_target_partitions(1);
@@ -1113,6 +1158,13 @@ where
         build(df)?.collect().await
     });
     drop(held);
+    if super::columnar_agg::admit_trace_enabled() {
+        pgrx::warning!(
+            "theodb_topk_pool: reserved_at_end={} pool_limit={}",
+            pool_probe.reserved(),
+            pool_bytes
+        );
+    }
     out.map_err(|e| format!("df_executor: datafusion: {e}"))
 }
 

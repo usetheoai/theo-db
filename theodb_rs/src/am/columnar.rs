@@ -938,10 +938,16 @@ unsafe fn decode_one_chunk_group(
 /// A columnar scan planned but not yet decoded: stripe directories, the projection, and the per-column FixedRaw
 /// decision. Pass 1 of the decode — cheap (headers + directories only, no value chunks).
 ///
-/// Extracted so the accumulating path (`decode_columns_v2`) and the M168 streaming path share ONE definition of
-/// "what this scan is". Duplicating pass 1 would duplicate knowledge, and the FixedRaw decision in particular is
-/// subtle: a column is only eligible if NO chunk-group anywhere has nulls for it, which is a whole-relation
-/// property that a per-chunk-group loop cannot rediscover.
+/// HONESTIDADE SOBRE O ESTADO ATUAL: esta struct foi extraída com a intenção de que o caminho acumulador
+/// (`decode_columns_v2`) e o streaming compartilhassem UMA definição de "o que é este scan". **Eles ainda não
+/// compartilham** — `decode_columns_v2` mantém seu próprio pass 1, byte-a-byte igual ao daqui, e
+/// `plan_columnar_scan` tem um único chamador. Essa duplicação é precisamente o mecanismo que produziu o BLOCKER
+/// do M168: a guarda de linhas pendentes ficou numa cópia e não na outra. Um comentário afirmando que a
+/// duplicação foi removida seria pior que nenhum comentário — ela não foi (achado de review).
+///
+/// A decisão FixedRaw é a parte sutil de qualquer unificação futura: uma coluna só é elegível se NENHUM
+/// chunk-group em lugar algum tem nulos para ela — propriedade da relação inteira, que um laço por chunk-group
+/// não redescobre.
 pub(crate) struct ScanPlan {
     plans: Vec<StripePlan>,
     wanted: Vec<usize>,
@@ -1070,6 +1076,12 @@ pub(crate) struct ColumnarChunkStream {
 }
 
 impl ColumnarChunkStream {
+    /// Assere a afinidade sem avançar o stream. Existe para que um chamador possa verificar a invariante ANTES
+    /// de tocar estado global do PostgreSQL — o safepoint de interrupções faz exatamente isso.
+    pub(crate) fn assert_owning_thread(&self, what: &str) {
+        self.affinity.assert_owned(what);
+    }
+
     pub(crate) fn new(rel: pg_sys::Relation, plan: ScanPlan) -> Self {
         Self {
             plan,

@@ -1,0 +1,71 @@
+SET
+SET
+SET
+DROP TABLE
+CREATE TABLE
+INSERT 0 5000
+psql:/root/theo-db/benchmarks/m168_pending_rows.sql:26: NOTICE:  table "pend_res" does not exist, skipping
+DROP TABLE
+CREATE TABLE
+### M168-P1: estado MISTO — stripes gravados + pendentes na mesma transação
+BEGIN
+INSERT 0 3
+SET
+psql:/root/theo-db/benchmarks/m168_pending_rows.sql:37: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_pending_rows.sql:37: WARNING:  theodb_admit_decline: swap_topk_admitted
+psql:/root/theo-db/benchmarks/m168_pending_rows.sql:37: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_pending_rows.sql:37: WARNING:  theodb_admit_decline: topk_parent_not_limit
+psql:/root/theo-db/benchmarks/m168_pending_rows.sql:37: WARNING:  theodb_decode_batch: rows=5003 bytes=125792 work_mem_bytes=67108864
+SELECT 5
+SET
+psql:/root/theo-db/benchmarks/m168_pending_rows.sql:41: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_pending_rows.sql:41: WARNING:  theodb_admit_decline: swap_topk_admitted
+psql:/root/theo-db/benchmarks/m168_pending_rows.sql:41: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_pending_rows.sql:41: WARNING:  theodb_admit_decline: topk_parent_not_limit
+psql:/root/theo-db/benchmarks/m168_pending_rows.sql:41: WARNING:  theodb_decode_batch: rows=5003 bytes=125792 work_mem_bytes=67108864
+SELECT 5
+INSERT 0 1
+INSERT 0 1
+COMMIT
+### M168-P2: estado PURAMENTE pendente (tabela nova, sem stripe) — já funcionava, fica travado
+DROP TABLE
+CREATE TABLE
+BEGIN
+INSERT 0 3
+SET
+psql:/root/theo-db/benchmarks/m168_pending_rows.sql:57: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_pending_rows.sql:57: WARNING:  theodb_admit_decline: swap_topk_admitted
+psql:/root/theo-db/benchmarks/m168_pending_rows.sql:57: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_pending_rows.sql:57: WARNING:  theodb_admit_decline: topk_parent_not_limit
+psql:/root/theo-db/benchmarks/m168_pending_rows.sql:57: WARNING:  theodb_decode_batch: rows=3 bytes=1280 work_mem_bytes=67108864
+SELECT 3
+SET
+psql:/root/theo-db/benchmarks/m168_pending_rows.sql:59: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_pending_rows.sql:59: WARNING:  theodb_admit_decline: swap_topk_admitted
+psql:/root/theo-db/benchmarks/m168_pending_rows.sql:59: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_pending_rows.sql:59: WARNING:  theodb_admit_decline: topk_parent_not_limit
+psql:/root/theo-db/benchmarks/m168_pending_rows.sql:59: WARNING:  theodb_decode_batch: rows=3 bytes=1280 work_mem_bytes=67108864
+SELECT 3
+INSERT 0 1
+INSERT 0 1
+COMMIT
+### M168-P3: CONTROLE POSITIVO — a mesma maquinaria tem de acusar uma divergência semeada
+psql:/root/theo-db/benchmarks/m168_pending_rows.sql:67: NOTICE:  table "p_bad" does not exist, skipping
+DROP TABLE
+SELECT 5
+INSERT 0 1
+### GATE FINAL — verificado por máquina
+psql:/root/theo-db/benchmarks/m168_pending_rows.sql:74: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_pending_rows.sql:74: WARNING:  theodb_admit_decline: topk_parent_not_limit
+            q            | n  
+-------------------------+----
+ p1_pending_rows_seen    |  3
+ p1_stream_vs_eager_mism |  0
+ p2_rows_seen            |  3
+ p2_stream_vs_eager_mism |  0
+ p3_control_diff         | 10
+(5 rows)
+
+psql:/root/theo-db/benchmarks/m168_pending_rows.sql:104: WARNING:  theodb_admit_decline: target_grouping_expression_or_other
+psql:/root/theo-db/benchmarks/m168_pending_rows.sql:104: NOTICE:  M168 PENDING GATE ok: streaming e eager concordam com pendentes na mesma transação (misto e puro), as 3 linhas pendentes aparecem no top-k, e o controle negativo dispara
+DO
