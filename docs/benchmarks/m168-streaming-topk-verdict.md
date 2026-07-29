@@ -3,7 +3,7 @@
 **Data:** 2026-07-29 · **Fecha:** item 2b do DoD do M167 (#215) e o falso-admit medido em #218
 **Box:** `theo-e2e-runner` (DigitalOcean, 32 GB / 8 vCPU) — NÃO a c6a.4xlarge canônica do ClickBench
 **Dados:** ClickBench `hits` / `hits_heap`, 1.000.000 linhas, 105 colunas — verificados por `count(*)`
-**Binário:** `so_md5=7a242fcae496… (ver o cabeçalho de cada artefato)`
+**Binário:** `so_md5=ba2af99482a4… (ver o cabeçalho de cada artefato)`
 **Artefatos:** `docs/benchmarks/m168-artifacts/`
 
 ## 1. Memória — os dois braços, na mesma sessão
@@ -12,7 +12,7 @@
 dentro de uma sessão, e `benchmarks/m168_peak_summarize.py` produz a tabela a partir do log commitado. A primeira
 versão deste verdict comparava um "antes" medido num binário anterior cujo log nunca foi commitado — a razão
 principal tinha numerador não-verificável (achado de review). Agora o par é um artefato só, mesmo processo,
-mesmo binário (`peak-both-arms.log`, `so_md5=7a242fcae496…`).
+mesmo binário (`peak-both-arms.log`, `so_md5=ba2af99482a4…`).
 
 | Consulta | eager: batches / bytes | streaming: batches / maior batch | razão |
 |---|---|---|---|
@@ -89,73 +89,75 @@ O summarizer passa a usar **teste do sinal exato, bilateral**, sobre os pares (i
 
 | Consulta | **razão das medianas**, por execução | pares favoráveis | p (sinal, bilateral) | leitura |
 |---|---|---|---|---|
-| **q23** | 0,820 · 0,818 | **12 / 12** | **0,0005** | **efeito pareado real, a favor** |
-| **q24** | 1,000 · 1,054 | **2 / 12** | **0,039** | **efeito pareado real, CONTRA — ver abaixo** |
-| q25 | 1,061 · 1,029 | 3 / 12 | 0,15 | sem efeito |
-| q26 | 1,009 · 1,050 | 6 / 12 | 1,00 | sem efeito |
+| **q23** | 0,835 · 0,802 | **12 / 12** | **0,0005** | **efeito pareado real, a favor** |
+| q24 | 1,091 · 1,018 | 3 / 12 | 0,15 | sem efeito nesta coleta |
+| q25 | 1,038 · 0,999 | 3 / 12 | 0,15 | sem efeito nesta coleta |
+| q26 | 1,021 · 1,125 | 3 / 12 | 0,15 | sem efeito nesta coleta |
 
-**O q24 nesta coleta, e por que ele NÃO sustenta uma alegação de regressão.** Sob a regra declarada (mediana das
-razões pareadas), q24 através das três coletas:
+### O agregado das quatro coletas — a única leitura com poder para decidir
 
-| Coleta | binário | mediana | efeito | sinal | p |
-|---|---|---|---|---|---|
-| A | `e010375381ae` | 0,998 | **−0,2%** | 7/12 | 0,77 |
-| B | `1eaec080b901` | 1,001 | +0,1% | 6/12 | 1,00 |
-| **C (esta)** | `7a242fcae496` | 1,054 | **+5,4%** | **2/12** | **0,039** |
-| **pool (36 pares)** | — | **1,023** | +2,3% | **15/36** | **0,41** |
+Nenhuma coleta isolada de 12 pares resolve um efeito de poucos por cento. Quatro coletas dão 48 pares por
+consulta, e aí o quadro fica estável:
 
-**Uma versão anterior desta seção afirmou "custo pequeno e consistente" e "a razão nunca ficou abaixo de 1 em
-média". As duas coisas são falsas**, e o dado acima é o mesmo que eu tinha ao escrevê-las: a coleta A dá −0,2%,
-e o efeito aparece em **uma** das três coletas, não consistentemente. Pior, há **multiplicidade não corrigida**:
-são 4 consultas × 3 coletas = **12 testes de sinal**, e sob a hipótese nula esperam-se **0,6** resultados a
-p ≤ 0,05. Um resultado a p = 0,039 é exatamente o que o acaso produz. No pool das 36 comparações não há efeito
-(15/36, p = 0,41).
+| Consulta | n | mediana | efeito | sinal | p | por coleta (A·B·C·D) |
+|---|---|---|---|---|---|---|
+| **q23** | 48 | **0,810** | **−19,0%** | **48 / 48** | **< 0,0001** | 0,810 · 0,790 · 0,828 · 0,817 |
+| q24 | 48 | 1,029 | +2,9% | 18 / 48 | 0,11 | 0,998 · 1,001 · 1,054 · 1,074 |
+| q25 | 48 | 1,009 | +0,9% | 19 / 48 | 0,19 | 0,985 · 0,994 · 1,041 · 1,042 |
+| q26 | 48 | 1,017 | +1,7% | 22 / 48 | 0,67 | 0,996 · 0,978 · 1,020 · 1,044 |
+| **as 3 estreitas juntas** | **144** | **1,017** | **+1,7%** | **59 / 144** | **0,037** | — |
 
-Eu tinha acabado de corrigir o erro oposto — "sem efeito" quando faltava poder estatístico — e sobrecorrigi para
-uma regressão que o conjunto não sustenta (achado de review). **A leitura defensável é:** as consultas de
-projeção estreita não mostram efeito de throughput que este desenho consiga separar do ruído; a coleta C sugere
-um custo da ordem de poucos por cento, e uma coleta com mais pares resolveria — hoje é `UNBENCHMARKED`.
+**O q23 é definitivo: 48 comparações pareadas, 48 favoráveis.** Seis coletas, quatro binários, nenhuma exceção.
 
-A hipótese mecânica (100 travessias de plano do DataFusion em vez de 1, sem memória a economizar em troca) é
-**plausível e não medida** — ela prediz custo nas três estreitas, e a coleta C mostra +5,4% / +4,1% / +2,0% em
-q24/q25/q26, o que é consistente mas longe de prova. Fica marcada como hipótese, não como explicação.
+**As estreitas custam ~1,7%, e a alegação vem com três ressalvas que a enfraquecem:** (a) **nenhuma das três
+atinge significância individualmente** — só o agrupamento chega a p = 0,037; (b) **o agrupamento foi formado
+depois de ver a direção do dado**, o que é exatamente o tipo de decisão que infla p-valor, e declarar isso é
+obrigatório; (c) há **multiplicidade** — 16 testes de sinal por consulta×coleta, dos quais se esperam 0,8 a
+p ≤ 0,05 sob a nula. A leitura que eu defendo: há provavelmente um custo pequeno, da ordem de 1 a 3%, e ele é
+**consistente com a hipótese mecânica** (100 travessias de plano do DataFusion em vez de 1, sem memória a
+economizar em troca) — mas a hipótese segue **não medida**, e o efeito é pequeno o bastante para que este
+desenho esteja no limite da própria resolução.
+
+**Duas versões anteriores desta seção erraram nas duas direções**, e vale registrar porque a segunda foi minha
+sobrecorreção da primeira: a rodada 8 disse "sem efeito nas estreitas" quando faltava poder estatístico; a
+rodada 9 disse "custo pequeno e **consistente**" e "a razão nunca ficou abaixo de 1 em média" — ambas falsas
+contra o próprio dado (a coleta A dá −0,2%). O agregado acima é o que sobrevive.
 
 E nada disso toca o resultado principal: q24, q25 e q26 economizam **31,6× / 21,9× / 31,6×** de memória.
 
 **A coluna de razões acima é `mediana(stream) / mediana(eager)` por execução** — é o que o SQL do harness computa
 (`m168_stream_ab.sql:72`), e **não** é a mesma estatística da regra de agregação fixada logo abaixo. Rotular as
 duas com a palavra "razão" foi um achado de review: quem lesse 0,746 como uma mediana-de-razões derivaria 25,4%,
-que nenhum subconjunto sustenta. Sob a regra declarada, estas duas execuções dão 0,831 e 0,821. As duas
+que nenhum subconjunto sustenta. Sob a regra declarada, estas duas execuções dão 0,817 e 0,817. As duas
 estatísticas concordam na direção e no sinal; a magnitude publicada vem sempre da regra declarada, nunca desta
 coluna.
 
 Fonte de todas as linhas desta seção: **`docs/benchmarks/m168-artifacts/paired-ab-stream.log`** (2 execuções ×
-6 pares, `so_md5=7a242fcae49602ba9625cd73e7680201`). Reproduzível com
+6 pares, `so_md5=ba2af99482a45455777ba193fb8b6fb9`). Reproduzível com
 `python3 benchmarks/m168_ab_summarize.py docs/benchmarks/m168-artifacts/paired-ab-stream.log`.
 
-**A magnitude publicável é a do regime aquecido.** Os pares 1–2 são frios (0,677 · 0,610 · 0,699 · 0,756) e
+**A magnitude publicável é a do regime aquecido.** Os pares 1–2 são frios (0,810 · 0,740 · 0,637 · 0,717) e
 inflam o ganho agregado. **Regra de agregação, fixada aqui e usada em todo o documento: mediana das razões
 pareadas** — uma versão anterior citava média para um subconjunto e mediana para outro, e daí saiu um "18,9%"
 que não é nenhum dos dois (achado de review; nenhum agregado do conjunto o produzia):
 
 | Subconjunto | n | mediana das razões | ganho |
 |---|---|---|---|
-| todos os pares | 12 | 0,828 | 17,2% |
-| pares 3–6 | 8 | 0,857 | 14,3% |
-| **pares 5–6** | 4 | **0,876** | **12,4%** |
+| todos os pares | 12 | 0,817 | 18,3% |
+| pares 3–6 | 8 | 0,832 | 16,8% |
+| **pares 5–6** | 4 | **0,832** | **16,8%** |
 
-**Publico o menor: o q23 é ~12% mais rápido em regime, com 12/12 pares favoráveis (p = 0,0005).** Toda
+**Publico o menor: o q23 é ~17% mais rápido em regime, com 12/12 pares favoráveis (p = 0,0005).** Toda
 alternativa do conjunto é mais lisonjeira. E o contrabalanceamento sustenta: nos seis pares em que o *streaming*
 rodou primeiro — a posição desfavorecida pelo aquecimento — ele venceu 6/6.
 
-**Estabilidade através de binários.** Esta é a **quinta** coleta independente, sobre **três** binários
-diferentes. O sinal do q23 não se moveu em nenhuma delas — **12/12, p = 0,0005 nas cinco**. É o resultado mais
-estável da série. A magnitude oscila com a máquina compartilhada (12,0% · 14,2% · 12,4% nas três últimas), o que
-é a razão de o documento publicar sempre o menor subconjunto e não o agregado mais lisonjeiro.
+**Estabilidade através de binários.** Esta é a **sexta** coleta independente, sobre **quatro** binários
+diferentes. O sinal do q23 não se moveu em nenhuma: **12/12 em cada uma, 48/48 no agregado**. É o resultado mais
+estável da série, e a tabela de memória saiu **idêntica ao dígito** nas quatro (43,2× / 31,6× / 21,9× / 31,6×) —
+esperado, porque é contagem de bytes.
 
-O que **se** moveu foi a leitura das projeções estreitas, e para pior — ver o quadro do q24 acima. Duas coletas
-diziam "sem efeito"; a terceira, com o mesmo desenho, detectou o custo. Uma conclusão que muda quando a amostra
-cresce não era conclusão: era ausência de poder estatístico descrita como ausência de efeito.
+A magnitude do q23 oscila com a máquina compartilhada (12,4% · 16,8% nas duas últimas), o que é a razão de o
+documento publicar sempre o menor subconjunto e não o agregado mais lisonjeiro — o agregado das 48 daria 19,0%.
 
 O ganho do q23 acompanha o regime em que a memória também cai 43×; onde há pouco a economizar, não há o que
 ganhar — e é aí que a travessia extra pode até custar (ver o quadro do q24 acima).
@@ -205,7 +207,7 @@ qualquer um pode reintroduzir o defeito removendo a guarda de `open_streaming_so
 A guarda virou `has_unflushed_pending`, chamável em vez de copiável, e o streaming declina para o eager quando ela
 é verdadeira — fail-closed.
 
-### Estado dos gates no binário final (`so_md5=7a242fcae496…`)
+### Estado dos gates no binário final (`so_md5=ba2af99482a4…`)
 
 | Gate | Resultado |
 |---|---|
@@ -232,7 +234,7 @@ uma consulta que o eager servia passaria a errar por default. `run_columnar_topk
 
 A pergunta empírica: **existe um `k` em que o eager serve e o streaming não?** Driver commitado
 (`benchmarks/m168_window_probe.sql`, `m168_inversion.sql`, `m168_inversion_narrow.sql`), artefatos em
-`m168-artifacts/`, todos com `so_md5=7a242fcae496…`.
+`m168-artifacts/`, todos com `so_md5=ba2af99482a4…`.
 
 | Cenário | streaming | eager |
 |---|---|---|
@@ -307,9 +309,10 @@ frames Rust **desenrolam** normalmente:
   `theodb_rs/Cargo.toml:85-86`.
 
 Ou seja: o código original era seguro, e o comentário que eu escrevi ao "corrigi-lo" contradizia o próprio crate.
-**A falsidade era mais cara que o defeito alegado.** Há cinco `check_for_interrupts!()` vivos em laços de
-`CREATE INDEX` (`am/build.rs:420,474,487,812`; `bench_symqg.rs:76`); um revisor futuro aplicando o racional falso
-os declararia BLOCKER em bloco ou os removeria, e `CREATE INDEX` ficaria incancelável.
+**A falsidade era mais cara que o defeito alegado.** Há **quatro** `check_for_interrupts!()` vivos em laços de
+`CREATE INDEX` (`am/build.rs:420,474,487,812`) — mais um em benchmark (`bench_symqg.rs:76`), que não é produção;
+um revisor futuro aplicando o racional falso os declararia BLOCKER em bloco ou os removeria, e `CREATE INDEX`
+ficaria incancelável.
 
 **O desenho novo permaneceu — pelas razões verdadeiras, não pela alegada.** `interrupt_is_pending()` lê os flags
 e devolve `DataFusionError`; o `check_for_interrupts!()` vem depois do `drop(held)`. Duas razões o sustentam, e
@@ -348,7 +351,7 @@ antes do timeout, em vez de contar isso como sucesso) e tem self-test de gate.
 | Asserção | Resultado | Artefato |
 |---|---|---|
 | `c1_outcome` — a consulta foi mesmo cancelada | **`canceled`** (SQLSTATE 57014) | `cancel-oracle.log` |
-| **`c1_elapsed_ms` vs `c4_full_scan_ms`** — cortou no MEIO? | **174 ms contra 998 ms** | `cancel-oracle.log` |
+| **`c1_chunk_groups` vs `c4_chunk_groups`** — cortou no MEIO? | **16 contra 101** (sinal determinístico) | `cancel-oracle.log` |
 | `c2_rows_after_cancel` — a sessão serve top-k **streaming** depois | **100** (trace `theodb_topk_pool` prova que o caminho streaming rodou) | `cancel-oracle.log` |
 | `c3_eager_rows_after_cancel` — e o caminho **eager** também | **100** (trace `theodb_decode_batch`) | `cancel-oracle.log` |
 | Controle positivo, **dois braços** | ambos abortam | `cancel-oracle-selftest.log` |

@@ -54,6 +54,9 @@ thread_local! {
     // scans (a shared thread_local, same as the agg-path `THEODB_SCAN_PROFILE` log) — a single top-level query
     // reads its own counts; SQL accessors `theodb_columnar_chunks_{skipped,scanned}()` expose them for tests.
     static SKIP_STATS: std::cell::Cell<(u64, u64)> = const { std::cell::Cell::new((0, 0)) };
+    // M168 — chunk-groups entregues pelo `ColumnarChunkStream` desde o último reset. Mesmo desenho e mesmas
+    // limitações do `SKIP_STATS` acima (thread_local, best-effort sob scans aninhados).
+    static STREAM_CG_COUNT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 /// M150 — chunk groups the zone-map pruned in the most recent `theodb_columnar` general scan (wiring metric).
@@ -66,6 +69,23 @@ fn theodb_columnar_chunks_skipped() -> i64 {
 #[pg_extern]
 fn theodb_columnar_chunks_scanned() -> i64 {
     SKIP_STATS.with(|s| s.get().1 as i64)
+}
+
+/// M168 — chunk groups the streaming top-k has delivered since the last reset (wiring metric, pillar c).
+///
+/// The deterministic half of the cancellation oracle: a full 1M-row scan delivers 100; a scan cut short by a
+/// cancellation delivers fewer. Unlike a wall-clock comparison, this is immune to machine speed, cache state and
+/// box load — which is what `benchmarks/m168_cancel_oracle.sql` needs to tell "cancelled mid-scan" from
+/// "cancelled at the end" without a single-sample timing claim.
+#[pg_extern]
+fn theodb_columnar_stream_chunk_groups() -> i64 {
+    STREAM_CG_COUNT.with(|c| c.get() as i64)
+}
+
+/// M168 — zero the streaming chunk-group counter (call before the statement you want to measure).
+#[pg_extern]
+fn theodb_columnar_stream_reset() {
+    STREAM_CG_COUNT.with(|c| c.set(0));
 }
 
 // ===========================================================================================================
@@ -983,10 +1003,14 @@ pub(crate) unsafe fn plan_columnar_scan(
     // Este `assert` prende a obrigação no callee. Uma versão anterior usava `debug_assert`, justificando que "o
     // custo de um SPI/scan de catálogo por plano não se justifica em release" — e isso está errado sobre a
     // própria função, definida vinte linhas acima: `has_unflushed_pending` é um lookup num
-    // `thread_local! HashMap<u32, PendingWrite>` (ver o `PENDING` no topo do módulo), da ordem de nanossegundos,
+    // `thread_local! HashMap<u32, PendingWrite>` (`WRITE_STATES`, no topo do módulo), da ordem de nanossegundos,
     // sem SPI e sem catálogo (achado de review). Com o custo real, `debug_assert` não tinha defesa: o artefato
     // `--release` é o que embarca, é sobre ele que todos os números do M168 foram medidos, e era exatamente nele
     // que a guarda não existia.
+    //
+    // O panic deste `assert!` desenrola PASSANDO pelo `relation_close` de `columnar_agg.rs:2417`. É correto
+    // mesmo assim: o abort da transação devolve a referência pelo resource owner. Vale dizer porque a
+    // justificativa anterior era sobre custo, e alguém poderia trocar por `Err` supondo vazamento de relcache.
     assert!(
         !has_unflushed_pending(rel),
         "plan_columnar_scan chamado com linhas pendentes não descarregadas: o plano seria construído sobre \
@@ -1121,6 +1145,12 @@ impl ColumnarChunkStream {
         skip: bool,
     ) -> Result<Option<Vec<(String, u32, DecodedColumn)>>, String> {
         self.affinity.assert_owned("ColumnarChunkStream::next");
+        // M168 — quantos chunk-groups este scan streaming ENTREGOU. É o sinal determinístico de que um
+        // cancelamento cortou o scan no meio: um scan completo de 1M linhas entrega 100, um cancelado entrega
+        // menos. O oráculo de cancelamento dizia gatear "a contagem" e na verdade gateava tempo de relógio
+        // (achado de review) — e uma medida de relógio de amostra única viola o R3 de `discover-phd-rigor.md`,
+        // além de ficar sujeita a carga da box. Este contador é imune a velocidade de máquina, cache e ruído.
+        STREAM_CG_COUNT.with(|c| c.set(c.get() + 1));
         let n = self.plan.wanted.len();
         let ctx = CgDecodeCtx {
             rel: self.rel,

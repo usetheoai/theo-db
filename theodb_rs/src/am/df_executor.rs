@@ -71,10 +71,10 @@ impl Drop for HeldInterrupts {
 /// Rust **desenrolam**. Este repositório já dizia isso corretamente em `am/build.rs:466` e em
 /// `Cargo.toml:85-86` — o comentário anterior contradizia o próprio crate.
 ///
-/// **Isso importa muito além deste arquivo:** há cinco `check_for_interrupts!()` vivos em laços de
-/// `CREATE INDEX` (`am/build.rs:420,474,487,812`; `bench_symqg.rs:76`). Sob o racional falso eles seriam ou
-/// declarados BLOCKER em bloco, ou removidos — e o `CREATE INDEX` ficaria incancelável. A falsidade custaria mais
-/// do que o defeito que ela alegava corrigir.
+/// **Isso importa muito além deste arquivo:** há **quatro** `check_for_interrupts!()` vivos em laços de
+/// `CREATE INDEX` (`am/build.rs:420,474,487,812`) — mais um num benchmark (`bench_symqg.rs:76`), que não conta
+/// como caminho de produção. Sob o racional falso eles seriam ou declarados BLOCKER em bloco, ou removidos, e o
+/// `CREATE INDEX` ficaria incancelável. A falsidade custaria mais do que o defeito que ela alegava corrigir.
 ///
 /// As razões **verdadeiras** para o desenho ler-e-devolver-`Err` são duas, e bastam:
 ///
@@ -93,12 +93,28 @@ unsafe fn interrupt_is_pending() -> bool {
     // scan — ele é o flag que o PG arma primeiro. O que decide é o segundo termo: os flags que `ProcessInterrupts`
     // de fato transforma em ERROR/FATAL.
     //
-    // Uma versão anterior listava só `QueryCancelPending`/`ProcDiePending` e o comentário afirmava serem "os dois".
-    // São quatro, e o `postgres.c` do PG18 no acervo mostra os outros dois (achado de review):
-    //   * `ClientConnectionLost`        -> FATAL (`tcop/postgres.c:3341`)
-    //   * `TransactionTimeoutPending`   -> ERROR (`tcop/postgres.c:3453`)
+    // NÃO É UMA LISTA EXAUSTIVA, e duas versões anteriores deste comentário afirmaram que era ("os dois", depois
+    // "são quatro"). O que está coberto:
+    //
+    //   * `QueryCancelPending`         -> ERROR (`tcop/postgres.c:3372`) — Ctrl-C, statement_timeout
+    //   * `ProcDiePending`             -> FATAL (`:3300`)                — pg_terminate_backend
+    //   * `TransactionTimeoutPending`  -> **FATAL** (`:3460`)            — transaction_timeout
+    //   * `ClientConnectionLost`       -> FATAL (`:3341`)                — defense-in-depth, ver abaixo
+    //
     // Sem `TransactionTimeoutPending`, um `SET transaction_timeout` sobre um scan longo era ignorado do começo ao
-    // fim — a mesma classe de buraco que motivou este safe-point, só mais estreita.
+    // fim: o handler (`postinit.c:1409-1414`) arma SÓ esse flag, nunca `QueryCancelPending`.
+    //
+    // O QUE FICA DESCOBERTO, e não dá para fechar daqui: `RecoveryConflictPending` (`:3432` ->
+    // `ProcessRecoveryConflictInterrupts`, ERROR/FATAL) é `static volatile sig_atomic_t` em `postgres.c:171` —
+    // escopo de arquivo, sem binding no pgrx, invisível para uma extensão. **Consequência real: num hot standby,
+    // um scan colunar streaming longo continua ignorando conflitos de recuperação até terminar**, atrasando o
+    // replay além do `max_standby_streaming_delay`. É a mesma classe de buraco que o `TransactionTimeoutPending`
+    // acabou de fechar, e a ação correta aqui é declará-lo, não fingir cobertura (achado de review).
+    //
+    // `ClientConnectionLost` é defense-in-depth e provavelmente inalcançável nesta janela: ele é armado em
+    // `pqcomm.c:1411` (um *send* que falhou — um scan longo não envia nada) e dentro do próprio
+    // `ProcessInterrupts` (`:3334`), que retorna cedo enquanto o holdoff está de pé. Custa uma leitura de `i32`;
+    // fica, mas sem alegar que fecha um buraco vivo.
     //
     // `IdleInTransactionSessionTimeoutPending` fica DE FORA de propósito: por definição ele só dispara com a sessão
     // ociosa, e um scan em curso não é uma sessão ociosa.
@@ -1219,20 +1235,20 @@ pub(super) unsafe fn run_columnar_topk(
             // Erro de integridade de dados, cancelamento, guard de re-execução: não são o caso que o fail-open
             // cobre. Sobem.
             //
-            // O CANCELAMENTO TEM DE SAIR COMO CANCELAMENTO (57014), não como erro interno. Normalmente ele nem
-            // chega aqui — o `check_for_interrupts!()` depois do `drop(held)` já levantou o 57014. Mas ele vira
-            // no-op se houver um holdoff externo ou `CritSectionCount != 0` (`tcop/postgres.c:3275` retorna
-            // cedo), e aí o `Err` desceria até esta linha e o usuário receberia `df_executor: datafusion: …`
-            // como XX000 pelo que é um cancelamento (achado de review).
+            // JANELA RESIDUAL, declarada em vez de "corrigida". Uma versão anterior punha um
+            // `check_for_interrupts!()` aqui, alegando resgatar o SQLSTATE 57014 quando o `check_for_interrupts!()`
+            // pós-`drop(held)` virasse no-op (holdoff externo ou `CritSectionCount != 0` —
+            // `tcop/postgres.c:3275` retorna cedo). **Aquela linha era inerte exatamente na janela que alegava
+            // cobrir** (achado de review): entre uma chamada e outra nada toca `InterruptHoldoffCount` nem
+            // `CritSectionCount`, então se a primeira retornou cedo a segunda retorna cedo pelo mesmo motivo. Era
+            // uma correção que não corrigia, publicada no CHANGELOG como se corrigisse.
             //
-            // A releitura abaixo NÃO casa a mensagem do erro — isso seria a Regra 8 ao contrário, e a mensagem é
-            // uma constante nossa que qualquer refactor moveria em silêncio. Ela relê o estado do backend, que é
-            // a fonte de verdade: se ainda há interrupção pendente, o PostgreSQL levanta o erro certo com o
-            // SQLSTATE certo, seja qual for a origem do `Err`.
-            Err(e) => {
-                pgrx::check_for_interrupts!();
-                return Err(format!("df_executor: datafusion: {e}"));
-            }
+            // O que fica, honestamente: sob um holdoff externo o cancelamento sai como erro interno em vez de
+            // 57014. É uma janela estreita e defensável — sob holdoff externo nada é interrompível de qualquer
+            // forma. Tipar o cancelamento (um marcador em `DataFusionError::External` + `downcast_ref`) resolveria
+            // de verdade, e é o caminho se algum dia isso doer; hoje seria código para um caso que ninguém alcança
+            // (parsimony ladder, degrau 1).
+            Err(e) => return Err(format!("df_executor: datafusion: {e}")),
         }
     }
 

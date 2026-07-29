@@ -15,9 +15,9 @@
 -- DESENROLAM. Este repositório já dizia isso em `am/build.rs:466` e `Cargo.toml:85-86`.
 --
 -- Corrigir só a prosa do verdict e deixar a alegação falsa aqui seria pior que inútil: este é o arquivo que um
--- revisor futuro abre. E o dano seria concreto — há cinco `check_for_interrupts!()` vivos em laços de
--- `CREATE INDEX` (`am/build.rs:420,474,487,812`; `bench_symqg.rs:76`) que o racional falso condenaria em bloco,
--- deixando `CREATE INDEX` incancelável.
+-- revisor futuro abre. E o dano seria concreto — há QUATRO `check_for_interrupts!()` vivos em laços de
+-- `CREATE INDEX` (`am/build.rs:420,474,487,812`) que o racional falso condenaria em bloco, deixando
+-- `CREATE INDEX` incancelável. (Há um quinto em `bench_symqg.rs:76`, que é benchmark, não produção.)
 --
 -- POR QUE O DESENHO É LER-E-DEVOLVER-`Err`, ENTÃO. Por duas razões verdadeiras, e bastam: (1) não desenrolar por
 -- dentro de frames async de terceiros — um panic no `poll_next` atravessa o executor do tokio e o plano do
@@ -81,19 +81,22 @@ $c0$;
 -- `check_for_interrupts!()` que vem depois do `drop(held)` levanta o 57014 assim mesmo. `c1_outcome='canceled'`,
 -- `c2=100`, `c3=100` — passa. O gate não distingue "cancelou NO MEIO" de "cancelou NO FIM".
 --
--- A evidência diferencial existe e está no log, mas era um humano contando: na coleta de 2026-07-29 o C1 emitiu
--- 17 linhas `theodb_decode_batch_stream` contra as 100 do C2 (1M linhas ÷ CHUNK_GROUP_ROWS=10.000). ISSO prova
--- que o scan foi cortado em ~17%. A asserção C4 abaixo transforma essa contagem em gate.
+-- A evidência diferencial é a CONTAGEM DE CHUNK-GROUPS entregues: um scan completo de 1M linhas entrega 100
+-- (CHUNK_GROUP_ROWS=10.000); um cortado entrega menos. `theodb_columnar_stream_chunk_groups()` a expõe, e o gate
+-- final compara C1 contra C4. Uma versão anterior gateava TEMPO DE RELÓGIO enquanto o comentário afirmava gatear
+-- a contagem (achado de review) — e uma amostra única de relógio, sujeita a carga da box e a estado de cache,
+-- viola o R3 de `discover-phd-rigor.md` para alegação de tempo. A contagem não depende de nada disso.
 --
--- Limite honesto que permanece: o corte depende do `statement_timeout` cair DENTRO de um `poll_next`. Um k menor,
--- cache mais quente ou uma box mais rápida põem o cancelamento depois do último batch — por isso o C4 reprova como
--- INCONCLUSIVO (não como sucesso) quando a contagem não indica corte.
+-- Limite honesto que permanece: o corte depende do `statement_timeout` cair DENTRO de um `poll_next`. Se o scan
+-- tiver poucos chunk-groups não há onde cortar no meio — por isso o gate reprova como INCONCLUSIVO (não como
+-- sucesso) quando `c4_chunk_groups < 4`.
 \echo '### M168-C1: cancela um top-k streaming no meio via statement_timeout'
 SET theodb.enable_columnar_topk_stream = on;
 SET statement_timeout = '150ms';
 \set ON_ERROR_STOP off
 -- ESPERADO: erro 57014 (query_canceled). Um resultado aqui significa que a consulta terminou antes do timeout —
 -- o gate abaixo trata isso como teste INCONCLUSIVO, não como sucesso.
+SELECT theodb_columnar_stream_reset();
 DO $c1$
 DECLARE t0 timestamptz := clock_timestamp();
 BEGIN
@@ -109,6 +112,10 @@ EXCEPTION
     -- diferente no relógio. É isto que separa "cancelou no meio" de "cancelou no fim".
     INSERT INTO cancel_res VALUES ('c1_elapsed_ms',
       round(extract(epoch FROM clock_timestamp() - t0) * 1000)::text);
+    -- O SINAL DETERMINÍSTICO, que é o que o gate usa. O tempo fica registrado como informação secundária:
+    -- ele depende de velocidade de máquina, cache e carga, e uma amostra única de relógio viola o R3 de
+    -- `discover-phd-rigor.md`. A contagem de chunk-groups não depende de nada disso.
+    INSERT INTO cancel_res VALUES ('c1_chunk_groups', theodb_columnar_stream_chunk_groups()::text);
   WHEN OTHERS THEN
     INSERT INTO cancel_res VALUES ('c1_outcome', 'other:' || SQLSTATE || ':' || SQLERRM);
 END
@@ -171,13 +178,24 @@ SET theodb.enable_columnar_topk_stream = on;
 -- Sem esta medida, "c1 levou 200ms" não significa nada: pode ser que o scan inteiro leve 200ms. A referência é o
 -- MESMO trabalho sem timeout. O gate compara os dois.
 SET theodb.enable_columnar_topk_stream = on;
+SELECT theodb_columnar_stream_reset();
 DO $c4$
-DECLARE t0 timestamptz := clock_timestamp();
+DECLARE t0 timestamptz := clock_timestamp(); plan text;
 BEGIN
+  -- C4 é o DENOMINADOR do gate, então ele assere o próprio roteamento como todos os outros passos. Uma versão
+  -- anterior era o único passo sem essa asserção, contradizendo a regra que este arquivo declara acima.
+  EXECUTE 'EXPLAIN (COSTS OFF, FORMAT JSON) CREATE TABLE c4_probe AS '
+          'SELECT EventTime, CounterID, WatchID, UserID, SearchPhrase FROM hits '
+          'ORDER BY EventTime, CounterID, WatchID, UserID LIMIT 50000' INTO plan;
+  IF position('theodb_columnar_agg' IN plan) = 0 THEN
+    INSERT INTO cancel_res VALUES ('c4_chunk_groups', 'NAO_ROTEOU');
+    RETURN;
+  END IF;
   EXECUTE 'CREATE TEMP TABLE c4_out AS SELECT EventTime, CounterID, WatchID, UserID, SearchPhrase FROM hits '
           'ORDER BY EventTime, CounterID, WatchID, UserID LIMIT 50000';
   INSERT INTO cancel_res VALUES ('c4_full_scan_ms',
     round(extract(epoch FROM clock_timestamp() - t0) * 1000)::text);
+  INSERT INTO cancel_res VALUES ('c4_chunk_groups', theodb_columnar_stream_chunk_groups()::text);
 END
 $c4$;
 
@@ -193,35 +211,41 @@ SELECT * FROM cancel_res ORDER BY q;
   -- de C1 iguala o do scan inteiro. Sem esta asserção o arquivo passa com o safe-point removido, que é o
   -- contra-exemplo que uma revisão construiu. Simular por dado é o único jeito de exercitar o ramo sem
   -- desinstalar o safe-point e reconstruir por 14 minutos.
-  UPDATE cancel_res SET v = (SELECT v FROM cancel_res WHERE q = 'c4_full_scan_ms')
-   WHERE q = 'c1_elapsed_ms';
+  UPDATE cancel_res SET v = (SELECT v FROM cancel_res WHERE q = 'c4_chunk_groups')
+   WHERE q = 'c1_chunk_groups';
 \endif
 DO $gate$
-DECLARE bad text := ''; c1 text; c2 text; c3 text; el numeric; full_ms numeric;
+DECLARE bad text := ''; c1 text; c2 text; c3 text; el numeric; full_ms numeric; c1cg text; c4cg text;
 BEGIN
   SELECT v INTO c1 FROM cancel_res WHERE q = 'c1_outcome';
   SELECT v INTO c2 FROM cancel_res WHERE q = 'c2_rows_after_cancel';
   SELECT v INTO c3 FROM cancel_res WHERE q = 'c3_eager_rows_after_cancel';
   SELECT v::numeric INTO el FROM cancel_res WHERE q = 'c1_elapsed_ms';
   SELECT v::numeric INTO full_ms FROM cancel_res WHERE q = 'c4_full_scan_ms';
+  SELECT v INTO c1cg FROM cancel_res WHERE q = 'c1_chunk_groups';
+  SELECT v INTO c4cg FROM cancel_res WHERE q = 'c4_chunk_groups';
 
-  -- DIFERENCIALIDADE. Este é o gate que faltava: sem o safe-point, o cancelamento só é notado DEPOIS do scan
-  -- completo, então `c1_elapsed` ~ `c4_full_scan`. Com ele, o corte acontece na fronteira de chunk-group e
-  -- `c1_elapsed` fica perto do timeout. Sem esta comparação o arquivo inteiro passa com o safe-point REMOVIDO
-  -- (contra-exemplo construído em review).
-  IF el IS NULL OR full_ms IS NULL THEN
-    bad := bad || 'faltam as medidas de tempo (c1_elapsed_ms / c4_full_scan_ms): o gate diferencial não pôde '
-               || 'rodar, e sem ele este arquivo passa mesmo com o safe-point removido; ';
-  ELSIF full_ms < 400 THEN
-    -- INCONCLUSIVO, não sucesso: se o scan completo já cabe perto do timeout, os dois regimes são
-    -- indistinguíveis por relógio. Aumente o k (ou baixe o timeout) e repita.
-    bad := bad || format('c4_full_scan_ms=%s (<400): o scan completo é rápido demais para separar "cancelou no '
-                      || 'meio" de "cancelou no fim" — teste INCONCLUSIVO, não aprovado; ', full_ms);
-  ELSIF el > full_ms * 0.5 THEN
-    bad := bad || format('c1_elapsed_ms=%s contra c4_full_scan_ms=%s: o cancelamento levou mais da metade do '
-                      || 'scan completo, ou seja NÃO foi notado na fronteira de chunk-group. É a assinatura de '
-                      || 'um safe-point ausente ou inerte; ', el, full_ms);
+  -- DIFERENCIALIDADE — o gate que faltava, e agora sobre um sinal DETERMINÍSTICO. Sem o safe-point, o
+  -- cancelamento só é notado DEPOIS do scan completo, então o scan cancelado entrega TANTOS chunk-groups quanto o
+  -- completo. Com ele, entrega menos. Uma versão anterior comparava tempo de relógio, e o comentário deste
+  -- arquivo afirmava gatear "a contagem" quando gateava o relógio (achado de review) — além de ser amostra única,
+  -- o que o R3 de `discover-phd-rigor.md` proíbe para alegação de tempo. A contagem é imune a velocidade de
+  -- máquina, cache e carga.
+  IF c1cg = 'NAO_ROTEOU' OR c4cg = 'NAO_ROTEOU' THEN
+    bad := bad || 'C1 ou C4 não roteou para o caminho streaming — o gate diferencial não mede nada; ';
+  ELSIF c1cg IS NULL OR c4cg IS NULL THEN
+    bad := bad || 'falta a contagem de chunk-groups (c1/c4): sem ela este arquivo passa mesmo com o safe-point '
+               || 'removido; ';
+  ELSIF c4cg::numeric < 4 THEN
+    -- INCONCLUSIVO, não sucesso: com poucos chunk-groups não há onde cortar no meio.
+    bad := bad || format('c4_chunk_groups=%s (<4): o scan tem chunk-groups demais poucos para distinguir "cortou '
+                      || 'no meio" de "cortou no fim" — INCONCLUSIVO, não aprovado; ', c4cg);
+  ELSIF c1cg::numeric > c4cg::numeric * 0.5 THEN
+    bad := bad || format('c1_chunk_groups=%s contra c4_chunk_groups=%s: o cancelamento entregou mais da metade '
+                      || 'dos chunk-groups do scan completo, ou seja NÃO foi notado na fronteira. É a assinatura '
+                      || 'de um safe-point ausente ou inerte; ', c1cg, c4cg);
   END IF;
+  -- O tempo fica como informação secundária no relatório, não como gate.
 
   -- NÃO-VACUIDADE. Se a consulta terminou antes do timeout, o safe-point nunca viu um cancelamento pendente e
   -- os sucessos de C2/C3 não provam nada. Isso é INCONCLUSIVO, e dizer isso é obrigatório — um gate que passa
@@ -254,7 +278,7 @@ BEGIN
 
   IF bad <> '' THEN RAISE EXCEPTION 'M168 CANCEL GATE FAILED: %', bad; END IF;
   RAISE NOTICE 'M168 CANCEL GATE ok: o top-k streaming foi cancelado de verdade (57014) e a sessão continuou '
-               'servindo consultas DataFusion nos dois caminhos, e o corte aconteceu no MEIO do scan (gate de tempo).';
+               'servindo consultas DataFusion nos dois caminhos, e o corte aconteceu no MEIO do scan (gate de contagem de chunk-groups).';
 END
 $gate$;
 DROP TABLE cancel_res;

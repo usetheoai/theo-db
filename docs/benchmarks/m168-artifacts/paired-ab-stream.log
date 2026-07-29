@@ -1,7 +1,7 @@
-=== paired-ab-stream (execução 1/2) start 2026-07-29T15:57:00+00:00 ===
-so_md5=7a242fcae49602ba9625cd73e7680201
+=== paired-ab-stream (execução 1/2) start 2026-07-29T16:49:55+00:00 ===
+so_md5=ba2af99482a45455777ba193fb8b6fb9
 so_path=/root/.pgrx/18.4/pgrx-install/lib/postgresql/theodb_rs.so
-postmaster=2026-07-29 15:55:08.621968+00
+postmaster=2026-07-29 16:38:45.911977+00
 SET
 SET
 SET
@@ -2704,10 +2704,10 @@ psql:/root/theo-db/benchmarks/m168_stream_ab.sql:74: WARNING:  theodb_admit_decl
 psql:/root/theo-db/benchmarks/m168_stream_ab.sql:74: WARNING:  theodb_admit_decline: topk_parent_not_limit
   q  | eager_ms | stream_ms | ratio | pairs 
 -----+----------+-----------+-------+-------
- q23 |   4307.4 |    3533.1 | 0.820 |     6
- q24 |    146.3 |     146.4 | 1.000 |     6
- q25 |    107.8 |     114.4 | 1.061 |     6
- q26 |    142.7 |     144.0 | 1.009 |     6
+ q23 |   4273.3 |    3567.4 | 0.835 |     6
+ q24 |    138.2 |     150.8 | 1.091 |     6
+ q25 |    108.5 |     112.6 | 1.038 |     6
+ q26 |    143.4 |     146.4 | 1.021 |     6
 (4 rows)
 
 ### per-pair detail (so a single outlier cannot hide behind a median)
@@ -2716,17 +2716,17 @@ psql:/root/theo-db/benchmarks/m168_stream_ab.sql:80: WARNING:  theodb_admit_decl
 psql:/root/theo-db/benchmarks/m168_stream_ab.sql:80: WARNING:  theodb_admit_decline: topk_parent_not_limit
   q  |                 eager_ms                  |                 stream_ms                 
 -----+-------------------------------------------+-------------------------------------------
- q23 | 5601.9 5646.9 4377.1 3997.9 4237.6 4018.3 | 3790.0 3441.8 3673.3 3554.5 3484.3 3511.7
- q24 | 157.9 175.6 134.7 130.0 129.9 175.3       | 148.5 142.2 144.3 151.0 141.8 185.2
- q25 | 129.4 118.4 99.8 103.1 111.6 104.0        | 130.2 126.3 111.4 97.7 115.6 113.2
- q26 | 145.0 156.3 135.4 147.5 140.5 136.0       | 152.3 155.9 127.5 130.2 155.4 135.8
+ q23 | 5354.1 5267.1 4295.4 4251.2 4173.0 4085.5 | 4338.2 3900.2 3536.6 3598.2 3377.1 3383.3
+ q24 | 174.3 141.8 139.3 137.1 127.5 134.2       | 153.1 148.4 154.7 157.8 143.5 147.7
+ q25 | 140.2 110.5 107.6 109.4 101.3 106.8       | 149.2 111.3 123.4 113.9 105.7 108.0
+ q26 | 192.3 142.3 147.9 130.1 130.6 144.5       | 200.3 145.8 133.9 144.6 211.7 147.0
 (4 rows)
 
-=== paired-ab-stream (execução 1/2) rc=0 end 2026-07-29T15:57:54+00:00 ===
-=== paired-ab-stream (execução 2/2) start 2026-07-29T15:57:54+00:00 ===
-so_md5=7a242fcae49602ba9625cd73e7680201
+=== paired-ab-stream (execução 1/2) rc=0 end 2026-07-29T16:50:50+00:00 ===
+=== paired-ab-stream (execução 2/2) start 2026-07-29T16:50:50+00:00 ===
+so_md5=ba2af99482a45455777ba193fb8b6fb9
 so_path=/root/.pgrx/18.4/pgrx-install/lib/postgresql/theodb_rs.so
-postmaster=2026-07-29 15:55:08.621968+00
+postmaster=2026-07-29 16:38:45.911977+00
 SET
 SET
 SET
@@ -5429,10 +5429,10 @@ psql:/root/theo-db/benchmarks/m168_stream_ab.sql:74: WARNING:  theodb_admit_decl
 psql:/root/theo-db/benchmarks/m168_stream_ab.sql:74: WARNING:  theodb_admit_decline: topk_parent_not_limit
   q  | eager_ms | stream_ms | ratio | pairs 
 -----+----------+-----------+-------+-------
- q23 |   4455.2 |    3642.9 | 0.818 |     6
- q24 |    144.6 |     152.4 | 1.054 |     6
- q25 |    111.8 |     115.0 | 1.029 |     6
- q26 |    143.9 |     151.2 | 1.050 |     6
+ q23 |   4438.4 |    3559.5 | 0.802 |     6
+ q24 |    135.5 |     137.9 | 1.018 |     6
+ q25 |    116.2 |     116.1 | 0.999 |     6
+ q26 |    152.1 |     171.2 | 1.125 |     6
 (4 rows)
 
 ### per-pair detail (so a single outlier cannot hide behind a median)
@@ -5441,10 +5441,10 @@ psql:/root/theo-db/benchmarks/m168_stream_ab.sql:80: WARNING:  theodb_admit_decl
 psql:/root/theo-db/benchmarks/m168_stream_ab.sql:80: WARNING:  theodb_admit_decline: topk_parent_not_limit
   q  |                 eager_ms                  |                 stream_ms                 
 -----+-------------------------------------------+-------------------------------------------
- q23 | 5220.7 5013.2 4501.1 4409.3 4018.4 4075.2 | 3651.6 3791.7 3634.2 3679.2 3526.1 3606.6
- q24 | 144.0 180.2 149.2 145.2 127.8 136.6       | 148.9 202.4 152.1 152.7 161.9 143.0
- q25 | 119.0 115.9 109.5 114.0 105.9 106.5       | 121.4 125.4 114.6 111.4 104.5 115.5
- q26 | 149.9 143.3 146.9 137.6 144.6 139.0       | 172.1 149.3 142.9 153.0 156.0 135.0
+ q23 | 5410.7 5110.4 4716.7 4160.1 3996.9 3966.2 | 3445.5 3666.7 3766.6 3693.6 3339.6 3452.2
+ q24 | 127.1 158.2 137.6 130.3 133.4 151.4       | 140.7 165.3 169.4 128.5 134.8 135.2
+ q25 | 119.6 112.8 149.0 99.0 102.5 123.4        | 134.4 111.5 146.8 107.4 119.5 112.7
+ q26 | 164.1 154.0 180.2 141.5 144.2 150.2       | 171.6 181.2 151.7 139.7 171.7 170.7
 (4 rows)
 
-=== paired-ab-stream (execução 2/2) rc=0 end 2026-07-29T15:58:49+00:00 ===
+=== paired-ab-stream (execução 2/2) rc=0 end 2026-07-29T16:51:44+00:00 ===
