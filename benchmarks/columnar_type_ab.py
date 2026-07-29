@@ -85,7 +85,21 @@ def _lit(v) -> str:
     return str(v)
 
 
+# GUARD (M167): this harness DROPs and recreates `hits` with its own 2000-row synthetic schema. Run against a
+# database that holds a ClickBench `hits` and it destroys it — which happened twice during M167, the second time
+# after the hazard had already been written down. Refuse rather than rely on the operator remembering.
+def _refuse_if_clickbench(cur) -> None:
+    cur.execute("""SELECT count(*) FROM information_schema.columns
+                   WHERE table_name = 'hits' AND column_name IN ('watchid','searchphrase','eventtime')""")
+    if cur.fetchone()[0] >= 2:
+        raise SystemExit(
+            "REFUSING: this database's `hits` looks like ClickBench (has WatchID/SearchPhrase/EventTime).\n"
+            "This harness recreates `hits` from scratch and would destroy it. Point PGDATABASE at a scratch\n"
+            "database instead, e.g.  createdb typeab && PGDATABASE=typeab python3 benchmarks/columnar_type_ab.py")
+
+
 def setup_tables(cur) -> int:
+    _refuse_if_clickbench(cur)
     """CREATE the columnar `hits` + heap twin `hits_heap`, load the catalog cross-product (one row per (col-index)).
     Returns the loaded row count (equal in both). Fails fast if theodb_columnar is unavailable (no silent heap fallback)."""
     cur.execute("SELECT 1 FROM pg_am WHERE amname = 'theodb_columnar'")
@@ -255,9 +269,25 @@ def build_cases() -> list[tuple[str, str, str, str | None]]:
         ("sum_i4_add_decline", "SELECT sum(c4 + 1) FROM hits", "decline", None),                   # int4 base → per-row 22003 reachable
         ("sum_i8_add_decline", "SELECT sum(c8 + 1) FROM hits", "decline", None),                   # int8 result → widened sum can overflow
         ("sum_i2_wide_decline", "SELECT sum(c2 + 2147483647) FROM hits", "decline", None),         # 32767+2147483647 leaves int4 → decline
-        # SCOPE: this harness covers the AGG/group/in-list/zone-pred/expr admit-paths — where every historical type-class
-        # bug lived (M151/M154/M157/M161/M163). The late-materialization *projection* path (M158) is query-shape, not
-        # type-class, and is cost-gated on table size + enable_sort — it belongs to M158's own A/B, not here.
+        # M167 — projection top-k (late-mat) ROUTING cases. Division of labour with `m158_ec_harness.sql`: the
+        # CORRECTNESS of the top-k (which k rows, in which order) is proven there, over a 20k fixture whose `wid` is
+        # UNIQUE so a full-row symmetric-EXCEPT is tie-free — this fixture cycles ≤6 distinct values per column, so a
+        # row-level comparison here would be tie-ambiguous and worthless. What THIS harness is good at, and what the
+        # M167 DoD asks it for, is the type-class question: does the shape route, and does a text sort key route only
+        # where byte-order is provable. Measured: `enable_sort = off` (set in session_setup for the M161 group-key
+        # lesson) does NOT suppress the swap — it is a cost penalty, not a prohibition, and the Sort node still forms.
+        ("topk_int_order", "SELECT c4 FROM hits WHERE c4 > -2147483647 ORDER BY c4 LIMIT 5", "route", AGG),
+        ("topk_ts_order", "SELECT c4 FROM hits WHERE c4 > -2147483647 ORDER BY ts LIMIT 5", "route", AGG),
+        ("topk_multikey", "SELECT c4 FROM hits WHERE c4 > -2147483647 ORDER BY c2, c4 LIMIT 5", "route", AGG),
+        # expect_node=AGG (not None) on purpose: with None, `plan_routes` matches ANY "Custom Scan (theodb_columnar…",
+        # and the M149 `theodb_columnar_project` scan is ALWAYS present under a columnar table — so a None-node decline
+        # case can never observe a top-k decline. Naming the node the top-k swap emits is what makes the assertion real.
+        # (Same false-green class the M161 lesson in session_setup guards against.)
+        ("topk_text_named_collation_decline",
+         'SELECT t FROM hits WHERE c4 > -2147483647 ORDER BY t COLLATE "en_US.utf8" LIMIT 5', "decline", AGG),
+        # SCOPE: this harness covers the AGG/group/in-list/zone-pred/expr admit-paths plus the M167 projection-top-k
+        # ROUTING cases above — where every historical type-class bug lived (M151/M154/M157/M161/M163). The top-k
+        # CORRECTNESS oracle (LIMIT-preserving, tie-free, order-checked) lives in `benchmarks/m158_ec_harness.sql`.
     ]
 
 

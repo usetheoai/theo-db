@@ -41,8 +41,19 @@ Append SEPA's response to `.claude/knowledge-base/implementations/{PLAN_SLUG}/se
 
 - Read the plan's TDD section for this task
 - Apply any non-critical SEPA suggestions from the pre-RED brief
-- Write the failing test FIRST in the declared `.test.ts` file
-- Run `npm test -- {test-file-path}` and CONFIRM it FAILS for the expected reason
+- Write the failing test FIRST, in the file the task's `#### Files to edit` declares. Name it per the project's
+  convention in `.claude/rules/testing.md § 5 — Test pairing convention` — do NOT assume `.test.ts`.
+- **Derive the test runner from the repo, never assume a stack.** Precedence:
+  1. an explicit command in the plan's `#### TDD` section (it wins — the plan is the contract);
+  2. the build manifest at the relevant root — `Cargo.toml` → `cargo test` / `cargo pgrx test`;
+     `pyproject.toml` / `requirements.txt` → `pytest <path>`; `package.json` → `npm test -- <path>`;
+     `go.mod` → `go test ./...`; `Makefile` / `Taskfile` → the declared target;
+  3. `.claude/rules/code-quality-languages.txt` for which languages this project actually enables.
+  A repo may be polyglot: pick the runner for the language of THIS task's file, not the repo's "main" language.
+- **If the test cannot run on this machine** (toolchain absent, DB/service required and not local), do NOT improvise a
+  local substitute and do NOT skip the RED. Either run it on the environment the plan declares, or HALT the iteration and
+  surface the missing environment — a RED that never actually failed is fabricated evidence (Rule 3).
+- Run that command and CONFIRM it FAILS for the expected reason
 - If the test passes BEFORE implementation, the test does not exercise the targeted behavior — HALT, revise the test
 - Update progress file: task status → `red`, log iteration outcome
 
@@ -57,7 +68,7 @@ Append SEPA's response to `.claude/knowledge-base/implementations/{PLAN_SLUG}/se
   6. Only then: the minimum that makes the test pass.
 - The ladder NEVER justifies skipping the failing test, input validation, error handling, security, or accessibility (`parsimony-ladder.md § Never on the chopping block`). A "fewer lines" argument that weakens correctness is a Rule 3 honesty violation — state the need explicitly and write the necessary code.
 - Write the MINIMAL production code that makes the RED test pass
-- Run `npm test -- {test-file-path}` and confirm PASS
+- Re-run the SAME command the RED phase used (same runner, same file) and confirm PASS
 - If still failing after a reasonable attempt, increment task retry counter (max 3 per task)
 - After 3 GREEN failures, mark task BLOCKED with reason "implementation strategy not viable"
 - Update progress file: task status → `green`, log iteration outcome
@@ -76,8 +87,8 @@ Append response to `.claude/knowledge-base/implementations/{PLAN_SLUG}/sepa-iter
 
 Review the new code against quality rules from `SKILL.md § Quality rules` PLUS SEPA's post-GREEN findings:
 
-- **SOLID:** SRP (one reason to change), OCP (composition over inheritance), LSP (subtypes substitute), ISP (role-shaped interfaces), DIP (`src/core/` ↛ `src/local|cloud/`)
-- **Clean Code:** naming conventions, function size, no dead code, no `any`, no `console.log`
+- **SOLID:** SRP (one reason to change), OCP (composition over inheritance), LSP (subtypes substitute), ISP (role-shaped interfaces), DIP — this project's layering and prohibited import directions are declared in `.claude/rules/architecture.md`, not assumed here
+- **Clean Code:** naming conventions, function size, no dead code, no untyped escape hatch (`any` / `interface{}` / `Object` / `unsafe` without a stated invariant), no ad-hoc `print` / `console.log` / `eprintln!` on production paths — use the project's structured logger
 - **DRY:** rule of three for extraction; don't merge code that looks similar but represents different concepts
 - **Design Patterns:** apply established patterns when the problem matches; don't invent
 - **SEPA-flagged items:** address each `[MAJOR]` or `[MINOR]` finding (or document explicit justification to skip)
@@ -162,7 +173,7 @@ Canonical shape: `.claude/skills/implement/templates/progress-schema.json`.
       "id": "T1.1",
       "phase": "1",
       "status": "committed",
-      "files": ["src/foo.ts", "src/foo.test.ts"],
+      "files": ["<path to the production file>", "<path to its test>"],
       "commit_sha": "abc123...",
       "wiring": {"a": "pass", "b": "pass", "c": "n/a"},
       "iterations_used": 7,

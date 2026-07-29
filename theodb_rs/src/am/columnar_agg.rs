@@ -18,6 +18,7 @@ use pgrx::datum::FromDatum;
 use pgrx::{GucContext, GucFlags, GucRegistry, GucSetting};
 use pgrx::{PgBox, PgList, pg_guard, pg_sys};
 use std::ffi::{CStr, c_int, c_void};
+use std::sync::atomic::{AtomicU8, Ordering};
 
 /// `theodb.enable_columnar_agg` — default OFF (the vectorized aggregate path is opt-in until benchmarked).
 pub(crate) static ENABLE_COLUMNAR_AGG: GucSetting<bool> = GucSetting::<bool>::new(false);
@@ -27,10 +28,172 @@ pub(crate) static ENABLE_COLUMNAR_AGG: GucSetting<bool> = GucSetting::<bool>::ne
 /// falls back to the legacy per-cell path — the toggle exists so a same-binary/same-box A/B can MEASURE the M160 win.
 pub(crate) static ENABLE_FAST_DECODE: GucSetting<bool> = GucSetting::<bool>::new(true);
 
-/// `theodb.enable_columnar_late_mat` (M158) — default OFF. When on, `Limit(k) → Sort([key]) → columnar-project` is
+/// `theodb.enable_columnar_late_mat` (M158; default flipped ON in M167) — default ON. When on, `Limit(k) → Sort([key]) → columnar-project` is
 /// swapped for a late-materialization top-k CustomScan (decode {key∪filter} for all rows, DataFusion filter+sort+limit,
 /// materialize the full projection only for the k survivors — avoiding `form_row`/`palloc` for N−k rows, the M148 cost).
-pub(crate) static ENABLE_COLUMNAR_LATE_MAT: GucSetting<bool> = GucSetting::<bool>::new(false);
+/// M167 — the default is ON: measured on ClickBench 1M, q23/q24 route byte-identically and a columnar table has no
+/// btree on the sort column, so native's only plan is Sort-over-projected-rows (late-mat is structurally >= native
+/// here). The O(N) decode this path pays is bounded by the plan-time guard in `try_swap_topk` (M167 ADR-4), which is
+/// what replaced "default OFF" as the mitigation.
+pub(crate) static ENABLE_COLUMNAR_LATE_MAT: GucSetting<bool> = GucSetting::<bool>::new(true);
+
+/// M167 ADR-4 — safety factor for the top-k decode bound. `run_columnar_topk` decodes {projection ∪ keys ∪ filter}
+/// for ALL rows into one Arrow batch BEFORE the bounded-heap TopK runs, so the path costs O(N) memory where the
+/// native top-N heapsort costs O(k). With the GUC defaulting ON (M167), an unfiltered wide `SELECT * … ORDER BY k
+/// LIMIT 10` would otherwise decode the whole relation and OOM the backend. HEURISTIC, not a measured optimum: it
+/// says "a relation an order of magnitude beyond what this session already budgeted for a sort is not ours to
+/// decode whole". Applied to `pg_class.relpages` (see `relation_physical_bytes`), NOT to `plan_rows`, which the
+/// columnar TableAM leaves at the planner's rows=1 default.
+const TOPK_DECODE_WORK_MEM_FACTOR: f64 = 8.0;
+
+/// M167 ADR-3 — ceiling on ORDER BY keys the top-k node will carry. The int wire format grows 3 slots per key, and
+/// a sort with more keys than this is not a shape this path was measured on; declining is free and correct.
+const TOPK_MAX_SORT_KEYS: usize = 8;
+
+/// M167 ADR-4 — the physical size of `rel_oid` in bytes, from `pg_class.relpages`.
+///
+/// The obvious signal — the planner's `plan_rows × plan_width` — is INERT on a columnar table: the TableAM reports
+/// no tuple count, so `reltuples` stays 0 and the planner estimates `rows=1` even for a 1M-row relation (measured:
+/// `EXPLAIN` of `SELECT * FROM hits ORDER BY EventTime LIMIT 10` shows `rows=1 width=1604`). A bound built on that
+/// never fires. `relpages` IS maintained (measured: 27863 pages for the same relation) and is the honest proxy for
+/// how much this path has to decode.
+///
+/// Imprecision, stated rather than hidden — and note the direction is the DANGEROUS one: the on-disk bytes are
+/// COMPRESSED, so the decoded Arrow batch is LARGER than this estimate. For an OOM bound, under-estimating causes
+/// false ADMITS (the failure this guard exists to prevent), not merely false declines. Consequence to be explicit
+/// about: with PostgreSQL's stock `work_mem` of 4 MB the budget is 32 MB, so a 1M-row ClickBench `hits`
+/// (measured: 27863 pages = 228 MB) DECLINES — the routing win of this milestone needs a larger `work_mem`
+/// (measured at 64 MB → 512 MB budget). The guard bills the whole relation, ignoring projection width and filter
+/// selectivity, so it is a ceiling on catastrophe rather than a tight bound.
+fn relation_physical_bytes(rel_oid: u32) -> f64 {
+    unsafe {
+        let rel_oid_t = pg_sys::Oid::from(rel_oid);
+        // The syscache key is an OID datum — build it through `Oid` rather than from a bare u32.
+        let tup = pg_sys::SearchSysCache1(
+            pg_sys::SysCacheIdentifier::RELOID as i32,
+            pg_sys::Datum::from(rel_oid_t),
+        );
+        if tup.is_null() {
+            // Fail CLOSED: an unknown size must not be read as "small". Returning 0.0 here would admit, which is
+            // the same direction as the original fail-open defect this function was written to fix.
+            return f64::INFINITY;
+        }
+        // `SysCacheGetAttr` rather than the GETSTRUCT macro (a C macro, absent from the pgrx bindings) — same
+        // pattern as `database_collate_is_byte_order`. `relpages` is a fixed-width int4, so no detoasting.
+        let mut isnull = false;
+        let d = pg_sys::SysCacheGetAttr(
+            pg_sys::SysCacheIdentifier::RELOID as i32,
+            tup,
+            pg_sys::Anum_pg_class_relpages as pg_sys::AttrNumber,
+            &mut isnull,
+        );
+        // Read the datum BEFORE releasing the tuple. Safe today only because `relpages` is int4/attbyval (the datum
+        // is a copied value, not a pointer into the tuple) — reading after the release would become a use-after-free
+        // the moment this is repointed at a by-reference attribute. Order it correctly rather than rely on the type.
+        let pages = if isnull { 0 } else { d.value() as i32 };
+        pg_sys::ReleaseSysCache(tup);
+        if pages > 0 {
+            return f64::from(pages) * f64::from(pg_sys::BLCKSZ);
+        }
+        // `relpages` is 0 until ANALYZE/VACUUM runs — and a big columnar relation is typically CREATE + bulk INSERT
+        // with no ANALYZE yet, which is exactly when the bound matters most. Falling back to 0.0 here would make the
+        // guard INERT in that window (measured: a 200k-row columnar table reports relpages=0 right after load and
+        // routes even at work_mem=64kB). Ask the storage manager for the CURRENT physical size instead — it is always
+        // right and never stale.
+        let rel = pg_sys::relation_open(rel_oid_t, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+        let blocks = pg_sys::RelationGetNumberOfBlocksInFork(rel, pg_sys::ForkNumber::MAIN_FORKNUM);
+        pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
+        f64::from(blocks) * f64::from(pg_sys::BLCKSZ)
+    }
+}
+
+/// M167 ADR-2 — is `coll` a BYTE-ORDER (memcmp) collation, i.e. does DataFusion's Utf8 sort agree with PG's
+/// `ORDER BY`? C (950) and POSIX (951) always are. The DEFAULT collation (100) delegates to the database, so it is
+/// byte-order iff `pg_database.datcollate` is `C`/`POSIX` — which the M158 OID allowlist could not see, declining a
+/// provably safe case on a C cluster (measured: ClickBench q25 on a `datcollate=C` database).
+///
+/// Determinism is NOT the property we need: it fixes equality (byte-equal ⟺ string-equal), not order — `en_US`
+/// sorts 'a' < 'Z' while bytes sort 'Z'(0x5A) < 'a'(0x61).
+///
+/// Why the catalog and not a GUC: PG 18 has **no** `lc_collate` GUC (removed once per-database collation became
+/// authoritative; `pg_settings` exposes only `lc_messages`/`monetary`/`numeric`/`time`). Why not
+/// `pg_newlocale_from_collation()->collate_is_c`, which is PG's own predicate: pgrx 0.19 generates no binding for
+/// it, so using it would mean a hand-written `extern "C"` plus an assumption about `pg_locale_struct`'s layout.
+/// Fail-closed: any unreadable catalog answer returns false (decline to the native plan, correct for any input).
+fn database_collate_is_byte_order() -> bool {
+    // datcollate cannot change for a live database, so resolve once per backend.
+    static CACHED: AtomicU8 = AtomicU8::new(0); // 0 = unknown, 1 = yes, 2 = no
+    match CACHED.load(Ordering::Relaxed) {
+        1 => return true,
+        2 => return false,
+        _ => {}
+    }
+    let is_c = unsafe {
+        let tup = pg_sys::SearchSysCache1(
+            pg_sys::SysCacheIdentifier::DATABASEOID as i32,
+            pg_sys::Datum::from(pg_sys::MyDatabaseId),
+        );
+        if tup.is_null() {
+            false
+        } else {
+            let mut isnull = false;
+            let d = pg_sys::SysCacheGetAttr(
+                pg_sys::SysCacheIdentifier::DATABASEOID as i32,
+                tup,
+                pg_sys::Anum_pg_database_datcollate as pg_sys::AttrNumber,
+                &mut isnull,
+            );
+            // `datcollate` alone does NOT determine how the DEFAULT collation orders — `datlocprovider` does.
+            // `CREATE DATABASE d LOCALE_PROVIDER icu ICU_LOCALE 'en-US' LOCALE 'C'` stores datcollate='C' while the
+            // default collation orders by ICU en-US (pg_locale.c dispatches on datlocprovider, and dbcommands.c
+            // writes the two fields independently). Trusting datcollate there would admit a text sort key whose
+            // DataFusion byte order disagrees with PG — the exact wrong-rows class this guard exists to prevent.
+            // So: require the libc provider ('c'). Anything else (ICU 'i', builtin 'b') declines — fail-closed.
+            let mut prov_isnull = false;
+            let prov = pg_sys::SysCacheGetAttr(
+                pg_sys::SysCacheIdentifier::DATABASEOID as i32,
+                tup,
+                pg_sys::Anum_pg_database_datlocprovider as pg_sys::AttrNumber,
+                &mut prov_isnull,
+            );
+            // pgrx exports the catalog constant; a local copy could drift from it silently (Rule 9).
+            let provider_is_libc =
+                !prov_isnull && (prov.value() as u8) == pg_sys::COLLPROVIDER_LIBC;
+            let verdict = if isnull || !provider_is_libc {
+                false
+            } else {
+                let cs = pg_sys::text_to_cstring(d.cast_mut_ptr());
+                let s = CStr::from_ptr(cs).to_string_lossy().into_owned();
+                pg_sys::pfree(cs.cast());
+                s == "C" || s == "POSIX"
+            };
+            pg_sys::ReleaseSysCache(tup);
+            verdict
+        }
+    };
+    CACHED.store(if is_c { 1 } else { 2 }, Ordering::Relaxed);
+    is_c
+}
+
+/// M167 ADR-2 — the guard a TEXT sort key must pass. Only ever ADDS provably-safe cases to the M158 allowlist.
+fn sort_collation_is_byte_order(coll: u32) -> bool {
+    const C_COLL: u32 = 950;
+    const POSIX_COLL: u32 = 951; // pgrx exports C_COLLATION_OID but not the POSIX one; both are stable catalog OIDs
+    const DEFAULT_COLL: u32 = 100;
+    match coll {
+        C_COLL | POSIX_COLL => true,
+        DEFAULT_COLL => database_collate_is_byte_order(),
+        _ => false,
+    }
+}
+
+/// Is the decline trace on? Split out so callers can skip building an expensive message when it is off — the
+/// `format!` would otherwise allocate on every decline even with tracing disabled (review finding L4).
+#[inline]
+fn admit_trace_enabled() -> bool {
+    static TRACE_ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *TRACE_ON.get_or_init(|| std::env::var("THEODB_ADMIT_TRACE").as_deref() == Ok("1"))
+}
 
 /// M152 (spike) — behavior-NEUTRAL decline trace. When `THEODB_ADMIT_TRACE=1`, emit the reason the columnar-agg
 /// path declined a candidate (the ground-truth the static SQL analysis can't give — plan-shape declines in
@@ -38,7 +201,10 @@ pub(crate) static ENABLE_COLUMNAR_LATE_MAT: GucSetting<bool> = GucSetting::<bool
 /// ONLY to build the M152 routing-map; carries no functional effect (mirrors `THEODB_SCAN_PROFILE` of M150).
 #[inline]
 fn admit_trace(reason: &str) {
-    if std::env::var("THEODB_ADMIT_TRACE").as_deref() == Ok("1") {
+    // Resolve the env var ONCE per backend. With M167 flipping the late-mat default ON, `swap_walk` now runs on
+    // every planned statement, so this is called per Sort node per plan on the default path — a `std::env::var`
+    // there is a syscall-free but still allocating lookup on the hot planning path (review finding F13).
+    if admit_trace_enabled() {
         pgrx::warning!("theodb_admit_decline: {reason}");
     }
 }
@@ -1771,24 +1937,26 @@ fn topk_type_supported(typoid: u32) -> bool {
     matches!(typoid, 21 | 23 | 20 | 700 | 701 | 16 | 25 | 1042 | 1043 | 1114 | 1184 | 1082)
 }
 
-/// M158 — encode the top-k `custom_private` int channel (mode == 2, distinct from the agg layouts):
-/// `[relid, 2, k, sort_attno, asc, nulls_first, nproj, (attno,typoid)×nproj, npred, (col,op,hi,lo)×npred]`.
+/// M158 — encode the top-k `custom_private` int channel (mode == 2, distinct from the agg layouts).
+/// M167 generalized the single sort key to N keys:
+/// `[relid, 2, k, nkeys, (attno,asc,nulls_first)×nkeys, nproj, (attno,typoid)×nproj, npred, (col,op,hi,lo)×npred]`.
 /// Text predicates ride the shared 2nd channel (`encode_text_preds`); the 3rd channel is empty (NIL) for top-k.
 unsafe fn encode_topk_private(
     table_oid: u32,
     k: usize,
-    sort_attno: i32,
-    ascending: bool,
-    nulls_first: bool,
+    sort_keys: &[(i32, bool, bool)], // (attno, ascending, nulls_first) — in ORDER BY position
     proj_cols: &[(i32, u32)],
     preds: &[ZonePredicate],
 ) -> *mut pg_sys::List {
     let mut pl = pg_sys::lappend_int(std::ptr::null_mut(), table_oid as i32);
     pl = pg_sys::lappend_int(pl, 2); // mode = 2 (top-k)
     pl = pg_sys::lappend_int(pl, k as i32);
-    pl = pg_sys::lappend_int(pl, sort_attno);
-    pl = pg_sys::lappend_int(pl, ascending as i32);
-    pl = pg_sys::lappend_int(pl, nulls_first as i32);
+    pl = pg_sys::lappend_int(pl, sort_keys.len() as i32);
+    for &(attno, asc, nf) in sort_keys {
+        pl = pg_sys::lappend_int(pl, attno);
+        pl = pg_sys::lappend_int(pl, asc as i32);
+        pl = pg_sys::lappend_int(pl, nf as i32);
+    }
     pl = pg_sys::lappend_int(pl, proj_cols.len() as i32);
     for &(attno, typoid) in proj_cols {
         pl = pg_sys::lappend_int(pl, attno);
@@ -1809,7 +1977,7 @@ unsafe fn encode_topk_private(
 /// reuses the agg CustomScan framework (`SCAN_METHODS`, exec/end/rescan) via `mode == 2`: `begin_custom_scan` decodes
 /// {key ∪ filter} for all rows, runs DataFusion `filter → sort → limit(k)`, and materializes the full projection only
 /// for the k survivors — paying the M148 `form_row`/`palloc` cost for k rows, not N. Returns `None` (keep the native
-/// plan) for ANY unsupported shape (fail-closed). Gated by `theodb.enable_columnar_late_mat` (default OFF).
+/// plan) for ANY unsupported shape (fail-closed). Gated by `theodb.enable_columnar_late_mat` (default ON since M167).
 unsafe fn try_swap_topk(
     plan: *mut pg_sys::Plan,
     rtable: *mut pg_sys::List,
@@ -1848,11 +2016,9 @@ unsafe fn try_swap_topk(
     }
     let k = k_i64 as usize;
 
-    // This node is the Sort; exactly one sort column.
+    // This node is the Sort. M167: the key count is validated per-key below (ADR-3) — M158's `numCols != 1` was a
+    // scope limit, not a safety property.
     let sort = plan as *mut pg_sys::Sort;
-    if (*sort).numCols != 1 {
-        return None;
-    }
     // Grandchild must be a theodb_columnar_project CustomScan (M149) over a columnar rel.
     let child = (*sort).plan.lefttree;
     if child.is_null() || (*child).type_ != pg_sys::NodeTag::T_CustomScan {
@@ -1910,45 +2076,50 @@ unsafe fn try_swap_topk(
         );
         cst = pg_sys::lappend(cst, nte as *mut c_void);
     }
-    // Sort key: sortColIdx[0] is a 1-based resno into the Sort's tlist, positionally aligned with the project's tlist
-    // (Sort passes columns through unchanged). Resolve to the base column + direction + nulls placement.
-    let key_pos = *(*sort).sortColIdx.add(0) as usize;
-    if key_pos == 0 || key_pos > proj_meta.len() {
+    // Sort keys (M167 ADR-3 — generalized from M158's single key). `sortColIdx[i]` is a 1-based resno into the
+    // Sort's tlist, positionally aligned with the project's tlist (Sort passes columns through unchanged). EVERY key
+    // must pass EVERY guard: the checks below are per-key properties, not a scope limit, so a multi-key sort is
+    // admissible exactly when each of its keys is. Fail-closed — one bad key declines the whole swap.
+    let nkeys = (*sort).numCols as usize;
+    if nkeys == 0 || nkeys > TOPK_MAX_SORT_KEYS {
+        admit_trace("topk_sort_key_count_out_of_range");
         return None;
     }
-    let (sort_attno, key_type) = proj_meta[key_pos - 1];
-    // Text sort key: DataFusion byte-sorts Utf8, which matches PG ORDER BY only under a BYTE-order collation — i.e.
-    // C / POSIX. A merely DETERMINISTIC collation (e.g. en_US.UTF-8) is NOT enough: determinism fixes equality
-    // (byte-equal ⟺ string-equal, the M153/M154 grouping/LIKE guarantee) but NOT sort order — en_US sorts
-    // linguistically ('a' < 'Z') while bytes sort 'Z'(0x5A) < 'a'(0x61) → a silently WRONG top-k row
-    // (council-index-storage HIGH). So a text SORT key is admitted ONLY under C (950) or POSIX (951); DEFAULT and
-    // every other collation decline to the native plan. (Text FILTER predicates keep the determinism guard — filter
-    // equality, not order — unchanged.) bpchar (1042) also declines (PG trims trailing blanks; DataFusion does not).
-    if matches!(key_type, 25 | 1043) {
-        // Use the SORT's effective collation for this key (`sort.collations[0]`), NOT the column's varcollid — an
-        // `ORDER BY s COLLATE "C"` overrides the column collation, and the override lives on the Sort node. C (950) and
-        // POSIX (951) are the only byte-order collations (memcmp); pgrx exports C_COLLATION_OID but not the POSIX one,
-        // so compare the raw OID values (both stable PG catalog OIDs).
-        let sort_coll = (*(*sort).collations.add(0)).to_u32();
-        if sort_coll != 950 && sort_coll != 951 {
-            admit_trace("topk_text_key_non_byte_collation");
+    let mut sort_keys: Vec<(i32, bool, bool)> = Vec::with_capacity(nkeys);
+    for ki in 0..nkeys {
+        let key_pos = *(*sort).sortColIdx.add(ki) as usize;
+        if key_pos == 0 || key_pos > proj_meta.len() {
             return None;
         }
-    } else if key_type == 1042 {
-        return None; // bpchar sort key → PG trims trailing blanks; DataFusion does not → decline
+        let (attno, key_type) = proj_meta[key_pos - 1];
+        // Text sort key: DataFusion byte-sorts Utf8, which matches PG ORDER BY only under a BYTE-order collation.
+        // A merely DETERMINISTIC collation (e.g. en_US.UTF-8) is NOT enough: determinism fixes equality (byte-equal
+        // ⟺ string-equal, the M153/M154 grouping/LIKE guarantee) but NOT sort order — en_US sorts linguistically
+        // ('a' < 'Z') while bytes sort 'Z'(0x5A) < 'a'(0x61) → a silently WRONG top-k row (council-index-storage
+        // HIGH). Use the SORT's effective collation for THIS key (`sort.collations[ki]`), not the column's
+        // varcollid — `ORDER BY s COLLATE "C"` overrides the column collation and the override lives on the Sort.
+        // (Text FILTER predicates keep the determinism guard — filter equality, not order — unchanged.)
+        if matches!(key_type, 25 | 1043) {
+            let sort_coll = (*(*sort).collations.add(ki)).to_u32();
+            if !sort_collation_is_byte_order(sort_coll) {
+                admit_trace("topk_text_key_non_byte_collation");
+                return None;
+            }
+        } else if key_type == 1042 {
+            return None; // bpchar sort key → PG trims trailing blanks; DataFusion does not → decline
+        }
+        // Direction from this key's sort operator (M135: PG18 CompareType port; COMPARE_LT == ascending).
+        let opno = *(*sort).sortOperators.add(ki);
+        let (mut opfamily, mut opcintype, mut cmptype) =
+            (pg_sys::InvalidOid, pg_sys::InvalidOid, pg_sys::CompareType::COMPARE_INVALID);
+        pg_sys::get_ordering_op_properties(opno, &mut opfamily, &mut opcintype, &mut cmptype);
+        let ascending = match cmptype {
+            pg_sys::CompareType::COMPARE_LT => true,
+            pg_sys::CompareType::COMPARE_GT => false,
+            _ => return None, // non-btree ordering operator → decline
+        };
+        sort_keys.push((attno, ascending, *(*sort).nullsFirst.add(ki)));
     }
-    // Direction from the sort operator (M135: PG18 CompareType port; COMPARE_LT == ascending).
-    let opno = *(*sort).sortOperators.add(0);
-    let (mut opfamily, mut opcintype, mut cmptype) =
-        (pg_sys::InvalidOid, pg_sys::InvalidOid, pg_sys::CompareType::COMPARE_INVALID);
-    pg_sys::get_ordering_op_properties(opno, &mut opfamily, &mut opcintype, &mut cmptype);
-    let ascending = match cmptype {
-        pg_sys::CompareType::COMPARE_LT => true,
-        pg_sys::CompareType::COMPARE_GT => false,
-        _ => return None, // non-btree ordering operator → decline
-    };
-    let nulls_first = *(*sort).nullsFirst.add(0);
-
     // Predicates: the project node applies the WHERE via its own qual (a List of final clauses whose Vars are base
     // Vars with varno == scanrelid). Every clause MUST be pushable (zone or text) — else decline, because the top-k
     // node OWNS the filter (the project subtree is dropped).
@@ -1971,6 +2142,21 @@ unsafe fn try_swap_topk(
         return None;
     }
     let table_oid = (*scan_rte).relid.to_u32();
+    // M167 ADR-4 / EC-1 — bound the O(N) decode. `run_columnar_topk` decodes {projection ∪ keys ∪ filter} for ALL
+    // rows into one Arrow batch BEFORE the bounded-heap TopK, so this path costs O(N) memory where the native top-N
+    // heapsort costs O(k). M158 mitigated that by defaulting the GUC OFF; M167 flipped it ON, so the bound lives
+    // here. Fail-closed: declining falls back to the native plan, correct for any input.
+    let est_decode_bytes = relation_physical_bytes(table_oid);
+    let work_mem_bytes = f64::from(pg_sys::work_mem.max(64)) * 1024.0;
+    if est_decode_bytes > work_mem_bytes * TOPK_DECODE_WORK_MEM_FACTOR {
+        if admit_trace_enabled() {
+            admit_trace(&format!(
+                "topk_decode_estimate_too_large est_bytes={est_decode_bytes:.0} budget={:.0}",
+                work_mem_bytes * TOPK_DECODE_WORK_MEM_FACTOR
+            ));
+        }
+        return None;
+    }
 
     // Build the replacement CustomScan (scanrelid = 0 — it scans the columnar rel by OID, like the agg node).
     let mut cscan = PgBox::<pg_sys::CustomScan>::alloc_node(pg_sys::NodeTag::T_CustomScan);
@@ -1992,7 +2178,7 @@ unsafe fn try_swap_topk(
     cscan.flags = 0;
     cscan.custom_plans = std::ptr::null_mut();
     cscan.custom_exprs = std::ptr::null_mut();
-    let int_channel = encode_topk_private(table_oid, k, sort_attno, ascending, nulls_first, &proj_meta, &zpreds);
+    let int_channel = encode_topk_private(table_oid, k, &sort_keys, &proj_meta, &zpreds);
     let text_channel = encode_text_preds(&tpreds)?;
     let mut outer = pg_sys::lappend(std::ptr::null_mut(), int_channel as *mut c_void);
     outer = pg_sys::lappend(outer, text_channel as *mut c_void);
@@ -2132,15 +2318,23 @@ unsafe extern "C-unwind" fn begin_custom_scan(
     let oldcxt = pg_sys::MemoryContextSwitchTo((*estate).es_query_cxt);
     let res = (|| -> Result<Vec<Vec<(pg_sys::Datum, bool)>>, String> {
         // M158 — top-k late materialization (mode == 2). Distinct IntList layout keyed by mode:
-        // [relid, 2, k, sort_attno, asc, nulls_first, nproj, (attno,typoid)×nproj, npred, (col,op,hi,lo)×npred].
+        // [relid, 2, k, nkeys, (attno,asc,nf)×nkeys, nproj, (attno,typoid)×nproj, npred, (col,op,hi,lo)×npred].
         if mode == 2 {
             let k = pg_sys::list_nth_int(priv_list, 2) as usize;
-            let sort_attno = pg_sys::list_nth_int(priv_list, 3);
-            let ascending = pg_sys::list_nth_int(priv_list, 4) != 0;
-            let nulls_first = pg_sys::list_nth_int(priv_list, 5) != 0;
-            let nproj = pg_sys::list_nth_int(priv_list, 6) as usize;
+            let nkeys = pg_sys::list_nth_int(priv_list, 3) as usize;
+            let mut j = 4;
+            let mut sort_keys: Vec<(String, bool, bool)> = Vec::with_capacity(nkeys);
+            for _ in 0..nkeys {
+                let attno = pg_sys::list_nth_int(priv_list, j);
+                let asc = pg_sys::list_nth_int(priv_list, j + 1) != 0;
+                let nf = pg_sys::list_nth_int(priv_list, j + 2) != 0;
+                j += 3;
+                let nm = pg_sys::get_attname(relid, attno as pg_sys::AttrNumber, false);
+                sort_keys.push((CStr::from_ptr(nm).to_string_lossy().into_owned(), asc, nf));
+            }
+            let nproj = pg_sys::list_nth_int(priv_list, j) as usize;
+            j += 1;
             let mut proj_cols: Vec<(String, u32)> = Vec::with_capacity(nproj);
-            let mut j = 7;
             for _ in 0..nproj {
                 let attno = pg_sys::list_nth_int(priv_list, j);
                 let typoid = pg_sys::list_nth_int(priv_list, j + 1) as u32;
@@ -2189,17 +2383,11 @@ unsafe extern "C-unwind" fn begin_custom_scan(
                     needle: CStr::from_ptr(sval).to_string_lossy().into_owned(),
                 });
             }
-            let sort_nm = {
-                let nm = pg_sys::get_attname(relid, sort_attno as pg_sys::AttrNumber, false);
-                CStr::from_ptr(nm).to_string_lossy().into_owned()
-            };
             let rel = pg_sys::relation_open(relid, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
             let r = super::df_executor::run_columnar_topk(
                 rel,
                 &proj_cols,
-                &sort_nm,
-                ascending,
-                nulls_first,
+                &sort_keys,
                 k,
                 &tk_preds,
                 &tk_text,

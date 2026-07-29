@@ -1,0 +1,52 @@
+=== suíte 43 queries start 2026-07-29T02:02:05+00:00 ===
+postmaster=2026-07-29 01:27:21.29745+00
+so_path=/root/.pgrx/18.4/pgrx-install/lib/postgresql/theodb_rs.so
+so_mtime=2026-07-29 01:26:46.242582116 +0000
+so_md5=9b9342f7e925d37ce0e1cf2ce1c356e0
+  q 0 cold=0.14 hot=0.0187 cs=True ab=True
+  q 1 cold=0.0231 hot=0.007 cs=True ab=True
+  q 2 cold=0.032 hot=0.0325 cs=True ab=True
+  q 3 cold=0.0317 hot=0.0304 cs=True ab=True
+  q 4 cold=0.0775 hot=0.0631 cs=True ab=True
+  q 5 cold=0.1305 hot=0.1044 cs=True ab=True
+  q 6 cold=0.0048 hot=0.0024 cs=True ab=True
+  q 7 cold=0.0199 hot=0.0081 cs=True ab=True
+  q 8 cold=0.1321 hot=0.1205 cs=True ab=True
+  q 9 cold=0.1803 hot=0.1574 cs=True ab=True
+  q10 cold=0.0783 hot=0.0733 cs=True ab=True
+  q11 cold=0.0946 hot=0.0873 cs=True ab=True
+  q12 cold=0.2597 hot=0.2513 cs=True ab=True
+  q13 cold=0.2703 hot=0.2515 cs=True ab=True
+  q14 cold=0.2473 hot=0.2433 cs=True ab=True
+  q15 cold=1.188 hot=0.9673 cs=True ab=True
+  q16 cold=0.9608 hot=0.8933 cs=True ab=True
+  q17 cold=24.2417 hot=22.171 cs=False ab=True
+  q18 cold=2.3077 hot=2.1812 cs=True ab=True
+  q19 cold=6.2238 hot=5.9421 cs=True ab=True
+  q20 cold=0.5167 hot=0.5004 cs=True ab=True
+  q21 cold=22.9491 hot=22.6273 cs=False ab=True
+  q22 cold=22.4432 hot=21.3601 cs=False ab=True
+  q23 cold=3.4453 hot=3.4126 cs=True ab=True
+  q24 cold=0.1757 hot=0.1363 cs=True ab=True
+  q25 cold=0.1107 hot=0.1008 cs=True ab=True
+  q26 cold=0.1353 hot=0.1281 cs=True ab=True
+  q27 cold=24.4723 hot=24.5454 cs=False ab=True
+  q28 cold=ERR hot=ERR cs=None ab=None
+  q29 cold=0.1257 hot=0.119 cs=True ab=True
+  q30 cold=0.6264 hot=0.5272 cs=True ab=True
+  q31 cold=0.5577 hot=0.5707 cs=True ab=True
+  q32 cold=2.9084 hot=2.8528 cs=True ab=True
+  q33 cold=1.717 hot=1.2824 cs=True ab=True
+  q34 cold=1.2785 hot=1.3111 cs=True ab=True
+  q35 cold=2.0794 hot=1.7666 cs=True ab=True
+  q36 cold=0.0706 hot=0.0568 cs=True ab=True
+  q37 cold=0.0423 hot=0.0407 cs=True ab=True
+  q38 cold=0.0546 hot=0.0519 cs=True ab=True
+  q39 cold=23.049 hot=24.1606 cs=False ab=True
+  q40 cold=0.0162 hot=0.0108 cs=True ab=True
+  q41 cold=0.0139 hot=0.0129 cs=True ab=True
+  q42 cold=0.0135 hot=0.0111 cs=True ab=True
+wrote /root/m167-suite-final-binary.json  status=OK
+  queries ok=42/43 errored=1 columnar_customscan=37 hot_geomean=0.26203s
+  result A/B: byte-identical (columnar==heap) (pass=42, diverged=0)
+=== suíte rc=0 end 2026-07-29T02:18:21+00:00 ===

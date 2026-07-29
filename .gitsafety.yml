@@ -1,0 +1,37 @@
+# Configuração do gitsafety — https://github.com/paulohenriquevn/gitsafety
+#
+# Três chaves, todas opcionais. Sem arquivo nenhum a ferramenta já funciona: isto existe
+# só para tirar ruído. O que o `.gitignore` exclui já sai da varredura sozinho.
+#
+# Nenhuma entrada aqui ignora uma pasta de código nosso. Todas descrevem o VALOR, para
+# que uma credencial de produção no mesmo arquivo continue sendo acusada.
+
+allow:
+  # --- Banco que só existe dentro da rede do container -----------------------------
+  #
+  # Host SEM PONTO é nome de serviço do compose ou do Kubernetes — `pg-cloud`,
+  # `pgvector`, `redis`, `localhost`. Não é endereço da internet, e a credencial só vale
+  # dentro daquela rede. Um FQDN (`db.producao.example.com`) tem ponto e CONTINUA sendo
+  # acusado: é essa a linha que separa os dois.
+  - "://[^@\"' ]{1,80}@[A-Za-z0-9_-]{1,60}[:/]"
+  - "://[^@\"' ]{1,80}@[A-Za-z0-9_-]{1,60}$"
+  # Loopback por número, que tem ponto e por isso não cai na regra acima.
+  - "://[^@\"' ]{1,80}@127\\.0\\.0\\.1"
+  - "://[^@\"' ]{1,80}@\\[::1\\]"
+  - "://[^@\"' ]{1,80}@host\\.docker\\.internal"
+
+  # --- DNS interno do Kubernetes ---------------------------------------------------
+  #
+  # `.svc.cluster.local` não resolve fora do cluster. Vale para os manifests de dev.
+  - "://[^@\"' ]{1,80}@[A-Za-z0-9_.-]{1,80}\\.svc\\.cluster\\.local"
+
+  # --- Hosts reservados para documentação ------------------------------------------
+  #
+  # RFC 2606: `example.com` e `example.org` existem justamente para servir de exemplo.
+  - "://[^@\"' ]{1,80}@[A-Za-z0-9_.-]{1,40}\\.example\\.(com|org)"
+  - "://[^@\"' ]{1,80}@<host>"
+
+ignore:
+  # Código de terceiros vendorizado: não escrevemos, não corrigimos, e ele traz os
+  # próprios exemplos. Única pasta ignorada por completo.
+  - "vendor/**"

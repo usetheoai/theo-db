@@ -1,0 +1,45 @@
+=== H0 gate POSITIVE CONTROL start 2026-07-29T02:33:41+00:00 ===
+postmaster=2026-07-29 01:27:21.29745+00
+so_path=/root/.pgrx/18.4/pgrx-install/lib/postgresql/theodb_rs.so
+so_mtime=2026-07-29 01:26:46.242582116 +0000
+so_md5=9b9342f7e925d37ce0e1cf2ce1c356e0
+expected_rc=3
+SET
+SET
+SET
+### M167-H0: routing precondition — EVERY shape run below MUST show the top-k node
+psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:66: ERROR:  M167-H0 FAILED: shape 1 did not route to the top-k node; every block below would pass vacuously. Plan: [
+  {
+    "Plan": {
+      "Node Type": "Limit",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Disabled": false,
+      "Plans": [
+        {
+          "Node Type": "Sort",
+          "Parent Relationship": "Outer",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Disabled": false,
+          "Sort Key": ["eventtime"],
+          "Plans": [
+            {
+              "Node Type": "Custom Scan",
+              "Parent Relationship": "Outer",
+              "Custom Plan Provider": "theodb_columnar_project",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Relation Name": "hits",
+              "Alias": "hits",
+              "Disabled": false,
+              "Filter": "(url ~~ '%google%'::text)"
+            }
+          ]
+        }
+      ]
+    }
+  }
+]
+CONTEXT:  PL/pgSQL function inline_code_block line 28 at RAISE
+=== H0 gate POSITIVE CONTROL rc=3 end 2026-07-29T02:33:41+00:00 ===

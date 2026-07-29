@@ -577,8 +577,10 @@ where
     // plenty), but the M158 top-k path decodes the FULL projection for all rows into one Arrow batch — which can be
     // hundreds of MB for a wide `SELECT *`. Size the pool to the batch's actual memory + headroom so a legitimate large
     // input is not rejected as "Resources exhausted"; the batch already lives in RAM regardless. (Honest caveat: the
-    // top-k path is therefore O(N) memory in the decoded batch — unlike the native top-N heapsort's O(k) — documented
-    // as an M158 trade-off; gated behind `theodb.enable_columnar_late_mat`, default OFF.)
+    // top-k path is therefore O(N) memory in the decoded batch — unlike the native top-N heapsort's O(k). M158
+    // mitigated this by defaulting the GUC OFF; M167 flipped the default ON, so the mitigation is now the plan-time
+    // decode-size guard in `try_swap_topk` (M167 ADR-4): a candidate whose estimated decode dwarfs `work_mem`
+    // declines to the native plan instead of being admitted here.)
     let work_mem_bytes = (pg_sys::work_mem.max(64) as usize) * 1024;
     let batch_bytes = batch.get_array_memory_size();
     let pool_bytes = work_mem_bytes.max(batch_bytes.saturating_mul(2)) + 64 * 1024 * 1024;
@@ -763,9 +765,7 @@ pub(super) unsafe fn run_columnar_grouped_aggs(
 pub(super) unsafe fn run_columnar_topk(
     rel: pg_sys::Relation,
     proj_cols: &[(String, u32)],
-    sort_key: &str,
-    ascending: bool,
-    nulls_first: bool,
+    sort_keys: &[(String, bool, bool)], // M167 — (name, ascending, nulls_first) in ORDER BY position
     k: usize,
     predicates: &[super::zonemap::ZonePredicate],
     text_predicates: &[super::zonemap::TextPredicate],
@@ -774,12 +774,16 @@ pub(super) unsafe fn run_columnar_topk(
 ) -> Result<Vec<Vec<(pg_sys::Datum, bool)>>, String> {
     // Project all output columns ∪ the sort key (decode_to_batch also folds in the predicate columns + guarantees ≥1).
     let mut proj_names: Vec<String> = proj_cols.iter().map(|(n, _)| n.clone()).collect();
-    if !proj_names.iter().any(|n| n == sort_key) {
-        proj_names.push(sort_key.to_string());
+    for (key, _, _) in sort_keys {
+        if !proj_names.iter().any(|n| n == key) {
+            proj_names.push(key.clone());
+        }
     }
-    let batch = decode_to_batch(rel, &proj_names, predicates, text_predicates, in_predicates, skip)?;
+    let batch =
+        decode_to_batch(rel, &proj_names, predicates, text_predicates, in_predicates, skip)?;
     let filter = build_filter_expr(rel, predicates, text_predicates, in_predicates);
-    let key = sort_key.to_string();
+    let order_by: Vec<_> =
+        sort_keys.iter().map(|(name, asc, nf)| col(name.as_str()).sort(*asc, *nf)).collect();
     // filter (WHERE, the final authority — D3) → sort by the key (PG order for numeric/temporal/det-collation text) →
     // limit k (DataFusion's TopK: a bounded heap, never materializing all N as tuples).
     let batches = run_df_collect(batch, move |df| {
@@ -787,7 +791,7 @@ pub(super) unsafe fn run_columnar_topk(
             Some(f) => df.filter(f)?,
             None => df,
         };
-        df.sort(vec![col(key.as_str()).sort(ascending, nulls_first)])?.limit(0, Some(k))
+        df.sort(order_by)?.limit(0, Some(k))
     })?;
 
     // Emit the surviving rows: one Datum per output column (in target order), located in the result batch by NAME

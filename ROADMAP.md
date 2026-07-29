@@ -3023,7 +3023,7 @@ bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan s�
 
 ---
 
-## M166 — [ ] Agregados de string (MIN/MAX texto) + lista larga de SUM(expr) ao CustomScan colunar (q21, q22, q27, q29) — cobertura
+## M166 — [x] Agregados de string (MIN/MAX texto) + lista larga de SUM(expr) ao CustomScan colunar (q21, q22, q27, q29) — cobertura
 
 > **Da mesma medição fresca**: além do GROUP BY multi-chave, o vocabulário de **agregados** do pushdown ainda não cobre agregados sobre texto nem listas largas de SUM(expr): **q21** (`MIN(URL) ... GROUP BY SearchPhrase`, 300×), **q22** (`MIN(URL), MIN(Title), COUNT(DISTINCT UserID)`, 260×), **q27** (`AVG(length(URL)) ... HAVING`, 817×), **q29** (muitos `SUM(ResolutionWidth + k)`, 567×). Juntas são 4 dos 8 termos non-pushdown que seguram o geomean.
 

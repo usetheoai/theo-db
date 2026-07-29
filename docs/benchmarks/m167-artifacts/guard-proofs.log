@@ -1,0 +1,31 @@
+=== § 5 guard proofs start 2026-07-29T02:35:04+00:00 ===
+postmaster=2026-07-29 01:27:21.29745+00
+so_path=/root/.pgrx/18.4/pgrx-install/lib/postgresql/theodb_rs.so
+so_mtime=2026-07-29 01:26:46.242582116 +0000
+so_md5=9b9342f7e925d37ce0e1cf2ce1c356e0
+selftest=0
+
+--- PROOF A: ICU database with datcollate=C MUST DECLINE a text sort key ---
+./benchmarks/m167_guard_proofs.sh: line 93: datlocprovider: command not found
+         locale_facts          
+-------------------------------
+ datcollate=C datlocprovider=i
+(1 row)
+
+CREATE TABLE
+INSERT 0 2000
+NOTICE:  PROOF A ok: datcollate=C but provider=i; an INT key ROUTES on this same fixture while the TEXT key DECLINES — the decline attributes to the collation, not to some other guard
+SET
+SET
+DO
+
+--- PROOF B: relpages=0 table MUST decline at 64kB and MUST route at 1GB ---
+NOTICE:  PROOF B ok: relpages=0, DECLINED at 64kB and ROUTED at 1GB — the fallback to the real relation size is what makes the guard bite
+ relpages_must_be_zero 
+-----------------------
+                     0
+(1 row)
+
+DO
+
+=== § 5 guard proofs rc=0 end 2026-07-29T02:35:05+00:00 ===

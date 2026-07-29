@@ -47,4 +47,4 @@ Late materialization here is a **time-for-memory trade**: it skips the dominant 
 
 ## Decision
 
-**Ship the capability, GUC-gated `theodb.enable_columnar_late_mat` default OFF** — the conservative honest default given the O(N) memory cost. Enabling it delivers a measured 1.60× on wide top-k. Correctness is unconditional (byte-identical + order-identical). Reproduce: `benchmarks/m158_ec_harness.sql` (correctness) + `benchmarks/m158_perf.sql` (perf, includes the exact `big` DDL + deterministic generator).
+**Ship the capability, GUC-gated `theodb.enable_columnar_late_mat` default OFF** — the conservative honest default given the O(N) memory cost. **[SUPERSEDED by M167 — the default is now ON.](m167-projection-topk-verdict.md)** M167 measured that q23/q24 route byte-identically at 1M and replaced "default OFF" with a plan-time decode-size guard (ADR-4) as the bound on the O(N) cost. Enabling it delivers a measured 1.60× on wide top-k. Correctness is unconditional (byte-identical + order-identical). Reproduce: `benchmarks/m158_ec_harness.sql` (correctness) + `benchmarks/m158_perf.sql` (perf, includes the exact `big` DDL + deterministic generator).

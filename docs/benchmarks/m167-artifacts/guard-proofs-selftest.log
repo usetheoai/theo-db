@@ -1,0 +1,32 @@
+=== § 5 guard proofs start 2026-07-29T02:35:05+00:00 ===
+postmaster=2026-07-29 01:27:21.29745+00
+so_path=/root/.pgrx/18.4/pgrx-install/lib/postgresql/theodb_rs.so
+so_mtime=2026-07-29 01:26:46.242582116 +0000
+so_md5=9b9342f7e925d37ce0e1cf2ce1c356e0
+selftest=1
+
+--- PROOF A: ICU database with datcollate=C MUST DECLINE a text sort key ---
+./benchmarks/m167_guard_proofs.sh: line 93: datlocprovider: command not found
+         locale_facts          
+-------------------------------
+ datcollate=C datlocprovider=i
+(1 row)
+
+CREATE TABLE
+INSERT 0 2000
+NOTICE:  PROOF A ok: datcollate=C but provider=i; an INT key ROUTES on this same fixture while the TEXT key DECLINES — the decline attributes to the collation, not to some other guard
+SET
+SET
+DO
+
+--- PROOF B: relpages=0 table MUST decline at 64kB and MUST route at 1GB ---
+NOTICE:  PROOF B SELF-TEST ARMED: the 64kB expectation is inverted below, so this run MUST fail
+ relpages_must_be_zero 
+-----------------------
+                     0
+(1 row)
+
+ERROR:  PROOF B SELF-TEST fired as designed: at 64kB the plan DECLINED, which the inverted expectation rejects. The real assertion is the opposite and passes.
+CONTEXT:  PL/pgSQL function inline_code_block line 19 at RAISE
+
+=== § 5 guard proofs rc=1 end 2026-07-29T02:35:06+00:00 ===

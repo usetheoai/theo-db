@@ -42,7 +42,7 @@ from pathlib import Path
 def _header_re(milestone_id: str) -> re.Pattern[str]:
     """Match the literal header for the given milestone, in either [ ] or [x] state."""
     return re.compile(
-        rf"^(###\s+{re.escape(milestone_id)}\s+[—\-]{{1,2}}\s+\[)([ x])(\]\s+.+?)$",
+        rf"^(#{{2,3}}\s+{re.escape(milestone_id)}\s+[—\-]{{1,2}}\s+\[)([ x])(\]\s+.+?)$",
         re.MULTILINE,
     )
 
