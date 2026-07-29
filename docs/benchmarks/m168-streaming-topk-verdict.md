@@ -144,10 +144,13 @@ por três caminhos independentes, e eu reproduzi os três:
 somava o empate em `n` e não em `wins` — e a direção desse erro é **anticonservadora justamente para a alegação
 em disputa**. Corrigido no summarizer: empates saem do teste do sinal. O agrupado vira **73/179, p = 0,0165**.
 
-**(b) A família de multiplicidade declarada era a errada.** O documento dizia "20 testes por consulta×coleta,
-espera-se 1,0 a p ≤ 0,05" — mas o número defendido **não é um daqueles 20**; é um teste agrupado sobre 179
-pares. A família dele são os 4 testes agrupados por consulta mais o grupo post-hoc. Bonferroni sobre 4:
-`0,0165 × 4 = 0,066` — **não sobrevive**. Sobre as 3 estreitas: `0,0495`, na casa decimal.
+**(b) A família de multiplicidade declarada era a errada — e este argumento ENVELHECEU.** Com **cinco** coletas o
+agrupado era `p = 0,0165`, e Bonferroni sobre os 4 testes agrupados dava `0,066`: não sobrevivia. Com **seis**
+coletas o agrupado é `p = 0,0016`, e Bonferroni dá `0,0066` (×4) ou `0,0049` (×3) — **os dois sobrevivem**. Ou
+seja: dos "três caminhos independentes" que derrubavam o p, o (a) hoje é desprezível e o **(b) não morde mais**.
+**Só o (c) sobrevive** — e é ele que decide, por um motivo mais grave do que multiplicidade. Note que o Bonferroni
+mata o p **nível-coleta** (0,064 × 4 = 0,26), nunca o agrupado; a distinção importa e a versão anterior não a
+fazia.
 
 **(c) Clustering — e este é decisivo.** O par não é a unidade independente; a **coleta** é. Por coleta:
 
@@ -160,16 +163,92 @@ pares. A família dele são os 4 testes agrupados por consulta mais o grupo post
 | E | 14/36 | 1,029 | +2,9% |
 | F | 11/36 | 1,067 | +6,7% |
 
-**Duas das seis coletas têm o efeito na direção oposta**, e a amplitude entre coletas (7,2 pontos) é **2,7× o
-efeito agregado** (+2,7%). Teste t no nível da coleta sobre as seis medianas: **t = 2,37, df = 5, p = 0,064**.
-O p pareado colapsa de 0,0016 para 0,064 quando a unidade de análise é a que o desenho de fato sustenta.
+**A TABELA ACIMA ESCONDIA A CRONOLOGIA, e isso é dívida minha.** Eu apresentava as seis coletas como se fossem
+intercambiáveis. Não são: são uma **série cronológica de um único dia**, numa box que também hospeda o runner de
+CI — e as duas coletas dissidentes são exatamente as duas mais antigas. Omitir a ordem nessas condições é omitir
+o que o leitor precisa para julgar.
 
-**A leitura honesta:** quatro das seis coletas mostram custo nas projeções estreitas, duas mostram ganho. A
-**direção firmou** (era 3 de 5, agora 4 de 6, e o p nível-coleta caiu de 0,14 para 0,064); a **significância
-não** — 0,064 continua acima de 0,05, e Bonferroni sobre os 4 testes agrupados a mataria de qualquer forma. A
-hipótese mecânica (100 travessias de plano do DataFusion em vez de 1, sem memória a economizar em troca) segue
-plausível e **não medida**. Uma sétima coleta provavelmente resolve; hoje o número defensável é "há
-provavelmente um custo de ~2 a 3%, no limite da resolução deste desenho".
+| Coleta | horário | efeito | `eager` mediana | `stream` mediana |
+|---|---|---|---|---|
+| A | 14:46 | **−0,6%** | 133,8 ms | 132,4 ms |
+| B | 15:28 | **−0,7%** | 133,7 ms | 134,0 ms |
+| C | 15:57 | +4,7% | 136,3 ms | 142,6 ms |
+| D | 16:49 | +4,5% | 137,3 ms | 145,2 ms |
+| E | 19:14 | +2,9% | 149,4 ms | 148,7 ms |
+| F | 22:13 | **+6,7%** | 151,9 ms | 155,6 ms |
+
+### O desenho tem DOIS níveis, e só um deles está protegido
+
+`references/papers/rigorous-perf-eval-georges-2007.pdf` § 2.1.2 nomeia o eixo exato: *"back-to-back measurements
+('aaabbb') versus interleaved measurements ('ababab')"*. Aplicado aqui:
+
+| Nível | Estrutura | Protegido? |
+|---|---|---|
+| **Dentro** de uma coleta | `ababab` — o harness alterna par a par | **sim**, é a prescrição do paper |
+| **Entre** coletas | `aaa…bbb` — uma por vez ao longo do dia | **não**, é o anti-padrão que ele nomeia |
+
+**E a medição mostra que o pareamento está de fato funcionando:**
+
+| | rho de Spearman vs ordem |
+|---|---|
+| `stream` **absoluto** | **+1,00** — monotonia perfeita, 132,4 → 155,6 ms |
+| `eager` absoluto | +0,94 |
+| **efeito** (a razão pareada) | **+0,71** — crítico a n=6 é **0,886**: não significativo |
+
+A sequência do efeito **não é monotônica** — três quebras (B<A, D<C, **E<D**). Se a deriva vazasse para a razão, a
+razão marcharia junto com os absolutos. Ela não marcha. **Isso é o desenho `ababab` fazendo o trabalho dele.**
+
+**Uma versão anterior desta passagem — escrita por mim uma rodada atrás — dizia "ordem e efeito perfeitamente
+confundidos".** Eu aceitei o diagnóstico do revisor e o publiquei **antes** de rodar o rho da razão. A conta o
+nega: +0,71 com três quebras não é confundimento perfeito. Foi a quarta rodada consecutiva em que a *correção*
+introduziu o defeito, e o padrão era sempre o mesmo — responder com prosa onde cabia uma conta.
+
+**Retiro, ainda assim, o que escrevi duas rodadas atrás:** "a direção firmou (era 3 de 5, agora 4 de 6)" e "uma
+sétima coleta provavelmente resolve". A primeira lê como tendência o que é ruído com rho não-significativo; a
+segunda **apostava significância futura** — e como a comparação **entre** coletas é `aaabbb`, uma sétima coleta
+tirada mais tarde não decide nada. Era hedging.
+
+**O teste t nível-coleta fica fora do documento** — não porque a deriva esteja provada, mas porque a
+permutabilidade que ele assume não é verificável com n=6 numa série temporal.
+
+### O sinal que sobra é uma hipótese melhor que as duas anteriores
+
+Os dois braços **não** degradaram igualmente ao longo do dia:
+
+| | A (14:46) | F (22:13) | Δ |
+|---|---|---|---|
+| `eager` | 133,8 ms | 151,9 ms | **+13,5%** |
+| `stream` | 132,4 ms | 155,6 ms | **+17,5%** |
+
+O streaming degradou **1,30× mais** — e isso casa com a arquitetura: ele faz **100 travessias de plano do
+DataFusion** contra 1 do eager, logo tem 100× mais oportunidades de ser desescalonado sob contenção. O q23 mostra
+o mesmo padrão (eager +11,0%, stream +13,5%), só que lá o ganho de 18% é grande o bastante para sobreviver.
+
+A leitura que isso sustenta — e que explica os dados melhor que "custo de 2%" ou "sem efeito":
+
+> **Numa box ociosa o custo das projeções estreitas é ~0; sob contenção ele aparece, e cresce com a contenção.**
+
+Status: **`UNBENCHMARKED`**. O controle que decide está descrito abaixo e em
+`.claude/knowledge-base/discoveries/blueprints/m168-drift-desk-check.md`.
+
+### O controle decisivo
+
+O paper prescreve converter `aaabbb` em `ababab`. No nível de coleta isso é: **reconstruir o binário da coleta A e
+rodá-lo intercalado com o de F, numa única janela.**
+
+- **A-agora mostra custo** → a diferença entre coletas é da box; o efeito é "aparece sob contenção" e a tabela
+  por-coleta não sustenta inferência entre coletas.
+- **A-agora ainda mostra ganho** → há diferença real de código, e o pooling entre coletas é inválido por outra
+  razão.
+
+**Expectativa registrada ANTES de medir**, para que o resultado não seja lido como confirmação retroativa: espero
+o primeiro. O único delta de código no caminho quente entre A e F são duas leituras de `i32` por chunk-group, que
+a ~100 chunk-groups não produzem 5% de uma consulta de 140 ms.
+
+**E "seis coletas, seis binários" exagera a independência.** No caminho quente do streaming as seis são
+essencialmente o mesmo código: o único delta na fronteira B→C, onde o sinal vira, são duas leituras extras de
+`i32` por chunk-group — que a ~100 chunk-groups não produzem ~5% de uma consulta de 140 ms. D→E e E→F tocaram
+apenas comentários e o `columnar.rs`. A identidade de binário não compra independência aqui.
 
 **O mesmo controle valida o q23.** Cada coleta isolada é **12/12** (p = 0,00049 por si só, seis vezes, em seis
 binários); teste t nível-coleta **t = −19,6, df = 5, p < 0,0001**; e o efeito (−18,3%) é ~2,5× a amplitude entre
@@ -185,8 +264,8 @@ E nada disso toca o resultado principal: q24, q25 e q26 economizam **31,6× / 21
 
 **A coluna de razões acima é `mediana(stream) / mediana(eager)` por execução** — é o que o SQL do harness computa
 (`m168_stream_ab.sql:72`), e **não** é a mesma estatística da regra de agregação fixada logo abaixo. Rotular as
-duas com a palavra "razão" foi um achado de review: quem lesse 0,746 como uma mediana-de-razões derivaria 25,4%,
-que nenhum subconjunto sustenta. Sob a regra declarada, estas duas execuções dão 0,825 e 0,798. As duas
+duas com a palavra "razão" foi um achado de review: quem lesse 0,855 como uma mediana-de-razões derivaria 14,5%,
+que nenhum subconjunto sustenta. Sob a regra declarada, estas duas execuções dão 0,836 e 0,860. As duas
 estatísticas concordam na direção e no sinal; a magnitude publicada vem sempre da regra declarada, nunca desta
 coluna.
 
@@ -194,9 +273,14 @@ Fonte de todas as linhas desta seção: **`docs/benchmarks/m168-artifacts/paired
 6 pares, `so_md5=dd91bb410d8569a10dbbb189a4f45bf5`). Reproduzível com
 `python3 benchmarks/m168_ab_summarize.py docs/benchmarks/m168-artifacts/paired-ab-stream.log`.
 
-**A magnitude publicável é a do regime aquecido.** Os pares 1–2 são frios (0,627 · 0,744 · 0,649 · 0,711) e
+**A magnitude publicável é a do regime aquecido.** Os pares 1–2 são frios (0,616 · 0,688 · 0,666 · 0,747) e
 inflam o ganho agregado. **Regra de agregação, fixada aqui e usada em todo o documento: mediana das razões
-pareadas** — uma versão anterior citava média para um subconjunto e mediana para outro, e daí saiu um "18,9%"
+pareadas, com empates EXCLUÍDOS** — a mesma exclusão que o teste do sinal exige, aplicada também às medianas para
+que as duas estatísticas descrevam o mesmo conjunto. Uma versão anterior declarava a regra sem a cláusula de
+empate e publicava medianas já sem eles: para o q25 a diferença é +1,8% (regra literal) contra +2,0% (publicado),
+e a direção da omissão era **anticonservadora** — a mesma do defeito de contagem que o § (a) descreve (achado de
+review). Há **um** empate no conjunto inteiro (coleta B, q25, par 6), então o efeito é pequeno; declarar a
+cláusula é o que impede que ele seja invisível — uma versão anterior citava média para um subconjunto e mediana para outro, e daí saiu um "18,9%"
 que não é nenhum dos dois (achado de review; nenhum agregado do conjunto o produzia):
 
 | Subconjunto | n | mediana das razões | ganho |
@@ -205,14 +289,14 @@ que não é nenhum dos dois (achado de review; nenhum agregado do conjunto o pro
 | pares 3–6 | 8 | 0,825 | 17,5% |
 | **pares 5–6** | 4 | **0,823** | **17,7%** |
 
-**A MAGNITUDE PUBLICADA VEM DO POOL DAS CINCO, NÃO DESTA COLETA — e a diferença é grande.** A tabela acima é
+**A MAGNITUDE PUBLICADA VEM DO POOL DAS SEIS, NÃO DESTA COLETA — e a diferença é grande.** A tabela acima é
 só da coleta E, e uma revisão mostrou que **E era a mais lisonjeira até a coleta F**: pares 5–6 por coleta dão
-12,0 · 14,2 · 12,4 · 16,8 · 17,7 · **13,6**. Pior, o desconto de aquecimento em E é de 0,6 ponto (18,3 → 17,7) contra
-4,4 pontos no pool (18,8 → 14,4) — E é justamente a coleta em que o regime frio quase não infla, e era dela que
+12,0 · 14,2 · 12,4 · 16,8 · 17,7 · **13,6**. Pior, o desconto de aquecimento em E foi de 0,6 ponto (18,3 → 17,7) contra
+**4,7 pontos** no pool das seis (18,3 → 13,6) — E é justamente a coleta em que o regime frio quase não infla, e era dela que
 eu publicava. Publicar "o menor subconjunto" **de uma coleta escolhida** não é publicar o menor; é cherry-pick
 com regra declarada.
 
-Aplicando a MESMA definição de regime aquecido ao pool das cinco coletas:
+Aplicando a MESMA definição de regime aquecido ao pool das seis coletas:
 
 | Subconjunto | n | mediana | ganho |
 |---|---|---|---|
@@ -221,8 +305,9 @@ Aplicando a MESMA definição de regime aquecido ao pool das cinco coletas:
 | **pares 5–6** | 24 | **0,864** | **13,6%** |
 
 **Publico ~13,6%: o q23 é ~13,6% mais rápido em regime aquecido**, com 72/72 pares favoráveis no pool e 12/12 em
-cada uma das seis coletas. É o menor número defensável do conjunto inteiro, não do subconjunto mais
-conveniente. E o contrabalanceamento sustenta: nos pares em que o *streaming* rodou primeiro — a posição
+cada uma das seis coletas. É o menor número da janela de regime **pré-declarada** (pares 5–6), não do subconjunto mais conveniente. Uma
+varredura exaustiva de janelas contíguas acha 13,3% (par 6 sozinho, n=12); mantenho 13,6% porque a janela foi
+declarada antes, e porque a deriva documentada acima já torna o número conservador. E o contrabalanceamento sustenta: nos pares em que o *streaming* rodou primeiro — a posição
 desfavorecida pelo aquecimento — ele venceu todos.
 
 **Estabilidade através de binários.** Esta é a **sexta** coleta independente, cada uma sobre um binário
@@ -230,7 +315,7 @@ diferente. O sinal do q23 não se moveu em nenhuma: **12/12 em cada uma, 72/72 n
 estável da série, e a tabela de memória saiu **idêntica ao dígito** nas seis (43,2× / 31,6× / 21,9× / 31,6×) —
 esperado, porque é contagem de bytes.
 
-A magnitude do q23 oscila com a máquina compartilhada (16,8% · 17,7% nas duas últimas), o que é a razão de o
+A magnitude do q23 oscila com a máquina compartilhada (17,7% na coleta E, **13,6%** na F — e é a F, a mais nova e a menos favorável, que produziu o número publicado), o que é a razão de o
 documento publicar sempre o menor subconjunto e não o agregado mais lisonjeiro — o agregado das 72 daria 18,3%.
 
 O ganho do q23 acompanha o regime em que a memória também cai 43×; onde há pouco a economizar, não há o que
@@ -285,8 +370,9 @@ A guarda virou `has_unflushed_pending`, chamável em vez de copiável, e o strea
 
 | Gate | Resultado |
 |---|---|
-| Oráculo 1M top-k (H0 9/9 + 15 asserções) | `rc=0` |
-| Oráculo de fixture (20 asserções) | `rc=0` |
+| Oráculo 1M top-k do M167 (H0 9/9 + 15 asserções) | `rc=0` — `m167-regression.log` |
+| Oráculo de fixture do M167 (20 asserções) | `rc=0` — `m167-regression.log` |
+| 3 controles positivos do M167 | `rc=3` esperado, todos disparam — `m167-regression.log` |
 | **Oráculo de pendentes (5 asserções, misto + puro)** | **ok** |
 | **Oráculo de k grande (`large-k.log`)** | **ok** — ver abaixo |
 | 4 controles positivos (H0, gate final, gate EC, gate de pendentes) | todos abortam |

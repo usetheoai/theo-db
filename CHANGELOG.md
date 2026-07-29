@@ -54,6 +54,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   numa projeção estreita com `LIMIT 400000` o caminho **novo serve e o anterior falha**. O recuo fica como defesa
   contra um caso não observado, e passa a ser registrado no log do servidor sempre que acontecer. Detalhes em
   `docs/benchmarks/m168-streaming-topk-verdict.md` § 3.5.
+- **A regressão do M167 passou a ser gravada como artefato pelo coletor de benchmark.** O relatório afirmava
+  `rc=0` para os dois oráculos do M167 numa tabela em que todas as outras linhas tinham artefato, mas o coletor
+  nunca os executava — a linha era verificada por leitura de código, não por execução. Agora
+  `benchmarks/m168_collect_all.sh` os roda e grava `m167-regression.log`.
 - **Os números de desempenho do top-k colunar foram revisados para baixo durante a revisão, e a metodologia
   mudou.** Quem leu uma versão anterior desta entrada viu "~18% mais rápido" e "as consultas de projeção estreita
   ficam ~2% mais lentas (p = 0,014)". Os dois números não sobreviveram à auditoria: o primeiro vinha da coleta

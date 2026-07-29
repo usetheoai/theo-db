@@ -60,6 +60,17 @@ run cancel-oracle             "$BENCH/m168_cancel_oracle.sql" "" 1
 # leitura de código, não por execução. Espera-se que ESTE log contenha um ERROR; é o ponto.
 run cancel-oracle-selftest    "$BENCH/m168_cancel_oracle.sql" "-v gate_selftest=1" 1
 run routing-shapes            "$BENCH/m168_routing_shapes.sql" "" 1
+
+# A REGRESSÃO DO M167, como artefato. Uma revisão apontou que o verdict afirmava `rc=0` para os dois oráculos do
+# M167 numa tabela em que TODAS as outras linhas têm artefato — e este coletor nunca os rodava. Rodar aqui é o que
+# torna a linha verificável em vez de afirmada. Ele é um shell script (não um .sql), então não passa pelo `run`.
+{
+  echo "=== m167-regression start $(date -Is) ==="
+  echo "so_md5=$SO_MD5"; echo "so_path=$SO_PATH"; echo "postmaster=$PM"
+  ( cd "$(dirname "$BENCH")" && PGRX_BIN="$P" PGPORT="$PGPORT" bash "$BENCH/m167_run_oracles.sh" 2>&1 )
+  echo "=== m167-regression rc=$? end $(date -Is) ==="
+} > "$OUT/m167-regression.log" 2>&1
+printf '  %-28s -> %s\n' "m167-regression" "$OUT/m167-regression.log"
 run inversion-narrow          "$BENCH/m168_inversion_narrow.sql" "" 1
 run inversion-wide-small-k    "$BENCH/m168_inversion.sql"    "" 1
 echo
