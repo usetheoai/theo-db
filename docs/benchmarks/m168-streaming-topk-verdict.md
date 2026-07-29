@@ -245,6 +245,49 @@ rodá-lo intercalado com o de F, numa única janela.**
 o primeiro. O único delta de código no caminho quente entre A e F são duas leituras de `i32` por chunk-group, que
 a ~100 chunk-groups não produzem 5% de uma consulta de 140 ms.
 
+### O CONTROLE RODOU. A expectativa se confirmou, e a pergunta está fechada.
+
+Artefatos: `docs/benchmarks/m168-drift-control/{A,F}-{1,2}.log` · script: `benchmarks/m168_drift_control.sh`.
+Quatro execuções alternando **A, F, A, F**, cada troca com `pg_ctl restart` e verificação de que o `.so` mapeado
+não é `(deleted)` — o script aborta se for.
+
+| | efeito nas 3 estreitas | `eager` | `stream` |
+|---|---|---|---|
+| binário **A**, coleta original (14:46) | **−0,6%** | 133,8 ms | 132,4 ms |
+| **binário A, agora, intercalado** | **+2,3%** | 150,6 ms | 148,8 ms |
+| binário **F**, agora, intercalado | +4,7% | 139,7 ms | 142,7 ms |
+
+**O MESMO BINÁRIO moveu 2,9 pontos — de −0,6% para +2,3% — só pelo horário da medição.** É a resposta: a variação
+entre coletas da tabela acima estava medindo a **box**, não o código.
+
+**E não há diferença de código detectável entre A e F.** Teste do sinal pareado por slot (consulta × repetição ×
+posição do par), os dois na mesma janela:
+
+| | n | F pior que A | p |
+|---|---|---|---|
+| 3 estreitas | 35 | 21/35 | **0,31** |
+| q23 | 12 | 7/12 | **0,77** |
+
+O resíduo de +2,4 pontos entre as medianas de A e F **não sobrevive ao teste pareado**. Eu cheguei a suspeitar da
+`PeakTrackingPool` (um `fetch_max` relaxado por reserva) — mas isso é nanossegundos, não 2,4 pontos de 140 ms, e o
+teste confirma que não há efeito a explicar. Registro a suspeita e o descarte porque especular mecanismo antes de
+testar existência foi o erro desta série.
+
+### Conclusão sobre as projeções estreitas — final
+
+**O efeito não é resolvível neste desenho, e agora isso é medido, não argumentado.** O mesmo binário dá −0,6% ou
++2,3% dependendo de quando você mede. Qualquer número que eu publicasse sobre as estreitas seria o estado da box
+naquela hora.
+
+O que **é** publicável: elas economizam **31,6× / 21,9× / 31,6×** de memória, e o custo de tempo, se existe, é
+menor que a variação que a box impõe entre duas medições do mesmo código.
+
+### E o q23 sobrevive a tudo
+
+12/12 em **cada uma** das seis coletas, 12/12 no binário A e 12/12 no F na mesma janela, com ganho de 20,4% (A) e
+14,3% (F). A comparação pareada entre binários não acha diferença (7/12, p=0,77). O contraste com as estreitas é o
+que valida o instrumento: **o mesmo desenho que não consegue resolver 2% resolve 18% seis vezes sem uma exceção.**
+
 **E "seis coletas, seis binários" exagera a independência.** No caminho quente do streaming as seis são
 essencialmente o mesmo código: o único delta na fronteira B→C, onde o sinal vira, são duas leituras extras de
 `i32` por chunk-group — que a ~100 chunk-groups não produzem ~5% de uma consulta de 140 ms. D→E e E→F tocaram
