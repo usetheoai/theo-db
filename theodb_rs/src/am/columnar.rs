@@ -951,14 +951,6 @@ pub(crate) struct ScanPlan {
     natts: usize,
 }
 
-impl ScanPlan {
-    /// Total chunk-groups across every visible stripe — the number of batches a streaming consumer will see
-    /// (minus whatever the zone-map skips).
-    pub(crate) fn n_chunk_groups(&self) -> usize {
-        self.plans.iter().map(|p| p.n_chunk_groups).sum()
-    }
-}
-
 /// Pass 1: plan the scan without decoding a single value chunk.
 pub(crate) unsafe fn plan_columnar_scan(
     rel: pg_sys::Relation,
@@ -1063,8 +1055,6 @@ pub(crate) struct ColumnarChunkStream {
     affinity: ThreadAffinity,
     pl_idx: usize,
     cg_idx: usize,
-    skipped: usize,
-    emitted: usize,
 }
 
 impl ColumnarChunkStream {
@@ -1075,21 +1065,7 @@ impl ColumnarChunkStream {
             affinity: ThreadAffinity::capture(),
             pl_idx: 0,
             cg_idx: 0,
-            skipped: 0,
-            emitted: 0,
         }
-    }
-
-    pub(crate) fn column_names(&self) -> &[String] {
-        &self.plan.names
-    }
-
-    pub(crate) fn column_typids(&self) -> Vec<u32> {
-        self.plan.wanted.iter().map(|&c| self.plan.cols[c].typid).collect()
-    }
-
-    pub(crate) fn stats(&self) -> (usize, usize) {
-        (self.emitted, self.skipped)
     }
 
     /// Decode the next non-skipped chunk-group. `Ok(None)` = the scan is exhausted.
@@ -1134,10 +1110,8 @@ impl ColumnarChunkStream {
                 &mut fixed_rows,
                 &mut cell_cols,
             )? {
-                self.skipped += 1;
                 continue;
             }
-            self.emitted += 1;
             let out = self
                 .plan
                 .wanted

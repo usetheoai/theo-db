@@ -77,7 +77,21 @@ panic imediato se divergir. Dois `#[pg_test]` provam os dois lados — que a ass
 
 Precedente na mesma classe: o M139 encontrou o Tantivy chamando `Directory` de quatro threads.
 
-## 5. O que NÃO está provado
+## 5. `/code-quality` — e o que ele NÃO pegou
+
+Veredito `PASS_WITH_CAVEATS`, **HARD 0**, D1 (código morto) sem achados. As duas ressalvas do D2 são o mesmo
+`use pg_sys::XactEvent as XE`, falso-positivo do detector (`pg_sys` é re-export de módulo do pgrx, não crate do
+crates.io) e **pré-existente** — `git log -S` o data em `b84a29f`, do M99.
+
+**Mas a auditoria passou por cima de código morto meu.** Minha própria checagem encontrou quatro métodos
+(`column_names`, `column_typids`, `stats`, `n_chunk_groups`) com **zero chamadores**, escritos especulativamente —
+violação da rung 1 da parsimony ladder. Removidos, e com eles os campos `skipped`/`emitted`, que ficaram
+write-only. O D1 do Rust não detecta método `pub(crate)` sem chamador; o relatório dizer "No findings" para D1
+significa "o detector não achou", não "não há".
+
+Revalidado após a remoção: oráculos verdes, 396 batches de stream (o caminho continua ativo).
+
+## 6. O que NÃO está provado
 
 - **Os `#[pg_test]` não foram executados nesta box.** `cargo test` não linka neste crate (`undefined symbol:
   PG_exception_stack` — os testes precisam dos símbolos do PostgreSQL) e `cargo pgrx test` não foi rodado aqui. A
@@ -90,7 +104,7 @@ Precedente na mesma classe: o M139 encontrou o Tantivy chamando `Directory` de q
 - **O tamanho do chunk-group é o do escritor.** Não há tuning aqui: se um dia os chunk-groups ficarem muito
   pequenos, o overhead fixo por batch do DataFusion pode dominar. Não medido.
 
-## 6. Reprodução
+## 7. Reprodução
 
 ```bash
 # pico (o postmaster PRECISA subir com a variável — o backend herda dele, não do psql)
