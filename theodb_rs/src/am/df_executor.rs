@@ -779,12 +779,11 @@ pub(super) unsafe fn run_columnar_topk(
             proj_names.push(key.clone());
         }
     }
-    let batch = decode_to_batch(rel, &proj_names, predicates, text_predicates, in_predicates, skip)?;
+    let batch =
+        decode_to_batch(rel, &proj_names, predicates, text_predicates, in_predicates, skip)?;
     let filter = build_filter_expr(rel, predicates, text_predicates, in_predicates);
-    let order_by: Vec<_> = sort_keys
-        .iter()
-        .map(|(name, asc, nf)| col(name.as_str()).sort(*asc, *nf))
-        .collect();
+    let order_by: Vec<_> =
+        sort_keys.iter().map(|(name, asc, nf)| col(name.as_str()).sort(*asc, *nf)).collect();
     // filter (WHERE, the final authority — D3) → sort by the key (PG order for numeric/temporal/det-collation text) →
     // limit k (DataFusion's TopK: a bounded heap, never materializing all N as tuples).
     let batches = run_df_collect(batch, move |df| {
