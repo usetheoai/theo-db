@@ -31,7 +31,12 @@ DECLARE
     'SELECT * FROM hits WHERE URL LIKE ''%google%'' ORDER BY EventTime LIMIT 10',
     'SELECT SearchPhrase FROM hits WHERE SearchPhrase <> '''' ORDER BY EventTime LIMIT 10',
     'SELECT SearchPhrase FROM hits WHERE SearchPhrase <> '''' ORDER BY SearchPhrase LIMIT 10',
-    'SELECT SearchPhrase FROM hits WHERE SearchPhrase <> '''' ORDER BY EventTime, SearchPhrase LIMIT 10'
+    'SELECT SearchPhrase FROM hits WHERE SearchPhrase <> '''' ORDER BY EventTime, SearchPhrase LIMIT 10',
+    -- H5/H5b sort by a THREE-key shape none of the four above exercises. They are the full-row blocks — the ones
+    -- that catch key<->payload misalignment, and the only comparison over all 105 columns. Omitting their shape
+    -- here left exactly those two free to pass vacuously if the 3-key swap declined.
+    'SELECT CounterID, WatchID, UserID, SearchPhrase FROM hits WHERE SearchPhrase <> '''' ORDER BY CounterID, WatchID, UserID LIMIT 20',
+    'SELECT * FROM hits WHERE URL LIKE ''%google%'' ORDER BY CounterID, WatchID, UserID LIMIT 10'
   ];
   shape text;
   plan  text;

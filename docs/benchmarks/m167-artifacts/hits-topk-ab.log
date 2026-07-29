@@ -2,12 +2,12 @@ SET
 SET
 SET
 ### M167-H0: routing precondition — the four shapes MUST show the top-k node
-psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:55: NOTICE:  M167-H0 ok: all 4 shapes route to theodb_columnar_agg with no surviving Sort
+psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:60: NOTICE:  M167-H0 ok: all 6 shapes route to theodb_columnar_agg with no surviving Sort
 DO
 ### M167-H1 (q23): SELECT * WHERE URL LIKE ... ORDER BY EventTime LIMIT 10 — sort-key multiset
-psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:58: NOTICE:  table "h1_col" does not exist, skipping
+psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:63: NOTICE:  table "h1_col" does not exist, skipping
 DROP TABLE
-psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:58: NOTICE:  table "h1_heap" does not exist, skipping
+psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:63: NOTICE:  table "h1_heap" does not exist, skipping
 DROP TABLE
 SELECT 10
 SELECT 10
@@ -17,9 +17,9 @@ SELECT 10
 (1 row)
 
 ### M167-H2 (q24): narrow projection, ORDER BY EventTime LIMIT 10 — sort-key multiset
-psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:66: NOTICE:  table "h2_col" does not exist, skipping
+psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:71: NOTICE:  table "h2_col" does not exist, skipping
 DROP TABLE
-psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:66: NOTICE:  table "h2_heap" does not exist, skipping
+psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:71: NOTICE:  table "h2_heap" does not exist, skipping
 DROP TABLE
 SELECT 10
 SELECT 10
@@ -29,9 +29,9 @@ SELECT 10
 (1 row)
 
 ### M167-H3 (q25): text sort key, ORDER BY SearchPhrase LIMIT 10 — sort-key multiset
-psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:74: NOTICE:  table "h3_col" does not exist, skipping
+psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:79: NOTICE:  table "h3_col" does not exist, skipping
 DROP TABLE
-psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:74: NOTICE:  table "h3_heap" does not exist, skipping
+psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:79: NOTICE:  table "h3_heap" does not exist, skipping
 DROP TABLE
 SELECT 10
 SELECT 10
@@ -41,9 +41,9 @@ SELECT 10
 (1 row)
 
 ### M167-H4 (q26): multi-key, ORDER BY EventTime, SearchPhrase LIMIT 10 — sort-key multiset
-psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:82: NOTICE:  table "h4_col" does not exist, skipping
+psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:87: NOTICE:  table "h4_col" does not exist, skipping
 DROP TABLE
-psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:82: NOTICE:  table "h4_heap" does not exist, skipping
+psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:87: NOTICE:  table "h4_heap" does not exist, skipping
 DROP TABLE
 SELECT 10
 SELECT 10
@@ -53,9 +53,9 @@ SELECT 10
 (1 row)
 
 ### M167-H5: TIE-BROKEN total order -> FULL ROWS compared (catches key<->payload misalignment)
-psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:90: NOTICE:  table "h5_col" does not exist, skipping
+psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:95: NOTICE:  table "h5_col" does not exist, skipping
 DROP TABLE
-psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:90: NOTICE:  table "h5_heap" does not exist, skipping
+psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:95: NOTICE:  table "h5_heap" does not exist, skipping
 DROP TABLE
 SELECT 20
 SELECT 20
@@ -75,9 +75,9 @@ SELECT 20
 (1 row)
 
 ### M167-H5b: WIDE projection (all 105 columns), tie-broken -> FULL ROWS compared
-psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:104: NOTICE:  table "h5b_col" does not exist, skipping
+psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:109: NOTICE:  table "h5b_col" does not exist, skipping
 DROP TABLE
-psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:104: NOTICE:  table "h5b_heap" does not exist, skipping
+psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:109: NOTICE:  table "h5b_heap" does not exist, skipping
 DROP TABLE
 SELECT 10
 SELECT 10
@@ -92,7 +92,7 @@ SELECT 10
 (1 row)
 
 ### M167-H6: NEGATIVE CONTROL — the same comparison must FAIL on seeded data
-psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:113: NOTICE:  table "h6_bad" does not exist, skipping
+psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:118: NOTICE:  table "h6_bad" does not exist, skipping
 DROP TABLE
 SELECT 20
         q        | n  
