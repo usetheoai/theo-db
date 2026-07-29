@@ -1,8 +1,8 @@
-=== M167 fixture oracle start 2026-07-29T02:33:40+00:00 ===
-postmaster=2026-07-29 01:27:21.29745+00
+=== M167 fixture oracle start 2026-07-29T11:42:56+00:00 ===
+postmaster=2026-07-29 11:42:30.185749+00
 so_path=/root/.pgrx/18.4/pgrx-install/lib/postgresql/theodb_rs.so
-so_mtime=2026-07-29 01:26:46.242582116 +0000
-so_md5=9b9342f7e925d37ce0e1cf2ce1c356e0
+so_mtime=2026-07-29 11:42:13.909201849 +0000
+so_md5=5b38af0a44efc6b2215f6bfae5b20469
 expected_rc=0
 SET
 DROP TABLE
@@ -292,4 +292,4 @@ INSERT 0 1
 
 psql:/root/theo-db/benchmarks/m158_ec_harness.sql:319: NOTICE:  M167 EC FINAL GATE ok: 20 assertions, all mismatch counters 0, negative control fires
 DO
-=== M167 fixture oracle rc=0 end 2026-07-29T02:33:41+00:00 ===
+=== M167 fixture oracle rc=0 end 2026-07-29T11:42:58+00:00 ===

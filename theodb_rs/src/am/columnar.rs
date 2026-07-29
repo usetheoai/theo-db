@@ -849,6 +849,92 @@ pub(crate) fn fixed_arrow_width(typid: u32) -> Option<usize> {
 /// (decided from the directory in a cheap first pass) AND has no same-xact pending rows accumulates as `FixedRaw` (one
 /// bulk `extend_from_slice` per chunk-group — O(bytes), not O(cells)); every other column stays `Cells` (fail-safe,
 /// byte-identical to `decode_columns`). Returns `(name, typid, DecodedColumn)` per wanted column, in `wanted` order.
+/// One visible stripe's directory, plus how many chunk-groups it holds. Lifted to module scope (it used to be
+/// declared inside `decode_columns_v2`) so the per-chunk-group decode can be a shared helper — M168 needs the same
+/// unit both accumulated (the existing path) and streamed (the O(k) top-k path).
+struct StripePlan {
+    entries: Vec<codec::ChunkDirEntry>,
+    n_chunk_groups: usize,
+}
+
+/// Everything a chunk-group decode needs that does NOT change between chunk-groups. Bundled so the helper takes a
+/// context rather than eleven positional arguments.
+struct CgDecodeCtx<'a> {
+    rel: pg_sys::Relation,
+    natts: usize,
+    wanted: &'a [usize],
+    cols: &'a [ColDesc],
+    mode_fixed: &'a [Option<usize>],
+    predicates: &'a [super::zonemap::ZonePredicate],
+    skip: bool,
+}
+
+/// Decode ONE chunk-group into the caller's accumulators.
+///
+/// This is the unit of work the columnar decode has always done — it was inlined in `decode_columns_v2`'s nested
+/// loop. Extracting it changes nothing about *how* a chunk-group is decoded; it changes only who owns the
+/// accumulators. `decode_columns_v2` passes buffers that live across every chunk-group (so the whole relation lands
+/// in one batch, the O(N) behaviour M167 measured at 772 MiB); the M168 streaming path passes buffers it resets and
+/// drains per chunk-group, which is what makes the peak independent of N.
+///
+/// Returns `Ok(false)` when the zone-map proved this chunk-group cannot match (nothing was read or decoded).
+unsafe fn decode_one_chunk_group(
+    ctx: &CgDecodeCtx,
+    pl: &StripePlan,
+    cg: usize,
+    fixed_bytes: &mut [Vec<u8>],
+    fixed_rows: &mut [usize],
+    cell_cols: &mut [Vec<Option<Vec<u8>>>],
+) -> Result<bool, String> {
+    let natts = ctx.natts;
+    let cg_rows = pl.entries[cg * natts].row_count as usize;
+    if ctx.skip
+        && ctx.predicates.iter().any(|p| {
+            p.col < natts && {
+                let e = &pl.entries[cg * natts + p.col];
+                !super::zonemap::chunk_can_match(
+                    e.has_minmax,
+                    e.min_bits,
+                    e.max_bits,
+                    ctx.cols[p.col].mm,
+                    p,
+                )
+            }
+        })
+    {
+        return Ok(false);
+    }
+    for (wi, &col) in ctx.wanted.iter().enumerate() {
+        let e = &pl.entries[cg * natts + col];
+        let comp = super::page::read_chunked(ctx.rel, e.first_block, e.n_pages)?;
+        if comp.len() < e.comp_len as usize {
+            return Err("theodb_columnar: column chunk truncated on disk".into());
+        }
+        let raw = zstd::decode_all(&comp[..e.comp_len as usize])
+            .map_err(|x| format!("theodb_columnar: zstd decode failed: {x}"))?;
+        match ctx.mode_fixed[wi] {
+            Some(w) => {
+                // FixedRaw: has_nulls=false ⇒ the whole `raw` is the dense contiguous LE value stream.
+                let expect = w * cg_rows;
+                if raw.len() != expect {
+                    return Err(format!(
+                        "theodb_columnar: fixed chunk size {} != {w}*{cg_rows} (col {col})",
+                        raw.len()
+                    ));
+                }
+                fixed_bytes[wi].extend_from_slice(&raw); // one bulk copy per chunk-group (O(bytes))
+                fixed_rows[wi] += cg_rows;
+            }
+            None => {
+                let mut vals =
+                    codec::decode_column(&raw, ctx.cols[col].attlen_fixed, cg_rows, e.has_nulls)?;
+                cell_cols[wi].append(&mut vals);
+            }
+        }
+    }
+    Ok(true)
+}
+
 pub(crate) unsafe fn decode_columns_v2(
     rel: pg_sys::Relation,
     projection: Option<&[usize]>,
@@ -891,10 +977,6 @@ pub(crate) unsafe fn decode_columns_v2(
     // Pass 1 — read every visible stripe's header + directory (cheap; no value chunks) so we can (a) decide per-wanted
     // column whether it can take the FixedRaw fast path (fixed-width type AND no nulls anywhere) and (b) reuse the
     // directories in pass 2 without re-reading. Also carries the zone-map skip decision per chunk-group.
-    struct StripePlan {
-        entries: Vec<codec::ChunkDirEntry>,
-        n_chunk_groups: usize,
-    }
     let mut plans: Vec<StripePlan> = Vec::new();
     for sm in read_visible_stripes((*rel).rd_id)? {
         let hdr_items = super::page::read_all_page_items(rel, sm.header_block)?;
@@ -934,54 +1016,29 @@ pub(crate) unsafe fn decode_columns_v2(
     let (mut skipped_cg, mut total_cg) = (0usize, 0usize);
 
     // Pass 2 — decode value chunks (the expensive part, done once), routing per column mode.
+    let ctx = CgDecodeCtx {
+        rel,
+        natts,
+        wanted: &wanted,
+        cols: &cols,
+        mode_fixed: &mode_fixed,
+        predicates,
+        skip,
+    };
     for pl in &plans {
         for cg in 0..pl.n_chunk_groups {
-            let cg_rows = pl.entries[cg * natts].row_count as usize;
             total_cg += 1;
-            if skip
-                && predicates.iter().any(|p| {
-                    p.col < natts && {
-                        let e = &pl.entries[cg * natts + p.col];
-                        !super::zonemap::chunk_can_match(
-                            e.has_minmax,
-                            e.min_bits,
-                            e.max_bits,
-                            cols[p.col].mm,
-                            p,
-                        )
-                    }
-                })
-            {
+            // Accumulators live across every chunk-group here — that is exactly what makes this path O(N) in the
+            // decoded batch. The streaming caller passes per-chunk-group buffers to the same helper instead.
+            if !decode_one_chunk_group(
+                &ctx,
+                pl,
+                cg,
+                &mut fixed_bytes,
+                &mut fixed_rows,
+                &mut cell_cols,
+            )? {
                 skipped_cg += 1;
-                continue;
-            }
-            for (wi, &col) in wanted.iter().enumerate() {
-                let e = &pl.entries[cg * natts + col];
-                let comp = super::page::read_chunked(rel, e.first_block, e.n_pages)?;
-                if comp.len() < e.comp_len as usize {
-                    return Err("theodb_columnar: column chunk truncated on disk".into());
-                }
-                let raw = zstd::decode_all(&comp[..e.comp_len as usize])
-                    .map_err(|x| format!("theodb_columnar: zstd decode failed: {x}"))?;
-                match mode_fixed[wi] {
-                    Some(w) => {
-                        // FixedRaw: has_nulls=false ⇒ the whole `raw` is the dense contiguous LE value stream.
-                        let expect = w * cg_rows;
-                        if raw.len() != expect {
-                            return Err(format!(
-                                "theodb_columnar: fixed chunk size {} != {w}*{cg_rows} (col {col})",
-                                raw.len()
-                            ));
-                        }
-                        fixed_bytes[wi].extend_from_slice(&raw); // one bulk copy per chunk-group (O(bytes))
-                        fixed_rows[wi] += cg_rows;
-                    }
-                    None => {
-                        let mut vals =
-                            codec::decode_column(&raw, cols[col].attlen_fixed, cg_rows, e.has_nulls)?;
-                        cell_cols[wi].append(&mut vals);
-                    }
-                }
             }
         }
     }

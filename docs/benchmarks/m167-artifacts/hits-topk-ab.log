@@ -1,8 +1,8 @@
-=== M167 1M top-k oracle start 2026-07-29T02:33:25+00:00 ===
-postmaster=2026-07-29 01:27:21.29745+00
+=== M167 1M top-k oracle start 2026-07-29T11:42:34+00:00 ===
+postmaster=2026-07-29 11:42:30.185749+00
 so_path=/root/.pgrx/18.4/pgrx-install/lib/postgresql/theodb_rs.so
-so_mtime=2026-07-29 01:26:46.242582116 +0000
-so_md5=9b9342f7e925d37ce0e1cf2ce1c356e0
+so_mtime=2026-07-29 11:42:13.909201849 +0000
+so_md5=5b38af0a44efc6b2215f6bfae5b20469
 expected_rc=0
 SET
 SET
@@ -96,4 +96,4 @@ INSERT 0 1
 
 psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:189: NOTICE:  M167 FINAL GATE ok: 15 assertions, all mismatch counters 0, negative control fires, tie-break exercised, wide row wide
 DO
-=== M167 1M top-k oracle rc=0 end 2026-07-29T02:33:40+00:00 ===
+=== M167 1M top-k oracle rc=0 end 2026-07-29T11:42:56+00:00 ===
