@@ -44,8 +44,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   registrar quantos bytes o caminho colunar decodificou para responder à consulta
   (`theodb_decode_batch: rows=… bytes=… work_mem_bytes=…`). Quem opera consegue ver o consumo real em vez de
   inferi-lo do `VmRSS`, que é dominado pelos `shared_buffers` mapeados em todo backend e não isola a consulta.
-  A primeira medição com ele já mostrou que o limite de proteção subestima o consumo em ~3,5× num `SELECT *`
-  largo, porque compara com bytes comprimidos em disco (#218).
+  A primeira medição com ele já mostrou que o limite de proteção subestima o consumo real num `SELECT *` largo,
+  porque compara com bytes comprimidos em disco — os números estão em (#218).
 
 ### Deprecated
 

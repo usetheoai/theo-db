@@ -1,4 +1,4 @@
-=== window-probe (execução 1/1) start 2026-07-29T14:24:50+00:00 ===
+=== window-probe (execução 1/1) start 2026-07-29T14:48:35+00:00 ===
 so_md5=e010375381ae7ad9069e4a38a5d6c9c6
 so_path=/root/.pgrx/18.4/pgrx-install/lib/postgresql/theodb_rs.so
 postmaster=2026-07-29 14:19:07.697502+00
@@ -364,4 +364,4 @@ psql:/root/theo-db/benchmarks/m168_window_probe.sql:76: WARNING:  theodb_admit_d
 A janela do fail-open existiria num cenário com linha para "eager" e SEM linha para "stream".
 A janela inversa é um cenário com linha para "stream" e SEM linha para "eager".
 DROP TABLE
-=== window-probe (execução 1/1) rc=0 end 2026-07-29T14:25:15+00:00 ===
+=== window-probe (execução 1/1) rc=0 end 2026-07-29T14:48:59+00:00 ===

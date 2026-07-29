@@ -89,16 +89,19 @@ O summarizer passa a usar **teste do sinal exato, bilateral**, sobre os pares (i
 
 | Consulta | razões (2 execuções) | pares favoráveis | p (sinal, bilateral) | leitura |
 |---|---|---|---|---|
-| **q23** | 0,808 · 0,866 | **12 / 12** | **0,0005** | **efeito pareado real** |
-| q24 | 1,084 · 1,038 | 4 / 12 | 0,39 | sem efeito |
-| q25 | 1,022 · 0,897 | 8 / 12 | 0,39 | sem efeito |
-| q26 | 1,002 · 0,989 | 8 / 12 | 0,39 | sem efeito |
+| **q23** | 0,828 · 0,805 | **12 / 12** | **0,0005** | **efeito pareado real** |
+| q24 | 1,035 · 1,024 | 7 / 12 | 0,77 | sem efeito |
+| q25 | 1,022 · 0,972 | 7 / 12 | 0,77 | sem efeito |
+| q26 | 0,981 · 0,981 | 6 / 12 | 1,00 | sem efeito |
 
-**A magnitude publicável é a do regime aquecido, não a média.** Os pares 1–2 são frios (razões 0,60–0,73) e
-puxam a média para baixo — para a ponta *otimista*, no sentido de exagerar o ganho. Nos pares aquecidos (5–6) as
-razões são 0,853 · 0,905 · 0,920 · 0,853, ou seja **~12%**.
+**A magnitude publicável é a do regime aquecido, não a média.** Os pares 1–2 são frios (0,636 · 0,755 · 0,697 ·
+0,700) e puxam a média para baixo — para a ponta *otimista*, no sentido de exagerar o ganho. O aquecimento
+estabiliza a partir do par 3, não do 5 (correção de review): pares **3–6** (n=8) dão média 0,851 → **14,9%**;
+pares 5–6 (n=4) dão 0,883 → 11,7%.
 
-**O q23 é ~12% mais rápido em regime, com 12/12 pares favoráveis (p = 0,0005).** E o contrabalanceamento sustenta:
+**Publico o número menor: o q23 é ~12% mais rápido em regime, com 12/12 pares favoráveis (p = 0,0005).** Toda
+alternativa no conjunto é mais lisonjeira — os 12 pares dão 18,9%, os pares 3–6 dão 14,9% sobre o dobro da
+amostra. 12% é o menor número defensável do dado. E o contrabalanceamento sustenta:
 nos seis pares em que o *streaming* rodou primeiro — a posição desfavorecida pelo aquecimento — ele venceu 6/6.
 
 Nas três consultas estreitas **não há efeito pareado**. Faz sentido mecanicamente: o ganho do q23 acompanha o
@@ -171,11 +174,12 @@ A pergunta empírica: **existe um `k` em que o eager serve e o streaming não?**
 
 | Cenário | streaming | eager |
 |---|---|---|
-| 32MB · `SELECT *` 105 col · k=200000 | estoura | **também estoura** |
-| 32MB · `SELECT *` 105 col · k=100000 | **estoura** (`peak_reserved=132.100.024` contra pool de 134.217.728) | **também estoura** |
-| 32MB · 2 col · k=400000 (`inversion-narrow.log`) | **serve** (`peak_reserved` **43.240.056 B**, pool 134.217.728 B) | **falha** (`TopK[0] with 100.3 MB already allocated`, `pool_size` 102,9 MB decimais) |
+| 32MB · `SELECT *` 105 col · k=200000 (`window-probe.log` cen. 1) | estoura | **também estoura** |
+| 32MB · `SELECT *` 105 col · k=100000 (`window-probe.log` cen. 2) | **estoura** (`peak_reserved=132.100.024` contra pool de 134.217.728) | **também estoura** |
+| 32MB · 2 col · k=400000 (`inversion-narrow.log`) | **serve** (`peak_reserved` **43.240.056 B** = 41,2 MiB, pool 134.217.728 B = 128 MiB) | **falha** (`TopK[0] with 100.3 MB already allocated`, `pool_size` 102,9 MB decimais) |
 | 32MB · 2 col · k=400000, chave composta (`window-probe.log` cenário 3) | **serve** (`peak_reserved` **50.064.565 B**) | **falha** (101,1 + 19,6 MB) |
-| **32MB · `SELECT *` 105 col · k=1000** (a banda que um reviewer previu) | **serve** (`peak_reserved` **9.293.548 B**) | **serve** (1000 linhas) |
+| **32MB · `SELECT *` 105 col · k=1000** — a banda que um reviewer previu (`inversion-wide-small-k.log`) | **serve** (`peak_reserved` **9.293.548 B**) | **serve** (1000 linhas) |
+| 64MB · 5 col · k=50000 (`window-probe.log` cen. 4) | **serve** (50.000 linhas) | **falha** — segundo caso de janela inversa |
 
 **A janela não foi encontrada — inclusive na banda prevista.** Um revisor derivou dos números da § 1 que
 `SELECT *` com `k` pequeno deveria quebrar o streaming: pool fixa de 128 MB contra até 100 × 18,75 MB retidos. A
@@ -185,17 +189,20 @@ de "× número de batches" não vale — e só se soube disso medindo.
 
 **A janela inversa existe.** Com projeção estreita e `k = 400000`, o streaming serve e o eager falha. Mas a
 comparação tem uma ressalva que uma versão anterior omitia: **os dois braços correm sob orçamentos diferentes**
-(128 MB contra 102,9 MB), porque as fórmulas das pools diferem. A conclusão qualitativa sobrevive — 43,2 MB
-caberiam nos dois orçamentos, e 119,8 MB não caberiam em nenhum — mas atribuir todo o delta à retenção
-confundiria duas variáveis.
+(128 MB contra 102,9 MB), porque as fórmulas das pools diferem. **E a frase que eu escrevia para dispensar esse confundidor era refutada pela própria aritmética.** Eu dizia que
+"119,8 MB não caberiam em nenhum dos dois orçamentos": 119,8 MiB são 125.619.404 B, e a pool do streaming é
+134.217.728 B — **cabe, com 8,2 MiB de folga**. A demanda do eager teria sido servida sob o orçamento do
+streaming. A conclusão pode continuar válida pela retenção sozinha (41,2 MiB medidos contra 119,8 MiB demandados
+é uma diferença real), mas a prova que eu publicava se auto-refutava — mesma forma da linha k=100000 da rodada
+anterior.
 
 E os números da retenção passaram a ser **os medidos**, não estimativas de tamanho de batch. Uma versão anterior
 dizia "o streaming retém ~250 KB e o eager segura 40 MB" (≈160×) — os 250 KB eram o tamanho de *um batch*, não a
-retenção, e os 40 MB não estavam em artefato algum. Medido: **43,2 MB contra ≥119,8 MB, ou ~2,8×**. Foi a
+retenção, e os 40 MB não estavam em artefato algum. Medido, numa unidade só: **41,2 MiB contra ≥119,8 MiB, ou 2,91×**. (Uma versão anterior citava "43,2 MB contra 119,8 MB, ~2,8×", dividindo decimal por binário.) Foi a
 `PeakTrackingPool` que produziu esse número, e a conclusão que mais dependia dele era justamente a que não o usava.
 
 **A folga não é constante, e a comparação tem de ser contra o mesmo denominador.** Contra a pool do DataFusion:
-em k=10 a retenção medida é 0,8–2,4 MiB numa pool de 192 MiB; em k=400000 é 43,2 MB numa pool de 128 MiB — 34%.
+em k=10 a retenção medida é 0,8–2,4 MiB numa pool de 192 MiB; em k=400000 é 41,2 MiB numa pool de 128 MiB — **32%**.
 (Uma versão anterior comparava ~21 MiB contra os 512 MiB do guard do ADR-4, misturando dois orçamentos diferentes
 numa frase só, e usando como numerador justamente a soma que o § 1 declara não ser um resultado.)
 

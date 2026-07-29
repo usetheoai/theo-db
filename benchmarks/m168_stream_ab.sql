@@ -49,6 +49,11 @@ BEGIN
       END IF;
       FOREACH m IN ARRAY modes LOOP
         EXECUTE format('SET theodb.enable_columnar_topk_stream = %s', CASE WHEN m='stream' THEN 'on' ELSE 'off' END);
+        -- Marcador de braço no stdout. Sem ele o `_reject_fallback` do summarizer não tem como saber em qual
+        -- braço um trace de decode eager apareceu, e o guard fica inalcançável — que é o que estava acontecendo:
+        -- ele testava `ARM=stream`, string que este arquivo nunca emitia (achado de review, segunda vez seguida
+        -- que um guard meu não conseguia disparar).
+        RAISE NOTICE 'ARM=% pair=% q=%', m, i, qn[j];
         t0 := clock_timestamp();
         EXECUTE 'CREATE TEMP TABLE _ab_t AS ' || qs[j];
         INSERT INTO ab_res VALUES (i, qn[j], m, extract(epoch from clock_timestamp()-t0)*1000);
