@@ -3043,7 +3043,7 @@ bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan s�
 
 ---
 
-## M167 — [ ] Top-k de projeção (SELECT cols WHERE … ORDER BY … LIMIT k) ao caminho late-mat colunar (q23–q26) — cobertura
+## M167 — [x] Top-k de projeção (SELECT cols WHERE … ORDER BY … LIMIT k) ao caminho late-mat colunar (q23–q26) — cobertura
 
 > **Da mesma medição fresca**: as queries **routed-mas-lentas** de top-k de *projeção* ainda passam pelo caminho lento: **q23** (`SELECT * … WHERE URL LIKE … ORDER BY EventTime LIMIT 10`, 110×), **q24/q25/q26** (`SELECT SearchPhrase … WHERE … ORDER BY <col> LIMIT 10`, 73-132×). O M158 fez late-mat top-k para `ORDER BY <agg>`; falta o top-k de *projeção* (ORDER BY coluna).
 
