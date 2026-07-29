@@ -4,10 +4,22 @@
 **Box:** `theo-e2e-runner` (DigitalOcean, 32 GB / 8 vCPU) — NOT the canonical ClickBench c6a.4xlarge.
 **Build:** `cargo pgrx install --release`, PG 18.4 (pgrx), `datcollate = C`, `work_mem = 64MB`, `shared_buffers = 4GB`.
 **Data:** ClickBench `hits` / `hits_heap`, 1,000,000 rows each — verified by `count(*)`.
-**Raw artifacts:** `docs/benchmarks/m167-artifacts/` (`after-1m.json`, `paired-ab-ctas.log`,
-`before-1m-SUPERSEDED.json`, `b1-latemat-on.json`, `b1-latemat-off.json`, `b1-control.log`, `hits-topk-ab.log`,
-`ec-harness.log`) and `docs/benchmarks/m167-type-coverage.md`
-(the `rules/testing.md` § 5.1 gate artifact for a change to the columnar routing admit-paths).
+**Raw artifacts:** all under `docs/benchmarks/m167-artifacts/`, plus `docs/benchmarks/m167-type-coverage.md`
+(the `rules/testing.md` § 5.1 gate artifact required for a change to the columnar routing admit-paths).
+
+| Artifact | What it backs | Postmaster |
+|---|---|---|
+| `paired-ab-ctas.log` | § 1 headline (paired CTAS) | 23:11–23:15Z run |
+| `suite-final-binary.json` | § 2 routing + suite A/B | **00:17:54Z (final binary)** |
+| `hits-topk-ab.log` | § 3 1M top-k oracle, `rc=0` | **00:17:54Z (final binary)** |
+| `ec-harness.log` | § 3 fixture oracle, `rc=0` | **00:17:54Z (final binary)** |
+| `h0-gate-positive-control.log` | § 3 proof the H0 gate can fail, `rc=3` | **00:17:54Z (final binary)** |
+| `b1-latemat-on.json` / `b1-latemat-off.json` / `b1-control.log` | § 6 noise floor + § 7.2 control (both arms) | 23:26:20Z run |
+| `before-1m-SUPERSEDED.json` | § 7.2 first table (the withdrawn baseline) | 27 Jul run |
+| `after-1m.json` | superseded by `suite-final-binary.json`; kept for the record | 23:17Z or earlier |
+
+Every log opens with `postmaster=<pg_postmaster_start_time()>` and closes with `rc=<exit code>`, so provenance is a
+property of the artifact rather than a claim in this document.
 
 ## 1. Result — paired same-binary A/B
 
@@ -80,11 +92,22 @@ zeros carry information. Blocks and their measured verdicts:
 | **M167-D2** | **multi-key with a TEXT second key** (q26's real shape) | route | route, `order_mism = 0` |
 | **M167-D3** | second key `COLLATE "en_US.utf8"` | decline | decline |
 | **M167-D3b** | `bpchar` as a non-first sort key | decline | decline |
-| **M167-D4** | 9 sort keys (over `TOPK_MAX_SORT_KEYS = 8`) | decline | decline |
+| **M167-D4a** | **exactly 8 distinct keys** (== `TOPK_MAX_SORT_KEYS`) | route | route |
+| **M167-D4** | **9 distinct keys** (over the ceiling) | decline | decline, `Sort Key: k1…k9` |
 | M167-E | seeded divergence (negative control) | `> 0` | **2** |
 
 D2/D3 matter most: they are the only place the two new mechanisms intersect. A per-key loop that validated key 0's
 collation and forgot key 1's would pass every other test and fail exactly there.
+
+**D4 was vacuous until this revision, and the committed log proved it.** It read
+`ORDER BY v, wid, sd, bc, v, wid, sd, bc, v` over a **four-column** fixture: nine items, but PostgreSQL deduplicates
+redundant pathkeys, so the plan showed `Sort Key: v, wid, sd, bc` — **four** keys. The ceiling was never approached
+and the decline came from `bc` (bpchar), i.e. D4 was re-proving D3b under another name. A 4-column fixture cannot
+express 9 distinct keys, so the fixture was the defect: `t_dc9` now carries 9 plain `int` columns. **D4a is the
+boundary control** — at exactly 8 keys it must *route*, otherwise a decline at 9 would prove only that something
+about the fixture failed, not that the ceiling fired. Measured: 8 keys → `Custom Scan (theodb_columnar_agg)`;
+9 keys → `Sort Key: k1, k2, k3, k4, k5, k6, k7, k8, k9` over a declined scan, so the planner really did produce
+nine pathkeys.
 
 `benchmarks/columnar_type_ab.py` (the M163/M164 type-coverage gate, required by the ROADMAP DoD) carries four
 projection-top-k routing cases: **35/35 as-expected, positive control `diverged = 2`**.
@@ -96,13 +119,13 @@ The two oracles above run on fixtures (20k / 2k rows). This one runs on the **re
 
 | Assertion | Measured |
 |---|---|
-| **H0 — routing precondition** (every shape below reaches `theodb_columnar_agg`, no surviving `Sort`) | **ok, 6/6** |
+| **H0 — routing precondition** (every shape the file runs reaches `theodb_columnar_agg`, no surviving `Sort`) | **ok, 9/9** |
 | sort-key multiset, q23 / q24 / q25 / q26 | **0 / 0 / 0 / 0** |
 | full rows under a total order (key↔payload alignment) | **0** |
 | wide variant — full rows over all **105** columns | **0** |
 | distinct values of the first sort key in those 20 rows | **1** — a total tie, so the tie-break decided every row |
 | negative control (seeded divergence) | **40** |
-| script exit code | **0** |
+| script exit code | **0** (`rc=0` line in `hits-topk-ab.log`, alongside the `postmaster=` provenance stamp) |
 
 Two of those rows exist because a draft of this block failed them:
 
@@ -114,8 +137,11 @@ Two of those rows exist because a draft of this block failed them:
 - **H0 must cover every shape it claims to guard, and at first it did not.** Its four shapes sort by
   `EventTime` / `SearchPhrase`, but the two full-row blocks (H5, H5b) sort by `CounterID, WatchID, UserID` — a 3-key
   shape H0 never checked. Those are precisely the blocks that catch key↔payload misalignment and the only comparison
-  over all 105 columns, so they were the two left free to pass vacuously. Both shapes were added; the gate now
-  reports **6/6** and the 3-key swap is proven to route rather than assumed to.
+  over all 105 columns, so they were the two left free to pass vacuously. A second pass found three more: H1, H2 and
+  H4 project *different columns* than the four suite shapes (`EventTime` vs `SearchPhrase` vs both), and while their
+  routing is implied — the decode guard bills the whole relation regardless of projection — "implied" is precisely
+  what this gate exists to replace. The array now carries **all nine** SQL statements the file actually executes, and
+  the gate reports **9/9**.
 - **The tie-break must actually tie.** The first version tie-broke on `EventTime`, which turned out *unique* in its
   top-20 — the block passed while exercising no tie-break at all. `CounterID` ties completely (1 distinct value in
   20 rows), so the second and third keys decide every row.
@@ -125,9 +151,21 @@ postmaster restarted at `00:17:54Z` so the shipped `.so` was the one loaded. Thi
 the immediately-preceding binary (postmaster up since `23:26:20Z`, `.so` rewritten at `23:44:58Z` — PostgreSQL loads
 `shared_preload_libraries` at startup, so the rebuild did not reach those two suites). That leaves the control
 internally valid — **both** of its arms used one identical binary, which is the only property it needed — while the
-correctness evidence is pinned to the code being merged. The one behavioural difference between the two binaries is
-the `COLLPROVIDER_LIBC` requirement added to the collation predicate; this cluster reports
-`datcollate = C, datlocprovider = c`, and q25 was re-verified to still route on the final binary rather than assumed to.
+correctness evidence is pinned to the code being merged.
+
+The delta between those two binaries is `bf809e7`, and it is one behavioural line: `relation_physical_bytes` used to
+return `0.0` when the `pg_class` syscache tuple was null (an unknown size read as "small" — **admit**) and now returns
+`f64::INFINITY` (**decline**). It is a fail-closed flip on a path that is in practice unreachable, and it can only
+make routing *stricter*, never looser — so it cannot have manufactured a route that the final binary would refuse.
+The other four changes in that commit are a comment, a `pg_sys::COLLPROVIDER_LIBC` swapped in for a local `const` of
+the same value, a `format!` moved behind its trace check, and a redundant cast. (An earlier revision of this
+paragraph named the `datlocprovider` requirement as the delta — wrong: `git log -S datlocprovider` places it in
+`6d6f78c`, which predates *both* binaries.)
+
+**Every artifact now states its own provenance** rather than relying on this paragraph: each oracle log opens with
+`postmaster=<pg_postmaster_start_time()>` and closes with `rc=<exit code>`, so a reader can pin a result to a
+postmaster image without trusting prose. The two oracle logs and the suite of § 2 all report the `00:17:54Z`
+postmaster; `paired-ab-ctas.log` (§ 1, 23:11–23:15Z) and the § 7.2 control (23:37–23:53Z) predate it.
 
 ## 4. What changed
 
@@ -184,8 +222,12 @@ true current size; verified: a `relpages = 0` table now declines at 64kB and rou
   draft did) is not supported; the cause on this cluster is unexplained.
 - **This box has between-run drift up to ~2× on sub-200 ms queries, measured.** The § 7.2 control exposed it (both arms committed; the
   numbers below are `b1-latemat-on.json` vs `b1-latemat-off.json`, **not** `after-1m.json`, which is a different
-  run of the same arm): three queries moved between the two arms that the GUC **cannot** touch, because none has a `Sort` node for
-  `try_swap_topk` to swap —
+  run of the same arm): three queries moved between the two arms that the GUC **cannot** touch — measured, not
+  assumed: the two suites differ in `columnar_agg_routed` on exactly 4 of 42 queries (36 vs 32), and these three are
+  not among them. (An earlier revision said "none has a `Sort` node"; q8 does — `… ORDER BY u DESC LIMIT 10`. What
+  makes it immune is that its `Sort` sits over an `Agg`, not over a `theodb_columnar_project`, so `try_swap_topk`'s
+  parent check never matches. The routing-count evidence is both stronger and simpler.) The queries and their moves
+ —
 
   | Query | shape | late-mat on | late-mat off | delta |
   |---|---|---|---|---|
@@ -242,12 +284,16 @@ With the drift hypothesis dead, three independent instruments now agree on the e
 
 | Instrument | q23 | q24 | q25 | q26 |
 |---|---|---|---|---|
-| cross-run (draft 1, withdrawn as method) | 6.51× | 42.51× | 62.07× | 41.88× |
+| cross-run (draft 1, withdrawn as method — see note) | 6.51× | 42.51× | 62.07× | 41.88× |
 | paired CTAS in one session (§ 1 — headline) | 4.98× | 44.78× | 56.18× | 41.67× |
 | same-binary GUC control (§ 7.2) | 7.10× | 48.51× | 63.19× | 40.81× |
 
 The headline stays the paired CTAS row: it is the only one where the toggle is the sole asymmetry *and* the k rows
 are actually materialized. The other two are corroboration, not evidence to average.
+
+The draft-1 row is quoted from that draft, **not reproducible from this repository**: its "after" suite had
+`hot_geomean 0.25108` and that JSON was overwritten before it was ever committed (no artifact here carries that
+geomean). It is listed for the record of what was claimed, and it is the one row a reader cannot check.
 
 **And this control is itself a cross-run comparison** — two suite invocations 16 minutes apart — so § 1's own
 objection applies to it. It is cited anyway, for a stated reason: its ratios (7.10×–63.19×) clear the measured

@@ -22,7 +22,7 @@ SET theodb.enable_columnar_late_mat = on;   -- the path under test, on the colum
 -- e.g. at stock `work_mem` the ADR-4 decode guard refuses and both arms would run the native plan, giving 0
 -- differences that prove nothing). `theodb_columnar_agg` in the plan of a query with NO aggregate can only come
 -- from the top-k swap, so its presence is a positive proof that the path under test actually ran.
-\echo '### M167-H0: routing precondition — the four shapes MUST show the top-k node'
+\echo '### M167-H0: routing precondition — EVERY shape run below MUST show the top-k node'
 -- Machine-checked, not printed-and-hoped: an EXPLAIN a human has to read is not a gate. This RAISES, and with
 -- ON_ERROR_STOP the whole oracle aborts, so a vacuous pass is impossible rather than merely visible.
 DO $h0$
@@ -36,7 +36,13 @@ DECLARE
     -- that catch key<->payload misalignment, and the only comparison over all 105 columns. Omitting their shape
     -- here left exactly those two free to pass vacuously if the 3-key swap declined.
     'SELECT CounterID, WatchID, UserID, SearchPhrase FROM hits WHERE SearchPhrase <> '''' ORDER BY CounterID, WatchID, UserID LIMIT 20',
-    'SELECT * FROM hits WHERE URL LIKE ''%google%'' ORDER BY CounterID, WatchID, UserID LIMIT 10'
+    'SELECT * FROM hits WHERE URL LIKE ''%google%'' ORDER BY CounterID, WatchID, UserID LIMIT 10',
+    -- H1/H2/H4 project different columns than the four suite shapes above (EventTime vs SearchPhrase vs both).
+    -- Routing is only *implied* for them — the decode guard bills the whole relation regardless of projection
+    -- (`columnar_agg.rs` `relation_physical_bytes`) — and "implied" is exactly what this gate exists to replace.
+    'SELECT EventTime FROM hits WHERE URL LIKE ''%google%'' ORDER BY EventTime LIMIT 10',
+    'SELECT EventTime FROM hits WHERE SearchPhrase <> '''' ORDER BY EventTime LIMIT 10',
+    'SELECT EventTime, SearchPhrase FROM hits WHERE SearchPhrase <> '''' ORDER BY EventTime, SearchPhrase LIMIT 10'
   ];
   shape text;
   plan  text;

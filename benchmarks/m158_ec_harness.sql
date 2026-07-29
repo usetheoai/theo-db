@@ -235,8 +235,22 @@ EXPLAIN (COSTS OFF) SELECT wid, sd FROM t_dc2 ORDER BY v, sd COLLATE "en_US.utf8
 EXPLAIN (COSTS OFF) SELECT wid, sd FROM t_dc2 ORDER BY v, bc LIMIT 10;
 
 -- ---- M167-D4: more sort keys than TOPK_MAX_SORT_KEYS (8) must decline ----
-\echo '### M167-D4: 9 sort keys MUST decline (over TOPK_MAX_SORT_KEYS)'
-EXPLAIN (COSTS OFF) SELECT wid FROM t_dc2 ORDER BY v, wid, sd, bc, v, wid, sd, bc, v LIMIT 10;
+-- The first version of this block wrote `ORDER BY v, wid, sd, bc, v, wid, sd, bc, v` over the 4-column `t_dc2`.
+-- Nine items, but PostgreSQL deduplicates redundant pathkeys, so the planner produced `Sort Key: v, wid, sd, bc` —
+-- FOUR keys. The ceiling was never reached and the decline came from `bc` (bpchar), i.e. it re-proved D3b under a
+-- different name. A fixture with 4 columns cannot express 9 distinct keys, so the fixture is the fix.
+DROP TABLE IF EXISTS t_dc9 CASCADE;
+CREATE TABLE t_dc9 (k1 int, k2 int, k3 int, k4 int, k5 int, k6 int, k7 int, k8 int, k9 int, payload bigint)
+  USING theodb_columnar;
+INSERT INTO t_dc9 SELECT g%2, g%3, g%5, g%7, g%11, g%13, g%17, g%19, g%23, g FROM generate_series(1, 5000) g;
+
+-- Boundary control: exactly 8 distinct keys, every one an admitted type, MUST route. Without this, a decline at 9
+-- proves nothing — it could be the fixture, the width, or any other guard rather than the ceiling.
+\echo '### M167-D4a: exactly 8 sort keys (== TOPK_MAX_SORT_KEYS) MUST route'
+EXPLAIN (COSTS OFF) SELECT payload FROM t_dc9 ORDER BY k1, k2, k3, k4, k5, k6, k7, k8 LIMIT 10;
+
+\echo '### M167-D4: 9 DISTINCT sort keys MUST decline (over TOPK_MAX_SORT_KEYS)'
+EXPLAIN (COSTS OFF) SELECT payload FROM t_dc9 ORDER BY k1, k2, k3, k4, k5, k6, k7, k8, k9 LIMIT 10;
 
 -- ---- M167-E: NEGATIVE CONTROL — the oracle MUST be able to fail ----
 -- Seed a real divergence (a twin table with one row moved into the top-k) and prove the SAME comparison

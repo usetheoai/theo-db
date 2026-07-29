@@ -1,3 +1,4 @@
+=== M167 fixture oracle start 2026-07-29T00:44:06+00:00 (postmaster: 2026-07-29 00:17:54.370517+00) ===
 SET
 DROP TABLE
 CREATE TABLE
@@ -271,13 +272,23 @@ SET
          ->  Custom Scan (theodb_columnar_project) on t_dc2
 (4 rows)
 
-### M167-D4: 9 sort keys MUST decline (over TOPK_MAX_SORT_KEYS)
+DROP TABLE
+CREATE TABLE
+INSERT 0 5000
+### M167-D4a: exactly 8 sort keys (== TOPK_MAX_SORT_KEYS) MUST route
+               QUERY PLAN                
+-----------------------------------------
+ Limit
+   ->  Custom Scan (theodb_columnar_agg)
+(2 rows)
+
+### M167-D4: 9 DISTINCT sort keys MUST decline (over TOPK_MAX_SORT_KEYS)
                          QUERY PLAN                         
 ------------------------------------------------------------
  Limit
    ->  Sort
-         Sort Key: v, wid, sd, bc
-         ->  Custom Scan (theodb_columnar_project) on t_dc2
+         Sort Key: k1, k2, k3, k4, k5, k6, k7, k8, k9
+         ->  Custom Scan (theodb_columnar_project) on t_dc9
 (4 rows)
 
 ### M167-E: negative control — seeded divergence MUST report n > 0
@@ -293,3 +304,4 @@ SELECT 10
 (1 row)
 
 ========== ALL *_ab_mism / *_order_mism above MUST be 0, AND m167e_control_diff MUST be > 0 (an oracle that cannot fail is not an oracle) ==========
+=== M167 fixture oracle rc=0 end 2026-07-29T00:44:08+00:00 ===
