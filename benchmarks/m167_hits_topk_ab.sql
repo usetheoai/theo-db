@@ -78,6 +78,8 @@ CREATE TEMP TABLE h1_heap AS SELECT EventTime FROM hits_heap WHERE URL LIKE '%go
 INSERT INTO h_res SELECT 'h1_key_mism', count(*) FROM (
   (SELECT * FROM h1_col EXCEPT ALL SELECT * FROM h1_heap)
   UNION ALL (SELECT * FROM h1_heap EXCEPT ALL SELECT * FROM h1_col)) d;
+-- non-vacuity: a comparison over zero rows reports 0 mismatches and proves nothing
+INSERT INTO h_res SELECT 'h1_rows', count(*) FROM h1_col;
 
 \echo '### M167-H2 (q24): narrow projection, ORDER BY EventTime LIMIT 10 — sort-key multiset'
 DROP TABLE IF EXISTS h2_col; DROP TABLE IF EXISTS h2_heap;
@@ -86,6 +88,8 @@ CREATE TEMP TABLE h2_heap AS SELECT EventTime FROM hits_heap WHERE SearchPhrase 
 INSERT INTO h_res SELECT 'h2_key_mism', count(*) FROM (
   (SELECT * FROM h2_col EXCEPT ALL SELECT * FROM h2_heap)
   UNION ALL (SELECT * FROM h2_heap EXCEPT ALL SELECT * FROM h2_col)) d;
+-- non-vacuity: a comparison over zero rows reports 0 mismatches and proves nothing
+INSERT INTO h_res SELECT 'h2_rows', count(*) FROM h2_col;
 
 \echo '### M167-H3 (q25): text sort key, ORDER BY SearchPhrase LIMIT 10 — sort-key multiset'
 DROP TABLE IF EXISTS h3_col; DROP TABLE IF EXISTS h3_heap;
@@ -94,6 +98,8 @@ CREATE TEMP TABLE h3_heap AS SELECT SearchPhrase FROM hits_heap WHERE SearchPhra
 INSERT INTO h_res SELECT 'h3_key_mism', count(*) FROM (
   (SELECT * FROM h3_col EXCEPT ALL SELECT * FROM h3_heap)
   UNION ALL (SELECT * FROM h3_heap EXCEPT ALL SELECT * FROM h3_col)) d;
+-- non-vacuity: a comparison over zero rows reports 0 mismatches and proves nothing
+INSERT INTO h_res SELECT 'h3_rows', count(*) FROM h3_col;
 
 \echo '### M167-H4 (q26): multi-key, ORDER BY EventTime, SearchPhrase LIMIT 10 — sort-key multiset'
 DROP TABLE IF EXISTS h4_col; DROP TABLE IF EXISTS h4_heap;
@@ -102,6 +108,8 @@ CREATE TEMP TABLE h4_heap AS SELECT EventTime, SearchPhrase FROM hits_heap WHERE
 INSERT INTO h_res SELECT 'h4_key_mism', count(*) FROM (
   (SELECT * FROM h4_col EXCEPT ALL SELECT * FROM h4_heap)
   UNION ALL (SELECT * FROM h4_heap EXCEPT ALL SELECT * FROM h4_col)) d;
+-- non-vacuity: a comparison over zero rows reports 0 mismatches and proves nothing
+INSERT INTO h_res SELECT 'h4_rows', count(*) FROM h4_col;
 
 \echo '### M167-H5: TIE-BROKEN total order -> FULL ROWS compared (catches key<->payload misalignment)'
 DROP TABLE IF EXISTS h5_col; DROP TABLE IF EXISTS h5_heap;
@@ -124,6 +132,8 @@ CREATE TEMP TABLE h5b_heap AS SELECT * FROM hits_heap WHERE URL LIKE '%google%' 
 INSERT INTO h_res SELECT 'h5b_wide_fullrow_mism', count(*) FROM (
   (SELECT * FROM h5b_col EXCEPT ALL SELECT * FROM h5b_heap)
   UNION ALL (SELECT * FROM h5b_heap EXCEPT ALL SELECT * FROM h5b_col)) d;
+-- non-vacuity: a comparison over zero rows reports 0 mismatches and proves nothing
+INSERT INTO h_res SELECT 'h5b_rows', count(*) FROM h5b_col;
 INSERT INTO h_res SELECT 'h5b_cols', count(*) FROM information_schema.columns WHERE table_name = 'h5b_col';
 
 \echo '### M167-H6: NEGATIVE CONTROL — the same comparison must FAIL on seeded data'
@@ -159,13 +169,17 @@ BEGIN
   IF (SELECT n FROM h_res WHERE q = 'h5_distinct_firstkey') >= (SELECT n FROM h_res WHERE q = 'h5_rows') THEN
     bad := bad || 'h5_distinct_firstkey >= h5_rows: the first key did not tie, so the tie-break proved nothing; ';
   END IF;
+  -- every comparison must have compared something: zero rows report zero mismatches
+  bad := bad || coalesce(
+    (SELECT 'blocks that compared ZERO rows: ' || string_agg(q, ', ') || '; '
+       FROM h_res WHERE q LIKE '%\_rows' AND q <> 'h5_rows' AND n = 0), '');
   -- the wide block must really have compared the wide row
   IF (SELECT n FROM h_res WHERE q = 'h5b_cols') < 100 THEN
     bad := bad || 'h5b_cols < 100: the wide comparison was not wide; ';
   END IF;
   -- every expected assertion must be present (a block silently skipped is not a pass)
-  IF (SELECT count(*) FROM h_res) <> 10 THEN
-    bad := bad || format('expected 10 assertions, found %s; ', (SELECT count(*) FROM h_res));
+  IF (SELECT count(*) FROM h_res) <> 15 THEN
+    bad := bad || format('expected 15 assertions, found %s; ', (SELECT count(*) FROM h_res));
   END IF;
 
   IF bad <> '' THEN RAISE EXCEPTION 'M167 FINAL GATE FAILED: %', bad; END IF;

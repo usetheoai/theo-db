@@ -1,4 +1,8 @@
-=== FINAL GATE POSITIVE CONTROL (seeded mism -> MUST abort) start 2026-07-29T01:28:23+00:00 (postmaster: 2026-07-29 01:27:21.29745+00) ===
+=== FINAL GATE POSITIVE CONTROL (seeded mism -> MUST abort) start 2026-07-29T02:01:29+00:00 ===
+postmaster=2026-07-29 01:27:21.29745+00
+so_path=/root/.pgrx/18.4/pgrx-install/lib/postgresql/theodb_rs.so
+so_mtime=2026-07-29 01:26:46.242582116 +0000
+so_md5=9b9342f7e925d37ce0e1cf2ce1c356e0
 SET
 SET
 SET
@@ -16,34 +20,38 @@ DROP TABLE
 SELECT 10
 SELECT 10
 INSERT 0 1
+INSERT 0 1
 ### M167-H2 (q24): narrow projection, ORDER BY EventTime LIMIT 10 — sort-key multiset
-psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:83: NOTICE:  table "h2_col" does not exist, skipping
+psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:85: NOTICE:  table "h2_col" does not exist, skipping
 DROP TABLE
-psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:83: NOTICE:  table "h2_heap" does not exist, skipping
+psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:85: NOTICE:  table "h2_heap" does not exist, skipping
 DROP TABLE
 SELECT 10
 SELECT 10
+INSERT 0 1
 INSERT 0 1
 ### M167-H3 (q25): text sort key, ORDER BY SearchPhrase LIMIT 10 — sort-key multiset
-psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:91: NOTICE:  table "h3_col" does not exist, skipping
+psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:95: NOTICE:  table "h3_col" does not exist, skipping
 DROP TABLE
-psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:91: NOTICE:  table "h3_heap" does not exist, skipping
+psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:95: NOTICE:  table "h3_heap" does not exist, skipping
 DROP TABLE
 SELECT 10
 SELECT 10
+INSERT 0 1
 INSERT 0 1
 ### M167-H4 (q26): multi-key, ORDER BY EventTime, SearchPhrase LIMIT 10 — sort-key multiset
-psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:99: NOTICE:  table "h4_col" does not exist, skipping
+psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:105: NOTICE:  table "h4_col" does not exist, skipping
 DROP TABLE
-psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:99: NOTICE:  table "h4_heap" does not exist, skipping
+psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:105: NOTICE:  table "h4_heap" does not exist, skipping
 DROP TABLE
 SELECT 10
 SELECT 10
 INSERT 0 1
+INSERT 0 1
 ### M167-H5: TIE-BROKEN total order -> FULL ROWS compared (catches key<->payload misalignment)
-psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:107: NOTICE:  table "h5_col" does not exist, skipping
+psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:115: NOTICE:  table "h5_col" does not exist, skipping
 DROP TABLE
-psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:107: NOTICE:  table "h5_heap" does not exist, skipping
+psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:115: NOTICE:  table "h5_heap" does not exist, skipping
 DROP TABLE
 SELECT 20
 SELECT 20
@@ -51,16 +59,17 @@ INSERT 0 1
 INSERT 0 1
 INSERT 0 1
 ### M167-H5b: WIDE projection (all 105 columns), tie-broken -> FULL ROWS compared
-psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:121: NOTICE:  table "h5b_col" does not exist, skipping
+psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:129: NOTICE:  table "h5b_col" does not exist, skipping
 DROP TABLE
-psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:121: NOTICE:  table "h5b_heap" does not exist, skipping
+psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:129: NOTICE:  table "h5b_heap" does not exist, skipping
 DROP TABLE
 SELECT 10
 SELECT 10
+INSERT 0 1
 INSERT 0 1
 INSERT 0 1
 ### M167-H6: NEGATIVE CONTROL — the same comparison must FAIL on seeded data
-psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:130: NOTICE:  table "h6_bad" does not exist, skipping
+psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:140: NOTICE:  table "h6_bad" does not exist, skipping
 DROP TABLE
 SELECT 20
 INSERT 0 1
@@ -70,17 +79,22 @@ UPDATE 1
            q           |  n  
 -----------------------+-----
  h1_key_mism           |   1
+ h1_rows               |  10
  h2_key_mism           |   0
+ h2_rows               |  10
  h3_key_mism           |   0
+ h3_rows               |  10
  h4_key_mism           |   0
+ h4_rows               |  10
  h5_distinct_firstkey  |   1
  h5_fullrow_mism       |   0
  h5_rows               |  20
  h5b_cols              | 105
+ h5b_rows              |  10
  h5b_wide_fullrow_mism |   0
  h6_control_diff       |  40
-(10 rows)
+(15 rows)
 
-psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:175: ERROR:  M167 FINAL GATE FAILED: non-zero mismatch counters: h1_key_mism=1; 
-CONTEXT:  PL/pgSQL function inline_code_block line 26 at RAISE
-=== FINAL GATE POSITIVE CONTROL (seeded mism -> MUST abort) rc=3 end 2026-07-29T01:28:38+00:00 ===
+psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:189: ERROR:  M167 FINAL GATE FAILED: non-zero mismatch counters: h1_key_mism=1; 
+CONTEXT:  PL/pgSQL function inline_code_block line 30 at RAISE
+=== FINAL GATE POSITIVE CONTROL (seeded mism -> MUST abort) rc=3 end 2026-07-29T02:01:44+00:00 ===

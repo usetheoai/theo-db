@@ -1,4 +1,4 @@
-=== M167 fixture oracle start 2026-07-29T02:01:27+00:00 ===
+=== EC GATE POSITIVE CONTROL (seeded mism -> MUST abort) start 2026-07-29T02:01:44+00:00 ===
 postmaster=2026-07-29 01:27:21.29745+00
 so_path=/root/.pgrx/18.4/pgrx-install/lib/postgresql/theodb_rs.so
 so_mtime=2026-07-29 01:26:46.242582116 +0000
@@ -277,6 +277,8 @@ INSERT 0 1
  q8_ab_mism         | 0
 (14 rows)
 
-psql:/root/theo-db/benchmarks/m158_ec_harness.sql:304: NOTICE:  M167 EC FINAL GATE ok: 14 assertions, all mismatch counters 0, negative control fires
-DO
-=== M167 fixture oracle rc=0 end 2026-07-29T02:01:29+00:00 ===
+### GATE SELF-TEST ARMED: forcing q1_ab_mism = 1 — the FINAL GATE MUST abort below
+UPDATE 1
+psql:/root/theo-db/benchmarks/m158_ec_harness.sql:304: ERROR:  M167 EC FINAL GATE FAILED: non-zero mismatch counters: q1_ab_mism=1; 
+CONTEXT:  PL/pgSQL function inline_code_block line 14 at RAISE
+=== EC GATE POSITIVE CONTROL (seeded mism -> MUST abort) rc=3 end 2026-07-29T02:01:45+00:00 ===

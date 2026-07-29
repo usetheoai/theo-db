@@ -1,4 +1,8 @@
-=== H0 gate POSITIVE CONTROL (work_mem=64kB -> MUST abort) start 2026-07-29T01:28:23+00:00 (postmaster: 2026-07-29 01:27:21.29745+00) ===
+=== H0 gate POSITIVE CONTROL (work_mem=64kB -> MUST abort) start 2026-07-29T02:01:29+00:00 ===
+postmaster=2026-07-29 01:27:21.29745+00
+so_path=/root/.pgrx/18.4/pgrx-install/lib/postgresql/theodb_rs.so
+so_mtime=2026-07-29 01:26:46.242582116 +0000
+so_md5=9b9342f7e925d37ce0e1cf2ce1c356e0
 SET
 SET
 SET
@@ -37,4 +41,4 @@ psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:66: ERROR:  M167-H0 FAILED: 
   }
 ]
 CONTEXT:  PL/pgSQL function inline_code_block line 28 at RAISE
-=== H0 gate POSITIVE CONTROL (work_mem=64kB -> MUST abort) rc=3 end 2026-07-29T01:28:23+00:00 ===
+=== H0 gate POSITIVE CONTROL (work_mem=64kB -> MUST abort) rc=3 end 2026-07-29T02:01:29+00:00 ===

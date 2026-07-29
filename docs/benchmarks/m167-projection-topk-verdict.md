@@ -10,20 +10,25 @@
 | Artifact | What it backs | Postmaster |
 |---|---|---|
 | `paired-ab-ctas.log` | § 1 headline (paired CTAS) | wall-clock only — 23:11–23:15Z, i.e. **pre-`e2d0955`** (§ 3) |
-| `suite-final-binary.json` + `.log` | § 2 routing + suite A/B | **01:27:21Z (final binary)** |
-| `hits-topk-ab.log` | § 3 1M top-k oracle — H0 `9/9`, FINAL GATE ok, `rc=0` | **01:27:21Z (final binary)** |
-| `ec-harness.log` | § 3 fixture oracle — EC FINAL GATE ok (14 assertions), `rc=0` | **01:27:21Z (final binary)** |
-| `h0-gate-positive-control.log` | § 3 proof the **H0** gate can fail, `rc=3` | **01:27:21Z (final binary)** |
-| `final-gate-positive-control.log` | § 3 proof the **FINAL** gate can fail, `rc=3` | **01:27:21Z (final binary)** |
-| `guard-proofs.log` + `benchmarks/m167_guard_proofs.sh` | § 5 ICU-provider and `relpages=0` proofs, `rc=0` | **01:27:21Z (final binary)** |
+| `suite-final-binary.json` + `.log` | § 2 routing + suite A/B | `so_md5=9b9342f7…` |
+| `hits-topk-ab.log` | § 3 1M top-k oracle — H0 `9/9`, FINAL GATE ok (15 assertions), `rc=0` | `so_md5=9b9342f7…` |
+| `ec-harness.log` | § 3 fixture oracle — EC FINAL GATE ok (14 assertions), `rc=0` | `so_md5=9b9342f7…` |
+| `h0-gate-positive-control.log` | § 3 proof the **H0** gate can fail, `rc=3` | `so_md5=9b9342f7…` |
+| `final-gate-positive-control.log` | § 3 proof the **FINAL** gate can fail, `rc=3` | `so_md5=9b9342f7…` |
+| `final-gate-EC-positive-control.log` | § 3 proof the **EC** gate can fail, `rc=3` | `so_md5=9b9342f7…` |
+| `guard-proofs.log` + `benchmarks/m167_guard_proofs.sh` | § 5 proofs A and B, self-asserting, `rc=0` | `so_md5=9b9342f7…` |
+| `guard-proofs-selftest.log` | § 5 proof those assertions can fail (`PROOF_SELFTEST=1`), exit 1 | `so_md5=9b9342f7…` |
+| `docs/benchmarks/m167-type-coverage.md` | the `rules/testing.md` § 5.1 routing gate, 35/35 | **pre-`ad132ab`** — generated at `bf809e7`; routing-only, and the H0 gate re-proves the same four shapes route on the final binary |
 | `b1-latemat-on.json` / `b1-latemat-off.json` / `b1-control.log` | § 6 noise floor + § 7.2 control (both arms) | 23:26:20Z run (**pre-`bf809e7`**, § 3) |
 | `before-1m-SUPERSEDED.json` | § 7.2 first table (the withdrawn baseline) | 27 Jul run |
 | `after-1m.json` | superseded by `suite-final-binary.json`; kept for the record | 23:17Z or earlier |
 
-Every log **except two** opens with `postmaster=<pg_postmaster_start_time()>` and closes with `rc=<exit code>`, so
-provenance is a property of the artifact rather than a claim in this document. The exceptions are
-`paired-ab-ctas.log` and `b1-control.log`, which predate that convention and carry only a wall-clock — their binaries
-are identified in § 3 instead.
+Every log **except two** opens with a `postmaster=` line plus `so_path=` / `so_mtime=` / `so_md5=` read from the
+installed `.so`, and closes with `rc=<exit code>` captured from `psql` (not from a preceding `echo` — an earlier
+revision of `m167_guard_proofs.sh` made exactly that mistake and always reported `rc=0`). Provenance is therefore a
+property of the artifact rather than a claim in this document. The two exceptions are `paired-ab-ctas.log` and
+`b1-control.log`, which predate the convention and carry only a wall-clock; § 3 says what is and is not known
+about their binaries.
 
 ## 1. Result — paired same-binary A/B
 
@@ -44,8 +49,15 @@ have `on` between 0.094 and 0.168 s against `off` between 5.60 and 6.71 s).
 Why paired-in-one-binary and not before-run vs after-run: **this box drifts up to ~2× between runs on sub-200 ms
 queries**, measured on three queries the GUC cannot affect (§ 6, last bullet). A cross-run comparison therefore cannot
 license a ratio on its own, whatever it reports. A GUC toggle inside one session removes build, cluster, session and
-thermal drift by construction; the toggle is the only asymmetry left. A same-binary control corroborates these
-numbers independently (§ 7.2).
+thermal drift by construction.
+
+**One asymmetry survives, and it penalises the winner.** `THEODB_ADMIT_TRACE` was on in that session:
+`paired-ab-ctas.log` carries 96 `theodb_admit_decline` WARNINGs, and because `swap_walk` is itself gated by the
+GUC, essentially all of them are emitted by the **on** arm. So the fast arm paid for warning emission the slow arm
+did not — the published ratios are a **lower bound** on the effect, not an inflated one. Disclosed rather than
+re-measured because correcting it can only move the numbers up.
+
+A same-binary control corroborates these numbers independently (§ 7.2).
 
 ## 2. Routing — the metric that actually discriminates
 
@@ -141,8 +153,18 @@ Two of those rows exist because a draft of this block failed them:
 - **H0 is machine-checked, not printed.** It was first written as four bare `EXPLAIN`s for a human to eyeball. That
   is not a gate: if the swap declines — which it does at stock `work_mem`, by design (§ 6) — both arms run the same
   native plan and every block below reports 0 differences while proving nothing. H0 now `RAISE`s and, under
-  `ON_ERROR_STOP`, aborts the whole oracle. **Positive control for the gate itself:** re-run at `work_mem = 64kB` and
-  it stops at shape 1 with `M167-H0 FAILED … would pass vacuously`, executing no comparison block.
+  `ON_ERROR_STOP`, aborts the whole oracle. **Every gate in this milestone now has a positive control**, because a
+  gate never seen to fail is not known to be a gate — five committed logs, three of them deliberate failures:
+
+  | Gate | Control | Result |
+  |---|---|---|
+  | H0 routing precondition | re-run at `work_mem = 64kB` | `rc=3`, stops at shape 1 with `… would pass vacuously`, no comparison block runs |
+  | 1M oracle FINAL GATE | `-v gate_selftest=1` seeds `h1_key_mism = 1` | `rc=3`, `non-zero mismatch counters: h1_key_mism=1` |
+  | fixture oracle EC GATE | `-v gate_selftest=1` seeds `q1_ab_mism = 1` | `rc=3` |
+  | § 5 guard proofs | `PROOF_SELFTEST=1` inverts Proof B's expectation | exit 1 |
+
+  The self-test seeds the fault **in the same file as the gate**, so the control cannot drift away from the thing
+  it controls.
 - **H0 must cover every shape it claims to guard, and at first it did not.** Its four shapes sort by
   `EventTime` / `SearchPhrase`, but the two full-row blocks (H5, H5b) sort by `CounterID, WatchID, UserID` — a 3-key
   shape H0 never checked. Those are precisely the blocks that catch key↔payload misalignment and the only comparison
@@ -157,22 +179,31 @@ Two of those rows exist because a draft of this block failed them:
   top-20 — the block passed while exercising no tie-break at all. `CounterID` ties completely (1 distinct value in
   20 rows), so the second and third keys decide every row.
 
-**Binary provenance — including the headline's, which an earlier revision left unnamed.** Three binaries appear in
-this document, and § 1 ran on the oldest of them:
+**Binary provenance — by checksum, not by clock.** An earlier revision pinned artifacts to a binary using
+wall-clock timestamps and asserted the oracles ran "after the final commit". A reviewer falsified that in one
+command: `git` dates `ad132ab` at 01:40:34Z while the artifacts start at 01:27–01:28Z. The inference was wrong in
+principle, not just in detail — **in this repository the build necessarily precedes the commit that contains it**,
+so "ran before commit X" never implies "does not contain X". Wall-clock cannot pin a binary here; a checksum can.
 
-| Section | Ran at | Binary |
+Every log written after this finding therefore stamps `so_path` / `so_mtime` / `so_md5` read from the installed
+`.so` itself:
+
+| Section | Artifact stamp | Binary |
 |---|---|---|
-| § 1 headline (`paired-ab-ctas.log`) | 23:11–23:15Z | **pre-`e2d0955`** — older than both binaries discussed below |
-| § 7.2 control (both arms) | 23:37–23:53Z | pre-`bf809e7` (postmaster 23:26:20Z) |
-| § 2 suite, § 3 oracles + both gate controls, § 5 guard proofs | 01:27–01:45Z | **final (`ad132ab`)**, postmaster 01:27:21Z |
+| § 2 suite, § 3 oracles, § 3 gate self-tests (×3), § 5 guard proofs | `so_md5=9b9342f7e925d37ce0e1cf2ce1c356e0`, `so_mtime=2026-07-29 01:26:46Z` | built from the tree committed minutes later as **`ad132ab`** |
+| § 1 headline (`paired-ab-ctas.log`, 23:11–23:15Z) | wall-clock only — predates the stamping convention | an **earlier** build; see below |
+| § 7.2 control (`b1-control.log`, 23:37–23:53Z) | wall-clock only — predates the convention | an **earlier** build; see below |
 
-§ 1's internal validity is untouched — both of its arms shared one binary, which is the only property a paired
-toggle needs — but the document previously pinned § 2/§ 3 to the final binary while saying nothing about the number
-that goes into the CHANGELOG. That is the § 2 defect displaced onto the headline, and it is disclosed rather than
-re-measured because neither intervening commit can move a paired wall-clock: `e2d0955` caches a trace-env lookup in
-a `OnceLock` — planning-time only, and **whatever its state, it was the same in both arms of the same session**,
-which is the property that matters — and `bf809e7` is the fail-closed `INFINITY` flip on an unreachable
-null-syscache path (§ below). Neither touches the executor, so neither can change how long a scan takes.
+Three commits touch `theodb_rs/` in this milestone — `e2d0955`, `bf809e7`, `ad132ab` (measured: `git log -- theodb_rs/`)
+— so § 1 and § 7.2 ran on earlier builds, and this document does **not** claim to know exactly which. It does not
+need to, and that is the honest position rather than a gap:
+
+- **§ 1's internal validity does not depend on it.** Both of its arms ran in one session on one binary; a paired
+  toggle needs no more.
+- **None of the three commits can move a paired wall-clock.** `e2d0955` caches a trace-env lookup in a `OnceLock`
+  (planning-time); `bf809e7` flips `relation_physical_bytes`'s null-syscache return from `0.0` to `f64::INFINITY`
+  (fail-closed, on an unreachable path, and it can only make routing *stricter*); `ad132ab` moves a doc-comment and
+  restores an `#[inline]` on `admit_trace`. None touches the executor, so none changes how long a scan takes.
 
 Both oracles, both gate self-tests, the § 5 guard proofs and the § 2 routing table were re-run **after** the final
 commit, against a postmaster restarted at `01:27:21Z` so the shipped `.so` was the one loaded. This matters: the § 7.2 control ran on
