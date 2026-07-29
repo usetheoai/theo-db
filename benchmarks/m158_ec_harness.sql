@@ -48,6 +48,8 @@ INSERT INTO ec_res SELECT 'q1_ab_mism', count(*) FROM (
   (SELECT * FROM q1_off EXCEPT SELECT * FROM q1_on)
   UNION ALL
   (SELECT * FROM q1_on  EXCEPT SELECT * FROM q1_off)) d;
+-- non-vacuity: a comparison over zero rows reports zero mismatches and proves nothing
+INSERT INTO ec_res SELECT 'q1_rows', count(*) FROM q1_on;
 SELECT 'q1_count' q, (SELECT count(*) FROM q1_off) off_n, (SELECT count(*) FROM q1_on) on_n;
 -- Order-preserving oracle (council-benchmark M1): capture EMISSION order via row_number() over the raw query output
 -- and compare wid position-by-position. Proves the top-k emits the SAME SEQUENCE, not just the same SET.
@@ -68,6 +70,8 @@ INSERT INTO ec_res SELECT 'q2_ab_mism', count(*) FROM (
   (SELECT * FROM q2_off EXCEPT SELECT * FROM q2_on)
   UNION ALL
   (SELECT * FROM q2_on  EXCEPT SELECT * FROM q2_off)) d;
+-- non-vacuity: a comparison over zero rows reports zero mismatches and proves nothing
+INSERT INTO ec_res SELECT 'q2_rows', count(*) FROM q2_on;
 
 -- ---- Q3: text LIKE predicate + late-mat ----
 \echo '### Q3: SELECT * WHERE s LIKE ''%foo%'' ORDER BY wid LIMIT 10'
@@ -80,6 +84,8 @@ INSERT INTO ec_res SELECT 'q3_ab_mism', count(*) FROM (
   (SELECT * FROM q3_off EXCEPT SELECT * FROM q3_on)
   UNION ALL
   (SELECT * FROM q3_on  EXCEPT SELECT * FROM q3_off)) d;
+-- non-vacuity: a comparison over zero rows reports zero mismatches and proves nothing
+INSERT INTO ec_res SELECT 'q3_rows', count(*) FROM q3_on;
 
 -- ---- Q4: DESC direction ----
 \echo '### Q4: SELECT * ORDER BY wid DESC LIMIT 10'
@@ -92,6 +98,8 @@ INSERT INTO ec_res SELECT 'q4_ab_mism', count(*) FROM (
   (SELECT * FROM q4_off EXCEPT SELECT * FROM q4_on)
   UNION ALL
   (SELECT * FROM q4_on  EXCEPT SELECT * FROM q4_off)) d;
+-- non-vacuity: a comparison over zero rows reports zero mismatches and proves nothing
+INSERT INTO ec_res SELECT 'q4_rows', count(*) FROM q4_on;
 
 -- ---- Q5: projected subset (not SELECT *), key IS a projected column ----
 \echo '### Q5: SELECT wid, cid, f WHERE cid > 0 ORDER BY wid LIMIT 15'
@@ -104,6 +112,8 @@ INSERT INTO ec_res SELECT 'q5_ab_mism', count(*) FROM (
   (SELECT * FROM q5_off EXCEPT SELECT * FROM q5_on)
   UNION ALL
   (SELECT * FROM q5_on  EXCEPT SELECT * FROM q5_off)) d;
+-- non-vacuity: a comparison over zero rows reports zero mismatches and proves nothing
+INSERT INTO ec_res SELECT 'q5_rows', count(*) FROM q5_on;
 
 -- ---- Q6: bpchar as a PROJECTED OUTPUT column (not a sort key) — council-rust-pgrx LOW-2 ----
 -- bpchar declines as a SORT KEY (PG trims trailing blanks), but is a valid OUTPUT column materialized via
@@ -121,6 +131,8 @@ INSERT INTO ec_res SELECT 'q6_ab_mism', count(*) FROM (
   (SELECT * FROM q6_off EXCEPT SELECT * FROM q6_on)
   UNION ALL
   (SELECT * FROM q6_on  EXCEPT SELECT * FROM q6_off)) d;
+-- non-vacuity: a comparison over zero rows reports zero mismatches and proves nothing
+INSERT INTO ec_res SELECT 'q6_rows', count(*) FROM q6_on;
 
 -- ---- Q7/Q8: text sort-key collation guard (council-index-storage HIGH) ----
 -- Under a linguistic collation (this DB is en_US.UTF-8), a TEXT sort key MUST decline to the native plan (byte-order
@@ -290,11 +302,14 @@ BEGIN
   bad := bad || coalesce(
     (SELECT 'non-zero mismatch counters: ' || string_agg(format('%s=%s', q, n), ', ') || '; '
        FROM ec_res WHERE (q LIKE '%\_ab\_mism' OR q LIKE '%\_order\_mism') AND n <> 0), '');
+  bad := bad || coalesce(
+    (SELECT 'blocks that compared ZERO rows: ' || string_agg(q, ', ') || '; '
+       FROM ec_res WHERE q LIKE '%\_rows' AND n = 0), '');
   IF coalesce((SELECT n FROM ec_res WHERE q = 'm167e_control_diff'), 0) = 0 THEN
     bad := bad || 'm167e_control_diff must be > 0 (an oracle that cannot fail is not an oracle); ';
   END IF;
-  IF (SELECT count(*) FROM ec_res) <> 14 THEN
-    bad := bad || format('expected 14 assertions, found %s (a block was silently skipped); ',
+  IF (SELECT count(*) FROM ec_res) <> 20 THEN
+    bad := bad || format('expected 20 assertions, found %s (a block was silently skipped); ',
                          (SELECT count(*) FROM ec_res));
   END IF;
   IF bad <> '' THEN RAISE EXCEPTION 'M167 EC FINAL GATE FAILED: %', bad; END IF;

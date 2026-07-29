@@ -1,8 +1,9 @@
-=== M167 fixture oracle start 2026-07-29T02:01:27+00:00 ===
+=== M167 fixture oracle start 2026-07-29T02:33:40+00:00 ===
 postmaster=2026-07-29 01:27:21.29745+00
 so_path=/root/.pgrx/18.4/pgrx-install/lib/postgresql/theodb_rs.so
 so_mtime=2026-07-29 01:26:46.242582116 +0000
 so_md5=9b9342f7e925d37ce0e1cf2ce1c356e0
+expected_rc=0
 SET
 DROP TABLE
 CREATE TABLE
@@ -23,6 +24,7 @@ SET
 SELECT 10
 SET
 SELECT 10
+INSERT 0 1
 INSERT 0 1
     q     | off_n | on_n 
 ----------+-------+------
@@ -46,6 +48,7 @@ SET
 
 SELECT 10
 INSERT 0 1
+INSERT 0 1
 ### Q3: SELECT * WHERE s LIKE '%foo%' ORDER BY wid LIMIT 10
 SET
 SELECT 10
@@ -57,6 +60,7 @@ SET
 (2 rows)
 
 SELECT 10
+INSERT 0 1
 INSERT 0 1
 ### Q4: SELECT * ORDER BY wid DESC LIMIT 10
 SET
@@ -70,6 +74,7 @@ SET
 
 SELECT 10
 INSERT 0 1
+INSERT 0 1
 ### Q5: SELECT wid, cid, f WHERE cid > 0 ORDER BY wid LIMIT 15
 SET
 SELECT 15
@@ -81,6 +86,7 @@ SET
 (2 rows)
 
 SELECT 15
+INSERT 0 1
 INSERT 0 1
 ### Q6: SELECT wid, bc(char(8)) ORDER BY wid LIMIT 12 (bpchar projected output)
 DROP TABLE
@@ -96,6 +102,7 @@ SET
 (2 rows)
 
 SELECT 12
+INSERT 0 1
 INSERT 0 1
 ### Q7: text sort key under the DATABASE DEFAULT collation — outcome depends on the cluster, so this
 ###     block asserts NOTHING by itself. On a byte-order cluster (datcollate=C + libc) it ROUTES; on a
@@ -259,24 +266,30 @@ SELECT 10
 SELECT 10
 INSERT 0 1
 ### FINAL GATE — machine-checked, not printed
-         q          | n 
---------------------+---
- m167a_ab_mism      | 0
- m167b_order_mism   | 0
- m167c_ab_mism      | 0
- m167d2_order_mism  | 0
- m167d_order_mism   | 0
- m167e_control_diff | 2
- q1_ab_mism         | 0
- q1_order_mism      | 0
- q2_ab_mism         | 0
- q3_ab_mism         | 0
- q4_ab_mism         | 0
- q5_ab_mism         | 0
- q6_ab_mism         | 0
- q8_ab_mism         | 0
-(14 rows)
+         q          | n  
+--------------------+----
+ m167a_ab_mism      |  0
+ m167b_order_mism   |  0
+ m167c_ab_mism      |  0
+ m167d2_order_mism  |  0
+ m167d_order_mism   |  0
+ m167e_control_diff |  2
+ q1_ab_mism         |  0
+ q1_order_mism      |  0
+ q1_rows            | 10
+ q2_ab_mism         |  0
+ q2_rows            | 10
+ q3_ab_mism         |  0
+ q3_rows            | 10
+ q4_ab_mism         |  0
+ q4_rows            | 10
+ q5_ab_mism         |  0
+ q5_rows            | 15
+ q6_ab_mism         |  0
+ q6_rows            | 12
+ q8_ab_mism         |  0
+(20 rows)
 
-psql:/root/theo-db/benchmarks/m158_ec_harness.sql:304: NOTICE:  M167 EC FINAL GATE ok: 14 assertions, all mismatch counters 0, negative control fires
+psql:/root/theo-db/benchmarks/m158_ec_harness.sql:319: NOTICE:  M167 EC FINAL GATE ok: 20 assertions, all mismatch counters 0, negative control fires
 DO
-=== M167 fixture oracle rc=0 end 2026-07-29T02:01:29+00:00 ===
+=== M167 fixture oracle rc=0 end 2026-07-29T02:33:41+00:00 ===

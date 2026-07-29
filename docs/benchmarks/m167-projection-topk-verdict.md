@@ -18,17 +18,20 @@
 | `final-gate-EC-positive-control.log` | § 3 proof the **EC** gate can fail, `rc=3` | `so_md5=9b9342f7…` |
 | `guard-proofs.log` + `benchmarks/m167_guard_proofs.sh` | § 5 proofs A and B, self-asserting, `rc=0` | `so_md5=9b9342f7…` |
 | `guard-proofs-selftest.log` | § 5 proof those assertions can fail (`PROOF_SELFTEST=1`), exit 1 | `so_md5=9b9342f7…` |
-| `docs/benchmarks/m167-type-coverage.md` | the `rules/testing.md` § 5.1 routing gate, 35/35 | **pre-`ad132ab`** — generated at `bf809e7`; routing-only, and the H0 gate re-proves the same four shapes route on the final binary |
-| `b1-latemat-on.json` / `b1-latemat-off.json` / `b1-control.log` | § 6 noise floor + § 7.2 control (both arms) | 23:26:20Z run (**pre-`bf809e7`**, § 3) |
+| `docs/benchmarks/m167-type-coverage.md` | the `rules/testing.md` § 5.1 routing gate, 35/35 | **pre-`ad132ab`** — generated at `bf809e7`; routing-only. Its *routing* cases are re-proved on the final binary by H0; its **decline** case is not — H0 structurally cannot prove a decline — and is re-proved instead by EC `M167-C2`/`D3`, which did run on the final binary |
+| `b1-latemat-on.json` / `b1-latemat-off.json` / `b1-control.log` | § 6 noise floor + § 7.2 control (both arms) | wall-clock only — 23:37:29Z → 00:11:50Z; an **earlier** build (§ 3) |
 | `before-1m-SUPERSEDED.json` | § 7.2 first table (the withdrawn baseline) | 27 Jul run |
 | `after-1m.json` | superseded by `suite-final-binary.json`; kept for the record | 23:17Z or earlier |
 
-Every log **except two** opens with a `postmaster=` line plus `so_path=` / `so_mtime=` / `so_md5=` read from the
-installed `.so`, and closes with `rc=<exit code>` captured from `psql` (not from a preceding `echo` — an earlier
-revision of `m167_guard_proofs.sh` made exactly that mistake and always reported `rc=0`). Provenance is therefore a
-property of the artifact rather than a claim in this document. The two exceptions are `paired-ab-ctas.log` and
-`b1-control.log`, which predate the convention and carry only a wall-clock; § 3 says what is and is not known
-about their binaries.
+Every log **except two** opens with `postmaster=` plus `so_path=` / `so_mtime=` / `so_md5=` read from the installed
+`.so`, and closes with `rc=<exit code>`; the oracle runs additionally declare `expected_rc=` up front, so a control
+that *stopped failing* becomes a visible defect instead of a silent one. The banner is emitted by two **committed**
+harnesses — `benchmarks/m167_run_oracles.sh` and `benchmarks/m167_guard_proofs.sh` — because a convention that
+lives only in the artifacts is a transcript, which is the gap that produced the guard harness one revision earlier.
+Neither can emit an unstamped artifact (both `exit 2` if the `.so` cannot be checksummed), and the guard harness
+writes its footer from an `EXIT` trap, so even an aborted run states its own outcome. Provenance is a property of
+the artifact, not a claim in this document. The two exceptions are `paired-ab-ctas.log` and `b1-control.log`, which
+predate the convention and carry only a wall-clock; § 3 says what is and is not known about their binaries.
 
 ## 1. Result — paired same-binary A/B
 
@@ -154,14 +157,14 @@ Two of those rows exist because a draft of this block failed them:
   is not a gate: if the swap declines — which it does at stock `work_mem`, by design (§ 6) — both arms run the same
   native plan and every block below reports 0 differences while proving nothing. H0 now `RAISE`s and, under
   `ON_ERROR_STOP`, aborts the whole oracle. **Every gate in this milestone now has a positive control**, because a
-  gate never seen to fail is not known to be a gate — five committed logs, three of them deliberate failures:
+  gate never seen to fail is not known to be a gate. **Four control logs, all four deliberate failures:**
 
   | Gate | Control | Result |
   |---|---|---|
   | H0 routing precondition | re-run at `work_mem = 64kB` | `rc=3`, stops at shape 1 with `… would pass vacuously`, no comparison block runs |
   | 1M oracle FINAL GATE | `-v gate_selftest=1` seeds `h1_key_mism = 1` | `rc=3`, `non-zero mismatch counters: h1_key_mism=1` |
   | fixture oracle EC GATE | `-v gate_selftest=1` seeds `q1_ab_mism = 1` | `rc=3` |
-  | § 5 guard proofs | `PROOF_SELFTEST=1` inverts Proof B's expectation | exit 1 |
+  | § 5 guard proofs | `PROOF_SELFTEST=1` inverts Proof B's expectation | `rc=1` |
 
   The self-test seeds the fault **in the same file as the gate**, so the control cannot drift away from the thing
   it controls.
@@ -181,8 +184,9 @@ Two of those rows exist because a draft of this block failed them:
 
 **Binary provenance — by checksum, not by clock.** An earlier revision pinned artifacts to a binary using
 wall-clock timestamps and asserted the oracles ran "after the final commit". A reviewer falsified that in one
-command: `git` dates `ad132ab` at 01:40:34Z while the artifacts start at 01:27–01:28Z. The inference was wrong in
-principle, not just in detail — **in this repository the build necessarily precedes the commit that contains it**,
+command: `git` dated the then-final commit at 01:40:34Z while those artifacts started at 01:27–01:28Z. (The current
+generation, re-run after the fix, spans 01:59–02:34Z — later than the commit, but that is scheduling luck, not a
+repair.) The inference was wrong in principle, not just in detail — **in this repository the build necessarily precedes the commit that contains it**,
 so "ran before commit X" never implies "does not contain X". Wall-clock cannot pin a binary here; a checksum can.
 
 Every log written after this finding therefore stamps `so_path` / `so_mtime` / `so_md5` read from the installed
@@ -250,15 +254,18 @@ committed** as `m167-artifacts/guard-proofs.log` (`postmaster=01:27:21Z`, `rc=0`
 these two as measured while shipping no artifact for either, which is the same defect the reviewers had just made
 me fix elsewhere.
 
-**ICU provider (`datlocprovider`).** `CREATE DATABASE d LOCALE_PROVIDER icu ICU_LOCALE 'en-US' LOCALE 'C'` stores
+**ICU provider (`datlocprovider`).** `CREATE DATABASE d TEMPLATE template0 LOCALE_PROVIDER icu ICU_LOCALE 'en-US' LC_COLLATE 'C' LC_CTYPE 'C'` (the literal DDL in `benchmarks/m167_guard_proofs.sh`) stores
 `datcollate = 'C'` while the DEFAULT collation orders by ICU (`pg_locale.c` dispatches on `datlocprovider`;
 `dbcommands.c` writes the two fields independently). Reading `datcollate` alone admitted a text sort key whose
 DataFusion byte order disagrees with PG — **the exact wrong-rows class the M158 guard existed to prevent**, made
 reachable without a session `SET` by the default flip.
 
-Proof A in `guard-proofs.log`: a database created exactly that way reports `provider=i datcollate=C` — it *says* C
-— and the text sort key declines (`Sort Key: s` survives over `Custom Scan (theodb_columnar_project)`). Without the
-`datlocprovider` clause the predicate would read `C` and admit.
+Proof A in `guard-proofs.log`: a database created exactly that way reports `datcollate=C datlocprovider=i` — it
+*says* C — and the text sort key declines. **The decline is attributed, not merely observed:** the same session,
+same table and same `work_mem` first asserts that an `int` sort key *routes*. Without that anchor any other reason
+to decline (a small `work_mem` tripping the ADR-4 decode guard, say) would let the proof close green having shown
+nothing about `datlocprovider` — the exact vacuity H0 exists to forbid elsewhere, and a reviewer caught it here.
+The harness also aborts if the fixture fails to reproduce `datcollate=C ∧ provider=i` at all.
 
 **The guard was inert without ANALYZE.** `pg_class.relpages` is written only by ANALYZE/VACUUM, and a columnar table
 never triggers either on its own — there is no `pgstat` counting anywhere in `theodb_rs/src/`, so autoanalyze never

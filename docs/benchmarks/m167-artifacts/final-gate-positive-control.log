@@ -1,8 +1,9 @@
-=== FINAL GATE POSITIVE CONTROL (seeded mism -> MUST abort) start 2026-07-29T02:01:29+00:00 ===
+=== 1M FINAL GATE POS. CONTROL start 2026-07-29T02:33:41+00:00 ===
 postmaster=2026-07-29 01:27:21.29745+00
 so_path=/root/.pgrx/18.4/pgrx-install/lib/postgresql/theodb_rs.so
 so_mtime=2026-07-29 01:26:46.242582116 +0000
 so_md5=9b9342f7e925d37ce0e1cf2ce1c356e0
+expected_rc=3
 SET
 SET
 SET
@@ -97,4 +98,4 @@ UPDATE 1
 
 psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:189: ERROR:  M167 FINAL GATE FAILED: non-zero mismatch counters: h1_key_mism=1; 
 CONTEXT:  PL/pgSQL function inline_code_block line 30 at RAISE
-=== FINAL GATE POSITIVE CONTROL (seeded mism -> MUST abort) rc=3 end 2026-07-29T02:01:44+00:00 ===
+=== 1M FINAL GATE POS. CONTROL rc=3 end 2026-07-29T02:33:56+00:00 ===

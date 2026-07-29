@@ -33,11 +33,21 @@ as_pg() { su - "$RUNAS" -c "$*"; }
 # Binary identity, stamped from the .so itself. A wall-clock cannot pin a run to a commit in this repo, because the
 # build necessarily precedes the commit that contains it; the checksum can.
 SO_PATH=$(find "$(dirname "$P")" -name theodb_rs.so 2>/dev/null | head -1)
+SO_MD5=$(md5sum "$SO_PATH" 2>/dev/null | cut -d' ' -f1)
+if [ -z "$SO_PATH" ] || [ -z "$SO_MD5" ]; then
+  echo "FATAL: could not stamp the installed .so (path='$SO_PATH') — an artifact without provenance is not evidence"
+  exit 2
+fi
+# The footer must be written on EVERY exit path, including the `|| exit 1` short-circuits below. Without this the
+# self-test run closed with no `rc=` line at all, so the artifact could not state its own outcome — the very gap
+# the stamping convention exists to close (reviewer finding, 6th pass).
+trap 'rc=$?; echo; echo "=== § 5 guard proofs rc=$rc end $(date -Is) ==="' EXIT
+
 echo "=== § 5 guard proofs start $(date -Is) ==="
 echo "postmaster=$(as_pg "$PSQL -d postgres -tAc \"SELECT pg_postmaster_start_time()\"" 2>/dev/null)"
 echo "so_path=$SO_PATH"
 echo "so_mtime=$(stat -c '%y' "$SO_PATH" 2>/dev/null)"
-echo "so_md5=$(md5sum "$SO_PATH" 2>/dev/null | cut -d' ' -f1)"
+echo "so_md5=$SO_MD5"
 echo "selftest=$SELFTEST"
 
 # ---------------------------------------------------------------- PROOF A
@@ -55,13 +65,22 @@ as_pg "$PSQL -d m167_icu -v ON_ERROR_STOP=1 -c \"
   SET theodb.enable_columnar_agg = on;
   SET theodb.enable_columnar_late_mat = on;
   DO \\\$a\\\$
-  DECLARE plan text; coll text; prov text;
+  DECLARE plan text; anchor text; coll text; prov text;
   BEGIN
     SELECT datcollate, datlocprovider::text INTO coll, prov
       FROM pg_database WHERE datname = current_database();
     IF coll <> 'C' OR prov <> 'i' THEN
       RAISE EXCEPTION 'PROOF A PRECONDITION FAILED: need datcollate=C and provider=i, got % / % — the fixture does not reproduce the hole', coll, prov;
     END IF;
+    -- POSITIVE ANCHOR, same table and same session: an INT key must ROUTE. Without it, any other reason to
+    -- decline (a small work_mem tripping the ADR-4 decode guard, say) would let the negative assertion below close
+    -- green having proven nothing about `datlocprovider`. This is the attribution H0 exists to force elsewhere.
+    SET LOCAL work_mem = '1GB';
+    EXECUTE 'EXPLAIN (COSTS OFF, FORMAT JSON) SELECT s FROM ticu ORDER BY k LIMIT 10' INTO anchor;
+    IF position('theodb_columnar_agg' IN anchor) = 0 THEN
+      RAISE EXCEPTION 'PROOF A INCONCLUSIVE: an INT sort key did not route on this fixture, so a decline on the TEXT key attributes to nothing. Plan: %', anchor;
+    END IF;
+
     EXECUTE 'EXPLAIN (COSTS OFF, FORMAT JSON) SELECT k FROM ticu ORDER BY s LIMIT 10' INTO plan;
     IF position('theodb_columnar_agg' IN plan) > 0 THEN
       RAISE EXCEPTION 'PROOF A FAILED: an ICU database ADMITTED a text sort key — wrong rows are reachable. Plan: %', plan;
@@ -69,7 +88,7 @@ as_pg "$PSQL -d m167_icu -v ON_ERROR_STOP=1 -c \"
     IF position('Sort' IN plan) = 0 THEN
       RAISE EXCEPTION 'PROOF A INCONCLUSIVE: no Sort node, so the query did not fall back to the native plan. Plan: %', plan;
     END IF;
-    RAISE NOTICE 'PROOF A ok: datcollate=C but provider=i, and the text sort key DECLINED to the native Sort';
+    RAISE NOTICE 'PROOF A ok: datcollate=C but provider=i; an INT key ROUTES on this same fixture while the TEXT key DECLINES — the decline attributes to the collation, not to some other guard';
   END
   \\\$a\\\$;\"" || exit 1
 
@@ -115,5 +134,3 @@ as_pg "$PSQL -d postgres -v ON_ERROR_STOP=1 -c \"
   END
   \\\$b\\\$;\"" || exit 1
 
-echo
-echo "=== § 5 guard proofs rc=0 end $(date -Is) ==="
