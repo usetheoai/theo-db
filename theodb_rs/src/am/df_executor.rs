@@ -814,6 +814,78 @@ pub(super) unsafe fn run_columnar_grouped_aggs(
 // instead of the whole relation (measured at 809,738,352 bytes for ClickBench q23 before this existed).
 // ---------------------------------------------------------------------------------------------------------------
 
+/// `MemoryPool` que delega tudo e registra a MARCA D'ÁGUA do reservado.
+///
+/// Existe porque `GreedyMemoryPool::reserved()` lido **depois** do `block_on` é zero por construção: tudo que
+/// reserva — plano, streams, o `TopK` — é construído e destruído dentro do bloco async, e `MemoryReservation`
+/// libera no `Drop`. Reportar esse zero como prova de que o TopK não reteve nada seria vender um não-resultado
+/// como medição: o instrumento não conseguiria retornar outra coisa (achado de review).
+///
+/// A pergunta real é a retenção **durante** a execução, e é isso que `peak` responde: cada `grow`/`try_grow`
+/// bem-sucedido atualiza o máximo.
+#[derive(Debug)]
+struct PeakTrackingPool {
+    inner: datafusion::execution::memory_pool::GreedyMemoryPool,
+    peak: std::sync::atomic::AtomicUsize,
+}
+
+impl PeakTrackingPool {
+    fn new(limit: usize) -> Self {
+        Self {
+            inner: datafusion::execution::memory_pool::GreedyMemoryPool::new(limit),
+            peak: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+    fn note(&self) {
+        use datafusion::execution::memory_pool::MemoryPool as _;
+        let now = self.inner.reserved();
+        self.peak.fetch_max(now, std::sync::atomic::Ordering::Relaxed);
+    }
+    fn peak(&self) -> usize {
+        self.peak.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+impl std::fmt::Display for PeakTrackingPool {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use datafusion::execution::memory_pool::MemoryPool as _;
+        write!(f, "PeakTrackingPool(peak={}, reserved={})", self.peak(), self.inner.reserved())
+    }
+}
+
+impl datafusion::execution::memory_pool::MemoryPool for PeakTrackingPool {
+    fn name(&self) -> &str {
+        "PeakTrackingPool"
+    }
+    fn register(&self, c: &datafusion::execution::memory_pool::MemoryConsumer) {
+        self.inner.register(c);
+    }
+    fn unregister(&self, c: &datafusion::execution::memory_pool::MemoryConsumer) {
+        self.inner.unregister(c);
+    }
+    fn grow(&self, r: &datafusion::execution::memory_pool::MemoryReservation, additional: usize) {
+        self.inner.grow(r, additional);
+        self.note();
+    }
+    fn shrink(&self, r: &datafusion::execution::memory_pool::MemoryReservation, shrink: usize) {
+        self.inner.shrink(r, shrink);
+    }
+    fn try_grow(
+        &self,
+        r: &datafusion::execution::memory_pool::MemoryReservation,
+        additional: usize,
+    ) -> datafusion::error::Result<()> {
+        let out = self.inner.try_grow(r, additional);
+        if out.is_ok() {
+            self.note();
+        }
+        out
+    }
+    fn reserved(&self) -> usize {
+        datafusion::execution::memory_pool::MemoryPool::reserved(&self.inner)
+    }
+}
+
 /// A `RecordBatchStream` that decodes one chunk-group per poll.
 ///
 /// SAFETY (M168 ADR-2): holds a `pg_sys::Relation`, which is only valid on its backend thread. DataFusion demands
@@ -1133,14 +1205,15 @@ where
     let pool_bytes = work_mem_bytes.saturating_mul(2) + 64 * 1024 * 1024;
     let schema = datafusion::physical_plan::streaming::PartitionStream::schema(part.as_ref()).clone();
     let held = HeldInterrupts::hold();
-    // A pool é criada FORA do bloco async e clonada para dentro, para que o pico reservado possa ser lido depois.
+    // A pool é criada FORA do bloco async e clonada para dentro, para que a MARCA D'ÁGUA possa ser lida depois.
     // Sem isso, o único número instrumentado é o maior batch individual — e a retenção do TopK (que segura cada
     // batch com linha sobrevivente) fica não medida. Um reviewer apontou que essa omissão é o que sustentava, sem
     // prova, a alegação de que o footprint total não chega perto do orçamento do guard; e o comentário logo acima
     // sobre `Resources exhausted` é evidência in-repo de que ela chega a ~128 MB. Agora é medida, não argumentada.
-    use datafusion::execution::memory_pool::{GreedyMemoryPool, MemoryPool};
-    let pool: std::sync::Arc<dyn MemoryPool> = std::sync::Arc::new(GreedyMemoryPool::new(pool_bytes));
-    let pool_probe = std::sync::Arc::clone(&pool);
+    use datafusion::execution::memory_pool::MemoryPool;
+    let tracked = std::sync::Arc::new(PeakTrackingPool::new(pool_bytes));
+    let pool_probe = std::sync::Arc::clone(&tracked);
+    let pool: std::sync::Arc<dyn MemoryPool> = tracked;
     let out: Result<Vec<RecordBatch>, DataFusionError> = rt.block_on(async move {
         use datafusion::execution::runtime_env::RuntimeEnvBuilder;
         use datafusion::prelude::SessionConfig;
@@ -1160,7 +1233,8 @@ where
     drop(held);
     if super::columnar_agg::admit_trace_enabled() {
         pgrx::warning!(
-            "theodb_topk_pool: reserved_at_end={} pool_limit={}",
+            "theodb_topk_pool: peak_reserved={} reserved_at_end={} pool_limit={}",
+            pool_probe.peak(),
             pool_probe.reserved(),
             pool_bytes
         );

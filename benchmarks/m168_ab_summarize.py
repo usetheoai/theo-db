@@ -54,6 +54,15 @@ def parse(path):
     return runs, md5s, seen_per_pair
 
 
+def _reject_fallback(path, problems):
+    """Um braço 'streaming' que degradou para o eager em silêncio alimentaria a tabela publicada como se fosse
+    streaming. Agora que o fail-open existe, o log tem de ser rejeitado se ele disparou."""
+    for line in open(path, errors="replace"):
+        if "theodb_topk_stream_fallback" in line:
+            problems.append("log contém theodb_topk_stream_fallback: um braço degradou para o eager em silêncio")
+            return
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("log")
@@ -62,6 +71,7 @@ def main() -> int:
 
     runs, md5s, seen_per_pair = parse(a.log)
     problems = []
+    _reject_fallback(a.log, problems)
     if not runs:
         print("FAIL: nenhuma execução encontrada (o log tem a linha so_md5=?)")
         return 2

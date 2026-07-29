@@ -1,0 +1,131 @@
+SET
+SET
+SET
+=== stream=ON ===
+SET
+psql:/tmp/inv.sql:4: NOTICE:  table "t1" does not exist, skipping
+DROP TABLE
+psql:/tmp/inv.sql:5: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/tmp/inv.sql:5: WARNING:  theodb_admit_decline: swap_topk_admitted
+psql:/tmp/inv.sql:5: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/tmp/inv.sql:5: WARNING:  theodb_admit_decline: topk_parent_not_limit
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756 probe=1
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=136604
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=136604
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=136604
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=136604
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=136604
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=136604
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=644508
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=644508
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=644508
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=128412
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=136604
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=382364
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=152988
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
+psql:/tmp/inv.sql:5: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
+psql:/tmp/inv.sql:5: WARNING:  theodb_topk_pool: peak_reserved=43240056 reserved_at_end=0 pool_limit=134217728
+SELECT 400000
+ stream_on_rows 
+----------------
+         400000
+(1 row)
+
+=== stream=OFF ===
+SET
+psql:/tmp/inv.sql:9: NOTICE:  table "t2" does not exist, skipping
+DROP TABLE
+psql:/tmp/inv.sql:10: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/tmp/inv.sql:10: WARNING:  theodb_admit_decline: swap_topk_admitted
+psql:/tmp/inv.sql:10: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/tmp/inv.sql:10: WARNING:  theodb_admit_decline: topk_parent_not_limit
+psql:/tmp/inv.sql:10: WARNING:  theodb_decode_batch: rows=1000000 bytes=20388828 work_mem_bytes=33554432
+psql:/tmp/inv.sql:10: ERROR:  df_executor: DataFusion: Resources exhausted: Failed to allocate additional 19.5 MB for TopK[0] with 100.3 MB already allocated for this reservation - 2.6 MB remain available for the total memory pool: greedy(used: 100.3 MB, pool_size: 102.9 MB)
+psql:/tmp/inv.sql:11: ERROR:  relation "t2" does not exist
+LINE 1: SELECT count(*) AS stream_off_rows FROM t2;
+                                                ^

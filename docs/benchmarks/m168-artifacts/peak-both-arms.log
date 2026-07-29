@@ -1,5 +1,4 @@
-so_md5=f98b5b4cb2fd9d8e1b1bf66e85f2bff5
-postmaster=2026-07-29 13:25:25.012226+00
+so_md5=9e402e08e08455c96589cc6b67d419fc
 SET
 SET
 SET
@@ -137,7 +136,7 @@ psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_st
 psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=9392368
 psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=8859888
 psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=7756016
-psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_topk_pool: reserved_at_end=0 pool_limit=201326592
+psql:/root/theo-db/benchmarks/m168_peak.sql:35: WARNING:  theodb_topk_pool: peak_reserved=2411803 reserved_at_end=0 pool_limit=201326592
 ===q24===
 psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_admit_decline: topk_entered_sort
 psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_admit_decline: swap_topk_admitted
@@ -243,7 +242,7 @@ psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_st
 psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
 psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
 psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
-psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_topk_pool: reserved_at_end=0 pool_limit=201326592
+psql:/root/theo-db/benchmarks/m168_peak.sql:37: WARNING:  theodb_topk_pool: peak_reserved=825920 reserved_at_end=0 pool_limit=201326592
 ===q25===
 psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_admit_decline: topk_entered_sort
 psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_admit_decline: swap_topk_admitted
@@ -349,7 +348,7 @@ psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_st
 psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=171196
 psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=171196
 psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=105660
-psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_topk_pool: reserved_at_end=0 pool_limit=201326592
+psql:/root/theo-db/benchmarks/m168_peak.sql:39: WARNING:  theodb_topk_pool: peak_reserved=1220138 reserved_at_end=0 pool_limit=201326592
 ===q26===
 psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_admit_decline: topk_entered_sort
 psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_admit_decline: swap_topk_admitted
@@ -455,5 +454,5 @@ psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_st
 psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
 psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=251292
 psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=185756
-psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_topk_pool: reserved_at_end=0 pool_limit=201326592
+psql:/root/theo-db/benchmarks/m168_peak.sql:41: WARNING:  theodb_topk_pool: peak_reserved=1372880 reserved_at_end=0 pool_limit=201326592
 ########## fim — some as linhas por braço com benchmarks/m168_peak_summarize.py ##########

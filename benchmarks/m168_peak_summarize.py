@@ -48,9 +48,19 @@ def parse(path):
     return out
 
 
+def _reject_fallback(path, problems):
+    """Um braço 'streaming' que degradou para o eager em silêncio alimentaria a tabela publicada como se fosse
+    streaming. Agora que o fail-open existe, o log tem de ser rejeitado se ele disparou."""
+    for line in open(path, errors="replace"):
+        if "theodb_topk_stream_fallback" in line:
+            problems.append("log contém theodb_topk_stream_fallback: um braço degradou para o eager em silêncio")
+            return
+
+
 def main(path):
     d = parse(path)
     problems = []
+    _reject_fallback(path, problems)
     queries = sorted(set(d["eager"]) | set(d["stream"]), key=lambda q: int(q[1:]))
     if not queries:
         print("FAIL: no queries found — was the postmaster started with THEODB_ADMIT_TRACE=1?")
