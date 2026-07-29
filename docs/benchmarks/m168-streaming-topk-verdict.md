@@ -4,6 +4,11 @@
 **Box:** `theo-e2e-runner` (DigitalOcean, 32 GB / 8 vCPU) — NÃO a c6a.4xlarge canônica do ClickBench
 **Dados:** ClickBench `hits` / `hits_heap`, 1.000.000 linhas, 105 colunas — verificados por `count(*)`
 **Binário:** `so_md5=dd91bb410d85… (ver o cabeçalho de cada artefato)`
+**Proveniência do binário vs. a árvore:** os 10 artefatos foram coletados no commit `ca6681b`. As correções
+posteriores em `theodb_rs/` são **exclusivamente de comentário** — verificável com
+`git diff ca6681b..HEAD -- theodb_rs/ | grep -E '^[+-]' | grep -vE '^[+-][+-]|^[+-]\s*(//|///)|^[+-]\s*$'`,
+que volta vazio. Nenhuma linha de código mudou, então nenhum número aqui depende de uma recoleta. Uma sétima
+coleta apenas trocaria todos os números de novo sem responder a pergunta nenhuma.
 **Artefatos:** `docs/benchmarks/m168-artifacts/`
 
 ## 1. Memória — os dois braços, na mesma sessão
@@ -149,11 +154,11 @@ pares. A família dele são os 4 testes agrupados por consulta mais o grupo post
 | Coleta | 3 estreitas | mediana | efeito |
 |---|---|---|---|
 | A | 20/36 | 0,994 | **−0,6%** |
-| B | 19/36 | 0,993 | **−0,5%** |
+| B | 19/35 | 0,993 | **−0,5%** |
 | C | 11/36 | 1,047 | +4,7% |
 | D | 9/36 | 1,045 | +4,5% |
 | E | 14/36 | 1,029 | +2,9% |
-| F | 11/35 | 1,067 | +6,7% |
+| F | 11/36 | 1,067 | +6,7% |
 
 **Duas das seis coletas têm o efeito na direção oposta**, e a amplitude entre coletas (7,2 pontos) é **2,7× o
 efeito agregado** (+2,7%). Teste t no nível da coleta sobre as seis medianas: **t = 2,37, df = 5, p = 0,064**.
@@ -429,15 +434,22 @@ antes do timeout, em vez de contar isso como sucesso) e tem self-test de gate.
 **O que o contador conta.** Ele conta **chamadas de `next()`**, não chunk-groups, e os dois diferem nas duas
 direções. Para cima: a **chamada terminal** (a que devolve `Ok(None)`) conta e não entrega nada — por isso um
 scan completo de 1M lê **101**, e não 100. A sonda de schema **não** é uma causa adicional: ela **é** o
-chunk-group nº 0 (`df_executor.rs:1152` — "The probe IS a chunk-group"). Uma versão anterior atribuía o
+chunk-group nº 0 (`df_executor.rs:1139` — "The probe IS a chunk-group"). Uma versão anterior atribuía o
 excedente a *duas* causas somando uma unidade — quem fizesse a conta chegava a 102, veria 101, e concluiria que
 o contador subconta (achado de review; é a mesma classe do defeito que ela veio corrigir). Para baixo: uma
 chamada pode consumir uma corrida inteira de chunk-groups podados pelo zone-map (`Ok(false)` → `continue`) e
 ainda contar 1 — **subcontagem sob predicado empurrado**.
 
-Nenhuma das duas atrapalha o propósito, mas o motivo publicado antes estava errado: **razão não cancela
-constante aditiva.** O gate testa `a+1 > (b+1)·0,5`, não `a > b·0,5`; com `b = 100` o limiar anda de 50 para
-49,5. A conclusão (inócuo) vale; a justificativa "o +1 se cancela" não.
+**O +1 é ASSIMÉTRICO, e a assimetria é o próprio sinal.** `interrupt_is_pending()` é checado **antes** do
+`inner.next()`, e retorna cedo — então o poll que cancela **não** incrementa: o braço cortado nunca faz a chamada
+terminal e **não carrega o +1**; o completo carrega. Medido: **C1 = 11 com 11 batches traçados; C4 = 101 com
+100.** Logo o gate testa `a > (b+1)·0,5`, e com `b = 100` o limiar anda de 50 para **50,5** — ligeiramente MAIS
+permissivo.
+
+Duas versões anteriores desta passagem erraram, em direções opostas: primeiro "o +1 se cancela" (razão não
+cancela constante aditiva), depois "`a+1 > (b+1)·0,5` → 49,5" (invertia o sentido). O efeito no veredito é nulo
+(11 contra 50,5), mas o que a fórmula errada apagava era exatamente a assimetria que está sendo medida: o C4
+ganha o +1 **porque** completou; o C1 não ganha **porque** foi cortado.
 
 O gate ganhou também um **piso**: `c1_chunk_groups < 2` reprova como INCONCLUSIVO. Sem ele, um cancelamento que
 caísse antes do primeiro poll dava `c1 = 0`, a razão passava, e o arquivo imprimia "cortou no MEIO" sem o laço do
@@ -567,7 +579,7 @@ Peças isoladas:
 ```bash
 psql -f benchmarks/m168_peak.sql          # pico; some com m168_peak_summarize.py
 psql -f benchmarks/m168_stream_ab.sql     # A/B pareado; some com m168_ab_summarize.py
-psql -f benchmarks/m168_cancel_oracle.sql # cancelamento (gate diferencial por relógio)
+psql -f benchmarks/m168_cancel_oracle.sql # cancelamento (gate diferencial por CONTAGEM de chunk-groups)
 psql -f benchmarks/m168_routing_shapes.sql # as duas formas de plano do § 3.6
 ./benchmarks/m167_run_oracles.sh          # regressão do M167
 PGOPTIONS='-c theodb.enable_columnar_topk_stream=off' psql -f benchmarks/m167_hits_topk_ab.sql

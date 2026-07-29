@@ -85,10 +85,11 @@ $c0$;
 -- (100 chunk-groups — a sonda de schema É o nº 0, não um extra — mais a chamada terminal); um cortado avança
 -- menos.
 -- `theodb_columnar_stream_chunk_groups()` expõe o número — ele conta CHAMADAS, não chunk-groups, e a doc da
--- função explica as duas direções em que os dois diferem. O gate compara C1 contra C4 como RAZÃO, então o +1
--- constante se cancela. Uma versão anterior gateava TEMPO DE RELÓGIO enquanto o comentário afirmava gatear
--- a contagem (achado de review) — e uma amostra única de relógio, sujeita a carga da box e a estado de cache,
--- viola o R3 de `discover-phd-rigor.md` para alegação de tempo. A contagem não depende de nada disso.
+-- função explica as duas direções em que os dois diferem. O gate compara C1 contra C4 como RAZÃO.
+--
+-- Uma versão anterior gateava TEMPO DE RELÓGIO enquanto o comentário afirmava gatear a contagem (achado de
+-- review) — e uma amostra única de relógio, sujeita a carga da box e a estado de cache, viola o R3 de
+-- `discover-phd-rigor.md` para alegação de tempo. A contagem não depende de nada disso.
 --
 -- Limite honesto que permanece: o corte depende do `statement_timeout` cair DENTRO de um `poll_next`. Se o scan
 -- tiver poucos chunk-groups não há onde cortar no meio — por isso o gate reprova como INCONCLUSIVO (não como
@@ -178,9 +179,13 @@ SET theodb.enable_columnar_topk_stream = on;
 
 \echo '### M168-C4: quantos avanços de cursor o scan COMPLETO faz? — a referência do sinal diferencial'
 -- Sem esta referência, "c1 avançou 16 vezes" não significa nada: pode ser que o scan inteiro avance 16. A
--- referência é o MESMO trabalho sem timeout. O gate compara os dois como razão. (A razão NÃO cancela a constante
--- aditiva: o teste é `a+1 > (b+1)*0,5`, então com b=100 o limiar anda de 50 para 49,5 — inócuo, mas o motivo
--- publicado antes estava errado.)
+-- referência é o MESMO trabalho sem timeout. O gate compara os dois como razão.
+--
+-- O +1 É ASSIMÉTRICO, e a assimetria É o sinal: `interrupt_is_pending()` é checado ANTES do `inner.next()`, então
+-- o poll que cancela retorna cedo e NÃO incrementa — o braço cortado nunca faz a chamada terminal e não carrega
+-- o +1; o completo carrega. Medido: C1 = 11 com 11 batches traçados, C4 = 101 com 100. Logo o teste é
+-- `a > (b+1)*0,5`, e com b=100 o limiar anda de 50 para 50,5 — ligeiramente MAIS permissivo. Duas versões
+-- anteriores deste comentário erraram nas duas direções ("o +1 se cancela", depois "49,5").
 SET theodb.enable_columnar_topk_stream = on;
 DO $c4$
 DECLARE t0 timestamptz := clock_timestamp(); plan text;

@@ -87,10 +87,16 @@ fn theodb_columnar_chunks_scanned() -> i64 {
 ///     actually traversed.
 ///
 /// Neither hurts its purpose. It is the deterministic half of the cancellation oracle — a scan cut short advances
-/// the cursor far fewer times than a complete one. (A ratio does NOT cancel an additive constant — the gate tests
-/// `a+1 > (b+1)·0.5`, so with b=100 the threshold moves from 50 to 49.5; the effect is harmless, but the earlier
-/// "the +1 cancels" was the wrong reason.) Unlike a wall-clock comparison it is immune to machine speed, cache
-/// state and box load, which is what
+/// the cursor far fewer times than a complete one.
+///
+/// **The +1 is ASYMMETRIC, and that asymmetry IS the signal.** `interrupt_is_pending()` is checked BEFORE
+/// `inner.next()` (`df_executor.rs`), so the poll that cancels returns early and does NOT increment — a cut arm
+/// never makes the terminal call and carries no +1. A complete arm does. Measured: C1 = 11 with 11 traced
+/// batches; C4 = 101 with 100. So the gate is `a > (b+1)·0.5`, and with b=100 the threshold moves from 50 to
+/// **50.5** — slightly MORE permissive. Two earlier versions of this comment got it wrong in both directions
+/// ("the +1 cancels", then "`a+1 > (b+1)·0.5` → 49.5"); the effect on the verdict is nil (11 against 50.5), but
+/// the erased asymmetry was the very thing being measured. Unlike a wall-clock comparison it is immune to machine
+/// speed, cache state and box load, which is what
 /// `benchmarks/m168_cancel_oracle.sql` needs to tell "cancelled mid-scan" from "cancelled at the end" without a
 /// single-sample timing claim.
 #[pg_extern]
@@ -1141,9 +1147,14 @@ impl ColumnarChunkStream {
         // resetá-lo é um contador que um dia reporta o scan anterior. Isto também apaga a necessidade do
         // `theodb_columnar_stream_reset()`, que existia só para compensar a ausência deste zero (achado de
         // review; parsimony ladder degrau 1 — a função não precisava existir).
-        // O zero vem DEPOIS da captura de afinidade, não antes: este módulo declara que assere a invariante em
-        // vez de confiar nela, e escrever um thread_local antes de capturar a thread dona contradizia isso. Numa
-        // thread estranha o efeito seria métrica silenciosamente velha (não UB), mas a ordem certa é grátis.
+        // O zero vem depois do `capture()` por ordem de inicialização, e isso é **tudo** que a mudança faz.
+        // Uma versão anterior deste comentário alegava ganho de segurança ("o módulo assere a invariante em vez
+        // de confiar nela") — falso aqui: `ThreadAffinity::capture()` é `thread::current().id()`, registro puro;
+        // ele DEFINE o dono como quem chamar, não assere nada, e `new()` não assere em ponto algum. O argumento
+        // válido dessa forma vive em `poll_next`, onde `assert_owning_thread()` — que de fato entra em pânico —
+        // precede a leitura de um global do PG. Emprestar a forma daquele argumento aqui ensinaria um mecanismo
+        // falso sobre `capture` vs `assert` no único módulo cuja segurança depende de saber a diferença
+        // (achado de review).
         let affinity = ThreadAffinity::capture();
         STREAM_CG_COUNT.with(|c| c.set(0));
         Self {
@@ -1166,10 +1177,9 @@ impl ColumnarChunkStream {
     ) -> Result<Option<Vec<(String, u32, DecodedColumn)>>, String> {
         self.affinity.assert_owned("ColumnarChunkStream::next");
         // M168 — quantas vezes este scan streaming AVANÇOU o cursor. Ver a doc de
-        // `theodb_columnar_stream_chunk_groups` para por que isto NÃO é "chunk-groups entregues": a chamada
-        // terminal e a sonda de schema contam (scan completo de 1M lê 101, não 100), e uma chamada pode consumir
-        // vários chunk-groups podados pelo zone-map contando 1. O gate compara C1 e C4 como RAZÃO, então o +1
-        // constante se cancela.
+        // `theodb_columnar_stream_chunk_groups`: isto NÃO é "chunk-groups entregues". A sonda de schema É o
+        // chunk-group nº 0 (não um extra); o que soma um é a CHAMADA TERMINAL, e só num scan completo. E uma
+        // chamada pode consumir vários chunk-groups podados pelo zone-map contando 1.
         STREAM_CG_COUNT.with(|c| c.set(c.get() + 1));
         let n = self.plan.wanted.len();
         let ctx = CgDecodeCtx {
