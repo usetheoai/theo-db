@@ -21,6 +21,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   Resultado byte a byte idêntico ao anterior, e sem custo de tempo: no A/B pareado o `SELECT *` largo ficou 15%
   mais **rápido**, e as consultas estreitas ficaram dentro do ruído de medição. Método e ressalvas em
   `docs/benchmarks/m168-streaming-topk-verdict.md`. Reversível com `theodb.enable_columnar_topk_stream = off`.
+
+### Changed
+- **Diagnóstico:** a auditoria automática de código morto não detecta métodos Rust sem chamador dentro do próprio
+  crate, então "nenhum achado" no relatório dela significa "o detector não achou", não "não há". Quatro métodos e
+  dois campos escritos durante o M168 e nunca usados foram encontrados por conferência manual e removidos. A
+  limitação está registrada em `docs/benchmarks/m168-streaming-topk-verdict.md` § 5 para quem for confiar no
+  relatório da próxima vez.
 - **Diagnóstico de memória do top-k colunar:** com `THEODB_ADMIT_TRACE=1` no ambiente do servidor, o log passa a
   registrar quantos bytes o caminho colunar decodificou para responder à consulta
   (`theodb_decode_batch: rows=… bytes=… work_mem_bytes=…`). Quem opera consegue ver o consumo real em vez de
