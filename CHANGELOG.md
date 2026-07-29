@@ -19,10 +19,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   **maior bloco decodificado de uma vez** num `SELECT *` caiu de **772 MiB para 17,9 MiB (43×)** — abaixo do `work_mem` da sessão, e não mais acima
   dele (#215, #218). O consumo total do processo é maior que esse bloco e foi medido em parte: a retenção interna
   do ordenador ficou entre 0,83 e 2,41 MB. A tabela passa a ser decodificada em partes, uma de cada vez, em vez de inteira de uma vez.
-  Resultado byte a byte idêntico ao anterior. No tempo, o `SELECT *` largo ficou **~12% mais rápido** depois que
+  Resultado byte a byte idêntico ao anterior. No tempo, o `SELECT *` largo ficou **~14% mais rápido** depois que
   o cache aquece — o caminho novo venceu **12 de 12 comparações pareadas** (teste do sinal, p = 0,0005), inclusive
-  nas seis em que ele correu na posição desfavorecida. Nas consultas de projeção estreita **não há efeito**
-  (7/12, 7/12 e 6/12 vitórias; p = 0,77, 0,77 e 1,00): onde há pouca memória a economizar, não há tempo a
+  nas seis em que ele correu na posição desfavorecida, e esse sinal se repetiu em quatro coletas independentes,
+  duas delas com binários diferentes. Nas consultas de projeção estreita **não há efeito**
+  (6/12, 6/12 e 7/12 vitórias; p = 1,00, 1,00 e 0,77): onde há pouca memória a economizar, não há tempo a
   ganhar. A medição foi feita
   numa máquina compartilhada, então o número merece replicação; o desenho pareado é o que o torna defensável
   apesar disso.

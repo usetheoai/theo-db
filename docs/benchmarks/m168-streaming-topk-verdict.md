@@ -89,29 +89,36 @@ O summarizer passa a usar **teste do sinal exato, bilateral**, sobre os pares (i
 
 | Consulta | razões (2 execuções) | pares favoráveis | p (sinal, bilateral) | leitura |
 |---|---|---|---|---|
-| **q23** | 0,828 · 0,805 | **12 / 12** | **0,0005** | **efeito pareado real** |
-| q24 | 1,035 · 1,024 | 7 / 12 | 0,77 | sem efeito |
-| q25 | 1,022 · 0,972 | 7 / 12 | 0,77 | sem efeito |
-| q26 | 0,981 · 0,981 | 6 / 12 | 1,00 | sem efeito |
+| **q23** | 0,790 · 0,746 | **12 / 12** | **0,0005** | **efeito pareado real** |
+| q24 | 1,038 · 0,957 | 6 / 12 | 1,00 | sem efeito |
+| q25 | 0,985 · 0,972 | 6 / 12 | 1,00 | sem efeito |
+| q26 | 0,966 · 1,035 | 7 / 12 | 0,77 | sem efeito |
 
 Fonte de todas as linhas desta seção: **`docs/benchmarks/m168-artifacts/paired-ab-stream.log`** (2 execuções ×
 6 pares, `so_md5=e010375381ae7ad9069e4a38a5d6c9c6`). Reproduzível com
 `python3 benchmarks/m168_ab_summarize.py docs/benchmarks/m168-artifacts/paired-ab-stream.log`.
 
-**A magnitude publicável é a do regime aquecido.** Os pares 1–2 são frios (0,636 · 0,755 · 0,697 · 0,700) e
+**A magnitude publicável é a do regime aquecido.** Os pares 1–2 são frios (0,625 · 0,743 · 0,638 · 0,701) e
 inflam o ganho agregado. **Regra de agregação, fixada aqui e usada em todo o documento: mediana das razões
 pareadas** — uma versão anterior citava média para um subconjunto e mediana para outro, e daí saiu um "18,9%"
-que não é nenhum dos dois (achado de review; nenhum agregado do conjunto o produz):
+que não é nenhum dos dois (achado de review; nenhum agregado do conjunto o produzia):
 
 | Subconjunto | n | mediana das razões | ganho |
 |---|---|---|---|
-| todos os pares | 12 | 0,810 | 19,0% |
-| pares 3–6 | 8 | 0,870 | 13,0% |
-| **pares 5–6** | 4 | **0,880** | **12,0%** |
+| todos os pares | 12 | 0,790 | 21,0% |
+| pares 3–6 | 8 | 0,840 | 16,0% |
+| **pares 5–6** | 4 | **0,858** | **14,2%** |
 
-**Publico o menor: o q23 é ~12% mais rápido em regime, com 12/12 pares favoráveis (p = 0,0005).** Toda
+**Publico o menor: o q23 é ~14% mais rápido em regime, com 12/12 pares favoráveis (p = 0,0005).** Toda
 alternativa do conjunto é mais lisonjeira. E o contrabalanceamento sustenta: nos seis pares em que o *streaming*
 rodou primeiro — a posição desfavorecida pelo aquecimento — ele venceu 6/6.
+
+**Estabilidade através de binários.** Esta é a **quarta** coleta independente, e a segunda com um binário
+diferente (`1eaec080b901`, que inclui a correção do safe-point da § 3.6). O sinal do q23 não se moveu — 12/12,
+p = 0,0005 nas quatro. A magnitude oscila com a máquina compartilhada (12,0% na coleta anterior, 14,2% nesta),
+o que é a razão de o documento publicar o menor subconjunto e não o agregado mais lisonjeiro. As consultas de
+projeção estreita também não se moveram em *classe* — nenhuma tem efeito pareado nas duas coletas — mas suas
+contagens de sinal trocaram entre 6/12 e 7/12, que é o que "sem efeito" significa na prática.
 
 Nas três consultas estreitas **não há efeito pareado**. Faz sentido mecanicamente: o ganho do q23 acompanha o
 regime em que a memória também cai 43×, e onde há pouco a economizar não há o que ganhar.
