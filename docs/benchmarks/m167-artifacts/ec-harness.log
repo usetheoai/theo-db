@@ -1,9 +1,12 @@
-=== M167 fixture oracle start 2026-07-29T00:44:06+00:00 (postmaster: 2026-07-29 00:17:54.370517+00) ===
+=== M167 fixture oracle start 2026-07-29T01:28:22+00:00 (postmaster: 2026-07-29 01:27:21.29745+00) ===
 SET
 DROP TABLE
 CREATE TABLE
 INSERT 0 20000
 ========== M158 A/B — each query: (off EXCEPT on) UNION ALL (on EXCEPT off) must be 0 ==========
+psql:/root/theo-db/benchmarks/m158_ec_harness.sql:36: NOTICE:  table "ec_res" does not exist, skipping
+DROP TABLE
+CREATE TABLE
 ### Q1: SELECT * ORDER BY wid LIMIT 10 (prime late-mat target)
 SET
                QUERY PLAN                
@@ -16,11 +19,7 @@ SET
 SELECT 10
 SET
 SELECT 10
-     q      | n 
-------------+---
- q1_ab_mism | 0
-(1 row)
-
+INSERT 0 1
     q     | off_n | on_n 
 ----------+-------+------
  q1_count |    10 |   10
@@ -30,11 +29,7 @@ SET
 SELECT 10
 SET
 SELECT 10
-       q       | n 
----------------+---
- q1_order_mism | 0
-(1 row)
-
+INSERT 0 1
 ### Q2: SELECT * WHERE v >= 3 ORDER BY wid LIMIT 10
 SET
 SELECT 10
@@ -46,11 +41,7 @@ SET
 (2 rows)
 
 SELECT 10
-     q      | n 
-------------+---
- q2_ab_mism | 0
-(1 row)
-
+INSERT 0 1
 ### Q3: SELECT * WHERE s LIKE '%foo%' ORDER BY wid LIMIT 10
 SET
 SELECT 10
@@ -62,11 +53,7 @@ SET
 (2 rows)
 
 SELECT 10
-     q      | n 
-------------+---
- q3_ab_mism | 0
-(1 row)
-
+INSERT 0 1
 ### Q4: SELECT * ORDER BY wid DESC LIMIT 10
 SET
 SELECT 10
@@ -78,11 +65,7 @@ SET
 (2 rows)
 
 SELECT 10
-     q      | n 
-------------+---
- q4_ab_mism | 0
-(1 row)
-
+INSERT 0 1
 ### Q5: SELECT wid, cid, f WHERE cid > 0 ORDER BY wid LIMIT 15
 SET
 SELECT 15
@@ -94,11 +77,7 @@ SET
 (2 rows)
 
 SELECT 15
-     q      | n 
-------------+---
- q5_ab_mism | 0
-(1 row)
-
+INSERT 0 1
 ### Q6: SELECT wid, bc(char(8)) ORDER BY wid LIMIT 12 (bpchar projected output)
 DROP TABLE
 CREATE TABLE
@@ -113,12 +92,12 @@ SET
 (2 rows)
 
 SELECT 12
-     q      | n 
-------------+---
- q6_ab_mism | 0
-(1 row)
-
-### Q7: text sort key under DB collation (en_US, linguistic) MUST show Sort (declined to native)
+INSERT 0 1
+### Q7: text sort key under the DATABASE DEFAULT collation — outcome depends on the cluster, so this
+###     block asserts NOTHING by itself. On a byte-order cluster (datcollate=C + libc) it ROUTES; on a
+###     linguistic one it declines. The environment-independent assertions are M167-C2 / D3 / D3b.
+###     (The old text said "MUST show Sort", a premise false on this C cluster — the committed log
+###      showed that MUST next to a Custom Scan, i.e. a violated assertion nobody was asserting.)
 SET
                QUERY PLAN                
 -----------------------------------------
@@ -140,11 +119,7 @@ SET
 SELECT 10
 SET
 SELECT 10
-     q      | n 
-------------+---
- q8_ab_mism | 0
-(1 row)
-
+INSERT 0 1
 ### M167-A (q23): SELECT * WHERE s LIKE '%foo%' ORDER BY wid LIMIT 10
 SET
                QUERY PLAN                
@@ -157,11 +132,7 @@ SET
 SELECT 10
 SET
 SELECT 10
-       q       | n 
----------------+---
- m167a_ab_mism | 0
-(1 row)
-
+INSERT 0 1
 ### M167-B (q24): SELECT s WHERE s <> '' ORDER BY wid LIMIT 10 (emission-order oracle)
 SET
                QUERY PLAN                
@@ -174,11 +145,7 @@ SET
 SELECT 10
 SET
 SELECT 10
-        q         | n 
-------------------+---
- m167b_order_mism | 0
-(1 row)
-
+INSERT 0 1
 ### M167-C (q25): text sort key with DEFAULT collation — routes iff datcollate is byte-order
         q         | v 
 ------------------+---
@@ -202,11 +169,7 @@ SET
 SELECT 10
 SET
 SELECT 10
-       q       | n 
----------------+---
- m167c_ab_mism | 0
-(1 row)
-
+INSERT 0 1
 ### M167-C2: ORDER BY sd COLLATE "en_US.utf8" MUST decline (linguistic != byte order)
 SET
                            QUERY PLAN                            
@@ -230,11 +193,7 @@ SET
 SELECT 10
 SET
 SELECT 10
-        q         | n 
-------------------+---
- m167d_order_mism | 0
-(1 row)
-
+INSERT 0 1
 ### M167-D2: ORDER BY v, sd LIMIT 10 (multi-key with a TEXT second key)
 SET
                QUERY PLAN                
@@ -247,11 +206,7 @@ SET
 SELECT 10
 SET
 SELECT 10
-         q         | n 
--------------------+---
- m167d2_order_mism | 0
-(1 row)
-
+INSERT 0 1
 ### M167-D3: ORDER BY v, sd COLLATE "en_US.utf8" MUST decline (second key not byte-order)
 SET
                             QUERY PLAN                            
@@ -298,10 +253,26 @@ INSERT 0 20000
 SET
 SELECT 10
 SELECT 10
+INSERT 0 1
+### FINAL GATE — machine-checked, not printed
          q          | n 
 --------------------+---
+ m167a_ab_mism      | 0
+ m167b_order_mism   | 0
+ m167c_ab_mism      | 0
+ m167d2_order_mism  | 0
+ m167d_order_mism   | 0
  m167e_control_diff | 2
-(1 row)
+ q1_ab_mism         | 0
+ q1_order_mism      | 0
+ q2_ab_mism         | 0
+ q3_ab_mism         | 0
+ q4_ab_mism         | 0
+ q5_ab_mism         | 0
+ q6_ab_mism         | 0
+ q8_ab_mism         | 0
+(14 rows)
 
-========== ALL *_ab_mism / *_order_mism above MUST be 0, AND m167e_control_diff MUST be > 0 (an oracle that cannot fail is not an oracle) ==========
-=== M167 fixture oracle rc=0 end 2026-07-29T00:44:08+00:00 ===
+psql:/root/theo-db/benchmarks/m158_ec_harness.sql:304: NOTICE:  M167 EC FINAL GATE ok: 14 assertions, all mismatch counters 0, negative control fires
+DO
+=== M167 fixture oracle rc=0 end 2026-07-29T01:28:23+00:00 ===

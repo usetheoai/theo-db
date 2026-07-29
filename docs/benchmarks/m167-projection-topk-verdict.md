@@ -9,17 +9,20 @@
 
 | Artifact | What it backs | Postmaster |
 |---|---|---|
-| `paired-ab-ctas.log` | § 1 headline (paired CTAS) | 23:11–23:15Z run |
+| `paired-ab-ctas.log` | § 1 headline (paired CTAS) | wall-clock only — 23:11–23:15Z, i.e. **pre-`e2d0955`** (§ 3) |
 | `suite-final-binary.json` | § 2 routing + suite A/B | **00:17:54Z (final binary)** |
 | `hits-topk-ab.log` | § 3 1M top-k oracle, `rc=0` | **00:17:54Z (final binary)** |
 | `ec-harness.log` | § 3 fixture oracle, `rc=0` | **00:17:54Z (final binary)** |
 | `h0-gate-positive-control.log` | § 3 proof the H0 gate can fail, `rc=3` | **00:17:54Z (final binary)** |
-| `b1-latemat-on.json` / `b1-latemat-off.json` / `b1-control.log` | § 6 noise floor + § 7.2 control (both arms) | 23:26:20Z run |
+| `guard-proofs.log` + `benchmarks/m167_guard_proofs.sh` | § 5 ICU-provider and `relpages=0` proofs, `rc=0` | **00:17:54Z (final binary)** |
+| `b1-latemat-on.json` / `b1-latemat-off.json` / `b1-control.log` | § 6 noise floor + § 7.2 control (both arms) | 23:26:20Z run (**pre-`bf809e7`**, § 3) |
 | `before-1m-SUPERSEDED.json` | § 7.2 first table (the withdrawn baseline) | 27 Jul run |
 | `after-1m.json` | superseded by `suite-final-binary.json`; kept for the record | 23:17Z or earlier |
 
-Every log opens with `postmaster=<pg_postmaster_start_time()>` and closes with `rc=<exit code>`, so provenance is a
-property of the artifact rather than a claim in this document.
+Every log **except two** opens with `postmaster=<pg_postmaster_start_time()>` and closes with `rc=<exit code>`, so
+provenance is a property of the artifact rather than a claim in this document. The exceptions are
+`paired-ab-ctas.log` and `b1-control.log`, which predate that convention and carry only a wall-clock — their binaries
+are identified in § 3 instead.
 
 ## 1. Result — paired same-binary A/B
 
@@ -146,12 +149,31 @@ Two of those rows exist because a draft of this block failed them:
   H4 project *different columns* than the four suite shapes (`EventTime` vs `SearchPhrase` vs both), and while their
   routing is implied — the decode guard bills the whole relation regardless of projection — "implied" is precisely
   what this gate exists to replace. The array now carries **all nine** SQL statements the file actually executes, and
-  the gate reports **9/9**.
+  the gate reports **9/9** — the file itself executes **six** distinct shapes (H1, H2, H3, H4, H5, H5b) and the array
+  additionally carries the four *suite* shapes q23–q26 (one of which H3 shares), because those are the shapes whose
+  numbers this document publishes. Nine statements, six of them run below.
 - **The tie-break must actually tie.** The first version tie-broke on `EventTime`, which turned out *unique* in its
   top-20 — the block passed while exercising no tie-break at all. `CounterID` ties completely (1 distinct value in
   20 rows), so the second and third keys decide every row.
 
-**Binary provenance.** Both oracles above and the § 2 routing table were re-run **after** the final commit, against a
+**Binary provenance — including the headline's, which an earlier revision left unnamed.** Three binaries appear in
+this document, and § 1 ran on the oldest of them:
+
+| Section | Ran at | Binary |
+|---|---|---|
+| § 1 headline (`paired-ab-ctas.log`) | 23:11–23:15Z | **pre-`e2d0955`** — older than both binaries discussed below |
+| § 7.2 control (both arms) | 23:37–23:53Z | pre-`bf809e7` (postmaster 23:26:20Z) |
+| § 2 suite, § 3 oracles, § 5 guard proofs | 00:43–01:19Z | **final (`1ea7e0b`)**, postmaster 00:17:54Z |
+
+§ 1's internal validity is untouched — both of its arms shared one binary, which is the only property a paired
+toggle needs — but the document previously pinned § 2/§ 3 to the final binary while saying nothing about the number
+that goes into the CHANGELOG. That is the § 2 defect displaced onto the headline, and it is disclosed rather than
+re-measured because neither intervening commit can move a paired wall-clock: `e2d0955` caches a trace-env lookup in
+a `OnceLock` — planning-time only, and **whatever its state, it was the same in both arms of the same session**,
+which is the property that matters — and `bf809e7` is the fail-closed `INFINITY` flip on an unreachable
+null-syscache path (§ below). Neither touches the executor, so neither can change how long a scan takes.
+
+Both oracles and the § 2 routing table were re-run **after** the final commit, against a
 postmaster restarted at `00:17:54Z` so the shipped `.so` was the one loaded. This matters: the § 7.2 control ran on
 the immediately-preceding binary (postmaster up since `23:26:20Z`, `.so` rewritten at `23:44:58Z` — PostgreSQL loads
 `shared_preload_libraries` at startup, so the rebuild did not reach those two suites). That leaves the control
@@ -220,9 +242,9 @@ guard declines at `work_mem = 64kB` (`Sort Key: v` survives) and routes at `1GB`
 Each DoD bullet, the artifact that settles it, and an honest status. One is **partial**, and it is marked as such
 rather than ticked.
 
-| # | DoD bullet (ROADMAP:3053-3057) | Evidence | Status |
+| # | DoD bullet (ROADMAP.md:3054-3056) | Evidence | Status |
 |---|---|---|---|
-| 1 | q23–q26 show the projection/late-mat Custom Scan in `EXPLAIN` **and** byte-identical A/B vs heap (`diverged=0`), **with the `WHERE URL LIKE …` filter also routed** (composed with M156) | H0 gate `9/9` (`hits-topk-ab.log`); suite `diverged = 0`, `columnar_agg_routed` true for all four; `EXPLAIN (VERBOSE)` on q23 shows `Limit → Custom Scan` with **no separate `Filter` node**, i.e. the `LIKE` is inside the scan | **met** |
+| 1 | q23–q26 show the projection/late-mat Custom Scan in `EXPLAIN` **and** byte-identical A/B vs heap (`diverged=0`), **with the `WHERE URL LIKE …` filter also routed** (composed with M156) | H0 gate `9/9` (`hits-topk-ab.log`); suite `diverged = 0`, `columnar_agg_routed` true for all four; the `LIKE` is proven inside the scan **from committed evidence**: H0 shape 1 is q23 verbatim (`m167_hits_topk_ab.sql:31`) and `try_swap_topk` returns `None` on any qual it cannot push down (`columnar_agg.rs`, un-pushable branch), so *routing entails the filter was pushed*. (An earlier revision cited an `EXPLAIN (VERBOSE)` run that was never committed — the same unartifacted-claim defect § 5 records two sections earlier, reappearing in the same commit set.) | **met** |
 | 2a | `ORDER BY` on text routes **only** under a deterministic collation | M167-C (routes, `datcollate = C`), C2 (`en_US.utf8` → declines), D3 (non-first key `en_US.utf8` → declines), D3b (`bpchar` → declines); predicate reads `datcollate` **and** requires `datlocprovider = 'c'` (§ 5) | **met** |
 | 2b | the LIMIT-k heapsort is **O(k)**, not an O(N) batch | The heap itself *is* bounded — DataFusion's `TopK` keeps k rows. **But the decode that feeds it is O(N)**: the whole relation is materialized into Arrow before the heap sees it. That is mitigated by the ADR-4 size guard, not eliminated. Peak RSS was **not** measured (§ 6). | **PARTIAL — see below** |
 | 3 | late-mat GUC honoured; the M163/M164 type-coverage A/B exercises the projection-top-k case; `CHANGELOG [Unreleased]` | GUC is the sole asymmetry of the § 1 and § 7.2 measurements; `columnar_type_ab.py` carries 4 projection-top-k routing cases, **35/35** with positive control `diverged = 2` (`m167-type-coverage.md`); CHANGELOG entry present | **met** |
@@ -231,7 +253,12 @@ rather than ticked.
 before any code was written (ADR-4: a streaming O(k) top-k is "real new executor mechanism, out of scope for this
 milestone; recorded as the honest gap"). What shipped is a bounded heap fed by an O(N) decode, with a plan-time
 guard that declines when the relation exceeds `work_mem × 8` — a ceiling on catastrophe, not the O(k) property the
-bullet asks for. Ticking bullet 2b would be a false green. It is carried forward as the open item.
+bullet asks for. Ticking bullet 2b would be a false green.
+
+**It is tracked, not merely noted:** [issue #215](https://github.com/usetheodev/theo-db/issues/215) carries the
+instrumentation of the real decoded-batch size, the streaming-decode evaluation, and the question of whether the
+default can hold at PostgreSQL's stock `work_mem`. When the M167 ROADMAP checkbox flips at release it records that
+the milestone shipped — **not** that bullet 2b's O(k) clause was met; that clause lives in #215 until it is.
 
 ## 6. What is NOT proven
 
@@ -300,7 +327,7 @@ the instrument does not license the claim. That reason still holds and the withd
 
 Draft 2 went further and asserted *why*: that the `before` baseline was inflated, citing
 `docs/benchmarks/m166-clickbench-agg.json` (same box, same parameters, one day earlier, late-mat off) which records
-q24 **3.0751 s** / q25 **2.7126 s** / q26 **2.9036 s** against the baseline's 5.9088 / 6.0517 / 5.9517. **That
+q24 **3.0751 s** / q25 **2.7126 s** / q26 **2.9036 s** against the baseline's 5.9088 / 6.0528 / 5.9517. **That
 diagnosis is falsified.**
 
 The control that settles it — **both arms committed**, `m167-artifacts/b1-latemat-on.json` and

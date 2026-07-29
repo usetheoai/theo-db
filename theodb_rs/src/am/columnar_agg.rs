@@ -187,12 +187,7 @@ fn sort_collation_is_byte_order(coll: u32) -> bool {
     }
 }
 
-/// M152 (spike) — behavior-NEUTRAL decline trace. When `THEODB_ADMIT_TRACE=1`, emit the reason the columnar-agg
-/// path declined a candidate (the ground-truth the static SQL analysis can't give — plan-shape declines in
-/// `try_swap_agg` are only visible at runtime). Off by default → zero emission, routing IDENTICAL to M151. Used
-/// ONLY to build the M152 routing-map; carries no functional effect (mirrors `THEODB_SCAN_PROFILE` of M150).
-#[inline]
-/// Is the decline trace on? Exposed so callers can skip building an expensive message when it is off — the
+/// Is the decline trace on? Split out so callers can skip building an expensive message when it is off — the
 /// `format!` would otherwise allocate on every decline even with tracing disabled (review finding L4).
 #[inline]
 fn admit_trace_enabled() -> bool {
@@ -200,6 +195,11 @@ fn admit_trace_enabled() -> bool {
     *TRACE_ON.get_or_init(|| std::env::var("THEODB_ADMIT_TRACE").as_deref() == Ok("1"))
 }
 
+/// M152 (spike) — behavior-NEUTRAL decline trace. When `THEODB_ADMIT_TRACE=1`, emit the reason the columnar-agg
+/// path declined a candidate (the ground-truth the static SQL analysis can't give — plan-shape declines in
+/// `try_swap_agg` are only visible at runtime). Off by default → zero emission, routing IDENTICAL to M151. Used
+/// ONLY to build the M152 routing-map; carries no functional effect (mirrors `THEODB_SCAN_PROFILE` of M150).
+#[inline]
 fn admit_trace(reason: &str) {
     // Resolve the env var ONCE per backend. With M167 flipping the late-mat default ON, `swap_walk` now runs on
     // every planned statement, so this is called per Sort node per plan on the default path — a `std::env::var`

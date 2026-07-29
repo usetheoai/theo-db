@@ -1,4 +1,4 @@
-=== M167 1M top-k oracle start 2026-07-29T01:28:07+00:00 (postmaster: 2026-07-29 01:27:21.29745+00) ===
+=== FINAL GATE POSITIVE CONTROL (seeded mism -> MUST abort) start 2026-07-29T01:28:23+00:00 (postmaster: 2026-07-29 01:27:21.29745+00) ===
 SET
 SET
 SET
@@ -64,10 +64,12 @@ psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:130: NOTICE:  table "h6_bad"
 DROP TABLE
 SELECT 20
 INSERT 0 1
+### GATE SELF-TEST ARMED: forcing h1_key_mism = 1 — the FINAL GATE MUST abort below
+UPDATE 1
 ### M167 FINAL GATE — machine-checked, not printed
            q           |  n  
 -----------------------+-----
- h1_key_mism           |   0
+ h1_key_mism           |   1
  h2_key_mism           |   0
  h3_key_mism           |   0
  h4_key_mism           |   0
@@ -79,6 +81,6 @@ INSERT 0 1
  h6_control_diff       |  40
 (10 rows)
 
-psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:175: NOTICE:  M167 FINAL GATE ok: 10 assertions, all mismatch counters 0, negative control fires, tie-break exercised, wide row wide
-DO
-=== M167 1M top-k oracle rc=0 end 2026-07-29T01:28:22+00:00 ===
+psql:/root/theo-db/benchmarks/m167_hits_topk_ab.sql:175: ERROR:  M167 FINAL GATE FAILED: non-zero mismatch counters: h1_key_mism=1; 
+CONTEXT:  PL/pgSQL function inline_code_block line 26 at RAISE
+=== FINAL GATE POSITIVE CONTROL (seeded mism -> MUST abort) rc=3 end 2026-07-29T01:28:38+00:00 ===

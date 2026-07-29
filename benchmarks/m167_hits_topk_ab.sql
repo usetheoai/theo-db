@@ -65,11 +65,17 @@ BEGIN
 END
 $h0$;
 
+-- Results land in a table so the FINAL GATE can assert on them. Until this revision every block below was a bare
+-- SELECT that printed a number for a human to read — `rc=0` certified that the queries ran, never that the zeros
+-- were zero. That is precisely the "printed and hoped" defect this file's own H0 comment condemns.
+DROP TABLE IF EXISTS h_res;
+CREATE TEMP TABLE h_res (q text PRIMARY KEY, n bigint);
+
 \echo '### M167-H1 (q23): SELECT * WHERE URL LIKE ... ORDER BY EventTime LIMIT 10 — sort-key multiset'
 DROP TABLE IF EXISTS h1_col; DROP TABLE IF EXISTS h1_heap;
 CREATE TEMP TABLE h1_col  AS SELECT EventTime FROM hits      WHERE URL LIKE '%google%' ORDER BY EventTime LIMIT 10;
 CREATE TEMP TABLE h1_heap AS SELECT EventTime FROM hits_heap WHERE URL LIKE '%google%' ORDER BY EventTime LIMIT 10;
-SELECT 'h1_key_mism' q, count(*) n FROM (
+INSERT INTO h_res SELECT 'h1_key_mism', count(*) FROM (
   (SELECT * FROM h1_col EXCEPT ALL SELECT * FROM h1_heap)
   UNION ALL (SELECT * FROM h1_heap EXCEPT ALL SELECT * FROM h1_col)) d;
 
@@ -77,7 +83,7 @@ SELECT 'h1_key_mism' q, count(*) n FROM (
 DROP TABLE IF EXISTS h2_col; DROP TABLE IF EXISTS h2_heap;
 CREATE TEMP TABLE h2_col  AS SELECT EventTime FROM hits      WHERE SearchPhrase <> '' ORDER BY EventTime LIMIT 10;
 CREATE TEMP TABLE h2_heap AS SELECT EventTime FROM hits_heap WHERE SearchPhrase <> '' ORDER BY EventTime LIMIT 10;
-SELECT 'h2_key_mism' q, count(*) n FROM (
+INSERT INTO h_res SELECT 'h2_key_mism', count(*) FROM (
   (SELECT * FROM h2_col EXCEPT ALL SELECT * FROM h2_heap)
   UNION ALL (SELECT * FROM h2_heap EXCEPT ALL SELECT * FROM h2_col)) d;
 
@@ -85,7 +91,7 @@ SELECT 'h2_key_mism' q, count(*) n FROM (
 DROP TABLE IF EXISTS h3_col; DROP TABLE IF EXISTS h3_heap;
 CREATE TEMP TABLE h3_col  AS SELECT SearchPhrase FROM hits      WHERE SearchPhrase <> '' ORDER BY SearchPhrase LIMIT 10;
 CREATE TEMP TABLE h3_heap AS SELECT SearchPhrase FROM hits_heap WHERE SearchPhrase <> '' ORDER BY SearchPhrase LIMIT 10;
-SELECT 'h3_key_mism' q, count(*) n FROM (
+INSERT INTO h_res SELECT 'h3_key_mism', count(*) FROM (
   (SELECT * FROM h3_col EXCEPT ALL SELECT * FROM h3_heap)
   UNION ALL (SELECT * FROM h3_heap EXCEPT ALL SELECT * FROM h3_col)) d;
 
@@ -93,7 +99,7 @@ SELECT 'h3_key_mism' q, count(*) n FROM (
 DROP TABLE IF EXISTS h4_col; DROP TABLE IF EXISTS h4_heap;
 CREATE TEMP TABLE h4_col  AS SELECT EventTime, SearchPhrase FROM hits      WHERE SearchPhrase <> '' ORDER BY EventTime, SearchPhrase LIMIT 10;
 CREATE TEMP TABLE h4_heap AS SELECT EventTime, SearchPhrase FROM hits_heap WHERE SearchPhrase <> '' ORDER BY EventTime, SearchPhrase LIMIT 10;
-SELECT 'h4_key_mism' q, count(*) n FROM (
+INSERT INTO h_res SELECT 'h4_key_mism', count(*) FROM (
   (SELECT * FROM h4_col EXCEPT ALL SELECT * FROM h4_heap)
   UNION ALL (SELECT * FROM h4_heap EXCEPT ALL SELECT * FROM h4_col)) d;
 
@@ -103,28 +109,67 @@ CREATE TEMP TABLE h5_col  AS SELECT CounterID, WatchID, UserID, SearchPhrase FRO
   WHERE SearchPhrase <> '' ORDER BY CounterID, WatchID, UserID LIMIT 20;
 CREATE TEMP TABLE h5_heap AS SELECT CounterID, WatchID, UserID, SearchPhrase FROM hits_heap
   WHERE SearchPhrase <> '' ORDER BY CounterID, WatchID, UserID LIMIT 20;
-SELECT 'h5_fullrow_mism' q, count(*) n FROM (
+INSERT INTO h_res SELECT 'h5_fullrow_mism', count(*) FROM (
   (SELECT * FROM h5_col EXCEPT ALL SELECT * FROM h5_heap)
   UNION ALL (SELECT * FROM h5_heap EXCEPT ALL SELECT * FROM h5_col)) d;
 -- non-vacuity: the FIRST key must tie, or the tie-break was never exercised and this block proves less than it claims
-SELECT 'h5_distinct_firstkey' q, count(DISTINCT CounterID) n FROM h5_col;
-SELECT 'h5_rows' q, count(*) n FROM h5_col;
+INSERT INTO h_res SELECT 'h5_distinct_firstkey', count(DISTINCT CounterID) FROM h5_col;
+INSERT INTO h_res SELECT 'h5_rows', count(*) FROM h5_col;
 
 \echo '### M167-H5b: WIDE projection (all 105 columns), tie-broken -> FULL ROWS compared'
 -- H1 compares only the sort key for q23; the 105-column payload it actually projects was compared by nothing.
 DROP TABLE IF EXISTS h5b_col; DROP TABLE IF EXISTS h5b_heap;
 CREATE TEMP TABLE h5b_col  AS SELECT * FROM hits      WHERE URL LIKE '%google%' ORDER BY CounterID, WatchID, UserID LIMIT 10;
 CREATE TEMP TABLE h5b_heap AS SELECT * FROM hits_heap WHERE URL LIKE '%google%' ORDER BY CounterID, WatchID, UserID LIMIT 10;
-SELECT 'h5b_wide_fullrow_mism' q, count(*) n FROM (
+INSERT INTO h_res SELECT 'h5b_wide_fullrow_mism', count(*) FROM (
   (SELECT * FROM h5b_col EXCEPT ALL SELECT * FROM h5b_heap)
   UNION ALL (SELECT * FROM h5b_heap EXCEPT ALL SELECT * FROM h5b_col)) d;
-SELECT 'h5b_cols' q, count(*) n FROM information_schema.columns WHERE table_name = 'h5b_col';
+INSERT INTO h_res SELECT 'h5b_cols', count(*) FROM information_schema.columns WHERE table_name = 'h5b_col';
 
 \echo '### M167-H6: NEGATIVE CONTROL — the same comparison must FAIL on seeded data'
 DROP TABLE IF EXISTS h6_bad;
 CREATE TEMP TABLE h6_bad AS SELECT CounterID, WatchID + 1 AS WatchID, UserID, SearchPhrase FROM h5_heap;
-SELECT 'h6_control_diff' q, count(*) n FROM (
+INSERT INTO h_res SELECT 'h6_control_diff', count(*) FROM (
   (SELECT * FROM h5_col EXCEPT ALL SELECT * FROM h6_bad)
   UNION ALL (SELECT * FROM h6_bad EXCEPT ALL SELECT * FROM h5_col)) d;
 
-\echo '========== all *_mism MUST be 0; h6_control_diff MUST be > 0; h5_distinct_firstkey MUST be < h5_rows (else the tie-break was not exercised) =========='
+-- POSITIVE CONTROL for the gate itself. Run with `-v gate_selftest=1` and the gate below MUST abort: that is the
+-- only proof it can fail. Seeding here (rather than duplicating the gate in a second file) keeps one copy of the
+-- logic, so the control can never drift away from the thing it controls.
+\if :{?gate_selftest}
+  \echo '### GATE SELF-TEST ARMED: forcing h1_key_mism = 1 — the FINAL GATE MUST abort below'
+  UPDATE h_res SET n = 1 WHERE q = 'h1_key_mism';
+\endif
+
+\echo '### M167 FINAL GATE — machine-checked, not printed'
+SELECT * FROM h_res ORDER BY q;
+DO $gate$
+DECLARE
+  bad text := '';
+  v   bigint;
+BEGIN
+  -- every mismatch counter must be exactly 0
+  bad := bad || coalesce(
+    (SELECT 'non-zero mismatch counters: ' || string_agg(format('%s=%s', q, n), ', ') || '; '
+       FROM h_res WHERE q LIKE '%\_mism' AND n <> 0), '');
+  -- the negative control must be able to fail, or every zero above is meaningless
+  SELECT n INTO v FROM h_res WHERE q = 'h6_control_diff';
+  IF v IS NULL OR v = 0 THEN bad := bad || 'h6_control_diff must be > 0 (the oracle cannot fail); '; END IF;
+  -- the tie-break must actually have been exercised
+  IF (SELECT n FROM h_res WHERE q = 'h5_distinct_firstkey') >= (SELECT n FROM h_res WHERE q = 'h5_rows') THEN
+    bad := bad || 'h5_distinct_firstkey >= h5_rows: the first key did not tie, so the tie-break proved nothing; ';
+  END IF;
+  -- the wide block must really have compared the wide row
+  IF (SELECT n FROM h_res WHERE q = 'h5b_cols') < 100 THEN
+    bad := bad || 'h5b_cols < 100: the wide comparison was not wide; ';
+  END IF;
+  -- every expected assertion must be present (a block silently skipped is not a pass)
+  IF (SELECT count(*) FROM h_res) <> 10 THEN
+    bad := bad || format('expected 10 assertions, found %s; ', (SELECT count(*) FROM h_res));
+  END IF;
+
+  IF bad <> '' THEN RAISE EXCEPTION 'M167 FINAL GATE FAILED: %', bad; END IF;
+  RAISE NOTICE 'M167 FINAL GATE ok: % assertions, all mismatch counters 0, negative control fires, tie-break exercised, wide row wide',
+    (SELECT count(*) FROM h_res);
+END
+$gate$;

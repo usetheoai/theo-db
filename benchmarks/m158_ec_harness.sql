@@ -33,6 +33,9 @@ FROM generate_series(1, 20000) g;
 \echo '========== M158 A/B — each query: (off EXCEPT on) UNION ALL (on EXCEPT off) must be 0 =========='
 
 -- ---- Q1: prime — SELECT * (wide projection), no filter, unique ASC key ----
+DROP TABLE IF EXISTS ec_res;
+CREATE TEMP TABLE ec_res (q text PRIMARY KEY, n bigint);
+
 \echo '### Q1: SELECT * ORDER BY wid LIMIT 10 (prime late-mat target)'
 SET theodb.enable_columnar_late_mat = on;
 EXPLAIN (COSTS OFF) SELECT * FROM t_col ORDER BY wid LIMIT 10;
@@ -41,7 +44,7 @@ SET theodb.enable_columnar_late_mat = off;
 CREATE TEMP TABLE q1_off AS SELECT * FROM t_col ORDER BY wid LIMIT 10;
 SET theodb.enable_columnar_late_mat = on;
 CREATE TEMP TABLE q1_on  AS SELECT * FROM t_col ORDER BY wid LIMIT 10;
-SELECT 'q1_ab_mism' q, count(*) n FROM (
+INSERT INTO ec_res SELECT 'q1_ab_mism', count(*) FROM (
   (SELECT * FROM q1_off EXCEPT SELECT * FROM q1_on)
   UNION ALL
   (SELECT * FROM q1_on  EXCEPT SELECT * FROM q1_off)) d;
@@ -52,7 +55,7 @@ SET theodb.enable_columnar_late_mat = off;
 CREATE TEMP TABLE q1o_off AS SELECT row_number() OVER () ord, wid FROM (SELECT wid FROM t_col ORDER BY wid LIMIT 10) x;
 SET theodb.enable_columnar_late_mat = on;
 CREATE TEMP TABLE q1o_on  AS SELECT row_number() OVER () ord, wid FROM (SELECT wid FROM t_col ORDER BY wid LIMIT 10) x;
-SELECT 'q1_order_mism' q, count(*) n FROM q1o_off o JOIN q1o_on n USING (ord) WHERE o.wid <> n.wid;
+INSERT INTO ec_res SELECT 'q1_order_mism', count(*) FROM q1o_off o JOIN q1o_on n USING (ord) WHERE o.wid <> n.wid;
 
 -- ---- Q2: numeric zone predicate + late-mat ----
 \echo '### Q2: SELECT * WHERE v >= 3 ORDER BY wid LIMIT 10'
@@ -61,7 +64,7 @@ CREATE TEMP TABLE q2_off AS SELECT * FROM t_col WHERE v >= 3 ORDER BY wid LIMIT 
 SET theodb.enable_columnar_late_mat = on;
 EXPLAIN (COSTS OFF) SELECT * FROM t_col WHERE v >= 3 ORDER BY wid LIMIT 10;
 CREATE TEMP TABLE q2_on  AS SELECT * FROM t_col WHERE v >= 3 ORDER BY wid LIMIT 10;
-SELECT 'q2_ab_mism' q, count(*) n FROM (
+INSERT INTO ec_res SELECT 'q2_ab_mism', count(*) FROM (
   (SELECT * FROM q2_off EXCEPT SELECT * FROM q2_on)
   UNION ALL
   (SELECT * FROM q2_on  EXCEPT SELECT * FROM q2_off)) d;
@@ -73,7 +76,7 @@ CREATE TEMP TABLE q3_off AS SELECT * FROM t_col WHERE s LIKE '%foo%' ORDER BY wi
 SET theodb.enable_columnar_late_mat = on;
 EXPLAIN (COSTS OFF) SELECT * FROM t_col WHERE s LIKE '%foo%' ORDER BY wid LIMIT 10;
 CREATE TEMP TABLE q3_on  AS SELECT * FROM t_col WHERE s LIKE '%foo%' ORDER BY wid LIMIT 10;
-SELECT 'q3_ab_mism' q, count(*) n FROM (
+INSERT INTO ec_res SELECT 'q3_ab_mism', count(*) FROM (
   (SELECT * FROM q3_off EXCEPT SELECT * FROM q3_on)
   UNION ALL
   (SELECT * FROM q3_on  EXCEPT SELECT * FROM q3_off)) d;
@@ -85,7 +88,7 @@ CREATE TEMP TABLE q4_off AS SELECT * FROM t_col ORDER BY wid DESC LIMIT 10;
 SET theodb.enable_columnar_late_mat = on;
 EXPLAIN (COSTS OFF) SELECT * FROM t_col ORDER BY wid DESC LIMIT 10;
 CREATE TEMP TABLE q4_on  AS SELECT * FROM t_col ORDER BY wid DESC LIMIT 10;
-SELECT 'q4_ab_mism' q, count(*) n FROM (
+INSERT INTO ec_res SELECT 'q4_ab_mism', count(*) FROM (
   (SELECT * FROM q4_off EXCEPT SELECT * FROM q4_on)
   UNION ALL
   (SELECT * FROM q4_on  EXCEPT SELECT * FROM q4_off)) d;
@@ -97,7 +100,7 @@ CREATE TEMP TABLE q5_off AS SELECT wid, cid, f FROM t_col WHERE cid > 0 ORDER BY
 SET theodb.enable_columnar_late_mat = on;
 EXPLAIN (COSTS OFF) SELECT wid, cid, f FROM t_col WHERE cid > 0 ORDER BY wid LIMIT 15;
 CREATE TEMP TABLE q5_on  AS SELECT wid, cid, f FROM t_col WHERE cid > 0 ORDER BY wid LIMIT 15;
-SELECT 'q5_ab_mism' q, count(*) n FROM (
+INSERT INTO ec_res SELECT 'q5_ab_mism', count(*) FROM (
   (SELECT * FROM q5_off EXCEPT SELECT * FROM q5_on)
   UNION ALL
   (SELECT * FROM q5_on  EXCEPT SELECT * FROM q5_off)) d;
@@ -114,7 +117,7 @@ CREATE TEMP TABLE q6_off AS SELECT wid, bc FROM t_bc ORDER BY wid LIMIT 12;
 SET theodb.enable_columnar_late_mat = on;
 EXPLAIN (COSTS OFF) SELECT wid, bc FROM t_bc ORDER BY wid LIMIT 12;
 CREATE TEMP TABLE q6_on  AS SELECT wid, bc FROM t_bc ORDER BY wid LIMIT 12;
-SELECT 'q6_ab_mism' q, count(*) n FROM (
+INSERT INTO ec_res SELECT 'q6_ab_mism', count(*) FROM (
   (SELECT * FROM q6_off EXCEPT SELECT * FROM q6_on)
   UNION ALL
   (SELECT * FROM q6_on  EXCEPT SELECT * FROM q6_off)) d;
@@ -123,7 +126,11 @@ SELECT 'q6_ab_mism' q, count(*) n FROM (
 -- Under a linguistic collation (this DB is en_US.UTF-8), a TEXT sort key MUST decline to the native plan (byte-order
 -- ≠ collation order). Under COLLATE "C" (byte order) it MUST swap. EXPLAIN-only (text keys have ties → A/B set-oracle
 -- is not tie-safe; the guard LOGIC is what we assert here; byte-identity of text OUTPUT columns is proven by Q3/Q6).
-\echo '### Q7: text sort key under DB collation (en_US, linguistic) MUST show Sort (declined to native)'
+\echo '### Q7: text sort key under the DATABASE DEFAULT collation — outcome depends on the cluster, so this'
+\echo '###     block asserts NOTHING by itself. On a byte-order cluster (datcollate=C + libc) it ROUTES; on a'
+\echo '###     linguistic one it declines. The environment-independent assertions are M167-C2 / D3 / D3b.'
+\echo '###     (The old text said "MUST show Sort", a premise false on this C cluster — the committed log'
+\echo '###      showed that MUST next to a Custom Scan, i.e. a violated assertion nobody was asserting.)'
 SET theodb.enable_columnar_late_mat = on;
 EXPLAIN (COSTS OFF) SELECT * FROM t_col ORDER BY s LIMIT 10;
 \echo '### Q8: BARE text sort key on a COLLATE "C" column MUST show Custom Scan (admitted — byte order == PG C order)'
@@ -136,7 +143,7 @@ SET theodb.enable_columnar_late_mat = off;
 CREATE TEMP TABLE q8_off AS SELECT * FROM t_cc ORDER BY sc LIMIT 10;
 SET theodb.enable_columnar_late_mat = on;
 CREATE TEMP TABLE q8_on  AS SELECT * FROM t_cc ORDER BY sc LIMIT 10;
-SELECT 'q8_ab_mism' q, count(*) n FROM (
+INSERT INTO ec_res SELECT 'q8_ab_mism', count(*) FROM (
   (SELECT * FROM q8_off EXCEPT SELECT * FROM q8_on)
   UNION ALL
   (SELECT * FROM q8_on  EXCEPT SELECT * FROM q8_off)) d;
@@ -156,7 +163,7 @@ SET theodb.enable_columnar_late_mat = off;
 CREATE TEMP TABLE m167a_off AS SELECT * FROM t_col WHERE s LIKE '%foo%' ORDER BY wid LIMIT 10;
 SET theodb.enable_columnar_late_mat = on;
 CREATE TEMP TABLE m167a_on  AS SELECT * FROM t_col WHERE s LIKE '%foo%' ORDER BY wid LIMIT 10;
-SELECT 'm167a_ab_mism' q, count(*) n FROM (
+INSERT INTO ec_res SELECT 'm167a_ab_mism', count(*) FROM (
   (SELECT * FROM m167a_off EXCEPT SELECT * FROM m167a_on)
   UNION ALL
   (SELECT * FROM m167a_on  EXCEPT SELECT * FROM m167a_off)) d;
@@ -169,7 +176,7 @@ SET theodb.enable_columnar_late_mat = off;
 CREATE TEMP TABLE m167b_off AS SELECT row_number() OVER () ord, s FROM (SELECT s FROM t_col WHERE s <> '' ORDER BY wid LIMIT 10) x;
 SET theodb.enable_columnar_late_mat = on;
 CREATE TEMP TABLE m167b_on  AS SELECT row_number() OVER () ord, s FROM (SELECT s FROM t_col WHERE s <> '' ORDER BY wid LIMIT 10) x;
-SELECT 'm167b_order_mism' q, count(*) n FROM m167b_off o JOIN m167b_on n USING (ord) WHERE o.s IS DISTINCT FROM n.s;
+INSERT INTO ec_res SELECT 'm167b_order_mism', count(*) FROM m167b_off o JOIN m167b_on n USING (ord) WHERE o.s IS DISTINCT FROM n.s;
 
 -- ---- M167-C: q25 analog — TEXT sort key carrying the DATABASE DEFAULT collation (OID 100) ----
 -- The expectation is CLUSTER-DEPENDENT by design: byte-order is a property of the collation, so this block
@@ -193,7 +200,7 @@ SET theodb.enable_columnar_late_mat = off;
 CREATE TEMP TABLE m167c_off AS SELECT wid, sd FROM t_dc ORDER BY sd LIMIT 10;
 SET theodb.enable_columnar_late_mat = on;
 CREATE TEMP TABLE m167c_on  AS SELECT wid, sd FROM t_dc ORDER BY sd LIMIT 10;
-SELECT 'm167c_ab_mism' q, count(*) n FROM (
+INSERT INTO ec_res SELECT 'm167c_ab_mism', count(*) FROM (
   (SELECT * FROM m167c_off EXCEPT SELECT * FROM m167c_on)
   UNION ALL
   (SELECT * FROM m167c_on  EXCEPT SELECT * FROM m167c_off)) d;
@@ -212,7 +219,7 @@ SET theodb.enable_columnar_late_mat = off;
 CREATE TEMP TABLE m167d_off AS SELECT row_number() OVER () ord, wid, v FROM (SELECT wid, v FROM t_col ORDER BY v, wid LIMIT 10) x;
 SET theodb.enable_columnar_late_mat = on;
 CREATE TEMP TABLE m167d_on  AS SELECT row_number() OVER () ord, wid, v FROM (SELECT wid, v FROM t_col ORDER BY v, wid LIMIT 10) x;
-SELECT 'm167d_order_mism' q, count(*) n FROM m167d_off o JOIN m167d_on n USING (ord) WHERE o.wid <> n.wid OR o.v <> n.v;
+INSERT INTO ec_res SELECT 'm167d_order_mism', count(*) FROM m167d_off o JOIN m167d_on n USING (ord) WHERE o.wid <> n.wid OR o.v <> n.v;
 
 -- ---- M167-D2: multi-key where the SECOND key is TEXT (q26's real shape: timestamp + text) ----
 -- The two mechanisms M167 added (multi-key wire format; byte-order collation predicate) intersect ONLY here.
@@ -225,7 +232,7 @@ SET theodb.enable_columnar_late_mat = off;
 CREATE TEMP TABLE m167d2_off AS SELECT row_number() OVER () ord, wid, sd FROM (SELECT wid, sd FROM t_dc2 ORDER BY v, sd LIMIT 10) x;
 SET theodb.enable_columnar_late_mat = on;
 CREATE TEMP TABLE m167d2_on  AS SELECT row_number() OVER () ord, wid, sd FROM (SELECT wid, sd FROM t_dc2 ORDER BY v, sd LIMIT 10) x;
-SELECT 'm167d2_order_mism' q, count(*) n FROM m167d2_off o JOIN m167d2_on n USING (ord) WHERE o.wid <> n.wid OR o.sd IS DISTINCT FROM n.sd;
+INSERT INTO ec_res SELECT 'm167d2_order_mism', count(*) FROM m167d2_off o JOIN m167d2_on n USING (ord) WHERE o.wid <> n.wid OR o.sd IS DISTINCT FROM n.sd;
 
 -- ---- M167-D3: a guard-failing key ANYWHERE in the list must decline the WHOLE swap (fail-closed per key) ----
 \echo '### M167-D3: ORDER BY v, sd COLLATE "en_US.utf8" MUST decline (second key not byte-order)'
@@ -264,9 +271,34 @@ INSERT INTO t_seed SELECT CASE WHEN wid = 19999 THEN -1 ELSE wid END, cid, v, s,
 SET theodb.enable_columnar_late_mat = on;
 CREATE TEMP TABLE m167e_a AS SELECT * FROM t_col  ORDER BY wid LIMIT 10;
 CREATE TEMP TABLE m167e_b AS SELECT * FROM t_seed ORDER BY wid LIMIT 10;
-SELECT 'm167e_control_diff' q, count(*) n FROM (
+INSERT INTO ec_res SELECT 'm167e_control_diff', count(*) FROM (
   (SELECT * FROM m167e_a EXCEPT SELECT * FROM m167e_b)
   UNION ALL
   (SELECT * FROM m167e_b EXCEPT SELECT * FROM m167e_a)) d;
 
-\echo '========== ALL *_ab_mism / *_order_mism above MUST be 0, AND m167e_control_diff MUST be > 0 (an oracle that cannot fail is not an oracle) =========='
+\echo '### FINAL GATE — machine-checked, not printed'
+SELECT * FROM ec_res ORDER BY q;
+-- POSITIVE CONTROL: run with `-v gate_selftest=1`; the gate MUST abort. One copy of the logic, so the control
+-- cannot drift from what it controls.
+\if :{?gate_selftest}
+  \echo '### GATE SELF-TEST ARMED: forcing q1_ab_mism = 1 — the FINAL GATE MUST abort below'
+  UPDATE ec_res SET n = 1 WHERE q = 'q1_ab_mism';
+\endif
+DO $gate$
+DECLARE bad text := '';
+BEGIN
+  bad := bad || coalesce(
+    (SELECT 'non-zero mismatch counters: ' || string_agg(format('%s=%s', q, n), ', ') || '; '
+       FROM ec_res WHERE (q LIKE '%\_ab\_mism' OR q LIKE '%\_order\_mism') AND n <> 0), '');
+  IF coalesce((SELECT n FROM ec_res WHERE q = 'm167e_control_diff'), 0) = 0 THEN
+    bad := bad || 'm167e_control_diff must be > 0 (an oracle that cannot fail is not an oracle); ';
+  END IF;
+  IF (SELECT count(*) FROM ec_res) <> 14 THEN
+    bad := bad || format('expected 14 assertions, found %s (a block was silently skipped); ',
+                         (SELECT count(*) FROM ec_res));
+  END IF;
+  IF bad <> '' THEN RAISE EXCEPTION 'M167 EC FINAL GATE FAILED: %', bad; END IF;
+  RAISE NOTICE 'M167 EC FINAL GATE ok: % assertions, all mismatch counters 0, negative control fires',
+    (SELECT count(*) FROM ec_res);
+END
+$gate$;
