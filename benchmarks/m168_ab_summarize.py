@@ -80,7 +80,20 @@ def sign_test_p(wins, n):
 
 def _reject_fallback(path, problems):
     """Um braço 'streaming' que degradou para o eager em silêncio alimentaria a tabela publicada como se fosse
-    streaming. Agora que o fail-open existe, o log tem de ser rejeitado se ele disparou."""
+    streaming. Agora que o fail-open existe, o log tem de ser rejeitado se ele disparou.
+
+    NÃO-VACUIDADE PRIMEIRO. O sinal que este guard procura (`theodb_decode_batch:`) só é emitido quando
+    `THEODB_ADMIT_TRACE=1` está no ambiente do POSTMASTER — e essa variável é lida pelo backend, que a herda do
+    postmaster, então ela some sem erro algum se a coleta reiniciar o servidor sem ela. Um review demonstrou por
+    construção que, com o canal desligado, este arquivo imprimia "ok" e saía 0: o guard ficava cego e a tabela
+    saía publicada como se ele tivesse verificado alguma coisa. Se não há NENHUM trace de streaming no log, o
+    guard não pode afirmar nada — e dizer isso é a única resposta honesta."""
+    if "theodb_decode_batch_stream:" not in open(path, errors="replace").read():
+        problems.append(
+            "nenhum `theodb_decode_batch_stream:` no log — o canal de trace estava desligado "
+            "(THEODB_ADMIT_TRACE ausente do ambiente do postmaster), então o guard de degradação é CEGO: "
+            "ele não conseguiria distinguir um braço streaming íntegro de um que caiu no eager")
+        return
     in_stream_arm = False
     for line in open(path, errors="replace"):
         if "ARM=stream" in line:

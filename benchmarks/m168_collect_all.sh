@@ -54,6 +54,7 @@ run paired-ab-stream          "$BENCH/m168_stream_ab.sql"   "" 2
 run pending-rows              "$BENCH/m168_pending_rows.sql" "" 1
 run large-k                   "$BENCH/m168_large_k.sql"     "" 1
 run window-probe              "$BENCH/m168_window_probe.sql" "" 1
+run cancel-oracle             "$BENCH/m168_cancel_oracle.sql" "" 1
 run inversion-narrow          "$BENCH/m168_inversion_narrow.sql" "" 1
 run inversion-wide-small-k    "$BENCH/m168_inversion.sql"    "" 1
 echo

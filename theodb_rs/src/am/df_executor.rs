@@ -53,35 +53,41 @@ impl Drop for HeldInterrupts {
     }
 }
 
-/// Abre uma janela de interrupção no meio de um `HeldInterrupts` e a fecha de novo.
+/// Há um cancelamento/terminação pendente? **Só LÊ os flags — nunca chama `ProcessInterrupts`.**
 ///
-/// O hold existe para que uma interrupção não caia dentro do executor do DataFusion, que não tem nada a ver com a
-/// máquina de erro do PostgreSQL. Mas com o M168 ele passou a cobrir a leitura de TODAS as páginas — antes o
-/// decode acontecia fora dele. Sem um safe-point, um scan de 100M linhas ignora Ctrl-C, `statement_timeout` e
-/// `pg_terminate_backend` do começo ao fim (achado de review).
+/// O hold de interrupções existe para que uma interrupção não caia dentro do executor do DataFusion, que não tem
+/// nada a ver com a máquina de erro do PostgreSQL. Mas com o M168 ele passou a cobrir a leitura de TODAS as
+/// páginas — antes o decode acontecia fora dele. Sem um safe-point, um scan de 100M linhas ignora Ctrl-C,
+/// `statement_timeout` e `pg_terminate_backend` do começo ao fim (achado de review).
 ///
-/// A fronteira de chunk-group é o lugar certo: nenhum estado do DataFusion está a meio caminho, e um longjmp
-/// daqui vira panic pelo caminho que a revisão de pgrx traçou e verificou limpo (o `HeldInterrupts` é RAII e é
-/// liberado no unwind).
+/// A PRIMEIRA TENTATIVA DE SAFE-POINT ESTAVA ERRADA, e do jeito mais caro: ela abria o holdoff e chamava
+/// `pgrx::check_for_interrupts!()` no meio do `block_on`, sob a alegação — escrita no comentário — de que "um
+/// longjmp daqui vira panic". **Isso é falso no pgrx 0.19.** O macro expande para a extern crua
+/// (`pgrx-pg-sys-0.19.0/src/submodules/elog.rs:587`: `if InterruptPending != 0 { ProcessInterrupts() }`), e o
+/// único lugar que instala um `sigsetjmp` e converte o longjmp do PG em panic é `pg_guard_ffi_boundary`
+/// (`submodules/ffi.rs`), que **não** embrulha chamadas comuns de `pg_sys`. O `ereport(ERROR)` de dentro do
+/// `ProcessInterrupts` faz `siglongjmp` direto para o `PG_exception_stack` do PostgreSQL, **pulando todos os
+/// frames Rust no caminho** — runtime tokio vivo, `SessionContext`, plano físico, as k linhas retidas do TopK, o
+/// `RecordBatch` em voo e o `relation_close`.
 ///
-/// SAFETY: só pode ser chamada de dentro de um `HeldInterrupts` vivo, na thread do backend.
-unsafe fn interrupt_safepoint() {
-    // O re-incremento é RAII, não a linha seguinte. Se `check_for_interrupts!` disparar (ele existe para isso),
-    // um `InterruptHoldoffCount += 1` posicional seria PULADO pelo unwind, enquanto o `Drop` do `HeldInterrupts`
-    // externo ainda decrementaria — o contador cairia 2 tendo subido 1, e um `InterruptHoldoffCount` com
-    // underflow desabilita o processamento de interrupções pelo resto da vida do backend. Com o guard, a janela
-    // fecha em qualquer caminho de saída.
-    struct Rehold;
-    impl Drop for Rehold {
-        fn drop(&mut self) {
-            unsafe { pg_sys::InterruptHoldoffCount += 1 };
-        }
-    }
-    if pg_sys::InterruptHoldoffCount > 0 {
-        pg_sys::InterruptHoldoffCount -= 1;
-    }
-    let _rehold = Rehold;
-    pgrx::check_for_interrupts!();
+/// O projeto já tinha registrado exatamente este risco e o fechado, e o achado está no repositório desde o M98:
+/// `am/datafusion_probe.rs:10-14` diz que "um cancel disparando no meio do `block_on` daria longjmp direto PARA
+/// ALÉM do runtime tokio vivo — nunca rodando os `Drop`s do Rust que o silenciam, vazando-o / rasgando o estado
+/// do PG". O safe-point do M168 reabriu esse risco (achado de review, verificado na fonte vendorizada).
+///
+/// O consertado: aqui só se **lê** o estado. Quem vê `true` devolve um `Err` do DataFusion, o stream/plano/runtime
+/// desenrolam pelo caminho normal do Rust, e só **depois** do `drop(held)` — com todo o estado Rust já liberado —
+/// `run_df_collect_streaming` chama `check_for_interrupts!()` para que o PostgreSQL levante o cancelamento de
+/// verdade. O lugar do safe-point estava certo; o mecanismo, não.
+///
+/// SAFETY: leitura de globais do backend; só pode ser chamada na thread do backend.
+unsafe fn interrupt_is_pending() -> bool {
+    // `QueryCancelPending`/`ProcDiePending` são os dois que `ProcessInterrupts` transforma em erro. `InterruptPending`
+    // sozinho também cobre eventos benignos (barreiras, notificações), que não devem abortar um scan — mas ele é o
+    // flag que o PG arma primeiro, então testar os três é o que casa com a semântica de "vai virar ERROR".
+    // Os três são `sig_atomic_t` (i32), não `bool` — comparar com 0 é o que o C faz.
+    pg_sys::InterruptPending != 0
+        && (pg_sys::QueryCancelPending != 0 || pg_sys::ProcDiePending != 0)
 }
 
 /// Map the decoded columnar columns (name, atttypid, per-row stored bytes) to an Arrow schema + arrays. The stored
@@ -930,12 +936,21 @@ impl futures::Stream for ChunkGroupBatchStream {
         // chunk-group é exatamente o "per-batch interrupt safe-point" que o cabeçalho deste módulo promete —
         // antes do M168 ela não existia porque não havia batches. Achado de review.
         //
-        // A afirmação de afinidade vem PRIMEIRO: o safepoint escreve num global do PostgreSQL sem sincronização, e
-        // numa thread estranha essa escrita aconteceria antes de a asserção do ADR-2 poder disparar. A filosofia
-        // deste módulo é assever a invariante, não confiar nela — então ela é asseverada antes de tocar o global.
+        // A afirmação de afinidade vem PRIMEIRO: o safe-point lê globais do PostgreSQL sem sincronização, e numa
+        // thread estranha essa leitura aconteceria antes de a asserção do ADR-2 poder disparar. A filosofia deste
+        // módulo é assever a invariante, não confiar nela — então ela é asseverada antes de tocar o global.
+        //
+        // O cancelamento vira `Err`, não `ereport`: ver `interrupt_is_pending`. Devolver o erro aqui faz o
+        // stream, o plano e o runtime tokio desenrolarem pelos `Drop`s do Rust; o PostgreSQL só levanta o
+        // cancelamento depois, em `run_df_collect_streaming`, com tudo isso já liberado.
         unsafe {
             self.inner.assert_owning_thread("ChunkGroupBatchStream::poll_next");
-            interrupt_safepoint();
+            if interrupt_is_pending() {
+                self.done = true;
+                return Poll::Ready(Some(Err(DataFusionError::Execution(
+                    "theodb: query canceled".into(),
+                ))));
+            }
         }
         let preds = std::mem::take(&mut self.predicates);
         let skip = self.skip;
@@ -1156,15 +1171,26 @@ pub(super) unsafe fn run_columnar_topk(
             df.sort(order_stream)?.limit(0, Some(k))
         }) {
             Ok(batches) => return rows_from_batches(&batches, proj_cols),
-            Err(e) => {
-                // INCONDICIONAL. Um reviewer notou que esconder isto atrás do flag de trace neutraliza, a
-                // jusante, um guard escrito para falhar alto (`columnar partition executed twice`), e deixa o
-                // usuário sem sinal de que a consulta acabou de trocar de perfil de memória e de latência. É
-                // evento raro (uma vez por consulta, só quando a pool estoura), então o custo é zero no caminho
-                // feliz. Vai para o log do servidor, não para o cliente.
+            // TIPADO, não catch-all. O fail-open existe por UM motivo: a retenção do `TopK` cresce com `k`
+            // enquanto a pool do streaming é constante, então um `k` grande pode estourar o que o caminho eager
+            // servia. Esse caso é `ResourcesExhausted` e nada mais.
+            //
+            // Engolir qualquer `Err` era mais largo que o argumento que o justifica, e um review mostrou duas
+            // consequências concretas: (a) neutraliza a jusante um guard escrito para falhar ALTO — o
+            // `columnar partition executed twice`, que vira uma linha de log e uma re-execução silenciosa; e
+            // (b) com o safe-point corrigido, o cancelamento chega aqui como `Execution`, e engoli-lo faria a
+            // consulta ignorar `statement_timeout`/Ctrl-C **e ainda refazer o scan inteiro pelo caminho eager**.
+            Err(DataFusionError::ResourcesExhausted(e)) => {
+                // INCONDICIONAL. Esconder isto atrás do flag de trace deixaria o usuário sem sinal de que a
+                // consulta acabou de trocar de perfil de memória e de latência. É evento raro (uma vez por
+                // consulta, só quando a pool estoura), então o custo é zero no caminho feliz. Vai para o log do
+                // servidor, não para o cliente.
                 pgrx::log!("theodb_topk_stream_fallback: {e}");
                 // cai para o caminho eager abaixo, que é o comportamento pré-M168
             }
+            // Erro de integridade de dados, cancelamento, guard de re-execução: não são o caso que o fail-open
+            // cobre. Sobem.
+            Err(e) => return Err(format!("df_executor: datafusion: {e}")),
         }
     }
 
@@ -1183,11 +1209,6 @@ pub(super) unsafe fn run_columnar_topk(
     rows_from_batches(&batches, proj_cols)
 }
 
-/// Emit the surviving rows: one Datum per output column (in target order), located in the result batch by NAME
-/// (the schema carries the decoded projection; filter/sort/limit preserve it). Only ≤ k rows are materialized.
-///
-/// Shared by the eager and the M168 streaming path so both produce byte-identical output by construction rather
-/// than by two copies staying in agreement.
 /// M168 — the streaming twin of `run_df_collect`: registers a lazy `PartitionStream` instead of one materialized
 /// batch, so `SortExec: TopK(fetch=k)` pulls chunk-groups and keeps only k rows.
 ///
@@ -1196,7 +1217,11 @@ pub(super) unsafe fn run_columnar_topk(
 unsafe fn run_df_collect_streaming<F>(
     part: Arc<ColumnarPartition>,
     build: F,
-) -> Result<Vec<RecordBatch>, String>
+// Devolve o `DataFusionError` **tipado**, não uma `String`. O chamador precisa distinguir "a pool estourou" de
+// "os dados estão corrompidos" / "a consulta foi cancelada" para decidir se o fail-open se aplica, e casar
+// substring de mensagem de erro para isso seria exatamente o que a Regra 8 proíbe (erros explícitos e tipados).
+// A conversão para `String` acontece no chamador, depois da classificação.
+) -> Result<Vec<RecordBatch>, DataFusionError>
 where
     F: FnOnce(
             datafusion::dataframe::DataFrame,
@@ -1206,7 +1231,7 @@ where
 {
     let rt = tokio::runtime::Builder::new_current_thread()
         .build()
-        .map_err(|e| format!("df_executor: tokio runtime: {e}"))?;
+        .map_err(|e| DataFusionError::Execution(format!("df_executor: tokio runtime: {e}")))?;
     let work_mem_bytes = (pg_sys::work_mem.max(64) as usize) * 1024;
     // O caminho eager dimensionava `max(work_mem, 2*batch) + 64MB`. Aqui não há batch gigante — esse é o ponto —
     // mas o TopK ainda retém k linhas, e o guard do M167 limita bytes FÍSICOS (comprimidos), não a pegada Arrow.
@@ -1241,6 +1266,11 @@ where
         build(df)?.collect().await
     });
     drop(held);
+    // AQUI, e não no meio do `block_on`. Neste ponto o runtime tokio, o `SessionContext`, o plano físico, as k
+    // linhas retidas do TopK e o `RecordBatch` em voo já foram liberados pelos `Drop`s do Rust — e o holdoff
+    // já caiu. Só agora é seguro deixar o PostgreSQL fazer o `siglongjmp` dele: não há mais frame Rust vivo para
+    // ele pular. Ver `interrupt_is_pending` para o porquê de o safe-point não poder fazer isto lá dentro.
+    pgrx::check_for_interrupts!();
     if super::columnar_agg::admit_trace_enabled() {
         pgrx::warning!(
             "theodb_topk_pool: peak_reserved={} reserved_at_end={} pool_limit={}",
@@ -1249,9 +1279,17 @@ where
             pool_bytes
         );
     }
-    out.map_err(|e| format!("df_executor: datafusion: {e}"))
+    out
 }
 
+/// Emit the surviving rows: one Datum per output column (in target order), located in the result batch by NAME
+/// (the schema carries the decoded projection; filter/sort/limit preserve it). Only ≤ k rows are materialized.
+///
+/// Shared by the eager and the M168 streaming path so both produce byte-identical output by construction rather
+/// than by two copies staying in agreement.
+///
+/// SAFETY: constructs PG Datums from Arrow values; must run on the backend thread, inside a memory context that
+/// outlives the caller's use of the returned Datums.
 unsafe fn rows_from_batches(
     batches: &[RecordBatch],
     proj_cols: &[(String, u32)],

@@ -18,15 +18,31 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   deixaram de precisar de memória proporcional ao tamanho da tabela. Medido a 1 milhão de linhas × 105 colunas, o
   **maior bloco decodificado de uma vez** num `SELECT *` caiu de **772 MiB para 17,9 MiB (43×)** — abaixo do `work_mem` da sessão, e não mais acima
   dele (#215, #218). O consumo total do processo é maior que esse bloco e foi medido em parte: a retenção interna
-  do ordenador ficou entre 0,8 e 2,4 MB. A tabela passa a ser decodificada em partes, uma de cada vez, em vez de inteira de uma vez.
+  do ordenador ficou entre 0,83 e 2,41 MB. A tabela passa a ser decodificada em partes, uma de cada vez, em vez de inteira de uma vez.
   Resultado byte a byte idêntico ao anterior. No tempo, o `SELECT *` largo ficou **~12% mais rápido** depois que
   o cache aquece — o caminho novo venceu **12 de 12 comparações pareadas** (teste do sinal, p = 0,0005), inclusive
   nas seis em que ele correu na posição desfavorecida. Nas consultas de projeção estreita **não há efeito**
-  (4 a 8 vitórias em 12, p = 0,39): onde há pouca memória a economizar, não há tempo a ganhar. A medição foi feita
+  (7/12, 7/12 e 6/12 vitórias; p = 0,77, 0,77 e 1,00): onde há pouca memória a economizar, não há tempo a
+  ganhar. A medição foi feita
   numa máquina compartilhada, então o número merece replicação; o desenho pareado é o que o torna defensável
   apesar disso.
   Reversível com `theodb.enable_columnar_topk_stream = off`. Método, números por consulta e ressalvas
   em `docs/benchmarks/m168-streaming-topk-verdict.md`.
+
+### Fixed
+- **Cancelar uma consulta colunar longa volta a funcionar, e a conexão sobrevive a isso.** Ao passar a decodificar
+  por partes, o top-k colunar passou a segurar a leitura de todas as páginas dentro de uma janela em que o
+  PostgreSQL não processa interrupções — na prática, um `Ctrl-C`, um `statement_timeout` ou um
+  `pg_terminate_backend` seriam ignorados até o fim do scan. A primeira tentativa de corrigir isso interrompia a
+  consulta no ponto certo, mas de um jeito que abandonava estruturas internas ainda vivas: a consulta era
+  cancelada e **todas as consultas analíticas seguintes daquela conexão passavam a falhar**, com memória retida
+  até a conexão cair. Agora o cancelamento é reconhecido entre partes, o trabalho interno é encerrado
+  ordenadamente e só então o PostgreSQL levanta o cancelamento — a conexão continua servindo normalmente. Coberto
+  por `benchmarks/m168_cancel_oracle.sql`, que cancela uma consulta de verdade e depois verifica que a sessão
+  sobreviveu.
+- **O recuo automático deixou de mascarar erros que não são de memória.** Ele foi escrito para um caso — o
+  orçamento de memória não caber — mas capturava qualquer falha, incluindo erro de integridade de dados e o
+  próprio cancelamento acima. Agora só o estouro de memória aciona o recuo; o resto é reportado.
 
 ### Changed
 - **Recuo automático quando o caminho novo não cabe na memória:** se o top-k colunar por partes não couber no

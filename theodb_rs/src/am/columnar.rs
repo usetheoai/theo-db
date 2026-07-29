@@ -974,6 +974,22 @@ pub(crate) unsafe fn plan_columnar_scan(
     rel: pg_sys::Relation,
     projection: Option<&[usize]>,
 ) -> Result<ScanPlan, String> {
+    // A guarda de linhas pendentes vive no CHAMADOR (`open_streaming_source`), e foi exatamente essa distância
+    // que produziu o BLOCKER da rodada anterior: o `plan_columnar_scan` foi extraído do MEIO do
+    // `decode_columns_v2`, deixando a checagem lá no topo — e o streaming passou a não ver as escritas da própria
+    // transação. Torná-la "chamável em vez de copiável" resolveu aquele caso e não impede o próximo: um segundo
+    // chamador que esqueça a checagem reintroduz o mesmo defeito em silêncio (achado de review).
+    //
+    // Este `debug_assert` prende a obrigação no callee. É `debug_assert` e não `assert` de propósito: em release
+    // o custo de um `SPI`/scan de catálogo por plano não se justifica para uma invariante que os builds de teste
+    // (e a CI cassert) já exercitam — mas em debug qualquer chamador novo que pule a guarda falha alto, aqui,
+    // em vez de devolver linhas silenciosamente incompletas.
+    debug_assert!(
+        !has_unflushed_pending(rel),
+        "plan_columnar_scan chamado com linhas pendentes não descarregadas: o plano seria construído sobre \
+         stripes que não contêm as escritas da própria transação. O chamador tem de declinar para o caminho \
+         eager (ver open_streaming_source)."
+    );
     let tupdesc = (*rel).rd_att;
     let natts = (*tupdesc).natts as usize;
     let cols = (0..natts).map(|i| coldesc(tupdesc, i)).collect::<Result<Vec<_>, _>>()?;
