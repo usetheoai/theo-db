@@ -189,8 +189,11 @@ fn sort_collation_is_byte_order(coll: u32) -> bool {
 
 /// Is the decline trace on? Split out so callers can skip building an expensive message when it is off — the
 /// `format!` would otherwise allocate on every decline even with tracing disabled (review finding L4).
+///
+/// `pub(super)` so the sibling executor can gate its own measurement trace on the same switch: one env var
+/// controls all of this subsystem's diagnostics rather than each site inventing its own.
 #[inline]
-fn admit_trace_enabled() -> bool {
+pub(super) fn admit_trace_enabled() -> bool {
     static TRACE_ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *TRACE_ON.get_or_init(|| std::env::var("THEODB_ADMIT_TRACE").as_deref() == Ok("1"))
 }

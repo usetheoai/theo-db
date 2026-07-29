@@ -583,6 +583,18 @@ where
     // declines to the native plan instead of being admitted here.)
     let work_mem_bytes = (pg_sys::work_mem.max(64) as usize) * 1024;
     let batch_bytes = batch.get_array_memory_size();
+    // M167 § 6 left the peak of the decoded batch UNMEASURED: `VmRSS` is dominated by `shared_buffers` mapped into
+    // every backend, so per-PID sampling never isolated it. The number was in-process the whole time — this is the
+    // one line that exposes it. It is the O(N) quantity the M167 DoD bullet 2b is about, so it is also the baseline
+    // any claim of "the path is now O(k)" has to be measured against, by the same instrument.
+    if super::columnar_agg::admit_trace_enabled() {
+        pgrx::warning!(
+            "theodb_decode_batch: rows={} bytes={} work_mem_bytes={}",
+            batch.num_rows(),
+            batch_bytes,
+            work_mem_bytes
+        );
+    }
     let pool_bytes = work_mem_bytes.max(batch_bytes.saturating_mul(2)) + 64 * 1024 * 1024;
     let held = HeldInterrupts::hold();
     let out: Result<Vec<RecordBatch>, DataFusionError> = rt.block_on(async move {
