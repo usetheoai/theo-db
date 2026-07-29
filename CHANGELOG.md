@@ -14,15 +14,16 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Roadmap amendado: adicionado **M169 — Bugs de escala a 100M** (`/roadmap-feature scale-bugs-100m`). Recorte: só as falhas duras (`byte array offset overflow` do q20, OOM da corrida, confirmar q23); os três `statement_timeout` ficam fora por não serem defeitos. 1 bilhão declarado fora de escopo até 100M passar limpo (#219 não relacionado).
 - **Top-k colunar com memória limitada:** consultas "as N primeiras linhas por uma coluna" sobre tabelas colunares
   deixaram de precisar de memória proporcional ao tamanho da tabela. Medido a 1 milhão de linhas × 105 colunas, o
   **maior bloco decodificado de uma vez** num `SELECT *` caiu de **772 MiB para 17,9 MiB (43×)** — abaixo do `work_mem` da sessão, e não mais acima
   dele (#215, #218). O consumo total do processo é maior que esse bloco e foi medido em parte: a retenção interna
   do ordenador ficou entre 0,83 e 2,41 MB. A tabela passa a ser decodificada em partes, uma de cada vez, em vez de inteira de uma vez.
-  Resultado byte a byte idêntico ao anterior. No tempo, o `SELECT *` largo ficou **~17% mais rápido** depois que
-  o cache aquece — juntando **seis coletas sobre quatro binários**, o caminho novo venceu **48 de 48 comparações
+  Resultado byte a byte idêntico ao anterior. No tempo, o `SELECT *` largo ficou **~18% mais rápido** depois que
+  o cache aquece — juntando **cinco coletas sobre cinco binários**, o caminho novo venceu **60 de 60 comparações
   pareadas**, sem uma única exceção. Nas consultas de projeção estreita a troca é o inverso e pequena: elas
-  ficam **~1 a 3% mais lentas** (as três juntas, 59 vitórias em 144, p = 0,04) em troca de 22× a 32× menos
+  ficam **~2% mais lentas** (as três juntas, 73 vitórias em 180, p = 0,01) em troca de 22× a 32× menos
   memória — nenhuma das três atinge significância sozinha, e o agrupamento foi feito depois de ver o dado, então
   o número é indicativo, não conclusivo. A medição foi feita
   numa máquina compartilhada, então o número merece replicação; o desenho pareado é o que o torna defensável

@@ -71,22 +71,27 @@ fn theodb_columnar_chunks_scanned() -> i64 {
     SKIP_STATS.with(|s| s.get().1 as i64)
 }
 
-/// M168 — chunk groups the streaming top-k has delivered since the last reset (wiring metric, pillar c).
+/// M168 — how many times the streaming top-k advanced its cursor in the most recent scan (wiring metric,
+/// pillar c). Auto-zeroed by `ColumnarChunkStream::new`, like `SKIP_STATS` at `columnar_scan_begin`.
 ///
-/// The deterministic half of the cancellation oracle: a full 1M-row scan delivers 100; a scan cut short by a
-/// cancellation delivers fewer. Unlike a wall-clock comparison, this is immune to machine speed, cache state and
-/// box load — which is what `benchmarks/m168_cancel_oracle.sql` needs to tell "cancelled mid-scan" from
-/// "cancelled at the end" without a single-sample timing claim.
+/// **It counts `next()` CALLS, not chunk-groups**, and the two differ in both directions (a review caught the doc
+/// claiming otherwise):
+///   * the terminal call that returns `Ok(None)` counts but delivers nothing, and the schema probe counts too —
+///     so a complete 1M-row scan reads **101**, not 100;
+///   * one call can consume a whole run of zone-map-pruned chunk-groups (`decode_one_chunk_group` returns
+///     `Ok(false)` → `continue`) and still count 1 — so under pushed-down predicates it UNDER-counts the groups
+///     actually traversed.
+///
+/// Neither hurts its purpose. It is the deterministic half of the cancellation oracle — a scan cut short advances
+/// the cursor far fewer times than a complete one, and the gate compares the two as a RATIO, so the constant +1
+/// cancels. Unlike a wall-clock comparison it is immune to machine speed, cache state and box load, which is what
+/// `benchmarks/m168_cancel_oracle.sql` needs to tell "cancelled mid-scan" from "cancelled at the end" without a
+/// single-sample timing claim.
 #[pg_extern]
 fn theodb_columnar_stream_chunk_groups() -> i64 {
     STREAM_CG_COUNT.with(|c| c.get() as i64)
 }
 
-/// M168 — zero the streaming chunk-group counter (call before the statement you want to measure).
-#[pg_extern]
-fn theodb_columnar_stream_reset() {
-    STREAM_CG_COUNT.with(|c| c.set(0));
-}
 
 // ===========================================================================================================
 // M99 Phase C2 — MVCC via a heap catalog (`columnar.stripe`), not the metapage (ADR-0042 D2)
@@ -1126,6 +1131,12 @@ impl ColumnarChunkStream {
     }
 
     pub(crate) fn new(rel: pg_sys::Relation, plan: ScanPlan) -> Self {
+        // Zera o contador AQUI, e não por uma chamada SQL do consumidor. É o mesmo desenho do `SKIP_STATS` do
+        // M150, que se auto-reseta em `columnar_scan_begin` — um contador que depende de alguém lembrar de
+        // resetá-lo é um contador que um dia reporta o scan anterior. Isto também apaga a necessidade do
+        // `theodb_columnar_stream_reset()`, que existia só para compensar a ausência deste zero (achado de
+        // review; parsimony ladder degrau 1 — a função não precisava existir).
+        STREAM_CG_COUNT.with(|c| c.set(0));
         Self {
             plan,
             rel,
@@ -1145,11 +1156,11 @@ impl ColumnarChunkStream {
         skip: bool,
     ) -> Result<Option<Vec<(String, u32, DecodedColumn)>>, String> {
         self.affinity.assert_owned("ColumnarChunkStream::next");
-        // M168 — quantos chunk-groups este scan streaming ENTREGOU. É o sinal determinístico de que um
-        // cancelamento cortou o scan no meio: um scan completo de 1M linhas entrega 100, um cancelado entrega
-        // menos. O oráculo de cancelamento dizia gatear "a contagem" e na verdade gateava tempo de relógio
-        // (achado de review) — e uma medida de relógio de amostra única viola o R3 de `discover-phd-rigor.md`,
-        // além de ficar sujeita a carga da box. Este contador é imune a velocidade de máquina, cache e ruído.
+        // M168 — quantas vezes este scan streaming AVANÇOU o cursor. Ver a doc de
+        // `theodb_columnar_stream_chunk_groups` para por que isto NÃO é "chunk-groups entregues": a chamada
+        // terminal e a sonda de schema contam (scan completo de 1M lê 101, não 100), e uma chamada pode consumir
+        // vários chunk-groups podados pelo zone-map contando 1. O gate compara C1 e C4 como RAZÃO, então o +1
+        // constante se cancela.
         STREAM_CG_COUNT.with(|c| c.set(c.get() + 1));
         let n = self.plan.wanted.len();
         let ctx = CgDecodeCtx {

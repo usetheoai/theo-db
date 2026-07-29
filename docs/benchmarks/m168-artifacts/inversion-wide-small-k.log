@@ -1,7 +1,7 @@
-=== inversion-wide-small-k (execução 1/1) start 2026-07-29T16:52:33+00:00 ===
-so_md5=ba2af99482a45455777ba193fb8b6fb9
+=== inversion-wide-small-k (execução 1/1) start 2026-07-29T19:17:47+00:00 ===
+so_md5=2497c0f5b585e00651df79f0e6eed907
 so_path=/root/.pgrx/18.4/pgrx-install/lib/postgresql/theodb_rs.so
-postmaster=2026-07-29 16:38:45.911977+00
+postmaster=2026-07-29 19:14:26.43512+00
 SET
 SET
 SET
@@ -137,4 +137,4 @@ SELECT 1000
        1000
 (1 row)
 
-=== inversion-wide-small-k (execução 1/1) rc=0 end 2026-07-29T16:52:42+00:00 ===
+=== inversion-wide-small-k (execução 1/1) rc=0 end 2026-07-29T19:17:57+00:00 ===

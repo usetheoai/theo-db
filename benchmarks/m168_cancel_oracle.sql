@@ -29,7 +29,7 @@
 -- `m168_peak.sql` e `m168_large_k.sql` **rodam até o fim**. Nenhum cancela nada.
 --
 -- O QUE ESTE ARQUIVO TESTA, em duas partes: (a) que o cancelamento é notado NO MEIO do scan, não no fim — é o
--- gate de tempo do C4, e sem ele o arquivo passa com o safe-point removido; e (b) que a sessão continua servindo
+-- gate de contagem do C4, e sem ele o arquivo passa com o safe-point removido; e (b) que a sessão continua servindo
 -- consultas depois, nos dois caminhos.
 --
 -- REQUER: tabela colunar `hits` com ≥ 2 chunk-groups (o safe-point roda na fronteira entre eles).
@@ -81,9 +81,11 @@ $c0$;
 -- `check_for_interrupts!()` que vem depois do `drop(held)` levanta o 57014 assim mesmo. `c1_outcome='canceled'`,
 -- `c2=100`, `c3=100` — passa. O gate não distingue "cancelou NO MEIO" de "cancelou NO FIM".
 --
--- A evidência diferencial é a CONTAGEM DE CHUNK-GROUPS entregues: um scan completo de 1M linhas entrega 100
--- (CHUNK_GROUP_ROWS=10.000); um cortado entrega menos. `theodb_columnar_stream_chunk_groups()` a expõe, e o gate
--- final compara C1 contra C4. Uma versão anterior gateava TEMPO DE RELÓGIO enquanto o comentário afirmava gatear
+-- A evidência diferencial é quantas vezes o stream AVANÇOU O CURSOR: um scan completo de 1M linhas avança 101
+-- (100 chunk-groups + a chamada terminal e a sonda de schema); um cortado avança menos.
+-- `theodb_columnar_stream_chunk_groups()` expõe o número — ele conta CHAMADAS, não chunk-groups, e a doc da
+-- função explica as duas direções em que os dois diferem. O gate compara C1 contra C4 como RAZÃO, então o +1
+-- constante se cancela. Uma versão anterior gateava TEMPO DE RELÓGIO enquanto o comentário afirmava gatear
 -- a contagem (achado de review) — e uma amostra única de relógio, sujeita a carga da box e a estado de cache,
 -- viola o R3 de `discover-phd-rigor.md` para alegação de tempo. A contagem não depende de nada disso.
 --
@@ -96,7 +98,6 @@ SET statement_timeout = '150ms';
 \set ON_ERROR_STOP off
 -- ESPERADO: erro 57014 (query_canceled). Um resultado aqui significa que a consulta terminou antes do timeout —
 -- o gate abaixo trata isso como teste INCONCLUSIVO, não como sucesso.
-SELECT theodb_columnar_stream_reset();
 DO $c1$
 DECLARE t0 timestamptz := clock_timestamp();
 BEGIN
@@ -174,11 +175,11 @@ $c3$;
 \set ON_ERROR_STOP on
 SET theodb.enable_columnar_topk_stream = on;
 
-\echo '### M168-C4: quanto tempo o scan COMPLETO leva? — a referência do sinal diferencial'
--- Sem esta medida, "c1 levou 200ms" não significa nada: pode ser que o scan inteiro leve 200ms. A referência é o
--- MESMO trabalho sem timeout. O gate compara os dois.
+\echo '### M168-C4: quantos avanços de cursor o scan COMPLETO faz? — a referência do sinal diferencial'
+-- Sem esta referência, "c1 avançou 16 vezes" não significa nada: pode ser que o scan inteiro avance 16. A
+-- referência é o MESMO trabalho sem timeout. O gate compara os dois como razão — o que também faz o +1 constante
+-- (chamada terminal + sonda de schema) se cancelar.
 SET theodb.enable_columnar_topk_stream = on;
-SELECT theodb_columnar_stream_reset();
 DO $c4$
 DECLARE t0 timestamptz := clock_timestamp(); plan text;
 BEGIN
@@ -207,8 +208,8 @@ SELECT * FROM cancel_res ORDER BY q;
   -- exemplo plausível de estado meio-desmontado).
   UPDATE cancel_res SET v = 'ERRO:XX000:sessao inutilizavel apos cancelamento'
    WHERE q = 'c2_rows_after_cancel';
-  -- Braço 2 — safe-point AUSENTE: o cancelamento só é notado depois do scan completo, então o tempo decorrido
-  -- de C1 iguala o do scan inteiro. Sem esta asserção o arquivo passa com o safe-point removido, que é o
+  -- Braço 2 — safe-point AUSENTE: o cancelamento só é notado depois do scan completo, então C1 avança o cursor
+  -- tantas vezes quanto o scan inteiro. Sem esta asserção o arquivo passa com o safe-point removido, que é o
   -- contra-exemplo que uma revisão construiu. Simular por dado é o único jeito de exercitar o ramo sem
   -- desinstalar o safe-point e reconstruir por 14 minutos.
   UPDATE cancel_res SET v = (SELECT v FROM cancel_res WHERE q = 'c4_chunk_groups')
@@ -236,6 +237,20 @@ BEGIN
   ELSIF c1cg IS NULL OR c4cg IS NULL THEN
     bad := bad || 'falta a contagem de chunk-groups (c1/c4): sem ela este arquivo passa mesmo com o safe-point '
                || 'removido; ';
+  ELSIF c1cg::numeric < 2 THEN
+    -- PISO, e ele fecha um regime em que este arquivo passava sem exercitar nada (achado de review): se o
+    -- cancelamento cai ANTES do primeiro poll — planning + `plan_columnar_scan` (que lê header e diretório de
+    -- todos os stripes) + a sonda de schema estourando os 150ms numa box fria —, então `c1cg = 0`, a razão
+    -- `0 > c4/2` é falsa, e o gate imprimia "cortou no MEIO" sem o laço do stream ter rodado uma vez sequer.
+    -- Passava COM ou SEM o safe-point instalado.
+    --
+    -- Isto é mais grave do que parece porque `c1cg >= 1` é a ÚNICA evidência neste arquivo de que o braço
+    -- STREAMING rodou em C1: as sondas EXPLAIN não distinguem streaming de eager (a GUC é lida em tempo de
+    -- EXECUÇÃO dentro de `run_columnar_topk`, não no plano — o próprio C3 demonstra, pondo a GUC em `off` e
+    -- ainda assim asserindo `theodb_columnar_agg`).
+    bad := bad || format('c1_chunk_groups=%s (<2): o cancelamento chegou antes do laço do stream, então nada do '
+                      || 'caminho streaming foi exercitado — INCONCLUSIVO, não aprovado. Aumente o '
+                      || 'statement_timeout; ', c1cg);
   ELSIF c4cg::numeric < 4 THEN
     -- INCONCLUSIVO, não sucesso: com poucos chunk-groups não há onde cortar no meio.
     bad := bad || format('c4_chunk_groups=%s (<4): o scan tem chunk-groups demais poucos para distinguir "cortou '

@@ -3063,6 +3063,64 @@ bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan s�
 
 ---
 
+## M169 — [ ] Bugs de escala a 100M (a escala do ClickBench oficial) — correção, não performance
+
+> **Da medição do M162 (2026-07-26):** a 100M linhas — que é a escala do ClickBench oficial (99,99M) — apenas
+> **19 das 43** consultas completam. Cinco falham de vez e a própria corrida foi OOM-killed em 24/43, enquanto o
+> ClickHouse serve as 43 em sub-segundo a 10 s. O gap típico por classe **não** piora muito (8–26× contra 7,54× a
+> 1M); o que quebra é outra coisa. **Mandato do owner (2026-07-29): a performance atual basta; bugs de escala não.**
+
+**Objective:** eliminar as falhas DURAS a 100M. Não é trabalho de performance — o critério é *a consulta
+termina*, não *a consulta é rápida*. Recorte deliberado: as três consultas que dão `statement_timeout` (q17, q21,
+q22) **ficam fora** — elas não são defeitos, são consultas que não roteiam e caem no executor de linha do
+PostgreSQL, e o owner declarou performance suficiente.
+
+O alvo é o **q20** (`SELECT COUNT(*) … WHERE URL LIKE '%google%'`), que estoura `byte array offset overflow`. A
+causa está confirmada no código: o caminho agregado chama `decode_to_batch` → `decode_columns_v2`, que decodifica
+a **relação inteira** numa única array Arrow, e a coluna é `DataType::Utf8` (`df_executor.rs:301`) — offsets
+`i32`, teto de 2 GB por array. **A correção já existe no repositório:** o M168 construiu `ColumnarChunkStream` +
+`plan_columnar_scan` para decodificar por chunk-group de 10.000 linhas no caminho do top-k; uma array de 10.000
+URLs nunca chega perto de 2 GB. Falta ligar a mesma máquina ao caminho agregado — o que ataca também o OOM que
+matou a corrida.
+
+**Definition of done:**
+
+- [ ] **Baseline primeiro.** Re-medir o ClickBench 100M no binário atual e publicar quantas das 43 completam. Isto
+      vem antes do conserto de propósito: descobre se o **q23** (`SELECT * … ORDER BY EventTime LIMIT 10` — que é
+      *literalmente* a consulta do M168, cujo maior bloco caiu de 772 MiB para 17,9 MiB) já foi resolvido por
+      M167+M168. Sem baseline, consertar o q20 e reportar progresso seria alegação sem lastro.
+- [ ] **q20 completa sem erro** a 100M. O caminho agregado decodifica por chunk-group; nenhuma array Arrow excede
+      o teto de `i32`. Marcado como resolvido só com o artefato da corrida, não com o raciocínio.
+- [ ] **Zero consultas falham com ERRO** a 100M (`byte array offset overflow`, OOM de backend, conexão derrubada).
+      Os `statement_timeout` de q17/q21/q22 **não contam** como falha para este DoD, e o artefato os declara
+      explicitamente como limitação conhecida de performance — com a nota de que a 1B ficariam 10× piores.
+- [ ] **A corrida completa as 43** sem ser OOM-killed no meio. O M162 morreu em 24/43 deixando 19 nunca executadas;
+      esse número tem de ir a zero.
+- [ ] **A/B byte-idêntico (`diverged=0`) sobre a suíte a 1M ANTES de subir para 100M**, mais o harness de cobertura
+      por tipo do M163. O caminho agregado atende 35 das 43 hoje: um conserto que reduza memória mas altere um byte
+      é regressão pior que o bug que ele corrige.
+- [ ] CHANGELOG `[Unreleased]` + artefato em `docs/benchmarks/`, com a ressalva de caixa (abaixo) em toda alegação.
+
+**Dependencies:** M167 `[x]`. **Não-roadmap:** reusa `ColumnarChunkStream` / `plan_columnar_scan` do spike M168
+(em revisão, não mergeado). O primeiro item do DoD não depende disso; o conserto do q20 depende.
+
+**Risks:** (a) **ligar o streaming ao caminho agregado pode alterar resultado ou perfil das consultas que HOJE
+funcionam** — daí o gate A/B a 1M vir antes da medição a 100M, e não depois; (b) **a caixa não é a canônica** — o
+owner escolheu droplet DigitalOcean equivalente (32 GB / 16 vCPU) em vez da `c6a.4xlarge`, então toda alegação tem
+de dizer "caixa equivalente, não canônica"; sem isso o número entra em comparação direta com a tabela publicada do
+ClickBench, que é o falso-verde que o M168 passou dez rodadas de review combatendo. Parte dos OOMs do M162 pode
+ser da caixa de 15 GB e não nossa — o baseline separa as duas coisas.
+
+**Fora de escopo, declarado:** 1 bilhão de registros. A 100M já falham 5 de 43 e o TSV de origem seria ~700 GB;
+rodar 1B agora produz relatório de falhas, não benchmark. Fica para o milestone seguinte, condicionado a 100M
+passar limpo.
+
+**Prior art / referências:** `docs/benchmarks/m162-100m-gap-verdict.md` (as 5 falhas, 19/43, a caixa de 15 GB);
+`docs/benchmarks/clickbench-fresh-vs-clickhouse-2026-07-27.md` (o baseline a 1M); `docs/benchmarks/m168-streaming-topk-verdict.md`
+(a máquina de decode por chunk-group e o 43,2× de memória no q23); acervo `references/arrow-rs`, `references/datafusion`.
+
+---
+
 ## Sequência e paralelismo
 
 ```
