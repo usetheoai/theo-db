@@ -54,6 +54,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   numa projeção estreita com `LIMIT 400000` o caminho **novo serve e o anterior falha**. O recuo fica como defesa
   contra um caso não observado, e passa a ser registrado no log do servidor sempre que acontecer. Detalhes em
   `docs/benchmarks/m168-streaming-topk-verdict.md` § 3.5.
+- **Os números de desempenho do top-k colunar foram revisados para baixo durante a revisão, e a metodologia
+  mudou.** Quem leu uma versão anterior desta entrada viu "~18% mais rápido" e "as consultas de projeção estreita
+  ficam ~2% mais lentas (p = 0,014)". Os dois números não sobreviveram à auditoria: o primeiro vinha da coleta
+  mais favorável de seis (o valor agregado das seis é **13,6%**), e o segundo tratava cada comparação como
+  independente quando a unidade de replicação é a **coleta** — corrigido, o custo das projeções estreitas fica no
+  limite da resolução da medição, com quatro das seis coletas mostrando custo e duas mostrando ganho. Nenhum
+  número de **memória** mudou (43×/32×/22×/32× em seis coletas, idênticos ao dígito). Método, as sete versões
+  desta seção e o que permanece não medido em `docs/benchmarks/m168-streaming-topk-verdict.md`.
 - **Diagnóstico:** a auditoria automática de código morto não detecta métodos Rust sem chamador dentro do próprio
   crate, então "nenhum achado" no relatório dela significa "o detector não achou", não "não há". Quatro métodos e
   dois campos escritos durante o M168 e nunca usados foram encontrados por conferência manual e removidos. A
