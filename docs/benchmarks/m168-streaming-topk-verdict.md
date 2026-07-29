@@ -94,24 +94,33 @@ O summarizer passa a usar **teste do sinal exato, bilateral**, sobre os pares (i
 | q25 | 1,061 · 1,029 | 3 / 12 | 0,15 | sem efeito |
 | q26 | 1,009 · 1,050 | 6 / 12 | 1,00 | sem efeito |
 
-**O q24 regride, e isso não é ruído de uma coleta.** Nesta coleta o teste do sinal cruzou o limiar (2/12,
-p = 0,039) na direção desfavorável, e olhando as três coletas a razão do q24 **nunca ficou abaixo de 1 em média**:
+**O q24 nesta coleta, e por que ele NÃO sustenta uma alegação de regressão.** Sob a regra declarada (mediana das
+razões pareadas), q24 através das três coletas:
 
-| Coleta | binário | sinal | p | razões |
-|---|---|---|---|---|
-| A | `e010375381ae` | 7/12 | 0,77 | 1,035 · 1,024 |
-| B | `1eaec080b901` | 6/12 | 1,00 | 1,038 · 0,957 |
-| **C (esta)** | `7a242fcae496` | **2/12** | **0,039** | 1,000 · 1,054 |
+| Coleta | binário | mediana | efeito | sinal | p |
+|---|---|---|---|---|---|
+| A | `e010375381ae` | 0,998 | **−0,2%** | 7/12 | 0,77 |
+| B | `1eaec080b901` | 1,001 | +0,1% | 6/12 | 1,00 |
+| **C (esta)** | `7a242fcae496` | 1,054 | **+5,4%** | **2/12** | **0,039** |
+| **pool (36 pares)** | — | **1,023** | +2,3% | **15/36** | **0,41** |
 
-A leitura honesta: **há um custo pequeno e consistente na projeção estreita — da ordem de 2 a 5%** — que as duas
-primeiras coletas não tinham amostra para separar do ruído e esta separou. Não é regressão introduzida pela
-rodada 8: o que ela acrescentou ao caminho quente são duas leituras de `i32` por chunk-group (200 por consulta) e
-um lookup em `thread_local` por plano. O custo é estrutural do desenho — 100 batches em vez de 1 significa 100
-travessias de plano do DataFusion, e onde não há memória a economizar essa travessia não se paga.
+**Uma versão anterior desta seção afirmou "custo pequeno e consistente" e "a razão nunca ficou abaixo de 1 em
+média". As duas coisas são falsas**, e o dado acima é o mesmo que eu tinha ao escrevê-las: a coleta A dá −0,2%,
+e o efeito aparece em **uma** das três coletas, não consistentemente. Pior, há **multiplicidade não corrigida**:
+são 4 consultas × 3 coletas = **12 testes de sinal**, e sob a hipótese nula esperam-se **0,6** resultados a
+p ≤ 0,05. Um resultado a p = 0,039 é exatamente o que o acaso produz. No pool das 36 comparações não há efeito
+(15/36, p = 0,41).
 
-Isso **não** anula o resultado: q24, q25 e q26 economizam 31,6×, 21,9× e 31,6× de memória cada. Mas a frase
-"não há efeito nas projeções estreitas", que as coletas A e B sustentavam, deixou de ser sustentável — e trocá-la
-por "há um custo de alguns por cento" é a diferença entre reportar e vender.
+Eu tinha acabado de corrigir o erro oposto — "sem efeito" quando faltava poder estatístico — e sobrecorrigi para
+uma regressão que o conjunto não sustenta (achado de review). **A leitura defensável é:** as consultas de
+projeção estreita não mostram efeito de throughput que este desenho consiga separar do ruído; a coleta C sugere
+um custo da ordem de poucos por cento, e uma coleta com mais pares resolveria — hoje é `UNBENCHMARKED`.
+
+A hipótese mecânica (100 travessias de plano do DataFusion em vez de 1, sem memória a economizar em troca) é
+**plausível e não medida** — ela prediz custo nas três estreitas, e a coleta C mostra +5,4% / +4,1% / +2,0% em
+q24/q25/q26, o que é consistente mas longe de prova. Fica marcada como hipótese, não como explicação.
+
+E nada disso toca o resultado principal: q24, q25 e q26 economizam **31,6× / 21,9× / 31,6×** de memória.
 
 **A coluna de razões acima é `mediana(stream) / mediana(eager)` por execução** — é o que o SQL do harness computa
 (`m168_stream_ab.sql:72`), e **não** é a mesma estatística da regra de agregação fixada logo abaixo. Rotular as
@@ -148,8 +157,8 @@ O que **se** moveu foi a leitura das projeções estreitas, e para pior — ver 
 diziam "sem efeito"; a terceira, com o mesmo desenho, detectou o custo. Uma conclusão que muda quando a amostra
 cresce não era conclusão: era ausência de poder estatístico descrita como ausência de efeito.
 
-Nas três consultas estreitas **não há efeito pareado**. Faz sentido mecanicamente: o ganho do q23 acompanha o
-regime em que a memória também cai 43×, e onde há pouco a economizar não há o que ganhar.
+O ganho do q23 acompanha o regime em que a memória também cai 43×; onde há pouco a economizar, não há o que
+ganhar — e é aí que a travessia extra pode até custar (ver o quadro do q24 acima).
 
 **Ressalva de ambiente, que continua valendo:** esta box hospeda o runner de CI e três serviços, e a dispersão
 subiu entre coletas. O teste pareado é robusto a isso *por construção* — é para isso que ele existe — mas uma
@@ -339,7 +348,7 @@ antes do timeout, em vez de contar isso como sucesso) e tem self-test de gate.
 | Asserção | Resultado | Artefato |
 |---|---|---|
 | `c1_outcome` — a consulta foi mesmo cancelada | **`canceled`** (SQLSTATE 57014) | `cancel-oracle.log` |
-| **`c1_elapsed_ms` vs `c4_full_scan_ms`** — cortou no MEIO? | **190 ms contra 757 ms** | `cancel-oracle.log` |
+| **`c1_elapsed_ms` vs `c4_full_scan_ms`** — cortou no MEIO? | **174 ms contra 998 ms** | `cancel-oracle.log` |
 | `c2_rows_after_cancel` — a sessão serve top-k **streaming** depois | **100** (trace `theodb_topk_pool` prova que o caminho streaming rodou) | `cancel-oracle.log` |
 | `c3_eager_rows_after_cancel` — e o caminho **eager** também | **100** (trace `theodb_decode_batch`) | `cancel-oracle.log` |
 | Controle positivo, **dois braços** | ambos abortam | `cancel-oracle-selftest.log` |

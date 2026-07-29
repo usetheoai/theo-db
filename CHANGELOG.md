@@ -22,9 +22,9 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   Resultado byte a byte idêntico ao anterior. No tempo, o `SELECT *` largo ficou **~12% mais rápido** depois que
   o cache aquece — o caminho novo venceu **12 de 12 comparações pareadas** (teste do sinal, p = 0,0005), e esse
   sinal se repetiu em **cinco coletas independentes sobre três binários**. Nas consultas de projeção estreita a
-  troca é o inverso e menor: elas **ficam ~2 a 5% mais lentas** (medido de forma detectável numa das coletas,
-  2/12 vitórias, p = 0,039) em troca de 22× a 32× menos memória — onde há pouca memória a economizar, a
-  travessia extra não se paga. A medição foi feita
+  troca é neutra no tempo: **nenhum efeito separável do ruído** (juntando as três coletas, 15 vitórias em 36
+  comparações, p = 0,41), em troca de 22× a 32× menos memória. Uma das três coletas sugeriu um custo de poucos
+  por cento nessas consultas; não se sustentou no conjunto e segue em aberto. A medição foi feita
   numa máquina compartilhada, então o número merece replicação; o desenho pareado é o que o torna defensável
   apesar disso.
   Reversível com `theodb.enable_columnar_topk_stream = off`. Método, números por consulta e ressalvas
@@ -34,11 +34,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - **Cancelar uma consulta colunar longa volta a funcionar, e a conexão sobrevive a isso.** Ao passar a decodificar
   por partes, o top-k colunar passou a segurar a leitura de todas as páginas dentro de uma janela em que o
   PostgreSQL não processa interrupções — na prática, um `Ctrl-C`, um `statement_timeout` ou um
-  `pg_terminate_backend` seriam ignorados até o fim do scan. A primeira tentativa de corrigir isso interrompia a
-  consulta no ponto certo, mas de um jeito que abandonava estruturas internas ainda vivas: a consulta era
-  cancelada e **todas as consultas analíticas seguintes daquela conexão passavam a falhar**, com memória retida
-  até a conexão cair. Agora o cancelamento é reconhecido entre partes, o trabalho interno é encerrado
-  ordenadamente e só então o PostgreSQL levanta o cancelamento — a conexão continua servindo normalmente. Coberto
+  `pg_terminate_backend` seriam ignorados até o fim do scan. Agora o cancelamento é reconhecido **entre partes**,
+  o trabalho interno é encerrado ordenadamente e só então o PostgreSQL levanta o cancelamento. Coberto
   por `benchmarks/m168_cancel_oracle.sql`, que cancela uma consulta de verdade e depois verifica que a sessão
   sobreviveu.
 - **O recuo automático deixou de mascarar erros que não são de memória.** Ele foi escrito para um caso — o

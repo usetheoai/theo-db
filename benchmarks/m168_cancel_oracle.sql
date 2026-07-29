@@ -1,24 +1,36 @@
 -- M168 — o oráculo de CANCELAMENTO do top-k streaming.
 --
--- WHY. Uma revisão de pgrx encontrou o BLOCKER da série: o safe-point de interrupção do M168 chamava
--- `pgrx::check_for_interrupts!()` de dentro do `block_on`, sob a alegação — escrita no comentário — de que "um
--- longjmp daqui vira panic". É FALSO no pgrx 0.19: o macro expande para a extern crua
--- (`pgrx-pg-sys-0.19.0/src/submodules/elog.rs:587`), e nada instala um `sigsetjmp` ali. O `ereport(ERROR)` de
--- dentro do `ProcessInterrupts` faz `siglongjmp` direto para o `PG_exception_stack`, PULANDO todos os frames Rust
--- vivos: runtime tokio, `SessionContext`, plano físico, as k linhas do TopK, o `RecordBatch` em voo, o
--- `relation_close`.
+-- WHY. Ao decodificar por partes, o M168 fez o holdoff de interrupções cobrir a leitura de TODAS as páginas —
+-- antes o decode acontecia fora dele. Sem um safe-point, um scan longo ignora `Ctrl-C`, `statement_timeout`,
+-- `transaction_timeout` e `pg_terminate_backend` do começo ao fim. O safe-point existe para fechar isso, e este
+-- arquivo é o oráculo dele.
 --
--- O projeto já tinha registrado e fechado esse risco no M98 (`am/datafusion_probe.rs:10-14`). O M168 o reabriu.
+-- ATENÇÃO AO QUE ESTE COMENTÁRIO NÃO DIZ MAIS. Uma versão anterior afirmava que chamar
+-- `pgrx::check_for_interrupts!()` dentro do `block_on` causaria um `siglongjmp` pulando os frames Rust vivos, e
+-- citava `elog.rs:587` como prova. **Isso é falso, e a própria linha citada o refuta:** ela expande para
+-- `$crate::ProcessInterrupts()`, que é o wrapper reescrito por `#[pg_guard]` — o único bloco `extern "C-unwind"`
+-- do `pgrx-pg-sys-0.19.0` carrega esse atributo (`src/include/pg18.rs:35462`, com `ProcessInterrupts` dentro em
+-- `:39525`), o macro reescreve cada função para `pg_guard_ffi_boundary` (`pgrx-macros/rewriter.rs:184-193`), e
+-- `ffi.rs:85` declara que a função protege **toda** extern gerada. O PG `ERROR` vira `panic_any` e os frames Rust
+-- DESENROLAM. Este repositório já dizia isso em `am/build.rs:466` e `Cargo.toml:85-86`.
 --
--- E NENHUM oráculo desta série podia pegá-lo, por uma razão estrutural: `m168_pending_rows.sql`,
--- `m168_stream_ab.sql`, `m168_peak.sql` e `m168_large_k.sql` **rodam até o fim**. Nenhum cancela nada. O caminho
--- mais perigoso do milestone era o único sem oráculo.
+-- Corrigir só a prosa do verdict e deixar a alegação falsa aqui seria pior que inútil: este é o arquivo que um
+-- revisor futuro abre. E o dano seria concreto — há cinco `check_for_interrupts!()` vivos em laços de
+-- `CREATE INDEX` (`am/build.rs:420,474,487,812`; `bench_symqg.rs:76`) que o racional falso condenaria em bloco,
+-- deixando `CREATE INDEX` incancelável.
 --
--- O SINTOMA QUE ESTE ARQUIVO PROCURA não é o erro de cancelamento — esse é esperado e correto. É o que sobra
--- DEPOIS dele. Com o defeito, o `EnterRuntimeGuard` do tokio não roda seu `Drop`, o thread-local fica `Entered`,
--- e o PRÓXIMO `block_on` da mesma conexão bate em
--- `panic!("Cannot start a runtime from within a runtime")`. Como o backend é por conexão, toda consulta
--- DataFusion seguinte daquela sessão morre. Então o teste é: cancele, e depois PROVE que a sessão continua viva.
+-- POR QUE O DESENHO É LER-E-DEVOLVER-`Err`, ENTÃO. Por duas razões verdadeiras, e bastam: (1) não desenrolar por
+-- dentro de frames async de terceiros — um panic no `poll_next` atravessa o executor do tokio e o plano do
+-- DataFusion, código cuja exception-safety não auditamos; devolver `Err` faz o DataFusion desmontar o plano pelo
+-- caminho que ele mesmo testa; (2) ponto de cancelamento determinístico. Isso torna o desenho mais fácil de
+-- auditar; **não** torna o anterior inseguro.
+--
+-- NENHUM outro oráculo desta série exercita este caminho: `m168_pending_rows.sql`, `m168_stream_ab.sql`,
+-- `m168_peak.sql` e `m168_large_k.sql` **rodam até o fim**. Nenhum cancela nada.
+--
+-- O QUE ESTE ARQUIVO TESTA, em duas partes: (a) que o cancelamento é notado NO MEIO do scan, não no fim — é o
+-- gate de tempo do C4, e sem ele o arquivo passa com o safe-point removido; e (b) que a sessão continua servindo
+-- consultas depois, nos dois caminhos.
 --
 -- REQUER: tabela colunar `hits` com ≥ 2 chunk-groups (o safe-point roda na fronteira entre eles).
 \set ON_ERROR_STOP on
@@ -34,10 +46,14 @@ CREATE TEMP TABLE cancel_res (q text, v text);
 -- Ela envolvia o top-k em `count(*) FROM (...) s` / `PERFORM * FROM (...) s`, e essa forma **DECLINA**: o pai do
 -- Sort vira um Aggregate, não um Limit, e o admit emite `topk_parent_not_limit`. Medido:
 --
---   EXPLAIN CREATE TABLE x AS SELECT … LIMIT 100      ->  Limit -> Custom Scan (theodb_columnar_agg)   [ROTEIA]
---   EXPLAIN SELECT count(*) FROM (SELECT … LIMIT 100) ->  Aggregate -> Limit -> Sort                   [NATIVO]
+--   CTAS:      Limit -> Custom Scan (theodb_columnar_agg)                                  [caminho do top-k]
+--   count(*):  Aggregate -> Limit -> Sort -> Result -> Custom Scan (theodb_columnar_project)  [NÃO é o top-k]
 --
--- Ou seja: os passos de sobrevivência rodavam o plano NATIVO do PostgreSQL, que não tem runtime tokio algum, e
+-- (planos completos em `docs/benchmarks/m168-artifacts/routing-shapes.log`)
+--
+-- A forma count(*) não roda "o plano nativo" puro — ela ainda usa o `theodb_columnar_project` do M149. O que ela
+-- não engaja é o caminho do TOP-K, que é o único que instancia runtime tokio e DataFusion
+-- (`columnar_project.rs` não tem uma referência sequer a nenhum dos dois). Por isso os passos de sobrevivência
 -- teriam passado idênticos COM o defeito presente. É a lição do M161 pela enésima vez — um A/B que não confirma
 -- o plano é falso-verde. Daqui em diante todo passo usa CTAS (que preserva o Limit como pai) e **assere o
 -- roteamento no próprio passo**, não só uma vez no C0.
@@ -50,8 +66,8 @@ BEGIN
           'ORDER BY EventTime, CounterID, WatchID, UserID LIMIT 50000' INTO plan;
   IF position('theodb_columnar_agg' IN plan) = 0 THEN
     RAISE EXCEPTION
-      'M168-C0 FAILED: a consulta alvo NÃO roteia para o caminho colunar. O cancelamento abaixo interromperia o '
-      'plano NATIVO do PostgreSQL, que não tem runtime tokio algum — o teste passaria sem nunca exercitar o '
+      'M168-C0 FAILED: a consulta alvo NÃO roteia para o caminho do top-k colunar. O cancelamento abaixo cairia '
+      'num plano que não instancia runtime tokio nem DataFusion — o teste passaria sem nunca exercitar o '
       'safe-point. Plano: %', plan;
   END IF;
   RAISE NOTICE 'M168-C0 ok: a forma CTAS roteia — o cancelamento vai cair no safe-point de verdade';
@@ -101,8 +117,8 @@ RESET statement_timeout;
 \set ON_ERROR_STOP on
 
 \echo '### M168-C2: A SESSÃO SOBREVIVEU? — este é o teste, não o C1'
--- Com o defeito, o thread-local do tokio ficou `Entered` e este `block_on` entra no
--- `panic!("Cannot start a runtime from within a runtime")`. Mesma forma do C1 (para exercitar o mesmo caminho),
+-- Prova que a sessão continua utilizável depois de um cancelamento: nenhum recurso ficou meio-desmontado, nem o
+-- runtime tokio, nem o `SessionContext`, nem a `Relation`. Mesma forma do C1 (para exercitar o mesmo caminho),
 -- k pequeno para terminar rápido, e roteamento asserido AQUI — não herdado do C0.
 \set ON_ERROR_STOP off
 DO $c2$
@@ -169,8 +185,9 @@ $c4$;
 SELECT * FROM cancel_res ORDER BY q;
 \if :{?gate_selftest}
   \echo '### GATE SELF-TEST ARMADO: dois braços — o gate abaixo DEVE abortar em AMBOS'
-  -- Braço 1 — sessão morta: a assinatura do longjmp atravessando os frames Rust.
-  UPDATE cancel_res SET v = 'ERRO:XX000:Cannot start a runtime from within a runtime'
+  -- Braço 1 — sessão inutilizável depois do cancelamento (qualquer erro em C2 serve; a string abaixo é só um
+  -- exemplo plausível de estado meio-desmontado).
+  UPDATE cancel_res SET v = 'ERRO:XX000:sessao inutilizavel apos cancelamento'
    WHERE q = 'c2_rows_after_cancel';
   -- Braço 2 — safe-point AUSENTE: o cancelamento só é notado depois do scan completo, então o tempo decorrido
   -- de C1 iguala o do scan inteiro. Sem esta asserção o arquivo passa com o safe-point removido, que é o
@@ -211,7 +228,7 @@ BEGIN
   -- sem ter exercitado o caminho é o falso-verde que esta série inteira combate.
   IF c1 IS DISTINCT FROM 'canceled' THEN
     bad := bad || format('c1_outcome=%s: o cancelamento NÃO ocorreu, então C2/C3 não exercitaram o caminho de '
-                      || 'longjmp. Aumente o k ou reduza o statement_timeout e repita; ', coalesce(c1, '(nulo)'));
+                      || 'cancelamento. Aumente o k ou reduza o statement_timeout e repita; ', coalesce(c1, '(nulo)'));
   END IF;
 
   -- NÃO-VACUIDADE, PARTE 2. Um passo que não roteou rodou o plano nativo, que não toca o runtime tokio — ele
@@ -221,11 +238,11 @@ BEGIN
                       || 'não tem runtime tokio — ele passaria com o defeito presente; ', c2, c3);
   END IF;
 
-  -- O TESTE. Com o defeito, o thread-local do tokio fica sujo e este ramo pega o panic do runtime.
+  -- O TESTE. Se o cancelamento tivesse deixado algum recurso meio-desmontado, este ramo pegaria o erro.
   IF c2 IS NULL OR c2 LIKE 'ERRO:%' THEN
     bad := bad || format('c2_rows_after_cancel=%s: a sessão NÃO sobreviveu ao cancelamento. É a assinatura do '
-                      || 'longjmp atravessando os frames Rust (runtime tokio nunca silenciado). Ver '
-                      || 'interrupt_is_pending em df_executor.rs; ', coalesce(c2, '(nulo)'));
+                      || 'um recurso deixado meio-desmontado pelo cancelamento (runtime tokio, SessionContext '
+                      || 'ou Relation). Ver interrupt_is_pending em df_executor.rs; ', coalesce(c2, '(nulo)'));
   ELSIF c2::bigint <> 100 THEN
     bad := bad || format('c2_rows_after_cancel=%s, esperado 100; ', c2);
   END IF;
@@ -237,7 +254,7 @@ BEGIN
 
   IF bad <> '' THEN RAISE EXCEPTION 'M168 CANCEL GATE FAILED: %', bad; END IF;
   RAISE NOTICE 'M168 CANCEL GATE ok: o top-k streaming foi cancelado de verdade (57014) e a sessão continuou '
-               'servindo consultas DataFusion nos dois caminhos — o estado Rust desenrolou antes do longjmp.';
+               'servindo consultas DataFusion nos dois caminhos, e o corte aconteceu no MEIO do scan (gate de tempo).';
 END
 $gate$;
 DROP TABLE cancel_res;
