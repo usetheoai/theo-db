@@ -15,14 +15,21 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 ### Changed
-- **Columnar top-k de projeção (M167):** a suíte de verificação diferencial passou a cobrir a forma "as N primeiras linhas por uma coluna" — roteamento no harness de cobertura por tipo (35/35 casos, com controle positivo que prova que o oráculo consegue falhar) e correção de qual linha sai em que posição no harness dedicado, sobre uma tabela cuja chave é única para que a comparação não dependa de desempate arbitrário.
-- **Columnar top-k de projeção (M167):** consultas do tipo "as N primeiras linhas por uma coluna" sobre tabelas colunares ficaram substancialmente mais rápidas — medido a 1 milhão de linhas, alternando o recurso ligado/desligado na mesma sessão e no mesmo binário, 5 pares por consulta: **4,98×**, **44,8×**, **56,2×** e **41,7×** nas quatro formas cobertas, com os 20 pares favorecendo o caminho novo e resultado idêntico ao plano anterior. Requer `work_mem` acima do padrão do PostgreSQL. Método e ressalvas em `docs/benchmarks/m167-projection-topk-verdict.md`.
-- **Columnar top-k de projeção (M167):** `ORDER BY` com **mais de uma coluna** (por exemplo `ORDER BY data, nome`) passa a usar o caminho rápido em tabelas colunares — antes qualquer ordenação composta caía no plano lento. Cada coluna da ordenação é verificada individualmente, e basta uma que não sirva para a consulta inteira voltar ao plano nativo.
-- **Columnar top-k de projeção (M167):** `theodb.enable_columnar_late_mat` passa a ter **default ON**. As consultas de top-k de projeção sobre tabelas colunares (`SELECT colunas WHERE pred ORDER BY coluna LIMIT k`) passam a usar a materialização preguiçosa por padrão, em vez de exigir um `SET` de sessão. Medido no ClickBench 1M: q23 e q24 roteiam com resultado byte-idêntico ao plano nativo. O custo de memória O(N) que justificava o default OFF passou a ser contido por um limite de plano (ver a entrada seguinte), não pelo default.
 
 ### Deprecated
 
 ### Removed
+
+### Fixed
+
+### Security
+
+## [0.158.0] - 2026-07-29
+### Changed
+- **Columnar top-k de projeção (M167):** a suíte de verificação diferencial passou a cobrir a forma "as N primeiras linhas por uma coluna" — roteamento no harness de cobertura por tipo (35/35 casos, com controle positivo que prova que o oráculo consegue falhar) e correção de qual linha sai em que posição no harness dedicado, sobre uma tabela cuja chave é única para que a comparação não dependa de desempate arbitrário.
+- **Columnar top-k de projeção (M167):** consultas do tipo "as N primeiras linhas por uma coluna" sobre tabelas colunares ficaram substancialmente mais rápidas — medido a 1 milhão de linhas, alternando o recurso ligado/desligado na mesma sessão e no mesmo binário, 5 pares por consulta: **4,98×**, **44,8×**, **56,2×** e **41,7×** nas quatro formas cobertas, com os 20 pares favorecendo o caminho novo e resultado idêntico ao plano anterior. Requer `work_mem` acima do padrão do PostgreSQL. Método e ressalvas em `docs/benchmarks/m167-projection-topk-verdict.md`.
+- **Columnar top-k de projeção (M167):** `ORDER BY` com **mais de uma coluna** (por exemplo `ORDER BY data, nome`) passa a usar o caminho rápido em tabelas colunares — antes qualquer ordenação composta caía no plano lento. Cada coluna da ordenação é verificada individualmente, e basta uma que não sirva para a consulta inteira voltar ao plano nativo.
+- **Columnar top-k de projeção (M167):** `theodb.enable_columnar_late_mat` passa a ter **default ON**. As consultas de top-k de projeção sobre tabelas colunares (`SELECT colunas WHERE pred ORDER BY coluna LIMIT k`) passam a usar a materialização preguiçosa por padrão, em vez de exigir um `SET` de sessão. Medido no ClickBench 1M: q23 e q24 roteiam com resultado byte-idêntico ao plano nativo. O custo de memória O(N) que justificava o default OFF passou a ser contido por um limite de plano (ver a entrada seguinte), não pelo default.
 
 ### Fixed
 - **Columnar top-k de projeção (M167):** `ORDER BY` sobre uma coluna de texto voltava ao plano lento em bancos cuja colação já é byte-a-byte (`C`/`POSIX`), porque a checagem reconhecia apenas as colações *nomeadas* `C` e `POSIX` e não a colação `default` — que é o que quase toda coluna carrega. Agora a propriedade é verificada na colação efetiva do banco, então `ORDER BY <texto>` usa o caminho rápido onde é comprovadamente seguro e continua recusando onde não é (qualquer colação linguística, mesmo declarada explicitamente na consulta).
@@ -33,8 +40,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - **Columnar top-k de projeção (M167):** um `SELECT *` sem `WHERE` com `ORDER BY … LIMIT k` sobre uma tabela colunar larga podia decodificar a relação inteira em memória antes de aplicar o limite — com o default ON isso deixaria de ser um caminho opcional e passaria a atingir consultas comuns. O planejador agora recusa a rota quando o tamanho da relação supera de forma desproporcional o `work_mem` da sessão, caindo no plano nativo (que é correto para qualquer entrada). Duas ressalvas honestas: a conta usa o tamanho da relação inteira, ignorando quantas colunas a consulta projeta e quão seletivo é o filtro — então uma projeção estreita sobre uma tabela grande pode ser recusada mesmo cabendo na memória; e como os bytes em disco estão comprimidos, o volume decodificado é **maior** que o estimado. É um teto contra catástrofe, não um limite justo.
 - Implementation tooling: the `/implement` halt-loop driver hardcoded a Node/TypeScript stack — it instructed the loop to write `.test.ts` files and run `npm test`, in a repository that is Rust + Python. Any `/implement` run here would have driven an autonomous, commit-making loop against a test runner that does not exist. The RED/GREEN phases now derive the runner from the plan's own TDD command, then the build manifest (`Cargo.toml` / `pyproject.toml` / `package.json` / `go.mod` / `Makefile`), and refuse to fabricate a RED when the test cannot run on the current machine.
 - Implementation tooling: `check_wiring.py` searched pillar (a) callers in `.rs`/`.py`/`.ts` but pillar (b) integration tests only in `.ts`/`.py` — so a Rust symbol could never satisfy the integration-test pillar with a Rust test, silently forcing every Rust task down the ADR-DEFER path. Both pillars now share one glob set (`.rs`/`.go`/`.sql` added), and the remediation message no longer names a `.test.ts` path.
-
-### Security
 
 ## [0.157.0] - 2026-07-27
 
