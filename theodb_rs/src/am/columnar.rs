@@ -935,6 +935,232 @@ unsafe fn decode_one_chunk_group(
     Ok(true)
 }
 
+/// A columnar scan planned but not yet decoded: stripe directories, the projection, and the per-column FixedRaw
+/// decision. Pass 1 of the decode — cheap (headers + directories only, no value chunks).
+///
+/// Extracted so the accumulating path (`decode_columns_v2`) and the M168 streaming path share ONE definition of
+/// "what this scan is". Duplicating pass 1 would duplicate knowledge, and the FixedRaw decision in particular is
+/// subtle: a column is only eligible if NO chunk-group anywhere has nulls for it, which is a whole-relation
+/// property that a per-chunk-group loop cannot rediscover.
+pub(crate) struct ScanPlan {
+    plans: Vec<StripePlan>,
+    wanted: Vec<usize>,
+    cols: Vec<ColDesc>,
+    mode_fixed: Vec<Option<usize>>,
+    names: Vec<String>,
+    natts: usize,
+}
+
+impl ScanPlan {
+    /// Total chunk-groups across every visible stripe — the number of batches a streaming consumer will see
+    /// (minus whatever the zone-map skips).
+    pub(crate) fn n_chunk_groups(&self) -> usize {
+        self.plans.iter().map(|p| p.n_chunk_groups).sum()
+    }
+}
+
+/// Pass 1: plan the scan without decoding a single value chunk.
+pub(crate) unsafe fn plan_columnar_scan(
+    rel: pg_sys::Relation,
+    projection: Option<&[usize]>,
+) -> Result<ScanPlan, String> {
+    let tupdesc = (*rel).rd_att;
+    let natts = (*tupdesc).natts as usize;
+    let cols = (0..natts).map(|i| coldesc(tupdesc, i)).collect::<Result<Vec<_>, _>>()?;
+    let wanted: Vec<usize> = match projection {
+        Some(p) => {
+            for &i in p {
+                if i >= natts {
+                    return Err(format!(
+                        "theodb_columnar: projection column {i} out of range (natts {natts})"
+                    ));
+                }
+            }
+            p.to_vec()
+        }
+        None => (0..natts).collect(),
+    };
+    let name_of = |i: usize| -> String {
+        std::ffi::CStr::from_ptr((*super::tupdesc_attr(tupdesc, i)).attname.data.as_ptr())
+            .to_string_lossy()
+            .into_owned()
+    };
+    let mut plans: Vec<StripePlan> = Vec::new();
+    for sm in read_visible_stripes((*rel).rd_id)? {
+        let hdr_items = super::page::read_all_page_items(rel, sm.header_block)?;
+        let header_bytes =
+            hdr_items.into_iter().next().ok_or("theodb_columnar: stripe header page empty")?;
+        let header = StripeHeader::from_bytes(&header_bytes)?;
+        if header.ncols as usize != natts {
+            return Err(format!("theodb_columnar: stripe ncols {} != natts {natts}", header.ncols));
+        }
+        let dir_bytes = super::page::read_chunked(rel, header.dir_first_block, header.dir_n_pages)?;
+        let entries =
+            codec::deserialize_directory(&dir_bytes, header.n_chunk_groups as usize * natts)?;
+        plans.push(StripePlan { entries, n_chunk_groups: header.n_chunk_groups as usize });
+    }
+    let fast_decode = super::columnar_agg::ENABLE_FAST_DECODE.get();
+    let mode_fixed: Vec<Option<usize>> = wanted
+        .iter()
+        .map(|&col| {
+            if !fast_decode {
+                return None;
+            }
+            let w = fixed_arrow_width(cols[col].typid)?;
+            let any_null = plans
+                .iter()
+                .any(|pl| (0..pl.n_chunk_groups).any(|cg| pl.entries[cg * natts + col].has_nulls));
+            if any_null { None } else { Some(w) }
+        })
+        .collect();
+    let names = wanted.iter().map(|&c| name_of(c)).collect();
+    Ok(ScanPlan { plans, wanted, cols, mode_fixed, names, natts })
+}
+
+/// The backend thread that a raw-`Relation` holder was created on.
+///
+/// M168 ADR-2. `ColumnarChunkStream` holds a `pg_sys::Relation` and is handed to DataFusion, whose
+/// `PartitionStream` trait demands `Send + Sync`. That `unsafe impl` is TRUE under the executor's
+/// `new_current_thread` runtime with `target_partitions(1)`: the stream is polled on the backend thread and
+/// nowhere else. But it is true by configuration, not by construction — someone switching to `new_multi_thread`
+/// would get silent memory corruption rather than a compile error, because PostgreSQL relation access is not
+/// thread-safe.
+///
+/// So the invariant is asserted rather than commented. Precedent in this project: M139 found Tantivy calling
+/// `Directory` from four threads, and the fix was to make the constraint explicit instead of hoping.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ThreadAffinity(std::thread::ThreadId);
+
+impl ThreadAffinity {
+    pub(crate) fn capture() -> Self {
+        Self(std::thread::current().id())
+    }
+
+    /// Panics if called from any thread other than the one that captured it.
+    pub(crate) fn assert_owned(&self, what: &str) {
+        let now = std::thread::current().id();
+        assert_eq!(
+            self.0, now,
+            "{what}: touched from {now:?} but owned by {:?}. A pg_sys::Relation is only valid on its backend \
+             thread; this means the DataFusion runtime is no longer single-threaded (see M168 ADR-2).",
+            self.0
+        );
+    }
+}
+
+/// Streams a planned columnar scan ONE chunk-group at a time.
+///
+/// This is the M168 answer to the M167 DoD bullet 2b. `decode_columns_v2` hands the same helper accumulators that
+/// live across the whole relation, so its peak is O(N) — measured at 809,738,352 bytes for ClickBench q23. This
+/// type hands the helper accumulators it drains after every chunk-group, so the peak is one chunk-group.
+///
+/// It holds a raw `pg_sys::Relation` and therefore MUST be advanced only on the backend thread that created it.
+/// That is not a comment: `next` asserts it (see `ThreadAffinity`), turning a runtime/threading change from silent
+/// memory corruption into an immediate panic.
+pub(crate) struct ColumnarChunkStream {
+    plan: ScanPlan,
+    rel: pg_sys::Relation,
+    affinity: ThreadAffinity,
+    pl_idx: usize,
+    cg_idx: usize,
+    skipped: usize,
+    emitted: usize,
+}
+
+impl ColumnarChunkStream {
+    pub(crate) fn new(rel: pg_sys::Relation, plan: ScanPlan) -> Self {
+        Self {
+            plan,
+            rel,
+            affinity: ThreadAffinity::capture(),
+            pl_idx: 0,
+            cg_idx: 0,
+            skipped: 0,
+            emitted: 0,
+        }
+    }
+
+    pub(crate) fn column_names(&self) -> &[String] {
+        &self.plan.names
+    }
+
+    pub(crate) fn column_typids(&self) -> Vec<u32> {
+        self.plan.wanted.iter().map(|&c| self.plan.cols[c].typid).collect()
+    }
+
+    pub(crate) fn stats(&self) -> (usize, usize) {
+        (self.emitted, self.skipped)
+    }
+
+    /// Decode the next non-skipped chunk-group. `Ok(None)` = the scan is exhausted.
+    ///
+    /// SAFETY: the caller guarantees this runs on the backend thread that owns `rel` (see the type's doc). Every
+    /// buffer is freshly allocated per call and moved out, so nothing accumulates across chunk-groups.
+    pub(crate) unsafe fn next(
+        &mut self,
+        predicates: &[super::zonemap::ZonePredicate],
+        skip: bool,
+    ) -> Result<Option<Vec<(String, u32, DecodedColumn)>>, String> {
+        self.affinity.assert_owned("ColumnarChunkStream::next");
+        let n = self.plan.wanted.len();
+        let ctx = CgDecodeCtx {
+            rel: self.rel,
+            natts: self.plan.natts,
+            wanted: &self.plan.wanted,
+            cols: &self.plan.cols,
+            mode_fixed: &self.plan.mode_fixed,
+            predicates,
+            skip,
+        };
+        while self.pl_idx < self.plan.plans.len() {
+            let pl = &self.plan.plans[self.pl_idx];
+            if self.cg_idx >= pl.n_chunk_groups {
+                self.pl_idx += 1;
+                self.cg_idx = 0;
+                continue;
+            }
+            let cg = self.cg_idx;
+            self.cg_idx += 1;
+            // Fresh per chunk-group — this is the whole point. `decode_columns_v2` reuses buffers across every
+            // chunk-group; draining them here is what makes the peak independent of N.
+            let mut fixed_bytes: Vec<Vec<u8>> = vec![Vec::new(); n];
+            let mut fixed_rows: Vec<usize> = vec![0; n];
+            let mut cell_cols: Vec<Vec<Option<Vec<u8>>>> = vec![Vec::new(); n];
+            if !decode_one_chunk_group(
+                &ctx,
+                pl,
+                cg,
+                &mut fixed_bytes,
+                &mut fixed_rows,
+                &mut cell_cols,
+            )? {
+                self.skipped += 1;
+                continue;
+            }
+            self.emitted += 1;
+            let out = self
+                .plan
+                .wanted
+                .iter()
+                .enumerate()
+                .map(|(wi, &col)| {
+                    let dc = match self.plan.mode_fixed[wi] {
+                        Some(w) => DecodedColumn::FixedRaw {
+                            bytes: std::mem::take(&mut fixed_bytes[wi]),
+                            width: w,
+                            row_count: fixed_rows[wi],
+                        },
+                        None => DecodedColumn::Cells(std::mem::take(&mut cell_cols[wi])),
+                    };
+                    (self.plan.names[wi].clone(), self.plan.cols[col].typid, dc)
+                })
+                .collect();
+            return Ok(Some(out));
+        }
+        Ok(None)
+    }
+}
+
 pub(crate) unsafe fn decode_columns_v2(
     rel: pg_sys::Relation,
     projection: Option<&[usize]>,
@@ -2319,5 +2545,35 @@ mod tests {
         assert_eq!(n, 0, "an empty columnar table must scan zero rows in Phase A");
 
         Spi::run("DROP TABLE m99_ct").unwrap();
+    }
+}
+
+#[cfg(any(test, feature = "pg_test"))]
+#[pgrx::pg_schema]
+mod m168_affinity_tests {
+    use super::ThreadAffinity;
+
+    /// M168 ADR-2 RED→GREEN. The whole point of `ThreadAffinity` is to fail loudly when a `pg_sys::Relation`
+    /// holder is touched off its backend thread. An assertion never observed failing is not known to be an
+    /// assertion — this observes it.
+    ///
+    /// No PostgreSQL state is touched from the spawned thread: only the affinity check runs there, so the test
+    /// cannot itself corrupt anything. The panic is contained by `join()` returning `Err`.
+    #[pgrx::pg_test]
+    fn affinity_panics_off_owning_thread() {
+        let aff = ThreadAffinity::capture();
+        let joined = std::thread::spawn(move || aff.assert_owned("m168 test")).join();
+        assert!(
+            joined.is_err(),
+            "ThreadAffinity did NOT panic when touched from another thread — the M168 ADR-2 guard is inert, \
+             which means a multi-threaded runtime would corrupt memory silently instead of failing fast"
+        );
+    }
+
+    /// The other half: on the owning thread it must be a no-op, or the guard would break the real path.
+    #[pgrx::pg_test]
+    fn affinity_is_silent_on_owning_thread() {
+        let aff = ThreadAffinity::capture();
+        aff.assert_owned("m168 test"); // must not panic
     }
 }

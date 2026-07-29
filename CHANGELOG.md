@@ -14,6 +14,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Base para o top-k colunar com memória limitada:** o motor colunar ganhou a capacidade de decodificar uma
+  tabela **em partes** (um grupo de linhas por vez) em vez de sempre carregar tudo de uma vez. Nenhuma consulta
+  usa esse caminho ainda — é a fundação para que consultas "as N primeiras linhas" deixem de precisar de memória
+  proporcional ao tamanho da tabela (#215). O caminho atual continua idêntico, com o mesmo resultado byte a byte.
 - **Diagnóstico de memória do top-k colunar:** com `THEODB_ADMIT_TRACE=1` no ambiente do servidor, o log passa a
   registrar quantos bytes o caminho colunar decodificou para responder à consulta
   (`theodb_decode_batch: rows=… bytes=… work_mem_bytes=…`). Quem opera consegue ver o consumo real em vez de
