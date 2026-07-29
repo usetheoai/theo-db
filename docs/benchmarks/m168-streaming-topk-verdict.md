@@ -64,31 +64,49 @@ orçamento do guard (512 MiB). O maior batch instrumentado caiu para 17,9 MiB, e
 **footprint total instantâneo** do caminho streaming não foi medido, e é o termo que falta para fechar a #218 com
 todo o rigor.
 
-## 2. Throughput — RETIRADO. Esta seção mudou de resposta quatro vezes e a última a retirou
+## 2. Throughput — publicado, depois de eu tê-lo retirado com o instrumento errado
 
-O registro das quatro é mais útil que qualquer número que eu publicasse aqui.
+Esta seção mudou de resposta **cinco** vezes. As quatro primeiras caíram por defeito de desenho ou de ambiente; a
+quinta caiu por defeito do meu *instrumento de decisão*, que é o erro mais instrutivo dos cinco.
 
 | # | O que eu afirmei | Por que caiu |
 |---|---|---|
-| 1 | "as quatro consultas ficaram mais rápidas" | o harness declarava alternar os braços e **não alternava** — o drift monotônico era sempre pago pelo braço que ia primeiro, que era sempre o eager |
-| 2 | "o q24 regride ~8%" | a alternância foi implementada, mas com **5 pares**: com ordem alternada, número ímpar não contrabalanceia — um braço come uma posição-primeira a mais, incluindo o par 1, o mais frio |
-| 3 | "o q23 é ~18% mais rápido; as estreitas sem efeito" | com 6 pares deu 0,817 e 0,818, faixas sem sobreposição. Parecia sólido |
-| 4 | **retirado** | re-executado no binário final: **0,808 e 0,866, faixas se sobrepondo**. O summarizer classifica como "dentro da dispersão" |
+| 1 | "as quatro consultas ficaram mais rápidas" | o harness declarava alternar os braços e **não alternava** |
+| 2 | "o q24 regride ~8%" | alternava com **5 pares**, e ímpar não contrabalanceia |
+| 3 | "o q23 é ~18% mais rápido" | a mediana sobre 6 pares mistura aquecimento e regime |
+| 4 | **retirei tudo** — "o efeito é da mesma ordem que a dispersão da box" | **falso, e o dado nega**: a dispersão é *entre* pares, o efeito é *dentro* de cada par |
+| 5 | o que está abaixo | — |
 
-A dispersão intra-braço do eager subiu de 1,30× para 1,39× entre as duas coletas. **O efeito que eu media é da
-mesma ordem que a dispersão da box**, e ela não é estável ao longo de uma sessão de trabalho — esta box hospeda o
-runner de CI e três serviços, e eu mesmo a carreguei ao longo deste milestone.
+**O que me fez retirar era um teste de faixas marginais NÃO PAREADAS aplicado a um desenho pareado.**
+`m168_ab_summarize.py` comparava `max(stream) < min(eager)` — descartando o pareamento, que é a razão de existir
+do desenho, e o único motivo de o harness alternar os braços. Com dispersão intra-braço de 1,39× e efeito de
+~0,87, as marginais **não podem** separar: aquele ramo era aritmeticamente quase infalsificável. Um instrumento
+que não consegue observar o que precisa observar é a violação do R3.1 de `discover-phd-rigor.md` — a mesma regra
+que este projeto escreveu depois do M162.
 
-**Conclusão honesta: este ambiente não sustenta uma alegação de throughput para o M168.** A direção observada foi
-consistentemente favorável ao streaming no q23 (0,808–0,866 em quatro execuções), mas "consistentemente
-favorável" com faixas que se sobrepõem não é um número publicável, e três das quatro versões anteriores desta
-seção foram artefato de desenho ou de ambiente.
+O summarizer passa a usar **teste do sinal exato, bilateral**, sobre os pares (implementação em
+`m168_ab_summarize.py`, sem dependência externa — é uma soma binomial):
 
-O que **não** é afetado: a alegação de memória (§ 1) é contagem determinística de bytes, não cronometragem — ela
-reproduz idêntica em todas as coletas. E os gates de correção (§ 3) são comparações de resultado, não de tempo.
+| Consulta | razões (2 execuções) | pares favoráveis | p (sinal, bilateral) | leitura |
+|---|---|---|---|---|
+| **q23** | 0,808 · 0,866 | **12 / 12** | **0,0005** | **efeito pareado real** |
+| q24 | 1,084 · 1,038 | 4 / 12 | 0,39 | sem efeito |
+| q25 | 1,022 · 0,897 | 8 / 12 | 0,39 | sem efeito |
+| q26 | 1,002 · 0,989 | 8 / 12 | 0,39 | sem efeito |
 
-Medir throughput deste milestone com rigor exige uma box dedicada e ociosa. Fica como trabalho declarado, não
-como número arredondado.
+**A magnitude publicável é a do regime aquecido, não a média.** Os pares 1–2 são frios (razões 0,60–0,73) e
+puxam a média para baixo — para a ponta *otimista*, no sentido de exagerar o ganho. Nos pares aquecidos (5–6) as
+razões são 0,853 · 0,905 · 0,920 · 0,853, ou seja **~12%**.
+
+**O q23 é ~12% mais rápido em regime, com 12/12 pares favoráveis (p = 0,0005).** E o contrabalanceamento sustenta:
+nos seis pares em que o *streaming* rodou primeiro — a posição desfavorecida pelo aquecimento — ele venceu 6/6.
+
+Nas três consultas estreitas **não há efeito pareado**. Faz sentido mecanicamente: o ganho do q23 acompanha o
+regime em que a memória também cai 43×, e onde há pouco a economizar não há o que ganhar.
+
+**Ressalva de ambiente, que continua valendo:** esta box hospeda o runner de CI e três serviços, e a dispersão
+subiu entre coletas. O teste pareado é robusto a isso *por construção* — é para isso que ele existe — mas uma
+replicação em máquina dedicada e ociosa continua sendo o que fecharia a questão com folga.
 
 ## 3. Correção — e o defeito que só a revisão pegou
 
@@ -154,8 +172,9 @@ A pergunta empírica: **existe um `k` em que o eager serve e o streaming não?**
 | Cenário | streaming | eager |
 |---|---|---|
 | 32MB · `SELECT *` 105 col · k=200000 | estoura | **também estoura** |
-| 32MB · `SELECT *` 105 col · k=100000 | serve | **estoura** |
-| 32MB · 2 col · k=400000 | **serve** (`peak_reserved` **43.240.056 B**, pool 134.217.728 B) | **falha** (`TopK[0] with 100.3 MB already allocated`, `pool_size: 102.9 MB`) |
+| 32MB · `SELECT *` 105 col · k=100000 | **estoura** (`peak_reserved=132.100.024` contra pool de 134.217.728) | **também estoura** |
+| 32MB · 2 col · k=400000 (`inversion-narrow.log`) | **serve** (`peak_reserved` **43.240.056 B**, pool 134.217.728 B) | **falha** (`TopK[0] with 100.3 MB already allocated`, `pool_size` 102,9 MB decimais) |
+| 32MB · 2 col · k=400000, chave composta (`window-probe.log` cenário 3) | **serve** (`peak_reserved` **50.064.565 B**) | **falha** (101,1 + 19,6 MB) |
 | **32MB · `SELECT *` 105 col · k=1000** (a banda que um reviewer previu) | **serve** (`peak_reserved` **9.293.548 B**) | **serve** (1000 linhas) |
 
 **A janela não foi encontrada — inclusive na banda prevista.** Um revisor derivou dos números da § 1 que
@@ -175,11 +194,16 @@ dizia "o streaming retém ~250 KB e o eager segura 40 MB" (≈160×) — os 250 
 retenção, e os 40 MB não estavam em artefato algum. Medido: **43,2 MB contra ≥119,8 MB, ou ~2,8×**. Foi a
 `PeakTrackingPool` que produziu esse número, e a conclusão que mais dependia dele era justamente a que não o usava.
 
-**A folga não é constante.** Em k=10 é ~21 MiB contra 512 MiB; em k=400000 é 43,2 MB contra 128 MB — 34% da pool.
-Dizer "duas ordens de grandeza" vale para o primeiro regime, não para o segundo.
+**A folga não é constante, e a comparação tem de ser contra o mesmo denominador.** Contra a pool do DataFusion:
+em k=10 a retenção medida é 0,8–2,4 MiB numa pool de 192 MiB; em k=400000 é 43,2 MB numa pool de 128 MiB — 34%.
+(Uma versão anterior comparava ~21 MiB contra os 512 MiB do guard do ADR-4, misturando dois orçamentos diferentes
+numa frase só, e usando como numerador justamente a soma que o § 1 declara não ser um resultado.)
 
-**O fail-open fica**, e o que ele é fica dito: defesa contra um caso que quatro cenários não encontraram, não
-resposta a uma janela medida. Ele agora registra no log do servidor **incondicionalmente** — escondê-lo atrás do
+**O fail-open fica, e o que ele é fica dito com precisão.** Ele **disparou** — nos cenários 1 e 2, e o
+`window-probe.log` mostra o trace do decode eager dentro do braço streaming provando a degradação. O que os quatro
+cenários não encontraram foi um caso em que ele **resgatasse** a consulta: nos dois em que atuou, o caminho eager
+também estourou. Uma versão anterior dizia "os quatro cenários não o encontraram", confundindo *disparar* com
+*resgatar*. Ele agora registra no log do servidor **incondicionalmente** — escondê-lo atrás do
 flag de trace neutralizava, a jusante, um guard escrito para falhar alto, e deixava o usuário sem sinal de que a
 consulta trocou de perfil de memória.
 

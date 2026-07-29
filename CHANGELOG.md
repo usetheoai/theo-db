@@ -19,10 +19,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   **maior bloco decodificado de uma vez** num `SELECT *` caiu de **772 MiB para 17,9 MiB (43×)** — abaixo do `work_mem` da sessão, e não mais acima
   dele (#215, #218). O consumo total do processo é maior que esse bloco e foi medido em parte: a retenção interna
   do ordenador ficou entre 0,8 e 2,4 MB. A tabela passa a ser decodificada em partes, uma de cada vez, em vez de inteira de uma vez.
-  Resultado byte a byte idêntico ao anterior. **Sobre tempo de execução, esta versão não faz alegação**: a
-  máquina usada para medir compartilha CPU com outros serviços, e o efeito observado ficou da mesma ordem que a
-  variação da própria medição — quatro tentativas de medir deram respostas diferentes, e a mais recente não
-  sustenta nenhuma delas. O ganho aqui é de memória, que é contagem de bytes e não depende de cronômetro.
+  Resultado byte a byte idêntico ao anterior. No tempo, o `SELECT *` largo ficou **~12% mais rápido** depois que
+  o cache aquece — o caminho novo venceu **12 de 12 comparações pareadas** (teste do sinal, p = 0,0005), inclusive
+  nas seis em que ele correu na posição desfavorecida. Nas consultas de projeção estreita **não há efeito**
+  (4 a 8 vitórias em 12, p = 0,39): onde há pouca memória a economizar, não há tempo a ganhar. A medição foi feita
+  numa máquina compartilhada, então o número merece replicação; o desenho pareado é o que o torna defensável
+  apesar disso.
   Reversível com `theodb.enable_columnar_topk_stream = off`. Método, números por consulta e ressalvas
   em `docs/benchmarks/m168-streaming-topk-verdict.md`.
 

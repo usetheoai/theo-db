@@ -51,11 +51,22 @@ def parse(path):
 def _reject_fallback(path, problems):
     """Um braço 'streaming' que degradou para o eager em silêncio alimentaria a tabela publicada como se fosse
     streaming. Agora que o fail-open existe, o log tem de ser rejeitado se ele disparou."""
+    in_stream_arm = False
     for line in open(path, errors="replace"):
+        if "ARM=stream" in line:
+            in_stream_arm = True
+        elif "ARM=eager" in line:
+            in_stream_arm = False
         # Ancorado no prefixo do servidor: um match por substring casaria com a própria prosa dos
         # gates, que menciona o nome do evento (achado de review).
         if "LOG:  theodb_topk_stream_fallback" in line or "WARNING:  theodb_topk_stream_fallback" in line:
             problems.append("log contém theodb_topk_stream_fallback: um braço degradou para o eager em silêncio")
+            return
+        # `pgrx::log!` vai para o log do SERVIDOR e o coletor captura só o stdout do psql, então o marcador acima
+        # quase nunca aparece — o guard era teatro (achado de review). O sinal que aparece de fato é o trace do
+        # decode eager dentro do braço streaming.
+        if in_stream_arm and "theodb_decode_batch: rows=" in line:
+            problems.append("braço streaming emitiu trace de decode EAGER: ele degradou e alimentaria a tabela")
             return
 
 

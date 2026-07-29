@@ -54,14 +54,49 @@ def parse(path):
     return runs, md5s, seen_per_pair
 
 
+def paired_wins(runs, q):
+    """Quantos PARES o streaming venceu, sobre o total. É a estatística que o desenho produz."""
+    wins = n = 0
+    for r in runs:
+        if q not in r["pairs"]:
+            continue
+        ea, st = r["pairs"][q]
+        for a, b in zip(ea, st):
+            n += 1
+            if b < a:
+                wins += 1
+    return wins, n
+
+
+def sign_test_p(wins, n):
+    """Teste do sinal exato, bilateral. Sem dependência externa — é uma soma binomial."""
+    if n == 0:
+        return 1.0
+    from math import comb
+    k = max(wins, n - wins)
+    tail = sum(comb(n, i) for i in range(k, n + 1)) / (2 ** n)
+    return min(1.0, 2 * tail)
+
+
 def _reject_fallback(path, problems):
     """Um braço 'streaming' que degradou para o eager em silêncio alimentaria a tabela publicada como se fosse
     streaming. Agora que o fail-open existe, o log tem de ser rejeitado se ele disparou."""
+    in_stream_arm = False
     for line in open(path, errors="replace"):
+        if "ARM=stream" in line:
+            in_stream_arm = True
+        elif "ARM=eager" in line:
+            in_stream_arm = False
         # Ancorado no prefixo do servidor: um match por substring casaria com a própria prosa dos
         # gates, que menciona o nome do evento (achado de review).
         if "LOG:  theodb_topk_stream_fallback" in line or "WARNING:  theodb_topk_stream_fallback" in line:
             problems.append("log contém theodb_topk_stream_fallback: um braço degradou para o eager em silêncio")
+            return
+        # O marcador acima quase nunca aparece: `pgrx::log!` escreve no log do SERVIDOR, e o coletor captura só o
+        # stdout do psql (achado de review — o guard era teatro). O sinal que REALMENTE aparece quando um braço
+        # streaming degrada é o trace do decode eager, que só pode vir do caminho antigo.
+        if in_stream_arm and "theodb_decode_batch: rows=" in line:
+            problems.append("braço streaming emitiu trace de decode EAGER: ele degradou e alimentaria a tabela")
             return
 
 
@@ -104,12 +139,14 @@ def main() -> int:
             continue
         med = statistics.median(ratios)
         lo, hi = min(ratios), max(ratios)
-        if overlap_all and not any(overlap_all):
-            verdict = "efeito real (faixas nunca se sobrepõem)"
-        elif overlap_all:
-            verdict = "dentro da dispersão (faixas se sobrepõem)"
-        else:
+        wins, n = paired_wins(runs, q)
+        pval = sign_test_p(wins, n)
+        if n == 0:
             verdict = "SEM per-pair — não classificável"
+        elif pval <= 0.05:
+            verdict = f"EFEITO PAREADO (sinal {wins}/{n}, p={pval:.4f})"
+        else:
+            verdict = f"sem efeito pareado (sinal {wins}/{n}, p={pval:.2f})"
         disp = f" · dispersão eager {statistics.median(spreads):.2f}x" if spreads else ""
         print(f"{q:<5} {' '.join(f'{r:.3f}' for r in ratios):<28} {med:>8.3f} {lo:>6.3f}-{hi:<7.3f} {verdict}{disp}")
 
