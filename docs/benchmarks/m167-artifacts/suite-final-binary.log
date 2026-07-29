@@ -1,0 +1,48 @@
+=== suíte no binário FINAL start 2026-07-29T00:44:26+00:00 postmaster=2026-07-29 00:17:54.370517+00 ===
+  q 0 cold=0.1488 hot=0.0235 cs=True ab=True
+  q 1 cold=0.0256 hot=0.0081 cs=True ab=True
+  q 2 cold=0.0431 hot=0.0298 cs=True ab=True
+  q 3 cold=0.0385 hot=0.0322 cs=True ab=True
+  q 4 cold=0.0738 hot=0.0578 cs=True ab=True
+  q 5 cold=0.113 hot=0.1008 cs=True ab=True
+  q 6 cold=0.0053 hot=0.0021 cs=True ab=True
+  q 7 cold=0.0187 hot=0.0078 cs=True ab=True
+  q 8 cold=0.1406 hot=0.1111 cs=True ab=True
+  q 9 cold=0.1582 hot=0.1545 cs=True ab=True
+  q10 cold=0.0661 hot=0.0639 cs=True ab=True
+  q11 cold=0.0857 hot=0.0794 cs=True ab=True
+  q12 cold=0.2282 hot=0.1999 cs=True ab=True
+  q13 cold=0.2387 hot=0.2372 cs=True ab=True
+  q14 cold=0.2241 hot=0.2273 cs=True ab=True
+  q15 cold=1.009 hot=0.9394 cs=True ab=True
+  q16 cold=0.9977 hot=1.0033 cs=True ab=True
+  q17 cold=22.9928 hot=22.7546 cs=False ab=True
+  q18 cold=2.3698 hot=2.1744 cs=True ab=True
+  q19 cold=5.7609 hot=5.6616 cs=True ab=True
+  q20 cold=0.4533 hot=0.4926 cs=True ab=True
+  q21 cold=24.7031 hot=21.6439 cs=False ab=True
+  q22 cold=21.0771 hot=21.5708 cs=False ab=True
+  q23 cold=3.9629 hot=3.7378 cs=True ab=True
+  q24 cold=0.1452 hot=0.1311 cs=True ab=True
+  q25 cold=0.1011 hot=0.0999 cs=True ab=True
+  q26 cold=0.1473 hot=0.1305 cs=True ab=True
+  q27 cold=23.7483 hot=23.2008 cs=False ab=True
+  q28 cold=ERR hot=ERR cs=None ab=None
+  q29 cold=0.0875 hot=0.0769 cs=True ab=True
+  q30 cold=0.5974 hot=0.5552 cs=True ab=True
+  q31 cold=0.5876 hot=0.5459 cs=True ab=True
+  q32 cold=3.3897 hot=2.9297 cs=True ab=True
+  q33 cold=1.2273 hot=1.182 cs=True ab=True
+  q34 cold=1.3445 hot=1.1754 cs=True ab=True
+  q35 cold=1.4868 hot=1.4765 cs=True ab=True
+  q36 cold=0.0858 hot=0.0469 cs=True ab=True
+  q37 cold=0.0372 hot=0.0364 cs=True ab=True
+  q38 cold=0.0361 hot=0.0359 cs=True ab=True
+  q39 cold=21.9062 hot=22.8134 cs=False ab=True
+  q40 cold=0.0182 hot=0.012 cs=True ab=True
+  q41 cold=0.0149 hot=0.0107 cs=True ab=True
+  q42 cold=0.0142 hot=0.0101 cs=True ab=True
+wrote /root/m167-suite-final-binary.json  status=OK
+  queries ok=42/43 errored=1 columnar_customscan=37 hot_geomean=0.24808s
+  result A/B: byte-identical (columnar==heap) (pass=42, diverged=0)
+=== rc=0 end 2026-07-29T01:00:19+00:00 ===

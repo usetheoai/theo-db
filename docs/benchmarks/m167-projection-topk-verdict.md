@@ -45,7 +45,8 @@ numbers independently (§ 7.2).
 
 ## 2. Routing — the metric that actually discriminates
 
-From `m167-artifacts/after-1m.json`, per query:
+From `m167-artifacts/suite-final-binary.json` — the 43-query suite re-run against **the binary being merged**
+(`postmaster=00:17:54Z`, `rc=0`, stamped in `suite-final-binary.log`):
 
 | Query | `columnar_agg_routed` | `result_ab_identical` |
 |---|---|---|
@@ -54,7 +55,11 @@ From `m167-artifacts/after-1m.json`, per query:
 | q25 | **true** | true |
 | q26 | **true** | true |
 
-Suite total: `columnar_agg_routed` **36/43**.
+Suite totals: `columnar_agg_routed` **36/43**; `result_ab` **`diverged = 0`** over 42 passing queries
+(1 ERRORED — q28, see § 6); `routed_identical` 36, `declined_trivial` 6, `no_pushdown_exercised: false`.
+
+An earlier revision sourced this table from `after-1m.json`, which `git log` places **before** two Rust commits — so
+the document asserted a provenance the repository contradicted. Re-run rather than re-worded.
 
 **`columnar_customscan` is deliberately NOT cited here.** That field is `"theodb_columnar_agg" in plan or "Custom
 Scan" in plan` (`run_m128_clickbench.py:271`) and its own docstring calls it "broad and ~always True … CANNOT tell an
@@ -200,6 +205,24 @@ fires, and `relation_vacuum` (`columnar.rs:1851`) is an error stub. Measured on 
 worked because ANALYZE had been run by hand during investigation, unrecorded. Fixed by falling back to the relation's
 true current size; verified: a `relpages = 0` table now declines at 64kB and routes at 1GB.
 
+## 5.5. ROADMAP M167 Definition of done — item by item
+
+Each DoD bullet, the artifact that settles it, and an honest status. One is **partial**, and it is marked as such
+rather than ticked.
+
+| # | DoD bullet (ROADMAP:3053-3057) | Evidence | Status |
+|---|---|---|---|
+| 1 | q23–q26 show the projection/late-mat Custom Scan in `EXPLAIN` **and** byte-identical A/B vs heap (`diverged=0`), **with the `WHERE URL LIKE …` filter also routed** (composed with M156) | H0 gate `9/9` (`hits-topk-ab.log`); suite `diverged = 0`, `columnar_agg_routed` true for all four; `EXPLAIN (VERBOSE)` on q23 shows `Limit → Custom Scan` with **no separate `Filter` node**, i.e. the `LIKE` is inside the scan | **met** |
+| 2a | `ORDER BY` on text routes **only** under a deterministic collation | M167-C (routes, `datcollate = C`), C2 (`en_US.utf8` → declines), D3 (non-first key `en_US.utf8` → declines), D3b (`bpchar` → declines); predicate reads `datcollate` **and** requires `datlocprovider = 'c'` (§ 5) | **met** |
+| 2b | the LIMIT-k heapsort is **O(k)**, not an O(N) batch | The heap itself *is* bounded — DataFusion's `TopK` keeps k rows. **But the decode that feeds it is O(N)**: the whole relation is materialized into Arrow before the heap sees it. That is mitigated by the ADR-4 size guard, not eliminated. Peak RSS was **not** measured (§ 6). | **PARTIAL — see below** |
+| 3 | late-mat GUC honoured; the M163/M164 type-coverage A/B exercises the projection-top-k case; `CHANGELOG [Unreleased]` | GUC is the sole asymmetry of the § 1 and § 7.2 measurements; `columnar_type_ab.py` carries 4 projection-top-k routing cases, **35/35** with positive control `diverged = 2` (`m167-type-coverage.md`); CHANGELOG entry present | **met** |
+
+**On 2b, plainly:** this milestone does not make the path O(k) end-to-end and does not claim to. The plan said so
+before any code was written (ADR-4: a streaming O(k) top-k is "real new executor mechanism, out of scope for this
+milestone; recorded as the honest gap"). What shipped is a bounded heap fed by an O(N) decode, with a plan-time
+guard that declines when the relation exceeds `work_mem × 8` — a ceiling on catastrophe, not the O(k) property the
+bullet asks for. Ticking bullet 2b would be a false green. It is carried forward as the open item.
+
 ## 6. What is NOT proven
 
 - **PostgreSQL's stock `work_mem` is 4 MB**, giving a budget of 32 MB — below the 1M-row `hits`. On a stock cluster
@@ -222,12 +245,15 @@ true current size; verified: a `relpages = 0` table now declines at 64kB and rou
   draft did) is not supported; the cause on this cluster is unexplained.
 - **This box has between-run drift up to ~2× on sub-200 ms queries, measured.** The § 7.2 control exposed it (both arms committed; the
   numbers below are `b1-latemat-on.json` vs `b1-latemat-off.json`, **not** `after-1m.json`, which is a different
-  run of the same arm): three queries moved between the two arms that the GUC **cannot** touch — measured, not
-  assumed: the two suites differ in `columnar_agg_routed` on exactly 4 of 42 queries (36 vs 32), and these three are
-  not among them. (An earlier revision said "none has a `Sort` node"; q8 does — `… ORDER BY u DESC LIMIT 10`. What
-  makes it immune is that its `Sort` sits over an `Agg`, not over a `theodb_columnar_project`, so `try_swap_topk`'s
-  parent check never matches. The routing-count evidence is both stronger and simpler.) The queries and their moves
- —
+  run of the same arm): three queries moved between the two arms whose plans the GUC provably did **not** change.
+
+  That is measured, not argued. Comparing `columnar_agg_routed` element-wise across the two suites, the flag differs
+  on **exactly four queries — q23, q24, q25, q26 — and on no others**. The three below kept an identical routing
+  decision in both arms, so whatever moved their wall-clock, it was not this change. (An earlier revision justified
+  their immunity with "none has a `Sort` node". That was wrong — q8 is `… ORDER BY u DESC LIMIT 10` and does have
+  one; what makes it immune is that its `Sort` sits over an `Agg` rather than a `theodb_columnar_project`, so
+  `try_swap_topk`'s parent check never matches. The element-wise routing comparison is both stronger and simpler,
+  because it does not depend on my reading of any plan.)
 
   | Query | shape | late-mat on | late-mat off | delta |
   |---|---|---|---|---|
