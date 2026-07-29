@@ -55,6 +55,11 @@ run pending-rows              "$BENCH/m168_pending_rows.sql" "" 1
 run large-k                   "$BENCH/m168_large_k.sql"     "" 1
 run window-probe              "$BENCH/m168_window_probe.sql" "" 1
 run cancel-oracle             "$BENCH/m168_cancel_oracle.sql" "" 1
+# O self-test do gate de cancelamento como ARTEFATO, não como afirmação. Uma revisão apontou que o verdict listava
+# "self-test aborta" numa tabela de coisas medidas, mas o coletor nunca passava a flag — a linha era verificada por
+# leitura de código, não por execução. Espera-se que ESTE log contenha um ERROR; é o ponto.
+run cancel-oracle-selftest    "$BENCH/m168_cancel_oracle.sql" "-v gate_selftest=1" 1
+run routing-shapes            "$BENCH/m168_routing_shapes.sql" "" 1
 run inversion-narrow          "$BENCH/m168_inversion_narrow.sql" "" 1
 run inversion-wide-small-k    "$BENCH/m168_inversion.sql"    "" 1
 echo

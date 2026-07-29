@@ -3,7 +3,7 @@
 **Data:** 2026-07-29 · **Fecha:** item 2b do DoD do M167 (#215) e o falso-admit medido em #218
 **Box:** `theo-e2e-runner` (DigitalOcean, 32 GB / 8 vCPU) — NÃO a c6a.4xlarge canônica do ClickBench
 **Dados:** ClickBench `hits` / `hits_heap`, 1.000.000 linhas, 105 colunas — verificados por `count(*)`
-**Binário:** `so_md5=e010375381ae… (ver o cabeçalho de cada artefato)`
+**Binário:** `so_md5=7a242fcae496… (ver o cabeçalho de cada artefato)`
 **Artefatos:** `docs/benchmarks/m168-artifacts/`
 
 ## 1. Memória — os dois braços, na mesma sessão
@@ -12,7 +12,7 @@
 dentro de uma sessão, e `benchmarks/m168_peak_summarize.py` produz a tabela a partir do log commitado. A primeira
 versão deste verdict comparava um "antes" medido num binário anterior cujo log nunca foi commitado — a razão
 principal tinha numerador não-verificável (achado de review). Agora o par é um artefato só, mesmo processo,
-mesmo binário (`peak-both-arms.log`, `so_md5=e010375381ae…`).
+mesmo binário (`peak-both-arms.log`, `so_md5=7a242fcae496…`).
 
 | Consulta | eager: batches / bytes | streaming: batches / maior batch | razão |
 |---|---|---|---|
@@ -87,38 +87,66 @@ que este projeto escreveu depois do M162.
 O summarizer passa a usar **teste do sinal exato, bilateral**, sobre os pares (implementação em
 `m168_ab_summarize.py`, sem dependência externa — é uma soma binomial):
 
-| Consulta | razões (2 execuções) | pares favoráveis | p (sinal, bilateral) | leitura |
+| Consulta | **razão das medianas**, por execução | pares favoráveis | p (sinal, bilateral) | leitura |
 |---|---|---|---|---|
-| **q23** | 0,790 · 0,746 | **12 / 12** | **0,0005** | **efeito pareado real** |
-| q24 | 1,038 · 0,957 | 6 / 12 | 1,00 | sem efeito |
-| q25 | 0,985 · 0,972 | 6 / 12 | 1,00 | sem efeito |
-| q26 | 0,966 · 1,035 | 7 / 12 | 0,77 | sem efeito |
+| **q23** | 0,820 · 0,818 | **12 / 12** | **0,0005** | **efeito pareado real, a favor** |
+| **q24** | 1,000 · 1,054 | **2 / 12** | **0,039** | **efeito pareado real, CONTRA — ver abaixo** |
+| q25 | 1,061 · 1,029 | 3 / 12 | 0,15 | sem efeito |
+| q26 | 1,009 · 1,050 | 6 / 12 | 1,00 | sem efeito |
+
+**O q24 regride, e isso não é ruído de uma coleta.** Nesta coleta o teste do sinal cruzou o limiar (2/12,
+p = 0,039) na direção desfavorável, e olhando as três coletas a razão do q24 **nunca ficou abaixo de 1 em média**:
+
+| Coleta | binário | sinal | p | razões |
+|---|---|---|---|---|
+| A | `e010375381ae` | 7/12 | 0,77 | 1,035 · 1,024 |
+| B | `1eaec080b901` | 6/12 | 1,00 | 1,038 · 0,957 |
+| **C (esta)** | `7a242fcae496` | **2/12** | **0,039** | 1,000 · 1,054 |
+
+A leitura honesta: **há um custo pequeno e consistente na projeção estreita — da ordem de 2 a 5%** — que as duas
+primeiras coletas não tinham amostra para separar do ruído e esta separou. Não é regressão introduzida pela
+rodada 8: o que ela acrescentou ao caminho quente são duas leituras de `i32` por chunk-group (200 por consulta) e
+um lookup em `thread_local` por plano. O custo é estrutural do desenho — 100 batches em vez de 1 significa 100
+travessias de plano do DataFusion, e onde não há memória a economizar essa travessia não se paga.
+
+Isso **não** anula o resultado: q24, q25 e q26 economizam 31,6×, 21,9× e 31,6× de memória cada. Mas a frase
+"não há efeito nas projeções estreitas", que as coletas A e B sustentavam, deixou de ser sustentável — e trocá-la
+por "há um custo de alguns por cento" é a diferença entre reportar e vender.
+
+**A coluna de razões acima é `mediana(stream) / mediana(eager)` por execução** — é o que o SQL do harness computa
+(`m168_stream_ab.sql:72`), e **não** é a mesma estatística da regra de agregação fixada logo abaixo. Rotular as
+duas com a palavra "razão" foi um achado de review: quem lesse 0,746 como uma mediana-de-razões derivaria 25,4%,
+que nenhum subconjunto sustenta. Sob a regra declarada, estas duas execuções dão 0,831 e 0,821. As duas
+estatísticas concordam na direção e no sinal; a magnitude publicada vem sempre da regra declarada, nunca desta
+coluna.
 
 Fonte de todas as linhas desta seção: **`docs/benchmarks/m168-artifacts/paired-ab-stream.log`** (2 execuções ×
-6 pares, `so_md5=e010375381ae7ad9069e4a38a5d6c9c6`). Reproduzível com
+6 pares, `so_md5=7a242fcae49602ba9625cd73e7680201`). Reproduzível com
 `python3 benchmarks/m168_ab_summarize.py docs/benchmarks/m168-artifacts/paired-ab-stream.log`.
 
-**A magnitude publicável é a do regime aquecido.** Os pares 1–2 são frios (0,625 · 0,743 · 0,638 · 0,701) e
+**A magnitude publicável é a do regime aquecido.** Os pares 1–2 são frios (0,677 · 0,610 · 0,699 · 0,756) e
 inflam o ganho agregado. **Regra de agregação, fixada aqui e usada em todo o documento: mediana das razões
 pareadas** — uma versão anterior citava média para um subconjunto e mediana para outro, e daí saiu um "18,9%"
 que não é nenhum dos dois (achado de review; nenhum agregado do conjunto o produzia):
 
 | Subconjunto | n | mediana das razões | ganho |
 |---|---|---|---|
-| todos os pares | 12 | 0,790 | 21,0% |
-| pares 3–6 | 8 | 0,840 | 16,0% |
-| **pares 5–6** | 4 | **0,858** | **14,2%** |
+| todos os pares | 12 | 0,828 | 17,2% |
+| pares 3–6 | 8 | 0,857 | 14,3% |
+| **pares 5–6** | 4 | **0,876** | **12,4%** |
 
-**Publico o menor: o q23 é ~14% mais rápido em regime, com 12/12 pares favoráveis (p = 0,0005).** Toda
+**Publico o menor: o q23 é ~12% mais rápido em regime, com 12/12 pares favoráveis (p = 0,0005).** Toda
 alternativa do conjunto é mais lisonjeira. E o contrabalanceamento sustenta: nos seis pares em que o *streaming*
 rodou primeiro — a posição desfavorecida pelo aquecimento — ele venceu 6/6.
 
-**Estabilidade através de binários.** Esta é a **quarta** coleta independente, e a segunda com um binário
-diferente (`1eaec080b901`, que inclui a correção do safe-point da § 3.6). O sinal do q23 não se moveu — 12/12,
-p = 0,0005 nas quatro. A magnitude oscila com a máquina compartilhada (12,0% na coleta anterior, 14,2% nesta),
-o que é a razão de o documento publicar o menor subconjunto e não o agregado mais lisonjeiro. As consultas de
-projeção estreita também não se moveram em *classe* — nenhuma tem efeito pareado nas duas coletas — mas suas
-contagens de sinal trocaram entre 6/12 e 7/12, que é o que "sem efeito" significa na prática.
+**Estabilidade através de binários.** Esta é a **quinta** coleta independente, sobre **três** binários
+diferentes. O sinal do q23 não se moveu em nenhuma delas — **12/12, p = 0,0005 nas cinco**. É o resultado mais
+estável da série. A magnitude oscila com a máquina compartilhada (12,0% · 14,2% · 12,4% nas três últimas), o que
+é a razão de o documento publicar sempre o menor subconjunto e não o agregado mais lisonjeiro.
+
+O que **se** moveu foi a leitura das projeções estreitas, e para pior — ver o quadro do q24 acima. Duas coletas
+diziam "sem efeito"; a terceira, com o mesmo desenho, detectou o custo. Uma conclusão que muda quando a amostra
+cresce não era conclusão: era ausência de poder estatístico descrita como ausência de efeito.
 
 Nas três consultas estreitas **não há efeito pareado**. Faz sentido mecanicamente: o ganho do q23 acompanha o
 regime em que a memória também cai 43×, e onde há pouco a economizar não há o que ganhar.
@@ -168,7 +196,7 @@ qualquer um pode reintroduzir o defeito removendo a guarda de `open_streaming_so
 A guarda virou `has_unflushed_pending`, chamável em vez de copiável, e o streaming declina para o eager quando ela
 é verdadeira — fail-closed.
 
-### Estado dos gates no binário final (`so_md5=e010375381ae…`)
+### Estado dos gates no binário final (`so_md5=7a242fcae496…`)
 
 | Gate | Resultado |
 |---|---|
@@ -195,7 +223,7 @@ uma consulta que o eager servia passaria a errar por default. `run_columnar_topk
 
 A pergunta empírica: **existe um `k` em que o eager serve e o streaming não?** Driver commitado
 (`benchmarks/m168_window_probe.sql`, `m168_inversion.sql`, `m168_inversion_narrow.sql`), artefatos em
-`m168-artifacts/`, todos com `so_md5=e010375381ae…`.
+`m168-artifacts/`, todos com `so_md5=7a242fcae496…`.
 
 | Cenário | streaming | eager |
 |---|---|---|
@@ -256,32 +284,41 @@ ao fim. Eu adicionei o safe-point **no lugar certo** — a fronteira de chunk-gr
 abria o holdoff e chamava `pgrx::check_for_interrupts!()` dentro do `block_on`, com um comentário afirmando que
 "um longjmp daqui vira panic pelo caminho que a revisão de pgrx traçou e verificou limpo".
 
-**Essa afirmação é falsa no pgrx 0.19**, e a fonte vendorizada diz isso em duas linhas:
+**E essa afirmação de BLOCKER era ela própria falsa** — o revisor a retratou na rodada seguinte, com fonte, e eu
+confirmei em cinco pontos independentes. O `pgrx` 0.19 **converte** o `ERROR` do PostgreSQL em `panic_any`, e os
+frames Rust **desenrolam** normalmente:
 
-- `check_for_interrupts!` expande para a extern crua — `if InterruptPending != 0 { ProcessInterrupts() }`
-  (`pgrx-pg-sys-0.19.0/src/submodules/elog.rs:587`).
-- O único lugar que instala um `sigsetjmp` e converte o longjmp do PostgreSQL em panic é `pg_guard_ffi_boundary`
-  (`pgrx-pg-sys-0.19.0/src/submodules/ffi.rs`), que **não** embrulha chamadas comuns de `pg_sys`.
+- o **único** bloco `extern "C-unwind"` do `pgrx-pg-sys-0.19.0` carrega `#[pgrx_macros::pg_guard]`
+  (`src/include/pg18.rs:35462`), e `ProcessInterrupts` está dentro dele (`:39525`);
+- o macro `pg_guard` reescreve **cada** função do bloco para `pg_guard_ffi_boundary(move || …)`
+  (`pgrx-macros-0.19.0/src/rewriter.rs:184-193`);
+- `ffi.rs:85` declara que a função *"is used to protect **every** bindgen-generated Postgres `extern "C-unwind"`
+  function"*;
+- e **este repositório já dizia isso corretamente**, em `theodb_rs/src/am/build.rs:466` e em
+  `theodb_rs/Cargo.toml:85-86`.
 
-Então o `ereport(ERROR)` de dentro do `ProcessInterrupts` faz `siglongjmp` direto para o `PG_exception_stack`,
-**pulando todos os frames Rust vivos**: runtime tokio, `SessionContext`, plano físico, as k linhas retidas do
-TopK, o `RecordBatch` em voo, o `relation_close`. Consequências, em ordem de gravidade: o `EnterRuntimeGuard` do
-tokio nunca roda seu `Drop`, o thread-local fica `Entered`, e **o próximo `block_on` da mesma conexão entra em
-`panic!("Cannot start a runtime from within a runtime")`** — como o backend é por conexão, toda consulta
-DataFusion seguinte daquela sessão morre; a memória Rust vazada é `malloc`, que o reset de contexto do PG no
-abort não recupera; e o `relation_close` pulado vira warning de referência de relcache.
+Ou seja: o código original era seguro, e o comentário que eu escrevi ao "corrigi-lo" contradizia o próprio crate.
+**A falsidade era mais cara que o defeito alegado.** Há cinco `check_for_interrupts!()` vivos em laços de
+`CREATE INDEX` (`am/build.rs:420,474,487,812`; `bench_symqg.rs:76`); um revisor futuro aplicando o racional falso
+os declararia BLOCKER em bloco ou os removeria, e `CREATE INDEX` ficaria incancelável.
 
-**O projeto já sabia disso.** O achado está no repositório desde o M98, em
-`theodb_rs/src/am/datafusion_probe.rs:10-14`, e diz exatamente o cenário — inclusive a nota de que o executor
-real "não deve segurar durante um scan colunar inteiro; deve servir interrupções ENTRE batches". Eu li aquele
-arquivo, implementei a metade certa da instrução (o lugar) e contradisse a outra metade (o mecanismo) num
-comentário que afirmava ter verificado.
+**O desenho novo permaneceu — pelas razões verdadeiras, não pela alegada.** `interrupt_is_pending()` lê os flags
+e devolve `DataFusionError`; o `check_for_interrupts!()` vem depois do `drop(held)`. Duas razões o sustentam, e
+bastam: (1) não desenrolar por dentro de frames async de terceiros — um panic dentro do `poll_next` atravessa o
+executor do tokio e o plano do DataFusion, código cuja exception-safety não auditamos; devolver `Err` faz o
+DataFusion desmontar o plano pelo caminho que ele mesmo testa; (2) ponto de cancelamento determinístico. Isso
+torna o desenho mais fácil de auditar, **não** torna o anterior inseguro — e a diferença entre essas duas frases
+é o que esta seção errou por uma rodada inteira.
 
-**A correção troca o mecanismo, não o lugar.** `interrupt_is_pending()` só **lê** `InterruptPending` +
-`QueryCancelPending`/`ProcDiePending`; quem vê `true` devolve `DataFusionError::Execution("theodb: query
-canceled")`. O stream, o plano e o runtime desenrolam pelos `Drop`s do Rust; só **depois** do `drop(held)` —
-com todo o estado Rust já liberado — é que `run_df_collect_streaming` chama `check_for_interrupts!()` e deixa o
-PostgreSQL levantar o cancelamento de verdade. Não há mais frame Rust para o longjmp pular.
+O `interrupt_is_pending` também cobria só metade dos gatilhos: listava `QueryCancelPending`/`ProcDiePending` e
+o comentário afirmava serem "os dois". São quatro — `ClientConnectionLost` (`tcop/postgres.c:3341`) e
+`TransactionTimeoutPending` (`:3453`) também viram FATAL/ERROR, e sem eles um `SET transaction_timeout` sobre um
+scan longo era ignorado do começo ao fim.
+
+**O que o M98 de fato dizia.** `datafusion_probe.rs:10-14` descreve o cenário do longjmp, e `:16-18` traz a
+instrução operacional — o executor real "não deve segurar durante um scan colunar inteiro; deve servir
+interrupções ENTRE batches". A parte que eu implementei certo (o lugar) veio de lá. A parte que eu errei foi
+inventar um mecanismo para justificá-la.
 
 Isso forçou uma segunda correção acoplada: o fail-open era um `Err(_)` catch-all, e teria **engolido o
 cancelamento** — a consulta ignoraria o `statement_timeout` e ainda refaria o scan inteiro pelo caminho eager.
@@ -299,21 +336,51 @@ antes do timeout, em vez de contar isso como sucesso) e tem self-test de gate.
 
 **Medido, contra o binário corrigido:**
 
-| Asserção | Resultado |
-|---|---|
-| `c1_outcome` — a consulta foi mesmo cancelada | **`canceled`** (SQLSTATE 57014) |
-| `c2_rows_after_cancel` — a sessão serve top-k **streaming** depois | **100** (com trace `theodb_topk_pool` — provando que o caminho streaming rodou) |
-| `c3_eager_rows_after_cancel` — e o caminho **eager** também | **100** (com trace `theodb_decode_batch`) |
-| Controle positivo (`gate_selftest`) | aborta com a assinatura exata: *"Cannot start a runtime from within a runtime"* |
+| Asserção | Resultado | Artefato |
+|---|---|---|
+| `c1_outcome` — a consulta foi mesmo cancelada | **`canceled`** (SQLSTATE 57014) | `cancel-oracle.log` |
+| **`c1_elapsed_ms` vs `c4_full_scan_ms`** — cortou no MEIO? | **190 ms contra 757 ms** | `cancel-oracle.log` |
+| `c2_rows_after_cancel` — a sessão serve top-k **streaming** depois | **100** (trace `theodb_topk_pool` prova que o caminho streaming rodou) | `cancel-oracle.log` |
+| `c3_eager_rows_after_cancel` — e o caminho **eager** também | **100** (trace `theodb_decode_batch`) | `cancel-oracle.log` |
+| Controle positivo, **dois braços** | ambos abortam | `cancel-oracle-selftest.log` |
+| As duas formas de plano do §3.6 | CTAS roteia, `count(*)` não | `routing-shapes.log` |
+
+**A linha do tempo é o gate que faltava, e ela nasceu de um terceiro falso-verde.** Um review construiu o
+contra-exemplo: **apague o `if interrupt_is_pending()` e este oráculo continua verde** — o `statement_timeout`
+arma os flags, o stream percorre os 100 chunk-groups até o fim, e o `check_for_interrupts!()` posterior ao
+`drop(held)` levanta o mesmo 57014. O veredito é idêntico; só o relógio distingue "cancelou no meio" de "cancelou
+no fim". Daí a comparação `c1_elapsed` × `c4_full_scan`, que reprova acima de 50% — e reprova como
+**inconclusivo**, não como sucesso, quando o scan completo é rápido demais para separar os regimes.
+
+O self-test arma os **dois** braços (sessão morta *e* safe-point ausente) e é executado pelo coletor com
+`-v gate_selftest=1`, gravando um artefato próprio. Uma versão anterior listava "self-test aborta" nesta tabela
+sem que o coletor jamais passasse a flag — verificado por leitura de código, publicado como medição.
 
 **Duas armadilhas de falso-verde apareceram ao verificar isto, e as duas teriam publicado uma prova vazia:**
 
-1. **A forma da consulta declinava.** A primeira versão do oráculo envolvia o top-k em `count(*) FROM (…) s`. Medido:
-   `EXPLAIN CREATE TABLE x AS SELECT … LIMIT 100` dá `Limit → Custom Scan (theodb_columnar_agg)`, mas
-   `SELECT count(*) FROM (SELECT … LIMIT 100) s` dá `Aggregate → Limit → Sort` — o pai do Sort deixa de ser um
-   Limit e o admit emite `topk_parent_not_limit`. Os passos de sobrevivência rodavam o **plano nativo**, que não
-   tem runtime tokio algum, e teriam passado idênticos **com** o defeito. Corrigido para CTAS, com a asserção de
-   roteamento repetida **em cada passo** em vez de herdada do C0.
+1. **A forma da consulta não engajava o caminho do top-k.** A primeira versão do oráculo envolvia o top-k em
+   `count(*) FROM (…) s`. Medido (`routing-shapes.log`, artefato desta coleta):
+
+   ```
+   FORMA A — CTAS                      FORMA B — count(*) wrapper
+     Limit                               Aggregate
+       -> Custom Scan                      -> Limit
+            (theodb_columnar_agg)               -> Sort
+                                                   Sort Key: eventtime, counterid, watchid, userid
+                                                     -> Result
+                                                          -> Custom Scan (theodb_columnar_project) on hits
+   ```
+
+   As duas pedem exatamente as mesmas linhas; o que muda é o **pai do nó Sort**. Na forma A ele é um `Limit` e o
+   admit aceita; na B vira um `Aggregate`, o admit emite `topk_parent_not_limit`, e a ordenação é feita pelo
+   `Sort` do próprio PostgreSQL.
+
+   **A precisão importa aqui, e uma versão anterior desta seção a perdeu:** a forma B *não* roda "o plano
+   nativo" puro — ela ainda usa o `theodb_columnar_project`, o CustomScan de projeção do M149. O que ela não
+   engaja é o caminho do **top-k**, que é o único que instancia runtime tokio e DataFusion (`columnar_project.rs`
+   não tem uma referência sequer a nenhum dos dois). Por isso os passos de sobrevivência teriam passado idênticos
+   **com** o defeito presente. Corrigido para CTAS, com a asserção de roteamento repetida **em cada passo** em
+   vez de herdada do C0.
 2. **O binário testado era o antigo.** `theodb_rs` está em `shared_preload_libraries`: o postmaster mapeia o `.so`
    no start e forka os backends com ele. Depois do `cargo pgrx install`, `/proc/<pid>/maps` mostrava
    `theodb_rs.so (deleted)` — o cluster seguia executando o código anterior, e o oráculo "passava" sem exercitar
@@ -368,15 +435,42 @@ Revalidado após a remoção: oráculos verdes, 400 batches de stream (o caminho
 
 ## 7. Reprodução
 
+**Tudo de uma vez, com proveniência por artefato** — é o caminho recomendado, e existe porque uma revisão
+encontrou o verdict citando um `so_md5` que nenhum artefato carregava:
+
 ```bash
-# pico (o postmaster PRECISA subir com a variável — o backend herda dele, não do psql)
-THEODB_ADMIT_TRACE=1 pg_ctl -D <datadir> -w start
-PGOPTIONS='-c work_mem=64MB' psql -f /tmp/peak.sql   # conta as linhas *_stream vs eager
+./benchmarks/m168_collect_all.sh     # 10 artefatos, um so_md5, um postmaster; imprime o hash a citar
+```
 
-# A/B pareado
-psql -f benchmarks/m168_stream_ab.sql
+**Duas verificações obrigatórias antes de confiar em qualquer artefato.** As duas já produziram falso-verde nesta
+série:
 
-# correção, nos dois estados da GUC
-./benchmarks/m167_run_oracles.sh
+```bash
+# 1. o postmaster está com o .so NOVO? (theodb_rs está em shared_preload_libraries)
+D=$(psql -tAc "SHOW data_directory"); PID=$(head -1 $D/postmaster.pid)
+grep theodb_rs /proc/$PID/maps | head -1        # "(deleted)" => binário obsoleto, reinicie
+psql -tAc "SELECT pg_postmaster_start_time()"   # tem de ser POSTERIOR ao mtime do .so
+
+# 2. o canal de trace está vivo? (o backend herda do POSTMASTER, não do psql)
+tr '\0' '\n' < /proc/$PID/environ | grep THEODB_ADMIT_TRACE
+```
+
+Reiniciar com as duas coisas certas:
+
+```bash
+su - <pguser> -c "THEODB_ADMIT_TRACE=1 pg_ctl -D <datadir> -m fast restart -o '-p <port>'"
+```
+
+Peças isoladas:
+
+```bash
+psql -f benchmarks/m168_peak.sql          # pico; some com m168_peak_summarize.py
+psql -f benchmarks/m168_stream_ab.sql     # A/B pareado; some com m168_ab_summarize.py
+psql -f benchmarks/m168_cancel_oracle.sql # cancelamento (gate diferencial por relógio)
+psql -f benchmarks/m168_routing_shapes.sql # as duas formas de plano do § 3.6
+./benchmarks/m167_run_oracles.sh          # regressão do M167
 PGOPTIONS='-c theodb.enable_columnar_topk_stream=off' psql -f benchmarks/m167_hits_topk_ab.sql
+
+# os guards dos summarizers (lógica pura, sem banco) — 4 deles são controles positivos
+python3 -m pytest benchmarks/test_m168_summarizer_guards.py
 ```

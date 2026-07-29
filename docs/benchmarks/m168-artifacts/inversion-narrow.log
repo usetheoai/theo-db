@@ -1,7 +1,7 @@
-=== inversion-narrow (execução 1/1) start 2026-07-29T15:30:59+00:00 ===
-so_md5=1eaec080b901dc7a648c714302a8f1cf
+=== inversion-narrow (execução 1/1) start 2026-07-29T15:59:34+00:00 ===
+so_md5=7a242fcae49602ba9625cd73e7680201
 so_path=/root/.pgrx/18.4/pgrx-install/lib/postgresql/theodb_rs.so
-postmaster=2026-07-29 15:27:52.222206+00
+postmaster=2026-07-29 15:55:08.621968+00
 SET
 SET
 SET
@@ -133,4 +133,4 @@ psql:/root/theo-db/benchmarks/m168_inversion_narrow.sql:17: ERROR:  df_executor:
 psql:/root/theo-db/benchmarks/m168_inversion_narrow.sql:18: ERROR:  relation "t2" does not exist
 LINE 1: SELECT count(*) AS stream_off_rows FROM t2;
                                                 ^
-=== inversion-narrow (execução 1/1) rc=0 end 2026-07-29T15:31:03+00:00 ===
+=== inversion-narrow (execução 1/1) rc=0 end 2026-07-29T15:59:37+00:00 ===

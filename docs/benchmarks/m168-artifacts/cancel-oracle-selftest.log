@@ -1,4 +1,4 @@
-=== cancel-oracle (execução 1/1) start 2026-07-29T15:59:31+00:00 ===
+=== cancel-oracle-selftest (execução 1/1) start 2026-07-29T15:59:33+00:00 ===
 so_md5=7a242fcae49602ba9625cd73e7680201
 so_path=/root/.pgrx/18.4/pgrx-install/lib/postgresql/theodb_rs.so
 postmaster=2026-07-29 15:55:08.621968+00
@@ -37,7 +37,6 @@ psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:99: WARNING:  theodb_decode
 psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:99: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
 psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:99: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
 psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:99: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:99: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
 DO
 RESET
 ### M168-C2: A SESSÃO SOBREVIVEU? — este é o teste, não o C1
@@ -273,14 +272,16 @@ psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:169: WARNING:  theodb_admit
 psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:169: WARNING:  theodb_admit_decline: topk_parent_not_limit
              q              |    v     
 ----------------------------+----------
- c1_elapsed_ms              | 190
+ c1_elapsed_ms              | 163
  c1_outcome                 | canceled
  c2_rows_after_cancel       | 100
  c3_eager_rows_after_cancel | 100
- c4_full_scan_ms            | 757
+ c4_full_scan_ms            | 638
 (5 rows)
 
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:242: NOTICE:  M168 CANCEL GATE ok: o top-k streaming foi cancelado de verdade (57014) e a sessão continuou servindo consultas DataFusion nos dois caminhos — o estado Rust desenrolou antes do longjmp.
-DO
-DROP TABLE
-=== cancel-oracle (execução 1/1) rc=0 end 2026-07-29T15:59:33+00:00 ===
+### GATE SELF-TEST ARMADO: dois braços — o gate abaixo DEVE abortar em AMBOS
+UPDATE 1
+UPDATE 1
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:242: ERROR:  M168 CANCEL GATE FAILED: c1_elapsed_ms=638 contra c4_full_scan_ms=638: o cancelamento levou mais da metade do scan completo, ou seja NÃO foi notado na fronteira de chunk-group. É a assinatura de um safe-point ausente ou inerte; c2_rows_after_cancel=ERRO:XX000:Cannot start a runtime from within a runtime: a sessão NÃO sobreviveu ao cancelamento. É a assinatura do longjmp atravessando os frames Rust (runtime tokio nunca silenciado). Ver interrupt_is_pending em df_executor.rs; 
+CONTEXT:  PL/pgSQL function inline_code_block line 57 at RAISE
+=== cancel-oracle-selftest (execução 1/1) rc=3 end 2026-07-29T15:59:34+00:00 ===

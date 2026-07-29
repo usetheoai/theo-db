@@ -19,12 +19,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   **maior bloco decodificado de uma vez** num `SELECT *` caiu de **772 MiB para 17,9 MiB (43×)** — abaixo do `work_mem` da sessão, e não mais acima
   dele (#215, #218). O consumo total do processo é maior que esse bloco e foi medido em parte: a retenção interna
   do ordenador ficou entre 0,83 e 2,41 MB. A tabela passa a ser decodificada em partes, uma de cada vez, em vez de inteira de uma vez.
-  Resultado byte a byte idêntico ao anterior. No tempo, o `SELECT *` largo ficou **~14% mais rápido** depois que
-  o cache aquece — o caminho novo venceu **12 de 12 comparações pareadas** (teste do sinal, p = 0,0005), inclusive
-  nas seis em que ele correu na posição desfavorecida, e esse sinal se repetiu em quatro coletas independentes,
-  duas delas com binários diferentes. Nas consultas de projeção estreita **não há efeito**
-  (6/12, 6/12 e 7/12 vitórias; p = 1,00, 1,00 e 0,77): onde há pouca memória a economizar, não há tempo a
-  ganhar. A medição foi feita
+  Resultado byte a byte idêntico ao anterior. No tempo, o `SELECT *` largo ficou **~12% mais rápido** depois que
+  o cache aquece — o caminho novo venceu **12 de 12 comparações pareadas** (teste do sinal, p = 0,0005), e esse
+  sinal se repetiu em **cinco coletas independentes sobre três binários**. Nas consultas de projeção estreita a
+  troca é o inverso e menor: elas **ficam ~2 a 5% mais lentas** (medido de forma detectável numa das coletas,
+  2/12 vitórias, p = 0,039) em troca de 22× a 32× menos memória — onde há pouca memória a economizar, a
+  travessia extra não se paga. A medição foi feita
   numa máquina compartilhada, então o número merece replicação; o desenho pareado é o que o torna defensável
   apesar disso.
   Reversível com `theodb.enable_columnar_topk_stream = off`. Método, números por consulta e ressalvas
@@ -44,6 +44,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - **O recuo automático deixou de mascarar erros que não são de memória.** Ele foi escrito para um caso — o
   orçamento de memória não caber — mas capturava qualquer falha, incluindo erro de integridade de dados e o
   próprio cancelamento acima. Agora só o estouro de memória aciona o recuo; o resto é reportado.
+- **`transaction_timeout` e queda de conexão passam a interromper uma consulta colunar longa.** O reconhecimento
+  de cancelamento cobria só `statement_timeout`/`Ctrl-C` e `pg_terminate_backend`; um `SET transaction_timeout`
+  sobre uma varredura longa era ignorado até o fim, e o mesmo valia para o cliente ter desaparecido. É a mesma
+  falha da entrada acima, num conjunto mais estreito de gatilhos.
+- **Uma consulta cancelada volta a reportar cancelamento (SQLSTATE 57014), não erro interno.** Numa janela
+  estreita — quando o cancelamento é reconhecido mas o PostgreSQL ainda não pode levantá-lo — a consulta saía
+  como erro interno genérico, sem indicar ao cliente que ela havia sido cancelada.
 
 ### Changed
 - **Recuo automático quando o caminho novo não cabe na memória:** se o top-k colunar por partes não couber no

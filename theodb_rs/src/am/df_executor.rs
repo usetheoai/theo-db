@@ -60,34 +60,55 @@ impl Drop for HeldInterrupts {
 /// páginas — antes o decode acontecia fora dele. Sem um safe-point, um scan de 100M linhas ignora Ctrl-C,
 /// `statement_timeout` e `pg_terminate_backend` do começo ao fim (achado de review).
 ///
-/// A PRIMEIRA TENTATIVA DE SAFE-POINT ESTAVA ERRADA, e do jeito mais caro: ela abria o holdoff e chamava
-/// `pgrx::check_for_interrupts!()` no meio do `block_on`, sob a alegação — escrita no comentário — de que "um
-/// longjmp daqui vira panic". **Isso é falso no pgrx 0.19.** O macro expande para a extern crua
-/// (`pgrx-pg-sys-0.19.0/src/submodules/elog.rs:587`: `if InterruptPending != 0 { ProcessInterrupts() }`), e o
-/// único lugar que instala um `sigsetjmp` e converte o longjmp do PG em panic é `pg_guard_ffi_boundary`
-/// (`submodules/ffi.rs`), que **não** embrulha chamadas comuns de `pg_sys`. O `ereport(ERROR)` de dentro do
-/// `ProcessInterrupts` faz `siglongjmp` direto para o `PG_exception_stack` do PostgreSQL, **pulando todos os
-/// frames Rust no caminho** — runtime tokio vivo, `SessionContext`, plano físico, as k linhas retidas do TopK, o
-/// `RecordBatch` em voo e o `relation_close`.
+/// POR QUE LER-E-DEVOLVER-`Err`, E NÃO CHAMAR `check_for_interrupts!()` AQUI. A razão **não** é a que uma versão
+/// anterior deste comentário afirmava. Ela dizia que o macro dispararia um `siglongjmp` pulando os frames Rust,
+/// porque "`pg_guard_ffi_boundary` não embrulha chamadas comuns de `pg_sys`". **Isso é falso**, e a fonte
+/// vendorizada o refuta em três pontos: o **único** bloco `extern "C-unwind"` do `pgrx-pg-sys-0.19.0` carrega
+/// `#[pgrx_macros::pg_guard]` (`src/include/pg18.rs:35462`), com `ProcessInterrupts` dentro dele (`:39525`); o
+/// macro `pg_guard` reescreve **cada** função do bloco para `pg_guard_ffi_boundary(move || …)`
+/// (`pgrx-macros-0.19.0/src/rewriter.rs:184-193`); e o `ffi.rs:85` declara que a função "is used to protect
+/// **every** bindgen-generated Postgres `extern "C-unwind"` function". O PG `ERROR` vira `panic_any`, e os frames
+/// Rust **desenrolam**. Este repositório já dizia isso corretamente em `am/build.rs:466` e em
+/// `Cargo.toml:85-86` — o comentário anterior contradizia o próprio crate.
 ///
-/// O projeto já tinha registrado exatamente este risco e o fechado, e o achado está no repositório desde o M98:
-/// `am/datafusion_probe.rs:10-14` diz que "um cancel disparando no meio do `block_on` daria longjmp direto PARA
-/// ALÉM do runtime tokio vivo — nunca rodando os `Drop`s do Rust que o silenciam, vazando-o / rasgando o estado
-/// do PG". O safe-point do M168 reabriu esse risco (achado de review, verificado na fonte vendorizada).
+/// **Isso importa muito além deste arquivo:** há cinco `check_for_interrupts!()` vivos em laços de
+/// `CREATE INDEX` (`am/build.rs:420,474,487,812`; `bench_symqg.rs:76`). Sob o racional falso eles seriam ou
+/// declarados BLOCKER em bloco, ou removidos — e o `CREATE INDEX` ficaria incancelável. A falsidade custaria mais
+/// do que o defeito que ela alegava corrigir.
 ///
-/// O consertado: aqui só se **lê** o estado. Quem vê `true` devolve um `Err` do DataFusion, o stream/plano/runtime
-/// desenrolam pelo caminho normal do Rust, e só **depois** do `drop(held)` — com todo o estado Rust já liberado —
-/// `run_df_collect_streaming` chama `check_for_interrupts!()` para que o PostgreSQL levante o cancelamento de
-/// verdade. O lugar do safe-point estava certo; o mecanismo, não.
+/// As razões **verdadeiras** para o desenho ler-e-devolver-`Err` são duas, e bastam:
+///
+/// 1. **Não desenrolar por dentro de frames async de terceiros.** Um panic levantado dentro do `poll_next`
+///    atravessa o executor do tokio e o plano físico do DataFusion — código que não escrevemos e cuja
+///    exception-safety não auditamos. Devolver `Err` faz o DataFusion desmontar o plano pelo caminho que ele
+///    próprio testa, e o panic acontece depois, em código nosso.
+/// 2. **Ponto de cancelamento determinístico.** O erro sobe pela mesma borda por onde sobe qualquer outro erro do
+///    stream, então há um lugar só onde raciocinar sobre o que já foi liberado.
+///
+/// Nada disso torna o desenho anterior *inseguro* — torna este mais fácil de auditar.
 ///
 /// SAFETY: leitura de globais do backend; só pode ser chamada na thread do backend.
 unsafe fn interrupt_is_pending() -> bool {
-    // `QueryCancelPending`/`ProcDiePending` são os dois que `ProcessInterrupts` transforma em erro. `InterruptPending`
-    // sozinho também cobre eventos benignos (barreiras, notificações), que não devem abortar um scan — mas ele é o
-    // flag que o PG arma primeiro, então testar os três é o que casa com a semântica de "vai virar ERROR".
-    // Os três são `sig_atomic_t` (i32), não `bool` — comparar com 0 é o que o C faz.
+    // `InterruptPending` sozinho também cobre eventos benignos (barreiras, notificações), que não devem abortar um
+    // scan — ele é o flag que o PG arma primeiro. O que decide é o segundo termo: os flags que `ProcessInterrupts`
+    // de fato transforma em ERROR/FATAL.
+    //
+    // Uma versão anterior listava só `QueryCancelPending`/`ProcDiePending` e o comentário afirmava serem "os dois".
+    // São quatro, e o `postgres.c` do PG18 no acervo mostra os outros dois (achado de review):
+    //   * `ClientConnectionLost`        -> FATAL (`tcop/postgres.c:3341`)
+    //   * `TransactionTimeoutPending`   -> ERROR (`tcop/postgres.c:3453`)
+    // Sem `TransactionTimeoutPending`, um `SET transaction_timeout` sobre um scan longo era ignorado do começo ao
+    // fim — a mesma classe de buraco que motivou este safe-point, só mais estreita.
+    //
+    // `IdleInTransactionSessionTimeoutPending` fica DE FORA de propósito: por definição ele só dispara com a sessão
+    // ociosa, e um scan em curso não é uma sessão ociosa.
+    //
+    // Todos são `sig_atomic_t` (i32), não `bool` — comparar com 0 é o que o C faz.
     pg_sys::InterruptPending != 0
-        && (pg_sys::QueryCancelPending != 0 || pg_sys::ProcDiePending != 0)
+        && (pg_sys::QueryCancelPending != 0
+            || pg_sys::ProcDiePending != 0
+            || pg_sys::ClientConnectionLost != 0
+            || pg_sys::TransactionTimeoutPending != 0)
 }
 
 /// Map the decoded columnar columns (name, atttypid, per-row stored bytes) to an Arrow schema + arrays. The stored
@@ -1180,7 +1201,14 @@ pub(super) unsafe fn run_columnar_topk(
             // `columnar partition executed twice`, que vira uma linha de log e uma re-execução silenciosa; e
             // (b) com o safe-point corrigido, o cancelamento chega aqui como `Execution`, e engoli-lo faria a
             // consulta ignorar `statement_timeout`/Ctrl-C **e ainda refazer o scan inteiro pelo caminho eager**.
-            Err(DataFusionError::ResourcesExhausted(e)) => {
+            // `find_root()`, não `match` na variante exata. O DataFusion embrulha `ResourcesExhausted` em
+            // `Context(_, Box(ResourcesExhausted))` num caminho irmão — o `err_with_oom_context` do
+            // `ExternalSorter` (`datafusion-physical-plan-54.0.0/src/sorts/sort.rs:756-762`). Hoje o nosso plano
+            // não passa por lá, mas um upgrade menor de DF que roteie um sort com `fetch` por esse caminho faria o
+            // `match` por variante ERRAR em silêncio, e o fail-open viraria erro duro — exatamente a regressão que
+            // ele existe para evitar (achado de review). `find_root` desembrulha `Context`/`External`/`Shared`
+            // (`datafusion-common-54.0.0/src/error.rs:436`).
+            Err(e) if matches!(e.find_root(), DataFusionError::ResourcesExhausted(_)) => {
                 // INCONDICIONAL. Esconder isto atrás do flag de trace deixaria o usuário sem sinal de que a
                 // consulta acabou de trocar de perfil de memória e de latência. É evento raro (uma vez por
                 // consulta, só quando a pool estoura), então o custo é zero no caminho feliz. Vai para o log do
@@ -1190,7 +1218,21 @@ pub(super) unsafe fn run_columnar_topk(
             }
             // Erro de integridade de dados, cancelamento, guard de re-execução: não são o caso que o fail-open
             // cobre. Sobem.
-            Err(e) => return Err(format!("df_executor: datafusion: {e}")),
+            //
+            // O CANCELAMENTO TEM DE SAIR COMO CANCELAMENTO (57014), não como erro interno. Normalmente ele nem
+            // chega aqui — o `check_for_interrupts!()` depois do `drop(held)` já levantou o 57014. Mas ele vira
+            // no-op se houver um holdoff externo ou `CritSectionCount != 0` (`tcop/postgres.c:3275` retorna
+            // cedo), e aí o `Err` desceria até esta linha e o usuário receberia `df_executor: datafusion: …`
+            // como XX000 pelo que é um cancelamento (achado de review).
+            //
+            // A releitura abaixo NÃO casa a mensagem do erro — isso seria a Regra 8 ao contrário, e a mensagem é
+            // uma constante nossa que qualquer refactor moveria em silêncio. Ela relê o estado do backend, que é
+            // a fonte de verdade: se ainda há interrupção pendente, o PostgreSQL levanta o erro certo com o
+            // SQLSTATE certo, seja qual for a origem do `Err`.
+            Err(e) => {
+                pgrx::check_for_interrupts!();
+                return Err(format!("df_executor: datafusion: {e}"));
+            }
         }
     }
 

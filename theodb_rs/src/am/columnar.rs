@@ -980,11 +980,14 @@ pub(crate) unsafe fn plan_columnar_scan(
     // transação. Torná-la "chamável em vez de copiável" resolveu aquele caso e não impede o próximo: um segundo
     // chamador que esqueça a checagem reintroduz o mesmo defeito em silêncio (achado de review).
     //
-    // Este `debug_assert` prende a obrigação no callee. É `debug_assert` e não `assert` de propósito: em release
-    // o custo de um `SPI`/scan de catálogo por plano não se justifica para uma invariante que os builds de teste
-    // (e a CI cassert) já exercitam — mas em debug qualquer chamador novo que pule a guarda falha alto, aqui,
-    // em vez de devolver linhas silenciosamente incompletas.
-    debug_assert!(
+    // Este `assert` prende a obrigação no callee. Uma versão anterior usava `debug_assert`, justificando que "o
+    // custo de um SPI/scan de catálogo por plano não se justifica em release" — e isso está errado sobre a
+    // própria função, definida vinte linhas acima: `has_unflushed_pending` é um lookup num
+    // `thread_local! HashMap<u32, PendingWrite>` (ver o `PENDING` no topo do módulo), da ordem de nanossegundos,
+    // sem SPI e sem catálogo (achado de review). Com o custo real, `debug_assert` não tinha defesa: o artefato
+    // `--release` é o que embarca, é sobre ele que todos os números do M168 foram medidos, e era exatamente nele
+    // que a guarda não existia.
+    assert!(
         !has_unflushed_pending(rel),
         "plan_columnar_scan chamado com linhas pendentes não descarregadas: o plano seria construído sobre \
          stripes que não contêm as escritas da própria transação. O chamador tem de declinar para o caminho \
