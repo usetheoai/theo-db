@@ -10,11 +10,12 @@
 | Artifact | What it backs | Postmaster |
 |---|---|---|
 | `paired-ab-ctas.log` | § 1 headline (paired CTAS) | wall-clock only — 23:11–23:15Z, i.e. **pre-`e2d0955`** (§ 3) |
-| `suite-final-binary.json` | § 2 routing + suite A/B | **00:17:54Z (final binary)** |
-| `hits-topk-ab.log` | § 3 1M top-k oracle, `rc=0` | **00:17:54Z (final binary)** |
-| `ec-harness.log` | § 3 fixture oracle, `rc=0` | **00:17:54Z (final binary)** |
-| `h0-gate-positive-control.log` | § 3 proof the H0 gate can fail, `rc=3` | **00:17:54Z (final binary)** |
-| `guard-proofs.log` + `benchmarks/m167_guard_proofs.sh` | § 5 ICU-provider and `relpages=0` proofs, `rc=0` | **00:17:54Z (final binary)** |
+| `suite-final-binary.json` + `.log` | § 2 routing + suite A/B | **01:27:21Z (final binary)** |
+| `hits-topk-ab.log` | § 3 1M top-k oracle — H0 `9/9`, FINAL GATE ok, `rc=0` | **01:27:21Z (final binary)** |
+| `ec-harness.log` | § 3 fixture oracle — EC FINAL GATE ok (14 assertions), `rc=0` | **01:27:21Z (final binary)** |
+| `h0-gate-positive-control.log` | § 3 proof the **H0** gate can fail, `rc=3` | **01:27:21Z (final binary)** |
+| `final-gate-positive-control.log` | § 3 proof the **FINAL** gate can fail, `rc=3` | **01:27:21Z (final binary)** |
+| `guard-proofs.log` + `benchmarks/m167_guard_proofs.sh` | § 5 ICU-provider and `relpages=0` proofs, `rc=0` | **01:27:21Z (final binary)** |
 | `b1-latemat-on.json` / `b1-latemat-off.json` / `b1-control.log` | § 6 noise floor + § 7.2 control (both arms) | 23:26:20Z run (**pre-`bf809e7`**, § 3) |
 | `before-1m-SUPERSEDED.json` | § 7.2 first table (the withdrawn baseline) | 27 Jul run |
 | `after-1m.json` | superseded by `suite-final-binary.json`; kept for the record | 23:17Z or earlier |
@@ -49,7 +50,7 @@ numbers independently (§ 7.2).
 ## 2. Routing — the metric that actually discriminates
 
 From `m167-artifacts/suite-final-binary.json` — the 43-query suite re-run against **the binary being merged**
-(`postmaster=00:17:54Z`, `rc=0`, stamped in `suite-final-binary.log`):
+(`postmaster=01:27:21Z`, `rc=0`, stamped in `suite-final-binary.log`):
 
 | Query | `columnar_agg_routed` | `result_ab_identical` |
 |---|---|---|
@@ -163,7 +164,7 @@ this document, and § 1 ran on the oldest of them:
 |---|---|---|
 | § 1 headline (`paired-ab-ctas.log`) | 23:11–23:15Z | **pre-`e2d0955`** — older than both binaries discussed below |
 | § 7.2 control (both arms) | 23:37–23:53Z | pre-`bf809e7` (postmaster 23:26:20Z) |
-| § 2 suite, § 3 oracles, § 5 guard proofs | 00:43–01:19Z | **final (`1ea7e0b`)**, postmaster 00:17:54Z |
+| § 2 suite, § 3 oracles + both gate controls, § 5 guard proofs | 01:27–01:45Z | **final (`ad132ab`)**, postmaster 01:27:21Z |
 
 § 1's internal validity is untouched — both of its arms shared one binary, which is the only property a paired
 toggle needs — but the document previously pinned § 2/§ 3 to the final binary while saying nothing about the number
@@ -173,8 +174,8 @@ a `OnceLock` — planning-time only, and **whatever its state, it was the same i
 which is the property that matters — and `bf809e7` is the fail-closed `INFINITY` flip on an unreachable
 null-syscache path (§ below). Neither touches the executor, so neither can change how long a scan takes.
 
-Both oracles and the § 2 routing table were re-run **after** the final commit, against a
-postmaster restarted at `00:17:54Z` so the shipped `.so` was the one loaded. This matters: the § 7.2 control ran on
+Both oracles, both gate self-tests, the § 5 guard proofs and the § 2 routing table were re-run **after** the final
+commit, against a postmaster restarted at `01:27:21Z` so the shipped `.so` was the one loaded. This matters: the § 7.2 control ran on
 the immediately-preceding binary (postmaster up since `23:26:20Z`, `.so` rewritten at `23:44:58Z` — PostgreSQL loads
 `shared_preload_libraries` at startup, so the rebuild did not reach those two suites). That leaves the control
 internally valid — **both** of its arms used one identical binary, which is the only property it needed — while the
@@ -191,8 +192,9 @@ paragraph named the `datlocprovider` requirement as the delta — wrong: `git lo
 
 **Every artifact now states its own provenance** rather than relying on this paragraph: each oracle log opens with
 `postmaster=<pg_postmaster_start_time()>` and closes with `rc=<exit code>`, so a reader can pin a result to a
-postmaster image without trusting prose. The two oracle logs and the suite of § 2 all report the `00:17:54Z`
-postmaster; `paired-ab-ctas.log` (§ 1, 23:11–23:15Z) and the § 7.2 control (23:37–23:53Z) predate it.
+postmaster image without trusting prose. The two oracle logs, both gate self-tests, the § 5 guard proofs and the
+§ 2 suite all report the `01:27:21Z` postmaster; `paired-ab-ctas.log` (§ 1, 23:11–23:15Z) and the § 7.2 control
+(23:37–23:53Z) predate it, and the table above says so per artifact.
 
 ## 4. What changed
 
@@ -212,7 +214,8 @@ bounded-heap TopK. The guard declines when the relation's size exceeds `work_mem
 ## 5. Two correctness holes found in review and closed
 
 Both were found by independent reviewers, re-verified here, and fixed before release. **Both demonstrations are
-committed** as `m167-artifacts/guard-proofs.log` (`postmaster=00:17:54Z`, `rc=0`) — an earlier revision asserted
+committed** as `m167-artifacts/guard-proofs.log` (`postmaster=01:27:21Z`, `rc=0`) and re-runnable via
+`benchmarks/m167_guard_proofs.sh` — an earlier revision asserted
 these two as measured while shipping no artifact for either, which is the same defect the reviewers had just made
 me fix elsewhere.
 
