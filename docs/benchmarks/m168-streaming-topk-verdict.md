@@ -3,7 +3,7 @@
 **Data:** 2026-07-29 · **Fecha:** item 2b do DoD do M167 (#215) e o falso-admit medido em #218
 **Box:** `theo-e2e-runner` (DigitalOcean, 32 GB / 8 vCPU) — NÃO a c6a.4xlarge canônica do ClickBench
 **Dados:** ClickBench `hits` / `hits_heap`, 1.000.000 linhas, 105 colunas — verificados por `count(*)`
-**Binário:** `so_md5=2497c0f5b585… (ver o cabeçalho de cada artefato)`
+**Binário:** `so_md5=dd91bb410d85… (ver o cabeçalho de cada artefato)`
 **Artefatos:** `docs/benchmarks/m168-artifacts/`
 
 ## 1. Memória — os dois braços, na mesma sessão
@@ -12,7 +12,7 @@
 dentro de uma sessão, e `benchmarks/m168_peak_summarize.py` produz a tabela a partir do log commitado. A primeira
 versão deste verdict comparava um "antes" medido num binário anterior cujo log nunca foi commitado — a razão
 principal tinha numerador não-verificável (achado de review). Agora o par é um artefato só, mesmo processo,
-mesmo binário (`peak-both-arms.log`, `so_md5=2497c0f5b585…`).
+mesmo binário (`peak-both-arms.log`, `so_md5=dd91bb410d85…`).
 
 | Consulta | eager: batches / bytes | streaming: batches / maior batch | razão |
 |---|---|---|---|
@@ -66,8 +66,10 @@ todo o rigor.
 
 ## 2. Throughput — publicado, depois de eu tê-lo retirado com o instrumento errado
 
-Esta seção mudou de resposta **cinco** vezes. As quatro primeiras caíram por defeito de desenho ou de ambiente; a
-quinta caiu por defeito do meu *instrumento de decisão*, que é o erro mais instrutivo dos cinco.
+Esta seção mudou de resposta **sete** vezes. As quatro primeiras caíram por defeito de desenho ou de ambiente;
+a quinta caiu por defeito do meu *instrumento de decisão*; a sexta e a sétima caíram por erro de **análise** —
+sobrecorreção e depois clustering ignorado. As sete estão na tabela abaixo, porque um documento que esconde as
+versões erradas não permite julgar a atual.
 
 | # | O que eu afirmei | Por que caiu |
 |---|---|---|
@@ -75,7 +77,9 @@ quinta caiu por defeito do meu *instrumento de decisão*, que é o erro mais ins
 | 2 | "o q24 regride ~8%" | alternava com **5 pares**, e ímpar não contrabalanceia |
 | 3 | "o q23 é ~18% mais rápido" | a mediana sobre 6 pares mistura aquecimento e regime |
 | 4 | **retirei tudo** — "o efeito é da mesma ordem que a dispersão da box" | **falso, e o dado nega**: a dispersão é *entre* pares, o efeito é *dentro* de cada par |
-| 5 | o que está abaixo | — |
+| 5 | "custo pequeno e **consistente** nas estreitas" | **sobrecorreção** — uma das coletas dava −0,2%, e o pool negava |
+| 6 | "as estreitas custam ~2%, p = 0,014" | **clustering ignorado** — o par não é a unidade; a coleta é. Nível-coleta o p era 0,14 |
+| 7 | o que está abaixo | — |
 
 **O que me fez retirar era um teste de faixas marginais NÃO PAREADAS aplicado a um desenho pareado.**
 `m168_ab_summarize.py` comparava `max(stream) < min(eager)` — descartando o pareamento, que é a razão de existir
@@ -89,17 +93,17 @@ O summarizer passa a usar **teste do sinal exato, bilateral**, sobre os pares (i
 
 | Consulta | **razão das medianas**, por execução | pares favoráveis | p (sinal, bilateral) | leitura |
 |---|---|---|---|---|
-| **q23** | 0,836 · 0,833 | **12 / 12** | **0,0005** | **efeito pareado real, a favor** |
-| q24 | 1,017 · 1,058 | 4 / 12 | 0,39 | sem efeito nesta coleta |
-| q25 | 1,081 · 0,973 | 5 / 12 | 0,77 | sem efeito nesta coleta |
-| q26 | 1,057 · 0,999 | 5 / 12 | 0,77 | sem efeito nesta coleta |
+| **q23** | 0,803 · 0,855 | **12 / 12** | **0,0005** | **efeito pareado real, a favor** |
+| q24 | 1,008 · 1,191 | 3 / 12 | 0,15 | sem efeito nesta coleta |
+| q25 | 1,016 · 1,137 | 4 / 12 | 0,39 | sem efeito nesta coleta |
+| q26 | 1,112 · 0,998 | 4 / 12 | 0,39 | sem efeito nesta coleta |
 
-### O agregado das quatro coletas — a única leitura com poder para decidir
+### O agregado das seis coletas — a única leitura com poder para decidir
 
-Nenhuma coleta isolada de 12 pares resolve um efeito de poucos por cento. Quatro coletas dão 48 pares por
+Nenhuma coleta isolada de 12 pares resolve um efeito de poucos por cento. Seis coletas dão 72 pares por
 consulta, e aí o quadro fica estável.
 
-**As quatro coletas, e onde cada uma está** (o `paired-ab-stream.log` do diretório de artefatos é sobrescrito a
+**As seis coletas, e onde cada uma está** (o `paired-ab-stream.log` do diretório de artefatos é sobrescrito a
 cada coleta — só a mais recente vive no HEAD; as anteriores estão no histórico, e sem nomeá-las esta tabela teria
 o mesmo defeito de "numerador não-verificável" que a § 1 diz ter corrigido — achado de review):
 
@@ -109,29 +113,63 @@ o mesmo defeito de "numerador não-verificável" que a § 1 diz ter corrigido �
 | B | `1eaec080b901` | `dbc277f` | `git show dbc277f:…` |
 | C | `7a242fcae496` | `6ace5dd` | `git show 6ace5dd:…` |
 | D | `ba2af99482a4` | `3775d70` | `git show 3775d70:…` |
-| **E (no HEAD)** | `2497c0f5b585` | — | `docs/benchmarks/m168-artifacts/paired-ab-stream.log` |
+| E | `2497c0f5b585` | `a55b51e` | `git show a55b51e:…` |
+| **F (no HEAD)** | `dd91bb410d85` | — | `docs/benchmarks/m168-artifacts/paired-ab-stream.log` |
 
-Cada coleta são 2 execuções × 6 pares = 12 pares por consulta; **5 × 12 = 60**. Uma versão anterior desta seção
-dizia "seis coletas", que não fecha com 48 (seis dariam 72) — o "seis" vinha de contar execuções, não coletas.
+Cada coleta são 2 execuções × 6 pares = 12 pares por consulta; **6 × 12 = 72**. (Uma versão anterior escreveu
+"seis coletas" quando havia **quatro**, porque contava execuções em vez de coletas — o número agora é seis de
+fato, e a tabela acima é o que torna isso verificável em vez de afirmado.)
 
-| Consulta | n | mediana | efeito | sinal | p | por coleta (A·B·C·D·E) |
+| Consulta | n | mediana | efeito | sinal | p | por coleta (A·B·C·D·E·F) |
 |---|---|---|---|---|---|---|
-| **q23** | 60 | **0,812** | **−18,8%** | **60 / 60** | **< 0,0001** | 0,810 · 0,790 · 0,828 · 0,817 · 0,817 |
-| q24 | 60 | 1,029 | +2,9% | 22 / 60 | 0,052 | 0,998 · 1,001 · 1,054 · 1,074 · 1,028 |
-| q25 | 60 | 1,012 | +1,2% | 24 / 60 | 0,16 | 0,985 · 0,994 · 1,041 · 1,042 · 1,036 |
-| q26 | 60 | 1,019 | +1,9% | 27 / 60 | 0,52 | 0,996 · 0,978 · 1,020 · 1,044 · 1,034 |
-| **as 3 estreitas juntas** | **180** | **1,021** | **+2,1%** | **73 / 180** | **0,014** | — |
+| **q23** | 72 | **0,817** | **−18,3%** | **72 / 72** | **< 0,0001** | 0,810 · 0,790 · 0,828 · 0,817 · 0,817 · 0,858 |
+| q24 | 72 | 1,034 | +3,4% | 25 / 72 | 0,013 | 0,998 · 1,001 · 1,054 · 1,074 · 1,028 · 1,089 |
+| q25 | 71 | 1,020 | +2,0% | 28 / 71 | 0,096 | 0,985 · 0,988 · 1,041 · 1,042 · 1,036 · 1,078 |
+| q26 | 72 | 1,023 | +2,3% | 31 / 72 | 0,29 | 0,996 · 0,978 · 1,020 · 1,044 · 1,034 · 1,057 |
+| **as 3 estreitas juntas** | **215** | **1,027** | **+2,7%** | **84 / 215** | **0,0016** | — |
 
-**O q23 é definitivo: 60 comparações pareadas, 60 favoráveis.** Cinco coletas, cinco binários, nenhuma exceção.
+**O q23 é definitivo: 72 comparações pareadas, 72 favoráveis.** Seis coletas, seis binários, nenhuma exceção.
 
-**As estreitas custam ~1,7%, e a alegação vem com três ressalvas que a enfraquecem:** (a) **nenhuma das três
-atinge significância individualmente** — só o agrupamento chega a p = 0,014; (b) **o agrupamento foi formado
-depois de ver a direção do dado**, o que é exatamente o tipo de decisão que infla p-valor, e declarar isso é
-obrigatório; (c) há **multiplicidade** — 20 testes de sinal por consulta×coleta, dos quais se espera 1,0 a
-p ≤ 0,05 sob a nula. A leitura que eu defendo: há provavelmente um custo pequeno, da ordem de 1 a 3%, e ele é
-**consistente com a hipótese mecânica** (100 travessias de plano do DataFusion em vez de 1, sem memória a
-economizar em troca) — mas a hipótese segue **não medida**, e o efeito é pequeno o bastante para que este
-desenho esteja no limite da própria resolução.
+### As estreitas: o p agrupado NÃO se sustenta, e o motivo é clustering
+
+Uma versão anterior publicava **p = 0,014 em negrito** para as três estreitas juntas. Uma revisão o desmontou
+por três caminhos independentes, e eu reproduzi os três:
+
+**(a) Havia um empate contado como derrota.** q25, coleta B, par 6: `eager = stream = 128,7`. O `paired_wins`
+somava o empate em `n` e não em `wins` — e a direção desse erro é **anticonservadora justamente para a alegação
+em disputa**. Corrigido no summarizer: empates saem do teste do sinal. O agrupado vira **73/179, p = 0,0165**.
+
+**(b) A família de multiplicidade declarada era a errada.** O documento dizia "20 testes por consulta×coleta,
+espera-se 1,0 a p ≤ 0,05" — mas o número defendido **não é um daqueles 20**; é um teste agrupado sobre 179
+pares. A família dele são os 4 testes agrupados por consulta mais o grupo post-hoc. Bonferroni sobre 4:
+`0,0165 × 4 = 0,066` — **não sobrevive**. Sobre as 3 estreitas: `0,0495`, na casa decimal.
+
+**(c) Clustering — e este é decisivo.** O par não é a unidade independente; a **coleta** é. Por coleta:
+
+| Coleta | 3 estreitas | mediana | efeito |
+|---|---|---|---|
+| A | 20/36 | 0,994 | **−0,6%** |
+| B | 19/36 | 0,993 | **−0,5%** |
+| C | 11/36 | 1,047 | +4,7% |
+| D | 9/36 | 1,045 | +4,5% |
+| E | 14/36 | 1,029 | +2,9% |
+| F | 11/35 | 1,067 | +6,7% |
+
+**Duas das seis coletas têm o efeito na direção oposta**, e a amplitude entre coletas (7,2 pontos) é **2,7× o
+efeito agregado** (+2,7%). Teste t no nível da coleta sobre as seis medianas: **t = 2,37, df = 5, p = 0,064**.
+O p pareado colapsa de 0,0016 para 0,064 quando a unidade de análise é a que o desenho de fato sustenta.
+
+**A leitura honesta:** quatro das seis coletas mostram custo nas projeções estreitas, duas mostram ganho. A
+**direção firmou** (era 3 de 5, agora 4 de 6, e o p nível-coleta caiu de 0,14 para 0,064); a **significância
+não** — 0,064 continua acima de 0,05, e Bonferroni sobre os 4 testes agrupados a mataria de qualquer forma. A
+hipótese mecânica (100 travessias de plano do DataFusion em vez de 1, sem memória a economizar em troca) segue
+plausível e **não medida**. Uma sétima coleta provavelmente resolve; hoje o número defensável é "há
+provavelmente um custo de ~2 a 3%, no limite da resolução deste desenho".
+
+**O mesmo controle valida o q23.** Cada coleta isolada é **12/12** (p = 0,00049 por si só, seis vezes, em seis
+binários); teste t nível-coleta **t = −19,6, df = 5, p < 0,0001**; e o efeito (−18,3%) é ~2,5× a amplitude entre
+coletas. O contraste é o que valida o método: o mesmo instrumento mantém um resultado em suspenso e confirma o
+outro sem hesitação.
 
 **Duas versões anteriores desta seção erraram nas duas direções**, e vale registrar porque a segunda foi minha
 sobrecorreção da primeira: a rodada 8 disse "sem efeito nas estreitas" quando faltava poder estatístico; a
@@ -148,7 +186,7 @@ estatísticas concordam na direção e no sinal; a magnitude publicada vem sempr
 coluna.
 
 Fonte de todas as linhas desta seção: **`docs/benchmarks/m168-artifacts/paired-ab-stream.log`** (2 execuções ×
-6 pares, `so_md5=2497c0f5b585e00651df79f0e6eed907`). Reproduzível com
+6 pares, `so_md5=dd91bb410d8569a10dbbb189a4f45bf5`). Reproduzível com
 `python3 benchmarks/m168_ab_summarize.py docs/benchmarks/m168-artifacts/paired-ab-stream.log`.
 
 **A magnitude publicável é a do regime aquecido.** Os pares 1–2 são frios (0,627 · 0,744 · 0,649 · 0,711) e
@@ -162,17 +200,33 @@ que não é nenhum dos dois (achado de review; nenhum agregado do conjunto o pro
 | pares 3–6 | 8 | 0,825 | 17,5% |
 | **pares 5–6** | 4 | **0,823** | **17,7%** |
 
-**Publico o menor: o q23 é ~18% mais rápido em regime, com 12/12 pares favoráveis (p = 0,0005).** Toda
-alternativa do conjunto é mais lisonjeira. E o contrabalanceamento sustenta: nos seis pares em que o *streaming*
-rodou primeiro — a posição desfavorecida pelo aquecimento — ele venceu 6/6.
+**A MAGNITUDE PUBLICADA VEM DO POOL DAS CINCO, NÃO DESTA COLETA — e a diferença é grande.** A tabela acima é
+só da coleta E, e uma revisão mostrou que **E era a mais lisonjeira até a coleta F**: pares 5–6 por coleta dão
+12,0 · 14,2 · 12,4 · 16,8 · 17,7 · **13,6**. Pior, o desconto de aquecimento em E é de 0,6 ponto (18,3 → 17,7) contra
+4,4 pontos no pool (18,8 → 14,4) — E é justamente a coleta em que o regime frio quase não infla, e era dela que
+eu publicava. Publicar "o menor subconjunto" **de uma coleta escolhida** não é publicar o menor; é cherry-pick
+com regra declarada.
 
-**Estabilidade através de binários.** Esta é a **quinta** coleta independente, cada uma sobre um binário
-diferente. O sinal do q23 não se moveu em nenhuma: **12/12 em cada uma, 60/60 no agregado**. É o resultado mais
-estável da série, e a tabela de memória saiu **idêntica ao dígito** nas quatro (43,2× / 31,6× / 21,9× / 31,6×) —
+Aplicando a MESMA definição de regime aquecido ao pool das cinco coletas:
+
+| Subconjunto | n | mediana | ganho |
+|---|---|---|---|
+| todos os pares | 72 | 0,817 | 18,3% |
+| pares 3–6 | 48 | 0,846 | 15,4% |
+| **pares 5–6** | 24 | **0,864** | **13,6%** |
+
+**Publico ~13,6%: o q23 é ~13,6% mais rápido em regime aquecido**, com 72/72 pares favoráveis no pool e 12/12 em
+cada uma das seis coletas. É o menor número defensável do conjunto inteiro, não do subconjunto mais
+conveniente. E o contrabalanceamento sustenta: nos pares em que o *streaming* rodou primeiro — a posição
+desfavorecida pelo aquecimento — ele venceu todos.
+
+**Estabilidade através de binários.** Esta é a **sexta** coleta independente, cada uma sobre um binário
+diferente. O sinal do q23 não se moveu em nenhuma: **12/12 em cada uma, 72/72 no agregado**. É o resultado mais
+estável da série, e a tabela de memória saiu **idêntica ao dígito** nas seis (43,2× / 31,6× / 21,9× / 31,6×) —
 esperado, porque é contagem de bytes.
 
 A magnitude do q23 oscila com a máquina compartilhada (16,8% · 17,7% nas duas últimas), o que é a razão de o
-documento publicar sempre o menor subconjunto e não o agregado mais lisonjeiro — o agregado das 48 daria 19,0%.
+documento publicar sempre o menor subconjunto e não o agregado mais lisonjeiro — o agregado das 72 daria 18,3%.
 
 O ganho do q23 acompanha o regime em que a memória também cai 43×; onde há pouco a economizar, não há o que
 ganhar — e é aí que a travessia extra pode até custar (ver o quadro do q24 acima).
@@ -222,7 +276,7 @@ qualquer um pode reintroduzir o defeito removendo a guarda de `open_streaming_so
 A guarda virou `has_unflushed_pending`, chamável em vez de copiável, e o streaming declina para o eager quando ela
 é verdadeira — fail-closed.
 
-### Estado dos gates no binário final (`so_md5=2497c0f5b585…`)
+### Estado dos gates no binário final (`so_md5=dd91bb410d85…`)
 
 | Gate | Resultado |
 |---|---|
@@ -249,7 +303,7 @@ uma consulta que o eager servia passaria a errar por default. `run_columnar_topk
 
 A pergunta empírica: **existe um `k` em que o eager serve e o streaming não?** Driver commitado
 (`benchmarks/m168_window_probe.sql`, `m168_inversion.sql`, `m168_inversion_narrow.sql`), artefatos em
-`m168-artifacts/`, todos com `so_md5=2497c0f5b585…`.
+`m168-artifacts/`, todos com `so_md5=dd91bb410d85…`.
 
 | Cenário | streaming | eager |
 |---|---|---|
@@ -366,24 +420,31 @@ antes do timeout, em vez de contar isso como sucesso) e tem self-test de gate.
 | Asserção | Resultado | Artefato |
 |---|---|---|
 | `c1_outcome` — a consulta foi mesmo cancelada | **`canceled`** (SQLSTATE 57014) | `cancel-oracle.log` |
-| **`c1_chunk_groups` vs `c4_chunk_groups`** — cortou no MEIO? | **17 contra 101** (sinal determinístico) | `cancel-oracle.log` |
+| **`c1_chunk_groups` vs `c4_chunk_groups`** — cortou no MEIO? | **11 contra 101** (sinal determinístico) | `cancel-oracle.log` |
+| `c2_rows_after_cancel` — a sessão serve top-k **streaming** depois | **100** (trace `theodb_topk_pool` prova que o caminho streaming rodou) | `cancel-oracle.log` |
+| `c3_eager_rows_after_cancel` — e o caminho **eager** também | **100** (trace `theodb_decode_batch`) | `cancel-oracle.log` |
+| Controle positivo, **dois braços** | ambos abortam | `cancel-oracle-selftest.log` |
+| As duas formas de plano | CTAS roteia, `count(*)` não | `routing-shapes.log` |
 
-O contador **conta chamadas de `next()`, não chunk-groups**, e os dois diferem nas duas direções: a chamada
-terminal e a sonda de schema contam (por isso um scan completo de 1M lê **101**, não 100), e uma chamada pode
-consumir vários chunk-groups podados pelo zone-map contando 1 (subcontagem sob predicado empurrado). Nenhuma das
-duas atrapalha o propósito: o gate compara C1 e C4 como **razão**, então o +1 constante se cancela. Uma versão
-anterior escrevia "entrega 100" em três arquivos enquanto o artefato dizia 101 — quem escrevesse `= 100` colheria
-falha espúria (achado de review).
+**O que o contador conta.** Ele conta **chamadas de `next()`**, não chunk-groups, e os dois diferem nas duas
+direções. Para cima: a **chamada terminal** (a que devolve `Ok(None)`) conta e não entrega nada — por isso um
+scan completo de 1M lê **101**, e não 100. A sonda de schema **não** é uma causa adicional: ela **é** o
+chunk-group nº 0 (`df_executor.rs:1152` — "The probe IS a chunk-group"). Uma versão anterior atribuía o
+excedente a *duas* causas somando uma unidade — quem fizesse a conta chegava a 102, veria 101, e concluiria que
+o contador subconta (achado de review; é a mesma classe do defeito que ela veio corrigir). Para baixo: uma
+chamada pode consumir uma corrida inteira de chunk-groups podados pelo zone-map (`Ok(false)` → `continue`) e
+ainda contar 1 — **subcontagem sob predicado empurrado**.
+
+Nenhuma das duas atrapalha o propósito, mas o motivo publicado antes estava errado: **razão não cancela
+constante aditiva.** O gate testa `a+1 > (b+1)·0,5`, não `a > b·0,5`; com `b = 100` o limiar anda de 50 para
+49,5. A conclusão (inócuo) vale; a justificativa "o +1 se cancela" não.
 
 O gate ganhou também um **piso**: `c1_chunk_groups < 2` reprova como INCONCLUSIVO. Sem ele, um cancelamento que
 caísse antes do primeiro poll dava `c1 = 0`, a razão passava, e o arquivo imprimia "cortou no MEIO" sem o laço do
 stream ter rodado — com ou sem o safe-point instalado. `c1 ≥ 1` é a única evidência no arquivo de que o braço
 streaming rodou em C1: as sondas `EXPLAIN` não distinguem streaming de eager, porque a GUC é lida em tempo de
-**execução**, não no plano.
-| `c2_rows_after_cancel` — a sessão serve top-k **streaming** depois | **100** (trace `theodb_topk_pool` prova que o caminho streaming rodou) | `cancel-oracle.log` |
-| `c3_eager_rows_after_cancel` — e o caminho **eager** também | **100** (trace `theodb_decode_batch`) | `cancel-oracle.log` |
-| Controle positivo, **dois braços** | ambos abortam | `cancel-oracle-selftest.log` |
-| As duas formas de plano do §3.6 | CTAS roteia, `count(*)` não | `routing-shapes.log` |
+**execução**, não no plano. O valor `1` é ambíguo (é também o que um decline `Ok(None)` → eager deixa), então o
+piso rejeita exatamente o conjunto ambíguo.
 
 **A linha do tempo é o gate que faltava, e ela nasceu de um terceiro falso-verde.** Um review construiu o
 contra-exemplo: **apague o `if interrupt_is_pending()` e este oráculo continua verde** — o `statement_timeout`

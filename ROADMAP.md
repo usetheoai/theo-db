@@ -3094,11 +3094,22 @@ matou a corrida.
 - [ ] **Zero consultas falham com ERRO** a 100M (`byte array offset overflow`, OOM de backend, conexão derrubada).
       Os `statement_timeout` de q17/q21/q22 **não contam** como falha para este DoD, e o artefato os declara
       explicitamente como limitação conhecida de performance — com a nota de que a 1B ficariam 10× piores.
-- [ ] **A corrida completa as 43** sem ser OOM-killed no meio. O M162 morreu em 24/43 deixando 19 nunca executadas;
-      esse número tem de ir a zero.
+- [ ] **O OOM de SCAN acaba** — a corrida não morre por materialização da coluna inteira. O M162 morreu em 24/43
+      deixando 19 nunca executadas; a parte disso que vem do decode O(N) tem de ir a zero.
+- [ ] **O OOM de CARDINALIDADE é medido e declarado, não prometido.** O discover mostrou que streaming limita o
+      *scan*, não a tabela hash do GROUP BY, que é O(grupos distintos) — confirmado no upstream
+      ([datafusion#7191](https://github.com/apache/datafusion/issues/7191), [#13831](https://github.com/apache/datafusion/issues/13831)).
+      q32/q33 (`GROUP BY WatchID, ClientIP`) a 100M produzem dezenas de milhões de grupos. O DoD é: medir o pico
+      dessas consultas, verificar se o spill do DataFusion dispara (ele está habilitado por default, mas hoje
+      nunca é alcançado porque o batch eager vive FORA da MemoryPool), e — se não bastar — **declarar o limite**
+      em vez de prometer "as 43 completam". Uma promessa que a arquitetura não sustenta é pior que um limite
+      documentado.
 - [ ] **A/B byte-idêntico (`diverged=0`) sobre a suíte a 1M ANTES de subir para 100M**, mais o harness de cobertura
-      por tipo do M163. O caminho agregado atende 35 das 43 hoje: um conserto que reduza memória mas altere um byte
-      é regressão pior que o bug que ele corrige.
+      por tipo do M163 **com foco explícito em float**. O caminho agregado atende 35 das 43 hoje: um conserto que
+      reduza memória mas altere um byte é regressão pior que o bug que ele corrige. **Risco nomeado pelo discover:**
+      `sum(float8)`/`avg(float8)` dependem da ordem de associação, que muda com o tamanho do batch (IEEE-754 não é
+      associativo; `arrow-arith/src/aggregate.rs` reduz em árvore sobre `chunks_exact(64)`). Não bate no ClickBench
+      (todos os SUM/AVG roteáveis são inteiros — verificado), mas bate no harness de tipos. `UNBENCHMARKED`.
 - [ ] CHANGELOG `[Unreleased]` + artefato em `docs/benchmarks/`, com a ressalva de caixa (abaixo) em toda alegação.
 
 **Dependencies:** M167 `[x]`. **Não-roadmap:** reusa `ColumnarChunkStream` / `plan_columnar_scan` do spike M168
@@ -3115,7 +3126,10 @@ ser da caixa de 15 GB e não nossa — o baseline separa as duas coisas.
 rodar 1B agora produz relatório de falhas, não benchmark. Fica para o milestone seguinte, condicionado a 100M
 passar limpo.
 
-**Prior art / referências:** `docs/benchmarks/m162-100m-gap-verdict.md` (as 5 falhas, 19/43, a caixa de 15 GB);
+**Prior art / referências:** blueprint do discover em
+`.claude/knowledge-base/discoveries/blueprints/m169-scale-bugs-100m-blueprint.md` (cadeia causal fechada até o
+`expect("byte array offset overflow")` do arrow-rs; ADR M169-1 rejeitando `LargeUtf8`/`Utf8View` com decode eager);
+`docs/benchmarks/m162-100m-gap-verdict.md` (as 5 falhas, 19/43, a caixa de 15 GB);
 `docs/benchmarks/clickbench-fresh-vs-clickhouse-2026-07-27.md` (o baseline a 1M); `docs/benchmarks/m168-streaming-topk-verdict.md`
 (a máquina de decode por chunk-group e o 43,2× de memória no q23); acervo `references/arrow-rs`, `references/datafusion`.
 

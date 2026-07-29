@@ -1,7 +1,7 @@
-=== cancel-oracle-selftest (execução 1/1) start 2026-07-29T19:17:42+00:00 ===
-so_md5=2497c0f5b585e00651df79f0e6eed907
+=== cancel-oracle-selftest (execução 1/1) start 2026-07-29T22:16:37+00:00 ===
+so_md5=dd91bb410d8569a10dbbb189a4f45bf5
 so_path=/root/.pgrx/18.4/pgrx-install/lib/postgresql/theodb_rs.so
-postmaster=2026-07-29 19:14:26.43512+00
+postmaster=2026-07-29 22:13:16.495145+00
 SET
 SET
 SET
@@ -17,276 +17,276 @@ DO
 ### M168-C1: cancela um top-k streaming no meio via statement_timeout
 SET
 SET
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:123: WARNING:  theodb_admit_decline: topk_entered_sort
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:123: WARNING:  theodb_admit_decline: swap_topk_admitted
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:123: WARNING:  theodb_admit_decline: topk_entered_sort
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:123: WARNING:  theodb_admit_decline: topk_parent_not_limit
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:123: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044 probe=1
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:123: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:123: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:123: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:123: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:123: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:123: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:123: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:123: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:123: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:123: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:123: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:123: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:123: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:123: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:123: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:123: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:124: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:124: WARNING:  theodb_admit_decline: swap_topk_admitted
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:124: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:124: WARNING:  theodb_admit_decline: topk_parent_not_limit
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:124: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044 probe=1
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:124: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:124: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:124: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:124: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:124: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:124: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:124: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:124: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:124: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:124: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:124: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:124: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:124: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:124: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:124: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:124: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
 DO
 RESET
 ### M168-C2: A SESSÃO SOBREVIVEU? — este é o teste, não o C1
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_admit_decline: topk_entered_sort
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_admit_decline: swap_topk_admitted
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_admit_decline: topk_entered_sort
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_admit_decline: swap_topk_admitted
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_admit_decline: topk_entered_sort
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_admit_decline: topk_parent_not_limit
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044 probe=1
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=844796
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=844796
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=844796
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=328700
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:150: WARNING:  theodb_topk_pool: peak_reserved=854032 reserved_at_end=0 pool_limit=201326592
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_admit_decline: swap_topk_admitted
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_admit_decline: swap_topk_admitted
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_admit_decline: topk_parent_not_limit
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044 probe=1
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=844796
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=844796
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=844796
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=328700
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:151: WARNING:  theodb_topk_pool: peak_reserved=854032 reserved_at_end=0 pool_limit=201326592
 DO
 ### M168-C3: e o caminho eager da mesma sessão também sobreviveu?
 SET
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:174: WARNING:  theodb_admit_decline: topk_entered_sort
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:174: WARNING:  theodb_admit_decline: swap_topk_admitted
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:174: WARNING:  theodb_admit_decline: topk_entered_sort
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:174: WARNING:  theodb_admit_decline: swap_topk_admitted
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:174: WARNING:  theodb_admit_decline: topk_entered_sort
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:174: WARNING:  theodb_admit_decline: topk_parent_not_limit
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:174: WARNING:  theodb_decode_batch: rows=1000000 bytes=40389116 work_mem_bytes=67108864
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:175: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:175: WARNING:  theodb_admit_decline: swap_topk_admitted
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:175: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:175: WARNING:  theodb_admit_decline: swap_topk_admitted
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:175: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:175: WARNING:  theodb_admit_decline: topk_parent_not_limit
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:175: WARNING:  theodb_decode_batch: rows=1000000 bytes=40389116 work_mem_bytes=67108864
 DO
 SET
 ### M168-C4: quantos avanços de cursor o scan COMPLETO faz? — a referência do sinal diferencial
 SET
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_admit_decline: topk_entered_sort
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_admit_decline: swap_topk_admitted
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_admit_decline: topk_entered_sort
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_admit_decline: swap_topk_admitted
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_admit_decline: topk_entered_sort
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_admit_decline: topk_parent_not_limit
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044 probe=1
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=844796
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=844796
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=844796
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=328700
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:201: WARNING:  theodb_topk_pool: peak_reserved=10250292 reserved_at_end=0 pool_limit=201326592
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_admit_decline: swap_topk_admitted
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_admit_decline: swap_topk_admitted
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_admit_decline: topk_parent_not_limit
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044 probe=1
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=844796
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=844796
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=844796
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=328700
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=336892
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=582652
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=353276
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=451580
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_decode_batch_stream: rows=10000 bytes=386044
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:203: WARNING:  theodb_topk_pool: peak_reserved=10250292 reserved_at_end=0 pool_limit=201326592
 DO
 ### GATE FINAL
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:204: WARNING:  theodb_admit_decline: topk_entered_sort
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:204: WARNING:  theodb_admit_decline: topk_parent_not_limit
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:206: WARNING:  theodb_admit_decline: topk_entered_sort
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:206: WARNING:  theodb_admit_decline: topk_parent_not_limit
              q              |    v     
 ----------------------------+----------
  c1_chunk_groups            | 17
- c1_elapsed_ms              | 175
+ c1_elapsed_ms              | 193
  c1_outcome                 | canceled
  c2_rows_after_cancel       | 100
  c3_eager_rows_after_cancel | 100
  c4_chunk_groups            | 101
- c4_full_scan_ms            | 778
+ c4_full_scan_ms            | 684
 (7 rows)
 
 ### GATE SELF-TEST ARMADO: dois braços — o gate abaixo DEVE abortar em AMBOS
 UPDATE 1
 UPDATE 1
-psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:298: ERROR:  M168 CANCEL GATE FAILED: c1_chunk_groups=101 contra c4_chunk_groups=101: o cancelamento entregou mais da metade dos chunk-groups do scan completo, ou seja NÃO foi notado na fronteira. É a assinatura de um safe-point ausente ou inerte; c2_rows_after_cancel=ERRO:XX000:sessao inutilizavel apos cancelamento: a sessão NÃO sobreviveu ao cancelamento. É a assinatura do um recurso deixado meio-desmontado pelo cancelamento (runtime tokio, SessionContext ou Relation). Ver interrupt_is_pending em df_executor.rs; 
+psql:/root/theo-db/benchmarks/m168_cancel_oracle.sql:300: ERROR:  M168 CANCEL GATE FAILED: c1_chunk_groups=101 contra c4_chunk_groups=101: o cancelamento entregou mais da metade dos chunk-groups do scan completo, ou seja NÃO foi notado na fronteira. É a assinatura de um safe-point ausente ou inerte; c2_rows_after_cancel=ERRO:XX000:sessao inutilizavel apos cancelamento: a sessão NÃO sobreviveu ao cancelamento. É a assinatura do um recurso deixado meio-desmontado pelo cancelamento (runtime tokio, SessionContext ou Relation). Ver interrupt_is_pending em df_executor.rs; 
 CONTEXT:  PL/pgSQL function inline_code_block line 77 at RAISE
-=== cancel-oracle-selftest (execução 1/1) rc=3 end 2026-07-29T19:17:43+00:00 ===
+=== cancel-oracle-selftest (execução 1/1) rc=3 end 2026-07-29T22:16:38+00:00 ===

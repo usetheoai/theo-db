@@ -20,12 +20,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   **maior bloco decodificado de uma vez** num `SELECT *` caiu de **772 MiB para 17,9 MiB (43×)** — abaixo do `work_mem` da sessão, e não mais acima
   dele (#215, #218). O consumo total do processo é maior que esse bloco e foi medido em parte: a retenção interna
   do ordenador ficou entre 0,83 e 2,41 MB. A tabela passa a ser decodificada em partes, uma de cada vez, em vez de inteira de uma vez.
-  Resultado byte a byte idêntico ao anterior. No tempo, o `SELECT *` largo ficou **~18% mais rápido** depois que
-  o cache aquece — juntando **cinco coletas sobre cinco binários**, o caminho novo venceu **60 de 60 comparações
-  pareadas**, sem uma única exceção. Nas consultas de projeção estreita a troca é o inverso e pequena: elas
-  ficam **~2% mais lentas** (as três juntas, 73 vitórias em 180, p = 0,01) em troca de 22× a 32× menos
-  memória — nenhuma das três atinge significância sozinha, e o agrupamento foi feito depois de ver o dado, então
-  o número é indicativo, não conclusivo. A medição foi feita
+  Resultado byte a byte idêntico ao anterior. No tempo, o `SELECT *` largo ficou **~13,6% mais rápido** depois que
+  o cache aquece — juntando **seis coletas sobre seis binários**, o caminho novo venceu **72 de 72 comparações
+  pareadas**, sem uma única exceção. Nas consultas de projeção estreita há **provavelmente** um custo de 2 a 3%:
+  quatro das seis coletas o mostram, duas mostram ganho, e tratando a coleta (não o par) como unidade de
+  replicação o resultado fica no limite da resolução da medição. Elas economizam 22× a 32× de memória de
+  qualquer forma. A medição foi feita
   numa máquina compartilhada, então o número merece replicação; o desenho pareado é o que o torna defensável
   apesar disso.
   Reversível com `theodb.enable_columnar_topk_stream = off`. Método, números por consulta e ressalvas

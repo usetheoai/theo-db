@@ -54,6 +54,50 @@ def _run(script, log, *extra):
                           capture_output=True, text=True)
 
 
+# ---------- REGRESSÃO: empates saem do teste do sinal ------------------------------------------------------------
+# O `paired_wins` somava o empate em `n` e não em `wins`, tratando-o como DERROTA. A direção desse erro é
+# anticonservadora — ele empurra o p para baixo — e o caso não é hipotético: q25, coleta B, par 6 tinha
+# `eager = stream = 128.7`. Aquele empate sozinho movia o p agrupado das três consultas estreitas de 0,0165 para
+# 0,014, que foi o número publicado em negrito até uma revisão o desmontar. Lógica pura, sem banco.
+sys.path.insert(0, BENCH)
+import m168_ab_summarize as ab  # noqa: E402
+
+
+def _run_with(pairs):
+    """Monta a estrutura que `paired_wins` consome: uma execução, uma consulta."""
+    return [{"pairs": {"q": pairs}}]
+
+
+def test_paired_wins_exclui_empate_do_denominador():
+    # 3 pares: streaming vence 1, perde 1, EMPATA 1 -> 1/2, não 1/3
+    wins, n = ab.paired_wins(_run_with(([10.0, 10.0, 10.0], [9.0, 11.0, 10.0])), "q")
+    assert (wins, n) == (1, 2), f"empate deveria sair do denominador, veio {wins}/{n}"
+
+
+def test_paired_wins_sem_empate_conta_todos():
+    wins, n = ab.paired_wins(_run_with(([10.0, 10.0], [9.0, 11.0])), "q")
+    assert (wins, n) == (1, 2)
+
+
+def test_paired_wins_todos_empatados_da_n_zero():
+    # n=0 é o caso degenerado: nenhum par informativo. `sign_test_p` devolve 1.0 e não divide por zero.
+    wins, n = ab.paired_wins(_run_with(([5.0, 5.0], [5.0, 5.0])), "q")
+    assert (wins, n) == (0, 0)
+    assert ab.sign_test_p(0, 0) == 1.0
+
+
+def test_empate_como_derrota_teria_inflado_a_significancia():
+    """O controle que prova POR QUE isto importa, com o número da série.
+
+    12 pares, streaming vence 4. Contar um empate como derrota (5/12 -> 4/12) muda o p do teste do sinal na
+    direção que favorece a alegação. O teste fixa a aritmética dos dois lados para que a regressão seja visível
+    como número, não como argumento."""
+    assert ab.sign_test_p(4, 12) < ab.sign_test_p(5, 12), \
+        "menos vitórias tem de dar p MENOR — é essa assimetria que o empate-como-derrota explorava"
+    # e com o empate excluído o denominador cai junto, que é o comportamento correto
+    assert ab.sign_test_p(4, 11) != ab.sign_test_p(4, 12)
+
+
 def _write(tmp_path, name, text):
     p = tmp_path / name
     p.write_text(text)

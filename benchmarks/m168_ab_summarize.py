@@ -55,13 +55,21 @@ def parse(path):
 
 
 def paired_wins(runs, q):
-    """Quantos PARES o streaming venceu, sobre o total. É a estatística que o desenho produz."""
+    """Quantos PARES o streaming venceu, sobre o total de pares NÃO-EMPATADOS.
+
+    Empates são EXCLUÍDOS, que é o que o teste do sinal exige. Uma versão anterior contava o empate em `n` e
+    não em `wins`, tratando-o como derrota — e a direção desse erro é ANTICONSERVADORA justamente para a
+    alegação em disputa (o custo das consultas estreitas): ele empurra o p para baixo. Houve um empate real no
+    conjunto (q25, coleta B, `eager = stream = 128.7`), e ele sozinho movia o p agrupado de 0,0165 para 0,014
+    (achado de review)."""
     wins = n = 0
     for r in runs:
         if q not in r["pairs"]:
             continue
         ea, st = r["pairs"][q]
         for a, b in zip(ea, st):
+            if a == b:
+                continue  # empate: fora do teste do sinal, não é derrota
             n += 1
             if b < a:
                 wins += 1

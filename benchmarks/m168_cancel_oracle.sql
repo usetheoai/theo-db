@@ -82,7 +82,8 @@ $c0$;
 -- `c2=100`, `c3=100` — passa. O gate não distingue "cancelou NO MEIO" de "cancelou NO FIM".
 --
 -- A evidência diferencial é quantas vezes o stream AVANÇOU O CURSOR: um scan completo de 1M linhas avança 101
--- (100 chunk-groups + a chamada terminal e a sonda de schema); um cortado avança menos.
+-- (100 chunk-groups — a sonda de schema É o nº 0, não um extra — mais a chamada terminal); um cortado avança
+-- menos.
 -- `theodb_columnar_stream_chunk_groups()` expõe o número — ele conta CHAMADAS, não chunk-groups, e a doc da
 -- função explica as duas direções em que os dois diferem. O gate compara C1 contra C4 como RAZÃO, então o +1
 -- constante se cancela. Uma versão anterior gateava TEMPO DE RELÓGIO enquanto o comentário afirmava gatear
@@ -177,8 +178,9 @@ SET theodb.enable_columnar_topk_stream = on;
 
 \echo '### M168-C4: quantos avanços de cursor o scan COMPLETO faz? — a referência do sinal diferencial'
 -- Sem esta referência, "c1 avançou 16 vezes" não significa nada: pode ser que o scan inteiro avance 16. A
--- referência é o MESMO trabalho sem timeout. O gate compara os dois como razão — o que também faz o +1 constante
--- (chamada terminal + sonda de schema) se cancelar.
+-- referência é o MESMO trabalho sem timeout. O gate compara os dois como razão. (A razão NÃO cancela a constante
+-- aditiva: o teste é `a+1 > (b+1)*0,5`, então com b=100 o limiar anda de 50 para 49,5 — inócuo, mas o motivo
+-- publicado antes estava errado.)
 SET theodb.enable_columnar_topk_stream = on;
 DO $c4$
 DECLARE t0 timestamptz := clock_timestamp(); plan text;

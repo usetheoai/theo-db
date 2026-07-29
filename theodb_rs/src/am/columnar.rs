@@ -54,8 +54,10 @@ thread_local! {
     // scans (a shared thread_local, same as the agg-path `THEODB_SCAN_PROFILE` log) — a single top-level query
     // reads its own counts; SQL accessors `theodb_columnar_chunks_{skipped,scanned}()` expose them for tests.
     static SKIP_STATS: std::cell::Cell<(u64, u64)> = const { std::cell::Cell::new((0, 0)) };
-    // M168 — chunk-groups entregues pelo `ColumnarChunkStream` desde o último reset. Mesmo desenho e mesmas
-    // limitações do `SKIP_STATS` acima (thread_local, best-effort sob scans aninhados).
+    // M168 — quantas vezes o `ColumnarChunkStream` avançou o cursor no scan MAIS RECENTE (conta CHAMADAS de
+    // `next()`, não chunk-groups — ver a doc do acessor). Zerado na construção do stream, como o `SKIP_STATS`
+    // acima em `columnar_scan_begin`; não há "último reset" — a função de reset foi removida. Mesmas limitações
+    // (thread_local, best-effort sob scans aninhados).
     static STREAM_CG_COUNT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
@@ -76,22 +78,25 @@ fn theodb_columnar_chunks_scanned() -> i64 {
 ///
 /// **It counts `next()` CALLS, not chunk-groups**, and the two differ in both directions (a review caught the doc
 /// claiming otherwise):
-///   * the terminal call that returns `Ok(None)` counts but delivers nothing, and the schema probe counts too —
-///     so a complete 1M-row scan reads **101**, not 100;
+///   * the terminal call that returns `Ok(None)` counts but delivers nothing — so a complete 1M-row scan reads
+///     **101**, not 100. The schema probe is NOT a second cause: it **is** chunk-group #0
+///     (`df_executor.rs` — "The probe IS a chunk-group"). Attributing the excess to two causes summing to one
+///     unit makes the reader compute 102, see 101, and conclude the counter under-counts;
 ///   * one call can consume a whole run of zone-map-pruned chunk-groups (`decode_one_chunk_group` returns
 ///     `Ok(false)` → `continue`) and still count 1 — so under pushed-down predicates it UNDER-counts the groups
 ///     actually traversed.
 ///
 /// Neither hurts its purpose. It is the deterministic half of the cancellation oracle — a scan cut short advances
-/// the cursor far fewer times than a complete one, and the gate compares the two as a RATIO, so the constant +1
-/// cancels. Unlike a wall-clock comparison it is immune to machine speed, cache state and box load, which is what
+/// the cursor far fewer times than a complete one. (A ratio does NOT cancel an additive constant — the gate tests
+/// `a+1 > (b+1)·0.5`, so with b=100 the threshold moves from 50 to 49.5; the effect is harmless, but the earlier
+/// "the +1 cancels" was the wrong reason.) Unlike a wall-clock comparison it is immune to machine speed, cache
+/// state and box load, which is what
 /// `benchmarks/m168_cancel_oracle.sql` needs to tell "cancelled mid-scan" from "cancelled at the end" without a
 /// single-sample timing claim.
 #[pg_extern]
 fn theodb_columnar_stream_chunk_groups() -> i64 {
     STREAM_CG_COUNT.with(|c| c.get() as i64)
 }
-
 
 // ===========================================================================================================
 // M99 Phase C2 — MVCC via a heap catalog (`columnar.stripe`), not the metapage (ADR-0042 D2)
@@ -1136,11 +1141,15 @@ impl ColumnarChunkStream {
         // resetá-lo é um contador que um dia reporta o scan anterior. Isto também apaga a necessidade do
         // `theodb_columnar_stream_reset()`, que existia só para compensar a ausência deste zero (achado de
         // review; parsimony ladder degrau 1 — a função não precisava existir).
+        // O zero vem DEPOIS da captura de afinidade, não antes: este módulo declara que assere a invariante em
+        // vez de confiar nela, e escrever um thread_local antes de capturar a thread dona contradizia isso. Numa
+        // thread estranha o efeito seria métrica silenciosamente velha (não UB), mas a ordem certa é grátis.
+        let affinity = ThreadAffinity::capture();
         STREAM_CG_COUNT.with(|c| c.set(0));
         Self {
             plan,
             rel,
-            affinity: ThreadAffinity::capture(),
+            affinity,
             pl_idx: 0,
             cg_idx: 0,
         }
