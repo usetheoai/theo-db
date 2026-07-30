@@ -380,3 +380,28 @@ A exceção virou o conceito que fecha a varredura:
 **Estado da cobertura.** Todas as fontes que a § 4.1 obriga foram varridas: 67 memórias, 139 benchmarks (53 com
 veredito), 58 ADRs, 173 reviews, 110 blueprints, 1601 commits (filtrados), 44 implementations (verificadas). O que
 resta fora é o que a § 4.2 exclui: rastro de execução e decisão de arquitetura.
+
+## 2026-07-30 (13) — a lição dominante do M169: corrigir a instância e não a classe
+
+Escrito porque aconteceu **cinco vezes numa sessão**, e as cinco foram pegas pelo sistema, não pela minha atenção.
+
+O formato: um revisor exibe UM caso; o fix fecha aquele caso; os irmãos do mesmo formato continuam vivos — agora
+com a falsa sensação de já terem sido revisados. É invisível pelo mesmo motivo que o original: se o revisor
+tivesse visto os irmãos, teria apontado os irmãos.
+
+| Mostraram | Corrigi | O irmão que ficou |
+|---|---|---|
+| `timeout=60` no `wc -l` de 69,7 GB | o `wc` | **`_psql_int`** com os mesmos 60 s — e `count(*)` a 100M leva ~2100 s, então a checagem de dataset **nunca podia** funcionar na escala para a qual foi escrita |
+| — | nada (achei o `_sh` correto) | rotulou mal **três** comandos, incluindo `systemctl is-enabled` de uma unidade **corretamente mascarada** |
+| parâmetro novo em `_psql_int` | a assinatura de `_psql` | o **corpo** não repassava; quebrou só na box |
+
+A regra que fica é **varrer, não prestar mais atenção**: ao receber um achado, nomear a CLASSE antes de escrever o
+fix, `grep` por ela, e dizer no commit quantos irmãos foram encontrados — inclusive zero.
+
+Apliquei a regra ao próprio commit: varri as três classes nos meus arquivos do M169. Resultado: 1 irmão por classe
+já corrigido, nenhum novo (o `wc` passa `WC_TIMEOUT_S`; `nproc`/`free`/`df` são sub-segundo; nenhum outro comando
+do coletor codifica estado no código de saída; os 3 chamadores de `_psql` passam o timeout).
+
+Duas de formato vizinho ficaram registradas dentro do conceito, porque não são instância-vs-classe e sim
+"saber não impede": nome de conceito escrito de memória (**três** vezes, três vezes pego pelo C2) e comando longo
+em foreground remoto (documentei o invariante de manhã, repeti o erro uma hora depois).
