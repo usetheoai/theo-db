@@ -14,6 +14,9 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **theodb:** gate executável de atestação da box de benchmark — falha quando a máquina não é a que o
+  milestone declarou (CPU/RAM insuficientes, carga concorrente, `unattended-upgrades` ativo, contagem de
+  linhas divergente do corpus, disco insuficiente), em vez de deixar os critérios como caixas manuais (#M169)
 - **theodb:** varredura dos 173 reviews + 58 ADRs + 110 blueprints para a base OKF — +17 conceitos
   (incluindo dois bypasses de allowlist por regex, um parser-differential que levava ao metadata service,
   e o padrão do DoD cujo primeiro checkbox mata o milestone); bundle vai a 91 conceitos (#okf)

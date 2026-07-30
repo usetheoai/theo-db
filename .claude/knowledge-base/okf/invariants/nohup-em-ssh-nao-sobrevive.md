@@ -62,6 +62,26 @@ Isto é o mesmo defeito que já custou um braço de A/B antes (um `psql` morto n
 1862 s contaminando o braço seguinte). O sintoma é **carga que não se explica** e um número deslocado — ver
 [medir-com-carga-concorrente](../failure-modes/contaminacao-por-concorrencia.md).
 
+### O mecanismo exato — e por que eu repeti o erro uma hora depois de documentá-lo
+
+`timeout 700 ssh host '<comando longo>'` **não** dá 700 s ao comando. A ferramenta que executa o `Bash` tem cap
+próprio de **120 s**; ao estourar, ela move o comando para background e o `ssh` local morre. O processo remoto
+não sabe de nada: fica **reparentado ao init**, que é a assinatura para procurar —
+
+```
+ps -o pid,ppid,args -p <pid>
+    PID    PPID COMMAND
+  84800       1 sudo -u pgtest ... psql ... -c select count(*) ...
+              ↑ PPID=1 = órfão
+```
+
+Medido duas vezes na MESMA sessão, com uma hora entre elas: a segunda foi lançar uma atestação em foreground
+logo depois de escrever este conceito. Saber do defeito não impede de cometê-lo — o que impede é **nunca lançar
+trabalho longo em foreground remoto**, e não "lembrar de ter cuidado".
+
+A forma correta é a mesma da seção acima e não tem exceção para "é rapidinho": script + `setsid` + verificação de
+PID, e a coleta do resultado numa invocação **separada**.
+
 ## A checagem que fecha os dois lados
 
 Antes de qualquer medição numa box remota, **enumere o que está rodando lá** — não confie no seu histórico local:

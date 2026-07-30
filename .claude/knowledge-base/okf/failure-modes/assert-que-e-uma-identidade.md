@@ -39,6 +39,33 @@ Para isolar um componente, tire do caminho tudo que possa mascará-lo, ou meça 
 aquele componente variando — a ablação mesmo-índice. O precedente medido: o kernel FastScan 1-bit parecia dar
 2,8× em comparação cross-box e deu **1,2×** quando isolado no mesmo índice.
 
+## Terceira forma: o gate casa por SUBSTRING de nome e passa numa colisão (M169, 2026-07-30)
+
+O `check_wiring.py` — cujo pilar (a) o contrato declara **não-negociável** — procura o chamador de produção
+fazendo `grep` do **nome do símbolo** nos arquivos-fonte. Medido na mesma invocação, sobre o mesmo módulo:
+
+| símbolo | pilar (a) | realidade |
+|---|---|---|
+| `attest` | **FAIL** | chamador existe (`m169_box_attest.py:203`) |
+| `collect` | **PASS** | **nenhum** chamador de produção existe |
+
+O `collect` passou porque `collect` é o nome do método de iterador da stdlib do **Rust**, e o repo tem dezenas de
+`.collect()` em `theodb_rs/src/`. Substring casada, linguagem ignorada, módulo ignorado, escopo ignorado.
+
+Consequência: **qualquer símbolo com nome genérico** — `collect`, `next`, `get`, `run`, `build`, `new`, `insert`,
+`scan` — passa o pilar não-negociável **sem chamador algum**. Um gate que não pode ficar vermelho para esses
+nomes não é evidência sobre eles.
+
+E o falso FAIL do `attest` tem causa independente: o filtro `--exclude='*test*'` é glob de substring, e o módulo
+de **produção** `m169_box_attest.py` contém `test` em "a**test**" — o arquivo com o chamador é classificado como
+teste e excluído.
+
+> Um falso FAIL custa tempo. Um **falso PASS** custa cobertura — e nenhum dos dois é visível de dentro do gate.
+
+O padrão dos três casos desta página é o mesmo: **pergunte o que faria este verde ficar vermelho.** Se a resposta
+depende de uma coincidência de nome, de uma expressão algebricamente fechada, ou de um componente downstream que
+domina a métrica, o verde não mede o que diz medir.
+
 ## Relacionados
 
 - [technique/controle-positivo](../techniques/controle-positivo.md)

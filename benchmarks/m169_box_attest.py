@@ -1,0 +1,217 @@
+"""M169 box attestation — the executable gate behind T1.1's acceptance criteria.
+
+Three layers, deliberately separated:
+
+- `attest()` is PURE — it judges a `BoxFacts` and returns a verdict. That is what makes it a regression test
+  (`test_m169_box_attest.py`) instead of a check that only runs on the right machine. Same shape as the M164
+  guards in `run_m128_clickbench.py`.
+- `collect()` MAPS the world into `BoxFacts` — which command, which timeout, which default, which parse. This
+  layer is where every defect of this file has lived, so it takes its shell/psql runners as injected callables
+  and IS unit-tested with fakes.
+- `_sh` / `_psql_int` are the only code that touches a real kernel. Their shell strings' correctness against a
+  real system is what genuinely cannot be unit-tested — not "collect is I/O, therefore untestable".
+
+Why an attestation and not a provisioning script: the box already exists. A script that creates a droplet, which
+nobody ran and nobody will run, is retroactive documentation dressed as an artifact. What IS needed is a header
+that Phase 1 and Phase 4 both emit, because ADR-3 requires them to run on the same box and a header nobody can
+compare cannot prove that.
+
+Usage (on the box):
+
+    python3 benchmarks/m169_box_attest.py            # human-readable header, exit != 0 when the box is wrong
+    python3 benchmarks/m169_box_attest.py --json     # machine-readable, for pasting into an artifact
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shlex
+import subprocess
+import sys
+from dataclasses import asdict, dataclass, field
+
+# The published ClickBench corpus. NOT 100_000_000 — `hits.tsv` has 99,997,497 rows, and `wc -l` on the loaded TSV
+# measured exactly that. An acceptance criterion written as the round number cannot be satisfied by the data.
+# Duplicated from `run_m128_clickbench.py:77` on purpose: importing it would drag `psycopg2` into a pure-logic
+# test. `test_m169_box_attest.py` pins the two literals against each other so the duplication cannot drift.
+HITS_ROWS = 99_997_497
+
+# ADR-3 declared the box: 16 vCPU / 32 GB. `free -g` truncates, so 32 GB of RAM reports as 31.
+MIN_NPROC = 16
+MIN_MEM_GB = 30
+# A benchmark started on a busy box measures the box, not the code. Inherited from the plan's AC ("< 2"); the plan
+# does not derive WHY 2 — on 16 vCPUs it is ~12.5% utilisation. Kept as a plan-inherited number, not a measured one.
+MAX_LOADAVG1 = 2.0
+# Rebuilding `hits_heap` writes the heap twin AND its columnar derivative. Derived from the project's canonical
+# sizing policy (`run_m128_clickbench.py` EST_*_BYTES_PER_ROW) rather than picked round, so the two do not disagree.
+# The TSV is NOT counted: it already exists on disk and is not rewritten.
+_EST_HEAP_BYTES_PER_ROW = 1000
+_EST_COLUMNAR_BYTES_PER_ROW = 150
+MIN_DISK_FREE_GB = int(HITS_ROWS * (_EST_HEAP_BYTES_PER_ROW + _EST_COLUMNAR_BYTES_PER_ROW) / 1024**3 * 1.12)
+
+# `wc -l` over the 69.7 GB corpus. 60 s would imply >1.1 GB/s sustained and time out on a CONFORMING box, whose
+# fail-closed default then accuses the corpus of being the wrong size. `run_m128_clickbench.py:190` runs the
+# identical command on the identical file with the same ceiling.
+WC_TIMEOUT_S = 600
+SH_TIMEOUT_S = 60
+
+
+@dataclass(frozen=True)
+class BoxFacts:
+    """One place the environment is named. `attest` judges it and the artifact header prints it, so a field can
+    never be checked-but-unpublished (which would silently break ADR-3's same-box comparison at T4.1)."""
+    nproc: int
+    mem_gb: int
+    loadavg1: float
+    unattended_state: str
+    hits_rows: int
+    hits_heap_rows: int
+    tsv_rows: int
+    disk_free_gb: int
+    so_md5: str = "unknown"
+    data_directory: str = "unknown"
+
+
+@dataclass
+class Verdict:
+    ok: bool
+    failures: list[str] = field(default_factory=list)
+    facts: dict = field(default_factory=dict)
+
+
+# A collector that could not run its command reports this instead of a number. It exists so an infrastructure
+# failure is never reported as a data defect — the #132 lesson (a generic error erasing the cause).
+UNREACHABLE = -1
+
+
+def attest(box: BoxFacts) -> Verdict:
+    """Judge one box against T1.1's acceptance criteria. Reports EVERY failure, never just the first — a
+    first-failure-wins guard hides work and makes the operator re-run to discover the next problem."""
+    failures: list[str] = []
+
+    if UNREACHABLE in (box.tsv_rows, box.hits_rows, box.hits_heap_rows):
+        # Fail-closed, but with the RIGHT label: "I could not look" is not "the data is wrong".
+        failures.append("collector could not read the corpus or the database — cannot attest the dataset "
+                        "(check psql reachability, LD_LIBRARY_PATH, and the TSV path) — NOT a data defect")
+    else:
+        if box.tsv_rows != HITS_ROWS:
+            failures.append(f"tsv_rows={box.tsv_rows} but the ClickBench corpus has {HITS_ROWS}")
+        if box.hits_rows != box.tsv_rows:
+            failures.append(f"hits_rows={box.hits_rows} disagrees with tsv_rows={box.tsv_rows} — the COPY lost "
+                            "or duplicated rows")
+        if box.hits_heap_rows == 0:
+            failures.append("hits_heap is ABSENT — T2.1/T4.1 have no byte-identity oracle without the heap twin")
+        elif box.hits_heap_rows != box.hits_rows:
+            failures.append(f"hits_heap_rows={box.hits_heap_rows} disagrees with hits_rows={box.hits_rows} — the "
+                            "A/B would compare two different populations")
+
+    if box.nproc < MIN_NPROC:
+        failures.append(f"nproc={box.nproc} below the {MIN_NPROC} ADR-3 declared")
+    if box.mem_gb < MIN_MEM_GB:
+        failures.append(f"mem_gb={box.mem_gb} below the {MIN_MEM_GB} ADR-3 declared")
+    if box.loadavg1 >= MAX_LOADAVG1:
+        failures.append(f"loadavg1={box.loadavg1} >= {MAX_LOADAVG1} — something else is running; the measurement "
+                        "would be contaminated")
+    if box.unattended_state != "masked":
+        failures.append(f"unattended-upgrades is '{box.unattended_state}', not masked — it restarts PostgreSQL "
+                        "mid-run, which is what truncated the UNLOGGED twin")
+    if box.disk_free_gb < MIN_DISK_FREE_GB:
+        failures.append(f"disk_free_gb={box.disk_free_gb} below the {MIN_DISK_FREE_GB} the heap rebuild needs")
+
+    return Verdict(ok=not failures, failures=failures, facts=asdict(box))
+
+
+def _sh(cmd: str, timeout: int = SH_TIMEOUT_S) -> str | None:
+    """Run a shell command. Returns None when it could NOT run (non-zero exit, timeout, spawn failure) — the
+    caller must distinguish that from a command that ran and produced '0'. Returning a magic number here is what
+    turns 'psql is down' into 'the COPY lost rows'."""
+    try:
+        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+        return r.stdout.strip() if r.returncode == 0 else None
+    except (subprocess.SubprocessError, OSError):
+        return None
+
+
+def _psql(sql: str) -> str | None:
+    """Every interpolated value is shell-quoted: `run_m128_clickbench.py:214` carries an explicit CWE-78 guard for
+    a less-exposed value, and undercutting the project's own standard 20 lines away is not a defensible shortcut."""
+    q = shlex.quote
+    return _sh(f'sudo -u {q(os.environ.get("PGOSUSER", "pgtest"))} env LD_LIBRARY_PATH=/opt/pg18/lib '
+               f'/opt/pg18/bin/psql -p {q(os.environ.get("PGPORT", "5432"))} '
+               f'-U {q(os.environ.get("PGUSER", "postgres"))} -d {q(os.environ.get("PGDATABASE", "postgres"))} '
+               f'-Atc {q(sql)}')
+
+
+def _psql_int(sql: str) -> int:
+    """A missing table and an empty table both report 0 — acceptable because both fail the SAME criterion (no A/B
+    oracle). A query that could not RUN reports UNREACHABLE, which is a different verdict with a different message."""
+    out = _psql(sql)
+    if out is None:
+        return UNREACHABLE
+    try:
+        return int(out.splitlines()[0])
+    except (ValueError, IndexError):
+        return 0
+
+
+def collect(tsv_path: str, *, sh=_sh, psql_int=_psql_int) -> BoxFacts:
+    """Map the world into `BoxFacts`. The runners are injected so this mapping — the layer where every defect of
+    this file has lived — is unit-testable without a box or a database.
+
+    ASSUMPTION, stated because being silent about it is the `instrumento-cego-a-arquitetura` failure: `df` is run
+    against PGDATA's filesystem, which is where the heap rebuild actually writes. The TSV cache is assumed to be
+    on the same mount; if it is not, its filesystem is unchecked."""
+    def _int(cmd: str, timeout: int = SH_TIMEOUT_S, default: int = 0) -> int:
+        out = sh(cmd, timeout)
+        try:
+            return int(out.split()[0]) if out else default
+        except (ValueError, IndexError):
+            return default
+
+    ddir = _psql_text(sh, "show data_directory") or "/"
+    return BoxFacts(
+        nproc=_int("nproc", default=0),
+        mem_gb=_int("free -g | awk '/^Mem:/{print $2}'", default=0),
+        loadavg1=float((sh("cut -d' ' -f1 /proc/loadavg", SH_TIMEOUT_S) or "99")),
+        unattended_state=sh("systemctl is-enabled unattended-upgrades 2>&1", SH_TIMEOUT_S) or "unknown",
+        hits_rows=psql_int("select count(*) from public.hits"),
+        hits_heap_rows=psql_int("select count(*) from public.hits_heap"),
+        tsv_rows=_int(f"wc -l < {shlex.quote(tsv_path)}", WC_TIMEOUT_S, default=UNREACHABLE),
+        disk_free_gb=_int(f"df -BG --output=avail {shlex.quote(ddir)} | tail -1 | tr -dc '0-9'", default=0),
+        so_md5=sh("md5sum /opt/pg18/lib/postgresql/theodb_rs.so | cut -c1-32", SH_TIMEOUT_S) or "unknown",
+        data_directory=ddir,
+    )
+
+
+def _psql_text(sh, sql: str) -> str | None:
+    """`SHOW data_directory` through the injected runner, so `collect` stays testable end-to-end."""
+    q = shlex.quote
+    return sh(f'sudo -u {q(os.environ.get("PGOSUSER", "pgtest"))} env LD_LIBRARY_PATH=/opt/pg18/lib '
+              f'/opt/pg18/bin/psql -p {q(os.environ.get("PGPORT", "5432"))} '
+              f'-U {q(os.environ.get("PGUSER", "postgres"))} -d {q(os.environ.get("PGDATABASE", "postgres"))} '
+              f'-Atc {q(sql)}', SH_TIMEOUT_S)
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--tsv", default="/root/theo-db/benchmarks/.cache/hits_sample.tsv",
+                    help="the loaded corpus; its line count is the authority the table count is checked against")
+    ap.add_argument("--json", action="store_true")
+    args = ap.parse_args()
+
+    v = attest(collect(args.tsv))
+    if args.json:
+        print(json.dumps({"ok": v.ok, "failures": v.failures, "facts": v.facts}, indent=1))
+    else:
+        print("=== M169 box attestation ===")
+        for k, val in v.facts.items():
+            print(f"  {k:>16} = {val}")
+        print("  VERDICT: OK" if v.ok else "  VERDICT: FAIL")
+        for fail in v.failures:
+            print(f"    - {fail}")
+    return 0 if v.ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

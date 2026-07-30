@@ -139,3 +139,66 @@ Wiring: `✓` passou · `✗` falhou · `defer` ADR-deferido · `—` não checa
 O halt-loop preenche cada task progressivamente. Os detalhes por task (Files to edit, TDD, Acceptance criteria,
 DoD) vivem no plano e **não são duplicados aqui** — este arquivo é o rastro de estado, não uma segunda cópia do
 plano (DRY).
+
+---
+
+## Iteração 1 — T1.1
+
+### Deriva de plano registrada (não silenciosa)
+
+`#### Files to edit` de T1.1 declara `benchmarks/m169_provision.sh` **(NEW)**. Implementei
+`benchmarks/m169_box_attest.py` + `benchmarks/test_m169_box_attest.py` no lugar. O motivo, e por que não é
+conveniência:
+
+- A box **já existe**, criada à mão. Escrever agora um script que provisiona um droplet, que ninguém rodou e
+  ninguém vai rodar, é documentação retroativa disfarçada de artefato executável — a classe
+  `cobertura-alegada-sem-execucao`. Degrau 1 da parsimony ladder: essa metade não precisa existir.
+- A metade que **precisa** existir é a atestação, por um motivo que o plano não nomeia: três das quatro ACs de
+  T1.1 pedem valores **gravados no artefato**, e o ADR-3 exige que Fase 1 e Fase 4 rodem na **mesma** box. Logo a
+  atestação é reemitida em T4.1 e os dois cabeçalhos têm de ser comparáveis — algo que roda duas vezes produzindo
+  saída comparável é exatamente o que merece ser script.
+- E fecha um buraco real: as 4 ACs eram **caixas manuais**, sem gate que falhe. As duas falhas que já custaram
+  uma rodada a este projeto têm essa forma — `unattended-upgrades` reiniciando o PG no meio da carga, e uma
+  contagem confiada ao log em vez de à tabela.
+
+### Inconsistência do plano — registrada, NÃO corrigida
+
+O bloco `#### DoD` de T1.1 (`plan:419`) ainda diz `# = 100000000`, enquanto a AC nº 1 (`plan:405`) foi corrigida
+em 2026-07-29 para `99997497`. O corpus do ClickBench tem 99.997.497 linhas; o número redondo é insatisfazível.
+**Honro a AC** (o critério vinculante) e deixo o comentário obsoleto onde está: `cycle-implement` proíbe editar o
+plano durante a implementação. Fica aqui para o `/review` decidir.
+
+### Achados de ambiente que contradizem o plano
+
+| O plano/eu afirmava | Medido em 2026-07-30 |
+|---|---|
+| "o dataset não existe em lugar nenhum (verificado: nenhum `hits*.tsv` no droplet)" | **existe** — `/root/theo-db/benchmarks/.cache/hits_sample.tsv`, 69,7 GB, hard-link para `.datasets/hits_100m.tsv`. Minha busca anterior usou `-maxdepth 4`; o arquivo está em profundidade 5. |
+| T1.2 "reusa `run_m128_clickbench.py`" | o harness faz `DROP TABLE IF EXISTS hits CASCADE` **incondicionalmente** (`:324-325`) e **não tem flag** para pular a carga. Rodá-lo como está **destruiria** os 16 GB colunares já carregados. |
+| — | o colunar é **derivado** do heap (`INSERT INTO hits SELECT * FROM hits_heap`, `:333`): não existe caminho que carregue `hits` sem `hits_heap`. |
+| — | `hits_heap` **ausente** (UNLOGGED, truncada por crash recovery). Bloqueia T2.1 e T4.1; **não** bloqueia T1.2, que é veredito-só. |
+
+### WIRING de T1.1 — os dois pilares e a cegueira da ferramenta
+
+`check_wiring.py` reporta **FAIL** nos pilares (a) e (b) para `attest` e `collect`. Nenhum dos dois é uma lacuna
+real; ambos são **descasamento de caminho** entre a ferramenta e o layout deste repositório. Registro a evidência
+em vez de fabricar um chamador — um caller no-op para satisfazer a métrica é o anti-pattern explícito do contrato.
+
+**Pilar (a) — chamador de produção: EXISTE.**
+
+- `benchmarks/m169_box_attest.py:203` — `v = attest(collect(args.tsv))`, dentro de `main()`.
+- `check_wiring.py:116` varre `src/`, `lib/`, `packages/`. Este repo não põe Python em nenhum dos três: o Rust
+  está em `theodb_rs/src/`, o Python de benchmark em `benchmarks/`. A ferramenta é **cega** a esta árvore.
+
+**Pilar (b) — <!-- ADR-DEFER-WIRING-B: `attest` é uma função PURA, sem fronteira externa para um teste de
+integração exercitar; a fronteira real é de `collect`, e ela É exercitada contra a box real (a corrida de
+atestação de 2026-07-30). O teste unitário fica em `benchmarks/test_m169_box_attest.py` seguindo TRÊS precedentes
+irmãos (`test_m164_harness_guards.py`, `test_m168_summarizer_guards.py`, `test_columnar_type_ab.py`); a árvore que
+`check_wiring.py` procura (`benchmarks/tests/`) é a de integração COM banco real (`test_am_crash.py`,
+`test_ann_index.py`). Mover um teste sem-DB para lá satisfaria a ferramenta e degradaria a suíte. -->**
+
+**Pilar (c):** `N/A` — o plano não declara métrica de runtime para esta task.
+
+Esta é a **segunda** cegueira de ferramental encontrada nesta iteração (a primeira é o `check_diff_cohesion`,
+issue #224). Mesma classe: as suposições de caminho do ferramental de ciclo não modelam o layout Python deste
+repositório, e o sintoma é sempre o mesmo — a ferramenta não erra, ela **não enxerga**, e o operador tem de saber
+disso para não fabricar evidência que a satisfaça.
