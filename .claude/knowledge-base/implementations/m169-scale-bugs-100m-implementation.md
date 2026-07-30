@@ -407,3 +407,20 @@ com a mensagem que diz que este é o estado esperado ANTES do fix.
 
 Se a função do contador não existisse, o RED morreria com `function does not exist` — e eu leria isso como "o
 ambiente está quebrado" em vez de "o teste está correto e o fix não existe ainda".
+
+### Pré-flight do runner — antes de a corrida chegar nele, não depois
+
+A atestação de abertura custa ~40 min. Um `ImportError` no runner **depois** dela jogaria fora esse tempo, e é o
+tipo de falha que só aparece na primeira execução real. Verificado na box:
+
+| | Medido |
+|---|---|
+| `psycopg2` para o python que roda a corrente | **2.9.9** presente |
+| import de `m169_baseline_run` | **OK** (importa `run_m128_clickbench`, que puxa `psycopg2` no topo) |
+| `_load_queries()` | **43** consultas |
+| `session_gucs(300, '256MB', agg=True, stream=False)` | `agg=on`, `late_mat=on`, `work_mem=256MB`, `statement_timeout=300s` |
+| `enable_columnar_agg_stream` na lista | **ausente** — o fix de hoje: a GUC só é emitida com `--stream`, senão o cabeçalho registraria um no-op como se fosse configuração |
+
+O teto de **300 s** e o `work_mem` de **256 MB** são os do M162 (`m162-100m-gap-verdict.md:10`) — e é essa
+igualdade que torna o número comparável ao `19/43`. Sob o default de 60 s do harness, quase tudo viraria
+`timeout` e o resultado não teria contra o que ser comparado.
