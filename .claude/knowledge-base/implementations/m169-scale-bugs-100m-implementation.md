@@ -345,3 +345,25 @@ do owner: ou o M168 ganha entrada retroativa no roadmap, ou o release declara ex
 
 **O que eu vou fazer:** rodar o `/review` com o diff-base correto, para que a cobertura exista mesmo que a
 contabilidade do roadmap fique pendente.
+
+### Duas bases de diff, dois propósitos — conflacioná-las quebra o milestone de um jeito ou de outro
+
+Medido contra `v0.158.0..HEAD`, os arquivos-fonte **já** excedem o budget de 40 linhas da Global DoD:
+
+```
+theodb_rs/src/am/columnar.rs      +439 -51
+theodb_rs/src/am/df_executor.rs   +563 -7
+ROADMAP.md                        +73  -1
+```
+
+**Esse crescimento é do M168**, não do M169 — o M169 ainda não tocou arquivo-fonte algum (T2.1 não começou). A
+ambiguidade é real e morde nos dois sentidos:
+
+| Base | Para quê | Se usada para a outra coisa |
+|---|---|---|
+| `v0.158.0` | **cobertura do `/review`** — 28 commits do M168 nunca revisados | reprovaria o M169 pelo budget que o **M168** estourou |
+| primeiro commit do M169 | **budget de 40 linhas/arquivo** (T2.1 AC) | deixaria os 28 commits do M168 entrarem em `main` sem review |
+
+**Decisão:** usar as duas, explicitamente — `--diff-base v0.158.0` para o `/review`, e o ponto de partida do M169
+para medir o budget. Registro aqui porque um revisor que veja `+563` em `df_executor.rs` e não souber que é do
+M168 vai reprovar o milestone errado.
