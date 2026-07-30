@@ -57,6 +57,9 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   em `docs/benchmarks/m168-streaming-topk-verdict.md`.
 
 ### Fixed
+- **theodb:** a atestação passou a ler corretamente uma unidade systemd **mascarada** — `systemctl
+  is-enabled` sai com código 1 nesse estado, e tratá-lo como falha de execução reprovava o gate pelo
+  motivo errado numa box corretamente configurada (#M169)
 - **theodb:** segunda varredura do round 3 (categorias nunca auditadas) — BLOCKER de recall `0.033` sem
   artefato, regra de proveniência que nenhum script cumpre, e atribuição de desfecho a milestone em voo (#okf)
 - **theodb:** round 3 de review da base OKF — 3 BLOCKER de correção não propagada pelo grafo, 2 HIGH em que o

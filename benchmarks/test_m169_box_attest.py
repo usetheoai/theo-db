@@ -161,7 +161,7 @@ def test_collect_maps_a_healthy_box_into_facts():
             return "/srv/m169data"
         return None
 
-    box = a.collect("/tmp/hits.tsv", sh=fake_sh, psql_int=lambda _sql: a.HITS_ROWS)
+    box = a.collect("/tmp/hits.tsv", sh=fake_sh, sh_any_rc=fake_sh, psql_int=lambda _sql: a.HITS_ROWS)
     assert a.attest(box).ok is True
     assert box.data_directory == "/srv/m169data"
     assert box.so_md5 == "a6ab650771f00b5a"
@@ -174,7 +174,8 @@ def test_collect_maps_a_healthy_box_into_facts():
 
 def test_collect_maps_a_failing_runner_to_fail_closed_values():
     """A runner that always fails must produce a verdict that REFUSES, and must not invent plausible numbers."""
-    box = a.collect("/tmp/hits.tsv", sh=lambda cmd, timeout=60: None, psql_int=lambda _sql: a.UNREACHABLE)
+    box = a.collect("/tmp/hits.tsv", sh=lambda cmd, timeout=60: None,
+                    sh_any_rc=lambda cmd, timeout=60: None, psql_int=lambda _sql: a.UNREACHABLE)
     v = a.attest(box)
     assert v.ok is False
     assert box.loadavg1 == 99.0        # the fail-closed sentinel, not 0.0 which would look idle
@@ -225,7 +226,7 @@ def test_collect_quick_skips_the_expensive_calls_entirely():
         psql_calls.append(sql)
         return a.HITS_ROWS
 
-    box = a.collect("/tmp/hits.tsv", sh=fake_sh, psql_int=fake_psql_int, quick=True)
+    box = a.collect("/tmp/hits.tsv", sh=fake_sh, sh_any_rc=fake_sh, psql_int=fake_psql_int, quick=True)
     assert box.hits_rows == a.SKIPPED
     assert psql_calls == [], "quick mode must not run count(*) at all"
     assert not any(c.startswith("wc -l") for c in calls), "quick mode must not run wc -l on 69.7 GB"
@@ -250,3 +251,54 @@ def test_a_heap_with_the_wrong_population_is_never_reported_as_absent():
     v = a.attest(_facts(hits_heap_rows=50_000_000))
     assert any(f.startswith(a.ID_HEAP_MISMATCH) for f in v.failures)
     assert not any(f.startswith(a.ID_HEAP_ABSENT) for f in v.failures)
+
+
+# ---------- a costura real: _count_rows -> _psql -> _sh, só o _sh falsificado -------------------------------------
+def test_count_rows_wires_to_psql_with_the_long_timeout(monkeypatch):
+    """Os testes de `collect` injetam `psql_int` FALSO, então `_count_rows` e `_psql` nunca eram exercitados —
+    e foi assim que um `_psql(sql, timeout)` chamando uma função de um argumento só passou verde e só quebrou na
+    box, depois do rsync. Este teste falsifica APENAS o `_sh`, deixando a cadeia real montada."""
+    calls = []
+
+    def fake_sh(cmd, timeout=60):
+        calls.append((cmd, timeout))
+        return "t" if "to_regclass" in cmd else "99997497"
+
+    monkeypatch.setattr(a, "_sh", fake_sh)
+    assert a._count_rows("public.hits") == 99997497
+    # a sonda de existência usa o teto curto; a contagem usa o longo (um count(*) a 100M leva ~35 min)
+    assert calls[0][1] == a.SH_TIMEOUT_S
+    assert calls[1][1] == a.COUNT_TIMEOUT_S
+
+
+def test_count_rows_reports_absent_without_counting(monkeypatch):
+    calls = []
+
+    def fake_sh(cmd, timeout=60):
+        calls.append(cmd)
+        return "f" if "to_regclass" in cmd else None
+
+    monkeypatch.setattr(a, "_sh", fake_sh)
+    assert a._count_rows("public.hits_heap") == a.ABSENT
+    assert len(calls) == 1, "uma relação ausente não deve custar um count(*)"
+
+
+def test_count_rows_reports_unreachable_when_the_probe_itself_fails(monkeypatch):
+    monkeypatch.setattr(a, "_sh", lambda cmd, timeout=60: None)
+    assert a._count_rows("public.hits") == a.UNREACHABLE
+
+
+def test_a_masked_unit_is_read_as_masked_even_though_systemctl_exits_nonzero():
+    """`systemctl is-enabled` devolve exit 1 para `masked` — o estado É o stdout, e o código de saída apenas o
+    repete. Ler não-zero como "não consegui rodar" transformou uma unidade CORRETAMENTE mascarada em `unknown`,
+    reprovando o gate pelo motivo errado. Terceira vez neste milestone que um returncode estrito rotula mal um
+    comando que funcionou."""
+    def sh_strict(cmd, timeout=60):
+        return None            # o `_sh` normal: não-zero vira None
+
+    def sh_any(cmd, timeout=60):
+        return "masked" if "is-enabled" in cmd else None
+
+    box = a.collect("/tmp/x", sh=sh_strict, sh_any_rc=sh_any, psql_int=lambda _s: a.SKIPPED, quick=True)
+    assert box.unattended_state == "masked"
+    assert not any(f.startswith("unattended_upgrades_live") for f in a.attest(box).failures)

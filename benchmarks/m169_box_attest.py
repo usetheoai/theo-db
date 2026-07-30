@@ -153,6 +153,21 @@ def attest(box: BoxFacts) -> Verdict:
     return Verdict(ok=not failures, failures=failures, facts=asdict(box))
 
 
+def _sh_any_rc(cmd: str, timeout: int = SH_TIMEOUT_S) -> str | None:
+    """For commands whose EXIT CODE encodes an answer rather than a failure.
+
+    `systemctl is-enabled` returns 1 for `masked` and for `disabled` — the state IS the stdout, and the exit code
+    merely restates it. Treating non-zero as "could not run" turned a correctly-masked unit into `unknown`, which
+    then failed the gate for the wrong reason. This is the third time in this milestone that a strict returncode
+    check mislabelled a working command; the fix is not to loosen `_sh` (whose strictness is what keeps "psql is
+    down" from becoming "the COPY lost rows") but to be explicit about which commands answer via exit code."""
+    try:
+        r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
+        return (r.stdout.strip() or r.stderr.strip()) or None
+    except (subprocess.SubprocessError, OSError):
+        return None
+
+
 def _sh(cmd: str, timeout: int = SH_TIMEOUT_S) -> str | None:
     """Run a shell command. Returns None when it could NOT run (non-zero exit, timeout, spawn failure) — the
     caller must distinguish that from a command that ran and produced '0'. Returning a magic number here is what
@@ -164,14 +179,14 @@ def _sh(cmd: str, timeout: int = SH_TIMEOUT_S) -> str | None:
         return None
 
 
-def _psql(sql: str) -> str | None:
+def _psql(sql: str, timeout: int = SH_TIMEOUT_S) -> str | None:
     """Every interpolated value is shell-quoted: `run_m128_clickbench.py:214` carries an explicit CWE-78 guard for
     a less-exposed value, and undercutting the project's own standard 20 lines away is not a defensible shortcut."""
     q = shlex.quote
     return _sh(f'sudo -u {q(os.environ.get("PGOSUSER", "pgtest"))} env LD_LIBRARY_PATH=/opt/pg18/lib '
                f'/opt/pg18/bin/psql -p {q(os.environ.get("PGPORT", "5432"))} '
                f'-U {q(os.environ.get("PGUSER", "postgres"))} -d {q(os.environ.get("PGDATABASE", "postgres"))} '
-               f'-Atc {q(sql)}')
+               f'-Atc {q(sql)}', timeout)
 
 
 def _psql_int(sql: str, timeout: int = SH_TIMEOUT_S) -> int:
@@ -198,7 +213,8 @@ def _count_rows(relation: str) -> int:
     return _psql_int(f"select count(*) from {relation}", COUNT_TIMEOUT_S)
 
 
-def collect(tsv_path: str, *, sh=_sh, psql_int=_count_rows, quick: bool = False) -> BoxFacts:
+def collect(tsv_path: str, *, sh=_sh, sh_any_rc=_sh_any_rc, psql_int=_count_rows,
+            quick: bool = False) -> BoxFacts:
     """Map the world into `BoxFacts`. The runners are injected so this mapping — the layer where every defect of
     this file has lived — is unit-testable without a box or a database.
 
@@ -230,7 +246,7 @@ def collect(tsv_path: str, *, sh=_sh, psql_int=_count_rows, quick: bool = False)
         nproc=_int("nproc", default=0),
         mem_gb=_int("free -g | awk '/^Mem:/{print $2}'", default=0),
         loadavg1=float((sh("cut -d' ' -f1 /proc/loadavg", SH_TIMEOUT_S) or "99")),
-        unattended_state=sh("systemctl is-enabled unattended-upgrades 2>&1", SH_TIMEOUT_S) or "unknown",
+        unattended_state=sh_any_rc("systemctl is-enabled unattended-upgrades", SH_TIMEOUT_S) or "unknown",
         hits_rows=dataset[0],
         hits_heap_rows=dataset[1],
         tsv_rows=dataset[2],
