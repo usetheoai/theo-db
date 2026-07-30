@@ -40,6 +40,21 @@ Numa agregação de alta cardinalidade **sem `LIMIT`**, o nosso caminho material
 (`rows: Vec<Vec<(Datum,bool)>>` → `Box::into_raw`) onde o PostgreSQL faria streaming. Os 12,3 GB são
 *consistentes* com isso, mas **não são prova** — a corrida que os produziu tinha o harness competindo.
 
+## Ressalva de instrumento (acrescentada 2026-07-30, medida)
+
+A série foi de **`VmRSS`**, que num backend PG **inclui os `shared_buffers` tocados** — ver
+[vmrss-de-backend-pg-inclui-shared-buffers](../invariants/vmrss-de-backend-pg-inclui-shared-buffers.md). Com
+`shared_buffers = 4 GB`, ~4 dos 4,58 GB **não são** memória do caminho agregado.
+
+O que isso muda e o que não muda:
+
+- **Não muda a conclusão.** Os dois braços rodaram com o mesmo `shared_buffers`, então o termo é comum e o delta
+  (0,01 GB) continua válido — o pushdown não é a regressão.
+- **Muda a leitura da magnitude.** "4,58 GB" não é o consumo do agregado. A alocação própria não foi separada
+  naquele run (`RssAnon` não foi amostrado), então o valor do caminho de código permanece **não medido** ali.
+
+Toda medição de memória posterior deste milestone amostra `RssAnon` e `RssShmem` separadamente.
+
 ## Relacionados
 
 - [failure-mode/oraculo-de-correcao-que-nao-escala](../failure-modes/oraculo-de-correcao-que-nao-escala.md)
