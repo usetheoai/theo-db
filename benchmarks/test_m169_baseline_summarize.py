@@ -151,3 +151,46 @@ def test_summarizer_rejects_duplicate_query_ids():
     r = s.summarize(recs, total_expected=43)
     assert r.ok is False
     assert "duplicad" in r.reason
+
+
+# ---------- o teste que cruza a fronteira arquivo -> main(): o único que pegava o CRITICAL-A ---------------------
+def test_summarizer_reads_exactly_what_the_runner_writes(tmp_path):
+    """Todos os outros testes chamam `summarize()` com listas em memória — nenhum atravessa o arquivo. Foi por
+    isso que `json.load` (parser de documento ÚNICO) sobreviveu ao verde: o runner escreve JSONL, e a quebra só
+    apareceria DEPOIS das horas de corrida."""
+    import json as _json
+    p = tmp_path / "baseline.jsonl"
+    with open(p, "w") as fh:
+        fh.write(_json.dumps({"header": {"label": "baseline-100m", "n_queries": 43, "timeout_s": 300,
+                                         "work_mem": "256MB", "gucs_effective": {}}}) + "\n")
+        for i in range(43):
+            fh.write(_json.dumps({"q": i, "verdict": "ok", "elapsed_s": 1.0, "ab_identical": None}) + "\n")
+
+    header, records = s.load_jsonl(str(p))
+    assert header["n_queries"] == 43
+    assert len(records) == 43, "a linha de cabeçalho não pode virar um 44º registro sem veredito"
+    assert s.summarize(records, total_expected=header["n_queries"]).ok is True
+
+
+def test_summarizer_main_exits_zero_on_a_complete_run(tmp_path, monkeypatch, capsys):
+    import json as _json
+    p = tmp_path / "b.jsonl"
+    with open(p, "w") as fh:
+        fh.write(_json.dumps({"header": {"n_queries": 43, "label": "x"}}) + "\n")
+        for i in range(43):
+            fh.write(_json.dumps({"q": i, "verdict": "ok"}) + "\n")
+    monkeypatch.setattr(sys, "argv", ["prog", str(p)])
+    assert s.main() == 0
+
+
+def test_summarizer_main_exits_nonzero_on_a_truncated_run(tmp_path, monkeypatch):
+    """A corrida morta na hora 3: o arquivo existe, tem cabeçalho, e 30 vereditos. Publicar '30/43 completam'
+    seria uma afirmação sobre o produto feita a partir de um fato sobre o harness."""
+    import json as _json
+    p = tmp_path / "b.jsonl"
+    with open(p, "w") as fh:
+        fh.write(_json.dumps({"header": {"n_queries": 43, "label": "x"}}) + "\n")
+        for i in range(30):
+            fh.write(_json.dumps({"q": i, "verdict": "ok"}) + "\n")
+    monkeypatch.setattr(sys, "argv", ["prog", str(p)])
+    assert s.main() == 1

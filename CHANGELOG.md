@@ -83,6 +83,9 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   falha da entrada acima, num conjunto mais estreito de gatilhos.
 
 ### Changed
+- **theodb:** o gate de atestação distingue "a tabela não existe" de "não consegui consultar" e emite
+  identificadores estáveis por falha, para que uma tolerância explícita (ex.: seguir sem o gêmeo heap) não
+  engula silenciosamente uma falha diferente que por acaso menciona a mesma tabela (#M169)
 - **theodb:** a atestação da box ganhou `--quick`, que pula as checagens de dataset (~40 min a 100M) e
   mantém as de contaminação — para o cabeçalho de fechamento de uma corrida read-only, que não pode ter
   mudado o dado; "não perguntei" é registrado como estado próprio, nunca confundido com "ausente" (#M169)

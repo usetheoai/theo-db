@@ -52,6 +52,9 @@ CRASH_COLLATERAL = "crash:collateral"
 OOM_PALLOC = "oom:palloc"
 OOM_KERNEL = "oom:kernel"
 _ERROR_PREFIX = "error:"
+# The runner failed, not the product. A distinct namespace so a harness defect is never counted as a query
+# failure — and so `_is_known` does not reject the whole run for a token it has never seen.
+HARNESS_PREFIX = "harness:"
 
 # PostgreSQL SQLSTATEs. 57014 = query_canceled, 53200 = out_of_memory, 57P02 = crash_shutdown.
 SQLSTATE_QUERY_CANCELED = "57014"
@@ -88,7 +91,7 @@ def classify_failure(sqlstate: str | None, message: str, *, oom_evidence: bool =
 
 def _is_known(verdict: str) -> bool:
     return (verdict in (OK, TIMEOUT, CRASH, CRASH_COLLATERAL, OOM_PALLOC, OOM_KERNEL)
-            or verdict.startswith(_ERROR_PREFIX))
+            or verdict.startswith(_ERROR_PREFIX) or verdict.startswith(HARNESS_PREFIX))
 
 
 def _ab_verdict(records: list[dict]) -> str:
@@ -133,15 +136,43 @@ def summarize(records: list[dict], total_expected: int = TOTAL_QUERIES) -> Summa
                    by_verdict=by_verdict, ab_verdict=_ab_verdict(records))
 
 
+def load_jsonl(path: str) -> tuple[dict, list[dict]]:
+    """Read what the runner ACTUALLY writes: one JSON document per line, the first carrying `header`.
+
+    An earlier version used `json.load` — a single-document parser — and would have raised
+    `JSONDecodeError: Extra data: line 2` AFTER the multi-hour run. Worse, a naive line reader would count the
+    header as a 44th record with no verdict and fail a perfectly good run. Both are caught by the round-trip
+    test, which is the only one that crosses the file boundary."""
+    header, records = {}, []
+    with open(path) as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            obj = json.loads(line)
+            if "header" in obj:
+                header = obj["header"]
+            else:
+                records.append(obj)
+    return header, records
+
+
 def main() -> int:
     if len(sys.argv) != 2:
-        print(f"uso: {sys.argv[0]} <baseline.json>", file=sys.stderr)
+        print(f"uso: {sys.argv[0]} <baseline.jsonl>", file=sys.stderr)
         return 2
-    with open(sys.argv[1]) as fh:
-        payload = json.load(fh)
-    records = payload["queries"] if isinstance(payload, dict) else payload
+    header, records = load_jsonl(sys.argv[1])
+    # The denominator comes from the run, not from a constant: with `--queries` pointing at another set, a fixed
+    # 43 would fail the gate by construction and make "N/43" incomparable.
+    expected = header.get("n_queries", TOTAL_QUERIES)
 
-    r = summarize(records)
+    r = summarize(records, total_expected=expected)
+    if header:
+        print(f"  label={header.get('label')} timeout={header.get('timeout_s')}s "
+              f"work_mem={header.get('work_mem')}")
+        ph = [k for k, v in (header.get("gucs_effective") or {}).items() if str(v).startswith("PLACEHOLDER")]
+        if ph:
+            print(f"  ATENÇÃO: GUCs que o servidor não conhece (SET sem efeito): {ph}")
     print(f"=== M169 baseline — {r.completed}/{r.total_expected} consultas completam ===")
     for verdict, n in sorted(r.by_verdict.items()):
         print(f"  {verdict:>18} : {n}")

@@ -53,27 +53,27 @@ def test_attestation_rejects_a_corpus_that_is_not_the_clickbench_one():
     # exercises the FIRST branch (tsv_rows != HITS_ROWS) — previously unreachable from any test
     v = a.attest(_facts(tsv_rows=1_000_000, hits_rows=1_000_000, hits_heap_rows=1_000_000))
     assert v.ok is False
-    assert any("tsv_rows" in f for f in v.failures)
+    assert any(f.startswith(a.ID_TSV_WRONG) for f in v.failures)
 
 
 def test_attestation_rejects_a_table_that_disagrees_with_the_tsv():
     # the M162 false-100M shape: the table holds fewer rows than the source file and nothing noticed
     v = a.attest(_facts(hits_rows=1_000_000))
     assert v.ok is False
-    assert any("hits_rows" in f and "COPY" in f for f in v.failures)
+    assert any(f.startswith(a.ID_COPY_LOST) for f in v.failures)
 
 
 # ---------- AC-1b: the heap twin must exist AND match — the gap that lost the table twice ------------------------
 def test_attestation_rejects_a_missing_heap_twin():
     v = a.attest(_facts(hits_heap_rows=0))
     assert v.ok is False
-    assert any("hits_heap is ABSENT" in f for f in v.failures)
+    assert any(f.startswith(a.ID_HEAP_ABSENT) for f in v.failures)
 
 
 def test_attestation_rejects_a_heap_twin_that_disagrees_with_the_columnar():
     v = a.attest(_facts(hits_heap_rows=a.HITS_ROWS - 17))
     assert v.ok is False
-    assert any("hits_heap_rows" in f for f in v.failures)
+    assert any(f.startswith(a.ID_HEAP_MISMATCH) for f in v.failures)
 
 
 # ---------- AC-2/3/4: the box is the one ADR-3 declared, idle, and not self-restarting ---------------------------
@@ -85,20 +85,20 @@ def test_attestation_rejects_an_undersized_box():
 def test_attestation_rejects_a_loaded_box():
     v = a.attest(_facts(loadavg1=2.08))
     assert v.ok is False
-    assert any("loadavg1" in f for f in v.failures)
+    assert any(f.startswith("box_busy") for f in v.failures)
 
 
 def test_attestation_rejects_unmasked_unattended_upgrades():
     for state in ("enabled", "disabled", "static", "unknown"):
         v = a.attest(_facts(unattended_state=state))
         assert v.ok is False, state
-        assert any("unattended" in f for f in v.failures)
+        assert any(f.startswith("unattended_upgrades_live") for f in v.failures)
 
 
 def test_attestation_rejects_insufficient_disk_for_the_heap_rebuild():
     v = a.attest(_facts(disk_free_gb=40))
     assert v.ok is False
-    assert any("disk_free_gb" in f for f in v.failures)
+    assert any(f.startswith("disk_insufficient") for f in v.failures)
 
 
 # ---------- NEGATIVE lens: the collector failed entirely -----------------------------------------------------------
@@ -107,8 +107,8 @@ def test_unreachable_collector_is_reported_as_such_not_as_a_data_defect():
     COPY lost rows' sends the operator hunting a phantom bug — the #132 defect this project already paid for."""
     v = a.attest(_facts(hits_rows=a.UNREACHABLE, hits_heap_rows=a.UNREACHABLE, tsv_rows=a.UNREACHABLE))
     assert v.ok is False
-    assert any("cannot attest the dataset" in f for f in v.failures)
-    assert not any("COPY lost" in f for f in v.failures), "an infra failure must not be labelled a data defect"
+    assert any(f.startswith(a.ID_UNREACHABLE) for f in v.failures)
+    assert not any(f.startswith(a.ID_COPY_LOST) for f in v.failures), "infra != data defect"
 
 
 # ---------- EDGE lens: exactly at each threshold --------------------------------------------------------------------
@@ -180,7 +180,7 @@ def test_collect_maps_a_failing_runner_to_fail_closed_values():
     assert box.loadavg1 == 99.0        # the fail-closed sentinel, not 0.0 which would look idle
     assert box.unattended_state == "unknown"
     assert box.tsv_rows == a.UNREACHABLE
-    assert any("cannot attest the dataset" in f for f in v.failures)
+    assert any(f.startswith(a.ID_UNREACHABLE) for f in v.failures)
 
 
 # ---------- quick mode: "não perguntei" é um terceiro estado, distinto de 0 e de UNREACHABLE ----------------------
@@ -193,8 +193,8 @@ def test_quick_mode_does_not_judge_the_dataset_it_did_not_ask_about():
                      disk_free_gb=a.MIN_DISK_FREE_GB + 10)
     v = a.attest(box)
     assert v.ok is True
-    assert not any("hits_heap" in f for f in v.failures)
-    assert not any("cannot attest the dataset" in f for f in v.failures)
+    assert not any(f.startswith(a.ID_HEAP_ABSENT) for f in v.failures)
+    assert not any(f.startswith(a.ID_UNREACHABLE) for f in v.failures)
 
 
 def test_quick_mode_still_judges_box_fitness():
@@ -204,7 +204,7 @@ def test_quick_mode_still_judges_box_fitness():
                      disk_free_gb=a.MIN_DISK_FREE_GB + 10)
     v = a.attest(box)
     assert v.ok is False
-    assert any("loadavg1" in f for f in v.failures)
+    assert any(f.startswith("box_busy") for f in v.failures)
 
 
 def test_collect_quick_skips_the_expensive_calls_entirely():
@@ -229,3 +229,24 @@ def test_collect_quick_skips_the_expensive_calls_entirely():
     assert box.hits_rows == a.SKIPPED
     assert psql_calls == [], "quick mode must not run count(*) at all"
     assert not any(c.startswith("wc -l") for c in calls), "quick mode must not run wc -l on 69.7 GB"
+
+
+# ---------- o buraco que tornava o escape hatch inerte no próprio caso de uso ----------------------------------
+def test_absent_relation_is_distinct_from_unreachable_and_from_empty():
+    """Três estados, três vereditos. `ALLOW_MISSING_HEAP` existe para tolerar UM deles; se `hits_heap` ausente
+    fosse reportado como 'não consegui olhar', a tolerância nunca dispararia — que era exatamente o caso."""
+    absent = a.attest(_facts(hits_heap_rows=a.ABSENT))
+    assert any(f.startswith(a.ID_HEAP_ABSENT) for f in absent.failures)
+    assert not any(f.startswith(a.ID_UNREACHABLE) for f in absent.failures)
+
+    unreachable = a.attest(_facts(hits_heap_rows=a.UNREACHABLE))
+    assert any(f.startswith(a.ID_UNREACHABLE) for f in unreachable.failures)
+    assert not any(f.startswith(a.ID_HEAP_ABSENT) for f in unreachable.failures)
+
+
+def test_a_heap_with_the_wrong_population_is_never_reported_as_absent():
+    """O buraco perigoso: uma tolerância que casasse a substring 'hits_heap' engoliria a divergência de
+    contagem — que é PIOR que ausência, porque o A/B compararia duas populações diferentes e passaria."""
+    v = a.attest(_facts(hits_heap_rows=50_000_000))
+    assert any(f.startswith(a.ID_HEAP_MISMATCH) for f in v.failures)
+    assert not any(f.startswith(a.ID_HEAP_ABSENT) for f in v.failures)

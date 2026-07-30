@@ -31,11 +31,14 @@ if [ "$ATTEST_RC" -ne 0 ]; then
   # The ONLY tolerated failure is the absent heap twin, and only when asked for explicitly. Everything else —
   # wrong box, busy box, unattended-upgrades live, row-count mismatch — aborts. A gate silenced by `|| true`
   # is a gate that does not exist.
-  ONLY_HEAP=$(python3 - "$ART/${LABEL}-box-before.json" <<'PY'
+  # Testa o ID ESTAVEL, nunca substring de prosa: "hits_heap is ABSENT" e "hits_heap_rows disagrees" contem
+  # ambos "hits_heap", entao um casamento por texto toleraria tambem o gemeo com populacao ERRADA -- que e pior
+  # que ausente, porque o A/B compararia duas populacoes e passaria.
+  ONLY_HEAP=$(python3 - "$ART/${LABEL}-box-before.json" <<'PYEOF'
 import json, sys
 f = json.load(open(sys.argv[1]))["failures"]
-print("1" if f and all("hits_heap" in x for x in f) else "0")
-PY
+print("1" if f and all(x.split(" | ", 1)[0] == "hits_heap_absent" for x in f) else "0")
+PYEOF
 )
   if [ "$ONLY_HEAP" = "1" ] && [ "$ALLOW_MISSING_HEAP" = "1" ]; then
     echo "  AVISO: hits_heap ausente — corrida segue SEM oráculo A/B (ALLOW_MISSING_HEAP=1)."
@@ -54,14 +57,25 @@ RUN_RC=$?
 # read-only não pode ter mudado. As checagens de dataset custam ~40 min MEDIDOS a 100M; pagá-las duas vezes
 # acrescentaria mais de uma hora a uma corrida que já é de horas. O JSON registra que o modo foi quick.
 echo "=== atestação da box (DEPOIS, --quick — prova de não-contaminação) ==="
-python3 "$HERE/m169_box_attest.py" --tsv "$TSV" --quick --json > "$ART/${LABEL}-box-after.json" || true
-python3 -c "
-import json,sys
-b=json.load(open('$ART/${LABEL}-box-before.json'))['facts']
-a=json.load(open('$ART/${LABEL}-box-after.json'))['facts']
-print(f\"  loadavg1 antes={b['loadavg1']} depois={a['loadavg1']}\")
-print(f\"  so_md5   antes={b['so_md5']} depois={a['so_md5']}\")
-if a['so_md5'] != b['so_md5']:
-    print('  ALERTA: o .so MUDOU durante a corrida — a medição mistura dois binários'); sys.exit(1)
-"
+python3 "$HERE/m169_box_attest.py" --tsv "$TSV" --quick --json > "$ART/${LABEL}-box-after.json"
+AFTER_RC=$?
+# O alerta TEM de reprovar. Numa versao anterior ele fazia sys.exit(1) e a linha seguinte descartava o codigo;
+# e o "|| true" deixava o JSON faltar em silencio, fazendo o comparador estourar e o script seguir. Um guard
+# cujo veredito ninguem le e decoracao.
+if [ "$AFTER_RC" -ne 0 ] && [ ! -s "$ART/${LABEL}-box-after.json" ]; then
+  echo "  ABORTA: a atestacao de fechamento nao produziu artefato -- a nao-contaminacao NAO foi verificada." >&2
+  exit 1
+fi
+python3 - "$ART/${LABEL}-box-before.json" "$ART/${LABEL}-box-after.json" <<'PYEOF'
+import json, sys
+b = json.load(open(sys.argv[1]))["facts"]
+a = json.load(open(sys.argv[2]))["facts"]
+print(f"  loadavg1 antes={b['loadavg1']} depois={a['loadavg1']}")
+print(f"  so_md5   antes={b['so_md5']} depois={a['so_md5']}")
+if a["so_md5"] != b["so_md5"]:
+    print("  ALERTA: o .so MUDOU durante a corrida -- a medicao mistura dois binarios", file=sys.stderr)
+    sys.exit(1)
+PYEOF
+CONTAM_RC=$?
+if [ "$CONTAM_RC" -ne 0 ]; then exit "$CONTAM_RC"; fi
 exit $RUN_RC

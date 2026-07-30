@@ -55,6 +55,11 @@ MIN_DISK_FREE_GB = int(HITS_ROWS * (_EST_HEAP_BYTES_PER_ROW + _EST_COLUMNAR_BYTE
 # identical command on the identical file with the same ceiling.
 WC_TIMEOUT_S = 600
 SH_TIMEOUT_S = 60
+# `count(*)` over the 100M columnar table is ~35 min MEASURED (row-by-row materialisation, the M148 bottleneck).
+# The 60 s default kills the psql CLIENT and leaves the BACKEND running orphaned — the check then reports
+# UNREACHABLE while the server burns CPU for another half hour. That is the same defect the `wc -l` ceiling fixed;
+# fixing one instance and not the class is how it survived.
+COUNT_TIMEOUT_S = 3600
 
 
 @dataclass(frozen=True)
@@ -84,45 +89,66 @@ class Verdict:
 # failure is never reported as a data defect — the #132 lesson (a generic error erasing the cause).
 UNREACHABLE = -1
 # The dataset checks were deliberately not run (see `collect(quick=True)`). Distinct from UNREACHABLE, which
-# means they were attempted and failed, and from 0, which means the table is absent or empty.
+# means they were attempted and failed, and from 0, which means the table is empty.
 SKIPPED = -2
+# The relation does not exist. Distinct from 0 (exists, empty) and from UNREACHABLE (could not ask): a caller
+# deciding whether to tolerate a missing heap twin must be able to tell "absent" from "I could not look".
+ABSENT = -3
+
+# Stable identifiers, so a caller tests an ID and never a substring of prose. Same contract as
+# `code-quality-golden-rule.md § 2` and its `hard_caps_triggered`.
+ID_UNREACHABLE = "collector_unreachable"
+ID_TSV_WRONG = "tsv_rowcount_wrong"
+ID_COPY_LOST = "hits_rowcount_disagrees_with_tsv"
+ID_HEAP_ABSENT = "hits_heap_absent"
+ID_HEAP_MISMATCH = "hits_heap_rowcount_mismatch"
 
 
 def attest(box: BoxFacts) -> Verdict:
     """Judge one box against T1.1's acceptance criteria. Reports EVERY failure, never just the first — a
-    first-failure-wins guard hides work and makes the operator re-run to discover the next problem."""
+    first-failure-wins guard hides work and makes the operator re-run to discover the next problem.
+
+    Each failure carries a STABLE ID as `id | prose`. A caller that greps the prose (as an earlier version of
+    `m169_baseline_100m.sh` did) matches whatever sentence happens to contain a word — and `hits_heap is ABSENT`
+    and `hits_heap_rows disagrees` both contain `hits_heap`, so a script meaning to tolerate the first silently
+    tolerated the second: a heap twin with the WRONG population, which is worse than none."""
     failures: list[str] = []
+
+    def fail(fid: str, prose: str) -> None:
+        failures.append(f"{fid} | {prose}")
 
     if SKIPPED in (box.tsv_rows, box.hits_rows, box.hits_heap_rows):
         pass  # quick mode: the dataset was not asked about, so it is not judged. Box fitness below still is.
-    elif UNREACHABLE in (box.tsv_rows, box.hits_rows, box.hits_heap_rows):
-        # Fail-closed, but with the RIGHT label: "I could not look" is not "the data is wrong".
-        failures.append("collector could not read the corpus or the database — cannot attest the dataset "
-                        "(check psql reachability, LD_LIBRARY_PATH, and the TSV path) — NOT a data defect")
     else:
-        if box.tsv_rows != HITS_ROWS:
-            failures.append(f"tsv_rows={box.tsv_rows} but the ClickBench corpus has {HITS_ROWS}")
-        if box.hits_rows != box.tsv_rows:
-            failures.append(f"hits_rows={box.hits_rows} disagrees with tsv_rows={box.tsv_rows} — the COPY lost "
-                            "or duplicated rows")
-        if box.hits_heap_rows == 0:
-            failures.append("hits_heap is ABSENT — T2.1/T4.1 have no byte-identity oracle without the heap twin")
-        elif box.hits_heap_rows != box.hits_rows:
-            failures.append(f"hits_heap_rows={box.hits_heap_rows} disagrees with hits_rows={box.hits_rows} — the "
-                            "A/B would compare two different populations")
+        if UNREACHABLE in (box.tsv_rows, box.hits_rows, box.hits_heap_rows):
+            fail(ID_UNREACHABLE, "could not read the corpus or the database — cannot attest the dataset "
+                                 "(check psql reachability, LD_LIBRARY_PATH, the TSV path, and the timeout) "
+                                 "— NOT a data defect")
+        if box.tsv_rows not in (UNREACHABLE,) and box.tsv_rows != HITS_ROWS:
+            fail(ID_TSV_WRONG, f"tsv_rows={box.tsv_rows} but the ClickBench corpus has {HITS_ROWS}")
+        if box.hits_rows not in (UNREACHABLE,) and box.tsv_rows not in (UNREACHABLE,) \
+                and box.hits_rows != box.tsv_rows:
+            fail(ID_COPY_LOST, f"hits_rows={box.hits_rows} disagrees with tsv_rows={box.tsv_rows} — the COPY "
+                               "lost or duplicated rows")
+        if box.hits_heap_rows in (ABSENT, 0):
+            fail(ID_HEAP_ABSENT, "hits_heap is ABSENT — T2.1/T4.1 have no byte-identity oracle without the twin")
+        elif box.hits_heap_rows != UNREACHABLE and box.hits_rows not in (UNREACHABLE,) \
+                and box.hits_heap_rows != box.hits_rows:
+            fail(ID_HEAP_MISMATCH, f"hits_heap_rows={box.hits_heap_rows} disagrees with hits_rows="
+                                   f"{box.hits_rows} — the A/B would compare two different populations")
 
     if box.nproc < MIN_NPROC:
-        failures.append(f"nproc={box.nproc} below the {MIN_NPROC} ADR-3 declared")
+        fail("nproc_below_adr3", f"nproc={box.nproc} below the {MIN_NPROC} ADR-3 declared")
     if box.mem_gb < MIN_MEM_GB:
-        failures.append(f"mem_gb={box.mem_gb} below the {MIN_MEM_GB} ADR-3 declared")
+        fail("mem_below_adr3", f"mem_gb={box.mem_gb} below the {MIN_MEM_GB} ADR-3 declared")
     if box.loadavg1 >= MAX_LOADAVG1:
-        failures.append(f"loadavg1={box.loadavg1} >= {MAX_LOADAVG1} — something else is running; the measurement "
-                        "would be contaminated")
+        fail("box_busy", f"loadavg1={box.loadavg1} >= {MAX_LOADAVG1} — something else is running; the "
+                         "measurement would be contaminated")
     if box.unattended_state != "masked":
-        failures.append(f"unattended-upgrades is '{box.unattended_state}', not masked — it restarts PostgreSQL "
-                        "mid-run, which is what truncated the UNLOGGED twin")
+        fail("unattended_upgrades_live", f"unattended-upgrades is '{box.unattended_state}', not masked — it "
+                                         "restarts PostgreSQL mid-run")
     if box.disk_free_gb < MIN_DISK_FREE_GB:
-        failures.append(f"disk_free_gb={box.disk_free_gb} below the {MIN_DISK_FREE_GB} the heap rebuild needs")
+        fail("disk_insufficient", f"disk_free_gb={box.disk_free_gb} below the {MIN_DISK_FREE_GB} needed")
 
     return Verdict(ok=not failures, failures=failures, facts=asdict(box))
 
@@ -148,19 +174,31 @@ def _psql(sql: str) -> str | None:
                f'-Atc {q(sql)}')
 
 
-def _psql_int(sql: str) -> int:
-    """A missing table and an empty table both report 0 — acceptable because both fail the SAME criterion (no A/B
-    oracle). A query that could not RUN reports UNREACHABLE, which is a different verdict with a different message."""
-    out = _psql(sql)
+def _psql_int(sql: str, timeout: int = SH_TIMEOUT_S) -> int:
+    """Three outcomes, deliberately distinct: a number, ABSENT, or UNREACHABLE. Collapsing them is how "psql is
+    down" became "the COPY lost rows" — the #132 defect."""
+    out = _psql(sql, timeout)
     if out is None:
         return UNREACHABLE
     try:
         return int(out.splitlines()[0])
     except (ValueError, IndexError):
-        return 0
+        return UNREACHABLE
 
 
-def collect(tsv_path: str, *, sh=_sh, psql_int=_psql_int, quick: bool = False) -> BoxFacts:
+def _count_rows(relation: str) -> int:
+    """Probe existence first with `to_regclass`, which CANNOT fail on a missing relation (it returns NULL, exit
+    0). Counting a nonexistent table exits non-zero, which is indistinguishable from psql being unreachable —
+    and that ambiguity made the `ALLOW_MISSING_HEAP` escape hatch inert in exactly its own use case."""
+    exists = _psql(f"select to_regclass('{relation}') is not null")
+    if exists is None:
+        return UNREACHABLE
+    if exists.strip() != "t":
+        return ABSENT
+    return _psql_int(f"select count(*) from {relation}", COUNT_TIMEOUT_S)
+
+
+def collect(tsv_path: str, *, sh=_sh, psql_int=_count_rows, quick: bool = False) -> BoxFacts:
     """Map the world into `BoxFacts`. The runners are injected so this mapping — the layer where every defect of
     this file has lived — is unit-testable without a box or a database.
 
@@ -184,8 +222,8 @@ def collect(tsv_path: str, *, sh=_sh, psql_int=_psql_int, quick: bool = False) -
     # SKIPPED is a distinct value from 0 and from UNREACHABLE: it says "not asked", which `attest` must not
     # mistake for "asked and found nothing".
     dataset = (SKIPPED, SKIPPED, SKIPPED) if quick else (
-        psql_int("select count(*) from public.hits"),
-        psql_int("select count(*) from public.hits_heap"),
+        psql_int("public.hits"),
+        psql_int("public.hits_heap"),
         _int(f"wc -l < {shlex.quote(tsv_path)}", WC_TIMEOUT_S, default=UNREACHABLE),
     )
     return BoxFacts(

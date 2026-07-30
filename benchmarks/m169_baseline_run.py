@@ -55,14 +55,19 @@ def session_gucs(timeout_s: int, work_mem: str, agg: bool, stream: bool) -> list
     """ONE place the session is configured, parameterised. T1.2 and T4.1 must differ only by the streaming GUC;
     if each copies its own SET list, one forgotten line makes T4.1 measure the new binary with the new path OFF
     and conclude 'nothing changed'. The effective list is written into the artifact."""
-    return [
+    gucs = [
         f"SET theodb.enable_columnar_agg = {'on' if agg else 'off'}",
-        f"SET theodb.enable_columnar_agg_stream = {'on' if stream else 'off'}",
         "SET theodb.enable_columnar_late_mat = on",
         f"SET work_mem = '{work_mem}'",
         "SET max_parallel_workers_per_gather = 0",
         f"SET statement_timeout = '{timeout_s}s'",
     ]
+    if stream:
+        # Only emitted when asked for. At baseline the GUC does not exist yet (T2.1 creates it), and setting a
+        # nonexistent parameter inside an extension's prefix SUCCEEDS as a silent placeholder — so emitting it
+        # unconditionally would put a no-op in the header pretending to be configuration.
+        gucs.insert(1, "SET theodb.enable_columnar_agg_stream = on")
+    return gucs
 
 
 def verify_gucs_took_effect(cur, gucs: list[str]) -> dict:
@@ -128,6 +133,14 @@ def run_query(i: int, sql: str, gucs: list[str]) -> dict:
         rec["verdict"] = summ.classify_failure(pid, str(e).splitlines()[0], oom_evidence=oom)
         rec["error"] = str(e).splitlines()[0][:160]
         rec["backend_pid"] = backend_pid
+    except Exception as e:  # noqa: BLE001 — deliberate: see below
+        # NOT a swallow. Anything that is not a psycopg2 error (MemoryError from a client-side fetchall,
+        # UnicodeDecodeError on a text column, KeyboardInterrupt) would otherwise escape run_query, kill the
+        # loop, and TRUNCATE the run — losing this query AND the remaining ones. A truncated run is worse than
+        # a failed query: the gate can see a failure, but a truncated file just has fewer lines. The verdict
+        # names the harness explicitly so it is never read as a product failure.
+        rec["verdict"] = f"{summ.HARNESS_PREFIX}{type(e).__name__}"
+        rec["error"] = str(e).splitlines()[0][:160] if str(e) else type(e).__name__
     finally:
         rec["elapsed_s"] = round(time.time() - t0, 3)
         if c is not None:
@@ -166,7 +179,11 @@ def main() -> int:
               "timeout_s": args.timeout_s, "work_mem": args.work_mem}
     placeholders = [k for k, v in effective.items() if str(v).startswith("PLACEHOLDER")]
     if placeholders:
-        print(f"  AVISO: GUCs que o servidor NÃO conhece (SET sucedeu sem efeito): {placeholders}", flush=True)
+        # ABORT, not warn. A placeholder means the code path that GUC governs is OFF while the header claims it
+        # was configured — which at T4.1 produces "the fix changed nothing" from a run that never enabled the fix.
+        print(f"  ABORTA: o servidor não conhece {placeholders} — o SET sucedeu como placeholder e NÃO teve "
+              f"efeito. Uma corrida sob configuração que não existe mede o caminho errado.", file=sys.stderr)
+        return 2
     print(json.dumps({"header": header}), flush=True)
 
     with open(args.out, "w") as fh:
