@@ -25,6 +25,24 @@
 | Correção (`diverged=0`, byte-identidade, EXPLAIN, controle positivo) | qualquer box, a 1M | não envolve relógio |
 | Medição (T1.2, T4.1, pico de pool, spill) | **`134.209.168.157`** (16 vCPU / 32 GB, dedicada) | a `165.227.121.20` é runner de CI e produziu rho=+1,00 de deriva |
 
+## O review do M169 tem de cobrir o diff do M168 também (medido 2026-07-29)
+
+| Fato | Medição |
+|---|---|
+| Última tag do repo | `v0.158.0` |
+| `develop` à frente de `origin/main` | **31 commits** — 17 do M168, 3 do M169, 11 anteriores |
+| Artefatos de ciclo do M168 | blueprint ✓ · plano ✓ · code-quality `PASS_WITH_CAVEATS` ✓ · **log de implementação ✗** · **review ✗** |
+
+O M168 shipou código em `develop` sem completar o ciclo no registro. **Consequência operacional:** a release do
+M169 (`develop → main`) carrega os 17 commits do M168, e como `/review` usa `--diff-base main`, o review do M169
+**inclui** o diff do M168. Logo nenhum código não-revisado alcança `main` — mas o review do M169 é o único gate
+que aquele diff terá.
+
+**Portanto, ao rodar `/review m169-scale-bugs-100m`:** não restringir o escopo aos arquivos do M169. Os agentes
+recebem `--diff-base main` e devem cobrir `theodb_rs/src/am/{df_executor,columnar}.rs` na íntegra do range, mais
+`benchmarks/m168_*` e `docs/benchmarks/m168-streaming-topk-verdict.md`. Reconstruir o log de implementação do M168
+a partir dos commits foi rejeitado: documentação retroativa tem alto risco de fabricação e nenhum valor de gate.
+
 ## Task list (ordenada por dependência)
 
 | # | Plan ref | Status | Wiring (a) | (b) | (c) | Commit SHA |
