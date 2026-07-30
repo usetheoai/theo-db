@@ -266,9 +266,24 @@ por um pré-check **exato** — não por heurística. `ChunkDirEntry.raw_len` j�
 todo modo). Somar `raw_len` das colunas de texto projetadas dá o total exato; se ele exceder `i32::MAX`, o
 `ResourcesExhausted` **sobe como erro tipado** em vez de recuar para um panic garantido.
 
-**Por que isto não é escopo novo:** é uma expressão sobre dados já em memória (degrau 5 da parsimony ladder), e
-substitui um comportamento que teria de ser documentado como quebrado. Um `ERROR` que diz "aumente work_mem" é
-acionável; um panic não é.
+**Custo real, medido antes de eu chamá-lo de barato (2026-07-29).** Eu havia escrito "é uma expressão sobre dados
+já em memória". **Não é** — a verificação mostrou que `struct StripePlan` (`columnar.rs:891`) é **privada** e
+`ScanPlan.plans` é **campo privado** de um struct `pub(crate)`. `df_executor.rs` alcança o `ScanPlan`, mas não o
+interior dele. `ChunkDirEntry.raw_len` é `pub` (`columnar_codec.rs:112`), então o dado existe; o que falta é o
+acesso.
+
+Logo o pré-check custa **um método acessor em `columnar.rs`** — algo como
+`pub(crate) fn raw_len_sum(&self, cols: &[usize]) -> u64` sobre `self.plans` — mais a chamada em `df_executor.rs`.
+São ~8 linhas em dois arquivos, não uma expressão em um. Continua no degrau 5 da ladder (a soma É uma linha), mas
+o encapsulamento cobra o acessor, e registrar isso agora evita a surpresa no GREEN.
+
+**Por que ainda não é escopo novo:** substitui um comportamento que teria de ser documentado como quebrado. Um
+`ERROR` que diz "aumente work_mem" é acionável; um panic não é.
+
+**Nota de tamanho, para ninguém "corrigir" a aritmética depois:** o doc-comment de `ChunkDirEntry`
+(`columnar_codec.rs:105-106`) diz "**fixed 44 bytes**", que é o tamanho **serializado**. Em memória, com dois
+`u64` (align 8), o struct ocupa **48 B** — é esse que vale para o cálculo do EC-1. Os dois números estão certos
+para coisas diferentes.
 
 **Alternativas rejeitadas:**
 
