@@ -555,3 +555,32 @@ estourou `XX000` em 52 s. É a assinatura de "entra no caminho colunar e quebra 
 
 Se eu tivesse pulado esta checagem, o conceito recém-escrito estaria apoiado num artefato do harness — e um
 conceito errado é pior que ausente, porque será citado.
+
+### q32 — a segunda falha com `agg=True`, e ela NÃO é da classe que o streaming conserta
+
+O par q31/q32 é um experimento controlado que o ClickBench entrega de graça:
+
+| | consulta | veredito | `agg` |
+|---|---|---|---|
+| q31 | `… COUNT(*), SUM(IsRefresh), AVG(ResolutionWidth) … WHERE SearchPhrase <> '' GROUP BY WatchID, ClientIP` | `ok` 93,3 s | True |
+| q32 | idem, **sem o `WHERE`** | `timeout` 303,6 s | True |
+
+Mesma chave, mesmos agregados, mesmo roteamento. A única variável é o filtro — e `WatchID` é quase único por
+linha, então sem ele a agregação tem da ordem de **10⁸ grupos**.
+
+**Consequência para o M169, e ela é restritiva.** Há agora duas falhas com `agg=True`, e elas estouram em
+lugares diferentes do mesmo caminho:
+
+| | onde estoura | o `ColumnarChunkStream` conserta? |
+|---|---|---|
+| **q20** | materialização do **input** — a coluna `URL` inteira num array Arrow `Utf8` de offsets i32 | **sim, estruturalmente** — o stream materializa um chunk-group (10 000 linhas) por vez, três ordens de grandeza abaixo do teto de 2 GB |
+| **q32** | **estado da agregação** — a hash table cresce com o número de GRUPOS, não com o input | **não** — streamar a entrada não encolhe uma tabela hash de 10⁸ entradas |
+
+Registro isto **antes** do T4.1 porque a leitura preguiçosa está pronta: "duas consultas roteiam e falham, o
+streaming conserta o caminho roteado, logo conserta as duas". Não conserta. O streaming ataca o pico de
+**entrada**; a alta cardinalidade é pico de **estado**. São eixos independentes, e prometer o segundo com a
+evidência do primeiro seria a mesma sobreatribuição que o conceito
+`contagem-agregada-mistura-classes-de-falha` documenta — agora um nível abaixo, **dentro** da classe `agg=True`.
+
+**O que isto valida:** a T3.2 do plano ("pico de agregado sob alta cardinalidade") não é zelo — o q32 é o caso
+natural dela, e agora tem um número medido para ancorá-la em vez de uma hipótese.
