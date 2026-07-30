@@ -16,7 +16,10 @@ Leia antes de mexer em storage, FFI, recovery, build ou branch compartilhado.
 | Conceito | O que é |
 |---|---|
 | [Acervo local primeiro, web depois, memória do modelo por último](acervo-local-antes-da-web.md) | 25 PDFs e 33 repos versionados no acervo; citar arquivo:linha do disco é mais barato, offline e já passou pelo gate de licença. |
+| [BackgroundWorker::transaction faz PushActiveSnapshot por todo o closure](bgworker-transaction-segura-snapshot.md) | Uma chamada HTTP dentro do closure segura backend_xmin pelo tempo inteiro da chamada, atrasando autovacuum. |
 | [CHUNK_GROUP_ROWS = 10.000 é a unidade de decode, skip e memória do colunar](chunk-group-e-a-unidade-de-tudo.md) | Todo termo O(N) no colunar tem uma versão O(chunk-group); quando um caminho não tem, é defeito de escala esperando a escala. |
+| [CustomScan com scanrelid=0 e Aggref no targetlist quebra sob subquery pullup](customscan-scanrelid-zero-e-aggref-pullup.md) | O pullup inlina o Aggref num nó superior e o planner falha com 'cache lookup failed for attribute N of relation 0' — crasha até o EXPLAIN. |
+| [sum(Int64) do DataFusion faz add_wrapping — casar para Decimal128 antes de somar](datafusion-sum-int64-faz-wrapping.md) | Para saída numeric exata, o caminho é sum(cast(col AS Decimal128(38,0))) sobre i128; sum(Int64) silenciosamente dá a volta. |
 | [git switch e restore — nunca checkout, revert, reset --hard ou force-push](git-switch-nao-checkout.md) | Comandos ambíguos ou destrutivos são proibidos por regra do projeto; os substitutos preservam a capacidade de recuperar. |
 | [Peers AGPL são estudo, nunca fonte de código](licenca-agpl-e-study-only.md) | A distribuição é Apache-2.0 com gate fail-closed contra AGPL; técnica se aprende, código se reimplementa do zero. |
 | [A e2e-runner é o runner do CI — medir nela satura o pipeline e contamina o número](nao-usar-a-box-do-ci.md) | 165.227.121.20 hospeda o runner do GitHub Actions e k3s; usá-la para benchmark degrada o CI de todo o time e produz deriva. |
@@ -26,3 +29,4 @@ Leia antes de mexer em storage, FFI, recovery, build ou branch compartilhado.
 | [Trocar o .so não afeta backends enquanto o postmaster não reinicia](so-obsoleto-sob-shared-preload.md) | Sob shared_preload_libraries o postmaster mapeia o .so no arranque; substituir o arquivo deixa /proc/PID/maps marcando '(deleted)' e os testes rodam contra o binário ANTIGO. |
 | [O TableAmRoutine tem de ser alocado em TopMemoryContext](tableam-routine-em-topmemorycontext.md) | Alocar a routine handler num contexto de menor duração produz ponteiro pendente e segfault quando o contexto é resetado. |
 | [UNLOGGED é truncada por crash recovery — sempre, sem aviso](unlogged-truncado-por-recovery.md) | Uma tabela UNLOGGED perde 100% do conteúdo quando o cluster reinicializa após crash. Se ela é a fonte de um A/B, o oráculo passa a comparar contra vazio. |
+| [Um background worker roda em backend próprio e não enxerga SET de sessão](worker-nao-ve-set-de-sessao.md) | Configurar GUCs com SET numa sessão psql não afeta o worker; ele precisa de ALTER SYSTEM, e shared_preload_libraries exige restart, não reload. |

@@ -14,6 +14,9 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **theodb:** auditoria de cobertura da base OKF — 7 lacunas reais fechadas (dogfood vs benchmark, teste que
+  passa pela razão errada, fail-open por omissão, snapshot do bgworker, GUC de worker, wrapping de `sum(Int64)`,
+  `scanrelid=0` sob pullup); bundle vai a 53 conceitos (#okf)
 - **theodb:** contrato de leitura e atualização da base OKF — regra `okf-knowledge-base.md`, validador
   determinístico `check_okf.py` (4 invariantes estruturais) e hard gate no Stop que bloqueia número
   publicado sem conceito de medição correspondente (#okf)

@@ -41,3 +41,26 @@ Durante a construção dos testes, **dois** dos meus próprios modos de falha ca
 mais interessante do dia: capturei `$?` de um `tail` num pipeline (`falso-verde-de-script`) e testei o gate de
 benchmark com um arquivo não-rastreado, que `ALL_FILES` estruturalmente não vê (`instrumento-cego-a-arquitetura`).
 O catálogo pegou os dois porque eu tinha acabado de escrevê-los.
+
+## 2026-07-30 (2) — auditoria de cobertura: 7 lacunas reais encontradas e fechadas
+
+O owner perguntou "todos os aprendizados estão no OKF?". Eu tinha **afirmado** consolidar 67 arquivos de memória
+sem nunca verificar entrada por entrada — o `cobertura-alegada-sem-execucao` aplicado ao próprio bundle.
+
+Medido: 10 memórias sem rastro algum. Lidas uma a uma e classificadas:
+
+| Veredito | Quantas | Ação |
+|---|---|---|
+| lacuna real | **7** | conceito escrito |
+| corretamente fora (§ 4.2 — rastro de execução, ou credencial) | 2 | nenhuma |
+| falso negativo da minha própria busca | 1 | nenhuma (`m140-4` está coberto sob `Spi`) |
+
+Conceitos acrescentados: `benchmark-nao-prova-que-o-produto-funciona`, `teste-que-passa-pela-razao-errada`,
+`fail-open-por-omissao`, `bgworker-transaction-segura-snapshot`, `worker-nao-ve-set-de-sessao`,
+`datafusion-sum-int64-faz-wrapping`, `customscan-scanrelid-zero-e-aggref-pullup`.
+
+**Ressalva que fica registrada porque é o dado mais honesto daqui:** a heurística que usei erra nos DOIS sentidos.
+Deu falso negativo em `m140-4` (busquei termos do slug; a lição vive sob `Spi::get_one`), e "com rastro" para as
+outras 56 significa apenas que **uma palavra apareceu em algum lugar** — não que a lição virou conceito. Logo
+**56/66 é teto, não medida**, e a cobertura real das 56 continua não auditada. Além disso, os 110 blueprints e as
+mensagens de commit da série **nunca foram varridos** — é superfície maior que a das memórias.
