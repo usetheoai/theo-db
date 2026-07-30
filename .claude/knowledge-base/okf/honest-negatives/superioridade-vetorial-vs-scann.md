@@ -36,8 +36,17 @@ E o RaBitQ — o melhor quantizador permissivo disponível — dá **memória, n
 
 **O que a saturação era, e o que ela é hoje.** O grafo do theodb **platôava em recall 0,974 a 500k** — até o
 **ADR-0034** (`extendCandidates`), que o levou a **0,990** (pgvector 0,994). O gap de recall a 500k está
-**fechado**; o que permanece é **eficiência recall-por-`ef`**: o theodb ainda precisa de ~1,8× o `ef` do pgvector
-a 500k (ADR-0035:21).
+**fechado**; o que permanece é **eficiência recall-por-`ef`**: o theodb precisa de **~5× o `ef`** do pgvector para
+igualar recall a 500k, o que sai **~1,8× mais lento** (`gap1-extend-candidates.md:39`).
+
+> **CORRIGIDO 2026-07-30.** Este conceito dizia "~1,8× o `ef`", citando `ADR-0035:21`. **O ADR está errado** — ele
+> comprimiu *"~5× o `ef` → ~1,8× mais lento"* do artefato em *"~1,8× o `ef`"*, fundindo o multiplicador de `ef`
+> com o de latência, e **cita o próprio artefato que o contradiz**. Eu fui fiel ao ADR e herdei o erro. A classe
+> está registrada em [numero-comprimido-na-cadeia-de-citacao](../failure-modes/numero-comprimido-na-cadeia-de-citacao.md).
+
+**E o fix teve custo, que o conceito omitia:** o `extendCandidates` deixou o **build ~2-3× mais lento** (pool de
+candidatos maior por insert), erodindo a vantagem de build-speed que o theodb tinha
+(`gap1-extend-candidates.md:41-42`). O trade foi deliberado — recall era o eixo do North Star.
 
 E a degradação por escala nunca foi uniforme: a **100k×768d o theodb dá recall@10 = 0,998**, em paridade ou acima
 do pgvector. A fonte marca isso explicitamente como **notícia de produto** — para ≤100k vetores o pilar vetorial

@@ -17,6 +17,8 @@ dele é o que impede o custo de repetição.
 | Conceito | O que é |
 |---|---|
 | [Uma perna BM25 9,8× mais forte NÃO vence na fusão RRF](bm25-na-fusao-rrf.md) | O RRF premia complementaridade, não força individual — trocar a perna lexical por uma muito melhor não melhorou a fusão. |
+| [Códigos 768× menores co-locados com o f32 no mesmo tuple não reduzem I/O algum](codigos-quantizados-co-locados-nao-reduzem-io.md) | O walk pagina os ~3 KB inteiros para ler 4 bytes; separar o layout também não bastou, porque o rerank lê NN-leaves frios enquanto o baseline revisita hub-nodes cacheáveis. |
+| [A superioridade da busca híbrida sobre vector-only é dataset-dependente — e os dois resultados se explicam](hibrida-e-dataset-dependente.md) | SciFact: paridade sem poder (p=0,253, 296/300 empates). NFCorpus: significativa (p=0,0099). A diferença é a força da perna lexical, não do método. |
 | [MIN/MAX sobre texto não é roteável: byte-min ≠ collation-min](min-max-texto-e-colacao.md) | Determinismo de colação não basta — ordenar não é o mesmo que igualdade. Só C/POSIX é seguro, e as colunas default do ClickBench declinam. |
 | [pg_duckdb force_execution sobre heap é 0,63-0,89× do row-executor do PostgreSQL](pgduckdb-sobre-heap-e-mais-lento.md) | Resultados corretos e plano usando DuckDB — e ainda assim mais lento que o executor nativo, em todas as escalas. |
 | [DoD de ≤1,2× vs pgvector FALSIFICADO — page-native é 7-23× mais lento](resume-from-discarded-m118.md) | O caminho page-native não alcança o alvo; o own-path fica em ~1,95× a recall 1.0. Registrado como ADR-0033. |

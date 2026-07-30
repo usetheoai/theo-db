@@ -227,3 +227,45 @@ aberto** — e a varredura seletiva por categoria é o que os protegeu.
 diretórios com `.git`; ele verificou que o `CLAUDE.md` separa deliberadamente os **33 peers** do `FlameGraph`
 (ferramenta, não peer), e recusou o achado. Relatar os nove teria sido o `diagnostico-aceito-sem-reproduzir` que
 este bundle documenta.
+
+## 2026-07-30 (8) — varredura dos 139 artefatos de benchmark: +14 conceitos
+
+Auditoria de cobertura mostrou que a § 4.1 do contrato estava sendo violada em escala: **139 artefatos de
+benchmark, 8 citados**. Três extratores varreram os 53 que carregam veredito, com a regra "todo número vem do
+arquivo, com `arquivo:linha`".
+
+**Decisão de desenho:** 139 artefatos **não** viram 139 conceitos. A § 4.1 exige que o número seja
+**recuperável**; a § 4.3 manda atualizar em vez de bifurcar; a § 6 avisa que enchimento envenena. Os extratores
+classificaram em `HONEST_NEGATIVE` / `MEASUREMENT` / `EXECUTION_TRACE`, e o terceiro balde — "o milestone N
+entregou X e o DoD passou" — foi descartado por § 4.2.
+
+**O achado de maior consequência é um ERRO NO BUNDLE, e a cadeia dele:**
+
+| Elo | Diz | Certo? |
+|---|---|---|
+| artefato `gap1:39` | "**~5× o `ef`** → **~1,8× mais lento**" | ✅ duas grandezas |
+| ADR-0035:21 | "**~1,8× o `ef`**" | ❌ fundiu as duas |
+| conceito OKF | citava o ADR, **fielmente** | ❌ herdou |
+
+O ADR **cita o artefato que o contradiz**. Meu conceito passava em qualquer verificação de citação — o `resource:`
+resolve, a linha diz aquilo. O defeito estava **um elo acima**, e nenhum gate alcança. Virou
+[numero-comprimido-na-cadeia-de-citacao](failure-modes/numero-comprimido-na-cadeia-de-citacao.md).
+
+**Os 14 novos, por tipo:**
+
+- `Invariant` (3, o tipo mais escasso): o rename `attrs`→`compact_attrs` do PG18 que **compila** lendo struct de
+  104 B sobre array de 16 B; o stub `extern "C-unwind"` sem frame de guarda que derruba **a instância** (e
+  `#[pg_guard]` **não pode** ser aplicado em `macro_rules!`); e `maintenance_work_mem` que **não capa** RSS de
+  Rust.
+- `Failure Mode` (5): número comprimido na cadeia; oráculo que não compara a chave (epoch de 10.957 dias); o A/B
+  prova o espaço de **dados** e o review o de **tipos** (5 milestones seguidos); `EXPLAIN ANALYZE` como
+  instrumento **assimétrico**; conflação ranker×candidate-set (3 instâncias).
+- `Technique` (2): braço de controle **inalterado** (+122% de deriva no binário que não mudou); a **forma da
+  curva** diagnostica a causa antes do profiler.
+- `Measurement` (2): o limite de escala a 100M (**19/43 vs 43/43** — a taxa de conclusão é o veredito, não a
+  razão); os **três** contadores de "cobertura" que não se contradizem.
+- `Honest Negative` (2): códigos quantizados **co-locados** não reduzem I/O (e o mesmo quantizador dá 2,3-5,1×
+  noutro carrier); híbrida é **dataset-dependente** (p=0,253 vs p=0,0099, e a perna lexical explica).
+
+**Fontes ainda NÃO varridas, para não virar cobertura presumida:** 58 ADRs, 110 blueprints, 173 reviews, 44
+implementations, 1601 mensagens de commit.
