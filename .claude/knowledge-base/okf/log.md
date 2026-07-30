@@ -296,3 +296,36 @@ do artefato nem da medição — exatamente o que
 - `Failure Mode` **cold-medido-uma-vez-por-sweep** — `drop_caches` uma vez por sweep mede a **primeira** query
   fria e 99 quentes. O +21% é limite inferior, e o artefato diz isso; citado liso, vira uma afirmação que o
   experimento não sustenta.
+
+## 2026-07-30 (10) — varredura dos 173 reviews: +5 conceitos, e o C2 pegando um link meu inventado
+
+A § 4.1 chama "uma alegação minha derrubada" de **o material de maior valor da série**. Os reviews são
+exatamente isso em volume: **110 dos 197 arquivos** mencionam BLOCKER. Varri os BLOCKER/CRITICAL, cruzei as
+classes contra o bundle, e **nenhuma das cinco abaixo estava coberta**.
+
+**O gate mordeu em mim, no mesmo commit.** Escrevi `[positive-control-antes-do-veredito]` de memória; o conceito
+real chama-se `controle-positivo`. O C2 reprovou os três links antes do commit. É a demonstração mais limpa que
+existe de por que C2 é hard gate e não advisory: eu, escrevendo a regra "citação que não resolve não entra",
+inventei um nome de arquivo no ato de escrever um conceito sobre não confiar em verde.
+
+**Os 5 novos:**
+
+- `Failure Mode` **allowlist-por-regex-sobre-linguagem** — a MESMA defesa do NL→SQL caiu **duas vezes seguidas**:
+  vírgula-join (`FROM documents, secret` — só a 1ª relação era conferida) e identificador entre aspas
+  (`FROM "secret"` — a regex exigia `[a-zA-Z_]`, capturou **zero** relações, e a allowlist virou **no-op**).
+  O 2º é pior: a defesa não vazou uma relação, **desligou-se inteira**, em silêncio.
+- `Invariant` **dois-parsers-da-mesma-string-discordam** — `endpoint_host` parseava a URL pela RFC (userinfo →
+  host `api.openai.com`, aprovado) enquanto o cliente HTTP não implementa userinfo e resolvia
+  **`169.254.169.254`** na porta 80: o metadata service. Estar certo pela norma é irrelevante — o atacante
+  escolhe a string onde os dois discordam.
+- `Failure Mode` **assert-que-e-uma-identidade** — duas formas no mesmo review: o assert algebricamente
+  equivalente dos dois lados (não podia falhar) e o gate de recall que **não isolava o quantizador** porque
+  carrier f32 + rerank dominavam. Ambos verdes, ambos vazios.
+- `Failure Mode` **guard-antes-de-materializar-o-pendente** — `scan_ivf_structured` retornava cedo em centroides
+  vazios **antes** do fold: índice criado vazio + INSERTs → **zero linhas para dados que existem**, sem erro.
+  Resposta errada com cara de certa.
+- `Invariant` **granularidade-do-relogio-menor-que-o-evento** — o `pitr-smoke` capturava o alvo no **mesmo
+  segundo** do stop do backup e o `--type=time` compara com estritamente-menor. Nenhum retry conserta: só muda a
+  probabilidade. O marcador causal (LSN/xid) é exato onde o tempo é aproximado.
+
+Fontes ainda NÃO varridas: 110 blueprints, 44 implementations, 1601 mensagens de commit.
