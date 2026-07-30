@@ -14,6 +14,9 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **theodb:** varredura dos 173 reviews + 58 ADRs + 110 blueprints para a base OKF — +17 conceitos
+  (incluindo dois bypasses de allowlist por regex, um parser-differential que levava ao metadata service,
+  e o padrão do DoD cujo primeiro checkbox mata o milestone); bundle vai a 91 conceitos (#okf)
 - **theodb:** varredura dos 139 artefatos de benchmark para a base OKF — +14 conceitos (3 invariantes de
   plataforma do porte PG18, o limite de escala a 100M, e a correção de um erro herdado de um ADR que
   comprimiu dois números em um); bundle vai a 76 conceitos (#okf)

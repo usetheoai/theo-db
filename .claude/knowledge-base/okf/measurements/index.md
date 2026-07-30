@@ -17,6 +17,7 @@ continua hipótese.
 | Conceito | O que é |
 |---|---|
 | [flush_pending consome ≈ maintenance_work_mem × 8](amplificacao-maintenance-work-mem.md) | Medido por OOM real: mwm=2GB produziu 23,4 GB de anon-rss; mwm=128MB completou a carga de 100M. A fórmula dá a ordem de grandeza e SUBESTIMA o observado em 36% (base: previsto, unidades uniformizadas em GiB). |
+| [No scan vetorial o custo é I/O (~50%) e sort (~36%) — a distância f32 é ~15%](custo-do-scan-vetorial-nao-e-a-distancia.md) | Medido com profiler em 200k×128, estável em 5 runs e 3 pontos de probes; falsificou a premissa do M36 e reescopou o milestone para o gargalo real. |
 | [O mesmo binário deu −0,6% e +2,3% em coletas diferentes da mesma box](deriva-de-box-m168.md) | Controle de deriva do M168: reconstruir o binário antigo e rodá-lo intercalado com o novo fechou a pergunta por experimento — a diferença entre coletas era da box. |
 | [Gap medido vs ClickHouse no ClickBench: 19,4× geral, 7,54× na classe coberta, 303× na não-coberta](gap-vs-clickhouse-m159.md) | Mesma box. O landscape publicado situa o resultado, e o deep-dive identificou a ponte de decode como gargalo da classe coberta. |
 | [O júri adversarial descartou 11 de 18 achados — precision 0.39](juri-adversarial-precision-039.md) | Medida da precisão de um review multi-agente: a maioria dos descartes era convenção deliberada lida como defeito. |

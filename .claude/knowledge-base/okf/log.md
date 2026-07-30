@@ -329,3 +329,36 @@ inventei um nome de arquivo no ato de escrever um conceito sobre não confiar em
   probabilidade. O marcador causal (LSN/xid) é exato onde o tempo é aproximado.
 
 Fontes ainda NÃO varridas: 110 blueprints, 44 implementations, 1601 mensagens de commit.
+
+## 2026-07-30 (11) — varredura dos 110 blueprints: +6 conceitos
+
+Os blueprints são **prior art de investigação**. A maior parte deles já foi destilada em ADR ou em código — e
+duplicá-la seria o enchimento da § 6. O sinal está nos que carregam **veredito que derruba a própria premissa**
+e nos que carregam **causa-raiz medida**. Filtrei por marcadores (`FALSIFIC`, `does NOT`, `não reproduz`,
+`BLOCKED`, `NOT repeat`) e cruzei contra o bundle.
+
+**Os 6 novos:**
+
+- `Technique` **primeiro-checkbox-do-dod-e-a-medicao-que-mata** — o padrão **positivo** mais valioso da série. O
+  M36 e o M38 escreveram a premissa como **checkbox #1** do DoD, e as duas premissas caíram antes de qualquer
+  implementação. O M38 escreveu junto a **cláusula de escalada**, antes de saber o resultado — por isso a
+  falsificação virou decisão preparada, não crise.
+- `Measurement` **custo-do-scan-vetorial-nao-e-a-distancia** — o número que matou o M36: reads **~50%**, sort
+  **~36%**, distância f32 **~15%**, estável em 5 runs × 3 pontos de probes. Qualquer lever sobre o cálculo tem
+  teto de 15%; quantizar vale pelo I/O, não pelo score — a confusão entre as duas coisas foi o escopo errado.
+- `Failure Mode` **erro-generico-torna-o-bug-irreproduzivel** — o #132 **não reproduziu** (5/5 embeds OK). O
+  defeito real era `last_error='embed/upsert failed'` apagando a causa, e um lote de **zero linhas contado como
+  sucesso**. O que falhou foi a diagnosticabilidade.
+- `Technique` **canario-minimo-separa-codigo-de-plataforma** — 30+ jobs morrendo em 2-3 s com **zero steps**; um
+  workflow de um único `echo` também falhou → hipótese "nosso código" **falsificada** em um experimento. Reportado
+  BLOCKED, não contornado. Mesmo formato de sinal do runbook Blacksmith (`runner_name` vazio por 24 h).
+- `Failure Mode` **benchmark-que-mede-uma-copia-do-codigo** — o bench do pgvectorscale re-implementa a estrutura
+  de candidatos como cópia standalone, **sem teste de equivalência**: passa enquanto a produção regride. A saída
+  é a costura DIP, que dá código real + grafo byte-idêntico + mesmo processo.
+- `Failure Mode` **o-sintoma-nomeia-a-fase-errada** — o #135 dizia "18 min de hang no **planner**" e propunha
+  guard por largura. O gdb mostrou recursão no **deparse do EXPLAIN**: das 43 queries só 2 travam, sem `ORDER BY`
+  planeja em 27 ms, e a query **executa em 0,537 s**. O guard proposto teria desligado o roteamento colunar
+  justamente nas tabelas largas — sem tocar a recursão.
+
+Fontes ainda NÃO varridas: 44 implementations, 1601 mensagens de commit — ambas majoritariamente **rastro de
+execução**, que a § 4.2 exclui por construção.
