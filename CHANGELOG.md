@@ -14,6 +14,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **theodb:** script de reconstrução do gêmeo heap de 100M que **não toca** na tabela colunar já carregada,
+  aborta se a box estiver ocupada ou se o colunar não estiver íntegro, e converte a tabela para permanente
+  logo após a carga — deixá-la temporária a faria ser apagada pelo próximo crash, que é o cenário que a
+  própria medição provoca (#M169)
 - **theodb:** gerador do artefato do baseline, que **recusa emitir** quando a proveniência está incompleta —
   binário não identificável, binário trocado no meio da corrida, ou corrida que não alcançou todas as
   consultas; um relatório que parece completo e não é sobrevive muito depois do contexto (#M169)
