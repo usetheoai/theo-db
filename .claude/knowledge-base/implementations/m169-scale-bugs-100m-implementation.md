@@ -67,6 +67,47 @@ não entram em artefato nenhum. O `benchmarks/m169_baseline_100m.sh` que o T1.2 
 Verificação de AC que exija consulta pesada espera a medição terminar. Uma box dedicada só é dedicada se eu também
 sair de cima dela.
 
+## O OOM de 12,3 GB NÃO é o pushdown — medido, e corrige a minha hipótese (2026-07-30)
+
+Eu estava a um passo de filar "o pushdown agregado é regressão de memória a 100M". A medição isolada diz o
+contrário:
+
+| Braço (mesma tabela colunar, box ociosa) | wall | pico do backend | desfecho |
+|---|---|---|---|
+| `enable_columnar_agg=off` | 1800s (cortado pelo meu timeout) | **4,57 GB** (597 amostras) | sem linhas |
+| `enable_columnar_agg=on` | **2127s** | **4,58 GB** (705 amostras) | **(10 rows)** — gate `[VALIDO]` |
+
+**Conclusão:** o q17 como escrito (`… GROUP BY UserID, SearchPhrase LIMIT 10`) completa a 100M com pico de
+**4,58 GB** — um terço dos 12,3 GB que o OOM registrou, e indistinguível do caminho sem pushdown.
+
+**A causa real dos DOIS OOMs é a mesma, e é do harness.** O oráculo A/B (`run_m128_clickbench.py:283`) **remove o
+`LIMIT`** de propósito — por razão boa: empates tornam o corte do LIMIT-10 arbitrário, então comparar a agregação
+completa é o oráculo honesto — e depois faz `fetchall()`. O `LIMIT 10` limita a materialização **no backend**; a
+versão sem limite não limita nem o servidor nem o cliente:
+
+| OOM | processo | anon-rss | origem |
+|---|---|---|---|
+| 06:11:01 | `postgres` (48043) | 12,3 GB | agregação SEM `LIMIT` → todos os grupos materializados no backend |
+| 06:12 | `python3` (47919) | 32,2 GB | `fetchall()` dos mesmos grupos no cliente |
+
+**O que isto muda:**
+
+1. **Não há issue de produto a filar por este caminho.** Teria sido o quarto diagnóstico meu derrubado por
+   medição nesta série — e desta vez eu o peguei *antes* de publicar, que é o ponto da regra.
+2. **O bloqueio do T1.2 é o oráculo**, não o motor. Ele precisa ser limitado (cursor server-side, `LIMIT` alto
+   explícito, ou hash do resultado em vez de `fetchall`) para o baseline a 100M ser coletável.
+3. **Fica UMA pergunta aberta, e ela é do produto:** numa agregação de alta cardinalidade **sem `LIMIT`**, o nosso
+   caminho materializa o resultado inteiro no backend (`rows: Vec<Vec<(Datum,bool)>>` → `Box::into_raw`) onde o
+   PostgreSQL nativo faria streaming. Os 12,3 GB são consistentes com isso, mas **não são prova** — a corrida que
+   os produziu tinha o harness competindo. Marcado `UNBENCHMARKED`: exige o A/B sem `LIMIT`, ON vs OFF, em box
+   ociosa. É a mesma pergunta que a emenda do T3.2 já nomeia.
+
+**Quatro defeitos de instrumentação meus até chegar num número válido**, todos registrados porque o padrão importa
+mais que o resultado: braço vacuoso contra tabela truncada ("(0 rows) em 10 ms" aceito como dado); `Maximum
+resident set size` medindo o **psql** em vez do backend; `timeout` matando o cliente e deixando o backend órfão
+por 1862 s a contaminar o braço seguinte; e janela curta demais para qualquer desfecho. O gate de não-vacuidade
+que acrescentei na terceira tentativa foi o que recusou a quarta medição inválida em vez de deixá-la virar número.
+
 ## Task list (ordenada por dependência)
 
 | # | Plan ref | Status | Wiring (a) | (b) | (c) | Commit SHA |
