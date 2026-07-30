@@ -41,7 +41,12 @@ igualar recall a 500k, o que sai **~1,8× mais lento** (`gap1-extend-candidates.
 
 > **CORRIGIDO 2026-07-30.** Este conceito dizia "~1,8× o `ef`", citando `ADR-0035:21`. **O ADR está errado** — ele
 > comprimiu *"~5× o `ef` → ~1,8× mais lento"* do artefato em *"~1,8× o `ef`"*, fundindo o multiplicador de `ef`
-> com o de latência, e **cita o próprio artefato que o contradiz**. Eu fui fiel ao ADR e herdei o erro. A classe
+> com o de latência, e **cita o próprio artefato que o contradiz**. Eu fui fiel ao ADR e herdei o erro.
+>
+> **Corroboração independente:** o `ADR-0031:14` — outro ADR do mesmo pilar — registra o número **certo**:
+> a iso-recall 0,996 a 100k, pgvector **2,13 ms (ef=100)** vs theodb **3,16 ms (ef=200)**, ou seja *"precisa ~2× o
+> `ef`; ~5× a 500k"*. Dois ADRs do mesmo pilar, um correto e um comprimido — o que confirma que o defeito é do elo
+> ADR-0035, não do artefato nem da medição. A classe
 > está registrada em [numero-comprimido-na-cadeia-de-citacao](../failure-modes/numero-comprimido-na-cadeia-de-citacao.md).
 
 **E o fix teve custo, que o conceito omitia:** o `extendCandidates` deixou o **build ~2-3× mais lento** (pool de

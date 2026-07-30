@@ -269,3 +269,30 @@ resolve, a linha diz aquilo. O defeito estava **um elo acima**, e nenhum gate al
 
 **Fontes ainda NÃO varridas, para não virar cobertura presumida:** 58 ADRs, 110 blueprints, 173 reviews, 44
 implementations, 1601 mensagens de commit.
+
+## 2026-07-30 (9) — varredura dos 58 ADRs: +4 conceitos, e a corroboração do erro
+
+Dos 58 ADRs, a maioria é **decisão de arquitetura** — que por § 4.2 **não vira conceito** (o ADR já é o registro).
+O que vira são os ADRs que carregam **veredito medido**. Dez foram cruzados contra o bundle; seis não tinham
+cobertura.
+
+**A corroboração que fecha o achado da varredura anterior:** o `ADR-0031:14` registra o número **certo** —
+*"precisa ~2× o `ef` a 100k; ~5× a 500k"*, com pgvector 2,13 ms (ef=100) vs theodb 3,16 ms (ef=200) a iso-recall
+0,996. Dois ADRs do mesmo pilar, um correto e um comprimido. Isso prova que o defeito é do **elo ADR-0035**, não
+do artefato nem da medição — exatamente o que
+[numero-comprimido-na-cadeia-de-citacao](failure-modes/numero-comprimido-na-cadeia-de-citacao.md) descreve.
+
+**Os 4 novos:**
+
+- `Technique` **dod-compara-contra-o-oraculo-de-controle** — duas DoDs (M60, M71) tiveram de ser reescritas
+  mid-flight por pedirem um **absoluto** que nem o oráculo atinge no mesmo dado: `recall ≥ 0,99` quando o próprio
+  pgvector faz **0,988** ali. Reescrever a DoD por medição não é afrouxar o gate — é corrigir o instrumento.
+- `Technique` **medir-o-incremento-isolado-antes-de-pagar-o-caro** — o plano do M89 escolheu FFI do `tuplesort`;
+  medir o incremento barato **isolado** mostrou que ele ainda OOMava a 4,21× e que as cópias dominantes eram
+  outras (16 GB + ~32 GB). O incremento 2, **sem FFI**, bateu o DoD. O caro virou YAGNI **medido**.
+- `Invariant` **build-pica-4x-o-dataset-base** — o teto de escala é o **build**, não a query: 30M OOMou a
+  **64,7 GB** enquanto o índice final tinha **15 GB**. Dimensionar a box pelo tamanho do artefato erra por 4×, e
+  a track inteira ficou `OUT_OF_RAM_QPS_INCONCLUSIVE` porque o regime alvo não era **construível**.
+- `Failure Mode` **cold-medido-uma-vez-por-sweep** — `drop_caches` uma vez por sweep mede a **primeira** query
+  fria e 99 quentes. O +21% é limite inferior, e o artefato diz isso; citado liso, vira uma afirmação que o
+  experimento não sustenta.

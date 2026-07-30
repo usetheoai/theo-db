@@ -16,6 +16,7 @@ Leia antes de mexer em storage, FFI, recovery, build ou branch compartilhado.
 | Conceito | O que é |
 |---|---|
 | [BackgroundWorker::transaction faz PushActiveSnapshot por todo o closure](bgworker-transaction-segura-snapshot.md) | Uma chamada HTTP dentro do closure segura backend_xmin pelo tempo inteiro da chamada, atrasando autovacuum. |
+| [O teto de escala costuma ser o BUILD, não a query — o ambuild picava ~4× o dataset base](build-pica-4x-o-dataset-base.md) | Dimensionar a box pelo tamanho do índice é dimensionar pelo número errado: 30M OOMou a 64,7 GB num box de 62 GB usáveis enquanto o índice final tinha 15 GB. |
 | [CHUNK_GROUP_ROWS = 10.000 é a unidade de decode, skip e memória do colunar](chunk-group-e-a-unidade-de-tudo.md) | Todo termo O(N) no colunar tem uma versão O(chunk-group); quando um caminho não tem, é defeito de escala esperando a escala. |
 | [CustomScan com scanrelid=0 e Aggref no targetlist quebra sob subquery pullup](customscan-scanrelid-zero-e-aggref-pullup.md) | O pullup inlina o Aggref num nó superior e o planner falha com 'cache lookup failed for attribute N of relation 0' — crasha até o EXPLAIN. |
 | [sum(Int64) do DataFusion faz add_wrapping — casar para Decimal128 antes de somar](datafusion-sum-int64-faz-wrapping.md) | Para saída numeric exata, o caminho é sum(cast(col AS Decimal128(38,0))) sobre i128; sum(Int64) silenciosamente dá a volta. |
