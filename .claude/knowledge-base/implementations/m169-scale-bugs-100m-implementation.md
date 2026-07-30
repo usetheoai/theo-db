@@ -43,6 +43,30 @@ recebem `--diff-base main` e devem cobrir `theodb_rs/src/am/{df_executor,columna
 `benchmarks/m168_*` e `docs/benchmarks/m168-streaming-topk-verdict.md`. Reconstruir o log de implementação do M168
 a partir dos commits foi rejeitado: documentação retroativa tem alto risco de fabricação e nenhum valor de gate.
 
+## A PRIMEIRA passada de consultas está CONTAMINADA — não é o baseline (2026-07-30)
+
+Enquanto o harness rodava as 43 consultas, **eu** executei um `select count(*) from hits` para verificar o AC do
+T1.1. Ele varreu os 16 GB do colunar por **921 segundos** em paralelo, e só então foi cancelado.
+
+| | |
+|---|---|
+| Consultas afetadas | aproximadamente **q4 a q11** (a janela de ~15 min do meu `count(*)`) |
+| Tempos observados nelas | q8 `cold=16,60 hot=12,89` · q9 `17,60/17,53` · q10 `16,03/12,94` · q11 `17,42/14,41` |
+| Estado | **inutilizáveis como baseline** — mediram contenção, não código |
+
+**Isto é literalmente o erro que o desk-check do M168 documentou** (`m168-drift-desk-check.md`): medir numa box com
+carga concorrente e depois tratar o número como propriedade do código. Lá o confundidor era o CI de outra pessoa;
+aqui fui eu, na box que provisionei justamente para não ter confundidor.
+
+**Consequência para o T1.2, e ela é vinculante:** esta passada serve para (a) provar que a carga funcionou, (b) dar
+o veredito **qualitativo** de cada consulta (`ok` / `error` / `timeout`), que não depende de relógio. Os **tempos**
+não entram em artefato nenhum. O `benchmarks/m169_baseline_100m.sh` que o T1.2 vai escrever roda uma passada
+**limpa** sobre os dados já carregados — a carga é a parte caríssima e não precisa ser repetida.
+
+**Regra operacional que passa a valer nesta box:** enquanto uma medição estiver em voo, nada meu toca o cluster.
+Verificação de AC que exija consulta pesada espera a medição terminar. Uma box dedicada só é dedicada se eu também
+sair de cima dela.
+
 ## Task list (ordenada por dependência)
 
 | # | Plan ref | Status | Wiring (a) | (b) | (c) | Commit SHA |
