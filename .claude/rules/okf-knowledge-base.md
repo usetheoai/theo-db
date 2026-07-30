@@ -58,11 +58,16 @@ Ler o índice da categoria **antes** de:
 | propor uma aposta técnica / novo milestone | `honest-negatives/index.md` — pode já ter sido refutada |
 | mexer em storage, FFI, `unsafe`, recovery, **build** ou branch compartilhado | `invariants/index.md` |
 | **rodar processo longo em máquina remota, ou escolher entre duas APIs da plataforma** | `invariants/index.md` |
+| **corrigir um achado de review / medição** — antes de escrever o fix | **`failure-modes/corrigir-a-instancia-e-nao-a-classe.md`** — nomeie a CLASSE e varra por ela; o achado é uma instância |
+| **escolher um timeout, um teto de recurso ou um tamanho de box** | `measurements/index.md` (a escala pode já estar medida) · `invariants/index.md` |
 | abrir um issue de produto | `techniques/medir-antes-de-filar.md` |
 
-> **Os dois gatilhos em negrito foram acrescentados em 2026-07-30**, depois de o review de recuperabilidade
-> medir que os cenários "lancei um build remoto via ssh" e "o gate não reclamou, está tudo certo?" **não eram
-> roteados por nada** — o segundo servido por quatro `failure-mode` e alcançável só por varredura espontânea.
+> **Os gatilhos em negrito foram acrescentados em 2026-07-30**, cada um depois de medir que um cenário real não
+> era roteado por nada. Os dois primeiros vieram do review de recuperabilidade ("lancei um build remoto via ssh",
+> "o gate não reclamou, está tudo certo?"). Os dois últimos vieram do M169, testando os gatilhos contra os erros
+> daquela sessão: **corrigir um achado de review não era roteado por nada** — e foi a classe que se repetiu cinco
+> vezes numa única sessão, sempre pega pelo revisor e nunca por mim. Um conceito que existe e para o qual nada
+> aponta no momento de uso é um conceito que não morde.
 
 **Limite honesto:** nenhum hook consegue provar que eu li. A injeção é o mecanismo mais forte
 disponível, e os gatilhos acima são instruction-grade — a mesma classe dos degraus 2, 3 e 5 da

@@ -421,3 +421,30 @@ explicar por que a precisão está ausente — em vez de emprestar autoridade qu
 
 A lição de método: a disciplina declarada numa mensagem de commit não se propaga sozinha para os comentários de
 código escritos meia hora depois. É a mesma classe do conceito, aplicada ao meu próprio texto.
+
+## 2026-07-30 (15) — testei os GATILHOS contra os erros da própria sessão, e achei o buraco
+
+O bundle existe para morder no momento de uso. A pergunta que fecha o ciclo não é "o conceito existe?" mas
+"algum gatilho aponta para ele **quando eu preciso**?". Testei os sete gatilhos declarados contra os cinco erros
+que cometi hoje:
+
+| Erro | Roteado? |
+|---|---|
+| `timeout=60` para operação de dezenas de minutos | **parcial** — "processo longo em máquina remota" leva ao invariante do ssh, não à escolha do teto |
+| `CASE ... ELSE 1/0` dobrado no planejamento | **nenhum** |
+| nome de conceito escrito de memória (3×) | nenhum — mas o gate C2 pega, determinístico |
+| "MEASURED" sobre número contaminado | **sim** — "publicar qualquer número" |
+| corrigir a instância e não a classe | **nenhum** |
+
+**O último é o achado.** O conceito `corrigir-a-instancia-e-nao-a-classe` foi escrito hoje, e nada apontava para
+ele no momento em que ele serviria — que é *antes de escrever o fix de um achado de review*. Um conceito que
+existe e para o qual nada aponta é um conceito que não morde. Foi a classe que se repetiu **cinco vezes** numa
+sessão, sempre pega pelo revisor, nunca por mim.
+
+Dois gatilhos novos: **"corrigir um achado de review / medição"** (aponta direto ao conceito) e **"escolher um
+timeout, um teto de recurso ou um tamanho de box"** (aponta a `measurements` — a escala pode já estar medida).
+
+E um `Invariant` novo, do erro que eu peguei antes de rodar: o PostgreSQL **dobra expressões constantes no
+planejamento**, então `CASE ... ELSE 1/0` dispara mesmo quando o ramo não é tomado. A direção do erro é a cara:
+o gate reprova SEMPRE, antes e depois do fix, e o sintoma se lê como *"o fix não funcionou"* — mandando caçar um
+defeito inexistente no código recém-corrigido. É a forma invertida do `teste-que-passa-pela-razao-errada`.
