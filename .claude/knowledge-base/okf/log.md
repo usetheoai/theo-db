@@ -138,7 +138,11 @@ mortos e índice dessincronizado. O mecanismo funcionou contra quem o escreveu.
 ## 2026-07-30 (5) — re-review: minhas correções introduziram 3 defeitos, um BLOCKER
 
 Re-verificação adversarial do commit `217d449`. Dos 34 achados: **24 corrigidos, 4 parciais, 3 não aplicados,
-3 defeitos NOVOS**. Todos tratados.
+3 defeitos NOVOS**.
+
+> **A frase "Todos tratados" que estava aqui era FALSA** — o round 3 achou três valores refutados ainda vivos
+> (`×7` em `chunk-group`, `~510 MB` em `medir-antes-de-filar`, `~31%` no índice de `measurements`). Corrigido, e
+> a classe virou conceito: [correcao-nao-propagada-pelo-grafo](failure-modes/correcao-nao-propagada-pelo-grafo.md).
 
 **O defeito novo que importa (BLOCKER):** ao substituir a faixa fabricada do `pg_duckdb` pela medida, **inverti
 as colunas** — publiquei 23,6 ms como DuckDB e 26,4 ms como PG. Com esses rótulos o DuckDB fica *mais rápido*,
@@ -166,3 +170,28 @@ em silêncio** — foi assim que a correção do C6 não entrou na primeira tent
 presumi 20). Edit erra alto; `replace` não. E o meu primeiro controle positivo do C6 era **inválido**: copiar o
 bundle para `/tmp` quebra a resolução de todo caminho relativo ao repo, então os 6 "achados" eram artefato do
 teste, não do gate.
+
+## 2026-07-30 (6) — round 3: a classe dominante era a PROPAGAÇÃO, não o conteúdo
+
+Dois revisores independentes (um sobre as correções do round 2, um sem priores). **Três BLOCKER, todos da mesma
+classe:** a correção do `×7 → ×8` landou no conceito-fonte e **não** nos três que citavam o valor — inclusive no
+`measurements/index.md`, que é a porta de entrada do gatilho "isso já foi medido?". E o `log.md` afirmava
+"Todos tratados".
+
+Isso virou [correcao-nao-propagada-pelo-grafo](failure-modes/correcao-nao-propagada-pelo-grafo.md), com regra
+operacional mecanizável: **antes de fechar uma correção numérica, `grep` o valor antigo no bundle inteiro**; e
+regenerar índices **depois** das edições, nunca antes.
+
+**Dois HIGH que são o bundle prescrevendo o defeito que documenta:**
+
+- `ablacao-mesmo-indice` publicava **2,8×** e **1,2×** — os dois **topos** de faixas medidas (2,4-2,8× e
+  1,07-1,22×), maximizando a "correção" narrada. É o arredondamento-para-o-favorável que
+  `estatistica-que-nao-sustenta-a-alegacao` condena por nome, cometido na Technique que ensina rigor de ablação.
+- `separar-transporte-de-conteudo` prescrevia `rc -ne 0` para detectar falha de canal. **`ssh` devolve o status
+  do comando remoto**, e `grep` sem casamento devolve 1 — logo todo poll saudável era contado como
+  inacessibilidade. A Technique prescrevia exatamente a confusão transporte↔conteúdo que ela existe para
+  prevenir. **E eu rodei esse padrão nos monitores desta sessão.** Corrigido para `rc -eq 255` + `|| true`.
+
+**Achado meu, no meu próprio gate:** o C6 tinha **falso-negativo** — aprovava `../../../.claude/rules/…`, que
+resolve só por uma terceira base de fallback que nenhum leitor navega. Restrito às duas bases declaradas
+(raiz do repo e `.claude/`), com o `references/` gitignored isento por desenho.

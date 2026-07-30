@@ -10,8 +10,15 @@ timestamp: 2026-07-30T00:00:00Z
 
 ## O caso — FastScan 1-bit (E2)
 
-Medido cross-box, o ganho parecia **2,8×**. Medido por **ablação sobre o mesmo índice** — trocando apenas o
-kernel de scoring, com tudo mais idêntico — o ganho real era **1,2×**. Modesto, e a decisão de produto mudou.
+Medido cross-box, o ganho parecia **2,4–2,8×**. Medido por **ablação sobre o mesmo índice** — trocando apenas o
+kernel de scoring, com tudo mais idêntico — o ganho real é **1,07–1,22×** (`fastscan_speedup_by_ef`: 1,07 a
+ef=40 → 1,22 a ef=640). Modesto, e a decisão de produto mudou.
+
+> **CORRIGIDO 2026-07-30 (round 3).** Esta seção publicava **2,8×** e **1,2×** — os **dois topos** das faixas
+> medidas, o que maximiza a "correção" narrada (2,33×) contra a leitura honesta. É exatamente o
+> arredondamento-para-o-favorável que [estatistica-que-nao-sustenta-a-alegacao](../failure-modes/estatistica-que-nao-sustenta-a-alegacao.md)
+> condena por nome — cometido na Technique que ensina rigor de ablação. Fonte:
+> `docs/benchmarks/e2-symqg-fastscan-verdict.md:37,48`.
 
 ## Correlato — M46
 

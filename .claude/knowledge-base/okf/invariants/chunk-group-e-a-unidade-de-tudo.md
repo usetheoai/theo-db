@@ -20,7 +20,7 @@ colunar **deveria** ser O(chunk-group):
 | top-k (M168) | O(chunk-group + k) ✔ |
 | zone-map skip (M150) | por chunk-group ✔ |
 | **plano do scan** (`ScanPlan`) | **O(N/10.000 × natts)** ✘ — 48,1 MiB a 100M |
-| **`flush_pending`** (escrita) | **O(mwm)** com multiplicador ×7 ✘ — issue #221 |
+| **`flush_pending`** (escrita) | **O(mwm)** com multiplicador **×8** ✘ — [medição](../measurements/amplificacao-maintenance-work-mem.md), issue #221 |
 | **resultado agrupado** (`rows: Vec<Vec<>>`) | **O(grupos)** ✘ — invisível à MemoryPool |
 
 ## A heurística que isso gera

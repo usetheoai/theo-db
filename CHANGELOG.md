@@ -44,6 +44,9 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   em `docs/benchmarks/m168-streaming-topk-verdict.md`.
 
 ### Fixed
+- **theodb:** round 3 de review da base OKF — 3 BLOCKER de correção não propagada pelo grafo, 2 HIGH em que o
+  bundle prescrevia o defeito que documenta (topo de faixa; `rc != 0` para falha de canal em ssh), e o C6
+  restrito a duas bases declaradas (#okf)
 - **theodb:** re-review das correções OKF — 3 defeitos que as próprias correções introduziram (1 BLOCKER:
   colunas invertidas no pg_duckdb), 2 omissões de propagação, e o gate C6 que valida `resource:` (#okf)
 - **theodb:** review adversarial de 5 agentes sobre a base OKF — 34 achados aplicados (4 BLOCKER de números

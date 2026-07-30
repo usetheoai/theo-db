@@ -112,7 +112,7 @@ Seis checagens:
 | C3 | cada `index.md` lista **exatamente** os conceitos ao lado | índice que deriva **esconde** conceito, e esconder é pior que faltar |
 | C4 | `index.md` e `log.md` existem na raiz | são a porta de entrada e a história |
 | C5 | o **valor** de `type` está no conjunto fechado do § 2 | C1 só checa presença; um sexto tipo exige ADR — e a porta de entrada tinha exatamente esse defeito (review 2026-07-30) |
-| C6 | todo `resource:` que é caminho do repo **resolve** | C2 valida só links markdown; o `resource:` não era verificado por nada — e escondia dois caminhos quebrados (re-review 2026-07-30) |
+| C6 | todo `resource:` que é caminho do repo **resolve** contra uma das **duas** bases declaradas (raiz do repo, `.claude/`) | C2 valida só links markdown; o `resource:` não era verificado por nada — e escondia dois caminhos quebrados. Uma terceira base de fallback tolerava caminho que nenhum leitor navega (round 3) |
 
 C1–C4 têm superfície de falso-positivo **zero**. C5 e C6 comparam string normalizada (tiram aspas, comentário
 YAML e âncora de seção, como um parser faria) — a normalização existe porque sem ela `type: "Failure Mode"` e
@@ -152,6 +152,10 @@ não prova.
 - **Publicar número em `docs/benchmarks/` e adiar o `Measurement`.** "Depois eu registro" é
   como o conhecimento se dispersou da primeira vez.
 - **Criar um segundo arquivo para uma classe que já existe.** Atualize o existente.
+- **Dar uma correção numérica por fechada sem `grep` do valor antigo no bundle inteiro.** O OKF é um grafo: o
+  valor vive na prosa dos vizinhos e no `index.md` da categoria, e nenhum gate compara conteúdo. Ver
+  `failure-modes/correcao-nao-propagada-pelo-grafo.md` — foi a classe de defeito **dominante** nos três rounds
+  de review deste bundle. E regenere os índices **depois** de editar os frontmatters, nunca antes.
 - **Tratar o bundle como arquivo morto.** Se um conceito está errado, corrija-o — um conceito
   errado é pior que ausente, porque será citado.
 - **Citar um conceito sem abrir o arquivo.** É o `diagnostico-aceito-sem-reproduzir` aplicado

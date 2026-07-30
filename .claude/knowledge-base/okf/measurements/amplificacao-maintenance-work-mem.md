@@ -10,7 +10,7 @@ timestamp: 2026-07-30T00:00:00Z
 # `flush_pending` consome ≈ `maintenance_work_mem × 8`
 
 > **CORRIGIDO 2026-07-30 após review.** Três defeitos numa tabela só: (a) o multiplicador é **8**, não 7 — a
-> decomposição dá `1 + 3,6 + 1 + 2,4`, e os próprios valores publicados somam 16,2/2,0 = 8,1; (b) o "~510 MB"
+> decomposição dá `1 + 3,6 + 1 + 2,4`, e os próprios valores publicados somam 16,0/2,0 = 8,0; (b) o "~510 MB"
 > previsto para `mwm=128MB` **pertencia à coluna `mwm=64MB`** do issue #221 — troquei o cabeçalho e mantive o
 > valor; (c) "a fórmula previu os dois" era falso: ela **subestima** o observado. O `×7` também está no
 > **issue público #221** e foi corrigido lá por comentário.

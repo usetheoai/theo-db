@@ -50,12 +50,22 @@ consecutivas em que a *correção* de um defeito introduzia outro.
 
 ## Como usar
 
-- **Antes de medir qualquer coisa:** leia [failure-modes/index.md](failure-modes/index.md). Metade das entradas
-  ali são medições que pareciam válidas e não eram.
+Os seis gatilhos são o § 3.2 do contrato — espelhados aqui porque esta é a superfície que um humano abre
+primeiro (as outras duas, a regra e o ponteiro injetado, só um agente vê):
+
+- **Antes de montar qualquer medição:** [failure-modes/index.md](failure-modes/index.md) ·
+  [techniques/index.md](techniques/index.md) · [measurements/index.md](measurements/index.md) (o número pode já
+  existir) · [invariants/index.md](invariants/index.md) (quatro invariantes já invalidaram medições aqui).
+- **Antes de aceitar um verde como evidência** — gate que não reclamou, `rc=0`, suíte passando, oráculo com 0
+  divergências: [failure-modes/index.md](failure-modes/index.md). Quatro conceitos servem exatamente este caso.
 - **Antes de publicar um número:** [technique/gate-de-nao-vacuidade](techniques/gate-de-nao-vacuidade.md) e
-  [measurement/index](measurements/index.md) — o número pode já existir.
+  [measurements/index.md](measurements/index.md).
 - **Antes de propor uma aposta técnica:** [honest-negatives/index.md](honest-negatives/index.md). Várias já
   foram medidas e refutadas com artefato.
-- **Antes de mexer em storage/FFI/recovery:** [invariants/index.md](invariants/index.md).
+- **Antes de mexer em storage, FFI, `unsafe`, recovery, build ou branch compartilhado:**
+  [invariants/index.md](invariants/index.md).
+- **Antes de rodar processo longo em máquina remota, ou escolher entre duas APIs da plataforma:**
+  [invariants/index.md](invariants/index.md).
+- **Antes de abrir um issue de produto:** [technique/medir-antes-de-filar](techniques/medir-antes-de-filar.md).
 
 Histórico cronológico em [log.md](log.md).

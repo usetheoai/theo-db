@@ -132,7 +132,10 @@ def check(bundle: Path) -> tuple[list[str], dict]:
                 res = res.split("#", 1)[0].strip()           # section anchor, as C2 already strips for links
                 if res and not res.startswith(_NON_PATH) and "/" in res:
                     if not any(res.startswith(g) or f"/{g}" in res for g in _GITIGNORED_PREFIXES):
-                        candidates = [bundle.parent.parent / res, bundle.parent / res, Path(res)]
+                        # Duas bases DECLARADAS, e só elas: a raiz do repo (docs/, theodb_rs/, benchmarks/) e
+                        # `.claude/` (rules/, knowledge-base/). Uma terceira base de fallback tolerava caminho
+                        # que nenhum leitor resolve — foi assim que `../../../.claude/rules/...` passou.
+                        candidates = [Path(res), bundle.parent.parent / res]
                         if not any(c.exists() for c in candidates):
                             findings.append(
                                 f"C6 resource-not-found: {rel} declares `resource: {res}`, which does not "

@@ -2,7 +2,7 @@
 type: Invariant
 title: Peers AGPL são estudo, nunca fonte de código
 description: A distribuição é Apache-2.0 com gate fail-closed contra AGPL; técnica se aprende, código se reimplementa do zero.
-resource: ../../../.claude/rules/reference-provenance.md (umbrella)
+resource: ../.claude/rules/reference-provenance.md
 tags: [licenca, compliance, d1]
 timestamp: 2026-07-30T00:00:00Z
 ---
@@ -37,4 +37,4 @@ guard de mensagem de commit, e detector de vazamento por shingles. As três prim
 
 ## Relacionados
 
-- [invariant/acervo-local-antes-da-web](../techniques/acervo-local-antes-da-web.md)
+- [technique/acervo-local-antes-da-web](../techniques/acervo-local-antes-da-web.md)
