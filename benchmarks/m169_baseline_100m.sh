@@ -78,4 +78,21 @@ if a["so_md5"] != b["so_md5"]:
 PYEOF
 CONTAM_RC=$?
 if [ "$CONTAM_RC" -ne 0 ]; then exit "$CONTAM_RC"; fi
+
+echo "=== gate de nao-vacuidade + artefato ==="
+python3 "$HERE/m169_baseline_summarize.py" "$ART/${LABEL}.jsonl"
+SUMM_RC=$?
+# O gerador RECUSA emitir quando a proveniencia esta incompleta (so_md5 desconhecido, binario trocado no meio,
+# corrida truncada). Um artefato que parece completo e nao e sobrevive muito depois de alguem lembrar o contexto.
+python3 "$HERE/m169_baseline_report.py" "$ART/${LABEL}.jsonl" \
+  "$ART/${LABEL}-box-before.json" "$ART/${LABEL}-box-after.json" > "$ART/${LABEL}.md"
+REPORT_RC=$?
+if [ "$REPORT_RC" -ne 0 ]; then
+  echo "  o gerador recusou emitir o artefato (veja o motivo acima)" >&2
+  rm -f "$ART/${LABEL}.md"
+fi
+echo "  artefato: $ART/${LABEL}.md"
+
+if [ "$SUMM_RC" -ne 0 ]; then exit "$SUMM_RC"; fi
+if [ "$REPORT_RC" -ne 0 ]; then exit "$REPORT_RC"; fi
 exit $RUN_RC

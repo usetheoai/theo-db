@@ -14,6 +14,9 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **theodb:** gerador do artefato do baseline, que **recusa emitir** quando a proveniência está incompleta —
+  binário não identificável, binário trocado no meio da corrida, ou corrida que não alcançou todas as
+  consultas; um relatório que parece completo e não é sobrevive muito depois do contexto (#M169)
 - **theodb:** runner de baseline do ClickBench a 100M que mede **quantas consultas completam** sobre as
   tabelas já carregadas — com gate de não-vacuidade que recusa publicar um número quando a corrida não
   alcançou as 43, vocabulário de veredito que nunca chama de OOM o que não tem evidência de kernel, e
