@@ -14,6 +14,9 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **theodb:** base de conhecimento operacional em Open Knowledge Format (OKF v0.1) — 46 conceitos
+  navegáveis por agente cobrindo modos de falha, técnicas, invariantes de plataforma, medições e
+  negativos honestos acumulados de M46 a M169 (#okf)
 - Roadmap amendado: adicionado **M169 — Bugs de escala a 100M** (`/roadmap-feature scale-bugs-100m`). Recorte: só as falhas duras (`byte array offset overflow` do q20, OOM da corrida, confirmar q23); os três `statement_timeout` ficam fora por não serem defeitos. 1 bilhão declarado fora de escopo até 100M passar limpo (#219 não relacionado).
 - **Top-k colunar com memória limitada:** consultas "as N primeiras linhas por uma coluna" sobre tabelas colunares
   deixaram de precisar de memória proporcional ao tamanho da tabela. Medido a 1 milhão de linhas × 105 colunas, o
