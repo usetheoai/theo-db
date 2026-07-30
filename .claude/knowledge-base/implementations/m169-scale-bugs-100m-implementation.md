@@ -539,3 +539,19 @@ falhar por não-vacuidade (`stream_calls=0`) antes de qualquer GREEN — um padr
 estar ligado ao call-site errado, e é precisamente isso que o contador prova. O M158 já produziu um falso-verde
 dessa espécie: o `planner_hook` só disparava o swap sob o gate do agregado, o `EXPLAIN` ainda mostrava `Sort`, e
 o A/B deu `0` de divergência por comparar o caminho antigo consigo mesmo.
+
+### O discriminador foi validado contra a arquitetura ANTES de virar conceito
+
+Elevei `agg_routed` a discriminador das classes de falha e imediatamente perguntei o que a regra R3.1 manda
+perguntar: **o instrumento observa mesmo aquilo?** Duas maneiras de ele mentir aqui, e as duas foram checadas.
+
+| Modo de mentir | Verificação | Resultado |
+|---|---|---|
+| `agg=False` ser um `None` renderizado como falso | o `EXPLAIN` roda **antes** da execução, em `try/except` próprio (`m169_baseline_run.py:146-150`); falha dele deixa `agg_routed=None` e o log imprime literalmente `agg=None` | as 5 imprimem `agg=False` — **medido** |
+| `agg=True` ser um `Custom Scan` genérico | `plan_shows_agg_pushdown` chaveia em `theodb_columnar_agg`, não em `"Custom Scan"` — o provider de projeção é ON por default e renderiza `Custom Scan` sob TODO scan colunar (achado HIGH-2 do council-benchmark) | o q20 casa a string específica |
+
+O `q20` fecha o argumento pelo outro lado: o `EXPLAIN` **sucedeu** mostrando o pushdown, e a **execução**
+estourou `XX000` em 52 s. É a assinatura de "entra no caminho colunar e quebra lá dentro" — não de "não roteia".
+
+Se eu tivesse pulado esta checagem, o conceito recém-escrito estaria apoiado num artefato do harness — e um
+conceito errado é pior que ausente, porque será citado.
