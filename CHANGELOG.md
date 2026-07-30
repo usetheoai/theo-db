@@ -14,6 +14,9 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **theodb:** mineração dos transcripts do projeto irmão para a base OKF — 7 conceitos novos e 2 atualizados
+  (`setsid` em ssh, fsync do diretório-pai, dados sintéticos degenerados, SBQ, pg_duckdb sobre heap, colação
+  em MIN/MAX de texto, precisão do júri); bundle vai a 60 conceitos (#okf)
 - **theodb:** auditoria de cobertura da base OKF — 7 lacunas reais fechadas (dogfood vs benchmark, teste que
   passa pela razão errada, fail-open por omissão, snapshot do bgworker, GUC de worker, wrapping de `sum(Int64)`,
   `scanrelid=0` sob pullup); bundle vai a 53 conceitos (#okf)

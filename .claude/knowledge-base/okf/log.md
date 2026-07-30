@@ -64,3 +64,33 @@ Deu falso negativo em `m140-4` (busquei termos do slug; a lição vive sob `Spi:
 outras 56 significa apenas que **uma palavra apareceu em algum lugar** — não que a lição virou conceito. Logo
 **56/66 é teto, não medida**, e a cobertura real das 56 continua não auditada. Além disso, os 110 blueprints e as
 mensagens de commit da série **nunca foram varridos** — é superfície maior que a das memórias.
+
+## 2026-07-30 (3) — mineração dos transcripts do projeto irmão
+
+O owner apontou `projects/-home-paulo-Projetos-usetheo-theo-data-theo-db/memory` como fonte de aprendizados.
+
+**Primeiro achado, e ele nega a premissa:** aquela memória é um **subconjunto estrito** da que já foi consolidada
+— 64 de 65 arquivos **byte-idênticos**, e o `theo-cloud` ainda tem 2 arquivos a mais. Zero aprendizado novo ali.
+
+**O que de fato não fora minerado:** os **562 MB de transcripts** do mesmo diretório (10 sessões, 4→27 de julho).
+Extração de parágrafos com marcador de aprendizado: 497 distintos; 439 após descartar repetição de conceito já
+coberto. Sete viraram conceito novo, dois atualizaram conceito existente:
+
+| Novo | O que é |
+|---|---|
+| `nohup-em-ssh-nao-sobrevive` | `nohup &` dentro de `ssh` morre com o canal — exige `setsid` + verificação de PID. Custou duas corridas perdidas |
+| `durable-rename-fsync-do-diretorio-pai` | 5 fsyncs em ordem estrita; o do diretório-pai é o load-bearing. E `durable_rename` NÃO faz PANIC |
+| `dados-sinteticos-degenerados` | uniforme satura recall em 1.0 com `probes=1`; sem cluster despenca a 0.033. Nenhum dos dois mede o índice |
+| `sbq-sem-vantagem-in-ram` | tese ≥2× falsificada: 0,31-0,77× do f32; a vantagem é memória, sob pressão de RAM |
+| `pgduckdb-sobre-heap-e-mais-lento` | 0,52-0,78× do row-executor nativo, com plano DuckDB e resultado correto |
+| `min-max-texto-e-colacao` | byte-min ≠ collation-min; determinismo não basta. Teto estrutural de ~35-39/43 no ClickBench |
+| `juri-adversarial-precision-039` | 11 de 18 achados descartados pelo júri — ~1/3 de acionáveis é o esperado |
+
+| Atualizado (regra § 4.3 — nunca bifurcar) | O que ganhou |
+|---|---|
+| `deriva-de-box-m168` | a instância do **M46: +122%** de deriva no controle de binário inalterado — 40× maior, e um ano antes |
+| `superioridade-vetorial-vs-scann` | a causa-raiz é **problema de pesquisa** (grafo satura em 0,974 a 500k) e **3 levers já refutados** por medição |
+
+**O mais desconfortável:** `nohup-em-ssh-nao-sobrevive` descreve um padrão que **usei várias vezes nesta própria
+sessão** para lançar cargas na box de medição. Funcionou por sorte — a lição existia, registrada, e não estava
+onde dispararia.

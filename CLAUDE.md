@@ -147,7 +147,7 @@ peers com licença copyleft (`paradedb`, `citus`, `hydra`, `vectorchord` = AGPL;
 ## Base de conhecimento OKF (consultar ANTES, escrever DEPOIS — inquebrável)
 
 Contrato: [`.claude/rules/okf-knowledge-base.md`](./.claude/rules/okf-knowledge-base.md).
-Bundle: `.claude/knowledge-base/okf/` — **53 conceitos** em [Open Knowledge Format v0.1](https://github.com/google/open-knowledge-format),
+Bundle: `.claude/knowledge-base/okf/` — **60 conceitos** em [Open Knowledge Format v0.1](https://github.com/google/open-knowledge-format),
 um arquivo por conceito, links markdown formando um grafo, `type` como único campo obrigatório.
 
 **Por que ele existe.** O conhecimento que este projeto pagou para aprender já estava escrito — em 67 arquivos de

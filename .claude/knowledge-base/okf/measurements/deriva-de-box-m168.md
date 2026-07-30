@@ -41,6 +41,24 @@ dos pares aquecidos — não os 17,7% da coleta mais lisonjeira).
 Absolutos derivam; o efeito não. O pareamento **estava** funcionando — negando a alegação de "ordem e efeito
 perfeitamente confundidos" que eu havia publicado antes de fazer a conta.
 
+## Instância anterior, MUITO maior — M46 (+122%)
+
+O M168 não foi a primeira vez, e a primeira foi pior por uma ordem de grandeza. No **M46**, numa dev box saturada
+(**load 18-36 em 12 cores**), o **controle pgvector** — binário **inalterado** — derivou **+122%** entre corridas.
+
+| | deriva do controle |
+|---|---|
+| M46, dev box saturada (load 18-36 / 12 cores) | **+122%** |
+| M168, e2e-runner (load 21 / 8 cores) | +2,9 pontos percentuais |
+
+Com +122% de ruído no controle, **nenhum Δ de QPS é atribuível ao código** — foi exatamente essa a conclusão, e o
+ganho de QPS do M46 foi declarado honest-negative (ADR-2) em vez de publicado. O que o M46 entregou de real
+(pré-dimensionamento das estruturas per-query + reuso do scratch de vizinhos) foi **provado recall-neutro**, que
+é uma propriedade que não depende de relógio.
+
+**A lição que atravessa os dois:** o controle de binário-inalterado não é zelo, é o instrumento que mede o piso
+de ruído. Sem ele, qualquer Δ menor que a deriva vira alegação — e a deriva pode ser 40× maior do que se imagina.
+
 ## Relacionados
 
 - [technique/desenho-ababab](../techniques/desenho-ababab.md)
