@@ -55,7 +55,10 @@ MIN_DISK_FREE_GB = int(HITS_ROWS * (_EST_HEAP_BYTES_PER_ROW + _EST_COLUMNAR_BYTE
 # identical command on the identical file with the same ceiling.
 WC_TIMEOUT_S = 600
 SH_TIMEOUT_S = 60
-# `count(*)` over the 100M columnar table is ~35 min MEASURED (row-by-row materialisation, the M148 bottleneck).
+# `count(*)` over the 100M columnar table takes TENS OF MINUTES (row-by-row materialisation, the M148
+# bottleneck). Deliberately not stated as a precise figure: both runs observed so far overlapped with another
+# query for part of their window, so the order of magnitude is solid and the exact number is not. The ceiling
+# below is sized from the order of magnitude, which is all a ceiling needs.
 # The 60 s default kills the psql CLIENT and leaves the BACKEND running orphaned — the check then reports
 # UNREACHABLE while the server burns CPU for another half hour. That is the same defect the `wc -l` ceiling fixed;
 # fixing one instance and not the class is how it survived.
@@ -222,8 +225,8 @@ def collect(tsv_path: str, *, sh=_sh, sh_any_rc=_sh_any_rc, psql_int=_count_rows
     against PGDATA's filesystem, which is where the heap rebuild actually writes. The TSV cache is assumed to be
     on the same mount; if it is not, its filesystem is unchecked.
 
-    `quick=True` skips the dataset checks (`count(*)` on 100M is ~35 min MEASURED, and `wc -l` on the 69.7 GB
-    corpus is minutes). It exists for the CLOSING header of a read-only run, whose question is "did anything run
+    `quick=True` skips the dataset checks (`count(*)` on 100M is tens of minutes, and `wc -l` on the 69.7 GB
+    corpus is minutes — see the ceiling constants for why neither figure is stated precisely). It exists for the CLOSING header of a read-only run, whose question is "did anything run
     alongside?" — not "is the data still there?", which a read-only run cannot have changed. Using it for the
     OPENING header would skip the very checks T1.1 exists to make, so the two are not interchangeable and the
     resulting facts say which mode produced them."""
@@ -271,7 +274,8 @@ def main() -> int:
                     help="the loaded corpus; its line count is the authority the table count is checked against")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--quick", action="store_true",
-                    help="skip the dataset checks (~40 min at 100M); for the CLOSING header of a read-only run")
+                    help="skip the dataset checks (tens of minutes at 100M); for the CLOSING header of a "
+                         "read-only run, whose question is contamination, not dataset integrity")
     args = ap.parse_args()
 
     v = attest(collect(args.tsv, quick=args.quick))

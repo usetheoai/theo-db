@@ -405,3 +405,19 @@ do coletor codifica estado no código de saída; os 3 chamadores de `_psql` pass
 Duas de formato vizinho ficaram registradas dentro do conceito, porque não são instância-vs-classe e sim
 "saber não impede": nome de conceito escrito de memória (**três** vezes, três vezes pego pelo C2) e comando longo
 em foreground remoto (documentei o invariante de manhã, repeti o erro uma hora depois).
+
+## 2026-07-30 (14) — a varredura de consistência me pegou contradizendo a própria disciplina
+
+Apliquei a regra do `correcao-nao-propagada-pelo-grafo` aos números que publiquei hoje, e ela achou um caso — em
+mim, não no bundle.
+
+Eu havia **decidido explicitamente não publicar** o tempo do `count(*)` a 100M, porque as duas observações tiveram
+janela sobreposta com outro processo (a primeira com um órfão, a segunda com o resto da primeira). Depois escrevi
+**"~35 min MEASURED"** em três comentários do `m169_box_attest.py`.
+
+`MEASURED` superestima o rigor: o que existe é uma **ordem de grandeza** sólida e um número exato que não é. Um
+teto de timeout precisa apenas da ordem de grandeza, então o código foi corrigido para dizer "tens of minutes" e
+explicar por que a precisão está ausente — em vez de emprestar autoridade que a medição não tem.
+
+A lição de método: a disciplina declarada numa mensagem de commit não se propaga sozinha para os comentários de
+código escritos meia hora depois. É a mesma classe do conceito, aplicada ao meu próprio texto.
