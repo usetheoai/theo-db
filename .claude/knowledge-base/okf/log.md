@@ -448,3 +448,14 @@ E um `Invariant` novo, do erro que eu peguei antes de rodar: o PostgreSQL **dobr
 planejamento**, então `CASE ... ELSE 1/0` dispara mesmo quando o ramo não é tomado. A direção do erro é a cara:
 o gate reprova SEMPRE, antes e depois do fix, e o sintoma se lê como *"o fix não funcionou"* — mandando caçar um
 defeito inexistente no código recém-corrigido. É a forma invertida do `teste-que-passa-pela-razao-errada`.
+
+## 2026-07-30 — `contagem-agregada-mistura-classes-de-falha` (Failure Mode, novo)
+
+Escrito **durante** o baseline do M169, aos 24 de 43, e deliberadamente **antes** do número final. O baseline
+mediu 6 falhas: **5 com `agg_routed=False`** (a consulta nunca entra no caminho colunar — assunto da série de
+cobertura M151…M163) e **1 com `agg_routed=True`** (o q20, `byte array offset overflow`, que é o alvo do M169).
+
+A métrica-resumo escolhida pelo milestone — "N de 43 completam" — soma as duas classes. Se o T4.1 reportar
+`19 → 21`, duas unidades podem ter mudado por qualquer coisa menos o streaming. O conceito registra a regra:
+capturar o discriminador por unidade na mesma corrida, publicar o delta **por classe**, e declarar o recorte
+antes do resultado.
