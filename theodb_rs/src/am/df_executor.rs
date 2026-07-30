@@ -169,82 +169,80 @@ fn fixed_raw_array(
 /// varlena / text) and by `arrow_cache`. Kept byte-identical: every arm is a plain `from_le_bytes`/`from_utf8_lossy`.
 fn cells_to_array(typid: u32, values: &[Option<Vec<u8>>]) -> Result<(DataType, ArrayRef), String> {
     Ok(match typid {
-            21 => (
-                DataType::Int16,
-                Arc::new(Int16Array::from_iter(
-                    values.iter().map(|v| v.as_ref().map(|b| i16::from_le_bytes([b[0], b[1]]))),
-                )),
-            ),
-            23 => {
-                (
-                    DataType::Int32,
-                    Arc::new(Int32Array::from_iter(values.iter().map(|v| {
-                        v.as_ref().map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-                    }))),
-                )
-            }
-            20 => {
-                (
-                    DataType::Int64,
-                    Arc::new(Int64Array::from_iter(values.iter().map(|v| {
-                        v.as_ref().map(|b| i64::from_le_bytes(b[..8].try_into().unwrap()))
-                    }))),
-                )
-            }
-            700 => {
-                (
-                    DataType::Float32,
-                    Arc::new(Float32Array::from_iter(values.iter().map(|v| {
-                        v.as_ref().map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-                    }))),
-                )
-            }
-            701 => {
-                (
-                    DataType::Float64,
-                    Arc::new(Float64Array::from_iter(values.iter().map(|v| {
-                        v.as_ref().map(|b| f64::from_le_bytes(b[..8].try_into().unwrap()))
-                    }))),
-                )
-            }
-            16 => (
-                DataType::Boolean,
-                Arc::new(BooleanArray::from_iter(
-                    values.iter().map(|v| v.as_ref().map(|b| b.first().copied().unwrap_or(0) != 0)),
-                )),
-            ),
-            25 | 1042 | 1043 => (
-                DataType::Utf8,
-                Arc::new(StringArray::from_iter(
-                    values
-                        .iter()
-                        .map(|v| v.as_ref().map(|b| String::from_utf8_lossy(b).into_owned())),
-                )),
-            ),
-            // Temporal: the stored bytes ARE the internal int (timestamp/timestamptz = int64 μs, date = int32 days).
-            // Both mapped to a naive (tz=None) Arrow type — the comparison is on the raw int domain (tz is display
-            // only), so `build_filter_expr`'s matching-typed literal compares correctly (D3).
-            1114 | 1184 => {
-                (
-                    DataType::Timestamp(TimeUnit::Microsecond, None),
-                    Arc::new(TimestampMicrosecondArray::from_iter(values.iter().map(|v| {
-                        v.as_ref().map(|b| i64::from_le_bytes(b[..8].try_into().unwrap()))
-                    }))),
-                )
-            }
-            1082 => {
-                (
-                    DataType::Date32,
-                    Arc::new(Date32Array::from_iter(values.iter().map(|v| {
-                        v.as_ref().map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-                    }))),
-                )
-            }
-            other => {
-                return Err(format!(
-                    "df_executor: unsupported column type oid {other} (Phase A: int2/4/8, float4/8, bool, text)"
-                ));
-            }
+        21 => (
+            DataType::Int16,
+            Arc::new(Int16Array::from_iter(
+                values.iter().map(|v| v.as_ref().map(|b| i16::from_le_bytes([b[0], b[1]]))),
+            )),
+        ),
+        23 => (
+            DataType::Int32,
+            Arc::new(Int32Array::from_iter(
+                values
+                    .iter()
+                    .map(|v| v.as_ref().map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]))),
+            )),
+        ),
+        20 => (
+            DataType::Int64,
+            Arc::new(Int64Array::from_iter(
+                values
+                    .iter()
+                    .map(|v| v.as_ref().map(|b| i64::from_le_bytes(b[..8].try_into().unwrap()))),
+            )),
+        ),
+        700 => (
+            DataType::Float32,
+            Arc::new(Float32Array::from_iter(
+                values
+                    .iter()
+                    .map(|v| v.as_ref().map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))),
+            )),
+        ),
+        701 => (
+            DataType::Float64,
+            Arc::new(Float64Array::from_iter(
+                values
+                    .iter()
+                    .map(|v| v.as_ref().map(|b| f64::from_le_bytes(b[..8].try_into().unwrap()))),
+            )),
+        ),
+        16 => (
+            DataType::Boolean,
+            Arc::new(BooleanArray::from_iter(
+                values.iter().map(|v| v.as_ref().map(|b| b.first().copied().unwrap_or(0) != 0)),
+            )),
+        ),
+        25 | 1042 | 1043 => (
+            DataType::Utf8,
+            Arc::new(StringArray::from_iter(
+                values.iter().map(|v| v.as_ref().map(|b| String::from_utf8_lossy(b).into_owned())),
+            )),
+        ),
+        // Temporal: the stored bytes ARE the internal int (timestamp/timestamptz = int64 μs, date = int32 days).
+        // Both mapped to a naive (tz=None) Arrow type — the comparison is on the raw int domain (tz is display
+        // only), so `build_filter_expr`'s matching-typed literal compares correctly (D3).
+        1114 | 1184 => (
+            DataType::Timestamp(TimeUnit::Microsecond, None),
+            Arc::new(TimestampMicrosecondArray::from_iter(
+                values
+                    .iter()
+                    .map(|v| v.as_ref().map(|b| i64::from_le_bytes(b[..8].try_into().unwrap()))),
+            )),
+        ),
+        1082 => (
+            DataType::Date32,
+            Arc::new(Date32Array::from_iter(
+                values
+                    .iter()
+                    .map(|v| v.as_ref().map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]))),
+            )),
+        ),
+        other => {
+            return Err(format!(
+                "df_executor: unsupported column type oid {other} (Phase A: int2/4/8, float4/8, bool, text)"
+            ));
+        }
     })
 }
 
@@ -271,7 +269,10 @@ pub(super) enum AggSpec {
     /// M166 — `sum(int2_col ± const)` → PG int8 (ClickBench q29). Admitted ONLY for an int2 base column with an int4
     /// operator result whose per-row `col ± delta` provably stays in int4 (so PG raises no 22003 and the Int64 sum is
     /// exact). `delta` folds the operator sign (`col - k` = `col + (-k)`). Output kind = SumInt (Arrow Int64 → PG int8).
-    SumIntAddConst { col: String, delta: i64 },
+    SumIntAddConst {
+        col: String,
+        delta: i64,
+    },
     /// `avg(float8)` → PG float8. DataFusion `avg` → Float64.
     AvgFloat8(String),
     /// `sum(int8)` → PG `numeric` (exact). DataFusion `sum(cast(col AS Decimal128(38,0)))` → i128; the datum is a PG
@@ -664,7 +665,9 @@ pub(super) unsafe fn run_columnar_grouped_aggs(
     let mut group_exprs: Vec<Expr> = group_cols.iter().map(|(n, _)| col(n.as_str())).collect();
     for g in group_key_exprs_spec {
         let e = match g.func {
-            0 => date_trunc(lit(ScalarValue::Utf8(Some(g.unit.clone()))), col(g.base_name.as_str())),
+            0 => {
+                date_trunc(lit(ScalarValue::Utf8(Some(g.unit.clone()))), col(g.base_name.as_str()))
+            }
             1 => cast(
                 date_part(lit(ScalarValue::Utf8(Some(g.unit.clone()))), col(g.base_name.as_str())),
                 DataType::Int64,
@@ -701,13 +704,15 @@ pub(super) unsafe fn run_columnar_grouped_aggs(
                 let cell = match kind {
                     0 => {
                         // bare group column — batch col `idx`.
-                        let typoid = group_cols.get(idx).ok_or("df_executor: layout group idx oob")?.1;
+                        let typoid =
+                            group_cols.get(idx).ok_or("df_executor: layout group idx oob")?.1;
                         arrow_value_to_datum(b.column(idx), r, typoid)?
                     }
                     2 => {
                         // M157/M161 — expression group-expr — batch col `ncols + idx`, materialized per variant.
-                        let g =
-                            group_key_exprs_spec.get(idx).ok_or("df_executor: layout group-expr idx oob")?;
+                        let g = group_key_exprs_spec
+                            .get(idx)
+                            .ok_or("df_executor: layout group-expr idx oob")?;
                         group_expr_cell(b.column(ncols + idx), r, g)?
                     }
                     3 => {
@@ -801,7 +806,9 @@ pub(super) unsafe fn run_columnar_topk(
         let schema = b.schema();
         let idxs: Vec<usize> = proj_cols
             .iter()
-            .map(|(n, _)| schema.index_of(n).map_err(|e| format!("df_executor: topk output col '{n}': {e}")))
+            .map(|(n, _)| {
+                schema.index_of(n).map_err(|e| format!("df_executor: topk output col '{n}': {e}"))
+            })
             .collect::<Result<Vec<_>, _>>()?;
         for r in 0..b.num_rows() {
             let mut row_out = Vec::with_capacity(proj_cols.len());
@@ -1023,7 +1030,10 @@ fn group_expr_cell(
                 .downcast_ref::<Int64Array>()
                 .ok_or("df_executor: extract group key not Int64")?
                 .value(row);
-            Ok((AnyNumeric::from(v).into_datum().ok_or("df_executor: extract numeric datum")?, false))
+            Ok((
+                AnyNumeric::from(v).into_datum().ok_or("df_executor: extract numeric datum")?,
+                false,
+            ))
         }
         2 => {
             // IntAddConst → the operator RESULT type (int2/int4 only; int8 result declined at admit) with a range
@@ -1036,8 +1046,12 @@ fn group_expr_cell(
                 .ok_or("df_executor: int-arith group key not Int64")?
                 .value(row);
             let d = match g.out_typoid {
-                21 => i16::try_from(v).map_err(|_| "smallint out of range".to_string())?.into_datum(),
-                23 => i32::try_from(v).map_err(|_| "integer out of range".to_string())?.into_datum(),
+                21 => {
+                    i16::try_from(v).map_err(|_| "smallint out of range".to_string())?.into_datum()
+                }
+                23 => {
+                    i32::try_from(v).map_err(|_| "integer out of range".to_string())?.into_datum()
+                }
                 other => return Err(format!("df_executor: int-arith bad out typoid {other}")),
             };
             Ok((d.ok_or("df_executor: int-arith datum")?, false))
@@ -1194,7 +1208,8 @@ mod m160_fixed_raw_tests {
 
         macro_rules! check {
             ($typid:expr, $w:expr, $arr:expr) => {{
-                let (dt_f, af) = fixed_raw_array($typid, &contiguous(&$arr), $w, $arr.len()).unwrap();
+                let (dt_f, af) =
+                    fixed_raw_array($typid, &contiguous(&$arr), $w, $arr.len()).unwrap();
                 let (dt_c, ac) = cells_to_array($typid, &cells_of(&$arr)).unwrap();
                 assert_eq!(dt_f, dt_c, "DataType mismatch for typid {}", $typid);
                 assert_eq!(af.to_data(), ac.to_data(), "Arrow data mismatch for typid {}", $typid);
