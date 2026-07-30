@@ -226,3 +226,74 @@ visíveis estão em `benchmarks/tests/`, que é a árvore de **integração com 
 dedicada**, onde o PG18 com a extensão existe — não aqui. Dispensá-lo por ADR seria dispensar um gate que
 consegue rodar; satisfazê-lo localmente é impossível. O braço de controle é o que permite afirmar que os 63+232
 são **pré-existentes e ambientais**, e não introduzidos por este milestone.
+
+---
+
+## Iteração 2 — T1.2
+
+### Deriva de plano: o prior art que o plano aponta é o script ERRADO
+
+`#### Files to edit` de T1.2 diz "reusa `run_m128_clickbench.py`, que já tem os guards do M164". Lido como
+**invocação**, isso destrói o milestone: `run()` faz `DROP TABLE IF EXISTS hits CASCADE` + idem `hits_heap`
+(`:324-325`), **incondicionalmente e sem flag para pular**, e o colunar é derivado do heap
+(`INSERT INTO hits SELECT * FROM hits_heap`, `:333`). Rodá-lo apagaria os 16 GB já carregados.
+
+O prior art correto é **`benchmarks/m162_timing.py`**, que o plano **não cita** e cujo cabeçalho diz literalmente
+*"query the ALREADY-LOADED columnar `hits` (100M), no reload, no A/B"*. Reuso a forma dele e **não** herdo três
+propriedades, cada uma por um motivo medido:
+
+| Não herdado | Por quê |
+|---|---|
+| `dbname="clickbench"`, `password="x"` (`:14`) | não é esta box (base `postgres`, auth trust), e credencial em fonte é errado em qualquer lugar |
+| `top_node` (`:25-36`) | casa o sinal **amplo** `Custom Scan (theodb_columnar`, que o guard B2 do M164 proibiu por ser ~sempre verdadeiro. Uso `plan_shows_agg_pushdown`, o agg-específico |
+| 3 execuções por consulta | a AC de T1.2 é "a consulta termina", não "é rápida" — triplicaria uma corrida de horas por um dado que ninguém pediu, e faria o delta do T4.1 comparar protocolos diferentes |
+
+Arquivos implementados: `m169_baseline_run.py`, `m169_baseline_summarize.py`, `m169_baseline_report.py`,
+`m169_baseline_100m.sh` (+ 3 arquivos de teste). O `m169_baseline_summarize.py` e o `m169_baseline_report.py`
+**não** constam de `#### Files to edit`, embora o DoD exija o primeiro — registro aqui porque o
+`check_diff_cohesion` é cego a este plano (issue #224).
+
+### Emenda ao vocabulário de veredito da AC
+
+A AC declara `ok|error:<sqlstate>|timeout|oom`. **`oom` não é uma coisa só**, e dois formatos não são atribuíveis
+à consulta que os observou:
+
+| Veredito | Como se sabe | Por que separado |
+|---|---|---|
+| `oom:palloc` | SQLSTATE **53200** | o PG capturou; o backend **sobreviveu** — remediação diferente |
+| `oom:kernel` | `crash` + linha do kernel nomeando **aquele** PID | sem a linha, é palpite |
+| `crash` | backend morto, `pgcode` nulo | a causa **ainda não é conhecida** |
+| `crash:collateral` | SQLSTATE **57P02** | quem morreu foi **outro**; contar contra esta consulta é culpá-la pela morte do vizinho |
+| `harness:<Tipo>` | exceção não-psycopg2 | defeito do runner, **nunca** contado como falha do produto |
+
+### `statement_timeout` = 300 s, não o default
+
+O default do harness é **60 s**; o M162 mediu com **300 s**. Sob 60 s quase tudo viraria `timeout` — e, pior, o
+número seria **incomparável** ao `19/43` que este milestone existe para superar.
+
+### Três CRITICAL do SEPA, encontrados com a corrida JÁ rodando
+
+Parei a corrida. Registro os três porque cada um produziria um resultado que parece válido:
+
+1. **O runner escreve JSONL; o summarizer fazia `json.load`** (parser de documento único) → `JSONDecodeError`
+   **depois** das horas de corrida. Os 35 testes anteriores eram **todos puros**; nenhum atravessava a fronteira
+   arquivo→`main()`, que é exatamente por que sobreviveu ao verde.
+2. **A GUC `enable_columnar_agg_stream` não existe** e o `SET` dela **sucede como placeholder silencioso**. No
+   T4.1 um typo deixaria o caminho novo desligado e a corrida concluiria "a mudança não teve efeito".
+3. **O `ALLOW_MISSING_HEAP` era inerte no próprio caso de uso.** Tabela inexistente → psql sai ≠ 0 →
+   `UNREACHABLE`, cuja mensagem não contém `hits_heap` → o script abortava **justamente quando devia tolerar**.
+   E o casamento por substring toleraria também `hits_heap_rowcount_mismatch`, que é **pior** que ausência.
+
+### O defeito de fundo era meu, e a classe é a lição
+
+`_psql_int` usava `_sh` com **60 s**; um `count(*)` a 100M leva **~2100 s medidos**. O cliente morre, `_sh`
+devolve `None` → `UNREACHABLE`, **e o backend segue rodando órfão**. Em T1.1 o SEPA me pegou pondo `timeout=60`
+no `wc -l` de 69,7 GB e eu corrigi **aquela instância**, não a **classe**. Ver
+`okf/failure-modes/corrigir-a-instancia-e-nao-a-classe.md`, escrito a partir de cinco ocorrências desta sessão.
+
+### Divergência do conselho do SEPA, declarada
+
+Ele recomendou reconstruir `hits_heap` **antes** do baseline. Implementei `ALLOW_MISSING_HEAP`, que tolera
+**apenas** o ID `hits_heap_absent` e **imprime** a ausência no cabeçalho. Razão: o ADR-2 existe para o número
+decisivo vir primeiro; a AC de T1.2 é veredito-só; e o A/B dobraria uma corrida de horas. O tempo total é igual
+nas duas ordens — o que muda é qual número chega primeiro.
