@@ -110,7 +110,7 @@ Todos aplicados; nenhum dispensado por ADR.
 | pg_duckdb | faixa `0,52-0,78×` **fabricada** — o medido é 0,63-0,89× em 3 escalas |
 | `mwm` | `×7` é **×8**; o `~510 MB` pertencia à coluna `mwm=64MB`; "a fórmula previu os dois" era falso |
 
-Os quatro, mais 4 dos HIGH, concentram-se no commit `5c38eee` — o que minerou **transcripts**. Isso virou o
+**Três** dos quatro, mais 4 dos HIGH, concentram-se no commit `5c38eee` (o quarto — o `mwm` — vem do commit fundador `239d487`; a alegação "os quatro" era generalização não contada, corrigida no re-review) — o que minerou **transcripts**. Isso virou o
 conceito [crenca-intermediaria-congelada](failure-modes/crenca-intermediaria-congelada.md): transcript é
 deliberação em andamento; memória consolidada e artefato são conclusão.
 
@@ -134,3 +134,35 @@ geomean do gap vs ClickHouse é exata ao dígito; `ChunkDirEntry` 48 B/44 B conf
 
 **Durante a aplicação, o gate C2/C3 pegou dois defeitos que eu introduzi** ao renomear um conceito — links
 mortos e índice dessincronizado. O mecanismo funcionou contra quem o escreveu.
+
+## 2026-07-30 (5) — re-review: minhas correções introduziram 3 defeitos, um BLOCKER
+
+Re-verificação adversarial do commit `217d449`. Dos 34 achados: **24 corrigidos, 4 parciais, 3 não aplicados,
+3 defeitos NOVOS**. Todos tratados.
+
+**O defeito novo que importa (BLOCKER):** ao substituir a faixa fabricada do `pg_duckdb` pela medida, **inverti
+as colunas** — publiquei 23,6 ms como DuckDB e 26,4 ms como PG. Com esses rótulos o DuckDB fica *mais rápido*,
+contradizendo o próprio título; e a razão 0,89 só fecha com os rótulos da fonte. **É a mesma espécie de defeito
+("rótulos trocados") que eu havia imputado ao original.**
+
+Dois defeitos novos auto-referenciais, e num bundle sobre honestidade epistêmica isso pesa: a nota de correção do
+SBQ **citava o slug novo como se fosse o antigo**, e a alegação "os 4 BLOCKER concentram-se em `5c38eee`" era
+**generalização não contada** — são **3 de 4** (o `mwm` nasceu no commit fundador `239d487`). Repetida em três
+lugares, sobre a causa dos defeitos: exatamente a espécie que `crenca-intermediaria-congelada` existe para
+prevenir.
+
+**Duas omissões de propagação:** o `~510 MB` foi corrigido no conceito-fonte mas não em `medir-antes-de-filar`,
+que passou a afirmar `×8` e `~510 MB` na mesma frase; e o `ARM=stream` saiu de `falso-verde-de-script` mas
+ficou duplicado entre `gate-desligado-em-silencio` e `medicao-vacuosa-aceita` — a duplicação mudou de par em vez
+de ser eliminada.
+
+**C6 implementado** — o buraco que o review pediu e que eu não fechei (usei o slot "C5" para o achado do `type`).
+`resource:` agora é validado, e ele já tinha **duas** vítimas vivas: `rules/reference-provenance.md` e um
+`docs/adr/0035` truncado que **seis revisores não pegaram**. C5 e C6 ganharam normalização (aspas, comentário
+YAML, âncora de seção) depois que um probe mostrou que rejeitavam YAML legal.
+
+**Lição de método, registrada porque se repetiu duas vezes hoje:** um `str.replace` cuja âncora não casa **falha
+em silêncio** — foi assim que a correção do C6 não entrou na primeira tentativa (indentação de 16 espaços, eu
+presumi 20). Edit erra alto; `replace` não. E o meu primeiro controle positivo do C6 era **inválido**: copiar o
+bundle para `/tmp` quebra a resolução de todo caminho relativo ao repo, então os 6 "achados" eram artefato do
+teste, não do gate.

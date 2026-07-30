@@ -36,4 +36,5 @@ O log termina com `rc=0` e o trabalho não aconteceu. Ou o gate "passa" porque p
 ## Relacionados
 
 - [technique/controle-positivo](../techniques/controle-positivo.md)
+- [invariant/nohup-em-ssh-nao-sobrevive](../invariants/nohup-em-ssh-nao-sobrevive.md) — "você acha que lançou e não lançou" é a variante desta classe em lançamento remoto
 - [failure-mode/medicao-vacuosa-aceita](medicao-vacuosa-aceita.md)

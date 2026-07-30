@@ -6,7 +6,10 @@ structurally honest? It deliberately does NOT judge content quality — a checke
 that pretends to grade prose would be exactly the "cobertura alegada sem
 execucao" failure mode the bundle documents.
 
-Four checks, all of them with zero false-positive surface:
+Five checks. C1-C4 have zero false-positive surface. C5 compares a normalized
+string against a closed set — it strips an inline YAML comment and surrounding
+quotes first, because `type: "Failure Mode"` and `type: Failure Mode  # note`
+are both legal YAML that a naive match would reject:
 
   C1  every concept file declares `type` in its YAML frontmatter
       (OKF v0.1 requires exactly one field, and this is it)
@@ -15,6 +18,10 @@ Four checks, all of them with zero false-positive surface:
   C3  each directory's index.md lists EXACTLY the concepts present
       (an index that drifts is worse than no index: it hides concepts)
   C4  the required root files exist (index.md, log.md)
+  C6  every `resource:` in the frontmatter resolves on disk when it is a repo path
+      (this is the hole the 2026-07-30 review found: C2 validates markdown links only,
+      so a bad path in `resource:` — where `rules/reference-provenance.md` and a
+      truncated `docs/adr/0035` both hid — was checked by nothing)
   C5  `type` is one of the taxonomy values declared in rules/okf-knowledge-base.md § 2
       (C1 only checks PRESENCE; a value outside the closed set is a sixth type, which
       the LOCKED clause requires an ADR for — and the front door had exactly that bug)
@@ -42,9 +49,27 @@ RESERVED = {"index.md", "log.md"}
 VALID_TYPES = {"Failure Mode", "Technique", "Invariant", "Measurement", "Honest Negative", "Index", "Log"}
 
 TYPE_RE = re.compile(r"^type:\s*(\S.*)$", re.M)
+RESOURCE_RE = re.compile(r"^resource:\s*(\S.*)$", re.M)
+# `resource:` values that are NOT repo paths and must not be probed.
+_NON_PATH = ("http://", "https://", "mailto:")
+# Study material is gitignored by design (CLAUDE.md) — absence is not a defect.
+_GITIGNORED_PREFIXES = ("references/", "knowledge-base/references/")
 LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 # An index row is a markdown table row whose first cell is a link: | [Title](file.md) | ... |
 INDEX_ROW_RE = re.compile(r"^\|\s*\[[^\]]*\]\(([^)]+\.md)\)\s*\|", re.M)
+
+
+def _normalize_type(raw: str) -> str:
+    """Normalize a frontmatter `type` value the way a YAML parser would.
+
+    `type: Failure Mode  # note` and `type: "Failure Mode"` are both legal YAML that
+    resolve to `Failure Mode`. Comparing the raw capture against the closed set would
+    reject them — a false positive on a legal file, which C5 must not have.
+    """
+    t = raw.split(" #", 1)[0].strip()
+    if len(t) >= 2 and t[0] == t[-1] and t[0] in "\"'":
+        t = t[1:-1].strip()
+    return t
 
 
 def frontmatter(text: str) -> str | None:
@@ -90,7 +115,7 @@ def check(bundle: Path) -> tuple[list[str], dict]:
             if not m:
                 findings.append(f"C1 no-type: {rel} frontmatter declares no `type`")
             else:
-                t = m.group(1).strip()
+                t = _normalize_type(m.group(1))
                 stats["types"][t] = stats["types"].get(t, 0) + 1
                 # C5 — the value must be in the closed taxonomy, not merely present
                 if t not in VALID_TYPES:
@@ -98,6 +123,22 @@ def check(bundle: Path) -> tuple[list[str], dict]:
                         f"C5 type-outside-taxonomy: {rel} declares `type: {t}`, which is not one of "
                         f"{sorted(VALID_TYPES)} (rules/okf-knowledge-base.md § 2 is LOCKED; a new type needs an ADR)"
                     )
+
+            # C6 — a `resource:` that points at a repo path must resolve
+            mr = RESOURCE_RE.search(fm)
+            if mr:
+                res = _normalize_type(mr.group(1))          # same quote/comment stripping
+                res = res.split(" (", 1)[0].strip()          # trailing gloss, e.g. "path (umbrella)"
+                res = res.split("#", 1)[0].strip()           # section anchor, as C2 already strips for links
+                if res and not res.startswith(_NON_PATH) and "/" in res:
+                    if not any(res.startswith(g) or f"/{g}" in res for g in _GITIGNORED_PREFIXES):
+                        candidates = [bundle.parent.parent / res, bundle.parent / res, Path(res)]
+                        if not any(c.exists() for c in candidates):
+                            findings.append(
+                                f"C6 resource-not-found: {rel} declares `resource: {res}`, which does not "
+                                "resolve against the repo root or .claude/ (a citation that does not resolve "
+                                "does not belong in this bundle — the bundle's own rule)"
+                            )
 
         if path.name not in RESERVED:
             stats["concepts"] += 1

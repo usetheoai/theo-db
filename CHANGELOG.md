@@ -44,6 +44,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   em `docs/benchmarks/m168-streaming-topk-verdict.md`.
 
 ### Fixed
+- **theodb:** re-review das correções OKF — 3 defeitos que as próprias correções introduziram (1 BLOCKER:
+  colunas invertidas no pg_duckdb), 2 omissões de propagação, e o gate C6 que valida `resource:` (#okf)
 - **theodb:** review adversarial de 5 agentes sobre a base OKF — 34 achados aplicados (4 BLOCKER de números
   fabricados ou conclusões invertidas), gate C5 (valor de `type` no conjunto fechado), dois gatilhos de
   leitura novos, e correção das origens herdadas em `CLAUDE.md` e no issue #221 (#okf)

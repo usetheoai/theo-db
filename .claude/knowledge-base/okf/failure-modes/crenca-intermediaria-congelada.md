@@ -16,8 +16,8 @@ acreditava **no meio** de uma investigação, não o que ela concluiu.
 ## O caso que gerou este conceito
 
 O commit `5c38eee` minerou 562 MB de **transcripts** de um diretório irmão para escrever 7 conceitos deste
-bundle. O review adversarial (5 agentes, 2026-07-30) encontrou **4 BLOCKER e 4 HIGH**, e a concentração não foi
-acidental:
+bundle. O review adversarial (5 agentes, 2026-07-30) encontrou **3 dos 4 BLOCKER** ali, mais 4 HIGH — e a
+concentração não foi acidental (o 4º BLOCKER veio do commit fundador, por outra causa):
 
 | Conceito | A crença congelada | O que a medição posterior disse |
 |---|---|---|

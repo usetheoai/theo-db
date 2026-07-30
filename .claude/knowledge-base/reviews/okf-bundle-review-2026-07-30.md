@@ -116,9 +116,10 @@ carrega a ressalva `[NO-BASELINE-COMPARABLE]` da fonte; `deriva-de-box-m168` pod
 
 ## O padrão, e ele é o achado mais importante deste review
 
-**Os 4 BLOCKER e 4 dos 11 HIGH concentram-se nos conceitos do commit `5c38eee`** — o que minerou 562 MB de
+**Três dos 4 BLOCKER e 4 dos 11 HIGH concentram-se nos conceitos do commit `5c38eee`** — o que minerou 562 MB de
 transcripts do diretório irmão em vez do corpus consolidado. Cada um congelou uma **crença intermediária** que a
-medição posterior derrubou:
+medição posterior derrubou. (O quarto BLOCKER — o `mwm` — nasceu no commit **fundador** `239d487`, não neste;
+corrigido no re-review depois de eu generalizar sem contar.)
 
 | Conceito | A crença congelada | O que a medição depois disse |
 |---|---|---|

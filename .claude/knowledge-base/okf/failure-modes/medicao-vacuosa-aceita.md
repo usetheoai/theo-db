@@ -18,7 +18,6 @@ linhas. `diverged=0` num oráculo cuja tabela de comparação está vazia. Cober
 | Caso | O que foi aceito | A verdade |
 |---|---|---|
 | M169 | `SELECT … FROM hits_heap GROUP BY … LIMIT 10` → `(0 rows)` em **10,354 ms** | `hits_heap` é `UNLOGGED` e tinha sido truncado por crash recovery — comparei contra tabela vazia |
-| M168 | gate `_reject_fallback` "passando" | casava um marcador que só existia no log do servidor, e depois uma string (`ARM=stream`) que o harness **nunca emitia** |
 | M168 | oráculo de cancelamento "passando" | passava **também com a safepoint removida** — não era diferencial |
 | M162 | "100M carregados" | `_ensure_sample` reusou um cache de 1M sem conferir a contagem |
 

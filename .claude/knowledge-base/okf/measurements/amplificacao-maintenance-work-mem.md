@@ -1,7 +1,7 @@
 ---
 type: Measurement
 title: flush_pending consome ≈ maintenance_work_mem × 8
-description: Medido por OOM real: mwm=2GB produziu 23,4 GB de anon-rss; mwm=128MB completou a carga de 100M. A fórmula dá a ordem de grandeza e SUBESTIMA o observado em ~31%.
+description: Medido por OOM real: mwm=2GB produziu 23,4 GB de anon-rss; mwm=128MB completou a carga de 100M. A fórmula dá a ordem de grandeza e SUBESTIMA o observado em 36% (base: previsto, unidades uniformizadas em GiB).
 resource: https://github.com/usetheodev/theo-db/issues/221
 tags: [memoria, colunar, escrita, issue-221]
 timestamp: 2026-07-30T00:00:00Z
@@ -19,11 +19,13 @@ timestamp: 2026-07-30T00:00:00Z
 
 | `mwm` | pico anônimo **previsto** (`×8`) | **observado** |
 |---|---|---|
-| 2 GiB | ~16,0 GiB | **OOM com 23,4 GB de `anon-rss`** (+ 8,6 GB de shmem) — **36% acima do previsto** |
+| 2 GiB | ~16,0 GiB | **OOM com 23,4 GB = 21,8 GiB de `anon-rss`** (+ 8,6 GB de shmem) — **36% acima do previsto** |
 | 128 MiB | ~1,0 GiB | carga de 99.997.497 linhas **completou** (pico não instrumentado) |
 
-**A fórmula dá a ordem de grandeza, não o número.** A 2 GiB ela prevê 16 GiB e o observado foi 23,4 GB — o
-resíduo de ~36% **não está decomposto**. É o suficiente para explicar o OOM e para dimensionar o knob; não é o
+**A fórmula dá a ordem de grandeza, não o número.** A 2 GiB ela prevê **16,0 GiB**; o observado foi **23,4 GB,
+que são 21,8 GiB** — **36% acima**, na mesma unidade e com base no previsto. O resíduo **não está decomposto**.
+(A base e a unidade estão declaradas porque a primeira correção publicava "31%" no frontmatter e "36%" no corpo:
+dois números para a mesma comparação, um deles sem conversão GB→GiB.) É o suficiente para explicar o OOM e para dimensionar o knob; não é o
 suficiente para ser citada como previsão. A linha de 128 MiB não tem pico observado a comparar: o que se sabe é
 que a carga completou.
 
@@ -32,7 +34,7 @@ que a carga completou.
 | Termo | Fórmula | a `mwm=2GB` |
 |---|---|---|
 | linhas pendentes | `mwm` | 2,0 GiB |
-| células | `(mwm / 700) × 105` | **322M** (2 GiB) |
+| células *(contagem — não é termo da soma)* | `(mwm / 700) × 105` | **322M** |
 | cabeçalhos `Option<Vec<u8>>` | células × 24 B | 7,2 GiB |
 | cópia do payload | ≈ `mwm` | 2,0 GiB |
 | overhead do alocador (≥16 B/aloc) | células × 16 B | 4,8 GiB |

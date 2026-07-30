@@ -2,7 +2,7 @@
 type: Honest Negative
 title: Superioridade de QPS vetorial sobre ScaNN/AlloyDB é NÃO-ALCANÇÁVEL por extensão PG permissiva
 description: Veredito medido do M73: o gap de 25-44× a recall 0.99 é de paradigma (AH-LUT anisotrópico + não pagar o imposto MVCC/WAL), não de otimização.
-resource: docs/adr/0035
+resource: docs/adr/0035-m73-northstar-vector-verdict.md
 tags: [vetorial, north-star, veredito]
 timestamp: 2026-07-30T00:00:00Z
 ---
@@ -37,7 +37,7 @@ E o RaBitQ — o melhor quantizador permissivo disponível — dá **memória, n
 **O que a saturação era, e o que ela é hoje.** O grafo do theodb **platôava em recall 0,974 a 500k** — até o
 **ADR-0034** (`extendCandidates`), que o levou a **0,990** (pgvector 0,994). O gap de recall a 500k está
 **fechado**; o que permanece é **eficiência recall-por-`ef`**: o theodb ainda precisa de ~1,8× o `ef` do pgvector
-a 500k (ADR-0035:20).
+a 500k (ADR-0035:21).
 
 E a degradação por escala nunca foi uniforme: a **100k×768d o theodb dá recall@10 = 0,998**, em paridade ou acima
 do pgvector. A fonte marca isso explicitamente como **notícia de produto** — para ≤100k vetores o pilar vetorial

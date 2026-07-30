@@ -10,7 +10,7 @@ timestamp: 2026-07-30T00:00:00Z
 # SBQ não ganha QPS em regime algum — nem in-RAM, nem sob pressão de memória
 
 > **CORRIGIDO 2026-07-30 após review.** A versão anterior deste conceito afirmava que "a vantagem do SBQ só
-> aparece sob pressão de RAM" e se chamava `sbq-nao-ganha-qps-em-regime-algum` — o slug codificava um recorte que a
+> aparece sob pressão de RAM" e se chamava `sbq-sem-vantagem-in-ram` — o slug codificava um recorte que a
 > medição não sustenta. **A pressão FOI medida, e o SBQ perdeu lá também.** O conceito estava reabrindo a aposta
 > que ele deveria fechar. Registro do erro em [failure-mode/crenca-intermediaria-congelada](../failure-modes/crenca-intermediaria-congelada.md).
 

@@ -103,7 +103,7 @@ Toda entrada nova ou revisão substantiva registra uma linha em `okf/log.md`.
 
 ### 5.1 Determinístico — `scripts/check_okf.py`
 
-Cinco checagens, todas com superfície de falso-positivo **zero**:
+Seis checagens:
 
 | # | Checa | Por quê é hard gate |
 |---|---|---|
@@ -112,6 +112,11 @@ Cinco checagens, todas com superfície de falso-positivo **zero**:
 | C3 | cada `index.md` lista **exatamente** os conceitos ao lado | índice que deriva **esconde** conceito, e esconder é pior que faltar |
 | C4 | `index.md` e `log.md` existem na raiz | são a porta de entrada e a história |
 | C5 | o **valor** de `type` está no conjunto fechado do § 2 | C1 só checa presença; um sexto tipo exige ADR — e a porta de entrada tinha exatamente esse defeito (review 2026-07-30) |
+| C6 | todo `resource:` que é caminho do repo **resolve** | C2 valida só links markdown; o `resource:` não era verificado por nada — e escondia dois caminhos quebrados (re-review 2026-07-30) |
+
+C1–C4 têm superfície de falso-positivo **zero**. C5 e C6 comparam string normalizada (tiram aspas, comentário
+YAML e âncora de seção, como um parser faria) — a normalização existe porque sem ela `type: "Failure Mode"` e
+`resource: rules/x.md#S2`, ambos legais, seriam reprovados.
 
 Códigos de saída: `0` válido · `1` achado estrutural · `2` erro de invocação.
 

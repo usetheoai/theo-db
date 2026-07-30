@@ -14,11 +14,19 @@ timestamp: 2026-07-30T00:00:00Z
 
 ## O veredito — medido em 3 escalas × 3 runs (`m61-columnar-adoption.md:26-28`)
 
-| escala | DuckDB | PG row-executor | razão |
+| escala | PG row-executor (ms) | DuckDB heap (ms) | razão de velocidade |
 |---|---|---|---|
 | 100k | 23,6 ± 5,2 | 26,4 ± 1,9 | **0,89×** |
 | 1M | 108,4 ± 15,0 | 164,2 ± 5,3 | **0,66×** |
 | 5M | 394,4 ± 12,2 | 627,8 ± 111,2 | **0,63×** |
+
+O DuckDB gasta **mais** milissegundos em todas as escalas; a razão é de **velocidade** (`23,6/26,4 = 0,89`),
+não de tempo.
+
+> **SEGUNDA correção, 2026-07-30 (re-review).** Ao substituir a faixa fabricada pela medida, eu **inverti as
+> colunas** — publiquei 23,6 ms como DuckDB e 26,4 ms como PG, o que faria o DuckDB parecer **mais rápido** e
+> contradiria o próprio título. É a mesma espécie de defeito ("rótulos trocados") que eu havia imputado ao
+> original. A citação de linha estava certa; a transcrição não.
 
 Forçar o DuckDB a executar sobre o **heap** do PostgreSQL é **mais lento que o executor nativo** em **todas** as
 escalas. E — o padrão que a faixa sozinha esconde — **piora conforme a escala cresce**, que é o oposto do que
