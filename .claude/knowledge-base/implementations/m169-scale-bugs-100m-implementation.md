@@ -297,3 +297,29 @@ Ele recomendou reconstruir `hits_heap` **antes** do baseline. Implementei `ALLOW
 **apenas** o ID `hits_heap_absent` e **imprime** a ausência no cabeçalho. Razão: o ADR-2 existe para o número
 decisivo vir primeiro; a AC de T1.2 é veredito-só; e o A/B dobraria uma corrida de horas. O tempo total é igual
 nas duas ordens — o que muda é qual número chega primeiro.
+
+### Groundwork de T3.1 — a alegação do plano sobre float, REPRODUZIDA
+
+O plano afirma (T3.1) que o risco de associação IEEE-754 "não bate no ClickBench — todos os `SUM`/`AVG`
+roteáveis são inteiros, verificado nas queries". **Reproduzi em vez de aceitar**, porque o milestone inteiro
+depende dessa fronteira:
+
+```
+SUM(AdvEngineID)      AdvEngineID     SMALLINT NOT NULL
+AVG(ResolutionWidth)  ResolutionWidth SMALLINT NOT NULL
+AVG(UserID)           UserID          BIGINT   NOT NULL
+SUM(ResolutionWidth + k)  k = 1..89   SMALLINT NOT NULL
+AVG(length(URL)), AVG(length(Referer))                    -> int
+```
+
+Confere: **nenhum `SUM`/`AVG` sobre float nas 43**. O que isso significa é o oposto de "então não é problema":
+
+- O risco é **real** — `SumAccumulator::update_batch` reduz em árvore sobre `chunks_exact(64)`, e IEEE-754 não é
+  associativo, então trocar o tamanho do batch (que é exatamente o que o streaming faz) pode mudar o resultado.
+- E o benchmark **não o exercita**. Um A/B verde sobre as 43 consultas não diria nada sobre float.
+
+É a forma exata do `okf/failure-modes/ab-prova-o-espaco-de-dados-nao-o-de-tipos` — cinco milestones seguidos
+tiveram HIGH/BLOCKER invisíveis ao `diverged=0` porque os dados do ClickBench não exercitam o espaço de tipos.
+T3.1 existe por isso, e `benchmarks/columnar_type_ab.py` já cobre o espaço: 10 tipos roteados, float com
+`-0.0`/`NaN`/`±Infinity`, int2 em 32767 (o BLOCKER do M161), e um controle positivo que roda **através** do
+caminho do oráculo — se ele não flagra a divergência semeada, a corrida aborta.
