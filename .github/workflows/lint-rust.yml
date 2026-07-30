@@ -74,7 +74,18 @@ jobs:
           # engasga em qualquer arg com espaço. `read -a` divide UMA vez, de forma explícita, e o
           # `"${ARGS[@]}"` passa cada flag como um argumento — o mesmo efeito pretendido, sem a
           # armadilha.
-          read -r -a ARGS < <(grep -v '^#' .clippy_args | grep -v '^[[:space:]]*$' | tr '\n' ' ')
+          #
+          # O `printf '\n'` no fim NAO e cosmetico. `read` devolve 1 quando a entrada termina SEM
+          # newline, e o `tr '\n' ' '` garante exatamente isso — entao, sob o `bash -e` deste step, a
+          # linha MATAVA O JOB antes de `cargo clippy` rodar uma unica vez. Provado:
+          #
+          #   bash -e -c 'read -r -a A < <(printf "x y z"); echo nunca-chega'   -> exit 1
+          #   bash    -c 'read -r -a A < <(printf "x y z"); echo $?'            -> 1, A preenchido
+          #
+          # Ficou invisivel porque o step `Rustfmt`, ANTES deste, falhava sempre (#217 gate 2) e
+          # parava o job. Consertar o fmt expos um gate de clippy que nunca guardou nada: 30ms entre
+          # o echo do comando e o erro, sem uma linha de saida do clippy.
+          read -r -a ARGS < <(grep -v '^#' .clippy_args | grep -v '^[[:space:]]*$' | tr '\n' ' '; printf '\n')
           echo "clippy args: ${ARGS[*]}"
           cargo clippy --features pg18 --no-deps -- "${ARGS[@]}"
 
