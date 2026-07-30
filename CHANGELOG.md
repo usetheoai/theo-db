@@ -60,6 +60,9 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   em `docs/benchmarks/m168-streaming-topk-verdict.md`.
 
 ### Fixed
+- **theodb:** o texto de ajuda do `--quick` da atestação passou a declarar o custo como ordem de grandeza
+  ("dezenas de minutos") em vez de um número preciso — as observações disponíveis tiveram janela
+  sobreposta com outro processo, e o valor exato não é sustentado por elas (#M169)
 - **theodb:** a atestação passou a ler corretamente uma unidade systemd **mascarada** — `systemctl
   is-enabled` sai com código 1 nesse estado, e tratá-lo como falha de execução reprovava o gate pelo
   motivo errado numa box corretamente configurada (#M169)
