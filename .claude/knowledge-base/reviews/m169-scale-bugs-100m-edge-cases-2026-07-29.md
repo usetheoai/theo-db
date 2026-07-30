@@ -40,7 +40,16 @@ Cases found: 9 (EDGE: 5, NEGATIVE: 4 | MUST FIX: 2, SHOULD TEST: 5, DOCUMENT: 2)
 
 ### EC-2: tabela colunar VAZIA — `count(*)` tem de devolver 0, não erro nem NULL
 
-- **Affected task:** T2.1
+> **CORRIGIDO 2026-07-29 — este caso JÁ ESTÁ TRATADO no código; a análise abaixo estava errada.**
+> `df_executor.rs:1132-1134` faz exatamente o que o "suggested fix" pede, e com o comentário explícito:
+> ```rust
+> let Some(cols) = first else {
+>     return Ok(None); // nothing visible — caller falls back to the batch path, which handles empty correctly
+> };
+> ```
+> Eu escrevi "hoje é indeterminado" sem ler o `else` da sonda. O `open_streaming_source` já devolve
+> `Result<Option<…>>` justamente para declinar. Rebaixado de **MUST FIX** para **SHOULD TEST**: o que falta
+> é o teste de regressão que trava o comportamento, não o comportamento.
 - **Kind:** EDGE (extremo válido: zero linhas é um estado legítimo)
 - **Family:** Boundary
 - **Scenario:** `open_streaming_source` faz uma **sonda de schema** chamando `next()` uma vez
@@ -129,7 +138,7 @@ Cases found: 9 (EDGE: 5, NEGATIVE: 4 | MUST FIX: 2, SHOULD TEST: 5, DOCUMENT: 2)
 |---|---|---|---|---|---|
 | T1.1 | 0 | 0 | 0 | 0 | 0 |
 | T1.2 | 1 | 0 | 1 (EC-1, medição) | 0 | 0 |
-| T2.1 | 4 | 4 | 2 | 5 | 0 |
+| T2.1 | 4 | 4 | **1** (EC-2 já tratado) | **6** | 0 |
 | T3.1 | 0 | 0 | 0 | 0 | 1 (EC-9) |
 | T3.2 | 0 | 1 | 0 | 0 | 1 (EC-8) |
 | T4.1 | 1 | 0 | 1 (EC-1, declaração) | 0 | 0 |
@@ -147,5 +156,19 @@ que EC-4/EC-5 pedem são a formalização deles, não descoberta nova. O plano t
 revisão — ele contradiz parcialmente a alegação central do milestone e só aparece na escala que ele mira. O
 segundo é o caso mais comum de todos (tabela recém-criada) e está indeterminado hoje.
 
-**Verdict:** PLAN NEEDS ADJUSTMENT — absorver EC-1 (uma linha de instrumentação + uma frase no artefato) e EC-2
-(uma linha em `open_streaming_source`) antes do `/plan-confidence`.
+**Verdict:** PLAN NEEDS ADJUSTMENT — absorver EC-1 (uma linha de instrumentação + uma frase no artefato)
+antes do `/plan-confidence`. EC-2 **não precisa de código** (já tratado — ver a correção acima), só de teste.
+
+## Correção pós-verificação (2026-07-29)
+
+Duas afirmações desta revisão foram **verificadas contra o código** depois de escritas, e uma não sobreviveu:
+
+| Afirmação | Veredito |
+|---|---|
+| EC-2: "hoje é indeterminado" se tabela vazia erra/NULL/declina | **FALSA** — declina explicitamente em `df_executor.rs:1132-1134` |
+| EC-1: o `ScanPlan` materializa o diretório inteiro antes do 1º batch | **CONFIRMADA** — `columnar.rs:987` monta `Vec<StripePlan>` com `entries` completo |
+
+**Achado NOVO que esta revisão não tinha:** `run_aggs_on_batch` (`df_executor.rs:619`) é `pub(super)` e tem
+**dois chamadores fora do caminho colunar** — `arrow_cache.rs:199` e `:265` (o caminho heap-autoritativo do
+M101). O T2.1 **não pode** alterar a assinatura dele; a versão streaming tem de ser um irmão, não um
+refactor. Sem isso, a troca do T2.1 quebraria o cache Arrow do heap sem que nenhum teste do M169 percebesse.
