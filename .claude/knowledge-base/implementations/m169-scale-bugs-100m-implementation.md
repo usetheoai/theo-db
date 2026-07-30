@@ -584,3 +584,37 @@ evidência do primeiro seria a mesma sobreatribuição que o conceito
 
 **O que isto valida:** a T3.2 do plano ("pico de agregado sob alta cardinalidade") não é zelo — o q32 é o caso
 natural dela, e agora tem um número medido para ancorá-la em vez de uma hipótese.
+
+### O defeito-alvo tem TRÊS instâncias, e todas na mesma coluna
+
+O erro exato, lido do JSONL (não do log resumido):
+
+```
+q20 | byte array offset overflow    SELECT COUNT(*) FROM hits WHERE URL LIKE '%google%'
+q33 | byte array offset overflow    SELECT URL, COUNT(*) AS c FROM hits GROUP BY URL ORDER BY c DESC LIMIT 10
+q34 | byte array offset overflow    SELECT 1, URL, COUNT(*) AS c FROM hits GROUP BY 1, URL ORDER BY c DESC LIMIT 10
+```
+
+**As três tocam `URL`** — uma no predicado, duas como chave de agrupamento. Isso fecha o diagnóstico com
+aritmética em vez de narrativa: ~100M URLs × ~60–100 B ≈ **6–10 GB** num único array Arrow `Utf8`, cujo teto de
+offset i32 é **2 GB**. O `decode_to_batch` materializa a coluna inteira; o `ColumnarChunkStream` materializa
+10 000 linhas (~1 MB) por vez — três ordens de grandeza de folga.
+
+### A predição que registro ANTES de medir o T4.1
+
+Consertar o overflow **não implica** que as três passem a completar. O streaming remove a barreira de
+**entrada**; o que vem depois é o estado da agregação, e ele é independente:
+
+| q | depois do fix, o que decide | desfecho possível |
+|---|---|---|
+| q20 | `COUNT(*)` — estado O(1) | **completa** (previsão forte) |
+| q33 | hash table de URLs distintas | completa **se** couber; senão vira `timeout`/OOM |
+| q34 | idem q33, mais a chave constante | idem |
+
+Ou seja: para q33/q34 o fix pode **trocar o modo de falha** (`error:XX000` → `timeout`) sem mudar o veredito.
+Isso continua sendo progresso real — o defeito de correção some — mas **não** é "+2 consultas completam", e as
+duas coisas não podem ser reportadas com a mesma frase.
+
+Escrevo isto agora porque depois do número a frase generosa já está pronta. É o mesmo motivo do confundidor do
+q23 e da distinção input-vs-estado do q32: a previsão registrada antes é o único jeito de o resultado poder
+**contrariar** quem o mede.
