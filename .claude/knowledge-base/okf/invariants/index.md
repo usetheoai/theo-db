@@ -15,12 +15,11 @@ Leia antes de mexer em storage, FFI, recovery, build ou branch compartilhado.
 
 | Conceito | O que é |
 |---|---|
-| [Acervo local primeiro, web depois, memória do modelo por último](acervo-local-antes-da-web.md) | 25 PDFs e 33 repos versionados no acervo; citar arquivo:linha do disco é mais barato, offline e já passou pelo gate de licença. |
 | [BackgroundWorker::transaction faz PushActiveSnapshot por todo o closure](bgworker-transaction-segura-snapshot.md) | Uma chamada HTTP dentro do closure segura backend_xmin pelo tempo inteiro da chamada, atrasando autovacuum. |
 | [CHUNK_GROUP_ROWS = 10.000 é a unidade de decode, skip e memória do colunar](chunk-group-e-a-unidade-de-tudo.md) | Todo termo O(N) no colunar tem uma versão O(chunk-group); quando um caminho não tem, é defeito de escala esperando a escala. |
 | [CustomScan com scanrelid=0 e Aggref no targetlist quebra sob subquery pullup](customscan-scanrelid-zero-e-aggref-pullup.md) | O pullup inlina o Aggref num nó superior e o planner falha com 'cache lookup failed for attribute N of relation 0' — crasha até o EXPLAIN. |
 | [sum(Int64) do DataFusion faz add_wrapping — casar para Decimal128 antes de somar](datafusion-sum-int64-faz-wrapping.md) | Para saída numeric exata, o caminho é sum(cast(col AS Decimal128(38,0))) sobre i128; sum(Int64) silenciosamente dá a volta. |
-| [durable_rename emite 5 fsyncs em ordem estrita e o do diretório-pai é o load-bearing](durable-rename-fsync-do-diretorio-pai.md) | Sem o fsync do diretório-pai o rename se perde; e durable_rename NÃO faz PANIC — repassa o elevel do caller. |
+| [durable_rename emite 4 fsyncs em ordem estrita e o do diretório-pai é o load-bearing](durable-rename-fsync-do-diretorio-pai.md) | Sem o fsync do diretório-pai o rename se perde; e durable_rename NÃO faz PANIC — repassa o elevel do caller. |
 | [git switch e restore — nunca checkout, revert, reset --hard ou force-push](git-switch-nao-checkout.md) | Comandos ambíguos ou destrutivos são proibidos por regra do projeto; os substitutos preservam a capacidade de recuperar. |
 | [Peers AGPL são estudo, nunca fonte de código](licenca-agpl-e-study-only.md) | A distribuição é Apache-2.0 com gate fail-closed contra AGPL; técnica se aprende, código se reimplementa do zero. |
 | [A e2e-runner é o runner do CI — medir nela satura o pipeline e contamina o número](nao-usar-a-box-do-ci.md) | 165.227.121.20 hospeda o runner do GitHub Actions e k3s; usá-la para benchmark degrada o CI de todo o time e produz deriva. |

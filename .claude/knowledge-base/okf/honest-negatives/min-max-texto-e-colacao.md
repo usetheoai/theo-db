@@ -21,9 +21,15 @@ q22 (300× e 260× de ganho potencial) são **honest-negatives estruturais**.
 
 ## Consequência que precisa ser dita em voz alta
 
-Existe um **teto realista de cobertura do ClickBench em ~35-39 de 43**. Regex, `ILIKE` e MIN/MAX de texto por
-colação são honest-negatives estruturais — **nunca será 43/43**. Prometer cobertura total é prometer o que a
-semântica do PostgreSQL proíbe.
+Regex, `ILIKE` e MIN/MAX de texto por colação são honest-negatives **estruturais** — vêm da semântica do
+PostgreSQL, não de implementação faltante. Prometer 43/43 é prometer o que a linguagem proíbe.
+
+> **RESSALVA acrescentada 2026-07-30 após review.** A versão anterior afirmava um teto de "**~35-39 de 43**".
+> Esse intervalo **não tem derivação localizável** em nenhum artefato — o review não conseguiu distinguir entre
+> conhecimento registrado só em transcript e extrapolação feita ao escrever. O que é **medido**: cobertura de
+> **35/43** (M161), e q21/q22 declinam por colação (`plans/m166-string-agg-plan.md` ADR-2,
+> `releases/v0.157.0-release.md:17`). O limite superior fica como **estimativa não derivada** até alguém
+> enumerar quais das 8 restantes são estruturais e quais são apenas não-implementadas.
 
 ## A família de defeito
 

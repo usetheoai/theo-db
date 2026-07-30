@@ -23,7 +23,7 @@ docs/benchmarks/m162-artifacts/theodb-100m-partial.jsonl:21
 ```
 
 Registrado em 2026-07-26. O que é leitura de código é apenas a **cadeia interna** até
-`arrow-array/src/builder/generic_bytes_builder.rs:87`.
+`arrow-array 58.3.0` (pinada em `Cargo.lock`) `src/builder/generic_bytes_builder.rs:87` — a citação é sensível à versão: na 54.3.1 a mesma linha é a 86.
 
 ## Duas propriedades que agravam
 

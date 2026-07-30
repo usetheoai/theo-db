@@ -17,7 +17,7 @@ demonstrada, não sugerida.
 
 | Previsão | Medido | Consequência |
 |---|---|---|
-| `flush_pending` consome ≈ `mwm × 7` → 16 GB com `mwm=2GB` | OOM com **23,4 GB** de `anon-rss` (estimativa de 700 B/linha é grosseira) | causa-raiz do #221 demonstrada; e a recarga com `mwm=128MB` (previsão ~510 MB) **completou** |
+| `flush_pending` consome ≈ `mwm × 8` → ~16,0 GiB com `mwm=2GiB` | OOM com **23,4 GB** de `anon-rss` — **36% acima** do previsto | ordem de grandeza certa, número não; suficiente para a causa-raiz do #221 e para dimensionar o knob, **não** para ser citada como previsão |
 | offsets `i32` estouram acima de 21,5 B/linha em média sobre 100M | `ERR:byte array offset overflow` no q20 | confirma que qualquer corpus de URLs estoura, com ordens de folga |
 | `ChunkDirEntry` = 48 B em memória × 10.000 cg × 105 col | 48,1 MiB por scan | termo O(N) do EC-1 quantificado sem instrumentar |
 

@@ -14,8 +14,9 @@ timestamp: 2026-07-30T00:00:00Z
 
 ## Caso — M168
 
-Medido: `develop` 31 commits à frente de `origin/main`, 17 deles do M168. O M168 tem blueprint, plano e audit de
-code-quality — **mas não tem log de implementação nem review**.
+Um milestone shipou 17 commits em `develop` com blueprint, plano e audit de code-quality — **mas sem log de
+implementação nem review**. (O inventário completo do estado é rastro de ciclo e vive em
+`knowledge-base/implementations/`, não aqui — § 4.2 do contrato; comprimido em 2026-07-30 após review.)
 
 A tentação era reconstruir. A decisão foi **não**, por duas razões:
 
@@ -23,9 +24,9 @@ A tentação era reconstruir. A decisão foi **não**, por duas razões:
    exatamente onde citações inventadas nascem.
 2. **Zero valor de gate** — um review escrito depois do código não gateia nada.
 
-O que **tem** valor de gate é garantir que o diff seja revisado **de fato**: a release do M169 carrega os 17
-commits do M168, e `/review` usa `--diff-base main`, então o review do M169 **inclui** aquele diff. Nenhum código
-não-revisado alcança `main`. Isso foi travado no contrato de implementação em vez de ser resolvido com prosa.
+O que **tem** valor de gate é garantir que o diff seja revisado **de fato**. Quando o review seguinte usa
+`--diff-base main`, ele **inclui** o diff órfão — nenhum código não-revisado alcança `main`. A correção é travar
+isso no contrato do próximo ciclo, não escrever prosa retroativa.
 
 ## Como evitar
 

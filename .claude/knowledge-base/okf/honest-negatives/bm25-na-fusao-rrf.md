@@ -11,7 +11,15 @@ timestamp: 2026-07-30T00:00:00Z
 ## O veredito (M138)
 
 Substituir a perna lexical por um BM25 próprio, medido **9,8× mais forte** em lexical puro, **não** melhorou a
-fusão híbrida. Default mantido em `ts_rank_cd`.
+fusão híbrida — e num dos corpora ela **piorou com significância**:
+
+| Corpus | Fusão BM25 | Fusão `ts_rank_cd` | veredito |
+|---|---|---|---|
+| SciFact | — | — | **empate** (p=0,51) |
+| NFCorpus (lexical-heavy) | 0,3797 | 0,3946 | **BM25 significativamente PIOR** (p=0,0168; 69W/104L) |
+
+Default mantido em `ts_rank_cd`. (A linha do NFCorpus foi acrescentada em 2026-07-30 após review: dizer apenas
+"não vence" descrevia o SciFact e escondia o caso que **sustenta** a explicação de complementaridade.)
 
 ## A razão, e ela é do algoritmo
 

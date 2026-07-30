@@ -2,11 +2,18 @@
 type: Measurement
 title: O júri adversarial descartou 11 de 18 achados — precision 0.39
 description: Medida da precisão de um review multi-agente: a maioria dos descartes era convenção deliberada lida como defeito.
+resource: .claude/knowledge-base/reviews/docs-features-13-19-review-2026-07-22.md
 tags: [review, juri, processo]
 timestamp: 2026-07-30T00:00:00Z
 ---
 
 # O júri adversarial descartou 11 de 18 achados — precision **0.39**
+
+## Proveniência
+
+Review do doc-set 13–19, **2026-07-22** — `knowledge-base/reviews/docs-features-13-19-review-2026-07-22.md`,
+onde o `0.39` aparece literal. (Acrescentado 2026-07-30 após review: era o único `Measurement` sem âncora, o que
+contradizia a própria [technique/proveniencia-em-todo-artefato](../techniques/proveniencia-em-todo-artefato.md).)
 
 ## O número
 

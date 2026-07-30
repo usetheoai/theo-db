@@ -1,5 +1,5 @@
 ---
-type: OKF Bundle
+type: Index
 title: TheoDB — conhecimento operacional de engenharia
 description: Cada erro, técnica, invariante, medição e negativo honesto que este projeto pagou para aprender, num bundle OKF navegável por agente e por humano.
 resource: https://github.com/usetheodev/theo-db
@@ -17,6 +17,11 @@ O conhecimento estava espalhado por ~67 arquivos de memória, 110 blueprints, no
 de commit. Espalhado, ele não morde no momento em que seria útil. Consolidado num formato que agentes navegam,
 ele morde.
 
+> **CORRIGIDO 2026-07-30 após review.** Esta porta de entrada declarava `type: OKF Bundle` — um **sexto tipo
+> fora da taxonomia LOCKED do § 2 do contrato, sem o ADR que ele exige** — e nomeava os cinco tipos em
+> `minúsculo-hífen`, convenção que **nenhum arquivo do bundle usa**: filtrar por `type: failure-mode` devolvia
+> **0 de 17**. O `check_okf.py` não pegava porque o C1 valida a **presença** de `type`, não o valor.
+
 ## Formato
 
 [Open Knowledge Format v0.1](https://github.com/google/open-knowledge-format) — um diretório de markdown com
@@ -28,11 +33,11 @@ entre conceitos são markdown normal, o que torna o bundle um **grafo**, não um
 
 | Tipo | A pergunta | Onde |
 |---|---|---|
-| `failure-mode` | "estou prestes a cometer isto?" | [failure-modes/](failure-modes/index.md) |
-| `technique` | "qual é o método certo aqui?" | [techniques/](techniques/index.md) |
-| `invariant` | "a plataforma permite isso?" | [invariants/](invariants/index.md) |
-| `measurement` | "isso já foi medido?" | [measurements/](measurements/index.md) |
-| `honest-negative` | "isso já foi tentado e refutado?" | [honest-negatives/](honest-negatives/index.md) |
+| `Failure Mode` | "estou prestes a cometer isto?" | [failure-modes/](failure-modes/index.md) |
+| `Technique` | "qual é o método certo aqui?" | [techniques/](techniques/index.md) |
+| `Invariant` | "a plataforma permite isso?" | [invariants/](invariants/index.md) |
+| `Measurement` | "isso já foi medido?" | [measurements/](measurements/index.md) |
+| `Honest Negative` | "isso já foi tentado e refutado?" | [honest-negatives/](honest-negatives/index.md) |
 
 ## A regra que gerou o bundle
 

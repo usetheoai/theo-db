@@ -2,7 +2,7 @@
 type: Invariant
 title: Peers AGPL são estudo, nunca fonte de código
 description: A distribuição é Apache-2.0 com gate fail-closed contra AGPL; técnica se aprende, código se reimplementa do zero.
-resource: rules/reference-provenance.md
+resource: ../../../.claude/rules/reference-provenance.md (umbrella)
 tags: [licenca, compliance, d1]
 timestamp: 2026-07-30T00:00:00Z
 ---
@@ -26,10 +26,15 @@ o arquivo deles é obra derivada — e adaptação de cópia continua sendo cóp
 
 ## Mecanismo, não confiança
 
-`rules/reference-provenance.md` define quatro camadas: guard de escrita na zona, guard de exportação por comando,
+`reference-provenance.md` — que vive no **umbrella** (`theo-cloud/.claude/rules/`), não no theo-db — define quatro camadas: guard de escrita na zona, guard de exportação por comando,
 guard de mensagem de commit, e detector de vazamento por shingles. As três primeiras **bloqueiam**; a quarta é
 **advisory** — casamento exato é evidência forte, não prova, e um BLOCK falso numa heurística é pior que um WARN.
 
+> **CORRIGIDO 2026-07-30 após review.** O conceito citava `rules/reference-provenance.md` como se fosse local.
+> **Não existe no theo-db** — só no umbrella. As outras seis citações `rules/*` do bundle resolvem contra
+> `.claude/rules/` do theo-db, então a base implícita era inequívoca e a citação estava quebrada. O **conteúdo**
+> afirmado (4 camadas, as 3 primeiras bloqueiam, a 4ª é advisory) confere com o arquivo do umbrella.
+
 ## Relacionados
 
-- [invariant/acervo-local-antes-da-web](acervo-local-antes-da-web.md)
+- [invariant/acervo-local-antes-da-web](../techniques/acervo-local-antes-da-web.md)

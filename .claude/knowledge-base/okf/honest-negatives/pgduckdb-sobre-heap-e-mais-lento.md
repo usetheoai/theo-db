@@ -1,17 +1,29 @@
 ---
 type: Honest Negative
-title: pg_duckdb force_execution sobre heap é 0,52-0,78× do row-executor do PostgreSQL
+title: pg_duckdb force_execution sobre heap é 0,63-0,89× do row-executor do PostgreSQL
 description: Resultados corretos e plano usando DuckDB — e ainda assim mais lento que o executor nativo, em todas as escalas.
 tags: [htap, duckdb, veredito]
 timestamp: 2026-07-30T00:00:00Z
 ---
 
-# `pg_duckdb` `force_execution` sobre heap é **0,52-0,78×** do row-executor do PostgreSQL
+# `pg_duckdb` `force_execution` sobre heap é **0,63-0,89×** do row-executor do PostgreSQL
 
-## O veredito
+> **CORRIGIDO 2026-07-30 após review.** A versão anterior publicava **0,52-0,78×** — uma faixa que **não existe
+> em artefato algum** deste projeto. A medição real está abaixo. A conclusão qualitativa não muda; os dois
+> extremos publicados eram fabricados, e estavam no título.
+
+## O veredito — medido em 3 escalas × 3 runs (`m61-columnar-adoption.md:26-28`)
+
+| escala | DuckDB | PG row-executor | razão |
+|---|---|---|---|
+| 100k | 23,6 ± 5,2 | 26,4 ± 1,9 | **0,89×** |
+| 1M | 108,4 ± 15,0 | 164,2 ± 5,3 | **0,66×** |
+| 5M | 394,4 ± 12,2 | 627,8 ± 111,2 | **0,63×** |
 
 Forçar o DuckDB a executar sobre o **heap** do PostgreSQL é **mais lento que o executor nativo** em **todas** as
-escalas medidas. E o resultado não é artefato de configuração:
+escalas. E — o padrão que a faixa sozinha esconde — **piora conforme a escala cresce**, que é o oposto do que
+"a vantagem do DuckDB é do formato" faria supor a quem só lê os extremos. O resultado não é artefato de
+configuração:
 
 - resultados **corretos** (match ✓);
 - o plano de fato usa DuckDB (`duckdb_plan=True`).

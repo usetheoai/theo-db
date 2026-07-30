@@ -29,13 +29,10 @@ momento em que se sente vontade de usar o comando destrutivo é o momento em que
 
 ## Protocolo antes de trocar de branch num checkout compartilhado
 
-```bash
-git status --porcelain            # nada não-commitado a perder?
-git branch -a --contains <sha>    # o trabalho do outro está alcançável por algum ref?
-git switch <branch>               # switch, nunca checkout
-```
-
-Os três passos são baratos e transformam uma operação de risco numa operação verificada.
+O procedimento de três passos vive em
+[failure-mode/duas-sessoes-num-checkout](../failure-modes/duas-sessoes-num-checkout.md) § Como evitar / recuperar
+— **não é repetido aqui** (§ 4.3 do contrato: atualizar o dono, nunca bifurcar). Este conceito guarda a
+**propriedade de plataforma**; aquele guarda o **cenário e a recuperação**.
 
 ## Nota sobre falso-positivo do hook
 

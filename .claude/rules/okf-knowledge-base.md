@@ -52,11 +52,17 @@ Ler o índice da categoria **antes** de:
 
 | Vou fazer isto | Leia antes |
 |---|---|
-| montar qualquer medição ou benchmark | `failure-modes/index.md` **e** `techniques/index.md` |
+| montar qualquer medição ou benchmark | `failure-modes/index.md` · `techniques/index.md` · **`measurements/index.md`** (o número pode já existir) · **`invariants/index.md`** (4 invariantes já invalidaram medições aqui) |
+| **aceitar um verde como evidência** — gate que não reclamou, script `rc=0`, suíte passando, oráculo com 0 divergências | **`failure-modes/index.md`** — quatro conceitos servem exatamente este caso |
 | publicar qualquer número | `measurements/index.md` — o número pode já existir |
 | propor uma aposta técnica / novo milestone | `honest-negatives/index.md` — pode já ter sido refutada |
-| mexer em storage, FFI, `unsafe`, recovery, build ou branch compartilhado | `invariants/index.md` |
+| mexer em storage, FFI, `unsafe`, recovery, **build** ou branch compartilhado | `invariants/index.md` |
+| **rodar processo longo em máquina remota, ou escolher entre duas APIs da plataforma** | `invariants/index.md` |
 | abrir um issue de produto | `techniques/medir-antes-de-filar.md` |
+
+> **Os dois gatilhos em negrito foram acrescentados em 2026-07-30**, depois de o review de recuperabilidade
+> medir que os cenários "lancei um build remoto via ssh" e "o gate não reclamou, está tudo certo?" **não eram
+> roteados por nada** — o segundo servido por quatro `failure-mode` e alcançável só por varredura espontânea.
 
 **Limite honesto:** nenhum hook consegue provar que eu li. A injeção é o mecanismo mais forte
 disponível, e os gatilhos acima são instruction-grade — a mesma classe dos degraus 2, 3 e 5 da
@@ -97,7 +103,7 @@ Toda entrada nova ou revisão substantiva registra uma linha em `okf/log.md`.
 
 ### 5.1 Determinístico — `scripts/check_okf.py`
 
-Quatro checagens, todas com superfície de falso-positivo **zero**:
+Cinco checagens, todas com superfície de falso-positivo **zero**:
 
 | # | Checa | Por quê é hard gate |
 |---|---|---|
@@ -105,6 +111,7 @@ Quatro checagens, todas com superfície de falso-positivo **zero**:
 | C2 | todo link markdown interno resolve | o bundle prega "citação que não resolve não entra" — ele tem de cumprir |
 | C3 | cada `index.md` lista **exatamente** os conceitos ao lado | índice que deriva **esconde** conceito, e esconder é pior que faltar |
 | C4 | `index.md` e `log.md` existem na raiz | são a porta de entrada e a história |
+| C5 | o **valor** de `type` está no conjunto fechado do § 2 | C1 só checa presença; um sexto tipo exige ADR — e a porta de entrada tinha exatamente esse defeito (review 2026-07-30) |
 
 Códigos de saída: `0` válido · `1` achado estrutural · `2` erro de invocação.
 

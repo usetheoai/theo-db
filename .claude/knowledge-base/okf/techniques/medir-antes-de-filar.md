@@ -29,7 +29,7 @@ A hipótese caiu. A causa era o oráculo do harness, que remove o `LIMIT` e faz 
 
 ## Caso inverso — #221, onde medir **confirmou**
 
-Mesma disciplina, resultado oposto: a aritmética previu `mwm × 7`, e a recarga com `mwm=128MB` (previsão: ~510 MB
+Mesma disciplina, resultado oposto: a aritmética previu `mwm × 8`, e a recarga com `mwm=128MB` (previsão: ~510 MB
 de pico) **completou**. Aí sim o issue tinha peso — com fix verificado por leitura de `encode_column` e do uso de
 `columns`.
 

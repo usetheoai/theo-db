@@ -27,9 +27,22 @@ justificativa** — código certo com razão errada é dívida que explode na ma
 
 ## O que continua exigindo cuidado
 
-Desenrolar corretamente **não** torna `unsafe` seguro. Há **384 blocos `unsafe`** em `theodb_rs`, e a classe de
-defeito mais cara já encontrada em review vive ali: alocação em `TopMemoryContext`, ponteiro que sobrevive ao
-contexto, e MVCC do SPI.
+Desenrolar corretamente **não** torna `unsafe` seguro. Medido em 2026-07-30, com a definição junto do número
+(`grep -rn … theodb_rs/src --include='*.rs'`):
+
+| Forma | Contagem |
+|---|---|
+| `unsafe {` (blocos) | **151** |
+| `unsafe fn` | **205** |
+| token `unsafe` (total) | **431** |
+
+> **CORRIGIDO 2026-07-30 após review.** Este conceito dizia "**384 blocos `unsafe`**" — número que **não
+> reproduz sob nenhuma definição**, nem hoje nem no commit que o introduziu. Ele foi herdado do `CLAUDE.md`
+> (commit `5ca80b8`), que também precisa ser corrigido: uma magnitude apresentada como fato verificável tem de
+> vir com o comando que a produz.
+
+A classe de defeito mais cara já encontrada em review vive nesse `unsafe`: alocação em `TopMemoryContext`,
+ponteiro que sobrevive ao contexto, e MVCC do SPI.
 
 ## Relacionados
 

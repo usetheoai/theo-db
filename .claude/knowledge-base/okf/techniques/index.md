@@ -16,6 +16,7 @@ Se você só ler uma: [nenhuma-alegacao-sem-medicao](nenhuma-alegacao-sem-medica
 | Conceito | O que é |
 |---|---|
 | [Para medir um kernel, varie só o kernel](ablacao-mesmo-indice.md) | Comparar builds diferentes, boxes diferentes ou índices diferentes mede a soma das mudanças; a ablação sobre o MESMO artefato mede a mudança. |
+| [Acervo local primeiro, web depois, memória do modelo por último](acervo-local-antes-da-web.md) | 25 PDFs e 33 repos versionados no acervo; citar arquivo:linha do disco é mais barato, offline e já passou pelo gate de licença. |
 | [Prever o número com uma conta antes de medir](aritmetica-fechada-antes-do-experimento.md) | Uma previsão fechada transforma a medição em teste da hipótese, e um erro de ordem de grandeza denuncia o modelo mental antes de gastar horas de máquina. |
 | [Um oráculo só é confiável se ele reprova um caso deliberadamente errado](controle-positivo.md) | Antes de confiar num verificador, prove que ele CONSEGUE reprovar — senão 'zero divergências' pode significar 'não olhou'. |
 | [Intercalar os braços em vez de medi-los em blocos](desenho-ababab.md) | Comparar A e B em janelas separadas herda todo confundidor temporal; intercalar par a par o neutraliza — e a razão pareada mostra se o pareamento está funcionando. |

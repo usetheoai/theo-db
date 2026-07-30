@@ -2,11 +2,19 @@
 type: Measurement
 title: Gap medido vs ClickHouse no ClickBench: 19,4× geral, 7,54× na classe coberta, 303× na não-coberta
 description: Mesma box. O landscape publicado situa o resultado, e o deep-dive identificou a ponte de decode como gargalo da classe coberta.
+resource: docs/benchmarks/m159-clickhouse-gap-verdict.md
 tags: [benchmark, clickbench, colunar]
 timestamp: 2026-07-30T00:00:00Z
 ---
 
 # Gap medido vs ClickHouse no ClickBench
+
+## Proveniência e ressalva da própria fonte
+
+`docs/benchmarks/m159-clickhouse-gap-verdict.md:26-28,41-45`. **A fonte marca a comparação com o landscape como
+`[NO-BASELINE-COMPARABLE]`**: o nosso é 1M/8-vCPU e o publicado deles é 100M/c6a.4xlarge. Os 19,4×/7,54×/303× são
+mesma-box e comparáveis entre si; o landscape situa, não mede o mesmo. (Âncora e ressalva acrescentadas
+2026-07-30 após review.)
 
 ## Os números (mesma box)
 

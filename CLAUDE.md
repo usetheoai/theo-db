@@ -128,8 +128,8 @@ pelos comandos de clone do catálogo.
 
 **Atalhos por assunto** (o mínimo a abrir antes de tocar no tema):
 
-- **`unsafe` / FFI / pgrx** → `references/pgrx/` (há **384 `unsafe`** no `theodb_rs`; é a classe de
-  defeito mais cara já encontrada em review — panic atravessando C, `TopMemoryContext`, MVCC do SPI).
+- **`unsafe` / FFI / pgrx** → `references/pgrx/` (medido 2026-07-30: **151** blocos `unsafe {`, **205** `unsafe fn`, 431 tokens no `theodb_rs` —
+  o "384" que constava aqui não reproduz sob nenhuma definição; é a classe de defeito mais cara já encontrada em review — panic atravessando C, `TopMemoryContext`, MVCC do SPI).
 - **Colunar / M148–M151** → `papers/morsel-parallelism-leis-2014.pdf`, `papers/monetdb-x100-boncz-2005.pdf`,
   `references/parquet-format/`, `references/datafusion/` + o survey de Abadi (403 no download — ler online).
 - **Vetorial** → `papers/hnsw-*.pdf`, `papers/scann-*.pdf` (**âncora do North Star**, regra 1), `references/hnswlib/`.

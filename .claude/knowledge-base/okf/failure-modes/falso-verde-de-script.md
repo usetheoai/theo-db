@@ -17,8 +17,13 @@ O log termina com `rc=0` e o trabalho não aconteceu. Ou o gate "passa" porque p
 | Caso | O defeito | Consequência |
 |---|---|---|
 | M169 | `echo "=== end rc=$? ==="` — `$?` era do **`echo` anterior**, não do python | o log declarou `rc=0` enquanto o harness tinha sido **`Killed`** por OOM |
-| M168 | gate casando `ARM=stream`, string que o harness não emitia | gate teatral; corrigido emitindo `RAISE NOTICE 'ARM=%'` e construindo controle positivo in-tree |
-| M168 | oráculo de cancelamento não-diferencial | passava com a proteção removida |
+
+> **Fronteira arrumada 2026-07-30 após review.** Este conceito listava dois casos do M168 que também estavam em
+> `medicao-vacuosa-aceita` — os mesmos incidentes em duas casas, que é o § 4.3 do contrato ao contrário. Cada um
+> voltou para a casa certa: o gate casando literal nunca emitido é a **definição** de
+> [gate-desligado-em-silencio](gate-desligado-em-silencio.md); o oráculo não-diferencial é a classe de
+> [medicao-vacuosa-aceita](medicao-vacuosa-aceita.md) / [controle-positivo](../techniques/controle-positivo.md).
+> Aqui fica só o que é exclusivamente deste conceito: **o log mente sobre o desfecho**.
 
 ## Como evitar
 

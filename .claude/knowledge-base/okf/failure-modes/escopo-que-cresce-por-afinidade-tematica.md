@@ -14,7 +14,7 @@ timestamp: 2026-07-30T00:00:00Z
 
 ## Caso — M169 / #221 (a decisão certa, registrada como ADR-7)
 
-O #221 (`flush_pending` consome ≈ `mwm × 7`) foi descoberto durante o baseline do M169, é da **mesma família**
+O #221 (`flush_pending` consome ≈ `mwm × 8`) foi descoberto durante o baseline do M169, é da **mesma família**
 (termo O(N) onde deveria haver O(chunk-group)) e tem o **mesmo padrão de fix**. Tentação forte.
 
 O critério que decidiu **não** foi mecânico, não estético: **ele bloqueia o milestone?** A medição respondeu —

@@ -44,6 +44,9 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   em `docs/benchmarks/m168-streaming-topk-verdict.md`.
 
 ### Fixed
+- **theodb:** review adversarial de 5 agentes sobre a base OKF — 34 achados aplicados (4 BLOCKER de números
+  fabricados ou conclusões invertidas), gate C5 (valor de `type` no conjunto fechado), dois gatilhos de
+  leitura novos, e correção das origens herdadas em `CLAUDE.md` e no issue #221 (#okf)
 - **Cancelar uma consulta colunar longa volta a funcionar, e a conexão sobrevive a isso.** Ao passar a decodificar
   por partes, o top-k colunar passou a segurar a leitura de todas as páginas dentro de uma janela em que o
   PostgreSQL não processa interrupções — na prática, um `Ctrl-C`, um `statement_timeout` ou um

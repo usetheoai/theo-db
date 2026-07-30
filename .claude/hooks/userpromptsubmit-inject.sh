@@ -49,7 +49,8 @@ OKF="OKF KNOWLEDGE BASE (rules/okf-knowledge-base.md) — .claude/knowledge-base
   failure-mode 'am I about to commit this?' · technique 'what is the right method?' · invariant 'does the platform allow this?'
   measurement 'was this already measured?' · honest-negative 'was this already tried and refuted?'
   READ the category index BEFORE: designing any measurement, publishing any number, proposing a technical bet,
-  or touching storage/FFI/unsafe/recovery/shared-branch.
+  ACCEPTING A GREEN as evidence (gate that did not complain, rc=0, passing suite, oracle with 0 divergences),
+  touching storage/FFI/unsafe/recovery/build/shared-branch, or launching anything on a remote box.
   WRITE a concept AFTER: any published number, any claim of mine refuted by measurement, any refuted bet,
   any platform property learned the hard way. Update the existing concept — never fork a second file for the same class."
 

@@ -27,11 +27,20 @@ Os dois desfechos parecem informativos e não são:
 
 O sinal que importa não é o valor absoluto, e sim o **diferencial entre braços** sobre o **mesmo** dataset.
 
-## Corolário medido — SBQ (M51)
+## Corolário — e ele é sobre a hipótese de regime, não sobre o regime
 
-"SBQ é mais rápido" também depende do regime: **in-RAM**, SBQ 1480 qps vs f32 1582 vs pgvector 1641 — **sem
-vantagem**. A vantagem do SBQ só aparece **sob pressão de RAM**. Medir no regime errado responde a pergunta
-errada com precisão.
+> **CORRIGIDO 2026-07-30 após review.** Esta seção citava uma tripla de QPS que **não existe em artefato algum** e
+> repetia a tese "a vantagem do SBQ só aparece sob pressão de RAM", que o M57 **falsificou**.
+
+A hipótese "o regime errado responde a pergunta errada" é boa e vale — mas o SBQ é o **contraexemplo**, não o
+exemplo. Ali o regime certo **foi** medido (pressão de 1,8 GB e 1,3 GB) e o resultado continuou negativo
+(0,73× / 0,77×), porque o HNSW tem localidade de acesso e não expõe o gargalo de I/O que o SBQ atacaria.
+
+É por isso que aquilo virou [honest-negative](../honest-negatives/sbq-nao-ganha-qps-em-regime-algum.md) em vez de
+ressalva: a hipótese de regime era razoável, foi testada, e o teste a matou.
+
+O que **fica** deste conceito são os dois extremos de degeneração acima — recall 1.0 com `probes=1` e recall
+0,033 sem cluster —, que são fiéis e medidos.
 
 ## Como evitar
 
@@ -42,4 +51,4 @@ errada com precisão.
 ## Relacionados
 
 - [failure-mode/medicao-vacuosa-aceita](medicao-vacuosa-aceita.md)
-- [honest-negative/sbq-sem-vantagem-in-ram](../honest-negatives/sbq-sem-vantagem-in-ram.md)
+- [honest-negative/sbq-nao-ganha-qps-em-regime-algum](../honest-negatives/sbq-nao-ganha-qps-em-regime-algum.md)

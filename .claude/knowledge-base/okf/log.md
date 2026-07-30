@@ -81,7 +81,7 @@ coberto. Sete viraram conceito novo, dois atualizaram conceito existente:
 | `nohup-em-ssh-nao-sobrevive` | `nohup &` dentro de `ssh` morre com o canal — exige `setsid` + verificação de PID. Custou duas corridas perdidas |
 | `durable-rename-fsync-do-diretorio-pai` | 5 fsyncs em ordem estrita; o do diretório-pai é o load-bearing. E `durable_rename` NÃO faz PANIC |
 | `dados-sinteticos-degenerados` | uniforme satura recall em 1.0 com `probes=1`; sem cluster despenca a 0.033. Nenhum dos dois mede o índice |
-| `sbq-sem-vantagem-in-ram` | tese ≥2× falsificada: 0,31-0,77× do f32; a vantagem é memória, sob pressão de RAM |
+| `sbq-nao-ganha-qps-em-regime-algum` | tese ≥2× falsificada: 0,31-0,77× do f32; a vantagem é memória, sob pressão de RAM |
 | `pgduckdb-sobre-heap-e-mais-lento` | 0,52-0,78× do row-executor nativo, com plano DuckDB e resultado correto |
 | `min-max-texto-e-colacao` | byte-min ≠ collation-min; determinismo não basta. Teto estrutural de ~35-39/43 no ClickBench |
 | `juri-adversarial-precision-039` | 11 de 18 achados descartados pelo júri — ~1/3 de acionáveis é o esperado |
@@ -94,3 +94,43 @@ coberto. Sete viraram conceito novo, dois atualizaram conceito existente:
 **O mais desconfortável:** `nohup-em-ssh-nao-sobrevive` descreve um padrão que **usei várias vezes nesta própria
 sessão** para lançar cargas na box de medição. Funcionou por sorte — a lição existia, registrada, e não estava
 onde dispararia.
+
+## 2026-07-30 (4) — review adversarial de 5 agentes: 34 achados, todos aplicados
+
+`/review` sobre o próprio bundle, com 5 revisores em paralelo. Pré-condições canônicas falharam (não há plano),
+então o ground truth foi `rules/okf-knowledge-base.md`. **34 achados: 4 BLOCKER · 11 HIGH · 12 MEDIUM · 7 LOW.**
+Todos aplicados; nenhum dispensado por ADR.
+
+**Os 4 BLOCKER, e o padrão que eles formam:**
+
+| Conceito | O defeito |
+|---|---|
+| SBQ | **invertia a conclusão do ADR que citava** — a pressão de RAM foi medida e o SBQ perdeu lá também |
+| SBQ | a tripla `1480/1582/1641` **não existe em artefato algum** (rótulos trocados de um smoke do M59) |
+| pg_duckdb | faixa `0,52-0,78×` **fabricada** — o medido é 0,63-0,89× em 3 escalas |
+| `mwm` | `×7` é **×8**; o `~510 MB` pertencia à coluna `mwm=64MB`; "a fórmula previu os dois" era falso |
+
+Os quatro, mais 4 dos HIGH, concentram-se no commit `5c38eee` — o que minerou **transcripts**. Isso virou o
+conceito [crenca-intermediaria-congelada](failure-modes/crenca-intermediaria-congelada.md): transcript é
+deliberação em andamento; memória consolidada e artefato são conclusão.
+
+**Correções estruturais além do conteúdo:**
+
+- **C5 no `check_okf.py`** — o valor de `type` tem de estar no conjunto fechado. A porta de entrada declarava
+  `type: OKF Bundle`, sexto tipo sem o ADR que o § 2 LOCKED exige, e o C1 (só presença) não pegava. Com controle
+  positivo.
+- **Dois gatilhos novos na regra § 3.2 e no ponteiro injetado** — "aceitar um verde como evidência" (servido por
+  4 `failure-mode`, roteado por zero) e "rodar processo longo em máquina remota". A divergência ponteiro-vs-regra
+  (`build` faltando no ponteiro) era o `gate-desligado-em-silencio` aplicado ao próprio bundle.
+- **Duas origens herdadas corrigidas na fonte**: `CLAUDE.md` (384 → 151/205/431 `unsafe`) e o **issue público
+  #221** (o `×7`), porque corrigir só o bundle deixaria a origem intacta.
+- Fronteiras arrumadas (§ 4.3): os casos do M168 voltaram para a casa certa; o protocolo git deixou de ser
+  duplicado; `acervo-local-antes-da-web` virou `Technique` (era `Invariant`, e o gatilho nunca disparava para
+  pesquisa).
+
+**O que o review confirmou como sólido:** as 20 citações `arquivo:linha` resolvem **e sustentam** (as 4 do pgrx
+com números idênticos em dois trees independentes); `deriva-de-box-m168` passou nos cinco eixos estatísticos; a
+geomean do gap vs ClickHouse é exata ao dígito; `ChunkDirEntry` 48 B/44 B confirmado no código.
+
+**Durante a aplicação, o gate C2/C3 pegou dois defeitos que eu introduzi** ao renomear um conceito — links
+mortos e índice dessincronizado. O mecanismo funcionou contra quem o escreveu.

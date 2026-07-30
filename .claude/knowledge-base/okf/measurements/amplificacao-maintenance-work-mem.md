@@ -1,31 +1,42 @@
 ---
 type: Measurement
-title: flush_pending consome ≈ maintenance_work_mem × 7
-description: Medido por OOM real: mwm=2GB produziu 23,4 GB de anon-rss; mwm=128MB completou a carga de 100M. A fórmula previu os dois.
+title: flush_pending consome ≈ maintenance_work_mem × 8
+description: Medido por OOM real: mwm=2GB produziu 23,4 GB de anon-rss; mwm=128MB completou a carga de 100M. A fórmula dá a ordem de grandeza e SUBESTIMA o observado em ~31%.
 resource: https://github.com/usetheodev/theo-db/issues/221
 tags: [memoria, colunar, escrita, issue-221]
 timestamp: 2026-07-30T00:00:00Z
 ---
 
-# `flush_pending` consome ≈ `maintenance_work_mem × 7`
+# `flush_pending` consome ≈ `maintenance_work_mem × 8`
+
+> **CORRIGIDO 2026-07-30 após review.** Três defeitos numa tabela só: (a) o multiplicador é **8**, não 7 — a
+> decomposição dá `1 + 3,6 + 1 + 2,4`, e os próprios valores publicados somam 16,2/2,0 = 8,1; (b) o "~510 MB"
+> previsto para `mwm=128MB` **pertencia à coluna `mwm=64MB`** do issue #221 — troquei o cabeçalho e mantive o
+> valor; (c) "a fórmula previu os dois" era falso: ela **subestima** o observado. O `×7` também está no
+> **issue público #221** e foi corrigido lá por comentário.
 
 ## O número
 
-| `mwm` | pico anônimo previsto | observado |
+| `mwm` | pico anônimo **previsto** (`×8`) | **observado** |
 |---|---|---|
-| 2 GB | ~16 GB | **OOM com 23,4 GB de `anon-rss`** (+ 8,6 GB de shmem) |
-| 128 MB | ~510 MB | carga de 99.997.497 linhas **completou** |
+| 2 GiB | ~16,0 GiB | **OOM com 23,4 GB de `anon-rss`** (+ 8,6 GB de shmem) — **36% acima do previsto** |
+| 128 MiB | ~1,0 GiB | carga de 99.997.497 linhas **completou** (pico não instrumentado) |
+
+**A fórmula dá a ordem de grandeza, não o número.** A 2 GiB ela prevê 16 GiB e o observado foi 23,4 GB — o
+resíduo de ~36% **não está decomposto**. É o suficiente para explicar o OOM e para dimensionar o knob; não é o
+suficiente para ser citada como previsão. A linha de 128 MiB não tem pico observado a comparar: o que se sabe é
+que a carga completou.
 
 ## A decomposição (hits do ClickBench: ~700 B/linha, 105 colunas)
 
 | Termo | Fórmula | a `mwm=2GB` |
 |---|---|---|
-| linhas pendentes | `mwm` | 2,0 GB |
-| células | `(mwm / 700) × 105` | **305M** |
-| cabeçalhos `Option<Vec<u8>>` | células × 24 B | 7,3 GB |
-| cópia do payload | ≈ `mwm` | 2,0 GB |
-| overhead do alocador (≥16 B/aloc) | células × 16 B | 4,9 GB |
-| **total** | ≈ **`mwm × 7`** | **~16 GB** |
+| linhas pendentes | `mwm` | 2,0 GiB |
+| células | `(mwm / 700) × 105` | **322M** (2 GiB) |
+| cabeçalhos `Option<Vec<u8>>` | células × 24 B | 7,2 GiB |
+| cópia do payload | ≈ `mwm` | 2,0 GiB |
+| overhead do alocador (≥16 B/aloc) | células × 16 B | 4,8 GiB |
+| **total** | ≈ **`mwm × 8`** | **~16,0 GiB** |
 
 ## A causa
 

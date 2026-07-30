@@ -27,26 +27,44 @@ E o RaBitQ — o melhor quantizador permissivo disponível — dá **memória, n
 - **Permitido:** "paridade de recall + memória billion-scale + AI-native / HTAP / aberto".
 - **Proibido:** "mais rápido que o AlloyDB no vetor".
 
-## A causa-raiz é um problema de PESQUISA, e três levers já foram refutados
+## A causa-raiz, e os SETE levers já refutados
 
-O gap não é de engenharia de execução — é **qualidade do grafo HNSW**, que **degrada com escala**: o grafo do
-theodb **satura em recall 0,974 a 500k**.
+> **CORRIGIDO 2026-07-30 após review.** Esta seção dizia "três levers" e apresentava a saturação em 0,974 como
+> **estado corrente** — errado nos dois pontos. São **sete**, e a saturação foi **superada pelo ADR-0034**. Pior:
+> a saturação como estado corrente **contradizia a tabela deste próprio conceito**, que credita M60 como
+> alcançado.
 
-Três levers foram tentados e **refutados por medição**:
+**O que a saturação era, e o que ela é hoje.** O grafo do theodb **platôava em recall 0,974 a 500k** — até o
+**ADR-0034** (`extendCandidates`), que o levou a **0,990** (pgvector 0,994). O gap de recall a 500k está
+**fechado**; o que permanece é **eficiência recall-por-`ef`**: o theodb ainda precisa de ~1,8× o `ef` do pgvector
+a 500k (ADR-0035:20).
+
+E a degradação por escala nunca foi uniforme: a **100k×768d o theodb dá recall@10 = 0,998**, em paridade ou acima
+do pgvector. A fonte marca isso explicitamente como **notícia de produto** — para ≤100k vetores o pilar vetorial
+está em paridade/superioridade.
+
+**Os sete levers refutados por medição:**
 
 | Lever | Resultado |
 |---|---|
-| `ef_construction=200` | **PIORA** — recall vai a 0,832. Revertido |
-| MERGE de back-links | refutado |
-| `HNSW_M` | refutado |
+| `ef_construction` 64→200 | **PIORA** — recall 0,832 |
+| MERGE de back-links | 0,846 — refutado |
+| `HNSW_M` 16→32 | 0,952 — refutado |
+| bissecção build sequencial vs paralelo | seq ≈ paralelo — **não é contenção, é o algoritmo base** |
+| descida-beam `ef=1` | no-op |
+| multi-entry `ep←W` | no-op de recall, **mas +29% QPS** — o único com efeito positivo medido |
+| overwrite paralelo (7º) | seq 0,974 ≈ parallel 0,972 — a degradação é inerente ao build **nos dois modos** |
+
+Os quatro que a versão anterior omitia são exatamente os que um planejador tenderia a propor como "ainda não
+tentados". Dois deles já vêm com conclusão **estrutural** ("não é contenção paralela — é o algoritmo base"), que
+é a informação de planejamento que este conceito existe para preservar.
 
 E a hipótese de causa-raiz mais óbvia caiu ao ler o código: **o theodb já tem a poda por diversidade**. As
 suspeitas restantes são finas — distribuição de níveis (`ml`), entry-point da descida greedy, ou a heurística de
 seleção de vizinhos.
 
-**Consequência de planejamento:** isso é risco **ALTO** e não se resolve com uma sprint de otimização. Qualquer
-milestone que dependa de fechar esse gap precisa declarar que depende de um problema de pesquisa em aberto — não
-de trabalho de implementação.
+**Consequência de planejamento:** risco **ALTO**, e não se resolve com uma sprint de otimização. Um milestone que
+dependa de fechar o gap de **QPS** depende de problema de pesquisa em aberto — não de trabalho de implementação.
 
 ## Por que registrar como negativo honesto
 

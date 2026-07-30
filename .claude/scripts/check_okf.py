@@ -15,6 +15,9 @@ Four checks, all of them with zero false-positive surface:
   C3  each directory's index.md lists EXACTLY the concepts present
       (an index that drifts is worse than no index: it hides concepts)
   C4  the required root files exist (index.md, log.md)
+  C5  `type` is one of the taxonomy values declared in rules/okf-knowledge-base.md § 2
+      (C1 only checks PRESENCE; a value outside the closed set is a sixth type, which
+      the LOCKED clause requires an ADR for — and the front door had exactly that bug)
 
 Exit codes:
   0  bundle is structurally valid
@@ -35,6 +38,8 @@ from pathlib import Path
 
 DEFAULT_BUNDLE = ".claude/knowledge-base/okf"
 RESERVED = {"index.md", "log.md"}
+# Closed set from rules/okf-knowledge-base.md § 2 (LOCKED). Adding a value here requires an ADR.
+VALID_TYPES = {"Failure Mode", "Technique", "Invariant", "Measurement", "Honest Negative", "Index", "Log"}
 
 TYPE_RE = re.compile(r"^type:\s*(\S.*)$", re.M)
 LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
@@ -87,6 +92,12 @@ def check(bundle: Path) -> tuple[list[str], dict]:
             else:
                 t = m.group(1).strip()
                 stats["types"][t] = stats["types"].get(t, 0) + 1
+                # C5 — the value must be in the closed taxonomy, not merely present
+                if t not in VALID_TYPES:
+                    findings.append(
+                        f"C5 type-outside-taxonomy: {rel} declares `type: {t}`, which is not one of "
+                        f"{sorted(VALID_TYPES)} (rules/okf-knowledge-base.md § 2 is LOCKED; a new type needs an ADR)"
+                    )
 
         if path.name not in RESERVED:
             stats["concepts"] += 1

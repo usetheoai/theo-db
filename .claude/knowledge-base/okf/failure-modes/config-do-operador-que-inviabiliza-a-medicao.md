@@ -18,11 +18,11 @@ O sistema morre num caminho que a versão anterior percorria bem, e a diferença
 Pus `maintenance_work_mem = 2GB` para acelerar a carga de 100M. O backend foi OOM-killed com **23,4 GB de
 `anon-rss`**. O M162 carregara os **mesmos** 100M numa box de 31 GB com o default de 64 MB.
 
-A causa é real e virou o issue #221 — `flush_pending` consome ≈ `mwm × 7` — mas **o OOM foi escolha minha**.
+A causa é real e virou o issue #221 — `flush_pending` consome ≈ `mwm × 8` — mas **o OOM foi escolha minha**.
 Duas verdades que não se cancelam:
 
 - eu causei aquele OOM específico;
-- ele expôs um defeito real (o knob promete um orçamento e o consumo é ~7× ele).
+- ele expôs um defeito real (o knob promete um orçamento e o consumo é ~8× ele).
 
 E uma hora antes eu havia afirmado que "o flush incremental do M104 limita a memória de escrita, isso não é bug
 do produto". A medição mostrou que o **gatilho** está limitado (`columnar.rs:1866`) e o **flush** não (`:1958`).

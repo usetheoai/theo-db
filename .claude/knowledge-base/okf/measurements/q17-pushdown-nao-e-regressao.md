@@ -21,7 +21,7 @@ RSS do **backend** amostrado a cada 3 s **durante**:
 ## O que isso corrige
 
 Eu estava a um passo de filar "o pushdown agregado é regressão de memória a 100M". Os dois braços são
-indistinguíveis, e ambos a **um terço** dos 12,3 GB do OOM observado.
+indistinguíveis, e ambos a **~37%** dos 12,3 GB do OOM observado.
 
 ## A causa real dos dois OOMs
 
