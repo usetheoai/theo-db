@@ -14,6 +14,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **theodb:** runner de baseline do ClickBench a 100M que mede **quantas consultas completam** sobre as
+  tabelas já carregadas — com gate de não-vacuidade que recusa publicar um número quando a corrida não
+  alcançou as 43, vocabulário de veredito que nunca chama de OOM o que não tem evidência de kernel, e
+  verificação de que as GUCs pedidas realmente existem no servidor (#M169)
 - **theodb:** gate executável de atestação da box de benchmark — falha quando a máquina não é a que o
   milestone declarou (CPU/RAM insuficientes, carga concorrente, `unattended-upgrades` ativo, contagem de
   linhas divergente do corpus, disco insuficiente), em vez de deixar os critérios como caixas manuais (#M169)
