@@ -323,3 +323,25 @@ tiveram HIGH/BLOCKER invisíveis ao `diverged=0` porque os dados do ClickBench n
 T3.1 existe por isso, e `benchmarks/columnar_type_ab.py` já cobre o espaço: 10 tipos roteados, float com
 `-0.0`/`NaN`/`±Infinity`, int2 em 32767 (o BLOCKER do M161), e um controle positivo que roda **através** do
 caminho do oráculo — se ele não flagra a divergência semeada, a corrida aborta.
+
+### O escopo do `/review` — medido, porque errá-lo faz o M168 shipar sem review algum
+
+| Fato | Medido em 2026-07-30 |
+|---|---|
+| `v0.158.0` → `a35dce4` | é o release do **M167** |
+| commits `m168` **até** a v0.158.0 | **0** |
+| commits `m168` **depois** da v0.158.0 | **28** |
+| entrada de milestone do M168 em `ROADMAP.md` | **não existe** — o M168 só aparece na prosa do bloco do M169 |
+| artefatos de ciclo do M168 | plano + `code-quality`. **Sem log de implementação, sem review** |
+
+**Consequência:** o release do M169 carregará **também** o M168, e o `/review` deste milestone tem de rodar com
+`--diff-base v0.158.0` (não contra o commit anterior), senão 28 commits de um milestone que nunca teve review
+próprio entram em `main` sem que ninguém os tenha olhado.
+
+**O que eu NÃO vou fazer:** criar a entrada do M168 no `ROADMAP.md` dentro deste milestone. É um achado real e
+adjacente, mas absorvê-lo daria ao M169 **dois Goals** — a classe
+`okf/failure-modes/absorver-um-achado-no-milestone-so-porque-e-do-mesmo-tema`. Fica registrado aqui e é decisão
+do owner: ou o M168 ganha entrada retroativa no roadmap, ou o release declara explicitamente que carrega os dois.
+
+**O que eu vou fazer:** rodar o `/review` com o diff-base correto, para que a cobertura exista mesmo que a
+contabilidade do roadmap fique pendente.
