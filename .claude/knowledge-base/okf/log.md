@@ -452,10 +452,23 @@ defeito inexistente no código recém-corrigido. É a forma invertida do `teste-
 ## 2026-07-30 — `contagem-agregada-mistura-classes-de-falha` (Failure Mode, novo)
 
 Escrito **durante** o baseline do M169, aos 24 de 43, e deliberadamente **antes** do número final. O baseline
-mediu 6 falhas: **5 com `agg_routed=False`** (a consulta nunca entra no caminho colunar — assunto da série de
-cobertura M151…M163) e **1 com `agg_routed=True`** (o q20, `byte array offset overflow`, que é o alvo do M169).
+mediu 6 falhas, das quais **apenas 1** (o q20, `byte array offset overflow`) é a classe que o M169 conserta.
 
 A métrica-resumo escolhida pelo milestone — "N de 43 completam" — soma as duas classes. Se o T4.1 reportar
 `19 → 21`, duas unidades podem ter mudado por qualquer coisa menos o streaming. O conceito registra a regra:
 capturar o discriminador por unidade na mesma corrida, publicar o delta **por classe**, e declarar o recorte
 antes do resultado.
+
+### Corrigido na mesma sessão, antes de qualquer consumo
+
+A primeira redação deste conceito dizia *"5 das 6 falhas não entram no caminho colunar"*, lendo `agg_routed=False`
+como "não roteia". **Errado.** O booleano chaveia em `theodb_columnar_agg` e responde apenas *"entrou no pushdown
+AGREGADO?"*. Lendo o SQL: q19 é um scan (`SELECT UserID WHERE UserID = …`) e q23 é um top-k
+(`SELECT * … ORDER BY … LIMIT 10`, a forma do M158/M168) — em ambos `False` é o valor **esperado por construção**,
+não evidência de nada.
+
+A conclusão macro sobreviveu (1 de 6 é do M169); o raciocínio que a sustentava, não — e uma conclusão certa por
+motivo errado não avisa quando o motivo deixa de valer. O conceito ganhou a instância meta (escrevi a regra e a
+violei na mesma iteração), um item de regra novo — *escreva a pergunta exata que o discriminador responde* — e
+o corolário: **não existe discriminador para o caminho top-k**, então hoje o harness não sabe dizer se o q23
+roteou e é lento ou se declinou.

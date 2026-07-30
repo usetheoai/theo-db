@@ -1,7 +1,7 @@
 ---
 type: Failure Mode
 title: Uma contagem agregada credita ao fix unidades que falhavam por outra causa
-description: "No baseline 100M do M169, 5 das 6 falhas eram agg=False (não roteiam) e só 1 era o defeito que o milestone conserta — mover a contagem 19→N mediria as duas classes juntas."
+description: "No baseline 100M do M169, só 1 das 6 falhas era o defeito que o milestone conserta — e ao classificar as outras 5 eu mesmo misturei classes, usando um discriminador que responde uma pergunta mais estreita do que eu supus."
 resource: .claude/knowledge-base/implementations/m169-scale-bugs-100m-implementation.md
 tags: [benchmark, metrica, milestone, honestidade]
 timestamp: 2026-07-30T00:00:00Z
@@ -23,17 +23,38 @@ O erro não é medir o agregado. É **publicá-lo sem o discriminador que separa
 O M169 existe para um defeito de escala do caminho **agregado colunar**: `byte array offset overflow` quando
 uma coluna de texto ultrapassa o teto de offset i32 do Arrow. A métrica escolhida foi a contagem ClickBench.
 
-Aos 24 de 43, o baseline mediu:
+Aos 24 de 43, o baseline mediu 18 `ok` e 6 falhas. Classificadas **pela forma da consulta**, e não só pelo
+booleano:
 
-| classe | n | veredito | `agg_routed` | o M169 conserta? |
+| q | forma | `agg_routed` | o que o booleano significa AQUI | o M169 conserta? |
 |---|---|---|---|---|
-| completam | 18 | `ok` | — | n/a |
-| **não roteiam** | **5** | `timeout` ~300 s | **False** | **não** — caem no executor de linha |
-| **defeito de escala** | **1** (q20) | `error:XX000` 52 s | **True** | **sim** — é o alvo |
+| q17 | `GROUP BY UserID, SearchPhrase` | False | agregado — o pushdown **declinou** | não |
+| q19 | `SELECT UserID WHERE UserID = …` | False | **não é agregado** — o booleano não responde nada | não |
+| **q20** | **`COUNT(*) WHERE URL LIKE`** | **True** | **roteou e estourou dentro** | **sim — é o alvo** |
+| q21 | `MIN(URL), COUNT(*) GROUP BY` | False | agregado — declinou | não |
+| q22 | `COUNT(DISTINCT) + MIN(URL) + MIN(Title)` | False | agregado — declinou | não |
+| q23 | `SELECT * … ORDER BY … LIMIT 10` | False | **é top-k**, servido por outro caminho (M158/M168) — o booleano é falso **por construção** | não |
 
-**Cinco das seis falhas não são da classe do milestone.** Elas falham porque a consulta nunca entra no caminho
-colunar — que é o assunto da série de cobertura de roteamento (M151…M163), não o desta. Se o T4.1 reportar
-"19 → 21", duas das unidades podem ter mudado por qualquer coisa **menos** o streaming.
+**Uma das seis é a classe do milestone.** Se o T4.1 reportar "19 → 21", a segunda unidade pode ter mudado por
+qualquer coisa **menos** o streaming agregado.
+
+## A instância meta: escrevi o conceito e o violei na mesma iteração
+
+A primeira versão deste arquivo dizia *"5 das 6 falhas não entram no caminho colunar"*. Está **errado**, e o
+erro é exatamente o que o conceito descreve: `agg_routed` chaveia em `theodb_columnar_agg` e portanto responde
+**"entrou no pushdown agregado?"** — não *"entrou no caminho colunar?"*. Para q19 (um scan) e q23 (um top-k),
+`False` é o valor **esperado por construção**, e lê-lo como "não roteia" é ler um discriminador fora do domínio
+em que ele discrimina.
+
+A conclusão macro sobreviveu; o raciocínio que a sustentava, não. Isso é pior do que parece: uma conclusão certa
+por um motivo errado não avisa quando o motivo deixa de valer.
+
+## Corolário: a lacuna que isso expôs
+
+Não existe discriminador para o caminho **top-k**. O q23 tem exatamente a forma que o M158/M168 servem
+(`SELECT * … ORDER BY … LIMIT k`) e mesmo assim dá timeout — e o instrumento atual **não sabe dizer** se ele
+roteou e é lento, ou se declinou. Um booleano por caminho não basta: o que o harness precisa registrar é **qual
+caminho serviu**, não *se um caminho específico serviu*.
 
 ## O discriminador é o que torna a contagem honesta
 
@@ -50,8 +71,12 @@ ninguém consegue reabrir a atribuição meses depois.
 
 1. Antes de escolher uma métrica-resumo, pergunte **quantas classes de falha ela soma**. Se for mais de uma,
    capture por unidade o sinal que diz a qual classe ela pertence — e capture-o **na mesma corrida**, não depois.
-2. Publique o delta **por classe**, com o agregado como contexto e não como manchete.
-3. Declare o recorte antes do número. Depois do resultado, a decomposição mais lisonjeira é a que se escreve
+2. **Antes de usar o discriminador, escreva a pergunta exata que ele responde.** Um booleano chamado
+   `agg_routed` responde *"entrou no pushdown agregado?"*. Ele **não** responde *"entrou no colunar?"* nem
+   *"roteou para algum caminho rápido?"*, e usá-lo assim é o mesmo erro num nível abaixo. Prefira registrar
+   **qual** caminho serviu a um booleano por caminho.
+3. Publique o delta **por classe**, com o agregado como contexto e não como manchete.
+4. Declare o recorte antes do número. Depois do resultado, a decomposição mais lisonjeira é a que se escreve
    sozinha — pela mesma razão que [[dod-compara-contra-o-oraculo-de-controle]] exige o braço de controle antes.
 
 ## Parentes
