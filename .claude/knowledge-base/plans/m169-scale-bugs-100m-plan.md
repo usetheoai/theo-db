@@ -313,6 +313,43 @@ caminho que ele mede.
 | **Reusar e declarar a acoplagem no plano + CHANGELOG** | aceitável pela Regra 3, mas paga em confusão permanente do operador o que custa ~5 linhas para não pagar |
 | **Nenhuma GUC** | o AC do T2.1 precisa do eixo off para provar que o trace não é vacuário |
 
+### ADR-7 — O #221 (amplificação de `maintenance_work_mem`) fica FORA deste milestone
+
+**Contexto.** O baseline do T1.2 provocou um OOM-kill real do backend durante
+`INSERT INTO hits SELECT * FROM hits_heap`: `anon-rss` de **23,4 GB** num único processo, com
+`maintenance_work_mem = 2GB`. Causa-raiz medida: `flush_pending` (`columnar.rs:1958`) transpõe o conjunto pendente
+**inteiro** para `Vec<Vec<Option<Vec<u8>>>>` (`:617`) antes de escrever o primeiro chunk-group — ~305M células a
+`mwm=2GB` × 105 colunas, pico ≈ **`mwm × 7`**. Filado como **#221**, com o fix verificado (transpor por
+chunk-group; `encode_column` não usa contexto global e `columns` não é lido depois do laço).
+
+**Decisão: não absorver no M169.** A pergunta de escopo era se o #221 **bloqueia** este milestone. A medição
+respondeu: com `maintenance_work_mem = 128MB` a carga de 99.997.497 linhas **completou** (`hits_heap` 66 GB,
+`hits` colunar 16 GB, 4,1× de compressão), e o harness seguiu para as 43 consultas. Logo o #221 **não bloqueia** —
+é defeito real, de outra família (caminho de **escrita**), e vira milestone próprio.
+
+**O que MUDA no M169 por causa disso:**
+
+1. A configuração da box passa a fazer parte da evidência do T1.1 — `maintenance_work_mem = 128MB` e
+   `shared_buffers = 4GB` não são detalhe: com `mwm = 2GB` o milestone é inmedível. O artefato tem de gravar os dois.
+2. O item do DoD global "não é OOM-killed" continua **em escopo** para o caminho de **leitura**. Se uma consulta
+   agregada a 100M for OOM-killed, isso é o termo O(grupos) que a emenda do T3.2 nomeou
+   (`rows: Vec<Vec<(Datum,bool)>>`, ~7,7 GB a 80M grupos) — e esse é do agregado, não do `flush_pending`.
+   **Sinal já observado:** 7,0 GB de RSS num backend durante `SELECT RegionID, SUM(...), COUNT(*), AVG(...)`.
+
+**Alternativas rejeitadas:**
+
+| Alternativa | Por que rejeitada |
+|---|---|
+| **Absorver o #221 como Fase 0** | não bloqueia (medido). Absorver por afinidade temática é scope creep, e o milestone passaria a ter dois Goals |
+| **Ignorar e não filar** | o defeito é real e reproduzível; o mandato do projeto é que filar é o default, não opcional |
+| **Subir `mwm` de novo e "medir com o defeito"** | mediria a minha configuração errada, não o código. Foi o que custou ~2h de `COPY` |
+
+**Registro honesto de causa:** o OOM foi causado por **escolha minha** de `maintenance_work_mem = 2GB` — o M162
+carregou os mesmos 100M com o default de 64 MB numa box de 31 GB. E uma hora antes eu havia afirmado que "o flush
+incremental do M104 limita a memória de escrita, isso não é bug do produto". A medição mostrou que o **gatilho**
+está limitado (`:1866` checa antes de empilhar) e o **flush** não. As duas coisas são verdade e nenhuma cancela a
+outra.
+
 ## Dependency Graph
 
 ```
