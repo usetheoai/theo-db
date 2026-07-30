@@ -731,10 +731,10 @@ unsafe fn extract_all_predicates(
             zpreds.push(z);
         } else if let Some(t) = extract_text_predicate(clause, relid) {
             tpreds.push(t);
-        } else if let Some(inp) = extract_inlist_predicate(clause, relid) {
-            inpreds.push(inp); // M161 — integer IN-list
         } else {
-            return None; // un-pushable qual → decline (native plan applies the full WHERE)
+            // `?` em vez de `else { return None }`: qual nao-empurravel declina o pushdown, e o plano
+            // nativo aplica o WHERE completo. Mesmo efeito, e o clippy::question_mark deixa de reprovar.
+            inpreds.push(extract_inlist_predicate(clause, relid)?); // M161 — integer IN-list
         }
     }
     Some((zpreds, tpreds, inpreds))
@@ -2078,9 +2078,7 @@ unsafe fn try_swap_topk(
     if (*lc_const).constisnull || (*lc_const).consttype.to_u32() != 20 {
         return None; // LIMIT ALL (NULL) or non-int8 → decline
     }
-    let Some(k_i64) = i64::from_datum((*lc_const).constvalue, false) else {
-        return None;
-    };
+    let k_i64 = i64::from_datum((*lc_const).constvalue, false)?;
     // k must be positive AND fit i32: it is serialized into the int-only `custom_private` channel as one i32
     // (`lappend_int`), so a LIMIT ≥ 2^31 would truncate to a wrong/negative k → too-few rows the parent Limit cannot
     // add back (council-index-storage + council-rust-pgrx LOW). Such a limit is absurd (O(N) memory would OOM first);
@@ -2204,10 +2202,9 @@ unsafe fn try_swap_topk(
         let clause = qual.get_ptr(i)?;
         if let Some(z) = extract_zone_predicate(clause, scanrelid as i32) {
             zpreds.push(z);
-        } else if let Some(t) = extract_text_predicate(clause, scanrelid as i32) {
-            tpreds.push(t);
         } else {
-            return None; // un-pushable qual → decline (native plan applies the full WHERE)
+            // idem ao pushdown de agregacao acima: `?` declina o pushdown sem mudar o efeito.
+            tpreds.push(extract_text_predicate(clause, scanrelid as i32)?);
         }
     }
     // Resolve the table OID from the RTE (the project's scanrelid indexes the flat range table).
