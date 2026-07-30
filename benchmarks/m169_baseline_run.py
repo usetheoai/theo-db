@@ -51,7 +51,18 @@ def _conn():
     return c
 
 
-def session_gucs(timeout_s: int, work_mem: str, agg: bool, stream: bool) -> list[str]:
+# The M169 streaming GUC (ADR-6). It does NOT exist in the baseline binary — T2.1 creates it — and it is born
+# "com o mesmo default" as the top-k one, which is `GucSetting::<bool>::new(true)`: **ON**.
+#
+# That default is why `stream=False` cannot mean "emit nothing". Omitting the SET leaves the server default in
+# force, so on the post-T2.1 binary the T4.1 "before" arm would silently measure the NEW path and report that the
+# fix changed nothing. The arm has to say `off` out loud — but only where the parameter exists, because setting an
+# unknown one creates a silent placeholder that the run then aborts on.
+AGG_STREAM_GUC = "theodb.enable_columnar_agg_stream"
+
+
+def session_gucs(timeout_s: int, work_mem: str, agg: bool, stream: bool, *,
+                 agg_stream_exists: bool = False) -> list[str]:
     """ONE place the session is configured, parameterised. T1.2 and T4.1 must differ only by the streaming GUC;
     if each copies its own SET list, one forgotten line makes T4.1 measure the new binary with the new path OFF
     and conclude 'nothing changed'. The effective list is written into the artifact."""
@@ -62,12 +73,26 @@ def session_gucs(timeout_s: int, work_mem: str, agg: bool, stream: bool) -> list
         "SET max_parallel_workers_per_gather = 0",
         f"SET statement_timeout = '{timeout_s}s'",
     ]
-    if stream:
-        # Only emitted when asked for. At baseline the GUC does not exist yet (T2.1 creates it), and setting a
-        # nonexistent parameter inside an extension's prefix SUCCEEDS as a silent placeholder — so emitting it
-        # unconditionally would put a no-op in the header pretending to be configuration.
-        gucs.insert(1, "SET theodb.enable_columnar_agg_stream = on")
+    if agg_stream_exists:
+        # Explicit in BOTH directions: the server default is ON, so "off" must be stated, not assumed.
+        gucs.insert(1, f"SET {AGG_STREAM_GUC} = {'on' if stream else 'off'}")
+    elif stream:
+        # Asked for streaming on a binary that has no such parameter. Emit it so the placeholder check ABORTS —
+        # running "with streaming" against a binary that cannot stream would produce a number labelled wrong.
+        gucs.insert(1, f"SET {AGG_STREAM_GUC} = on")
     return gucs
+
+
+def agg_stream_guc_exists() -> bool:
+    """Probe `pg_settings` BEFORE building the SET list. A placeholder is invisible to `SHOW`, so existence is the
+    only thing that distinguishes 'the server has this knob' from 'the server will happily remember a string'."""
+    c = _conn()
+    try:
+        cur = c.cursor()
+        cur.execute("SELECT 1 FROM pg_settings WHERE name = %s", (AGG_STREAM_GUC,))
+        return cur.fetchone() is not None
+    finally:
+        c.close()
 
 
 def verify_gucs_took_effect(cur, gucs: list[str]) -> dict:
@@ -164,7 +189,8 @@ def main() -> int:
 
     queries = _load_queries() if args.queries is None else \
         [q.strip() for q in open(args.queries).read().split("\n") if q.strip() and not q.strip().startswith("--")]
-    gucs = session_gucs(args.timeout_s, args.work_mem, args.agg, args.stream)
+    gucs = session_gucs(args.timeout_s, args.work_mem, args.agg, args.stream,
+                        agg_stream_exists=agg_stream_guc_exists())
 
     # Prove the session config took effect BEFORE spending hours measuring under it.
     probe = _conn()

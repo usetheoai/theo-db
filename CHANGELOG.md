@@ -64,6 +64,9 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   em `docs/benchmarks/m168-streaming-topk-verdict.md`.
 
 ### Fixed
+- **theodb:** o runner do baseline passou a declarar explicitamente o estado do streaming agregado em vez de
+  confiar no default do servidor — o parâmetro nasce ligado, então o braço "antes" de uma comparação
+  mediria o caminho novo e concluiria que a mudança não teve efeito (#M169)
 - **theodb:** a atestação passou a amostrar o ambiente (carga, CPU, RAM) **antes** das verificações caras de
   dataset — lê-lo depois faria a medição refletir o trabalho da própria atestação e reprovar a máquina por
   uma carga que ela mesma criou (#M169)
