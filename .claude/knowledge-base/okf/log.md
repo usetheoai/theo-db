@@ -362,3 +362,21 @@ e nos que carregam **causa-raiz medida**. Filtrei por marcadores (`FALSIFIC`, `d
 
 Fontes ainda NÃO varridas: 44 implementations, 1601 mensagens de commit — ambas majoritariamente **rastro de
 execução**, que a § 4.2 exclui por construção.
+
+## 2026-07-30 (12) — as duas fontes restantes, verificadas antes de excluir
+
+**Não declarei exclusão sem olhar.** As 44 `implementations`: **2** mencionam lição/surpresa — as outras 42 são
+rastro de execução, que a § 4.2 exclui **por construção**, não por falta de tempo. As **1601** mensagens de
+commit: filtradas por `falsific|honest-negative|não reproduz`, **30** casam, e todas menos uma já tinham conceito
+(m118, m57, m59, m60, m73).
+
+A exceção virou o conceito que fecha a varredura:
+
+- `Honest Negative` **rerank-de-segunda-ordem-piorou** — `ai.rerank` **PIOROU** o nDCG@10 em **3,8 pt**
+  (0,7327 → 0,6947) e custou **1953 ms p50** por query, em três runs **idênticos** (determinístico, logo não é
+  ruído). O `Recall@50` é **igual** nos dois braços — o reranker só reordena, então todo o Δ vem da ordenação, e
+  ela piorou. Foi shipado assim mesmo, com o veredito na própria release (v0.55.0 rotulada honest-negative).
+
+**Estado da cobertura.** Todas as fontes que a § 4.1 obriga foram varridas: 67 memórias, 139 benchmarks (53 com
+veredito), 58 ADRs, 173 reviews, 110 blueprints, 1601 commits (filtrados), 44 implementations (verificadas). O que
+resta fora é o que a § 4.2 exclui: rastro de execução e decisão de arquitetura.
