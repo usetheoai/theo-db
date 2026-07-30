@@ -83,6 +83,9 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   falha da entrada acima, num conjunto mais estreito de gatilhos.
 
 ### Changed
+- **theodb:** a atestação da box ganhou `--quick`, que pula as checagens de dataset (~40 min a 100M) e
+  mantém as de contaminação — para o cabeçalho de fechamento de uma corrida read-only, que não pode ter
+  mudado o dado; "não perguntei" é registrado como estado próprio, nunca confundido com "ausente" (#M169)
 - **Recuo automático quando o caminho novo não cabe na memória:** se o top-k colunar por partes não couber no
   orçamento de memória da sessão, a consulta volta sozinha ao caminho anterior em vez de falhar. Quatro cenários foram medidos
   procurando um caso em que o caminho novo falhe e o anterior sirva, e **nenhum foi encontrado**; o oposto sim —
