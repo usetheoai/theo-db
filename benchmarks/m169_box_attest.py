@@ -83,6 +83,9 @@ class Verdict:
 # A collector that could not run its command reports this instead of a number. It exists so an infrastructure
 # failure is never reported as a data defect — the #132 lesson (a generic error erasing the cause).
 UNREACHABLE = -1
+# The dataset checks were deliberately not run (see `collect(quick=True)`). Distinct from UNREACHABLE, which
+# means they were attempted and failed, and from 0, which means the table is absent or empty.
+SKIPPED = -2
 
 
 def attest(box: BoxFacts) -> Verdict:
@@ -90,7 +93,9 @@ def attest(box: BoxFacts) -> Verdict:
     first-failure-wins guard hides work and makes the operator re-run to discover the next problem."""
     failures: list[str] = []
 
-    if UNREACHABLE in (box.tsv_rows, box.hits_rows, box.hits_heap_rows):
+    if SKIPPED in (box.tsv_rows, box.hits_rows, box.hits_heap_rows):
+        pass  # quick mode: the dataset was not asked about, so it is not judged. Box fitness below still is.
+    elif UNREACHABLE in (box.tsv_rows, box.hits_rows, box.hits_heap_rows):
         # Fail-closed, but with the RIGHT label: "I could not look" is not "the data is wrong".
         failures.append("collector could not read the corpus or the database — cannot attest the dataset "
                         "(check psql reachability, LD_LIBRARY_PATH, and the TSV path) — NOT a data defect")
@@ -155,13 +160,19 @@ def _psql_int(sql: str) -> int:
         return 0
 
 
-def collect(tsv_path: str, *, sh=_sh, psql_int=_psql_int) -> BoxFacts:
+def collect(tsv_path: str, *, sh=_sh, psql_int=_psql_int, quick: bool = False) -> BoxFacts:
     """Map the world into `BoxFacts`. The runners are injected so this mapping — the layer where every defect of
     this file has lived — is unit-testable without a box or a database.
 
     ASSUMPTION, stated because being silent about it is the `instrumento-cego-a-arquitetura` failure: `df` is run
     against PGDATA's filesystem, which is where the heap rebuild actually writes. The TSV cache is assumed to be
-    on the same mount; if it is not, its filesystem is unchecked."""
+    on the same mount; if it is not, its filesystem is unchecked.
+
+    `quick=True` skips the dataset checks (`count(*)` on 100M is ~35 min MEASURED, and `wc -l` on the 69.7 GB
+    corpus is minutes). It exists for the CLOSING header of a read-only run, whose question is "did anything run
+    alongside?" — not "is the data still there?", which a read-only run cannot have changed. Using it for the
+    OPENING header would skip the very checks T1.1 exists to make, so the two are not interchangeable and the
+    resulting facts say which mode produced them."""
     def _int(cmd: str, timeout: int = SH_TIMEOUT_S, default: int = 0) -> int:
         out = sh(cmd, timeout)
         try:
@@ -170,14 +181,21 @@ def collect(tsv_path: str, *, sh=_sh, psql_int=_psql_int) -> BoxFacts:
             return default
 
     ddir = _psql_text(sh, "show data_directory") or "/"
+    # SKIPPED is a distinct value from 0 and from UNREACHABLE: it says "not asked", which `attest` must not
+    # mistake for "asked and found nothing".
+    dataset = (SKIPPED, SKIPPED, SKIPPED) if quick else (
+        psql_int("select count(*) from public.hits"),
+        psql_int("select count(*) from public.hits_heap"),
+        _int(f"wc -l < {shlex.quote(tsv_path)}", WC_TIMEOUT_S, default=UNREACHABLE),
+    )
     return BoxFacts(
         nproc=_int("nproc", default=0),
         mem_gb=_int("free -g | awk '/^Mem:/{print $2}'", default=0),
         loadavg1=float((sh("cut -d' ' -f1 /proc/loadavg", SH_TIMEOUT_S) or "99")),
         unattended_state=sh("systemctl is-enabled unattended-upgrades 2>&1", SH_TIMEOUT_S) or "unknown",
-        hits_rows=psql_int("select count(*) from public.hits"),
-        hits_heap_rows=psql_int("select count(*) from public.hits_heap"),
-        tsv_rows=_int(f"wc -l < {shlex.quote(tsv_path)}", WC_TIMEOUT_S, default=UNREACHABLE),
+        hits_rows=dataset[0],
+        hits_heap_rows=dataset[1],
+        tsv_rows=dataset[2],
         disk_free_gb=_int(f"df -BG --output=avail {shlex.quote(ddir)} | tail -1 | tr -dc '0-9'", default=0),
         so_md5=sh("md5sum /opt/pg18/lib/postgresql/theodb_rs.so | cut -c1-32", SH_TIMEOUT_S) or "unknown",
         data_directory=ddir,
@@ -198,9 +216,11 @@ def main() -> int:
     ap.add_argument("--tsv", default="/root/theo-db/benchmarks/.cache/hits_sample.tsv",
                     help="the loaded corpus; its line count is the authority the table count is checked against")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--quick", action="store_true",
+                    help="skip the dataset checks (~40 min at 100M); for the CLOSING header of a read-only run")
     args = ap.parse_args()
 
-    v = attest(collect(args.tsv))
+    v = attest(collect(args.tsv, quick=args.quick))
     if args.json:
         print(json.dumps({"ok": v.ok, "failures": v.failures, "facts": v.facts}, indent=1))
     else:

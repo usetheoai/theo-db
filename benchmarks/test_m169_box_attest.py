@@ -181,3 +181,51 @@ def test_collect_maps_a_failing_runner_to_fail_closed_values():
     assert box.unattended_state == "unknown"
     assert box.tsv_rows == a.UNREACHABLE
     assert any("cannot attest the dataset" in f for f in v.failures)
+
+
+# ---------- quick mode: "não perguntei" é um terceiro estado, distinto de 0 e de UNREACHABLE ----------------------
+def test_quick_mode_does_not_judge_the_dataset_it_did_not_ask_about():
+    """The closing header of a read-only run asks 'did anything run alongside?', not 'is the data still there?'.
+    Skipping the ~40-minute dataset checks there is right; letting SKIPPED be read as 'absent' would invent a
+    failure, and letting it be read as 'fine' would invent a pass."""
+    box = a.BoxFacts(nproc=16, mem_gb=31, loadavg1=0.1, unattended_state="masked",
+                     hits_rows=a.SKIPPED, hits_heap_rows=a.SKIPPED, tsv_rows=a.SKIPPED,
+                     disk_free_gb=a.MIN_DISK_FREE_GB + 10)
+    v = a.attest(box)
+    assert v.ok is True
+    assert not any("hits_heap" in f for f in v.failures)
+    assert not any("cannot attest the dataset" in f for f in v.failures)
+
+
+def test_quick_mode_still_judges_box_fitness():
+    """Quick mode skips the DATASET, never the contamination check — that is the only reason it exists."""
+    box = a.BoxFacts(nproc=16, mem_gb=31, loadavg1=7.5, unattended_state="masked",
+                     hits_rows=a.SKIPPED, hits_heap_rows=a.SKIPPED, tsv_rows=a.SKIPPED,
+                     disk_free_gb=a.MIN_DISK_FREE_GB + 10)
+    v = a.attest(box)
+    assert v.ok is False
+    assert any("loadavg1" in f for f in v.failures)
+
+
+def test_collect_quick_skips_the_expensive_calls_entirely():
+    """Not merely 'ignores the result' — the ~40 minutes must not be SPENT."""
+    calls = []
+
+    def fake_sh(cmd, timeout=60):
+        calls.append(cmd)
+        return {"nproc": "16"}.get(cmd, "masked" if "unattended" in cmd else
+                                   "0.1" if "loadavg" in cmd else
+                                   "31" if "free -g" in cmd else
+                                   "300" if "df -BG" in cmd else
+                                   "/srv/m169data" if "data_directory" in cmd else "abc123")
+
+    psql_calls = []
+
+    def fake_psql_int(sql):
+        psql_calls.append(sql)
+        return a.HITS_ROWS
+
+    box = a.collect("/tmp/hits.tsv", sh=fake_sh, psql_int=fake_psql_int, quick=True)
+    assert box.hits_rows == a.SKIPPED
+    assert psql_calls == [], "quick mode must not run count(*) at all"
+    assert not any(c.startswith("wc -l") for c in calls), "quick mode must not run wc -l on 69.7 GB"

@@ -50,8 +50,11 @@ echo "=== corrida das 43 consultas (agg=on, 1 execução por consulta) ==="
 python3 "$HERE/m169_baseline_run.py" --out "$ART/${LABEL}.jsonl" --label "$LABEL" --agg "$@"
 RUN_RC=$?
 
-echo "=== atestação da box (DEPOIS — prova de não-contaminação) ==="
-python3 "$HERE/m169_box_attest.py" --tsv "$TSV" --json > "$ART/${LABEL}-box-after.json" || true
+# --quick: o cabeçalho de FECHAMENTO pergunta "algo rodou junto?", não "o dado ainda está lá?" — que uma corrida
+# read-only não pode ter mudado. As checagens de dataset custam ~40 min MEDIDOS a 100M; pagá-las duas vezes
+# acrescentaria mais de uma hora a uma corrida que já é de horas. O JSON registra que o modo foi quick.
+echo "=== atestação da box (DEPOIS, --quick — prova de não-contaminação) ==="
+python3 "$HERE/m169_box_attest.py" --tsv "$TSV" --quick --json > "$ART/${LABEL}-box-after.json" || true
 python3 -c "
 import json,sys
 b=json.load(open('$ART/${LABEL}-box-before.json'))['facts']
