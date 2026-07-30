@@ -216,6 +216,14 @@ def _count_rows(relation: str) -> int:
     return _psql_int(f"select count(*) from {relation}", COUNT_TIMEOUT_S)
 
 
+def _int_pre(sh, cmd: str, default: int = 0) -> int:
+    out = sh(cmd, SH_TIMEOUT_S)
+    try:
+        return int(out.split()[0]) if out else default
+    except (ValueError, IndexError):
+        return default
+
+
 def collect(tsv_path: str, *, sh=_sh, sh_any_rc=_sh_any_rc, psql_int=_count_rows,
             quick: bool = False) -> BoxFacts:
     """Map the world into `BoxFacts`. The runners are injected so this mapping — the layer where every defect of
@@ -237,6 +245,15 @@ def collect(tsv_path: str, *, sh=_sh, sh_any_rc=_sh_any_rc, psql_int=_count_rows
         except (ValueError, IndexError):
             return default
 
+    # ORDER MATTERS, and it is not cosmetic. The dataset checks below are ~40 minutes of CPU-bound work; reading
+    # `loadavg` AFTER them would measure the attestation's OWN footprint and then blame the box for it — the
+    # instrument perturbing what it measures. Every environment fact is therefore sampled BEFORE the expensive
+    # work, so `loadavg1` answers "was the box busy when we started?", which is the question the gate asks.
+    env_nproc = _int_pre(sh, "nproc")
+    env_mem_gb = _int_pre(sh, "free -g | awk '/^Mem:/{print $2}'")
+    env_loadavg1 = float(sh("cut -d' ' -f1 /proc/loadavg", SH_TIMEOUT_S) or "99")
+    env_unattended = sh_any_rc("systemctl is-enabled unattended-upgrades", SH_TIMEOUT_S) or "unknown"
+
     ddir = _psql_text(sh, "show data_directory") or "/"
     # SKIPPED is a distinct value from 0 and from UNREACHABLE: it says "not asked", which `attest` must not
     # mistake for "asked and found nothing".
@@ -246,10 +263,10 @@ def collect(tsv_path: str, *, sh=_sh, sh_any_rc=_sh_any_rc, psql_int=_count_rows
         _int(f"wc -l < {shlex.quote(tsv_path)}", WC_TIMEOUT_S, default=UNREACHABLE),
     )
     return BoxFacts(
-        nproc=_int("nproc", default=0),
-        mem_gb=_int("free -g | awk '/^Mem:/{print $2}'", default=0),
-        loadavg1=float((sh("cut -d' ' -f1 /proc/loadavg", SH_TIMEOUT_S) or "99")),
-        unattended_state=sh_any_rc("systemctl is-enabled unattended-upgrades", SH_TIMEOUT_S) or "unknown",
+        nproc=env_nproc,
+        mem_gb=env_mem_gb,
+        loadavg1=env_loadavg1,
+        unattended_state=env_unattended,
         hits_rows=dataset[0],
         hits_heap_rows=dataset[1],
         tsv_rows=dataset[2],

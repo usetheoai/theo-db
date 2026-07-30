@@ -64,6 +64,9 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   em `docs/benchmarks/m168-streaming-topk-verdict.md`.
 
 ### Fixed
+- **theodb:** a atestação passou a amostrar o ambiente (carga, CPU, RAM) **antes** das verificações caras de
+  dataset — lê-lo depois faria a medição refletir o trabalho da própria atestação e reprovar a máquina por
+  uma carga que ela mesma criou (#M169)
 - **theodb:** o texto de ajuda do `--quick` da atestação passou a declarar o custo como ordem de grandeza
   ("dezenas de minutos") em vez de um número preciso — as observações disponíveis tiveram janela
   sobreposta com outro processo, e o valor exato não é sustentado por elas (#M169)

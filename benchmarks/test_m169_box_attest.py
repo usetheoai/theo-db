@@ -302,3 +302,27 @@ def test_a_masked_unit_is_read_as_masked_even_though_systemctl_exits_nonzero():
     box = a.collect("/tmp/x", sh=sh_strict, sh_any_rc=sh_any, psql_int=lambda _s: a.SKIPPED, quick=True)
     assert box.unattended_state == "masked"
     assert not any(f.startswith("unattended_upgrades_live") for f in a.attest(box).failures)
+
+
+def test_environment_is_sampled_BEFORE_the_expensive_dataset_checks():
+    """O `loadavg` tem de responder 'a box estava ocupada quando COMEÇAMOS?'. Lê-lo depois de ~40 min de
+    trabalho CPU-bound da própria atestação mediria a pegada dela e culparia a box — o instrumento perturbando o
+    que mede. A ordem das chamadas é a única prova disso."""
+    order = []
+
+    def fake_sh(cmd, timeout=60):
+        order.append("loadavg" if "loadavg" in cmd else ("wc" if cmd.startswith("wc -l") else "outro"))
+        return {"nproc": "16"}.get(cmd, "31" if "free" in cmd else
+                                   "0.1" if "loadavg" in cmd else
+                                   "283" if "df" in cmd else
+                                   "/srv/m169data" if "data_directory" in cmd else "abc")
+
+    def fake_count(rel):
+        order.append("count")
+        return a.HITS_ROWS
+
+    a.collect("/tmp/x", sh=fake_sh, sh_any_rc=lambda c, t=60: "masked", psql_int=fake_count)
+    assert "loadavg" in order and "count" in order
+    assert order.index("loadavg") < order.index("count"), \
+        f"loadavg foi lido DEPOIS do count — mediria a pegada da própria atestação: {order}"
+    assert order.index("loadavg") < order.index("wc"), order
