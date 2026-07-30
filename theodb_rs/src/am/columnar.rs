@@ -837,10 +837,10 @@ pub(crate) enum DecodedColumn {
 /// varlena/text. Widths match `decode_column`'s `attlen_fixed` and `build_arrow`'s per-type readers.
 pub(crate) fn fixed_arrow_width(typid: u32) -> Option<usize> {
     match typid {
-        21 => Some(2),                 // int2
-        23 | 700 | 1082 => Some(4),    // int4 / float4 / date (Date32)
+        21 => Some(2),                     // int2
+        23 | 700 | 1082 => Some(4),        // int4 / float4 / date (Date32)
         20 | 701 | 1114 | 1184 => Some(8), // int8 / float8 / timestamp / timestamptz (all i64/f64)
-        _ => None,                     // bool (bit-packed), varlena/text → cell path
+        _ => None,                         // bool (bit-packed), varlena/text → cell path
     }
 }
 
@@ -880,7 +880,8 @@ pub(crate) unsafe fn decode_columns_v2(
     // Same-xact pending rows force the whole result onto the legacy cell path (fail-safe: merging FixedRaw bytes with
     // pending cell rows is out of M160 scope — pending is empty for a read-only benchmark query, the measured regime).
     let oid = (*rel).rd_id.to_u32();
-    let has_pending = WRITE_STATES.with(|w| w.borrow().get(&oid).is_some_and(|p| !p.rows.is_empty()));
+    let has_pending =
+        WRITE_STATES.with(|w| w.borrow().get(&oid).is_some_and(|p| !p.rows.is_empty()));
     if has_pending {
         return Ok(decode_columns(rel, projection, predicates, skip)?
             .into_iter()
@@ -920,9 +921,9 @@ pub(crate) unsafe fn decode_columns_v2(
                 return None;
             }
             let w = fixed_arrow_width(cols[col].typid)?;
-            let any_null = plans.iter().any(|pl| {
-                (0..pl.n_chunk_groups).any(|cg| pl.entries[cg * natts + col].has_nulls)
-            });
+            let any_null = plans
+                .iter()
+                .any(|pl| (0..pl.n_chunk_groups).any(|cg| pl.entries[cg * natts + col].has_nulls));
             if any_null { None } else { Some(w) }
         })
         .collect();
@@ -977,8 +978,12 @@ pub(crate) unsafe fn decode_columns_v2(
                         fixed_rows[wi] += cg_rows;
                     }
                     None => {
-                        let mut vals =
-                            codec::decode_column(&raw, cols[col].attlen_fixed, cg_rows, e.has_nulls)?;
+                        let mut vals = codec::decode_column(
+                            &raw,
+                            cols[col].attlen_fixed,
+                            cg_rows,
+                            e.has_nulls,
+                        )?;
                         cell_cols[wi].append(&mut vals);
                     }
                 }
@@ -1477,7 +1482,8 @@ unsafe fn accumulate_row(rel: pg_sys::Relation, slot: *mut pg_sys::TupleTableSlo
             if (*super::tupdesc_attr(tupdesc, i)).attlen != -1 {
                 continue; // fixed-length: nothing to detoast
             }
-            let flat = pg_sys::pg_detoast_datum_copy(form_values[i].cast_mut_ptr::<pg_sys::varlena>());
+            let flat =
+                pg_sys::pg_detoast_datum_copy(form_values[i].cast_mut_ptr::<pg_sys::varlena>());
             owned.push(flat);
             form_values[i] = pg_sys::Datum::from(flat);
         }
