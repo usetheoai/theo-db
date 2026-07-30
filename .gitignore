@@ -72,3 +72,6 @@ code-review-output/
 
 # locks de exclusao mutua do review-cycle (nao sao conteudo)
 *.json.lock
+
+# Cache de fixtures gerado pela suíte de benchmarks (pytest)
+.cache*/
