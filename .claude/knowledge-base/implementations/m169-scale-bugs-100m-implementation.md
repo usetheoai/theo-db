@@ -498,3 +498,44 @@ Aritmética fechada contra o teto:
 O defeito que o SEPA apontou em T1.1 era real, e o teto novo está dimensionado com folga. Registro porque a
 correção tinha sido feita por **raciocínio** ("60 s implicaria 1,16 GB/s sustentado, implausível") e agora tem
 **medição** — que é a diferença entre uma estimativa correta e um número.
+
+---
+
+## T2.1 — o delta exato, medido no código antes de escrever uma linha dele
+
+Enquanto o baseline ocupava a box (medição exige exclusividade), fiz a única coisa útil que **não** a toca:
+ler os call-sites. Isto é análise, não o GREEN — escrever o código de produção antes de observar o RED falhar
+seria pular a fase, e o RED (`m169_agg_stream.sql`) está encadeado para rodar assim que as 43 terminarem.
+
+**O achado que muda o tamanho do T2.1:** o M168 já resolveu a forma inteira no top-k, e T2.1 é uma
+**reaplicação do mesmo padrão**, não uma construção nova. `df_executor.rs:1190-1245`:
+
+| Elemento do padrão M168 | Onde | T2.1 reusa? |
+|---|---|---|
+| guard por GUC | `ENABLE_COLUMNAR_TOPK_STREAM.get()` | nova GUC irmã, mesmo default |
+| abrir a fonte | `open_streaming_source(rel, &proj, …) -> Option<ColumnarPartition>` | **idêntico** |
+| decline de linhas pendentes | `has_unflushed_pending(rel)` **dentro** de `open_streaming_source:1125` | **herdado de graça** |
+| probe traçado como chunk-group | `:1140-1147` | idem |
+| fail-open **tipado** | `Err(e) if matches!(e.find_root(), ResourcesExhausted(_))` | idem |
+| eager como fallback | corpo abaixo do `if` | idem |
+
+Três consequências concretas para o plano:
+
+1. **O `has_unflushed_pending` não precisa ser re-escrito.** Ele vive dentro de `open_streaming_source`, então o
+   caminho agregado herda a correção que o review do M168 pagou — a que impedia um `BEGIN; INSERT; SELECT agg`
+   de perder as linhas não-flushadas. Escrever um segundo guard seria duplicar conhecimento (DRY) e criar duas
+   cópias que divergem. **Degrau 4 da parsimony ladder: a dependência já está instalada; reuse.**
+2. **O fail-open tem de ser `find_root()`, não `match` por variante.** O comentário em `:1219-1226` documenta
+   por que: o DataFusion embrulha `ResourcesExhausted` em `Context(_, Box(...))` num caminho irmão, e um `match`
+   por variante erraria em silêncio depois de um upgrade menor — transformando o fail-open em erro duro,
+   exatamente a regressão que ele existe para evitar. Copiar o padrão **sem** o `find_root` seria copiar a forma
+   e perder o motivo.
+3. **O ADR-5 do plano ("o pré-check não é uma expressão — o encapsulamento cobra um acessor") continua de pé**,
+   mas o acessor é menor do que eu havia dimensionado: o que falta é `raw_len_sum`, porque o resto do
+   pré-check já está encapsulado em `open_streaming_source`.
+
+**O que este achado NÃO autoriza.** Ele reduz o tamanho do T2.1; não reduz o rigor. O RED continua tendo de
+falhar por não-vacuidade (`stream_calls=0`) antes de qualquer GREEN — um padrão idêntico ao do top-k ainda pode
+estar ligado ao call-site errado, e é precisamente isso que o contador prova. O M158 já produziu um falso-verde
+dessa espécie: o `planner_hook` só disparava o swap sob o gate do agregado, o `EXPLAIN` ainda mostrava `Sort`, e
+o A/B deu `0` de divergência por comparar o caminho antigo consigo mesmo.
