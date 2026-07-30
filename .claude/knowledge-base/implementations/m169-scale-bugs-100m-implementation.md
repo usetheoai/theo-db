@@ -367,3 +367,24 @@ ambiguidade é real e morde nos dois sentidos:
 **Decisão:** usar as duas, explicitamente — `--diff-base v0.158.0` para o `/review`, e o ponto de partida do M169
 para medir o budget. Registro aqui porque um revisor que veja `+563` em `df_executor.rs` e não souber que é do
 M168 vai reprovar o milestone errado.
+
+### Smoke da cola do `.sh`, com artefatos sintéticos — antes de a corrida chegar lá
+
+O trecho do `m169_baseline_100m.sh` **depois** da corrida (summarizer → gerador → guard de contaminação) nunca
+tinha executado junto. Um bug de cola ali só apareceria **depois das horas de medição**, que é o momento mais caro
+possível para descobri-lo. Rodei os três com artefatos fabricados, exatamente como o `.sh` os invoca:
+
+| Cenário | Esperado | Medido |
+|---|---|---|
+| corrida completa (19 ok, 23 timeout, 1 erro) | ambos `exit 0`, artefato emitido | **exit 0** ✓ |
+| `.so` mudou entre antes e depois | recusa | **exit 1** — *"mistura dois binários e não é atribuível a nenhum"* |
+| corrida truncada (30/43) | recusa nos dois | **exit 1** no summarizer **e** no gerador |
+| `so_md5=unknown` | recusa | **exit 1** — *"não conseguiria dizer QUAL binário produziu estes números"* |
+
+O caminho feliz também foi verificado no conteúdo, não só no código de saída: com o gêmeo heap ausente, o
+relatório escreve `hits_heap: ausente` e **"A/B: n/a — nenhuma comparação executada"**. Ele NÃO omite a seção e
+NÃO escreve "byte-identical" — que é a manchete falsa que o `decide_ab_verdict` do harness publica quando zero
+comparações foram feitas.
+
+Isto é `controle-positivo` aplicado ao pipeline inteiro: os três gates foram vistos **reprovando**, e um gate que
+nunca foi visto vermelho é uma hipótese sobre o gate, não uma medição.
