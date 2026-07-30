@@ -37,6 +37,29 @@ como PASS. A falha é humana — tratar o soft cap como ruído a dispensar.
   declarada em [technique/proveniencia-em-todo-artefato](../techniques/proveniencia-em-todo-artefato.md), não
   regra cumprida.
 
+## A saída não é dispensar o cap — é rodar onde a ferramenta existe (medido no M169, 2026-07-30)
+
+O cap `auditor_unavailable_*` é **ambiental**, não sistêmico, e a diferença é mensurável. O MESMO plano, o MESMO
+comando, duas máquinas:
+
+| Onde | `~/.pgrx/config.toml` | verdict | caps |
+|---|---|---|---|
+| box de desenvolvimento | **ausente** (sem `bison`/`flex`/`sudo` para criar) | `NON_SHIPPABLE` (70) | `auditor_unavailable_cargo-udeps` + `symbol_fab_unverifiable_rust` |
+| box dedicada de bench | **presente** | **`SHIPPABLE_WITH_CAVEATS` (89)** | só `symbol_fab_unverifiable_rust` |
+
+A causa é concreta: `cargo-udeps` precisa **compilar** o crate, e num crate pgrx o build script do `pgrx-pg-sys`
+exige o config. Sem ele o auditor não roda — e emitir o cap ali é **correto**.
+
+> **Dispensar por ADR um gate que consegue rodar é workaround.** A dispensa do golden rule existe para caps
+> irremediáveis, não para caps que só precisam da máquina certa.
+
+Um ADR anterior deste mesmo milestone dispensava as duas caps alegando defeito do detector, e trazia **duas
+saídas de comando que nunca foram produzidas**. As duas premissas caíram na verificação — o ADR foi reescrito
+para "roda onde o auditor existe, sem dispensa". A lição que ele passou a carregar: *a regra de reproduzir antes
+de afirmar vale sobretudo para as alegações que me **favorecem*** — essa convinha, e foi por isso que passou.
+
 ## Relacionados
 
-- [technique/proveniencia-em-todo-artefato](../techniques/proveniencia-em-todo-artefato.md)
+- [technique/nenhuma-alegacao-sem-medicao](../techniques/nenhuma-alegacao-sem-medicao.md)
+- [failure-mode/diagnostico-aceito-sem-reproduzir](diagnostico-aceito-sem-reproduzir.md)
+- [invariant/nao-usar-a-box-do-ci](../invariants/nao-usar-a-box-do-ci.md) — a box certa não é a do CI
