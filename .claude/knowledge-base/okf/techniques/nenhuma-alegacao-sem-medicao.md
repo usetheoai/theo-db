@@ -23,13 +23,14 @@ O desk-check que a formalizou está em `knowledge-base/discoveries/blueprints/m1
 
 ## A assimetria que importa
 
-Na sessão em que a regra foi aplicada com disciplina, ela derrubou **sete** alegações — e a distribuição é o
-achado:
+Na sessão em que a regra foi aplicada com disciplina, ela derrubou **sete** alegações **minhas** (a tabela de
+[diagnostico-aceito-sem-reproduzir](../failure-modes/diagnostico-aceito-sem-reproduzir.md) as lista uma a uma),
+mais **uma** de revisor — e a distribuição é o achado:
 
 | Direção da alegação | Quantas caíram |
 |---|---|
-| me **favorecia** (destravava gate, validava hipótese, dispensava trabalho) | a maioria |
-| me **contradizia** | uma (o "perfeitamente confundido" do revisor, negado por rho=+0,71) |
+| me **favorecia** (destravava gate, validava hipótese, dispensava trabalho) | **as sete** |
+| me **contradizia** | **uma**, de revisor — o "perfeitamente confundido", negado por rho=+0,71 (M168, outra sessão) |
 
 Alegação conveniente passa pelo filtro porque ninguém quer testá-la. É por isso que a regra precisa dizer
 explicitamente "vale para as que me favorecem" — senão ela se auto-desliga.

@@ -195,3 +195,35 @@ regenerar índices **depois** das edições, nunca antes.
 **Achado meu, no meu próprio gate:** o C6 tinha **falso-negativo** — aprovava `../../../.claude/rules/…`, que
 resolve só por uma terceira base de fallback que nenhum leitor navega. Restrito às duas bases declaradas
 (raiz do repo e `.claude/`), com o `references/` gitignored isento por desenho.
+
+## 2026-07-30 (7) — round 3, segunda varredura: o padrão real era OUTRO
+
+O segundo revisor do round 3 varreu `failure-modes/` e `techniques/` — as categorias que os três rounds
+anteriores **não** tinham varrido, porque "os números moram em `measurements/`". Oito achados novos, e um deles
+BLOCKER.
+
+**O BLOCKER:** `dados-sinteticos-degenerados` publicava **`0.033`** como recall medido, em quatro lugares, e
+certificava a linha como "fiel e medida". **O número não existe em artefato algum** — busca exaustiva em `docs/`
+e `benchmarks/` só devolve `0.0333` como **tempo** (cold seconds) do ClickBench; o menor recall de qualquer
+artefato vetorial é `0.0634`. Sobreviveu a três rodadas e seis revisores porque ninguém procura número em
+`failure-modes/`.
+
+**O diagnóstico dos rounds 1-3 estava incompleto.** Eles concluíram "a origem é transcript"
+(`crenca-intermediaria-congelada`) e depois "a classe é propagação" (`correcao-nao-propagada-pelo-grafo`).
+Nenhum dos dois explica o `0.033`, o `+11`, o `~3× otimista`, os cinco campos de proveniência ou o M169 sem
+audit. A origem desses é outra: **o conceito é escrito com o número que a narrativa pede, e o artefato nunca é
+aberto** — e a varredura seletiva por categoria é o que os protegeu.
+
+**Dois casos de o bundle afirmar o que não cumpre:**
+
+- `proveniencia-em-todo-artefato` exigia cinco campos e `cobertura-alegada-sem-execucao` afirmava que "**todo**
+  artefato carrega" os cinco. Medido: `m168_collect_all.sh` grava **dois** (`so_md5`, `postmaster`) — `nproc`,
+  `free` e `loadavg` dão zero no `grep`. Virou dívida declarada, não regra cumprida.
+- `cobertura-alegada-sem-execucao` atribuía dois caps ao **M169** e afirmava o desfecho "tirou os dois caps e deu
+  `PASS_WITH_CAVEATS`". **Não existe audit de code-quality do M169** — o milestone está em voo. Reatribuído aos
+  que têm audit (M161/M163-M165, M146) e o desfecho removido.
+
+**E o revisor rejeitou um achado próprio** — o subagente dele reportou "33 repos" como errado por ter contado 34
+diretórios com `.git`; ele verificou que o `CLAUDE.md` separa deliberadamente os **33 peers** do `FlameGraph`
+(ferramenta, não peer), e recusou o achado. Relatar os nove teria sido o `diagnostico-aceito-sem-reproduzir` que
+este bundle documenta.

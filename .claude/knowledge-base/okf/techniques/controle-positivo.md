@@ -15,7 +15,7 @@ Todo oráculo carrega, no mesmo arquivo, um caso **construído para falhar**. Se
 e a corrida **aborta** antes de produzir qualquer número.
 
 ```python
-def test_type_ab_positive_control_reports_divergence():
+def test_positive_control_catches_seeded_divergence(live):   # benchmarks/test_columnar_type_ab.py:135
     GIVEN um par deliberadamente divergente no EDGE_CATALOG
     WHEN o oráculo roda sobre ele
     THEN assert result.diverged > 0   # se der 0, o oráculo está quebrado

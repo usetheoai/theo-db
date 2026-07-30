@@ -17,8 +17,8 @@ porque a saída de "passou" e a de "não rodou" são idênticas.
 
 | Caso | O literal esperado | O que o artefato tinha |
 |---|---|---|
-| M169 | `check_phase_completeness.py:41` → `^##\s+Phase\s+(\d+)` | `## Fase N` (em português) — o mini review de fronteira pularia nas **quatro** fronteiras |
-| M169 | `check_tdd_shape.py` exige forma executável | T4.1 não tinha seção `#### TDD` **alguma** |
+| M169 (no plano como escrito em `948e30d`; corrigido em `9d61d8e`) | `check_phase_completeness.py:41` → `^##\s+Phase\s+(\d+)` | `## Fase N` (em português) — o mini review pularia nas **quatro** fronteiras |
+| M169 (idem — o plano atual já tem) | `check_tdd_shape.py` exige forma executável | T4.1 não tinha seção `#### TDD` **alguma** |
 | M168 | gate `_reject_fallback` casando `ARM=stream` — string que o harness **nunca emitia** | o gate procurava um literal inexistente; corrigido emitindo `RAISE NOTICE 'ARM=%'` + controle positivo in-tree |
 | M156/M161 | A/B do ClickBench como oráculo de tipos | os dados do benchmark não exercitam o espaço de tipos — bugs de classe de tipo sobreviviam ao A/B e só caíam no review |
 

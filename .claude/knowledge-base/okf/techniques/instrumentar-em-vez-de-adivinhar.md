@@ -14,9 +14,14 @@ A pergunta era quais consultas do ClickBench não usavam o pushdown colunar e po
 SQL gerava palpites. A abordagem que funcionou foi um trace no ponto de admissão (`THEODB_ADMIT_TRACE`) que
 registra **a razão do declínio** por consulta.
 
-Resultado: mapa completo, zero lacunas — e o achado estrutural de que **os bloqueios são compostos**. Uma consulta
-declinava por 2-3 razões simultâneas, então destravar uma delas rendia +2 a 4 consultas, não +11. Sem o trace, a
-estimativa de ganho teria sido ~3× otimista.
+Resultado: mapa completo, zero lacunas — e o achado estrutural de que **os bloqueios são compostos**. Uma
+consulta declinava por 2-3 razões simultâneas, então a cobertura marginal de destravar uma fatia isolada é
+**pequena (2-4 consultas)** — o artefato `m152-routing-map.md:14` diz exatamente isso, e conclui que "o modelo
+'cada fatia adiciona K' do blueprint era **otimista**".
+
+> **CORRIGIDO 2026-07-30 (round 3).** A frase anterior dizia "não +11" e "~3× otimista". Nem o `+11` nem o `~3×`
+> aparecem no artefato — ele registra o modelo ingênuo de forma **abstrata**, sem valor de K. Dois números sem
+> âncora numa Technique que ensina a instrumentar em vez de adivinhar.
 
 ## Onde se repetiu
 

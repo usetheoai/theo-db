@@ -44,6 +44,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   em `docs/benchmarks/m168-streaming-topk-verdict.md`.
 
 ### Fixed
+- **theodb:** segunda varredura do round 3 (categorias nunca auditadas) — BLOCKER de recall `0.033` sem
+  artefato, regra de proveniência que nenhum script cumpre, e atribuição de desfecho a milestone em voo (#okf)
 - **theodb:** round 3 de review da base OKF — 3 BLOCKER de correção não propagada pelo grafo, 2 HIGH em que o
   bundle prescrevia o defeito que documenta (topo de faixa; `rc != 0` para falha de canal em ssh), e o C6
   restrito a duas bases declaradas (#okf)

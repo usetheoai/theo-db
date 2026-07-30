@@ -1,7 +1,7 @@
 ---
 type: Technique
 title: Todo log de medição carrega a identidade do binário e da máquina
-description: Sem so_md5, postmaster, nproc, free e loadavg no cabeçalho, um artefato não é evidência — é um número solto.
+description: Sem a identidade do binário e da máquina no cabeçalho, um artefato não é evidência — é um número solto. O exemplar do repo grava 2 dos 5 campos: dívida declarada, não regra cumprida.
 resource: benchmarks/m168_collect_all.sh
 tags: [benchmark, artefato, rigor]
 timestamp: 2026-07-30T00:00:00Z
@@ -36,6 +36,18 @@ O `so_md5` também é o guard contra o
 [invariant/so-obsoleto-sob-shared-preload](../invariants/so-obsoleto-sob-shared-preload.md): se o log traz o md5
 do arquivo em disco mas o postmaster mapeou o antigo, comparar `postmaster` (start time) com a data do build
 denuncia.
+
+## Estado real do exemplar — dívida declarada
+
+> **CORRIGIDO 2026-07-30 (round 3).** Este conceito prescrevia cinco campos e o irmão
+> `cobertura-alegada-sem-execucao` afirmava que "**todo** artefato de medição carrega" os cinco. Medido:
+> `benchmarks/m168_collect_all.sh` grava **`so_md5` e `postmaster`** — `grep` por `nproc`, `free` e `loadavg`
+> devolve **zero**. O único script que emite `loadavg` é `m168_drift_control.sh`, e esse não emite
+> `postmaster`/`nproc`/`free`.
+>
+> Os cinco campos continuam sendo a regra — cada um serve a um confundidor distinto e o M169 provou que
+> `maintenance_work_mem` e `shared_buffers` também precisam entrar. Mas **nenhum script do repo os grava todos**,
+> e dizer que grava era a `cobertura-alegada-sem-execucao` aplicada à própria Technique.
 
 ## Relacionados
 
