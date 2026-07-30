@@ -202,3 +202,27 @@ Esta é a **segunda** cegueira de ferramental encontrada nesta iteração (a pri
 issue #224). Mesma classe: as suposições de caminho do ferramental de ciclo não modelam o layout Python deste
 repositório, e o sintoma é sempre o mesmo — a ferramenta não erra, ela **não enxerga**, e o operador tem de saber
 disso para não fabricar evidência que a satisfaça.
+
+### A Global DoD `pytest benchmarks/ -q — todos passam` não é satisfazível nesta máquina
+
+**Medido com braço de controle** (a suíte SEM os arquivos novos do M169, `--ignore=benchmarks/test_m169_box_attest.py`):
+
+```
+63 failed, 346 passed, 13 skipped, 232 errors in 1146.49s (0:19:06)
+```
+
+Causa isolada num caso representativo:
+
+```
+psycopg2.OperationalError: connection to server at "localhost" (127.0.0.1), port 5432 failed:
+FATAL:  password authentication failed for user "postgres"
+```
+
+Não há PostgreSQL local com o `theodb_rs` instalado — `pg_isready` responde `no response`. Todos os erros
+visíveis estão em `benchmarks/tests/`, que é a árvore de **integração com banco real**
+(`test_vector_ops.py`, `test_unified.py`, `test_am_crash.py`).
+
+**Consequência para o milestone, e é a mesma do ADR-4:** este item da Global DoD tem de ser satisfeito **na box
+dedicada**, onde o PG18 com a extensão existe — não aqui. Dispensá-lo por ADR seria dispensar um gate que
+consegue rodar; satisfazê-lo localmente é impossível. O braço de controle é o que permite afirmar que os 63+232
+são **pré-existentes e ambientais**, e não introduzidos por este milestone.
