@@ -144,6 +144,44 @@ peers com licença copyleft (`paradedb`, `citus`, `hydra`, `vectorchord` = AGPL;
 
 ---
 
+## Base de conhecimento OKF (consultar ANTES, escrever DEPOIS — inquebrável)
+
+Contrato: [`.claude/rules/okf-knowledge-base.md`](./.claude/rules/okf-knowledge-base.md).
+Bundle: `.claude/knowledge-base/okf/` — **46 conceitos** em [Open Knowledge Format v0.1](https://github.com/google/open-knowledge-format),
+um arquivo por conceito, links markdown formando um grafo, `type` como único campo obrigatório.
+
+**Por que ele existe.** O conhecimento que este projeto pagou para aprender já estava escrito — em 67 arquivos de
+memória, 110 blueprints, notas e mensagens de commit. Espalhado, ele **não morde no momento em que seria útil**.
+Numa única sessão do M169, seis diagnósticos caíram por medição e **nenhum era novo em espécie**: todos tinham
+precedente registrado em algum lugar que não disparou.
+
+| `type` | A pergunta que ele responde | Quando ler |
+|---|---|---|
+| `Failure Mode` | "estou prestes a cometer isto?" | **antes de montar qualquer medição** |
+| `Technique` | "qual é o método certo aqui?" | idem, e antes de abrir issue de produto |
+| `Invariant` | "a plataforma permite isso?" | antes de mexer em storage, FFI, `unsafe`, recovery, build, branch compartilhado |
+| `Measurement` | "isso já foi medido?" | **antes de publicar qualquer número** — ele pode já existir |
+| `Honest Negative` | "isso já foi tentado e refutado?" | **antes de propor aposta técnica ou milestone** |
+
+**Escrita obrigatória.** Vira conceito: todo número publicado em `docs/benchmarks/**`; toda alegação minha
+derrubada por medição; toda aposta medida e refutada; toda propriedade de plataforma aprendida por falha; todo
+método que passou a ser exigido. **Atualize o conceito existente** — nunca crie um segundo arquivo para a mesma
+classe. Registre a mudança em `okf/log.md`.
+
+**NÃO vira conceito** (e escrever enchimento para satisfazer o gate é pior que não escrever): rastro de execução
+— isso é `knowledge-base/` do ciclo; decisão de arquitetura — isso é ADR em `docs/adr/`; bug corrigido sem lição
+generalizável.
+
+**Verificação.** `python3 .claude/scripts/check_okf.py` valida quatro invariantes estruturais (`type` presente,
+links internos resolvem, índices sincronizados, arquivos-raiz existem) — exit `0`/`1`/`2`. O
+`hooks/stop-validation.sh` **BLOQUEIA** em dois casos determinísticos: bundle inválido, e número publicado em
+`docs/benchmarks/**` sem conceito `Measurement` tocado. O `hooks/userpromptsubmit-inject.sh` injeta o ponteiro a
+cada turno.
+
+**Limite honesto:** nenhum hook prova que eu li. A injeção é o mecanismo mais forte disponível; os gatilhos de
+leitura são instruction-grade, como os degraus 2, 3 e 5 da parsimony ladder. Fingir que isso é mecanizável seria
+o mesmo `cobertura-alegada-sem-execucao` que o bundle documenta.
+
 ## Fluxo de trabalho
 
 - Branch de trabalho: **`develop`** (nunca `main` — Regra 4). `main` recebe só releases.

@@ -14,6 +14,9 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **theodb:** contrato de leitura e atualização da base OKF — regra `okf-knowledge-base.md`, validador
+  determinístico `check_okf.py` (4 invariantes estruturais) e hard gate no Stop que bloqueia número
+  publicado sem conceito de medição correspondente (#okf)
 - **theodb:** base de conhecimento operacional em Open Knowledge Format (OKF v0.1) — 46 conceitos
   navegáveis por agente cobrindo modos de falha, técnicas, invariantes de plataforma, medições e
   negativos honestos acumulados de M46 a M169 (#okf)

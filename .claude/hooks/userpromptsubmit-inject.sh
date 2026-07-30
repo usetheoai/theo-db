@@ -38,11 +38,30 @@ LADDER="PARSIMONY LADDER (rules/parsimony-ladder.md) — walk top-down BEFORE wr
   6. Only then: the minimum that works
 Never sacrificed by the ladder: tests, input validation, error handling, security, accessibility."
 
+# OKF knowledge base — re-injected EVERY turn, as a POINTER only (rules/okf-knowledge-base.md).
+# Deliberately terse: this hook fires on every prompt and its additionalContext stays in the
+# conversation history, so inlining concept content here would reproduce the context-bloat
+# problem documented at the top of this file. The agent Reads the category index on demand.
+# Rationale for existing at all: the knowledge was already written down across 67 memory files
+# and 110 blueprints and STILL did not fire when it mattered. A pointer that arrives every turn
+# is the strongest mechanism available for "always read" — hooks cannot prove comprehension.
+OKF="OKF KNOWLEDGE BASE (rules/okf-knowledge-base.md) — .claude/knowledge-base/okf/ :: 5 types, each answering one question:
+  failure-mode 'am I about to commit this?' · technique 'what is the right method?' · invariant 'does the platform allow this?'
+  measurement 'was this already measured?' · honest-negative 'was this already tried and refuted?'
+  READ the category index BEFORE: designing any measurement, publishing any number, proposing a technical bet,
+  or touching storage/FFI/unsafe/recovery/shared-branch.
+  WRITE a concept AFTER: any published number, any claim of mine refuted by measurement, any refuted bet,
+  any platform property learned the hard way. Update the existing concept — never fork a second file for the same class."
+
 # Emit canonical JSON and exit 0. The parsimony ladder is always prepended.
 emit_context() {
   local ctx="$1"
-  local full="$LADDER"
+  local full="$LADDER
+
+$OKF"
   [ -n "$ctx" ] && full="$LADDER
+
+$OKF
 
 $ctx"
   # jq -Rs reads stdin as a single string and JSON-escapes it

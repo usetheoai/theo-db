@@ -161,6 +161,38 @@ if echo "$ALL_FILES" | grep -qE '(^|/)README\.md$'; then
 fi
 
 # ----------------------------------------------------------------------------
+# 5. OKF knowledge base (HARD GATE — rules/okf-knowledge-base.md § 5.2)
+# ----------------------------------------------------------------------------
+# Two deterministic conditions, both with zero false-positive surface:
+#   (a) the bundle changed and is structurally invalid  -> BLOCK
+#   (b) a number was published under docs/benchmarks/ and no Measurement concept
+#       was touched -> BLOCK. A published number that is not in the knowledge base
+#       is EXACTLY the failure the bundle exists to correct: it will be re-measured
+#       by whoever needs it next, because nothing points them at it.
+# Content quality is deliberately NOT judged here — a checker pretending to grade
+# prose would be the "cobertura alegada sem execucao" failure mode the bundle
+# itself documents.
+OKF_CHANGED=$(echo "$ALL_FILES" | grep -E '(^|/)knowledge-base/okf/' || true)
+BENCH_CHANGED=$(echo "$ALL_FILES" | grep -E '^docs/benchmarks/.+' || true)
+OKF_MEASUREMENT_TOUCHED=$(echo "$ALL_FILES" | grep -E '(^|/)knowledge-base/okf/measurements/' || true)
+
+if [ -n "$OKF_CHANGED" ] && [ -f ".claude/scripts/check_okf.py" ]; then
+  OKF_OUT=$(python3 .claude/scripts/check_okf.py 2>&1)
+  OKF_RC=$?                      # captured IMMEDIATELY — see failure-modes/falso-verde-de-script
+  if [ "$OKF_RC" -ne 0 ]; then
+    msg="OKF bundle is structurally invalid (rules/okf-knowledge-base.md 5.1). Fix before stopping:
+$(echo "$OKF_OUT" | sed 's/^/      /')"
+    if [ "$WARN_ONLY" = "1" ]; then WARNINGS+=("$msg"); else BLOCKERS+=("$msg"); fi
+  fi
+fi
+
+if [ -n "$BENCH_CHANGED" ] && [ -z "$OKF_MEASUREMENT_TOUCHED" ]; then
+  msg="A number was published under docs/benchmarks/ but no OKF Measurement concept was written or updated (rules/okf-knowledge-base.md 4.1). A published number outside the knowledge base will be re-measured by whoever needs it next. Add or update a concept under .claude/knowledge-base/okf/measurements/ and log it in okf/log.md.
+      Published: $(echo "$BENCH_CHANGED" | head -3 | tr '\n' ' ')"
+  if [ "$WARN_ONLY" = "1" ]; then WARNINGS+=("$msg"); else BLOCKERS+=("$msg"); fi
+fi
+
+# ----------------------------------------------------------------------------
 # Report
 # ----------------------------------------------------------------------------
 if [ ${#BLOCKERS[@]} -gt 0 ]; then

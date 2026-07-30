@@ -64,6 +64,7 @@ Each `cycle-{name}.md` defines:
 | `error-handling.md` | Fail-fast discipline, typed errors (Unbreakable Rule 8) |
 | `git-safety.md` | Forbidden git commands + safe substitutes (Unbreakable Rule 4) |
 | `parsimony-ladder.md` | Pre-write minimalism ladder (YAGNI/KISS/Don't-Reinvent) enforced in GREEN phase |
+| `okf-knowledge-base.md` | OKF bundle contract — when reading is mandatory, when writing is, and what `check_okf.py` enforces |
 | `public-copy.md` | Banned framings in README/marketing |
 | `audit-trail-rotation.md` | When to archive/delete artifacts |
 | `loop-engine-convention.md` | Skill vs Agent vs ralph-loop |

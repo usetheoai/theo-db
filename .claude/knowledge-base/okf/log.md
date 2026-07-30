@@ -21,3 +21,23 @@ implementação do M169, e as mensagens de commit da série.
 Escopo deliberadamente **não** incluído: planos, reviews, ADRs e audits históricos. Eles continuam em
 `knowledge-base/`, no formato do ciclo. Este bundle é sobre **método e invariantes**, não sobre o rastro de
 execução.
+
+## 2026-07-30 — o bundle ganha contrato, validador e gates
+
+Criar o bundle não bastava: um bundle que ninguém lê é pior que nenhum, porque produz a sensação de cobertura
+sem a cobertura. Três mecanismos foram acrescentados no mesmo dia:
+
+| Peça | O que faz | Grau |
+|---|---|---|
+| `rules/okf-knowledge-base.md` | o contrato — quando ler, quando escrever, o que é máquina e o que não é | contrato |
+| `scripts/check_okf.py` | valida 4 invariantes estruturais (C1 `type`, C2 links, C3 índices, C4 raiz) | **determinístico** |
+| `hooks/stop-validation.sh` gate 5 | BLOQUEIA em bundle inválido, e em número publicado sem `Measurement` | **hard gate** |
+| `hooks/userpromptsubmit-inject.sh` | injeta o ponteiro a cada turno, ao lado da parsimony ladder | injeção |
+
+O validador tem **controle positivo**: um bundle deliberadamente quebrado tem de produzir exit 1, e produz
+(C1+C2+C3 detectados). Sem isso ele seria o `cobertura-alegada-sem-execucao` que este mesmo bundle documenta.
+
+Durante a construção dos testes, **dois** dos meus próprios modos de falha catalogados reapareceram — e é o dado
+mais interessante do dia: capturei `$?` de um `tail` num pipeline (`falso-verde-de-script`) e testei o gate de
+benchmark com um arquivo não-rastreado, que `ALL_FILES` estruturalmente não vê (`instrumento-cego-a-arquitetura`).
+O catálogo pegou os dois porque eu tinha acabado de escrevê-los.
