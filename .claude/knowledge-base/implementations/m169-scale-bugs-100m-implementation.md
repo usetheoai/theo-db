@@ -424,3 +424,25 @@ tipo de falha que só aparece na primeira execução real. Verificado na box:
 O teto de **300 s** e o `work_mem` de **256 MB** são os do M162 (`m162-100m-gap-verdict.md:10`) — e é essa
 igualdade que torna o número comparável ao `19/43`. Sob o default de 60 s do harness, quase tudo viraria
 `timeout` e o resultado não teria contra o que ser comparado.
+
+### Um confundidor do baseline, nomeado ANTES do número chegar
+
+A AC de T1.2 pede: *"o q23 tem veredito registrado"* — e o plano explica por quê: o M162 registrou o q23 como
+falha em 2026-07-26, **antes** de o M167 shipar, então "se ele roteia agora, o M167+M168 pode já tê-lo
+resolvido".
+
+**Mas o M162 registra a causa do q23 como `connection dropped (backend OOM on the 15 GB box)`** — e a box de
+hoje tem **31 GB**. Se o q23 passar, existem DUAS explicações, e o experimento não as separa:
+
+| Explicação | Como distinguir |
+|---|---|
+| M167+M168 o resolveram (roteamento novo) | o `EXPLAIN` mostra `Custom Scan (theodb_columnar_*)` — é o que a AC-3 pede |
+| a box tem 2× a RAM e o OOM simplesmente não ocorre | o `EXPLAIN` mostra o executor de linha nativo, e mesmo assim `ok` |
+
+Registro isto **antes** do resultado de propósito: depois que o número chega, a tentação de atribuir é máxima, e
+"o q23 foi resolvido pelo M167+M168" é uma alegação de produto que este experimento **não sustenta sozinho**. O
+`agg_routed` que o runner grava por consulta é o discriminador — foi por isso que ele usa
+`plan_shows_agg_pushdown` (o sinal agg-específico) em vez do sinal amplo que o M162 usava.
+
+Se o q23 passar com `agg_routed=False`, o veredito honesto é: **"completa nesta box; a causa registrada em 2026
+era OOM numa box de 15 GB, e esta tem 31 — a melhoria NÃO é atribuível ao roteamento."**
