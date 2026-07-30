@@ -478,3 +478,23 @@ quiser o delta contra o M162 precisa re-medir o M162 aqui — o que não é esco
 
 Registro **antes** de o número chegar. É a mesma disciplina do confundidor do q23, e pela mesma razão: depois do
 resultado, a comparação mais lisonjeira é a que se escreve sozinha.
+
+### O teto do `wc -l`, validado por medição em vez de raciocínio
+
+Durante a atestação de abertura, com o `wc -l` lendo os 69,7 GB:
+
+```
+vmstat: bi=401984 blocos/s  ≈ 400 MB/s
+```
+
+Aritmética fechada contra o teto:
+
+| | |
+|---|---|
+| 69,7 GB a 400 MB/s | **~175 s** |
+| `WC_TIMEOUT_S = 600` | **3,4× de margem** |
+| o `timeout=60` original | alcançaria **24 GB** — não os 69,7 |
+
+O defeito que o SEPA apontou em T1.1 era real, e o teto novo está dimensionado com folga. Registro porque a
+correção tinha sido feita por **raciocínio** ("60 s implicaria 1,16 GB/s sustentado, implausível") e agora tem
+**medição** — que é a diferença entre uma estimativa correta e um número.
