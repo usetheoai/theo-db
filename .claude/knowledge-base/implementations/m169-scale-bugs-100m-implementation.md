@@ -446,3 +446,35 @@ Registro isto **antes** do resultado de propósito: depois que o número chega, 
 
 Se o q23 passar com `agg_routed=False`, o veredito honesto é: **"completa nesta box; a causa registrada em 2026
 era OOM numa box de 15 GB, e esta tem 31 — a melhoria NÃO é atribuível ao roteamento."**
+
+## O `19/43` NÃO é base de comparação válida para esta corrida — e o plano não registra isso
+
+Medido nos dois artefatos, não inferido:
+
+| | M162 (`m162-100m-gap-verdict.md:5-6`) | Esta corrida (ADR-3) |
+|---|---|---|
+| Box | **15 GB RAM**, 8 vCPU, 280 GB | **31 GB RAM**, 16 vCPU, 400 GB |
+| `hits` colunar | 16 GB | 16 GB |
+| Regime declarado | *"**Genuinely larger-than-RAM**: the 100M columnar `hits` working set exceeds 15 GB RAM, so cold queries hit disk"* | **cabe em RAM** |
+
+O ADR-3 trocou a box por um motivo correto (a antiga tem load 21, hospeda o runner de CI e produziu ρ=+1,00 de
+deriva). Mas **nenhum ponto do plano registra que a troca muda o REGIME** — e três das cinco falhas do M162
+(q17, q21, q22, todas `statement_timeout` >300 s) foram medidas num regime **disk-bound** que esta box não
+reproduz.
+
+**Consequência, e ela tem dois lados:**
+
+1. **O baseline continua válido para o que ele existe.** O propósito declarado (ADR-2) é ter o número do binário
+   ATUAL na box onde o T4.1 vai re-medir. Isso é auto-comparação — mesma box, mesmo regime, antes vs depois do
+   fix — e permanece exata.
+2. **O `19/43` não pode ser citado como "de onde partimos".** Se esta corrida completar mais que 19, parte do
+   ganho é da máquina, não do código. Reportar "melhoramos de 19/43 para N/43" seria comparar duas populações
+   sob regimes diferentes — exatamente o que o próprio artefato do M162 alerta ao chamar o geomean dele de
+   *"cross-population"*.
+
+**O que o artefato do baseline TEM de dizer**, e o gerador já carrega os fatos para isso: o número desta corrida
+é o **ponto de partida do M169 nesta box**, e a comparação com o M162 é **inválida por mudança de regime**. Quem
+quiser o delta contra o M162 precisa re-medir o M162 aqui — o que não é escopo deste milestone.
+
+Registro **antes** de o número chegar. É a mesma disciplina do confundidor do q23, e pela mesma razão: depois do
+resultado, a comparação mais lisonjeira é a que se escreve sozinha.
