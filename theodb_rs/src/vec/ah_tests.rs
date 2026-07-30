@@ -2,362 +2,390 @@
 // so neither file exceeds the 500-LoC budget (`rules/architecture.md`). Spliced inside `mod tests`, so
 // `super::` resolves to `vec::ah`. Covers T2.1 (scalar LUT + oracle), T2.2 (pshufb parity + no-overflow +
 // block32), T2.3 (micro-bench).
-    use super::*;
-    use pgrx::prelude::*;
+use super::*;
+use pgrx::prelude::*;
 
-    /// Tiny deterministic PRNG (SplitMix64) — local so `ah.rs` tests do not depend on `crate::ann::Rng`.
-    struct TestRng(u64);
-    impl TestRng {
-        fn new(seed: u64) -> Self {
-            TestRng(seed)
+/// Tiny deterministic PRNG (SplitMix64) — local so `ah.rs` tests do not depend on `crate::ann::Rng`.
+struct TestRng(u64);
+impl TestRng {
+    fn new(seed: u64) -> Self {
+        TestRng(seed)
+    }
+    fn next_f32(&mut self) -> f32 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^= z >> 31;
+        ((z >> 11) as f64 / (1u64 << 53) as f64) as f32 * 2.0 - 1.0
+    }
+}
+
+fn random_corpus(rng: &mut TestRng, n: usize, dim: usize) -> Vec<Vec<f32>> {
+    (0..n).map(|_| (0..dim).map(|_| rng.next_f32()).collect()).collect()
+}
+
+/// The naive f32-ADC score: `Σ_i ‖query_sub_i − centroid_{i, code_i}‖²` — the exact reference the requantized
+/// LUT16 must ORDER-match (the FAISS/ScaNN validity property, blueprint T2).
+fn naive_adc_f32(q: &AqQuantizer, query: &[f32], code: &[u8]) -> f64 {
+    let lut = q.adc_lut(query);
+    q.adc_distance(&lut, code)
+}
+
+// ---------- T2.1: scalar LUT16 + oracle ----------
+
+#[pg_test]
+fn ah_lut_score_equals_naive_adc() {
+    // Over a random corpus, ah_score_scalar RANKS codes identically to the naive f32-ADC (order-preserving —
+    // the requant preserves the argmin/top-k, which is all the scan needs). blueprint T2.
+    let mut r = TestRng::new(101);
+    let dim = 16;
+    let m = 4;
+    let corpus = random_corpus(&mut r, 300, dim);
+    let q = AqQuantizer::train(&corpus, m, 4, 2.0, 42).expect("train");
+    let codes: Vec<Vec<u8>> = corpus.iter().map(|v| q.encode(v)).collect();
+    let query = random_corpus(&mut r, 1, dim).remove(0);
+    let lut = build_lut16(&query, &q).expect("lut");
+
+    // Spearman-style: the ranking by int8 AH score must equal the ranking by naive f32 ADC on the SAME codes.
+    let mut by_ah: Vec<usize> = (0..codes.len()).collect();
+    by_ah.sort_by_key(|&i| ah_score_scalar(&lut, &codes[i]));
+    let mut by_f32: Vec<usize> = (0..codes.len()).collect();
+    by_f32.sort_by(|&a, &b| {
+        naive_adc_f32(&q, &query, &codes[a])
+            .partial_cmp(&naive_adc_f32(&q, &query, &codes[b]))
+            .unwrap()
+    });
+    // Top-k agreement (the property the scan uses): the top-10 AH survivors overlap the top-10 f32 by ≥ 8/10.
+    let k = 10;
+    let ah_top: std::collections::HashSet<usize> = by_ah[..k].iter().copied().collect();
+    let overlap = by_f32[..k].iter().filter(|i| ah_top.contains(i)).count();
+    assert!(overlap >= 8, "AH top-{k} must overlap f32 top-{k} by ≥8, got {overlap}");
+    // And the argmin must agree exactly (the nearest neighbour is preserved).
+    assert_eq!(by_ah[0], by_f32[0], "AH argmin must equal f32 argmin (nearest is preserved)");
+}
+
+#[pg_test]
+fn ah_lut_requant_bounded() {
+    // The int8 requant error per LUT entry is ≤ one quant step (scale). And a degenerate all-equal-partials
+    // subspace (min==max) does NOT panic (div-by-zero guard).
+    let mut r = TestRng::new(202);
+    let dim = 8;
+    let m = 2;
+    let corpus = random_corpus(&mut r, 200, dim);
+    let q = AqQuantizer::train(&corpus, m, 4, 1.0, 7).expect("train");
+    let query = random_corpus(&mut r, 1, dim).remove(0);
+    let lut = build_lut16(&query, &q).expect("lut");
+    // Reconstruct each partial and compare to the f32 LUT: |A·code + B − partial| ≤ A (one step).
+    let f32_lut = q.adc_lut(&query);
+    for (i, sub) in f32_lut.iter().enumerate() {
+        for (j, &partial) in sub.iter().enumerate() {
+            let code = lut.tables[i * 16 + j] as i32;
+            let recon = lut.scale * code as f32 + lut.bias;
+            assert!(
+                (recon - partial).abs() <= lut.scale + 1e-3,
+                "requant off by more than one step at [{i}][{j}]: recon={recon} partial={partial} step={}",
+                lut.scale
+            );
         }
-        fn next_f32(&mut self) -> f32 {
-            self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
-            let mut z = self.0;
-            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-            z ^= z >> 31;
-            ((z >> 11) as f64 / (1u64 << 53) as f64) as f32 * 2.0 - 1.0
-        }
     }
+    // Degenerate: an empty codebook → typed Err (fail-fast), never a panic.
+    let empty = AqQuantizer::train(&[], m, 4, 1.0, 1).expect("empty train");
+    assert!(build_lut16(&query, &empty).is_err(), "empty codebook must be rejected");
+}
 
-    fn random_corpus(rng: &mut TestRng, n: usize, dim: usize) -> Vec<Vec<f32>> {
-        (0..n).map(|_| (0..dim).map(|_| rng.next_f32()).collect()).collect()
+#[pg_test]
+fn ah_build_lut16_rejects_dim_mismatch() {
+    // Negative (Rule 8): a query of the wrong dim → typed Err, never OOB.
+    let mut r = TestRng::new(303);
+    let corpus = random_corpus(&mut r, 50, 8);
+    let q = AqQuantizer::train(&corpus, 2, 4, 1.0, 1).expect("train");
+    let bad_query = vec![0.0f32; 7]; // dim 7 != codebook dim 8
+    assert!(build_lut16(&bad_query, &q).is_err(), "dim-mismatch query must be rejected");
+}
+
+// ---------- T2.2: SIMD pshufb == scalar oracle ----------
+
+#[cfg(target_arch = "x86_64")]
+#[pg_test]
+fn ah_simd_matches_scalar_lut() {
+    // The single-code `_mm_shuffle_epi8` (pshufb) kernel is BIT-IDENTICAL to the scalar oracle across several
+    // m (even + odd, incl. a non-lane-multiple tail): both sum the same int8 LUT; pshufb is exact, not
+    // approximate (the tolerance lives in the requant, tested separately). This proves the intrinsic is
+    // correct even though production single-code scoring dispatches to scalar (the pshufb WIN is the batched
+    // block path). blueprint Coverage Corner 1 Project B (FAISS pq4 bit-for-bit accumulate).
+    if !super::simd_ah::available() {
+        return; // no AVX2 on this host → the pshufb kernel is unreachable; scalar oracle already covered.
     }
-
-    /// The naive f32-ADC score: `Σ_i ‖query_sub_i − centroid_{i, code_i}‖²` — the exact reference the requantized
-    /// LUT16 must ORDER-match (the FAISS/ScaNN validity property, blueprint T2).
-    fn naive_adc_f32(q: &AqQuantizer, query: &[f32], code: &[u8]) -> f64 {
-        let lut = q.adc_lut(query);
-        q.adc_distance(&lut, code)
-    }
-
-    // ---------- T2.1: scalar LUT16 + oracle ----------
-
-    #[pg_test]
-    fn ah_lut_score_equals_naive_adc() {
-        // Over a random corpus, ah_score_scalar RANKS codes identically to the naive f32-ADC (order-preserving —
-        // the requant preserves the argmin/top-k, which is all the scan needs). blueprint T2.
-        let mut r = TestRng::new(101);
-        let dim = 16;
-        let m = 4;
-        let corpus = random_corpus(&mut r, 300, dim);
-        let q = AqQuantizer::train(&corpus, m, 4, 2.0, 42).expect("train");
-        let codes: Vec<Vec<u8>> = corpus.iter().map(|v| q.encode(v)).collect();
+    let mut r = TestRng::new(404);
+    for &m in &[2usize, 4, 5, 8, 16, 17] {
+        let dim = m * 4; // sub_dim 4
+        let corpus = random_corpus(&mut r, 250, dim);
+        let q = AqQuantizer::train(&corpus, m, 4, 2.0, 11).expect("train");
         let query = random_corpus(&mut r, 1, dim).remove(0);
         let lut = build_lut16(&query, &q).expect("lut");
-
-        // Spearman-style: the ranking by int8 AH score must equal the ranking by naive f32 ADC on the SAME codes.
-        let mut by_ah: Vec<usize> = (0..codes.len()).collect();
-        by_ah.sort_by_key(|&i| ah_score_scalar(&lut, &codes[i]));
-        let mut by_f32: Vec<usize> = (0..codes.len()).collect();
-        by_f32.sort_by(|&a, &b| {
-            naive_adc_f32(&q, &query, &codes[a])
-                .partial_cmp(&naive_adc_f32(&q, &query, &codes[b]))
-                .unwrap()
-        });
-        // Top-k agreement (the property the scan uses): the top-10 AH survivors overlap the top-10 f32 by ≥ 8/10.
-        let k = 10;
-        let ah_top: std::collections::HashSet<usize> = by_ah[..k].iter().copied().collect();
-        let overlap = by_f32[..k].iter().filter(|i| ah_top.contains(i)).count();
-        assert!(overlap >= 8, "AH top-{k} must overlap f32 top-{k} by ≥8, got {overlap}");
-        // And the argmin must agree exactly (the nearest neighbour is preserved).
-        assert_eq!(by_ah[0], by_f32[0], "AH argmin must equal f32 argmin (nearest is preserved)");
-    }
-
-    #[pg_test]
-    fn ah_lut_requant_bounded() {
-        // The int8 requant error per LUT entry is ≤ one quant step (scale). And a degenerate all-equal-partials
-        // subspace (min==max) does NOT panic (div-by-zero guard).
-        let mut r = TestRng::new(202);
-        let dim = 8;
-        let m = 2;
-        let corpus = random_corpus(&mut r, 200, dim);
-        let q = AqQuantizer::train(&corpus, m, 4, 1.0, 7).expect("train");
-        let query = random_corpus(&mut r, 1, dim).remove(0);
-        let lut = build_lut16(&query, &q).expect("lut");
-        // Reconstruct each partial and compare to the f32 LUT: |A·code + B − partial| ≤ A (one step).
-        let f32_lut = q.adc_lut(&query);
-        for (i, sub) in f32_lut.iter().enumerate() {
-            for (j, &partial) in sub.iter().enumerate() {
-                let code = lut.tables[i * 16 + j] as i32;
-                let recon = lut.scale * code as f32 + lut.bias;
-                assert!(
-                    (recon - partial).abs() <= lut.scale + 1e-3,
-                    "requant off by more than one step at [{i}][{j}]: recon={recon} partial={partial} step={}",
-                    lut.scale
-                );
-            }
+        for v in corpus.iter().take(40) {
+            let code = q.encode(v);
+            let oracle = ah_score_scalar(&lut, &code);
+            // SAFETY: available() true; code.len()==ceil(m/2) by construction.
+            let avx = unsafe { super::simd_ah::ah_score(&lut, &code) };
+            assert_eq!(avx, oracle, "single-code pshufb must equal the scalar oracle for m={m}");
+            // And the public dispatcher (scalar by design) equals the oracle too.
+            assert_eq!(
+                ah_score(&lut, &code),
+                oracle,
+                "public ah_score must equal the oracle for m={m}"
+            );
         }
-        // Degenerate: an empty codebook → typed Err (fail-fast), never a panic.
-        let empty = AqQuantizer::train(&[], m, 4, 1.0, 1).expect("empty train");
-        assert!(build_lut16(&query, &empty).is_err(), "empty codebook must be rejected");
     }
+}
 
-    #[pg_test]
-    fn ah_build_lut16_rejects_dim_mismatch() {
-        // Negative (Rule 8): a query of the wrong dim → typed Err, never OOB.
-        let mut r = TestRng::new(303);
-        let corpus = random_corpus(&mut r, 50, 8);
-        let q = AqQuantizer::train(&corpus, 2, 4, 1.0, 1).expect("train");
-        let bad_query = vec![0.0f32; 7]; // dim 7 != codebook dim 8
-        assert!(build_lut16(&bad_query, &q).is_err(), "dim-mismatch query must be rejected");
+#[cfg(target_arch = "x86_64")]
+#[pg_test]
+fn ah_simd_block32_matches_scalar() {
+    // The batched block32 kernel (subspace-major transposed layout, FAISS bbs=32) scores a block of up to 32
+    // codes identically to the per-code scalar oracle. Exercises the widened i16 accumulate path.
+    let mut r = TestRng::new(505);
+    let m = 8usize;
+    let dim = m * 4;
+    let corpus = random_corpus(&mut r, 64, dim);
+    let q = AqQuantizer::train(&corpus, m, 4, 2.0, 13).expect("train");
+    let query = random_corpus(&mut r, 1, dim).remove(0);
+    let lut = build_lut16(&query, &q).expect("lut");
+    if !super::simd_ah::available() {
+        // No AVX2 on this host → the block kernel is unreachable; the scalar path is already covered.
+        return;
     }
+    let n = 32usize;
+    let codes: Vec<Vec<u8>> = corpus.iter().take(n).map(|v| q.encode(v)).collect();
+    // Transpose to subspace-pair-major: for each pair p, one byte per vector.
+    let pairs = m.div_ceil(2);
+    let mut block = vec![0u8; pairs * 32];
+    for (v, code) in codes.iter().enumerate() {
+        for (p, &byte) in code.iter().enumerate() {
+            block[p * 32 + v] = byte;
+        }
+    }
+    let mut out = vec![0i32; n];
+    ah_score_block(&lut, &block, n, &mut out); // dispatches to the AVX2 block kernel here.
+    for (v, code) in codes.iter().enumerate() {
+        assert_eq!(out[v], ah_score_scalar(&lut, code), "block32 vector {v} mismatch");
+    }
+}
 
-    // ---------- T2.2: SIMD pshufb == scalar oracle ----------
-
+#[pg_test]
+fn ah_simd_no_overflow() {
+    // A worst-case all-max-LUT block does not overflow the int accumulate. m=128 → max acc = 128*127 = 16256
+    // < i16::MAX (32767) and ≪ i32::MAX. Construct a synthetic all-127 LUT and assert the score is exact.
+    let m = 128usize;
+    let tables = vec![LUT_MAX as i8; m * 16];
+    let lut = Lut16 { m, tables, scale: 1.0, bias: 0.0 };
+    let code = vec![0u8; m.div_ceil(2)]; // every nibble → centroid 0 → 127
+    let scalar = ah_score_scalar(&lut, &code);
+    assert_eq!(scalar, m as i32 * LUT_MAX, "all-max scalar accumulate must be exact (no overflow)");
     #[cfg(target_arch = "x86_64")]
-    #[pg_test]
-    fn ah_simd_matches_scalar_lut() {
-        // The single-code `_mm_shuffle_epi8` (pshufb) kernel is BIT-IDENTICAL to the scalar oracle across several
-        // m (even + odd, incl. a non-lane-multiple tail): both sum the same int8 LUT; pshufb is exact, not
-        // approximate (the tolerance lives in the requant, tested separately). This proves the intrinsic is
-        // correct even though production single-code scoring dispatches to scalar (the pshufb WIN is the batched
-        // block path). blueprint Coverage Corner 1 Project B (FAISS pq4 bit-for-bit accumulate).
-        if !super::simd_ah::available() {
-            return; // no AVX2 on this host → the pshufb kernel is unreachable; scalar oracle already covered.
-        }
-        let mut r = TestRng::new(404);
-        for &m in &[2usize, 4, 5, 8, 16, 17] {
-            let dim = m * 4; // sub_dim 4
-            let corpus = random_corpus(&mut r, 250, dim);
-            let q = AqQuantizer::train(&corpus, m, 4, 2.0, 11).expect("train");
-            let query = random_corpus(&mut r, 1, dim).remove(0);
-            let lut = build_lut16(&query, &q).expect("lut");
-            for v in corpus.iter().take(40) {
-                let code = q.encode(v);
-                let oracle = ah_score_scalar(&lut, &code);
-                // SAFETY: available() true; code.len()==ceil(m/2) by construction.
-                let avx = unsafe { super::simd_ah::ah_score(&lut, &code) };
-                assert_eq!(avx, oracle, "single-code pshufb must equal the scalar oracle for m={m}");
-                // And the public dispatcher (scalar by design) equals the oracle too.
-                assert_eq!(ah_score(&lut, &code), oracle, "public ah_score must equal the oracle for m={m}");
-            }
-        }
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    #[pg_test]
-    fn ah_simd_block32_matches_scalar() {
-        // The batched block32 kernel (subspace-major transposed layout, FAISS bbs=32) scores a block of up to 32
-        // codes identically to the per-code scalar oracle. Exercises the widened i16 accumulate path.
-        let mut r = TestRng::new(505);
-        let m = 8usize;
-        let dim = m * 4;
-        let corpus = random_corpus(&mut r, 64, dim);
-        let q = AqQuantizer::train(&corpus, m, 4, 2.0, 13).expect("train");
-        let query = random_corpus(&mut r, 1, dim).remove(0);
-        let lut = build_lut16(&query, &q).expect("lut");
-        if !super::simd_ah::available() {
-            // No AVX2 on this host → the block kernel is unreachable; the scalar path is already covered.
-            return;
-        }
-        let n = 32usize;
-        let codes: Vec<Vec<u8>> = corpus.iter().take(n).map(|v| q.encode(v)).collect();
-        // Transpose to subspace-pair-major: for each pair p, one byte per vector.
-        let pairs = m.div_ceil(2);
-        let mut block = vec![0u8; pairs * 32];
-        for (v, code) in codes.iter().enumerate() {
-            for (p, &byte) in code.iter().enumerate() {
-                block[p * 32 + v] = byte;
-            }
-        }
-        let mut out = vec![0i32; n];
-        ah_score_block(&lut, &block, n, &mut out); // dispatches to the AVX2 block kernel here.
-        for (v, code) in codes.iter().enumerate() {
-            assert_eq!(out[v], ah_score_scalar(&lut, code), "block32 vector {v} mismatch");
-        }
-    }
-
-    #[pg_test]
-    fn ah_simd_no_overflow() {
-        // A worst-case all-max-LUT block does not overflow the int accumulate. m=128 → max acc = 128*127 = 16256
-        // < i16::MAX (32767) and ≪ i32::MAX. Construct a synthetic all-127 LUT and assert the score is exact.
-        let m = 128usize;
-        let tables = vec![LUT_MAX as i8; m * 16];
-        let lut = Lut16 { m, tables, scale: 1.0, bias: 0.0 };
-        let code = vec![0u8; m.div_ceil(2)]; // every nibble → centroid 0 → 127
-        let scalar = ah_score_scalar(&lut, &code);
-        assert_eq!(scalar, m as i32 * LUT_MAX, "all-max scalar accumulate must be exact (no overflow)");
-        #[cfg(target_arch = "x86_64")]
-        {
-            if super::simd_ah::available() {
-                // Single-code pshufb: exact even at the worst case.
-                // SAFETY: available() true; code.len()==ceil(m/2).
-                let avx1 = unsafe { super::simd_ah::ah_score(&lut, &code) };
-                assert_eq!(avx1, scalar, "single-code avx must not overflow");
-                // Batched block: the i16 widened accumulate must survive m=128 all-max (128*127=16256 < 32767).
-                let pairs = m.div_ceil(2);
-                let block = vec![0u8; pairs * 32]; // all nibbles → centroid 0 → 127
-                let mut out = vec![0i32; 32];
-                ah_score_block(&lut, &block, 32, &mut out);
-                assert!(out.iter().all(|&s| s == scalar), "block32 accumulate must not overflow (i16 widen)");
-            }
-        }
-    }
-
-    // ---------- T2.3: criterion micro-bench ----------
-
-    #[pg_test]
-    fn ah_simd_per_candidate_speedup() {
-        // Per-candidate scoring cost of the AH THROUGHPUT path — the batched `pshufb` block32 kernel (16/32
-        // parallel lookups/instruction, blueprint T2) vs the scalar loop over the same 32 codes, m=128
-        // (SIFT1M-scale). This is the honest comparison: single-code pshufb pays a lane-extract per subspace and
-        // loses to a table lookup (documented on `ah_score`); the win is BATCHED. Logs the ratio + writes it for
-        // the Phase-5 doc; asserts only "SIMD not slower" (loose, non-flaky). Mirrors cosine_simd_… (vec.rs:487).
-        let mut r = TestRng::new(606);
-        let m = 128usize;
-        let dim = m * 4;
-        let corpus = random_corpus(&mut r, 64, dim);
-        let q = AqQuantizer::train(&corpus, m, 4, 2.0, 99).expect("train");
-        let query = random_corpus(&mut r, 1, dim).remove(0);
-        let lut = build_lut16(&query, &q).expect("lut");
-        let pairs = m.div_ceil(2);
-        // A full transposed block of 32 real codes.
-        let mut block = vec![0u8; pairs * 32];
-        for (v, cv) in corpus.iter().take(32).enumerate() {
-            let code = q.encode(cv);
-            for (p, &b) in code.iter().enumerate() {
-                block[p * 32 + v] = b;
-            }
-        }
-        let iters = 50_000u64; // each iter scores 32 codes → 1.6M candidate-scores per branch
-        let run_avx = || -> f64 {
-            let t0 = std::time::Instant::now();
-            let mut acc = 0i64;
+    {
+        if super::simd_ah::available() {
+            // Single-code pshufb: exact even at the worst case.
+            // SAFETY: available() true; code.len()==ceil(m/2).
+            let avx1 = unsafe { super::simd_ah::ah_score(&lut, &code) };
+            assert_eq!(avx1, scalar, "single-code avx must not overflow");
+            // Batched block: the i16 widened accumulate must survive m=128 all-max (128*127=16256 < 32767).
+            let pairs = m.div_ceil(2);
+            let block = vec![0u8; pairs * 32]; // all nibbles → centroid 0 → 127
             let mut out = vec![0i32; 32];
-            for _ in 0..iters {
-                ah_score_block(std::hint::black_box(&lut), std::hint::black_box(&block), 32, &mut out);
-                acc += out[0] as i64;
-            }
-            std::hint::black_box(acc);
-            t0.elapsed().as_secs_f64()
-        };
-        let run_scalar = || -> f64 {
-            let t0 = std::time::Instant::now();
-            let mut acc = 0i64;
-            let mut o = vec![0i32; 32];
-            for _ in 0..iters {
-                ah_score_block_scalar(std::hint::black_box(&lut), std::hint::black_box(&block), 32, &mut o);
-                acc += o[0] as i64;
-            }
-            std::hint::black_box(acc);
-            t0.elapsed().as_secs_f64()
-        };
-        // On x86 with AVX2, ah_score_block dispatches to the SIMD kernel; run_scalar always uses the scalar loop.
-        #[cfg(target_arch = "x86_64")]
-        let have_avx = super::simd_ah::available();
-        #[cfg(not(target_arch = "x86_64"))]
-        let have_avx = false;
-        let (t_avx, t_scalar) = (run_avx(), run_scalar());
-        let speedup = t_scalar / t_avx.max(1e-9);
-        let line = format!(
-            "M59 AH block32 micro-bench m={m} iters={iters} (x32 codes) avx2={have_avx}: scalar={t_scalar:.4}s block={t_avx:.4}s speedup={speedup:.2}x"
-        );
-        pgrx::log!("{line}");
-        let _ = std::fs::write("/build/target/m59-ah-speedup.txt", &line);
-        // Loose non-flaky guard. When AVX2 is present the batched pshufb should be ≥ the scalar loop; when it is
-        // NOT present both paths are the identical scalar loop, so only the "not materially slower" bound holds.
-        assert!(t_avx <= t_scalar * 1.2, "AH block32 must not be slower than the scalar loop (block={t_avx} scalar={t_scalar})");
-    }
-
-    // ============================================================================================================
-    // E2 FastScan 1-bit sign kernel (plan symqg-fastscan-1bit T1.1). Validates the REAL build_sign_lut16 +
-    // sign_estimate_block against the exact dot / scalar estimate_sign oracle. Mirrors the standalone arithmetic
-    // proof, exercised here through the actual Lut16 + ah_score_block pshufb path.
-    // ============================================================================================================
-
-    /// Pack a block of ≤32 neighbours' sign vectors `u ∈ {−1,+1}^dim` into the block32-nibble layout the FastScan
-    /// kernel expects (`codes[pair*32 + v]`; group `g`'s 4-bit sign pattern is the nibble). Mirrors the T2.1 pack.
-    fn pack_block32_signs(us: &[Vec<i8>], m: usize) -> Vec<u8> {
-        let pairs = m.div_ceil(2);
-        let mut codes = vec![0u8; pairs * 32];
-        for (v, u) in us.iter().enumerate() {
-            let nib = |g: usize| -> u8 { (0..4).filter(|&b| 4 * g + b < u.len()).map(|b| if u[4 * g + b] > 0 { 1u8 << b } else { 0 }).sum() };
-            for pair in 0..pairs {
-                let lo = nib(2 * pair);
-                let hi = if 2 * pair + 1 < m { nib(2 * pair + 1) } else { 0 };
-                codes[pair * 32 + v] = lo | (hi << 4);
-            }
-        }
-        codes
-    }
-
-    fn exact_dot(q_r: &[f32], u: &[i8]) -> f64 {
-        q_r.iter().zip(u).map(|(&q, &s)| q as f64 * s as f64).sum()
-    }
-
-    #[pg_test]
-    fn test_sign_lut_dequant_within_tol() {
-        // build_sign_lut16 + ah_score_block: the dequantized accumulator ≈ exact ⟨q_r,u⟩ within the requant bound.
-        for &dim in &[128usize, 8, 130, 768, 1032] {
-            let m = dim.div_ceil(4);
-            let mut rng = TestRng::new(0xABCD ^ dim as u64);
-            let q_r: Vec<f32> = (0..dim).map(|_| rng.next_f32() * 10.0).collect();
-            let lut = build_sign_lut16(&q_r).expect("eligible dim");
-            let us: Vec<Vec<i8>> = (0..32)
-                .map(|_| (0..dim).map(|_| if rng.next_f32() > 0.0 { 1i8 } else { -1 }).collect())
-                .collect();
-            let codes = pack_block32_signs(&us, m);
-            let mut acc = vec![0i32; 32];
-            ah_score_block(&lut, &codes, 32, &mut acc);
-            let bound = m as f64 * lut.scale as f64; // ≥ worst-case m·scale/2
-            for v in 0..32 {
-                let dq = lut.dequantize(acc[v]) as f64;
-                let ex = exact_dot(&q_r, &us[v]);
-                assert!((dq - ex).abs() <= bound, "dim={dim} v={v}: |{dq}-{ex}| > {bound}");
-            }
+            ah_score_block(&lut, &block, 32, &mut out);
+            assert!(
+                out.iter().all(|&s| s == scalar),
+                "block32 accumulate must not overflow (i16 widen)"
+            );
         }
     }
+}
 
-    #[pg_test]
-    fn test_sign_fastscan_matches_estimate_sign() {
-        // sign_estimate_block reproduces estimate_sign (the scalar oracle) within the propagated requant tolerance.
-        use crate::ann::symqg_spike::{estimate_sign, SignCode};
-        let dim = 128usize;
-        let m = dim / 4;
-        let mut rng = TestRng::new(0x5151);
-        let q_r: Vec<f32> = (0..dim).map(|_| rng.next_f32() * 8.0).collect();
-        let lut = build_sign_lut16(&q_r).unwrap();
-        let qc2 = 42.0f64;
-        let codes_u: Vec<Vec<i8>> = (0..32)
+// ---------- T2.3: criterion micro-bench ----------
+
+#[pg_test]
+fn ah_simd_per_candidate_speedup() {
+    // Per-candidate scoring cost of the AH THROUGHPUT path — the batched `pshufb` block32 kernel (16/32
+    // parallel lookups/instruction, blueprint T2) vs the scalar loop over the same 32 codes, m=128
+    // (SIFT1M-scale). This is the honest comparison: single-code pshufb pays a lane-extract per subspace and
+    // loses to a table lookup (documented on `ah_score`); the win is BATCHED. Logs the ratio + writes it for
+    // the Phase-5 doc; asserts only "SIMD not slower" (loose, non-flaky). Mirrors cosine_simd_… (vec.rs:487).
+    let mut r = TestRng::new(606);
+    let m = 128usize;
+    let dim = m * 4;
+    let corpus = random_corpus(&mut r, 64, dim);
+    let q = AqQuantizer::train(&corpus, m, 4, 2.0, 99).expect("train");
+    let query = random_corpus(&mut r, 1, dim).remove(0);
+    let lut = build_lut16(&query, &q).expect("lut");
+    let pairs = m.div_ceil(2);
+    // A full transposed block of 32 real codes.
+    let mut block = vec![0u8; pairs * 32];
+    for (v, cv) in corpus.iter().take(32).enumerate() {
+        let code = q.encode(cv);
+        for (p, &b) in code.iter().enumerate() {
+            block[p * 32 + v] = b;
+        }
+    }
+    let iters = 50_000u64; // each iter scores 32 codes → 1.6M candidate-scores per branch
+    let run_avx = || -> f64 {
+        let t0 = std::time::Instant::now();
+        let mut acc = 0i64;
+        let mut out = vec![0i32; 32];
+        for _ in 0..iters {
+            ah_score_block(std::hint::black_box(&lut), std::hint::black_box(&block), 32, &mut out);
+            acc += out[0] as i64;
+        }
+        std::hint::black_box(acc);
+        t0.elapsed().as_secs_f64()
+    };
+    let run_scalar = || -> f64 {
+        let t0 = std::time::Instant::now();
+        let mut acc = 0i64;
+        let mut o = vec![0i32; 32];
+        for _ in 0..iters {
+            ah_score_block_scalar(
+                std::hint::black_box(&lut),
+                std::hint::black_box(&block),
+                32,
+                &mut o,
+            );
+            acc += o[0] as i64;
+        }
+        std::hint::black_box(acc);
+        t0.elapsed().as_secs_f64()
+    };
+    // On x86 with AVX2, ah_score_block dispatches to the SIMD kernel; run_scalar always uses the scalar loop.
+    #[cfg(target_arch = "x86_64")]
+    let have_avx = super::simd_ah::available();
+    #[cfg(not(target_arch = "x86_64"))]
+    let have_avx = false;
+    let (t_avx, t_scalar) = (run_avx(), run_scalar());
+    let speedup = t_scalar / t_avx.max(1e-9);
+    let line = format!(
+        "M59 AH block32 micro-bench m={m} iters={iters} (x32 codes) avx2={have_avx}: scalar={t_scalar:.4}s block={t_avx:.4}s speedup={speedup:.2}x"
+    );
+    pgrx::log!("{line}");
+    let _ = std::fs::write("/build/target/m59-ah-speedup.txt", &line);
+    // Loose non-flaky guard. When AVX2 is present the batched pshufb should be ≥ the scalar loop; when it is
+    // NOT present both paths are the identical scalar loop, so only the "not materially slower" bound holds.
+    assert!(
+        t_avx <= t_scalar * 1.2,
+        "AH block32 must not be slower than the scalar loop (block={t_avx} scalar={t_scalar})"
+    );
+}
+
+// ============================================================================================================
+// E2 FastScan 1-bit sign kernel (plan symqg-fastscan-1bit T1.1). Validates the REAL build_sign_lut16 +
+// sign_estimate_block against the exact dot / scalar estimate_sign oracle. Mirrors the standalone arithmetic
+// proof, exercised here through the actual Lut16 + ah_score_block pshufb path.
+// ============================================================================================================
+
+/// Pack a block of ≤32 neighbours' sign vectors `u ∈ {−1,+1}^dim` into the block32-nibble layout the FastScan
+/// kernel expects (`codes[pair*32 + v]`; group `g`'s 4-bit sign pattern is the nibble). Mirrors the T2.1 pack.
+fn pack_block32_signs(us: &[Vec<i8>], m: usize) -> Vec<u8> {
+    let pairs = m.div_ceil(2);
+    let mut codes = vec![0u8; pairs * 32];
+    for (v, u) in us.iter().enumerate() {
+        let nib = |g: usize| -> u8 {
+            (0..4)
+                .filter(|&b| 4 * g + b < u.len())
+                .map(|b| if u[4 * g + b] > 0 { 1u8 << b } else { 0 })
+                .sum()
+        };
+        for pair in 0..pairs {
+            let lo = nib(2 * pair);
+            let hi = if 2 * pair + 1 < m { nib(2 * pair + 1) } else { 0 };
+            codes[pair * 32 + v] = lo | (hi << 4);
+        }
+    }
+    codes
+}
+
+fn exact_dot(q_r: &[f32], u: &[i8]) -> f64 {
+    q_r.iter().zip(u).map(|(&q, &s)| q as f64 * s as f64).sum()
+}
+
+#[pg_test]
+fn test_sign_lut_dequant_within_tol() {
+    // build_sign_lut16 + ah_score_block: the dequantized accumulator ≈ exact ⟨q_r,u⟩ within the requant bound.
+    for &dim in &[128usize, 8, 130, 768, 1032] {
+        let m = dim.div_ceil(4);
+        let mut rng = TestRng::new(0xABCD ^ dim as u64);
+        let q_r: Vec<f32> = (0..dim).map(|_| rng.next_f32() * 10.0).collect();
+        let lut = build_sign_lut16(&q_r).expect("eligible dim");
+        let us: Vec<Vec<i8>> = (0..32)
             .map(|_| (0..dim).map(|_| if rng.next_f32() > 0.0 { 1i8 } else { -1 }).collect())
             .collect();
-        let nr: Vec<f32> = (0..32).map(|_| rng.next_f32().abs() * 3.0 + 0.5).collect();
-        let w: Vec<f32> = (0..32).map(|_| rng.next_f32().abs() * 2.0 + 0.5).collect();
-        let codes = pack_block32_signs(&codes_u, m);
-        let mut out = vec![0f64; 32];
-        sign_estimate_block(&lut, &codes, 32, &nr, &w, qc2, &mut out);
-        let bound = m as f64 * lut.scale as f64;
-        for k in 0..32 {
-            let sc = SignCode { u: codes_u[k].clone(), nr: nr[k], w: w[k] };
-            let exact = estimate_sign(&sc, &q_r, qc2);
-            let est_tol = 2.0 * nr[k] as f64 / w[k] as f64 * bound + 1e-3;
-            assert!((out[k] - exact).abs() <= est_tol, "k={k}: fast {} vs exact {} tol {est_tol}", out[k], exact);
+        let codes = pack_block32_signs(&us, m);
+        let mut acc = vec![0i32; 32];
+        ah_score_block(&lut, &codes, 32, &mut acc);
+        let bound = m as f64 * lut.scale as f64; // ≥ worst-case m·scale/2
+        for v in 0..32 {
+            let dq = lut.dequantize(acc[v]) as f64;
+            let ex = exact_dot(&q_r, &us[v]);
+            assert!((dq - ex).abs() <= bound, "dim={dim} v={v}: |{dq}-{ex}| > {bound}");
         }
     }
+}
 
-    #[pg_test]
-    fn test_sign_lut_empty_q_r_errs() {
-        assert!(build_sign_lut16(&[]).is_err(), "empty q_r must fail-fast");
-        assert!(build_sign_lut16(&vec![1.0f32; 130]).is_ok(), "dim=130 (m=33) valid via tail group");
-        assert!(build_sign_lut16(&vec![1.0f32; 1536]).is_err(), "dim=1536 (m=384>258) must fail-fast → scalar");
+#[pg_test]
+fn test_sign_fastscan_matches_estimate_sign() {
+    // sign_estimate_block reproduces estimate_sign (the scalar oracle) within the propagated requant tolerance.
+    use crate::ann::symqg_spike::{SignCode, estimate_sign};
+    let dim = 128usize;
+    let m = dim / 4;
+    let mut rng = TestRng::new(0x5151);
+    let q_r: Vec<f32> = (0..dim).map(|_| rng.next_f32() * 8.0).collect();
+    let lut = build_sign_lut16(&q_r).unwrap();
+    let qc2 = 42.0f64;
+    let codes_u: Vec<Vec<i8>> = (0..32)
+        .map(|_| (0..dim).map(|_| if rng.next_f32() > 0.0 { 1i8 } else { -1 }).collect())
+        .collect();
+    let nr: Vec<f32> = (0..32).map(|_| rng.next_f32().abs() * 3.0 + 0.5).collect();
+    let w: Vec<f32> = (0..32).map(|_| rng.next_f32().abs() * 2.0 + 0.5).collect();
+    let codes = pack_block32_signs(&codes_u, m);
+    let mut out = vec![0f64; 32];
+    sign_estimate_block(&lut, &codes, 32, &nr, &w, qc2, &mut out);
+    let bound = m as f64 * lut.scale as f64;
+    for k in 0..32 {
+        let sc = SignCode { u: codes_u[k].clone(), nr: nr[k], w: w[k] };
+        let exact = estimate_sign(&sc, &q_r, qc2);
+        let est_tol = 2.0 * nr[k] as f64 / w[k] as f64 * bound + 1e-3;
+        assert!(
+            (out[k] - exact).abs() <= est_tol,
+            "k={k}: fast {} vs exact {} tol {est_tol}",
+            out[k],
+            exact
+        );
     }
+}
 
-    #[pg_test]
-    fn test_sign_lut_degenerate_range_all_zero_qr() {
-        // q_r all zero → max==min guard; every dequantized dot is 0, estimate = qc2 + nr².
-        use crate::ann::symqg_spike::SignCode;
-        let dim = 128usize;
-        let lut = build_sign_lut16(&vec![0.0f32; dim]).expect("degenerate is valid");
-        let us: Vec<Vec<i8>> = vec![vec![1i8; dim]; 32];
-        let codes = pack_block32_signs(&us, dim / 4);
-        let nr = vec![2.0f32; 32];
-        let w = vec![1.5f32; 32];
-        let mut out = vec![0f64; 32];
-        sign_estimate_block(&lut, &codes, 32, &nr, &w, 7.0, &mut out);
-        for k in 0..32 {
-            assert!((out[k] - (7.0 + 4.0)).abs() < 1e-4, "all-zero q_r: est {} != qc2+nr²", out[k]);
-        }
-        let _ = SignCode { u: vec![1i8; dim], nr: 2.0, w: 1.5 };
+#[pg_test]
+fn test_sign_lut_empty_q_r_errs() {
+    assert!(build_sign_lut16(&[]).is_err(), "empty q_r must fail-fast");
+    assert!(build_sign_lut16(&vec![1.0f32; 130]).is_ok(), "dim=130 (m=33) valid via tail group");
+    assert!(
+        build_sign_lut16(&vec![1.0f32; 1536]).is_err(),
+        "dim=1536 (m=384>258) must fail-fast → scalar"
+    );
+}
+
+#[pg_test]
+fn test_sign_lut_degenerate_range_all_zero_qr() {
+    // q_r all zero → max==min guard; every dequantized dot is 0, estimate = qc2 + nr².
+    use crate::ann::symqg_spike::SignCode;
+    let dim = 128usize;
+    let lut = build_sign_lut16(&vec![0.0f32; dim]).expect("degenerate is valid");
+    let us: Vec<Vec<i8>> = vec![vec![1i8; dim]; 32];
+    let codes = pack_block32_signs(&us, dim / 4);
+    let nr = vec![2.0f32; 32];
+    let w = vec![1.5f32; 32];
+    let mut out = vec![0f64; 32];
+    sign_estimate_block(&lut, &codes, 32, &nr, &w, 7.0, &mut out);
+    for k in 0..32 {
+        assert!((out[k] - (7.0 + 4.0)).abs() < 1e-4, "all-zero q_r: est {} != qc2+nr²", out[k]);
     }
+    let _ = SignCode { u: vec![1i8; dim], nr: 2.0, w: 1.5 };
+}
