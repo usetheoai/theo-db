@@ -388,3 +388,22 @@ comparações foram feitas.
 
 Isto é `controle-positivo` aplicado ao pipeline inteiro: os três gates foram vistos **reprovando**, e um gate que
 nunca foi visto vermelho é uma hipótese sobre o gate, não uma medição.
+
+### Pré-flight do RED encadeado — para ele falhar pelo motivo CERTO
+
+Um RED que reprova por erro de ambiente é indistinguível, no log, de um RED que reprova pelo desenho. Verifiquei
+no catálogo da box, antes de deixá-lo encadeado:
+
+| | Estado |
+|---|---|
+| `theodb_columnar_stream_chunk_groups()` | **existe** — é o contador que torna o teste não-vacuoso |
+| `theodb.enable_columnar_agg`, `theodb.enable_columnar_late_mat` | **existem** |
+| AM `theodb_columnar` | **registrado** |
+| `theodb.enable_columnar_agg_stream` | **ausente** — correto, é a GUC que o T2.1 cria |
+
+A ausência da última é parte do desenho, não um problema: o `SET` dela sucede como **placeholder silencioso**
+(invariante medido hoje), os dois braços rodam o mesmo caminho eager, o contador fica em **0**, e o gate dispara
+com a mensagem que diz que este é o estado esperado ANTES do fix.
+
+Se a função do contador não existisse, o RED morreria com `function does not exist` — e eu leria isso como "o
+ambiente está quebrado" em vez de "o teste está correto e o fix não existe ainda".
