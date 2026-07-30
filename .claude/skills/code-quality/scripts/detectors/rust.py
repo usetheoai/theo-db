@@ -115,13 +115,13 @@ class RustDetector(BaseDetector):
     language = "rust"
     manifest_marker = "Cargo.toml"
 
-    def detect_dead_code(self, repo_root: Path) -> list[Finding]:
+    def detect_dead_code(self, manifest_dir: Path) -> list[Finding]:
         """Run `cargo +nightly udeps --output json` and parse unused deps."""
         cmd = ["cargo", "+nightly", "udeps", "--output", "json", "--all-targets"]
         try:
             result = subprocess.run(
                 cmd,
-                cwd=str(repo_root),
+                cwd=str(manifest_dir),
                 capture_output=True,
                 text=True,
                 timeout=_CARGO_UDEPS_TIMEOUT_SEC,

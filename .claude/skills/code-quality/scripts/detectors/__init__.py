@@ -29,7 +29,7 @@ class BaseDetector:
     language: str = ""
     manifest_marker: str = ""
 
-    def detect_dead_code(self, repo_root: Path) -> list:
+    def detect_dead_code(self, manifest_dir: Path) -> list:
         """Run D1 — language-specific dead code detector.
 
         Wraps external CLI (vulture / knip / cargo-udeps / deadcode).

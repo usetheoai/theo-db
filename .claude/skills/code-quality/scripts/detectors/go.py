@@ -22,13 +22,13 @@ class GoDetector(BaseDetector):
     language = "go"
     manifest_marker = "go.mod"
 
-    def detect_dead_code(self, repo_root: Path) -> list[Finding]:
+    def detect_dead_code(self, manifest_dir: Path) -> list[Finding]:
         """Run `deadcode -json ./...` and parse JSON list into Findings."""
         cmd = ["deadcode", "-json", "./..."]
         try:
             result = subprocess.run(
                 cmd,
-                cwd=str(repo_root),
+                cwd=str(manifest_dir),
                 capture_output=True,
                 text=True,
                 timeout=_DEADCODE_TIMEOUT_SEC,

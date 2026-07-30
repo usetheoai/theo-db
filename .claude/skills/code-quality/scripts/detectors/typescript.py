@@ -33,8 +33,8 @@ class TypescriptDetector(BaseDetector):
     language = "typescript"
     manifest_marker = "package.json"
 
-    def detect_dead_code(self, repo_root: Path) -> list[Finding]:
-        """Run knip against `repo_root` and parse JSON into Findings.
+    def detect_dead_code(self, manifest_dir: Path) -> list[Finding]:
+        """Run knip against `manifest_dir` and parse JSON into Findings.
 
         knip emits exit code 0 (no findings) or 1 (findings). Exit code > 1
         signals tool error and is treated as `auditor_unavailable_knip`.
@@ -43,7 +43,7 @@ class TypescriptDetector(BaseDetector):
         try:
             result = subprocess.run(
                 cmd,
-                cwd=str(repo_root),
+                cwd=str(manifest_dir),
                 capture_output=True,
                 text=True,
                 timeout=_KNIP_TIMEOUT_SEC,
@@ -77,7 +77,7 @@ class TypescriptDetector(BaseDetector):
                     allowlist_key="typescript|.|dead_code|auditor_output_malformed_knip",
                 )
             ]
-        return self._parse_knip_json(data, repo_root)
+        return self._parse_knip_json(data, manifest_dir)
 
     def _find_self_package_name(self, changed_files: list[Path]) -> str | None:
         """Walk up from any changed file to find the repo's package.json#name.

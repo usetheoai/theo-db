@@ -31,8 +31,8 @@ class PythonDetector(BaseDetector):
     def __init__(self, min_confidence: int = 80) -> None:
         self.min_confidence = min_confidence
 
-    def detect_dead_code(self, repo_root: Path) -> list[Finding]:
-        """Run vulture against `repo_root` and parse stdout into Findings.
+    def detect_dead_code(self, manifest_dir: Path) -> list[Finding]:
+        """Run vulture against `manifest_dir` and parse stdout into Findings.
 
         Returns:
             list[Finding] — one per detected dead-code item, severity=HARD.
@@ -43,7 +43,7 @@ class PythonDetector(BaseDetector):
             "vulture",
             "--min-confidence",
             str(self.min_confidence),
-            str(repo_root),
+            str(manifest_dir),
         ]
         try:
             result = subprocess.run(
@@ -60,7 +60,7 @@ class PythonDetector(BaseDetector):
         except (subprocess.SubprocessError, OSError) as e:
             return [self._auditor_unavailable(f"vulture invocation failed: {e}")]
 
-        return self._parse_vulture_output(result.stdout, repo_root)
+        return self._parse_vulture_output(result.stdout, manifest_dir)
 
     def detect_symbol_fabrication(self, changed_files: list[Path]) -> list[Finding]:
         """T2.2 — Validate imports against PyPI. Skip stdlib + relative imports (EC-17)."""
