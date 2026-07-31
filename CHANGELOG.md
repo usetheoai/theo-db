@@ -13,6 +13,16 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **theodb:** o relatório do benchmark passou a registrar, **por consulta**, quantos blocos o caminho streamado
+  de fato consumiu. Sem esse número, uma consulta atendida pela rota de recuo — com o consumo de memória
+  proporcional ao volume que este milestone existe para eliminar — aparecia no relatório exatamente igual a uma
+  atendida pelo caminho novo, porque o sinal anterior vinha do plano de execução e não distingue as duas (#M169)
+- **theodb:** oráculo que exercita a **execução** do recuo, e não só a decisão de recuar. Ele força o caminho
+  novo a falhar por recurso de forma controlada e então verifica três coisas: que o recuo realmente aconteceu,
+  que o resultado é idêntico ao do caminho de referência, e que um resultado deliberadamente corrompido seria
+  reprovado — sem esse terceiro gate, "nenhuma divergência" não é evidência de nada (#M169)
+
 ### Fixed
 - **theodb:** o spill do agregado/top-k passou a viver sob **`pgsql_tmp` do próprio cluster**, com teto derivado
   de `temp_file_limit`, em vez do diretório temporário do sistema. Isso importa porque o M169 tornou o spill um
