@@ -13,7 +13,9 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ART="${ART_DIR:-docs/benchmarks/m169-artifacts}"
-TSV="${TSV_PATH:-/root/theo-db/benchmarks/.cache/hits_sample.tsv}"
+# Default FORA de `/root` (modo 700): um caminho que atravessa 700 é inalcançável para qualquer processo que
+# não seja root, por mais permissivo que o ARQUIVO seja. Ver o invariante do bit x em todo o caminho.
+TSV="${TSV_PATH:-/srv/bench-data/hits_sample.tsv}"
 LABEL="${LABEL:-baseline-100m}"
 ALLOW_MISSING_HEAP="${ALLOW_MISSING_HEAP:-0}"
 

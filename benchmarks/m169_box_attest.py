@@ -287,7 +287,7 @@ def _psql_text(sh, sql: str) -> str | None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--tsv", default="/root/theo-db/benchmarks/.cache/hits_sample.tsv",
+    ap.add_argument("--tsv", default="/srv/bench-data/hits_sample.tsv",
                     help="the loaded corpus; its line count is the authority the table count is checked against")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--quick", action="store_true",

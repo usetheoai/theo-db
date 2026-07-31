@@ -26,6 +26,9 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   (modo 700): um arquivo 644 é inalcançável quando um diretório do caminho não dá `x` (#M169)
 
 ### Added
+- **theodb:** o caminho default do TSV de 100M saiu de `/root` em **todos** os scripts do M169 (baseline,
+  atestação e recarga), não só naquele onde o defeito apareceu. `/root` é modo 700, e um caminho que
+  atravessa 700 é inalcançável para qualquer processo não-root — por mais permissivo que o arquivo seja (#M169)
 - **theodb:** o trace de pico da pool de streaming passou a se chamar `theodb_stream_pool` (era
   `theodb_topk_pool`). O M169 fez o agregado consumir a mesma função, então o rótulo antigo passaria a
   mentir: quem lesse `topk_pool` numa linha emitida por um `GROUP BY` concluiria a coisa errada sobre qual
