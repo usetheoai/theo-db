@@ -149,6 +149,26 @@ A **q32** (`GROUP BY WatchID, ClientIP`) roteia e falha por pico de **estado** d
 distintos), independente do batch. O streaming não a move, e o código diz isso onde alguém iria supor o
 contrário.
 
+### O oráculo de regressão do M167 precisa de uma base de 1M, não da de 100M (achado 2026-07-31)
+
+O Global DoD pede `benchmarks/m167_run_oracles.sh` verde. Antes de rodá-lo, li o que ele toca — e há duas razões
+para NÃO apontá-lo para a base de trabalho:
+
+1. **Ele lê `hits` e `hits_heap` diretamente** (`m167_hits_topk_ab.sql:31-43`). Rodá-lo durante a recarga
+   compararia o colunar completo contra um `hits_heap` **em carga**: divergência garantida, por estado do dado e
+   não por defeito de código. Eu teria perseguido um fantasma.
+2. **Ele foi escrito para 1M** — o próprio cabeçalho diz *"top-k A/B at the MEASURED scale: columnar `hits`
+   (1M, 105 cols) vs the heap twin"*. As consultas são a forma pesada (`SELECT * … ORDER BY … LIMIT`), que a
+   100M é justamente o regime que o M169 está investigando. Rodá-lo a 100M **não é o mesmo teste**: um
+   `timeout` ali não distinguiria regressão de escala esperada.
+
+**Como fechar o item honestamente:** base scratch com 1M, o mesmo padrão que o harness de tipos já exige (e que
+tem guard próprio contra rodar sobre o ClickBench). O oráculo então mede o que foi desenhado para medir, e o
+resultado é comparável ao verde histórico do M167.
+
+Registrado aqui porque a leitura ingênua do DoD — "é só rodar o script" — produz ou um falso vermelho (durante a
+carga) ou um teste diferente do que o item pede (a 100M).
+
 ### DESVIO DECLARADO — o orçamento de 40 linhas por arquivo foi estourado em `df_executor.rs`
 
 Medido contra `948e30d` (início do M169):
