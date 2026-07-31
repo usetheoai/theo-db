@@ -667,3 +667,24 @@ estado pós-fix e com a byte-identidade (q20/q32/q33 provadas contra o gêmeo he
 Registro sem enfeite de uma outra: minha declaração de exceção ao orçamento de linhas estava **1,9× errada**
 (+130 declarado, +247 medido) e afirmava conformidade de um segundo arquivo que também estoura (+105). O
 revisor mediu; eu não tinha remedido depois de quatro commits.
+
+## 2026-07-31 (noite) — a byte-identidade fechou 4/4, e o review pagou o preço dele
+
+`docs/benchmarks/m169-ab-verify.md`: **q20, q32, q33 e q34 devolvem resultado byte-idêntico ao gêmeo heap**, com
+o pushdown agregado confirmado no plano antes de cada comparação. 0 divergentes, 0 não-verificadas. Isso fecha o
+bloqueador que o T4.1 deixara aberto — aquela corrida mede CONCLUSÃO, e "termina" não é "está certo".
+
+O `/review` (3 revisores) devolveu 1 BLOCKER, 5 HIGH e 8 MEDIUM/LOW, e três achados viraram correção de código
+que valem registro pelo que ensinam:
+
+- **A guarda somava colunas onde o teto é por coluna.** O limite de offsets do Arrow é de UM array; somar duas
+  colunas de texto de 1,5 GiB recusaria o recuo em consultas que o caminho eager atende. A direção do erro
+  parecia conservadora e era o oposto: transformava em erro duro o caso que a rede existe para cobrir.
+- **O reset do contador cobria 1 de 4 caminhos**, e faltava no top-k — que é o consumidor primário dele. Terceira
+  vez nesta sessão que corrijo a instância e deixo os irmãos vivos; ver
+  [failure-mode/corrigir-a-instancia-e-nao-a-classe](failure-modes/corrigir-a-instancia-e-nao-a-classe.md).
+- **O spill ia para `/tmp`, não para `pgsql_tmp`.** Fora do `temp_file_limit`, invisível ao
+  `pg_stat_database.temp_bytes`, vazando arquivo em morte anormal — e, numa distro com `/tmp` em tmpfs,
+  "derramar para disco para limitar memória" **aloca mais RAM**, desfazendo o teto que a pool promete. Não era
+  pré-existente na prática: antes do M169 a pool vinha dimensionada pelo batch O(N) e nada derramava. O
+  milestone tornou o spill caminho de produção e herdou a responsabilidade de configurá-lo.

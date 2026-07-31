@@ -1031,20 +1031,28 @@ impl ScanPlan {
     ///
     /// Fixed-width columns are skipped because they land in a fixed-stride Arrow buffer with no offsets at all —
     /// their size is bounded by `row_count * width`, not by an `i32` cursor.
-    pub(crate) fn varlena_raw_len_sum(&self) -> u64 {
-        let mut total: u64 = 0;
+    /// **MÁXIMO POR COLUNA, não a soma entre colunas** (corrigido no review do M169). O teto de offsets do
+    /// Arrow é de **um array**, isto é, de UMA coluna: `DataType::Utf8` endereça seu buffer de valores com
+    /// offsets `i32`. Somar as colunas projetadas responde a pergunta errada — duas colunas de texto de 1,5 GiB
+    /// somam 3 GiB e reprovariam o pré-check, enquanto nenhuma delas sozinha estoura e o caminho eager teria
+    /// servido a consulta. Como este número existe para decidir "o eager PODE ter sucesso?", a soma
+    /// transformaria em erro duro exatamente o caso que o recuo existe para atender.
+    pub(crate) fn varlena_raw_len_max_per_column(&self) -> u64 {
+        let mut worst: u64 = 0;
         for col in &self.wanted {
             if self.cols[*col].attlen_fixed.is_some() {
                 continue;
             }
+            let mut per_column: u64 = 0;
             for sp in &self.plans {
                 for cg in 0..sp.n_chunk_groups {
-                    total =
-                        total.saturating_add(u64::from(sp.entries[cg * self.natts + *col].raw_len));
+                    per_column = per_column
+                        .saturating_add(u64::from(sp.entries[cg * self.natts + *col].raw_len));
                 }
             }
+            worst = worst.max(per_column);
         }
-        total
+        worst
     }
 }
 

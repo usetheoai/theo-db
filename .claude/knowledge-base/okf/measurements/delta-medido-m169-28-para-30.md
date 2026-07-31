@@ -1,7 +1,7 @@
 ---
 type: Measurement
 title: M169 medido — ClickBench 100M vai de 28/43 para 30/43, e a leitura honesta é 28 pelo streaming + 2 pelo recuo eager
-description: Medido 2026-07-31 na mesma box, mesmo corpus (99.997.497 linhas), mesmo teto de 300 s, com o so_md5 como única variável. Consertadas q20/q32/q33/q34. A regressão q08/q09 (EMFILE no spill) foi corrigida pelo ADR-0059, mas elas completam pelo RECUO ao eager, com consumo O(N). Byte-identidade provada em q20/q32/q33 contra o gêmeo heap.
+description: Medido 2026-07-31 na mesma box, mesmo corpus (99.997.497 linhas), mesmo teto de 300 s, com o so_md5 como única variável. Consertadas q20/q32/q33/q34. A regressão q08/q09 (EMFILE no spill) foi corrigida pelo ADR-0059, mas elas completam pelo RECUO ao eager, com consumo O(N). Byte-identidade provada 4/4 (q20/q32/q33/q34) contra o gêmeo heap, 0 divergentes.
 resource: benchmarks/m169_delta.py
 tags: [clickbench, 100m, streaming, regressao, spill, delta, m169]
 timestamp: 2026-07-31T00:00:00Z
@@ -75,15 +75,18 @@ O campo `ab_identical` da corrida é `None` nas 30: aquele harness mede **conclu
 depois, por `benchmarks/m169_ab_verify.py` contra o gêmeo `hits_heap`, com ordem total e o pushdown agregado
 confirmado no plano antes de comparar:
 
-| q | byte-idêntica ao heap |
-|---|---|
-| q20 | **sim** |
-| q32 | **sim** |
-| q33 | **sim** |
-| q34 | em verificação na data deste registro |
+**4/4, 0 divergentes, 0 não-verificadas** (`docs/benchmarks/m169-ab-verify.md`, binário `debde5f3`):
 
-Enquanto uma consulta não fecha, ela é **não-verificada** — estado distinto de "correta". Tratar "completou"
-como "correto" seria [aceitar um verde sem execução](../failure-modes/cobertura-alegada-sem-execucao.md).
+| q | byte-idêntica | linhas (colunar/heap) | colunar | heap |
+|---|---|---|---|---|
+| q20 | **sim** | 1 / 1 | 59,5 s | 165,7 s |
+| q32 | **sim** | 10 / 10 | 279,9 s | 886,2 s |
+| q33 | **sim** | 10 / 10 | 110,2 s | 474,3 s |
+| q34 | **sim** | 10 / 10 | 111,2 s | 469,4 s |
+
+Efeito colateral com número, registrado porque alguém vai perguntar por que a verificação demorou: o lado
+colunar é **2,8× a 4,2× mais rápido** que o gêmeo heap nas mesmas consultas. Não é claim de performance — é o
+custo do oráculo, medido com teto de 4h e sem controle de deriva.
 
 As 11 `timeout` são todas `agg_routed = false` — não entram no caminho agregado, então este milestone não as
 toca. A q17 reproduziu 301,6 s contra 301,6 s do baseline, e a q18 (que completa) deu 149,5 s contra 147,1 s —

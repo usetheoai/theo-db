@@ -14,6 +14,22 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **theodb:** o spill do agregado/top-k passou a viver sob **`pgsql_tmp` do próprio cluster**, com teto derivado
+  de `temp_file_limit`, em vez do diretório temporário do sistema. Isso importa porque o M169 tornou o spill um
+  caminho de produção (antes dele a pool era dimensionada pelo lote decodificado e nada derramava): no default
+  do DataFusion o `temp_file_limit` não se aplicava, `log_temp_files` e `pg_stat_database.temp_bytes` ficavam
+  cegos, arquivos vazavam quando o processo morre de forma anormal, e numa instalação com `/tmp` em tmpfs
+  "derramar para disco para limitar a memória" na verdade **alocava mais RAM** — desfazendo o próprio teto que a
+  operação promete. Falha ao resolver o diretório cai no comportamento anterior em vez de perder o spill (#M169)
+- **theodb:** a guarda que decide se o caminho antigo pode atender uma consulta passou a usar o **maior total por
+  coluna** em vez da soma entre colunas. O teto de endereçamento do Arrow é de um array — ou seja, de uma coluna
+  —, então somar duas colunas de texto grandes recusava o recuo em consultas que o caminho antigo atenderia sem
+  problema, transformando em erro duro exatamente o caso que a rede existe para cobrir (#M169)
+- **theodb:** o contador que prova "esta consulta passou pelo caminho streamado" passou a ser **zerado na
+  entrada das duas rotas**, antes da decisão. Ele cobria só um dos quatro caminhos que terminam no caminho
+  antigo, e faltava justamente no top-k — o consumidor primário dele. Nos casos descobertos, um oráculo lia
+  "passou pelo stream" sobre uma resposta vinda do caminho antigo, ou sobre as chamadas de uma tentativa que
+  falhou (#M169)
 - **theodb:** o verificador de byte-identidade passou a **reproduzir a sessão da corrida que ele prova** e a
   recusar a comparação quando o plano não tem o pushdown agregado. Faltava `SET theodb.enable_columnar_agg = on`
   (a GUC é default OFF), então ele compararia colunar vs heap por um caminho que o milestone não toca e

@@ -646,7 +646,7 @@ pub(super) unsafe fn run_columnar_aggs(
 /// served. Here the eager path is *sometimes* the defect: `decode_to_batch` builds each text column as ONE Arrow
 /// `Utf8` array with `i32` offsets, so past `i32::MAX` bytes of values it cannot succeed at all.
 ///
-/// So the fallback is gated on the exact byte total (`ScanPlan::varlena_raw_len_sum`), not on a heuristic:
+/// So the fallback is gated on the exact byte total (`ScanPlan::varlena_raw_len_max_per_column`), not on a heuristic:
 ///
 /// - projected varlena bytes **< `i32::MAX`** → eager cannot fail *for this reason* → fall back, exactly as the
 ///   top-k does. This is the case the plan refused to punish: at 1M with a small `work_mem` the streaming pool is
@@ -683,6 +683,15 @@ where
         + Send
         + 'static,
 {
+    // ZERADO NA ENTRADA, antes da decisão de rota. O reset que existia estava só no ramo do fail-open, e a
+    // varredura do review encontrou QUATRO caminhos que terminam no eager: o fail-open (que zerava), o declínio
+    // por `has_unflushed_pending` (antes do `new()`, então o contador guardava o valor da consulta ANTERIOR), o
+    // declínio por nada visível (DEPOIS de um `next()`, então o contador ficava em 1) e a GUC desligada. Nos três
+    // últimos o oráculo de não-vacuidade leria `> 0` e afirmaria "passou pelo stream" sobre uma resposta que veio
+    // do eager — a MESMA classe de falso-verde que o reset do fail-open corrigiu, uma linha adiante. Zerar aqui
+    // faz `0` significar, sem exceção, "o scan colunar mais recente não streamou". Corrigir a instância e deixar
+    // os irmãos vivos é o defeito recorrente desta sessão; esta é a varredura da classe.
+    super::columnar::reset_stream_cg_count();
     if super::columnar_agg::ENABLE_COLUMNAR_AGG_STREAM.get()
         && let Some((part, varlena_bytes)) =
             open_streaming_source(rel, proj_cols, predicates, text_predicates, in_predicates, skip)?
@@ -772,6 +781,52 @@ pub(super) unsafe fn run_aggs_on_batch(
 /// esta string.
 const SPILL_CREATE_MARKER: &str = "Failed to create partition file";
 
+/// Constrói o `DiskManager` do DataFusion apontando para o diretório temporário DO POSTGRESQL, com teto
+/// derivado de `temp_file_limit`.
+///
+/// **Por que isto não é cosmético (achado do review do M169).** O default do `RuntimeEnvBuilder` derrama em
+/// `std::env::temp_dir()` — `TMPDIR` ou `/tmp` —, o que tem quatro consequências, todas fora do controle do
+/// operador:
+///
+/// 1. **`temp_file_limit` não se aplica.** O `File::create` do DataFusion é `std::fs`, não passa pelo `fd.c`,
+///    então o GUC com que um DBA contém consultas famintas fica inerte.
+/// 2. **`log_temp_files` e `pg_stat_database.temp_bytes` ficam cegos** — quem for depurar "de onde vieram 40 GB"
+///    não acha por instrumento do PostgreSQL.
+/// 3. **`/tmp` é tmpfs em boa parte das distros com systemd.** Ali "derramar para disco para limitar a memória"
+///    é *alocar mais RAM*, e o teto que a pool promete deixa de existir. O OOM-killer numa instância PostgreSQL
+///    não mata o backend: mata o postmaster.
+/// 4. **Vaza arquivo em morte anormal.** `ereport(FATAL)` chama `proc_exit`, que não roda `Drop`. O PostgreSQL
+///    limpa `pgsql_tmp` no restart; não limpa `/tmp`.
+///
+/// Isto **não era pré-existente na prática**: antes do M169 a pool do agregado era dimensionada pelo batch O(N)
+/// (~2,5 GB a 100M) e nada derramava. Este milestone tornou o spill um caminho de produção, com a GUC ligada por
+/// default — então a configuração passa a ser responsabilidade dele.
+///
+/// Falha ao resolver o diretório é **não-fatal**: cai no default do DataFusion, porque perder o spill inteiro
+/// seria pior que derramá-lo no lugar errado. O trace diz qual caminho foi tomado.
+fn spill_disk_manager() -> Option<datafusion::execution::disk_manager::DiskManagerBuilder> {
+    use datafusion::execution::disk_manager::{DiskManagerBuilder, DiskManagerMode};
+    // SAFETY: `DataDir` é um `*mut c_char` global do postmaster, válido durante toda a vida do backend.
+    let data_dir = unsafe {
+        let p = pg_sys::DataDir;
+        if p.is_null() {
+            return None;
+        }
+        std::ffi::CStr::from_ptr(p).to_str().ok()?.to_owned()
+    };
+    let tmp = std::path::PathBuf::from(data_dir).join("base").join("pgsql_tmp");
+    if !tmp.is_dir() {
+        return None; // não criamos o diretório: quem o cria é o PostgreSQL, e criá-lo aqui mascararia um cluster estranho
+    }
+    let mut b = DiskManagerBuilder::default().with_mode(DiskManagerMode::Directories(vec![tmp]));
+    // `temp_file_limit` é em KB e `-1` significa ilimitado — nesse caso deixamos o teto do DataFusion.
+    let limit_kb = unsafe { pg_sys::temp_file_limit };
+    if limit_kb > 0 {
+        b = b.with_max_temp_directory_size(u64::from(limit_kb.unsigned_abs()) * 1024);
+    }
+    Some(b)
+}
+
 /// A falha do braço streaming autoriza recuar para o caminho eager?
 ///
 /// Duas condições, e a segunda é a que torna o recuo **seguro**:
@@ -835,9 +890,14 @@ where
         use datafusion::execution::memory_pool::GreedyMemoryPool;
         use datafusion::execution::runtime_env::RuntimeEnvBuilder;
         use datafusion::prelude::SessionConfig;
-        let runtime = RuntimeEnvBuilder::new()
-            .with_memory_pool(std::sync::Arc::new(GreedyMemoryPool::new(pool_bytes)))
-            .build_arc()?;
+        let mut rb = RuntimeEnvBuilder::new()
+            .with_memory_pool(std::sync::Arc::new(GreedyMemoryPool::new(pool_bytes)));
+        // Spill sob `pgsql_tmp` nos DOIS construtores — ver `spill_disk_manager`. A assimetria entre eles é
+        // exatamente como o M168 nasceu com a guarda de linhas pendentes num lado só.
+        if let Some(dm) = spill_disk_manager() {
+            rb = rb.with_disk_manager_builder(dm);
+        }
+        let runtime = rb.build_arc()?;
         let config = SessionConfig::new().with_target_partitions(1);
         let ctx = SessionContext::new_with_config_rt(config, runtime);
         let df = ctx.read_batch(batch)?;
@@ -1255,7 +1315,7 @@ unsafe fn open_streaming_source(
     text_predicates: &[super::zonemap::TextPredicate],
     in_predicates: &[super::zonemap::InListPredicate],
     skip: bool,
-    // M169 ADR-5 — the second element is `ScanPlan::varlena_raw_len_sum`: the exact byte total of the projected
+    // M169 ADR-5 — the second element is `ScanPlan::varlena_raw_len_max_per_column`: o MAIOR total por coluna entre as varlena projetadas — por coluna porque o teto do Arrow é de um array, e somar entre colunas recusaria o recuo onde o eager serviria (achado do review). O total das
     // variable-length columns. It is returned from HERE, not recomputed by the caller, because the only way to
     // get it is from the `ScanPlan`, and this function moves that plan into the stream. Re-planning to ask the
     // question would repeat the directory read, which is the scan's O(N) term.
@@ -1294,7 +1354,7 @@ unsafe fn open_streaming_source(
     }
     let plan = super::columnar::plan_columnar_scan(rel, Some(&proj))?;
     // Read the byte total BEFORE the plan is moved into the stream — afterwards it is unreachable.
-    let varlena_bytes = plan.varlena_raw_len_sum();
+    let varlena_bytes = plan.varlena_raw_len_max_per_column();
     let mut inner = super::columnar::ColumnarChunkStream::new(rel, plan);
     // Probe: the schema has to be exact before DataFusion executes, and only decoded data reveals it.
     let first = inner.next(predicates, skip)?;
@@ -1358,6 +1418,11 @@ pub(super) unsafe fn run_columnar_topk(
     let order_by: Vec<_> =
         sort_keys.iter().map(|(name, asc, nf)| col(name.as_str()).sort(*asc, *nf)).collect();
 
+    // Mesmo reset de entrada do caminho agregado (`:686`), e aqui ele importa MAIS: o acessor
+    // `theodb_columnar_stream_chunk_groups` se documenta como "quantas vezes o top-k streamado avançou o
+    // cursor", ou seja este é o consumidor PRIMÁRIO do contador — e era justamente o que ficara sem reset.
+    // Um `ORDER BY … LIMIT k` grande que recua para o eager reportava as chamadas da tentativa que FALHOU.
+    super::columnar::reset_stream_cg_count();
     // M168 — stream one chunk-group at a time so the peak is a chunk-group + k, not the whole relation. The
     // eager path below stays as the fallback for the one case the stream cannot serve (nothing visible), and
     // because a source that yields zero batches is exactly the empty-but-green result the oracles guard against.
@@ -1497,7 +1562,11 @@ where
     let out: Result<Vec<RecordBatch>, DataFusionError> = rt.block_on(async move {
         use datafusion::execution::runtime_env::RuntimeEnvBuilder;
         use datafusion::prelude::SessionConfig;
-        let runtime = RuntimeEnvBuilder::new().with_memory_pool(pool).build_arc()?;
+        let mut rb = RuntimeEnvBuilder::new().with_memory_pool(pool);
+        if let Some(dm) = spill_disk_manager() {
+            rb = rb.with_disk_manager_builder(dm);
+        }
+        let runtime = rb.build_arc()?;
         // target_partitions(1) is load-bearing, not tuning: it is what keeps the single `PartitionStream` on the
         // calling (backend) thread, which is what makes the `unsafe impl Send` on it sound (M168 ADR-2).
         let config = SessionConfig::new().with_target_partitions(1);
