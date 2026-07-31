@@ -28,24 +28,37 @@ BEGIN
 END
 $gate$;
 
+-- As cardinalidades são COLUNAS MATERIALIZADAS, não expressões na consulta. Motivo verificado no código, não
+-- suposto: o whitelist de chave-expressão do admit é `DateTrunc` / `ExtractField` (só minute e hour) /
+-- `IntAddConst` / `Const` (`columnar_agg.rs:806-808`). **Módulo não está lá**, então `GROUP BY k1 % 1000`
+-- DECLINA e a varredura mediria o executor de linha do PostgreSQL — uma medição inteira da coisa errada.
+-- Chave bare é o que roteia.
 DROP TABLE IF EXISTS t_peak CASCADE;
-CREATE TABLE t_peak (g bigint, k1 bigint, k2 bigint) USING theodb_columnar;
-INSERT INTO t_peak SELECT g, g, g FROM generate_series(1, 2000000) g;   -- 200 chunk-groups
+CREATE TABLE t_peak (g bigint, c3 bigint, c5 bigint, c6 bigint, k1 bigint, k2 bigint) USING theodb_columnar;
+INSERT INTO t_peak
+SELECT g, g % 1000, g % 100000, g % 1000000, g, g
+FROM generate_series(1, 2000000) g;   -- 200 chunk-groups
 
 \echo '### T3.2-A — AggregateMode do plano: Single ou Partial?'
 -- Decide o modo de OOM do DataFusion: `Single` só pode fazer spill; `Partial` pode emitir cedo e deixar o merge
 -- para o nó acima. Sem saber qual é, "o spill basta?" não tem resposta — são políticas com tetos diferentes.
 EXPLAIN (COSTS OFF, VERBOSE) SELECT k1, count(*) FROM t_peak GROUP BY k1;
 
+\echo '### T3.2-A2 — as 5 formas ROTEIAM mesmo? (se declinarem, o pico medido é de outro executor)'
+-- O driver conta as linhas de `peak_reserved`; esperar 5 e ver menos significa que alguma declinou. Este EXPLAIN
+-- deixa a razão visível ANTES de gastar a medição, em vez de deduzi-la de um contador que veio baixo.
+EXPLAIN (COSTS OFF) SELECT c3, count(*) FROM t_peak GROUP BY c3;
+EXPLAIN (COSTS OFF) SELECT k1, k2, count(*) FROM t_peak GROUP BY k1, k2;
+
 \echo '### T3.2-B — varredura de cardinalidade: onde o pico cruza o teto da pool'
 -- `\o /dev/null` descarta o RESULTADO sem tocar o plano. Um `LIMIT`/`OFFSET` para conter a saída acrescentaria um
 -- nó acima do agregado e poderia mudar a decisão de roteamento — aí o pico medido seria o de outro plano.
 \o /dev/null
-SELECT k1 % 1000,    count(*) FROM t_peak GROUP BY 1;
-SELECT k1 % 100000,  count(*) FROM t_peak GROUP BY 1;
-SELECT k1 % 1000000, count(*) FROM t_peak GROUP BY 1;
-SELECT k1,           count(*) FROM t_peak GROUP BY 1;
-\echo '### T3.2-C — a forma da q32: DUAS chaves, cardinalidade quase-única'
+SELECT c3, count(*) FROM t_peak GROUP BY c3;   -- 1e3 grupos
+SELECT c5, count(*) FROM t_peak GROUP BY c5;   -- 1e5
+SELECT c6, count(*) FROM t_peak GROUP BY c6;   -- 1e6
+SELECT k1, count(*) FROM t_peak GROUP BY k1;   -- 2e6 (uma linha por grupo)
+-- T3.2-C — a forma da q32: DUAS chaves, cardinalidade quase-única
 SELECT k1, k2, count(*) FROM t_peak GROUP BY k1, k2;
 \o
 

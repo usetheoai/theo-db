@@ -48,7 +48,7 @@ psql_c -f "$HERE/m169_groupby_peak.sql" > "$OUT" 2>&1
 SQL_RC=$?
 
 PEAKS=$(grep -c "peak_reserved=" "$OUT")
-echo "  linhas de pico capturadas: $PEAKS   (sql_rc=$SQL_RC)"
+echo "  linhas de pico capturadas: $PEAKS de 5 esperadas   (sql_rc=$SQL_RC)"
 grep -oE "theodb_stream_pool: peak_reserved=[0-9]+ reserved_at_end=[0-9]+ pool_limit=[0-9]+" "$OUT" | sed 's/^/  /'
 
 if [ "$PEAKS" -eq 0 ]; then
