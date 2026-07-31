@@ -26,6 +26,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   (modo 700): um arquivo 644 é inalcançável quando um diretório do caminho não dá `x` (#M169)
 
 ### Added
+- **theodb:** driver da medição de pico do `GROUP BY` que encoda a ordem obrigatória em vez de a confiar à
+  memória de quem roda: guarda de box ociosa, restart **com** `THEODB_ADMIT_TRACE=1` (o trace resolve num
+  `OnceLock` por backend, então só entra por restart do postmaster), medição, e `trap` que restaura o
+  servidor **sem** o trace mesmo se a medição falhar no meio. Zero linhas de pico é tratado como falha —
+  significa instrumento desligado, não pico baixo (#M169)
 - **theodb:** gerador do delta entre as duas corridas de 100M, que **recusa publicar** quando as condições
   não são comparáveis: teto de tempo diferente, box diferente, corpus diferente, ou o **mesmo binário** dos
   dois lados. Separa os ganhos atribuíveis (falhavam COM roteamento agregado) dos não-atribuíveis, e nomeia
