@@ -648,11 +648,17 @@ pub(super) unsafe fn run_columnar_aggs(
 ///
 /// So the fallback is gated on the exact byte total (`ScanPlan::varlena_raw_len_sum`), not on a heuristic:
 ///
-/// - projected varlena bytes **< `i32::MAX`** → eager CAN serve it → fall back, exactly as the top-k does. This
-///   is the case the plan refused to punish: at 1M with a small `work_mem` the streaming pool is tiny, and a
-///   query eager served would otherwise start failing.
-/// - projected varlena bytes **≥ `i32::MAX`** → eager provably CANNOT serve it → the typed `ResourcesExhausted`
+/// - projected varlena bytes **< `i32::MAX`** → eager cannot fail *for this reason* → fall back, exactly as the
+///   top-k does. This is the case the plan refused to punish: at 1M with a small `work_mem` the streaming pool is
+///   tiny, and a query eager served would otherwise start failing.
+/// - projected varlena bytes **≥ `i32::MAX`** → eager provably CANNOT succeed → the typed `ResourcesExhausted`
 ///   rises as an error saying to raise `work_mem`. An error that names its remedy is actionable; a panic is not.
+///
+/// **Precision about what the pre-check does NOT promise.** Below the threshold it rules out the *offset*
+/// overflow, and only that. The eager path still materialises every projected row into one Arrow batch, so a wide
+/// fixed-width relation can exhaust memory with `varlena_bytes = 0`. That is not a regression this introduces —
+/// it is exactly the pre-M169 behaviour of the aggregate — but reading the condition as "eager will succeed"
+/// would be wrong, and someone will read it.
 ///
 /// The eager path also runs, as the CORRECT answer rather than a fallback, when the GUC is off (the paired
 /// "before" arm of the measurement) or when `open_streaming_source` declines — unflushed pending rows (a scan
