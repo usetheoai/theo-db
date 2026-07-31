@@ -79,6 +79,16 @@ class BoxFacts:
     disk_free_gb: int
     so_md5: str = "unknown"
     data_directory: str = "unknown"
+    # M169 T4.1 — o ORÇAMENTO DE DESCRITORES entrou aqui depois de uma regressão medida: q08/q09
+    # (`COUNT(DISTINCT`) falharam com `EMFILE` no spill do DataFusion enquanto havia 205 GB de disco livres. A
+    # causa não é memória nem disco: o PostgreSQL pode segurar até `max_files_per_process` (1000) dentro de um
+    # soft limit de 1024, deixando folga quase nula para arquivos abertos fora do gerenciador de VFD dele.
+    # Sem estes dois campos no cabeçalho, "30/43" é um número NÃO REPRODUZÍVEL e a causa-raiz fica invisível
+    # para quem tentar repetir a corrida noutra caixa.
+    # Default = -1, o MESMO valor de `UNREACHABLE` (definido abaixo, depois desta classe — por isso o
+    # literal aqui em vez do nome). Significa 'não consegui ler', nunca 'sem limite'.
+    ulimit_nofile_soft: int = -1
+    max_files_per_process: int = -1
 
 
 @dataclass
@@ -285,7 +295,23 @@ def collect(tsv_path: str, *, sh=_sh, sh_any_rc=_sh_any_rc, psql_int=_count_rows
         disk_free_gb=_int(f"df -BG --output=avail {shlex.quote(ddir)} | tail -1 | tr -dc '0-9'", default=0),
         so_md5=sh("md5sum /opt/pg18/lib/postgresql/theodb_rs.so | cut -c1-32", SH_TIMEOUT_S) or "unknown",
         data_directory=ddir,
+        # Lido do POSTMASTER, não do shell da atestação: quem abre os arquivos de spill é o backend, e o shell
+        # pode ter um limite diferente. `head -1` do postmaster.pid é o PID do postmaster.
+        ulimit_nofile_soft=_int(
+            f"awk '/^Max open files/{{print $4}}' /proc/$(head -1 {shlex.quote(ddir)}/postmaster.pid)/limits",
+            SH_TIMEOUT_S, default=UNREACHABLE),
+        max_files_per_process=_as_int(
+            _psql_text(sh, "show max_files_per_process"), default=UNREACHABLE),
     )
+
+
+def _as_int(text: str | None, *, default: int) -> int:
+    """Converte a saída de um `SHOW` em int. Devolve `default` (UNREACHABLE) quando a leitura falhou — nunca 0,
+    que num campo de LIMITE se leria como 'sem descritor nenhum' em vez de 'não perguntei'."""
+    try:
+        return int((text or "").strip().split()[0])
+    except (ValueError, IndexError):
+        return default
 
 
 def _psql_text(sh, sql: str) -> str | None:

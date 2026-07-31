@@ -14,6 +14,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **theodb:** o recuo do agregado streaming passou a cobrir também a **falha de spill em disco**, não só a pool
+  estourada. Medido na corrida completa a 100M: `COUNT(DISTINCT …) GROUP BY …` (q08/q09 do ClickBench) saía de
+  `ok` para erro. A causa não é defeito novo — a pool do caminho eager é dimensionada pelo batch decodificado, o
+  que a 100M dava ~2,5 GB; removido o batch O(N), a pool passou a derivar de `work_mem`, o agregado começou a
+  derramar, e o derrame falha porque o PostgreSQL pode segurar até `max_files_per_process` (1000) descritores
+  dentro de um limite de 1024, deixando folga quase nula para arquivos abertos fora do gerenciador dele. O recuo
+  continua condicionado à guarda de offsets, e erro genuíno do braço streaming **não** recua — recuar nele daria
+  a resposta certa pelo caminho errado e esconderia o defeito (#M169)
 - **theodb:** o recuo do agregado streaming para o caminho eager passou a **classificar o erro com `find_root()`**
   em vez de casar a variante nua. O DataFusion embrulha `ResourcesExhausted` em `Context(…)` num caminho vizinho,
   e a forma anterior deixaria o recuo de fora justamente quando ele é necessário — com esta GUC em `on` por

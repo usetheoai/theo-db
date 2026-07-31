@@ -697,10 +697,13 @@ where
             // pior aqui que no top-k: esta GUC é default ON, logo um `ResourcesExhausted` embrulhado viraria erro
             // duro em consultas que o caminho eager pré-M169 servia. Achado do SEPA; a AC do plano exige
             // `find_root()` textualmente.
-            Err(e)
-                if matches!(e.find_root(), DataFusionError::ResourcesExhausted(_))
-                    && varlena_bytes < i32::MAX as u64 =>
-            {
+            // M169 T4.1 — a classe FOI AMPLIADA depois da corrida completa a 100M, que mediu q08/q09
+            // (`COUNT(DISTINCT …) GROUP BY …`) REGREDINDO de `ok` para erro. Elas não quebraram por defeito
+            // novo: vinham passando porque a pool do caminho eager é dimensionada pelo BATCH
+            // (`:798`, `max(work_mem, batch*2)`), e a 100M isso dava ~2,5 GB. Sem o batch O(N) — que é
+            // exatamente o que este milestone remove — a pool virou `work_mem`-derivada, o agregado passou a
+            // derramar, e o derrame falhou. Ou seja: a pool generosa era efeito colateral do próprio O(N).
+            Err(e) if stream_failure_is_fail_open(&e, varlena_bytes) => {
                 // INCONDICIONAL, não atrás do flag de trace — mesma decisão e mesmo racional do top-k
                 // (`:1354-1358`): sem isto o usuário não tem sinal de que a consulta acabou de trocar de perfil
                 // de memória e de latência.
@@ -758,6 +761,37 @@ pub(super) unsafe fn run_aggs_on_batch(
         df.aggregate(vec![], exprs)
     })?;
     aggs_from_batches(&batches, aggs)
+}
+
+/// Marcador da falha de criação de arquivo de spill do DataFusion. Vem de
+/// `datafusion-physical-plan-54.0.0/src/spill/mod.rs:311`, onde um `File::create` que falha é embrulhado por
+/// `exec_datafusion_err!` — portanto chega como `Execution`, **não** como `ResourcesExhausted` nem `IoError`.
+/// Casar por substring é frágil a um upgrade do DataFusion, e é uma escolha consciente: a alternativa (casar
+/// `Execution` inteiro) recuaria para o eager em erro genuíno do braço streaming, mascarando defeito nosso —
+/// ver o teste `unrelated_execution_error_does_not_fail_open`. Um bump de major do DataFusion DEVE reverificar
+/// esta string.
+const SPILL_CREATE_MARKER: &str = "Failed to create partition file";
+
+/// A falha do braço streaming autoriza recuar para o caminho eager?
+///
+/// Duas condições, e a segunda é a que torna o recuo **seguro**:
+///
+/// 1. a falha é de RECURSO — pool estourada (`ResourcesExhausted`) ou spill que não pôde criar arquivo. Um
+///    erro qualquer NÃO entra: recuar nele esconderia um defeito do streaming atrás de um resultado certo.
+/// 2. o eager PODE ter sucesso — com `varlena_bytes >= i32::MAX` ele bate no teto de offsets do Arrow por
+///    construção, e tentar seria trocar um erro por outro, mais lento.
+///
+/// `find_root()` e não `match` na variante nua: o DataFusion embrulha em `Context(_, Box(_))` em caminhos
+/// vizinhos, e casar a variante crua deixa o recuo de fora justamente quando ele é necessário.
+fn stream_failure_is_fail_open(e: &DataFusionError, varlena_bytes: u64) -> bool {
+    if varlena_bytes >= i32::MAX as u64 {
+        return false;
+    }
+    match e.find_root() {
+        DataFusionError::ResourcesExhausted(_) => true,
+        DataFusionError::Execution(msg) => msg.contains(SPILL_CREATE_MARKER),
+        _ => false,
+    }
 }
 
 /// Build the DataFusion runtime (bounded `work_mem` MemoryPool + `target_partitions=1` — M100 D3 safety), read the
@@ -1367,6 +1401,16 @@ pub(super) unsafe fn run_columnar_topk(
             // `match` por variante ERRAR em silêncio, e o fail-open viraria erro duro — exatamente a regressão que
             // ele existe para evitar (achado de review). `find_root` desembrulha `Context`/`External`/`Shared`
             // (`datafusion-common-54.0.0/src/error.rs:436`).
+            // NÃO usa `stream_failure_is_fail_open` (`:775`) DE PROPÓSITO, e a razão é medida, não estilística: o
+            // predicado de lá também cobre a falha de CRIAÇÃO DE ARQUIVO DE SPILL, e este caminho não cria um.
+            // Com `fetch = Some(k)` o `SortExec` roteia para o operador `TopK`
+            // (`datafusion-physical-plan-54.0.0/src/sorts/sort.rs:1216-1249`), que mantém o heap em memória; o
+            // `create_in_progress_file("Sorting")` (`sort.rs:419`) vive no ramo `ExternalSorter`, alcançado só
+            // quando `fetch == None`. Nosso plano é `df.sort(...).limit(0, Some(k))`, logo cai no primeiro.
+            // A varredura foi FEITA: `ResourcesExhausted` tem exatamente 2 ocorrências no crate — esta e a `:706`.
+            // O que torna isto frágil é a REACHABILITY, não o predicado: se um upgrade do DataFusion parar de
+            // empurrar o `limit` como `fetch` no `SortExec`, este ramo passa pelo `ExternalSorter` e AÍ a classe
+            // de spill se aplica aqui também. Quem mexer no pushdown do limit deve reavaliar esta linha.
             Err(e) if matches!(e.find_root(), DataFusionError::ResourcesExhausted(_)) => {
                 // INCONDICIONAL. Esconder isto atrás do flag de trace deixaria o usuário sem sinal de que a
                 // consulta acabou de trocar de perfil de memória e de latência. É evento raro (uma vez por
@@ -1915,5 +1959,61 @@ mod m160_fixed_raw_tests {
     fn fixed_raw_rejects_wrong_size() {
         // 5 bytes for a width-4 / 1-row column must be a typed error, never a panic across C.
         assert!(fixed_raw_array(23, &[0u8; 5], 4, 1).is_err());
+    }
+}
+
+#[cfg(test)]
+mod m169_fail_open_tests {
+    //! M169 T4.1 — a classificação da falha do braço streaming. Puro (sem `pg_sys`), então roda em `cargo test`.
+    //!
+    //! O RED destes testes não foi escrito no vácuo: é a regressão MEDIDA na corrida de 43 consultas a 100M, em
+    //! que q08/q09 saíram de `ok` para `error:XX000` com exatamente a mensagem de spill abaixo. O predicado
+    //! anterior só casava `ResourcesExhausted` e portanto não recuava.
+    use super::{stream_failure_is_fail_open, SPILL_CREATE_MARKER};
+    use datafusion::error::DataFusionError;
+
+    /// A mensagem real, copiada da corrida (o `Os { code: 24 }` é `EMFILE`).
+    fn spill_error() -> DataFusionError {
+        DataFusionError::Execution(format!(
+            "(Hint: you may increase the file descriptor limit with shell command 'ulimit -n 4096') \
+             {SPILL_CREATE_MARKER} at \"/tmp/.tmpXYZ\": Os {{ code: 24, kind: Uncategorized }}"
+        ))
+    }
+
+    #[test]
+    fn spill_file_creation_failure_authorises_fail_open() {
+        assert!(
+            stream_failure_is_fail_open(&spill_error(), 1_000),
+            "a falha de spill é de recurso — o eager servia estas consultas antes do M169"
+        );
+    }
+
+    #[test]
+    fn wrapped_spill_failure_is_found_through_context() {
+        let wrapped = DataFusionError::Context("GroupedHashAggregate".into(), Box::new(spill_error()));
+        assert!(
+            stream_failure_is_fail_open(&wrapped, 1_000),
+            "find_root() tem de atravessar o Context — casar a variante nua perde o recuo"
+        );
+    }
+
+    #[test]
+    fn resources_exhausted_still_authorises_fail_open() {
+        let e = DataFusionError::ResourcesExhausted("pool limit".into());
+        assert!(stream_failure_is_fail_open(&e, 1_000), "a classe original não pode ter sido perdida");
+    }
+
+    #[test]
+    fn unrelated_execution_error_does_not_fail_open() {
+        // O teste mais importante: recuar em erro genuíno produziria a resposta certa pelo caminho errado e
+        // esconderia um defeito do streaming para sempre.
+        let e = DataFusionError::Execution("Divide by zero".into());
+        assert!(!stream_failure_is_fail_open(&e, 1_000));
+    }
+
+    #[test]
+    fn offset_overflow_risk_blocks_fail_open_even_for_a_resource_failure() {
+        // Com varlena >= i32::MAX o eager falha por construção: recuar trocaria um erro por outro, mais lento.
+        assert!(!stream_failure_is_fail_open(&spill_error(), i32::MAX as u64));
     }
 }
