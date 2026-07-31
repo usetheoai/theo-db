@@ -1,0 +1,42 @@
+[
+  {
+    "q": 20,
+    "identical": true,
+    "rows_columnar": 1,
+    "rows_heap": 1,
+    "agg_routed": true,
+    "note": null,
+    "elapsed_columnar_s": 59.49,
+    "elapsed_heap_s": 165.7
+  },
+  {
+    "q": 32,
+    "identical": true,
+    "rows_columnar": 10,
+    "rows_heap": 10,
+    "agg_routed": true,
+    "note": null,
+    "elapsed_columnar_s": 279.91,
+    "elapsed_heap_s": 886.23
+  },
+  {
+    "q": 33,
+    "identical": true,
+    "rows_columnar": 10,
+    "rows_heap": 10,
+    "agg_routed": true,
+    "note": null,
+    "elapsed_columnar_s": 110.24,
+    "elapsed_heap_s": 474.27
+  },
+  {
+    "q": 34,
+    "identical": true,
+    "rows_columnar": 10,
+    "rows_heap": 10,
+    "agg_routed": true,
+    "note": null,
+    "elapsed_columnar_s": 111.23,
+    "elapsed_heap_s": 469.43
+  }
+]
