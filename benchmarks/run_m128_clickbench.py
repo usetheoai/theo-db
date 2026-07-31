@@ -72,6 +72,13 @@ def _load_queries():
         return [q.strip() for q in fh.read().split("\n") if q.strip() and not q.strip().startswith("--")]
 
 
+# O `LIMIT N` final é removido ANTES do A/B colunar-vs-heap. Sem isto a comparação é falso-negativa: as
+# consultas do ClickBench com `ORDER BY count DESC LIMIT 10` têm muitos empates, e o corte escolhe 10 linhas
+# ARBITRÁRIAS-mas-válidas entre elas — diferença de ordem de varredura, não de armazenamento. Constante (e não
+# regex inline) porque a regra é UM conhecimento com dois consumidores: `_bench_query` aqui e
+# `m169_ab_verify.py`, que prova byte-identidade sem arrastar o timing 5× junto.
+LIMIT_RE = re.compile(r"\s+LIMIT\s+\d+\s*;?\s*$", re.IGNORECASE)
+
 # ClickBench `hits` tem 99.997.497 linhas (número publicado pelo próprio ClickBench). Usado só para
 # derivar o passo da amostragem sistemática — nunca para afirmar que rodamos a escala completa.
 HITS_TOTAL_ROWS = 99_997_497
@@ -280,7 +287,7 @@ def _bench_query(cur, conn, i, sql, assert_byte_identical) -> dict:
     # `... ORDER BY count DESC LIMIT 10` has many tied counts on a subsample, so the LIMIT cut picks an
     # ARBITRARY-but-valid 10 among the ties — a legitimate scan-order difference, NOT a storage bug. Comparing
     # the FULL (unlimited) deterministic aggregation is the real columnar-storage correctness oracle.
-    ab_sql = re.sub(r"\s+LIMIT\s+\d+\s*;?\s*$", "", sql.rstrip().rstrip(";"))
+    ab_sql = LIMIT_RE.sub("", sql.rstrip().rstrip(";"))
     try:
         cur.execute(ab_sql)
         rc = _canonical(cur.fetchall())
