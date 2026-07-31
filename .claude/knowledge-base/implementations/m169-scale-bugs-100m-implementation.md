@@ -112,12 +112,49 @@ que acrescentei na terceira tentativa foi o que recusou a quarta medição invá
 
 | # | Plan ref | Status | Wiring (a) | (b) | (c) | Commit SHA |
 |---|---|---|---|---|---|---|
-| T1.1 | Phase 1 / T1.1 | pending | — | — | — | — |
-| T1.2 | Phase 1 / T1.2 | pending | — | — | — | — |
-| T2.1 | Phase 2 / T2.1 | pending | — | — | — | — |
-| T3.1 | Phase 3 / T3.1 | pending | — | — | — | — |
-| T3.2 | Phase 3 / T3.2 | pending | — | — | — | — |
-| T4.1 | Phase 4 / T4.1 | pending | — | — | — | — |
+| T1.1 | Phase 1 / T1.1 | committed | ✓ | ✓ | n/a | gate de atestação + 26 testes |
+| T1.2 | Phase 1 / T1.2 | committed | ✓ | ✓ | n/a | `5dc3d09` |
+| T2.1 | Phase 2 / T2.1 | committed | ✓ | ✓ | ✓ | `01bc602` (+ `0abee2f` doc) |
+| T3.1 | Phase 3 / T3.1 | committed | ✓ | ✓ | n/a | `e068d0a` (float) · `851a616` (tipos) |
+| T3.2 | Phase 3 / T3.2 | red | — | — | — | `92ed33e` — autorado; **bloqueado pela box** |
+| T4.1 | Phase 4 / T4.1 | red | — | — | — | `adcc419` — gerador do delta; **bloqueado pela box** |
+
+
+### Evidência por task (2026-07-31)
+
+| task | o que prova que está feito |
+|---|---|
+| T1.1 | 26 testes puros; gate roda contra a box real e recusa por CPU/RAM/carga/`unattended-upgrades`/contagem/disco |
+| T1.2 | **28/43** completam; `so_md5` idêntico antes e depois; 4 falhas COM `agg_routed` (q20, q32, q33, q34), 11 sem |
+| T2.1 | GREEN `diverged=0/0` nos braços escalar **e** agrupado; controle positivo reprova **ambos** (`diverged=2` cada); `pg_settings` confirma que a GUC nova não é placeholder |
+| T3.1 | float8 idêntico **bit a bit** sob dado adversarial (controle positivo de 1 ULP reprova) + harness de tipos **35/35** com `positive_control diverged=2` |
+| T3.2 | apenas autorado — a medição de pico exige box ociosa, e a recarga do gêmeo heap a está ocupando |
+| T4.1 | apenas o gerador — a re-medição exige o `.so` novo instalado e a box ociosa |
+
+### O que a medição mudou no escopo declarado do plano
+
+O plano nomeava a **q20**. O baseline mostrou **três** instâncias de `byte array offset overflow`, e a
+distribuição delas obrigou a mexer em duas funções, não uma:
+
+| q | forma | função |
+|---|---|---|
+| q20 | `COUNT(*) … WHERE URL LIKE` | `run_columnar_aggs` (escalar) |
+| q33 | `GROUP BY URL` | `run_columnar_grouped_aggs` |
+| q34 | `GROUP BY 1, URL` | `run_columnar_grouped_aggs` |
+
+Consequência que quase passou: o RED original só exercitava agregados **escalares**, então teria ficado
+**verde com dois terços do alvo intactos**. Os braços agrupados (A4–A6) foram acrescentados por isso.
+
+A **q32** (`GROUP BY WatchID, ClientIP`) roteia e falha por pico de **estado** da tabela de hash — O(grupos
+distintos), independente do batch. O streaming não a move, e o código diz isso onde alguém iria supor o
+contrário.
+
+### Desvio que eu ia cometer e o plano barrou
+
+Meu primeiro desenho do T2.1 não tinha fail-open algum, com o argumento de que o eager É o defeito. O
+**ADR-5 já havia pesado e rejeitado exatamente isso**: a 1M o eager funciona, e remover o recuo puniria quem
+tem `work_mem` pequeno para proteger o caso grande. Implementei o que o plano especifica — recuo condicionado
+ao total exato de bytes varlena (`ScanPlan::varlena_raw_len_sum`), que sobre-conta e nunca sub-conta.
 
 Status: `pending` / `red` / `green` / `refactor` / `wired` / `committed` / `blocked` / `done`
 Wiring: `✓` passou · `✗` falhou · `defer` ADR-deferido · `—` não checado.
