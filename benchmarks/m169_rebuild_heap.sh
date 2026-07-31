@@ -41,7 +41,14 @@ if [ "${BACKENDS:-1}" -gt 0 ]; then
 fi
 
 echo "=== guarda: 'hits' está intacto ANTES de mexer em qualquer coisa? ==="
-HITS=$(psql_c -Atc "select count(*) from public.hits;")
+# `theodb.enable_columnar_agg = on` NÃO é cosmético aqui. MEDIDO 2026-07-31 nesta box, sobre as mesmas 99.997.497
+# linhas: 11,4 s com o pushdown contra >948 s sem ele (o backend a 99,9% de CPU, zero wait events — é materialização
+# linha a linha, não I/O). Um guard de 35 minutos é um guard que alguém vai pular; um de 11 s roda sempre.
+#
+# Trade-off declarado: a versão rápida valida o colunar ATRAVÉS do caminho de pushdown, então um defeito nesse
+# caminho poderia mascarar-se. Aceito porque `columnar_type_ab.py` prova byte-identidade do pushdown em 35 casos
+# com controle positivo, e porque o custo do caminho lento é grande o bastante para comprar o incentivo errado.
+HITS=$(psql_c -Atc "SET theodb.enable_columnar_agg = on; select count(*) from public.hits;")
 echo "  hits=$HITS"
 if [ "${HITS:-0}" != "99997497" ]; then
   echo "  ABORTA: 'hits' não tem 99.997.497 linhas. Não mexo no heap sem o colunar íntegro." >&2

@@ -550,3 +550,23 @@ a árvore inteira, que é a
 Terceiro, menor e recorrente: escrevi `cmd | tail; echo $?` e reportei `RC=0` para um script que falhara — `$?`
 depois de um pipe é o status do **último** comando, o `tail`. É `falso-verde-de-script` na forma mais barata de
 cometer.
+
+## 2026-07-31 (5) — a hipótese que virou número, e o incentivo escondido no custo
+
++1 `Measurement`. Eu havia escrito que **não** afirmaria por que o guard da recarga levava 35 minutos, porque era
+palpite. Medi: `count(*)` sobre as mesmas 99.997.497 linhas leva **11,4 s** com `theodb.enable_columnar_agg = on`
+e **>948 s** sem — e o número rápido saiu *sob contenção*, com o backend lento ocupando um núcleo inteiro, então é
+teto e não melhor caso.
+
+O que fecha o diagnóstico não é o tempo, é o `pg_stat_activity`: **99,9% de CPU com `wait_event` nulo** elimina
+I/O e aponta materialização linha a linha — a mesma conclusão do flamegraph do M148, agora por um segundo caminho
+independente.
+
+A lição de segunda ordem é a que vale reter: **um guard de 35 minutos é um guard que alguém vai pular**. Custo de
+execução alto não é neutro — ele compra o incentivo errado, e o defeito aparece como "a verificação foi
+desativada", não como "a verificação era lenta".
+
+**Nota sobre mim, quinta ocorrência:** inventei outro nome de arquivo nos Relacionados
+(`configuracao-do-operador-torna-inmedivel`; o real é `config-do-operador-que-inviabiliza-a-medicao`). Diferença
+desta vez: conferi com `grep` **antes** de rodar o gate, em vez de descobrir pelo gate. É a primeira das cinco em
+que a checagem foi minha.

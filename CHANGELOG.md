@@ -26,6 +26,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   (modo 700): um arquivo 644 é inalcançável quando um diretório do caminho não dá `x` (#M169)
 
 ### Added
+- **theodb:** o guard de integridade da recarga do heap passou a ligar `theodb.enable_columnar_agg` antes do
+  `count(*)`. **Medido:** 11,4 s com o pushdown contra >948 s sem ele sobre as mesmas 99.997.497 linhas — o
+  backend lento fica a 99,9% de CPU com zero wait events, ou seja materialização linha a linha, não I/O. Um
+  guard de 35 minutos é um guard que alguém pula (#M169)
 - **theodb:** o caminho default do TSV de 100M saiu de `/root` em **todos** os scripts do M169 (baseline,
   atestação e recarga), não só naquele onde o defeito apareceu. `/root` é modo 700, e um caminho que
   atravessa 700 é inalcançável para qualquer processo não-root — por mais permissivo que o arquivo seja (#M169)
