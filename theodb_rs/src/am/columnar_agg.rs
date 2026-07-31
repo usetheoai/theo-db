@@ -46,6 +46,22 @@ pub(crate) static ENABLE_COLUMNAR_LATE_MAT: GucSetting<bool> = GucSetting::<bool
 /// shape the oracles do not cover.
 pub(crate) static ENABLE_COLUMNAR_TOPK_STREAM: GucSetting<bool> = GucSetting::<bool>::new(true);
 
+/// M169 — the same streaming source, applied to the AGGREGATE paths (scalar and grouped).
+///
+/// Why the aggregate needed its own switch instead of reusing the top-k's: the two answer different questions.
+/// The top-k's switch guards a path whose retention grows with `k`; the aggregate's guards a path whose peak was
+/// the DECODE itself. Sharing one GUC would make the top-k escape hatch also disable the aggregate fix (and vice
+/// versa), and the M169 measurement needs the aggregate arms paired inside one session and one binary.
+///
+/// Default ON, matching the top-k's — and that default is what makes `stream=false` at T4.1 a real arm rather
+/// than a no-op: omitting the SET leaves the fix ENABLED, so the "before" arm has to say `off` out loud.
+///
+/// MEDIDO (baseline 100M, 2026-07-31): das 15 falhas, 4 roteiam pelo caminho agregado — q20 (escalar,
+/// `COUNT(*) … WHERE URL LIKE`), q33 e q34 (agrupadas por URL) com `byte array offset overflow`, e q32
+/// (`GROUP BY WatchID, ClientIP`) com timeout. As três primeiras morrem no decode; a q32 morre no ESTADO da
+/// tabela de hash, que o streaming não reduz — dizer que este switch a conserta seria vender o que não acontece.
+pub(crate) static ENABLE_COLUMNAR_AGG_STREAM: GucSetting<bool> = GucSetting::<bool>::new(true);
+
 /// M167 ADR-4 — safety factor for the top-k decode bound. `run_columnar_topk` decodes {projection ∪ keys ∪ filter}
 /// for ALL rows into one Arrow batch BEFORE the bounded-heap TopK runs, so the path costs O(N) memory where the
 /// native top-N heapsort costs O(k). With the GUC defaulting ON (M167), an unfiltered wide `SELECT * … ORDER BY k
@@ -314,6 +330,15 @@ pub(crate) fn init() {
         c"Stream the columnar top-k input per chunk-group instead of one whole-relation batch (M168)",
         c"When on, the top-k decodes one chunk-group at a time so peak memory is a chunk-group + k, not O(N).",
         &ENABLE_COLUMNAR_TOPK_STREAM,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+    GucRegistry::define_bool_guc(
+        c"theodb.enable_columnar_agg_stream",
+        c"Stream the columnar aggregate input per chunk-group instead of one whole-relation batch (M169)",
+        c"When on, scalar and grouped aggregates decode one chunk-group at a time, so a text column wider than \
+          2 GiB no longer overflows the i32 offsets of a single Arrow array.",
+        &ENABLE_COLUMNAR_AGG_STREAM,
         GucContext::Userset,
         GucFlags::default(),
     );

@@ -14,6 +14,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **theodb:** agregados sobre tabelas colunares passaram a **consumir a relação um chunk-group por vez** em vez de
+  decodificá-la inteira num único `RecordBatch` Arrow. É o que remove o `byte array offset overflow` a 100M: uma
+  coluna de texto acima de 2 GiB não cabe nos offsets `i32` de um array Arrow único. Vale para os **dois** caminhos
+  — escalar e agrupado —, porque das três instâncias medidas do defeito uma é escalar (q20) e duas são agrupadas
+  (q33, q34). Nova GUC `theodb.enable_columnar_agg_stream` (default on) (#M169)
 - **theodb:** a reconstrução do gêmeo heap de 100M passou a **provar que consegue ler o TSV antes de dropar
   qualquer coisa** — lendo 1 byte como o usuário que de fato lerá. A ordem anterior dropava e recriava a tabela
   primeiro, e o aborto por leitura deixava 0 linhas onde antes não havia tabela nenhuma; 0 linhas lê como "a

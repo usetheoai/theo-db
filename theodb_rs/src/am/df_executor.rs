@@ -608,9 +608,109 @@ pub(super) unsafe fn run_columnar_aggs(
 ) -> Result<Vec<(pg_sys::Datum, bool)>, String> {
     let agg_cols: Vec<String> =
         aggs.iter().filter_map(|a| a.col_name().map(str::to_string)).collect();
-    let batch = decode_to_batch(rel, &agg_cols, predicates, text_predicates, in_predicates, skip)?;
     let filter = build_filter_expr(rel, predicates, text_predicates, in_predicates);
-    run_aggs_on_batch(batch, aggs, filter)
+    let mut exprs = Vec::with_capacity(aggs.len());
+    for a in aggs {
+        push_agg_exprs(a, &mut exprs);
+    }
+    let batches = run_df_over_columnar(
+        rel,
+        &agg_cols,
+        predicates,
+        text_predicates,
+        in_predicates,
+        skip,
+        move |df| {
+            // Zone-map predicate as the FINAL authority over surviving rows (D3): filter BEFORE aggregating.
+            let df = match filter {
+                Some(f) => df.filter(f)?,
+                None => df,
+            };
+            df.aggregate(vec![], exprs)
+        },
+    )?;
+    aggs_from_batches(&batches, aggs)
+}
+
+/// M169 — run a DataFusion plan over the columnar relation, streaming one chunk-group at a time when possible.
+///
+/// THE single place the aggregate paths choose between the streaming source and the eager whole-relation batch.
+/// Both `run_columnar_aggs` (scalar) and `run_columnar_grouped_aggs` (grouped) route through it, because the
+/// measured target spans BOTH: of the three `byte array offset overflow` instances at 100M, q20 is scalar
+/// (`COUNT(*) … WHERE URL LIKE`) and q33/q34 are grouped (`GROUP BY URL`). Two copies of this decision would
+/// drift, and the drift would be invisible to a test that exercises only one of the two shapes.
+///
+/// **The fail-open is CONDITIONAL — the top-k's shape copied verbatim would reintroduce the defect (ADR-5).**
+/// There, recuing to eager is safe: the eager path is the pre-M168 behaviour and it works, while the `TopK`
+/// retention grows with `k` against a constant streaming pool, so a large `k` can exhaust a pool that eager
+/// served. Here the eager path is *sometimes* the defect: `decode_to_batch` builds each text column as ONE Arrow
+/// `Utf8` array with `i32` offsets, so past `i32::MAX` bytes of values it cannot succeed at all.
+///
+/// So the fallback is gated on the exact byte total (`ScanPlan::varlena_raw_len_sum`), not on a heuristic:
+///
+/// - projected varlena bytes **< `i32::MAX`** → eager CAN serve it → fall back, exactly as the top-k does. This
+///   is the case the plan refused to punish: at 1M with a small `work_mem` the streaming pool is tiny, and a
+///   query eager served would otherwise start failing.
+/// - projected varlena bytes **≥ `i32::MAX`** → eager provably CANNOT serve it → the typed `ResourcesExhausted`
+///   rises as an error saying to raise `work_mem`. An error that names its remedy is actionable; a panic is not.
+///
+/// The eager path also runs, as the CORRECT answer rather than a fallback, when the GUC is off (the paired
+/// "before" arm of the measurement) or when `open_streaming_source` declines — unflushed pending rows (a scan
+/// planned from visible stripes alone cannot see this transaction's own writes) or nothing visible at all.
+unsafe fn run_df_over_columnar<F>(
+    rel: pg_sys::Relation,
+    proj_cols: &[String],
+    predicates: &[super::zonemap::ZonePredicate],
+    text_predicates: &[super::zonemap::TextPredicate],
+    in_predicates: &[super::zonemap::InListPredicate],
+    skip: bool,
+    build: F,
+) -> Result<Vec<RecordBatch>, String>
+where
+    // `Clone` (not just `FnOnce`) because the conditional fail-open may run the SAME plan twice — once streamed,
+    // once eager. Rebuilding the closure at each call site instead would put the plan in two places, which is how
+    // the two arms would silently drift apart.
+    F: FnOnce(
+            datafusion::dataframe::DataFrame,
+        ) -> Result<datafusion::dataframe::DataFrame, DataFusionError>
+        + Clone
+        + Send
+        + 'static,
+{
+    if super::columnar_agg::ENABLE_COLUMNAR_AGG_STREAM.get()
+        && let Some((part, varlena_bytes)) =
+            open_streaming_source(rel, proj_cols, predicates, text_predicates, in_predicates, skip)?
+    {
+        match run_df_collect_streaming(part, build.clone()) {
+            Ok(batches) => return Ok(batches),
+            // TIPADO, não catch-all — mesma disciplina do top-k. `ResourcesExhausted` é a ÚNICA condição que o
+            // recuo endereça; engolir qualquer `Err` esconderia corrupção de dados e cancelamento atrás de uma
+            // segunda execução silenciosa.
+            Err(DataFusionError::ResourcesExhausted(_))
+                if varlena_bytes < i64::from(i32::MAX) as u64 => {}
+            Err(e) => return Err(format!("df_executor: datafusion: {e}")),
+        }
+    }
+    let batch = decode_to_batch(rel, proj_cols, predicates, text_predicates, in_predicates, skip)?;
+    run_df_collect(batch, build)
+}
+
+/// Extract one `(Datum, is_null)` per agg from the single scalar-aggregate result batch.
+///
+/// Shared by the eager (`run_aggs_on_batch`, also the M101 heap-Arrow-cache caller) and the streaming path, so
+/// the two cannot drift in how they read the aggregate output — a drift a test exercising one path would miss.
+unsafe fn aggs_from_batches(
+    batches: &[RecordBatch],
+    aggs: &[AggSpec],
+) -> Result<Vec<(pg_sys::Datum, bool)>, String> {
+    let b = batches.first().ok_or("df_executor: no result batch")?;
+    let mut result = Vec::with_capacity(aggs.len());
+    let mut off = 0; // batch column cursor — a multi-column spec (avg-int) consumes >1 column
+    for a in aggs {
+        result.push(agg_datum(b, off, 0, a)?);
+        off += a.ncols();
+    }
+    Ok(result)
 }
 
 /// Run the aggregates over an already-built Arrow `RecordBatch` via a vectorized DataFusion plan under
@@ -634,14 +734,7 @@ pub(super) unsafe fn run_aggs_on_batch(
         };
         df.aggregate(vec![], exprs)
     })?;
-    let b = batches.first().ok_or("df_executor: no result batch")?;
-    let mut result = Vec::with_capacity(aggs.len());
-    let mut off = 0; // batch column cursor — a multi-column spec (avg-int) consumes >1 column
-    for a in aggs {
-        result.push(agg_datum(b, off, 0, a)?);
-        off += a.ncols();
-    }
-    Ok(result)
+    aggs_from_batches(&batches, aggs)
 }
 
 /// Build the DataFusion runtime (bounded `work_mem` MemoryPool + `target_partitions=1` — M100 D3 safety), read the
@@ -744,7 +837,6 @@ pub(super) unsafe fn run_columnar_grouped_aggs(
             }
         }
     }
-    let batch = decode_to_batch(rel, &proj_cols, predicates, text_predicates, in_predicates, skip)?;
     let filter = build_filter_expr(rel, predicates, text_predicates, in_predicates);
 
     // Grouping keys: bare columns FIRST, then the expression exprs (M157/M161). The output batch columns follow this
@@ -779,13 +871,27 @@ pub(super) unsafe fn run_columnar_grouped_aggs(
     }
     // Filter BEFORE aggregating (SQL WHERE … GROUP BY — M114 blueprint E4); the zone-map skip above is only an
     // admission filter, the DataFusion Filter is the final row authority.
-    let batches = run_df_collect(batch, move |df| {
-        let df = match filter {
-            Some(f) => df.filter(f)?,
-            None => df,
-        };
-        df.aggregate(group_exprs, agg_exprs)
-    })?;
+    //
+    // M169: streamed per chunk-group when possible (see `run_df_over_columnar`). This is where TWO of the three
+    // measured `byte array offset overflow` instances live — q33/q34 group by URL, so the eager path built the
+    // whole URL column as one i32-offset Arrow array. What streaming does NOT reduce is the hash table's own
+    // state, which is O(distinct groups): q32 (`GROUP BY WatchID, ClientIP`, near-unique key) times out for that
+    // reason and this change does not move it. Claiming otherwise would be selling a fix that does not happen.
+    let batches = run_df_over_columnar(
+        rel,
+        &proj_cols,
+        predicates,
+        text_predicates,
+        in_predicates,
+        skip,
+        move |df| {
+            let df = match filter {
+                Some(f) => df.filter(f)?,
+                None => df,
+            };
+            df.aggregate(group_exprs, agg_exprs)
+        },
+    )?;
 
     // DataFusion output columns: [group_0..group_{ngroup-1}, agg columns…]. Agg `idx` starts at batch column
     // `ngroup + agg_off[idx]` (a multi-column spec shifts the rest). Emit rows in `layout` (target) order.
@@ -1092,7 +1198,11 @@ unsafe fn open_streaming_source(
     text_predicates: &[super::zonemap::TextPredicate],
     in_predicates: &[super::zonemap::InListPredicate],
     skip: bool,
-) -> Result<Option<Arc<ColumnarPartition>>, String> {
+    // M169 ADR-5 — the second element is `ScanPlan::varlena_raw_len_sum`: the exact byte total of the projected
+    // variable-length columns. It is returned from HERE, not recomputed by the caller, because the only way to
+    // get it is from the `ScanPlan`, and this function moves that plan into the stream. Re-planning to ask the
+    // question would repeat the directory read, which is the scan's O(N) term.
+) -> Result<Option<(Arc<ColumnarPartition>, u64)>, String> {
     let mut proj: Vec<usize> = Vec::new();
     let mut want = |idx: usize, proj: &mut Vec<usize>| {
         if !proj.contains(&idx) {
@@ -1126,6 +1236,8 @@ unsafe fn open_streaming_source(
         return Ok(None);
     }
     let plan = super::columnar::plan_columnar_scan(rel, Some(&proj))?;
+    // Read the byte total BEFORE the plan is moved into the stream — afterwards it is unreachable.
+    let varlena_bytes = plan.varlena_raw_len_sum();
     let mut inner = super::columnar::ColumnarChunkStream::new(rel, plan);
     // Probe: the schema has to be exact before DataFusion executes, and only decoded data reveals it.
     let first = inner.next(predicates, skip)?;
@@ -1146,17 +1258,20 @@ unsafe fn open_streaming_source(
             probe.get_array_memory_size()
         );
     }
-    Ok(Some(Arc::new(ColumnarPartition {
-        schema: schema.clone(),
-        state: std::sync::Mutex::new(Some(ChunkGroupBatchStream {
-            schema,
-            inner,
-            predicates: predicates.to_vec(),
-            skip,
-            pending: Some(probe),
-            done: false,
-        })),
-    })))
+    Ok(Some((
+        Arc::new(ColumnarPartition {
+            schema: schema.clone(),
+            state: std::sync::Mutex::new(Some(ChunkGroupBatchStream {
+                schema,
+                inner,
+                predicates: predicates.to_vec(),
+                skip,
+                pending: Some(probe),
+                done: false,
+            })),
+        }),
+        varlena_bytes,
+    )))
 }
 
 /// M158 — late-materialization top-k over a columnar table: `SELECT <proj> [WHERE <pushable>] ORDER BY <key> LIMIT k`.
@@ -1190,9 +1305,14 @@ pub(super) unsafe fn run_columnar_topk(
     // eager path below stays as the fallback for the one case the stream cannot serve (nothing visible), and
     // because a source that yields zero batches is exactly the empty-but-green result the oracles guard against.
     if super::columnar_agg::ENABLE_COLUMNAR_TOPK_STREAM.get()
-        && let Some(part) =
+        && let Some((part, _varlena_bytes)) =
             open_streaming_source(rel, &proj_names, predicates, text_predicates, in_predicates, skip)?
     {
+        // O top-k IGNORA o total de bytes, e a razão é de ESCOPO, não de segurança: o eager daqui materializa a
+        // relação inteira do mesmo jeito, então tem o MESMO teto de offsets i32 — o fail-open abaixo pode cair
+        // nele e estourar por largura de texto. O M169 foi escopado ao caminho agregado (é lá que estão as três
+        // instâncias medidas), e estender o pré-check ao top-k é uma mudança de comportamento que este milestone
+        // não mediu. Fica dito aqui em vez de descoberto depois.
         let order_stream = order_by.clone();
         let filter_stream = filter.clone();
         // FAIL-OPEN, não `?`. A pool do streaming é constante em `k` enquanto a retenção do TopK cresce com ele

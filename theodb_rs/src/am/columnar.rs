@@ -993,6 +993,43 @@ pub(crate) struct ScanPlan {
     natts: usize,
 }
 
+impl ScanPlan {
+    /// M169 ADR-5 — total UNCOMPRESSED bytes of the projected VARIABLE-LENGTH columns, over every visible
+    /// chunk-group of every visible stripe.
+    ///
+    /// This is the exact pre-check for the one question the aggregate fail-open has to answer: *can the eager
+    /// path serve this scan at all?* `decode_to_batch` builds each text column as ONE Arrow `Utf8` array, and
+    /// those offsets are `i32` — past `i32::MAX` bytes of values the array cannot be built and the decode dies
+    /// with `byte array offset overflow`. Recuing to eager in that situation would hand the query back to the
+    /// very defect M169 removes, so the fallback is conditional on this number.
+    ///
+    /// Exact, not estimated: `ChunkDirEntry.raw_len` is already in memory (the directory is the O(N) term the
+    /// scan pays regardless), so there is nothing to approximate.
+    ///
+    /// **Direction of the inexactness, stated rather than hidden.** `raw_len` is the raw *serialized* length of
+    /// the chunk, which includes the per-cell length headers that the Arrow values buffer does NOT carry. It
+    /// therefore OVER-counts, never under. That is the safe side for a check that decides "eager cannot serve
+    /// this": it may decline the fallback slightly early, and it can never miss a real overflow.
+    ///
+    /// Fixed-width columns are skipped because they land in a fixed-stride Arrow buffer with no offsets at all —
+    /// their size is bounded by `row_count * width`, not by an `i32` cursor.
+    pub(crate) fn varlena_raw_len_sum(&self) -> u64 {
+        let mut total: u64 = 0;
+        for col in &self.wanted {
+            if self.cols[*col].attlen_fixed.is_some() {
+                continue;
+            }
+            for sp in &self.plans {
+                for cg in 0..sp.n_chunk_groups {
+                    total = total
+                        .saturating_add(u64::from(sp.entries[cg * self.natts + *col].raw_len));
+                }
+            }
+        }
+        total
+    }
+}
+
 /// Does this relation have rows written by the current transaction that are not yet flushed into a stripe?
 ///
 /// `decode_columns_v2` checks this FIRST and falls back to the legacy cell path when true, because a scan built
