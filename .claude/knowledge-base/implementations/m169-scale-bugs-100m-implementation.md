@@ -149,6 +149,40 @@ A **q32** (`GROUP BY WatchID, ClientIP`) roteia e falha por pico de **estado** d
 distintos), independente do batch. O streaming não a move, e o código diz isso onde alguém iria supor o
 contrário.
 
+### DESVIO DECLARADO — o orçamento de 40 linhas por arquivo foi estourado em `df_executor.rs`
+
+Medido contra `948e30d` (início do M169):
+
+| | |
+|---|---|
+| crescimento líquido de `df_executor.rs` | **+130 linhas** |
+| composição do que foi adicionado | 62 comentário · 2 branco · **98 código** |
+| tamanho do arquivo hoje | **1902** linhas (era **1772**) |
+| orçamento do Global DoD | **40** |
+
+Os outros dois arquivos de produção tocados **cabem**: `columnar.rs` +37, `columnar_agg.rs` +25.
+
+**Por que estourou, sem desculpa.** O orçamento foi escrito quando o plano acreditava que o alvo era **uma**
+função — o plano nomeia a q20, que é escalar. A medição do T1.2 mostrou **três** instâncias do overflow, duas
+delas em `run_columnar_grouped_aggs`. Duas funções significam dois call-sites reescritos mais o ponto de decisão
+compartilhado; 98 linhas de código é o custo real desse escopo, não gordura.
+
+**O que NÃO é desculpa:** o arquivo já estava com 1772 linhas antes de eu tocá-lo — quase 4× a diretriz de 500
+LoC do projeto. Meu diff piora um problema pré-existente; não o cria, e também não o resolve.
+
+**Alternativa considerada e rejeitada.** Extrair `run_df_over_columnar` + `aggs_from_batches` para um módulo
+novo traria o crescimento para dentro do orçamento. Rejeitada porque as duas dependem de quatro símbolos
+privados de `df_executor` (`decode_to_batch`, `open_streaming_source`, `run_df_collect`,
+`run_df_collect_streaming`): mover exigiria promovê-los a `pub(super)`, **aumentando a superfície pública para
+reduzir uma contagem de linhas**. É o trade errado (KISS/encapsulamento perdem para uma métrica).
+
+**Recomendação para o `/review`:** julgar o desvio, não o meu argumento. Se o veredito for que o orçamento vale
+como está, a correção certa é a extração do módulo de streaming inteiro (`ColumnarPartition`,
+`ChunkGroupBatchStream`, `open_streaming_source`, `run_df_collect_streaming` e as duas novas) — um refactor de
+~400 linhas que faz sentido por coesão e não só por contagem. **Não o fiz agora de propósito:** um refactor desse
+tamanho no meio do milestone muda o `so_md5` entre a medição e a entrega, e o T4.1 exige que o binário medido
+seja o binário entregue.
+
 ### Desvio que eu ia cometer e o plano barrou
 
 Meu primeiro desenho do T2.1 não tinha fail-open algum, com o argumento de que o eager É o defeito. O
