@@ -14,6 +14,16 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **theodb:** o verificador de byte-identidade passou a **reproduzir a sessão da corrida que ele prova** e a
+  recusar a comparação quando o plano não tem o pushdown agregado. Faltava `SET theodb.enable_columnar_agg = on`
+  (a GUC é default OFF), então ele compararia colunar vs heap por um caminho que o milestone não toca e
+  estamparia "idêntico" com toda a razão e nenhuma relevância. O sintoma que denunciou foi o tempo — 4m45s
+  contra 59,5 s da corrida-alvo —, não o resultado. `identical` agora fica indefinido quando não houve prova:
+  "não provei" é estado distinto de "está certo" (#M169)
+- **theodb:** o driver de medição de pico passou a ler o SQL por **redirecionamento** em vez de `-f <caminho>`.
+  A checagem do bit `x` vale para cada componente resolvido no momento do open, e um caminho absoluto sob um
+  diretório 700 falha onde o relativo (a partir do CWD já herdado) funciona — o erro acusa o arquivo, não o
+  diretório, e manda o leitor conferir a permissão certa do alvo errado (#M169)
 - **theodb:** o recuo do agregado streaming passou a cobrir também a **falha de spill em disco**, não só a pool
   estourada. Medido na corrida completa a 100M: `COUNT(DISTINCT …) GROUP BY …` (q08/q09 do ClickBench) saía de
   `ok` para erro. A causa não é defeito novo — a pool do caminho eager é dimensionada pelo batch decodificado, o

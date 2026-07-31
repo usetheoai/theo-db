@@ -48,7 +48,14 @@ trap 'echo "=== restaurando: restart SEM o trace ==="; pg_restart ""' EXIT
 pg_restart 1
 
 echo "=== medição ==="
-psql_c -f "$HERE/m169_groupby_peak.sql" > "$OUT" 2>&1
+# `-f -` com REDIRECIONAMENTO, não `-f "$HERE/…"`. Quem abre o arquivo passa a ser o shell (que roda como root e
+# atravessa `/root`), e o psql — que roda como $PGOSUSER — só lê o stdin. Isso remove a permissão da equação.
+#
+# MEDIDO 2026-07-31, e a sutileza vale registrar: o mesmo arquivo, mesmo usuário, funciona com
+# `cd /root/theo-db && psql -f benchmarks/x.sql` e FALHA com `psql -f /root/theo-db/benchmarks/x.sql`. A checagem
+# do bit `x` vale para os componentes resolvidos NA HORA do open; um caminho relativo parte do CWD já aberto e
+# herdado, então não re-atravessa `/root`. Foi por isso que o RED do T2.1 passou e este driver não.
+psql_c -f - < "$HERE/m169_groupby_peak.sql" > "$OUT" 2>&1
 SQL_RC=$?
 
 PEAKS=$(grep -c "peak_reserved=" "$OUT")
