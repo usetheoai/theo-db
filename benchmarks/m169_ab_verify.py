@@ -50,14 +50,33 @@ def _conn(timeout_ms: int):
         # O lado HEAP varre 66 GB; com o teto de 300 s da corrida de benchmark ele nunca terminaria, e um
         # timeout aqui se leria como "não deu para provar" quando na verdade é só orçamento de tempo.
         cur.execute(f"SET statement_timeout = {int(timeout_ms)}")
+        # A SESSÃO TEM DE SER A MESMA DA CORRIDA QUE SE QUER PROVAR. `theodb.enable_columnar_agg` é
+        # **default OFF** (`columnar_agg.rs:24`), então sem este SET a consulta roda pelo caminho SEM pushdown
+        # agregado — e o oráculo provaria byte-identidade de um caminho que este milestone não toca. Custou uma
+        # corrida descartada para descobrir: a q20 levava 4m45s aqui contra 59,5 s no T4.1, e a diferença de 5×
+        # era o pushdown ausente, não cache frio.
+        cur.execute("SET theodb.enable_columnar_agg = on")
+        cur.execute("SET work_mem = '256MB'")
     return c
 
 
 def verify_one(cur, i: int, sql: str) -> dict:
     """Compara colunar (`hits`) vs heap (`hits_heap`) para UMA consulta. Sem LIMIT, sem timing."""
-    rec = {"q": i, "identical": None, "rows_columnar": None, "rows_heap": None, "note": None}
+    rec = {"q": i, "identical": None, "rows_columnar": None, "rows_heap": None,
+           "agg_routed": None, "note": None}
     ab_sql = LIMIT_RE.sub("", sql.rstrip().rstrip(";"))
     try:
+        # NÃO-VACUIDADE, antes de qualquer comparação: as 4 consultas em prova são exatamente as que o T4.1
+        # mediu com `agg_routed=true`. Se o pushdown agregado NÃO estiver no plano, o que vier a seguir compara
+        # outro caminho — e um "idêntico" ali seria verdadeiro e irrelevante. `identical` fica None nesse caso:
+        # "não provei" é um estado distinto de "está certo".
+        cur.execute("EXPLAIN (FORMAT TEXT) " + ab_sql)
+        rec["agg_routed"] = "theodb_columnar_agg" in "\n".join(r[0] for r in cur.fetchall())
+        if not rec["agg_routed"]:
+            rec["note"] = ("o plano NÃO tem pushdown agregado — comparar aqui provaria outro caminho "
+                           "(theodb.enable_columnar_agg está on?)")
+            return rec
+
         t0 = time.perf_counter()
         cur.execute(ab_sql)
         rc = _canonical(cur.fetchall())
@@ -98,13 +117,14 @@ def render(recs: list[dict]) -> str:
         f"- divergentes: **{len(failed)}**",
         f"- não verificadas: **{len(unknown)}**",
         "",
-        "| q | idêntico | linhas (colunar / heap) | colunar s | heap s | nota |",
-        "|---|---|---|---|---|---|",
+        "| q | roteou | idêntico | linhas (colunar / heap) | colunar s | heap s | nota |",
+        "|---|---|---|---|---|---|---|",
     ]
     for r in recs:
         mark = {True: "**sim**", False: "**NÃO**", None: "—"}[r["identical"]]
         out.append(
-            f"| q{r['q']:02d} | {mark} | {r['rows_columnar']} / {r['rows_heap']} | "
+            f"| q{r['q']:02d} | {'sim' if r.get('agg_routed') else '**NÃO**'} | {mark} | "
+            f"{r['rows_columnar']} / {r['rows_heap']} | "
             f"{r.get('elapsed_columnar_s', '—')} | {r.get('elapsed_heap_s', '—')} | {r['note'] or ''} |"
         )
     if unknown:
