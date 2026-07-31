@@ -20,6 +20,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   estamparia "idêntico" com toda a razão e nenhuma relevância. O sintoma que denunciou foi o tempo — 4m45s
   contra 59,5 s da corrida-alvo —, não o resultado. `identical` agora fica indefinido quando não houve prova:
   "não provei" é estado distinto de "está certo" (#M169)
+- **theodb:** o mesmo verificador passou a comparar por **ordem total** em vez de remover o `LIMIT`, e a abrir
+  **uma conexão por consulta**. Remover o limite desempatava corretamente em consultas pequenas e pedia ~10⁸
+  linhas na `GROUP BY WatchID, ClientIP`: 19,5 GB de anon-rss, backend morto pelo kernel e o cluster inteiro
+  reinicializado. Acrescentar as colunas de saída como critérios de desempate posicionais resolve o empate sem
+  inflar o resultado, e mantém a consulta na forma que o ClickBench define. A conexão por consulta existe porque
+  a queda envenenou a sessão e transformou as duas consultas seguintes em `cursor already closed`, que o
+  relatório exibia como "não roteou" — artefato lido como medição (#M169)
 - **theodb:** o driver de medição de pico passou a ler o SQL por **redirecionamento** em vez de `-f <caminho>`.
   A checagem do bit `x` vale para cada componente resolvido no momento do open, e um caminho absoluto sob um
   diretório 700 falha onde o relativo (a partir do CWD já herdado) funciona — o erro acusa o arquivo, não o
