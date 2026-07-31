@@ -30,6 +30,9 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   `GROUP BY <expressão>`. Módulo não está no whitelist de chave-expressão do admit (`DateTrunc`,
   `ExtractField`, `IntAddConst`, `Const`), então a forma anterior **declinava** e a medição teria reportado
   o pico do executor de linha do PostgreSQL como se fosse o do agregado colunar (#M169)
+- **theodb:** o acompanhamento da recarga deixou de chamar `pg_total_relation_size` na tabela em carga. A
+  função pega lock de relação e o `ALTER TABLE … SET LOGGED` segura `AccessExclusiveLock`, então o monitor
+  ficava **preso na fila do lock** — e a saída vazia se lê como "nada acontecendo", que é o oposto (#M169)
 - **theodb:** as guardas de "box ociosa" passaram a ignorar backends `idle`. Um `psql` esquecido por uma
   conexão que caiu não consome CPU nem I/O, mas abortava a medição; `idle in transaction` continua contando,
   porque esse segura locks e snapshot e é justamente o que contamina o número (#M169)

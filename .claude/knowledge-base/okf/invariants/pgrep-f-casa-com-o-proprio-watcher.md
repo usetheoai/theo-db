@@ -51,6 +51,7 @@ memória que não é do processo) e em [medir com carga concorrente](../failure-
 
 ## Relacionados
 
+- [invariant/monitorar-tamanho-de-relacao-bloqueia-sob-ddl](monitorar-tamanho-de-relacao-bloqueia-sob-ddl.md) — o irmão que EMUDECE em vez de mentir
 - [invariant/vmrss-de-backend-pg-inclui-shared-buffers](vmrss-de-backend-pg-inclui-shared-buffers.md)
 - [failure-mode/instrumento-cego-a-arquitetura](../failure-modes/instrumento-cego-a-arquitetura.md)
 - [failure-mode/contaminacao-por-concorrencia](../failure-modes/contaminacao-por-concorrencia.md)

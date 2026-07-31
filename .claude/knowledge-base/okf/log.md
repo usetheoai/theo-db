@@ -570,3 +570,22 @@ desativada", não como "a verificação era lenta".
 (`configuracao-do-operador-torna-inmedivel`; o real é `config-do-operador-que-inviabiliza-a-medicao`). Diferença
 desta vez: conferi com `grep` **antes** de rodar o gate, em vez de descobrir pelo gate. É a primeira das cinco em
 que a checagem foi minha.
+
+## 2026-07-31 (6) — o observador preso atrás do que observava
+
++1 `Invariant`. Enquanto o `ALTER TABLE … SET LOGGED` reescrevia ~70 GB, a minha query de acompanhamento —
+que imprimia `pg_total_relation_size('hits_heap')` — apareceu em `pg_stat_activity` com **163 s em
+`Lock/relation`**. A função precisa abrir a relação, e o DDL segura `AccessExclusiveLock` do começo ao fim.
+
+O que torna isto caro é o sintoma: não é erro, é **silêncio**. A invocação não retorna, o `timeout` do shell a
+mata, e a saída vazia se lê como *"não há atividade"* — foi exatamente a leitura errada que fiz numa coleta
+anterior. E cada tentativa deixa mais um backend na fila, até que uma guarda de "box ociosa" comece a abortar
+por causa do próprio monitoramento.
+
+Família: instrumento perturbando a medição, junto de `pgrep-f-casa-com-o-proprio-watcher` e
+`vmrss-de-backend-pg-inclui-shared-buffers`. A diferença que vale reter é o sintoma — **lá o instrumento mente,
+aqui ele emudece**, e silêncio se confunde com informação muito mais facilmente.
+
+Substitutos que não pegam lock: `pg_stat_activity` sozinho para "está vivo?", `df` para "quanto foi escrito", e
+a linha que o próprio script imprime ao fechar o passo — a melhor das três, porque fala do PASSO e não de bytes
+que sobem por WAL ou por temporário.
