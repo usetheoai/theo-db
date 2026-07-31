@@ -48,7 +48,15 @@ echo "=== guarda: 'hits' está intacto ANTES de mexer em qualquer coisa? ==="
 # Trade-off declarado: a versão rápida valida o colunar ATRAVÉS do caminho de pushdown, então um defeito nesse
 # caminho poderia mascarar-se. Aceito porque `columnar_type_ab.py` prova byte-identidade do pushdown em 35 casos
 # com controle positivo, e porque o custo do caminho lento é grande o bastante para comprar o incentivo errado.
-HITS=$(psql_c -Atc "SET theodb.enable_columnar_agg = on; select count(*) from public.hits;")
+#
+# Duas armadilhas, ambas pagas ao aplicar este fix, ambas registradas para não voltarem:
+#   1. Um `SET` no mesmo `-c` imprime o tag `SET` em linha própria, e a captura vira "SET\n99997497" — que não
+#      casa com comparação alguma. O guard fail-closed recusou, em vez de recarregar sobre número inválido.
+#   2. `PGOPTIONS=... psql_c ...` NÃO funciona aqui: `psql_c` chama `sudo -u "$PGOSUSER" env LD_LIBRARY_PATH=…`,
+#      e o `sudo` limpa o ambiente — a variável nunca alcança o psql, e o count roda sem pushdown (35 min).
+# `tail -1` resolve as duas sem encanamento de ambiente. Fail-closed preservado: `ON_ERROR_STOP=1` faz um erro
+# sair não-zero, e a captura vira texto de erro, que também não casa com a contagem esperada.
+HITS=$(psql_c -Atc "SET theodb.enable_columnar_agg = on; select count(*) from public.hits;" | tail -1)
 echo "  hits=$HITS"
 if [ "${HITS:-0}" != "99997497" ]; then
   echo "  ABORTA: 'hits' não tem 99.997.497 linhas. Não mexo no heap sem o colunar íntegro." >&2
