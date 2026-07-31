@@ -54,6 +54,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - **theodb:** as guardas de "box ociosa" passaram a ignorar backends `idle`. Um `psql` esquecido por uma
   conexão que caiu não consome CPU nem I/O, mas abortava a medição; `idle in transaction` continua contando,
   porque esse segura locks e snapshot e é justamente o que contamina o número (#M169)
+- **theodb:** publicado o limite de cardinalidade do `GROUP BY`, **medido**: o pico de memória cresce
+  linearmente com o número de grupos distintos (~92 B cada), e 2 milhões de grupos já consomem **95,4%** de
+  uma pool de 192 MiB. É o termo que o consumo por chunk-group **não** reduz — e o que faz uma consulta de
+  chave quase-única sobre 100M linhas estourar por estado, não por offsets (#M169)
 - **theodb:** driver da medição de pico do `GROUP BY` que encoda a ordem obrigatória em vez de a confiar à
   memória de quem roda: guarda de box ociosa, restart **com** `THEODB_ADMIT_TRACE=1` (o trace resolve num
   `OnceLock` por backend, então só entra por restart do postmaster), medição, e `trap` que restaura o
