@@ -55,9 +55,15 @@ Duas coisas mudam de figura, e ambas para melhor entendimento — não para melh
 1. **O alvo tem 3 instâncias, não 1.** A alavanca do milestone é maior do que o snapshot sugeria, e as três
    são a **mesma** coluna (`URL`) — o que é evidência de causa única, não de três bugs.
 2. **Surge uma classe que o snapshot não continha: roteia e ainda assim falha.** O q32 tem `agg_routed=true`
-   e estoura o teto de 300 s. Isso **não** é o defeito de offsets, e o streaming pode não movê-lo: o pico ali é
-   de **estado** do agregado (cardinalidade), não do buffer de decode. Creditar o q32 ao fix seria a mesma
-   falha que este conceito descreve, um nível abaixo.
+   e estoura o teto de 300 s. Isso **não** é o defeito de offsets: o pico ali é de **estado** do agregado
+   (cardinalidade), não do buffer de decode.
+
+   > **Desfecho medido (2026-07-31, T4.1):** a q32 **passou a completar** (290,5 s). A cautela acima — "creditar
+   > o q32 ao fix seria a mesma falha" — estava certa em exigir prova e **errada no palpite**: o fix a moveu, por
+   > um mecanismo que eu não havia considerado (o streaming habilita spill para disco). O crédito agora é
+   > legítimo porque foi **medido**, não porque foi previsto. Ver
+   > [measurement/delta-medido-m169-28-para-30](../measurements/delta-medido-m169-28-para-30.md) e
+   > [failure-mode/extrapolar-reta-para-regime-de-outro-mecanismo](extrapolar-reta-para-regime-de-outro-mecanismo.md).
 
 A regra operacional resiste: o snapshot parcial já publicava **por classe**, então a correção foi aditiva em
 vez de invalidante. Um agregado sem discriminador teria ido de "6 falhas" a "15 falhas" sem nenhuma forma de

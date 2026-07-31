@@ -36,7 +36,7 @@ Das **15 falhas** do M169, só **4 estão no caminho agregado colunar** — o qu
 | q | veredito | `agg_routed` | leitura |
 |---|---|---|---|
 | **q20, q33, q34** | `error:XX000` | **true** | `byte array offset overflow` — o alvo, **3 instâncias**, não 1 |
-| q32 | `timeout` | **true** | roteia e não termina — pico de ESTADO, não de offsets |
+| q32 | `timeout` | **true** | roteia e não termina — pico de ESTADO, não de offsets (**corrigida no T4.1**: 290,5 s) |
 | q17, q19, q21…q28, q39 (11) | `timeout` | **false** | executor de linha do PostgreSQL; nenhuma mudança colunar as move |
 
 Sem esse recorte, "28/43" é ambíguo: 11 das 15 falhas nem entram no caminho que o milestone endereça, e

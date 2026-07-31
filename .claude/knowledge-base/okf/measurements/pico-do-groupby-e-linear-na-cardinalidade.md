@@ -32,11 +32,31 @@ por vez.
 
 Consequência direta para o ClickBench a 100M: a **q32** (`GROUP BY WatchID, ClientIP`, chave quase-única)
 teria ~10⁸ grupos. A ~92 B/grupo isso é ordem de **9 GB** de estado — contra uma pool de 192 MiB no default, ou
-~576 MiB mesmo com `work_mem = 256MB`. O estouro não é hipótese; é aritmética a partir da reta medida.
+~576 MiB mesmo com `work_mem = 256MB`.
 
 Foi por isso que a q32 apareceu no baseline com `agg_routed = true` **e** `timeout`: ela roteia pelo caminho
 colunar e morre no estado, não nos offsets — ao contrário de q20/q33/q34, que morriam no
 [teto de offsets i32](teto-offsets-i32.md) e são o que o T2.1 endereça.
+
+## ⚠ A previsão que eu derivei daqui foi FALSIFICADA (2026-07-31, T4.1)
+
+A versão anterior deste arquivo concluía, deste mesmo parágrafo: *"O estouro não é hipótese; é aritmética a
+partir da reta medida."* **A q32 completou em 290,5 s no T4.1.** A reta está certa; a previsão tirada dela,
+errada.
+
+O defeito do raciocínio: extrapolei a reta assumindo que o estado **precisa caber na pool**. Sob streaming ele
+não precisa — o DataFusion passa a poder **derramar para disco**, o que o caminho eager, entregando um único
+batch gigante, não conseguia fazer no meio da execução. Mudar o regime de entrega **mudou o mecanismo**, e a
+aritmética só valia no mecanismo antigo.
+
+O mesmo spill tem dois sinais opostos na mesma corrida, o que é a evidência mais forte de que é ele o
+mecanismo: **salva** a q32 (estado passa a caber em disco) e **quebra** q08/q09 (`COUNT(DISTINCT)`, que
+esgotam o soft limit de 1024 descritores criando arquivos de partição). Ver
+[failure-mode/extrapolar-reta-para-regime-de-outro-mecanismo](../failure-modes/extrapolar-reta-para-regime-de-outro-mecanismo.md).
+
+O que continua válido, e é o que este conceito deve ser citado para sustentar: **a reta em si** (~92 B/grupo,
+linear) e o fato de que o streaming **não reduz** o termo de estado. O que não se deve citar daqui é qualquer
+previsão de falha derivada por aritmética sem checar se o mecanismo do regime-alvo é o mesmo.
 
 ## Duas honestidades sobre a medição
 

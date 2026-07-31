@@ -616,3 +616,29 @@ Os números do custo viraram
 COPY 1796 s + SET LOGGED 1561 s, gêmeo 4,1× o tamanho do colunar, pico de disco 247 GB (o rewrite precisa do
 dobro da tabela, então dimensionar pelo tamanho final é subdimensionar). O passo que parecia cerimônia custou
 26 min e evitou perder 56.
+
+## 2026-07-31 — o T4.1 falsificou uma previsão minha, e a correção teve de andar pelo grafo
+
+A corrida completa do ClickBench 100M com o binário do M169 virou
+[measurement/delta-medido-m169-28-para-30](measurements/delta-medido-m169-28-para-30.md): **28/43 → 30/43**,
+com as 4 falhas roteadas (q20, q32, q33, q34) consertadas e **q08/q09 REGREDINDO** por exaustão de descritores
+no spill de `COUNT(DISTINCT)`. O delta é publicado por classe — ganho atribuível, ganho não-atribuível e
+regressão em tabela própria — porque um "+2 consultas" esconderia exatamente a linha que importa.
+
+A q32 **não estava prevista**. Eu havia escrito, no T3.2, que o estouro dela *"não é hipótese; é aritmética a
+partir da reta medida"*. Ela completou em 290,5 s. A reta (~92 B/grupo, linear) continua correta; o que caiu
+foi a extrapolação, que pressupunha silenciosamente que o estado **precisa caber na pool** — verdade no
+caminho eager, falsa sob streaming, onde o DataFusion passa a derramar para disco. O mesmo spill salva a q32 e
+quebra q08/q09, e é essa dupla consequência que sustenta o diagnóstico.
+
+A classe virou [failure-mode/extrapolar-reta-para-regime-de-outro-mecanismo](failure-modes/extrapolar-reta-para-regime-de-outro-mecanismo.md):
+uma reta descreve o comportamento dentro do mecanismo em que foi medida, e a q32 era **executável** — medir
+custava 300 s contra publicar uma conclusão errada.
+
+A correção foi propagada pelos **três** arquivos que citavam a q32 (o conceito da reta, o do baseline e o de
+contagem-agregada, cuja cautela "creditar o q32 ao fix seria a mesma falha" estava certa em exigir prova e
+errada no palpite) mais os dois índices — a classe `correcao-nao-propagada-pelo-grafo` é a que mais reincide
+neste bundle.
+
+Pendente e declarado: `ab_identical` é `None` nas 30 que completam. Está provado que saem de erro para `ok`;
+**não** está provado que o resultado é byte-idêntico ao do `hits_heap`.
