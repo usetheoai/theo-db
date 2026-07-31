@@ -514,3 +514,21 @@ classe maior — o instrumento que se inclui na própria medição, a mesma de
 (`o-instrumento-nao-observa-a-coisa-que-se-quer-medir`; o real é `instrumento-cego-a-arquitetura`). É a quarta
 ocorrência da mesma classe nesta base, e as quatro foram pegas pelo gate C2, nunca por mim. O gate é o que
 funciona aqui; a intenção não é.
+
+## 2026-07-31 (3) — a pergunta que o benchmark não faria
+
++1 `Measurement`. O M169 fez o agregado consumir por chunk-group, o que muda a ORDEM de acumulação — e adição
+IEEE-754 não é associativa. Se `sum(float8)` dependesse do tamanho do chunk-group, o milestone teria trocado um
+defeito **barulhento** (o overflow de offsets) por um **silencioso**, que é pior.
+
+Medido: **idêntico bit a bit** (`sum=2.00000000000001e+17`, `avg=8000000000000.04`) sobre dado adversarial —
+`0.1`, que não é representável em binário, com `1e17` esparso, onde `ulp(1e17)=16` faz a ordem decidir se os `0.1`
+sobrevivem. Controle positivo de 1 ULP aborta o gate, que é o que impede o "idêntico" de ser um verde vazio.
+Registrado com o limite explícito: uma forma medida, não prova para toda entrada.
+
+O detalhe que vale reter: **o meu próprio RED mascarava isso**. Ele comparava `round(avg(f)::numeric, 9)`, e o
+arredondamento apaga exatamente a divergência procurada. O gate novo compara `::text` com
+`extra_float_digits = 3` — no PG ≥ 12 essa é a representação mais curta com round-trip exato, então igualdade de
+texto é igualdade de bits. Instância de
+[o A/B prova o espaço de dados, não o de tipos](failure-modes/ab-prova-o-espaco-de-dados-nao-o-de-tipos.md): as
+colunas de SUM/AVG do ClickBench são todas inteiras, então nenhum volume de dados dele faria essa pergunta.

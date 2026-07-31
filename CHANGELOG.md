@@ -26,6 +26,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   (modo 700): um arquivo 644 é inalcançável quando um diretório do caminho não dá `x` (#M169)
 
 ### Added
+- **theodb:** gate de associatividade de `float8` para o agregado colunar — mede `sum`/`avg` **bit a bit**
+  entre o caminho eager e o streaming sobre dado adversarial (`0.1` não-representável + `1e17` esparso), com
+  controle positivo de 1 ULP. Consumir por chunk-group muda a ORDEM de acumulação, e adição IEEE-754 não é
+  associativa; sem esta medição o milestone poderia trocar um defeito barulhento por um silencioso. **Medido:
+  idêntico.** O ClickBench não responderia isso — todas as colunas de SUM/AVG dele são inteiras (#M169)
 - **theodb:** baseline medido do ClickBench a 100M — **28 das 43 consultas completam** sob teto de 300 s, e o
   artefato separa as falhas pelo discriminador `agg_routed`: **4 no caminho agregado colunar** (q20, q32, q33,
   q34) contra 11 que nem entram nele. O alvo do milestone tem **3 instâncias** de `byte array offset overflow`
