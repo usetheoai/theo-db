@@ -532,3 +532,21 @@ arredondamento apaga exatamente a divergência procurada. O gate novo compara `:
 texto é igualdade de bits. Instância de
 [o A/B prova o espaço de dados, não o de tipos](failure-modes/ab-prova-o-espaco-de-dados-nao-o-de-tipos.md): as
 colunas de SUM/AVG do ClickBench são todas inteiras, então nenhum volume de dados dele faria essa pergunta.
+
+## 2026-07-31 (4) — a pergunta larga, no mesmo binário
+
+O conceito de float ganhou a metade larga em vez de virar arquivo novo (é a mesma classe: *o streaming mudou algum
+resultado?*, em escopos diferentes). `benchmarks/columnar_type_ab.py` rodou com a GUC no default **on**, então todo
+caso atravessou o caminho novo: **35/35 como esperado**, `positive_control diverged=2`, cobrindo int2/int4/int8,
+float4/float8, bool, texto, temporais, colação nomeada, `IN`-list, `const_out`, group-expr e top-k.
+
+Duas coisas operacionais foram anexadas ao conceito porque já custaram tempo. O harness **DROPa e recria `hits`** —
+apontá-lo para a base do ClickBench destrói a tabela, o que aconteceu duas vezes no M167; hoje há um guard que
+recusa, e ele funcionou. E rodá-lo como `pgtest` a partir de `/root/theo-db` bate exatamente no invariante escrito
+horas antes ([bit x em todo o caminho](invariants/ler-arquivo-exige-x-em-todo-o-caminho.md)) — corrigi o TSV e não
+a árvore inteira, que é a
+[instância corrigida sem a classe](failure-modes/corrigir-a-instancia-e-nao-a-classe.md) outra vez.
+
+Terceiro, menor e recorrente: escrevi `cmd | tail; echo $?` e reportei `RC=0` para um script que falhara — `$?`
+depois de um pipe é o status do **último** comando, o `tail`. É `falso-verde-de-script` na forma mais barata de
+cometer.

@@ -26,6 +26,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   (modo 700): um arquivo 644 é inalcançável quando um diretório do caminho não dá `x` (#M169)
 
 ### Added
+- **theodb:** o harness de cobertura de tipos (M163) rodou contra o caminho agregado streaming: **35/35 casos
+  como esperado** com `positive_control diverged=2` — cada classe roteada é byte-idêntica e cada declínio é
+  correto, em int2/int4/int8, float4/float8, bool, texto, temporais, colação nomeada, `IN`-list, `const_out`,
+  group-expr e top-k. Artefato em `docs/benchmarks/m169-type-coverage.md` (#M169)
 - **theodb:** gate de associatividade de `float8` para o agregado colunar — mede `sum`/`avg` **bit a bit**
   entre o caminho eager e o streaming sobre dado adversarial (`0.1` não-representável + `1e17` esparso), com
   controle positivo de 1 ULP. Consumir por chunk-group muda a ORDEM de acumulação, e adição IEEE-754 não é

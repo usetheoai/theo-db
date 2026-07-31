@@ -1,7 +1,7 @@
 ---
 type: Measurement
-title: Consumir por chunk-group NÃO mudou sum/avg de float8 — bit a bit, sobre dado adversarial
-description: Medido 2026-07-31 no M169: eager e streaming deram sum=2.00000000000001e+17 e avg=8000000000000.04 idênticos, com 0.1 não-representável + 1e17 esparso em 3 chunk-groups. Uma forma medida, não uma prova para toda entrada.
+title: Consumir por chunk-group NÃO mudou resultado algum — float8 bit a bit, e 35/35 do espaço de tipos
+description: Medido 2026-07-31 no M169: float8 idêntico bit a bit sobre dado adversarial (0.1 + 1e17 esparso), e o harness de tipos deu 35/35 com positive_control diverged=2 sobre o caminho streaming. Formas medidas, não prova para toda entrada.
 resource: benchmarks/m169_float_assoc.sql
 tags: [float, ieee754, streaming, colunar, agregado, associatividade]
 timestamp: 2026-07-31T00:00:00Z
@@ -51,6 +51,25 @@ então o eixo nem é variável hoje).
 
 O gate `benchmarks/m169_float_assoc.sql` fica no repositório justamente porque a resposta pode mudar com uma
 versão do DataFusion — uma observação de uma vez só não sobrevive a upgrade.
+
+## O espaço de tipos INTEIRO, medido no mesmo binário (2026-07-31)
+
+O gate acima responde uma pergunta estreita (`float8`). A larga — *o streaming mudou algum resultado, em qualquer
+tipo?* — foi respondida rodando `benchmarks/columnar_type_ab.py` com a GUC no default (**on**), de modo que todo
+caso passou pelo caminho novo:
+
+**35/35 casos como esperado**, `positive_control diverged=2`, 2000 linhas
+(`docs/benchmarks/m169-type-coverage.md`). Cobre int2/int4/int8, float4/float8, bool, texto, timestamp/date/
+timestamptz, colação nomeada, `IN`-list, `const_out`, group-expr e top-k — cada um ou **byte-idêntico quando
+roteia** ou **declinando corretamente**.
+
+O `positive_control` é o que impede esse "35/35" de ser um verde vazio: sem ele, um harness quebrado reportaria
+35/35 exatamente igual.
+
+**Armadilha operacional do harness, para não custar uma terceira vez:** ele **DROPa e recria `hits`** com um
+schema sintético de 2000 linhas. Rodá-lo contra a base que tem o ClickBench destrói a tabela — aconteceu duas
+vezes no M167. Existe um guard que recusa quando o `hits` da base parece ClickBench; obedeça-o e aponte
+`PGDATABASE` para uma base scratch.
 
 ## Por que o ClickBench não responderia isto
 
