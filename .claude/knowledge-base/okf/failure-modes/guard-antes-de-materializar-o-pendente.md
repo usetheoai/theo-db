@@ -42,5 +42,6 @@ correto, e nenhum teste de happy-path pega, porque no happy-path o estado já es
 
 ## Relacionados
 
+- [failure-mode/destruir-antes-de-provar-a-precondicao](destruir-antes-de-provar-a-precondicao.md) — o espelho: lá o passo **destrutivo** roda cedo demais e CRIA estado parcial; aqui o guard roda cedo demais e JULGA estado parcial. A correção é oposta.
 - [failure-mode/fail-open-por-omissao](fail-open-por-omissao.md) — o primo em segurança: o caminho vazio vira permissivo
 - [failure-mode/cobertura-alegada-sem-execucao](cobertura-alegada-sem-execucao.md)

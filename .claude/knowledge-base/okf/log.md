@@ -472,3 +472,27 @@ motivo errado não avisa quando o motivo deixa de valer. O conceito ganhou a ins
 violei na mesma iteração), um item de regra novo — *escreva a pergunta exata que o discriminador responde* — e
 o corolário: **não existe discriminador para o caminho top-k**, então hoje o harness não sabe dizer se o q23
 roteou e é lento ou se declinou.
+
+## 2026-07-31 — o gêmeo heap: um `Permission denied` que apontava para o arquivo errado
+
++2 conceitos, ambos de uma única falha: a recarga do `hits_heap` a 100M abortou lendo um TSV de 70 GB em
+**644, world-readable** — porque o diretório-pai era `/root`, modo `700`. O erro nomeia o **arquivo**, e quem
+confere o `ls -l` dele conclui que permissão não é a causa; a resposta está um nível acima, onde a mensagem não
+olha. Virou [invariant/ler-arquivo-exige-x-em-todo-o-caminho](invariants/ler-arquivo-exige-x-em-todo-o-caminho.md),
+com o corolário de que `\copy` (cliente) e `COPY` (servidor) leem por processos diferentes — trocar um pelo outro
+troca quem precisa da permissão, e uma carga que passou como `root` falha como `pgtest` sem que nada tenha
+regredido no produto.
+
+O agravante não foi a permissão: foi a **ordem**. O script dropou e recriou `hits_heap` **antes** de provar que
+conseguia ler a fonte, e o aborto deixou uma tabela de **0 linhas** onde antes não havia tabela nenhuma. O gate
+de atestação — escrito nesta mesma sessão — lê os dois estados de formas diferentes: ausente é `hits_heap_absent`
+(tolerável), 0 linhas é `hits_heap_rowcount_mismatch` ("a carga perdeu linhas"), que manda perseguir um bug de
+COPY inexistente. A falha converteu *não fiz* em *fiz errado*. Virou
+[failure-mode/destruir-antes-de-provar-a-precondicao](failure-modes/destruir-antes-de-provar-a-precondicao.md),
+explicitamente distinguido do vizinho `guard-antes-de-materializar-o-pendente`: lá o guard roda cedo e **julga**
+estado parcial; aqui o passo destrutivo roda cedo e **cria** estado parcial — a correção de um é mover para
+depois, a do outro é mover para antes.
+
+Terceiro fato, contra a minha própria intuição: mover 70 GB de `/root` para `/srv` foi **instantâneo** — mesmo
+filesystem, `rename(2)`, `df` inalterado em 105 GB usados. "É grande demais para mover" era suposição, não
+medição.

@@ -21,7 +21,9 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TSV="${TSV_PATH:-/root/theo-db/benchmarks/.cache/hits_sample.tsv}"
+# Default FORA de `/root`: aquele diretório é 700, e um caminho que atravessa 700 é inalcançável para o
+# cliente mesmo com o arquivo em 644 (ver a guarda de leitura adiante).
+TSV="${TSV_PATH:-/srv/bench-data/hits_sample.tsv}"
 CREATE_SQL="${CREATE_SQL:-$HERE/clickbench/theodb/create.sql}"
 export PGHOST="${PGHOST:-127.0.0.1}" PGPORT="${PGPORT:-5432}"
 export PGDATABASE="${PGDATABASE:-postgres}" PGUSER="${PGUSER:-postgres}" PGOSUSER="${PGOSUSER:-pgtest}"
@@ -43,6 +45,23 @@ HITS=$(psql_c -Atc "select count(*) from public.hits;")
 echo "  hits=$HITS"
 if [ "${HITS:-0}" != "99997497" ]; then
   echo "  ABORTA: 'hits' não tem 99.997.497 linhas. Não mexo no heap sem o colunar íntegro." >&2
+  exit 1
+fi
+
+echo "=== guarda: o CLIENTE consegue mesmo LER o TSV? ==="
+# MEDIDO 2026-07-31: esta guarda não existia, e a corrida anterior dropou `hits_heap`, recriou vazia, e SÓ
+# ENTÃO descobriu `Permission denied` — deixando uma tabela de 0 linhas onde antes não havia nenhuma. Uma
+# tabela vazia é PIOR que ausente: a atestação a lê como divergência de contagem em vez de ausência.
+#
+# A causa não é a permissão do ARQUIVO. `\copy` é client-side, o cliente roda como $PGOSUSER, e o arquivo
+# estava 644 — legível por todos. O bloqueio era o DIRETÓRIO-PAI: todo componente do caminho precisa do bit
+# `x` para o processo que lê, e `/root` é 700. O erro aponta para o arquivo e a causa está no caminho.
+#
+# Ler 1 byte COMO O USUÁRIO QUE VAI LER é a única prova; `test -r` rodado por outro usuário não vale.
+if ! sudo -u "$PGOSUSER" head -c1 "$TSV" >/dev/null 2>&1; then
+  echo "  ABORTA: '$PGOSUSER' não consegue ler '$TSV' — e NADA foi dropado." >&2
+  echo "  Cheque o bit x de CADA diretório do caminho, não só a permissão do arquivo:" >&2
+  namei -l "$TSV" 2>/dev/null | sed 's/^/    /' >&2 || true
   exit 1
 fi
 

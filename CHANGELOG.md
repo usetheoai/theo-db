@@ -13,6 +13,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **theodb:** a reconstrução do gêmeo heap de 100M passou a **provar que consegue ler o TSV antes de dropar
+  qualquer coisa** — lendo 1 byte como o usuário que de fato lerá. A ordem anterior dropava e recriava a tabela
+  primeiro, e o aborto por leitura deixava 0 linhas onde antes não havia tabela nenhuma; 0 linhas lê como "a
+  carga perdeu linhas", que manda perseguir um bug de COPY inexistente. O caminho default saiu de `/root`
+  (modo 700): um arquivo 644 é inalcançável quando um diretório do caminho não dá `x` (#M169)
+
 ### Added
 - **theodb:** baseline medido do ClickBench a 100M — **28 das 43 consultas completam** sob teto de 300 s, e o
   artefato separa as falhas pelo discriminador `agg_routed`: **4 no caminho agregado colunar** (q20, q32, q33,
