@@ -1021,8 +1021,8 @@ impl ScanPlan {
             }
             for sp in &self.plans {
                 for cg in 0..sp.n_chunk_groups {
-                    total = total
-                        .saturating_add(u64::from(sp.entries[cg * self.natts + *col].raw_len));
+                    total =
+                        total.saturating_add(u64::from(sp.entries[cg * self.natts + *col].raw_len));
                 }
             }
         }
