@@ -20,8 +20,12 @@ are both legal YAML that a naive match would reject:
   C4  the required root files exist (index.md, log.md)
   C6  every `resource:` in the frontmatter resolves on disk when it is a repo path
       (this is the hole the 2026-07-30 review found: C2 validates markdown links only,
-      so a bad path in `resource:` — where `rules/reference-provenance.md` and a
-      truncated `docs/adr/0035` both hid — was checked by nothing)
+      so a bad path in `resource:` — where a rule filename that lives only in the
+      umbrella, and a truncated ADR path, both hid — was checked by nothing)
+      NOTE: the two bad paths are described rather than quoted on purpose. Quoting them
+      makes `check_xrefs.py` read this docstring as a citation and report a FAIL for a
+      path that is deliberately an EXAMPLE of a broken one — noise that gets
+      re-investigated on every run.
   C5  `type` is one of the taxonomy values declared in rules/okf-knowledge-base.md § 2
       (C1 only checks PRESENCE; a value outside the closed set is a sixth type, which
       the LOCKED clause requires an ADR for — and the front door had exactly that bug)
