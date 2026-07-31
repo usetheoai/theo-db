@@ -132,7 +132,15 @@ def _kernel_killed(pid: int) -> bool:
 
 def run_query(i: int, sql: str, gucs: list[str]) -> dict:
     """One query, one fresh connection — so a backend that dies does not poison the remaining 42."""
-    rec: dict = {"q": i, "verdict": None, "elapsed_s": None, "agg_routed": None, "ab_identical": None}
+    # `stream_cgs` — quantos chunk-groups o caminho STREAMADO consumiu nesta consulta. Existe porque
+    # `agg_routed` NÃO responde a pergunta que o milestone faz: ele vem do `EXPLAIN`, é fato de PLANEJAMENTO, e
+    # é idêntico quer a execução tenha streamado, quer tenha recuado para o caminho eager depois de falhar. Sem
+    # este campo, uma consulta servida pelo recuo — com o consumo O(N) que o milestone existe para remover —
+    # publica exatamente como uma servida pelo stream, e o artefato afirma "30/43" onde a verdade é "28 pelo
+    # stream + 2 pelo recuo". Achado do /review; o contador só é confiável porque o mesmo review fez o reset
+    # passar para a ENTRADA das duas rotas (antes ele cobria 1 de 4 caminhos).
+    rec: dict = {"q": i, "verdict": None, "elapsed_s": None, "agg_routed": None,
+                 "ab_identical": None, "stream_cgs": None}
     backend_pid = None
     c = None
     t0 = time.time()
@@ -152,6 +160,16 @@ def run_query(i: int, sql: str, gucs: list[str]) -> dict:
         cur.execute(sql)
         cur.fetchall()
         rec["verdict"] = summ.OK
+        # Lido na MESMA conexão, logo depois da consulta: o contador é thread-local do backend e é zerado na
+        # entrada de cada rota, então este número é desta consulta e de nenhuma outra. `0` num plano que roteia
+        # significa exatamente uma coisa: a resposta veio do caminho eager.
+        try:
+            cur.execute("SELECT theodb_columnar_stream_chunk_groups()")
+            rec["stream_cgs"] = cur.fetchone()[0]
+        except psycopg2.Error:
+            # Acessor ausente (binário antigo) NÃO é falha da consulta — fica None, que o relatório lê como
+            # "não perguntei", distinto de 0 ("perguntei e não streamou").
+            c.rollback()
     except psycopg2.Error as e:
         pid = getattr(e, "pgcode", None)
         oom = (not pid) and backend_pid is not None and _kernel_killed(backend_pid)
