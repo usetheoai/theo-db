@@ -689,11 +689,28 @@ where
     {
         match run_df_collect_streaming(part, build.clone()) {
             Ok(batches) => return Ok(batches),
-            // TIPADO, não catch-all — mesma disciplina do top-k. `ResourcesExhausted` é a ÚNICA condição que o
-            // recuo endereça; engolir qualquer `Err` esconderia corrupção de dados e cancelamento atrás de uma
-            // segunda execução silenciosa.
-            Err(DataFusionError::ResourcesExhausted(_))
-                if varlena_bytes < i64::from(i32::MAX) as u64 => {}
+            // `find_root()`, NÃO `match` na variante exata — a mesma disciplina do top-k (`:1346-1353`), e pela
+            // mesma razão: o DataFusion embrulha `ResourcesExhausted` em `Context(_, Box(ResourcesExhausted))`
+            // num caminho vizinho (`sorts/sort.rs` usa `err_with_oom_context`), e casar a variante nua deixa o
+            // recuo de fora justamente quando ele é necessário. Hoje o agregado devolve o erro CRU
+            // (`aggregates/grouped_hash_stream.rs:955`), então a diferença é LATENTE — mas a direção da falha é
+            // pior aqui que no top-k: esta GUC é default ON, logo um `ResourcesExhausted` embrulhado viraria erro
+            // duro em consultas que o caminho eager pré-M169 servia. Achado do SEPA; a AC do plano exige
+            // `find_root()` textualmente.
+            Err(e)
+                if matches!(e.find_root(), DataFusionError::ResourcesExhausted(_))
+                    && varlena_bytes < i32::MAX as u64 =>
+            {
+                // INCONDICIONAL, não atrás do flag de trace — mesma decisão e mesmo racional do top-k
+                // (`:1354-1358`): sem isto o usuário não tem sinal de que a consulta acabou de trocar de perfil
+                // de memória e de latência.
+                pgrx::log!("theodb_agg_stream_fallback: {e}");
+                // E o contador precisa VOLTAR A ZERO. Ele é a prova de não-vacuidade que
+                // `benchmarks/m169_agg_stream.sql` usa para afirmar "o braço on passou mesmo pelo stream"; sem o
+                // reset ele reteria as chamadas da tentativa que FALHOU, e o gate leria `calls > 0` enquanto a
+                // resposta veio do eager. Falso-verde no meu próprio oráculo (achado do SEPA).
+                super::columnar::reset_stream_cg_count();
+            }
             Err(e) => return Err(format!("df_executor: datafusion: {e}")),
         }
     }

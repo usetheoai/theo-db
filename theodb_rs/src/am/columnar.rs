@@ -104,6 +104,16 @@ fn theodb_columnar_stream_chunk_groups() -> i64 {
     STREAM_CG_COUNT.with(|c| c.get() as i64)
 }
 
+/// M169 — zerar o contador quando o agregado RECUA do streaming para o eager.
+///
+/// Sem isto o contador guarda as chamadas da tentativa que **falhou**, e o oráculo de não-vacuidade
+/// (`benchmarks/m169_agg_stream.sql`) leria `calls > 0` afirmando que o braço `on` passou pelo stream — quando a
+/// resposta veio do caminho eager. É falso-verde dentro do próprio oráculo, que é a classe de defeito que este
+/// projeto mais paga.
+pub(crate) fn reset_stream_cg_count() {
+    STREAM_CG_COUNT.with(|c| c.set(0));
+}
+
 // ===========================================================================================================
 // M99 Phase C2 — MVCC via a heap catalog (`columnar.stripe`), not the metapage (ADR-0042 D2)
 // ===========================================================================================================
@@ -1006,10 +1016,18 @@ impl ScanPlan {
     /// Exact, not estimated: `ChunkDirEntry.raw_len` is already in memory (the directory is the O(N) term the
     /// scan pays regardless), so there is nothing to approximate.
     ///
-    /// **Direction of the inexactness, stated rather than hidden.** `raw_len` is the raw *serialized* length of
-    /// the chunk, which includes the per-cell length headers that the Arrow values buffer does NOT carry. It
-    /// therefore OVER-counts, never under. That is the safe side for a check that decides "eager cannot serve
-    /// this": it may decline the fallback slightly early, and it can never miss a real overflow.
+    /// **Direction of the inexactness, bounded rather than asserted.** `raw_len` is the raw *serialized* length
+    /// of the chunk, including per-cell length headers the Arrow values buffer does NOT carry, so it normally
+    /// OVER-counts — the safe side for a check that decides "eager cannot serve this": it declines the fallback
+    /// slightly early and never misses a real overflow. It also ignores `skip`/Filter pruning, over-counting
+    /// again for a pruned scan.
+    ///
+    /// The one direction where it can under-count, stated because "never under" would be a false guarantee:
+    /// `build_arrow` decodes text with `String::from_utf8_lossy` (`df_executor.rs:305`), which expands each
+    /// invalid byte to a 3-byte `U+FFFD`. A column of invalid UTF-8 can therefore produce an Arrow values buffer
+    /// larger than its stored payload. Reaching an overflow that way needs invalid UTF-8 *and* a column already
+    /// near 2 GiB — narrow, but not impossible, and the fallback would then hand the query to a path that
+    /// cannot serve it. Found by SEPA review.
     ///
     /// Fixed-width columns are skipped because they land in a fixed-stride Arrow buffer with no offsets at all —
     /// their size is bounded by `row_count * width`, not by an `i32` cursor.
@@ -1120,6 +1138,26 @@ pub(crate) unsafe fn plan_columnar_scan(
         })
         .collect();
     let names = wanted.iter().map(|&c| name_of(c)).collect();
+    // EC-1 (MUST FIX do plano) — o termo O(N) que o streaming NÃO remove, MEDIDO em vez de derivado.
+    //
+    // O M169 torna o DECODE O(chunk-group). O diretório do scan continua O(N): `plans` materializa um
+    // `ChunkDirEntry` por (chunk-group × coluna) da relação inteira, ANTES de qualquer decode. A 100M com 105
+    // colunas isso é ~1,05M entradas. O artefato precisa publicar esse número medido — declarar "decode
+    // O(chunk-group)" sem ele deixaria o leitor concluir que o consumo total virou constante, que é falso.
+    //
+    // Sob o flag de trace, como o resto da instrumentação: é uma linha por scan planejado, e o caminho padrão
+    // não paga nada.
+    if super::columnar_agg::admit_trace_enabled() {
+        let entries: usize = plans.iter().map(|p| p.entries.len()).sum();
+        pgrx::warning!(
+            "theodb_scan_plan: stripes={} chunk_dir_entries={} natts={} wanted={} bytes_in_mem≈{}",
+            plans.len(),
+            entries,
+            natts,
+            wanted.len(),
+            entries * std::mem::size_of::<codec::ChunkDirEntry>()
+        );
+    }
     Ok(ScanPlan { plans, wanted, cols, mode_fixed, names, natts })
 }
 

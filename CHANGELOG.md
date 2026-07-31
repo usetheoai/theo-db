@@ -14,6 +14,20 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **theodb:** o recuo do agregado streaming para o caminho eager passou a **classificar o erro com `find_root()`**
+  em vez de casar a variante nua. O DataFusion embrulha `ResourcesExhausted` em `Context(…)` num caminho vizinho,
+  e a forma anterior deixaria o recuo de fora justamente quando ele é necessário — com esta GUC em `on` por
+  default, isso viraria erro duro em consultas que a versão anterior servia (#M169)
+- **theodb:** o recuo passou a **registrar uma linha de log incondicional**. Sem ela o usuário não tem sinal de
+  que a consulta acabou de trocar de perfil de memória e de latência — e a medição de pico não distingue "o
+  spill funcionou" de "a pool estourou e re-executamos em silêncio" (#M169)
+- **theodb:** o contador de chunk-groups do streaming passou a ser **zerado no recuo**. Ele é a prova de que o
+  braço `on` de fato usou o caminho novo; sem o reset, retinha as chamadas da tentativa que falhou e o gate lia
+  "passou pelo stream" quando a resposta viera do eager — falso-verde dentro do próprio oráculo (#M169)
+- **theodb:** o planejador do scan colunar passou a publicar, sob o flag de trace, o **tamanho do diretório do
+  plano** (entradas por chunk-group × coluna, e os bytes que ocupam). É o termo O(N) que o streaming **não**
+  remove: sem esse número, "decode O(chunk-group)" leva o leitor a concluir que o consumo total virou
+  constante (#M169)
 - **theodb:** agregados sobre tabelas colunares passaram a **consumir a relação um chunk-group por vez** em vez de
   decodificá-la inteira num único `RecordBatch` Arrow. É o que remove o `byte array offset overflow` a 100M: uma
   coluna de texto acima de 2 GiB não cabe nos offsets `i32` de um array Arrow único. Vale para os **dois** caminhos
