@@ -60,11 +60,43 @@ def _conn(timeout_ms: int):
     return c
 
 
+def comparable_sql(cur, sql: str) -> str:
+    """A forma da consulta que pode ser comparada entre os dois lados.
+
+    O problema é EMPATE: `ORDER BY count DESC LIMIT 10` sobre dados com contagens repetidas deixa o corte
+    escolher 10 linhas arbitrárias-mas-válidas, e a diferença seria de ordem de varredura, não de armazenamento.
+
+    Remover o `LIMIT` (o que o oráculo do M128 faz, e o que este script fazia) resolve o empate e **quebra a
+    q32**: `GROUP BY WatchID, ClientIP` tem ~10⁸ grupos, e materializá-los todos consumiu 19,5 GB de anon-rss e
+    fez o kernel MATAR o backend — derrubando o cluster inteiro (medido 2026-07-31, `dmesg`: `Out of memory:
+    Killed process 175145 (postgres)`). Não é hipótese; foi observado.
+
+    A saída é tornar a ordem **TOTAL** em vez de tirar o limite: acrescentar todas as colunas de saída como
+    critérios de desempate posicionais. Os dois lados passam a devolver as MESMAS 10 linhas, deterministicamente,
+    e a consulta continua sendo a forma que o ClickBench define — que é justamente a que se quer provar.
+    """
+    body = sql.rstrip().rstrip(";")
+    if not LIMIT_RE.search(body):
+        return body  # sem LIMIT não há corte, logo não há empate a desfazer (ex.: um agregado escalar)
+    # Quantas colunas a consulta devolve? `LIMIT 0` responde sem materializar linha alguma.
+    cur.execute(LIMIT_RE.sub("", body) + " LIMIT 0")
+    ncols = len(cur.description)
+    tiebreak = ", ".join(str(n) for n in range(1, ncols + 1))
+    head = LIMIT_RE.sub("", body)
+    limit_clause = LIMIT_RE.search(body).group(0).strip().rstrip(";")
+    joiner = ", " if " ORDER BY " in head.upper() else " ORDER BY "
+    return f"{head}{joiner}{tiebreak} {limit_clause}"
+
+
 def verify_one(cur, i: int, sql: str) -> dict:
-    """Compara colunar (`hits`) vs heap (`hits_heap`) para UMA consulta. Sem LIMIT, sem timing."""
+    """Compara colunar (`hits`) vs heap (`hits_heap`) para UMA consulta. Ordem total, sem timing."""
     rec = {"q": i, "identical": None, "rows_columnar": None, "rows_heap": None,
            "agg_routed": None, "note": None}
-    ab_sql = LIMIT_RE.sub("", sql.rstrip().rstrip(";"))
+    try:
+        ab_sql = comparable_sql(cur, sql)
+    except Exception as e:  # noqa: BLE001
+        rec["note"] = "não consegui montar a forma comparável: " + str(e).splitlines()[0][:120]
+        return rec
     try:
         # NÃO-VACUIDADE, antes de qualquer comparação: as 4 consultas em prova são exatamente as que o T4.1
         # mediu com `agg_routed=true`. Se o pushdown agregado NÃO estiver no plano, o que vier a seguir compara
@@ -143,14 +175,30 @@ def main() -> int:
 
     idx = [int(x) for x in a.queries.split(",") if x.strip()]
     queries = _load_queries()
-    conn = _conn(a.timeout_ms)
     recs = []
-    with conn.cursor() as cur:
-        for i in idx:
-            print(f"  q{i:02d} …", flush=True)
-            r = verify_one(cur, i, queries[i])
-            print(f"  q{i:02d} identical={r['identical']} note={r['note'] or ''}", flush=True)
-            recs.append(r)
+    # UMA CONEXÃO POR CONSULTA. Não é zelo: na corrida de 2026-07-31 a q32 fez o kernel matar o backend, e a
+    # conexão morta transformou q33 e q34 em `cursor already closed` — três consultas perdidas por causa de uma,
+    # e as duas últimas apareceram no relatório como `roteou=NÃO`, que é artefato do envenenamento e não medição.
+    # Um oráculo que perde dado bom por causa de dado ruim mede menos do que poderia a cada falha.
+    for i in idx:
+        print(f"  q{i:02d} …", flush=True)
+        try:
+            conn = _conn(a.timeout_ms)
+        except Exception as e:  # noqa: BLE001
+            recs.append({"q": i, "identical": None, "rows_columnar": None, "rows_heap": None,
+                         "agg_routed": None, "note": "não conectei: " + str(e).splitlines()[0][:120]})
+            print(f"  q{i:02d} identical=None (sem conexão)", flush=True)
+            continue
+        try:
+            with conn.cursor() as cur:
+                r = verify_one(cur, i, queries[i])
+        finally:
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001 — fechar uma conexão já morta não é erro a propagar
+                pass
+        print(f"  q{i:02d} identical={r['identical']} note={r['note'] or ''}", flush=True)
+        recs.append(r)
 
     text = render(recs)
     if a.out:
