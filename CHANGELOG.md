@@ -30,6 +30,9 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   `GROUP BY <expressão>`. Módulo não está no whitelist de chave-expressão do admit (`DateTrunc`,
   `ExtractField`, `IntAddConst`, `Const`), então a forma anterior **declinava** e a medição teria reportado
   o pico do executor de linha do PostgreSQL como se fosse o do agregado colunar (#M169)
+- **theodb:** as guardas de "box ociosa" passaram a ignorar backends `idle`. Um `psql` esquecido por uma
+  conexão que caiu não consome CPU nem I/O, mas abortava a medição; `idle in transaction` continua contando,
+  porque esse segura locks e snapshot e é justamente o que contamina o número (#M169)
 - **theodb:** driver da medição de pico do `GROUP BY` que encoda a ordem obrigatória em vez de a confiar à
   memória de quem roda: guarda de box ociosa, restart **com** `THEODB_ADMIT_TRACE=1` (o trace resolve num
   `OnceLock` por backend, então só entra por restart do postmaster), medição, e `trap` que restaura o

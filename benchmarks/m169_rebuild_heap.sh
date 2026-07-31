@@ -32,7 +32,11 @@ psql_c() { sudo -u "$PGOSUSER" env LD_LIBRARY_PATH=/opt/pg18/lib /opt/pg18/bin/p
              -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" -v ON_ERROR_STOP=1 "$@"; }
 
 echo "=== guarda: a box está livre? ==="
-BACKENDS=$(psql_c -Atc "select count(*) from pg_stat_activity where backend_type='client backend' and pid<>pg_backend_pid();")
+# `state <> 'idle'` e não apenas `client backend`: um psql ÓCIOSO esquecido por um ssh que caiu não
+# consome CPU nem I/O, mas fazia esta guarda abortar — visto na box em 2026-07-31, um órfão com
+# query_start de 91 s atrás. `idle in transaction` CONTINUA contando: esse segura locks e snapshot, e é
+# exatamente o estado que contamina uma medição.
+BACKENDS=$(psql_c -Atc "select count(*) from pg_stat_activity where backend_type='client backend' and state <> 'idle' and pid<>pg_backend_pid();")
 LOAD=$(cut -d' ' -f1 /proc/loadavg)
 echo "  backends=$BACKENDS loadavg=$LOAD"
 if [ "${BACKENDS:-1}" -gt 0 ]; then
