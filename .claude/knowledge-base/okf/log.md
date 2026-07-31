@@ -642,3 +642,28 @@ neste bundle.
 
 Pendente e declarado: `ab_identical` é `None` nas 30 que completam. Está provado que saem de erro para `ok`;
 **não** está provado que o resultado é byte-idêntico ao do `hits_heap`.
+
+## 2026-07-31 (tarde) — o /review pegou o que eu tinha deixado como prosa
+
+Três achados do review viraram correção no bundle e no repo, e todos eram meus.
+
+O **BLOCKER**: as evidências do T4.1 existiam só na box de bench. O Goal do milestone estava sustentado por uma
+frase dentro de uma mensagem de commit — "a corrida mediu X" — sem artefato no repositório. Trazidos para
+`docs/benchmarks/m169-t41*`, com um adendo que diz as três coisas que a tabela escondia: o artefato descreve o
+binário ANTERIOR ao fix, "30/43" é na verdade **28 pelo streaming + 2 pelo recuo eager**, e a q32 passa com
+1,5% de margem.
+
+A ampliação da classe de fail-open virou [ADR-0059](../../../docs/adr/0059-m169-fail-open-cobre-falha-de-spill.md)
+— existia só em comentário de código. Ele nomeia a alternativa tipada rejeitada (desabilitar o `DiskManager`
+faria a pressão sair como `ResourcesExhausted`, que o predicado antigo já casava — mas mataria a q32) e declara
+a consequência que dói: o pré-check cobre o teto de offsets e **apenas ele**, então para q08/q09 passa
+trivialmente e o recuo re-materializa ~2,5 GB.
+
+[measurement/delta-medido-m169-28-para-30](measurements/delta-medido-m169-28-para-30.md) foi atualizado com o
+estado pós-fix e com a byte-identidade (q20/q32/q33 provadas contra o gêmeo heap). A propagação teve de ir ao
+`description` do frontmatter e à linha do índice, que ainda afirmavam "byte-identidade NÃO executada" — a classe
+`correcao-nao-propagada-pelo-grafo` aplicada ao conceito que eu mesmo acabara de escrever.
+
+Registro sem enfeite de uma outra: minha declaração de exceção ao orçamento de linhas estava **1,9× errada**
+(+130 declarado, +247 medido) e afirmava conformidade de um segundo arquivo que também estoura (+105). O
+revisor mediu; eu não tinha remedido depois de quatro commits.

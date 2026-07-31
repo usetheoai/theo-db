@@ -1,7 +1,7 @@
 ---
 type: Measurement
-title: M169 medido — ClickBench 100M vai de 28/43 para 30/43; as 4 falhas roteadas caem e 2 consultas REGRIDEM
-description: Medido 2026-07-31 na mesma box, mesmo corpus (99.997.497 linhas), mesmo teto de 300 s, com o so_md5 como única variável. Consertadas q20/q32/q33/q34; regredidas q08/q09 por exaustão de descritores no spill. A byte-identidade NÃO foi executada.
+title: M169 medido — ClickBench 100M vai de 28/43 para 30/43, e a leitura honesta é 28 pelo streaming + 2 pelo recuo eager
+description: Medido 2026-07-31 na mesma box, mesmo corpus (99.997.497 linhas), mesmo teto de 300 s, com o so_md5 como única variável. Consertadas q20/q32/q33/q34. A regressão q08/q09 (EMFILE no spill) foi corrigida pelo ADR-0059, mas elas completam pelo RECUO ao eager, com consumo O(N). Byte-identidade provada em q20/q32/q33 contra o gêmeo heap.
 resource: benchmarks/m169_delta.py
 tags: [clickbench, 100m, streaming, regressao, spill, delta, m169]
 timestamp: 2026-07-31T00:00:00Z
@@ -55,13 +55,35 @@ gigante, sem ponto de parada) não tinha. Isso **salva** a q32, cujo estado deix
 Que a mesma explicação preveja o ganho **e** o dano colateral é o que a sustenta; uma que só servisse ao caso
 favorável seria suspeita.
 
-## O que este número NÃO prova
+## Estado depois do fix da regressão (atualizado 2026-07-31)
 
-**A byte-identidade não foi executada.** O campo `ab_identical` é `None` nas 30 consultas que completam, e o
-resumo da corrida diz literalmente `A/B: n/a — nenhuma comparação executada`. Está provado que **saem de erro
-para `ok`**; **não** está provado que o resultado é igual ao do `hits_heap`. O DoD do milestone exige as duas
-coisas, e tratar "completou" como "correto" seria
-[aceitar um verde sem execução](../failure-modes/cobertura-alegada-sem-execucao.md).
+As duas regressões foram corrigidas ([ADR-0059](../../../../docs/adr/0059-m169-fail-open-cobre-falha-de-spill.md))
+e remedidas com o binário `debde5f3`: **q08 `ok` 28,5 s, q09 `ok` 36,6 s, q32 `ok` 295,6 s**.
+
+Duas ressalvas que a soma esconde e que fazem parte do número:
+
+- **q08/q09 completam pelo RECUO ao caminho eager**, com o consumo O(N) que o milestone remove. Provado por duas
+  linhas de `theodb_agg_stream_fallback` no log do servidor, uma por consulta, cada uma com
+  `Os { code: 24, "Too many open files" }`. A leitura honesta é **28 pelo streaming + 2 pelo recuo**, não
+  "30/43" liso — e o harness hoje **não** distingue os dois, porque `agg_routed` vem do `EXPLAIN`, que é fato
+  de planejamento e é idêntico nos dois braços.
+- **A q32 passa com 1,5% de margem** (295,6 s contra teto de 300 s). Frágil, não folgado.
+
+## Byte-identidade — parcialmente provada
+
+O campo `ab_identical` da corrida é `None` nas 30: aquele harness mede **conclusão**, não correção. A prova veio
+depois, por `benchmarks/m169_ab_verify.py` contra o gêmeo `hits_heap`, com ordem total e o pushdown agregado
+confirmado no plano antes de comparar:
+
+| q | byte-idêntica ao heap |
+|---|---|
+| q20 | **sim** |
+| q32 | **sim** |
+| q33 | **sim** |
+| q34 | em verificação na data deste registro |
+
+Enquanto uma consulta não fecha, ela é **não-verificada** — estado distinto de "correta". Tratar "completou"
+como "correto" seria [aceitar um verde sem execução](../failure-modes/cobertura-alegada-sem-execucao.md).
 
 As 11 `timeout` são todas `agg_routed = false` — não entram no caminho agregado, então este milestone não as
 toca. A q17 reproduziu 301,6 s contra 301,6 s do baseline, e a q18 (que completa) deu 149,5 s contra 147,1 s —
