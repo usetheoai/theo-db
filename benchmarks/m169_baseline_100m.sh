@@ -95,6 +95,27 @@ if [ "$REPORT_RC" -ne 0 ]; then
 fi
 echo "  artefato: $ART/${LABEL}.md"
 
+# T4.1 — o delta contra uma corrida anterior, quando `COMPARE_TO` nomeia o label dela.
+#   LABEL=after-100m COMPARE_TO=baseline-100m bash benchmarks/m169_baseline_100m.sh --stream
+# O gerador RECUSA publicar quando as condições não batem (teto, box, corpus, ou o MESMO binário dos dois lados),
+# e a recusa é tratada aqui como falha da corrida — um delta que não pôde ser emitido não pode virar silêncio,
+# porque silêncio se lê como "não havia delta".
+DELTA_RC=0
+if [ -n "${COMPARE_TO:-}" ]; then
+  echo "=== delta contra '${COMPARE_TO}' ==="
+  python3 "$HERE/m169_delta.py" \
+    "$ART/${COMPARE_TO}.jsonl" "$ART/${COMPARE_TO}-box-before.json" \
+    "$ART/${LABEL}.jsonl"      "$ART/${LABEL}-box-before.json" > "$ART/${LABEL}-delta.md"
+  DELTA_RC=$?
+  if [ "$DELTA_RC" -ne 0 ]; then
+    echo "  o gerador RECUSOU publicar o delta (motivo acima) — as duas corridas não são comparáveis" >&2
+    rm -f "$ART/${LABEL}-delta.md"
+  else
+    echo "  delta: $ART/${LABEL}-delta.md"
+  fi
+fi
+
 if [ "$SUMM_RC" -ne 0 ]; then exit "$SUMM_RC"; fi
+if [ "$DELTA_RC" -ne 0 ]; then exit "$DELTA_RC"; fi
 if [ "$REPORT_RC" -ne 0 ]; then exit "$REPORT_RC"; fi
 exit $RUN_RC

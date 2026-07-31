@@ -108,6 +108,38 @@ def test_delta_attributes_only_the_queries_that_route_through_the_aggregate():
     assert "0 NÃO atribuíveis" in md
 
 
+def test_delta_reads_exactly_what_the_runner_writes_and_returns_the_right_code(tmp_path, capsys):
+    """A fronteira arquivo -> main(), que os testes puros acima NÃO atravessam.
+
+    Esta é a lacuna que já custou um CRITICAL nesta mesma sessão: o summarizer usava `json.load` (documento
+    único) contra um arquivo JSONL, e a quebra só apareceria DEPOIS das horas de corrida, porque nenhum teste
+    ligava o formato real ao ponto de entrada."""
+    import json as _json
+
+    def write(label, ok_n, md5):
+        with open(tmp_path / f"{label}.jsonl", "w") as fh:
+            fh.write(_json.dumps({"header": {"label": label, "n_queries": 43, "timeout_s": 300,
+                                             "work_mem": "256MB"}}) + "\n")
+            for i in range(43):
+                v = "ok" if i < ok_n else "error:XX000"
+                fh.write(_json.dumps({"q": i, "verdict": v, "agg_routed": True, "elapsed_s": 1.0}) + "\n")
+        with open(tmp_path / f"{label}-box.json", "w") as fh:
+            _json.dump({"facts": {"nproc": 16, "mem_gb": 31, "so_md5": md5,
+                                  "data_directory": "/srv/m169data", "hits_rows": 99_997_497}}, fh)
+
+    write("b", 28, "aaaa")
+    write("a", 31, "aaaa")          # MESMO binário → tem de recusar
+    argv = [str(tmp_path / x) for x in ("b.jsonl", "b-box.json", "a.jsonl", "a-box.json")]
+    sys.argv = ["m169_delta.py", *argv]
+    assert d.main() == 1
+    assert "binário é o MESMO" in capsys.readouterr().err
+
+    write("a", 31, "bbbb")          # binário diferente → publica
+    sys.argv = ["m169_delta.py", *argv]
+    assert d.main() == 0
+    assert "28/43 → 31/43 (+3)" in capsys.readouterr().out
+
+
 def test_delta_names_the_regressions_not_only_the_gains():
     """A query that completed BEFORE and fails AFTER is the most important line in the document, and the one a
     'how many more pass?' summary hides."""
