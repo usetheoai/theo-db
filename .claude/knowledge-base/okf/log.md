@@ -496,3 +496,21 @@ depois, a do outro é mover para antes.
 Terceiro fato, contra a minha própria intuição: mover 70 GB de `/root` para `/srv` foi **instantâneo** — mesmo
 filesystem, `rename(2)`, `df` inalterado em 105 GB usados. "É grande demais para mover" era suposição, não
 medição.
+
+## 2026-07-31 (2) — o watcher que esperava por si mesmo
+
++1 conceito. Para aguardar um build remoto usei `until ! pgrep -f "cargo build"; do sleep 20; done`. O build
+terminou em 2m11s com 0 erros e o laço **continuou girando**: `pgrep -f` casa contra a linha de comando inteira de
+todo processo, inclusive a do shell que executa o laço — cujo `argv` contém a string por construção. O watcher se
+enxergava e concluía que o alvo estava vivo.
+
+O que torna este caro é o sintoma ser **ausência**: nada falha, nada loga, o exit code nunca chega, e "ainda
+rodando" é a leitura mais plausível. Além disso é 100% reprodutível, então repetir confirma a conclusão errada.
+Virou [invariant/pgrep-f-casa-com-o-proprio-watcher](invariants/pgrep-f-casa-com-o-proprio-watcher.md), ligado à
+classe maior — o instrumento que se inclui na própria medição, a mesma de
+`vmrss-de-backend-pg-inclui-shared-buffers`.
+
+**Nota sobre mim:** ao escrever os "Relacionados" inventei de novo um nome de arquivo
+(`o-instrumento-nao-observa-a-coisa-que-se-quer-medir`; o real é `instrumento-cego-a-arquitetura`). É a quarta
+ocorrência da mesma classe nesta base, e as quatro foram pegas pelo gate C2, nunca por mim. O gate é o que
+funciona aqui; a intenção não é.
