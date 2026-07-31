@@ -26,6 +26,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   (modo 700): um arquivo 644 é inalcançável quando um diretório do caminho não dá `x` (#M169)
 
 ### Added
+- **theodb:** o trace de pico da pool de streaming passou a se chamar `theodb_stream_pool` (era
+  `theodb_topk_pool`). O M169 fez o agregado consumir a mesma função, então o rótulo antigo passaria a
+  mentir: quem lesse `topk_pool` numa linha emitida por um `GROUP BY` concluiria a coisa errada sobre qual
+  caminho consumiu a memória. Os artefatos do M168 mantêm a string antiga — eles registram o que aquele
+  binário emitiu (#M169)
 - **theodb:** o harness de cobertura de tipos (M163) rodou contra o caminho agregado streaming: **35/35 casos
   como esperado** com `positive_control diverged=2` — cada classe roteada é byte-idêntica e cada declínio é
   correto, em int2/int4/int8, float4/float8, bool, texto, temporais, colação nomeada, `IN`-list, `const_out`,

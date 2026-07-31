@@ -1451,7 +1451,11 @@ where
     pgrx::check_for_interrupts!();
     if super::columnar_agg::admit_trace_enabled() {
         pgrx::warning!(
-            "theodb_topk_pool: peak_reserved={} reserved_at_end={} pool_limit={}",
+            // M169: renomeado de `theodb_topk_pool`. Esta função passou a servir TAMBÉM o agregado (escalar e
+            // agrupado), então o rótulo antigo passaria a mentir — quem lesse `topk_pool` numa linha emitida por
+            // um `GROUP BY` concluiria a coisa errada sobre qual caminho consumiu a pool. Os artefatos do M168
+            // guardam a string antiga de propósito: eles registram o que foi emitido NAQUELE binário.
+            "theodb_stream_pool: peak_reserved={} reserved_at_end={} pool_limit={}",
             pool_probe.peak(),
             pool_probe.reserved(),
             pool_bytes
