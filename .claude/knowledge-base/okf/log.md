@@ -589,3 +589,30 @@ aqui ele emudece**, e silêncio se confunde com informação muito mais facilmen
 Substitutos que não pegam lock: `pg_stat_activity` sozinho para "está vivo?", `df` para "quanto foi escrito", e
 a linha que o próprio script imprime ao fechar o passo — a melhor das três, porque fala do PASSO e não de bytes
 que sobem por WAL ou por temporário.
+
+## 2026-07-31 (7) — eu derrubei o cluster, e a decisão que parecia cerimônia pagou por si
+
++2 conceitos, de um erro meu com consequência real.
+
+Instalei o `.so` novo com `cp` sobre o instalado. Segundos depois: `background worker "theodb vectorizer worker"
+was terminated by signal 11: Segmentation fault` e o postmaster derrubou tudo. `cp` **trunca e reescreve no mesmo
+inode**, então todo processo com o arquivo `mmap`ado passou a ver conteúdo novo em endereços resolvidos para o
+layout antigo. O correto é `install` num nome temporário + `mv` — `rename(2)` troca a entrada de diretório, não o
+conteúdo.
+
+Segundo fato, que é o que impede a recuperação óbvia: depois do crash o cluster entrou em **loop**, com o arquivo
+em disco íntegro (md5 conferido). O postmaster tenta se recuperar (`reinitializing`) forkando filhos que herdam o
+mapeamento corrompido **dele**. Só `stop` + confirmar zero processos + `start` resolveu. Virou
+[invariant/cp-sobre-so-mapeado-derruba-o-servidor](invariants/cp-sobre-so-mapeado-derruba-o-servidor.md).
+
+**O que salva este registro de ser só um mea-culpa:** o gêmeo de 100M havia acabado de passar por `SET LOGGED` —
+1561 s que eu poderia ter tratado como cerimônia, e cujo comentário no script dizia que manter `UNLOGGED` é
+"agendar a terceira perda", porque crash recovery trunca essas tabelas. **O cenário previsto aconteceu no mesmo
+dia**, com um gatilho que eu não havia imaginado (eu mesmo, não um OOM). As duas tabelas voltaram íntegras:
+`hits` 99.997.497 e `hits_heap` permanente, 66 GB.
+
+Os números do custo viraram
+[measurement/custo-de-materializar-o-gemeo-heap-100m](measurements/custo-de-materializar-o-gemeo-heap-100m.md):
+COPY 1796 s + SET LOGGED 1561 s, gêmeo 4,1× o tamanho do colunar, pico de disco 247 GB (o rewrite precisa do
+dobro da tabela, então dimensionar pelo tamanho final é subdimensionar). O passo que parecia cerimônia custou
+26 min e evitou perder 56.

@@ -44,6 +44,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   `GROUP BY <expressão>`. Módulo não está no whitelist de chave-expressão do admit (`DateTrunc`,
   `ExtractField`, `IntAddConst`, `Const`), então a forma anterior **declinava** e a medição teria reportado
   o pico do executor de linha do PostgreSQL como se fosse o do agregado colunar (#M169)
+- **theodb:** o script de recarga passou a documentar que instalar o `.so` exige **rename atômico**, não `cp`.
+  `cp` reescreve no mesmo inode e troca as páginas sob os processos que já o têm mapeado — na prática isso
+  matou um background worker com SIGSEGV e derrubou o cluster; e o postmaster, ao tentar se recuperar, forka
+  filhos que herdam o mapeamento corrompido, então só um `stop` + `start` limpo resolve (#M169)
 - **theodb:** o acompanhamento da recarga deixou de chamar `pg_total_relation_size` na tabela em carga. A
   função pega lock de relação e o `ALTER TABLE … SET LOGGED` segura `AccessExclusiveLock`, então o monitor
   ficava **preso na fila do lock** — e a saída vazia se lê como "nada acontecendo", que é o oposto (#M169)
