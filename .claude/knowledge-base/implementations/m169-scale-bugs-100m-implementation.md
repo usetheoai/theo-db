@@ -149,6 +149,33 @@ A **q32** (`GROUP BY WatchID, ClientIP`) roteia e falha por pico de **estado** d
 distintos), independente do batch. O streaming não a move, e o código diz isso onde alguém iria supor o
 contrário.
 
+### O item `pytest benchmarks/` do DoD exige banco vivo — e os meus "65 verdes" não são ele (2026-07-31)
+
+Correção de uma imprecisão que eu vinha repetindo: os **65 testes verdes** que reportei são `test_m169_*.py`.
+O Global DoD pede `python3 -m pytest benchmarks/ -q`, que é **mais amplo**.
+
+O que a execução real mostrou:
+
+| invocação | resultado |
+|---|---|
+| `pytest test_m169_*.py` | **65 passed** (lógica pura, sem banco) |
+| `pytest test_m164… test_m168… test_columnar_type_ab…` | 20 + 12 + (13 passed, 5 skipped) |
+| `pytest` (sem args, de `benchmarks/`) | **32 errors** — `psycopg2.OperationalError` |
+
+A causa não é defeito: `benchmarks/pyproject.toml` declara `testpaths = ["tests"]`, e `benchmarks/tests/` são
+testes de **integração** (marker `integration: requires a running theo-db:dev container`). Sem banco, erram na
+conexão.
+
+**Duas condições para fechar o item honestamente**, ambas verificadas antes de rodar qualquer coisa:
+
+1. **Base scratch.** Os testes criam **19 tabelas** na base de `PGDATABASE`. Apontá-los para a base de trabalho a
+   polui. Verifiquei especificamente se destroem `hits`/`hits_heap`: **não** — as cinco citações em
+   `tests/*.py` estão em comentários e strings, sem DDL. O risco aqui é sujeira, não perda.
+2. **Box livre.** São integração contra PostgreSQL; rodá-los durante o COPY compete por I/O.
+
+Alguns exigem chave de API (`tests/test_ai_sql.py` exercita `ai.*`). O relatório final tem de dizer
+passou/falhou/**pulou** por categoria, em vez de um número agregado que esconde os pulados.
+
 ### O oráculo de regressão do M167 precisa de uma base de 1M, não da de 100M (achado 2026-07-31)
 
 O Global DoD pede `benchmarks/m167_run_oracles.sh` verde. Antes de rodá-lo, li o que ele toca — e há duas razões
