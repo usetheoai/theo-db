@@ -198,8 +198,13 @@ def _psql_int(sql: str, timeout: int = SH_TIMEOUT_S) -> int:
     out = _psql(sql, timeout)
     if out is None:
         return UNREACHABLE
+    # A ÚLTIMA linha não-vazia, não a primeira. Um `SET …;` antes do `select` imprime o tag `SET` em linha
+    # própria, e `int("SET")` devolveria UNREACHABLE — que se lê como "o psql caiu" em vez de "o número está na
+    # linha seguinte". É a mesma armadilha que fez o guard da recarga abortar. Para uma consulta de valor único
+    # sem prefixo, primeira e última coincidem, então isto não muda nenhum chamador existente.
+    lines = [ln for ln in out.splitlines() if ln.strip()]
     try:
-        return int(out.splitlines()[0])
+        return int(lines[-1])
     except (ValueError, IndexError):
         return UNREACHABLE
 
@@ -213,7 +218,14 @@ def _count_rows(relation: str) -> int:
         return UNREACHABLE
     if exists.strip() != "t":
         return ABSENT
-    return _psql_int(f"select count(*) from {relation}", COUNT_TIMEOUT_S)
+    # `SET theodb.enable_columnar_agg = on` primeiro. MEDIDO 2026-07-31 sobre as mesmas 99.997.497 linhas:
+    # 11,4 s com o pushdown contra >948 s sem ele (backend a 99,9% de CPU, zero wait events — materialização
+    # linha a linha, não I/O). Sem isto a atestação sozinha custa dezenas de minutos ANTES da medição começar.
+    #
+    # A captura toma a ÚLTIMA linha porque o `SET` imprime o próprio tag numa linha separada — a mesma armadilha
+    # que fez o guard da recarga abortar quando apliquei este fix lá. Quarta vez nesta sessão que corrijo a
+    # instância e não a classe: o guard foi consertado e ESTE caminho ficou para trás.
+    return _psql_int(f"SET theodb.enable_columnar_agg = on; select count(*) from {relation}", COUNT_TIMEOUT_S)
 
 
 def _int_pre(sh, cmd: str, default: int = 0) -> int:

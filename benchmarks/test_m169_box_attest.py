@@ -326,3 +326,22 @@ def test_environment_is_sampled_BEFORE_the_expensive_dataset_checks():
     assert order.index("loadavg") < order.index("count"), \
         f"loadavg foi lido DEPOIS do count — mediria a pegada da própria atestação: {order}"
     assert order.index("loadavg") < order.index("wc"), order
+
+# ---------- o count com pushdown: o tag `SET` sai em linha própria -------------------------------------------------
+def test_row_count_parses_the_number_even_with_a_SET_tag_before_it(monkeypatch):
+    """`SET theodb.enable_columnar_agg = on; select count(*) …` devolve DUAS linhas: o tag `SET` e o número.
+    Ler a primeira daria `int("SET")` -> UNREACHABLE, que se lê como "o psql caiu" em vez de "o número está
+    abaixo". Mesma armadilha que fez o guard da recarga abortar quando apliquei este fix lá."""
+    monkeypatch.setattr(a, "_psql", lambda sql, timeout=60: "SET\n99997497")
+    assert a._psql_int("qualquer", 60) == 99_997_497
+
+
+def test_row_count_still_reads_a_bare_number(monkeypatch):
+    """Sem prefixo, primeira e última linha coincidem — o fix não muda nenhum chamador existente."""
+    monkeypatch.setattr(a, "_psql", lambda sql, timeout=60: "99997497")
+    assert a._psql_int("qualquer", 60) == 99_997_497
+
+
+def test_row_count_still_reports_unreachable_on_garbage(monkeypatch):
+    monkeypatch.setattr(a, "_psql", lambda sql, timeout=60: "ERROR:  relation does not exist")
+    assert a._psql_int("qualquer", 60) == a.UNREACHABLE
