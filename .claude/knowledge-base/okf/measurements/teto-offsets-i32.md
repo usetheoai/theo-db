@@ -1,7 +1,7 @@
 ---
 type: Measurement
 title: Offsets i32 do Arrow estouram acima de 21,5 B/linha sobre 100M
-description: DataType::Utf8 usa offsets i32 (2 GB por array); o q20 do ClickBench estoura com ordens de grandeza de folga — e é panic, não Result.
+description: DataType::Utf8 usa offsets i32 (2 GB por array); TRÊS consultas do ClickBench estouram (q20, q33, q34), todas sobre URL, com ordens de grandeza de folga — e é panic, não Result.
 resource: docs/benchmarks/m162-artifacts/theodb-100m-partial.jsonl
 tags: [arrow, escala, colunar]
 timestamp: 2026-07-30T00:00:00Z
@@ -22,7 +22,26 @@ docs/benchmarks/m162-artifacts/theodb-100m-partial.jsonl:21
  "hot_s": null, "status": "ERR:byte array offset overflow"}
 ```
 
-Registrado em 2026-07-26. O que é leitura de código é apenas a **cadeia interna** até
+Registrado em 2026-07-26 sobre o q20. O baseline COMPLETO do M169 (2026-07-30, 43/43, box de 31 GB) mostra que
+o defeito tem **três instâncias**, não uma — e as três com `agg_routed=true`, isto é, dentro do caminho que o
+milestone toca:
+
+| q | veredito | tempo até estourar |
+|---|---|---|
+| q20 | `error:XX000 byte array offset overflow` | 52,1 s |
+| q33 | idem | 57,3 s |
+| q34 | idem | 48,4 s |
+
+As três agregam sobre a **mesma coluna** (`URL`) — evidência de causa única, não de três bugs distintos, e
+consistente com a conta acima: `URL` é a única coluna do corpus larga o bastante para passar de 21,5 B/linha.
+Fonte: `docs/benchmarks/m169-baseline-100m.md`.
+
+Consequência para o fix: decodificar por chunk-group deve fechar as três de uma vez. Mas **o modo de falha pode
+mudar em vez de sumir** — removido o teto de offsets, o que resta é o pico de memória do ×3 descrito abaixo, que
+pode reaparecer como `timeout` ou OOM. Um `ok` nas três é o gate; qualquer outro veredito é resultado parcial,
+não sucesso.
+
+O que é leitura de código é apenas a **cadeia interna** até
 `arrow-array 58.3.0` (pinada em `Cargo.lock`) `src/builder/generic_bytes_builder.rs:87` — a citação é sensível à versão: na 54.3.1 a mesma linha é a 86.
 
 ## Duas propriedades que agravam

@@ -14,6 +14,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **theodb:** baseline medido do ClickBench a 100M — **28 das 43 consultas completam** sob teto de 300 s, e o
+  artefato separa as falhas pelo discriminador `agg_routed`: **4 no caminho agregado colunar** (q20, q32, q33,
+  q34) contra 11 que nem entram nele. O alvo do milestone tem **3 instâncias** de `byte array offset overflow`
+  (q20, q33, q34), não uma; a q32 roteia mas falha por pico de estado, que o streaming não corrige (#M169)
+- **theodb:** o artefato do baseline agora declara, onde o número é lido, que o `19/43` do M162 **não é base de
+  comparação válida** — as duas corridas rodaram em regimes de memória diferentes (corpus maior que a RAM vs
+  corpus em page cache), e um delta entre elas misturaria o efeito do código com o efeito da máquina (#M169)
 - **theodb:** script de reconstrução do gêmeo heap de 100M que **não toca** na tabela colunar já carregada,
   aborta se a box estiver ocupada ou se o colunar não estiver íntegro, e converte a tabela para permanente
   logo após a carga — deixá-la temporária a faria ser apagada pelo próximo crash, que é o cenário que a

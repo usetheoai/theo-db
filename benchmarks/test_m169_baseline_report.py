@@ -58,6 +58,52 @@ def test_report_carries_a_reproduction_command_next_to_the_numbers():
     assert "m169_baseline_summarize.py" in md
 
 
+# ---------- the agg_routed discriminator — what makes the number ATTRIBUTABLE -------------------------------------
+# Written AFTER the section it covers (my TDD lapse, stated rather than hidden). Each assertion targets a string
+# that exists ONLY in that section, so removing it turns these red.
+def _mixed_records():
+    """Shaped like the real 100M run: failures on BOTH sides of the discriminator."""
+    recs = [{"q": i, "verdict": "ok", "elapsed_s": 1.0, "agg_routed": True} for i in range(43)]
+    for q in (20, 33, 34):   # ROUTED — the overflow this milestone exists to remove
+        recs[q].update(verdict="error:XX000", agg_routed=True, error="byte array offset overflow")
+    for q in (17, 21, 22):   # UNROUTED — PostgreSQL's row executor; no columnar change moves them
+        recs[q].update(verdict="timeout", agg_routed=False,
+                       error="canceling statement due to statement timeout")
+    return recs
+
+
+def test_report_separates_failures_by_whether_the_aggregate_path_routed():
+    """An aggregate count mixes two classes of failure. A query that never enters the columnar path fails for a
+    reason no change to that path can move — counting it alongside the target inflates the milestone's scope."""
+    md = r.render(_header(), _mixed_records(), _box(), _box())
+    assert "3 falhas COM roteamento agregado" in md
+    assert "3 falhas SEM roteamento" in md
+
+
+def test_report_names_which_queries_are_in_the_milestones_scope():
+    """The count alone is not actionable — the artifact has to say WHICH queries the fix must move, on the line
+    that declares the routed class."""
+    md = r.render(_header(), _mixed_records(), _box(), _box())
+    routed_line = md.split("falhas COM roteamento agregado")[1].split("\n")[0]
+    for q in ("q20", "q33", "q34"):
+        assert q in routed_line, q
+    assert "q17" not in routed_line, "unrouted failure leaked into the in-scope list"
+
+
+def test_report_carries_the_error_text_of_each_failure():
+    md = r.render(_header(), _mixed_records(), _box(), _box())
+    assert "byte array offset overflow" in md
+
+
+def test_report_refuses_to_present_the_m162_count_as_a_comparison_baseline():
+    """Two runs in different MEMORY REGIMES are not comparable query-by-query: a delta between them mixes the
+    effect of the code with the effect of the box, and neither can be isolated afterwards. The caveat has to sit
+    where the number is read, not in a commit message nobody opens."""
+    md = r.render(_header(), _mixed_records(), _box(), _box())
+    assert "não é base de comparação válida" in md
+    assert "page cache" in md, "the caveat must name the regime difference, not just assert it"
+
+
 # ---------- the REFUSALS — an artifact that looks complete and is not ---------------------------------------------
 def test_report_refuses_to_emit_with_an_unidentifiable_binary():
     """`so_md5: unknown` means nobody can say WHICH binary produced these numbers. The project already paid for

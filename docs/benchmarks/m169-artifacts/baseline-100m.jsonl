@@ -1,0 +1,44 @@
+{"header": {"label": "baseline-100m", "n_queries": 43, "gucs": ["SET theodb.enable_columnar_agg = on", "SET theodb.enable_columnar_late_mat = on", "SET work_mem = '256MB'", "SET max_parallel_workers_per_gather = 0", "SET statement_timeout = '300s'"], "gucs_effective": {"theodb.enable_columnar_agg": "on", "theodb.enable_columnar_late_mat": "on", "work_mem": "262144", "max_parallel_workers_per_gather": "0", "statement_timeout": "300000"}, "timeout_s": 300, "work_mem": "256MB"}}
+{"q": 0, "verdict": "ok", "elapsed_s": 12.778, "agg_routed": true, "ab_identical": null}
+{"q": 1, "verdict": "ok", "elapsed_s": 2.171, "agg_routed": true, "ab_identical": null}
+{"q": 2, "verdict": "ok", "elapsed_s": 4.705, "agg_routed": true, "ab_identical": null}
+{"q": 3, "verdict": "ok", "elapsed_s": 6.134, "agg_routed": true, "ab_identical": null}
+{"q": 4, "verdict": "ok", "elapsed_s": 8.514, "agg_routed": true, "ab_identical": null}
+{"q": 5, "verdict": "ok", "elapsed_s": 17.678, "agg_routed": true, "ab_identical": null}
+{"q": 6, "verdict": "ok", "elapsed_s": 1.186, "agg_routed": true, "ab_identical": null}
+{"q": 7, "verdict": "ok", "elapsed_s": 2.124, "agg_routed": true, "ab_identical": null}
+{"q": 8, "verdict": "ok", "elapsed_s": 13.14, "agg_routed": true, "ab_identical": null}
+{"q": 9, "verdict": "ok", "elapsed_s": 17.374, "agg_routed": true, "ab_identical": null}
+{"q": 10, "verdict": "ok", "elapsed_s": 14.281, "agg_routed": true, "ab_identical": null}
+{"q": 11, "verdict": "ok", "elapsed_s": 15.404, "agg_routed": true, "ab_identical": null}
+{"q": 12, "verdict": "ok", "elapsed_s": 22.72, "agg_routed": true, "ab_identical": null}
+{"q": 13, "verdict": "ok", "elapsed_s": 31.214, "agg_routed": true, "ab_identical": null}
+{"q": 14, "verdict": "ok", "elapsed_s": 24.798, "agg_routed": true, "ab_identical": null}
+{"q": 15, "verdict": "ok", "elapsed_s": 20.454, "agg_routed": true, "ab_identical": null}
+{"q": 16, "verdict": "ok", "elapsed_s": 45.761, "agg_routed": true, "ab_identical": null}
+{"q": 17, "verdict": "timeout", "elapsed_s": 301.327, "agg_routed": false, "ab_identical": null, "error": "canceling statement due to statement timeout", "backend_pid": 118446}
+{"q": 18, "verdict": "ok", "elapsed_s": 147.067, "agg_routed": true, "ab_identical": null}
+{"q": 19, "verdict": "timeout", "elapsed_s": 300.491, "agg_routed": false, "ab_identical": null, "error": "canceling statement due to statement timeout", "backend_pid": 119844}
+{"q": 20, "verdict": "error:XX000", "elapsed_s": 52.07, "agg_routed": true, "ab_identical": null, "error": "byte array offset overflow", "backend_pid": 120833}
+{"q": 21, "verdict": "timeout", "elapsed_s": 300.912, "agg_routed": false, "ab_identical": null, "error": "canceling statement due to statement timeout", "backend_pid": 120953}
+{"q": 22, "verdict": "timeout", "elapsed_s": 300.444, "agg_routed": false, "ab_identical": null, "error": "canceling statement due to statement timeout", "backend_pid": 121840}
+{"q": 23, "verdict": "timeout", "elapsed_s": 302.811, "agg_routed": false, "ab_identical": null, "error": "canceling statement due to statement timeout", "backend_pid": 122834}
+{"q": 24, "verdict": "timeout", "elapsed_s": 300.149, "agg_routed": false, "ab_identical": null, "error": "canceling statement due to statement timeout", "backend_pid": 123092}
+{"q": 25, "verdict": "timeout", "elapsed_s": 300.001, "agg_routed": false, "ab_identical": null, "error": "canceling statement due to statement timeout", "backend_pid": 123458}
+{"q": 26, "verdict": "timeout", "elapsed_s": 300.319, "agg_routed": false, "ab_identical": null, "error": "canceling statement due to statement timeout", "backend_pid": 124284}
+{"q": 27, "verdict": "timeout", "elapsed_s": 303.698, "agg_routed": false, "ab_identical": null, "error": "canceling statement due to statement timeout", "backend_pid": 125548}
+{"q": 28, "verdict": "timeout", "elapsed_s": 300.063, "agg_routed": false, "ab_identical": null, "error": "canceling statement due to statement timeout", "backend_pid": 126632}
+{"q": 29, "verdict": "ok", "elapsed_s": 8.085, "agg_routed": true, "ab_identical": null}
+{"q": 30, "verdict": "ok", "elapsed_s": 47.655, "agg_routed": true, "ab_identical": null}
+{"q": 31, "verdict": "ok", "elapsed_s": 93.28, "agg_routed": true, "ab_identical": null}
+{"q": 32, "verdict": "timeout", "elapsed_s": 303.608, "agg_routed": true, "ab_identical": null, "error": "canceling statement due to statement timeout", "backend_pid": 128278}
+{"q": 33, "verdict": "error:XX000", "elapsed_s": 57.253, "agg_routed": true, "ab_identical": null, "error": "byte array offset overflow", "backend_pid": 129121}
+{"q": 34, "verdict": "error:XX000", "elapsed_s": 48.356, "agg_routed": true, "ab_identical": null, "error": "byte array offset overflow", "backend_pid": 129189}
+{"q": 35, "verdict": "ok", "elapsed_s": 32.278, "agg_routed": true, "ab_identical": null}
+{"q": 36, "verdict": "ok", "elapsed_s": 2.573, "agg_routed": true, "ab_identical": null}
+{"q": 37, "verdict": "ok", "elapsed_s": 2.181, "agg_routed": true, "ab_identical": null}
+{"q": 38, "verdict": "ok", "elapsed_s": 2.234, "agg_routed": true, "ab_identical": null}
+{"q": 39, "verdict": "timeout", "elapsed_s": 301.958, "agg_routed": false, "ab_identical": null, "error": "canceling statement due to statement timeout", "backend_pid": 129401}
+{"q": 40, "verdict": "ok", "elapsed_s": 1.09, "agg_routed": true, "ab_identical": null}
+{"q": 41, "verdict": "ok", "elapsed_s": 0.973, "agg_routed": true, "ab_identical": null}
+{"q": 42, "verdict": "ok", "elapsed_s": 0.899, "agg_routed": true, "ab_identical": null}

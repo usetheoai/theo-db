@@ -1,7 +1,7 @@
 ---
 type: Failure Mode
 title: Uma contagem agregada credita ao fix unidades que falhavam por outra causa
-description: "No baseline 100M do M169, só 1 das 6 falhas era o defeito que o milestone conserta — e ao classificar as outras 5 eu mesmo misturei classes, usando um discriminador que responde uma pergunta mais estreita do que eu supus."
+description: "No baseline 100M do M169 (43/43 completo) só 4 das 15 falhas entram no caminho agregado, e 3 delas são o defeito-alvo — e ao classificar as demais eu mesmo misturei classes, usando um discriminador que responde uma pergunta mais estreita do que eu supus."
 resource: .claude/knowledge-base/implementations/m169-scale-bugs-100m-implementation.md
 tags: [benchmark, metrica, milestone, honestidade]
 timestamp: 2026-07-30T00:00:00Z
@@ -37,6 +37,31 @@ booleano:
 
 **Uma das seis é a classe do milestone.** Se o T4.1 reportar "19 → 21", a segunda unidade pode ter mudado por
 qualquer coisa **menos** o streaming agregado.
+
+### Atualização com a corrida COMPLETA (43/43, 2026-07-30)
+
+O recorte acima foi escrito **no meio da corrida**, aos 24 de 43. Registrá-lo cedo foi certo — a decomposição
+declarada antes do resultado é o ponto do conceito — mas os números eram parciais, e a corrida completa os
+supera:
+
+| | snapshot aos 24/43 | corrida completa 43/43 |
+|---|---|---|
+| falhas | 6 | **15** |
+| falhas com `agg_routed=true` | 1 | **4** (q20, q32, q33, q34) |
+| instâncias do defeito-alvo (`byte array offset overflow`) | **1** (q20) | **3** (q20, q33, q34) |
+
+Duas coisas mudam de figura, e ambas para melhor entendimento — não para melhor manchete:
+
+1. **O alvo tem 3 instâncias, não 1.** A alavanca do milestone é maior do que o snapshot sugeria, e as três
+   são a **mesma** coluna (`URL`) — o que é evidência de causa única, não de três bugs.
+2. **Surge uma classe que o snapshot não continha: roteia e ainda assim falha.** O q32 tem `agg_routed=true`
+   e estoura o teto de 300 s. Isso **não** é o defeito de offsets, e o streaming pode não movê-lo: o pico ali é
+   de **estado** do agregado (cardinalidade), não do buffer de decode. Creditar o q32 ao fix seria a mesma
+   falha que este conceito descreve, um nível abaixo.
+
+A regra operacional resiste: o snapshot parcial já publicava **por classe**, então a correção foi aditiva em
+vez de invalidante. Um agregado sem discriminador teria ido de "6 falhas" a "15 falhas" sem nenhuma forma de
+saber que o alvo triplicou.
 
 ## A instância meta: escrevi o conceito e o violei na mesma iteração
 

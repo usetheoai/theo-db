@@ -91,6 +91,42 @@ def render(header: dict, records: list[dict], box_before: dict, box_after: dict)
         "",
         f"**A/B columnar vs heap:** {ab}",
         "",
+        "## Falhas, separadas pelo discriminador `agg_routed`",
+        "",
+        "Sem esta separação o número agregado é ambíguo: uma consulta que nem entra no caminho colunar",
+        "falha por razão que este milestone não endereça, e contá-la junto infla o alvo. `agg_routed` vem",
+        "do plano (`EXPLAIN`) via o sinal **agg-específico**, não do amplo `Custom Scan (theodb_columnar`",
+        "— que é quase sempre verdadeiro e esconde se o caminho AGREGADO roteou.",
+        "",
+        "| q | veredito | `agg_routed` | erro |",
+        "|---|---|---|---|",
+    ]
+    fails = [r for r in records if r.get("verdict") != "ok"]
+    lines += [f"| q{r['q']:02d} | `{r['verdict']}` | **{r.get('agg_routed')}** | {(r.get('error') or '')[:56]} |"
+              for r in sorted(fails, key=lambda r: r["q"])]
+    routed_fail = [r for r in fails if r.get("agg_routed")]
+    unrouted_fail = [r for r in fails if not r.get("agg_routed")]
+    lines += [
+        "",
+        f"- **{len(routed_fail)} falhas COM roteamento agregado** — no caminho que o M169 toca: "
+        + ", ".join(f"q{r['q']}" for r in sorted(routed_fail, key=lambda r: r['q'])),
+        f"- **{len(unrouted_fail)} falhas SEM roteamento** — caem no executor de linha do PostgreSQL; "
+        "fora do escopo declarado do plano, e nenhuma mudança no caminho colunar as move.",
+        "",
+        "## O que este número NÃO autoriza a concluir (honestidade — Regra 3)",
+        "",
+        "**O `19/43` do M162 não é base de comparação válida.** As duas corridas rodaram em regimes",
+        "diferentes de memória, não apenas em máquinas diferentes: a box do M162 tinha 15 GB e o corpus",
+        "de 16 GB era declaradamente *maior que a RAM*; esta tem 31 GB e o corpus **cabe em page cache**",
+        "(medido: 5 GB usados / 24 GB de cache). Uma diferença de contagem entre as duas corridas mistura",
+        "o efeito do código com o efeito do regime, e nenhuma das duas pode ser isolada *post hoc*.",
+        "O baseline honesto do M169 é ESTE número, medido nesta box; o delta que o milestone reivindicará",
+        "é T4.1 contra T1.2 — **mesma box, mesmo `so_md5` de dataset, mesmo teto**.",
+        "",
+        "Consequência prática: consultas que falhavam no M162 e completam aqui **sem** `agg_routed` não",
+        "são evidência de melhoria de produto — são evidência de mais RAM. O discriminador acima existe",
+        "exatamente para impedir que essa atribuição seja feita por engano.",
+        "",
         "## GUCs efetivas",
         "",
         "Lidas de volta de `pg_settings` após o `SET` — um parâmetro desconhecido no prefixo de uma extensão é",

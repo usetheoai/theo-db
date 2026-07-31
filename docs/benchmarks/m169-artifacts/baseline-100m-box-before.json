@@ -1,0 +1,18 @@
+{
+ "ok": false,
+ "failures": [
+  "hits_heap_absent | hits_heap is ABSENT \u2014 T2.1/T4.1 have no byte-identity oracle without the twin"
+ ],
+ "facts": {
+  "nproc": 16,
+  "mem_gb": 31,
+  "loadavg1": 1.1,
+  "unattended_state": "masked",
+  "hits_rows": 99997497,
+  "hits_heap_rows": 0,
+  "tsv_rows": 99997497,
+  "disk_free_gb": 283,
+  "so_md5": "a6ab650771f00b5a0d66af2220709168",
+  "data_directory": "/srv/m169data"
+ }
+}
