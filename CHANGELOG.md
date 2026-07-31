@@ -26,6 +26,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   (modo 700): um arquivo 644 é inalcançável quando um diretório do caminho não dá `x` (#M169)
 
 ### Added
+- **theodb:** gerador do delta entre as duas corridas de 100M, que **recusa publicar** quando as condições
+  não são comparáveis: teto de tempo diferente, box diferente, corpus diferente, ou o **mesmo binário** dos
+  dois lados. Separa os ganhos atribuíveis (falhavam COM roteamento agregado) dos não-atribuíveis, e nomeia
+  as regressões — a linha que um resumo de "quantas a mais passam?" esconde (#M169)
 - **theodb:** o guard de integridade da recarga do heap passou a ligar `theodb.enable_columnar_agg` antes do
   `count(*)`. **Medido:** 11,4 s com o pushdown contra >948 s sem ele sobre as mesmas 99.997.497 linhas — o
   backend lento fica a 99,9% de CPU com zero wait events, ou seja materialização linha a linha, não I/O. Um
