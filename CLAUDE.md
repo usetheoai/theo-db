@@ -1,8 +1,15 @@
 # CLAUDE.md — TheoDB
 
 Instruções específicas deste projeto para o Claude Code. Complementam (não substituem)
-as regras globais em `~/.claude/CLAUDE.md` e as convenções de ciclo em
-`../.claude/rules/`. Quando houver conflito, a regra mais específica vence.
+as regras globais em `~/.claude/CLAUDE.md`. Quando houver conflito, a regra mais
+específica vence.
+
+> **Nota de layout (2026-08).** Duas coisas que este arquivo cita não são mais
+> navegáveis: `../.claude/rules/` era o workspace pai do layout antigo — hoje este
+> repo é um irmão plano em `theo-platform/`, e esse diretório não existe; e o
+> `.claude/` local (rules, skills, catálogo do acervo, bundle OKF) saiu do
+> versionamento na limpeza de 2026-08. O texto abaixo descreve os contratos como
+> foram acordados; os arquivos citados vivem fora do repositório.
 
 ## Contexto
 
@@ -116,7 +123,7 @@ buscar **superioridade de performance no pilar vetorial comprovada por benchmark
 
 ## Acervo de referências (fonte primária — consultar SEMPRE antes de responder)
 
-Catálogo versionado: [`.claude/knowledge-base/references-catalog.md`](./.claude/knowledge-base/references-catalog.md)
+Catálogo versionado: `.claude/knowledge-base/references-catalog.md` *(fora do versionamento)*
 — é o contrato; toda referência nova entra lá. Os arquivos são gitignored (2,3 GB) e reprodutíveis
 pelos comandos de clone do catálogo.
 
@@ -146,7 +153,7 @@ peers com licença copyleft (`paradedb`, `citus`, `hydra`, `vectorchord` = AGPL;
 
 ## Base de conhecimento OKF (consultar ANTES, escrever DEPOIS — inquebrável)
 
-Contrato: [`.claude/rules/okf-knowledge-base.md`](./.claude/rules/okf-knowledge-base.md).
+Contrato: `.claude/rules/okf-knowledge-base.md` *(fora do versionamento)*.
 Bundle: `.claude/knowledge-base/okf/` — **60 conceitos** em [Open Knowledge Format v0.1](https://github.com/google/open-knowledge-format),
 um arquivo por conceito, links markdown formando um grafo, `type` como único campo obrigatório.
 
