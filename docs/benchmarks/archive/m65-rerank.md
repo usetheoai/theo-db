@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-09 · **Milestone:** M65 · **Dataset:** BEIR/SciFact (100 queries) · **Métrica primária:** nDCG@10
 **Harness:** `benchmarks/run_m65_rerank.py` (reusa `theodb_bench.metrics` ndcg/recall + beir/openai_embed) · **JSON:** `docs/benchmarks/m65-rerank.json`
-**ADR:** [`0024-m65-ai-rerank-cross-encoder.md`](../adr/0024-m65-ai-rerank-cross-encoder.md)
+**ADR:** [`0024-m65-ai-rerank-cross-encoder.md`](../../adr/0024-m65-ai-rerank-cross-encoder.md)
 
 > **VEREDITO: HONEST-NEGATIVE.** O reranker cross-encoder (BGE-reranker-base) **PIOROU** o nDCG@10 em
 > **−3.8 pontos** (0.7327 → 0.6947) sobre o retrieval vetorial no SciFact, ao custo de **~1.96 s** de latência

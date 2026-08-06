@@ -4,7 +4,7 @@
 **Benchmark:** HotpotQA distractor (validation), HuggingFace `hotpotqa/hotpot_qa` — HippoRAG's multi-hop set.
 **Retriever baseline:** OpenAI `text-embedding-3-small` (a strong 2024-era dense embedder).
 **Metric:** recall@4 of the 2 supporting-fact paragraphs, per question. Real embeddings + real LLM extraction.
-**Raw data:** [`m111-graphrag-flow.json`](./m111-graphrag-flow.json), [`m112-hipporag-eval.json`](./m112-hipporag-eval.json).
+**Raw data:** [`m111-graphrag-flow.json`](../m111-graphrag-flow.json), [`m112-hipporag-eval.json`](../m112-hipporag-eval.json).
 
 ## The measured result — vector wins in EVERY configuration
 

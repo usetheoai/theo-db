@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-09 · **Milestone:** M67 · **Métrica primária:** convergência (recall medido do ef recomendado vs alvo)
 **Harness:** `benchmarks/run_m67_autotune.py` (corpus sintético gaussian-mixture, 10k×128, sample≠measure) · **JSON:** `docs/benchmarks/m67-autotune.json`
-**ADR:** [`0026-m67-autotune-recommender.md`](../adr/0026-m67-autotune-recommender.md)
+**ADR:** [`0026-m67-autotune-recommender.md`](../../adr/0026-m67-autotune-recommender.md)
 
 > **VEREDITO: CONVERGED (com nuance honesta).** O `theodb.recommend_ef` **converge** — retorna o **menor ef** que
 > atinge o alvo na amostra, e o recall medido (num measure-set disjunto) fica ≥ o alvo na média. **DUAS ressalvas

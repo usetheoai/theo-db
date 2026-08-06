@@ -1,7 +1,7 @@
 # M104 / #99 — bounded columnar write memory (benchmark)
 
 **Date:** 2026-07-16 · **Host:** droplet `theo-m104-pgrx19` (8 vCPU) · **PG:** 17.10 / pgrx 0.19.0 · **maintenance_work_mem:** 4MB
-**Harness:** `theodb_rs/isolation/bench_m104_write.sh` · **Raw:** [`m104-write-envelope.json`](./m104-write-envelope.json)
+**Harness:** `theodb_rs/isolation/bench_m104_write.sh` · **Raw:** [`m104-write-envelope.json`](../m104-write-envelope.json)
 
 ## What is measured
 

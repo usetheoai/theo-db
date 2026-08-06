@@ -1,6 +1,6 @@
 # M110 — in-DB graph extraction: parity + throughput
 
-**Date:** 2026-07-16 · **Milestone:** M110 (native graph pillar Phase 3) · **Raw data:** [`m110-extraction.json`](./m110-extraction.json)
+**Date:** 2026-07-16 · **Milestone:** M110 (native graph pillar Phase 3) · **Raw data:** [`m110-extraction.json`](../m110-extraction.json)
 **Hardware:** DigitalOcean DO-Regular, 4 vCPU @ 2.0GHz · pgrx 0.19 / PostgreSQL 17.
 
 ## The gate: cross-language parity (recall non-regression by construction)

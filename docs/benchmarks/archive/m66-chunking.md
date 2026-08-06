@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-09 · **Milestone:** M66 · **Dataset:** BEIR/NFCorpus (50 queries) · **Métrica primária:** nDCG@10
 **Harness:** `benchmarks/run_m66_chunking.py` (chunka via `theodb.chunk` = o SUT; reusa `theodb_bench.metrics`/beir/openai_embed) · **JSON:** `docs/benchmarks/m66-chunking.json`
-**ADR:** [`0025-m66-chunking-strategies.md`](../adr/0025-m66-chunking-strategies.md)
+**ADR:** [`0025-m66-chunking-strategies.md`](../../adr/0025-m66-chunking-strategies.md)
 
 > **VEREDITO: STRATEGY_MATTERS (com rigor estatístico declarado).** A estratégia de chunking **move o recall**
 > neste corpus: `sentence`/`recursive` (nDCG@10 **0.397**/**0.391**) > `fixed` (**0.372**), spread total **0.025**.

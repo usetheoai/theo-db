@@ -1,7 +1,7 @@
 # M102 — AI operators as optimizable plan nodes (benchmark)
 
 **Date:** 2026-07-16 · **Host:** DigitalOcean droplet `theo-m98-pgrx19` (8 vCPU, 15 GiB) · **PG:** 17.10 / pgrx 0.19.0
-**Harness:** `theodb_rs/isolation/bench_m102.sh` (reproducible) · **Raw:** [`m102-ai-operators.json`](./m102-ai-operators.json)
+**Harness:** `theodb_rs/isolation/bench_m102.sh` (reproducible) · **Raw:** [`m102-ai-operators.json`](../m102-ai-operators.json)
 
 ## What is measured
 
