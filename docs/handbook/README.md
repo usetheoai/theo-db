@@ -145,7 +145,7 @@ O livro cresce **capítulo a capítulo** (não num único despejo — isso seria
 FAANG-level). O capítulo 19 é o **template de qualidade**: todo capítulo original deve alcançar aquele nível de
 aterrissagem no código e nos números.
 
-**A máquina que produz capítulos:** a skill [`/deep-research`](../../.claude/skills/deep-research/SKILL.md) executa
+**A máquina que produz capítulos:** a skill `/deep-research` *(fora do versionamento)* executa
 este contrato — pesquisa profunda (nosso sistema + papers + benchmarks + cálculos + técnicas), destila nas 5
 camadas, e o validador `scripts/validate_citations.py` mecaniza o contrato de honestidade (toda citação resolve no
 disco; todo número tem benchmark ou `UNBENCHMARKED`; toda URL no allowlist). Um capítulo só é dado por pronto com
