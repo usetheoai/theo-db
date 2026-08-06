@@ -250,7 +250,10 @@ pub(crate) fn init() {
 }
 
 #[pg_guard]
-unsafe extern "C-unwind" fn xact_clear(event: pg_sys::XactEvent::Type, _arg: *mut std::ffi::c_void) {
+unsafe extern "C-unwind" fn xact_clear(
+    event: pg_sys::XactEvent::Type,
+    _arg: *mut std::ffi::c_void,
+) {
     use pg_sys::XactEvent as XE;
     if event == XE::XACT_EVENT_ABORT
         || event == XE::XACT_EVENT_PARALLEL_ABORT
@@ -425,7 +428,11 @@ unsafe extern "C-unwind" fn create_custom_scan_state(
 /// referencing this scan rel, or any non-Var node the walker surfaces. `RECURSE_*` flags mean the walker
 /// descends into aggregate/window/placeholder sub-expressions and yields their leaf Vars (defense in depth —
 /// a scan node's own tlist/qual should carry none). Mirrors Citus `ColumnarAttrNeeded`.
-unsafe fn columns_needed(plan: *mut pg_sys::Plan, scanrelid: u32, natts: usize) -> Option<Vec<usize>> {
+unsafe fn columns_needed(
+    plan: *mut pg_sys::Plan,
+    scanrelid: u32,
+    natts: usize,
+) -> Option<Vec<usize>> {
     let flags = (pg_sys::PVC_RECURSE_AGGREGATES
         | pg_sys::PVC_RECURSE_WINDOWFUNCS
         | pg_sys::PVC_RECURSE_PLACEHOLDERS) as c_int;
@@ -525,7 +532,9 @@ unsafe fn predicates_needed(plan: *mut pg_sys::Plan, scanrelid: u32) -> Vec<Zone
 /// active projection (keyed by this scandesc) and materializes only `wanted`. `node` aliases `css.ss` (offset 0
 /// of `ProjScanState`), so it round-trips to the state.
 #[pg_guard]
-unsafe extern "C-unwind" fn proj_access(node: *mut pg_sys::ScanState) -> *mut pg_sys::TupleTableSlot {
+unsafe extern "C-unwind" fn proj_access(
+    node: *mut pg_sys::ScanState,
+) -> *mut pg_sys::TupleTableSlot {
     let st = node as *mut ProjScanState;
     let slot = (*node).ss_ScanTupleSlot;
     if (*st).scandesc.is_null() {
@@ -627,15 +636,11 @@ mod tests {
     fn test_projection_customscan_wins() {
         seed(50);
         let plan: String = Spi::connect(|c| {
-            c.select(
-                "EXPLAIN (COSTS OFF) SELECT b FROM t_col",
-                None,
-                &[],
-            )
-            .unwrap()
-            .filter_map(|r| r.get::<String>(1).unwrap())
-            .collect::<Vec<_>>()
-            .join("\n")
+            c.select("EXPLAIN (COSTS OFF) SELECT b FROM t_col", None, &[])
+                .unwrap()
+                .filter_map(|r| r.get::<String>(1).unwrap())
+                .collect::<Vec<_>>()
+                .join("\n")
         });
         assert!(
             plan.contains("Custom Scan (theodb_columnar_project)"),
@@ -743,7 +748,10 @@ mod tests {
                 .filter_map(|r| Some((r.get::<i32>(1).unwrap()?, r.get::<i32>(2).unwrap()?)))
                 .collect()
         });
-        assert_eq!(col, heap, "system-column ctid forces None fallback (decode-all); result must equal heap");
+        assert_eq!(
+            col, heap,
+            "system-column ctid forces None fallback (decode-all); result must equal heap"
+        );
     }
 
     /// T2.3 — nested/self-join correctness: the scandesc-keyed side channel exists solely to stop a nested
@@ -766,7 +774,10 @@ mod tests {
                 .filter_map(|r| Some((r.get::<i32>(1).unwrap()?, r.get::<i32>(2).unwrap()?)))
                 .collect()
         });
-        assert_eq!(col, heap, "self-join with per-side projections must equal the heap twin (scandesc keying)");
+        assert_eq!(
+            col, heap,
+            "self-join with per-side projections must equal the heap twin (scandesc keying)"
+        );
     }
 
     /// T2.4 — regression for the ABA HIGH (stale registry after a caught subxact abort). A PL/pgSQL block
@@ -812,7 +823,10 @@ mod tests {
                 })
                 .collect()
         });
-        assert_eq!(col, heap, "post-subxact-abort fallback query must not inherit a stale projection mask");
+        assert_eq!(
+            col, heap,
+            "post-subxact-abort fallback query must not inherit a stale projection mask"
+        );
     }
 
     // ---- M150 — chunk-group skip (zone-map) tests ----
@@ -828,8 +842,9 @@ mod tests {
         Spi::run("DROP TABLE IF EXISTS t_heap").unwrap();
         Spi::run("CREATE TABLE t_col (a int, b int, c text) USING theodb_columnar").unwrap();
         Spi::run("CREATE TABLE t_heap (a int, b int, c text)").unwrap();
-        let ins =
-            format!("INSERT INTO {{tbl}} SELECT g, (g % 7) - 3, 'row-'||g FROM generate_series(1,{n}) g");
+        let ins = format!(
+            "INSERT INTO {{tbl}} SELECT g, (g % 7) - 3, 'row-'||g FROM generate_series(1,{n}) g"
+        );
         Spi::run(&ins.replace("{tbl}", "t_col")).unwrap();
         Spi::run(&ins.replace("{tbl}", "t_heap")).unwrap();
     }
@@ -856,7 +871,10 @@ mod tests {
         let sk = chunks_skipped();
         let sc = chunks_scanned();
         let heap = col_ints("SELECT a FROM t_heap WHERE a = 25000 ORDER BY a");
-        assert_eq!(col, heap, "chunk-skip result must equal the heap twin (skip is admission-only)");
+        assert_eq!(
+            col, heap,
+            "chunk-skip result must equal the heap twin (skip is admission-only)"
+        );
         assert_eq!(col, vec![25000], "the one matching row must be present");
         assert!(sc >= 2, "the table must span >= 2 chunk groups to prove pruning (scanned {sc})");
         assert!(sk > 0, "a selective `a = 25000` must prune >= 1 chunk group (skipped {sk}/{sc})");
@@ -868,18 +886,16 @@ mod tests {
     #[pgrx::pg_test]
     fn test_skip_never_loses_row() {
         seed_clustered(50_000);
-        for pred in [
-            "a = 24999",
-            "a BETWEEN 19998 AND 20003",
-            "a > 49995",
-            "a < 4",
-            "a = 1",
-            "a = 50000",
-        ] {
+        for pred in
+            ["a = 24999", "a BETWEEN 19998 AND 20003", "a > 49995", "a < 4", "a = 1", "a = 50000"]
+        {
             let q = format!("SELECT a FROM {{tbl}} WHERE {pred} ORDER BY a");
             let col = col_ints(&q.replace("{tbl}", "t_col"));
             let heap = col_ints(&q.replace("{tbl}", "t_heap"));
-            assert_eq!(col, heap, "predicate `{pred}` must not lose or gain a row vs the heap twin");
+            assert_eq!(
+                col, heap,
+                "predicate `{pred}` must not lose or gain a row vs the heap twin"
+            );
         }
     }
 
@@ -917,7 +933,10 @@ mod tests {
         let heap_and =
             col_ints("SELECT a FROM t_heap WHERE a = 25000 AND lower(c) = 'row-25000' ORDER BY a");
         assert_eq!(col_and, heap_and, "mixed AND must return the correct rows");
-        assert!(sk_and > 0, "the pushable `a = 25000` conjunct must prune despite the function (got {sk_and})");
+        assert!(
+            sk_and > 0,
+            "the pushable `a = 25000` conjunct must prune despite the function (got {sk_and})"
+        );
     }
 
     /// Review LOW/MEDIUM (rust-pgrx council) — predicate-channel isolation across TWO DIFFERENT columnar tables
@@ -935,7 +954,8 @@ mod tests {
         Spi::run(&ins.replace("{tbl}", "t_col2")).unwrap();
         Spi::run(&ins.replace("{tbl}", "t_heap2")).unwrap();
         // Each side selective on a DIFFERENT value → each scan pushes a distinct predicate.
-        let q = "SELECT x.a, y.a FROM {t1} x, {t2} y WHERE x.a = 25000 AND y.a = 35000 ORDER BY 1,2";
+        let q =
+            "SELECT x.a, y.a FROM {t1} x, {t2} y WHERE x.a = 25000 AND y.a = 35000 ORDER BY 1,2";
         let col: Vec<(i32, i32)> = Spi::connect(|c| {
             c.select(&q.replace("{t1}", "t_col").replace("{t2}", "t_col2"), None, &[])
                 .unwrap()
@@ -948,8 +968,15 @@ mod tests {
                 .filter_map(|r| Some((r.get::<i32>(1).unwrap()?, r.get::<i32>(2).unwrap()?)))
                 .collect()
         });
-        assert_eq!(col, vec![(25000, 35000)], "the one cross-join pair must survive both predicates");
-        assert_eq!(col, heap, "two-table cross join must equal the heap twin (predicate channels isolated)");
+        assert_eq!(
+            col,
+            vec![(25000, 35000)],
+            "the one cross-join pair must survive both predicates"
+        );
+        assert_eq!(
+            col, heap,
+            "two-table cross join must equal the heap twin (predicate channels isolated)"
+        );
     }
 
     /// T2.1 — ABA regression for the PREDICATE channel (mirror of `test_subxact_abort_no_stale_projection`). A
@@ -973,6 +1000,9 @@ mod tests {
         let col = col_ints("SELECT a FROM t_col ORDER BY a");
         let heap = col_ints("SELECT a FROM t_heap ORDER BY a");
         assert_eq!(col.len(), 50_000, "the fallback full scan must return every row");
-        assert_eq!(col, heap, "post-subxact-abort full scan must not inherit a stale skip predicate");
+        assert_eq!(
+            col, heap,
+            "post-subxact-abort full scan must not inherit a stale skip predicate"
+        );
     }
 }
