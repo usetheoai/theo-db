@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin.json",
+  "name": "squad",
+  "version": "0.1.0",
+  "description": "A maintenance squad for the Theo ecosystem: 8 domain specialists plus a measurement-first pipeline (BACKLOG → DISCOVER → PLAN → IMPLEMENT → CODE-QUALITY → REVIEW → RELEASE) where every item is a hypothesis, evidence comes from our own code and runtime, and killing an item is a successful outcome.",
+  "author": "usetheo",
+  "license": "MIT",
+  "keywords": [
+    "maintenance",
+    "backlog",
+    "measurement",
+    "tdd",
+    "code-review",
+    "halt-loop",
+    "multi-repo",
+    "squad"
+  ],
+  "requires": {
+    "claudeCode": ">=1.0.0",
+    "plugins": [
+      "ralph-loop"
+    ]
+  },
+  "_comment_": "Derived from the Cycle plugin (MIT). Cycle is greenfield and stack-agnostic: its DISCOVER studies how OTHER projects solved a problem, and it forbids looking at your own code. Squad inverts that — it maintains a running ecosystem, so DISCOVER measures OUR code and runtime, and prior art can never be evidence. This repository is dual-mode: (1) standalone — open the directory directly in Claude Code; settings.json + hooks/* + skills/* + rules/* + agents/* work as-is; (2) plugin — install via marketplace. Both modes share the same source."
+}

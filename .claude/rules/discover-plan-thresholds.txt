@@ -1,0 +1,30 @@
+# Discover-Plan Score Thresholds — per-project tuning.
+#
+# Authoritative source: rules/discover-plan-golden-rule.md
+#
+# Format: <band-name>|<min-score>|<sunset-date>|<adr-ref>
+#
+# Comparison is >= (inclusive). Score == 70 -> SHIPPABLE_WITH_CAVEATS.
+# Lines starting with `#` and blank lines are skipped.
+#
+# Bands (descending):
+#   90+   -> SHIPPABLE              (measurement plan ready to execute)
+#   70-89 -> SHIPPABLE_WITH_CAVEATS (explicit caveats)
+#   50-69 -> NON_SHIPPABLE          (rewrite the plan)
+#   0-49  -> INVALID                (hard cap fired, or a very low score)
+#
+# HISTORY — 2026-08-05. This file previously used a `key = value` shape carrying
+# `soft_cap.*` / `hard_cap.*` / `band.*` entries. Nothing parsed it: the scorer's
+# `_parse_thresholds` splits on `|`, found no bands, and every score fell through to
+# INVALID. The defect was invisible because a second one hid it — the resolver looked
+# only under `.claude/rules/`, so in this repo's standalone layout the file was never
+# read at all. The cap keys are gone rather than reformatted: the caps live in the
+# orchestrator, and a config file that configures nothing is worse than no file, because
+# editing it feels like changing behaviour.
+#
+# Sunset = quarterly review. Update sunset + ADR ref when you recalibrate.
+#
+SHIPPABLE|90|2027-01-31|YOUR_ADR_REF
+SHIPPABLE_WITH_CAVEATS|70|2027-01-31|YOUR_ADR_REF
+NON_SHIPPABLE|50|2027-01-31|YOUR_ADR_REF
+INVALID|0|2027-01-31|YOUR_ADR_REF
