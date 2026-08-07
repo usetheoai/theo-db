@@ -38,6 +38,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   no histórico — quem depender de um deles precisa recuperá-lo com `git show f7c7b93:docs/benchmarks/…`
 
 ### Added
+- **theodb:** **medido o gargalo que o ADR 0007 registrou em junho e deixou explicitamente para depois** — o
+  caminho de embed sob concorrência. O servidor de embeddings **satura em ~20 rps**: de 8 para 16 clientes o
+  throughput sobe 5% enquanto a **p99 quadruplica** (469 → 1 887 ms), atingindo 5,7× de escala num ideal de
+  16×. Reportar a média esconderia o achado — a média a 16 clientes é 615 ms, mas um em cada cem usuários
+  espera 1,9 s. Medido também que `minreq` **abre conexão nova a cada chamada**: ~0,6 ms sobre loopback, mas
+  **~32 ms contra provedor remoto** (handshake TCP+TLS medido), de modo que embedar 10 mil linhas gasta ~320 s
+  só abrindo conexões. A referência SOTA para o bloqueio (`pg_net`, Apache-2.0, BackgroundWorker + libcurl)
+  resolve **apenas a ingestão**: a consulta precisa do vetor na mesma query e não pode ser assíncrona
 - **theodb:** primeira medição do **M177 fase 1** — os dois lados da troca que decide a extensão de
   embeddings local. O hop HTTP local custa **15,55 ms** numa chamada unitária (27,2% do tempo, p=0,0000) e
   **deixa de ser mensurável em lote de 8** (p=0,1457): é custo fixo por requisição. Do outro lado, ter o
