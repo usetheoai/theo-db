@@ -38,6 +38,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   no histórico — quem depender de um deles precisa recuperá-lo com `git show f7c7b93:docs/benchmarks/…`
 
 ### Added
+- **theodb:** **o servidor de embeddings colapsa sob sobrecarga**, achado do primeiro teste de stress do
+  milestone. Além do pico de 65 rps (32 clientes), mais carga produz **menos** trabalho: 26,5 rps a 64 clientes
+  e **17,1 rps a 128, com 19,7% de recusa de conexão** — congestion collapse, não saturação. Pior, o RSS do
+  servidor cresce de 161 MB para **6 932 MB e não é devolvido** quando a carga cessa: com um cliente e a
+  latência já normalizada em 19 ms, os 7 GB continuavam retidos até o processo ser encerrado. O mecanismo foi
+  verificado no processo vivo — `ThreadingHTTPServer` cria uma thread por conexão sem limite e o ONNX Runtime
+  aloca arena por thread. A capacidade útil é ~32 clientes concorrentes, e a correção é **limitar** a
+  concorrência (pool fixo, semáforo, backlog explícito), o oposto do instinto de aumentá-la para escalar
 - **theodb:** **fixado o teto de qualquer otimização de transporte no caminho de embed.** A decomposição por
   camada mede que servidor Python + HTTP + TCP custam juntos **0,849 ms sobre 16,649 ms — 5,1%**; os outros
   94,9% são o ONNX Runtime, que é nativo e executaria igual sob qualquer arquitetura. Isso limita **todas** as
