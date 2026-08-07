@@ -38,6 +38,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   no histórico — quem depender de um deles precisa recuperá-lo com `git show f7c7b93:docs/benchmarks/…`
 
 ### Added
+- **theodb:** **M177 — embeddings locais como extensão instalável, marcado P0** pelo owner. O que recebe
+  prioridade máxima é o **gate de medição**, não a construção: marcar como P0 um caminho cuja viabilidade
+  ninguém mediu abandonaria o measurement-first que trava o roadmap. A Fase 1 compara modelos open-source no
+  nosso corpus (entrega útil sozinha — define o modelo default recomendado), mede quanto do tempo ponta a ponta
+  é hop local versus inferência, e levanta o custo de empacotar centenas de MB de pesos. A falsificação está
+  escrita antes de medir: hop abaixo de 5% do total não justifica a Fase 2 por latência. A Fase 2 — a extensão
+  opt-in — é condicional, e seu primeiro item é o ADR sobre **onde o modelo fica residente**, que o prior art
+  aponta como o custo que decide
 - **docs:** levantamento de prior art sobre **gerar embeddings localmente como extensão PostgreSQL instalável**
   (`wiki/references/embedding-local-como-extensao-2026-08.md`). A arquitetura já existe sob licença permissiva —
   `pg_gembed` (Apache 2.0) é quase idêntica à proposta, e o PostgresML (MIT) mostra o formato em escala maior —,

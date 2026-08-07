@@ -24,8 +24,10 @@ localizável pelo campo `milestone:` do frontmatter. Medido em 2026-08-07: **130
 citando seu id; a maior parte dos 19 restantes é o bloco M76–M81, cujas seis fases do IVF-AQ tiveram a evidência
 consolidada no M82 ([ADR 0037](./wiki/decisions/0037-m82-am-ivf-aq-measured-verdict.md)) em vez de por fase.
 
-**Estado em 2026-08-07:** 159 milestones · **151 concluídos** · **8 abertos** — M169 (em andamento, ver
-`[Unreleased]` no CHANGELOG) e M170–M176, o **Roadmap v7**: levar todos os pilares a maturidade ≥ 4.
+**Estado em 2026-08-07:** 160 milestones · **151 concluídos** · **9 abertos** — M169 (em andamento, ver
+`[Unreleased]` no CHANGELOG) e M170–M177, o **Roadmap v7**: levar todos os pilares a maturidade ≥ 4.
+**O M177 (embeddings locais) é P0**, marcado pelo owner em 2026-08-07 — a Fase 1 dele roda à frente de
+M170–M176, e a Fase 2 é condicional ao gate que ela produz.
 
 **Lacunas de numeração são intencionais:** M23, M24, M27, M28, M29 foram **removidos em 2026-07-03** por saírem
 do escopo do repositório (control plane em Go, K8s, replicação, MCP write) e permanecem riscados abaixo, em vez
@@ -48,7 +50,7 @@ mudaria o registro do que se afirmou à época, e o veredito legível de cada mi
 | v4 — independência do pgvector | M69–M70 | **este arquivo** |
 | v5 — superioridade vetorial P0 | M60, M71–M74 | **este arquivo**, § Roadmap v5 |
 | v6 — colunar, lexical, grafo, lakehouse | M75–M169 | **este arquivo** |
-| v7 — maturidade ≥ 4 em todos os pilares | M170–M176 | **este arquivo**, § Roadmap v7 |
+| v7 — maturidade ≥ 4 em todos os pilares | M170–M177 | **este arquivo**, § Roadmap v7 |
 
 `ROADMAP-v3.md` e `ROADMAP-v5.md` existiam em paralelo como drafts estratégicos e **foram removidos em
 2026-08-07**: seus milestones estavam **todos concluídos aqui** enquanto os arquivos seguiam mostrando `[ ]` em
@@ -3473,14 +3475,84 @@ o e2 custou três artefatos e isso **não** é razão para manter.
 **Prior art / referências:** `wiki/features/17-indice-symqg.md`; `wiki/benchmarks/e2-symqg-inpg-verdict.md`,
 `e2-symqg-fastscan-verdict.md`, `e2-symqg-spike.md`.
 
+## P0 — Embeddings locais como extensão instalável (marcado pelo owner, 2026-08-07)
+
+> **Prioridade máxima do v7, à frente dos M170–M176.** Hoje o banco **chama um endpoint e não embarca
+> modelo algum** (`wiki/guides/sql-embeddings.md`) — uma escolha de desenho central, que mantém a imagem
+> enxuta e o modelo trocável. A proposta do owner não é embarcar no binário default: é entregar o modelo
+> **como extensão opt-in**, no mesmo padrão em que este repositório já distribui três extensões com
+> `requires` entre elas (`theodb`, `vector`, `theodb_rs`).
+>
+> **O que é P0 aqui é o GATE, não a construção.** Marcar como prioridade máxima um caminho cuja viabilidade
+> ninguém mediu seria abandonar o measurement-first que trava todo este roadmap (ADR 0002) — e o levantamento
+> de prior art (`wiki/references/embedding-local-como-extensao-2026-08.md`) é explícito em **não** ser
+> evidência. O que roda com prioridade máxima é a Fase 1: a medição que decide. A Fase 2 é **condicional** ao
+> resultado dela, e não começa antes.
+>
+> **Por que vale a prioridade:** o modelo de embedding é o maior determinante de qualidade de retrieval —
+> acima de qualquer ganho de índice que os últimos quarenta milestones perseguiram. Um modelo melhor move o
+> nDCG mais do que qualquer `ef_search`, e isso independe do desfecho arquitetural.
+
+## M177 — [ ] Embeddings locais: o gate de medição (P0 — Fase 1) e a extensão (Fase 2, condicional)
+
+**Objective:** decidir, por medição, se gerar embeddings **dentro do host** vale o custo — e, se valer, onde o
+modelo fica residente. Duas fases com gate entre elas; a segunda não existe se a primeira não a justificar.
+
+### Fase 1 — o gate (esta é a parte P0)
+
+**Definition of done:**
+
+- [ ] **Comparação de modelos no NOSSO corpus.** 3–4 modelos open-source permissivos servidos localmente, medidos com `benchmarks/theodb_bench/beir.py` + `significance.py` (nDCG@10, recall@100, bootstrap pareado). Ranking público — MTEB e afins — **seleciona candidatos; não é o veredito** (Regra 5 / gate G5). Entrega isolada: define o modelo default recomendado, **independentemente do desfecho arquitetural**.
+- [ ] **Custo do hop local medido.** Quanto do tempo ponta a ponta é hop HTTP para o servidor ONNX local (que os testes de integração já exercitam) e quanto é a inferência em si. **É o número que decide a Fase 2:** se a inferência domina e o hop some no ruído, a extensão in-process é complexidade acidental e o milestone fecha aqui — desfecho legítimo.
+- [ ] **Custo de empacotar os pesos levantado.** Centenas de MB num pacote de extensão versus download no primeiro uso, com o caso de ambiente offline declarado. Nenhuma fonte do prior art documenta isso, e pode ser o custo dominante sem aparecer em benchmark de latência.
+- [ ] Artefato em `wiki/benchmarks/` + CHANGELOG `[Unreleased]`.
+
+**Falsificação declarada antes de medir:** se o hop local custar **< 5% do tempo ponta a ponta**, a Fase 2 não
+se justifica por latência e só prossegue se outro eixo (privacidade, ausência de rede, custo por token) for
+declarado como motivador — **por escrito, em ADR, e não retroativamente**.
+
+### Fase 2 — a extensão (CONDICIONAL ao gate da Fase 1)
+
+**Definition of done:**
+
+- [ ] **ADR decidindo onde o modelo fica residente.** O prior art mostra que este é o custo que decide, não a licença: o `pg_gembed` (Apache 2.0) cacheia o modelo **por backend**, e o NeurStore (arXiv:2509.03228) constrói deduplicação, compressão e **buffers compartilhados** justamente para conter o overhead por conexão. Uma cópia por backend, com encoder de centenas de MB, é inviável sob concorrência real.
+- [ ] O ADR avalia explicitamente a rota **modelo no BackgroundWorker** ([ADR 0016](./wiki/decisions/0016-m54-vectorizer-worker-mechanism.md)): uma cópia em vez de N, e nunca segura um backend — o que também neutraliza o footgun do [ADR 0007](./wiki/decisions/0007-synchronous-per-row-model-http.md). É a rota que o prior art **não** tomou e que já temos construída.
+- [ ] O ADR registra que a restrição do [ADR 0009](./wiki/decisions/0009-theodb-rs-api-surface-single-module.md) **não se aplica**: ela veta fatiar a superfície de *uma* extensão em N módulos de schema, não uma extensão separada com seu próprio `.so` e control file.
+- [ ] Extensão **opt-in**: o binário default não incha, e quem não instala continua apontando para endpoint — a independência de modelo do [ADR 0002](./wiki/decisions/0002-north-star-equal-or-superior-to-alloydb.md) é preservada, não trocada.
+- [ ] Gate D1 sobre runtime e pesos (Apache-2.0 / MIT / BSD / PostgreSQL), verificado no `deny.toml`. Isolamento de thread na disciplina do [ADR 0053](./wiki/decisions/0053-m140-2-lexical-core-crate.md) — nenhuma thread do runtime toca o banco.
+- [ ] Medição de memória **sob concorrência**, não em conexão única. Uma cópia por backend só aparece quando há backends.
+
+**Dependencies:** M170 `[ ]` para a cobertura de erro do caminho `embed` — a Fase 2 adiciona um modo de falha
+novo (modelo ausente, pesos corrompidos, OOM na carga) ao caminho que hoje tem **um teste**.
+
+**Risks:** (a) **marcar P0 antes de medir cria pressão por resultado positivo** — daí a falsificação estar
+escrita acima e antes; (b) empacotamento dos pesos pode inviabilizar sozinho, e é o item menos documentado
+pelo prior art; (c) o pgai **saiu** do formato de extensão porque managed services não a instalam — pesa menos
+para uma edição self-hosted, mas pertence ao ADR.
+
+**Prior art / referências:** `wiki/references/embedding-local-como-extensao-2026-08.md` (pg_gembed Apache 2.0;
+PostgresML MIT; NeurStore; o contra-argumento do pgai) — **prior art, não evidência**;
+`wiki/guides/sql-embeddings.md`; `wiki/features/16-vectorizer.md`.
+
 ## Sequência do v7
 
 ```
+P0  ══▶  M177 fase 1 (o gate: modelos + custo do hop + empacotamento)
+              │
+              ├── hop irrelevante  ──▶ fecha aqui; fica o modelo default recomendado
+              └── hop relevante    ──▶ M177 fase 2 (ADR de residência + extensão opt-in)
+
 independentes, paralelizáveis:   M170 (IA) · M171 (lakehouse) · M176 (SymQG) · M169 (colunar, já aberto)
 bancada compartilhada:           M172 (híbrida) ──▶ M173 (lexical)     [mesmos corpora, uma coleta]
 independente, mede-antes:        M174 (grafo)
 calendário + decisão do owner:   M175 (dogfood) — começar CEDO, é o de maior latência
 ```
+
+**O que P0 desloca, dito explicitamente:** M177 fase 1 passa à frente de M170–M176. **Não desloca o M169** —
+aquele é correção de falha dura na escala-alvo, e correctness precede aposta nova (o mesmo princípio que ordenou
+M48 antes de M51). A bancada da fase 1 é a mesma do M172/M173, então rodá-los na sequência aproveita uma coleta
+só; e um modelo melhor **eleva a barra** que a híbrida precisa superar, o que torna a ordem M177 → M172 mais
+informativa que a inversa.
 
 **M175 primeiro em ordem de início, último em ordem de conclusão.** Ele não compete por tempo de engenharia com
 os outros e é o único que destrava o nível 5 — quanto antes o anchor for declarado, antes a janela de evidência
