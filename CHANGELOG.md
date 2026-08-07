@@ -80,6 +80,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   foi absorvido no `ROADMAP.md` e os arquivos removidos; permanecem no histórico git
 
 ### Fixed
+- **theodb:** **retratada a atribuição do custo do hop no M177.** O artefato publicava 15,55 ms como "custo do
+  hop"; uma decomposição com o mesmo stack e **sem modelo nenhum** — só o canal — mede o transporte real em
+  **1,37 ms** (vetor 384d) e **1,72 ms** (1024d), sobre 0,68 ms de HTTP+JSON vazio. Os ~14 ms restantes eram
+  diferença de implementação entre os dois braços, não o canal: o experimento comparava caminhos que diferiam
+  em mais de uma variável, e o total foi creditado à única que estava sob investigação. Com o transporte a
+  ~1,4 ms, o hop é ~2–3% do pipeline de consulta — **abaixo do limiar de 5%** que o milestone declarou antes
+  de medir, de modo que o critério de falsificação foi cruzado. A seção original fica preservada no conceito,
+  sob aviso, porque foi ela que fundamentou a primeira leitura
 - **docs:** o roadmap ativo declarava, na abertura da seção do v5, um estado que a própria medição já havia
   superado — "M60 aberto", "o pilar segue parcial". A seção passou a abrir com o veredito medido do M73
   (paridade de recall alcançada; QPS multi-cliente competitivo-a-superior vs pgvector; superioridade sobre
