@@ -37,6 +37,23 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   artefatos brutos** de medição que viviam sob `docs/benchmarks/` saíram junto e passam a existir apenas
   no histórico — quem depender de um deles precisa recuperá-lo com `git show f7c7b93:docs/benchmarks/…`
 
+### Added
+- **docs:** levantamento de prior art sobre **gerar embeddings localmente como extensão PostgreSQL instalável**
+  (`wiki/references/embedding-local-como-extensao-2026-08.md`). A arquitetura já existe sob licença permissiva —
+  `pg_gembed` (Apache 2.0) é quase idêntica à proposta, e o PostgresML (MIT) mostra o formato em escala maior —,
+  de modo que a licença não é o obstáculo. O custo que decide é outro, e duas fontes independentes convergem
+  nele: **memória por conexão**. O `pg_gembed` cacheia o modelo por backend, e o paper NeurStore constrói
+  deduplicação, compressão e buffers compartilhados justamente para conter esse overhead. O conceito declara no
+  topo que é prior art e **não** evidência
+- **docs:** roadmap **v7 — maturidade ≥ 4 em todos os pilares** (M170–M176), derivado de um levantamento do
+  estado de cada pilar contra a wiki e o código: vetorial 4; colunar, IA, lakehouse, híbrida e grafo 3; lexical 2;
+  SymQG 1. Cobre a cobertura de erro na fronteira de rede da superfície `ai.*` (onde `embed` e `rerank` têm um
+  teste cada), a escrita Parquet além de escalares com head-to-head externo, e o **dogfood sustentado** — que hoje
+  é o teto de todos os pilares, já que nenhum pode passar de 4 sem evidência de uso real. Três dos sete perguntam
+  se o pilar **merece** subir e admitem aposentadoria como conclusão: a híbrida (cujo ganho sobre o vetorial puro
+  não é estatisticamente significativo), o BM25 próprio (fora do binário default) e o SymQG (medido mais lento).
+  O colunar já tinha o seu — é o M169
+
 ### Changed
 - **docs:** o roadmap passou a ser **um só arquivo**. `ROADMAP-v3.md` e `ROADMAP-v5.md` viviam em paralelo como
   drafts estratégicos e mostravam **100% dos seus milestones em aberto** enquanto todos os 13 estavam concluídos

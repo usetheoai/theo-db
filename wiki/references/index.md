@@ -1,5 +1,6 @@
 # Referências
 
+* [Prior art — gerar embeddings localmente como extensão PostgreSQL instalável](embedding-local-como-extensao-2026-08.md) - A arquitetura já existe sob Apache 2.0 e MIT, e duas fontes independentes convergem no mesmo custo decisivo — memória por conexão, não licença nem peso do pacote.
 * [Handbook capítulo 19 — HNSW, da teoria à página de 8 KB](handbook-19-hnsw.md) - O capítulo-farol do currículo interno; vai do paper à matemática de camadas, à implementação em duas camadas, ao benchmark e ao gap honesto.
 * [Handbook de engenharia — o currículo técnico interno](handbook-overview.md) - Ensina engenharia de banco através do sistema real do projeto, com um padrão de cinco camadas e um contrato de honestidade que decide se um capítulo pertence ao coração ou ao roadmap.
 * [Auditoria de licenças do pacote — zero AGPL na distribuição](license-audit.md) - A evidência reproduzível do gate de release: varredura determinística sobre pacotes do sistema e sobre a árvore de crates fixada, com o falso positivo conhecido explicado.

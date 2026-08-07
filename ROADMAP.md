@@ -24,8 +24,8 @@ localizável pelo campo `milestone:` do frontmatter. Medido em 2026-08-07: **130
 citando seu id; a maior parte dos 19 restantes é o bloco M76–M81, cujas seis fases do IVF-AQ tiveram a evidência
 consolidada no M82 ([ADR 0037](./wiki/decisions/0037-m82-am-ivf-aq-measured-verdict.md)) em vez de por fase.
 
-**Estado em 2026-08-07:** 152 milestones · **151 concluídos** · **1 aberto (M169**, em andamento — ver
-`[Unreleased]` no CHANGELOG).
+**Estado em 2026-08-07:** 159 milestones · **151 concluídos** · **8 abertos** — M169 (em andamento, ver
+`[Unreleased]` no CHANGELOG) e M170–M176, o **Roadmap v7**: levar todos os pilares a maturidade ≥ 4.
 
 **Lacunas de numeração são intencionais:** M23, M24, M27, M28, M29 foram **removidos em 2026-07-03** por saírem
 do escopo do repositório (control plane em Go, K8s, replicação, MCP write) e permanecem riscados abaixo, em vez
@@ -47,7 +47,8 @@ mudaria o registro do que se afirmou à época, e o veredito legível de cada mi
 | v3 — amplitude de produto | M61–M68 | **este arquivo**, § Roadmap v3 |
 | v4 — independência do pgvector | M69–M70 | **este arquivo** |
 | v5 — superioridade vetorial P0 | M60, M71–M74 | **este arquivo**, § Roadmap v5 |
-| v6 em diante | M75+ | **este arquivo** |
+| v6 — colunar, lexical, grafo, lakehouse | M75–M169 | **este arquivo** |
+| v7 — maturidade ≥ 4 em todos os pilares | M170–M176 | **este arquivo**, § Roadmap v7 |
 
 `ROADMAP-v3.md` e `ROADMAP-v5.md` existiam em paralelo como drafts estratégicos e **foram removidos em
 2026-08-07**: seus milestones estavam **todos concluídos aqui** enquanto os arquivos seguiam mostrando `[ ]` em
@@ -3281,6 +3282,209 @@ passar limpo.
 `wiki/benchmarks/m162-100m-gap-verdict.md` (as 5 falhas, 19/43, a caixa de 15 GB);
 `wiki/benchmarks/clickbench-fresh-vs-clickhouse-2026-07-27.md` (o baseline a 1M); `wiki/benchmarks/m168-streaming-topk-verdict.md`
 (a máquina de decode por chunk-group e o 43,2× de memória no q23); acervo `references/arrow-rs`, `references/datafusion`.
+
+---
+
+# Roadmap v7 — Maturidade mínima 4 em todos os pilares
+
+> Ativado 2026-08-07 (pedido do owner: **nenhum pilar abaixo de 4**). Origem: levantamento de maturidade por
+> pilar contra a wiki e o código, nesta data. A régua usada — e ela é **proposta desta avaliação**, não um
+> artefato pré-existente do projeto:
+>
+> | Nível | Critério |
+> |---|---|
+> | 1 | spike/experimental; medido, mas não recomendado |
+> | 2 | implementado e testado, com ressalva estrutural — ou fora do binário default |
+> | 3 | no default, testado, crash-safe, com ganho medido; limite conhecido e declarado |
+> | 4 | 3 + paridade ou vantagem **medida contra a referência de mercado** + observabilidade própria |
+> | 5 | 4 + dogfood sustentado + reprodução independente por terceiro |
+>
+> **Estado medido em 2026-08-07:** vetorial **4**; colunar, IA, lakehouse, híbrida, grafo **3**; lexical **2**;
+> SymQG **1**. O colunar já tem seu milestone — é o **M169**, aberto. Os sete abaixo cobrem o resto.
+>
+> **Três destes milestones podem terminar em honest-negative, e isso é conclusão válida** (Regra 3): M172, M174 e
+> M176 perguntam se um pilar **merece** subir, não assumem que sim. Um pilar aposentado com evidência sai da
+> tabela de maturidade em vez de ficar puxando a média — e isso conta como milestone cumprido.
+
+## M170 — [ ] Cobertura de erro na fronteira de rede da superfície `ai.*` (IA 3 → 4)
+
+**Objective:** a superfície `ai.*` é a única do produto que faz **I/O de rede dentro de uma transação**, e é onde
+a suíte é mais fina: `embed.rs` e `rerank.rs` têm **1 teste cada** (medido 2026-08-07), contra 26 no vectorizer e
+87 em `am/`. Os caminhos felizes estão cobertos; os de falha, não. Um `NULL` devolvido silenciosamente por um
+timeout de provedor vira dado errado **dentro de uma tabela do usuário** — não um erro visível.
+
+**Definition of done:**
+
+- [ ] Teste por classe de falha do provedor, com **erro tipado distinto** em cada uma: timeout, 4xx, 5xx, resposta malformada, resposta vazia, conexão resetada. Um teste que só afirma "levanta erro" não fecha o item — a asserção é sobre o **tipo e a mensagem** (`rules/error-handling.md` § 2, `testing.md` § 4.1).
+- [ ] Nenhum caminho de falha retorna `NULL` ou valor mágico; auditado em `embed.rs`, `rerank.rs`, `chat.rs`, `ai_op.rs`, `nl.rs`, `egress.rs`.
+- [ ] Testes **determinísticos** — endpoint fake/gravado, nunca provedor vivo com asserção exata (um teste flaky é bug, `testing.md` § 3).
+- [ ] Verificado que chave de API não aparece em log, mensagem de erro ou artefato de teste — **inclusive no caminho de erro**, que é onde vaza.
+- [ ] CHANGELOG `[Unreleased]`.
+
+**Dependencies:** nenhuma. **Não bloqueia nem é bloqueado** — paralelizável com todos os outros.
+
+**Risks:** (a) o modelo síncrono por linha (ADR 0007) limita o que dá para simular sem refatorar; o item é de
+cobertura, **não** de rearquitetura — se aparecer pressão para mudar o modelo, isso é outro milestone; (b) o
+fail-open do M169/ADR-0059 cobre falha de recurso: não confundir com falha de provedor, que é fail-closed.
+
+**Prior art / referências:** `wiki/features/07-funcoes-ia-sql.md`; `wiki/decisions/0007-synchronous-per-row-model-http.md`,
+`0049-m122-three-phase-async-embed.md`, `0059-m169-fail-open-cobre-falha-de-spill.md`; `.claude/rules/error-handling.md`.
+
+## M171 — [ ] Escrita Parquet além de escalares + head-to-head externo (Lakehouse 3 → 4)
+
+**Objective:** o lakehouse é own-code e está no binário default, mas para **subir a 4 falta o eixo comparativo**:
+não existe head-to-head contra nenhuma referência de mercado. E a escrita v1 cobre apenas tipos escalares — a
+leitura já cobre tudo, inclusive aninhado, via `SETOF jsonb`.
+
+**Definition of done:**
+
+- [ ] `write_parquet` ou passa a cobrir tipos aninhados, ou **recusa-os com erro tipado explícito** — o que não pode permanecer é o comportamento indefinido na fronteira. Escolher por medição de custo, não por preferência.
+- [ ] Head-to-head reproduzível **lendo o mesmo arquivo Parquet** contra uma referência externa (DuckDB é o candidato natural — MIT, e usado só como baseline de bancada, jamais redistribuído: mesmo padrão do pgvector como oráculo de controle desde o M70). Publicado em `wiki/benchmarks/`.
+- [ ] `theodb_rs/isolation/crash_parquet.sh` estendido para os tipos novos.
+- [ ] O `REVOKE ... FROM PUBLIC` de `read_parquet`/`write_parquet` verificado intacto — I/O de arquivo do lado do servidor é superuser-only.
+- [ ] CHANGELOG `[Unreleased]` + artefato.
+
+**Dependencies:** nenhuma.
+
+**Risks:** (a) tipo aninhado em Parquet é onde mora a complexidade real do formato — se a medição mostrar custo
+alto, **recusar com erro tipado é resultado aceitável** e fecha o item; (b) comparar contra DuckDB in-process com
+o nosso caminho in-database mede coisas diferentes: declarar a assimetria no artefato, como o M100 fez.
+
+**Prior art / referências:** `wiki/features/15-lakehouse-parquet.md`; `wiki/decisions/0057-m143-pgduckdb-total-removal.md`;
+`wiki/benchmarks/parquet-reader-owncode-spike.md`; `wiki/technologies/{parquet,arrow,datafusion}.md`.
+
+## M172 — [ ] O pilar híbrido vale sobre o vetorial puro? (Híbrida 3 → 4, admite honest-negative)
+
+**Objective:** o M123 mediu a fusão RRF contra o vetorial puro e o ganho **não foi estatisticamente
+significativo** — nDCG@10 de 0,7337 contra 0,7296. O pilar está entregue, é determinístico e seguro (filtro
+fail-closed do M120), mas **o valor que ele adiciona não está demonstrado**. Este milestone resolve a pergunta em
+vez de deixá-la aberta: existe um regime em que a híbrida ganha de forma significativa?
+
+**Definition of done:**
+
+- [ ] Medição em **≥ 2 corpora adicionais de regimes diferentes** (um lexical-pesado, um semântico), com `paired_significance` — coeficiente de variação não é teste de significância.
+- [ ] Um dos dois desfechos, ambos fechando o item: **(a)** existe regime com ganho significativo → documentado em `wiki/features/06-busca-hibrida.md` com o regime nomeado, e a híbrida passa a ser recomendada **ali**; **(b)** não existe → **honest-negative publicado**, e a feature é reposicionada honestamente como cobertura lexical (recuperar o que o vetor não recupera), sem claim de nDCG.
+- [ ] Qualquer que seja o desfecho, o conceito da wiki deixa de sugerir ganho não medido.
+- [ ] CHANGELOG `[Unreleased]` + artefato.
+
+**Dependencies:** compartilha bancada com M173 (mesmos corpora, mesma régua) — **rodar juntos** economiza uma
+coleta inteira.
+
+**Risks:** (a) escolher corpus até achar um em que ganha é *p-hacking* — os corpora e a régua são declarados
+**antes** da coleta; (b) o resultado (b) é o mais provável dado o M123 e o M138, e precisa ser aceito sem
+resistência: já são dois artefatos apontando na mesma direção.
+
+**Prior art / referências:** `wiki/benchmarks/m123-hybrid-significance.md`, `m53-hybrid-beir.md`, `m106-weighted-rrf.md`;
+`wiki/features/06-busca-hibrida.md`; `benchmarks/theodb_bench/{significance,beir,hybrid,logcorpus}.py`.
+
+## M173 — [ ] Promover ou aposentar o BM25 próprio (Lexical 2 → 4, admite aposentadoria)
+
+**Objective:** o motor lexical own-code existe, foi medido e **não está no binário default** — o que trava o
+pilar em 2 por definição: um pilar que o usuário não recebe não é maduro. O estado medido é ambíguo por regime:
+ganha em lexical puro por margem modesta, fica ~4% abaixo do `pg_textsearch` em nDCG@10 num regime, **não dá
+ganho na fusão**, e num corpus lexical-pesado mede **pior**. Limbo indefinido é o pior dos estados: paga-se a
+manutenção do código sem entregar o valor.
+
+**Definition of done:**
+
+- [ ] Decisão **por medição**, registrada em ADR: promover ao default, ou aposentar a feature `spike-lexical` e remover o código.
+- [ ] Se promover: ganho medido **na fusão** (não só em lexical puro — a lição do M138), custo de binário declarado, e a fronteira pgrx-free do `lexical_core` verificada intacta (é o que impede uma thread do Tantivy de tocar o backend — ADR 0053).
+- [ ] Se aposentar: código removido, `theodb_lexical` e `tantivy` saem do `Cargo.toml`, redução do `.so` medida, e o conceito da wiki marcado como aposentado **com o motivo** — nunca apagado.
+- [ ] CHANGELOG `[Unreleased]` + ADR.
+
+**Dependencies:** M172 (mesma bancada, mesmos corpora).
+
+**Risks:** (a) **anti-sunk-cost** — foram dois milestones (M139, M140.1–.4) e quatro ADRs; nada disso é razão
+para promover algo que a medição não sustenta; (b) aposentar remove uma capacidade citada em material público:
+varrer README/wiki antes.
+
+**Prior art / referências:** `wiki/features/18-motor-lexical-bm25.md`; `wiki/decisions/0051`–`0054`;
+`wiki/benchmarks/m138-bm25-fusion.md`, `m140-1-lexical-measurement.md`, `m140-3-bm25-engine.md`.
+
+## M174 — [ ] Reposicionar o grafo no caso de uso em que ele vence (Grafo 3 → 4)
+
+**Objective:** a primitiva é forte — travessia CSR medida **106–232×** acima de CTE recursiva mesmo contra o
+baseline mais justo, com WAL/MVCC/crash-safety herdados do PostgreSQL. Mas o M111/M112, em HotpotQA real,
+concluiu que **"o vetor vence em TODAS as configurações"** no GraphRAG retrieval — a tarefa que motivou o pilar.
+Hoje o pilar entrega uma primitiva excelente para um caso de uso refutado.
+
+**Definition of done:**
+
+- [ ] Identificar e medir **um caso de uso onde a travessia é a resposta certa** e o vetor não compete — candidatos: alcançabilidade multi-hop, detecção de ciclo, componentes conexos, PPR sobre grafo denso. O critério é vencer uma alternativa real (CTE recursiva **e** o vetor onde aplicável), não vencer o nada.
+- [ ] Um dos dois desfechos: **(a)** caso encontrado → `wiki/features/13-grafo-nativo.md` reposicionado nele, com o benchmark, e o claim de RAG removido; **(b)** nenhum caso justifica a manutenção → ADR de aposentadoria com o custo de manter versus o valor medido.
+- [ ] O honest-negative do M111/M112 permanece linkado do conceito da feature — quem chegar ao grafo precisa encontrá-lo.
+- [ ] CHANGELOG `[Unreleased]` + artefato.
+
+**Dependencies:** nenhuma.
+
+**Risks:** (a) procurar caso de uso até achar um em que ganhamos é o mesmo viés do M172 — o caso é declarado
+antes de medir, e a alternativa a bater é nomeada junto; (b) o pilar tem 35 testes e está no binário default:
+aposentá-lo é remoção de superfície pública e exige upgrade script (ver M175/`theo-pgrx`).
+
+**Prior art / referências:** `wiki/features/13-grafo-nativo.md`; `wiki/decisions/0048-m107-native-graph-engine-go.md`;
+`wiki/benchmarks/m107-graph-spike.md`, `m109-msbfs.md`, `archive/m111-m112-graphrag-retrieval.md`.
+
+## M175 — [ ] Dogfood sustentado — o teto que trava TODOS os pilares em 4
+
+**Objective:** nenhum pilar pode passar de 4, hoje, e **não por engenharia**:
+`.claude/knowledge-base/dogfood/evidence/` está **vazio** (verificado 2026-08-07), e o `m45-pareto-sift1m`
+declara que entrega *metade* do requisito para claim comparativo público — a reprodução independente por
+terceiro segue em aberto. Enquanto isso valer, `production-ready` permanece proibido pelo `public-copy.md` § 3.
+Este é o único item cujo desfecho eleva **todos** os pilares de uma vez.
+
+**Definition of done:**
+
+- [ ] `knowledge-base/dogfood/manifest.md` criado com o **anchor scenario** declarado e justificado, conforme `rules/dogfood-golden-rule.md` § 1.
+- [ ] Status do anchor = `running` — usado pelo time em infraestrutura real, não em bancada sintética.
+- [ ] **≥ 3 evidências** com o frontmatter obrigatório (`scenario`/`date`/`operator`/`outcome`/`summary`), a mais recente dentro da janela de frescor (30 dias).
+- [ ] **≥ 1 failure story.** Um dogfood sem falhas é teatro — a ausência delas é sinal de que não se usou de verdade.
+- [ ] Evidência de **≥ 2 operadores distintos** (evita o "só uma pessoa sabe rodar").
+- [ ] `/dogfood` emite `EVIDENCE_SUFFICIENT`.
+
+**Dependencies:** nenhuma técnica. Depende de **decisão do owner** sobre qual cenário ancorar e de tempo de
+calendário — três evidências não se produzem numa tarde, por construção.
+
+**Risks:** (a) escolher um anchor confortável esvazia o gate: o cenário certo é o que **dói** — aquele em que
+o time depende do produto; (b) este item não é fechável por esforço de engenharia isolado, e tentar acelerá-lo
+com evidência sintética é exatamente a `cobertura-alegada-sem-execucao` que o repositório combate.
+
+**Prior art / referências:** `.claude/rules/dogfood-golden-rule.md`; `.claude/rules/public-copy.md` § 3–4;
+`wiki/benchmarks/m45-pareto-sift1m.md` (a metade faltante do claim público).
+
+## M176 — [ ] SymQG: promover com evidência ou aposentar (1 → 4, admite remoção)
+
+**Objective:** o `theodb_symqg` é `experimental — não recomendado como default` e foi **medido mais lento** que
+o índice existente: o e2 mediu o AM atual **2,6–3,9× mais rápido a recall casado**, com os dois access methods
+sobre a MESMA tabela. Um índice que não é recomendado e é mais lento não é um pilar em construção — é código
+mantido sem consumidor.
+
+**Definition of done:**
+
+- [ ] Decisão registrada em ADR: promover (exige lever medido que reverta o e2) ou **aposentar e remover**.
+- [ ] Se aposentar: `symqg_spike.rs` e a superfície removidos, redução do `.so` medida, e os conceitos da wiki marcados como aposentados com o motivo — o honest-negative do e2 **permanece**.
+- [ ] Nenhum caminho de código restante referencia o AM removido (gate de `symbol_fabrication` / `dead_code` do `/code-quality`).
+- [ ] CHANGELOG `[Unreleased]` + ADR.
+
+**Dependencies:** nenhuma. É o item mais barato dos sete e o de maior ganho de clareza por linha removida.
+
+**Risks:** (a) o índice pode estar em uso por alguém que o habilitou — varrer antes; (b) anti-sunk-cost, de novo:
+o e2 custou três artefatos e isso **não** é razão para manter.
+
+**Prior art / referências:** `wiki/features/17-indice-symqg.md`; `wiki/benchmarks/e2-symqg-inpg-verdict.md`,
+`e2-symqg-fastscan-verdict.md`, `e2-symqg-spike.md`.
+
+## Sequência do v7
+
+```
+independentes, paralelizáveis:   M170 (IA) · M171 (lakehouse) · M176 (SymQG) · M169 (colunar, já aberto)
+bancada compartilhada:           M172 (híbrida) ──▶ M173 (lexical)     [mesmos corpora, uma coleta]
+independente, mede-antes:        M174 (grafo)
+calendário + decisão do owner:   M175 (dogfood) — começar CEDO, é o de maior latência
+```
+
+**M175 primeiro em ordem de início, último em ordem de conclusão.** Ele não compete por tempo de engenharia com
+os outros e é o único que destrava o nível 5 — quanto antes o anchor for declarado, antes a janela de evidência
+começa a correr.
 
 ---
 
