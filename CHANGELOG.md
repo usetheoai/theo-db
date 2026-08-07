@@ -38,6 +38,16 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   no histórico — quem depender de um deles precisa recuperá-lo com `git show f7c7b93:docs/benchmarks/…`
 
 ### Added
+- **theodb:** **retratado o ganho de 9,4× da configuração de thread** — ele **não existe em CPU dedicada**
+  (1,00× a um cliente, 0,98× a oito, medido em droplet `c-8` ocioso). Era contenção da máquina compartilhada
+  do começo ao fim: sob disputa, `OMP_NUM_THREADS=1` deixa o ONNX com uma thread competindo com dez
+  containers, enquanto sem o limite ele abre várias e arranca fatia maior do escalonador. Numa máquina ociosa
+  não há disputa e uma thread já basta. A "maior alavanca medida do milestone" **não é alavanca**
+- **docs:** registrada a restrição de plataforma — o banco roda sob **CloudNativePG**. Isso não muda número
+  medido nenhum, mas muda o que eles significam: em Kubernetes o `limits.memory` do pod é rígido, e um pod que
+  o estoura é **morto**, não paginado. Os 1,7 GB por processo de um modelo multilíngue somados ao pod do banco
+  fariam um pico de concorrência derrubar **o banco**, não o embedding. A rota do serviço separado passa a ser
+  o padrão nativo da plataforma, com o teto de ~195 rps por instância virando parâmetro de `replicas`
 - **theodb:** **retratado o colapso sob sobrecarga** — re-executado num droplet de CPU dedicada, o servidor de
   embeddings **não colapsa nem vaza memória**: o throughput fica plano em ~195 rps de 8 a 128 clientes (contra a
   inversão para 26% do pico medida localmente) e o RSS cresce **16 MB em vez de 6,8 GB**. A explosão de memória

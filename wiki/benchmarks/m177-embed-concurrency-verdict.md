@@ -20,7 +20,32 @@ Fecha uma lacuna que o [ADR 0007](/decisions/0007-synchronous-per-row-model-http
 modelo, e decidiu, com honestidade explícita, que *"máquina de fila é complexidade essencial apenas
 depois de um gargalo medido"*. **O gargalo nunca havia sido medido.** Agora foi.
 
-# ⚠️ Retratação (2026-08-07, mesma data) — os números abaixo mediram a MINHA configuração, não o sistema
+# ⚠️⚠️ SEGUNDA retratação (2026-08-08) — o ganho de 9,4× também não existe
+
+A retratação abaixo trocou um erro por outro. Re-medido em **droplet `c-8` de CPU dedicada e ociosa**,
+mesmo servidor, mesmos clientes:
+
+| clientes | `OMP_NUM_THREADS=1` | sem limite | ganho |
+|---|---|---|---|
+| 1 | 97,5 rps · p50 10,1 ms | 97,9 rps · p50 9,8 ms | **1,00×** |
+| 8 | 156,2 rps · p50 49,0 ms | 152,5 rps · p50 47,8 ms | **0,98×** |
+
+**A configuração de thread não faz diferença nenhuma em hardware dedicado.** O 9,4× era, do começo ao
+fim, artefato de contenção de CPU da máquina compartilhada.
+
+**Mecanismo:** numa máquina disputada, `OMP_NUM_THREADS=1` dá ao ONNX uma única thread que compete com
+dez containers pelo escalonador; sem o limite, ele abre várias e coletivamente arranca uma fatia maior de
+CPU. Numa máquina ociosa não há disputa — e uma thread já basta, porque o modelo é pequeno e o gargalo
+não é paralelismo intra-operador.
+
+**Consequência prática:** a "maior alavanca medida do milestone" **não é alavanca**. A recomendação de
+não estrangular o servidor continua sensata como higiene, mas **não vale 9,4×, e provavelmente não vale
+nada** em máquina dedicada.
+
+*(Os 97,5 rps a 1 cliente aqui não são comparáveis aos 193 rps do teste de stress no mesmo hardware: um
+usa carga fixa por cliente, o outro carga sustentada por tempo, com textos de tamanhos diferentes.)*
+
+# ⚠️ Primeira retratação (2026-08-07) — os números abaixo mediram a MINHA configuração, não o sistema
 
 **O teto de ~20 rps era artefato meu.** O servidor foi iniciado com `OMP_NUM_THREADS=1` e
 `ORT_NUM_THREADS=1` — herdados do experimento do hop, onde equalizar threads entre os dois braços era

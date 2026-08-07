@@ -1,5 +1,6 @@
 # Referências
 
+* [Embeddings locais sob CloudNativePG — o que a plataforma de destino impõe](embedding-em-cloudnativepg-2026-08.md) - O alvo de deploy é um operador Kubernetes, e isso torna a rota do modelo embarcado pior e a do serviço separado natural — por mecanismo, não por preferência.
 * [Prior art — gerar embeddings localmente como extensão PostgreSQL instalável](embedding-local-como-extensao-2026-08.md) - A arquitetura já existe sob Apache 2.0 e MIT, e duas fontes independentes convergem no mesmo custo decisivo — memória por conexão, não licença nem peso do pacote.
 * [Handbook capítulo 19 — HNSW, da teoria à página de 8 KB](handbook-19-hnsw.md) - O capítulo-farol do currículo interno; vai do paper à matemática de camadas, à implementação em duas camadas, ao benchmark e ao gap honesto.
 * [Handbook de engenharia — o currículo técnico interno](handbook-overview.md) - Ensina engenharia de banco através do sistema real do projeto, com um padrão de cinco camadas e um contrato de honestidade que decide se um capítulo pertence ao coração ou ao roadmap.
