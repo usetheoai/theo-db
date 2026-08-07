@@ -38,6 +38,16 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   no histórico — quem depender de um deles precisa recuperá-lo com `git show f7c7b93:docs/benchmarks/…`
 
 ### Added
+- **theodb:** **fixado o teto de qualquer otimização de transporte no caminho de embed.** A decomposição por
+  camada mede que servidor Python + HTTP + TCP custam juntos **0,849 ms sobre 16,649 ms — 5,1%**; os outros
+  94,9% são o ONNX Runtime, que é nativo e executaria igual sob qualquer arquitetura. Isso limita **todas** as
+  técnicas de eliminação de transporte à mesma fatia: Unix socket, protocolo binário, memória compartilhada e
+  até embarcar o modelo no backend disputam 5,1%. Medido também o Unix domain socket contra o TCP loopback,
+  pareado e sem modelo no laço: ele vence com **p=0,0000** e ganha **33 microssegundos** — 0,2% do pedido. É o
+  caso didático de significância estatística sem relevância prática, e reportar apenas o p seria verdadeiro e
+  enganoso. Para comparação, as alavancas fora do transporte já medidas neste milestone valem 9,4× (configuração
+  de thread) e 3,7× (escolha de modelo), contra 1,05× de eliminar todo o transporte
+
 - **theodb:** **perfilado o servidor de embeddings, e a maior alavanca de performance é uma flag** — não uma
   reescrita. O flamegraph (`py-spy`, 4 091 amostras sob 8 clientes) mostra que **98,6% do tempo de requisição
   é `InferenceSession.run`**; HTTP, JSON e tokenização somam ~1,4%, de modo que **não há overhead a cortar no
