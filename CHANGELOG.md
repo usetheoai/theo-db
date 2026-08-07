@@ -38,7 +38,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   no histórico — quem depender de um deles precisa recuperá-lo com `git show f7c7b93:docs/benchmarks/…`
 
 ### Added
-- **theodb:** **o servidor de embeddings colapsa sob sobrecarga**, achado do primeiro teste de stress do
+- **theodb:** **retratado o colapso sob sobrecarga** — re-executado num droplet de CPU dedicada, o servidor de
+  embeddings **não colapsa nem vaza memória**: o throughput fica plano em ~195 rps de 8 a 128 clientes (contra a
+  inversão para 26% do pico medida localmente) e o RSS cresce **16 MB em vez de 6,8 GB**. A explosão de memória
+  era efeito de **segunda ordem** da contenção de CPU: sob disputa cada pedido demora 3× mais, mais conexões
+  ficam abertas ao mesmo tempo, e mais arenas do ONNX são alocadas de uma vez. Sobrevive apenas o limite de
+  aceitação de conexão — 13% de recusa a 128 clientes mesmo no dedicado. O achado original segue abaixo,
+  preservado, porque foi ele que motivou o teste em máquina limpa
+- **theodb:** ~~**o servidor de embeddings colapsa sob sobrecarga**~~ (RETRATADO acima), achado do primeiro teste de stress do
   milestone. Além do pico de 65 rps (32 clientes), mais carga produz **menos** trabalho: 26,5 rps a 64 clientes
   e **17,1 rps a 128, com 19,7% de recusa de conexão** — congestion collapse, não saturação. Pior, o RSS do
   servidor cresce de 161 MB para **6 932 MB e não é devolvido** quando a carga cessa: com um cliente e a

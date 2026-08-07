@@ -1,22 +1,59 @@
 ---
 type: Measurement
-title: m177 stress — o servidor de embeddings COLAPSA sob sobrecarga e retém 7 GB depois dela
-description: Empurrado além da saturação, o throughput cai a 26% do pico com 19,7% de recusa de conexão, e a memória cresce 43× sem ser devolvida — um modo de falha que o teste de carga curta não revelava.
-resource: benchmarks/artifacts/m177/stress.json
-tags: [benchmark, m177, embedding, stress, colapso, memoria, thread-per-connection, modo-de-falha, honest-negative]
+title: m177 stress — o colapso e o vazamento eram da máquina; em CPU dedicada o servidor satura limpo
+description: Re-executado em droplet dedicado, o throughput fica plano em ~195 rps e o RSS cresce 16 MB em vez de 6,8 GB — a explosão de memória era efeito de segunda ordem da contenção de CPU.
+resource: benchmarks/artifacts/m177/stress-dedicated-droplet.json
+tags: [benchmark, m177, embedding, stress, retratacao, cpu-dedicada, memoria, contencao, honest-negative]
 milestone: M177
 generated: { by: claude-code/opus-5, at: 2026-08-08T00:15:00Z }
 sources:
-  - id: stress
+  - id: dedicado
+    resource: benchmarks/artifacts/m177/stress-dedicated-droplet.json
+    title: Stress em droplet c-8 dedicado (8 vCPU CPU-Optimized, 16 GB, ocioso) — a medição válida
+  - id: local
     resource: benchmarks/artifacts/m177/stress.json
-    title: Stress 8→128 clientes, 20 s por nível, com recuperação pós-pico
+    title: Stress local em máquina compartilhada — preservado, retratado
 ---
 
-Os testes anteriores deste milestone mediram **carga curta até a saturação**. Este empurra **além** dela
-e procura o modo de falha. O resultado muda o veredito operacional do pilar de embeddings: o servidor
-**não degrada graciosamente — ele colapsa**, e não devolve a memória depois.
+Os testes anteriores deste milestone mediram **carga curta até a saturação**. Este empurrou **além** dela
+para achar o modo de falha — e acabou achando um defeito no próprio ambiente de medição. **Leia a
+retratação abaixo antes de qualquer número deste documento.**
 
-# O colapso
+# ⚠️ RETRATAÇÃO (2026-08-08) — as duas patologias eram da máquina, não do servidor
+
+Re-executado num **droplet DigitalOcean `c-8` dedicado** (8 vCPU CPU-Optimized, 16 GB, ocioso), mesmo
+script, mesmo modelo, mesma duração. **Nem o colapso nem a explosão de memória se reproduzem:**
+
+| clientes | LOCAL rps · erro · RSS | **DEDICADO rps · erro · RSS** |
+|---|---|---|
+| 8 | 62,3 · 0,0% · 1 125 MB | **193,5 · 0,0% · 291 MB** |
+| 32 | 65,0 · 0,5% · 3 158 MB | **197,2 · 0,1% · 293 MB** |
+| 64 | **26,5** · 3,7% · 5 081 MB | **197,1** · 3,5% · **295 MB** |
+| 128 | **17,1** · 19,7% · **6 932 MB** | **191,3** · 13,0% · **296 MB** |
+
+**Não há inversão de throughput.** No dedicado ele fica **plano em ~193–197 rps** de 8 a 128 clientes —
+saturação limpa, exatamente a degradação graciosa que a seção abaixo dizia não existir. O que localmente
+caiu para 26% do pico, aqui não cai.
+
+**Não há vazamento de memória.** O RSS vai de 280 MB a 296 MB — **16 MB de crescimento**, contra os
+6 771 MB (43×) medidos localmente. A hipótese de "arena de ONNX por thread não devolvida" **está
+refutada**: são 33 threads nos dois casos.
+
+**O mecanismo real, e ele é de segunda ordem:** sob contenção de CPU, cada pedido demora mais (p50 de
+125 ms contra 38 ms), então mais conexões ficam simultaneamente abertas, então mais threads existem ao
+mesmo tempo, então mais arenas são alocadas de uma vez. A explosão de memória era **consequência** da
+lentidão por contenção, não causa independente. Numa máquina que responde rápido, a concorrência
+instantânea nunca chega ao ponto de alocar as arenas.
+
+**O que sobrevive:** os erros de conexão. Mesmo no dedicado há **13,0% de recusa a 128 clientes** (3,5% a
+64). Existe um limite de aceitação de conexão, e ele é real — só não vem acompanhado de colapso nem de
+vazamento.
+
+**O que isto custou para descobrir:** um droplet dedicado de $0,25/hora. A seção abaixo permanece sem
+edição porque foi ela que motivou o teste — e porque é o registro de que **três das quatro conclusões
+mais graves deste milestone vieram de defeito de instrumento**, não do sistema medido.
+
+# O colapso (medição LOCAL — retratada acima)
 
 8 → 128 clientes, 20 s sustentados por nível, todo pedido contabilizado:
 
