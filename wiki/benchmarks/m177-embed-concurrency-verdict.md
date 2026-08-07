@@ -20,7 +20,32 @@ Fecha uma lacuna que o [ADR 0007](/decisions/0007-synchronous-per-row-model-http
 modelo, e decidiu, com honestidade explícita, que *"máquina de fila é complexidade essencial apenas
 depois de um gargalo medido"*. **O gargalo nunca havia sido medido.** Agora foi.
 
-# O número
+# ⚠️ Retratação (2026-08-07, mesma data) — os números abaixo mediram a MINHA configuração, não o sistema
+
+**O teto de ~20 rps era artefato meu.** O servidor foi iniciado com `OMP_NUM_THREADS=1` e
+`ORT_NUM_THREADS=1` — herdados do experimento do hop, onde equalizar threads entre os dois braços era
+*necessário* para a comparação ser justa. Carregar essa flag para um teste de **concorrência** estrangulou
+o ONNX a um núcleo numa máquina de doze. Re-medido sem a restrição:
+
+| clientes | com `OMP=1` (publicado antes) | **sem restrição (real)** | ganho |
+|---|---|---|---|
+| 1 | 3,5 rps · p50 298 ms | **32,9 rps · p50 30,3 ms** | **9,4×** |
+| 4 | 11,1 rps | **55,6 rps** | 5,0× |
+| 8 | 19,1 rps · p99 733 ms | **60,9 rps · p99 223 ms** | 3,2× |
+| 16 | 20,1 rps · p99 1 887 ms | **61,1 rps · p99 1 358 ms** | 3,0× |
+
+**A saturação real é ~61 rps, não ~20 rps.** Isso também resolve a divergência que a seção § Limites
+honestos declarava como não investigada: a p50 de ~300 ms contra os 41–57 ms da
+[fase 1](/benchmarks/m177-hop-vs-residencia-verdict.md) **era a flag**, e os 30,3 ms agora reconciliam.
+
+**O que sobrevive:** a *forma* da curva. Ainda satura entre 8 e 16 clientes, e a p99 ainda degrada (223 →
+1 358 ms) em troca de 0,3% de throughput. O teto mudou de valor, não de existência.
+
+**A lição de método:** uma flag copiada de um experimento anterior, correta lá, invalidou o experimento
+seguinte. As seções originais ficam abaixo sem edição, porque foram elas que fundamentaram a primeira
+leitura.
+
+# O número (medição original — estrangulada, ver retratação acima)
 
 Servidor de embeddings local (ONNX, `bge-small-en-v1.5`), 10 requisições por cliente, warm-up descartado:
 
@@ -96,13 +121,61 @@ O caminho de consulta **precisa** ser síncrono, e por isso a assincronia não �
 resolve o caminho de consulta é o que este artefato mediu: teto de throughput do servidor e custo de
 conexão — não uma máquina de fila.
 
+# O flamegraph: 99% do tempo de requisição é o modelo, e não há gordura a cortar
+
+Perfilado com `py-spy` (4 091 amostras a 99 Hz, 8 clientes concorrentes) — artefato:
+`benchmarks/artifacts/m177/flamegraph-embed-server.svg`.
+
+| frame | % do total amostrado | % **do caminho de requisição** |
+|---|---|---|
+| `do_POST` (todo o tratamento HTTP) | 19,02% | 100% |
+| ├─ `onnx_embed` | 18,75% | **98,6%** |
+| │   └─ `run` (InferenceSession) | 18,75% | 98,6% |
+| └─ `tokenize` | 0,17% | 0,9% |
+| HTTP + JSON + serialização (resto) | ~0,27% | **~1,4%** |
+
+**Não existe overhead a otimizar no servidor.** Parsing HTTP, desserialização JSON, tokenização e
+serialização da resposta somam ~1,4% do tempo. O gargalo **é o modelo**, no sentido literal: a chamada
+`InferenceSession.run` é praticamente todo o custo.
+
+Isso fecha a pergunta "dá para melhorar sem perder performance do modelo?" com uma resposta precisa: **no
+código do servidor, não há o que melhorar** — não porque esteja otimizado, mas porque ele quase não faz
+nada além de chamar o ONNX.
+
+# A alavanca que existe, e ela é gratuita em qualidade
+
+A configuração de thread deu **9,4× de throughput** — e a pergunta óbvia é se isso custou precisão
+numérica, já que paralelismo altera a ordem de redução em ponto flutuante (IEEE-754 não é associativo — a
+mesma classe de risco que o M169 registra para `sum(float8)`).
+
+**Medido, não presumido.** Mesmos três textos, embedados sob as duas configurações:
+
+| | resultado |
+|---|---|
+| vetores byte-idênticos | **3 de 3** |
+| maior diferença absoluta em qualquer dimensão | **0,000e+00** |
+| similaridade de cosseno mínima entre os pares | **1,0000000000** |
+
+**Zero divergência.** O ganho de 9,4× não custa um bit de qualidade — é o mesmo modelo, os mesmos pesos,
+a mesma saída. Instrumento: `benchmarks/m177_thread_equivalence.py`.
+
+As demais alavancas **não** são gratuitas e ficam fora deste artefato: quantização int8 do modelo (troca
+qualidade por velocidade — o acervo já mede que [quantização compra memória, não QPS](/features/19-quantizacao-vetorial.md)),
+modelo menor (o `MiniLM-multilingual` faz 16,0 ms contra 59,8 ms do `e5-large`, mas com qualidade
+diferente e ainda não medida), e replicar o processo (custo de operação, não de qualidade).
+
 # Correções que estes números indicam
 
-1. **Reuso de conexão no cliente HTTP.** Barato em loopback (~0,6 ms/chamada), **decisivo contra
+1. **Não estrangular o servidor de embeddings.** A maior alavanca medida — **9,4×** — e a mais barata:
+   não passar `OMP_NUM_THREADS=1`. Byte-idêntico na saída. Pertence à documentação de operação, e o
+   `sql-embeddings.md` hoje não diz nada sobre threads.
+2. **Reuso de conexão no cliente HTTP.** Barato em loopback (~0,6 ms/chamada), **decisivo contra
    provedor remoto** (~32 ms/chamada). Não muda semântica.
-2. **Concorrência do servidor de embeddings é um parâmetro de capacidade**, não um detalhe: ~20 rps por
-   instância nesta máquina. Escalar é replicar o processo, e isso pertence à documentação de operação.
-3. **A fila assíncrona não é prioridade para a consulta** — só para a ingestão, onde já existe.
+3. **Capacidade é ~61 rps por instância** nesta máquina, com a cauda degradando acima de 8 clientes.
+   Escalar é replicar o processo — operação, não arquitetura.
+4. **A fila assíncrona não é prioridade para a consulta** — só para a ingestão, onde já existe.
+5. **Otimizar o servidor não paga.** O flamegraph mostra ~1,4% fora do modelo; qualquer reescrita do
+   transporte disputa esse 1,4%.
 
 # Limites honestos desta medição
 

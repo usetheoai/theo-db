@@ -38,6 +38,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   no histórico — quem depender de um deles precisa recuperá-lo com `git show f7c7b93:docs/benchmarks/…`
 
 ### Added
+- **theodb:** **perfilado o servidor de embeddings, e a maior alavanca de performance é uma flag** — não uma
+  reescrita. O flamegraph (`py-spy`, 4 091 amostras sob 8 clientes) mostra que **98,6% do tempo de requisição
+  é `InferenceSession.run`**; HTTP, JSON e tokenização somam ~1,4%, de modo que **não há overhead a cortar no
+  servidor**. Em compensação, rodá-lo sem `OMP_NUM_THREADS=1` dá **9,4× de throughput** (3,5 → 32,9 rps a um
+  cliente) e derruba a p50 de 298 ms para 30,3 ms, com saturação em ~61 rps em vez de ~20. O ganho foi
+  verificado como **gratuito em qualidade**: os vetores das duas configurações são byte-idênticos (diferença
+  máxima 0,000e+00, cosseno 1,0000000000), o que era obrigatório checar porque paralelismo altera a ordem de
+  redução em ponto flutuante
 - **theodb:** **medido o gargalo que o ADR 0007 registrou em junho e deixou explicitamente para depois** — o
   caminho de embed sob concorrência. O servidor de embeddings **satura em ~20 rps**: de 8 para 16 clientes o
   throughput sobe 5% enquanto a **p99 quadruplica** (469 → 1 887 ms), atingindo 5,7× de escala num ideal de
