@@ -35,7 +35,7 @@ import psycopg2  # noqa: E402
 import m169_baseline_summarize as summ  # noqa: E402
 from run_m128_clickbench import _load_queries, plan_shows_agg_pushdown  # noqa: E402
 
-# Matched to the M162 run (`docs/benchmarks/m162-100m-gap-verdict.md:10`). The "19/43" this milestone measures
+# Matched to the M162 run (`wiki/benchmarks/m162-100m-gap-verdict.md:10`). The "19/43" this milestone measures
 # against is only comparable under the SAME ceiling — the harness default of 60 s would mark nearly everything
 # `timeout` and produce a number that means nothing.
 DEFAULT_TIMEOUT_S = 300

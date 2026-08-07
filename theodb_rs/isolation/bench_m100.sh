@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # M100 D2 — honest OLAP benchmark for the DataFusion vectorized CustomScan aggregate. Emits JSON (stdout) →
-# docs/benchmarks/m100-datafusion-executor.{md,json}. MEASURES a `count(*), sum(measure)` aggregate over a WIDE
+# benchmarks/artifacts/m100-datafusion-executor.{md,json}. MEASURES a `count(*), sum(measure)` aggregate over a WIDE
 # columnar table three ways on the SAME data: (1) VECTORIZED — theodb.enable_columnar_agg=on (the M100 CustomScan
 # decodes only the projected column into Arrow + runs a DataFusion aggregate); (2) M99 SEQSCAN — GUC off (the M99
 # row-at-a-time TAM scan: decode all columns + form heap tuples + PG aggregate); (3) HEAP — a row-store control.

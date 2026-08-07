@@ -16,7 +16,7 @@
 
 **Tese central:** o AlloyDB Omni provou que existe demanda por "PostgreSQL + IA + analytics empacotados, rodando em qualquer lugar" — mas ele é **proprietário e pago ($40/vCPU/mês)**. O TheoDB ocupa exatamente essa lacuna sendo **100% open-source**, sem licença por vCPU, sem lock-in, com a mesma técnica de base (Postgres + extensões + pgvector customizado).
 
-**North Star (mandato do CTO, 2026-06-27):** TheoDB deve ser **igual ou superior ao AlloyDB** para usuários OSS/on-prem (Opção α — paridade de capacidades/resultados + superioridade estrutural OSS; superioridade de performance no pilar vetorial **comprovada por benchmark reproduzível**). Honra D1–D7: columnar (lakehouse, D2) e HA (Patroni) são apostas **diferentes e competitivas**, não cópias internas do AlloyDB (paridade interna *literal* exigiria reabrir D1/D2/D7). Fonte de verdade LOCKED: [`docs/adr/0002-north-star-equal-or-superior-to-alloydb.md`](./docs/adr/0002-north-star-equal-or-superior-to-alloydb.md).
+**North Star (mandato do CTO, 2026-06-27):** TheoDB deve ser **igual ou superior ao AlloyDB** para usuários OSS/on-prem (Opção α — paridade de capacidades/resultados + superioridade estrutural OSS; superioridade de performance no pilar vetorial **comprovada por benchmark reproduzível**). Honra D1–D7: columnar (lakehouse, D2) e HA (Patroni) são apostas **diferentes e competitivas**, não cópias internas do AlloyDB (paridade interna *literal* exigiria reabrir D1/D2/D7). Fonte de verdade LOCKED: [`wiki/decisions/0002-north-star-equal-or-superior-to-alloydb.md`](./wiki/decisions/0002-north-star-equal-or-superior-to-alloydb.md).
 
 ---
 
@@ -215,7 +215,7 @@ CLI de gestão, **MCP server** para acesso seguro de agentes de IA, integraçõe
 
 ## 9. Requisitos não-funcionais (metas)
 
-> **Honestidade:** estas são **metas de design / SLOs alvo**, não claims. Cada uma exige benchmark reproduzível e publicado (`docs/benchmarks/`) antes de virar afirmação pública.
+> **Honestidade:** estas são **metas de design / SLOs alvo**, não claims. Cada uma exige benchmark reproduzível e publicado (`wiki/benchmarks/`) antes de virar afirmação pública.
 
 - **Compatibilidade:** 100% dos testes de regressão do PostgreSQL upstream passam na distribuição.
 - **Performance vetorial (meta):** latência e recall competitivos com pgvector/HNSW em datasets de referência (alvo a definir com benchmark; ex.: p95 sob limite X em N vetores com recall ≥ Y%).
@@ -344,7 +344,7 @@ Modelo open governance com **Developer Certificate of Origin** (sign-off por com
 ### D7 — Control plane managed: **fora do v1; porta aberta via operador K8s**
 v1 = engine downloadable OSS (decisão já firmada). Um managed **não** será construído agora (YAGNI), mas a arquitetura mantém a porta aberta: o **operador Kubernetes (P8)** é o substrato natural de um eventual managed. Reavaliar pós-tração.
 
-> Estas decisões devem ser promovidas a ADRs formais (`docs/adr/0001..0007`) quando a estrutura de engenharia for criada. Mudá-las exige novo ADR + entrada no CHANGELOG.
+> Estas decisões devem ser promovidas a ADRs formais (`wiki/decisions/0001..0007`) quando a estrutura de engenharia for criada. Mudá-las exige novo ADR + entrada no CHANGELOG.
 
 ---
 

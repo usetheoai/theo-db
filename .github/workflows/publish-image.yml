@@ -32,7 +32,7 @@ on:
       # Adicionados em 2026-07-27: nada aqui entra na imagem (conferido nos `COPY` do Dockerfile —
       # só `theodb_rs/`, `sql/`, `*.control`). O commit `3313226`, que tocou só workflows e o
       # CHANGELOG, disparou um build+push completo de imagem idêntica.
-      - 'docs/**'
+      - 'wiki/**'
       - 'knowledge-base/**'
       - 'agents/**'
       - '.review-runs/**'

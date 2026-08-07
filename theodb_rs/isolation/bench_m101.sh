@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # M101 D2 — honest HTAP benchmark for the heap-authoritative Arrow cache. Emits JSON (stdout) →
-# docs/benchmarks/m101-arrow-cache.{md,json}. In ONE persistent session (the cache is per-backend): builds the
+# wiki/benchmarks/archive/m101-arrow-cache.md e benchmarks/artifacts/m101-arrow-cache.json. In ONE persistent session (the cache is per-backend): builds the
 # cache, then measures `count(*), sum(measure)` over a HEAP table the vectorized cache way (GUC on, reuse the Arrow
 # cache — no heap seqscan) vs the native heap aggregate (GUC off, heap seqscan + PG aggregate), same data. The gain
 # claim is CACHE vs NATIVE-HEAP for a repeated read-heavy analytical query. Non-interference (OLTP): the cache is

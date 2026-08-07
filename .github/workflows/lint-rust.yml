@@ -17,7 +17,7 @@ on:
     # em 95 de 100 runs entre 24 e 27/07. A economia de fila que #187 buscava se expressa DENTRO do
     # `paths:`, via padrão negado — um filtro só, sem conflito.
     #
-    # `.claude/**` e `docs/**` já estão fora por construção (não casam nenhum padrão positivo).
+    # `.claude/**` e `wiki/**` já estão fora por construção (não casam nenhum padrão positivo).
     # O `!**/*.md` é guarda de FUTURO, não economia de hoje: em 2026-07-27 não existe nenhum `.md`
     # sob `theodb_rs/`, mas `theodb_rs/**` engoliria um `theodb_rs/README.md` no dia em que alguém
     # criar um — e recompilar pgrx por causa de um README é exatamente o desperdício que #187 atacava.

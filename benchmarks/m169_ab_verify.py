@@ -21,7 +21,7 @@ O que ele REUSA de `run_m128_clickbench` (Regra 9 — não reinventar o oráculo
 
 Uso:
     PGDATABASE=postgres python3 benchmarks/m169_ab_verify.py --queries 20,32,33,34 \\
-        --timeout-ms 3600000 --out docs/benchmarks/m169-ab-verify.md
+        --timeout-ms 3600000 --out wiki/benchmarks/m169-ab-verify.md
 """
 from __future__ import annotations
 

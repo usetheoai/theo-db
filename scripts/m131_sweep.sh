@@ -1,7 +1,7 @@
 #!/bin/bash
 # M131 (#135) — EXPLAIN sweep over the 43 ClickBench queries with the columnar-aggregate pushdown ON.
 #
-# Produces the artifact behind `docs/benchmarks/m131-columnar-agg-accelerated.md`: per-query EXPLAIN latency, whether
+# Produces the artifact behind `wiki/benchmarks/m131-columnar-agg-accelerated.md`: per-query EXPLAIN latency, whether
 # the query hung (the #135 defect was an EXPLAIN-deparse infinite recursion that `statement_timeout` cannot
 # interrupt), and whether the `theodb_columnar_agg` CustomScan engaged.
 #
@@ -11,7 +11,7 @@
 # Usage:
 #   PSQL_BIN=/path/to/psql PGPORT=28900 \
 #   QUERIES=benchmarks/clickbench/theodb/queries.sql \
-#   OUT=docs/benchmarks/m131-explain-sweep.json \
+#   OUT=benchmarks/artifacts/m131-explain-sweep.json \
 #   bash scripts/m131_sweep.sh
 #
 # Exits non-zero if ANY query still hangs (a #135 regression gate).
@@ -21,7 +21,7 @@ PSQL_BIN="${PSQL_BIN:-psql}"
 PGPORT="${PGPORT:-28900}"; PGHOST="${PGHOST:-localhost}"
 PGUSER="${PGUSER:-postgres}"; PGDATABASE="${PGDATABASE:-postgres}"
 QUERIES="${QUERIES:-benchmarks/clickbench/theodb/queries.sql}"
-OUT="${OUT:-docs/benchmarks/m131-explain-sweep.json}"
+OUT="${OUT:-benchmarks/artifacts/m131-explain-sweep.json}"
 TIMEOUT_S="${TIMEOUT_S:-20}"
 BOX="${BOX:-self-hosted (NOT canonical hardware)}"
 

@@ -5,7 +5,7 @@ Builds BOTH HNSW index-AMs on the SAME corpus with MATCHED build params (m=16, e
 single-thread build), sweeps a SHARED ef_search grid on each (session GUC — no rebuild), runs >=3 timed
 passes per operating point → **mean ± std** QPS + recall vs exact GT, then computes the honest
 matched-recall margin via Pareto interpolation (`m45_pareto.pareto_margin_verdict`). This is the rigor the
-M42 single-run signal (`docs/benchmarks/sift1m-carrier-verdict.md`) lacked (public-copy.md §4 half 1).
+M42 single-run signal (`wiki/benchmarks/sift1m-carrier-verdict.md`) lacked (public-copy.md §4 half 1).
 
 Reuses `theodb_bench.{dataset,db,recall}` by import (Rule 9 — no harness rebuild); does NOT touch
 `theodb_bench/harness.py` (which reports best-of-N, the very statistic we must NOT use here).

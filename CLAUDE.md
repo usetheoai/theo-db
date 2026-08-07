@@ -64,22 +64,22 @@ quanto tempo investimos. São dois eixos independentes:
 ## North Star — igualar ou superar o AlloyDB (Opção α)
 
 > **Mandato do CTO (2026-06-27):** entregar um banco **igual ou superior ao AlloyDB**. Fonte de verdade
-> LOCKED: [`docs/adr/0002-north-star-equal-or-superior-to-alloydb.md`](./docs/adr/0002-north-star-equal-or-superior-to-alloydb.md).
+> LOCKED: [`wiki/decisions/0002-north-star-equal-or-superior-to-alloydb.md`](./wiki/decisions/0002-north-star-equal-or-superior-to-alloydb.md).
 
 **Como (Opção α):** igualar/superar o AlloyDB em **capacidades e resultados** para usuários
 OSS/on-prem/model-agnostic; **vencer já hoje** em abertura, custo, portabilidade e independência de modelo;
-buscar **superioridade de performance no pilar vetorial comprovada por benchmark** (`docs/benchmarks/`).
+buscar **superioridade de performance no pilar vetorial comprovada por benchmark** (`wiki/benchmarks/`).
 
 - **Measurement-first:** o harness de recall@k reproduzível **existe** (`benchmarks/theodb_bench/`) e é
   pré-requisito de qualquer claim de performance. Estado medido: SIFT1M vs ScaNN (M33 — gap ~25× QPS) e vs
-  pgvector hnsw (M45 — **paridade** recall×QPS). Nenhuma afirmação de performance sem artefato em `docs/benchmarks/`.
-- **VEREDITO MEDIDO FINAL do pilar vetorial (M73, 2026-07-10, `docs/adr/0035` + `docs/benchmarks/m73-headtohead-verdict.md`):**
+  pgvector hnsw (M45 — **paridade** recall×QPS). Nenhuma afirmação de performance sem artefato em `wiki/benchmarks/`.
+- **VEREDITO MEDIDO FINAL do pilar vetorial (M73, 2026-07-10, `wiki/decisions/0035` + `wiki/benchmarks/m73-headtohead-verdict.md`):**
   **paridade own-code de recall classe-pgvector ALCANÇADA** (M60/M69/M70); **throughput multi-cliente
   competitivo-a-superior** vs pgvector no regime 128d clusterizado (M72, +11% QPS a recall casado); **superioridade
   de QPS vetorial sobre o ScaNN/AlloyDB MEDIDA como NÃO-ALCANÇÁVEL** por extensão PG permissiva (gap ~25-44× @ 0.99 é
   de paradigma — AH-LUT anisotrópico + não pagar o imposto MVCC/WAL; RaBitQ, melhor quantizador permissivo, dá
   memória não QPS — M74/ADR-0036). Posicionamento permitido: "paridade recall + memória billion-scale + AI-native/
-  HTAP/aberto"; **jamais** "mais rápido que o AlloyDB no vetor". Reposicionamento formal do North Star: `docs/adr/0033`
+  HTAP/aberto"; **jamais** "mais rápido que o AlloyDB no vetor". Reposicionamento formal do North Star: `wiki/decisions/0033`
   (proposto, decisão do owner — o mandato LOCKED ADR-0002 permanece até assinatura).
 - **Fork é condicional** ao benchmark de gatilho (D3); não forkar antes de medir (anti-sunk-cost).
 - **Columnar / lakehouse (D2)** é uma aposta **diferente e competitiva**, não cópia do AlloyDB — forçado pela
@@ -107,7 +107,7 @@ buscar **superioridade de performance no pilar vetorial comprovada por benchmark
 4. **Não reinvente.** Compomos sobre PostgreSQL + extensões maduras (Regra 9). Código próprio
    só onde nenhuma peça OSS permissiva resolve.
 5. **Performance é claim, não opinião.** Nenhuma afirmação de performance ("Nx mais rápido")
-   sem benchmark reproduzível e publicado em `docs/benchmarks/` (`../.claude/rules/public-copy.md`).
+   sem benchmark reproduzível e publicado em `wiki/benchmarks/` (`../.claude/rules/public-copy.md`).
    Metas de design são marcadas como metas, não como fatos.
 6. **100% wire-compatible com PostgreSQL é gate**, não feature opcional.
 7. **Honestidade extrema (Regra 3).** Diga quando algo é incerto, quando um trade-off existe
@@ -170,19 +170,19 @@ precedente registrado em algum lugar que não disparou.
 | `Measurement` | "isso já foi medido?" | **antes de publicar qualquer número** — ele pode já existir |
 | `Honest Negative` | "isso já foi tentado e refutado?" | **antes de propor aposta técnica ou milestone** |
 
-**Escrita obrigatória.** Vira conceito: todo número publicado em `docs/benchmarks/**`; toda alegação minha
+**Escrita obrigatória.** Vira conceito: todo número publicado em `wiki/benchmarks/**`; toda alegação minha
 derrubada por medição; toda aposta medida e refutada; toda propriedade de plataforma aprendida por falha; todo
 método que passou a ser exigido. **Atualize o conceito existente** — nunca crie um segundo arquivo para a mesma
 classe. Registre a mudança em `okf/log.md`.
 
 **NÃO vira conceito** (e escrever enchimento para satisfazer o gate é pior que não escrever): rastro de execução
-— isso é `knowledge-base/` do ciclo; decisão de arquitetura — isso é ADR em `docs/adr/`; bug corrigido sem lição
+— isso é `knowledge-base/` do ciclo; decisão de arquitetura — isso é ADR em `wiki/decisions/`; bug corrigido sem lição
 generalizável.
 
 **Verificação.** `python3 .claude/scripts/check_okf.py` valida quatro invariantes estruturais (`type` presente,
 links internos resolvem, índices sincronizados, arquivos-raiz existem) — exit `0`/`1`/`2`. O
 `hooks/stop-validation.sh` **BLOQUEIA** em dois casos determinísticos: bundle inválido, e número publicado em
-`docs/benchmarks/**` sem conceito `Measurement` tocado. O `hooks/userpromptsubmit-inject.sh` injeta o ponteiro a
+`wiki/benchmarks/**` sem conceito `Measurement` tocado. O `hooks/userpromptsubmit-inject.sh` injeta o ponteiro a
 cada turno.
 
 **Limite honesto:** nenhum hook prova que eu li. A injeção é o mecanismo mais forte disponível; os gatilhos de
@@ -196,5 +196,5 @@ o mesmo `cobertura-alegada-sem-execucao` que o bundle documenta.
 - Commits **sem** trailer `Co-Authored-By` (política do projeto — `../.claude/rules/cycle-review.md`).
 - Trabalho não-trivial passa pelos ciclos: `cycle-discover` → `cycle-plan` → `cycle-implement`
   → `cycle-code-quality` → `cycle-review` (ver `../.claude/rules/`).
-- Decisões arquiteturais viram ADRs em `docs/adr/` (a estrutura existe — 12 ADRs, incluindo D1–D7
-  formalizados em `docs/adr/0006`); toda nova decisão de arquitetura abre um ADR.
+- Decisões arquiteturais viram ADRs em `wiki/decisions/` (a estrutura existe — 12 ADRs, incluindo D1–D7
+  formalizados em `wiki/decisions/0006`); toda nova decisão de arquitetura abre um ADR.

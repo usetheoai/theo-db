@@ -18,7 +18,7 @@ use crate::am::options::{DEFAULT_LISTS, lists_from_relation};
 /// fundamentalmente anomalo). Bissecao (`THEODB_HNSW_PARALLEL_THRESHOLD`): sequencial ≈ paralelo → NAO e contencao.
 /// LEAD FORTE p/ o M60: o recall e NAO-MONOTONICO em `ef_search` (melhor no MENOR ef) → o teto e provavelmente um
 /// BUG NO SCAN (`am/hnsw_page.rs` traverse — beam search/heap), comum aos dois builds, e nao a conectividade do
-/// grafo. Investigar o traverse primeiro no M60. Ver `docs/adr/0018` + `docs/benchmarks/m57-sbq-superiority.md`.
+/// grafo. Investigar o traverse primeiro no M60. Ver `wiki/decisions/0018` + `wiki/benchmarks/m57-sbq-superiority.md`.
 pub(crate) const HNSW_M: usize = 16;
 pub(crate) const HNSW_EF_CONSTRUCTION: usize = 64;
 const BUILD_SEED: u64 = 42;
@@ -186,7 +186,7 @@ pub extern "C-unwind" fn ambuild(
         let ntuples_built = corpus.len();
         // M89 (Roadmap v7 — ambuild streaming Increment 1): MOVE the owned corpus into the index (`build_owned`)
         // instead of cloning it — eliminates the redundant 2nd full copy the M88 OOM was partly made of
-        // (`docs/adr/0038`). The AQ/SQ8 encode below reads the vectors back from `idx` (no `corpus` / `corpus_vecs`
+        // (`wiki/decisions/0038`). The AQ/SQ8 encode below reads the vectors back from `idx` (no `corpus` / `corpus_vecs`
         // clone). Byte-identical build.
         let idx = IvfflatIndex::build_owned(corpus, lists, metric, BUILD_SEED)
             .with_soar_spill(soar_lambda);

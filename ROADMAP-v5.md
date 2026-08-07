@@ -7,22 +7,22 @@
 >
 > Herda TODAS as travas: engine PostgreSQL mantido (wire-compat), **measurement-first (ADR 0002 — nada é
 > "concluído" sem paridade/benchmark medido; nenhuma afirmação de performance sem artefato em
-> `docs/benchmarks/`)**, licenças permissivas (D1 — Apache/MIT/BSD/PostgreSQL), Regra 9 (não reinventar peça
+> `wiki/benchmarks/`)**, licenças permissivas (D1 — Apache/MIT/BSD/PostgreSQL), Regra 9 (não reinventar peça
 > madura), **honestidade extrema (Regra 3/5 — honest-negative é um resultado válido, não um fracasso)**.
 
 ## Contexto (o que está MEDIDO — para não prometer o que a régua não sustenta)
 
-O North Star (`docs/adr/0002`) é **igualar ou superar o AlloyDB**. AlloyDB é GCP-managed → o baseline
+O North Star (`wiki/decisions/0002`) é **igualar ou superar o AlloyDB**. AlloyDB é GCP-managed → o baseline
 sancionado é o **ScaNN OSS** (o algoritmo do índice vetorial do AlloyDB, arXiv:1908.10396). Estado medido:
 
 | Eixo | Estado (medido) | Artefato |
 |---|---|---|
-| **Recall-parity vs pgvector** | ✅ paridade a régua (SIFT1M) | `docs/benchmarks/m45-pareto-sift1m.*` |
+| **Recall-parity vs pgvector** | ✅ paridade a régua (SIFT1M) | `wiki/benchmarks/m45-pareto-sift1m.*` |
 | **Recall≥0.99 no grafo próprio a escala** | ❌ satura ~0.96–0.974 a 100k–500k×768d (gap ~1.5–3pt) | M57 (`m57-raw/`) → **M60 aberto** |
 | **Latência do AM (p50)** | ✅ paridade vs pgvector a 1M no ponto recall≥0.99 (M34 ivfflat) | `m32-scale-sift1m.*` |
 | **Latência SUPERIOR** | ❌ paridade, não superioridade clara | — |
 | **QPS a 1M** | ✅ benchmarked (multi-way) | `m32-scale-sift1m.*` |
-| **Head-to-head vs ScaNN (AlloyDB)** | ⚠️ recall PARIDADE mas **~25–37× GAP de QPS** (ScaNN mais rápido) | `docs/benchmarks/m33-scann-headtohead.*` |
+| **Head-to-head vs ScaNN (AlloyDB)** | ⚠️ recall PARIDADE mas **~25–37× GAP de QPS** (ScaNN mais rápido) | `wiki/benchmarks/m33-scann-headtohead.*` |
 
 **A verdade dura:** o gap vs ScaNN (~25×) vem da **quantização anisotrópica + Asymmetric Hashing (AH) SIMD**
 do ScaNN. Duas apostas nesse eixo já foram MEDIDAS e deram **honest-negative** no carrier: **M57** (SBQ inline
@@ -59,7 +59,7 @@ paridade — não inflar).
 
 **Definition of done:**
 - [ ] Discover (R0): o que o pgvector faz no hot-path do scan HNSW que o theodb não faz (mesmo grafo) — prefetch/página/SIMD.
-- [ ] Fix com **p50 do theodb_hnsw ≤ pgvector a recall≥0.99** num same-graph micro-bench + e2e a 1M, sem regressão de recall → `docs/benchmarks/m71-scan-latency.{md,json}`.
+- [ ] Fix com **p50 do theodb_hnsw ≤ pgvector a recall≥0.99** num same-graph micro-bench + e2e a 1M, sem regressão de recall → `wiki/benchmarks/m71-scan-latency.md` + `benchmarks/artifacts/m71-scan-latency.json`.
 - [ ] Veredito honesto (superior / paridade / honest-negative) com mean±std ≥3 runs.
 
 **Dependencies:** M60 (recall≥0.99 — medir latência abaixo do recall de produção). **Risco (MÉDIO-ALTO):** ganhos de hot-path costumam ser fator-constante; a régua pode dar paridade.
@@ -71,7 +71,7 @@ real de produção) — theodb_hnsw/ivfflat vs pgvector, mesmo hardware/dataset.
 que o throughput multi-cliente é competitivo, incluindo o efeito do lock/buffer do índice sob carga.
 
 **Definition of done:**
-- [ ] Harness multi-cliente (N conexões, QPS agregado, p50/p95/p99) a 1M×128d (SIFT1M) — theodb vs pgvector, ≥3 runs, mean±std → `docs/benchmarks/m72-qps-multiclient.{md,json}`.
+- [ ] Harness multi-cliente (N conexões, QPS agregado, p50/p95/p99) a 1M×128d (SIFT1M) — theodb vs pgvector, ≥3 runs, mean±std → `wiki/benchmarks/m72-qps-multiclient.md` + `benchmarks/artifacts/m72-qps-multiclient.json`.
 - [ ] Veredito honesto de QPS multi-cliente (competitivo / gap medido) com a origem do gap identificada.
 
 **Dependencies:** M60, M71. **Risco (MÉDIO):** contenção de buffer/lock sob concorrência; o gap pode ser estrutural (índice persistente vs library in-memory).
@@ -85,7 +85,7 @@ o resultado pode ser (a) fechou/reduziu o gap vs ScaNN, (b) paridade own-code + 
 North Star exige (não uma vitória inventada).
 
 **Definition of done:**
-- [ ] Re-run M33 (ScaNN OSS proxy do AlloyDB; caveat library-vs-database documentado) a recall≥0.99, ≥3 runs → `docs/benchmarks/m73-headtohead-verdict.{md,json}`.
+- [ ] Re-run M33 (ScaNN OSS proxy do AlloyDB; caveat library-vs-database documentado) a recall≥0.99, ≥3 runs → `wiki/benchmarks/m73-headtohead-verdict.md` + `benchmarks/artifacts/m73-headtohead-verdict.json`.
 - [ ] **ADR de veredito do North Star vetorial:** superior / paridade+trade-off / honest-negative, com a evidência e a decisão de posicionamento (o que o produto pode/NÃO pode claim, per `public-copy.md`).
 - [ ] Atualizar `goto-p0-vector-superiority` (memória) + o CLAUDE.md North Star com o estado MEDIDO final.
 
@@ -101,7 +101,7 @@ implementar sem um blueprint com evidência de que o lever é viável** (anti-su
 
 **Definition of done:**
 - [ ] Discover-gate: blueprint com evidência (paper + medição de viabilidade) de um lever de quantização não-refutado → decisão implementar/não-implementar.
-- [ ] SE implementar: recall≥0.99 + ganho de QPS MEDIDO vs o baseline M73, sem regressão → `docs/benchmarks/m74-quant-sota.{md,json}`.
+- [ ] SE implementar: recall≥0.99 + ganho de QPS MEDIDO vs o baseline M73, sem regressão → `wiki/benchmarks/m74-quant-sota.md` + `benchmarks/artifacts/m74-quant-sota.json`.
 - [ ] SE não: ADR honesto "nenhum lever viável pós-M57/M59; o veredito M73 é o estado final do pilar".
 
 **Dependencies:** M73 (o veredito + a origem do gap). **Risco (ALTO):** dois levers já refutados; este é condicional por design.
@@ -122,7 +122,7 @@ veredito. M74 só existe se M73 abrir um caminho não-refutado.
 - **NÃO é uma promessa de vencer o ScaNN.** Dois levers (M57 SBQ, M59 anisotrópica+AH) já deram honest-negative.
   O v5 entrega o **veredito medido** — que pode ser paridade own-code + trade-off documentado.
 - **NÃO reabre HA / replicação / control-plane** — deploy/plataforma, fora do escopo deste repo (CLAUDE.md).
-- **NÃO faz claim de performance sem artefato** em `docs/benchmarks/` (Regra 5 / `public-copy.md`).
+- **NÃO faz claim de performance sem artefato** em `wiki/benchmarks/` (Regra 5 / `public-copy.md`).
 
 ## Relação com os roadmaps anteriores
 

@@ -143,7 +143,7 @@ def render(header: dict, records: list[dict], box_before: dict, box_after: dict)
         "",
         "```bash",
         "ALLOW_MISSING_HEAP=1 bash benchmarks/m169_baseline_100m.sh",
-        "python3 benchmarks/m169_baseline_summarize.py docs/benchmarks/m169-artifacts/baseline-100m.jsonl",
+        "python3 benchmarks/m169_baseline_summarize.py benchmarks/artifacts/m169-artifacts/baseline-100m.jsonl",
         "```",
         "",
     ]

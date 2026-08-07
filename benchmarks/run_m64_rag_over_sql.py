@@ -257,7 +257,7 @@ def main():
     ap.add_argument("--dim", type=int, default=128)
     ap.add_argument("--k", type=int, default=10)
     ap.add_argument("--runs", type=int, default=3)
-    ap.add_argument("--out", default="docs/benchmarks/m64-rag-over-sql.json")
+    ap.add_argument("--out", default="benchmarks/artifacts/m64-rag-over-sql.json")
     a = ap.parse_args()
     res = run(a.n, a.dim, a.k, a.runs)
     os.makedirs(os.path.dirname(a.out), exist_ok=True)

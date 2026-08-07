@@ -10,7 +10,7 @@
 # Secrets: the OpenAI key is read from $OPENAI_API_KEY (never hard-coded, never committed). The GUCs are set at
 # the instance level (ALTER SYSTEM) so the BACKGROUND WORKER — which runs in its own session — can see them.
 #
-# Prereqs (see docs/ops/self-host-quickstart.md): a self-hosted PG17 with theodb_rs installed +
+# Prereqs (see wiki/guides/self-host-quickstart.md): a self-hosted PG17 with theodb_rs installed +
 # `shared_preload_libraries = 'theodb_rs'` (so the vectorizer worker runs). Env: PGPORT, PGHOST, PGUSER, PGDATABASE
 # (default the pgrx-managed instance), OPENAI_API_KEY.
 set -euo pipefail

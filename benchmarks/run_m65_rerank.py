@@ -205,7 +205,7 @@ def main():
     ap.add_argument("--model", default="text-embedding-3-small")
     ap.add_argument("--cache-dir", default="/tmp/m65-beir-cache")
     ap.add_argument("--limit-queries", type=int, default=None, help="cap queries for CPU-rerank tractability")
-    ap.add_argument("--out", default="docs/benchmarks/m65-rerank.json")
+    ap.add_argument("--out", default="benchmarks/artifacts/m65-rerank.json")
     a = ap.parse_args()
     res = run(a.dataset, a.top_k, a.runs, a.dim, a.model, a.cache_dir, a.limit_queries)
     os.makedirs(os.path.dirname(a.out), exist_ok=True)

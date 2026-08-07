@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # M103 — honest COLUMN-PRUNING benchmark for the co-resident vector+columnar substrate. Emits JSON (stdout) →
-# docs/benchmarks/m103-vector-columnar.{md,json}. The co-resident filtered top-k (theodb.vindex_knn_columnar)
+# wiki/benchmarks/m103-vector-columnar.md e benchmarks/artifacts/m103-vector-columnar.json. The co-resident filtered top-k (theodb.vindex_knn_columnar)
 # decodes ONLY the 4 index columns (tid, part_id, label, vec) — the analytical columns are NEVER decoded. The
 # cleanest measurable proof of pruning: the knn latency is INVARIANT to the analytical-column width. We build two
 # co-resident indexes on the SAME vectors — one with a NARROW payload (1 float8), one WIDE (W float8 columns) —

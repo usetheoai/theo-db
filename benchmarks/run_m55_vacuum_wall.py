@@ -589,8 +589,8 @@ def main():
     ap.add_argument("--dim", type=int, default=int(os.environ.get("M55_DIM", str(DIM))))
     ap.add_argument("--seed", type=int, default=int(os.environ.get("M55_SEED", str(SEED))))
     ap.add_argument("--runs", type=int, default=int(os.environ.get("M55_RUNS", "3")))
-    ap.add_argument("--out-json", default="docs/benchmarks/m55-vacuum-wall.json")
-    ap.add_argument("--out-md", default="docs/benchmarks/m55-vacuum-wall.md")
+    ap.add_argument("--out-json", default="benchmarks/artifacts/m55-vacuum-wall.json")
+    ap.add_argument("--out-md", default="wiki/benchmarks/m55-vacuum-wall.md")
     args = ap.parse_args()
 
     scales = args.scales if isinstance(args.scales, list) else _parse_scales(args.scales)

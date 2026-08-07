@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # M99 D2 — honest columnar-vs-heap benchmark for the theodb_columnar TAM. Emits a JSON blob (stdout) consumed
-# into docs/benchmarks/m99-columnar-tam.{md,json}. MEASURES: (1) on-disk size columnar vs heap (the compression
+# into wiki/benchmarks/m99-columnar-tam.md e benchmarks/artifacts/m99-columnar-tam.json. MEASURES: (1) on-disk size columnar vs heap (the compression
 # win — deterministic, reproducible); (2) full-scan aggregate + GROUP BY wall time, N runs, mean ± stddev.
 # HONEST CEILING: M99 has no projection/skip/vectorization pushdown (that is M100) — a plain seqscan decodes ALL
 # columns of ALL chunk groups, so scan time is expected to be at PARITY or SLOWER than heap; the measured win is

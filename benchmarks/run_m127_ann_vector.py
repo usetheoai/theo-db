@@ -138,7 +138,7 @@ def run(args) -> dict:
         "caveats": [
             "self-hosted box, NOT the canonical AWS c6a.4xlarge — public ann-benchmarks leaderboard PR is a follow-up (ADR M127-2)",
             "GloVe subsampled to n_corpus with exact brute-force GT; the full-corpus canonical run is the operational follow-up",
-            "any ScaNN/AlloyDB QPS-gap magnitude cites docs/benchmarks/m73-headtohead-verdict.md, not this run",
+            "any ScaNN/AlloyDB QPS-gap magnitude cites wiki/benchmarks/m73-headtohead-verdict.md, not this run",
         ],
     }
 
@@ -151,7 +151,7 @@ def main():
     ap.add_argument("--k", type=int, default=10)
     ap.add_argument("--ef", type=int, nargs="+", default=[10, 40, 100, 200, 400])
     ap.add_argument("--seed", type=int, default=20260720)
-    ap.add_argument("--out", default="docs/benchmarks/m127-ann-benchmarks-vector.json")
+    ap.add_argument("--out", default="benchmarks/artifacts/m127-ann-benchmarks-vector.json")
     args = ap.parse_args()
 
     try:

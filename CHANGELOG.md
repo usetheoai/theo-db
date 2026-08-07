@@ -23,7 +23,30 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   que o resultado é idêntico ao do caminho de referência, e que um resultado deliberadamente corrompido seria
   reprovado — sem esse terceiro gate, "nenhuma divergência" não é evidência de nada (#M169)
 
+### Changed
+- **docs:** a documentação do projeto passou a viver em `wiki/`, como um acervo de 282 conceitos em
+  [Open Knowledge Format](https://github.com/google/open-knowledge-format). Toda referência do repositório
+  — README, ROADMAP, `CLAUDE.md`, scripts, workflows de CI e comentários de código — foi reapontada para lá
+- **benchmarks:** os artefatos brutos que os runners escrevem (JSON, CSV, logs, flamegraphs) passaram a ir
+  para `benchmarks/artifacts/`, junto do código que os gera, em vez de ficarem misturados à documentação.
+  Quem roda um benchmark com `--out` padrão encontra o resultado no diretório novo
+
+### Removed
+- **docs:** a árvore `docs/` foi **removida do repositório**. Seus 264 documentos estão convertidos em
+  `wiki/`, e os 517 arquivos permanecem recuperáveis no histórico git, no commit `f7c7b93`. Os **253
+  artefatos brutos** de medição que viviam sob `docs/benchmarks/` saíram junto e passam a existir apenas
+  no histórico — quem depender de um deles precisa recuperá-lo com `git show f7c7b93:docs/benchmarks/…`
+
 ### Fixed
+- **docs:** o guia de migração mínima voltou a mostrar os comandos literais que recriam os índices
+  (`USING hnsw`, `USING ivfflat`) durante a restauração. Sem eles, o leitor não sabia quais índices
+  sobrevivem ao `pg_restore` sem inspecionar o dump
+- **docs:** a página do analítico colunar passou a registrar a ressalva que faltava — um `SELECT` normal
+  numa tabela colunar decodifica **todas** as colunas e é medido em torno de 16 a 26 vezes mais lento que
+  a mesma leitura numa tabela heap. O ganho de projeção existe apenas no caminho acelerado, e omitir isso
+  levava a esperar velocidade onde o desenho entrega compressão
+- **docs:** nove links para benchmarks arquivados apontavam para a raiz do diretório enquanto os arquivos
+  estavam sob `archive/` — quebrados desde antes desta mudança, agora resolvidos
 - **theodb:** o spill do agregado/top-k passou a viver sob **`pgsql_tmp` do próprio cluster**, com teto derivado
   de `temp_file_limit`, em vez do diretório temporário do sistema. Isso importa porque o M169 tornou o spill um
   caminho de produção (antes dele a pool era dimensionada pelo lote decodificado e nada derramava): no default

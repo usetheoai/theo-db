@@ -20,24 +20,24 @@ e sem lock-in.
 A missão do TheoDB é **igualar ou superar o AlloyDB** para quem roda OSS, on-premises e na borda —
 entregando as mesmas capacidades (busca vetorial/IA, analytics, operação) com **superioridade estrutural**
 em abertura, custo, portabilidade e **independência de modelo** (qualquer modelo local ou remoto, sem
-lock-in). Metas de performance são **metas comprovadas por benchmark reproduzível** em `docs/benchmarks/` —
-nunca afirmações sem evidência. Estratégia completa: [`docs/adr/0002-north-star-equal-or-superior-to-alloydb.md`](./docs/adr/0002-north-star-equal-or-superior-to-alloydb.md).
+lock-in). Metas de performance são **metas comprovadas por benchmark reproduzível** em `wiki/benchmarks/` —
+nunca afirmações sem evidência. Estratégia completa: [`wiki/decisions/0002-north-star-equal-or-superior-to-alloydb.md`](./wiki/decisions/0002-north-star-equal-or-superior-to-alloydb.md).
 
-> **Estado medido FINAL do pilar vetorial (honesto — M73/M74, `docs/adr/0035`, `docs/adr/0036`).** Depois de
+> **Estado medido FINAL do pilar vetorial (honesto — M73/M74, `wiki/decisions/0035`, `wiki/decisions/0036`).** Depois de
 > medir head-to-head reproduzível vs **ScaNN OSS** (o algoritmo do AlloyDB) e vs **pgvector** no SIFT1M:
 > - **Paridade de recall own-code classe-pgvector: ALCANÇADA** (M60/M69/M70) — o tipo `vector` e os índices ANN
 >   são 100% próprios, sem pgvector/pgvectorscale.
 > - **Throughput multi-cliente competitivo-a-superior** vs pgvector no regime 128d clusterizado (M72, +11% QPS
->   a recall casado) — [`docs/benchmarks/`](./docs/benchmarks/).
+>   a recall casado) — [`wiki/benchmarks/`](./wiki/benchmarks/).
 > - **Superioridade de QPS vetorial sobre o ScaNN/AlloyDB: MEDIDA como NÃO-ALCANÇÁVEL** por uma extensão
->   PostgreSQL permissiva ([`docs/benchmarks/m73-headtohead-verdict.md`](./docs/benchmarks/m73-headtohead-verdict.md)) —
+>   PostgreSQL permissiva ([`wiki/benchmarks/m73-headtohead-verdict.md`](./wiki/benchmarks/m73-headtohead-verdict.md)) —
 >   o gap (~25–44× @ 0,99) é de **paradigma** (AH-LUT anisotrópico + não pagar o imposto MVCC/WAL), não de
 >   engenharia. Posicionamento honesto: **paridade de recall + memória billion-scale + AI-native/HTAP/aberto** —
 >   **nunca** "mais rápido que o AlloyDB no vetor".
 >
 > Onde o TheoDB pode ser genuinamente superior é a **superfície AI-native híbrida** (as duas pernas próprias,
 > vetor + lexical, no mesmo banco transacional) — o reposicionamento do North Star está em
-> [`docs/adr/0033`](./docs/adr/) (proposto, decisão do owner; o mandato LOCKED do ADR-0002 permanece até assinatura).
+> [`wiki/decisions/0033`](./wiki/decisions/) (proposto, decisão do owner; o mandato LOCKED do ADR-0002 permanece até assinatura).
 
 ---
 
@@ -79,8 +79,8 @@ TheoDB = PostgreSQL 18 (upstream, sem fork)
 
 A diferenciação técnica é ter as **duas pernas próprias** (vetorial + lexical + grafo) **dentro de um banco
 transacional**, numa superfície SQL AI-native — não uma biblioteca in-memory nem um bolt-on de busca externa.
-Toda afirmação de performance é medida em [`docs/benchmarks/`](./docs/benchmarks/), nunca sem evidência.
-Detalhes de arquitetura, pilares e decisões travadas (D1–D7) estão no [`PRD.md`](./PRD.md) e nos [`docs/adr/`](./docs/adr/).
+Toda afirmação de performance é medida em [`wiki/benchmarks/`](./wiki/benchmarks/), nunca sem evidência.
+Detalhes de arquitetura, pilares e decisões travadas (D1–D7) estão no [`PRD.md`](./PRD.md) e nos [`wiki/decisions/`](./wiki/decisions/).
 
 ---
 
@@ -102,7 +102,7 @@ CREATE EXTENSION theodb CASCADE;   -- CASCADE puxa theodb_rs (o tipo `vector` ow
 ALTER EXTENSION theodb_rs UPDATE;  -- upgrade in-place da extensão (cadeia de upgrade própria, M137)
 ```
 
-Passo a passo das 12 capacidades em [`docs/quickstart.md`](./docs/quickstart.md).
+Passo a passo das 12 capacidades em [`wiki/guides/quickstart.md`](./wiki/guides/quickstart.md).
 
 > **Sem `plpython3u` (desde M19):** toda a superfície de IA (`ai.*`, NL→SQL, generativas, embed) é servida
 > pela extensão Rust **`theodb_rs`** — o `theodb` não requer mais a linguagem *untrusted* `plpython3u`. A
@@ -115,7 +115,7 @@ Passo a passo das 12 capacidades em [`docs/quickstart.md`](./docs/quickstart.md)
 
 > Estado real, não promessa. A lista completa e viva de milestones está em [`ROADMAP.md`](./ROADMAP.md)
 > (**75 de 76 entregues** até a v0.131.0 — só falta o M141, o dogfood de produção). Nada aqui é data ou
-> promessa; performance é sempre medida em [`docs/benchmarks/`](./docs/benchmarks/). Continua **pré-1.0**
+> promessa; performance é sempre medida em [`wiki/benchmarks/`](./wiki/benchmarks/). Continua **pré-1.0**
 > (ver o disclaimer de status acima).
 >
 > **Nível de maturidade (honesto):** **Estágio 1 (Experimental) entrando no 2 (Preview)** — invariantes
@@ -129,7 +129,7 @@ Passo a passo das 12 capacidades em [`docs/quickstart.md`](./docs/quickstart.md)
 - **Pilar vetorial** — tipo `vector` e índices ANN (`theodb_hnsw`, `theodb_ivfflat`, `theodb_symqg`) **own-code**, com paridade de recall classe-pgvector (ver o estado medido na Missão). Sem pgvector/pgvectorscale.
 - **Superfície AI-native (SQL)** — embeddings (`theodb.embed`), busca **híbrida** `ai.hybrid_search_rrf` (BM25/`ts_rank_cd` + vetor via RRF), rerank, NL→SQL com defesa a injeção, extração de grafo. Servida 100% pela extensão Rust — **sem `plpython3u`**.
 - **Colunar (in-DB)** — TableAM colunar próprio (`theodb_columnar`) com pushdown de agregação/GROUP-BY/zone-map sobre dados transacionais vivos (own-code).
-- **Lakehouse Parquet (own-code)** — ler/escrever/agregar arquivos Parquet externos **own-code** via DataFusion/Arrow, **sem DuckDB** (M143 removeu o `pg_duckdb` por completo — ADR-0057). Superfície: `theodb.htap_refresh(rel)` (materializa uma tabela num snapshot Parquet) e `theodb.olap(rel)` (lê+agrega o snapshot); as primitivas `public.read_parquet(path)`/`write_parquet(rel,path)` são superuser-only (least-privilege — escrita de arquivo server-side). Uma imagem só, sem componente C++/httpfs; o lakehouse own-code custa +12 MB no build default vs os 118 MB do bundle DuckDB (`docs/benchmarks/m143-pgduckdb-removal.md`).
+- **Lakehouse Parquet (own-code)** — ler/escrever/agregar arquivos Parquet externos **own-code** via DataFusion/Arrow, **sem DuckDB** (M143 removeu o `pg_duckdb` por completo — ADR-0057). Superfície: `theodb.htap_refresh(rel)` (materializa uma tabela num snapshot Parquet) e `theodb.olap(rel)` (lê+agrega o snapshot); as primitivas `public.read_parquet(path)`/`write_parquet(rel,path)` são superuser-only (least-privilege — escrita de arquivo server-side). Uma imagem só, sem componente C++/httpfs; o lakehouse own-code custa +12 MB no build default vs os 118 MB do bundle DuckDB (`wiki/benchmarks/m143-pgduckdb-removal.md`).
 - **Grafo nativo** — engine de grafo persisted-CSR para GraphRAG (`theodb.graph_*`).
 - **Fundação de banco** — **PostgreSQL 18**, cadeia de upgrade própria (`ALTER EXTENSION ... UPDATE`), gates mecânicos de qualidade no CI (clippy `-D warnings`, rustfmt, Postgres `--enable-cassert`, license-gate D1, pgspot).
 
@@ -151,7 +151,7 @@ banco de dados (o engine + a extensão). Referências científicas de cada pilar
 
 - [`PRD.md`](./PRD.md) — documento de produto completo (visão, pilares, requisitos, riscos, MVP).
 - [`CHANGELOG.md`](./CHANGELOG.md) — registro de mudanças ([Keep a Changelog](https://keepachangelog.com/) + SemVer).
-- [`docs/quickstart.md`](./docs/quickstart.md) — passo a passo das capacidades; [`docs/benchmarks/`](./docs/benchmarks/) — evidência medida.
+- [`wiki/guides/quickstart.md`](./wiki/guides/quickstart.md) — passo a passo das capacidades; [`wiki/benchmarks/`](./wiki/benchmarks/) — evidência medida.
 
 ---
 

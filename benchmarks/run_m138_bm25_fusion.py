@@ -113,7 +113,7 @@ def run(dataset_name: str, model: str, dim: int, cache_dir: str = "benchmarks/.c
     # needs; the twin is byte-identical to the in-DB ai.hybrid_search_rrf (ADR D2), so the fused quality
     # equals the product's. (The in-DB lexical_engine='bm25' template itself carries a separately-tracked
     # bug on pg_textsearch 1.3.1 — the bare `<@> $bind` form needs `to_bm25query($bind, idx)`; measuring
-    # via the proven twin decides the milestone without gating on that fix. See docs/benchmarks/m138.)
+    # via the proven twin decides the milestone without gating on that fix. See wiki/benchmarks/m138.)
     K = 60
     TOP = 100
     vec_rank, ts_rank, bm_rank = {}, {}, {}

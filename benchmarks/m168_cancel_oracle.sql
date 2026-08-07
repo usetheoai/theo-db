@@ -49,7 +49,7 @@ CREATE TEMP TABLE cancel_res (q text, v text);
 --   CTAS:      Limit -> Custom Scan (theodb_columnar_agg)                                  [caminho do top-k]
 --   count(*):  Aggregate -> Limit -> Sort -> Result -> Custom Scan (theodb_columnar_project)  [NÃO é o top-k]
 --
--- (planos completos em `docs/benchmarks/m168-artifacts/routing-shapes.log`)
+-- (planos completos em `benchmarks/artifacts/m168-artifacts/routing-shapes.log`)
 --
 -- A forma count(*) não roda "o plano nativo" puro — ela ainda usa o `theodb_columnar_project` do M149. O que ela
 -- não engaja é o caminho do TOP-K, que é o único que instancia runtime tokio e DataFusion

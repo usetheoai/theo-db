@@ -5,7 +5,7 @@ name: CI
 # the M2 vectorscale/diskann integration. Every step here is one that has been run locally first.
 
 # FILTRO POSITIVO (não `paths-ignore`) — o runner é ÚNICO e serial, e o `paths-ignore` anterior
-# (`.claude/**`, `**/*.md`, `docs/**`) não excluía quase nada: qualquer commit em `.github/`,
+# (`.claude/**`, `**/*.md`, `wiki/**`) não excluía quase nada: qualquer commit em `.github/`,
 # `knowledge-base/`, `agents/` ou num arquivo de raiz reabria os 10 jobs. Medido em 2026-07-27, o
 # commit `3313226` — que tocou SÓ 4 YAMLs de workflow e o CHANGELOG, zero linha de código —
 # disparou CI + publish + ci-canary + lint-rust + cassert, cinco runs numa fila serial.
@@ -297,7 +297,7 @@ jobs:
           PGPASSWORD: postgres
           PGDATABASE: postgres
         # HNSW only + small subset keeps CI fast (a full diskann build on 50k takes ~2 min); the
-        # decision-grade diskann sweep is run out-of-CI and committed under docs/benchmarks/.
+        # decision-grade diskann sweep is run out-of-CI and committed under wiki/benchmarks/.
         run: |
           python -m theodb_bench --hdf5 .datasets/glove-25-angular.hdf5 --index hnsw \
             --metric cosine --seed 42 --n 10000 --n-queries 200 --k 10 --runs 2 --out /tmp/bench

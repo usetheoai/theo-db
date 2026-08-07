@@ -321,7 +321,7 @@ def main():
     ap.add_argument("--dim", type=int, default=128)
     ap.add_argument("--k", type=int, default=10)
     ap.add_argument("--runs", type=int, default=3)
-    ap.add_argument("--out", default="docs/benchmarks/m63-vector-join.json")
+    ap.add_argument("--out", default="benchmarks/artifacts/m63-vector-join.json")
     args = ap.parse_args()
     data = run(args.n_a, args.n_b, args.dim, args.k, args.runs)
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)

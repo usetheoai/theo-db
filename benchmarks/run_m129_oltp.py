@@ -162,7 +162,7 @@ def main():
     ap.add_argument("--rampup", type=int, default=1)
     ap.add_argument("--hdb-duration", type=int, default=2)
     ap.add_argument("--pgbench", default=None, help="pgbench binary path (else PATH)")
-    ap.add_argument("--out", default="docs/benchmarks/m129-oltp.json")
+    ap.add_argument("--out", default="benchmarks/artifacts/m129-oltp.json")
     args = ap.parse_args()
     data = run(args)
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)

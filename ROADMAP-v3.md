@@ -45,7 +45,7 @@ Esta milestone faz a adoção: buildar a peça no PG17 (ou bump PG18), smoke end
   smoke (criar columnstore, query analítica) verde em CI.
 - [ ] Gate de licença (D1 — MIT ✓) + `/deps-audit` (CVE) da peça e suas transitivas.
 - [ ] Benchmark de adoção reproduzível: columnstore vs row-store no MESMO dataset/box (confirma o ~14× do M30 na
-  imagem embarcada) → `docs/benchmarks/m61-columnar-adoption.{md,json}`.
+  imagem embarcada) → `wiki/benchmarks/m61-columnar-adoption.md` + `benchmarks/artifacts/m61-columnar-adoption.json`.
 - [ ] Honestidade (Regra 9): documentar que columnar é **exceção permissiva adotada**, não own-code.
 
 **Dependencies:** M30 (decisão KEEP + evidência). **Risco (MÉDIO):** compat de build PG17/18; peso da imagem.
@@ -59,7 +59,7 @@ tabela serve OLTP (row) e OLAP (column) sem ETL manual, com roteamento por tipo 
 - [ ] Um fluxo declarativo: tabela row-store transacional + réplica/coluna analítica sincronizada (via a peça
   columnar), documentado como o "HTAP do TheoDB".
 - [ ] Benchmark HTAP: carga mista (INSERTs OLTP + agregações OLAP concorrentes) medindo latência de ambos →
-  `docs/benchmarks/m62-htap.{md,json}`.
+  `wiki/benchmarks/m62-htap.md` + `benchmarks/artifacts/m62-htap.json`.
 - [ ] Veredito honesto vs AlloyDB HTAP (in-memory columnar): nosso é lakehouse/columnar-adotado — **aposta
   diferente** (D2), declarada, não cópia.
 
@@ -75,7 +75,7 @@ b.emb < τ` (similarity join) planner-integrado, o que torna o vetor parte do mo
 **Definition of done:**
 - [ ] Similarity join suportado com uso do índice (não nested-loop O(n²)) — o planner escolhe o AM vetorial no
   join; recall preservado.
-- [ ] TDD + benchmark de recall/latência do join vs o baseline seqscan → `docs/benchmarks/m63-vector-join.{md,json}`.
+- [ ] TDD + benchmark de recall/latência do join vs o baseline seqscan → `wiki/benchmarks/m63-vector-join.md` + `benchmarks/artifacts/m63-vector-join.json`.
 - [ ] Caso de uso end-to-end: deduplicação/entity-resolution por similaridade em SQL puro.
 
 **Dependencies:** M52 (filtered ANN), M35 (scan estruturado). **Risco (ALTO):** integração no planner de join.
@@ -103,7 +103,7 @@ analítica columnar numa query só — o RAG que não sai do banco.
 **Definition of done:**
 - [ ] `ai.rerank(query, docs[])` própria (Rust), retornando scores; integrável com a híbrida (M53) e o vector
   join (M63).
-- [ ] Qualidade medida: nDCG@10 / MRR em BEIR real com vs sem rerank → `docs/benchmarks/m65-rerank.{md,json}`
+- [ ] Qualidade medida: nDCG@10 / MRR em BEIR real com vs sem rerank → `wiki/benchmarks/archive/m65-rerank.md` + `benchmarks/artifacts/m65-rerank.json`
   (o gate: rerank melhora o nDCG mensuravelmente).
 - [ ] Honestidade: se o rerank não melhorar o nDCG no dataset, honest-negative + decisão.
 
@@ -116,7 +116,7 @@ Faltam estratégias declarativas (fixed/sentence/semantic/overlap) com medida de
 
 **Definition of done:**
 - [ ] Chunking configurável no vectorizer (`WITH (chunk_strategy=…, chunk_size=…, overlap=…)`), own-code.
-- [ ] Benchmark: recall de RAG por estratégia num corpus real → `docs/benchmarks/m66-chunking.{md,json}` (qual
+- [ ] Benchmark: recall de RAG por estratégia num corpus real → `wiki/benchmarks/archive/m66-chunking.md` + `benchmarks/artifacts/m66-chunking.json` (qual
   estratégia ganha, medido).
 - [ ] Edge/negative: documentos degenerados (vazio, gigante, 1 token) → typed error/handling.
 
@@ -132,7 +132,7 @@ North Star). Own-code: observar o padrão de queries e sugerir/ajustar o knob pa
 **Definition of done:**
 - [ ] Coletor de estatística de scan (recall estimado, pages read, latência) por índice — own-code.
 - [ ] Auto-tune (ou recomendação) do `ef_search`/`probes` para um alvo de recall declarado; medida de que
-  converge → `docs/benchmarks/m67-autotune.{md,json}`.
+  converge → `wiki/benchmarks/archive/m67-autotune.md` + `benchmarks/artifacts/m67-autotune.json`.
 - [ ] Honest `amcostestimate` refinado com a estatística real (fecha o gap do M48/cost).
 
 **Dependencies:** M35 (scan estruturado), M34 (probes/lists). **Risco (MÉDIO).**

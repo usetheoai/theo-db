@@ -90,7 +90,7 @@ pub(crate) fn hnsw_tombstone_compact_pct() -> i32 {
 
 /// M56 fase 2 — `SET theodb.hnsw_slot_reuse = on|off`: when ON, `aminsert` REUSES a tombstoned element slot via a
 /// proper in-place insert (search + link) before growing the pending region, bounding relation growth under
-/// DELETE+INSERT churn. **Default OFF.** The churn benchmark (`docs/benchmarks/m56-slot-reuse-churn.md`) drove the
+/// DELETE+INSERT churn. **Default OFF.** The churn benchmark (`wiki/benchmarks/m56-slot-reuse-churn.md`) drove the
 /// design: the original slot-reuse SUPPRESSED the ratio-compaction (tombstones consumed before the threshold, so
 /// the graph-REPAIRING fold never fired) and recall@10 collapsed to ~0.57. The fix — reuse only clean level-0
 /// non-entry slots + trigger the fold on CHURN (`count_churned`, not just tombstones) — makes it recall-SAFE
@@ -108,7 +108,7 @@ pub(crate) fn hnsw_slot_reuse() -> bool {
 /// M118 — `SET theodb_hnsw.resume = on|off`: when ON (default), the filtered iterative scan RESUMES from the
 /// retained beam frontier (resume-from-discarded) instead of re-searching the graph with a doubled `ef`. OFF
 /// reverts to the M52 re-search (the pre-M118 path) — kept as an operator escape hatch and for the honest
-/// own-path A/B (`docs/benchmarks/m118-resume-discarded.md`). V1 (exact-f32) only; SBQ/AQ always re-search.
+/// own-path A/B (`wiki/benchmarks/m118-resume-discarded.md`). V1 (exact-f32) only; SBQ/AQ always re-search.
 pub(crate) static HNSW_RESUME: GucSetting<bool> = GucSetting::<bool>::new(true);
 
 /// Whether the filtered iterative scan uses resume-from-discarded (M118). Default ON.

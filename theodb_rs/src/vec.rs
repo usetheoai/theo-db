@@ -521,7 +521,7 @@ mod tests {
 
     /// M58 micro-bench (DoD item 2): per-candidate cosine cost, AVX2+FMA vs scalar, dim=768 (the real-embedding
     /// dim). Times a large batch through the DISPATCHED `cosine_dist_from_bytes` under each forced branch and logs
-    /// the ratio (server LOG — the artifact `docs/benchmarks/m58-simd-cosine.md` records it). Asserts only that
+    /// the ratio (server LOG — the artifact `wiki/benchmarks/m58-simd-cosine.md` records it). Asserts only that
     /// SIMD is NOT SLOWER (a loose, non-flaky regression guard — the magnitude is reported, not gated on timing).
     #[pg_test]
     fn cosine_simd_per_candidate_speedup() {

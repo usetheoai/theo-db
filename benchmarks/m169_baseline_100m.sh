@@ -12,7 +12,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ART="${ART_DIR:-docs/benchmarks/m169-artifacts}"
+ART="${ART_DIR:-benchmarks/artifacts/m169-artifacts}"
 # Default FORA de `/root` (modo 700): um caminho que atravessa 700 é inalcançável para qualquer processo que
 # não seja root, por mais permissivo que o ARQUIVO seja. Ver o invariante do bit x em todo o caminho.
 TSV="${TSV_PATH:-/srv/bench-data/hits_sample.tsv}"

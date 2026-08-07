@@ -344,7 +344,7 @@ def run(args) -> dict:
     # `resolve_special_varno` deparse. NOTE the corrected diagnosis — it was NOT a planner hang, NOT O(cols^2), and
     # NOT width/TEXT-related (the queries always EXECUTED fine); `statement_timeout` could not interrupt it because
     # it happened during plan PRINTING. Both modes keep the byte-identical A/B oracle
-    # (`docs/benchmarks/m131-columnar-agg-accelerated.md`).
+    # (`wiki/benchmarks/m131-columnar-agg-accelerated.md`).
     cur.execute(f"SET theodb.enable_columnar_agg = {'on' if args.agg else 'off'}")
     cur.execute("SET max_parallel_workers_per_gather = 0")
     # Per-query ceiling: a query the columnar path cannot complete in time is recorded ERRORED (honest per-query
@@ -406,7 +406,7 @@ def main():
     ap.add_argument("--cache", default="benchmarks/.cache")
     ap.add_argument("--query-timeout-s", type=int, default=60, help="per-query ceiling; slow query -> ERRORED")
     ap.add_argument("--agg", action="store_true", help="enable the vectorized columnar-agg CustomScan pushdown (the M131 fix for #135 removed the EXPLAIN deparse hang; default OFF = storage path)")
-    ap.add_argument("--out", default="docs/benchmarks/m128-clickbench-columnar.json")
+    ap.add_argument("--out", default="benchmarks/artifacts/m128-clickbench-columnar.json")
     args = ap.parse_args()
     data = run(args)
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)

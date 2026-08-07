@@ -21,7 +21,7 @@ Two design decisions worth stating, because both are places where guessing is te
 
 Usage:
 
-    python3 benchmarks/m169_baseline_summarize.py docs/benchmarks/m169-artifacts/baseline.json   # exit != 0 on a
+    python3 benchmarks/m169_baseline_summarize.py benchmarks/artifacts/m169-artifacts/baseline.json   # exit != 0 on a
                                                                                                  # vacuous run
 """
 from __future__ import annotations

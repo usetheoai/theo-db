@@ -18,9 +18,9 @@ without a container (mirrors `m45_pareto`). Only `run_hardened` touches the DB, 
 
 Usage (per image, back-to-back same session — EC-4):
   python3 benchmarks/run_m46_highrecall.py --hdf5 .datasets/sift-128-euclidean.hdf5 \
-      --nq 500 --runs 5 --port 5474 --tag baseline --out docs/benchmarks/m46-highrecall-qps-baseline.json
+      --nq 500 --runs 5 --port 5474 --tag baseline --out benchmarks/artifacts/m46-highrecall-qps-baseline.json
   # (rebuild the image with the M46 change, restart container, then)
-  python3 benchmarks/run_m46_highrecall.py ... --tag post --out docs/benchmarks/m46-highrecall-qps-post.json
+  python3 benchmarks/run_m46_highrecall.py ... --tag post --out benchmarks/artifacts/m46-highrecall-qps-post.json
   python3 benchmarks/run_m46_highrecall.py --compare baseline.json post.json --write-doc
 """
 from __future__ import annotations

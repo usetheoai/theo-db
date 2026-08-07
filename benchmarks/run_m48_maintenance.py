@@ -316,8 +316,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--n", type=int, default=int(os.environ.get("M48_N", "50000")))
     ap.add_argument("--runs", type=int, default=int(os.environ.get("M48_RUNS", "3")))
-    ap.add_argument("--out-json", default="docs/benchmarks/m48-am-maintenance.json")
-    ap.add_argument("--out-md", default="docs/benchmarks/m48-am-maintenance.md")
+    ap.add_argument("--out-json", default="benchmarks/artifacts/m48-am-maintenance.json")
+    ap.add_argument("--out-md", default="wiki/benchmarks/m48-am-maintenance.md")
     args = ap.parse_args()
 
     data = run(args.n, args.runs)

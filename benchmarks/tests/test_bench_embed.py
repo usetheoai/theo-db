@@ -2,7 +2,7 @@
 
 Proves the harness computes mean/std over the requested runs and validates its inputs. The real
 latency numbers (against a live container) are produced by running bench_embed.py and recorded in
-docs/benchmarks/m17-embed-rust-vs-plpython.md.
+wiki/benchmarks/m17-embed-rust-vs-plpython.md.
 """
 import os
 import sys

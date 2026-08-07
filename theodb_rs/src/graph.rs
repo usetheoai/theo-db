@@ -149,7 +149,7 @@ impl Csr {
             // FRONTIER-DRIVEN MS-BFS (ADR-2): iterate only ACTIVE vertices — NOT a full O(nnodes) per-hop sweep
             // (a shared hub reached by many lanes has its high-degree adjacency traversed ONCE with the OR'd
             // lane bits, instead of once per lane in N sequential BFSs). MEASURED traversal-only (confound-free,
-            // `docs/benchmarks/m109-msbfs`): pure_speedup 1.33× @N=1 → ~7× @N=64+, oracle PASS at every N. The
+            // `wiki/benchmarks/m109-msbfs`): pure_speedup 1.33× @N=1 → ~7× @N=64+, oracle PASS at every N. The
             // growth-with-N is exactly Then et al.'s (VLDB'14) edge-sharing mechanism. `visit[v]` is a u64
             // source-mask (bit l = lane `base+l`), auto-vectorized bitwise-OR — source-parallel, NOT the
             // candidate-parallel `pshufb` of `vec/ah.rs` (ADR-1).

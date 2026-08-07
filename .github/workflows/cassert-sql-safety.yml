@@ -18,7 +18,7 @@ on:
     # #211 — NÃO adicione `paths-ignore:` aqui. O GitHub proíbe `paths` e `paths-ignore` no MESMO
     # evento e rejeita o arquivo no parse (`startup_failure`, zero jobs): foi o que matou este gate
     # em 95 de 100 runs entre 24 e 27/07. A economia de fila que #187 buscava se expressa DENTRO do
-    # `paths:`, via padrão negado — um filtro só, sem conflito. `.claude/**` e `docs/**` já estão
+    # `paths:`, via padrão negado — um filtro só, sem conflito. `.claude/**` e `wiki/**` já estão
     # fora por construção; o `!**/*.md` é guarda de futuro (hoje não há `.md` sob `theodb_rs/src/`),
     # e este gate custa um `cargo pgrx install` completo — caro demais para um README.
     paths:

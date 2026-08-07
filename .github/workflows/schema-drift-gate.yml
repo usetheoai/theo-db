@@ -30,7 +30,7 @@ on:
     # #211 — NÃO adicione `paths-ignore:` aqui. O GitHub proíbe `paths` e `paths-ignore` no MESMO
     # evento e rejeita o arquivo no parse (`startup_failure`, zero jobs): este gate marcou 100 de
     # 100 runs falhos até 27/07. A economia de fila que #187 buscava se expressa DENTRO do `paths:`,
-    # via padrão negado — um filtro só, sem conflito. `.claude/**` e `docs/**` já estão fora por
+    # via padrão negado — um filtro só, sem conflito. `.claude/**` e `wiki/**` já estão fora por
     # construção; o `!**/*.md` é guarda de futuro (hoje não há `.md` sob `theodb_rs/src|sql/`).
     paths:
       - 'theodb_rs/src/**'
@@ -89,7 +89,7 @@ jobs:
           if [ "$SURFACE_CHANGED" -eq 1 ] && [ "$CTL" -eq 0 ] && [ "$MIG" -eq 0 ]; then
             echo "::error::A superfície SQL da extensão mudou sem bumpar default_version nem adicionar"
             echo "::error::script de upgrade. É assim que '1.0.0' passou a rotular cinco catálogos"
-            echo "::error::diferentes ao longo de 120 releases (ver docs/benchmarks/m137-upgrade-chain.md)."
+            echo "::error::diferentes ao longo de 120 releases (ver wiki/benchmarks/m137-upgrade-chain.md)."
             echo "::error::Objetos que entraram ou saíram do catálogo:"
             diff /tmp/surface-base.txt /tmp/surface-head.txt | grep -E '^[<>]' | head -40 | while read -r l; do
               echo "::error::  $l"

@@ -116,7 +116,7 @@ fn backoff(attempt: u32) {
 /// HONEST LIMIT (ADR M134-2): this is resolve-and-check, NOT resolve-then-connect. `minreq` exposes no custom
 /// resolver/connector, so the checked IP cannot be pinned through to the socket without replacing the HTTP client.
 /// A DNS-rebinding attacker who flips the record between this resolution and `minreq`'s retains a narrow window.
-/// That residual window is documented in `docs/benchmarks/m134-ssrf-hardening.md` rather than papered over.
+/// That residual window is documented in `wiki/benchmarks/m134-ssrf-hardening.md` rather than papered over.
 ///
 /// Escape hatch: `theodb.egress_allowlist` is an operator-only (`Suset`) GUC — never caller-settable — so a
 /// deliberate on-prem endpoint on 10/8 or 192.168/16 can be re-permitted without opening the class.

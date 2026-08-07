@@ -877,7 +877,7 @@ unsafe fn scan_ivf_aq_split_v7(
     // Stage 1 — read ONLY the CODE pages; AH-score; INLINE-SKIP non-overlapping labels before they cost a slot.
     // M91: selectivity-adaptive probing. A selective label filter starves the default `probes` — the true filtered
     // NN hide in lists the default never visits (measured: recall 0.741 @ 0.01% sel, recovered to ~1.0 by probing
-    // more lists; docs/benchmarks/m91-adaptive-filter.md). So when filtering, keep probing nearest lists PAST
+    // more lists; wiki/benchmarks/m91-adaptive-filter.md). So when filtering, keep probing nearest lists PAST
     // `probes` until the matching-candidate pool reaches the rerank target `rerank_pool` (naturally bounded by
     // cd.len()). A non-filter or loose-filter query breaks at exactly `probes` (target already met) ⇒ byte-identical
     // to the previous fixed `.take(probes)` scan (the no-regression guarantee). Extreme selectivity (matches ≪
