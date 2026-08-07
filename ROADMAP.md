@@ -8,6 +8,54 @@
 > código PRÓPRIO**, dependendo o **mínimo possível** de bibliotecas externas, **mantendo a engine PostgreSQL**
 > (C, wire-compat).
 
+## Como ler o status deste arquivo (convenção — leia antes de contar caixinhas)
+
+**O status de um milestone vive no header**, nunca nos bullets: `## M168 — [x]` é a declaração de conclusão, e é
+o que o `cycle-release`/`cycle-acceptance` lê e flipa.
+
+Os `- [ ]` sob **Definition of done** são a **especificação escrita no momento do plano** — o contrato do que
+seria feito. Eles não foram sendo tickados ao longo do projeto: a prática existiu num bloco (M59–M76) e foi
+abandonada depois, então **346 bullets seguem `[ ]` dentro de milestones concluídos**. Um `grep -c '\[ \]'`
+sobre este arquivo mede a especificação, não o progresso, e devolve um número enganoso.
+
+**A evidência de conclusão não mora aqui — mora na wiki.** Cada milestone entregue tem conceito em
+[`wiki/benchmarks/`](./wiki/) ou [`wiki/decisions/`](./wiki/decisions/index.md) com método, números e ressalvas,
+localizável pelo campo `milestone:` do frontmatter. Medido em 2026-08-07: **130 dos 149 concluídos** têm conceito
+citando seu id; a maior parte dos 19 restantes é o bloco M76–M81, cujas seis fases do IVF-AQ tiveram a evidência
+consolidada no M82 ([ADR 0037](./wiki/decisions/0037-m82-am-ivf-aq-measured-verdict.md)) em vez de por fase.
+
+**Estado em 2026-08-07:** 152 milestones · **151 concluídos** · **1 aberto (M169**, em andamento — ver
+`[Unreleased]` no CHANGELOG).
+
+**Lacunas de numeração são intencionais:** M23, M24, M27, M28, M29 foram **removidos em 2026-07-03** por saírem
+do escopo do repositório (control plane em Go, K8s, replicação, MCP write) e permanecem riscados abaixo, em vez
+de apagados — a numeração não é recompactada, para que nenhuma referência histórica passe a apontar outro
+milestone.
+
+**Os `benchmarks/artifacts/*.json` citados nos milestones antigos não estão na árvore de trabalho.** Eles eram
+os artefatos brutos sob `docs/benchmarks/` e saíram com a remoção daquela árvore; hoje existem apenas no
+histórico — `git show f7c7b93:docs/benchmarks/<arquivo>.json`. O caminho `benchmarks/artifacts/` é o destino
+**novo**, para onde os runners passaram a escrever. As citações antigas ficam como foram escritas: reescrevê-las
+mudaria o registro do que se afirmou à época, e o veredito legível de cada milestone está na wiki, não no JSON.
+
+## Linhagem dos roadmaps (um só arquivo, desde 2026-08-07)
+
+| Geração | Milestones | Onde está |
+|---|---|---|
+| v1 — tese de composição | M0–M16 | entregue como distribuição; superado pelo ADR 0006 |
+| v2 — own-code Rust | M17–M60 | **este arquivo** |
+| v3 — amplitude de produto | M61–M68 | **este arquivo**, § Roadmap v3 |
+| v4 — independência do pgvector | M69–M70 | **este arquivo** |
+| v5 — superioridade vetorial P0 | M60, M71–M74 | **este arquivo**, § Roadmap v5 |
+| v6 em diante | M75+ | **este arquivo** |
+
+`ROADMAP-v3.md` e `ROADMAP-v5.md` existiam em paralelo como drafts estratégicos e **foram removidos em
+2026-08-07**: seus milestones estavam **todos concluídos aqui** enquanto os arquivos seguiam mostrando `[ ]` em
+100% deles. O risco era concreto — o v5 se apresentava como "fechar o pilar P0 que segue parcial", quando o M73
+já havia medido esse pilar como fechado, com veredito de que a superioridade sobre o ScaNN é **não-alcançável**.
+Todo o conteúdo estratégico deles foi absorvido nas seções § Roadmap v3 e § Roadmap v5; os arquivos permanecem
+recuperáveis no histórico git (`git show c7e6b7d:ROADMAP-v3.md`, `git show c7e6b7d:ROADMAP-v5.md`).
+
 ## Visão
 
 TheoDB é um **banco de dados competitivo, open-source, baseado na engine PostgreSQL**, com a superfície de
@@ -543,6 +591,31 @@ race-free; o carrier atinge build competitivo (12 cores). Próximo: redução de
 
 ---
 
+### M45 — [x] Pareto recall×QPS em SIFT1M real vs pgvector hnsw — **a régua de paridade**
+
+**Objective:** estabelecer a régua honesta do pilar vetorial — fronteira Pareto recall×QPS medida em dataset
+real, contra o pgvector hnsw, com desvio publicado. É este milestone que **retratou** o claim de "~1,7–2,8×
+mais rápido que pgvector" do M42 (best-of-N em dados sintéticos degenerados — ADR 0012).
+
+**Definition of done:**
+
+- [x] Veredito **PARIDADE**, sob gate de *efeito maior que variância* aplicado sobre os níveis de recall compartilhados.
+- [x] Config casada entre os dois lados: 1M vetores, 500 queries, 3 runs com média **e desvio**, grade de `ef` varrida, dataset real, workers de manutenção desligados em ambos.
+- [x] Desvio publicado ao lado da média — o que expõe que o ponto `ef=200` (43,5 ± 19,1 QPS) é **instável**, em vez de tratá-lo como os demais.
+- [x] Build próprio medido mais rápido que a referência (271 s vs 467 s), herdando o M44.
+- [x] Artefato reproduzível: [`wiki/benchmarks/m45-pareto-sift1m.md`](./wiki/benchmarks/m45-pareto-sift1m.md).
+
+**Dependencies:** M32 (harness de escala), M44 (build paralelo).
+
+**Limite declarado pelo próprio artefato:** ele entrega **metade** do requisito para um claim comparativo
+público — o artefato reproduzível. **A outra metade, reprodução independente por terceiro, permanece EM ABERTO**
+(`public-copy.md` § 4). Nomear a metade faltante é o que impede um resultado válido de virar alegação indevida.
+
+*(Registrado retroativamente em 2026-08-07: entregue e citado 10× neste arquivo como a régua de paridade — e no
+`CLAUDE.md` como o marco M45 —, mas nunca teve header próprio.)*
+
+---
+
 ### M46 — [x] theodb_hnsw scan hot-path hygiene — fechar o déficit de QPS no alto recall (recall-neutro, benchmark-gated)
 
 **Objective (V2 — 1º milestone após o ROADMAP V1 completo):** o M45 (Pareto mean±std, SIFT1M) mediu PARIDADE
@@ -980,8 +1053,33 @@ recall fechada pelo caminho SBQ; 2 ciclos de droplet nesta iteração (`benchmar
 
 # Roadmap v3 — Amplitude de produto (HTAP + vector-relational + AI-native + operabilidade)
 
-> Ativado 2026-07-08 (sign-off do owner). Detalhe estratégico completo em `ROADMAP-v3.md`. 4 pilares, M61–M68.
-> Herda todas as travas do v2 (measurement-first, licenças D1, engine Postgres mantido, Regra 9). M60 diferido.
+> Ativado 2026-07-08 (sign-off do owner). 4 pilares, M61–M68 — **todos concluídos**.
+> Herda todas as travas do v2 (measurement-first, licenças D1, engine Postgres mantido, Regra 9). M60 diferido
+> à época, concluído depois. *(O detalhe estratégico, antes em `ROADMAP-v3.md`, foi absorvido abaixo; o arquivo
+> foi removido — ver § Linhagem dos roadmaps.)*
+
+**Estratégia que motivou o v3:**
+
+1. **Amplitude sobre profundidade** — o pilar vetorial já estava em paridade com pgvector; o v3 diversificou
+   para onde o TheoDB difere de "uma colagem de extensões": HTAP unificado, vetor first-class no relacional,
+   IA dentro do banco em own-code, e operabilidade.
+2. **Adotar quando own-code não paga (Regra 9)** — columnar/HTAP entrou por **adoção** da peça permissiva já
+   medida, não por reescrita (ADR-0013). *(Superado depois: o M143 removeu o `pg_duckdb` e o pilar passou a ser
+   100% own-code — ADR-0056/0057. A justificativa de adoção fica registrada porque foi a base da decisão da época.)*
+3. **Measurement-first (ADR 0002)** — cada milestone com gate reproduzível; honest-negative é resultado válido.
+4. **Incremental com paridade** — o produto permanece funcional a cada milestone.
+
+```
+Pilar A (HTAP):    M61 (adotar columnar) ──▶ M62 (HTAP surface)
+                        │
+Pilar B (vec-rel):      └──▶ M63 (vector join) ──▶ M64 (RAG-sobre-SQL, usa A+B)
+Pilar C (AI):      M65 (rerank) ──▶ M66 (chunking)              [independente de A/B]
+Pilar D (ops):     M67 (auto-tune) ──▶ M68 (observabilidade)    [independente]
+```
+
+**Fora de escopo do v3 (declarado à época):** reescrever columnar/BM25 próprios (Regra 9 — *revertido pelo
+M139/M143*); o carrier IVF e o 25× do ScaNN (esforço ALTO, diferido — *fechado como não-alcançável no M73*);
+control-plane / deploy / HA (fora do escopo deste repositório); reescrever engine/HTTP/serde/crypto (Regra 9).
 
 ### M61 — [x] Embarcar o columnar/HTAP (pg_mooncake/pg_duckdb) na distribuição — o gate de adoção do M30
 
@@ -1108,16 +1206,41 @@ Esta milestone faz a adoção: buildar a peça no PG17 (ou bump PG18), smoke end
 
 ---
 
-# Roadmap v5 — Superioridade vetorial P0 (MEDIDA)
+# Roadmap v5 — Superioridade vetorial P0 (MEDIDA) — **CONCLUÍDO, com veredito**
 
-> Detalhe estratégico + estado medido honesto em [`ROADMAP-v5.md`](./ROADMAP-v5.md). Fecha o pilar **P0 do
-> North Star** (`wiki/decisions/0002`) que segue parcial: **superioridade vetorial comprovada por benchmark**. Estado
-> medido: recall-parity vs pgvector ✅, mas o grafo próprio satura <0.99 a escala (**M60 aberto**); latência p50
-> paridade (não superior); head-to-head vs ScaNN (AlloyDB) = recall-paridade mas **~25–37× gap de QPS** (M33) —
-> a quantização anisotrópica + AH SIMD do ScaNN; **M57 (SBQ) e M59 (anisotrópica+AH) já deram honest-negative**.
-> **O v5 é measurement-first: cada milestone tem gate executável e ACEITA honest-negative como conclusão** (Regra
-> 3/5). Não promete vencer o ScaNN — promete o **veredito medido** de onde o TheoDB está vs o SOTA. **Fundação:
-> M60** (já abaixo). Sequência: M60 → M71 → M72 → M73 → (M74 condicional).
+> Ativado 2026-07-09 (sign-off do owner). M60, M71, M72, M73, M74 — **todos concluídos**. *(O detalhe
+> estratégico, antes em `ROADMAP-v5.md`, foi absorvido abaixo; o arquivo foi removido — ver § Linhagem.)*
+>
+> **⚠️ LEIA O VEREDITO ANTES DE REABRIR QUALQUER APOSTA DESTE PILAR.** O v5 existiu para fechar o pilar **P0 do
+> North Star** (`wiki/decisions/0002`) — superioridade vetorial comprovada por benchmark — e **fechou**:
+>
+> | Eixo | Veredito MEDIDO (M73, 2026-07-10) |
+> |---|---|
+> | Recall vs pgvector | **paridade own-code ALCANÇADA** (M60/M69/M70) |
+> | Throughput multi-cliente vs pgvector | **competitivo-a-superior** — +11% QPS a recall casado, 128d clusterizado (M72) |
+> | QPS vs ScaNN/AlloyDB | **superioridade NÃO-ALCANÇÁVEL** por extensão PG permissiva — gap de ~25–44× @ 0.99 é **de paradigma** (AH-LUT anisotrópico + não pagar o imposto MVCC/WAL) |
+>
+> Fonte de verdade: [`wiki/decisions/0035-m73-northstar-vector-verdict.md`](./wiki/decisions/0035-m73-northstar-vector-verdict.md)
+> + [`wiki/benchmarks/m73-headtohead-verdict.md`](./wiki/benchmarks/m73-headtohead-verdict.md). O M74 mediu o
+> melhor quantizador permissivo (RaBitQ) e concluiu que ele **compra memória, não QPS** (ADR-0036).
+>
+> **Três levers já deram honest-negative** — M57 (SBQ inline), M59 (anisotrópica + AH), M74 (RaBitQ). Propor um
+> quarto exige **dado novo**, não argumento. Posicionamento permitido: "paridade de recall + memória
+> billion-scale + AI-native/HTAP/aberto"; **jamais** "mais rápido que o AlloyDB no vetor".
+
+**Estratégia que motivou o v5:** fechar o P0 em quatro passos gated por medição, do pré-requisito ao veredito.
+Cada milestone com gate executável que **aceita honest-negative como conclusão** (Regra 3) — o valor é a régua e
+o veredito, não um número prometido. O pgvector permaneceu como **oráculo de controle** nos benchmarks
+(recall-parity gate) mesmo tendo sido removido da distribuição no M70 — instalável só no ambiente de benchmark.
+
+```
+M60 (recall≥0.99) ──▶ M71 (latência) ──▶ M72 (QPS multi-cliente) ──▶ M73 (veredito head-to-head)
+                                                                          └──▶ M74 (quant SOTA, CONDICIONAL)
+```
+
+**O que o v5 nunca foi (honestidade, declarada na abertura):** não era promessa de vencer o ScaNN; não reabria
+HA / replicação / control-plane (deploy/plataforma, fora do escopo deste repo); não fazia claim de performance
+sem artefato em `wiki/benchmarks/` (Regra 5 / `public-copy.md`).
 
 ## M71 — [x] Latência do AM: melhoria medida (multi-entry build) — DoD reenquadrada (ADR-0031)
 
@@ -3060,6 +3183,32 @@ bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan s�
 **Risks:** (a) `ORDER BY <texto>` — colação não-C/não-determinística DEVE declinar (M158 HIGH: determinístico ≠ byte-order); (b) o predicado do WHERE (`LIKE`) tem de rotear junto (M156) — se declinar, o top-k não é comparável; medir com o harness M164 que exige o Custom Scan de fato (não `diverged=0` trivial).
 
 **Prior art / referências:** `wiki/benchmarks/clickbench-fresh-vs-clickhouse-2026-07-27.md` (q23=110×, q24=73×, q25=113×, q26=132× medidos); memory `m158-late-mat-released` (colação/timer), `m156-text-where-released` (LIKE); `theodb_rs/src/am/columnar_project.rs`.
+
+---
+
+## M168 — [x] Decode proporcional a `k` no top-k de projeção (`ColumnarChunkStream`) — perf + falso-admit
+
+**Objective:** fechar o item pendente do M167 — o top-k de projeção decodificava a relação inteira antes de
+descartar tudo menos `k` linhas — e o **falso-admit** medido junto: um caso em que o roteamento aceitava o que
+não deveria.
+
+**Definition of done:**
+
+- [x] `ColumnarChunkStream` + `plan_columnar_scan` decodificam **por chunk-group** (10.000 linhas) em vez da
+      relação inteira; o custo de decode passa a ser proporcional a `k`.
+- [x] Medido no `q23` (`SELECT * … ORDER BY EventTime LIMIT 10`): maior bloco de **772 MiB → 17,9 MiB**.
+- [x] Falso-admit corrigido — o roteamento deixa de aceitar o caso que não deveria.
+- [x] Veredito publicado: [`wiki/benchmarks/m168-streaming-topk-verdict.md`](./wiki/benchmarks/m168-streaming-topk-verdict.md).
+
+**Dependencies:** M167 `[x]` (top-k de projeção), M160 `[x]` (decode zero-copy).
+
+**Nota de proveniência (a decisão de medição mais interessante do repositório):** os artefatos foram coletados
+num commit específico e as mudanças posteriores no código são **exclusivamente de comentário** — o documento traz
+o comando que verifica isso (o filtro por linhas não-comentário volta vazio). Uma sétima coleta apenas trocaria
+todos os números sem responder pergunta nenhuma. **Isso é rigor, não preguiça — e a diferença é ser verificável.**
+
+*(Registrado retroativamente em 2026-08-07: o milestone foi entregue, publicou verdict e é citado pelo M169 e
+pelo CHANGELOG, mas nunca teve header próprio — a numeração pulava de M167 para M169.)*
 
 ---
 

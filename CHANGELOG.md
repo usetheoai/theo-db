@@ -37,7 +37,44 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   artefatos brutos** de medição que viviam sob `docs/benchmarks/` saíram junto e passam a existir apenas
   no histórico — quem depender de um deles precisa recuperá-lo com `git show f7c7b93:docs/benchmarks/…`
 
+### Changed
+- **docs:** o roadmap passou a ser **um só arquivo**. `ROADMAP-v3.md` e `ROADMAP-v5.md` viviam em paralelo como
+  drafts estratégicos e mostravam **100% dos seus milestones em aberto** enquanto todos os 13 estavam concluídos
+  no roadmap ativo. O caso do v5 era o perigoso: ele se apresentava como "fechar o pilar P0 que segue parcial",
+  quando esse pilar havia sido fechado com veredito de que a superioridade vetorial sobre o ScaNN é
+  **não-alcançável** — quem o lesse reabriria uma aposta já refutada por medição. O conteúdo estratégico dos dois
+  foi absorvido no `ROADMAP.md` e os arquivos removidos; permanecem no histórico git
+
 ### Fixed
+- **docs:** o roadmap ativo declarava, na abertura da seção do v5, um estado que a própria medição já havia
+  superado — "M60 aberto", "o pilar segue parcial". A seção passou a abrir com o veredito medido do M73
+  (paridade de recall alcançada; QPS multi-cliente competitivo-a-superior vs pgvector; superioridade sobre
+  ScaNN/AlloyDB não-alcançável) e com o aviso de que três levers já deram honest-negative, de modo que propor um
+  quarto exige dado novo
+- **docs:** dois milestones entregues nunca tiveram registro no roadmap, e foram adicionados retroativamente. O
+  **M168** publicou verdict e é citado pelo M169 e pelo CHANGELOG (o número que ele moveu: maior bloco do `q23`,
+  de 772 MiB para 17,9 MiB). O **M45** é a **régua de paridade** do pilar vetorial — citado dez vezes no próprio
+  roadmap e no `CLAUDE.md` — e é o milestone que retratou o claim de "1,7–2,8× mais rápido que pgvector" medido
+  em dados degenerados. As demais lacunas de numeração (M23, M24, M27–M29) são intencionais: milestones removidos
+  do escopo em 2026-07-03, mantidos riscados para que nenhuma referência histórica mude de alvo
+- **docs:** o roadmap não explicava sua própria convenção de status, e um `grep` de caixinhas sobre ele devolvia
+  um número enganoso: o status vive no header do milestone, enquanto os 346 bullets `[ ]` restantes são a
+  especificação escrita no momento do plano. A convenção passou a estar declarada no topo, junto de onde a
+  evidência de conclusão realmente mora (a wiki) e da cobertura medida — 130 dos 149 concluídos
+- **docs:** o `CLAUDE.md` declarava `develop` como branch de trabalho, contradizendo a Regra 4 e o
+  `git-safety.md`, segundo os quais toda mudança **nasce** em `workspace` e `develop` apenas integra — seguir o
+  texto do projeto levaria a commitar exatamente onde o hook local bloqueia. Corrigido, com o fluxo completo
+  explícito. Na mesma seção, a contagem de ADRs dizia 12 quando são **60**
+- **docs:** a seção do acervo de referências primárias no `CLAUDE.md` manda ler papers e repositórios em
+  `knowledge-base/references/` e **citar `arquivo:linha`**, e esse diretório não existe no disco. A seção passou
+  a declarar o estado verificado e a instruir o caminho honesto enquanto não for repovoado, em vez de exigir uma
+  citação impossível
+- **docs:** a seção do acervo de conhecimento no `CLAUDE.md` descrevia um bundle, um contrato, um validador
+  e dois hooks que **não existem** — anunciava que a sessão era bloqueada ao publicar um número sem o
+  conceito correspondente, quando nenhum hook jamais conheceu o formato. Um documento normativo que promete
+  um gate inexistente é pior que não ter gate, porque quem lê confia nele. A seção passou a apontar o acervo
+  real (`wiki/`, 282 conceitos), o validador que de fato existe e roda, e a listar explicitamente o que
+  **não** é verificado por mecanismo nenhum
 - **docs:** o guia de migração mínima voltou a mostrar os comandos literais que recriam os índices
   (`USING hnsw`, `USING ivfflat`) durante a restauração. Sem eles, o leitor não sabia quais índices
   sobrevivem ao `pg_restore` sem inspecionar o dump
