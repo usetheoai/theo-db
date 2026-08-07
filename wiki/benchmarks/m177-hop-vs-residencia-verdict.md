@@ -28,6 +28,29 @@ modelo como **extensão instalável**. A troca é: economizar o hop HTTP local *
 modelo residente. O [prior art](/references/embedding-local-como-extensao-2026-08.md) apontou memória por
 conexão como o custo decisivo — este artefato põe número nos dois lados.
 
+# ⚠️ Retratação parcial (2026-08-07, mesma data) — a atribuição do lado 1 estava errada
+
+**O número de 15,55 ms abaixo é real, mas NÃO é o custo do hop.** Uma decomposição posterior, com o mesmo
+stack e sem modelo nenhum — só o canal — mediu o transporte de verdade:
+
+| o que | round-trip (n=200) |
+|---|---|
+| HTTP+JSON sobre loopback, **sem vetor** | **0,682 ± 0,104 ms** |
+| idem, devolvendo vetor **384d** | **1,369 ± 0,334 ms** |
+| idem, devolvendo vetor **1024d** | **1,718 ± 0,306 ms** |
+
+**O transporte custa ~1,4 ms, não 15,55 ms.** Os ~14 ms restantes da diferença entre os braços são
+diferença de implementação entre chamar `model.embed()` no processo e o servidor fazer o mesmo — não são
+o canal. Chamar aquela diferença de "custo do hop" foi atribuição indevida: o experimento comparava dois
+caminhos que diferem em mais de uma variável, e eu creditei o total à única que estava investigando.
+
+**Consequência sobre o veredito:** com o transporte a ~1,4 ms contra 41–60 ms de inferência e 7,15 ms de
+busca ANN (`ef=100`, [m45](/benchmarks/m45-pareto-sift1m.md)), o hop é **~2–3% do pipeline de consulta** —
+**abaixo do limiar de 5%** que o M177 declarou, antes de medir, como o ponto em que a Fase 2 deixa de se
+justificar por latência. **O critério de falsificação foi cruzado.**
+
+A seção original fica abaixo, sem edição, porque foi ela que fundamentou a primeira leitura.
+
 # Lado 1 — o hop custa 15 ms, e só importa em chamada unitária
 
 `BAAI/bge-small-en-v1.5`, mesmo modelo nos dois braços, `OMP_NUM_THREADS=1` em ambos, braços
@@ -86,6 +109,29 @@ vale para `jinaai/jina-embeddings-v3` no lado do embedding.
 **A cobertura multilíngue do `bge-reranker-base` NÃO foi verificada** por este artefato. Ele é MIT e foi
 medido em custo; se ele atende português é pergunta em aberto.
 
+# Os dois caminhos do produto, separados (correção de enquadramento)
+
+A primeira redação tratou "batch 1 vs batch 8" como regimes genéricos. O fluxo real do produto tem **dois
+caminhos de natureza oposta**, e o veredito só faz sentido separado por eles:
+
+| | **Ingestão** | **Consulta** |
+|---|---|---|
+| o que é | `INSERT` de texto/PDF/doc → [vectorizer](/features/16-vectorizer.md) embeda | usuário consulta → embeda **a query** → busca semântica |
+| tamanho | lote | **1 texto** |
+| sincronia | assíncrono, fora da transação de quem escreve | **síncrono, no caminho crítico do usuário** |
+| latência importa? | não — o worker absorve | **sim, é o tempo que o usuário espera** |
+
+**Orçamento medido do caminho de consulta:**
+
+| etapa | custo | fonte |
+|---|---|---|
+| inferência do embedding da query | **41–60 ms** | este artefato (384d / 1024d) |
+| transporte até o modelo | **~1,4 ms** | decomposição acima |
+| busca ANN (`ef=100`, recall 0,983) | **7,15 ms** | [m45](/benchmarks/m45-pareto-sift1m.md) — 139,9 QPS |
+
+**A consulta é dominada pela inferência, não pelo transporte nem pela busca.** O embedding da query custa
+**6 a 8 vezes a busca vetorial inteira** — o pilar que consumiu quarenta milestones de otimização.
+
 # O veredito
 
 **Uma cópia do modelo por backend está refutada para o regime multilíngue.** O stack multilíngue mais
@@ -99,9 +145,18 @@ o `pg_gembed` adota (cache por backend). A rota do **BackgroundWorker**
 ([ADR 0016](/decisions/0016-m54-vectorizer-worker-mechanism.md)) — uma cópia, fora do caminho da query —
 permanece viável e agora tem o número que a justifica.
 
-E há uma ironia útil no lado 1: o hop **só** é significativo em batch 1, e é precisamente no lote que o
-worker opera, onde ele deixa de ser mensurável. **A rota que resolve a memória também é a que menos
-ganha com a eliminação do hop.**
+**E a rota do worker não ajuda a consulta.** O worker cobre a *ingestão*; a consulta embeda **um** texto,
+de forma síncrona, no backend que atende o usuário. Ou seja: o caminho onde a latência importa é
+exatamente aquele em que o modelo precisaria estar residente no backend — que é a rota que a memória
+refuta.
+
+**A alavanca real da consulta é o modelo, não o lugar dele.** Medido aqui: `MiniLM-multilingual` faz
+16,0 ms contra 59,8 ms do `e5-large` em batch 1 — **3,7× de diferença de latência entre dois modelos
+multilíngues permissivos**, contra ~1,4 ms que se ganharia eliminando o transporte. **Escolher o modelo
+certo vale cerca de trinta vezes mais que embarcá-lo**, e não custa memória por backend nenhuma.
+
+Isso reordena o que a Fase 1 ainda deve fazer: a comparação de qualidade entre modelos — o item que
+segue aberto — não é o menos importante dos três. É o único que ataca o termo dominante.
 
 # O que este artefato NÃO mede
 
