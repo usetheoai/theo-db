@@ -3500,10 +3500,27 @@ modelo fica residente. Duas fases com gate entre elas; a segunda não existe se 
 
 ### Fase 1 — o gate (esta é a parte P0)
 
+> **Parcialmente MEDIDO em 2026-08-07** — artefato: [`wiki/benchmarks/m177-hop-vs-residencia-verdict.md`](./wiki/benchmarks/m177-hop-vs-residencia-verdict.md),
+> brutos em `benchmarks/artifacts/m177/`. Dois dos três itens do DoD abaixo têm número; o primeiro
+> (qualidade no nosso corpus) **não foi executado** e segue aberto.
+>
+> | Medido | Resultado |
+> |---|---|
+> | Custo do hop HTTP local | **15,55 ms** em batch 1 (27,2%, p=0,0000); **7,76 ms em batch 8 — não significativo** (p=0,1457) |
+> | Residência do modelo multilíngue | `multilingual-e5-large` (MIT) **1 735 MB/processo**; `mpnet-multilingual` 1 788 MB; `MiniLM-multilingual` 677 MB |
+> | Residência do rerank | `bge-reranker-base` (MIT) **1 787 MB**; o único rerank **multilíngue** do catálogo é cc-by-nc-4.0 → **BARRADO por D1** |
+>
+> **Consequência para a Fase 2:** a rota "uma cópia por backend" — a que o `pg_gembed` adota — está
+> **refutada em multilíngue**: o stack e5-large + bge-reranker custa **~3,5 GB por processo**, e dois
+> backends esgotam a memória livre da máquina de medição. Economizar 15,55 ms a esse preço não fecha.
+> A rota **BackgroundWorker** (ADR 0016) sobrevive, com a ironia registrada de que o hop só é
+> significativo em batch 1 — e o worker opera em lote, onde ele deixa de ser mensurável.
+
 **Definition of done:**
 
-- [ ] **Comparação de modelos no NOSSO corpus.** 3–4 modelos open-source permissivos servidos localmente, medidos com `benchmarks/theodb_bench/beir.py` + `significance.py` (nDCG@10, recall@100, bootstrap pareado). Ranking público — MTEB e afins — **seleciona candidatos; não é o veredito** (Regra 5 / gate G5). Entrega isolada: define o modelo default recomendado, **independentemente do desfecho arquitetural**.
-- [ ] **Custo do hop local medido.** Quanto do tempo ponta a ponta é hop HTTP para o servidor ONNX local (que os testes de integração já exercitam) e quanto é a inferência em si. **É o número que decide a Fase 2:** se a inferência domina e o hop some no ruído, a extensão in-process é complexidade acidental e o milestone fecha aqui — desfecho legítimo.
+- [ ] **Comparação de modelos no NOSSO corpus.** 3–4 modelos open-source permissivos servidos localmente, medidos com `benchmarks/theodb_bench/beir.py` + `significance.py` (nDCG@10, recall@100, bootstrap pareado). Ranking público — MTEB e afins — **seleciona candidatos; não é o veredito** (Regra 5 / gate G5). Entrega isolada: define o modelo default recomendado, **independentemente do desfecho arquitetural**. **Multilíngue é requisito, não preferência** (decisão do owner, 2026-08-07): o corpus real é pt-BR, e medir com modelo `-en` enviesa a escolha. Candidatos D1-limpos já levantados e com custo medido; falta a qualidade. **← ÚNICO ITEM AINDA ABERTO DA FASE 1**
+- [x] **Custo do hop local medido.** — 15,55 ms em batch 1 (27,2% do total, p=0,0000); **não significativo em batch 8** (7,76 ms, p=0,1457). O hop é custo fixo por requisição: pesa na chamada unitária e some no lote.
+- [x] **Custo da residência medido** (item acrescentado pela medição, não previsto no plano original): 0,7–1,8 GB por processo em multilíngue. É o lado que decide, e o plano original só previa medir o hop — medir apenas o transporte teria produzido meio veredito.
 - [ ] **Custo de empacotar os pesos levantado.** Centenas de MB num pacote de extensão versus download no primeiro uso, com o caso de ambiente offline declarado. Nenhuma fonte do prior art documenta isso, e pode ser o custo dominante sem aparecer em benchmark de latência.
 - [ ] Artefato em `wiki/benchmarks/` + CHANGELOG `[Unreleased]`.
 

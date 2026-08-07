@@ -38,6 +38,15 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   no histórico — quem depender de um deles precisa recuperá-lo com `git show f7c7b93:docs/benchmarks/…`
 
 ### Added
+- **theodb:** primeira medição do **M177 fase 1** — os dois lados da troca que decide a extensão de
+  embeddings local. O hop HTTP local custa **15,55 ms** numa chamada unitária (27,2% do tempo, p=0,0000) e
+  **deixa de ser mensurável em lote de 8** (p=0,1457): é custo fixo por requisição. Do outro lado, ter o
+  modelo residente custa **1,7 GB por processo** para o melhor multilíngue permissivo (`multilingual-e5-large`,
+  MIT) e mais **1,8 GB** para o rerank (`bge-reranker-base`, MIT). **A rota de uma cópia por backend fica
+  refutada em multilíngue** — ~3,5 GB por processo, com dois backends esgotando a memória livre da máquina
+  de medição. A rota do BackgroundWorker sobrevive. Achado de licença: o único rerank multilíngue do
+  catálogo é cc-by-nc-4.0 e está barrado por D1, assim como o `jina-embeddings-v3`. O artefato declara que
+  **não** mede qualidade — nenhum nDCG foi coletado, e esse item da fase 1 segue aberto
 - **theodb:** **M177 — embeddings locais como extensão instalável, marcado P0** pelo owner. O que recebe
   prioridade máxima é o **gate de medição**, não a construção: marcar como P0 um caminho cuja viabilidade
   ninguém mediu abandonaria o measurement-first que trava o roadmap. A Fase 1 compara modelos open-source no
