@@ -1,0 +1,20 @@
+{
+  "medido_em": "2026-08-08",
+  "ambiente": "droplet c-8 CPU dedicada efemero (174.138.95.185), theo-db:0.139.0, 20k vetores 128d",
+  "metodo": "container com --pid=host e o .so espelhado no MESMO caminho do host, para o perf resolver simbolos",
+  "descoberta_de_metodo": "o .so NAO e stripped: 86.191 simbolos estaticos com nomes Rust. O perfil anterior falhou por resolucao de caminho no namespace do container, nao por falta de debuginfo",
+  "symqg_build_top": [
+    {"pct": 39.27, "fn": "am::build::ambuild_symqg (dentro de pgrx run_guarded)"},
+    {"pct": 23.08, "fn": "vec::simd_x86::l2_sq"},
+    {"pct": 8.46,  "fn": "vec::l2_dist_from_bytes"},
+    {"pct": 2.31,  "fn": "ann::hnsw_parallel::select_from"},
+    {"pct": 1.16,  "fn": "vec::rabitq::RabitqQuantizer::rotate"}
+  ],
+  "hnsw_build_top": [
+    {"pct": 36.39, "fn": "vec::simd_x86::l2_sq"},
+    {"pct": 15.31, "fn": "vec::l2_dist_from_bytes"},
+    {"pct": 3.93,  "fn": "ann::hnsw_parallel::build_parallel"},
+    {"pct": 3.55,  "fn": "ann::hnsw_parallel::select_from"},
+    {"pct": 2.89,  "fn": "std::sync::RwLock::read_contended"}
+  ]
+}

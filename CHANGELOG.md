@@ -14,6 +14,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **theodb:** **o gargalo do SymQG tem nome** — `ambuild_symqg`, **39,27% do build**, medido com símbolos
+  resolvidos em CPU dedicada. O HNSW **não tem função análoga**: o build dele se distribui entre o kernel de
+  distância e o paralelismo. E os dois **compartilham o mesmo kernel SIMD** (`l2_sq`, `l2_dist_from_bytes`), de
+  modo que o SymQG **não é mais lento por calcular distância pior** — é mais lento por gastar 39% em outra
+  coisa. Isso não o torna promovível, mas muda o M176 de "problema estrutural do ambiente" para "39% do custo
+  numa função nomeada", que é alvo e não muro. **Correção de método junto:** o perfil anterior atribuiu a falha
+  de símbolos a "release sem debuginfo" — falso, o `.so` tem 86.191 símbolos estáticos; o `perf` falhava por
+  resolução de caminho no namespace do container, resolvido com `--pid=host` e um `docker cp`
 - **theodb:** **perfilado o SymQG para responder *por que* é mais lento** — pergunta que os três artefatos do e2
   deixaram aberta (nenhum menciona mecanismo, gargalo ou profiling). O resultado **contradiz a hipótese
   registrada na feature**, que atribuía a lentidão ao "imposto de página, WAL e MVCC": se fosse isso, o SymQG
