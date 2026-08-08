@@ -38,6 +38,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   no histórico — quem depender de um deles precisa recuperá-lo com `git show f7c7b93:docs/benchmarks/…`
 
 ### Added
+- **theodb:** medido que **processar em lote vale ~2,2×** no caminho de embedding — 7,82 ms por texto isolado
+  contra 3,54 ms em lote de 8, saturando por volta de 8–16 textos (medido em droplet de CPU dedicada,
+  reproduzido em duas coletas). Metade desse ganho **já está capturada**: o worker do vectorizer agrupa a fila
+  numa única chamada, então a ingestão já colhe o benefício. O caminho de **consulta não** — ele embeda um texto
+  por vez, de forma síncrona —, e é ali que a oportunidade segue aberta: agrupar pedidos concorrentes numa
+  janela curta melhora latência **e** throughput ao mesmo tempo, porque só troca espera de fila por espera de
+  janela. Não implementado; o ganho acima é do modelo, não do servidor
+
 - **theodb:** **retratado o ganho de 9,4× da configuração de thread** — ele **não existe em CPU dedicada**
   (1,00× a um cliente, 0,98× a oito, medido em droplet `c-8` ocioso). Era contenção da máquina compartilhada
   do começo ao fim: sob disputa, `OMP_NUM_THREADS=1` deixa o ONNX com uma thread competindo com dez
