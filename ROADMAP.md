@@ -3650,9 +3650,29 @@ que ninguém recebe. Decidir onde ele vive é pré-requisito.
 | dentro do pod do banco (sidecar) | soma ao `limits.memory` do pod; um pico derruba **o banco** |
 | embarcado na extensão | **refutado** — 1,7 GB por backend, e o CNPG piora (pesos fora do layout de image volume) |
 
+> **DECIDIDO no grill de 2026-08-08 (owner):**
+> **(a) Entrega** — imagem própria `theodb-embed` publicada com a distribuição, mais manifesto CNPG de
+> exemplo (`Deployment` + `Service`) e um serviço no compose para quem não usa Kubernetes.
+> **(b) Pesos** — **dentro da imagem** (~520 MB para o `nomic-embed-text-v1`): imagem imutável, sobe sem
+> rede, funciona air-gapped, versão do modelo presa à tag, e o scale-up não faz N réplicas baixarem o
+> mesmo peso.
+> **(c) Sobrecarga e batching** — **medir antes de decidir**: A/B entre o servidor atual com batching +
+> fila implementados por nós e um servidor de inferência pronto de CPU (`text-embeddings-inference`,
+> HuggingFace, Rust — licença e tamanho **não verificados**). Régua existente: 2,2× de batching e ~195 rps
+> medidos. É o rigor do M143 ao remover o `pg_duckdb` — medir antes de trocar. **Isso vira o M181.**
+>
+> Fundamentação do SOTA: o padrão de produção (NVIDIA Triton) combina **dynamic batching** com **queue
+> policy** — tamanho máximo, prioridade e timeout de fila. Ou seja, o batching do M178 e o limite de
+> sobrecarga **são a mesma peça**, não duas. Ressalva: Triton e vLLM são para GPU e frota multi-modelo;
+> nosso caso é um encoder em CPU, e levar Triton para isso é levar um cluster para resolver um Deployment.
+>
+> `pgpool` foi levantado e **não se aplica a esta camada**: ele enfileira conexões *PostgreSQL*, e o
+> gargalo medido está no servidor HTTP de embeddings. Ele **é** relevante para o problema vizinho — o
+> footgun do ADR 0007, backends presos durante a chamada — que segue **não medido**.
+
 **Definition of done:**
 
-- [ ] Decisão registrada em ADR, escolhendo entre processo ao lado e Deployment/Service — com a restrição do CNPG explicitada.
+- [x] Decisão de entrega e de pesos registrada (grill 2026-08-08). Falta transcrevê-la em ADR formal.
 - [ ] O servidor sai de `benchmarks/` para um caminho de produção, com o modelo default sendo o **recomendado por medição**: `nomic-embed-text-v1` (Apache-2.0, MRR@10 0,6749 a 53,7 ms — [veredito de qualidade](./wiki/benchmarks/m177-qualidade-ptbr-verdict.md)).
 - [ ] `theodb.embedding_endpoint` aponta para ele **por padrão** — instalar e funcionar sem chave, sem escolher nada.
 - [ ] Gate D1 sobre o runtime (`onnxruntime`) e sobre os pesos do modelo; peso da imagem medido e declarado.

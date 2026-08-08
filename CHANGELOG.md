@@ -38,6 +38,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   no histórico — quem depender de um deles precisa recuperá-lo com `git show f7c7b93:docs/benchmarks/…`
 
 ### Added
+- **theodb:** decidido no grill com o owner como o servidor de embeddings é entregue: **imagem própria**
+  `theodb-embed` com manifesto CloudNativePG de exemplo, e **pesos dentro da imagem** (~520 MB) para que ela
+  suba sem rede, funcione air-gapped e prenda a versão do modelo à tag. Sobre o comportamento em sobrecarga, a
+  decisão foi **medir antes de escolher**: A/B entre implementar batching e fila no servidor atual e adotar um
+  servidor de inferência de CPU pronto. Fundamentação: o padrão de produção (Triton) combina dynamic batching
+  com queue policy — de modo que o batching do M178 e o limite de sobrecarga **são a mesma peça**. Registrado
+  também que `pgpool` **não se aplica** a esta camada: ele enfileira conexões PostgreSQL, e o gargalo medido
+  está no servidor HTTP
 - **theodb:** **M180 — empacotar o servidor de embeddings na distribuição**, o item que separa a capacidade
   entregue do produto entregue. O modelo local funciona e o usuário não o recebe: o servidor **não está na
   imagem** (verificado no `Dockerfile`) e o guia manda rodar `python benchmarks/servers/embedding_server.py` —
