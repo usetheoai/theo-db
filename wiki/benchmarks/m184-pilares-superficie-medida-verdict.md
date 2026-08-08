@@ -83,6 +83,26 @@ lakehouse estão presentes e amplos (23 e 4 funções), coerentes com as notas 3
 | **`rerank.rs`** | **1** |
 | **`parquet.rs`** | **0** |
 
+# Eixo crash-safety — EXECUTADO, não inventariado
+
+`kill -9` no postmaster (PID 1 do container), restart, e comparação de checksum antes/depois. Recovery
+confirmado no log do servidor.
+
+| pilar | antes | depois | veredito |
+|---|---|---|---|
+| **vetorial** | 5 000 linhas | 5 000 linhas | busca ANN devolve 10 resultados pós-recovery — **índice utilizável** |
+| **colunar** | `md5 d89aa957…` | `md5 d89aa957…` | **idêntico** |
+| heap (controle) | `md5 d89aa957…` | `md5 d89aa957…` | idêntico |
+| **grafo** | 1 000 arestas | 1 000 arestas | preservado |
+
+**Verde nos quatro.** E um resultado colateral que vale por si: o `theodb_columnar` produz **md5
+byte-idêntico ao heap** sobre os mesmos 50 000 registros — a propriedade que o
+[m128](/benchmarks/m128-clickbench-columnar.md) mediu em 43 queries do ClickBench, aqui reconfirmada por
+outro caminho, e **também depois do crash**.
+
+Isto substitui o inventário anterior: os 17 scripts de `isolation/` continuam sem rodar (exigem
+instalação pgrx do fonte), mas a propriedade que eles protegem foi **verificada por execução direta**.
+
 # As divergências, em ordem de gravidade
 
 **1. O SymQG está no default** (acima) — e o eixo de performance agrava: além de ser 2,6–3,9× mais lento
@@ -103,10 +123,18 @@ o nome é `theodb_hnsw_l2_ops`. Quem seguir a nomenclatura do pgvector recebe
 
 # O que este artefato NÃO mede
 
-Cobre **três** dos cinco eixos: presença, performance e cobertura de teste. **Não** mede **qualidade de
-recuperação** por pilar (só o vetorial tem, do M177) nem **crash-safety executada** — os 17 scripts de
-`isolation/` foram inventariados, não rodados. Esses dois eixos seguem sem verificação, e o M184 continua
-aberto para eles.
+Cobre **quatro** dos cinco eixos: presença, performance, cobertura de teste e crash-safety executada.
+
+**Não** mede **qualidade de recuperação por pilar** — e é uma lacuna com razão estrutural, não descuido:
+qualidade de recuperação só é definível onde há recuperação. O vetorial tem (M45/M177), o lexical teria
+mas **expõe zero funções**, e colunar, lakehouse e grafo não recuperam nada — para eles, o análogo é
+**correção**, medida acima como md5 idêntico ao heap. O único pilar com o eixo genuinamente aberto é o
+**híbrido**, cuja qualidade o [m123](/benchmarks/m123-hybrid-significance.md) já mediu como
+não-significativa sobre o vetorial puro.
+
+O dataset é **sintético e pequeno** (5k–200k linhas). Os tempos servem para **comparar pilares entre si
+na mesma máquina**, não como números publicáveis de capacidade — para isso existem os artefatos de escala
+do M45 e do ClickBench.
 
 O dataset é **sintético e pequeno** (20k vetores, 200k linhas). Os tempos servem para **comparar pilares
 entre si na mesma máquina**, não como números publicáveis de capacidade — para isso existem os artefatos

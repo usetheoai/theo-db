@@ -14,6 +14,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **theodb:** **M184 — crash-safety EXECUTADA**, fechando o quarto eixo: `kill -9` no postmaster, restart e
+  comparação de checksum. **Verde nos quatro pilares** — vetorial preserva 5 000 linhas e o índice continua
+  servindo busca pós-recovery; colunar, heap de controle e grafo com checksum idêntico. Resultado colateral: o
+  `theodb_columnar` produz **md5 byte-idêntico ao heap** sobre 50 000 registros, antes e depois do crash — a
+  propriedade que o m128 mediu em 43 queries do ClickBench, reconfirmada por outro caminho. Os 17 scripts de
+  `isolation/` seguem sem rodar (exigem instalação pgrx do fonte), mas a propriedade que protegem foi
+  verificada por execução direta
 - **theodb:** **M184 — três divergências medidas** entre a tabela de maturidade e a execução, em CPU dedicada.
   **(1)** O `theodb_symqg` está registrado no binário default (nota 1 dizia "experimental") **e** tem build
   **3,5× mais lento** que o HNSW no mesmo dataset — somado aos 2,6–3,9× de busca do e2, é superfície pública
