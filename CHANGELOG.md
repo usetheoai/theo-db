@@ -14,6 +14,16 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **theodb:** o módulo `parquet.rs` (lakehouse) tinha **zero testes próprios** — lacuna medida pelo M184 contra
+  uma nota de maturidade que exigia "testado". Acrescentados **6 testes**: as duas representações de string do
+  Arrow que o leitor de Parquet devolve conforme o schema do arquivo (tratar só uma quebraria em arquivo real,
+  e silenciosamente), o **caso negativo** de tipo errado exigindo erro tipado com o tipo real na mensagem —
+  porque um `Vec` vazio ali viraria "categoria sem linhas" rio abaixo, dado errado em vez de erro —, a borda de
+  array vazio (Parquet com zero linhas é válido), o pool de memória do DataFusion não-degenerado, e o **REVOKE
+  de PUBLIC** das três primitivas de I/O de arquivo, que vive num `extension_sql!` e sumiria em silêncio num
+  refactor. **Não compile-verificados localmente**: o toolchain pgrx desta máquina está incompleto
+  (`~/.pgrx/18.4/pgrx-install` sem `pg_config`) e a imagem `theodb-builder` não existe aqui — a verificação
+  fica para o CI ou para `scripts/pgrx-test-in-builder.sh`
 - **theodb:** **retratada uma das três divergências que o M184 alegou.** Eu havia concluído que os opclasses
   documentados não existiam, porque `USING theodb_hnsw (v vector_l2_ops)` falha. O comando falha, a conclusão
   não: existem **dois caminhos coerentes** — nativo (`theodb_hnsw` + `theodb_hnsw_l2_ops`) e compatibilidade
