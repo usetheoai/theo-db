@@ -13,6 +13,15 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **theodb:** **retratada uma das três divergências que o M184 alegou.** Eu havia concluído que os opclasses
+  documentados não existiam, porque `USING theodb_hnsw (v vector_l2_ops)` falha. O comando falha, a conclusão
+  não: existem **dois caminhos coerentes** — nativo (`theodb_hnsw` + `theodb_hnsw_l2_ops`) e compatibilidade
+  pgvector via shim do ADR 0058 (`hnsw` + `vector_l2_ops`) — e eu cruzei um com o outro sem instalar o shim
+  antes de concluir. Verificado: com `CREATE EXTENSION vector`, a sintaxe pgvector **funciona**. Sobra um
+  resíduo real e bem menor: a mensagem de erro não sugere o opclass correto nem menciona o shim, o que é
+  melhoria de diagnóstico
+
 ### Added
 - **theodb:** **M184 — crash-safety EXECUTADA**, fechando o quarto eixo: `kill -9` no postmaster, restart e
   comparação de checksum. **Verde nos quatro pilares** — vetorial preserva 5 000 linhas e o índice continua

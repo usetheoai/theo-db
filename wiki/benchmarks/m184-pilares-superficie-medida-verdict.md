@@ -1,7 +1,7 @@
 ---
 type: Measurement
-title: m184 — superfície, performance e cobertura por pilar: três divergências da tabela de maturidade
-description: O SymQG está no binário default e tem build 3,5× mais lento; o lakehouse tem zero testes próprios contra uma nota que exigia testado; e os opclasses documentados não existem com o nome do pgvector.
+title: m184 — superfície, performance, cobertura e crash-safety por pilar: duas divergências reais e uma retratada
+description: O SymQG está no binário default e tem build 3,5× mais lento, e o lakehouse tem zero testes próprios contra uma nota que exigia testado — mas a terceira divergência alegada era erro meu, retratado no mesmo dia.
 resource: benchmarks/artifacts/m184/pillar-surface-measured.json
 tags: [benchmark, m184, pilares, maturidade, divergencia, catalogo, superficie-sql, parcial]
 milestone: M184
@@ -114,9 +114,30 @@ dataset. Nota atribuída 1; a realidade é superfície pública com custo medido
 `isolation/crash_parquet.sh`, então crash-safety está coberta; **cobertura de teste unitário, não.** A
 nota estava alta.
 
-**3. Os opclasses documentados não são os reais.** `USING theodb_hnsw (v vector_l2_ops)` **falha** —
-o nome é `theodb_hnsw_l2_ops`. Quem seguir a nomenclatura do pgvector recebe
-`operator class does not exist`. Não é divergência de nota, é de documentação, e só aparece executando.
+**3. ~~Os opclasses documentados não são os reais.~~ — RETRATADO no mesmo dia.**
+
+A afirmação original: `USING theodb_hnsw (v vector_l2_ops)` falha, logo a documentação estaria errada.
+**O comando falha, mas a conclusão não se sustenta** — verificado depois, com o
+[shim de compatibilidade](/decisions/0058-pgvector-compat-shim.md) instalado:
+
+```sql
+CREATE EXTENSION vector;                          -- o shim (ADR 0058)
+CREATE INDEX ON t USING hnsw (v vector_l2_ops);   -- CREATE INDEX  ✓
+```
+
+**Funciona.** São dois caminhos coerentes, e eu misturei um com o outro:
+
+| caminho | AM | opclass |
+|---|---|---|
+| nativo | `theodb_hnsw` | `theodb_hnsw_l2_ops` |
+| compat pgvector (shim) | `hnsw` | `vector_l2_ops` |
+
+`USING theodb_hnsw (v vector_l2_ops)` cruza os dois — e falhar é o comportamento **correto**. A
+`wiki/features/02-indice-hnsw.md:39` sempre disse isso; eu não instalei o shim antes de concluir.
+
+**Sobra apenas um resíduo real:** a mensagem de erro (`operator class "vector_l2_ops" does not exist for
+access method "theodb_hnsw"`) não sugere o opclass correto nem menciona o shim. Isso é melhoria de
+diagnóstico, não defeito de documentação — e de gravidade muito menor que a alegada.
 
 **Confirmações:** vetorial com 60 testes e busca em 3,7 ms sustenta a nota 4. Colunar com 87 testes no
 `am/` sustenta a 3. Lexical com 6 testes e zero funções expostas sustenta a 2.
