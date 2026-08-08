@@ -1,7 +1,7 @@
 ---
 type: Measurement
-title: m184 (parcial) — a superfície real dos pilares no binário default, e a primeira divergência da tabela de maturidade
-description: Consulta ao catálogo do PostgreSQL mostra que o SymQG está registrado como access method no binário default, contra a nota que o classificou como experimental — a avaliação por leitura errou onde a execução responde.
+title: m184 — superfície, performance e cobertura por pilar: três divergências da tabela de maturidade
+description: O SymQG está no binário default e tem build 3,5× mais lento; o lakehouse tem zero testes próprios contra uma nota que exigia testado; e os opclasses documentados não existem com o nome do pgvector.
 resource: benchmarks/artifacts/m184/pillar-surface-measured.json
 tags: [benchmark, m184, pilares, maturidade, divergencia, catalogo, superficie-sql, parcial]
 milestone: M184
@@ -54,11 +54,63 @@ consequência para quem instala.
 ("fora do binário default") estava certa, e agora por catálogo, não por leitura do `Cargo.toml`. Grafo e
 lakehouse estão presentes e amplos (23 e 4 funções), coerentes com as notas 3.
 
+# Eixo performance — medido em CPU dedicada
+
+20 000 vetores 128d, 200 000 linhas colunares, droplet `c-8` efêmero:
+
+| pilar | operação | tempo |
+|---|---|---|
+| **vetorial** | build `theodb_hnsw` (20k) | 4 579 ms |
+| | busca ANN top-10 | **3,7 ms** |
+| | build `theodb_symqg` (20k) | **16 056 ms — 3,5× mais lento que o HNSW** |
+| **colunar** | `INSERT` 200k | 452,6 ms |
+| | `GROUP BY` | 144,6 ms |
+| | `min`/`max` | 104,8 ms |
+| lexical nativo (`tsvector`) | busca em 20k | 30,1 ms |
+
+# Eixo cobertura de teste — contagem no fonte
+
+310 testes no total. Por pilar, os extremos importam mais que a soma:
+
+| pilar | testes |
+|---|---|
+| `am/` (colunar + AM) | 87 |
+| `vec/` + `ann/` (vetorial) | 60 |
+| grafo (4 arquivos) | 35 |
+| vectorizer | 26 |
+| lexical | 6 |
+| **`embed.rs`** | **1** |
+| **`rerank.rs`** | **1** |
+| **`parquet.rs`** | **0** |
+
+# As divergências, em ordem de gravidade
+
+**1. O SymQG está no default** (acima) — e o eixo de performance agrava: além de ser 2,6–3,9× mais lento
+na busca ([e2](/benchmarks/e2-symqg-inpg-verdict.md)), o **build é 3,5× mais lento** que o HNSW no mesmo
+dataset. Nota atribuída 1; a realidade é superfície pública com custo medido em dois eixos.
+
+**2. O lakehouse tem zero testes próprios.** `parquet.rs` expõe 4 funções e tem **0** `#[test]`/`#[pg_test]`
+— há apenas 2 testes citando parquet no `lib.rs`. A nota **3** exigia "testado". Existe
+`isolation/crash_parquet.sh`, então crash-safety está coberta; **cobertura de teste unitário, não.** A
+nota estava alta.
+
+**3. Os opclasses documentados não são os reais.** `USING theodb_hnsw (v vector_l2_ops)` **falha** —
+o nome é `theodb_hnsw_l2_ops`. Quem seguir a nomenclatura do pgvector recebe
+`operator class does not exist`. Não é divergência de nota, é de documentação, e só aparece executando.
+
+**Confirmações:** vetorial com 60 testes e busca em 3,7 ms sustenta a nota 4. Colunar com 87 testes no
+`am/` sustenta a 3. Lexical com 6 testes e zero funções expostas sustenta a 2.
+
 # O que este artefato NÃO mede
 
-Ele cobre **um** eixo da régua — presença na superfície. **Não** mede performance, qualidade, crash-safety
-nem cobertura de teste, que são os outros eixos das notas atribuídas. As notas 0–5 **continuam sem
-verificação completa**, e o M184 continua aberto.
+Cobre **três** dos cinco eixos: presença, performance e cobertura de teste. **Não** mede **qualidade de
+recuperação** por pilar (só o vetorial tem, do M177) nem **crash-safety executada** — os 17 scripts de
+`isolation/` foram inventariados, não rodados. Esses dois eixos seguem sem verificação, e o M184 continua
+aberto para eles.
+
+O dataset é **sintético e pequeno** (20k vetores, 200k linhas). Os tempos servem para **comparar pilares
+entre si na mesma máquina**, não como números publicáveis de capacidade — para isso existem os artefatos
+de escala do M45 e do ClickBench.
 
 Um limite honesto de método: contar `pg_extern` no fonte e contar `pg_proc` no catálogo **discordam** —
 `graph.rs` tem 9 `pg_extern` e o catálogo mostra 23 funções com nome de grafo, porque o `api.rs` é um

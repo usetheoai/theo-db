@@ -14,6 +14,15 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **theodb:** **M184 — três divergências medidas** entre a tabela de maturidade e a execução, em CPU dedicada.
+  **(1)** O `theodb_symqg` está registrado no binário default (nota 1 dizia "experimental") **e** tem build
+  **3,5× mais lento** que o HNSW no mesmo dataset — somado aos 2,6–3,9× de busca do e2, é superfície pública
+  cara em dois eixos, o que agrava o M176. **(2)** O `parquet.rs` tem **zero testes próprios** contra uma nota
+  3 que exigia "testado" — crash-safety está coberta por script de isolation, cobertura unitária não.
+  **(3)** Os opclasses documentados **não existem** com o nome do pgvector: `vector_l2_ops` falha, o real é
+  `theodb_hnsw_l2_ops`, e quem seguir a nomenclatura herdada recebe erro. Confirmações registradas com a mesma
+  clareza: vetorial (60 testes, busca 3,7 ms) sustenta a nota 4; colunar (87 testes) sustenta a 3; lexical
+  (zero funções expostas) sustenta a 2
 - **theodb:** primeira entrega do **M184**, e ela já achou uma divergência da tabela de maturidade: consultando
   o catálogo do PostgreSQL no binário default (CPU dedicada, imagem 0.139.0), o **`theodb_symqg` está
   registrado como access method** — contra a nota 1 que o classificara como "experimental, não recomendado
