@@ -13,6 +13,15 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **theodb:** o **M176 (SymQG) muda de natureza** com a medição do M184. Ele fora escrito assumindo "código
+  mantido sem consumidor" — dívida interna barata. A medição desmente: o `theodb_symqg` está **registrado como
+  access method no binário default**, com opclass exposto, e um usuário pode escrever `USING theodb_symqg`
+  hoje e receber um índice **3,5× mais lento no build** e **2,6–3,9× mais lento na busca**. Não é dívida
+  interna, é **superfície pública cara**, e nada no produto avisa — "não recomendado" no `feature_status` não
+  é "indisponível". O leque de saídas ganhou uma que não estava previsto e é a mais barata: **esconder atrás
+  de feature flag**, o mesmo tratamento do lexical, que preserva o código para estudo sem expor quem instala
+
 ### Fixed
 - **theodb:** o módulo `parquet.rs` (lakehouse) tinha **zero testes próprios** — lacuna medida pelo M184 contra
   uma nota de maturidade que exigia "testado". Acrescentados **6 testes**: as duas representações de string do

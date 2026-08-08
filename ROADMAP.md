@@ -3455,6 +3455,33 @@ com evidência sintética é exatamente a `cobertura-alegada-sem-execucao` que o
 
 ## M176 — [ ] SymQG: promover com evidência ou aposentar (1 → 4, admite remoção)
 
+> **AGRAVADO pela medição do M184 (2026-08-08).** Este milestone foi escrito assumindo que o SymQG era
+> "código mantido sem consumidor" — dívida interna, barata de carregar. **A medição desmente:**
+>
+> | fato medido | fonte |
+> |---|---|
+> | `theodb_symqg` está **registrado como access method no binário default**, sem feature flag | catálogo do PostgreSQL, [m184](./wiki/benchmarks/m184-pilares-superficie-medida-verdict.md) |
+> | opclass `theodb_symqg_l2_ops` exposto — o usuário **pode** escrever `USING theodb_symqg` hoje | idem |
+> | **build 3,5× mais lento** que o HNSW no mesmo dataset (16 056 ms vs 4 579 ms, 20k vetores) | idem |
+> | busca **2,6–3,9× mais lenta** a recall casado | [e2](./wiki/benchmarks/e2-symqg-inpg-verdict.md) |
+>
+> **Não é dívida interna — é superfície pública com custo medido em dois eixos.** Um usuário que a
+> descubra recebe um índice pior em build e em busca, sem nada no produto que o avise: o
+> `feature_status` da wiki diz "não recomendado", e *não recomendado* não é *indisponível*.
+>
+> **A decisão sobe de prioridade e muda de natureza.** Deixa de ser higiene de repositório e passa a ter
+> consequência para quem instala. Três saídas, e a do meio é a que o milestone original não previa:
+>
+> | saída | custo |
+> |---|---|
+> | **aposentar** — remover AM, opclass e `symqg_spike.rs` | perde-se o spike; ganha-se `.so` menor e uma armadilha a menos |
+> | **esconder atrás de feature flag** — mesmo tratamento do lexical | mantém o código para estudo sem expor o usuário; é a saída mais barata e não estava no leque |
+> | **promover** | exige lever medido que reverta **dois** eixos, não um |
+>
+> **O ônus da promoção cresceu**: antes bastava reverter a busca; agora o build também está medido como
+> pior. E vale o anti-sunk-cost — o e2 custou três artefatos, e isso não é razão para manter.
+
+
 **Objective:** o `theodb_symqg` é `experimental — não recomendado como default` e foi **medido mais lento** que
 o índice existente: o e2 mediu o AM atual **2,6–3,9× mais rápido a recall casado**, com os dois access methods
 sobre a MESMA tabela. Um índice que não é recomendado e é mais lento não é um pilar em construção — é código
