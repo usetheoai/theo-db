@@ -24,8 +24,8 @@ localizável pelo campo `milestone:` do frontmatter. Medido em 2026-08-07: **130
 citando seu id; a maior parte dos 19 restantes é o bloco M76–M81, cujas seis fases do IVF-AQ tiveram a evidência
 consolidada no M82 ([ADR 0037](./wiki/decisions/0037-m82-am-ivf-aq-measured-verdict.md)) em vez de por fase.
 
-**Estado em 2026-08-08:** 165 milestones · **151 concluídos** · **14 abertos** — M169 (em andamento, ver
-`[Unreleased]` no CHANGELOG) e M170–M183, o **Roadmap v7**: levar todos os pilares a maturidade ≥ 4.
+**Estado em 2026-08-08:** 166 milestones · **151 concluídos** · **15 abertos** — M169 (em andamento, ver
+`[Unreleased]` no CHANGELOG) e M170–M184, o **Roadmap v7**: levar todos os pilares a maturidade ≥ 4.
 **O M177 (embeddings locais) é P0**, marcado pelo owner em 2026-08-07 — a Fase 1 dele roda à frente de
 M170–M176, e a Fase 2 é condicional ao gate que ela produz.
 
@@ -50,7 +50,7 @@ mudaria o registro do que se afirmou à época, e o veredito legível de cada mi
 | v4 — independência do pgvector | M69–M70 | **este arquivo** |
 | v5 — superioridade vetorial P0 | M60, M71–M74 | **este arquivo**, § Roadmap v5 |
 | v6 — colunar, lexical, grafo, lakehouse | M75–M169 | **este arquivo** |
-| v7 — maturidade ≥ 4 em todos os pilares | M170–M183 | **este arquivo**, § Roadmap v7 |
+| v7 — maturidade ≥ 4 em todos os pilares | M170–M184 | **este arquivo**, § Roadmap v7 |
 
 `ROADMAP-v3.md` e `ROADMAP-v5.md` existiam em paralelo como drafts estratégicos e **foram removidos em
 2026-08-07**: seus milestones estavam **todos concluídos aqui** enquanto os arquivos seguiam mostrando `[ ]` em
@@ -3744,6 +3744,45 @@ reprodução por terceiro segue em aberto desde julho.
 
 **Risks:** publicar sem a reprodução independente viola a regra do próprio projeto e transforma um número
 honesto em claim indefensável.
+
+## M184 — [ ] Medir cada pilar com rigor, e apurar quanto a avaliação de maturidade errou
+
+**Objective:** em 2026-08-07 este roadmap ganhou uma tabela de maturidade 0–5 por pilar (§ Roadmap v7) que
+motivou os M170–M176. **Ela não era medição.** Foi produzida lendo `feature_status` da wiki, contando testes
+por diretório e aplicando uma régua que eu mesmo propus — sem executar nada. O único pilar com número real
+era o vetorial, e mesmo ele vinha de artefatos de julho.
+
+O que justifica reabrir agora não é rigor abstrato: **o M177 derrubou cinco conclusões minhas por defeito de
+instrumento** — hop negativo por CPU desigual, keep-alive invertido por Nagle, saturação estrangulada por
+`OMP_NUM_THREADS`, colapso e vazamento de memória que eram contenção de máquina, e um ganho de 9,4× que não
+existe em hardware dedicado. Se a medição direta errou cinco vezes, uma avaliação por leitura de documentação
+merece desconfiança maior, não menor.
+
+**A entrega não é uma nota nova — é a diferença.** Um pilar cuja medição confirmar a nota vale tão pouco
+quanto um que a contradiga; o que tem valor é saber **onde a leitura e a execução divergem**, porque isso
+calibra toda avaliação futura feita do mesmo jeito.
+
+**Definition of done:**
+
+- [ ] Cada pilar com **pelo menos um número executado nesta rodada**, em CPU dedicada, com o comando registrado: vetorial, colunar, IA, lakehouse, híbrida, grafo, lexical, SymQG.
+- [ ] Para cada pilar, a comparação explícita **nota atribuída em 2026-08-07 × nota medida**, com a divergência nomeada quando houver — e "confirmou" dito com a mesma clareza que "errou".
+- [ ] **Perfil onde o número surpreender.** A régua desta sessão: número inesperado é hipótese sobre o instrumento antes de ser hipótese sobre o sistema. `py-spy` / `perf` / decomposição por camada no padrão do `m177_layers.py`.
+- [ ] A régua 0–5 **reexaminada contra o que a medição mostrou** — se um critério não distinguiu nada na prática, ele sai; se faltou eixo, ele entra. A régua é proposta desta avaliação, não artefato do projeto, e nada obriga a mantê-la.
+- [ ] Conceito em `wiki/benchmarks/` e a tabela do § Roadmap v7 **atualizada ou retratada**, com a versão anterior preservada — a disciplina que esta sessão aplicou cinco vezes.
+- [ ] **Declarar o que continuou sem medir**, por pilar. Um eixo não medido nomeado vale mais que uma nota inventada para completar a linha.
+
+**Dependencies:** nenhuma técnica. Reusa `benchmarks/theodb_bench/` (BEIR, known-item, significância,
+ClickBench, HTAP) e os seis instrumentos `m177_*`. Precisa de **droplet dedicado** — máquina compartilhada
+invalidou cinco medições e invalidaria estas.
+
+**Risks:** (a) **viés de confirmação** — eu escrevi a tabela original, e medir para confirmá-la é o desfecho
+mais confortável e o menos útil; o DoD exige a divergência nomeada justamente por isso; (b) oito pilares é
+escopo grande, e a tentação é medir o fácil e estimar o resto — o último item do DoD existe contra isso;
+(c) alguns eixos (dogfood, reprodução por terceiro) **não são mensuráveis por engenharia** e continuarão
+abertos, o que deve ser dito e não contornado.
+
+**Prior art / referências:** a tabela original em § Roadmap v7 deste arquivo; as cinco retratações em
+`wiki/benchmarks/m177-*` e em `wiki/log.md`; `benchmarks/theodb_bench/`, `benchmarks/m177_*.py`.
 
 ## Sequência do v7
 

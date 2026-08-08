@@ -14,6 +14,15 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **theodb:** **M184 — medir cada pilar com rigor e apurar quanto a avaliação de maturidade errou.** A tabela
+  0–5 por pilar registrada em 2026-08-07, que motivou os M170–M176, **não era medição**: saiu de ler
+  `feature_status`, contar testes por diretório e aplicar uma régua proposta na hora, sem executar nada. O que
+  justifica reabri-la é concreto — o M177 derrubou **cinco conclusões medidas por defeito de instrumento**, e
+  se a medição direta errou cinco vezes, uma avaliação por leitura de documentação merece desconfiança maior.
+  **A entrega não é uma nota nova, é a divergência**: saber onde leitura e execução discordam calibra toda
+  avaliação futura feita do mesmo jeito. O DoD exige a divergência nomeada (contra viés de confirmação, já que
+  quem mede escreveu a tabela), perfil onde o número surpreender, e declarar por pilar o que **continuou sem
+  medir**
 - **theodb:** **M182 — VectorDBBench: rodar, perfilar e publicar internamente, nesta ordem**, e **M183 — o claim
   público**, que é gate separado. Nenhuma das quatro bancadas já usadas cobre o caminho de embedding ponta a
   ponta (ClickBench é colunar, ANN-Benchmarks é o índice isolado, BEIR é qualidade, CH-benCHmark é HTAP) — foi
