@@ -24,8 +24,8 @@ localizável pelo campo `milestone:` do frontmatter. Medido em 2026-08-07: **130
 citando seu id; a maior parte dos 19 restantes é o bloco M76–M81, cujas seis fases do IVF-AQ tiveram a evidência
 consolidada no M82 ([ADR 0037](./wiki/decisions/0037-m82-am-ivf-aq-measured-verdict.md)) em vez de por fase.
 
-**Estado em 2026-08-07:** 160 milestones · **151 concluídos** · **9 abertos** — M169 (em andamento, ver
-`[Unreleased]` no CHANGELOG) e M170–M177, o **Roadmap v7**: levar todos os pilares a maturidade ≥ 4.
+**Estado em 2026-08-08:** 162 milestones · **151 concluídos** · **11 abertos** — M169 (em andamento, ver
+`[Unreleased]` no CHANGELOG) e M170–M179, o **Roadmap v7**: levar todos os pilares a maturidade ≥ 4.
 **O M177 (embeddings locais) é P0**, marcado pelo owner em 2026-08-07 — a Fase 1 dele roda à frente de
 M170–M176, e a Fase 2 é condicional ao gate que ela produz.
 
@@ -50,7 +50,7 @@ mudaria o registro do que se afirmou à época, e o veredito legível de cada mi
 | v4 — independência do pgvector | M69–M70 | **este arquivo** |
 | v5 — superioridade vetorial P0 | M60, M71–M74 | **este arquivo**, § Roadmap v5 |
 | v6 — colunar, lexical, grafo, lakehouse | M75–M169 | **este arquivo** |
-| v7 — maturidade ≥ 4 em todos os pilares | M170–M177 | **este arquivo**, § Roadmap v7 |
+| v7 — maturidade ≥ 4 em todos os pilares | M170–M179 | **este arquivo**, § Roadmap v7 |
 
 `ROADMAP-v3.md` e `ROADMAP-v5.md` existiam em paralelo como drafts estratégicos e **foram removidos em
 2026-08-07**: seus milestones estavam **todos concluídos aqui** enquanto os arquivos seguiam mostrando `[ ]` em
@@ -3551,6 +3551,65 @@ para uma edição self-hosted, mas pertence ao ADR.
 PostgresML MIT; NeurStore; o contra-argumento do pgai) — **prior art, não evidência**;
 `wiki/guides/sql-embeddings.md`; `wiki/features/16-vectorizer.md`.
 
+## M178 — [ ] Dynamic batching no caminho de consulta (~2,2× medido, não implementado)
+
+**Objective:** o caminho de consulta embeda **um** texto por vez, de forma síncrona. Medido em CPU dedicada
+(`wiki/benchmarks/m177-camadas-python-http-verdict.md` e artefatos em `benchmarks/artifacts/m177/`): um texto
+isolado custa **7,82 ms**, em lote de 8 custa **3,54 ms por texto** — **2,21×**, saturando por volta de 8–16.
+A ingestão **já colhe** esse ganho (`theodb_rs/src/vectorizer.rs:393` → `run_batch`, um round-trip por N
+chunks); a consulta não.
+
+Sob concorrência os pedidos **já estão enfileirados**: agrupar oito que chegam na mesma janela custa 28,3 ms
+para os oito contra 62,6 ms sequenciais. Isso melhora latência **e** throughput ao mesmo tempo — só troca
+espera de fila por espera de janela. É a técnica padrão de servidor de inferência, e o servidor atual não a tem.
+
+**Definition of done:**
+
+- [ ] Agrupamento por janela no servidor de embeddings, com **janela e lote máximo configuráveis** — uma janela fixa longa demais penaliza o pedido solitário, que é o caso comum de uma consulta interativa.
+- [ ] Medido sob concorrência real (1, 8, 32, 128 clientes) **em CPU dedicada**, com latência **e** taxa de erro lado a lado — a régua do `m177_stress.py`, não a de carga curta.
+- [ ] O pedido isolado **não regride**: com um cliente, a latência não pode piorar mais que a janela configurada.
+- [ ] Vetores **byte-idênticos** ao caminho sem batching (o mesmo gate que o `m177_thread_equivalence.py` aplicou à configuração de thread — agrupar não pode alterar resultado).
+- [ ] Artefato em `wiki/benchmarks/` + CHANGELOG `[Unreleased]`.
+
+**Dependencies:** nenhuma. **Não depende** do M177 fase 1 — o ganho já está medido.
+
+**Risks:** (a) a janela é uma troca explícita: throughput por latência do pedido solitário, e o DoD exige medir
+os dois; (b) **medir em máquina compartilhada invalidaria o resultado** — cinco conclusões deste milestone
+caíram por isso, e o batching é justamente o tipo de ganho que a contenção mascara.
+
+**Prior art / referências:** `wiki/benchmarks/m177-camadas-python-http-verdict.md`,
+`m177-stress-colapso-verdict.md`; `benchmarks/m177_batch_scaling.py`, `m177_stress.py`,
+`m177_thread_equivalence.py`; `theodb_rs/src/vectorizer.rs`.
+
+## M179 — [ ] Reuso de conexão no cliente HTTP (decisivo contra provedor remoto)
+
+**Objective:** `theodb_rs/src/http.rs` usa `minreq::post(endpoint)`, que **abre conexão nova a cada chamada** —
+sem pool, sem keep-alive. Medido: reusar a conexão custa **0,404 ms** contra **1,016 ms** abrindo uma nova
+(loopback, n=300, `TCP_NODELAY` nos dois lados).
+
+Sobre loopback os ~0,6 ms são irrelevantes. **Contra provedor remoto o mesmo defeito custa duas ordens de
+grandeza a mais**: o handshake TCP+TLS medido é de **32,0 ± 1,2 ms** (api.openai.com), 39,4 ms (api.cohere.ai),
+36,7 ms (api.voyageai.com). Embedar 10 mil linhas paga esse handshake dez mil vezes — **~320 s só abrindo
+conexões**.
+
+**Definition of done:**
+
+- [ ] Reuso de conexão no caminho de egress, respeitando o guard de SSRF do `post_json` — a validação **continua acontecendo antes** de qualquer conexão, incluindo as reusadas (o guard espelha o parser do `minreq` de propósito; ver M134).
+- [ ] A/B medido contra endpoint **remoto real**, não só loopback: é lá que o ganho existe.
+- [ ] Comportamento definido para conexão morta: reconectar, não falhar — e o circuit breaker do M104 continua funcionando.
+- [ ] Se exigir trocar de cliente HTTP: passa pela escada de parcimônia (rung 4 — o que já está na árvore?) e pelo gate D1 no `deny.toml`.
+- [ ] Artefato + CHANGELOG `[Unreleased]`.
+
+**Dependencies:** nenhuma. **Interage com M170** (cobertura de erro na fronteira de rede): conexão reusada
+adiciona modos de falha novos — conexão morta, servidor que fechou o keep-alive —, e o M170 é onde eles ganham teste.
+
+**Risks:** (a) **é código de produção numa superfície de segurança** — o `post_json` carrega o guard de SSRF, e
+um pool que conecte antes de validar seria um bypass; (b) o ganho em loopback é desprezível, então um A/B só
+local concluiria erradamente que não vale a pena.
+
+**Prior art / referências:** `wiki/benchmarks/m177-embed-concurrency-verdict.md` (a medição de keep-alive e o
+handshake remoto); `theodb_rs/src/http.rs`, `src/egress.rs`; `benchmarks/m177_keepalive.py`.
+
 ## Sequência do v7
 
 ```
@@ -3559,6 +3618,7 @@ P0  ══▶  M177 fase 1 (o gate: modelos + custo do hop + empacotamento)
               ├── hop irrelevante  ──▶ fecha aqui; fica o modelo default recomendado
               └── hop relevante    ──▶ M177 fase 2 (ADR de residência + extensão opt-in)
 
+medidos, prontos p/ implementar: M178 (batching, 2,2×) · M179 (reuso de conexão)
 independentes, paralelizáveis:   M170 (IA) · M171 (lakehouse) · M176 (SymQG) · M169 (colunar, já aberto)
 bancada compartilhada:           M172 (híbrida) ──▶ M173 (lexical)     [mesmos corpora, uma coleta]
 independente, mede-antes:        M174 (grafo)

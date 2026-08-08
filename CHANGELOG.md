@@ -38,6 +38,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   no histórico — quem depender de um deles precisa recuperá-lo com `git show f7c7b93:docs/benchmarks/…`
 
 ### Added
+- **theodb:** **M178 — dynamic batching no caminho de consulta** e **M179 — reuso de conexão no cliente HTTP**,
+  os dois itens do M177 cujo ganho já está medido e que faltam implementar. O batching vale **~2,2×** (7,82 ms
+  por texto isolado contra 3,54 ms em lote de 8) e a ingestão já o colhe pelo worker do vectorizer — só a
+  consulta não. O reuso de conexão vale ~0,6 ms em loopback mas **~32 ms contra provedor remoto**, porque
+  `minreq` abre conexão nova a cada chamada e paga o handshake TLS toda vez. Os outros dois eixos discutidos
+  (escolha de modelo e limite de aceitação de conexão) **não viraram milestone**: ainda são medição, não
+  implementação, e já são itens abertos da fase 1 do M177
 - **theodb:** medido que **processar em lote vale ~2,2×** no caminho de embedding — 7,82 ms por texto isolado
   contra 3,54 ms em lote de 8, saturando por volta de 8–16 textos (medido em droplet de CPU dedicada,
   reproduzido em duas coletas). Metade desse ganho **já está capturada**: o worker do vectorizer agrupa a fila
