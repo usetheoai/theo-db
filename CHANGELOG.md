@@ -14,6 +14,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **theodb:** primeira entrega do **M184**, e ela já achou uma divergência da tabela de maturidade: consultando
+  o catálogo do PostgreSQL no binário default (CPU dedicada, imagem 0.139.0), o **`theodb_symqg` está
+  registrado como access method** — contra a nota 1 que o classificara como "experimental, não recomendado
+  como default" a partir de leitura de documentação. *Não recomendado* não é *ausente*, e a nota foi atribuída
+  como se fosse: um usuário pode escrever `USING theodb_symqg` hoje e receber o índice medido como 2,6–3,9×
+  mais lento. Isso **agrava o M176**. Confirmado no mesmo método que o pilar lexical expõe **zero** funções
+  (nota 2 correta). O artefato declara que cobre **um** eixo da régua — presença — e que performance,
+  qualidade e crash-safety seguem sem verificação
 - **theodb:** criado o **`BACKLOG.md`** deste repositório, destravando o `/backlog-item` — que havia recusado
   quatro invocações nesta sessão porque o registro não existia, e cujo bootstrap (`/backlog-init`) está
   bloqueado no umbrella por falta de `CHANGELOG.md` lá. **A divergência do `cycle-backlog.md` está declarada no

@@ -1,5 +1,7 @@
 ## 2026-08-08
 
+* **Creation**: `benchmarks/m184-pilares-superficie-medida-verdict.md` — primeira entrega do M184, e ela **já achou uma divergência**: o `theodb_symqg` está registrado como access method **no binário default**, contra a nota 1 que o classificou como experimental lendo `feature_status`. *Não recomendado* não é *ausente*, e a nota foi atribuída como se fosse. Isso **agrava** o M176: não é código atrás de flag, é superfície pública medida como 2,6–3,9× mais lenta. Confirmações também registradas: lexical com **zero** funções expostas (nota 2 correta, agora por catálogo). Limite de método declarado: contar `pg_extern` no fonte **subestima** — o `api.rs` é facade único (ADR 0009) e há `extension_sql!` declarativo; o catálogo é a fonte de verdade.
+
 * **Creation**: `benchmarks/m177-adr0007-backends-verdict.md` — fecha a última pergunta aberta desta área, e é a **primeira medição do milestone com o PostgreSQL no laço**. O mecanismo que o ADR 0007 registrou em junho é real (backends ficam ativos durante a chamada, e crescem com a concorrência), mas o custo **não está onde o ADR temia**: a 16 clientes o pico foi de **8 backends — 8% de `max_connections`**, enquanto a p99 subiu 6,3×. O gargalo medido não é esgotamento de conexões, é latência — o que muda a conclusão sobre a fila assíncrona: ela resolveria o backend preso, que não é o que dói primeiro. Achado colateral registrado: o guard de SSRF do M134 **recusou o endpoint em runtime** e apontou a saída correta, evidência de execução de que a defesa opera fora do teste.
 
 ## 2026-08-07
