@@ -66,6 +66,34 @@ HNSW** — a rotação do quantizador é custo exclusivo do caminho quantizado, 
 O `RwLock::read_contended` aparece nos dois (2,89% no HNSW, 1,95% no SymQG), o que indica contenção de
 lock no build paralelo — **compartilhada**, não específica do SymQG.
 
+# A busca — o regime onde os 2,6–3,9× foram medidos
+
+O `Limites honestos` da primeira versão deste artefato dizia que a busca **não** fora perfilada. Foi
+agora, com o plano confirmado por `EXPLAIN` (`Index Scan using isq` / `using ih`), 20 000 buscas top-10
+em laço PL/pgSQL:
+
+| **SymQG (busca)** | | **HNSW (busca)** | |
+|---|---|---|---|
+| `am::scan::gather_symqg_candidates` | **18,23%** | `hashbrown::HashMap::insert` | 1,29% |
+| `roundf` (libm) | 1,52% | *(nada acima de 1,3%)* | |
+
+**O contraste é o achado.** No HNSW **nenhuma função do `theodb_rs.so` passa de 1,3%** — o custo da busca
+está espalhado, e majoritariamente fora do nosso código. No SymQG, **uma única função concentra 18,23%**.
+
+`gather_symqg_candidates` é a coleta de candidatos do scan — o análogo funcional do que o HNSW faz
+percorrendo o grafo. Ela é o gargalo da busca, assim como `ambuild_symqg` é o do build. **Os dois regimes
+têm gargalos distintos, ambos em funções específicas do caminho SymQG.**
+
+## Um achado de planner, que explica duas falhas anteriores
+
+Duas tentativas de perfilar a busca não produziram amostra nenhuma. A causa: **sem
+`enable_seqscan=off` E `enable_sort=off`, o planner escolhe `Sort` + `Seq Scan` em vez do índice
+vetorial** — confirmado por `EXPLAIN`. Eu estava perfilando um caminho que não passava pelo índice.
+
+Isso não é um detalhe de bancada: significa que, **neste dataset e com o custo default, o planner não
+considera o índice vetorial vantajoso**. Se o mesmo acontece com o `theodb_hnsw` em produção, é um
+problema maior que o SymQG — e **não foi investigado aqui**.
+
 # Confirma o artefato anterior e o torna acionável
 
 O perfil por objeto já dizia *compute-bound, no nosso código*. Agora sabe-se **qual código**: uma única
@@ -77,8 +105,11 @@ função nomeada"**, o que é um alvo, não um muro.
 
 # Limites honestos
 
-- **Um regime: o build.** A busca — onde os 2,6–3,9× do [e2](/benchmarks/e2-symqg-inpg-verdict.md)
-  foram medidos — **não foi perfilada**. O gargalo da busca pode ser outro, e não há dado sobre ele.
+- **Ambos os regimes foram perfilados** (build e busca), mas em **um** dataset (20k × 128d), **uma**
+  máquina e **uma** coleta por combinação. Sem repetição, sem intervalo de confiança.
+- **O planner precisou ser forçado** para a busca usar o índice. Os números da busca valem para o
+  caminho indexado; o que o planner escolheria sozinho é outro caminho, e o fato de ele preferir
+  `Seq Scan` neste dataset **não foi investigado**.
 - **Um dataset** (20k × 128d), uma máquina, uma coleta por índice. Sem repetição, sem intervalo.
 - **`ambuild_symqg` aparece dentro de `pgrx run_guarded`** — o wrapper que contém pânico na fronteira
   FFI. Os 39,27% incluem tudo o que a função chama, então é custo **inclusivo**: diz onde entrar, não o

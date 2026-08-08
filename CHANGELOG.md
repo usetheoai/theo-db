@@ -14,6 +14,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **theodb:** perfilada também a **busca** do SymQG, fechando o regime onde os 2,6–3,9× do e2 foram medidos. O
+  contraste com o HNSW é o achado: naquele, **nenhuma função do `theodb_rs.so` passa de 1,3%** — o custo está
+  espalhado e majoritariamente fora do nosso código —, enquanto no SymQG **`gather_symqg_candidates` concentra
+  18,23%**. Build e busca têm gargalos **distintos**, ambos em funções específicas do caminho SymQG. Achado
+  colateral de planner: **sem `enable_seqscan=off` e `enable_sort=off`, o planner escolhe `Sort` + `Seq Scan`
+  em vez do índice vetorial** neste dataset — foi a causa de duas tentativas anteriores de perfilar a busca não
+  produzirem amostra. Se o mesmo vale para o `theodb_hnsw` em produção, é problema maior que o SymQG, e **não
+  foi investigado**
 - **theodb:** **o gargalo do SymQG tem nome** — `ambuild_symqg`, **39,27% do build**, medido com símbolos
   resolvidos em CPU dedicada. O HNSW **não tem função análoga**: o build dele se distribui entre o kernel de
   distância e o paralelismo. E os dois **compartilham o mesmo kernel SIMD** (`l2_sq`, `l2_dist_from_bytes`), de
