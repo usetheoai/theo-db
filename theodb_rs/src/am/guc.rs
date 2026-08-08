@@ -324,10 +324,6 @@ pub(crate) fn init() {
         GucFlags::default(),
     );
     GucRegistry::define_bool_guc(
-        GucContext::Userset,
-        GucFlags::default(),
-    );
-    GucRegistry::define_bool_guc(
         c"theodb.columnar_zonemap_skip",
         c"When on (default), a WHERE-filtered theodb_columnar aggregate skips chunk groups whose min/max cannot match",
         c"Columnar zone-map skip-pruning kill-switch / same-table A/B baseline. No effect on non-columnar tables.",

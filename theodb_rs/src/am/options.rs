@@ -190,11 +190,6 @@ pub(crate) unsafe fn init() {
         MAX_RABITQ_BITS,
         pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
     );
-    pg_sys::add_int_reloption(
-        RELOPT_KIND,
-        "degree_bound".as_pg_cstr(),
-        pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
-    );
 }
 
 /// The `amoptions` callback: parse `pg_class.reloptions` text[] into the `TheodbIvfflatOptions` bytea that fills

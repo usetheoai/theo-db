@@ -150,7 +150,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   `gather_symqg_candidates` com 18% da busca), e a decisão foi remover em vez de esconder atrás de flag.
   Saíram 1 810 linhas: o spike, o runner de benchmark, o layout de página, os dois scripts de medição, o
   handler e o opclass, o **kernel FastScan de 1 bit** (`build_sign_lut16`/`sign_estimate_block`, exclusivos
-  deste caminho — verificado), GUCs, reloption e testes. **Migração:** o projeto está em pré-release e não há instalação em campo, mas o upgrade `1.3.0 → 1.4.0` existe
+  deste caminho — verificado), GUCs, reloption e testes. **Verificado por compilação:** `cargo pgrx install --release --features pg18` completa sem erro depois da
+  remoção — e a primeira tentativa **falhou com dois `E0061`**, que a varredura de referências e a checagem de
+  chaves não pegariam: a remoção por linha havia deixado uma chamada de `define_bool_guc` e uma de
+  `add_int_reloption` com o esqueleto sem os argumentos do meio. **Migração:** o projeto está em pré-release e não há instalação em campo, mas o upgrade `1.3.0 → 1.4.0` existe
   porque o `schema-drift-gate` bloqueia mudança de superfície sem ele e porque a cadeia é append-only — o elo
   que falta hoje não pode ser criado depois. Ele dropa o AM e **falha alto** se existir índice criado com ele. Os artefatos de medição do e2 e do M184 **permanecem no acervo**: o conhecimento pago fica
 
