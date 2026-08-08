@@ -3593,8 +3593,27 @@ grandeza a mais**: o handshake TCP+TLS medido é de **32,0 ± 1,2 ms** (api.open
 36,7 ms (api.voyageai.com). Embedar 10 mil linhas paga esse handshake dez mil vezes — **~320 s só abrindo
 conexões**.
 
+> **INVESTIGADO em 2026-08-08 — o item é maior do que o DoD supunha.** Leitura do código do `minreq`
+> 2.14.1 na árvore local (`~/.cargo/registry/.../minreq-2.14.1/src/`): **não há keep-alive nem pool**.
+> Zero ocorrências de `keep-alive`/`keep_alive` em `connection.rs` e `request.rs`, e `Request::send()`
+> **consome `self`** chamando `TcpStream::connect` a cada envio. Não existe opção a ligar.
+>
+> Restam três caminhos, e nenhum é a mudança de uma linha que o DoD original sugeria:
+>
+> | caminho | custo |
+> |---|---|
+> | trocar de cliente HTTP (ex.: `ureq`, que tem pool) | dependência nova → **gate D1** + `/deps-audit` + crescimento do `.so` + reescrever o guard de SSRF, que hoje **espelha o parser do `minreq` de propósito** (M134) |
+> | implementar pool sobre socket próprio | reinventa cliente HTTP — barrado pela escada de parcimônia |
+> | não fazer | mantém ~32 ms por chamada contra provedor remoto |
+>
+> O segundo caminho está fora. O primeiro exige ADR: o guard de SSRF do M134 foi construído para
+> **concordar com o parser do `minreq`**, e trocar o cliente sem reescrever o guard o tornaria
+> decorativo — que é exatamente o BLOCKER que aquele review encontrou. **O item passa a exigir decisão
+> de dependência antes de implementação.**
+
 **Definition of done:**
 
+- [ ] **ADR decidindo o cliente HTTP** — com o custo de reescrever o guard de SSRF para o parser do cliente novo explicitado, e o crescimento do `.so` medido.
 - [ ] Reuso de conexão no caminho de egress, respeitando o guard de SSRF do `post_json` — a validação **continua acontecendo antes** de qualquer conexão, incluindo as reusadas (o guard espelha o parser do `minreq` de propósito; ver M134).
 - [ ] A/B medido contra endpoint **remoto real**, não só loopback: é lá que o ganho existe.
 - [ ] Comportamento definido para conexão morta: reconectar, não falhar — e o circuit breaker do M104 continua funcionando.

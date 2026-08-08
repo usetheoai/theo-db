@@ -38,6 +38,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   no histórico — quem depender de um deles precisa recuperá-lo com `git show f7c7b93:docs/benchmarks/…`
 
 ### Added
+- **theodb:** investigado o **M179** antes de implementar, e ele é maior do que o DoD supunha: leitura do
+  código do `minreq` 2.14.1 mostra que **não há keep-alive nem pool** — zero ocorrências no `connection.rs`/
+  `request.rs`, e `send()` consome `self` chamando `TcpStream::connect` a cada envio. Não existe opção a
+  ligar. Sobram trocar de cliente HTTP (dependência nova → gate D1 + `/deps-audit` + `.so` maior + **reescrever
+  o guard de SSRF, que hoje espelha o parser do `minreq` de propósito**) ou reinventar um cliente, que a escada
+  de parcimônia barra. O item passa a exigir **ADR de dependência antes da implementação**
 - **theodb:** **fechado o gate de qualidade da fase 1 do M177** — o último eixo sem número. Medidos oito
   modelos multilíngues permissivos contra um corpus **pt-BR real** (os 250 conceitos da wiki, com a descrição
   do frontmatter como consulta e o conceito como alvo — relevância derivada por construção, não inventada). O
