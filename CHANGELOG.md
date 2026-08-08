@@ -14,6 +14,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **theodb:** **M182 — VectorDBBench: rodar, perfilar e publicar internamente, nesta ordem**, e **M183 — o claim
+  público**, que é gate separado. Nenhuma das quatro bancadas já usadas cobre o caminho de embedding ponta a
+  ponta (ClickBench é colunar, ANN-Benchmarks é o índice isolado, BEIR é qualidade, CH-benCHmark é HTAP) — foi
+  a lacuna que obrigou esta sessão a escrever seis instrumentos. **A ordem é o milestone**: nenhum número sai
+  antes do perfil que explica por que ele é aquele, porque esta sessão produziu cinco retratações, todas por
+  defeito de instrumento, e um número de bancada pública sem perfil seria a sexta — com o nome do projeto
+  junto. O M183 separa o que depende de terceiro: `public-copy.md` § 4 exige **reprodução independente** para
+  comparação pública, a metade que o `m45` declara em aberto desde julho
 - **theodb:** **medido o footgun do ADR 0007** com o PostgreSQL no laço — a última pergunta aberta desta área,
   e a primeira medição do milestone que instala a extensão e observa `pg_stat_activity` sob carga. O mecanismo é
   real: os backends ficam ativos durante a chamada e crescem com a concorrência. **Mas o custo não está onde o

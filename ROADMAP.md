@@ -24,8 +24,8 @@ localizável pelo campo `milestone:` do frontmatter. Medido em 2026-08-07: **130
 citando seu id; a maior parte dos 19 restantes é o bloco M76–M81, cujas seis fases do IVF-AQ tiveram a evidência
 consolidada no M82 ([ADR 0037](./wiki/decisions/0037-m82-am-ivf-aq-measured-verdict.md)) em vez de por fase.
 
-**Estado em 2026-08-08:** 163 milestones · **151 concluídos** · **12 abertos** — M169 (em andamento, ver
-`[Unreleased]` no CHANGELOG) e M170–M180, o **Roadmap v7**: levar todos os pilares a maturidade ≥ 4.
+**Estado em 2026-08-08:** 165 milestones · **151 concluídos** · **14 abertos** — M169 (em andamento, ver
+`[Unreleased]` no CHANGELOG) e M170–M183, o **Roadmap v7**: levar todos os pilares a maturidade ≥ 4.
 **O M177 (embeddings locais) é P0**, marcado pelo owner em 2026-08-07 — a Fase 1 dele roda à frente de
 M170–M176, e a Fase 2 é condicional ao gate que ela produz.
 
@@ -50,7 +50,7 @@ mudaria o registro do que se afirmou à época, e o veredito legível de cada mi
 | v4 — independência do pgvector | M69–M70 | **este arquivo** |
 | v5 — superioridade vetorial P0 | M60, M71–M74 | **este arquivo**, § Roadmap v5 |
 | v6 — colunar, lexical, grafo, lakehouse | M75–M169 | **este arquivo** |
-| v7 — maturidade ≥ 4 em todos os pilares | M170–M180 | **este arquivo**, § Roadmap v7 |
+| v7 — maturidade ≥ 4 em todos os pilares | M170–M183 | **este arquivo**, § Roadmap v7 |
 
 `ROADMAP-v3.md` e `ROADMAP-v5.md` existiam em paralelo como drafts estratégicos e **foram removidos em
 2026-08-07**: seus milestones estavam **todos concluídos aqui** enquanto os arquivos seguiam mostrando `[ ]` em
@@ -3689,6 +3689,61 @@ clientes — o limite pertence a este milestone, não ao seguinte.
 **Prior art / referências:** `wiki/references/embedding-em-cloudnativepg-2026-08.md`,
 `embedding-local-como-extensao-2026-08.md`; `wiki/benchmarks/m177-qualidade-ptbr-verdict.md`,
 `m177-stress-colapso-verdict.md`; `benchmarks/servers/embedding_server.py`; `Dockerfile`.
+
+## M182 — [ ] VectorDBBench: rodar, PERFILAR e publicar internamente (nesta ordem)
+
+**Objective:** adotar a bancada pública [VectorDBBench](https://github.com/zilliztech/VectorDBBench) (Zilliz)
+para o caminho vetorial + embedding, que **nenhuma das quatro bancadas já usadas cobre** — ClickBench é
+colunar, ANN-Benchmarks é o índice isolado, BEIR é qualidade de retrieval, CH-benCHmark é HTAP. Foi a lacuna
+que obrigou esta sessão a escrever seis instrumentos `m177_*`.
+
+**A ordem é o milestone.** Rodar → **perfilar** → publicar. Nenhum número sai antes de sabermos **por que ele
+é aquele**: se o gargalo é nosso código, o modelo, o transporte ou a máquina. Esta sessão produziu **cinco
+retratações, todas por defeito de instrumento**; um número de bancada pública publicado sem perfil seria a
+sexta — e essa sairia com o nome do projeto.
+
+**Definition of done:**
+
+- [ ] VectorDBBench rodando contra o TheoDB, em **CPU dedicada** (máquina compartilhada invalidou cinco medições nesta sessão).
+- [ ] **Perfil antes da publicação**, com o ferramental já exercitado: `py-spy` para o servidor Python (o FlameGraph de Brendan Gregg **não está instalado**; `py-spy` gera o mesmo formato e `ptrace_scope=1` exige lançar o processo como filho), `perf` para o caminho nativo, e decomposição por camada no padrão do `m177_layers.py`.
+- [ ] Todo número publicado vem com **o mecanismo explicado** — qual frame domina, e qual fração é modelo, transporte e banco.
+- [ ] **Ressalva metodológica declarada**, porque a própria literatura a levanta: benchmarks de vetor codificam premissas arquiteturais (o VectorDBBench premia escala distribuída; suítes de Redis/Qdrant premiam in-memory), e leaderboards medem condição estática enquanto produção enfrenta escrita contínua, filtro de metadado e pico de concorrência.
+- [ ] Registrado também que os datasets do **ANN-Benchmarks**, que já usamos, têm a fraqueza declarada de não representarem mais aplicações modernas de ANN — o substituto acadêmico proposto (**VIBE**, arXiv:2505.17810) **não foi avaliado**.
+- [ ] Publicação **interna**: conceito em `wiki/benchmarks/` + CHANGELOG. **Nada sai do repositório neste milestone** — ver M183.
+
+**Dependencies:** nenhuma. Régua de comparação já existe: ~195 rps por instância, MRR@10 0,6749, 8% de
+`max_connections` a 16 clientes.
+
+**Risks:** (a) adotar a bancada sem perfil produz número que ninguém sabe defender; (b) o VectorDBBench pode
+assumir topologia distribuída que não é a nossa — se assumir, **dizer isso é o resultado**, não um problema a
+contornar; (c) postura do [ADR 0050](./wiki/decisions/0050-official-benchmark-adopt-and-wrap.md): **adotar e
+envelopar**, nunca substituir o harness próprio.
+
+**Prior art / referências:** `wiki/decisions/0050-official-benchmark-adopt-and-wrap.md`;
+`wiki/benchmarks/m177-camadas-python-http-verdict.md` (a decomposição por camada), `m177-stress-colapso-verdict.md`
+(a régua de stress), `m177-adr0007-backends-verdict.md` (o banco no laço); `benchmarks/m177_layers.py`,
+`m177_stress.py`, `m177_concurrency.py`.
+
+## M183 — [ ] Claim público comparativo — depende de reprodução independente
+
+**Objective:** levar um número comparativo para fora do repositório (README, site, comparação com outros
+bancos vetoriais). **Não é continuação natural do M182** — é outro gate, e mais duro.
+
+O `public-copy.md` § 4 exige **três** coisas para uma comparação pública: artefato reproduzível, **reprodução
+independente por terceiro**, e o benchmark linkado no mesmo parágrafo do claim. O
+[m45](./wiki/benchmarks/m45-pareto-sift1m.md) declara, no próprio texto, que entrega **metade** disso — a
+reprodução por terceiro segue em aberto desde julho.
+
+**Definition of done:**
+
+- [ ] Artefato do M182 publicado internamente e estável.
+- [ ] **Reprodução independente por um terceiro** — a metade que falta, e que não depende de engenharia nossa.
+- [ ] O claim, quando escrito, linka o benchmark no mesmo parágrafo e respeita a fronteira já decidida: paridade de recall, memória billion-scale, AI-native/HTAP/aberto — **jamais** "mais rápido que o AlloyDB no vetor" ([ADR 0035](./wiki/decisions/0035-m73-northstar-vector-verdict.md)).
+
+**Dependencies:** M182 `[ ]`, e **um terceiro disposto a reproduzir** — o item não fecha só com trabalho interno.
+
+**Risks:** publicar sem a reprodução independente viola a regra do próprio projeto e transforma um número
+honesto em claim indefensável.
 
 ## Sequência do v7
 
