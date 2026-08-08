@@ -38,6 +38,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   no histórico — quem depender de um deles precisa recuperá-lo com `git show f7c7b93:docs/benchmarks/…`
 
 ### Added
+- **theodb:** **fechado o gate de qualidade da fase 1 do M177** — o último eixo sem número. Medidos oito
+  modelos multilíngues permissivos contra um corpus **pt-BR real** (os 250 conceitos da wiki, com a descrição
+  do frontmatter como consulta e o conceito como alvo — relevância derivada por construção, não inventada). O
+  resultado corrige a leitura anterior: o modelo mais rápido **não basta**. `MiniLM` é 8,5× mais rápido que
+  `multilingual-e5-large` e perde **37% de MRR** (0,4946 contra 0,7906); qualidade e latência andam juntas, e
+  cinco dos oito candidatos são **dominados** — existe outro mais rápido *e* melhor. Recomendação medida:
+  `nomic-embed-text-v1` (Apache-2.0, 53,7 ms, MRR 0,6749) como default, `e5-large` quando qualidade domina. Os
+  valores absolutos são otimistas por construção do corpus; o que vale é a ordem entre modelos
 - **theodb:** **M178 — dynamic batching no caminho de consulta** e **M179 — reuso de conexão no cliente HTTP**,
   os dois itens do M177 cujo ganho já está medido e que faltam implementar. O batching vale **~2,2×** (7,82 ms
   por texto isolado contra 3,54 ms em lote de 8) e a ingestão já o colhe pelo worker do vectorizer — só a

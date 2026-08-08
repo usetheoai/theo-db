@@ -3500,7 +3500,7 @@ modelo fica residente. Duas fases com gate entre elas; a segunda não existe se 
 
 ### Fase 1 — o gate (esta é a parte P0)
 
-> **Parcialmente MEDIDO em 2026-08-07** — artefato: [`wiki/benchmarks/m177-hop-vs-residencia-verdict.md`](./wiki/benchmarks/m177-hop-vs-residencia-verdict.md),
+> **FASE 1 COMPLETA em 2026-08-08** — os três itens do DoD têm número. Antes: parcialmente medido em 2026-08-07 — artefato: [`wiki/benchmarks/m177-hop-vs-residencia-verdict.md`](./wiki/benchmarks/m177-hop-vs-residencia-verdict.md),
 > brutos em `benchmarks/artifacts/m177/`. Dois dos três itens do DoD abaixo têm número; o primeiro
 > (qualidade no nosso corpus) **não foi executado** e segue aberto.
 >
@@ -3518,7 +3518,8 @@ modelo fica residente. Duas fases com gate entre elas; a segunda não existe se 
 
 **Definition of done:**
 
-- [ ] **Comparação de modelos no NOSSO corpus.** 3–4 modelos open-source permissivos servidos localmente, medidos com `benchmarks/theodb_bench/beir.py` + `significance.py` (nDCG@10, recall@100, bootstrap pareado). Ranking público — MTEB e afins — **seleciona candidatos; não é o veredito** (Regra 5 / gate G5). Entrega isolada: define o modelo default recomendado, **independentemente do desfecho arquitetural**. **Multilíngue é requisito, não preferência** (decisão do owner, 2026-08-07): o corpus real é pt-BR, e medir com modelo `-en` enviesa a escolha. Candidatos D1-limpos já levantados e com custo medido; falta a qualidade. **← ÚNICO ITEM AINDA ABERTO DA FASE 1**
+- [x] **Comparação de modelos no NOSSO corpus.** — MEDIDO (`wiki/benchmarks/m177-qualidade-ptbr-verdict.md`): oito multilíngues permissivos sobre 250 conceitos pt-BR desta wiki (known-item). `e5-large` MRR@10 **0,7906** a 108,0 ms · `nomic-v1` **0,6749** a 53,7 ms · `MiniLM` **0,4946** a 12,7 ms. **Cinco dos oito são dominados.** Default recomendado: `nomic-embed-text-v1`. *(O texto original do item segue abaixo, como escrito antes da medição.)*
+- [x] ~~**Comparação de modelos no NOSSO corpus.**~~ 3–4 modelos open-source permissivos servidos localmente, medidos com `benchmarks/theodb_bench/beir.py` + `significance.py` (nDCG@10, recall@100, bootstrap pareado). Ranking público — MTEB e afins — **seleciona candidatos; não é o veredito** (Regra 5 / gate G5). Entrega isolada: define o modelo default recomendado, **independentemente do desfecho arquitetural**. **Multilíngue é requisito, não preferência** (decisão do owner, 2026-08-07): o corpus real é pt-BR, e medir com modelo `-en` enviesa a escolha. Candidatos D1-limpos já levantados e com custo medido; falta a qualidade. **← FECHADO em 2026-08-08**
 - [x] **Custo do hop local medido.** — 15,55 ms em batch 1 (27,2% do total, p=0,0000); **não significativo em batch 8** (7,76 ms, p=0,1457). O hop é custo fixo por requisição: pesa na chamada unitária e some no lote.
 - [x] **Custo da residência medido** (item acrescentado pela medição, não previsto no plano original): 0,7–1,8 GB por processo em multilíngue. É o lado que decide, e o plano original só previa medir o hop — medir apenas o transporte teria produzido meio veredito.
 - [ ] **Custo de empacotar os pesos levantado.** Centenas de MB num pacote de extensão versus download no primeiro uso, com o caso de ambiente offline declarado. Nenhuma fonte do prior art documenta isso, e pode ser o custo dominante sem aparecer em benchmark de latência.
