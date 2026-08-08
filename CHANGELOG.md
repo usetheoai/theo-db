@@ -14,6 +14,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **theodb:** criado o **`BACKLOG.md`** deste repositório, destravando o `/backlog-item` — que havia recusado
+  quatro invocações nesta sessão porque o registro não existia, e cujo bootstrap (`/backlog-init`) está
+  bloqueado no umbrella por falta de `CHANGELOG.md` lá. **A divergência do `cycle-backlog.md` está declarada no
+  próprio arquivo**: a regra desenha um registro único no umbrella e recusa backlog per-repo, mas
+  `knowledge-base-location.md` estabelece que cada projeto é dono dos próprios artefatos de ciclo, e o custo da
+  escolha — um achado que cruze repositórios não tem onde morar — fica dito em vez de silenciado. O `domain` do
+  schema passa a ser **o pilar** (vetorial, colunar, lexical, ai-surface, engine-pgrx…), cada um roteado para o
+  especialista correspondente. Semeado **sem itens**, por desenho
 - **theodb:** **M184 — medir cada pilar com rigor e apurar quanto a avaliação de maturidade errou.** A tabela
   0–5 por pilar registrada em 2026-08-07, que motivou os M170–M176, **não era medição**: saiu de ler
   `feature_status`, contar testes por diretório e aplicar uma régua proposta na hora, sem executar nada. O que
