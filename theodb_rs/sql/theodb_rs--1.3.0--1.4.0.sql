@@ -9,10 +9,15 @@
 -- com 39% do build e `gather_symqg_candidates` com 18% da busca —, e o owner decidiu remover em vez de
 -- esconder atrás de flag (2026-08-08).
 --
--- DESTRUTIVO E DECLARADO: um índice existente criado com `USING theodb_symqg` bloqueia este DROP. É
--- deliberado — falhar alto é melhor que derrubar índice de usuário em silêncio (Regra 8). O operador
--- deve dropar o índice e recriá-lo com `theodb_hnsw`, que é o caminho recomendado e mais rápido nos
--- dois regimes.
+-- CONTEXTO (2026-08-08): o projeto está em PRÉ-RELEASE e não há instalação em campo. Este script existe
+-- por dois motivos que não dependem disso: (a) o `schema-drift-gate.yml` bloqueia mudança de superfície
+-- SQL sem bump de `default_version` ou script de migração — a disciplina do M137, criada porque "1.0.0"
+-- chegou a rotular cinco catálogos diferentes ao longo de 120 releases; (b) a cadeia de upgrade é
+-- append-only, então o elo que falta hoje não pode ser criado depois.
+--
+-- COMPORTAMENTO DESTRUTIVO, declarado: um índice criado com `USING theodb_symqg` bloqueia este DROP.
+-- Deliberado — falhar alto é melhor que derrubar índice em silêncio (Regra 8). O caminho é dropar o
+-- índice e recriá-lo com `theodb_hnsw`, mais rápido nos dois regimes.
 
 DROP OPERATOR CLASS IF EXISTS theodb_symqg_l2_ops USING theodb_symqg;
 DROP ACCESS METHOD IF EXISTS theodb_symqg;
