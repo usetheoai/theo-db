@@ -13,6 +13,16 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **theodb:** **perfilado o SymQG para responder *por que* é mais lento** — pergunta que os três artefatos do e2
+  deixaram aberta (nenhum menciona mecanismo, gargalo ou profiling). O resultado **contradiz a hipótese
+  registrada na feature**, que atribuía a lentidão ao "imposto de página, WAL e MVCC": se fosse isso, o SymQG
+  passaria **mais** tempo no kernel, e ele passa **menos** — 18,7% contra 27,9% do HNSW, com 76,5% em
+  `theodb_rs.so` contra 66,0%. Os símbolos de kernel em ambos são de **escalonador**, sem nenhum de I/O, página
+  ou WAL. **É compute-bound: o custo mora no nosso código.** Isso não o torna promovível, mas muda a natureza
+  do trabalho que uma promoção exigiria — de estrutural para algorítmico. Limite grande e declarado: os
+  símbolos do `.so` não resolvem (release sem debuginfo), então a atribuição é por objeto, não por função
+
 ### Changed
 - **theodb:** o **M176 (SymQG) muda de natureza** com a medição do M184. Ele fora escrito assumindo "código
   mantido sem consumidor" — dívida interna barata. A medição desmente: o `theodb_symqg` está **registrado como
