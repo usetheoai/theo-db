@@ -14,6 +14,14 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **theodb:** **medido o footgun do ADR 0007** com o PostgreSQL no laço — a última pergunta aberta desta área,
+  e a primeira medição do milestone que instala a extensão e observa `pg_stat_activity` sob carga. O mecanismo é
+  real: os backends ficam ativos durante a chamada e crescem com a concorrência. **Mas o custo não está onde o
+  ADR temia** — a 16 clientes concorrentes o pico foi de **8 backends, 8% de `max_connections`**, enquanto a p50
+  subiu 4,2× e a p99 **6,3×**. O gargalo é **latência, não esgotamento de conexões**, o que muda a conclusão
+  sobre a fila assíncrona: ela resolveria o backend preso, que não é o que dói primeiro — o que dói é a
+  capacidade do servidor, endereçada por batching, limite e réplicas. Registrado também que o guard de SSRF do
+  M134 **recusou o endpoint em runtime**, evidência de execução de que a defesa opera fora do teste
 - **theodb:** o relatório do benchmark passou a registrar, **por consulta**, quantos blocos o caminho streamado
   de fato consumiu. Sem esse número, uma consulta atendida pela rota de recuo — com o consumo de memória
   proporcional ao volume que este milestone existe para eliminar — aparecia no relatório exatamente igual a uma
