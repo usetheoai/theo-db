@@ -24,8 +24,8 @@ localizável pelo campo `milestone:` do frontmatter. Medido em 2026-08-07: **130
 citando seu id; a maior parte dos 19 restantes é o bloco M76–M81, cujas seis fases do IVF-AQ tiveram a evidência
 consolidada no M82 ([ADR 0037](./wiki/decisions/0037-m82-am-ivf-aq-measured-verdict.md)) em vez de por fase.
 
-**Estado em 2026-08-08:** 162 milestones · **151 concluídos** · **11 abertos** — M169 (em andamento, ver
-`[Unreleased]` no CHANGELOG) e M170–M179, o **Roadmap v7**: levar todos os pilares a maturidade ≥ 4.
+**Estado em 2026-08-08:** 163 milestones · **151 concluídos** · **12 abertos** — M169 (em andamento, ver
+`[Unreleased]` no CHANGELOG) e M170–M180, o **Roadmap v7**: levar todos os pilares a maturidade ≥ 4.
 **O M177 (embeddings locais) é P0**, marcado pelo owner em 2026-08-07 — a Fase 1 dele roda à frente de
 M170–M176, e a Fase 2 é condicional ao gate que ela produz.
 
@@ -50,7 +50,7 @@ mudaria o registro do que se afirmou à época, e o veredito legível de cada mi
 | v4 — independência do pgvector | M69–M70 | **este arquivo** |
 | v5 — superioridade vetorial P0 | M60, M71–M74 | **este arquivo**, § Roadmap v5 |
 | v6 — colunar, lexical, grafo, lakehouse | M75–M169 | **este arquivo** |
-| v7 — maturidade ≥ 4 em todos os pilares | M170–M179 | **este arquivo**, § Roadmap v7 |
+| v7 — maturidade ≥ 4 em todos os pilares | M170–M180 | **este arquivo**, § Roadmap v7 |
 
 `ROADMAP-v3.md` e `ROADMAP-v5.md` existiam em paralelo como drafts estratégicos e **foram removidos em
 2026-08-07**: seus milestones estavam **todos concluídos aqui** enquanto os arquivos seguiam mostrando `[ ]` em
@@ -3630,6 +3630,46 @@ local concluiria erradamente que não vale a pena.
 **Prior art / referências:** `wiki/benchmarks/m177-embed-concurrency-verdict.md` (a medição de keep-alive e o
 handshake remoto); `theodb_rs/src/http.rs`, `src/egress.rs`; `benchmarks/m177_keepalive.py`.
 
+## M180 — [ ] Empacotar o servidor de embeddings na distribuição (o que falta para "embedding-native")
+
+**Objective:** a capacidade existe e o usuário não a recebe. `theodb.embed()` é own-code Rust, o vectorizer
+mantém a coluna fresca, e o modelo local roda — mas o servidor **não está na imagem** (verificado: não
+aparece no `Dockerfile`), e o guia manda o usuário rodar `python benchmarks/servers/embedding_server.py`,
+um caminho dentro de `benchmarks/`. Isso é uma bancada de teste documentada como caminho de produção.
+
+**Este milestone destrava o M178.** O DoD daquele item fala em "agrupamento por janela no servidor de
+embeddings" — mas enquanto esse servidor for ferramenta de bancada, implementar batching ali otimiza algo
+que ninguém recebe. Decidir onde ele vive é pré-requisito.
+
+**A decisão, com a evidência já medida para cada opção:**
+
+| opção | evidência que pesa |
+|---|---|
+| processo ao lado (imagem/compose) | ~195 rps por instância em CPU dedicada (M177 stress); memória isolada do banco |
+| `Deployment` + `Service` no Kubernetes | é o padrão nativo do [CloudNativePG](./wiki/references/embedding-em-cloudnativepg-2026-08.md); `replicas: N` resolve throughput |
+| dentro do pod do banco (sidecar) | soma ao `limits.memory` do pod; um pico derruba **o banco** |
+| embarcado na extensão | **refutado** — 1,7 GB por backend, e o CNPG piora (pesos fora do layout de image volume) |
+
+**Definition of done:**
+
+- [ ] Decisão registrada em ADR, escolhendo entre processo ao lado e Deployment/Service — com a restrição do CNPG explicitada.
+- [ ] O servidor sai de `benchmarks/` para um caminho de produção, com o modelo default sendo o **recomendado por medição**: `nomic-embed-text-v1` (Apache-2.0, MRR@10 0,6749 a 53,7 ms — [veredito de qualidade](./wiki/benchmarks/m177-qualidade-ptbr-verdict.md)).
+- [ ] `theodb.embedding_endpoint` aponta para ele **por padrão** — instalar e funcionar sem chave, sem escolher nada.
+- [ ] Gate D1 sobre o runtime (`onnxruntime`) e sobre os pesos do modelo; peso da imagem medido e declarado.
+- [ ] `wiki/guides/sql-embeddings.md` deixa de instruir um caminho sob `benchmarks/`.
+- [ ] Smoke end-to-end: `CREATE EXTENSION` → `theodb.embed('texto')` devolve vetor **sem configuração manual**.
+
+**Dependencies:** nenhuma técnica. Depende de **decisão do owner** sobre o formato de entrega.
+
+**Risks:** (a) empacotar pesos de centenas de MB muda o tamanho da distribuição — medir antes de decidir, é o
+item que o prior art não documenta; (b) escolher o default por conveniência em vez do medido desperdiça a
+Fase 1 do M177; (c) um servidor entregue sem limite de concorrência herda os 13% de recusa medidos a 128
+clientes — o limite pertence a este milestone, não ao seguinte.
+
+**Prior art / referências:** `wiki/references/embedding-em-cloudnativepg-2026-08.md`,
+`embedding-local-como-extensao-2026-08.md`; `wiki/benchmarks/m177-qualidade-ptbr-verdict.md`,
+`m177-stress-colapso-verdict.md`; `benchmarks/servers/embedding_server.py`; `Dockerfile`.
+
 ## Sequência do v7
 
 ```
@@ -3638,7 +3678,8 @@ P0  ══▶  M177 fase 1 (o gate: modelos + custo do hop + empacotamento)
               ├── hop irrelevante  ──▶ fecha aqui; fica o modelo default recomendado
               └── hop relevante    ──▶ M177 fase 2 (ADR de residência + extensão opt-in)
 
-medidos, prontos p/ implementar: M178 (batching, 2,2×) · M179 (reuso de conexão)
+destrava os outros:           M180 (empacotar o servidor) ──▶ M178 (batching)
+bloqueado por ADR de dep:      M179 (reuso de conexão — minreq não tem keep-alive)
 independentes, paralelizáveis:   M170 (IA) · M171 (lakehouse) · M176 (SymQG) · M169 (colunar, já aberto)
 bancada compartilhada:           M172 (híbrida) ──▶ M173 (lexical)     [mesmos corpora, uma coleta]
 independente, mede-antes:        M174 (grafo)

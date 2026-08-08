@@ -38,6 +38,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   no histórico — quem depender de um deles precisa recuperá-lo com `git show f7c7b93:docs/benchmarks/…`
 
 ### Added
+- **theodb:** **M180 — empacotar o servidor de embeddings na distribuição**, o item que separa a capacidade
+  entregue do produto entregue. O modelo local funciona e o usuário não o recebe: o servidor **não está na
+  imagem** (verificado no `Dockerfile`) e o guia manda rodar `python benchmarks/servers/embedding_server.py` —
+  uma bancada de teste documentada como caminho de produção. **Destrava o M178**, cujo DoD fala em batching
+  "no servidor de embeddings" — enquanto ele for ferramenta de bancada, otimizá-lo melhora algo que ninguém
+  recebe. O milestone chega com a evidência já medida para cada opção de entrega, incluindo o default
+  recomendado por medição (`nomic-embed-text-v1`) e a restrição do CloudNativePG
 - **theodb:** investigado o **M179** antes de implementar, e ele é maior do que o DoD supunha: leitura do
   código do `minreq` 2.14.1 mostra que **não há keep-alive nem pool** — zero ocorrências no `connection.rs`/
   `request.rs`, e `send()` consome `self` chamando `TcpStream::connect` a cada envio. Não existe opção a
