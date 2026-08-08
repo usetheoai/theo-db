@@ -143,6 +143,17 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   Quem roda um benchmark com `--out` padrão encontra o resultado no diretório novo
 
 ### Removed
+- **theodb:** **o access method `theodb_symqg` foi removido por completo** (M176 fechado). Ele estava
+  registrado no binário default sem feature flag, de modo que um usuário podia escrever `USING theodb_symqg` e
+  receber — **sem aviso** — um índice medido como **3,5× mais lento no build** e **2,6–3,9× mais lento na
+  busca** a recall casado. O perfil localizou os gargalos (`ambuild_symqg` com 39% do build,
+  `gather_symqg_candidates` com 18% da busca), e a decisão foi remover em vez de esconder atrás de flag.
+  Saíram 1 810 linhas: o spike, o runner de benchmark, o layout de página, os dois scripts de medição, o
+  handler e o opclass, o **kernel FastScan de 1 bit** (`build_sign_lut16`/`sign_estimate_block`, exclusivos
+  deste caminho — verificado), GUCs, reloption e testes. **Quem já instalou:** o upgrade `1.3.0 → 1.4.0` dropa
+  o AM e **falha alto** se existir índice criado com ele — recrie com `theodb_hnsw`, que é mais rápido nos dois
+  regimes. Os artefatos de medição do e2 e do M184 **permanecem no acervo**: o conhecimento pago fica
+
 - **docs:** a árvore `docs/` foi **removida do repositório**. Seus 264 documentos estão convertidos em
   `wiki/`, e os 517 arquivos permanecem recuperáveis no histórico git, no commit `f7c7b93`. Os **253
   artefatos brutos** de medição que viviam sob `docs/benchmarks/` saíram junto e passam a existir apenas

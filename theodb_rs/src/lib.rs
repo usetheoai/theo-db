@@ -45,7 +45,6 @@ mod ai_op;
 mod am;
 mod ann;
 mod ann_query;
-mod bench_symqg; // E2 — SymphonyQG spike in-PG benchmark entrypoint (symqg_spike_bench)
 mod chat;
 mod chunk;
 mod dtype;

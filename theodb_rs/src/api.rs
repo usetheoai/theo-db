@@ -1010,18 +1010,4 @@ REVOKE ALL ON FUNCTION theodb_rs._pq_knn(text, text, text, text, real[], int, in
 mod surface_tests {
     use pgrx::prelude::*;
 
-    // M144 T1.2: `symqg_spike_bench` (a spike fn that reads an arbitrary server file via std::fs::read) shipped
-    // PUBLIC-executable. It must be superuser-only — REVOKE ALL FROM PUBLIC, the same least-privilege pattern the
-    // PostgreSQL core applies to pg_read_file / lo_import. A non-superuser role must NOT hold EXECUTE. (REVOKE
-    // rather than removal keeps the .so wrapper present so the extension upgrade chain stays intact.)
-    #[pg_test]
-    fn symqg_spike_bench_revoked_from_public() {
-        // PUBLIC must not hold EXECUTE on the fs-reading spike function.
-        let public_has: bool = Spi::get_one(
-            "SELECT has_function_privilege('public', 'symqg_spike_bench(text, bigint, bigint, int)', 'EXECUTE')",
-        )
-        .unwrap()
-        .unwrap();
-        assert!(!public_has, "symqg_spike_bench must be REVOKEd from PUBLIC (superuser-only)");
-    }
 }

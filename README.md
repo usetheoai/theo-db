@@ -69,7 +69,7 @@ alugadas), empacotados e tunados numa imagem única:
 ```
 TheoDB = PostgreSQL 18 (upstream, sem fork)
        + theodb_rs (extensão Rust própria):
-           · tipo `vector` own-code + AMs ANN próprios (theodb_hnsw / theodb_ivfflat / theodb_symqg)
+           · tipo `vector` own-code + AMs ANN próprios (theodb_hnsw / theodb_ivfflat)
            · superfície AI-native SQL: embed, hybrid_search_rrf (BM25+vetor+RRF), rerank, NL→SQL, grafo
            · TableAM colunar próprio (theodb_columnar) para analytics sobre dados transacionais vivos
            · engine de grafo nativo (persisted-CSR) para GraphRAG
@@ -126,7 +126,7 @@ Passo a passo das 12 capacidades em [`wiki/guides/quickstart.md`](./wiki/guides/
 
 **O que já existe e foi medido:**
 
-- **Pilar vetorial** — tipo `vector` e índices ANN (`theodb_hnsw`, `theodb_ivfflat`, `theodb_symqg`) **own-code**, com paridade de recall classe-pgvector (ver o estado medido na Missão). Sem pgvector/pgvectorscale.
+- **Pilar vetorial** — tipo `vector` e índices ANN (`theodb_hnsw`, `theodb_ivfflat`) **own-code**, com paridade de recall classe-pgvector (ver o estado medido na Missão). Sem pgvector/pgvectorscale.
 - **Superfície AI-native (SQL)** — embeddings (`theodb.embed`), busca **híbrida** `ai.hybrid_search_rrf` (BM25/`ts_rank_cd` + vetor via RRF), rerank, NL→SQL com defesa a injeção, extração de grafo. Servida 100% pela extensão Rust — **sem `plpython3u`**.
 - **Colunar (in-DB)** — TableAM colunar próprio (`theodb_columnar`) com pushdown de agregação/GROUP-BY/zone-map sobre dados transacionais vivos (own-code).
 - **Lakehouse Parquet (own-code)** — ler/escrever/agregar arquivos Parquet externos **own-code** via DataFusion/Arrow, **sem DuckDB** (M143 removeu o `pg_duckdb` por completo — ADR-0057). Superfície: `theodb.htap_refresh(rel)` (materializa uma tabela num snapshot Parquet) e `theodb.olap(rel)` (lê+agrega o snapshot); as primitivas `public.read_parquet(path)`/`write_parquet(rel,path)` são superuser-only (least-privilege — escrita de arquivo server-side). Uma imagem só, sem componente C++/httpfs; o lakehouse own-code custa +12 MB no build default vs os 118 MB do bundle DuckDB (`wiki/benchmarks/m143-pgduckdb-removal.md`).

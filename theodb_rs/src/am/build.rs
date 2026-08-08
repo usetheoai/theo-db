@@ -436,100 +436,6 @@ pub extern "C-unwind" fn ambuild_hnsw(
     }
 }
 
-/// E2 degree bound R for the co-located symqg graph (a multiple of 32 for FastScan alignment; HNSW base-layer
-/// m0 = 2·HNSW_M ≤ R so no neighbour is truncated, only padded). T4.1 promotes this to a reloption.
-const SYMQG_DEGREE: usize = 32;
-
-/// E2 T2.1 — `ambuild_symqg`: build the HNSW base graph, encode per-parent 1-bit sign codes (`SymqgSpike`), and
-/// persist the co-located page layout (`page::pack_symqg`). Mirrors `ambuild_hnsw`; the search reads the persisted
-/// rows per hop (`scan_symqg_structured`, T3.1). L2-only (the sign estimator is L2-only) — fail-fast at build.
-#[pg_guard]
-pub extern "C-unwind" fn ambuild_symqg(
-    heaprel: pg_sys::Relation,
-    indexrel: pg_sys::Relation,
-    index_info: *mut pg_sys::IndexInfo,
-) -> *mut pg_sys::IndexBuildResult {
-    unsafe {
-        let (corpus, _labels, ntuples) = collect_corpus(heaprel, indexrel, index_info);
-        let corpus_len = corpus.len();
-        let metric = resolve_metric(indexrel);
-        if metric != Metric::L2 {
-            pg_sys::error!(
-                "theodb_symqg: requires the L2 opclass (the 1-bit sign estimator is L2-only)"
-            );
-        }
-        // WITH (degree_bound=R): the co-located out-degree. Build the HNSW base graph with m = R/2 so m0 = R fills
-        // the row (R=32 default = HNSW m0). Larger R → denser graph + bigger rows.
-        let degree = crate::am::options::degree_bound_from_relation(indexrel);
-        let hnsw_m = (degree / 2).max(1);
-        // EC-1: both the HNSW build and the sign-encode loop take the cancellation seam so a long CREATE INDEX
-        // responds to pg_cancel_backend (check_for_interrupts! runs under #[pg_guard] — unwinds cleanly across C).
-        let idx = crate::ann::HnswIndex::build_owned(
-            corpus,
-            hnsw_m,
-            hnsw_ef_construction(),
-            metric,
-            BUILD_SEED,
-            &|| {
-                pgrx::check_for_interrupts!();
-            },
-        );
-        // STREAMING encode (EC-10 fix): encode + pack each vertex's row and DROP its codes immediately, instead of
-        // materializing all N·R sign codes at once (`SymqgSpike::build` — which OOM'd at 1M on 16 GB). Peak memory
-        // is the HNSW graph + the packed rows (O(N·row_bytes)) + O(R) transient codes — no O(N·R·dim) code buffer.
-        let n = idx.spike_len();
-        let dim = if n > 0 { idx.spike_vector(0).len() } else { 0 };
-        let rq = crate::vec::rabitq::RabitqQuantizer::train(dim, 1, BUILD_SEED);
-        let mut rows: Vec<Vec<u8>> = Vec::with_capacity(n);
-        let mut tids: Vec<i64> = Vec::with_capacity(n);
-        for p in 0..n {
-            if p % 4096 == 0 {
-                pgrx::check_for_interrupts!(); // EC-1
-            }
-            tids.push(idx.spike_id(p));
-            let pv = idx.spike_vector(p);
-            let rot = rq.rotate(pv); // P·x_p — exact dist = ‖rot_q − rot‖², q_r = rot_q − rot (one subtraction at scan)
-            let nbr_nodes = idx.spike_base_neighbors(p);
-            let mut nbrs: Vec<(u32, crate::ann::symqg_spike::SignCode)> =
-                Vec::with_capacity(degree);
-            for &nb in nbr_nodes.iter().take(degree) {
-                let resid: Vec<f32> =
-                    idx.spike_vector(nb).iter().zip(pv).map(|(&x, &c)| x - c).collect();
-                nbrs.push((nb as u32, crate::ann::symqg_spike::encode_sign(&rq, &resid)));
-            }
-            while nbrs.len() < degree {
-                nbrs.push((
-                    page::SENTINEL_ORD,
-                    crate::ann::symqg_spike::SignCode { u: vec![0i8; dim], nr: 0.0, w: 0.0 },
-                ));
-            }
-            rows.push(page::pack_row(&rot, &nbrs, dim, degree)); // rot + nbrs codes dropped here
-        }
-        let entry = idx.spike_entry().unwrap_or(0) as u32;
-        let rot_codebook = rq.to_meta_bytes();
-        page::pack_symqg(
-            indexrel,
-            metric.tag(),
-            dim as u32,
-            degree as u32,
-            entry,
-            &rot_codebook,
-            &tids,
-            &rows,
-        );
-        build_result(ntuples, corpus_len)
-    }
-}
-
-/// E2 T2.1 — empty `theodb_symqg` index (CREATE INDEX on an empty table). Builds a 0-vertex graph + persists an
-/// empty layout so `peek_magic` returns SYMQG_MAGIC and the scan short-circuits to [] (EC-4).
-#[pg_guard]
-pub extern "C-unwind" fn ambuildempty_symqg(indexrel: pg_sys::Relation) {
-    unsafe {
-        // dim/degree unknown with no rows; a 0-vertex layout: no rows, empty rotation codebook.
-        page::pack_symqg(indexrel, Metric::L2.tag(), 0, SYMQG_DEGREE as u32, 0, &[], &[], &[]);
-    }
-}
 
 /// M59 T3.3 — pick the persisted layout for an initial `theodb_hnsw` build from the reloptions: `WITH
 /// (pq_subspaces=M)` (M > 0) trains the anisotropic PQ and packs **v3** (AQ ⊥ SBQ per index, D1); otherwise
@@ -731,13 +637,6 @@ pub(crate) unsafe fn vacuum_rebuild(
                 return 0;
             }
             return vacuum_rebuild_structured(indexrel, dead);
-        }
-        if magic == page::SYMQG_MAGIC {
-            // E2: SymphonyQG co-located graph — a routine VACUUM is a safe NO-OP on the structure (same rationale as
-            // IVF v4-v8): the scan folds the pending region + the executor's MVCC heap re-check drops dead TIDs, so a
-            // deleted row never surfaces. Compacting the graph (dropping dead vertices + re-encoding) is a REINDEX-only
-            // path for v1 (a symqg-aware in-VACUUM fold is a documented follow-up). Never a crash on `read_blob(symqg)`.
-            return 0;
         }
         if magic == crate::am::hnsw_page::HNSW_STRUCT_MAGIC {
             return vacuum_rebuild_hnsw_structured(indexrel, dead);

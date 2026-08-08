@@ -116,15 +116,6 @@ pub(crate) fn hnsw_resume() -> bool {
     HNSW_RESUME.get()
 }
 
-/// E2 FastScan A/B kill-switch: when on (default), the `theodb_symqg` scan uses the batched FastScan 1-bit sign
-/// kernel; off forces the scalar `estimate_sign` path (same index/box — isolates the kernel's measured effect).
-pub(crate) static SYMQG_FASTSCAN: GucSetting<bool> = GucSetting::<bool>::new(true);
-
-/// Whether the `theodb_symqg` scan uses the FastScan kernel (default on; off = scalar A/B baseline).
-pub(crate) fn symqg_fastscan() -> bool {
-    SYMQG_FASTSCAN.get()
-}
-
 /// Columnar zone-map skip-pruning kill-switch: when on (default), a WHERE-filtered columnar aggregate skips
 /// chunk groups whose min/max cannot satisfy the predicate; off = full decode (same-table A/B baseline).
 pub(crate) static COLUMNAR_ZONEMAP_SKIP: GucSetting<bool> = GucSetting::<bool>::new(true);
@@ -333,10 +324,6 @@ pub(crate) fn init() {
         GucFlags::default(),
     );
     GucRegistry::define_bool_guc(
-        c"theodb.symqg_fastscan",
-        c"When on (default), theodb_symqg scans with the batched FastScan 1-bit sign kernel; off forces scalar estimate_sign",
-        c"E2 FastScan kill-switch / same-index A/B baseline (isolates the kernel's effect). No effect on non-symqg indexes.",
-        &SYMQG_FASTSCAN,
         GucContext::Userset,
         GucFlags::default(),
     );

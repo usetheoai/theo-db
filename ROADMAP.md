@@ -24,7 +24,7 @@ localizável pelo campo `milestone:` do frontmatter. Medido em 2026-08-07: **130
 citando seu id; a maior parte dos 19 restantes é o bloco M76–M81, cujas seis fases do IVF-AQ tiveram a evidência
 consolidada no M82 ([ADR 0037](./wiki/decisions/0037-m82-am-ivf-aq-measured-verdict.md)) em vez de por fase.
 
-**Estado em 2026-08-08:** 166 milestones · **151 concluídos** · **15 abertos** — M169 (em andamento, ver
+**Estado em 2026-08-08:** 166 milestones · **152 concluídos** · **14 abertos** — M169 (em andamento, ver
 `[Unreleased]` no CHANGELOG) e M170–M184, o **Roadmap v7**: levar todos os pilares a maturidade ≥ 4.
 **O M177 (embeddings locais) é P0**, marcado pelo owner em 2026-08-07 — a Fase 1 dele roda à frente de
 M170–M176, e a Fase 2 é condicional ao gate que ela produz.
@@ -3453,8 +3453,16 @@ com evidência sintética é exatamente a `cobertura-alegada-sem-execucao` que o
 **Prior art / referências:** `.claude/rules/dogfood-golden-rule.md`; `.claude/rules/public-copy.md` § 3–4;
 `wiki/benchmarks/m45-pareto-sift1m.md` (a metade faltante do claim público).
 
-## M176 — [ ] SymQG: promover com evidência ou aposentar (1 → 4, admite remoção)
+## M176 — [x] SymQG: APOSENTADO — removido da distribuição (2026-08-08)
 
+> **DECIDIDO E EXECUTADO em 2026-08-08: removido por completo.** O owner escolheu remoção em vez de
+> feature flag, depois de a medição mostrar que era superfície pública com custo em dois eixos. Removidos:
+> `ann/symqg_spike.rs`, `bench_symqg.rs`, `am/page/symqg.rs`, os dois runners de benchmark, o handler e o
+> opclass do AM, o kernel FastScan de 1 bit (`build_sign_lut16`/`sign_estimate_block` — exclusivos deste
+> caminho, verificado por grep), GUCs, reloption e testes. **1 810 linhas.** Upgrade `1.3.0 → 1.4.0`
+> dropa o AM em instalação existente, e **falha alto** se houver índice criado com ele — derrubar índice
+> de usuário em silêncio seria pior.
+>
 > **AGRAVADO pela medição do M184 (2026-08-08).** Este milestone foi escrito assumindo que o SymQG era
 > "código mantido sem consumidor" — dívida interna, barata de carregar. **A medição desmente:**
 >

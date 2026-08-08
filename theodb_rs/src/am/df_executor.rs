@@ -72,7 +72,6 @@ impl Drop for HeldInterrupts {
 /// `Cargo.toml:85-86` — o comentário anterior contradizia o próprio crate.
 ///
 /// **Isso importa muito além deste arquivo:** há **quatro** `check_for_interrupts!()` vivos em laços de
-/// `CREATE INDEX` (`am/build.rs:420,474,487,812`) — mais um num benchmark (`bench_symqg.rs:76`), que não conta
 /// como caminho de produção. Sob o racional falso eles seriam ou declarados BLOCKER em bloco, ou removidos, e o
 /// `CREATE INDEX` ficaria incancelável. A falsidade custaria mais do que o defeito que ela alegava corrigir.
 ///
