@@ -106,6 +106,28 @@ executa**.
 por fixtures. A hipótese 4 caiu exatamente por confiar numa fixture de versão antiga que o próprio
 `cargo-pgrx` 0.19 continua distribuindo.
 
+> **Atualização 2026-08-09 — 3 hipóteses novas testadas no ambiente correto, o mecanismo ficou claro, o item
+> NÃO fechou.** As 4 refutações anteriores foram todas no host, onde o `cargo pgrx init` nunca completou.
+> Repetindo no **builder do próprio Dockerfile** (PG18 + `pgrx init` reais):
+>
+> | etapa | antes | agora |
+> |---|---|---|
+> | compilar o binário de teste | falhava | **passa** |
+> | linkar | `undefined symbol: pfree, palloc0, error_context_stack` | **passa** com `RUSTFLAGS="-Clink-arg=-Wl,--unresolved-symbols=ignore-all"` |
+> | executar | `undefined symbol: CurrentMemoryContext` | **continua falhando**, idem como não-root e via `cargo pgrx test` |
+>
+> **Mecanismo entendido:** o binário de teste é standalone e a lib referencia globais do PostgreSQL. Nenhuma
+> flag de link resolve — resolver o link não faz o símbolo existir em tempo de execução. Só executar dentro de
+> um backend PG resolve, e é para isso que o `cargo pgrx test` existe — mas no nosso projeto ele roda o binário
+> standalone em vez de embarcá-lo, e **por que** é a pergunta que continua aberta.
+>
+> **Falso rastro descartado:** o `E0133` que aparece no log são *warnings* de `rust_2024_compatibility`, não
+> erros. Quase os persegui como causa.
+>
+> **Próxima hipótese, não testada:** comparar nosso `Cargo.toml`/`lib.rs` com um projeto pgrx 0.19 recém-criado
+> por `cargo pgrx new`, no mesmo builder — se o projeto novo roda os testes e o nosso não, a diferença está no
+> nosso setup e é diffável. É a primeira hipótese que não depende de adivinhar o mecanismo interno do pgrx.
+
 ## B-002 — O objetivo: definir e medir o que torna o TheoDB **atrativo**, já que superar todo benchmark é impossível   [ ]
 
 domain: acervo
