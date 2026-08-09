@@ -163,8 +163,22 @@ por fixtures. A hipótese 4 caiu exatamente por confiar numa fixture de versão 
 > **nosso código**: o `build.rs`, o `extension_sql!` declarativo, o facade `api.rs`
 > ([ADR 0009](/decisions/0009-theodb-rs-api-surface-single-module.md)), e o que roda em inicialização estática.
 >
-> **Próxima medição:** copiar nosso `build.rs` e depois nossos `extension_sql!` para o projeto de referência,
-> nessa ordem — são as duas peças que geram código fora do caminho normal do pgrx.
+> **Os dois candidatos seguintes, medidos — nenhum reproduz.**
+>
+> - **`build.rs`: eliminado por inspeção, sem gastar um build.** *Ele não existe.* O que eu vinha chamando de
+>   `build.rs` era `src/am/build.rs`, um módulo nosso — não um script de build do Cargo. O candidato nasceu de
+>   um erro meu de leitura.
+> - **`extension_sql!`: não reproduz.** Injetado no projeto de referência no mesmo padrão do nosso `ai_op.rs` /
+>   `graph_pgq.rs` (schema + função declarativa, com `name =`). Continua carregando e executando.
+>
+> **Sobram dois:** o facade `api.rs` ([ADR 0009](/decisions/0009-theodb-rs-api-surface-single-module.md)) e
+> inicialização estática. Nenhum foi medido.
+>
+> **Nota de método que vale para todas estas rodadas:** o projeto de referência **nunca passa** neste
+> ambiente — ele sempre termina em `test result: FAILED. 0 passed; 1 failed`, porque não sobe um postgres
+> dentro do contêiner. A comparação que sustenta cada eliminação não é "passa vs falha", é **"o binário
+> carrega e o harness executa" vs "o binário não carrega" (exit 127)**. Essa distinção se manteve idêntica nas
+> quatro rodadas.
 
 ## B-002 — O objetivo: definir e medir o que torna o TheoDB **atrativo**, já que superar todo benchmark é impossível   [ ]
 
