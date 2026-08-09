@@ -151,11 +151,20 @@ por fixtures. A hipótese 4 caiu exatamente por confiar numa fixture de versão 
 >   `palloc0`/`pfree` num `#[pg_extern]` do projeto de referência: ele **continua carregando e executando**
 >   (`0 passed; 1 failed`, sem `symbol lookup error`). Tocar alocação de memória do PG **não** é o gatilho.
 >
-> **Espaço restante, agora estreito:** não é o ambiente, não é o `crate-type`, não é o `.cargo/config.toml`,
-> não é chamada de alocação do PG. Sobra o que a nossa crate tem e a referência não: ~40 dependências
-> (tantivy, datafusion, arrow), `build.rs`, `extension_sql!` declarativo, e código que roda em inicialização
-> estática. **A próxima medição é bisseção**: adicionar nossas dependências ao projeto de referência em
-> blocos até a falha reproduzir. Cada rodada custa um build.
+> **Bisseção executada — as dependências NÃO são o gatilho.** Primeiro corte grande: as **8** dependências
+> diretas (`datafusion`, `arrow`, `tantivy`, `serde_json`, `minreq`, `futures`) injetadas no projeto de
+> referência, mais um `#[pg_extern]` que usa três delas para o linker não podar. Resultado: **continua
+> carregando e executando** (`0 passed; 1 failed`, sem `symbol lookup error`). Build de 98,6 s.
+>
+> *(Correção: eu havia dito "~40 dependências" — esse é o número de transitivas. Diretas são 8.)*
+>
+> **Espaço restante, e agora ele é pequeno:** não é o ambiente, não é o `crate-type`, não é o
+> `.cargo/config.toml`, não é alocação do PG, **não são as dependências**. Sobra o que é exclusivamente
+> **nosso código**: o `build.rs`, o `extension_sql!` declarativo, o facade `api.rs`
+> ([ADR 0009](/decisions/0009-theodb-rs-api-surface-single-module.md)), e o que roda em inicialização estática.
+>
+> **Próxima medição:** copiar nosso `build.rs` e depois nossos `extension_sql!` para o projeto de referência,
+> nessa ordem — são as duas peças que geram código fora do caminho normal do pgrx.
 
 ## B-002 — O objetivo: definir e medir o que torna o TheoDB **atrativo**, já que superar todo benchmark é impossível   [ ]
 
