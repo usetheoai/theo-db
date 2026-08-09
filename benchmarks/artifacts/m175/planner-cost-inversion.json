@@ -1,14 +1,31 @@
 {
   "medido_em": "2026-08-09",
-  "ambiente": "container theo-db:0.139.0, 20.000 linhas, vector(1536), indice HNSW via sintaxe pgvector",
-  "consulta": "SELECT id FROM chunks ORDER BY vector <=> (SELECT vector FROM chunks LIMIT 1) LIMIT 10",
-  "plano_default": {"plano": "Sort + Seq Scan", "custo_estimado": "830.19..880.19", "execution_time_ms": 182.117},
-  "plano_forcado": {"plano": "Index Scan using chunks_vector_idx", "custo_estimado": "3404.25..83080.00", "execution_time_ms": 1.994},
-  "inversao": {
-    "indice_e_mais_rapido_x": 91.3,
-    "indice_e_estimado_mais_caro_x": 94.4,
-    "conclusao": "o modelo de custo esta INVERTIDO — o planner escolhe o plano 91x mais lento"
+  "ambiente": "container theo-db:0.139.0, vector(1536), indice via sintaxe pgvector, ANALYZE rodado",
+  "sintoma": {
+    "N": 20000,
+    "plano_default": {"plano": "Sort + Seq Scan", "custo": "830.19..880.19", "execution_time_ms": 182.117},
+    "plano_forcado": {"plano": "Index Scan HNSW", "custo": "3404.25..83080.00", "execution_time_ms": 1.994},
+    "indice_mais_rapido_x": 91.3, "indice_estimado_mais_caro_x": 94.4
   },
-  "workaround": "SET enable_seqscan=off; SET enable_sort=off",
-  "nao_testado": "se o mesmo ocorre com theodb_ivfflat, com outras dimensoes, ou em escalas maiores"
+  "causa_raiz": {
+    "onde": "theodb_rs/src/am/mod.rs:208-212 para no nucleo startup=total*ratio",
+    "o_que_falta": "a correcao TOAST do pgvector hnswcostestimate, omitida deliberadamente e justificada em am/cost.rs:10-14",
+    "fonte_primaria": "https://raw.githubusercontent.com/pgvector/pgvector/master/src/hnsw.c lido em 2026-08-09",
+    "paginas_medidas": {"idx_pages": 20522, "heap_pages": 128, "ratio": 0.040975},
+    "condicao_do_if_satisfeita": true,
+    "startup_nosso": 3404.25,
+    "startup_com_a_correcao": 168.7,
+    "reducao_pct": 95,
+    "custo_do_plano_seqscan": 810.21,
+    "veredito": "com a correcao 168.7 < 810.21 -> o indice VENCE. A omissao e decisiva, nao um ajuste leve."
+  },
+  "hipotese_refutada": {
+    "hipotese": "procost=1 nas funcoes de distancia subestima o Sort de 1536 dimensoes",
+    "teste": "ALTER FUNCTION theodb_vector_cosine_distance COST em 1, 10, 100, 1000",
+    "resultado": "Seq Scan em todos os quatro — a hipotese e FALSA, nao e o operador"
+  },
+  "cruzamento": {"1000": "Seq Scan", "5000": "Seq Scan", "20000": "Seq Scan", "conclusao": "nao ha cruzamento nessa faixa — nao e questao de escala"},
+  "ivfflat": {"N": 20000, "opclass": "theodb_ivfflat_cosine_ops", "plano": "Seq Scan", "conclusao": "mesmo defeito; o codigo omite a correcao sequentialRatio equivalente"},
+  "achado_lateral": "o shim de compatibilidade pgvector nao expoe vector_cosine_ops para theodb_ivfflat — so para o hnsw",
+  "nao_medido": ["outras dimensoes (so 1536)", "escalas acima de 20k", "se a correcao aplicada de fato flipa o plano (calculo, nao execucao — exige recompilar)"]
 }

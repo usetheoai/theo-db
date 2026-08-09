@@ -3893,9 +3893,18 @@ planner escolhe `Seq Scan` (182 ms) em vez do índice HNSW (2 ms), porque o cust
 maior quando ele é 91× mais rápido. **Todo usuário que criar um índice recebe um índice que nunca é usado**,
 a menos que saiba rodar `SET enable_seqscan=off`.
 
+**Causa-raiz já identificada (2026-08-09).** Não é o ratio (portado corretamente do pgvector) nem o
+`procost` do operador (hipótese testada e refutada). É a correção TOAST do `hnswcostestimate` que
+`am/mod.rs:208-212` nunca aplica, omitida deliberadamente e justificada em `am/cost.rs:10-14` com a frase
+*"never flip the index-vs-seqscan choice"* — que a medição refuta. Aritmética sobre páginas medidas: o
+startup cairia de 3 404,25 para 168,7 (−95%), contra 810,21 do seq scan, e o índice venceria.
+
 **Definition of done (all must hold):**
-- `am/cost.rs` lido e a origem da superestimativa identificada com evidência, não hipótese.
-- O planner escolhe o índice sem intervenção manual a 20k×1536d.
-- O cruzamento entre `Seq Scan` e `Index Scan` medido — a que escala cada plano passa a ser o certo.
-- Verificado também para `theodb_ivfflat` (não medido até aqui).
+- A correção TOAST aplicada em `am/mod.rs`, e o `am/cost.rs:10-14` corrigido — a justificativa da omissão
+  está factualmente errada e não pode ficar no código.
+- O equivalente `sequentialRatio` aplicado ao `theodb_ivfflat` (medido com o mesmo defeito).
+- O planner escolhe o índice sem intervenção manual a 20k×1536d — **executado, não calculado**: os 168,7
+  são aritmética e podem estar errados.
+- Medido em dimensões menores, onde a correção é menor — até onde ela basta.
 - Regressão coberta por teste que falha no estado atual.
+- Opcional, achado lateral: o shim pgvector não expõe `vector_cosine_ops` para o `theodb_ivfflat`.
