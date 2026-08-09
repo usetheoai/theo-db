@@ -106,4 +106,148 @@ executa**.
 por fixtures. A hipótese 4 caiu exatamente por confiar numa fixture de versão antiga que o próprio
 `cargo-pgrx` 0.19 continua distribuindo.
 
-Próximo id livre: **`B-002`**. Ids são monotônicos e nunca reusados.
+## B-002 — O objetivo: definir e medir o que torna o TheoDB **atrativo**, já que superar todo benchmark é impossível   [ ]
+
+domain: acervo
+repo: theo-db
+suggested_mode: evolve
+source: human
+evidence: none-yet
+why_now: o M73 mediu que superar o ScaNN/AlloyDB no vetorial é **não-alcançável** por extensão PG permissiva (gap 25–44× a recall 0.99, causa de paradigma). O owner reformulou o alvo em 2026-08-09: não precisamos vencer todos os benchmarks, precisamos ser atrativos. Hoje não existe artefato que diga **o que** torna o produto atrativo nem **como se mede** isso — e sem essa definição os demais itens deste lote otimizam eixos escolhidos por intuição. O ADR-0033 (reposicionamento do North Star) segue proposto, sem assinatura, desde 2026-07-10.
+status: raw
+dod:
+  - um ADR assinado define os eixos de atratividade e, para cada um, a medição que o sustenta
+  - cada eixo tem um número medido ou um `não medido` explícito — nenhum eixo fica em afirmação
+  - os itens B-003..B-010 são repriorizados contra esse ADR, e os que não servem a nenhum eixo são mortos
+
+> Registered 2026-08-09 by `/backlog-item` (slug: `objetivo-atratividade-medida`).
+
+## B-003 — Vetorial: o teto é o build, não a busca — ≥100M nunca foi atingido   [ ]
+
+domain: vetorial
+repo: theo-db
+suggested_mode: evolve
+source: human
+evidence: none-yet
+why_now: o M88 mediu 16M como o maior índice viável e sofreu 2 OOM-kills a 30M; o M89 derrubou o pico de 4,21× para 1,28–1,50× do base, mas registrou honestamente que **não** é `O(maintenance_work_mem)` — a cópia 1× de `idx.vectors` continua no pico, e ~51 GB de base a 100M não cabe em RAM commodity. O recall a escala real segue sem medição porque o índice não constrói.
+status: raw
+dod:
+  - build de 100M completa num box de RAM commodity, com pico anon-rss medido
+  - recall@10 medido a 100M sobre dados ANN reais, não sintéticos (a recall sintética do M88 foi tie-degenerada, 0.291)
+  - zero regressão de recall a ≤1M (A/B same-data)
+
+> Registered 2026-08-09 by `/backlog-item` (slug: `vetorial-teto-build-100m`).
+
+## B-004 — Lexical: qualidade de recuperação nunca foi medida contra um corpus público   [ ]
+
+domain: lexical
+repo: theo-db
+suggested_mode: evolve
+source: human
+evidence: none-yet
+why_now: o pilar entra no binário default em 2026-08-09 (M186), e a partir daí quem instala recebe `bm25_build`/`bm25_search`. O que existe medido é engine (M140.3 — cache MVCC, ganho que escala) e robustez (M140.4 — crash/VACUUM/MVCC contra o binário embarcado). **Qualidade de recuperação não.** O M184 registrou o eixo como estruturalmente aberto para este pilar. Expor superfície pública sem saber sua qualidade foi exatamente o defeito que o M184 mediu no SymQG.
+status: raw
+dod:
+  - nDCG@10 medido sobre pelo menos um dataset do BEIR, com o comando de reprodução no artefato
+  - comparado contra o `ts_rank_cd` nativo do Postgres no mesmo corpus — o baseline que o usuário já tem
+  - o resultado é publicado mesmo se for pior: um honest-negative aqui vale mais que a ausência do número
+
+> Registered 2026-08-09 by `/backlog-item` (slug: `lexical-qualidade-beir`).
+
+## B-005 — Híbrido: o ganho da fusão sobre o vetorial puro é estatisticamente não-significativo   [ ]
+
+domain: lexical
+repo: theo-db
+suggested_mode: evolve
+source: human
+evidence: none-yet
+why_now: o M123 mediu o ganho da fusão RRF sobre o vetorial puro e o teste pareado não o sustentou. É o pilar mais frágil do produto **e o único que está exposto prometendo algo que a medição não confirma** — pior que o lexical estar fora do binário, porque ali a ausência era honesta. Com apenas 4 testes em `hybrid.rs`, é também o menos protegido.
+status: raw
+dod:
+  - uma fusão cujo ganho sobre o vetorial puro sobrevive a teste pareado de significância, no mesmo corpus do M123
+  - ou, se nenhuma sobreviver: um honest-negative que retire a promessa da superfície pública em vez de mantê-la
+  - cobertura de teste de `hybrid.rs` proporcional à superfície exposta
+
+> Registered 2026-08-09 by `/backlog-item` (slug: `hibrido-fusao-significativa`).
+
+## B-006 — Colunar: 43 queries do ClickBench medidas, a suíte completa nunca   [ ]
+
+domain: colunar
+repo: theo-db
+suggested_mode: evolve
+source: human
+evidence: none-yet
+why_now: o M128 mediu 43 queries do ClickBench com md5 byte-idêntico ao heap — correção provada. Mas a suíte completa nunca rodou publicada, e o M184 registrou que o ganho do colunar vive no pushdown, não no seqscan plano. Sem a suíte completa não dá para dizer onde o pilar é competitivo e onde não é, que é precisamente o que o objetivo B-002 vai precisar saber.
+status: raw
+dod:
+  - suíte ClickBench completa executada e publicada em `wiki/benchmarks/`, com as queries que falham ou degradam nomeadas
+  - por query, quanto do tempo é pushdown e quanto é seqscan plano — medido, não estimado
+  - o hardware e o método de reprodução no artefato
+
+> Registered 2026-08-09 by `/backlog-item` (slug: `colunar-clickbench-completo`).
+
+## B-007 — Grafo: 23 funções expostas e nenhuma medição contra peer algum   [ ]
+
+domain: colunar
+repo: theo-db
+suggested_mode: review
+source: human
+evidence: none-yet
+why_now: o M184 mediu 23 funções de grafo no binário default e 35 testes — a maior superfície pública depois do vetorial. **Não existe um único artefato comparando o pilar com qualquer outro sistema**, nem um número de latência publicado. Qualquer afirmação sobre o grafo hoje, em qualquer direção, é sem lastro; e ele é superfície que o usuário recebe.
+status: raw
+dod:
+  - latência e throughput medidos em ao menos duas operações de travessia, com dataset e método publicados
+  - comparação contra um baseline — SQL recursivo no próprio Postgres serve, e é o que o usuário faria sem nós
+  - o veredito é publicado mesmo se desfavorável
+
+> Registered 2026-08-09 by `/backlog-item` (slug: `grafo-sem-baseline`).
+
+## B-008 — Lakehouse: 4 funções expostas, escala e formatos nunca medidos   [ ]
+
+domain: colunar
+repo: theo-db
+suggested_mode: evolve
+source: human
+evidence: none-yet
+why_now: o M184 mediu 4 funções de parquet no default e **zero testes próprios** em `parquet.rs` contra uma nota que exigia "testado" — a nota estava alta, e isso está registrado. Foram adicionados 6 testes em 2026-08-09, que **não rodaram** (bloqueados por B-001). Escala, formatos além de Parquet e comportamento sob arquivo corrompido seguem sem medição.
+status: raw
+dod:
+  - leitura medida em ao menos duas ordens de grandeza de tamanho de arquivo, com o tempo publicado
+  - comportamento sob arquivo truncado/corrompido: erro tipado, nunca crash do backend
+  - os 6 testes existentes efetivamente executados (depende de B-001)
+
+> Registered 2026-08-09 by `/backlog-item` (slug: `lakehouse-escala-formatos`).
+
+## B-009 — AI surface: `embed.rs` e `rerank.rs` têm 1 teste cada   [ ]
+
+domain: ai-surface
+repo: theo-db
+suggested_mode: review
+source: human
+evidence: none-yet
+why_now: o M184 contou **1** teste em `embed.rs` e **1** em `rerank.rs` — os dois extremos inferiores do crate inteiro. É a superfície que faz egress HTTP para provedor externo, ou seja, a que mais tem modo de falha que teste unitário pega: timeout, 5xx, resposta malformada, credencial ausente. O M177 mediu a performance desse caminho; a robustez dele não.
+status: raw
+dod:
+  - cada modo de falha do egress (timeout, 5xx, corpo malformado, credencial ausente) tem teste que assere o erro **tipado**, não apenas que lança
+  - nenhum segredo aparece em log ou mensagem de erro — verificado por teste
+  - o comportamento fail-open/fail-closed de cada função está declarado e coberto
+
+> Registered 2026-08-09 by `/backlog-item` (slug: `ai-surface-robustez-egress`).
+
+## B-010 — Maturidade: zero uso real, e é o gargalo de todos os pilares   [ ]
+
+domain: engine-pgrx
+repo: theo-db
+suggested_mode: live-test
+source: human
+evidence: none-yet
+why_now: 109 artefatos de benchmark sintético e nenhuma instalação real. `theo-rag` e `theo-memory` — os produtos de IA do próprio time — declaram `docker compose up -d pgvector`. O âncora de dogfood está `planned`. E o defeito do planner medido em 2026-08-09 prova o custo disso: o índice vetorial era rejeitado em todos os cenários, entregando 182 ms onde havia 6 ms — **nenhum dos 109 benchmarks pegou**, porque todos forçam o caminho que querem medir. Um usuário real teria pego no primeiro dia.
+status: raw
+dod:
+  - `theo-rag` servindo consultas reais sobre TheoDB na infraestrutura que o time opera
+  - âncora de dogfood em `running`, com ao menos 3 evidências e 1 história de falha (soft caps da golden rule)
+  - ao menos um defeito encontrado por uso, não por benchmark — é a prova de que o dogfood está funcionando
+
+> Registered 2026-08-09 by `/backlog-item` (slug: `dogfood-uso-real`).
+
+Próximo id livre: **`B-011`**. Ids são monotônicos e nunca reusados.
