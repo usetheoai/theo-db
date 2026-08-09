@@ -14,6 +14,15 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **theodb:** **cenário-âncora de dogfood declarado** (M175) — `theo-rag-sobre-theodb`: o produto de RAG do
+  próprio ecossistema passa a usar o TheoDB como vector store em vez do pgvector. A escolha é medida, não
+  arbitrária: `theo-rag/package.json` e `theo-memory` declaravam `docker compose up -d pgvector`, ou seja, **os
+  produtos de IA do time usavam a extensão de um terceiro e não o banco que o time constrói**. O golden rule
+  saiu do estado de template — o § 1 ainda tinha `<anchor-slug>` como placeholder — e o manifesto foi criado
+  com status **`planned`**, o único que a evidência sustenta. O drop-in foi **verificado executando** a
+  sequência exata do theo-rag contra a imagem (extensão, `vector(1536)`, INSERT de 500 vetores, índice HNSW por
+  sintaxe pgvector, busca por `<=>`), e o PR está aberto em usetheoai/theo-rag#206. **Nenhuma evidência de
+  dogfood foi fabricada:** as execuções desta sessão são carga sintética de benchmark, que o § 1 exclui em texto
 - **theodb:** backlog **B-001** — `cargo pgrx test` não executa neste repositório: o binário de teste morre com
   `symbol lookup error: CurrentMemoryContext`. **310 testes e nenhum roda localmente** pelo caminho
   documentado. Confirmado pré-existente rodando um teste que existe desde antes (`sq8`) com todas as mudanças
