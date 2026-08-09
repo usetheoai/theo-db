@@ -133,14 +133,42 @@ a correção para o lugar errado.
 (`ERROR: operator class "vector_cosine_ops" does not exist for access method "theodb_ivfflat"`) — só para o
 `hnsw`. Quem migrar do pgvector e quiser IVF precisa reescrever o `CREATE INDEX`.
 
+# Controle contra o pgvector real — a causa-raiz confirmada por implementação independente
+
+Tudo acima é raciocínio sobre o nosso código contra a fonte do upstream. O controle que fecha o argumento é
+rodar o **pgvector real** no cenário idêntico e ver se ele acerta onde nós erramos.
+
+`ankane/pgvector:v0.5.1`, 20 000 × `vector(1536)`, mesmo `CREATE INDEX`, mesmo `ANALYZE`, mesma consulta:
+
+| | páginas (heap / índice) | startup | plano escolhido |
+|---|---|---|---|
+| **pgvector** — *com* a correção | 128 / 20 001 | **324,60** | **`Index Scan using t_v_idx`** |
+| **TheoDB** — *sem* a correção | 128 / 20 522 | 3 404,25 | `Seq Scan` |
+
+As páginas batem (`heap = 128` idêntico), então os dois modelos veem o mesmo índice sobre a mesma tabela. A
+única diferença de comportamento é a correção — e o startup difere **10,5×**, o que é exatamente o que decide
+o plano.
+
+**Isto confirma a causa-raiz por um caminho que não depende da minha leitura do código.**
+
+## Correção da minha aritmética
+
+A seção anterior previu que o startup corrigido seria **168,7**. O medido no pgvector é **324,60** — quase o
+dobro. A previsão acertou a direção e a ordem de grandeza e **errou o número**, porque aplicou o nosso `ratio`
+e o nosso `numIndexPages` a um `genericcostestimate` que no pgvector parte de outros valores.
+
+Mantenho o cálculo registrado em vez de apagá-lo: ele foi apresentado com a ressalva de que era aritmética e
+não execução, e essa ressalva era o que o tornava utilizável. O que ele provava — *a correção derruba o
+startup para abaixo do custo do seqscan* — segue verdadeiro, agora por medição.
+
 # O que NÃO foi testado
 
 - **Outras dimensões.** Todo o experimento é 1536d. A correção escala com `numIndexPages`, então dimensões
   menores a atenuam — **onde ela deixa de bastar não foi medido**.
 - **Escalas acima de 20k.**
-- **A correção aplicada de fato.** Os 168,7 são **aritmética sobre páginas medidas**, não um plano executado —
-  confirmar exige recompilar a extensão. É a primeira coisa que o M185 deve fazer, e ela pode desmentir o
-  cálculo.
+- **A correção aplicada no NOSSO código.** O controle prova que a correção resolve no pgvector; não prova que
+  a nossa porta dela vai produzir o mesmo número. Isso exige recompilar a extensão, e é a primeira tarefa do
+  M185.
 
 # Relacionados
 
