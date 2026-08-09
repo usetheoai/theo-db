@@ -66,8 +66,32 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Items
 
-*(vazio — próximo id livre: `B-001`)*
+## B-001 — `cargo pgrx test` não roda: o binário de teste morre em `CurrentMemoryContext`   [ ]
 
-Semeado sem itens, por desenho: um item que ninguém filou não tem `why_now`, não tem DoD e não tem dono —
-é um placeholder que será herdado como se fosse decisão. A medição de maturidade dos pilares, que motivou
-a criação deste arquivo, já existe como **M184** no `ROADMAP.md`, porque nasceu com escopo de milestone.
+domain: engine-pgrx
+repo: theo-db
+suggested_mode: bug
+source: human
+evidence: reproduzido em 2026-08-09 no builder do próprio `Dockerfile` — `cargo pgrx test pg18 <filtro>` falha com `symbol lookup error: undefined symbol: CurrentMemoryContext`
+why_now: a suíte tem 310 testes e **nenhum deles roda localmente** pelo caminho documentado. Descoberto ao tentar validar 6 testes novos do `parquet.rs`; confirmado como **pré-existente** rodando `cargo pgrx test pg18 sq8` — teste que existe desde antes — com todas as mudanças da sessão revertidas via `git stash`. Uma suíte que só roda no CI é uma suíte cuja regressão só aparece depois do push.
+status: raw
+dod:
+  - `cargo pgrx test pg18 parquet` executa e reporta resultado de teste (passou ou falhou), em vez de morrer no carregamento
+  - a correção é verificada num teste pré-existente (`sq8`), não só nos testes novos
+  - o caminho que funcionar fica documentado em `scripts/pgrx-test-in-builder.sh`, que hoje descreve uma receita que não chega a executar
+
+> Registered 2026-08-09 by `/backlog-item` (slug: `theo-db-pgrx-test-nao-executa`).
+
+**Três hipóteses já testadas e REFUTADAS** — registradas para que ninguém as repita:
+
+| # | hipótese | resultado |
+|---|---|---|
+| 1 | falta `.cargo/config.toml` com `-Wl,--unresolved-symbols=ignore-all` | **muda o sintoma, não resolve**: o link passa a completar, e a falha migra de *link-time* (`undefined symbol: FreeErrorData/FlushErrorState/pfree`) para *runtime* (`CurrentMemoryContext`). É progresso diagnóstico, não correção |
+| 2 | o bootstrap `pub mod pg_test` está sob `#[cfg(test)]` enquanto os 56 módulos de teste usam `cfg(any(test, feature = "pg_test"))` | **sem efeito.** O desalinhamento é real e provavelmente deve ser corrigido de qualquer forma, mas não é a causa |
+| 3 | `crate-type = ["cdylib"]` sem o `"lib"` que o template do pgrx traz | **sem efeito** (rebuild confirmado por mudança de hash do binário) |
+
+**O que a evidência sugere:** o binário de teste está sendo executado como processo standalone em vez de ser
+carregado pelo Postgres. Nenhuma das três hipóteses toca esse ponto, e é por aí que a próxima investigação
+deveria começar.
+
+Próximo id livre: **`B-002`**. Ids são monotônicos e nunca reusados.

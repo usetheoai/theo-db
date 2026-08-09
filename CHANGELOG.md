@@ -14,6 +14,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **theodb:** backlog **B-001** — `cargo pgrx test` não executa neste repositório: o binário de teste morre com
+  `symbol lookup error: CurrentMemoryContext`. **310 testes e nenhum roda localmente** pelo caminho
+  documentado. Confirmado pré-existente rodando um teste que existe desde antes (`sq8`) com todas as mudanças
+  da sessão revertidas. O item registra **três hipóteses já testadas e refutadas** — flag de link em
+  `.cargo/config.toml` (muda o sintoma de link-time para runtime, não resolve), desalinhamento de `cfg` no
+  bootstrap `pg_test`, e `crate-type` sem `"lib"` — para que ninguém pague de novo os ciclos de build que elas
+  custaram
 - **theodb:** perfilada também a **busca** do SymQG, fechando o regime onde os 2,6–3,9× do e2 foram medidos. O
   contraste com o HNSW é o achado: naquele, **nenhuma função do `theodb_rs.so` passa de 1,3%** — o custo está
   espalhado e majoritariamente fora do nosso código —, enquanto no SymQG **`gather_symqg_candidates` concentra
