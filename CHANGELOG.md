@@ -56,9 +56,11 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   porque um `Vec` vazio ali viraria "categoria sem linhas" rio abaixo, dado errado em vez de erro —, a borda de
   array vazio (Parquet com zero linhas é válido), o pool de memória do DataFusion não-degenerado, e o **REVOKE
   de PUBLIC** das três primitivas de I/O de arquivo, que vive num `extension_sql!` e sumiria em silêncio num
-  refactor. **Não compile-verificados localmente**: o toolchain pgrx desta máquina está incompleto
-  (`~/.pgrx/18.4/pgrx-install` sem `pg_config`) e a imagem `theodb-builder` não existe aqui — a verificação
-  fica para o CI ou para `scripts/pgrx-test-in-builder.sh`
+  refactor. **Compile-verificados** no builder construído a partir do próprio `Dockerfile` (`cargo check --features pg_test`
+  limpo). **Não executados**: `cargo pgrx test` falha no link do binário de teste standalone com `undefined
+  symbol: FreeErrorData / FlushErrorState / pfree`, vindos do `pgrx-pg-sys` — e a falha é **pré-existente**,
+  reproduzida com um teste que existe desde antes (`sq8`) e com as mudanças desta sessão revertidas. É um
+  defeito de infraestrutura de teste do repositório, não destes testes
 - **theodb:** **retratada uma das três divergências que o M184 alegou.** Eu havia concluído que os opclasses
   documentados não existiam, porque `USING theodb_hnsw (v vector_l2_ops)` falha. O comando falha, a conclusão
   não: existem **dois caminhos coerentes** — nativo (`theodb_hnsw` + `theodb_hnsw_l2_ops`) e compatibilidade
