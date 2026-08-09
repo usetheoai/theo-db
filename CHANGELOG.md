@@ -65,6 +65,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   de feature flag**, o mesmo tratamento do lexical, que preserva o código para estudo sem expor quem instala
 
 ### Fixed
+- **Medido e reportado (ainda não corrigido):** a 20 mil linhas o planner escolhe um plano 91× mais lento porque o custo do índice vetorial está superestimado em 94× — todo índice HNSW criado deixa de ser usado sem `SET enable_seqscan=off`. Registro em `wiki/benchmarks/m175-planner-cost-inversion-verdict.md`; correção rastreada em M185 (P0). (#M175)
+
 - **theodb:** o módulo `parquet.rs` (lakehouse) tinha **zero testes próprios** — lacuna medida pelo M184 contra
   uma nota de maturidade que exigia "testado". Acrescentados **6 testes**: as duas representações de string do
   Arrow que o leitor de Parquet devolve conforme o schema do arquivo (tratar só uma quebraria em arquivo real,

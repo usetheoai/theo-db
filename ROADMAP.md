@@ -3883,3 +3883,19 @@ M19 ─────────────────────────�
 - **Columnar (M6) + BM25 (M7)** — os dois pilares v1 de composição foram **mantidos** (M30 / ADR `0013`,
   2026-07-03) como exceções permissivas (Regra 9), com evidência medida (columnar ~14× a 5M (mean±std); BM25 nDCG 0.95 vs
   0.51). Gated para adoção; o leg lexical shipado segue o `ts_rank_cd` nativo.
+
+### M185 — Corrigir a inversão do modelo de custo do índice vetorial `[ ]` **P0**
+
+**Bloqueia:** M175 (dogfood) e qualquer alegação de performance vetorial em uso real.
+
+Medido em 2026-08-09 (`wiki/benchmarks/m175-planner-cost-inversion-verdict.md`): a 20k linhas × 1536d o
+planner escolhe `Seq Scan` (182 ms) em vez do índice HNSW (2 ms), porque o custo estimado do índice é 94×
+maior quando ele é 91× mais rápido. **Todo usuário que criar um índice recebe um índice que nunca é usado**,
+a menos que saiba rodar `SET enable_seqscan=off`.
+
+**Definition of done (all must hold):**
+- `am/cost.rs` lido e a origem da superestimativa identificada com evidência, não hipótese.
+- O planner escolhe o índice sem intervenção manual a 20k×1536d.
+- O cruzamento entre `Seq Scan` e `Index Scan` medido — a que escala cada plano passa a ser o certo.
+- Verificado também para `theodb_ivfflat` (não medido até aqui).
+- Regressão coberta por teste que falha no estado atual.

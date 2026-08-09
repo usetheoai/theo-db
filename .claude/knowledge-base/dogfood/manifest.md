@@ -79,3 +79,31 @@ a falhar agora é o **#2 (`anchor_not_running`)**, e em seguida o **#3 (`no_anch
 
 Enquanto isso valer, o `public-copy.md` § 3 proíbe `production-ready`, `production-grade` e
 `battle-tested` — e **nenhum pilar passa de maturidade 4** (`wiki/benchmarks/m184-*`).
+
+---
+
+## Atualização 2026-08-09 — as duas verificações em aberto foram fechadas, e uma delas bloqueia o âncora
+
+Este manifesto declarava duas coisas como "não verificadas". Ambas eram verificáveis; eu havia parado por
+decisão, não por impossibilidade. Fechadas:
+
+### (a) Escala — o planner usa o índice? **NÃO. E isso bloqueia o âncora.**
+
+A 20 000 linhas × 1536d, com `ANALYZE` rodado, o planner escolhe `Sort` + `Seq Scan` (182 ms) em vez do
+índice HNSW (2 ms). O modelo de custo estima o índice como **94× mais caro** quando ele é **91× mais
+rápido**. Medição completa em `wiki/benchmarks/m175-planner-cost-inversion-verdict.md`.
+
+**Consequência para o âncora:** migrar o `theo-rag` hoje entregaria buscas ~91× mais lentas que o esperado,
+sem erro que denunciasse. O PR [usetheoai/theo-rag#206](https://github.com/usetheoai/theo-rag/pull/206) foi
+marcado para **não mergear** até a correção.
+
+### (b) Suíte de testes do `theo-rag` contra a imagem — **não executada, e agora sem valor de decisão**
+
+Ficou subordinada: com o defeito de (a) confirmado, a suíte passaria (o drop-in é funcionalmente correto) e
+o resultado verde seria **enganoso** — provaria compatibilidade enquanto esconde a regressão de performance,
+que é justamente o que a suíte não mede. Executá-la agora produziria evidência que aponta para a conclusão
+errada.
+
+Ela volta a fazer sentido depois da correção do planner, como parte da promoção `planned` → `wired`.
+
+**Status permanece `planned`** — e agora com um bloqueador técnico nomeado, não apenas com trabalho pendente.
