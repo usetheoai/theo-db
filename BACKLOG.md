@@ -124,9 +124,26 @@ por fixtures. A hipótese 4 caiu exatamente por confiar numa fixture de versão 
 > **Falso rastro descartado:** o `E0133` que aparece no log são *warnings* de `rust_2024_compatibility`, não
 > erros. Quase os persegui como causa.
 >
-> **Próxima hipótese, não testada:** comparar nosso `Cargo.toml`/`lib.rs` com um projeto pgrx 0.19 recém-criado
-> por `cargo pgrx new`, no mesmo builder — se o projeto novo roda os testes e o nosso não, a diferença está no
-> nosso setup e é diffável. É a primeira hipótese que não depende de adivinhar o mecanismo interno do pgrx.
+> **Hipótese testada em 2026-08-09 — e ela responde a pergunta estrutural.** `cargo pgrx new probe` no MESMO
+> builder, mesmo usuário, mesmo `pgrx init`:
+>
+> | etapa | projeto de referência | **nosso** |
+> |---|---|---|
+> | carregar o binário de teste | **passa** | falha — `undefined symbol: CurrentMemoryContext` |
+> | executar o harness | **passa** — `0 passed; 1 failed` | nunca chega (exit 127) |
+> | onde falha | dentro de `pgrx-tests/framework.rs:425`, **já em execução** | no carregamento dinâmico |
+>
+> São falhas de categorias diferentes: a referência passa do carregamento dinâmico, nós não. **O bloqueador é
+> do nosso projeto, não do ambiente** — a primeira resposta direcional que este item tem, depois de 7
+> hipóteses refutadas.
+>
+> O `crate-type` foi comparado e é idêntico (`["cdylib"]` nos dois), então não é ele. A falha própria da
+> referência em `framework.rs:425` é provavelmente ambiental (subir postgres no contêiner) e acontece
+> **estritamente depois** — não enfraquece a comparação.
+>
+> **Próximo passo, não feito:** diffar dependências e `lib.rs` entre os dois — o que a nossa crate linka que a
+> referência não linka é a superfície onde o símbolo entra. Com o lado do ambiente eliminado, é busca num
+> espaço fechado.
 
 ## B-002 — O objetivo: definir e medir o que torna o TheoDB **atrativo**, já que superar todo benchmark é impossível   [ ]
 
