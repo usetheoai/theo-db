@@ -64,6 +64,7 @@ pub fn load(index_id: i64) -> MemStore {
 ///
 /// O `flush`/`load` rodam na main thread (esta função); as threads do Tantivy só tocam o buffer em memória —
 /// nenhum SPI de thread worker (a restrição que o probe descobriu).
+#[cfg(feature = "spike-lexical")] // M186: andaime de medicao, fora do default
 #[pg_extern]
 fn lexical_spike_roundtrip(term: &str) -> i64 {
     use std::sync::Arc;
@@ -111,6 +112,7 @@ fn lexical_spike_roundtrip(term: &str) -> i64 {
 /// Gate 2 (MVCC), passo 1: indexa 3 docs (um contendo `term`) e faz FLUSH ao heap na txn corrente — SEM commit
 /// (o caller controla a txn). Retorna o nº de arquivos persistidos. Um segundo backend com snapshot anterior
 /// não verá estes arquivos até o COMMIT (a visibilidade é a do heap do PG).
+#[cfg(feature = "spike-lexical")] // M186: andaime de medicao, fora do default
 #[pg_extern]
 fn lexical_spike_flush_only(index_id: i64, term: &str) -> i64 {
     use std::sync::Arc;
@@ -143,6 +145,7 @@ fn lexical_spike_flush_only(index_id: i64, term: &str) -> i64 {
 /// Gate 4 (custo): indexa `n` docs sintéticos determinísticos num `PgDirectory` bufferizado e faz flush ao
 /// heap. Retorna o total de bytes do índice (o "tamanho" para o head-to-head vs `pg_textsearch`). Corpus
 /// determinístico (mesmo texto por `i`) para o `pg_textsearch` indexar o MESMO corpus e a comparação ser justa.
+#[cfg(feature = "spike-lexical")] // M186: andaime de medicao, fora do default
 #[pg_extern]
 fn lexical_spike_bulk_index(index_id: i64, n: i32) -> i64 {
     use std::sync::Arc;
@@ -179,6 +182,7 @@ fn lexical_spike_bulk_index(index_id: i64, n: i32) -> i64 {
 
 /// Gate 2 (MVCC), passo 2: LÊ o índice do heap no snapshot da txn corrente e busca `term`. Retorna o nº de hits
 /// (0 se o `index_id` não tem arquivos VISÍVEIS ao snapshot — ex.: outra txn ainda não commitou o flush).
+#[cfg(feature = "spike-lexical")] // M186: andaime de medicao, fora do default
 #[pg_extern]
 fn lexical_spike_search(index_id: i64, term: &str) -> i64 {
     use std::sync::Arc;

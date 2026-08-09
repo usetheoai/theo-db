@@ -14,6 +14,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Backlog B-002..B-010 — um item por pilar mais o item do objetivo, todos justificados por medição própria: atratividade medida (B-002), teto de build vetorial (B-003), qualidade lexical contra BEIR (B-004), significância da fusão híbrida (B-005), ClickBench completo (B-006), grafo sem baseline (B-007), escala do lakehouse (B-008), robustez do egress de IA (B-009), uso real (B-010). (#M186)
+
+- Busca lexical BM25 disponível na instalação padrão. Até aqui o pilar existia, era medido e era robusto, mas ficava fora do binário entregue — quem instalava o TheoDB não tinha `bm25_build`/`bm25_search`. Passa a acompanhar a extensão sem nenhuma flag de compilação. As funções de andaime do spike (`lexical_spike_*`) continuam fora da superfície pública, por opção. (#M186)
+
 - **theodb:** **cenário-âncora de dogfood declarado** (M175) — `theo-rag-sobre-theodb`: o produto de RAG do
   próprio ecossistema passa a usar o TheoDB como vector store em vez do pgvector. A escolha é medida, não
   arbitrária: `theo-rag/package.json` e `theo-memory` declaravam `docker compose up -d pgvector`, ou seja, **os

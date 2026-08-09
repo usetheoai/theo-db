@@ -29,7 +29,9 @@ pg_test = []
 # M140.2 — the lexical core moved to its own pgrx-free crate `theodb_lexical`. The feature enables
 # both the core crate (the Directory/MemStore/SegmentStore) AND tantivy directly (pg_backing.rs
 # builds tantivy schemas in its flush-roundtrip tests). Same tantivy 0.26 → one in the tree.
-spike-lexical = ["dep:theodb_lexical", "dep:tantivy"]
+# M186: as deps deixaram de ser opcionais — o GO do gate foi dado pelo ADR 0054 (Accepted). A feature
+# sobrevive apenas para o andaime de medicao do spike (`lexical::pg_backing`), que NAO vai no default.
+spike-lexical = []
 # M143 — a feature `spike-parquet` foi promovida a permanente (parquet + arrow/json nas deps acima); o leitor
 # own-code vive em `src/parquet.rs`, ligado por default. O spike deu GO (wiki/benchmarks/parquet-reader-owncode-spike.md).
 
@@ -54,10 +56,10 @@ futures = { version = "0.3", default-features = false, features = ["std"] }
 arrow = { version = "58", default-features = false, features = ["json"] }
 # M139 spike (opcional — só com feature `spike-lexical`). Tantivy 0.26 é MIT (D1-limpo, verificado); o deny.toml
 # barra qualquer AGPL transitiva. Dep OPCIONAL para não entrar no build shipado até o veredito GO.
-tantivy = { version = "0.26", optional = true }
+tantivy = "0.26"
 # M140.2 — the pgrx-free lexical core (path dep, opcional sob spike-lexical). O tantivy vem
 # transitivo daqui também; a versão casa (0.26) → uma única no tree.
-theodb_lexical = { path = "lexical_core", optional = true }
+theodb_lexical = { path = "lexical_core" }
 tokio = { version = "1", features = ["rt"], default-features = false }
 # M99 — columnar stripe compression (zstd). Already in the tree transitively via datafusion/arrow (parsimony rung 4
 # — reuse before adding); MIT/BSD-licensed, D1-clean. default-features=false keeps it lean.
