@@ -175,6 +175,12 @@ dod:
   - o resultado é publicado mesmo se for pior: um honest-negative aqui vale mais que a ausência do número
 
 > Registered 2026-08-09 by `/backlog-item` (slug: `lexical-qualidade-beir`).
+>
+> **Medido no mesmo dia** (`wiki/benchmarks/m186-lexical-ndcg-scifact-verdict.md`): nDCG@10 **0,6269** contra
+> **0,3016** do `ts_rank_cd` nativo, sobre 300 consultas do BEIR SciFact com julgamento humano. Delta +0,3253,
+> bootstrap pareado p < 0,0001. Dois dos três DoD estão cumpridos — falta a generalização, porque um dataset
+> não é uma curva. **O item permanece `raw`**: SciFact é pequeno e de domínio científico, e o achado lateral
+> (a superfície não expõe busca multi-termo) virou trabalho de produto que ainda não foi feito.
 
 ## B-005 — Híbrido: o ganho da fusão sobre o vetorial puro é estatisticamente não-significativo   [ ]
 
