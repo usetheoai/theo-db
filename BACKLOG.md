@@ -89,9 +89,21 @@ dod:
 | 1 | falta `.cargo/config.toml` com `-Wl,--unresolved-symbols=ignore-all` | **muda o sintoma, não resolve**: o link passa a completar, e a falha migra de *link-time* (`undefined symbol: FreeErrorData/FlushErrorState/pfree`) para *runtime* (`CurrentMemoryContext`). É progresso diagnóstico, não correção |
 | 2 | o bootstrap `pub mod pg_test` está sob `#[cfg(test)]` enquanto os 56 módulos de teste usam `cfg(any(test, feature = "pg_test"))` | **sem efeito.** O desalinhamento é real e provavelmente deve ser corrigido de qualquer forma, mas não é a causa |
 | 3 | `crate-type = ["cdylib"]` sem o `"lib"` que o template do pgrx traz | **sem efeito** (rebuild confirmado por mudança de hash do binário) |
+| 4 | falta `src/bin/pgrx_embed.rs` com `::pgrx::pgrx_embed!()`, arquivo que a fixture de pacote do `cargo-pgrx` traz | **a macro NÃO EXISTE no pgrx 0.19** — `error[E0433]: cannot find pgrx_embed in pgrx`. A fixture onde a encontrei é de versão antiga: os arquivos irmãos são `expected-0.16.0.toml` e `expected-0.16.1.toml`. **O cargo-pgrx 0.19 ainda distribui fixtures da 0.16**, o que as torna fonte enganosa para a versão em uso |
 
-**O que a evidência sugere:** o binário de teste está sendo executado como processo standalone em vez de ser
-carregado pelo Postgres. Nenhuma das três hipóteses toca esse ponto, e é por aí que a próxima investigação
-deveria começar.
+**Nota de método sobre a hipótese 4** — ela foi a mais informativa antes de cair. Com o `pgrx_embed.rs`
+presente, o erro **migrou** de runtime (`CurrentMemoryContext`) de volta para link-time (`errmsg`,
+`errfinish`), mostrando que o arquivo mudava de fato o caminho de build. Só ao combiná-lo com a flag de
+link (hipótese 1) o erro real apareceu — e era que a macro não existe nesta versão. **Duas mudanças
+combinadas revelaram o que nenhuma isolada mostrava.**
+
+**O que a evidência sugere:** o binário de teste é executado como processo standalone em vez de carregado
+pelo Postgres. As quatro hipóteses mexeram em **como o binário é construído**; nenhuma tocou **quem o
+executa**.
+
+**Por onde a próxima investigação deve começar:** ler o código do `pgrx-tests` 0.19 em
+`~/.cargo/registry/.../pgrx-tests-0.19.0/` para ver como ele inicia o servidor de teste — em vez de inferir
+por fixtures. A hipótese 4 caiu exatamente por confiar numa fixture de versão antiga que o próprio
+`cargo-pgrx` 0.19 continua distribuindo.
 
 Próximo id livre: **`B-002`**. Ids são monotônicos e nunca reusados.
