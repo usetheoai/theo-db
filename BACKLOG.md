@@ -171,8 +171,30 @@ por fixtures. A hipótese 4 caiu exatamente por confiar numa fixture de versão 
 > - **`extension_sql!`: não reproduz.** Injetado no projeto de referência no mesmo padrão do nosso `ai_op.rs` /
 >   `graph_pgq.rs` (schema + função declarativa, com `name =`). Continua carregando e executando.
 >
-> **Sobram dois:** o facade `api.rs` ([ADR 0009](/decisions/0009-theodb-rs-api-surface-single-module.md)) e
-> inicialização estática. Nenhum foi medido.
+> **Os dois últimos candidatos caíram juntos — por busca direta, não por bisseção.** `nm` sobre o binário de
+> teste e sobre cada `.rlib`:
+>
+> ```
+> CurrentMemoryContext no binário ........ U (indefinido)
+> objetos NOSSOS que o referenciam ....... NENHUM
+> entra por .............................. libpgrx.rlib, libpgrx_pg_sys.rlib
+> ```
+>
+> **A referência não vem do nosso código.** Vem das próprias crates do pgrx. Nem o facade `api.rs` nem
+> inicialização estática são a causa — **nenhum objeto nosso toca o símbolo**.
+>
+> **Causa-raiz, então:** o projeto de referência usa uma fatia pequena da API do pgrx, e o linker poda os
+> caminhos que referenciam `CurrentMemoryContext`. A nossa crate usa fatia larga o bastante para mantê-los. É
+> um símbolo de **dado** — não pode ser ligado preguiçosamente, então basta ser alcançável para ser exigido no
+> carregamento. Isso explica por que `palloc0`/`pfree` sozinhos não reproduziram: são símbolos de *função*.
+>
+> **Consequência:** não existe arquivo nosso para consertar. O defeito é estrutural — qualquer extensão pgrx
+> grande o bastante encontra isto. A direção de solução é outra e nunca foi tentada: fazer o binário de teste
+> resolver os símbolos do PG (linkar contra o binário do postgres, `-rdynamic` / `pg_config --libdir`), ou
+> executar os testes de fato dentro de um backend.
+>
+> **Todos os 9 candidatos levantados foram medidos.** O item permanece aberto porque a *solução* não foi
+> implementada — mas deixou de ser uma caça: o mecanismo está identificado e a direção é conhecida.
 >
 > **Nota de método que vale para todas estas rodadas:** o projeto de referência **nunca passa** neste
 > ambiente — ele sempre termina em `test result: FAILED. 0 passed; 1 failed`, porque não sobe um postgres
