@@ -52,9 +52,32 @@ grosseira, não graças a ela.
 **E é um achado por si:** a superfície pública não expõe busca multi-termo, e é dela que qualquer usuário
 real precisaria. Consertar isso é trabalho de produto, não de benchmark.
 
+# Segundo corpus — a vantagem generaliza em direção, não em magnitude
+
+O primeiro corte deste artefato media um dataset só, e eu registrei isso como limite. Fechado com um segundo
+corpus de domínio diferente — **BEIR NFCorpus**, médico, 3 633 documentos, 80 consultas com julgamento:
+
+| corpus | nosso | `ts_rank_cd` | razão | delta | p |
+|---|---|---|---|---|---|
+| SciFact (científico, n = 300) | 0,6269 | 0,3016 | **2,08×** | +0,3253 | < 0,0001 |
+| NFCorpus (médico, n = 80) | 0,3138 | 0,2331 | **1,35×** | +0,0807 | < 0,0001 |
+
+**A direção replica** — ambos significativos por bootstrap pareado, IC 95% inteiramente positivo nos dois.
+**A magnitude não.** 2,08× contra 1,35× é diferença grande demais para ser ruído amostral.
+
+**Consequência direta:** "mais que o dobro do `ts_rank_cd`" é propriedade **do SciFact**, não do produto.
+A afirmação defensável é *"melhor que o `ts_rank_cd` nativo com significância pareada em dois corpora de
+domínios distintos, por margem que varia com o domínio"*. Escrevi a primeira versão no CHANGELOG antes de ter
+o segundo corpus; ela foi corrigida antes de virar release.
+
+A calibração se mantém no segundo corpus: a referência BM25/Anserini para NFCorpus é ≈ 0,325 (conhecimento
+interno, **não verificado**), e nosso 0,3138 fica logo abaixo — o mesmo padrão do SciFact, o que reforça que o
+número não está inflado.
+
 # O que este artefato NÃO mede
 
-- **Um só dataset.** SciFact é pequeno e de domínio científico. Um resultado num corpus não é uma curva.
+- **Dois datasets, ambos pequenos e biomédicos/científicos.** Dois pontos são melhores que um e continuam não
+  sendo uma curva. Domínios distantes — jurídico, código, conversacional — seguem sem medição.
 - **Latência.** Só qualidade. O [m184](/benchmarks/m184-pilares-superficie-medida-verdict.md) mediu o
   `tsvector` nativo em 30,1 ms sobre 20k; o nosso caminho não foi cronometrado aqui.
 - **A fusão híbrida.** O [m123](/benchmarks/m123-hybrid-significance.md) mediu o ganho do híbrido sobre o
