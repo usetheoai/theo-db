@@ -141,9 +141,21 @@ por fixtures. A hipótese 4 caiu exatamente por confiar numa fixture de versão 
 > referência em `framework.rs:425` é provavelmente ambiental (subir postgres no contêiner) e acontece
 > **estritamente depois** — não enfraquece a comparação.
 >
-> **Próximo passo, não feito:** diffar dependências e `lib.rs` entre os dois — o que a nossa crate linka que a
-> referência não linka é a superfície onde o símbolo entra. Com o lado do ambiente eliminado, é busca num
-> espaço fechado.
+> **Diff feito no mesmo dia, e ele estreitou mais o espaço — sem fechar.**
+>
+> - **`.cargo/config.toml`:** o `cargo pgrx new` cria um, e nós não temos. **Mas ele só carrega flags para
+>   macOS** (`-Wl,-undefined,dynamic_lookup`); no Linux é inerte. **Descartado.**
+> - **`crate-type`:** idêntico (`["cdylib"]`). **Descartado.**
+> - **Hipótese minha, testada e REFUTADA:** `CurrentMemoryContext` é símbolo de *dado*, e dados não podem ser
+>   ligados preguiçosamente — supus que nossa crate o referenciasse e a referência não. Injetei
+>   `palloc0`/`pfree` num `#[pg_extern]` do projeto de referência: ele **continua carregando e executando**
+>   (`0 passed; 1 failed`, sem `symbol lookup error`). Tocar alocação de memória do PG **não** é o gatilho.
+>
+> **Espaço restante, agora estreito:** não é o ambiente, não é o `crate-type`, não é o `.cargo/config.toml`,
+> não é chamada de alocação do PG. Sobra o que a nossa crate tem e a referência não: ~40 dependências
+> (tantivy, datafusion, arrow), `build.rs`, `extension_sql!` declarativo, e código que roda em inicialização
+> estática. **A próxima medição é bisseção**: adicionar nossas dependências ao projeto de referência em
+> blocos até a falha reproduzir. Cada rodada custa um build.
 
 ## B-002 — O objetivo: definir e medir o que torna o TheoDB **atrativo**, já que superar todo benchmark é impossível   [ ]
 
