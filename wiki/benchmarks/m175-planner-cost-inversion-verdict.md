@@ -166,12 +166,64 @@ startup para abaixo do custo do seqscan* — segue verdadeiro, agora por mediç�
 - **Outras dimensões.** Todo o experimento é 1536d. A correção escala com `numIndexPages`, então dimensões
   menores a atenuam — **onde ela deixa de bastar não foi medido**.
 - **Escalas acima de 20k.**
-- **A correção aplicada no NOSSO código.** O controle prova que a correção resolve no pgvector; não prova que
-  a nossa porta dela vai produzir o mesmo número. Isso exige recompilar a extensão, e é a primeira tarefa do
-  M185.
+- **Dimensões acima de 1536 e escalas acima de 50 000.**
+- **Os três testes unitários não foram compilados nem executados.** Exigem PG18 configurado no pgrx (o
+  `cargo pgrx init` está incompleto neste host) e a suíte não roda por B-001. O que
+  prova a correção é a verificação ponta a ponta abaixo, não eles.
 
 # Relacionados
 
 - O runbook que trata o sintoma como erro do usuário: [diagnóstico do query vetorial](/runbooks/vector-scan-diagnostics.md)
 - O dogfood que este defeito bloqueia: manifesto em `.claude/knowledge-base/dogfood/manifest.md`
 - O perfil cujo tropeço isto explica: [SymQG com símbolos](/benchmarks/m184-symqg-profile-simbolos-verdict.md)
+
+# A correção — aplicada e verificada ponta a ponta
+
+`theodb_rs/src/am/cost.rs` ganhou `toast_startup_correction` como função pura (a suíte não executa
+`#[pg_test]` — B-001 —, então tudo que dispensa uma `Relation` fica testável assim), e o `amcostestimate` em
+`am/mod.rs` passou a chamá-la, lendo `spc_seq_page_cost` de `get_tablespace_page_costs` em vez de fixar
+constantes — um tablespace em mídia diferente tem custos diferentes.
+
+Imagem construída pelo Dockerfile do projeto, cenário-âncora reproduzido, **mesmas páginas** (`heap = 128`,
+`idx = 20 522`):
+
+| | startup | plano | tempo real |
+|---|---|---|---|
+| antes | 3 404,25 | `Seq Scan` | 182,117 ms |
+| **depois** | **134,21** | **`Index Scan using t_ix`** | **6,401 ms** |
+
+**28,5× mais rápido, com o planner escolhendo sozinho.**
+
+## Varrimento — a correção vale no espectro, e as guardas funcionam
+
+| dim | linhas | AM | heap / idx | usa índice | startup |
+|---|---|---|---|---|---|
+| 64 | 20 000 | hnsw | 741 / 1 237 | sim | 211,03 |
+| 256 | 20 000 | hnsw | 2 858 / 3 380 | sim | 565,87 |
+| 768 | 20 000 | hnsw | 128 / 10 522 | sim | 134,21 |
+| 1 536 | **50 000** | hnsw | 319 / 51 302 | sim | 325,75 |
+| 1 536 | 20 000 | **ivfflat** | 128 / 15 509 | sim | 143,00 |
+
+A 64d e 256d o heap é grande — vetores desse tamanho não são TOASTed — e a guarda `startup_pages > rel_pages`
+corretamente **não** dispara; o índice vence por já ser pequeno. A correção age exatamente onde o TOAST cria a
+assimetria, que é o que o upstream desenhou.
+
+## Um defeito do meu instrumento, quase publicado como cinco achados
+
+A primeira leitura deste varrimento reportou `Seq Scan` nos cinco casos — contradizendo a verificação-âncora
+que acabara de dar certo. O `grep` pegava a primeira ocorrência de `Seq Scan` na saída, e a subconsulta
+`(SELECT v FROM t LIMIT 1)` do `InitPlan` sempre faz um, **antes** da linha do plano principal.
+
+Cinco falsos negativos, coerentes entre si, prontos para serem lidos como "a correção não funciona em lugar
+nenhum". O que os pegou foi a contradição com uma medição anterior — não uma revisão do script.
+
+## Minhas duas previsões, e o quanto erraram
+
+| | previsto | medido |
+|---|---|---|
+| startup corrigido (aritmética sobre nossas páginas) | 168,7 | — |
+| startup do pgvector real | — | 324,60 |
+| startup do nosso código corrigido | — | **134,21** |
+
+A aritmética acertou a vizinhança e a direção nas duas vezes, e o número exato em nenhuma. Fica registrada
+como o que era: um cálculo que orientou onde procurar, não uma medição.

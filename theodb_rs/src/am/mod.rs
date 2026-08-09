@@ -206,7 +206,28 @@ pub unsafe extern "C-unwind" fn amcostestimate(
     let ratio = cost::scan_visit_ratio(rel, tuples);
     pg_sys::index_close(rel, pg_sys::NoLock as pg_sys::LOCKMODE);
 
-    *index_startup_cost = costs.indexTotalCost * ratio;
+    // M175: the TOAST startup correction pgvector applies right after this core. Omitting it made the
+    // planner reject the index in every case measured (see `cost.rs` module docs). `spc_seq_page_cost` comes
+    // from the tablespace, never a hardcoded constant — a tablespace on different media has different costs.
+    let mut spc_seq_page_cost = 0.0f64;
+    pg_sys::get_tablespace_page_costs(
+        (*indexinfo).reltablespace,
+        std::ptr::null_mut(),
+        &mut spc_seq_page_cost,
+    );
+    let rel_pages = if (*indexinfo).rel.is_null() {
+        0.0
+    } else {
+        (*(*indexinfo).rel).pages as f64
+    };
+    *index_startup_cost = cost::toast_startup_correction(
+        costs.indexTotalCost * ratio,
+        costs.numIndexPages,
+        ratio,
+        rel_pages,
+        costs.spc_random_page_cost,
+        spc_seq_page_cost,
+    );
     *index_total_cost = costs.indexTotalCost;
     *index_selectivity = costs.indexSelectivity;
     *index_correlation = costs.indexCorrelation;

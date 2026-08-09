@@ -7,11 +7,18 @@
 //! total → seqscan+sort wins). The old stub returned cost 0, so the index ALWAYS won — it lied to the planner
 //! (deep-view gap G6).
 //!
-//! The ratio math follows pgvector's cost model (`hnsw.c` / `ivfflat.c`): only the load-bearing
-//! `startup = total * ratio` core is ported. pgvector's secondary corrections — IVF's `sequentialRatio` page
-//! adjustment and the HNSW/IVF TOAST `startupPages` refinement — are intentionally omitted: they only shift
-//! cost slightly *toward* the index and never flip the index-vs-seqscan choice this feature exists to make
-//! honest. Omitting them biases conservatively toward seqscan. Constant tuning is out of scope (D5).
+//! The ratio math follows pgvector's cost model (`hnsw.c` / `ivfflat.c`), and so does the TOAST startup
+//! correction that follows it (`toast_startup_correction`).
+//!
+//! **The correction used to be omitted, and the omission was justified here with a claim that measurement
+//! refuted (M175).** The text said the secondary corrections "only shift cost slightly *toward* the index and
+//! never flip the index-vs-seqscan choice this feature exists to make honest". They do flip it, and they flip
+//! every case that matters: at 20k x `vector(1536)` the index answered in 1,99 ms against 182,12 ms for
+//! seqscan+sort, and the planner chose seqscan anyway because the uncorrected startup was 3404,25. Real
+//! pgvector, same data and same page counts, produced startup 324,60 and chose the index. The correction
+//! exists precisely for large vectors — its own upstream comment says "TOAST not included in seq scan cost" —
+//! so the regime where it was dismissed as negligible is the regime where it is decisive. Constant tuning
+//! remains out of scope (D5).
 use crate::am::build::HNSW_M;
 use crate::am::hnsw_page::HNSW_STRUCT_MAGIC;
 use crate::am::{guc, page};
@@ -61,6 +68,36 @@ pub(crate) fn ratio_for(
         Some(x) if x == page::IVF_STRUCT_MAGIC => ivf_visit_ratio(probes, lists),
         Some(x) if x == HNSW_STRUCT_MAGIC => hnsw_visit_ratio(tuples, m, ef),
         _ => 1.0,
+    }
+}
+
+/// pgvector's TOAST startup correction (`hnsw.c` / `ivfflat.c`), as a pure function so it is unit-testable
+/// with forged inputs — the crate's test suite cannot run `#[pg_test]` (B-001), so every rule that can be
+/// expressed without a `Relation` is expressed here.
+///
+/// A `vector(1536)` is ~6 KB and always TOASTed, so the heap the planner compares against holds only TOAST
+/// pointers (measured: 128 pages for 20 000 rows) while the index holds the vectors (20 522 pages). Without
+/// this correction the index is charged random-page cost for pages the seqscan never pays for at all, and it
+/// loses a comparison it should win by ~91x in real time. Both guards are pgvector's: only correct when the
+/// scan really is partial (`ratio < 0.5`) and when the index side genuinely reads more pages than the heap.
+pub(crate) fn toast_startup_correction(
+    startup: f64,
+    num_index_pages: f64,
+    ratio: f64,
+    rel_pages: f64,
+    spc_random_page_cost: f64,
+    spc_seq_page_cost: f64,
+) -> f64 {
+    let startup_pages = num_index_pages * ratio;
+    if startup_pages > rel_pages && ratio < 0.5 {
+        // Charge the partial scan as sequential rather than random, then drop the pages it never reads.
+        let corrected = startup
+            - startup_pages * (spc_random_page_cost - spc_seq_page_cost)
+            - (startup_pages - rel_pages) * spc_seq_page_cost;
+        // A negative startup would make the index free and re-create the pre-M48 lie the ratio exists to kill.
+        corrected.max(0.0)
+    } else {
+        startup
     }
 }
 
@@ -233,4 +270,32 @@ mod tests {
         let hnsw = ratio_for(Some(HNSW_STRUCT_MAGIC), 50_000.0, 10, 100, 16, 64);
         assert!(hnsw < 1.0 && hnsw > 0.0, "HNSW branch = pgvector formula, in (0,1) at 50k");
     }
+
+    #[test]
+    fn toast_correction_flips_the_measured_m175_case() {
+        // The exact numbers measured at 20k x vector(1536): without the correction the planner chose a plan
+        // 91x slower. Corrected startup must land below the 810,21 the seqscan plan cost.
+        let corrected = toast_startup_correction(3404.25, 20_522.0, 0.040975, 128.0, 4.0, 1.0);
+        assert!(
+            corrected < 810.21,
+            "corrected startup {corrected} must beat the seqscan plan (810.21) or the index is never chosen"
+        );
+        assert!(corrected > 0.0, "must stay positive — a free index is the pre-M48 lie");
+    }
+
+    #[test]
+    fn toast_correction_respects_both_pgvector_guards() {
+        // ratio >= 0.5: the scan is not partial, so there is nothing to re-charge as sequential.
+        assert_eq!(toast_startup_correction(1000.0, 20_000.0, 0.9, 128.0, 4.0, 1.0), 1000.0);
+        // startup_pages <= rel_pages: the index does not out-read the heap, so the premise does not hold.
+        assert_eq!(toast_startup_correction(1000.0, 100.0, 0.1, 128.0, 4.0, 1.0), 1000.0);
+    }
+
+    #[test]
+    fn toast_correction_never_returns_negative() {
+        // A tiny startup over a huge index would go negative unclamped, making the index look free.
+        let c = toast_startup_correction(1.0, 1_000_000.0, 0.1, 0.0, 4.0, 1.0);
+        assert_eq!(c, 0.0);
+    }
+
 }

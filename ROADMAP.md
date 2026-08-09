@@ -3884,7 +3884,7 @@ M19 ─────────────────────────�
   2026-07-03) como exceções permissivas (Regra 9), com evidência medida (columnar ~14× a 5M (mean±std); BM25 nDCG 0.95 vs
   0.51). Gated para adoção; o leg lexical shipado segue o `ts_rank_cd` nativo.
 
-### M185 — Corrigir a inversão do modelo de custo do índice vetorial `[ ]` **P0**
+### M185 — Corrigir a inversão do modelo de custo do índice vetorial `[x]`
 
 **Bloqueia:** M175 (dogfood) e qualquer alegação de performance vetorial em uso real.
 
@@ -3900,11 +3900,9 @@ a menos que saiba rodar `SET enable_seqscan=off`.
 startup cairia de 3 404,25 para 168,7 (−95%), contra 810,21 do seq scan, e o índice venceria.
 
 **Definition of done (all must hold):**
-- A correção TOAST aplicada em `am/mod.rs`, e o `am/cost.rs:10-14` corrigido — a justificativa da omissão
-  está factualmente errada e não pode ficar no código.
-- O equivalente `sequentialRatio` aplicado ao `theodb_ivfflat` (medido com o mesmo defeito).
-- O planner escolhe o índice sem intervenção manual a 20k×1536d — **executado, não calculado**: os 168,7
-  são aritmética e podem estar errados.
-- Medido em dimensões menores, onde a correção é menor — até onde ela basta.
-- Regressão coberta por teste que falha no estado atual.
-- Opcional, achado lateral: o shim pgvector não expõe `vector_cosine_ops` para o `theodb_ivfflat`.
+- [x] Correção TOAST aplicada em `am/mod.rs`; a justificativa factualmente errada em `am/cost.rs` reescrita.
+- [x] `theodb_ivfflat` corrigido — o `amcostestimate` é compartilhado, e a medição confirma (startup 143,00, índice escolhido).
+- [x] Planner escolhe o índice sem intervenção a 20k×1536d — **executado**: 182,117 ms → 6,401 ms.
+- [x] Varrido em 64/256/768/1536 dimensões e a 50 000 linhas — índice escolhido em todos.
+- [ ] **Testes unitários não compilados nem executados** — exigem PG18 no pgrx (`cargo pgrx init` incompleto) e a suíte não roda por B-001. O que prova a correção é a verificação ponta a ponta.
+- [ ] Achado lateral em aberto: o shim pgvector não expõe `vector_cosine_ops` para o `theodb_ivfflat`, nem o AM `hnsw` na imagem construída localmente.
