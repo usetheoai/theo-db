@@ -67,7 +67,7 @@ jobs:
 
       # O gate NÃO é "zero falhas" — seria reprovar todo push a partir de hoje, e um CI que
       # reprova sempre é um CI que alguém desliga. É "não pode PIORAR": o baseline é o número
-      # medido em 2026-08-10 e cada falha nova reprova.
+      # medido em 2026-08-10 (era 20; caiu para 10 ao fechar B-011 e as 8 de registro de schema) e cada falha nova reprova.
       #
       # RESSALVA REGISTRADA (log de intake de B-013): este baseline só é honesto enquanto o B-012
       # estiver ativo para derrubá-lo. Se o B-012 morrer, o número vira permanente sem ninguém ter
@@ -75,7 +75,7 @@ jobs:
       # BAIXE o baseline no mesmo commit.
       - name: Gate — falhas não podem aumentar
         env:
-          BASELINE: "20"
+          BASELINE: "10"
         run: |
           line=$(grep -E "^test result" suite.log | tail -1)
           echo "$line"

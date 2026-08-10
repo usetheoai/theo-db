@@ -2707,8 +2707,12 @@ mod tests {
     }
 }
 
-#[cfg(any(test, feature = "pg_test"))]
-#[pgrx::pg_schema]
+// B-012: eram `#[pgrx::pg_test]` num módulo `#[pgrx::pg_schema]` chamado `m168_affinity_tests` — o pgrx
+// gerava as funções no schema homônimo enquanto o harness as chama em `tests.<fn>`, e as duas falhavam com
+// `function tests.affinity_...() does not exist`. Reclassificados para `#[test]`: `ThreadAffinity::capture`
+// e `assert_owned` são `std::thread::current().id()` puro, sem uma linha de `pg_sys` — não precisam de
+// backend, e um `#[pg_test]` que não toca o PostgreSQL está classificado errado.
+#[cfg(test)]
 mod m168_affinity_tests {
     use super::ThreadAffinity;
 
@@ -2718,7 +2722,7 @@ mod m168_affinity_tests {
     ///
     /// No PostgreSQL state is touched from the spawned thread: only the affinity check runs there, so the test
     /// cannot itself corrupt anything. The panic is contained by `join()` returning `Err`.
-    #[pgrx::pg_test]
+    #[test]
     fn affinity_panics_off_owning_thread() {
         let aff = ThreadAffinity::capture();
         let joined = std::thread::spawn(move || aff.assert_owned("m168 test")).join();
@@ -2730,7 +2734,7 @@ mod m168_affinity_tests {
     }
 
     /// The other half: on the owning thread it must be a no-op, or the guard would break the real path.
-    #[pgrx::pg_test]
+    #[test]
     fn affinity_is_silent_on_owning_thread() {
         let aff = ThreadAffinity::capture();
         aff.assert_owned("m168 test"); // must not panic

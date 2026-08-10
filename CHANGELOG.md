@@ -75,7 +75,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   de feature flag**, o mesmo tratamento do lexical, que preserva o código para estudo sem expor quem instala
 
 ### Fixed
-- Os testes da busca lexical BM25 voltam a ser executados. Eles existiam e falhavam desde sempre por um detalhe de registro — o módulo não declarava seu schema, então o PostgreSQL nunca recebia as funções de teste e a chamada falhava com "função não existe". O pilar tinha sido promovido à instalação padrão com seus 6 testes vermelhos. (#B-012)
+- Metade das falhas da suíte era classificação errada de teste, não defeito do banco: 10 dos 20 testes vermelhos passaram a verde sem uma linha de mudança no comportamento do produto. Os testes da busca lexical BM25 voltam a ser executados. Eles existiam e falhavam desde sempre por um detalhe de registro — o módulo não declarava seu schema, então o PostgreSQL nunca recebia as funções de teste e a chamada falhava com "função não existe". O pilar tinha sido promovido à instalação padrão com seus 6 testes vermelhos. (#B-012)
 
 - **Retratação da entrada anterior:** o vector-join do HNSW **não tinha defeito**. Ao medir, a perda vinha da premissa dos próprios testes — eles pediam ao índice uma garantia que o algoritmo não dá (o parâmetro de busca limita a exploração do grafo, não o tamanho do resultado). Os testes foram corrigidos com o alvo intacto e passam. Nenhuma mudança no comportamento do banco. (#B-011)
 
