@@ -216,7 +216,10 @@ fn sanitize_query(query: &str) -> String {
         .join(" ")
 }
 
+// B-011/B-012: sem `#[pgrx::pg_schema]` o pgrx NÃO registra os `#[pg_test]` como funções SQL, e o harness
+// falha com `function tests.<nome>() does not exist` — foi o que manteve os 6 testes de BM25 vermelhos.
 #[cfg(any(test, feature = "pg_test"))]
+#[pgrx::pg_schema]
 mod tests {
     use pgrx::prelude::*;
 

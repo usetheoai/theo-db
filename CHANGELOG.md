@@ -75,6 +75,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   de feature flag**, o mesmo tratamento do lexical, que preserva o código para estudo sem expor quem instala
 
 ### Fixed
+- Os testes da busca lexical BM25 voltam a ser executados. Eles existiam e falhavam desde sempre por um detalhe de registro — o módulo não declarava seu schema, então o PostgreSQL nunca recebia as funções de teste e a chamada falhava com "função não existe". O pilar tinha sido promovido à instalação padrão com seus 6 testes vermelhos. (#B-012)
+
 - **Retratação da entrada anterior:** o vector-join do HNSW **não tinha defeito**. Ao medir, a perda vinha da premissa dos próprios testes — eles pediam ao índice uma garantia que o algoritmo não dá (o parâmetro de busca limita a exploração do grafo, não o tamanho do resultado). Os testes foram corrigidos com o alvo intacto e passam. Nenhuma mudança no comportamento do banco. (#B-011)
 
 - A suíte de testes do projeto volta a executar localmente — os unitários puros **e** os que precisam de um servidor PostgreSQL. O binário de teste morria no carregamento com `symbol lookup error: CurrentMemoryContext`, antes do primeiro teste — **nenhum dos 439 rodava**. Eram três bloqueios empilhados — link, carregamento e instalação da extensão — e resolver um só não fazia nenhum teste rodar. A receita completa está no runbook `wiki/runbooks/rodar-a-suite-de-testes.md`. Quem contribui com o TheoDB deixa de depender do CI para descobrir uma regressão em lógica pura. (#B-001)
