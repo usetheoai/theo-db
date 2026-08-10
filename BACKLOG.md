@@ -243,11 +243,26 @@ por fixtures. A hipótese 4 caiu exatamente por confiar numa fixture de versão 
 > `initdb` rodando. O harness espera por um servidor de teste que nunca sobe, e **não falha rápido** — o que
 > é pior que falhar, porque não deixa diagnóstico.
 >
-> **Não medido, e é onde a próxima rodada começa:** por que o servidor não sobe. Candidatos não testados —
-> `initdb` falhando em silêncio, diretório de dados do pgrx sem permissão, porta indisponível, ou o
-> `pgrx init --pg18 $(which pg_config)` apontando para o Postgres do sistema em vez de um gerido pelo pgrx (o
-> `~/.pgrx/` do builder tem só `config.toml`, nenhuma instalação própria). O caminho barato é rodar
-> `cargo pgrx start pg18` isolado e ler o log do servidor, em vez de inferir pelo harness.
+> **Medido em 2026-08-09 — `cargo pgrx start` falha em SILÊNCIO.** Rodado isolado, de dentro da crate, como
+> usuário não-root, com `PGRX_HOME` próprio:
+>
+> ```
+> cargo pgrx init --pg18 $(which pg_config)   → OK; data-18/ criado com base, global, pg_commit_ts, pg_hba.conf
+> cargo pgrx start pg18                        → SEM SAÍDA, sem erro, exit 0
+> pg_isready -h localhost -p 28818             → no response
+> psql -p 28818                                → Connection refused
+> ```
+>
+> **O `init` funciona; o `start` reporta sucesso e a porta nunca abre.** É exatamente por isso que o harness
+> trava: ele espera por um servidor que foi declarado iniciado. Nenhum arquivo `*.log` foi produzido sob
+> `~/.pgrx/` — não há nem o log do servidor para ler.
+>
+> **Dois candidatos eliminados de passagem:** `initdb` NÃO falha (o data dir está completo), e o `pgrx init`
+> apontando para o Postgres do sistema NÃO impede a inicialização.
+>
+> **Onde a próxima rodada começa:** invocar o `pg_ctl` do PG18 diretamente sobre `~/.pgrx/data-18`, com
+> `-l` explícito, e ler o log que o `pgrx start` não produz. Isso separa "o postgres não sobe" de "o pgrx não
+> consegue subi-lo" — que são consertos diferentes e hoje estão confundidos.
 >
 > **Nota de método que vale para todas estas rodadas:** o projeto de referência **nunca passa** neste
 > ambiente — ele sempre termina em `test result: FAILED. 0 passed; 1 failed`, porque não sobe um postgres
