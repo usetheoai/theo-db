@@ -438,4 +438,38 @@ dod:
 
 > Registered 2026-08-09 by `/backlog-item` (slug: `dogfood-uso-real`).
 
-XX. Ids são monotônicos e nunca reusados.
+## B-011 — O vector-join do HNSW perde exatamente um elemento   [ ]
+
+domain: vetorial
+repo: theo-db
+suggested_mode: bug
+source: discover-review
+evidence: `wiki/benchmarks/m187-vector-join-recall-defeito.md` — `am::hnsw_page` vector-join devolve 199/200 e 59/60 onde o contrato exige igualdade com a busca exata. Os dois testes já existiam em `am/hnsw_page.rs` e falham na primeira execução da suíte (2026-08-10).
+why_now: a suíte destravou pelo B-001 e executou pela primeira vez. **109 artefatos de benchmark não pegaram este off-by-one**, porque benchmark mede o caminho que se escolhe medir. O caso `k ≥ |b|` é o mais grave: pedir o conjunto inteiro tem de devolver o conjunto inteiro — não há trade-off de recall a fazer nesse regime.
+status: raw
+dod:
+  - `pg_vector_join_recall_matches_exact_within_tol` e `pg_vector_join_threshold_correct` passam
+  - a causa é nomeada em `hnsw_page.rs`, não contornada por afrouxar a tolerância do teste
+  - verificado se é um bug ou dois — os dois erram por exatamente um elemento, o que sugere causa comum
+
+> Registered 2026-08-10 by `/backlog-item` (slug: `hnsw-vector-join-off-by-one`).
+> **Descartado por medição:** a hipótese de que a correção do planner (m175) o causara. Revertendo apenas a
+> correção TOAST em `am/mod.rs`, os mesmos dois testes falham. O defeito é anterior e independente.
+
+## B-012 — As outras 18 falhas da suíte seguem sem causa capturada   [ ]
+
+domain: engine-pgrx
+repo: theo-db
+suggested_mode: review
+source: discover-review
+evidence: 20 falhas na primeira execução da suíte; **2 causas capturadas** (B-011), 18 sem mensagem — o `tail` do script de execução cortou os pânicos.
+why_now: 6 das 18 são do `lexical::engine`, o pilar promovido a binário default em 2026-08-09. Promover superfície pública com teste vermelho é o defeito que o M184 mediu no SymQG e o M176 removeu.
+status: raw
+dod:
+  - as 18 causas capturadas e classificadas em defeito de produto vs limitação de ambiente
+  - as 6 do lexical resolvidas ou o pilar sai do default até que estejam
+  - a suíte roda no CI, para que a próxima regressão não espere meses
+
+> Registered 2026-08-10 by `/backlog-item` (slug: `suite-18-falhas-sem-causa`).
+
+Próximo id livre: **`B-013`**. Ids são monotônicos e nunca reusados.
