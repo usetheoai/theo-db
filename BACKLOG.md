@@ -468,8 +468,41 @@ status: raw
 dod:
   - as 18 causas capturadas e classificadas em defeito de produto vs limitação de ambiente
   - as 6 do lexical resolvidas ou o pilar sai do default até que estejam
-  - a suíte roda no CI, para que a próxima regressão não espere meses
+  - *(o CI saiu deste DoD e virou B-013 — é infraestrutura, não diagnóstico)*
 
 > Registered 2026-08-10 by `/backlog-item` (slug: `suite-18-falhas-sem-causa`).
 
-Próximo id livre: **`B-013`**. Ids são monotônicos e nunca reusados.
+## B-013 — A suíte não roda no CI, então a próxima regressão espera meses   [ ]
+
+domain: engine-pgrx
+repo: theo-db
+suggested_mode: evolve
+source: human
+evidence: none-yet
+why_now: a suíte destravou em 2026-08-10 (B-001) e revelou **20 falhas na primeira execução**, das quais uma (B-011) é um defeito de recall que 109 artefatos de benchmark não pegaram. Nada garante que a próxima regressão apareça antes de meses: a execução hoje depende de alguém lembrar de rodá-la à mão, com uma receita de cinco peças que vive num runbook. Medido: a suíte inteira leva **480 s** — o argumento de custo não existe.
+status: raw
+dod:
+  - a suíte roda em cada push para `workspace`, com a receita do runbook, e o resultado é visível sem abrir log
+  - o número de falhas é um gate declarado (baseline aceito hoje = 20) e **subir esse número reprova**
+  - o tempo de execução é publicado, para que a degradação do próprio CI seja visível
+
+> Registered 2026-08-10 by `/backlog-item` (slug: `suite-no-ci`).
+> Saiu do DoD do B-012 por ser trabalho diferente: B-012 é diagnosticar 18 falhas, este é impedir a próxima.
+
+## B-014 — `bm25_search` aceita um termo por chamada; consulta de usuário tem vários   [ ]
+
+domain: lexical
+repo: theo-db
+suggested_mode: evolve
+source: human
+evidence: none-yet
+why_now: descoberto ao medir a qualidade do pilar contra o BEIR (`wiki/benchmarks/m186-lexical-ndcg-scifact-verdict.md`). Para avaliar uma consulta multi-termo eu tive de **somar os scores por termo do lado de fora** — aproximação grosseira que o BM25 real não faz, porque ele normaliza uma vez sobre a consulta inteira. O pilar entrou no binário default em 2026-08-09 expondo `bm25_search(index, termo, k)`: **nenhuma consulta real de usuário é um termo só.**
+status: raw
+dod:
+  - `bm25_search` aceita uma consulta multi-termo e a pontua numa passagem, sem agregação externa
+  - o nDCG@10 é re-medido nos dois corpora do m186 com a nova assinatura — a expectativa é SUBIR, já que a agregação atual subestima
+  - a assinatura antiga permanece ou é migrada por script de upgrade; quebrar quem já usa não é aceitável
+
+> Registered 2026-08-10 by `/backlog-item` (slug: `bm25-multi-termo`).
+
+Próximo id livre: **`B-015`**. Ids são monotônicos e nunca reusados.

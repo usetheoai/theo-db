@@ -14,6 +14,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Backlog B-013 (a suíte de testes precisa rodar no CI — hoje depende de alguém lembrar) e B-014 (`bm25_search` aceita um termo por chamada, e nenhuma consulta real de usuário é um termo só). (#B-013 #B-014)
+
 - Posicionamento do produto declarado e assinado: cinco eixos de atratividade, cada um com a medição que o sustenta (ADR 0060). Diz também o que o TheoDB **não** promete — superar o ScaNN/AlloyDB em throughput vetorial, que a própria medição do projeto declara inalcançável para uma extensão PostgreSQL permissiva. (#B-002)
 
 - Backlog B-002..B-010 — um item por pilar mais o item do objetivo, todos justificados por medição própria: atratividade medida (B-002), teto de build vetorial (B-003), qualidade lexical contra BEIR (B-004), significância da fusão híbrida (B-005), ClickBench completo (B-006), grafo sem baseline (B-007), escala do lakehouse (B-008), robustez do egress de IA (B-009), uso real (B-010). (#M186)
