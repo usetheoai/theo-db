@@ -485,7 +485,7 @@ dod:
 > **Descartado por medição:** a hipótese de que a correção do planner (m175) o causara. Revertendo apenas a
 > correção TOAST em `am/mod.rs`, os mesmos dois testes falham. O defeito é anterior e independente.
 
-## B-012 — As outras 18 falhas da suíte seguem sem causa capturada   [ ]
+## B-012 — As outras 18 falhas da suíte seguem sem causa capturada   [x]
 
 domain: engine-pgrx
 repo: theo-db
@@ -500,6 +500,51 @@ dod:
   - *(o CI saiu deste DoD e virou B-013 — é infraestrutura, não diagnóstico)*
 
 > Registered 2026-08-10 by `/backlog-item` (slug: `suite-18-falhas-sem-causa`).
+>
+> **FECHADO 2026-08-10** — os três DoD cumpridos:
+> 1. **Causas capturadas e classificadas** — `wiki/benchmarks/m188-suite-18-falhas-classificadas.md`, uma
+>    linha por teste com a mensagem verbatim do servidor.
+> 2. **As 6 do lexical resolvidas** — faltava `#[pgrx::pg_schema]`; o pilar segue no default, agora verde.
+> 3. **Suíte no CI** — B-013, com baseline já baixado de 20 para 10.
+>
+> **Resultado: 419/20 → 429/10, sem uma linha de mudança no produto.** As 10 que caíram eram todas defeito
+> de registro ou classificação de teste. **Metade das falhas de uma suíte que passou meses sem rodar era a
+> própria suíte apodrecendo** — um teste que não executa não protege nada e ainda acumula defeitos próprios.
+>
+> **As 10 abertas herdaram itens novos** (B-015, B-016), porque classificá-las mostrou que são duas famílias
+> distintas e não um resto homogêneo.
+
+## B-015 — Cinco testes falham com contador em zero: instrumentação ou o chunk-skip não poda?   [ ]
+
+domain: colunar
+repo: theo-db
+suggested_mode: bug
+source: discover-review
+evidence: `wiki/benchmarks/m188-suite-18-falhas-classificadas.md` — `explain_scan shows real pages_read (got 0)`, `the table must span >= 2 chunk groups (scanned 0)`, `with the GUC on the selective predicate must prune (got 0)`. Cinco testes, três módulos, **a mesma assinatura**.
+why_now: cinco testes de módulos diferentes falhando com contador em zero sugere causa comum. A distinção decide tudo: se for instrumentação, conserta-se o teste; **se for produto, o chunk-skip não está podando** — um defeito de performance real e silencioso no pilar colunar, exatamente a classe que o m175 revelou no planner.
+status: raw
+dod:
+  - determinado por medição se os contadores não incrementam ou se o caminho de varredura não é tomado
+  - se for produto: o chunk-skip poda e os cinco passam; se for instrumentação: os testes medem o que existe
+  - **não** afrouxar a asserção antes de saber qual é o caso
+
+> Registered 2026-08-10 by `/backlog-item` (slug: `contadores-em-zero`).
+
+## B-016 — Os testes de egress esbarram na guarda SSRF do próprio produto   [ ]
+
+domain: ai-surface
+repo: theo-db
+suggested_mode: bug
+source: discover-review
+evidence: `pg_embed_unreachable_endpoint_fails_typed` e o par de `rerank` recebem `theodb.embed: refusing to call 127.0.0.1 — it resolves to a blocked internal address`.
+why_now: os testes querem provar erro **tipado** para endpoint inalcançável e recebem um erro tipado **diferente** — a guarda SSRF recusa loopback antes de conectar. **O produto está certo e o teste está desatualizado:** a guarda é mais nova que ele.
+status: raw
+dod:
+  - os testes usam um endereço externo inalcançável, provando o erro que pretendem provar
+  - a guarda SSRF permanece intacta — afrouxá-la para fazer teste passar seria abrir um SSRF
+  - um teste separado cobre a própria guarda, que hoje só é exercitada por acidente
+
+> Registered 2026-08-10 by `/backlog-item` (slug: `egress-guarda-ssrf`).
 
 ## B-013 — A suíte não roda no CI, então a próxima regressão espera meses   [ ]
 
@@ -534,4 +579,4 @@ dod:
 
 > Registered 2026-08-10 by `/backlog-item` (slug: `bm25-multi-termo`).
 
-Próximo id livre: **`B-015`**. Ids são monotônicos e nunca reusados.
+Próximo id livre: **`B-017`**. Ids são monotônicos e nunca reusados.
