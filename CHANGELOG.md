@@ -14,6 +14,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- A suíte de testes passa a rodar na integração contínua a cada push que toca a extensão. Até aqui nenhum job da esteira a executava — foi assim que 20 falhas, uma delas um defeito de recall, ficaram invisíveis por meses. O gate reprova quando o número de falhas **aumenta**, não quando é maior que zero. (#B-013)
+
 - Backlog B-013 (a suíte de testes precisa rodar no CI — hoje depende de alguém lembrar) e B-014 (`bm25_search` aceita um termo por chamada, e nenhuma consulta real de usuário é um termo só). (#B-013 #B-014)
 
 - Posicionamento do produto declarado e assinado: cinco eixos de atratividade, cada um com a medição que o sustenta (ADR 0060). Diz também o que o TheoDB **não** promete — superar o ScaNN/AlloyDB em throughput vetorial, que a própria medição do projeto declara inalcançável para uma extensão PostgreSQL permissiva. (#B-002)

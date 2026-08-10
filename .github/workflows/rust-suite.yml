@@ -1,0 +1,95 @@
+name: Rust test suite
+
+# B-013. A suíte tem 439 testes e, até 2026-08-10, NENHUM job da esteira a executava — o `ci.yml`
+# constrói imagens e faz smoke, e `cargo pgrx test` não aparecia em lugar nenhum. Na primeira
+# execução manual ela revelou 20 falhas, uma delas (B-011) um defeito de recall que 109 artefatos
+# de benchmark não haviam pegado. Benchmark mede o caminho que se escolhe medir; teste cobre o que
+# se esqueceu.
+#
+# A execução completa leva 480 s medidos. O argumento de custo não existe.
+
+on:
+  push:
+    branches: [workspace, develop]
+    paths:
+      - "theodb_rs/**"
+      - "Dockerfile"
+      - ".github/workflows/rust-suite.yml"
+  pull_request:
+    paths:
+      - "theodb_rs/**"
+      - "Dockerfile"
+      - ".github/workflows/rust-suite.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: rust-suite-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  suite:
+    runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}
+    # A suíte leva 8 min; o build da imagem builder domina o resto. 45 min corta um travamento
+    # sem cortar uma execução legítima — e travar é um modo de falha REAL aqui: antes do B-001, o
+    # harness ficava 17 min sem saída esperando um servidor que nunca subia.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # O estágio builder do Dockerfile já tem PG18 + pgrx init + o toolchain pinado. Reusá-lo em
+      # vez de montar um ambiente próprio mantém UMA definição de ambiente (a imagem que ships).
+      - name: Build builder stage
+        run: docker build --target theodb-rs-builder -t theodb-builder .
+
+      # A receita de cinco peças está em wiki/runbooks/rodar-a-suite-de-testes.md. As três que o
+      # ambiente precisa fornecer (as outras duas vivem no código):
+      #   sudo                      → o pgrx invoca `cargo pgrx install --sudo`
+      #   CARGO_PGRX_TEST_RUNAS     → postgres se recusa a rodar como root
+      #   RUSTFLAGS unresolved      → o binário de teste não linka sem isto
+      - name: Run suite
+        run: |
+          set -o pipefail
+          docker run --name suite theodb-builder bash -c '
+            apt-get update -qq && apt-get install -y -qq sudo
+            useradd -m postgres 2>/dev/null || true
+            mkdir -p /pgdata && chown postgres /pgdata
+            chmod -R a+rwX /tmp/theodb_rs
+            cd /tmp/theodb_rs
+            export CARGO_PGRX_TEST_RUNAS=postgres
+            export CARGO_PGRX_TEST_PGDATA=/pgdata
+            export RUSTFLAGS="-Clink-arg=-Wl,--unresolved-symbols=ignore-all"
+            cargo pgrx test pg18
+          ' 2>&1 | tee suite.log || true
+          docker rm -f suite >/dev/null 2>&1 || true
+
+      # O gate NÃO é "zero falhas" — seria reprovar todo push a partir de hoje, e um CI que
+      # reprova sempre é um CI que alguém desliga. É "não pode PIORAR": o baseline é o número
+      # medido em 2026-08-10 e cada falha nova reprova.
+      #
+      # RESSALVA REGISTRADA (log de intake de B-013): este baseline só é honesto enquanto o B-012
+      # estiver ativo para derrubá-lo. Se o B-012 morrer, o número vira permanente sem ninguém ter
+      # decidido isso, e o gate passa a proteger a dívida em vez do produto. Ao fechar cada falha,
+      # BAIXE o baseline no mesmo commit.
+      - name: Gate — falhas não podem aumentar
+        env:
+          BASELINE: "20"
+        run: |
+          line=$(grep -E "^test result" suite.log | tail -1)
+          echo "$line"
+          [ -n "$line" ] || { echo "::error::a suíte não emitiu resultado — travou ou não compilou"; exit 1; }
+          failed=$(echo "$line" | sed -E 's/.* ([0-9]+) failed.*/\1/')
+          passed=$(echo "$line" | sed -E 's/.*result: [A-Za-z]+\. ([0-9]+) passed.*/\1/')
+          echo "passed=$passed failed=$failed baseline=$BASELINE"
+          echo "### Suíte Rust" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`$passed\` passam · \`$failed\` falham · baseline \`$BASELINE\`" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$failed" -gt "$BASELINE" ]; then
+            echo "::error::regressão — $failed falhas contra baseline de $BASELINE"
+            grep -E "^    [a-z_]+::" suite.log | tail -40
+            exit 1
+          fi
+          if [ "$failed" -lt "$BASELINE" ]; then
+            echo "::notice::$((BASELINE - failed)) falha(s) a menos que o baseline — baixe BASELINE para $failed neste mesmo commit"
+          fi
