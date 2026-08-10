@@ -453,6 +453,29 @@ dod:
   - verificado se é um bug ou dois — os dois erram por exatamente um elemento, o que sugere causa comum
 
 > Registered 2026-08-10 by `/backlog-item` (slug: `hnsw-vector-join-off-by-one`).
+
+> **Análise de código 2026-08-10 — o teste e o laço, lidos.** O teste (`src/am/hnsw_page/tests.rs`) faz:
+> `SET theodb_hnsw.ef_search = 60` sobre uma tabela `vrb` de **exatamente 60 linhas**, e então
+> `SELECT ... ORDER BY emb <=> probe LIMIT 70` com `enable_seqscan=off`. Espera 60, recebe 59.
+>
+> O laço de busca (`src/ann/scan_core.rs:110-165`) limita o resultado a `ef`:
+> ```rust
+> if nd < worst || result.len() < ef { ...; if result.len() > ef { result.pop(); } }
+> ```
+> Com `ef == |b| == 60`, o heap comporta 60 e o portão de entrada admite enquanto `result.len() < ef`.
+> **Pela leitura, deveria chegar a 60.**
+>
+> **Duas explicações concorrentes, e a distinção importa:**
+> 1. **off-by-one real** no limite — um slot consumido pelo ponto de entrada, ou `<` onde caberia `<=`;
+> 2. **propriedade do HNSW** — um nó inalcançável no grafo dentro do beam, que é recall normal e não defeito.
+>    Nesse caso o **teste** é que está errado ao exigir 1.0 com `ef == |b|`.
+>
+> A distinção é decisiva para o conserto: (1) conserta-se o código, (2) conserta-se o teste — e afrouxar o
+> teste sem saber qual é o caso seria exatamente o bypass que o DoD proíbe.
+>
+> **Experimento que separa os dois, ainda não executado:** varrer `ef_search` em 40/59/60/61/80/120 sobre a
+> mesma tabela de 60 linhas. Se voltar 60 a partir de 61, é (1) — o limite erra por um. Se ficar em 59 mesmo
+> com ef=120, é (2) — há um nó que o grafo não alcança, e aí a pergunta vira por que ele ficou isolado.
 > **Descartado por medição:** a hipótese de que a correção do planner (m175) o causara. Revertendo apenas a
 > correção TOAST em `am/mod.rs`, os mesmos dois testes falham. O defeito é anterior e independente.
 
