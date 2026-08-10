@@ -438,4 +438,4 @@ dod:
 
 > Registered 2026-08-09 by `/backlog-item` (slug: `dogfood-uso-real`).
 
-Próximo id livre: **`B-011`**. Ids são monotônicos e nunca reusados.
+XX. Ids são monotônicos e nunca reusados.
