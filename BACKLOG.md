@@ -542,6 +542,20 @@ dod:
 
 > Registered 2026-08-10 by `/backlog-item` (slug: `contadores-em-zero`).
 
+> **Hipótese de causa, 2026-08-10 — lida no código, não medida ainda.** Os contadores são `thread_local!`
+> (`src/am/columnar.rs:50-62`), e o próprio comentário admite ser *"best-effort under nested scans"*. O teste
+> semeia **50 000 linhas** — escala em que o PostgreSQL escolhe varredura **paralela**, e a poda acontece nos
+> *workers*, cada um com seu próprio `thread_local` (processos distintos, na verdade). **O líder, que responde
+> ao `SELECT theodb_columnar_chunks_skipped()`, lê zero.**
+>
+> Isso explicaria `scanned 0` exatamente, e é a distinção que o DoD exige: se for isto, o chunk-skip **está
+> podando** e a instrumentação é que é cega ao paralelismo — conserta-se a instrumentação (ou o teste), não o
+> colunar.
+>
+> **Experimento decisivo, uma linha:** `SET max_parallel_workers_per_gather = 0` antes da consulta do teste.
+> Se os contadores passarem a reportar > 0, a hipótese está confirmada e o pilar colunar não tem defeito. Se
+> continuarem em zero mesmo em serial, aí sim o chunk-skip não está podando — e é defeito de performance real.
+
 ## B-016 — Os testes de egress esbarram na guarda SSRF do próprio produto   [ ]
 
 domain: ai-surface
