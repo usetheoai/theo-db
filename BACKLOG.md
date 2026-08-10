@@ -642,4 +642,20 @@ dod:
 > opera, e agora ela está diante deles como uma mudança que **cabe numa tela** em vez de 550 arquivos. Era
 > disto que o item precisava, e é o último passo que existia do meu lado.
 
+> **2026-08-10 — o `theo-rag` adotou o TheoDB em `main`.** O owner mergeou o
+> [#211](https://github.com/usetheoai/theo-rag/pull/211) e autorizou o merge dos demais PRs abertos; os 7
+> foram analisados e mergeados. `origin/main` do `theo-rag` agora declara
+> `image: ghcr.io/usetheoai/theo-db:0.140.0` com o mount corrigido do PG 18.
+>
+> **DoD 1 avança de "verificado localmente" para "adotado no repositório".** O que separa isto de `running`
+> continua sendo o mesmo e não encolheu: **o produto rodando com carga real ao longo do tempo**, produzindo
+> uma história de falha em operação. Adoção em `main` é uma declaração; uso é um fato — e só o segundo move o
+> hard cap 2 da golden rule.
+>
+> **Um conflito que eu causei, registrado:** mergear os PRs do dependabot em `main` antes do release deixou o
+> [#197](https://github.com/usetheoai/theo-rag/pull/197) `CONFLICTING` em três workflows. Resolvido por um PR
+> de sincronização ([#212](https://github.com/usetheoai/theo-rag/pull/212)), honrando a deleção deliberada de
+> `build-publish.yml` que o `develop` havia feito. A ordem inversa — release primeiro, bumps depois — teria
+> evitado o conflito inteiro.
+
 Próximo id livre: **`B-018`**. Ids são monotônicos e nunca reusados.
