@@ -260,9 +260,27 @@ por fixtures. A hipótese 4 caiu exatamente por confiar numa fixture de versão 
 > **Dois candidatos eliminados de passagem:** `initdb` NÃO falha (o data dir está completo), e o `pgrx init`
 > apontando para o Postgres do sistema NÃO impede a inicialização.
 >
-> **Onde a próxima rodada começa:** invocar o `pg_ctl` do PG18 diretamente sobre `~/.pgrx/data-18`, com
-> `-l` explícito, e ler o log que o `pgrx start` não produz. Isso separa "o postgres não sobe" de "o pgrx não
-> consegue subi-lo" — que são consertos diferentes e hoje estão confundidos.
+> **A separação foi feita, e o veredito é claro: o PostgreSQL funciona; quem falha é o `cargo pgrx start`.**
+> `pg_ctl` invocado diretamente sobre o mesmo `~/.pgrx/data-18`, mesma porta, mesmo usuário não-root:
+>
+> ```
+> pg_ctl -D ~/.pgrx/data-18 -l srv.log -o "-p 28818" start   → "server started"
+> LOG:  listening on IPv4 address "0.0.0.0", port 28818
+> LOG:  database system is ready to accept connections
+> pg_isready -p 28818                                        → accepting connections
+> ```
+>
+> O mesmo diretório de dados que o `cargo pgrx start` declarou iniciado sem abrir porta **sobe em segundos
+> pelo `pg_ctl`**. O defeito está na camada do pgrx, não no servidor nem no ambiente.
+>
+> **Pista concreta no log, não seguida:** o socket Unix vai para `/var/run/postgresql/.s.PGSQL.28818` (default
+> do Debian). Se o pgrx procura o socket noutro diretório — o data dir, ou `/tmp` —, ele conclui que o
+> servidor não subiu quando ele subiu. É hipótese, não medição.
+>
+> **Duas saídas, e a segunda não depende de descobrir a causa:**
+> 1. achar por que o `pgrx start` falha em silêncio (ler o que ele passa ao `pg_ctl`);
+> 2. **contornar** — subir o servidor com `pg_ctl` antes e fazer o harness usar o que já está de pé. Se o
+>    `pgrx-tests` aceitar um servidor existente, os 370 `#[pg_test]` destravam sem consertar o pgrx.
 >
 > **Nota de método que vale para todas estas rodadas:** o projeto de referência **nunca passa** neste
 > ambiente — ele sempre termina em `test result: FAILED. 0 passed; 1 failed`, porque não sobe um postgres
