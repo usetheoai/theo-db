@@ -103,7 +103,7 @@ Registro isso porque "nenhum item morreu" é o resultado que mais merece desconf
 lote estava bem escolhido, ou a régua foi aplicada frouxa. Aqui foi o primeiro caso apenas porque cada item
 já nascera atado a uma medição nossa (gate G5) — o que é diferente de estar atado a um eixo.
 
-## B-001 — `cargo pgrx test` não roda: o binário de teste morre em `CurrentMemoryContext`   [ ]
+## B-001 — `cargo pgrx test` não roda: o binário de teste morre em `CurrentMemoryContext`   [x]
 
 domain: engine-pgrx
 repo: theo-db
@@ -572,7 +572,7 @@ dod:
 
 > Registered 2026-08-10 by `/backlog-item` (slug: `egress-guarda-ssrf`).
 
-## B-013 — A suíte não roda no CI, então a próxima regressão espera meses   [ ]
+## B-013 — A suíte não roda no CI, então a próxima regressão espera meses   [x]
 
 domain: engine-pgrx
 repo: theo-db
