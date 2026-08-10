@@ -195,6 +195,22 @@ por fixtures. A hipótese 4 caiu exatamente por confiar numa fixture de versão 
 >
 > **Todos os 9 candidatos levantados foram medidos.** O item permanece aberto porque a *solução* não foi
 > implementada — mas deixou de ser uma caça: o mecanismo está identificado e a direção é conhecida.
+
+> **Metade resolvida em 2026-08-09** (commit `0229532`): os **69 testes puros** passaram a executar. A causa
+> era dupla e eu tratava como uma só — `--unresolved-symbols=ignore-all` resolve o **link**, e
+> `src/pg_test_stubs.rs` (16 símbolos medidos por `ldd -r`, sob `#[cfg(test)]`) resolve o **carregamento**.
+>
+> **A metade que falta — os 370 `#[pg_test]` — tem sintoma novo e diferente.** Não é mais `symbol lookup
+> error`: o harness **trava**. Medido: com a compilação já em cache, `cargo test --lib --features pg_test sq8`
+> ficou **17 minutos sem terminar e sem emitir saída**, e o contêiner não tinha processo `postgres` nem
+> `initdb` rodando. O harness espera por um servidor de teste que nunca sobe, e **não falha rápido** — o que
+> é pior que falhar, porque não deixa diagnóstico.
+>
+> **Não medido, e é onde a próxima rodada começa:** por que o servidor não sobe. Candidatos não testados —
+> `initdb` falhando em silêncio, diretório de dados do pgrx sem permissão, porta indisponível, ou o
+> `pgrx init --pg18 $(which pg_config)` apontando para o Postgres do sistema em vez de um gerido pelo pgrx (o
+> `~/.pgrx/` do builder tem só `config.toml`, nenhuma instalação própria). O caminho barato é rodar
+> `cargo pgrx start pg18` isolado e ler o log do servidor, em vez de inferir pelo harness.
 >
 > **Nota de método que vale para todas estas rodadas:** o projeto de referência **nunca passa** neste
 > ambiente — ele sempre termina em `test result: FAILED. 0 passed; 1 failed`, porque não sobe um postgres
