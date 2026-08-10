@@ -66,6 +66,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   símbolos do `.so` não resolvem (release sem debuginfo), então a atribuição é por objeto, não por função
 
 ### Changed
+- Hook de validação de comandos ficou mais rápido: ~6 processos por chamada de ferramenta em vez de ~50, sem mudança de comportamento
 - **theodb:** o **M176 (SymQG) muda de natureza** com a medição do M184. Ele fora escrito assumindo "código
   mantido sem consumidor" — dívida interna barata. A medição desmente: o `theodb_symqg` está **registrado como
   access method no binário default**, com opclass exposto, e um usuário pode escrever `USING theodb_symqg`
