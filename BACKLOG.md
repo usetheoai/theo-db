@@ -658,4 +658,36 @@ dod:
 > `build-publish.yml` que o `develop` havia feito. A ordem inversa — release primeiro, bumps depois — teria
 > evitado o conflito inteiro.
 
-Próximo id livre: **`B-018`**. Ids são monotônicos e nunca reusados.
+## B-018 — O planner não alcança o HNSW no caminho de JUNÇÃO, mesmo com `enable_seqscan = off`   [ ]
+
+domain: vetorial
+repo: theo-db
+suggested_mode: bug
+source: discover-live-test
+evidence: suíte de integração do `theo-rag` contra `ghcr.io/usetheoai/theo-db:0.140.0` (2026-08-10): `o planner deveria alcançar o índice HNSW sob enable_seqscan = off`. Plano escolhido: `Limit → Sort → Nested Loop → Index Scan` — **há um `Sort` acima**, então o índice não está servindo a ordenação.
+why_now: a correção do planner de hoje ([m175](wiki/benchmarks/m175-planner-cost-inversion-verdict.md)) resolveu a busca simples e **não cobre o caminho de junção**, que é o que o `theo-rag` usa de verdade. Encontrado pela suíte do produto, não por benchmark — o quarto defeito do dia pelo mesmo mecanismo.
+status: raw
+dod:
+  - o teste `ensureHnswIndex` do `theo-rag` passa sem `Sort` acima do `Index Scan`
+  - determinado se a causa é o mesmo modelo de custo (m175) num caminho não coberto, ou outra
+  - regressão coberta por teste nosso, não só pelo do `theo-rag`
+
+> Registered 2026-08-10 by `/backlog-item` (slug: `planner-hnsw-no-join`).
+
+## B-019 — `CREATE INDEX` de HNSW não é idempotente: estoura em vez de ser no-op   [ ]
+
+domain: vetorial
+repo: theo-db
+suggested_mode: bug
+source: discover-live-test
+evidence: `error: duplicate key value violates unique constraint "pg_class_relname_nsp_index"` no `ensureHnswIndex_is_idempotent` do `theo-rag`.
+why_now: o `theo-rag` chama `ensureHnswIndex` no caminho de inicialização, e ele precisa ser seguro para reexecução — é o padrão de qualquer migração. Estourar em vez de ser no-op quebra reinício de serviço.
+status: raw
+dod:
+  - recriar um índice HNSW existente é no-op ou erro tipado claro, nunca violação de constraint do catálogo
+  - `ensureHnswIndex_is_idempotent` e `ensureHnswIndex_creates_missing_index` passam
+  - verificado se `CREATE INDEX IF NOT EXISTS` se comporta corretamente no nosso AM
+
+> Registered 2026-08-10 by `/backlog-item` (slug: `hnsw-create-index-idempotente`).
+
+Próximo id livre: **`B-020`**. Ids são monotônicos e nunca reusados.
