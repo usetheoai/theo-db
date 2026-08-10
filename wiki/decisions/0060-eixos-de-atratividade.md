@@ -3,15 +3,21 @@ type: Decision
 title: ADR 0060 — os cinco eixos de atratividade, e o que cada um exige como prova
 description: Substitui "ser melhor em todo benchmark" — que o M73 mediu como não-alcançável no pilar mais visível — por cinco eixos onde a vitória é possível, cada um com a medição que o sustenta e o número que hoje o sustenta ou não.
 adr_id: "0060"
-adr_status: Proposed
+adr_status: Accepted
 decision_date: 2026-08-09
-tags: [adr, posicionamento, north-star, atratividade, m186, proposto]
+tags: [adr, posicionamento, north-star, atratividade, m186, aceito]
 generated: { by: claude-code/opus-5, at: 2026-08-09T21:00:00Z }
 ---
 
-**Status: PROPOSTO.** A decisão de posicionamento é do owner; este documento reúne o que está medido para
-que a assinatura seja informada, não para substituí-la. O [ADR 0033](/decisions/0033-north-star-reposition-proposal.md)
-está proposto e sem assinatura desde 2026-07-10 — este o sucede e reduz o escopo ao que é decidível hoje.
+**Status: ACEITO — assinado pelo owner em 2026-08-09.** Sucede o
+[ADR 0033](/decisions/0033-north-star-reposition-proposal.md), que ficou proposto e sem assinatura desde
+2026-07-10 por tentar reposicionar o North Star inteiro; este reduz o escopo ao que é decidível com o que já
+foi medido.
+
+**Relação com o [ADR 0002](/decisions/0002-north-star-equal-or-superior-to-alloydb.md) (LOCKED).** O 0002
+manda "igualar ou superar o AlloyDB". Este ADR **não o revoga** — ele o torna operável, declarando *em quais
+eixos* a superação é buscada e reconhecendo, com a medição do [M73](/benchmarks/m73-headtohead-verdict.md), o
+eixo em que ela é impossível. Onde os dois colidirem, vale a medição.
 
 # Contexto
 

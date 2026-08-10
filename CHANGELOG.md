@@ -14,6 +14,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Posicionamento do produto declarado e assinado: cinco eixos de atratividade, cada um com a medição que o sustenta (ADR 0060). Diz também o que o TheoDB **não** promete — superar o ScaNN/AlloyDB em throughput vetorial, que a própria medição do projeto declara inalcançável para uma extensão PostgreSQL permissiva. (#B-002)
+
 - Backlog B-002..B-010 — um item por pilar mais o item do objetivo, todos justificados por medição própria: atratividade medida (B-002), teto de build vetorial (B-003), qualidade lexical contra BEIR (B-004), significância da fusão híbrida (B-005), ClickBench completo (B-006), grafo sem baseline (B-007), escala do lakehouse (B-008), robustez do egress de IA (B-009), uso real (B-010). (#M186)
 
 - Busca lexical BM25 disponível na instalação padrão, e medida em dois corpora públicos com julgamento humano: entrega qualidade de recuperação superior à do `ts_rank_cd` nativo do Postgres em ambos, com significância estatística — 2,08× no BEIR SciFact e 1,35× no BEIR NFCorpus. A margem varia com o domínio. Até aqui o pilar existia, era medido e era robusto, mas ficava fora do binário entregue — quem instalava o TheoDB não tinha `bm25_build`/`bm25_search`. Passa a acompanhar a extensão sem nenhuma flag de compilação. As funções de andaime do spike (`lexical_spike_*`) continuam fora da superfície pública, por opção. (#M186)

@@ -66,6 +66,43 @@ Um item que abranja dois pilares **é dois itens** (gate G3).
 
 ## Items
 
+---
+
+## Priorização — derivada do ADR 0060 (assinado 2026-08-09)
+
+O ADR exige, no seu DoD, que este lote seja repriorizado contra os cinco eixos e que **os itens que não
+servem a nenhum eixo sejam mortos, inclusive os que eu mesmo registrei**. Aplicado:
+
+| ordem | item | eixo | por quê |
+|---|---|---|---|
+| **1** | **B-010** dogfood / uso real | **A5** | **o único eixo com estado `NÃO medido`.** Todos os outros já têm número; este não tem nenhum |
+| 2 | B-001 suíte de testes | *(nenhum — habilitador)* | não é eixo, é o que permite provar qualquer eixo sem depender do CI |
+| 3 | B-005 fusão híbrida | A2 | o ADR a classifica como **dívida, não eixo**: está exposta prometendo o que o M123 mediu como não-significativo |
+| 4 | B-004 lexical em mais corpora | A2 | o eixo já tem número em dois corpora; falta a curva |
+| 5 | B-009 robustez do egress | A1 | superfície exposta com 1 teste por arquivo, e é a que faz I/O externo |
+| 6 | B-006 ClickBench completo | A2 | o ADR **explicitamente não promete** vencer o ClickBench; medir serve para saber onde não competimos |
+| 7 | B-003 vetorial ≥100M | A3 | paridade já medida; a escala amplia, não muda a promessa |
+| 8 | B-008 lakehouse escala | A1 | superfície presente e correta; escala é refinamento |
+| **—** | **B-007 grafo sem baseline** | **nenhum** | **ver abaixo** |
+
+### B-007 — mantido, com a razão corrigida
+
+O item nasceu como "grafo nunca foi medido contra ninguém", o que é verdade e **não é um eixo**. Sob o ADR
+ele deveria morrer. Não morre por um motivo que só ficou visível ao aplicar a régua: **23 funções de grafo
+estão expostas no binário default** ([m184](wiki/benchmarks/m184-pilares-superficie-medida-verdict.md)), e o
+eixo **A1 promete "um banco só"** — o que inclui não entregar superfície pública cuja qualidade ninguém
+conhece. É o mesmo argumento que matou o SymQG no M176.
+
+**A razão do item muda:** não é "queremos ser bons em grafo", é "temos superfície pública não caracterizada".
+Se a medição mostrar que ela não serve, a saída correta é removê-la, não otimizá-la.
+
+### Nenhum item foi morto
+
+O ADR previa que alguns morreriam. Nenhum morreu — mas B-007 **quase**, e a régua mudou a sua justificativa.
+Registro isso porque "nenhum item morreu" é o resultado que mais merece desconfiança numa repriorização: ou o
+lote estava bem escolhido, ou a régua foi aplicada frouxa. Aqui foi o primeiro caso apenas porque cada item
+já nascera atado a uma medição nossa (gate G5) — o que é diferente de estar atado a um eixo.
+
 ## B-001 — `cargo pgrx test` não roda: o binário de teste morre em `CurrentMemoryContext`   [ ]
 
 domain: engine-pgrx
