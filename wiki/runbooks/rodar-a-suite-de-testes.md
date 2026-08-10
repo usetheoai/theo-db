@@ -47,10 +47,30 @@ parecer do PostgreSQL quando é da camada do pgrx.
 |---|---|
 | `#[test]` puros | **69 passam** (verificado) |
 | `#[pg_test]` | **1 verificado** — `pg_sq8_roundtrips_through_meta_bytes`, em 324 s |
-| suíte completa | **NÃO executada** — cada `#[pg_test]` reinstala a extensão, e 439 testes assim levam horas |
+| **suíte completa** | **EXECUTADA em 2026-08-10: 419 passam, 20 falham, em 480 s** |
 
-O último ponto é honesto e importante: **provei que a receita funciona, não que a suíte passa.** Rodar tudo é
-trabalho de CI, e o número de falhas reais é desconhecido — testes que nunca rodaram costumam ter apodrecido.
+A estimativa de "horas" estava errada por uma ordem de grandeza: a instalação da extensão acontece **uma vez
+por invocação**, não por teste. A suíte inteira leva **8 minutos**.
+
+## As 20 falhas
+
+Agrupadas, porque a distribuição diz mais que a lista:
+
+| grupo | nº | comentário |
+|---|---|---|
+| **`lexical::engine` (BM25)** | **6** | **o pilar que entrou no binário default em 2026-08-09.** É o grupo de maior consequência e o primeiro a investigar |
+| `am::columnar_project` | 3 | chunk-skip, GUC, pushdown |
+| `am::autotune` | 2 | `explain_scan`, `scan_stats` |
+| `am::columnar` afinidade | 2 | comportamento por thread |
+| `am::hnsw_page` vector-join | 2 | recall e threshold |
+| `embed`/`rerank` endpoint inalcançável | 2 | **provavelmente ambiente** — testam falha de rede num contêiner sem saída |
+| `graph`, `http` breaker, `vectorizer` | 3 | um cada |
+
+**As causas não foram capturadas** — o `tail -60` do script de execução cortou as mensagens de pânico. Rodar
+de novo com a saída completa é a primeira coisa a fazer, e é barato (8 min).
+
+**Não presuma que são todas ambientais.** Duas provavelmente são (endpoint inalcançável sem rede), mas as 6
+do BM25 rodam inteiramente dentro do banco e não têm essa desculpa.
 
 # Relacionados
 
