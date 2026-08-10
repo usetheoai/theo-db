@@ -29,9 +29,6 @@ from typing import Any
 PRODUCTION_DIR_NAMES = ("src", "lib", "packages")
 TEST_DIR_NAMES = ("test", "tests", "__tests__", "spec")
 INTEGRATION_DIR_NAMES = ("integration", "e2e")
-# theo-db: integration tests are pytest-vs-real-container under benchmarks/tests/ (project layout
-# predates this script; aligning the tool to reality, same class as the MAX_PER_CORNER fix).
-EXTRA_INTEGRATION_DIRS = ("benchmarks/tests",)
 
 # Lines that DEFINE a symbol rather than CALL it. A file whose only occurrences of
 # the symbol match these patterns is the definition site, not a caller.
@@ -45,11 +42,6 @@ _DEFINITION_PATTERNS = (
     r"^\s*(?:async\s+)?def\s+{sym}\b",
     r"^\s*class\s+{sym}\b",
     r"^\s*export\s+default\s+(?:function|class)?\s*{sym}\b",
-    # Rust (theodb_rs): fn/struct/enum/trait/type/static/const definitions
-    r"^\s*(?:pub(?:\(crate\))?\s+)?(?:unsafe\s+)?(?:extern\s+\"[^\"]+\"\s+)?fn\s+{sym}\b",
-    r"^\s*(?:pub(?:\(crate\))?\s+)?(?:struct|enum|trait|mod)\s+{sym}\b",
-    r"^\s*(?:pub(?:\(crate\))?\s+)?(?:static|const)\s+{sym}\b",
-    r"^\s*(?:pub(?:\(crate\))?\s+)?type\s+{sym}\s*=",
 )
 
 
@@ -122,9 +114,8 @@ def check_pillar_a_static_caller(project_root: Path, symbol: str) -> dict[str, A
     matches = _grep_symbol(
         project_root,
         symbol,
-        include_globs=["*.ts", "*.tsx", "*.js", "*.mjs", "*.py", "*.rs"],
-        exclude_dirs=["node_modules", ".git", "dist", "build", "tests", "test", "__tests__", "spec",
-                      "target", "benchmarks", "benches"],
+        include_globs=["*.ts", "*.tsx", "*.js", "*.mjs", "*.py"],
+        exclude_dirs=["node_modules", ".git", "dist", "build", "tests", "test", "__tests__", "spec"],
     )
     # Exclude files with "test" / "spec" / "fixture" / "mock" in basename
     production_files = [
@@ -199,10 +190,6 @@ def check_pillar_b_integration_test(project_root: Path, symbol: str, deferral_pa
             candidate = project_root / tdir / idir
             if candidate.exists():
                 integration_dirs.append(candidate)
-    for extra in EXTRA_INTEGRATION_DIRS:
-        candidate = project_root / extra
-        if candidate.exists():
-            integration_dirs.append(candidate)
 
     if not integration_dirs:
         return {
@@ -217,12 +204,8 @@ def check_pillar_b_integration_test(project_root: Path, symbol: str, deferral_pa
         test_matches.extend(_grep_symbol(
             idir,
             symbol,
-            # Must mirror pillar (a)'s glob set (see check_pillar_a): a project whose callers are found in
-            # `.rs`/`.go` but whose integration tests are searched only in `.ts`/`.py` can NEVER satisfy this
-            # pillar with a test written in its own language — the asymmetry silently forces every Rust/Go task
-            # down the ADR-DEFER path. Keep the two lists in sync.
-            include_globs=["*.ts", "*.tsx", "*.js", "*.mjs", "*.py", "*.rs", "*.go", "*.sql"],
-            exclude_dirs=["node_modules", ".git", "target"],
+            include_globs=["*.ts", "*.tsx", "*.js", "*.mjs", "*.py"],
+            exclude_dirs=["node_modules", ".git"],
         ))
 
     if test_matches:
@@ -237,7 +220,7 @@ def check_pillar_b_integration_test(project_root: Path, symbol: str, deferral_pa
         "status": "FAIL",
         "tests_count": 0,
         "reason": f"Symbol '{symbol}' is not exercised in any integration test",
-        "recommended_action": "Add an integration test that exercises the symbol via a real boundary scenario, in one of the searched dirs and in this project's own language (naming per rules/testing.md § 5), OR add an ADR-DEFER-WIRING-B marker",
+        "recommended_action": "Add tests/integration/*.test.ts that exercises the symbol via a real boundary scenario, OR add ADR-DEFER-WIRING-B marker",
     }
 
 

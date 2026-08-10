@@ -1,7 +1,7 @@
 """Spec-smell detector for /discover-execute blueprints (M2 deterministic).
 
 Copy of plan-confidence/scripts/check_spec_smells.py — same algorithm,
-reads rubric-blueprint.md instead of rubric-v1.md.
+reads rubric-opportunity.md instead of rubric-v1.md.
 """
 from __future__ import annotations
 
@@ -69,8 +69,8 @@ def _context_around(text: str, start: int, end: int) -> str:
     return snippet.strip()
 
 
-def check_spec_smells(blueprint_path: Path, rubric_path: Path) -> SmellReport:
-    raw = blueprint_path.read_text(encoding="utf-8-sig")
+def check_spec_smells(artifact_path: Path, rubric_path: Path) -> SmellReport:
+    raw = artifact_path.read_text(encoding="utf-8-sig")
     content = _strip_code(raw)
     rubric = load_rubric(rubric_path)
     smells_spec = rubric.get("smells", {})

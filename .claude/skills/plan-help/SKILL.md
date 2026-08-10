@@ -80,8 +80,8 @@ Print the following guide:
 
 | Command | Purpose |
 |---|---|
-| `/roadmap-init` | Bootstrap ROADMAP.md from scratch |
-| `/roadmap-feature` | Add milestone to existing roadmap |
+| `/backlog-init` | Bootstrap ROADMAP.md from scratch |
+| `/backlog-item` | Add milestone to existing roadmap |
 | `/auto-plan {topic/M<N>}` | Autonomous end-to-end pipeline |
 
 ### Utilities

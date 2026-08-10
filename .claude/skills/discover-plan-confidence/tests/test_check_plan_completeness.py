@@ -1,128 +1,123 @@
-"""Tests for check_plan_completeness.py — verifies mandatory sections + question budget +
-method per Q + ADR count on discovery plans.
-
-RED tests of T0.4. MUST fail with ModuleNotFoundError until T1.3 lands.
-"""
+"""Tests for check_plan_completeness.py — sections, budget, method, falsification."""
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
 
-from check_plan_completeness import check_plan_completeness  # noqa: E402
+from check_plan_completeness import MIN_QUESTIONS, check_plan_completeness
 
 
-def _build_plan(tmp_path: Path, name: str, body: str) -> Path:
-    plan = tmp_path / name
-    plan.write_text(body, encoding="utf-8")
-    return plan
-
-
-@pytest.fixture
-def under_budget_plan(fixtures_dir: Path) -> Path:
-    return fixtures_dir / "under-budget-discover-plan.md"
-
-
-@pytest.fixture
-def method_missing_plan(fixtures_dir: Path) -> Path:
-    return fixtures_dir / "method-missing-discover-plan.md"
-
-
-@pytest.fixture
-def no_adrs_plan(fixtures_dir: Path) -> Path:
-    return fixtures_dir / "no-adrs-discover-plan.md"
-
-
-def test_good_plan_all_sections_present(good_discover_plan: Path) -> None:
-    """good-discover-plan.md has all 10 mandatory sections + 2 ADRs."""
-    report = check_plan_completeness(good_discover_plan)
-    assert report["found"] == report["total_required"]
+def test_good_plan_is_complete(good_measurement_plan: Path) -> None:
+    report = check_plan_completeness(good_measurement_plan)
     assert report["missing_mandatory"] == []
-    assert report["adr_count"] >= 2
     assert report["budget_violations"] == []
     assert report["methodless_questions"] == []
+    assert report["falsification_missing"] is False
 
 
-def test_missing_section_detected(tmp_path: Path, good_discover_plan: Path) -> None:
-    """Removing the Halt-loop Checkpoints section MUST surface it in missing_mandatory."""
-    text = good_discover_plan.read_text(encoding="utf-8")
-    truncated = text.split("## Halt-loop Checkpoints")[0] + text.split("## Acceptance Criteria")[1].join(["## Acceptance Criteria", ""])
-    plan = _build_plan(tmp_path, "no-halt-checkpoints.md", truncated)
+def test_synthetic_plan_is_complete(synthetic_measurement_plan: Path) -> None:
+    report = check_plan_completeness(synthetic_measurement_plan)
+    assert report["missing_mandatory"] == []
+    assert report["falsification_missing"] is False
+
+
+def test_missing_section_detected(tmp_path: Path) -> None:
+    plan = tmp_path / "missing.md"
+    plan.write_text(
+        "# Measurement Plan: X\n\n**Item:** B-001\n**Repo:** squad\n**Mode:** review\n\n"
+        "## Context\n\nText.\n",
+        encoding="utf-8",
+    )
     report = check_plan_completeness(plan)
-    assert any("Halt" in m for m in report["missing_mandatory"])
+    assert "Hypothesis" in report["missing_mandatory"]
+    assert "Falsification" in report["missing_mandatory"]
+    assert "Measurement Questions" in report["missing_mandatory"]
 
 
-def test_question_count_below_min_detected(under_budget_plan: Path) -> None:
-    """4 Qs is below the 5-10 budget."""
-    report = check_plan_completeness(under_budget_plan)
-    assert any("too_few" in v for v in report["budget_violations"])
-
-
-def test_question_count_above_max_detected(tmp_path: Path) -> None:
-    """11 Qs is above the 5-10 budget. Build a synthetic plan inline."""
-    rows = "\n".join(
-        f"| Q{i} | q | tests | `.claude/knowledge-base/references/project-a/` | SKIP | Read | text |" for i in range(1, 12)
+def test_invalid_mode_is_a_missing_section(synthetic_measurement_plan: Path) -> None:
+    content = synthetic_measurement_plan.read_text(encoding="utf-8")
+    synthetic_measurement_plan.write_text(
+        content.replace("**Mode:** review", "**Mode:** whatever"), encoding="utf-8"
     )
-    body = (
-        "# Discovery Plan: Over Budget\n\n## Context\n\nx\n\n## Objective\n\nx\n\n"
-        "## In-Scope / Out-of-Scope\n\n| P | In | Why |\n|---|---|---|\n| `.claude/knowledge-base/references/project-a/` | x | y |\n\n"
-        "## ADRs\n\n### D1 — x\n\n**Decision:** x.\n\n### D2 — x\n\n**Decision:** x.\n\n"
-        "## Research Questions\n\n"
-        "| # | Question | Corner | Reference project(s) | Fase A (broad — ast-grep map) | Fase B (deep — Read at each hotspot) | Expected answer shape |\n"
-        "|---|---|---|---|---|---|---|\n"
-        f"{rows}\n\n"
-        "## Coverage Matrix\n\n| Corner | Q | Status |\n|---|---|---|\n| Integration tests | Q1 | x |\n"
-        "| Dependencies | Q2 | <!-- DEFER-CORNER: deps | x --> |\n"
-        "| Tools | Q3 | <!-- DEFER-CORNER: tools | x --> |\n"
-        "| Techniques | Q4 | <!-- DEFER-CORNER: techniques | x --> |\n\n"
-        "## Halt-loop Checkpoints\n\n| C | A | F |\n|---|---|---|\n| x | y | z |\n\n"
-        "## Acceptance Criteria\n\n- [ ] x\n\n## Global Definition of Done\n\n- [ ] x\n"
+    report = check_plan_completeness(synthetic_measurement_plan)
+    assert "Mode" in report["missing_mandatory"]
+
+
+def test_empty_falsification_is_flagged(fixtures_dir: Path) -> None:
+    """The check that replaced the >=2 ADR requirement.
+
+    An ADR in a measurement plan is premature — nothing has been measured, so there is
+    nothing to decide. What makes the plan honest is stating in advance what result would
+    kill the hypothesis; without it, any observation can be reinterpreted afterwards as
+    confirming what was already believed, and the measurement cannot fail.
+    """
+    report = check_plan_completeness(fixtures_dir / "no-falsification-measurement-plan.md")
+    assert report["falsification_missing"] is True
+
+
+def test_placeholder_falsification_does_not_count(
+    tmp_path: Path, synthetic_measurement_plan: Path
+) -> None:
+    content = synthetic_measurement_plan.read_text(encoding="utf-8")
+    stubbed = content.replace(
+        "If every branch is present and refuses, the hypothesis is dead "
+        "and the item is killed with that result recorded.",
+        "<!-- TBD: decide later -->",
     )
-    plan = _build_plan(tmp_path, "over.md", body)
+    plan = tmp_path / "stub.md"
+    plan.write_text(stubbed, encoding="utf-8")
     report = check_plan_completeness(plan)
-    assert any("too_many" in v for v in report["budget_violations"])
+    assert report["falsification_missing"] is True
 
 
-def test_per_corner_max_exceeded_detected(tmp_path: Path) -> None:
-    """4 Qs in one corner (tests) violates per-corner max (3)."""
-    rows = "\n".join(
-        f"| Q{i} | q | tests | `.claude/knowledge-base/references/project-a/` | SKIP | Read | text |" for i in range(1, 5)
+def test_under_budget_detected(fixtures_dir: Path) -> None:
+    report = check_plan_completeness(fixtures_dir / "under-budget-measurement-plan.md")
+    assert any("too_few_questions" in v for v in report["budget_violations"])
+    assert report["question_count"] < MIN_QUESTIONS
+
+
+def test_question_floor_is_three_not_five(good_measurement_plan: Path) -> None:
+    """Recalibrated for maintenance work.
+
+    Five was sized for a prior-art survey across several projects. A maintenance item is
+    smaller, and a floor that forces padding produces questions written to satisfy a
+    counter rather than to measure anything.
+    """
+    assert MIN_QUESTIONS == 3
+    report = check_plan_completeness(good_measurement_plan)
+    assert report["question_count"] == 4
+    assert report["budget_violations"] == []
+
+
+def test_methodless_question_detected(fixtures_dir: Path) -> None:
+    report = check_plan_completeness(fixtures_dir / "method-missing-measurement-plan.md")
+    assert "Q2" in report["methodless_questions"]
+
+
+def test_missing_method_headers_reported(tmp_path: Path) -> None:
+    """Renaming the columns must not silently pass every question as fine."""
+    plan = tmp_path / "no-headers.md"
+    plan.write_text(
+        "# Measurement Plan: X\n\n## Measurement Questions\n\n"
+        "| # | Question | Corner | Thing | Place |\n"
+        "|---|---|---|---|---|\n"
+        "| Q1 | Something? | evidence | Read | somewhere |\n",
+        encoding="utf-8",
     )
-    body = (
-        "# Discovery Plan: Corner Overflow\n\n## Context\n\nx\n\n## Objective\n\nx\n\n"
-        "## In-Scope / Out-of-Scope\n\n| P | In | Why |\n|---|---|---|\n| `.claude/knowledge-base/references/project-a/` | x | y |\n\n"
-        "## ADRs\n\n### D1 — x\n\n**Decision:** x.\n\n### D2 — x\n\n**Decision:** x.\n\n"
-        "## Research Questions\n\n"
-        "| # | Question | Corner | Reference project(s) | Fase A (broad — ast-grep map) | Fase B (deep — Read at each hotspot) | Expected answer shape |\n"
-        "|---|---|---|---|---|---|---|\n"
-        f"{rows}\n"
-        "| Q5 | q | deps | `.claude/knowledge-base/references/project-a/` | SKIP | Read | text |\n\n"
-        "## Coverage Matrix\n\n| Corner | Q | Status |\n|---|---|---|\n"
-        "| Integration tests | Q1, Q2, Q3, Q4 | x |\n"
-        "| Dependencies | Q5 | x |\n"
-        "| Tools | (none) | <!-- DEFER-CORNER: tools | x --> |\n"
-        "| Techniques | (none) | <!-- DEFER-CORNER: techniques | x --> |\n\n"
-        "## Halt-loop Checkpoints\n\n| C | A | F |\n|---|---|---|\n| x | y | z |\n\n"
-        "## Acceptance Criteria\n\n- [ ] x\n\n## Global Definition of Done\n\n- [ ] x\n"
-    )
-    plan = _build_plan(tmp_path, "overflow.md", body)
     report = check_plan_completeness(plan)
-    assert any("corner_overflow_tests" in v for v in report["budget_violations"])
+    assert report["methodless_questions"] == ["__header_not_found__"]
 
 
-def test_methodless_question_detected(method_missing_plan: Path) -> None:
-    """Q3 in the fixture has empty Fase A (not SKIP) — must surface in methodless_questions."""
-    report = check_plan_completeness(method_missing_plan)
-    assert "Q3" in report["methodless_questions"]
-
-
-def test_skip_token_allowed_in_fase_a(good_discover_plan: Path) -> None:
-    """Fase A == 'SKIP' is the text-shape exemption — MUST NOT count as methodless."""
-    report = check_plan_completeness(good_discover_plan)
-    assert report["methodless_questions"] == []
-
-
-def test_adr_count_below_two_detected(no_adrs_plan: Path) -> None:
-    """The no-adrs fixture has ## ADRs header but zero ### D1/D2 entries."""
-    report = check_plan_completeness(no_adrs_plan)
-    assert report["adr_count"] < 2
+def test_target_without_tool_is_methodless(tmp_path: Path) -> None:
+    """A target with no tool is a place nobody said how to look at."""
+    plan = tmp_path / "half.md"
+    plan.write_text(
+        "# Measurement Plan: X\n\n## Measurement Questions\n\n"
+        "| # | Question | Corner | Tool | Target |\n"
+        "|---|---|---|---|---|\n"
+        "| Q1 | Something? | evidence |  | somewhere |\n",
+        encoding="utf-8",
+    )
+    report = check_plan_completeness(plan)
+    assert report["methodless_questions"] == ["Q1"]

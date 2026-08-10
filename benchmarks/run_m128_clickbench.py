@@ -72,6 +72,13 @@ def _load_queries():
         return [q.strip() for q in fh.read().split("\n") if q.strip() and not q.strip().startswith("--")]
 
 
+# O `LIMIT N` final é removido ANTES do A/B colunar-vs-heap. Sem isto a comparação é falso-negativa: as
+# consultas do ClickBench com `ORDER BY count DESC LIMIT 10` têm muitos empates, e o corte escolhe 10 linhas
+# ARBITRÁRIAS-mas-válidas entre elas — diferença de ordem de varredura, não de armazenamento. Constante (e não
+# regex inline) porque a regra é UM conhecimento com dois consumidores: `_bench_query` aqui e
+# `m169_ab_verify.py`, que prova byte-identidade sem arrastar o timing 5× junto.
+LIMIT_RE = re.compile(r"\s+LIMIT\s+\d+\s*;?\s*$", re.IGNORECASE)
+
 # ClickBench `hits` tem 99.997.497 linhas (número publicado pelo próprio ClickBench). Usado só para
 # derivar o passo da amostragem sistemática — nunca para afirmar que rodamos a escala completa.
 HITS_TOTAL_ROWS = 99_997_497
@@ -280,7 +287,7 @@ def _bench_query(cur, conn, i, sql, assert_byte_identical) -> dict:
     # `... ORDER BY count DESC LIMIT 10` has many tied counts on a subsample, so the LIMIT cut picks an
     # ARBITRARY-but-valid 10 among the ties — a legitimate scan-order difference, NOT a storage bug. Comparing
     # the FULL (unlimited) deterministic aggregation is the real columnar-storage correctness oracle.
-    ab_sql = re.sub(r"\s+LIMIT\s+\d+\s*;?\s*$", "", sql.rstrip().rstrip(";"))
+    ab_sql = LIMIT_RE.sub("", sql.rstrip().rstrip(";"))
     try:
         cur.execute(ab_sql)
         rc = _canonical(cur.fetchall())
@@ -337,7 +344,7 @@ def run(args) -> dict:
     # `resolve_special_varno` deparse. NOTE the corrected diagnosis — it was NOT a planner hang, NOT O(cols^2), and
     # NOT width/TEXT-related (the queries always EXECUTED fine); `statement_timeout` could not interrupt it because
     # it happened during plan PRINTING. Both modes keep the byte-identical A/B oracle
-    # (`docs/benchmarks/m131-columnar-agg-accelerated.md`).
+    # (`wiki/benchmarks/m131-columnar-agg-accelerated.md`).
     cur.execute(f"SET theodb.enable_columnar_agg = {'on' if args.agg else 'off'}")
     cur.execute("SET max_parallel_workers_per_gather = 0")
     # Per-query ceiling: a query the columnar path cannot complete in time is recorded ERRORED (honest per-query
@@ -399,7 +406,7 @@ def main():
     ap.add_argument("--cache", default="benchmarks/.cache")
     ap.add_argument("--query-timeout-s", type=int, default=60, help="per-query ceiling; slow query -> ERRORED")
     ap.add_argument("--agg", action="store_true", help="enable the vectorized columnar-agg CustomScan pushdown (the M131 fix for #135 removed the EXPLAIN deparse hang; default OFF = storage path)")
-    ap.add_argument("--out", default="docs/benchmarks/m128-clickbench-columnar.json")
+    ap.add_argument("--out", default="benchmarks/artifacts/m128-clickbench-columnar.json")
     args = ap.parse_args()
     data = run(args)
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)

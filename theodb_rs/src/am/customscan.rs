@@ -878,7 +878,7 @@ mod tests {
         );
     }
 
-    // M95 auto-selection at TIGHT selectivity is measured on SIFT1M (T3.1 sweep, `docs/benchmarks/m95-cost-model`),
+    // M95 auto-selection at TIGHT selectivity is measured on SIFT1M (T3.1 sweep, `wiki/benchmarks/m95-cost-model`),
     // NOT asserted here: with M48 unchanged the native post-filter competitor is probe-blind (under-priced), so
     // whether the planner AUTO-picks the node at tight is a measured, honest question — the blueprint's R4. The
     // node's honest cost correctness is proven by the `cost::` unit tests; the integration proof that the forced

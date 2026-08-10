@@ -8,17 +8,17 @@ import pytest
 from check_spec_smells import SmellReport, check_spec_smells  # noqa: E402
 
 
-def test_clean_blueprint_zero_smells(good_blueprint: Path, rubric_path: Path) -> None:
-    report = check_spec_smells(good_blueprint, rubric_path)
+def test_clean_opportunity_zero_smells(good_opportunity: Path, rubric_path: Path) -> None:
+    report = check_spec_smells(good_opportunity, rubric_path)
     assert isinstance(report, SmellReport)
-    # Good blueprint may have a few INFO-level smells but penalty should be modest
+    # Good opportunity may have a few INFO-level smells but penalty should be modest
     assert report.total_penalty >= -30
 
 
-def test_smelly_blueprint_detects_weak_imperatives(tmp_path: Path, rubric_path: Path) -> None:
+def test_smelly_opportunity_detects_weak_imperatives(tmp_path: Path, rubric_path: Path) -> None:
     bp = tmp_path / "smelly.md"
     bp.write_text(
-        "# Blueprint: Smelly\n\n"
+        "# Opportunity: Smelly\n\n"
         "We should add a test if possible. The module could be better. We may consider improvements.\n"
         "Talvez seja eficiente. The system might be robust.\n",
         encoding="utf-8",
@@ -33,7 +33,7 @@ def test_smelly_blueprint_detects_weak_imperatives(tmp_path: Path, rubric_path: 
 def test_code_blocks_excluded_from_smells(tmp_path: Path, rubric_path: Path) -> None:
     bp = tmp_path / "code-blocks.md"
     bp.write_text(
-        "# Blueprint\n\n"
+        "# Opportunity\n\n"
         "Real prose has no smells here.\n\n"
         "```typescript\n"
         "// This code may contain weak imperatives but should not count\n"

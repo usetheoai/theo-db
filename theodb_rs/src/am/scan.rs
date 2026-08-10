@@ -348,14 +348,6 @@ pub extern "C-unwind" fn amrescan(
                     Err(e) => crate::pg::err_corrupt(&format!("theodb am scan: {e}")),
                 };
             heapify(init)
-        } else if magic == crate::am::page::SYMQG_MAGIC {
-            // E2: SymphonyQG co-located quantized graph — beam search reading rows per hop.
-            let ef = crate::am::guc::ef_search();
-            state.query = query.clone();
-            state.rel = rel;
-            state.ef = ef;
-            state.iterative = false; // iterative-grow scan is a follow-up; the ORDER BY LIMIT path is served
-            scan_symqg_structured(rel, &query, ef)
         } else {
             scan_blob(rel, &query)
         };
@@ -390,166 +382,6 @@ unsafe fn gather_hnsw_candidates(
     let mut results = crate::am::hnsw_page::traverse(rel, &meta, query, ef)?;
     // Fold in pending (INSERTed after build) — no rebuild (mirror the IVF path).
     let pending = page::read_pending(rel)?;
-    for (tidv, v) in pending {
-        results.push((tidv, metric.dist(query, &v)));
-    }
-    Ok(results)
-}
-
-/// E2 T3.1 — SymphonyQG scan: beam search over the persisted co-located graph, reading one vertex row per hop.
-/// Reuses the off-PG-validated estimator (`symqg_spike::estimate_sign`) and the rotation trick: the row stores
-/// `rot = P·x_p`, so `q_r = rot_q − rot_p` gives BOTH the exact distance (`‖q_r‖²`, rotation-invariant) and the
-/// per-neighbour estimate in one O(D) subtraction (no per-hop rotate — the spike's speed lever). Answer = the k
-/// smallest EXACT among popped vertices (no re-rank), mapped ordinal→tid; pending rows scored exact.
-unsafe fn scan_symqg_structured(
-    rel: pg_sys::Relation,
-    query: &[f32],
-    ef: usize,
-) -> BinaryHeap<Reverse<Scored>> {
-    heapify(gather_symqg_candidates(rel, query, ef).unwrap_or_else(|e| e.raise()))
-}
-
-/// Ordered f64 for the beam heaps (all distances ≥ 0, finite here).
-#[derive(Clone, Copy, PartialEq)]
-struct OrdF(f64);
-impl Eq for OrdF {}
-impl PartialOrd for OrdF {
-    fn partial_cmp(&self, o: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(o))
-    }
-}
-impl Ord for OrdF {
-    fn cmp(&self, o: &Self) -> std::cmp::Ordering {
-        self.0.partial_cmp(&o.0).unwrap_or(std::cmp::Ordering::Equal)
-    }
-}
-
-unsafe fn gather_symqg_candidates(
-    rel: pg_sys::Relation,
-    query: &[f32],
-    ef: usize,
-) -> Result<Vec<(i64, f64)>, ScanError> {
-    use crate::am::page;
-    let meta = page::read_symqg_meta(rel)?;
-    let metric = Metric::from_tag(meta.metric_tag)
-        .ok_or_else(|| ScanError::Corrupt("unknown metric tag in persisted index meta".into()))?;
-    if meta.n == 0 {
-        return Ok(Vec::new()); // empty index (EC-4)
-    }
-    if query.len() != meta.dim as usize {
-        crate::pg::err_input(&format!(
-            "theodb_symqg: query dim {} != index dim {}",
-            query.len(),
-            meta.dim
-        )); // EC-3
-    }
-    let dim = meta.dim as usize;
-    let degree = meta.degree_bound as usize;
-    let rot_bytes = page::read_chunked(rel, meta.gen_base, meta.rot_codebook_npages)
-        .map_err(|e| ScanError::Corrupt(format!("rotation: {e}")))?;
-    let rq = crate::vec::rabitq::RabitqQuantizer::from_meta_bytes(&rot_bytes)
-        .map_err(|e| ScanError::Corrupt(format!("rabitq: {e}")))?;
-    let rot_q = rq.rotate(query);
-    let tids =
-        page::read_symqg_tids(rel, &meta).map_err(|e| ScanError::Corrupt(format!("tids: {e}")))?;
-    let rows_base = meta.rows_base();
-    let ef = ef.max(1);
-    // D5 eligibility dispatch: the FastScan int16 accumulator is safe only for `m = ⌈dim/4⌉ ≤ 258` (dim ≤ 1032).
-    // Larger dims (e.g. 1536-dim embeddings) fall back to the scalar `estimate_sign` path — always correct. The
-    // `symqg_fastscan` GUC (default on) is the same-index A/B kill-switch that isolates the kernel's effect.
-    let fastscan_ok = crate::am::guc::symqg_fastscan() && dim.div_ceil(4) <= 258;
-    let read_fast = |ord: u32| -> Result<page::SymqgRowFast, ScanError> {
-        page::read_symqg_row_fast(rel, rows_base, ord, dim, degree)
-            .map_err(|e| ScanError::Corrupt(format!("row {ord}: {e}")))
-    };
-    let read_scalar = |ord: u32| -> Result<page::SymqgRow, ScanError> {
-        page::read_symqg_row(rel, rows_base, ord, dim, degree)
-            .map_err(|e| ScanError::Corrupt(format!("row {ord}: {e}")))
-    };
-    let mut visited: std::collections::HashSet<u32> = std::collections::HashSet::new();
-    let mut cand: BinaryHeap<Reverse<(OrdF, u32)>> = BinaryHeap::new();
-    let mut beamw: BinaryHeap<OrdF> = BinaryHeap::new();
-    let mut results: Vec<(i64, f64)> = Vec::new();
-    let entry = meta.entry;
-    visited.insert(entry);
-    // Seed the beam with the entry vertex's exact distance (its q_r norm) as its estimate. `read_fast` gives `rot`
-    // cheaply in either mode (no `u` reconstruction).
-    let erow = read_fast(entry)?;
-    let eq: Vec<f32> = rot_q.iter().zip(&erow.rot).map(|(&a, &b)| a - b).collect();
-    let e_ex: f64 = eq.iter().map(|&x| (x as f64) * (x as f64)).sum();
-    cand.push(Reverse((OrdF(e_ex), entry)));
-    beamw.push(OrdF(e_ex));
-    let mut out_est = vec![0f64; 32]; // reused FastScan block output buffer
-    while let Some(Reverse((OrdF(est_p), p))) = cand.pop() {
-        if beamw.len() >= ef {
-            if let Some(&OrdF(worst)) = beamw.peek() {
-                if est_p > worst {
-                    break;
-                }
-            }
-        }
-        // Record the popped centre's EXACT distance on the sqrt-L2 scale (same as `metric.dist` / pending — the
-        // E1 lesson: never mix squared and sqrt scales in the ORDER BY comparison). Then estimate its neighbours.
-        if fastscan_ok {
-            let row = read_fast(p)?;
-            let q_r: Vec<f32> = rot_q.iter().zip(&row.rot).map(|(&a, &b)| a - b).collect();
-            let qc2: f64 = q_r.iter().map(|&x| (x as f64) * (x as f64)).sum();
-            results.push((tids[p as usize], qc2.max(0.0).sqrt()));
-            let lut = crate::vec::ah::build_sign_lut16(&q_r)
-                .map_err(|e| ScanError::Corrupt(format!("sign lut: {e}")))?;
-            for c in 0..row.nblocks() {
-                let base = c * 32;
-                crate::vec::ah::sign_estimate_block(
-                    &lut,
-                    row.block_codes(c, dim),
-                    32,
-                    &row.nr[base..base + 32],
-                    &row.w[base..base + 32],
-                    qc2,
-                    &mut out_est,
-                );
-                for v in 0..32 {
-                    let ord = row.ords[base + v];
-                    if ord == page::SENTINEL_ORD || !visited.insert(ord) {
-                        continue;
-                    }
-                    let est = out_est[v].max(0.0);
-                    let admit =
-                        beamw.len() < ef || beamw.peek().map(|&OrdF(w)| est < w).unwrap_or(true);
-                    if admit {
-                        cand.push(Reverse((OrdF(est), ord)));
-                        beamw.push(OrdF(est));
-                        if beamw.len() > ef {
-                            beamw.pop();
-                        }
-                    }
-                }
-            }
-        } else {
-            let row = read_scalar(p)?;
-            let q_r: Vec<f32> = rot_q.iter().zip(&row.rot).map(|(&a, &b)| a - b).collect();
-            let qc2: f64 = q_r.iter().map(|&x| (x as f64) * (x as f64)).sum();
-            results.push((tids[p as usize], qc2.max(0.0).sqrt()));
-            for (ord, code) in &row.neighbours {
-                if !visited.insert(*ord) {
-                    continue;
-                }
-                let est = crate::ann::symqg_spike::estimate_sign(code, &q_r, qc2).max(0.0);
-                let admit =
-                    beamw.len() < ef || beamw.peek().map(|&OrdF(w)| est < w).unwrap_or(true);
-                if admit {
-                    cand.push(Reverse((OrdF(est), *ord)));
-                    beamw.push(OrdF(est));
-                    if beamw.len() > ef {
-                        beamw.pop();
-                    }
-                }
-            }
-        }
-    }
-    // Pending rows (INSERTed after build) — scored EXACT (sqrt L2), same scale as the popped centres.
-    let pending =
-        page::read_pending(rel).map_err(|e| ScanError::Corrupt(format!("pending: {e}")))?;
     for (tidv, v) in pending {
         results.push((tidv, metric.dist(query, &v)));
     }
@@ -877,7 +709,7 @@ unsafe fn scan_ivf_aq_split_v7(
     // Stage 1 — read ONLY the CODE pages; AH-score; INLINE-SKIP non-overlapping labels before they cost a slot.
     // M91: selectivity-adaptive probing. A selective label filter starves the default `probes` — the true filtered
     // NN hide in lists the default never visits (measured: recall 0.741 @ 0.01% sel, recovered to ~1.0 by probing
-    // more lists; docs/benchmarks/m91-adaptive-filter.md). So when filtering, keep probing nearest lists PAST
+    // more lists; wiki/benchmarks/m91-adaptive-filter.md). So when filtering, keep probing nearest lists PAST
     // `probes` until the matching-candidate pool reaches the rerank target `rerank_pool` (naturally bounded by
     // cd.len()). A non-filter or loose-filter query breaks at exactly `probes` (target already met) ⇒ byte-identical
     // to the previous fixed `.take(probes)` scan (the no-regression guarantee). Extreme selectivity (matches ≪

@@ -1,80 +1,62 @@
-# Discover-Improve Halt-Loop Prompt
+# Discover-Improve Halt-Loop Driver Prompt
 
-You are mid-improvement of a blueprint, iteration {ITERATION}. The user invoked `/discover-improve {BLUEPRINT_SLUG}` after `/discover-confidence` returned a verdict below `{TARGET_VERDICT}`.
+You are mid-improvement, iteration {ITERATION}. The user invoked `/discover-improve {SLUG}` to lift an opportunity's `/discover-confidence` score to `{TARGET}`.
 
-**Blueprint:** `{BLUEPRINT_PATH}`
-**Target verdict:** `{TARGET_VERDICT}` (default: `SHIPPABLE_WITH_CAVEATS`, score ≥ 70)
-**Confidence rubric:** `.claude/skills/discover-confidence/templates/rubric-blueprint.md`
+**Opportunity:** `{OPPORTUNITY_PATH}`
+**Current verdict:** `{CURRENT_VERDICT}` (score `{CURRENT_SCORE}`)
+**Target:** `{TARGET}`
+
+You are improving how the finding is **argued**, never what it **claims**. The measurement is over; this phase does not get to add to it.
+
+## The boundary — read before every edit
+
+| Section | May you edit it? | Why |
+|---|---|---|
+| `## Corner 1 — Evidence` | **NO** | The record of a measurement. Editing it falsifies findings, and nothing downstream can tell. |
+| `## Corner 2 — Constraint Relation` | Only formatting | `<!-- UNKNOWN: reason -->` is a complete answer. Do not "upgrade" it into a claim. |
+| `## Corner 3 — Blast Radius` | Only from evidence already gathered | Never invent a consumer nobody looked for. |
+| `## Corner 4 — Verification` | Yes | This is where vagueness actually lives, and where sharpening pays. |
+| `## Recommendation` | Yes | An argument, not a record. |
+| `## Context` | Yes | Background prose. |
+
+If improving a corner would require knowing something nobody measured, **stop and report it as unfixable**. That is a correct outcome, not a failed iteration.
 
 ## Your contract for this iteration
 
-### Phase A — Deterministic fixes (apply FIRST every iteration)
+1. **Re-read the current score report.** Work the largest detractor first — the caps ranked by how much score they hold down.
 
-Run `python3 .claude/skills/discover-improve/scripts/apply_fixes.py {BLUEPRINT_PATH}`. This:
+2. **Pick ONE fix.** One per iteration keeps the effect of each change measurable. A batch that lifts the score leaves you unable to say which edit did it.
 
-1. Replaces weak imperatives (should/could/may/might) with `must` in prose (skips code blocks and citation tables).
-2. Strips loopholes ("if possible", "as appropriate", "when applicable", "where feasible").
-3. Detects fabricated citations (paths in `.claude/knowledge-base/references/{...}` that don't exist on disk) and marks them with `<!-- BLOCKED: path not found in .claude/knowledge-base/references/ -->`.
-4. Reports diff to stdout.
+3. **Apply it, respecting the boundary above.**
 
-Then re-score:
+   Fixes that are usually available:
 
-```
-python3 .claude/skills/discover-confidence/scripts/run_blueprint_score.py {BLUEPRINT_PATH} --no-warn
-```
+   - **Vague Recommendation** → scope it. Name what is IN and what is OUT and belongs to its own item. A recommendation that quietly widens is how a micro-evolution becomes a refactor nobody sized.
+   - **Verification with no criterion** → tie it to the item's `dod` in `BACKLOG.md`. Prefer a test that fails against the current state.
+   - **Verification with no successor limit** → name where the limit plausibly moves once this is fixed.
+   - **Smell density** → weak imperatives and loopholes, in the editable sections only.
+   - **Missing mandatory section** → add the header and fill it, but only if the content is already implied by what was measured. An empty header added to satisfy a counter is worse than a missing one: it converts a visible gap into an invisible lie.
 
-If verdict ≥ `{TARGET_VERDICT}`, jump to step "Emit promise".
+4. **Re-score.** Run `/discover-confidence {SLUG}`. Record the new score.
 
-### Phase B — LLM-driven fixes (apply only if Phase A insufficient)
-
-For each detractor in the latest `reasons`:
-
-1. **Empty coverage corner** — read the discovery plan to find the research question(s) mapped to that corner. If credible answers exist in already-collected blueprint content elsewhere, REFACTOR them into the empty corner. If no credible answer exists, add:
-   ```markdown
-   <!-- ADR: Corner X deferred. Original plan declared Qy for this corner; halt-loop blocked at iteration Z. See plan ADR Dn. -->
-   ```
-   The `<!-- ADR: ... -->` marker satisfies the completeness check as long as it includes a real reason.
-
-2. **Per-project asymmetry** — one project dominates content. Trim repetitive paragraphs in the dominant project's subsections; do NOT pad the under-represented projects with fabricated detail.
-
-3. **Low citation density** — paragraphs without citations should EITHER receive a real `.claude/knowledge-base/references/{...}` citation OR be rewritten as opinion ("the synthesis suggests...") rather than claim.
-
-4. **Structural_risk detractors** — fix specific smells listed in reasons by rewriting the affected sentence.
-
-Then re-score with `run_blueprint_score.py`.
-
-### Emit promise
-
-When verdict ≥ `{TARGET_VERDICT}`, emit the promise marker AT THE VERY END of your response — **plain text, isolated on its own line, NO backticks, NO fenced code blocks, NO markdown wrapping**. Ralph-loop's regex matches the literal sequence outside of inline code; wrapping breaks detection.
-
-Correct emission (place exactly this on its own line at end of response):
-
-<promise>BLUEPRINT_IMPROVED</promise>
-
-You may precede the marker with: initial verdict → final verdict, changes applied per category, remaining issues that need human review (don't auto-fix what you can't honestly fix — leave a TODO). The marker must be the last content of the response.
-
-If no-improvement is detected for 2 consecutive iterations (same score, same `reasons`):
-
-- HALT this iteration. Do NOT emit `<promise>BLUEPRINT_IMPROVED</promise>` — the target was NOT reached.
-- Write an explicit BLOCKED report listing the remaining issues and why automated improvement is stuck.
-- Surface the BLOCKED report to the human. The completion promise is reserved for genuine target hits on disk.
+5. **Halt check.** If the verdict on disk is at or above `{TARGET}`, emit `<promise>OPPORTUNITY_IMPROVED</promise>`. Otherwise STOP — the loop resumes.
 
 ## Inviolable rules
 
-- NEVER touch files outside `{BLUEPRINT_PATH}`.
-- NEVER modify the upstream discovery plan. To revise the plan, the user must invoke `/discover-plan` again.
-- NEVER modify `.claude/knowledge-base/references/` (boundary-check hook enforces).
-- NEVER fabricate a citation. If a path doesn't exist, mark it BLOCKED and move on.
-- NEVER emit the promise while a hard cap is still active. INVALID verdict cannot be auto-improved past 49 without resolving the underlying structural defect (empty corner / fabricated citation).
-- NEVER emit the completion promise as a graceful exit from a stop condition — when a blocker fires, HALT and surface a BLOCKED report without promise.
-- NEVER emit `<promise>BLUEPRINT_IMPROVED</promise>` without re-running `run_blueprint_score.py` in this iteration AFTER your last edit. The promise asserts a measurable fact (verdict ≥ `{TARGET_VERDICT}`); emitting it speculatively (without verification) is fabrication.
-- NEVER spawn a nested ralph-loop inside this iteration. NEVER modify `.claude/ralph-loop.local.md` directly. If you observe `ralph-loop.local.md` with `active: true` referencing a DIFFERENT slug, HALT and surface the conflict.
+- **Never edit `## Corner 1 — Evidence`.** Not to fix a typo, not to strengthen a phrase, not to make it read better.
+- **Never write `<!-- BLOCKED: ... -->` onto an unresolvable pointer.** A marked pointer leaves `fabricated` and enters `explicitly_blocked`, so `fabricated_evidence` stops firing. Writing one here is bypassing the cycle's most important hard cap by hand — the same reason the deterministic fixer had that behaviour removed.
+- **Never add a claim about the system that was not measured.** Whatever corner it would improve.
+- **Never substitute `may`/`might`** in descriptive prose. "The endpoint may return 500 under load" is a measured fact; "must return 500" is a different, false claim.
+- **Never emit the promise on a partial improvement.** The score on disk in THIS iteration decides — not the direction of travel, not the expectation that the next edit will get there.
+- **Never touch a governed repo.** This phase edits one document.
 
-## When to give up honestly
+## Stop conditions
 
-If a hard cap fires that cannot be resolved without human input:
+Report honestly and stop — do NOT emit the completion promise — when ANY of:
 
-- Fabricated citation with no plausible replacement → BLOCKED, recommend `/discover-execute` to re-run that question
-- Empty corner with no relevant existing content → BLOCKED, recommend `/discover-plan` to re-plan or accept lower verdict
+1. **The remaining cap is unfixable by editing.** `fabricated_evidence`, `empty_corner_evidence`, `empty_corner_blast_radius`, `no_adr_on_cross_repo_change`. Each needs a re-measurement or a human decision. Name the cap and the real fix.
+2. **Three consecutive iterations with no score improvement.** The remaining distance is not editorial.
+3. **The only path left would require inventing a claim.** Say so plainly.
+4. **The score went DOWN.** Revert the last edit and report — an improvement loop that degrades the artifact has a defect in the loop, not in the artifact.
 
-HALT without emitting the promise. Write a BLOCKED report itemizing the unresolvable issues. The user reads the report and decides. The completion promise is reserved for genuine target hits — emitting it on a blocker would let downstream cycles treat the blueprint as auto-improved.
+An honest "this cannot be lifted by editing" beats a promise emitted on a score that never reached the target.

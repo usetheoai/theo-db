@@ -50,7 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
         "~4 s/query at 1M); keeps a scale run tractable. Recorded in the result label.",
     )
     p.add_argument("--dsn", default=None, help="libpq DSN (else built from PG* env vars)")
-    p.add_argument("--out", default="docs/benchmarks")
+    p.add_argument("--out", default="benchmarks/artifacts")
     return p
 
 

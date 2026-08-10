@@ -187,7 +187,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--iters", type=int, default=20, help="calls per run")
     ap.add_argument("--runs", type=int, default=5, help="number of runs (>=3 for mean+/-std)")
-    ap.add_argument("--write-doc", action="store_true", help="write docs/benchmarks/m19-nl-rust-vs-plpython.md")
+    ap.add_argument("--write-doc", action="store_true", help="write wiki/benchmarks/m19-nl-rust-vs-plpython.md")
     ap.add_argument("--db", default="m19_bench_nl")
     args = ap.parse_args()
     if args.runs < 3:
@@ -241,7 +241,7 @@ def main() -> int:
 
         if args.write_doc:
             _write_doc(args, rust_mean, rust_std, rust_p95, plpy_mean, plpy_std, plpy_p95, ratio)
-            print("wrote docs/benchmarks/m19-nl-rust-vs-plpython.md")
+            print("wrote wiki/benchmarks/m19-nl-rust-vs-plpython.md")
 
         # No-regression gate: the Rust validation path must not be materially slower than plpython3u. Both are
         # LLM-RTT-dominated, so a 1.20 ceiling (20% headroom for stub jitter) is a generous, honest bar.

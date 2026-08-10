@@ -2,7 +2,7 @@
 # M1 DoD-3 — reproducible license due-diligence: prove ZERO AGPL in the TheoDB package.
 # (a) apt system packages in the image; (b) the pgvectorscale Rust crate tree statically linked into
 # vectorscale.so (pinned commit). Exits non-zero if any real AGPL/Affero license is found.
-# This is the deterministic implementation of the DoD-3 license gate (see docs/packaging/license-audit.md
+# This is the deterministic implementation of the DoD-3 license gate (see wiki/references/license-audit.md
 # § "Tool note" for why this is used in lieu of the loop-check-licence multi-agent plugin).
 set -euo pipefail
 IMG="${IMG:-theo-db:dev}"

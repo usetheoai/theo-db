@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """M148 — reproduz a tabela de self-time por alavanca do veredito do flamegraph a partir dos folded
-committados (docs/benchmarks/m148-artifacts/*-folded.txt). Torna `docs/benchmarks/m148-flamegraph-scan.md`
+committados (benchmarks/artifacts/m148-artifacts/*-folded.txt). Torna `wiki/benchmarks/m148-flamegraph-scan.md`
 reproduzível (o tests-pillar review apontou que a tabela vinha de um script inline não-versionado).
 
 Uso: python3 benchmarks/m148_selftime.py [DIR]
-  DIR default = docs/benchmarks/m148-artifacts
+  DIR default = benchmarks/artifacts/m148-artifacts
 Imprime, por query (slow/scanpuro): self-time bruto por folha, o eixo I/O, e a tabela de PRODUÇÃO com os
 frames exclusivos de `cassert` (randomize_mem / verify_compact_attribute / …) descontados — a mesma
 metodologia do doc. Determinístico, sem rede.
@@ -64,7 +64,7 @@ def analyze(path: Path) -> None:
 
 
 def main() -> int:
-    d = Path(sys.argv[1] if len(sys.argv) > 1 else "docs/benchmarks/m148-artifacts")
+    d = Path(sys.argv[1] if len(sys.argv) > 1 else "benchmarks/artifacts/m148-artifacts")
     folded = sorted(d.glob("*-folded.txt"))
     if not folded:
         print(f"nenhum *-folded.txt em {d}", file=sys.stderr)

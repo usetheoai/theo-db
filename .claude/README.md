@@ -1,21 +1,18 @@
 <div align="center">
 
-# Cycle
+# Squad
 
-**Ship features with evidence, not assumptions.**
+**Maintain a running ecosystem on measurements, not hunches.**
 
-[![Status](https://img.shields.io/badge/status-beta-orange)](CHANGELOG.md)
-[![Version](https://img.shields.io/badge/version-1.0.0-blue)](plugin.json)
+[![Status](https://img.shields.io/badge/status-alpha-orange)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.1.0-blue)](plugin.json)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-632%20passing-brightgreen)](.github/workflows/test.yml)
 [![Python](https://img.shields.io/badge/python-3.10%2B-3776AB)](pyproject.toml)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-blueviolet)](https://code.claude.com/docs/en/)
 
-A stack-agnostic **6+1 cycle pipeline** that carries a feature from **idea → discovery → plan → code → merge**, with Claude Code as the active agent at every step. Hard gates, audit trails, and runtime hooks keep plans from being vague and stop code from shipping on assumptions.
+A development squad that keeps the **Theo ecosystem** healthy: eight domain specialists and a pipeline that carries a maintenance item from **hunch → measurement → plan → code → merge**. Every item starts as a hypothesis. Nothing reaches a plan until somebody measured it — and finding nothing is a successful outcome.
 
-[Quick start](#quick-start) · [Flows](#three-common-flows) · [How it works](#the-61-cycles-macro-super-loop) · [Project structure](#project-structure) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
-
-<img src="images/cycle-hero.png" alt="Cycle — the 6+1 cycle pipeline: Roadmap-init → Discover → Plan → Implement → Code-Quality → Review → Release as a macro super-loop, with hard gates, audit trails, and runtime hooks, and Claude Code as the active agent at every step" width="100%">
+[Quick start](#quick-start) · [How it works](#how-it-works) · [The specialists](#the-eight-specialists) · [Contributing](CONTRIBUTING.md)
 
 </div>
 
@@ -24,447 +21,182 @@ A stack-agnostic **6+1 cycle pipeline** that carries a feature from **idea → d
 ## Table of contents
 
 - [Why this exists](#why-this-exists)
-- [Highlights](#highlights)
-- [The 6+1 cycles](#the-61-cycles-macro-super-loop)
-- [Requirements](#requirements)
+- [What you get](#what-you-get)
+- [How it works](#how-it-works)
+- [The eight specialists](#the-eight-specialists)
 - [Quick start](#quick-start)
-- [Three common flows](#three-common-flows)
-- [Flows for maximum value](#flows-for-maximum-value)
+- [The four discover modes](#the-four-discover-modes)
 - [Project structure](#project-structure)
+- [Advisory skills](#advisory-skills)
 - [Unbreakable principles](#unbreakable-principles)
-- [Match the cycle to the work](#match-the-cycle-to-the-shape-of-the-work)
-- [Orthogonal LLM jury](#orthogonal-llm-jury-optional-but-recommended)
-- [Two ways to use this](#two-ways-to-use-this)
-- [Contributing](#contributing)
-- [License](#license)
+- [Relationship to Cycle](#relationship-to-cycle)
+- [Status](#status) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [License](#license)
 
 ---
 
 ## Why this exists
 
-Three failure modes show up repeatedly when LLMs help build software:
+Maintaining a live multi-repo ecosystem fails in ways that building a new one does not:
 
-1. **Plans written before requirements are clear** — vague goal, missing constraints, no measurable success criterion.
-2. **Code shipped on assumptions** — symbols that don't exist, callers that were never wired, metrics declared but never observed.
-3. **Reviews that miss systemic issues** — single reviewer, single pass, biased toward the implementer's mental model.
+1. **Work justified by hunches.** "The trace explorer feels slow" becomes a refactor nobody sized, because nobody measured what was slow.
+2. **Fabricated evidence.** A `file:line` nobody opened, a status code nobody requested, a test asserted to fail but never run. Everything downstream treats it as fact.
+3. **Findings that die orphaned.** A review notices six real problems; they live in a report, get read once, and never become work.
+4. **Local optimisation.** Ten well-evidenced improvements shipped into a stage that was never the limit, mistaken for throughput.
+5. **Generic agents.** A reviewer that does not know a root `go build ./...` covers almost nothing in `theo` reports "builds clean" and has measured nothing.
 
-This project fixes each one with a dedicated cycle, an unbreakable chain between them, and runtime hooks that block the most common shortcuts (force-push, direct-to-main, dead-code commit, plan tampering).
+Squad addresses each with a phase, a gate, or a specialist who knows the difference.
 
-## Highlights
+## What you get
 
-- **Idea-to-merge in one chain.** Seven composable cycles (Roadmap → Discover → Plan → Implement → Code-Quality → Review → Release) that you enter at the lightest point matching your task.
-- **Evidence over assumptions.** A plan ships only at verdict `SHIPPABLE_WITH_CAVEATS` or better; code advances only when fabricated symbols, dead code, and unwired call-sites are absent.
-- **Guardrails at runtime, not in a wiki.** 8 Claude Code hooks enforce git safety (no `--force`, no direct-to-`main`), TDD discipline, CHANGELOG hygiene, and honest public copy as you work.
-- **Multi-agent review.** `/review` runs 5–7 specialist sub-agents in parallel; an optional [GPT-Codex jury](#orthogonal-llm-jury-optional-but-recommended) adds an orthogonal second opinion to break single-model blind spots.
-- **Stack- and domain-agnostic.** Python, TypeScript, Go, and Rust gates ship in-box; thresholds calibrate to your codebase. Nothing here assumes a particular framework.
-- **Auditable by design.** Every cycle writes a dated artifact under `knowledge-base/`, so decisions, evidence, and verdicts are traceable after the fact.
-- **Dual delivery.** Use it standalone (open the repo in Claude Code) or install it as a plugin — same source, two modes.
+- **A hunch is registerable, and cheap.** `/backlog-item` takes an unmeasured hypothesis — no evidence required, on purpose. Demanding proof at intake silences the cheapest signal a maintenance team has.
+- **Measurement decides, not conviction.** `/discover` runs against *our* code and runtime in one of four modes, and has the authority to **kill** the item. A run that finds nothing protected the plan cycle from a hunch.
+- **Prior art can never be evidence.** Gate G5 rejects "project X does it this way" as a justification. Knowing how others solved it is fine; it is simply not a measurement of our system.
+- **Pointers are verified, line included.** A cited `file:line` that does not resolve — missing file, or a line past the end of one — caps the artifact at INVALID.
+- **One registry, two producers.** `BACKLOG.md` is the single answer to "what is pending?". Humans file items; sweeps register findings with evidence attached. Orphaned findings have nowhere to hide.
+- **Eight specialists who know the terrain.** Each carries build commands verified on disk, the domain's invariants, and the false positives that domain generates.
+- **Guardrails at runtime.** Claude Code hooks enforce git safety (no `--force`, no direct-to-`main`), TDD discipline, CHANGELOG hygiene and honest public copy while you work.
 
-## The 6+1 cycles (macro super-loop)
+## How it works
 
 ```
-            ┌──────────────────────────────────────────┐
-            │       ROADMAP-INIT  (once, at start)     │
-            │  /roadmap-init — Socratic grill + SOTA   │
-            │  → ROADMAP.md (M0..M8 macro milestones)  │
-            │  → knowledge-base/references/ (peers)    │
-            └──────────────────┬───────────────────────┘
-                               │ ROADMAP.md exists
-                               ▼
-            ┌──────────────────────────────────────────┐ ◄────────────┐
-            │       ROADMAP  (macro super-loop)        │              │
-            │  select next [ ] milestone respecting    │              │
-            │  dependencies → delegate /auto-plan M<N> │              │
-            └──────────────────┬───────────────────────┘              │
-                               │ milestone_id derived                 │
-                               ▼                                      │
-              ┌─────────────────────┐                                 │
-              │   DISCOVER (opt.)   │                                 │
-              │   prior art study   │                                 │
-              └──────────┬──────────┘                                 │
-                         │ blueprint                                  │
-                         ▼                                            │
-            ┌──────────────────────────────────────────┐              │
-            │                  PLAN                    │              │
-            │  Phase 0 (opt.): /grill-me — interview   │              │
-            │  /to-plan → /edge-case-plan →            │              │
-            │  /deps-audit → /plan-confidence          │              │
-            │  plan frontmatter: milestone_id: M<N>    │              │
-            └──────────────────┬───────────────────────┘              │
-                               │ verdict ≥ SHIPPABLE_WITH_CAVEATS     │
-                               ▼                                      │
-            ┌──────────────────────────────────────────┐              │
-            │              IMPLEMENT                   │              │
-            │  halt-loop: RED → GREEN → REFACTOR →     │              │
-            │  WIRING(triad) → COMMIT                  │              │
-            └──────────────────┬───────────────────────┘              │
-                               │ IMPLEMENTATION_COMPLETE              │
-                               ▼                                      │
-            ┌──────────────────────────────────────────┐              │
-            │            CODE-QUALITY                  │              │
-            │  dead code + fabricated symbols          │              │
-            │  + wiring gaps                           │              │
-            └──────────────────┬───────────────────────┘              │
-                               │ PASS or PASS_WITH_CAVEATS            │
-                               ▼                                      │
-            ┌──────────────────────────────────────────┐              │
-            │                REVIEW                    │              │
-            │  5-7 specialist agents in parallel       │              │
-            │  → verdict: READY_TO_MERGE / NEEDS_FIXES │              │
-            └──────────────────┬───────────────────────┘              │
-                               │ READY_TO_MERGE                       │
-                               ▼                                      │
-            ┌──────────────────────────────────────────┐              │
-            │               RELEASE                    │              │
-            │  auto-bump semver, rewrite CHANGELOG,    │              │
-            │  open develop→main PR + tag on merge     │              │
-            │  post-merge: ROADMAP.md M<N> [ ]→[x]     │──────────────┘
-            │  → verdict: MILESTONE_RELEASED           │   loop back to ROADMAP
-            └──────────────────────────────────────────┘   until ROADMAP_COMPLETE
-
-  Shortcut per milestone:  /auto-plan M<N>   (or /auto-plan with no arg → picks next)
-  Shortcut ad-hoc:         /auto-plan {topic-slug}   (no roadmap link, hotfix mode)
+        ┌──────────────────────────────────────────────┐
+        │  BACKLOG · /backlog-item          (phase 0)  │
+        │  a hypothesis. evidence: none-yet            │
+        └────────────────────┬─────────────────────────┘
+                             │ B-NNN · status: raw
+                             ▼
+        ┌──────────────────────────────────────────────┐
+        │  DISCOVER · /discover --mode {…}             │
+        │  measures OUR code / OUR runtime             │
+        ├──────────────────────┬───────────────────────┤
+        │  evidence found      │  nothing found        │
+        │  → status: triaged   │  → status: killed     │
+        └──────────┬───────────┴───────────────────────┘
+                   │                    ✔ a successful outcome
+                   ▼
+        ┌──────────────────────────────────────────────┐
+        │  PLAN → IMPLEMENT → CODE-QUALITY → REVIEW    │
+        │  → RELEASE          (TDD, gates, jury)       │
+        └────────────────────┬─────────────────────────┘
+                             │ RELEASED
+                             ▼
+                   status: shipped ──→ back to SELECT
 ```
 
-Each arrow is an **unbreakable chain** — you don't skip a cycle, you don't advance past an INVALID verdict, and the hooks enforce git safety (no `checkout`, no `--force`, no `main` commits) at every step. The macro loop closes only when every milestone in `ROADMAP.md` is `[x]` (verdict `ROADMAP_COMPLETE`).
+The macro loop (`cycle-maintenance`) selects the next item — measured before unmeasured, then oldest first — routes it to a specialist, and delegates. **It never reports "complete".** A backlog is not a scope; an empty one means nobody has looked recently, so the empty state is a prompt to sweep.
 
-## Requirements
+## The eight specialists
 
-| Dependency | Version | Required for |
+| Specialist | Repos | Knows |
 |---|---|---|
-| [Claude Code](https://code.claude.com/docs/en/) | latest | everything (CLI, desktop, or IDE) |
-| Python | 3.10+ | skill scripts, validators, quality gates |
-| PyYAML | 6.0+ | frontmatter + rubric parsing |
-| [`ralph-loop`](https://github.com/) plugin | latest | `/implement`, `/discover-execute`, `/plan-improve` halt-loops |
-| `ast-grep` | latest | structural code queries (optional but recommended) |
-| `hypothesis` | latest | property-based tests (dev/CI only) |
+| `engine-go` | `theo` | A root `go build ./...` covers almost nothing — it is multi-module |
+| `control-plane` | `theo-cloud`, `theo-traefik-mcp` | Cross-tenant leakage; metering that mis-counts money |
+| `data-plane-ts` | `theo-memory`, `theo-rag`, `theo-lens`, `theo-trust`, `theo-skills`, `theo-promptly` | Tenant isolation; drift between SDK, REST and MCP |
+| `theo-db` | `theo-db` | A defect crashes the database; the AGPL licence gate |
+| `infra-terraform` | `theo-infra-modules`, `theo-infra-live` | Terraform (not OpenTofu); RDS is a protected unit; Pulumi is legacy |
+| `contracts-auth` | `theo-contracts` | Everything imports it — assume cross-repo by default |
+| `frontend-dashboard` | `theo-cloud/dashboard` | Environment vs product — the only domain with a live target |
+| `platform-cli` | `theo-cli`, `theo-storage` | `npm`, not `pnpm`; consumers are scripts, not importers |
 
-Tested on Linux and macOS with Python 3.10, 3.11, and 3.12.
+Routing is deterministic (`scripts/route_domain.py`) and reads its table from `rules/cycle-backlog.md` — one table, one truth. See [`agents/README.md`](agents/README.md).
 
 ## Quick start
 
-### Setup (once per environment)
+**Requirements:** Python 3.10+, `git`, Claude Code, and the `ralph-loop` plugin for halt-loop phases.
 
-1. Install Claude Code (CLI / desktop / IDE — any).
-2. Install the `ralph-loop` plugin (required by `/implement`, `/discover-execute`, `/plan-improve`).
-3. Open this directory in Claude Code. The `settings.json` wires hooks; `skills/` and `commands/` are auto-discovered.
-4. Verify pre-conditions:
-   ```bash
-   python3 --version              # 3.10+ required
-   python3 -c "import yaml"       # PyYAML
-   ast-grep --version             # structural queries
-   jq '.enabledPlugins' ~/.claude/settings.json | grep ralph-loop
-   ```
-5. Edit `rules/dogfood-golden-rule.md` § 1 (anchor scenario), `rules/code-quality-languages.txt`, and `rules/discover-web-allowlist.txt` for your project.
+```bash
+# 1. Create the registry, once (inventories repos FROM DISK, never from a table)
+/backlog-init
 
-### Three common flows
+# 2. Register something worth looking at — a hunch is enough
+/backlog-item theo-lens-trace-latency
 
-**A. I have a clear feature to build** (most common path)
-```
-/to-plan "{one-sentence feature}"
-/edge-case-plan {slug}
-/deps-audit {slug}
-/plan-confidence {slug}
-# if verdict ≥ SHIPPABLE_WITH_CAVEATS:
-/implement {slug}
-/code-quality {slug}
-/review {slug}
-# verdict READY_TO_MERGE:
-/release            # opens PR develop→main + proposes semver tag (human approves merge)
+# 3. Measure it. This may kill the item, and that is a good day
+/discover --mode live-test B-014
+
+# 4. If it survived, run the chain
+/auto-plan B-014
 ```
 
-**B. The feature is vague and needs requirements grilling first**
-```
-/grill-me {topic-slug}
-# interview-driven, one Q at a time, codebase-first
-# produces knowledge-base/grills/{slug}-grill.md
-# then continue with flow A
-```
+Sweep a whole domain instead of filing by hand:
 
-**C. I don't know how others solved this — need prior art first**
-```
-/discover-plan {topic-slug}
-/discover-edge-cases {slug}
-/discover-plan-confidence {slug}
-/discover-execute {slug}
-/discover-confidence {slug}
-# verdict ≥ SHIPPABLE_WITH_CAVEATS → blueprint in knowledge-base/discoveries/blueprints/
-# optionally distil into a first-class skill via the standalone /skill-creator
-# then go to flow A — /to-plan reads the blueprint as input
+```bash
+/discover --sweep data-plane-ts        # findings land in BACKLOG.md with evidence attached
+/backlog-review                        # what has rotted in the registry
 ```
 
-**Shortcut for autonomous end-to-end:** `/auto-plan {topic-slug}` chains everything. Use when the topic is large enough to justify autonomous execution.
+## The four discover modes
 
-## Flows for maximum value
+Each mode defines what counts as a measurement. Evidence from one does not satisfy another.
 
-The pipeline is most effective when the **right cycle is invoked for the right shape of work**. Map your task to the closest scenario:
+| Mode | Finds | Evidence required |
+|---|---|---|
+| `review` | A defect visible in our code | `file:line` + the rule violated + why it matters **here** |
+| `live-test` | Behaviour wrong in the running system | `METHOD URL -> status`, console, trace id, timing, screenshot |
+| `bug` | A reproduced defect | Numbered repro **plus a test that fails on the current state, executed** |
+| `evolve` | Measured cost of the status quo | A number: N round-trips, N duplicated call sites, N ms |
 
-### Scenario 1 — Vague request, no prior art known
-
-> "We need user authentication that doesn't lock us into one vendor."
-
-```
-/grill-me user-auth
-  → resolves: identity source? session storage? RBAC vs ABAC? recovery flow?
-  → verdict: NEEDS_DISCOVERY (prior art on identity adapters unknown)
-/discover-plan user-auth-adapter-patterns
-  → investigates 2-3 reference projects' approaches
-/discover-execute / discover-confidence
-  → blueprint with side-by-side comparison + ADRs
-/to-plan user-auth
-  → cites grill decisions + blueprint
-/edge-case-plan → /deps-audit → /plan-confidence
-/implement → /code-quality → /review
-```
-
-### Scenario 2 — Clear spec already exists
-
-> "Spec doc at docs/specs/payment-retry.md describes exactly what to build."
-
-```
-/to-plan payment-retry            # skip grill-me; spec is the input
-/edge-case-plan → /deps-audit → /plan-confidence
-/implement → /code-quality → /review
-```
-
-### Scenario 3 — Trivial bug fix
-
-> "Off-by-one in pagination."
-
-```
-# No cycle needed. Write failing test, fix, commit, PR.
-# Use the cycle pipeline only when the change has > 3 decision branches OR touches > 1 module non-trivially.
-```
-
-### Scenario 4 — Cross-cutting refactor
-
-> "Migrate from synchronous to async I/O across 12 modules."
-
-```
-/grill-me async-migration         # constraints: backward compat? rollout strategy?
-/discover-plan async-migration-prior-art    # how do other projects stage this?
-# ... full chain
-# Likely NEEDS_SPLIT verdict on grill — break into per-module slices.
-```
-
-### Scenario 5 — Pre-release v1.0 claim
-
-> "Are we ready to drop the 'beta' label?"
-
-```
-/dogfood audit
-# Reads knowledge-base/dogfood/manifest.md + evidence/
-# Applies rules/dogfood-golden-rule.md
-# Emits EVIDENCE_SUFFICIENT / EVIDENCE_WITH_CAVEATS / EVIDENCE_INSUFFICIENT
-# If INSUFFICIENT, /public-copy-lint will catch attempts to claim production-ready in README
-```
-
-### Scenario 6 — Periodic maintenance
-
-```
-/loop 7d /code-quality            # weekly dead-code / fabricated-symbol sweep
-/loop 7d /deps-audit              # weekly CVE check
-```
+`bug` has a hard floor: **no failing test, no bug.** A defect nobody can express as a failing test is not understood well enough to fix. `live-test` refuses on a domain with no declared target — six of eight have none, by design, because a Go library and a Terraform module have no surface a browser can probe.
 
 ## Project structure
 
 ```
-.
-├── README.md                      ← you are here
-├── HOW-TO-USE.md                  ← detailed onboarding for new contributors
-├── ROADMAP.md                     ← macro milestones (M0..M8) — written by /roadmap-init, edited by cycle-release
-├── plugin.json                    ← manifest for marketplace install
-├── settings.json                  ← Claude Code permissions + hooks wiring
-├── settings.local.json            ← personal overrides (gitignored)
-├── .active_plan.example           ← pin a specific plan as active
-│
-├── skills/                        ← 28 skills (cycle entry-points + utilities)
-│   ├── roadmap-init/              ← single-shot at project inception (Socratic + SOTA clone)
-│   ├── roadmap-feature/           ← add one new milestone to an existing roadmap (sister of roadmap-init)
-│   ├── grill-me/                  ← Phase 0 of cycle-plan (interview)
-│   ├── to-plan/                   ← cycle-plan main entry
-│   ├── discover-plan/             ← cycle-discover main entry
-│   ├── implement/                 ← cycle-implement halt-loop
-│   ├── code-quality/              ← cycle-code-quality audit
-│   ├── review/                    ← cycle-review parallel agents
-│   ├── release/                   ← cycle-release: develop→main PR + semver tag + ROADMAP.md checkbox flip
-│   ├── auto-plan/                 ← cycle-auto-plan orchestrator (sub-cycle of cycle-roadmap)
-│   ├── dogfood/                   ← honesty gate for v1.0 claims
-│   ├── deck/, marp-slide/,        ← utility skills (slides/diagrams)
-│   │   excalidraw/, ast-grep/
-│   └── skill-creator/             ← author/improve/eval any skill (standalone)
-│
-├── rules/                         ← Source of Truth for cycles + conventions
-│   ├── architecture.md            ← layering, DIP boundaries
-│   ├── testing.md                 ← TDD discipline, pyramid
-│   ├── public-copy.md             ← banned framings in README/marketing
-│   ├── cycle-roadmap.md           ← macro super-loop: roadmap → … → release → roadmap (loop)
-│   ├── cycle-discover.md          ← discovery cycle contract
-│   ├── cycle-plan.md              ← planning cycle contract
-│   ├── cycle-implement.md         ← implementation cycle contract
-│   ├── cycle-code-quality.md      ← code-quality cycle contract
-│   ├── cycle-review.md            ← review cycle contract
-│   ├── cycle-release.md           ← release cycle contract (develop→main + tag + roadmap flip)
-│   ├── cycle-auto-plan.md         ← auto-orchestrator contract (one milestone per run)
-│   ├── code-quality-golden-rule.md  ← locked code-quality severity rubric
-│   ├── code-quality-thresholds.txt  ← per-project threshold overrides
-│   ├── code-quality-allowlist.txt   ← findings exemptions (mandatory sunset)
-│   ├── discover-blueprint-golden-rule.md ← locked discover-confidence hard caps
-│   ├── dogfood-golden-rule.md     ← anchor scenario + status vocab
-│   ├── audit-trail-rotation.md    ← when to archive/delete artifacts
-│   ├── loop-engine-convention.md  ← Skill vs. Agent vs. ralph-loop
-│   ├── discover-web-allowlist.txt ← authoritative domains for WebFetch
-│   └── code-quality-languages.txt ← enabled languages per project
-│
-├── hooks/                         ← 8 defensive runtime hooks
-│   ├── sessionstart-context.sh    ← injects git/plan/loop status at session start
-│   ├── userpromptsubmit-inject.sh ← injects active plan excerpt before each prompt
-│   ├── validate-command.sh        ← blocks git destructive ops + Co-Authored-By trailers
-│   ├── boundary-check.sh          ← read-only enforcement on references/ + tools/
-│   ├── post-edit-check.sh         ← multi-language linter feedback
-│   ├── public-copy-lint.sh        ← banned framings in README/marketing
-│   ├── stop-validation.sh         ← TDD gate + CHANGELOG check
-│   └── precompact-preserve.sh     ← snapshots before context compaction
-│
-├── commands/                      ← 3 parallel utilities
-│   ├── plan-attest.md             ← SHA256 attest plan against tampering
-│   ├── plan-goal.md               ← bridge active plan to Claude Code /goal
-│   └── plan-loop.md               ← bridge active plan to Claude Code /loop
-│
-├── knowledge-base/                ← all generated artifacts live here
-│   ├── grills/                    ← /grill-me Q&A logs
-│   ├── plans/                     ← /to-plan outputs
-│   ├── discoveries/
-│   │   ├── plans/                 ← /discover-plan outputs
-│   │   ├── blueprints/            ← /discover-execute outputs
-│   │   └── snapshots/             ← WebFetch snapshots (hash-verified) cited by blueprints
-│   ├── implementations/           ← /implement halt-loop logs + summaries
-│   ├── reviews/                   ← /plan-confidence, /discover-confidence, /review reports
-│   ├── releases/                  ← /release run records (per version)
-│   ├── roadmap-runs/              ← cycle-roadmap per-milestone audit trail (in_progress/completed/blocked)
-│   ├── adrs/                      ← long-term ADRs (MADR 3.0)
-│   ├── audits/                    ← /deps-audit, /code-quality reports
-│   ├── dogfood/                   ← anchor manifest + evidence files
-│   ├── backlog.md                 ← deferred/not-yet-implemented items
-│   ├── references/                ← read-only clones of reference projects (seeded by /roadmap-init)
-│   └── tools/                     ← read-only docs of tools the project depends on
-│
-├── scripts/                       ← shared utilities
-│   ├── ecosystem_utils.py         ← shared layout detection (DRY module)
-│   ├── validate_skill_frontmatter.py ← CI skill contract validator
-│   ├── generate-plugin-settings.py ← generates settings.plugin.json from settings.json
-│   ├── attest-plan.sh             ← used by /plan-attest
-│   ├── statusline.sh              ← Claude Code status line
-│   ├── check_xrefs.py             ← validate cross-references (dual-mode)
-│   ├── session-catchup.py         ← rebuild context post-compaction
-│   ├── run_slice_tests.sh         ← run every skills/*/tests suite isolated (CI + local)
-│   └── test_e2e_smoke.py          ← CI smoke test (syntax + xrefs + smoke chain)
-│
-├── tests/                         ← root suite (17) + 45 hook integration tests
-│   ├── test_ecosystem_utils.py    ← 11 layout detection tests
-│   ├── test_skill_frontmatter.py  ← 6 skill contract tests
-│   └── hooks/                     ← 45 hook integration tests (bash)
-│       ├── test_validate_command.sh
-│       ├── test_boundary_check.sh
-│       └── test_stop_validation.sh
-│   # 615 more tests live in skills/*/tests — each slice runs isolated in CI
-│   # via scripts/run_slice_tests.sh (632 Python tests total)
-│
-└── agents/                        ← audit trail of cycle runs
+squad/
+├── agents/          ← the 8 domain specialists + README
+├── rules/           ← contracts. cycle-*.md are the source of truth
+│   ├── cycle-backlog.md      ← the registry, intake, domain routing
+│   ├── cycle-discover.md     ← the four modes, evidence contracts, gates
+│   ├── cycle-maintenance.md  ← the macro loop
+│   ├── current-constraint.md ← the constraint lens (advisory, never a gate)
+│   └── live-target.txt       ← declared live environments
+├── skills/          ← one directory per phase, each with its SKILL.md
+├── scripts/         ← route_domain.py, check_xrefs.py, validators
+├── hooks/           ← runtime guardrails
+└── tests/           ← root suite; per-slice suites live in skills/*/tests
 ```
+
+Rules are the contract; a SKILL.md carries only phase-specific detail and points back at its rule.
+
+## Advisory skills
+
+Beyond the pipeline phases, the bundle ships skills that answer architecture questions rather than driving a cycle. They are auxiliary — bound to no `cycle-*.md`, invoked on demand:
+
+| Skill | Answers |
+|---|---|
+| `cap-theorem-specialist` | Consistency vs availability during a network partition; CP/AP classification of an operation |
+| `backpressure-specialist` | A producer outrunning a consumer: buffers, drop policies, flow control |
+| `resilience-specialist` | Timeouts, retries, circuit breakers, bulkheads, load shedding, degradation, recovery |
+
+Each refuses the shortcut its field is prone to — classifying a product as CP or AP without its configuration, recommending an unbounded buffer, or retrying a non-idempotent operation without protection.
 
 ## Unbreakable principles
 
-These apply in every cycle and are enforced by hooks where automatable:
+- **Evidence is ours or it is not evidence.** Gate G5 at intake, and the Evidence corner downstream.
+- **A pointer resolves, line included.** Otherwise the artifact is INVALID.
+- **Killing an item is success.** The cycle can say no, with a `kill_reason` naming what was measured.
+- **`unknown` is a complete answer** — for the constraint corner, and only there. We do not instrument flow, so demanding a constraint claim would be answered by assertion.
+- **Ids are never reused or renumbered.** A killed `B-007` stays `B-007` forever; the number is the audit trail.
+- **Measuring is reading.** Discover produces a document, never a patch.
+- **Verdicts are derived from findings**, never asserted.
 
-1. **95% confidence rule** — never proceed without 95%+ certainty. Ask when unsure. `/grill-me` operationalizes this for vague plans.
-2. **Task completion gate** — finish the current task before starting a new one.
-3. **Extreme honesty** — admit ignorance; expose risks; never invent state. `/dogfood` blocks v1.0 claims without measured evidence.
-4. **Git rules** — NEVER `git checkout`, `git revert`, `git push --force`, `git reset --hard`, or commit to `main`. Enforced by `hooks/validate-command.sh`.
-5. **TDD-first** — failing test before code; bug fix starts with a regression test. Warned by `hooks/stop-validation.sh`.
-6. **CHANGELOG discipline** — every change in `[Unreleased]`. Warned by `hooks/stop-validation.sh`.
-7. **Don't reinvent** — mature libraries exist; prefer composition over rewriting. `/deps-audit` checks Rule 9 evaluation on new deps.
+## Relationship to Cycle
 
-## Match the cycle to the shape of the work
+Squad is derived from Cycle (MIT) and inverts its centre. Cycle is greenfield and stack-agnostic: its DISCOVER studies **how other projects solved a problem** and explicitly forbids looking at your own code. That is the right question when building something new and the wrong one when maintaining something that runs — it produces imitation, not maintenance.
 
-Each cycle is heavyweight by design — they trade speed for evidence. Pick the lightest entry point that fits the work:
-
-| Cycle | Best for | When NOT to use |
+| | Cycle | Squad |
 |---|---|---|
-| `cycle-discover` (full chain) | Unknown prior art; investigating how others solved the problem | Question is text-shape (use Read + Grep) |
-| `cycle-plan` (full chain, no grill) | Clear feature with known shape | Trivial change (single-line) |
-| `cycle-plan` (with `/grill-me`) | Vague requirements, multi-branch decision tree | Spec already detailed |
-| `cycle-implement` (halt-loop) | Building per an approved plan | No plan (run cycle-plan first) |
-| `cycle-code-quality` | Post-implement audit | Uncommitted tree |
-| `cycle-review` (5-7 agents) | Pre-merge rigorous review | Tiny PR (built-in `/review` is enough) |
-| `cycle-judge-codex` (optional external plugin) | Orthogonal LLM jury alongside `/review` — breaks the Claude-only monoculture by adding GPT-Codex as a second jury family | Sessions where Codex CLI is not installed; trivial single-line changes |
-| `cycle-release` | Cutting a versioned release after `/review` returns `READY_TO_MERGE` | Nothing in `[Unreleased]` to ship |
-| `/auto-plan` (super-cycle) | Large, well-scoped topics warranting autonomy | Plan already exists (call `/implement` directly) |
+| Driver | a milestone in `ROADMAP.md` | an item in `BACKLOG.md` |
+| Discover asks | how did project X solve this? | what is true about *our* system? |
+| Terminal artifact | blueprint (a design to copy) | opportunity (a measured gap) |
+| Agents | generic, stack-agnostic | 8 specialists with verified build commands |
+| Ends when | every milestone is `[x]` | never — maintenance is continuous |
 
-The cheapest cycle is the one you don't run.
+What Squad keeps: TDD halt-loops, the wiring triad, hard gates with derived verdicts, the orthogonal Codex jury, git-safety hooks, and an auditable `knowledge-base/`.
 
-## Claude Code best practices conformance
+## Status
 
-This ecosystem follows [Claude Code](https://code.claude.com/docs/en/) conventions:
-
-- **Skill frontmatter**: `name`, `description`, `user-invocable`, `allowed-tools`, `argument-hint`, `paths` (where applicable) per [Skills spec](https://code.claude.com/docs/en/skills).
-- **Hook JSON output**: canonical `hookSpecificOutput.additionalContext` format per [Hooks reference](https://code.claude.com/docs/en/hooks).
-- **Permissions**: granular allow/ask/deny lists with `defaultMode` declared.
-- **Plugin manifest**: `plugin.json` allows installation via marketplace.
-- **Composition**: orchestrator skills (`to-plan`, `implement`, `review`, `auto-plan`) declare `Skill` and `Agent` in `allowed-tools` for sub-skill / sub-agent invocation.
-
-See `HOW-TO-USE.md § Maintenance notes` for details.
-
-## Orthogonal LLM jury (optional but recommended)
-
-`cycle-review` runs 5–7 Claude sub-agents in parallel — but they share the same model family's blind spots. The **`judge-codex` plugin** ([usetheodev/judge-codex-plugin-cc](https://github.com/usetheodev/judge-codex-plugin-cc)) adds **GPT-Codex** as an orthogonal jury that re-validates each cycle artifact against the same canonical golden rules used here. When Claude and Codex **agree**, confidence ↑. When they **disagree**, the pipeline halts for human adjudication.
-
-```bash
-# install once per environment
-npm install -g @openai/codex
-codex login
-
-/plugin marketplace add usetheodev/judge-codex-plugin-cc
-/plugin install judge-codex@judge-codex
-/judge-codex:setup
-
-# use after any plan cycle stage
-/judge-codex:plan {slug}            # judge a /to-plan output
-/judge-codex:auto {slug}            # end-to-end across all 4 stages
-```
-
-Contract documented in `rules/cycle-judge-codex.md`. Verified live: caught a fabricated ADR citation that `plan-confidence` M3 v0.1 had missed (different scope: structural Evidence-block scan vs full plan prose).
-
-## Two ways to use this
-
-**Standalone** — open this directory in Claude Code. Everything works as-is: hooks fire, skills are discovered, commands are invokable.
-
-**Plugin install** — when published to a marketplace, Claude Code reads `plugin.json` and wires the same components under the plugin namespace. Same source, two delivery modes.
-
-## Next steps
-
-- New contributor: read [`HOW-TO-USE.md`](HOW-TO-USE.md) — the detailed operational guide.
-- Designing a feature: start with `/grill-me {topic}` or `/to-plan "{description}"`.
-- Investigating prior art: `/discover-plan {topic}`.
-- Cycle deep dive: `rules/cycle-{name}.md`.
-- Specific skill: `skills/{name}/SKILL.md`.
-
-## Contributing
-
-Contributions are welcome. This project is built with its own cycle, so the workflow doubles as the contribution guide:
-
-1. Work on the `develop` branch (never `main` — it receives release merges only).
-2. For non-trivial changes, run the matching cycle (`/to-plan` → `/implement` → `/code-quality` → `/review`).
-3. Add a failing test before the fix (TDD), keep the suite green (`bash scripts/run_slice_tests.sh`), and record every change under `## [Unreleased]` in [`CHANGELOG.md`](CHANGELOG.md).
-
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full checklist and [`HOW-TO-USE.md`](HOW-TO-USE.md) for the operational guide.
-
-## Security
-
-Found a vulnerability? Please follow the disclosure process in [`SECURITY.md`](SECURITY.md) rather than opening a public issue.
+Alpha. The pipeline and its gates are implemented and covered by tests; no item has yet run end to end through this version. Everything above describes what the code does, not accumulated production evidence.
 
 ## License
 
-[MIT](LICENSE) © 2026 Paulo Henrique.
-
-Reference projects cloned under `knowledge-base/references/` retain their original licenses (e.g. CC-BY-4.0 for documentation) and are study material only — not redistributed as part of this project.
+MIT — see [LICENSE](LICENSE).

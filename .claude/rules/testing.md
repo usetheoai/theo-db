@@ -70,26 +70,6 @@ The default convention assumed by stop-validation.sh:
 
 If your project uses a different convention (e.g., separate `tests/` mirror tree), document it here so the hook knows where to look.
 
-## § 5.1 — Columnar routing changes: the type-coverage A/B gate (M163)
-
-Any change to the columnar routing admit-paths (`theodb_rs/src/am/columnar_agg.rs` `classify_target_node` /
-`extract_*_predicate` / group-expr) MUST pass **`benchmarks/columnar_type_ab.py`** BEFORE `/review`. The ClickBench A/B
-oracle runs over benchmark data, which does NOT exercise the type space — so type-class bugs (integer widening, temporal,
-float IEEE, collation) survive it and are only caught by council review after a 14-min rebuild (the recurring
-M151/M154/M157/M161 defect; M161 alone: 1 BLOCKER + 1 HIGH the `int4-int4` A/B never triggered).
-
-- **What it does:** for each routed class × each per-type edge value (int2 `32767`, int4/int8 max, float `-0.0`/`NaN`,
-  timestamp/date/timestamptz, non-C text, NULL — the `EDGE_CATALOG`), it asserts the fail-closed contract:
-  **byte-identical (symmetric-EXCEPT diverged=0) if it routes, OR correct-decline (EXPLAIN has no `Custom Scan`)**.
-- **Self-test:** a **positive control** (a deliberately-divergent pair) MUST report `diverged>0`; if it ever reports 0
-  the oracle is broken and the run aborts. This is the proof it would catch a wrong `out_typoid` (the M161 BLOCKER).
-- **Run:** `PGDATABASE=<db-with-theodb_rs> python3 benchmarks/columnar_type_ab.py --out docs/benchmarks/<slug>-type-coverage.md`
-  (exit 0 = all cases as-expected). Pure-logic tiers run without a DB via `pytest benchmarks/test_columnar_type_ab.py`.
-- **Extend it:** a new routed type or class MUST add its edges to `EDGE_CATALOG` + a case to `build_cases()`;
-  `test_edge_catalog_has_all_routed_types` fails when a routed type has no edges (coverage-rot guard).
-- It is **complementary** to the ClickBench A/B, never a replacement (the ClickBench data proves production shapes; this
-  proves the type space).
-
 ## § 6 — Anti-patterns
 
 - Tests depending on execution order or shared state.

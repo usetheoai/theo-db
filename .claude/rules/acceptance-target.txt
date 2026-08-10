@@ -1,0 +1,30 @@
+# How the RELEASED delivery of this project is reached — PER-PROJECT, edit this.
+#
+# cycle-acceptance exercises the delivery as its user meets it. It cannot invent
+# how to reach it, and a goal armed without a reachable target is a trap: the gate
+# blocks forever on a condition nobody can satisfy. So /cycle-goal REFUSES to arm
+# until this file declares the path.
+#
+# Format: `key = value`, one per line. `#` starts a comment.
+#
+# kind      (required) one of: web | native | cli | library | api | internal
+# target    (required) how to reach it — a URL, a package name, or a command
+# build     (optional) command that produces the artifact from the release tag
+# verify    (optional) command proving the artifact is the RELEASED one, not the tree
+# credentials (optional) name of the secret needed to publish/consume. NEVER put the
+#             value here. If a run needs it and it is absent, ASK THE HUMAN — do not
+#             skip the phase, do not fake the result, do not mark NOT_VALIDATED and
+#             move on as if the milestone were done.
+#
+# --- examples -------------------------------------------------------------
+# kind = web
+# target = https://app.example.com
+#
+# kind = internal
+# target = @usetheo/skills-monorepo
+# build = git worktree add /tmp/rel <tag> && cd /tmp/rel && pnpm install && pnpm build
+# verify = node -e "console.log(require('./package.json').version)"
+# credentials = NPM_TOKEN
+#
+# --- this project ---------------------------------------------------------
+# (uncomment and fill; /cycle-goal refuses to arm while this section is empty)

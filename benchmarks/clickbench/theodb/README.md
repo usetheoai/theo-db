@@ -19,5 +19,5 @@ Only `benchmark.sh` + `template.json` + this README are ours (Apache-2.0). `crea
 PYTHONPATH=benchmarks python3 benchmarks/run_m128_clickbench.py --n 1000
 ```
 
-Measured evidence: `docs/benchmarks/m128-clickbench-columnar.md`. The vectorized-agg CustomScan pushdown (`--agg`)
+Measured evidence: `wiki/benchmarks/m128-clickbench-columnar.md`. The vectorized-agg CustomScan pushdown (`--agg`)
 is gated on issue #135 (planner hang on the wide real hits table); the default measured path is columnar storage.

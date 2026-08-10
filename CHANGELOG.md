@@ -14,8 +14,627 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- A suíte de testes passa a rodar na integração contínua a cada push que toca a extensão. Até aqui nenhum job da esteira a executava — foi assim que 20 falhas, uma delas um defeito de recall, ficaram invisíveis por meses. O gate reprova quando o número de falhas **aumenta**, não quando é maior que zero. (#B-013)
+
+- Backlog B-013 (a suíte de testes precisa rodar no CI — hoje depende de alguém lembrar) e B-014 (`bm25_search` aceita um termo por chamada, e nenhuma consulta real de usuário é um termo só). (#B-013 #B-014)
+
+- Posicionamento do produto declarado e assinado: cinco eixos de atratividade, cada um com a medição que o sustenta (ADR 0060). Diz também o que o TheoDB **não** promete — superar o ScaNN/AlloyDB em throughput vetorial, que a própria medição do projeto declara inalcançável para uma extensão PostgreSQL permissiva. (#B-002)
+
+- Backlog B-002..B-010 — um item por pilar mais o item do objetivo, todos justificados por medição própria: atratividade medida (B-002), teto de build vetorial (B-003), qualidade lexical contra BEIR (B-004), significância da fusão híbrida (B-005), ClickBench completo (B-006), grafo sem baseline (B-007), escala do lakehouse (B-008), robustez do egress de IA (B-009), uso real (B-010). (#M186)
+
+- Busca lexical BM25 disponível na instalação padrão, e medida em dois corpora públicos com julgamento humano: entrega qualidade de recuperação superior à do `ts_rank_cd` nativo do Postgres em ambos, com significância estatística — 2,08× no BEIR SciFact e 1,35× no BEIR NFCorpus. A margem varia com o domínio. Até aqui o pilar existia, era medido e era robusto, mas ficava fora do binário entregue — quem instalava o TheoDB não tinha `bm25_build`/`bm25_search`. Passa a acompanhar a extensão sem nenhuma flag de compilação. As funções de andaime do spike (`lexical_spike_*`) continuam fora da superfície pública, por opção. (#M186)
+
+- **theodb:** **cenário-âncora de dogfood declarado** (M175) — `theo-rag-sobre-theodb`: o produto de RAG do
+  próprio ecossistema passa a usar o TheoDB como vector store em vez do pgvector. A escolha é medida, não
+  arbitrária: `theo-rag/package.json` e `theo-memory` declaravam `docker compose up -d pgvector`, ou seja, **os
+  produtos de IA do time usavam a extensão de um terceiro e não o banco que o time constrói**. O golden rule
+  saiu do estado de template — o § 1 ainda tinha `<anchor-slug>` como placeholder — e o manifesto foi criado
+  com status **`planned`**, o único que a evidência sustenta. O drop-in foi **verificado executando** a
+  sequência exata do theo-rag contra a imagem (extensão, `vector(1536)`, INSERT de 500 vetores, índice HNSW por
+  sintaxe pgvector, busca por `<=>`), e o PR está aberto em usetheoai/theo-rag#206. **Nenhuma evidência de
+  dogfood foi fabricada:** as execuções desta sessão são carga sintética de benchmark, que o § 1 exclui em texto
+- **theodb:** backlog **B-001** — `cargo pgrx test` não executa neste repositório: o binário de teste morre com
+  `symbol lookup error: CurrentMemoryContext`. **310 testes e nenhum roda localmente** pelo caminho
+  documentado. Confirmado pré-existente rodando um teste que existe desde antes (`sq8`) com todas as mudanças
+  da sessão revertidas. O item registra **três hipóteses já testadas e refutadas** — flag de link em
+  `.cargo/config.toml` (muda o sintoma de link-time para runtime, não resolve), desalinhamento de `cfg` no
+  bootstrap `pg_test`, e `crate-type` sem `"lib"` — para que ninguém pague de novo os ciclos de build que elas
+  custaram
+- **theodb:** perfilada também a **busca** do SymQG, fechando o regime onde os 2,6–3,9× do e2 foram medidos. O
+  contraste com o HNSW é o achado: naquele, **nenhuma função do `theodb_rs.so` passa de 1,3%** — o custo está
+  espalhado e majoritariamente fora do nosso código —, enquanto no SymQG **`gather_symqg_candidates` concentra
+  18,23%**. Build e busca têm gargalos **distintos**, ambos em funções específicas do caminho SymQG. Achado
+  colateral de planner: **sem `enable_seqscan=off` e `enable_sort=off`, o planner escolhe `Sort` + `Seq Scan`
+  em vez do índice vetorial** neste dataset — foi a causa de duas tentativas anteriores de perfilar a busca não
+  produzirem amostra. Se o mesmo vale para o `theodb_hnsw` em produção, é problema maior que o SymQG, e **não
+  foi investigado**
+- **theodb:** **o gargalo do SymQG tem nome** — `ambuild_symqg`, **39,27% do build**, medido com símbolos
+  resolvidos em CPU dedicada. O HNSW **não tem função análoga**: o build dele se distribui entre o kernel de
+  distância e o paralelismo. E os dois **compartilham o mesmo kernel SIMD** (`l2_sq`, `l2_dist_from_bytes`), de
+  modo que o SymQG **não é mais lento por calcular distância pior** — é mais lento por gastar 39% em outra
+  coisa. Isso não o torna promovível, mas muda o M176 de "problema estrutural do ambiente" para "39% do custo
+  numa função nomeada", que é alvo e não muro. **Correção de método junto:** o perfil anterior atribuiu a falha
+  de símbolos a "release sem debuginfo" — falso, o `.so` tem 86.191 símbolos estáticos; o `perf` falhava por
+  resolução de caminho no namespace do container, resolvido com `--pid=host` e um `docker cp`
+- **theodb:** **perfilado o SymQG para responder *por que* é mais lento** — pergunta que os três artefatos do e2
+  deixaram aberta (nenhum menciona mecanismo, gargalo ou profiling). O resultado **contradiz a hipótese
+  registrada na feature**, que atribuía a lentidão ao "imposto de página, WAL e MVCC": se fosse isso, o SymQG
+  passaria **mais** tempo no kernel, e ele passa **menos** — 18,7% contra 27,9% do HNSW, com 76,5% em
+  `theodb_rs.so` contra 66,0%. Os símbolos de kernel em ambos são de **escalonador**, sem nenhum de I/O, página
+  ou WAL. **É compute-bound: o custo mora no nosso código.** Isso não o torna promovível, mas muda a natureza
+  do trabalho que uma promoção exigiria — de estrutural para algorítmico. Limite grande e declarado: os
+  símbolos do `.so` não resolvem (release sem debuginfo), então a atribuição é por objeto, não por função
 
 ### Changed
+- **theodb:** o **M176 (SymQG) muda de natureza** com a medição do M184. Ele fora escrito assumindo "código
+  mantido sem consumidor" — dívida interna barata. A medição desmente: o `theodb_symqg` está **registrado como
+  access method no binário default**, com opclass exposto, e um usuário pode escrever `USING theodb_symqg`
+  hoje e receber um índice **3,5× mais lento no build** e **2,6–3,9× mais lento na busca**. Não é dívida
+  interna, é **superfície pública cara**, e nada no produto avisa — "não recomendado" no `feature_status` não
+  é "indisponível". O leque de saídas ganhou uma que não estava previsto e é a mais barata: **esconder atrás
+  de feature flag**, o mesmo tratamento do lexical, que preserva o código para estudo sem expor quem instala
+
+### Fixed
+- **A imagem do TheoDB está publicada** em `ghcr.io/usetheoai/theo-db:latest` e `:0.140.0` — pela primeira vez. `docker pull`, o primeiro comando do README, funciona. A causa de nunca ter sido publicada: o workflow de publicação apontava para uma organização que não existe. O workflow de publicação apontava para uma organização que não existe, então **toda** execução falhava — no push de `develop` e na tag `v0.158.0` — e por isso `docker pull ghcr.io/usetheoai/theo-db:latest`, o primeiro comando do README, respondia `manifest unknown`. (#B-010)
+
+- Metade das falhas da suíte era classificação errada de teste, não defeito do banco: 10 dos 20 testes vermelhos passaram a verde sem uma linha de mudança no comportamento do produto. Os testes da busca lexical BM25 voltam a ser executados. Eles existiam e falhavam desde sempre por um detalhe de registro — o módulo não declarava seu schema, então o PostgreSQL nunca recebia as funções de teste e a chamada falhava com "função não existe". O pilar tinha sido promovido à instalação padrão com seus 6 testes vermelhos. (#B-012)
+
+- **Retratação da entrada anterior:** o vector-join do HNSW **não tinha defeito**. Ao medir, a perda vinha da premissa dos próprios testes — eles pediam ao índice uma garantia que o algoritmo não dá (o parâmetro de busca limita a exploração do grafo, não o tamanho do resultado). Os testes foram corrigidos com o alvo intacto e passam. Nenhuma mudança no comportamento do banco. (#B-011)
+
+- A suíte de testes do projeto volta a executar localmente — os unitários puros **e** os que precisam de um servidor PostgreSQL. O binário de teste morria no carregamento com `symbol lookup error: CurrentMemoryContext`, antes do primeiro teste — **nenhum dos 439 rodava**. Eram três bloqueios empilhados — link, carregamento e instalação da extensão — e resolver um só não fazia nenhum teste rodar. A receita completa está no runbook `wiki/runbooks/rodar-a-suite-de-testes.md`. Quem contribui com o TheoDB deixa de depender do CI para descobrir uma regressão em lógica pura. (#B-001)
+
+- Índices vetoriais voltam a ser escolhidos pelo planner. A 20 mil linhas × `vector(1536)` o TheoDB respondia em 182 ms fazendo varredura sequencial, tendo um índice capaz de responder em 2 ms — porque o custo de partida do índice era estimado 10× acima do real e ele nunca vencia a comparação. Quem criava um índice recebia um índice que não era usado, sem nenhum erro que denunciasse. Vale para `theodb_hnsw` e `theodb_ivfflat`. (#M175)
+
+- **theodb:** o módulo `parquet.rs` (lakehouse) tinha **zero testes próprios** — lacuna medida pelo M184 contra
+  uma nota de maturidade que exigia "testado". Acrescentados **6 testes**: as duas representações de string do
+  Arrow que o leitor de Parquet devolve conforme o schema do arquivo (tratar só uma quebraria em arquivo real,
+  e silenciosamente), o **caso negativo** de tipo errado exigindo erro tipado com o tipo real na mensagem —
+  porque um `Vec` vazio ali viraria "categoria sem linhas" rio abaixo, dado errado em vez de erro —, a borda de
+  array vazio (Parquet com zero linhas é válido), o pool de memória do DataFusion não-degenerado, e o **REVOKE
+  de PUBLIC** das três primitivas de I/O de arquivo, que vive num `extension_sql!` e sumiria em silêncio num
+  refactor. **Compile-verificados** no builder construído a partir do próprio `Dockerfile` (`cargo check --features pg_test`
+  limpo). **Não executados**: `cargo pgrx test` falha no link do binário de teste standalone com `undefined
+  symbol: FreeErrorData / FlushErrorState / pfree`, vindos do `pgrx-pg-sys` — e a falha é **pré-existente**,
+  reproduzida com um teste que existe desde antes (`sq8`) e com as mudanças desta sessão revertidas. É um
+  defeito de infraestrutura de teste do repositório, não destes testes
+- **theodb:** **retratada uma das três divergências que o M184 alegou.** Eu havia concluído que os opclasses
+  documentados não existiam, porque `USING theodb_hnsw (v vector_l2_ops)` falha. O comando falha, a conclusão
+  não: existem **dois caminhos coerentes** — nativo (`theodb_hnsw` + `theodb_hnsw_l2_ops`) e compatibilidade
+  pgvector via shim do ADR 0058 (`hnsw` + `vector_l2_ops`) — e eu cruzei um com o outro sem instalar o shim
+  antes de concluir. Verificado: com `CREATE EXTENSION vector`, a sintaxe pgvector **funciona**. Sobra um
+  resíduo real e bem menor: a mensagem de erro não sugere o opclass correto nem menciona o shim, o que é
+  melhoria de diagnóstico
+
+### Added
+- **theodb:** **M184 — crash-safety EXECUTADA**, fechando o quarto eixo: `kill -9` no postmaster, restart e
+  comparação de checksum. **Verde nos quatro pilares** — vetorial preserva 5 000 linhas e o índice continua
+  servindo busca pós-recovery; colunar, heap de controle e grafo com checksum idêntico. Resultado colateral: o
+  `theodb_columnar` produz **md5 byte-idêntico ao heap** sobre 50 000 registros, antes e depois do crash — a
+  propriedade que o m128 mediu em 43 queries do ClickBench, reconfirmada por outro caminho. Os 17 scripts de
+  `isolation/` seguem sem rodar (exigem instalação pgrx do fonte), mas a propriedade que protegem foi
+  verificada por execução direta
+- **theodb:** **M184 — três divergências medidas** entre a tabela de maturidade e a execução, em CPU dedicada.
+  **(1)** O `theodb_symqg` está registrado no binário default (nota 1 dizia "experimental") **e** tem build
+  **3,5× mais lento** que o HNSW no mesmo dataset — somado aos 2,6–3,9× de busca do e2, é superfície pública
+  cara em dois eixos, o que agrava o M176. **(2)** O `parquet.rs` tem **zero testes próprios** contra uma nota
+  3 que exigia "testado" — crash-safety está coberta por script de isolation, cobertura unitária não.
+  **(3)** Os opclasses documentados **não existem** com o nome do pgvector: `vector_l2_ops` falha, o real é
+  `theodb_hnsw_l2_ops`, e quem seguir a nomenclatura herdada recebe erro. Confirmações registradas com a mesma
+  clareza: vetorial (60 testes, busca 3,7 ms) sustenta a nota 4; colunar (87 testes) sustenta a 3; lexical
+  (zero funções expostas) sustenta a 2
+- **theodb:** primeira entrega do **M184**, e ela já achou uma divergência da tabela de maturidade: consultando
+  o catálogo do PostgreSQL no binário default (CPU dedicada, imagem 0.139.0), o **`theodb_symqg` está
+  registrado como access method** — contra a nota 1 que o classificara como "experimental, não recomendado
+  como default" a partir de leitura de documentação. *Não recomendado* não é *ausente*, e a nota foi atribuída
+  como se fosse: um usuário pode escrever `USING theodb_symqg` hoje e receber o índice medido como 2,6–3,9×
+  mais lento. Isso **agrava o M176**. Confirmado no mesmo método que o pilar lexical expõe **zero** funções
+  (nota 2 correta). O artefato declara que cobre **um** eixo da régua — presença — e que performance,
+  qualidade e crash-safety seguem sem verificação
+- **theodb:** criado o **`BACKLOG.md`** deste repositório, destravando o `/backlog-item` — que havia recusado
+  quatro invocações nesta sessão porque o registro não existia, e cujo bootstrap (`/backlog-init`) está
+  bloqueado no umbrella por falta de `CHANGELOG.md` lá. **A divergência do `cycle-backlog.md` está declarada no
+  próprio arquivo**: a regra desenha um registro único no umbrella e recusa backlog per-repo, mas
+  `knowledge-base-location.md` estabelece que cada projeto é dono dos próprios artefatos de ciclo, e o custo da
+  escolha — um achado que cruze repositórios não tem onde morar — fica dito em vez de silenciado. O `domain` do
+  schema passa a ser **o pilar** (vetorial, colunar, lexical, ai-surface, engine-pgrx…), cada um roteado para o
+  especialista correspondente. Semeado **sem itens**, por desenho
+- **theodb:** **M184 — medir cada pilar com rigor e apurar quanto a avaliação de maturidade errou.** A tabela
+  0–5 por pilar registrada em 2026-08-07, que motivou os M170–M176, **não era medição**: saiu de ler
+  `feature_status`, contar testes por diretório e aplicar uma régua proposta na hora, sem executar nada. O que
+  justifica reabri-la é concreto — o M177 derrubou **cinco conclusões medidas por defeito de instrumento**, e
+  se a medição direta errou cinco vezes, uma avaliação por leitura de documentação merece desconfiança maior.
+  **A entrega não é uma nota nova, é a divergência**: saber onde leitura e execução discordam calibra toda
+  avaliação futura feita do mesmo jeito. O DoD exige a divergência nomeada (contra viés de confirmação, já que
+  quem mede escreveu a tabela), perfil onde o número surpreender, e declarar por pilar o que **continuou sem
+  medir**
+- **theodb:** **M182 — VectorDBBench: rodar, perfilar e publicar internamente, nesta ordem**, e **M183 — o claim
+  público**, que é gate separado. Nenhuma das quatro bancadas já usadas cobre o caminho de embedding ponta a
+  ponta (ClickBench é colunar, ANN-Benchmarks é o índice isolado, BEIR é qualidade, CH-benCHmark é HTAP) — foi
+  a lacuna que obrigou esta sessão a escrever seis instrumentos. **A ordem é o milestone**: nenhum número sai
+  antes do perfil que explica por que ele é aquele, porque esta sessão produziu cinco retratações, todas por
+  defeito de instrumento, e um número de bancada pública sem perfil seria a sexta — com o nome do projeto
+  junto. O M183 separa o que depende de terceiro: `public-copy.md` § 4 exige **reprodução independente** para
+  comparação pública, a metade que o `m45` declara em aberto desde julho
+- **theodb:** **medido o footgun do ADR 0007** com o PostgreSQL no laço — a última pergunta aberta desta área,
+  e a primeira medição do milestone que instala a extensão e observa `pg_stat_activity` sob carga. O mecanismo é
+  real: os backends ficam ativos durante a chamada e crescem com a concorrência. **Mas o custo não está onde o
+  ADR temia** — a 16 clientes concorrentes o pico foi de **8 backends, 8% de `max_connections`**, enquanto a p50
+  subiu 4,2× e a p99 **6,3×**. O gargalo é **latência, não esgotamento de conexões**, o que muda a conclusão
+  sobre a fila assíncrona: ela resolveria o backend preso, que não é o que dói primeiro — o que dói é a
+  capacidade do servidor, endereçada por batching, limite e réplicas. Registrado também que o guard de SSRF do
+  M134 **recusou o endpoint em runtime**, evidência de execução de que a defesa opera fora do teste
+- **theodb:** o relatório do benchmark passou a registrar, **por consulta**, quantos blocos o caminho streamado
+  de fato consumiu. Sem esse número, uma consulta atendida pela rota de recuo — com o consumo de memória
+  proporcional ao volume que este milestone existe para eliminar — aparecia no relatório exatamente igual a uma
+  atendida pelo caminho novo, porque o sinal anterior vinha do plano de execução e não distingue as duas (#M169)
+- **theodb:** oráculo que exercita a **execução** do recuo, e não só a decisão de recuar. Ele força o caminho
+  novo a falhar por recurso de forma controlada e então verifica três coisas: que o recuo realmente aconteceu,
+  que o resultado é idêntico ao do caminho de referência, e que um resultado deliberadamente corrompido seria
+  reprovado — sem esse terceiro gate, "nenhuma divergência" não é evidência de nada (#M169)
+
+### Changed
+- **docs:** a documentação do projeto passou a viver em `wiki/`, como um acervo de 282 conceitos em
+  [Open Knowledge Format](https://github.com/google/open-knowledge-format). Toda referência do repositório
+  — README, ROADMAP, `CLAUDE.md`, scripts, workflows de CI e comentários de código — foi reapontada para lá
+- **benchmarks:** os artefatos brutos que os runners escrevem (JSON, CSV, logs, flamegraphs) passaram a ir
+  para `benchmarks/artifacts/`, junto do código que os gera, em vez de ficarem misturados à documentação.
+  Quem roda um benchmark com `--out` padrão encontra o resultado no diretório novo
+
+### Removed
+- **theodb:** **o access method `theodb_symqg` foi removido por completo** (M176 fechado). Ele estava
+  registrado no binário default sem feature flag, de modo que um usuário podia escrever `USING theodb_symqg` e
+  receber — **sem aviso** — um índice medido como **3,5× mais lento no build** e **2,6–3,9× mais lento na
+  busca** a recall casado. O perfil localizou os gargalos (`ambuild_symqg` com 39% do build,
+  `gather_symqg_candidates` com 18% da busca), e a decisão foi remover em vez de esconder atrás de flag.
+  Saíram 1 810 linhas: o spike, o runner de benchmark, o layout de página, os dois scripts de medição, o
+  handler e o opclass, o **kernel FastScan de 1 bit** (`build_sign_lut16`/`sign_estimate_block`, exclusivos
+  deste caminho — verificado), GUCs, reloption e testes. **Verificado por compilação:** `cargo pgrx install --release --features pg18` completa sem erro depois da
+  remoção — e a primeira tentativa **falhou com dois `E0061`**, que a varredura de referências e a checagem de
+  chaves não pegariam: a remoção por linha havia deixado uma chamada de `define_bool_guc` e uma de
+  `add_int_reloption` com o esqueleto sem os argumentos do meio. **Migração:** o projeto está em pré-release e não há instalação em campo, mas o upgrade `1.3.0 → 1.4.0` existe
+  porque o `schema-drift-gate` bloqueia mudança de superfície sem ele e porque a cadeia é append-only — o elo
+  que falta hoje não pode ser criado depois. Ele dropa o AM e **falha alto** se existir índice criado com ele. Os artefatos de medição do e2 e do M184 **permanecem no acervo**: o conhecimento pago fica
+
+- **docs:** a árvore `docs/` foi **removida do repositório**. Seus 264 documentos estão convertidos em
+  `wiki/`, e os 517 arquivos permanecem recuperáveis no histórico git, no commit `f7c7b93`. Os **253
+  artefatos brutos** de medição que viviam sob `docs/benchmarks/` saíram junto e passam a existir apenas
+  no histórico — quem depender de um deles precisa recuperá-lo com `git show f7c7b93:docs/benchmarks/…`
+
+### Added
+- **theodb:** decidido no grill com o owner como o servidor de embeddings é entregue: **imagem própria**
+  `theodb-embed` com manifesto CloudNativePG de exemplo, e **pesos dentro da imagem** (~520 MB) para que ela
+  suba sem rede, funcione air-gapped e prenda a versão do modelo à tag. Sobre o comportamento em sobrecarga, a
+  decisão foi **medir antes de escolher**: A/B entre implementar batching e fila no servidor atual e adotar um
+  servidor de inferência de CPU pronto. Fundamentação: o padrão de produção (Triton) combina dynamic batching
+  com queue policy — de modo que o batching do M178 e o limite de sobrecarga **são a mesma peça**. Registrado
+  também que `pgpool` **não se aplica** a esta camada: ele enfileira conexões PostgreSQL, e o gargalo medido
+  está no servidor HTTP
+- **theodb:** **M180 — empacotar o servidor de embeddings na distribuição**, o item que separa a capacidade
+  entregue do produto entregue. O modelo local funciona e o usuário não o recebe: o servidor **não está na
+  imagem** (verificado no `Dockerfile`) e o guia manda rodar `python benchmarks/servers/embedding_server.py` —
+  uma bancada de teste documentada como caminho de produção. **Destrava o M178**, cujo DoD fala em batching
+  "no servidor de embeddings" — enquanto ele for ferramenta de bancada, otimizá-lo melhora algo que ninguém
+  recebe. O milestone chega com a evidência já medida para cada opção de entrega, incluindo o default
+  recomendado por medição (`nomic-embed-text-v1`) e a restrição do CloudNativePG
+- **theodb:** investigado o **M179** antes de implementar, e ele é maior do que o DoD supunha: leitura do
+  código do `minreq` 2.14.1 mostra que **não há keep-alive nem pool** — zero ocorrências no `connection.rs`/
+  `request.rs`, e `send()` consome `self` chamando `TcpStream::connect` a cada envio. Não existe opção a
+  ligar. Sobram trocar de cliente HTTP (dependência nova → gate D1 + `/deps-audit` + `.so` maior + **reescrever
+  o guard de SSRF, que hoje espelha o parser do `minreq` de propósito**) ou reinventar um cliente, que a escada
+  de parcimônia barra. O item passa a exigir **ADR de dependência antes da implementação**
+- **theodb:** **fechado o gate de qualidade da fase 1 do M177** — o último eixo sem número. Medidos oito
+  modelos multilíngues permissivos contra um corpus **pt-BR real** (os 250 conceitos da wiki, com a descrição
+  do frontmatter como consulta e o conceito como alvo — relevância derivada por construção, não inventada). O
+  resultado corrige a leitura anterior: o modelo mais rápido **não basta**. `MiniLM` é 8,5× mais rápido que
+  `multilingual-e5-large` e perde **37% de MRR** (0,4946 contra 0,7906); qualidade e latência andam juntas, e
+  cinco dos oito candidatos são **dominados** — existe outro mais rápido *e* melhor. Recomendação medida:
+  `nomic-embed-text-v1` (Apache-2.0, 53,7 ms, MRR 0,6749) como default, `e5-large` quando qualidade domina. Os
+  valores absolutos são otimistas por construção do corpus; o que vale é a ordem entre modelos
+- **theodb:** **M178 — dynamic batching no caminho de consulta** e **M179 — reuso de conexão no cliente HTTP**,
+  os dois itens do M177 cujo ganho já está medido e que faltam implementar. O batching vale **~2,2×** (7,82 ms
+  por texto isolado contra 3,54 ms em lote de 8) e a ingestão já o colhe pelo worker do vectorizer — só a
+  consulta não. O reuso de conexão vale ~0,6 ms em loopback mas **~32 ms contra provedor remoto**, porque
+  `minreq` abre conexão nova a cada chamada e paga o handshake TLS toda vez. Os outros dois eixos discutidos
+  (escolha de modelo e limite de aceitação de conexão) **não viraram milestone**: ainda são medição, não
+  implementação, e já são itens abertos da fase 1 do M177
+- **theodb:** medido que **processar em lote vale ~2,2×** no caminho de embedding — 7,82 ms por texto isolado
+  contra 3,54 ms em lote de 8, saturando por volta de 8–16 textos (medido em droplet de CPU dedicada,
+  reproduzido em duas coletas). Metade desse ganho **já está capturada**: o worker do vectorizer agrupa a fila
+  numa única chamada, então a ingestão já colhe o benefício. O caminho de **consulta não** — ele embeda um texto
+  por vez, de forma síncrona —, e é ali que a oportunidade segue aberta: agrupar pedidos concorrentes numa
+  janela curta melhora latência **e** throughput ao mesmo tempo, porque só troca espera de fila por espera de
+  janela. Não implementado; o ganho acima é do modelo, não do servidor
+
+- **theodb:** **retratado o ganho de 9,4× da configuração de thread** — ele **não existe em CPU dedicada**
+  (1,00× a um cliente, 0,98× a oito, medido em droplet `c-8` ocioso). Era contenção da máquina compartilhada
+  do começo ao fim: sob disputa, `OMP_NUM_THREADS=1` deixa o ONNX com uma thread competindo com dez
+  containers, enquanto sem o limite ele abre várias e arranca fatia maior do escalonador. Numa máquina ociosa
+  não há disputa e uma thread já basta. A "maior alavanca medida do milestone" **não é alavanca**
+- **docs:** registrada a restrição de plataforma — o banco roda sob **CloudNativePG**. Isso não muda número
+  medido nenhum, mas muda o que eles significam: em Kubernetes o `limits.memory` do pod é rígido, e um pod que
+  o estoura é **morto**, não paginado. Os 1,7 GB por processo de um modelo multilíngue somados ao pod do banco
+  fariam um pico de concorrência derrubar **o banco**, não o embedding. A rota do serviço separado passa a ser
+  o padrão nativo da plataforma, com o teto de ~195 rps por instância virando parâmetro de `replicas`
+- **theodb:** **retratado o colapso sob sobrecarga** — re-executado num droplet de CPU dedicada, o servidor de
+  embeddings **não colapsa nem vaza memória**: o throughput fica plano em ~195 rps de 8 a 128 clientes (contra a
+  inversão para 26% do pico medida localmente) e o RSS cresce **16 MB em vez de 6,8 GB**. A explosão de memória
+  era efeito de **segunda ordem** da contenção de CPU: sob disputa cada pedido demora 3× mais, mais conexões
+  ficam abertas ao mesmo tempo, e mais arenas do ONNX são alocadas de uma vez. Sobrevive apenas o limite de
+  aceitação de conexão — 13% de recusa a 128 clientes mesmo no dedicado. O achado original segue abaixo,
+  preservado, porque foi ele que motivou o teste em máquina limpa
+- **theodb:** ~~**o servidor de embeddings colapsa sob sobrecarga**~~ (RETRATADO acima), achado do primeiro teste de stress do
+  milestone. Além do pico de 65 rps (32 clientes), mais carga produz **menos** trabalho: 26,5 rps a 64 clientes
+  e **17,1 rps a 128, com 19,7% de recusa de conexão** — congestion collapse, não saturação. Pior, o RSS do
+  servidor cresce de 161 MB para **6 932 MB e não é devolvido** quando a carga cessa: com um cliente e a
+  latência já normalizada em 19 ms, os 7 GB continuavam retidos até o processo ser encerrado. O mecanismo foi
+  verificado no processo vivo — `ThreadingHTTPServer` cria uma thread por conexão sem limite e o ONNX Runtime
+  aloca arena por thread. A capacidade útil é ~32 clientes concorrentes, e a correção é **limitar** a
+  concorrência (pool fixo, semáforo, backlog explícito), o oposto do instinto de aumentá-la para escalar
+- **theodb:** **fixado o teto de qualquer otimização de transporte no caminho de embed.** A decomposição por
+  camada mede que servidor Python + HTTP + TCP custam juntos **0,849 ms sobre 16,649 ms — 5,1%**; os outros
+  94,9% são o ONNX Runtime, que é nativo e executaria igual sob qualquer arquitetura. Isso limita **todas** as
+  técnicas de eliminação de transporte à mesma fatia: Unix socket, protocolo binário, memória compartilhada e
+  até embarcar o modelo no backend disputam 5,1%. Medido também o Unix domain socket contra o TCP loopback,
+  pareado e sem modelo no laço: ele vence com **p=0,0000** e ganha **33 microssegundos** — 0,2% do pedido. É o
+  caso didático de significância estatística sem relevância prática, e reportar apenas o p seria verdadeiro e
+  enganoso. Para comparação, as alavancas fora do transporte já medidas neste milestone valem 9,4× (configuração
+  de thread) e 3,7× (escolha de modelo), contra 1,05× de eliminar todo o transporte
+
+- **theodb:** **perfilado o servidor de embeddings, e a maior alavanca de performance é uma flag** — não uma
+  reescrita. O flamegraph (`py-spy`, 4 091 amostras sob 8 clientes) mostra que **98,6% do tempo de requisição
+  é `InferenceSession.run`**; HTTP, JSON e tokenização somam ~1,4%, de modo que **não há overhead a cortar no
+  servidor**. Em compensação, rodá-lo sem `OMP_NUM_THREADS=1` dá **9,4× de throughput** (3,5 → 32,9 rps a um
+  cliente) e derruba a p50 de 298 ms para 30,3 ms, com saturação em ~61 rps em vez de ~20. O ganho foi
+  verificado como **gratuito em qualidade**: os vetores das duas configurações são byte-idênticos (diferença
+  máxima 0,000e+00, cosseno 1,0000000000), o que era obrigatório checar porque paralelismo altera a ordem de
+  redução em ponto flutuante
+- **theodb:** **medido o gargalo que o ADR 0007 registrou em junho e deixou explicitamente para depois** — o
+  caminho de embed sob concorrência. O servidor de embeddings **satura em ~20 rps**: de 8 para 16 clientes o
+  throughput sobe 5% enquanto a **p99 quadruplica** (469 → 1 887 ms), atingindo 5,7× de escala num ideal de
+  16×. Reportar a média esconderia o achado — a média a 16 clientes é 615 ms, mas um em cada cem usuários
+  espera 1,9 s. Medido também que `minreq` **abre conexão nova a cada chamada**: ~0,6 ms sobre loopback, mas
+  **~32 ms contra provedor remoto** (handshake TCP+TLS medido), de modo que embedar 10 mil linhas gasta ~320 s
+  só abrindo conexões. A referência SOTA para o bloqueio (`pg_net`, Apache-2.0, BackgroundWorker + libcurl)
+  resolve **apenas a ingestão**: a consulta precisa do vetor na mesma query e não pode ser assíncrona
+- **theodb:** primeira medição do **M177 fase 1** — os dois lados da troca que decide a extensão de
+  embeddings local. O hop HTTP local custa **15,55 ms** numa chamada unitária (27,2% do tempo, p=0,0000) e
+  **deixa de ser mensurável em lote de 8** (p=0,1457): é custo fixo por requisição. Do outro lado, ter o
+  modelo residente custa **1,7 GB por processo** para o melhor multilíngue permissivo (`multilingual-e5-large`,
+  MIT) e mais **1,8 GB** para o rerank (`bge-reranker-base`, MIT). **A rota de uma cópia por backend fica
+  refutada em multilíngue** — ~3,5 GB por processo, com dois backends esgotando a memória livre da máquina
+  de medição. A rota do BackgroundWorker sobrevive. Achado de licença: o único rerank multilíngue do
+  catálogo é cc-by-nc-4.0 e está barrado por D1, assim como o `jina-embeddings-v3`. O artefato declara que
+  **não** mede qualidade — nenhum nDCG foi coletado, e esse item da fase 1 segue aberto
+- **theodb:** **M177 — embeddings locais como extensão instalável, marcado P0** pelo owner. O que recebe
+  prioridade máxima é o **gate de medição**, não a construção: marcar como P0 um caminho cuja viabilidade
+  ninguém mediu abandonaria o measurement-first que trava o roadmap. A Fase 1 compara modelos open-source no
+  nosso corpus (entrega útil sozinha — define o modelo default recomendado), mede quanto do tempo ponta a ponta
+  é hop local versus inferência, e levanta o custo de empacotar centenas de MB de pesos. A falsificação está
+  escrita antes de medir: hop abaixo de 5% do total não justifica a Fase 2 por latência. A Fase 2 — a extensão
+  opt-in — é condicional, e seu primeiro item é o ADR sobre **onde o modelo fica residente**, que o prior art
+  aponta como o custo que decide
+- **docs:** levantamento de prior art sobre **gerar embeddings localmente como extensão PostgreSQL instalável**
+  (`wiki/references/embedding-local-como-extensao-2026-08.md`). A arquitetura já existe sob licença permissiva —
+  `pg_gembed` (Apache 2.0) é quase idêntica à proposta, e o PostgresML (MIT) mostra o formato em escala maior —,
+  de modo que a licença não é o obstáculo. O custo que decide é outro, e duas fontes independentes convergem
+  nele: **memória por conexão**. O `pg_gembed` cacheia o modelo por backend, e o paper NeurStore constrói
+  deduplicação, compressão e buffers compartilhados justamente para conter esse overhead. O conceito declara no
+  topo que é prior art e **não** evidência
+- **docs:** roadmap **v7 — maturidade ≥ 4 em todos os pilares** (M170–M176), derivado de um levantamento do
+  estado de cada pilar contra a wiki e o código: vetorial 4; colunar, IA, lakehouse, híbrida e grafo 3; lexical 2;
+  SymQG 1. Cobre a cobertura de erro na fronteira de rede da superfície `ai.*` (onde `embed` e `rerank` têm um
+  teste cada), a escrita Parquet além de escalares com head-to-head externo, e o **dogfood sustentado** — que hoje
+  é o teto de todos os pilares, já que nenhum pode passar de 4 sem evidência de uso real. Três dos sete perguntam
+  se o pilar **merece** subir e admitem aposentadoria como conclusão: a híbrida (cujo ganho sobre o vetorial puro
+  não é estatisticamente significativo), o BM25 próprio (fora do binário default) e o SymQG (medido mais lento).
+  O colunar já tinha o seu — é o M169
+
+### Changed
+- **docs:** o roadmap passou a ser **um só arquivo**. `ROADMAP-v3.md` e `ROADMAP-v5.md` viviam em paralelo como
+  drafts estratégicos e mostravam **100% dos seus milestones em aberto** enquanto todos os 13 estavam concluídos
+  no roadmap ativo. O caso do v5 era o perigoso: ele se apresentava como "fechar o pilar P0 que segue parcial",
+  quando esse pilar havia sido fechado com veredito de que a superioridade vetorial sobre o ScaNN é
+  **não-alcançável** — quem o lesse reabriria uma aposta já refutada por medição. O conteúdo estratégico dos dois
+  foi absorvido no `ROADMAP.md` e os arquivos removidos; permanecem no histórico git
+
+### Fixed
+- **theodb:** **retratada a atribuição do custo do hop no M177.** O artefato publicava 15,55 ms como "custo do
+  hop"; uma decomposição com o mesmo stack e **sem modelo nenhum** — só o canal — mede o transporte real em
+  **1,37 ms** (vetor 384d) e **1,72 ms** (1024d), sobre 0,68 ms de HTTP+JSON vazio. Os ~14 ms restantes eram
+  diferença de implementação entre os dois braços, não o canal: o experimento comparava caminhos que diferiam
+  em mais de uma variável, e o total foi creditado à única que estava sob investigação. Com o transporte a
+  ~1,4 ms, o hop é ~2–3% do pipeline de consulta — **abaixo do limiar de 5%** que o milestone declarou antes
+  de medir, de modo que o critério de falsificação foi cruzado. A seção original fica preservada no conceito,
+  sob aviso, porque foi ela que fundamentou a primeira leitura
+- **docs:** o roadmap ativo declarava, na abertura da seção do v5, um estado que a própria medição já havia
+  superado — "M60 aberto", "o pilar segue parcial". A seção passou a abrir com o veredito medido do M73
+  (paridade de recall alcançada; QPS multi-cliente competitivo-a-superior vs pgvector; superioridade sobre
+  ScaNN/AlloyDB não-alcançável) e com o aviso de que três levers já deram honest-negative, de modo que propor um
+  quarto exige dado novo
+- **docs:** dois milestones entregues nunca tiveram registro no roadmap, e foram adicionados retroativamente. O
+  **M168** publicou verdict e é citado pelo M169 e pelo CHANGELOG (o número que ele moveu: maior bloco do `q23`,
+  de 772 MiB para 17,9 MiB). O **M45** é a **régua de paridade** do pilar vetorial — citado dez vezes no próprio
+  roadmap e no `CLAUDE.md` — e é o milestone que retratou o claim de "1,7–2,8× mais rápido que pgvector" medido
+  em dados degenerados. As demais lacunas de numeração (M23, M24, M27–M29) são intencionais: milestones removidos
+  do escopo em 2026-07-03, mantidos riscados para que nenhuma referência histórica mude de alvo
+- **docs:** o roadmap não explicava sua própria convenção de status, e um `grep` de caixinhas sobre ele devolvia
+  um número enganoso: o status vive no header do milestone, enquanto os 346 bullets `[ ]` restantes são a
+  especificação escrita no momento do plano. A convenção passou a estar declarada no topo, junto de onde a
+  evidência de conclusão realmente mora (a wiki) e da cobertura medida — 130 dos 149 concluídos
+- **docs:** o `CLAUDE.md` declarava `develop` como branch de trabalho, contradizendo a Regra 4 e o
+  `git-safety.md`, segundo os quais toda mudança **nasce** em `workspace` e `develop` apenas integra — seguir o
+  texto do projeto levaria a commitar exatamente onde o hook local bloqueia. Corrigido, com o fluxo completo
+  explícito. Na mesma seção, a contagem de ADRs dizia 12 quando são **60**
+- **docs:** a seção do acervo de referências primárias no `CLAUDE.md` manda ler papers e repositórios em
+  `knowledge-base/references/` e **citar `arquivo:linha`**, e esse diretório não existe no disco. A seção passou
+  a declarar o estado verificado e a instruir o caminho honesto enquanto não for repovoado, em vez de exigir uma
+  citação impossível
+- **docs:** a seção do acervo de conhecimento no `CLAUDE.md` descrevia um bundle, um contrato, um validador
+  e dois hooks que **não existem** — anunciava que a sessão era bloqueada ao publicar um número sem o
+  conceito correspondente, quando nenhum hook jamais conheceu o formato. Um documento normativo que promete
+  um gate inexistente é pior que não ter gate, porque quem lê confia nele. A seção passou a apontar o acervo
+  real (`wiki/`, 282 conceitos), o validador que de fato existe e roda, e a listar explicitamente o que
+  **não** é verificado por mecanismo nenhum
+- **docs:** o guia de migração mínima voltou a mostrar os comandos literais que recriam os índices
+  (`USING hnsw`, `USING ivfflat`) durante a restauração. Sem eles, o leitor não sabia quais índices
+  sobrevivem ao `pg_restore` sem inspecionar o dump
+- **docs:** a página do analítico colunar passou a registrar a ressalva que faltava — um `SELECT` normal
+  numa tabela colunar decodifica **todas** as colunas e é medido em torno de 16 a 26 vezes mais lento que
+  a mesma leitura numa tabela heap. O ganho de projeção existe apenas no caminho acelerado, e omitir isso
+  levava a esperar velocidade onde o desenho entrega compressão
+- **docs:** nove links para benchmarks arquivados apontavam para a raiz do diretório enquanto os arquivos
+  estavam sob `archive/` — quebrados desde antes desta mudança, agora resolvidos
+- **theodb:** o spill do agregado/top-k passou a viver sob **`pgsql_tmp` do próprio cluster**, com teto derivado
+  de `temp_file_limit`, em vez do diretório temporário do sistema. Isso importa porque o M169 tornou o spill um
+  caminho de produção (antes dele a pool era dimensionada pelo lote decodificado e nada derramava): no default
+  do DataFusion o `temp_file_limit` não se aplicava, `log_temp_files` e `pg_stat_database.temp_bytes` ficavam
+  cegos, arquivos vazavam quando o processo morre de forma anormal, e numa instalação com `/tmp` em tmpfs
+  "derramar para disco para limitar a memória" na verdade **alocava mais RAM** — desfazendo o próprio teto que a
+  operação promete. Falha ao resolver o diretório cai no comportamento anterior em vez de perder o spill (#M169)
+- **theodb:** a guarda que decide se o caminho antigo pode atender uma consulta passou a usar o **maior total por
+  coluna** em vez da soma entre colunas. O teto de endereçamento do Arrow é de um array — ou seja, de uma coluna
+  —, então somar duas colunas de texto grandes recusava o recuo em consultas que o caminho antigo atenderia sem
+  problema, transformando em erro duro exatamente o caso que a rede existe para cobrir (#M169)
+- **theodb:** o contador que prova "esta consulta passou pelo caminho streamado" passou a ser **zerado na
+  entrada das duas rotas**, antes da decisão. Ele cobria só um dos quatro caminhos que terminam no caminho
+  antigo, e faltava justamente no top-k — o consumidor primário dele. Nos casos descobertos, um oráculo lia
+  "passou pelo stream" sobre uma resposta vinda do caminho antigo, ou sobre as chamadas de uma tentativa que
+  falhou (#M169)
+- **theodb:** o verificador de byte-identidade passou a **reproduzir a sessão da corrida que ele prova** e a
+  recusar a comparação quando o plano não tem o pushdown agregado. Faltava `SET theodb.enable_columnar_agg = on`
+  (a GUC é default OFF), então ele compararia colunar vs heap por um caminho que o milestone não toca e
+  estamparia "idêntico" com toda a razão e nenhuma relevância. O sintoma que denunciou foi o tempo — 4m45s
+  contra 59,5 s da corrida-alvo —, não o resultado. `identical` agora fica indefinido quando não houve prova:
+  "não provei" é estado distinto de "está certo" (#M169)
+- **theodb:** o mesmo verificador passou a comparar por **ordem total** em vez de remover o `LIMIT`, e a abrir
+  **uma conexão por consulta**. Remover o limite desempatava corretamente em consultas pequenas e pedia ~10⁸
+  linhas na `GROUP BY WatchID, ClientIP`: 19,5 GB de anon-rss, backend morto pelo kernel e o cluster inteiro
+  reinicializado. Acrescentar as colunas de saída como critérios de desempate posicionais resolve o empate sem
+  inflar o resultado, e mantém a consulta na forma que o ClickBench define. A conexão por consulta existe porque
+  a queda envenenou a sessão e transformou as duas consultas seguintes em `cursor already closed`, que o
+  relatório exibia como "não roteou" — artefato lido como medição (#M169)
+- **theodb:** o driver de medição de pico passou a ler o SQL por **redirecionamento** em vez de `-f <caminho>`.
+  A checagem do bit `x` vale para cada componente resolvido no momento do open, e um caminho absoluto sob um
+  diretório 700 falha onde o relativo (a partir do CWD já herdado) funciona — o erro acusa o arquivo, não o
+  diretório, e manda o leitor conferir a permissão certa do alvo errado (#M169)
+- **theodb:** o recuo do agregado streaming passou a cobrir também a **falha de spill em disco**, não só a pool
+  estourada. Medido na corrida completa a 100M: `COUNT(DISTINCT …) GROUP BY …` (q08/q09 do ClickBench) saía de
+  `ok` para erro. A causa não é defeito novo — a pool do caminho eager é dimensionada pelo batch decodificado, o
+  que a 100M dava ~2,5 GB; removido o batch O(N), a pool passou a derivar de `work_mem`, o agregado começou a
+  derramar, e o derrame falha porque o PostgreSQL pode segurar até `max_files_per_process` (1000) descritores
+  dentro de um limite de 1024, deixando folga quase nula para arquivos abertos fora do gerenciador dele. O recuo
+  continua condicionado à guarda de offsets, e erro genuíno do braço streaming **não** recua — recuar nele daria
+  a resposta certa pelo caminho errado e esconderia o defeito (#M169)
+- **theodb:** o recuo do agregado streaming para o caminho eager passou a **classificar o erro com `find_root()`**
+  em vez de casar a variante nua. O DataFusion embrulha `ResourcesExhausted` em `Context(…)` num caminho vizinho,
+  e a forma anterior deixaria o recuo de fora justamente quando ele é necessário — com esta GUC em `on` por
+  default, isso viraria erro duro em consultas que a versão anterior servia (#M169)
+- **theodb:** o recuo passou a **registrar uma linha de log incondicional**. Sem ela o usuário não tem sinal de
+  que a consulta acabou de trocar de perfil de memória e de latência — e a medição de pico não distingue "o
+  spill funcionou" de "a pool estourou e re-executamos em silêncio" (#M169)
+- **theodb:** o contador de chunk-groups do streaming passou a ser **zerado no recuo**. Ele é a prova de que o
+  braço `on` de fato usou o caminho novo; sem o reset, retinha as chamadas da tentativa que falhou e o gate lia
+  "passou pelo stream" quando a resposta viera do eager — falso-verde dentro do próprio oráculo (#M169)
+- **theodb:** o planejador do scan colunar passou a publicar, sob o flag de trace, o **tamanho do diretório do
+  plano** (entradas por chunk-group × coluna, e os bytes que ocupam). É o termo O(N) que o streaming **não**
+  remove: sem esse número, "decode O(chunk-group)" leva o leitor a concluir que o consumo total virou
+  constante (#M169)
+- **theodb:** agregados sobre tabelas colunares passaram a **consumir a relação um chunk-group por vez** em vez de
+  decodificá-la inteira num único `RecordBatch` Arrow. É o que remove o `byte array offset overflow` a 100M: uma
+  coluna de texto acima de 2 GiB não cabe nos offsets `i32` de um array Arrow único. Vale para os **dois** caminhos
+  — escalar e agrupado —, porque das três instâncias medidas do defeito uma é escalar (q20) e duas são agrupadas
+  (q33, q34). Nova GUC `theodb.enable_columnar_agg_stream` (default on) (#M169)
+- **theodb:** a reconstrução do gêmeo heap de 100M passou a **provar que consegue ler o TSV antes de dropar
+  qualquer coisa** — lendo 1 byte como o usuário que de fato lerá. A ordem anterior dropava e recriava a tabela
+  primeiro, e o aborto por leitura deixava 0 linhas onde antes não havia tabela nenhuma; 0 linhas lê como "a
+  carga perdeu linhas", que manda perseguir um bug de COPY inexistente. O caminho default saiu de `/root`
+  (modo 700): um arquivo 644 é inalcançável quando um diretório do caminho não dá `x` (#M169)
+
+### Added
+- **theodb:** a varredura de cardinalidade do T3.2 passou a agrupar por **colunas materializadas** em vez de
+  `GROUP BY <expressão>`. Módulo não está no whitelist de chave-expressão do admit (`DateTrunc`,
+  `ExtractField`, `IntAddConst`, `Const`), então a forma anterior **declinava** e a medição teria reportado
+  o pico do executor de linha do PostgreSQL como se fosse o do agregado colunar (#M169)
+- **theodb:** o script de recarga passou a documentar que instalar o `.so` exige **rename atômico**, não `cp`.
+  `cp` reescreve no mesmo inode e troca as páginas sob os processos que já o têm mapeado — na prática isso
+  matou um background worker com SIGSEGV e derrubou o cluster; e o postmaster, ao tentar se recuperar, forka
+  filhos que herdam o mapeamento corrompido, então só um `stop` + `start` limpo resolve (#M169)
+- **theodb:** o acompanhamento da recarga deixou de chamar `pg_total_relation_size` na tabela em carga. A
+  função pega lock de relação e o `ALTER TABLE … SET LOGGED` segura `AccessExclusiveLock`, então o monitor
+  ficava **preso na fila do lock** — e a saída vazia se lê como "nada acontecendo", que é o oposto (#M169)
+- **theodb:** as guardas de "box ociosa" passaram a ignorar backends `idle`. Um `psql` esquecido por uma
+  conexão que caiu não consome CPU nem I/O, mas abortava a medição; `idle in transaction` continua contando,
+  porque esse segura locks e snapshot e é justamente o que contamina o número (#M169)
+- **theodb:** publicado o limite de cardinalidade do `GROUP BY`, **medido**: o pico de memória cresce
+  linearmente com o número de grupos distintos (~92 B cada), e 2 milhões de grupos já consomem **95,4%** de
+  uma pool de 192 MiB. É o termo que o consumo por chunk-group **não** reduz — e o que faz uma consulta de
+  chave quase-única sobre 100M linhas estourar por estado, não por offsets (#M169)
+- **theodb:** driver da medição de pico do `GROUP BY` que encoda a ordem obrigatória em vez de a confiar à
+  memória de quem roda: guarda de box ociosa, restart **com** `THEODB_ADMIT_TRACE=1` (o trace resolve num
+  `OnceLock` por backend, então só entra por restart do postmaster), medição, e `trap` que restaura o
+  servidor **sem** o trace mesmo se a medição falhar no meio. Zero linhas de pico é tratado como falha —
+  significa instrumento desligado, não pico baixo (#M169)
+- **theodb:** gerador do delta entre as duas corridas de 100M, que **recusa publicar** quando as condições
+  não são comparáveis: teto de tempo diferente, box diferente, corpus diferente, ou o **mesmo binário** dos
+  dois lados. Separa os ganhos atribuíveis (falhavam COM roteamento agregado) dos não-atribuíveis, e nomeia
+  as regressões — a linha que um resumo de "quantas a mais passam?" esconde. Ligado ao script do baseline
+  por `COMPARE_TO=<label>`, e uma recusa de publicar falha a corrida em vez de virar silêncio (#M169)
+- **theodb:** a atestação da box passou a ligar o pushdown antes de contar as linhas, como o guard da recarga
+  já fazia — sem isso ela sozinha custava dezenas de minutos **antes** de a medição começar. A leitura do
+  resultado passou a tomar a última linha, porque o `SET` imprime o próprio tag acima do número e lê-lo como
+  valor reportaria "servidor inalcançável" (#M169)
+- **theodb:** o guard de integridade da recarga do heap passou a ligar `theodb.enable_columnar_agg` antes do
+  `count(*)`. **Medido:** 11,4 s com o pushdown contra >948 s sem ele sobre as mesmas 99.997.497 linhas — o
+  backend lento fica a 99,9% de CPU com zero wait events, ou seja materialização linha a linha, não I/O. Um
+  guard de 35 minutos é um guard que alguém pula. A captura usa `tail -1` porque o tag `SET` sai em linha
+  própria, e `PGOPTIONS` não serve: `sudo` limpa o ambiente antes do psql (#M169)
+- **theodb:** o caminho default do TSV de 100M saiu de `/root` em **todos** os scripts do M169 (baseline,
+  atestação e recarga), não só naquele onde o defeito apareceu. `/root` é modo 700, e um caminho que
+  atravessa 700 é inalcançável para qualquer processo não-root — por mais permissivo que o arquivo seja (#M169)
+- **theodb:** o trace de pico da pool de streaming passou a se chamar `theodb_stream_pool` (era
+  `theodb_topk_pool`). O M169 fez o agregado consumir a mesma função, então o rótulo antigo passaria a
+  mentir: quem lesse `topk_pool` numa linha emitida por um `GROUP BY` concluiria a coisa errada sobre qual
+  caminho consumiu a memória. Os artefatos do M168 mantêm a string antiga — eles registram o que aquele
+  binário emitiu (#M169)
+- **theodb:** o harness de cobertura de tipos (M163) rodou contra o caminho agregado streaming: **35/35 casos
+  como esperado** com `positive_control diverged=2` — cada classe roteada é byte-idêntica e cada declínio é
+  correto, em int2/int4/int8, float4/float8, bool, texto, temporais, colação nomeada, `IN`-list, `const_out`,
+  group-expr e top-k. Artefato em `docs/benchmarks/m169-type-coverage.md` (#M169)
+- **theodb:** gate de associatividade de `float8` para o agregado colunar — mede `sum`/`avg` **bit a bit**
+  entre o caminho eager e o streaming sobre dado adversarial (`0.1` não-representável + `1e17` esparso), com
+  controle positivo de 1 ULP. Consumir por chunk-group muda a ORDEM de acumulação, e adição IEEE-754 não é
+  associativa; sem esta medição o milestone poderia trocar um defeito barulhento por um silencioso. **Medido:
+  idêntico.** O ClickBench não responderia isso — todas as colunas de SUM/AVG dele são inteiras (#M169)
+- **theodb:** baseline medido do ClickBench a 100M — **28 das 43 consultas completam** sob teto de 300 s, e o
+  artefato separa as falhas pelo discriminador `agg_routed`: **4 no caminho agregado colunar** (q20, q32, q33,
+  q34) contra 11 que nem entram nele. O alvo do milestone tem **3 instâncias** de `byte array offset overflow`
+  (q20, q33, q34), não uma; a q32 roteia mas falha por pico de estado, que o streaming não corrige (#M169)
+- **theodb:** o artefato do baseline agora declara, onde o número é lido, que o `19/43` do M162 **não é base de
+  comparação válida** — as duas corridas rodaram em regimes de memória diferentes (corpus maior que a RAM vs
+  corpus em page cache), e um delta entre elas misturaria o efeito do código com o efeito da máquina (#M169)
+- **theodb:** script de reconstrução do gêmeo heap de 100M que **não toca** na tabela colunar já carregada,
+  aborta se a box estiver ocupada ou se o colunar não estiver íntegro, e converte a tabela para permanente
+  logo após a carga — deixá-la temporária a faria ser apagada pelo próximo crash, que é o cenário que a
+  própria medição provoca (#M169)
+- **theodb:** gerador do artefato do baseline, que **recusa emitir** quando a proveniência está incompleta —
+  binário não identificável, binário trocado no meio da corrida, ou corrida que não alcançou todas as
+  consultas; um relatório que parece completo e não é sobrevive muito depois do contexto (#M169)
+- **theodb:** runner de baseline do ClickBench a 100M que mede **quantas consultas completam** sobre as
+  tabelas já carregadas — com gate de não-vacuidade que recusa publicar um número quando a corrida não
+  alcançou as 43, vocabulário de veredito que nunca chama de OOM o que não tem evidência de kernel, e
+  verificação de que as GUCs pedidas realmente existem no servidor (#M169)
+- **theodb:** gate executável de atestação da box de benchmark — falha quando a máquina não é a que o
+  milestone declarou (CPU/RAM insuficientes, carga concorrente, `unattended-upgrades` ativo, contagem de
+  linhas divergente do corpus, disco insuficiente), em vez de deixar os critérios como caixas manuais (#M169)
+- **theodb:** varredura dos 173 reviews + 58 ADRs + 110 blueprints para a base OKF — +17 conceitos
+  (incluindo dois bypasses de allowlist por regex, um parser-differential que levava ao metadata service,
+  e o padrão do DoD cujo primeiro checkbox mata o milestone); bundle vai a 91 conceitos (#okf)
+- **theodb:** varredura dos 139 artefatos de benchmark para a base OKF — +14 conceitos (3 invariantes de
+  plataforma do porte PG18, o limite de escala a 100M, e a correção de um erro herdado de um ADR que
+  comprimiu dois números em um); bundle vai a 76 conceitos (#okf)
+- **theodb:** mineração dos transcripts do projeto irmão para a base OKF — 7 conceitos novos e 2 atualizados
+  (`setsid` em ssh, fsync do diretório-pai, dados sintéticos degenerados, SBQ, pg_duckdb sobre heap, colação
+  em MIN/MAX de texto, precisão do júri); bundle vai a 60 conceitos (#okf)
+- **theodb:** auditoria de cobertura da base OKF — 7 lacunas reais fechadas (dogfood vs benchmark, teste que
+  passa pela razão errada, fail-open por omissão, snapshot do bgworker, GUC de worker, wrapping de `sum(Int64)`,
+  `scanrelid=0` sob pullup); bundle vai a 53 conceitos (#okf)
+- **theodb:** contrato de leitura e atualização da base OKF — regra `okf-knowledge-base.md`, validador
+  determinístico `check_okf.py` (4 invariantes estruturais) e hard gate no Stop que bloqueia número
+  publicado sem conceito de medição correspondente (#okf)
+- **theodb:** base de conhecimento operacional em Open Knowledge Format (OKF v0.1) — 46 conceitos
+  navegáveis por agente cobrindo modos de falha, técnicas, invariantes de plataforma, medições e
+  negativos honestos acumulados de M46 a M169 (#okf)
+- Roadmap amendado: adicionado **M169 — Bugs de escala a 100M** (`/roadmap-feature scale-bugs-100m`). Recorte: só as falhas duras (`byte array offset overflow` do q20, OOM da corrida, confirmar q23); os três `statement_timeout` ficam fora por não serem defeitos. 1 bilhão declarado fora de escopo até 100M passar limpo (#219 não relacionado).
+- **Top-k colunar com memória limitada:** consultas "as N primeiras linhas por uma coluna" sobre tabelas colunares
+  deixaram de precisar de memória proporcional ao tamanho da tabela. Medido a 1 milhão de linhas × 105 colunas, o
+  **maior bloco decodificado de uma vez** num `SELECT *` caiu de **772 MiB para 17,9 MiB (43×)** — abaixo do `work_mem` da sessão, e não mais acima
+  dele (#215, #218). O consumo total do processo é maior que esse bloco e foi medido em parte: a retenção interna
+  do ordenador ficou entre 0,83 e 2,41 MB. A tabela passa a ser decodificada em partes, uma de cada vez, em vez de inteira de uma vez.
+  Resultado byte a byte idêntico ao anterior. No tempo, o `SELECT *` largo ficou **~13,6% mais rápido** depois que
+  o cache aquece — juntando **seis coletas sobre seis binários**, o caminho novo venceu **72 de 72 comparações
+  pareadas**, sem uma única exceção. Nas consultas de projeção estreita **a medição não resolve o tempo** — e isso
+  passou a ser provado por experimento, não argumentado: o **mesmo binário**, medido em dois horários do mesmo dia,
+  deu **−0,6% e +2,3%**. A variação que a máquina impõe entre duas medições do mesmo código é maior que qualquer
+  efeito que essas consultas tenham. Elas economizam 22× a 32× de memória de qualquer forma. A medição foi feita
+  numa máquina compartilhada, então o número merece replicação; o desenho pareado é o que o torna defensável
+  apesar disso.
+  Reversível com `theodb.enable_columnar_topk_stream = off`. Método, números por consulta e ressalvas
+  em `docs/benchmarks/m168-streaming-topk-verdict.md`.
+
+### Fixed
+- **theodb:** o runner do baseline passou a declarar explicitamente o estado do streaming agregado em vez de
+  confiar no default do servidor — o parâmetro nasce ligado, então o braço "antes" de uma comparação
+  mediria o caminho novo e concluiria que a mudança não teve efeito (#M169)
+- **theodb:** a atestação passou a amostrar o ambiente (carga, CPU, RAM) **antes** das verificações caras de
+  dataset — lê-lo depois faria a medição refletir o trabalho da própria atestação e reprovar a máquina por
+  uma carga que ela mesma criou (#M169)
+- **theodb:** o texto de ajuda do `--quick` da atestação passou a declarar o custo como ordem de grandeza
+  ("dezenas de minutos") em vez de um número preciso — as observações disponíveis tiveram janela
+  sobreposta com outro processo, e o valor exato não é sustentado por elas (#M169)
+- **theodb:** a atestação passou a ler corretamente uma unidade systemd **mascarada** — `systemctl
+  is-enabled` sai com código 1 nesse estado, e tratá-lo como falha de execução reprovava o gate pelo
+  motivo errado numa box corretamente configurada (#M169)
+- **theodb:** segunda varredura do round 3 (categorias nunca auditadas) — BLOCKER de recall `0.033` sem
+  artefato, regra de proveniência que nenhum script cumpre, e atribuição de desfecho a milestone em voo (#okf)
+- **theodb:** round 3 de review da base OKF — 3 BLOCKER de correção não propagada pelo grafo, 2 HIGH em que o
+  bundle prescrevia o defeito que documenta (topo de faixa; `rc != 0` para falha de canal em ssh), e o C6
+  restrito a duas bases declaradas (#okf)
+- **theodb:** re-review das correções OKF — 3 defeitos que as próprias correções introduziram (1 BLOCKER:
+  colunas invertidas no pg_duckdb), 2 omissões de propagação, e o gate C6 que valida `resource:` (#okf)
+- **theodb:** review adversarial de 5 agentes sobre a base OKF — 34 achados aplicados (4 BLOCKER de números
+  fabricados ou conclusões invertidas), gate C5 (valor de `type` no conjunto fechado), dois gatilhos de
+  leitura novos, e correção das origens herdadas em `CLAUDE.md` e no issue #221 (#okf)
+- **Cancelar uma consulta colunar longa volta a funcionar, e a conexão sobrevive a isso.** Ao passar a decodificar
+  por partes, o top-k colunar passou a segurar a leitura de todas as páginas dentro de uma janela em que o
+  PostgreSQL não processa interrupções — na prática, um `Ctrl-C`, um `statement_timeout` ou um
+  `pg_terminate_backend` seriam ignorados até o fim do scan. Agora o cancelamento é reconhecido **entre partes**,
+  o trabalho interno é encerrado ordenadamente e só então o PostgreSQL levanta o cancelamento. Coberto
+  por `benchmarks/m168_cancel_oracle.sql`, que cancela uma consulta de verdade e depois verifica que a sessão
+  sobreviveu.
+- **O recuo automático deixou de mascarar erros que não são de memória.** Ele foi escrito para um caso — o
+  orçamento de memória não caber — mas capturava qualquer falha, incluindo erro de integridade de dados e o
+  próprio cancelamento acima. Agora só o estouro de memória aciona o recuo; o resto é reportado.
+- **`transaction_timeout` e queda de conexão passam a interromper uma consulta colunar longa.** O reconhecimento
+  de cancelamento cobria só `statement_timeout`/`Ctrl-C` e `pg_terminate_backend`; um `SET transaction_timeout`
+  sobre uma varredura longa era ignorado até o fim, e o mesmo valia para o cliente ter desaparecido. É a mesma
+  falha da entrada acima, num conjunto mais estreito de gatilhos.
+
+### Changed
+- **theodb:** o gate de atestação distingue "a tabela não existe" de "não consegui consultar" e emite
+  identificadores estáveis por falha, para que uma tolerância explícita (ex.: seguir sem o gêmeo heap) não
+  engula silenciosamente uma falha diferente que por acaso menciona a mesma tabela (#M169)
+- **theodb:** a atestação da box ganhou `--quick`, que pula as checagens de dataset (~40 min a 100M) e
+  mantém as de contaminação — para o cabeçalho de fechamento de uma corrida read-only, que não pode ter
+  mudado o dado; "não perguntei" é registrado como estado próprio, nunca confundido com "ausente" (#M169)
+- **Recuo automático quando o caminho novo não cabe na memória:** se o top-k colunar por partes não couber no
+  orçamento de memória da sessão, a consulta volta sozinha ao caminho anterior em vez de falhar. Quatro cenários foram medidos
+  procurando um caso em que o caminho novo falhe e o anterior sirva, e **nenhum foi encontrado**; o oposto sim —
+  numa projeção estreita com `LIMIT 400000` o caminho **novo serve e o anterior falha**. O recuo fica como defesa
+  contra um caso não observado, e passa a ser registrado no log do servidor sempre que acontecer. Detalhes em
+  `docs/benchmarks/m168-streaming-topk-verdict.md` § 3.5.
+- **A regressão do M167 passou a ser gravada como artefato pelo coletor de benchmark.** O relatório afirmava
+  `rc=0` para os dois oráculos do M167 numa tabela em que todas as outras linhas tinham artefato, mas o coletor
+  nunca os executava — a linha era verificada por leitura de código, não por execução. Agora
+  `benchmarks/m168_collect_all.sh` os roda e grava `m167-regression.log`.
+- **Os números de desempenho do top-k colunar foram revisados para baixo durante a revisão, e a metodologia
+  mudou.** Quem leu uma versão anterior desta entrada viu "~18% mais rápido" e "as consultas de projeção estreita
+  ficam ~2% mais lentas (p = 0,014)". Os dois números não sobreviveram à auditoria: o primeiro vinha da coleta
+  mais favorável de seis (o valor agregado das seis é **13,6%**), e o segundo tratava cada comparação como
+  independente quando a unidade de replicação é a **coleta** — corrigido, o custo das projeções estreitas fica no
+  limite da resolução da medição, com quatro das seis coletas mostrando custo e duas mostrando ganho. Nenhum
+  número de **memória** mudou (43×/32×/22×/32× em seis coletas, idênticos ao dígito). Método, as sete versões
+  desta seção e o que permanece não medido em `docs/benchmarks/m168-streaming-topk-verdict.md`.
+- **Diagnóstico:** a auditoria automática de código morto não detecta métodos Rust sem chamador dentro do próprio
+  crate, então "nenhum achado" no relatório dela significa "o detector não achou", não "não há". Quatro métodos e
+  dois campos escritos durante o M168 e nunca usados foram encontrados por conferência manual e removidos. A
+  limitação está registrada em `docs/benchmarks/m168-streaming-topk-verdict.md` § 5 para quem for confiar no
+  relatório da próxima vez.
+- **Diagnóstico de memória do top-k colunar:** com `THEODB_ADMIT_TRACE=1` no ambiente do servidor, o log passa a
+  registrar quantos bytes o caminho colunar decodificou para responder à consulta
+  (`theodb_decode_batch: rows=… bytes=… work_mem_bytes=…`). Quem opera consegue ver o consumo real em vez de
+  inferi-lo do `VmRSS`, que é dominado pelos `shared_buffers` mapeados em todo backend e não isola a consulta.
+  A primeira medição com ele já mostrou que o limite de proteção subestima o consumo real num `SELECT *` largo,
+  porque compara com bytes comprimidos em disco — os números estão em (#218).
 
 ### Deprecated
 
@@ -26,12 +645,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Security
 
 ## [0.158.0] - 2026-07-29
-### Changed
-- **Columnar top-k de projeção (M167):** a suíte de verificação diferencial passou a cobrir a forma "as N primeiras linhas por uma coluna" — roteamento no harness de cobertura por tipo (35/35 casos, com controle positivo que prova que o oráculo consegue falhar) e correção de qual linha sai em que posição no harness dedicado, sobre uma tabela cuja chave é única para que a comparação não dependa de desempate arbitrário.
-- **Columnar top-k de projeção (M167):** consultas do tipo "as N primeiras linhas por uma coluna" sobre tabelas colunares ficaram substancialmente mais rápidas — medido a 1 milhão de linhas, alternando o recurso ligado/desligado na mesma sessão e no mesmo binário, 5 pares por consulta: **4,98×**, **44,8×**, **56,2×** e **41,7×** nas quatro formas cobertas, com os 20 pares favorecendo o caminho novo e resultado idêntico ao plano anterior. Requer `work_mem` acima do padrão do PostgreSQL. Método e ressalvas em `docs/benchmarks/m167-projection-topk-verdict.md`.
-- **Columnar top-k de projeção (M167):** `ORDER BY` com **mais de uma coluna** (por exemplo `ORDER BY data, nome`) passa a usar o caminho rápido em tabelas colunares — antes qualquer ordenação composta caía no plano lento. Cada coluna da ordenação é verificada individualmente, e basta uma que não sirva para a consulta inteira voltar ao plano nativo.
-- **Columnar top-k de projeção (M167):** `theodb.enable_columnar_late_mat` passa a ter **default ON**. As consultas de top-k de projeção sobre tabelas colunares (`SELECT colunas WHERE pred ORDER BY coluna LIMIT k`) passam a usar a materialização preguiçosa por padrão, em vez de exigir um `SET` de sessão. Medido no ClickBench 1M: q23 e q24 roteiam com resultado byte-idêntico ao plano nativo. O custo de memória O(N) que justificava o default OFF passou a ser contido por um limite de plano (ver a entrada seguinte), não pelo default.
-
 ### Fixed
 - **Columnar top-k de projeção (M167):** `ORDER BY` sobre uma coluna de texto voltava ao plano lento em bancos cuja colação já é byte-a-byte (`C`/`POSIX`), porque a checagem reconhecia apenas as colações *nomeadas* `C` e `POSIX` e não a colação `default` — que é o que quase toda coluna carrega. Agora a propriedade é verificada na colação efetiva do banco, então `ORDER BY <texto>` usa o caminho rápido onde é comprovadamente seguro e continua recusando onde não é (qualquer colação linguística, mesmo declarada explicitamente na consulta).
 - **Ferramental de verificação:** o harness de cobertura por tipo passa a **recusar** rodar contra um banco cujo `hits` tenha forma de ClickBench, em vez de recriá-lo silenciosamente e destruir o conjunto de dados. A recusa explica como prosseguir (apontar `PGDATABASE` para um banco descartável). Durante o M167 essa perda aconteceu duas vezes — a segunda depois de o risco já estar documentado, o que mostrou que aviso em texto não substitui verificação em código.
@@ -62,15 +675,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - **CI: `timeout-minutes` em todo job próprio.** `pgvector-compat` (20), `harness-unit` (15), `image-and-bench` (45), `migration-smoke` (25) e `notify-on-failure` (10) rodavam com o default do GitHub de **360 min**. Num runner serial compartilhado por 5 repositórios, um job pendurado sequestra a fila de todos por 6 horas — e o próprio repo já registrou `harness-unit` levando 999s só para falhar. Os valores são folga sobre a duração observada, alinhados aos jobs que já declaravam timeout.
 
 
-### Changed
-
-- **CI: o runner de TODO job passou a sair da variável `CI_RUNNER`, com fallback.** Antes, trocar a frota de runner exigia editar 18 jobs — e foi exatamente esse custo que fez os pilotos Blacksmith de hoje (theo-rag#143, theo-memory#156) serem aplicados e revertidos às pressas, quebrando a CI duas vezes. Agora `runs-on: ${{ fromJSON(vars.CI_RUNNER || '["self-hosted","theodb-do"]') }}`: migrar a frota é **um toggle de variável, zero commits**, e o rollback é instantâneo. O `||` é guarda-costas deliberado — variável ausente, vazia ou apagada por engano NÃO quebra job nenhum, cai no runner que funciona hoje; sem ele a variável viraria ponto único de falha para a esteira inteira. O padrão foi **provado empiricamente** antes de aplicar (run `30300163857`: despachou em `theodb-do-1`, `success`), e já era o usado pelo reusable `theo/.github/workflows/build-publish.yml:38`.
-
-- **CI: `ci.yml` passou a filtro POSITIVO; `publish-image.yml` deixou de publicar imagem por commit de documentação.** O `paths-ignore` anterior (`.claude/**`, `**/*.md`, `docs/**`) não excluía quase nada: medido em 2026-07-27, o commit `3313226` — que tocou só 4 YAMLs de workflow e o CHANGELOG, zero linha de código — disparou CI + publish + ci-canary + lint-rust + cassert, cinco runs numa fila serial. O `ci.yml` agora lista o que a esteira de fato lê (`Dockerfile`, `theodb_rs/`, `sql/`, `scripts/`, `benchmarks/`, `packaging/`, `*.control`), derivado dos `COPY` do Dockerfile e dos steps. **Trade-off explícito:** filtro positivo cria risco de falso-verde — quem adicionar um diretório que a suíte exercite precisa listá-lo ali. O `publish-image.yml` NÃO recebeu filtro positivo de propósito: ele escuta `tags: ["v*"]`, e filtro de path também se aplica a push de tag, então um release poderia ser silenciosamente ignorado; ganhou apenas exclusões de caminhos que comprovadamente não entram na imagem.
-
-- **CI: `permissions: contents: read` no topo do `ci.yml`.** O workflow não declarava permissão nenhuma, então cada job recebia o default do repositório para o `GITHUB_TOKEN`. Nada na esteira escreve — só checkout, build local (`load: true`) e teste.
-
-
 ### Fixed
 
 - **CI: quatro gates não executavam nada desde 24/07 — incluindo o `license-gate` da regra D1 (#211).** `license-gate`, `lint-rust`, `cassert-sql-safety` e `schema-drift-gate` declaravam `paths` **e** `paths-ignore` no mesmo evento, combinação que o GitHub rejeita no parse: os runs eram criados e morriam em `startup_failure`, com zero jobs e 0s de duração. Medido: 95 de 100 runs falhos nos três primeiros e 100 de 100 no `schema-drift-gate`. Na prática, por três dias nada barrou uma dependência AGPL de entrar na distribuição — a regra que o próprio arquivo chama de "a mais inegociável do projeto". A economia de fila que motivou o `paths-ignore` (#187) foi preservada, agora expressa **dentro** do `paths:` via padrão negado (`!**/*.md`), que é um filtro só e não conflita. Os gates voltam a rodar após três dias sem enforcement, então é esperado que algum acuse achado real acumulado.
@@ -87,10 +691,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 - Roadmap amended: added M163 Harness A/B por-tipo (retro item A) + M164 Endurecer o harness de benchmark (retro items B+C) (`/roadmap-feature`).
 - M163: **type-coverage A/B harness** (`benchmarks/columnar_type_ab.py` + tests) — closes the project's most recurring defect (the ClickBench A/B doesn't exercise the type space, so type-class routing bugs survive it and are only caught by council review after a 14-min rebuild; M151/M154/M157/M161). For each routed admit-path × each per-type edge value (int2 `32767`, int4/int8 max, float `-0.0`/`NaN`/`inf`, timestamp/date/timestamptz, non-C text, NULL) it asserts the M161 fail-closed contract — **byte-identical if it routes, OR correct-decline** — over a synthetic `theodb_columnar` table. A **positive control** (a seeded-divergent twin run *through* the same `ab_check` oracle path the real cases use) proves the oracle catches a wrong result (the M161 `out_typoid` BLOCKER shape). Validated live on a fresh TheoDB build: Tier-1 `pytest` 8 passed, Tier-2 **20/20 cases as-expected**, positive-control diverged=2. Bespoke pytest reusing the shipped symmetric-EXCEPT oracle (no new dep, Rule 9); routing evidence and the byte-identity comparison come from the **same execution** (`EXPLAIN ANALYZE CREATE TEMP TABLE _ab_on AS <sql>`), so a `route` case whose pushdown silently didn't fire in the comparison query can't pass as a false `diverged=0` (council-benchmark HIGH); wired as a pre-`/review` gate in `rules/testing.md § 5.1`. Evidence: `docs/benchmarks/m163-type-coverage-verdict.md`.
-
-
-### Changed
-- `rules/discover-phd-rigor.md`: added R3.1 (instrument-validates-against-architecture — retro item D; a measurement DoD must verify its instrument actually observes the thing measured, e.g. `shared_blks_read` cannot see `theodb_columnar`'s TAM-level I/O).
 
 
 ### Fixed
@@ -124,8 +724,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - M160 hardening (council-rust-pgrx LOW-1): `decode_columns_v2` + `decode_columns` guardam `comp.len() >= comp_len` antes do slice do zstd (diretório corrompido → `Err` tipado, não panic atravessando C) — espelha o guard já presente no scan geral.
 - M160: decode zero-copy fixed-width→Arrow no path de pushdown colunar. `decode_columns_v2` decodifica colunas fixed-width NÃO-nulas (int2/4/8, float4/8, timestamp/tz, date) como um stream contíguo little-endian (`DecodedColumn::FixedRaw`), e `build_arrow_from_decoded` as constrói via UM `Vec<T>` tipado por coluna (`PrimitiveArray::from`, handoff zero-copy) — eliminando a tempestade de alocação `.to_vec()` por-célula + a re-cópia do `build_arrow` (o gargalo gêmeo do M148 que o deep-dive/flamegraph mediu na classe coberta). Colunas nullable/varlena/texto/bool e queries com linhas pending same-xact mantêm o caminho de células (fail-safe, byte-idêntico). Byte-idêntico por construção (mesmo `from_le_bytes` plano, sem transform de epoch) — validado por A/B symmetric-EXCEPT colunar vs heap **diverged=0** (GROUP BY sum, count-distinct, multi-agg, min/max) + teste unitário. Endian-safe (`from_le_bytes` explícito). Só o hot path pushdown (vindex/arrow_cache seguem `decode_columns`). **Ganho medido same-binário (GUC `theodb.enable_columnar_fast_decode` off vs on, agg pushdown ON em ambos, EXPLAIN ANALYZE median-of-3, 1M ClickBench): 5.7× (RegionID GROUP BY sum), 7.4× (SearchEngineID GROUP BY sum), 8.3× (sum+count), 1.8× (count-distinct)** — ~2-8× na classe coberta de agregações fixed-width (`docs/benchmarks/m160-decode-zerocopy-verdict.md`), consistente com o flamegraph do deep-dive (a ponte de decode era ~80% do custo).
 
-### Changed
-
 ### Deprecated
 
 ### Removed
@@ -157,14 +755,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - M156: predicados de TEXTO no WHERE (`col = 'x'`, `col <> ''`, `col LIKE '%p%'`, `col NOT LIKE 'a%'`) agora roteiam ao CustomScan colunar vetorizado (DataFusion), subindo a cobertura de agregação do ClickBench. O predicado de texto é serializado num 2º canal de `custom_private` (nós `Integer`/`String`) e reconstruído como filtro DataFusion sobre a coluna Utf8; byte-idêntico ao PostgreSQL nativo. Guards de correção (fail-closed → plano nativo): só sob collation determinística e operador `=`/`<>`/`~~`(LIKE)/`!~~`(NOT LIKE); declinam ILIKE (`~~*`), regex (`~`/`!~`/`~*`/`!~*`), `bpchar`, collation não-determinística, literal não-UTF-8 (server encoding LATIN1/etc.) e padrão LIKE terminado em escape pendente (`\` final, que o PostgreSQL rejeita com erro 22025).
 
 ## [0.146.1] - 2026-07-25
-
-### Changed
-- M155 (spike Top-N) re-escopado por medição a um HONEST-NEGATIVE: EXPLAIN ANALYZE mostrou que o PostgreSQL já usa
-  `top-N heapsort` (heap O(n log k) = o algoritmo do TopK do DataFusion) para `ORDER BY … LIMIT` — o nó Sort custa
-  ~2-4ms (não é gargalo) e o custo dominante é a materialização row-by-row do scan colunar (M148, ~150ms), que rotear
-  ao TopK não elimina; a cobertura marginal é 0 (as Top-N já roteiam). Veredito: não implementar o roteamento-ao-TopK
-  (esforço≠complexidade). Lever real apontado (materialização preguiçosa de colunas de saída) como candidato futuro.
-  Evidência: `docs/benchmarks/m155-topn-spike.md`.
 
 ## [0.146.0] - 2026-07-25
 
@@ -199,8 +789,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - Instrumentação de medição M152 (spike): `THEODB_ADMIT_TRACE=1` emite a razão pela qual o CustomScan de agregação declina cada query (`agg_distinct_filter_order`, `unpushable_where_qual`, `swap_agg_sorted_*`, etc.) — behavior-neutral quando off (roteamento idêntico). Mapa de roteamento medido (`docs/benchmarks/m152-routing-map.md`): as 29 queries não-vetorizadas classificadas por razão real (zero gaps) — reordena M153-M155 (COUNT DISTINCT > text-`<>`-WHERE > GROUP BY texto), pois os bloqueios são compostos e a cobertura marginal de cada fatia é 2-4. (#M152)
 - Roadmap ampliado: M152 (spike measurement-first — mapear o roteamento das 29 queries não-vetorizadas), M153 (rotear GROUP BY texto), M154 (rotear COUNT(DISTINCT) exato), M155 (rotear Top-N/TopK) — o programa para fechar o gap colunar vs ClickBench (29/43 queries ainda row-based, ~80% materialização heap-tuple), derivado do deep research `columnar-gap-closing-strategy-blueprint` (padrão: ampliar o CustomScan DataFusion vetorizado que já temos, não trocar de paradigma nem re-embed engine). (`/roadmap-feature columnar-gap-closing`)
 
-### Changed
-
 ### Deprecated
 
 ### Removed
@@ -215,8 +803,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 - Cobertura do CustomScan vetorizado DataFusion (M151): agregados (`COUNT`/`SUM`/`AVG`, com ou sem `GROUP BY`) que filtram por `WHERE col <> const` em coluna numérica/temporal sobre `theodb_columnar` passam a rotear pelo caminho vetorizado (batch Arrow), não mais tuple-a-tuple. `<>` é detectado como o negador do `=` btree (não é estratégia btree) e aplicado só pelo `Filter` DataFusion (nunca poda chunk — a poda por min/max continua só nos ops ordenados). Const **cross-type na classe inteira** (`int2`/`int4`/`int8`) é coercido ao domínio da coluna com range-check (o padrão real do ClickBench: coluna `int2`, literal `int4` — ex. `AdvEngineID <> 0`), ampliando também `=`/`<`/`>` cross-type inteiro. Cross-type temporal/float é declinado ao plano nativo (a coerção por bits crus não é isomórfica de ordem lá — pegue pelo review). Escopo honesto: predicados numéricos/temporais/bool; `<>` em texto (`SearchPhrase <> ''`) é follow-up (const-texto não cabe na serialização `custom_private` atual — ADR-4). (#M151)
 
-### Changed
-
 ### Deprecated
 
 ### Removed
@@ -230,8 +816,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 - Chunk-group filtering no scan colunar (M150): um `WHERE col op const` sobre `theodb_columnar` pula chunk-groups inteiros cujo zone-map min/max prova não conter match, sem descomprimi-los (estilo Citus chunk-group filtering). Reusa o `chunk_can_match`/`directory` do M105 e o CustomScan do M149. Métricas SQL `theodb_columnar_chunks_skipped()`/`_scanned()`; GUC `theodb.enable_chunk_skip` (default on — requer `theodb.enable_projection` on, pois o skip viaja no CustomScan de projeção). (#M150)
-
-### Changed
 
 ### Deprecated
 
@@ -266,15 +850,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   `parquet-format`, `graphrag`, `beir`, `faiss`, `hnswlib`) — fecham as lacunas de segurança
   Rust/FFI, metodologia de profiling e spec colunar
 
-### Changed
-
-- `CLAUDE.md` ganha a regra 8 ("fundamente em referência primária — acervo local primeiro") e a
-  seção "Acervo de referências", tornando o acervo visível em toda sessão do agente
-- `rules/discover-phd-rigor.md` ganha o requisito R0.1 (consultar o acervo local antes da busca
-  web; R0 continua obrigatório para o que o acervo não cobre)
-- `references-catalog.md` passa a registrar os 8 peers novos, o índice de papers, os 2 documentos
-  não obtidos (403/404) e os 12 clones que estavam no disco sem entrada no catálogo
-
 ### Deprecated
 
 ### Removed
@@ -293,11 +868,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - Plano de correção do defeito que impede carregar dados reais no armazenamento colunar (`columnar-toast-materialize`): a solução escolhida materializa os valores grandes no momento da inserção, em vez de contornar o problema no momento da gravação — remove a causa em vez de mascará-la, e protege contra uma segunda falha possível (dado removido por limpeza automática antes da gravação) (#190)
 - Previsão de budget do programa de benchmark oficial (`docs/benchmarks/clickbench-official-budget.md`): custo atual da infraestrutura medido via API de faturamento, custo por etapa com preços reais consultados na AWS, e os guardrails adotados para que nenhuma máquina temporária fique ligada por esquecimento (#187)
 - Gate de compatibilidade pgvector no CI: a cada mudança de código, a esteira sobe a **imagem** publicável e executa o fluxo que uma aplicação real faz — `CREATE EXTENSION vector` sem `CASCADE`, tabela com coluna `vector`, e os três índices `USING hnsw (... vector_cosine_ops/l2/ip)` — verificando resultado correto, não apenas ausência de erro. Era a lacuna que deixou passar os dois bugs que impediam qualquer aplicação de subir contra o TheoDB (#181, #182)
-
-### Changed
-
-- Roadmap "Fora de escopo" ajustado: removido "Columnar próprio (substituir DuckDB/pg_mooncake)" — a restrição foi superada pelos M99–M143 (theodb_columnar 100% own-code entregue, pg_duckdb removido; ADR-0042/0057), então otimizar o scan é continuação, não reabertura
-- A publicação da imagem passa a usar o workflow reutilizável do ecossistema (o mesmo do theo-memory e do theo-rag) em vez de uma implementação própria: além de publicar no GHCR, a imagem agora passa por varredura de vulnerabilidades (Trivy, bloqueando CRITICAL/HIGH antes do push) e, nas releases, sai com SBOM, proveniência SLSA e assinatura — garantias que a versão caseira não tinha (#187)
 
 ### Deprecated
 
@@ -323,12 +893,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 
 - A imagem Docker do TheoDB passa a ser publicada no GitHub Container Registry a cada release: `docker pull ghcr.io/usetheodev/theo-db:latest` — o comando que o README e o quickstart já documentavam — agora funciona. Antes nenhum workflow publicava (o CI construía a imagem só para rodar os testes e a descartava), então o primeiro comando da documentação falhava com `manifest unknown`. A publicação valida a própria imagem antes de concluir: baixa, sobe o banco e executa o fluxo do README (extensão, tipo vector, índice ANN) (#187)
-
-
-
-### Changed
-
-- Documentada no `Dockerfile` a razão de a imagem iniciar como root: o entrypoint oficial do PostgreSQL precisa disso para ajustar as permissões do diretório de dados antes de rebaixar privilégio (`gosu postgres`) — o servidor nunca roda como root. Supressão explícita e justificada do aviso de análise estática, em vez de uma mudança que quebraria a inicialização em volumes novos (#182)
 
 
 
@@ -364,16 +928,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - Discovery plan do M147 (`m147-scan-version-dispatch`): investigação focada de como pgvectorscale (par pgrx), lance (formato versionado Rust) e pgvector (C) fazem dispatch de versão de formato on-disk OCP e isolam corpos de decode por-versão — insumo para o refactor de `scan.rs` sem violar a ADR-2 do M145 (#170)
 
 
-### Changed
-
-- M147 Fase 3: o kernel Stage-1 (`ah_score_block` + loop de blocos) copiado byte-a-byte em 5 corpos `scan_ivf_aq*` virou um `stage1_score_blocks` compartilhado que recebe `codes_off` do chamador — o decode on-disk por-versão permanece separado (ADR-2 do M145), só o scoring in-memory é compartilhado. Byte-idêntico nos 6 caminhos; não-vacuidade provada (mutar codes_off → A/B falha) (#170)
-
-- M147 Fase 2: os 8 gather helpers do scan IVF/HNSW/SymQG passam a retornar `Result` e propagar o erro com `?` até um único boundary (`enum ScanError` carregando a classe Corrupt/Input), no lugar de ~56 `match { Ok=>v, Err=>ereport }` C-style — idioma do crate. A taxonomia do M146 (corrupção→XX002, dim-errada→22023) é preservada por construção; comportamento byte-idêntico provado por A/B nos 6 caminhos (#170)
-
-- M147 Fase 1: if-ladder de dispatch IVF → enum lido uma vez (OCP); byte-idêntico nos 6 caminhos (#170)
-
-- M147 (review): a mensagem de erro para um discriminante de formato IVF desconhecido volta a carregar a pista de remediação "REINDEX to upgrade" (regressão de diagnosticabilidade pega no review — a classe SQLSTATE XX002 já era preservada) (#170)
-
 ## [0.135.0] - 2026-07-24
 
 ### Added
@@ -386,13 +940,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - Teste de regressão do #177 no `cassert-sql-safety` (o job de CI que roda SQL real): um scan sem `ORDER BY <->` tem de falhar alto, nunca devolver linha vazia. Não-vacuidade provada nos dois sentidos — com o comportamento antigo simulado o script sai com exit 1; com o guard ativo, exit 0 (M146, #177)
 - Harness de injeção de corrupção `theodb_rs/isolation/corrupt_index.sh`: corrompe bytes de um arquivo de índice real e verifica que nenhuma corrupção derruba o backend — a única prova possível dessa propriedade, já que teste unitário não toca página real. Parametrizado por AM (`AM=theodb_hnsw` default, `AM=theodb_ivfflat`), então a mesma propriedade é medida nos dois decodificadores (M146)
 - `theodb_rs/examples/ivf_codec_check.rs`: cobre a aritmética pura do formato IVF (codificação de labels de largura fixa e cálculo de span com straddle de chunk), que não tinha teste algum. Executa de verdade — `cargo test`/`cargo pgrx test` não linkam neste crate, então o binário de example é o teste, seguindo a convenção que `examples/resumable_check.rs` já estabelecia (M146)
-
-
-### Changed
-
-- Erros de leitura de índice corrompido agora retornam **SQLSTATE XX002 (`index_corrupted`)** em vez de XX000 (`internal_error`). O operador passa a distinguir "o índice está corrompido, reindexe" de "encontrei um bug interno, reporte" — o mesmo código que o `contrib/amcheck` do PostgreSQL usa para corrupção (M146)
-- **`/code-quality` deste repositório nunca auditou nada.** `code-quality-languages.txt` estava vazio, e o loader trata arquivo vazio como "nenhuma linguagem habilitada" — então todo `PASS` registrado até aqui saiu com "Languages audited: none" e zero findings, inclusive os que serviram de gate para `/implement` e `/review`. Rust habilitado apontando para `theodb_rs/Cargo.toml` (o workspace não fica na raiz, e o detector procurava lá). Ao rodar de verdade, o detector D2 acusou 117 falso-positivos — `use std::collections::HashMap` era reportado como "crate fabricado não encontrado no crates.io" — o que dava `FAIL_HARD` e bloquearia o `/review`; corrigido para reconhecer a biblioteca padrão, módulos locais do arquivo, crates do próprio workspace e caminhos já em escopo, e para rebaixar a `SOFT_FLOOR` ("não verificável") quando o arquivo tem glob import, em vez de afirmar fabricação. Dois outros falso-verdes do mesmo gate foram medidos e corrigidos junto: o detector de dead code (`cargo +nightly udeps`) rodava na raiz do repo, onde não existe `Cargo.toml`, e reportava a ferramenta como indisponível; e o extractor de símbolos degradava para lista vazia **em silêncio** quando o tree-sitter não estava presente — "nenhum símbolo extraído" era lido como "nenhum problema", então um ambiente sem o parser produzia `PASS` sem auditar uma linha (agora vira `auditor_unavailable_tree-sitter-rust`) (M146, #175)
-- Os gates de lint do repositório voltaram a passar: `cargo clippy` (baseline `-D warnings`) e `cargo fmt --check` estavam **vermelhos no `develop`** desde o M145 — o primeiro por um doc comment órfão deixado pelo refactor, o segundo por drift acumulado em 8 arquivos. Ambos agora saem com exit 0. Mudança mecânica, sem alteração de comportamento (M146)
 
 
 ### Fixed
@@ -416,20 +963,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [0.134.1] - 2026-07-23
 
-### Changed
-- Refactor interno (M145): `admit` (`am/columnar_agg.rs`) decomposto — CC 59 → 17 medido por lizard (helpers `parse_agg_kind`/`classify_target_node`/`build_admission` + enum `TargetSlot`); byte-idêntico do Agg-swap M115 preservado (ordem de decisão e todo `None`/`?` idênticos; `layout.push` na mesma ordem), zero mudança de superfície SQL
-- Refactor interno (M145): `main_index_pages` (`am/page/mod.rs`) decomposto — CC 34 → 11 medido por lizard (4 helpers verbatim por-versão `pending_start_v4`/`_v5_v7`/`_v6_v8`/`_v2_v3`); offsets/strides/guards byte-a-byte idênticos (ADR-2: blocos NÃO unificados), zero mudança de comportamento
-- Refactor interno (M145): `theodb_embed_worker_main` (`vectorizer.rs`) decomposto — CC 41 → 14 medido por lizard (helpers `reap_and_purge`/`claim_batch`/`renew_lease`/`process_one`/`process_group`); limites de transação M122/H-1/H1 movidos intactos, semântica de sigterm-break preservada (equivalente), zero mudança de superfície SQL
-- Refactor interno (M145): `write_parquet_impl` (`parquet.rs`) decomposto por Extract Function — CC 35 → 19 medido por lizard (helpers `col_builder_for`/`append_row`/`finish_arrays`/`atomic_write_parquet`); comportamento preservado (fail-closed no OID + atomicidade de escrita idênticos), zero mudança de superfície SQL
-
 ## [0.134.0] - 2026-07-23
 
 ### Added
 - Cadeia de upgrade `1.1.0→1.2.0` (`theodb_rs--1.1.0--1.2.0.sql`, full-schema self-healing conforme a convenção M137/oráculo CONV) que expõe a superfície lakehouse M143 (`public.read_parquet`/`write_parquet`/`olap` + REVOKEs least-privilege) a quem faz `ALTER EXTENSION theodb_rs UPDATE` — antes só o fresh-install a tinha; `default_version` → `1.2.0` (M144 T1.1, review HIGH)
-
-
-### Changed
-- `theodb.vectorizer` retry agora usa backoff exponencial (2^attempts s, cap 300s) ao re-enfileirar um job falho, em vez de reclamá-lo instantaneamente — uma queda transitória do endpoint não re-dispara o backlog inteiro em loop apertado (M144 T2.3, review MEDIUM)
 
 
 ### Fixed
@@ -462,15 +999,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [0.131.2] - 2026-07-22
 
-### Changed
-- Docs (`docs/features/`): revisão completa de exatidão vs código (3 revisores + verificação). Corrige exemplos de SQL que quebravam se copiados — assinaturas reais de `ai.nl_*` (doc 12), reloptions do `theodb_hnsw` (removido `WITH (m/ef_construction)` inexistentes, doc 02), `pq_bits=4`/`separate_storage=1` (doc 05), `theodb.embed(content,model)` no lugar de `embedding()` + `lexical_engine=ts_rank_cd` (doc 06), `ai.if` (doc 07); e o drift do pgvector/pgvectorscale (removidos no M70): 13× `CREATE EXTENSION vector`→`theodb CASCADE` + todas as seções "coexiste/instala pgvector" atualizadas para o caminho own-code `theodb_hnsw`/`theodb_ivfflat`
-
 ## [0.131.1] - 2026-07-22
-
-### Changed
-- Repo/tooling: consolida a `knowledge-base/` da raiz (leftover da migração) para dentro de `.claude/knowledge-base/` — 100 artefatos únicos (plans/reviews/grills/discoveries/blueprints/designs/audits/releases/roadmap-runs) movidos via `git mv` (zero conflito), references dupe descartadas (já no `.claude`, re-clonáveis), e `statusline.sh` ajustado para preferir o layout `.claude/` com fallback standalone. Um único knowledge-base a partir de agora
-- Benchmarks (harness interno): review de limpeza — remove método morto `pg_duckdb_available` do core `theodb_bench/db.py` (extensão removida no M143), `run_m59_aq.py` default `--runs` 1→3 (rigor ≥3 iterações), `ruff --fix` de imports/f-strings vazias, e arquiva 6 harness órfãos em `benchmarks/archive/` (audit-trail: arquivar, não deletar)
-
 
 ### Fixed
 - Build: `Makefile` `PARTS` estava sem `sql/85-theodb-htap.sql`, divergindo do `Dockerfile` — o install base gerado por `make theodb-build`/`make install` ficava sem as funções `theodb.htap_refresh`/`theodb.olap` (a imagem Docker shipada nunca foi afetada; drift só no caminho de build local/regress)
@@ -485,11 +1014,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 - Spike (Fase 4) do leitor Parquet own-code (`theodb.read_parquet_agg_spike`, atrás da feature `spike-parquet`, off no build default): lê Parquet externo via DataFusion/Arrow (Apache-2.0, sem DuckDB) — veredito **VIÁVEL**, paridade byte-a-byte vs `pg_duckdb.read_parquet` a +9 MB no `.so` vs 118 MB do bundle DuckDB (`docs/benchmarks/parquet-reader-owncode-spike.md`)
 - Roadmap amended: added M143 Remoção total do `pg_duckdb` (lakehouse Parquet own-code no default) (`/roadmap-feature pgduckdb-total-removal`)
-
-
-### Changed
-
-- **BREAKING:** a imagem `theodb-htap` (M142) foi **aposentada** — o lakehouse é own-code no build default (uma imagem só). `packaging/Dockerfile.htap` e o job CI `htap-image` removidos (M143, ADR-0057)
 
 
 ### Removed
@@ -507,11 +1031,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 - Roadmap amended: added M142 Tier-out do `pg_duckdb` (imagem default enxuta + imagem opcional `theodb-htap`) (`/roadmap-feature pgduckdb-htap-tiering`)
 - Imagem opcional `theodb-htap` (`packaging/Dockerfile.htap`) = imagem default + `pg_duckdb`, para o lakehouse de arquivos externos (Parquet/Iceberg/CSV) (M142)
-
-
-### Changed
-
-- **BREAKING:** a imagem **default** do TheoDB não inclui mais o `pg_duckdb` (tier-out M142) — a imagem ficou menor e sem o único componente C++/httpfs. O lakehouse de arquivos externos (Parquet/Iceberg/CSV) continua disponível via a **imagem opcional `theodb-htap`**; a superfície `theodb.htap_refresh_sql`/`olap_sql` permanece na extensão mas falha-claro (`0A000`, com dica para a imagem htap) sem `pg_duckdb`. Extensão `theodb` bumpada para `1.5` (`ALTER EXTENSION theodb UPDATE TO '1.5'`) (M142, ADR-0056)
 
 
 ### Fixed
@@ -539,10 +1058,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - **M140.1** (medição lexical — gate de rigor do M140, **MEDIDO E CONCLUÍDO**): artefato reproduzível `docs/benchmarks/m140-1-lexical-measurement.md` + dados `docs/benchmarks/m140-1-data/` + ADR `docs/adr/0052`. Veredito: a **BM25 own-engine (Tantivy) bate o baseline `ts_rank_cd`** em retrieval lexical puro (o caso do theo-lens) em dois eixos — BEIR nDCG@10 (scifact 0,661 vs 0,072; nfcorpus 0,308 vs 0,206, reproduzindo o M138) e logs HDFS reais known-item (direção robusta em todo m; **magnitude honesta modesta** no regime justo m=1-2 ~9-13%, com o gap enorme de m≥3 declarado como **artefato de semântica de query**, não headline). Storage: índice Tantivy **~3,5× menor** no footprint enxuto (até 5× vs o baseline fiel theo-lens; apples-to-apples review H2) → **ADR 0052 decide heap buffer-then-flush** (AM custom rejeitado por over-engineering). Harness: `theodb_bench/{knownitem,logcorpus,lexical_engines}.py` + `run_m140_1_lexical.py` + gate offline `test_m140_1_decision.py`. 30 testes verdes, ruff limpo. Caveat declarado: corpus log-proxy público (LogHub), validação em traces reais é o boundary M140.4/M141
 
 
-### Changed
-- README atualizado ao estado real (estava em v0.35.0, ~90 releases atrás): corrige erros factuais (**PostgreSQL 18**, não 17; tipo `vector` **own-code**, não pgvector/vectorscale no CASCADE), reescreve "Como funciona"/"Por que" com os pilares atuais (vetor own-code, híbrido AI-native, colunar próprio, grafo nativo, HTAP), atualiza o estado medido do pilar vetorial para o veredito FINAL (M73/M74), e substitui o roadmap M0–M9 genérico pelo status real (69/71) + o planejado (M140.x, M141)
-- Roadmap: **M140 decomposto em M140.1–M140.4** (medição+decisão de arquitetura → crate núcleo sem pgrx → engine BM25 de produção com cache → MVCC/VACUUM/crash provados + consumidor theo-lens). Motivação: M139 deu GO e o consumidor real (theo-lens, busca lexical-pura em traces) justifica a engine own-code; ganhos medidos: índice 2,8× menor que pg_textsearch, MVCC/crash herdados do heap. Cada fatia entrega valor com release próprio
-
 ## [0.125.0] - 2026-07-22
 
 ### Added
@@ -557,10 +1072,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 - Gates mecânicos de qualidade Rust (M136): `lint-rust.yml` (clippy `-D warnings` com baseline de 21 categorias em `theodb_rs/.clippy_args` estilo neon, rustfmt `--check`, `cargo machete`, `metadata --locked`, doc) + `cassert-sql-safety.yml` (smoke dos 4 AMs + columnar sob Postgres `--enable-cassert` — a classe do crash #143 — via `scripts/cassert-smoke.sh`, e pgspot na SQL de instalação). Cada gate verificado verde por medição direta (`docs/benchmarks/m136-quality-gates.md`); backlog pré-existente em baseline-com-sunset (#151)
-
-
-### Changed
-- `theodb_rs`: código Rust 100% rustfmt-clean pela primeira vez (`cargo fmt` mutirão, 65 arquivos) — `rustfmt.toml` codifica o estilo (edition 2024, use_small_heuristics=Max). Preserva semântica; build verificado (M136)
 
 
 ### Fixed
@@ -591,10 +1102,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - Roadmap ampliado com a fundação decidida em 2026-07-21 (`/roadmap-feature`, 6 milestones): **M136** gates mecânicos de qualidade + Postgres `cassert` no CI (torna o D1 gate de máquina via `deny.toml`); **M137** cadeia de upgrade do `theodb_rs` (94 funções `pg_extern` e zero scripts hoje — instalações não conseguem `ALTER EXTENSION UPDATE`); **M138** BM25 como perna lexical default, executando o gate de adoção já medido no M53 (`ts_rank_cd` 0,0703 vs BM25 0,6881 nDCG@10); **M139** spike-gate do `Directory` do Tantivy sobre block storage do Postgres; **M140** engine lexical própria sobre Tantivy (MIT) + crate núcleo sem pgrx, *gated* pelo M139; **M141** dogfood `running`, o que autoriza qualquer reivindicação de production-ready
 
 
-### Changed
-- `theodb_rs.control`: `default_version` sai de `'1.0.0'` (congelado por 120 releases) para `'1.1.0'` (M137)
-
-
 ### Fixed
 - Corrupção silenciosa no script de upgrade (defeito e correção provados empiricamente sobre um shell type real: o guard antigo avalia `f` e nunca aplicaria a definição; o novo avalia `t`) do `theodb_rs`: o shell type e a definição completa do tipo `vector` compartilhavam o mesmo predicado de guarda, então num catálogo sem o tipo o shell era criado e a definição real **nunca aplicava** — o tipo ficava shell para sempre, sem erro. Guards agora diferem (`typisdefined`) e qualificam o namespace, evitando também ligar em cima de um `vector` de outra extensão (M137)
 
@@ -602,11 +1109,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 - Roadmap ampliado: adicionado M135 — suporte a PostgreSQL 18 (migração 17 → 18), com custo medido por sondagem de compilação (27 erros mapeados por arquivo/linha), não estimado (`/roadmap-feature pg18-support`)
-
-
-### Changed
-- **BREAKING:** o TheoDB passa a exigir **PostgreSQL 18**; o suporte a PG17 foi removido. As features `pg13`–`pg17` do `Cargo.toml` saíram — nunca haviam sido compiladas por ninguém, e declaração de compatibilidade não verificada é a mesma classe de defeito que o projeto rejeita em qualquer outro lugar (M135)
-- Callbacks de bitmap scan do `theodb_columnar` deixam de ser registrados (ficam `NULL`): registrar um stub que erra dizia ao planner que suportávamos, fazendo-o gerar um plano que falharia em runtime; agora o planner roteia ao redor (M135, padrão citus)
 
 
 ### Fixed
@@ -620,10 +1122,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - GUC `theodb.egress_allowlist` (superusuário) para permitir explicitamente um host on-prem que resolva para endereço privado, sem desabilitar a proteção inteira (#117)
 
 
-### Changed
-- **BREAKING:** `theodb_ml.apply_model` passa a exigir superusuário (ou privilégio SET no parâmetro), pois define `theodb.llm_endpoint`. Mantida como SECURITY INVOKER de propósito: torná-la SECURITY DEFINER devolveria o controle do endpoint a quem tem EXECUTE em `create_model` e reabriria #117 (#117)
-- **BREAKING:** os GUCs de **endpoint** e **chave** de IA (`theodb.{llm,embedding,rerank}_{endpoint,api_key}`, mais `theodb.llm_test_model`) passam a ser superusuário-apenas; antes eram nomes-placeholder que qualquer role podia definir na própria sessão. Configure-os por `ALTER SYSTEM`; as chaves ficam ocultas para não-superusuários em `pg_settings`. Os GUCs de **modelo** (`*_model`) continuam definíveis pelo chamador — o nome do modelo não é vetor de rede, já que o endpoint para onde ele é enviado agora é do operador (#117)
-
 ## [0.118.0] - 2026-07-21
 
 
@@ -631,8 +1129,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - Roadmap amended: added M132 fix #132 — vectorizer bgworker embeda no self-host (destrava o anchor de dogfood) (`/roadmap-feature vectorizer-worker-embed-fix`)
 - Roadmap amended: added M133 fix #140 — restaurar o sinal de CI (todo job do Actions falha antes de qualquer step) (`/roadmap-feature ci-restore-signal`)
 - Roadmap amended: added M134 fix #117 — SSRF cego via `theodb.llm_endpoint` setável pelo chamador (`/roadmap-feature llm-endpoint-ssrf-hardening`)
-
-### Changed
 
 ### Deprecated
 
@@ -668,8 +1164,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 - Roadmap amended: added M131 fix #135 — destravar o columnar-agg pushdown (planner hang em tabelas largas mixed-type) (`/roadmap-feature columnar-agg-planner-hang-fix`)
-
-### Changed
 
 ### Deprecated
 
@@ -753,9 +1247,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [0.111.0] - 2026-07-20
 
-### Changed
-- **Split the 3,456-LoC `am/hnsw_page.rs` god-file into a cohesive directory module (M126).** `am/hnsw_page/{layout,meta,codec,pack,store,search}` + co-located tests, each prod module ≤ ~500 LoC, with `unsafe` now isolated to the two Relation-facing modules (store+search) — the four pure format/build modules are `unsafe`-free. Behavior-preserving: proven **byte-identical** by a same-index A/B (build once, swap the `.so`, re-query the SAME physical index → zero-diff `(id,distance)` over 50 queries; `docs/benchmarks/m126-hnsw-split-byteidentical.md`). Zero caller edits, zero public-API change, zero on-disk format change. Addresses the top maintainability/safety risk from the 2026-07-20 trajectory analysis.
-
 ## [0.110.0] - 2026-07-20
 
 ### Added
@@ -775,8 +1266,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   **PARITY (not significant)** — the +0.004 mean is within noise (`docs/benchmarks/m123-hybrid-significance.md`). Also
   hardens the eval harness (OpenAI 429 backoff-retry; `theodb_rs` own-vector extension instead of stale pgvector).
 
-### Changed
-
 ### Deprecated
 
 ### Removed
@@ -790,8 +1279,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 - Roadmap amended: added M122 Embed totalmente assíncrono no vectorizer (`/roadmap-feature async-embed-vectorizer`)
 - Roadmap amended: added M123 Significância estatística pareada do hybrid vs vector — BEIR (`/roadmap-feature hybrid-beir-significance`)
-
-### Changed
 
 ### Deprecated
 
@@ -822,15 +1309,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   (`docs/security/m120-fail-closed-filter.md`).
 - Roadmap amended: added M120 Filtro estruturado fail-closed para `ai.hybrid_search_rrf` (`/roadmap-feature hybrid-fail-closed-filter`)
 - Roadmap amended: added M121 IVF cosine/ip spherical k-means — recall quality (`/roadmap-feature ivf-spherical-kmeans`)
-
-### Changed
-- **M121 spherical k-means — HONEST-NEGATIVE (measured no-op, reverted).** Investigated normalizing the IVF Lloyd
-  centroid onto the unit sphere for cosine/ip recall. For cosine it is a **provable no-op**: both the k-means
-  assignment and the scan probe-selection use the scale-invariant `cosine_distance`, so normalizing the centroid
-  cannot change recall on any dataset. Measured A/B (same-binary GUC toggle + REINDEX) confirmed
-  `recall_mean == recall_spherical` for cosine and ip in every configuration. Per the M121 DoD (measurement-first
-  honest-negative gate) the implementation was reverted — shipping a default-off GUC that never lifts recall would
-  be an unjustified knob (YAGNI/KISS). Finding recorded in `docs/benchmarks/m121-spherical-kmeans-honest-negative.md`.
 
 ### Deprecated
 
@@ -869,9 +1347,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   (`council-rust-pgrx` + `council-index-storage` clean; 2 LOW review-fixes applied: resume-loop `if let` +
   `resume_max_mb` doc caveat).
 
-### Changed
-- Roadmap corrigido: **M116 / M117 / M119 marcados `[x]` (SUPERSEDED — já entregues)** por M56+M104 (VACUUM tombstone-in-place + fold memory-bound), M58 (SIMD AVX2 cosine/IP) e M65 (cross-encoder `ai.rerank`, medido honest-negative) + M54 (chunking recursivo). Foram criados sobre um gap-analysis desatualizado (deep-view 2026-07-07, anterior a M56–M115); reimplementá-los seria re-trabalho. Apenas **M118 (filtered ANN resume-from-discarded)** permanece `[ ]` como trabalho novo genuíno.
-
 ### Deprecated
 
 ### Removed
@@ -894,8 +1369,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   uncommitted `INSERT` is seen by `max()`). `max(float)` correctly falls back to the decoded scan (directory skips NaN
   while PG `max` returns NaN); GROUP BY / WHERE / empty / all-NULL all byte-identical. Scope: ordered native types
   (bool has no PG min/max aggregate; text/numeric deferred).
-
-### Changed
 
 ### Deprecated
 
@@ -920,8 +1393,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   sum grows). Empty group → SQL `NULL` (zero-count guard). Scalar + GROUP BY; 7.14–10.10× vs native (context, not a new
   perf claim). Scope: integer input only — `sum/avg(numeric)` column input deferred (needs Arrow `Decimal128` column
   decode).
-
-### Changed
 
 ### Deprecated
 
@@ -1211,9 +1682,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 - Durability crash-recovery proofs for the AM (closes the ADR-0014 "Prova pendente"): `theodb_rs/isolation/crash_fold.sh` induces **3 real backend crashes (SIGABRT)** across all VACUUM-fold phases (before-pivot / post-pivot / mid-reclaim) + WAL replay and asserts the #47 guarantee — crash before the meta-pivot ⇒ old generation correct; crash after ⇒ fail-loud REINDEX; **never a silently-wrong result**. `theodb_rs/isolation/crash_unlogged.sh` proves the #46 fix via standby promotion (a RED/GREEN toggle shows `wal_log_init_fork` is load-bearing: without it the promoted UNLOGGED index is broken; with it, INSERT + scan work). Wired as `make -C theodb_rs/isolation check-crash`. Issues #46/#47 verified & closed.
 
-### Changed
-- Forward-compat with newer Rust (edition 2024, rustc ≥ 1.85): `#[no_mangle]` → `#[unsafe(no_mangle)]` on the vectorizer bgworker entrypoint (`theodb_rs/src/vectorizer.rs`) so the extension builds on current stable toolchains.
-
 ### Deprecated
 
 ### Removed
@@ -1268,13 +1736,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - **M99 Phase B/C1 (write path + reader — INSERT→SELECT round-trip):** wired `tuple_insert`/`multi_insert`/`finish_bulk_insert` (accumulate rows per backend) + flush-to-stripe (write row blobs across data pages, reserve the row_number range, append a stripe descriptor to the metapage, all WAL-logged via `GenericXLog` so an aborted xact rolls the stripe back) + the seqscan reader (materialize every stripe's rows at `scan_begin`, deform each into a virtual slot via `heap_deform_tuple`). **MEASURED: INSERT of 5001 rows into a `theodb_columnar` table reads back result-identical — `count`/`sum(int)`/`sum(float8)`/text values/NULL handling all match** (`m99_insert_select_roundtrip` pg_test GREEN; A1+A2 still GREEN; 279 existing GREEN, no regression). **Honest scope:** this slice stores rows as formed heap-tuple bytes (row-major on disk) — a correct, general round-trip proving the storage+retrieval + stripe/metapage machinery. The true column-major encoding (per-column chunks + zstd compression + min/max skip-pruning — the actual columnar *benefit*) is the follow-up refactor; TDD order is correct-first. Single-transaction MVP visibility; snapshot-scoped cross-backend MVCC is Phase C2/D. (M99)
 - **M99 (zstd stripe compression — the measurable columnar space benefit):** each stripe's payload is zstd-compressed (level 3, the DuckDB/Parquet default) before being written to data pages, and decompressed on scan (`zstd` reused from the tree via datafusion/arrow — parsimony rung 4, MIT/BSD, D1-clean). **MEASURED: 20000 rows with a `repeat('x',200)` column occupy < HALF the on-disk size of the same rows in a heap table** (`m99_stripe_compression_shrinks_ondisk` pg_test compares `pg_relation_size` columnar vs heap; round-trip still identical through the compress/decompress path; full suite GREEN, no regression). Per-column chunking + min/max skip-pruning (the *skip* half of the columnar benefit) is the follow-up slice. (M99)
 
-### Changed
-- **Correction (honesty, Rule 3 + D1 license gate):** the M98 roadmap amendment (v0.85.0) mislabeled M99's columnar TAM as "Hydra-model, **Apache-2.0**". Hydra's `columnar/` subtree is **AGPLv3** (`hydra/README.md:83`), barred by D1. M99 is corrected to **own-code** (study the AGPL design as literature only, Rule 9 — copy no source, link no library; same posture as the vector pillar vs AGPL VectorChord). The only Apache-2.0 native-columnar reference is `cstore_fdw` (an FDW, deprecated); `arrow-rs` (Apache-2.0) codecs are the permissive compression reuse. Recorded in `docs/adr/0042-m99-own-code-columnar-tam.md` (supersedes ADR-0041's DEFER *for the own-code path* — the option 0041 never evaluated). ROADMAP.md M99 corrected. (M99)
-
 ## [0.85.0] - 2026-07-14
-
-### Changed
-- **M98 (pgrx 0.19 upgrade + DataFusion/Arrow coexistence GATE — the single-planner columnar+AI pillar's go/no-go): upgraded theodb_rs from pgrx 0.16.1 to 0.19.0** (Rust edition 2021→2024 via `cargo fix --edition`; the pgrx 0.18 One-Compile model — removed `src/bin/pgrx_embed.rs` + the `pgrx_embed` bin + `crate-type "lib"`; the `public.vector` type's `SqlTranslatable` migrated to the const API with `TypeOrigin::External` so the SQL name stays `vector`, no REINDEX / no user-SQL change) + bumped `rust-toolchain` 1.91→1.97 (pgrx 0.19 MSRV is 1.96). **MEASURED: 277 existing tests GREEN on pgrx 0.19 (zero regression)** + Apache DataFusion 54 + Arrow 58 linked with `cargo tree` showing a SINGLE arrow major (no ABI/version conflict — the coexistence proof) + 2 new smoke tests proving DataFusion executes in-process AND inside a PG backend (`SELECT theodb_df_probe()`=3, a DataFusion aggregate over an Arrow batch under the `HeldInterrupts` discipline). 279 total GREEN. The full planner-integrated CustomScan executor is M100; this GATE proves coexistence + DataFusion-runs-in-a-backend (`docs/benchmarks/m98-coexistence.md`). No page-format change; NOT a performance claim — a build/link/runtime feasibility gate. Honest ceiling locked: DuckDB/Photon-class, capability-match not superiority (M73/M97). (M98)
 
 ### Added
 - Roadmap amended: single-planner columnar+AI pillar (AlloyDB-class HTAP) — 6 milestones M98-M103 from the `single-planner-columnar-ai` discovery (blueprint SHIPPABLE 98.8, GO-CONDITIONAL): M98 pgrx-0.19-upgrade + DataFusion/Arrow coexistence spike (the GATE), M99 append-only columnar TAM (Hydra-model, Apache-2.0), M100 DataFusion CustomScan vectorized executor (the single-planner seam), M101 heap-authoritative Arrow columnar cache (MVCC-correct HTAP), M102 AI operators as pushable plan nodes (LOTUS/Palimpzest), M103 vector+columnar unified substrate (Lance-inspired). Honest ceiling locked in every DoD: DuckDB/Photon-class 15-30× on columnar-resident data — capability-match AlloyDB, never superiority over its in-core engine (M73/M97). Supersedes ADR-0041's DEFER + corrects its Hydra-license error (Apache-2.0, not AGPL) (M98, M99, M100, M101, M102, M103)
@@ -1305,8 +1767,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Fixed
 - `read_page_item_into` now bounds-checks `block < nblocks` (mirroring `read_page_item_at`) — a torn/concurrently-folded meta page no longer raises a C `ereport(ERROR)` longjmp that would abort ALL query planning from a planner hook; it degrades to a typed `Err` → fail-safe (M95 review HIGH-2; also hardens the M48 amcostestimate read path)
 - Roadmap amended: added M95 honest cost model for the vecfilter node (M95)
-
-### Changed
 
 ### Deprecated
 
@@ -1350,8 +1810,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - Roadmap amended: added M91 adaptive filter strategy (pre/inline/post pela cardinalidade do bitmap — a peça adaptive AM-local; gated M90) (`/roadmap-feature adaptive-filter-strategy`) (M91)
 - Roadmap amended: added M90 inline filter pushdown (bitmap-in-traversal via Custom Scan — fecha o inline filtering vs AlloyDB; gated M87/M89) (`/roadmap-feature inline-filter-pushdown`) (M90)
 
-### Changed
-
 ### Deprecated
 
 ### Removed
@@ -1365,8 +1823,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 - **M89 (build escalável — ambuild streaming, veredito `DOD_MET`): o build do índice vetorial agora tem memória limitada por-lista.** Fecha o teto de memória descoberto no M88 (ADR-0038): o `ambuild` do `theodb_ivfflat` picava ~4× o dataset base em RAM → OOM a 30M. Duas mudanças byte-idênticas ao formato on-disk (sem REINDEX): (1) `build_owned` **move** o corpus p/ o índice (sem clonar); (2) os writers v5/v6 leem os vetores por referência e **escrevem cada lista incrementalmente**, liberando o blob f32 por-lista (elimina o clone `list_entries()` + os buffers `enc_vec`/`items`). **MEDIDO (DO m-8vcpu-64gb, 30M×128 = 15.4 GB base):** o build de 30M agora **completa** num box de 64 GB com pico **1.28× (v5) / 1.50× (v6)** base — o build antigo OOMou a **4.21×/64.7 GB** (reproduz o M88). 250 pg_tests GREEN, zero regressão. Honesto: NÃO é `O(maintenance_work_mem)` (o pico ainda tem a cópia 1× `idx.vectors`) → 100M+ ainda não cabe em RAM commodity; o streaming via `tuplesort` dos vetores é o follow-up. `docs/benchmarks/m89-ambuild-streaming.{md,json}`, ADR `0039`. Sign-off council-index-storage + council-rust-pgrx + council-benchmark. (M89)
 - Roadmap amended: added M89 ambuild streaming (flush incremental via `tuplesort` nativo — derruba o teto de memória de build ~4×→~1× base descoberto no M88; gated M88) (`/roadmap-feature ambuild-streaming`) (M89)
-
-### Changed
 
 ### Deprecated
 
@@ -1382,8 +1838,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - **M88 (Roadmap v7 — veredito terminal da track storage-separation, `SIZE_CONFIRMED / OUT_OF_RAM_QPS_INCONCLUSIVE`).** A medição terminal da separação de armazenamento SQ8 (v6) vs f32 (v5) no regime out-of-RAM. **Medido a 16M** (DO m-8vcpu-64gb, sign-off council-benchmark): índice v6/SQ8 **3.52× menor** que v5/f32 (confirma o 3.5× do M85 a 16× a escala); **+21% cold-QPS a probes=32** (direcional, limite inferior). **Honesto:** o DoD ≥100M **NÃO foi atingido** — o ambuild pica ~4× o base em RAM (2 OOM-kills medidos a 30M: 47 GB, 64 GB anon-rss num box de 62 GB usáveis), 16M foi o maior build viável; a recall (0.291) é degenerada por dados sintéticos tie-saturados (SIFT1M real deu 0.98 no mesmo código, M84). Crossover QPS out-of-RAM fica direcional-não-provado; superioridade sobre ScaNN/AlloyDB **não é reivindicada** (teto de paradigma M73/M82 permanece). `docs/benchmarks/m88-billion-scale-verdict.{md,json}`, ADR `0038` (estende `0037`). Follow-up recomendado: ambuild streaming (derruba o teto ~4×-base) + dados bilhão-scale reais. (M88)
 - **M88 Phase 1 — build IVF escalável.** kmeans-train sampling (subsample determinístico por stride, capado em `KMEANS_TRAIN_SAMPLE=1.1M`) + parallel full-N assignment (`assign_all_parallel`, `std::thread::scope`) — ataca o O(N·k·d) que era o gargalo real a 100M+ (custo de kmeans fixo ~1M-scale). **Byte-idêntico a ≤1M** (todos os testes + benchmarks 1M inalterados); **249 pg_tests GREEN**. Melhoria de produto (build escalável), não só p/ o M88. (M88)
 
-### Changed
-
 ### Deprecated
 
 ### Removed
@@ -1398,8 +1852,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 - **M87 (Roadmap v7 — filtered ANN + planner, veredito GO): iterative scan para TODO IVF (v3/v4/v5/v6).** O iterative do M52 era HNSW-only, então um `WHERE` seletivo COLAPSAVA o recall no IVF (os candidatos dos primeiros probes eram filtrados, o AM retornava false). Agora os scans IVF retornam `Vec` + recebem `probes`/`rerank_pool` como param, e o re-search iterativo cresce **probes** (alcança listas não-probed) E o **rerank pool** até emitir `max_scan_tuples` tids distintos (recall preservado); dedup-by-tid via o `emitted` HashSet do `amgettuple`. `amcostestimate` já era v5/v6-aware. **Medido a SIFT1M:** filtered recall@10 **0.894 @ 10% sel, 0.942 @ 30%** (sem o fix colapsaria); EXPLAIN confirma `Index Scan` para a query filtrada ordenada. `docs/benchmarks/m87-filtered-ann.{md,json}`. **248 pg_tests GREEN (247 + 1 M87), zero regressão.** Classe pgvector-relaxed_order; NÃO é o inline/adaptive filtering do AlloyDB (gap de paradigma). Fecha o escopo M85-M87.
 
-### Changed
-
 ### Deprecated
 
 ### Removed
@@ -1413,8 +1865,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 - **M86 (Roadmap v7 — SOAR spill, veredito HONEST-NEGATIVE no QPS SIFT1M): atribuição SOAR** (Sun et al. NeurIPS 2023, arXiv:2404.00774) atrás de `WITH (soar_lambda=N)` — cada vetor é spilled p/ uma 2ª lista escolhida pela loss de resíduo ortogonal-amplificado, então uma query com MENOS probes ainda o encontra. `ivf.rs::with_soar_spill` (~40 LoC), reloption `soar_lambda`; dedup-by-tid reusa o `emitted` HashSet do `amgettuple` (sem mudança de scan). **Medido a SIFT1M (A/B vs no-SOAR):** o lever centroid-probe é REAL (recall +0.12 a probes=4, +0.06 a probes=8), mas **NÃO dá ganho de QPS** (0.66-0.80× em todo ponto) — o bind do SIFT1M é o read da Fase 2 (M85), não o nº de probes; e a impl mínima dobrou o índice (f32 duplicado no layout v5 per-list). `docs/benchmarks/m86-soar-spill.{md,json}`. **247 pg_tests GREEN (246 + 1 SOAR), zero regressão.** Opt-in (default 0=off); veredito honest-negative no SIFT1M (o ganho projeta-se a bilhão-scale/M88). NÃO vence o ScaNN-biblioteca (M73/ADR-0035).
 
-### Changed
-
 ### Deprecated
 
 ### Removed
@@ -1427,8 +1877,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ### Added
 - **M85 (Roadmap v7 — SQ8 refine tier, veredito GO memory-win): índice IVF-AQ v6 SQ8-REFINE** atrás de `WITH (separate_storage=1, refine=1)` — o rerank da Fase 2 lê códigos SQ8 (`dim` B/vec, 128B) em vez de f32 (512B). Novo quantizador `sq8.rs` (~90 LoC, sem lib — FAISS QT_8bit per-dim min/max, asymmetric decode-then-metric); layout v6 (`write_ivf_aq_split_sq8`/`read_ivf_aq_meta_split_sq8`/`read_sq8_at`/`ivf_is_v6`, reloption `refine`, cost/vacuum/pending v6-aware). **Medido a SIFT1M (A/B vs v5 f32): índice 3.5× MENOR (153 MB vs 528 MB) a ε≤2% de recall** (`docs/benchmarks/m85-sq8-refine.{md,json}`). **246 pg_tests GREEN (238 + 6 sq8 + 2 v6), zero regressão.** Honesto: o QPS-a-recall-casado é flat-to-marginal em warm-cache 1M (o decode SQ8 + a perda de recall compensam o ganho de I/O — caveat da pesquisa); o ganho de QPS/I/O compõe a bilhão-scale (M88, onde o índice 3.5× menor cabe em RAM e o f32 não). Perfil AlloyDB-SQ8-default; opt-in (v5 f32 exato continua default).
-
-### Changed
 
 ### Deprecated
 
@@ -1446,8 +1894,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - **M83 (Roadmap v7 fase 0 — spike D3 GATE, veredito GO): índice IVF-AQ v5 STORAGE-SEPARATED** atrás de `WITH (separate_storage=1)` — os códigos AQ e os vetores f32 vivem em cadeias de páginas DISTINTAS, então o scan lê só os códigos compactos na Fase 1 (poda AH) e faz random-read do f32 só dos sobreviventes do rerank na Fase 2 (a alavanca que o ADR-0037/M82 nomeou). Novo `write_ivf_aq_split`/`read_ivf_aq_meta_split`/`read_vec_at` (`am/page.rs`), `scan_ivf_aq_split` (`am/scan.rs`), reloption `separate_storage` (`am/options.rs`); `main_index_pages`/VACUUM-gate/`amcostestimate` v5-aware. **Medido a SIFT1M (A/B same-data vs v4 interleaved): 2.7×–11.8× mais QPS a recall CASADO (6.2× @ probes=32), 3–14× menos buffer-accesses** (`docs/benchmarks/m83-split-storage-spike.{md,json}`). **238 pg_tests GREEN (236 + 2 v5), zero regressão; recall v5==v4 byte-idêntico (lossless).** Veredito GATE = **GO** para M84 (layout v5 produção). Caveats honestos: recall-teto ~0.80 deste run (rerank pool fixo em 64, investigação M84); ganho warm-cache é lower bound (bilhão-scale compõe, M88). NÃO vence o ScaNN-biblioteca (imposto de paradigma permanece, M73/ADR-0035).
 - Deep research web-grounded (R0) do caminho **storage-separated ScaNN-fidelity** (a alavanca não-testada do ADR-0037): `docs/research/scann-storage-separation-2026-07.md`. Convergência de 4 SOTA (FAISS FastScan, AlloyDB ScaNN, VectorChord, pgvectorscale) — todos separam fisicamente códigos↔vetores brutos. Reformulação honesta do alvo (arXiv:2603.23710 SIGMOD 2026: 84.4% do tempo do ScaNN-in-PG é overhead de sistema; teto AlloyDB = ~4× sobre pgvector HNSW): meta ACHIEVABLE = classe AlloyDB-in-Postgres (~4–6× recuperável), jamais vencer o ScaNN-biblioteca. Roadmap v7 (M83 spike D3 gate → M84 layout v5 → M85 SQ8 refine → M86 SOAR → M87 filtered+planner → M88 bilhão-scale) adicionado ao `ROADMAP.md`.
 
-### Changed
-
 ### Deprecated
 
 ### Removed
@@ -1463,11 +1909,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - M82 (pg_scann fase 7 — veredito final): head-to-head MEDIDO do índice v4 IVF-AQ+AH como Access Method, dentro do
   Postgres, a SIFT1M completo (GT oficial válido a 1M) vs a baseline f32-IVF own-code na mesma tabela (rigor A/B
   same-data M46). Artefatos `docs/benchmarks/m82-pgscann-headtohead.{md,json}` + veredito `docs/adr/0037-m82-am-ivf-aq-measured-verdict.md`. **Achado honesto:** o índice v4 é funcionalmente correto (recall byte-idêntico ao f32-IVF exato — AH pruning lossless), mas **não entrega ganho de QPS** no AM (78.5 QPS @ recall 0.985, classe f32-IVF, ~24× abaixo do ScaNN) — os 5-7× in-memory do M75 são mascarados pelo custo I/O+probe do AM. Confirma e estende o veredito M73 (ADR-0035). Fecha o track pg_scann (M75→M82) e o Roadmap v6.
-
-### Changed
-- M82: treino do codebook AVQ no `ambuild` passa a amostrar deterministicamente (stride) até 50k vetores antes de
-  encodar TODOS — torna o `CREATE INDEX` do índice v4 tratável a 1M+ (o treino ingênuo era super-linear, o blocker
-  do M75). Recall inalterado (medido byte-idêntico ao f32-IVF exato a 1M).
 
 ## [0.70.0] - 2026-07-11
 
@@ -1489,8 +1930,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 - M75 (pg_scann Fase 0, spike measurement-first): índice IVF-AQ+AH in-memory own-code (`theodb_rs/src/ann/ivf_aqah.rs`) — compõe (Rule 9) a partição IVF + o AVQ (`am/aq.rs`) + o kernel batched AH-LUT já existente (`vec/ah.rs`, layout transposed block32) num scan 2-estágios probe→AH→rerank. Pipeline provado correto (3 pg_tests GREEN). **Veredito D3 = GO (medido, SIFT real):** IVF-AQ+AH entrega **~5-7× o QPS do full-precision a recall casado** (captura ~5-7× dos ~25× do gap ScaNN M33) — 1º lever own-code que move o gap; reabre o eixo de QPS. Caveat honesto: medido a n=5000 (AVQ train naive super-linear bloqueia 1M in-session → otimização é M77). `docs/benchmarks/m75-ivf-aqah-spike.{md,json}`. Gate ABERTO: M76-M82 arrancam.
 - DISCOVER cycle + ROADMAP v6 para o **pg_scann** (índice IVF-AQ+AH nativo — ScaNN own-code): blueprint web-grounded SHIPPABLE_WITH_CAVEATS (`.claude/knowledge-base/discoveries/blueprints/pg-scann-am-blueprint.md`, R0: AVQ paper + AlloyDB + arXiv:2603.23710 SIGMOD 2026) + 8 milestones M75-M82 (Fase 0 spike-gate D3 + 7 fases: AM scaffold → layout contíguo → AVQ → AH-scan → rerank → lifecycle → planner). Tese não-refutada (M59): AQ+AH sobre carrier IVF batch-scan; measurement-first (M75 é o gate, honest-negative é saída válida).
-
-### Changed
 
 ### Deprecated
 
@@ -1521,9 +1960,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - **Veredito medido do pilar vetorial P0 + proposta de reposicionamento do North Star** (`docs/benchmarks/vector-pillar-verdict-2026-07.md` (NEW), `docs/benchmarks/rabitq-spike/rabitq_ivf_mstg_1m768d.log` (NEW), `docs/adr/0033-north-star-reposition-proposal.md` (NEW, PROPOSED)): fechamento da investigação de superioridade vetorial. Gap 2 (QPS) atacado com o SOTA permissivo (RaBitQ vendorizado, ADR-0032) e **medido a 1M×768d** (spike D3): MSTG-RaBitQ-mem = 8.2ms @ 98.4% recall (competitivo com full-precision ~10-15ms, **NÃO os 25× do ScaNN**); variante disk = 98.4% @ **5.3 MB residentes** (o ganho real do RaBitQ é MEMÓRIA, não QPS). Conclusão honesta (Regra 3/5): **superioridade de QPS vetorial sobre AlloyDB/ScaNN NÃO é alcançável como extensão Postgres permissiva** (o 25× do ScaNN é do AH-LUT anisotrópico + não pagar o imposto PG). Alvos honestos: paridade classe-pgvector (Gap 1, fix do select_from) + RaBitQ como feature de **memória/billion-scale** + AI-native/HTAP. Proposta ADR-0033 (requer assinatura do owner) reposiciona o North Star. Prior-art R0: rabitq-rs/RaBitQ-Library/LanceDB/Qdrant (permissivos, estudo+vendor); VectorChord/srvdb (AGPL, só estudo de design).
 - **Vendorizado o CORE do `rabitq-rs` (Apache-2.0) para o futuro índice IVF-RaBitQ** (`theodb_rs/src/rabitq/vendor/` (NEW): `quantizer.rs`, `rotation.rs`, `fastscan.rs`, `fastscan_kernel.rs`, `simd.rs`, `math.rs` + `LICENSE` + `VENDORED.md`; `docs/adr/0032-vendor-rabitq-rs-core.md` (NEW)): ataque ao Gap 2 do pilar vetorial (superioridade de QPS vs ScaNN/AlloyDB). RaBitQ (arXiv:2405.12497, quantização 1-bit training-free com bound de erro provado; canônica `VectorDB-NTU/RaBitQ-Library` Apache-2.0, adotada por Milvus/Faiss/Elasticsearch) é o lever **não-refutado** (M57 SBQ + M59 anisotrópico falharam no carrier HNSW; o carrier certo é IVF, que já temos em `ann/ivf.rs`). Vendorizado o core do algoritmo (commit upstream `10b9a4e`), NÃO a camada de storage (substituída pela nossa IVF page-native + WAL). Regra 9 (não reinventar) + D1 (Apache→Apache, LICENSE+atribuição preservados). Arquivos inertes até o wiring (implement); gate D3 (spike local de recall/velocidade) antes do AM completo. ADR-0032.
 
-### Changed
-- **HNSW build: `extendCandidates` (default ON) fecha a degradação de recall por escala — f32 0.974→0.990, SBQ 0.986→0.994 a 500k×768d** (`theodb_rs/src/ann/hnsw.rs`, `ann/hnsw_parallel.rs`, `docs/adr/0034-hnsw-extend-candidates-navigability.md` (NEW), `docs/benchmarks/gap1-extend-candidates.md` (NEW)): o Gap 1 (navegabilidade) foi localizado por **método white-box** (analisador de estrutura do grafo, local — conectividade perfeita mas 100% das misses são ROTEAMENTO, hop-distance cresce com a escala) e a causa é paper-grounded: faltava o `extendCandidates` do HNSW (Malkov-Yashunin — recomendado p/ dados clusterizados, nosso regime de 256 clusters). Fix: estende o pool de candidatos com os vizinhos-dos-vizinhos antes do `select_from`, nos dois caminhos de build. **Medido a 500k×768d:** recall f32 0.974→**0.990** (curva inteira +~5pt; agora alcança ≥0.99, antes platôava em 0.974), SBQ 0.986→**0.994** = paridade de valor de recall com pgvector (0.994). 63/63 pg_tests GREEN. **Honesto (Regra 3):** NÃO é paridade de FRONTIER — pgvector ainda tem recall maior no mesmo ef (iso-recall ~1.8× mais lento); o fix sobe o teto, não iguala a eficiência recall-por-ef (follow-up: `select_from`/`SelectNeighbors` exato). Build ~2-3× mais lento (trade-off recall>build-speed) — opt-out via `THEODB_HNSW_EXTEND_CANDIDATES=0`. ADR-0034.
-
 ### Deprecated
 
 ### Removed
@@ -1537,9 +1973,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 - **P0 bloqueador-raiz — 2 achados decisivos que reformulam o gap de recall** (`docs/benchmarks/p0-vector-superiority-root-blocker.md`, `docs/benchmarks/m60-raw/m60_efc_{sweep_100k,seq_vs_parallel_500k}768d.json`, knob `THEODB_HNSW_EF_CONSTRUCTION` em `theodb_rs/src/am/build.rs`): experimento efc×modo-de-build em droplet — (1) o "gap" é **degradação por ESCALA**, não defeito fixo: theodb recall@10 = **0.998 a 100k×768d** (excelente, ≈/> pgvector) e só cai a 0.974 a 500k; (2) a hipótese do **overwrite paralelo é REFUTADA** (7º lever): sequential 0.974 ≈ parallel 0.972 a 500k — o build sequencial (sem overwrite) tem o MESMO plateau. A degradação é inerente ao algoritmo de build a escala, nos dois modos. Notícia de produto: para ≤100k vetores o vetor do theodb está em paridade/superioridade com pgvector. Knob `THEODB_HNSW_EF_CONSTRUCTION` (benchmark-only, default 64 — comportamento inalterado; espelha `THEODB_HNSW_PARALLEL_THRESHOLD`).
 - **M71 (discover) — blueprint de latência iso-recall do scan** (`.claude/knowledge-base/discoveries/blueprints/m71-scan-latency-blueprint.md`): diagnóstico dual-source (theodb↔pgvector) + SOTA (PANORAMA arXiv:2510.00566, Faiss FastScan, KScaNN arXiv:2511.03298) do gap de latência a iso-recall (theodb precisa ~5× o `ef` do pgvector p/ o mesmo recall). Levers ranqueados: (1) qualidade de grafo (multi-entry build já +29% QPS medido), (2) kernel de distância com early-out por limiar (onde theodb pode SUPERAR pgvector), (3) SIMD multi-accumulator + hoist da norma da query no cosseno. Rigor iso-recall (não QPS-sweep). Implement+benchmark exigem droplet.
-
-### Changed
-- **M71 CONCLUÍDO — melhoria de latência do AM medida (multi-entry build), DoD reenquadrada (ADR-0031)** (`theodb_rs/src/ann/hnsw.rs`, `ann/hnsw_parallel.rs`, `docs/adr/0031-m71-latency-improvement-not-superiority.md` (NEW), `docs/benchmarks/m71-scan-latency.md` (NEW), `ROADMAP.md § M71` [x]): o build do HNSW próprio carrega o conjunto completo `W` como entry-set entre camadas (Malkov-Yashunin Alg.1 `ep←W` / pgvector) em vez de colapsar a um único nó → grafo melhor-conectado → **+29% QPS a 500k×768d, recall-neutral (0.972 vs 0.974), 63/63 pg_tests GREEN**. DoD reenquadrada (measurement-first como o M60): superioridade iso-recall gateada na navegabilidade do grafo (theodb precisa ~2× o `ef` do pgvector a 100k, ~5× a 500k — mesma raiz do M60) → M71 entrega a **melhoria medida** e documenta o gap iso-recall (pgvector 2.13ms vs theodb 3.16ms a recall 0.996/100k). Cortes de custo/candidato (kernel bounded, norm-hoist) = follow-up. Sem claim de superioridade. ADR-0031.
 
 ### Deprecated
 
@@ -1555,9 +1988,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 - **M60 — medição decisiva do recall do HNSW próprio vs pgvector a 500k×768d** (`docs/benchmarks/m60-hnsw-recall.md`, `docs/benchmarks/m60-raw/`, `benchmarks/run_m60_recall.py` (NEW), `benchmarks/run_m60_pgvector_control.py` (NEW), blueprint `m60-hnsw-recall-quality`): head-to-head no MESMO corpus gaussian-mixture (droplet c-8, pg17) — pgvector best recall@10 = **0.988**, theodb_hnsw f32 = 0.974, theodb SBQ (over_fetch=32) = **0.986**. Dois achados (Regra 3): (1) **o gate 0.99 é artefato do dado** — o próprio pgvector só chega a 0.988 (256 clusters apertados em 768d → teto de recall@10 < 0.99 para índices HNSW); a DoD do M60 deve virar **paridade-pgvector**, não 0.99 absoluto; (2) existe um gap real **~1.4pt** (f32 vs pgvector), com o SBQ já em quase-paridade. Duas hipóteses de fix do discover (descida de build por beam ef=1; multi-entry `ep←W`) foram **implementadas e REFUTADAS por medição** a 500k×768d (no-op no recall) — revertidas; 5 levers refutados no total. Fechamento do M60 via reenquadramento de DoD → ver a entrada em `Changed` (ADR-0030). O grafo multi-entry rendeu +29% de QPS a recall igual (achado registrado para o M71).
 - Roadmap v5 "Superioridade vetorial P0 (MEDIDA)" definido (`ROADMAP-v5.md` + seção `# Roadmap v5` em `ROADMAP.md`): fecha o pilar P0 do North Star (`docs/adr/0002`) que segue parcial — superioridade vetorial comprovada por benchmark. Milestones: **M60** (fundação — recall HNSW ≥0.99 a escala, já aberto), **M71** (latência-superior do AM, scan hot-path v2), **M72** (QPS a 1M+ multi-cliente), **M73** (head-to-head MEDIDO vs ScaNN/AlloyDB — o veredito de superioridade), **M74** (CONDICIONAL — quantização SOTA só com lever não-refutado por M57/M59). Measurement-first + honesto (Regra 3/5): cada milestone tem gate executável e ACEITA honest-negative como conclusão; o v5 NÃO promete vencer o ScaNN (~25× gap de QPS medido no M33; M57 SBQ + M59 anisotrópica+AH já honest-negative) — promete o veredito medido de onde o TheoDB está vs o SOTA.
 
-### Changed
-- **M60 CONCLUÍDO — DoD de recall reenquadrada para PARIDADE-pgvector (ADR-0030), fechado pelo caminho SBQ** (`docs/adr/0030-m60-recall-parity-not-absolute-099.md` (NEW), `ROADMAP.md § M60` [x]): a medição head-to-head a 500k×768d provou que o gate `recall@10 ≥0.99` é **artefato do dado** — o próprio pgvector só chega a **0.988** (256 clusters apertados em 768d ⇒ teto de recall@10 < 0.99 para índices HNSW). A DoD passa a **paridade-pgvector** (measurement-first, North Star ADR-0002). **Paridade atingida pelo SBQ: 0.986 ≈ 0.988** (GT exato). Gap do f32 puro (0.974, ~1.4pt) = **follow-up autorizado** (opção B) — resistiu a 5 levers refutados por medição. Sem claim de superioridade (paridade de recall; latência/QPS = M71). ADR-0030.
-
 ### Deprecated
 
 ### Removed
@@ -1570,15 +2000,10 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Removed
 - **M70 — pgvector e pgvectorscale REMOVIDOS totalmente** (`theodb_rs/src/dtype.rs`, `am/mod.rs`, `theodb_rs.control`, `theodb.control`, `sql/*.sql`, `Dockerfile`): o tipo `vector` do TheoDB agora é **100% own-code** — o pgvector e o pgvectorscale saíram da distribuição (Dockerfile sem o stage pgvectorscale, sem o `make install` do pgvector; **pg_duckdb intocado**). Fecha o roadmap v4 "Independência do pgvector" e o pilar do North Star.
 
-### Changed
-- **M70 — tipo `vector` own-code movido para `public.vector` (drop-in) + flip da dependência** (ADR-0029): o tipo próprio (M69) migrou de `theodb.vector` para `public.vector` — `::vector` do usuário e o `FOR TYPE vector` das opclasses do AM resolvem ao tipo own-code SEM mudança de código. **Flip (ADR-0029 D1):** `theodb_rs` vira a BASE da stack (provê o tipo `public.vector` + os AMs ANN + os schemas `theodb`/`ai` via o bloco `theodb_schema_bootstrap`); `theodb_rs.control requires` ZERADO; o umbrella `theodb.control requires` vira `theodb_rs` (antes ambos requeriam o pgvector, o 3º que quebrava o ciclo de dependência). **Migração** de instalações com pgvector via intermediário `real[]` (`docs/ops/pgvector-migration.md`, janela de manutenção — o byte-cast direto do M69 não se aplica ao upgrade por colisão de nome `public.vector`; honestidade Regra 3). **Validado pg17 real SEM pgvector:** 229/230 suíte completa GREEN standalone (a 1 falha é o teste de timing SIMD `pg_cosine_simd_per_candidate_speedup`, flaky sob carga — passa isolado, M70 não tocou `vec.rs`); os pg_tests do AM `set-equal-vs-seqscan` + 15/15 dtype + 13/13 HNSW GREEN sobre `public.vector`; **`CREATE EXTENSION theodb CASCADE` sem pgvector** → extensões `theodb` + `theodb_rs` (zero `vector`/`vectorscale`), `'[1,2,3]'::vector` resolve ao tipo próprio. Councils index-storage: greenfield SHIPPABLE (findings de migração corrigidos). Sem claim de performance (correção/paridade — o dado é o gate de não-regressão de recall). Código ORIGINAL (VectorChord AGPL só estudo). ADR-0029.
-
 ## [0.59.0] - 2026-07-09
 ### Added
 - **M69 — tipo vetorial PRÓPRIO own-code `theodb.vector`** (`theodb_rs/src/dtype.rs` (NEW), `lib.rs`, `docs/adr/0028`): tipo `vector` own-code no schema `theodb`, com layout `#[repr(C)]` **byte-idêntico** ao `Vector` do pgvector (`varlena u32 · dim u16 · unused u16 · f32[]`; 8+4·dim bytes) — coexiste com `public.vector` (pgvector) SEM colisão (schemas distintos). I/O text (parse espelha `vector.c`, PostgreSQL License) + **typmod** (parse + enforce via length-coercion cast) + **recv/send binário** (wire big-endian, `unused`==0) + operadores `<->`/`<#>`/`<=>` (reuso dos kernels `vec.rs`) + casts `real[]`/`float8[]`/`text` + **cast binário `WITHOUT FUNCTION` bidirecional com o `vector` do pgvector** (habilita coexistência + a migração grátis do M70). Fundação para remover o pgvector (M70 fará `SET SCHEMA public` ⇒ drop-in). **Validado pg17 real:** 16/16 dtype pg_tests GREEN (paridade `vector_type`/`cast`/`copy` binário + byte-compat dim-variado + typmod + negative-cases + memória sem UAF) + 13/13 HNSW AM GREEN (**não tocou o AM, zero regressão P0**). Código ORIGINAL (VectorChord AGPL só estudo). Sem claim de performance (correção/paridade). Spike ADR-D3 (7/7). ADR-0028.
 - Roadmap amended: added M69 Tipo vetorial próprio own-code (coexistindo com pgvector, gated por paridade) + M70 Remover pgvector (e pgvectorscale) totalmente (`/roadmap-feature own-vector-type-drop-pgvector`) — Roadmap v4 "Independência do pgvector"; decisão da fonte de verdade: blueprint SHIPPABLE `.claude/knowledge-base/discoveries/blueprints/own-vector-type-drop-pgvector-blueprint.md` (veredito A, decomposto em 2 milestones).
-
-### Changed
 
 ### Deprecated
 
@@ -1592,8 +2017,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ### Added
 - **M68 — observabilidade do query vetorial (`theodb.explain_scan` + `candidates_seen`)** (`theodb_rs/src/ann/scan_core.rs`, `am/hnsw_page.rs`, `am/autotune.rs`, `api.rs`, `docs/ops/vector-scan-diagnostics.md` (NEW)): fecha o pilar de operabilidade do scan ANN (opaco por natureza). **`theodb.explain_scan(index_table, vector_col, query, ef, k)`** — função diagnóstica que retorna, de UM scan real: `index_name`, `ef_effective`, `pages_read`, `candidates_seen`, `latency_us`, `results` (padrão Qdrant `/telemetry`/Milvus — **não** `amexplain`, que não existe no PG17/18). **`candidates_seen`** — tamanho do pool navegado no beam, capturado own-code em `ground_search_nodes` (`visited.len()` antes do drop) e propagado ao thread_local `SCAN_CANDIDATES` (irmão do `SCAN_PAGES_READ` do M67); distingue "grafo caro de navegar" (candidates alto) de "I/O pesado / spill" (pages alto). `theodb.scan_stats` agora retorna 4-tupla (`pages_read, candidates_seen, latency_us, results`); catálogo heap `theodb._index_scan_stats` ganha `sum_candidates`; `theodb.index_scan_stats` expõe `avg_candidates` (pilar (c) do wiring-triad = catálogo consultável, crash-safe M35 — não histograma Prometheus, adiado por YAGNI). REVOKE FROM PUBLIC. **Doc de operação** `docs/ops/vector-scan-diagnostics.md`: playbook recall-baixo/latência-alta + tabela sinal→causa→ação. **pg_tests GREEN** (`explain_scan_shows_index_and_candidates`, `scan_stats_records_real_pages_read` estendido p/ 4-tupla + `sum_candidates>0`). Observabilidade → validado por teste determinístico, **sem benchmark de performance** (nenhum claim "Nx"). ADR-0027.
 
-### Changed
-
 ### Deprecated
 
 ### Removed
@@ -1605,8 +2028,6 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [0.57.0] - 2026-07-09
 ### Added
 - **M67 — auto-tune de índices vetoriais (`theodb.recommend_ef` + coletor de stats)** (`theodb_rs/src/am/autotune.rs` (NEW), `am/mod.rs`, `am/hnsw_page.rs`, `api.rs`, `benchmarks/run_m67_autotune.py` (NEW)): **recomendador determinístico** `theodb.recommend_ef(index, vec_col, samples, recall_target, k)` — bisecção monotônica sobre recall(ef) (monotônico, Malkov & Yashunin) contra GT exato amostrado (seqscan), retorna o menor ef que atinge o alvo (ctid como id estável; MAX_EF se inatingível). **Coletor** `theodb.scan_stats(tbl,col,query,ef,k)` — mede o **pages_read REAL** (thread_local que o traverse HNSW bumpa — 1 add in-memory, sem page write) + latência, persiste no catálogo heap `theodb._index_scan_stats` (FORA das páginas do índice — crash-safe, M35); `theodb.index_scan_stats(rel)` lê os agregados. REVOKE FROM PUBLIC. **5 pg_test GREEN** (stack real) + 12 pytest (MAE/RQUT/convergência). **Benchmark (10k sintético) — CONVERGED com nuance honesta:** o recomendador converge na média (recall 0.986 ≥ alvos), MAS (1) corpus fácil demais (baseline ef=64 dá recall 1.0; todos os alvos → ef=10 — não estressa a curva ef; SIFT1M mostraria o scaling), (2) RQUT 12% de cauda (mean-optimal, não tail-safe — v2). **NÃO auto-tune online** (deferido por evidência ADR-0026 — oscilação; SOTA é early-termination acadêmico DARTH/Ada-ef). **amcostestimate:** fórmula M48 (f(ef)) retida + auditabilidade via scan_stats; calibração-in-planning DEFERIDA por risco EC-3 (SPI no planning abortaria TODO o planejamento). `docs/benchmarks/m67-autotune.{md,json}`, ADR-0026.
-
-### Changed
 
 ### Deprecated
 

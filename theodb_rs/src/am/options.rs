@@ -67,12 +67,8 @@ pub(crate) const DEFAULT_RABITQ_BITS: i32 = 7;
 const MIN_RABITQ_BITS: i32 = 1;
 const MAX_RABITQ_BITS: i32 = 8;
 
-/// Vector-research E2 — `WITH (degree_bound = R)`: the co-located `theodb_symqg` graph's per-vertex out-degree
 /// (a multiple of 32 for FastScan alignment). 32 = HNSW base-layer m0 (no truncation). Larger R → higher recall +
 /// bigger rows. The reader rounds a non-multiple-of-32 UP.
-pub(crate) const DEFAULT_SYMQG_DEGREE: i32 = 32;
-const MIN_SYMQG_DEGREE: i32 = 32;
-const MAX_SYMQG_DEGREE: i32 = 512;
 
 /// M86 (Roadmap v7) — `WITH (soar_lambda = N)`: SOAR spill's orthogonality-penalty weight `λ`, stored
 /// **milli-scaled** (`λ × 1000`) so one int reloption carries the float knob (KISS, mirrors `aq_threshold`).
@@ -192,15 +188,6 @@ pub(crate) unsafe fn init() {
         DEFAULT_RABITQ_BITS,
         MIN_RABITQ_BITS,
         MAX_RABITQ_BITS,
-        pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
-    );
-    pg_sys::add_int_reloption(
-        RELOPT_KIND,
-        "degree_bound".as_pg_cstr(),
-        "Per-vertex out-degree for the theodb_symqg co-located graph (multiple of 32; 32 = HNSW m0, E2)".as_pg_cstr(),
-        DEFAULT_SYMQG_DEGREE,
-        MIN_SYMQG_DEGREE,
-        MAX_SYMQG_DEGREE,
         pg_sys::AccessExclusiveLock as pg_sys::LOCKMODE,
     );
 }
@@ -451,7 +438,6 @@ pub(crate) unsafe fn rabitq_bits_from_relation(indexrel: pg_sys::Relation) -> u8
     }
 }
 
-/// E2 — resolve `degree_bound` (R) for a `theodb_symqg` index: the `WITH (degree_bound=R)` value ROUNDED UP to a
 /// multiple of 32 (FastScan alignment) and clamped to `[MIN, MAX]`, or the default 32 when absent.
 ///
 /// # Safety
@@ -459,10 +445,8 @@ pub(crate) unsafe fn rabitq_bits_from_relation(indexrel: pg_sys::Relation) -> u8
 pub(crate) unsafe fn degree_bound_from_relation(indexrel: pg_sys::Relation) -> usize {
     let rd_options = (*indexrel).rd_options;
     if rd_options.is_null() {
-        return DEFAULT_SYMQG_DEGREE as usize;
     }
     let r = (*(rd_options as *const TheodbIvfflatOptions)).degree_bound;
-    let r = r.clamp(MIN_SYMQG_DEGREE, MAX_SYMQG_DEGREE);
     (r as usize).div_ceil(32) * 32 // round up to a multiple of 32
 }
 

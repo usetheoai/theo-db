@@ -1,0 +1,59 @@
+{
+  "skill_name": "discover-edge-cases",
+  "notes": "This phase asks what could make a measurement LIE. Its highest-value judgement is recognising an unfalsifiable hypothesis and classifying it MUST FIX — every other defect produces a wrong answer someone might catch, that one produces a measurement that CANNOT fail and will be believed precisely because it ran cleanly.",
+  "evals": [
+    {
+      "id": 0,
+      "name": "unfalsifiable-hypothesis-is-always-must-fix",
+      "prompt": "review the measurement plan for B-025. the hypothesis is 'the trace explorer could have a better navigation experience'",
+      "expected_output": "The skill recognises that no plausible result could refute this hypothesis and classifies it MUST FIX — not SHOULD TEST, not DOCUMENT. The verdict is MEASUREMENT PLAN NEEDS ADJUSTMENT, with a concrete reformulation suggested in one line.",
+      "files": [],
+      "assertions": [
+        "The unfalsifiable hypothesis was identified",
+        "It was classified MUST FIX, not SHOULD TEST or DOCUMENT",
+        "The verdict is MEASUREMENT PLAN NEEDS ADJUSTMENT",
+        "The reasoning explains that a measurement which cannot fail will be believed because it ran cleanly",
+        "A concrete falsifiable reformulation was suggested in one line of plan change"
+      ]
+    },
+    {
+      "id": 1,
+      "name": "flags-a-target-that-resolves-but-is-stale",
+      "prompt": "review this plan: it cites theo-lens/src/api/traces.ts:142 as a target, but that file went through a big refactor in July",
+      "expected_output": "The skill flags that a target can resolve and still be stale — the line now means something else. This is a Target-family finding, and the suggested fix is to re-anchor by symbol or re-open the file rather than trusting the line number.",
+      "files": [],
+      "assertions": [
+        "The 'resolves but stale' risk was raised explicitly",
+        "The finding is classified in the Target family",
+        "The fix is one line of plan change (re-anchor), not a new phase",
+        "The reasoning distinguishes 'the path opens' from 'the line still means what the plan assumes'"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "does-not-widen-scope",
+      "prompt": "give this theo-rag measurement plan a look before we run it",
+      "expected_output": "Every finding is a checkpoint or a different tool — a fix of at most one line of plan change. The skill does not propose new questions, a wider investigation, or additional repos to look at. Scope creep is the anti-pattern this phase is most prone to.",
+      "files": [],
+      "assertions": [
+        "No finding proposes adding new measurement questions",
+        "No finding proposes widening the investigation to another repo or subsystem",
+        "Each suggested fix fits in one line of plan change",
+        "Findings that are theoretical or whose fix costs more than the problem were classified IGNORE and left out"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "mode-specific-checks-are-applied",
+      "prompt": "review the plan for B-031 — it's review mode, about a theo-contracts function that seems never to be called",
+      "expected_output": "For review mode the skill checks whether the plan will rule out that the code is dead, that the caller never existed, and that the shape is deliberate. For theo-contracts specifically, it flags that a local grep proves nothing — consumers live in other repos.",
+      "files": [],
+      "assertions": [
+        "The three review-mode false positives (dead / never existed / deliberate) were checked",
+        "It flagged that in theo-contracts a local grep cannot prove a symbol is unused",
+        "It did not apply live-test or bug checks that are irrelevant to review mode",
+        "The blast-radius question (consumers outside the repo) was raised"
+      ]
+    }
+  ]
+}

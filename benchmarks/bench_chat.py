@@ -11,7 +11,7 @@ Rust after M18) — minimal, no retry, same request/parse shape as the historica
 Usage (against a running TheoDB container, chat stub reachable via the endpoint):
     PGHOST=localhost PGPORT=55432 python3 benchmarks/bench_chat.py \
         --endpoint http://host.docker.internal:8100/v1/chat/completions \
-        --report docs/benchmarks/m18-ai-rust-vs-plpython.md
+        --report wiki/benchmarks/m18-ai-rust-vs-plpython.md
 """
 from __future__ import annotations
 

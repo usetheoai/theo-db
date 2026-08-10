@@ -216,7 +216,7 @@ def main():
     ap.add_argument("--out-dir", default="/tmp/m130_bb_out", help="host dir mounted into the container for summary json")
     ap.add_argument("--olap-oracle", action="store_true", help="after the run, exercise the 22 CH queries as the OLAP result-consistency oracle (needs psql + loaded schema)")
     ap.add_argument("--psql", default=None, help="psql binary path for the OLAP oracle (else PATH)")
-    ap.add_argument("--out", default="docs/benchmarks/m130-htap.json")
+    ap.add_argument("--out", default="benchmarks/artifacts/m130-htap.json")
     args = ap.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
     data = run(args)

@@ -131,7 +131,7 @@ def main() -> int:
 
     if args.write_doc:
         _write_doc(args, pgver, results, parity_ok)
-        print("wrote docs/benchmarks/m20-vector-ops-parity.md")
+        print("wrote wiki/benchmarks/m20-vector-ops-parity.md")
 
     if not parity_ok:
         print("FAIL: numeric parity violated (max rel|Δ| > tolerance)", file=sys.stderr)

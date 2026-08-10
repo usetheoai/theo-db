@@ -155,7 +155,7 @@ def main():
     ap.add_argument("--m-queries", type=int, default=100)
     ap.add_argument("--k", type=int, default=10)
     ap.add_argument("--targets", default="0.90,0.95,0.99")
-    ap.add_argument("--out", default="docs/benchmarks/m67-autotune.json")
+    ap.add_argument("--out", default="benchmarks/artifacts/m67-autotune.json")
     a = ap.parse_args()
     targets = [float(x) for x in a.targets.split(",")]
     res = run(a.n, a.dim, a.m_queries, a.k, targets)

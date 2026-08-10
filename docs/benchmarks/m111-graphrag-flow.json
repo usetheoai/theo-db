@@ -1,1 +1,0 @@
-{"benchmark":"HotpotQA distractor (validation), HuggingFace hotpotqa/hotpot_qa","questions":30,"recall_at_k":4,"embed_model":"text-embedding-3-small","vector_recall":0.8500,"graph_only_recall":0.3167,"hybrid_rrf_recall":0.7167,"note":"hybrid = RRF(vector, graph-expanded) — the SOTA-fair comparison where the graph AUGMENTS vector"}

@@ -1,0 +1,160 @@
+{
+  "medido_em": "2026-08-09",
+  "ambiente": "container theo-db:0.139.0, vector(1536), indice via sintaxe pgvector, ANALYZE rodado",
+  "sintoma": {
+    "N": 20000,
+    "plano_default": {
+      "plano": "Sort + Seq Scan",
+      "custo": "830.19..880.19",
+      "execution_time_ms": 182.117
+    },
+    "plano_forcado": {
+      "plano": "Index Scan HNSW",
+      "custo": "3404.25..83080.00",
+      "execution_time_ms": 1.994
+    },
+    "indice_mais_rapido_x": 91.3,
+    "indice_estimado_mais_caro_x": 94.4
+  },
+  "causa_raiz": {
+    "onde": "theodb_rs/src/am/mod.rs:208-212 para no nucleo startup=total*ratio",
+    "o_que_falta": "a correcao TOAST do pgvector hnswcostestimate, omitida deliberadamente e justificada em am/cost.rs:10-14",
+    "fonte_primaria": "https://raw.githubusercontent.com/pgvector/pgvector/master/src/hnsw.c lido em 2026-08-09",
+    "paginas_medidas": {
+      "idx_pages": 20522,
+      "heap_pages": 128,
+      "ratio": 0.040975
+    },
+    "condicao_do_if_satisfeita": true,
+    "startup_nosso": 3404.25,
+    "startup_com_a_correcao": 168.7,
+    "reducao_pct": 95,
+    "custo_do_plano_seqscan": 810.21,
+    "veredito": "com a correcao 168.7 < 810.21 -> o indice VENCE. A omissao e decisiva, nao um ajuste leve.",
+    "correcao_da_aritmetica": "previsto 168.7, medido no pgvector 324.60 — direcao e ordem de grandeza certas, numero exato errado; o calculo usou nosso ratio/numIndexPages sobre um genericcostestimate diferente"
+  },
+  "hipotese_refutada": {
+    "hipotese": "procost=1 nas funcoes de distancia subestima o Sort de 1536 dimensoes",
+    "teste": "ALTER FUNCTION theodb_vector_cosine_distance COST em 1, 10, 100, 1000",
+    "resultado": "Seq Scan em todos os quatro — a hipotese e FALSA, nao e o operador"
+  },
+  "cruzamento": {
+    "1000": "Seq Scan",
+    "5000": "Seq Scan",
+    "20000": "Seq Scan",
+    "conclusao": "nao ha cruzamento nessa faixa — nao e questao de escala"
+  },
+  "ivfflat": {
+    "N": 20000,
+    "opclass": "theodb_ivfflat_cosine_ops",
+    "plano": "Seq Scan",
+    "conclusao": "mesmo defeito; o codigo omite a correcao sequentialRatio equivalente"
+  },
+  "achado_lateral": "o shim de compatibilidade pgvector nao expoe vector_cosine_ops para theodb_ivfflat — so para o hnsw",
+  "nao_medido": [
+    "dimensoes acima de 1536",
+    "escalas acima de 50k",
+    "os 3 testes unitarios NAO foram compilados nem executados: exigem PG18 configurado no pgrx (cargo pgrx init incompleto no host) e a suite nao roda por B-001"
+  ],
+  "controle_pgvector_real": {
+    "imagem": "ankane/pgvector:v0.5.1",
+    "cenario": "identico — 20000 x vector(1536), mesmo CREATE INDEX/ANALYZE/consulta",
+    "paginas": {
+      "heap": 128,
+      "idx": 20001
+    },
+    "startup": 324.6,
+    "plano": "Index Scan using t_v_idx",
+    "theodb_mesmo_cenario": {
+      "paginas": {
+        "heap": 128,
+        "idx": 20522
+      },
+      "startup": 3404.25,
+      "plano": "Seq Scan"
+    },
+    "razao_startup": 10.5,
+    "conclusao": "causa-raiz confirmada por implementacao independente — as paginas batem, a unica diferenca e a correcao"
+  },
+  "correcao_aplicada_e_verificada": {
+    "imagem": "theodb:m175-fix (build local do Dockerfile do projeto)",
+    "mudanca": [
+      "theodb_rs/src/am/cost.rs: funcao pura toast_startup_correction + 3 testes + docstring da omissao reescrita",
+      "theodb_rs/src/am/mod.rs: amcostestimate chama a correcao; spc_seq_page_cost via get_tablespace_page_costs"
+    ],
+    "caso_ancora": {
+      "dim": 1536,
+      "rows": 20000,
+      "heap": 128,
+      "idx": 20522,
+      "antes": {
+        "startup": 3404.25,
+        "plano": "Seq Scan",
+        "execution_ms": 182.117
+      },
+      "depois": {
+        "startup": 134.21,
+        "plano": "Index Scan using t_ix",
+        "execution_ms": 6.401
+      },
+      "ganho_x": 28.5
+    },
+    "varrimento": [
+      {
+        "dim": 64,
+        "rows": 20000,
+        "am": "hnsw",
+        "heap": 741,
+        "idx": 1237,
+        "usa_indice": true,
+        "startup": 211.03,
+        "nota": "guarda nao dispara (vetor nao TOASTed); indice vence por ser pequeno"
+      },
+      {
+        "dim": 256,
+        "rows": 20000,
+        "am": "hnsw",
+        "heap": 2858,
+        "idx": 3380,
+        "usa_indice": true,
+        "startup": 565.87,
+        "nota": "idem"
+      },
+      {
+        "dim": 768,
+        "rows": 20000,
+        "am": "hnsw",
+        "heap": 128,
+        "idx": 10522,
+        "usa_indice": true,
+        "startup": 134.21
+      },
+      {
+        "dim": 1536,
+        "rows": 50000,
+        "am": "hnsw",
+        "heap": 319,
+        "idx": 51302,
+        "usa_indice": true,
+        "startup": 325.75,
+        "nota": "escala acima de 20k"
+      },
+      {
+        "dim": 1536,
+        "rows": 20000,
+        "am": "ivfflat",
+        "heap": 128,
+        "idx": 15509,
+        "usa_indice": true,
+        "startup": 143.0,
+        "nota": "ivfflat corrigido pelo mesmo amcostestimate compartilhado"
+      }
+    ],
+    "previsao_vs_medido": {
+      "previsto": 168.7,
+      "medido": 134.21,
+      "nota": "aritmetica na vizinhanca certa; numero exato errado nas duas previsoes (168,7 vs 324,60 no pgvector, vs 134,21 no nosso)"
+    },
+    "defeito_de_instrumento_corrigido": "a primeira leitura do varrimento pegava o Seq Scan do InitPlan (a subconsulta SELECT v ... LIMIT 1), que aparece antes do plano principal na saida do EXPLAIN — cinco falsos negativos que contradiziam uma verificacao correta"
+  }
+}

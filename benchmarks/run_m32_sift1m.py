@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """M32 operator artifact — full SIFT1M (1M×128) 4-way head-to-head: theodb_ivfflat / theodb_hnsw vs
-pgvector ivfflat / hnsw. Writes docs/benchmarks/m32-scale-sift1m.{md,json}.
+pgvector ivfflat / hnsw. Writes wiki/benchmarks/m32-scale-sift1m.md e benchmarks/artifacts/m32-scale-sift1m.json.
 
 This is the >=1M evidence run (ADR-4: operator-invoked, not per-commit CI). It reuses the mature
 `theodb_bench` harness via the `--index 4way --full-train` path (neighbors-GT, no 10^10 brute force).

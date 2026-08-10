@@ -10,7 +10,7 @@ Produce an implementation plan — what to build, how, in what order, with which
 
 - A feature has a defined goal and known prior art (otherwise, run DISCOVER first).
 - A non-trivial bug fix that touches multiple modules.
-- (Optional macro context) — when running inside the `cycle-roadmap` super-loop, `/to-plan` accepts `--milestone M<N>` to persist the milestone ID in the plan frontmatter; `cycle-release` reads this metadata to flip the checkbox post-merge. Plans without `--milestone` are valid (ad-hoc / hotfix work) but skip the post-release flip.
+- (Optional macro context) — when running inside the `cycle-maintenance` super-loop, `/to-plan` accepts `--milestone M<N>` to persist the milestone ID in the plan frontmatter; `cycle-release` reads this metadata to flip the checkbox post-merge. Plans without `--milestone` are valid (ad-hoc / hotfix work) but skip the post-release flip.
 
 Do NOT trigger PLAN for:
 - Single-line changes (write the code).
@@ -89,7 +89,7 @@ A BLOCKED report blocks downstream: `/plan-confidence` MUST NOT honor the plan a
 
 - Schema for cycle rules: `rules/cycle-rule-schema.md`
 - Skills: `skills/grill-me/SKILL.md`, `skills/to-plan/SKILL.md`, `skills/edge-case-plan/SKILL.md`, `skills/deps-audit/SKILL.md`, `skills/plan-confidence/SKILL.md`, `skills/plan-improve/SKILL.md`
-- Macro super-loop: `rules/cycle-roadmap.md` — defines the `milestone_id` frontmatter contract that plans MAY carry
+- Macro super-loop: `rules/cycle-maintenance.md` — defines the `milestone_id` frontmatter contract that plans MAY carry
 - Upstream: `rules/cycle-discover.md` (when prior art is unknown)
 - Downstream: `rules/cycle-implement.md` (consumes the plan with verdict ≥ SHIPPABLE_WITH_CAVEATS)
 - Conventions: `rules/architecture.md`, `rules/testing.md`

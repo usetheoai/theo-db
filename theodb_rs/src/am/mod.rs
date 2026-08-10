@@ -77,22 +77,6 @@ fn theodb_hnsw_amhandler(_fcinfo: pg_sys::FunctionCallInfo) -> PgBox<pg_sys::Ind
     make_amroutine(build::ambuild_hnsw, build::ambuildempty_hnsw)
 }
 
-/// The `theodb_symqg` handler (E2) — the SAME shared plumbing (scan/vacuum/cost dispatch on the persisted blob's
-/// magic), only the build persists a co-located SymphonyQG quantized graph instead of an HNSW blob.
-#[pg_extern(sql = "
-    CREATE OR REPLACE FUNCTION theodb_symqg_amhandler(internal) RETURNS index_am_handler
-        PARALLEL SAFE IMMUTABLE STRICT COST 0.0001 LANGUAGE c AS '@MODULE_PATHNAME@', '@FUNCTION_NAME@';
-    DO $$
-    BEGIN
-        IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_am WHERE amname = 'theodb_symqg') THEN
-            CREATE ACCESS METHOD theodb_symqg TYPE INDEX HANDLER theodb_symqg_amhandler;
-        END IF;
-    END;
-    $$;
-")]
-fn theodb_symqg_amhandler(_fcinfo: pg_sys::FunctionCallInfo) -> PgBox<pg_sys::IndexAmRoutine> {
-    make_amroutine(build::ambuild_symqg, build::ambuildempty_symqg)
-}
 
 /// Fill an `IndexAmRoutine` with the shared hooks + the given per-algorithm build callbacks.
 /// M135 (ADR-1) — the i-th attribute of a `TupleDesc`, read in a way that survives a major upgrade.
@@ -222,7 +206,28 @@ pub unsafe extern "C-unwind" fn amcostestimate(
     let ratio = cost::scan_visit_ratio(rel, tuples);
     pg_sys::index_close(rel, pg_sys::NoLock as pg_sys::LOCKMODE);
 
-    *index_startup_cost = costs.indexTotalCost * ratio;
+    // M175: the TOAST startup correction pgvector applies right after this core. Omitting it made the
+    // planner reject the index in every case measured (see `cost.rs` module docs). `spc_seq_page_cost` comes
+    // from the tablespace, never a hardcoded constant — a tablespace on different media has different costs.
+    let mut spc_seq_page_cost = 0.0f64;
+    pg_sys::get_tablespace_page_costs(
+        (*indexinfo).reltablespace,
+        std::ptr::null_mut(),
+        &mut spc_seq_page_cost,
+    );
+    let rel_pages = if (*indexinfo).rel.is_null() {
+        0.0
+    } else {
+        (*(*indexinfo).rel).pages as f64
+    };
+    *index_startup_cost = cost::toast_startup_correction(
+        costs.indexTotalCost * ratio,
+        costs.numIndexPages,
+        ratio,
+        rel_pages,
+        costs.spc_random_page_cost,
+        spc_seq_page_cost,
+    );
     *index_total_cost = costs.indexTotalCost;
     *index_selectivity = costs.indexSelectivity;
     *index_correlation = costs.indexCorrelation;
@@ -365,16 +370,6 @@ extension_sql!(
     requires = [theodb_hnsw_amhandler, "vector_type"],
 );
 
-// E2: the DEFAULT L2 operator class for the SymphonyQG AM (L2-only — the 1-bit sign estimator is L2-only, so no
-// cosine/ip opclass is offered; a non-L2 build fails fast in `ambuild_symqg`).
-extension_sql!(
-    r#"
-    CREATE OPERATOR CLASS theodb_symqg_l2_ops DEFAULT FOR TYPE vector USING theodb_symqg AS
-        OPERATOR 1 <-> (vector, vector) FOR ORDER BY float_ops;
-    "#,
-    name = "theodb_symqg_opclasses",
-    requires = [theodb_symqg_amhandler, "vector_type"],
-);
 
 // M49: non-default cosine (`<=>`) + inner-product (`<#>`) opclasses for both AMs. Strategy is always 1
 // (`FOR ORDER BY float_ops`); the metric is encoded in the operator + the `FUNCTION 1` metric-tag support proc

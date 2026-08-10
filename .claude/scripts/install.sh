@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installs the Cycle 6+1 pipeline ecosystem into a target project as a plugin install
+# Installs the Squad maintenance ecosystem into a target project as a plugin install
 # (target/.claude/ layout). Hooks auto-detect the layout, so target/.claude/* is
 # picked up identically to the standalone repo.
 #
@@ -13,8 +13,9 @@
 #      HOW-TO-USE.md into target/.claude/.
 #   4. Writes settings.plugin.json as target/.claude/settings.json.
 #   5. Creates empty scaffold under target/.claude/knowledge-base/
-#      (plans, implementations, reviews, audits, discoveries/{plans,blueprints,snapshots},
-#      adrs, grills, dogfood, judge-codex, references, tools) + empty agents/.
+#      (plans, implementations, reviews, audits, discoveries/{plans,opportunities,snapshots},
+#      adrs, grills, dogfood, judge-codex, backlog, maintenance-runs, tools).
+#      agents/ ships the 8 domain specialists, copied from source.
 #   6. Skips the source repo's history: caches, artifact dirs, audit trails,
 #      CHANGELOG.md, .git/, .compaction-snapshots/, .attestations/.
 #   7. Prints next steps.
@@ -59,13 +60,13 @@ if [ -d "$ECO" ] && [ "$FORCE" -ne 1 ]; then
   exit 2
 fi
 
-echo "==> Installing Cycle ecosystem"
+echo "==> Installing Squad ecosystem"
 echo "    source: $SRC_DIR"
 echo "    target: $ECO"
 
 # --- copy ecosystem code ---
 mkdir -p "$ECO"
-for item in skills rules hooks commands scripts; do
+for item in skills rules hooks commands scripts agents; do
   echo "==> Copying $item/"
   rm -rf "$ECO/$item"
   cp -r "$SRC_DIR/$item" "$ECO/$item"
@@ -96,17 +97,20 @@ KB_DIRS=(
   "implementations"             # /implement halt-loop logs
   "reviews"                     # /review reports
   "audits"                      # /code-quality + /deps-audit reports
+  "acceptance"                  # /acceptance records (end-user validation of a release)
+  "acceptance/evidence"         # screenshots, console/network dumps, transcripts
+  "maintenance-runs"            # per-item macro-loop audit trail
+  "backlog"                     # /backlog-item intake logs
   "adrs"                        # MADR 3.0 ADRs
   "grills"                      # /grill-me Q&A logs
   "dogfood"                     # /dogfood anchor manifest
   "dogfood/evidence"            # /dogfood evidence files
   "judge-codex"                 # orthogonal LLM jury outputs (optional plugin)
-  "references"                  # read-only clones of reference projects (consumer populates)
   "tools"                       # read-only docs of tools the project depends on (consumer populates)
   "discoveries"                 # /discover-* root
   "discoveries/plans"           # /discover-plan outputs
-  "discoveries/blueprints"      # /discover-execute outputs
-  "discoveries/snapshots"       # WebFetch hash-verified snapshots cited by blueprints
+  "discoveries/opportunities"   # /discover-execute outputs
+  "discoveries/snapshots"       # hash-verified snapshots cited by opportunities
   "progress"                    # per-slug progress.md (read by hooks + session-catchup)
 )
 for d in "${KB_DIRS[@]}"; do
@@ -120,8 +124,10 @@ if [ -f "$SRC_DIR/knowledge-base/backlog.md" ]; then
   fi
 fi
 
-# --- agents/ audit trail dir (empty) ---
-mkdir -p "$ECO/agents"
+# agents/ was copied above with the 8 domain specialists. An empty agents/ would
+# leave route_domain.py pointing at files that do not exist — the routing table would
+# resolve and the specialist behind it would be missing.
+
 
 # --- Validation ---
 echo "==> Validating install"

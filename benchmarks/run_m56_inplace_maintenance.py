@@ -3,7 +3,7 @@
 
 The deep-view (2026-07-07) measured the M55 baseline: the O(N) whole-index fold holds the advisory
 EXCLUSIVE lock ~86 s at 100k×768d (total stall of vector queries) with ~1.44 GB peak private RSS
-(`docs/benchmarks/m55-vacuum-wall.md`). M56 replaces the DELETE path with **in-place tombstones**
+(`wiki/benchmarks/m55-vacuum-wall.md`). M56 replaces the DELETE path with **in-place tombstones**
 (`ambulkdelete` → `vacuum_delete_inplace`): each dead node is flagged on its own page under GenericXLog,
 with **NO advisory EXCLUSIVE** and **NO O(N) rebuild**. The rare O(N) compaction (the M48 fold) runs ONLY
 when tombstones exceed `theodb.hnsw_tombstone_compact_pct` of the graph.
@@ -55,7 +55,7 @@ COMPACT_GUC = "theodb.hnsw_tombstone_compact_pct"
 # compaction mode: pct LOW so 10% deleted DOES exceed it → the M48 fold runs (the rare path).
 PCT_NO_COMPACT = 90
 PCT_FORCE_COMPACT = 5
-M55_BASELINE_WALL_MS_100K = 86000.0  # the measured M55 fold stall at 100k×768d (docs/benchmarks/m55-*.md)
+M55_BASELINE_WALL_MS_100K = 86000.0  # the measured M55 fold stall at 100k×768d (wiki/benchmarks/m55-*.md)
 PROJECT_TO = 1_000_000
 
 
@@ -219,7 +219,7 @@ CAVEATS = [
     "peak_private_rss_mb EXCLUDES shared_buffers (Private_Dirty+Private_Clean); the tombstone sweep mallocs "
     "nothing O(N) — it modifies one page at a time — so its private working set is O(#deleted), tiny vs the "
     "fold's O(N) ~1.44 GB at 100k (M55).",
-    "The M55 baseline (86 s / 1.44 GB @ 100k×768d) is quoted from docs/benchmarks/m55-vacuum-wall.md, "
+    "The M55 baseline (86 s / 1.44 GB @ 100k×768d) is quoted from wiki/benchmarks/m55-vacuum-wall.md, "
     "measured on the SAME dev-box class; treat the speedup as same-box characterization, not a portable claim.",
     "The compaction mode reproduces the fold cost (unchanged from M55) to show the RARE path; 1M for that "
     "path is an O(N) PROJECTION (see M55), never measured here.",
@@ -327,7 +327,7 @@ def _write_md(data, path):
               f"tombstone) e **compaction** com `{data['compact_guc']}={data['pct_force_compact']}` (10% "
               "passa → fold M48). Peak RSS de conexão dedicada via `smaps_rollup`; lock via poller ~1ms sobre "
               "`pg_locks`; WAL via delta de `pg_current_wal_lsn()` (método M48). Baseline M55 citado de "
-              "`docs/benchmarks/m55-vacuum-wall.md`.", "",
+              "`wiki/benchmarks/m55-vacuum-wall.md`.", "",
               "## Caveats honestos", ""]
     lines += [f"- {c}" for c in data["caveats"]] + [""]
     with open(path, "w") as f:
@@ -348,8 +348,8 @@ def main():
     ap.add_argument("--seed", type=int, default=int(os.environ.get("M56_SEED", str(SEED))))
     ap.add_argument("--runs", type=int, default=int(os.environ.get("M56_RUNS", "3")))
     ap.add_argument("--delete-frac", type=float, default=float(os.environ.get("M56_DELETE_FRAC", str(DELETE_FRAC))))
-    ap.add_argument("--out-json", default="docs/benchmarks/m56-inplace-maintenance.json")
-    ap.add_argument("--out-md", default="docs/benchmarks/m56-inplace-maintenance.md")
+    ap.add_argument("--out-json", default="benchmarks/artifacts/m56-inplace-maintenance.json")
+    ap.add_argument("--out-md", default="wiki/benchmarks/m56-inplace-maintenance.md")
     args = ap.parse_args()
 
     container = os.environ.get("THEODB_BENCH_CONTAINER", "theodb-bench")

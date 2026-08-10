@@ -36,7 +36,7 @@ impl IvfflatIndex {
 
     /// M89 (Roadmap v7 — ambuild streaming Increment 1) — ownership-taking build that MOVES the corpus vectors into
     /// `self.vectors` instead of cloning them (`ivf.rs` pre-M89 cloned the whole corpus → the 2nd of the ~4× copies
-    /// the M88 OOM was made of, `docs/adr/0038`). The `ambuild` caller hands its owned `collect_corpus` output here
+    /// the M88 OOM was made of, `wiki/decisions/0038`). The `ambuild` caller hands its owned `collect_corpus` output here
     /// and no longer holds a second copy; the AQ/SQ8 encode reads the vectors back from `self.vectors()` (no
     /// `corpus_vecs` clone). BYTE-IDENTICAL to the pre-M89 build (same vectors, same order, same kmeans) — the only
     /// change is who owns the bytes.
@@ -274,7 +274,7 @@ impl IvfflatIndex {
     /// M89 (ambuild streaming Increment 2) — each inverted list as POSITIONS into `vectors()`/`ids()`, by reference
     /// (no clone). The streaming page writers read `vectors()[pos]`/`ids()[pos]` per list and flush one list at a
     /// time, so the full corpus is never re-materialized as `Vec<(id, vector)>` (the `list_entries()` clone that,
-    /// with the writers' `enc_vec`/`items` buffering, made the M88 build peak ~4× base — `docs/adr/0038`).
+    /// with the writers' `enc_vec`/`items` buffering, made the M88 build peak ~4× base — `wiki/decisions/0038`).
     pub(crate) fn list_positions(&self) -> &[Vec<usize>] {
         &self.lists
     }

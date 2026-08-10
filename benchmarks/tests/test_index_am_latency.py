@@ -5,8 +5,8 @@ M31b DoD: the structured `theodb_ivfflat` Index Scan p50 is **≤ pgvector** at 
 Two regimes, both on DISTINCT vectors seeded from Python (seed=42, COPY) — NEVER the SQL
 `(SELECT string_agg(random()...) FROM generate_series(...))` idiom, which PostgreSQL hoists as a one-time InitPlan
 so every row gets the SAME vector (COUNT(DISTINCT)=1). That degeneracy made every pre-M31b latency number a
-brute-force-on-identical-ties measurement (all lists collapse into one) — see docs/benchmarks/m31b-simd-distance.md
-and docs/adr/0012-benchmark-data-degeneracy.md. The profiler `THEODB_SCAN_PROFILE=1` exposed it (`cand=100000,
+brute-force-on-identical-ties measurement (all lists collapse into one) — see wiki/benchmarks/m31b-simd-distance.md
+and wiki/decisions/0012-benchmark-data-degeneracy.md. The profiler `THEODB_SCAN_PROFILE=1` exposed it (`cand=100000,
 nonempty_lists=1/100`).
 
   1. UNIFORM random — the IVFFlat worst case (no cluster structure). Recall is low for BOTH; the gate asserts

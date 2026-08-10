@@ -1,0 +1,33 @@
+{
+  "model": "BAAI/bge-small-en-v1.5",
+  "layers": {
+    "A_inproc": {
+      "ms_mean": 16.706,
+      "ms_stdev": 2.195,
+      "ms_p50": 15.8,
+      "ms_p99": 24.699,
+      "n": 60
+    },
+    "C_http_tcp": {
+      "ms_mean": 18.63,
+      "ms_stdev": 5.483,
+      "ms_p50": 16.649,
+      "ms_p99": 40.477,
+      "n": 60
+    },
+    "D_http_uds": {
+      "ms_mean": 22.285,
+      "ms_stdev": 7.999,
+      "ms_p50": 18.624,
+      "ms_p99": 57.524,
+      "n": 60
+    }
+  },
+  "deltas_p50_ms": {
+    "servidor_python_mais_http_tcp": 0.849,
+    "servidor_python_mais_http_uds": 2.824,
+    "ganho_do_uds_sobre_tcp": -1.975,
+    "overhead_tcp_pct_do_total": 5.1,
+    "overhead_uds_pct_do_total": 15.16
+  }
+}

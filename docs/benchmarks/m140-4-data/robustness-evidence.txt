@@ -1,8 +1,0 @@
-servidor caiu (esperado)
-recovery/replay ocorreu no restart
-após crash+recovery: top id = 2   [esperado 2]
-CRASH_OK — índice bm25 COMMITADO durável através de SIGABRT + recovery
-VACUUM_OK
-OK   MVCC RR: A (snapshot antigo) NÃO vê o build de B = 0
-OK   MVCC RC: A vê o build de B no próximo statement (cache invalida no snapshot novo) = 1
-M140_4_ROBUSTNESS_OK

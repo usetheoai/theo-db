@@ -1,6 +1,6 @@
 # Cycle: AUTO-PLAN (sub-cycle of cycle-roadmap)
 
-Source of Truth for the end-to-end autonomous orchestrator. Sits **below** `cycle-roadmap` in the cycle hierarchy: `cycle-roadmap` selects the next milestone and delegates one full `cycle-auto-plan` run per milestone.
+Source of Truth for the end-to-end autonomous orchestrator. Sits **below** `cycle-maintenance` in the cycle hierarchy: `cycle-maintenance` selects the next milestone and delegates one full `cycle-auto-plan` run per milestone.
 
 ## Purpose
 
@@ -21,7 +21,7 @@ When NOT to use:
 - A plan already exists AND only implementation remains → call `/implement` directly.
 - The feature is trivial (< 1 hour by hand).
 - You're not 95% sure about requirements (Unbreakable Rule 1).
-- **Roadmap-driven mode:** all milestones already `[x]` (project's V1 scope is complete — declare V2 or stop) OR every `[ ]` milestone is blocked by another `[ ]` (dependency wall — `cycle-roadmap` emits `ROADMAP_BLOCKED`).
+- **Roadmap-driven mode:** all milestones already `[x]` (project's V1 scope is complete — declare V2 or stop) OR every `[ ]` milestone is blocked by another `[ ]` (dependency wall — `cycle-maintenance` emits `ROADMAP_BLOCKED`).
 
 ## Chain
 
@@ -92,6 +92,6 @@ For most features, running cycles manually with human review between them produc
 
 - Schema for cycle rules: `rules/cycle-rule-schema.md`
 - Orchestrator skill: `skills/auto-plan/SKILL.md`
-- Upstream macro super-loop: `rules/cycle-roadmap.md` — selects the next milestone, delegates one full `cycle-auto-plan` run per milestone
+- Upstream macro super-loop: `rules/cycle-maintenance.md` — selects the next milestone, delegates one full `cycle-auto-plan` run per milestone
 - Chained cycles: `rules/cycle-discover.md`, `rules/cycle-plan.md`, `rules/cycle-implement.md`, `rules/cycle-code-quality.md`, `rules/cycle-review.md`, `rules/cycle-release.md`
 - Conventions: `rules/loop-engine-convention.md`

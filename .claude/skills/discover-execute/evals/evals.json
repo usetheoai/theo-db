@@ -1,0 +1,63 @@
+{
+  "skill_name": "discover-execute",
+  "notes": "The two behaviours that define this phase are both judgement calls no script can make: killing an item when the falsification criterion is met (against the sunk cost of a long measurement), and REFUSING to kill when the measurement could not run at all. Getting the second wrong is worse — it files 'we could not measure' as 'we disproved it'.",
+  "evals": [
+    {
+      "id": 0,
+      "name": "kills-the-item-when-falsification-is-met",
+      "prompt": "run the measurement for B-014. the plan says the hypothesis dies if the endpoint issues a single query regardless of span count",
+      "expected_output": "The measurement finds one query regardless of span count. The skill stops measuring, writes status: killed with a kill_reason naming what was measured and what it showed, emits ITEM_KILLED, and reports this as a successful outcome — not as a failed run.",
+      "files": [],
+      "assertions": [
+        "The skill stopped measuring once the falsification criterion was satisfied",
+        "BACKLOG.md shows status: killed for the item",
+        "kill_reason names what was measured AND what it showed, not just 'not reproducible'",
+        "No opportunity document was produced",
+        "The report frames the kill as a successful outcome of the cycle",
+        "The skill did not continue measuring to salvage a weaker finding"
+      ]
+    },
+    {
+      "id": 1,
+      "name": "refuses-to-kill-when-the-measurement-could-not-run",
+      "prompt": "run the measurement for B-030 in live-test mode against app-dev. (the environment is down / returning 502 right now)",
+      "expected_output": "The target is unreachable, so nothing was measured and nothing was disproved. The skill STOPS and asks the human. It must not record ITEM_KILLED, must not substitute a weaker measurement, and must not reason about what the measurement would probably have shown.",
+      "files": [],
+      "assertions": [
+        "The skill did NOT record ITEM_KILLED",
+        "The item's status in BACKLOG.md is unchanged",
+        "The skill stopped and surfaced the blocker to the human",
+        "No substitute or weaker measurement was performed in place of the one that failed",
+        "The report does not speculate about what the measurement would have shown",
+        "The distinction is stated: unreachable is not disproof"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "bug-mode-runs-the-failing-test",
+      "prompt": "run the measurement for B-022 (bug mode): theo-cli returns exit 0 when a deploy step fails. the repro is in the plan",
+      "expected_output": "The skill writes the numbered repro AND a test that fails on the current state, then RUNS it and records the actual failure output. A test asserted to fail but never executed is fabricated evidence and caps the opportunity at 49.",
+      "files": [],
+      "assertions": [
+        "A test that fails on the current state was written",
+        "The test was actually executed and its output recorded",
+        "The Evidence corner contains the real failure output, not an assertion that it would fail",
+        "If the test unexpectedly passed, the skill recorded that instead of forcing the finding"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "live-test-names-the-environment-vs-product-uncertainty",
+      "prompt": "run the live-test for B-018 against app-dev: the trace listing returned 500 on a 30-day window",
+      "expected_output": "The opportunity records METHOD URL -> STATUS, console, timing — and explicitly names whether the 500 is believed to be an environment fault or a product defect, plus what would distinguish them. If it cannot yet tell, it says exactly that rather than picking the more interesting explanation.",
+      "files": [],
+      "assertions": [
+        "The Evidence corner records METHOD URL -> STATUS verbatim",
+        "The environment-vs-product uncertainty is named explicitly",
+        "What would distinguish the two is stated",
+        "A single observation was not treated as conclusive for something that could be intermittent",
+        "The probe was non-destructive — no state was mutated"
+      ]
+    }
+  ]
+}

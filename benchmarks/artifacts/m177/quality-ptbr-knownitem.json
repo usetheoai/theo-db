@@ -1,0 +1,133 @@
+{
+  "corpus": {
+    "docs": 250,
+    "queries": 250,
+    "source": "wiki (pt-BR)"
+  },
+  "results": [
+    {
+      "model": "jinaai/jina-clip-v1",
+      "license": "apache-2.0",
+      "size_gb": 0.55,
+      "dim": 768,
+      "n_docs": 250,
+      "n_queries": 250,
+      "mrr_at_10": 0.4557,
+      "success_at_1": 0.332,
+      "recall_at_10": 0.7,
+      "query_latency_p50_ms": 56.5,
+      "query_latency_mean_ms": 56.27,
+      "model_load_s": 4.8
+    },
+    {
+      "model": "Qdrant/clip-ViT-B-32-text",
+      "license": "mit",
+      "size_gb": 0.25,
+      "dim": 512,
+      "n_docs": 250,
+      "n_queries": 250,
+      "mrr_at_10": 0.113,
+      "success_at_1": 0.072,
+      "recall_at_10": 0.22,
+      "query_latency_p50_ms": 21.42,
+      "query_latency_mean_ms": 21.61,
+      "model_load_s": 4.8
+    },
+    {
+      "model": "jinaai/jina-embeddings-v2-base-de",
+      "license": "apache-2.0",
+      "size_gb": 0.32,
+      "dim": 768,
+      "n_docs": 250,
+      "n_queries": 250,
+      "mrr_at_10": 0.4023,
+      "success_at_1": 0.3,
+      "recall_at_10": 0.612,
+      "query_latency_p50_ms": 50.87,
+      "query_latency_mean_ms": 52.65,
+      "model_load_s": 5.4
+    },
+    {
+      "model": "jinaai/jina-embeddings-v2-base-code",
+      "license": "apache-2.0",
+      "size_gb": 0.64,
+      "dim": 768,
+      "n_docs": 250,
+      "n_queries": 250,
+      "mrr_at_10": 0.344,
+      "success_at_1": 0.244,
+      "recall_at_10": 0.592,
+      "query_latency_p50_ms": 47.91,
+      "query_latency_mean_ms": 49.19,
+      "model_load_s": 4.0
+    },
+    {
+      "model": "nomic-ai/nomic-embed-text-v1.5",
+      "license": "apache-2.0",
+      "size_gb": 0.52,
+      "error": "Fetching 5 files: 100%|██████████| 5/5 [00:02<00:00,  1.93it/s]"
+    },
+    {
+      "model": "nomic-ai/nomic-embed-text-v1.5-Q",
+      "license": "apache-2.0",
+      "size_gb": 0.13,
+      "error": "  model = TextEmbedding(model_name=model_name)"
+    },
+    {
+      "model": "nomic-ai/nomic-embed-text-v1",
+      "license": "apache-2.0",
+      "size_gb": 0.52,
+      "dim": 768,
+      "n_docs": 250,
+      "n_queries": 250,
+      "mrr_at_10": 0.6749,
+      "success_at_1": 0.548,
+      "recall_at_10": 0.908,
+      "query_latency_p50_ms": 53.73,
+      "query_latency_mean_ms": 53.41,
+      "model_load_s": 11.6
+    },
+    {
+      "model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+      "license": "apache-2.0",
+      "size_gb": 0.22,
+      "dim": 384,
+      "n_docs": 250,
+      "n_queries": 250,
+      "mrr_at_10": 0.4946,
+      "success_at_1": 0.412,
+      "recall_at_10": 0.684,
+      "query_latency_p50_ms": 12.67,
+      "query_latency_mean_ms": 12.61,
+      "model_load_s": 3.4
+    },
+    {
+      "model": "sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
+      "license": "apache-2.0",
+      "size_gb": 1.0,
+      "dim": 768,
+      "n_docs": 250,
+      "n_queries": 250,
+      "mrr_at_10": 0.4568,
+      "success_at_1": 0.34,
+      "recall_at_10": 0.732,
+      "query_latency_p50_ms": 30.69,
+      "query_latency_mean_ms": 31.14,
+      "model_load_s": 7.6
+    },
+    {
+      "model": "intfloat/multilingual-e5-large",
+      "license": "mit",
+      "size_gb": 2.24,
+      "dim": 1024,
+      "n_docs": 250,
+      "n_queries": 250,
+      "mrr_at_10": 0.7906,
+      "success_at_1": 0.704,
+      "recall_at_10": 0.936,
+      "query_latency_p50_ms": 107.98,
+      "query_latency_mean_ms": 107.65,
+      "model_load_s": 8.2
+    }
+  ]
+}

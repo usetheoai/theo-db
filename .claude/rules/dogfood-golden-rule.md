@@ -8,11 +8,25 @@ Without this file, `/dogfood` emits `EVIDENCE_INSUFFICIENT` with flag `golden_ru
 
 The anchor scenario is the single use case that, if you cannot dogfood it, you cannot claim production-ready. Pick one. Be specific.
 
-**Slug:** `theo-data-capability-on-theodb` (kebab-case identifier referenced in the manifest)
+**Slug:** `theo-rag-sobre-theodb`
 
-**Description:** A real theo-data capability (e.g. `theo-rag` or `theo-memory`) uses a **self-hosted TheoDB instance the team owns** — NOT pgvector, NOT a managed vector DB — as its live retrieval store, exercised by the team's own product traffic (not synthetic load) for a sustained window (≥ 30 days). Concretely: the capability declares a vectorizer (`theodb.create_vectorizer`) so the background worker keeps an embedding column fresh as content changes, and it serves the capability's real user queries through `ai.hybrid_search_rrf` (BM25 + own-vector + RRF), on infrastructure the team runs, with the team depending on the results being correct and fresh.
+**Description:** O **`theo-rag`** — produto de RAG do próprio ecossistema, que serve usuários — passa a usar
+o **TheoDB** como vector store, em vez do pgvector, na infraestrutura que o time opera. Ingestão e consulta
+reais de usuário passando pelo `theodb_hnsw` e pela superfície `theodb.embed`/híbrida.
 
-**Why this scenario:** TheoDB's primary promise is an **open-source, PostgreSQL-compatible, AI-native** database — embeddings, a declarative vectorizer, and hybrid search **inside SQL**, on your own infra, model-agnostic. This scenario exercises that entire promise end-to-end under real load: the own `vector` type + `ai.hybrid_search_rrf` (the AI-native surface), the vectorizer bgworker (the operability surface M122 hardened), and the crash-safe job queue — all at once, with a team that depends on it. If TheoDB cannot back a theo-data capability's own retrieval on our own infra, the "AI-native OSS DB you can self-host" claim is unproven, no matter how many benchmarks pass. Synthetic recall/QPS numbers (the 109 benchmark artifacts) prove the algorithms; only this proves the product.
+**Estado medido em 2026-08-09, e é o que torna este âncora o certo:** `theo-rag/package.json` declara
+`"compose:up": "docker compose up -d pgvector"`, e o `theo-memory` faz o mesmo. **Os produtos de IA do time
+usam a extensão de um concorrente, não o banco que o time constrói.** Enquanto isso for verdade, "production
+ready" é uma alegação que os próprios autores não sustentam com o próprio uso.
+
+**Why this scenario:** A promessa primária do TheoDB é ser um banco PostgreSQL-compatible cujas capacidades
+vetorial e de IA são **próprias**, não uma colagem de extensões de terceiros. O `theo-rag` é exatamente a carga
+que essa promessa existe para servir — e ele hoje escolhe o pgvector.
+
+É desconfortável na medida que a regra pede: se o produto não aguenta o RAG do próprio time, não aguenta o de
+ninguém; e se aguentar, a migração produz evidência que nenhum benchmark sintético produz — dado real,
+consulta real, falha real. O contraponto honesto é que **migrar tem custo e risco para um produto que já
+funciona**, e é por isso que este âncora vale: ele só é escolhido se o time realmente acreditar no banco.
 
 ## § 2 — Status vocabulary (LOCKED — do not change without ADR)
 

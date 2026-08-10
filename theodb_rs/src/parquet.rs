@@ -453,3 +453,77 @@ REVOKE ALL ON FUNCTION public.olap(text) FROM PUBLIC;
     name = "parquet_revoke_public",
     requires = [write_parquet, read_parquet, olap],
 );
+
+// M184 — o audit de maturidade mediu ZERO testes próprios neste módulo, contra uma nota que exigia
+// "testado" (`wiki/benchmarks/m184-pilares-superficie-medida-verdict.md`). A crash-safety do pilar já
+// tinha cobertura (`isolation/crash_parquet.sh`); a unitária não tinha nenhuma.
+//
+// `#[pg_test]` (não `#[test]`) porque o crate liga símbolos do Postgres: um binário de teste standalone
+// falharia no link de `errstart`/`errmsg` — o mesmo motivo documentado em `sq8.rs` e `sbq.rs`.
+#[cfg(any(test, feature = "pg_test"))]
+#[pgrx::pg_schema]
+mod tests {
+    // `use super::*` já traz `Float64Array`, `StringArray` e `StringViewArray` — o módulo pai os importa
+    // na linha 17. Reimportá-los aqui seria E0252 (nome definido duas vezes).
+    use super::*;
+    use pgrx::prelude::*;
+
+    // `extract_strings` aceita DUAS representações de string do Arrow. O leitor de Parquet devolve uma
+    // ou outra conforme o schema do arquivo, então tratar só `StringArray` quebraria em arquivo real —
+    // e o bug seria silencioso até alguém ler um Parquet com view.
+    #[pgrx::pg_test]
+    fn extract_strings_aceita_string_array() {
+        let arr = StringArray::from(vec!["alfa", "beta", "gama"]);
+        let got = extract_strings(&arr).expect("StringArray deve ser aceita");
+        assert_eq!(got, vec!["alfa", "beta", "gama"]);
+    }
+
+    #[pgrx::pg_test]
+    fn extract_strings_aceita_string_view_array() {
+        let arr = StringViewArray::from(vec!["alfa", "beta"]);
+        let got = extract_strings(&arr).expect("StringViewArray deve ser aceita");
+        assert_eq!(got, vec!["alfa", "beta"]);
+    }
+
+    // Caso NEGATIVO (`rules/testing.md` § 4.1): tipo errado devolve erro TIPADO com o tipo real na
+    // mensagem, em vez de entrar em pânico ou devolver vazio. Um `Vec` vazio aqui viraria "categoria sem
+    // linhas" rio abaixo — dado errado, não erro.
+    #[pgrx::pg_test]
+    fn extract_strings_recusa_tipo_nao_string_com_erro_tipado() {
+        let arr = Float64Array::from(vec![1.0, 2.0]);
+        let err = extract_strings(&arr).expect_err("Float64Array não é string — deve falhar");
+        assert!(err.contains("não uma string array"), "mensagem sem o motivo: {err}");
+        assert!(err.contains("Float64"), "mensagem não diz o tipo real recebido: {err}");
+    }
+
+    // Borda: array vazio é VÁLIDO (um Parquet pode ter zero linhas) e não pode ser confundido com erro.
+    #[pgrx::pg_test]
+    fn extract_strings_aceita_array_vazio() {
+        let arr = StringArray::from(Vec::<&str>::new());
+        assert!(extract_strings(&arr).expect("vazio é válido").is_empty());
+    }
+
+    // `work_mem_bytes` alimenta o `GreedyMemoryPool` que limita o DataFusion. Zero ou negativo viraria
+    // pool degenerado — o caminho que o M169 mostrou custar caro quando falha por recurso.
+    #[pgrx::pg_test]
+    fn work_mem_bytes_e_positivo() {
+        assert!(work_mem_bytes() > 0, "pool de memória do DataFusion não pode ser zero");
+    }
+
+    // A superfície é superuser-only por desenho (M143 review HIGH-1). O REVOKE vive num `extension_sql!`
+    // e some silenciosamente num refactor — este teste é o que faz a perda aparecer.
+    #[pgrx::pg_test]
+    fn primitivas_de_arquivo_sao_revogadas_de_public() {
+        for f in ["write_parquet(text, text)", "read_parquet(text)", "olap(text)"] {
+            let sql = format!(
+                "SELECT has_function_privilege('public', 'public.{f}', 'EXECUTE')"
+            );
+            let granted = Spi::get_one::<bool>(&sql).expect("consulta de privilégio falhou");
+            assert_eq!(
+                granted,
+                Some(false),
+                "public.{f} deveria estar REVOKEd de PUBLIC — I/O de arquivo server-side é superuser-only"
+            );
+        }
+    }
+}

@@ -18,8 +18,6 @@ mod ivf;
 // exercise it (`cargo test` does not link in this crate). `ivf` re-exports its items.
 mod ivf_codec;
 pub(crate) use ivf::*;
-mod symqg; // E2 — theodb_symqg co-located page layout (reaches the private helpers via `use super::*`)
-pub(crate) use symqg::*;
 
 const META_MAGIC: u32 = 0x5449_4D45; // "TIME" (Theodb Index MEta)
 const META_VERSION: u32 = 1;
@@ -718,13 +716,6 @@ unsafe fn main_index_pages(rel: pg_sys::Relation) -> Result<u32, String> {
     } else if magic == crate::am::hnsw_page::HNSW_STRUCT_MAGIC {
         // M35 structured HNSW: pending starts right after the neighbor page range (nbr_first + nbr_npages).
         Ok(crate::am::hnsw_page::decode_meta(&m)?.pending_start())
-    } else if magic == symqg::SYMQG_MAGIC {
-        // E2 v2: rows are FIXED-SIZE and packed contiguously (no directory) — pending starts right after
-        // gen_base + rotation codebook + tids + the packed rows region (npages_for(n · row_bytes)).
-        let meta = symqg::SymqgMeta::decode(&m)?;
-        let rows_bytes = (meta.n as usize)
-            .saturating_mul(symqg::row_bytes(meta.dim as usize, meta.degree_bound as usize));
-        Ok(meta.rows_base().saturating_add(npages_for(rows_bytes)))
     } else {
         // blob (M26 legacy / old HNSW): 1 meta + nchunks data pages.
         if m.len() < 20 {

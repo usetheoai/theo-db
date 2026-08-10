@@ -1,0 +1,55 @@
+{
+  "medido_em": "2026-08-09",
+  "dataset": "BEIR SciFact",
+  "corpus": 5183,
+  "queries_com_qrel": 300,
+  "imagem": "theodb:m186-lexical (build local do Dockerfile)",
+  "nosso": {
+    "metrica": "nDCG@10",
+    "valor": 0.6269,
+    "caminho": "bm25_build + bm25_search, termos crus minusculos"
+  },
+  "controle": {
+    "metrica": "nDCG@10",
+    "valor": 0.3016,
+    "caminho": "to_tsvector('english') + GIN + ts_rank_cd, com stemming e stopwords do PG"
+  },
+  "delta": 0.3253,
+  "significancia": {
+    "metodo": "bootstrap pareado",
+    "B": 10000,
+    "semente": 20260809,
+    "p": 0.0,
+    "ic95": [
+      0.2811,
+      0.3677
+    ]
+  },
+  "limites_de_metodo": [
+    "bm25_search aceita UM termo por chamada; para consulta multi-termo os scores por termo foram SOMADOS — aproximacao grosseira do BM25 multi-termo real, que normalizaria uma vez",
+    "isso provavelmente SUBESTIMA o nosso numero, nao o infla",
+    "o controle roda com stemming/stopwords do PG e o nosso com termos crus — deliberado: e a configuracao que o usuario teria sem nos"
+  ],
+  "calibracao": "a referencia publicada do BEIR para BM25/Anserini neste dataset e ~0.665 — citada de CONHECIMENTO INTERNO, NAO verificada nesta sessao. Nosso 0.6269 fica LOGO ABAIXO dela, o que e coerente e nao inflado.",
+  "achado_lateral": "a superficie publica nao expoe busca multi-termo — um usuario real precisaria dela",
+  "segundo_corpus": {
+    "dataset": "BEIR NFCorpus (dominio medico)",
+    "corpus": 3633,
+    "queries": 80,
+    "nosso": 0.3138,
+    "controle": 0.2331,
+    "razao": 1.35,
+    "delta": 0.0807,
+    "p": 0.0,
+    "ic95": [
+      0.0424,
+      0.1226
+    ],
+    "calibracao": "referencia BEIR/Anserini para nfcorpus ~0.325 (conhecimento interno, NAO verificado); nosso 0.3138 fica logo abaixo, coerente com o padrao do scifact"
+  },
+  "generalizacao": {
+    "direcao": "REPLICA — ambos significativos, p<0.0001",
+    "magnitude": "NAO REPLICA — 2.08x no scifact contra 1.35x no nfcorpus",
+    "conclusao": "a vantagem sobre o ts_rank_cd e real e consistente em sinal, mas seu TAMANHO e dependente de dominio. Alegar 'mais que o dobro' como propriedade do produto seria generalizar de um corpus."
+  }
+}

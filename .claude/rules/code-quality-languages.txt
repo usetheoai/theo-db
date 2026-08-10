@@ -14,14 +14,8 @@
 # python
 # typescript
 # javascript
-rust       | theodb_rs/Cargo.toml | ENABLED  | theodb_rs + theodb_lexical — o grosso do repo.
+# rust
 # java
 # kotlin
 # ruby
 # csharp
-
-# M146 — habilitado 2026-07-23. Estava VAZIO desde a adocao do ciclo, o que fazia
-# /code-quality emitir `PASS` com "Languages audited: none" em TODO milestone deste
-# repo: um gate verde que nunca auditou nada. O repo e majoritariamente Rust
-# (theodb_rs + theodb_lexical). Python do harness (benchmarks/) ja tem gate proprio
-# no CI (ruff + vulture + pytest), entao fica de fora daqui para nao duplicar.

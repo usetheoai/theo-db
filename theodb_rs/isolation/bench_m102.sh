@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # M102 — honest benchmark for the SET-oriented, planner-optimizable AI operators. Emits JSON (stdout) →
-# docs/benchmarks/m102-ai-operators.{md,json}. Two measured artifacts:
+# wiki/benchmarks/archive/m102-ai-operators.md e benchmarks/artifacts/m102-ai-operators.json. Two measured artifacts:
 #   (1) DETERMINISTIC (theodb.llm_test_model='parity', HTTP-free, reproducible, CI-safe):
 #       - batching: `ai.if_batch` over N values issues exactly 1 inference round-trip vs N for the per-row path
 #         (measured via ai.call_count()); wall-time of each.

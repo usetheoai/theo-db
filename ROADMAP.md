@@ -8,6 +8,57 @@
 > código PRÓPRIO**, dependendo o **mínimo possível** de bibliotecas externas, **mantendo a engine PostgreSQL**
 > (C, wire-compat).
 
+## Como ler o status deste arquivo (convenção — leia antes de contar caixinhas)
+
+**O status de um milestone vive no header**, nunca nos bullets: `## M168 — [x]` é a declaração de conclusão, e é
+o que o `cycle-release`/`cycle-acceptance` lê e flipa.
+
+Os `- [ ]` sob **Definition of done** são a **especificação escrita no momento do plano** — o contrato do que
+seria feito. Eles não foram sendo tickados ao longo do projeto: a prática existiu num bloco (M59–M76) e foi
+abandonada depois, então **346 bullets seguem `[ ]` dentro de milestones concluídos**. Um `grep -c '\[ \]'`
+sobre este arquivo mede a especificação, não o progresso, e devolve um número enganoso.
+
+**A evidência de conclusão não mora aqui — mora na wiki.** Cada milestone entregue tem conceito em
+[`wiki/benchmarks/`](./wiki/) ou [`wiki/decisions/`](./wiki/decisions/index.md) com método, números e ressalvas,
+localizável pelo campo `milestone:` do frontmatter. Medido em 2026-08-07: **130 dos 149 concluídos** têm conceito
+citando seu id; a maior parte dos 19 restantes é o bloco M76–M81, cujas seis fases do IVF-AQ tiveram a evidência
+consolidada no M82 ([ADR 0037](./wiki/decisions/0037-m82-am-ivf-aq-measured-verdict.md)) em vez de por fase.
+
+**Estado em 2026-08-08:** 166 milestones · **152 concluídos** · **14 abertos** — M169 (em andamento, ver
+`[Unreleased]` no CHANGELOG) e M170–M184, o **Roadmap v7**: levar todos os pilares a maturidade ≥ 4.
+**O M177 (embeddings locais) é P0**, marcado pelo owner em 2026-08-07 — a Fase 1 dele roda à frente de
+M170–M176, e a Fase 2 é condicional ao gate que ela produz.
+
+**Lacunas de numeração são intencionais:** M23, M24, M27, M28, M29 foram **removidos em 2026-07-03** por saírem
+do escopo do repositório (control plane em Go, K8s, replicação, MCP write) e permanecem riscados abaixo, em vez
+de apagados — a numeração não é recompactada, para que nenhuma referência histórica passe a apontar outro
+milestone.
+
+**Os `benchmarks/artifacts/*.json` citados nos milestones antigos não estão na árvore de trabalho.** Eles eram
+os artefatos brutos sob `docs/benchmarks/` e saíram com a remoção daquela árvore; hoje existem apenas no
+histórico — `git show f7c7b93:docs/benchmarks/<arquivo>.json`. O caminho `benchmarks/artifacts/` é o destino
+**novo**, para onde os runners passaram a escrever. As citações antigas ficam como foram escritas: reescrevê-las
+mudaria o registro do que se afirmou à época, e o veredito legível de cada milestone está na wiki, não no JSON.
+
+## Linhagem dos roadmaps (um só arquivo, desde 2026-08-07)
+
+| Geração | Milestones | Onde está |
+|---|---|---|
+| v1 — tese de composição | M0–M16 | entregue como distribuição; superado pelo ADR 0006 |
+| v2 — own-code Rust | M17–M60 | **este arquivo** |
+| v3 — amplitude de produto | M61–M68 | **este arquivo**, § Roadmap v3 |
+| v4 — independência do pgvector | M69–M70 | **este arquivo** |
+| v5 — superioridade vetorial P0 | M60, M71–M74 | **este arquivo**, § Roadmap v5 |
+| v6 — colunar, lexical, grafo, lakehouse | M75–M169 | **este arquivo** |
+| v7 — maturidade ≥ 4 em todos os pilares | M170–M184 | **este arquivo**, § Roadmap v7 |
+
+`ROADMAP-v3.md` e `ROADMAP-v5.md` existiam em paralelo como drafts estratégicos e **foram removidos em
+2026-08-07**: seus milestones estavam **todos concluídos aqui** enquanto os arquivos seguiam mostrando `[ ]` em
+100% deles. O risco era concreto — o v5 se apresentava como "fechar o pilar P0 que segue parcial", quando o M73
+já havia medido esse pilar como fechado, com veredito de que a superioridade sobre o ScaNN é **não-alcançável**.
+Todo o conteúdo estratégico deles foi absorvido nas seções § Roadmap v3 e § Roadmap v5; os arquivos permanecem
+recuperáveis no histórico git (`git show c7e6b7d:ROADMAP-v3.md`, `git show c7e6b7d:ROADMAP-v5.md`).
+
 ## Visão
 
 TheoDB é um **banco de dados competitivo, open-source, baseado na engine PostgreSQL**, com a superfície de
@@ -126,7 +177,7 @@ index — **somente** quando atingir **paridade de recall@k** no harness.
 
 **Definition of done:**
 
-- [ ] Índice próprio HNSW/IVF builda + responde `<=>` com recall@k em **paridade** (harness M2/M9), latência aceitável — medido, reproduzível em `docs/benchmarks/`.
+- [ ] Índice próprio HNSW/IVF builda + responde `<=>` com recall@k em **paridade** (harness M2/M9), latência aceitável — medido, reproduzível em `wiki/benchmarks/`.
 - [ ] Se NÃO atingir paridade → ADR honesto mantendo pgvector index (anti-sunk-cost); o milestone entrega a medição, não uma regressão.
 
 **Dependencies:** M20. **Risco:** ALTO (índice ANN é PhD-level); measurement-first é o guard-rail.
@@ -186,7 +237,7 @@ pgvector/pgvectorscale/vectorchord (todos AMs).
 - [ ] `CREATE INDEX ... USING theodb_hnsw (embedding …_ops)` persistido em páginas (não rebuild por query).
 - [ ] Planner pushdown: `ORDER BY embedding <-> $1 LIMIT k` usa o índice (`amcanorderbyop` + `amcostestimate`), provado por `EXPLAIN`.
 - [ ] Manutenção incremental: `INSERT`/`DELETE` mantêm o índice (sem rebuild total); `VACUUM` limpa.
-- [ ] **Benchmark reproduzível** (measurement-first): recall@k ≥ paridade com a função atual + latência índice-persistido vs full-scan+rebuild; `docs/benchmarks/`.
+- [ ] **Benchmark reproduzível** (measurement-first): recall@k ≥ paridade com a função atual + latência índice-persistido vs full-scan+rebuild; `wiki/benchmarks/`.
 - [ ] Coexistência com a função SQL-callable atual mantida (não quebra M20–M22).
 
 **Dependencies:** M25. **Risco (ALTO):** superfície pgrx de baixo nível (FFI/longjmp/WAL) ainda não exercitada — competência que os peers Rust têm; mitigar com spikes de de-risk + estudo dos peers clonados. **Nota:** absorve o antigo deferral M21b.
@@ -213,12 +264,12 @@ mínimas) ou são deprecados. O `## Fora de escopo do v2` já exige "Reabrir exi
 esse ADR**.
 
 **Decisão (2026-07-03, CTO): MANTER os dois** como exceções permissivas (Regra 9), gated para adoção futura —
-ADR [`0013-v1-legacy-columnar-bm25-scope`](docs/adr/0013-v1-legacy-columnar-bm25-scope.md).
+ADR [`0013-v1-legacy-columnar-bm25-scope`](wiki/decisions/0013-v1-legacy-columnar-bm25-scope.md).
 
 **Definition of done:**
 
 - [x] ADR `0013-v1-legacy-columnar-bm25-scope` (MADR 3.0): decisão = **MANTER** ambos, trade-offs + evidência + alternativa rejeitada (deprecar). *(ADR 0007 já estava ocupado; usado 0013.)*
-- [x] Evidência de benchmark validando o KEEP: columnar-at-scale (`docs/benchmarks/m30-columnar-scale.md`) — columnstore vence o row-store **2.99× (100k) → 8.89× (1M) → 13.87× (5M) — mean±std, effect>variância**, correto (match) + `DuckDBScan`; fecha o gap UNBENCHMARKED do M6. BM25: nDCG 0.95 vs 0.51 (m7).
+- [x] Evidência de benchmark validando o KEEP: columnar-at-scale (`wiki/benchmarks/m30-columnar-scale.md`) — columnstore vence o row-store **2.99× (100k) → 8.89× (1M) → 13.87× (5M) — mean±std, effect>variância**, correto (match) + `DuckDBScan`; fecha o gap UNBENCHMARKED do M6. BM25: nDCG 0.95 vs 0.51 (m7).
 - [x] Nota de exceção permissiva no ROADMAP (§ Fora de escopo do v2 — Regra 9).
 - [x] CHANGELOG + `## Relação com o v1` atualizados com a decisão.
 
@@ -237,7 +288,7 @@ caminho de adoção (embarcar columnar: build PG17 OU bump PG18) é milestone fu
 
 ### M31 — [x] Otimização de latência do index AM (leitura parcial de páginas)
 
-> **Nota (superseded — [ADR 0012](docs/adr/0012-benchmark-data-degeneracy.md), anotado 2026-07-06 no M50/G8):** as *claims de latência* do M31 (via ADR 0011) foram medidas em dados sintéticos degenerados (InitPlan-hoist → todos os vetores idênticos); ficam **superseded pela ADR 0012**. O trabalho de código do M31 (leitura parcial de páginas) permanece válido; a régua de latência confiável é a do M32 (SIFT1M real) e M45/M50.
+> **Nota (superseded — [ADR 0012](wiki/decisions/0012-benchmark-data-degeneracy.md), anotado 2026-07-06 no M50/G8):** as *claims de latência* do M31 (via ADR 0011) foram medidas em dados sintéticos degenerados (InitPlan-hoist → todos os vetores idênticos); ficam **superseded pela ADR 0012**. O trabalho de código do M31 (leitura parcial de páginas) permanece válido; a régua de latência confiável é a do M32 (SIFT1M real) e M45/M50.
 
 **Objective:** Fechar o gargalo O(N)-por-scan do AM do M26 (hoje deseraliza o blob inteiro por query, ADR
 0010 §D2/D5) para que o índice persistido **bata a latência de query-time** — não só o rebuild-per-query
@@ -246,7 +297,7 @@ caminho de adoção (embarcar columnar: build PG17 OU bump PG18) é milestone fu
 **Definition of done (re-escopado por ADR 0011, CTO 2026-07-01 — o "≤ pgvector" migrou para M31b):**
 
 - [ ] Scan lê **só as páginas necessárias** (meta/centroide + listas probed) — NÃO o blob inteiro por query (structured layout).
-- [ ] **Benchmark reproduzível** (measurement-first): Index Scan do `theodb_ivfflat` **bem abaixo do regime O(N)** e **dentro de um band documentado do pgvector** (medido: ~45× vs M26 O(N); ~2.7× atrás do pgvector), recall@k mantido; `docs/benchmarks/m31-am-latency.{md,json}`.
+- [ ] **Benchmark reproduzível** (measurement-first): Index Scan do `theodb_ivfflat` **bem abaixo do regime O(N)** e **dentro de um band documentado do pgvector** (medido: ~45× vs M26 O(N); ~2.7× atrás do pgvector), recall@k mantido; `wiki/benchmarks/m31-am-latency.md` + `benchmarks/artifacts/m31-am-latency.json`.
 - [ ] Sem regressão: `test_index_am.py` + coexistência M20–M22 verdes; manutenção incremental intacta.
 - [ ] ADR 0010 §D2/D5 atualizado (O(N) fechado para IVFFlat, com número; SIMD-parity → M31b).
 
@@ -261,7 +312,7 @@ escalar/SSE2 4-wide vs a SIMD AVX 8-wide + dispatch de CPU em runtime do pgvecto
 
 - [ ] Distância l2/cosine/ip com SIMD (AVX2/AVX-512 quando disponível) + **dispatch de CPU em runtime** (crate portável tipo `wide`/`multiversion` OU intrinsics com feature-detect) — sem quebrar portabilidade (fallback escalar).
 - [ ] `/deps-audit` da nova crate (CVE + licença D1 permissiva).
-- [ ] **Benchmark reproduzível:** `theodb_ivfflat` Index Scan p50 **≤ pgvector** (n≥100k, dim≥128), recall mantido; `docs/benchmarks/`.
+- [ ] **Benchmark reproduzível:** `theodb_ivfflat` Index Scan p50 **≤ pgvector** (n≥100k, dim≥128), recall mantido; `wiki/benchmarks/`.
 - [ ] Sem regressão: paridade de recall dos M20–M22 (a distância é reusada) preservada.
 
 **Dependencies:** M31. **Risco (MÉDIO):** portabilidade do dispatch de CPU; paridade numérica f32 da distância SIMD vs a escalar (M20).
@@ -274,7 +325,7 @@ próprios vs pgvector em dataset real grande (SIFT1M / GloVe / deep1M), reproduz
 **Definition of done:**
 
 - [ ] Harness roda **≥ 1M vetores** (dataset público, ex. SIFT1M) contra o container; reusa `theodb_bench.recall`.
-- [ ] Tabela QPS + p50/p95/p99 + recall@10 + build time + index bytes: `theodb_ivfflat`/`theodb_hnsw` **vs** pgvector `ivfflat`/`hnsw`, mean±std ≥3 runs, hardware citado; `docs/benchmarks/` + `.json`.
+- [ ] Tabela QPS + p50/p95/p99 + recall@10 + build time + index bytes: `theodb_ivfflat`/`theodb_hnsw` **vs** pgvector `ivfflat`/`hnsw`, mean±std ≥3 runs, hardware citado; `wiki/benchmarks/` + `.json`.
 - [ ] Veredito honesto por knob (paridade / superior / inferior) — sem cherry-pick; ANN-Benchmarks semantics.
 
 **Dependencies:** M31b (benchmarkar o AM com a distância SIMD já otimizada, senão a comparação de escala é injusta). **Risco (MÉDIO):** custo de infra/tempo do dataset grande; determinismo do QPS.
@@ -288,7 +339,7 @@ refuta honestamente) o claim "igual ou superior ao AlloyDB no vetorial".
 **Definition of done:**
 
 - [ ] Benchmark vs AlloyDB ScaNN (ou ScaNN OSS) em dataset + hardware comparáveis, metodologia documentada (caveats de disk-backed vs in-memory explícitos, como manda `analysis-golden-rule`).
-- [ ] Veredito: **SUPERIOR / PARIDADE / GAP** com número por dimensão (recall@k, QPS, latência, memória); `docs/benchmarks/` + `.json`.
+- [ ] Veredito: **SUPERIOR / PARIDADE / GAP** com número por dimensão (recall@k, QPS, latência, memória); `wiki/benchmarks/` + `.json`.
 - [ ] `public-copy.md`: só então um claim de performance vetorial vira permitido (com link ao benchmark) — ou fica marcado `UNBENCHMARKED`/`meta` se não alcançado.
 
 **Dependencies:** M32. **Risco (ALTO):** acesso/reprodutibilidade do AlloyDB; comparar baselines comparáveis (honestidade científica).
@@ -307,7 +358,7 @@ que é ~3-4× o esforço/risco do M31 (reescrita de grafo page-native), grande d
 **Definition of done:**
 
 - [ ] `theodb_ivfflat` aceita `lists` (build) configurável via reloption `WITH (lists=N)` (pgrx `amoptions`) + `probes` (scan) via GUC `theodb_ivfflat.probes` (`GucRegistry`); o default preserva o comportamento atual (sem regressão nos gates M26/M31).
-- [ ] Com tuning (lists≈√N, probes ajustável), `theodb_ivfflat` p50 **≤ pgvector** a 1M×128 (recall ≥ paridade), validado por re-run do harness M32 (`benchmarks/run_m32_sift1m.py` → `docs/benchmarks/`).
+- [ ] Com tuning (lists≈√N, probes ajustável), `theodb_ivfflat` p50 **≤ pgvector** a 1M×128 (recall ≥ paridade), validado por re-run do harness M32 (`benchmarks/run_m32_sift1m.py` → `wiki/benchmarks/`).
 - [ ] Validação de bordas das opções (lists/probes fora do range → erro tipado, não crash); coexistência M20–M22 verde; benchmark reproduzível + veredito honesto (`public-copy.md`).
 
 **Dependencies:** M32. **Sequência:** estrategicamente PRECEDE M33 (rodar antes do head-to-head vs AlloyDB). **Risco
@@ -344,14 +395,14 @@ original: a distância full-precision é **~15%** do custo de scan, não o garga
 pontos de probes, são **`reads` (I/O de página) ~44–51%** e **`sort` (ordenar TODOS os candidatos, `am/scan.rs`)
 ~35–41%**. M36 ataca o `sort` (win de recall-zero-risco); o `reads` foi separado no **M38** (quantização de I/O,
 recall-risco — ADR-2: medir o heap antes de comprometer o risco maior). Contribui para o gap de ~25× vs ScaNN
-medido no M33 (`docs/benchmarks/m33-scann-headtohead.json`) — honestamente uma fração via `sort`, NÃO "25× da
-distância" (ADR-1 do blueprint). North Star: `docs/adr/0002-north-star-equal-or-superior-to-alloydb.md`.
+medido no M33 (`benchmarks/artifacts/m33-scann-headtohead.json`) — honestamente uma fração via `sort`, NÃO "25× da
+distância" (ADR-1 do blueprint). North Star: `wiki/decisions/0002-north-star-equal-or-superior-to-alloydb.md`.
 
 **Definition of done:**
 
 - [x] **Pré-requisito medido (concluído):** `THEODB_SCAN_PROFILE=1` mediu a divisão de fases — distância ~15%, reads ~44–51%, sort ~35–41% (200k×128, 3 pontos de probes). A premissa "distância domina" está falsificada; o milestone foi re-escopado para os gargalos reais.
 - [x] **Sort → heap min lazy** (ADR-2, recall-zero-risco): `results.sort_by` sobre TODOS os candidatos → heap min lazy (heapify O(C) no `amrescan` + pop O(log C) no `amgettuple` = O(C+k·log C) em vez de O(C·log C)). Top-K **byte-idêntico** (mesma ordem total `(total_cmp, tid)`) → recall inalterado (provado por construção + `#[pg_test]` de ordering + 61 testes de coexistência). Fase sort caiu ~10–13× (profiler).
-- [x] Benchmark reproduzível `docs/benchmarks/m36-scan-optimization.{md,json}` (`benchmarks/run_m36_scan.py`): end-to-end ~1.5× band (mean±std, recall idêntico), reconciliado com o teto de Amdahl (`sort` ~37–41% ⇒ teto ~1.5–1.7×). Honesto: fecha o `sort`, não o gap total do ScaNN.
+- [x] Benchmark reproduzível `wiki/benchmarks/archive/m36-scan-optimization.md` + `benchmarks/artifacts/m36-scan-optimization.json` (`benchmarks/run_m36_scan.py`): end-to-end ~1.5× band (mean±std, recall idêntico), reconciliado com o teto de Amdahl (`sort` ~37–41% ⇒ teto ~1.5–1.7×). Honesto: fecha o `sort`, não o gap total do ScaNN.
 
 **Dependencies:** M34 (infra reloption/GUC), M35 (scan estruturado). **Risco (BAIXO):** o heap é correção pura de
 complexidade (zero risco de recall — top-K byte-idêntico). O `reads` (quantização de I/O, recall-risco) é o M38.
@@ -362,7 +413,7 @@ complexidade (zero risco de recall — top-K byte-idêntico). O `reads` (quantiz
 
 **Outcome (honesto, measurement-first):** o milestone entregou uma **MEDIÇÃO** que fechou 3 hipóteses, não um win
 de QPS. Blueprint: `.claude/knowledge-base/discoveries/blueprints/m38-io-quantization-blueprint.md`; artefato:
-`docs/benchmarks/m38-copy-free-scan.{md,json}`.
+`wiki/benchmarks/m38-copy-free-scan.md` + `benchmarks/artifacts/m38-copy-free-scan.json`.
 
 1. **SBQ falsificado (recall).** Em SIFT real o SBQ atinge só recall 0.77–0.95 vs 1.0 do baseline (quantização
    escalar perde ranking demais). O gate "recall preservado" do SBQ não é atingível — PQ seria o answer, mas é
@@ -388,7 +439,7 @@ milestone futuro grande, registrado aqui e no blueprint para quando o North Star
 ### M37 — [x] Sumarização de conteúdo (`ai.summarize`) — já entregue (correção de doc-drift)
 
 **Outcome (honesto, measurement-first):** o milestone descobriu que a feature **JÁ ESTAVA IMPLEMENTADA E TESTADA**
-— a auditoria anterior de `docs/features/` (que criou este milestone) foi **incompleta**: grepou só o Rust
+— a auditoria anterior de `wiki/features/` (que criou este milestone) foi **incompleta**: grepou só o Rust
 (`theodb_rs/src/`) e perdeu a implementação em `sql/50-theodb-ai.sql`. Blueprint:
 `.claude/knowledge-base/discoveries/blueprints/m37-ai-summarize-blueprint.md`.
 
@@ -399,7 +450,7 @@ O que já existe (M10 + M18):
 - **6 testes de contrato verdes** em `benchmarks/tests/test_ai_sql.py` (summarize escalar + agregado + negative
   cases + volatilidade).
 
-**Trabalho do M37 (o único gap real):** `docs/features/11-sumarizacao-conteudo.md` atualizado de "📋 planejado" →
+**Trabalho do M37 (o único gap real):** `wiki/features/11-sumarizacao-conteudo.md` atualizado de "📋 planejado" →
 "✅ Entregue" com `file:line` + os 6 testes, validado por `deep-research/validate_citations.py` (PASS). NÃO foi
 adicionado código Rust — seria um `ai.summarize` DUPLICADO (conflito). O grounding measurement-first evitou o
 duplicado.
@@ -418,7 +469,7 @@ duplicado.
 próprio, std-only (k-means Lloyd por subespaço + ADC LUT), funcional e testado, e medimos head-to-head vs
 `theodb.sbq_knn`. O gate D3 (anti-sunk-cost) deu **SBQ_RETAINED**: a paridade recall, PQ é **~5× mais lento** que
 o SBQ. Blueprint: `.claude/knowledge-base/discoveries/blueprints/m39-pq-product-quantization-blueprint.md`;
-artefato: `docs/benchmarks/m39-pq.{md,json}`.
+artefato: `wiki/benchmarks/m39-pq.md` + `benchmarks/artifacts/m39-pq.json`.
 
 1. **Paridade de recall, não vitória.** PQ 0.770 vs SBQ 0.769 (gap 0.001 = ruído); ambos limitados pelo IVFFlat a
    ~0.77 — **nenhum vence o f32 (recall 1.0)**. O gap que importa é vs f32 (0.23), não PQ-vs-SBQ.
@@ -438,10 +489,10 @@ esqueleto PQ (ataca recall, não QPS) — semente do M40.
 ### M40 — [x] Carrier head-to-head (theodb_hnsw vs theodb_ivfflat) — re-escopado da anisotropic loss
 
 **Outcome (honesto, measurement-first — 5º da sequência M36/M38/M39/M40-ceiling/M40):** o milestone foi pedido como
-"ScaNN anisotropic loss", mas a **sonda de teto** (`docs/benchmarks/m40-ceiling-probe.md`) falsificou a premissa
+"ScaNN anisotropic loss", mas a **sonda de teto** (`wiki/benchmarks/m40-ceiling-probe.md`) falsificou a premissa
 ANTES de construir: no nosso pipeline com rerank f32, o recall é limitado pelo **carrier (probes)**, não pelo
 quantizer — a loss anisotrópica não moveria a agulha. Re-escopado (com aval do owner) para o head-to-head dos
-carriers próprios. Artefato: `docs/benchmarks/m40-carrier.{md,json}`; harness: `benchmarks/run_m40_carrier.py`.
+carriers próprios. Artefato: `wiki/benchmarks/m40-carrier.md` + `benchmarks/artifacts/m40-carrier.json`; harness: `benchmarks/run_m40_carrier.py`.
 
 **Medição (n=50k synthetic):** `theodb_ivfflat` **vence** o trade-off recall×QPS — a QPS igual tem recall
 substancialmente maior; o `theodb_hnsw` é **3–5× mais lento a recall igual** (headroom de otimização real no scan
@@ -463,7 +514,7 @@ lento que o `theodb_ivfflat` a recall igual. O discover (blueprint `m41-hnsw-qps
 `traverse` (`hnsw_page.rs`): custo fixo por-nó (`to_vec` alloc+memcpy + `RelationGetNumberOfBlocksInFork` ×2/nó),
 enquanto o ivfflat amortiza o pin/lock sobre uma página inteira com SIMD. A correção pontua/decodifica cada nó
 **dentro do pin** (`page::with_page_item`, sem cópia) e cacheia `nblocks` por query. Artefato:
-`docs/benchmarks/m41-hnsw-qps.md`.
+`wiki/benchmarks/m41-hnsw-qps.md`.
 
 **Medição A/B rigorosa (n=50k, 4 amostras alternadas mean±std, recall byte-idêntico):** QPS **1.2–1.5×**, crescendo
 com ef (ef=10: 1.24×; ef=100: 1.38×; ef=200: **1.46×** com bandas de std separadas → significativo). Recall inalterado
@@ -481,13 +532,13 @@ provada por A/B benchmark. Código de produto (Rust) — candidato a release.
 
 > **⚠️ Retratado por M45 (2026-07-03):** o "~1.7–2.8× mais rápido que pgvector hnsw" abaixo era best-of-N +
 > 200 queries + cache quente e **NÃO se reproduz** sob mean±std rigoroso (500 queries, ≥3 runs, GT exato) —
-> veredito real **PARITY** (`docs/benchmarks/m45-pareto-sift1m.md`). theodb_hnsw é **competitivo, não
+> veredito real **PARITY** (`wiki/benchmarks/m45-pareto-sift1m.md`). theodb_hnsw é **competitivo, não
 > superior** vs pgvector hnsw a 1M. Não citar os multiplicadores abaixo como claim.
 
 **Outcome (WIN honesto em dados reais — inverte o synthetic do M40):** rodamos o head-to-head 4-way em **SIFT1M
 real (1M×128, GT exato)** na imagem M41-otimizada. O M40 (synthetic random-gaussian) dava vitória ao ivfflat; em
 dados **estruturados reais o grafo vence decisivamente**, exatamente como o caveat honesto do M40 previa. Sem
-código novo (harness `run_m32_sift1m.py` existente). Artefato: `docs/benchmarks/sift1m-carrier-verdict.md` +
+código novo (harness `run_m32_sift1m.py` existente). Artefato: `wiki/benchmarks/sift1m-carrier-verdict.md` +
 `m32-scale-sift1m.json`.
 
 **Medição (best-of-3, GT exato):** `theodb_hnsw` 0.96 recall @ **278 QPS** vs `theodb_ivfflat` 0.98 @ **28.7 QPS**
@@ -511,7 +562,7 @@ superioridade do carrier próprio vs a baseline SOTA permissiva (pgvector hnsw);
 build in-memory (`ann/hnsw.rs`) usava distância L2 **escalar** enquanto o scan já era **SIMD** — bilhões de
 distâncias escalares em 128-dim. A correção adiciona `crate::vec::l2_distance_simd` (reusa o kernel AVX2+FMA M31b
 via reinterpret f32→bytes) e roteia o build para ele (`Metric::dist_simd`), alinhando build e scan ao mesmo SIMD.
-Artefato: `docs/benchmarks/m43-hnsw-build.md`; blueprint: `m43-hnsw-build-qps-blueprint.md`.
+Artefato: `wiki/benchmarks/m43-hnsw-build.md`; blueprint: `m43-hnsw-build-qps-blueprint.md`.
 
 **Medição A/B rigorosa (3 samples @ 200k, mean±std):** build **2.20×** (m41 200±23s vs m43 91±3s, bandas
 separadas), **recall IDÊNTICO** (0.9825=0.9825). @ **1M**: 24min → **8.4min** (~2.86× vs baseline M42), recall
@@ -529,7 +580,7 @@ build-time real cortado ~2.2–2.9×, recall-preserving; o carrier próprio agor
 **Outcome (WIN honesto):** o M42/M43 mostrou o build como gargalo; o M43 cortou 2.2× via SIMD, o paralelismo era o
 próximo teto. Discover: o build é CPU-bound + Rust puro (sem chamadas PG no loop) → paralelizável. Implementado com
 `std::thread::scope` + `RwLock` por-nó (`ann/hnsw_parallel.rs`), despacho por threshold (small→sequential
-determinístico; large→parallel). Sem nova dep. Artefato: `docs/benchmarks/m44-parallel-build.md`; blueprint no plano.
+determinístico; large→parallel). Sem nova dep. Artefato: `wiki/benchmarks/m44-parallel-build.md`; blueprint no plano.
 
 **Medição A/B (m43 sequential vs m44 parallel):** @50k **2.82×** (33±6s→12±3s, 3 samples back-to-back, bandas
 separadas), recall paridade (Δ+0.0055). @1M: 8.4min→**4.3min** (1.95×), recall 0.9730. **Honesto:** o speedup
@@ -540,6 +591,31 @@ paridade é o gate). Race-freedom por construção (RwLock), deadlock-free (1 lo
 
 **Dependencies:** M35 (theodb_hnsw), M43 (build SIMD). **Resultado:** build paralelo real, recall-preserving,
 race-free; o carrier atinge build competitivo (12 cores). Próximo: redução de contenção (lock striping) se preciso.
+
+---
+
+### M45 — [x] Pareto recall×QPS em SIFT1M real vs pgvector hnsw — **a régua de paridade**
+
+**Objective:** estabelecer a régua honesta do pilar vetorial — fronteira Pareto recall×QPS medida em dataset
+real, contra o pgvector hnsw, com desvio publicado. É este milestone que **retratou** o claim de "~1,7–2,8×
+mais rápido que pgvector" do M42 (best-of-N em dados sintéticos degenerados — ADR 0012).
+
+**Definition of done:**
+
+- [x] Veredito **PARIDADE**, sob gate de *efeito maior que variância* aplicado sobre os níveis de recall compartilhados.
+- [x] Config casada entre os dois lados: 1M vetores, 500 queries, 3 runs com média **e desvio**, grade de `ef` varrida, dataset real, workers de manutenção desligados em ambos.
+- [x] Desvio publicado ao lado da média — o que expõe que o ponto `ef=200` (43,5 ± 19,1 QPS) é **instável**, em vez de tratá-lo como os demais.
+- [x] Build próprio medido mais rápido que a referência (271 s vs 467 s), herdando o M44.
+- [x] Artefato reproduzível: [`wiki/benchmarks/m45-pareto-sift1m.md`](./wiki/benchmarks/m45-pareto-sift1m.md).
+
+**Dependencies:** M32 (harness de escala), M44 (build paralelo).
+
+**Limite declarado pelo próprio artefato:** ele entrega **metade** do requisito para um claim comparativo
+público — o artefato reproduzível. **A outra metade, reprodução independente por terceiro, permanece EM ABERTO**
+(`public-copy.md` § 4). Nomear a metade faltante é o que impede um resultado válido de virar alegação indevida.
+
+*(Registrado retroativamente em 2026-08-07: entregue e citado 10× neste arquivo como a régua de paridade — e no
+`CLAUDE.md` como o marco M45 —, mas nunca teve header próprio.)*
 
 ---
 
@@ -561,7 +637,7 @@ com re-medição rigorosa (measurement-first).
   scratch `Vec<Addr>` reusado no ground loop (elimina alloc-por-nó). **Zero nova dep** (hasher default, rung 5).
 - [ ] **Recall-neutro provado:** `traverse` retorna resultado byte-idêntico + `pages_read` idêntico antes/depois
   por seed fixa (teste-âncora `assert_eq!` + property `decode_neighbors_into`). Se divergir 1 tid, é BUG.
-- [ ] Re-run do Pareto (`benchmarks/run_m46_highrecall.py`, median ≥5 runs + pages_read) → `docs/benchmarks/m46-*.{md,json}`;
+- [ ] Re-run do Pareto (`benchmarks/run_m46_highrecall.py`, median ≥5 runs + pages_read) → `wiki/benchmarks/m46-*.{md,json}`;
   veredito honesto por effect>variância: theodb QPS ≥ pgvector a recall ≥0.993 OU honest-negative com variância
   a ef≥200 reduzida de ~44% p/ <15% (sem cherry-pick, `public-copy.md`).
 
@@ -599,7 +675,7 @@ Plano: `.claude/knowledge-base/plans/fu1-samegraph-scan-microbench-plan.md` (`mi
 - [ ] Guard de equivalência: o path benchado == oráculo `brute()` exato no grafo seeded (D3 do blueprint);
   oracle recall-neutro do M46 (`traverse_presize_is_recall_neutral_end_to_end`) verde no path de produção.
 - [ ] Duas medições criterion (`presized`/`unsized`) sobre o MESMO grafo (`HnswIndex::build(seed=42)`,
-  N≥50k) com CIs reportados; delta persistido em `docs/benchmarks/fu1-samegraph-scan-microbench.{md,json}`.
+  N≥50k) com CIs reportados; delta persistido em `wiki/benchmarks/fu1-samegraph-scan-microbench.md` + `benchmarks/artifacts/fu1-samegraph-scan-microbench.json`.
 - [ ] Caveat EC-2 explícito no artefato: micro-bench sem I/O de página magnifica a fração de alocação —
   o delta é **UPPER BOUND** do ganho de produção, não o número de produção (`public-copy.md`).
 
@@ -661,7 +737,7 @@ visitado (`am/hnsw_page.rs:436-447`).
 - [ ] Kernel fused SIMD para cosine/IP no traverse — **zero alocação por nó** (mesmo contrato do L2;
   extensão de `vec.rs`, runtime dispatch AVX2 preservado).
 - [ ] Paridade numérica + recall@10 vs pgvector nas mesmas métricas (harness existente, seed fixa);
-  artefato `docs/benchmarks/m49-cosine-ip-opclasses.{md,json}`.
+  artefato `wiki/benchmarks/archive/m49-cosine-ip-opclasses.md` + `benchmarks/artifacts/m49-cosine-ip-opclasses.json`.
 - [ ] Coexistência: suíte L2 (M45/M46) verde sem regressão; erros tipados para opclass×métrica inválida.
 
 **Dependencies:** M48. **Risco (BAIXO-MÉDIO):** kernel IP/cosine SIMD é extensão direta do L2; decisão
@@ -686,7 +762,7 @@ esta calibração, qualquer novo ciclo de otimização mira um asymptote desconh
   só de corpus, ×3 builds (theodb/pgvector/diskann) numa box de ~15 GB. Escolha default: **cohere 768d×1M
   (~3 GB)** OU subset 250–500k @1536d com caveat explícito no artefato; 1M×1536d fica gated pelo streaming
   build (M55+). Métrica cosine (requer M49), GT exato; fronteira recall×QPS theodb_hnsw vs pgvector vs
-  diskann → `docs/benchmarks/m50-sota-ruler.{md,json}`.
+  diskann → `wiki/benchmarks/m50-sota-ruler.md` + `benchmarks/artifacts/m50-sota-ruler.json`.
 - [ ] **Primeiro artefato de QPS-de-banco** (G5/G6 do deep-view): sweep multi-cliente (8/16 conexões,
   p50/p95/p99, mesmo ponto de recall) + degradação de latência de scan com pending acumulada (N inserts
   pós-build, antes do fold) — theodb vs pgvector. QPS a 1 cliente é 1/latência, não throughput de banco.
@@ -730,7 +806,7 @@ milestone mede).
   on-page** apenas no top `k·over_fetch` (over_fetch reloption/GUC, default medido).
 - [ ] **Recall-gate D3-style:** recall@10 ≥ 0.99 preservado no Pareto M50 (SIFT1M E dataset realista);
   retenção SÓ se effect>variância — senão honest-negative + ADR mantendo f32 (anti-sunk-cost).
-- [ ] Fronteira recall×QPS re-medida vs pgvector E diskann → `docs/benchmarks/m51-sbq-inline.{md,json}`;
+- [ ] Fronteira recall×QPS re-medida vs pgvector E diskann → `wiki/benchmarks/m51-sbq-inline.md` + `benchmarks/artifacts/m51-sbq-inline.json`;
   meta: mover a fronteira ≥2× a recall ≥0.99 vs pgvector (o M50 fixa o número exato do gate).
 - [ ] **ADR keep/kill do AM próprio** (risco 4c do deep-view): critério registrado de quando o AM próprio
   deixa de valer a pena (ex.: se após este lever seguir ≤ pgvector+diskann no Pareto realista, reabrir a
@@ -758,7 +834,7 @@ seletivo — resolver isso planner-integrado é diferencial genuíno e citável.
   passarem o recheck do executor; ou pushdown de bitmap de visibilidade) — `EXPLAIN` provando índice usado
   sob `WHERE`.
 - [ ] **Benchmark de seletividade** (1% / 10% / 50%): recall@10 + QPS vs pgvector iterative scan, mesmo
-  dataset do M50 → `docs/benchmarks/m52-filtered-ann.{md,json}`. Recall sob filtro seletivo ≥ paridade
+  dataset do M50 → `wiki/benchmarks/m52-filtered-ann.md` + `benchmarks/artifacts/m52-filtered-ann.json`. Recall sob filtro seletivo ≥ paridade
   pgvector 0.8.
 - [ ] Zero regressão no path unfiltered (suíte M45/M50 verde; effect>variância).
 
@@ -785,7 +861,7 @@ e o próprio doc diz "not decision-grade"; o follow-up BEIR real está aberto de
 - [ ] Gate de adoção do BM25 executado: leg lexical `pg_textsearch` (BM25) opt-in com fallback `ts_rank_cd`
   preservado; decisão registrada (executa a exceção ADR 0013 — não reabre out-of-scope).
 - [ ] **Benchmark BEIR real** (scifact/nfcorpus, embedder real via `.env` de teste, nDCG@10 + recall@100):
-  híbrida vs vector-only vs BM25-only → `docs/benchmarks/m53-hybrid-beir.{md,json}` — a híbrida só vira
+  híbrida vs vector-only vs BM25-only → `wiki/benchmarks/m53-hybrid-beir.md` + `benchmarks/artifacts/m53-hybrid-beir.json` — a híbrida só vira
   claim com este artefato (`public-copy.md`).
 - [ ] Idioma do `to_tsvector`/`plainto_tsquery` parametrizável (hoje 'english' hard-coded, `hybrid.rs:34-37`).
 
@@ -838,7 +914,7 @@ apressado.
   in-place à la pgvector (`hnswvacuum.c`) vs híbrido (in-place para DELETE, fold para compaction) —
   trade-offs com evidência dos peers (pgvector, pgvectorscale).
 - [ ] Medição do estado atual como baseline: RAM de pico + duração do lock EXCLUSIVE no fold a 100k/500k/1M
-  (SIFT + 768d) + volume de WAL (insumo já coletado no M48) → `docs/benchmarks/m55-vacuum-wall.{md,json}`.
+  (SIFT + 768d) + volume de WAL (insumo já coletado no M48) → `wiki/benchmarks/m55-vacuum-wall.md` + `benchmarks/artifacts/m55-vacuum-wall.json`.
 - [ ] **ADR (MADR 3.0)** com a decisão, alternativas rejeitadas e o plano de milestone(s) de implementação;
   inclui o teto de memória do BUILD (`collect_corpus` streaming ou batched) no escopo da decisão.
 - [ ] Trigger registrado: a implementação da decisão é **pré-requisito de qualquer claim v1.0/produção**
@@ -849,7 +925,7 @@ insumo). **Risco (BAIXO — é decisão+medição, não implementação):** a im
 ganha milestone próprio via `/roadmap-feature` após o ADR.
 
 > **Insumo do M48 já disponível (2026-07-05):** o volume de WAL do fold shadow-write está medido em
-> `docs/benchmarks/m48-am-maintenance.{md,json}` — ~12,3 MB para reescrever um índice de 50k (mean±std de 3
+> `wiki/benchmarks/m48-am-maintenance.md` + `benchmarks/artifacts/m48-am-maintenance.json` — ~12,3 MB para reescrever um índice de 50k (mean±std de 3
 > runs); é exatamente esse custo que o fold incremental desta milestone busca reduzir.
 
 ---
@@ -858,7 +934,7 @@ ganha milestone próprio via `/roadmap-feature` após o ADR.
 
 **Objective (deep-view 2026-07-07, gap P3):** a deep-view mediu o muro: o fold O(N) whole-index segura o
 advisory EXCLUSIVE por ~86 s a 100k×768d (parada total de queries) → ~14 min projetado a 1M
-(`docs/benchmarks/m55-vacuum-wall.md`). O ADR 0017 **decidiu** o caminho (híbrido tombstone-in-place +
+(`wiki/benchmarks/m55-vacuum-wall.md`). O ADR 0017 **decidiu** o caminho (híbrido tombstone-in-place +
 fold-para-compaction) mas a implementação foi deixada como milestone própria. Esta milestone entrega a
 **fase 1**: DELETE vira tombstone in-place por página (à la pgvectorscale `plain/node.rs` / pgvector
 `hnswvacuum.c`), removendo o rebuild O(N) sob EXCLUSIVE do caminho de delete — pré-requisito honesto de
@@ -875,7 +951,7 @@ v1.0 (`public-copy.md §3`) **e** de medir o P0 (M57) a 1M.
 - [ ] Teto de memória do **BUILD**: `collect_corpus` (`build.rs:28`) streaming/batched — `CREATE INDEX`/
   `REINDEX` de 1M×768d não materializa O(N) antes do primeiro nó.
 - [ ] Benchmark: parada do DELETE-path **≪ 86 s do rebuild** + RAM O(#deletados) não O(N), comparado ao
-  baseline M55 → `docs/benchmarks/m56-inplace-maintenance.{md,json}`.
+  baseline M55 → `wiki/benchmarks/m56-inplace-maintenance.md` + `benchmarks/artifacts/m56-inplace-maintenance.json`.
 - [ ] Layout `Changed` (magic bump + REINDEX path); crash-injection e2e (build → restart → scan idêntico).
 
 **Dependencies:** M55 (a decisão ADR 0017), M48 (o `fold.rs` reusado na compaction). **Risco (ALTO):** quebra
@@ -886,21 +962,21 @@ entre compactions (a medir); FFI de VACUUM in-place por página.
 
 **Objective (deep-view 2026-07-07, gap P0):** o claim `≥2× QPS do SBQ inline a recall≥0.99` está
 **UNBENCHMARKED** — o M51 provou correção mas o ganho de QPS não se materializou a 25k (corpus cabe em RAM,
-compressão 4× sem onde ganhar; `docs/benchmarks/m51-sbq-inline.md`). **Toda a tese do AM próprio (ADR 0015)
+compressão 4× sem onde ganhar; `wiki/benchmarks/m51-sbq-inline.md`). **Toda a tese do AM próprio (ADR 0015)
 depende desse número**, e enquanto for hipótese, "superioridade vetorial" viola a Regra 5 (performance é
 claim, não opinião). Esta milestone roda o head-to-head decision-grade que **valida ou mata** a aposta.
 
 **Definition of done:**
 
 - [x] Benchmark reproduzível a **500k@768d** numa box com **RAM < corpus f32** (pressão real via `docker
-  --memory`, box dedicada/quieta — load_per_run<1.5, M46), SBQ vs f32 vs pgvector hnsw → `docs/benchmarks/m57-sbq-superiority.{md,json}`. **Re-escopado (2026-07-08, sign-off do usuário):** a comparação foi entregue a
+  --memory`, box dedicada/quieta — load_per_run<1.5, M46), SBQ vs f32 vs pgvector hnsw → `wiki/benchmarks/m57-sbq-superiority.md` + `benchmarks/artifacts/m57-sbq-superiority.json`. **Re-escopado (2026-07-08, sign-off do usuário):** a comparação foi entregue a
   **recall casado 0.974** (o teto do grafo HNSW do theodb); o `recall≥0.99` literal exige uma melhoria de
   qualidade do HNSW **ORTOGONAL ao SBQ** — provada por 3 fixes medidos-e-refutados (efc→0.832, MERGE→0.846,
   m=32→0.952) e pela bissecção (sequencial≈paralelo). Movido para **M60** (afeta f32 e SBQ igualmente → não
   muda o veredito). Escala 1M literal também deferida ao M60 (mecanismo escala-robusto). `≥3 runs`: pressão
   medida em 3 regimes de RAM.
 - [x] **Veredito D3-style (gate):** honest-negative — SBQ é recall-neutro mas **0.31–0.77× do QPS** do f32
-  (mais lento) in-RAM e sob pressão; a tese ≥2× está FALSIFICADA. ADR `docs/adr/0018` (finaliza o D3 do 0015).
+  (mais lento) in-RAM e sob pressão; a tese ≥2× está FALSIFICADA. ADR `wiki/decisions/0018` (finaliza o D3 do 0015).
 - [x] Posicionamento vs o gap ScaNN do M33: reenquadrado no ADR-0018 — o gap é anisotrópico (M59), não SBQ.
 - [x] **Nenhum claim de "superioridade vetorial" antes deste artefato** (Regra 5 / `public-copy.md §4`) — o
   artefato honest-negative é o único claim, e ele NEGA a superioridade do SBQ.
@@ -914,7 +990,7 @@ do AM próprio — resultado VÁLIDO (anti-sunk-cost), não fracasso.
 **Objective (deep-view 2026-07-07, gap P2):** `dot_from_bytes`/`cosine_dist_from_bytes` (`vec.rs:210-239`)
 rodam **escalares** — só o L2 tem AVX2 (`vec.rs:133`). Mas embeddings reais (OpenAI/Cohere) são **cosine/IP**
 → o hot path deles não é vetorizado. É um ganho de fator-constante **não-colhido** no eixo exato onde
-perdemos para o pgvector (~1.6× latência 1-cliente, `docs/benchmarks/m50-sota-ruler.md`). Arquitetura
+perdemos para o pgvector (~1.6× latência 1-cliente, `wiki/benchmarks/m50-sota-ruler.md`). Arquitetura
 intocada; independente de M56/M57 (pode paralelizar).
 
 **Definition of done:**
@@ -922,7 +998,7 @@ intocada; independente de M56/M57 (pode paralelizar).
 - [ ] `dot_from_bytes`/`cosine_dist_from_bytes` com kernels **AVX2/FMA + fallback escalar**, dispatch runtime
   (mesmo padrão do L2 existente); **recall bit-idêntico** ao escalar (mesma matemática).
 - [ ] Micro-bench same-graph (criterion) provando o speedup por-candidato + macro recall×QPS
-  neutro-em-recall → `docs/benchmarks/m58-simd-cosine.{md,json}`.
+  neutro-em-recall → `wiki/benchmarks/m58-simd-cosine.md` + `benchmarks/artifacts/m58-simd-cosine.json`.
 - [ ] Teste de paridade escalar↔SIMD (fixture/property-based) — sem regressão de correção; edge do tail de
   vetor (dim não-múltipla de 8/16).
 
@@ -930,7 +1006,7 @@ intocada; independente de M56/M57 (pode paralelizar).
 
 ### M59 — [x] Quantização anisotrópica + Asymmetric Hashing SIMD — MEDIDO (honest-negative: carrier HNSW não materializa; caminho é IVF) (P1)
 
-**Objective (deep-view 2026-07-07, gap P1):** o gap de ~25× QPS vs ScaNN/AlloyDB (`docs/benchmarks/m33-scann-headtohead.md`: ScaNN 1920 QPS @0.99 vs theodb 78) é **quantização anisotrópica + Asymmetric Hashing
+**Objective (deep-view 2026-07-07, gap P1):** o gap de ~25× QPS vs ScaNN/AlloyDB (`wiki/benchmarks/m33-scann-headtohead.md`: ScaNN 1920 QPS @0.99 vs theodb 78) é **quantização anisotrópica + Asymmetric Hashing
 (AH) SIMD**, não bit-quantization — o SBQ é fator-constante, não asymptote de recall×QPS. É o lever nomeado
 no M39. Esta milestone ataca o eixo algorítmico real do North Star.
 
@@ -941,11 +1017,11 @@ no M39. Esta milestone ataca o eixo algorítmico real do North Star.
   (D1-D4). `knowledge-base/discoveries/blueprints/m59-anisotropic-ah-blueprint.md`.
 - [x] Quantização anisotrópica (`aq.rs`) + AH scoring via **LUT16 SIMD** (`vec/ah.rs`, `_mm256_shuffle_epi8`) +
   persistência v3/v4 + scan — **177 pg_tests GREEN**. recall×QPS medido vs SBQ/f32/pgvector (20k/100k/500k, in-RAM
-  + pressão) → `docs/benchmarks/m59-anisotropic-ah.{md,json}` + `m59-raw/`.
+  + pressão) → `wiki/benchmarks/m59-anisotropic-ah.md` + `benchmarks/artifacts/m59-anisotropic-ah.json` + `m59-raw/`.
 - [x] **Veredito: HONEST-NEGATIVE (medido, rigoroso).** O AQ+AH está correto e completo mas NÃO supera o f32 em QPS
   a recall casado em nenhuma config no carrier HNSW (v3 co-localizado E v4 separado; in-RAM E pressão). Causa
   estrutural: o pointer-chasing do HNSW + rerank de f32 frios compensa a economia da quantização. O 25× do ScaNN
-  exige o **carrier IVF batch-scan** — registrado como próximo lever medido. ADR `docs/adr/0019`.
+  exige o **carrier IVF batch-scan** — registrado como próximo lever medido. ADR `wiki/decisions/0019`.
 
 **Dependencies:** M57 (medir o SBQ PRIMEIRO — informa se AH é o próximo teto ou o pivot da decisão do AM),
 M58 (o AH depende do dispatch SIMD). **Risco (ALTO):** é o algoritmo, não a plumbing; esforço alto; pode não
@@ -968,20 +1044,45 @@ anômalo); **bissecção** (`THEODB_HNSW_PARALLEL_THRESHOLD`) mostra sequencial�
   ef=1, multi-entry `ep←W`); entry-point/upper-layers/ground-accept confirmados corretos.
 - [x] **Recall-PARIDADE com pgvector a 500k×768d** (DoD reenquadrada, ADR-0030 — o gate 0.99 é artefato do dado:
   o próprio pgvector só chega a 0.988). Medido no MESMO corpus: **theodb SBQ 0.986 ≈ pgvector 0.988 = paridade**;
-  f32 0.974 (gap ~1.4pt = follow-up autorizado, opção B). → `docs/benchmarks/m60-hnsw-recall.md`, `m60-raw/`.
+  f32 0.974 (gap ~1.4pt = follow-up autorizado, opção B). → `wiki/benchmarks/m60-hnsw-recall.md`, `m60-raw/`.
 - [x] Re-comparativo SBQ vs f32 medido a 500k×768d: SBQ 0.986 > f32 0.974 em recall (o over-fetch+rerank do SBQ
   *supera* o f32 puro em recall a escala; o veredito D3 de QPS do M57/ADR-0018 permanece — SBQ mais lento).
 
 **Dependencies:** M57. **Risco (ALTO — confirmado empiricamente):** o resíduo f32 (~1.4pt) resistiu a 5 levers e é
 follow-up (opção B, ADR-0030). — **Concluído** (2026-07-10): DoD reenquadrada por medição (ADR-0030); paridade de
-recall fechada pelo caminho SBQ; 2 ciclos de droplet nesta iteração (`docs/benchmarks/m60-raw/`).
+recall fechada pelo caminho SBQ; 2 ciclos de droplet nesta iteração (`benchmarks/artifacts/m60-raw/`).
 
 ---
 
 # Roadmap v3 — Amplitude de produto (HTAP + vector-relational + AI-native + operabilidade)
 
-> Ativado 2026-07-08 (sign-off do owner). Detalhe estratégico completo em `ROADMAP-v3.md`. 4 pilares, M61–M68.
-> Herda todas as travas do v2 (measurement-first, licenças D1, engine Postgres mantido, Regra 9). M60 diferido.
+> Ativado 2026-07-08 (sign-off do owner). 4 pilares, M61–M68 — **todos concluídos**.
+> Herda todas as travas do v2 (measurement-first, licenças D1, engine Postgres mantido, Regra 9). M60 diferido
+> à época, concluído depois. *(O detalhe estratégico, antes em `ROADMAP-v3.md`, foi absorvido abaixo; o arquivo
+> foi removido — ver § Linhagem dos roadmaps.)*
+
+**Estratégia que motivou o v3:**
+
+1. **Amplitude sobre profundidade** — o pilar vetorial já estava em paridade com pgvector; o v3 diversificou
+   para onde o TheoDB difere de "uma colagem de extensões": HTAP unificado, vetor first-class no relacional,
+   IA dentro do banco em own-code, e operabilidade.
+2. **Adotar quando own-code não paga (Regra 9)** — columnar/HTAP entrou por **adoção** da peça permissiva já
+   medida, não por reescrita (ADR-0013). *(Superado depois: o M143 removeu o `pg_duckdb` e o pilar passou a ser
+   100% own-code — ADR-0056/0057. A justificativa de adoção fica registrada porque foi a base da decisão da época.)*
+3. **Measurement-first (ADR 0002)** — cada milestone com gate reproduzível; honest-negative é resultado válido.
+4. **Incremental com paridade** — o produto permanece funcional a cada milestone.
+
+```
+Pilar A (HTAP):    M61 (adotar columnar) ──▶ M62 (HTAP surface)
+                        │
+Pilar B (vec-rel):      └──▶ M63 (vector join) ──▶ M64 (RAG-sobre-SQL, usa A+B)
+Pilar C (AI):      M65 (rerank) ──▶ M66 (chunking)              [independente de A/B]
+Pilar D (ops):     M67 (auto-tune) ──▶ M68 (observabilidade)    [independente]
+```
+
+**Fora de escopo do v3 (declarado à época):** reescrever columnar/BM25 próprios (Regra 9 — *revertido pelo
+M139/M143*); o carrier IVF e o 25× do ScaNN (esforço ALTO, diferido — *fechado como não-alcançável no M73*);
+control-plane / deploy / HA (fora do escopo deste repositório); reescrever engine/HTTP/serde/crypto (Regra 9).
 
 ### M61 — [x] Embarcar o columnar/HTAP (pg_mooncake/pg_duckdb) na distribuição — o gate de adoção do M30
 
@@ -991,7 +1092,7 @@ Esta milestone faz a adoção: buildar a peça no PG17 (ou bump PG18), smoke end
 **Definition of done:**
 - [x] `pg_mooncake` (ou `pg_duckdb`, o que passar no gate) buildado na imagem do TheoDB; `CREATE EXTENSION` + smoke (columnstore + query analítica) verde em CI.
 - [x] Gate de licença (D1 — MIT ✓) + `/deps-audit` (CVE) da peça e transitivas.
-- [x] Benchmark de adoção reproduzível: columnstore vs row-store no MESMO dataset/box → `docs/benchmarks/m61-columnar-adoption.{md,json}`.
+- [x] Benchmark de adoção reproduzível: columnstore vs row-store no MESMO dataset/box → `wiki/benchmarks/m61-columnar-adoption.md` + `benchmarks/artifacts/m61-columnar-adoption.json`.
 - [x] Honestidade (Regra 9): columnar é **exceção permissiva adotada**, não own-code.
 
 **Dependencies:** M30. **Risco (MÉDIO):** compat de build PG17/18; peso da imagem.
@@ -1002,7 +1103,7 @@ Esta milestone faz a adoção: buildar a peça no PG17 (ou bump PG18), smoke end
 
 **Definition of done:**
 - [x] Fluxo declarativo row-store transacional + coluna analítica sincronizada, documentado como "HTAP do TheoDB".
-- [x] Benchmark HTAP: carga mista (INSERTs OLTP + agregações OLAP concorrentes) → `docs/benchmarks/m62-htap.{md,json}`.
+- [x] Benchmark HTAP: carga mista (INSERTs OLTP + agregações OLAP concorrentes) → `wiki/benchmarks/m62-htap.md` + `benchmarks/artifacts/m62-htap.json`.
 - [x] Veredito honesto vs AlloyDB HTAP (nosso é lakehouse/columnar-adotado — aposta diferente D2, declarada).
 
 **Dependencies:** M61. **Risco (MÉDIO-ALTO):** sincronização row↔column; consistência sob carga mista.
@@ -1013,7 +1114,7 @@ Esta milestone faz a adoção: buildar a peça no PG17 (ou bump PG18), smoke end
 
 **Definition of done:**
 - [x] Similarity join com uso do índice (não nested-loop O(n²)); planner escolhe o AM vetorial; recall preservado. — provado por `#[pg_test] vector_join_uses_index_scan` (EXPLAIN assere `Index Scan using vjb_idx ... Order By` no ramo interno do LATERAL, ausência de `Seq Scan on vjb`); recall 0.9948 paridade com pgvector (ADR-0022).
-- [x] TDD + benchmark de recall/latência do join vs seqscan → `docs/benchmarks/m63-vector-join.{md,json}`. — 4 `#[pg_test]` GREEN + 16 pytest; T1 LATERAL-index 0.452ms **2.16× mais rápido** que T2 naive O(n·m) 0.977ms, paridade com pgvector.
+- [x] TDD + benchmark de recall/latência do join vs seqscan → `wiki/benchmarks/m63-vector-join.md` + `benchmarks/artifacts/m63-vector-join.json`. — 4 `#[pg_test]` GREEN + 16 pytest; T1 LATERAL-index 0.452ms **2.16× mais rápido** que T2 naive O(n·m) 0.977ms, paridade com pgvector.
 - [x] Caso end-to-end: deduplicação/entity-resolution por similaridade em SQL puro. — dedup self-join, recall 1.0 (20/20 duplicatas plantadas achadas), precisão 0.115 (função do τ).
 
 **Dependencies:** M52, M35. **Risco (ALTO):** integração no planner de join.
@@ -1024,7 +1125,7 @@ Esta milestone faz a adoção: buildar a peça no PG17 (ou bump PG18), smoke end
 
 **Definition of done:**
 - [x] Query de referência: `WHERE <filtro> ORDER BY <vetor> LIMIT k` + agregação, planner-integrado, recall + latência medidos. — Path 1 (row-store) entregue e provado por `#[pg_test] rag_unified_query_preserves_recall` (recupera o top-k filtrado idêntico ao oráculo exato) + benchmark. **Nota honesta (ADR-0023):** a agregação **columnar** planner-integrada é estruturalmente inalcançável (pg_duckdb proíbe DuckDB em função, ADR-0021; row-store + Parquet = 2 engines, 2 planners) — Path 2 columnar documentado como 2 statements (padrão M62), não mascarado.
-- [x] Doc do padrão RAG-nativo (retrieval + rerank + contexto) em SQL + benchmark. — `docs/benchmarks/m64-rag-over-sql.md` (o padrão CTE-retrieve + `string_agg` context-assembly) + benchmark. Rerank de 2ª ordem cross-encoder é M65 (documentado honestamente: hoje RRF/ai.rank).
+- [x] Doc do padrão RAG-nativo (retrieval + rerank + contexto) em SQL + benchmark. — `wiki/benchmarks/m64-rag-over-sql.md` (o padrão CTE-retrieve + `string_agg` context-assembly) + benchmark. Rerank de 2ª ordem cross-encoder é M65 (documentado honestamente: hoje RRF/ai.rank).
 - [x] Veredito honesto vs pgvector + app-layer (o que ganhamos por ser unificado). — benchmark "1 SQL vs N app-calls": A_unified 1 round-trip 6.721ms vs B_app_layer 2 round-trips 7.284ms, **recall-match gate PASS (jaccard 1.0)**; a vitória estrutural é round_trips (1 vs 2, amplifica sobre rede); co-located ~8%. council-benchmark: HONESTO.
 
 **Dependencies:** M63, M61, M53. **Risco (MÉDIO).**
@@ -1035,7 +1136,7 @@ Esta milestone faz a adoção: buildar a peça no PG17 (ou bump PG18), smoke end
 
 **Definition of done:**
 - [x] `ai.rerank(query, docs[])` própria (Rust), integrável com a híbrida (M53) e o vector join (M63). — `ai.rerank(query text, docs text[], model text DEFAULT NULL, top_n int DEFAULT NULL) RETURNS TABLE(idx int, score real)` em `rerank.rs` (espelha `embed.rs`, reusa `http.rs`); 14 `#[pg_test]` GREEN; compõe via `ORDER BY score DESC` + join do idx (como M53/M63). ADR-0024.
-- [x] Qualidade medida: nDCG@10 / MRR em BEIR com vs sem rerank → `docs/benchmarks/m65-rerank.{md,json}`. — SciFact 100 queries, 3 runs determinísticos: baseline nDCG@10 0.7327 vs rerank (BGE-reranker-base) 0.6947, Recall@50 conservado (0.92). council-benchmark: HONESTO (idx-mapping verificado, sem bug).
+- [x] Qualidade medida: nDCG@10 / MRR em BEIR com vs sem rerank → `wiki/benchmarks/archive/m65-rerank.md` + `benchmarks/artifacts/m65-rerank.json`. — SciFact 100 queries, 3 runs determinísticos: baseline nDCG@10 0.7327 vs rerank (BGE-reranker-base) 0.6947, Recall@50 conservado (0.92). council-benchmark: HONESTO (idx-mapping verificado, sem bug).
 - [x] Honestidade: se não melhorar, honest-negative + decisão. — **HONEST-NEGATIVE:** o rerank degradou o nDCG@10 em −3.8% (SciFact fora da distribuição do reranker, previsto pela literatura). **Decisão:** `ai.rerank` embarca (superfície model-agnostic correta e medível), sem claim de ganho (public-copy §4), rerank opt-in (custo ~2s/query sem ganho garantido; operador escolhe o reranker por GUC).
 
 **Dependencies:** M53, M18. **Risco (MÉDIO).**
@@ -1046,7 +1147,7 @@ Esta milestone faz a adoção: buildar a peça no PG17 (ou bump PG18), smoke end
 
 **Definition of done:**
 - [x] Chunking configurável no vectorizer (`WITH (chunk_strategy=…, chunk_size=…, overlap=…)`), own-code. — `theodb.chunk` (chunk.rs Rust, fixed/sentence/recursive + overlap, char-based Unicode-safe) + modo chunk-table opt-in no vectorizer (`create_vectorizer(..., chunk_strategy, chunk_size, chunk_overlap)` → 1-doc→N-chunks; 1→1 in-place preservado). chunk 16/16 + vectorizer 13/13 pg_test GREEN. `semantic` DEFERIDO por evidência (arXiv:2410.13070). ADR-0025.
-- [x] Benchmark: recall de RAG por estratégia num corpus real → `docs/benchmarks/m66-chunking.{md,json}`. — NFCorpus 50 queries, k-adaptativo: `sentence`/`recursive` (nDCG@10 0.397/0.391) > `fixed` (0.372). **STRATEGY_MATTERS** (degrau robusto sentence > fixed Δ0.025; degrau fino sentence vs recursive Δ0.006 é empate estatístico — declarado, n=1). council-benchmark: HONESTO.
+- [x] Benchmark: recall de RAG por estratégia num corpus real → `wiki/benchmarks/archive/m66-chunking.md` + `benchmarks/artifacts/m66-chunking.json`. — NFCorpus 50 queries, k-adaptativo: `sentence`/`recursive` (nDCG@10 0.397/0.391) > `fixed` (0.372). **STRATEGY_MATTERS** (degrau robusto sentence > fixed Δ0.025; degrau fino sentence vs recursive Δ0.006 é empate estatístico — declarado, n=1). council-benchmark: HONESTO.
 - [x] Edge/negative: documentos degenerados (vazio, gigante, 1 token) → typed error/handling. — pg_test: vazio→0 chunks, doc<size→1 chunk, palavra gigante→char-cut forçado (sem loop infinito), multibyte→fronteira de char (nunca byte), overlap≥size/size≤0/strategy desconhecida→typed error 22023.
 
 **Dependencies:** M54. **Risco (BAIXO-MÉDIO).**
@@ -1057,7 +1158,7 @@ Esta milestone faz a adoção: buildar a peça no PG17 (ou bump PG18), smoke end
 
 **Definition of done:**
 - [x] Coletor de estatística de scan (recall estimado, pages read, latência) por índice — own-code. — `theodb.scan_stats` mede o **pages_read REAL** (thread_local que o traverse HNSW bumpa) + latência + persiste no catálogo heap `theodb._index_scan_stats` (crash-safe, fora das páginas do índice); `theodb.index_scan_stats(rel)` lê agregados. 5 pg_test GREEN. ADR-0026.
-- [x] Auto-tune (ou **recomendação**) do `ef_search` para um alvo de recall; medida de convergência → `docs/benchmarks/m67-autotune.{md,json}`. — `theodb.recommend_ef` (bisecção monotônica vs GT exato amostrado). Benchmark: **CONVERGED** na média (recall 0.986 ≥ alvos) com 2 ressalvas honestas (corpus fácil não estressa a curva ef; RQUT 12% de cauda — mean-optimal, não tail-safe). Auto-tune ONLINE deferido por evidência (ADR-0026 — oscilação). council-benchmark: HONESTO.
+- [x] Auto-tune (ou **recomendação**) do `ef_search` para um alvo de recall; medida de convergência → `wiki/benchmarks/archive/m67-autotune.md` + `benchmarks/artifacts/m67-autotune.json`. — `theodb.recommend_ef` (bisecção monotônica vs GT exato amostrado). Benchmark: **CONVERGED** na média (recall 0.986 ≥ alvos) com 2 ressalvas honestas (corpus fácil não estressa a curva ef; RQUT 12% de cauda — mean-optimal, não tail-safe). Auto-tune ONLINE deferido por evidência (ADR-0026 — oscilação). council-benchmark: HONESTO.
 - [x] `amcostestimate` refinado com a estatística real (fecha o gap M48/cost). — a fórmula M48 (f(ef)) é retida (honesta) + `theodb.scan_stats` dá a **auditabilidade real** (pages_read medido vs estimado, fechando o gap de auditoria M48/cost). A calibração-in-planning é DEFERIDA por risco EC-3 (SPI no planning abortaria TODO o planejamento) — honesto, não workaround (ADR-0026 D3).
 
 **Dependencies:** M35, M34. **Risco (MÉDIO).**
@@ -1069,7 +1170,7 @@ Esta milestone faz a adoção: buildar a peça no PG17 (ou bump PG18), smoke end
 **Definition of done:**
 - [x] `EXPLAIN` do scan vetorial mostra: índice, ef/probes efetivo, pages read, candidatos vistos. — `theodb.explain_scan(index_table, vector_col, query, ef, k)` retorna `index_name, ef_effective, pages_read, candidates_seen, latency_us, results`. **Honestidade (ADR-0027 D1):** é uma **função diagnóstica separada**, NÃO uma linha dentro do `EXPLAIN` do plano — não existe hook `amexplain` no PG17/PG18; é o padrão Qdrant/Milvus. Validado por pg_test `explain_scan_shows_index_and_candidates` (droplet pg17 real).
 - [x] Métricas runtime (counter/histogram) do scan vetorial expostas (pilar (c) do wiring-triad). — thread_local `SCAN_CANDIDATES` (+`SCAN_PAGES_READ` do M67) bumpado em todo scan; agregado no catálogo heap consultável `theodb._index_scan_stats` (`sum_candidates`/`avg_candidates` via `theodb.index_scan_stats`). **Honestidade (ADR-0027 D3):** catálogo consultável, crash-safe (heap-page, M35), **não** histograma Prometheus/OTel (exporter adiado por YAGNI — passo de plataforma, sem consumidor hoje).
-- [x] Doc de operação: diagnosticar recall baixo / latência alta em produção. — `docs/ops/vector-scan-diagnostics.md` (playbook Passo-0-índice-usado + recall-baixo + latência-alta + tabela sinal→causa→ação; `candidates_seen` distingue grafo-caro de I/O-pesado).
+- [x] Doc de operação: diagnosticar recall baixo / latência alta em produção. — `wiki/runbooks/vector-scan-diagnostics.md` (playbook Passo-0-índice-usado + recall-baixo + latência-alta + tabela sinal→causa→ação; `candidates_seen` distingue grafo-caro de I/O-pesado).
 
 **Dependencies:** M67. **Risco (BAIXO).** — **Concluído** (v0.58.0, 2026-07-09). Observabilidade → validado por pg_test determinístico (6/6 autotune incl. os 2 novos M68 + 13/13 correção HNSW, recall preservado após a mudança de assinatura `ground_search_nodes`), **sem benchmark de performance** (nenhum claim "Nx"; Regra 5 não se aplica). Councils index-storage + rust-pgrx: READY_TO_MERGE (zero BLOCKER/HIGH).
 
@@ -1084,7 +1185,7 @@ Esta milestone faz a adoção: buildar a peça no PG17 (ou bump PG18), smoke end
 **Objective:** shipar um tipo `vector` próprio no theodb_rs (I/O, typmod, operadores, casts) com layout `#[repr(C)]` byte-idêntico ao pgvector, **coexistindo** com o pgvector e provado byte-a-byte — a fundação para remover o pgvector sem tocar o hot path do índice (o P0 do North Star).
 
 **Definition of done:**
-- [x] **Spike pgrx (gate de continuação, ADR-D3):** validado em pg17 real (7/7 pg_test, `docs/spikes/m69-theovec-pgrx-feasibility/`) — pgrx 0.16.1 define o tipo denso via `extension_sql!(CREATE TYPE)` + I/O `#[pg_extern]` + 6 traits, layout `#[repr(C)]` byte-idêntico. Spike PASSOU → veredito A confirmado.
+- [x] **Spike pgrx (gate de continuação, ADR-D3):** validado em pg17 real (7/7 pg_test, `wiki/references/m69-theovec-pgrx-feasibility/`) — pgrx 0.16.1 define o tipo denso via `extension_sql!(CREATE TYPE)` + I/O `#[pg_extern]` + 6 traits, layout `#[repr(C)]` byte-idêntico. Spike PASSOU → veredito A confirmado.
 - [x] Tipo próprio `theodb.vector`: I/O in/out/recv/send (parse `[..]`, wire binário big-endian `unused`==0), typmod (dim 1..16000, enforce via length-coercion cast), validação (NaN/Inf/dim-mismatch typed), operadores `<->`/`<#>`/`<=>` (reuso kernels `vec.rs`) + casts `real[]`/`float8[]`/`text` **+ cast binário `WITHOUT FUNCTION` bidirecional com o `vector` do pgvector**. `theodb_rs/src/dtype.rs`.
 - [x] **Gate de paridade byte-a-byte:** 16/16 dtype pg_tests GREEN em pg17 real (stack completa) — corpus `vector_type`/`cast`/`copy` binário + **`md5(vector_send)` byte-cru idêntico ao pgvector em dims 1/3/5/128/300** (prova byte-a-byte incl. byte alto do `u16 dim`) + typmod + NaN/Inf/dim0/malformado + memória sem UAF.
 - [x] pgvector permanece instalado; os AMs usam `FOR TYPE vector` do pgvector — **zero regressão** (13/13 HNSW AM pg_tests GREEN; o M69 NÃO tocou o AM).
@@ -1099,7 +1200,7 @@ Esta milestone faz a adoção: buildar a peça no PG17 (ou bump PG18), smoke end
 
 **Definition of done:**
 - [x] Opclasses `theodb_hnsw`/`theodb_ivfflat` sobre o tipo próprio (o `FOR TYPE vector` resolve ao `public.vector` own-code — sem mudança; preserva o M49 metric-from-opclass). Os `::vector` do `theodb_rs/src` resolvem ao tipo próprio (o tipo é `public.vector`). Opclasses ganham `requires = ["vector_type"]` (ordem de criação).
-- [x] **Migração de tabelas existentes** documentada + testada no design (`docs/ops/pgvector-migration.md`): via intermediário `real[]` (ALTER→real[]→DROP pgvector→CREATE theodb→ALTER→vector→REINDEX), janela de manutenção. **Honestidade (Regra 3):** o byte-cast direto do M69 NÃO se aplica ao upgrade (colisão de nome `public.vector`); corrigido no review. Greenfield não precisa de migração.
+- [x] **Migração de tabelas existentes** documentada + testada no design (`wiki/guides/pgvector-migration.md`): via intermediário `real[]` (ALTER→real[]→DROP pgvector→CREATE theodb→ALTER→vector→REINDEX), janela de manutenção. **Honestidade (Regra 3):** o byte-cast direto do M69 NÃO se aplica ao upgrade (colisão de nome `public.vector`); corrigido no review. Greenfield não precisa de migração.
 - [x] `requires` do pgvector/vectorscale ZERADO (`theodb_rs.control` vazio — o flip; `theodb.control` requer `theodb_rs`); **Dockerfile sem pgvector nem pgvectorscale** (stage pgvectorscale + `ADD pgvector.git`/`make install` + `COPY vectorscale*` removidos); **pg_duckdb intocado**; diskann benchmark-only.
 - [x] **Gate de não-regressão de recall:** os pg_tests `set-equal-vs-seqscan` do AM (`hnsw_page.rs`) GREEN sobre o tipo próprio `public.vector`, em pg17 real, SEM pgvector — top-k índice == top-k exato.
 - [x] pgvector + pgvectorscale **ausentes**; `CREATE EXTENSION theodb CASCADE` sem CASCADE de terceiros — extensões instaladas `theodb` + `theodb_rs` (zero vector/vectorscale); a suíte completa (prova de paridade v1) verde.
@@ -1108,16 +1209,41 @@ Esta milestone faz a adoção: buildar a peça no PG17 (ou bump PG18), smoke end
 
 ---
 
-# Roadmap v5 — Superioridade vetorial P0 (MEDIDA)
+# Roadmap v5 — Superioridade vetorial P0 (MEDIDA) — **CONCLUÍDO, com veredito**
 
-> Detalhe estratégico + estado medido honesto em [`ROADMAP-v5.md`](./ROADMAP-v5.md). Fecha o pilar **P0 do
-> North Star** (`docs/adr/0002`) que segue parcial: **superioridade vetorial comprovada por benchmark**. Estado
-> medido: recall-parity vs pgvector ✅, mas o grafo próprio satura <0.99 a escala (**M60 aberto**); latência p50
-> paridade (não superior); head-to-head vs ScaNN (AlloyDB) = recall-paridade mas **~25–37× gap de QPS** (M33) —
-> a quantização anisotrópica + AH SIMD do ScaNN; **M57 (SBQ) e M59 (anisotrópica+AH) já deram honest-negative**.
-> **O v5 é measurement-first: cada milestone tem gate executável e ACEITA honest-negative como conclusão** (Regra
-> 3/5). Não promete vencer o ScaNN — promete o **veredito medido** de onde o TheoDB está vs o SOTA. **Fundação:
-> M60** (já abaixo). Sequência: M60 → M71 → M72 → M73 → (M74 condicional).
+> Ativado 2026-07-09 (sign-off do owner). M60, M71, M72, M73, M74 — **todos concluídos**. *(O detalhe
+> estratégico, antes em `ROADMAP-v5.md`, foi absorvido abaixo; o arquivo foi removido — ver § Linhagem.)*
+>
+> **⚠️ LEIA O VEREDITO ANTES DE REABRIR QUALQUER APOSTA DESTE PILAR.** O v5 existiu para fechar o pilar **P0 do
+> North Star** (`wiki/decisions/0002`) — superioridade vetorial comprovada por benchmark — e **fechou**:
+>
+> | Eixo | Veredito MEDIDO (M73, 2026-07-10) |
+> |---|---|
+> | Recall vs pgvector | **paridade own-code ALCANÇADA** (M60/M69/M70) |
+> | Throughput multi-cliente vs pgvector | **competitivo-a-superior** — +11% QPS a recall casado, 128d clusterizado (M72) |
+> | QPS vs ScaNN/AlloyDB | **superioridade NÃO-ALCANÇÁVEL** por extensão PG permissiva — gap de ~25–44× @ 0.99 é **de paradigma** (AH-LUT anisotrópico + não pagar o imposto MVCC/WAL) |
+>
+> Fonte de verdade: [`wiki/decisions/0035-m73-northstar-vector-verdict.md`](./wiki/decisions/0035-m73-northstar-vector-verdict.md)
+> + [`wiki/benchmarks/m73-headtohead-verdict.md`](./wiki/benchmarks/m73-headtohead-verdict.md). O M74 mediu o
+> melhor quantizador permissivo (RaBitQ) e concluiu que ele **compra memória, não QPS** (ADR-0036).
+>
+> **Três levers já deram honest-negative** — M57 (SBQ inline), M59 (anisotrópica + AH), M74 (RaBitQ). Propor um
+> quarto exige **dado novo**, não argumento. Posicionamento permitido: "paridade de recall + memória
+> billion-scale + AI-native/HTAP/aberto"; **jamais** "mais rápido que o AlloyDB no vetor".
+
+**Estratégia que motivou o v5:** fechar o P0 em quatro passos gated por medição, do pré-requisito ao veredito.
+Cada milestone com gate executável que **aceita honest-negative como conclusão** (Regra 3) — o valor é a régua e
+o veredito, não um número prometido. O pgvector permaneceu como **oráculo de controle** nos benchmarks
+(recall-parity gate) mesmo tendo sido removido da distribuição no M70 — instalável só no ambiente de benchmark.
+
+```
+M60 (recall≥0.99) ──▶ M71 (latência) ──▶ M72 (QPS multi-cliente) ──▶ M73 (veredito head-to-head)
+                                                                          └──▶ M74 (quant SOTA, CONDICIONAL)
+```
+
+**O que o v5 nunca foi (honestidade, declarada na abertura):** não era promessa de vencer o ScaNN; não reabria
+HA / replicação / control-plane (deploy/plataforma, fora do escopo deste repo); não fazia claim de performance
+sem artefato em `wiki/benchmarks/` (Regra 5 / `public-copy.md`).
 
 ## M71 — [x] Latência do AM: melhoria medida (multi-entry build) — DoD reenquadrada (ADR-0031)
 
@@ -1127,7 +1253,7 @@ grafo (mesma raiz do M60) → M71 entrega a **melhoria medida** e documenta hone
 
 **Definition of done (reenquadrada — ADR-0031):**
 - [x] Discover (R0 web): blueprint `m71-scan-latency` (dual-source + SOTA PANORAMA/FastScan/KScaNN). Raiz do gap = navegabilidade (theodb precisa ~2-5× o `ef` do pgvector por recall).
-- [x] **Melhoria de latência medida e shipada:** multi-entry build → **+29% QPS a 500k×768d, recall-neutral, 63/63 pg_tests GREEN** → `docs/benchmarks/m71-scan-latency.md`, `m60-raw/m71_*`.
+- [x] **Melhoria de latência medida e shipada:** multi-entry build → **+29% QPS a 500k×768d, recall-neutral, 63/63 pg_tests GREEN** → `wiki/benchmarks/m71-scan-latency.md`, `m60-raw/m71_*`.
 - [x] Veredito honesto: superioridade iso-recall NÃO atingida (theodb ~1.5× a 100k, ~1.7× a 500k a iso-recall — gated na navegabilidade, follow-up autorizado). Sem claim de superioridade.
 
 **Dependencies:** M60. **Risco (MÉDIO-ALTO — confirmado).** — **Concluído** (2026-07-10): melhoria medida entregue; superioridade gated na navegabilidade (ADR-0031). Cortes de custo/candidato (kernel bounded, norm-hoist) = follow-up.
@@ -1141,7 +1267,7 @@ de produção) — theodb_hnsw/ivfflat vs pgvector, mesmo hardware/dataset — p
 o throughput multi-cliente é competitivo, incluindo o efeito de lock/buffer do índice sob carga.
 
 **Definition of done:**
-- [x] Harness multi-cliente (8 conexões, QPS agregado, p50/p95/p99) a 1M×128d, ≥3 runs, mean±std — theodb vs pgvector → `docs/benchmarks/m72-qps-multiclient.md` + `m72-raw/`. **Caveat honesto (Regra 3):** corpus = gaussian-mixture 256-cluster (gerador M45/M51, comparação justa mesmo-dado-ambos-engines), **NÃO** o SIFT1M literal — o regime clusterizado favorece o theodb (extendCandidates); em SIFT1M real a vantagem provavelmente encolhe. Flagged, não escondido.
+- [x] Harness multi-cliente (8 conexões, QPS agregado, p50/p95/p99) a 1M×128d, ≥3 runs, mean±std — theodb vs pgvector → `wiki/benchmarks/m72-qps-multiclient.md` + `m72-raw/`. **Caveat honesto (Regra 3):** corpus = gaussian-mixture 256-cluster (gerador M45/M51, comparação justa mesmo-dado-ambos-engines), **NÃO** o SIFT1M literal — o regime clusterizado favorece o theodb (extendCandidates); em SIFT1M real a vantagem provavelmente encolhe. Flagged, não escondido.
 - [x] Veredito honesto de QPS multi-cliente com a origem identificada: **theodb competitivo-a-superior** a recall casado neste regime (+11% QPS @ ~0.91, build 3× mais rápido; alcança recall 0.97 onde a pgvector platôa ~0.914). Origem: navegabilidade do extendCandidates em dados clusterizados. Frontier alta-dim/alto-recall (768d@0.99) permanece da pgvector (ADR-0034).
 
 **Dependencies:** M60, M71. **Risco (MÉDIO):** contenção de buffer/lock; o gap pode ser estrutural (índice persistente vs library in-memory). → **MEDIDO:** sem colapso de contenção a 8 clientes; theodb competitivo/à-frente no regime 128d clusterizado.
@@ -1155,8 +1281,8 @@ caso, entrega a **prova medida de ONDE o TheoDB está** vs o SOTA (o que o North
 inventada). Caveat estrutural: ScaNN é library ANN in-memory, theodb é índice PostgreSQL persistente transacional.
 
 **Definition of done:**
-- [x] Head-to-head a recall≥0.99 → `docs/benchmarks/m73-headtohead-verdict.{md,json}` — consolida frontiers MEDIDOS em SIFT1M real (M33 ScaNN 1920 QPS vs M45 theodb_hnsw ~44 QPS vs pgvector) + M72 multi-cliente + RaBitQ spike. **ScaNN não re-rodado (D3/anti-sunk-cost):** inalterado desde M33; M60/M71/M72 não tocam o paradigma de quantização — documentado no doc. Gap ~25-44× @ 0.99 confirmado por 4 medições independentes.
-- [x] **ADR de veredito do North Star vetorial** (`docs/adr/0035`): **(b)+(c) — paridade own-code de recall ALCANÇADA + throughput multi-cliente competitivo-superior + honest-negative de QPS-superioridade vs ScaNN.** Posicionamento permitido definido (`public-copy.md`).
+- [x] Head-to-head a recall≥0.99 → `wiki/benchmarks/m73-headtohead-verdict.md` + `benchmarks/artifacts/m73-headtohead-verdict.json` — consolida frontiers MEDIDOS em SIFT1M real (M33 ScaNN 1920 QPS vs M45 theodb_hnsw ~44 QPS vs pgvector) + M72 multi-cliente + RaBitQ spike. **ScaNN não re-rodado (D3/anti-sunk-cost):** inalterado desde M33; M60/M71/M72 não tocam o paradigma de quantização — documentado no doc. Gap ~25-44× @ 0.99 confirmado por 4 medições independentes.
+- [x] **ADR de veredito do North Star vetorial** (`wiki/decisions/0035`): **(b)+(c) — paridade own-code de recall ALCANÇADA + throughput multi-cliente competitivo-superior + honest-negative de QPS-superioridade vs ScaNN.** Posicionamento permitido definido (`public-copy.md`).
 - [x] Atualizado `goto-p0-vector-superiority` (memória) + CLAUDE.md North Star com o estado MEDIDO final.
 
 **Dependencies:** M60, M71, M72. **Risco (ALTO):** → **MATERIALIZOU-SE (honesto):** o veredito É "paridade own-code + multi-cliente competitivo-superior, NÃO superioridade de QPS pura vs ScaNN" — como o risco previa. Gap de paradigma, não fechável por extensão PG permissiva.
@@ -1196,7 +1322,7 @@ primeiro número honesto (sustenta OU refuta a hipótese IVF-batch-scan). Espelh
 o formato do `rabitq-rs/examples/bench_ivf_vs_mstg.rs`.
 
 **Definition of done:**
-- [x] Harness recall×QPS IVF-AQ+AH vs full-precision IVF em dado **SIFT real** (GT exato brute-force), sweep nprobe, ≥3 runs → `docs/benchmarks/m75-ivf-aqah-spike.{md,json}`. **Achado Rule 9 (de-risca tudo):** o kernel batched AH-LUT (`vec/ah.rs::ah_score_block`) + o acesso às inverted lists (`ivf.rs::list_entries`) **já existiam e estavam testados** — o glue novo é só `ann/ivf_aqah.rs` (pipeline provado correto: 3 pg_tests GREEN). **Caveat honesto (Regra 5):** medido a **n=5000 (subset SIFT), NÃO 1M** — o `AqQuantizer::train` naive é **super-linear** (23s@5k → impraticável@1M in-session); a comparação RELATIVA (aqah vs f32, mesmo corpus, GT exato) que o D3 pergunta É válida nessa escala; a medição full-1M exige otimizar o AVQ train (item concreto de M77). Micro-bench criterion + ScaNN-re-run: deferidos (o kernel já tem teste de paridade `ah_simd_block32_matches_scalar`; o gate D3 é vs f32 baseline, per o m59 blueprint).
+- [x] Harness recall×QPS IVF-AQ+AH vs full-precision IVF em dado **SIFT real** (GT exato brute-force), sweep nprobe, ≥3 runs → `wiki/benchmarks/m75-ivf-aqah-spike.md` + `benchmarks/artifacts/m75-ivf-aqah-spike.json`. **Achado Rule 9 (de-risca tudo):** o kernel batched AH-LUT (`vec/ah.rs::ah_score_block`) + o acesso às inverted lists (`ivf.rs::list_entries`) **já existiam e estavam testados** — o glue novo é só `ann/ivf_aqah.rs` (pipeline provado correto: 3 pg_tests GREEN). **Caveat honesto (Regra 5):** medido a **n=5000 (subset SIFT), NÃO 1M** — o `AqQuantizer::train` naive é **super-linear** (23s@5k → impraticável@1M in-session); a comparação RELATIVA (aqah vs f32, mesmo corpus, GT exato) que o D3 pergunta É válida nessa escala; a medição full-1M exige otimizar o AVQ train (item concreto de M77). Micro-bench criterion + ScaNN-re-run: deferidos (o kernel já tem teste de paridade `ah_simd_block32_matches_scalar`; o gate D3 é vs f32 baseline, per o m59 blueprint).
 - [x] **Veredito D3 = GO (medido):** o IVF-AQ+AH entrega **~2.3× (recall 1.0) a ~7× (recall 0.95-0.99) o QPS do full-precision a recall casado** em SIFT real — captura ~5-7× dos ~25× do gap ScaNN (M33). Primeiro lever own-code que move o gap de verdade (M57/M59-no-HNSW não moveram). Reabre honestamente o eixo de QPS que o M73 fechara "pelos levers tentados". Sem overclaim: GO é sobre viabilidade algorítmica medida, não promessa de vencer o ScaNN (isso é o M82).
 
 **Dependencies:** M73, M59. **Risco (ALTO):** → **RESOLVIDO (medido-positivo):** a hipótese IVF-AQ+AH era fundamentada e agora está MEDIDA (~5-7× vs f32 a recall casado). **GATE ABERTO: M76-M82 arrancam (GO).**
@@ -1291,7 +1417,7 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 
 **Definition of done:**
 - [ ] `amcostestimate` faz o planner escolher o pg_scann quando apropriado; filtros SQL + ORDER BY <-> integrados.
-- [ ] Head-to-head final a recall≥0.99 vs ScaNN (SIFT1M) → `docs/benchmarks/m82-pgscann-headtohead.{md,json}` + ADR de veredito do North Star (superou / reduziu o gap / honest-negative final).
+- [ ] Head-to-head final a recall≥0.99 vs ScaNN (SIFT1M) → `wiki/benchmarks/m82-pgscann-headtohead.md` + `benchmarks/artifacts/m82-pgscann-headtohead.json` + ADR de veredito do North Star (superou / reduziu o gap / honest-negative final).
 
 **Dependencies:** M81. **Risco (ALTO):** o veredito honesto pode ainda ser "reduziu mas não superou"; o valor é a prova medida final do pilar.
 
@@ -1301,7 +1427,7 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 
 > **`ROADMAP_COMPLETED` (2026-07-12)** — M83→M88 todos `[x]`; **18/18 milestones do roadmap ativo entregues**. Veredito terminal da track: **classe "AlloyDB-ScaNN in-Postgres" alcançada em tamanho/memória** (SQ8 3.52× menor, storage-separation 3–12× a 1M M84-M87), **crossover de QPS out-of-RAM direcional-não-provado** (teto de memória de build descoberto no M88; DoD ≥100M não atingido honestamente — ver M88 Outcome + ADR `0038`). **Superioridade sobre o ScaNN-biblioteca permanece NÃO-alcançável** (imposto de paradigma MVCC/WAL, M73/M82). Próxima linhagem (fora deste roadmap): ambuild streaming + bilhão-scale real.
 >
-> Origem: deep research web-grounded 2026-07-11 (`docs/research/scann-storage-separation-2026-07.md`). Ataca a **única** alavanca não-testada que o ADR-0037 (M82) nomeou: **separar os códigos AQ dos vetores f32 em cadeias de páginas distintas** (FastScan/AlloyDB/VectorChord/pgvectorscale todos fazem). **Alvo honesto (arXiv:2603.23710 + teto AlloyDB):** recuperar ~4–6× → classe "AlloyDB-ScaNN in-Postgres" (~4× sobre pgvector HNSW), **jamais** vencer o ScaNN-biblioteca (imposto MVCC/WAL é ~4–6× irrecuperável). **Serial, gate-driven; honest-negative é terminal válido em cada etapa.**
+> Origem: deep research web-grounded 2026-07-11 (`wiki/references/scann-storage-separation-2026-07.md`). Ataca a **única** alavanca não-testada que o ADR-0037 (M82) nomeou: **separar os códigos AQ dos vetores f32 em cadeias de páginas distintas** (FastScan/AlloyDB/VectorChord/pgvectorscale todos fazem). **Alvo honesto (arXiv:2603.23710 + teto AlloyDB):** recuperar ~4–6× → classe "AlloyDB-ScaNN in-Postgres" (~4× sobre pgvector HNSW), **jamais** vencer o ScaNN-biblioteca (imposto MVCC/WAL é ~4–6× irrecuperável). **Serial, gate-driven; honest-negative é terminal válido em cada etapa.**
 
 ## M83 — [x] Fase 0 v7: spike D3 storage-separation (o GATE measurement-first)
 
@@ -1309,7 +1435,7 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 
 **Definition of done:**
 - [ ] `write_ivf_aq_split`/`read_ivf_aq_meta_v5`/`scan_ivf_aq_split` (~185 LoC, `am/page.rs`+`am/scan.rs`) atrás de reloption; recall@10 byte-classe-idêntico ao v4/v3.
-- [ ] `benchmarks/m83_split_bench.py` (A/B same-data M46: v5+v4+v3 na MESMA tabela 1M) → `docs/benchmarks/m83-split-storage-spike.{md,json}` com **cold E warm cache** best-of-3 + `pages_read` via profiler + veredito D3 explícito.
+- [ ] `benchmarks/m83_split_bench.py` (A/B same-data M46: v5+v4+v3 na MESMA tabela 1M) → `wiki/benchmarks/m83-split-storage-spike.md` + `benchmarks/artifacts/m83-split-storage-spike.json` com **cold E warm cache** best-of-3 + `pages_read` via profiler + veredito D3 explícito.
 - [ ] 236 pg_tests GREEN; CHANGELOG atualizado.
 
 **GATE D3:** ≥**3× v4** a recall 0.985 (≥~235 QPS) **E** pages_read confirma queda de I/O → **GO M84**. 1.3–3× → HONEST-PARTIAL. <1.3× → HONEST-NEGATIVE-FINAL (fecha a track, ADR estende M73/M82).
@@ -1338,9 +1464,9 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 ## M88 — [x] Head-to-head bilhão-scale + North Star re-measure *(gated M87)*
 
 **Objective:** a medição terminal num regime onde o f32 NÃO cabe em RAM (a vantagem real da separação, não projetada) vs ScaNN/AlloyDB.
-**DoD:** `docs/benchmarks/m88-*.md` a ≥100M/1B; ADR estendendo/revisando 0037; sign-off council-benchmark. **GATE:** veredito terminal do North Star para a track separada (o próximo dado da linhagem M33/M73/M82). **Dependencies:** M87.
+**DoD:** `wiki/benchmarks/m88-*.md` a ≥100M/1B; ADR estendendo/revisando 0037; sign-off council-benchmark. **GATE:** veredito terminal do North Star para a track separada (o próximo dado da linhagem M33/M73/M82). **Dependencies:** M87.
 
-**Outcome (2026-07-12, veredito `SIZE_CONFIRMED / OUT_OF_RAM_QPS_INCONCLUSIVE` — `docs/benchmarks/m88-billion-scale-verdict.{md,json}` + ADR `0038`, sign-off council-benchmark):** MEDIDO a **16M** — índice SQ8 (v6) **3.52× menor** que f32 (v5), confirmando o 3.5× do M85 em 16× a escala; **+21% cold-QPS @ probes=32** (direcional, limite inferior). **DoD ≥100M NÃO atingido honestamente:** descoberto um **teto de memória de build** (ambuild pica ~4× o base → 2 OOM-kills medidos a 30M num box de 62 GB usáveis), 16M foi o maior viável; a recall sintética (0.291) é tie-degenerada (SIFT1M real = 0.98, M84). Crossover QPS out-of-RAM fica **direcional-não-provado**; **nenhuma** claim de superioridade sobre ScaNN/AlloyDB (teto de paradigma M73/M82 permanece). Fechado na disciplina honest-negative de M73/M82. Follow-up (nova linhagem): **ambuild streaming** (derruba o teto ~4×-base → 100M+ em RAM commodity) + dados ANN reais bilhão-scale + harness cold-cache por-query. Phase 1 (build escalável, commit `fba16d0`, 249 pg_tests GREEN, byte-idêntico ≤1M) foi o que tornou os builds 16M/30M tratáveis.
+**Outcome (2026-07-12, veredito `SIZE_CONFIRMED / OUT_OF_RAM_QPS_INCONCLUSIVE` — `wiki/benchmarks/m88-billion-scale-verdict.md` + `benchmarks/artifacts/m88-billion-scale-verdict.json` + ADR `0038`, sign-off council-benchmark):** MEDIDO a **16M** — índice SQ8 (v6) **3.52× menor** que f32 (v5), confirmando o 3.5× do M85 em 16× a escala; **+21% cold-QPS @ probes=32** (direcional, limite inferior). **DoD ≥100M NÃO atingido honestamente:** descoberto um **teto de memória de build** (ambuild pica ~4× o base → 2 OOM-kills medidos a 30M num box de 62 GB usáveis), 16M foi o maior viável; a recall sintética (0.291) é tie-degenerada (SIFT1M real = 0.98, M84). Crossover QPS out-of-RAM fica **direcional-não-provado**; **nenhuma** claim de superioridade sobre ScaNN/AlloyDB (teto de paradigma M73/M82 permanece). Fechado na disciplina honest-negative de M73/M82. Follow-up (nova linhagem): **ambuild streaming** (derruba o teto ~4×-base → 100M+ em RAM commodity) + dados ANN reais bilhão-scale + harness cold-cache por-query. Phase 1 (build escalável, commit `fba16d0`, 249 pg_tests GREEN, byte-idêntico ≤1M) foi o que tornou os builds 16M/30M tratáveis.
 
 ---
 
@@ -1348,14 +1474,14 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 
 > **`ROADMAP_COMPLETED` (2026-07-12) — 19/19 milestones do roadmap ativo `[x]`.** M89 entregue (v0.77.0): o teto de memória do build (~4× base, M88) foi derrubado para **1.28× (v5) / 1.50× (v6)** a 30M, MEDIDO — o build de 30M agora completa num box de 64 GB (byte-idêntico, sem REINDEX, 250 pg_tests GREEN). **Limite honesto:** ainda carrega a cópia 1× `idx.vectors` (não é `O(maintenance_work_mem)`), então 100M+ (~51 GB base) ainda não cabe em RAM commodity — o `tuplesort` streaming dos vetores (nunca materializar o corpus) é o próximo follow-up honesto p/ a medição ≥100M do M88.
 >
-> Origem: achado MEDIDO do M88 (ADR-0038 + `docs/benchmarks/m88-billion-scale-verdict.md`) — o `ambuild` do `theodb_ivfflat` pica ~4× o dataset base em RAM (2 OOM-kills a 30M num box de 62 GB usáveis), então um índice genuinamente out-of-RAM não é construível em RAM commodity. O roadmap v7 fechou `ROADMAP_COMPLETED` (18/18, v0.76.0); esta linhagem retoma a **única alavanca nomeada** para o crossover de QPS out-of-RAM ficar medível. Serial, gate-driven, measurement-first.
+> Origem: achado MEDIDO do M88 (ADR-0038 + `wiki/benchmarks/m88-billion-scale-verdict.md`) — o `ambuild` do `theodb_ivfflat` pica ~4× o dataset base em RAM (2 OOM-kills a 30M num box de 62 GB usáveis), então um índice genuinamente out-of-RAM não é construível em RAM commodity. O roadmap v7 fechou `ROADMAP_COMPLETED` (18/18, v0.76.0); esta linhagem retoma a **única alavanca nomeada** para o crossover de QPS out-of-RAM ficar medível. Serial, gate-driven, measurement-first.
 
 ## M89 — [x] ambuild streaming (flush incremental — derruba o teto de memória de build) *(gated M88)*
 
-**Outcome (2026-07-12, veredito `DOD_MET` — `docs/benchmarks/m89-ambuild-streaming.{md,json}` + ADR `0039`, sign-off council-index-storage + rust-pgrx + benchmark):** o build de 30M agora **completa num box de 64 GB** com pico **1.28× (v5) / 1.50× (v6)** base MEDIDO (vs old-build 4.21×/64.7 GB OOM, reproduzindo o M88). Fix: `build_owned` move o corpus + os writers v5/v6 escrevem cada lista incrementalmente (elimina os clones `list_entries`/`enc_vec`/`items`), byte-idêntico (sem REINDEX). 250 pg_tests GREEN, zero regressão. **Desvio parsimony honesto:** o plano previa FFI do `tuplesort` (Opção B); a MEDIÇÃO mostrou que clone-elimination + streaming page-writes atingem o DoD de 30M com risco muito menor (zero FFI) — a FFI era YAGNI p/ 30M. **Limite honesto:** NÃO é `O(maintenance_work_mem)` (pico ainda tem a cópia 1× `idx.vectors`) → 100M+ (~51 GB base) ainda não cabe em RAM commodity; o `tuplesort` streaming dos vetores é o follow-up.
+**Outcome (2026-07-12, veredito `DOD_MET` — `wiki/benchmarks/m89-ambuild-streaming.md` + `benchmarks/artifacts/m89-ambuild-streaming.json` + ADR `0039`, sign-off council-index-storage + rust-pgrx + benchmark):** o build de 30M agora **completa num box de 64 GB** com pico **1.28× (v5) / 1.50× (v6)** base MEDIDO (vs old-build 4.21×/64.7 GB OOM, reproduzindo o M88). Fix: `build_owned` move o corpus + os writers v5/v6 escrevem cada lista incrementalmente (elimina os clones `list_entries`/`enc_vec`/`items`), byte-idêntico (sem REINDEX). 250 pg_tests GREEN, zero regressão. **Desvio parsimony honesto:** o plano previa FFI do `tuplesort` (Opção B); a MEDIÇÃO mostrou que clone-elimination + streaming page-writes atingem o DoD de 30M com risco muito menor (zero FFI) — a FFI era YAGNI p/ 30M. **Limite honesto:** NÃO é `O(maintenance_work_mem)` (pico ainda tem a cópia 1× `idx.vectors`) → 100M+ (~51 GB base) ainda não cabe em RAM commodity; o `tuplesort` streaming dos vetores é o follow-up.
 
 **Objective:** reescrever o `ambuild` do `theodb_ivfflat` para **flush incremental de páginas via `tuplesort`/spool nativo do Postgres** (Regra 9 — o mecanismo do ambuild do btree e do build HNSW do pgvector), em vez de bufferizar o `AnnIndex` inteiro + cópias em RAM, derrubando o pico de ~4× o base para ~1× base — o teto que causou 2 OOM-kills a 30M no M88.
-**DoD:** (1) pico anon-rss do build **≤ ~1.5× o dataset base, MEDIDO** num build de **30M** que completa num box de 64 GB (o cenário que OOMou no M88); (2) **zero regressão** — 249 pg_tests GREEN + recall **byte-idêntico** a ≤1M (A/B same-data M46); (3) `docs/benchmarks/m89-*.{md,json}` com pico anon-rss vs N (16M, 30M) build-antigo vs novo provando que o pico deixou de escalar ~4×; (4) `maintenance_work_mem` respeitado; (5) sem novas deps externas (`tuplesort` é do próprio Postgres via `pg_sys`); (6) sign-off council-rust-pgrx (FFI do tuplesort) + council-index-storage (build/page). **Escopo:** SÓ o build escalável — a medição terminal bilhão-scale (≥100M) é **M90 gated por M89**. **Risks:** (a) API do `tuplesortstate` via `pg_sys` (FFI/`extern "C-unwind"`) — mitigar espelhando o build HNSW do pgvector + council-rust-pgrx; (b) build mais lento a ≤1M onde tudo cabe em RAM — mitigar com fast-path in-RAM quando `N·base ≤ maintenance_work_mem`. **Dependencies:** M88.
+**DoD:** (1) pico anon-rss do build **≤ ~1.5× o dataset base, MEDIDO** num build de **30M** que completa num box de 64 GB (o cenário que OOMou no M88); (2) **zero regressão** — 249 pg_tests GREEN + recall **byte-idêntico** a ≤1M (A/B same-data M46); (3) `wiki/benchmarks/m89-*.{md,json}` com pico anon-rss vs N (16M, 30M) build-antigo vs novo provando que o pico deixou de escalar ~4×; (4) `maintenance_work_mem` respeitado; (5) sem novas deps externas (`tuplesort` é do próprio Postgres via `pg_sys`); (6) sign-off council-rust-pgrx (FFI do tuplesort) + council-index-storage (build/page). **Escopo:** SÓ o build escalável — a medição terminal bilhão-scale (≥100M) é **M90 gated por M89**. **Risks:** (a) API do `tuplesortstate` via `pg_sys` (FFI/`extern "C-unwind"`) — mitigar espelhando o build HNSW do pgvector + council-rust-pgrx; (b) build mais lento a ≤1M onde tudo cabe em RAM — mitigar com fast-path in-RAM quando `N·base ≤ maintenance_work_mem`. **Dependencies:** M88.
 
 ---
 
@@ -1369,12 +1495,12 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 
 **Objective:** empurrar o filtro de **label** (`WHERE labels && '{…}' ORDER BY e <-> q LIMIT k`) para DENTRO da travessia do IVF-AQ via o mecanismo de **scan-key** (o nosso `amrescan` já recebe `_keys` — hoje ignora): `amcanmulticol=true` + opclass própria `&&` para `smallint[]` (código próprio, Regra 9 — pgvectorscale é estudo-de-design) faz o planner empurrar o predicado como Index Cond; o build lê a 2ª coluna e guarda o label **nas code-pages** (novo layout v7); a Stage-1 pula candidatos sem overlap ANTES do rerank; `xs_recheck=true`. Interage com o M87 (grow-probes recupera recall se uma lista probed tem poucos matches).
 **GATE (D3-style, measurement-first):** mede **recall@10 sob filtro de label ~1% INLINE vs o M87 post-filter** num benchmark reproduzível — **GO só se o inline melhora o recall medido**; honest-negative fecha (anti-sunk-cost).
-**DoD:** (1) `labels && '{…}'` chega ao `amrescan` como ScanKey e a Stage-1 pula não-matching inline; (2) **recall@10 sob filtro de label seletivo (~1%) MEDIDO estritamente > M87 post-filter** (`docs/benchmarks/m90-inline-filter.{md,json}`); (3) EXPLAIN mostra o label como Index Cond; (4) **zero regressão** — 250+ pg_tests GREEN, path sem-label byte-idempotente (v5/v6 inalterados); (5) crash-safety no v7 (build→restart→scan-identical); (6) sign-off council-index-storage + council-benchmark. **Boundary honesto:** só a coluna de label declarada + `&&` (arbitrary-WHERE é o M91). **Risks:** (a) format bump v7 (label nas code-pages) + REINDEX — mitigar com magic novo + gate de crash-safety; (b) o inline pode não bater o recall do M87 → honest-negative (o gate mede antes). **Dependencies:** M87 (scan iterativo), M89 (build escalável). **Prior art (estudo, código próprio):** pgvectorscale (PostgreSQL License, Rust+pgrx); AlloyDB fechado → só design publicado.
+**DoD:** (1) `labels && '{…}'` chega ao `amrescan` como ScanKey e a Stage-1 pula não-matching inline; (2) **recall@10 sob filtro de label seletivo (~1%) MEDIDO estritamente > M87 post-filter** (`wiki/benchmarks/m90-inline-filter.md` + `benchmarks/artifacts/m90-inline-filter.json`); (3) EXPLAIN mostra o label como Index Cond; (4) **zero regressão** — 250+ pg_tests GREEN, path sem-label byte-idempotente (v5/v6 inalterados); (5) crash-safety no v7 (build→restart→scan-identical); (6) sign-off council-index-storage + council-benchmark. **Boundary honesto:** só a coluna de label declarada + `&&` (arbitrary-WHERE é o M91). **Risks:** (a) format bump v7 (label nas code-pages) + REINDEX — mitigar com magic novo + gate de crash-safety; (b) o inline pode não bater o recall do M87 → honest-negative (o gate mede antes). **Dependencies:** M87 (scan iterativo), M89 (build escalável). **Prior art (estudo, código próprio):** pgvectorscale (PostgreSQL License, Rust+pgrx); AlloyDB fechado → só design publicado.
 
 ---
 
 
-**Outcome (2026-07-12, veredito `GO` — `docs/benchmarks/m90-inline-filter.{md,json}` + ADR `0040`, sign-off council-index-storage+rust-pgrx+benchmark):** MEDIDO (DO c-8, 500k, ~1% seletividade) **recall@10 1.00 (inline v7) vs 0.52 (M87 post-filter) — delta +0.48 + ~19× QPS**. Approach A (scan-key/label, layout v7 co-localizado, inline-skip na Stage-1 + xs_recheck). 253 pg_tests GREEN (250 + 3 v7), zero regressão; vetor-only/v5/v6 sem-label byte-idênticos. 2 blockers de correção achados no review e corrigidos (VACUUM no-op v7; xs_recheck no pending region). Honesto: só label + `&&`, v7+REINDEX; o arbitrary-WHERE inline (Custom Scan) é o M91; NÃO vence ScaNN (teto M73/M82).
+**Outcome (2026-07-12, veredito `GO` — `wiki/benchmarks/m90-inline-filter.md` + `benchmarks/artifacts/m90-inline-filter.json` + ADR `0040`, sign-off council-index-storage+rust-pgrx+benchmark):** MEDIDO (DO c-8, 500k, ~1% seletividade) **recall@10 1.00 (inline v7) vs 0.52 (M87 post-filter) — delta +0.48 + ~19× QPS**. Approach A (scan-key/label, layout v7 co-localizado, inline-skip na Stage-1 + xs_recheck). 253 pg_tests GREEN (250 + 3 v7), zero regressão; vetor-only/v5/v6 sem-label byte-idênticos. 2 blockers de correção achados no review e corrigidos (VACUUM no-op v7; xs_recheck no pending region). Honesto: só label + `&&`, v7+REINDEX; o arbitrary-WHERE inline (Custom Scan) é o M91; NÃO vence ScaNN (teto M73/M82).
 
 ## M91 — [x] adaptive filter strategy (AM-local no scan-key de label) *(gated M90)*
 
@@ -1382,7 +1508,7 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 
 **Objective:** o AM escolhe AUTOMÁTICAMENTE a estratégia pela **seletividade estimada in-scan** (match-rate na 1ª lista probed — grátis, data-true): médio → **INLINE** (o v7 do M90); loose → **POST** (o M87); ultra-seletivo → **PRE** (scan das code-pages compactas p/ o match set + rerank exato) **SÓ se medido necessário** (measurement-first: o M90 já deu recall 1.00 @ 1% com INLINE — se o INLINE vence o ultra-seletivo, PRE é YAGNI e o adaptive vira um switch INLINE⇄POST de 2 vias). **Fora de escopo (limite honesto):** arbitrary-`WHERE` (qualquer coluna) — precisa do Custom Scan Provider (Approach B) = milestone futuro; e o re-plan cross-index do core do AlloyDB.
 **GATE (measurement-first):** benchmark **varrendo a seletividade de label (0.01% → 30%)** mostra o adaptive **dominando o envelope** das estratégias fixas (recall alto E custo baixo em CADA ponto); honest-negative é terminal válido.
-**DoD:** (1) estimador de seletividade in-scan + branch adaptive INLINE⇄POST (+ PRE só se medido) no `scan_ivf_structured`/`amrescan`, threshold ajustável (GUC); (2) **benchmark de varredura (0.01%→30%) mede o adaptive dominando as fixas** (`docs/benchmarks/m91-adaptive-filter.{md,json}`); (3) contador/log runtime revela a estratégia escolhida (observabilidade); (4) **zero regressão** — 253+ pg_tests GREEN, testes por regime; (5) sign-off council-index-storage + council-benchmark. **Boundary:** label-only (arbitrary-WHERE é o Custom Scan futuro); sem novo formato. **Risks:** (a) o estimador in-scan pode ser ruidoso → calibrar no sweep + threshold GUC; (b) o adaptive pode não dominar (INLINE já domina em toda a faixa?) → honest-negative (o gate mede antes; se INLINE domina, o M91 é "INLINE é a estratégia" documentado). **Dependencies:** M90 (INLINE), M87 (POST). **Prior art (estudo, Regra 9):** pgvectorscale (permissivo — prova que adaptive é adição NOSSA). **NÃO é claim de QPS-superior** (teto M73/M82).
+**DoD:** (1) estimador de seletividade in-scan + branch adaptive INLINE⇄POST (+ PRE só se medido) no `scan_ivf_structured`/`amrescan`, threshold ajustável (GUC); (2) **benchmark de varredura (0.01%→30%) mede o adaptive dominando as fixas** (`wiki/benchmarks/m91-adaptive-filter.md` + `benchmarks/artifacts/m91-adaptive-filter.json`); (3) contador/log runtime revela a estratégia escolhida (observabilidade); (4) **zero regressão** — 253+ pg_tests GREEN, testes por regime; (5) sign-off council-index-storage + council-benchmark. **Boundary:** label-only (arbitrary-WHERE é o Custom Scan futuro); sem novo formato. **Risks:** (a) o estimador in-scan pode ser ruidoso → calibrar no sweep + threshold GUC; (b) o adaptive pode não dominar (INLINE já domina em toda a faixa?) → honest-negative (o gate mede antes; se INLINE domina, o M91 é "INLINE é a estratégia" documentado). **Dependencies:** M90 (INLINE), M87 (POST). **Prior art (estudo, Regra 9):** pgvectorscale (permissivo — prova que adaptive é adição NOSSA). **NÃO é claim de QPS-superior** (teto M73/M82).
 
 ## M92 — [x] arbitrary-WHERE filtered vector search via Custom Scan Provider (paridade AlloyDB tier ③) *(gated M90, M91)*
 
@@ -1392,7 +1518,7 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 
 **GATE (measurement-first):** benchmark em SIFT1M (vizinhos reais — lição M91) com um `WHERE` escalar **em coluna não-label** varrendo a seletividade (0.01%→30%) mostra o inline-por-bitmap **batendo o post-filter em recall** no regime seletivo (onde o post-filter starva), com QPS competitivo. **Honest-negative é terminal válido** (se o overhead do Custom Scan node + bitmap não compensa vs o post-filter nativo do Postgres, documenta-se e fecha).
 
-**DoD:** (1) Custom Scan Provider registrado, intercepta o padrão arbitrary-WHERE + `ORDER BY <-> LIMIT` e injeta o bitmap na Stage-1 do scan do AM; (2) sub-plano bitmap nativo (`TIDBitmap` via `tbm_*`) → membership test MVCC-correto (recheck no snapshot); (3) **benchmark mede inline-por-bitmap recall > post-filter** em coluna arbitrária (`docs/benchmarks/m92-arbitrary-where.{md,json}`, SIFT real); (4) `EXPLAIN` revela o Custom Scan node + a estratégia escolhida; (5) **zero regressão** — 255+ pg_tests GREEN (o path sem Custom Scan é byte-idêntico); (6) sign-off council-index-storage + council-rust-pgrx + council-benchmark. **Boundary honesto:** `WHERE` escalar sobre índices existentes; **NÃO** o re-plan cross-index mid-query do core do AlloyDB (tier ④, não-alcançável por extensão permissiva). **Risks:** (a) **integração Custom Scan Provider ↔ scan state do AM sem quebrar MVCC/snapshot** — maior risco; mitigar espelhando o design nativo + council-rust-pgrx; (b) os helpers inline `create_customscan_path`/`make_custom_scan` NÃO existem no pgrx 0.16.1 → hand-roll via `pg_sys` (confirmado: `set_rel_pathlist_hook`, `Register/CustomScanMethods`, `TIDBitmap`+`tbm_*` TODOS presentes); (c) o overhead do node pode não compensar → honest-negative (o gate mede antes). **Dependencies:** M90 (inline skip na Stage-1), M91 (estratégia por cardinalidade), M87 (post baseline). **Prior art (estudo, Regra 9):** pgvectorscale (permissivo) + design publicado do AlloyDB (inline filtering). **NÃO é claim de QPS-superior** ao ScaNN/AlloyDB (teto de paradigma M73/M82) — é paridade de **capacidade** (busca vetorial com filtro arbitrário eficiente), medida.
+**DoD:** (1) Custom Scan Provider registrado, intercepta o padrão arbitrary-WHERE + `ORDER BY <-> LIMIT` e injeta o bitmap na Stage-1 do scan do AM; (2) sub-plano bitmap nativo (`TIDBitmap` via `tbm_*`) → membership test MVCC-correto (recheck no snapshot); (3) **benchmark mede inline-por-bitmap recall > post-filter** em coluna arbitrária (`wiki/benchmarks/archive/m92-arbitrary-where.md` + `benchmarks/artifacts/m92-arbitrary-where.json`, SIFT real); (4) `EXPLAIN` revela o Custom Scan node + a estratégia escolhida; (5) **zero regressão** — 255+ pg_tests GREEN (o path sem Custom Scan é byte-idêntico); (6) sign-off council-index-storage + council-rust-pgrx + council-benchmark. **Boundary honesto:** `WHERE` escalar sobre índices existentes; **NÃO** o re-plan cross-index mid-query do core do AlloyDB (tier ④, não-alcançável por extensão permissiva). **Risks:** (a) **integração Custom Scan Provider ↔ scan state do AM sem quebrar MVCC/snapshot** — maior risco; mitigar espelhando o design nativo + council-rust-pgrx; (b) os helpers inline `create_customscan_path`/`make_custom_scan` NÃO existem no pgrx 0.16.1 → hand-roll via `pg_sys` (confirmado: `set_rel_pathlist_hook`, `Register/CustomScanMethods`, `TIDBitmap`+`tbm_*` TODOS presentes); (c) o overhead do node pode não compensar → honest-negative (o gate mede antes). **Dependencies:** M90 (inline skip na Stage-1), M91 (estratégia por cardinalidade), M87 (post baseline). **Prior art (estudo, Regra 9):** pgvectorscale (permissivo) + design publicado do AlloyDB (inline filtering). **NÃO é claim de QPS-superior** ao ScaNN/AlloyDB (teto de paradigma M73/M82) — é paridade de **capacidade** (busca vetorial com filtro arbitrário eficiente), medida.
 
 > **Nota (2026-07-13):** o **spike do M92 (v0/v1a/v1b) já PROVOU as 3 primitivas** em isolamento (blueprint `knowledge-base/discoveries/blueprints/arbitrary-where-custom-scan-blueprint.md`; commits `7224ae0`/`c20db0f`/`a882027`): (v0) o Custom Scan node hand-rolled funciona em runtime; (v1a) a membership de TID chega à Stage-1 do AM e filtra; (v1b) `materialize_bitmap()` itera o `TIDBitmap` → exact+lossy sets. Tudo gated OFF (`theodb.enable_vecfilter`), 260 pg_tests GREEN. O DoD acima permanece o alvo do M92; a **integração** dessas peças é o M93 abaixo.
 
@@ -1424,7 +1550,7 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 
 **Objective:** substituir a heurística por um **cost model real**: `cost(node) = cost(bitmap sub-plan) + cost(vector scan com membership)` onde o custo do vector scan reflete a **cardinalidade estimada do bitmap** (a seletividade que o planner já computou p/ o BitmapHeapPath — `rows`) → probes efetivos esperados (o adaptive M91 proba mais quando seletivo) + o rerank. Espelhar o `am/cost.rs` existente (o visit-ratio honesto do M48) — Regra 9, não inventar modelo novo. Remover o `×0.1`; o `pathkeys` (ordenação grátis vs Sort explícito) entra naturalmente na comparação do planner. Manter o GUC como kill-switch (default a decidir no gate — só vira ON-default se o gate provar dominância de plano).
 **GATE (measurement-first):** um **sweep de seletividade (0.01%→50%) SIFT1M** onde, com o cost model, o `EXPLAIN` mostra o planner escolhendo o node **exatamente nos regimes onde o node vence** (medido: recall+QPS por plano escolhido vs o plano alternativo forçado) — incluindo o regime loose onde o POST/seqscan+Sort deve vencer e o node NÃO deve ser escolhido. Honest-negative é terminal válido (se o modelo não discriminar bem, documenta-se o porquê e a feature permanece GUC-opt-in).
-**DoD:** (1) cost model implementado em `plan_custom_path`/`pathlist_hook` (custos derivados dos child paths + cardinalidade do bitmap; zero mágica `×0.1`); (2) **benchmark de decisão de plano**: em cada ponto do sweep, o plano escolhido pelo planner é o de melhor recall+QPS medido (`docs/benchmarks/m95-cost-model.{md,json}`); (3) pg_tests: node escolhido no seletivo, NÃO escolhido no loose (EXPLAIN assertions); (4) **zero regressão** — 265+ testes GREEN; (5) decisão documentada (ADR) sobre o default do GUC pós-gate; (6) sign-off council-index-storage (cost model) + council-benchmark. **Boundary honesto:** o modelo usa as estimativas do planner (stats/ANALYZE) — estimativa ruim ⇒ plano subótimo, como qualquer cost model PG; NÃO é o adaptive runtime do AlloyDB (tier ④). **Risks:** (a) calibração — constantes de custo mal escolhidas invertem decisões → o sweep é o oráculo; (b) estatísticas frias (sem ANALYZE) → herdar o comportamento conservador do planner (sem node); (c) interação com o iterativo M87 no custo do POST → medir, não assumir. **Dependencies:** M94. **Prior art (Regra 9):** `am/cost.rs` (M48 visit-ratio), `cost_bitmap_heap_scan`/`cost_index` do core (estudo).
+**DoD:** (1) cost model implementado em `plan_custom_path`/`pathlist_hook` (custos derivados dos child paths + cardinalidade do bitmap; zero mágica `×0.1`); (2) **benchmark de decisão de plano**: em cada ponto do sweep, o plano escolhido pelo planner é o de melhor recall+QPS medido (`wiki/benchmarks/m95-cost-model.md` + `benchmarks/artifacts/m95-cost-model.json`); (3) pg_tests: node escolhido no seletivo, NÃO escolhido no loose (EXPLAIN assertions); (4) **zero regressão** — 265+ testes GREEN; (5) decisão documentada (ADR) sobre o default do GUC pós-gate; (6) sign-off council-index-storage (cost model) + council-benchmark. **Boundary honesto:** o modelo usa as estimativas do planner (stats/ANALYZE) — estimativa ruim ⇒ plano subótimo, como qualquer cost model PG; NÃO é o adaptive runtime do AlloyDB (tier ④). **Risks:** (a) calibração — constantes de custo mal escolhidas invertem decisões → o sweep é o oráculo; (b) estatísticas frias (sem ANALYZE) → herdar o comportamento conservador do planner (sem node); (c) interação com o iterativo M87 no custo do POST → medir, não assumir. **Dependencies:** M94. **Prior art (Regra 9):** `am/cost.rs` (M48 visit-ratio), `cost_bitmap_heap_scan`/`cost_index` do core (estudo).
 
 ## M96 — [x] tuplesort-streaming ambuild — build 100M+ em RAM commodity *(gated M89)*
 
@@ -1432,7 +1558,7 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 
 **Objective:** nunca materializar o corpus: o pipeline **heap → tuplesort (spill em disco, `maintenance_work_mem`) → páginas por-lista**, o desenho do `ivfbuild.c` do pgvector (Regra 9 — estudo do pipeline, código próprio). Fases: (1) sample p/ kmeans (o M88 já capou o treino em 1.1M — inalterado); (2) 1ª passada: assign de cada vetor à lista + `tuplesort_put` de `(list_id, tid, vec)`; (3) sort por `list_id` (spill automático); (4) 2ª passada: drenar o sorter em ordem escrevendo cada lista incrementalmente (o writer streaming do M89 — reusado). Pico alvo: `O(maintenance_work_mem + 1 lista)`.
 **GATE (measurement-first):** **build de 100M×128 (~51 GB base) completa num box de 64 GB** com pico de RSS medido `< 1.15× maintenance_work_mem + overhead fixo` documentado; e o índice resultante passa o set-equal/recall sanity (amostra). Em seguida (stretch, se o box aguentar): a medição out-of-RAM do M88 re-tentada a 100M (v6/SQ8 vs v5/f32 cold-QPS) — honest-negative continua terminal válido.
-**DoD:** (1) path streaming atrás de reloption/threshold (builds pequenos mantêm o path atual — byte-idêntico ≤1M provado por testes); (2) **build 100M MEDIDO** completando com pico documentado (`docs/benchmarks/m96-streaming-build.{md,json}`); (3) crash-safety do build preservada (os testes de crash-phase existentes GREEN); (4) **zero regressão** — 265+ testes GREEN + set-equal nos formatos v5/v6/v7; (5) sign-off council-index-storage + council-rust-pgrx (FFI do tuplesort é superfície nova) + council-benchmark. **Boundary honesto:** é sobre BUILD, não QPS; o crossover out-of-RAM é stretch/medição separada; v3/v4 legacy mantêm o path antigo. **Risks:** (a) **FFI do tuplesort** (lifecycle begin/put/perform/get/end, memória do slot) — superfície C nova → spike-first do ciclo put/get antes do pipeline completo (a lição M92); (b) o formato do tuple no sorter (serializar vec+tid) → custo de (de)serialização medido; (c) duas passadas no heap dobram o I/O de leitura → medir o custo real (o gate é caber em RAM, não ser mais rápido). **Dependencies:** M89 (writer streaming), blueprint `knowledge-base/discoveries/blueprints/ambuild-streaming-blueprint.md`. **Prior art (Regra 9):** pgvector `ivfbuild.c` (o pipeline tuplesort — estudo), nossos writers v5/v6 (reuso).
+**DoD:** (1) path streaming atrás de reloption/threshold (builds pequenos mantêm o path atual — byte-idêntico ≤1M provado por testes); (2) **build 100M MEDIDO** completando com pico documentado (`wiki/benchmarks/m96-streaming-build.md` + `benchmarks/artifacts/m96-streaming-build.json`); (3) crash-safety do build preservada (os testes de crash-phase existentes GREEN); (4) **zero regressão** — 265+ testes GREEN + set-equal nos formatos v5/v6/v7; (5) sign-off council-index-storage + council-rust-pgrx (FFI do tuplesort é superfície nova) + council-benchmark. **Boundary honesto:** é sobre BUILD, não QPS; o crossover out-of-RAM é stretch/medição separada; v3/v4 legacy mantêm o path antigo. **Risks:** (a) **FFI do tuplesort** (lifecycle begin/put/perform/get/end, memória do slot) — superfície C nova → spike-first do ciclo put/get antes do pipeline completo (a lição M92); (b) o formato do tuple no sorter (serializar vec+tid) → custo de (de)serialização medido; (c) duas passadas no heap dobram o I/O de leitura → medir o custo real (o gate é caber em RAM, não ser mais rápido). **Dependencies:** M89 (writer streaming), blueprint `knowledge-base/discoveries/blueprints/ambuild-streaming-blueprint.md`. **Prior art (Regra 9):** pgvector `ivfbuild.c` (o pipeline tuplesort — estudo), nossos writers v5/v6 (reuso).
 
 ## M97 — [x] Columnar/HTAP (D2) — DISCOVERY-first do pilar lakehouse *(sem gate — pilar novo)*
 
@@ -1440,7 +1566,7 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 
 **Objective:** responder com evidência (R0 — WebSearch/WebFetch obrigatórios + código real dos refs locais `pg_duckdb`/`hydra`/`pg_mooncake`/`duckdb`): (1) **qual é o gap real** entre "instalar pg_duckdb puro" e "TheoDB integra columnar" — o que NÓS agregaríamos (sync automático row→columnar? planner routing? vector+analytics fundidos?) que o usuário não tem hoje com 1 comando; (2) **como os peers resolvem** (Hydra columnar AM vs pg_mooncake iceberg/delta vs pg_duckdb query-engine-only) — trade-offs medidos, não opinião; (3) **a fronteira HTAP honesta** para uma extensão permissiva (o AlloyDB columnar engine é in-memory + core-integrated — o que é alcançável vs teto de paradigma, como fizemos no vetor com M73); (4) **1 benchmark de viabilidade** (TPC-H subset ou clickbench sample: PG row vs pg_duckdb no MESMO box) para ancorar números; (5) decisão: GO (com roadmap de milestones) / NO-GO / DEFER, em ADR.
 **GATE:** blueprint SHIPPABLE pelo `/discover-confidence` (4 coverage corners, ≥2 fontes primárias por técnica, citações resolvem) + o benchmark de viabilidade com números reais + ADR de decisão assinável. **NO-GO/DEFER são terminais válidos e baratos** — o milestone entrega CONHECIMENTO, não código.
-**DoD:** (1) blueprint em `knowledge-base/discoveries/blueprints/columnar-htap-blueprint.md` (SHIPPABLE); (2) benchmark de viabilidade (`docs/benchmarks/m97-htap-viability.{md,json}`); (3) ADR GO/NO-GO/DEFER com o roadmap proposto (se GO); (4) zero código de produto neste milestone; (5) sign-off council-research-adr. **Boundary honesto:** discovery-only; qualquer claim de performance vem do benchmark de viabilidade, rotulado como preliminar. **Risks:** (a) escopo-creep para implementação → o DoD proíbe código; (b) o gap vs pg_duckdb puro pode ser pequeno → NO-GO honesto é sucesso do milestone (evitou meses num pilar sem diferencial). **Dependencies:** nenhuma (pilar independente). **Prior art:** refs locais `pg_duckdb`, `hydra`, `pg_mooncake`, `duckdb` + PRD D1/D2.
+**DoD:** (1) blueprint em `knowledge-base/discoveries/blueprints/columnar-htap-blueprint.md` (SHIPPABLE); (2) benchmark de viabilidade (`wiki/benchmarks/m97-htap-viability.md` + `benchmarks/artifacts/m97-htap-viability.json`); (3) ADR GO/NO-GO/DEFER com o roadmap proposto (se GO); (4) zero código de produto neste milestone; (5) sign-off council-research-adr. **Boundary honesto:** discovery-only; qualquer claim de performance vem do benchmark de viabilidade, rotulado como preliminar. **Risks:** (a) escopo-creep para implementação → o DoD proíbe código; (b) o gap vs pg_duckdb puro pode ser pequeno → NO-GO honesto é sucesso do milestone (evitou meses num pilar sem diferencial). **Dependencies:** nenhuma (pilar independente). **Prior art:** refs locais `pg_duckdb`, `hydra`, `pg_mooncake`, `duckdb` + PRD D1/D2.
 
 ---
 
@@ -1463,7 +1589,7 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 
 **Objective:** (1) upgrade `pgrx =0.16.1 → =0.19.0` no `theodb_rs` (toca `IndexAmRoutine`/`CustomScan`/`pg_sys` — API churn); (2) adicionar `datafusion` + `arrow` (upstream `apache/datafusion`, NÃO o fork `datafusion-distributed` da paradedb — Regra 9) como deps e provar que **linkam** com o pgrx num crate único; (3) um smoke-test mínimo: uma query trivial roteada por um `CustomScan` que roda um `ExecutionPlan` DataFusion e devolve tuplas ao PG. Rust 1.91 ≥ 1.88 (MSRV do datafusion) já está satisfeito.
 **GATE (build primeiro):** `cargo pgrx test pg17` **verde com os 277 testes existentes** no pgrx 0.19.0 + datafusion/arrow linkados; `cargo tree` sem conflito de versão de arrow; o smoke CustomScan→DataFusion→tupla passa. Honest-negative é terminal válido: se a coexistência quebrar (conflito de arrow, símbolo, ABI), documenta-se o bloqueio e o pilar re-escopa (fica no pg_duckdb).
-**DoD:** (1) `theodb_rs` compila+testa em pgrx 0.19.0 (todos os testes verdes, zero regressão); (2) datafusion+arrow linkados, `cargo tree` limpo; (3) smoke-test CustomScan↔DataFusion↔TupleTableSlot passa (1 pg_test); (4) benchmark/nota de que o build funciona (`docs/benchmarks/m98-coexistence.md`); (5) sign-off council-rust-pgrx (o upgrade de pgrx + a superfície FFI). **Risks:** (a) API churn 0.16→0.19 pode tocar muito código de AM → esforço medido, sem workaround; (b) conflito de versão de arrow (datafusion-main usa 59, pg_search 58) → pinar; (c) coexistência pode simplesmente falhar → honest-negative documentado. **Dependencies:** M97 (a decisão de perseguir o pilar). **Prior art:** blueprint Q6/Q7 + `theodb_rs/src/am/{mod.rs,customscan.rs}` (o IndexAmRoutine/CustomScan que o upgrade toca). **NÃO é claim de performance** — é um gate de viabilidade.
+**DoD:** (1) `theodb_rs` compila+testa em pgrx 0.19.0 (todos os testes verdes, zero regressão); (2) datafusion+arrow linkados, `cargo tree` limpo; (3) smoke-test CustomScan↔DataFusion↔TupleTableSlot passa (1 pg_test); (4) benchmark/nota de que o build funciona (`wiki/benchmarks/m98-coexistence.md`); (5) sign-off council-rust-pgrx (o upgrade de pgrx + a superfície FFI). **Risks:** (a) API churn 0.16→0.19 pode tocar muito código de AM → esforço medido, sem workaround; (b) conflito de versão de arrow (datafusion-main usa 59, pg_search 58) → pinar; (c) coexistência pode simplesmente falhar → honest-negative documentado. **Dependencies:** M97 (a decisão de perseguir o pilar). **Prior art:** blueprint Q6/Q7 + `theodb_rs/src/am/{mod.rs,customscan.rs}` (o IndexAmRoutine/CustomScan que o upgrade toca). **NÃO é claim de performance** — é um gate de viabilidade.
 
 ## M99 — [x] columnar TAM append-only (own-code; Hydra design = AGPL study-only) *(gated M98)*
 
@@ -1472,7 +1598,7 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 
 **Objective:** um columnar TAM próprio (código próprio own-code — ADR-0042; **Hydra columnar é AGPLv3, estudo do design apenas (Rule 9), NUNCA copiar/linkar**; cstore_fdw Apache-2.0 = única ref TableAM permissiva, é FDW/deprecated), `columnar_storage.c`/`columnar_tableam.c`): layout stripe (150k) → chunk_group (10k) → chunk por-coluna + compressão por-coluna (zstd/lz4) + min/max skip para chunk-group pruning; TID = row_number sintético → binary search no catálogo de stripes; WAL via `GenericXLog` (reusa `am/page.rs`); MVCC append-only (stripe visível ⟺ linha de catálogo visível) + delete via row_mask sob advisory lock. **Escopo append-mostly honesto:** SEM update in-place, SEM parallel/bitmap/sample (o mesmo NULL/ERROR set do Hydra).
 **GATE (correção primeiro):** result-equivalence — `SELECT` sobre a tabela columnar == a mesma tabela row-store (agregações idênticas); **pgisolation permutations** provando visibilidade MVCC sob txns concorrentes (stripe não-commitada invisível; REPEATABLE READ segura o snapshot); crash-safety (insert stripes → restart → scan idêntico; abort → restart → sem stripe parcial). **Sem isolation permutations verde, "MVCC-correct columnar" é over-claiming.**
-**DoD:** (1) `theodb_columnar` TAM registrável (`CREATE ACCESS METHOD ... TYPE TABLE`); (2) result-equivalence pg_tests vs row-store; (3) **pgisolation permutation specs** (MVCC) verdes — precisa wire do `isolationtester` (gap de tooling do blueprint Corner 3); (4) crash-safety WAL-replay; (5) benchmark de scan analítico columnar vs heap (`docs/benchmarks/m99-columnar-tam.{md,json}`) — ganho de compressão+skip (~2-5×, honesto, SEM execução vetorizada ainda); (6) sign-off council-index-storage + council-rust-pgrx. **Boundary honesto:** append-only analytical, NÃO updatable HTAP (claim de "updatable columnar" seria over-claiming). **Risks:** (a) bugs de MVCC só aparecem sob concorrência → permutations não-opcionais; (b) TID sintético + binary search no catálogo é território novo; (c) o unwind boundary (todo callback → `pg_sys::error!`, nunca panic). **Dependencies:** M98 (pgrx 0.19 + o build). **Prior art:** blueprint Q2/Q7/Q9 + `theodb_rs/src/am/{mod.rs,page.rs,tid.rs}` (IndexAmRoutine/GenericXLog/TID codec — NÃO é greenfield). **Prior art de estudo (AGPLv3 — design only, Rule 9, ADR-0042):** `hydra/columnar` + `citus` columnar; **permissivo:** `cstore_fdw` (Apache-2.0, FDW), `arrow-rs` codecs (Apache-2.0).
+**DoD:** (1) `theodb_columnar` TAM registrável (`CREATE ACCESS METHOD ... TYPE TABLE`); (2) result-equivalence pg_tests vs row-store; (3) **pgisolation permutation specs** (MVCC) verdes — precisa wire do `isolationtester` (gap de tooling do blueprint Corner 3); (4) crash-safety WAL-replay; (5) benchmark de scan analítico columnar vs heap (`wiki/benchmarks/m99-columnar-tam.md` + `benchmarks/artifacts/m99-columnar-tam.json`) — ganho de compressão+skip (~2-5×, honesto, SEM execução vetorizada ainda); (6) sign-off council-index-storage + council-rust-pgrx. **Boundary honesto:** append-only analytical, NÃO updatable HTAP (claim de "updatable columnar" seria over-claiming). **Risks:** (a) bugs de MVCC só aparecem sob concorrência → permutations não-opcionais; (b) TID sintético + binary search no catálogo é território novo; (c) o unwind boundary (todo callback → `pg_sys::error!`, nunca panic). **Dependencies:** M98 (pgrx 0.19 + o build). **Prior art:** blueprint Q2/Q7/Q9 + `theodb_rs/src/am/{mod.rs,page.rs,tid.rs}` (IndexAmRoutine/GenericXLog/TID codec — NÃO é greenfield). **Prior art de estudo (AGPLv3 — design only, Rule 9, ADR-0042):** `hydra/columnar` + `citus` columnar; **permissivo:** `cstore_fdw` (Apache-2.0, FDW), `arrow-rs` codecs (Apache-2.0).
 
 ## M100 — [x] executor DataFusion CustomScan vetorizado *(gated M99)*
 
@@ -1481,7 +1607,7 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 
 **Objective:** ligar o columnar TAM (M99) a um executor vetorizado DataFusion via `CustomScan` (o seam provado pelo pg_search [AGPL-design]; TheoDB já tem `customscan.rs`): planner hooks (`set_rel_pathlist_hook`/`create_upper_paths_hook`) montam o `CustomPath`; o exec constrói o `ExecutionPlan` DataFusion, `block_on` no `SendableRecordBatchStream`, projeta cada `RecordBatch` Arrow → `TupleTableSlot`; a leaf implementa `TableProvider` puxando as stripes columnar como Arrow batches; tradução de qual/agg PG → DataFusion `Expr` (gate `schema=="pg_catalog"`). **Disciplina de segurança own-code (o artefato #1 do blueprint):** `HeldInterrupts` em volta do `block_on` (senão `proc_exit` mata o backend), `MemoryPool` limitado a `work_mem` que ERRA (não panica), `unsafe impl Send` pinado numa thread (sem multi-partition até provar), todo panic → `pg_sys::error!`.
 **GATE (measurement-first):** correção (result == heap/row-store byte-a-byte nas agregações) PRIMEIRO; depois o benchmark: OLAP columnar-vetorizado vs pg_duckdb vs heap GROUP BY no MESMO box, **em dados columnar-residentes** (o ganho não existe sobre heap — M61 mediu 0.63-0.89×). Honest-negative terminal válido.
-**DoD:** (1) `CustomScan` DataFusion sobre o TAM M99, plano único (EXPLAIN mostra o node); (2) result-equivalence vs row-store; (3) a disciplina de interrupt/MemoryPool/Send implementada + testada (crash sob interrupt não mata o backend); (4) **benchmark medido** OLAP vetorizado vs pg_duckdb vs heap (`docs/benchmarks/m100-datafusion-executor.{md,json}`), teto DuckDB/Photon-class honesto; (5) sign-off council-rust-pgrx (FFI/panic-across-C) + council-benchmark. **Boundary honesto:** ganho SÓ em dados columnar-residentes; **NÃO é claim de superioridade vs AlloyDB in-core** (teto de paradigma travado). **Risks:** (a) o seam FFI é o mais perigoso do pilar (runtime async dentro de callback C síncrono) → disciplina de interrupt desde o dia 1; (b) `unsafe impl Send` vira data-race com parallel exec → single-thread pinning; (c) churn de versão do DataFusion → shim fino atrás da nossa interface (DIP). **Dependencies:** M99 (o storage). **Prior art:** blueprint Q1/Q3 + `theodb_rs/src/am/customscan.rs` (o seam M94/M95). **Estudo (AGPL):** `paradedb/pg_search/src/postgres/customscan/` (design-only).
+**DoD:** (1) `CustomScan` DataFusion sobre o TAM M99, plano único (EXPLAIN mostra o node); (2) result-equivalence vs row-store; (3) a disciplina de interrupt/MemoryPool/Send implementada + testada (crash sob interrupt não mata o backend); (4) **benchmark medido** OLAP vetorizado vs pg_duckdb vs heap (`benchmarks/artifacts/m100-datafusion-executor.{md,json}`), teto DuckDB/Photon-class honesto; (5) sign-off council-rust-pgrx (FFI/panic-across-C) + council-benchmark. **Boundary honesto:** ganho SÓ em dados columnar-residentes; **NÃO é claim de superioridade vs AlloyDB in-core** (teto de paradigma travado). **Risks:** (a) o seam FFI é o mais perigoso do pilar (runtime async dentro de callback C síncrono) → disciplina de interrupt desde o dia 1; (b) `unsafe impl Send` vira data-race com parallel exec → single-thread pinning; (c) churn de versão do DataFusion → shim fino atrás da nossa interface (DIP). **Dependencies:** M99 (o storage). **Prior art:** blueprint Q1/Q3 + `theodb_rs/src/am/customscan.rs` (o seam M94/M95). **Estudo (AGPL):** `paradedb/pg_search/src/postgres/customscan/` (design-only).
 
 ## M101 — [x] Arrow columnar cache heap-authoritative (MVCC-correto HTAP) *(gated M100)*
 
@@ -1490,7 +1616,7 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 
 **Objective:** um cache columnar Arrow **derivado do heap row-store** (heap = fonte-de-verdade → MVCC correto por construção), que o executor DataFusion (M100) lê zero-copy; invalidação/refresh no write; o planner escolhe o cache para scans analíticos (custo) e cai no heap senão. **Primeiro cut manual:** um pragma "columnarize estas colunas" (o auto-populate/evict por workload — o que o AlloyDB faz — é a cauda ambiciosa, follow-up).
 **GATE:** MVCC-correto sob concorrência (o cache carrega metadados de visibilidade; escrita no heap invalida) — pgisolation permutations provando que uma leitura analítica vê exatamente o snapshot correto; result-equivalence heap vs cache; não-interferência OLTP (o cache read-only não degrada o p95 do heap, o padrão M62).
-**DoD:** (1) cache Arrow derivado + refresh/invalidação no write; (2) planner escolhe cache vs heap por custo; (3) **pgisolation MVCC permutations** verdes (o cache respeita snapshot isolation); (4) benchmark HTAP (`docs/benchmarks/m101-arrow-cache.{md,json}`): OLAP acelerado + OLTP p95 não-degradado sob carga concorrente; (5) sign-off council-index-storage + council-benchmark. **Boundary honesto:** o pragma é manual (não auto-tuned como o AlloyDB); heap-authoritative = MVCC correto mas com custo de refresh (2× storage do cache). **Risks:** (a) consistência cache↔heap sob write concorrente → invalidação testada por permutations; (b) refresh caro em tabelas quentes → o pragma deixa o operador decidir. **Dependencies:** M100 (o executor). **Prior art:** blueprint Q4/D-γ + AlloyDB columnar-engine (estudo do design, proprietário) + M62 (o padrão materializado). **NÃO é o engine in-memory auto-mantido do AlloyDB** (declarado honestamente).
+**DoD:** (1) cache Arrow derivado + refresh/invalidação no write; (2) planner escolhe cache vs heap por custo; (3) **pgisolation MVCC permutations** verdes (o cache respeita snapshot isolation); (4) benchmark HTAP (`wiki/benchmarks/archive/m101-arrow-cache.md` + `benchmarks/artifacts/m101-arrow-cache.json`): OLAP acelerado + OLTP p95 não-degradado sob carga concorrente; (5) sign-off council-index-storage + council-benchmark. **Boundary honesto:** o pragma é manual (não auto-tuned como o AlloyDB); heap-authoritative = MVCC correto mas com custo de refresh (2× storage do cache). **Risks:** (a) consistência cache↔heap sob write concorrente → invalidação testada por permutations; (b) refresh caro em tabelas quentes → o pragma deixa o operador decidir. **Dependencies:** M100 (o executor). **Prior art:** blueprint Q4/D-γ + AlloyDB columnar-engine (estudo do design, proprietário) + M62 (o padrão materializado). **NÃO é o engine in-memory auto-mantido do AlloyDB** (declarado honestamente).
 
 ## M102 — [x] operadores de AI como plan nodes (AI.IF/sem_filter pushable) *(gated M100)*
 
@@ -1500,7 +1626,7 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 
 **Objective:** expor os operadores de AI (`ai.generate`/`AI.IF`/`sem_filter`) como **nodes de plano** (`CustomScan`/table-func set-oriented, não plpgsql per-row) com: (1) um cost hook de 3 eixos (custo/tempo/qualidade + selectivity) em `am/cost.rs` — modelo do Palimpzest [MIT]; (2) uma regra de push-down dependency-safe (`depends_on ∩ generated_fields = ∅`) que roda o `WHERE` relacional barato antes do operador de AI caro; (3) opcional: a cascata proxy→oracle do LOTUS [Apache-2.0] com thresholds aprendidos de sample p/ um alvo de recall com garantia estatística. Requer revisitar a inferência HTTP per-row (ADR-0007) para **batching** (senão o ganho columnar é jogado fora um round-trip por vez) — ADR novo.
 **GATE:** correção (o resultado do operador-plano == o da função per-row) + o benchmark de composição: `AI.IF` num `WHERE` sobre um scan vetorizado com push-down do filtro barato antes — custo/latência medidos vs o caminho per-row; a cascata reporta **o alvo de recall + a metodologia de sample** (nunca "AI.IF é rápido" sem o ponto de qualidade).
-**DoD:** (1) `AI.IF`/`ai.generate` como node de plano (EXPLAIN mostra + reordena); (2) cost hook 3-eixos + push-down dependency-safe; (3) result-equivalence vs a função per-row; (4) benchmark (`docs/benchmarks/m102-ai-operators.{md,json}`): push-down + (opcional) cascata com recall-target medido; (5) ADR revisitando ADR-0007 (batched inference); (6) sign-off council-ai-in-db + council-security (superfície NL→SQL/AI). **Boundary honesto:** ortogonal a recall vetorial; ganho de **composabilidade/custo com acurácia ESTATÍSTICA** (reportar sempre com metodologia). **Risks:** (a) calibração do cost model exige telemetria de sample (senão estimativa naive sem garantia); (b) prompt-injection na superfície AI-operator → council-security obrigatório; (c) batching muda o ADR-0007. **Dependencies:** M100 (o executor vetorizado — o batch vem dele). **Prior art:** blueprint Q5 + `lotus`/`palimpzest` (Apache/MIT) + `theodb_rs/src/{nl.rs,chat.rs,am/customscan.rs,am/cost.rs}` + ADR-0007/0033.
+**DoD:** (1) `AI.IF`/`ai.generate` como node de plano (EXPLAIN mostra + reordena); (2) cost hook 3-eixos + push-down dependency-safe; (3) result-equivalence vs a função per-row; (4) benchmark (`wiki/benchmarks/archive/m102-ai-operators.md` + `benchmarks/artifacts/m102-ai-operators.json`): push-down + (opcional) cascata com recall-target medido; (5) ADR revisitando ADR-0007 (batched inference); (6) sign-off council-ai-in-db + council-security (superfície NL→SQL/AI). **Boundary honesto:** ortogonal a recall vetorial; ganho de **composabilidade/custo com acurácia ESTATÍSTICA** (reportar sempre com metodologia). **Risks:** (a) calibração do cost model exige telemetria de sample (senão estimativa naive sem garantia); (b) prompt-injection na superfície AI-operator → council-security obrigatório; (c) batching muda o ADR-0007. **Dependencies:** M100 (o executor vetorizado — o batch vem dele). **Prior art:** blueprint Q5 + `lotus`/`palimpzest` (Apache/MIT) + `theodb_rs/src/{nl.rs,chat.rs,am/customscan.rs,am/cost.rs}` + ADR-0007/0033.
 
 ## M103 — [x] vetor + columnar num substrato único (Lance-inspired) *(gated M100)*
 
@@ -1509,7 +1635,7 @@ pg_scann vs ScaNN/AlloyDB (o veredito que reabre — ou fecha definitivamente �
 
 **Objective:** um substrato columnar compartilhado onde o índice vetorial (IVF partições → row-ranges contíguos; códigos AQ/SQ como colunas Arrow — layout do Lance [Apache-2.0], código próprio) co-reside com as colunas escalares, de modo que `WHERE <escalar> ORDER BY <vetor> LIMIT k` + uma agregação columnar compõem num plano vetorizado só: prefiltro escalar → `RowAddrMask` → sub-index search só nas partições sondadas → rerank + projeção das colunas analíticas por row-id. Reusa o IVF/AQ próprio (M60-M89) re-materializado como colunas.
 **GATE (correção + honestidade):** result-equivalence do vetor filtrado vs o caminho atual (M90-M95) — recall byte-idêntico; o benchmark mede **custo/escala** (out-of-RAM, column pruning) — **NÃO recall e NÃO o gap de QPS do ScaNN** (o teto M73/M74 permanece; qualquer claim de recall/QPS-superior é barrado).
-**DoD:** (1) índice vetorial como colunas Arrow no substrato columnar; (2) `WHERE escalar + ORDER BY vetor` + agregação num plano vetorizado; (3) result-equivalence de recall vs M90-M95; (4) benchmark (`docs/benchmarks/m103-vector-columnar.{md,json}`): ganho de custo/escala (out-of-RAM/pruning), honesto; (5) sign-off council-vector-ann + council-index-storage + council-benchmark. **Boundary honesto:** ganho de **cost/scale/composabilidade, NÃO recall, NÃO QPS-vs-ScaNN** (teto de paradigma travado); Lance é file-format → integração lakehouse/side-store, não substitui o AM transacional. **Risks:** (a) consistência dual-store (row-store verdade + réplica columnar); (b) manutenção incremental de índice sobre segmentos imutáveis; (c) tentação de over-claim recall → GATE barra. **Dependencies:** M100 (o executor vetorizado). **Prior art:** blueprint Q4 + `lance` (Apache-2.0, estudo do layout) + `theodb_rs/src/ann/{ivf.rs,hnsw.rs}` + `am/page.rs` (o IVF/AQ próprio) + ADRs 0035/0037.
+**DoD:** (1) índice vetorial como colunas Arrow no substrato columnar; (2) `WHERE escalar + ORDER BY vetor` + agregação num plano vetorizado; (3) result-equivalence de recall vs M90-M95; (4) benchmark (`wiki/benchmarks/m103-vector-columnar.md` + `benchmarks/artifacts/m103-vector-columnar.json`): ganho de custo/escala (out-of-RAM/pruning), honesto; (5) sign-off council-vector-ann + council-index-storage + council-benchmark. **Boundary honesto:** ganho de **cost/scale/composabilidade, NÃO recall, NÃO QPS-vs-ScaNN** (teto de paradigma travado); Lance é file-format → integração lakehouse/side-store, não substitui o AM transacional. **Risks:** (a) consistência dual-store (row-store verdade + réplica columnar); (b) manutenção incremental de índice sobre segmentos imutáveis; (c) tentação de over-claim recall → GATE barra. **Dependencies:** M100 (o executor vetorizado). **Prior art:** blueprint Q4 + `lance` (Apache-2.0, estudo do layout) + `theodb_rs/src/ann/{ivf.rs,hnsw.rs}` + `am/page.rs` (o IVF/AQ próprio) + ADRs 0035/0037.
 
 ---
 
@@ -1554,9 +1680,9 @@ issues #99/#100/#102/#104/#106/#108.
 ## M105 — [x] docs/features honestas — reconciliar as specs com a superfície entregue (pré-lançamento) *(gated M104)*
 
 > Added 2026-07-16 by `/roadmap-feature` (slug: `docs-features-reality-reconciliation`). Fonte: auditoria de features
-> (3 agentes, spec↔código↔testes) sobre `docs/features/*.md`. See CHANGELOG `[Unreleased] § Added`.
+> (3 agentes, spec↔código↔testes) sobre `wiki/features/*.md`. See CHANGELOG `[Unreleased] § Added`.
 
-**Objective:** todo exemplo SQL em `docs/features/*.md` OU roda num install limpo (copy-paste) OU está sob um banner
+**Objective:** todo exemplo SQL em `wiki/features/*.md` OU roda num install limpo (copy-paste) OU está sob um banner
 claramente rotulado **"🎯 API-alvo / roadmap (não-shipped)"**. Nenhum `42883 undefined_function` silencioso. Pré-lançamento,
 sem usuários: doc que mente é pior que doc que falta — mata a primeira impressão de um produto OSS. **Docs-only, ZERO código.**
 
@@ -1579,7 +1705,7 @@ honesto:** ZERO mudança de capacidade/código — só alinhar doc↔realidade e
 **Risks:** (a) afirmar shipped o que não é (honestidade, Regra 3) → mitigação: grep-verify por exemplo antes de marcar
 runnable; (b) scope creep p/ reescrever specs inteiras → mitigação: "corrige+rotula, não reescreve"; DoD é checklist
 por-arquivo. **Dependencies:** M104 (estado shipped mais recente que o audit reflete). **Prior art:** o audit de features
-+ `docs/features/*.md` + `theodb_rs/src/{api,hybrid,rerank,nl,chat,embed}.rs` + `am/mod.rs` (AMs/opclasses reais).
++ `wiki/features/*.md` + `theodb_rs/src/{api,hybrid,rerank,nl,chat,embed}.rs` + `am/mod.rs` (AMs/opclasses reais).
 
 ---
 
@@ -1623,7 +1749,7 @@ spike reproduzível** que a travessia nativa-sobre-columnar **bate o recursive-C
 GraphRAG-alvo (multi-hop + expansão de vizinhança). Grafo é capability recorrente/cross-system (não YAGNI) e AI-native:
 o pattern SOTA é **vector-entry → travessia bounded → rerank** (LazyGraphRAG/HippoRAG) rodando **zero-copy num só engine**.
 
-**GATE (measurement-first / D3 — anti-sunk-cost):** benchmark reproduzível em `docs/benchmarks/` comparando **CSR+MS-BFS
+**GATE (measurement-first / D3 — anti-sunk-cost):** benchmark reproduzível em `wiki/benchmarks/` comparando **CSR+MS-BFS
 own-code vs recursive-CTE** (e, onde viável, vs Apache AGE) em queries multi-hop + vizinhança a escala representativa
 (~10⁵–10⁶ arestas), **≥3 runs mean±std**, veredito explícito **GO / honest-partial / honest-negative**. Se a via nativa
 NÃO superar o CTE de forma significativa na carga-alvo → **NO-GO honesto** (saída válida: fica relacional-com-helpers).
@@ -1633,7 +1759,7 @@ ZERO número fabricado (Regra 5). O motor completo só arranca se o gate for GO.
 (index-AM vs materializado), MS-BFS vetorizado reusando os kernels SIMD, escopo WCOJ/factorização, superfície SQL/PGQ vs
 funções `graph_*`, o fluxo vector-entry→bounded-traversal→rerank, e o acoplamento com columnar (community/PPR) + `ai.*`
 (`extract_graph`); cita DuckPGQ, Kùzu, GRFusion, SQL/PGQ, GraphRAG/LazyGraphRAG/HippoRAG; (2) **spike own-code**: CSR +
-MS-BFS mínimo sobre uma tabela de arestas vs o baseline recursive-CTE, medido, artefato `docs/benchmarks/m107-graph-spike.{md,json}`;
+MS-BFS mínimo sobre uma tabela de arestas vs o baseline recursive-CTE, medido, artefato `wiki/benchmarks/m107-graph-spike.md` + `benchmarks/artifacts/m107-graph-spike.json`;
 (3) **veredito D3 explícito** (GO/honest-partial/honest-negative) que decide os milestones seguintes do pilar; (4) **ADR**
 registrando a decisão de arquitetura (nativo-sobre-columnar vs Apache AGE vs recursive-CTE) com a evidência medida + nota
 de licença (own-code inspirado em MIT DuckPGQ/Kùzu; AGE Apache-2.0 avaliado e rejeitado por arquitetura, não por licença);
@@ -1656,7 +1782,7 @@ LazyGraphRAG (MS Research), HippoRAG 2; baseline a bater = `theo-rag/packages/co
 
 > Added 2026-07-16 by `/roadmap-feature` (slug: `graph-persisted-csr-am`). Fonte: ADR-0048 (follow-on #1) — o achado do spike M107 (build CSR on-the-fly domina a 1M → end-to-end cai p/ ~7×).
 
-**Objective:** um **AM de índice** que **persiste a adjacência CSR** de uma tabela de arestas — construída 1× no `ambuild` e mantida **incremental** no `aminsert` + `amvacuumcleanup` — para a travessia NÃO pagar o rebuild O(N) por query. **GATE:** benchmark reproduzível provando que a travessia sobre o CSR persistido **preserva o ganho ~100–700×** do M107 **sem** o custo de build por query (end-to-end ≈ traverse-only); **crash-safe** (WAL/GenericXLog) provado por harness de crash (abort→íntegro; committed→sobrevive replay); ZERO número fabricado (Regra 5). **DoD:** (1) AM `theodb_graph` (ou estrutura CSR sobre a edge-table) registrado com `ambuild`/`aminsert`/`amvacuumcleanup`; (2) CSR persistido em páginas WAL-logged (reusa a page/WAL machinery do pilar vetorial); (3) manutenção incremental (pending-region + fold no VACUUM, padrão M48/M89); (4) benchmark end-to-end vs o M107 baseline em `docs/benchmarks/`; (5) prova de crash. **Boundary honesto:** só a **persistência+manutenção** do CSR — o operador de travessia é o M109. **Risks:** (a) manutenção incremental correta sob concorrência → reusar o invariante MVCC/crash do pilar vetorial + provas de isolation; (b) build dominar mesmo persistido se a manutenção for cara → medir manutenção amortizada. **Dependencies:** M107. **Prior art:** `theodb_rs/src/am/{mod,page,build,fold}.rs` (index-AM+WAL+VACUUM), ADR-0048, DuckPGQ (CSR), USPTO 11,093,459 (CSR-in-RDBMS incremental).
+**Objective:** um **AM de índice** que **persiste a adjacência CSR** de uma tabela de arestas — construída 1× no `ambuild` e mantida **incremental** no `aminsert` + `amvacuumcleanup` — para a travessia NÃO pagar o rebuild O(N) por query. **GATE:** benchmark reproduzível provando que a travessia sobre o CSR persistido **preserva o ganho ~100–700×** do M107 **sem** o custo de build por query (end-to-end ≈ traverse-only); **crash-safe** (WAL/GenericXLog) provado por harness de crash (abort→íntegro; committed→sobrevive replay); ZERO número fabricado (Regra 5). **DoD:** (1) AM `theodb_graph` (ou estrutura CSR sobre a edge-table) registrado com `ambuild`/`aminsert`/`amvacuumcleanup`; (2) CSR persistido em páginas WAL-logged (reusa a page/WAL machinery do pilar vetorial); (3) manutenção incremental (pending-region + fold no VACUUM, padrão M48/M89); (4) benchmark end-to-end vs o M107 baseline em `wiki/benchmarks/`; (5) prova de crash. **Boundary honesto:** só a **persistência+manutenção** do CSR — o operador de travessia é o M109. **Risks:** (a) manutenção incremental correta sob concorrência → reusar o invariante MVCC/crash do pilar vetorial + provas de isolation; (b) build dominar mesmo persistido se a manutenção for cara → medir manutenção amortizada. **Dependencies:** M107. **Prior art:** `theodb_rs/src/am/{mod,page,build,fold}.rs` (index-AM+WAL+VACUUM), ADR-0048, DuckPGQ (CSR), USPTO 11,093,459 (CSR-in-RDBMS incremental).
 
 ---
 
@@ -1664,7 +1790,7 @@ LazyGraphRAG (MS Research), HippoRAG 2; baseline a bater = `theo-rag/packages/co
 
 > Added 2026-07-16 by `/roadmap-feature` (slug: `graph-msbfs-operator`). Fonte: ADR-0048 (follow-on #2).
 
-**Objective:** **Multi-Source BFS vetorizado** sobre o CSR persistido (M108) como operador in-engine — bitset visited + SIMD, muitas seeds simultâneas (o MS-BFS do DuckPGQ: um registro AVX512 avança até 512 buscas). **GATE:** **oracle set-hash** = mesmo reachable-set do baseline recursive-CTE em cada trial; throughput MS-BFS medido (≥3 runs mean±std) e o ganho de N-seeds-em-paralelo vs N BFS sequenciais quantificado; `docs/benchmarks/`. **DoD:** (1) operador MS-BFS own-code reusando os kernels SIMD `vec/ah.rs`; (2) semântica bounded ≤H hops idêntica ao theo-rag (differential test / set-hash, NÃO count+sum — dívida do M107); (3) benchmark N-seeds; (4) integração com o AM M108. **Boundary honesto:** só o **primitivo de travessia** (reachable-set + scoring por peso de aresta) — a superfície SQL é o M110; PPR é o M112. **Risks:** (a) SIMD de bitset visited correto (falso-compartilhamento/alinhamento) → oracle set-hash + testes de borda; (b) grafo denso estourar frontier → medir memória do frontier. **Dependencies:** M108. **Prior art:** `vec/ah.rs` (SIMD/FastScan), ADR-0048, DuckPGQ MS-BFS, `benchmarks/m107_graph_spike/` (o BFS de referência).
+**Objective:** **Multi-Source BFS vetorizado** sobre o CSR persistido (M108) como operador in-engine — bitset visited + SIMD, muitas seeds simultâneas (o MS-BFS do DuckPGQ: um registro AVX512 avança até 512 buscas). **GATE:** **oracle set-hash** = mesmo reachable-set do baseline recursive-CTE em cada trial; throughput MS-BFS medido (≥3 runs mean±std) e o ganho de N-seeds-em-paralelo vs N BFS sequenciais quantificado; `wiki/benchmarks/`. **DoD:** (1) operador MS-BFS own-code reusando os kernels SIMD `vec/ah.rs`; (2) semântica bounded ≤H hops idêntica ao theo-rag (differential test / set-hash, NÃO count+sum — dívida do M107); (3) benchmark N-seeds; (4) integração com o AM M108. **Boundary honesto:** só o **primitivo de travessia** (reachable-set + scoring por peso de aresta) — a superfície SQL é o M110; PPR é o M112. **Risks:** (a) SIMD de bitset visited correto (falso-compartilhamento/alinhamento) → oracle set-hash + testes de borda; (b) grafo denso estourar frontier → medir memória do frontier. **Dependencies:** M108. **Prior art:** `vec/ah.rs` (SIMD/FastScan), ADR-0048, DuckPGQ MS-BFS, `benchmarks/m107_graph_spike/` (o BFS de referência).
 
 ---
 
@@ -1680,7 +1806,7 @@ LazyGraphRAG (MS Research), HippoRAG 2; baseline a bater = `theo-rag/packages/co
 
 > Added 2026-07-16 by `/roadmap-feature` (slug: `graph-vector-nodes-flow`). Fonte: ADR-0048 (follow-on #4) — o pattern GraphRAG SOTA (LazyGraphRAG/HippoRAG) zero-copy num só engine.
 
-**Objective:** embeddings dos **nós do grafo** indexados pelo AM vetorial; o fluxo GraphRAG **vector-entry → bounded-traversal → rerank** como um caminho in-DB único, zero-copy (cosseno acha as entry entities → `graph_expand` → `ai.rerank`). **GATE:** **eval estratificado** (local-fact / multi-hop / global-sensemaking, metodologia BenchmarkQED/Microsoft): o fluxo grafo×vetor **bate hybrid+rerank** em multi-hop/global — **honest-negative em local-fact é resultado válido** (vetor puro vence local); `docs/benchmarks/`. **DoD:** (1) índice vetorial nos nós (reusa AM vetorial); (2) o fluxo composto num caminho (entry→expand→rerank); (3) eval estratificado com origem identificada (ZERO número fabricado); (4) synonymy-edges opcional (cosseno>0.8, HippoRAG) se o eval justificar. **Boundary honesto:** o **retrieval**, não a geração (a resposta LLM continua no consumidor). **Risks:** (a) eval honesto exige corpus rotulado real, não sintético → usar um dataset GraphRAG público + o eval do theo-rag; (b) o ganho depende da qualidade do grafo (M110) → o gate mede o fluxo, não salva grafo ruim. **Dependencies:** M110. **Prior art:** AM vetorial `am/mod.rs`, `ai.rerank`, HippoRAG (vector-entry→PPR), LazyGraphRAG, ADR-0048, o eval do theo-rag (`packages/core/.../eval`).
+**Objective:** embeddings dos **nós do grafo** indexados pelo AM vetorial; o fluxo GraphRAG **vector-entry → bounded-traversal → rerank** como um caminho in-DB único, zero-copy (cosseno acha as entry entities → `graph_expand` → `ai.rerank`). **GATE:** **eval estratificado** (local-fact / multi-hop / global-sensemaking, metodologia BenchmarkQED/Microsoft): o fluxo grafo×vetor **bate hybrid+rerank** em multi-hop/global — **honest-negative em local-fact é resultado válido** (vetor puro vence local); `wiki/benchmarks/`. **DoD:** (1) índice vetorial nos nós (reusa AM vetorial); (2) o fluxo composto num caminho (entry→expand→rerank); (3) eval estratificado com origem identificada (ZERO número fabricado); (4) synonymy-edges opcional (cosseno>0.8, HippoRAG) se o eval justificar. **Boundary honesto:** o **retrieval**, não a geração (a resposta LLM continua no consumidor). **Risks:** (a) eval honesto exige corpus rotulado real, não sintético → usar um dataset GraphRAG público + o eval do theo-rag; (b) o ganho depende da qualidade do grafo (M110) → o gate mede o fluxo, não salva grafo ruim. **Dependencies:** M110. **Prior art:** AM vetorial `am/mod.rs`, `ai.rerank`, HippoRAG (vector-entry→PPR), LazyGraphRAG, ADR-0048, o eval do theo-rag (`packages/core/.../eval`).
 
 ---
 
@@ -1688,7 +1814,7 @@ LazyGraphRAG (MS Research), HippoRAG 2; baseline a bater = `theo-rag/packages/co
 
 > Added 2026-07-16 by `/roadmap-feature` (slug: `graph-ppr-community`). Fonte: ADR-0048 (follow-on #5) — o mais **diferível** (LazyGraphRAG: community summaries custam 700×).
 
-**Objective:** **Personalized PageRank** a partir das seeds vetoriais (HippoRAG) + **community detection/summarization** opcional (GraphRAG global, Microsoft) como computação **columnar iterativa**. **GATE (D3 — anti-sunk-cost):** eval provando que PPR/community **bate** o bounded-BFS-scoring (M111) em **global-sensemaking** — senão **honest-negative FECHA** (bounded BFS + rerank basta; o SOTA mostra que community é caro e nem sempre vale). `docs/benchmarks/`. **DoD:** (1) PPR iterativo sobre o CSR (columnar, reusa M99–M103); (2) community detection (Leiden/Louvain) + summarization via `ai.summarize` — SÓ se o eval de global justificar; (3) eval estratificado global vs M111. **Boundary honesto:** só arranca se o eval do M111 mostrar gap em global-sensemaking; caso contrário é YAGNI e o pilar para no M111. **Risks:** (a) custo de indexação de community (o driver de 75% do custo GraphRAG) → medir custo/benefício antes de shipar; (b) PPR não convergir barato em grafo grande → medir iterações/convergência. **Dependencies:** M111. **Prior art:** columnar M99–M103 (iteração), `ai.summarize`, Microsoft GraphRAG (communities), HippoRAG (PPR), LazyGraphRAG (defer-communities), ADR-0048.
+**Objective:** **Personalized PageRank** a partir das seeds vetoriais (HippoRAG) + **community detection/summarization** opcional (GraphRAG global, Microsoft) como computação **columnar iterativa**. **GATE (D3 — anti-sunk-cost):** eval provando que PPR/community **bate** o bounded-BFS-scoring (M111) em **global-sensemaking** — senão **honest-negative FECHA** (bounded BFS + rerank basta; o SOTA mostra que community é caro e nem sempre vale). `wiki/benchmarks/`. **DoD:** (1) PPR iterativo sobre o CSR (columnar, reusa M99–M103); (2) community detection (Leiden/Louvain) + summarization via `ai.summarize` — SÓ se o eval de global justificar; (3) eval estratificado global vs M111. **Boundary honesto:** só arranca se o eval do M111 mostrar gap em global-sensemaking; caso contrário é YAGNI e o pilar para no M111. **Risks:** (a) custo de indexação de community (o driver de 75% do custo GraphRAG) → medir custo/benefício antes de shipar; (b) PPR não convergir barato em grafo grande → medir iterações/convergência. **Dependencies:** M111. **Prior art:** columnar M99–M103 (iteração), `ai.summarize`, Microsoft GraphRAG (communities), HippoRAG (PPR), LazyGraphRAG (defer-communities), ADR-0048.
 
 ---
 
@@ -1702,23 +1828,23 @@ LazyGraphRAG (MS Research), HippoRAG 2; baseline a bater = `theo-rag/packages/co
 
 ## M114 — [x] Columnar analytical aggregate completeness: GROUP BY+WHERE combinado + avg/sum(int) *(gated M100)*
 
-> Added 2026-07-19 by `/roadmap-feature` (slug: `columnar-aggregate-completeness`). Fonte: caveats dos slices ad-hoc columnar (`docs/benchmarks/columnar-groupby-verdict.md`). See CHANGELOG `[Unreleased] § Added`.
+> Added 2026-07-19 by `/roadmap-feature` (slug: `columnar-aggregate-completeness`). Fonte: caveats dos slices ad-hoc columnar (`wiki/benchmarks/columnar-groupby-verdict.md`). See CHANGELOG `[Unreleased] § Added`.
 
-**Objective:** alargar as FORMAS de agregado colunar admitidas pelo M100 CustomScan — hoje `count(*)`/`sum(float8)` sem WHERE combinado. Duas frentes: (a) **GROUP BY + WHERE combinados** (o zone-map skip + o DataFusion Filter compõem com o hash-aggregate num só plano — o `admit` hoje DECLINA quando `groupClause` E `baserestrictinfo` estão ambos presentes); (b) **`avg` + `sum(int2/4/8)`** — onde o tipo Arrow de saída difere do tipo de saída do PG (a razão de o M100 se restringir a `sum(float8)`/`count`), exigindo a coerção exata da semântica do PG. **GATE (measurement-first):** um A/B in-PG provando resultado **byte-idêntico** vs heap para cada forma nova (`SELECT k, sum(x) WHERE ts BETWEEN … GROUP BY k`, `avg(x)`, `sum(int_col)`), CustomScan engatado, com speedup medido. **DoD:** (1) `admit` aceita `groupClause` + `baserestrictinfo` juntos — skip + Filter + group num só plano (reusa o invariante D3 admission-filter); (2) `avg(float8/int)` + `sum(int2/4/8)` admitidos com o tipo de saída EXATO do PG (`sum(int4)`→int8, `sum(int8)`→numeric, `avg`→numeric) OU decline fail-safe; (3) A/B byte-idêntico por forma nova + verdict em `docs/benchmarks/`; (4) CHANGELOG. **Boundary honesto:** alarga a SUPERFÍCIE de agregado (eixo colunar/lakehouse D2), **não** é pilar novo nem claim de performance vetorial — reusa o zone-map (slices ad-hoc) + o DataFusion aggregate já in-tree (Regra 9). **Risks:** (a) overflow/semântica numérica do integer-sum — deve casar o tipo de saída do PG exatamente ou declinar (fail-safe, honestidade Rule 3); mitigação: mapear ao tipo PG exato ou plano nativo. (b) interação skip×group — um chunk group pulado NUNCA pode dropar um grupo (o grupo só existe se uma linha casa — o Filter do DataFusion é a autoridade); mitigação: reusar o invariante D3, A/B com grupos de overlap parcial. **Dependencies:** M100 (o CustomScan que estes agregados estendem). **Prior art:** slices ad-hoc `docs/benchmarks/columnar-zonemap-verdict.md`, `columnar-zonemap-temporal-verdict.md`, `columnar-groupby-verdict.md`; `theodb_rs/src/am/columnar_agg.rs`, `am/df_executor.rs`, `am/zonemap.rs`.
+**Objective:** alargar as FORMAS de agregado colunar admitidas pelo M100 CustomScan — hoje `count(*)`/`sum(float8)` sem WHERE combinado. Duas frentes: (a) **GROUP BY + WHERE combinados** (o zone-map skip + o DataFusion Filter compõem com o hash-aggregate num só plano — o `admit` hoje DECLINA quando `groupClause` E `baserestrictinfo` estão ambos presentes); (b) **`avg` + `sum(int2/4/8)`** — onde o tipo Arrow de saída difere do tipo de saída do PG (a razão de o M100 se restringir a `sum(float8)`/`count`), exigindo a coerção exata da semântica do PG. **GATE (measurement-first):** um A/B in-PG provando resultado **byte-idêntico** vs heap para cada forma nova (`SELECT k, sum(x) WHERE ts BETWEEN … GROUP BY k`, `avg(x)`, `sum(int_col)`), CustomScan engatado, com speedup medido. **DoD:** (1) `admit` aceita `groupClause` + `baserestrictinfo` juntos — skip + Filter + group num só plano (reusa o invariante D3 admission-filter); (2) `avg(float8/int)` + `sum(int2/4/8)` admitidos com o tipo de saída EXATO do PG (`sum(int4)`→int8, `sum(int8)`→numeric, `avg`→numeric) OU decline fail-safe; (3) A/B byte-idêntico por forma nova + verdict em `wiki/benchmarks/`; (4) CHANGELOG. **Boundary honesto:** alarga a SUPERFÍCIE de agregado (eixo colunar/lakehouse D2), **não** é pilar novo nem claim de performance vetorial — reusa o zone-map (slices ad-hoc) + o DataFusion aggregate já in-tree (Regra 9). **Risks:** (a) overflow/semântica numérica do integer-sum — deve casar o tipo de saída do PG exatamente ou declinar (fail-safe, honestidade Rule 3); mitigação: mapear ao tipo PG exato ou plano nativo. (b) interação skip×group — um chunk group pulado NUNCA pode dropar um grupo (o grupo só existe se uma linha casa — o Filter do DataFusion é a autoridade); mitigação: reusar o invariante D3, A/B com grupos de overlap parcial. **Dependencies:** M100 (o CustomScan que estes agregados estendem). **Prior art:** slices ad-hoc `wiki/benchmarks/columnar-zonemap-verdict.md`, `columnar-zonemap-temporal-verdict.md`, `columnar-groupby-verdict.md`; `theodb_rs/src/am/columnar_agg.rs`, `am/df_executor.rs`, `am/zonemap.rs`.
 
 ---
 
 ## M115 — [x] Composabilidade do M100: saída columnar-agg usável em subquery/join *(gated M100)*
 
-> Added 2026-07-19 by `/roadmap-feature` (slug: `columnar-aggregate-completeness`). Fonte: caveat medido em `docs/benchmarks/columnar-groupby-verdict.md` (limitação pré-existente do M100). See CHANGELOG `[Unreleased] § Added`.
+> Added 2026-07-19 by `/roadmap-feature` (slug: `columnar-aggregate-completeness`). Fonte: caveat medido em `wiki/benchmarks/columnar-groupby-verdict.md` (limitação pré-existente do M100). See CHANGELOG `[Unreleased] § Added`.
 
-**Objective:** resolver a limitação **pré-existente do M100** onde consumir o VALOR de saída de um agregado colunar dentro de uma expressão externa (subquery/join/`ORDER BY` de agregado sobre o valor) falha com `cache lookup failed for attribute N of relation 0` — o planner inlina o `Aggref` do CustomScan `scanrelid=0` na remoção do SubqueryScan, re-avaliando a tupla sintética. Afeta o path ESCALAR e o GROUP BY igualmente (`SELECT s+1 FROM (SELECT sum(x) s FROM col) q` também falha). **GATE (measurement-first + discover-first):** um teste/A/B in-PG provando `SELECT sum(s) FROM (SELECT k, sum(x) s FROM col GROUP BY k) q`, um JOIN sobre a saída agrupada, e `string_agg(… ORDER BY agg_value)` — TODOS byte-idênticos vs heap com o CustomScan engatado, nos paths escalar E agrupado. **DoD:** (1) diagnóstico do caminho exato `setrefs`/SubqueryScan-removal (a tentativa `INDEX_VAR`-no-`plan.targetlist` QUEBROU o top-level — o fix deve deixar o `setrefs` construir o INDEX_VAR ele mesmo OU impedir o inlining do Aggref); (2) um fix que torne a saída do CustomScan opaca/consumível (ex.: `custom_scan_tlist` correto p/ nós superiores referenciarem colunas de saída, não o `Aggref` cru); (3) saída escalar E agrupada usável em subquery/join/ORDER-BY-de-agregado; (4) A/B/testes byte-idênticos + verdict; (5) SEM regressão do path top-level (re-provar). **Boundary honesto:** é um fix de CORREÇÃO de planner-integration (composabilidade), **não** capacidade nova nem performance — destrava o uso do columnar-agg em queries reais (analytics/RAG compõem agregados em subqueries). **Risks:** (a) interação profunda com `setrefs` — o `INDEX_VAR`-in-`plan.targetlist` ingênuo quebrou o top-level (o setrefs quer as exprs reais); mitigação: discover-first do padrão `scanrelid=0` agrupado (extensão real: Citus/TimescaleDB) + `set_customscan_references`. (b) o fix pode exigir interceptar em outro estágio do planner → escopo pode crescer; mitigação: spike/measurement-first GATE antes de comprometer a abordagem. **Dependencies:** M100 (o CustomScan cuja saída este fix torna composável). **Prior art:** `docs/benchmarks/columnar-groupby-verdict.md § caveat` (a limitação + a tentativa INDEX_VAR revertida), `theodb_rs/src/am/columnar_agg.rs::plan_custom_path`, PostgreSQL `setrefs.c::set_customscan_references`.
+**Objective:** resolver a limitação **pré-existente do M100** onde consumir o VALOR de saída de um agregado colunar dentro de uma expressão externa (subquery/join/`ORDER BY` de agregado sobre o valor) falha com `cache lookup failed for attribute N of relation 0` — o planner inlina o `Aggref` do CustomScan `scanrelid=0` na remoção do SubqueryScan, re-avaliando a tupla sintética. Afeta o path ESCALAR e o GROUP BY igualmente (`SELECT s+1 FROM (SELECT sum(x) s FROM col) q` também falha). **GATE (measurement-first + discover-first):** um teste/A/B in-PG provando `SELECT sum(s) FROM (SELECT k, sum(x) s FROM col GROUP BY k) q`, um JOIN sobre a saída agrupada, e `string_agg(… ORDER BY agg_value)` — TODOS byte-idênticos vs heap com o CustomScan engatado, nos paths escalar E agrupado. **DoD:** (1) diagnóstico do caminho exato `setrefs`/SubqueryScan-removal (a tentativa `INDEX_VAR`-no-`plan.targetlist` QUEBROU o top-level — o fix deve deixar o `setrefs` construir o INDEX_VAR ele mesmo OU impedir o inlining do Aggref); (2) um fix que torne a saída do CustomScan opaca/consumível (ex.: `custom_scan_tlist` correto p/ nós superiores referenciarem colunas de saída, não o `Aggref` cru); (3) saída escalar E agrupada usável em subquery/join/ORDER-BY-de-agregado; (4) A/B/testes byte-idênticos + verdict; (5) SEM regressão do path top-level (re-provar). **Boundary honesto:** é um fix de CORREÇÃO de planner-integration (composabilidade), **não** capacidade nova nem performance — destrava o uso do columnar-agg em queries reais (analytics/RAG compõem agregados em subqueries). **Risks:** (a) interação profunda com `setrefs` — o `INDEX_VAR`-in-`plan.targetlist` ingênuo quebrou o top-level (o setrefs quer as exprs reais); mitigação: discover-first do padrão `scanrelid=0` agrupado (extensão real: Citus/TimescaleDB) + `set_customscan_references`. (b) o fix pode exigir interceptar em outro estágio do planner → escopo pode crescer; mitigação: spike/measurement-first GATE antes de comprometer a abordagem. **Dependencies:** M100 (o CustomScan cuja saída este fix torna composável). **Prior art:** `wiki/benchmarks/columnar-groupby-verdict.md § caveat` (a limitação + a tentativa INDEX_VAR revertida), `theodb_rs/src/am/columnar_agg.rs::plan_custom_path`, PostgreSQL `setrefs.c::set_customscan_references`.
 
 ---
 
 ## M116 — [x] Operabilidade em escala: eliminar o muro do VACUUM (index-maintenance ADR-0017 fase 1)
 
-> Added 2026-07-20 by `/roadmap-feature` (slug: `vacuum-wall-operability`). Fonte: deep-view `.claude/knowledge-base/audits/deep-view-sota-ai-native-2026-07-07.md § P3` + `docs/adr/0017-m55-index-maintenance-at-scale.md`. See CHANGELOG `[Unreleased] § Added`.
+> Added 2026-07-20 by `/roadmap-feature` (slug: `vacuum-wall-operability`). Fonte: deep-view `.claude/knowledge-base/audits/deep-view-sota-ai-native-2026-07-07.md § P3` + `wiki/decisions/0017-m55-index-maintenance-at-scale.md`. See CHANGELOG `[Unreleased] § Added`.
 >
 > **[CORREÇÃO 2026-07-20 — SUPERSEDED / JÁ ENTREGUE]** O muro do caminho DELETE foi fechado por **M56** (`theodb_rs/src/am/build.rs::vacuum_delete_inplace` + `am/hnsw_page.rs::tombstone_sweep` — tombstone in-place per-page, GenericXLog, sem advisory EXCLUSIVE / sem O(N) / sem stall; compaction disparada por churn ratio, com recall medido no M56 fase-2 churn bench) e **M104** (`vacuum_fold_max_mb` — blast radius de memória do fold limitado). Milestone criado sobre gap-analysis desatualizado (deep-view 2026-07-07, anterior a M56/M104). Residual não-bloqueador (streaming BUILD `collect_corpus`, IVF in-place) não justifica milestone próprio. Marcado `[x]` como correção de ROADMAP — não reimplementar (Regra: sem re-trabalho).
 
@@ -1729,7 +1855,7 @@ LazyGraphRAG (MS Research), HippoRAG 2; baseline a bater = `theo-rag/packages/co
 - [ ] Deletes marcam tombstone in-place (sem reescrever o índice inteiro); o VACUUM não segura EXCLUSIVE por um fold O(N).
 - [ ] Compaction incremental/bounded (não whole-index sob EXCLUSIVE) conforme ADR-0017, com política de trigger explícita.
 - [ ] Crash-safe provado por harness check-crash (padrão meta-pivot M48): pós-recovery o índice dá o top-k correto.
-- [ ] MEDIDO em box quieta: stall de manutenção a 1M dentro do limite acordado (documentar em `docs/benchmarks/`), sem regressão de recall.
+- [ ] MEDIDO em box quieta: stall de manutenção a 1M dentro do limite acordado (documentar em `wiki/benchmarks/`), sem regressão de recall.
 
 **Dependencies:** M48 (fold crash-safe / meta-pivot), M55 (decisão ADR-0017). Ambos `[x]`.
 
@@ -1756,7 +1882,7 @@ LazyGraphRAG (MS Research), HippoRAG 2; baseline a bater = `theo-rag/packages/co
 
 - [ ] `cosine_dist_from_bytes` e `ip_dist_from_bytes` ganham caminho AVX2+FMA com dispatch por feature em runtime, espelhando o L2 existente, com fallback escalar correto.
 - [ ] Recall-neutro provado por ablação mesmo-índice (o kernel muda velocidade, não resultado).
-- [ ] MEDIDO: microbench same-graph mostra o lift de latência do kernel cosine/IP (documentar em `docs/benchmarks/`; nunca citar cross-box).
+- [ ] MEDIDO: microbench same-graph mostra o lift de latência do kernel cosine/IP (documentar em `wiki/benchmarks/`; nunca citar cross-box).
 
 **Dependencies:** M31b (distância SIMD L2). `[x]`.
 
@@ -1777,13 +1903,13 @@ Quick-win barato no eixo exato (latência cosine/IP) que o M50 aponta como teto,
 
 **Objective:** Tornar o iterative scan do filtered ANN resumível a partir do discarded set (em vez de re-buscar o grafo inteiro com ef dobrado a cada esgotamento), no caso RAG `WHERE tenant=X ORDER BY emb`.
 
-> **[RE-ESCOPO 2026-07-20 — owner-approved]** O DoD original (fechar o gap vs pgvector 0.8, ≤1.2×) foi **FALSIFICADO por medição**: theodb page-native é ~7–23× mais lento que o grafo in-memory do pgvector — gap estrutural de paradigma (ADR-0033/0035/0036), não de tuning. Nenhum claim de paridade pgvector é feito (Regra 5). O M118 é re-escopado para o resultado honesto **alcançável e medido**: correção + melhoria do PRÓPRIO path do theodb. Evidência: `docs/benchmarks/m118-resume-discarded.md`.
+> **[RE-ESCOPO 2026-07-20 — owner-approved]** O DoD original (fechar o gap vs pgvector 0.8, ≤1.2×) foi **FALSIFICADO por medição**: theodb page-native é ~7–23× mais lento que o grafo in-memory do pgvector — gap estrutural de paradigma (ADR-0033/0035/0036), não de tuning. Nenhum claim de paridade pgvector é feito (Regra 5). O M118 é re-escopado para o resultado honesto **alcançável e medido**: correção + melhoria do PRÓPRIO path do theodb. Evidência: `wiki/benchmarks/m118-resume-discarded.md`.
 
 **Definition of done (re-escopado):**
 
 - [x] `amgettuple` mantém estado de scan resumível entre chamadas (discarded set) — sem re-percorrer o grafo do zero a cada esgotamento (`ann/scan_core.rs::ResumableGround` + `am/scan.rs` wiring).
 - [x] Recall mantido em paridade no filtered path — **recall@10 = 1.0** vs brute-force exato sob filtro seletivo (A/B in-PG, `Index Scan using theodb_hnsw`).
-- [x] MEDIDO own-path A/B: `resume ON` **~1.95× mais rápido** que o re-search M52 (`resume OFF`) a recall casado (14.33 vs 27.94 ms @ 0.9967) — `docs/benchmarks/m118-resume-discarded.md`. **[Gate original ≤1.2× vs pgvector: FALSIFICADO — não alcançável, não claimado.]**
+- [x] MEDIDO own-path A/B: `resume ON` **~1.95× mais rápido** que o re-search M52 (`resume OFF`) a recall casado (14.33 vs 27.94 ms @ 0.9967) — `wiki/benchmarks/m118-resume-discarded.md`. **[Gate original ≤1.2× vs pgvector: FALSIFICADO — não alcançável, não claimado.]**
 - [x] Bounded + kill-switch: `theodb_hnsw.resume_max_mb` (fail-safe, EC-5 no-panic) + `theodb_hnsw.resume` (on/off).
 
 **Dependencies:** M52 (filtered ANN / iterative scan). `[x]`.
@@ -1811,7 +1937,7 @@ Quick-win barato no eixo exato (latência cosine/IP) que o M50 aponta como teto,
 
 - [ ] `ai.rerank` / hybrid ganham estágio opcional de cross-encoder re-rank via endpoint HTTP OpenAI-compat existente (opt-in por GUC/param, bounded em latência/custo).
 - [ ] `theodb.chunk_text` ganha splitter recursivo separator-aware (parágrafo→frase→palavra→char) além da janela de caracteres v1.
-- [ ] MEDIDO: lift de nDCG@10 em BEIR (scifact / nfcorpus) com re-rank ligado vs desligado, com teste de significância (documentar em `docs/benchmarks/`).
+- [ ] MEDIDO: lift de nDCG@10 em BEIR (scifact / nfcorpus) com re-rank ligado vs desligado, com teste de significância (documentar em `wiki/benchmarks/`).
 
 **Dependencies:** M53 (hybrid / RRF), M54 (vectorizer / chunking). Ambos `[x]`.
 
@@ -1861,7 +1987,7 @@ Pós-reposição (ADR-0033), AI-native / HTAP / abertura são os eixos diferenci
 **Definition of done:**
 
 - [ ] O k-means do IVF, para métrica cosine/ip, **normaliza os centroides no update** (spherical); o path L2 fica **byte-idêntico** (inalterado).
-- [ ] MEDIDO: recall@10 IVF cosine/ip **sobe** vs o baseline arithmetic-mean, a QPS casado (documentar em `docs/benchmarks/`).
+- [ ] MEDIDO: recall@10 IVF cosine/ip **sobe** vs o baseline arithmetic-mean, a QPS casado (documentar em `wiki/benchmarks/`).
 - [ ] **Gate honesto:** se o lift não justificar (< limite acordado), **reverter** e registrar honest-negative — decisão measurement-first (como o slot-reuse M56).
 
 **Dependencies:** M49 (IVF cosine/ip opclasses). `[x]`.
@@ -1905,7 +2031,7 @@ Hardening pós-roadmap-completo no eixo **operabilidade + AI-native** (eixos viv
 
 ## M123 — [x] Significância estatística pareada do hybrid vs vector (BEIR)
 
-> Added 2026-07-20 by `/roadmap-feature` (slug: `hybrid-beir-significance`). Fonte: backlog "[M53 review — council-benchmark] Teste de significância pareado hybrid vs vector (BEIR)" + `docs/benchmarks/m53-hybrid-beir.md` (harness já existe). See CHANGELOG `[Unreleased] § Added`.
+> Added 2026-07-20 by `/roadmap-feature` (slug: `hybrid-beir-significance`). Fonte: backlog "[M53 review — council-benchmark] Teste de significância pareado hybrid vs vector (BEIR)" + `wiki/benchmarks/m53-hybrid-beir.md` (harness já existe). See CHANGELOG `[Unreleased] § Added`.
 
 **Objective:** Elevar o benchmark hybrid-BEIR de "médias reportadas" para **prova estatística** — teste de significância **pareado** (per-query) do hybrid (BM25+vector+RRF) vs vector-only, com p-value + tamanho de efeito + IC, honrando "performance é claim, não opinião" (regra TheoDB 5) e a lente council-ai-in-db "isso melhora recall de verdade?".
 
@@ -1914,7 +2040,7 @@ Hardening pós-roadmap-completo no eixo **operabilidade + AI-native** (eixos viv
 - [ ] O harness `benchmarks/run_m53_hybrid_beir.py` reporta, **por query**, a métrica de ranking (nDCG@10 ou recall@k) para hybrid **e** vector-only sobre ≥1 dataset BEIR **permissivo** (ex.: SciFact / NFCorpus — pequenos, licença aberta).
 - [ ] **MEDIDO:** teste de significância **pareado** sobre as diferenças per-query (bootstrap pareado OU Wilcoxon signed-rank), reportando **p-value + tamanho de efeito + IC 95%** — não apenas a média.
 - [ ] **Honestidade (anti cherry-pick):** reporta `n` total de queries, a fração onde o hybrid **perde**, e o veredito honesto — se **não-significativo**, dizer explicitamente (honest-negative aceito, como M121). Sem selecionar pontos de recall/k favoráveis.
-- [ ] Artefato reproduzível em `docs/benchmarks/` (comando exato, dataset+versão, seed).
+- [ ] Artefato reproduzível em `wiki/benchmarks/` (comando exato, dataset+versão, seed).
 
 **Dependencies:** M53 (hybrid / RRF). `[x]`.
 
@@ -1937,7 +2063,7 @@ O hybrid é o coração do pilar **AI-native**, e o benchmark existe mas **não 
 
 **Definition of done:**
 
-- [ ] **Quickstart reproduzível de self-host** documentado (`docs/ops/`): stand up de um TheoDB próprio (imagem/compose OU recipe pgrx-install) com `theodb_rs` + `shared_preload_libraries` + o worker do vectorizer ativo — um membro do time consegue subir do zero.
+- [ ] **Quickstart reproduzível de self-host** documentado (`wiki/guides/`): stand up de um TheoDB próprio (imagem/compose OU recipe pgrx-install) com `theodb_rs` + `shared_preload_libraries` + o worker do vectorizer ativo — um membro do time consegue subir do zero.
 - [ ] **Uma capability theo-data com retrieval real no TheoDB:** `theodb.create_vectorizer` mantém uma coluna de embedding fresca + as queries reais da capability passam por `ai.hybrid_search_rrf` (substituindo o store atual). Config versionada.
 - [ ] **Primeira evidência** em `knowledge-base/dogfood/evidence/*.md` (frontmatter § 5: scenario/date/operator/outcome/summary), **incluindo ≥1 história de falha** (um dogfood sem falhas é teatro — § 4).
 - [ ] O manifest documenta o caminho `planned → wired → running`; o flip para `running` (uso sustentado ≥30d) é operacional/cross-repo, **não** gated neste milestone de código.
@@ -1957,7 +2083,7 @@ Recomendação #1 e Risco dominante (H9): a trajetória de *engenharia* é sóli
 
 ## M125 — [x] Resolver H6: significância da híbrida num dataset lexical-heavy (ou travar posicionamento honesto)
 
-> Added 2026-07-20 by gap-analysis (`knowledge-base/audits/2026-07-20-analysis.md` Recomendação 2 / Risco H6). Fonte: `docs/benchmarks/m123-hybrid-significance.md` (PARITY medido na SciFact). See CHANGELOG `[Unreleased] § Added`.
+> Added 2026-07-20 by gap-analysis (`knowledge-base/audits/2026-07-20-analysis.md` Recomendação 2 / Risco H6). Fonte: `wiki/benchmarks/m123-hybrid-significance.md` (PARITY medido na SciFact). See CHANGELOG `[Unreleased] § Added`.
 
 **Objective:** O M123 mediu **paridade** (hybrid vs vector não-significativo, p=0.25, 296/300 empates) numa SciFact dense-strong onde a perna FTS é fraca. Testar a híbrida onde ela *deveria* ajudar — um dataset **lexical-heavy** (keyword/termos raros) com o mesmo teste pareado — para converter o value-prop AI-native de **AT_RISK** em **medido**: ou a híbrida vence significativamente em algum regime, ou o posicionamento honesto é travado ("híbrida disponível; paridade em dense-strong").
 
@@ -1966,7 +2092,7 @@ Recomendação #1 e Risco dominante (H9): a trajetória de *engenharia* é sóli
 - [ ] O harness roda o teste pareado (reusa `theodb_bench.significance.paired_significance` do M123) num dataset BEIR **lexical-heavy** permissivo (ex.: um subset keyword-heavy; declarar licença) além da SciFact.
 - [ ] **MEDIDO:** p-value pareado + IC + wins/losses/ties reportados; se a híbrida vencer significativamente (p<0.05 E IC>0) num regime, o claim é registrado com evidência; se não, **posicionamento honesto travado** no doc (sem overclaim).
 - [ ] **Anti p-hack:** endpoint pré-declarado (nDCG@10), correção de comparação múltipla se >1 dataset, honest-negative aceito (como o M123). Sem dataset-shopping para achar significância.
-- [ ] Artefato em `docs/benchmarks/` atualizando o veredito AI-native.
+- [ ] Artefato em `wiki/benchmarks/` atualizando o veredito AI-native.
 
 **Dependencies:** M123 (teste de significância) `[x]`.
 
@@ -2009,7 +2135,7 @@ Recomendação #3 / Risco de manutenção: com 19 arquivos >500 LoC e este a 3.4
 
 ## Programa: benchmark oficial (adopt-and-wrap) — M127–M130
 
-> Added 2026-07-20. Fonte: discovery `knowledge-base/discoveries/blueprints/official-db-benchmark-harness-blueprint.md` (SHIPPABLE 97.5) + `docs/adr/0050-official-benchmark-adopt-and-wrap.md`. Decisão do owner ("o mais FAANG possível"): adotar o benchmark oficial por pilar (comparabilidade reproduzível por terceiros) **e** manter uma camada fina nossa (significância + A/B byte-idêntico + gate de corretude) por cima — os tools oficiais não a repõem. Rollout **vector-pilot-first**.
+> Added 2026-07-20. Fonte: discovery `knowledge-base/discoveries/blueprints/official-db-benchmark-harness-blueprint.md` (SHIPPABLE 97.5) + `wiki/decisions/0050-official-benchmark-adopt-and-wrap.md`. Decisão do owner ("o mais FAANG possível"): adotar o benchmark oficial por pilar (comparabilidade reproduzível por terceiros) **e** manter uma camada fina nossa (significância + A/B byte-idêntico + gate de corretude) por cima — os tools oficiais não a repõem. Rollout **vector-pilot-first**.
 
 ## M127 — [x] Benchmark oficial: pilar VETOR (VectorDBBench + ann-benchmarks) — piloto do padrão adopt-and-wrap
 
@@ -2019,7 +2145,7 @@ Recomendação #3 / Risco de manutenção: com 19 arquivos >500 LoC e este a 3.4
 
 - [ ] Adapter `BaseANN` (`fit`/`query`) para TheoDB rodando ann-benchmarks em ≥1 dataset D1-safe (GloVe/PDDL) + ≥1 eval-only (SIFT/GIST via CI-download) — recall×QPS MEDIDO, reprodutível.
 - [ ] Camada-wrap genérica extraída (`benchmarks/theodb_bench/significance.py` + A/B byte-idêntico) consumindo o output per-query do runner oficial — provada nesse pilar.
-- [ ] Posicionamento honesto: qualquer número vs ScaNN/AlloyDB cita `docs/benchmarks/m73-headtohead-verdict.md` (magnitude não-publicada em fonte neutra); direção pode citar o blog Google.
+- [ ] Posicionamento honesto: qualquer número vs ScaNN/AlloyDB cita `wiki/benchmarks/m73-headtohead-verdict.md` (magnitude não-publicada em fonte neutra); direção pode citar o blog Google.
 - [ ] Os `run_m*.py` vetoriais comparativos redundantes aposentados (a camada-wrap + entrada oficial os substituem); significância/regressão preservadas.
 
 **Dependencies:** M126 `[x]` (ADR-0050).
@@ -2089,7 +2215,7 @@ Recomendação #3 / Risco de manutenção: com 19 arquivos >500 LoC e este a 3.4
 
 **Boundary honesto:** é um fix de **correção de planner-integration** (destrava uma otimização existente), não capacidade nova. Habilita o rank ClickBench colunar; performance vira claim só com benchmark (`../.claude/rules/public-copy.md`).
 
-**Prior art:** `theodb_rs/src/am/columnar_agg.rs::plan_custom_path`, `benchmarks/run_m128_clickbench.py`, PostgreSQL `setrefs.c::set_customscan_references`, `docs/benchmarks/columnar-groupby-verdict.md`, issue #135.
+**Prior art:** `theodb_rs/src/am/columnar_agg.rs::plan_custom_path`, `benchmarks/run_m128_clickbench.py`, PostgreSQL `setrefs.c::set_customscan_references`, `wiki/benchmarks/columnar-groupby-verdict.md`, issue #135.
 
 ---
 
@@ -2188,7 +2314,7 @@ Falsificação registrada: a hipótese de que a dor viria do WAL estava **errada
 - [ ] `cargo build --features pg18` **limpo** (0 erros) e a extensão instala/carrega num PG18.4.
 - [ ] **Bitmap scan portado de verdade** para o contrato novo (decisão do owner: não declarar não-suportado) — incluindo teste que **força página lossy** (`ntuples < 0`) e assere que o recheck não perde nem duplica linha; um bug aqui não aparece em happy path, produz resultado errado.
 - [ ] **Suítes de crash e de MVCC/isolamento verdes contra o binário 18** — `test_am_crash.py` e as de isolamento do `theodb_rs/isolation/`. Compilar não prova comportamento, e o que quebrou foi justamente o caminho de varredura.
-- [ ] **Benchmark de sanidade no 18 vs baseline 17**, publicado em `docs/benchmarks/` — restabelece a linha de base, já que os 119 artefatos existentes foram medidos no 17 e passam a descrever configuração não distribuída.
+- [ ] **Benchmark de sanidade no 18 vs baseline 17**, publicado em `wiki/benchmarks/` — restabelece a linha de base, já que os 119 artefatos existentes foram medidos no 17 e passam a descrever configuração não distribuída.
 - [ ] **Flags `pg13`–`pg17` removidas do `Cargo.toml`** (consequência coerente do migrar-para-18): elas nunca foram compiladas por ninguém, e manter declaração não verificada é a mesma classe de defeito que esta sondagem expôs.
 - [ ] **Packaging publica o 18** — Dockerfiles e scripts hoje são pg17-only (4 referências); sem isso o suporte existe só para quem compila, não para quem consome a imagem.
 
@@ -2270,7 +2396,7 @@ O próprio artefato declara *"o gate de medição está executado"*. **Caveat ho
 - [ ] `lexical_engine='bm25'` vira **default** de `ai.hybrid_search_rrf`, com `ts_rank_cd` selecionável para compatibilidade.
 - [ ] **Medição que faltava do M53 §4:** híbrida-com-BM25 vs híbrida-com-`ts_rank_cd`, com teste de significância pareado sobre as queries — o M53 nunca mediu a fusão com BM25, só o leg isolado.
 - [ ] Nota de migração: trocar o default **muda resultados de queries existentes**; documentado, não silencioso.
-- [ ] Artefato em `docs/benchmarks/` com metodologia e comando de reprodução.
+- [ ] Artefato em `wiki/benchmarks/` com metodologia e comando de reprodução.
 
 **Dependencies:** M137 `[ ]` — mudar o default da superfície SQL sem cadeia de upgrade entrega a melhoria só para instalações novas.
 
@@ -2278,7 +2404,7 @@ O próprio artefato declara *"o gate de medição está executado"*. **Caveat ho
 
 **Boundary honesto:** é **adoção de peça de terceiro**, não código próprio. Fecha um gap medido de ~10× hoje e serve de baseline para o M140. Não nos torna donos da busca.
 
-**Prior art:** `docs/benchmarks/m53-hybrid-beir.md` (a medição), ADR-0013 (a exceção permissiva gated), ADR-0003 (identificação do `pg_textsearch`).
+**Prior art:** `wiki/benchmarks/m53-hybrid-beir.md` (a medição), ADR-0013 (a exceção permissiva gated), ADR-0003 (identificação do `pg_textsearch`).
 
 ---
 ## M139 — [x] SPIKE (o GATE): `Directory` do Tantivy sobre block storage do Postgres
@@ -2332,7 +2458,7 @@ usa: **heap buffer-then-flush** (o M139 provou: MVCC/WAL/crash de graça, ~milha
 
 **Definition of done:**
 
-- [ ] Artefato em `docs/benchmarks/` com BM25(Tantivy) vs `ts_rank` vs `pg_textsearch` no MESMO corpus de traces + BEIR, nDCG@10 + teste pareado. **Bate a baseline do M138 ou reporta honestamente que não** (DoD-3 do M140).
+- [ ] Artefato em `wiki/benchmarks/` com BM25(Tantivy) vs `ts_rank` vs `pg_textsearch` no MESMO corpus de traces + BEIR, nDCG@10 + teste pareado. **Bate a baseline do M138 ou reporta honestamente que não** (DoD-3 do M140).
 - [ ] **ADR** decidindo o storage (heap vs index AM) com o custo/benefício medido — reconcilia o DoD "index AM" com o achado do M139 (heap). Se heap: registra por que o AM custom seria over-engineering (Rule 9/anti-YAGNI).
 - [ ] Tamanho do índice + latência de ingest medidos nos dois candidatos, no corpus de traces.
 
@@ -2342,7 +2468,7 @@ usa: **heap buffer-then-flush** (o M139 provou: MVCC/WAL/crash de graça, ~milha
 
 **Boundary honesto:** é o **gate de rigor** do M140. Se a BM25 não bater a baseline nos dados do theo-lens, o M140 não se justifica e para aqui — barato.
 
-**Prior art:** M139 (spike GO, `docs/adr/0051`), M138 (baseline pg_textsearch + o método de significância), theo-lens `packages/core/.../trace-read-repository.ts` (o `ts_rank`/`websearch_to_tsquery` atual a bater).
+**Prior art:** M139 (spike GO, `wiki/decisions/0051`), M138 (baseline pg_textsearch + o método de significância), theo-lens `packages/core/.../trace-read-repository.ts` (o `ts_rank`/`websearch_to_tsquery` atual a bater).
 
 ## M140.2 — [x] Crate núcleo lexical sem pgrx (superfície pura testável) *(gated M140.1)*
 
@@ -2460,7 +2586,7 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 **Definition of done:**
 
-- [ ] Imagem **default** builda **sem** pg_duckdb (sem estágio `pgduckdb-builder`, sem COPY do `.so`, sem `shared_preload_libraries='pg_duckdb'`, sem `libcurl4`, sem `CREATE EXTENSION pg_duckdb`); queda de tamanho **≥ 150 MB** medida em `docs/benchmarks/`.
+- [ ] Imagem **default** builda **sem** pg_duckdb (sem estágio `pgduckdb-builder`, sem COPY do `.so`, sem `shared_preload_libraries='pg_duckdb'`, sem `libcurl4`, sem `CREATE EXTENSION pg_duckdb`); queda de tamanho **≥ 150 MB** medida em `wiki/benchmarks/`.
 - [ ] Smoke default: `pg_extension` sem `pg_duckdb`; `shared_preload_libraries` sem ele; `theodb_rs` + `theodb_columnar` own-code intactos (vetor/AM/columnar verdes).
 - [ ] `packaging/Dockerfile.htap` = base default + camada pg_duckdb; smoke htap: pg_duckdb presente + superfície M62 (`theodb.htap_refresh_sql`/`olap_sql`) funciona e2e.
 - [ ] `sql/85-theodb-htap.sql` + `CREATE EXTENSION pg_duckdb` carregam **condicionalmente** (só na imagem htap), provado pelos dois smokes.
@@ -2472,7 +2598,7 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 **Boundary honesto:** não é uma remoção de capacidade — o lakehouse D2 continua disponível via `theodb-htap`. É uma decisão de **superfície default** (enxugar a imagem que a maioria puxa, tirar o único C++/httpfs do caminho default) depois que o own-code columnar amadureceu.
 
-**Prior art:** ADR-0020 (embarcar pg_duckdb — a decisão sendo emendada; o tier-out já era seu follow-up Unresolved), ADR-0042 (own-code columnar TableAM M99), ADR-0021/0023 (superfície M62/M64 — pg_duckdb fora do hot path AI-native), `docs/benchmarks/m97-htap-viability.md` (DEFER a new columnar pillar), `.claude/rules/parsimony-ladder.md` (anti-sunk-cost), `.claude/rules/public-copy.md` (honestidade de posicionamento).
+**Prior art:** ADR-0020 (embarcar pg_duckdb — a decisão sendo emendada; o tier-out já era seu follow-up Unresolved), ADR-0042 (own-code columnar TableAM M99), ADR-0021/0023 (superfície M62/M64 — pg_duckdb fora do hot path AI-native), `wiki/benchmarks/m97-htap-viability.md` (DEFER a new columnar pillar), `.claude/rules/parsimony-ladder.md` (anti-sunk-cost), `.claude/rules/public-copy.md` (honestidade de posicionamento).
 
 ---
 
@@ -2480,14 +2606,14 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 > Added 2026-07-22 (`/roadmap-feature pgduckdb-total-removal`). Grill: `knowledge-base/grills/pgduckdb-total-removal-feature-grill.md`.
 
-**Objective:** eliminar o `pg_duckdb` **inteiro** do TheoDB, substituindo o lakehouse de arquivos externos por um caminho **own-code** em Rust (DataFusion + Arrow, já no binário; Apache-2.0). O spike da Fase 4 (`docs/benchmarks/parquet-reader-owncode-spike.md`) **mediu** a viabilidade: leitor Parquet own-code com **paridade byte-a-byte** vs `pg_duckdb.read_parquet` a **+9 MB** vs os **118 MB** do bundle DuckDB (~13× menor), sem C++/httpfs. Este milestone executa a substituição e **remove o último componente C++/httpfs do projeto**, dobrando a capacidade lakehouse no build default (a imagem `theodb-htap` do M142 é aposentada).
+**Objective:** eliminar o `pg_duckdb` **inteiro** do TheoDB, substituindo o lakehouse de arquivos externos por um caminho **own-code** em Rust (DataFusion + Arrow, já no binário; Apache-2.0). O spike da Fase 4 (`wiki/benchmarks/parquet-reader-owncode-spike.md`) **mediu** a viabilidade: leitor Parquet own-code com **paridade byte-a-byte** vs `pg_duckdb.read_parquet` a **+9 MB** vs os **118 MB** do bundle DuckDB (~13× menor), sem C++/httpfs. Este milestone executa a substituição e **remove o último componente C++/httpfs do projeto**, dobrando a capacidade lakehouse no build default (a imagem `theodb-htap` do M142 é aposentada).
 
 **Definition of done:**
 
 - [ ] `theodb.read_parquet` own-code (DataFusion, **sem DuckDB**) lê Parquet externo e produz o agregado do M62 — **paridade byte-a-byte** vs o baseline pg_duckdb (reusa/estende `scripts/spike-parquet-validate.sh`).
 - [ ] **Write Parquet own-code** (o `COPY→Parquet` do `htap_refresh_sql` → `DataFrame::write_parquet`) — round-trip escreve+lê+agrega correto.
 - [ ] `sql/85` reescrito: `olap_sql`/`htap_refresh_sql` usam o caminho próprio (`theodb.*`), **não** `duckdb.query`; a superfície M62 funciona **sem** pg_duckdb (guard M142 removido — não há mais o que guardar).
-- [ ] `Dockerfile.htap` **dropa** o pg_duckdb (estágio C++, COPY, `shared_preload`, `libcurl4`, `CREATE EXTENSION`); o lakehouse own-code **dobra no build default** → a imagem `theodb-htap` deixa de existir. Delta de tamanho medido em `docs/benchmarks/`.
+- [ ] `Dockerfile.htap` **dropa** o pg_duckdb (estágio C++, COPY, `shared_preload`, `libcurl4`, `CREATE EXTENSION`); o lakehouse own-code **dobra no build default** → a imagem `theodb-htap` deixa de existir. Delta de tamanho medido em `wiki/benchmarks/`.
 - [ ] Feature `spike-parquet` promovida a permanente (a superfície liga por default); smoke lê+escreve+agrega Parquet own-code, `pg_extension` **sem** pg_duckdb.
 - [ ] **Suporte amplo a tipos** Parquet/Arrow comuns (text, numéricos, timestamp/date, bool e — na medida do viável — nested/list/struct), com **erro tipado fail-closed** para o não-suportado.
 - [ ] ADR emendando 0056/0020 (remoção total) + README (lakehouse own-code no default) + CHANGELOG.
@@ -2498,7 +2624,7 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 **Boundary honesto:** a viabilidade do *read* own-code está **medida** (GO); o *write*, a reescrita do `sql/85`, o drop do pg_duckdb e o suporte amplo de tipos são o trabalho deste milestone. É a conclusão da jornada M142 (tier-out) → M143 (remoção total): 118 MB de C++ fora, ~9 MB de Rust permissivo dentro.
 
-**Prior art:** `docs/benchmarks/parquet-reader-owncode-spike.md` (o spike GO), `theodb_rs/src/parquet_spike.rs` (o código validado), ADR-0056/0020 (o pg_duckdb e o tier-out), ADR-0042/M100 (o DataFusion executor own-code reusado), `.claude/rules/parsimony-ladder.md` (rung 4 — reusar o instalado).
+**Prior art:** `wiki/benchmarks/parquet-reader-owncode-spike.md` (o spike GO), `theodb_rs/src/parquet_spike.rs` (o código validado), ADR-0056/0020 (o pg_duckdb e o tier-out), ADR-0042/M100 (o DataFusion executor own-code reusado), `.claude/rules/parsimony-ladder.md` (rung 4 — reusar o instalado).
 
 ---
 
@@ -2609,7 +2735,7 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 **Definition of done:**
 
 - [ ] `perf record -g` num backend durante ≥1 query lenta (q7/q8) sobre 1M linhas reais, num droplet efêmero dedicado (padrão M57), destruído ao fim.
-- [ ] Flamegraph (`cargo flamegraph` ou `perf script | stackcollapse | flamegraph.pl`) commitado em `docs/benchmarks/`, com o top-3 de frames por tempo próprio.
+- [ ] Flamegraph (`cargo flamegraph` ou `perf script | stackcollapse | flamegraph.pl`) commitado em `wiki/benchmarks/`, com o top-3 de frames por tempo próprio.
 - [ ] Veredito explícito: qual das 3 técnicas (projection pushdown / chunk-filter / vetorização) ataca o frame dominante — com o % do tempo que cada uma endereçaria.
 - [ ] CHANGELOG `[Unreleased]`.
 
@@ -2617,7 +2743,7 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 **Risks:** (a) o gargalo pode ser I/O e não CPU — mitigação: o flamegraph inclui `wait`/`read` frames, e a medição reporta CPU-bound vs I/O-bound honestamente. (b) profiling de release-build perde símbolos — mitigação: build com `debug=1` no profile de bench.
 
-**Prior art:** `memory/columnar-scan-bottleneck-hypothesis.md`, `docs/benchmarks/clickbench-1m-postfix-2026-07-24.md`, padrão de spike measurement-first M75/M83.
+**Prior art:** `memory/columnar-scan-bottleneck-hypothesis.md`, `wiki/benchmarks/clickbench-1m-postfix-2026-07-24.md`, padrão de spike measurement-first M75/M83.
 
 ---
 
@@ -2631,7 +2757,7 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 - [ ] O scan obtém a lista de colunas referenciadas pelo plano (via `scan_begin`/`rs_rd`) e passa a `decode_stripe`; colunas não-referenciadas não são descomprimidas.
 - [ ] A/B byte-idêntico vs heap preservado em TODAS as 43 queries do ClickBench (a projeção não pode mudar resultado).
-- [ ] Benchmark medido: geomean das queries que tocam poucas colunas (ex.: `SELECT col FROM hits`) melhora ≥ 3× vs baseline pós-#190 (`docs/benchmarks/clickbench-1m-postfix-2026-07-24.md`), com o número real (não meta).
+- [ ] Benchmark medido: geomean das queries que tocam poucas colunas (ex.: `SELECT col FROM hits`) melhora ≥ 3× vs baseline pós-#190 (`wiki/benchmarks/clickbench-1m-postfix-2026-07-24.md`), com o número real (não meta).
 - [ ] Fallback seguro: query que toca todas as colunas ou sem lista disponível decodifica tudo (sem regressão).
 - [ ] CHANGELOG `[Unreleased]`.
 
@@ -2695,10 +2821,10 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 **Definition of done:**
 
-- [ ] Relatório em `docs/benchmarks/m152-routing-map.md`: cada uma das ~29 queries não-vetorizadas mapeada → classe → roteia hoje (S/N, via `columnar_customscan` do `run_m128 --agg`) → razão do declínio (`arquivo:linha` em `columnar_agg.rs`/`df_executor.rs`).
+- [ ] Relatório em `wiki/benchmarks/m152-routing-map.md`: cada uma das ~29 queries não-vetorizadas mapeada → classe → roteia hoje (S/N, via `columnar_customscan` do `run_m128 --agg`) → razão do declínio (`arquivo:linha` em `columnar_agg.rs`/`df_executor.rs`).
 - [ ] Alvo de cobertura estimado por fatia: quantas queries CADA classe (GROUP BY texto, COUNT DISTINCT, Top-N) adicionaria se roteada — número medido, não prometido.
 - [ ] Veredito honesto: qual fatia tem o MAIOR ganho de cobertura ainda-não-coberto (pode contradizer o ranking do blueprint se GROUP BY texto já rotear — aceito).
-- [ ] Sem alteração de código de produção (é spike de medição); artefato JSON do run em `docs/benchmarks/m152-artifacts/`.
+- [ ] Sem alteração de código de produção (é spike de medição); artefato JSON do run em `benchmarks/artifacts/m152-artifacts/`.
 - [ ] CHANGELOG `[Unreleased]`.
 
 **Dependencies:** M151 `[x]` (o CustomScan DataFusion + a cobertura 14/43 medida são o ponto de partida).
@@ -2711,7 +2837,7 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 ## M153 — [x] Rotear GROUP BY por chave de TEXTO ao CustomScan DataFusion (hash, guardado por collation determinística)
 
-> **M152 measured (2026-07-25, `docs/benchmarks/m152-routing-map.md`):** o real blocker das GROUP-BY-texto (q16,17,33,38) é `swap_sorted_text_group_collation` (o planner escolhe AGG_SORTED p/ `ORDER BY count LIMIT` → texto declina por collation) + o deparse ORDER-BY-sobre-agregado — NÃO o group-key texto (já aceito por `arrow_supported_group_type`). Cobertura marginal medida ~3. **Executar APÓS M154** (COUNT DISTINCT tem ganho mais limpo). Escopo revisado: tratar o AGG_SORTED-texto (collation determinística) + o deparse.
+> **M152 measured (2026-07-25, `wiki/benchmarks/m152-routing-map.md`):** o real blocker das GROUP-BY-texto (q16,17,33,38) é `swap_sorted_text_group_collation` (o planner escolhe AGG_SORTED p/ `ORDER BY count LIMIT` → texto declina por collation) + o deparse ORDER-BY-sobre-agregado — NÃO o group-key texto (já aceito por `arrow_supported_group_type`). Cobertura marginal medida ~3. **Executar APÓS M154** (COUNT DISTINCT tem ganho mais limpo). Escopo revisado: tratar o AGG_SORTED-texto (collation determinística) + o deparse.
 
 > Added 2026-07-25 (`/roadmap-feature columnar-gap-closing`). Blueprint: `.claude/knowledge-base/discoveries/blueprints/columnar-gap-closing-strategy-blueprint.md` (deep research M148-M151, R0 web + acervo).
 
@@ -2759,7 +2885,7 @@ Isto não remove a capacidade lakehouse (D2) — apenas a torna **opt-in**. Anti
 
 ## M155 — [x] Spike Top-N: medir se rotear ORDER BY … LIMIT ao TopK do DataFusion é lever (HONEST-NEGATIVE medido)
 
-> **Re-escopado 2026-07-25 por medição (owner-delegado, `docs/benchmarks/m155-topn-spike.md`).** A hipótese ORIGINAL
+> **Re-escopado 2026-07-25 por medição (owner-delegado, `wiki/benchmarks/m155-topn-spike.md`).** A hipótese ORIGINAL
 > ("rotear ao TopK do DataFusion evitando o sort completo") foi **REFUTADA por EXPLAIN ANALYZE**: o PostgreSQL já usa
 > `Sort Method: top-N heapsort` (heap O(n log k) = o mesmo algoritmo do TopK do DataFusion) — não há sort completo a
 > evitar. Medido: o nó `Sort` custa **~2-4ms** (não é gargalo); o custo dominante é a **materialização row-by-row do
@@ -2791,7 +2917,7 @@ bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan s�
 
 ## M156 — [x] Rotear predicados de texto no WHERE (=, <>, LIKE, NOT LIKE) ao CustomScan colunar
 
-> **M152 measured (2026-07-25, `docs/benchmarks/m152-routing-map.md`):** `unpushable_where_qual` é o MAIOR first-blocker das não-roteadas (8 queries: q12,14,20,27,30,31,36,37) — predicados de TEXTO no WHERE. Hoje `extract_zone_predicate` (`columnar_agg.rs:160`) só serializa numérico (`u64` zone-bits); texto (varlena) não cabe.
+> **M152 measured (2026-07-25, `wiki/benchmarks/m152-routing-map.md`):** `unpushable_where_qual` é o MAIOR first-blocker das não-roteadas (8 queries: q12,14,20,27,30,31,36,37) — predicados de TEXTO no WHERE. Hoje `extract_zone_predicate` (`columnar_agg.rs:160`) só serializa numérico (`u64` zone-bits); texto (varlena) não cabe.
 
 > Added 2026-07-25. Blueprint: `.claude/knowledge-base/discoveries/blueprints/columnar-text-where-pushdown-blueprint.md` (discover pg_clickhouse + DataFusion, SHIPPABLE_WITH_CAVEATS). Plan: `.claude/knowledge-base/plans/m156-text-where-plan.md`.
 
@@ -2869,13 +2995,13 @@ bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan s�
 - [ ] Run ClickBench canônico (ou desvio documentado: box, subsample, o que difere do c6a.4xlarge) com metodologia reproduzível.
 - [ ] Comparação por-query vs os números PUBLICADOS do ClickHouse (fonte citada) — NENHUMA razão inventada; queries sem baseline comparável marcadas explicitamente.
 - [ ] Veredito honesto: em quais classes de query o "2-3×" é alcançável e em quais o teto estrutural (imposto MVCC/WAL + materialização, ADR-0033/0035) o impede — sem mascarar números (mandato do owner).
-- [ ] Artefato em `docs/benchmarks/` + CHANGELOG `[Unreleased]`.
+- [ ] Artefato em `wiki/benchmarks/` + CHANGELOG `[Unreleased]`.
 
 **Dependencies:** M157 `[ ]`, M158 `[ ]` (medir o estado APÓS cobertura + perf maximizadas). Nota: um baseline do estado atual pode ser medido a qualquer momento; este milestone é a medição culminante.
 
 **Risks:** (a) tentação de inventar/estimar uma razão vs ClickHouse sem baseline reproduzível → PROIBIDO (regra 5); marcar `[NO-BASELINE]` honestamente. (b) comparar baselines incomparáveis (box, dataset, config) sem notar a diferença → dishonest science; documentar todo desvio. (c) ler um honest-negative (gap > 3× no benchmark inteiro) como fracasso — é o teto estrutural já conhecido (ADR-0033/0035); o "2-3×" é por-classe-de-query-vetorizada, não no benchmark inteiro.
 
-**Prior art:** M148/M155 (o teto de materialização), ADR-0033/0035 (o gap de paradigma medido no pilar vetorial), `docs/benchmarks/` (harness `run_m128_clickbench.py`), `papers/rigorous-perf-eval-georges-2007.pdf` (rigor estatístico).
+**Prior art:** M148/M155 (o teto de materialização), ADR-0033/0035 (o gap de paradigma medido no pilar vetorial), `wiki/benchmarks/` (harness `run_m128_clickbench.py`), `papers/rigorous-perf-eval-georges-2007.pdf` (rigor estatístico).
 
 ---
 
@@ -2888,7 +3014,7 @@ bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan s�
 
 **Efficiency target (medido, regra 5):**
 
-- Baseline M159: classe coberta **geomean 7.54× vs ClickHouse** (mesma-box, 1M ClickBench); DuckDB 1.8×, pg_mooncake 6.2× são o landscape (`docs/benchmarks/m159-clickhouse-gap-verdict.md`).
+- Baseline M159: classe coberta **geomean 7.54× vs ClickHouse** (mesma-box, 1M ClickBench); DuckDB 1.8×, pg_mooncake 6.2× são o landscape (`wiki/benchmarks/m159-clickhouse-gap-verdict.md`).
 - Meta: **reduzir o geomean da classe coberta** (rumo a 2-3×) com o flamegraph do path de pushdown provando que `build_arrow`+`decode_column`+`malloc` caem — não estimado, MEDIDO.
 
 **Definition of done (measurement-first):**
@@ -2904,7 +3030,7 @@ bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan s�
 
 **Risks:** (a) endianness/alinhamento — `Buffer::from_vec` assume little-endian nativo (x86/ARM ok); guard explícito. (b) colunas nullable/varlena não são zero-copy — não regredir o caminho de cópia delas. (c) o ganho pode migrar em vez de sumir (ex.: p/ o zstd decode) → honest-negative medido.
 
-**Prior art / referências:** deep-dive blueprint (`columnar-improvement-deepdive-blueprint.md`, council-performance-simd); `references/papers/monetdb-x100-boncz-2005.pdf` (vetores L2-residentes) + `morsel-parallelism-leis-2014.pdf`; `references/arrow-rs/` (`Buffer::from_vec`, zero-copy); `references/datafusion/`; `docs/benchmarks/m148-flamegraph-scan.md` (o gargalo Volcano gêmeo) + `m159-clickhouse-gap-verdict.md`. Secundário (fast-follow, fora deste milestone): batches ~L2 (X100) + multi-core (tokio `rt-multi-thread`, hoje nem compilado — `Cargo.toml:57`; Amdahl-capado ~2× pelo decode serial PG-bound).
+**Prior art / referências:** deep-dive blueprint (`columnar-improvement-deepdive-blueprint.md`, council-performance-simd); `references/papers/monetdb-x100-boncz-2005.pdf` (vetores L2-residentes) + `morsel-parallelism-leis-2014.pdf`; `references/arrow-rs/` (`Buffer::from_vec`, zero-copy); `references/datafusion/`; `wiki/benchmarks/m148-flamegraph-scan.md` (o gargalo Volcano gêmeo) + `m159-clickhouse-gap-verdict.md`. Secundário (fast-follow, fora deste milestone): batches ~L2 (X100) + multi-core (tokio `rt-multi-thread`, hoje nem compilado — `Cargo.toml:57`; Amdahl-capado ~2× pelo decode serial PG-bound).
 
 ---
 
@@ -2933,7 +3059,7 @@ bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan s�
 
 **Risks:** (a) gauntlet de corretude por classe — overflow int, colação de texto (M158), epoch de `extract` (M157) → cada slice é um mini-M157 com A/B. (b) tentação de contar "+11" — os blockers compõem; medir o ganho real, não o SQL-count (regra 5). (c) tax de serialização — o `custom_private` 3-canal só carrega leaves `Integer|String`; a generalização bounded evita reescrever isso (YAGNI).
 
-**Prior art / referências:** deep-dive blueprint (council-research-adr); `references/pg_clickhouse/src/deparse.c` (`foreign_expr_walker` — allowlist + colação-como-estado-de-primeira-classe, o modelo canônico); `references/datafusion/` (capacidade nativa de `.aggregate(Vec<Expr>)`, `case()`, `in_list`); `docs/benchmarks/m152-routing-map.md` (blockers-compõem) + `m159-artifacts/per-query-comparison.md`; precedentes M151/M153/M156/M157/M158.
+**Prior art / referências:** deep-dive blueprint (council-research-adr); `references/pg_clickhouse/src/deparse.c` (`foreign_expr_walker` — allowlist + colação-como-estado-de-primeira-classe, o modelo canônico); `references/datafusion/` (capacidade nativa de `.aggregate(Vec<Expr>)`, `case()`, `in_list`); `wiki/benchmarks/m152-routing-map.md` (blockers-compõem) + `m159-artifacts/per-query-comparison.md`; precedentes M151/M153/M156/M157/M158.
 
 ---
 
@@ -2953,13 +3079,13 @@ bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan s�
 - [ ] Run ClickBench **100M** reproduzível (box documentada; usar o harness `run_m128_clickbench.py` + `m159_clickhouse_run.sh` mesma-box) — o número que o M159 deixou como `[NEEDS-100M]`.
 - [ ] Veredito honesto: a 100M, quais classes alargam vs 1M, e se I/O/decode virou o gargalo (aí sim encodings; senão, honest-negative — encoding não ajuda se CPU-bound).
 - [ ] SÓ SE justificado: encoding type-specific com A/B byte-idêntico + benchmark antes/depois + história de upgrade de formato (bump de magic + REINDEX, subsistema M137).
-- [ ] Artefato em `docs/benchmarks/` + CHANGELOG `[Unreleased]`.
+- [ ] Artefato em `wiki/benchmarks/` + CHANGELOG `[Unreleased]`.
 
 **Dependencies:** M159 `[ ]` (o baseline 1M). M160/M161 recomendados antes (medir a 100M o estado maximizado).
 
 **Risks:** (a) construir encoding sem medir a 100M primeiro → complexidade acidental sobre palpite (regra 5). (b) custo de infra da box 100M canônica — orçar, destruir ao fim, nunca deixar ociosa. (c) encoding é mudança de FORMATO PERSISTENTE → subsistema de upgrade (M137), não script SQL lateral; crash-safety + rollback obrigatórios.
 
-**Prior art / referências:** deep-dive blueprint (council-index-storage); `references/parquet-format/` (encodings delta/dict/RLE/FOR — a referência, NÃO cstore); `references/papers/cstore-stonebraker-2005.pdf` + `monetdb-x100-boncz-2005.pdf`; `references/duckdb/`; `references/papers/rigorous-perf-eval-georges-2007.pdf` (rigor a 100M); `docs/benchmarks/m159-clickhouse-gap-verdict.md` (o `[NEEDS-100M]`).
+**Prior art / referências:** deep-dive blueprint (council-index-storage); `references/parquet-format/` (encodings delta/dict/RLE/FOR — a referência, NÃO cstore); `references/papers/cstore-stonebraker-2005.pdf` + `monetdb-x100-boncz-2005.pdf`; `references/duckdb/`; `references/papers/rigorous-perf-eval-georges-2007.pdf` (rigor a 100M); `wiki/benchmarks/m159-clickhouse-gap-verdict.md` (o `[NEEDS-100M]`).
 
 ---
 
@@ -2979,7 +3105,7 @@ bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan s�
 
 **Risks:** (a) falsa confiança se a tabela sintética não casa o type-mix de produção → documentar que é complementar ao A/B do ClickBench, não substituto. (b) manutenção — toda classe de rota nova DEVE adicionar suas bordas de tipo (checklist no harness).
 
-**Prior art / referências:** memory `m161-expr-routing` (o padrão M151/M154/M157/M158/M161); `docs/benchmarks/m161-expr-routing-verdict.md` (o gauntlet por-classe); `rules/testing.md § 4.1` (edge vs negative cases).
+**Prior art / referências:** memory `m161-expr-routing` (o padrão M151/M154/M157/M158/M161); `wiki/benchmarks/m161-expr-routing-verdict.md` (o gauntlet por-classe); `rules/testing.md § 4.1` (edge vs negative cases).
 
 ---
 
@@ -2999,13 +3125,13 @@ bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan s�
 
 **Risks:** (a) pre-flight estrito demais bloqueando um run larger-than-RAM legítimo → o caso RAM é WARN, nunca BLOCK. (b) o assert de contagem tem de honrar a amostragem sistemática (a divisão inteira pode render 1 linha a mais — comparar com tolerância).
 
-**Prior art / referências:** memory `m162-100m-load-gotchas` (as 3 armadilhas medidas); memory `infra-nao-usar-maquina-do-ci`; `docs/benchmarks/m162-100m-gap-verdict.md`; `benchmarks/run_m128_clickbench.py:79-122` (`_ensure_sample`).
+**Prior art / referências:** memory `m162-100m-load-gotchas` (as 3 armadilhas medidas); memory `infra-nao-usar-maquina-do-ci`; `wiki/benchmarks/m162-100m-gap-verdict.md`; `benchmarks/run_m128_clickbench.py:79-122` (`_ensure_sample`).
 
 ---
 
 ## M165 — [x] GROUP BY multi-chave ao CustomScan colunar (fecha q17, q34) — cobertura
 
-> **Da medição fresca 2026-07-27** (`docs/benchmarks/clickbench-fresh-vs-clickhouse-2026-07-27.md`): o gap vs ClickHouse caiu ~pela metade desde o M159 (19,4×→9,95× geral; 7,54×→4,53× na classe pushdown), mas **8 queries non-pushdown seguram o geomean geral** (~25-35 s cada, 312×). A classe dominante entre elas é o **GROUP BY de múltiplas chaves**, que o pushdown atual (single-key, M153/M157) ainda declina: **q17** (`GROUP BY UserID, SearchPhrase`, 115×) e **q34** (`GROUP BY 1, URL`, 152×).
+> **Da medição fresca 2026-07-27** (`wiki/benchmarks/clickbench-fresh-vs-clickhouse-2026-07-27.md`): o gap vs ClickHouse caiu ~pela metade desde o M159 (19,4×→9,95× geral; 7,54×→4,53× na classe pushdown), mas **8 queries non-pushdown seguram o geomean geral** (~25-35 s cada, 312×). A classe dominante entre elas é o **GROUP BY de múltiplas chaves**, que o pushdown atual (single-key, M153/M157) ainda declina: **q17** (`GROUP BY UserID, SearchPhrase`, 115×) e **q34** (`GROUP BY 1, URL`, 152×).
 
 **Objective:** rotear GROUP BY de 2+ chaves (`GROUP BY a, b [, c]`) ao CustomScan vetorizado do DataFusion, incluindo a mistura inteiro+texto — hoje só a chave única roteia. A meta é medida, não afirmada: q17 e q34 saem de non-pushdown para pushdown com ratio caindo de >100× para a faixa da classe coberta.
 
@@ -3019,7 +3145,7 @@ bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan s�
 
 **Risks:** (a) chave-texto em GROUP BY multi-chave — colação não-determinística DEVE declinar (byte-order ≠ ordem determinística; M153/M157), senão o A/B diverge; (b) a chave-constante pode ser eliminada pelo planner antes do admit (M161 q34 honest-negative) — confirmar via `THEODB_ADMIT_TRACE` que a chave real chega ao classificador.
 
-**Prior art / referências:** `docs/benchmarks/clickbench-fresh-vs-clickhouse-2026-07-27.md` (q17=115×, q34=152× medidos); memory `m153-groupby-text-released` (texto só HASHED), `m161-expr-routing` (const-key honest-negative); `theodb_rs/src/am/columnar_agg.rs` (`classify_target_node`).
+**Prior art / referências:** `wiki/benchmarks/clickbench-fresh-vs-clickhouse-2026-07-27.md` (q17=115×, q34=152× medidos); memory `m153-groupby-text-released` (texto só HASHED), `m161-expr-routing` (const-key honest-negative); `theodb_rs/src/am/columnar_agg.rs` (`classify_target_node`).
 
 ---
 
@@ -3039,7 +3165,7 @@ bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan s�
 
 **Risks:** (a) ordenação de `MIN/MAX(texto)` vs colação do PG — declarar não-determinística deve declinar, senão o resultado diverge silenciosamente (M156/M157); (b) `SUM` sobre float/numeric precisa honrar IEEE/overflow (lições M154/M163) — declinar onde não é byte-idêntico.
 
-**Prior art / referências:** `docs/benchmarks/clickbench-fresh-vs-clickhouse-2026-07-27.md` (q21=300×, q22=260×, q27=817×, q29=567× medidos); memory `m154-count-distinct-released`, `m156-text-where-released` (colação), `m161-expr-routing` (widening); `theodb_rs/src/am/df_executor.rs` (`parse_agg_kind`).
+**Prior art / referências:** `wiki/benchmarks/clickbench-fresh-vs-clickhouse-2026-07-27.md` (q21=300×, q22=260×, q27=817×, q29=567× medidos); memory `m154-count-distinct-released`, `m156-text-where-released` (colação), `m161-expr-routing` (widening); `theodb_rs/src/am/df_executor.rs` (`parse_agg_kind`).
 
 ---
 
@@ -3059,7 +3185,665 @@ bem-definida. Nenhum número mascarado: os ~2-4ms do Sort e os ~150ms do scan s�
 
 **Risks:** (a) `ORDER BY <texto>` — colação não-C/não-determinística DEVE declinar (M158 HIGH: determinístico ≠ byte-order); (b) o predicado do WHERE (`LIKE`) tem de rotear junto (M156) — se declinar, o top-k não é comparável; medir com o harness M164 que exige o Custom Scan de fato (não `diverged=0` trivial).
 
-**Prior art / referências:** `docs/benchmarks/clickbench-fresh-vs-clickhouse-2026-07-27.md` (q23=110×, q24=73×, q25=113×, q26=132× medidos); memory `m158-late-mat-released` (colação/timer), `m156-text-where-released` (LIKE); `theodb_rs/src/am/columnar_project.rs`.
+**Prior art / referências:** `wiki/benchmarks/clickbench-fresh-vs-clickhouse-2026-07-27.md` (q23=110×, q24=73×, q25=113×, q26=132× medidos); memory `m158-late-mat-released` (colação/timer), `m156-text-where-released` (LIKE); `theodb_rs/src/am/columnar_project.rs`.
+
+---
+
+## M168 — [x] Decode proporcional a `k` no top-k de projeção (`ColumnarChunkStream`) — perf + falso-admit
+
+**Objective:** fechar o item pendente do M167 — o top-k de projeção decodificava a relação inteira antes de
+descartar tudo menos `k` linhas — e o **falso-admit** medido junto: um caso em que o roteamento aceitava o que
+não deveria.
+
+**Definition of done:**
+
+- [x] `ColumnarChunkStream` + `plan_columnar_scan` decodificam **por chunk-group** (10.000 linhas) em vez da
+      relação inteira; o custo de decode passa a ser proporcional a `k`.
+- [x] Medido no `q23` (`SELECT * … ORDER BY EventTime LIMIT 10`): maior bloco de **772 MiB → 17,9 MiB**.
+- [x] Falso-admit corrigido — o roteamento deixa de aceitar o caso que não deveria.
+- [x] Veredito publicado: [`wiki/benchmarks/m168-streaming-topk-verdict.md`](./wiki/benchmarks/m168-streaming-topk-verdict.md).
+
+**Dependencies:** M167 `[x]` (top-k de projeção), M160 `[x]` (decode zero-copy).
+
+**Nota de proveniência (a decisão de medição mais interessante do repositório):** os artefatos foram coletados
+num commit específico e as mudanças posteriores no código são **exclusivamente de comentário** — o documento traz
+o comando que verifica isso (o filtro por linhas não-comentário volta vazio). Uma sétima coleta apenas trocaria
+todos os números sem responder pergunta nenhuma. **Isso é rigor, não preguiça — e a diferença é ser verificável.**
+
+*(Registrado retroativamente em 2026-08-07: o milestone foi entregue, publicou verdict e é citado pelo M169 e
+pelo CHANGELOG, mas nunca teve header próprio — a numeração pulava de M167 para M169.)*
+
+---
+
+## M169 — [ ] Bugs de escala a 100M (a escala do ClickBench oficial) — correção, não performance
+
+> **Da medição do M162 (2026-07-26):** a 100M linhas — que é a escala do ClickBench oficial (99,99M) — apenas
+> **19 das 43** consultas completam. Cinco falham de vez e a própria corrida foi OOM-killed em 24/43, enquanto o
+> ClickHouse serve as 43 em sub-segundo a 10 s. O gap típico por classe **não** piora muito (8–26× contra 7,54× a
+> 1M); o que quebra é outra coisa. **Mandato do owner (2026-07-29): a performance atual basta; bugs de escala não.**
+
+**Objective:** eliminar as falhas DURAS a 100M. Não é trabalho de performance — o critério é *a consulta
+termina*, não *a consulta é rápida*. Recorte deliberado: as três consultas que dão `statement_timeout` (q17, q21,
+q22) **ficam fora** — elas não são defeitos, são consultas que não roteiam e caem no executor de linha do
+PostgreSQL, e o owner declarou performance suficiente.
+
+O alvo é o **q20** (`SELECT COUNT(*) … WHERE URL LIKE '%google%'`), que estoura `byte array offset overflow`. A
+causa está confirmada no código: o caminho agregado chama `decode_to_batch` → `decode_columns_v2`, que decodifica
+a **relação inteira** numa única array Arrow, e a coluna é `DataType::Utf8` (`df_executor.rs:301`) — offsets
+`i32`, teto de 2 GB por array. **A correção já existe no repositório:** o M168 construiu `ColumnarChunkStream` +
+`plan_columnar_scan` para decodificar por chunk-group de 10.000 linhas no caminho do top-k; uma array de 10.000
+URLs nunca chega perto de 2 GB. Falta ligar a mesma máquina ao caminho agregado — o que ataca também o OOM que
+matou a corrida.
+
+**Definition of done:**
+
+- [ ] **Baseline primeiro.** Re-medir o ClickBench 100M no binário atual e publicar quantas das 43 completam. Isto
+      vem antes do conserto de propósito: descobre se o **q23** (`SELECT * … ORDER BY EventTime LIMIT 10` — que é
+      *literalmente* a consulta do M168, cujo maior bloco caiu de 772 MiB para 17,9 MiB) já foi resolvido por
+      M167+M168. Sem baseline, consertar o q20 e reportar progresso seria alegação sem lastro.
+- [ ] **q20 completa sem erro** a 100M. O caminho agregado decodifica por chunk-group; nenhuma array Arrow excede
+      o teto de `i32`. Marcado como resolvido só com o artefato da corrida, não com o raciocínio.
+- [ ] **Zero consultas falham com ERRO** a 100M (`byte array offset overflow`, OOM de backend, conexão derrubada).
+      Os `statement_timeout` de q17/q21/q22 **não contam** como falha para este DoD, e o artefato os declara
+      explicitamente como limitação conhecida de performance — com a nota de que a 1B ficariam 10× piores.
+- [ ] **O OOM de SCAN acaba** — a corrida não morre por materialização da coluna inteira. O M162 morreu em 24/43
+      deixando 19 nunca executadas; a parte disso que vem do decode O(N) tem de ir a zero.
+- [ ] **O OOM de CARDINALIDADE é medido e declarado, não prometido.** O discover mostrou que streaming limita o
+      *scan*, não a tabela hash do GROUP BY, que é O(grupos distintos) — confirmado no upstream
+      ([datafusion#7191](https://github.com/apache/datafusion/issues/7191), [#13831](https://github.com/apache/datafusion/issues/13831)).
+      q32/q33 (`GROUP BY WatchID, ClientIP`) a 100M produzem dezenas de milhões de grupos. O DoD é: medir o pico
+      dessas consultas, verificar se o spill do DataFusion dispara (ele está habilitado por default, mas hoje
+      nunca é alcançado porque o batch eager vive FORA da MemoryPool), e — se não bastar — **declarar o limite**
+      em vez de prometer "as 43 completam". Uma promessa que a arquitetura não sustenta é pior que um limite
+      documentado.
+- [ ] **A/B byte-idêntico (`diverged=0`) sobre a suíte a 1M ANTES de subir para 100M**, mais o harness de cobertura
+      por tipo do M163 **com foco explícito em float**. O caminho agregado atende 35 das 43 hoje: um conserto que
+      reduza memória mas altere um byte é regressão pior que o bug que ele corrige. **Risco nomeado pelo discover:**
+      `sum(float8)`/`avg(float8)` dependem da ordem de associação, que muda com o tamanho do batch (IEEE-754 não é
+      associativo; `arrow-arith/src/aggregate.rs` reduz em árvore sobre `chunks_exact(64)`). Não bate no ClickBench
+      (todos os SUM/AVG roteáveis são inteiros — verificado), mas bate no harness de tipos. `UNBENCHMARKED`.
+- [ ] CHANGELOG `[Unreleased]` + artefato em `wiki/benchmarks/`, com a ressalva de caixa (abaixo) em toda alegação.
+
+**Dependencies:** M167 `[x]`. **Não-roadmap:** reusa `ColumnarChunkStream` / `plan_columnar_scan` do spike M168
+(em revisão, não mergeado). O primeiro item do DoD não depende disso; o conserto do q20 depende.
+
+**Risks:** (a) **ligar o streaming ao caminho agregado pode alterar resultado ou perfil das consultas que HOJE
+funcionam** — daí o gate A/B a 1M vir antes da medição a 100M, e não depois; (b) **a caixa não é a canônica** — o
+owner escolheu droplet DigitalOcean equivalente (32 GB / 16 vCPU) em vez da `c6a.4xlarge`, então toda alegação tem
+de dizer "caixa equivalente, não canônica"; sem isso o número entra em comparação direta com a tabela publicada do
+ClickBench, que é o falso-verde que o M168 passou dez rodadas de review combatendo. Parte dos OOMs do M162 pode
+ser da caixa de 15 GB e não nossa — o baseline separa as duas coisas.
+
+**Fora de escopo, declarado:** 1 bilhão de registros. A 100M já falham 5 de 43 e o TSV de origem seria ~700 GB;
+rodar 1B agora produz relatório de falhas, não benchmark. Fica para o milestone seguinte, condicionado a 100M
+passar limpo.
+
+**Prior art / referências:** blueprint do discover em
+`.claude/knowledge-base/discoveries/blueprints/m169-scale-bugs-100m-blueprint.md` (cadeia causal fechada até o
+`expect("byte array offset overflow")` do arrow-rs; ADR M169-1 rejeitando `LargeUtf8`/`Utf8View` com decode eager);
+`wiki/benchmarks/m162-100m-gap-verdict.md` (as 5 falhas, 19/43, a caixa de 15 GB);
+`wiki/benchmarks/clickbench-fresh-vs-clickhouse-2026-07-27.md` (o baseline a 1M); `wiki/benchmarks/m168-streaming-topk-verdict.md`
+(a máquina de decode por chunk-group e o 43,2× de memória no q23); acervo `references/arrow-rs`, `references/datafusion`.
+
+---
+
+# Roadmap v7 — Maturidade mínima 4 em todos os pilares
+
+> Ativado 2026-08-07 (pedido do owner: **nenhum pilar abaixo de 4**). Origem: levantamento de maturidade por
+> pilar contra a wiki e o código, nesta data. A régua usada — e ela é **proposta desta avaliação**, não um
+> artefato pré-existente do projeto:
+>
+> | Nível | Critério |
+> |---|---|
+> | 1 | spike/experimental; medido, mas não recomendado |
+> | 2 | implementado e testado, com ressalva estrutural — ou fora do binário default |
+> | 3 | no default, testado, crash-safe, com ganho medido; limite conhecido e declarado |
+> | 4 | 3 + paridade ou vantagem **medida contra a referência de mercado** + observabilidade própria |
+> | 5 | 4 + dogfood sustentado + reprodução independente por terceiro |
+>
+> **Estado medido em 2026-08-07:** vetorial **4**; colunar, IA, lakehouse, híbrida, grafo **3**; lexical **2**;
+> SymQG **1**. O colunar já tem seu milestone — é o **M169**, aberto. Os sete abaixo cobrem o resto.
+>
+> **Três destes milestones podem terminar em honest-negative, e isso é conclusão válida** (Regra 3): M172, M174 e
+> M176 perguntam se um pilar **merece** subir, não assumem que sim. Um pilar aposentado com evidência sai da
+> tabela de maturidade em vez de ficar puxando a média — e isso conta como milestone cumprido.
+
+## M170 — [ ] Cobertura de erro na fronteira de rede da superfície `ai.*` (IA 3 → 4)
+
+**Objective:** a superfície `ai.*` é a única do produto que faz **I/O de rede dentro de uma transação**, e é onde
+a suíte é mais fina: `embed.rs` e `rerank.rs` têm **1 teste cada** (medido 2026-08-07), contra 26 no vectorizer e
+87 em `am/`. Os caminhos felizes estão cobertos; os de falha, não. Um `NULL` devolvido silenciosamente por um
+timeout de provedor vira dado errado **dentro de uma tabela do usuário** — não um erro visível.
+
+**Definition of done:**
+
+- [ ] Teste por classe de falha do provedor, com **erro tipado distinto** em cada uma: timeout, 4xx, 5xx, resposta malformada, resposta vazia, conexão resetada. Um teste que só afirma "levanta erro" não fecha o item — a asserção é sobre o **tipo e a mensagem** (`rules/error-handling.md` § 2, `testing.md` § 4.1).
+- [ ] Nenhum caminho de falha retorna `NULL` ou valor mágico; auditado em `embed.rs`, `rerank.rs`, `chat.rs`, `ai_op.rs`, `nl.rs`, `egress.rs`.
+- [ ] Testes **determinísticos** — endpoint fake/gravado, nunca provedor vivo com asserção exata (um teste flaky é bug, `testing.md` § 3).
+- [ ] Verificado que chave de API não aparece em log, mensagem de erro ou artefato de teste — **inclusive no caminho de erro**, que é onde vaza.
+- [ ] CHANGELOG `[Unreleased]`.
+
+**Dependencies:** nenhuma. **Não bloqueia nem é bloqueado** — paralelizável com todos os outros.
+
+**Risks:** (a) o modelo síncrono por linha (ADR 0007) limita o que dá para simular sem refatorar; o item é de
+cobertura, **não** de rearquitetura — se aparecer pressão para mudar o modelo, isso é outro milestone; (b) o
+fail-open do M169/ADR-0059 cobre falha de recurso: não confundir com falha de provedor, que é fail-closed.
+
+**Prior art / referências:** `wiki/features/07-funcoes-ia-sql.md`; `wiki/decisions/0007-synchronous-per-row-model-http.md`,
+`0049-m122-three-phase-async-embed.md`, `0059-m169-fail-open-cobre-falha-de-spill.md`; `.claude/rules/error-handling.md`.
+
+## M171 — [ ] Escrita Parquet além de escalares + head-to-head externo (Lakehouse 3 → 4)
+
+**Objective:** o lakehouse é own-code e está no binário default, mas para **subir a 4 falta o eixo comparativo**:
+não existe head-to-head contra nenhuma referência de mercado. E a escrita v1 cobre apenas tipos escalares — a
+leitura já cobre tudo, inclusive aninhado, via `SETOF jsonb`.
+
+**Definition of done:**
+
+- [ ] `write_parquet` ou passa a cobrir tipos aninhados, ou **recusa-os com erro tipado explícito** — o que não pode permanecer é o comportamento indefinido na fronteira. Escolher por medição de custo, não por preferência.
+- [ ] Head-to-head reproduzível **lendo o mesmo arquivo Parquet** contra uma referência externa (DuckDB é o candidato natural — MIT, e usado só como baseline de bancada, jamais redistribuído: mesmo padrão do pgvector como oráculo de controle desde o M70). Publicado em `wiki/benchmarks/`.
+- [ ] `theodb_rs/isolation/crash_parquet.sh` estendido para os tipos novos.
+- [ ] O `REVOKE ... FROM PUBLIC` de `read_parquet`/`write_parquet` verificado intacto — I/O de arquivo do lado do servidor é superuser-only.
+- [ ] CHANGELOG `[Unreleased]` + artefato.
+
+**Dependencies:** nenhuma.
+
+**Risks:** (a) tipo aninhado em Parquet é onde mora a complexidade real do formato — se a medição mostrar custo
+alto, **recusar com erro tipado é resultado aceitável** e fecha o item; (b) comparar contra DuckDB in-process com
+o nosso caminho in-database mede coisas diferentes: declarar a assimetria no artefato, como o M100 fez.
+
+**Prior art / referências:** `wiki/features/15-lakehouse-parquet.md`; `wiki/decisions/0057-m143-pgduckdb-total-removal.md`;
+`wiki/benchmarks/parquet-reader-owncode-spike.md`; `wiki/technologies/{parquet,arrow,datafusion}.md`.
+
+## M172 — [ ] O pilar híbrido vale sobre o vetorial puro? (Híbrida 3 → 4, admite honest-negative)
+
+**Objective:** o M123 mediu a fusão RRF contra o vetorial puro e o ganho **não foi estatisticamente
+significativo** — nDCG@10 de 0,7337 contra 0,7296. O pilar está entregue, é determinístico e seguro (filtro
+fail-closed do M120), mas **o valor que ele adiciona não está demonstrado**. Este milestone resolve a pergunta em
+vez de deixá-la aberta: existe um regime em que a híbrida ganha de forma significativa?
+
+**Definition of done:**
+
+- [ ] Medição em **≥ 2 corpora adicionais de regimes diferentes** (um lexical-pesado, um semântico), com `paired_significance` — coeficiente de variação não é teste de significância.
+- [ ] Um dos dois desfechos, ambos fechando o item: **(a)** existe regime com ganho significativo → documentado em `wiki/features/06-busca-hibrida.md` com o regime nomeado, e a híbrida passa a ser recomendada **ali**; **(b)** não existe → **honest-negative publicado**, e a feature é reposicionada honestamente como cobertura lexical (recuperar o que o vetor não recupera), sem claim de nDCG.
+- [ ] Qualquer que seja o desfecho, o conceito da wiki deixa de sugerir ganho não medido.
+- [ ] CHANGELOG `[Unreleased]` + artefato.
+
+**Dependencies:** compartilha bancada com M173 (mesmos corpora, mesma régua) — **rodar juntos** economiza uma
+coleta inteira.
+
+**Risks:** (a) escolher corpus até achar um em que ganha é *p-hacking* — os corpora e a régua são declarados
+**antes** da coleta; (b) o resultado (b) é o mais provável dado o M123 e o M138, e precisa ser aceito sem
+resistência: já são dois artefatos apontando na mesma direção.
+
+**Prior art / referências:** `wiki/benchmarks/m123-hybrid-significance.md`, `m53-hybrid-beir.md`, `m106-weighted-rrf.md`;
+`wiki/features/06-busca-hibrida.md`; `benchmarks/theodb_bench/{significance,beir,hybrid,logcorpus}.py`.
+
+## M173 — [ ] Promover ou aposentar o BM25 próprio (Lexical 2 → 4, admite aposentadoria)
+
+**Objective:** o motor lexical own-code existe, foi medido e **não está no binário default** — o que trava o
+pilar em 2 por definição: um pilar que o usuário não recebe não é maduro. O estado medido é ambíguo por regime:
+ganha em lexical puro por margem modesta, fica ~4% abaixo do `pg_textsearch` em nDCG@10 num regime, **não dá
+ganho na fusão**, e num corpus lexical-pesado mede **pior**. Limbo indefinido é o pior dos estados: paga-se a
+manutenção do código sem entregar o valor.
+
+**Definition of done:**
+
+- [ ] Decisão **por medição**, registrada em ADR: promover ao default, ou aposentar a feature `spike-lexical` e remover o código.
+- [ ] Se promover: ganho medido **na fusão** (não só em lexical puro — a lição do M138), custo de binário declarado, e a fronteira pgrx-free do `lexical_core` verificada intacta (é o que impede uma thread do Tantivy de tocar o backend — ADR 0053).
+- [ ] Se aposentar: código removido, `theodb_lexical` e `tantivy` saem do `Cargo.toml`, redução do `.so` medida, e o conceito da wiki marcado como aposentado **com o motivo** — nunca apagado.
+- [ ] CHANGELOG `[Unreleased]` + ADR.
+
+**Dependencies:** M172 (mesma bancada, mesmos corpora).
+
+**Risks:** (a) **anti-sunk-cost** — foram dois milestones (M139, M140.1–.4) e quatro ADRs; nada disso é razão
+para promover algo que a medição não sustenta; (b) aposentar remove uma capacidade citada em material público:
+varrer README/wiki antes.
+
+**Prior art / referências:** `wiki/features/18-motor-lexical-bm25.md`; `wiki/decisions/0051`–`0054`;
+`wiki/benchmarks/m138-bm25-fusion.md`, `m140-1-lexical-measurement.md`, `m140-3-bm25-engine.md`.
+
+## M174 — [ ] Reposicionar o grafo no caso de uso em que ele vence (Grafo 3 → 4)
+
+**Objective:** a primitiva é forte — travessia CSR medida **106–232×** acima de CTE recursiva mesmo contra o
+baseline mais justo, com WAL/MVCC/crash-safety herdados do PostgreSQL. Mas o M111/M112, em HotpotQA real,
+concluiu que **"o vetor vence em TODAS as configurações"** no GraphRAG retrieval — a tarefa que motivou o pilar.
+Hoje o pilar entrega uma primitiva excelente para um caso de uso refutado.
+
+**Definition of done:**
+
+- [ ] Identificar e medir **um caso de uso onde a travessia é a resposta certa** e o vetor não compete — candidatos: alcançabilidade multi-hop, detecção de ciclo, componentes conexos, PPR sobre grafo denso. O critério é vencer uma alternativa real (CTE recursiva **e** o vetor onde aplicável), não vencer o nada.
+- [ ] Um dos dois desfechos: **(a)** caso encontrado → `wiki/features/13-grafo-nativo.md` reposicionado nele, com o benchmark, e o claim de RAG removido; **(b)** nenhum caso justifica a manutenção → ADR de aposentadoria com o custo de manter versus o valor medido.
+- [ ] O honest-negative do M111/M112 permanece linkado do conceito da feature — quem chegar ao grafo precisa encontrá-lo.
+- [ ] CHANGELOG `[Unreleased]` + artefato.
+
+**Dependencies:** nenhuma.
+
+**Risks:** (a) procurar caso de uso até achar um em que ganhamos é o mesmo viés do M172 — o caso é declarado
+antes de medir, e a alternativa a bater é nomeada junto; (b) o pilar tem 35 testes e está no binário default:
+aposentá-lo é remoção de superfície pública e exige upgrade script (ver M175/`theo-pgrx`).
+
+**Prior art / referências:** `wiki/features/13-grafo-nativo.md`; `wiki/decisions/0048-m107-native-graph-engine-go.md`;
+`wiki/benchmarks/m107-graph-spike.md`, `m109-msbfs.md`, `archive/m111-m112-graphrag-retrieval.md`.
+
+## M175 — [ ] Dogfood sustentado — o teto que trava TODOS os pilares em 4
+
+**Objective:** nenhum pilar pode passar de 4, hoje, e **não por engenharia**:
+`.claude/knowledge-base/dogfood/evidence/` está **vazio** (verificado 2026-08-07), e o `m45-pareto-sift1m`
+declara que entrega *metade* do requisito para claim comparativo público — a reprodução independente por
+terceiro segue em aberto. Enquanto isso valer, `production-ready` permanece proibido pelo `public-copy.md` § 3.
+Este é o único item cujo desfecho eleva **todos** os pilares de uma vez.
+
+**Definition of done:**
+
+- [ ] `knowledge-base/dogfood/manifest.md` criado com o **anchor scenario** declarado e justificado, conforme `rules/dogfood-golden-rule.md` § 1.
+- [ ] Status do anchor = `running` — usado pelo time em infraestrutura real, não em bancada sintética.
+- [ ] **≥ 3 evidências** com o frontmatter obrigatório (`scenario`/`date`/`operator`/`outcome`/`summary`), a mais recente dentro da janela de frescor (30 dias).
+- [ ] **≥ 1 failure story.** Um dogfood sem falhas é teatro — a ausência delas é sinal de que não se usou de verdade.
+- [ ] Evidência de **≥ 2 operadores distintos** (evita o "só uma pessoa sabe rodar").
+- [ ] `/dogfood` emite `EVIDENCE_SUFFICIENT`.
+
+**Dependencies:** nenhuma técnica. Depende de **decisão do owner** sobre qual cenário ancorar e de tempo de
+calendário — três evidências não se produzem numa tarde, por construção.
+
+**Risks:** (a) escolher um anchor confortável esvazia o gate: o cenário certo é o que **dói** — aquele em que
+o time depende do produto; (b) este item não é fechável por esforço de engenharia isolado, e tentar acelerá-lo
+com evidência sintética é exatamente a `cobertura-alegada-sem-execucao` que o repositório combate.
+
+**Prior art / referências:** `.claude/rules/dogfood-golden-rule.md`; `.claude/rules/public-copy.md` § 3–4;
+`wiki/benchmarks/m45-pareto-sift1m.md` (a metade faltante do claim público).
+
+## M176 — [x] SymQG: APOSENTADO — removido da distribuição (2026-08-08)
+
+> **DECIDIDO E EXECUTADO em 2026-08-08: removido por completo.** O owner escolheu remoção em vez de
+> feature flag, depois de a medição mostrar que era superfície pública com custo em dois eixos. Removidos:
+> `ann/symqg_spike.rs`, `bench_symqg.rs`, `am/page/symqg.rs`, os dois runners de benchmark, o handler e o
+> opclass do AM, o kernel FastScan de 1 bit (`build_sign_lut16`/`sign_estimate_block` — exclusivos deste
+> caminho, verificado por grep), GUCs, reloption e testes. **1 810 linhas.** Upgrade `1.3.0 → 1.4.0`
+> dropa o AM em instalação existente, e **falha alto** se houver índice criado com ele — derrubar índice
+> de usuário em silêncio seria pior.
+>
+> **AGRAVADO pela medição do M184 (2026-08-08).** Este milestone foi escrito assumindo que o SymQG era
+> "código mantido sem consumidor" — dívida interna, barata de carregar. **A medição desmente:**
+>
+> | fato medido | fonte |
+> |---|---|
+> | `theodb_symqg` está **registrado como access method no binário default**, sem feature flag | catálogo do PostgreSQL, [m184](./wiki/benchmarks/m184-pilares-superficie-medida-verdict.md) |
+> | opclass `theodb_symqg_l2_ops` exposto — o usuário **pode** escrever `USING theodb_symqg` hoje | idem |
+> | **build 3,5× mais lento** que o HNSW no mesmo dataset (16 056 ms vs 4 579 ms, 20k vetores) | idem |
+> | busca **2,6–3,9× mais lenta** a recall casado | [e2](./wiki/benchmarks/e2-symqg-inpg-verdict.md) |
+>
+> **Não é dívida interna — é superfície pública com custo medido em dois eixos.** Um usuário que a
+> descubra recebe um índice pior em build e em busca, sem nada no produto que o avise: o
+> `feature_status` da wiki diz "não recomendado", e *não recomendado* não é *indisponível*.
+>
+> **A decisão sobe de prioridade e muda de natureza.** Deixa de ser higiene de repositório e passa a ter
+> consequência para quem instala. Três saídas, e a do meio é a que o milestone original não previa:
+>
+> | saída | custo |
+> |---|---|
+> | **aposentar** — remover AM, opclass e `symqg_spike.rs` | perde-se o spike; ganha-se `.so` menor e uma armadilha a menos |
+> | **esconder atrás de feature flag** — mesmo tratamento do lexical | mantém o código para estudo sem expor o usuário; é a saída mais barata e não estava no leque |
+> | **promover** | exige lever medido que reverta **dois** eixos, não um |
+>
+> **O ônus da promoção cresceu**: antes bastava reverter a busca; agora o build também está medido como
+> pior. E vale o anti-sunk-cost — o e2 custou três artefatos, e isso não é razão para manter.
+
+
+**Objective:** o `theodb_symqg` é `experimental — não recomendado como default` e foi **medido mais lento** que
+o índice existente: o e2 mediu o AM atual **2,6–3,9× mais rápido a recall casado**, com os dois access methods
+sobre a MESMA tabela. Um índice que não é recomendado e é mais lento não é um pilar em construção — é código
+mantido sem consumidor.
+
+**Definition of done:**
+
+- [ ] Decisão registrada em ADR: promover (exige lever medido que reverta o e2) ou **aposentar e remover**.
+- [ ] Se aposentar: `symqg_spike.rs` e a superfície removidos, redução do `.so` medida, e os conceitos da wiki marcados como aposentados com o motivo — o honest-negative do e2 **permanece**.
+- [ ] Nenhum caminho de código restante referencia o AM removido (gate de `symbol_fabrication` / `dead_code` do `/code-quality`).
+- [ ] CHANGELOG `[Unreleased]` + ADR.
+
+**Dependencies:** nenhuma. É o item mais barato dos sete e o de maior ganho de clareza por linha removida.
+
+**Risks:** (a) o índice pode estar em uso por alguém que o habilitou — varrer antes; (b) anti-sunk-cost, de novo:
+o e2 custou três artefatos e isso **não** é razão para manter.
+
+**Prior art / referências:** `wiki/features/17-indice-symqg.md`; `wiki/benchmarks/e2-symqg-inpg-verdict.md`,
+`e2-symqg-fastscan-verdict.md`, `e2-symqg-spike.md`.
+
+## P0 — Embeddings locais como extensão instalável (marcado pelo owner, 2026-08-07)
+
+> **Prioridade máxima do v7, à frente dos M170–M176.** Hoje o banco **chama um endpoint e não embarca
+> modelo algum** (`wiki/guides/sql-embeddings.md`) — uma escolha de desenho central, que mantém a imagem
+> enxuta e o modelo trocável. A proposta do owner não é embarcar no binário default: é entregar o modelo
+> **como extensão opt-in**, no mesmo padrão em que este repositório já distribui três extensões com
+> `requires` entre elas (`theodb`, `vector`, `theodb_rs`).
+>
+> **O que é P0 aqui é o GATE, não a construção.** Marcar como prioridade máxima um caminho cuja viabilidade
+> ninguém mediu seria abandonar o measurement-first que trava todo este roadmap (ADR 0002) — e o levantamento
+> de prior art (`wiki/references/embedding-local-como-extensao-2026-08.md`) é explícito em **não** ser
+> evidência. O que roda com prioridade máxima é a Fase 1: a medição que decide. A Fase 2 é **condicional** ao
+> resultado dela, e não começa antes.
+>
+> **Por que vale a prioridade:** o modelo de embedding é o maior determinante de qualidade de retrieval —
+> acima de qualquer ganho de índice que os últimos quarenta milestones perseguiram. Um modelo melhor move o
+> nDCG mais do que qualquer `ef_search`, e isso independe do desfecho arquitetural.
+
+## M177 — [ ] Embeddings locais: o gate de medição (P0 — Fase 1) e a extensão (Fase 2, condicional)
+
+**Objective:** decidir, por medição, se gerar embeddings **dentro do host** vale o custo — e, se valer, onde o
+modelo fica residente. Duas fases com gate entre elas; a segunda não existe se a primeira não a justificar.
+
+### Fase 1 — o gate (esta é a parte P0)
+
+> **FASE 1 COMPLETA em 2026-08-08** — os três itens do DoD têm número. Antes: parcialmente medido em 2026-08-07 — artefato: [`wiki/benchmarks/m177-hop-vs-residencia-verdict.md`](./wiki/benchmarks/m177-hop-vs-residencia-verdict.md),
+> brutos em `benchmarks/artifacts/m177/`. Dois dos três itens do DoD abaixo têm número; o primeiro
+> (qualidade no nosso corpus) **não foi executado** e segue aberto.
+>
+> | Medido | Resultado |
+> |---|---|
+> | Custo do hop HTTP local | **15,55 ms** em batch 1 (27,2%, p=0,0000); **7,76 ms em batch 8 — não significativo** (p=0,1457) |
+> | Residência do modelo multilíngue | `multilingual-e5-large` (MIT) **1 735 MB/processo**; `mpnet-multilingual` 1 788 MB; `MiniLM-multilingual` 677 MB |
+> | Residência do rerank | `bge-reranker-base` (MIT) **1 787 MB**; o único rerank **multilíngue** do catálogo é cc-by-nc-4.0 → **BARRADO por D1** |
+>
+> **Consequência para a Fase 2:** a rota "uma cópia por backend" — a que o `pg_gembed` adota — está
+> **refutada em multilíngue**: o stack e5-large + bge-reranker custa **~3,5 GB por processo**, e dois
+> backends esgotam a memória livre da máquina de medição. Economizar 15,55 ms a esse preço não fecha.
+> A rota **BackgroundWorker** (ADR 0016) sobrevive, com a ironia registrada de que o hop só é
+> significativo em batch 1 — e o worker opera em lote, onde ele deixa de ser mensurável.
+
+**Definition of done:**
+
+- [x] **Comparação de modelos no NOSSO corpus.** — MEDIDO (`wiki/benchmarks/m177-qualidade-ptbr-verdict.md`): oito multilíngues permissivos sobre 250 conceitos pt-BR desta wiki (known-item). `e5-large` MRR@10 **0,7906** a 108,0 ms · `nomic-v1` **0,6749** a 53,7 ms · `MiniLM` **0,4946** a 12,7 ms. **Cinco dos oito são dominados.** Default recomendado: `nomic-embed-text-v1`. *(O texto original do item segue abaixo, como escrito antes da medição.)*
+- [x] ~~**Comparação de modelos no NOSSO corpus.**~~ 3–4 modelos open-source permissivos servidos localmente, medidos com `benchmarks/theodb_bench/beir.py` + `significance.py` (nDCG@10, recall@100, bootstrap pareado). Ranking público — MTEB e afins — **seleciona candidatos; não é o veredito** (Regra 5 / gate G5). Entrega isolada: define o modelo default recomendado, **independentemente do desfecho arquitetural**. **Multilíngue é requisito, não preferência** (decisão do owner, 2026-08-07): o corpus real é pt-BR, e medir com modelo `-en` enviesa a escolha. Candidatos D1-limpos já levantados e com custo medido; falta a qualidade. **← FECHADO em 2026-08-08**
+- [x] **Custo do hop local medido.** — 15,55 ms em batch 1 (27,2% do total, p=0,0000); **não significativo em batch 8** (7,76 ms, p=0,1457). O hop é custo fixo por requisição: pesa na chamada unitária e some no lote.
+- [x] **Custo da residência medido** (item acrescentado pela medição, não previsto no plano original): 0,7–1,8 GB por processo em multilíngue. É o lado que decide, e o plano original só previa medir o hop — medir apenas o transporte teria produzido meio veredito.
+- [ ] **Custo de empacotar os pesos levantado.** Centenas de MB num pacote de extensão versus download no primeiro uso, com o caso de ambiente offline declarado. Nenhuma fonte do prior art documenta isso, e pode ser o custo dominante sem aparecer em benchmark de latência.
+- [ ] Artefato em `wiki/benchmarks/` + CHANGELOG `[Unreleased]`.
+
+**Falsificação declarada antes de medir:** se o hop local custar **< 5% do tempo ponta a ponta**, a Fase 2 não
+se justifica por latência e só prossegue se outro eixo (privacidade, ausência de rede, custo por token) for
+declarado como motivador — **por escrito, em ADR, e não retroativamente**.
+
+### Fase 2 — a extensão (CONDICIONAL ao gate da Fase 1)
+
+**Definition of done:**
+
+- [ ] **ADR decidindo onde o modelo fica residente.** O prior art mostra que este é o custo que decide, não a licença: o `pg_gembed` (Apache 2.0) cacheia o modelo **por backend**, e o NeurStore (arXiv:2509.03228) constrói deduplicação, compressão e **buffers compartilhados** justamente para conter o overhead por conexão. Uma cópia por backend, com encoder de centenas de MB, é inviável sob concorrência real.
+- [ ] O ADR avalia explicitamente a rota **modelo no BackgroundWorker** ([ADR 0016](./wiki/decisions/0016-m54-vectorizer-worker-mechanism.md)): uma cópia em vez de N, e nunca segura um backend — o que também neutraliza o footgun do [ADR 0007](./wiki/decisions/0007-synchronous-per-row-model-http.md). É a rota que o prior art **não** tomou e que já temos construída.
+- [ ] O ADR registra que a restrição do [ADR 0009](./wiki/decisions/0009-theodb-rs-api-surface-single-module.md) **não se aplica**: ela veta fatiar a superfície de *uma* extensão em N módulos de schema, não uma extensão separada com seu próprio `.so` e control file.
+- [ ] Extensão **opt-in**: o binário default não incha, e quem não instala continua apontando para endpoint — a independência de modelo do [ADR 0002](./wiki/decisions/0002-north-star-equal-or-superior-to-alloydb.md) é preservada, não trocada.
+- [ ] Gate D1 sobre runtime e pesos (Apache-2.0 / MIT / BSD / PostgreSQL), verificado no `deny.toml`. Isolamento de thread na disciplina do [ADR 0053](./wiki/decisions/0053-m140-2-lexical-core-crate.md) — nenhuma thread do runtime toca o banco.
+- [ ] Medição de memória **sob concorrência**, não em conexão única. Uma cópia por backend só aparece quando há backends.
+
+**Dependencies:** M170 `[ ]` para a cobertura de erro do caminho `embed` — a Fase 2 adiciona um modo de falha
+novo (modelo ausente, pesos corrompidos, OOM na carga) ao caminho que hoje tem **um teste**.
+
+**Risks:** (a) **marcar P0 antes de medir cria pressão por resultado positivo** — daí a falsificação estar
+escrita acima e antes; (b) empacotamento dos pesos pode inviabilizar sozinho, e é o item menos documentado
+pelo prior art; (c) o pgai **saiu** do formato de extensão porque managed services não a instalam — pesa menos
+para uma edição self-hosted, mas pertence ao ADR.
+
+**Prior art / referências:** `wiki/references/embedding-local-como-extensao-2026-08.md` (pg_gembed Apache 2.0;
+PostgresML MIT; NeurStore; o contra-argumento do pgai) — **prior art, não evidência**;
+`wiki/guides/sql-embeddings.md`; `wiki/features/16-vectorizer.md`.
+
+## M178 — [ ] Dynamic batching no caminho de consulta (~2,2× medido, não implementado)
+
+**Objective:** o caminho de consulta embeda **um** texto por vez, de forma síncrona. Medido em CPU dedicada
+(`wiki/benchmarks/m177-camadas-python-http-verdict.md` e artefatos em `benchmarks/artifacts/m177/`): um texto
+isolado custa **7,82 ms**, em lote de 8 custa **3,54 ms por texto** — **2,21×**, saturando por volta de 8–16.
+A ingestão **já colhe** esse ganho (`theodb_rs/src/vectorizer.rs:393` → `run_batch`, um round-trip por N
+chunks); a consulta não.
+
+Sob concorrência os pedidos **já estão enfileirados**: agrupar oito que chegam na mesma janela custa 28,3 ms
+para os oito contra 62,6 ms sequenciais. Isso melhora latência **e** throughput ao mesmo tempo — só troca
+espera de fila por espera de janela. É a técnica padrão de servidor de inferência, e o servidor atual não a tem.
+
+**Definition of done:**
+
+- [ ] Agrupamento por janela no servidor de embeddings, com **janela e lote máximo configuráveis** — uma janela fixa longa demais penaliza o pedido solitário, que é o caso comum de uma consulta interativa.
+- [ ] Medido sob concorrência real (1, 8, 32, 128 clientes) **em CPU dedicada**, com latência **e** taxa de erro lado a lado — a régua do `m177_stress.py`, não a de carga curta.
+- [ ] O pedido isolado **não regride**: com um cliente, a latência não pode piorar mais que a janela configurada.
+- [ ] Vetores **byte-idênticos** ao caminho sem batching (o mesmo gate que o `m177_thread_equivalence.py` aplicou à configuração de thread — agrupar não pode alterar resultado).
+- [ ] Artefato em `wiki/benchmarks/` + CHANGELOG `[Unreleased]`.
+
+**Dependencies:** nenhuma. **Não depende** do M177 fase 1 — o ganho já está medido.
+
+**Risks:** (a) a janela é uma troca explícita: throughput por latência do pedido solitário, e o DoD exige medir
+os dois; (b) **medir em máquina compartilhada invalidaria o resultado** — cinco conclusões deste milestone
+caíram por isso, e o batching é justamente o tipo de ganho que a contenção mascara.
+
+**Prior art / referências:** `wiki/benchmarks/m177-camadas-python-http-verdict.md`,
+`m177-stress-colapso-verdict.md`; `benchmarks/m177_batch_scaling.py`, `m177_stress.py`,
+`m177_thread_equivalence.py`; `theodb_rs/src/vectorizer.rs`.
+
+## M179 — [ ] Reuso de conexão no cliente HTTP (decisivo contra provedor remoto)
+
+**Objective:** `theodb_rs/src/http.rs` usa `minreq::post(endpoint)`, que **abre conexão nova a cada chamada** —
+sem pool, sem keep-alive. Medido: reusar a conexão custa **0,404 ms** contra **1,016 ms** abrindo uma nova
+(loopback, n=300, `TCP_NODELAY` nos dois lados).
+
+Sobre loopback os ~0,6 ms são irrelevantes. **Contra provedor remoto o mesmo defeito custa duas ordens de
+grandeza a mais**: o handshake TCP+TLS medido é de **32,0 ± 1,2 ms** (api.openai.com), 39,4 ms (api.cohere.ai),
+36,7 ms (api.voyageai.com). Embedar 10 mil linhas paga esse handshake dez mil vezes — **~320 s só abrindo
+conexões**.
+
+> **INVESTIGADO em 2026-08-08 — o item é maior do que o DoD supunha.** Leitura do código do `minreq`
+> 2.14.1 na árvore local (`~/.cargo/registry/.../minreq-2.14.1/src/`): **não há keep-alive nem pool**.
+> Zero ocorrências de `keep-alive`/`keep_alive` em `connection.rs` e `request.rs`, e `Request::send()`
+> **consome `self`** chamando `TcpStream::connect` a cada envio. Não existe opção a ligar.
+>
+> Restam três caminhos, e nenhum é a mudança de uma linha que o DoD original sugeria:
+>
+> | caminho | custo |
+> |---|---|
+> | trocar de cliente HTTP (ex.: `ureq`, que tem pool) | dependência nova → **gate D1** + `/deps-audit` + crescimento do `.so` + reescrever o guard de SSRF, que hoje **espelha o parser do `minreq` de propósito** (M134) |
+> | implementar pool sobre socket próprio | reinventa cliente HTTP — barrado pela escada de parcimônia |
+> | não fazer | mantém ~32 ms por chamada contra provedor remoto |
+>
+> O segundo caminho está fora. O primeiro exige ADR: o guard de SSRF do M134 foi construído para
+> **concordar com o parser do `minreq`**, e trocar o cliente sem reescrever o guard o tornaria
+> decorativo — que é exatamente o BLOCKER que aquele review encontrou. **O item passa a exigir decisão
+> de dependência antes de implementação.**
+
+**Definition of done:**
+
+- [ ] **ADR decidindo o cliente HTTP** — com o custo de reescrever o guard de SSRF para o parser do cliente novo explicitado, e o crescimento do `.so` medido.
+- [ ] Reuso de conexão no caminho de egress, respeitando o guard de SSRF do `post_json` — a validação **continua acontecendo antes** de qualquer conexão, incluindo as reusadas (o guard espelha o parser do `minreq` de propósito; ver M134).
+- [ ] A/B medido contra endpoint **remoto real**, não só loopback: é lá que o ganho existe.
+- [ ] Comportamento definido para conexão morta: reconectar, não falhar — e o circuit breaker do M104 continua funcionando.
+- [ ] Se exigir trocar de cliente HTTP: passa pela escada de parcimônia (rung 4 — o que já está na árvore?) e pelo gate D1 no `deny.toml`.
+- [ ] Artefato + CHANGELOG `[Unreleased]`.
+
+**Dependencies:** nenhuma. **Interage com M170** (cobertura de erro na fronteira de rede): conexão reusada
+adiciona modos de falha novos — conexão morta, servidor que fechou o keep-alive —, e o M170 é onde eles ganham teste.
+
+**Risks:** (a) **é código de produção numa superfície de segurança** — o `post_json` carrega o guard de SSRF, e
+um pool que conecte antes de validar seria um bypass; (b) o ganho em loopback é desprezível, então um A/B só
+local concluiria erradamente que não vale a pena.
+
+**Prior art / referências:** `wiki/benchmarks/m177-embed-concurrency-verdict.md` (a medição de keep-alive e o
+handshake remoto); `theodb_rs/src/http.rs`, `src/egress.rs`; `benchmarks/m177_keepalive.py`.
+
+## M180 — [ ] Empacotar o servidor de embeddings na distribuição (o que falta para "embedding-native")
+
+**Objective:** a capacidade existe e o usuário não a recebe. `theodb.embed()` é own-code Rust, o vectorizer
+mantém a coluna fresca, e o modelo local roda — mas o servidor **não está na imagem** (verificado: não
+aparece no `Dockerfile`), e o guia manda o usuário rodar `python benchmarks/servers/embedding_server.py`,
+um caminho dentro de `benchmarks/`. Isso é uma bancada de teste documentada como caminho de produção.
+
+**Este milestone destrava o M178.** O DoD daquele item fala em "agrupamento por janela no servidor de
+embeddings" — mas enquanto esse servidor for ferramenta de bancada, implementar batching ali otimiza algo
+que ninguém recebe. Decidir onde ele vive é pré-requisito.
+
+**A decisão, com a evidência já medida para cada opção:**
+
+| opção | evidência que pesa |
+|---|---|
+| processo ao lado (imagem/compose) | ~195 rps por instância em CPU dedicada (M177 stress); memória isolada do banco |
+| `Deployment` + `Service` no Kubernetes | é o padrão nativo do [CloudNativePG](./wiki/references/embedding-em-cloudnativepg-2026-08.md); `replicas: N` resolve throughput |
+| dentro do pod do banco (sidecar) | soma ao `limits.memory` do pod; um pico derruba **o banco** |
+| embarcado na extensão | **refutado** — 1,7 GB por backend, e o CNPG piora (pesos fora do layout de image volume) |
+
+> **DECIDIDO no grill de 2026-08-08 (owner):**
+> **(a) Entrega** — imagem própria `theodb-embed` publicada com a distribuição, mais manifesto CNPG de
+> exemplo (`Deployment` + `Service`) e um serviço no compose para quem não usa Kubernetes.
+> **(b) Pesos** — **dentro da imagem** (~520 MB para o `nomic-embed-text-v1`): imagem imutável, sobe sem
+> rede, funciona air-gapped, versão do modelo presa à tag, e o scale-up não faz N réplicas baixarem o
+> mesmo peso.
+> **(c) Sobrecarga e batching** — **medir antes de decidir**: A/B entre o servidor atual com batching +
+> fila implementados por nós e um servidor de inferência pronto de CPU (`text-embeddings-inference`,
+> HuggingFace, Rust — licença e tamanho **não verificados**). Régua existente: 2,2× de batching e ~195 rps
+> medidos. É o rigor do M143 ao remover o `pg_duckdb` — medir antes de trocar. **Isso vira o M181.**
+>
+> Fundamentação do SOTA: o padrão de produção (NVIDIA Triton) combina **dynamic batching** com **queue
+> policy** — tamanho máximo, prioridade e timeout de fila. Ou seja, o batching do M178 e o limite de
+> sobrecarga **são a mesma peça**, não duas. Ressalva: Triton e vLLM são para GPU e frota multi-modelo;
+> nosso caso é um encoder em CPU, e levar Triton para isso é levar um cluster para resolver um Deployment.
+>
+> `pgpool` foi levantado e **não se aplica a esta camada**: ele enfileira conexões *PostgreSQL*, e o
+> gargalo medido está no servidor HTTP de embeddings. Ele **é** relevante para o problema vizinho — o
+> footgun do ADR 0007, backends presos durante a chamada — que segue **não medido**.
+
+**Definition of done:**
+
+- [x] Decisão de entrega e de pesos registrada (grill 2026-08-08). Falta transcrevê-la em ADR formal.
+- [ ] O servidor sai de `benchmarks/` para um caminho de produção, com o modelo default sendo o **recomendado por medição**: `nomic-embed-text-v1` (Apache-2.0, MRR@10 0,6749 a 53,7 ms — [veredito de qualidade](./wiki/benchmarks/m177-qualidade-ptbr-verdict.md)).
+- [ ] `theodb.embedding_endpoint` aponta para ele **por padrão** — instalar e funcionar sem chave, sem escolher nada.
+- [ ] Gate D1 sobre o runtime (`onnxruntime`) e sobre os pesos do modelo; peso da imagem medido e declarado.
+- [ ] `wiki/guides/sql-embeddings.md` deixa de instruir um caminho sob `benchmarks/`.
+- [ ] Smoke end-to-end: `CREATE EXTENSION` → `theodb.embed('texto')` devolve vetor **sem configuração manual**.
+
+**Dependencies:** nenhuma técnica. Depende de **decisão do owner** sobre o formato de entrega.
+
+**Risks:** (a) empacotar pesos de centenas de MB muda o tamanho da distribuição — medir antes de decidir, é o
+item que o prior art não documenta; (b) escolher o default por conveniência em vez do medido desperdiça a
+Fase 1 do M177; (c) um servidor entregue sem limite de concorrência herda os 13% de recusa medidos a 128
+clientes — o limite pertence a este milestone, não ao seguinte.
+
+**Prior art / referências:** `wiki/references/embedding-em-cloudnativepg-2026-08.md`,
+`embedding-local-como-extensao-2026-08.md`; `wiki/benchmarks/m177-qualidade-ptbr-verdict.md`,
+`m177-stress-colapso-verdict.md`; `benchmarks/servers/embedding_server.py`; `Dockerfile`.
+
+## M182 — [ ] VectorDBBench: rodar, PERFILAR e publicar internamente (nesta ordem)
+
+**Objective:** adotar a bancada pública [VectorDBBench](https://github.com/zilliztech/VectorDBBench) (Zilliz)
+para o caminho vetorial + embedding, que **nenhuma das quatro bancadas já usadas cobre** — ClickBench é
+colunar, ANN-Benchmarks é o índice isolado, BEIR é qualidade de retrieval, CH-benCHmark é HTAP. Foi a lacuna
+que obrigou esta sessão a escrever seis instrumentos `m177_*`.
+
+**A ordem é o milestone.** Rodar → **perfilar** → publicar. Nenhum número sai antes de sabermos **por que ele
+é aquele**: se o gargalo é nosso código, o modelo, o transporte ou a máquina. Esta sessão produziu **cinco
+retratações, todas por defeito de instrumento**; um número de bancada pública publicado sem perfil seria a
+sexta — e essa sairia com o nome do projeto.
+
+**Definition of done:**
+
+- [ ] VectorDBBench rodando contra o TheoDB, em **CPU dedicada** (máquina compartilhada invalidou cinco medições nesta sessão).
+- [ ] **Perfil antes da publicação**, com o ferramental já exercitado: `py-spy` para o servidor Python (o FlameGraph de Brendan Gregg **não está instalado**; `py-spy` gera o mesmo formato e `ptrace_scope=1` exige lançar o processo como filho), `perf` para o caminho nativo, e decomposição por camada no padrão do `m177_layers.py`.
+- [ ] Todo número publicado vem com **o mecanismo explicado** — qual frame domina, e qual fração é modelo, transporte e banco.
+- [ ] **Ressalva metodológica declarada**, porque a própria literatura a levanta: benchmarks de vetor codificam premissas arquiteturais (o VectorDBBench premia escala distribuída; suítes de Redis/Qdrant premiam in-memory), e leaderboards medem condição estática enquanto produção enfrenta escrita contínua, filtro de metadado e pico de concorrência.
+- [ ] Registrado também que os datasets do **ANN-Benchmarks**, que já usamos, têm a fraqueza declarada de não representarem mais aplicações modernas de ANN — o substituto acadêmico proposto (**VIBE**, arXiv:2505.17810) **não foi avaliado**.
+- [ ] Publicação **interna**: conceito em `wiki/benchmarks/` + CHANGELOG. **Nada sai do repositório neste milestone** — ver M183.
+
+**Dependencies:** nenhuma. Régua de comparação já existe: ~195 rps por instância, MRR@10 0,6749, 8% de
+`max_connections` a 16 clientes.
+
+**Risks:** (a) adotar a bancada sem perfil produz número que ninguém sabe defender; (b) o VectorDBBench pode
+assumir topologia distribuída que não é a nossa — se assumir, **dizer isso é o resultado**, não um problema a
+contornar; (c) postura do [ADR 0050](./wiki/decisions/0050-official-benchmark-adopt-and-wrap.md): **adotar e
+envelopar**, nunca substituir o harness próprio.
+
+**Prior art / referências:** `wiki/decisions/0050-official-benchmark-adopt-and-wrap.md`;
+`wiki/benchmarks/m177-camadas-python-http-verdict.md` (a decomposição por camada), `m177-stress-colapso-verdict.md`
+(a régua de stress), `m177-adr0007-backends-verdict.md` (o banco no laço); `benchmarks/m177_layers.py`,
+`m177_stress.py`, `m177_concurrency.py`.
+
+## M183 — [ ] Claim público comparativo — depende de reprodução independente
+
+**Objective:** levar um número comparativo para fora do repositório (README, site, comparação com outros
+bancos vetoriais). **Não é continuação natural do M182** — é outro gate, e mais duro.
+
+O `public-copy.md` § 4 exige **três** coisas para uma comparação pública: artefato reproduzível, **reprodução
+independente por terceiro**, e o benchmark linkado no mesmo parágrafo do claim. O
+[m45](./wiki/benchmarks/m45-pareto-sift1m.md) declara, no próprio texto, que entrega **metade** disso — a
+reprodução por terceiro segue em aberto desde julho.
+
+**Definition of done:**
+
+- [ ] Artefato do M182 publicado internamente e estável.
+- [ ] **Reprodução independente por um terceiro** — a metade que falta, e que não depende de engenharia nossa.
+- [ ] O claim, quando escrito, linka o benchmark no mesmo parágrafo e respeita a fronteira já decidida: paridade de recall, memória billion-scale, AI-native/HTAP/aberto — **jamais** "mais rápido que o AlloyDB no vetor" ([ADR 0035](./wiki/decisions/0035-m73-northstar-vector-verdict.md)).
+
+**Dependencies:** M182 `[ ]`, e **um terceiro disposto a reproduzir** — o item não fecha só com trabalho interno.
+
+**Risks:** publicar sem a reprodução independente viola a regra do próprio projeto e transforma um número
+honesto em claim indefensável.
+
+## M184 — [ ] Medir cada pilar com rigor, e apurar quanto a avaliação de maturidade errou
+
+**Objective:** em 2026-08-07 este roadmap ganhou uma tabela de maturidade 0–5 por pilar (§ Roadmap v7) que
+motivou os M170–M176. **Ela não era medição.** Foi produzida lendo `feature_status` da wiki, contando testes
+por diretório e aplicando uma régua que eu mesmo propus — sem executar nada. O único pilar com número real
+era o vetorial, e mesmo ele vinha de artefatos de julho.
+
+O que justifica reabrir agora não é rigor abstrato: **o M177 derrubou cinco conclusões minhas por defeito de
+instrumento** — hop negativo por CPU desigual, keep-alive invertido por Nagle, saturação estrangulada por
+`OMP_NUM_THREADS`, colapso e vazamento de memória que eram contenção de máquina, e um ganho de 9,4× que não
+existe em hardware dedicado. Se a medição direta errou cinco vezes, uma avaliação por leitura de documentação
+merece desconfiança maior, não menor.
+
+**A entrega não é uma nota nova — é a diferença.** Um pilar cuja medição confirmar a nota vale tão pouco
+quanto um que a contradiga; o que tem valor é saber **onde a leitura e a execução divergem**, porque isso
+calibra toda avaliação futura feita do mesmo jeito.
+
+**Definition of done:**
+
+- [ ] Cada pilar com **pelo menos um número executado nesta rodada**, em CPU dedicada, com o comando registrado: vetorial, colunar, IA, lakehouse, híbrida, grafo, lexical, SymQG.
+- [ ] Para cada pilar, a comparação explícita **nota atribuída em 2026-08-07 × nota medida**, com a divergência nomeada quando houver — e "confirmou" dito com a mesma clareza que "errou".
+- [ ] **Perfil onde o número surpreender.** A régua desta sessão: número inesperado é hipótese sobre o instrumento antes de ser hipótese sobre o sistema. `py-spy` / `perf` / decomposição por camada no padrão do `m177_layers.py`.
+- [ ] A régua 0–5 **reexaminada contra o que a medição mostrou** — se um critério não distinguiu nada na prática, ele sai; se faltou eixo, ele entra. A régua é proposta desta avaliação, não artefato do projeto, e nada obriga a mantê-la.
+- [ ] Conceito em `wiki/benchmarks/` e a tabela do § Roadmap v7 **atualizada ou retratada**, com a versão anterior preservada — a disciplina que esta sessão aplicou cinco vezes.
+- [ ] **Declarar o que continuou sem medir**, por pilar. Um eixo não medido nomeado vale mais que uma nota inventada para completar a linha.
+
+**Dependencies:** nenhuma técnica. Reusa `benchmarks/theodb_bench/` (BEIR, known-item, significância,
+ClickBench, HTAP) e os seis instrumentos `m177_*`. Precisa de **droplet dedicado** — máquina compartilhada
+invalidou cinco medições e invalidaria estas.
+
+**Risks:** (a) **viés de confirmação** — eu escrevi a tabela original, e medir para confirmá-la é o desfecho
+mais confortável e o menos útil; o DoD exige a divergência nomeada justamente por isso; (b) oito pilares é
+escopo grande, e a tentação é medir o fácil e estimar o resto — o último item do DoD existe contra isso;
+(c) alguns eixos (dogfood, reprodução por terceiro) **não são mensuráveis por engenharia** e continuarão
+abertos, o que deve ser dito e não contornado.
+
+**Prior art / referências:** a tabela original em § Roadmap v7 deste arquivo; as cinco retratações em
+`wiki/benchmarks/m177-*` e em `wiki/log.md`; `benchmarks/theodb_bench/`, `benchmarks/m177_*.py`.
+
+## Sequência do v7
+
+```
+P0  ══▶  M177 fase 1 (o gate: modelos + custo do hop + empacotamento)
+              │
+              ├── hop irrelevante  ──▶ fecha aqui; fica o modelo default recomendado
+              └── hop relevante    ──▶ M177 fase 2 (ADR de residência + extensão opt-in)
+
+destrava os outros:           M180 (empacotar o servidor) ──▶ M178 (batching)
+bloqueado por ADR de dep:      M179 (reuso de conexão — minreq não tem keep-alive)
+independentes, paralelizáveis:   M170 (IA) · M171 (lakehouse) · M176 (SymQG) · M169 (colunar, já aberto)
+bancada compartilhada:           M172 (híbrida) ──▶ M173 (lexical)     [mesmos corpora, uma coleta]
+independente, mede-antes:        M174 (grafo)
+calendário + decisão do owner:   M175 (dogfood) — começar CEDO, é o de maior latência
+```
+
+**O que P0 desloca, dito explicitamente:** M177 fase 1 passa à frente de M170–M176. **Não desloca o M169** —
+aquele é correção de falha dura na escala-alvo, e correctness precede aposta nova (o mesmo princípio que ordenou
+M48 antes de M51). A bancada da fase 1 é a mesma do M172/M173, então rodá-los na sequência aproveita uma coleta
+só; e um modelo melhor **eleva a barra** que a híbrida precisa superar, o que torna a ordem M177 → M172 mais
+informativa que a inversa.
+
+**M175 primeiro em ordem de início, último em ordem de conclusão.** Ele não compete por tempo de engenharia com
+os outros e é o único que destrava o nível 5 — quanto antes o anchor for declarado, antes a janela de evidência
+começa a correr.
 
 ---
 
@@ -3099,3 +3883,26 @@ M19 ─────────────────────────�
 - **Columnar (M6) + BM25 (M7)** — os dois pilares v1 de composição foram **mantidos** (M30 / ADR `0013`,
   2026-07-03) como exceções permissivas (Regra 9), com evidência medida (columnar ~14× a 5M (mean±std); BM25 nDCG 0.95 vs
   0.51). Gated para adoção; o leg lexical shipado segue o `ts_rank_cd` nativo.
+
+### M185 — Corrigir a inversão do modelo de custo do índice vetorial `[x]`
+
+**Bloqueia:** M175 (dogfood) e qualquer alegação de performance vetorial em uso real.
+
+Medido em 2026-08-09 (`wiki/benchmarks/m175-planner-cost-inversion-verdict.md`): a 20k linhas × 1536d o
+planner escolhe `Seq Scan` (182 ms) em vez do índice HNSW (2 ms), porque o custo estimado do índice é 94×
+maior quando ele é 91× mais rápido. **Todo usuário que criar um índice recebe um índice que nunca é usado**,
+a menos que saiba rodar `SET enable_seqscan=off`.
+
+**Causa-raiz já identificada (2026-08-09).** Não é o ratio (portado corretamente do pgvector) nem o
+`procost` do operador (hipótese testada e refutada). É a correção TOAST do `hnswcostestimate` que
+`am/mod.rs:208-212` nunca aplica, omitida deliberadamente e justificada em `am/cost.rs:10-14` com a frase
+*"never flip the index-vs-seqscan choice"* — que a medição refuta. Aritmética sobre páginas medidas: o
+startup cairia de 3 404,25 para 168,7 (−95%), contra 810,21 do seq scan, e o índice venceria.
+
+**Definition of done (all must hold):**
+- [x] Correção TOAST aplicada em `am/mod.rs`; a justificativa factualmente errada em `am/cost.rs` reescrita.
+- [x] `theodb_ivfflat` corrigido — o `amcostestimate` é compartilhado, e a medição confirma (startup 143,00, índice escolhido).
+- [x] Planner escolhe o índice sem intervenção a 20k×1536d — **executado**: 182,117 ms → 6,401 ms.
+- [x] Varrido em 64/256/768/1536 dimensões e a 50 000 linhas — índice escolhido em todos.
+- [ ] **Testes unitários não compilados nem executados** — exigem PG18 no pgrx (`cargo pgrx init` incompleto) e a suíte não roda por B-001. O que prova a correção é a verificação ponta a ponta.
+- [ ] Achado lateral em aberto: o shim pgvector não expõe `vector_cosine_ops` para o `theodb_ivfflat`, nem o AM `hnsw` na imagem construída localmente.

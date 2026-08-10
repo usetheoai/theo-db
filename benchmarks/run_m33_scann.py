@@ -9,7 +9,7 @@ Research) — the open-source implementation of the exact algorithm AlloyDB's ve
 
 Fairness (matched methodology, no cherry-pick):
   * SAME SIFT1M (1M×128, Euclidean), SAME 1000-query subsample (seed 42), SAME neighbors-GT, SAME k=10 as
-    the M34 theodb/pgvector run — reused verbatim from docs/benchmarks/m34-ivfflat-reloption.json (ADR-2).
+    the M34 theodb/pgvector run — reused verbatim from benchmarks/artifacts/m34-ivfflat-reloption.json (ADR-2).
   * ScaNN `num_leaves=1000` matches theodb/pgvector `lists=1000`; the `leaves_to_search` sweep {1,10,50,100}
     matches the theodb/pgvector `probes` sweep {1,10,50,100} — a partition-fraction-matched comparison.
   * recall is computed IDENTICALLY to theodb: recompute the EXACT Euclidean distance of ScaNN's returned
@@ -311,7 +311,7 @@ def _render_md(r) -> str:
     L.append("## Reproduction\n")
     L.append("```\npip install scann   # dev-only, Apache-2.0, needs AVX2\n"
              "python3 benchmarks/run_m33_scann.py --n-queries 1000 --runs 3\n```\n")
-    L.append("theodb/pgvector rows reused verbatim from `docs/benchmarks/m34-ivfflat-reloption.json` "
+    L.append("theodb/pgvector rows reused verbatim from `benchmarks/artifacts/m34-ivfflat-reloption.json` "
              "(same SIFT1M, hardware, neighbors-GT). ScaNN measured on the SAME 1000-query subsample (seed 42).\n")
     return "\n".join(L)
 

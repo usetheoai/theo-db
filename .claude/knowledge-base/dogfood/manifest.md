@@ -1,59 +1,109 @@
-# Dogfood manifest — TheoDB
+# Dogfood — manifesto
 
-Source of truth for the production-readiness anchor. `/dogfood` reads this + `rules/dogfood-golden-rule.md` and
-emits EVIDENCE_SUFFICIENT / EVIDENCE_WITH_CAVEATS / EVIDENCE_INSUFFICIENT. `running` is the only status that
-satisfies the v1.0 / production-ready claim.
+Registro do cenário-âncora que decide se este projeto pode alegar `production-ready` / v1.0.
+Contrato: `.claude/rules/dogfood-golden-rule.md`. Avaliação: `/dogfood`.
 
-## Anchor scenario
+## theo-rag-sobre-theodb
 
-**Slug:** `theo-data-capability-on-theodb`
+**Slug:** `theo-rag-sobre-theodb`
 
-**Status:** `wired`
+**Status:** `planned`
 
-A real theo-data capability (`theo-rag` or `theo-memory`) uses a self-hosted TheoDB instance the team owns as its
-live retrieval store — declarative vectorizer keeping an embedding column fresh + `ai.hybrid_search_rrf` serving
-the capability's real queries — on infra the team runs, for a sustained ≥ 30-day window. See
-`rules/dogfood-golden-rule.md § 1` for the full anchor definition and the rationale.
+**Declarado em:** 2026-08-09 · **Proposto por:** claude-code/opus-5 · **Aguarda sign-off do owner**
 
-## Honest status rationale (why `wired`, not yet `running`)
+### O cenário
 
-**M124 (2026-07-20) advanced this anchor from `planned` → `wired`:** the anchor path is now exercised on a
-self-hosted TheoDB — `theodb.create_vectorizer` + the vectorizer worker + `ai.hybrid_search_rrf`, driven by
-`benchmarks/dogfood_anchor_smoke.sh`, with the QUERY path proven end-to-end using **real** OpenAI embeddings
-(`evidence/2026-07-20-anchor-smoke.md`). A reproducible self-host recipe exists at
-`docs/ops/self-host-quickstart.md`. This meets the `wired` bar (§ 2: "the anchor is invoked at least once in a
-manual smoke").
+O `theo-rag` — produto de RAG do próprio ecossistema, que serve usuários — usa o **TheoDB** como vector
+store, em vez do pgvector, na infraestrutura que o time opera.
 
-It is **not** `running`: the rest of the evidence is still **synthetic benchmarks** (109 artifacts under
-`docs/benchmarks/`) and this run is a smoke, not sustained real product traffic. The dogfood already earned its
-keep — it surfaced two real gaps (`evidence/2026-07-20-anchor-failure-modes.md`): the async vectorizer worker
-dead-letters embeds on self-host (issue #132) and `create_vectorizer` does not backfill pre-existing rows.
-Setting this to `running` now would be exactly the dogfood-theatre the gate exists to prevent (§ 7).
+### Por que o status é `planned` e não outro
 
-**Consequence (Unbreakable Rule 3 + `rules/public-copy.md § 3`):** until this anchor reaches `running` with fresh
-evidence, TheoDB MUST NOT be described as `production-ready` / `production-grade` / `battle-tested` in any
-external copy. Permitted framings: "designed for production HA scenarios", "targeted at <use case>". The 109
-benchmarks justify algorithm/feature claims (recall parity, billion-scale memory, measured latency), NOT a
-production-ready claim.
+Aplicando o vocabulário do § 2 do golden rule contra o que existe no disco em 2026-08-09:
 
-## Path to `running` (what would satisfy the gate)
+| status | exige | temos? |
+|---|---|---|
+| `planned` | âncora identificado, sem trabalho de implementação | **sim — é este** |
+| `wired` | âncora invocado **ao menos uma vez** em CI ou smoke manual | não: o `theo-rag` nunca apontou para o TheoDB |
+| `running` | **usado ativamente pelo time em infraestrutura real** | não |
 
-1. Stand up a self-hosted TheoDB the team owns (this repo builds the engine + extension; a deploy target is
-   needed — HA/control-plane are out of this repo's scope by design).
-2. Point one theo-data capability's retrieval at it (vectorizer + `ai.hybrid_search_rrf`), replacing its current
-   store.
-3. Run the team's own product traffic against it for ≥ 30 days; log evidence files under
-   `knowledge-base/dogfood/evidence/` per the § 5 frontmatter (scenario / date / operator / outcome / summary),
-   including at least one **failure story** (a dogfood with no failures is theatre — § 4).
-4. Flip status → `running` once the sustained evidence exists; then `/dogfood` can emit EVIDENCE_SUFFICIENT and a
-   production-ready claim becomes defensible.
+**Medido, não presumido:** `theo-rag/package.json` declara `"compose:up": "docker compose up -d pgvector"`,
+e o `theo-memory` declara o mesmo. Nenhum dos dois referencia o TheoDB.
 
-## Evidence
+### O que move este âncora adiante
 
-Evidence files under `.claude/knowledge-base/dogfood/evidence/` for this anchor:
+**`planned` → `wired`:** o `theo-rag` sobe uma vez contra o TheoDB — compose apontando para a imagem
+`ghcr.io/usetheodev/theo-db`, extensão criada, uma ingestão e uma consulta reais completando. Isso é
+trabalho de engenharia e não depende de calendário.
 
-- `2026-07-20-anchor-smoke.md` — outcome `pass`: the QUERY path proven on self-hosted TheoDB with real embeddings.
-- `2026-07-20-anchor-failure-modes.md` — outcome `partial`: two real failure modes (worker embed → #132; no backfill).
+**`wired` → `running`:** o time passa a **depender** disso — não uma execução, uso sustentado. É aqui que
+mora a latência: os soft caps do § 4 pedem **≥ 3 evidências**, **≥ 1 failure story** e **≥ 2 operadores
+distintos**, com a mais recente dentro de **30 dias**. Três evidências não se produzem numa tarde por
+construção, e é por isso que declarar o âncora cedo importa: **a janela só começa a correr depois disto.**
 
-Enabler (M124): `docs/ops/self-host-quickstart.md` + `benchmarks/dogfood_anchor_smoke.sh`. The remaining step to
-`running` is operational/cross-repo: a theo-data capability migrating its production retrieval here for ≥30 days.
+### Progresso em 2026-08-09
+
+**Drop-in verificado, executando contra a imagem** — a sequência exata que o `theo-rag` usa:
+
+| passo | resultado |
+|---|---|
+| `CREATE EXTENSION IF NOT EXISTS vector` | OK — o shim reporta `vector 0.6.0`, **mais novo** que o `v0.5.1` que o theo-rag usava |
+| `CREATE TABLE ... vector(1536)` | OK — o tipo que `packages/core/src/infrastructure/db/schema.ts` declara |
+| INSERT de 500 vetores de 1536d | OK |
+| `CREATE INDEX ... USING hnsw (v vector_cosine_ops)` | OK |
+| `SELECT ... ORDER BY v <=> $1 LIMIT 10` | OK |
+
+**PR aberto:** [usetheoai/theo-rag#206](https://github.com/usetheoai/theo-rag/pull/206) — troca a `image:`
+do compose de dev. Uma linha; nome do serviço, variáveis e portas idênticos.
+
+**O status continua `planned`, e não `wired`.** O § 2 define `wired` como *"implementation lands"* — o PR
+está **aberto, não mergeado**. O smoke manual aconteceu, mas a implementação não aterrissou. Marcar `wired`
+agora seria antecipar uma decisão que é da revisão do outro repositório.
+
+**Não verificado, e declarado no próprio PR:** se o planner usa o índice em escala real (a 500 linhas ele
+escolhe `Seq Scan`, o que é *correto* nesse tamanho e não diz nada sobre escala), e a suíte de testes do
+`theo-rag` contra a imagem nova.
+
+### Evidências
+
+Nenhuma. `knowledge-base/dogfood/evidence/` está vazio, e o hard cap 3 (`no_anchor_evidence`) falha.
+
+**Nenhuma evidência foi fabricada para preencher esta seção.** A regra lista *dogfood theatre* como o modo
+de falha que ela existe para impedir, e um arquivo escrito por um agente que rodou o banco num container de
+medição não é uso do time — é exatamente o teatro. As execuções desta sessão (medição de pilares, teste de
+crash, perfil do SymQG) são **carga sintética de benchmark**, que o § 1 exclui em texto.
+
+### Veredito atual
+
+`EVIDENCE_INSUFFICIENT` — flag `anchor_missing` deixou de aplicar com este manifesto; o primeiro hard cap
+a falhar agora é o **#2 (`anchor_not_running`)**, e em seguida o **#3 (`no_anchor_evidence`)**.
+
+Enquanto isso valer, o `public-copy.md` § 3 proíbe `production-ready`, `production-grade` e
+`battle-tested` — e **nenhum pilar passa de maturidade 4** (`wiki/benchmarks/m184-*`).
+
+---
+
+## Atualização 2026-08-09 — as duas verificações em aberto foram fechadas, e uma delas bloqueia o âncora
+
+Este manifesto declarava duas coisas como "não verificadas". Ambas eram verificáveis; eu havia parado por
+decisão, não por impossibilidade. Fechadas:
+
+### (a) Escala — o planner usa o índice? **NÃO. E isso bloqueia o âncora.**
+
+A 20 000 linhas × 1536d, com `ANALYZE` rodado, o planner escolhe `Sort` + `Seq Scan` (182 ms) em vez do
+índice HNSW (2 ms). O modelo de custo estima o índice como **94× mais caro** quando ele é **91× mais
+rápido**. Medição completa em `wiki/benchmarks/m175-planner-cost-inversion-verdict.md`.
+
+**Consequência para o âncora:** migrar o `theo-rag` hoje entregaria buscas ~91× mais lentas que o esperado,
+sem erro que denunciasse. O PR [usetheoai/theo-rag#206](https://github.com/usetheoai/theo-rag/pull/206) foi
+marcado para **não mergear** até a correção.
+
+### (b) Suíte de testes do `theo-rag` contra a imagem — **não executada, e agora sem valor de decisão**
+
+Ficou subordinada: com o defeito de (a) confirmado, a suíte passaria (o drop-in é funcionalmente correto) e
+o resultado verde seria **enganoso** — provaria compatibilidade enquanto esconde a regressão de performance,
+que é justamente o que a suíte não mede. Executá-la agora produziria evidência que aponta para a conclusão
+errada.
+
+Ela volta a fazer sentido depois da correção do planner, como parte da promoção `planned` → `wired`.
+
+**Status permanece `planned`** — e agora com um bloqueador técnico nomeado, não apenas com trabalho pendente.

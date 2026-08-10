@@ -190,7 +190,7 @@ def main():
     ap.add_argument("--cache-dir", default="/tmp/m66-beir-cache")
     ap.add_argument("--limit-queries", type=int, default=50)
     ap.add_argument("--target-tokens", type=int, default=2000)
-    ap.add_argument("--out", default="docs/benchmarks/m66-chunking.json")
+    ap.add_argument("--out", default="benchmarks/artifacts/m66-chunking.json")
     a = ap.parse_args()
     res = run(a.dataset, a.chunk_size, a.overlap, a.dim, a.model, a.cache_dir, a.limit_queries, a.target_tokens)
     os.makedirs(os.path.dirname(a.out), exist_ok=True)

@@ -1,5 +1,0 @@
-OK   bm25_build indexa os spans do theo-lens = 5
-OK   bm25_search retorna o TRACE certo p/ o termo distintivo 'blkfoxzz' = trace-bbb
-OK   bm25_search casa o trace de tool Claude Code = trace-ddd
-OK   bm25_search casa o trace por query natural multi-termo = trace-aaa
-CONSUMER_OK — theo-lens shape (input||output do span) busca traces via bm25_search

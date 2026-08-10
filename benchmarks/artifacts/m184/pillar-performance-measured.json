@@ -1,0 +1,29 @@
+{
+  "medido_em": "2026-08-08",
+  "ambiente": "droplet c-8 CPU dedicada (efemero, destruido apos), theo-db:0.139.0, 20k vetores 128d, 200k linhas colunar",
+  "vetorial": {
+    "build_hnsw_20k_ms": 4579.1,
+    "busca_ann_top10_ms": 3.689,
+    "build_symqg_20k_ms": 16055.7,
+    "symqg_vs_hnsw_build": "3.5x mais lento"
+  },
+  "colunar": {
+    "create_table_ms": 4.099,
+    "insert_200k_ms": 452.6,
+    "group_by_ms": 144.6,
+    "min_max_ms": 104.8
+  },
+  "lexical_nativo_tsvector": {"busca_20k_ms": 30.055},
+  "opclasses_reais": {
+    "theodb_hnsw": ["theodb_hnsw_l2_ops", "theodb_hnsw_cosine_ops", "theodb_hnsw_ip_ops"],
+    "theodb_ivfflat": ["theodb_ivfflat_l2_ops", "theodb_ivfflat_cosine_ops", "theodb_ivfflat_ip_ops", "theodb_ivfflat_label_ops"],
+    "theodb_symqg": ["theodb_symqg_l2_ops"]
+  },
+  "cobertura_teste_fonte": {
+    "am": 87, "vec": 33, "ann": 27, "vectorizer": 26, "graph_total": 35,
+    "nl": 13, "sbq": 12, "chunk": 10, "pq": 7, "lexical": 6, "egress": 5,
+    "hybrid": 4, "ai_op": 4, "chat": 3, "sq8": 2,
+    "embed": 1, "rerank": 1, "parquet": 0,
+    "total": 310
+  }
+}

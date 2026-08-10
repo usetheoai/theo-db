@@ -1,0 +1,13 @@
+{
+  "medido_em": "2026-08-08",
+  "ambiente": "droplet c-8 CPU dedicada efemero (159.203.111.52, destruido apos), theo-db:0.139.0",
+  "metodo": "kill -9 no PID 1 do container (postmaster), restart, comparacao de checksum antes/depois",
+  "crash_confirmado": "container derrubado, recovery registrado no log",
+  "resultados": {
+    "vetorial": {"linhas_antes": 5000, "linhas_depois": 5000, "busca_ann_pos_recovery": "10 resultados — indice utilizavel"},
+    "colunar": {"md5_antes": "d89aa9578ec949121f82b620f8800bd2", "md5_depois": "d89aa9578ec949121f82b620f8800bd2", "identico": true},
+    "heap_controle": {"md5_antes": "d89aa9578ec949121f82b620f8800bd2", "md5_depois": "d89aa9578ec949121f82b620f8800bd2", "identico": true},
+    "grafo": {"arestas_antes": 1000, "arestas_depois": 1000}
+  },
+  "correcao_colunar_vs_heap": "md5 IDENTICO entre theodb_columnar e heap sobre os mesmos 50.000 registros, antes e depois do crash"
+}

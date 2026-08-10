@@ -190,7 +190,7 @@ impl HnswIndex {
         // INSERT Alg.1 `ep ← W`; pgvector `HnswFindElementNeighbors` `ep = w`, hnswutils.c). The previous
         // `ep = selected.first()` collapsed W to a SINGLE node between layers, yielding a less-connected graph that
         // needs a wider query beam. Carrying W builds a better-connected graph → **+29% query QPS at equal recall**,
-        // measured at 500k×768d (docs/benchmarks/m60-raw/m60_theodb_f32_fix2_multientry_500k768d.json). Recall-neutral.
+        // measured at 500k×768d (benchmarks/artifacts/m60-raw/m60_theodb_f32_fix2_multientry_500k768d.json). Recall-neutral.
         let mut entries: Vec<usize> = vec![ep];
         while lc >= 0 {
             let layer = lc as usize;

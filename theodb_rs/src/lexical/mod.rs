@@ -6,6 +6,9 @@
 //! (ADR 0051):** o `SegmentStore` de páginas PG (WAL via `GenericXLog`, MVCC-via-catálogo) pluga pela mesma
 //! porta. Tudo atrás da feature `spike-lexical` para não inchar o crate shipado antes do veredito GO.
 
+// M186: o modulo e compilado sempre — `ensure_table`/`flush`/`load` sao producao, usados pelo `engine`.
+// Sao as 4 funcoes `#[pg_extern] lexical_spike_*` que ficam atras da flag, uma a uma: expor funcao de
+// spike na superficie SQL publica foi o defeito que o M184 mediu no SymQG e o M176 removeu.
 pub mod pg_backing;
 
 // M140.3 — a superfície BM25 de produção (bm25_build + bm25_search) com o cache do Directory.

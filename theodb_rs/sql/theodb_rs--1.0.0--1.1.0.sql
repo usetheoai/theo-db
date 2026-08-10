@@ -1240,7 +1240,7 @@ AS $$ SELECT index_name, ef_effective, pages_read, candidates_seen, latency_us, 
 COMMENT ON FUNCTION theodb.explain_scan(regclass, text, text, int, int) IS
   'EXPLAIN the vector scan (M68): index, effective ef, pages_read, candidates_seen (the beam pool navigated), '
   'latency, results. A diagnostic function (PG18 has no amexplain hook — the Qdrant/Milvus pattern). See '
-  'docs/ops/vector-scan-diagnostics.md. Not granted to PUBLIC.';
+  'wiki/runbooks/vector-scan-diagnostics.md. Not granted to PUBLIC.';
 
 REVOKE ALL ON FUNCTION theodb.explain_scan(regclass, text, text, int, int) FROM PUBLIC;
 REVOKE ALL ON FUNCTION theodb_rs._explain_scan(oid, text, text, text, text, int, int) FROM PUBLIC;

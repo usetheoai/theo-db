@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """M60 — recall@10 gate for the OWN theodb_hnsw (f32) at scale, after the build-descent beam fix.
 
-The M57 measurement (`docs/benchmarks/m57-raw/m57p_ef1000.json`) showed theodb_hnsw_f32 saturating recall@10 at
+The M57 measurement (`benchmarks/artifacts/m57-raw/m57p_ef1000.json`) showed theodb_hnsw_f32 saturating recall@10 at
 ~0.974 even at ef_search=1000 (an ef-INSENSITIVE plateau) at 500k×768d, while pgvector reached ≥0.99 on the same
 gaussian-mixture data. M60's discover (blueprint m60-hnsw-recall-quality) traced the ceiling to the BUILD-path
 upper-layer descent being a naive hill-climb (`greedy_descend`) instead of a width-1 beam (Malkov-Yashunin INSERT

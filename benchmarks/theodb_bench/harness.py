@@ -1,7 +1,7 @@
 """Benchmark orchestration: dataset -> ground-truth -> build index -> measure -> report.
 
 Accepts an injected `db` (any object with the VectorDB interface) so it is testable without a
-container (DIP, blueprint ADR D1). Emits a reproducible JSON + markdown report to docs/benchmarks/
+container (DIP, blueprint ADR D1). Emits a reproducible JSON + markdown report to wiki/benchmarks/
 — the artifact of the M2 measurement-first gate (ADR 0002).
 """
 from __future__ import annotations

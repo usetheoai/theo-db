@@ -1,118 +1,128 @@
 # Discover-Execute Halt-Loop Driver Prompt
 
-You are mid-discovery, iteration {ITERATION}. The user invoked `/discover-execute {PLAN_SLUG}` to drive a deep-research investigation across `.claude/knowledge-base/references/`.
+You are mid-measurement, iteration {ITERATION}. The user invoked `/discover-execute {PLAN_SLUG}` to measure a hypothesis against **our own system**.
 
-**Discovery plan:** `{PLAN_PATH}`
-**Blueprint (in progress):** `{BLUEPRINT_PATH}`
-**Progress file:** `.claude/knowledge-base/discoveries/.progress-{PLAN_SLUG}.json` (gitignored)
+**Measurement plan:** `{PLAN_PATH}`
+**Opportunity (in progress):** `{OPPORTUNITY_PATH}`
+**Backlog item:** `B-{ITEM}` in `BACKLOG.md`
+**Mode:** `{MODE}`
+**Progress file:** `knowledge-base/discoveries/.progress-{PLAN_SLUG}.json` (gitignored)
+
+You are not studying how another project solved this. You are finding out what is true about ours, and you have the authority to conclude that nothing is.
 
 ## Your contract for this iteration
 
-1. **Read the progress file.** If absent, initialize it from the plan's Research Questions table:
+1. **Read the progress file.** If absent, initialize it from the plan's Measurement Questions table:
+
    ```json
    {
      "iterations_used": 0,
+     "mode": "{MODE}",
      "questions": [
-       {"id": "Q1", "status": "pending", "corner": "tests", "blocked_reason": null},
-       {"id": "Q2", "status": "pending", "corner": "deps",  "blocked_reason": null},
-       ...
+       {"id": "Q1", "status": "pending", "corner": "evidence", "blocked_reason": null},
+       {"id": "Q2", "status": "pending", "corner": "blast_radius", "blocked_reason": null}
      ],
-     "citations_verified": 0
+     "pointers_verified": 0,
+     "runtime_observations": 0
    }
    ```
 
-2. **Pick the next question.** Choose the lowest-numbered question whose status is `pending` AND whose declared method does not depend on a still-pending question.
+2. **Pick the next question** — lowest-numbered `pending` whose method does not depend on a still-pending question.
 
-3. **Apply the planned method — Fase A (broad, ast-grep) → Fase B (deep, Read).**
+3. **Run the measurement, per the mode.** The mode decides what counts as evidence. Do not substitute one mode's evidence for another's.
 
-   Use only the tools listed in SKILL.md's `allowed-tools`. The investigation runs in **two phases per question**, not a single pass:
+### `review` — a defect visible in our code
 
-   ### Fase A — Broad map via ast-grep (mandatory for code-shape questions)
+Open the file. Read the surrounding context, not just the matched line. Record `path/file.ext:LINE`, the rule or principle violated, and why it matters **here**.
 
-   Before any Read, run at least one `ast-grep` query to produce a structural map of the target. Goal of Fase A: a hotspot list (path + line range + AST kind) that Fase B will Read in detail.
+Before writing it down, rule out the three ways a review finding is wrong:
 
-   Examples by question shape:
+- **The code is dead.** Grep for callers. A violation in unreachable code is not a defect worth an item.
+- **The caller never existed.** A "missing call site" that was never wired is a different finding than a regression.
+- **The shape is deliberate.** Check git history and comments. An intentional decision documented elsewhere is not a violation.
 
-   - "How does Project A implement `Memory` class surface?" → Fase A: `ast-grep scan --rule .claude/skills/ast-grep/rules/method-in-class-ts.yml .claude/knowledge-base/references/project-a/project-a-ts/src/oss/src/memory/` → 27 methods, each with line range.
-   - "What async pipeline does Project B run?" → Fase A: `ast-grep scan --rule async-function-python.yml .claude/knowledge-base/references/project-b/project-b/` → list of async entry points.
-   - "Where is `.embed()` called?" → Fase A: edit `method-call-ts.yml` rule pattern to `$OBJ.embed($$$)` (default) and scan the target dir.
-   - "Compare class hierarchies between Project A and Project C" → Fase A: run `class-extends-ts.yml` against both, then a Python-equivalent rule against Project C.
+If any holds, that question's answer is that the finding does not survive — which is progress, not failure.
 
-   The Fase A output becomes the input table for the blueprint section under the corresponding research question. Cite the rule used + the dir scanned + match count in the progress file.
+### `live-test` — behaviour wrong in the running system
 
-   ### Fase B — Deep Read at each hotspot
+Confirm the target is declared in `rules/live-target.txt` for this domain. **If it is not declared, stop.** Do not improvise a probe: six of the eight domains have no live surface by design, and inventing one produces theatre.
 
-   For each entry in the Fase A hotspot list, `Read` the file at that line range. Goal of Fase B: capture intent, comments, edge cases — what ast-grep cannot see — and produce the prose + line-exact citation that goes into the blueprint.
+Record `METHOD URL -> STATUS`, console output, trace id where available, timing, and a screenshot for UI findings.
 
-   Each Read in Fase B produces ONE paragraph or one table row in the blueprint, with citation `.claude/knowledge-base/references/{project}/{path}:N`.
+Then do the thing this mode exists to get right: **name the uncertainty between environment and product.** `app-dev.usetheo.dev` is a dev environment; it breaks for reasons that have nothing to do with the code. Write which one you believe it is and what would distinguish them. If you cannot yet distinguish, say exactly that — do not resolve it toward the more interesting explanation.
 
-   ### When to skip Fase A
+Non-destructive discipline: read, observe, measure. No writes, no state mutation, no fixtures left behind.
 
-   Skip ast-grep ONLY when the question is text-shaped, not code-shape:
+### `bug` — a reproduced defect
 
-   - "Find the file that contains string 'pgvector'" → straight Grep + Read
-   - "Read the README of Project A" → straight Read
-   - "What's in `pyproject.toml`?" → straight Read
+The hard floor: **no failing test, no bug.**
 
-   For everything else (function shape, class hierarchy, call sites, decorators, async patterns, type definitions, control flow), **Fase A is mandatory** before any Read. Skipping Fase A turns Read into broad exploration, which is unfocused and noisy.
+1. Write the numbered repro, exact commands and URLs.
+2. Write a test that FAILS on the current state.
+3. **Run it.** Record the actual failure output.
 
-   ### Halt and skip conditions
+A test asserted to fail but never executed is fabricated evidence and caps the opportunity at 49. If the test passes, the bug as described does not exist — record what you actually observed and let the falsification criterion do its job.
 
-   - If the path declared by the plan does not exist (`Path.exists()` returns false), mark the question BLOCKED with reason "path not found" and CONTINUE to step 5.
-   - If Fase A returns zero matches when the question expected hotspots, mark the question BLOCKED with reason "Fase A returned empty — query or path may be wrong" and CONTINUE to step 5.
+### `evolve` — measured cost of the status quo
 
-   Synthesize the answer in the format declared by the "Expected answer shape" column of the plan. Reference the full ast-grep workflow guide at `.claude/skills/ast-grep/SKILL.md` § "Workflow: zoom out → zoom in".
+Produce a number, not an adjective. N round-trips, N duplicated call sites, N ms, N manual steps. Count it; do not estimate it and present the estimate as a count.
 
-4. **Append the answer to the blueprint.** Edit `{BLUEPRINT_PATH}`:
-   - Locate the section mapped to the question's corner (Coverage Corner 1-4) and the subsection mapped to the reference project
-   - Replace any `<!-- TBD: Qx -->` placeholder with the synthesis
-   - Cite every claim with `.claude/knowledge-base/references/{project}/{path}:{line}` references
-   - Ensure each paragraph or table row has at least one citation
+Then check the number against the falsification criterion. "The cost is real but trivial" is a legitimate outcome and usually means the item dies.
 
-5. **Update the progress file.** Set the question's status to either `done` or `blocked` (with `blocked_reason`). Increment `iterations_used`.
+4. **Write the answer into the opportunity** under the corner that question maps to. Replace the `<!-- TBD -->` placeholder.
 
-6. **Verify halt conditions.** ALL of the following must hold to emit the promise:
+5. **Cite what you touched.** Every claim about behaviour carries a pointer that resolves — `path/file.ext:LINE` for code, a recorded observation for runtime. Verify the line exists before writing it: a pointer past the end of a file is evidence that moved.
 
-   a. Every question in the progress file has status `done` OR `blocked` with reason.
+6. **Update the progress file.**
 
-   b. Every citation in the blueprint (every `.claude/knowledge-base/references/...` reference) exists in the filesystem. Run:
-      ```bash
-      grep -oE '.claude/knowledge-base/references/[^ )`":]+' {BLUEPRINT_PATH} | sort -u | while read -r path; do
-        [ -e "$path" ] || echo "FABRICATED: $path"
-      done
-      ```
-      Treat any FABRICATED line as a halt-condition failure: mark the corresponding sentence with `<!-- BLOCKED: path not found -->` and re-iterate.
+7. **Re-evaluate the halt condition.**
 
-   c. All four coverage-corner H2 sections (`## Coverage Corner 1 — Integration Tests`, `## Coverage Corner 2 — Dependencies`, `## Coverage Corner 3 — Tools`, `## Coverage Corner 4 — Techniques`) contain at least one non-placeholder subsection.
+## The kill decision — check this every iteration
 
-   d. The blueprint contains at least one ADR section under `## ADRs`.
+Before continuing, re-read the plan's `## Falsification` section and ask whether what you have measured so far already satisfies it.
 
-7. **If halt conditions met**, emit the promise marker AT THE VERY END of your response — **plain text, isolated on its own line, NO backticks, NO fenced code blocks, NO markdown wrapping**. Ralph-loop's regex matches the literal sequence outside of inline code. The correct emission (place exactly this on its own line at end of response):
+If it does: **stop measuring and kill the item.** Do not keep going to salvage something. Write to `BACKLOG.md`:
 
-   <promise>BLUEPRINT_COMPLETE</promise>
+```
+status: killed
+kill_reason: <what was measured, and what it showed>
+```
 
-   Wrapping the marker in backticks OR a fenced code block BREAKS detection and forces another iteration. After emitting, a one-paragraph summary may follow ABOVE the marker but the marker must be the last content. Report: questions answered / questions blocked / iterations used / citations verified.
+Then emit `<promise>ITEM_KILLED</promise>` and report. **This is a successful outcome of the cycle**, not a failure of the run. A measurement that honestly finds nothing has protected the plan cycle from work that would have been justified by a hunch. The sunk cost of a long measurement is the strongest reason a weak finding gets shipped — recognise the pull and stop anyway.
 
-8. **If halt conditions NOT met**, do NOT emit the promise. The loop will resume. STOP your current turn (the Stop hook will restart you in iteration {ITERATION + 1}).
+An unexplained kill is indistinguishable from an abandoned run, so `kill_reason` names what was measured and what it showed.
+
+## Halt condition
+
+Emit `<promise>OPPORTUNITY_COMPLETE</promise>` only when ALL hold:
+
+1. Every question is `done`, or `blocked` with a reason.
+2. Every code pointer in the opportunity resolves — file exists **and** the line is within it.
+3. All four corners are populated. `<!-- UNKNOWN: reason -->` populates Corner 2 and only Corner 2.
+4. The mode's evidence contract is satisfied — most often the missing piece is `bug` without an executed failing test.
+5. The acceptance criteria from the plan are observably met.
+
+Otherwise, STOP. The loop resumes.
 
 ## Inviolable rules
 
-- NEVER write to anything under `.claude/knowledge-base/references/`. The `boundary-check.sh` hook blocks Edit and Write there.
-- NEVER `npm install`, `pip install`, `poetry install`, or any dependency installer inside `.claude/knowledge-base/references/`.
-- NEVER modify `{PLAN_PATH}`. The plan is the contract — to revise it, the user must invoke `/discover-plan` again.
-- NEVER fabricate a citation. If you cannot find a real path that supports a claim, REMOVE the claim or mark it BLOCKED.
-- NEVER skip a corner. All four must be populated before the promise.
-- NEVER emit `<promise>BLUEPRINT_COMPLETE</promise>` while a question is still `pending`. Use `blocked` if you cannot answer it.
-- NEVER spawn a nested ralph-loop inside this iteration. NEVER modify `.claude/ralph-loop.local.md` directly — that is the parent loop's state. If you observe `ralph-loop.local.md` with `active: true` referencing a DIFFERENT slug, HALT and surface the conflict (concurrent loops on overlapping state is an anti-pattern in `rules/loop-engine-convention.md`).
+- **Never invent a pointer.** A plausible `file:line` nobody opened, a status code nobody requested, a test asserted to fail but never run. This is the cardinal sin: everything downstream treats it as measured fact.
+- **Never write to a governed repo.** Discover produces a document. An opportunity that already contains the patch has pre-empted the plan cycle and skipped every gate after it. Measuring is reading.
+- **Never justify a finding with prior art.** "Project X does it this way" cannot fill the Evidence corner. It may be true, useful, and the reason someone had the idea — it is still not a measurement of our system.
+- **Never emit `OPPORTUNITY_COMPLETE` from a partial state**, and never as a graceful exit from a stop condition. Use `<promise>OPPORTUNITY_BLOCKED</promise>`.
+- **Never emit `ITEM_KILLED` when the measurement could not be run.** Target unreachable, credential absent, tool missing — nothing was measured, so nothing was disproved. Stop and ask the human.
+- **Never substitute a weaker measurement** for one that failed, and never reason about what the measurement would probably have shown.
+- **Never fill Corner 2 with a confident claim nobody measured.** `unknown` is the honest default.
+- **On `--sweep`: register every finding in `BACKLOG.md`** with `source: discover-{MODE}` and its evidence. A finding that stays in this run's output and never reaches the registry is the orphaned-finding failure the single registry exists to prevent.
 
-## When the loop should give up
+## Stop conditions
 
-If the same question fails twice in a row with no observable progress OR a per-project time budget declared inside the discovery plan is exhausted for that project OR a fabricated citation cannot be replaced with a real path:
+Emit `<promise>OPPORTUNITY_BLOCKED</promise>` with an explicit report when ANY of:
 
-- Mark the affected questions as `blocked` with an explicit reason (e.g., "no-progress after retry", "project time budget exhausted", "fabricated citation, no replacement")
-- Emit `<promise>BLUEPRINT_BLOCKED</promise>` (NOT `BLUEPRINT_COMPLETE`) with the honest blocked-questions report
-- DO NOT pretend the blueprint is complete
+1. The same question fails twice in a row with no observable progress.
+2. A pointer cannot be replaced with one that resolves.
+3. A corner has no credible source after an exhaustive pass.
+4. The measurement cannot be run at all — target unreachable, credential absent, tool missing. **Ask the human.** This is not a kill.
+5. A hook blocked a write you attempted. That surfaces a bug in this run, not a content gap: halt immediately and surface it.
 
-`BLUEPRINT_BLOCKED` signals to the ralph-loop wrapper that the loop terminated honestly without satisfying every halt condition. The downstream `/discover-confidence` will catch any structural failure regardless. Honesty over false completion (Unbreakable Rule 3).
-
-The promise `<promise>BLUEPRINT_COMPLETE</promise>` is reserved for genuine satisfaction of every halt condition; there is no graceful-exit path that emits `BLUEPRINT_COMPLETE` from a partial state.
+Honest BLOCKED beats false COMPLETE. Honest KILLED beats a shipped hunch.

@@ -2,7 +2,7 @@
 
 Copy-with-attribution from .claude/skills/discover-confidence/scripts/check_spec_smells.py
 per D1 of the discover-plan-confidence plan. Same algorithm; reads
-rubric-discover-plan.md instead of rubric-blueprint.md / rubric-v1.md.
+rubric-measurement-plan.md instead of rubric-opportunity.md / rubric-v1.md.
 """
 from __future__ import annotations
 
@@ -70,8 +70,8 @@ def _context_around(text: str, start: int, end: int) -> str:
     return snippet.strip()
 
 
-def check_spec_smells(blueprint_path: Path, rubric_path: Path) -> SmellReport:
-    raw = blueprint_path.read_text(encoding="utf-8-sig")
+def check_spec_smells(artifact_path: Path, rubric_path: Path) -> SmellReport:
+    raw = artifact_path.read_text(encoding="utf-8-sig")
     content = _strip_code(raw)
     rubric = load_rubric(rubric_path)
     smells_spec = rubric.get("smells", {})

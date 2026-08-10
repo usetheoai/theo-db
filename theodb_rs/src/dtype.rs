@@ -8,7 +8,7 @@
 //!
 //! Código ORIGINAL. Técnica de varlena aprendida de fontes permissivas (`pgvector` = PostgreSQL
 //! License, `vector.c/.h`; `postgres.h` SET_VARSIZE; docs pgrx). VectorChord é AGPL (D1) = SÓ estudo.
-//! Viabilidade provada pelo spike ADR-D3 (7/7 pg_test, `docs/spikes/m69-theovec-pgrx-feasibility/`).
+//! Viabilidade provada pelo spike ADR-D3 (7/7 pg_test, `wiki/references/m69-theovec-pgrx-feasibility/`).
 use crate::pg;
 use crate::vec;
 use core::ffi::CStr;
@@ -550,7 +550,7 @@ mod tests {
     // `binary_compat_with_pgvector` sobre `md5(vector_send)` em dims 1/3/5/128/300). No M70 o pgvector
     // é REMOVIDO — o tipo `vector` é 100% own-code, então esse teste (que exigia o pgvector coexistindo)
     // não roda mais na suíte standalone. A migração de instalações com pgvector (via intermediário `real[]`,
-    // não byte-cast) está em `docs/ops/pgvector-migration.md`; a paridade byte já está coberta no M69 v0.59.0.
+    // não byte-cast) está em `wiki/guides/pgvector-migration.md`; a paridade byte já está coberta no M69 v0.59.0.
 
     #[pg_test(error = "vector cannot have more than 16000 dimensions")]
     fn parse_fail_fast_over_max() {

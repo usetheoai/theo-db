@@ -1,0 +1,26 @@
+{
+  "levels": [
+    {
+      "clients": 1,
+      "requests": 15,
+      "wall_s": 0.15,
+      "throughput_rps": 97.87,
+      "p50_ms": 9.8,
+      "p95_ms": 11.8,
+      "p99_ms": 11.8,
+      "mean_ms": 10.1,
+      "max_ms": 11.8
+    },
+    {
+      "clients": 8,
+      "requests": 120,
+      "wall_s": 0.79,
+      "throughput_rps": 152.48,
+      "p50_ms": 47.8,
+      "p95_ms": 71.0,
+      "p99_ms": 81.6,
+      "mean_ms": 48.2,
+      "max_ms": 83.8
+    }
+  ]
+}

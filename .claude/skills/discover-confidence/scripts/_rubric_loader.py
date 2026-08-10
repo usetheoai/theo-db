@@ -1,6 +1,6 @@
-"""Shared helper to load rubric-blueprint.md YAML block.
+"""Shared helper to load rubric-opportunity.md YAML block.
 
-Used by check_spec_smells.py and run_blueprint_score.py. Copied as-is from
+Used by check_spec_smells.py and run_opportunity_score.py. Copied as-is from
 plan-confidence/scripts/_rubric_loader.py — same YAML-in-markdown convention.
 """
 from __future__ import annotations

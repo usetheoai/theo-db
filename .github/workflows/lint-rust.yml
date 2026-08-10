@@ -17,7 +17,7 @@ on:
     # em 95 de 100 runs entre 24 e 27/07. A economia de fila que #187 buscava se expressa DENTRO do
     # `paths:`, via padrão negado — um filtro só, sem conflito.
     #
-    # `.claude/**` e `docs/**` já estão fora por construção (não casam nenhum padrão positivo).
+    # `.claude/**` e `wiki/**` já estão fora por construção (não casam nenhum padrão positivo).
     # O `!**/*.md` é guarda de FUTURO, não economia de hoje: em 2026-07-27 não existe nenhum `.md`
     # sob `theodb_rs/`, mas `theodb_rs/**` engoliria um `theodb_rs/README.md` no dia em que alguém
     # criar um — e recompilar pgrx por causa de um README é exatamente o desperdício que #187 atacava.
@@ -66,6 +66,39 @@ jobs:
           export PATH="$HOME/.cargo/bin:$PATH"
           cargo fmt -- --check
 
+      # #171 — `cargo fmt` percorre a ARVORE DE MODULOS, e um arquivo trazido por `include!` nao e
+      # modulo: ele e texto colado antes da expansao de macro. `src/vec/ah_tests.rs` (363 linhas)
+      # nunca foi visto pelo gate, e drift acumulou ali sem ninguem notar — o mesmo mecanismo que
+      # deixou 58 hunks se juntarem no resto do crate (#217).
+      #
+      # A lista e DESCOBERTA do codigo, nao mantida a mao: um `include!` novo entra no gate sozinho.
+      # Manter uma lista fixa aqui seria repetir o erro de origem — algo fora do alcance do check.
+      #
+      # CUSTO DECLARADO: o rustfmt formata o arquivo como se fosse topo de arquivo, entao os itens
+      # perdem a indentacao de 4 espacos que tinham por viver dentro de `mod tests { … }` no ponto do
+      # splice. O compilador e indiferente (include! e colagem textual); a leitura no contexto muda.
+      # Foi uma escolha: um arquivo VERIFICADO com indentacao plana vale mais que um arquivo bonito
+      # que ninguem checa — e o #217 mostrou onde termina a segunda opcao.
+      - name: Rustfmt nos arquivos trazidos por `include!` (#171)
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+          mapfile -t INCLUDED < <(
+            grep -rhoE 'include!\("[^"]+"\)' src --include='*.rs' \
+              | sed -E 's/include!\("([^"]+)"\)/\1/' | sort -u
+          )
+          if [ "${#INCLUDED[@]}" -eq 0 ]; then
+            echo "nenhum include! no crate — nada a checar"; exit 0
+          fi
+          rc=0
+          for name in "${INCLUDED[@]}"; do
+            # `include!` resolve relativo ao arquivo que inclui; procuramos pelo nome sob src/.
+            while IFS= read -r f; do
+              echo "rustfmt --check $f"
+              rustfmt --edition 2024 --config-path rustfmt.toml --check "$f" || rc=1
+            done < <(find src -name "$(basename "$name")" -type f)
+          done
+          exit "$rc"
+
       - name: Clippy (-D warnings via .clippy_args baseline)
         run: |
           export PATH="$HOME/.cargo/bin:$PATH"
@@ -74,7 +107,18 @@ jobs:
           # engasga em qualquer arg com espaço. `read -a` divide UMA vez, de forma explícita, e o
           # `"${ARGS[@]}"` passa cada flag como um argumento — o mesmo efeito pretendido, sem a
           # armadilha.
-          read -r -a ARGS < <(grep -v '^#' .clippy_args | grep -v '^[[:space:]]*$' | tr '\n' ' ')
+          #
+          # O `printf '\n'` no fim NAO e cosmetico. `read` devolve 1 quando a entrada termina SEM
+          # newline, e o `tr '\n' ' '` garante exatamente isso — entao, sob o `bash -e` deste step, a
+          # linha MATAVA O JOB antes de `cargo clippy` rodar uma unica vez. Provado:
+          #
+          #   bash -e -c 'read -r -a A < <(printf "x y z"); echo nunca-chega'   -> exit 1
+          #   bash    -c 'read -r -a A < <(printf "x y z"); echo $?'            -> 1, A preenchido
+          #
+          # Ficou invisivel porque o step `Rustfmt`, ANTES deste, falhava sempre (#217 gate 2) e
+          # parava o job. Consertar o fmt expos um gate de clippy que nunca guardou nada: 30ms entre
+          # o echo do comando e o erro, sem uma linha de saida do clippy.
+          read -r -a ARGS < <(grep -v '^#' .clippy_args | grep -v '^[[:space:]]*$' | tr '\n' ' '; printf '\n')
           echo "clippy args: ${ARGS[*]}"
           cargo clippy --features pg18 --no-deps -- "${ARGS[@]}"
 

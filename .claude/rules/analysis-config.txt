@@ -58,14 +58,3 @@
 # scale_edges = 100_000_000
 # scale_concurrent_readers = 100
 # scale_p99_latency_ms = 10
-
-# ─── ACTIVE CONFIG (enabled 2026-07-20, post-v0.109.0 release) ───────
-enabled = true
-profile = engine
-benchmark_dir = benchmarks/
-baseline_dir = .benchmarks/baselines/
-reference_repos = knowledge-base/references/pgvector,knowledge-base/references/pgvectorscale
-scale_vectors = 1_000_000
-scale_dim = 128
-scale_concurrent_readers = 8
-scale_recall_at_10 = 0.90
