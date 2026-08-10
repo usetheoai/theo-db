@@ -620,8 +620,12 @@ dod:
 > delas, num repositório que não é este. **O `gh pr diff` nem consegue exibir o diff** (HTTP 406, limite de
 > 300 arquivos).
 >
-> **O que destravaria sem esse custo:** um PR separado no `theo-rag`, com só o `docker-compose.yaml`, contra
-> `develop`. Isso é decisão do time do `theo-rag` sobre como querem receber a mudança — não uma que eu deva
-> tomar por eles.
+> **Feito em 2026-08-10: [`theo-rag#211`](https://github.com/usetheoai/theo-rag/pull/211)** — a mesma mudança
+> em **um arquivo e 23 linhas**, saindo de `develop`, com as duas correções que só apareceram ao rodar de
+> verdade (mount do PG 18 e a tag da imagem que não existia). O #206 foi apontado para ele.
+>
+> **Abrir o PR é meu; mergear não.** A decisão de trocar o banco de um produto que serve usuários é de quem o
+> opera, e agora ela está diante deles como uma mudança que **cabe numa tela** em vez de 550 arquivos. Era
+> disto que o item precisava, e é o último passo que existia do meu lado.
 
 Próximo id livre: **`B-018`**. Ids são monotônicos e nunca reusados.
