@@ -591,4 +591,23 @@ dod:
 
 > Registered 2026-08-10 by `/backlog-item` (slug: `bm25-multi-termo`).
 
-Próximo id livre: **`B-017`**. Ids são monotônicos e nunca reusados.
+## B-017 — `running` exige tempo, e nenhuma ação instantânea o produz   [ ]
+
+domain: engine-pgrx
+repo: theo-db
+suggested_mode: live-test
+source: human
+evidence: `.claude/knowledge-base/dogfood/evidence/` — 4 evidências em 2026-08-10, todas `partial`/`pass` de **verificação**, nenhuma de uso.
+why_now: o B-010 ficou com dois DoD abertos, e a razão é estrutural, não de esforço. A golden rule define `running` como *"ativamente usado pelo time em infraestrutura real"*, e exige ≥ 3 evidências mais **uma história de falha**. Uma falha em operação **emerge de operação** — não existe ação, minha ou de ninguém, que a produza num dia. Registrar isto como item próprio evita que o B-010 fique aberto para sempre parecendo trabalho não feito, quando o que falta é calendário.
+status: raw
+dod:
+  - `theo-rag` mergeado e rodando sobre TheoDB em dev por ao menos duas semanas
+  - ≥ 3 evidências de **operação** (não de verificação), com operador humano nomeado
+  - ≥ 1 história de falha real — a única que não pode ser fabricada
+  - só então o âncora vai a `running`
+
+> Registered 2026-08-10 by `/backlog-item` (slug: `running-exige-tempo`).
+> **Depende de:** merge de `usetheoai/theo-rag#206` e deploy. O caminho técnico foi verificado ponta a ponta
+> em 2026-08-10 — imagem publicada, compose `Up (healthy)`, schema real aplicado, 197 testes passando.
+
+Próximo id livre: **`B-018`**. Ids são monotônicos e nunca reusados.

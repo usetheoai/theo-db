@@ -9,8 +9,10 @@ name: Rust test suite
 # A execução completa leva 480 s medidos. O argumento de custo não existe.
 
 on:
+  # Sem gatilho de `push` em `workspace`: com um runner serial, cada commit disparava 8 min de suite
+  # a frente de publish/lint/CI. No PR o custo e pago uma vez, no momento em que a decisao acontece.
   push:
-    branches: [workspace, develop]
+    branches: [develop]
     paths:
       - "theodb_rs/**"
       - "Dockerfile"
@@ -22,6 +24,13 @@ on:
       - ".github/workflows/rust-suite.yml"
   workflow_dispatch:
 
+# O runner self-hosted e UNICO e SERIAL. Medido em 2026-08-10: este workflow, com timeout de 45 min,
+# monopolizou-o e deixou `publish`, `lint-rust` e `CI` na fila por 12+ minutos — a publicacao da imagem
+# so saiu depois de eu cancelar este job. Um gate de qualidade que bloqueia a entrega nao e um gate, e
+# um empecilho.
+#
+# Duas medidas: a suite roda so no PR (nao em cada push de workspace), e cede a vez — `group` global
+# entre workflows nao existe no Actions, entao o que da para fazer e nao concorrer com o proprio push.
 concurrency:
   group: rust-suite-${{ github.ref }}
   cancel-in-progress: true
