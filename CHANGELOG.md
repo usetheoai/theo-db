@@ -75,7 +75,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   de feature flag**, o mesmo tratamento do lexical, que preserva o código para estudo sem expor quem instala
 
 ### Fixed
-- **Defeito conhecido, ainda não corrigido:** a busca vetorial por junção (vector-join) do índice HNSW deixa de retornar exatamente um resultado — devolve 199 de 200, e 59 de 60 mesmo quando se pede o conjunto inteiro. Encontrado ao executar a suíte de testes pela primeira vez; **nenhum dos 109 benchmarks do projeto o havia detectado**. Rastreado em B-011. (#M187)
+- **Retratação da entrada anterior:** o vector-join do HNSW **não tinha defeito**. Ao medir, a perda vinha da premissa dos próprios testes — eles pediam ao índice uma garantia que o algoritmo não dá (o parâmetro de busca limita a exploração do grafo, não o tamanho do resultado). Os testes foram corrigidos com o alvo intacto e passam. Nenhuma mudança no comportamento do banco. (#B-011)
 
 - A suíte de testes do projeto volta a executar localmente — os unitários puros **e** os que precisam de um servidor PostgreSQL. O binário de teste morria no carregamento com `symbol lookup error: CurrentMemoryContext`, antes do primeiro teste — **nenhum dos 439 rodava**. Eram três bloqueios empilhados — link, carregamento e instalação da extensão — e resolver um só não fazia nenhum teste rodar. A receita completa está no runbook `wiki/runbooks/rodar-a-suite-de-testes.md`. Quem contribui com o TheoDB deixa de depender do CI para descobrir uma regressão em lógica pura. (#B-001)
 

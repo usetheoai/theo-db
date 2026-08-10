@@ -438,7 +438,7 @@ dod:
 
 > Registered 2026-08-09 by `/backlog-item` (slug: `dogfood-uso-real`).
 
-## B-011 — O vector-join do HNSW perde exatamente um elemento   [ ]
+## B-011 — O vector-join do HNSW perde exatamente um elemento   [x]
 
 domain: vetorial
 repo: theo-db
@@ -453,6 +453,12 @@ dod:
   - verificado se é um bug ou dois — os dois erram por exatamente um elemento, o que sugere causa comum
 
 > Registered 2026-08-10 by `/backlog-item` (slug: `hnsw-vector-join-off-by-one`).
+>
+> **FECHADO 2026-08-10 — e o produto não tinha o defeito.** A varredura com os dados exatos da semeadura
+> mostrou 55 vetores distintos em 60 linhas (período 55 do padrão), e `ef_search` limitando o **beam**, não o
+> resultado. Com dados aleatórios, `ef=60` devolve 60; com os do teste, precisa de `ef≈100`. A premissa
+> "`k ≥ |b|` devolve tudo trivialmente" é falsa para HNSW e era a base das duas asserções. Beam elevado a 200
+> nos dois testes, **alvo intacto** (igualdade exata com o oráculo seqscan). Verificado: `4 passed; 0 failed`.
 
 > **Análise de código 2026-08-10 — o teste e o laço, lidos.** O teste (`src/am/hnsw_page/tests.rs`) faz:
 > `SET theodb_hnsw.ef_search = 60` sobre uma tabela `vrb` de **exatamente 60 linhas**, e então

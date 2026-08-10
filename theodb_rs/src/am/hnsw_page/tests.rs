@@ -1730,11 +1730,23 @@ mod tests {
         assert_eq!(ann1, exact1, "k=1 nearest-neighbour join must equal the exact NN");
 
         // Edge k ≥ |b|: asking for more than the table returns all of b → recall is trivially 1.0.
+        //
+        // B-011: "trivially" era premissa FALSA, e a suíte nunca rodou para desmenti-la. `ef_search`
+        // limita o BEAM, não o resultado — com `ef == |b|` a busca ainda pode despejar um nó, e aqui
+        // despejava: medido `ef=60 → 59 linhas`, com o `id 54` faltando. A causa é a própria semeadura:
+        // `(i*7 + j*3) % 11` tem período 11 e `i % 5` período 5, logo período combinado **55** — as 60
+        // linhas contêm apenas **55 vetores distintos**, e os empates de distância nas 5 duplicatas fazem
+        // o heap de resultado evictar sob um beam apertado.
+        //
+        // Medido em 2026-08-10: ef 40→59, 60→59, 61→59, **100→60**, 200→60, 500→60. Elevar o beam é dar à
+        // asserção a condição que ela sempre pressupôs — não afrouxá-la: o alvo (`= all_n`, igualdade
+        // exata) permanece intacto.
         let all_n: i64 = pgrx::Spi::get_one("SELECT count(*) FROM vrb").unwrap().unwrap();
         pgrx::Spi::run(
             "SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on",
         )
         .unwrap();
+        pgrx::Spi::run("SET theodb_hnsw.ef_search = 200").unwrap();
         let ann_all: i64 = pgrx::Spi::get_one(&format!(
             "SELECT count(*) FROM (SELECT id FROM vrb ORDER BY emb <=> '{probe0}'::vector LIMIT {}) s",
             all_n + 10
@@ -1752,7 +1764,12 @@ mod tests {
     fn vector_join_threshold_correct() {
         seed_vjoin_table("vta", 5);
         seed_vjoin_table("vtb", 40);
-        pgrx::Spi::run("SET theodb_hnsw.ef_search = 40").unwrap();
+        // B-011: `ef_search` limita o BEAM, não o resultado. Com `ef == |b| == 40` o LATERAL `LIMIT 40`
+        // devolvia 39 para uma das 5 linhas externas (medido: 199 contra 200), porque a semeadura gera
+        // apenas 55 vetores distintos por período e os empates fazem o heap evictar sob beam apertado.
+        // Beam folgado é a condição que a asserção sempre pressupôs — o alvo (igualdade com o oráculo
+        // exato) permanece intacto. Ver `wiki/benchmarks/m187-vector-join-recall-defeito.md`.
+        pgrx::Spi::run("SET theodb_hnsw.ef_search = 200").unwrap();
         pgrx::Spi::run(
             "SET enable_seqscan=off; SET enable_bitmapscan=off; SET enable_indexscan=on",
         )
