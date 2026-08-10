@@ -437,6 +437,18 @@ dod:
   - ao menos um defeito encontrado por uso, não por benchmark — é a prova de que o dogfood está funcionando
 
 > Registered 2026-08-09 by `/backlog-item` (slug: `dogfood-uso-real`).
+>
+> **Progresso 2026-08-10 — 4 evidências, e o caminho até o uso está inteiro.** Publicada
+> `ghcr.io/usetheoai/theo-db:latest` + `:0.140.0` (a primeira vez na história do projeto); PR do `theo-rag`
+> apontado para ela e verificado `Up (healthy)` com as 24 tabelas do schema real.
+>
+> **DoD 3 satisfeito com folga — TRÊS defeitos achados por uso**, nenhum pego por 109 benchmarks:
+> a inversão de custo do planner, o mount do PG 18 que fazia o contêiner entrar em loop, e o workflow de
+> publicação apontando para um org inexistente — este último provando que o PR **nunca poderia ter
+> funcionado** para quem o mergeasse (a tag `usetheodev/theo-db:0.139.0` não existe).
+>
+> **DoD 1 e 2 seguem abertos** e dependem do merge + deploy: `running` exige uso sustentado em infraestrutura
+> real, e nenhuma das 4 evidências é uso — todas são verificação.
 
 ## B-011 — O vector-join do HNSW perde exatamente um elemento   [x]
 
