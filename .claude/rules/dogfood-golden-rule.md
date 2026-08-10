@@ -61,11 +61,22 @@ exigir produção e passa a exigir o `theo-rag` **rodando no `app-dev` sobre o T
 O que ela **não** muda: continua exigindo **uso**, não instalação — um serviço implantado que ninguém
 exercita não é dogfood, é um contêiner ligado.
 
-**Medido em 2026-08-10, antes da troca:** `app-dev.usetheo.dev` responde 200 em 0,5 s, **mas devolve a SPA
-para qualquer rota** — `/api/rag/health` retornou HTML, e uma rota inventada também deu 200. **Não há
-evidência de que o `theo-rag` esteja implantado lá**, nem sobre qual banco. Registrar isto é o ponto: o gate
-novo aponta para um ambiente cujo estado ainda não foi verificado, e a primeira coisa que ele exige é
-verificá-lo.
+**Medido em 2026-08-10, e o resultado muda o que o gate significa.** Duas medições:
+
+1. **Pelo HTTP:** `app-dev.usetheo.dev` responde 200 em 0,5 s, mas **devolve a SPA para qualquer rota** —
+   `/api/rag/health` retornou HTML, e `/rota-que-nao-existe-xyz` também deu 200. Os três 200 iniciais eram
+   falso positivo; o controle com rota inventada foi o que pegou.
+
+2. **Pela composição da pilha:** o `theo-cloud/docker-compose.dev.yaml` — que é o que sustenta o `app-dev` —
+   declara `pg-cloud`, `pg-themory`, `themory`, `kratos`, `theo-cloud`, `dashboard` e `traefik`. **O
+   `theo-rag` não está lá.** E o banco vetorial que está (`pg-themory`) é `ankane/pgvector:v0.5.1`.
+
+**Consequência para o âncora:** o alvo do gate não é apenas "não verificado" — o serviço do âncora **não está
+implantado no ambiente escolhido**. Antes de `running` ser sequer discutível, o `theo-rag` precisa entrar
+nessa pilha, e o `pg-themory` continua sendo uma segunda frente (o `theo-memory` também usa pgvector).
+
+Isto **não** invalida a troca de ambiente — `app-dev` continua sendo um alvo mais alcançável que produção.
+Só torna explícito que o passo seguinte é de implantação, não de medição.
 
 **Freshness threshold (PER-PROJECT — EDIT THIS):** `30 days` by default. Reduce for fast-moving products; never raise without ADR.
 
