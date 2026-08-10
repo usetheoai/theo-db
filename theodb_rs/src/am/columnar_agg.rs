@@ -37,6 +37,31 @@ pub(crate) static ENABLE_FAST_DECODE: GucSetting<bool> = GucSetting::<bool>::new
 /// what replaced "default OFF" as the mitigation.
 pub(crate) static ENABLE_COLUMNAR_LATE_MAT: GucSetting<bool> = GucSetting::<bool>::new(true);
 
+/// M168 — stream the top-k's input one chunk-group at a time instead of decoding the whole relation into one
+/// Arrow batch. Default ON: measured peak for ClickBench q23 drops 772.2 MiB → 17.9 MiB (43.2x).
+///
+/// The switch exists for two reasons, both load-bearing. It makes the throughput comparison PAIRED inside one
+/// session and one binary — the alternative is a cross-run comparison, and this box drifts up to 1.88x between
+/// runs (M167 § 6), which would swamp the signal. And it is the escape hatch if streaming ever misbehaves in a
+/// shape the oracles do not cover.
+pub(crate) static ENABLE_COLUMNAR_TOPK_STREAM: GucSetting<bool> = GucSetting::<bool>::new(true);
+
+/// M169 — the same streaming source, applied to the AGGREGATE paths (scalar and grouped).
+///
+/// Why the aggregate needed its own switch instead of reusing the top-k's: the two answer different questions.
+/// The top-k's switch guards a path whose retention grows with `k`; the aggregate's guards a path whose peak was
+/// the DECODE itself. Sharing one GUC would make the top-k escape hatch also disable the aggregate fix (and vice
+/// versa), and the M169 measurement needs the aggregate arms paired inside one session and one binary.
+///
+/// Default ON, matching the top-k's — and that default is what makes `stream=false` at T4.1 a real arm rather
+/// than a no-op: omitting the SET leaves the fix ENABLED, so the "before" arm has to say `off` out loud.
+///
+/// MEDIDO (baseline 100M, 2026-07-31): das 15 falhas, 4 roteiam pelo caminho agregado — q20 (escalar,
+/// `COUNT(*) … WHERE URL LIKE`), q33 e q34 (agrupadas por URL) com `byte array offset overflow`, e q32
+/// (`GROUP BY WatchID, ClientIP`) com timeout. As três primeiras morrem no decode; a q32 morre no ESTADO da
+/// tabela de hash, que o streaming não reduz — dizer que este switch a conserta seria vender o que não acontece.
+pub(crate) static ENABLE_COLUMNAR_AGG_STREAM: GucSetting<bool> = GucSetting::<bool>::new(true);
+
 /// M167 ADR-4 — safety factor for the top-k decode bound. `run_columnar_topk` decodes {projection ∪ keys ∪ filter}
 /// for ALL rows into one Arrow batch BEFORE the bounded-heap TopK runs, so the path costs O(N) memory where the
 /// native top-N heapsort costs O(k). With the GUC defaulting ON (M167), an unfiltered wide `SELECT * … ORDER BY k
@@ -189,8 +214,11 @@ fn sort_collation_is_byte_order(coll: u32) -> bool {
 
 /// Is the decline trace on? Split out so callers can skip building an expensive message when it is off — the
 /// `format!` would otherwise allocate on every decline even with tracing disabled (review finding L4).
+///
+/// `pub(super)` so the sibling executor can gate its own measurement trace on the same switch: one env var
+/// controls all of this subsystem's diagnostics rather than each site inventing its own.
 #[inline]
-fn admit_trace_enabled() -> bool {
+pub(super) fn admit_trace_enabled() -> bool {
     static TRACE_ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *TRACE_ON.get_or_init(|| std::env::var("THEODB_ADMIT_TRACE").as_deref() == Ok("1"))
 }
@@ -297,6 +325,23 @@ pub(crate) fn init() {
         GucContext::Userset,
         GucFlags::default(),
     );
+    GucRegistry::define_bool_guc(
+        c"theodb.enable_columnar_topk_stream",
+        c"Stream the columnar top-k input per chunk-group instead of one whole-relation batch (M168)",
+        c"When on, the top-k decodes one chunk-group at a time so peak memory is a chunk-group + k, not O(N).",
+        &ENABLE_COLUMNAR_TOPK_STREAM,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+    GucRegistry::define_bool_guc(
+        c"theodb.enable_columnar_agg_stream",
+        c"Stream the columnar aggregate input per chunk-group instead of one whole-relation batch (M169)",
+        c"When on, scalar and grouped aggregates decode one chunk-group at a time, so a text column wider than \
+          2 GiB no longer overflows the i32 offsets of a single Arrow array.",
+        &ENABLE_COLUMNAR_AGG_STREAM,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
     unsafe {
         pg_sys::RegisterCustomScanMethods(&SCAN_METHODS.0);
         PREV_UPPER_HOOK = pg_sys::create_upper_paths_hook;
@@ -351,7 +396,10 @@ pub(crate) unsafe fn encode_const_bits(datum: pg_sys::Datum, kind: MinMaxKind) -
 /// check by `encode_const_coerced`); cross-type outside the integer class (temporal/float) is declined because raw
 /// min/max coercion is not order-isomorphic there. Returns `None` for ANY other shape (function, OR, two-Var, NULL
 /// const, non-min/max-able column, unsafe cross-type) → the caller MUST fall back to the native plan.
-pub(crate) unsafe fn extract_zone_predicate(clause: *mut pg_sys::Node, relid: i32) -> Option<ZonePredicate> {
+pub(crate) unsafe fn extract_zone_predicate(
+    clause: *mut pg_sys::Node,
+    relid: i32,
+) -> Option<ZonePredicate> {
     if clause.is_null() || (*clause).type_ != pg_sys::NodeTag::T_OpExpr {
         return None;
     }
@@ -495,7 +543,14 @@ pub(crate) unsafe fn extract_inlist_predicate(
         return None;
     }
     let (mut strategy, mut lt, mut rt) = (0 as c_int, pg_sys::InvalidOid, pg_sys::InvalidOid);
-    pg_sys::get_op_opfamily_properties((*sa).opno, opfamily, false, &mut strategy, &mut lt, &mut rt);
+    pg_sys::get_op_opfamily_properties(
+        (*sa).opno,
+        opfamily,
+        false,
+        &mut strategy,
+        &mut lt,
+        &mut rt,
+    );
     if strategy != 3 || lt != vartype {
         return None; // must be `=` and apply to the column type on the Var (left) side
     }
@@ -542,7 +597,13 @@ pub(crate) unsafe fn extract_inlist_predicate(
         let (mut elems_ptr, mut nulls_ptr, mut nelems) =
             (std::ptr::null_mut(), std::ptr::null_mut(), 0i32);
         pg_sys::deconstruct_array(
-            arrp, elemtype, elemlen as c_int, elembyval, elemalign, &mut elems_ptr, &mut nulls_ptr,
+            arrp,
+            elemtype,
+            elemlen as c_int,
+            elembyval,
+            elemalign,
+            &mut elems_ptr,
+            &mut nulls_ptr,
             &mut nelems,
         );
         let et = elemtype.to_u32();
@@ -568,7 +629,11 @@ pub(crate) unsafe fn extract_inlist_predicate(
 /// never match/exclude a real int2 row; for `<`/`>` an out-of-range bound makes the predicate trivially
 /// true/false, which the native plan evaluates correctly). Same-type consts fall through to `encode_const_bits`.
 /// The result MUST agree with `compute_minmax` (ints as `i64 as u64`, floats as `f64::to_bits`).
-unsafe fn encode_const_coerced(datum: pg_sys::Datum, consttype: u32, target: MinMaxKind) -> Option<u64> {
+unsafe fn encode_const_coerced(
+    datum: pg_sys::Datum,
+    consttype: u32,
+    target: MinMaxKind,
+) -> Option<u64> {
     // Read the const value in its OWN type. Integers/temporal → i128 (wide enough for any range check); floats → f64.
     enum V {
         I(i128),
@@ -584,7 +649,7 @@ unsafe fn encode_const_coerced(datum: pg_sys::Datum, consttype: u32, target: Min
         701 => V::F(f64::from_datum(datum, false)?),
         1114 | 1184 => V::I(i64::from_datum(datum, false)? as i128), // timestamp/tz μs
         1082 => V::I(i32::from_datum(datum, false)? as i128),        // date days
-        _ => return None,                                            // non-numeric const → cannot coerce
+        _ => return None, // non-numeric const → cannot coerce
     };
     // Cast into the column's min/max domain, RANGE-CHECKED (i128 → i16/i32/i64 via try_from).
     Some(match (target, v) {
@@ -711,10 +776,10 @@ unsafe fn extract_all_predicates(
             zpreds.push(z);
         } else if let Some(t) = extract_text_predicate(clause, relid) {
             tpreds.push(t);
-        } else if let Some(inp) = extract_inlist_predicate(clause, relid) {
-            inpreds.push(inp); // M161 — integer IN-list
         } else {
-            return None; // un-pushable qual → decline (native plan applies the full WHERE)
+            // `?` em vez de `else { return None }`: qual nao-empurravel declina o pushdown, e o plano
+            // nativo aplica o WHERE completo. Mesmo efeito, e o clippy::question_mark deixa de reprovar.
+            inpreds.push(extract_inlist_predicate(clause, relid)?); // M161 — integer IN-list
         }
     }
     Some((zpreds, tpreds, inpreds))
@@ -733,7 +798,7 @@ struct Admitted {
     in_preds: Vec<super::zonemap::InListPredicate>, // M161 — integer IN-list WHERE (filter-only, never prune)
     group_cols: Vec<(i32, u32)>,
     group_exprs: Vec<GroupExprSpec>, // M157 — expression group keys (date_trunc), layout kind=2
-    const_outs: Vec<(i64, u32)>,     // M165 — projected integer constant output cells (SELECT 1, …), layout kind=3
+    const_outs: Vec<(i64, u32)>, // M165 — projected integer constant output cells (SELECT 1, …), layout kind=3
     layout: Vec<(u8, usize)>,
 }
 
@@ -760,10 +825,10 @@ impl Admitted {
 enum GroupFunc {
     DateTrunc = 0,    // date_trunc('unit', ts::timestamp) → timestamp
     ExtractField = 1, // M161 — date_part('unit', ts::timestamp) → numeric (só minute/hour: epoch-invariante + inteiro)
-    IntAddConst = 2,  // M161 — col ± k (int2/4/8) → mesmo tipo int (compute widened + range-check no materialize)
-    // NB: um GROUP BY por constante literal (`GROUP BY 1`) NÃO é uma variante aqui — o planner do PG ELIMINA chaves de
-    // grupo constantes antes do plano final (grouping por constante é redundante), então o admit contaria a chave mas o
-    // Agg do plano não a teria → mismatch no swap → declina. Medido no ClickBench q34 (M161 honest-negative).
+    IntAddConst = 2, // M161 — col ± k (int2/4/8) → mesmo tipo int (compute widened + range-check no materialize)
+                     // NB: um GROUP BY por constante literal (`GROUP BY 1`) NÃO é uma variante aqui — o planner do PG ELIMINA chaves de
+                     // grupo constantes antes do plano final (grouping por constante é redundante), então o admit contaria a chave mas o
+                     // Agg do plano não a teria → mismatch no swap → declina. Medido no ClickBench q34 (M161 honest-negative).
 }
 
 /// M157/M161 — uma chave de grupo por EXPRESSÃO. `func` seleciona a computação:
@@ -785,7 +850,7 @@ struct GroupExprSpec {
 enum TargetSlot {
     Group(i32, u32),
     GroupExpr(GroupExprSpec), // M157 — layout kind=2
-    ConstOut(i64, u32),       // M165 — projected integer constant (SELECT 1, …), layout kind=3; (value, typoid)
+    ConstOut(i64, u32), // M165 — projected integer constant (SELECT 1, …), layout kind=3; (value, typoid)
     Agg(ParsedAgg),
 }
 
@@ -801,7 +866,8 @@ fn parse_agg_kind(name: &str, vartype: pg_sys::Oid) -> Option<i32> {
         } else if vartype == pg_sys::INT8OID {
             4 // sum(int8)→numeric (exact Decimal128 → AnyNumeric — numeric-output blueprint ADR-N1)
         } else {
-            admit_trace("agg_output_type_numeric"); return None; // sum(float4)→real, sum(numeric): decline
+            admit_trace("agg_output_type_numeric");
+            return None; // sum(float4)→real, sum(numeric): decline
         }
     } else if name == "avg" {
         if vartype == pg_sys::FLOAT8OID {
@@ -812,7 +878,8 @@ fn parse_agg_kind(name: &str, vartype: pg_sys::Oid) -> Option<i32> {
         {
             5 // avg(int2/4/8)→numeric (AnyNumeric division = PG numeric_div — ADR-N1)
         } else {
-            admit_trace("agg_output_type_numeric"); return None; // avg(float4)→float8-ULP, avg(numeric): decline
+            admit_trace("agg_output_type_numeric");
+            return None; // avg(float4)→float8-ULP, avg(numeric): decline
         }
     } else {
         // min/max: any ordered native type (same set the zone-map supports) → output = input type.
@@ -971,7 +1038,8 @@ unsafe fn classify_target_node(
         if (*unit_const).constisnull || (ut != 25 && ut != 1043) {
             return None;
         }
-        let unit_cstr = pg_sys::text_to_cstring((*unit_const).constvalue.cast_mut_ptr::<pg_sys::text>());
+        let unit_cstr =
+            pg_sys::text_to_cstring((*unit_const).constvalue.cast_mut_ptr::<pg_sys::text>());
         let unit = CStr::from_ptr(unit_cstr).to_str().ok()?.to_ascii_lowercase();
         // EPOCH GUARD (council-index-storage CRITICAL): the columnar timestamp is stored as µs-since-2000 (PG epoch)
         // but decoded into an Arrow `Timestamp` that DataFusion reads as µs-since-1970. The PG↔Arrow offset is exactly
@@ -988,7 +1056,11 @@ unsafe fn classify_target_node(
         // to {minute, hour}; date_trunc keeps its epoch-invariant {second, minute, hour, day} (truncation, not field).
         const DT_UNITS: [&str; 4] = ["second", "minute", "hour", "day"];
         const EX_UNITS: [&str; 2] = ["minute", "hour"];
-        let unit_ok = if is_extract { EX_UNITS.contains(&unit.as_str()) } else { DT_UNITS.contains(&unit.as_str()) };
+        let unit_ok = if is_extract {
+            EX_UNITS.contains(&unit.as_str())
+        } else {
+            DT_UNITS.contains(&unit.as_str())
+        };
         if !unit_ok {
             admit_trace("group_expr_granularity_unsupported"); // week / month / quarter / year / day-extract / second-extract → native
             return None;
@@ -1168,7 +1240,9 @@ unsafe fn classify_target_node(
                 return None;
             }
             Some(TargetSlot::Agg(ParsedAgg { kind: 8, attno, delta: 0 }))
-        } else if !has_distinct && (name == "sum" || name == "avg" || name == "min" || name == "max") {
+        } else if !has_distinct
+            && (name == "sum" || name == "avg" || name == "min" || name == "max")
+        {
             let args = PgList::<pg_sys::TargetEntry>::from_pg((*agg).args);
             if args.len() != 1 {
                 return None;
@@ -1247,7 +1321,7 @@ unsafe fn build_admission(
     aggs: Vec<ParsedAgg>,
     group_cols: Vec<(i32, u32)>,
     group_exprs: Vec<GroupExprSpec>, // M157
-    const_outs: Vec<(i64, u32)>,     // M165 — projected integer constant output cells (layout kind=3)
+    const_outs: Vec<(i64, u32)>, // M165 — projected integer constant output cells (layout kind=3)
     layout: Vec<(u8, usize)>,
 ) -> Option<Admitted> {
     // Mode: a columnar table (decode stripes) vs a heap table with a usable Arrow cache (M101 HTAP).
@@ -1258,14 +1332,31 @@ unsafe fn build_admission(
             // GROUP BY + WHERE combined (M114): un-pushable qual → `extract_all_predicates` None → decline.
             let (preds, text_preds, in_preds) = match extract_all_predicates(input_rel, relid) {
                 Some(p) => p,
-                None => { admit_trace("unpushable_where_qual"); return None; } // M152
+                None => {
+                    admit_trace("unpushable_where_qual");
+                    return None;
+                } // M152
             };
-            return Some(Admitted { mode: 0, relid, aggs, preds, text_preds, in_preds, group_cols, group_exprs, const_outs, layout });
+            return Some(Admitted {
+                mode: 0,
+                relid,
+                aggs,
+                preds,
+                text_preds,
+                in_preds,
+                group_cols,
+                group_exprs,
+                const_outs,
+                layout,
+            });
         }
         // Non-grouped: ALL quals must be pushable (`col <op> const`), else decline.
         let (preds, text_preds, in_preds) = match extract_all_predicates(input_rel, relid) {
             Some(p) => p,
-            None => { admit_trace("unpushable_where_qual"); return None; } // M152
+            None => {
+                admit_trace("unpushable_where_qual");
+                return None;
+            } // M152
         };
         return Some(Admitted {
             mode: 0,
@@ -1303,7 +1394,7 @@ unsafe fn build_admission(
             aggs,
             preds: Vec::new(),
             text_preds: Vec::new(), // M156 — heap-cache path declines any WHERE (guarded above), so never text preds
-            in_preds: Vec::new(),   // M161 — heap-cache path declines any WHERE, so never IN-list preds
+            in_preds: Vec::new(), // M161 — heap-cache path declines any WHERE, so never IN-list preds
             group_cols: Vec::new(),
             group_exprs: Vec::new(), // M157 — heap-cache path is non-grouped, so never group exprs
             const_outs: Vec::new(),  // M165 — heap-cache path is non-grouped, so never const-outs
@@ -1379,7 +1470,17 @@ unsafe fn admit(
     if grouped && group_cols.is_empty() && group_exprs.is_empty() {
         return None; // GROUP BY with NO grouping key at all (a const-out alone is not a key) → native plan
     }
-    build_admission(rte, input_rel, relid, grouped, aggs, group_cols, group_exprs, const_outs, layout)
+    build_admission(
+        rte,
+        input_rel,
+        relid,
+        grouped,
+        aggs,
+        group_cols,
+        group_exprs,
+        const_outs,
+        layout,
+    )
 }
 
 /// `create_upper_paths_hook` — run `admit` and STASH the result keyed by the base table's OID (M115). Does NOT add a
@@ -1441,7 +1542,9 @@ unsafe extern "C-unwind" fn planner_hook(
     // M158 late-materialization GUC is on (a pure top-k query has no aggregate/stash). `try_swap_agg` declines
     // fail-closed without a matching stash entry; `try_swap_topk` carries its own GUC + shape guards — so running the
     // walk under the disjunction never mis-swaps.
-    if !stmt.is_null() && ((ENABLE_COLUMNAR_AGG.get() && have_stash) || ENABLE_COLUMNAR_LATE_MAT.get()) {
+    if !stmt.is_null()
+        && ((ENABLE_COLUMNAR_AGG.get() && have_stash) || ENABLE_COLUMNAR_LATE_MAT.get())
+    {
         swap_walk(&mut (*stmt).planTree, (*stmt).rtable, std::ptr::null_mut());
         let subplans = (*stmt).subplans;
         if !subplans.is_null() {
@@ -1630,7 +1733,10 @@ unsafe fn deparse_safe_tlist(
                                 (*v).varcollid,
                                 0,
                             ) as *mut pg_sys::Expr;
-                        } else if pa.kind == 9 && !av.is_null() && (*av).type_ == pg_sys::NodeTag::T_OpExpr {
+                        } else if pa.kind == 9
+                            && !av.is_null()
+                            && (*av).type_ == pg_sys::NodeTag::T_OpExpr
+                        {
                             // M166 — the SumIntAddConst argument is `OpExpr(Var(base int2), Const)`. Its nested Var is
                             // OUTER_VAR post-set_plan_refs (into the subtree we dropped); leaving it would make
                             // ruleutils' deparse of the aggregate argument follow OUTER_VAR through this scanrelid=0
@@ -1638,7 +1744,9 @@ unsafe fn deparse_safe_tlist(
                             // of the base column's type — resolvable and descriptor-equal (exprType(Aggref)=int8 is
                             // unchanged); EXPLAIN then shows `sum(<col>)` (cosmetic — the `+ k` is folded into the
                             // executed sum, byte-identical, same convention as the group-expr slot's base-column deparse).
-                            let inner = PgList::<pg_sys::Node>::from_pg((*(av as *mut pg_sys::OpExpr)).args);
+                            let inner = PgList::<pg_sys::Node>::from_pg(
+                                (*(av as *mut pg_sys::OpExpr)).args,
+                            );
                             let Some(iv) = inner.get_ptr(0) else { return std::ptr::null_mut() };
                             if (*iv).type_ != pg_sys::NodeTag::T_Var {
                                 return std::ptr::null_mut(); // admit guaranteed a Var arg; otherwise decline the swap
@@ -1750,7 +1858,10 @@ unsafe fn encode_group_exprs(gexprs: &[GroupExprSpec]) -> Option<*mut pg_sys::Li
         entry = pg_sys::lappend(entry, pg_sys::makeString(pgstr) as *mut c_void);
         entry = pg_sys::lappend(entry, pg_sys::makeInteger(g.out_typoid as i32) as *mut c_void);
         entry = pg_sys::lappend(entry, pg_sys::makeInteger((g.delta >> 32) as i32) as *mut c_void);
-        entry = pg_sys::lappend(entry, pg_sys::makeInteger((g.delta & 0xFFFF_FFFF) as i32) as *mut c_void);
+        entry = pg_sys::lappend(
+            entry,
+            pg_sys::makeInteger((g.delta & 0xFFFF_FFFF) as i32) as *mut c_void,
+        );
         outer = pg_sys::lappend(outer, entry as *mut c_void);
     }
     Some(outer)
@@ -1768,7 +1879,10 @@ unsafe fn encode_in_preds(inpreds: &[super::zonemap::InListPredicate]) -> *mut p
         entry = pg_sys::lappend(entry, pg_sys::makeInteger(p.consts.len() as i32) as *mut c_void);
         for &c in &p.consts {
             entry = pg_sys::lappend(entry, pg_sys::makeInteger((c >> 32) as i32) as *mut c_void);
-            entry = pg_sys::lappend(entry, pg_sys::makeInteger((c & 0xFFFF_FFFF) as i32) as *mut c_void);
+            entry = pg_sys::lappend(
+                entry,
+                pg_sys::makeInteger((c & 0xFFFF_FFFF) as i32) as *mut c_void,
+            );
         }
         outer = pg_sys::lappend(outer, entry as *mut c_void);
     }
@@ -1858,20 +1972,25 @@ unsafe fn try_swap_agg(
                     return None; // nulls-first ≠ our nulls-last
                 }
                 let opno = *(*s).sortOperators.add(i);
-            // M135: PG18 generalized the btree strategy number into an AM-agnostic `CompareType`, so the last
-            // out-param changed TYPE. The VALUE did not change — `access/cmptype.h:34` defines `COMPARE_LT = 1`,
-            // i.e. exactly `BTLessStrategyNumber` — so this is a type port, not a semantic one. (An earlier
-            // version of this comment claimed the old constant "would silently accept the wrong ordering";
-            // council-index-storage caught that as false, and a wrong rationale would mislead anyone auditing
-            // the project's other strategy-number sites into expecting value drift that does not exist.)
-            //
-            // Seeded with `COMPARE_INVALID`, not `COMPARE_LT`: `lsyscache.c:275` overwrites it unconditionally
-            // today, but seeding the ACCEPT value means a future PG that returns early without writing the
-            // out-param would flip this gate from fail-closed to fail-open — wrong ordering accepted, wrong
-            // results, no error. Seeding the reject value costs nothing.
-            let (mut opfamily, mut opcintype, mut cmptype) =
-                (pg_sys::InvalidOid, pg_sys::InvalidOid, pg_sys::CompareType::COMPARE_INVALID);
-            pg_sys::get_ordering_op_properties(opno, &mut opfamily, &mut opcintype, &mut cmptype);
+                // M135: PG18 generalized the btree strategy number into an AM-agnostic `CompareType`, so the last
+                // out-param changed TYPE. The VALUE did not change — `access/cmptype.h:34` defines `COMPARE_LT = 1`,
+                // i.e. exactly `BTLessStrategyNumber` — so this is a type port, not a semantic one. (An earlier
+                // version of this comment claimed the old constant "would silently accept the wrong ordering";
+                // council-index-storage caught that as false, and a wrong rationale would mislead anyone auditing
+                // the project's other strategy-number sites into expecting value drift that does not exist.)
+                //
+                // Seeded with `COMPARE_INVALID`, not `COMPARE_LT`: `lsyscache.c:275` overwrites it unconditionally
+                // today, but seeding the ACCEPT value means a future PG that returns early without writing the
+                // out-param would flip this gate from fail-closed to fail-open — wrong ordering accepted, wrong
+                // results, no error. Seeding the reject value costs nothing.
+                let (mut opfamily, mut opcintype, mut cmptype) =
+                    (pg_sys::InvalidOid, pg_sys::InvalidOid, pg_sys::CompareType::COMPARE_INVALID);
+                pg_sys::get_ordering_op_properties(
+                    opno,
+                    &mut opfamily,
+                    &mut opcintype,
+                    &mut cmptype,
+                );
                 if cmptype != pg_sys::CompareType::COMPARE_LT {
                     admit_trace("swap_agg_sorted_desc_or_nonbtree"); // M152
                     return None; // DESC (or non-btree) ≠ our ascending
@@ -2004,9 +2123,7 @@ unsafe fn try_swap_topk(
     if (*lc_const).constisnull || (*lc_const).consttype.to_u32() != 20 {
         return None; // LIMIT ALL (NULL) or non-int8 → decline
     }
-    let Some(k_i64) = i64::from_datum((*lc_const).constvalue, false) else {
-        return None;
-    };
+    let k_i64 = i64::from_datum((*lc_const).constvalue, false)?;
     // k must be positive AND fit i32: it is serialized into the int-only `custom_private` channel as one i32
     // (`lappend_int`), so a LIMIT ≥ 2^31 would truncate to a wrong/negative k → too-few rows the parent Limit cannot
     // add back (council-index-storage + council-rust-pgrx LOW). Such a limit is absurd (O(N) memory would OOM first);
@@ -2130,10 +2247,9 @@ unsafe fn try_swap_topk(
         let clause = qual.get_ptr(i)?;
         if let Some(z) = extract_zone_predicate(clause, scanrelid as i32) {
             zpreds.push(z);
-        } else if let Some(t) = extract_text_predicate(clause, scanrelid as i32) {
-            tpreds.push(t);
         } else {
-            return None; // un-pushable qual → decline (native plan applies the full WHERE)
+            // idem ao pushdown de agregacao acima: `?` declina o pushdown sem mudar o efeito.
+            tpreds.push(extract_text_predicate(clause, scanrelid as i32)?);
         }
     }
     // Resolve the table OID from the RTE (the project's scanrelid indexes the flat range table).
@@ -2245,11 +2361,7 @@ unsafe fn swap_walk_list(
     let n = (*list).length;
     for i in 0..n {
         let cell = (*list).elements.add(i as usize);
-        swap_walk(
-            &mut (*cell).ptr_value as *mut _ as *mut *mut pg_sys::Plan,
-            rtable,
-            parent,
-        );
+        swap_walk(&mut (*cell).ptr_value as *mut _ as *mut *mut pg_sys::Plan, rtable, parent);
     }
 }
 
@@ -2288,7 +2400,9 @@ unsafe extern "C-unwind" fn begin_custom_scan(
         *mut pg_sys::List,
         *mut pg_sys::List,
         *mut pg_sys::List,
-    ) = if !raw_priv.is_null() && (*(raw_priv as *mut pg_sys::Node)).type_ == pg_sys::NodeTag::T_List {
+    ) = if !raw_priv.is_null()
+        && (*(raw_priv as *mut pg_sys::Node)).type_ == pg_sys::NodeTag::T_List
+    {
         let outer_len = pg_sys::list_length(raw_priv);
         (
             pg_sys::list_nth(raw_priv, 0) as *mut pg_sys::List,
@@ -2483,8 +2597,11 @@ unsafe extern "C-unwind" fn begin_custom_scan(
             let n = (*(pg_sys::list_nth(entry, 1) as *mut pg_sys::Integer)).ival as usize;
             let mut consts = Vec::with_capacity(n);
             for j in 0..n {
-                let hi = (*(pg_sys::list_nth(entry, (2 + j * 2) as i32) as *mut pg_sys::Integer)).ival;
-                let lo = (*(pg_sys::list_nth(entry, (2 + j * 2 + 1) as i32) as *mut pg_sys::Integer)).ival;
+                let hi =
+                    (*(pg_sys::list_nth(entry, (2 + j * 2) as i32) as *mut pg_sys::Integer)).ival;
+                let lo = (*(pg_sys::list_nth(entry, (2 + j * 2 + 1) as i32)
+                    as *mut pg_sys::Integer))
+                    .ival;
                 consts.push(((hi as i64) << 32) | (lo as u32 as i64));
             }
             in_preds.push(super::zonemap::InListPredicate { col, consts });
@@ -2623,10 +2740,15 @@ unsafe extern "C-unwind" fn begin_custom_scan(
             }
             let r = match fast {
                 Some(res) => res,
-                None => {
-                    run_columnar_aggs(rel, &specs, &preds, &text_preds, &in_preds, super::guc::columnar_zonemap_skip())
-                        .map(|row| vec![row])
-                }
+                None => run_columnar_aggs(
+                    rel,
+                    &specs,
+                    &preds,
+                    &text_preds,
+                    &in_preds,
+                    super::guc::columnar_zonemap_skip(),
+                )
+                .map(|row| vec![row]),
             };
             pg_sys::relation_close(rel, pg_sys::AccessShareLock as pg_sys::LOCKMODE);
             r

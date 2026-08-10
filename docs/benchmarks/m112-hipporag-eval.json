@@ -1,1 +1,0 @@
-{"benchmark":"HotpotQA distractor, HuggingFace hotpotqa/hotpot_qa","recipe":"HippoRAG: LLM(gpt-4o-mini) extraction + Personalized PageRank","questions":15,"recall_at_k":4,"embed_model":"text-embedding-3-small","vector_recall":0.8667,"ppr_recall":0.5333,"hybrid_rrf_recall":0.8333}

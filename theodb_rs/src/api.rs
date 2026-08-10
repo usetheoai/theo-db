@@ -595,7 +595,7 @@ AS $$ SELECT index_name, ef_effective, pages_read, candidates_seen, latency_us, 
 COMMENT ON FUNCTION theodb.explain_scan(regclass, text, text, int, int) IS
   'EXPLAIN the vector scan (M68): index, effective ef, pages_read, candidates_seen (the beam pool navigated), '
   'latency, results. A diagnostic function (PG18 has no amexplain hook — the Qdrant/Milvus pattern). See '
-  'docs/ops/vector-scan-diagnostics.md. Not granted to PUBLIC.';
+  'wiki/runbooks/vector-scan-diagnostics.md. Not granted to PUBLIC.';
 
 REVOKE ALL ON FUNCTION theodb.explain_scan(regclass, text, text, int, int) FROM PUBLIC;
 REVOKE ALL ON FUNCTION theodb_rs._explain_scan(oid, text, text, text, text, int, int) FROM PUBLIC;
@@ -1010,18 +1010,4 @@ REVOKE ALL ON FUNCTION theodb_rs._pq_knn(text, text, text, text, real[], int, in
 mod surface_tests {
     use pgrx::prelude::*;
 
-    // M144 T1.2: `symqg_spike_bench` (a spike fn that reads an arbitrary server file via std::fs::read) shipped
-    // PUBLIC-executable. It must be superuser-only — REVOKE ALL FROM PUBLIC, the same least-privilege pattern the
-    // PostgreSQL core applies to pg_read_file / lo_import. A non-superuser role must NOT hold EXECUTE. (REVOKE
-    // rather than removal keeps the .so wrapper present so the extension upgrade chain stays intact.)
-    #[pg_test]
-    fn symqg_spike_bench_revoked_from_public() {
-        // PUBLIC must not hold EXECUTE on the fs-reading spike function.
-        let public_has: bool = Spi::get_one(
-            "SELECT has_function_privilege('public', 'symqg_spike_bench(text, bigint, bigint, int)', 'EXECUTE')",
-        )
-        .unwrap()
-        .unwrap();
-        assert!(!public_has, "symqg_spike_bench must be REVOKEd from PUBLIC (superuser-only)");
-    }
 }

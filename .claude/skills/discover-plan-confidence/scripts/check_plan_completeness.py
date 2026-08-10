@@ -1,18 +1,30 @@
-"""Plan-completeness checker for /discover-plan discovery plans (M2 deterministic).
+"""Plan-completeness checker for /discover-plan measurement plans (M2 deterministic).
 
 Bundles 4 sub-checks for orchestrator simplicity:
 
-  1. mandatory_sections — all 10 required headers present (caps verdict at 70 if any missing)
-  2. question_budget   — 5 <= N <= 10, per-corner <= 3, per-corner >= 1 OR DEFER-CORNER marker per D5
-  3. method_per_question — Fase A non-empty OR 'SKIP' AND Fase B non-empty (header-text-based per EC-2)
-  4. adr_count         — at least 2 ADRs in ## ADRs section (D1 time-budget + D2 investigation-depth minimum)
+  1. mandatory_sections  — all required headers present (caps verdict at 70 if any missing)
+  2. question_budget     — 3 <= N <= 10, per-corner <= 3, per-corner >= 1 OR DEFER-CORNER
+  3. method_per_question — Tool AND Target columns non-empty for every question
+  4. falsification       — the `## Falsification` section states what would kill the hypothesis
 
-Returns one combined report dict; the orchestrator decides which hard caps fire
-based on which keys are populated:
-  - missing_mandatory non-empty   -> mandatory_section_missing cap (70)
-  - adr_count < 2                 -> insufficient_adrs cap (70)
-  - budget_violations non-empty   -> question_budget_violated cap (70)
-  - methodless_questions non-empty-> method_missing cap (70)
+Returns one combined report; the orchestrator decides which caps fire:
+  - missing_mandatory non-empty    -> mandatory_section_missing cap (70)
+  - falsification_missing True     -> no_falsification_criterion cap (70)
+  - budget_violations non-empty    -> question_budget_violated cap (70)
+  - methodless_questions non-empty -> method_missing cap (70)
+
+Two deliberate departures from the ancestor:
+
+**ADRs are gone; falsification replaces them.** The ancestor demanded >=2 ADRs in every
+discovery plan. In a MEASUREMENT plan an ADR is premature — nothing has been measured, so
+there is nothing to decide yet. What makes a measurement plan honest is stating IN ADVANCE
+what result would kill the hypothesis. Without it, any observation can be reinterpreted
+after the fact as confirming whatever was already believed, and the measurement becomes
+a ritual that cannot fail.
+
+**The question floor drops from 5 to 3.** Five questions was calibrated for a prior-art
+survey across several projects. A maintenance item is smaller, and a floor that forces
+padding produces questions written to satisfy a counter.
 """
 from __future__ import annotations
 
@@ -20,61 +32,55 @@ import re
 from pathlib import Path
 from typing import Any
 
-from check_research_coverage import _has_defer_corner_marker
+from check_corner_coverage import CORNERS, _has_defer_corner_marker
 
 
-CORNERS = ("tests", "deps", "tools", "techniques")
-# Frontier profile per rules/discover-phd-rigor.md § 2 + ADR 0001-discover-phd-rigor
-# (was 5/10/3 — the ADR-sanctioned widening had not been shipped to this script).
-# Stays inside the LOCKED golden-rule cap (question count <= 15).
-MIN_QUESTIONS = 6
-MAX_QUESTIONS = 14
-MAX_PER_CORNER = 5
-MIN_ADRS = 2
+MIN_QUESTIONS = 3
+MAX_QUESTIONS = 10
+MAX_PER_CORNER = 3
+MIN_FALSIFICATION_CHARS = 40
 
 MANDATORY_SECTIONS = [
-    ("Header", r"^#\s+Discovery\s+Plan:"),
+    ("Header", r"^#\s+Measurement\s+Plan:"),
+    ("Item", r"^\*\*Item:\*\*\s*B-\d+"),
+    ("Repo", r"^\*\*Repo:\*\*\s*\S+"),
+    ("Mode", r"^\*\*Mode:\*\*\s*(?:review|live-test|bug|evolve)\b"),
     ("Context", r"^##\s+Context"),
-    ("Objective", r"^##\s+Objective"),
-    ("In-Scope", r"^##\s+In[- ]Scope"),
-    ("ADRs", r"^##\s+ADRs"),
-    ("Research Questions", r"^##\s+Research\s+Questions"),
-    ("Coverage Matrix", r"^##\s+Coverage\s+Matrix"),
+    ("Hypothesis", r"^##\s+Hypothesis"),
+    ("Falsification", r"^##\s+Falsification"),
+    ("Measurement Questions", r"^##\s+Measurement\s+Questions"),
     ("Halt-loop Checkpoints", r"^##\s+Halt[- ]loop\s+Checkpoints"),
     ("Acceptance Criteria", r"^##\s+Acceptance\s+Criteria"),
-    ("Global Definition of Done", r"^##\s+Global\s+Definition\s+of\s+Done"),
 ]
 
-ADR_HEADER_RE = re.compile(r"^###\s+D\d+\s*(?:—|-)", re.MULTILINE)
-ADRS_SECTION_RE = re.compile(r"^##\s+ADRs\b", re.MULTILINE | re.IGNORECASE)
-QUESTIONS_HEADER_RE = re.compile(r"^##\s+Research\s+Questions\s*$", re.MULTILINE | re.IGNORECASE)
+QUESTIONS_HEADER_RE = re.compile(
+    r"^##\s+Measurement\s+Questions\s*$", re.MULTILINE | re.IGNORECASE
+)
+FALSIFICATION_HEADER_RE = re.compile(r"^##\s+Falsification\b", re.MULTILINE | re.IGNORECASE)
 NEXT_H2_RE = re.compile(r"^##\s+\S", re.MULTILINE)
 TABLE_ROW_RE = re.compile(r"^\|.*\|\s*$", re.MULTILINE)
 QID_RE = re.compile(r"^Q\d+$")
-FASE_A_HEADER_RE = re.compile(r"^\s*Fase\s*A\b", re.IGNORECASE)
-FASE_B_HEADER_RE = re.compile(r"^\s*Fase\s*B\b", re.IGNORECASE)
+PLACEHOLDER_RE = re.compile(r"<!--\s*TBD[\s:].*?-->", re.IGNORECASE | re.DOTALL)
+HEADER_LINE_RE = re.compile(r"^#{1,6}\s+.*$", re.MULTILINE)
+TOOL_HEADER_RE = re.compile(r"^\s*Tool\b", re.IGNORECASE)
+TARGET_HEADER_RE = re.compile(r"^\s*Target\b", re.IGNORECASE)
 
 
 def _check_mandatory_sections(content: str) -> tuple[list[str], list[str]]:
-    """Returns (present_names, missing_names) by regex-matching each header pattern."""
     present: list[str] = []
     missing: list[str] = []
     for name, pattern in MANDATORY_SECTIONS:
-        if re.search(pattern, content, re.MULTILINE | re.IGNORECASE):
-            present.append(name)
-        else:
-            missing.append(name)
+        (present if re.search(pattern, content, re.MULTILINE | re.IGNORECASE) else missing).append(name)
     return present, missing
 
 
-def _extract_questions_section(content: str) -> str:
-    header = QUESTIONS_HEADER_RE.search(content)
+def _section_body(content: str, header_re: re.Pattern[str]) -> str:
+    header = header_re.search(content)
     if not header:
         return ""
     start = header.end()
     next_h2 = NEXT_H2_RE.search(content, pos=start)
-    end = next_h2.start() if next_h2 else len(content)
-    return content[start:end]
+    return content[start : next_h2.start()] if next_h2 else content[start:]
 
 
 def _split_row(row: str) -> list[str]:
@@ -82,42 +88,32 @@ def _split_row(row: str) -> list[str]:
 
 
 def _find_method_column_indices(questions_section: str) -> tuple[int | None, int | None]:
-    """Find col indices of 'Fase A' and 'Fase B' by HEADER TEXT match (per EC-2).
+    """Locate the Tool and Target columns by HEADER TEXT, not by position.
 
-    Returns (idx_a, idx_b). Either may be None if not found (header renamed).
-    The header row is the first table row that contains 'Fase' in any cell.
+    Position-based lookup breaks the moment someone inserts a column, and it breaks
+    silently — every question reads as methodless, or worse, as fine.
     """
     for row_match in TABLE_ROW_RE.finditer(questions_section):
-        row = row_match.group(0)
-        cells = _split_row(row)
-        if not any("fase" in c.lower() for c in cells):
+        cells = _split_row(row_match.group(0))
+        if not any(TOOL_HEADER_RE.match(c) or TARGET_HEADER_RE.match(c) for c in cells):
             continue
-        idx_a = next((i for i, c in enumerate(cells) if FASE_A_HEADER_RE.match(c)), None)
-        idx_b = next((i for i, c in enumerate(cells) if FASE_B_HEADER_RE.match(c)), None)
-        return idx_a, idx_b
+        idx_tool = next((i for i, c in enumerate(cells) if TOOL_HEADER_RE.match(c)), None)
+        idx_target = next((i for i, c in enumerate(cells) if TARGET_HEADER_RE.match(c)), None)
+        return idx_tool, idx_target
     return None, None
 
 
 def _parse_question_rows(questions_section: str) -> list[dict[str, Any]]:
-    """Return rows where col-1 matches Q\\d+, each with corner + raw cells."""
     rows: list[dict[str, Any]] = []
     for row_match in TABLE_ROW_RE.finditer(questions_section):
-        row = row_match.group(0)
-        cells = _split_row(row)
-        if len(cells) < 4:
+        cells = _split_row(row_match.group(0))
+        if len(cells) < 4 or not QID_RE.match(cells[1]):
             continue
-        first = cells[1] if len(cells) > 1 else ""
-        if not QID_RE.match(first):
-            continue
-        corner = cells[3].strip().strip("`").lower() if len(cells) > 3 else ""
-        rows.append({"q_id": first, "corner": corner, "cells": cells})
+        rows.append({"q_id": cells[1], "corner": cells[3].strip().strip("`").lower(), "cells": cells})
     return rows
 
 
-def _check_question_budget(
-    content: str, q_rows: list[dict[str, Any]]
-) -> list[str]:
-    """Returns list of violation identifiers. Empty list = no violations."""
+def _check_question_budget(content: str, q_rows: list[dict[str, Any]]) -> list[str]:
     violations: list[str] = []
     total = len(q_rows)
     if total < MIN_QUESTIONS:
@@ -125,7 +121,7 @@ def _check_question_budget(
     if total > MAX_QUESTIONS:
         violations.append(f"too_many_questions ({total} > {MAX_QUESTIONS})")
 
-    counts: dict[str, int] = {c: 0 for c in CORNERS}
+    counts = {c: 0 for c in CORNERS}
     for row in q_rows:
         if row["corner"] in counts:
             counts[row["corner"]] += 1
@@ -138,74 +134,72 @@ def _check_question_budget(
     return violations
 
 
-def _check_methods(q_rows: list[dict[str, Any]], idx_a: int | None, idx_b: int | None) -> list[str]:
-    """Returns list of Q-IDs with method violations.
+def _check_methods(
+    q_rows: list[dict[str, Any]], idx_tool: int | None, idx_target: int | None
+) -> list[str]:
+    """Q-IDs missing a Tool or a Target.
 
-    Per EC-2: columns located by HEADER TEXT (idx_a, idx_b passed in).
-    Rule: Fase A must be non-empty (the literal token 'SKIP' is the text-shape exemption
-    and is itself non-empty, so the same check covers both cases). Fase B must be non-empty.
-    If header row contained neither 'Fase A' nor 'Fase B', emit '__header_not_found__'.
+    A question with no tool is a wish; one with no target is a tool pointed at nothing.
+    Either way the measurement cannot be run as written.
     """
-    if idx_a is None and idx_b is None:
+    if idx_tool is None and idx_target is None:
         return ["__header_not_found__"]
 
     violations: list[str] = []
     for row in q_rows:
         cells = row["cells"]
-        fase_a = cells[idx_a].strip() if idx_a is not None and idx_a < len(cells) else ""
-        fase_b = cells[idx_b].strip() if idx_b is not None and idx_b < len(cells) else ""
-        if fase_a == "" or fase_b == "":
+        tool = cells[idx_tool].strip() if idx_tool is not None and idx_tool < len(cells) else ""
+        target = cells[idx_target].strip() if idx_target is not None and idx_target < len(cells) else ""
+        if not tool or not target:
             violations.append(row["q_id"])
     return violations
 
 
-def _count_adrs(content: str) -> int:
-    """Count `### D\\d+ —` headers within the ## ADRs section body."""
-    adrs_match = ADRS_SECTION_RE.search(content)
-    if not adrs_match:
-        return 0
-    start = adrs_match.end()
-    next_h2 = NEXT_H2_RE.search(content, pos=start)
-    body = content[start : next_h2.start()] if next_h2 else content[start:]
-    return len(ADR_HEADER_RE.findall(body))
+def _check_falsification(content: str) -> tuple[bool, int]:
+    """Return (missing, char_count) for the `## Falsification` section body."""
+    body = _section_body(content, FALSIFICATION_HEADER_RE)
+    stripped = HEADER_LINE_RE.sub("", PLACEHOLDER_RE.sub("", body)).strip()
+    return len(stripped) < MIN_FALSIFICATION_CHARS, len(stripped)
 
 
 def check_plan_completeness(plan_path: Path) -> dict[str, Any]:
     content = plan_path.read_text(encoding="utf-8-sig")
 
     present, missing = _check_mandatory_sections(content)
-    q_section = _extract_questions_section(content)
-    idx_a, idx_b = _find_method_column_indices(q_section)
+    q_section = _section_body(content, QUESTIONS_HEADER_RE)
+    idx_tool, idx_target = _find_method_column_indices(q_section)
     q_rows = _parse_question_rows(q_section)
     budget_violations = _check_question_budget(content, q_rows)
-    methodless = _check_methods(q_rows, idx_a, idx_b)
-    adr_count = _count_adrs(content)
+    methodless = _check_methods(q_rows, idx_tool, idx_target)
+    falsification_missing, falsification_chars = _check_falsification(content)
 
     contributors: list[str] = [f"{len(present)}/{len(MANDATORY_SECTIONS)} mandatory sections present"]
-    if adr_count >= MIN_ADRS:
-        contributors.append(f"{adr_count} ADRs found")
+    if not falsification_missing:
+        contributors.append("Falsification criterion stated")
     if not budget_violations:
         contributors.append(f"Question budget OK ({len(q_rows)} Qs)")
     if not methodless:
-        contributors.append("Every Q has Fase A + Fase B populated")
+        contributors.append("Every Q names a Tool and a Target")
 
-    detractors: list[str] = []
-    for m in missing[:3]:
-        detractors.append(f"Missing section: {m}")
-    if adr_count < MIN_ADRS:
-        detractors.append(f"Only {adr_count} ADRs found (need {MIN_ADRS}+)")
+    detractors: list[str] = [f"Missing section: {m}" for m in missing[:3]]
+    if falsification_missing:
+        detractors.append(
+            "No falsification criterion — nothing stated in advance would kill the hypothesis"
+        )
     detractors.extend(f"Budget: {v}" for v in budget_violations[:3])
     if methodless:
-        detractors.append(f"Methodless Qs: {methodless[:3]}")
+        detractors.append(f"Questions without Tool/Target: {methodless[:3]}")
 
     return {
         "total_required": len(MANDATORY_SECTIONS),
         "found": len(present),
         "present": present,
         "missing_mandatory": missing,
-        "adr_count": adr_count,
+        "falsification_missing": falsification_missing,
+        "falsification_chars": falsification_chars,
         "budget_violations": budget_violations,
         "methodless_questions": methodless,
+        "question_count": len(q_rows),
         "contributors": contributors[:3],
         "detractors": detractors[:3],
     }

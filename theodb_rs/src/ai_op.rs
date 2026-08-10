@@ -14,7 +14,7 @@
 //!     reduction is observable via `ai.call_count()` (the wiring-triad runtime metric).
 //!
 //! Honest ceiling (ADR D4): a composability / round-trip win with STATISTICAL accuracy — orthogonal to vector
-//! recall. Any latency/accuracy claim is measured in `docs/benchmarks/m102-ai-operators.*`, never asserted here.
+//! recall. Any latency/accuracy claim is measured in `wiki/benchmarks/m102-ai-operators.*`, never asserted here.
 
 use pgrx::prelude::*;
 

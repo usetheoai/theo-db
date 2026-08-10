@@ -29,7 +29,7 @@ pub(super) fn parallel_threshold() -> usize {
 
 /// Whether the build extends the candidate pool with the candidates' own neighbors before the diversity select
 /// (Malkov-Yashunin `extendCandidates`). Default ON — measured to lift recall@10 0.974→0.990 at 500k×768d by
-/// closing the routing/navigability gap on clustered data (`docs/benchmarks/gap1-extend-candidates.md`). Opt-out via
+/// closing the routing/navigability gap on clustered data (`wiki/benchmarks/gap1-extend-candidates.md`). Opt-out via
 /// `THEODB_HNSW_EXTEND_CANDIDATES=0` for the ~2-3× faster build when recall-per-ef is not the priority.
 pub(super) fn extend_candidates() -> bool {
     !matches!(
@@ -172,7 +172,7 @@ fn insert_node(
         // manter o conjunto `selected` limpo (diversity-pruned dos MELHORES candidatos) é superior a mesclá-lo com
         // back-links arbitrários. O OVERWRITE fica. O teto de recall (~0.974 a 500k) do build paralelo NÃO é o
         // lost-update — a causa-raiz continua não-isolada e exige investigação de grafo própria (M60). Ver
-        // `docs/benchmarks/m57-sbq-superiority.md` § caveat 3 (duas tentativas de fix refutadas por medição).
+        // `wiki/benchmarks/m57-sbq-superiority.md` § caveat 3 (duas tentativas de fix refutadas por medição).
         {
             let mut nn = neighbors[node].write().unwrap();
             if layer < nn.len() {

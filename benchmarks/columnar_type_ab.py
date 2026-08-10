@@ -8,7 +8,7 @@ the TYPE space the ClickBench A/B never exercises. Includes a POSITIVE CONTROL (
 flag) as its self-test. Design: blueprint `m163-type-coverage-ab-blueprint.md` (ADR-1 bespoke pytest, reuse the shipped
 symmetric-EXCEPT oracle, no new dep).
 
-CLI: `python3 benchmarks/columnar_type_ab.py [--out docs/benchmarks/m163-type-coverage-verdict.md]` → exit 0 iff every
+CLI: `python3 benchmarks/columnar_type_ab.py [--out wiki/benchmarks/m163-type-coverage-verdict.md]` → exit 0 iff every
 routed case is diverged=0 AND every expected-decline case is declined AND the positive control is caught.
 """
 from __future__ import annotations

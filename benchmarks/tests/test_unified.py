@@ -320,7 +320,7 @@ def test_import_vectors_dim_mismatch(admin_conn):
 def test_migrate_doc_runnable_sql_executes(admin_conn):
     """The migration guide's SQL actually runs against the container (T2.2) — catches a broken example
     (e.g. a dim-mismatch) that a string grep would miss. Runs the runnable ```sql blocks in order."""
-    assert MIGRATE_DOC.exists(), "docs/migrate-from-pinecone.md missing"
+    assert MIGRATE_DOC.exists(), "wiki/guides/migrate-from-pinecone.md missing"
     text = MIGRATE_DOC.read_text()
     assert "theodb.import_vectors" in text  # the guide must teach the function
     blocks = re.findall(r"```sql\n(.*?)```", text, re.DOTALL)
@@ -339,7 +339,7 @@ def test_migrate_doc_runnable_sql_executes(admin_conn):
 
 def test_demo_doc_has_no_perf_claim():
     """The 1-vs-2 demo measures simplicity/consistency, NEVER speed (ADR 0005 / public-copy.md)."""
-    assert DEMO_DOC.exists(), "docs/unification-1-vs-2-systems.md missing"
+    assert DEMO_DOC.exists(), "wiki/guides/unification-1-vs-2-systems.md missing"
     text = DEMO_DOC.read_text().lower()
     banned = ["faster", "x speedup", "lower latency", "higher qps", "outperform", "ms p95", "throughput win"]
     hits = [b for b in banned if b in text]

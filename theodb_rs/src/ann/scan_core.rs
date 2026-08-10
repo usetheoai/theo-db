@@ -178,7 +178,7 @@ pub(crate) fn ground_search_nodes<S: NeighborSource>(
 /// M118: resume-from-discarded state for the iterative filtered scan. Holds the ground-layer beam frontier
 /// (`cands` = pgvector 0.8.5's `so->discarded`) + `visited` (`so->v`) so the search can be RESUMED from the
 /// retained frontier across `amgettuple` batches instead of re-searching the whole graph with a doubled `ef`
-/// (the M52 cost measured at ~3× vs pgvector in `docs/benchmarks/m52-filtered-ann.md`). Each [`next_batch`]
+/// (the M52 cost measured at ~3× vs pgvector in `wiki/benchmarks/m52-filtered-ann.md`). Each [`next_batch`]
 /// runs ONE bounded-`ef` beam pass seeded from the retained frontier and returns its emittable top-`ef`
 /// (ascending); the frontier + visited persist for the next call, mirroring pgvector `ResumeScanItems`.
 ///

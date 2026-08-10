@@ -1,12 +1,12 @@
 # Discover-Plan Golden Rule
 
-Locked unbreakable contract that `/discover-plan-confidence` reads to score discovery plans (the *plan* of investigation, distinct from the resulting *blueprint*). Mirrors the discover-blueprint-golden-rule pattern.
+Locked unbreakable contract that `/discover-plan-confidence` reads to score measurement plans (the *plan* of investigation, distinct from the resulting *opportunity*). Mirrors the discover-opportunity-golden-rule pattern.
 
 Without this file, `/discover-plan-confidence` falls back to the example template in `skills/discover-plan-confidence/templates/` (when present), or uses defaults.
 
 ## § 1 — The unbreakable rule (LOCKED)
 
-A discovery plan is `INVALID` and cannot produce a `SHIPPABLE` verdict when any of the following holds:
+A measurement plan is `INVALID` and cannot produce a `SHIPPABLE` verdict when any of the following holds:
 
 1. **Empty research question** — `## Research questions` is missing or has zero non-placeholder entries.
 2. **Fabricated source citation** — at least one `knowledge-base/references/{project}` cited in the plan does not exist when checked via `Path.exists()`.
@@ -17,8 +17,8 @@ A discovery plan is `INVALID` and cannot produce a `SHIPPABLE` verdict when any 
 
 | Requirement | Enforcement |
 |---|---|
-| Score capping — capped at 49 when any hard cap fires | `skills/discover-plan-confidence/scripts/run_discover_plan_score.py` |
-| Mandatory verdict — `INVALID` instead of soft band | `run_discover_plan_score.py` |
+| Score capping — capped at 49 when any hard cap fires | `skills/discover-plan-confidence/scripts/run_measurement_plan_score.py` |
+| Mandatory verdict — `INVALID` instead of soft band | `run_measurement_plan_score.py` |
 | Vocabulary lock — "shippable" never appears when capped | Rendering invariant |
 | Hard cap audit — JSON `hard_caps_triggered` non-empty | Schema invariant |
 
@@ -27,14 +27,14 @@ A discovery plan is `INVALID` and cannot produce a `SHIPPABLE` verdict when any 
 | Rule | Enforcement script |
 |---|---|
 | All declared coverage corners have ≥ 1 question | `check_coverage_corners.py` |
-| All `knowledge-base/references/{...}` paths resolve | `check_reference_citations.py` |
+| All `knowledge-base/references/{...}` paths resolve | `check_measurement_targets.py` |
 | Question count ≤ 15 | `check_question_budget.py` |
 | `--skip-checks` flag does not exist and SHALL NOT be added | Constructor invariant |
 | `hard_caps_triggered` MUST be non-empty when verdict==INVALID | JSON schema invariant |
 
 ## § 4 — Why the rule exists
 
-A discovery plan that does not declare research questions is investigation theatre. A plan that cites references that do not exist will produce a blueprint built on fiction. A plan with > 15 questions has not been scoped — it is a research project, not a discovery cycle.
+A measurement plan that does not declare research questions is investigation theatre. A plan that cites references that do not exist will produce a opportunity built on fiction. A plan with > 15 questions has not been scoped — it is a research project, not a discovery cycle.
 
 ## § 5 — Verdict tokens (LOCKED)
 

@@ -36,12 +36,38 @@ LAST_COMMIT=$(git diff --name-only HEAD~1..HEAD 2>/dev/null || true)
 
 ALL_FILES=$(echo -e "${UNSTAGED}\n${STAGED}\n${LAST_COMMIT}" | sort -u | grep -v '^$' || true)
 
-if [ -z "$ALL_FILES" ]; then
-  exit 0
-fi
-
 WARNINGS=()
 BLOCKERS=()
+
+# ----------------------------------------------------------------------------
+# Reference leakage (third layer of the provenance guard) — evaluated BEFORE the
+# no-diff early exit on purpose. Layers 1 and 2 live in validate-command.sh and
+# block copying content OUT of the study zone and citing its paths in commit
+# messages; neither sees a manual paste. This checks the RESULT: a block of
+# consecutive lines shared between the project and the zone.
+# It must run even when the session produced only UNTRACKED files — `git diff`
+# does not list those, so the early exit below would skip the check exactly in
+# the "pasted a brand-new file" case, which is the likeliest way a copy lands.
+# Advisory by design: exact-shingle matching is strong evidence, not proof, and a
+# false BLOCK would be worse than a WARN. SKIPs when the zone is absent.
+# ----------------------------------------------------------------------------
+LEAK_SCRIPT="$PROJECT_DIR/scripts/check_reference_leakage.py"
+if [ -f "$LEAK_SCRIPT" ] && command -v python3 >/dev/null 2>&1; then
+  LEAK_OUT=$(python3 "$LEAK_SCRIPT" --repo "$PROJECT_DIR" --strict 2>&1 || true)
+  if echo "$LEAK_OUT" | grep -q "SUSPECTED COPY"; then
+    msg="Suspected literal copy of third-party study material (provenance risk). Review each match; if legitimate, record source + licence in CHANGELOG.md:"
+    while IFS= read -r line; do
+      case "$line" in
+        *"shares"*"consecutive lines with"*) msg+="\n    -${line}" ;;
+      esac
+    done <<< "$LEAK_OUT"
+    WARNINGS+=("$msg")
+  fi
+fi
+
+if [ -z "$ALL_FILES" ] && [ ${#WARNINGS[@]} -eq 0 ]; then
+  exit 0
+fi
 
 # Escape hatch
 WARN_ONLY="${STOP_VALIDATION_WARN_ONLY:-0}"
@@ -56,12 +82,10 @@ WARN_ONLY="${STOP_VALIDATION_WARN_ONLY:-0}"
 #   <name>.spec.<ext>          (TS/JS Jasmine/RSpec)
 #   test_<name>.<ext>          (Python pytest)
 # Falls back to "ANY test file in the same directory" (idiomatic in some langs).
-# Skips generated/doc files, obvious vendored/third-party trees, and the
-# .claude/ pipeline tooling (it is dev scaffolding with its own tests, not the
-# project's consumer-facing production source — so it never gates the CHANGELOG).
+# Skips generated/doc files and obvious vendored/third-party trees.
 SRC_CHANGED=$(echo "$ALL_FILES" \
   | grep -E '\.(go|py|ts|tsx|js|jsx|rs|java|kt|rb|cs)$' \
-  | grep -vE '(^|/)(node_modules|vendor|dist|build|target|\.venv|__pycache__|\.next|\.nuxt|\.claude)/' \
+  | grep -vE '(^|/)(node_modules|vendor|dist|build|target|\.venv|__pycache__|\.next|\.nuxt)/' \
   | grep -vE '(_test|\.test|\.spec)\.[a-z]+$' \
   | grep -vE '(^|/)test_[^/]+\.[a-z]+$' \
   | grep -vE '(^|/)zz_generated[^/]*\.go$' \
@@ -114,8 +138,7 @@ if [ -f "CHANGELOG.md" ]; then
   CODE_CHANGED=$(echo "$ALL_FILES" \
     | grep -E '\.(go|py|ts|tsx|js|jsx|rs|java|kt|rb|cs)$' \
     | grep -vE '(_test|\.test|\.spec)\.[a-z]+$' \
-    | grep -vE '(^|/)test_[^/]+\.[a-z]+$' \
-    | grep -vE '(^|/)(node_modules|vendor|dist|build|target|\.venv|__pycache__|\.claude)/' \
+    | grep -vE '(^|/)(node_modules|vendor|dist|build|target|\.venv|__pycache__)/' \
     || true)
   if [ -n "$CODE_CHANGED" ] && ! echo "$ALL_FILES" | grep -qE '^CHANGELOG\.md$'; then
     msg="CHANGELOG.md not updated despite production source changes (Inquebrável Rule 6; cycle-review BLOCKER). Add an entry to [Unreleased] before stopping. Override with STOP_VALIDATION_WARN_ONLY=1 only when the change is a bulk reorg with the rationale documented separately."
@@ -132,7 +155,6 @@ fi
 # ----------------------------------------------------------------------------
 SECRET_HITS=$(echo "$ALL_FILES" \
   | grep -E '(^|/)(\.env(\.[a-z0-9_-]+)?|credentials([._-][a-z0-9]+)?|[a-z0-9_-]*secret[s]?(\.[a-z0-9_-]+)?\.(ya?ml|json|env|txt))$|\.(pem|key|p12|pfx|jks)$' \
-  | grep -vE '\.(example|sample|template|dist)$' \
   || true)
 if [ -n "$SECRET_HITS" ]; then
   msg="Secret-pattern files appear in this session's diff (cycle-review BLOCKER). Verify they are intentionally NOT secrets, or remove them before stopping:"

@@ -8,10 +8,10 @@ Applies to:
 - `README.md` (any directory)
 - `PITCH.md`
 - `docs/marketing/**/*.md`
-- `docs/guides/**/*.md`
+- `wiki/guides/**/*.md`
 
 Does NOT apply to:
-- `docs/exploration-reports/`, `docs/benchmarks/`, `docs/adr/` — technical-direct
+- `docs/exploration-reports/`, `wiki/benchmarks/`, `wiki/decisions/` — technical-direct
 - `CLAUDE.md`, `PRD.md`, `CHANGELOG.md`, source code
 - `knowledge-base/references/**` — third-party study material
 
@@ -37,7 +37,7 @@ Until v1.0 with sustained measured evidence in real production:
 ## § 4 — Comparative claims
 
 Performance comparisons require:
-1. A reproducible benchmark artifact under `docs/benchmarks/`.
+1. A reproducible benchmark artifact under `wiki/benchmarks/`.
 2. Independent reproduction by a third party.
 3. The benchmark linked in the same paragraph as the claim.
 

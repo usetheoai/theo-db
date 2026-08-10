@@ -13,15 +13,15 @@ blocked on roadmap metadata.
 
 Side effects (when --commit is passed AND a flip happened):
     - `git add ROADMAP.md && git commit -m "chore(roadmap): mark M<N> done (v<version>)"` on the current branch
-    - Append/create `.claude/knowledge-base/roadmap-runs/M<N>-<date>.md` with completion metadata
+    - Append/create `knowledge-base/roadmap-runs/M<N>-<date>.md` with completion metadata
 
 Usage:
     python3 flip_milestone_checkbox.py \
         --roadmap ROADMAP.md \
         --milestone-id M3 \
         --version 0.4.0 \
-        --plan .claude/knowledge-base/plans/foo-plan.md \
-        --release-log .claude/knowledge-base/releases/v0.4.0-release.md \
+        --plan knowledge-base/plans/foo-plan.md \
+        --release-log knowledge-base/releases/v0.4.0-release.md \
         --commit
 
 Exit codes:
@@ -42,7 +42,7 @@ from pathlib import Path
 def _header_re(milestone_id: str) -> re.Pattern[str]:
     """Match the literal header for the given milestone, in either [ ] or [x] state."""
     return re.compile(
-        rf"^(#{{2,3}}\s+{re.escape(milestone_id)}\s+[—\-]{{1,2}}\s+\[)([ x])(\]\s+.+?)$",
+        rf"^(###\s+{re.escape(milestone_id)}\s+[—\-]{{1,2}}\s+\[)([ x])(\]\s+.+?)$",
         re.MULTILINE,
     )
 
@@ -131,6 +131,23 @@ def _append_roadmap_run(
     return target
 
 
+def _default_runs_dir(project_root: Path) -> Path:
+    """Resolve the canonical roadmap-runs directory for this project's layout.
+
+    Defaulting to a CWD-relative `knowledge-base/roadmap-runs` is what split the
+    knowledge-base in every consumer: the flip wrote its run-file to the project
+    ROOT while every other cycle wrote under `.claude/`, so half the audit trail
+    landed beside the other half and nobody noticed — an auditor reading one side
+    reports absence where the evidence is on the other.
+
+    See rules/knowledge-base-location.md: `.claude/knowledge-base/` is canonical,
+    except in the standalone layout (the kit's own repo).
+    """
+    if (project_root / ".claude").exists():
+        return project_root / ".claude" / "knowledge-base" / "roadmap-runs"
+    return project_root / "knowledge-base" / "roadmap-runs"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--roadmap", type=Path, default=Path("ROADMAP.md"))
@@ -141,8 +158,11 @@ def main() -> int:
     parser.add_argument(
         "--roadmap-runs-dir",
         type=Path,
-        default=Path(".claude/knowledge-base/roadmap-runs"),
-        help="Directory for the roadmap-runs audit file (canonical location the cycle kit writes to).",
+        default=None,
+        help=(
+            "Directory for the roadmap-runs audit file. Defaults to the canonical "
+            "knowledge-base for this layout (see rules/knowledge-base-location.md)."
+        ),
     )
     parser.add_argument("--commit", action="store_true", help="Stage & commit ROADMAP.md on the current branch.")
     args = parser.parse_args()
@@ -154,6 +174,8 @@ def main() -> int:
     if not re.match(r"^M\d+$", args.milestone_id):
         print(f"invalid milestone_id (expected M<N>): {args.milestone_id!r}", file=sys.stderr)
         return 2
+
+    runs_dir = args.roadmap_runs_dir or _default_runs_dir(args.roadmap.resolve().parent)
 
     text = args.roadmap.read_text(encoding="utf-8")
     new_text, status = flip(text, args.milestone_id)
@@ -178,7 +200,7 @@ def main() -> int:
         flip_sha = _git_commit(args.roadmap, args.milestone_id, args.version)
 
     run_file = _append_roadmap_run(
-        args.roadmap_runs_dir, args.milestone_id, args.plan, args.release_log, flip_sha
+        runs_dir, args.milestone_id, args.plan, args.release_log, flip_sha
     )
     print(
         f"FLIPPED {args.milestone_id} [ ]→[x] in {args.roadmap}; "

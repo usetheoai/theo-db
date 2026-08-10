@@ -56,4 +56,4 @@ emit("M91S_DONE")
 
 # --- M91 probe-recovery diagnostic (ultra-selective): appended for reproducibility ---
 # Run separately: builds one v7 index, sweeps probes {64,128,256,500,1000} at sel {0.01%,0.1%,1%}.
-# See m91_ultra.py logic in docs/benchmarks/m91-adaptive-filter.json probe_recovery_ultra_selective.
+# See m91_ultra.py logic in benchmarks/artifacts/m91-adaptive-filter.json probe_recovery_ultra_selective.

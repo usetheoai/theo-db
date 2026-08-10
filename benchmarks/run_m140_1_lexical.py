@@ -11,8 +11,8 @@ ts_rank axis is `skipped` with a reason, never a fabricated number.
 
 Usage:
   python3 run_m140_1_lexical.py --smoke --out /tmp/m140_smoke.json
-  python3 run_m140_1_lexical.py --dataset hdfs --seeds 3 --n 2000 --out docs/benchmarks/m140-1-data/logproxy.json
-  python3 run_m140_1_lexical.py --beir scifact,nfcorpus --out docs/benchmarks/m140-1-data/beir.json
+  python3 run_m140_1_lexical.py --dataset hdfs --seeds 3 --n 2000 --out benchmarks/artifacts/m140-1-data/logproxy.json
+  python3 run_m140_1_lexical.py --beir scifact,nfcorpus --out benchmarks/artifacts/m140-1-data/beir.json
 """
 from __future__ import annotations
 

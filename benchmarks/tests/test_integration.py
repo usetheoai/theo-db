@@ -99,7 +99,7 @@ def test_harness_measures_diskann(db, tmp_path):
 def test_diskann_reaches_scann_quality_recall(db, tmp_path):
     # M14 fork-decision evidence: DiskANN (StreamingDiskANN, the shipped permissive ANN) must reach the
     # ScaNN-quality bar (recall@10 >= 0.90 at usable QPS). This is the measurable gate the no-fork decision
-    # (docs/adr/0004) rests on — if it ever fails, the fork-trigger re-opens (PRD fork-gate policy).
+    # (wiki/decisions/0004) rests on — if it ever fails, the fork-trigger re-opens (PRD fork-gate policy).
     from theodb_bench.__main__ import build_config, build_parser
     from theodb_bench.harness import run_benchmark
 

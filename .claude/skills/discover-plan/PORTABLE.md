@@ -1,131 +1,119 @@
 # Discover-Plan — Portable Installation
 
-This skill works in **any project** that uses Claude Code AND has a `.claude/knowledge-base/references/` (or equivalent) directory of read-only reference implementations to investigate.
+This skill works in **any project** that uses Claude Code and maintains a `BACKLOG.md` registry of maintenance items (see `rules/cycle-backlog.md`).
+
+It has no reference-clones requirement. The ancestor of this skill planned investigations into *other people's* code under `knowledge-base/references/`; this one plans measurements of **your own system**, so the only inputs it needs are your repo, your rules, and the item being measured.
 
 ## What you get
 
-- `/discover-plan {topic-slug}` — generates a discovery plan saved at `.claude/knowledge-base/discoveries/plans/{slug}-plan.md`
-- A template (`templates/discovery-plan-template.md`) that bakes in Fase A → Fase B (ast-grep then Read), Coverage Matrix, ADRs, halt-loop checkpoints
+- `/discover-plan B-NNN` — writes a measurement plan to `knowledge-base/discoveries/plans/{slug}-plan.md`
+- A template (`templates/measurement-plan-template.md`) that bakes in the falsification criterion, Tool + Target per question, the four corners, and halt-loop checkpoints
 
-The skill itself produces NO output until invoked. It is pure instructions + template + fixtures.
+The skill produces no output until invoked. It is instructions plus a template.
 
-## Quick install (2 steps)
+## Quick install
 
 ### 1. Copy the skill directory
 
 ```bash
-cp -r /path/to/source/.claude/skills/discover-plan .claude/skills/
+cp -r /path/to/source/skills/discover-plan .claude/skills/
 ```
 
-The skill walks UP from the saved plan path to find your project root (`.claude/` or `.git/` marker).
+The skill walks UP from the saved plan path to find your project root (`.claude/` or `.git/` marker), so both the standalone (`rules/`) and plugin (`.claude/rules/`) layouts work.
 
 ### 2. Ensure the consumer chain exists
 
-`/discover-plan` is only useful if at least `/discover-edge-cases` is installed alongside (next step in the chain). The full chain is:
+The full chain:
 
 ```
-/discover-plan → /discover-edge-cases → /discover-execute → /discover-confidence → (/discover-improve if needed) → /discover-confidence re-score
+/discover-plan → /discover-edge-cases → /discover-plan-confidence → /discover-execute → /discover-confidence → (/discover-improve if needed)
 ```
 
-If your project has all five: full pipeline. If only `/discover-plan`: standalone planning, but `/discover-execute` references in the SKILL.md will be unactionable until the rest are installed.
+`/discover-plan` alone gives you planning, but its references to downstream phases stay unactionable until the rest are installed.
 
 ## Project requirements
 
 ### Required
 
-- **`.claude/rules/` directory** with at least `architecture.md` and `testing.md` (or your project's equivalents). Step 0 of the protocol mandates reading them. If missing, the skill falls back to a generic "no rules" plan (lower quality output).
-- **A reference-clones directory** — the SKILL.md examples cite `.claude/knowledge-base/references/project-a/`, `.claude/knowledge-base/references/project-b/`, `.claude/knowledge-base/references/project-c/`. If your project uses a different path (e.g., `vendor/`, `third_party/`, `studies/`), see § Customization below.
-- **`.claude/knowledge-base/discoveries/plans/` directory** — where the plan is saved. Created on first use if missing.
+- **`rules/` (or `.claude/rules/`)** with at least `architecture.md` and `testing.md`, or your equivalents. Step 0 mandates reading them. Missing rules degrade the plan to a generic one.
+- **`BACKLOG.md`** at the workspace root. The skill takes a `B-NNN` item as its input — the hypothesis it plans to measure. Without a registry there is nothing to plan against; run `/backlog-init` first.
+- **`knowledge-base/discoveries/plans/`** — created on first use if absent.
+
+### Required for `--mode live-test` only
+
+- **`rules/live-target.txt`** declaring the domain's live surface. The skill **refuses** to plan a live probe against an undeclared domain rather than improvising one. If your project has no live surface, this file is unnecessary and `live-test` simply never applies.
 
 ### Optional but recommended
 
-- A foundation doc (e.g., a landscape survey) in `docs/` — Step 1 reads it for inventory of what is already known. If absent, skill skips that step.
-- Prior exploration reports under `docs/exploration-reports/*.md` (if any) — the plan cross-references them.
-- `CLAUDE.md § Architectural Decisions Locked` — root-level lock list. Without it, ADRs in the plan won't reference upstream decisions.
+- **`rules/current-constraint.md`** — the constraint lens. Absent or undeclared, the constraint corner is deferred, which is the expected path rather than a failure.
+- Prior opportunities under `knowledge-base/discoveries/opportunities/` — Step 1 reads them so a hypothesis killed three months ago is not silently re-measured.
 
 ## What happens out of the box
 
-When you invoke `/discover-plan {topic-slug}`:
-
-1. Reads `.claude/rules/` to internalize project principles
-2. Reads any `docs/*.md` foundation docs + `CLAUDE.md` (if present) for context inventory
-3. Lists `.claude/knowledge-base/references/{project-a,project-b,project-c}/` top-level structure (or your equivalent)
-4. Defines investigation targets (in-scope / out-of-scope)
-5. Declares four-corner coverage (5-10 questions total, max 3 per corner)
-6. Writes the plan at `.claude/knowledge-base/discoveries/plans/{slug}-plan.md`
+1. Reads `rules/` to internalize project principles, plus `current-constraint.md`
+2. Reads the `B-NNN` block and prior opportunities touching the same repo
+3. Confirms or reclassifies the mode (`review` / `live-test` / `bug` / `evolve`)
+4. Declares the four corners, normally deferring the constraint corner
+5. Writes the falsification criterion **before** the questions
+6. Pre-validates every target by opening it
+7. Writes the plan
 
 ## Customizing for your project
 
-### 1. Different reference-clones directory
+### Domains and repo routing
 
-If your project uses `vendor/` instead of `.claude/knowledge-base/references/`:
+The eight domains in `rules/cycle-backlog.md § Domain routing` are specific to the Theo ecosystem. For your own, edit that table — the skill reads `domain` and `repo` from the item and does not hardcode names.
 
-```bash
-# Find every .claude/knowledge-base/references/ mention in the skill and replace
-sed -i 's|.claude/knowledge-base/references/|vendor/|g' .claude/skills/discover-plan/SKILL.md
-sed -i 's|.claude/knowledge-base/references/|vendor/|g' .claude/skills/discover-plan/templates/discovery-plan-template.md
-```
+### Question budget
 
-Or simpler: add a project-specific override at `.claude/rules/discover-plan-overrides.md` that the skill reads first.
+Total 3-10, max 3 per corner, min 1 per corner or a `DEFER-CORNER` marker. The floor is 3 because maintenance items are small; raising it forces padding, and a question written to satisfy a counter measures nothing. Both bounds live in `skills/discover-plan-confidence/scripts/check_plan_completeness.py` (`MIN_QUESTIONS` / `MAX_QUESTIONS`) — change them there, not only in prose, or the gate and the guidance will disagree.
 
-### 2. Different reference projects
+### The four corners
 
-The SKILL.md examples cite Project A / Project B / Project C. To investigate different projects, just use them in your `{topic-slug}` and Research Questions — the skill doesn't enforce specific project names. The "1 question per corner" rule applies to whatever projects you list.
+Evidence / Constraint Relation / Blast Radius / Verification are tuned for maintaining a running system. Changing them means editing **three** places or the pieces drift apart:
 
-### 3. Different "four corners"
+1. `SKILL.md § Step 3`
+2. `templates/measurement-plan-template.md`
+3. `skills/discover-plan-confidence/scripts/check_corner_coverage.py` (`CORNERS`) **and** its sibling in `skills/discover-confidence/`
 
-The four corners (tests / deps / tools / techniques) are tuned for software-implementation investigations. For different domains, edit the corner table in `SKILL.md § Step 3` AND in the template's Coverage Matrix.
-
-Examples:
-
-- **Academic-paper survey**: corners might be methodology / dataset / baselines / results
-- **Library benchmark**: corners might be correctness / latency / memory / API surface
-- **Architectural pattern study**: corners might be context / problem / forces / consequences
-
-If you change corners, update BOTH the SKILL.md AND `templates/discovery-plan-template.md` § Coverage Matrix table.
-
-### 4. Time-budget defaults
-
-The template suggests "Project A: 4h, Project B: 2h, Project C: 1h" as illustrative. For your project, set per-discovery defaults based on your team's calibration. After 5-10 real discoveries, you'll know the realistic per-project budget.
+Blast Radius is the corner most worth keeping. It earns its place wherever repos form a dependency graph: a change is dangerous in proportion to how far up that graph it sits.
 
 ## What's portable, what's project-specific
 
 | Element | Portable? | Notes |
 |---|---|---|
-| `SKILL.md` protocol (Step 0-4) | ✅ Fully | Generic. `.claude/rules/` lookup is project-agnostic. |
-| Question budget rule (5-10, max 3 per corner) | ✅ Fully | Domain-agnostic heuristic. |
-| Fase A → Fase B workflow | ✅ Fully | Investigation pattern, not tool-specific. |
-| Template structure (10 mandatory sections) | ✅ Fully | Coverage Matrix shape is universal. |
-| Cited paths `.claude/knowledge-base/references/project-a/...` | ❌ Project-specific | Examples reference OurProject's clones. Replace with your paths. |
-| Example ADRs (D1 Project A/Project B/Project C budget) | ❌ Project-specific | Adapt to your reference list. |
+| `SKILL.md` protocol (Steps 0-5) | ✅ | Generic; the rules lookup handles both layouts |
+| Falsification-first discipline | ✅ | Domain-agnostic and the core of the phase |
+| Question budget (3-10, max 3/corner) | ✅ | Heuristic, adjustable in the checker |
+| Template structure | ✅ | Matches the deterministic checker |
+| The four corners | ⚠️ | Portable in shape; edit all three places if you change them |
+| Domain routing table | ❌ | The eight Theo domains. Replace with yours. |
+| `rules/live-target.txt` contents | ❌ | Your environments, your credentials-by-name |
 
-## Limitations (Known)
+## Limitations (known)
 
-- **No self-scoring** — discovery plans don't have a confidence scorer (the closest is `/discover-confidence`, which scores BLUEPRINTS, not plans). Quality of a plan is gated only by the next skill in the chain (`/discover-edge-cases`).
-- **No automated tests** — unlike `plan-confidence` (21 pytest tests), `discover-plan` is exercised only by real invocations. The fixtures at `fixtures/` are reference examples for humans, not test inputs.
-- **Step 0 fallback weak** — if `.claude/rules/` is missing, the skill notes the absence but does not auto-generate a fallback rule set. The resulting plan will not pass the architecture-compliance soft cap in `/discover-confidence`.
-- **Single-reference-project plans** — the template assumes ≥2 in-scope projects (Project A + Project B + Project C). For single-project investigations, the "Cross-cutting Comparison" section in the resulting blueprint will be degenerate. Either accept the trade-off or fork the template.
+- **The template fails its own checker until filled in** — 8/10 sections plus `falsification_missing`, because `Item`, `Mode` and the falsification body hold placeholders. Deliberate: a placeholder shaped like a valid value would let a forgotten `B-000` pass the gate and point the plan at an item that does not exist. Do not "fix" this by pre-filling them.
+- **No automated tests for this skill** — unlike `discover-plan-confidence` (36 pytest tests), `discover-plan` is exercised only by real invocations. Its output, however, *is* gated deterministically by that sibling.
+- **Weak Step 0 fallback** — with no `rules/`, the skill notes the absence but generates no fallback rule set.
+- **Target pre-validation is existence, not faithfulness** — Step 3 proves a path opens; it does not prove the path contains what the question assumes. That is `/discover-edge-cases`'s "resolves but stale" check, and it is a review by a reader, not a deterministic gate.
 
 ## Self-validation
 
-After install, sanity-check with:
-
 ```bash
-# Confirm the SKILL.md is readable and has the four-corner table
-grep -E '^### Step [0-4]' .claude/skills/discover-plan/SKILL.md
+# The protocol steps are present
+grep -E '^### Step [0-5]' .claude/skills/discover-plan/SKILL.md
 
-# Confirm the template has the 10 mandatory sections (1 H1 + 9 H2)
-grep -cE '^##? ' .claude/skills/discover-plan/templates/discovery-plan-template.md
-# Should print 10 (1 H1 "Discovery Plan:" + 9 H2 sections)
+# The template carries the mandatory headers the checker looks for
+grep -E '^\*\*(Item|Repo|Mode):\*\*|^## (Context|Hypothesis|Falsification|Measurement Questions)' \
+  .claude/skills/discover-plan/templates/measurement-plan-template.md
 
-# Confirm fixtures are present
-ls .claude/skills/discover-plan/fixtures/
+# The gate agrees with the guidance about the question floor
+grep -n 'MIN_QUESTIONS' .claude/skills/discover-plan-confidence/scripts/check_plan_completeness.py
 ```
 
 ## Related
 
-- Skill: `.claude/skills/discover-plan/SKILL.md`
-- Template: `.claude/skills/discover-plan/templates/discovery-plan-template.md`
-- Fixtures: `.claude/skills/discover-plan/fixtures/`
-- Downstream: `/discover-edge-cases` (next step) → `/discover-execute` (consumes plan)
+- Upstream: `rules/cycle-backlog.md` — supplies the `B-NNN` hypothesis
+- Next: `/discover-edge-cases` → `/discover-plan-confidence` → `/discover-execute`
+- Template: `templates/measurement-plan-template.md`
 - Sibling: `/to-plan` (same architecture, different output — implementation plans)

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # M104 / #99 — measured write-memory envelope for the incremental columnar stripe flush. Emits JSON (stdout) →
-# docs/benchmarks/m104-write-envelope.{md,json}. Proves the O(maintenance_work_mem) (N-INDEPENDENT) bound: it runs
+# wiki/benchmarks/archive/m104-write-envelope.md e benchmarks/artifacts/m104-write-envelope.json. Proves the O(maintenance_work_mem) (N-INDEPENDENT) bound: it runs
 # a big INSERT...SELECT at increasing N with a FIXED small maintenance_work_mem and samples the inserting backend's
 # PEAK resident memory (VmHWM from /proc). With the incremental flush, peak RSS stays ~FLAT across N (bounded by mwm,
 # not the row count) while the stripe count grows LINEARLY with N — the signature of bounded write memory. Run on the

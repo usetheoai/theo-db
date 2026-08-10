@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """M40 carrier head-to-head — theodb_hnsw (graph, M35) vs theodb_ivfflat (probes, M34): recall x QPS at matched QPS.
 
-Measurement-first re-scope (see docs/benchmarks/m40-ceiling-probe.md): the ceiling probe proved the vector-pillar
+Measurement-first re-scope (see wiki/benchmarks/m40-ceiling-probe.md): the ceiling probe proved the vector-pillar
 recall is limited by the CARRIER (candidate generation), not the quantizer — so the real vector-superiority
 question is which OWN carrier wins the recall x QPS trade-off. This runs BOTH persisted AMs over the same corpus +
 exact brute-force ground truth, sweeping each AM's query-time knob (theodb_hnsw.ef_search / theodb_ivfflat.probes),

@@ -1,13 +1,18 @@
 # Image publish — #187. Segue o playbook do ecossistema (mesmo do theo-memory/theo-rag):
-# delega ao workflow REUTILIZÁVEL `usetheodev/theo/.github/workflows/build-publish.yml`, que já entrega
+# delega ao workflow REUTILIZÁVEL `usetheoai/theo/.github/workflows/build-publish.yml`, que já entrega
 # build + push GHCR, gate Trivy (CRITICAL/HIGH) antes do push, e SBOM + provenance SLSA + assinatura
 # keyless cosign nas tags. Escrever um workflow próprio aqui seria reimplementar o que o ecossistema já
 # resolve (Regra 9 / parsimony ladder rung 4) — e perderia Trivy, SBOM e assinatura.
 #
-#   develop push → ghcr.io/usetheodev/theo-db:develop (+ :develop-<sha>)
+#   develop push → ghcr.io/usetheoai/theo-db:develop (+ :develop-<sha>)
 #   v* tag       → :X.Y.Z + :X.Y + :latest, assinada e verificada
 #
-# Contexto: a imagem nunca havia sido publicada — `docker pull ghcr.io/usetheodev/theo-db:latest`, o
+# B-010 (2026-08-10): o `uses:` apontava para `usetheodev/theo`, org que NÃO EXISTE — o correto é
+# `usetheoai`. Consequência medida: TODA execução deste workflow falhava com `workflow was not found`,
+# no push de `develop` e na tag `v0.158.0`. Por isso a imagem nunca foi publicada, e por isso
+# `ghcr.io/usetheoai/theo-db:latest` responde `manifest unknown` até hoje.
+#
+# Contexto: a imagem nunca havia sido publicada — `docker pull ghcr.io/usetheoai/theo-db:latest`, o
 # primeiro comando do README, falhava com `manifest unknown`. O `ci.yml` constrói a imagem seis vezes,
 # mas sempre com `load: true` + tag local, para rodar os testes e descartar.
 name: publish
@@ -32,7 +37,7 @@ on:
       # Adicionados em 2026-07-27: nada aqui entra na imagem (conferido nos `COPY` do Dockerfile —
       # só `theodb_rs/`, `sql/`, `*.control`). O commit `3313226`, que tocou só workflows e o
       # CHANGELOG, disparou um build+push completo de imagem idêntica.
-      - 'docs/**'
+      - 'wiki/**'
       - 'knowledge-base/**'
       - 'agents/**'
       - '.review-runs/**'
@@ -61,7 +66,7 @@ permissions:
 
 jobs:
   image:
-    uses: usetheodev/theo/.github/workflows/build-publish.yml@develop
+    uses: usetheoai/theo/.github/workflows/build-publish.yml@develop
     with:
       image: theo-db
       dockerfile: ./Dockerfile

@@ -4,7 +4,7 @@
 Proves the M34 DoD: with the new `lists` reloption + `theodb_ivfflat.probes` GUC, theodb_ivfflat reaches p50
 <= pgvector ivfflat at matched probes on 1M×128 (recall >= parity). Reuses the M32 harness (`--full-train`
 neighbors-GT) with two ivfflat specs at the SAME lists + a shared probes sweep — a fair, tuned head-to-head.
-Writes docs/benchmarks/m34-ivfflat-reloption.{md,json}.
+Writes wiki/benchmarks/m34-ivfflat-reloption.md e benchmarks/artifacts/m34-ivfflat-reloption.json.
 
 Repro:
   PGPORT=<port> python3 benchmarks/run_m34_ivfflat.py --lists 1000 --n-queries 1000 --runs 3

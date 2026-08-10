@@ -1,1 +1,0 @@
-{"chunks":500,"hardware":"DO-Regular 4 vCPU @ 2.0GHz (pgrx 0.19/PG17)","extract_ms_mean":325.23,"extract_chunks_per_sec":1537.4,"upsert_chunks_per_sec":108.7,"total_edges":5000,"parity_coverage":"100% (entity+edge sets byte-identical to theo-rag graph-extractor.ts on fixtures)"}

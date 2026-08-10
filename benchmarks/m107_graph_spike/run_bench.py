@@ -106,9 +106,10 @@ def agg(scale_edges):
 summary = [agg(e) for e, _ in SCALES]
 out = {"date": datetime.date.today().isoformat(), "hops": HOPS, "n_seeds": N_SEEDS, "trials_per_scale": len(TRIALS),
        "host": "local docker postgres:17 (PG 17.10) + native Rust release", "rows": rows, "summary": summary}
-docs = pathlib.Path("../../docs/benchmarks")
-(docs / "m107-graph-spike.json").write_text(json.dumps(out, indent=2))
+artifacts = pathlib.Path("../artifacts")
+artifacts.mkdir(parents=True, exist_ok=True)
+(artifacts / "m107-graph-spike.json").write_text(json.dumps(out, indent=2))
 print("\n=== SUMMARY ===")
 for s in summary:
     print(json.dumps(s))
-print("\nwrote docs/benchmarks/m107-graph-spike.json")
+print("\nwrote benchmarks/artifacts/m107-graph-spike.json")

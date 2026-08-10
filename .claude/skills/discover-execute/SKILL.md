@@ -1,178 +1,172 @@
 ---
 name: discover-execute
-version: 0.1.0
+version: 0.2.0
 requires: [discover-plan-confidence]
-description: Executes a discovery plan via halt-loop (ralph-loop-style autonomous iteration) over the sources declared in the plan — local references under knowledge-base/references/ e/ou URLs allowlisted via rules/discover-web-allowlist.txt. Produces a technical blueprint at knowledge-base/discoveries/blueprints/{slug}-blueprint.md. Use after /discover-edge-cases has approved the plan.
+description: Run a measurement against OUR own code and runtime via halt-loop, routed by mode (review / live-test / bug / evolve), and produce an opportunity — or KILL the item when the falsification criterion is met. Use this whenever someone wants to find out whether a suspicion is real, to sweep a domain for findings nobody filed (--sweep), or to reproduce and prove a defect. Killing an item is a successful outcome, not a failed run.
 user-invocable: true
 allowed-tools: Read Glob Grep Bash Write Edit Skill
-argument-hint: "{plan-slug}"
+argument-hint: "{plan-slug} | --sweep {domain}"
 ---
 
-# Discover-Execute — Halt-Loop Deep-Research Driver
+# Discover-Execute — Halt-Loop Measurement Driver
 
-Reads an approved discovery plan, then drives a halt-loop investigation across `.claude/knowledge-base/references/` (Project A, Project B, Project C), producing a structured technical blueprint.
+Reads an approved measurement plan, then drives a halt-loop investigation **against our own system**, producing an opportunity — or killing the item.
 
-**Architecture:** wraps the `ralph-loop` plugin's autonomous-iteration mechanism (Stop hook + state file) with a discovery-specific prompt template. Each iteration answers one or more research questions from the plan, appends to the blueprint, and re-evaluates "are all questions answered + all citations real + all coverage corners covered?"
+**Architecture:** wraps the `ralph-loop` plugin's autonomous-iteration mechanism (Stop hook + state file) with a measurement-specific prompt. Each iteration answers one question, appends to the opportunity, and re-evaluates both the halt condition and the kill condition.
 
-**Halt condition:** the loop emits `<promise>BLUEPRINT_COMPLETE</promise>` only when ALL of:
+**Two terminal outcomes, both legitimate:**
 
-1. Every research question from the plan is answered in the blueprint.
-2. Every citation (file/symbol) in the blueprint exists in `.claude/knowledge-base/references/`.
-3. All four coverage corners (tests / deps / tools / techniques) have at least one populated subsection.
-4. Acceptance criteria from the plan are observably met.
+- `<promise>OPPORTUNITY_COMPLETE</promise>` — the hypothesis held; the opportunity feeds `/discover-confidence`.
+- `<promise>ITEM_KILLED</promise>` — the falsification criterion was met; the item is closed with its `kill_reason`. **This is success.** A run that measures honestly and finds nothing has protected the plan cycle from work that would have been justified by a hunch.
 
 ## Cycle contract
 
-This skill is **phase 3** of [`cycle-discover`](../../rules/cycle-discover.md). The cycle rule is the source of truth for chain order, hard gates (path existence, halt-loop conditions, fabricated citation refusal), stop conditions (3-retry Fase A, fabricated citation without replacement, empty coverage corner without credible source), anti-patterns (never modify .claude/knowledge-base/references/, never fabricate Fase B answers), and rollback. **Read `cycle-discover.md` before invoking this skill.** This SKILL.md retains phase-specific detail (halt-loop workflow, per-iteration prompt, halt-loop invariants).
+This skill is **phase 4** of [`cycle-discover`](../../rules/cycle-discover.md). The cycle rule is the source of truth for the four modes and their evidence contracts, chain order, hard gates (G-E/G-M/G-L/G-C/G-K), stop conditions, anti-patterns and rollback. **Read `cycle-discover.md` before invoking this skill.** This SKILL.md retains phase-specific detail (halt-loop workflow, mode routing, post-promise checks).
 
-## When to Trigger
+## When NOT to invoke
 
-- After `/discover-edge-cases {slug}` returned `DISCOVERY PLAN OK` (or MUST FIX absorbed).
-- User explicitly invokes `/discover-execute {slug}` to launch the autonomous loop.
+- **Fast lane:** `--mode bug` where a failing test already exists — enter here directly, skipping phases 1–3. A test that fails on the current state is a stronger measurement plan than any document describing one, and it is verifiable by execution rather than by review. Unavailable when the repro is not yet a test: "I can reproduce it by hand" is a plan, not a measurement.
+- `--sweep {domain}` to measure a whole domain with no prior item.
+
+## Mode routing
+
+The mode comes from the plan's `**Mode:**` header (or `--sweep`'s flag). It decides what counts as evidence, and evidence from one mode does not satisfy another.
+
+| Mode | The measurement | Refuses when |
+|---|---|---|
+| `review` | Open the file, read surrounding context, record `path:LINE` + the rule violated + why it matters here | — |
+| `live-test` | Probe the declared target; record `METHOD URL -> STATUS`, console, trace id, timing, screenshot | The domain has no block in `rules/live-target.txt` |
+| `bug` | Numbered repro **plus a test that fails on the current state, executed** | The failing test was never run |
+| `evolve` | Count the cost of the status quo — a number, not an adjective | — |
+
+`review` carries a discipline the others do not: rule out that the code is **dead**, that the caller **never existed**, and that the shape is **deliberate**. All three produce findings that look real and are not.
+
+`live-test` carries the environment-vs-product obligation. A dev environment breaks for its own reasons; the opportunity states which explanation it believes and what would distinguish them, or states plainly that it cannot yet tell.
+
+**Reclassification is expected.** `suggested_mode` on the backlog item is the filer's guess. If measurement shows a different shape, switch mode and record the switch with its reason. Forcing the measurement into the guessed mode defeats the purpose of measuring.
 
 ## Workflow
 
-### Step 1 — Argument parsing
+### Step 1 — Resolve inputs
 
-Accept:
+1. Plan path: `knowledge-base/discoveries/plans/{slug}-plan.md`. Read it fully — extract `**Item:**`, `**Repo:**`, `**Mode:**`, the Measurement Questions table, and `## Falsification`.
+2. Confirm the `B-NNN` item exists in `BACKLOG.md` and is `raw`. An item already `triaged`, `planned` or `shipped` is not re-measured — that is how duplicate work enters.
+3. For `live-test`, confirm the domain has a block in `rules/live-target.txt`. **No block, no probe.**
 
-- `/discover-execute {slug}`
+### Step 2 — Initialize the opportunity
 
-The loop runs until every research question is `done` OR `blocked` with reason AND every citation in the blueprint resolves on disk AND all four coverage corners are populated. There is no iteration cap; per-project time budgets declared inside the discovery plan still apply as honest stop conditions that mark questions as `blocked` (see § Stop conditions).
+Create `knowledge-base/discoveries/opportunities/{slug}-opportunity.md` from `templates/opportunity-template.md`. Every section present, each corner holding a `<!-- TBD -->` placeholder mapped to its question.
 
-### Step 2 — Resolve plan + initialize blueprint
-
-1. Resolve plan path: `.claude/knowledge-base/discoveries/plans/{slug}-plan.md`.
-2. Read it fully. Extract: in-scope projects, research questions, coverage matrix, halt-loop checkpoints.
-3. Create the blueprint file at `.claude/knowledge-base/discoveries/blueprints/{slug}-blueprint.md` using `.claude/skills/discover-execute/templates/blueprint-template.md` as the starter.
-4. The blueprint starts with all sections present but EMPTY (each section has a `<!-- TBD: Qx -->` placeholder mapping to the research question).
+Fill the header lines immediately — `**Item:**`, `**Repo:**`, `**Mode:**` are checked by `check_opportunity_completeness.py`, and a mode token outside the four reads as a missing section.
 
 ### Step 3 — Build the halt-loop prompt
 
-Read `.claude/skills/discover-execute/prompts/execute-mode-prompt.md` and substitute:
-
-- `{PLAN_SLUG}` — the slug
-- `{PLAN_PATH}` — the resolved plan path
-- `{BLUEPRINT_PATH}` — the resolved blueprint path
+Read `prompts/execute-mode-prompt.md` and substitute `{PLAN_SLUG}`, `{PLAN_PATH}`, `{OPPORTUNITY_PATH}`, `{ITEM}`, `{MODE}`.
 
 ### Step 4 — Pre-flight guard (concurrent-loop safety)
 
-Before invoking ralph-loop, verify `.claude/ralph-loop.local.md` (if present in project root) does NOT have `active: true`. Concurrent ralph-loops on overlapping state is a documented anti-pattern (`rules/loop-engine-convention.md § Anti-patterns`). If a stale state file from a prior loop is observed `active`, HALT and surface to human rather than spawning a concurrent loop.
+Verify `.claude/ralph-loop.local.md` (if present) does NOT have `active: true`. Concurrent ralph-loops on overlapping state is a documented anti-pattern (`rules/loop-engine-convention.md § Anti-patterns`). A stale state file observed `active` HALTS and surfaces to the human rather than spawning a second loop.
 
-### Step 5 — Invoke ralph-loop (shell-safe positional + flags)
+### Step 5 — Invoke ralph-loop
 
-**Read `.claude/rules/loop-engine-convention.md § How to invoke ralph-loop:ralph-loop safely` BEFORE this step.** The ralph-loop positional argument is shell-evaluated; inlining a multi-section driver prompt (backticks / fenced code blocks / `$(...)`) breaks loop startup with a bash parse error. Use the file-referenced pattern.
+**Read `rules/loop-engine-convention.md § How to invoke ralph-loop:ralph-loop safely` BEFORE this step.** The positional argument is shell-evaluated; inlining a multi-section driver prompt (backticks, fenced blocks, `$(...)`) breaks loop startup with a bash parse error. Use the file-referenced pattern.
 
-1. Write the substituted prompt from Step 3 to `.claude/halt-loop-prompts/discover-execute-{plan-slug}.md` (gitignored).
+1. Write the substituted prompt to `.claude/halt-loop-prompts/discover-execute-{slug}.md` (gitignored).
 2. Invoke `ralph-loop:ralph-loop` with:
-   - Positional prompt (no shell metachars): `Read .claude/halt-loop-prompts/discover-execute-{plan-slug}.md and follow its instructions for this halt-loop iteration.`
-   - `--completion-promise 'BLUEPRINT_COMPLETE'`
-
-The ralph-loop plugin:
-
-- Writes `.claude/ralph-loop.local.md` (state file)
-- Activates the Stop hook
-- Feeds the positional prompt back to Claude on each session-exit attempt (Claude re-reads the driver file each iteration)
-- Detects `<promise>BLUEPRINT_COMPLETE</promise>` to terminate
+   - Positional prompt (no shell metacharacters): `Read .claude/halt-loop-prompts/discover-execute-{slug}.md and follow its instructions for this halt-loop iteration.`
+   - `--completion-promise 'OPPORTUNITY_COMPLETE'`
 
 ### Step 6 — Per-iteration contract
 
-Each iteration of the halt-loop MUST:
+Enforced by the driver prompt. Each iteration: pick the next pending question → run the mode's measurement → write the answer into its corner with a resolving pointer → update `.progress-{slug}.json` → **re-check the kill condition** → re-evaluate the halt condition.
 
-1. **Pick the next un-answered research question** from the plan's Coverage Matrix.
-2. **Apply the planned method** (Read / Grep / find / git log) using the planned reference project + path. Never `cd` into `.claude/knowledge-base/references/`; never modify it (boundary-check hook blocks).
-3. **Synthesize the answer** in the format declared by the plan's "expected answer shape".
-4. **Append/update the blueprint** under the section mapped to that question. Replace the `<!-- TBD: Qx -->` placeholder.
-5. **Cite the source** — every paragraph or table cell that references behavior MUST link to a `.claude/knowledge-base/references/{project}/{path}:{line}` reference. No claim without citation.
-6. **Mark the question DONE** in a session-local progress file under `.claude/knowledge-base/discoveries/.progress-{slug}.json` (gitignored).
-7. **Re-evaluate halt condition.** If all four conditions hold (every question answered + every citation verifiable + four corners populated + acceptance criteria met), emit `<promise>BLUEPRINT_COMPLETE</promise>`.
-
-If a research question cannot be answered (e.g., the cited path doesn't exist after all), the iteration:
-
-- Adds a `<!-- BLOCKED: reason -->` comment in the blueprint at that section.
-- Lists the blocked question in the progress file.
-- Continues to the next question.
-- Does NOT emit `BLUEPRINT_COMPLETE` — instead reports honestly that N questions remained blocked.
+The kill check runs every iteration, not at the end. Recognising early that the falsification criterion is already met is what stops a long measurement from accumulating the sunk cost that makes a weak finding look shippable.
 
 ### Step 7 — Post-promise sanity check
 
-After the loop emits `<promise>BLUEPRINT_COMPLETE</promise>`, run ONCE before the report:
+After `<promise>OPPORTUNITY_COMPLETE</promise>`, run ONCE before reporting:
 
 ```bash
-# Re-verify ALL citations in the blueprint exist on disk
-grep -oE '.claude/knowledge-base/references/[^ )`":]+' {BLUEPRINT_PATH} | sort -u | while read -r path; do
-  [ -e "$path" ] || echo "FABRICATED: $path"
-done
+python3 - "{OPPORTUNITY_PATH}" <<'PY'
+# Re-verify every code pointer: the file exists, the line is within it, and the line is
+# PRINTED so you can confirm it says what the opportunity claims.
+#
+# Written in python3 rather than shell on purpose. The shell version used
+# `$(wc -l < "$path")` for the bounds check, and when `wc` was unavailable that expanded
+# to empty — every comparison failed and the check reported EVERY pointer as fabricated.
+# An eval run hit exactly that: 23 real pointers, 23 false FABRICATED. A check that
+# collapses to "everything is fake" when a tool is missing gets distrusted and then
+# ignored, which is worse than one that fails loudly.
+import re, sys
+from pathlib import Path
+
+text = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace")
+pat = re.compile(r"\b((?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+\.[A-Za-z0-9]{1,10}):(\d+)")
+bad = 0
+for path, line in sorted(set(pat.findall(text))):
+    f, n = Path(path), int(line)
+    if not f.is_file():
+        print(f"FABRICATED (missing file): {path}:{n}"); bad += 1; continue
+    lines = f.read_text(encoding="utf-8", errors="replace").splitlines()
+    if not 1 <= n <= len(lines):
+        print(f"FABRICATED (line {n} past EOF, file has {len(lines)}): {path}"); bad += 1; continue
+    print(f"  ok {path}:{n} | {lines[n-1].strip()[:80]}")
+print(f"\n{bad} fabricated" if bad else "\nall pointers resolve")
+sys.exit(1 if bad else 0)
+PY
 ```
 
-If ANY `FABRICATED:` line appears, the promise was emitted with a fabricated citation slipping through. Surface as **PROMISE INTEGRITY VIOLATION** — re-mark the offending claim with `<!-- BLOCKED: ... -->` and re-invoke the loop. NEVER accept the promise at face value.
+Checking the line matters as much as checking the file. A pointer at line 400 of a 30-line file is evidence that moved, and the ancestor's check — which stripped the line suffix before testing the path — passed it as verified.
 
-If the loop emitted `<promise>BLUEPRINT_BLOCKED</promise>`, the sanity check still runs to ensure the BLOCKED report's surfaced blocker count matches the progress file. Drift between the report and `.progress-{slug}.json` blocks handoff.
+Any `FABRICATED:` line is a **PROMISE INTEGRITY VIOLATION**: re-mark the claim `<!-- BLOCKED: ... -->` and re-invoke the loop. Never accept the promise at face value.
 
-### Step 8 — Report
+On `<promise>OPPORTUNITY_BLOCKED</promise>` the check still runs, plus the blocked count in the report must match `.progress-{slug}.json`. Drift blocks handoff.
 
-After the loop terminates (promise detected OR stop condition fires):
+On `<promise>ITEM_KILLED</promise>`, verify instead that the `B-NNN` block carries a `kill_reason` naming what was measured and what it showed (gate G-K). An unexplained kill is indistinguishable from an abandoned run.
 
-- Path to the produced blueprint
-- Number of iterations used
-- Questions answered / questions blocked (with blocker reasons)
-- Citations verified count (cross-ref against `.progress-{slug}.json`)
-- Recommendation: invoke `/discover-confidence {slug}` next
+### Step 8 — Update `BACKLOG.md` and report
 
-## Halt-loop anti-patterns
+| Outcome | `B-NNN` becomes |
+|---|---|
+| `OPPORTUNITY_COMPLETE` | `status: triaged`, `evidence: <pointer>` |
+| `ITEM_KILLED` | `status: killed`, `kill_reason: <what was measured>` |
+| `OPPORTUNITY_BLOCKED` | unchanged — `raw`, with the blocker surfaced to the human |
 
-- The skill NEVER modifies the discovery plan during execute (use `/discover-improve` for blueprint refinement).
-- The skill NEVER touches any file inside `.claude/knowledge-base/references/` (boundary-check hook enforces).
-- The skill NEVER runs `npm install`, `pip install`, `poetry install`, or any dependency installer inside `.claude/knowledge-base/references/`.
-- The skill NEVER emits `<promise>BLUEPRINT_COMPLETE</promise>` while ANY of the four halt-condition checks fails.
-- The skill NEVER emits a promise without the post-promise sanity check (Step 7) confirming on-disk truth.
-- The skill NEVER spawns concurrent ralph-loops on overlapping state (Step 4 pre-flight guard).
-- The skill NEVER emits `<promise>BLUEPRINT_COMPLETE</promise>` as a graceful exit from a stop condition. When a stop condition fires (see § Stop conditions), the skill emits `<promise>BLUEPRINT_BLOCKED</promise>` (a distinct, honest failure marker) with the blocked-questions report. Forbidden practices specific to per-iteration work are enumerated in `prompts/execute-mode-prompt.md § Inviolable rules`.
+Report: the opportunity path, iterations used, questions answered / blocked with reasons, pointers verified, runtime observations recorded, and any mode reclassification. Next step: `/discover-confidence {slug}` — except on `ITEM_KILLED`, where the chain ends and there is nothing to score.
 
-## Stop conditions
+### Step 9 — Sweep mode
 
-Emit `<promise>BLUEPRINT_BLOCKED</promise>` (NEVER `BLUEPRINT_COMPLETE`) with explicit BLOCKED report when ANY of:
+`--sweep {domain}` measures a domain with no prior item. Each finding is registered directly in `BACKLOG.md` with `source: discover-{mode}`, its evidence attached, and `status: triaged` — sweep findings skip intake because they arrive with the evidence intake is not allowed to require.
 
-1. Same question fails twice in a row with no observable progress (same diagnostic, same shape).
-2. A fabricated citation cannot be replaced with a real path (recommend re-running `/discover-plan` for that question).
-3. A coverage corner has zero credible source after exhaustive Fase A + Fase B passes — recommend `/discover-plan` to revise.
-4. A per-project time budget declared inside the discovery plan (ADR D1 or equivalent) is exhausted with questions still `pending` for that project — mark those questions as `blocked` with reason "project time budget exhausted" and continue with the next project; if every remaining project is in the same state, emit `BLUEPRINT_BLOCKED`.
-5. Boundary-check hook blocked a write attempt to `knowledge-base/references/` — surfaces an underlying bug, not a content gap; HALT immediately and surface to human.
+Registration is not optional. A finding that stays in this run's output and never reaches the registry is exactly the orphaned-finding failure the single registry exists to prevent.
 
-The promise `<promise>BLUEPRINT_COMPLETE</promise>` is emitted EXCLUSIVELY when ALL halt conditions hold (every question `done` or honestly `blocked`, every citation resolves, four corners populated, ≥ 1 ADR present). There is no path that emits `BLUEPRINT_COMPLETE` from a partial state. In all stop-condition cases, `/discover-confidence` MUST NOT honor the blueprint as SHIPPABLE — the BLOCKED report is canonical until the human resolves the blocker. Honest BLOCKED > false COMPLETE (Unbreakable Rule 3).
+## Anti-patterns
 
-## Per-iteration prompt skeleton (informational — actual prompt lives in `prompts/execute-mode-prompt.md`)
-
-```
-You are mid-discovery, iteration {N}.
-
-Plan: {PLAN_PATH}
-Blueprint (in progress): {BLUEPRINT_PATH}
-Progress so far: {N answered}/{TOTAL} questions; {M blocked}.
-
-Your next action:
-1. Read `.claude/knowledge-base/discoveries/.progress-{slug}.json` to know which questions remain.
-2. Pick the next unanswered question with the lowest dependency depth.
-3. Apply the planned method.
-4. Append the answer to {BLUEPRINT_PATH} under the question's mapped section, with citations.
-5. Update `.progress-{slug}.json`.
-6. If all halt conditions hold, emit <promise>BLUEPRINT_COMPLETE</promise>. Otherwise, STOP — the loop will resume.
-```
+- **Writing to a governed repo.** Discover produces a document. An opportunity carrying the patch has pre-empted the plan cycle and skipped every gate after it.
+- **Fabricated evidence** — a plausible pointer nobody opened, a status code nobody requested, a test asserted to fail but never executed.
+- **Prior art as evidence.** Not a measurement of our system, and it cannot fill the Evidence corner.
+- **Improvising a live probe** on a domain with no declared target.
+- **Refusing to kill.** After a long measurement, sunk cost makes a weak finding look shippable.
+- **`ITEM_KILLED` when nothing was measured.** Target unreachable is not disproof — stop and ask the human.
+- **Emitting a promise without the Step 7 check.**
+- **Spawning concurrent ralph-loops** on overlapping state.
+- **Sweeping without registering.**
 
 ## What this skill does NOT do
 
-- Generate the discovery plan — that's `/discover-plan`.
-- Review edge cases — that's `/discover-edge-cases`.
-- Score the blueprint — that's `/discover-confidence`.
-- Refine a low-scoring blueprint — that's `/discover-improve`.
-- Modify `.claude/knowledge-base/references/` — forbidden by boundary-check hook.
+- Write the measurement plan — `/discover-plan`.
+- Review edge cases — `/discover-edge-cases`.
+- Score the opportunity — `/discover-confidence`.
+- Refine a low-scoring opportunity — `/discover-improve`.
+- Fix anything. Measuring is reading.
 
 ## Related
 
-- Upstream skill: `/discover-plan` (produces the plan this skill consumes)
-- Upstream skill: `/discover-edge-cases` (validates the plan before execute)
-- Downstream skill: `/discover-confidence` (scores the blueprint this skill produces)
-- Downstream skill: `/discover-improve` (refines the blueprint if confidence is low)
-- Template: `templates/blueprint-template.md`
+- Upstream: `/discover-plan`, `/discover-edge-cases`, `/discover-plan-confidence`
+- Downstream: `/discover-confidence`, then `/discover-improve` if the score is low
+- Intake contract: `rules/cycle-backlog.md`
+- Live environment declaration: `rules/live-target.txt`
+- Constraint lens: `rules/current-constraint.md`
+- Template: `templates/opportunity-template.md`
 - Prompt: `prompts/execute-mode-prompt.md`
 - Loop engine: `ralph-loop` plugin (must be enabled in `~/.claude/settings.json`)

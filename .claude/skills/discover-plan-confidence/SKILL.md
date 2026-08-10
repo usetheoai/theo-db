@@ -1,23 +1,23 @@
 ---
 name: discover-plan-confidence
-version: 0.1.0
+version: 0.2.0
 requires: [discover-edge-cases]
-description: Score a discovery plan produced by /discover-plan for structural quality (M2 deterministic check). Sibling of /discover-confidence with a discovery-plan-shape rubric (research coverage, reference citations, plan completeness, smells). Use after /discover-edge-cases, before /discover-execute.
+description: Score a measurement plan for structural quality (deterministic, zero LLM calls, under 5s). Use this after /discover-edge-cases and before /discover-execute, and whenever someone asks whether a plan is ready to run. Enforces the falsification criterion — what result would kill the hypothesis, stated in advance — plus Tool and Target on every question and targets that actually resolve.
 user-invocable: true
 allowed-tools: Read Glob Grep Bash Write
-argument-hint: "{discovery-plan-slug}"
+argument-hint: "{measurement-plan-slug}"
 ---
 
-# Discover-Plan-Confidence — M2 Structural Scoring for Discovery Plans
+# Discover-Plan-Confidence — M2 Structural Scoring for Measurement Plans
 
-Scores a discovery plan produced by `/discover-plan` against the M2 structural rubric for **discovery plans** (NOT blueprints). Deterministic. Zero LLM calls. Latency < 5s. Cost $0.
+Scores a measurement plan produced by `/discover-plan` against the M2 structural rubric for **measurement plans** (NOT opportunities). Deterministic. Zero LLM calls. Latency < 5s. Cost $0.
 
-Sibling of `/discover-confidence` — same architecture (Python deterministic + soft caps + hard caps), different rubric. `/discover-confidence` scores **research blueprints** (output of `/discover-execute`); this skill scores **research plans** (output of `/discover-plan`).
+Sibling of `/discover-confidence` — same architecture (Python deterministic + soft caps + hard caps), different rubric. `/discover-confidence` scores **opportunities** (output of `/discover-execute`); this skill scores **measurement plans** (output of `/discover-plan`).
 
 **Hard caps:** see [`.claude/rules/discover-plan-golden-rule.md`](../../rules/discover-plan-golden-rule.md)
 **Thresholds (versioned):** [`.claude/rules/discover-plan-thresholds.txt`](../../rules/discover-plan-thresholds.txt)
 
-## When to Trigger
+## When NOT to invoke
 
 - After running `/discover-edge-cases {slug}` and the plan was bumped to v1.x with MUST FIX absorbed.
 - BEFORE running `/discover-execute {slug}` — a malformed plan poisons the entire downstream chain.
@@ -31,12 +31,12 @@ Four deterministic checkers, four dimensions:
 
 | Dimension | Checker script | Hard cap | Default weight |
 |---|---|---|---|
-| **research_coverage** | `scripts/check_research_coverage.py` | ≤49 if any coverage corner is empty AND no `<!-- DEFER-CORNER: {corner} \| {reason} -->` marker present | 0.30 |
-| **reference_citations** | `scripts/check_reference_citations.py` | ≤49 if ANY cited path in `.claude/knowledge-base/references/` is fabricated (file does not exist) | 0.30 |
+| **corner_coverage** | `scripts/check_corner_coverage.py` | ≤49 if any coverage corner is empty AND no `<!-- DEFER-CORNER: {corner} \| {reason} -->` marker present | 0.30 |
+| **measurement_targets** | `scripts/check_measurement_targets.py` | ≤49 if ANY cited path in `.claude/knowledge-base/references/` is fabricated (file does not exist) | 0.30 |
 | **plan_completeness** | `scripts/check_plan_completeness.py` | ≤70 if any of: mandatory section missing, ADR count < 2, question budget violated, method missing | 0.25 |
 | **structural_risk** (smells) | `scripts/check_spec_smells.py` | penalty only (no hard cap) | 0.15 |
 
-The four weights sum to 1.0. Composite formula: `final = 0.30·research_coverage + 0.30·reference_citations + 0.25·plan_completeness + 0.15·structural_risk`.
+The four weights sum to 1.0. Composite formula: `final = 0.30·corner_coverage + 0.30·measurement_targets + 0.25·plan_completeness + 0.15·structural_risk`.
 
 When a hard cap fires, `final_score_after_caps = min(weighted_avg, smallest_active_cap)`.
 
@@ -45,7 +45,7 @@ When a hard cap fires, `final_score_after_caps = min(weighted_avg, smallest_acti
 **Out of scope for M2** (mirrors `/discover-confidence`'s deferred dimensions):
 
 - **M3 (semantic citation faithfulness)** — verifies the cited path contains the claimed symbol/behavior. Future: SAFE adapted to `ripgrep + tree-sitter`.
-- **5th coverage corner `prior_art`** — `cycle-discover.md` v1.1 added a 5th corner. The current `check_research_coverage.py` still recognizes the 4-corner v1.0 shape; v1.1 extension is tracked under `cycle-discover.md § Downstream changes required #8`. Until shipped, plans authored against the v1.1 template can still pass this scorer — the extra corner is recognized as an unmapped header but is NOT hard-capped. Human reviewers are expected to catch missing `prior_art` content until the script is extended.
+- **5th coverage corner `prior_art`** — `cycle-discover.md` v1.1 added a 5th corner. The current `check_corner_coverage.py` still recognizes the 4-corner v1.0 shape; v1.1 extension is tracked under `cycle-discover.md § Downstream changes required #8`. Until shipped, plans authored against the v1.1 template can still pass this scorer — the extra corner is recognized as an unmapped header but is NOT hard-capped. Human reviewers are expected to catch missing `prior_art` content until the script is extended.
 
 ## Workflow
 
@@ -64,10 +64,10 @@ When a hard cap fires, `final_score_after_caps = min(weighted_avg, smallest_acti
   "verdict": "SHIPPABLE | SHIPPABLE_WITH_CAVEATS | NON_SHIPPABLE | INVALID",
   "final_score": 0-100,
   "weighted_avg": 0-100,
-  "hard_caps_triggered": ["empty_corner_tests", "fabricated_citation", ...],
+  "hard_caps_triggered": ["empty_corner_tests", "fabricated_target", ...],
   "dimensions": {
-    "research_coverage": {"score": 0-100, "reasons": [...]},
-    "reference_citations": {"score": 0-100, "reasons": [...]},
+    "corner_coverage": {"score": 0-100, "reasons": [...]},
+    "measurement_targets": {"score": 0-100, "reasons": [...]},
     "plan_completeness": {"score": 0-100, "reasons": [...]},
     "structural_risk":  {"score": 0-100, "reasons": [...]}
   }

@@ -5,7 +5,7 @@
 # into the shipped theo-db:dev (PG17) is the GATED adoption step — it is a heavy Rust+pgrx+DuckDB source build
 # (pg_mooncake supports pg17 per its Makefile, but ships no pg17 prebuilt .so). A from-source pg17 build was
 # attempted; it failed on a pinned-rustc/MSRV mismatch at the then-current upstream HEAD (recorded honestly in
-# docs/benchmarks/m6-columnar-vs-row.md) — a resolvable toolchain issue, not a capability gap. Until that
+# wiki/benchmarks/m6-columnar-vs-row.md) — a resolvable toolchain issue, not a capability gap. Until that
 # adoption work lands, this canonical distribution is the measurement substrate.
 #
 # The official image already ships pg_duckdb + pg_mooncake with shared_preload_libraries + wal_level=logical.

@@ -90,7 +90,7 @@ pub(crate) fn hnsw_tombstone_compact_pct() -> i32 {
 
 /// M56 fase 2 — `SET theodb.hnsw_slot_reuse = on|off`: when ON, `aminsert` REUSES a tombstoned element slot via a
 /// proper in-place insert (search + link) before growing the pending region, bounding relation growth under
-/// DELETE+INSERT churn. **Default OFF.** The churn benchmark (`docs/benchmarks/m56-slot-reuse-churn.md`) drove the
+/// DELETE+INSERT churn. **Default OFF.** The churn benchmark (`wiki/benchmarks/m56-slot-reuse-churn.md`) drove the
 /// design: the original slot-reuse SUPPRESSED the ratio-compaction (tombstones consumed before the threshold, so
 /// the graph-REPAIRING fold never fired) and recall@10 collapsed to ~0.57. The fix — reuse only clean level-0
 /// non-entry slots + trigger the fold on CHURN (`count_churned`, not just tombstones) — makes it recall-SAFE
@@ -108,21 +108,12 @@ pub(crate) fn hnsw_slot_reuse() -> bool {
 /// M118 — `SET theodb_hnsw.resume = on|off`: when ON (default), the filtered iterative scan RESUMES from the
 /// retained beam frontier (resume-from-discarded) instead of re-searching the graph with a doubled `ef`. OFF
 /// reverts to the M52 re-search (the pre-M118 path) — kept as an operator escape hatch and for the honest
-/// own-path A/B (`docs/benchmarks/m118-resume-discarded.md`). V1 (exact-f32) only; SBQ/AQ always re-search.
+/// own-path A/B (`wiki/benchmarks/m118-resume-discarded.md`). V1 (exact-f32) only; SBQ/AQ always re-search.
 pub(crate) static HNSW_RESUME: GucSetting<bool> = GucSetting::<bool>::new(true);
 
 /// Whether the filtered iterative scan uses resume-from-discarded (M118). Default ON.
 pub(crate) fn hnsw_resume() -> bool {
     HNSW_RESUME.get()
-}
-
-/// E2 FastScan A/B kill-switch: when on (default), the `theodb_symqg` scan uses the batched FastScan 1-bit sign
-/// kernel; off forces the scalar `estimate_sign` path (same index/box — isolates the kernel's measured effect).
-pub(crate) static SYMQG_FASTSCAN: GucSetting<bool> = GucSetting::<bool>::new(true);
-
-/// Whether the `theodb_symqg` scan uses the FastScan kernel (default on; off = scalar A/B baseline).
-pub(crate) fn symqg_fastscan() -> bool {
-    SYMQG_FASTSCAN.get()
 }
 
 /// Columnar zone-map skip-pruning kill-switch: when on (default), a WHERE-filtered columnar aggregate skips
@@ -329,14 +320,6 @@ pub(crate) fn init() {
         c"When on, the vectorizer worker forces the pre-M122 single-txn embed path (measurement A/B for the xmin-pin)",
         c"Default off = the shipped 3-phase split (embed off-txn). On = embed inside the process txn. Apparatus only.",
         &VECTORIZER_SINGLE_TXN,
-        GucContext::Userset,
-        GucFlags::default(),
-    );
-    GucRegistry::define_bool_guc(
-        c"theodb.symqg_fastscan",
-        c"When on (default), theodb_symqg scans with the batched FastScan 1-bit sign kernel; off forces scalar estimate_sign",
-        c"E2 FastScan kill-switch / same-index A/B baseline (isolates the kernel's effect). No effect on non-symqg indexes.",
-        &SYMQG_FASTSCAN,
         GucContext::Userset,
         GucFlags::default(),
     );

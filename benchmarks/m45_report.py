@@ -18,7 +18,7 @@ def render_md(res, order) -> str:
         f"**Build (matched):** {p['build_params']}. theodb build={res['build_s'].get('theodb_hnsw')}s, "
         f"pgvector build={res['build_s'].get('pgvector_hnsw')}s.  ",
         "**Type:** measurement — the rigorous mean±std the M42 signal "
-        "(`docs/benchmarks/sift1m-carrier-verdict.md`) lacked. Delivers `public-copy.md` §4 half 1 "
+        "(`wiki/benchmarks/sift1m-carrier-verdict.md`) lacked. Delivers `public-copy.md` §4 half 1 "
         "(reproducible artifact); half 2 (independent third-party reproduction) remains OPEN.",
         "",
         "## Pareto frontiers (mean ± std over runs, recall@10 vs exact GT)",

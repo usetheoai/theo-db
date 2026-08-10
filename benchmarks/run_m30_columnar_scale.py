@@ -105,7 +105,7 @@ def _render_md(res) -> str:
         f"**Substrate:** {res['substrate']} — {res['note']}. Digest: `{res['image_digest']}`.  ",
         f"**Query:** `{res['query']}`. **Runs:** {res['runs']} timed passes per side (mean±std), warm cache.  ",
         "**Type:** measurement — fills the large-scale gap the M6 benchmark "
-        "(`docs/benchmarks/m6-columnar-vs-row.md`) marked UNBENCHMARKED. Grounds the M30 KEEP-columnar decision "
+        "(`wiki/benchmarks/m6-columnar-vs-row.md`) marked UNBENCHMARKED. Grounds the M30 KEEP-columnar decision "
         "(ADR 0013).",
         "",
         "| rows (n) | row-store ms (Seq Scan) | columnstore ms (DuckDBScan) | speedup | effect>variance | correct? |",

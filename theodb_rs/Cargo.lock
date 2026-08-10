@@ -3770,6 +3770,7 @@ dependencies = [
  "arrow",
  "criterion",
  "datafusion",
+ "futures",
  "minreq",
  "pgrx",
  "pgrx-tests",

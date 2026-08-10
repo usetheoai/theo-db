@@ -26,7 +26,6 @@ pub(crate) mod scan_core;
 // (which turns `pg_test` on for all targets), blocking every #[pg_test] in the crate.
 #[cfg(feature = "pg_test")]
 pub(crate) mod scan_core_mem;
-pub(crate) mod symqg_spike; // E2 — SymphonyQG clean-room spike (co-located quantized graph traversal)
 mod wire;
 
 pub(crate) use hnsw::{HNSW_MAGIC, HnswIndex};

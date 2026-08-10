@@ -4,7 +4,7 @@
 # MergeTree, then runs the 43 ClickBench (clickhouse-dialect) queries 3× each and writes {q, ch_hot_s=min} per line.
 #   ch_hot_s is ClickHouse SERVER-SIDE exec time (`--time`) — NOT a client round-trip; TheoDB's harness times the
 #   psycopg2 round-trip. This asymmetry ADDS fixed overhead to TheoDB only, so the measured ratio is CONSERVATIVE
-#   (overstates the gap, never flatters TheoDB). Documented in docs/benchmarks/m159-clickhouse-gap-verdict.md.
+#   (overstates the gap, never flatters TheoDB). Documented in wiki/benchmarks/m159-clickhouse-gap-verdict.md.
 # Usage: m159_clickhouse_run.sh <clickhouse-binary> <sample.tsv> <ch_create.sql> <ch_queries.sql> <out.jsonl> [ch-path]
 set -u
 CH="${1:?clickhouse binary}"; SAMPLE="${2:?sample.tsv}"; CREATE="${3:?create.sql}"; QUERIES="${4:?queries.sql}"

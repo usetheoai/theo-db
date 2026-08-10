@@ -205,7 +205,7 @@ def main():
     ap.add_argument("--limit-queries", type=int, default=None,
                     help="smoke only: score just the first N queries (corpus never subsampled)")
     ap.add_argument("--cache-dir", default="benchmarks/.cache")
-    ap.add_argument("--out", default="docs/benchmarks/m53-hybrid-beir.json")
+    ap.add_argument("--out", default="benchmarks/artifacts/m53-hybrid-beir.json")
     ap.add_argument("--include-bm25", action="store_true")
     args = ap.parse_args()
 

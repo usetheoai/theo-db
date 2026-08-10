@@ -15,8 +15,9 @@ Each `cycle-{name}.md` defines:
 
 | Contract | Cycle | Key Verdicts |
 |---|---|---|
-| `cycle-roadmap.md` | Macro super-loop | ROADMAP_COMPLETE |
-| `cycle-discover.md` | Prior art research | SHIPPABLE_WITH_CAVEATS |
+| `cycle-backlog.md` | Intake (phase 0) | ITEM_REGISTERED / ITEM_REJECTED |
+| `cycle-maintenance.md` | Macro super-loop | ITEM_SHIPPED / ITEM_KILLED / BACKLOG_EMPTY |
+| `cycle-discover.md` | Measurement of our own system | SHIPPABLE_WITH_CAVEATS / ITEM_KILLED |
 | `cycle-plan.md` | Planning | SHIPPABLE_WITH_CAVEATS |
 | `cycle-implement.md` | Implementation | IMPLEMENTATION_COMPLETE |
 | `cycle-code-quality.md` | Code quality audit | PASS, PASS_WITH_CAVEATS, FAIL_SOFT, FAIL_HARD, INVALID |
@@ -31,7 +32,7 @@ Each `cycle-{name}.md` defines:
 | File | Purpose |
 |---|---|
 | `code-quality-golden-rule.md` | Code quality severity levels |
-| `discover-blueprint-golden-rule.md` | Blueprint confidence hard caps |
+| `discover-opportunity-golden-rule.md` | Opportunity confidence hard caps |
 | `plan-confidence-golden-rule.md` | Plan confidence scoring rubric |
 | `discover-plan-golden-rule.md` | Discovery plan scoring rubric |
 | `deps-audit-golden-rule.md` | Dependency audit severity |
@@ -49,7 +50,9 @@ Each `cycle-{name}.md` defines:
 | `plan-confidence-allowlist.txt` | Plan findings exemptions |
 | `discover-web-allowlist.txt` | Authoritative domains for WebFetch |
 | `deps-audit-allowlist.txt` | Dependency audit exemptions |
-| `discover-blueprint-thresholds.txt` | Blueprint confidence thresholds |
+| `discover-opportunity-thresholds.txt` | Opportunity confidence thresholds |
+| `live-target.txt` | Declared live environments per domain (live-test refuses without one) |
+| `current-constraint.md` | The constraint lens — advisory, never a gate |
 | `discover-plan-thresholds.txt` | Discovery plan scoring thresholds |
 | `analysis-config.txt` | Trajectory analysis profile + enablement |
 | `review-model-routing.txt` | Agent model routing for review |
@@ -63,6 +66,7 @@ Each `cycle-{name}.md` defines:
 | `testing.md` | TDD discipline and pyramid |
 | `error-handling.md` | Fail-fast discipline, typed errors (Unbreakable Rule 8) |
 | `git-safety.md` | Forbidden git commands + safe substitutes (Unbreakable Rule 4) |
+| `reference-provenance.md` | Keeping third-party study material out of the project (4 layers) |
 | `parsimony-ladder.md` | Pre-write minimalism ladder (YAGNI/KISS/Don't-Reinvent) enforced in GREEN phase |
 | `public-copy.md` | Banned framings in README/marketing |
 | `audit-trail-rotation.md` | When to archive/delete artifacts |

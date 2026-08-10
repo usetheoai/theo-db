@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # M137 / F4 — harness da cadeia de upgrade do `theodb_rs`.
 #
-# POR QUE ISTO EXISTE: as provas do artefato `docs/benchmarks/m137-upgrade-chain.md` foram feitas à mão numa
+# POR QUE ISTO EXISTE: as provas do artefato `wiki/benchmarks/m137-upgrade-chain.md` foram feitas à mão numa
 # droplet e não eram re-executáveis. Isso importa mais aqui do que de costume, porque o próprio artefato registra
 # DUAS leituras falsas minhas — um "CONVERGENCIA_OK" comparando 196 com 196 onde nada tinha sido removido, e um
 # `grep -cE "^ERROR"` que não pegava os erros do psql (que vêm prefixados com `psql:arquivo:linha:`). Um harness

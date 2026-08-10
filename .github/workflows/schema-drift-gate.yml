@@ -30,7 +30,7 @@ on:
     # #211 — NÃO adicione `paths-ignore:` aqui. O GitHub proíbe `paths` e `paths-ignore` no MESMO
     # evento e rejeita o arquivo no parse (`startup_failure`, zero jobs): este gate marcou 100 de
     # 100 runs falhos até 27/07. A economia de fila que #187 buscava se expressa DENTRO do `paths:`,
-    # via padrão negado — um filtro só, sem conflito. `.claude/**` e `docs/**` já estão fora por
+    # via padrão negado — um filtro só, sem conflito. `.claude/**` e `wiki/**` já estão fora por
     # construção; o `!**/*.md` é guarda de futuro (hoje não há `.md` sob `theodb_rs/src|sql/`).
     paths:
       - 'theodb_rs/src/**'
@@ -68,18 +68,35 @@ jobs:
           fi
 
           CHANGED=$(git diff --name-only "$BASE" HEAD)
-          SRC=$(echo "$CHANGED" | grep -c '^theodb_rs/src/' || true)
           CTL=$(echo "$CHANGED" | grep -c '^theodb_rs/theodb_rs.control$' || true)
           MIG=$(echo "$CHANGED" | grep -cE '^theodb_rs/sql/theodb_rs--.*--.*\.sql$' || true)
 
-          echo "src=$SRC  control=$CTL  migração=$MIG"
+          # #217 — SUPERFICIE, nao proxy de caminho. A versao anterior cobrava bump sempre que QUALQUER
+          # arquivo sob `theodb_rs/src/` mudasse. Num PR de release o `base.sha` e `main`, entao o diff
+          # e o MILESTONE INTEIRO: todo milestone que tocasse planner/executor disparava o gate sem ter
+          # alterado uma unica funcao SQL. Nao havia caminho para o verde, e ele reprovou em 100% dos
+          # PRs de release recentes — um gate que sempre falha ensina o time a mergear por cima do CI.
+          bash scripts/sql-surface.sh "$BASE" > /tmp/surface-base.txt
+          bash scripts/sql-surface.sh HEAD    > /tmp/surface-head.txt
+          if diff -q /tmp/surface-base.txt /tmp/surface-head.txt >/dev/null; then
+            SURFACE_CHANGED=0
+          else
+            SURFACE_CHANGED=1
+          fi
 
-          if [ "$SRC" -gt 0 ] && [ "$CTL" -eq 0 ] && [ "$MIG" -eq 0 ]; then
-            echo "::error::A superfície da extensão mudou ($SRC arquivo(s) em theodb_rs/src/) sem bumpar"
-            echo "::error::default_version nem adicionar script de upgrade. É assim que '1.0.0' passou a rotular"
-            echo "::error::cinco catálogos diferentes ao longo de 120 releases (ver docs/benchmarks/m137-upgrade-chain.md)."
-            echo "::error::Se a mudança NÃO altera a superfície SQL (refactor interno, comentário, teste), toque"
-            echo "::error::o .control com um bump de versão ou registre a isenção no corpo do PR."
+          echo "superfície mudou=$SURFACE_CHANGED  control=$CTL  migração=$MIG"
+
+          if [ "$SURFACE_CHANGED" -eq 1 ] && [ "$CTL" -eq 0 ] && [ "$MIG" -eq 0 ]; then
+            echo "::error::A superfície SQL da extensão mudou sem bumpar default_version nem adicionar"
+            echo "::error::script de upgrade. É assim que '1.0.0' passou a rotular cinco catálogos"
+            echo "::error::diferentes ao longo de 120 releases (ver wiki/benchmarks/m137-upgrade-chain.md)."
+            echo "::error::Objetos que entraram ou saíram do catálogo:"
+            diff /tmp/surface-base.txt /tmp/surface-head.txt | grep -E '^[<>]' | head -40 | while read -r l; do
+              echo "::error::  $l"
+            done
+            echo "::error::Um refactor interno, comentário ou teste NÃO chega aqui — a superfície é medida,"
+            echo "::error::não inferida do caminho do arquivo. Se estes objetos são mesmo novos, bumpe o"
+            echo "::error::.control e adicione o script de upgrade correspondente."
             exit 1
           fi
           echo "ok — ou a superfície não mudou, ou a cadeia de upgrade acompanhou"

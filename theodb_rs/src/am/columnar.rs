@@ -54,6 +54,11 @@ thread_local! {
     // scans (a shared thread_local, same as the agg-path `THEODB_SCAN_PROFILE` log) — a single top-level query
     // reads its own counts; SQL accessors `theodb_columnar_chunks_{skipped,scanned}()` expose them for tests.
     static SKIP_STATS: std::cell::Cell<(u64, u64)> = const { std::cell::Cell::new((0, 0)) };
+    // M168 — quantas vezes o `ColumnarChunkStream` avançou o cursor no scan MAIS RECENTE (conta CHAMADAS de
+    // `next()`, não chunk-groups — ver a doc do acessor). Zerado na construção do stream, como o `SKIP_STATS`
+    // acima em `columnar_scan_begin`; não há "último reset" — a função de reset foi removida. Mesmas limitações
+    // (thread_local, best-effort sob scans aninhados).
+    static STREAM_CG_COUNT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 /// M150 — chunk groups the zone-map pruned in the most recent `theodb_columnar` general scan (wiring metric).
@@ -66,6 +71,47 @@ fn theodb_columnar_chunks_skipped() -> i64 {
 #[pg_extern]
 fn theodb_columnar_chunks_scanned() -> i64 {
     SKIP_STATS.with(|s| s.get().1 as i64)
+}
+
+/// M168 — how many times the streaming top-k advanced its cursor in the most recent scan (wiring metric,
+/// pillar c). Auto-zeroed by `ColumnarChunkStream::new`, like `SKIP_STATS` at `columnar_scan_begin`.
+///
+/// **It counts `next()` CALLS, not chunk-groups**, and the two differ in both directions (a review caught the doc
+/// claiming otherwise):
+///   * the terminal call that returns `Ok(None)` counts but delivers nothing — so a complete 1M-row scan reads
+///     **101**, not 100. The schema probe is NOT a second cause: it **is** chunk-group #0
+///     (`df_executor.rs` — "The probe IS a chunk-group"). Attributing the excess to two causes summing to one
+///     unit makes the reader compute 102, see 101, and conclude the counter under-counts;
+///   * one call can consume a whole run of zone-map-pruned chunk-groups (`decode_one_chunk_group` returns
+///     `Ok(false)` → `continue`) and still count 1 — so under pushed-down predicates it UNDER-counts the groups
+///     actually traversed.
+///
+/// Neither hurts its purpose. It is the deterministic half of the cancellation oracle — a scan cut short advances
+/// the cursor far fewer times than a complete one.
+///
+/// **The +1 is ASYMMETRIC, and that asymmetry IS the signal.** `interrupt_is_pending()` is checked BEFORE
+/// `inner.next()` (`df_executor.rs`), so the poll that cancels returns early and does NOT increment — a cut arm
+/// never makes the terminal call and carries no +1. A complete arm does. Measured: C1 = 11 with 11 traced
+/// batches; C4 = 101 with 100. So the gate is `a > (b+1)·0.5`, and with b=100 the threshold moves from 50 to
+/// **50.5** — slightly MORE permissive. Two earlier versions of this comment got it wrong in both directions
+/// ("the +1 cancels", then "`a+1 > (b+1)·0.5` → 49.5"); the effect on the verdict is nil (11 against 50.5), but
+/// the erased asymmetry was the very thing being measured. Unlike a wall-clock comparison it is immune to machine
+/// speed, cache state and box load, which is what
+/// `benchmarks/m168_cancel_oracle.sql` needs to tell "cancelled mid-scan" from "cancelled at the end" without a
+/// single-sample timing claim.
+#[pg_extern]
+fn theodb_columnar_stream_chunk_groups() -> i64 {
+    STREAM_CG_COUNT.with(|c| c.get() as i64)
+}
+
+/// M169 — zerar o contador quando o agregado RECUA do streaming para o eager.
+///
+/// Sem isto o contador guarda as chamadas da tentativa que **falhou**, e o oráculo de não-vacuidade
+/// (`benchmarks/m169_agg_stream.sql`) leria `calls > 0` afirmando que o braço `on` passou pelo stream — quando a
+/// resposta veio do caminho eager. É falso-verde dentro do próprio oráculo, que é a classe de defeito que este
+/// projeto mais paga.
+pub(crate) fn reset_stream_cg_count() {
+    STREAM_CG_COUNT.with(|c| c.set(0));
 }
 
 // ===========================================================================================================
@@ -837,10 +883,10 @@ pub(crate) enum DecodedColumn {
 /// varlena/text. Widths match `decode_column`'s `attlen_fixed` and `build_arrow`'s per-type readers.
 pub(crate) fn fixed_arrow_width(typid: u32) -> Option<usize> {
     match typid {
-        21 => Some(2),                 // int2
-        23 | 700 | 1082 => Some(4),    // int4 / float4 / date (Date32)
+        21 => Some(2),                     // int2
+        23 | 700 | 1082 => Some(4),        // int4 / float4 / date (Date32)
         20 | 701 | 1114 | 1184 => Some(8), // int8 / float8 / timestamp / timestamptz (all i64/f64)
-        _ => None,                     // bool (bit-packed), varlena/text → cell path
+        _ => None,                         // bool (bit-packed), varlena/text → cell path
     }
 }
 
@@ -849,6 +895,432 @@ pub(crate) fn fixed_arrow_width(typid: u32) -> Option<usize> {
 /// (decided from the directory in a cheap first pass) AND has no same-xact pending rows accumulates as `FixedRaw` (one
 /// bulk `extend_from_slice` per chunk-group — O(bytes), not O(cells)); every other column stays `Cells` (fail-safe,
 /// byte-identical to `decode_columns`). Returns `(name, typid, DecodedColumn)` per wanted column, in `wanted` order.
+/// One visible stripe's directory, plus how many chunk-groups it holds. Lifted to module scope (it used to be
+/// declared inside `decode_columns_v2`) so the per-chunk-group decode can be a shared helper — M168 needs the same
+/// unit both accumulated (the existing path) and streamed (the O(k) top-k path).
+struct StripePlan {
+    entries: Vec<codec::ChunkDirEntry>,
+    n_chunk_groups: usize,
+}
+
+/// Everything a chunk-group decode needs that does NOT change between chunk-groups. Bundled so the helper takes a
+/// context rather than eleven positional arguments.
+struct CgDecodeCtx<'a> {
+    rel: pg_sys::Relation,
+    natts: usize,
+    wanted: &'a [usize],
+    cols: &'a [ColDesc],
+    mode_fixed: &'a [Option<usize>],
+    predicates: &'a [super::zonemap::ZonePredicate],
+    skip: bool,
+}
+
+/// Decode ONE chunk-group into the caller's accumulators.
+///
+/// This is the unit of work the columnar decode has always done — it was inlined in `decode_columns_v2`'s nested
+/// loop. Extracting it changes nothing about *how* a chunk-group is decoded; it changes only who owns the
+/// accumulators. `decode_columns_v2` passes buffers that live across every chunk-group (so the whole relation lands
+/// in one batch, the O(N) behaviour M167 measured at 772 MiB); the M168 streaming path passes buffers it resets and
+/// drains per chunk-group, which is what makes the peak independent of N.
+///
+/// Returns `Ok(false)` when the zone-map proved this chunk-group cannot match (nothing was read or decoded).
+unsafe fn decode_one_chunk_group(
+    ctx: &CgDecodeCtx,
+    pl: &StripePlan,
+    cg: usize,
+    fixed_bytes: &mut [Vec<u8>],
+    fixed_rows: &mut [usize],
+    cell_cols: &mut [Vec<Option<Vec<u8>>>],
+) -> Result<bool, String> {
+    let natts = ctx.natts;
+    let cg_rows = pl.entries[cg * natts].row_count as usize;
+    if ctx.skip
+        && ctx.predicates.iter().any(|p| {
+            p.col < natts && {
+                let e = &pl.entries[cg * natts + p.col];
+                !super::zonemap::chunk_can_match(
+                    e.has_minmax,
+                    e.min_bits,
+                    e.max_bits,
+                    ctx.cols[p.col].mm,
+                    p,
+                )
+            }
+        })
+    {
+        return Ok(false);
+    }
+    for (wi, &col) in ctx.wanted.iter().enumerate() {
+        let e = &pl.entries[cg * natts + col];
+        let comp = super::page::read_chunked(ctx.rel, e.first_block, e.n_pages)?;
+        if comp.len() < e.comp_len as usize {
+            return Err("theodb_columnar: column chunk truncated on disk".into());
+        }
+        let raw = zstd::decode_all(&comp[..e.comp_len as usize])
+            .map_err(|x| format!("theodb_columnar: zstd decode failed: {x}"))?;
+        match ctx.mode_fixed[wi] {
+            Some(w) => {
+                // FixedRaw: has_nulls=false ⇒ the whole `raw` is the dense contiguous LE value stream.
+                let expect = w * cg_rows;
+                if raw.len() != expect {
+                    return Err(format!(
+                        "theodb_columnar: fixed chunk size {} != {w}*{cg_rows} (col {col})",
+                        raw.len()
+                    ));
+                }
+                fixed_bytes[wi].extend_from_slice(&raw); // one bulk copy per chunk-group (O(bytes))
+                fixed_rows[wi] += cg_rows;
+            }
+            None => {
+                let mut vals =
+                    codec::decode_column(&raw, ctx.cols[col].attlen_fixed, cg_rows, e.has_nulls)?;
+                cell_cols[wi].append(&mut vals);
+            }
+        }
+    }
+    Ok(true)
+}
+
+/// A columnar scan planned but not yet decoded: stripe directories, the projection, and the per-column FixedRaw
+/// decision. Pass 1 of the decode — cheap (headers + directories only, no value chunks).
+///
+/// HONESTIDADE SOBRE O ESTADO ATUAL: esta struct foi extraída com a intenção de que o caminho acumulador
+/// (`decode_columns_v2`) e o streaming compartilhassem UMA definição de "o que é este scan". **Eles ainda não
+/// compartilham** — `decode_columns_v2` mantém seu próprio pass 1, byte-a-byte igual ao daqui, e
+/// `plan_columnar_scan` tem um único chamador. Essa duplicação é precisamente o mecanismo que produziu o BLOCKER
+/// do M168: a guarda de linhas pendentes ficou numa cópia e não na outra. Um comentário afirmando que a
+/// duplicação foi removida seria pior que nenhum comentário — ela não foi (achado de review).
+///
+/// A decisão FixedRaw é a parte sutil de qualquer unificação futura: uma coluna só é elegível se NENHUM
+/// chunk-group em lugar algum tem nulos para ela — propriedade da relação inteira, que um laço por chunk-group
+/// não redescobre.
+pub(crate) struct ScanPlan {
+    plans: Vec<StripePlan>,
+    wanted: Vec<usize>,
+    cols: Vec<ColDesc>,
+    mode_fixed: Vec<Option<usize>>,
+    names: Vec<String>,
+    natts: usize,
+}
+
+impl ScanPlan {
+    /// M169 ADR-5 — total UNCOMPRESSED bytes of the projected VARIABLE-LENGTH columns, over every visible
+    /// chunk-group of every visible stripe.
+    ///
+    /// This is the exact pre-check for the one question the aggregate fail-open has to answer: *can the eager
+    /// path serve this scan at all?* `decode_to_batch` builds each text column as ONE Arrow `Utf8` array, and
+    /// those offsets are `i32` — past `i32::MAX` bytes of values the array cannot be built and the decode dies
+    /// with `byte array offset overflow`. Recuing to eager in that situation would hand the query back to the
+    /// very defect M169 removes, so the fallback is conditional on this number.
+    ///
+    /// Exact, not estimated: `ChunkDirEntry.raw_len` is already in memory (the directory is the O(N) term the
+    /// scan pays regardless), so there is nothing to approximate.
+    ///
+    /// **Direction of the inexactness, bounded rather than asserted.** `raw_len` is the raw *serialized* length
+    /// of the chunk, including per-cell length headers the Arrow values buffer does NOT carry, so it normally
+    /// OVER-counts — the safe side for a check that decides "eager cannot serve this": it declines the fallback
+    /// slightly early and never misses a real overflow. It also ignores `skip`/Filter pruning, over-counting
+    /// again for a pruned scan.
+    ///
+    /// The one direction where it can under-count, stated because "never under" would be a false guarantee:
+    /// `build_arrow` decodes text with `String::from_utf8_lossy` (`df_executor.rs:305`), which expands each
+    /// invalid byte to a 3-byte `U+FFFD`. A column of invalid UTF-8 can therefore produce an Arrow values buffer
+    /// larger than its stored payload. Reaching an overflow that way needs invalid UTF-8 *and* a column already
+    /// near 2 GiB — narrow, but not impossible, and the fallback would then hand the query to a path that
+    /// cannot serve it. Found by SEPA review.
+    ///
+    /// Fixed-width columns are skipped because they land in a fixed-stride Arrow buffer with no offsets at all —
+    /// their size is bounded by `row_count * width`, not by an `i32` cursor.
+    /// **MÁXIMO POR COLUNA, não a soma entre colunas** (corrigido no review do M169). O teto de offsets do
+    /// Arrow é de **um array**, isto é, de UMA coluna: `DataType::Utf8` endereça seu buffer de valores com
+    /// offsets `i32`. Somar as colunas projetadas responde a pergunta errada — duas colunas de texto de 1,5 GiB
+    /// somam 3 GiB e reprovariam o pré-check, enquanto nenhuma delas sozinha estoura e o caminho eager teria
+    /// servido a consulta. Como este número existe para decidir "o eager PODE ter sucesso?", a soma
+    /// transformaria em erro duro exatamente o caso que o recuo existe para atender.
+    pub(crate) fn varlena_raw_len_max_per_column(&self) -> u64 {
+        let mut worst: u64 = 0;
+        for col in &self.wanted {
+            if self.cols[*col].attlen_fixed.is_some() {
+                continue;
+            }
+            let mut per_column: u64 = 0;
+            for sp in &self.plans {
+                for cg in 0..sp.n_chunk_groups {
+                    per_column = per_column
+                        .saturating_add(u64::from(sp.entries[cg * self.natts + *col].raw_len));
+                }
+            }
+            worst = worst.max(per_column);
+        }
+        worst
+    }
+}
+
+/// Does this relation have rows written by the current transaction that are not yet flushed into a stripe?
+///
+/// `decode_columns_v2` checks this FIRST and falls back to the legacy cell path when true, because a scan built
+/// only from `read_visible_stripes` cannot see them. Any OTHER caller that plans a scan from stripes alone owes
+/// the same check — M168 extracted `plan_columnar_scan` from the middle of that function and left the guard
+/// behind at the top, which made a streamed `BEGIN; INSERT; SELECT … ORDER BY … LIMIT` silently miss its own
+/// transaction's writes. Exposed here so the guard is callable instead of copyable.
+pub(crate) unsafe fn has_unflushed_pending(rel: pg_sys::Relation) -> bool {
+    let oid = (*rel).rd_id.to_u32();
+    WRITE_STATES.with(|w| w.borrow().get(&oid).is_some_and(|p| !p.rows.is_empty()))
+}
+
+/// Pass 1: plan the scan without decoding a single value chunk.
+pub(crate) unsafe fn plan_columnar_scan(
+    rel: pg_sys::Relation,
+    projection: Option<&[usize]>,
+) -> Result<ScanPlan, String> {
+    // A guarda de linhas pendentes vive no CHAMADOR (`open_streaming_source`), e foi exatamente essa distância
+    // que produziu o BLOCKER da rodada anterior: o `plan_columnar_scan` foi extraído do MEIO do
+    // `decode_columns_v2`, deixando a checagem lá no topo — e o streaming passou a não ver as escritas da própria
+    // transação. Torná-la "chamável em vez de copiável" resolveu aquele caso e não impede o próximo: um segundo
+    // chamador que esqueça a checagem reintroduz o mesmo defeito em silêncio (achado de review).
+    //
+    // Este `assert` prende a obrigação no callee. Uma versão anterior usava `debug_assert`, justificando que "o
+    // custo de um SPI/scan de catálogo por plano não se justifica em release" — e isso está errado sobre a
+    // própria função, definida vinte linhas acima: `has_unflushed_pending` é um lookup num
+    // `thread_local! HashMap<u32, PendingWrite>` (`WRITE_STATES`, no topo do módulo), da ordem de nanossegundos,
+    // sem SPI e sem catálogo (achado de review). Com o custo real, `debug_assert` não tinha defesa: o artefato
+    // `--release` é o que embarca, é sobre ele que todos os números do M168 foram medidos, e era exatamente nele
+    // que a guarda não existia.
+    //
+    // O panic deste `assert!` desenrola PASSANDO pelo `relation_close` de `columnar_agg.rs:2417`. É correto
+    // mesmo assim: o abort da transação devolve a referência pelo resource owner. Vale dizer porque a
+    // justificativa anterior era sobre custo, e alguém poderia trocar por `Err` supondo vazamento de relcache.
+    assert!(
+        !has_unflushed_pending(rel),
+        "plan_columnar_scan chamado com linhas pendentes não descarregadas: o plano seria construído sobre \
+         stripes que não contêm as escritas da própria transação. O chamador tem de declinar para o caminho \
+         eager (ver open_streaming_source)."
+    );
+    let tupdesc = (*rel).rd_att;
+    let natts = (*tupdesc).natts as usize;
+    let cols = (0..natts).map(|i| coldesc(tupdesc, i)).collect::<Result<Vec<_>, _>>()?;
+    let wanted: Vec<usize> = match projection {
+        Some(p) => {
+            for &i in p {
+                if i >= natts {
+                    return Err(format!(
+                        "theodb_columnar: projection column {i} out of range (natts {natts})"
+                    ));
+                }
+            }
+            p.to_vec()
+        }
+        None => (0..natts).collect(),
+    };
+    let name_of = |i: usize| -> String {
+        std::ffi::CStr::from_ptr((*super::tupdesc_attr(tupdesc, i)).attname.data.as_ptr())
+            .to_string_lossy()
+            .into_owned()
+    };
+    let mut plans: Vec<StripePlan> = Vec::new();
+    for sm in read_visible_stripes((*rel).rd_id)? {
+        let hdr_items = super::page::read_all_page_items(rel, sm.header_block)?;
+        let header_bytes =
+            hdr_items.into_iter().next().ok_or("theodb_columnar: stripe header page empty")?;
+        let header = StripeHeader::from_bytes(&header_bytes)?;
+        if header.ncols as usize != natts {
+            return Err(format!("theodb_columnar: stripe ncols {} != natts {natts}", header.ncols));
+        }
+        let dir_bytes = super::page::read_chunked(rel, header.dir_first_block, header.dir_n_pages)?;
+        let entries =
+            codec::deserialize_directory(&dir_bytes, header.n_chunk_groups as usize * natts)?;
+        plans.push(StripePlan { entries, n_chunk_groups: header.n_chunk_groups as usize });
+    }
+    let fast_decode = super::columnar_agg::ENABLE_FAST_DECODE.get();
+    let mode_fixed: Vec<Option<usize>> = wanted
+        .iter()
+        .map(|&col| {
+            if !fast_decode {
+                return None;
+            }
+            let w = fixed_arrow_width(cols[col].typid)?;
+            let any_null = plans
+                .iter()
+                .any(|pl| (0..pl.n_chunk_groups).any(|cg| pl.entries[cg * natts + col].has_nulls));
+            if any_null { None } else { Some(w) }
+        })
+        .collect();
+    let names = wanted.iter().map(|&c| name_of(c)).collect();
+    // EC-1 (MUST FIX do plano) — o termo O(N) que o streaming NÃO remove, MEDIDO em vez de derivado.
+    //
+    // O M169 torna o DECODE O(chunk-group). O diretório do scan continua O(N): `plans` materializa um
+    // `ChunkDirEntry` por (chunk-group × coluna) da relação inteira, ANTES de qualquer decode. A 100M com 105
+    // colunas isso é ~1,05M entradas. O artefato precisa publicar esse número medido — declarar "decode
+    // O(chunk-group)" sem ele deixaria o leitor concluir que o consumo total virou constante, que é falso.
+    //
+    // Sob o flag de trace, como o resto da instrumentação: é uma linha por scan planejado, e o caminho padrão
+    // não paga nada.
+    if super::columnar_agg::admit_trace_enabled() {
+        let entries: usize = plans.iter().map(|p| p.entries.len()).sum();
+        pgrx::warning!(
+            "theodb_scan_plan: stripes={} chunk_dir_entries={} natts={} wanted={} bytes_in_mem≈{}",
+            plans.len(),
+            entries,
+            natts,
+            wanted.len(),
+            entries * std::mem::size_of::<codec::ChunkDirEntry>()
+        );
+    }
+    Ok(ScanPlan { plans, wanted, cols, mode_fixed, names, natts })
+}
+
+/// The backend thread that a raw-`Relation` holder was created on.
+///
+/// M168 ADR-2. `ColumnarChunkStream` holds a `pg_sys::Relation` and is handed to DataFusion, whose
+/// `PartitionStream` trait demands `Send + Sync`. That `unsafe impl` is TRUE under the executor's
+/// `new_current_thread` runtime with `target_partitions(1)`: the stream is polled on the backend thread and
+/// nowhere else. But it is true by configuration, not by construction — someone switching to `new_multi_thread`
+/// would get silent memory corruption rather than a compile error, because PostgreSQL relation access is not
+/// thread-safe.
+///
+/// So the invariant is asserted rather than commented. Precedent in this project: M139 found Tantivy calling
+/// `Directory` from four threads, and the fix was to make the constraint explicit instead of hoping.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ThreadAffinity(std::thread::ThreadId);
+
+impl ThreadAffinity {
+    pub(crate) fn capture() -> Self {
+        Self(std::thread::current().id())
+    }
+
+    /// Panics if called from any thread other than the one that captured it.
+    pub(crate) fn assert_owned(&self, what: &str) {
+        let now = std::thread::current().id();
+        assert_eq!(
+            self.0, now,
+            "{what}: touched from {now:?} but owned by {:?}. A pg_sys::Relation is only valid on its backend \
+             thread; this means the DataFusion runtime is no longer single-threaded (see M168 ADR-2).",
+            self.0
+        );
+    }
+}
+
+/// Streams a planned columnar scan ONE chunk-group at a time.
+///
+/// This is the M168 answer to the M167 DoD bullet 2b. `decode_columns_v2` hands the same helper accumulators that
+/// live across the whole relation, so its peak is O(N) — measured at 809,738,352 bytes for ClickBench q23. This
+/// type hands the helper accumulators it drains after every chunk-group, so the peak is one chunk-group.
+///
+/// It holds a raw `pg_sys::Relation` and therefore MUST be advanced only on the backend thread that created it.
+/// That is not a comment: `next` asserts it (see `ThreadAffinity`), turning a runtime/threading change from silent
+/// memory corruption into an immediate panic.
+pub(crate) struct ColumnarChunkStream {
+    plan: ScanPlan,
+    rel: pg_sys::Relation,
+    affinity: ThreadAffinity,
+    pl_idx: usize,
+    cg_idx: usize,
+}
+
+impl ColumnarChunkStream {
+    /// Assere a afinidade sem avançar o stream. Existe para que um chamador possa verificar a invariante ANTES
+    /// de tocar estado global do PostgreSQL — o safepoint de interrupções faz exatamente isso.
+    pub(crate) fn assert_owning_thread(&self, what: &str) {
+        self.affinity.assert_owned(what);
+    }
+
+    pub(crate) fn new(rel: pg_sys::Relation, plan: ScanPlan) -> Self {
+        // Zera o contador AQUI, e não por uma chamada SQL do consumidor. É o mesmo desenho do `SKIP_STATS` do
+        // M150, que se auto-reseta em `columnar_scan_begin` — um contador que depende de alguém lembrar de
+        // resetá-lo é um contador que um dia reporta o scan anterior. Isto também apaga a necessidade do
+        // `theodb_columnar_stream_reset()`, que existia só para compensar a ausência deste zero (achado de
+        // review; parsimony ladder degrau 1 — a função não precisava existir).
+        // O zero vem depois do `capture()` por ordem de inicialização, e isso é **tudo** que a mudança faz.
+        // Uma versão anterior deste comentário alegava ganho de segurança ("o módulo assere a invariante em vez
+        // de confiar nela") — falso aqui: `ThreadAffinity::capture()` é `thread::current().id()`, registro puro;
+        // ele DEFINE o dono como quem chamar, não assere nada, e `new()` não assere em ponto algum. O argumento
+        // válido dessa forma vive em `poll_next`, onde `assert_owning_thread()` — que de fato entra em pânico —
+        // precede a leitura de um global do PG. Emprestar a forma daquele argumento aqui ensinaria um mecanismo
+        // falso sobre `capture` vs `assert` no único módulo cuja segurança depende de saber a diferença
+        // (achado de review).
+        let affinity = ThreadAffinity::capture();
+        STREAM_CG_COUNT.with(|c| c.set(0));
+        Self {
+            plan,
+            rel,
+            affinity,
+            pl_idx: 0,
+            cg_idx: 0,
+        }
+    }
+
+    /// Decode the next non-skipped chunk-group. `Ok(None)` = the scan is exhausted.
+    ///
+    /// SAFETY: the caller guarantees this runs on the backend thread that owns `rel` (see the type's doc). Every
+    /// buffer is freshly allocated per call and moved out, so nothing accumulates across chunk-groups.
+    pub(crate) unsafe fn next(
+        &mut self,
+        predicates: &[super::zonemap::ZonePredicate],
+        skip: bool,
+    ) -> Result<Option<Vec<(String, u32, DecodedColumn)>>, String> {
+        self.affinity.assert_owned("ColumnarChunkStream::next");
+        // M168 — quantas vezes este scan streaming AVANÇOU o cursor. Ver a doc de
+        // `theodb_columnar_stream_chunk_groups`: isto NÃO é "chunk-groups entregues". A sonda de schema É o
+        // chunk-group nº 0 (não um extra); o que soma um é a CHAMADA TERMINAL, e só num scan completo. E uma
+        // chamada pode consumir vários chunk-groups podados pelo zone-map contando 1.
+        STREAM_CG_COUNT.with(|c| c.set(c.get() + 1));
+        let n = self.plan.wanted.len();
+        let ctx = CgDecodeCtx {
+            rel: self.rel,
+            natts: self.plan.natts,
+            wanted: &self.plan.wanted,
+            cols: &self.plan.cols,
+            mode_fixed: &self.plan.mode_fixed,
+            predicates,
+            skip,
+        };
+        while self.pl_idx < self.plan.plans.len() {
+            let pl = &self.plan.plans[self.pl_idx];
+            if self.cg_idx >= pl.n_chunk_groups {
+                self.pl_idx += 1;
+                self.cg_idx = 0;
+                continue;
+            }
+            let cg = self.cg_idx;
+            self.cg_idx += 1;
+            // Fresh per chunk-group — this is the whole point. `decode_columns_v2` reuses buffers across every
+            // chunk-group; draining them here is what makes the peak independent of N.
+            let mut fixed_bytes: Vec<Vec<u8>> = vec![Vec::new(); n];
+            let mut fixed_rows: Vec<usize> = vec![0; n];
+            let mut cell_cols: Vec<Vec<Option<Vec<u8>>>> = vec![Vec::new(); n];
+            if !decode_one_chunk_group(
+                &ctx,
+                pl,
+                cg,
+                &mut fixed_bytes,
+                &mut fixed_rows,
+                &mut cell_cols,
+            )? {
+                continue;
+            }
+            let out = self
+                .plan
+                .wanted
+                .iter()
+                .enumerate()
+                .map(|(wi, &col)| {
+                    let dc = match self.plan.mode_fixed[wi] {
+                        Some(w) => DecodedColumn::FixedRaw {
+                            bytes: std::mem::take(&mut fixed_bytes[wi]),
+                            width: w,
+                            row_count: fixed_rows[wi],
+                        },
+                        None => DecodedColumn::Cells(std::mem::take(&mut cell_cols[wi])),
+                    };
+                    (self.plan.names[wi].clone(), self.plan.cols[col].typid, dc)
+                })
+                .collect();
+            return Ok(Some(out));
+        }
+        Ok(None)
+    }
+}
+
 pub(crate) unsafe fn decode_columns_v2(
     rel: pg_sys::Relation,
     projection: Option<&[usize]>,
@@ -879,9 +1351,7 @@ pub(crate) unsafe fn decode_columns_v2(
 
     // Same-xact pending rows force the whole result onto the legacy cell path (fail-safe: merging FixedRaw bytes with
     // pending cell rows is out of M160 scope — pending is empty for a read-only benchmark query, the measured regime).
-    let oid = (*rel).rd_id.to_u32();
-    let has_pending = WRITE_STATES.with(|w| w.borrow().get(&oid).is_some_and(|p| !p.rows.is_empty()));
-    if has_pending {
+    if has_unflushed_pending(rel) {
         return Ok(decode_columns(rel, projection, predicates, skip)?
             .into_iter()
             .map(|(n, t, v)| (n, t, DecodedColumn::Cells(v)))
@@ -891,10 +1361,6 @@ pub(crate) unsafe fn decode_columns_v2(
     // Pass 1 — read every visible stripe's header + directory (cheap; no value chunks) so we can (a) decide per-wanted
     // column whether it can take the FixedRaw fast path (fixed-width type AND no nulls anywhere) and (b) reuse the
     // directories in pass 2 without re-reading. Also carries the zone-map skip decision per chunk-group.
-    struct StripePlan {
-        entries: Vec<codec::ChunkDirEntry>,
-        n_chunk_groups: usize,
-    }
     let mut plans: Vec<StripePlan> = Vec::new();
     for sm in read_visible_stripes((*rel).rd_id)? {
         let hdr_items = super::page::read_all_page_items(rel, sm.header_block)?;
@@ -920,9 +1386,9 @@ pub(crate) unsafe fn decode_columns_v2(
                 return None;
             }
             let w = fixed_arrow_width(cols[col].typid)?;
-            let any_null = plans.iter().any(|pl| {
-                (0..pl.n_chunk_groups).any(|cg| pl.entries[cg * natts + col].has_nulls)
-            });
+            let any_null = plans
+                .iter()
+                .any(|pl| (0..pl.n_chunk_groups).any(|cg| pl.entries[cg * natts + col].has_nulls));
             if any_null { None } else { Some(w) }
         })
         .collect();
@@ -934,54 +1400,29 @@ pub(crate) unsafe fn decode_columns_v2(
     let (mut skipped_cg, mut total_cg) = (0usize, 0usize);
 
     // Pass 2 — decode value chunks (the expensive part, done once), routing per column mode.
+    let ctx = CgDecodeCtx {
+        rel,
+        natts,
+        wanted: &wanted,
+        cols: &cols,
+        mode_fixed: &mode_fixed,
+        predicates,
+        skip,
+    };
     for pl in &plans {
         for cg in 0..pl.n_chunk_groups {
-            let cg_rows = pl.entries[cg * natts].row_count as usize;
             total_cg += 1;
-            if skip
-                && predicates.iter().any(|p| {
-                    p.col < natts && {
-                        let e = &pl.entries[cg * natts + p.col];
-                        !super::zonemap::chunk_can_match(
-                            e.has_minmax,
-                            e.min_bits,
-                            e.max_bits,
-                            cols[p.col].mm,
-                            p,
-                        )
-                    }
-                })
-            {
+            // Accumulators live across every chunk-group here — that is exactly what makes this path O(N) in the
+            // decoded batch. The streaming caller passes per-chunk-group buffers to the same helper instead.
+            if !decode_one_chunk_group(
+                &ctx,
+                pl,
+                cg,
+                &mut fixed_bytes,
+                &mut fixed_rows,
+                &mut cell_cols,
+            )? {
                 skipped_cg += 1;
-                continue;
-            }
-            for (wi, &col) in wanted.iter().enumerate() {
-                let e = &pl.entries[cg * natts + col];
-                let comp = super::page::read_chunked(rel, e.first_block, e.n_pages)?;
-                if comp.len() < e.comp_len as usize {
-                    return Err("theodb_columnar: column chunk truncated on disk".into());
-                }
-                let raw = zstd::decode_all(&comp[..e.comp_len as usize])
-                    .map_err(|x| format!("theodb_columnar: zstd decode failed: {x}"))?;
-                match mode_fixed[wi] {
-                    Some(w) => {
-                        // FixedRaw: has_nulls=false ⇒ the whole `raw` is the dense contiguous LE value stream.
-                        let expect = w * cg_rows;
-                        if raw.len() != expect {
-                            return Err(format!(
-                                "theodb_columnar: fixed chunk size {} != {w}*{cg_rows} (col {col})",
-                                raw.len()
-                            ));
-                        }
-                        fixed_bytes[wi].extend_from_slice(&raw); // one bulk copy per chunk-group (O(bytes))
-                        fixed_rows[wi] += cg_rows;
-                    }
-                    None => {
-                        let mut vals =
-                            codec::decode_column(&raw, cols[col].attlen_fixed, cg_rows, e.has_nulls)?;
-                        cell_cols[wi].append(&mut vals);
-                    }
-                }
             }
         }
     }
@@ -1477,7 +1918,8 @@ unsafe fn accumulate_row(rel: pg_sys::Relation, slot: *mut pg_sys::TupleTableSlo
             if (*super::tupdesc_attr(tupdesc, i)).attlen != -1 {
                 continue; // fixed-length: nothing to detoast
             }
-            let flat = pg_sys::pg_detoast_datum_copy(form_values[i].cast_mut_ptr::<pg_sys::varlena>());
+            let flat =
+                pg_sys::pg_detoast_datum_copy(form_values[i].cast_mut_ptr::<pg_sys::varlena>());
             owned.push(flat);
             form_values[i] = pg_sys::Datum::from(flat);
         }
@@ -2262,5 +2704,39 @@ mod tests {
         assert_eq!(n, 0, "an empty columnar table must scan zero rows in Phase A");
 
         Spi::run("DROP TABLE m99_ct").unwrap();
+    }
+}
+
+// B-012: eram `#[pgrx::pg_test]` num módulo `#[pgrx::pg_schema]` chamado `m168_affinity_tests` — o pgrx
+// gerava as funções no schema homônimo enquanto o harness as chama em `tests.<fn>`, e as duas falhavam com
+// `function tests.affinity_...() does not exist`. Reclassificados para `#[test]`: `ThreadAffinity::capture`
+// e `assert_owned` são `std::thread::current().id()` puro, sem uma linha de `pg_sys` — não precisam de
+// backend, e um `#[pg_test]` que não toca o PostgreSQL está classificado errado.
+#[cfg(test)]
+mod m168_affinity_tests {
+    use super::ThreadAffinity;
+
+    /// M168 ADR-2 RED→GREEN. The whole point of `ThreadAffinity` is to fail loudly when a `pg_sys::Relation`
+    /// holder is touched off its backend thread. An assertion never observed failing is not known to be an
+    /// assertion — this observes it.
+    ///
+    /// No PostgreSQL state is touched from the spawned thread: only the affinity check runs there, so the test
+    /// cannot itself corrupt anything. The panic is contained by `join()` returning `Err`.
+    #[test]
+    fn affinity_panics_off_owning_thread() {
+        let aff = ThreadAffinity::capture();
+        let joined = std::thread::spawn(move || aff.assert_owned("m168 test")).join();
+        assert!(
+            joined.is_err(),
+            "ThreadAffinity did NOT panic when touched from another thread — the M168 ADR-2 guard is inert, \
+             which means a multi-threaded runtime would corrupt memory silently instead of failing fast"
+        );
+    }
+
+    /// The other half: on the owning thread it must be a no-op, or the guard would break the real path.
+    #[test]
+    fn affinity_is_silent_on_owning_thread() {
+        let aff = ThreadAffinity::capture();
+        aff.assert_owned("m168 test"); // must not panic
     }
 }

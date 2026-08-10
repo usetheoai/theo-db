@@ -277,8 +277,8 @@ def test_sanitize_symbol_escapes_pipes() -> None:
 
 def test_default_skip_dirs_includes_references() -> None:
     # Issue #37: the real directory is `references` (EN, the convention used
-    # across .claude/rules/), NOT `referencia` (PT) — the latter never matched
-    # any real path and let the audit walk third-party reference repos.
+    # across rules/), NOT `referencia` (PT) — the latter never matched any real
+    # path and let the audit walk third-party reference repos under references/.
     assert "references" in DEFAULT_SKIP_DIRS
     assert ".git" in DEFAULT_SKIP_DIRS
     assert "node_modules" in DEFAULT_SKIP_DIRS

@@ -5,7 +5,7 @@ A correct HNSW build has recall non-decreasing in ef_construction. M57 measured 
 recall WORSE, 0.974→0.832) — a build-bug signal. This probe isolates it: sweep efc × {sequential, parallel} build
 and read recall@10. If the SEQUENTIAL build (no overwrite lost-update) is monotonic-increasing in efc while the
 PARALLEL build (with the `hnsw_parallel.rs` overwrite) inverts, the overwrite is the graph-navigability root cause
-(the whole P0 pillar's blocker — `docs/benchmarks/p0-vector-superiority-root-blocker.md`).
+(the whole P0 pillar's blocker — `wiki/benchmarks/p0-vector-superiority-root-blocker.md`).
 
 The efc + build-mode are set via env on the POSTMASTER (THEODB_HNSW_EF_CONSTRUCTION / THEODB_HNSW_PARALLEL_THRESHOLD),
 read at CREATE INDEX time — so the bash orchestrator restarts pg per config. This script does ONE config:

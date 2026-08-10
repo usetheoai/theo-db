@@ -49,36 +49,43 @@ def project_root() -> Path:
 
 @pytest.fixture(scope="session")
 def rubric_path() -> Path:
-    return TEMPLATES_DIR / "rubric-blueprint.md"
+    return TEMPLATES_DIR / "rubric-opportunity.md"
 
 
 @pytest.fixture
-def good_blueprint(fixtures_dir: Path) -> Path:
-    return fixtures_dir / "good-blueprint.md"
+def good_opportunity(fixtures_dir: Path) -> Path:
+    return fixtures_dir / "good-opportunity.md"
 
 
 @pytest.fixture
-def synthetic_blueprint(tmp_path: Path) -> Path:
-    """Minimal valid blueprint for negative-path tests. Each corner has >50 chars of content
-    to pass the MIN_CONTENT_CHARS threshold in check_research_coverage.
+def synthetic_opportunity(tmp_path: Path) -> Path:
+    """Minimal valid opportunity for negative-path tests.
+
+    Each corner carries >50 chars to clear MIN_CONTENT_CHARS in check_corner_coverage.
+    Deliberately repo-local in its blast radius, so no ADR is required — the ADR
+    conditional is exercised explicitly in test_check_opportunity_completeness.
     """
     body = (
-        "# Blueprint: Test\n\n"
+        "# Opportunity: Test\n\n"
+        "**Item:** B-001\n"
+        "**Repo:** squad\n"
+        "**Mode:** review\n"
         "**Slug:** `test`\n\n"
         "## Context\n\nTest context for the synthetic fixture used in unit tests.\n\n"
-        "## Objective\n\nVerify the checker logic with controlled inputs.\n\n"
-        "## Coverage Corner 1 — Integration Tests\n\n"
-        "### Project A\n\nThis subsection has substantive content describing how integration tests are structured in Project A; well above the threshold required by the checker.\n\n"
-        "## Coverage Corner 2 — Dependencies\n\n"
-        "### Project A\n\nThis subsection has substantive content describing the dependency profile of Project A with versions and rationale; well above threshold.\n\n"
-        "## Coverage Corner 3 — Tools\n\n"
-        "### Project A\n\nThis subsection has substantive content describing the local-dev tooling story for Project A with concrete commands and steps.\n\n"
-        "## Coverage Corner 4 — Techniques\n\n"
-        "### Project A\n\nThis subsection has substantive content describing the core technique borrowed from Project A, with architectural details.\n\n"
-        "## Cross-cutting Comparison\n\nA table comparing approaches across projects, with substantive content for each column.\n\n"
-        "## ADRs\n\n### D1 — A decision\n\nRationale text here describing the decision and why we made it.\n\n"
-        "## Recommendations\n\n- Do X for reason Y as explained in section Z\n"
+        "## Corner 1 — Evidence\n\n"
+        "The measurement is recorded here with enough substantive detail to clear the "
+        "minimum content threshold enforced by the corner checker.\n\n"
+        "## Corner 2 — Constraint Relation\n\n"
+        "Local optimisation. The declared constraint is untouched by this change, and "
+        "that is stated plainly rather than left blank.\n\n"
+        "## Corner 3 — Blast Radius\n\n"
+        "Repo-local. Nothing outside this repository consumes the affected surface, so "
+        "no consumer has to migrate.\n\n"
+        "## Corner 4 — Verification\n\n"
+        "A regression test asserts the corrected behaviour and fails against the current "
+        "state. The limit plausibly moves to the next stage afterwards.\n\n"
+        "## Recommendation\n\n- Do X for reason Y as explained above\n"
     )
-    bp = tmp_path / "test-blueprint.md"
-    bp.write_text(body, encoding="utf-8")
-    return bp
+    path = tmp_path / "test-opportunity.md"
+    path.write_text(body, encoding="utf-8")
+    return path

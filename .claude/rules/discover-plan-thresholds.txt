@@ -1,17 +1,30 @@
-# Discover-plan-confidence verdict bands.
+# Discover-Plan Score Thresholds — per-project tuning.
 #
-# Formato CANÔNICO: pipe-delimitado `NAME|threshold|sunset|adr` — lido por
-# `skills/discover-plan-confidence/scripts/run_discover_plan_score.py` (_parse_thresholds usa split("|")
-# e _verdict_for retorna o próprio NAME como token de verdict). Espelha `discover-blueprint-thresholds.txt`.
-# Bands apertados (frontier) por ADR 0001-discover-phd-rigor § 3.1.
+# Authoritative source: rules/discover-plan-golden-rule.md
 #
-# Os HARD CAPS (citação fabricada, corner vazio, budget de perguntas) NÃO são lidos daqui — são enforced
-# pelos checker scripts (check_reference_citations / check_research_coverage / check_plan_completeness).
+# Format: <band-name>|<min-score>|<sunset-date>|<adr-ref>
 #
-# Correção (2026-06-27): o arquivo estava no formato `band.x = N` (equals), incompatível com o parser
-# pipe-delimitado → bands vazio → verdict colapsava para INVALID independente do score. Migrado ao formato
-# canônico (mesmas bandas 92/75/50/0; mesmos tokens do golden rule + exit codes do runner).
-SHIPPABLE|92|2027-01-31|0001-discover-phd-rigor
-SHIPPABLE_WITH_CAVEATS|75|2027-01-31|0001-discover-phd-rigor
-NON_SHIPPABLE|50|2027-01-31|0001-discover-phd-rigor
-INVALID|0|2027-01-31|0001-discover-phd-rigor
+# Comparison is >= (inclusive). Score == 70 -> SHIPPABLE_WITH_CAVEATS.
+# Lines starting with `#` and blank lines are skipped.
+#
+# Bands (descending):
+#   90+   -> SHIPPABLE              (measurement plan ready to execute)
+#   70-89 -> SHIPPABLE_WITH_CAVEATS (explicit caveats)
+#   50-69 -> NON_SHIPPABLE          (rewrite the plan)
+#   0-49  -> INVALID                (hard cap fired, or a very low score)
+#
+# HISTORY — 2026-08-05. This file previously used a `key = value` shape carrying
+# `soft_cap.*` / `hard_cap.*` / `band.*` entries. Nothing parsed it: the scorer's
+# `_parse_thresholds` splits on `|`, found no bands, and every score fell through to
+# INVALID. The defect was invisible because a second one hid it — the resolver looked
+# only under `.claude/rules/`, so in this repo's standalone layout the file was never
+# read at all. The cap keys are gone rather than reformatted: the caps live in the
+# orchestrator, and a config file that configures nothing is worse than no file, because
+# editing it feels like changing behaviour.
+#
+# Sunset = quarterly review. Update sunset + ADR ref when you recalibrate.
+#
+SHIPPABLE|90|2027-01-31|YOUR_ADR_REF
+SHIPPABLE_WITH_CAVEATS|70|2027-01-31|YOUR_ADR_REF
+NON_SHIPPABLE|50|2027-01-31|YOUR_ADR_REF
+INVALID|0|2027-01-31|YOUR_ADR_REF

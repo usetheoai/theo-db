@@ -1,4 +1,4 @@
-"""Tests for check_spec_smells.py — verifies smell detection on discovery plan prose.
+"""Tests for check_spec_smells.py — verifies smell detection on measurement plan prose.
 
 RED tests of T0.5. MUST fail with ModuleNotFoundError until T1.4 lands the
 check_spec_smells module + _rubric_loader (both copy-with-attribution from sibling).

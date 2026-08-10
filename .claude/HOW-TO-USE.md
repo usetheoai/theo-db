@@ -1,321 +1,161 @@
-# How to use the Cycle ecosystem
+# How to use the Squad ecosystem
 
-A stack-agnostic, domain-agnostic pipeline for taking a feature from **idea → discovery → plan → code → merge**, with Claude Code as the active agent at every cycle. Each cycle has hard gates, anti-patterns, rollback, and an audit trail documented in `rules/cycle-*.md`.
+A pipeline for taking a maintenance item from **hunch → measurement → plan → code → merge**, with Claude Code as the active agent at every phase. Each phase has hard gates, anti-patterns, rollback and an audit trail documented in `rules/cycle-*.md`.
 
 ```
-DISCOVER → PLAN → IMPLEMENT → CODE-QUALITY → REVIEW → RELEASE → ANALYSIS (opt-in)
-   ↓         ↓        ↓             ↓            ↓        ↓           ↓
-(knowledge  (plans/) (commits +   (dead-code/  (gate    (develop→   (benchmarks,
- -base/    →         tests)      fabrication/  tighter)  main PR +   architecture,
- discoveries/)                    wiring)               semver tag)  scalability
-                                                                     → trajectory
-                                                                       verdict)
-                                                                         ↓
-                                              ON_TRACK → next milestone normally
-                                              WITH_RISKS → next milestone + risk tasks
-                                              CORRECTION → /to-plan corretivo primeiro
-                                              RETHINK → /discover-plan + redesign
+BACKLOG → DISCOVER → PLAN → IMPLEMENT → CODE-QUALITY → REVIEW → RELEASE
+   ↓          ↓         ↓        ↓            ↓           ↓        ↓
+ B-NNN     measures   plans/   commits +   dead-code/   gate    develop→main
+ (hunch)   OUR code            tests       fabrication/ tighter  PR + semver
+            ↓                              wiring
+       ITEM_KILLED ✔
+       (chain ends — a successful outcome)
 ```
 
-Each arrow is an **unbreakable chain** — you don't skip a cycle, you don't advance past an INVALID verdict. The ANALYSIS cycle is the post-release feedback loop: its verdict determines the shape of the next iteration.
+Each arrow is an **unbreakable chain** — you do not skip a phase, and you do not advance past an INVALID verdict. Unlike a roadmap pipeline, this one has no end state: `cycle-maintenance` loops for as long as the ecosystem is maintained.
 
-## Which cycle, when
+## Which phase, when
 
 | Question | Cycle | Entry point |
 |---|---|---|
-| "Brand new project — idea only, nothing built yet" | (one-shot bootstrap) | `/roadmap-init {project-slug}` |
-| "Add a NEW feature to an existing roadmap (becomes M<N+1>)" | (one-shot amendment) | `/roadmap-feature {feature-slug}` |
-| "ROADMAP exists; advance the next milestone end-to-end autonomously" | `cycle-roadmap` (delegates to `cycle-auto-plan`) | `/auto-plan` (no arg) or `/auto-plan M<N>` |
-| "How does <project X> handle <Y>?" | `cycle-discover` | `/discover-plan {topic-slug}` |
-| "I want to do X but haven't articulated requirements yet" | `cycle-plan` Phase 0 | `/grill-me {topic-slug}` |
-| "Let's design feature Y" | `cycle-plan` | `/to-plan` |
-| "Build the feature per the plan" | `cycle-implement` | `/implement {plan-slug}` |
+| "First time — there is no registry yet" | (one-shot bootstrap) | `/backlog-init` |
+| "I noticed something worth looking at" | `cycle-backlog` | `/backlog-item {slug}` |
+| "Is this hunch real?" | `cycle-discover` | `/discover --mode {review\|live-test\|bug\|evolve} B-NNN` |
+| "Sweep a domain for things nobody filed" | `cycle-discover` | `/discover --sweep {domain}` |
+| "Advance the next item end-to-end autonomously" | `cycle-maintenance` → `cycle-auto-plan` | `/auto-plan` (no arg) or `/auto-plan B-NNN` |
+| "The measurement holds — design the fix" | `cycle-plan` | `/to-plan B-NNN` |
+| "Requirements are still vague" | `cycle-plan` phase 0 | `/grill-me {slug}` |
+| "Build it per the plan" | `cycle-implement` | `/implement {plan-slug}` |
 | "Audit dead code + fabricated APIs post-implement" | `cycle-code-quality` | `/code-quality` |
 | "Review before merge" | `cycle-review` | `/review {plan-slug}` |
 | "Cut a release (develop → main + tag)" | `cycle-release` | `/release [bump-level]` |
-| "Just locate something in the code" | (no cycle) | Glob/Grep directly OR `/ast-grep` for structural queries |
-| "Ad-hoc work outside the roadmap (hotfix, exploratory)" | `cycle-auto-plan` direct | `/auto-plan {topic-slug}` (no `M<N>`) |
-| "Post-release: o projeto está no caminho certo? (benchmarks + evidence)" | `cycle-analysis` (opt-in, after release) | `/analysis [plan-slug]` |
+| "Check the released thing works for its user" | `cycle-acceptance` | `/acceptance B-NNN` |
+| "What has rotted in the registry?" | auxiliary | `/backlog-review` |
+| "Which specialist owns this repo?" | auxiliary | `python3 scripts/route_domain.py {repo}` |
+| "Just locate something in the code" | (no cycle) | Glob/Grep, or `/ast-grep` for structural queries |
+| "Is this operation CP or AP?" | auxiliary | `/cap-theorem-specialist` |
+| "The queue never drains / we OOM under load" | auxiliary | `/backpressure-specialist` |
+| "One slow service took the whole site down" | auxiliary | `/resilience-specialist` |
 
 ## Quick start
 
-### 1. Investigate underlying technology
+### 1. Create the registry (once)
 
-Before writing code, investigate prior art:
-
-```
-/discover-plan {topic-slug}
-  → produces knowledge-base/discoveries/plans/{slug}-plan.md
-/discover-edge-cases {slug}
-  → MUST-FIX absorbed into the plan
-/discover-plan-confidence {slug}
-  → plan-gate: structural score of the discovery plan itself; INVALID returns to /discover-plan
-/discover-execute {slug}
-  → halt-loop investigates (sources per rules/discover-web-allowlist.txt and clones in knowledge-base/references/)
-/discover-confidence {slug}
-  → blueprint score; INVALID returns to /discover-plan
-/discover-improve {slug}        [optional — only if score is NEEDS_REVISION]
-  → the blueprint is the cycle's terminal artifact
-/skill-creator                  [optional, out of cycle] — distil a SHIPPABLE blueprint
-                                  into a first-class skill at skills/{purpose}/,
-                                  consumed by /to-plan in future plans
+```bash
+/backlog-init
 ```
 
-### 2. Plan a feature
+Inventories the repos **from disk** (`find` + `git rev-list`), never from a documentation table. Builds the domain routing table, names the exclusions with their reasons, and seeds **zero items** — an item nobody filed has no `why_now`, no DoD and no owner.
 
-Optional Phase 0 — when requirements are vague:
+### 2. Register a hunch
 
-```
-/grill-me {topic-slug}
-  → interview-driven requirements resolution (one question at a time, codebase-first)
-  → produces knowledge-base/grills/{slug}-grill.md with verdict
-  → READY_FOR_PLAN → proceed to /to-plan; NEEDS_SPLIT → split topic; NEEDS_DISCOVERY → run /discover-plan first
+```bash
+/backlog-item theo-lens-trace-latency
 ```
 
-Then the plan chain:
+Four questions, one per turn: what changed in **our** system; which repo and therefore which domain; which discover mode looks right (a guess, not a decision); and the verifiable Definition of Done.
 
-```
-/to-plan "{one-sentence feature description}"
-  → Step 0 reads rules/ AND skills/*-patterns/ (auto-discovery)
-  → produces knowledge-base/plans/{slug}-plan.md
-/edge-case-plan {slug}
-  → MUST-FIX absorbed
-/deps-audit {slug}
-  → audits dependencies + CVEs before the plan advances
-/plan-confidence {slug}
-  → score; if low:
-/plan-improve {slug}
-/plan-confidence {slug}  [re-score]
-  → if ≥ SHIPPABLE_WITH_CAVEATS: plan ready for /implement
+**No evidence is requested.** `evidence: none-yet` is the honest value for a hypothesis. Gate G5 rejects a `why_now` justified by what another project does.
+
+### 3. Measure
+
+```bash
+/discover --mode live-test B-014
 ```
 
-### 3. Implement
+Runs `discover-plan → edge-cases → plan-confidence → execute → confidence`, measuring against our code or runtime. Two legitimate endings:
 
-```
-git switch -c feature/my-feature   # or stay on develop (Unbreakable Rule 4)
-/implement {plan-slug}
-  → halt-loop task by task: RED → GREEN → REFACTOR → WIRING → COMMIT
-  → wiring triad enforced: caller + integration test + runtime metric
-  → produces commits + knowledge-base/implementations/{slug}-implementation.md
-  → final validation: tests + linters + coverage + wiring summary
-```
+- **Opportunity** → the item becomes `triaged` with its evidence attached.
+- **`ITEM_KILLED`** → the falsification criterion was met. The item closes with a `kill_reason` and the chain ends. **This is success** — the run stopped work that would have been justified by a hunch.
 
-### 4. Review before merge
+**Fast lane:** for `--mode bug` where a failing test already exists, enter directly at `/discover-execute`. A test that fails on the current state is a stronger measurement plan than any document describing one.
 
-```
-/code-quality {plan-slug}              # MANDATORY before /review (cycle-code-quality)
-  → audits dead code / fabricated symbols / wiring gaps
-  → verdict: PASS / PASS_WITH_CAVEATS / FAIL_SOFT / FAIL_HARD / INVALID
-  → /review refuses to start if verdict is below PASS_WITH_CAVEATS
+### 4. Ship it
 
-/review {plan-slug}
-  → detect domain; spawn 5-7 specialist agents (architecture, tests, wiring, cross-validation, domain-specific)
-  → run in parallel; consolidate findings by severity (BLOCKER / HIGH / MEDIUM / LOW / INFO)
-  → re-validate quality gates with tighter thresholds
-  → analyze edge-case coverage
-  → verdict: READY_TO_MERGE / NEEDS_FIXES / NEEDS_DEEPER
-  → produces knowledge-base/reviews/{slug}-review-{date}.md
-  → audit trail in agents/review-{slug}-{date}/
+```bash
+/auto-plan B-014
 ```
 
-### 5. Release (develop → main + semver tag)
+Chains plan → implement → code-quality → review → release, pausing at each gate.
 
-```
-/release [patch|minor|major]
-  → derives next version (auto-bump from CHANGELOG sections when omitted)
-  → rewrites [Unreleased] under [{version}] - {date}
-  → commits "chore(release): {version}" on develop
-  → opens PR develop → main with rendered release notes
-  → pauses for human approval (the only manual gate — Unbreakable Rule 4)
-  → on merge: creates annotated tag + gh release create
-  → records run at knowledge-base/releases/v{version}-release.md
-```
+## The four modes
 
-## Utility skills (outside the pipeline)
-
-These skills don't belong to any cycle — invoke them ad-hoc when the task calls for it. They never block the pipeline; nothing else consumes their output.
-
-| Skill | Use when | Output |
+| Mode | Measures | Refuses when |
 |---|---|---|
-| `/ast-grep` | You need a code query Grep can't express: function signatures, class hierarchies, decorator + function pairs, call sites, type defs. Especially useful inside `knowledge-base/references/` during discovery. | Stdout |
-| `/excalidraw` | The user wants a visual diagram (workflow, architecture, concept). Standalone or as input to `/marp-slide` and `/deck`. | `.excalidraw` JSON file |
-| `/marp-slide` | The user wants slides only (no full deck with diagrams). | Self-contained `.md` + rendered `.html` + `.pptx` |
-| `/deck` | The user wants a full presentation with visuals. Orchestrates `/marp-slide` + `/excalidraw`. | Full deck (HTML + PPTX + diagrams) |
+| `review` | A defect visible in our code | — |
+| `live-test` | Behaviour in the running system | The domain has no block in `rules/live-target.txt` |
+| `bug` | A reproduced defect | The failing test was never **run** |
+| `evolve` | The cost of the status quo | — |
 
-## Commands (parallel utilities)
+`review` carries a discipline the others do not: before recording a finding, rule out that the code is **dead**, that the caller **never existed**, and that the shape is **deliberate**. All three produce findings that look real and are not.
 
-Commands live in `commands/` and are invoked by slash. They run alongside the cycle pipeline — none of them replaces a cycle.
+`live-test` carries the environment-vs-product obligation: a dev environment breaks for its own reasons, and an opportunity that cannot yet tell the two apart says so rather than picking the more interesting explanation.
 
-| Command | What it does | When |
-|---|---|---|
-| `/plan-attest {slug}` | Computes SHA256 of the active plan file and stores it under `.attestations/{slug}.sha256`. Subsequent `userpromptsubmit-inject.sh` runs verify the live plan against this hash; mismatch blocks prompt injection. | Run after every intentional edit to a plan file. |
-| `/plan-goal [extra-condition]` | Derives a goal condition from the active plan (Objective checkboxes + Goal metric + Global DoD) and invokes Claude Code's built-in `/goal`. | When you want `/goal`-driven termination tied to the plan file. |
-| `/plan-loop [interval] [prompt]` | Runs a planning-aware tick on top of Claude Code's `/loop`. Default tick re-reads the active plan + recent progress and writes a progress entry. | When you want recurring cadence ("babysit my plan"); pairs with `/plan-goal` for termination. |
-
-These commands are complementary to ralph-loop, not replacements. Skills like `/implement` still use ralph-loop by default; commands provide a lightweight alternative for users who prefer Claude Code's native `/goal` + `/loop` primitives.
+**Mode is reclassifiable.** `suggested_mode` is the filer's guess. If measurement shows a different shape, switch and record why.
 
 ## Where things live
 
-```
-.
-├── settings.json                 Permissions + hook wiring
-├── settings.local.json           Personal overrides (gitignored)
-├── hooks/                        Defensive runtime hooks
-├── rules/
-│   ├── architecture.md           Layering, DIP, naming
-│   ├── testing.md                TDD discipline, pyramid, pairing convention
-│   ├── public-copy.md            Voice/tone for README, marketing
-│   ├── cycle-roadmap.md          SoT for the macro super-loop (roadmap → … → release → roadmap)
-│   ├── cycle-discover.md         SoT for the discovery cycle
-│   ├── cycle-plan.md             SoT for the planning cycle
-│   ├── cycle-implement.md        SoT for the implementation cycle
-│   ├── cycle-code-quality.md     SoT for the code-quality cycle
-│   ├── cycle-review.md           SoT for the review cycle
-│   ├── cycle-release.md          SoT for the release cycle (includes ROADMAP.md checkbox flip)
-│   ├── cycle-auto-plan.md        SoT for the per-milestone orchestrator
-│   ├── code-quality-golden-rule.md      Locked contract for /code-quality severity rubric
-│   ├── code-quality-thresholds.txt      Per-project threshold overrides for /code-quality
-│   ├── code-quality-allowlist.txt       Allowlist exemptions with mandatory sunset
-│   ├── discover-blueprint-golden-rule.md Locked contract for /discover-confidence hard caps
-│   ├── audit-trail-rotation.md   When to archive/delete generated artifacts
-│   ├── loop-engine-convention.md Skill vs. Agent vs. ralph-loop
-│   ├── discover-web-allowlist.txt Authoritative domains for WebFetch
-│   └── code-quality-languages.txt Languages enabled for /code-quality and post-edit-check
-├── skills/                       Cycle entry-points + auxiliaries
-├── knowledge-base/
-│   ├── grills/                   /grill-me outputs (interview logs)
-│   ├── plans/                    /to-plan outputs
-│   ├── discoveries/
-│   │   ├── plans/                /discover-plan outputs
-│   │   └── blueprints/           /discover-execute outputs
-│   ├── implementations/          /implement working contracts + summaries
-│   ├── reviews/                  /plan-confidence, /discover-confidence, /review reports
-│   ├── adrs/                     Long-term ADRs (MADR 3.0)
-│   ├── audits/                   /deps-audit, /code-quality reports
-│   └── references/               Read-only clones of reference projects
-├── agents/                       Audit trail of /review and /implement runs
-└── scripts/                      Utility scripts
+| Path | What |
+|---|---|
+| `BACKLOG.md` | The single registry, at the umbrella root |
+| `knowledge-base/discoveries/plans/` | Measurement plans |
+| `knowledge-base/discoveries/opportunities/` | Opportunities (the terminal artifact) |
+| `knowledge-base/maintenance-runs/` | One record per macro-loop run |
+| `knowledge-base/reviews/` | Edge-case reports |
+| `rules/cycle-*.md` | The contracts. Source of truth for every phase |
+| `agents/*.md` | The eight domain specialists |
+
+## The specialists
+
+Routing is deterministic: the item declares `repo`, and a repo belongs to exactly one domain.
+
+```bash
+python3 scripts/route_domain.py theo-lens
+# repo   : theo-lens
+# domain : data-plane-ts
+# agent  : agents/data-plane-ts.md
 ```
 
-## `knowledge-base/references/`
+A repo the routing table does not know **does not route** — gate G1 refuses the item rather than sending it to a specialist who cannot open the code. Read `agents/README.md` before assuming a build command: each specialist carries commands verified on disk, and documentation drifts.
 
-Read-only enforced by `hooks/boundary-check.sh` + `hooks/validate-command.sh`. Holds clones of **reference projects** for domain study.
+## Unbreakable principles
 
-**Bootstrap mechanism:** the hooks block mv/cp/rm/sed/tee/redirect into `references/` and `tools/` by default. To populate a new clone, create the marker file `.references-bootstrap` at the project root (with rationale inside), run the `git clone` / `mv`, delete the marker, and cite the source in `CHANGELOG.md` when it exists.
-
-## The 4+1 cycle rules — single source of truth
-
-Read the cycle rule BEFORE invoking a skill:
-
-| Rule | Skills it governs | Read when |
-|---|---|---|
-| `cycle-discover.md` | discover-plan, discover-edge-cases, discover-plan-confidence, discover-execute, discover-confidence, discover-improve (skill distillation via standalone `/skill-creator` is out of cycle) | Investigating underlying technology or domain reference |
-| `cycle-plan.md` | grill-me (opt. Phase 0), to-plan, edge-case-plan, deps-audit, plan-confidence, plan-improve | Designing a feature |
-| `cycle-implement.md` | implement | Building the planned feature |
-| `cycle-code-quality.md` | code-quality | Auditing dead code / fabricated symbols / wiring gaps post-implement |
-| `cycle-review.md` | review | Reviewing before merge |
-| `cycle-release.md` | release | Cutting a release after `/review` returned `READY_TO_MERGE` |
-| `cycle-auto-plan.md` | auto-plan (orchestrator) | The topic is large and you want an autonomous chain |
-
-Each cycle rule has: Purpose, Trigger conditions, Chain (unbreakable), Phase contracts, Hard gates, Stop conditions, Anti-patterns, Rollback.
-
-## Unbreakable principles (apply everywhere)
-
-From `/home/paulo/.claude/CLAUDE.md`. Apply in every cycle:
-
-1. **95% confidence rule** — never proceed without 95%+ certainty; ask when unsure.
-2. **Task completion gate** — finish the current task before starting a new one.
-3. **Extreme honesty** — admit ignorance; expose risks; never invent state.
-4. **Git rules** — NEVER `git checkout` / `git revert` / `git push --force` / `git reset --hard` / commit directly to `main`.
-5. **TDD-first** — failing test before code; bug fix starts with a regression test.
-6. **CHANGELOG discipline** — every change in `[Unreleased]`.
-7. **Don't reinvent** — mature libraries exist; prefer composition over rewriting.
-
-These rules are enforced by hooks (`hooks/`) and declarative gates in each cycle rule.
-
-## Match the cycle to the shape of the work
-
-Each cycle is heavyweight by design — they trade speed for evidence. Pick the lightest entry point that fits:
-
-| Cycle | Best for | When NOT to use |
-|---|---|---|
-| `cycle-discover` (full chain) | Investigating prior art / unknown solutions | Question is text-shape (use Read + Grep) |
-| `cycle-plan` (full chain) | Clear feature with known shape | Trivial change (single-line; write it) |
-| `cycle-implement` (halt-loop) | Building per an approved plan | No plan (run cycle-plan first) |
-| `cycle-review` (5-7 agents) | Pre-merge rigorous review | Tiny PR (use built-in `/review`) |
-| `/auto-plan` (super-cycle) | Large, well-scoped topic warranting autonomy | Plan already exists (call `/implement` directly) |
-
-The cheapest cycle is the one you don't run. Don't invoke a cycle for work that doesn't justify the rigor.
-
-## Pre-conditions for new contributors
-
-Before invoking any cycle skill, verify:
-
-- [ ] `ralph-loop` plugin enabled (`jq '.enabledPlugins' ~/.claude/settings.json`) — REQUIRED by `/implement`, `/discover-execute`, `/plan-improve`. Without it, those skills refuse to start.
-- [ ] Python 3.10+ (`python3 --version`)
-- [ ] PyYAML installed (`python3 -c "import yaml"`)
-- [ ] `ast-grep` installed for structural queries (`ast-grep --version`)
-- [ ] Your project's language toolchain is set up (matches `rules/code-quality-languages.txt`)
-- [ ] You've read at least `rules/cycle-{target}.md` and the entry-point's `SKILL.md`
-
-### First-time setup notes
-
-- **`.active_plan`** — optional pointer file at the project root with a single slug. When present, `hooks/userpromptsubmit-inject.sh` resolves THIS plan instead of falling back to the newest by mtime. Useful when multiple plans are in flight. See `.active_plan.example`.
-- **`.attestations/`** — created on demand by `/plan-attest`. Do not commit (already excluded by hook behavior).
-- **`rules/dogfood-golden-rule.md`** — template shipped; edit § 1 (anchor scenario) before invoking `/dogfood` for the first time.
-- **`rules/code-quality-languages.txt`** — empty by default; uncomment the languages your project uses.
-- **`rules/discover-web-allowlist.txt`** — empty by default; uncomment authoritative domains your `/discover-execute` needs to reach.
+- **Evidence is ours or it is not evidence.** "Project X does it this way" cannot fill the Evidence corner.
+- **A pointer resolves, line included.** A cited line past the end of a file is evidence that moved.
+- **Killing an item is success.** But never kill when the measurement could not run — target unreachable is not disproof. Stop and ask.
+- **`unknown` is complete** for the constraint corner, and only there.
+- **Ids are never reused.** A killed `B-007` stays `B-007`.
+- **Measuring is reading.** Discover writes a document, never a patch.
 
 ## Common questions
 
-### "When to use /grill-me vs. jumping straight to /to-plan?"
+### "The item is a one-line fix. Do I still file it?"
 
-- `/grill-me` if requirements are vague, the decision tree has multiple non-obvious branches, OR the user explicitly asks to be grilled. Output is a Q&A log that `/to-plan` consumes as primary context.
-- Skip `/grill-me` if you already wrote a spec, the change is trivial (single-line), it's a pure refactor with no behavior change, or the decision tree has < 3 branches.
+Yes. Squad's ancestor refused hotfixes and refactors at intake and routed them elsewhere; those are the core workload of a maintenance team, and the door is open for them here.
 
-A previous run of `/to-plan` that produced a vague plan is a strong signal to re-start with `/grill-me`.
+### "The measurement found nothing. Did I waste the run?"
 
-### "When to use /to-plan vs. /discover-plan?"
+No — that is the cycle working. Record the `kill_reason` naming what was measured and what it showed. An unexplained kill is indistinguishable from an abandoned run.
 
-- `/to-plan` produces an **implementation plan** (what to build, how, in what order).
-- `/discover-plan` produces a **discovery plan** (what to investigate in `references/` or on the web).
+### "Can I skip `/discover-edge-cases`?"
 
-If you don't know how others solved the problem → `/discover-plan`. If you know the problem and need to plan implementation → `/to-plan`.
+It is where you ask what could make the measurement **lie** — a target that resolves but is stale, a method that observes a proxy, an environment fault read as a product defect. An unfalsifiable hypothesis found there is always MUST FIX: every other defect produces a wrong answer someone might catch; that one produces a measurement that cannot fail.
 
-### "Can I skip /discover-edge-cases?"
+### "`/discover-confidence` returned INVALID. Now what?"
 
-No. The chain is unbreakable. Edge cases caught pre-implementation are 100× cheaper than those caught post-implementation.
+Read the caps. `fabricated_evidence` and `empty_corner_evidence` mean re-measure — `/discover-improve` refuses them by design, because no amount of editing fixes a pointer that does not resolve.
 
-### "What if /plan-confidence returns INVALID?"
+### "The backlog is empty. Are we done?"
 
-INVALID = hard cap fired (Coverage Matrix < 100% OR fabricated citation). Return to `/to-plan` to fix structurally. Do NOT go to `/plan-improve` — improve doesn't fix hard caps.
+No. `BACKLOG_EMPTY` means nobody has looked recently. Run `/discover --sweep {domain}`. There is no `MAINTENANCE_COMPLETE`: a backlog is not a scope.
 
-### "How do I roll back a patterns skill?"
+### "How do I adapt this to another ecosystem?"
 
-```bash
-rm -rf skills/{purpose}/
-```
-
-`/to-plan` stops discovering it via Step 0 on the next run. (Skills are authored directly under `skills/` via the standalone `/skill-creator`; there is no separate staging area.)
-
-### "How do I adapt this to my specific stack and domain?"
-
-The defaults in `rules/` are stack- and domain-agnostic. To specialize:
-
-1. Add a project-specific section at the bottom of relevant rules (e.g., naming conventions, banned framings, internal component names).
-2. Populate `rules/code-quality-languages.txt` with the languages you use.
-3. Populate `rules/discover-web-allowlist.txt` with the authoritative sources for your domain.
-4. Optionally create `rules/dogfood-golden-rule.md` if your project has an anchor scenario that drives go/no-go decisions.
+Replace the domain routing table in `rules/cycle-backlog.md`, write one specialist per domain in `agents/`, and declare your live environments in `rules/live-target.txt`. The phases, gates and evidence contracts are ecosystem-agnostic; the routing table and the specialists are not.
 
 ## Maintenance notes
 
-- Cycle rules are SoT. Changes to chain order, anti-patterns, or gates go in the cycle rule, not in SKILL.md.
-- SKILL.md files keep only PHASE-SPECIFIC detail. Generic content found there should move to the cycle rule.
-- Cross-reference validation: `python3 scripts/check_xrefs.py` (if present).
-- Audit trail rotation: see `rules/audit-trail-rotation.md`.
-
-## Where to ask for help
-
-- Global Claude Code conventions: `/home/paulo/.claude/CLAUDE.md`
-- Specific cycle: `rules/cycle-{name}.md`
-- Specific skill: `skills/{name}/SKILL.md`
+- `python3 scripts/check_xrefs.py` validates that every cross-reference resolves.
+- `python3 scripts/test_e2e_smoke.py` validates cycle-rule structure and skill frontmatter.
+- `bash scripts/run_slice_tests.sh` runs each slice in its own process — slices ship colliding module basenames, so a single wide pytest process is unsound.
+- Adding a domain? The routing table, the specialist file and `tests/test_route_domain.py` must agree; two guards fail loudly if they do not.

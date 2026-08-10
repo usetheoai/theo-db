@@ -68,7 +68,7 @@ def test_verdict_flip_is_derived_not_hardcoded():
         assert v["flip"] == expected, "flip must equal (p<0.05 and mean_diff>0)"
 
 
-# M138 measured ts_rank_cd leg (docs/benchmarks/m138-bm25-fusion.md): the anti-fabrication
+# M138 measured ts_rank_cd leg (wiki/benchmarks/m138-bm25-fusion.md): the anti-fabrication
 # anchor. Our ts_rank_cd pipeline must reproduce these within tolerance — if it drifts, the
 # harness changed something silently and the numbers are no longer comparable to M138.
 M138_TSRANK_LEG = {"scifact": 0.070275, "nfcorpus": 0.206117}

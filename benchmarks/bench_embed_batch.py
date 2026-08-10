@@ -14,7 +14,7 @@ is a real, reproducible N→1 collapse, not an unbenchmarked claim.
 Usage (against a running TheoDB container, with the stub reachable via the given endpoint):
     PGHOST=localhost PGPORT=55432 python3 benchmarks/bench_embed_batch.py \
         --endpoint http://host.docker.internal:8099/v1/embeddings \
-        --report docs/benchmarks/audit-remediation-embed-batch.md
+        --report wiki/benchmarks/audit-remediation-embed-batch.md
 """
 from __future__ import annotations
 
@@ -100,7 +100,7 @@ def _render_report(results: list[dict], runs: int, meta: dict) -> str:
         "python3 benchmarks/servers/embedding_server.py --host 0.0.0.0 --port 8099 --model BAAI/bge-small-en-v1.5 &",
         "PGHOST=localhost PGPORT=55432 python3 benchmarks/bench_embed_batch.py \\",
         "  --endpoint http://host.docker.internal:8099/v1/embeddings \\",
-        "  --report docs/benchmarks/audit-remediation-embed-batch.md",
+        "  --report wiki/benchmarks/audit-remediation-embed-batch.md",
         "```",
         "",
         "## Results",

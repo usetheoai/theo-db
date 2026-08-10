@@ -5,12 +5,12 @@
 #   - README.md (any directory)
 #   - PITCH.md
 #   - docs/marketing/**/*.md
-#   - docs/guides/**/*.md
+#   - wiki/guides/**/*.md
 #
 # Does NOT apply to:
 #   - docs/exploration-reports/*.md
-#   - docs/benchmarks/*.md
-#   - docs/adr/*.md
+#   - wiki/benchmarks/*.md
+#   - wiki/decisions/*.md
 #   - CLAUDE.md, PRD.md, CHANGELOG.md, source code
 #   - knowledge-base/references/** (already blocked by boundary-check)
 #
@@ -18,7 +18,7 @@
 #   - production-ready / production-grade / battle-tested / enterprise-(ready|grade)
 #       → pre-release until measured evidence sustains the claim
 #   - "Faster than <X>" without a benchmark artifact in the same paragraph
-#       → comparative perf requires docs/benchmarks/ with independent reproduction
+#       → comparative perf requires wiki/benchmarks/ with independent reproduction
 #   - "Drop-in replacement"
 #       → implies zero migration cost; almost always false
 #   - "Zero downtime" (unqualified)
@@ -51,7 +51,7 @@ case "$FILE_PATH" in
   */README.md|README.md) IS_PUBLIC_COPY=true ;;
   */PITCH.md|PITCH.md) IS_PUBLIC_COPY=true ;;
   *docs/marketing/*.md) IS_PUBLIC_COPY=true ;;
-  *docs/guides/*.md) IS_PUBLIC_COPY=true ;;
+  *wiki/guides/*.md) IS_PUBLIC_COPY=true ;;
   *) IS_PUBLIC_COPY=false ;;
 esac
 
@@ -62,8 +62,8 @@ fi
 # Skip technical docs even if they live under docs/
 case "$FILE_PATH" in
   *docs/exploration-reports/*) exit 0 ;;
-  *docs/benchmarks/*) exit 0 ;;
-  *docs/adr/*) exit 0 ;;
+  *wiki/benchmarks/*) exit 0 ;;
+  *wiki/decisions/*) exit 0 ;;
 esac
 
 CONTENT=$(echo "$INPUT" | jq -r '.tool_input.new_string // .tool_input.content // empty')
@@ -89,8 +89,8 @@ fi
 
 # --- 2. Comparative claims without benchmark ---
 if echo "$CONTENT" | grep -qiE '\bfaster[[:space:]]+than\b'; then
-  if ! echo "$CONTENT" | grep -qE '(docs/benchmarks/|benchmarks/)'; then
-    WARNINGS+=("'Faster than <X>' claim in public copy without a docs/benchmarks/ link in the same paragraph. Comparative performance requires a reproducible artifact + independent reproduction.")
+  if ! echo "$CONTENT" | grep -qE '(wiki/benchmarks/|benchmarks/)'; then
+    WARNINGS+=("'Faster than <X>' claim in public copy without a wiki/benchmarks/ link in the same paragraph. Comparative performance requires a reproducible artifact + independent reproduction.")
   fi
 fi
 

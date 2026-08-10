@@ -20,8 +20,8 @@ This skill is **the only phase** of [`cycle-release`](../../rules/cycle-release.
 
 User invokes `/release [bump-level]` when:
 
-- A `/review {slug}` run emitted `READY_TO_MERGE` recently (audit at `.claude/knowledge-base/reviews/{slug}-review-{date}.md`).
-- The working branch is `develop` with commits ahead of `main`.
+- A `/review {slug}` run emitted `READY_TO_MERGE` recently (audit at `knowledge-base/reviews/{slug}-review-{date}.md`).
+- The working branch is `workspace`; `develop` carries the commits ahead of `main` (promoted from `workspace` via PR).
 - `CHANGELOG.md` has content in `[Unreleased]`.
 - `gh` CLI is authenticated.
 
@@ -44,12 +44,12 @@ If derivation is ambiguous, the skill pauses and asks the human ONCE.
 ### Step 1 — Pre-condition validation (refuse if any fails)
 
 ```bash
-# Branch is develop
-[ "$(git branch --show-current)" = "develop" ]
+# Branch is workspace (release prep is authored here, then promoted)
+[ "$(git branch --show-current)" = "workspace" ]
 # Clean tree
 [ -z "$(git status --porcelain)" ]
 # Latest /review verdict is READY_TO_MERGE
-LATEST_REVIEW=$(ls -t .claude/knowledge-base/reviews/*-review-*.md 2>/dev/null | head -1)
+LATEST_REVIEW=$(ls -t knowledge-base/reviews/*-review-*.md 2>/dev/null | head -1)
 grep -q '^\*\*Verdict:\*\* READY_TO_MERGE' "$LATEST_REVIEW"
 # CHANGELOG [Unreleased] has content
 python3 skills/release/scripts/changelog_section_nonempty.py --section Unreleased
@@ -89,12 +89,16 @@ This script:
 2. Leaves a fresh empty `## [Unreleased]` at the top.
 3. Preserves Keep-a-Changelog category ordering (`Added` → `Changed` → `Deprecated` → `Removed` → `Fixed` → `Security`).
 
-### Step 4 — Commit the release prep on develop
+### Step 4 — Commit the release prep on workspace, then promote to develop
 
 ```bash
 git add CHANGELOG.md
 git commit -m "chore(release): ${NEXT_VERSION}"
-git push origin develop
+git push origin workspace
+
+# Promotion (git-safety.md § 1): release prep reaches develop like any other change
+gh pr create --base develop --head workspace --title "chore(release): ${NEXT_VERSION}" --body "Release prep for ${NEXT_VERSION}."
+gh pr merge --merge   # or via the UI; branch protection decides who can
 ```
 
 NO `Co-Authored-By` trailer (per `hooks/validate-command.sh`). NO `--amend`. The commit is plain and signed by user policy.
@@ -149,11 +153,11 @@ gh release create "v${NEXT_VERSION}" \
 
 ### Step 7.5 — Flip ROADMAP.md milestone checkbox (post-merge)
 
-Closes the `cycle-roadmap` super-loop. Runs after the tag + GitHub release are published.
+Closes the `cycle-maintenance` super-loop. Runs after the tag + GitHub release are published.
 
 ```bash
 # Extract the plan slug from the release context (passed from /auto-plan, or derived from the source review)
-PLAN_FILE=".claude/knowledge-base/plans/${SLUG}-plan.md"
+PLAN_FILE="knowledge-base/plans/${SLUG}-plan.md"
 
 # Read milestone_id from the plan frontmatter
 MILESTONE_ID=$(python3 -c "
@@ -174,7 +178,7 @@ else
     --milestone-id "$MILESTONE_ID" \
     --version "$NEXT_VERSION" \
     --plan "$PLAN_FILE" \
-    --release-log ".claude/knowledge-base/releases/v${NEXT_VERSION}-release.md"
+    --release-log "knowledge-base/releases/v${NEXT_VERSION}-release.md"
 fi
 ```
 
@@ -183,14 +187,14 @@ fi
 1. Locate the literal header `## ${MILESTONE_ID} — [ ] <name>` in `ROADMAP.md`. If not found, emit `WARN roadmap-checkbox: $MILESTONE_ID not found in ROADMAP.md — skipping flip` and exit 0.
 2. If header is already `[x]`, emit `INFO roadmap-checkbox: $MILESTONE_ID already [x] — no-op` and exit 0 (idempotent).
 3. Replace `[ ]` → `[x]` in-place. NEVER use fuzzy matching.
-4. Commit on `develop` (NOT `main`): `chore(roadmap): mark $MILESTONE_ID done (v$NEXT_VERSION)`.
-5. Append to `.claude/knowledge-base/roadmap-runs/${MILESTONE_ID}-$(date -I).md`: `status: completed`, `checkbox_flipped_at`, `flip_commit_sha`, link to release log. Create the file if it does not exist.
+4. Commit on `workspace` (NOT `develop`, NOT `main`): `chore(roadmap): mark $MILESTONE_ID done (v$NEXT_VERSION)`.
+5. Append to `knowledge-base/roadmap-runs/${MILESTONE_ID}-$(date -I).md`: `status: completed`, `checkbox_flipped_at`, `flip_commit_sha`, link to release log. Create the file if it does not exist.
 
 Per `cycle-release § Single-flip invariant`, at most ONE checkbox flips per release. The script verifies its own diff before committing — if more than one `[ ]` → `[x]` transition would result, it aborts.
 
 ### Step 8 — Record the release
 
-Write `.claude/knowledge-base/releases/v${NEXT_VERSION}-release.md`:
+Write `knowledge-base/releases/v${NEXT_VERSION}-release.md`:
 
 ```markdown
 # Release v{NEXT_VERSION}
@@ -258,4 +262,4 @@ This skill is `phase 1` (only phase) of `cycle-release`. The cycle rule SoT is `
 - Conventions: [`rules/public-copy.md`](../../rules/public-copy.md) — release notes lint
 - Hooks enforced: `hooks/validate-command.sh` (git safety + Co-Authored-By block), `hooks/stop-validation.sh` (CHANGELOG hard gate)
 - Scripts: `scripts/compute_next_version.py`, `scripts/promote_unreleased.py`, `scripts/render_release_notes.py`, `scripts/changelog_section_nonempty.py`, `scripts/flip_milestone_checkbox.py` (Step 7.5 — pending implementation, see Task #20)
-- Macro super-loop: [`rules/cycle-roadmap.md`](../../rules/cycle-roadmap.md) — defines the single-flip invariant + the roadmap-runs file contract that Step 7.5 satisfies
+- Macro super-loop: [`rules/cycle-maintenance.md`](../../rules/cycle-maintenance.md) — defines the single-flip invariant + the roadmap-runs file contract that Step 7.5 satisfies

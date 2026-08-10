@@ -19,7 +19,7 @@ extensions, each under the permissive PostgreSQL License. Their copyright and
 permission notices are reproduced below to satisfy the PostgreSQL License
 requirement that the copyright notice appear in all copies. AGPL due-diligence
 for the shipped image is proven separately and reproducibly by
-`packaging/license-sweep.sh` and documented in `docs/packaging/license-audit.md`.
+`packaging/license-sweep.sh` and documented in `wiki/references/license-audit.md`.
 
 --------------------------------------------------------------------------------
 pgvector — https://github.com/pgvector/pgvector

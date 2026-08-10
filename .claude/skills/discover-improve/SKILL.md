@@ -1,175 +1,99 @@
 ---
 name: discover-improve
-version: 0.1.0
+version: 0.2.0
 requires: [discover-confidence]
-description: Iteratively improve a blueprint's discover-confidence score by applying deterministic fixes + LLM-driven semantic fixes via a halt-loop (ralph-loop-style autonomous iteration). Mirrors /plan-improve but for blueprints.
+description: Lift a low-scoring opportunity toward its target verdict — improving how the finding is ARGUED, never what it CLAIMS. Use this when /discover-confidence returns NEEDS_REVISION and someone wants the artifact salvaged. Never rewrites the Evidence corner (that is the record of a measurement) and never annotates an unresolvable pointer (that would disarm the fabricated_evidence hard cap). Refuses outright when the score is capped by something only a re-measurement can fix.
 user-invocable: true
 allowed-tools: Read Glob Grep Bash Write Edit Skill
-argument-hint: "{blueprint-slug} [--target SHIPPABLE_WITH_CAVEATS]"
+argument-hint: "{opportunity-slug} [--target SHIPPABLE_WITH_CAVEATS]"
 ---
 
-# Discover-Improve — Iterative Blueprint Score Lifter
+# Discover-Improve — Iterative Opportunity Score Lifter
 
-Reads a blueprint, scores it with `/discover-confidence`, applies deterministic + semantic fixes, re-scores, and repeats until the blueprint reaches the target verdict.
+Reads an opportunity, scores it with `/discover-confidence`, applies fixes, re-scores, and repeats until it reaches the target verdict.
 
-Sibling of `/plan-improve` — same architecture (ralph-loop halt-loop + deterministic Phase A + LLM Phase B), different fix categories tailored to **blueprints** (not implementation plans).
+Sibling of `/plan-improve` — same architecture (ralph-loop halt-loop + deterministic Phase A + LLM Phase B), different fix categories.
 
-**Architecture:** wraps the `ralph-loop` plugin's autonomous-iteration mechanism with a blueprint-specific prompt template.
-
-**ADR reference:** see `.claude/skills/discover-confidence/SKILL.md` for the scoring contract.
+**The governing distinction:** an opportunity is part **record** and part **prose**. `## Corner 1 — Evidence` records what was measured; `## Recommendation` argues what to do about it. This skill may improve the argument. It may never edit the record.
 
 ## Cycle contract
 
-This skill is **phase 5** of [`cycle-discover`](../../rules/cycle-discover.md). The cycle rule is the source of truth for chain order (invoked when `/discover-confidence` verdict < SHIPPABLE_WITH_CAVEATS; followed by `/discover-confidence` re-score; if verdict reaches SHIPPABLE_WITH_CAVEATS, skill-distillation tail begins), hard limits, anti-patterns, and rollback. **Read `cycle-discover.md` before invoking this skill.** This SKILL.md retains phase-specific detail (Phase A deterministic fixes for blueprints, Phase B LLM fixes, fix categories tailored to blueprint shape).
+This skill is **phase 6** of [`cycle-discover`](../../rules/cycle-discover.md), invoked when `/discover-confidence` returns `NEEDS_REVISION`. The cycle rule is the source of truth for chain order, hard gates, stop conditions and rollback. **Read `cycle-discover.md` before invoking this skill.**
 
-## When to Trigger
+## When NOT to invoke
 
-User explicitly invokes `/discover-improve {slug}` after seeing a low score from `/discover-confidence` and wanting the system to attempt auto-improvement.
+Invoke `/discover-improve {slug}` after `/discover-confidence` returned `NEEDS_REVISION` and the caps are ones this skill can actually close.
+
+**Do NOT invoke when the score is capped by any of these** — none is fixable by editing text, and iterating on them burns a loop to arrive at the same number:
+
+| Cap | Why this skill cannot fix it | What actually fixes it |
+|---|---|---|
+| `fabricated_evidence` | A pointer that does not resolve means someone invented it or the code moved | Re-measure, or a human replaces the pointer |
+| `empty_corner_evidence` | Nothing was measured | Re-run `/discover-execute` |
+| `empty_corner_blast_radius` | Nobody scoped the change | Answer it — a real question, not prose |
+| `no_adr_on_cross_repo_change` | A decision for other repos' maintainers is missing | A human writes the ADR |
+
+The skill checks the caps before starting and **refuses**, naming the cap and the real fix. A refusal here is cheaper than an honest failure four iterations later.
+
+## Two-phase fixing
+
+### Phase A — deterministic (`scripts/apply_fixes.py`)
+
+Idempotent, zero LLM calls, `$0`. Scoped to `## Recommendation`:
+
+- Weak imperatives: `should` → `must`, `could` → `can`
+- Loopholes stripped: "if possible", "as appropriate", "when applicable", "where feasible"
+- Code fences never touched
+
+**`may` and `might` are deliberately NOT substituted.** In descriptive prose they are correct — *"the endpoint may return 500 under load"* is a measured fact about something intermittent, and *"must return 500"* is a different, false claim. No regex distinguishes description from prescription, so it does not try.
+
+Exit codes: `0` fixed or nothing to fix, `2` file not found, **`3` unresolvable pointers present** — a signal for the halt-loop to stop rather than iterate on something it cannot fix.
+
+#### What Phase A REPORTS but never touches
+
+Unresolvable pointers are listed and left exactly as they are.
+
+The ancestor annotated each one with `<!-- BLOCKED: path not found -->`. Measured against the current checker (2026-08-05): a marked pointer moves out of `fabricated` and into `explicitly_blocked`, and `fabricated_evidence` stops firing. That made the fixer an **automated bypass of the cycle's most important hard cap** — a script turning an INVALID opportunity into a passing one with nothing measured.
+
+`test_apply_fixes.py::test_never_writes_a_blocked_marker` locks it shut. A failure there is a hole in the gate, not a formatting regression.
+
+A `<!-- BLOCKED: -->` marker written by a human or by the measurement itself is respected and not re-reported. The difference is who decided.
+
+### Phase B — semantic (LLM, inside the halt-loop)
+
+What deterministic rules cannot do:
+
+- Sharpen a vague **Recommendation** into a scoped one, naming what is out of scope
+- Make the **Verification** corner concrete — tie it to the item's `dod`, prefer a test that fails against the current state
+- Name the successor limit in Verification when it is missing
+- Complete the **Blast Radius** corner from evidence already gathered — never by guessing at consumers nobody looked for
+
+Phase B obeys the same boundary: it may argue better, never claim more. Any statement about the system that was not measured is out of bounds, whichever corner it would improve.
 
 ## Workflow
 
-### Step 1 — Argument parsing
-
-Accept:
-
-- `/discover-improve {slug}`
-- `/discover-improve {slug} --target SHIPPABLE`
-
-Where `{slug}` is the basename of a blueprint file in `.claude/knowledge-base/discoveries/blueprints/`.
-
-Defaults:
-
-- `--target`: `SHIPPABLE_WITH_CAVEATS` (the realistic ceiling for auto-improvement)
-
-The loop runs until EITHER the target verdict is reached on disk OR a genuine stop condition fires (see § Stop conditions). There is no iteration cap — premature termination would let downstream cycles treat a sub-target blueprint as improved.
-
-### Step 2 — Resolve blueprint path
-
-Resolve to `.claude/knowledge-base/discoveries/blueprints/{slug}-blueprint.md`.
-
-### Step 3 — Build the improvement prompt
-
-Read `.claude/skills/discover-improve/prompts/improvement-prompt.md` and substitute:
-
-- `{BLUEPRINT_SLUG}` — the slug
-- `{BLUEPRINT_PATH}` — the resolved path
-- `{TARGET_VERDICT}` — target band
-
-### Step 4 — Pre-flight guard (concurrent-loop safety)
-
-Before invoking ralph-loop, verify `.claude/ralph-loop.local.md` (if present in project root) does NOT have `active: true`. Concurrent ralph-loops on overlapping state is a documented anti-pattern (`rules/loop-engine-convention.md § Anti-patterns`). If a stale state file from a prior loop is observed `active`, HALT and surface to human rather than spawning a concurrent loop.
-
-### Step 5 — Invoke ralph-loop (shell-safe positional + flags)
-
-**Read `.claude/rules/loop-engine-convention.md § How to invoke ralph-loop:ralph-loop safely` BEFORE this step.** The ralph-loop positional argument is shell-evaluated; inlining a multi-section driver prompt (backticks / fenced code blocks / `$(...)`) breaks loop startup with a bash parse error. Use the file-referenced pattern.
-
-1. Write the substituted prompt from Step 3 to `.claude/halt-loop-prompts/discover-improve-{blueprint-slug}.md` (gitignored).
-2. Invoke `ralph-loop:ralph-loop` with:
-   - Positional prompt (no shell metachars): `Read .claude/halt-loop-prompts/discover-improve-{blueprint-slug}.md and follow its instructions for this halt-loop iteration.`
-   - `--completion-promise 'BLUEPRINT_IMPROVED'`
-
-The ralph-loop plugin:
-
-- Writes `.claude/ralph-loop.local.md` (state file)
-- Activates the Stop hook
-- Feeds the positional prompt back to Claude on each session-exit attempt (Claude re-reads the driver file each iteration)
-- Detects `<promise>BLUEPRINT_IMPROVED</promise>` to terminate
-
-### Step 6 — Post-promise sanity check
-
-After the loop emits `<promise>BLUEPRINT_IMPROVED</promise>`, run ONCE before the report:
-
-```bash
-python3 .claude/skills/discover-confidence/scripts/run_blueprint_score.py {BLUEPRINT_PATH} --no-warn
-```
-
-Compare the emitted verdict against `--target`. If the post-promise verdict is BELOW `--target`, the loop emitted the marker speculatively — surface as **PROMISE INTEGRITY VIOLATION** and re-invoke. NEVER accept the promise at face value when score-on-disk does not match.
-
-### Step 7 — Report
-
-After the loop terminates AND sanity check passes:
-
-- Initial verdict vs final verdict (post-sanity-check)
-- Total changes per category
-- Remaining issues that required human review
-- Diff of all modifications (`git diff` against working tree)
-
-## Stop conditions
-
-HALT and surface BLOCKED report to the human (do NOT emit `<promise>BLUEPRINT_IMPROVED</promise>`) when ANY of the following structural blockers fires:
-
-1. No-improvement detected for 2 consecutive iterations (same score, same `reasons`).
-2. Fabricated citation with no plausible replacement → recommend `/discover-execute` to re-run the source question.
-3. Empty coverage corner with no relevant content elsewhere → recommend `/discover-plan` to revise OR accept lower verdict.
-4. Hard cap remains active (INVALID at 49) and cannot be lifted via Phase A or Phase B without scope-creeping → surface to human.
-5. Post-promise sanity check (Step 6) detects score-disk drift → re-invoke OR HALT after 2 retries.
-
-The promise `<promise>BLUEPRINT_IMPROVED</promise>` is emitted EXCLUSIVELY when the score on disk reaches `--target`. There is no path that emits the promise on a partial improvement. In all blocker cases, downstream phases of `cycle-discover` MUST NOT proceed treating the blueprint as auto-improved. Honest BLOCKED > false IMPROVED (Unbreakable Rule 3).
-
-## Fix categories (4 active in v1)
-
-| Fix | Phase | Mechanism | Risk |
-|---|---|---|---|
-| Weak imperatives in blueprint prose (should/could/may/might) → must | A — deterministic | regex (skips code blocks + citation tables) | Low |
-| Loopholes (if possible, when applicable, ...) | A — deterministic | regex | Low |
-| Fabricated citation → mark as `<!-- BLOCKED: path not found in .claude/knowledge-base/references/ -->` | A — deterministic | path existence check | Low |
-| Empty coverage corner → mark as `<!-- BLOCKED: corner X has zero content; re-run /discover-execute -->` | A — deterministic | section emptiness check | Low |
-
-**Empty coverage corner is NOT auto-resolved via ADR.** A blueprint missing an entire coverage corner is a structural defect (hard cap 49 INVALID per `discover-blueprint-golden-rule.md`). Auto-laundering it through a Phase B ADR would let `discover-improve` paper over deep-research failure. Instead, Phase A marks the corner explicitly as BLOCKED — the human re-executes that section via `/discover-execute` (or revises the discovery plan).
-
-**Phase A (apply_fixes.py)** runs first. **Phase B (LLM)** runs only if Phase A doesn't reach target.
+1. **Parse arguments.** `{slug}`, optional `--target` (default `SHIPPABLE_WITH_CAVEATS`).
+2. **Score first.** Run `/discover-confidence {slug}`. If already at target, report and stop — an unnecessary loop is worse than none.
+3. **Check the caps.** Any cap from the refusal table above → stop, name the cap and the real fix.
+4. **Phase A.** Run `apply_fixes.py --json`. Exit 3 → surface the pointers and stop.
+5. **Pre-flight guard.** Verify `.claude/ralph-loop.local.md` does not have `active: true` (`rules/loop-engine-convention.md § Anti-patterns`).
+6. **Invoke ralph-loop** with `prompts/improvement-prompt.md`, `--completion-promise 'OPPORTUNITY_IMPROVED'`.
+7. **Post-promise sanity check.** Re-run the scorer in the emitting iteration. **The verdict on disk is the verdict** — a promise emitted while the score is below target is a promise integrity violation.
 
 ## Anti-patterns
 
-- The skill NEVER touches files outside `{BLUEPRINT_PATH}` (or the progress file).
-- The skill NEVER modifies `.claude/knowledge-base/references/` (boundary-check hook enforces).
-- The skill NEVER modifies the upstream discovery plan (use `/discover-plan` to revise the plan).
-- The skill NEVER commits or pushes to git.
-- The skill NEVER emits `<promise>BLUEPRINT_IMPROVED</promise>` falsely — Step 6 sanity check enforces.
-- The skill NEVER spawns concurrent ralph-loops on overlapping state (Step 4 pre-flight guard).
-- The skill NEVER emits the completion promise as a graceful exit from a stop condition — when a blocker fires, the skill HALTS without promise. Forbidden per-iteration practices are enumerated in `prompts/improvement-prompt.md § Inviolable rules`.
-
-## Hard limits
-
-- `apply_fixes.py` is DETERMINISTIC — same input always produces same output. Idempotent.
-- Phase B LLM iterations use the main model.
-- The loop has no iteration cap; it runs until the target verdict is reached on disk OR a stop condition fires. If many iterations pass without convergence and no-progress is detected, the no-improvement stop condition (see § Stop conditions) HALTS the loop honestly without emitting the promise.
-
-## Output
-
-When the loop completes:
-
-```
-=== Discover-Improve complete ===
-Blueprint: <slug>
-Initial verdict: NON_SHIPPABLE (52.0)
-Final verdict:   SHIPPABLE_WITH_CAVEATS (74.5)
-Iterations:      6
-
-Changes applied:
-  weak_imperatives: 14
-  loopholes: 3
-  fabricated_citations_marked: 2
-  empty_corners_resolved_via_adr: 1
-
-Remaining issues (need human):
-  - Q5 — Project B citation `project-b/services/memory.py:142` does not exist; mark as BLOCKED but no replacement found.
-  - Coverage Matrix row 8 — unmapped gap, marked TODO (loop could not justify deferral).
-
-Diff: <git diff against working tree>
-```
+- **Rewriting the Evidence corner.** It is the record of a measurement. Editing it falsifies findings, and downstream cannot tell.
+- **Annotating unresolvable pointers.** Disarms `fabricated_evidence`. Removed on purpose; see Phase A.
+- **Adding claims to fill a corner.** A Blast Radius written from imagination is worse than an empty one: empty is visible, invented is not.
+- **Looping on a cap this skill cannot close.** Four iterations to reach the same number, then a false report.
+- **Emitting the promise on a partial improvement.** The score on disk decides, not the direction of travel.
+- **Substituting `may`/`might` in descriptive prose.** Inverts measured facts.
 
 ## Related
 
-- Scorer: `.claude/skills/discover-confidence/SKILL.md`
-- Loop engine: `ralph-loop` plugin (must be enabled in `~/.claude/settings.json`)
-- Fix script: `.claude/skills/discover-improve/scripts/apply_fixes.py`
-- Prompt template: `.claude/skills/discover-improve/prompts/improvement-prompt.md`
-- Sibling skill: `/plan-improve` (same mechanism, applies to implementation plans)
-
-## Limitations (honest)
-
-- **Phase A fixes can over-correct.** Replacing "should" with "must" in a blueprint where "should" is a hedge ("the codebase should be < 50KB") may sound stronger than the evidence warrants. Acceptable trade-off because the rubric penalizes weak imperatives.
-- **Phase B (empty-corner deferral) depends on LLM judgment.** The loop instructs Claude to leave TODO comments rather than fabricate, but the line between "credible ADR for deferral" and "fabricated rationale" is judgment-call.
-- **Fabricated citations cannot be auto-fixed.** The fix is to MARK them as blocked, not to invent a correct path. Human must re-execute that section of the discovery.
-- **Loop terminates** when EITHER target verdict reached on disk (promise emitted) OR a stop condition fires (HALT without promise — see § Stop conditions).
+- Upstream: `/discover-confidence` (produces the score this skill lifts)
+- Re-score after: `/discover-confidence` — the verdict on disk is canonical
+- Golden rule: [`rules/discover-opportunity-golden-rule.md`](../../rules/discover-opportunity-golden-rule.md)
+- Script: `scripts/apply_fixes.py`
+- Prompt: `prompts/improvement-prompt.md`
+- Loop engine: `ralph-loop` plugin
