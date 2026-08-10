@@ -61,6 +61,7 @@ mod migrate;
 mod nl;
 mod parquet; // M143 — lakehouse Parquet own-code (read_parquet/olap via DataFusion, sem DuckDB) — default-on
 mod pg;
+mod pg_test_stubs; // B-001 — simbolos do backend p/ o binario de teste standalone (cfg(test))
 mod pq;
 mod rerank;
 mod sbq;
