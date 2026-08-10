@@ -432,7 +432,7 @@ evidence: none-yet
 why_now: 109 artefatos de benchmark sintético e nenhuma instalação real. `theo-rag` e `theo-memory` — os produtos de IA do próprio time — declaram `docker compose up -d pgvector`. O âncora de dogfood está `planned`. E o defeito do planner medido em 2026-08-09 prova o custo disso: o índice vetorial era rejeitado em todos os cenários, entregando 182 ms onde havia 6 ms — **nenhum dos 109 benchmarks pegou**, porque todos forçam o caminho que querem medir. Um usuário real teria pego no primeiro dia.
 status: raw
 dod:
-  - `theo-rag` servindo consultas reais sobre TheoDB na infraestrutura que o time opera
+  - `theo-rag` servindo consultas reais sobre TheoDB no **`app-dev.usetheo.dev`** (ambiente trocado pelo owner em 2026-08-10; era "infraestrutura de produção")
   - âncora de dogfood em `running`, com ao menos 3 evidências e 1 história de falha (soft caps da golden rule)
   - ao menos um defeito encontrado por uso, não por benchmark — é a prova de que o dogfood está funcionando
 
@@ -642,6 +642,15 @@ dod:
 > opera, e agora ela está diante deles como uma mudança que **cabe numa tela** em vez de 550 arquivos. Era
 > disto que o item precisava, e é o último passo que existia do meu lado.
 
+> **2026-08-10 — o gate mudou de ambiente, por decisão do owner.** `running` deixa de exigir produção e passa
+> a exigir o `theo-rag` rodando no **`app-dev.usetheo.dev`** sobre o TheoDB, servindo consultas. Registrado na
+> `dogfood-golden-rule.md § 3`.
+>
+> **Medido antes de aceitar o novo alvo:** o `app-dev` responde 200 em 0,5 s, mas **devolve a SPA para
+> qualquer rota** — `/api/rag/health` retornou HTML, e uma rota inventada também deu 200. **Não há evidência
+> de que o `theo-rag` esteja implantado lá**, nem sobre qual banco. O gate novo aponta para um ambiente cujo
+> estado ainda não foi verificado; verificá-lo é a primeira coisa que ele exige.
+>
 > **2026-08-10 — o `theo-rag` adotou o TheoDB em `main`.** O owner mergeou o
 > [#211](https://github.com/usetheoai/theo-rag/pull/211) e autorizou o merge dos demais PRs abertos; os 7
 > foram analisados e mergeados. `origin/main` do `theo-rag` agora declara
