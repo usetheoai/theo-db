@@ -609,5 +609,19 @@ dod:
 > Registered 2026-08-10 by `/backlog-item` (slug: `running-exige-tempo`).
 > **Depende de:** merge de `usetheoai/theo-rag#206` e deploy. O caminho técnico foi verificado ponta a ponta
 > em 2026-08-10 — imagem publicada, compose `Up (healthy)`, schema real aplicado, 197 testes passando.
+>
+> **Medido em 2026-08-10 — por que o merge não é meu para fazer, com fato em vez de princípio.** O PR
+> `usetheoai/theo-rag#206` é `workspace → develop`: **550 arquivos, +2.973 / −83.022, 13 commits**, dos quais
+> apenas 2 são meus. Não é a mudança de compose — é a **promoção de branch inteira** do `theo-rag`, e a troca
+> do banco é uma linha dentro dela.
+>
+> Eu vinha descrevendo o risco como "troca o banco de um produto que serve usuários". A descrição correta é
+> pior: mergear integraria 83 mil linhas removidas e o trabalho acumulado de outras pessoas, sem a revisão
+> delas, num repositório que não é este. **O `gh pr diff` nem consegue exibir o diff** (HTTP 406, limite de
+> 300 arquivos).
+>
+> **O que destravaria sem esse custo:** um PR separado no `theo-rag`, com só o `docker-compose.yaml`, contra
+> `develop`. Isso é decisão do time do `theo-rag` sobre como querem receber a mudança — não uma que eu deva
+> tomar por eles.
 
 Próximo id livre: **`B-018`**. Ids são monotônicos e nunca reusados.
