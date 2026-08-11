@@ -62,6 +62,25 @@ pub(crate) fn bump_scan_candidates(candidates: i64) {
     SCAN_CANDIDATES.with(|c| c.set(c.get() + candidates));
 }
 
+/// Record the COMPLETE observation of one scan segment — pages read AND candidates navigated — in a single
+/// call. Every scan path MUST report through here rather than bumping the two counters by hand.
+///
+/// This exists because reporting only half was a real, shipped defect (B-015): the M118 resume path
+/// (`hnsw_page::resumable_init` / `resumable_next`) duplicated `traverse`'s greedy descent, accumulated its own
+/// `reads`, and never called either bump — while being the DEFAULT path for every V1 exact-f32 index. The
+/// measurement that isolated it toggled the kill-switch on one query: `theodb_hnsw.resume = off` reported
+/// `pages_read=112 candidates_seen=38`; `= on` reported `0` and `0`, with the same plan and the same 5 rows.
+/// `theodb.explain_scan`, `theodb.scan_stats` and the `theodb._index_scan_stats` collector therefore reported
+/// zero for the most common scan in the product, and the ef_search recommender consumed those zeros.
+///
+/// A pair of calls is two chances to forget one; this is one. Note it does NOT make instrumentation automatic
+/// for a future path — only a test can do that (see `scan_stats_instruments_the_resume_path`), which is why
+/// the fix ships with one.
+pub(crate) fn record_scan_observation(reads: i64, candidates: i64) {
+    bump_scan_pages(reads);
+    bump_scan_candidates(candidates);
+}
+
 /// Reset the backend-local accumulators (before a measured scan window).
 fn reset_scan_counters() {
     SCAN_PAGES_READ.with(|c| c.set(0));
@@ -356,6 +375,48 @@ mod tests {
         });
         assert_eq!(n, 1, "the collector persisted one observation into theodb._index_scan_stats");
         assert!(cand > 0, "candidates_seen persisted into the catalog (got {cand})");
+    }
+
+    /// B-015 regression — the collector must observe the scan on BOTH scan paths, not just one.
+    ///
+    /// The sibling test above asserts `pages > 0` without pinning WHICH path produced it, and that gap shipped:
+    /// the M118 resume path (`hnsw_page::resumable_init` / `resumable_next`) is the DEFAULT for every V1
+    /// exact-f32 index and reported nothing, so `explain_scan`/`scan_stats`/`_index_scan_stats` read zero for
+    /// the product's most common scan while the ef_search recommender consumed those zeros. Flipping the
+    /// kill-switch on one query was what isolated it: `resume = off` → `pages=112 cand=38`; `resume = on` →
+    /// `0`/`0`, same plan, same 5 rows.
+    ///
+    /// So this asserts the A/B directly. Were the fix reverted, the `on` half fails while the `off` half still
+    /// passes — which is precisely the asymmetry the sibling test could not see.
+    #[pg_test]
+    fn scan_stats_instruments_the_resume_path() {
+        // `sst3`, not `sst2` — `scan_stats_rejects_bad_ef` already seeds `sst2`, and two tests sharing a
+        // fixture name is the order-dependence `rules/testing.md § 3` forbids.
+        let probes = seed("sst3", 60);
+
+        // The M118 path — the default, and the one that was blind.
+        Spi::run("SET theodb_hnsw.resume = on").unwrap();
+        let (pages_on, cand_on, _lat, results_on) = scan_stats(0, "sst3", "e", &probes[0], 40, 5);
+        assert!(results_on > 0, "the resume-path scan returned rows (got {results_on})");
+        assert!(
+            pages_on > 0,
+            "resume ON must observe pages_read — the M118 path reports through \
+             record_scan_observation like traverse (got {pages_on})"
+        );
+        assert!(
+            cand_on > 0,
+            "resume ON must observe candidates_seen — ResumableGround::candidates_seen() was an \
+             accessor with no caller until B-015 (got {cand_on})"
+        );
+
+        // The M52 re-search path, which always reported. Kept in the same test so the two are compared on one
+        // binary and one dataset: an assertion that only ever ran on one path is what let this defect ship.
+        Spi::run("SET theodb_hnsw.resume = off").unwrap();
+        let (pages_off, cand_off, _lat, _r) = scan_stats(0, "sst3", "e", &probes[0], 40, 5);
+        assert!(pages_off > 0, "resume OFF still observes pages_read (got {pages_off})");
+        assert!(cand_off > 0, "resume OFF still observes candidates_seen (got {cand_off})");
+
+        Spi::run("SET theodb_hnsw.resume = on").unwrap();
     }
 
     #[pg_test(error = "theodb.scan_stats: ef and k must be > 0")]

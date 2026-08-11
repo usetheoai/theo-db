@@ -78,13 +78,24 @@ jobs:
       # reprova sempre é um CI que alguém desliga. É "não pode PIORAR": o baseline é o número
       # medido em 2026-08-10 (era 20; caiu para 10 ao fechar B-011 e as 8 de registro de schema) e cada falha nova reprova.
       #
+      # 2026-08-11 — baixado de 10 para 6 ao fechar o B-015: `434 passed; 6 failed` medido na suíte completa
+      # (`cargo pgrx test pg18`, 539,43 s). Fecharam os cinco testes de contador em zero — três colunares
+      # (`chunk_skip_prunes_and_ab_identical`, `enable_chunk_skip_guc_off_disables_skip`,
+      # `predicate_pushdown_best_effort`) e dois de autotune (`scan_stats_records_real_pages_read`,
+      # `explain_scan_shows_index_and_candidates`) — mais o teste novo que amarra a causa.
+      #
+      # RESSALVA DE MÉTODO: os 10 do baseline anterior foram medidos em outro commit e em outra data; eu não
+      # rodei a suíte completa ANTES desta mudança, só o subconjunto filtrado (que falhava 2/2). Então "10 → 6"
+      # é a comparação de dois números honestos medidos em momentos diferentes, NÃO um A/B pareado no mesmo
+      # commit. O que está pareado é o subconjunto: RED 2/2 antes, GREEN 6/6 depois.
+      #
       # RESSALVA REGISTRADA (log de intake de B-013): este baseline só é honesto enquanto o B-012
       # estiver ativo para derrubá-lo. Se o B-012 morrer, o número vira permanente sem ninguém ter
       # decidido isso, e o gate passa a proteger a dívida em vez do produto. Ao fechar cada falha,
       # BAIXE o baseline no mesmo commit.
       - name: Gate — falhas não podem aumentar
         env:
-          BASELINE: "10"
+          BASELINE: "6"
         run: |
           line=$(grep -E "^test result" suite.log | tail -1)
           echo "$line"
