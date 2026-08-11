@@ -297,5 +297,4 @@ mod tests {
         let c = toast_startup_correction(1.0, 1_000_000.0, 0.1, 0.0, 4.0, 1.0);
         assert_eq!(c, 0.0);
     }
-
 }

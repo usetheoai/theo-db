@@ -906,7 +906,8 @@ why_now: o `.clippy_args` existe declaradamente para que "CI e local leem o MESM
 status: raw
 dod:
   - `rustup component add clippy` entra no estágio `theodb-rs-builder` do Dockerfile, e a imagem roda o gate sem passo extra
-  - verificado se `rustfmt` tem o mesmo problema (o `fmt --check` do CI roda no mesmo runner, não na imagem)
+  - ~~verificado se `rustfmt` tem o mesmo problema~~ **VERIFICADO 2026-08-11: SIM, e é pior.** `cargo fmt` na imagem devolve `error: 'cargo-fmt' is not installed for the toolchain '1.97.0'`. E o modo de falha é traiçoeiro: `cargo fmt -- --check | grep -c "^Diff in"` imprimiu **`0`** — não porque não havia diffs, mas porque o comando falhou e não produziu saída nenhuma. **Um falso "está tudo limpo" indistinguível do verdadeiro**, exatamente o que o golden rule chama de fabricar saída limpa. Ambos os componentes (`clippy` e `rustfmt`) precisam entrar na imagem.
+  - o toolchain local do desenvolvedor **não** serve de substituto: medido, o `cargo` do host é 1.91.0 e o projeto pina 1.97.0 (`rustfmt 1.9.0-stable`), então formatar fora do contêiner produz um resultado que o CI recusa
   - o script local documentado no `.clippy_args` roda de ponta a ponta contra a imagem
 
 > Registered 2026-08-11 by `/code-quality` (slug: `builder-sem-clippy`), ao executar o gate de lint do
