@@ -52,13 +52,14 @@ thread_local! {
     static SCAN_CANDIDATES: Cell<i64> = const { Cell::new(0) }; // M68 — candidates navigated in the beam
 }
 
-/// Called by the HNSW scan (`hnsw_page::traverse`) with the pages it read — accumulates for the collector.
-pub(crate) fn bump_scan_pages(reads: i64) {
+/// Accumulate the pages a scan segment read. PRIVATE on purpose — see `record_scan_observation`.
+fn bump_scan_pages(reads: i64) {
     SCAN_PAGES_READ.with(|c| c.set(c.get() + reads));
 }
 
-/// M68 — called by the HNSW scan with the candidates it navigated (the `visited` count from ground_search).
-pub(crate) fn bump_scan_candidates(candidates: i64) {
+/// M68 — accumulate the candidates a scan segment navigated (the `visited` count from ground_search).
+/// PRIVATE on purpose — see `record_scan_observation`.
+fn bump_scan_candidates(candidates: i64) {
     SCAN_CANDIDATES.with(|c| c.set(c.get() + candidates));
 }
 
@@ -73,9 +74,11 @@ pub(crate) fn bump_scan_candidates(candidates: i64) {
 /// `theodb.explain_scan`, `theodb.scan_stats` and the `theodb._index_scan_stats` collector therefore reported
 /// zero for the most common scan in the product, and the ef_search recommender consumed those zeros.
 ///
-/// A pair of calls is two chances to forget one; this is one. Note it does NOT make instrumentation automatic
-/// for a future path — only a test can do that (see `scan_stats_instruments_the_resume_path`), which is why
-/// the fix ships with one.
+/// A pair of calls is two chances to forget one; this is one. The two `bump_*` helpers are PRIVATE to this
+/// module precisely so a future scan path cannot reach half the pair from outside: the type system now refuses
+/// the shape of the defect, instead of a comment asking nicely. Note this still does NOT make instrumentation
+/// automatic for a path that reports nothing at all — only a test can do that (see
+/// `scan_stats_instruments_the_resume_path`), which is why the fix ships with one.
 pub(crate) fn record_scan_observation(reads: i64, candidates: i64) {
     bump_scan_pages(reads);
     bump_scan_candidates(candidates);

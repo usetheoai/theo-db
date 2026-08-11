@@ -878,4 +878,21 @@ dod:
 > Registered 2026-08-11 by `/discover --mode review` (slug: `simd-speedup-na-suite-funcional`), da
 > investigação das 6 falhas remanescentes após o `B-015`.
 
-Próximo id livre: **`B-024`**. Ids são monotônicos e nunca reusados.
+## B-024 — O autotune recomendou `ef_search` sobre contadores em ZERO, e ninguém mediu o alcance   [ ]
+
+domain: vetorial
+repo: theo-db
+suggested_mode: review
+source: discover-review
+evidence: consequência direta do `B-015`, medida em 2026-08-11. O recomendador lê `pages_read` do coletor (`autotune.rs:219` — `let (pages_read, candidates) = (read_scan_pages(), read_scan_candidates())`), e para todo índice V1 exact-f32 esses contadores eram **0** desde o M118, porque o caminho *resume* nunca reportou. O `B-015` corrigiu a instrumentação; **não** investigou o que o recomendador fez enquanto ela esteve cega.
+why_now: um recomendador que decide sobre zero não erra de forma aleatória — erra de forma **sistemática e silenciosa**, e o `theodb._index_scan_stats` guarda essas observações persistidas. Duas perguntas ficaram abertas no review e nenhuma tem resposta medida: (a) recomendações emitidas nesse período são recuperáveis do catálogo e estão erradas? (b) o `recommend_ef` chega a ser sensível a `pages_read`, ou o zero foi inócuo porque a bisseção decide por recall? A segunda pode inocentar tudo — e é exatamente por isso que precisa ser medida em vez de suposta em qualquer direção.
+status: raw
+dod:
+  - determinado por leitura + medição se `recommend_ef` consome `pages_read` no caminho de decisão ou apenas o persiste
+  - se consome: quantificado o erro sobre um índice real, comparando recomendação com contador cego vs instrumentado
+  - se não consome: registrado como honest-negative, e o campo deixa de ser citado como insumo de decisão
+
+> Registered 2026-08-11 by `/review` (slug: `autotune-sobre-zeros`), como followup HIGH obrigatório do
+> verdict `READY_TO_MERGE_WITH_FOLLOWUPS` — `.claude/knowledge-base/reviews/b015-review-2026-08-11.md`.
+
+Próximo id livre: **`B-025`**. Ids são monotônicos e nunca reusados.
