@@ -438,17 +438,16 @@ pub(crate) unsafe fn rabitq_bits_from_relation(indexrel: pg_sys::Relation) -> u8
     }
 }
 
-/// multiple of 32 (FastScan alignment) and clamped to `[MIN, MAX]`, or the default 32 when absent.
-///
-/// # Safety
-/// `indexrel` must be a valid open index relation.
-pub(crate) unsafe fn degree_bound_from_relation(indexrel: pg_sys::Relation) -> usize {
-    let rd_options = (*indexrel).rd_options;
-    if rd_options.is_null() {
-    }
-    let r = (*(rd_options as *const TheodbIvfflatOptions)).degree_bound;
-    (r as usize).div_ceil(32) * 32 // round up to a multiple of 32
-}
+// B-026 — `degree_bound_from_relation` REMOVIDA aqui. Ela era resíduo do `theodb_symqg`, aposentado e
+// removido da distribuição no M176, e tinha **zero callers** quando foi apagada (verificado por grep antes
+// da remoção). Carregava um defeito latente que o clippy expôs: `if rd_options.is_null() { }` com corpo
+// VAZIO, seguido de uma desreferência do mesmo ponteiro na linha seguinte — as duas funções irmãs deste
+// arquivo (`lists_from_relation`, `sbq_bits_from_relation`) fazem `return <default>;` ali, e só nesta o
+// `return` se perdeu (introduzido em `34a49d1`).
+//
+// Removida em vez de "consertada": preencher o `if` manteria código morto de um pilar que não existe mais.
+// O reloption `degree_bound` em si (o campo do struct e a entrada da tabela de opções) NÃO foi tocado —
+// mexer nele afeta índices já criados que o declarem, e isso é escopo próprio, não carona.
 
 /// M86 — resolve SOAR `λ` for a `theodb_ivfflat` AQ index: the milli-scaled `WITH (soar_lambda=N)` / 1000. 0.0 =
 /// SOAR off (default, primary-only assignment, byte-identical). Read at build to spill; the fold does not re-spill.

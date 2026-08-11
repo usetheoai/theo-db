@@ -45,10 +45,12 @@ impl Drop for HeldInterrupts {
         // do backend. Só se cura porque o pgrx re-lança o erro e outro `errfinish` zera de novo — o que depende do
         // panic nunca ser capturado. Guardar é grátis e não depende dessa invariante (achado de review; é o mesmo
         // idioma do `lwlock.rs` do pgrx).
+        // `InterruptHoldoffCount` é `volatile uint32` (miscadmin.h) — UNSIGNED, então `saturating_sub` satura
+        // em 0 e é exatamente o `if > 0 { -= 1 }` que estava aqui, sem o `if` que o clippy recusa
+        // (`implicit_saturating_sub`). A verificação do tipo não é cerimônia: sobre um inteiro COM sinal
+        // `0.saturating_sub(1)` daria `-1`, e a mesma sugestão do lint teria mudado o comportamento.
         unsafe {
-            if pg_sys::InterruptHoldoffCount > 0 {
-                pg_sys::InterruptHoldoffCount -= 1;
-            }
+            pg_sys::InterruptHoldoffCount = pg_sys::InterruptHoldoffCount.saturating_sub(1);
         }
     }
 }
