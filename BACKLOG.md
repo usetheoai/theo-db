@@ -621,13 +621,15 @@ domain: ai-surface
 repo: theo-db
 suggested_mode: bug
 source: discover-review
-evidence: `pg_embed_unreachable_endpoint_fails_typed` e o par de `rerank` recebem `theodb.embed: refusing to call 127.0.0.1 — it resolves to a blocked internal address`.
+evidence: `pg_embed_unreachable_endpoint_fails_typed` e o par de `rerank` recebem `theodb.embed: refusing to call 127.0.0.1 — it resolves to a blocked internal address`. **Ampliado em 2026-08-11 — são TRÊS testes, não dois.** A suíte completa (`434 passed; 6 failed`) mostra que `http::m104_breaker_success_closes` tem a mesma causa por outro sintoma: o log traz cinco `theodb egress guard: bt denied host 127.0.0.1 -> blocked address 127.0.0.1` seguidos de `ERROR: open after K failures` (`http.rs:320`). O teste quer provar que **um sucesso em HalfOpen FECHA o disjuntor**, e nunca há sucesso — a guarda recusa loopback antes de qualquer conexão, então o disjuntor só acumula falhas e abre. É o mesmo produto-certo-teste-desatualizado, agora atingindo também a máquina de estados do circuit breaker.
 why_now: os testes querem provar erro **tipado** para endpoint inalcançável e recebem um erro tipado **diferente** — a guarda SSRF recusa loopback antes de conectar. **O produto está certo e o teste está desatualizado:** a guarda é mais nova que ele.
 status: raw
 dod:
   - os testes usam um endereço externo inalcançável, provando o erro que pretendem provar
   - a guarda SSRF permanece intacta — afrouxá-la para fazer teste passar seria abrir um SSRF
   - um teste separado cobre a própria guarda, que hoje só é exercitada por acidente
+  - **os TRÊS testes passam** — `embed`, `rerank` e `http::m104_breaker_success_closes`; o do disjuntor precisa de um caminho que produza SUCESSO em HalfOpen, o que a guarda impede por loopback
+  - a máquina de estados do disjuntor ganha cobertura que não dependa de rede alguma (o comentário do próprio teste admite que ele não consegue ser hermético: *"We can't hit a live 4xx hermetically"*)
 
 > Registered 2026-08-10 by `/backlog-item` (slug: `egress-guarda-ssrf`).
 
@@ -842,4 +844,38 @@ dod:
 > Registered 2026-08-11 by `/discover --mode bug` (slug: `diagnostico-cego-ao-shim`), como achado
 > colateral da medição do `B-015`.
 
-Próximo id livre: **`B-022`**. Ids são monotônicos e nunca reusados.
+## B-022 — Dois testes declaram FRAGMENTO em `#[pg_test(error = …)]`, e o pgrx compara a mensagem INTEIRA   [ ]
+
+domain: engine-pgrx
+repo: theo-db
+suggested_mode: bug
+source: discover-review
+evidence: suíte completa de 2026-08-11 (`434 passed; 6 failed`). `graph::csr_build_guards_u32_boundary` declara `error = "must fit in u32"` e o produto emite `theodb.graph_build: node ids must fit in u32 (max 4294967295)`; `vectorizer::process_delete_failure_does_not_mark_done` declara `error = "does not exist"` e o produto emite `column "emb" of relation "dst_bad" does not exist`. **A comparação do pgrx é igualdade exata** — lido no fonte da dependência, `pgrx-tests-0.19.0/src/framework.rs:174`: `if Some(received_error_message) == expected_error`.
+why_now: **o produto está CORRETO nos dois** — cada um emitiu exatamente o erro tipado que o teste existe para provar, e a asserção reprova mesmo assim. É a classe que o m188 chamou de classificação errada de teste, e ela custa duas vagas permanentes no baseline de falhas do CI, protegendo dívida em vez de produto. O conserto é declarar a mensagem inteira; o cuidado é que ela então vira contrato — mudar o texto do erro passa a quebrar o teste, que é o comportamento desejado para um erro tipado.
+status: raw
+dod:
+  - os dois testes passam com a mensagem completa declarada, sem afrouxar para `should_panic` genérico
+  - verificado se há OUTROS `#[pg_test(error = …)]` no repositório declarando fragmento (mesma classe, ainda verdes por coincidência de texto)
+  - baseline de falhas do CI baixado no mesmo commit
+
+> Registered 2026-08-11 by `/discover --mode review` (slug: `pg-test-error-fragmento`), da investigação
+> das 6 falhas remanescentes após o `B-015`.
+
+## B-023 — Um teste de PERFORMANCE mora na suíte funcional, e ele reprovou com AVX 51% mais lento   [ ]
+
+domain: hot-path
+repo: theo-db
+suggested_mode: bug
+source: discover-review
+evidence: suíte completa de 2026-08-11 — `vec::cosine_simd_per_candidate_speedup` falha com `SIMD cosine must not be slower than scalar (avx=15.75800491 scalar=10.426654568)` (`vec.rs:553`). A execução ocorreu numa máquina com outros dois contêineres ativos e uma suíte de 440 testes concorrendo por CPU.
+why_now: as duas leituras possíveis têm consequências opostas e **a medição atual não as separa**. Se for ruído de ambiente, o teste é flaky por construção — `rules/testing.md § 6` proíbe teste dependente de tempo sem isolamento, e um teste vermelho intermitente treina o time a ignorar vermelho. Se for real, o kernel SIMD do caminho crítico regrediu e está 51% mais lento que a versão escalar que ele existe para superar, o que é defeito de performance no pilar vetorial. Um teste de vazão dentro da suíte funcional não consegue emitir esse veredito: `papers/rigorous-perf-eval-georges-2007.pdf` exige isolamento e variância, e a suíte não oferece nenhum dos dois.
+status: raw
+dod:
+  - determinado por repetição em máquina isolada se `avx < scalar` reproduz, ou se é ruído de contenção
+  - se ruído: o teste sai da suíte funcional para o harness de benchmark, com variância declarada — não é afrouxado no lugar
+  - se real: causa capturada por profiling e regressão coberta por benchmark reproduzível em `wiki/benchmarks/`
+
+> Registered 2026-08-11 by `/discover --mode review` (slug: `simd-speedup-na-suite-funcional`), da
+> investigação das 6 falhas remanescentes após o `B-015`.
+
+Próximo id livre: **`B-024`**. Ids são monotônicos e nunca reusados.
