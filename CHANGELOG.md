@@ -78,6 +78,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   símbolos do `.so` não resolvem (release sem debuginfo), então a atribuição é por objeto, não por função
 
 ### Changed
+- _(interno, sem efeito para quem usa o banco)_ Os dois verificadores automáticos de qualidade do código voltaram a passar. Ambos estavam reprovando havia tempo — o de formatação desde antes desta versão, o de análise estática por causa dos resíduos descritos em Fixed — e um verificador que reprova sempre deixa de barrar o próximo defeito de verdade. O código foi reformatado pela ferramenta oficial do projeto (7 arquivos, apenas quebras de linha, nenhuma mudança de comportamento). (#B-025 #B-026)
+
 - Hook de validação de comandos ficou mais rápido: ~6 processos por chamada de ferramenta em vez de ~50, sem mudança de comportamento
 - **theodb:** o **M176 (SymQG) muda de natureza** com a medição do M184. Ele fora escrito assumindo "código
   mantido sem consumidor" — dívida interna barata. A medição desmente: o `theodb_symqg` está **registrado como
