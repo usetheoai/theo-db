@@ -951,4 +951,22 @@ dod:
 > problema. Se o gate estivesse verde antes do M176, o primeiro resíduo teria aparecido sozinho, na hora,
 > em vez de quatro deles emergirem meses depois durante um release não relacionado.
 
-Próximo id livre: **`B-027`**. Ids são monotônicos e nunca reusados.
+## B-027 — Run cancelado deixa o contêiner `suite` órfão, e o run seguinte reprova sem rodar um teste   [ ]
+
+domain: engine-pgrx
+repo: theo-db
+suggested_mode: bug
+source: discover-live-test
+evidence: medido em 2026-08-11 no PR #226. O job `suite` falhou com `docker: Error response from daemon: Conflict. The container name "/suite" is already in use by container "d14937ebd80f…"` — **antes de executar um único teste**. Causa: `rust-suite.yml` usa `docker run --name suite` (nome fixo) e só faz `docker rm -f suite` **depois** do run; quando o run é cancelado — e cada push novo no mesmo PR cancela o anterior — o passo morre antes da limpeza e o contêiner sobrevive no runner self-hosted.
+why_now: o sintoma **mente sobre a causa**. Sem `test result` no log, o gate seguinte faz `line=$(grep -E "^test result" suite.log | tail -1)` e o job aparece no PR como **"suíte reprovou"** — indistinguível de uma regressão real de testes. Passei um ciclo investigando uma falha de testes que não existia. Num repositório onde o gate é "falhas não podem aumentar", confundir lixo de infraestrutura com regressão é o caminho mais curto para alguém subir o baseline sem precisar.
+status: raw
+dod:
+  - `docker rm -f suite` roda ANTES do `docker run` (aplicado neste ciclo — verificar se resolve na prática)
+  - avaliado usar nome único por run (`suite-${{ github.run_id }}`) em vez de nome fixo, que elimina a classe em vez de remediar
+  - o gate distingue "a suíte não emitiu resultado" de "a suíte reprovou" na saída do PR, em vez de os dois lerem igual
+
+> Registered 2026-08-11 by `/discover --mode live-test` (slug: `suite-container-orfao`), ao rodar o
+> release do `B-015`. **Provocado pelos meus próprios pushes sucessivos** — mas qualquer cancelamento
+> reproduz, e cancelamento é uso normal de PR.
+
+Próximo id livre: **`B-028`**. Ids são monotônicos e nunca reusados.

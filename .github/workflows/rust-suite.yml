@@ -61,6 +61,18 @@ jobs:
       - name: Run suite
         run: |
           set -o pipefail
+          # O `docker rm` de baixo só roda no caminho feliz. Quando o run é CANCELADO — e cada push novo
+          # para o mesmo PR cancela o anterior — o passo morre antes dele e o contêiner `suite` fica órfão
+          # no runner self-hosted. O run seguinte então falha com
+          # `Conflict. The container name "/suite" is already in use`, ANTES de executar um único teste.
+          #
+          # O sintoma disso é traiçoeiro: a suíte não emite `test result`, e o gate abaixo faz
+          # `line=$(grep -E "^test result" ...)` sob `bash -e` — a atribuição herda o exit 1 do grep e MATA o
+          # passo sem imprimir a mensagem de erro que ele tem pronta para esse caso. O job aparece como
+          # "suíte reprovou" quando o que houve foi lixo de um run cancelado.
+          #
+          # Medido em 2026-08-11 no PR #226, após pushes sucessivos cancelarem runs.
+          docker rm -f suite >/dev/null 2>&1 || true
           docker run --name suite theodb-builder bash -c '
             apt-get update -qq && apt-get install -y -qq sudo
             useradd -m postgres 2>/dev/null || true
