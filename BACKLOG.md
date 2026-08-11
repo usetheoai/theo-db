@@ -931,4 +931,23 @@ dod:
 > Registered 2026-08-11 by `/code-quality` (slug: `residuo-symqg-null-deref`), ao executar o gate de lint
 > do ciclo do `B-015`. **Nenhum dos 4 erros está nos arquivos alterados por aquele ciclo.**
 
+> **O padrão, medido ao corrigir: foram QUATRO resíduos da MESMA remoção, e o gate só os revelou um por
+> vez.** Cada correção destravava o clippy até o erro seguinte — 4 erros → 2 → 1 → 0, em quatro rodadas.
+> Todos vêm da aposentadoria do `theodb_symqg`/FastScan (M176):
+>
+> | # | Onde | O que sobrou | Custo real |
+> |---|---|---|---|
+> | 1 | `options.rs:445` | `degree_bound_from_relation` com `if is_null(){}` vazio + desreferência | **null-deref latente** (zero callers) |
+> | 2 | `options.rs:70` | doc do `degree_bound`, órfão sobre `DEFAULT_SOAR_LAMBDA_MILLI` | gate vermelho |
+> | 3 | `vec/ah.rs:116` | doc de um "sign LUT" inexistente, órfão sobre `nibble` | gate vermelho |
+> | 4 | `df_executor.rs:49` | `if > 0 { -= 1 }` | nenhum — código correto, só idioma |
+>
+> **Dois dos quatro tinham a frase TRUNCADA no meio** (`int16-accumulator-safe,` / `(a multiple of`), que é
+> a assinatura de um corte parcial — alguém apagou linhas de dentro de um bloco em vez do bloco inteiro.
+> Isso sugere que o M176 foi desfeito por remoção manual, não por uma verificação do que ficava órfão.
+>
+> **A lição operacional:** um gate que reprova em cascata (um erro por vez) esconde a dimensão do
+> problema. Se o gate estivesse verde antes do M176, o primeiro resíduo teria aparecido sozinho, na hora,
+> em vez de quatro deles emergirem meses depois durante um release não relacionado.
+
 Próximo id livre: **`B-027`**. Ids são monotônicos e nunca reusados.

@@ -67,8 +67,10 @@ pub(crate) const DEFAULT_RABITQ_BITS: i32 = 7;
 const MIN_RABITQ_BITS: i32 = 1;
 const MAX_RABITQ_BITS: i32 = 8;
 
-/// (a multiple of 32 for FastScan alignment). 32 = HNSW base-layer m0 (no truncation). Larger R → higher recall +
-/// bigger rows. The reader rounds a non-multiple-of-32 UP.
+// B-026 — quarto resíduo da mesma remoção, e o par do que saiu em `degree_bound_from_relation`. Este doc
+// comment descrevia o `degree_bound` ("a multiple of 32 for FastScan alignment... Larger R → higher recall"),
+// ficou órfão e pendurou sobre `DEFAULT_SOAR_LAMBDA_MILLI`, que tem o seu. Abre com `(a multiple of` —
+// truncado no início, a mesma assinatura de corte parcial do resíduo em `vec/ah.rs`.
 
 /// M86 (Roadmap v7) — `WITH (soar_lambda = N)`: SOAR spill's orthogonality-penalty weight `λ`, stored
 /// **milli-scaled** (`λ × 1000`) so one int reloption carries the float knob (KISS, mirrors `aq_threshold`).
