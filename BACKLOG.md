@@ -895,4 +895,39 @@ dod:
 > Registered 2026-08-11 by `/review` (slug: `autotune-sobre-zeros`), como followup HIGH obrigatório do
 > verdict `READY_TO_MERGE_WITH_FOLLOWUPS` — `.claude/knowledge-base/reviews/b015-review-2026-08-11.md`.
 
-Próximo id livre: **`B-025`**. Ids são monotônicos e nunca reusados.
+## B-025 — A imagem `theodb-builder` não traz `cargo-clippy`, então o gate de lint não roda fora do CI   [ ]
+
+domain: engine-pgrx
+repo: theo-db
+suggested_mode: bug
+source: discover-review
+evidence: medido em 2026-08-11 ao tentar rodar o gate de lint localmente contra a imagem que o próprio CI constrói (`docker build --target theodb-rs-builder -t theodb-builder .`): `error: 'cargo-clippy' is not installed for the toolchain '1.97.0-x86_64-unknown-linux-gnu'`, exit 1 — **ferramenta ausente, não lint reprovado**. O `lint-rust.yml` roda no runner self-hosted `theodb-do`, que tem o componente instalado fora da imagem.
+why_now: o `.clippy_args` existe declaradamente para que "CI e local leem o MESMO baseline, sem drift" (comentário no topo do arquivo), e o drift que ele previne é de *argumentos* — mas a **ferramenta** diverge, o que é pior: quem tenta rodar o gate pela imagem oficial recebe exit 1 e, se ler o código de saída sem ler a mensagem, conclui que o lint reprovou. É a forma de falso-negativo que o `code-quality-golden-rule` nomeia `auditor_unavailable_{tool}` e manda registrar em vez de fabricar saída limpa. Nesta sessão o contorno foi `rustup component add` dentro do contêiner, o que funciona e **não** é o conserto: cada quem paga o download de novo.
+status: raw
+dod:
+  - `rustup component add clippy` entra no estágio `theodb-rs-builder` do Dockerfile, e a imagem roda o gate sem passo extra
+  - verificado se `rustfmt` tem o mesmo problema (o `fmt --check` do CI roda no mesmo runner, não na imagem)
+  - o script local documentado no `.clippy_args` roda de ponta a ponta contra a imagem
+
+> Registered 2026-08-11 by `/code-quality` (slug: `builder-sem-clippy`), ao executar o gate de lint do
+> ciclo do `B-015`.
+
+## B-026 — Resíduo do SymQG: função morta com null-deref latente, e o gate de clippy está vermelho por ela   [ ]
+
+domain: engine-pgrx
+repo: theo-db
+suggested_mode: bug
+source: discover-review
+evidence: gate de lint executado em 2026-08-11 (`cargo clippy --features pg18 --no-deps` com o baseline `.clippy_args`): **4 erros, exit 101**, de dois lints que **não estão no baseline** — `clippy::needless_ifs` em `src/am/options.rs:447` e `clippy::implicit_saturating_sub` em `src/am/df_executor.rs:49`. O primeiro é o defeito: `degree_bound_from_relation` (`options.rs:445`) faz `if rd_options.is_null() { }` com **corpo vazio** e desreferencia o ponteiro na linha seguinte. As duas funções irmãs do mesmo arquivo fazem o certo — `lists_from_relation` tem `return DEFAULT_LISTS;` e `sbq_bits_from_relation` tem `return 0;`. O `return` se perdeu só nesta. Introduzido em `34a49d1` (2026-07-17, `impl(E2 T4.1): theodb_symqg reloption`).
+why_now: **o risco de crash hoje é ZERO e é importante dizer isso** — `grep` confirma que a função tem **zero callers**: ela é resíduo do `theodb_symqg`, aposentado e removido da distribuição no M176. Não é um null-deref alcançável; é dead code carregando um. Duas consequências mesmo assim: (a) o `code-quality-golden-rule` classifica dead code exportado sem caller como `FAIL_HARD`, e (b) o gate de lint do repositório está **vermelho**, o que significa que ele não protege mais nada — o próximo defeito de verdade entra sem ser barrado, porque o vermelho já é o estado normal.
+status: raw
+dod:
+  - `degree_bound_from_relation` removida (não "consertada" — preencher o `if` manteria código morto de um pilar aposentado)
+  - avaliado se o reloption `degree_bound` (`options.rs:97,286-288`) também sai, e o que isso faz com índices já criados que o declarem
+  - `df_executor.rs:49` resolvido ou entrando no baseline com justificativa — o código lá está **correto** (guarda explícita `> 0`), é só idioma
+  - gate de clippy volta a exit 0 contra a imagem oficial (depende de `B-025`)
+
+> Registered 2026-08-11 by `/code-quality` (slug: `residuo-symqg-null-deref`), ao executar o gate de lint
+> do ciclo do `B-015`. **Nenhum dos 4 erros está nos arquivos alterados por aquele ciclo.**
+
+Próximo id livre: **`B-027`**. Ids são monotônicos e nunca reusados.

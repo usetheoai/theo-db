@@ -13,6 +13,18 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.159.0] - 2026-08-11
+
+> **Nota de versionamento — por que MINOR e não MAJOR.** Esta versão contém duas seções `Removed` (o
+> access method `theodb_symqg` e a árvore `docs/`), e a regra de derivação do `cycle-release` deriva
+> MAJOR de um `Removed` não-vazio — o que daria `v1.0.0`. Cortada como MINOR por decisão do owner
+> (2026-08-11), por duas razões que se somam: (a) [SemVer §4](https://semver.org/) estabelece que em
+> `0.y.z` nada é declarado estável, então remoções não forçam major — a regra do projeto não distingue
+> `0.x`, e essa é uma lacuna dela; (b) `v1.0.0` violaria o hard cap #2 do `dogfood-golden-rule`
+> (`anchor_not_running`): o cenário-âncora `theo-rag-sobre-theodb` está `planned`, não `running`, e o
+> README declara explicitamente que o projeto não é production-ready. Cortar 1.0 aqui seria alegar por
+> acidente de regra o que o projeto se recusa a alegar por evidência.
+
 ### Added
 - A suíte de testes passa a rodar na integração contínua a cada push que toca a extensão. Até aqui nenhum job da esteira a executava — foi assim que 20 falhas, uma delas um defeito de recall, ficaram invisíveis por meses. O gate reprova quando o número de falhas **aumenta**, não quando é maior que zero. (#B-013)
 
