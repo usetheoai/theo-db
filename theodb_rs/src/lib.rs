@@ -66,6 +66,8 @@ mod pq;
 mod rerank;
 mod sbq;
 mod sq8;
+mod surface; // B-030 — manifesto da superfície SQL absorvida do umbrella (extension_sql_file!)
+mod surface_contract; // B-030/B-031 — o contrato da superfície instalada (presença, ACL de egress, linguagem dos wrappers)
 mod vec;
 mod vectorizer;
 mod vindex;

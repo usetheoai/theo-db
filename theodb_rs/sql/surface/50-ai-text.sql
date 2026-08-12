@@ -9,34 +9,28 @@
 -- `ai.analyze_sentiment` / `ai.rank` / `ai.generate_batch` are now implemented in Rust by the `theodb_rs`
 -- extension (theodb_rs/src/chat.rs) — NOT here (no more plpython3u in this file). This file keeps the thin
 -- SQL keepers (`ai.generate`, `ai.summarize`) and the `ai.agg_summarize` aggregate, which call `ai._chat`
--- by name (late-bound via plpgsql, since `ai._chat` is created by theodb_rs, installed after theodb).
+-- by name. B-030: ESTE ARQUIVO PASSOU A SER PARTE DO theodb_rs (extension_sql_file! em src/surface.rs,
+-- com `requires = ["theodb_ai_wrappers"]`), então a ordem contra `ai._chat` é garantida e os corpos
+-- voltaram a ser LANGUAGE sql — validados em tempo de CREATE, não no primeiro uso.
 -- Idempotent: safe to re-run / load from docker-entrypoint-initdb.d.
 
 -- M18: ai._chat + the generative wrappers are Rust (theodb_rs); plpython3u dropped from requires in M19. Not created here.
 
--- ai.generate — raw text completion. plpgsql (late-bound) so its body is not validated against ai._chat at
--- CREATE time (ai._chat lives in theodb_rs, created after theodb). VOLATILE: an LLM call is non-deterministic
--- + has side effects (network/cost) — STABLE would let the planner fold/hoist one call over N rows.
-CREATE OR REPLACE FUNCTION ai.generate(prompt text, model text DEFAULT NULL)
+-- ai.generate — raw text completion. LANGUAGE sql: o corpo É validado contra ai._chat no CREATE (B-030).
+-- VOLATILE: uma chamada de LLM é não-determinística e tem efeito colateral (rede/custo) — STABLE deixaria
+-- o planejador dobrar ou içar uma chamada sobre N linhas.
+CREATE FUNCTION ai.generate(prompt text, model text DEFAULT NULL)
 RETURNS text
-LANGUAGE plpgsql
+LANGUAGE sql
 VOLATILE
-AS $$
-BEGIN
-    RETURN ai._chat(prompt, NULL, model);
-END;
-$$;
+AS $$ SELECT ai._chat(prompt, NULL, model) $$;
 
--- ai.summarize — content -> concise summary text. plpgsql late-bound; VOLATILE (LLM call).
-CREATE OR REPLACE FUNCTION ai.summarize(content text, model text DEFAULT NULL)
+-- ai.summarize — content -> concise summary text. LANGUAGE sql, validada no CREATE; VOLATILE (chamada LLM).
+CREATE FUNCTION ai.summarize(content text, model text DEFAULT NULL)
 RETURNS text
-LANGUAGE plpgsql
+LANGUAGE sql
 VOLATILE
-AS $$
-BEGIN
-    RETURN ai._chat(content, 'Summarize the following text concisely in 1-2 sentences.', model);
-END;
-$$;
+AS $$ SELECT ai._chat(content, 'Summarize the following text concisely in 1-2 sentences.', model) $$;
 
 -- ai.agg_summarize — AGGREGATE: collapse many rows into a single summary (feature 11, aggregate path).
 -- Composed from ai._chat (Rule 9 — no reinvention). sfunc is a pure-SQL newline-join (NULL/empty-skipping);
@@ -47,7 +41,7 @@ $$;
 -- VOLATILITY: like EVERY PostgreSQL aggregate, ai.agg_summarize's own pg_proc row is provolatile='i'. That is
 -- NOT a footgun: the paid, non-deterministic LLM call lives in the VOLATILE finalfunc (ai._agg_summ_final),
 -- which the executor re-runs per query — aggregates are never constant-folded. The transition fn is IMMUTABLE.
-CREATE OR REPLACE FUNCTION ai._agg_summ_accum(state text, item text)
+CREATE FUNCTION ai._agg_summ_accum(state text, item text)
 RETURNS text
 LANGUAGE sql
 IMMUTABLE
@@ -59,25 +53,19 @@ AS $$
     END;
 $$;
 
--- finalfunc is plpgsql (late-bound to ai._chat) + VOLATILE (the LLM call). Empty/all-NULL group -> NULL.
-CREATE OR REPLACE FUNCTION ai._agg_summ_final(state text)
+-- finalfunc: LANGUAGE sql (o IF virou CASE, mesmo comportamento) + VOLATILE (a chamada LLM).
+-- Grupo vazio / todo-NULL -> NULL, sem chamada.
+CREATE FUNCTION ai._agg_summ_final(state text)
 RETURNS text
-LANGUAGE plpgsql
+LANGUAGE sql
 VOLATILE
 AS $$
-BEGIN
-    IF state IS NULL THEN
-        RETURN NULL;
-    END IF;
-    RETURN ai._chat(
+    SELECT CASE WHEN state IS NULL THEN NULL ELSE ai._chat(
         left(state, 12000),
         'Summarize the following collected texts into a single concise summary (1-3 sentences).',
-        NULL);
-END;
+        NULL) END
 $$;
 
--- No CREATE OR REPLACE AGGREGATE exists; DROP-then-CREATE keeps re-applying this file idempotent.
-DROP AGGREGATE IF EXISTS ai.agg_summarize(text);
 CREATE AGGREGATE ai.agg_summarize(text) (
     sfunc = ai._agg_summ_accum,
     stype = text,

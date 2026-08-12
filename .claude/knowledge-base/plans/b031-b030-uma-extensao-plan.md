@@ -148,7 +148,7 @@ Cobertura: **14 de 14 afirmações mapeadas (100%)**. Nenhuma tarefa órfã: T1.
 2. *Não verificar, confiando no build.* **Rejeitada:** é o atalho explicitamente proibido; mudar o contrato de `CREATE EXTENSION` sem oráculo é o risco que o B-029 registra.
 3. *`#[pg_test]` (escolhida).* Roda com `cargo pgrx test pg18` (toolchain medido: cargo-pgrx 0.19.0, PostgreSQL 18.4 em `~/.pgrx`), vive junto do código que produz a superfície, e cobre ACL — que o oráculo atual declara não cobrir.
 
-**Ganho não-óbvio:** o teste de ACL fecha um ponto cego que existia mesmo com a cadeia viva.
+**Ganho não-óbvio:** a cobertura de ACL deixa de depender de um runner externo com baseline versionada e passa a ser asserção que falha sozinha na suíte. O `schema_snapshot.sql` já snapshotava `proacl`, mas quem comparava era um script que não existe mais.
 
 ### D4 — Um módulo Rust por área funcional, não um arquivo único
 
@@ -158,7 +158,18 @@ Cobertura: **14 de 14 afirmações mapeadas (100%)**. Nenhuma tarefa órfã: T1.
 
 1. *Tudo em `api.rs`.* **Rejeitada:** `api.rs` já tem 17 blocos; somar 22 objetos faria dele o god-module que `.claude/rules/architecture.md` § 6 nomeia como anti-pattern.
 2. *Um módulo `umbrella.rs`.* **Rejeitada:** preserva a fronteira que a mudança existe para apagar; o nome só faria sentido em referência à coisa removida.
-3. *Um por área (escolhida).* SRP no nível de módulo — cada um tem uma razão para mudar. É também OCP na prática: superfície nova entra como módulo novo, sem editar lista central, porque o pgrx coleta `extension_sql!` de qualquer módulo.
+3. *Um por área (escolhida na fase de planejamento).* SRP no nível de módulo — cada um tem uma razão para mudar. É também OCP na prática: superfície nova entra como módulo novo, sem editar lista central, porque o pgrx coleta `extension_sql!` de qualquer módulo.
+
+**REVISADO durante a implementação — `extension_sql_file!` em vez de literal embutido.**
+
+Ao implementar o T3.1 apareceu uma quarta alternativa que o planejamento não tinha considerado: o pgrx 0.19 oferece `extension_sql_file!("../caminho.sql", name = …, requires = […])`, que lê o SQL de um arquivo em tempo de compilação. Isso muda a decisão por dois motivos:
+
+- **Elimina o risco R2 em vez de mitigá-lo.** O risco declarado era "mover 471 linhas para string literals troca erro de sintaxe em tempo de arquivo por erro em tempo de build". Com o arquivo, não há transcrição — logo não há o que transcrever errado. É o degrau 3 da parsimony ladder: usar o recurso da plataforma antes de escrever o nosso.
+- **Dissolve a premissa do god-module.** A alternativa 1 foi rejeitada porque somar 471 linhas de SQL a `api.rs` faria dele um god-module. Com o SQL fora do Rust, essa objeção some, e seis módulos de duas linhas cada passam a ser cerimônia.
+
+**Desenho efetivamente implementado:** os seis corpos vivem em `theodb_rs/sql/surface/*.sql` — continuam sendo SQL legível, diffável e revisável por quem entende de banco sem ler Rust — e um único manifesto `theodb_rs/src/surface.rs` os declara com o `requires` de cada um. A separação por área, que era a razão do SRP, passa a viver nos arquivos `.sql`; o manifesto é uma lista de arestas, não um god-module.
+
+O único arquivo com mudança de conteúdo é `50-ai-text.sql`, e a mudança é o ganho do ADR D1: `ai.generate`, `ai.summarize` e `ai._agg_summ_final` deixam de ser `plpgsql` late-bound e voltam a ser `LANGUAGE sql` (o `IF` virou `CASE`, sem mudança de comportamento). Os comentários que descreviam o late-binding foram reescritos — deixá-los seria repetir o defeito de comentário obsoleto que este mesmo ciclo encontrou em `schema_snapshot.sql`.
 
 ## Tasks
 
@@ -278,7 +289,7 @@ test_extension_surface_contains_public_api
 
 #### Why this step
 
-O oráculo de membresia declara: registra membresia, não ACL — um upgrade que perca um `REVOKE ... FROM PUBLIC` passa por ele. Toda a superfície `ai.*` faz HTTP de saída server-side. Perder um `REVOKE` abriria egress para todo papel do banco, e nada hoje detectaria.
+**Correção de leitura, registrada:** o `schema_snapshot.sql` **cobre** ACL — o cabeçalho declara a lacuna, mas um segundo bloco (linhas 27-38) faz snapshot de `proacl` e afirma fechá-la; o cabeçalho ficou obsoleto. O que não existe é o **consumidor**: aquele snapshot só vira verificação sob um runner que faça o diff contra uma baseline, e esse runner (`test-upgrade.sh`) foi removido em `8605677`. T2.2 converte um snapshot que depende de baseline externa numa **asserção executável** que roda na suíte normal — e sem ele a migração dos cinco `REVOKE` do umbrella não teria rede nenhuma. Toda a superfície `ai.*` faz HTTP de saída server-side; perder um `REVOKE` abriria egress para todo papel do banco.
 
 #### TDD
 

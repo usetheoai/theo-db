@@ -1115,9 +1115,12 @@ dod:
   - a decisão anterior confirma explicitamente a premissa "não há instalação em campo" — ela é de 2026-08-08 e o projeto publicou releases e imagem desde então; eu não consegui verificá-la, e ela é o que sustenta tudo
   - o ponto cego declarado do oráculo está coberto ou registrado como risco aceito (ver nota abaixo)
 
-> **Nota sobre o ponto cego, que é o achado mais afiado deste item.** `theodb_rs/sql/schema_snapshot.sql`
-> — o oráculo da cadeia — sobreviveu às remoções, e declara o próprio limite: *"`pg_depend` registra
-> MEMBRESIA, não ACL. Um upgrade que perca um `REVOKE ... FROM PUBLIC` passa neste oráculo."* Isso pesa
+> **Nota sobre a cobertura de ACL — CORRIGIDA em 2026-08-12.** A primeira redação deste item afirmava,
+> citando o cabeçalho do `schema_snapshot.sql`, que o oráculo não cobre ACL. **Está errado:** o arquivo tem
+> um segundo bloco (linhas 27-38) que faz snapshot de `proacl` e declara fechar a lacuna; o cabeçalho é que
+> ficou obsoleto. O problema real é outro e permanece: o snapshot só vira verificação sob um runner que
+> compare contra baseline, e esse runner saiu em `8605677`. Fica registrado por acréscimo, não por
+> sobrescrita, porque a leitura errada chegou a ser comunicada ao owner. O peso do tema não muda
 > mais aqui do que em quase qualquer outro projeto: **toda a superfície `ai.*` faz HTTP de saída
 > server-side e é deliberadamente revogada de PUBLIC** (`sql/50-theodb-ai.sql` traz cinco `REVOKE` e um
 > comentário avisando para não conceder `ai._chat` a PUBLIC "para consertar" erro de permissão). Um

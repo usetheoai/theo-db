@@ -90,28 +90,20 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-# M15/M70 — TheoDB ships as an INSTALLABLE EXTENSION (CREATE EXTENSION theodb), not init-scripts.
-# Build the install script (concat of the modular bodies in load order) + copy theodb.control + sql/theodb--*.sql
-# into the PG extension dir. SQL-only install is a plain copy. M70: `theodb.control` requires `theodb_rs` (o flip —
-# theodb_rs provê o tipo `vector` + os schemas theodb/ai); NÃO há mais dep de vector/vectorscale.
+# B-030 — UMA extensão de produto: `theodb_rs`. O umbrella SQL-only `theodb` foi absorvido por ela: a
+# superfície ai/nl/ml/migrate/htap virou `extension_sql_file!` em `theodb_rs/src/surface.rs`, lendo os
+# mesmos arquivos SQL, agora sob `theodb_rs/sql/surface/`. Com o umbrella saíram `theodb.control`, o
+# `Makefile` PGXS, a cadeia `theodb--X--Y.sql` e a concatenação de corpos que este bloco fazia.
 #
-# ORDEM DE CARGA = PREFIXO NUMÉRICO de dois dígitos, e o glob abaixo é a MESMA regra usada pelo `PARTS` do
-# Makefile. Antes cada ponta carregava a lista enumerada à mão: um corpo novo exigia lembrar dos dois lugares,
-# e esquecer este embarcava uma imagem sem a superfície nova, sem erro nenhum. Prefixo de DOIS dígitos é o
-# contrato — `sql/100-*.sql` ordenaria antes de `50-`; use 90-99 ou renumere. Os `install` também deixam de
-# enumerar: `theodb--*--*.sql` casa só os upgrades (nunca o `theodb--1.0.sql`, que tem um `--` só).
-COPY theodb.control /tmp/theodb/theodb.control
-# M148 (#181) — o shim de compatibilidade `vector`: toda app pgvector roda `CREATE EXTENSION IF NOT
-# EXISTS vector` no bootstrap (drizzle/alembic/prisma/scripts). Sem um objeto de extensão com esse nome
-# a app NÃO sobe — nem chega a emitir uma query. O shim não implementa nada (o tipo/operadores/opclasses
-# são own-code do theodb_rs); ele completa o drop-in declarado na ADR-0029 § D2 no nível tooling.
+# M148 (#181) — o shim `vector` PERMANECE separado, e de propósito: toda app pgvector roda
+# `CREATE EXTENSION IF NOT EXISTS vector` no bootstrap (drizzle/alembic/prisma/scripts). Sem um objeto de
+# extensão com esse nome a app NÃO sobe — nem chega a emitir uma query. O shim não implementa nada (o
+# tipo/operadores/opclasses são own-code do theodb_rs); ele completa o drop-in da ADR-0029 § D2 no nível
+# tooling. Aqui o NOME é o contrato, então colapsá-lo reintroduziria o bloqueio que o #181 mediu.
 COPY vector.control /tmp/theodb/vector.control
 COPY sql/ /tmp/theodb/sql/
 RUN set -eux; \
     cd /tmp/theodb; \
-    cat sql/[0-9][0-9]-theodb-*.sql > sql/theodb--1.0.sql; \
-    install -m 0644 theodb.control sql/theodb--1.0.sql sql/theodb--*--*.sql \
-        "/usr/share/postgresql/$PG_MAJOR/extension/"; \
     install -m 0644 vector.control sql/vector--*.sql \
         "/usr/share/postgresql/$PG_MAJOR/extension/"; \
     rm -rf /tmp/theodb
@@ -119,10 +111,9 @@ RUN set -eux; \
 # Create the extension on fresh DB init (greenfield — M15 ADR D3). M70: CASCADE puxa theodb_rs (o flip);
 # NÃO puxa mais vector/vectorscale (removidos). theodb_rs provê o tipo `vector` own-code + os schemas.
 COPY <<'EOF' /docker-entrypoint-initdb.d/00-create-theodb.sql
--- M15/M70: a superfície TheoDB (hybrid/ai/nl/ml/migrate) é o extension SQL `theodb`, que requer `theodb_rs`
--- (o flip — theodb_rs provê o tipo `vector` own-code + os schemas theodb/ai + os AMs ANN). CASCADE pulls theodb_rs.
-CREATE EXTENSION IF NOT EXISTS theodb CASCADE;
--- theodb_rs (M17/M69/M70): o tipo `vector` own-code + a superfície embed/ai/nl em Rust + os AMs. Sem deps externas.
+-- B-030: UMA extensão entrega a superfície inteira — o tipo `vector` own-code, os AMs ANN, os schemas
+-- `theodb`/`ai`/`theodb_ml` e toda a superfície embed/ai/nl/ml/migrate/htap. O umbrella `theodb` deixou
+-- de existir; não há mais um segundo `CREATE EXTENSION` a emitir aqui.
 CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE;
 -- M143: o lakehouse é own-code no theodb_rs (theodb.htap_refresh/olap + read_parquet/write_parquet own-code, sem
 -- DuckDB). Nada de pg_duckdb. ADR-0057.
