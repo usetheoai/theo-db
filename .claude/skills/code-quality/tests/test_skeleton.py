@@ -95,13 +95,14 @@ def test_detectors_expose_base_detector_subclass() -> None:
 
 
 def test_base_detector_declares_required_methods() -> None:
-    """BaseDetector MUST declare 4 abstract-or-stub methods."""
+    """BaseDetector MUST declare its detection surface — D1-D4 plus D5 (architecture)."""
     base = importlib.import_module("scripts.detectors").BaseDetector
     for method in (
         "detect_dead_code",
         "detect_symbol_fabrication",
         "detect_orphan_exports",
         "detect_mutation_score",
+        "detect_architecture_violations",
     ):
         assert hasattr(base, method), f"BaseDetector missing method: {method}"
 
@@ -115,6 +116,7 @@ def test_base_detector_methods_raise_not_implemented() -> None:
         ("detect_symbol_fabrication", ([Path("/tmp/x.py")],)),
         ("detect_orphan_exports", (Path("/tmp"),)),
         ("detect_mutation_score", ([Path("/tmp/x.py")],)),
+        ("detect_architecture_violations", (Path("/tmp"),)),
     ]
     for method, args in methods:
         with pytest.raises(NotImplementedError):
