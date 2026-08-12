@@ -22,11 +22,39 @@ ARG PG_MAJOR=18
 # (impl(m98)) mas o Dockerfile nunca acompanhou (o repin M135 não pegou) — a imagem default não buildava. Fix.
 ARG PGRX_VERSION=0.19.0
 # M142: repin de 1.91.0 → 1.97.1. cargo-pgrx 0.19.0 exige rustc ≥ 1.96; 1.97.1 é o toolchain provado no e2e-runner.
-ARG RUST_VERSION=1.97.1
+#
+# B-026/B-025 (2026-08-12) — ALINHADO a 1.97.0, que é o que `theodb_rs/rust-toolchain.toml` declara, e o
+# `rust-toolchain.toml` VENCE dentro do crate. O 1.97.1 daqui nunca compilou nada: medido no log do build,
+# o rustup baixa 1.97.0 on-demand ao entrar em `theodb_rs/` ("syncing channel updates for 1.97.0"). Ou seja,
+# o repin do M142 para .1 não teve efeito sobre o que de fato compila.
+#
+# Isso não era só cosmético — era o que **quebrava o `--component` abaixo**: os componentes iam para o
+# 1.97.1 (o `--default-toolchain` deste RUN) enquanto todo `cargo` dentro do crate usava o 1.97.0, que não
+# os tinha. Era por isso que rodar o gate na imagem exigia um `rustup component add --toolchain 1.97.0`
+# manual. Uma versão só, num lugar só, e o drift deixa de existir.
+ARG RUST_VERSION=1.97.0
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential postgresql-server-dev-$PG_MAJOR libssl-dev pkg-config clang curl ca-certificates && \
     rm -rf /var/lib/apt/lists/*
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain $RUST_VERSION
+# B-025 — `--component clippy,rustfmt` no MESMO comando do rustup, não num `rustup component add` depois.
+#
+# O `--profile minimal` (correto, mantém a imagem enxuta) NÃO traz clippy nem rustfmt, e a ausência deles
+# quebrava o gate de qualidade fora do CI de um jeito silencioso. Medido em 2026-08-11: `cargo clippy` na
+# imagem devolve `error: 'cargo-clippy' is not installed for the toolchain '1.97.0'` com exit 1 — que é
+# trivialmente lido como "o lint reprovou". Pior no fmt: `cargo fmt -- --check | grep -c "^Diff in"`
+# imprimiu **0** — não porque estava limpo, mas porque o comando falhou e não produziu saída nenhuma. Um
+# "tudo certo" falso, visualmente idêntico ao verdadeiro.
+#
+# O `lint-rust.yml` nunca sofreu com isso porque roda no runner self-hosted, que tem os componentes fora da
+# imagem. Ou seja: a imagem que o projeto entrega não conseguia rodar o gate que o projeto exige — e o
+# `.clippy_args` existe declaradamente para que "CI e local leiam o MESMO baseline, sem drift". O drift de
+# ARGUMENTOS ele previne; o de FERRAMENTA passava.
+#
+# Componentes na mesma invocação (e não num `RUN` extra) por dois motivos: evita uma camada só para isso, e
+# o rustup resolve tudo contra o toolchain pinado numa transação — sem chance de instalar componente de
+# outra versão que a do `--default-toolchain`.
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal \
+      --component clippy,rustfmt --default-toolchain $RUST_VERSION
 ENV PATH="/root/.cargo/bin:${PATH}"
 RUN cargo install --locked cargo-pgrx --version $PGRX_VERSION
 # Initialize the pgrx dev environment (compiles/links against the runtime's pg_config) BEFORE copying

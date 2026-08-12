@@ -96,7 +96,9 @@ struct TheodbIvfflatOptions {
     refine: i32,
     soar_lambda_milli: i32,
     rabitq_bits: i32,
-    degree_bound: i32,
+    // B-026 — `degree_bound: i32` removido daqui. Era o ÚLTIMO campo do struct, então tirá-lo não desloca
+    // o offset de nenhum outro — e nenhum índice pode tê-lo gravado, porque a opção nunca chegou a ser
+    // registrada (ver o comentário na tabela de parse abaixo). Resíduo do `theodb_symqg` (M176).
 }
 
 static mut RELOPT_KIND: pg_sys::relopt_kind::Type = 0;
@@ -202,7 +204,7 @@ pub(crate) unsafe extern "C-unwind" fn amoptions(
     reloptions: pg_sys::Datum,
     validate: bool,
 ) -> *mut pg_sys::bytea {
-    let tab: [pg_sys::relopt_parse_elt; 10] = [
+    let tab: [pg_sys::relopt_parse_elt; 9] = [
         pg_sys::relopt_parse_elt {
             optname: "lists".as_pg_cstr(),
             opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
@@ -284,15 +286,14 @@ pub(crate) unsafe extern "C-unwind" fn amoptions(
             // exhaustive, so this is required at every literal — same tax pgvectorscale pays (options.rs:113).
             isset_offset: 0,
         },
-        pg_sys::relopt_parse_elt {
-            optname: "degree_bound".as_pg_cstr(),
-            opttype: pg_sys::relopt_type::RELOPT_TYPE_INT,
-            offset: std::mem::offset_of!(TheodbIvfflatOptions, degree_bound) as i32,
-            // M135: PG18 added `isset_offset` to relopt_parse_elt (tracks whether the option was explicitly
-            // set). We never consult that tracking, so 0 preserves PG17 semantics exactly. Rust struct literals are
-            // exhaustive, so this is required at every literal — same tax pgvectorscale pays (options.rs:113).
-            isset_offset: 0,
-        },
+        // B-026 — a entrada de `degree_bound` saiu daqui (array de 10 → 9). Ela era resíduo do
+        // `theodb_symqg`, aposentado no M176, e estava numa situação que só a contagem revela: aparecia no
+        // `relopt_parse_elt` mas **nunca** no `add_int_reloption` — todos os outros nove aparecem nos DOIS.
+        // Sem registro, o PostgreSQL rejeita a opção antes de chegar ao parse. Medido no binário shipado:
+        //   CREATE INDEX ... WITH (degree_bound = 32)  →  ERROR: unrecognized parameter "degree_bound"
+        //   CREATE INDEX ... WITH (lists = 4)          →  CREATE INDEX
+        // Ou seja: a opção nunca foi aceita, então NENHUM índice existente pode tê-la gravada, e remover não
+        // tem efeito sobre dump/restore — que era o risco pelo qual eu havia adiado esta parte do item.
     ];
     pg_sys::build_reloptions(
         reloptions,

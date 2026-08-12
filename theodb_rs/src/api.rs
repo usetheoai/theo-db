@@ -583,12 +583,28 @@ CREATE FUNCTION theodb.explain_scan(index_table regclass, vector_col text, query
                                     ef int DEFAULT 100, k int DEFAULT 10)
 RETURNS TABLE(index_name text, ef_effective int, pages_read bigint, candidates_seen bigint, latency_us bigint, results bigint)
 LANGUAGE sql
+-- B-021: o índice é resolvido pelo HANDLER, não pelo nome do access method.
+--
+-- A forma anterior casava `a.amname = 'theodb_hnsw'`, e isso deixava invisível todo índice criado pela
+-- sintaxe pgvector (`USING hnsw`), que é o alias registrado por `sql/vector--0.6.0.sql`. O alias é uma
+-- SEGUNDA entrada em `pg_am` — medido: `hnsw` OID 17174 vs `theodb_hnsw` OID 16568 — então o nome nunca
+-- casaria, e `explain_scan` devolvia `(no theodb_hnsw index on this table)` para uma tabela que TEM índice.
+--
+-- Isso não era um detalhe: todo índice que o `theo-rag` cria usa `USING hnsw`, então o diagnóstico era cego
+-- justamente nas consultas que o dogfood exercita.
+--
+-- Os dois AMs compartilham o mesmo handler own-code (medido: ambos `theodb_hnsw_amhandler`), que é
+-- exatamente o invariante que importa aqui — "este índice é servido pelo nosso AM" — e continua verdadeiro
+-- se amanhã surgir um terceiro alias. O join passa por `pg_proc` em vez de `'…'::regproc` para não depender
+-- do `search_path` de quem chama.
 AS $$ SELECT index_name, ef_effective, pages_read, candidates_seen, latency_us, results
       FROM theodb_rs._explain_scan(
         index_table::oid,
         COALESCE((SELECT ci.relname FROM pg_index i JOIN pg_class ci ON ci.oid = i.indexrelid
                   JOIN pg_am a ON a.oid = ci.relam
-                  WHERE i.indrelid = index_table AND a.amname = 'theodb_hnsw' LIMIT 1),
+                  JOIN pg_proc h ON h.oid = a.amhandler
+                  WHERE i.indrelid = index_table AND h.proname = 'theodb_hnsw_amhandler'
+                  ORDER BY ci.relname LIMIT 1),
                  '(no theodb_hnsw index on this table)'),
         index_table::text, vector_col, query, ef, k) $$;
 

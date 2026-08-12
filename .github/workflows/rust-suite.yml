@@ -83,8 +83,20 @@ jobs:
           # "suíte reprovou" quando o que houve foi lixo de um run cancelado.
           #
           # Medido em 2026-08-11 no PR #226, após pushes sucessivos cancelarem runs.
-          docker rm -f suite >/dev/null 2>&1 || true
-          docker run --name suite theodb-builder bash -c '
+          #
+          # B-027 (2026-08-12) — o nome passou a ser ÚNICO POR RUN, e isso ELIMINA a classe em vez de
+          # remediá-la. O `docker rm -f` acrescentado ontem é remédio: depende de o passo seguinte chegar a
+          # rodar, e um cancelamento no ponto errado ainda deixaria lixo com nome fixo. Com
+          # `suite-${{ github.run_id }}-${{ github.run_attempt }}` não existe colisão possível — dois runs
+          # nunca disputam o mesmo nome, mesmo que o anterior tenha morrido no meio.
+          #
+          # O `rm -f` fica, agora como higiene local do próprio run (re-tentativa do mesmo attempt), e o
+          # `docker container prune` varre o que runs cancelados antigos deixaram para trás — sem ele, os
+          # órfãos já criados no runner continuariam ocupando disco para sempre.
+          CONTAINER="suite-${{ github.run_id }}-${{ github.run_attempt }}"
+          docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+          docker container prune -f --filter "until=24h" >/dev/null 2>&1 || true
+          docker run --name "$CONTAINER" theodb-builder bash -c '
             apt-get update -qq && apt-get install -y -qq sudo
             useradd -m postgres 2>/dev/null || true
             mkdir -p /pgdata && chown postgres /pgdata
@@ -95,7 +107,7 @@ jobs:
             export RUSTFLAGS="-Clink-arg=-Wl,--unresolved-symbols=ignore-all"
             cargo pgrx test pg18
           ' 2>&1 | tee suite.log || true
-          docker rm -f suite >/dev/null 2>&1 || true
+          docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
 
       # O gate NÃO é "zero falhas" — seria reprovar todo push a partir de hoje, e um CI que
       # reprova sempre é um CI que alguém desliga. É "não pode PIORAR": o baseline é o número

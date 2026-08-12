@@ -819,11 +819,26 @@ suggested_mode: evolve
 source: discover-bug
 evidence: medido em 2026-08-11 contra `ghcr.io/usetheoai/theo-db:0.140.0`, mesmas 1000 linhas `vector(1536)`, mesma sessão, mesmo binário — **build em lote (`CREATE INDEX` sobre a tabela cheia): 60 643 ms**; **incremental (índice vazio + `INSERT` das mesmas 1000 linhas): 647 ms**. Recall verificado íntegro nos dois caminhos (top-5 do índice ≡ top-5 exato do seqscan, interseção 5/5), então não é o índice incremental que está pulando trabalho.
 why_now: a assimetria é o **inverso** do esperado — um build em lote enxerga todos os vetores de uma vez e deveria ganhar do caminho um-a-um, que é o que a doc do pgvector recomenda justamente por isso. O custo é sentido por uso real: o teste do planner do `theo-rag` gastava 29 s de um `testTimeout` de 30 s (97% do orçamento) e o próprio comentário do teste registra a reordenação feita para contorná-lo; nesta sessão o mesmo build estourou um timeout de 2 min. É também o que alarga a janela de corrida do `B-019`.
-status: raw
+status: killed
+kill_reason: **o número que abriu este item era MEU ERRO DE MEDIÇÃO, e as duas evidências dele caem.**
+
+(1) **Os 60 s não reproduzem.** Medido em 2026-08-12 num host isolado, mesmo binário, mesma forma: `CREATE INDEX` HNSW sobre **1000 × vector(1536)** leva **3.524 ms**, não 60.643 ms — **17× inflado**. A medição original foi feita com outros contêineres disputando CPU, exatamente a contaminação que já havia falseado o `B-023`. É a segunda ocorrência do mesmo erro meu na mesma sessão.
+
+(2) **A comparação de 93× era entre coisas diferentes.** O caminho "incremental" não constrói o mesmo objeto: medido, o índice resultante tem **2576 kB** contra **1504 kB** do build em lote — 71% maior, estrutura distinta. Comparar construir um grafo com empilhar num buffer não mede lentidão de build.
+
+**O que a medição limpa mostra, e é o oposto do item:** o build é ~**linear em N e em dim**, sem patologia —
+
+| N | dim | tempo |
+|---|---|---|
+| 2000 | 128 | 1.163 ms |
+| 4000 | 128 | 2.526 ms (2,17× ao dobrar N) |
+| 2000 | 512 | 4.393 ms (3,78× ao quadruplicar dim) |
+| 2000 | 1536 | 18.097 ms (1,3× acima da extrapolação) |
+| 1000 | 1536 | **3.524 ms** |
+
+**O que NÃO foi explicado, e por isso não vira "nada a ver aqui":** o teste do planner do `theo-rag` gastava 29 s de um `testTimeout` de 30 s, e o comentário dele atribui isso ao seed. Com o build custando 3,5 s, a causa daquele tempo está em outro lugar — provavelmente no INSERT linha-a-linha via driver, não no `CREATE INDEX`. Se alguém quiser perseguir, o item novo deve nascer da medição do `theo-rag`, não desta.
 dod:
-  - determinado por profiling qual etapa do `ambuild` domina os 60 s (o M176 já demonstrou o método: `perf` com `--pid=host` e símbolos resolvidos)
-  - build em lote deixa de ser mais lento que o caminho incremental equivalente, ou a razão de ser é documentada e medida
-  - regressão coberta por benchmark que compara os dois caminhos no mesmo binário
+  - ~~determinado por profiling qual etapa do `ambuild` domina os 60 s~~ **não se aplica: os 60 s não existem**
 
 > Registered 2026-08-11 by `/discover --mode bug` (slug: `hnsw-build-em-lote-lento`), como achado
 > colateral da medição do `B-019`.
@@ -837,13 +852,33 @@ source: discover-bug
 evidence: medido em 2026-08-11 contra `ghcr.io/usetheoai/theo-db:0.140.0`. (a) `theodb.explain_scan` sobre uma tabela cujo índice foi criado com `USING hnsw` (o alias do shim, `sql/vector--0.6.0.sql:49`) devolve `(no theodb_hnsw index on this table)` — o alias é uma segunda entrada em `pg_am` (OID `hnsw=19173` vs `theodb_hnsw=16568`) e a resolução casa pelo nome do AM. (b) um índice criado com o opclass **default** do AM (`theodb_hnsw_l2_ops`, `opcdefault=t`) não serve o operador `<=>`: o plano medido cai em `Limit → Sort → Seq Scan`, enquanto `theodb_hnsw_cosine_ops` produz `Index Scan ... Order By`.
 why_now: os dois se somam contra o consumidor real. **Todo** índice que o `theo-rag` cria usa `USING hnsw` — portanto é invisível ao `explain_scan` e ao autotune, justamente nas consultas que o dogfood exercita. E `scan_stats` hardcoda `<=>` (`autotune.rs:210`), então quem cria o índice sem nomear o opclass (aceitando o default L2) nunca é medido e não recebe aviso — o diagnóstico devolve zeros silenciosos em vez de dizer "este índice não responde a este operador".
 status: raw
+status: triaged
+resolvido: 2026-08-12 — as TRÊS partes do DoD, mais o script de upgrade que elas exigiam.
 dod:
-  - `explain_scan` resolve índices pelo **handler** (`theodb_hnsw_amhandler`), não pelo nome do AM, cobrindo o alias
-  - operador incompatível com o opclass do índice produz erro/aviso tipado, nunca zero silencioso
-  - regressão coberta por teste que cria o índice pelas DUAS sintaxes
+  - ~~`explain_scan` resolve índices pelo **handler**, não pelo nome do AM~~ **FEITO** — join por `pg_proc` (não `'…'::regproc`, que dependeria do `search_path`). Medido: `hnsw` OID 17174 e `theodb_hnsw` OID 16568 compartilham `theodb_hnsw_amhandler`, então resolver por handler cobre as duas sintaxes e qualquer alias futuro.
+  - ~~operador incompatível com o opclass produz erro tipado, nunca zero silencioso~~ **FEITO** — `scan_stats` verifica em `pg_amop` se algum índice da tabela responde `<=>` e recusa com erro que nomeia o opclass a usar. **Erro e não aviso**: os números seguintes viriam de um seqscan, e reportá-los sob o nome `explain_scan` seria medir uma coisa e rotular outra.
+  - ~~regressão coberta por teste que cria o índice pelas DUAS sintaxes~~ **FEITO** — dois testes. Um cria um AM com nome diferente e o MESMO handler (a forma do shim, sem acoplar o teste ao empacotamento da extensão `vector`); o outro exige que um índice `l2_ops` seja RECUSADO. Os testes que já existiam não podiam ver nenhum dos dois defeitos: só criavam índice com `USING theodb_hnsw` + `cosine_ops`.
+  - **script de upgrade** `theodb_rs--1.4.0--1.5.0.sql` gerado por `scripts/gen-upgrade-script.py` (94 KB; 129 `CREATE FUNCTION` → `OR REPLACE`, 19 objetos guardados, 2 `DROP IF EXISTS`), `default_version` bumpado para 1.5.0. Gerado, não escrito à mão — o próprio script avisa que transcrever à mão produz erro silencioso.
 
 > Registered 2026-08-11 by `/discover --mode bug` (slug: `diagnostico-cego-ao-shim`), como achado
 > colateral da medição do `B-015`.
+
+> **Erro meu durante a implementação, registrado porque a classe importa mais que o bug.** A primeira versão
+> da checagem de opclass interpolou `{tbl}::regclass` **sem aspas** no SQL, e isso QUEBROU três testes que
+> passavam (`explain_scan_shows_index_and_candidates`, `scan_stats_records_real_pages_read`,
+> `scan_stats_instruments_the_resume_path`) com `ERROR: column "esc1" does not exist` — o nome da relação
+> virou identificador de coluna.
+>
+> É **exatamente a forma** que o doc de `resolve_relation` neste mesmo arquivo documenta como lição do #172:
+> *"patch the SHAPE (every interpolation in the builder), never the payload"*. Ali foram três eixos
+> (`qvec`, `col`, `tbl`) e o texto avisa que corrigir dois e declarar vitória é pior que não corrigir. Eu
+> adicionei um quarto ponto de interpolação e repeti a forma — o sintoma foi outro (erro de sintaxe, não
+> injeção, porque o valor vem do catálogo), mas a origem é a mesma.
+>
+> Agravante de método: **anunciei o item "implementado por completo" tendo validado só com
+> `cargo check --lib`**, que não compila `#[cfg(test)]`. Eu havia escrito isso nesta mesma sessão, ao
+> justificar por que a compilação limpa não cobria um teste novo — e mesmo assim declarei conclusão sobre
+> uma verificação que não alcançava o que eu tinha escrito.
 
 ## B-022 — Dois testes declaram FRAGMENTO em `#[pg_test(error = …)]`, e o pgrx compara a mensagem INTEIRA   [ ]
 
@@ -852,13 +887,14 @@ repo: theo-db
 suggested_mode: bug
 source: discover-review
 evidence: suíte completa de 2026-08-11 (`434 passed; 6 failed`). `graph::csr_build_guards_u32_boundary` declara `error = "must fit in u32"` e o produto emite `theodb.graph_build: node ids must fit in u32 (max 4294967295)`; `vectorizer::process_delete_failure_does_not_mark_done` declara `error = "does not exist"` e o produto emite `column "emb" of relation "dst_bad" does not exist`. **A comparação do pgrx é igualdade exata** — lido no fonte da dependência, `pgrx-tests-0.19.0/src/framework.rs:174`: `if Some(received_error_message) == expected_error`.
+status: triaged
 status_nota: resolvido em 2026-08-11 — os dois passaram a declarar a mensagem INTEIRA. Efeito colateral desejado e registrado: o texto do erro vira contrato, e mudá-lo passa a quebrar o teste (para o do `vectorizer` a mensagem é do ENGINE, `analyze.c`, então o contrato é do PostgreSQL).
 why_now: **o produto está CORRETO nos dois** — cada um emitiu exatamente o erro tipado que o teste existe para provar, e a asserção reprova mesmo assim. É a classe que o m188 chamou de classificação errada de teste, e ela custa duas vagas permanentes no baseline de falhas do CI, protegendo dívida em vez de produto. O conserto é declarar a mensagem inteira; o cuidado é que ela então vira contrato — mudar o texto do erro passa a quebrar o teste, que é o comportamento desejado para um erro tipado.
 status: raw
 dod:
   - os dois testes passam com a mensagem completa declarada, sem afrouxar para `should_panic` genérico
-  - verificado se há OUTROS `#[pg_test(error = …)]` no repositório declarando fragmento (mesma classe, ainda verdes por coincidência de texto)
-  - baseline de falhas do CI baixado no mesmo commit
+  - ~~verificado se há OUTROS `#[pg_test(error = …)]` declarando fragmento~~ **FEITO 2026-08-12, e a prova é a suíte verde.** São **30** asserções `#[pg_test(error = …)]` no repositório, e a suíte fechou **440/0**. Como o pgrx compara por IGUALDADE (`framework.rs:174`), um fragmento que não casasse reprovaria o teste — logo, as 30 mensagens casam exatamente. A categoria "fragmento ainda verde por coincidência" **não existe** sob comparação exata: ou casa inteiro, ou falha.
+  - ~~baseline de falhas do CI baixado no mesmo commit~~ **FEITO: 6 → 0**
 
 > Registered 2026-08-11 by `/discover --mode review` (slug: `pg-test-error-fragmento`), da investigação
 > das 6 falhas remanescentes após o `B-015`.
@@ -891,9 +927,11 @@ suggested_mode: review
 source: discover-review
 evidence: consequência direta do `B-015`, medida em 2026-08-11. O recomendador lê `pages_read` do coletor (`autotune.rs:219` — `let (pages_read, candidates) = (read_scan_pages(), read_scan_candidates())`), e para todo índice V1 exact-f32 esses contadores eram **0** desde o M118, porque o caminho *resume* nunca reportou. O `B-015` corrigiu a instrumentação; **não** investigou o que o recomendador fez enquanto ela esteve cega.
 why_now: um recomendador que decide sobre zero não erra de forma aleatória — erra de forma **sistemática e silenciosa**, e o `theodb._index_scan_stats` guarda essas observações persistidas. Duas perguntas ficaram abertas no review e nenhuma tem resposta medida: (a) recomendações emitidas nesse período são recuperáveis do catálogo e estão erradas? (b) o `recommend_ef` chega a ser sensível a `pages_read`, ou o zero foi inócuo porque a bisseção decide por recall? A segunda pode inocentar tudo — e é exatamente por isso que precisa ser medida em vez de suposta em qualquer direção.
-status: raw
+status: killed
+kill_reason: **honest-negative — o autotune NUNCA decidiu sobre os zeros.** Medido em 2026-08-12 lendo o caminho de decisão: `recommend_ef` (`autotune.rs`) faz doubling + bisseção sobre `recall_at_ef(&tbl, col, samples, &gts, k, ef) >= target` — a decisão é por **recall medido contra ground-truth exato**, e `pages_read` **não aparece** no corpo da função. Ele era apenas persistido em `theodb._index_scan_stats` por `record_scan_stat`, como observação, não como insumo. O DoD previa este desfecho e ele se realizou.
+**Isto corrige uma afirmação minha.** O review do B-015 e o corpo do PR #226 diziam que "o recomendador de `ef_search` consumiu esses zeros". Era especulação a partir da proximidade no código, não leitura do caminho de decisão. O impacto do B-015 era **menor** do que afirmei: atingiu o diagnóstico (`explain_scan`/`scan_stats`) e o histórico do catálogo, não a recomendação. Fica registrado em vez de corrigido em silêncio, porque a afirmação errada saiu num PR.
 dod:
-  - determinado por leitura + medição se `recommend_ef` consome `pages_read` no caminho de decisão ou apenas o persiste
+  - ~~determinado por leitura + medição se `recommend_ef` consome `pages_read`~~ **FEITO: não consome**
   - se consome: quantificado o erro sobre um índice real, comparando recomendação com contador cego vs instrumentado
   - se não consome: registrado como honest-negative, e o campo deixa de ser citado como insumo de decisão
 
@@ -913,6 +951,34 @@ dod:
   - `rustup component add clippy` entra no estágio `theodb-rs-builder` do Dockerfile, e a imagem roda o gate sem passo extra
   - ~~verificado se `rustfmt` tem o mesmo problema~~ **VERIFICADO 2026-08-11: SIM, e é pior.** `cargo fmt` na imagem devolve `error: 'cargo-fmt' is not installed for the toolchain '1.97.0'`. E o modo de falha é traiçoeiro: `cargo fmt -- --check | grep -c "^Diff in"` imprimiu **`0`** — não porque não havia diffs, mas porque o comando falhou e não produziu saída nenhuma. **Um falso "está tudo limpo" indistinguível do verdadeiro**, exatamente o que o golden rule chama de fabricar saída limpa. Ambos os componentes (`clippy` e `rustfmt`) precisam entrar na imagem.
   - o toolchain local do desenvolvedor **não** serve de substituto: medido, o `cargo` do host é 1.91.0 e o projeto pina 1.97.0 (`rustfmt 1.9.0-stable`), então formatar fora do contêiner produz um resultado que o CI recusa
+
+> **RESOLVIDO 2026-08-12, e a causa era mais funda que o item registrava.** O `Dockerfile` usa
+> `rustup ... --profile minimal`, que não traz clippy nem rustfmt. Adicionar `--component clippy,rustfmt`
+> ao mesmo comando **não bastaria**: havia um DRIFT DE VERSÃO invisível — o `Dockerfile` pinava
+> `RUST_VERSION=1.97.1` enquanto `theodb_rs/rust-toolchain.toml` declara `1.97.0`, e o
+> `rust-toolchain.toml` VENCE dentro do crate. Medido no log do build: o rustup baixa 1.97.0 on-demand ao
+> entrar em `theodb_rs/`. Ou seja, os componentes iriam para o 1.97.1 — que **nunca compilou nada** — e o
+> gate continuaria quebrado, exatamente como estava.
+>
+> Corolário que ninguém tinha notado: **o repin do M142 para 1.97.1 nunca teve efeito.** Tudo que compila o
+> crate sempre usou 1.97.0.
+>
+> Correção: `RUST_VERSION=1.97.0` (alinhado ao `rust-toolchain.toml`, uma versão num lugar só) +
+> `--component clippy,rustfmt` na mesma invocação do rustup. Verificação: o build passou a baixar **5
+> componentes** em vez de 3.
+>
+> **A necessidade do alinhamento foi PROVADA experimentalmente, não deduzida.** Uma imagem construída com
+> `--component` mas ainda com as versões desalinhadas mostra os dois toolchains convivendo e o componente
+> só num deles:
+>
+> ```
+> toolchains: 1.97.0  +  1.97.1 (active, default)
+> fora do crate   → clippy 0.1.97                                      OK
+> DENTRO do crate → 'cargo-clippy' is not installed for '1.97.0'       FALHA
+> ```
+>
+> Ou seja: a correção "óbvia" (só adicionar o componente) teria sido publicada como resolvida e o gate
+> continuaria quebrado exatamente do mesmo jeito — com o agravante de agora parecer consertado.
   - o script local documentado no `.clippy_args` roda de ponta a ponta contra a imagem
 
 > Registered 2026-08-11 by `/code-quality` (slug: `builder-sem-clippy`), ao executar o gate de lint do
@@ -930,7 +996,7 @@ status: triaged
 parcialmente_resolvido: 2026-08-11 — as duas causas do gate vermelho foram corrigidas no mesmo ciclo, porque elas **bloqueavam o merge** do release e a parte segura do conserto não tinha o risco que motivou o adiamento. (a) `degree_bound_from_relation` **removida** (zero callers, verificado por grep antes de apagar); (b) `df_executor.rs:49` passou a usar `saturating_sub` — e a checagem do tipo foi o que tornou isso seguro: `InterruptHoldoffCount` é `volatile uint32` (`miscadmin.h:104`), então satura em 0; sobre um inteiro COM sinal a mesma sugestão do lint daria `-1` e mudaria o comportamento. **O que NÃO foi feito**, e é o que mantém o item aberto: o reloption `degree_bound` (`options.rs:97,286-288`) segue registrado, e removê-lo afeta índices já criados que o declarem.
 dod:
   - ~~`degree_bound_from_relation` removida~~ **FEITO** (não "consertada" — preencher o `if` manteria código morto de um pilar aposentado)
-  - avaliado se o reloption `degree_bound` (`options.rs:97,286-288`) também sai, e o que isso faz com índices já criados que o declarem
+  - ~~avaliado se o reloption `degree_bound` também sai, e o que isso faz com índices já criados~~ **FEITO 2026-08-12 — REMOVIDO, e o risco que motivou o adiamento NÃO EXISTIA.** A contagem revelou o que a leitura não: `degree_bound` aparecia no `relopt_parse_elt` mas **nunca** no `add_int_reloption` — todos os outros nove aparecem nos DOIS. Sem registro, o PostgreSQL rejeita a opção antes do parse. Medido no binário shipado: `CREATE INDEX ... WITH (degree_bound = 32)` → `ERROR: unrecognized parameter "degree_bound"`, enquanto `WITH (lists = 4)` → `CREATE INDEX`. Logo **nenhum índice existente pode tê-la gravada**, e remover não afeta dump/restore. O campo era o ÚLTIMO do struct, então sair não desloca offset de nenhum outro. Array de parse: 10 → 9.
   - `df_executor.rs:49` resolvido ou entrando no baseline com justificativa — o código lá está **correto** (guarda explícita `> 0`), é só idioma
   - gate de clippy volta a exit 0 contra a imagem oficial (depende de `B-025`)
 
@@ -966,8 +1032,8 @@ evidence: medido em 2026-08-11 no PR #226. O job `suite` falhou com `docker: Err
 why_now: o sintoma **mente sobre a causa**. Sem `test result` no log, o gate seguinte faz `line=$(grep -E "^test result" suite.log | tail -1)` e o job aparece no PR como **"suíte reprovou"** — indistinguível de uma regressão real de testes. Passei um ciclo investigando uma falha de testes que não existia. Num repositório onde o gate é "falhas não podem aumentar", confundir lixo de infraestrutura com regressão é o caminho mais curto para alguém subir o baseline sem precisar.
 status: raw
 dod:
-  - `docker rm -f suite` roda ANTES do `docker run` (aplicado neste ciclo — verificar se resolve na prática)
-  - avaliado usar nome único por run (`suite-${{ github.run_id }}`) em vez de nome fixo, que elimina a classe em vez de remediar
+  - ~~`docker rm -f suite` roda ANTES do `docker run`~~ **FEITO 2026-08-11** (remédio)
+  - ~~avaliado usar nome único por run~~ **FEITO 2026-08-12 — a classe foi ELIMINADA.** O nome passou a ser `suite-${{ github.run_id }}-${{ github.run_attempt }}`: dois runs nunca disputam o mesmo nome, mesmo que o anterior morra no meio, então não existe colisão a remediar. O `rm -f` fica como higiene do próprio attempt, e um `docker container prune --filter until=24h` varre os órfãos que runs cancelados antigos já deixaram no runner — sem isso eles ocupariam disco para sempre.
   - o gate distingue "a suíte não emitiu resultado" de "a suíte reprovou" na saída do PR, em vez de os dois lerem igual
 
 > Registered 2026-08-11 by `/discover --mode live-test` (slug: `suite-container-orfao`), ao rodar o

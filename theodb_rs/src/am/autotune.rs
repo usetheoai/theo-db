@@ -222,6 +222,37 @@ pub(crate) fn scan_stats(
             "theodb.scan_stats: vector_col must be a plain identifier ([A-Za-z_][A-Za-z0-9_]*, ≤63)",
         );
     }
+    // B-021 — fail-fast quando NENHUM índice da tabela responde ao operador que este diagnóstico usa.
+    //
+    // A consulta abaixo é fixa em `<=>` (cosine), mas o opclass DEFAULT do AM é `theodb_hnsw_l2_ops`. Quem
+    // cria o índice sem nomear o opclass fica com um índice que não serve `<=>`: medido, o plano cai em
+    // `Limit → Sort → Seq Scan` e o diagnóstico devolvia `pages_read=0 candidates_seen=0` — indistinguível
+    // de "o índice foi usado e leu zero páginas". O zero silencioso é a pior resposta possível de um
+    // instrumento de diagnóstico, e é a mesma família de falso-negativo que o B-015 corrigiu do outro lado.
+    //
+    // Erro tipado e não WARNING porque o número que viria em seguida seria de um seqscan, não do índice —
+    // reportá-lo sob o nome `explain_scan` seria medir uma coisa e rotular outra (Regra 8: falhe alto, cedo
+    // e claro). A checagem é por FAMÍLIA de operador (`pg_amop`), então cobre qualquer AM servido pelo nosso
+    // handler, incluindo o alias pgvector.
+    let serves_cosine: bool = Spi::get_one(&format!(
+        "SELECT EXISTS (
+           SELECT 1 FROM pg_index i
+             JOIN pg_opclass oc ON oc.oid = i.indclass[0]
+             JOIN pg_amop ao ON ao.amopfamily = oc.opcfamily AND ao.amoppurpose = 'o'
+             JOIN pg_operator op ON op.oid = ao.amopopr
+           WHERE i.indrelid = {lit}::regclass AND op.oprname = '<=>')",
+        lit = pgrx::spi::quote_literal(&tbl)
+    ))
+    .unwrap_or(Some(true))
+    .unwrap_or(true);
+    if !serves_cosine {
+        err_input(&format!(
+            "theodb.scan_stats: no index on {tbl} answers the cosine operator `<=>` — this diagnostic \
+             always probes with `<=>`, and the access method's DEFAULT opclass is l2. Rebuild with \
+             `USING theodb_hnsw ({col} theodb_hnsw_cosine_ops)` (or the pgvector-compatible \
+             `vector_cosine_ops`), or the numbers below would come from a sequential scan, not the index."
+        ));
+    }
     Spi::run(&format!(
         "SET LOCAL enable_seqscan=off; SET LOCAL enable_bitmapscan=off; SET LOCAL enable_indexscan=on; \
          SET LOCAL theodb_hnsw.ef_search = {ef}"
@@ -450,5 +481,91 @@ mod tests {
         );
         assert!(pages > 0, "explain_scan shows real pages_read (got {pages})");
         assert!(cand > 0, "explain_scan shows candidates_seen (got {cand})");
+    }
+
+    /// B-021 regression — an index whose opclass does NOT answer `<=>` must fail loudly, never return zeros.
+    ///
+    /// The AM's DEFAULT opclass is `theodb_hnsw_l2_ops`, and this diagnostic always probes with `<=>`
+    /// (cosine). Measured before the fix: the plan fell back to `Limit → Sort → Seq Scan` and `scan_stats`
+    /// answered `pages_read=0 candidates_seen=0` — a number indistinguishable from "the index was used and
+    /// read no pages". A diagnostic that reports a sequential scan under the name `explain_scan` is worse
+    /// than one that refuses, which is why this is a typed error and not a warning.
+    ///
+    /// The error is captured rather than matched with `#[pg_test(error = …)]`: the message interpolates the
+    /// resolved relation name, and a TEMP table's `regclass::text` depends on the session's `pg_temp` schema
+    /// — pinning it would make the test fragile for a reason that has nothing to do with the behaviour.
+    #[pg_test]
+    fn scan_stats_refuses_an_index_that_does_not_answer_cosine() {
+        Spi::run("CREATE TEMP TABLE l2only (id int PRIMARY KEY, e vector(8))").unwrap();
+        Spi::run("INSERT INTO l2only VALUES (1, '[1,2,3,4,5,6,7,8]')").unwrap();
+        // Opclass L2 — o DEFAULT do AM, e justamente o que NÃO serve `<=>`.
+        Spi::run("CREATE INDEX l2only_idx ON l2only USING theodb_hnsw (e theodb_hnsw_l2_ops)")
+            .unwrap();
+
+        let refused = PgTryBuilder::new(|| {
+            scan_stats(0, "l2only", "e", "[1,2,3,4,5,6,7,8]", 40, 5);
+            false // chegou aqui ⇒ NÃO recusou: o defeito (zeros silenciosos) está de volta
+        })
+        .catch_others(|_| true)
+        .execute();
+
+        assert!(
+            refused,
+            "scan_stats must REFUSE an index whose opclass does not answer `<=>`; returning zeros silently \
+             is the falso-negativo this guard exists to kill"
+        );
+    }
+
+    /// B-021 regression — `explain_scan` must find the index by the HANDLER that serves it, not by the NAME
+    /// of the access method.
+    ///
+    /// The sibling test above only ever creates the index with `USING theodb_hnsw`, so it could never see the
+    /// gap that shipped: `sql/vector--0.6.0.sql` registers a pgvector-compatible alias (`CREATE ACCESS METHOD
+    /// hnsw ... HANDLER theodb_hnsw_amhandler`), and an alias is a SECOND row in `pg_am` — measured, `hnsw`
+    /// OID 17174 vs `theodb_hnsw` OID 16568. The old lookup matched `a.amname = 'theodb_hnsw'`, so every index
+    /// created the pgvector way answered `(no theodb_hnsw index on this table)` — and that is EVERY index the
+    /// `theo-rag` creates, i.e. the diagnostic was blind exactly where the dogfood exercises it.
+    ///
+    /// The alias is created here rather than by installing the `vector` extension: the invariant under test is
+    /// "any AM served by our handler is found", and a locally-created AM exercises it without coupling this
+    /// test to the shim's packaging. `#[pg_test]` runs inside a transaction, so the AM disappears on rollback.
+    #[pg_test]
+    fn explain_scan_finds_index_created_through_an_am_alias() {
+        let probes = seed("esc_alias_src", 60);
+        let q = &probes[0];
+
+        // Um AM com OUTRO nome e o MESMO handler own-code — a forma exata do shim pgvector.
+        //
+        // A opclass precisa ser declarada JUNTO: ela é por-AM, e criar o access method não herda as
+        // opclasses do irmão (medido — sem esta linha o CREATE INDEX falha com
+        // `operator class "theodb_hnsw_cosine_ops" does not exist for access method "hnsw_alias_test"`).
+        // É exatamente o que `sql/vector--0.6.0.sql` faz para o alias `hnsw`, reproduzido no mínimo.
+        Spi::run("CREATE ACCESS METHOD hnsw_alias_test TYPE INDEX HANDLER theodb_hnsw_amhandler")
+            .unwrap();
+        Spi::run(
+            "CREATE OPERATOR CLASS alias_cosine_ops FOR TYPE vector USING hnsw_alias_test AS \
+               OPERATOR 1 <=> (vector, vector) FOR ORDER BY float_ops, \
+               FUNCTION 1 theodb_metric_cosine()",
+        )
+        .unwrap();
+        Spi::run("CREATE TEMP TABLE esc_alias (id int PRIMARY KEY, e vector(8))").unwrap();
+        Spi::run("INSERT INTO esc_alias SELECT id, e FROM esc_alias_src").unwrap();
+        Spi::run(
+            "CREATE INDEX esc_alias_idx ON esc_alias USING hnsw_alias_test (e alias_cosine_ops)",
+        )
+        .unwrap();
+
+        let idx: String = Spi::connect(|c| {
+            let sql = format!(
+                "SELECT index_name FROM theodb.explain_scan('esc_alias'::regclass, 'e', '{q}', 40, 5)"
+            );
+            c.select(&sql, None, &[]).unwrap().first().get::<String>(1).unwrap().unwrap_or_default()
+        });
+
+        assert_eq!(
+            idx, "esc_alias_idx",
+            "explain_scan must resolve an index whose AM is an ALIAS sharing our handler; \
+             resolving by `amname` returns the not-found sentinel instead (got '{idx}')"
+        );
     }
 }
