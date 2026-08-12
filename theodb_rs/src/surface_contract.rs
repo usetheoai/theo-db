@@ -191,7 +191,11 @@ mod tests {
             // contradisse. Engolir erro dentro do teste escrito para exigir rigor é a Regra 8 violada
             // no lugar mais caro possível.
             let lang = Spi::get_one_with_args::<String>(
-                "SELECT l.lanname FROM pg_proc p \
+                // `lanname` também é `name`, não `text` — o cast na projeção é tão necessário quanto
+                // os do WHERE. Sem ele, o pgrx recusa converter o datum para String e a consulta
+                // falha com IncompatibleTypes{name,text}. Foi EXATAMENTE este erro que a versão com
+                // `.ok().flatten()` transformava num plácido "AUSENTE".
+                "SELECT l.lanname::text FROM pg_proc p \
                  JOIN pg_language l ON l.oid = p.prolang \
                  JOIN pg_namespace n ON n.oid = p.pronamespace \
                  WHERE n.nspname::text = $1 AND p.proname::text = $2 \
