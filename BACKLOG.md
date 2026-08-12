@@ -1284,4 +1284,23 @@ dod:
 > Registrado 2026-08-12 pela medição do B-035. Escrito com a prioridade relativa dita, não escondida: dos
 > três achados do ciclo, este é o que menos dói e o mais caro.
 
-Próximo id livre: **`B-039`**. Ids são monotônicos e nunca reusados.
+## B-039 — O detector de `cargo-udeps` roda no host, onde o ambiente de build não existe   [ ]
+
+domain: theo-db
+repo: theo-db
+suggested_mode: bug
+source: discover-evolve
+evidence: medido em 2026-08-12. O `/code-quality` reporta `auditor_unavailable_cargo-udeps` em **três ciclos seguidos** (B-033, B-034, B-035). A causa não é ausência da ferramenta: `cargo-udeps` está em `~/.cargo/bin/cargo-udeps` no host. São dois obstáculos empilhados, ambos medidos. (a) **1.226 arquivos em `theodb_rs/target/` pertencem ao `root`** — resíduo de builds em contêiner que montaram o diretório do host —, e o auditor roda como `paulo`: `failed to write .../fingerprint/zstd-…`. (b) Mais fundo, e este é o que decide: contornar com `CARGO_TARGET_DIR` próprio revelou `Error: /home/paulo/.pgrx/config.toml not found. Have you run 'cargo pgrx init' yet?` — **o host nunca instalou o pgrx**. Nenhum `chown` conserta isso. Rodado dentro do `theodb-toolchain` (que tem `cargo pgrx init` feito): `Finished dev profile in 2m 07s` / **`All deps seem to have been used.`**
+why_now: o cap capeia o veredito em `FAIL_SOFT` (70) todo ciclo, e por três ciclos foi declarado como limitação de ambiente — o que é a forma educada de dizer que ninguém investigou. Investigado, o audit passa **limpo em 2 minutos**. O custo de manter é pior que o do conserto: um cap que sempre dispara deixa de ser sinal, e o dia em que houver uma dependência realmente não usada, ninguém vai reparar na linha que já estava vermelha. O padrão de rodar no contêiner pinado já é o do projeto para `clippy`/`fmt`.
+status: raw
+dod:
+  - o detector D1 invoca `cargo-udeps` dentro do contêiner pinado (`theodb-toolchain`), como o projeto já faz com `clippy`/`fmt` — provado por uma execução de `/code-quality` que reporta o resultado do audit, não `auditor_unavailable`
+  - a saída limpa (`All deps seem to have been used.`) e a suja (uma dependência propositalmente não usada, num teste) produzem verdictos DIFERENTES — senão o detector está apenas deixando de reclamar
+  - `theodb_rs/target/` deixa de acumular arquivos root: ou o build em contêiner passa a usar volume nomeado em vez de montar o diretório do host, ou há um passo de `chown` documentado
+  - o mesmo tratamento é avaliado para os outros detectores que dependem do toolchain Rust — ou o item declara por que só o udeps importa
+
+> Registrado 2026-08-12 durante o B-035. **Não é achado do benchmark** — é o gate do próprio projeto que
+> vinha reportando indisponibilidade sobre algo que funciona. Custo estimado por medição: a execução completa
+> leva 2m07s no contêiner.
+
+Próximo id livre: **`B-040`**. Ids são monotônicos e nunca reusados.

@@ -132,6 +132,26 @@ Os 1.226 arquivos root no `target/` são reais e valem limpar, mas são o **segu
 primeiro. O caminho correto é rodar o auditor dentro do contêiner pinado — que é o padrão já estabelecido no
 projeto para `clippy`/`fmt`.
 
+**Segunda correção por acréscimo — executei, e o resultado desfaz o rótulo.** Rodado dentro do
+`theodb-toolchain` (crate copiado para dentro, `CARGO_TARGET_DIR` em volume próprio, nightly):
+
+```
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 2m 07s
+All deps seem to have been used.
+```
+
+**Zero dependências não utilizadas.** O auditor nunca esteve indisponível — a invocação é que estava no lugar
+errado. Três ciclos declararam `auditor_unavailable_cargo-udeps` sobre um audit que passa limpo em 2 minutos
+quando invocado onde o ambiente de build existe.
+
+O `/code-quality` continua reportando o cap porque o detector invoca no host. É defeito do gate, não do
+código: item [[B-039]].
+
+**Observação de passagem, não achado deste ciclo:** a compilação emitiu `method 'exact_filtered' is never
+used` (`src/vindex.rs:106`) e `fn record_bytes` idem. São `pub(crate)` — pela régua do
+`code-quality-golden-rule` isso é `PASS_WITH_CAVEATS`, não bloqueia, e este ciclo não altera Rust. Fica
+registrado para quem for mexer ali.
+
 ## O que este review NÃO cobriu
 
 - **Nenhum agente independente.** Mesmo agente que implementou. Três dos seis achados vieram de rodar contra
