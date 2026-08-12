@@ -34,7 +34,8 @@ __pycache__/
 
 # ANN-Benchmarks dataset cache (large HDF5, fetched on demand)
 benchmarks/.datasets/
-
+benchmarks/vectordbbench/logs
+benchmarks/vectordbbench/results
 # pytest-benchmark run artifacts (não versionar)
 benchmarks/.benchmarks/
 
