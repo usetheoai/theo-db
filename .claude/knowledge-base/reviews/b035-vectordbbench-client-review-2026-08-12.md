@@ -115,8 +115,22 @@ Dispara há três ciclos. A causa: **1.226 arquivos em `theodb_rs/target/` perte
 builds em contêiner que montaram o diretório do host. O `cargo-udeps` roda como `paulo` e não consegue
 sobrescrever (`failed to write .../fingerprint/zstd-…`).
 
-`sudo` sem senha não está disponível, então não forcei. Contornado rodando com `CARGO_TARGET_DIR` próprio.
-**O conserto de verdade é `chown -R paulo:paulo theodb_rs/target`, e é do dono da máquina.**
+`sudo` sem senha não está disponível, então não forcei.
+
+**Correção por acréscimo, escrita depois de tentar o contorno:** o diagnóstico acima estava *incompleto*, e a
+tentativa de contornar com `CARGO_TARGET_DIR` próprio revelou a causa mais funda —
+
+```
+Error: /home/paulo/.pgrx/config.toml not found.  Have you run `cargo pgrx init` yet?
+```
+
+**O host nunca instalou o pgrx.** O build deste crate acontece dentro do `theodb-toolchain`, e é lá que
+`cargo pgrx init` foi executado. Então `cargo-udeps` no host não falha por permissão — falha porque o
+ambiente de build não existe ali, e nenhum `chown` conserta isso.
+
+Os 1.226 arquivos root no `target/` são reais e valem limpar, mas são o **segundo** obstáculo, não o
+primeiro. O caminho correto é rodar o auditor dentro do contêiner pinado — que é o padrão já estabelecido no
+projeto para `clippy`/`fmt`.
 
 ## O que este review NÃO cobriu
 
