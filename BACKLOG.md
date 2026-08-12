@@ -1205,7 +1205,7 @@ suggested_mode: evolve
 source: human
 evidence: `zilliztech/VectorDBBench` avaliado em 2026-08-12 — licença **MIT** (passa o D1, que barra AGPL), 1160 estrelas, último push **2026-08-11**. Tem cliente para `pgvector`, `pgvectorscale`, `pgdiskann`, `pgvecto_rs`, `vectorchord` e — o que mais importa aqui — **`alloydb`**, a âncora declarada do North Star (ADR-0002). Diferente do harness avaliado antes (o comparativo de 5 sistemas publicado no HuggingFace), este **mede recall**; aquele reporta apenas latência/vazão e usa "top-K name overlap entre motores" como proxy, que dá 100% se todos errarem igual — e roda com 10.000 vetores, escala em que se mede o cliente Python, não o índice.
 why_now: o projeto **não tem harness de benchmark** desde a remoção de `benchmarks/` (268 arquivos, commit `7cd157d`), e a Regra 5 do `CLAUDE.md` exige artefato reproduzível para qualquer afirmação de performance. Sem instrumento, nenhuma alegação nova é sustentável — e o `wiki/benchmarks/` tem 164 medições publicadas cujo caminho de reprodução saiu junto. Este arnês cobre dois eixos que o `theodb_bench` removido não cobria: comparação multi-sistema e carga concorrente com mutação.
-status: triaged
+status: planned
 unblocked_by: B-034 — **resolvido e provado em situ 2026-08-12**: varredura `SET hnsw.ef_search` de 10→400 sobre 5.000 vetores dim128 produziu recall@10 de 0,4915 → 1,0000 com QPS de 3474 → 650. A curva é monótona e íngreme; antes do B-034 as quatro linhas teriam recall idêntico.
 dod:
   - existe fork em `usetheoai/VectorDBBench` com **diff mínimo** (um diretório de cliente, uma entrada no registro, um extra no `pyproject`), sem tocar o núcleo — a disciplina da Política de Fork D3
@@ -1228,6 +1228,8 @@ dod:
 > para não fazer; é razão para fazer sabendo o que a tabela vai mostrar.
 
 > **2026-08-12 — triaged.** Oportunidade em `.claude/knowledge-base/discoveries/opportunities/b035-vectordbbench-client-opportunity.md`. A medição confirmou que o formato de fio binário do nosso `vector` é compatível com o `pgvector-python` (`COPY FORMAT BINARY` carregou 5.000 linhas) e encontrou **três lacunas do produto**, agora itens próprios: [[B-036]] (`m`/`ef_construction`), [[B-037]] (AM `ivfflat`), [[B-038]] (`halfvec`/`sparsevec`).
+
+> **2026-08-12 — implementado, não shipped.** Ciclo completo (DISCOVER→PLAN→IMPLEMENT→CODE-QUALITY→REVIEW→RELEASE). Cliente em `usetheoai/VectorDBBench@theodb` (3 arquivos upstream tocados, +19 linhas, núcleo intocado, zero dependências novas). Corrida real num droplet `g-16vcpu-64gb` (IP 164.90.141.31, destruído): **a recall casado (~0,983) o pgvector faz +16,3% de QPS e constrói o índice 2,7× mais rápido** — `wiki/benchmarks/b035-theodb-vs-pgvector-pg18.md`. Review `READY_TO_MERGE`; release `PR_OPEN_AWAITING_APPROVAL` (PR #228). `shipped` só depois do merge.
 
 ## B-036 — O `hnsw` alias não aceita `m` nem `ef_construction`: a sintaxe de build do pgvector falha alto   [ ]
 
