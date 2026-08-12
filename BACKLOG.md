@@ -1083,7 +1083,7 @@ suggested_mode: evolve
 source: human
 evidence: medido em 2026-08-12. `theodb_rs/src/dtype.rs:392` cria **os dois** schemas (`CREATE SCHEMA IF NOT EXISTS theodb; CREATE SCHEMA IF NOT EXISTS ai;`), e o umbrella `theodb` escreve 22 objetos dentro deles — de modo que o schema `ai` contém funções de **duas extensões distintas** (`ai._chat`/`ai.if`/`ai.rank`/`ai.hybrid_search`/`ai.nl_to_sql` do `theodb_rs`; `ai.generate`/`ai.summarize`/`ai.agg_summarize`/`ai.nl_query`/`ai.nl_*` do `theodb`). Não é camada, é co-propriedade de namespace. Dos oito corpos-fonte do umbrella, **dois tinham zero instruções** (`30-theodb-embed.sql` e `40-theodb-hybrid.sql`, 32 linhas de comentário que ainda afirmavam criar schemas que não criavam — removidos neste ciclo). E a divisão **degrada o que sobrou**: `sql/50-theodb-ai.sql` documenta que `ai.generate` é `plpgsql` em vez de SQL puro apenas porque "`ai._chat` is created by theodb_rs, installed after theodb" — o contorno da ordem de dependência custa a validação do corpo em tempo de `CREATE`.
 why_now: a migração que justificava os dois **acabou**: não há uma única `LANGUAGE plpython3u` ativa em `sql/` (as 7 ocorrências são comentários históricos), então o `theodb` deixou de ser "a extensão SQL sendo reescrita" e passou a ser um invólucro. E não existe ADR decidindo que devem ser dois: o `ADR-0029 § D1` debate a **direção** da dependência e rejeita duas alternativas — "pôr o tipo no umbrella" e "manter a direção antiga" —, ambas sobre qual depende de qual. A opção "colapsar o umbrella dentro do `theodb_rs`" nunca entrou na mesa; a existência de dois foi premissa herdada, nunca escolhida. O owner declarou em 2026-08-12 que **retro-compatibilidade não precisa ser mantida**, o que remove o único custo real do colapso.
-status: triaged
+status: planned
 opportunity: .claude/knowledge-base/discoveries/opportunities/b030-colapso-umbrella-opportunity.md
 blocked_by: B-029 — sem oráculo de instalação e upgrade, mudar o contrato de `CREATE EXTENSION` é mexer no que o usuário instala sem nada que prove que ainda funciona.
 dod:
@@ -1099,6 +1099,7 @@ dod:
 > segura (remover os dois corpos vazios e unificar a lista de concatenação duplicada entre `Makefile` e
 > `Dockerfile`) foi feita no mesmo ciclo; o colapso em si depende do B-029.
 
+> **2026-08-12 — implementado, não shipped.** Ciclo completo executado (DISCOVER→PLAN→IMPLEMENT→CODE-QUALITY→REVIEW→RELEASE). Review `READY_TO_MERGE`; release `PR_OPEN_AWAITING_APPROVAL` — o merge espera aprovação humana (PR #228 → #227), por diretiva do owner de um merge só quando o banco estiver SOTA level. **`shipped` só depois do merge**, e é por isso que este bloco não diz `shipped`.
 ## B-031 — 10.283 linhas de cadeia de upgrade duplicada, para um gate que não roda mais e instalações que não existem   [ ]
 
 domain: engine-pgrx
@@ -1107,7 +1108,7 @@ suggested_mode: evolve
 source: human
 evidence: medido em 2026-08-12 sobre as duas árvores SQL. **Cadeia `theodb_rs` — 9.785 linhas em 4 scripts, ~86% idênticas entre si.** São re-emissões convergentes do SQL de instalação inteiro, geradas por `gen-upgrade-script.py`: `1.0.0--1.1.0` (2391 linhas) e `1.4.0--1.5.0` (2472) divergem em **339 linhas**; pares consecutivos divergem em 55, 274 e 148. O `1.3.0--1.4.0` foge do padrão com 25 linhas — delta real escrito à mão, provando que o gerador não foi usado de forma consistente. **Cadeia `theodb` — 366 linhas em 6 scripts, com o problema espelhado:** deltas escritos à mão que precisam replicar o greenfield. O `theodb--1.5--1.6.sql` redefine `theodb.htap_refresh` e `theodb.olap`, que também vivem em `sql/85-theodb-htap.sql`, e o próprio arquivo admite na linha 6 que "re-aplica em intenção byte-idêntica" — *em intenção*, porque nada verifica. Some-se o shim: `sql/vector--*.sql`, 132 linhas, das quais o install 0.5.1 e o delta 0.5.1→0.6.0 (65 linhas) só existem para quem instalou a 0.5.1.
 why_now: o próprio repositório documenta que o motivo da cadeia deixou de valer. `theodb_rs/sql/theodb_rs--1.3.0--1.4.0.sql` diz, textualmente: *"CONTEXTO (2026-08-08): o projeto está em PRÉ-RELEASE e não há instalação em campo. Este script existe por dois motivos que não dependem disso: (a) o `schema-drift-gate.yml` bloqueia mudança de superfície SQL sem bump de `default_version` ou script de migração; (b) a cadeia de upgrade é append-only."* **O motivo (a) evaporou:** o `schema-drift-gate.yml` invoca `scripts/sql-surface.sh`, removido em `8605677` — o gate não roda. E o `gen-upgrade-script.py`, que produzia as re-emissões, foi removido no mesmo commit: a cadeia não pode mais ser estendida pelo caminho documentado. Sobra uma disciplina de 10.283 linhas mantida por inércia, protegendo instalações que o próprio projeto afirma não existirem, verificada por um gate que não executa.
-status: triaged
+status: planned
 opportunity: .claude/knowledge-base/discoveries/opportunities/b031-cadeia-upgrade-opportunity.md
 dod:
   - decidido e registrado em ADR se as cadeias de upgrade são **removidas** (uma instalação greenfield por extensão, `default_version` livre) ou **mantidas** — e, se mantidas, qual gate as verifica
@@ -1132,6 +1133,7 @@ dod:
 > e o colapso do umbrella deixa de arrastar seis deltas. Todos os três dependem da mesma confirmação:
 > não há instalação em campo.
 
+> **2026-08-12 — implementado, não shipped.** Ciclo completo executado (DISCOVER→PLAN→IMPLEMENT→CODE-QUALITY→REVIEW→RELEASE). Review `READY_TO_MERGE`; release `PR_OPEN_AWAITING_APPROVAL` — o merge espera aprovação humana (PR #228 → #227), por diretiva do owner de um merge só quando o banco estiver SOTA level. **`shipped` só depois do merge**, e é por isso que este bloco não diz `shipped`.
 ## B-032 — 2.872 operações inseguras sem bloco explícito, concentradas na área que o projeto chama de mais cara   [ ]
 
 domain: engine-pgrx
@@ -1160,7 +1162,7 @@ suggested_mode: bug
 source: human
 evidence: medido em 2026-08-12 contra a imagem `theodb:arrumacao` construída deste ciclo, num banco que herdou o shim de `template1`. `pg_operator` mostra que o tipo `vector` define os três operadores de distância — `<->`, `<=>`, `<#>` — e **zero** operadores de igualdade/ordenação (`SELECT count(*) ... WHERE oprname='=' ` devolve `0`). Consequência medida, com tabela real de 3 linhas: `WHERE e = '[1,2,3]'::vector` → `operator does not exist: vector = vector`; `SELECT DISTINCT e` e `GROUP BY e` → `could not identify an equality operator for type vector`; `ORDER BY e` → `could not identify an ordering operator`; `CREATE UNIQUE INDEX ON emb (e)` → `data type vector has no default operator class for access method "btree"`. O caminho ANN (`ORDER BY e <-> ...`) funciona normalmente.
 why_now: o pgvector define uma opclass btree `vector_ops` com `=`, `<>`, `<`, `<=`, `>`, `>=`, e por isso esses cinco padrões funcionam numa app pgvector. O `ADR-0029 § D2` declara drop-in — *"`::vector` do usuário e o `FOR TYPE vector` das opclasses resolvem ao tipo próprio SEM mudança de código"* — e o `ADR-0058` estendeu o drop-in ao nível de tooling justamente porque o issue #181 mostrou que app real quebra no que a alegação não cobria. Este é o mesmo formato de falha, uma camada adiante: não é o `CREATE EXTENSION` nem o `CREATE INDEX` que quebram, é a **consulta**. Um `SELECT DISTINCT embedding` ou uma chave única sobre a coluna são padrões comuns o bastante para aparecer em migração de qualquer app que já rodava sobre pgvector — e falham com mensagem de PostgreSQL que não menciona TheoDB, então o usuário não tem como saber que trocou de implementação.
-status: raw
+status: planned
 dod:
   - decidido em ADR se o tipo passa a ter a opclass btree completa (`=`, `<>`, `<`, `<=`, `>`, `>=`) ou se o drop-in é reescrito para declarar o limite
   - se implementado: os cinco padrões medidos acima passam, e há teste que os cobre — os mesmos cinco, não um genérico
@@ -1172,6 +1174,7 @@ dod:
 > B-030/B-031 não os toca. Apareceu porque a pergunta forçou exercitar a superfície em USO, que é exatamente
 > o que o relatório de review daquele ciclo declarou NÃO ter coberto.
 
+> **2026-08-12 — implementado, não shipped.** Ciclo completo executado (DISCOVER→PLAN→IMPLEMENT→CODE-QUALITY→REVIEW→RELEASE). Review `READY_TO_MERGE`; release `PR_OPEN_AWAITING_APPROVAL` — o merge espera aprovação humana (PR #228 → #227), por diretiva do owner de um merge só quando o banco estiver SOTA level. **`shipped` só depois do merge**, e é por isso que este bloco não diz `shipped`.
 ## B-034 — `SET hnsw.ef_search` é aceito em silêncio e não faz nada: meia compatibilidade que produz medição plana   [ ]
 
 domain: engine-pgrx
@@ -1180,7 +1183,7 @@ suggested_mode: bug
 source: human
 evidence: medido em 2026-08-12 contra a imagem construída deste ciclo. `SET hnsw.ef_search = 200` **sucede**, `current_setting('hnsw.ef_search')` devolve `200`, e `SELECT count(*) FROM pg_settings WHERE name LIKE 'hnsw%'` devolve **0**. O PostgreSQL aceita GUC de prefixo não registrado como *placeholder*: guarda o valor, não expõe em `pg_settings`, e nenhum código o lê. O TheoDB lê `theodb_hnsw.ef_search` (`theodb_rs/src/am/guc.rs:361`), nome diferente. Superfície de consumo medida: **um único ponto** — `am/guc.rs:512`, `EF_SEARCH.get().max(MIN_EF_SEARCH)`.
 why_now: o shim já toma o nome `hnsw` para o access method — uma app pgvector faz `CREATE INDEX ... USING hnsw (e vector_l2_ops)` e funciona (verificado hoje). Depois ela faz `SET hnsw.ef_search` para ajustar recall, e **não acontece nada, sem erro nem aviso**. Meia compatibilidade é pior que nenhuma: a ausência do access method falharia alto e o usuário saberia; assim ele acredita ter ajustado o índice e mediu outra coisa. O impacto não é hipotético nem restrito a benchmark — **toda app pgvector que ajuste recall está hoje sem efeito**, e a forma da falha é uma curva recall×QPS plana, que é indistinguível de "o parâmetro não importa neste dataset". É a mesma classe do B-033 (o `ADR-0029 § D2` promete drop-in "sem mudança de código") e do issue #181, uma camada adiante: não quebra no `CREATE EXTENSION`, não quebra no `CREATE INDEX`, quebra no **ajuste**.
-status: raw
+status: planned
 dod:
   - `SET hnsw.ef_search = N` passa a ter o MESMO efeito que `SET theodb_hnsw.ef_search = N`, provado por teste que mede recall diferente entre dois valores — não apenas que o `SET` foi aceito
   - a **precedência está DECIDIDA em ADR e documentada**: se os dois forem setados na mesma sessão, qual vence. Três candidatas, nenhuma obviamente certa — mais específico vence (`theodb_hnsw` > `hnsw`), último setado vence, ou maior vence. A primeira é a única que não muda o comportamento de quem já usa o produto hoje; a decisão é do owner
@@ -1193,6 +1196,7 @@ dod:
 > medição, não por impressão: ~20 linhas de código (um `define_int_guc` a mais e a decisão no único ponto
 > de leitura) e ~40 de teste. O caro aqui é a decisão de precedência, não a implementação.
 
+> **2026-08-12 — implementado, não shipped.** Ciclo completo executado (DISCOVER→PLAN→IMPLEMENT→CODE-QUALITY→REVIEW→RELEASE). Review `READY_TO_MERGE`; release `PR_OPEN_AWAITING_APPROVAL` — o merge espera aprovação humana (PR #228 → #227), por diretiva do owner de um merge só quando o banco estiver SOTA level. **`shipped` só depois do merge**, e é por isso que este bloco não diz `shipped`.
 ## B-035 — Cliente `theodb` no VectorDBBench, em fork, para medir contra pgvector e AlloyDB no mesmo arnês   [ ]
 
 domain: engine-pgrx
