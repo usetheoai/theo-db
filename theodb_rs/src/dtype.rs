@@ -820,11 +820,17 @@ mod tests {
     /// avaliado. A primeira versão deste teste cometeu esse erro e reprovou **com o produto correto**,
     /// mostrando no log exatamente a violação que ela queria provar. É o idioma que o resto deste
     /// arquivo já usa em sete testes.
-    #[pg_test(error = "duplicate key value violates unique constraint")]
+    ///
+    /// A mensagem é a COMPLETA, com o nome do índice: o pgrx compara por igualdade exata
+    /// (`framework.rs:174`, `Some(received) == expected`), não por conter. Uma primeira tentativa com
+    /// só o prefixo reprovou de novo — com o produto certo pela segunda vez. Por isso o índice é
+    /// nomeado à mão: assim a string do erro fica sob controle deste teste, em vez de depender da
+    /// convenção de nomes automática do PostgreSQL.
+    #[pg_test(error = "duplicate key value violates unique constraint \"b033d_uq\"")]
     fn unique_index_rejects_duplicate() {
         Spi::run(
             "CREATE TABLE b033d (e vector(3));
-             CREATE UNIQUE INDEX ON b033d (e);
+             CREATE UNIQUE INDEX b033d_uq ON b033d (e);
              INSERT INTO b033d VALUES ('[4,5,6]');",
         )
         .unwrap();
