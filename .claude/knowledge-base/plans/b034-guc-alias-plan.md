@@ -161,7 +161,8 @@ test_pgvector_probes_alias_has_effect
 
 #### Acceptance criteria
 
-`cargo pgrx test pg18 -- probes_alias` em exit code 0, com recall crescente.
+- `cargo pgrx test pg18 -- probes_alias` termina em exit code 0
+- o valor efetivo de `guc::probes()` equals o valor setado por `SET ivfflat.probes`
 
 ### T1.3 — A precedência é determinística
 
@@ -180,7 +181,9 @@ test_alias_precedence_specific_wins
 
 #### Acceptance criteria
 
-O teste passa, e o comentário do código enuncia a regra na mesma linguagem do ADR D1.
+- `cargo pgrx test pg18 -- alias_precedence` termina em exit code 0
+- com `theodb_hnsw.ef_search = 300` e `hnsw.ef_search = 7`, o efetivo returns 300
+- o comentário de `resolve_alias` enuncia a regra na mesma linguagem do ADR D1
 
 ### T1.4 — O comportamento existente não muda
 
@@ -199,7 +202,8 @@ test_native_guc_unchanged
 
 #### Acceptance criteria
 
-Passa antes e depois da mudança.
+- `cargo pgrx test pg18 -- native_guc_unchanged` termina em exit code 0 antes E depois da mudança
+- `SET theodb_hnsw.ef_search = 123` produz efetivo que equals 123
 
 ### T1.5 — Os GUCs ficam visíveis no catálogo
 
@@ -218,7 +222,8 @@ test_alias_gucs_are_registered
 
 #### Acceptance criteria
 
-`pg_settings` lista os dois.
+- `SELECT count(*) FROM pg_settings WHERE name IN ('hnsw.ef_search','ivfflat.probes')` returns 2
+- o mesmo comando returns 0 antes da mudança, medido
 
 ### T1.6 — Sem regressão
 
@@ -235,7 +240,8 @@ assert: 451 testes seguem verdes, mais os novos
 
 #### Acceptance criteria
 
-`cargo pgrx test pg18 --no-default-features --features "pg18 pg_test"` em exit code 0.
+- `cargo pgrx test pg18 --no-default-features --features "pg18 pg_test"` termina em exit code 0
+- a contagem de testes verdes é >= 451, o baseline medido no ciclo anterior
 
 ## Failure scenarios
 
