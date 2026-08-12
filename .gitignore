@@ -4,7 +4,7 @@
 .claude/**/.pytest_cache/
 .claude/**/.ruff_cache/
 .claude/**/.mypy_cache/
-
+clear-project-output
 # Cycle runtime artifacts (regenerated per run; not source)
 .claude/knowledge-base/implementations/.progress-*.json
 # Per-run halt-loop scaffolding — ephemeral, never tracked (implement SKILL.md: "gitignored").
