@@ -13,6 +13,9 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- _(interno, sem efeito para quem usa o banco)_ A medição que compara a rotina vetorial otimizada (SIMD) com a versão simples parou de acusar falsa lentidão. Ela media cada uma **uma única vez e sempre na mesma ordem**, então qualquer variação da máquina entre as duas medições era atribuída ao código. Num notebook isso acontece de verdade: instruções AVX reduzem a frequência do processador, e o efeito cresce conforme a máquina esquenta ao longo da suíte — medido, o resultado piorava de forma consistente com a carga acumulada (passava sozinho, 0,78× depois dos outros 439 testes, 0,66× com mais carga ao lado). A medição passa a **alternar** as duas versões por cinco rodadas e comparar **medianas**, de modo que o aquecimento afete as duas igualmente. **A tolerância não foi afrouxada** — o que melhorou foi a qualidade da medição que ela julga. (#B-023)
+
 ### Changed
 - _(interno, sem efeito para quem usa o banco)_ A esteira de integração contínua deixou de rodar a cada envio num pull request e passa a rodar **uma vez por promoção** — nos merges para `develop` e `main`. Motivo: a máquina que executa a esteira é única e atende um job por vez, e cada envio disparava a esteira inteira; o custo passou a ser alto demais para o retorno. Oito fluxos foram ajustados, e todos continuam podendo ser executados sob demanda quando valer a pena. **A troca é real e fica registrada:** sem verificação no pull request, um defeito só aparece depois de já estar em `develop`, e quem descobre é a próxima pessoa a integrar. A proteção não desaparece — muda de lugar, e passa a depender de rodar as verificações localmente antes de promover; o comando exato está no comentário de cada fluxo.
 

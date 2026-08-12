@@ -1145,7 +1145,12 @@ mod tests {
 
     // M144 T2.4 (EC-4 NEGATIVE): a node id past u32::MAX must fail-closed with a typed error,
     // never truncate silently into the u32 adjacency slot.
-    #[pg_test(error = "must fit in u32")]
+    // B-022: a mensagem vai INTEIRA. `pgrx-tests` compara por igualdade — `framework.rs:174`,
+    // `Some(received_error_message) == expected_error` — e não por substring, então o fragmento
+    // "must fit in u32" nunca casava com o texto real que o produto emite. O teste reprovava enquanto
+    // provava exatamente o que existe para provar. Efeito colateral desejado: o texto do erro tipado
+    // vira contrato, e mudá-lo passa a quebrar o teste.
+    #[pg_test(error = "theodb.graph_build: node ids must fit in u32 (max 4294967295)")]
     fn csr_build_guards_u32_boundary() {
         Spi::run("CREATE TABLE gover(src bigint, dst bigint)").unwrap();
         // 4294967296 == u32::MAX + 1 — the first id past the boundary.

@@ -1702,7 +1702,11 @@ mod tests {
     // the real propagated substring. Finding #76 is defense-in-depth (audit marked it `heuristic`): with
     // the `let _ =`, the longjmp already bypassed it, so this trigger cannot black-box-distinguish old vs
     // new; the fix hardens the SpiError-code path and removes the Result-discarding smell. See ADR-3.
-    #[pg_test(error = "does not exist")]
+    // B-022: mesma causa do `csr_build_guards_u32_boundary` — `pgrx-tests` compara a mensagem INTEIRA
+    // (`framework.rs:174`), não por substring, então "does not exist" nunca casava com o texto do
+    // PostgreSQL. A mensagem vai completa; note que ela é do ENGINE (`analyze.c`), não nossa, então é
+    // contrato do PostgreSQL e não do TheoDB — se um upgrade de major a mudar, este teste avisa.
+    #[pg_test(error = "column \"emb\" of relation \"dst_bad\" does not exist")]
     fn process_delete_failure_does_not_mark_done() {
         Spi::run("CREATE TABLE dst_bad(id int)").unwrap(); // valid relation, NO 'emb' column
         Spi::run(

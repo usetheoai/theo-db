@@ -116,9 +116,21 @@ jobs:
       # estiver ativo para derrubá-lo. Se o B-012 morrer, o número vira permanente sem ninguém ter
       # decidido isso, e o gate passa a proteger a dívida em vez do produto. Ao fechar cada falha,
       # BAIXE o baseline no mesmo commit.
+      #
+      # 2026-08-12 — BASELINE = 0. A dívida acabou: `440 passed; 0 failed` medido na suíte completa
+      # (353,01 s). As seis últimas caíram assim:
+      #   · 2 (B-022) declaravam FRAGMENTO em `#[pg_test(error=)]` e o pgrx compara a mensagem INTEIRA;
+      #   · 3 (B-016) apontavam para loopback, que a guarda de egress recusa ANTES de conectar — dois
+      #     passaram a usar `invalid.invalid` (RFC 2606) e o do disjuntor virou hermético;
+      #   · 1 (B-023) era um microbenchmark que media a TÉRMICA do laptop: AVX sempre medido primeiro,
+      #     amostra única, num i7-1355U de 15 W. Passou a alternar rodadas e comparar medianas.
+      # Nos seis, o produto estava CERTO e o teste é que estava desatualizado ou mal-instrumentado.
+      #
+      # O gate deixa de proteger dívida e passa a proteger o produto: a partir daqui, QUALQUER falha
+      # reprova. É o estado que a ressalva acima pedia desde o começo.
       - name: Gate — falhas não podem aumentar
         env:
-          BASELINE: "6"
+          BASELINE: "0"
         run: |
           line=$(grep -E "^test result" suite.log | tail -1)
           echo "$line"
