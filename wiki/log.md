@@ -1,4 +1,21 @@
-## 2026-08-12
+#
+## 2026-08-12 — b035: a comparação que só existe com recall casado
+
+Acrescentado `benchmarks/b035-theodb-vs-pgvector-pg18.md` — primeira corrida do VectorDBBench com cliente
+próprio, contra pgvector 0.8.6, os dois em PostgreSQL 18.4, num droplet `g-16vcpu-64gb` (o `16c64g` que é o
+rótulo de referência do upstream), destruído ao fim.
+
+**A recall casado (~0,983) o pgvector faz +16% de QPS.** A leitura ingênua da mesma tabela — `ef_search=64`
+dos dois lados, que *parece* a comparação justa — diria TheoDB +26%, porque nesse ponto o TheoDB entrega
+recall 0,96 contra 0,9835. Ele é mais rápido porque procura menos.
+
+Registro isto por acréscimo e com destaque porque o defeito é sedutor: o parâmetro estava igual dos dois
+lados, e mesmo assim o ponto de operação não estava.
+
+**Não contradiz o [m72](benchmarks/m72-qps-multiclient.md)**, que mede +11% para o índice próprio a 1M × 128d
+e recall ~0,91. São regimes diferentes (50K × 1536d, recall ~0,983 aqui) e o M72 já se declarava num regime
+favorável. O que a corrida mostra é que aquele resultado **não generaliza** — não que fosse falso.
+# 2026-08-12
 
 **B-030/B-031 — uma extensão, e o que a wiki teve de deixar como estava.**
 

@@ -13,6 +13,15 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Cliente `theodb` para o **VectorDBBench**, em fork de diff mínimo — `pip install "vectordb-bench[theodb] @ git+https://github.com/usetheoai/VectorDBBench@theodb"` — devolvendo ao projeto um arnês de benchmark reproduzível e multi-sistema, ausente desde a remoção de `benchmarks/` (B-035)
+- `benchmarks/vectordbbench/` — compose e runner que fixam a **mesma versão de PostgreSQL** nos dois motores comparados e recusam a corrida se divergirem (B-035)
+- Primeira medição comparativa publicada em `wiki/benchmarks/b035-theodb-vs-pgvector-pg18.md`: **a recall casado (~0,983) o pgvector faz +16% de QPS**, e constrói o índice 2,7× mais rápido. A leitura ingênua da mesma corrida — `ef_search` igual dos dois lados — diria o oposto, porque ali o TheoDB entrega recall 0,96 contra 0,9835 (B-035)
+
+### Fixed
+- O cliente do benchmark **recusa** `m` e `ef_construction` em qualquer valor que o TheoDB não construa (16 e 64, `am/build.rs:22-23`), em vez de aceitá-los e ignorá-los. Uma corrida que reportasse `ef_construction=200` sobre um índice construído com 64 seria medição errada com aparência de certa (B-035)
+- O cliente **recusa** um endereço que responde mas não é TheoDB. O pgvector satisfaz toda sondagem que o cliente faz — tem o tipo `vector`, um access method `hnsw` e `vector_l2_ops` —, então sem essa checagem os números de outro motor seriam publicados sob o rótulo TheoDB (B-035)
+
 ## [0.160.0] - 2026-08-12
 
 > **Nota de versionamento — por que MINOR e não MAJOR.** Esta versão traz uma seção `Removed`
