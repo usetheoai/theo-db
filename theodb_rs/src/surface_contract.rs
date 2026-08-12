@@ -40,6 +40,22 @@ mod tests {
         "function theodb.embed_batch(text[],text)",
         "function theodb.chunk(text,text,integer,integer)",
         "function ai._chat(text,text,text)",
+        // B-033 — a ordem do tipo `vector`. Entram no contrato porque uma superfície que some sem
+        // ninguém perceber é o modo de falha que este módulo existe para fechar: sem `=` o usuário
+        // perde `DISTINCT`, `GROUP BY`, `ORDER BY` e chave única, com erro do PostgreSQL que não cita
+        // o TheoDB.
+        "function theodb_vector_cmp(vector,vector)",
+        "function theodb_vector_eq(vector,vector)",
+        "function theodb_vector_ne(vector,vector)",
+        "function theodb_vector_lt(vector,vector)",
+        "function theodb_vector_le(vector,vector)",
+        "function theodb_vector_gt(vector,vector)",
+        "function theodb_vector_ge(vector,vector)",
+        // O formato desta string foi MEDIDO (2026-08-12) contra as opclasses já existentes:
+        // `operator class theodb_hnsw_l2_ops for access method theodb_hnsw`. Uma `operator family`
+        // NÃO foi incluída: nenhuma aparece como membro da extensão para os AMs atuais, e afirmar um
+        // formato não medido é o erro que este ciclo já cometeu com "procedure" vs "function".
+        "operator class vector_ops for access method btree",
         // --- [umbrella] absorvidos pela Fase 3 ---
         "function ai.generate(text,text)",            // T3.1
         "function ai.summarize(text,text)",           // T3.1

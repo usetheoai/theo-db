@@ -813,6 +813,46 @@ mod tests {
         Spi::run("CREATE UNIQUE INDEX b033u_ix ON b033u (e)").unwrap();
     }
 
+
+    /// T1.4 — a opclass btree NÃO rouba o caminho ANN.
+    ///
+    /// Adicionar `=` e `<` ao tipo dá ao planejador alternativas que ele não tinha. O risco não é erro,
+    /// é REGRESSÃO SILENCIOSA: uma consulta de similaridade passar a resolver por outro caminho e ficar
+    /// lenta sem ninguém notar. Este teste é rede, não alvo — deve passar antes e depois da mudança.
+    #[pg_test]
+    fn ann_path_still_uses_the_ann_index() {
+        Spi::run(
+            "CREATE TABLE b033ann (id int, e vector(3));
+             INSERT INTO b033ann SELECT g, ('['||g||','||(g*2)||','||(g*3)||']')::vector
+               FROM generate_series(1,200) g;
+             CREATE INDEX b033ann_ix ON b033ann USING theodb_hnsw (e theodb_hnsw_l2_ops);
+             SET enable_seqscan = off;",
+        )
+        .unwrap();
+
+        let mut linhas = String::new();
+        Spi::connect(|c| {
+            let t = c
+                .select(
+                    "EXPLAIN (COSTS OFF) SELECT id FROM b033ann ORDER BY e <-> '[10,20,30]'::vector LIMIT 3",
+                    None,
+                    &[],
+                )
+                .unwrap();
+            for row in t {
+                if let Ok(Some(l)) = row.get::<String>(1) {
+                    linhas.push_str(&l);
+                    linhas.push('\n');
+                }
+            }
+        });
+
+        assert!(
+            linhas.contains("b033ann_ix"),
+            "a consulta ANN deixou de usar o índice `theodb_hnsw`; plano obtido:\n{linhas}"
+        );
+    }
+
     /// T1.3 — o índice único REJEITA duplicata. Construir sem rejeitar não provaria nada.
     ///
     /// Usa `#[pg_test(error = …)]` e não `assert!(result.is_err())`: no pgrx um `ERROR` do PostgreSQL
