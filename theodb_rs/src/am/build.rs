@@ -436,7 +436,6 @@ pub extern "C-unwind" fn ambuild_hnsw(
     }
 }
 
-
 /// M59 T3.3 — pick the persisted layout for an initial `theodb_hnsw` build from the reloptions: `WITH
 /// (pq_subspaces=M)` (M > 0) trains the anisotropic PQ and packs **v3** (AQ ⊥ SBQ per index, D1); otherwise
 /// `WITH (sbq_bits=N)` packs v2 (or v1 when both are 0 — byte-identical to the pre-M51/M59 build). The AQ params

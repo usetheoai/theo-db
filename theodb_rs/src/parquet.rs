@@ -515,9 +515,7 @@ mod tests {
     #[pgrx::pg_test]
     fn primitivas_de_arquivo_sao_revogadas_de_public() {
         for f in ["write_parquet(text, text)", "read_parquet(text)", "olap(text)"] {
-            let sql = format!(
-                "SELECT has_function_privilege('public', 'public.{f}', 'EXECUTE')"
-            );
+            let sql = format!("SELECT has_function_privilege('public', 'public.{f}', 'EXECUTE')");
             let granted = Spi::get_one::<bool>(&sql).expect("consulta de privilégio falhou");
             assert_eq!(
                 granted,

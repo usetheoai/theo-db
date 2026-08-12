@@ -529,7 +529,28 @@ mod tests {
         let q: Vec<f32> = (0..dim).map(|i| ((i * 7 % 13) as f32) * 0.1 - 0.6).collect();
         let c: Vec<f32> = (0..dim).map(|i| ((i * 5 % 11) as f32) * 0.1 - 0.5).collect();
         let raw = to_le_bytes(&c);
-        let iters = 200_000u64;
+        // B-023 — MEDIANA de rodadas ALTERNADAS, em vez de uma amostra de cada em ordem fixa.
+        //
+        // A forma anterior (`(timed(true), timed(false))`) media AVX uma vez, depois escalar uma vez, sempre
+        // nessa ordem. Isso atribui ao CÓDIGO qualquer variação da MÁQUINA que aconteça entre as duas medições
+        // — e num laptop ela acontece. Medido nesta suíte, o mesmo binário e o mesmo teste:
+        //
+        //   | condição                          | speedup |
+        //   |-----------------------------------|---------|
+        //   | teste rodando sozinho             | passa   |
+        //   | após os outros 439 testes         | 0,78×   |
+        //   | idem, com 3 contêineres ao lado   | 0,66×   |
+        //
+        // Monotônico com a carga acumulada, não aleatório: AVX2 dispara redução de frequência por licença em
+        // CPUs Intel, e num i7-1355U (TDP de 15 W) o efeito cresce conforme a máquina esquenta ao longo da
+        // suíte. Como o AVX era SEMPRE medido primeiro — logo após o teste anterior ter aquecido o núcleo —
+        // o viés tinha direção fixa. O teste media a térmica do laptop e reportava como qualidade do kernel.
+        //
+        // Alternar A,S,A,S,… faz o drift atingir os dois lados igualmente, e a mediana descarta a rodada
+        // isolada em que o escalonador migrou a thread entre P-core e E-core (a CPU é híbrida). `iters` cai
+        // para manter o custo total parecido: 5 rodadas × 2 medições × 40k ≈ as 200k de antes.
+        let iters = 40_000u64;
+        let rounds = 5usize;
         let timed = |avx: bool| -> f64 {
             simd_x86::force_for_test(avx);
             let t0 = std::time::Instant::now();
@@ -540,19 +561,32 @@ mod tests {
             std::hint::black_box(acc);
             t0.elapsed().as_secs_f64()
         };
-        let (t_avx, t_scalar) = (timed(true), timed(false));
+        let median = |mut v: Vec<f64>| -> f64 {
+            v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            v[v.len() / 2]
+        };
+        let (mut avx_runs, mut scalar_runs) = (Vec::new(), Vec::new());
+        for _ in 0..rounds {
+            avx_runs.push(timed(true));
+            scalar_runs.push(timed(false));
+        }
+        let (t_avx, t_scalar) = (median(avx_runs), median(scalar_runs));
         simd_x86::reset_for_test();
         let speedup = t_scalar / t_avx.max(1e-9);
         let line = format!(
-            "M58 cosine micro-bench dim={dim} iters={iters}: scalar={t_scalar:.4}s avx={t_avx:.4}s speedup={speedup:.2}x"
+            "M58 cosine micro-bench dim={dim} iters={iters}x{rounds} (medianas alternadas): scalar={t_scalar:.4}s avx={t_avx:.4}s speedup={speedup:.2}x"
         );
         pgrx::log!("{line}");
         // Also drop the measured ratio to the (mounted) build dir so the benchmark doc can quote it (server LOG is
         // swallowed on a passing pg_test). Best-effort — a write failure never fails the micro-bench.
         let _ = std::fs::write("/build/target/m58-speedup.txt", &line);
+        // A tolerância continua 1.2 — NÃO foi afrouxada. O que mudou é a qualidade da medição que ela julga:
+        // antes comparava duas amostras únicas colhidas em condições térmicas diferentes; agora compara
+        // medianas de rodadas alternadas, que é o mínimo que o `rigorous-perf-eval` (Georges 2007) exige para
+        // uma comparação pareada ter significado.
         assert!(
             t_avx <= t_scalar * 1.2,
-            "SIMD cosine must not be slower than scalar (avx={t_avx} scalar={t_scalar})"
+            "SIMD cosine must not be slower than scalar (mediana de {rounds} rodadas alternadas: avx={t_avx} scalar={t_scalar} speedup={speedup:.2}x)"
         );
     }
 }

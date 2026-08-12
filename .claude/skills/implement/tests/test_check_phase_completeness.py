@@ -112,3 +112,77 @@ def test_phase_dod_absent_only_info(tmp_path: Path) -> None:
     info_codes = [f.code for f in report.findings if f.severity == "INFO"]
     assert "phase_dod_absent" in info_codes
     assert report.has_high_or_blocker is False
+
+
+def test_a_plan_task_absent_from_the_checkpoint_is_caught(tmp_path: Path) -> None:
+    """The phase's inventory comes from the PLAN, not from the checkpoint.
+
+    Reading it from the checkpoint made the checkpoint judge itself: a task declared in the
+    plan and never written there was not `pending`, it did not exist. Measured before the fix:
+    T1.1/T1.2/T1.3 with T1.3 absent reported `total_tasks_in_phase: 2` and exit 0, while the
+    same task recorded `pending` was caught HIGH.
+    """
+    plan = tmp_path / "plan.md"
+    plan.write_text(
+        "## Phase 1 — core\n\n"
+        "### T1.1 — first\n### T1.2 — second\n### T1.3 — the skipped one\n\n"
+        "### Phase 1 — Definition of Done\n- [x] all three covered\n",
+        encoding="utf-8",
+    )
+    progress = tmp_path / ".progress-x.json"
+    progress.write_text(
+        json.dumps({"tasks": [
+            {"id": "T1.1", "phase": 1, "status": "committed", "commit_sha": "a" * 7},
+            {"id": "T1.2", "phase": 1, "status": "committed", "commit_sha": "b" * 7},
+        ]}),
+        encoding="utf-8",
+    )
+
+    report = check_phase_completeness(plan, progress, "1")
+    codes = [f.code for f in report.findings]
+    assert "plan_task_absent_from_progress" in codes
+    assert report.has_high_or_blocker
+    assert "T1.3" in next(f for f in report.findings if f.code == "plan_task_absent_from_progress").message
+
+
+def test_a_phase_whose_plan_tasks_are_all_recorded_still_passes(tmp_path: Path) -> None:
+    """The new check must not fire when the checkpoint accounts for every declared task."""
+    plan = tmp_path / "plan.md"
+    plan.write_text(
+        "## Phase 1 — core\n\n### T1.1 — first\n### T1.2 — second\n\n"
+        "### Phase 1 — Definition of Done\n- [x] both covered\n",
+        encoding="utf-8",
+    )
+    progress = tmp_path / ".progress-x.json"
+    progress.write_text(
+        json.dumps({"tasks": [
+            {"id": "T1.1", "phase": 1, "status": "committed", "commit_sha": "a" * 7},
+            {"id": "T1.2", "phase": 1, "status": "committed", "commit_sha": "b" * 7},
+        ]}),
+        encoding="utf-8",
+    )
+    assert not check_phase_completeness(plan, progress, "1").has_high_or_blocker
+
+
+def test_tasks_of_a_later_phase_do_not_fail_this_boundary(tmp_path: Path) -> None:
+    """A phase-1 boundary must not fail over phase-2 work that has not started.
+
+    The scoping is the `T{phase}.{n}` id convention; without it the check would make every
+    boundary red until the very last task landed, which is the fastest way to get a gate
+    disabled.
+    """
+    plan = tmp_path / "plan.md"
+    plan.write_text(
+        "## Phase 1 — core\n\n### T1.1 — first\n\n"
+        "### Phase 1 — Definition of Done\n- [x] covered\n\n"
+        "## Phase 2 — later\n\n### T2.1 — not started\n",
+        encoding="utf-8",
+    )
+    progress = tmp_path / ".progress-x.json"
+    progress.write_text(
+        json.dumps({"tasks": [
+            {"id": "T1.1", "phase": 1, "status": "committed", "commit_sha": "a" * 7},
+        ]}),
+        encoding="utf-8",
+    )
+    assert not check_phase_completeness(plan, progress, "1").has_high_or_blocker

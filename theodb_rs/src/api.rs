@@ -1009,5 +1009,4 @@ REVOKE ALL ON FUNCTION theodb_rs._pq_knn(text, text, text, text, real[], int, in
 #[pgrx::pg_schema]
 mod surface_tests {
     use pgrx::prelude::*;
-
 }

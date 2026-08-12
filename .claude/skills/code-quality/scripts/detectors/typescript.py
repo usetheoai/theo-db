@@ -15,7 +15,7 @@ from scripts import _registry
 from scripts._shared import Finding, safe_parse_json, sanitize_symbol, to_rel_path
 from scripts.check_symbol_fab import extract_imports_and_calls
 
-from . import BaseDetector
+from . import BaseDetector, _arch
 
 _TS_NODE_BUILTINS = frozenset(
     {
@@ -28,14 +28,18 @@ _TS_NODE_BUILTINS = frozenset(
 )
 
 _KNIP_TIMEOUT_SEC = 120
+_ARCH_TIMEOUT_SEC = 300
+
+#: Path-ish token inside a dependency-cruiser regex: at least one `/`, no regex metacharacters.
+_PATH_TOKEN_RE = re.compile(r"[A-Za-z0-9_.@-]+(?:/[A-Za-z0-9_.@-]+)+")
 
 
 class TypescriptDetector(BaseDetector):
     language = "typescript"
     manifest_marker = "package.json"
 
-    def detect_dead_code(self, repo_root: Path) -> list[Finding]:
-        """Run knip against `repo_root` and parse JSON into Findings.
+    def detect_dead_code(self, manifest_dir: Path) -> list[Finding]:
+        """Run knip against `manifest_dir` and parse JSON into Findings.
 
         knip emits exit code 0 (no findings) or 1 (findings). Exit code > 1
         signals tool error and is treated as `auditor_unavailable_knip`.
@@ -44,7 +48,7 @@ class TypescriptDetector(BaseDetector):
         try:
             result = subprocess.run(
                 cmd,
-                cwd=str(repo_root),
+                cwd=str(manifest_dir),
                 capture_output=True,
                 text=True,
                 timeout=_KNIP_TIMEOUT_SEC,
@@ -78,7 +82,7 @@ class TypescriptDetector(BaseDetector):
                     allowlist_key="typescript|.|dead_code|auditor_output_malformed_knip",
                 )
             ]
-        return self._parse_knip_json(data, repo_root)
+        return self._parse_knip_json(data, manifest_dir)
 
     def _find_self_package_name(self, changed_files: list[Path]) -> str | None:
         """Walk up from any changed file to find the repo's package.json#name.
@@ -362,3 +366,263 @@ class TypescriptDetector(BaseDetector):
             message=f"Knip auditor unavailable: {reason}",
             allowlist_key="typescript|.|dead_code|auditor_unavailable_knip",
         )
+
+    # ── D5 — architecture ───────────────────────────────────────────────────────────────────────
+
+    def detect_architecture_violations(self, manifest_dir: Path) -> list[Finding]:
+        """Run the repo's OWN dependency-cruiser script, plus the meta-gate on its rules.
+
+        D5 invokes the npm script the repo declares rather than guessing which directories to
+        cruise. Two reasons, both measured. The paths a cruise covers ARE an architectural
+        decision — choosing them here would be Squad deciding what counts as the codebase. And
+        `npm run` resolves the LOCAL binary: usetheo-labs/agent-builder measured the global
+        `depcruise` cruising **0 modules** against a config the local one cruised 279 with. A
+        global binary runs without the project's transpilers, so it silently sees nothing.
+
+        That second failure is why `totalCruised == 0` is treated as a vacuous run and not as a
+        clean one. A cruise that reached no modules reports zero violations — green — having
+        verified nothing.
+        """
+        pkg = manifest_dir / "package.json"
+        if not pkg.is_file():
+            return [_arch.no_config("typescript", tool="dependency-cruiser", looked_for=["package.json"])]
+
+        findings = self._tsarch_selfcheck(manifest_dir, pkg)
+
+        script = _depcruise_script(pkg)
+        if script is None:
+            return findings + [
+                _arch.no_config(
+                    "typescript",
+                    tool="dependency-cruiser",
+                    looked_for=["a package.json script running `depcruise`"],
+                )
+            ]
+
+        try:
+            result = subprocess.run(
+                ["npm", "run", "--silent", script, "--", "--output-type", "json"],
+                cwd=str(manifest_dir),
+                capture_output=True,
+                text=True,
+                timeout=_ARCH_TIMEOUT_SEC,
+                check=False,
+            )
+        except FileNotFoundError:
+            return findings + [
+                _arch.auditor_unavailable("typescript", tool="dependency-cruiser", reason="npm not found")
+            ]
+        except subprocess.TimeoutExpired:
+            return findings + [
+                _arch.auditor_unavailable(
+                    "typescript", tool="dependency-cruiser", reason=f"timed out after {_ARCH_TIMEOUT_SEC}s"
+                )
+            ]
+        except (subprocess.SubprocessError, OSError) as e:
+            return findings + [
+                _arch.auditor_unavailable(
+                    "typescript", tool="dependency-cruiser", reason=f"invocation failed: {e}"
+                )
+            ]
+
+        if not result.stdout.strip():
+            return findings + [
+                _arch.auditor_unavailable(
+                    "typescript",
+                    tool="dependency-cruiser",
+                    reason=(
+                        f"`npm run {script}` exit {result.returncode} produced no output: "
+                        f"{result.stderr.strip()[:200]}"
+                    ),
+                )
+            ]
+
+        data, parse_finding = safe_parse_json(result.stdout, "dependency-cruiser")
+        if parse_finding is not None:
+            return findings + [
+                _arch.auditor_unavailable(
+                    "typescript",
+                    tool="dependency-cruiser",
+                    reason=(
+                        f"JSON output failed to parse — is `{script}` printing anything before the "
+                        f"payload? ({parse_finding.message})"
+                    ),
+                )
+            ]
+        return findings + self._parse_depcruise_json(data, script)
+
+    def _parse_depcruise_json(self, data: object, script: str) -> list[Finding]:
+        if not isinstance(data, dict) or not isinstance(data.get("summary"), dict):
+            return [
+                _arch.auditor_unavailable(
+                    "typescript", tool="dependency-cruiser", reason="payload had no 'summary' object"
+                )
+            ]
+        summary = data["summary"]
+        findings: list[Finding] = []
+
+        cruised = summary.get("totalCruised") or 0
+        if cruised == 0:
+            return [
+                _arch.vacuous_rule(
+                    "typescript",
+                    tool="dependency-cruiser",
+                    rule=f"npm run {script}",
+                    config_path="package.json",
+                    detail=(
+                        "the cruise reached 0 modules, so every rule passed without inspecting "
+                        "anything. Usually a global binary running without the project's "
+                        "transpilers, or paths that no longer exist"
+                    ),
+                )
+            ]
+
+        for violation in summary.get("violations") or []:
+            if not isinstance(violation, dict):
+                continue
+            rule = (violation.get("rule") or {}).get("name", "?")
+            severity = "HARD" if (violation.get("rule") or {}).get("severity") == "error" else "SOFT_FLOOR"
+            source = str(violation.get("from", "?"))
+            target = str(violation.get("to", "?"))
+            findings.append(
+                Finding(
+                    detector=_arch.D5,
+                    language="typescript",
+                    severity=severity,
+                    file_path=source,
+                    symbol_or_line=rule,
+                    message=f"[dependency-cruiser] {rule}: {source} -> {target}",
+                    allowlist_key=f"typescript|{source}|architecture|{sanitize_symbol(rule)}",
+                )
+            )
+
+        sources = {str(m.get("source", "")) for m in (data.get("modules") or []) if isinstance(m, dict)}
+        findings.extend(_rule_selfcheck(summary.get("ruleSetUsed") or {}, sources))
+        return findings
+
+    def _tsarch_selfcheck(self, manifest_dir: Path, pkg: Path) -> list[Finding]:
+        """`tsarch` declared but never imported is an auditor that never runs.
+
+        tsarch asserts from inside the test framework, so D5 cannot invoke it — the repo's own
+        suite does. What D5 can establish is that the suite actually uses it. A devDependency no
+        test imports is the shape theo's #255 catalogued nine times over: a gate implemented,
+        registered, and never executed, whose presence reads as coverage.
+        """
+        try:
+            declared = json.loads(pkg.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return []
+        deps = {**(declared.get("dependencies") or {}), **(declared.get("devDependencies") or {})}
+        if "tsarch" not in deps:
+            return []
+
+        for path in manifest_dir.rglob("*.ts"):
+            if "node_modules" in path.parts:
+                continue
+            try:
+                if "tsarch" in path.read_text(encoding="utf-8", errors="replace"):
+                    return []
+            except OSError:
+                continue
+        return [
+            Finding(
+                detector=_arch.D5,
+                language="typescript",
+                severity="SOFT_FLOOR",
+                file_path="package.json",
+                symbol_or_line="tsarch",
+                message=(
+                    "`tsarch` is declared as a dependency and no source file imports it. An "
+                    "architecture auditor that never runs still reads as coverage to anyone "
+                    "scanning package.json — either write the assertions or drop the dependency."
+                ),
+                allowlist_key="typescript|package.json|architecture|tsarch_declared_unused",
+            )
+        ]
+
+
+def _depcruise_script(pkg: Path) -> str | None:
+    """The npm script that runs dependency-cruiser, if the repo declares one."""
+    try:
+        declared = json.loads(pkg.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    for name, command in (declared.get("scripts") or {}).items():
+        if "depcruise" in command or "dependency-cruiser" in command:
+            return str(name)
+    return None
+
+
+def _rule_selfcheck(rule_set: dict, sources: set[str]) -> list[Finding]:
+    """Every directory a rule names must still be in the cruised tree.
+
+    Split by which side of the rule the name sits on, because the two mean different things:
+
+    - `from` selects the code the rule GOVERNS. If it matches nothing, the rule governs nothing
+      and can never fire — the invariant evaporated. HARD.
+    - `to` and `pathNot` may legitimately match nothing: `no-sdk-direto` forbids importing a
+      package precisely so that nobody imports it, and demanding a match there would force every
+      preventive rule to be violated once before it is believed. SOFT_FLOOR, and external
+      (`node_modules/…`) targets are skipped entirely.
+    """
+    findings: list[Finding] = []
+    for rule in rule_set.get("forbidden") or []:
+        if not isinstance(rule, dict):
+            continue
+        name = str(rule.get("name", "?"))
+
+        if not _arch.reason_has_substance(rule.get("comment")):
+            findings.append(
+                _arch.rule_without_reason(
+                    "typescript", tool="dependency-cruiser", rule=name, config_path="package.json"
+                )
+            )
+
+        for side, pattern, severity in (
+            ("from", (rule.get("from") or {}).get("path"), "HARD"),
+            ("to", (rule.get("to") or {}).get("path"), "SOFT_FLOOR"),
+        ):
+            for token in _path_tokens(pattern):
+                if token.startswith("node_modules"):
+                    continue
+                if any(s.startswith(token) for s in sources):
+                    continue
+                detail = f"its `{side}` names `{token}`, which no cruised module is under"
+                if severity == "HARD":
+                    findings.append(
+                        _arch.vacuous_rule(
+                            "typescript",
+                            tool="dependency-cruiser",
+                            rule=name,
+                            config_path="package.json",
+                            detail=detail,
+                        )
+                    )
+                else:
+                    findings.append(
+                        Finding(
+                            detector=_arch.D5,
+                            language="typescript",
+                            severity="SOFT_FLOOR",
+                            file_path="package.json",
+                            symbol_or_line=name,
+                            message=(
+                                f"[dependency-cruiser] rule '{name}': {detail}. Fine for a rule "
+                                "that forbids something nobody does — stale if the directory was "
+                                "renamed."
+                            ),
+                            allowlist_key=f"typescript|package.json|architecture|stale_{sanitize_symbol(name)}",
+                        )
+                    )
+    return findings
+
+
+def _path_tokens(pattern: object) -> list[str]:
+    """Directory-shaped literals inside a regex. Single words are skipped on purpose.
+
+    `index` in `(?!index)` is a filename fragment, not a directory, and flagging it would make the
+    meta-gate noisy — which is how a gate earns being switched off.
+    """
+    if not isinstance(pattern, str):
+        return []
+    return sorted({m.group(0).rstrip("/") for m in _PATH_TOKEN_RE.finditer(pattern)})

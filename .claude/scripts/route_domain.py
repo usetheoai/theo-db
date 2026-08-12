@@ -15,6 +15,16 @@ Exit codes:
   0 — routed
   1 — repo not in the routing table (gate G1 refuses the item)
   2 — the routing table could not be read or parsed
+  3 — routed to a specialist that does not exist on disk (a defect in the table itself)
+
+Exit 3 used to be exit 0 printing `(none declared)`. The invariant behind it lived only in
+`tests/test_route_domain.py`, and `install.sh` does not copy `tests/` — so in every consumer
+repo the guard was absent and a domain pointing at a missing specialist answered `routed: true`
+with `agent: null`. Measured while installing into TheoCode: a second three-column table inside
+the `## Domain routing` section parses as routing, which invented two domains whose specialist
+files were never written, and nothing objected. A resolution that names nobody is the same
+vacuous gate D5 exists to catch — so the check belongs in the tool, which always runs, rather
+than in a test suite that ships to nowhere.
 """
 from __future__ import annotations
 
@@ -87,12 +97,12 @@ def route(repo: str, table: dict[str, dict[str, Any]]) -> tuple[str, str | None]
     return None
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Route a repo to its domain specialist.")
     parser.add_argument("target", help="repo name, or a path to a B-NNN item file")
     parser.add_argument("--rule", type=Path, default=None, help="override the routing table path")
     parser.add_argument("--json", action="store_true")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     project_root = _find_project_root(Path(__file__))
     rule_path = args.rule or _routing_table_path(project_root)
@@ -128,13 +138,27 @@ def main() -> int:
         return 1
 
     domain, agent = result
+    # The specialist has to EXIST. Routing to a filename nobody wrote reads as success at every
+    # downstream step — the item looks owned, and the failure only surfaces when someone tries to
+    # open the file. See the exit-code note at the top of this module for how it was measured.
+    resolved = (rule_path.parent.parent / agent) if agent else None
+    if resolved is None or not resolved.is_file():
+        payload = {"repo": repo, "routed": False, "domain": domain, "agent": agent}
+        if args.json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(f"BROKEN ROUTE: `{repo}` routes to domain `{domain}`, whose specialist is")
+            print(f"{'  ' + agent if agent else '  not declared at all'} — and that file is not on disk.")
+            print("The table names an owner who does not exist. Fix the table or write the specialist.")
+        return 3
+
     payload = {"repo": repo, "routed": True, "domain": domain, "agent": agent}
     if args.json:
         print(json.dumps(payload, indent=2))
     else:
         print(f"repo   : {repo}")
         print(f"domain : {domain}")
-        print(f"agent  : {agent or '(none declared)'}")
+        print(f"agent  : {agent}")
     return 0
 
 

@@ -13,6 +13,24 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- _(interno, sem efeito para quem usa o banco)_ A medição que compara a rotina vetorial otimizada (SIMD) com a versão simples parou de acusar falsa lentidão. Ela media cada uma **uma única vez e sempre na mesma ordem**, então qualquer variação da máquina entre as duas medições era atribuída ao código. Num notebook isso acontece de verdade: instruções AVX reduzem a frequência do processador, e o efeito cresce conforme a máquina esquenta ao longo da suíte — medido, o resultado piorava de forma consistente com a carga acumulada (passava sozinho, 0,78× depois dos outros 439 testes, 0,66× com mais carga ao lado). A medição passa a **alternar** as duas versões por cinco rodadas e comparar **medianas**, de modo que o aquecimento afete as duas igualmente. **A tolerância não foi afrouxada** — o que melhorou foi a qualidade da medição que ela julga. (#B-023)
+
+### Changed
+- _(interno, sem efeito para quem usa o banco)_ A esteira de integração contínua deixou de rodar a cada envio num pull request e passa a rodar **uma vez por promoção** — nos merges para `develop` e `main`. Motivo: a máquina que executa a esteira é única e atende um job por vez, e cada envio disparava a esteira inteira; o custo passou a ser alto demais para o retorno. Oito fluxos foram ajustados, e todos continuam podendo ser executados sob demanda quando valer a pena. **A troca é real e fica registrada:** sem verificação no pull request, um defeito só aparece depois de já estar em `develop`, e quem descobre é a próxima pessoa a integrar. A proteção não desaparece — muda de lugar, e passa a depender de rodar as verificações localmente antes de promover; o comando exato está no comentário de cada fluxo.
+
+## [0.159.0] - 2026-08-11
+
+> **Nota de versionamento — por que MINOR e não MAJOR.** Esta versão contém duas seções `Removed` (o
+> access method `theodb_symqg` e a árvore `docs/`), e a regra de derivação do `cycle-release` deriva
+> MAJOR de um `Removed` não-vazio — o que daria `v1.0.0`. Cortada como MINOR por decisão do owner
+> (2026-08-11), por duas razões que se somam: (a) [SemVer §4](https://semver.org/) estabelece que em
+> `0.y.z` nada é declarado estável, então remoções não forçam major — a regra do projeto não distingue
+> `0.x`, e essa é uma lacuna dela; (b) `v1.0.0` violaria o hard cap #2 do `dogfood-golden-rule`
+> (`anchor_not_running`): o cenário-âncora `theo-rag-sobre-theodb` está `planned`, não `running`, e o
+> README declara explicitamente que o projeto não é production-ready. Cortar 1.0 aqui seria alegar por
+> acidente de regra o que o projeto se recusa a alegar por evidência.
+
 ### Added
 - A suíte de testes passa a rodar na integração contínua a cada push que toca a extensão. Até aqui nenhum job da esteira a executava — foi assim que 20 falhas, uma delas um defeito de recall, ficaram invisíveis por meses. O gate reprova quando o número de falhas **aumenta**, não quando é maior que zero. (#B-013)
 
@@ -66,6 +84,13 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   símbolos do `.so` não resolvem (release sem debuginfo), então a atribuição é por objeto, não por função
 
 ### Changed
+- _(interno, sem efeito para quem usa o banco)_ Cinco testes que reprovavam **porque o produto estava certo** voltaram a passar, sem que nenhuma verificação fosse afrouxada. Dois comparavam a mensagem de erro por um pedaço, enquanto a ferramenta de teste exige o texto inteiro — passaram a declarar a mensagem completa, o que de quebra transforma o texto do erro em contrato. Três apontavam para um endereço local que a proteção contra requisições internas (SSRF) recusa antes mesmo de tentar conectar: dois passaram a usar um domínio reservado que não existe, e o do disjuntor de circuito passou a exercitar a máquina de estados diretamente, sem rede nenhuma. **A proteção não foi tocada** — relaxá-la para fazer teste passar seria abrir exatamente o buraco que ela fecha. (#B-016 #B-022)
+
+- _(interno, sem efeito para quem usa o banco)_ A esteira de testes deixa de reprovar por lixo de execuções canceladas. Quando um envio novo cancelava o anterior, sobrava um contêiner com nome fixo na máquina de build, e a execução seguinte falhava por conflito de nome — **antes de rodar um único teste**, mas aparecendo como "os testes falharam". Um ciclo inteiro foi gasto investigando uma regressão que não existia. (#B-027)
+
+- _(interno, sem efeito para quem usa o banco)_ Os dois verificadores automáticos de qualidade do código voltaram a passar. Ambos estavam reprovando havia tempo — o de formatação desde antes desta versão, o de análise estática por causa dos resíduos descritos em Fixed — e um verificador que reprova sempre deixa de barrar o próximo defeito de verdade. O código foi reformatado pela ferramenta oficial do projeto (7 arquivos, apenas quebras de linha, nenhuma mudança de comportamento). (#B-025 #B-026)
+
+- Hook de validação de comandos ficou mais rápido: ~6 processos por chamada de ferramenta em vez de ~50, sem mudança de comportamento
 - **theodb:** o **M176 (SymQG) muda de natureza** com a medição do M184. Ele fora escrito assumindo "código
   mantido sem consumidor" — dívida interna barata. A medição desmente: o `theodb_symqg` está **registrado como
   access method no binário default**, com opclass exposto, e um usuário pode escrever `USING theodb_symqg`
@@ -75,6 +100,12 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
   de feature flag**, o mesmo tratamento do lexical, que preserva o código para estudo sem expor quem instala
 
 ### Fixed
+- Limpos **quatro resíduos** deixados pela retirada do índice experimental SymQG. O que mais importa: uma função que nunca era chamada e que, se algum dia fosse, poderia derrubar a conexão do banco — ela checava se um ponteiro era nulo, não fazia nada com o resultado, e usava o ponteiro na linha seguinte. As duas funções vizinhas do mesmo arquivo tratam o caso corretamente; só nela o tratamento se perdeu. Nenhum caminho do produto a alcançava, então **não houve impacto para quem usa o banco**. Os outros três eram documentação órfã de código que não existe mais e um trecho que o verificador recusava por estilo (o código estava correto). Todos juntos mantinham o verificador de qualidade reprovando — e um verificador que reprova sempre deixa de barrar o próximo defeito de verdade. (#B-026)
+
+- Três testes do pilar colunar acusavam que a poda por zone-map não acontecia, e a medição mostrou o contrário: **a poda sempre funcionou** — o cenário de teste é que nunca chegava a criar o que ela poda. Os dados ficavam num buffer de escrita que só vira bloco durável ao encerrar a transação, e o teste nunca encerrava a sua. Corrigido no cenário, não na verificação: o teste passa a produzir blocos reais e volta a medir o que diz medir. Medido na mesma sessão: dentro da transação, 0 blocos examinados; com o buffer dimensionado como em uso real, 31 blocos e 30 podados. (#B-015)
+
+- O diagnóstico de busca vetorial voltou a reportar o custo real das consultas. `theodb.explain_scan`, `theodb.scan_stats` e as estatísticas acumuladas mostravam **zero páginas lidas e zero candidatos** para o tipo de índice mais usado do produto, mesmo com a consulta usando o índice e devolvendo as linhas certas — e o recomendador automático de `ef_search` decidia sobre esses zeros. A causa: a busca ganhou um segundo caminho interno (retomada de varredura, M118) que virou o padrão e não reportava o que media. Medido antes e depois na mesma consulta: onde antes vinha `0`, agora vêm as páginas e os candidatos reais. Quem usa `explain_scan` para diagnosticar latência passa a ver números; quem depende do autotune passa a recebê-lo alimentado com dados verdadeiros. (#B-015)
+
 - **A imagem do TheoDB está publicada** em `ghcr.io/usetheoai/theo-db:latest` e `:0.140.0` — pela primeira vez. `docker pull`, o primeiro comando do README, funciona. A causa de nunca ter sido publicada: o workflow de publicação apontava para uma organização que não existe. O workflow de publicação apontava para uma organização que não existe, então **toda** execução falhava — no push de `develop` e na tag `v0.158.0` — e por isso `docker pull ghcr.io/usetheoai/theo-db:latest`, o primeiro comando do README, respondia `manifest unknown`. (#B-010)
 
 - Metade das falhas da suíte era classificação errada de teste, não defeito do banco: 10 dos 20 testes vermelhos passaram a verde sem uma linha de mudança no comportamento do produto. Os testes da busca lexical BM25 voltam a ser executados. Eles existiam e falhavam desde sempre por um detalhe de registro — o módulo não declarava seu schema, então o PostgreSQL nunca recebia as funções de teste e a chamada falhava com "função não existe". O pilar tinha sido promovido à instalação padrão com seus 6 testes vermelhos. (#B-012)

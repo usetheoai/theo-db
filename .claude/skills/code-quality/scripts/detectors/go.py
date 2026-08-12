@@ -13,22 +13,24 @@ from scripts import _registry
 from scripts._shared import Finding, safe_parse_json, sanitize_symbol, to_rel_path
 from scripts.check_symbol_fab import extract_imports_and_calls
 
-from . import BaseDetector
+from . import BaseDetector, _arch
 
 _DEADCODE_TIMEOUT_SEC = 180
+_ARCH_TIMEOUT_SEC = 240
+_ARCH_CONFIG = ".go-arch-lint.yml"
 
 
 class GoDetector(BaseDetector):
     language = "go"
     manifest_marker = "go.mod"
 
-    def detect_dead_code(self, repo_root: Path) -> list[Finding]:
+    def detect_dead_code(self, manifest_dir: Path) -> list[Finding]:
         """Run `deadcode -json ./...` and parse JSON list into Findings."""
         cmd = ["deadcode", "-json", "./..."]
         try:
             result = subprocess.run(
                 cmd,
-                cwd=str(repo_root),
+                cwd=str(manifest_dir),
                 capture_output=True,
                 text=True,
                 timeout=_DEADCODE_TIMEOUT_SEC,
@@ -187,3 +189,199 @@ class GoDetector(BaseDetector):
             message=f"deadcode auditor unavailable: {reason}",
             allowlist_key="go|.|dead_code|auditor_unavailable_deadcode",
         )
+
+    # ── D5 — architecture ───────────────────────────────────────────────────────────────────────
+
+    def detect_architecture_violations(self, manifest_dir: Path) -> list[Finding]:
+        """Run `go-arch-lint check --json` against the repo's own `.go-arch-lint.yml`.
+
+        The linter is the authority on its own format — D5 never re-parses the YAML to decide
+        what a rule means. Raw text is read for exactly one thing the JSON cannot tell us: whether
+        the config disabled the linter's built-in protection against ghost components.
+        """
+        config = manifest_dir / _ARCH_CONFIG
+        if not config.is_file():
+            return [_arch.no_config("go", tool="go-arch-lint", looked_for=[_ARCH_CONFIG])]
+
+        findings = self._arch_config_selfcheck(config)
+
+        try:
+            result = subprocess.run(
+                ["go-arch-lint", "check", "--json", "--project-path", str(manifest_dir)],
+                cwd=str(manifest_dir),
+                capture_output=True,
+                text=True,
+                timeout=_ARCH_TIMEOUT_SEC,
+                check=False,
+            )
+        except FileNotFoundError:
+            return findings + [
+                _arch.auditor_unavailable(
+                    "go",
+                    tool="go-arch-lint",
+                    reason=(
+                        "binary not found (install via "
+                        "`go install github.com/fe3dback/go-arch-lint@latest`)"
+                    ),
+                )
+            ]
+        except subprocess.TimeoutExpired:
+            return findings + [
+                _arch.auditor_unavailable(
+                    "go", tool="go-arch-lint", reason=f"timed out after {_ARCH_TIMEOUT_SEC}s"
+                )
+            ]
+        except (subprocess.SubprocessError, OSError) as e:
+            return findings + [
+                _arch.auditor_unavailable("go", tool="go-arch-lint", reason=f"invocation failed: {e}")
+            ]
+
+        if not result.stdout.strip():
+            return findings + [
+                _arch.auditor_unavailable(
+                    "go",
+                    tool="go-arch-lint",
+                    reason=f"exit {result.returncode} with no output: {result.stderr.strip()[:200]}",
+                )
+            ]
+
+        data, parse_finding = safe_parse_json(result.stdout, "go-arch-lint")
+        if parse_finding is not None:
+            return findings + [
+                _arch.auditor_unavailable(
+                    "go", tool="go-arch-lint", reason=f"JSON output failed to parse: {parse_finding.message}"
+                )
+            ]
+
+        return findings + self._parse_arch_json(data)
+
+    def _arch_config_selfcheck(self, config: Path) -> list[Finding]:
+        """The one thing the linter's JSON cannot report: its own safety net being switched off.
+
+        `allow.ignoreNotFoundComponents` makes go-arch-lint skip a component whose glob matches
+        nothing — which is precisely the failure this detector exists to catch, made silent by
+        configuration. Default is disabled; turning it on is a decision, and it should be a loud one.
+        """
+        try:
+            raw = config.read_text(encoding="utf-8", errors="replace")
+        except OSError as e:
+            return [
+                _arch.auditor_unavailable(
+                    "go", tool="go-arch-lint", reason=f"could not read {_ARCH_CONFIG}: {e}"
+                )
+            ]
+
+        findings: list[Finding] = []
+        for line in raw.splitlines():
+            stripped = line.split("#", 1)[0].strip()
+            if stripped.startswith("ignoreNotFoundComponents:") and stripped.endswith("true"):
+                findings.append(
+                    Finding(
+                        detector=_arch.D5,
+                        language="go",
+                        severity="HARD",
+                        file_path=_ARCH_CONFIG,
+                        symbol_or_line="allow.ignoreNotFoundComponents",
+                        message=(
+                            "`ignoreNotFoundComponents: true` disables the linter's own guard "
+                            "against a component whose glob matches nothing. With it on, a "
+                            "directory rename silently retires the rule and the check still "
+                            "passes — measured on theo-contracts 2026-08-06, where a ghost "
+                            "component reported ArchHasWarnings: false."
+                        ),
+                        allowlist_key="go|.go-arch-lint.yml|architecture|ignore_not_found_components",
+                    )
+                )
+        return findings
+
+    def _parse_arch_json(self, data: object) -> list[Finding]:
+        """Map go-arch-lint's payload onto the D5 vocabulary."""
+        if not isinstance(data, dict):
+            return [
+                _arch.auditor_unavailable(
+                    "go", tool="go-arch-lint", reason="payload was not an object"
+                )
+            ]
+        payload = data.get("Payload")
+        if not isinstance(payload, dict):
+            return [
+                _arch.auditor_unavailable(
+                    "go", tool="go-arch-lint", reason="payload had no 'Payload' object"
+                )
+            ]
+
+        findings: list[Finding] = []
+
+        # A component whose directory is gone. go-arch-lint files this under ExecutionWarnings and
+        # still answers ArchHasWarnings: false — green. This is the whole reason D5 reads the
+        # payload instead of trusting the exit code.
+        for warning in payload.get("ExecutionWarnings") or []:
+            if not isinstance(warning, dict):
+                continue
+            text = str(warning.get("Text", ""))
+            if "not found directories" in text:
+                findings.append(
+                    _arch.vacuous_rule(
+                        "go",
+                        tool="go-arch-lint",
+                        rule=_component_of(text),
+                        config_path=_ARCH_CONFIG,
+                        detail=text,
+                    )
+                )
+            else:
+                findings.append(
+                    _arch.auditor_unavailable("go", tool="go-arch-lint", reason=text[:200])
+                )
+
+        for key in ("ArchWarningsDeps", "ArchWarningsDeepScan"):
+            for warning in payload.get(key) or []:
+                if not isinstance(warning, dict):
+                    continue
+                rel = str(warning.get("FileRelativePath", "")).lstrip("/") or "."
+                line = (warning.get("Reference") or {}).get("Line", "?")
+                findings.append(
+                    _arch.violation(
+                        "go",
+                        tool="go-arch-lint",
+                        rule=str(warning.get("ComponentName", "?")),
+                        file_path=rel,
+                        symbol_or_line=f"line {line}",
+                        message=(
+                            f"imports {warning.get('ResolvedImportName', '?')}, which its component "
+                            "is not allowed to depend on"
+                        ),
+                    )
+                )
+
+        # Code no component claims. Not a violation — the rules simply do not reach it, and a
+        # boundary that covers half the tree protects half the tree. SOFT_FLOOR so it is visible
+        # without blocking, mirroring how the journeys registry treats an unclassified module.
+        not_matched = payload.get("ArchWarningsNotMatched") or []
+        if not_matched:
+            findings.append(
+                Finding(
+                    detector=_arch.D5,
+                    language="go",
+                    severity="SOFT_FLOOR",
+                    file_path=_ARCH_CONFIG,
+                    symbol_or_line="coverage",
+                    message=(
+                        f"{len(not_matched)} package(s) belong to no component, so no rule reaches "
+                        "them. Add them to a component or say why they are out of scope."
+                    ),
+                    allowlist_key="go|.go-arch-lint.yml|architecture|packages_not_matched",
+                )
+            )
+        return findings
+
+
+def _component_of(warning_text: str) -> str:
+    """Pull the component name out of `not found directories for 'X' in '...'`."""
+    marker = "not found directories for '"
+    start = warning_text.find(marker)
+    if start == -1:
+        return "?"
+    rest = warning_text[start + len(marker) :]
+    end = rest.find("'")
+    return rest[:end] if end != -1 else "?"

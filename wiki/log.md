@@ -1,3 +1,18 @@
+## 2026-08-11
+
+* **Creation**: `benchmarks/b015-cinco-contadores-em-zero-duas-causas.md` — a medição do B-015. Registra
+  duas coisas que só a medição separou: os cinco testes com contador em zero não tinham causa comum (três
+  eram o fixture do `pg_test`, dois eram instrumentação perdida num caminho de scan que virou default), e a
+  **hipótese de paralelismo que o item carregava está refutada** — o `Custom Scan` colunar não paraleliza, e
+  o próprio seed já desligava paralelismo desde que foi escrito.
+
+  A hipótese refutada fica escrita no conceito em vez de ser apagada, porque foi ela que sustentou a
+  prioridade do item durante um dia. Mesmo critério dos honest-negatives já no acervo.
+
+  Não vira conceito, e o skip é declarado: `B-018` (o planner na junção) **não reproduziu** em seis cenários
+  e continua aberto — não há medição conclusiva para registrar, só um espaço de busca reduzido, que vive no
+  `BACKLOG.md`. Registrar "não achei" como `Measurement` inflaria o acervo com a ausência de resultado.
+
 ## 2026-08-08
 
 * **Update**: `benchmarks/m184-symqg-profile-simbolos-verdict.md` — fechado o regime que faltava: a **busca**, onde os 2,6–3,9× do e2 foram medidos. O contraste é o achado: no HNSW **nenhuma função do `theodb_rs.so` passa de 1,3%**, enquanto no SymQG **`gather_symqg_candidates` concentra 18,23%**. Build e busca têm gargalos **distintos**, ambos em funções específicas do caminho SymQG. E um achado de planner que explica duas falhas anteriores de perfilar a busca: **sem `enable_seqscan=off` E `enable_sort=off` o planner escolhe `Sort` + `Seq Scan` em vez do índice vetorial** — eu perfilava um caminho que não passava pelo índice. Registrado como pergunta aberta maior que o SymQG: se o planner também despreza o `theodb_hnsw` em produção, isso não foi investigado.

@@ -9,15 +9,25 @@ name: Rust test suite
 # A execução completa leva 480 s medidos. O argumento de custo não existe.
 
 on:
-  # Sem gatilho de `push` em `workspace`: com um runner serial, cada commit disparava 8 min de suite
-  # a frente de publish/lint/CI. No PR o custo e pago uma vez, no momento em que a decisao acontece.
+  # 2026-08-12 — gatilho de `pull_request` REMOVIDO por decisão do owner: o runner é único e serial, e
+  # cada PR disparava a esteira inteira a cada push, com custo elevado. A esteira passa a rodar SÓ no
+  # `push` para `develop`/`main` — ou seja, DEPOIS do merge.
+  #
+  # A TROCA É REAL e fica dita: sem gate no PR, um defeito só aparece quando já está em `develop`, e
+  # quem descobre é o próximo a integrar. A proteção não some, muda de lugar — passa a depender de
+  # rodar os gates LOCALMENTE antes de promover, no contêiner com o toolchain pinado:
+  #   docker run --rm -v $PWD/theodb_rs:/src theodb-builder:latest bash -c '
+  #     rustup component add clippy rustfmt --toolchain 1.97.0-x86_64-unknown-linux-gnu
+  #     mkdir -p /tmp/b && cp -r /src/. /tmp/b/ && cd /tmp/b
+  #     cargo fmt -- --check && cargo clippy --features pg18 --no-deps -- $(grep -v "^#" .clippy_args | tr "\n" " ")
+  #     cargo pgrx test pg18'
+  # `workflow_dispatch` continua disponível para rodar sob demanda num PR específico quando valer a pena.
+  #
+  # Também não há gatilho de `push` em `workspace`: com um runner serial, cada commit disparava 8 min de
+  # suíte à frente de publish/lint/CI. Com a remoção do `pull_request` acima, a suíte roda UMA vez por
+  # promoção — no push para `develop`.
   push:
-    branches: [develop]
-    paths:
-      - "theodb_rs/**"
-      - "Dockerfile"
-      - ".github/workflows/rust-suite.yml"
-  pull_request:
+    branches: [develop, main]
     paths:
       - "theodb_rs/**"
       - "Dockerfile"
@@ -29,8 +39,9 @@ on:
 # so saiu depois de eu cancelar este job. Um gate de qualidade que bloqueia a entrega nao e um gate, e
 # um empecilho.
 #
-# Duas medidas: a suite roda so no PR (nao em cada push de workspace), e cede a vez — `group` global
-# entre workflows nao existe no Actions, entao o que da para fazer e nao concorrer com o proprio push.
+# Duas medidas: a suíte roda uma vez por promoção (no push para `develop` — desde 2026-08-12 não roda
+# mais em PR nem em cada push de workspace), e cede a vez — `group` global entre workflows não existe no
+# Actions, então o que dá para fazer é não concorrer com o próprio push.
 concurrency:
   group: rust-suite-${{ github.ref }}
   cancel-in-progress: true
@@ -61,6 +72,18 @@ jobs:
       - name: Run suite
         run: |
           set -o pipefail
+          # O `docker rm` de baixo só roda no caminho feliz. Quando o run é CANCELADO — e cada push novo
+          # para o mesmo PR cancela o anterior — o passo morre antes dele e o contêiner `suite` fica órfão
+          # no runner self-hosted. O run seguinte então falha com
+          # `Conflict. The container name "/suite" is already in use`, ANTES de executar um único teste.
+          #
+          # O sintoma disso é traiçoeiro: a suíte não emite `test result`, e o gate abaixo faz
+          # `line=$(grep -E "^test result" ...)` sob `bash -e` — a atribuição herda o exit 1 do grep e MATA o
+          # passo sem imprimir a mensagem de erro que ele tem pronta para esse caso. O job aparece como
+          # "suíte reprovou" quando o que houve foi lixo de um run cancelado.
+          #
+          # Medido em 2026-08-11 no PR #226, após pushes sucessivos cancelarem runs.
+          docker rm -f suite >/dev/null 2>&1 || true
           docker run --name suite theodb-builder bash -c '
             apt-get update -qq && apt-get install -y -qq sudo
             useradd -m postgres 2>/dev/null || true
@@ -78,13 +101,36 @@ jobs:
       # reprova sempre é um CI que alguém desliga. É "não pode PIORAR": o baseline é o número
       # medido em 2026-08-10 (era 20; caiu para 10 ao fechar B-011 e as 8 de registro de schema) e cada falha nova reprova.
       #
+      # 2026-08-11 — baixado de 10 para 6 ao fechar o B-015: `434 passed; 6 failed` medido na suíte completa
+      # (`cargo pgrx test pg18`, 539,43 s). Fecharam os cinco testes de contador em zero — três colunares
+      # (`chunk_skip_prunes_and_ab_identical`, `enable_chunk_skip_guc_off_disables_skip`,
+      # `predicate_pushdown_best_effort`) e dois de autotune (`scan_stats_records_real_pages_read`,
+      # `explain_scan_shows_index_and_candidates`) — mais o teste novo que amarra a causa.
+      #
+      # RESSALVA DE MÉTODO: os 10 do baseline anterior foram medidos em outro commit e em outra data; eu não
+      # rodei a suíte completa ANTES desta mudança, só o subconjunto filtrado (que falhava 2/2). Então "10 → 6"
+      # é a comparação de dois números honestos medidos em momentos diferentes, NÃO um A/B pareado no mesmo
+      # commit. O que está pareado é o subconjunto: RED 2/2 antes, GREEN 6/6 depois.
+      #
       # RESSALVA REGISTRADA (log de intake de B-013): este baseline só é honesto enquanto o B-012
       # estiver ativo para derrubá-lo. Se o B-012 morrer, o número vira permanente sem ninguém ter
       # decidido isso, e o gate passa a proteger a dívida em vez do produto. Ao fechar cada falha,
       # BAIXE o baseline no mesmo commit.
+      #
+      # 2026-08-12 — BASELINE = 0. A dívida acabou: `440 passed; 0 failed` medido na suíte completa
+      # (353,01 s). As seis últimas caíram assim:
+      #   · 2 (B-022) declaravam FRAGMENTO em `#[pg_test(error=)]` e o pgrx compara a mensagem INTEIRA;
+      #   · 3 (B-016) apontavam para loopback, que a guarda de egress recusa ANTES de conectar — dois
+      #     passaram a usar `invalid.invalid` (RFC 2606) e o do disjuntor virou hermético;
+      #   · 1 (B-023) era um microbenchmark que media a TÉRMICA do laptop: AVX sempre medido primeiro,
+      #     amostra única, num i7-1355U de 15 W. Passou a alternar rodadas e comparar medianas.
+      # Nos seis, o produto estava CERTO e o teste é que estava desatualizado ou mal-instrumentado.
+      #
+      # O gate deixa de proteger dívida e passa a proteger o produto: a partir daqui, QUALQUER falha
+      # reprova. É o estado que a ressalva acima pedia desde o começo.
       - name: Gate — falhas não podem aumentar
         env:
-          BASELINE: "10"
+          BASELINE: "0"
         run: |
           line=$(grep -E "^test result" suite.log | tail -1)
           echo "$line"

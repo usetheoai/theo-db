@@ -200,3 +200,63 @@ def test_cli_no_audit_write_skips_markdown(tmp_path: Path, capsys) -> None:
     assert exit_code == 0
     audit_dir = tmp_path / ".claude" / "knowledge-base" / "audits"
     assert not audit_dir.exists() or not list(audit_dir.glob("*.md"))
+
+
+# --------------------------------------------------------------------------
+# Nested manifest — the detector must be pointed at the manifest's directory
+# --------------------------------------------------------------------------
+
+
+def test_detector_receives_manifest_dir_not_repo_root(tmp_path: Path, monkeypatch) -> None:
+    """A manifest declared under a subdirectory must not send the detector to the root.
+
+    `code-quality-languages.txt` takes a MANIFEST-MARKER that is a repo-relative
+    path, so a crate at `crate/Cargo.toml` is a legal, configured layout. Passing
+    the repo root to the detector makes cargo-udeps exit with "could not find
+    `Cargo.toml`", which the detector honestly reports as
+    `auditor_unavailable_cargo-udeps` — a soft cap that blocks the cycle because
+    of a path assumption rather than because of the code.
+
+    Measured on theo-db (usetheoai/theo-db#175): `theodb_rs/Cargo.toml`.
+    """
+    rules = tmp_path / ".claude" / "rules"
+    rules.mkdir(parents=True)
+    (rules / "code-quality-languages.txt").write_text(
+        "rust | crate/Cargo.toml | ENABLED |\n"
+    )
+    (rules / "code-quality-thresholds.txt").write_text("vulture.min_confidence = 80\n")
+    (rules / "code-quality-allowlist.txt").write_text("")
+    (tmp_path / ".claude" / "knowledge-base" / "plans").mkdir(parents=True)
+    (tmp_path / ".git").mkdir()
+
+    manifest = tmp_path / "crate" / "Cargo.toml"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text("[package]\nname = 'x'\n")
+
+    seen: list[Path] = []
+
+    class _SpyDetector:
+        def detect_dead_code(self, target: Path) -> list:
+            seen.append(target)
+            return []
+
+        def detect_orphan_exports(self, target: Path) -> list:
+            return []
+
+        def detect_architecture_violations(self, target: Path) -> list:
+            # Present because the orchestrator resolves the attribute BEFORE `_safe_call` can
+            # guard it: a double that skips a contract method takes the whole run down with an
+            # AttributeError instead of the detector being skipped.
+            return []
+
+    monkeypatch.setattr(
+        "scripts.run_code_quality._build_detector", lambda _lang: _SpyDetector()
+    )
+
+    main(["--repo-root", str(tmp_path), "--no-network"])
+
+    assert seen, "detect_dead_code was never called for the enabled language"
+    assert seen[0] == manifest.parent, (
+        f"detector was pointed at {seen[0]}, not at the manifest's directory "
+        f"{manifest.parent} — cargo-udeps would fail to find Cargo.toml"
+    )

@@ -838,6 +838,23 @@ mod tests {
         Spi::run("SET theodb.enable_chunk_skip = on").unwrap();
         Spi::run("SET theodb.enable_columnar_agg = off").unwrap();
         Spi::run("SET max_parallel_workers_per_gather = 0").unwrap();
+        // B-015 — WHY the three skip tests read `scanned 0`, and why the fix is here and not in the assertions.
+        //
+        // `#[pg_test]` runs each test inside ONE transaction (rolled back at the end). The columnar writer holds
+        // rows in the pending set and only materializes a durable stripe when the buffer exceeds
+        // `maintenance_work_mem`, or at pre-commit (M104 — see `columnar.rs` `PendingWrite`). Under the default
+        // 64 MB, 50 000 narrow rows never reach that bound and the commit never arrives, so the scan reads the
+        // pending set: there are no chunk groups in existence, hence `scanned=0`, hence `skipped=0`.
+        //
+        // Measured on the shipped binary, same session, same rows: inside a transaction → `skipped=0 scanned=0`;
+        // after COMMIT → `skipped=4 scanned=5`; inside a transaction with a small `maintenance_work_mem` →
+        // `skipped=30 scanned=31`. The zone map was pruning the whole time — the fixture just never produced
+        // anything for it to prune.
+        //
+        // Lowering the bound makes the incremental flush the product already implements actually happen here, so
+        // the test measures the thing it claims to measure. The DoD for B-015 explicitly forbids the other
+        // route — relaxing the assertion — which would have hidden a working feature behind a green test.
+        Spi::run("SET maintenance_work_mem = '64kB'").unwrap();
         Spi::run("DROP TABLE IF EXISTS t_col").unwrap();
         Spi::run("DROP TABLE IF EXISTS t_heap").unwrap();
         Spi::run("CREATE TABLE t_col (a int, b int, c text) USING theodb_columnar").unwrap();

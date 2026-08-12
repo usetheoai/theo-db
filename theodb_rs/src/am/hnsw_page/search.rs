@@ -334,8 +334,7 @@ pub(crate) unsafe fn traverse(
 
     // M67/M68: feed the backend-local scan-stats collectors (cheap in-memory adds; no page write, no
     // crash-safety impact) so `theodb.scan_stats`/`explain_scan`/`index_scan_stats` report real per-scan cost.
-    crate::am::autotune::bump_scan_pages(reads as i64);
-    crate::am::autotune::bump_scan_candidates(candidates_seen as i64);
+    crate::am::autotune::record_scan_observation(reads as i64, candidates_seen as i64);
 
     if std::env::var("THEODB_SCAN_PROFILE").is_ok_and(|v| v == "1") {
         // The wiring-triad runtime metric: pages read must be O(ef·M), flat in N (server LOG, not client WARNING).
@@ -425,7 +424,17 @@ pub(crate) unsafe fn resumable_init(
             m0,
             reads: std::cell::Cell::new(reads),
         };
-        Ok(Some(crate::ann::scan_core::ResumableGround::init(&pg_src, ep, ef, m0, true)))
+        let rg = crate::ann::scan_core::ResumableGround::init(&pg_src, ep, ef, m0, true);
+        // B-015: report the FIRST segment of this scan (upper-layer descent + the seeded ground frontier).
+        // `traverse` has always reported here; this path did not, and it is the DEFAULT for every V1 index —
+        // so `explain_scan`/`scan_stats`/`_index_scan_stats` read zero for the product's most common scan.
+        // `pg_src.reads` already carries the descent (it was seeded with `reads` above) plus whatever `init`
+        // read; `candidates_seen()` is the `visited` set the accessor was built to expose and nobody called.
+        crate::am::autotune::record_scan_observation(
+            pg_src.reads.get() as i64,
+            rg.candidates_seen() as i64,
+        );
+        Ok(Some(rg))
     }
 }
 
@@ -456,7 +465,17 @@ pub(crate) unsafe fn resumable_next(
             m0,
             reads: std::cell::Cell::new(0),
         };
+        // B-015: `candidates_seen()` is CUMULATIVE on `rg`, and `record_scan_observation` ADDS — so reporting
+        // the running total here would count every earlier batch again on each resumed pull. The delta around
+        // `next_batch` is this segment's own contribution, and it needs no new state on `HnswResume`. Pages do
+        // not need the same care: `pg_src` is rebuilt per call with `reads: Cell::new(0)`, so its counter is
+        // already per-segment.
+        let candidates_before = rg.candidates_seen();
         let batch = rg.next_batch(&pg_src)?;
+        crate::am::autotune::record_scan_observation(
+            pg_src.reads.get() as i64,
+            rg.candidates_seen().saturating_sub(candidates_before) as i64,
+        );
         Ok(batch.into_iter().map(|(cand, d)| (cand.tid, d)).collect())
     }
 }

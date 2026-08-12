@@ -77,7 +77,6 @@ fn theodb_hnsw_amhandler(_fcinfo: pg_sys::FunctionCallInfo) -> PgBox<pg_sys::Ind
     make_amroutine(build::ambuild_hnsw, build::ambuildempty_hnsw)
 }
 
-
 /// Fill an `IndexAmRoutine` with the shared hooks + the given per-algorithm build callbacks.
 /// M135 (ADR-1) — the i-th attribute of a `TupleDesc`, read in a way that survives a major upgrade.
 ///
@@ -215,11 +214,7 @@ pub unsafe extern "C-unwind" fn amcostestimate(
         std::ptr::null_mut(),
         &mut spc_seq_page_cost,
     );
-    let rel_pages = if (*indexinfo).rel.is_null() {
-        0.0
-    } else {
-        (*(*indexinfo).rel).pages as f64
-    };
+    let rel_pages = if (*indexinfo).rel.is_null() { 0.0 } else { (*(*indexinfo).rel).pages as f64 };
     *index_startup_cost = cost::toast_startup_correction(
         costs.indexTotalCost * ratio,
         costs.numIndexPages,
@@ -369,7 +364,6 @@ extension_sql!(
     name = "theodb_hnsw_opclasses",
     requires = [theodb_hnsw_amhandler, "vector_type"],
 );
-
 
 // M49: non-default cosine (`<=>`) + inner-product (`<#>`) opclasses for both AMs. Strategy is always 1
 // (`FOR ORDER BY float_ops`); the metric is encoded in the operator + the `FUNCTION 1` metric-tag support proc

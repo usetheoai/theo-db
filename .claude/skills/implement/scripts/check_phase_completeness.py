@@ -38,6 +38,12 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# The plan's task-id parser lives with the checkpoint gate; importing it keeps ONE definition
+# of what a task id looks like. A second regex here would drift from it silently, and the two
+# gates would disagree about which tasks the plan declares — the exact class of bug this
+# module now exists to catch.
+from check_checkpoint_consistency import plan_task_ids_from_text
+
 PHASE_HEADER_RE = re.compile(r"^##\s+Phase\s+(\d+)(?:\s*[:\-—]\s*(.+?))?\s*$", re.MULTILINE)
 PHASE_DOD_RE = re.compile(
     r"^###\s+Phase\s+(\d+)\s*(?:[:\-—]\s*)?Definition\s+of\s+Done\s*$"
@@ -77,6 +83,23 @@ def _tasks_in_phase(progress: dict, phase: str) -> list[dict]:
     return [t for t in progress.get("tasks", []) if str(t.get("phase")) == str(phase)]
 
 
+def _plan_task_ids_in_phase(plan_path: Path, phase: str) -> list[str]:
+    """Task ids the PLAN declares for this phase, via the `T{phase}.{n}` id convention.
+
+    The plan is the contract; the checkpoint is a record of work claimed against it. Reading
+    the phase's inventory from the checkpoint made the checkpoint judge itself — a task
+    declared in the plan and simply never written there was not "pending", it did not exist.
+    Measured: T1.1/T1.2/T1.3 with T1.3 absent reported `total_tasks_in_phase: 2` and PASS,
+    while the same task recorded `pending` was caught HIGH. Omission was cheaper than
+    admission, on the one artefact the halt-loop writes by discipline and nothing enforces.
+    """
+    return [
+        tid
+        for tid in plan_task_ids_from_text(plan_path.read_text(encoding="utf-8-sig"))
+        if tid.startswith(f"T{phase}.")
+    ]
+
+
 def _plan_declares_phase_dod(plan_path: Path, phase: str) -> tuple[bool, int]:
     """Return (declared?, non_empty_line_count) for the phase DoD section."""
     content = plan_path.read_text(encoding="utf-8-sig")
@@ -97,6 +120,21 @@ def check_phase_completeness(
     tasks = _tasks_in_phase(progress, phase)
 
     findings: list[Finding] = []
+
+    # The plan's inventory first: a declared task with no checkpoint entry is a SKIP, and it
+    # has to be named before the counts below, which can only describe entries that exist.
+    recorded = {t.get("id") for t in progress.get("tasks", []) if isinstance(t, dict)}
+    missing = [tid for tid in _plan_task_ids_in_phase(plan_path, phase) if tid not in recorded]
+    if missing:
+        findings.append(Finding(
+            severity="HIGH",
+            code="plan_task_absent_from_progress",
+            message=(
+                f"Phase {phase}: {len(missing)} task(s) declared by the plan have NO entry "
+                f"in {progress_path.name}: {', '.join(missing)}. Not pending, not blocked — "
+                "absent. The plan is the contract; these were skipped, not completed."
+            ),
+        ))
 
     if not tasks:
         findings.append(Finding(

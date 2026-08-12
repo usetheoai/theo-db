@@ -176,8 +176,8 @@ def check_coverage(project_root: Path) -> dict[str, Any]:
 
 
 def _read_progress(project_root: Path, slug: str) -> dict[str, Any] | None:
-    path = project_root / ".claude" / "knowledge-base" / "implementations" / f".progress-{slug}.json"
-    if not path.exists():
+    path = _find_progress(project_root, slug)
+    if path is None:
         return None
     try:
         return json.loads(path.read_text(encoding="utf-8-sig"))
@@ -353,6 +353,27 @@ def _find_plan(project_root: Path, slug: str) -> Path | None:
     return None
 
 
+def _find_progress(project_root: Path, slug: str) -> Path | None:
+    """The checkpoint, in either layout — the companion `_find_plan` always had and this did not.
+
+    Three call sites hardcoded `.claude/knowledge-base/implementations/` while `_find_plan`,
+    written directly above them, already handled both. `rules/knowledge-base-location.md` makes
+    the standalone layout (`<repo>/knowledge-base/`) canonical for the kit's own repository —
+    which is where the kit dogfoods itself. There, all three answered SKIP: `_read_progress`
+    returned None, and the schema and checkpoint-consistency gates reported
+    "no progress checkpoint — implement may not have run" for a checkpoint sitting on disk.
+
+    A gate that reports SKIP because it looked in the wrong directory is indistinguishable in
+    the report from one that legitimately had nothing to check, which is why this survived.
+    """
+    for base in (project_root / ".claude" / "knowledge-base" / "implementations",
+                 project_root / "knowledge-base" / "implementations"):
+        candidate = base / f".progress-{slug}.json"
+        if candidate.exists():
+            return candidate
+    return None
+
+
 _PATTERNS_SKILL_RE = re.compile(r"\b([A-Za-z0-9_]+(?:-[A-Za-z0-9_]+)*-patterns)\b")
 
 
@@ -401,8 +422,11 @@ def check_progress_schema_gate(project_root: Path, slug: str) -> dict[str, Any]:
     A malformed `.progress-{slug}.json` (missing `tasks` envelope, `task_id` instead
     of `id`, missing `phase`) makes every phase-scoped gate degrade silently. This
     gate turns that into a loud, early failure (Unbreakable Rule 8)."""
-    path = (project_root / ".claude" / "knowledge-base" / "implementations"
-            / f".progress-{slug}.json")
+    # Falls back to the plugin path when neither layout holds a checkpoint, so the schema
+    # check still reports "missing" against a concrete path rather than crashing on None.
+    path = _find_progress(project_root, slug) or (
+        project_root / ".claude" / "knowledge-base" / "implementations" / f".progress-{slug}.json"
+    )
     from check_progress_schema import check_progress_schema
 
     report = check_progress_schema(path)
@@ -420,10 +444,9 @@ def check_checkpoint_consistency_gate(project_root: Path, slug: str) -> dict[str
     task points at a real commit, and every plan task referenced by a real commit is
     recorded as committed. Catches a checkpoint that drifted out of sync with reality
     (e.g. a task finished + committed but the .progress update was skipped)."""
-    path = (project_root / ".claude" / "knowledge-base" / "implementations"
-            / f".progress-{slug}.json")
+    path = _find_progress(project_root, slug)
     plan = _find_plan(project_root, slug)
-    if not path.exists():
+    if path is None:
         return {"name": "checkpoint_consistency", "status": "SKIP",
                 "reason": "no progress checkpoint — implement may not have run"}
     if plan is None:

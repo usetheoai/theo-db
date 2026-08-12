@@ -243,3 +243,59 @@ def test_patterns_advisory_absent_when_no_citation(tmp_path: Path) -> None:
     (plans / "demo-plan.md").write_text("# Plan: demo\n## Goal\nNothing special here.\n")
     r = check_patterns_advisory(tmp_path, "demo")
     assert r["status"] == "N/A"
+
+
+def _standalone_project(tmp_path: Path, *, tasks: list[dict]) -> Path:
+    """A project in the STANDALONE layout — knowledge-base at the root, no `.claude/` wrapper.
+
+    `rules/knowledge-base-location.md` makes this canonical for the kit's own repository, which
+    is exactly where the kit dogfoods itself.
+    """
+    (tmp_path / "knowledge-base" / "plans").mkdir(parents=True)
+    (tmp_path / "knowledge-base" / "implementations").mkdir(parents=True)
+    (tmp_path / "knowledge-base" / "plans" / "s-plan.md").write_text(
+        "## Phase 1 — core\n\n### T1.1 — first\n### T1.2 — skipped\n", encoding="utf-8"
+    )
+    (tmp_path / "knowledge-base" / "implementations" / ".progress-s.json").write_text(
+        json.dumps({"tasks": tasks}), encoding="utf-8"
+    )
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    return tmp_path
+
+
+def test_find_progress_reads_the_standalone_layout(tmp_path: Path) -> None:
+    """Three call sites hardcoded `.claude/`, while `_find_plan` beside them handled both.
+
+    In the standalone layout every one of them answered SKIP — "no progress checkpoint,
+    implement may not have run" — for a checkpoint sitting on disk. A gate that skips because
+    it looked in the wrong directory is indistinguishable in the report from one that
+    legitimately had nothing to check, which is why it survived.
+    """
+    from run_validation import _find_progress
+
+    root = _standalone_project(tmp_path, tasks=[{"id": "T1.1", "phase": 1, "status": "committed"}])
+    found = _find_progress(root, "s")
+    assert found is not None
+    assert found == root / "knowledge-base" / "implementations" / ".progress-s.json"
+
+
+def test_find_progress_still_prefers_the_plugin_layout(tmp_path: Path) -> None:
+    """The plugin layout is canonical for every consumer; standalone is the single exception."""
+    from run_validation import _find_progress
+
+    root = _standalone_project(tmp_path, tasks=[])
+    plugin = root / ".claude" / "knowledge-base" / "implementations"
+    plugin.mkdir(parents=True)
+    (plugin / ".progress-s.json").write_text(json.dumps({"tasks": []}), encoding="utf-8")
+    assert _find_progress(root, "s") == plugin / ".progress-s.json"
+
+
+def test_checkpoint_gate_catches_a_skipped_task_in_the_standalone_layout(tmp_path: Path) -> None:
+    """End-to-end: the two defects compounded — the gate could not find the checkpoint, and
+    even when it did it could not see an omitted task."""
+    from run_validation import check_checkpoint_consistency_gate
+
+    root = _standalone_project(tmp_path, tasks=[{"id": "T1.1", "phase": 1, "status": "committed"}])
+    result = check_checkpoint_consistency_gate(root, "s")
+    assert result["status"] == "FAIL"
+    assert [f["code"] for f in result["findings"]] == ["plan_task_absent_from_progress"]

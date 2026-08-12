@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import threading
 from datetime import date
+import re
 from pathlib import Path
 
 import pytest
@@ -329,3 +330,36 @@ def test_emit_json_summary_score_caps_per_golden_rule() -> None:
     assert emit_json_summary([], "FAIL_SOFT", [])["score_cap"] == 70
     assert emit_json_summary([], "FAIL_HARD", [])["score_cap"] == 49
     assert emit_json_summary([], "INVALID", [])["score_cap"] == 0
+
+
+def test_the_shipped_template_parses_when_you_follow_its_own_instructions(tmp_path: Path) -> None:
+    """The template is the only thing a new repo reads, and it used to describe a format the
+    parser rejects.
+
+    It said "one language identifier per line" and listed `# typescript`; uncommenting that —
+    the happy path for every new install — raised `ValueError: malformed line: 'typescript'`.
+    The code was right and the doc was wrong, which is the worse direction. A test that asserts
+    the parser's behaviour cannot catch that; only one that READS THE DOC can.
+    """
+    template = Path(__file__).resolve().parents[3] / "rules" / "code-quality-languages.txt"
+    # A commented example is a `#` line whose FIRST pipe-field is a bare lowercase identifier.
+    # Matching on "has a pipe and says ENABLED" also catches the line documenting the STATUS
+    # column itself (`STATUS  ENABLED | DISABLED | DEFER`), which is prose, not an example.
+    examples = [
+        stripped
+        for line in template.read_text(encoding="utf-8").splitlines()
+        if line.startswith("#")
+        and (stripped := line.lstrip("#").strip())
+        and re.match(r"^[a-z][a-z0-9]*\s*\|", stripped)
+    ]
+    assert examples, f"{template} offers no commented example line to uncomment"
+
+    rule = tmp_path / "languages.txt"
+    rule.write_text("\n".join(examples) + "\n", encoding="utf-8")
+    cfg = load_languages_config(rule)
+
+    assert len(cfg) == len(examples)
+    assert "typescript" in cfg
+    for language, entry in cfg.items():
+        assert entry["manifest"], f"{language} example declares no manifest marker"
+        assert entry["status"] == "ENABLED"

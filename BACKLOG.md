@@ -103,7 +103,7 @@ Registro isso porque "nenhum item morreu" é o resultado que mais merece desconf
 lote estava bem escolhido, ou a régua foi aplicada frouxa. Aqui foi o primeiro caso apenas porque cada item
 já nascera atado a uma medição nossa (gate G5) — o que é diferente de estar atado a um eixo.
 
-## B-001 — `cargo pgrx test` não roda: o binário de teste morre em `CurrentMemoryContext`   [ ]
+## B-001 — `cargo pgrx test` não roda: o binário de teste morre em `CurrentMemoryContext`   [x]
 
 domain: engine-pgrx
 repo: theo-db
@@ -432,7 +432,7 @@ evidence: none-yet
 why_now: 109 artefatos de benchmark sintético e nenhuma instalação real. `theo-rag` e `theo-memory` — os produtos de IA do próprio time — declaram `docker compose up -d pgvector`. O âncora de dogfood está `planned`. E o defeito do planner medido em 2026-08-09 prova o custo disso: o índice vetorial era rejeitado em todos os cenários, entregando 182 ms onde havia 6 ms — **nenhum dos 109 benchmarks pegou**, porque todos forçam o caminho que querem medir. Um usuário real teria pego no primeiro dia.
 status: raw
 dod:
-  - `theo-rag` servindo consultas reais sobre TheoDB na infraestrutura que o time opera
+  - `theo-rag` servindo consultas reais sobre TheoDB no **`app-dev.usetheo.dev`** (ambiente trocado pelo owner em 2026-08-10; era "infraestrutura de produção")
   - âncora de dogfood em `running`, com ao menos 3 evidências e 1 história de falha (soft caps da golden rule)
   - ao menos um defeito encontrado por uso, não por benchmark — é a prova de que o dogfood está funcionando
 
@@ -534,13 +534,72 @@ suggested_mode: bug
 source: discover-review
 evidence: `wiki/benchmarks/m188-suite-18-falhas-classificadas.md` — `explain_scan shows real pages_read (got 0)`, `the table must span >= 2 chunk groups (scanned 0)`, `with the GUC on the selective predicate must prune (got 0)`. Cinco testes, três módulos, **a mesma assinatura**.
 why_now: cinco testes de módulos diferentes falhando com contador em zero sugere causa comum. A distinção decide tudo: se for instrumentação, conserta-se o teste; **se for produto, o chunk-skip não está podando** — um defeito de performance real e silencioso no pilar colunar, exatamente a classe que o m175 revelou no planner.
-status: raw
+status: triaged
+measured_evidence: `wiki/benchmarks/b015-cinco-contadores-em-zero-duas-causas.md` — medido 2026-08-11. **Não havia causa comum**, e a hipótese de paralelismo do item está refutada. Família A (3 testes colunares) = fixture: o `pg_test` roda em transação e o colunar nunca materializa stripe (0/0 na transação, 4/5 pós-commit, 30/31 com `maintenance_work_mem` baixo) — o produto sempre podou. Família B (2 testes de autotune) = defeito real: o caminho *resume* do M118, default de todo índice V1, nunca reportou as métricas (kill-switch `off` → `pages=112 cand=38`; `on` → `0/0`).
 dod:
   - determinado por medição se os contadores não incrementam ou se o caminho de varredura não é tomado
   - se for produto: o chunk-skip poda e os cinco passam; se for instrumentação: os testes medem o que existe
   - **não** afrouxar a asserção antes de saber qual é o caso
 
 > Registered 2026-08-10 by `/backlog-item` (slug: `contadores-em-zero`).
+
+> **Medido em 2026-08-11 — os cinco NÃO têm causa comum. São dois defeitos diferentes, e a hipótese
+> de paralelismo está REFUTADA nos dois.** Medido contra `ghcr.io/usetheoai/theo-db:0.140.0` (a imagem
+> é de 2026-07-24, **posterior** ao commit `be00b86` que introduziu a instrumentação — o binário tem o
+> código que se está medindo).
+>
+> **CAUSA DA FAMÍLIA A, provada em 2026-08-11 — é o FIXTURE, e a correção não afrouxa nada.** O
+> `#[pg_test]` roda cada teste dentro de **uma transação** (revertida ao fim). O escritor colunar segura
+> as linhas no *pending set* e só materializa um stripe durável quando o buffer excede
+> `maintenance_work_mem` ou no pre-commit (M104). Sob os 64 MB default, 50 000 linhas estreitas nunca
+> alcançam esse limite e o commit nunca chega — então **não existe chunk-group algum** para o zone-map
+> podar. Medido na mesma sessão, mesmas linhas:
+>
+> | condição | `skipped` / `scanned` |
+> |---|---|
+> | dentro da transação (o que o `pg_test` faz) | **0 / 0** |
+> | após `COMMIT` | 4 / 5 |
+> | dentro da transação, com `maintenance_work_mem = '64kB'` | **30 / 31** |
+>
+> O zone-map estava podando o tempo todo; o fixture é que nunca produzia o que ele poda. **Correção
+> aplicada em `seed_clustered`** (`columnar_project.rs`): baixar `maintenance_work_mem` para que o flush
+> incremental que o produto **já implementa** de fato ocorra no teste. O DoD deste item proíbe
+> explicitamente a outra rota — afrouxar a asserção —, que teria escondido uma feature funcionando
+> atrás de um teste verde.
+>
+> **Família A — colunar (testes 3, 4, 5): o produto está CORRETO. O chunk-skip PODA.** Replicado o
+> `seed_clustered(50_000)` em SQL puro: `SELECT a FROM t_col WHERE a = 25000` devolve
+> **`skipped=4 scanned=5`** — quatro dos cinco chunk-groups podados. Idêntico em três caminhos: statement
+> de topo, **SPI aninhado** (função PL/pgSQL, o mesmo mecanismo do `#[pg_test]`) e conexão nova com os
+> GUCs default. E com `max_parallel_workers_per_gather` em 0 **e** em 4 o resultado é o mesmo, porque o
+> `Custom Scan (theodb_columnar_project)` não paraleliza. A hipótese registrada aqui em 2026-08-10 —
+> `thread_local` cego a workers paralelos — **não se sustenta**: além de o plano não paralelizar, o
+> próprio `seed_clustered` já executa `SET max_parallel_workers_per_gather = 0`
+> (`columnar_project.rs:840`), de modo que os testes nunca correram sob paralelismo.
+>
+> **Família B — autotune (testes 1, 2): DEFEITO REAL, reproduzido.** `theodb.explain_scan` devolve
+> `pages_read=0` e `candidates_seen=0` **enquanto o plano usa o índice e a consulta devolve as linhas
+> certas**:
+>
+> | escala | plano observado | `explain_scan` |
+> |---|---|---|
+> | 2 000 × `vector(64)` | `Index Scan using esc2_e_idx` | `pages=0 cand=0 lat_us=1105 results=5` |
+> | 20 000 × `vector(64)` | `Index Scan using esc3_e_idx` (escolhido **sem** nenhum `SET`) | `pages=0 cand=0 lat_us=1697 results=5` |
+> | idem, `max_parallel_workers_per_gather=0` | idem | `pages=0 cand=0 lat_us=2595` |
+>
+> `results=5` e `lat_us` não-trivial provam que a consulta executou; `pages=0` prova que
+> `bump_scan_pages`/`bump_scan_candidates` (`hnsw_page/search.rs:337-338`) não foram alcançados. Não há
+> caminho de saída entre o início de `traverse` e os dois bumps exceto índice vazio
+> (`search.rs:181`) e os `Err` de codebook corrompido, então a leitura mais provável é que
+> `traverse` não seja o caminho executado por este scan — hipótese ainda **não** confirmada.
+>
+> **Achado colateral com impacto próprio:** `explain_scan` só reconhece índices cujo AM é
+> `theodb_hnsw`. Um índice criado pela sintaxe pgvector (`USING hnsw`, o alias do shim — `pg_am` OID
+> distinto: `hnsw=19173` vs `theodb_hnsw=16568`) devolve
+> `(no theodb_hnsw index on this table)`. **Todo índice que o `theo-rag` cria é invisível para o
+> diagnóstico e para o autotune.** Segundo achado: um índice criado com o opclass **default** do AM
+> (`theodb_hnsw_l2_ops`) nunca serve o operador `<=>`, e o plano cai em `Sort` + `Seq Scan` — o default
+> do AM é L2 e a superfície de diagnóstico assume cosine.
 
 > **Hipótese de causa, 2026-08-10 — lida no código, não medida ainda.** Os contadores são `thread_local!`
 > (`src/am/columnar.rs:50-62`), e o próprio comentário admite ser *"best-effort under nested scans"*. O teste
@@ -562,17 +621,20 @@ domain: ai-surface
 repo: theo-db
 suggested_mode: bug
 source: discover-review
-evidence: `pg_embed_unreachable_endpoint_fails_typed` e o par de `rerank` recebem `theodb.embed: refusing to call 127.0.0.1 — it resolves to a blocked internal address`.
+evidence: `pg_embed_unreachable_endpoint_fails_typed` e o par de `rerank` recebem `theodb.embed: refusing to call 127.0.0.1 — it resolves to a blocked internal address`. **Ampliado em 2026-08-11 — são TRÊS testes, não dois.** A suíte completa (`434 passed; 6 failed`) mostra que `http::m104_breaker_success_closes` tem a mesma causa por outro sintoma: o log traz cinco `theodb egress guard: bt denied host 127.0.0.1 -> blocked address 127.0.0.1` seguidos de `ERROR: open after K failures` (`http.rs:320`). O teste quer provar que **um sucesso em HalfOpen FECHA o disjuntor**, e nunca há sucesso — a guarda recusa loopback antes de qualquer conexão, então o disjuntor só acumula falhas e abre. É o mesmo produto-certo-teste-desatualizado, agora atingindo também a máquina de estados do circuit breaker.
 why_now: os testes querem provar erro **tipado** para endpoint inalcançável e recebem um erro tipado **diferente** — a guarda SSRF recusa loopback antes de conectar. **O produto está certo e o teste está desatualizado:** a guarda é mais nova que ele.
-status: raw
+status: triaged
+resolvido: 2026-08-11 — os TRÊS corrigidos, sem tocar a guarda. `embed` e `rerank` passaram a apontar para `invalid.invalid` (TLD reservado RFC 2606, não resolve em lugar nenhum), com a mensagem MEDIDA no binário shipado, não adivinhada. O do disjuntor (`m104_breaker_success_closes`) passou a registrar as K falhas direto na máquina de estados via `breaker_record`, ficando hermético — coerente com o comentário que ele já carregava ("assert the state-machine directly") e com a segunda metade, que sempre usou essa porta. **Medição que decidiu o endereço:** um IP TEST-NET (`192.0.2.1`) passa a guarda e produz `endpoint call failed: the timeout of the request was reached`, mas leva **90,6 s** com os 2 retries — inaceitável numa suíte; o DNS falha em milissegundos.
 dod:
   - os testes usam um endereço externo inalcançável, provando o erro que pretendem provar
   - a guarda SSRF permanece intacta — afrouxá-la para fazer teste passar seria abrir um SSRF
   - um teste separado cobre a própria guarda, que hoje só é exercitada por acidente
+  - **os TRÊS testes passam** — `embed`, `rerank` e `http::m104_breaker_success_closes`; o do disjuntor precisa de um caminho que produza SUCESSO em HalfOpen, o que a guarda impede por loopback
+  - a máquina de estados do disjuntor ganha cobertura que não dependa de rede alguma (o comentário do próprio teste admite que ele não consegue ser hermético: *"We can't hit a live 4xx hermetically"*)
 
 > Registered 2026-08-10 by `/backlog-item` (slug: `egress-guarda-ssrf`).
 
-## B-013 — A suíte não roda no CI, então a próxima regressão espera meses   [ ]
+## B-013 — A suíte não roda no CI, então a próxima regressão espera meses   [x]
 
 domain: engine-pgrx
 repo: theo-db
@@ -642,4 +704,274 @@ dod:
 > opera, e agora ela está diante deles como uma mudança que **cabe numa tela** em vez de 550 arquivos. Era
 > disto que o item precisava, e é o último passo que existia do meu lado.
 
-Próximo id livre: **`B-018`**. Ids são monotônicos e nunca reusados.
+> **2026-08-10 — o gate mudou de ambiente, por decisão do owner.** `running` deixa de exigir produção e passa
+> a exigir o `theo-rag` rodando no **`app-dev.usetheo.dev`** sobre o TheoDB, servindo consultas. Registrado na
+> `dogfood-golden-rule.md § 3`.
+>
+> **Medido antes de aceitar o novo alvo:** o `app-dev` responde 200 em 0,5 s, mas **devolve a SPA para
+> qualquer rota** — `/api/rag/health` retornou HTML, e uma rota inventada também deu 200. **Não há evidência
+> de que o `theo-rag` esteja implantado lá**, nem sobre qual banco. O gate novo aponta para um ambiente cujo
+> estado ainda não foi verificado; verificá-lo é a primeira coisa que ele exige.
+>
+> **2026-08-10 — o `theo-rag` adotou o TheoDB em `main`.** O owner mergeou o
+> [#211](https://github.com/usetheoai/theo-rag/pull/211) e autorizou o merge dos demais PRs abertos; os 7
+> foram analisados e mergeados. `origin/main` do `theo-rag` agora declara
+> `image: ghcr.io/usetheoai/theo-db:0.140.0` com o mount corrigido do PG 18.
+>
+> **DoD 1 avança de "verificado localmente" para "adotado no repositório".** O que separa isto de `running`
+> continua sendo o mesmo e não encolheu: **o produto rodando com carga real ao longo do tempo**, produzindo
+> uma história de falha em operação. Adoção em `main` é uma declaração; uso é um fato — e só o segundo move o
+> hard cap 2 da golden rule.
+>
+> **Um conflito que eu causei, registrado:** mergear os PRs do dependabot em `main` antes do release deixou o
+> [#197](https://github.com/usetheoai/theo-rag/pull/197) `CONFLICTING` em três workflows. Resolvido por um PR
+> de sincronização ([#212](https://github.com/usetheoai/theo-rag/pull/212)), honrando a deleção deliberada de
+> `build-publish.yml` que o `develop` havia feito. A ordem inversa — release primeiro, bumps depois — teria
+> evitado o conflito inteiro.
+
+## B-018 — O planner não alcança o HNSW no caminho de JUNÇÃO, mesmo com `enable_seqscan = off`   [ ]
+
+domain: vetorial
+repo: theo-db
+suggested_mode: bug
+source: discover-live-test
+evidence: suíte de integração do `theo-rag` contra `ghcr.io/usetheoai/theo-db:0.140.0` (2026-08-10): `o planner deveria alcançar o índice HNSW sob enable_seqscan = off`. Plano escolhido: `Limit → Sort → Nested Loop → Index Scan` — **há um `Sort` acima**, então o índice não está servindo a ordenação.
+why_now: a correção do planner de hoje ([m175](wiki/benchmarks/m175-planner-cost-inversion-verdict.md)) resolveu a busca simples e **não cobre o caminho de junção**, que é o que o `theo-rag` usa de verdade. Encontrado pela suíte do produto, não por benchmark — o quarto defeito do dia pelo mesmo mecanismo.
+status: raw
+dod:
+  - o teste `ensureHnswIndex` do `theo-rag` passa sem `Sort` acima do `Index Scan`
+  - determinado se a causa é o mesmo modelo de custo (m175) num caminho não coberto, ou outra
+  - regressão coberta por teste nosso, não só pelo do `theo-rag`
+
+> Registered 2026-08-10 by `/backlog-item` (slug: `planner-hnsw-no-join`).
+
+> **Medido em 2026-08-11 — NÃO REPRODUZIU em seis cenários. O item continua aberto, e o que muda é
+> saber onde ele não está.** Reproduzida a query exata do `theo-rag` (`vector-retriever.integration.test.ts:386`
+> — `embeddings ⋈ chunks ⋈ documents`, `ORDER BY e.vector <=> $1`, `LIMIT`), contra
+> `ghcr.io/usetheoai/theo-db:0.140.0`, sob `SET LOCAL enable_seqscan = off`. Em **todos** os seis o plano
+> foi o correto — `Index Scan using embeddings_vector_hnsw ... Order By: (vector <=> ...)`, **sem `Sort`
+> acima**:
+>
+> | # | cenário | plano |
+> |---|---|---|
+> | 1 | literal via sub-select (InitPlan) | HNSW serve a ordenação |
+> | 2 | parâmetro `$1` via `PREPARE`, execuções 1–5 (custom plan) | idem |
+> | 3 | parâmetro `$1`, execuções 6–7 (generic plan) | idem |
+> | 4 | pós-`TRUNCATE`, sem `ANALYZE` | idem |
+> | 5 | índice criado **antes** do seed (tabela vazia) + 1000 linhas incrementais + `ANALYZE` | idem |
+> | 6 | idem sem `ANALYZE` (`reltuples=0` no índice, `-1` nas três tabelas) | idem |
+>
+> Isto **não** absolve o produto: o próprio teste do `theo-rag` declara a falha como **1 em 11
+> execuções** (`vector-retriever.integration.test.ts:428` — *"a falha não reproduz sob demanda"*), e seis
+> tentativas determinísticas não derrubam um evento intermitente. O que a medição estabelece é que as
+> hipóteses baratas — parâmetro vs literal, generic plan, estatística ausente, ordem de criação do
+> índice — **não são o gatilho**.
+>
+> **Próxima medição, e ela é cara por natureza:** rodar a suíte do `theo-rag` em laço até a ocorrência,
+> capturando o plano (o teste já o imprime na mensagem de falha desde o #167). Um evento de 1-em-11 exige
+> repetição, não outro cenário inventado. Enquanto isso o item fica `raw`, com o espaço de busca
+> reduzido — que é o resultado honesto desta rodada.
+
+## B-019 — `CREATE INDEX` de HNSW não é idempotente: estoura em vez de ser no-op   [ ]
+
+domain: vetorial
+repo: theo-db
+suggested_mode: bug
+source: discover-live-test
+evidence: `error: duplicate key value violates unique constraint "pg_class_relname_nsp_index"` no `ensureHnswIndex_is_idempotent` do `theo-rag`. **Medido em 2026-08-11:** reproduz só sob concorrência, e reproduz IDÊNTICO num btree nativo do PostgreSQL (controle sem uma linha de código nosso).
+why_now: o `theo-rag` chama `ensureHnswIndex` no caminho de inicialização, e ele precisa ser seguro para reexecução — é o padrão de qualquer migração. Estourar em vez de ser no-op quebra reinício de serviço.
+status: killed
+kill_reason: não é defeito do TheoDB. Serial, `CREATE INDEX IF NOT EXISTS` sobre HNSW é no-op correto (`NOTICE ... skipping`) e sem `IF NOT EXISTS` dá o erro tipado `42P07` — nunca viola o catálogo. A falha só aparece com duas conexões concorrentes, e o **controle com btree nativo do PostgreSQL** (3M linhas, build 21,7 s, zero código nosso) falha com a mensagem idêntica: `IF NOT EXISTS` não é atômico no engine, e dois `CREATE INDEX` tomam `ShareLock`, que é compatível consigo mesmo. O que é nosso é apenas a LARGURA da janela — ver `B-020`. Ação real: serializar `ensureHnswIndex` no consumidor (`pg_advisory_lock`); 9 arquivos de teste do `theo-rag` o chamam e o vitest paraleliza arquivos contra um banco só.
+dod:
+  - recriar um índice HNSW existente é no-op ou erro tipado claro, nunca violação de constraint do catálogo
+  - `ensureHnswIndex_is_idempotent` e `ensureHnswIndex_creates_missing_index` passam
+  - verificado se `CREATE INDEX IF NOT EXISTS` se comporta corretamente no nosso AM
+
+> Registered 2026-08-10 by `/backlog-item` (slug: `hnsw-create-index-idempotente`).
+
+> **Medido em 2026-08-11 — o defeito NÃO é nosso, e o controle é o que prova.** Reproduzido contra
+> `ghcr.io/usetheoai/theo-db:0.140.0`. Serial, o caminho é **correto**: `CREATE INDEX IF NOT EXISTS`
+> repetido emite `NOTICE: relation already exists, skipping` e é no-op; sem `IF NOT EXISTS` emite o
+> erro tipado `42P07`. **Nunca** viola o catálogo. O erro do `theo-rag` só reproduz com **duas conexões
+> concorrentes** — e aí reproduz literalmente:
+> `Key (relname, relnamespace)=(embeddings_vector_hnsw, 2200) already exists`.
+>
+> **Controle decisivo:** o mesmo `CREATE INDEX IF NOT EXISTS` concorrente sobre um **btree nativo do
+> PostgreSQL** (3M linhas, build de 21,7 s — zero código nosso) falha com a **mensagem idêntica**. O
+> mecanismo é do PostgreSQL upstream: `IF NOT EXISTS` não é atômico — a checagem de existência e a
+> criação não são cobertas por lock exclusivo, e dois `CREATE INDEX` tomam `ShareLock`, que é compatível
+> consigo mesmo. Nada no nosso AM participa disso.
+>
+> O que é nosso é a **largura da janela**: o build HNSW leva segundos (ver `B-020`), o que transforma
+> uma corrida teórica em falha rotineira. E o gatilho no consumidor está medido: **9 arquivos de teste
+> do `theo-rag` chamam `ensureHnswIndex`**, e o vitest roda arquivos em paralelo contra um banco só.
+>
+> **Veredito: `ITEM_KILLED` como defeito do TheoDB** (matar um item medido é resultado de sucesso do
+> `/discover`, não falha). A ação real é do lado do consumidor — serializar o `ensureHnswIndex` com
+> `pg_advisory_lock` — mais `B-020` do nosso lado, que encolhe a janela. Corrigir o nosso AM para
+> "resolver" um comportamento do engine seria workaround sobre causa alheia.
+
+## B-020 — `CREATE INDEX` de HNSW é 93× mais lento que inserir as mesmas linhas   [ ]
+
+domain: vetorial
+repo: theo-db
+suggested_mode: evolve
+source: discover-bug
+evidence: medido em 2026-08-11 contra `ghcr.io/usetheoai/theo-db:0.140.0`, mesmas 1000 linhas `vector(1536)`, mesma sessão, mesmo binário — **build em lote (`CREATE INDEX` sobre a tabela cheia): 60 643 ms**; **incremental (índice vazio + `INSERT` das mesmas 1000 linhas): 647 ms**. Recall verificado íntegro nos dois caminhos (top-5 do índice ≡ top-5 exato do seqscan, interseção 5/5), então não é o índice incremental que está pulando trabalho.
+why_now: a assimetria é o **inverso** do esperado — um build em lote enxerga todos os vetores de uma vez e deveria ganhar do caminho um-a-um, que é o que a doc do pgvector recomenda justamente por isso. O custo é sentido por uso real: o teste do planner do `theo-rag` gastava 29 s de um `testTimeout` de 30 s (97% do orçamento) e o próprio comentário do teste registra a reordenação feita para contorná-lo; nesta sessão o mesmo build estourou um timeout de 2 min. É também o que alarga a janela de corrida do `B-019`.
+status: raw
+dod:
+  - determinado por profiling qual etapa do `ambuild` domina os 60 s (o M176 já demonstrou o método: `perf` com `--pid=host` e símbolos resolvidos)
+  - build em lote deixa de ser mais lento que o caminho incremental equivalente, ou a razão de ser é documentada e medida
+  - regressão coberta por benchmark que compara os dois caminhos no mesmo binário
+
+> Registered 2026-08-11 by `/discover --mode bug` (slug: `hnsw-build-em-lote-lento`), como achado
+> colateral da medição do `B-019`.
+
+## B-021 — O diagnóstico não enxerga índice criado pela sintaxe pgvector, e o opclass default não serve `<=>`   [ ]
+
+domain: vetorial
+repo: theo-db
+suggested_mode: bug
+source: discover-bug
+evidence: medido em 2026-08-11 contra `ghcr.io/usetheoai/theo-db:0.140.0`. (a) `theodb.explain_scan` sobre uma tabela cujo índice foi criado com `USING hnsw` (o alias do shim, `sql/vector--0.6.0.sql:49`) devolve `(no theodb_hnsw index on this table)` — o alias é uma segunda entrada em `pg_am` (OID `hnsw=19173` vs `theodb_hnsw=16568`) e a resolução casa pelo nome do AM. (b) um índice criado com o opclass **default** do AM (`theodb_hnsw_l2_ops`, `opcdefault=t`) não serve o operador `<=>`: o plano medido cai em `Limit → Sort → Seq Scan`, enquanto `theodb_hnsw_cosine_ops` produz `Index Scan ... Order By`.
+why_now: os dois se somam contra o consumidor real. **Todo** índice que o `theo-rag` cria usa `USING hnsw` — portanto é invisível ao `explain_scan` e ao autotune, justamente nas consultas que o dogfood exercita. E `scan_stats` hardcoda `<=>` (`autotune.rs:210`), então quem cria o índice sem nomear o opclass (aceitando o default L2) nunca é medido e não recebe aviso — o diagnóstico devolve zeros silenciosos em vez de dizer "este índice não responde a este operador".
+status: raw
+dod:
+  - `explain_scan` resolve índices pelo **handler** (`theodb_hnsw_amhandler`), não pelo nome do AM, cobrindo o alias
+  - operador incompatível com o opclass do índice produz erro/aviso tipado, nunca zero silencioso
+  - regressão coberta por teste que cria o índice pelas DUAS sintaxes
+
+> Registered 2026-08-11 by `/discover --mode bug` (slug: `diagnostico-cego-ao-shim`), como achado
+> colateral da medição do `B-015`.
+
+## B-022 — Dois testes declaram FRAGMENTO em `#[pg_test(error = …)]`, e o pgrx compara a mensagem INTEIRA   [ ]
+
+domain: engine-pgrx
+repo: theo-db
+suggested_mode: bug
+source: discover-review
+evidence: suíte completa de 2026-08-11 (`434 passed; 6 failed`). `graph::csr_build_guards_u32_boundary` declara `error = "must fit in u32"` e o produto emite `theodb.graph_build: node ids must fit in u32 (max 4294967295)`; `vectorizer::process_delete_failure_does_not_mark_done` declara `error = "does not exist"` e o produto emite `column "emb" of relation "dst_bad" does not exist`. **A comparação do pgrx é igualdade exata** — lido no fonte da dependência, `pgrx-tests-0.19.0/src/framework.rs:174`: `if Some(received_error_message) == expected_error`.
+status_nota: resolvido em 2026-08-11 — os dois passaram a declarar a mensagem INTEIRA. Efeito colateral desejado e registrado: o texto do erro vira contrato, e mudá-lo passa a quebrar o teste (para o do `vectorizer` a mensagem é do ENGINE, `analyze.c`, então o contrato é do PostgreSQL).
+why_now: **o produto está CORRETO nos dois** — cada um emitiu exatamente o erro tipado que o teste existe para provar, e a asserção reprova mesmo assim. É a classe que o m188 chamou de classificação errada de teste, e ela custa duas vagas permanentes no baseline de falhas do CI, protegendo dívida em vez de produto. O conserto é declarar a mensagem inteira; o cuidado é que ela então vira contrato — mudar o texto do erro passa a quebrar o teste, que é o comportamento desejado para um erro tipado.
+status: raw
+dod:
+  - os dois testes passam com a mensagem completa declarada, sem afrouxar para `should_panic` genérico
+  - verificado se há OUTROS `#[pg_test(error = …)]` no repositório declarando fragmento (mesma classe, ainda verdes por coincidência de texto)
+  - baseline de falhas do CI baixado no mesmo commit
+
+> Registered 2026-08-11 by `/discover --mode review` (slug: `pg-test-error-fragmento`), da investigação
+> das 6 falhas remanescentes após o `B-015`.
+
+## B-023 — Um teste de PERFORMANCE mora na suíte funcional, e ele reprovou com AVX 51% mais lento   [ ]
+
+domain: hot-path
+repo: theo-db
+suggested_mode: bug
+source: discover-review
+evidence: suíte completa de 2026-08-11 — `vec::cosine_simd_per_candidate_speedup` falha com `SIMD cosine must not be slower than scalar (avx=15.75800491 scalar=10.426654568)` (`vec.rs:553`). A execução ocorreu numa máquina com outros dois contêineres ativos e uma suíte de 440 testes concorrendo por CPU.
+why_now: as duas leituras possíveis têm consequências opostas e **a medição atual não as separa**. Se for ruído de ambiente, o teste é flaky por construção — `rules/testing.md § 6` proíbe teste dependente de tempo sem isolamento, e um teste vermelho intermitente treina o time a ignorar vermelho. Se for real, o kernel SIMD do caminho crítico regrediu e está 51% mais lento que a versão escalar que ele existe para superar, o que é defeito de performance no pilar vetorial. Um teste de vazão dentro da suíte funcional não consegue emitir esse veredito: `papers/rigorous-perf-eval-georges-2007.pdf` exige isolamento e variância, e a suíte não oferece nenhum dos dois.
+status: triaged
+medido: 2026-08-11 — **NÃO reproduz isolado, e a falha era do meu AMBIENTE de medição, não do teste.** Rodado sozinho num host sem outros contêineres: `pg_cosine_simd_per_candidate_speedup ... ok` (467,33 s). A execução que reprovou tinha TRÊS contêineres e 440 testes disputando CPU — contenção que eu mesmo criei. **Não há regressão no kernel SIMD**, e não havia teste quebrado para consertar; havia uma medição feita em condição ruim.
+fragilidade_confirmada: o teste continua frágil POR CONSTRUÇÃO, e isso não muda com o resultado acima: mede tempo de parede, **uma amostra de cada**, ordem fixa (AVX sempre primeiro), sem pinagem de núcleo — num host cuja CPU é **híbrida** (i7-1355U, P-cores + E-cores), onde as duas metades podem cair em tipos de núcleo diferentes e a diferença entre eles supera a tolerância de 20%. Ele passa quando a máquina está livre, que é a condição do runner do CI; quebra sob qualquer contenção.
+dod:
+  - ~~determinado por repetição em máquina isolada se `avx < scalar` reproduz~~ **FEITO: não reproduz — é contenção**
+  - alternar as duas medições e comparar MEDIANAS de N repetições, em vez de uma amostra de cada, para cancelar drift de frequência e migração entre P-core/E-core
+  - se ruído: o teste sai da suíte funcional para o harness de benchmark, com variância declarada — não é afrouxado no lugar
+  - se real: causa capturada por profiling e regressão coberta por benchmark reproduzível em `wiki/benchmarks/`
+
+> Registered 2026-08-11 by `/discover --mode review` (slug: `simd-speedup-na-suite-funcional`), da
+> investigação das 6 falhas remanescentes após o `B-015`.
+
+## B-024 — O autotune recomendou `ef_search` sobre contadores em ZERO, e ninguém mediu o alcance   [ ]
+
+domain: vetorial
+repo: theo-db
+suggested_mode: review
+source: discover-review
+evidence: consequência direta do `B-015`, medida em 2026-08-11. O recomendador lê `pages_read` do coletor (`autotune.rs:219` — `let (pages_read, candidates) = (read_scan_pages(), read_scan_candidates())`), e para todo índice V1 exact-f32 esses contadores eram **0** desde o M118, porque o caminho *resume* nunca reportou. O `B-015` corrigiu a instrumentação; **não** investigou o que o recomendador fez enquanto ela esteve cega.
+why_now: um recomendador que decide sobre zero não erra de forma aleatória — erra de forma **sistemática e silenciosa**, e o `theodb._index_scan_stats` guarda essas observações persistidas. Duas perguntas ficaram abertas no review e nenhuma tem resposta medida: (a) recomendações emitidas nesse período são recuperáveis do catálogo e estão erradas? (b) o `recommend_ef` chega a ser sensível a `pages_read`, ou o zero foi inócuo porque a bisseção decide por recall? A segunda pode inocentar tudo — e é exatamente por isso que precisa ser medida em vez de suposta em qualquer direção.
+status: raw
+dod:
+  - determinado por leitura + medição se `recommend_ef` consome `pages_read` no caminho de decisão ou apenas o persiste
+  - se consome: quantificado o erro sobre um índice real, comparando recomendação com contador cego vs instrumentado
+  - se não consome: registrado como honest-negative, e o campo deixa de ser citado como insumo de decisão
+
+> Registered 2026-08-11 by `/review` (slug: `autotune-sobre-zeros`), como followup HIGH obrigatório do
+> verdict `READY_TO_MERGE_WITH_FOLLOWUPS` — `.claude/knowledge-base/reviews/b015-review-2026-08-11.md`.
+
+## B-025 — A imagem `theodb-builder` não traz `cargo-clippy`, então o gate de lint não roda fora do CI   [ ]
+
+domain: engine-pgrx
+repo: theo-db
+suggested_mode: bug
+source: discover-review
+evidence: medido em 2026-08-11 ao tentar rodar o gate de lint localmente contra a imagem que o próprio CI constrói (`docker build --target theodb-rs-builder -t theodb-builder .`): `error: 'cargo-clippy' is not installed for the toolchain '1.97.0-x86_64-unknown-linux-gnu'`, exit 1 — **ferramenta ausente, não lint reprovado**. O `lint-rust.yml` roda no runner self-hosted `theodb-do`, que tem o componente instalado fora da imagem.
+why_now: o `.clippy_args` existe declaradamente para que "CI e local leem o MESMO baseline, sem drift" (comentário no topo do arquivo), e o drift que ele previne é de *argumentos* — mas a **ferramenta** diverge, o que é pior: quem tenta rodar o gate pela imagem oficial recebe exit 1 e, se ler o código de saída sem ler a mensagem, conclui que o lint reprovou. É a forma de falso-negativo que o `code-quality-golden-rule` nomeia `auditor_unavailable_{tool}` e manda registrar em vez de fabricar saída limpa. Nesta sessão o contorno foi `rustup component add` dentro do contêiner, o que funciona e **não** é o conserto: cada quem paga o download de novo.
+status: raw
+dod:
+  - `rustup component add clippy` entra no estágio `theodb-rs-builder` do Dockerfile, e a imagem roda o gate sem passo extra
+  - ~~verificado se `rustfmt` tem o mesmo problema~~ **VERIFICADO 2026-08-11: SIM, e é pior.** `cargo fmt` na imagem devolve `error: 'cargo-fmt' is not installed for the toolchain '1.97.0'`. E o modo de falha é traiçoeiro: `cargo fmt -- --check | grep -c "^Diff in"` imprimiu **`0`** — não porque não havia diffs, mas porque o comando falhou e não produziu saída nenhuma. **Um falso "está tudo limpo" indistinguível do verdadeiro**, exatamente o que o golden rule chama de fabricar saída limpa. Ambos os componentes (`clippy` e `rustfmt`) precisam entrar na imagem.
+  - o toolchain local do desenvolvedor **não** serve de substituto: medido, o `cargo` do host é 1.91.0 e o projeto pina 1.97.0 (`rustfmt 1.9.0-stable`), então formatar fora do contêiner produz um resultado que o CI recusa
+  - o script local documentado no `.clippy_args` roda de ponta a ponta contra a imagem
+
+> Registered 2026-08-11 by `/code-quality` (slug: `builder-sem-clippy`), ao executar o gate de lint do
+> ciclo do `B-015`.
+
+## B-026 — Resíduo do SymQG: função morta com null-deref latente, e o gate de clippy está vermelho por ela   [ ]
+
+domain: engine-pgrx
+repo: theo-db
+suggested_mode: bug
+source: discover-review
+evidence: gate de lint executado em 2026-08-11 (`cargo clippy --features pg18 --no-deps` com o baseline `.clippy_args`): **4 erros, exit 101**, de dois lints que **não estão no baseline** — `clippy::needless_ifs` em `src/am/options.rs:447` e `clippy::implicit_saturating_sub` em `src/am/df_executor.rs:49`. O primeiro é o defeito: `degree_bound_from_relation` (`options.rs:445`) faz `if rd_options.is_null() { }` com **corpo vazio** e desreferencia o ponteiro na linha seguinte. As duas funções irmãs do mesmo arquivo fazem o certo — `lists_from_relation` tem `return DEFAULT_LISTS;` e `sbq_bits_from_relation` tem `return 0;`. O `return` se perdeu só nesta. Introduzido em `34a49d1` (2026-07-17, `impl(E2 T4.1): theodb_symqg reloption`).
+why_now: **o risco de crash hoje é ZERO e é importante dizer isso** — `grep` confirma que a função tem **zero callers**: ela é resíduo do `theodb_symqg`, aposentado e removido da distribuição no M176. Não é um null-deref alcançável; é dead code carregando um. Duas consequências mesmo assim: (a) o `code-quality-golden-rule` classifica dead code exportado sem caller como `FAIL_HARD`, e (b) o gate de lint do repositório está **vermelho**, o que significa que ele não protege mais nada — o próximo defeito de verdade entra sem ser barrado, porque o vermelho já é o estado normal.
+status: triaged
+parcialmente_resolvido: 2026-08-11 — as duas causas do gate vermelho foram corrigidas no mesmo ciclo, porque elas **bloqueavam o merge** do release e a parte segura do conserto não tinha o risco que motivou o adiamento. (a) `degree_bound_from_relation` **removida** (zero callers, verificado por grep antes de apagar); (b) `df_executor.rs:49` passou a usar `saturating_sub` — e a checagem do tipo foi o que tornou isso seguro: `InterruptHoldoffCount` é `volatile uint32` (`miscadmin.h:104`), então satura em 0; sobre um inteiro COM sinal a mesma sugestão do lint daria `-1` e mudaria o comportamento. **O que NÃO foi feito**, e é o que mantém o item aberto: o reloption `degree_bound` (`options.rs:97,286-288`) segue registrado, e removê-lo afeta índices já criados que o declarem.
+dod:
+  - ~~`degree_bound_from_relation` removida~~ **FEITO** (não "consertada" — preencher o `if` manteria código morto de um pilar aposentado)
+  - avaliado se o reloption `degree_bound` (`options.rs:97,286-288`) também sai, e o que isso faz com índices já criados que o declarem
+  - `df_executor.rs:49` resolvido ou entrando no baseline com justificativa — o código lá está **correto** (guarda explícita `> 0`), é só idioma
+  - gate de clippy volta a exit 0 contra a imagem oficial (depende de `B-025`)
+
+> Registered 2026-08-11 by `/code-quality` (slug: `residuo-symqg-null-deref`), ao executar o gate de lint
+> do ciclo do `B-015`. **Nenhum dos 4 erros está nos arquivos alterados por aquele ciclo.**
+
+> **O padrão, medido ao corrigir: foram QUATRO resíduos da MESMA remoção, e o gate só os revelou um por
+> vez.** Cada correção destravava o clippy até o erro seguinte — 4 erros → 2 → 1 → 0, em quatro rodadas.
+> Todos vêm da aposentadoria do `theodb_symqg`/FastScan (M176):
+>
+> | # | Onde | O que sobrou | Custo real |
+> |---|---|---|---|
+> | 1 | `options.rs:445` | `degree_bound_from_relation` com `if is_null(){}` vazio + desreferência | **null-deref latente** (zero callers) |
+> | 2 | `options.rs:70` | doc do `degree_bound`, órfão sobre `DEFAULT_SOAR_LAMBDA_MILLI` | gate vermelho |
+> | 3 | `vec/ah.rs:116` | doc de um "sign LUT" inexistente, órfão sobre `nibble` | gate vermelho |
+> | 4 | `df_executor.rs:49` | `if > 0 { -= 1 }` | nenhum — código correto, só idioma |
+>
+> **Dois dos quatro tinham a frase TRUNCADA no meio** (`int16-accumulator-safe,` / `(a multiple of`), que é
+> a assinatura de um corte parcial — alguém apagou linhas de dentro de um bloco em vez do bloco inteiro.
+> Isso sugere que o M176 foi desfeito por remoção manual, não por uma verificação do que ficava órfão.
+>
+> **A lição operacional:** um gate que reprova em cascata (um erro por vez) esconde a dimensão do
+> problema. Se o gate estivesse verde antes do M176, o primeiro resíduo teria aparecido sozinho, na hora,
+> em vez de quatro deles emergirem meses depois durante um release não relacionado.
+
+## B-027 — Run cancelado deixa o contêiner `suite` órfão, e o run seguinte reprova sem rodar um teste   [ ]
+
+domain: engine-pgrx
+repo: theo-db
+suggested_mode: bug
+source: discover-live-test
+evidence: medido em 2026-08-11 no PR #226. O job `suite` falhou com `docker: Error response from daemon: Conflict. The container name "/suite" is already in use by container "d14937ebd80f…"` — **antes de executar um único teste**. Causa: `rust-suite.yml` usa `docker run --name suite` (nome fixo) e só faz `docker rm -f suite` **depois** do run; quando o run é cancelado — e cada push novo no mesmo PR cancela o anterior — o passo morre antes da limpeza e o contêiner sobrevive no runner self-hosted.
+why_now: o sintoma **mente sobre a causa**. Sem `test result` no log, o gate seguinte faz `line=$(grep -E "^test result" suite.log | tail -1)` e o job aparece no PR como **"suíte reprovou"** — indistinguível de uma regressão real de testes. Passei um ciclo investigando uma falha de testes que não existia. Num repositório onde o gate é "falhas não podem aumentar", confundir lixo de infraestrutura com regressão é o caminho mais curto para alguém subir o baseline sem precisar.
+status: raw
+dod:
+  - `docker rm -f suite` roda ANTES do `docker run` (aplicado neste ciclo — verificar se resolve na prática)
+  - avaliado usar nome único por run (`suite-${{ github.run_id }}`) em vez de nome fixo, que elimina a classe em vez de remediar
+  - o gate distingue "a suíte não emitiu resultado" de "a suíte reprovou" na saída do PR, em vez de os dois lerem igual
+
+> Registered 2026-08-11 by `/discover --mode live-test` (slug: `suite-container-orfao`), ao rodar o
+> release do `B-015`. **Provocado pelos meus próprios pushes sucessivos** — mas qualquer cancelamento
+> reproduz, e cancelamento é uso normal de PR.
+
+Próximo id livre: **`B-028`**. Ids são monotônicos e nunca reusados.
