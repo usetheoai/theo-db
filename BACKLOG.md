@@ -1098,4 +1098,33 @@ dod:
 > segura (remover os dois corpos vazios e unificar a lista de concatenação duplicada entre `Makefile` e
 > `Dockerfile`) foi feita no mesmo ciclo; o colapso em si depende do B-029.
 
-Próximo id livre: **`B-031`**. Ids são monotônicos e nunca reusados.
+## B-031 — 10.283 linhas de cadeia de upgrade duplicada, para um gate que não roda mais e instalações que não existem   [ ]
+
+domain: engine-pgrx
+repo: theo-db
+suggested_mode: evolve
+source: human
+evidence: medido em 2026-08-12 sobre as duas árvores SQL. **Cadeia `theodb_rs` — 9.785 linhas em 4 scripts, ~86% idênticas entre si.** São re-emissões convergentes do SQL de instalação inteiro, geradas por `gen-upgrade-script.py`: `1.0.0--1.1.0` (2391 linhas) e `1.4.0--1.5.0` (2472) divergem em **339 linhas**; pares consecutivos divergem em 55, 274 e 148. O `1.3.0--1.4.0` foge do padrão com 25 linhas — delta real escrito à mão, provando que o gerador não foi usado de forma consistente. **Cadeia `theodb` — 366 linhas em 6 scripts, com o problema espelhado:** deltas escritos à mão que precisam replicar o greenfield. O `theodb--1.5--1.6.sql` redefine `theodb.htap_refresh` e `theodb.olap`, que também vivem em `sql/85-theodb-htap.sql`, e o próprio arquivo admite na linha 6 que "re-aplica em intenção byte-idêntica" — *em intenção*, porque nada verifica. Some-se o shim: `sql/vector--*.sql`, 132 linhas, das quais o install 0.5.1 e o delta 0.5.1→0.6.0 (65 linhas) só existem para quem instalou a 0.5.1.
+why_now: o próprio repositório documenta que o motivo da cadeia deixou de valer. `theodb_rs/sql/theodb_rs--1.3.0--1.4.0.sql` diz, textualmente: *"CONTEXTO (2026-08-08): o projeto está em PRÉ-RELEASE e não há instalação em campo. Este script existe por dois motivos que não dependem disso: (a) o `schema-drift-gate.yml` bloqueia mudança de superfície SQL sem bump de `default_version` ou script de migração; (b) a cadeia de upgrade é append-only."* **O motivo (a) evaporou:** o `schema-drift-gate.yml` invoca `scripts/sql-surface.sh`, removido em `8605677` — o gate não roda. E o `gen-upgrade-script.py`, que produzia as re-emissões, foi removido no mesmo commit: a cadeia não pode mais ser estendida pelo caminho documentado. Sobra uma disciplina de 10.283 linhas mantida por inércia, protegendo instalações que o próprio projeto afirma não existirem, verificada por um gate que não executa.
+status: raw
+dod:
+  - decidido e registrado em ADR se as cadeias de upgrade são **removidas** (uma instalação greenfield por extensão, `default_version` livre) ou **mantidas** — e, se mantidas, qual gate as verifica
+  - nenhuma definição de função existe em dois arquivos ao mesmo tempo; hoje `theodb.htap_refresh` e `theodb.olap` estão no delta e no greenfield, e nada prova que são iguais
+  - a decisão anterior confirma explicitamente a premissa "não há instalação em campo" — ela é de 2026-08-08 e o projeto publicou releases e imagem desde então; eu não consegui verificá-la, e ela é o que sustenta tudo
+  - o ponto cego declarado do oráculo está coberto ou registrado como risco aceito (ver nota abaixo)
+
+> **Nota sobre o ponto cego, que é o achado mais afiado deste item.** `theodb_rs/sql/schema_snapshot.sql`
+> — o oráculo da cadeia — sobreviveu às remoções, e declara o próprio limite: *"`pg_depend` registra
+> MEMBRESIA, não ACL. Um upgrade que perca um `REVOKE ... FROM PUBLIC` passa neste oráculo."* Isso pesa
+> mais aqui do que em quase qualquer outro projeto: **toda a superfície `ai.*` faz HTTP de saída
+> server-side e é deliberadamente revogada de PUBLIC** (`sql/50-theodb-ai.sql` traz cinco `REVOKE` e um
+> comentário avisando para não conceder `ai._chat` a PUBLIC "para consertar" erro de permissão). Um
+> upgrade que perdesse um desses `REVOKE` abriria HTTP de saída para todo papel do banco — e o oráculo
+> aprovaria. É a classe de defeito que a cadeia existe para pegar, e é justamente a que ela não pega.
+
+> Registered 2026-08-12 ao revisar `sql/` e `theodb_rs/sql/` a pedido do owner. **Ordem sugerida:** este
+> item vem ANTES do B-030 e encolhe o B-029 — se as cadeias saem, não há oráculo de upgrade a restaurar,
+> e o colapso do umbrella deixa de arrastar seis deltas. Todos os três dependem da mesma confirmação:
+> não há instalação em campo.
+
+Próximo id livre: **`B-032`**. Ids são monotônicos e nunca reusados.
