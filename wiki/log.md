@@ -1,3 +1,30 @@
+## 2026-08-12
+
+**B-030/B-031 — uma extensão, e o que a wiki teve de deixar como estava.**
+
+`CREATE EXTENSION theodb CASCADE` deixou de funcionar: o umbrella `theodb` foi absorvido pelo
+`theodb_rs` e não existe mais como extensão instalável. **13 linhas em 12 arquivos** foram atualizadas
+para `theodb_rs` — os guias e as páginas de feature que *instruem* o leitor a instalar. Um guia que manda
+rodar um comando que falha é pior que nenhum guia.
+
+**Três ocorrências ficaram deliberadamente intactas**, e a distinção é a mesma que o bundle já aplica em
+outros pontos: elas não instruem, elas **registram**.
+
+* `wiki/decisions/0029-m70-drop-pgvector.md` (duas) — o ADR descreve uma decisão **como ela foi tomada**,
+  num momento em que `CREATE EXTENSION theodb` era o comando correto. Reescrevê-lo faria o registro
+  afirmar que a decisão de 2026 previa um mundo que só passou a existir agora.
+* `wiki/benchmarks/m184-pilares-superficie-medida-verdict.md` — o veredito registra **o comando que foi de
+  fato executado** na medição. Trocá-lo transformaria um relato de execução em ficção, exatamente o
+  `cobertura-alegada-sem-execucao` que este acervo documenta como classe de defeito.
+
+**Correção registrada por acréscimo.** Durante a análise que originou o B-031, afirmei — citando o
+cabeçalho de `theodb_rs/sql/schema_snapshot.sql` — que o oráculo da cadeia de upgrade não cobre ACL.
+**Está errado.** O arquivo tem um segundo bloco que faz snapshot de `proacl` e declara fechar a lacuna; o
+cabeçalho é que ficou obsoleto quando a lacuna foi fechada. O problema real é outro e permanece: quem
+comparava aquele snapshot contra uma baseline era um script removido em `8605677`, de modo que a cobertura
+existia como SQL e não como verificação. Fica por acréscimo porque a leitura errada chegou a ser
+comunicada ao owner e baseou a redação inicial do item de backlog.
+
 ## 2026-08-11
 
 * **Creation**: `benchmarks/b015-cinco-contadores-em-zero-duas-causas.md` — a medição do B-015. Registra

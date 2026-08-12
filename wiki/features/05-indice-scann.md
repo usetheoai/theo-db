@@ -27,7 +27,7 @@ A técnica inspirada no [ScaNN](/technologies/scann.md) que existe hoje é IVF c
 Asymmetric Hashing, exposta pelo [índice IVFFlat](/features/03-indice-ivfflat.md):
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS theodb CASCADE;
+CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE;
 
 CREATE INDEX products_scann_like_idx
 ON products

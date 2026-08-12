@@ -98,7 +98,7 @@ A imagem cria a extensão automaticamente no primeiro init. Roda em **PostgreSQL
 do 17 para o 18 no M135; o tipo `vector` e os índices ANN são **own-code**, sem depender de pgvector/pgvectorscale):
 
 ```sql
-CREATE EXTENSION theodb CASCADE;   -- CASCADE puxa theodb_rs (o tipo `vector` own-code + a superfície ai.*)
+CREATE EXTENSION theodb_rs CASCADE;   -- CASCADE puxa theodb_rs (o tipo `vector` own-code + a superfície ai.*)
 ALTER EXTENSION theodb_rs UPDATE;  -- upgrade in-place da extensão (cadeia de upgrade própria, M137)
 ```
 

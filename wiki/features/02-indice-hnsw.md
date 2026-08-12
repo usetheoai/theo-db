@@ -21,7 +21,7 @@ recall contra o HNSW do [pgvector](/technologies/pgvector.md) como baseline.
 # Criar o índice
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS theodb CASCADE;
+CREATE EXTENSION IF NOT EXISTS theodb_rs CASCADE;
 
 CREATE INDEX products_hnsw
 ON products
