@@ -3,8 +3,8 @@ slug: b031-b030-uma-extensao
 items: [B-031, B-030]
 date: 2026-08-12
 base: bcf7819
-head: 123c910
-verdict: pending
+head: c55fe6a
+verdict: READY_TO_MERGE
 ---
 
 # Review — uma extensão, um caminho de instalação
@@ -30,7 +30,7 @@ Nenhum gate duro disparou.
 | G1 | Cadeia `theodb_rs` removida | `ls theodb_rs/sql/theodb_rs--*--*.sql` | 0 arquivos |
 | G2 | Cadeia do umbrella removida | `ls sql/theodb--*--*.sql` | 0 arquivos |
 | G3 | Shim reduzido a uma versão | `ls sql/vector--*.sql` | 1 arquivo |
-| G4 | Build coerente sem cadeia | `docker build -t theodb:b031 .` | ver § Achados, R-1 |
+| G4 | Build coerente sem cadeia | `docker build` + smoke da imagem em execução | **EXIT=0**, 523 MB, initdb sem erro |
 | G5 | Superfície verificada por teste | `pg_surface_contains_public_api` | ok |
 | G6 | ACL de egress verificada | `pg_egress_surface_is_revoked_from_public` | ok |
 | G7 | Wrappers validados no `CREATE` | `pg_ai_wrappers_are_sql_language` | ok |
@@ -52,7 +52,20 @@ Durante a implementação eu construí apenas `--target theodb-toolchain` e segu
 
 O risco concreto que a lacuna cobria: a Fase 3 removeu `theodb.control`, o `Makefile` e a concatenação de corpos do estágio de runtime. Se algum resíduo tivesse ficado — um `COPY` de arquivo inexistente, um `install` com glob vazio — o estágio de runtime quebraria e nenhuma das verificações anteriores perceberia, porque todas rodam sobre o crate, não sobre a imagem.
 
-Corrigido durante este review: o build completo foi executado. Resultado em § Veredito.
+Corrigido durante este review, e a verificação foi além do critério escrito, porque **construir não é subir**:
+
+| Verificação | Resultado |
+|---|---|
+| `docker build -t theodb:b031 .` | `EXIT=0`, imagem de 523 MB |
+| `ERROR`/`FATAL` no log de initdb | **0** |
+| Extensões no banco após initdb | `plpgsql 1.0`, **`theodb_rs 1.5.0`** — uma só de produto |
+| Funções em `theodb`/`ai`/`theodb_ml` | 72 |
+| `template1` | `theodb_rs 1.5.0` + `vector 0.6.0` |
+| Banco novo + `CREATE EXTENSION vector` **sem CASCADE** (cenário do #181) | sucesso |
+| `'[1,2,3]'::vector` | resolve |
+| AMs `hnsw` (alias) e `theodb_hnsw` | ambos presentes |
+
+O último bloco fecha o G14 com o produto **em execução**, e não por leitura de arquivo: o shim continua servindo o nome que drizzle/alembic/prisma emitem, que é a razão declarada de ele existir separado.
 
 ### R-2 — BAIXO · Três defeitos nas verificações novas, corrigidos antes do merge
 
@@ -88,4 +101,15 @@ Dito porque a ausência de menção lê-se como cobertura:
 
 ## Veredito
 
-Preenchido após o resultado do G4 — ver § Achados, R-1.
+**`READY_TO_MERGE`.**
+
+Nenhum gate duro disparou; as 14 afirmações do Goal foram verificadas contra o disco, contra os testes e contra o produto em execução. O único achado de severidade real (R-1) era uma **verificação faltante, não um defeito** — executada e fechada dentro desta fase.
+
+**Ressalva que acompanha o veredito, e não é formalidade:** este review foi conduzido pelo mesmo agente que implementou. O R-1 é a evidência do custo — a alegação passou sem medição porque era meu próprio ponto cego, e só apareceu quando percorri a Coverage Matrix linha a linha em vez de reler o que eu havia escrito. Um revisor independente é o mecanismo certo para essa classe; percorrer a matriz foi o substituto disponível.
+
+**Followups registrados, nenhum bloqueante para este merge:**
+
+- **B-029** — a esteira referencia diretórios removidos e o produto ficou sem portão de verificação. Anterior a esta mudança; não é consertado por ela.
+- **B-032** — 2.872 ocorrências de `unsafe_op_in_unsafe_fn`. Descoberto durante este ciclo, deliberadamente não tratado nele.
+
+**Defeito de processo registrado sobre este próprio relatório.** O commit `c55fe6a` gravou o artefato com o corpo desatualizado — as substituições que preencheriam o G4 e o veredito falharam em silêncio (`str.replace` não erra quando não casa) e eu não conferi o arquivo depois de escrever. Durante alguns minutos a **mensagem de commit afirmava um resultado que o artefato não continha**. É a mesma classe que este ciclo perseguiu o dia inteiro — instrumento que responde sem medir —, desta vez cometida por mim no registro do próprio review. Corrigido por acréscimo, não por reescrita silenciosa.
