@@ -1,0 +1,142 @@
+{
+  "run_id": "9b8d8ef45cff40cab068357fff3f9e95",
+  "task_label": "9b8d8ef45cff40cab068357fff3f9e95",
+  "results": [
+    {
+      "metrics": {
+        "max_load_count": 0,
+        "insert_duration": 0.0,
+        "optimize_duration": 0.0,
+        "load_duration": 0.0,
+        "qps": 1887.6845,
+        "serial_latency_p99": 0.0081,
+        "serial_latency_p95": 0.0076,
+        "recall": 0.9936,
+        "ndcg": 0.9944,
+        "mrr": 0.0,
+        "conc_num_list": [
+          1,
+          5,
+          10,
+          20,
+          30,
+          40,
+          60,
+          80
+        ],
+        "conc_qps_list": [
+          163.7443,
+          789.4865,
+          1381.6136,
+          1876.9305,
+          1887.6845,
+          1875.2266,
+          1855.2882,
+          1835.1279
+        ],
+        "conc_latency_p99_list": [
+          0.008008307760610478,
+          0.00891512949965545,
+          0.010066764989942384,
+          0.025695047239969432,
+          0.04051320971978384,
+          0.05999402718006422,
+          0.08364462849980554,
+          0.11028382066961974
+        ],
+        "conc_latency_p95_list": [
+          0.0075021482003649,
+          0.007938327800002299,
+          0.009320417950175398,
+          0.019317077899995632,
+          0.029007043299725404,
+          0.04655494609992274,
+          0.06799040850009988,
+          0.08819427779976646
+        ],
+        "conc_latency_avg_list": [
+          0.006098122755747801,
+          0.006320567980440182,
+          0.007216995071560765,
+          0.010607849735900825,
+          0.015791828147197654,
+          0.021149187347769962,
+          0.031923707706577,
+          0.04304623622204554
+        ],
+        "payload_profile": "ids_only",
+        "payload_estimated_bytes_per_query": 200,
+        "inserted_count": 0,
+        "insert_rows_per_second": 0.0,
+        "insert_completion_seconds": 0.0,
+        "searchable_after_insert_seconds": 0.0,
+        "indexed_after_searchable_seconds": 0.0,
+        "additional_parameters": {},
+        "st_ideal_insert_duration": 0,
+        "st_search_stage_list": [],
+        "st_search_time_list": [],
+        "st_max_qps_list_list": [],
+        "st_recall_list": [],
+        "st_ndcg_list": [],
+        "st_serial_latency_p99_list": [],
+        "st_serial_latency_p95_list": [],
+        "st_conc_failed_rate_list": [],
+        "st_conc_num_list_list": [],
+        "st_conc_qps_list_list": [],
+        "st_conc_latency_p99_list_list": [],
+        "st_conc_latency_p95_list_list": [],
+        "st_conc_latency_avg_list_list": []
+      },
+      "task_config": {
+        "db": "TheoDB",
+        "db_config": {
+          "db_label": "theodb-pg18-ef256",
+          "version": "",
+          "note": "",
+          "user_name": "**********",
+          "password": "**********",
+          "host": "127.0.0.1",
+          "port": 55435,
+          "db_name": "theo"
+        },
+        "db_case_config": {
+          "metric_type": "COSINE",
+          "create_index_before_load": false,
+          "create_index_after_load": true,
+          "index": "HNSW",
+          "m": null,
+          "ef_construction": null,
+          "ef_search": 256
+        },
+        "case_config": {
+          "case_id": 50,
+          "custom_case": {},
+          "k": 10,
+          "concurrency_search_config": {
+            "num_concurrency": [
+              1,
+              5,
+              10,
+              20,
+              30,
+              40,
+              60,
+              80
+            ],
+            "concurrency_duration": 30,
+            "concurrency_timeout": 3600,
+            "serial_cooldown": 0.0
+          }
+        },
+        "stages": [
+          "search_serial",
+          "search_concurrent"
+        ],
+        "load_concurrency": 0
+      },
+      "label": ":)"
+    }
+  ],
+  "file_fmt": "result_{}_{}_{}.json",
+  "timestamp": 1786492800.0
+}

@@ -1,0 +1,4 @@
+== theodb ef_search=128 (reusa índice: sem drop, sem load) ==
+2026-08-12 23:31:35,268 | INFO |TheoDB | theodb-pg18-ef128    Search Performance Test (50K Dataset, 1536 Dim) e9a25d160c25497b884d584ab3c00d87 | 0.0         3086.1388    0.0052          0.0046          0.9829        0             
+== theodb ef_search=256 (reusa índice: sem drop, sem load) ==
+2026-08-12 23:37:42,896 | INFO |TheoDB | theodb-pg18-ef256    Search Performance Test (50K Dataset, 1536 Dim) 9b8d8ef45cff40cab068357fff3f9e95 | 0.0         1887.6845    0.0081          0.0076          0.9936        0             
