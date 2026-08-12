@@ -1172,4 +1172,55 @@ dod:
 > B-030/B-031 não os toca. Apareceu porque a pergunta forçou exercitar a superfície em USO, que é exatamente
 > o que o relatório de review daquele ciclo declarou NÃO ter coberto.
 
-Próximo id livre: **`B-034`**. Ids são monotônicos e nunca reusados.
+## B-034 — `SET hnsw.ef_search` é aceito em silêncio e não faz nada: meia compatibilidade que produz medição plana   [ ]
+
+domain: engine-pgrx
+repo: theo-db
+suggested_mode: bug
+source: human
+evidence: medido em 2026-08-12 contra a imagem construída deste ciclo. `SET hnsw.ef_search = 200` **sucede**, `current_setting('hnsw.ef_search')` devolve `200`, e `SELECT count(*) FROM pg_settings WHERE name LIKE 'hnsw%'` devolve **0**. O PostgreSQL aceita GUC de prefixo não registrado como *placeholder*: guarda o valor, não expõe em `pg_settings`, e nenhum código o lê. O TheoDB lê `theodb_hnsw.ef_search` (`theodb_rs/src/am/guc.rs:361`), nome diferente. Superfície de consumo medida: **um único ponto** — `am/guc.rs:512`, `EF_SEARCH.get().max(MIN_EF_SEARCH)`.
+why_now: o shim já toma o nome `hnsw` para o access method — uma app pgvector faz `CREATE INDEX ... USING hnsw (e vector_l2_ops)` e funciona (verificado hoje). Depois ela faz `SET hnsw.ef_search` para ajustar recall, e **não acontece nada, sem erro nem aviso**. Meia compatibilidade é pior que nenhuma: a ausência do access method falharia alto e o usuário saberia; assim ele acredita ter ajustado o índice e mediu outra coisa. O impacto não é hipotético nem restrito a benchmark — **toda app pgvector que ajuste recall está hoje sem efeito**, e a forma da falha é uma curva recall×QPS plana, que é indistinguível de "o parâmetro não importa neste dataset". É a mesma classe do B-033 (o `ADR-0029 § D2` promete drop-in "sem mudança de código") e do issue #181, uma camada adiante: não quebra no `CREATE EXTENSION`, não quebra no `CREATE INDEX`, quebra no **ajuste**.
+status: raw
+dod:
+  - `SET hnsw.ef_search = N` passa a ter o MESMO efeito que `SET theodb_hnsw.ef_search = N`, provado por teste que mede recall diferente entre dois valores — não apenas que o `SET` foi aceito
+  - a **precedência está DECIDIDA em ADR e documentada**: se os dois forem setados na mesma sessão, qual vence. Três candidatas, nenhuma obviamente certa — mais específico vence (`theodb_hnsw` > `hnsw`), último setado vence, ou maior vence. A primeira é a única que não muda o comportamento de quem já usa o produto hoje; a decisão é do owner
+  - o mesmo tratamento é avaliado para `ivfflat.probes` (o TheoDB registra `theodb_ivfflat.probes`) — ou o item declara por que só o hnsw importa
+  - a migração de placeholder está coberta: registrar o GUC de verdade converte placeholders existentes, e o PostgreSQL **erra** se o valor guardado estiver fora da faixa. Uma sessão que hoje faz `SET hnsw.ef_search = 99999` em silêncio passaria a falhar — comportamento correto, mas é mudança visível e precisa estar no CHANGELOG
+  - nenhum teste existente que use `theodb_hnsw.ef_search` regride
+
+> Registered 2026-08-12 ao avaliar a adoção do VectorDBBench. **Não é achado de benchmark** — o benchmark
+> só tornou visível um defeito de compatibilidade que existe para qualquer usuário. Custo estimado por
+> medição, não por impressão: ~20 linhas de código (um `define_int_guc` a mais e a decisão no único ponto
+> de leitura) e ~40 de teste. O caro aqui é a decisão de precedência, não a implementação.
+
+## B-035 — Cliente `theodb` no VectorDBBench, em fork, para medir contra pgvector e AlloyDB no mesmo arnês   [ ]
+
+domain: engine-pgrx
+repo: theo-db
+suggested_mode: evolve
+source: human
+evidence: `zilliztech/VectorDBBench` avaliado em 2026-08-12 — licença **MIT** (passa o D1, que barra AGPL), 1160 estrelas, último push **2026-08-11**. Tem cliente para `pgvector`, `pgvectorscale`, `pgdiskann`, `pgvecto_rs`, `vectorchord` e — o que mais importa aqui — **`alloydb`**, a âncora declarada do North Star (ADR-0002). Diferente do harness avaliado antes (o comparativo de 5 sistemas publicado no HuggingFace), este **mede recall**; aquele reporta apenas latência/vazão e usa "top-K name overlap entre motores" como proxy, que dá 100% se todos errarem igual — e roda com 10.000 vetores, escala em que se mede o cliente Python, não o índice.
+why_now: o projeto **não tem harness de benchmark** desde a remoção de `benchmarks/` (268 arquivos, commit `7cd157d`), e a Regra 5 do `CLAUDE.md` exige artefato reproduzível para qualquer afirmação de performance. Sem instrumento, nenhuma alegação nova é sustentável — e o `wiki/benchmarks/` tem 164 medições publicadas cujo caminho de reprodução saiu junto. Este arnês cobre dois eixos que o `theodb_bench` removido não cobria: comparação multi-sistema e carga concorrente com mutação.
+status: raw
+blocked_by: B-034 — sem a padronização do GUC, o cliente varreria `ef_search` sem efeito e produziria curva recall×QPS PLANA. Medição inválida que parece válida é pior que medição ausente.
+dod:
+  - existe fork em `usetheoai/VectorDBBench` com **diff mínimo** (um diretório de cliente, uma entrada no registro, um extra no `pyproject`), sem tocar o núcleo — a disciplina da Política de Fork D3
+  - o cliente é executável por terceiro: `pip install "vectordb-bench[theodb] @ git+https://github.com/usetheoai/VectorDBBench@theodb"` funciona a partir de um checkout limpo
+  - uma corrida medida contra pgvector **na mesma versão de PostgreSQL** — o TheoDB é PG18-only e o compose upstream fixa `pgvector/pgvector:pg16`; comparar sem igualar a versão mediria PG18 vs PG16, não TheoDB vs pgvector
+  - o resultado entra em `wiki/benchmarks/` com recall reportado ao lado de cada número de latência, nunca latência sozinha
+  - o registro diz o que a corrida **não** cobre — significância estatística pareada não existe neste arnês, e existia no `theodb_bench` removido (`significance.py`, teste de randomização de Smucker/Allan/Carterette). Qualquer alegação comparativa precisa dela por cima
+  - a saída do fork está declarada: ele morre quando o PR upstream for aceito (D3 — "saída quando o upstream alcançar")
+
+> Registered 2026-08-12. **O PR upstream fica para depois, e por razão medida, não por cautela:** a imagem
+> do produto **nunca foi publicada** — 10 de 10 execuções do workflow de publish falharam, e
+> `ghcr.io/usetheoai/theo-db:latest` responde `manifest unknown`. Um cliente novo no VectorDBBench precisa
+> que o revisor consiga subir uma instância; hoje a resposta seria "compile do fonte". Entregar código que
+> o revisor não consegue executar é o caminho mais curto para o PR travar.
+>
+> **Ressalva de posicionamento, dita porque a decisão é do owner:** entrar num arnês que tem cliente
+> `alloydb` convida comparação pública direta com a âncora do North Star — e o veredito medido do próprio
+> projeto (M73, ADR-0035) diz que superioridade de QPS vetorial sobre ScaNN/AlloyDB **não é alcançável**
+> por extensão permissiva. A posição honesta é paridade de recall + memória + abertura. Isso não é razão
+> para não fazer; é razão para fazer sabendo o que a tabela vai mostrar.
+
+Próximo id livre: **`B-036`**. Ids são monotônicos e nunca reusados.
