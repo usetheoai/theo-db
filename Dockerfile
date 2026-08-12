@@ -94,6 +94,12 @@ RUN apt-get update && \
 # Build the install script (concat of the modular bodies in load order) + copy theodb.control + sql/theodb--*.sql
 # into the PG extension dir. SQL-only install is a plain copy. M70: `theodb.control` requires `theodb_rs` (o flip —
 # theodb_rs provê o tipo `vector` + os schemas theodb/ai); NÃO há mais dep de vector/vectorscale.
+#
+# ORDEM DE CARGA = PREFIXO NUMÉRICO de dois dígitos, e o glob abaixo é a MESMA regra usada pelo `PARTS` do
+# Makefile. Antes cada ponta carregava a lista enumerada à mão: um corpo novo exigia lembrar dos dois lugares,
+# e esquecer este embarcava uma imagem sem a superfície nova, sem erro nenhum. Prefixo de DOIS dígitos é o
+# contrato — `sql/100-*.sql` ordenaria antes de `50-`; use 90-99 ou renumere. Os `install` também deixam de
+# enumerar: `theodb--*--*.sql` casa só os upgrades (nunca o `theodb--1.0.sql`, que tem um `--` só).
 COPY theodb.control /tmp/theodb/theodb.control
 # M148 (#181) — o shim de compatibilidade `vector`: toda app pgvector roda `CREATE EXTENSION IF NOT
 # EXISTS vector` no bootstrap (drizzle/alembic/prisma/scripts). Sem um objeto de extensão com esse nome
@@ -103,13 +109,10 @@ COPY vector.control /tmp/theodb/vector.control
 COPY sql/ /tmp/theodb/sql/
 RUN set -eux; \
     cd /tmp/theodb; \
-    cat sql/30-theodb-embed.sql sql/40-theodb-hybrid.sql sql/50-theodb-ai.sql \
-        sql/60-theodb-nl.sql sql/61-theodb-nl-config.sql sql/70-theodb-ml.sql \
-        sql/80-theodb-migrate.sql sql/85-theodb-htap.sql > sql/theodb--1.0.sql; \
-    install -m 0644 theodb.control sql/theodb--1.0.sql sql/theodb--1.0--1.1.sql sql/theodb--1.1--1.2.sql \
-        sql/theodb--1.2--1.3.sql sql/theodb--1.3--1.4.sql sql/theodb--1.4--1.5.sql sql/theodb--1.5--1.6.sql \
+    cat sql/[0-9][0-9]-theodb-*.sql > sql/theodb--1.0.sql; \
+    install -m 0644 theodb.control sql/theodb--1.0.sql sql/theodb--*--*.sql \
         "/usr/share/postgresql/$PG_MAJOR/extension/"; \
-    install -m 0644 vector.control sql/vector--0.5.1.sql sql/vector--0.6.0.sql sql/vector--0.5.1--0.6.0.sql \
+    install -m 0644 vector.control sql/vector--*.sql \
         "/usr/share/postgresql/$PG_MAJOR/extension/"; \
     rm -rf /tmp/theodb
 

@@ -1056,4 +1056,46 @@ kill_reason: corrigido no mesmo ciclo em que foi descoberto. (a) o path passa a 
 > no conserto — é a terceira leitura falsa deste harness, e as três têm a mesma forma (um resumo que
 > afirma mais do que a execução sustenta).
 
-Próximo id livre: **`B-029`**. Ids são monotônicos e nunca reusados.
+## B-029 — A esteira invoca arquivos que não existem mais, e o produto ficou sem nenhum portão de verificação   [ ]
+
+domain: engine-pgrx
+repo: theo-db
+suggested_mode: bug
+source: human
+evidence: medido por inspeção em 2026-08-12, após os commits `7cd157d` (remove `benchmarks/`, 268 arquivos) e `8605677` (remove `scripts/`, 17 arquivos). Dez invocações diretas em três fluxos deixam de resolver — `ci.yml:241,442,518,655` (`scripts/smoke.sh`, em **todos** os quatro jobs que constroem a imagem), `ci.yml:362,365,368` (`migrate-doc-check.sh`, `migrate-smoke.sh`, `migrate-smoke-selftest.sh`), `schema-drift-gate.yml:87,88` (`sql-surface.sh`) e `cassert-sql-safety.yml:94` (`cassert-smoke.sh`). Some também `gen-upgrade-script.py`, que gera os `theodb_rs/sql/theodb_rs--X--Y.sql` — os arquivos gerados estão versionados e trazem no cabeçalho "GERADO (…) NÃO editar à mão". E `theodb_rs/sql/schema_snapshot.sql` **sobreviveu**: restou o insumo do oráculo sem o oráculo.
+why_now: não é apenas que a esteira vai falhar por arquivo ausente na próxima promoção — é que ela **perde a capacidade de reprovar**. O `test-upgrade.sh` removido é o oráculo do caminho de atualização, e ele foi consertado em `3656b7e` (B-028) precisamente porque já havia declarado "TODOS OS CENÁRIOS PASSARAM" com um cenário pulado. O `why_now` do próprio B-028 registra que aquela foi a **terceira** leitura falsa do mesmo harness. Num banco, atualização quebrada é a falha mais cara que existe: quem atualiza perde dado ou fica com a extensão inutilizável, e descobre em produção. Hoje não há nada entre esse defeito e o usuário.
+status: raw
+dod:
+  - a promoção `workspace → develop` passa, sem que nenhum job invoque caminho inexistente
+  - existe um oráculo que **reprova** um upgrade quebrado da cadeia `theodb_rs` (1.0.0 → 1.5.0) e outro da cadeia `theodb` (1.0 → 1.6), e cada um foi provado reprovando um caso deliberadamente quebrado — não apenas passando
+  - o portão de drift de superfície SQL volta a comparar antes/depois, consumindo `theodb_rs/sql/schema_snapshot.sql`
+  - a decisão está registrada: ou as ferramentas voltam (`git restore` a partir de `bcf7819`), ou os fluxos são reescritos sem elas — e nesse caso o CHANGELOG diz quais garantias o produto deixou de ter
+
+> Registered 2026-08-12. Nasce como consequência direta de duas remoções decididas pelo owner após
+> ressalva técnica; ambas estão registradas no `CHANGELOG.md` sob `[Unreleased] § Removed` e citam
+> este item. Recuperação de qualquer uma: `git restore` a partir de `bcf7819`.
+
+## B-030 — Um produto, três extensões: o umbrella `theodb` é resíduo de uma migração que terminou   [ ]
+
+domain: engine-pgrx
+repo: theo-db
+suggested_mode: evolve
+source: human
+evidence: medido em 2026-08-12. `theodb_rs/src/dtype.rs:392` cria **os dois** schemas (`CREATE SCHEMA IF NOT EXISTS theodb; CREATE SCHEMA IF NOT EXISTS ai;`), e o umbrella `theodb` escreve 22 objetos dentro deles — de modo que o schema `ai` contém funções de **duas extensões distintas** (`ai._chat`/`ai.if`/`ai.rank`/`ai.hybrid_search`/`ai.nl_to_sql` do `theodb_rs`; `ai.generate`/`ai.summarize`/`ai.agg_summarize`/`ai.nl_query`/`ai.nl_*` do `theodb`). Não é camada, é co-propriedade de namespace. Dos oito corpos-fonte do umbrella, **dois tinham zero instruções** (`30-theodb-embed.sql` e `40-theodb-hybrid.sql`, 32 linhas de comentário que ainda afirmavam criar schemas que não criavam — removidos neste ciclo). E a divisão **degrada o que sobrou**: `sql/50-theodb-ai.sql` documenta que `ai.generate` é `plpgsql` em vez de SQL puro apenas porque "`ai._chat` is created by theodb_rs, installed after theodb" — o contorno da ordem de dependência custa a validação do corpo em tempo de `CREATE`.
+why_now: a migração que justificava os dois **acabou**: não há uma única `LANGUAGE plpython3u` ativa em `sql/` (as 7 ocorrências são comentários históricos), então o `theodb` deixou de ser "a extensão SQL sendo reescrita" e passou a ser um invólucro. E não existe ADR decidindo que devem ser dois: o `ADR-0029 § D1` debate a **direção** da dependência e rejeita duas alternativas — "pôr o tipo no umbrella" e "manter a direção antiga" —, ambas sobre qual depende de qual. A opção "colapsar o umbrella dentro do `theodb_rs`" nunca entrou na mesa; a existência de dois foi premissa herdada, nunca escolhida. O owner declarou em 2026-08-12 que **retro-compatibilidade não precisa ser mantida**, o que remove o único custo real do colapso.
+status: raw
+blocked_by: B-029 — sem oráculo de instalação e upgrade, mudar o contrato de `CREATE EXTENSION` é mexer no que o usuário instala sem nada que prove que ainda funciona.
+dod:
+  - `CREATE EXTENSION theodb_rs` sozinho entrega a superfície inteira (`theodb.*`, `ai.*`, `theodb_ml.*`); não resta extensão `theodb` a instalar
+  - o shim `vector` **permanece extensão separada** — o nome é o contrato (ADR-0058: drizzle/alembic/prisma emitem `CREATE EXTENSION vector` literalmente), e colapsá-lo reintroduziria o bloqueio do issue #181
+  - `DROP EXTENSION` do produto não deixa meia superfície de pé em `ai`/`theodb`
+  - os wrappers deixam de precisar de late-binding `plpgsql` e voltam a ser validados em tempo de `CREATE`
+  - a instalação limpa deixa de executar 7 scripts (`theodb--1.0.sql` + seis upgrades) por causa do descompasso entre `EXTVERSION = 1.0` e `default_version = 1.6`
+  - existe ADR registrando o colapso e as alternativas que o ADR-0029 não considerou
+
+> Registered 2026-08-12 ao analisar `sql/` e `theodb_rs/sql/` a pedido do owner, que contestou —
+> corretamente — a leitura inicial de que a estrutura de três extensões fazia sentido. A primeira fatia
+> segura (remover os dois corpos vazios e unificar a lista de concatenação duplicada entre `Makefile` e
+> `Dockerfile`) foi feita no mesmo ciclo; o colapso em si depende do B-029.
+
+Próximo id livre: **`B-031`**. Ids são monotônicos e nunca reusados.

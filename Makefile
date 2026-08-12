@@ -10,10 +10,12 @@ EXTVERSION = 1.0
 DATA = $(wildcard sql/theodb--*--*.sql)
 DATA_built = sql/$(EXTENSION)--$(EXTVERSION).sql
 
-# Source bodies, concatenated in load order (50 before 70; 60 before 61) — see Dockerfile history.
-PARTS = sql/30-theodb-embed.sql sql/40-theodb-hybrid.sql sql/50-theodb-ai.sql \
-        sql/60-theodb-nl.sql sql/61-theodb-nl-config.sql sql/70-theodb-ml.sql \
-        sql/80-theodb-migrate.sql sql/85-theodb-htap.sql
+# Source bodies, concatenated in load order. A ORDEM É O PREFIXO NUMÉRICO de dois dígitos — não uma lista
+# mantida à mão. Antes esta lista existia aqui E, repetida, no Dockerfile; um corpo novo exigia lembrar dos
+# dois lugares, e esquecer o Dockerfile embarcava uma imagem sem a superfície nova, em silêncio. As duas
+# pontas passam a derivar do mesmo glob. Prefixo de DOIS dígitos é o contrato: `sql/100-*.sql` ordenaria
+# antes de `30-` e quebraria a ordem de carga — use 90-99 ou renumere.
+PARTS = $(sort $(wildcard sql/[0-9][0-9]-theodb-*.sql))
 
 # PGXS is only needed for `make install` / regress (it requires postgresql-server-dev). The concat
 # target below works WITHOUT it, so the install script can be built in a runtime image that dropped the
@@ -26,7 +28,9 @@ endif
 
 $(DATA_built): $(PARTS)
 	@echo '-- TheoDB umbrella extension v$(EXTVERSION) — GENERATED (do not edit; edit sql/NN-*.sql)' > $@
-	@echo '-- deps: vector, vectorscale, plpython3u (theodb.control requires; installed via CASCADE)' >> $@
+	@echo '-- dep: theodb_rs (theodb.control requires; instalado via CASCADE) — ele provê o tipo `vector`' >> $@
+	@echo '-- own-code, os AMs ANN e os schemas theodb/ai. NÃO há dep de pgvector/pgvectorscale (removidos' >> $@
+	@echo '-- em M69/M70, ADR-0029) nem de plpython3u (removido em M19).' >> $@
 	cat $(PARTS) >> $@
 
 .PHONY: theodb-build dist
