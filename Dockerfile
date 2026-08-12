@@ -91,6 +91,23 @@ ENV CARGO_PGRX_TEST_RUNAS=postgres \
 RUN rustup toolchain install nightly --profile minimal && \
     cargo install --locked cargo-udeps
 
+# Detector D2 (fabricação de símbolo) — a gramática Rust do tree-sitter, via `tree_sitter_languages`.
+#
+# Sem ela o `/code-quality` devolve `auditor_unavailable_tree-sitter-rust` e o veredito cai para
+# FAIL_SOFT. Vale notar POR QUE ele reporta indisponível em vez de limpo: o extractor degrada para
+# lista vazia quando a gramática falta, e "zero achados" é lido pelo rubric como CLEAN. O guard de
+# vacuidade (M146, #175) mediu isso — 0 símbolos extraídos de um arquivo de 1600 linhas com 10 `use`,
+# e o audit emitiu PASS. É a mesma classe de falso-verde que este projeto persegue em toda parte.
+RUN apt-get update && apt-get install -y --no-install-recommends python3-pip && \
+    rm -rf /var/lib/apt/lists/* && \
+    pip3 install --no-cache-dir --break-system-packages \
+        "tree_sitter==0.21.3" "tree_sitter_languages==1.10.2"
+# O pin do `tree_sitter` é LOAD-BEARING, não conservadorismo: a API mudou em 0.22
+# (`Language(ptr, name)` -> `Language(ptr)`), e o `tree_sitter_languages` ainda chama a forma antiga.
+# Sem o pin, o import sucede e o `get_parser('rust')` estoura com `TypeError: __init__() takes exactly
+# 1 argument (2 given)` — medido em 2026-08-12. O detector trataria isso como gramática indisponível,
+# que é o comportamento correto dele, mas a causa seria uma versão flutuante, não uma ausência real.
+
 # ---- Stage 1b: builder do produto — o ÚNICO estágio que contém código-fonte ----
 #
 # A separação é o ponto, e ela nasceu de um defeito medido em 2026-08-12: a imagem de teste usada
