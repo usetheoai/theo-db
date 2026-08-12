@@ -1205,8 +1205,8 @@ suggested_mode: evolve
 source: human
 evidence: `zilliztech/VectorDBBench` avaliado em 2026-08-12 — licença **MIT** (passa o D1, que barra AGPL), 1160 estrelas, último push **2026-08-11**. Tem cliente para `pgvector`, `pgvectorscale`, `pgdiskann`, `pgvecto_rs`, `vectorchord` e — o que mais importa aqui — **`alloydb`**, a âncora declarada do North Star (ADR-0002). Diferente do harness avaliado antes (o comparativo de 5 sistemas publicado no HuggingFace), este **mede recall**; aquele reporta apenas latência/vazão e usa "top-K name overlap entre motores" como proxy, que dá 100% se todos errarem igual — e roda com 10.000 vetores, escala em que se mede o cliente Python, não o índice.
 why_now: o projeto **não tem harness de benchmark** desde a remoção de `benchmarks/` (268 arquivos, commit `7cd157d`), e a Regra 5 do `CLAUDE.md` exige artefato reproduzível para qualquer afirmação de performance. Sem instrumento, nenhuma alegação nova é sustentável — e o `wiki/benchmarks/` tem 164 medições publicadas cujo caminho de reprodução saiu junto. Este arnês cobre dois eixos que o `theodb_bench` removido não cobria: comparação multi-sistema e carga concorrente com mutação.
-status: raw
-blocked_by: B-034 — sem a padronização do GUC, o cliente varreria `ef_search` sem efeito e produziria curva recall×QPS PLANA. Medição inválida que parece válida é pior que medição ausente.
+status: triaged
+unblocked_by: B-034 — **resolvido e provado em situ 2026-08-12**: varredura `SET hnsw.ef_search` de 10→400 sobre 5.000 vetores dim128 produziu recall@10 de 0,4915 → 1,0000 com QPS de 3474 → 650. A curva é monótona e íngreme; antes do B-034 as quatro linhas teriam recall idêntico.
 dod:
   - existe fork em `usetheoai/VectorDBBench` com **diff mínimo** (um diretório de cliente, uma entrada no registro, um extra no `pyproject`), sem tocar o núcleo — a disciplina da Política de Fork D3
   - o cliente é executável por terceiro: `pip install "vectordb-bench[theodb] @ git+https://github.com/usetheoai/VectorDBBench@theodb"` funciona a partir de um checkout limpo
@@ -1227,4 +1227,59 @@ dod:
 > por extensão permissiva. A posição honesta é paridade de recall + memória + abertura. Isso não é razão
 > para não fazer; é razão para fazer sabendo o que a tabela vai mostrar.
 
-Próximo id livre: **`B-036`**. Ids são monotônicos e nunca reusados.
+> **2026-08-12 — triaged.** Oportunidade em `.claude/knowledge-base/discoveries/opportunities/b035-vectordbbench-client-opportunity.md`. A medição confirmou que o formato de fio binário do nosso `vector` é compatível com o `pgvector-python` (`COPY FORMAT BINARY` carregou 5.000 linhas) e encontrou **três lacunas do produto**, agora itens próprios: [[B-036]] (`m`/`ef_construction`), [[B-037]] (AM `ivfflat`), [[B-038]] (`halfvec`/`sparsevec`).
+
+## B-036 — O `hnsw` alias não aceita `m` nem `ef_construction`: a sintaxe de build do pgvector falha alto   [ ]
+
+domain: engine-pgrx
+repo: theo-db
+suggested_mode: bug
+source: discover-evolve
+evidence: medido em 2026-08-12 contra `theodb:b034`. `CREATE INDEX ... USING hnsw (embedding vector_l2_ops) WITH (m=16, ef_construction=64)` → `ERROR: unrecognized parameter "m"`; idem para `ef_construction` e `max_connections`, e idem nos AMs próprios `theodb_hnsw` / `theodb_ivfflat`. As reloptions realmente registradas, lidas da fonte (`theodb_rs/src/am/options.rs:112-196`): `lists`, `sbq_bits`, `pq_subspaces`, `pq_bits`, `aq_threshold`, `separate_storage`, `refine`, `soar_lambda`, `rabitq_bits` — nenhum `m`, nenhum `ef_construction`. O build é fixo em `HNSW_M = 16` e `HNSW_EF_CONSTRUCTION = 64` (`theodb_rs/src/am/build.rs:22-23`), o segundo sobreponível **apenas** por variável de ambiente do servidor (`THEODB_HNSW_EF_CONSTRUCTION`, `build.rs:30-36`) — inalcançável por sessão de cliente.
+why_now: o `ADR-0029 § D2` promete drop-in "sem mudança de código", e o shim já registra o AM `hnsw` e as opclasses `vector_*_ops` — então a app pgvector chega até o `CREATE INDEX` e **só ali** descobre que a linha dela não roda. É a terceira camada da mesma classe (B-033 quebrava no `=`, B-034 no ajuste de scan, este no build). Diferente dos dois anteriores, **este falha alto**, o que é muito melhor: o usuário vê o erro. O custo real não é a mensagem, é a capacidade — o TheoDB não tem os dois knobs de qualidade de grafo que qualquer comparação séria varre, e por isso nenhuma corrida de benchmark pode explorar esse eixo (medido ao construir o cliente do B-035).
+status: raw
+dod:
+  - `m` e `ef_construction` viram reloptions de verdade do `theodb_hnsw` (e portanto do alias `hnsw`), com faixa validada, e o build os HONRA — provado por teste que mede recall diferente entre dois `ef_construction`, não apenas que o `CREATE INDEX` foi aceito
+  - a variável de ambiente `THEODB_HNSW_EF_CONSTRUCTION` é reavaliada: com reloption de verdade ela vira redundante, e duas fontes para o mesmo knob é a armadilha de precedência que o B-034 acabou de pagar para resolver
+  - os defaults permanecem `m=16` / `ef_construction=64` — coincidem com os do pgvector, o que mantém comparável qualquer corrida já publicada
+  - índices existentes (sem as opções gravadas) continuam abrindo e varrendo — teste de compatibilidade de catálogo
+
+> Registrado 2026-08-12 pela medição do B-035. **Ordem de tamanho honesta:** é o maior dos três achados desse
+> ciclo, porque não é rotulagem de catálogo — exige que o build persistente aceite e propague os parâmetros.
+
+## B-037 — O AM `ivfflat` não existe: metade do shim pgvector está ausente   [ ]
+
+domain: engine-pgrx
+repo: theo-db
+suggested_mode: bug
+source: discover-evolve
+evidence: medido em 2026-08-12 contra `theodb:b034`. `SELECT amname FROM pg_am WHERE amtype='i'` devolve `hnsw`, `theodb_hnsw`, `theodb_ivfflat` — **não há `ivfflat`**. Logo `CREATE INDEX ... USING ivfflat (embedding vector_l2_ops) WITH (lists=100)` falha. O shim (`vector/vector--0.6.0.sql:49-67`) registra o alias `hnsw` e as três opclasses `vector_*_ops` para ele, e **para por aí**. Enquanto isso o GUC `ivfflat.probes` **foi registrado** no B-034 — ou seja, hoje o produto aceita o botão de ajuste de um índice que não se pode criar pelo nome que a app escreve.
+why_now: a assimetria é o problema, não a ausência. O B-034 registrou `ivfflat.probes` porque o TheoDB tem `theodb_ivfflat`; um usuário que leia `pg_settings` e encontre `ivfflat.probes` conclui — razoavelmente — que `USING ivfflat` funciona. O alias é rotulagem de catálogo pura: mesmo handler own-code, mesmas opclasses, exatamente o que o `hnsw` já faz e que o próprio arquivo do shim documenta como "não é uma segunda implementação". Não fazer é deixar o shim pela metade com o botão da metade que falta já instalado.
+status: raw
+dod:
+  - `CREATE ACCESS METHOD ivfflat` com o handler `theodb_ivfflat_amhandler` e as opclasses `vector_l2_ops` / `vector_cosine_ops` / `vector_ip_ops` registradas para ele — mesmo padrão do `hnsw`, no mesmo arquivo
+  - **o conflito de nome de opclass está resolvido e testado**: nomes de opclass são únicos POR access method, então `vector_l2_ops` pode existir para `hnsw` e para `ivfflat` ao mesmo tempo — o item confirma isso por execução, não por leitura
+  - `CREATE INDEX ... USING ivfflat (...) WITH (lists=N)` cria, e `SET ivfflat.probes` altera o resultado medido — recall diferente entre dois valores, não apenas o `SET` aceito
+  - a superfície `theodb_ivfflat` continua intacta — nenhum teste existente regride
+
+> Registrado 2026-08-12 pela medição do B-035. **Custo estimado por comparação com o que já existe**, não por
+> impressão: o alias `hnsw` custou ~20 linhas de SQL no shim. Este deve custar o mesmo.
+
+## B-038 — `halfvec` e `sparsevec` não existem: a superfície de tipos do pgvector está incompleta   [ ]
+
+domain: engine-pgrx
+repo: theo-db
+suggested_mode: evolve
+source: discover-evolve
+evidence: medido em 2026-08-12 contra `theodb:b034`. `SELECT typname FROM pg_type WHERE typname IN ('vector','halfvec','sparsevec')` devolve **só `vector`**. O `pgvector-python 0.5.0` trata a ausência sem erro — `register_vector` só registra os dois se `TypeInfo.fetch` os encontrar (verificado na fonte do pacote) —, então nada quebra no cliente; o que quebra é qualquer DDL ou consulta de app que os use, e todos os casos de quantização do VectorDBBench, que assumem `halfvec` e `bit` como tipo de coluna.
+why_now: é a lacuna de drop-in mais funda das três encontradas neste ciclo e, honestamente, **a menos urgente** — as outras duas são rotulagem ou parâmetro sobre capacidade que já existe; esta pede tipos novos com I/O binário, operadores, opclasses e cast. Fica registrada porque foi medida, e porque uma decisão de NÃO fazer também precisa estar escrita: se o posicionamento é "compatível com pgvector", um `ERROR: type "halfvec" does not exist` é uma resposta que o produto dá hoje e ninguém decidiu dar.
+status: raw
+dod:
+  - uma DECISÃO registrada em ADR sobre implementar ou declarar fora de escopo — as duas saídas são aceitáveis, o silêncio não é
+  - se implementar: `halfvec(N)` com o MESMO formato de fio do pgvector (o `vector` já tem — provado pelo `COPY FORMAT BINARY` do B-035), operadores de distância, opclasses nos AMs, e cast `vector <-> halfvec`
+  - se declarar fora de escopo: a limitação aparece na documentação de compatibilidade, ao lado do que É suportado, em vez de ser descoberta em runtime
+
+> Registrado 2026-08-12 pela medição do B-035. Escrito com a prioridade relativa dita, não escondida: dos
+> três achados do ciclo, este é o que menos dói e o mais caro.
+
+Próximo id livre: **`B-039`**. Ids são monotônicos e nunca reusados.
