@@ -13,6 +13,9 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- _(interno, sem efeito para quem usa o banco)_ A esteira de integração contínua deixou de rodar a cada envio num pull request e passa a rodar **uma vez por promoção** — nos merges para `develop` e `main`. Motivo: a máquina que executa a esteira é única e atende um job por vez, e cada envio disparava a esteira inteira; o custo passou a ser alto demais para o retorno. Oito fluxos foram ajustados, e todos continuam podendo ser executados sob demanda quando valer a pena. **A troca é real e fica registrada:** sem verificação no pull request, um defeito só aparece depois de já estar em `develop`, e quem descobre é a próxima pessoa a integrar. A proteção não desaparece — muda de lugar, e passa a depender de rodar as verificações localmente antes de promover; o comando exato está no comentário de cada fluxo.
+
 ## [0.159.0] - 2026-08-11
 
 > **Nota de versionamento — por que MINOR e não MAJOR.** Esta versão contém duas seções `Removed` (o

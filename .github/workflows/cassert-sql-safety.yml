@@ -13,6 +13,20 @@
 name: cassert-sql-safety
 
 on:
+  # 2026-08-12 — gatilho de `pull_request` REMOVIDO por decisão do owner: o runner é único e serial, e
+  # cada PR disparava a esteira inteira a cada push, com custo elevado. A esteira passa a rodar SÓ no
+  # `push` para `develop`/`main` — ou seja, DEPOIS do merge.
+  #
+  # A TROCA É REAL e fica dita: sem gate no PR, um defeito só aparece quando já está em `develop`, e
+  # quem descobre é o próximo a integrar. A proteção não some, muda de lugar — passa a depender de
+  # rodar os gates LOCALMENTE antes de promover, no contêiner com o toolchain pinado:
+  #   docker run --rm -v $PWD/theodb_rs:/src theodb-builder:latest bash -c '
+  #     rustup component add clippy rustfmt --toolchain 1.97.0-x86_64-unknown-linux-gnu
+  #     mkdir -p /tmp/b && cp -r /src/. /tmp/b/ && cd /tmp/b
+  #     cargo fmt -- --check && cargo clippy --features pg18 --no-deps -- $(grep -v "^#" .clippy_args | tr "\n" " ")
+  #     cargo pgrx test pg18'
+  # `workflow_dispatch` continua disponível para rodar sob demanda num PR específico quando valer a pena.
+  workflow_dispatch:
   push:
     branches: [develop, main]
     # #211 — NÃO adicione `paths-ignore:` aqui. O GitHub proíbe `paths` e `paths-ignore` no MESMO
@@ -21,15 +35,6 @@ on:
     # `paths:`, via padrão negado — um filtro só, sem conflito. `.claude/**` e `wiki/**` já estão
     # fora por construção; o `!**/*.md` é guarda de futuro (hoje não há `.md` sob `theodb_rs/src/`),
     # e este gate custa um `cargo pgrx install` completo — caro demais para um README.
-    paths:
-      - 'theodb_rs/src/**'
-      - 'theodb_rs/Cargo.*'
-      - 'scripts/cassert-smoke.sh'
-      - '.github/workflows/cassert-sql-safety.yml'
-      - '!**/*.md'
-  pull_request:
-    branches: [develop, main]
-    # Mesmo filtro do `push` acima (o `!**/*.md` cobre o PR só-de-CHANGELOG observado no #189).
     paths:
       - 'theodb_rs/src/**'
       - 'theodb_rs/Cargo.*'

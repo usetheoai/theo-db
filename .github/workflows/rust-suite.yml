@@ -9,15 +9,25 @@ name: Rust test suite
 # A execução completa leva 480 s medidos. O argumento de custo não existe.
 
 on:
-  # Sem gatilho de `push` em `workspace`: com um runner serial, cada commit disparava 8 min de suite
-  # a frente de publish/lint/CI. No PR o custo e pago uma vez, no momento em que a decisao acontece.
+  # 2026-08-12 — gatilho de `pull_request` REMOVIDO por decisão do owner: o runner é único e serial, e
+  # cada PR disparava a esteira inteira a cada push, com custo elevado. A esteira passa a rodar SÓ no
+  # `push` para `develop`/`main` — ou seja, DEPOIS do merge.
+  #
+  # A TROCA É REAL e fica dita: sem gate no PR, um defeito só aparece quando já está em `develop`, e
+  # quem descobre é o próximo a integrar. A proteção não some, muda de lugar — passa a depender de
+  # rodar os gates LOCALMENTE antes de promover, no contêiner com o toolchain pinado:
+  #   docker run --rm -v $PWD/theodb_rs:/src theodb-builder:latest bash -c '
+  #     rustup component add clippy rustfmt --toolchain 1.97.0-x86_64-unknown-linux-gnu
+  #     mkdir -p /tmp/b && cp -r /src/. /tmp/b/ && cd /tmp/b
+  #     cargo fmt -- --check && cargo clippy --features pg18 --no-deps -- $(grep -v "^#" .clippy_args | tr "\n" " ")
+  #     cargo pgrx test pg18'
+  # `workflow_dispatch` continua disponível para rodar sob demanda num PR específico quando valer a pena.
+  #
+  # Também não há gatilho de `push` em `workspace`: com um runner serial, cada commit disparava 8 min de
+  # suíte à frente de publish/lint/CI. Com a remoção do `pull_request` acima, a suíte roda UMA vez por
+  # promoção — no push para `develop`.
   push:
-    branches: [develop]
-    paths:
-      - "theodb_rs/**"
-      - "Dockerfile"
-      - ".github/workflows/rust-suite.yml"
-  pull_request:
+    branches: [develop, main]
     paths:
       - "theodb_rs/**"
       - "Dockerfile"
@@ -29,8 +39,9 @@ on:
 # so saiu depois de eu cancelar este job. Um gate de qualidade que bloqueia a entrega nao e um gate, e
 # um empecilho.
 #
-# Duas medidas: a suite roda so no PR (nao em cada push de workspace), e cede a vez — `group` global
-# entre workflows nao existe no Actions, entao o que da para fazer e nao concorrer com o proprio push.
+# Duas medidas: a suíte roda uma vez por promoção (no push para `develop` — desde 2026-08-12 não roda
+# mais em PR nem em cada push de workspace), e cede a vez — `group` global entre workflows não existe no
+# Actions, então o que dá para fazer é não concorrer com o próprio push.
 concurrency:
   group: rust-suite-${{ github.ref }}
   cancel-in-progress: true
