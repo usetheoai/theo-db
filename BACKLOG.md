@@ -1040,4 +1040,20 @@ dod:
 > release do `B-015`. **Provocado pelos meus próprios pushes sucessivos** — mas qualquer cancelamento
 > reproduz, e cancelamento é uso normal de PR.
 
-Próximo id livre: **`B-028`**. Ids são monotônicos e nunca reusados.
+## B-028 — O harness de upgrade declarou "TODOS OS CENÁRIOS PASSARAM" com um cenário PULADO   [x]
+
+domain: engine-pgrx
+repo: theo-db
+suggested_mode: bug
+source: discover-review
+evidence: execução de 2026-08-12 do salto 1.4.0 → 1.5.0. A saída traz, na mesma tela: `AVISO: /usr/share/postgresql/extension/theodb_rs--1.4.0--1.5.0.sql não encontrado — cenário de idempotência PULADO (não é um pass)` e, quatro linhas abaixo, `== TODOS OS CENÁRIOS PASSARAM ==`. Duas causas independentes: (a) o path era montado à mão como `$PGINST/share/postgresql/extension/…`, **sem o componente de versão maior** — o diretório real é `share/postgresql/18/extension`, então o arquivo nunca era encontrado; (b) o `echo` do resumo era **incondicional**, sem qualquer estado que registrasse o pulo.
+why_now: o cabeçalho deste mesmo arquivo diz que ele existe porque as provas anteriores foram feitas à mão e **registra DUAS leituras falsas** — um `CONVERGENCIA_OK` comparando 196 com 196 onde nada fora removido, e um `grep -cE "^ERROR"` que não pegava erros do psql. Ele foi escrito para que não houvesse uma terceira. **Havia.** Um harness que produz exatamente o defeito que existe para prevenir é pior que nenhum, porque empresta autoridade de verificação a um resultado não verificado — e este aqui é o gate do caminho de atualização, onde a falha silenciosa é o modo de falha característico (um `ALTER EXTENSION` incompleto sobe sem erro).
+status: killed
+kill_reason: corrigido no mesmo ciclo em que foi descoberto. (a) o path passa a sair de `pg_config --sharedir`, com fallback; (b) o pulo grava em `$SKIPPED` e o resumo passa a imprimir `== INCOMPLETO — cenários PULADOS: … ==` com **exit 1** — um cenário que não rodou é um cenário não provado, e quem chama precisa distinguir isso de um pass sem ler o log inteiro.
+
+> Registered 2026-08-12 by `/review` (slug: `harness-upgrade-pass-vacuoso`), ao executar o followup do
+> review do B-021. O item nasce e morre no mesmo ciclo, mas fica registrado: o valor está no PADRÃO, não
+> no conserto — é a terceira leitura falsa deste harness, e as três têm a mesma forma (um resumo que
+> afirma mais do que a execução sustenta).
+
+Próximo id livre: **`B-029`**. Ids são monotônicos e nunca reusados.

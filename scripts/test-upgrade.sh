@@ -73,7 +73,12 @@ diff -u "$TMP/fresh.out" "$TMP/conv.out" > "$TMP/c.diff" \
 echo "CONVERGENCIA_OK — catálogo incompleto ($AGED) convergiu para o completo ($FRESH)"
 
 # ---------------------------------------------------------------- idempotência
-UPG="$PGINST/share/postgresql/extension/theodb_rs--$FROM_VER--$TO_VER.sql"
+# B-028 — o path saía do `pg_config`, não montado à mão. A forma anterior
+# (`$PGINST/share/postgresql/extension/…`) omitia o componente de VERSÃO MAIOR: o diretório real é
+# `share/postgresql/18/extension`. O arquivo nunca era encontrado, o cenário caía no `else` e era PULADO —
+# medido em 2026-08-12 no salto 1.4.0→1.5.0.
+SHAREDIR="$("$PGINST/bin/pg_config" --sharedir 2>/dev/null || echo "$PGINST/share/postgresql")"
+UPG="$SHAREDIR/extension/theodb_rs--$FROM_VER--$TO_VER.sql"
 if [ -f "$UPG" ]; then
   snap up_old > "$TMP/i1.out"
   $PSQL -d up_old -f "$UPG" > "$TMP/i.log" 2>&1 || true
@@ -83,6 +88,7 @@ if [ -f "$UPG" ]; then
   echo "IDEMPOTENTE_OK — script rodado 2x: 0 erros, snapshot inalterado"
 else
   echo "AVISO: $UPG não encontrado — cenário de idempotência PULADO (não é um pass)"
+  SKIPPED="${SKIPPED:+$SKIPPED, }idempotência"
 fi
 
 # ---------------------------------------------------------------- cenário B1
@@ -105,4 +111,18 @@ AFTER=$([ -f "$LOG" ] && grep -c "terminated by signal" "$LOG" || echo 0)
 q b1 "SELECT 1" >/dev/null || { echo "FALHA B1 — servidor não responde após o cenário"; exit 1; }
 echo "SCENARIO_B1_DONE — .so novo sobre catálogo $FROM_VER sem UPDATE: servidor sobreviveu (crashes $BEFORE -> $AFTER)"
 
+# B-028 — o resumo NÃO pode dizer "todos passaram" quando um cenário foi pulado.
+#
+# A linha anterior era incondicional, então uma execução com o IDEM pulado terminava com
+# `== TODOS OS CENÁRIOS PASSARAM ==` — medido em 2026-08-12. Isso é precisamente o "pass vacuoso" que o
+# cabeçalho deste arquivo diz que motivou sua criação: ele registra DUAS leituras falsas anteriores e existe
+# para que não haja uma terceira. Havia. Um harness que produz o defeito que existe para prevenir é pior que
+# nenhum, porque carrega a autoridade de ter sido verificado.
+#
+# Exit 1 no caminho pulado: um cenário que não rodou é um cenário não provado, e quem chama precisa
+# distinguir isso de um pass sem ler o log inteiro.
+if [ -n "${SKIPPED:-}" ]; then
+  echo "== INCOMPLETO — cenários PULADOS: $SKIPPED (os demais passaram) =="
+  exit 1
+fi
 echo "== TODOS OS CENÁRIOS PASSARAM =="
