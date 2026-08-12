@@ -1152,4 +1152,24 @@ dod:
 > ler os 1.460 avisos que toda build já imprimia. Fica registrado separado porque 2.872 ocorrências não são
 > trabalho de um ciclo, e embuti-las neste diluiria as duas coisas.
 
-Próximo id livre: **`B-033`**. Ids são monotônicos e nunca reusados.
+## B-033 — O tipo `vector` own-code não tem `=`, e cinco padrões de app pgvector quebram   [ ]
+
+domain: engine-pgrx
+repo: theo-db
+suggested_mode: bug
+source: human
+evidence: medido em 2026-08-12 contra a imagem `theodb:arrumacao` construída deste ciclo, num banco que herdou o shim de `template1`. `pg_operator` mostra que o tipo `vector` define os três operadores de distância — `<->`, `<=>`, `<#>` — e **zero** operadores de igualdade/ordenação (`SELECT count(*) ... WHERE oprname='=' ` devolve `0`). Consequência medida, com tabela real de 3 linhas: `WHERE e = '[1,2,3]'::vector` → `operator does not exist: vector = vector`; `SELECT DISTINCT e` e `GROUP BY e` → `could not identify an equality operator for type vector`; `ORDER BY e` → `could not identify an ordering operator`; `CREATE UNIQUE INDEX ON emb (e)` → `data type vector has no default operator class for access method "btree"`. O caminho ANN (`ORDER BY e <-> ...`) funciona normalmente.
+why_now: o pgvector define uma opclass btree `vector_ops` com `=`, `<>`, `<`, `<=`, `>`, `>=`, e por isso esses cinco padrões funcionam numa app pgvector. O `ADR-0029 § D2` declara drop-in — *"`::vector` do usuário e o `FOR TYPE vector` das opclasses resolvem ao tipo próprio SEM mudança de código"* — e o `ADR-0058` estendeu o drop-in ao nível de tooling justamente porque o issue #181 mostrou que app real quebra no que a alegação não cobria. Este é o mesmo formato de falha, uma camada adiante: não é o `CREATE EXTENSION` nem o `CREATE INDEX` que quebram, é a **consulta**. Um `SELECT DISTINCT embedding` ou uma chave única sobre a coluna são padrões comuns o bastante para aparecer em migração de qualquer app que já rodava sobre pgvector — e falham com mensagem de PostgreSQL que não menciona TheoDB, então o usuário não tem como saber que trocou de implementação.
+status: raw
+dod:
+  - decidido em ADR se o tipo passa a ter a opclass btree completa (`=`, `<>`, `<`, `<=`, `>`, `>=`) ou se o drop-in é reescrito para declarar o limite
+  - se implementado: os cinco padrões medidos acima passam, e há teste que os cobre — os mesmos cinco, não um genérico
+  - se NÃO implementado: `ADR-0029 § D2` e a documentação de migração param de dizer "sem mudança de código" sem ressalva, porque hoje dizem
+  - a decisão registra o custo do lado escolhido; igualdade de vetor float tem semântica não-óbvia (`[1.0,2.0]` vs `[1.0,2.0000001]`), e é provavelmente por isso que não foi feita ainda
+
+> Registered 2026-08-12 ao responder "o sistema está 100% funcional?" com teste funcional de verdade, em vez
+> de checagem de catálogo. **Não é regressão deste ciclo** — o tipo own-code nunca teve esses operadores, e o
+> B-030/B-031 não os toca. Apareceu porque a pergunta forçou exercitar a superfície em USO, que é exatamente
+> o que o relatório de review daquele ciclo declarou NÃO ter coberto.
+
+Próximo id livre: **`B-034`**. Ids são monotônicos e nunca reusados.
