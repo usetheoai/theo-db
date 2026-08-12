@@ -171,6 +171,46 @@ Ao implementar o T3.1 apareceu uma quarta alternativa que o planejamento não ti
 
 O único arquivo com mudança de conteúdo é `50-ai-text.sql`, e a mudança é o ganho do ADR D1: `ai.generate`, `ai.summarize` e `ai._agg_summ_final` deixam de ser `plpgsql` late-bound e voltam a ser `LANGUAGE sql` (o `IF` virou `CASE`, sem mudança de comportamento). Os comentários que descreviam o late-binding foram reescritos — deixá-los seria repetir o defeito de comentário obsoleto que este mesmo ciclo encontrou em `schema_snapshot.sql`.
 
+### D5 — Instalar a ferramenta em vez de dispensar o cap
+
+**Resolução final: o cap foi REMOVIDO por medição, não dispensado.** `cargo-udeps 0.1.61` + toolchain nightly entraram na camada da imagem `theodb-toolchain`; o detector rodou e devolveu `{"success":true,"unused_deps":{}}`. O gate completo, executado dentro do contêiner onde a ferramenta vive, devolveu **`PASS` com `languages_audited: ['rust']`**, zero caps e zero achados.
+
+**Correção de um argumento meu, registrada por acréscimo.** A versão anterior deste ADR dispensava o cap, e uma das razões dizia que instalar nightly "reintroduziria a classe de problema que o pin existe para fechar" (o drift do B-025). **Isso estava exagerado.** O nightly é aditivo: `theodb_rs/rust-toolchain.toml` fixa 1.97.0 e vence dentro do diretório, então `cargo build` e `cargo pgrx test` seguem em estável, e o nightly só é alcançado por invocação explícita `cargo +nightly`. O drift do B-025 era outro: componente instalado numa versão enquanto o `cargo` do crate rodava em outra — herança silenciosa, não chamada por nome. Eu usei um precedente real para justificar não medir, e o precedente não se aplicava.
+
+**O que permanece verdadeiro da análise anterior:** `cargo-udeps` detecta **dependências declaradas e não usadas**, não símbolos mortos, embora a tabela de detectores da golden rule a liste sob "D1 — Dead code". O descasamento é da regra. Como esta mudança não adiciona dependência alguma, o resultado limpo era o esperado — o valor de tê-lo rodado não é a descoberta, é o gate ter deixado de mentir.
+
+**O defeito maior, corrigido no caminho.** A primeira execução devolveu `PASS` com `languages_audited: []`, porque `rules/code-quality-languages.txt` estava com **todas** as linguagens comentadas. Um `PASS` que não auditou nada é indistinguível de um `PASS` real — a mesma classe (`cobertura-alegada-sem-execucao`) que este ciclo já encontrou no harness de upgrade do B-028 e na imagem de teste com fonte embutida. Rust habilitado; só então o gate mediu algo.
+
+**Alternativas consideradas:**
+
+1. *Dispensar o cap por ADR.* **Rejeitada** — havia alternativa, e trocar medição por dispensa quando dá para medir é o atalho que o ciclo proíbe.
+2. *Deixar `code-quality-languages.txt` vazio e aceitar o `PASS`.* **Rejeitada** — é o verde vazio, o oposto do que o gate existe para fazer.
+3. *Instalar a ferramenta e medir (escolhida).*
+
+**Não resolvido, e deliberadamente fora deste ciclo:** o cabeçalho de `code-quality-languages.txt` documenta "one language identifier per line", formato que o parser **rejeita** com `malformed line` — quem seguir a instrução do próprio arquivo recebe erro. Corrigir é mudança na skill, não neste produto.
+
+### D5-histórico — a dispensa que foi substituída
+
+**Contexto.** `/code-quality` devolveu `FAIL_SOFT` com um único cap: `auditor_unavailable_cargo-udeps`. Por `cycle-code-quality.md`, um `FAIL_SOFT` só segue para `/review` com um ADR dispensando cada cap. Este é o ADR.
+
+**Antes dele, um defeito maior, corrigido no caminho.** A primeira execução devolveu `PASS` com `languages_audited: []` — porque `rules/code-quality-languages.txt` estava com **todas** as linguagens comentadas. Um `PASS` que não auditou nada é indistinguível de um `PASS` real, e é a mesma classe (`cobertura-alegada-sem-execucao`) que este ciclo já encontrou duas vezes: no harness de upgrade do B-028 e na imagem de teste com fonte embutida. Rust foi habilitado; só então o gate passou a medir algo.
+
+**Decisão:** dispensar o cap e prosseguir.
+
+**Razões, em ordem de peso:**
+
+1. **A ferramenta não mede o que o cap sugere.** `cargo-udeps` detecta **dependências declaradas e não usadas**, não símbolos mortos. A tabela de detectores da golden rule a lista sob "D1 — Dead code"; o descasamento é da regra, não desta execução. Esta mudança **não adiciona dependência alguma** (§ Dependencies), então a superfície de achados da ferramenta é vazia por construção.
+2. **O toolchain exigido contraria um pin deliberado.** O detector invoca `cargo +nightly udeps`; `theodb_rs/rust-toolchain.toml` fixa `1.97.0` estável, e os comentários do `Dockerfile` registram que esse pin é load-bearing — o drift entre a versão do `--default-toolchain` e a do crate já quebrou o gate de qualidade uma vez (B-025). Instalar nightly para satisfazer um detector reintroduziria a classe de problema que o pin existe para fechar.
+3. **O risco real desta mudança é coberto por outro mecanismo.** O que poderia ficar órfão aqui não é dependência, é **objeto SQL** — um dos 22 absorvidos ficar de fora da emissão. Quem responde por isso é `surface_contains_public_api`, que assere presença dos 14 e passou.
+
+**Alternativas consideradas:**
+
+1. *Instalar nightly e rodar o detector.* **Rejeitada** pela razão 2 — o custo é reabrir um drift de toolchain conhecido, por um sinal que a razão 1 mostra ser vazio aqui.
+2. *Deixar `code-quality-languages.txt` vazio e aceitar o `PASS`.* **Rejeitada** — seria trocar um `FAIL_SOFT` honesto por um verde vazio. É o oposto do que o gate existe para fazer.
+3. *Dispensar com ADR (escolhida).* Registra o limite em vez de escondê-lo.
+
+**Não resolvido, e deliberadamente fora deste ciclo:** o cabeçalho de `code-quality-languages.txt` documenta "one language identifier per line", formato que o parser **rejeita** com `malformed line` — quem seguir a instrução do próprio arquivo recebe erro. Corrigir isso é mudança na skill, não neste produto.
+
 ## Tasks
 
 ### T1.1 — Remover a cadeia de upgrade do `theodb_rs`

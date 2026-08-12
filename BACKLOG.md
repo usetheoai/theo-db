@@ -1132,4 +1132,24 @@ dod:
 > e o colapso do umbrella deixa de arrastar seis deltas. Todos os três dependem da mesma confirmação:
 > não há instalação em campo.
 
-Próximo id livre: **`B-032`**. Ids são monotônicos e nunca reusados.
+## B-032 — 2.872 operações inseguras sem bloco explícito, concentradas na área que o projeto chama de mais cara   [ ]
+
+domain: engine-pgrx
+repo: theo-db
+suggested_mode: review
+source: human
+evidence: medido em 2026-08-12 na saída de `cargo pgrx test pg18` (suíte completa, 446 testes). O build emite **1.460 avisos**, e o lint dominante é `unsafe_op_in_unsafe_fn` (E0133) com **2.872 ocorrências**: 1.874 chamadas a função `unsafe`, 932 desreferências de ponteiro cru, 54 usos de `static` mutável e 4 acessos a campo de `union`. A concentração é o que assusta — `src/am/columnar_agg.rs` (1.236), `src/am/page/mod.rs` (354), `src/am/columnar.rs` (286), `src/am/customscan.rs` (140), `src/am/build_stream.rs` (140), `src/am/page/ivf.rs` (138). Para contraste medido na mesma saída: código morto (`never used/read/constructed`) aparece **10** vezes. O eixo de risco deste repositório não é código morto.
+why_now: o `CLAUDE.md` do projeto declara que `unsafe`/FFI/pgrx é "a classe de defeito mais cara já encontrada em review — panic atravessando C, `TopMemoryContext`, MVCC do SPI", e manda abrir o acervo de pgrx antes de tocar em qualquer bloco `unsafe`. O que o lint diz é exatamente sobre enxergar esses blocos: dentro de uma `unsafe fn`, sem `unsafe {}` explícito, **o corpo inteiro é implicitamente inseguro** — some a capacidade de apontar QUAIS linhas são as perigosas. Num banco onde um panic atravessando a fronteira C derruba o backend do usuário, essa visibilidade é a diferença entre revisar 12 linhas marcadas e reler 1.236. O sinal já é emitido pelo compilador a cada build e ninguém o consome; ele não foi descoberto por ferramenta nova, foi descoberto por alguém ter lido a saída.
+status: raw
+dod:
+  - decidido em ADR se o lint vira erro (`#![deny(unsafe_op_in_unsafe_fn)]`) de uma vez, por módulo, ou com prazo — e o ADR registra o custo escolhido
+  - `src/am/columnar_agg.rs` e `src/am/page/mod.rs`, que somam 1.590 das 2.872, tratados primeiro ou explicitamente adiados com razão escrita
+  - o número deixa de poder crescer em silêncio: existe gate que reprova aumento, como o `rust-suite.yml` já faz com falhas de teste
+  - nenhuma correção altera comportamento — envolver operação em `unsafe {}` é anotação, não mudança semântica; qualquer diff que mude semântica sai deste item
+
+> Registered 2026-08-12 durante a fase CODE-QUALITY do ciclo B-030/B-031. **Não é achado de ferramenta
+> nova:** `cargo-udeps` foi instalado no mesmo dia e mede outra coisa (dependência não usada). Este saiu de
+> ler os 1.460 avisos que toda build já imprimia. Fica registrado separado porque 2.872 ocorrências não são
+> trabalho de um ciclo, e embuti-las neste diluiria as duas coisas.
+
+Próximo id livre: **`B-033`**. Ids são monotônicos e nunca reusados.

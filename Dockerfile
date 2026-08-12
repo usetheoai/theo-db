@@ -77,6 +77,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends sudo && \
 ENV CARGO_PGRX_TEST_RUNAS=postgres \
     CARGO_PGRX_TEST_PGDATA=/pgdata
 
+# Ferramentas do gate de qualidade — `cargo-udeps` (dependências declaradas e não usadas) e o toolchain
+# nightly que ele exige.
+#
+# O nightly é ADITIVO e não move o compilador do crate: `theodb_rs/rust-toolchain.toml` fixa 1.97.0 e vence
+# dentro do diretório, então `cargo build`/`cargo pgrx test` continuam em estável. Ele é invocado só por
+# `cargo +nightly udeps`. Isto NÃO é o drift do B-025 — lá o problema era componente instalado numa versão
+# e `cargo` rodando em outra; aqui a versão extra é chamada por nome, nunca por herança.
+#
+# Sem estas duas linhas, `/code-quality` devolve FAIL_SOFT com `auditor_unavailable_cargo-udeps` e o ciclo
+# só avança dispensando o cap por ADR — trocar medição por dispensa é aceitável quando não há alternativa,
+# e aqui há.
+RUN rustup toolchain install nightly --profile minimal && \
+    cargo install --locked cargo-udeps
+
 # ---- Stage 1b: builder do produto — o ÚNICO estágio que contém código-fonte ----
 #
 # A separação é o ponto, e ela nasceu de um defeito medido em 2026-08-12: a imagem de teste usada

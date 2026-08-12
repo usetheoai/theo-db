@@ -19,3 +19,18 @@
 # kotlin
 # ruby
 # csharp
+
+# B-030 (2026-08-12) — habilitado. O arquivo estava INTEIRAMENTE comentado, e a consequência não era
+# "nenhuma verificação": era `/code-quality` devolvendo PASS com `languages_audited: []` — um verde que
+# não mediu nada, visualmente idêntico a um verde real. É a mesma classe de defeito que o acervo do
+# projeto registra como `cobertura-alegada-sem-execucao`, e a que este ciclo já encontrou em duas outras
+# formas (o harness de upgrade do B-028 e a imagem de teste com fonte embutida).
+#
+# `theodb_rs/Cargo.toml` é o único manifesto de código do repositório desde que benchmarks/ saiu.
+#
+# FORMATO: o cabeçalho acima diz "one language identifier per line" e ISSO ESTÁ ERRADO — o parser
+# (`_registry.py`) exige o formato em pipes de `skills/code-quality/defaults/languages.txt`, e um
+# identificador solto aborta com `languages.txt malformed line`. Quem seguir a instrução do próprio
+# arquivo recebe erro. Corrigir o cabeçalho é mudança na skill, fora do escopo deste ciclo; fica
+# registrado aqui e no CHANGELOG para não se perder.
+rust       | theodb_rs/Cargo.toml | ENABLED | pgrx extension — o único manifesto de código do repo.
