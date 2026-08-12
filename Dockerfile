@@ -150,11 +150,14 @@ RUN apt-get update && \
 # extensão com esse nome a app NÃO sobe — nem chega a emitir uma query. O shim não implementa nada (o
 # tipo/operadores/opclasses são own-code do theodb_rs); ele completa o drop-in da ADR-0029 § D2 no nível
 # tooling. Aqui o NOME é o contrato, então colapsá-lo reintroduziria o bloqueio que o #181 mediu.
-COPY vector.control /tmp/theodb/vector.control
-COPY sql/ /tmp/theodb/sql/
+# O shim é uma UNIDADE AUTOCONTIDA em `vector/`: control e script de instalação juntos. Antes o control
+# ficava na raiz e o script num `sql/` de topo — nome genérico que fazia sentido quando aquele diretório
+# abrigava duas extensões e oito corpos-fonte, e que virou incoerência quando sobrou um arquivo só, de uma
+# extensão cujo control estava noutro lugar.
+COPY vector/ /tmp/theodb/vector/
 RUN set -eux; \
     cd /tmp/theodb; \
-    install -m 0644 vector.control sql/vector--*.sql \
+    install -m 0644 vector/vector.control vector/vector--*.sql \
         "/usr/share/postgresql/$PG_MAJOR/extension/"; \
     rm -rf /tmp/theodb
 

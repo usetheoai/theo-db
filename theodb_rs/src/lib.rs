@@ -1,6 +1,7 @@
 //! TheoDB's own PostgreSQL extension in Rust (pgrx) — M17 (ROADMAP-v2 / ADR 0006).
 //!
-//! `theodb.embed` (formerly plpython3u + urllib, `sql/30-theodb-embed.sql`) rewritten in Rust at
+//! `theodb.embed` (formerly plpython3u + urllib, em `sql/30-theodb-embed.sql` — REMOVIDO em `d0771b3`,
+//! recuperável com `git show d0771b3^:sql/30-theodb-embed.sql`) rewritten in Rust at
 //! **proven parity**: same signature, same vector output, same typed SQLSTATEs as the baseline.
 //! Mirrors AlloyDB's embedding() pattern — the DB calls a configurable model endpoint (it does NOT
 //! ship a model). Configuration via the same session GUCs:

@@ -1,9 +1,9 @@
 //! SPI-orchestration adapter (blueprint M19, ADR-C): the Pinecone import migration helper, ported from the plpgsql
-//! `theodb.import_vectors` FUNCTION (sql/80). Maps a Pinecone export {id, values, metadata} → a relational
+//! `theodb.import_vectors` FUNCTION (theodb_rs/sql/surface/80-import-vectors.sql). Maps a Pinecone export {id, values, metadata} → a relational
 //! table (id, embedding vector, metadata jsonb). The Rust function owns the loop + native jsonb parsing
 //! (serde — no pinecone client, no stdlib json dependency); the INSERT is built with Postgres-native `%I`
 //! quoting via `format()` over SPI (NOT hand-rolled), so the injection-safety of the plpgsql version is
-//! preserved byte-for-byte (sql/80:38-44). The chunked PROCEDURE stays plpgsql (ADR-D): a plpgsql PROCEDURE
+//! preserved byte-for-byte (theodb_rs/sql/surface/80-import-vectors.sql:38-44). The chunked PROCEDURE stays plpgsql (ADR-D): a plpgsql PROCEDURE
 //! can COMMIT per batch, which a Rust #[pg_extern] function (running in the caller's transaction) cannot.
 //!
 //! Fails fast (22023) on a non-array export or a record missing id/values — no partial/corrupt insert beyond
@@ -16,7 +16,7 @@ use crate::pg::err_input;
 
 /// The INSERT template. `%1$s`=target (regclass::text, already quoted), `%2$I`=id_col, `%3$I`=embedding_col,
 /// `%4$I`=metadata_col — substituted by Postgres `format()` (injection-safe). `$1..$3` are LITERAL here and
-/// bind per record: $1=id (text), $2=values (text → ::vector), $3=metadata (jsonb). Byte-faithful to sql/80:39.
+/// bind per record: $1=id (text), $2=values (text → ::vector), $3=metadata (jsonb). Byte-faithful to theodb_rs/sql/surface/80-import-vectors.sql:39.
 const INSERT_TEMPLATE: &str = "INSERT INTO %1$s (%2$I, %3$I, %4$I) VALUES ($1, $2::vector, $3)";
 
 /// Import a Pinecone export into `target` and return the number of records inserted. `target_text` is a
