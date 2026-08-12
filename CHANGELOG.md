@@ -13,6 +13,22 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.160.0] - 2026-08-12
+
+> **Nota de versionamento — por que MINOR e não MAJOR.** Esta versão traz uma seção `Removed`
+> substancial (o umbrella `theodb`, as cadeias de atualização, `benchmarks/` e `scripts/`), e a regra de
+> derivação do `cycle-release` daria MAJOR — `v1.0.0`. Cortada como MINOR seguindo o **precedente
+> documentado na `[0.159.0]`**: [SemVer §4](https://semver.org/) estabelece que em `0.y.z` nada é
+> declarado estável, então remoção não força major. A escolha entre `v1.0.0` e `v0.160.0` é
+> posicionamento de produto e cabe a quem aprova o PR de release; o corte como MINOR é o que preserva a
+> decisão anterior em vez de reverter uma escolha do owner sem que ele tenha pedido.
+>
+> **Ressalva que acompanha o corte:** a esteira de integração contínua está vermelha (B-029) — os fluxos
+> referenciam `benchmarks/` e `scripts/`, removidos nesta versão. Enquanto isso durar, **este corte não
+> tem CI que o valide**; o que existe é a suíte 446/0 executada localmente e a imagem construída e
+> exercitada. Está registrado aqui para que a aprovação seja informada, não presumida.
+
+
 ### Fixed
 - _(interno, sem efeito para quem usa o banco)_ **As verificações novas da superfície instalada nasceram com três defeitos e foram corrigidas antes de valerem como prova.** (1) Uma delas colapsava "a consulta falhou" e "não encontrei nada" na mesma resposta, e por isso acusou como ausente uma função que estava instalada — o mesmo engolir-erro-em-silêncio que o projeto proíbe, cometido dentro da verificação escrita para exigir rigor. Só não virou diagnóstico errado porque outra verificação a contradisse. (2) Outra conferia como o catálogo do PostgreSQL **escreve** o nome de um procedimento, e não a propriedade que importa: ser procedimento é o que permite confirmar cada lote durante uma importação grande, e uma conversão descuidada para função tornaria a importação tudo-ou-nada sem erro visível. Agora a propriedade é asserida diretamente. (3) A consulta comparava e lia colunas de catálogo sem conversão de tipo, o que a fazia falhar sempre — o defeito que o item (1) mantinha invisível, e que apareceu com mensagem exata no instante em que o erro parou de ser engolido. (#B-030)
 

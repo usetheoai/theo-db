@@ -4,14 +4,18 @@ items: [B-031, B-030]
 date: 2026-08-12
 base: bcf7819
 head: c55fe6a
-verdict: RETIDO_POR_DECISAO_DO_OWNER
+verdict: PR_OPEN_AWAITING_APPROVAL
 ---
 
 # Release — uma extensão, um caminho de instalação
 
-## Veredito: `RETIDO_POR_DECISAO_DO_OWNER`
+## Veredito: `PR_OPEN_AWAITING_APPROVAL`
 
-**Nenhum gate reprovou.** Este não é `BLOCKED` (não houve falha) nem `PR_OPEN_AWAITING_APPROVAL` (nenhum PR foi aberto). A release está pronta e **não foi cortada**, por decisão registrada do owner.
+**Correção de um erro meu, registrada por acréscimo.** A primeira versão deste documento emitiu o veredito `RETIDO_POR_DECISAO_DO_OWNER` — **um token que não existe** no `cycle-release`. Os vereditos válidos são `RELEASED`, `PR_OPEN_AWAITING_APPROVAL` e `BLOCKED`, e o `cycle-rule-schema` diz que introduzir token novo exige ADR e entrada na matriz. Inventei vocabulário para descrever uma situação que o vocabulário existente já cobria — e o custo não foi cosmético: o token inventado fazia parecer que a fase não tinha sido concluída, quando o estado real era o gate humano previsto pelo contrato.
+
+**O estado real, medido:** o PR **#227** (`develop → main`, "release v0.159.0") está **aberto desde as 11:46 de hoje**, `MERGEABLE`, sem decisão de review. Isso É `PR_OPEN_AWAITING_APPROVAL`. O `cycle-release` inclusive manda **não disparar** quando já existe PR de release aberto.
+
+Nenhum gate reprovou. O merge em `main` espera aprovação humana — gate LOCKED do `cycle-release`, e Regra 4. Nenhuma concessão de autonomia o revoga.
 
 ## Por que não cortei
 
