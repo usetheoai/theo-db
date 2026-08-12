@@ -814,10 +814,20 @@ mod tests {
     }
 
     /// T1.3 — o índice único REJEITA duplicata. Construir sem rejeitar não provaria nada.
-    #[pg_test]
+    ///
+    /// Usa `#[pg_test(error = …)]` e não `assert!(result.is_err())`: no pgrx um `ERROR` do PostgreSQL
+    /// não retorna como `Err`, ele faz longjmp e aborta a transação — o `assert` nunca chegaria a ser
+    /// avaliado. A primeira versão deste teste cometeu esse erro e reprovou **com o produto correto**,
+    /// mostrando no log exatamente a violação que ela queria provar. É o idioma que o resto deste
+    /// arquivo já usa em sete testes.
+    #[pg_test(error = "duplicate key value violates unique constraint")]
     fn unique_index_rejects_duplicate() {
-        Spi::run("CREATE TABLE b033d (e vector(3)); CREATE UNIQUE INDEX ON b033d (e); INSERT INTO b033d VALUES ('[4,5,6]');").unwrap();
-        let dup = Spi::run("INSERT INTO b033d VALUES ('[4,5,6]')");
-        assert!(dup.is_err(), "duplicata deveria violar o índice único, mas o insert passou");
+        Spi::run(
+            "CREATE TABLE b033d (e vector(3));
+             CREATE UNIQUE INDEX ON b033d (e);
+             INSERT INTO b033d VALUES ('[4,5,6]');",
+        )
+        .unwrap();
+        Spi::run("INSERT INTO b033d VALUES ('[4,5,6]')").unwrap();
     }
 }
