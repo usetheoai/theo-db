@@ -48,9 +48,11 @@ mod tests {
         "function ai.nl_query_cfg(text,text,integer)",   // T3.2
         "function theodb_ml.create_model(text,text,text)", // T3.3
         "function theodb_ml.apply_model(text)",          // T3.3
-        // PROCEDURE, não function — `pg_describe_object` distingue, e é o erro que uma
-        // migração feita no olho comete (T3.4).
-        "procedure theodb.import_vectors_chunked(regclass,jsonb,integer,text,text,text)",
+        // MEDIDO 2026-08-12: `pg_describe_object` imprime "function" mesmo para `prokind='p'`, então
+        // esperar "procedure" aqui testava a REDAÇÃO do PostgreSQL, não a propriedade que importa.
+        // A propriedade — ser procedimento, que é o que permite `COMMIT` por lote — é asserida em
+        // `import_vectors_chunked_is_a_procedure`, onde ela pertence.
+        "function theodb.import_vectors_chunked(regclass,jsonb,integer,text,text,text)",
         "function theodb.htap_refresh(regclass)",        // T3.5
         "function theodb.olap(regclass)",                // T3.5
     ];
@@ -179,16 +181,24 @@ mod tests {
         let mut wrong: Vec<String> = Vec::new();
 
         for (schema, name) in SQL_LANGUAGE_WRAPPERS {
+            // `nspname`/`proname` são do tipo `name`, não `text`. Comparar direto com um parâmetro
+            // ligado deixa o planejador sem tipo para resolver; o cast explícito remove a ambiguidade.
+            //
+            // O `.expect` é deliberado e corrige um defeito da primeira versão deste teste: ela usava
+            // `.ok().flatten()`, que colapsa "a consulta falhou" e "não encontrei nada" no MESMO None.
+            // Medido em 2026-08-12, isso reportou `ai.generate = AUSENTE` para uma função que estava
+            // instalada — e só não virou diagnóstico errado porque `surface_contains_public_api`
+            // contradisse. Engolir erro dentro do teste escrito para exigir rigor é a Regra 8 violada
+            // no lugar mais caro possível.
             let lang = Spi::get_one_with_args::<String>(
                 "SELECT l.lanname FROM pg_proc p \
                  JOIN pg_language l ON l.oid = p.prolang \
                  JOIN pg_namespace n ON n.oid = p.pronamespace \
-                 WHERE n.nspname = $1 AND p.proname = $2 \
+                 WHERE n.nspname::text = $1 AND p.proname::text = $2 \
                  ORDER BY p.oid LIMIT 1",
                 &[(*schema).into(), (*name).into()],
             )
-            .ok()
-            .flatten();
+            .unwrap_or_else(|e| panic!("consulta de linguagem falhou para {schema}.{name}: {e:?}"));
 
             match lang.as_deref() {
                 Some("sql") => {}
@@ -200,6 +210,30 @@ mod tests {
         assert!(
             wrong.is_empty(),
             "wrappers públicos que não são `LANGUAGE sql` (logo, não validados no CREATE): {wrong:#?}",
+        );
+    }
+
+    /// T3.4 — `theodb.import_vectors_chunked` é PROCEDIMENTO, não função.
+    ///
+    /// A distinção é funcional, não cosmética: só um procedimento pode emitir `COMMIT`, e é isso que
+    /// permite importar em lotes com pegada de memória e WAL limitadas. Uma migração feita no olho
+    /// converteria em `FUNCTION` sem erro visível — e a importação passaria a ser tudo-ou-nada.
+    ///
+    /// Vive num teste próprio porque `pg_describe_object` **imprime "function" mesmo para
+    /// `prokind='p'`** (medido). Testar a redação do catálogo não prova a propriedade; `prokind` prova.
+    #[pg_test]
+    fn import_vectors_chunked_is_a_procedure() {
+        let kind = Spi::get_one::<i8>(
+            "SELECT p.prokind FROM pg_proc p \
+             JOIN pg_namespace n ON n.oid = p.pronamespace \
+             WHERE n.nspname::text = 'theodb' AND p.proname::text = 'import_vectors_chunked'",
+        )
+        .unwrap_or_else(|e| panic!("consulta de prokind falhou: {e:?}"));
+
+        assert_eq!(
+            kind,
+            Some(b'p' as i8),
+            "theodb.import_vectors_chunked deveria ser PROCEDURE (prokind='p'); obtido: {kind:?}",
         );
     }
 }

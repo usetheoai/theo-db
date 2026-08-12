@@ -47,8 +47,9 @@ on:
     paths:
       - 'Dockerfile'
       - '.dockerignore'
-      - 'Makefile'
-      - 'theodb.control'
+      # B-030: `Makefile` e `theodb.control` saíram com o umbrella `theodb`, absorvido pelo `theodb_rs`.
+      # A superfície SQL que eles construíam agora vive em `theodb_rs/sql/surface/`, já coberta pelo
+      # `theodb_rs/**` abaixo. `vector.control` + `sql/**` seguem: o shim `vector` continua separado.
       - 'vector.control'
       - 'theodb_rs/**'
       - 'sql/**'

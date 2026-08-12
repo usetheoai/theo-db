@@ -16,7 +16,7 @@ ARG BASE_IMAGE=postgres:18-bookworm
 # ---- Stage 1: build theodb_rs (TheoDB's own Rust/pgrx extension — M17/M69/M70; own vector type + ANN AM) ----
 # Compila a crate contra o MESMO PG pinado. M70: theodb_rs provê o tipo `vector` own-code (byte-idêntico ao
 # pgvector) + os AMs theodb_hnsw/theodb_ivfflat + os schemas theodb/ai — sem depender do pgvector/pgvectorscale.
-FROM ${BASE_IMAGE} AS theodb-rs-builder
+FROM ${BASE_IMAGE} AS theodb-toolchain
 ARG PG_MAJOR=18
 # M142: repin de 0.16.1 → 0.19.0. cargo-pgrx e o crate pgrx são lockstep; theodb_rs foi para pgrx =0.19.0 no M98
 # (impl(m98)) mas o Dockerfile nunca acompanhou (o repin M135 não pegou) — a imagem default não buildava. Fix.
@@ -61,6 +61,42 @@ RUN cargo install --locked cargo-pgrx --version $PGRX_VERSION
 # our source — this expensive layer is independent of the crate code, so editing lib.rs does not force
 # a PostgreSQL recompile (only the COPY + install layers below rerun).
 RUN cargo pgrx init --pg$PG_MAJOR "$(which pg_config)"
+
+# Pré-requisitos do `cargo pgrx test`, aqui e não no runtime de cada execução.
+#
+# `initdb` RECUSA rodar como root — e a recusa não aparece como uma falha, aparece como uma AVALANCHE:
+# medido em 2026-08-12, o primeiro `#[pg_test]` aborta duro segurando o mutex de teste do pgrx e os 373
+# seguintes reprovam com "Could not obtain test mutex", sem executar. De 374 blocos de falha, UM continha
+# a causa. O `CARGO_PGRX_TEST_RUNAS` resolve, mas exige `sudo` e um usuário com PGDATA próprio; deixar
+# isso para um `apt-get install` dentro de cada execução paga rede toda vez e faz a suíte depender de
+# repositório externo estar no ar para poder rodar.
+RUN apt-get update && apt-get install -y --no-install-recommends sudo && \
+    rm -rf /var/lib/apt/lists/* && \
+    (id -u postgres >/dev/null 2>&1 || useradd -m postgres) && \
+    mkdir -p /pgdata && chown postgres /pgdata
+ENV CARGO_PGRX_TEST_RUNAS=postgres \
+    CARGO_PGRX_TEST_PGDATA=/pgdata
+
+# ---- Stage 1b: builder do produto — o ÚNICO estágio que contém código-fonte ----
+#
+# A separação é o ponto, e ela nasceu de um defeito medido em 2026-08-12: a imagem de teste usada
+# localmente tinha o crate COPIADO dentro dela, em `/tmp/theodb_rs`. Um `docker run` que montasse o repo e
+# copiasse por cima aninhava o diretório em vez de substituí-lo, e o `cargo` compilava a cópia velha —
+# devolvendo **440 testes verdes que não testaram o código sob mudança**. Um falso verde visualmente
+# idêntico ao verdadeiro, que é a pior forma de falha de verificação.
+#
+# Com o corte, `--target theodb-toolchain` produz uma imagem SEM fonte alguma. O modo de falha vira
+# estrutural: montagem errada não compila outra coisa em silêncio, ela para com "could not find Cargo.toml".
+# É a mesma disciplina do resto do projeto — preferir a falha alta à leitura plausível e errada.
+#
+# Para a suíte: `docker build --target theodb-toolchain -t theodb-toolchain .`, depois montar o repo e
+# apontar CARGO_TARGET_DIR para um volume nomeado, de modo que a compilação seja incremental entre
+# execuções. O job de teste também deixa de pagar o `cargo pgrx install --release` abaixo, que ele nunca
+# reaproveita: perfil e features diferentes não compartilham artefato de compilação.
+FROM theodb-toolchain AS theodb-rs-builder
+# `ARG` não atravessa fronteira de estágio: sem esta redeclaração, `$PG_MAJOR` no RUN abaixo expandiria
+# para vazio e o `--features pg` instalaria a extensão sem feature de versão do PostgreSQL.
+ARG PG_MAJOR=18
 # Copy the crate (with its committed Cargo.lock for reproducibility — pgrx install does not re-resolve).
 COPY theodb_rs/ /tmp/theodb_rs/
 RUN cd /tmp/theodb_rs && cargo pgrx install --release --features pg$PG_MAJOR
