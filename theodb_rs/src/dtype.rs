@@ -345,6 +345,81 @@ fn theodb_vector_cosine_distance(a: Vector, b: Vector) -> f64 {
     vec::cosine_distance(a.as_slice(), b.as_slice())
 }
 
+// ---- ordem total: igualdade e comparação (B-033) ----
+//
+// Por que existe: sem estes operadores o PostgreSQL não sabe ordenar o tipo, e cinco padrões de app
+// pgvector falham — `WHERE e = …`, `SELECT DISTINCT e`, `GROUP BY e`, `ORDER BY e` e `UNIQUE` sobre a
+// coluna. Só o caminho ANN (`ORDER BY e <-> …`) funcionava. O `ADR-0029 § D2` promete drop-in "sem
+// mudança de código", e a promessa falhava na CONSULTA — com mensagem do PostgreSQL que não cita
+// TheoDB, então o usuário não descobria que trocou de implementação.
+//
+// SEMÂNTICA: paridade byte-a-byte com `vector_cmp_internal` do pgvector, consultado na fonte upstream
+// (ADR D1 do plano `b033-vector-btree`). Compara elementos até `min(dim_a, dim_b)` e só então desempata
+// por dimensão. NÃO chama `check_dims`: ao contrário das distâncias acima, comparar vetores de
+// dimensões diferentes é legal e produz ordem, nunca erro.
+//
+// A escolha NÃO é estética. Duas alternativas foram rejeitadas por quebrarem coisas diferentes:
+//   - dimensão como chave primária (minha suposição inicial) ordena diferente do pgvector, o que
+//     consertaria a incompatibilidade antiga criando uma nova;
+//   - igualdade com tolerância (`|a-b| < eps`) quebra TRANSITIVIDADE, e um btree sobre relação
+//     não-transitiva corrompe em silêncio — a busca deixa de encontrar linhas que existem.
+//
+// PRÉ-CONDIÇÃO que torna isto uma ordem total: NaN e infinito são rejeitados na entrada (ver
+// `theodb_vector_in` e o cast de array). Sem essa garantia, `partial_cmp` sobre f32 não seria total —
+// NaN não é comparável nem a si mesmo — e o índice ficaria incoerente.
+fn vector_cmp_internal(a: &Vector, b: &Vector) -> i32 {
+    let (x, y) = (a.as_slice(), b.as_slice());
+    for (l, r) in x.iter().zip(y.iter()) {
+        // `partial_cmp` só devolve None sob NaN, impossível aqui pela pré-condição acima. O
+        // `expect` documenta o invariante em vez de mascará-lo com um fallback silencioso.
+        match l.partial_cmp(r).expect("NaN em vector: rejeitado na entrada, não deveria existir") {
+            std::cmp::Ordering::Less => return -1,
+            std::cmp::Ordering::Greater => return 1,
+            std::cmp::Ordering::Equal => {}
+        }
+    }
+    // Prefixo comum idêntico: o mais curto vem antes.
+    x.len().cmp(&y.len()) as i32
+}
+
+#[pg_extern(immutable, strict, parallel_safe)]
+fn theodb_vector_cmp(a: Vector, b: Vector) -> i32 {
+    vector_cmp_internal(&a, &b)
+}
+
+// Os seis operadores derivam da MESMA comparação (ADR D3): seis implementações independentes seriam
+// duplicação de conhecimento, e uma divergência entre `=` e `cmp` produziria um btree incoerente com
+// os operadores que o consultam.
+#[pg_extern(immutable, strict, parallel_safe)]
+fn theodb_vector_eq(a: Vector, b: Vector) -> bool {
+    vector_cmp_internal(&a, &b) == 0
+}
+
+#[pg_extern(immutable, strict, parallel_safe)]
+fn theodb_vector_ne(a: Vector, b: Vector) -> bool {
+    vector_cmp_internal(&a, &b) != 0
+}
+
+#[pg_extern(immutable, strict, parallel_safe)]
+fn theodb_vector_lt(a: Vector, b: Vector) -> bool {
+    vector_cmp_internal(&a, &b) < 0
+}
+
+#[pg_extern(immutable, strict, parallel_safe)]
+fn theodb_vector_le(a: Vector, b: Vector) -> bool {
+    vector_cmp_internal(&a, &b) <= 0
+}
+
+#[pg_extern(immutable, strict, parallel_safe)]
+fn theodb_vector_gt(a: Vector, b: Vector) -> bool {
+    vector_cmp_internal(&a, &b) > 0
+}
+
+#[pg_extern(immutable, strict, parallel_safe)]
+fn theodb_vector_ge(a: Vector, b: Vector) -> bool {
+    vector_cmp_internal(&a, &b) >= 0
+}
+
 fn check_dims(a: &Vector, b: &Vector) {
     let (x, y) = (a.as_slice().len(), b.as_slice().len());
     if x != y {
@@ -421,6 +496,50 @@ CREATE OPERATOR <=> (
     PROCEDURE = theodb_vector_cosine_distance, COMMUTATOR = '<=>'
 );
 
+-- B-033 — os operadores de ORDEM. Família distinta dos de distância acima: aqueles alimentam as
+-- opclasses dos AMs ANN, estes alimentam o btree. Adicionar não muda a resolução de nenhum caminho
+-- existente.
+--
+-- COMMUTATOR/NEGATOR e as funções de seletividade replicam `pgvector/sql/vector.sql` verbatim: são o
+-- que o planejador usa para reescrever predicados e estimar cardinalidade. Omiti-los não quebraria a
+-- consulta, mas produziria planos piores em silêncio — que é a forma cara de errar aqui.
+CREATE OPERATOR = (
+    LEFTARG = vector, RIGHTARG = vector, PROCEDURE = theodb_vector_eq,
+    COMMUTATOR = = , NEGATOR = <> , RESTRICT = eqsel, JOIN = eqjoinsel
+);
+CREATE OPERATOR <> (
+    LEFTARG = vector, RIGHTARG = vector, PROCEDURE = theodb_vector_ne,
+    COMMUTATOR = <> , NEGATOR = = , RESTRICT = eqsel, JOIN = eqjoinsel
+);
+CREATE OPERATOR < (
+    LEFTARG = vector, RIGHTARG = vector, PROCEDURE = theodb_vector_lt,
+    COMMUTATOR = > , NEGATOR = >= , RESTRICT = scalarltsel, JOIN = scalarltjoinsel
+);
+CREATE OPERATOR <= (
+    LEFTARG = vector, RIGHTARG = vector, PROCEDURE = theodb_vector_le,
+    COMMUTATOR = >= , NEGATOR = > , RESTRICT = scalarlesel, JOIN = scalarlejoinsel
+);
+CREATE OPERATOR > (
+    LEFTARG = vector, RIGHTARG = vector, PROCEDURE = theodb_vector_gt,
+    COMMUTATOR = < , NEGATOR = <= , RESTRICT = scalargtsel, JOIN = scalargtjoinsel
+);
+CREATE OPERATOR >= (
+    LEFTARG = vector, RIGHTARG = vector, PROCEDURE = theodb_vector_ge,
+    COMMUTATOR = <= , NEGATOR = < , RESTRICT = scalargesel, JOIN = scalargejoinsel
+);
+
+-- `DEFAULT` é o que faz `CREATE UNIQUE INDEX ON t (e)` e `ORDER BY e` funcionarem sem o usuário
+-- nomear a opclass. O nome `vector_ops` não colide com as `vector_l2_ops`/`vector_cosine_ops` do shim:
+-- nomes de opclass são únicos POR MÉTODO DE ACESSO, e aquelas são do AM `hnsw`.
+CREATE OPERATOR CLASS vector_ops
+    DEFAULT FOR TYPE vector USING btree AS
+    OPERATOR 1 < ,
+    OPERATOR 2 <= ,
+    OPERATOR 3 = ,
+    OPERATOR 4 >= ,
+    OPERATOR 5 > ,
+    FUNCTION 1 theodb_vector_cmp(vector, vector);
+
 CREATE CAST (real[] AS vector)  WITH FUNCTION theodb_vector_from_real_array(real[]);
 CREATE CAST (vector AS real[])  WITH FUNCTION theodb_vector_to_real_array(vector);
 CREATE CAST (double precision[] AS vector) WITH FUNCTION theodb_vector_from_float8_array(double precision[]);
@@ -437,6 +556,16 @@ CREATE CAST (double precision[] AS vector) WITH FUNCTION theodb_vector_from_floa
         theodb_vector_l2_distance,
         theodb_vector_neg_inner_product,
         theodb_vector_cosine_distance,
+        // B-033 — sem estas 7 arestas o pgrx pode emitir os CREATE OPERATOR antes das funções que
+        // eles referenciam, e o CREATE EXTENSION falha. É a classe de defeito que não aparece na
+        // compilação, só na instalação.
+        theodb_vector_cmp,
+        theodb_vector_eq,
+        theodb_vector_ne,
+        theodb_vector_lt,
+        theodb_vector_le,
+        theodb_vector_gt,
+        theodb_vector_ge,
         theodb_vector_from_real_array,
         theodb_vector_to_real_array,
         theodb_vector_from_float8_array,
@@ -581,5 +710,114 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(first, "[1,2,3]");
+    }
+
+    // ---- B-033: ordem total do tipo vector ----
+
+    /// T1.1 — `vector_cmp` replica `vector_cmp_internal` do pgvector.
+    ///
+    /// O quarto caso é o que separa a semântica correta da suposição com que este trabalho começou:
+    /// `[1,3]` vs `[1,2,9]` devolve **1** porque o SEGUNDO elemento já decide. Se a dimensão fosse a
+    /// chave primária, `[1,3]` (dim 2) viria antes de `[1,2,9]` (dim 3) e o resultado seria -1.
+    #[pg_test]
+    fn cmp_matches_upstream_semantics() {
+        let c = |a: &str, b: &str| {
+            Spi::get_one_with_args::<i32>(
+                "SELECT theodb_vector_cmp($1::vector, $2::vector)",
+                &[a.into(), b.into()],
+            )
+            .unwrap_or_else(|e| panic!("cmp({a},{b}) falhou: {e:?}"))
+            .expect("cmp devolveu NULL para entrada não-nula")
+        };
+        assert_eq!(c("[1,2]", "[1,3]"), -1, "elemento menor decide");
+        assert_eq!(c("[1,2]", "[1,2]"), 0, "iguais");
+        assert_eq!(c("[1,2]", "[1,2,0]"), -1, "prefixo igual: o mais curto vem antes");
+        assert_eq!(c("[1,3]", "[1,2,9]"), 1, "o ELEMENTO decide antes da dimensão");
+        assert_eq!(c("[-5]", "[1]"), -1, "negativos ordenam corretamente");
+    }
+
+    /// T1.1 — a comparação é uma ordem TOTAL, que é a pré-condição do btree.
+    ///
+    /// Se falhar, o índice não fica "um pouco errado": ele deixa de encontrar linhas que existem, em
+    /// silêncio. O conjunto inclui dimensões diferentes de propósito — é onde uma implementação
+    /// ingênua quebra a antissimetria.
+    #[pg_test]
+    fn cmp_is_a_total_order() {
+        let vs = ["[1,2]", "[1,3]", "[1,2,0]", "[-5]", "[1]", "[9,9,9]"];
+        let c = |a: &str, b: &str| {
+            Spi::get_one_with_args::<i32>(
+                "SELECT theodb_vector_cmp($1::vector, $2::vector)",
+                &[a.into(), b.into()],
+            )
+            .unwrap()
+            .unwrap()
+        };
+        for a in vs {
+            assert_eq!(c(a, a), 0, "reflexividade falhou em {a}");
+        }
+        for a in vs {
+            for b in vs {
+                assert_eq!(
+                    c(a, b).signum(),
+                    -c(b, a).signum(),
+                    "antissimetria falhou entre {a} e {b}"
+                );
+            }
+        }
+        for a in vs {
+            for b in vs {
+                for k in vs {
+                    if c(a, b) <= 0 && c(b, k) <= 0 {
+                        assert!(c(a, k) <= 0, "transitividade falhou: {a} <= {b} <= {k}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// T1.3 — os cinco padrões que o B-033 mediu falhando. Os MESMOS cinco, não um genérico.
+    #[pg_test]
+    fn pgvector_query_patterns_work() {
+        Spi::run(
+            "CREATE TABLE b033 (id int, e vector(3));
+             INSERT INTO b033 VALUES (1,'[1,2,3]'),(2,'[1,2,3]'),(3,'[9,9,9]');",
+        )
+        .unwrap();
+
+        let eq = Spi::get_one::<i64>("SELECT count(*) FROM b033 WHERE e = '[1,2,3]'::vector")
+            .unwrap()
+            .unwrap();
+        assert_eq!(eq, 2, "WHERE e = ...");
+
+        let distinct =
+            Spi::get_one::<i64>("SELECT count(*) FROM (SELECT DISTINCT e FROM b033) x")
+                .unwrap()
+                .unwrap();
+        assert_eq!(distinct, 2, "SELECT DISTINCT e");
+
+        let grouped =
+            Spi::get_one::<i64>("SELECT count(*) FROM (SELECT e FROM b033 GROUP BY e) x")
+                .unwrap()
+                .unwrap();
+        assert_eq!(grouped, 2, "GROUP BY e");
+
+        let first = Spi::get_one::<String>("SELECT e::text FROM b033 ORDER BY e LIMIT 1")
+            .unwrap()
+            .unwrap();
+        assert_eq!(first, "[1,2,3]", "ORDER BY e");
+
+        // O quinto: a opclass DEFAULT existe, então o índice é criável sem nomeá-la. Sobre uma
+        // tabela SEM duplicata, para provar que CONSTRÓI (a rejeição de duplicata é o teste seguinte).
+        Spi::run("CREATE TABLE b033u (e vector(3)); INSERT INTO b033u VALUES ('[1,2,3]'),('[9,9,9]');")
+            .unwrap();
+        Spi::run("CREATE UNIQUE INDEX b033u_ix ON b033u (e)").unwrap();
+    }
+
+    /// T1.3 — o índice único REJEITA duplicata. Construir sem rejeitar não provaria nada.
+    #[pg_test]
+    fn unique_index_rejects_duplicate() {
+        Spi::run("CREATE TABLE b033d (e vector(3)); CREATE UNIQUE INDEX ON b033d (e); INSERT INTO b033d VALUES ('[4,5,6]');").unwrap();
+        let dup = Spi::run("INSERT INTO b033d VALUES ('[4,5,6]')");
+        assert!(dup.is_err(), "duplicata deveria violar o índice único, mas o insert passou");
     }
 }
