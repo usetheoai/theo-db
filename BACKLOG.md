@@ -653,7 +653,7 @@ suggested_mode: bug
 source: discover-review
 evidence: `pg_embed_unreachable_endpoint_fails_typed` e o par de `rerank` recebem `theodb.embed: refusing to call 127.0.0.1 — it resolves to a blocked internal address`. **Ampliado em 2026-08-11 — são TRÊS testes, não dois.** A suíte completa (`434 passed; 6 failed`) mostra que `http::m104_breaker_success_closes` tem a mesma causa por outro sintoma: o log traz cinco `theodb egress guard: bt denied host 127.0.0.1 -> blocked address 127.0.0.1` seguidos de `ERROR: open after K failures` (`http.rs:320`). O teste quer provar que **um sucesso em HalfOpen FECHA o disjuntor**, e nunca há sucesso — a guarda recusa loopback antes de qualquer conexão, então o disjuntor só acumula falhas e abre. É o mesmo produto-certo-teste-desatualizado, agora atingindo também a máquina de estados do circuit breaker.
 why_now: os testes querem provar erro **tipado** para endpoint inalcançável e recebem um erro tipado **diferente** — a guarda SSRF recusa loopback antes de conectar. **O produto está certo e o teste está desatualizado:** a guarda é mais nova que ele.
-status: triaged
+status: planned
 resolvido: 2026-08-11 — os TRÊS corrigidos, sem tocar a guarda. `embed` e `rerank` passaram a apontar para `invalid.invalid` (TLD reservado RFC 2606, não resolve em lugar nenhum), com a mensagem MEDIDA no binário shipado, não adivinhada. O do disjuntor (`m104_breaker_success_closes`) passou a registrar as K falhas direto na máquina de estados via `breaker_record`, ficando hermético — coerente com o comentário que ele já carregava ("assert the state-machine directly") e com a segunda metade, que sempre usou essa porta. **Medição que decidiu o endereço:** um IP TEST-NET (`192.0.2.1`) passa a guarda e produz `endpoint call failed: the timeout of the request was reached`, mas leva **90,6 s** com os 2 retries — inaceitável numa suíte; o DNS falha em milissegundos.
 dod:
   - os testes usam um endereço externo inalcançável, provando o erro que pretendem provar
@@ -678,6 +678,18 @@ dod:
 >
 > Verde não é DoD. Fechar aqui seria trocar a pergunta ("a guarda está coberta?") pelo sintoma que a
 > denunciava ("o teste está vermelho?").
+
+> **2026-08-13 — FECHADO, e por mais do que o item pedia.** Verificado lendo o código, não inferido do verde:
+>
+> | bullet do `dod` | evidência |
+> |---|---|
+> | testes usam endereço externo inalcançável | `invalid.invalid` (TLD reservado, RFC 2606) em `lib.rs:123,203`. A escolha foi **medida**: um IP TEST-NET passa a guarda mas leva **90,6 s** com os 2 retries; o DNS falha em milissegundos |
+> | a guarda SSRF permanece intacta | o comentário em `lib.rs:107-110` declara explicitamente que afrouxá-la seria abrir o SSRF, e ela não foi tocada |
+> | teste separado cobre a própria guarda | **cinco** `#[test]` dedicados em `egress.rs`: bateria de faixas privadas (Teredo, v4-compat, site-local, CGNAT, benchmarking, reservado), extração de host espelhando o cliente HTTP, confusão de `userinfo`, escopo da allowlist e parsing dela |
+> | os TRÊS testes passam | medido hoje na suíte (`478 passed; 0 failed`) |
+> | disjuntor com cobertura sem rede | `m104_breaker_success_closes` registra as K falhas **direto na máquina de estados**; a única URL no corpo é chave do mapa, não destino. Zero rede |
+>
+> A guarda **não** era "exercitada por acidente" quando este item foi escrito — ou deixou de ser desde então.
 
 ## B-013 — A suíte não roda no CI, então a próxima regressão espera meses   [x]
 
@@ -1001,6 +1013,28 @@ dod:
 > Um teste de performance que passa hoje e falha amanhã por carga da máquina é flaky por construção
 > (`rules/testing.md § 6`), e um vermelho intermitente treina o time a ignorar vermelho. **A execução verde
 > de hoje é evidência a favor de mover o teste, não contra.**
+
+> **2026-08-13 — dois dos três bullets FECHADOS; o terceiro é refatoração de produto, e fica declarado.**
+>
+> O bullet 2 está implementado e bem: **medianas de 5 rodadas alternadas** (A,S,A,S,…) em vez de uma amostra
+> de cada em ordem fixa, com a evidência medida no próprio comentário (`vec.rs`) —
+> `sozinho: passa · após 439 testes: 0,78× · com 3 contêineres: 0,66×`, monotônico com a carga acumulada, não
+> aleatório. O diagnóstico registrado é redução de frequência por licença AVX2 num i7-1355U de 15 W: o teste
+> media a térmica do laptop e reportava como qualidade do kernel.
+>
+> **O bullet 3 — tirar o teste da suíte funcional — exige o que o plano do Tier 1 mandou declarar em vez de
+> fazer de passagem.** Medido: `vec.rs` tem **uma** dependência de PostgreSQL (`use crate::pg::err_input`,
+> `:17`, usada uma vez em `:34`); todo o resto é puro. O harness de bench existe e é o destino certo
+> (`criterion`, `benches/scan_hot_path.rs`, com `test = false` para não compilar sob `cargo pgrx test`), mas o
+> padrão dele é `#[path]`-incluir um módulo **puro** — e o Cargo.toml documenta por quê: sob `pg_test` o
+> código dependente de símbolos do PG não linka num binário standalone, e tentar isso já bloqueou **todos** os
+> `#[pg_test]` do crate uma vez (M144).
+>
+> Então mover exige extrair o núcleo puro de `vec.rs`, como o `ann/scan_core.rs` foi extraído. Isso é mudança
+> de produto com blast radius próprio → [[B-053]].
+>
+> **A pergunta que decide se vale:** o teste flakou desde o conserto das medianas? Se não flakou, o caso para
+> a extração enfraquece — e essa é medição que o tempo produz, não eu.
 
 ## B-024 — O autotune recomendou `ef_search` sobre contadores em ZERO, e ninguém mediu o alcance   [ ]
 
@@ -1838,3 +1872,34 @@ dod:
 > um palpite: nenhum dos cinco itens do Tier 1 nomeava esta janela, e ela é o que faz os outros quatro
 > valerem menos do que parecem — um portão que só olha depois do merge protege `develop` de si mesmo, não o
 > trabalho de quem o produz.
+
+## B-053 — O núcleo de distância vetorial é puro por uma linha, e é ela que prende o micro-bench na suíte   [ ]
+
+domain: hot-path
+repo: theo-db
+suggested_mode: evolve
+source: discover-review
+evidence: medido em 2026-08-13. `theodb_rs/src/vec.rs` tem **uma única** dependência de PostgreSQL em código de
+produção — `use crate::pg::err_input` (`:17`), usada uma vez em `:34` para o erro tipado de dimensão
+incompatível. Todo o resto (`mod simd_x86`, `cosine_dist_from_bytes`, `to_le_bytes`, o despacho AVX2/escalar) é
+puro. Essa linha impede que o módulo seja `#[path]`-incluído num binário de `criterion`, que é o padrão
+estabelecido pelo `benches/scan_hot_path.rs` — cujo cabeçalho diz textualmente que inclui o **puro**
+`ann/scan_core.rs` para linkar sem runtime de PostgreSQL. O `Cargo.toml` (`:80-85`) registra o custo de ignorar
+isso: sob `pg_test`, o código dependente de símbolos do PG não linka num bench standalone, e tentar já bloqueou
+**todos** os `#[pg_test]` do crate no M144.
+why_now: é o que prende o terceiro bullet do [[B-023]]. O micro-bench de SIMD mora na suíte funcional porque
+não há para onde movê-lo, e `rules/testing.md § 6` proíbe teste dependente de tempo sem isolamento. O precedente
+de como fazer já existe e foi pago uma vez — o `ann/scan_core.rs` foi extraído exatamente por esta razão, e o
+comentário dele explica que o pgvectorscale contorna o mesmo problema com uma cópia divergente, enquanto nós
+contornamos benchando o código real.
+status: raw
+dod:
+  - o núcleo de distância é um módulo **puro** — `grep -c "crate::" ` no arquivo extraído `equals` 0
+  - um bench de `criterion` o inclui por `#[path]` e linka sem runtime de PostgreSQL
+  - o `err_input` de dimensão incompatível continua sendo levantado no mesmo ponto, com o mesmo SQLSTATE —
+    provado por teste, porque mover a fronteira do erro é o risco real desta extração
+  - a suíte funcional não perde teste: o que sai é o micro-bench, e o que fica é a correção
+
+> Registrado 2026-08-13 pelo ciclo do Tier 1. **A ordem importa e está declarada:** este item só vale a pena se
+> o micro-bench de fato incomodar. Ele foi consertado (medianas alternadas) e passou hoje; se não flakar de
+> novo, a extração é custo sem problema correspondente. Medir antes de extrair.

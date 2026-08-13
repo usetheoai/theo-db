@@ -379,6 +379,30 @@ backend só. Cobertura multi-backend seria item próprio.
 - a guarda não é alterada: `git diff` em `egress.rs` na região da guarda `equals` vazio
 - suíte total **>= 478** e `0 failed`
 
+> **T1.5 — NÃO EXECUTADA, e a razão é medição, não desistência (2026-08-13).**
+>
+> A tarefa foi planejada sobre uma leitura desatualizada do [[B-016]] — a segunda vez neste ciclo que eu
+> planejei contra o texto de um item em vez de contra o código. Lido o código, os cinco bullets do `dod` já
+> estão satisfeitos: a guarda tem **cinco** `#[test]` dedicados em `egress.rs` (faixas privadas, extração de
+> host espelhando o cliente, confusão de `userinfo`, escopo e parsing da allowlist), e
+> `m104_breaker_success_closes` registra as K falhas direto na máquina de estados — a única URL no corpo é
+> chave do mapa, não destino. **Zero rede.**
+>
+> Escrever os testes que a T1.5 previa teria duplicado cobertura existente para satisfazer um plano, que é a
+> forma mais cara de parecer produtivo.
+
+> **T1.7 — PARCIAL, e a parte que falta está declarada como item (2026-08-13).**
+>
+> O bullet 2 do [[B-023]] já estava implementado: medianas de 5 rodadas alternadas, com a evidência no
+> comentário do `vec.rs`. O bullet 3 — tirar o teste da suíte funcional — esbarra numa medição: `vec.rs` tem
+> **uma** dependência de PostgreSQL (`use crate::pg::err_input`, `:17`), e o padrão do harness de bench deste
+> projeto é `#[path]`-incluir um módulo **puro**. Mover exige extrair o núcleo, que é mudança de produto com
+> blast radius próprio → [[B-053]].
+>
+> O próprio plano exigia isto: *"se precisar de seam de injeção, é mudança de produto: registrar no plano antes
+> de escrever"*. Registrado, e com a pergunta que decide se vale — o teste flakou desde o conserto? Se não,
+> a extração é custo sem problema correspondente.
+
 ### T1.6 — `cargo-udeps` roda onde o ambiente existe
 
 #### Why this step
