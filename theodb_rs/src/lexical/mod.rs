@@ -11,6 +11,11 @@
 // spike na superficie SQL publica foi o defeito que o M184 mediu no SymQG e o M176 removeu.
 pub mod pg_backing;
 
+// B-044 — o analisador nomeado (stemming + stopwords). Nome próprio, nunca `default`: o Tantivy
+// serializa o nome no schema, então redefinir o default mudaria a semântica de todo índice já
+// construído em silêncio.
+pub mod analyzer;
+
 // M140.3 — a superfície BM25 de produção (bm25_build + bm25_search) com o cache do Directory.
 pub mod engine;
 

@@ -15,7 +15,9 @@ use pgrx::prelude::*;
 use std::sync::Arc;
 use tantivy::collector::TopDocs;
 use tantivy::query::QueryParser;
-use tantivy::schema::{FAST, Field, INDEXED, STORED, Schema, TEXT, Value};
+use tantivy::schema::{
+    FAST, Field, INDEXED, IndexRecordOption, STORED, Schema, TextFieldIndexing, TextOptions, Value,
+};
 use tantivy::{Index, TantivyDocument};
 
 use theodb_lexical::{IndexCache, MemStore, PgDirectory};
@@ -32,11 +34,24 @@ fn quote_ident(s: &str) -> String {
     format!("\"{}\"", s.replace('"', "\"\""))
 }
 
-/// Schema de produção: `id` i64 stored+fast (retornável), `body` TEXT (tokenizer default, como o M140.1).
+/// Schema de produção: `id` i64 stored+fast (retornável), `body` TEXT com o analisador NOMEADO do TheoDB.
+///
+/// B-044: o nome vai serializado no schema e portanto no `meta.json` do índice — é ele que decide qual
+/// cadeia cada índice usa, para sempre. Índices construídos antes disto carregam `"default"` e continuam
+/// resolvendo o tokenizer padrão do Tantivy, sem migração e sem mudança de comportamento.
 fn build_schema() -> (Schema, Field, Field) {
     let mut sb = Schema::builder();
     let id = sb.add_i64_field("id", STORED | FAST | INDEXED);
-    let body = sb.add_text_field("body", TEXT | STORED);
+    let body = sb.add_text_field(
+        "body",
+        TextOptions::default()
+            .set_stored()
+            .set_indexing_options(
+                TextFieldIndexing::default()
+                    .set_tokenizer(super::analyzer::ANALYZER_NAME)
+                    .set_index_option(IndexRecordOption::WithFreqsAndPositions),
+            ),
+    );
     let schema = sb.build();
     (schema, id, body)
 }
@@ -99,9 +114,13 @@ fn read_generation(index_id: i64) -> u64 {
 /// Abre um `Index` do estado heap VISÍVEL ao snapshot (reusa `load`, que é MVCC — M139 gate 2).
 fn open_from_heap(index_id: i64) -> Index {
     let store = Arc::new(load(index_id));
-    Index::open(PgDirectory::with_store(store)).unwrap_or_else(|e| {
+    let index = Index::open(PgDirectory::with_store(store)).unwrap_or_else(|e| {
         error!("bm25: índice heap ilegível/corrompido para index_id={index_id}: {e}")
-    })
+    });
+    // B-044: registrar também na LEITURA. O `QueryParser` resolve o tokenizer pelo nome gravado no schema
+    // do campo e o procura aqui; sem isto, um índice novo daria `UnknownTokenizer` na consulta.
+    super::analyzer::register(&index);
+    index
 }
 
 /// Indexa `SELECT id_col, text_col FROM table` no Tantivy, flush ao heap (drop+reinsere atômico),
@@ -119,6 +138,8 @@ fn bm25_build(index_id: i64, table: &str, id_col: &str, text_col: &str) -> i64 {
         tantivy::IndexSettings::default(),
     )
     .expect("lexical: create index");
+    // B-044: registrar na ESCRITA. Indexar com uma cadeia e consultar com outra degrada recall sem erro.
+    super::analyzer::register(&index);
 
     let mut count: i64 = 0;
     {
@@ -185,9 +206,14 @@ fn bm25_search(
     let reader = index.reader().expect("lexical: reader");
     let searcher = reader.searcher();
     let qp = QueryParser::for_index(index, vec![body_f]);
+    // B-044 (D4): erro de parse NÃO vira lista vazia. Vazio é indistinguível de "nada casou", e um
+    // `UnknownTokenizer` — a falha exata que um registro malfeito produz — passaria como resultado
+    // legítimo, fazendo uma corrida de benchmark publicar NDCG 0 como medição. `sanitize_query` já
+    // reduziu a consulta a alfanuméricos separados por espaço, então este caminho só dispara em defeito
+    // de configuração, nunca em consulta de usuário.
     let parsed = match qp.parse_query(&clean) {
         Ok(q) => q,
-        Err(_) => return TableIterator::new(Vec::new().into_iter()),
+        Err(e) => error!("bm25: consulta inválida no index_id={index_id} ({clean:?}): {e}"),
     };
     let hits = searcher
         .search(&parsed, &TopDocs::with_limit(k as usize).order_by_score())
@@ -233,6 +259,123 @@ mod tests {
              (3, 'info dfs datanode packetresponder terminating')",
         )
         .unwrap();
+    }
+
+    // ---------------------------------------------------------------- B-044: stemming
+
+    fn setup_inflection_docs() {
+        Spi::run("DROP TABLE IF EXISTS b044_docs").unwrap();
+        Spi::run("CREATE TABLE b044_docs (id bigint, body text)").unwrap();
+        Spi::run(
+            "INSERT INTO b044_docs VALUES \
+             (1, 'the quick brown fox jumps over the lazy dog'), \
+             (2, 'a database engine indexing documents')",
+        )
+        .unwrap();
+    }
+
+    /// O sintoma que abriu o item: a consulta flexionada não casava o documento.
+    #[pg_test]
+    fn test_bm25_matches_across_inflection() {
+        setup_inflection_docs();
+        crate::lexical::engine::bm25_build(710, "b044_docs", "id", "body");
+        let hit: Option<i64> =
+            Spi::get_one("SELECT id FROM bm25_search(710, 'jumping', 5)").unwrap();
+        assert_eq!(hit, Some(1), "consulta flexionada 'jumping' deve casar o doc com 'jumps'");
+    }
+
+    /// Indexação e consulta usam a MESMA cadeia: `indexing` (documento) casa `index` (consulta).
+    #[pg_test]
+    fn test_bm25_stems_both_sides_of_the_pipeline() {
+        setup_inflection_docs();
+        crate::lexical::engine::bm25_build(711, "b044_docs", "id", "body");
+        let hit: Option<i64> = Spi::get_one("SELECT id FROM bm25_search(711, 'index', 5)").unwrap();
+        assert_eq!(hit, Some(2), "'index' deve casar o doc que contém 'indexing'");
+    }
+
+    /// Stopwords somem do índice e da consulta — zero linhas é resultado legítimo, não erro.
+    #[pg_test]
+    fn test_stopword_only_query_returns_no_rows_without_error() {
+        setup_inflection_docs();
+        crate::lexical::engine::bm25_build(712, "b044_docs", "id", "body");
+        let n: Option<i64> =
+            Spi::get_one("SELECT count(*) FROM bm25_search(712, 'the', 5)").unwrap();
+        assert_eq!(n, Some(0), "consulta só de stopword devolve vazio, sem erro");
+    }
+
+    /// Consulta de usuário com pontuação e operadores NUNCA chega ao caminho de erro do parser:
+    /// `sanitize_query` a reduz a alfanuméricos antes. Prova a mitigação do risco R6 do plano.
+    #[pg_test]
+    fn test_sanitized_user_queries_never_reach_the_error_path() {
+        setup_inflection_docs();
+        crate::lexical::engine::bm25_build(713, "b044_docs", "id", "body");
+        for q in ["LAZY, Dog!", "a+b", "x AND -y", "acentuação", "(((", "\"aspas\""] {
+            let sql = format!("SELECT count(*) FROM bm25_search(713, '{q}', 5)");
+            let n: Option<i64> = Spi::get_one(&sql).unwrap_or_else(|e| {
+                panic!("consulta de usuário {q:?} levantou erro: {e}");
+            });
+            assert!(n.is_some(), "consulta {q:?} deve devolver contagem, não erro");
+        }
+    }
+
+    /// A prova mais importante da D1: um índice com o schema ANTIGO (tokenizer `default`) continua
+    /// respondendo sob a semântica antiga quando lido pelo binário novo — sem migração e sem surpresa.
+    #[pg_test]
+    fn test_legacy_default_schema_index_keeps_its_own_semantics() {
+        use std::sync::Arc;
+        use tantivy::schema::{STORED, Schema, TEXT};
+        use tantivy::{Index, IndexSettings};
+
+        setup_inflection_docs();
+        crate::lexical::pg_backing::ensure_table();
+        Spi::run(
+            "CREATE TABLE IF NOT EXISTS theodb.lexical_index_meta (\
+             index_id bigint PRIMARY KEY, generation bigint NOT NULL DEFAULT 0)",
+        )
+        .unwrap();
+
+        // schema legado: `TEXT` puro => tokenizer "default", como antes do B-044
+        let mut sb = Schema::builder();
+        let id_f = sb.add_i64_field("id", tantivy::schema::FAST | tantivy::schema::INDEXED | STORED);
+        let body_f = sb.add_text_field("body", TEXT | STORED);
+        let store = Arc::new(crate::lexical::MemStore::default());
+        let index = Index::create(
+            crate::lexical::PgDirectory::with_store(store.clone()),
+            sb.build(),
+            IndexSettings::default(),
+        )
+        .unwrap();
+        {
+            let mut w = index.writer_with_num_threads(1, 15_000_000).unwrap();
+            w.add_document(
+                tantivy::doc!(id_f => 1i64, body_f => "the quick brown fox jumps over the lazy dog"),
+            )
+            .unwrap();
+            w.commit().unwrap();
+        }
+        crate::lexical::pg_backing::flush(714, &store);
+        Spi::run("INSERT INTO theodb.lexical_index_meta(index_id, generation) VALUES (714, 1)")
+            .unwrap();
+
+        // sob "default" não há stemming: a flexionada NÃO casa — e isso é o comportamento CORRETO
+        let inflected: Option<i64> =
+            Spi::get_one("SELECT count(*) FROM bm25_search(714, 'jumping', 5)").unwrap();
+        assert_eq!(inflected, Some(0), "índice legado não deve stemizar");
+
+        // e o que casava antes continua casando
+        let exact: Option<i64> =
+            Spi::get_one("SELECT id FROM bm25_search(714, 'jumps', 5)").unwrap();
+        assert_eq!(exact, Some(1), "índice legado deve continuar casando o termo exato");
+    }
+
+    /// O caminho de atualização é reconstruir — e ele funciona sobre o mesmo `index_id`.
+    #[pg_test]
+    fn test_rebuilding_a_legacy_index_upgrades_it_to_the_named_analyzer() {
+        setup_inflection_docs();
+        crate::lexical::engine::bm25_build(715, "b044_docs", "id", "body");
+        let before: Option<i64> =
+            Spi::get_one("SELECT count(*) FROM bm25_search(715, 'jumping', 5)").unwrap();
+        assert_eq!(before, Some(1), "após rebuild com a cadeia nova, a flexionada casa");
     }
 
     #[pg_test]
