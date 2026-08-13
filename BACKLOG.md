@@ -342,6 +342,20 @@ dod:
 > não é uma curva. **O item permanece `raw`**: SciFact é pequeno e de domínio científico, e o achado lateral
 > (a superfície não expõe busca multi-termo) virou trabalho de produto que ainda não foi feito.
 
+> **2026-08-12 — correção por acréscimo, medida.** A nota acima diz que "a superfície não expõe busca
+> multi-termo". **Medido contra `theodb:b034`, isso é falso como escrito:** `bm25_search(1,'lazy dog',5)`
+> devolve os dois documentos corretos com scores acumulados (1,767 e 1,691 contra 0,883 e 0,845 de `dog`
+> sozinho — semântica OR com soma, que é BM25 correto), e a pergunta natural *"what does the lazy dog do all
+> day"* rankeia em primeiro o documento certo (5,543 contra 2,978).
+>
+> **O que de fato falta, medido termo a termo:** operadores de consulta — `"frase exata"` é tratada como
+> bag-of-words, `AND` vira termo (casa documentos que contêm a palavra "and"), `-exclusao` é ignorada,
+> `prefixo*` devolve vazio — e **stemming**: `jumping` não casa `jumps`. Stopwords são indexadas, não
+> removidas. Não há GUC para `k1`/`b`.
+>
+> Corrijo por acréscimo porque a nota errada já circulava e teria feito o [[B-040]] parecer inviável.
+
+
 ## B-005 — Híbrido: o ganho da fusão sobre o vetorial puro é estatisticamente não-significativo   [ ]
 
 domain: lexical
@@ -1303,4 +1317,45 @@ dod:
 > vinha reportando indisponibilidade sobre algo que funciona. Custo estimado por medição: a execução completa
 > leva 2m07s no contêiner.
 
-Próximo id livre: **`B-040`**. Ids são monotônicos e nunca reusados.
+## B-040 — Cliente FTS no VectorDBBench: validar o pilar lexical no mesmo arnês, com a mesma disciplina   [ ]
+
+domain: engine-pgrx
+repo: theo-db
+suggested_mode: evolve
+source: human
+evidence: medido em 2026-08-12 contra a imagem `theodb:b034`. O arnês tem caso FTS (`FTSBm25Performance`, `cases.py:945`) com dataset MS MARCO Small de **100.000 documentos** (`dataset.py:1173`) e mede **QPS, latência, recall, MRR e NDCG** — não latência sozinha. O contrato do cliente é `supports_full_text_search()` + `insert_documents(texts, doc_ids)` + `search_documents(query, k) -> list[str]` (`api.py:273,281,302`). **Nenhum cliente PostgreSQL o implementa hoje** — só Elastic, OpenSearch, Milvus, Turbopuffer e Vespa. Do nosso lado a superfície existe e foi exercitada: `bm25_build(index_id, table, id_col, text_col)` indexou 5 documentos e `bm25_search(index_id, query, k)` devolveu os 2 corretos ranqueados por score (1,7666 e 1,6908), naquela ordem.
+why_now: o B-035 devolveu o arnês e mediu o pilar **vetorial** — o lexical ficou sem instrumento nenhum, e é metade da promessa híbrida do produto. O leaderboard público de full-text da Zilliz existe e tem os mesmos motores contra os quais o pilar lexical seria comparado; sem cliente, o TheoDB simplesmente não aparece nessa tabela, e nenhuma alegação sobre BM25 tem artefato reproduzível (Regra 5). Segundo motivo, medido: **nenhum cliente PostgreSQL implementa FTS no arnês** — o que torna este trabalho mais valioso upstream do que o cliente vetorial foi, e é a mesma razão pela qual ninguém o fez ainda.
+status: raw
+dod:
+  - cliente FTS no MESMO fork `usetheoai/VectorDBBench@theodb`, com diff mínimo e núcleo intocado — a disciplina da Política de Fork D3, já provada no B-035
+  - uma corrida real completa emitindo **recall, MRR e NDCG** ao lado de QPS, nunca QPS sozinho
+  - a corrida roda no mesmo arnês de reprodução (`benchmarks/vectordbbench/`), com gate de versão e `/dev/shm` iguais — as lições operacionais do B-035 não se reaprendem
+  - **os parâmetros de BM25 estão DECLARADOS e comparáveis**: `k1` e `b` do TheoDB versus os do motor comparado, ou o registro diz explicitamente que a corrida é product-default de ambos os lados. O arnês avisa que os motores diferem nisso; comparar rankings com parametrizações diferentes sem dizer é a mesma classe do recall não casado do B-035
+  - o cliente **recusa alto** qualquer parâmetro do caso que o TheoDB não honre, em vez de aceitar e ignorar — a decisão D2 do B-035 se aplica igual
+  - o registro diz o que a corrida NÃO cobre, incluindo a ausência de teste de significância pareada
+
+> Registrado 2026-08-12 a pedido do owner, referenciando o leaderboard de full-text da Zilliz.
+> **Duas ressalvas honestas antes de qualquer trabalho:** (a) o dataset FTS vem do `ir_datasets`, não do S3
+> da Zilliz (`with_remote_resource: False`) — o custo de download é maior e ainda não foi medido; (b) o
+> mapeamento entre o contrato do arnês (inserção incremental de documentos) e a nossa superfície
+> (`bm25_build` sobre uma tabela já carregada) é plausível mas **não foi verificado** — é a primeira coisa
+> que a fase de descoberta tem de medir, porque se não fechar, o resto do item não existe.
+
+> **2026-08-12 — a descoberta mediu e o item segue de pé, com handicap declarado.** O mapeamento que a
+> ressalva (b) chamava de "plausível mas não verificado" **fecha**: `bm25_build` re-executado sobre o mesmo
+> `index_id` reindexa e passa a ver documentos novos, que é exatamente o `optimize()` do arnês; `index_id`
+> distintos coexistem; **50.000 documentos indexam em 210 ms** e a busca responde em 9,8 ms, então a escala de
+> 100K do MS MARCO não é obstáculo. O FTS entra como **métodos na classe existente** (é assim que o Elastic
+> faz), sem entrada nova no registro — diff menor que o do B-035.
+>
+> **O handicap, medido e a declarar no artefato: não há stemming.** Motores do leaderboard que usam analisador
+> com stemming casam `jumping`/`jumps`; o TheoDB não. Isso custa recall/NDCG e **não** é defeito de
+> implementação a corrigir dentro deste item — é uma propriedade a reportar ao lado do número.
+>
+> Relação com [[B-004]]: itens distintos — aquele mede qualidade de recuperação contra corpus público, este
+> constrói o instrumento e coloca o produto na mesma tabela dos concorrentes. Mas uma corrida deste item
+> **avança o DoD aberto do B-004** (generalização além do SciFact), porque MS MARCO é um segundo corpus,
+> maior e de outro domínio.
+
+
+Próximo id livre: **`B-041`**. Ids são monotônicos e nunca reusados.
