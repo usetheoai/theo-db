@@ -1,5 +1,7 @@
 #
-## 2026-08-12 — b035: a comparação que só existe com recall casado
+## 2026-08-12
+
+**b035 — a comparação que só existe com recall casado.**
 
 Acrescentado `benchmarks/b035-theodb-vs-pgvector-pg18.md` — primeira corrida do VectorDBBench com cliente
 próprio, contra pgvector 0.8.6, os dois em PostgreSQL 18.4, num droplet `g-16vcpu-64gb` (o `16c64g` que é o
@@ -16,6 +18,24 @@ lados, e mesmo assim o ponto de operação não estava.
 e recall ~0,91. São regimes diferentes (50K × 1536d, recall ~0,983 aqui) e o M72 já se declarava num regime
 favorável. O que a corrida mostra é que aquele resultado **não generaliza** — não que fosse falso.
 # 2026-08-12
+
+## 2026-08-13
+
+**b040 — o pilar lexical entra no arnês, e o handicap vem antes do número.**
+
+Acrescentado `benchmarks/b040-theodb-fts-msmarco.md`. MS MARCO 100K, num droplet `g-16vcpu-64gb` destruído
+ao fim: **NDCG@10 0,6962, recall@10 0,8025, MRR 0,667**, 1.616 QPS de pico, p99 serial 4,8 ms.
+
+O artefato abre declarando que o TheoDB **não faz stemming**, não tem operadores de consulta e não expõe
+`k1`/`b` — porque Elasticsearch e OpenSearch, os motores da mesma tabela, stemmizam por padrão. Um número de
+NDCG lido sem isso atribui ao motor de ranqueamento uma diferença que é de pré-processamento.
+
+**Não há comparação com outro motor neste artefato**, e isso é deliberado: citar os números publicados do
+leaderboard ao lado destes compararia corridas em máquinas, versões e datas diferentes — o mesmo erro que o
+b035 documentou no eixo vetorial.
+
+Correção medida a caminho: a nota do B-004 dizia que "a superfície não expõe busca multi-termo". **Falso como
+escrito** — multi-termo funciona com scores acumulados corretos. O que falta são operadores e stemming.
 
 **B-030/B-031 — uma extensão, e o que a wiki teve de deixar como estava.**
 

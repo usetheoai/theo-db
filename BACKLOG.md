@@ -1360,4 +1360,23 @@ dod:
 > **2026-08-12 — triaged.** Oportunidade em `.claude/knowledge-base/discoveries/opportunities/b040-fts-client-opportunity.md`.
 
 
-Próximo id livre: **`B-041`**. Ids são monotônicos e nunca reusados.
+## B-041 — `bm25_search` sobre índice nunca construído devolve zero linhas, sem erro   [ ]
+
+domain: lexical
+repo: theo-db
+suggested_mode: bug
+source: discover-evolve
+evidence: medido em 2026-08-12 contra `theodb:b034`. `SELECT count(*) FROM bm25_search(999,'lazy dog',5)` — onde 999 nunca passou por `bm25_build` — devolve **0**, sem erro nem aviso. O catálogo sabe a diferença: `theodb.lexical_index_meta` tem uma linha por índice construído (`index_id`, `generation`), e o 999 não está lá. A informação existe; a função apenas não a consulta. Contraste medido no mesmo banco: índice 102, construído, devolve resultados.
+why_now: **zero resultados é indistinguível de "nada casou"**, e essa é a forma mais cara de falhar num pilar de busca. Uma aplicação que esqueceu o `bm25_build` — ou que o perdeu num restore, ou cujo índice foi construído com outro `index_id` — não recebe erro: recebe silêncio, e conclui que o corpus não tem o documento. É a mesma classe do B-034 (botão aceito que não faz nada) e do achado do B-035 (cliente que aceitava o banco errado), agora no pilar lexical. Descoberto ao construir o cliente FTS do [[B-040]]: o cliente teve de consultar `lexical_index_meta` por conta própria para conseguir falhar alto, o que é a evidência de que a informação está no lugar certo e a função no lugar errado.
+status: raw
+dod:
+  - `bm25_search` sobre `index_id` ausente de `theodb.lexical_index_meta` levanta erro tipado nomeando o `index_id` e dizendo que ele nunca foi construído — provado por teste que hoje falharia
+  - índice construído e depois **esvaziado** (corpus sem documentos) continua devolvendo zero linhas **sem** erro: é resultado legítimo, e o teste distingue os dois casos
+  - o custo da checagem é medido: uma consulta a `lexical_index_meta` por busca é aceitável, um `JOIN` no caminho quente não é. Se for caro, cachear por sessão e declarar a janela de invalidação
+  - a mesma pergunta é feita ao `bm25_build`: reconstruir sobre uma tabela inexistente falha alto hoje? (não medido)
+
+> Registrado 2026-08-12 durante o ciclo do B-040. **O cliente do arnês já contorna** — consulta
+> `lexical_index_meta` antes de buscar e levanta —, então o benchmark não é afetado. O item existe porque o
+> contorno é do cliente, e todo outro consumidor da superfície pública continua exposto.
+
+Próximo id livre: **`B-042`**. Ids são monotônicos e nunca reusados.

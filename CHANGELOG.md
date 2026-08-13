@@ -14,6 +14,8 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Suporte a **full-text (BM25)** no cliente `theodb` do VectorDBBench — quatro métodos na classe existente, zero pontos de registro novos. É o **primeiro cliente PostgreSQL com FTS** no arnês (B-040)
+- Primeira medição do pilar lexical em arnês público (`wiki/benchmarks/b040-theodb-fts-msmarco.md`): MS MARCO 100K, **NDCG@10 0,6962, recall@10 0,8025, MRR 0,667** a 1.616 QPS de pico, p99 serial 4,8 ms. **Sem stemming, sem operadores de consulta e `k1`/`b` não configuráveis** — declarado antes da tabela, porque os motores comparáveis stemmizam por padrão (B-040)
 - Cliente `theodb` para o **VectorDBBench**, em fork de diff mínimo — `pip install "vectordb-bench[theodb] @ git+https://github.com/usetheoai/VectorDBBench@theodb"` — devolvendo ao projeto um arnês de benchmark reproduzível e multi-sistema, ausente desde a remoção de `benchmarks/` (B-035)
 - `benchmarks/vectordbbench/` — compose e runner que fixam a **mesma versão de PostgreSQL** nos dois motores comparados e recusam a corrida se divergirem (B-035)
 - Primeira medição comparativa publicada em `wiki/benchmarks/b035-theodb-vs-pgvector-pg18.md`: **a recall casado (~0,983) o pgvector faz +16% de QPS**, e constrói o índice 2,7× mais rápido. A leitura ingênua da mesma corrida — `ef_search` igual dos dois lados — diria o oposto, porque ali o TheoDB entrega recall 0,96 contra 0,9835 (B-035)
