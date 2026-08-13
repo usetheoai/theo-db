@@ -990,7 +990,7 @@ suggested_mode: bug
 source: discover-review
 evidence: suíte completa de 2026-08-11 — `vec::cosine_simd_per_candidate_speedup` falha com `SIMD cosine must not be slower than scalar (avx=15.75800491 scalar=10.426654568)` (`vec.rs:553`). A execução ocorreu numa máquina com outros dois contêineres ativos e uma suíte de 440 testes concorrendo por CPU.
 why_now: as duas leituras possíveis têm consequências opostas e **a medição atual não as separa**. Se for ruído de ambiente, o teste é flaky por construção — `rules/testing.md § 6` proíbe teste dependente de tempo sem isolamento, e um teste vermelho intermitente treina o time a ignorar vermelho. Se for real, o kernel SIMD do caminho crítico regrediu e está 51% mais lento que a versão escalar que ele existe para superar, o que é defeito de performance no pilar vetorial. Um teste de vazão dentro da suíte funcional não consegue emitir esse veredito: `papers/rigorous-perf-eval-georges-2007.pdf` exige isolamento e variância, e a suíte não oferece nenhum dos dois.
-status: triaged
+status: planned
 medido: 2026-08-11 — **NÃO reproduz isolado, e a falha era do meu AMBIENTE de medição, não do teste.** Rodado sozinho num host sem outros contêineres: `pg_cosine_simd_per_candidate_speedup ... ok` (467,33 s). A execução que reprovou tinha TRÊS contêineres e 440 testes disputando CPU — contenção que eu mesmo criei. **Não há regressão no kernel SIMD**, e não havia teste quebrado para consertar; havia uma medição feita em condição ruim.
 fragilidade_confirmada: o teste continua frágil POR CONSTRUÇÃO, e isso não muda com o resultado acima: mede tempo de parede, **uma amostra de cada**, ordem fixa (AVX sempre primeiro), sem pinagem de núcleo — num host cuja CPU é **híbrida** (i7-1355U, P-cores + E-cores), onde as duas metades podem cair em tipos de núcleo diferentes e a diferença entre eles supera a tolerância de 20%. Ele passa quando a máquina está livre, que é a condição do runner do CI; quebra sob qualquer contenção.
 dod:
@@ -1035,6 +1035,18 @@ dod:
 >
 > **A pergunta que decide se vale:** o teste flakou desde o conserto das medianas? Se não flakou, o caso para
 > a extração enfraquece — e essa é medição que o tempo produz, não eu.
+
+> **2026-08-13 — FECHADO. O terceiro bullet foi feito, não adiado.** O micro-bench saiu da suíte funcional
+> para `theodb_rs/benches/simd_cosine.rs`, e o [[B-053]] que eu havia registrado como bloqueio foi executado
+> junto — o núcleo puro de `vec.rs` virou `vec/kernels.rs`.
+>
+> Medido: suíte **477 passed; 0 failed** (era 478; a diferença é exatamente o teste que saiu, que era o critério
+> de aceite). O bench **linka e roda sem runtime de PostgreSQL** — `Testing cosine_dist_from_bytes/avx2` e
+> `/scalar`, exit 0.
+>
+> O que ficou na suíte é o que é determinístico e pertence: a **correção** do despacho, com os dois branches
+> comparados contra o oráculo escalar em 8 dimensões. Só a medição de **velocidade** saiu, e lá o `criterion`
+> reporta variância em vez de uma asserção sobre o relógio.
 
 ## B-024 — O autotune recomendou `ef_search` sobre contadores em ZERO, e ninguém mediu o alcance   [ ]
 
@@ -1931,7 +1943,7 @@ não há para onde movê-lo, e `rules/testing.md § 6` proíbe teste dependente 
 de como fazer já existe e foi pago uma vez — o `ann/scan_core.rs` foi extraído exatamente por esta razão, e o
 comentário dele explica que o pgvectorscale contorna o mesmo problema com uma cópia divergente, enquanto nós
 contornamos benchando o código real.
-status: raw
+status: planned
 dod:
   - o núcleo de distância é um módulo **puro** — `grep -c "crate::" ` no arquivo extraído `equals` 0
   - um bench de `criterion` o inclui por `#[path]` e linka sem runtime de PostgreSQL
@@ -1942,3 +1954,23 @@ dod:
 > Registrado 2026-08-13 pelo ciclo do Tier 1. **A ordem importa e está declarada:** este item só vale a pena se
 > o micro-bench de fato incomodar. Ele foi consertado (medianas alternadas) e passou hoje; se não flakar de
 > novo, a extração é custo sem problema correspondente. Medir antes de extrair.
+
+> **2026-08-13 — FECHADO no mesmo ciclo em que foi registrado.** Eu o havia aberto como "mudança de produto com
+> blast radius próprio" e parado ali; a diretiva do owner é não parar por escopo quando o trabalho é real, e ele
+> era.
+>
+> `theodb_rs/src/vec/kernels.rs` — **290 linhas, zero `crate::`** fora de comentário. A fronteira caiu onde já
+> existia: a família `*_from_bytes` **nunca** chamou `check_dims`, porque valida com `assert_eq!` sobre o
+> comprimento bruto (invariante de layout, não regra de negócio). `l2_distance`, `inner_product`,
+> `cosine_distance` e `l2_distance_simd` ficaram em `vec.rs`, que é onde o `err_input` tipado pertence — nenhuma
+> verificação mudou de lugar.
+>
+> Os 17 call sites em `am/`, `ann/` e `hybrid.rs` **não foram tocados**: o re-export mantém `vec::cosine_dist_from_bytes`
+> funcionando, e é isso que torna a extração segura por construção.
+>
+> **Duas falhas no caminho, e as duas dizem a mesma coisa.** `cargo check --features pg18` passou LIMPO
+> enquanto o módulo de testes estava quebrado — sem `pg_test` ele nem é compilado. O erro real só apareceu em
+> `cargo pgrx test`, 25 minutos depois; e a segunda tentativa caiu de novo, em `pub(super)` que antes apontava
+> para `vec` e passou a apontar para `kernels`. **Um gate mais barato que o gate que importa dá uma confiança
+> que ele não sustenta** — que é, literalmente, o assunto deste ciclo. O gate certo é
+> `cargo check --features pg18,pg_test --all-targets`, e ele fecha em 2m32s contra os ~6 min da suíte.

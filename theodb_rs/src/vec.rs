@@ -25,6 +25,28 @@ pub(crate) mod ah;
 pub(crate) mod aq; // M104 — relocated from am/ (pure domain quantizer; fixes the vec->am layering inversion)
 pub(crate) mod rabitq; // vector E1 — extended multi-bit RaBitQ (f32-free rerank codec; own-code, arXiv:2409.09913)
 
+// B-023/B-053 — o núcleo numérico saiu para um módulo PURO (zero `crate::`), para que o micro-bench de SIMD
+// possa ser `#[path]`-incluído num binário de `criterion` e sair da suíte funcional, onde `rules/testing.md § 6`
+// não admite teste dependente de tempo. Mesmo movimento do `ann/scan_core.rs` (FU-1).
+//
+// O `use` abaixo re-exporta tudo o que já era `pub(crate)`, então os 17 call sites em `am/`, `ann/` e `hybrid.rs`
+// seguem escrevendo `vec::cosine_dist_from_bytes` — a extração é invisível para eles por construção, e é isso
+// que a torna segura.
+#[path = "vec/kernels.rs"]
+pub(crate) mod kernels;
+pub(crate) use kernels::{cosine_dist_from_bytes, ip_dist_from_bytes, l2_dist_from_bytes};
+
+// Os testes de CORREÇÃO do despacho (que ficaram aqui, ao contrário do micro-bench) forçam o branch e comparam
+// contra o oráculo escalar, então precisam de dois nomes que a produção não usa. Re-exportados sob `cfg` para
+// não deixarem re-export morto no binário shipado.
+//
+// Foi esta linha que a extração esqueceu, e o modo como isso apareceu vale registro: `cargo check --features
+// pg18` passou LIMPO, porque sem `pg_test` o módulo de testes nem é compilado. O erro só surgiu em
+// `cargo pgrx test`, 25 minutos depois. Um gate mais barato que o gate que importa dá uma confiança que ele
+// não sustenta — que é, literalmente, o assunto deste ciclo.
+#[cfg(any(test, feature = "pg_test"))]
+pub(crate) use kernels::{l2_sq_from_bytes_scalar, simd_x86};
+
 /// Reject mismatched dimensions, fail-fast at the boundary (Unbreakable Rule 8). Both TheoDB and pgvector's
 /// `CheckDims` reject `a->dim != b->dim`; pgvector raises SQLSTATE 22000 (data_exception) while TheoDB uses
 /// its house typed error 22023 (invalid_parameter_value, via `err_input`) — same fail-fast semantics, a
@@ -77,186 +99,6 @@ pub(crate) fn cosine_distance(a: &[f32], b: &[f32]) -> f64 {
     let similarity = (sim as f64 / ((norma as f64) * (normb as f64)).sqrt()).clamp(-1.0, 1.0);
     1.0 - similarity
 }
-
-// ---------------------------------------------------------------------------------------------------------------
-// M31b — fused decode+distance for the index-AM SCAN hot loop. Reads the candidate vector's f32 DIRECTLY from the
-// page bytes (little-endian, native on x86) and computes L2 in ONE pass — eliminating the separate byte-decode
-// (Phase 0 profile: decode 45% + scalar distance 55% of the ~38 ms scan). AVX2+FMA (8-wide) with a runtime
-// dispatch + scalar fallback (portability). Used ONLY by `scan_ivf_structured`'s L2 branch (am/scan.rs); the M20
-// SQL-callable ops above are untouched (byte-parity contract). Numeric: SIMD sums in a different f32 order → ~1
-// ULP·√dim off the scalar sum — recall-preserving (ranking unchanged), NOT bit-identical. pgvector has the same
-// property (FMA).
-// ---------------------------------------------------------------------------------------------------------------
-
-/// Scalar squared-L2 between `query` (`&[f32]`) and a candidate vector stored as little-endian f32 bytes `raw`
-/// (`raw.len() == query.len()*4`). The portable fallback + the correctness oracle for the AVX2 path.
-fn l2_sq_from_bytes_scalar(query: &[f32], raw: &[u8]) -> f32 {
-    let mut s = 0f32;
-    for (i, &q) in query.iter().enumerate() {
-        let o = i * 4;
-        let r = f32::from_le_bytes([raw[o], raw[o + 1], raw[o + 2], raw[o + 3]]);
-        let d = q - r;
-        s += d * d;
-    }
-    s
-}
-
-#[cfg(target_arch = "x86_64")]
-mod simd_x86 {
-    use std::arch::x86_64::*;
-    use std::sync::atomic::{AtomicU8, Ordering};
-
-    static AVX2_FMA: AtomicU8 = AtomicU8::new(2); // 2 = unknown, 1 = yes, 0 = no
-
-    /// Test-only: pin the dispatch to scalar (`false`) or AVX (`true`) so both branches of `l2_dist_from_bytes`
-    /// are coverable on the same host; `reset_for_test` restores runtime detection. Callers MUST reset in the same
-    /// test (no cross-test state — pgrx pg_tests run sequentially in one backend).
-    #[cfg(any(test, feature = "pg_test"))]
-    pub(super) fn force_for_test(available: bool) {
-        AVX2_FMA.store(u8::from(available), Ordering::Relaxed);
-    }
-
-    #[cfg(any(test, feature = "pg_test"))]
-    pub(super) fn reset_for_test() {
-        AVX2_FMA.store(2, Ordering::Relaxed);
-    }
-
-    /// Detect AVX2+FMA once, cache in an atomic (idempotent — any thread writes the same value).
-    pub(super) fn available() -> bool {
-        match AVX2_FMA.load(Ordering::Relaxed) {
-            1 => true,
-            0 => false,
-            _ => {
-                let ok = is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma");
-                AVX2_FMA.store(u8::from(ok), Ordering::Relaxed);
-                ok
-            }
-        }
-    }
-
-    /// Squared-L2 with AVX2+FMA, reading `raw` as unaligned little-endian f32. SAFETY (both halves required —
-    /// the loop is driven by `dim = query.len()` and indexes BOTH `query[0..dim]` and `raw[0..dim*4]`): the caller
-    /// MUST ensure (1) AVX2+FMA is available (via `available()`), AND (2) `raw.len() == query.len()*4` — i.e. the
-    /// candidate vector byte-slice has exactly `dim` f32. `_mm256_loadu_ps` handles unaligned addresses, so reading
-    /// `&[u8]` page bytes as `*const f32` is sound; only the LENGTH invariant is the caller's obligation.
-    #[target_feature(enable = "avx2,fma")]
-    pub(super) unsafe fn l2_sq(query: &[f32], raw: &[u8]) -> f32 {
-        unsafe {
-            let dim = query.len();
-            let qp = query.as_ptr();
-            let rp = raw.as_ptr();
-            let mut acc = _mm256_setzero_ps();
-            let mut i = 0usize;
-            while i + 8 <= dim {
-                let q = _mm256_loadu_ps(qp.add(i));
-                let r = _mm256_loadu_ps(rp.add(i * 4) as *const f32); // unaligned f32 straight from page bytes
-                let d = _mm256_sub_ps(q, r);
-                acc = _mm256_fmadd_ps(d, d, acc);
-                i += 8;
-            }
-            // Horizontal sum of the 8 lanes.
-            let mut lanes = [0f32; 8];
-            _mm256_storeu_ps(lanes.as_mut_ptr(), acc);
-            let mut s: f32 = lanes.iter().sum();
-            // Scalar tail for dim % 8.
-            while i < dim {
-                let o = i * 4;
-                let r = f32::from_le_bytes([
-                    *rp.add(o),
-                    *rp.add(o + 1),
-                    *rp.add(o + 2),
-                    *rp.add(o + 3),
-                ]);
-                let d = *qp.add(i) - r;
-                s += d * d;
-                i += 1;
-            }
-            s
-        }
-    }
-
-    /// M58: the cosine kernel — `(Σq·r, Σq², Σr²)` with AVX2+FMA over unaligned LE-f32 `raw`, three lane
-    /// accumulators reduced once. Same SAFETY contract as [`l2_sq`] (caller ensures AVX2+FMA available AND
-    /// `raw.len() == query.len()*4`). Feeds `cosine_dist_from_bytes` / `ip_dist_from_bytes` — the scan hot path for
-    /// real (OpenAI/Cohere) cosine/IP embeddings, which until now ran scalar (the M58 P2 gap). Approximate (SIMD FMA
-    /// rounds differently than the scalar sum) — same parity-not-identity rule as L2's SIMD (operators stay scalar).
-    #[target_feature(enable = "avx2,fma")]
-    pub(super) unsafe fn cosine_terms(query: &[f32], raw: &[u8]) -> (f32, f32, f32) {
-        unsafe {
-            let dim = query.len();
-            let qp = query.as_ptr();
-            let rp = raw.as_ptr();
-            let (mut adot, mut anq, mut anr) =
-                (_mm256_setzero_ps(), _mm256_setzero_ps(), _mm256_setzero_ps());
-            let mut i = 0usize;
-            while i + 8 <= dim {
-                let q = _mm256_loadu_ps(qp.add(i));
-                let r = _mm256_loadu_ps(rp.add(i * 4) as *const f32);
-                adot = _mm256_fmadd_ps(q, r, adot);
-                anq = _mm256_fmadd_ps(q, q, anq);
-                anr = _mm256_fmadd_ps(r, r, anr);
-                i += 8;
-            }
-            let mut ld = [0f32; 8];
-            let mut lq = [0f32; 8];
-            let mut lr = [0f32; 8];
-            _mm256_storeu_ps(ld.as_mut_ptr(), adot);
-            _mm256_storeu_ps(lq.as_mut_ptr(), anq);
-            _mm256_storeu_ps(lr.as_mut_ptr(), anr);
-            let (mut dot, mut nq, mut nr) =
-                (ld.iter().sum::<f32>(), lq.iter().sum::<f32>(), lr.iter().sum::<f32>());
-            while i < dim {
-                let o = i * 4;
-                let r = f32::from_le_bytes([
-                    *rp.add(o),
-                    *rp.add(o + 1),
-                    *rp.add(o + 2),
-                    *rp.add(o + 3),
-                ]);
-                let q = *qp.add(i);
-                dot += q * r;
-                nq += q * q;
-                nr += r * r;
-                i += 1;
-            }
-            (dot, nq, nr)
-        }
-    }
-
-    /// M58: fused dot `Σq·r` with AVX2+FMA (the inner-product kernel). Same SAFETY contract as [`l2_sq`].
-    #[target_feature(enable = "avx2,fma")]
-    pub(super) unsafe fn dot(query: &[f32], raw: &[u8]) -> f32 {
-        unsafe {
-            let dim = query.len();
-            let qp = query.as_ptr();
-            let rp = raw.as_ptr();
-            let mut acc = _mm256_setzero_ps();
-            let mut i = 0usize;
-            while i + 8 <= dim {
-                let q = _mm256_loadu_ps(qp.add(i));
-                let r = _mm256_loadu_ps(rp.add(i * 4) as *const f32);
-                acc = _mm256_fmadd_ps(q, r, acc);
-                i += 8;
-            }
-            let mut lanes = [0f32; 8];
-            _mm256_storeu_ps(lanes.as_mut_ptr(), acc);
-            let mut s: f32 = lanes.iter().sum();
-            while i < dim {
-                let o = i * 4;
-                let r = f32::from_le_bytes([
-                    *rp.add(o),
-                    *rp.add(o + 1),
-                    *rp.add(o + 2),
-                    *rp.add(o + 3),
-                ]);
-                s += *qp.add(i) * r;
-                i += 1;
-            }
-            s
-        }
-    }
-}
-
 /// L2 distance between two f32 slices, using the SAME AVX2+FMA kernel as the scan (M43). Reuses `l2_dist_from_bytes`
 /// by reinterpreting `b`'s f32 slice as its own little-endian bytes — a zero-copy cast (an f32 slice IS its bytes on
 /// x86_64 LE). Used by the `theodb_hnsw` BUILD (billions of 128-dim distances) to replace the scalar `l2_distance`.
@@ -280,89 +122,6 @@ pub(crate) fn l2_distance_simd(a: &[f32], b: &[f32]) -> f64 {
     {
         l2_distance(a, b)
     }
-}
-
-/// L2 distance between `query` and a candidate stored as little-endian f32 bytes `raw` — the SCAN hot-path entry
-/// (M31b). Dispatches to AVX2+FMA when available (cached), else the scalar fallback. The length invariant
-/// `raw.len() == query.len()*4` is enforced ALWAYS (not just in debug) so the `unsafe` AVX2 path can never OOB in
-/// release regardless of caller — one compare per candidate, negligible vs the SIMD work.
-pub(crate) fn l2_dist_from_bytes(query: &[f32], raw: &[u8]) -> f64 {
-    assert_eq!(raw.len(), query.len() * 4, "l2_dist_from_bytes: raw must be exactly dim*4 bytes");
-    #[cfg(target_arch = "x86_64")]
-    let sq = if simd_x86::available() {
-        // SAFETY: `available()` confirmed AVX2+FMA and the `assert_eq!` above guarantees `raw.len()==query.len()*4`.
-        unsafe { simd_x86::l2_sq(query, raw) }
-    } else {
-        l2_sq_from_bytes_scalar(query, raw)
-    };
-    #[cfg(not(target_arch = "x86_64"))]
-    let sq = l2_sq_from_bytes_scalar(query, raw);
-    (sq as f64).sqrt()
-}
-
-/// M49: fused dot product `Σ query·raw` over little-endian f32 bytes — ZERO per-node `Vec<f32>` alloc (the mine
-/// the ROADMAP flagged for cosine/ip). Reads each f32 inline from `raw`. The length invariant is enforced ALWAYS
-/// so no OOB. (AVX2 for the dot term is a Phase-4 parity optimization if the benchmark shows cosine/ip lag L2's
-/// AVX2 kernel; the zero-alloc contract — the M49 DoD — is already met by this scalar path.)
-fn dot_from_bytes_scalar(query: &[f32], raw: &[u8]) -> f32 {
-    let mut dot = 0f32;
-    for (i, &qi) in query.iter().enumerate() {
-        let r = f32::from_le_bytes([raw[i * 4], raw[i * 4 + 1], raw[i * 4 + 2], raw[i * 4 + 3]]);
-        dot += qi * r;
-    }
-    dot
-}
-
-/// M58: dispatches to the AVX2+FMA `dot` kernel when available (cached), else the scalar fallback. Length
-/// invariant enforced ALWAYS so the `unsafe` SIMD path can never OOB. Approximate (SIMD rounding) — the scan
-/// walk/rerank tolerate it (parity-not-identity, like L2); the SQL `<#>` operator uses the exact scalar path.
-fn dot_from_bytes(query: &[f32], raw: &[u8]) -> f32 {
-    assert_eq!(raw.len(), query.len() * 4, "dot_from_bytes: raw must be exactly dim*4 bytes");
-    #[cfg(target_arch = "x86_64")]
-    if simd_x86::available() {
-        // SAFETY: `available()` confirmed AVX2+FMA; the `assert_eq!` guarantees `raw.len()==query.len()*4`.
-        return unsafe { simd_x86::dot(query, raw) };
-    }
-    dot_from_bytes_scalar(query, raw)
-}
-
-/// M49: negative inner product `-Σ q·r` from raw bytes (the `<#>` ORDER BY key — smaller = closer, pgvector
-/// `vector_negative_inner_product` convention). Zero-alloc.
-pub(crate) fn ip_dist_from_bytes(query: &[f32], raw: &[u8]) -> f64 {
-    -(dot_from_bytes(query, raw) as f64)
-}
-
-/// M49: cosine distance `1 - dot/sqrt(‖q‖²·‖r‖²)` from raw bytes, one pass, clamp to [-1,1]. Zero-alloc. A
-/// zero-norm `raw` yields NaN (0/0) — ordered LAST by the scan's `Cand` "NaN LAST" comparator (`ann/mod.rs`).
-fn cosine_terms_scalar(query: &[f32], raw: &[u8]) -> (f32, f32, f32) {
-    let (mut dot, mut nq, mut nr) = (0f32, 0f32, 0f32);
-    for (i, &qi) in query.iter().enumerate() {
-        let r = f32::from_le_bytes([raw[i * 4], raw[i * 4 + 1], raw[i * 4 + 2], raw[i * 4 + 3]]);
-        dot += qi * r;
-        nq += qi * qi;
-        nr += r * r;
-    }
-    (dot, nq, nr)
-}
-
-pub(crate) fn cosine_dist_from_bytes(query: &[f32], raw: &[u8]) -> f64 {
-    assert_eq!(
-        raw.len(),
-        query.len() * 4,
-        "cosine_dist_from_bytes: raw must be exactly dim*4 bytes"
-    );
-    // M58: AVX2+FMA cosine kernel when available (the real-embedding scan hot path); scalar fallback otherwise.
-    #[cfg(target_arch = "x86_64")]
-    let (dot, nq, nr) = if simd_x86::available() {
-        // SAFETY: `available()` confirmed AVX2+FMA; the `assert_eq!` guarantees `raw.len()==query.len()*4`.
-        unsafe { simd_x86::cosine_terms(query, raw) }
-    } else {
-        cosine_terms_scalar(query, raw)
-    };
-    #[cfg(not(target_arch = "x86_64"))]
-    let (dot, nq, nr) = cosine_terms_scalar(query, raw);
-    let sim = (dot as f64) / ((nq as f64) * (nr as f64)).sqrt();
-    1.0 - sim.clamp(-1.0, 1.0)
 }
 
 // Rust unit tests for the pure distance math (plan T2.1). `#[pg_test]` (not plain `#[test]`) because the
@@ -519,74 +278,17 @@ mod tests {
         }
     }
 
-    /// M58 micro-bench (DoD item 2): per-candidate cosine cost, AVX2+FMA vs scalar, dim=768 (the real-embedding
-    /// dim). Times a large batch through the DISPATCHED `cosine_dist_from_bytes` under each forced branch and logs
-    /// the ratio (server LOG — the artifact `wiki/benchmarks/m58-simd-cosine.md` records it). Asserts only that
-    /// SIMD is NOT SLOWER (a loose, non-flaky regression guard — the magnitude is reported, not gated on timing).
-    #[pg_test]
-    fn cosine_simd_per_candidate_speedup() {
-        let dim = 768usize;
-        let q: Vec<f32> = (0..dim).map(|i| ((i * 7 % 13) as f32) * 0.1 - 0.6).collect();
-        let c: Vec<f32> = (0..dim).map(|i| ((i * 5 % 11) as f32) * 0.1 - 0.5).collect();
-        let raw = to_le_bytes(&c);
-        // B-023 — MEDIANA de rodadas ALTERNADAS, em vez de uma amostra de cada em ordem fixa.
-        //
-        // A forma anterior (`(timed(true), timed(false))`) media AVX uma vez, depois escalar uma vez, sempre
-        // nessa ordem. Isso atribui ao CÓDIGO qualquer variação da MÁQUINA que aconteça entre as duas medições
-        // — e num laptop ela acontece. Medido nesta suíte, o mesmo binário e o mesmo teste:
-        //
-        //   | condição                          | speedup |
-        //   |-----------------------------------|---------|
-        //   | teste rodando sozinho             | passa   |
-        //   | após os outros 439 testes         | 0,78×   |
-        //   | idem, com 3 contêineres ao lado   | 0,66×   |
-        //
-        // Monotônico com a carga acumulada, não aleatório: AVX2 dispara redução de frequência por licença em
-        // CPUs Intel, e num i7-1355U (TDP de 15 W) o efeito cresce conforme a máquina esquenta ao longo da
-        // suíte. Como o AVX era SEMPRE medido primeiro — logo após o teste anterior ter aquecido o núcleo —
-        // o viés tinha direção fixa. O teste media a térmica do laptop e reportava como qualidade do kernel.
-        //
-        // Alternar A,S,A,S,… faz o drift atingir os dois lados igualmente, e a mediana descarta a rodada
-        // isolada em que o escalonador migrou a thread entre P-core e E-core (a CPU é híbrida). `iters` cai
-        // para manter o custo total parecido: 5 rodadas × 2 medições × 40k ≈ as 200k de antes.
-        let iters = 40_000u64;
-        let rounds = 5usize;
-        let timed = |avx: bool| -> f64 {
-            simd_x86::force_for_test(avx);
-            let t0 = std::time::Instant::now();
-            let mut acc = 0f64;
-            for _ in 0..iters {
-                acc += cosine_dist_from_bytes(std::hint::black_box(&q), std::hint::black_box(&raw));
-            }
-            std::hint::black_box(acc);
-            t0.elapsed().as_secs_f64()
-        };
-        let median = |mut v: Vec<f64>| -> f64 {
-            v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-            v[v.len() / 2]
-        };
-        let (mut avx_runs, mut scalar_runs) = (Vec::new(), Vec::new());
-        for _ in 0..rounds {
-            avx_runs.push(timed(true));
-            scalar_runs.push(timed(false));
-        }
-        let (t_avx, t_scalar) = (median(avx_runs), median(scalar_runs));
-        simd_x86::reset_for_test();
-        let speedup = t_scalar / t_avx.max(1e-9);
-        let line = format!(
-            "M58 cosine micro-bench dim={dim} iters={iters}x{rounds} (medianas alternadas): scalar={t_scalar:.4}s avx={t_avx:.4}s speedup={speedup:.2}x"
-        );
-        pgrx::log!("{line}");
-        // Also drop the measured ratio to the (mounted) build dir so the benchmark doc can quote it (server LOG is
-        // swallowed on a passing pg_test). Best-effort — a write failure never fails the micro-bench.
-        let _ = std::fs::write("/build/target/m58-speedup.txt", &line);
-        // A tolerância continua 1.2 — NÃO foi afrouxada. O que mudou é a qualidade da medição que ela julga:
-        // antes comparava duas amostras únicas colhidas em condições térmicas diferentes; agora compara
-        // medianas de rodadas alternadas, que é o mínimo que o `rigorous-perf-eval` (Georges 2007) exige para
-        // uma comparação pareada ter significado.
-        assert!(
-            t_avx <= t_scalar * 1.2,
-            "SIMD cosine must not be slower than scalar (mediana de {rounds} rodadas alternadas: avx={t_avx} scalar={t_scalar} speedup={speedup:.2}x)"
-        );
-    }
+    // B-023/B-053 — o micro-bench `cosine_simd_per_candidate_speedup` SAIU daqui para
+    // `benches/simd_cosine.rs`, e o motivo está medido, não estimado: ele cronometrava parede dentro da suíte
+    // funcional, e o mesmo binário dava `0,78×` após os outros 439 testes e `0,66×` com 3 contêineres ao lado —
+    // monotônico com a carga acumulada. Era a redução de frequência por licença AVX2 num i7-1355U de 15 W: o
+    // teste media a térmica do laptop e reportava como qualidade do kernel.
+    //
+    // A correção anterior (medianas de rodadas alternadas) melhorou a MEDIÇÃO e não removeu a CLASSE.
+    // `rules/testing.md § 6` veda tempo em teste unitário sem isolamento, e um vermelho intermitente treina o
+    // time a ignorar vermelho.
+    //
+    // O que ficou aqui é o que é determinístico e pertence: a CORREÇÃO do despacho — `simd_matches_scalar_*`
+    // prova que os dois branches concordam. Velocidade virou `cargo bench --bench simd_cosine`, com o
+    // `criterion` reportando variância em vez de uma asserção sobre o relógio.
 }
