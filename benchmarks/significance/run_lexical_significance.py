@@ -81,7 +81,7 @@ def main() -> int:
     case = CaseType[args.case].case_cls()
     dataset = case.dataset
     dataset.prepare()
-    queries = [(q.qid, q.text) for q in (dataset.recall_queries_data or dataset.queries_data)]
+    queries = [(q.query_id, q.text) for q in (dataset.recall_queries_data or dataset.queries_data)]
     qrels = dataset.recall_gt_data or dataset.gt_data
     print(f"consultas com qrel: {len(queries)}", file=sys.stderr)
 
@@ -122,7 +122,7 @@ def _systems_under_test():
     """
     from pydantic import SecretStr
 
-    from vectordb_bench.backend.clients.api import MetricType
+    from vectordb_bench.backend.clients.api import IndexType, MetricType
 
     def theodb():
         from vectordb_bench.backend.clients.theodb.config import TheoDBConfig, TheoDBFTSConfig
@@ -134,26 +134,32 @@ def _systems_under_test():
         )
         return TheoDB(dim=0, db_config=cfg.to_dict(),
                       db_case_config=TheoDBFTSConfig(metric_type=MetricType.BM25),
-                      collection_name="vdb_bench_index", drop_old=False)
+                      # `theodb_collection` é o default do nosso cliente e é o nome que a carga do arnês criou —
+                      # verificado em `pg_tables` depois da carga, não suposto. O `index_id` é derivado dele
+                      # por hash, então um nome divergente aponta para um índice que não existe: foi o que o
+                      # guard do B-041 pegou na primeira tentativa, em vez de devolver 6.980 zeros.
+                      collection_name="theodb_collection", drop_old=False)
 
     def elastic():
         from vectordb_bench.backend.clients import DB
-        cfg = DB.ElasticCloud.config_cls()(
+        # `config_cls` e `case_config_cls` são propriedades que devolvem a CLASSE — construir é uma
+        # chamada só. `IndexType.FTS`, não a string.
+        cfg = DB.ElasticCloud.config_cls(
             host="127.0.0.1", port=9200, scheme="http",
             user="elastic", password=SecretStr("changeme"),
         )
         return DB.ElasticCloud.init_cls(
             dim=0, db_config=cfg.to_dict(),
-            db_case_config=DB.ElasticCloud.case_config_cls("FTS")(metric_type=MetricType.BM25),
+            db_case_config=DB.ElasticCloud.case_config_cls(IndexType.FTS)(metric_type=MetricType.BM25),
             drop_old=False,
         )
 
     def opensearch():
         from vectordb_bench.backend.clients import DB
-        cfg = DB.OSSOpenSearch.config_cls()(host="127.0.0.1", port=9201)
+        cfg = DB.OSSOpenSearch.config_cls(host="127.0.0.1", port=9201)
         return DB.OSSOpenSearch.init_cls(
             dim=0, db_config=cfg.to_dict(),
-            db_case_config=DB.OSSOpenSearch.case_config_cls("FTS")(metric_type=MetricType.BM25),
+            db_case_config=DB.OSSOpenSearch.case_config_cls(IndexType.FTS)(metric_type=MetricType.BM25),
             drop_old=False,
         )
 

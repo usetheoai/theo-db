@@ -1,7 +1,7 @@
 ---
 type: Measurement
 title: b047 — TheoDB × Elasticsearch × OpenSearch no MS MARCO, mesma máquina
-description: Com pré-processamento casado, a qualidade de ranqueamento é paridade (NDCG 0,7351 contra 0,7343 e 0,7344) e o throughput não é — o Elasticsearch faz 4,3× o nosso QPS.
+description: Com pré-processamento casado, a paridade de ranqueamento é DEMONSTRADA por teste pareado (p=0,48, IC estreito em torno de zero, n=6.980) — e o throughput não é: o Elasticsearch faz 4,3× o nosso QPS.
 tags: [benchmark, lexical, bm25, elasticsearch, opensearch, honest-negative, b047]
 item: B-047
 generated: { by: claude-code/opus-5, at: 2026-08-13T12:15:00Z }
@@ -23,8 +23,25 @@ Com o pré-processamento casado — todos os três motores stemizando e removend
 | Elasticsearch 9.1.2 | `english` | 0,7343 | 0,8449 | 0,7029 | **7.638,5** | **1,9 ms** | 59,3 s |
 | OpenSearch 2.17.1 | `english` | 0,7344 | 0,8450 | 0,7030 | 7.026,7 | 2,2 ms | 59,1 s |
 
-**Qualidade: +0,11% de NDCG sobre o Elasticsearch.** Isso é paridade, não vantagem — a diferença está na
-terceira casa decimal e não há teste de significância que a sustente.
+**Qualidade: paridade, e agora demonstrada.** O [[B-045]] aplicou teste de permutação pareada sobre as
+**6.980 consultas** do caso:
+
+| comparação | diff médio (NDCG) | IC 95% | p (permutação) | p (t) | vitórias/derrotas/empates | `d_z` |
+|---|---|---|---|---|---|---|
+| TheoDB vs Elasticsearch | +0,00066 | [−0,0011, +0,0025] | **0,477** | 0,475 | 233 / 263 / 6.484 | 0,009 |
+| TheoDB vs OpenSearch | +0,00068 | [−0,0011, +0,0025] | **0,466** | 0,463 | 235 / 268 / 6.477 | 0,009 |
+| Elasticsearch vs OpenSearch | +0,00002 | [−0,0002, +0,0002] | 0,912 | 0,843 | 9 / 10 / 6.961 | 0,002 |
+
+**É a espécie certa de não-significância.** Um `p` alto pode significar duas coisas opostas: equivalência, ou
+falta de poder para detectar uma diferença real. Aqui o IC é **estreito e centrado em zero** — largura de
+0,0036 em NDCG, com n=6.980 —, o que é evidência de **equivalência**, não ausência de evidência. O `d_z` de
+0,009 confirma: o tamanho de efeito é praticamente nulo.
+
+Em 6.980 consultas, **6.484 empatam exatamente** entre TheoDB e Elasticsearch, e as 496 restantes se dividem
+quase igualmente (233 a 263). Não é um empate na média que esconde variação — é empate consulta a consulta.
+
+Os arrays por consulta dos três sistemas estão em `benchmarks/significance/per-query/b047.json`, para que um
+terceiro recomponha o teste — inclusive com outro método, se discordar da escolha.
 
 **Throughput: o Elasticsearch faz 4,3× o nosso QPS**, com p99 2,3× menor. O OpenSearch faz 3,9×.
 
@@ -77,9 +94,9 @@ de volta do `_settings` de cada índice após a corrida.
 
 # O que esta comparação NÃO cobre
 
-- **Sem teste de significância pareada.** Uma corrida por configuração. O empate de NDCG (+0,11%) é
-  **observado**; a diferença de QPS (4,3×) é grande o bastante para não ser ruído desta magnitude, mas
-  nenhuma das duas foi testada. [[B-045]].
+- **O empate de NDCG agora É testado** (acima); a **diferença de QPS não**. QPS não tem valor por consulta,
+  então o pareado não se aplica a ele — o caminho seria N corridas repetidas, e é item separado. Os 4,3× são
+  grandes demais para ser ruído desta magnitude, mas isso é leitura, não teste.
 - **Memória não é equivalente, só não-grosseira.** 4 GB de heap JVM e 4 GB de `shared_buffers` não são a
   mesma coisa — um Postgres também usa o page cache do sistema. O que se evitou foi a assimetria de dar
   16 GB a um e 1 GB a outro.

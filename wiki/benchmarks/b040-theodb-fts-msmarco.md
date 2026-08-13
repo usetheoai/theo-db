@@ -26,6 +26,12 @@ em cache — a única variável é a imagem:**
 Qualidade sobe nos três eixos **e o throughput sobe junto** — remover stopwords encurta as listas de
 postings mais do que o stemmer as alonga. O único custo é o build: +1,03 s sobre 100.000 documentos.
 
+> **Significância, acrescentada em 2026-08-13 pelo [[B-045]].** O ganho de +5,6% em NDCG **não** foi
+> submetido a teste pareado: as duas corridas do A/B foram feitas com imagens diferentes e os arrays por
+> consulta do lado *sem stemming* não foram preservados. O que o B-045 mediu foi a comparação de três motores
+> do [b047](b047-lexical-headtohead.md), onde os três estados coexistiam. **Este número segue observado, não
+> demonstrado**, e refazê-lo com os arrays por consulta dos dois estados é trabalho de um ciclo próprio.
+
 > **Uma primeira comparação minha dizia o oposto, e estava errada.** Medi a corrida com stemming num droplet
 > Xeon 8168 e comparei com a corrida sem stemming, feita antes num Xeon **8358**. O delta aparente era
 > **−31,8% de QPS** — atribuído ao stemmer. Refeito na mesma máquina, é **+10,9%**. NDCG, recall e MRR são

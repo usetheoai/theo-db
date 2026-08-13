@@ -21,6 +21,29 @@ favorável. O que a corrida mostra é que aquele resultado **não generaliza** �
 
 ## 2026-08-13
 
+**b045 — a paridade lexical passa de observada a demonstrada.**
+
+Teste de permutação pareada sobre **6.980 consultas**: TheoDB vs Elasticsearch **p=0,477**, vs OpenSearch
+**p=0,466**, com IC 95% de [−0,0011, +0,0025] em NDCG e `d_z` de 0,009. **6.484 consultas empatam
+exatamente**; as 496 restantes se dividem 233 a 263.
+
+**É a espécie certa de não-significância** — e a ferramenta distingue as duas explicitamente, porque tratá-las
+como iguais é como se afirma paridade sem tê-la medido: `p` alto com IC **estreito** em torno de zero é
+evidência de equivalência; `p` alto com IC **largo** é falta de poder.
+
+O dado por consulta veio **por fora do arnês**: ele computa métrica por consulta em `serial_runner.py` e a
+descarta no `return`, e persistí-la lá atravessaria o núcleo que a Política de Fork manda não tocar. O
+avaliador reusa a porta `VectorDB.search_documents` e as funções de métrica do próprio arnês — idênticas por
+construção — e a média por consulta foi **verificada contra o agregado publicado** antes de qualquer `p` sair.
+
+**O guard do [[B-041]] disparou de verdade** durante a execução: apontei o avaliador para um nome de coleção
+errado e o cliente recusou buscar, em vez de devolver 6.980 zeros que virariam NDCG 0.
+
+**O que segue sem teste:** os 4,3× de QPS (QPS não tem valor por consulta — o caminho é N corridas
+repetidas) e o +5,6% do stemming (os arrays do lado sem stemming não foram preservados).
+
+## 2026-08-13
+
 **b047 — a comparação lexical real, e a terceira variação do mesmo erro.**
 
 TheoDB × Elasticsearch 9.1.2 × OpenSearch 2.17.1, MS MARCO 100K, mesma máquina, mesma corrida. **Com o
