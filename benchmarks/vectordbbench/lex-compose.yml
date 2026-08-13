@@ -1,0 +1,50 @@
+# Três motores lexicais na MESMA máquina, para que a comparação seja atribuível ao motor.
+#
+# Heap/memória igual entre Elastic e OpenSearch (4 GB cada) e shared_buffers do TheoDB no mesmo patamar.
+# Não é equivalência perfeita — um JVM e um Postgres usam memória de formas diferentes — e o artefato dirá
+# isso. O que se evita aqui é a assimetria grosseira: dar 16 GB a um e 1 GB a outro mediria a configuração.
+services:
+  theodb:
+    image: theodb:b044
+    container_name: lex-theodb
+    environment: { POSTGRES_PASSWORD: theo, POSTGRES_DB: theo }
+    ports: ["55435:5432"]
+    shm_size: 2gb
+    command: ["postgres", "-c", "shared_buffers=4GB", "-c", "maintenance_work_mem=1GB"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d theo"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.1.2
+    container_name: lex-elastic
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms4g -Xmx4g
+      - bootstrap.memory_lock=true
+    ulimits: { memlock: { soft: -1, hard: -1 } }
+    ports: ["9200:9200"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+
+  opensearch:
+    image: opensearchproject/opensearch:2.17.1
+    container_name: lex-opensearch
+    environment:
+      - discovery.type=single-node
+      - DISABLE_SECURITY_PLUGIN=true
+      - OPENSEARCH_JAVA_OPTS=-Xms4g -Xmx4g
+      - bootstrap.memory_lock=true
+    ulimits: { memlock: { soft: -1, hard: -1 } }
+    ports: ["9201:9200"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 60

@@ -21,6 +21,29 @@ favorável. O que a corrida mostra é que aquele resultado **não generaliza** �
 
 ## 2026-08-13
 
+**b047 — a comparação lexical real, e a terceira variação do mesmo erro.**
+
+TheoDB × Elasticsearch 9.1.2 × OpenSearch 2.17.1, MS MARCO 100K, mesma máquina, mesma corrida. **Com o
+analisador casado, a qualidade é paridade** (NDCG 0,7351 contra 0,7343 e 0,7344 — terceira casa decimal) e o
+**Elasticsearch faz 4,3× o nosso QPS**, com p99 2,3× menor. Somos **2× mais rápidos na carga**.
+
+**A tabela que eu quase publiquei dizia +6,4% de NDCG para nós.** Era product-default: o mapeamento que o
+arnês configura para Elastic e OpenSearch usa o analisador `standard`, que **não stemiza**. Dando `english`
+aos dois, o NDCG deles sobe de 0,6908 para 0,7343 e a vantagem some inteira.
+
+É a terceira variação do mesmo erro em três ciclos: no b035 o **parâmetro** era igual e o ponto de operação
+não; no b044 o **rótulo** era igual e a máquina não; aqui a **configuração padrão** era a de cada um e o
+pré-processamento não. O ADR-0061 passa a exigir também o pré-processamento casado.
+
+As duas rodadas ficam publicadas, porque respondem perguntas diferentes: product-default diz o que o usuário
+recebe ao instalar; analisador casado diz qual motor ranqueia melhor.
+
+**Dois defeitos de ferramenta no caminho:** o cliente OpenSearch do arnês era inrodável (`"30m"` passado como
+timeout numérico — corrigido no fork, candidato a PR upstream), e o `elasticsearch-py` não-pinado instala 9.x,
+que contra servidor 8.15 dá um 400 opaco na criação do índice.
+
+## 2026-08-13
+
 **b044 — stemming entra, e o controle na mesma máquina desfaz uma conclusão minha.**
 
 A/B controlado (mesma máquina, mesmo caso, mesmo dataset em cache, só a imagem muda): NDCG@10 **+5,6%**,

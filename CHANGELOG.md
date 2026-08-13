@@ -14,6 +14,7 @@ e este projeto adere ao [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Primeira comparação lexical contra concorrentes reais**, na mesma máquina e na mesma corrida (`wiki/benchmarks/b047-lexical-headtohead.md`): TheoDB × Elasticsearch 9.1.2 × OpenSearch 2.17.1, MS MARCO 100K. **Com pré-processamento casado a qualidade é paridade** — NDCG@10 0,7351 contra 0,7343 e 0,7344 — e o **Elasticsearch faz 4,3× o nosso QPS**. Somos 2× mais rápidos na carga (B-047)
 - **Stemming e remoção de stopwords no pilar lexical** (B-044). Índices novos usam o analisador `theodb_en` — SimpleTokenizer + RemoveLong + LowerCaser + StopWordFilter + Stemmer (Snowball inglês) — e a consulta `jumping` passa a casar documentos com `jumps`. Medido em A/B na mesma máquina, MS MARCO 100K: **NDCG@10 +5,6% (0,6962 → 0,7351), recall +5,5%, MRR +5,5% — e QPS +10,9%**, porque remover stopwords encurta as listas de postings mais do que o stemmer as alonga. Custo: +1,03 s no build de 100.000 documentos
 - Suporte a **full-text (BM25)** no cliente `theodb` do VectorDBBench — quatro métodos na classe existente, zero pontos de registro novos. É o **primeiro cliente PostgreSQL com FTS** no arnês (B-040)
 - Primeira medição do pilar lexical em arnês público (`wiki/benchmarks/b040-theodb-fts-msmarco.md`): MS MARCO 100K, **NDCG@10 0,6962, recall@10 0,8025, MRR 0,667** a 1.616 QPS de pico, p99 serial 4,8 ms. **Sem stemming, sem operadores de consulta e `k1`/`b` não configuráveis** — declarado antes da tabela, porque os motores comparáveis stemmizam por padrão (B-040)
