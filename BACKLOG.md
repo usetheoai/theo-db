@@ -103,7 +103,7 @@ Registro isso porque "nenhum item morreu" é o resultado que mais merece desconf
 lote estava bem escolhido, ou a régua foi aplicada frouxa. Aqui foi o primeiro caso apenas porque cada item
 já nascera atado a uma medição nossa (gate G5) — o que é diferente de estar atado a um eixo.
 
-## B-001 — `cargo pgrx test` não roda: o binário de teste morre em `CurrentMemoryContext`   [x]
+## B-001 — `cargo pgrx test` não roda: o binário de teste morre em `CurrentMemoryContext`   [ ]
 
 domain: engine-pgrx
 repo: theo-db
@@ -111,7 +111,7 @@ suggested_mode: bug
 source: human
 evidence: reproduzido em 2026-08-09 no builder do próprio `Dockerfile` — `cargo pgrx test pg18 <filtro>` falha com `symbol lookup error: undefined symbol: CurrentMemoryContext`
 why_now: a suíte tem 310 testes e **nenhum deles roda localmente** pelo caminho documentado. Descoberto ao tentar validar 6 testes novos do `parquet.rs`; confirmado como **pré-existente** rodando `cargo pgrx test pg18 sq8` — teste que existe desde antes — com todas as mudanças da sessão revertidas via `git stash`. Uma suíte que só roda no CI é uma suíte cuja regressão só aparece depois do push.
-status: raw
+status: planned
 dod:
   - `cargo pgrx test pg18 parquet` executa e reporta resultado de teste (passou ou falhou), em vez de morrer no carregamento
   - a correção é verificada num teste pré-existente (`sq8`), não só nos testes novos
@@ -288,6 +288,15 @@ por fixtures. A hipótese 4 caiu exatamente por confiar numa fixture de versão 
 > carrega e o harness executa" vs "o binário não carrega" (exit 127)**. Essa distinção se manteve idêntica nas
 > quatro rodadas.
 
+> **2026-08-13 — `raw` → `planned`.** O item está entregue e não foi marcado. A saída 2 do próprio bloco
+> ("contornar — subir o servidor antes") foi a implementada: `CARGO_PGRX_TEST_RUNAS=postgres` +
+> `CARGO_PGRX_TEST_PGDATA=/pgdata` no `Dockerfile` (`842347c`), com `sudo` e um usuário `postgres` de PGDATA
+> próprio. **Medido hoje**: `cargo pgrx test pg18` dentro do `theodb-toolchain` reporta
+> `478 passed; 0 failed` em 313 s.
+>
+> O checkbox já estava `[x]` e o status `raw` — inconsistência que ninguém pegou porque nada compara os dois.
+> A última release é a **v0.158.0**; os PRs #227 e #228 seguem aguardando aprovação humana. `shipped` exige `RELEASED` (`rules/cycle-backlog.md § Status transitions`), então o estado correto é `planned`.
+
 ## B-002 — O objetivo: definir e medir o que torna o TheoDB **atrativo**, já que superar todo benchmark é impossível   [ ]
 
 domain: acervo
@@ -328,7 +337,7 @@ suggested_mode: evolve
 source: human
 evidence: none-yet
 why_now: o pilar entra no binário default em 2026-08-09 (M186), e a partir daí quem instala recebe `bm25_build`/`bm25_search`. O que existe medido é engine (M140.3 — cache MVCC, ganho que escala) e robustez (M140.4 — crash/VACUUM/MVCC contra o binário embarcado). **Qualidade de recuperação não.** O M184 registrou o eixo como estruturalmente aberto para este pilar. Expor superfície pública sem saber sua qualidade foi exatamente o defeito que o M184 mediu no SymQG.
-status: raw
+status: planned
 dod:
   - nDCG@10 medido sobre pelo menos um dataset do BEIR, com o comando de reprodução no artefato
   - comparado contra o `ts_rank_cd` nativo do Postgres no mesmo corpus — o baseline que o usuário já tem
@@ -355,6 +364,13 @@ dod:
 >
 > Corrijo por acréscimo porque a nota errada já circulava e teria feito o [[B-040]] parecer inviável.
 
+> **2026-08-13 — `raw` → `planned`.** Os três bullets do `dod` estão fechados, e o primeiro foi medido no
+> mesmo dia do registro: nDCG@10 **0,6269** contra **0,3016** do `ts_rank_cd` no SciFact
+> (`wiki/benchmarks/m186-lexical-ndcg-scifact-verdict.md`), com o comando de reprodução no artefato.
+>
+> O eixo foi depois **muito além do DoD**: o [[B-040]] mediu MS MARCO 100K em arnês público (VectorDBBench),
+> e o [[B-047]] comparou contra Elasticsearch 9.1.2 e OpenSearch 2.17.1 na mesma máquina, com o [[B-045]]
+> aplicando teste pareado sobre 6.980 consultas. A última release é a **v0.158.0**; os PRs #227 e #228 seguem aguardando aprovação humana. `shipped` exige `RELEASED` (`rules/cycle-backlog.md § Status transitions`), então o estado correto é `planned`.
 
 ## B-005 — Híbrido: o ganho da fusão sobre o vetorial puro é estatisticamente não-significativo   [ ]
 
@@ -960,7 +976,7 @@ suggested_mode: bug
 source: discover-review
 evidence: medido em 2026-08-11 ao tentar rodar o gate de lint localmente contra a imagem que o próprio CI constrói (`docker build --target theodb-rs-builder -t theodb-builder .`): `error: 'cargo-clippy' is not installed for the toolchain '1.97.0-x86_64-unknown-linux-gnu'`, exit 1 — **ferramenta ausente, não lint reprovado**. O `lint-rust.yml` roda no runner self-hosted `theodb-do`, que tem o componente instalado fora da imagem.
 why_now: o `.clippy_args` existe declaradamente para que "CI e local leem o MESMO baseline, sem drift" (comentário no topo do arquivo), e o drift que ele previne é de *argumentos* — mas a **ferramenta** diverge, o que é pior: quem tenta rodar o gate pela imagem oficial recebe exit 1 e, se ler o código de saída sem ler a mensagem, conclui que o lint reprovou. É a forma de falso-negativo que o `code-quality-golden-rule` nomeia `auditor_unavailable_{tool}` e manda registrar em vez de fabricar saída limpa. Nesta sessão o contorno foi `rustup component add` dentro do contêiner, o que funciona e **não** é o conserto: cada quem paga o download de novo.
-status: raw
+status: planned
 dod:
   - `rustup component add clippy` entra no estágio `theodb-rs-builder` do Dockerfile, e a imagem roda o gate sem passo extra
   - ~~verificado se `rustfmt` tem o mesmo problema~~ **VERIFICADO 2026-08-11: SIM, e é pior.** `cargo fmt` na imagem devolve `error: 'cargo-fmt' is not installed for the toolchain '1.97.0'`. E o modo de falha é traiçoeiro: `cargo fmt -- --check | grep -c "^Diff in"` imprimiu **`0`** — não porque não havia diffs, mas porque o comando falhou e não produziu saída nenhuma. **Um falso "está tudo limpo" indistinguível do verdadeiro**, exatamente o que o golden rule chama de fabricar saída limpa. Ambos os componentes (`clippy` e `rustfmt`) precisam entrar na imagem.
@@ -997,6 +1013,14 @@ dod:
 
 > Registered 2026-08-11 by `/code-quality` (slug: `builder-sem-clippy`), ao executar o gate de lint do
 > ciclo do `B-015`.
+
+> **2026-08-13 — `raw` → `planned`.** `--component clippy,rustfmt` entrou na MESMA invocação do `rustup`
+> (`Dockerfile:57`, commit `0cc3b88`) — e não num `rustup component add` posterior, precisamente para que
+> não haja chance de instalar componente de uma versão e rodar `cargo` de outra.
+>
+> **Medido hoje, dentro da imagem**: `cargo clippy --version` → `clippy 0.1.97`, `cargo fmt --version` →
+> `rustfmt 1.9.0-stable`. Os dois respondem; o falso "está tudo certo" que o bloco documenta (o
+> `grep -c "^Diff in"` imprimindo 0 porque o comando falhou) não se reproduz mais. A última release é a **v0.158.0**; os PRs #227 e #228 seguem aguardando aprovação humana. `shipped` exige `RELEASED` (`rules/cycle-backlog.md § Status transitions`), então o estado correto é `planned`.
 
 ## B-026 — Resíduo do SymQG: função morta com null-deref latente, e o gate de clippy está vermelho por ela   [ ]
 
@@ -1245,7 +1269,7 @@ dod:
 
 > **2026-08-12 — implementado, não shipped.** Ciclo completo (DISCOVER→PLAN→IMPLEMENT→CODE-QUALITY→REVIEW→RELEASE). Cliente em `usetheoai/VectorDBBench@theodb` (3 arquivos upstream tocados, +19 linhas, núcleo intocado, zero dependências novas). Corrida real num droplet `g-16vcpu-64gb` (IP 164.90.141.31, destruído): **a recall casado (~0,983) o pgvector faz +16,3% de QPS e constrói o índice 2,7× mais rápido** — `wiki/benchmarks/b035-theodb-vs-pgvector-pg18.md`. Review `READY_TO_MERGE`; release `PR_OPEN_AWAITING_APPROVAL` (PR #228). `shipped` só depois do merge.
 
-## B-036 — O `hnsw` alias não aceita `m` nem `ef_construction`: a sintaxe de build do pgvector falha alto   [x]
+## B-036 — O `hnsw` alias não aceita `m` nem `ef_construction`: a sintaxe de build do pgvector falha alto   [ ]
 
 domain: engine-pgrx
 repo: theo-db
@@ -1253,7 +1277,7 @@ suggested_mode: bug
 source: discover-evolve
 evidence: medido em 2026-08-12 contra `theodb:b034`. `CREATE INDEX ... USING hnsw (embedding vector_l2_ops) WITH (m=16, ef_construction=64)` → `ERROR: unrecognized parameter "m"`; idem para `ef_construction` e `max_connections`, e idem nos AMs próprios `theodb_hnsw` / `theodb_ivfflat`. As reloptions realmente registradas, lidas da fonte (`theodb_rs/src/am/options.rs:112-196`): `lists`, `sbq_bits`, `pq_subspaces`, `pq_bits`, `aq_threshold`, `separate_storage`, `refine`, `soar_lambda`, `rabitq_bits` — nenhum `m`, nenhum `ef_construction`. O build é fixo em `HNSW_M = 16` e `HNSW_EF_CONSTRUCTION = 64` (`theodb_rs/src/am/build.rs:22-23`), o segundo sobreponível **apenas** por variável de ambiente do servidor (`THEODB_HNSW_EF_CONSTRUCTION`, `build.rs:30-36`) — inalcançável por sessão de cliente.
 why_now: o `ADR-0029 § D2` promete drop-in "sem mudança de código", e o shim já registra o AM `hnsw` e as opclasses `vector_*_ops` — então a app pgvector chega até o `CREATE INDEX` e **só ali** descobre que a linha dela não roda. É a terceira camada da mesma classe (B-033 quebrava no `=`, B-034 no ajuste de scan, este no build). Diferente dos dois anteriores, **este falha alto**, o que é muito melhor: o usuário vê o erro. O custo real não é a mensagem, é a capacidade — o TheoDB não tem os dois knobs de qualidade de grafo que qualquer comparação séria varre, e por isso nenhuma corrida de benchmark pode explorar esse eixo (medido ao construir o cliente do B-035).
-status: shipped
+status: planned
 dod:
   - `m` e `ef_construction` viram reloptions de verdade do `theodb_hnsw` (e portanto do alias `hnsw`), com faixa validada, e o build os HONRA — provado por teste que mede recall diferente entre dois `ef_construction`, não apenas que o `CREATE INDEX` foi aceito
   - a variável de ambiente `THEODB_HNSW_EF_CONSTRUCTION` é reavaliada: com reloption de verdade ela vira redundante, e duas fontes para o mesmo knob é a armadilha de precedência que o B-034 acabou de pagar para resolver
@@ -1282,6 +1306,19 @@ dod:
 >
 > Os quatro pontos do `dod` estão fechados. Review: `.claude/knowledge-base/reviews/b036-build-reloptions-review-2026-08-13.md`.
 > **Destrava [[B-046]] e [[B-042]]** — o eixo de qualidade de grafo passa a ser varrível por benchmark.
+
+> **2026-08-13 — CORREÇÃO: `shipped` → `planned`, e o erro foi meu.**
+>
+> Marquei este item como `shipped` hoje, no mesmo dia em que o implementei. A última release é a **v0.158.0**; os PRs #227 e #228 seguem aguardando aprovação humana. `shipped` exige `RELEASED` (`rules/cycle-backlog.md § Status transitions`), então o estado correto é `planned`. O commit `cecd388`
+> está no PR #228, exatamente como os outros oito.
+>
+> Pior que o erro: eu depois li os 9 itens `planned` como registro desatualizado e propus "avançá-los",
+> quando o commit `88479fe` já explicava, em texto, por que estavam `planned`. **Acusei o registro de uma
+> podridão que eu tinha acabado de introduzir** — e a única forma de a acusação ter parecido verdadeira era
+> eu ter sido o único a quebrar a regra.
+>
+> A entrega em si não mudou: `CREATE INDEX … WITH (m=32, ef_construction=200)` funciona e é honrado,
+> medido no produto (`theodb:b036`), 478 testes verdes. O que muda é o rótulo do estado.
 
 ## B-037 — O AM `ivfflat` não existe: metade do shim pgvector está ausente   [ ]
 
@@ -1410,6 +1447,17 @@ dod:
 > Registrado 2026-08-12 durante o ciclo do B-040. **O cliente do arnês já contorna** — consulta
 > `lexical_index_meta` antes de buscar e levanta —, então o benchmark não é afetado. O item existe porque o
 > contorno é do cliente, e todo outro consumidor da superfície pública continua exposto.
+
+> **2026-08-13 — correção factual, e ela desfaz uma afirmação minha.** O review do [[B-045]] registrou que
+> "o guard do B-041 disparou de verdade, e evitou um NDCG 0 publicado". Disparou — mas o guard vive em
+> `clients/theodb/theodb.py:330` do **fork do VectorDBBench**, não no motor.
+>
+> A diferença é o item inteiro: o que existe protege **as nossas corridas de benchmark**; o `dod` deste bloco
+> exige que o `bm25_search` **do produto** levante erro tipado. Para qualquer usuário do TheoDB, `bm25_search`
+> sobre índice nunca construído continua devolvendo zero linhas em silêncio.
+>
+> O item segue `raw`, e a evidência de que a classe é real ficou mais forte, não mais fraca: a defesa que
+> construímos para nós mesmos existe porque o defeito nos morderia — e ele continua mordendo quem instala.
 
 ## B-042 — O build do HNSW é 3,6× mais lento que o do pgvector usando 8× mais threads, e o grafo sai pior   [ ]
 
