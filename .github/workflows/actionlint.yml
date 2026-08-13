@@ -63,3 +63,18 @@ jobs:
           docker run --rm -v "$PWD:/repo" --workdir /repo \
             rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 \
             -color
+
+      - name: Toda invocação de workflow aponta para um arquivo que existe?
+        # B-029 — o `actionlint` acima valida a SINTAXE do workflow e a forma das expressões; ele não
+        # abre o arquivo que um `run:` manda o bash executar. São perguntas diferentes, e só uma
+        # estava sendo feita: em 2026-08-13 havia 10 invocações de 6 scripts ausentes, e o actionlint
+        # passou verde sobre elas no dia anterior.
+        #
+        # A quebra tinha ficado ARMADA por um dia e meio — os gates só rodam em push para
+        # develop/main, e o commit da remoção ainda não chegara lá. Quando chegasse, o job falharia
+        # por arquivo ausente, indistinguível de regressão real: a mesma classe que o B-027 acabou
+        # de eliminar do outro lado.
+        #
+        # Este passo custa milissegundos e mora aqui, e não num workflow próprio, porque o
+        # `actionlint` já é o job barato que olha para `.github/workflows/`.
+        run: bash scripts/check-workflow-paths.sh

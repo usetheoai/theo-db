@@ -113,29 +113,136 @@ def _normalize_use_module(module: str) -> str:
 
 _CARGO_UDEPS_TIMEOUT_SEC = 180
 
+# O contêiner precisa compilar o crate do zero na primeira vez; medido no B-035, o audit completo
+# fecha em 2 min 07 s dentro da imagem. O teto é maior que o do host de propósito — usar o mesmo
+# faria o fallback expirar justamente no caminho que funciona.
+_CARGO_UDEPS_CONTAINER_TIMEOUT_SEC = 600
+
+# A imagem pinada onde `cargo pgrx init` já foi executado. É o mesmo ambiente em que o projeto roda
+# `clippy` e `fmt` — nenhum ambiente novo é introduzido aqui.
+_TOOLCHAIN_IMAGE = "theodb-toolchain:latest"
+
+# CORRIGIDO 2026-08-13 pela medição: uma lista de assinaturas de erro é frágil, porque o B-039 registrou
+# DOIS obstáculos empilhados e o primeiro mascara o segundo. Neste repositório o host falha em
+# `failed to write .../target/debug/.fingerprint/...` (resíduo de builds em contêiner que montaram o
+# diretório do host) ANTES de chegar ao `config.toml not found` que eu havia codificado — então o
+# predicado por assinatura deixaria o cap disparando exatamente na máquina onde ele foi medido.
+#
+# O critério passou a ser a AUSÊNCIA DE DADO, que é o que de fato distingue os dois casos: um audit que
+# rodou devolve JSON, com achado ou sem. Sem JSON e com exit != 0, o host não auditou.
+
+
+class _UdepsExecution:
+    """Onde `cargo-udeps` roda. Duas implementações; o detector não sabe qual usa.
+
+    Existe como abstração — e não como um `if` dentro do detector — porque as duas diferem em três
+    eixos independentes: o comando, o timeout, e SOBRETUDO a mensagem de indisponibilidade. Foi
+    justamente a mensagem genérica que fez quatro ciclos lerem "cargo-udeps não encontrado" quando a
+    ferramenta estava instalada e o que faltava era o ambiente.
+    """
+
+    timeout = _CARGO_UDEPS_TIMEOUT_SEC
+
+    def command(self, manifest_dir: Path) -> list[str]:  # pragma: no cover - interface
+        raise NotImplementedError
+
+    def unavailable_reason(self, exc: Exception) -> str:  # pragma: no cover - interface
+        raise NotImplementedError
+
+
+class _HostExecution(_UdepsExecution):
+    """O caminho padrão: `cargo +nightly udeps` no host, sem custo de contêiner."""
+
+    def command(self, manifest_dir: Path) -> list[str]:
+        return ["cargo", "+nightly", "udeps", "--output", "json", "--all-targets"]
+
+    def unavailable_reason(self, exc: Exception) -> str:
+        if isinstance(exc, FileNotFoundError):
+            return "cargo +nightly udeps not found (install nightly + cargo-udeps)"
+        return f"cargo-udeps invocation failed: {exc}"
+
+
+class _ContainerExecution(_UdepsExecution):
+    """O fallback: a mesma invocação dentro da imagem pinada, onde `cargo pgrx init` já rodou."""
+
+    timeout = _CARGO_UDEPS_CONTAINER_TIMEOUT_SEC
+
+    def command(self, manifest_dir: Path) -> list[str]:
+        # `CARGO_TARGET_DIR` próprio, em volume nomeado, e NÃO o `target/` do host.
+        #
+        # Medido em 2026-08-13: a primeira execução com o target compartilhado devolveu
+        # `exit 101: Updating crates.io index`; a segunda, já aquecida por uma corrida direta, passou
+        # limpo. Dois `cargo` disputando o mesmo diretório é estado compartilhado mutável entre dois
+        # processos, e um conserto que só funciona com cache quente falha na máquina de quem chega
+        # depois — com um modo de falha indistinguível de "auditor indisponível", que é justamente o
+        # cap que este código existe para remover.
+        #
+        # É a mesma forma do B-027: eliminar a possibilidade de colisão, em vez de remediá-la.
+        # O volume do registro persiste entre execuções, então o custo de rede é pago uma vez.
+        return [
+            "docker", "run", "--rm",
+            "-v", f"{manifest_dir}:/w:ro",
+            "-v", "theodb-udeps-target:/udeps-target",
+            "-v", "theodb-cargo:/root/.cargo/registry",
+            "-e", "CARGO_TARGET_DIR=/udeps-target",
+            "-w", "/w",
+            _TOOLCHAIN_IMAGE,
+            "cargo", "+nightly", "udeps", "--output", "json", "--all-targets",
+        ]
+
+    def unavailable_reason(self, exc: Exception) -> str:
+        if isinstance(exc, FileNotFoundError):
+            return (
+                "o host não tem ambiente pgrx e o docker não está disponível para rodar o auditor "
+                f"na imagem pinada ({_TOOLCHAIN_IMAGE})"
+            )
+        return f"cargo-udeps no contêiner falhou: {exc}"
+
 
 class RustDetector(BaseDetector):
     language = "rust"
     manifest_marker = "Cargo.toml"
 
-    def detect_dead_code(self, manifest_dir: Path) -> list[Finding]:
-        """Run `cargo +nightly udeps --output json` and parse unused deps."""
-        cmd = ["cargo", "+nightly", "udeps", "--output", "json", "--all-targets"]
+    def _run_udeps(self, manifest_dir: Path, how: _UdepsExecution):
+        """Executa uma estratégia. Devolve `(result, finding)`; exatamente um dos dois é None."""
         try:
-            result = subprocess.run(
-                cmd,
-                cwd=str(manifest_dir),
-                capture_output=True,
-                text=True,
-                timeout=_CARGO_UDEPS_TIMEOUT_SEC,
-                check=False,
+            return (
+                subprocess.run(
+                    how.command(manifest_dir),
+                    cwd=str(manifest_dir),
+                    capture_output=True,
+                    text=True,
+                    timeout=how.timeout,
+                    check=False,
+                ),
+                None,
             )
-        except FileNotFoundError:
-            return [self._auditor_unavailable("cargo +nightly udeps not found (install nightly + cargo-udeps)")]
         except subprocess.TimeoutExpired:
-            return [self._auditor_unavailable(f"cargo-udeps timed out after {_CARGO_UDEPS_TIMEOUT_SEC}s")]
-        except (subprocess.SubprocessError, OSError) as e:
-            return [self._auditor_unavailable(f"cargo-udeps invocation failed: {e}")]
+            return None, self._auditor_unavailable(f"cargo-udeps timed out after {how.timeout}s")
+        except (FileNotFoundError, subprocess.SubprocessError, OSError) as e:
+            return None, self._auditor_unavailable(how.unavailable_reason(e))
+
+    def detect_dead_code(self, manifest_dir: Path) -> list[Finding]:
+        """Run `cargo +nightly udeps --output json` and parse unused deps.
+
+        B-039 — quando o HOST não tem ambiente de build, a invocação cai para a imagem pinada em vez
+        de reportar `auditor_unavailable`. Medido no B-035: no host o erro real é
+        `config.toml not found. Have you run 'cargo pgrx init' yet?`, e nenhum `chown` conserta isso;
+        dentro do contêiner o mesmo audit fecha em 2 min com `All deps seem to have been used.`
+        Quatro ciclos declararam o cap como limitação de ambiente, que é a forma educada de dizer que
+        ninguém investigou — e um cap que dispara sempre deixa de ser sinal.
+
+        O contêiner é fallback e não caminho padrão: pagá-lo sempre custaria ~2 min por audit num host
+        onde `cargo-udeps` responderia em segundos.
+        """
+        result, finding = self._run_udeps(manifest_dir, _HostExecution())
+        if finding is not None:
+            return [finding]
+
+        if self._host_lacks_build_environment(result):
+            result, finding = self._run_udeps(manifest_dir, _ContainerExecution())
+            if finding is not None:
+                return [finding]
 
         if not result.stdout.strip():
             # No JSON output — likely no Cargo.toml or build error
@@ -161,6 +268,21 @@ class RustDetector(BaseDetector):
                 )
             ]
         return self._parse_udeps_json(data)
+
+    @staticmethod
+    def _host_lacks_build_environment(result) -> bool:
+        """O host falhou sem produzir DADO, e não por achado do auditor?
+
+        A distinção decide se cair para o contêiner é correto ou é mascarar um erro real, e o
+        discriminador é a saída, não a mensagem: `cargo-udeps` que auditou devolve JSON — inclusive
+        quando encontra dependência não usada, caso em que sai com código != 0. Sem JSON e com exit
+        != 0, ele não chegou a auditar, e o contêiner é onde ele consegue.
+
+        Um erro de compilação genuíno também cai aqui, e isso é correto: o contêiner falhará igual, e
+        a mensagem que sobra é a dele — que é a mais informativa das duas, porque vem do ambiente em
+        que o crate de fato compila.
+        """
+        return result.returncode != 0 and not result.stdout.strip()
 
     def detect_symbol_fabrication(self, changed_files: list[Path]) -> list[Finding]:
         """T2.4 — Validate `use` statements against crates.io. Skip module-local (EC-17 analog)."""

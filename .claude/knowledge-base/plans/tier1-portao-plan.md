@@ -108,7 +108,25 @@ Estado do git: `2c0c31c` em `workspace`.
 | `sql-surface.sh` (79 linhas) | **restaurado verbatim** | Só faz `git archive` + `grep` sobre `theodb_rs/src`. Não toca umbrella nem cadeia |
 | `cassert-smoke.sh` (116) | **restaurado, após verificação** | Usa `CREATE EXTENSION theodb_rs` (correto) e os AMs próprios |
 | `smoke.sh` (204) | **reescrito** | Faz `CREATE EXTENSION theodb` 3× — umbrella removido pelo B-030 |
-| `migrate-doc-check.sh`, `migrate-smoke.sh`, `migrate-smoke-selftest.sh` | **invocação removida** | Testam a cadeia de upgrade removida pelo B-031 com ADR |
+| `migrate-doc-check.sh`, `migrate-smoke.sh`, `migrate-smoke-selftest.sh` | ~~invocação removida~~ **RESTAURADOS** | Ver a correção abaixo: testam a migração pgvector→TheoDB, não a cadeia de upgrade |
+
+> **CORREÇÃO POR ACRÉSCIMO — 2026-08-13, durante a implementação. A linha dos `migrate-*` estava ERRADA.**
+>
+> Eu classifiquei os três como "testam a cadeia de upgrade removida pelo B-031" **inferindo do nome**. Lidos:
+> `migrate-smoke.sh` migra uma base **pgvector baunilha para o TheoDB via `pg_dump`/`pg_restore` padrão** e
+> verifica que dado e índices sobrevivem — é a promessa drop-in do `ADR-0029 § D2`, não a cadeia de upgrade.
+> `migrate-doc-check.sh` verifica que todo comando publicado em `wiki/guides/minimal-migration.md` aparece
+> literalmente no smoke, para o guia não derivar do que é testado. `migrate-smoke-selftest.sh` prova que o
+> assert de checksum não é teatro. Nenhum dos três cita o umbrella ou a cadeia.
+>
+> **Os três voltam.** E há uma razão mais forte que "não estavam errados": `migrate-smoke.sh` semeia a origem
+> com `CREATE INDEX ... USING ivfflat` (`:76`), e **medido hoje no `theodb:b036`**:
+> `ERROR: access method "ivfflat" does not exist` — só `hnsw`, `theodb_hnsw` e `theodb_ivfflat` existem.
+> Restaurá-lo devolve ao projeto um oráculo que **reprova, e por razão verdadeira**: o [[B-037]] quebrando a
+> migração real na promessa que o ADR-0029 faz.
+>
+> Eu quase apaguei o portão da capacidade que os quatro últimos itens do projeto foram construídos para
+> entregar, por ter lido um nome em vez do arquivo.
 
 **Alternativas consideradas.**
 
