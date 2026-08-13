@@ -488,7 +488,7 @@ suggested_mode: bug
 source: discover-review
 evidence: `wiki/benchmarks/m187-vector-join-recall-defeito.md` — `am::hnsw_page` vector-join devolve 199/200 e 59/60 onde o contrato exige igualdade com a busca exata. Os dois testes já existiam em `am/hnsw_page.rs` e falham na primeira execução da suíte (2026-08-10).
 why_now: a suíte destravou pelo B-001 e executou pela primeira vez. **109 artefatos de benchmark não pegaram este off-by-one**, porque benchmark mede o caminho que se escolhe medir. O caso `k ≥ |b|` é o mais grave: pedir o conjunto inteiro tem de devolver o conjunto inteiro — não há trade-off de recall a fazer nesse regime.
-status: raw
+status: planned
 dod:
   - `pg_vector_join_recall_matches_exact_within_tol` e `pg_vector_join_threshold_correct` passam
   - a causa é nomeada em `hnsw_page.rs`, não contornada por afrouxar a tolerância do teste
@@ -526,6 +526,19 @@ dod:
 > com ef=120, é (2) — há um nó que o grafo não alcança, e aí a pergunta vira por que ele ficou isolado.
 > **Descartado por medição:** a hipótese de que a correção do planner (m175) o causara. Revertendo apenas a
 > correção TOAST em `am/mod.rs`, os mesmos dois testes falham. O defeito é anterior e independente.
+
+> **2026-08-13 — `raw` → `planned`.** O bloco já dizia FECHADO desde 2026-08-10, com checkbox `[x]`, e o status
+> ficou `raw` — a mesma divergência de dois campos que o [[B-001]] carregou e que o [[B-051]] existe para
+> mecanizar. Confirmado por execução na suíte de hoje:
+>
+> ```
+> test am::hnsw_page::tests::tests::pg_vector_join_threshold_correct ... ok
+> test am::hnsw_page::tests::tests::pg_vector_join_recall_matches_exact_within_tol ... ok
+> ```
+>
+> **A divergência tem custo medido:** eu recomendei este item como prioridade número 1 do Tier A hoje, lendo o
+> título ("perde exatamente um elemento") sem abrir o bloco. É a terceira vez neste ciclo que o texto de um item
+> me levou a planejar contra algo que não existia — depois dos `migrate-*` e do [[B-016]].
 
 ## B-012 — As outras 18 falhas da suíte seguem sem causa capturada   [x]
 
@@ -1587,7 +1600,7 @@ suggested_mode: bug
 source: discover-evolve
 evidence: medido em 2026-08-12 contra `theodb:b034`. `SELECT count(*) FROM bm25_search(999,'lazy dog',5)` — onde 999 nunca passou por `bm25_build` — devolve **0**, sem erro nem aviso. O catálogo sabe a diferença: `theodb.lexical_index_meta` tem uma linha por índice construído (`index_id`, `generation`), e o 999 não está lá. A informação existe; a função apenas não a consulta. Contraste medido no mesmo banco: índice 102, construído, devolve resultados.
 why_now: **zero resultados é indistinguível de "nada casou"**, e essa é a forma mais cara de falhar num pilar de busca. Uma aplicação que esqueceu o `bm25_build` — ou que o perdeu num restore, ou cujo índice foi construído com outro `index_id` — não recebe erro: recebe silêncio, e conclui que o corpus não tem o documento. É a mesma classe do B-034 (botão aceito que não faz nada) e do achado do B-035 (cliente que aceitava o banco errado), agora no pilar lexical. Descoberto ao construir o cliente FTS do [[B-040]]: o cliente teve de consultar `lexical_index_meta` por conta própria para conseguir falhar alto, o que é a evidência de que a informação está no lugar certo e a função no lugar errado.
-status: raw
+status: triaged
 dod:
   - `bm25_search` sobre `index_id` ausente de `theodb.lexical_index_meta` levanta erro tipado nomeando o `index_id` e dizendo que ele nunca foi construído — provado por teste que hoje falharia
   - índice construído e depois **esvaziado** (corpus sem documentos) continua devolvendo zero linhas **sem** erro: é resultado legítimo, e o teste distingue os dois casos
@@ -1608,6 +1621,16 @@ dod:
 >
 > O item segue `raw`, e a evidência de que a classe é real ficou mais forte, não mais fraca: a defesa que
 > construímos para nós mesmos existe porque o defeito nos morderia — e ele continua mordendo quem instala.
+
+> **2026-08-13 — `raw` → `triaged`.** Reproduzido no produto (`theodb:b036`, contêiner limpo):
+> `SELECT count(*) FROM bm25_search(999,'lazy dog',5)` → **0 linhas, sem erro**.
+>
+> **E a medição que decide o conserto:** um `bm25_build` sobre corpus **vazio** registra no catálogo com
+> `generation 1` — verificado com os dois builds na mesma transação. Logo `lexical_index_meta` significa *"um
+> build aconteceu"*, não *"existem documentos"*, que é exatamente a semântica de que o segundo bullet do `dod`
+> precisa: ausente → erro; presente com zero hits → resultado legítimo.
+>
+> Oportunidade: `.claude/knowledge-base/discoveries/opportunities/b041-b048-silencio-opportunity.md`
 
 ## B-042 — O build do HNSW é 3,6× mais lento que o do pgvector usando 8× mais threads, e o grafo sai pior   [ ]
 
@@ -1806,7 +1829,7 @@ suggested_mode: bug
 source: discover-review
 evidence: medido em 2026-08-13 contra `theodb:b044`. **(a) `bm25_build` conta documento que nunca será achável.** Com uma tabela de 3 linhas onde uma tem `body` NULL, `bm25_build` devolve **3** — o `unwrap_or_default()` de `engine.rs:157` transforma o NULL em documento vazio, que entra no índice, conta no retorno e não casa consulta nenhuma. Quem confere o valor de retorno acredita que os 3 estão buscáveis; a busca por termos dos outros dois devolve `3,1` e nunca o 2. **(b) `pg_backing.rs:201`: `Index::open` que falha devolve `0`** em vez de erro — bytes de heap ilegíveis viram "índice vazio". Visível no código; **não** reproduzido por execução (exigiria corromper heap de propósito), e a distinção está dita. **(c) `engine.rs:109`: `read_generation` cai para 0** por cadeia de `.ok()`, misturando "índice sem build" (estado válido) com "a consulta ao catálogo falhou" (não é).
 why_now: a classe **não é nova, e é aí que está o problema**. O próprio backlog registra que ela já foi encontrada e consertada ao menos três vezes: o `explain_scan`/`scan_stats` devolvendo "zeros silenciosos" (consertado com erro tipado, e a justificativa escrita lá vale palavra por palavra aqui — *"os números seguintes viriam de um seqscan, e reportá-los sob o nome `explain_scan` seria medir uma coisa e rotular outra"*), o contador do chunk-skip do colunar, e o gerador de script de upgrade. Somados aos [[B-034]] (GUC aceito sem efeito), [[B-041]] (busca em índice não construído) e ao erro de parse engolido que o [[B-044]] corrigiu, são **seis instâncias da mesma classe consertadas uma a uma**, sem que a classe tenha nome. Cada conserto local é correto e nenhum impede o sétimo.
-status: raw
+status: triaged
 dod:
   - as três instâncias medidas acima corrigidas: `body` NULL **não** conta como indexado (ou o retorno distingue indexados de pulados); `Index::open` que falha **levanta**; `read_generation` separa "sem build" de "catálogo ilegível"
   - **um teste por instância**, que hoje falharia — para (a), a asserção é sobre o valor de retorno de `bm25_build`, não sobre a busca
@@ -1816,6 +1839,20 @@ dod:
 > Registrado 2026-08-13, a partir da pergunta do owner sobre o que mudar para a classe não voltar. **A resposta
 > medida é que não é configuração**: nenhum GUC ou reloption teria evitado qualquer um dos seis casos. O que
 > falta é contrato de falha, e a evidência de que falta é a contagem — seis consertos locais e nenhuma regra.
+
+> **2026-08-13 — `raw` → `triaged`, e o escopo ENCOLHEU pela medição.**
+>
+> - **(a) confirmado por execução.** Tabela de 3 linhas com um `body` NULL: `bm25_build` devolve **3**, e só os
+>   ids **1 e 3** aparecem em qualquer busca. O `unwrap_or_default()` de `engine.rs:157` transforma o NULL num
+>   documento vazio que conta e nunca casa.
+> - **(b) SAI do escopo de produto.** `pg_backing.rs:201` vive dentro de `#[cfg(feature = "spike-lexical")]`,
+>   declarado no próprio arquivo como *"andaime de medicao, fora do default"* — não chega ao usuário. O caminho
+>   equivalente que **está** no default (`open_from_heap`, `engine.rs:115`) já falha alto com erro tipado.
+> - **(c) permanece, e é achado de LEITURA.** A cadeia `.ok()`/`.unwrap_or(0)` de `engine.rs:105-110` mistura
+>   "sem build" com "a consulta ao catálogo falhou". Não reproduzido por execução — exigiria fazer o SPI falhar
+>   de propósito —, e a distinção fica dita em vez de suposta.
+>
+> Oportunidade: `.claude/knowledge-base/discoveries/opportunities/b041-b048-silencio-opportunity.md`
 
 ## B-049 — As diferenças de VELOCIDADE que publicamos não têm teste, e o pareado não serve para elas   [ ]
 
