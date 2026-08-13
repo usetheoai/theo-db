@@ -1455,7 +1455,7 @@ suggested_mode: evolve
 source: human
 evidence: medido em 2026-08-12 contra `theodb:b034`: a consulta `jumping` não casa o documento que contém `jumps`; stopwords são indexadas (`the` devolve documentos); operadores de consulta não existem. **Causa localizada em 2026-08-13:** o schema declara `sb.add_text_field("body", TEXT | STORED)` (`theodb_rs/src/lexical/pg_backing.rs:82,125,158` e `engine.rs`), e o `TEXT` do Tantivy usa o tokenizer `"default"` (`tantivy-0.26.1/src/schema/field_entry.rs:160`), que é SimpleTokenizer + RemoveLong + LowerCaser — **sem stemmer, sem stopwords**. O Tantivy 0.26.1 **já traz** `Stemmer`, `Language` (`src/tokenizer/stemmer.rs:12,63`) e `StopWordFilter`.
 why_now: decisão do owner em 2026-08-13 — **implementar**. O item deixa de ser "decidir se" e passa a ser "fazer". O que a medição mudou é o **tamanho**: não se escreve um stemmer, configura-se o que já está linkado (degrau 4 da parsimony ladder — reusar dependência instalada). O custo real não é o código, é o contrato: o analisador precisa ser **idêntico na indexação e na consulta**, e trocá-lo **invalida todo índice existente**, exigindo rebuild.
-status: raw
+status: planned
 dod:
   - um `TextAnalyzer` registrado (SimpleTokenizer + LowerCaser + `StopWordFilter` + `Stemmer`) e usado **nos dois lados** — no `add_text_field` e no parser de consulta. Um teste prova que os dois usam o mesmo, porque analisadores divergentes degradam recall em silêncio
   - `jumping` casa `jumps` — teste de regressão que hoje falha
@@ -1468,6 +1468,22 @@ dod:
 > decidindo "implementar ou declarar fora de escopo" — a decisão foi tomada, então o item vira execução.
 > Operadores de consulta (`"frase"`, `AND`, `-exclusão`, `prefixo*`) **não** entram aqui: são superfície de
 > consulta, não analisador, e misturá-los faria um item que fecha nunca.
+
+> **2026-08-13 — implementado, não shipped.** Ciclo completo. Analisador `theodb_en` registrado sob nome
+> próprio; suíte 457 → **469, 0 falhas**. A/B controlado na MESMA máquina (`g-16vcpu-64gb`, IP
+> 159.65.249.69, destruído): **NDCG@10 +5,6% (0,6962 → 0,7351), recall +5,5%, MRR +5,5% e QPS +10,9%**, p99
+> −10,3%. Custo: +1,03 s no build de 100.000 documentos. Artefato atualizado em
+> `wiki/benchmarks/b040-theodb-fts-msmarco.md`. Review `READY_TO_MERGE`; release
+> `PR_OPEN_AWAITING_APPROVAL` (PR #228).
+>
+> **Todos os DoD cumpridos, com uma diferença de desenho:** o DoD pedia que "a invalidação de índices
+> existentes esteja tratada". Não há o que tratar — o nome do analisador vai no schema de cada índice, então
+> registrar sob nome novo faz índice antigo continuar correto sob a própria semântica. Provado por teste, não
+> por raciocínio. O idioma ficou fixo em inglês por ADR (D2), com `theodb_en` reservando o espaço.
+>
+> **A lição do ciclo não é o número.** Minha primeira leitura dizia −31,8% de QPS, medida contra uma corrida
+> anterior feita noutro modelo de CPU. Refeita na mesma máquina, é +10,9%.
+
 
 ## B-045 — Nenhuma comparação que publicamos tem teste de significância, e tínhamos o instrumento   [ ]
 

@@ -36,6 +36,13 @@ esta decisão:
    próprio mede o que escolhemos medir; um de terceiros mede o que a indústria escolheu.
 2. **Concorrentes na mesma corrida e na mesma máquina.** Não se cita número publicado de outro ambiente. Se
    o concorrente não rodou aqui, o artefato diz que **não há comparação** — como o `b040` faz.
+
+   **Acrescentado em 2026-08-13, por medição:** a exigência vale igual para **antes-e-depois do mesmo
+   motor**. No B-044 comparei a corrida com stemming (Xeon 8168) contra a corrida sem, feita antes noutro
+   droplet (Xeon 8358): o delta aparente era **−31,8% de QPS**. Refeito na mesma máquina, é **+10,9%** — o
+   sinal inverteu. Métricas de qualidade (NDCG, recall, MRR) são independentes de hardware; **QPS e latência
+   não são**. E a corrida controlada carrega uma **sonda que prova qual variante está ativa**, em vez de
+   confiar no rótulo da imagem.
 3. **Métrica de qualidade ao lado de toda métrica de velocidade.** Recall junto de QPS no vetorial; NDCG, MRR
    e recall junto de QPS no lexical. Latência sozinha não é resultado.
 4. **Ponto de operação casado, não parâmetro casado.** Comparação de velocidade só a qualidade equivalente.
