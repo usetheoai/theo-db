@@ -30,16 +30,29 @@ Primeira corrida do **VectorDBBench** com o cliente `theodb`, contra o **pgvecto
 
 # Resultado
 
-| Motor | `ef_search` | recall@10 | QPS (pico) | p99 serial | build do índice |
-|---|---|---|---|---|---|
-| pgvector 0.8.6 | 64 | **0,9835** | **3.590,6** | 4,3 ms | **53,9 s** |
-| TheoDB | 64 | 0,9600 | 4.536,8 | 3,8 ms | 144,8 s |
-| **TheoDB** | **128** | **0,9829** | **3.086,1** | 5,2 ms | — |
-| TheoDB | 256 | 0,9936 | 1.887,7 | 8,1 ms | — |
+| Motor | `ef_search` | recall@10 | QPS (pico) | p99 serial | insert | build do índice |
+|---|---|---|---|---|---|---|
+| pgvector 0.8.6 | 64 | **0,9835** | **3.590,6** | 4,3 ms | 18,8 s | **35,1 s** |
+| TheoDB | 64 | 0,9600 | 4.536,8 | 3,8 ms | 19,7 s | 125,1 s |
+| **TheoDB** | **128** | **0,9829** | **3.086,1** | 5,2 ms | — | — |
+| TheoDB | 256 | 0,9936 | 1.887,7 | 8,1 ms | — | — |
 
 **A recall casado — 0,9829 contra 0,9835 — o pgvector faz +16,3% de QPS** (3.590,6 vs 3.086,1).
 
-**No build do índice o pgvector é 2,7× mais rápido** (53,9 s vs 144,8 s para os mesmos 50.000 × 1536).
+**No build do índice o pgvector é 3,6× mais rápido** — e a primeira redação desta linha estava imprecisa.
+
+> **Correção por acréscimo, 2026-08-13.** Publiquei "2,7× mais rápido (53,9 s vs 144,8 s)" citando
+> `load_duration`, que **soma inserção e construção**. Decompondo o mesmo JSON:
+>
+> | | insert (COPY) | build do índice | load (soma) |
+> |---|---|---|---|
+> | pgvector | 18,80 s | **35,09 s** | 53,88 s |
+> | TheoDB | 19,66 s | **125,09 s** | 144,75 s |
+> | TheoDB (2ª corrida) | 19,34 s | 122,85 s | 142,18 s |
+>
+> A inserção está em **paridade** (4% de diferença — o caminho de fio e o armazenamento são comparáveis).
+> O que é lento é a **construção do grafo HNSW: 3,6×**, não 2,7×. A redação anterior atribuía à carga um
+> custo que é do build, e diluía o tamanho real da diferença.
 
 # A armadilha que esta corrida documenta
 

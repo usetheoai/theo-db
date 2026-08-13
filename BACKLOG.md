@@ -1263,6 +1263,14 @@ dod:
 > Registrado 2026-08-12 pela medição do B-035. **Ordem de tamanho honesta:** é o maior dos três achados desse
 > ciclo, porque não é rotulagem de catálogo — exige que o build persistente aceite e propague os parâmetros.
 
+> **2026-08-13 — a medição deu a este item uma urgência que ele não tinha.** Os benchmarks do B-035
+> mostraram que, no mesmo `ef_search=64`, o pgvector entrega recall **0,9835** e o TheoDB **0,9600** — o
+> TheoDB precisa de `ef=128` para casar, e é daí que vem o déficit de 16% de QPS. A pergunta natural é se o
+> grafo é pior ou se a varredura é menos eficiente por candidato, e **essa pergunta não pode ser respondida
+> por experimento enquanto `m` e `ef_construction` forem constantes de compilação**. Este item deixou de ser
+> só uma lacuna de compatibilidade: é o que destrava a investigação do [[B-042]].
+
+
 ## B-037 — O AM `ivfflat` não existe: metade do shim pgvector está ausente   [ ]
 
 domain: engine-pgrx
@@ -1391,4 +1399,80 @@ dod:
 > `lexical_index_meta` antes de buscar e levanta —, então o benchmark não é afetado. O item existe porque o
 > contorno é do cliente, e todo outro consumidor da superfície pública continua exposto.
 
-Próximo id livre: **`B-042`**. Ids são monotônicos e nunca reusados.
+## B-042 — O build do HNSW é 3,6× mais lento que o do pgvector usando 8× mais threads, e o grafo sai pior   [ ]
+
+domain: engine-pgrx
+repo: theo-db
+suggested_mode: evolve
+source: discover-evolve
+evidence: medido em 2026-08-12 no droplet `g-16vcpu-64gb`, corpus `Performance1536D50K` (50.000 × 1536d, COSINE), decompondo `load_duration` do JSON do VectorDBBench. **A inserção está em paridade** — pgvector 18,80 s contra TheoDB 19,66 s (4%). **A construção do índice não:** pgvector **35,09 s**, TheoDB **125,09 s** e 122,85 s numa segunda corrida independente (1,8% entre elas). O caminho paralelo do TheoDB **foi usado** — o limiar é 4.096 nós (`ann/hnsw_parallel.rs:18`) e o corpus tem 50.000, com `available_parallelism()` = 16 threads no droplet. O pgvector usou **2** workers de manutenção (`max_parallel_maintenance_workers=2`, lido do log da corrida). Em segundos-de-thread para o mesmo grafo, a razão é **28,5×**.
+why_now: o que torna isto um achado e não uma escolha de projeto é a **ausência de troca**: o grafo mais barato do pgvector é também o **melhor**. No mesmo `ef_search=64` o pgvector entrega recall **0,9835** e o TheoDB **0,9600** — para casar recall o TheoDB precisa de `ef=128`, e é daí que sai o déficit de 16% de QPS já publicado. Ou seja, o custo aparece duas vezes: uma no tempo de build, outra na varredura. Enquanto for assim, "paridade de recall" é verdade apenas com o dobro de trabalho por consulta, e isso não está dito em lugar nenhum. O eixo para investigar está bloqueado pelo [[B-036]] — sem `m`/`ef_construction` ajustáveis, não é possível separar qualidade-de-grafo de eficiência-de-varredura por experimento.
+status: raw
+dod:
+  - o tempo de build é **decomposto por fase** com profiling real (seleção de vizinhos, descida, escrita de página) — não estimado —, e a fase dominante é nomeada com percentual
+  - está medido se as 16 threads produzem trabalho útil ou contenção: build sequencial forçado (`THEODB_HNSW_PARALLEL_THRESHOLD` alto) contra paralelo, no mesmo corpus, com o speedup real reportado
+  - a comparação com o pgvector é feita **com o mesmo número de workers dos dois lados**, ou o registro declara que a assimetria de workers é parte do resultado
+  - qualquer ganho é provado por medição pareada, e o **recall no mesmo `ef` não regride** — build mais rápido que piora o grafo não é ganho, é troca escondida
+  - o resultado entra em `wiki/benchmarks/` mesmo se o TheoDB continuar atrás: um honest-negative aqui vale mais que a ausência do número
+
+> Registrado 2026-08-13 a partir dos dois benchmarks. **Corrigiu um número que eu havia publicado:** o
+> artefato do B-035 dizia "2,7× mais rápido" citando `load_duration`, que soma inserção e build. A razão real
+> do build é 3,6×, e a inserção está empatada — a redação anterior diluía o tamanho da diferença e a atribuía
+> ao lugar errado. Corrigido lá por acréscimo.
+
+## B-043 — O QPS lexical satura em ~20 clientes numa máquina de 16 vCPU e não sobe mais   [ ]
+
+domain: lexical
+repo: theo-db
+suggested_mode: evolve
+source: discover-evolve
+evidence: medido em 2026-08-13 no droplet `g-16vcpu-64gb`, MS MARCO 100K, caso `FTSBm25Performance`. Curva de concorrência (clientes → QPS): 1 → 251,2 · 5 → 1.025,9 · 10 → 1.460,4 · **20 → 1.613,2** · 30 → 1.507,3 · 40 → 1.592,6 · 60 → 1.616,4 · 80 → 1.600,0. A latência p99 cresce de 0,005 s a 0,112 s no mesmo intervalo. Ou seja: **de 20 a 80 clientes o throughput não sobe 1%, e a p99 cresce 4×** — a fila cresce contra capacidade fixa. A p99 serial é 4,8 ms, o que a 16 núcleos daria um teto teórico bem acima de 1.616.
+why_now: o pilar lexical acabou de ganhar seu primeiro número público (`wiki/benchmarks/b040-theodb-fts-msmarco.md`), e o teto de vazão é a métrica que uma instalação real encontra primeiro. **A causa não está medida** e há pelo menos três candidatas que exigem instrumentos diferentes: saturação de CPU real (o trabalho por consulta é simplesmente caro), contenção no índice lexical compartilhado (trava), ou teto do cliente Python do arnês — que a esta escala é hipótese séria, porque o B-035 já declarou que a 50 mil vetores boa parte do custo é round-trip. Publicar a curva sem investigar deixa o leitor concluir o que quiser.
+status: raw
+dod:
+  - a causa é **nomeada e medida**, não inferida: perfil de CPU do backend durante a corrida a 20 e a 80 clientes, com a fração de tempo em espera de trava versus trabalho
+  - a hipótese do cliente Python é **descartada ou confirmada** por um gerador de carga que não seja o arnês (por exemplo `pgbench` com a consulta do BM25), no mesmo corpus e máquina
+  - se for contenção: o ponto de trava é identificado com `file:line` e há uma medição do ganho após a mudança
+  - se for CPU: o custo por consulta é decomposto, e o registro diz se 1.616 QPS a 16 vCPU é o esperado para o trabalho que a consulta faz
+  - qualquer conclusão vale para o regime medido (100K documentos) e o registro diz que não foi verificada em outra escala
+
+> Registrado 2026-08-13. **A curva é o achado; a causa é a pergunta.** Não afirmo trava — a saturação também
+> é compatível com trabalho genuinamente caro por consulta, e distinguir as duas exige perfil, não leitura.
+
+## B-044 — O analisador lexical não faz stemming, e isso custa NDCG contra todo motor comparável   [ ]
+
+domain: lexical
+repo: theo-db
+suggested_mode: evolve
+source: discover-evolve
+evidence: medido em 2026-08-12 contra `theodb:b034`. `bm25_search` sobre um corpus contendo "the quick brown fox **jumps** over the lazy dog": a consulta `jumping` devolve **vazio**. Stopwords são indexadas em vez de removidas (`the` devolve documentos). Não há operadores de consulta: `"frase exata"` é tratada como palavras soltas, `AND` vira termo que casa documentos contendo a palavra "and", `-exclusão` é ignorada, `prefixo*` devolve vazio. O que **funciona** e foi verificado: multi-termo com OR e scores acumulados corretos, e perguntas em linguagem natural rankeando o documento certo em primeiro.
+why_now: o pilar acabou de ser medido num arnês público — **NDCG@10 0,6962 no MS MARCO 100K** — e o próximo passo natural é comparar com Elasticsearch e OpenSearch, cujos analisadores padrão **stemmizam**. Qualquer diferença de NDCG contra eles carrega essa diferença de pré-processamento embutida, e hoje a única saída honesta é declarar o handicap no topo do artefato, que foi o que se fez. Isso não é sustentável como resposta permanente: ou o produto ganha um analisador comparável, ou a decisão de não ter um vira ADR com a razão escrita.
+status: raw
+dod:
+  - uma DECISÃO em ADR: implementar stemming (e qual — Snowball/Porter, por idioma) ou declarar fora de escopo com a razão. As duas saídas servem; o silêncio não
+  - se implementar: o ganho é medido **no mesmo corpus e comando** do `b040-theodb-fts-msmarco.md`, com NDCG antes e depois, e o artefato é atualizado em vez de duplicado
+  - stopwords e operadores de consulta são avaliados na mesma decisão, ou o ADR diz por que ficam de fora
+  - o analisador é **configurável ou declarado fixo** — se for fixo, o artefato de benchmark continua dizendo isso, porque é o que torna a comparação legível
+
+> Registrado 2026-08-13. Complementa o [[B-004]] (qualidade de recuperação) sem substituí-lo: aquele mede,
+> este decide o que fazer com o que a medição mostrou.
+
+## B-045 — Nenhuma comparação que publicamos tem teste de significância, e tínhamos o instrumento   [ ]
+
+domain: theo-db
+repo: theo-db
+suggested_mode: evolve
+source: discover-evolve
+evidence: os dois artefatos publicados neste ciclo declaram a mesma ausência. O `b035-theodb-vs-pgvector-pg18.md` reporta **+16,3% de QPS a recall casado** apoiado em duas amostras concordantes (1,3% entre elas) e diz explicitamente que "duas amostras concordantes não são um teste". O `b040-theodb-fts-msmarco.md` reporta NDCG@10 0,6962 de **uma única corrida**, sem variância medida. O VectorDBBench não tem teste de significância. O `theodb_bench` removido no commit `7cd157d` **tinha** — randomização pareada de Smucker/Allan/Carterette, em `significance.py`.
+why_now: a Regra 5 exige artefato reproduzível para alegação de performance, e os dois artefatos cumprem isso. O que nenhum cumpre é dizer se a diferença medida **sobrevive ao acaso** — e a partir de agora toda comparação nova herda o mesmo limite. O custo é assimétrico: publicar um delta de 16% sem significância é aceitável enquanto o artefato o declara, mas a primeira vez que alguém citar o número fora do artefato, a ressalva não vai junto. O instrumento já existiu neste repositório e o caminho de reprodução saiu com a remoção do `benchmarks/`.
+status: raw
+dod:
+  - o teste pareado volta a existir como ferramenta executável sobre os JSON do VectorDBBench — recuperado do histórico (`git show 7cd157d^:benchmarks/.../significance.py`) ou reescrito, o que for menor
+  - aplicado retroativamente aos dois artefatos já publicados, com o resultado acrescentado a cada um **mesmo que enfraqueça a conclusão**
+  - o `run.sh` e o `run-fts.sh` passam a executar N corridas por ponto (N declarado) em vez de uma, ou o registro diz por que uma basta para aquele eixo
+  - a ferramenta é usada por padrão em qualquer artefato novo — não é opcional a partir daqui
+
+> Registrado 2026-08-13. **Este item limita o valor de todos os outros:** enquanto ele estiver aberto,
+> nenhum ganho medido no B-042 ou no B-043 poderá ser afirmado como real, apenas como observado.
+
+Próximo id livre: **`B-046`**. Ids são monotônicos e nunca reusados.
