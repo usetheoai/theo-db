@@ -1245,7 +1245,7 @@ dod:
 
 > **2026-08-12 — implementado, não shipped.** Ciclo completo (DISCOVER→PLAN→IMPLEMENT→CODE-QUALITY→REVIEW→RELEASE). Cliente em `usetheoai/VectorDBBench@theodb` (3 arquivos upstream tocados, +19 linhas, núcleo intocado, zero dependências novas). Corrida real num droplet `g-16vcpu-64gb` (IP 164.90.141.31, destruído): **a recall casado (~0,983) o pgvector faz +16,3% de QPS e constrói o índice 2,7× mais rápido** — `wiki/benchmarks/b035-theodb-vs-pgvector-pg18.md`. Review `READY_TO_MERGE`; release `PR_OPEN_AWAITING_APPROVAL` (PR #228). `shipped` só depois do merge.
 
-## B-036 — O `hnsw` alias não aceita `m` nem `ef_construction`: a sintaxe de build do pgvector falha alto   [ ]
+## B-036 — O `hnsw` alias não aceita `m` nem `ef_construction`: a sintaxe de build do pgvector falha alto   [x]
 
 domain: engine-pgrx
 repo: theo-db
@@ -1253,7 +1253,7 @@ suggested_mode: bug
 source: discover-evolve
 evidence: medido em 2026-08-12 contra `theodb:b034`. `CREATE INDEX ... USING hnsw (embedding vector_l2_ops) WITH (m=16, ef_construction=64)` → `ERROR: unrecognized parameter "m"`; idem para `ef_construction` e `max_connections`, e idem nos AMs próprios `theodb_hnsw` / `theodb_ivfflat`. As reloptions realmente registradas, lidas da fonte (`theodb_rs/src/am/options.rs:112-196`): `lists`, `sbq_bits`, `pq_subspaces`, `pq_bits`, `aq_threshold`, `separate_storage`, `refine`, `soar_lambda`, `rabitq_bits` — nenhum `m`, nenhum `ef_construction`. O build é fixo em `HNSW_M = 16` e `HNSW_EF_CONSTRUCTION = 64` (`theodb_rs/src/am/build.rs:22-23`), o segundo sobreponível **apenas** por variável de ambiente do servidor (`THEODB_HNSW_EF_CONSTRUCTION`, `build.rs:30-36`) — inalcançável por sessão de cliente.
 why_now: o `ADR-0029 § D2` promete drop-in "sem mudança de código", e o shim já registra o AM `hnsw` e as opclasses `vector_*_ops` — então a app pgvector chega até o `CREATE INDEX` e **só ali** descobre que a linha dela não roda. É a terceira camada da mesma classe (B-033 quebrava no `=`, B-034 no ajuste de scan, este no build). Diferente dos dois anteriores, **este falha alto**, o que é muito melhor: o usuário vê o erro. O custo real não é a mensagem, é a capacidade — o TheoDB não tem os dois knobs de qualidade de grafo que qualquer comparação séria varre, e por isso nenhuma corrida de benchmark pode explorar esse eixo (medido ao construir o cliente do B-035).
-status: raw
+status: shipped
 dod:
   - `m` e `ef_construction` viram reloptions de verdade do `theodb_hnsw` (e portanto do alias `hnsw`), com faixa validada, e o build os HONRA — provado por teste que mede recall diferente entre dois `ef_construction`, não apenas que o `CREATE INDEX` foi aceito
   - a variável de ambiente `THEODB_HNSW_EF_CONSTRUCTION` é reavaliada: com reloption de verdade ela vira redundante, e duas fontes para o mesmo knob é a armadilha de precedência que o B-034 acabou de pagar para resolver
@@ -1270,6 +1270,18 @@ dod:
 > por experimento enquanto `m` e `ef_construction` forem constantes de compilação**. Este item deixou de ser
 > só uma lacuna de compatibilidade: é o que destrava a investigação do [[B-042]].
 
+> **2026-08-13 — SHIPPED** (`cecd388`, PR #228). `CREATE INDEX … USING hnsw (e vector_l2_ops) WITH (m=32,
+> ef_construction=200)` funciona e é honrado — medido no produto (`theodb:b036`): catálogo mostra
+> `{m=32,ef_construction=200}`, o índice `m=32` ocupa 248 kB contra 152 kB do `m=16`, e devolve recall@10 = 1,0
+> contra o oráculo exato. `m=999999` é recusado com `value 999999 out of bounds for option "m"`. A env var
+> `THEODB_HNSW_EF_CONSTRUCTION` saiu. 478 testes verdes (baseline 469 + 9).
+>
+> **O `max_connections` da evidência NÃO foi implementado** — é opção do pgvectorscale/diskann, não do
+> pgvector, e o plano cobriu os dois knobs que o DoD nomeia. Registrado para que a ausência seja escolha
+> declarada e não omissão.
+>
+> Os quatro pontos do `dod` estão fechados. Review: `.claude/knowledge-base/reviews/b036-build-reloptions-review-2026-08-13.md`.
+> **Destrava [[B-046]] e [[B-042]]** — o eixo de qualidade de grafo passa a ser varrível por benchmark.
 
 ## B-037 — O AM `ivfflat` não existe: metade do shim pgvector está ausente   [ ]
 

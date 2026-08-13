@@ -208,3 +208,15 @@ comunicada ao owner e baseou a redação inicial do item de backlog.
 * **Nenhum conceito carrega `verified`.** Todo o conteúdo foi gerado por agente a partir dos documentos de origem; nenhuma confirmação humana ocorreu. Semear esse campo inflaria o tier de confiança que um consumidor calcula.
 * **A entity pass é fechada sobre os nomes que os conceitos ligam.** Nomes que aparecem apenas dentro dos conceitos de entidade (por exemplo, bibliotecas citadas dentro de `technologies/`) permaneceram como prosa, conforme a regra de recursão de um anel.
 * **O acervo de referências primárias do projeto não foi convertido.** O catálogo de papers e repositórios clonados citado no `CLAUDE.md` está fora do versionamento e fora do escopo desta conversão.
+
+## 2026-08-13 — B-036: `m` e `ef_construction` deixam de ser constantes de compilação
+
+`features/02-indice-hnsw.md` **atualizado** (não duplicado): a seção "A armadilha dos parâmetros de build"
+descrevia como verdade permanente algo que era estado — `WITH (m = …)` falhava com `unrecognized parameter`.
+Virou "Parâmetros de build", com a tabela de faixas, os quatro caminhos que honram o valor, e o teto de `m`
+derivado do page layout (39, não o 100 do pgvector, cujo teto de nível é outro).
+
+Acrescentado à seção de qualidade do grafo o honest-negative que o knob torna relevante: **`ef_construction`
+maior não é sempre melhor** — o M57 mediu 64→200 *piorando* o recall a 100k–500k, e `m` 16→32 idem (0,952).
+O knob existe para ser varrido por medição, não subido no escuro; sem essa linha ao lado da tabela, a tabela
+convida exatamente ao erro que o projeto já pagou.
