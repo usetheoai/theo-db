@@ -1,9 +1,9 @@
 ---
 slug: tier1-portao
-items: [B-029, B-039, B-016, B-023, B-013, B-022, B-027]
+items: [B-029, B-039, B-016, B-023, B-053, B-013, B-022, B-027]
 date: 2026-08-13
 base: 2daac5b
-head: 979f7aa
+head: cdf784e
 verdict: READY_TO_MERGE
 ---
 
@@ -15,7 +15,7 @@ verdict: READY_TO_MERGE
 |---|---|---|
 | 1 | `/code-quality` | **`PASS_WITH_CAVEATS` (89)** — subiu de `FAIL_SOFT` (70), **0 achados HARD** |
 | 2 | Suíte da ferramenta | **175 passed, 1 failed** — a falha é pré-existente (§ R-6) |
-| 3 | Suíte Rust | inalterada (**478**) — este ciclo **não altera uma linha de Rust de produção** |
+| 3 | Suíte Rust | **477 passed; 0 failed** — 478 menos exatamente o micro-bench que saiu (§ R-8) |
 | 4 | Segredos commitados | **0** |
 | 5 | Commit direto em `main` | não — `workspace` |
 | 6 | Trailer de coautoria | **0** |
@@ -126,6 +126,24 @@ O que sobrou de real: B-001, B-004 e B-025 entregues e nunca avançados; e o B-0
 `status: raw` simultaneamente — dois campos do mesmo bloco discordando, e **nada compara os dois**. Virou
 [[B-051]].
 
+### R-8 — ALTO · Um gate mais barato que o gate que importa dá confiança que ele não sustenta
+
+A extração do núcleo puro (B-053) falhou **duas vezes**, e as duas falhas são a mesma lição — a do próprio
+ciclo, agora comigo:
+
+1. `cargo check --features pg18` passou **limpo** com o módulo de testes quebrado. Sem `pg_test` ele **nem é
+   compilado**. O erro real (`cannot find module simd_x86`) só apareceu em `cargo pgrx test`, **25 minutos
+   depois**.
+2. A segunda tentativa caiu em `pub(super) fn force_for_test`: antes `super` era `vec`, e depois da extração
+   passou a ser `kernels`. Outros ~6 minutos de suíte para descobrir uma linha.
+
+O gate correto é `cargo check --features pg18,pg_test --all-targets`, e ele fecha em **2m32s** contra os ~6 min
+da suíte. Eu usei o barato porque era barato, e paguei 30 minutos por isso.
+
+**Não virou item porque não é defeito do produto — é do meu método**, e o registro dele aqui é o remédio
+disponível. O que vale generalizar: *"compila"* não é uma propriedade, é a propriedade de uma configuração; a
+configuração que importa é a que o CI usa.
+
 ### R-6 — BAIXO · Um teste vermelho pré-existente na ferramenta, que não é meu e não foi escondido
 
 `tests/test_shared.py::test_the_shipped_template_parses_when_you_follow_its_own_instructions` falha porque
@@ -138,8 +156,9 @@ um ciclo sobre portões seria exatamente o oposto do que o ciclo defende. Fica r
 ### R-7 — INFORMATIVO · O que este ciclo deliberadamente NÃO fez
 
 - **Não mexeu no gatilho dos workflows.** É o [[B-052]], e precisa de ADR.
-- **Não extraiu o núcleo puro de `vec.rs`.** É o [[B-053]], e a pergunta que decide se vale — o micro-bench
-  flakou desde o conserto das medianas? — é medição que o tempo produz.
+- ~~Não extraiu o núcleo puro de `vec.rs`.~~ **EXECUTADO** (§ R-8): `vec/kernels.rs`, 290 linhas, zero
+  `crate::`. A fronteira caiu onde já existia — a família `*_from_bytes` nunca chamou `check_dims`. O bench
+  linka e roda sem PostgreSQL, e a suíte foi de 478 para 477 por exatamente um teste: o que saiu.
 - **Não restaurou os 11 scripts de milestones encerrados** (`m131_sweep`, `m139-*`, `m140-*`, `m56-crash-e2e`,
   `vectorizer-e2e`, `docs-features-lint`, `pgrx-test-in-builder`). Nenhum workflow os invoca; voltar com eles
   seria ressuscitar o que a limpeza corretamente removeu.
@@ -168,3 +187,7 @@ um ciclo sobre portões seria exatamente o oposto do que o ciclo defende. Fica r
 **Ressalvas:** review do próprio implementador; os gates restaurados ainda não passaram pelo CI real; e o achado
 mais importante do ciclo — a janela cega de `workspace` — foi **registrado, não resolvido**, porque resolvê-lo
 de passagem seria desfazer uma decisão do owner sem o ADR que ela merece.
+
+**Contagem final:** 9 itens fechados (B-013, B-016, B-022, B-023, B-027, B-029, B-039, B-053, mais o
+saneamento de B-001/B-004/B-025/B-036 no Tier 0); 3 novos registrados por medição (B-051, B-052, B-053 — este
+último aberto e fechado no mesmo ciclo).
