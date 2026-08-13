@@ -3,7 +3,7 @@ type: Decision
 title: ADR-0061 — Todo pilar mensurável tem benchmark oficial público, rodado contra concorrentes na mesma máquina
 description: Nenhuma alegação de capacidade de um pilar entra em documento público sem uma corrida em arnês de terceiros, com os concorrentes medidos na mesma máquina e na mesma corrida.
 tags: [decision, benchmark, metodologia, vectordbbench, adr]
-status: aceito
+status: stable
 date: 2026-08-13
 generated: { by: claude-code/opus-5, at: 2026-08-13T02:00:00Z }
 ---
