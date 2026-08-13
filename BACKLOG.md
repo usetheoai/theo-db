@@ -1201,7 +1201,7 @@ suggested_mode: bug
 source: human
 evidence: medido por inspeção em 2026-08-12, após os commits `7cd157d` (remove `benchmarks/`, 268 arquivos) e `8605677` (remove `scripts/`, 17 arquivos). Dez invocações diretas em três fluxos deixam de resolver — `ci.yml:241,442,518,655` (`scripts/smoke.sh`, em **todos** os quatro jobs que constroem a imagem), `ci.yml:362,365,368` (`migrate-doc-check.sh`, `migrate-smoke.sh`, `migrate-smoke-selftest.sh`), `schema-drift-gate.yml:87,88` (`sql-surface.sh`) e `cassert-sql-safety.yml:94` (`cassert-smoke.sh`). Some também `gen-upgrade-script.py`, que gera os `theodb_rs/sql/theodb_rs--X--Y.sql` — os arquivos gerados estão versionados e trazem no cabeçalho "GERADO (…) NÃO editar à mão". E `theodb_rs/sql/schema_snapshot.sql` **sobreviveu**: restou o insumo do oráculo sem o oráculo.
 why_now: não é apenas que a esteira vai falhar por arquivo ausente na próxima promoção — é que ela **perde a capacidade de reprovar**. O `test-upgrade.sh` removido é o oráculo do caminho de atualização, e ele foi consertado em `3656b7e` (B-028) precisamente porque já havia declarado "TODOS OS CENÁRIOS PASSARAM" com um cenário pulado. O `why_now` do próprio B-028 registra que aquela foi a **terceira** leitura falsa do mesmo harness. Num banco, atualização quebrada é a falha mais cara que existe: quem atualiza perde dado ou fica com a extensão inutilizável, e descobre em produção. Hoje não há nada entre esse defeito e o usuário.
-status: raw
+status: planned
 dod:
   - a promoção `workspace → develop` passa, sem que nenhum job invoque caminho inexistente
   - existe um oráculo que **reprova** um upgrade quebrado da cadeia `theodb_rs` (1.0.0 → 1.5.0) e outro da cadeia `theodb` (1.0 → 1.6), e cada um foi provado reprovando um caso deliberadamente quebrado — não apenas passando
@@ -1211,6 +1211,24 @@ dod:
 > Registered 2026-08-12. Nasce como consequência direta de duas remoções decididas pelo owner após
 > ressalva técnica; ambas estão registradas no `CHANGELOG.md` sob `[Unreleased] § Removed` e citam
 > este item. Recuperação de qualquer uma: `git restore` a partir de `bcf7819`.
+
+> **2026-08-13 — `raw` → `planned`.** Os quatro bullets do `dod` fechados; review em
+> `.claude/knowledge-base/reviews/tier1-portao-review-2026-08-13.md`.
+>
+> - **nenhuma invocação inexistente**: `scripts/check-workflow-paths.sh` sai 0 contra `HEAD` e **1 contra
+>   `8605677`**, listando as 10 com `arquivo:linha`. Ligado no `actionlint.yml`, que valida sintaxe de workflow
+>   e não abre o arquivo que um `run:` executa — foi por isso que passou verde sobre as 10 no dia anterior.
+> - **oráculo que reprova**: o `smoke.sh` foi **reescrito** (o antigo fazia `CREATE EXTENSION theodb` 3×, e o
+>   umbrella saiu no B-030) e provado nos dois lados — reprova contra `postgres:18` puro nomeando a extensão
+>   ausente, passa contra `theodb:b036` verificando os **dois** nomes de AM e que a busca devolve linha.
+> - **drift de superfície volta a comparar**: `sql-surface.sh` restaurado, 171 símbolos, e provado detectando um
+>   `#[pg_extern]` fictício adicionado e revertido.
+> - **decisão registrada**: os `migrate-*` **voltaram**, contra a decisão inicial do plano. Ver a correção no
+>   review § R-1 — eles testam a migração pgvector→TheoDB, não a cadeia de upgrade, e o oráculo restaurado
+>   **reprova** por `access method "ivfflat" does not exist` ([[B-037]]).
+>
+> **O que o produto NÃO recuperou**, e é consequência do [[B-031]], não deste ciclo: o oráculo do caminho de
+> atualização da própria extensão. A cadeia foi removida por ADR; não há o que testar.
 
 ## B-030 — Um produto, três extensões: o umbrella `theodb` é resíduo de uma migração que terminou   [ ]
 
@@ -1462,7 +1480,7 @@ suggested_mode: bug
 source: discover-evolve
 evidence: medido em 2026-08-12. O `/code-quality` reporta `auditor_unavailable_cargo-udeps` em **três ciclos seguidos** (B-033, B-034, B-035). A causa não é ausência da ferramenta: `cargo-udeps` está em `~/.cargo/bin/cargo-udeps` no host. São dois obstáculos empilhados, ambos medidos. (a) **1.226 arquivos em `theodb_rs/target/` pertencem ao `root`** — resíduo de builds em contêiner que montaram o diretório do host —, e o auditor roda como `paulo`: `failed to write .../fingerprint/zstd-…`. (b) Mais fundo, e este é o que decide: contornar com `CARGO_TARGET_DIR` próprio revelou `Error: /home/paulo/.pgrx/config.toml not found. Have you run 'cargo pgrx init' yet?` — **o host nunca instalou o pgrx**. Nenhum `chown` conserta isso. Rodado dentro do `theodb-toolchain` (que tem `cargo pgrx init` feito): `Finished dev profile in 2m 07s` / **`All deps seem to have been used.`**
 why_now: o cap capeia o veredito em `FAIL_SOFT` (70) todo ciclo, e por três ciclos foi declarado como limitação de ambiente — o que é a forma educada de dizer que ninguém investigou. Investigado, o audit passa **limpo em 2 minutos**. O custo de manter é pior que o do conserto: um cap que sempre dispara deixa de ser sinal, e o dia em que houver uma dependência realmente não usada, ninguém vai reparar na linha que já estava vermelha. O padrão de rodar no contêiner pinado já é o do projeto para `clippy`/`fmt`.
-status: raw
+status: planned
 dod:
   - o detector D1 invoca `cargo-udeps` dentro do contêiner pinado (`theodb-toolchain`), como o projeto já faz com `clippy`/`fmt` — provado por uma execução de `/code-quality` que reporta o resultado do audit, não `auditor_unavailable`
   - a saída limpa (`All deps seem to have been used.`) e a suja (uma dependência propositalmente não usada, num teste) produzem verdictos DIFERENTES — senão o detector está apenas deixando de reclamar
@@ -1472,6 +1490,27 @@ dod:
 > Registrado 2026-08-12 durante o B-035. **Não é achado do benchmark** — é o gate do próprio projeto que
 > vinha reportando indisponibilidade sobre algo que funciona. Custo estimado por medição: a execução completa
 > leva 2m07s no contêiner.
+
+> **2026-08-13 — `raw` → `planned`. FECHADO com número.** `/code-quality` sobe de **`FAIL_SOFT` (70)** para
+> **`PASS_WITH_CAVEATS` (89)**, em duas execuções seguidas, e o cap `auditor_unavailable_cargo-udeps` some
+> **pela primeira vez em cinco ciclos**.
+>
+> Strategy com `_HostExecution`/`_ContainerExecution`: o contêiner é **fallback**, não caminho padrão — pagá-lo
+> sempre custaria ~2 min por audit num host onde a ferramenta responderia em segundos.
+>
+> Duas correções vieram de medir, não de raciocinar:
+>
+> 1. **o predicado por assinatura de erro estava errado.** Este item registrou dois obstáculos empilhados, e o
+>    primeiro mascara o segundo: nesta máquina o host falha em `failed to write .../target/.fingerprint/` antes
+>    do `config.toml not found` que eu havia codificado. Um predicado por assinatura deixaria o cap disparando
+>    exatamente na máquina onde ele foi medido. O critério passou a ser **ausência de dado** — um audit que
+>    rodou devolve JSON, inclusive quando acha dependência não usada.
+> 2. **host e contêiner compilavam no mesmo `target/`.** Primeira execução: `exit 101: Updating crates.io index`.
+>    Segunda, com cache quente: limpa. Um conserto que só funciona quente falha na máquina de quem chega depois,
+>    com modo de falha idêntico ao cap que ele remove. `CARGO_TARGET_DIR` próprio em volume nomeado, fonte
+>    montada `:ro` (verificado: o contêiner não escreve na árvore do host).
+>
+> 27 testes no detector (era 21), cobrindo os quatro modos de falha distintos.
 
 ## B-040 — Cliente FTS no VectorDBBench: validar o pilar lexical no mesmo arnês, com a mesma disciplina   [ ]
 
